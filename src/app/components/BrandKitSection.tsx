@@ -20,6 +20,7 @@ import {
 
 export function BrandKitSection() {
   const brandKit = useProjectStore((s) => s.brandKit);
+  const userFonts = useProjectStore((s) => s.userFonts);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
@@ -78,6 +79,12 @@ export function BrandKitSection() {
           <option value="">覚えない（毎回選ぶ）</option>
           {FONT_CATALOG.map((f) => (
             <option key={f.id} value={f.id}>{f.label}{f.id === DEFAULT_FONT_ID ? "（標準）" : ""}</option>
+          ))}
+          {/* ⚠️ **手持ちの文字の形も既定にできる**（ADR-0038 決定7・α-6 出口監査 🔴1）＝
+              「`fontId` が `string` になれば持ち込みを既定にできる」と決めていたのに、
+              ここが同梱3種のままで**決定が成立していなかった**。 */}
+          {userFonts.map((f) => (
+            <option key={f.id} value={f.id}>{f.displayName}（手持ち）</option>
           ))}
         </select>
       </div>

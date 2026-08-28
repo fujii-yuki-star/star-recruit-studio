@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { claimEscape } from "../hooks/escapeOwners";
-import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, type FontId } from "../../domain/font/fontCatalog";
+import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
+import { useProjectStore } from "../store/projectStore";
 
 // 動画フォントの選択（プルダウン）。各選択肢を「そのフォントの字形」で表示して直感的に選べるようにする。
 // native <select> は option 個別の font 装飾ができないため、開閉する自前のドロップダウンにする。
@@ -8,6 +9,8 @@ import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, type FontId } from "../
 //   選択中を示す（PR#161 レビュー）。Esc・背景クリックで閉じる。
 // allowInherit=true のとき、先頭に「動画全体に合わせる」(=null) を出す（場面ごとのフォント＝null は継承）。
 const INHERIT_LABEL = "動画全体に合わせる";
+/** 指している字体が一覧に無いとき（起動直後でまだ読めていない／実体が消えている）。 */
+const MISSING_LABEL = "取り込んだ文字の形（見つかりません）";
 
 export function FontPicker({
   value,
@@ -29,11 +32,31 @@ export function FontPicker({
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const known = value && FONT_CATALOG.some((f) => f.id === value) ? (value as FontId) : null;
+  // ⚠️ **一覧は自分で store から読む**（α-6 出口監査 🔴1）＝この部品の呼び出しは6か所あり、
+  // 呼ぶ側から渡す形にすると**配り忘れた所だけ同梱3種**になる（ADR-0036 の色と同じ流儀）。
+  const userFonts = useProjectStore((s) => s.userFonts);
+  // 同梱＋持ち込みを1つの一覧にする（`note` は持ち込みには無いので空）。
+  const choices: { id: FontId; label: string; note?: string }[] = [
+    ...FONT_CATALOG.map((f) => ({ id: f.id as FontId, label: f.label, note: f.note })),
+    ...userFonts.map((f) => ({ id: f.id as FontId, label: f.displayName, note: "手持ち" })),
+  ];
+  // ⚠️ **持ち込みフォントも「既知」として扱う**（🔴1）＝`FONT_CATALOG` だけを見ていたため、
+  // 既に持ち込みフォントが入っている文書で**実際と違う字体名を見せ**、一度触ると黙って上書きしていた。
+  const known = isKnownFontId(value) ? (value as FontId) : null;
   // allowInherit のとき、未選択/不明は「動画全体に合わせる」。そうでなければ既定フォント表示。
   const isInherit = allowInherit ? known === null : false;
   const currentId: FontId = known ?? DEFAULT_FONT_ID;
-  const current = FONT_CATALOG.find((f) => f.id === currentId) ?? FONT_CATALOG[0];
+  // ⚠️ **見つからない字体を、無関係な字体の名前で見せない**（PR #901 レビュー 🟡・§2-5）＝
+  // `isKnownFontId` は**形**しか見ないので、①起動直後でまだ一覧を取れていない ②実体が消えている
+  //（`listUserFonts` は実体があるものだけ返す）の2つで「既知だが一覧に無い」が起きる。
+  // 先頭へ倒すと**具体的に間違った名前**が出て、押した瞬間その字体で上書きされる
+  //（🔴1 で直した失敗と同型）。id を保ったまま「見つかりません」と出す。
+  // ⚠️ **内部の id は画面に出さない**（§2-3・PR #901 レビュー 🟡）＝`user_font_003` のような
+  // 内部の綴りは「見つからない」系の既存 UI（素材・見た目パターン）でも出していない（種別と件数まで）。
+  // 選び直せるように、指している値そのものは `title`（指したときの説明）に残す。
+  const current = choices.find((f) => f.id === currentId)
+    ?? { id: currentId, label: MISSING_LABEL, note: undefined };
+  const missing = !choices.some((f) => f.id === currentId);
 
   // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
   // `disabled` は見本のボタンにしか効かないので、開いたままだと一覧は選べてしまい、選んでから断られる。
@@ -69,11 +92,11 @@ export function FontPicker({
         type="button"
         className="select"
         disabled={disabled}
-        title={title}
+        title={missing ? `${title ? `${title} / ` : ""}指定：${currentId}` : title}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}
-        style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit ? undefined : fontFamilyForId(current.id) }}
+        style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit || missing ? undefined : fontFamilyForId(current.id) }}
       >
         {isInherit ? INHERIT_LABEL : current.label}
       </button>
@@ -102,7 +125,7 @@ export function FontPicker({
                 </button>
               </li>
             )}
-            {FONT_CATALOG.map((f) => (
+            {choices.map((f) => (
               <li key={f.id}>
                 <button
                   type="button"

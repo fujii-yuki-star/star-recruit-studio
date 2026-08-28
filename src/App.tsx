@@ -72,6 +72,7 @@ function App() {
   const isExporting = isExportBusy(exportPhase);
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
+  const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
   const hasProjectContent = useProjectStore((s) => s.status !== "idle" || s.scenes.length > 0);
   const projectName = useProjectStore((s) => s.meta.projectName);
@@ -94,7 +95,12 @@ function App() {
     const last = getLastProjectId();
     if (last) void loadProject(last).catch(() => {});
     void loadUserTemplates().catch(() => {});
-  }, [loadProject, loadUserTemplates]);
+    // ⚠️ **持ち込みフォントは起動時に1回そろえる**（α-6 出口監査 🟡11）＝`loadUserFonts` の入口が
+    // 設定・公開前チェック・書き出しにしか無かったため、**場面編集・仕上がり確認・タイムライン編集では
+    // プレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 のパリティが崩れる）。
+    // 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
+    void refreshUserFonts().catch(() => {});
+  }, [loadProject, loadUserTemplates, refreshUserFonts]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
