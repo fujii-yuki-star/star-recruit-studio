@@ -76,11 +76,24 @@ export function ExportScreen({ onNavigate }: ExportProps) {
 
   // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
+  // 持ち込みフォント（#261）＝**開くたびに調べ直す**（アプリの外で消されうる・公開前チェックと同じ流儀）。
+  const userFontIds = useProjectStore((s) => s.userFontIds);
+  const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
+  useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
+  const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  const fontsForBlocking = useMemo(
+    // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
+    () => ({ projectFontId, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) }),
+    [projectFontId, userFontIds],
+  );
   // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
   // useMemo：書き出し中は進捗更新のたびに再描画されるので、毎回 全場面のレイアウト計算をやり直さない（#376 の待ち時間に効く）。
+  // ⚠️ **フォントの材料もここへ通す**（#261・PR #886 レビュー 🔴）＝通さないと、サイドバーから
+  // この画面へ直行したときに「見つからない文字の形」が**項目そのものとして作られず**、
+  // 別の字体に化けた動画がそのまま書き出せてしまう（§2-5・ADR-0026②）。
   const blockingItems = useMemo(
-    () => exportBlockingItems(scenes, assets, templates, overlayAnimations),
-    [scenes, assets, templates, overlayAnimations],
+    () => exportBlockingItems(scenes, assets, templates, overlayAnimations, fontsForBlocking),
+    [scenes, assets, templates, overlayAnimations, fontsForBlocking],
   );
   const blockedMessage = blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "export") : null;
   // この端末で書き出せない（h264 不可）ときも公開前チェックと同じく止める＝直行経路だけ押せてしまうのを防ぐ（ADR-0026②）。
@@ -190,7 +203,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // 残っていると書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと**同じ述語**で、
       // サイドバーからこの画面へ直行した経路も止める＝保存先を選ばせた後に落とさない（ADR-0026④）。
       if (capabilityBlocked && capability) return EXPORT_CAPABILITY_NOTICE[capability].detail;
-      const blocking = exportBlockingItems(st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations);
+      const blocking = exportBlockingItems(
+        st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations,
+        // ⚠️ 押した瞬間の再確認でも同じ材料を見る（`null`＝まだ調べていない＝項目を出さない）。
+        { projectFontId: st.meta.videoSettings.fontId, ...(st.userFontIds ? { availableUserFontIds: st.userFontIds } : {}) },
+      );
       if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;
     };
