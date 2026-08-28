@@ -220,6 +220,23 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
+/// 一覧に出す小さな絵（#397）を保存する。`projects/<id>/preview.png`。
+///
+/// ⚠️ **失敗しても保存そのものは止めない**（呼ぶ側が投げっぱなしにする）＝
+/// 絵が無くても一覧は開ける（プレースホルダで出る）。
+#[tauri::command]
+fn save_project_thumbnail(
+    app: tauri::AppHandle,
+    project_id: String,
+    data_url: String,
+) -> Result<(), String> {
+    let dir = crate::assets::project_dir(&app, &project_id)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let b64 = data_url.rsplit(',').next().unwrap_or_default();
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+        .map_err(|e| e.to_string())?;
+    fs::write(dir.join("preview.png"), bytes).map_err(|e| e.to_string())
+}
 /// appData/readingdict.json（読み方辞書・全プロジェクト共通＝ADR-0037 決定1）。
 ///
 /// ⚠️ **正典はアプリが持つ**＝エンジンを入れ替えても、外部エンジンを指しても同じ読みになる。
@@ -710,6 +727,7 @@ pub fn run() {
             save_user_template,
             load_user_templates,
             delete_user_template,
+            save_project_thumbnail,
             load_reading_dict,
             save_reading_dict,
             export_reading_dict,

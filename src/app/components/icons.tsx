@@ -181,6 +181,16 @@ export function TrashIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
+/** 複製（#395）＝2枚重ねた紙。 */
+export function CopyIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a1 1 0 0 1 1-1h9" />
+    </svg>
+  );
+}
+
 export function SaveIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>
