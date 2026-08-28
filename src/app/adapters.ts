@@ -11,6 +11,7 @@ import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import { isSubtitleItem, sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
+import { outsideSafeArea, safeAreaRect } from "../domain/preview/safeArea";
 import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
@@ -295,6 +296,26 @@ export function buildPrecheckItems(
       id: "tooFast",
       label: "早口になる場面",
       detail: `${fmtScenes(tooFast.nums)}は、表示する時間に対してセリフが多いです。表示時間を延ばすか、セリフを短くしてください。`,
+      severity: "warning",
+    });
+  }
+
+  // ⚠️ **端に寄りすぎた文字**（#265 の任意項目）＝画面の**外**へ出るもの（`subtitleOverflow`）とは別で、
+  // 画面の中だが端に近い。テレビ・SNS で**切られる媒体でだけ**問題になるので**注意止まり**。
+  // 判定は編集画面の「端の目安」と**同じ数字**（`safeAreaRect`）＝線の内側なのに注意が出ない/その逆、を作らない。
+  const nearEdge = offending((s) => {
+    const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
+    const t = templateOf(s);
+    if (!found || !t) return false;
+    const safe = safeAreaRect(t.canvas, t.aspectRatio);
+    // 文字だけを見る（写真・背景は端まで敷くのが普通＝出すと全場面に注意が付く）。
+    return found.items.some((it) => it.kind === "text" && outsideSafeArea(it, safe));
+  });
+  if (nearEdge.nums.length > 0) {
+    items.push({
+      id: "nearEdge",
+      label: "端に寄った文字",
+      detail: `${fmtScenes(nearEdge.nums)}の文字が画面の端に近いです。テレビやSNSで切れることがあります（編集画面の「端の目安」で確かめられます）。`,
       severity: "warning",
     });
   }
