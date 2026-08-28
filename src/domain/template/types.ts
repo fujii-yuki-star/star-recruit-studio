@@ -2,6 +2,27 @@
 import type { Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
 import type { Group } from '../group/types';
 
+/**
+ * 文字の影（#264）。`enabled` のときだけ描く。未指定/`false`＝影なし＝**従来の出力は不変**。
+ *
+ * ⚠️ **両形式で使う語彙**（ADR-0032 追補3）＝タイムラインの文字クリップは「FREE 要素＋時間」で
+ * 描画核（`layoutScene` の FREE 分岐）を共有するので、ここへ足せば二重投資にならない。
+ * 「タイムラインだけ」と線を引くと**同じ語彙に「片方でしか編集できない項目」**ができて分岐が増える。
+ */
+export interface TextShadow {
+  enabled?: boolean;
+  /** 影の色（`#RRGGBB`）。未指定＝黒。 */
+  color?: string;
+  /** 濃さ（0〜1）。未指定＝0.5。 */
+  opacity?: number;
+  /** ぼかし（canvas px・0＝くっきり）。 */
+  blur?: number;
+  /** 右へのずらし（canvas px・負で左）。 */
+  dx?: number;
+  /** 下へのずらし（canvas px・負で上）。 */
+  dy?: number;
+}
+
 export interface LayerBackground {
   enabled?: boolean;
   color?: string;
@@ -39,6 +60,13 @@ export interface Layer {
   /** 文字/字幕の縁取り（#275・任意）。strokeWidth>0 のとき描画（FREE の #209 と同じ仕組みを流用）。 */
   strokeColor?: string;
   strokeWidth?: number;
+  /**
+   * 字間（em・#264）。**文字サイズに対する割合**＝サイズを変えても詰め具合が変わらない。
+   * 未指定＝0（従来の出力は不変）。負で詰める。制約は `FreeElement` の同名と同一（§2-7）。
+   */
+  letterSpacing?: number;
+  /** 文字の影（#264）。未指定/`enabled:false`＝影なし（従来の出力は不変）。 */
+  shadow?: TextShadow;
 }
 
 export interface TemplateAiHint {

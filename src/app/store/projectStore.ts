@@ -4,9 +4,11 @@ import { create } from "zustand";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import { isKnownFontId } from "../../domain/font/fontCatalog";
 import { createUserFontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
@@ -26,6 +28,10 @@ import { substituteDeletedTemplateInScenes } from "../../domain/project/template
 import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { hasWorkInProgress } from "../hooks/newProjectGuard";
+import { duplicateProjectDoc, duplicatedFilePaths } from "../../domain/project/duplicate";
+import { thumbnailScene, thumbnailSignature } from "../../domain/project/thumbnail";
+import { renderProjectThumbnail } from "../../renderer/export/projectThumbnail";
+import { saveProjectThumbnail } from "../../infrastructure/projectFs";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
@@ -44,6 +50,9 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import type { BrandKit } from "../../domain/brand/brandKit";
+import { isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
+import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
@@ -238,11 +247,19 @@ interface ProjectState {
   newProject: () => void;
   /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
   newBlankProject: () => void;
+  /**
+   * 動画を**複製する**（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
+   * 素材・場面・声・設定ごとコピーし、**新しい動画として開く**。
+   * 成功したら新しい `projectId`、できなければ `null`。
+   */
+  duplicateProject: (projectId: string) => Promise<string | null>;
   /** 生成失敗/中断から手動作成へ入る（#393 P1・12 §9.3／15）。入力済みの会社情報・素材は残し、status を "ready"・
    *  aiError をクリアして手動で組む状態にする（AI 生成はしない＝draftFromAi=false）。 */
   startManualEdit: () => void;
   /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
+  /** 一覧に出す小さな絵を焼き直す（#397・内部用）。 */
+  _refreshProjectThumbnail: (projectId: string) => Promise<void>;
   /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
   _doSave: () => Promise<void>;
   /** 保存済みプロジェクトを読み込んで反映する。 */
@@ -323,6 +340,11 @@ interface ProjectState {
   applyStandardLookToUnresolvedScenes: () => StandardLookApplyResult;
   /** 動画全体のフォントを切り替える（videoSettings.fontId・保存時に永続化）。 */
   setFontId: (fontId: FontId) => void;
+  /**
+   * クレジットの見せ方を変える（ADR-0025・#359）。
+   * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで変わるのは**動画に焼く側**だけ。
+   */
+  setCreditDisplay: (patch: Partial<CreditDisplay>) => void;
   /**
    * 音の自動処理（#257 ダッキング／#259 ノーマライズ）を部分更新する。
    * ⚠️ **プロジェクト単位**（`videoSettings.audioAuto`）＝場面ごとには持たない（ADR-0032 追補4）。
@@ -411,12 +433,35 @@ interface ProjectState {
    */
   missingAssetIds: string[];
   /**
+   * ブランドキット（ADR-0036・#351）。会社の既定フォント・色・ロゴ。
+   * ⚠️ **動画の中身ではない**（`project.json` には入らない）＝ここに置くのは、
+   * 色を選ぶところなど**あちこちから同じものを見る**ため（渡し歩くと配り忘れる）。
+   */
+  brandKit: BrandKit;
+  /** 見つからない素材を調べ直す（#347）。 */
+  refreshMissingAssets: () => Promise<void>;
+  /** ブランドキットを読み直す（#351）。 */
+  refreshBrandKit: () => Promise<void>;
+  /** ブランドキットを書き換える（#351）。 */
+  updateBrandKit: (next: BrandKit) => Promise<void>;
+  /**
+   * ブランドキットをいまの動画へ**適用し直す**（#351 決定3）。**できたかどうかを返す**。
+   * ⚠️ **自動では遡及しない**（§2-5）＝この明示操作のときだけ。何がいくつ変わるかは
+   * 押す前に `planBrandApply` で見せる。取り消し（Undo）で戻せる。
+   * ⚠️ **ロゴの取り込みは失敗しうる**（置き場から消えている等）ので、**成功を騙らない**ために
+   * 結果を返す（呼ぶ側が「反映しました」と言ってよいかを決める）。
+   */
+  applyBrandKit: () => Promise<{ ok: boolean; error: string | null }>;
+  /**
+   * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
+   * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
+   */
+  applyBrandKitToNew: () => Promise<void>;
+  /**
    * いま持っている持ち込みフォントの id（#261）。**`null` ＝まだ調べていない**
    *（`missingAssetIds` と同じ流儀＝調べていないのに「全部そろっている」と言わない）。
    */
   userFontIds: string[] | null;
-  /** 見つからない素材を調べ直す（#347）。 */
-  refreshMissingAssets: () => Promise<void>;
   /** 持ち込みフォントの一覧を調べ直す（#261）。**実体があるものだけ**が入る。 */
   refreshUserFonts: () => Promise<void>;
   /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
@@ -496,6 +541,15 @@ const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.
 // 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
 let saveInFlight: Promise<void> | null = null;
+/**
+ * 直近に焼いた一覧の絵の印（#397）。**文書には持たない**＝絵は作り直せるもので、動画の中身ではない。
+ * 別の動画を開いたら `null` へ戻す（前の動画の印で焼き直しを飛ばさない）。
+ *
+ * ⚠️ **どの動画の印かまで持つ**（PR #889 レビュー 🟡）＝印だけだと、**中身が同じ別の動画**
+ *（複製した直後がまさにそれ）で「変わっていない」と誤判定し、**一度も焼いていない側の絵が
+ * 焼かれないまま**になる。投げっぱなしで走るので着地の順番も保証できない。
+ */
+let lastThumbnail: { projectId: string; signature: string } | null = null;
 
 // 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
 // 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
@@ -606,6 +660,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImporting: false,
   importProgress: null,
   missingAssetIds: [],
+  brandKit: {},
   userFontIds: null,
   fontError: null,
   isTemplateMutating: false,
@@ -713,6 +768,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   newProject: () => {
+    lastThumbnail = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
     set((s) => ({
@@ -748,6 +804,45 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
+    // ⚠️ **新しい動画には会社の見た目を焼き込む**（ADR-0036 決定2＝コピー）。
+    // ⚠️ **`newProject` に置く**（PR #888 レビュー 🔴）＝以前は「白紙から作る」だけに入れていたので、
+    // **主経路（AI で作る）に効いていなかった**。どちらも `newProject` を通るので、ここに置けば両方に効く。
+    // フォントは `videoSettings` へ、ロゴは**ライブラリからの取り込みと同じ経路**（`asset_NNN` を採番）。
+    void get().applyBrandKitToNew();
+  },
+  applyBrandKit: async () => {
+    // 書き出し中は文書を固定（#570 P1）。押せないようにもしてあるが、二重に守る。
+    if (isExportBusy(get().exportRun.phase)) return { ok: false, error: EXPORT_BUSY_ASSET_MSG };
+    const kit = get().brandKit;
+    const plan = planBrandApply(kit, {
+      fontId: get().meta.videoSettings.fontId,
+      hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
+    });
+    if (isNoopBrandApply(plan)) return { ok: true, error: null }; // 何も変わらないなら履歴を積まない
+    get().pushHistory();
+    // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
+    if (plan.fontChanges && isKnownFontId(kit.fontId)) {
+      const fontId = kit.fontId;
+      set((st) => ({
+        meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } },
+        saveStatus: "idle",
+      }));
+    }
+    // ⚠️ **ロゴは「足す」だけ**＝既に置いているロゴは利用者が選んだもの（§2-5＝差し替えない）。
+    // ⚠️ **できなかったら「反映しました」と言わせない**（PR #888 レビュー 🟡）＝置き場から消えている等で
+    // 取り込みは失敗しうる。理由（`importError`）は設定画面には出ないので、ここで拾って返す。
+    if (plan.addsLogo && kit.logoLibraryAssetId != null) {
+      const added = await get().importFromLibrary(kit.logoLibraryAssetId);
+      if (added == null) {
+        return {
+          ok: false,
+          error:
+            get().importError ??
+            "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。",
+        };
+      }
+    }
+    return { ok: true, error: null };
   },
   newBlankProject: () => {
     // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
@@ -756,6 +851,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return;
     get().newProject();
     set({ status: "ready" });
+  },
+  applyBrandKitToNew: async () => {
+    // ⚠️ **キットは読み直してから使う**＝設定画面で変えた直後でも新しい動画に効く。
+    await get().refreshBrandKit();
+    const kit = get().brandKit;
+    if (isKnownFontId(kit.fontId)) {
+      const fontId = kit.fontId;
+      set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
+    }
+    if (kit.logoLibraryAssetId != null) await get().importFromLibrary(kit.logoLibraryAssetId);
   },
   startManualEdit: () => {
     // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
@@ -767,6 +872,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
+  /**
+   * 一覧に出す小さな絵を焼き直す（#397）。**保存の後に投げっぱなしで呼ぶ**（待たせない）。
+   * ⚠️ **失敗しても何も起きない**＝絵が無ければ一覧はプレースホルダで出る（§2-5 の行き止まりにしない）。
+   */
+  _refreshProjectThumbnail: async (projectId) => {
+    const s = get();
+    const sig = thumbnailSignature({ scenes: s.scenes, assets: s.assets, videoSettings: s.meta.videoSettings });
+    // ⚠️ **同じ動画の印と比べる**＝別の動画の印と当たっても「変わっていない」にしない。
+    if (lastThumbnail?.projectId === projectId && lastThumbnail.signature === sig) return;
+    const scene = thumbnailScene(s.scenes);
+    const template = scene ? s.templates.find((t) => t.templateId === scene.templateId) : undefined;
+    if (!scene || !template) {
+      lastThumbnail = { projectId, signature: sig }; // 「絵が無い」も1つの状態として覚える（毎回試さない）
+      return;
+    }
+    const dataUrl = await renderProjectThumbnail(
+      scene,
+      template,
+      (id) => (id ? s.assetSrcById[id] ?? s.templateAssetSrcById[id] : undefined),
+      s.meta.videoSettings.fontId,
+    );
+    if (!dataUrl) return; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
+    try {
+      await saveProjectThumbnail(projectId, dataUrl);
+      lastThumbnail = { projectId, signature: sig };
+    } catch {
+      /* 絵が無くても一覧は開ける＝黙って続ける */
+    }
+  },
   saveProject: async () => {
     if (saveInFlight) return saveInFlight;
     saveInFlight = get()._doSave();
@@ -917,13 +1051,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           _dirtyAudioKeys: nextDirty,
         };
       });
+      // 一覧に出す小さな絵（#397）＝**投げっぱなし**にする（保存の完了を待たせない＝体感で重くならない）。
+      // ⚠️ **先頭の場面が変わっていなければ焼き直さない**（印の比較）＝打つたびに焼かない。
+      void get()._refreshProjectThumbnail(projectId);
     } catch {
       // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
       if (stillOpen()) set({ saveStatus: "error" });
     }
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
+  duplicateProject: async (projectId) => {
+    // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
+    if (isExportBusy(get().exportRun.phase)) return null;
+    try {
+      // ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない（焼き出し＝ADR-0032 決定16 と同じ流儀）。
+      const src = parseProjectDoc(await loadProjectDoc(projectId));
+      const existing = await listProjectSummaries();
+      const newId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      const dup = duplicateProjectDoc(src, newId, new Date().toISOString());
+      // ⚠️ **ファイルを運んでから文書を保存する**（焼き出しと同じ順＝`bakeToTimeline`）＝
+      // 逆にすると、素材の無い動画が一覧に残る。
+      // ⚠️ **コピーの入口は1つ**（`copyBakedFiles`）＝焼き出しと同じ関数を使う（規則を写さない・§2-7）。
+      await copyBakedFiles(projectId, newId, duplicatedFilePaths(src));
+      await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
+      // 複製したら**開く**（作っただけで見えないと、できたかどうか分からない）。
+      await get().loadProject(newId);
+      return newId;
+    } catch (e) {
+      set({ importError: typeof e === "string" ? e : "動画を複製できませんでした。もう一度お試しください。" });
+      return null;
+    }
+  },
   loadProject: async (projectId) => {
+    lastThumbnail = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
     if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);
@@ -1402,6 +1562,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
+      saveStatus: "idle",
+    }));
+  },
+  setCreditDisplay: (patch) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④）
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        videoSettings: {
+          ...s.meta.videoSettings,
+          creditDisplay: { ...s.meta.videoSettings.creditDisplay, ...patch },
+        },
+      },
       saveStatus: "idle",
     }));
   },
@@ -1999,6 +2173,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  refreshBrandKit: async () => {
+    set({ brandKit: await loadBrandKit() });
+  },
+  updateBrandKit: async (next) => {
+    set({ brandKit: next });
+    await saveBrandKit(next);
+  },
   addUserFont: async (srcPath, displayName) => {
     set({ fontError: null });
     try {

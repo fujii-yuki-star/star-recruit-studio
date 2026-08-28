@@ -25,6 +25,7 @@ import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import { buildExportScenes, ExportCancelledError } from './buildExportScenes';
 import { afterAnimNoSettledSceneNumbers } from './videoSlotPlacement';
+import { transitionBoundaryDs, transitionTimeline } from '../../domain/project/sceneTransitions';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
 // 見た目（テンプレ）未解決の場面は黙って落とさず停止する（Codex 監査 2026-07-13）ため、共有 fixture は解決可能な2場面のみ。
@@ -475,6 +476,108 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
       { credit: 'VOICEVOX:四国めたん' },
     );
     expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
+  });
+
+  /**
+   * クレジットの見せ方（ADR-0025・#359）。
+   *
+   * ⚠️ **場面ごとにしか切り替えられない**＝静止の場面は1枚の絵なので、途中で消すには
+   * その場面だけ毎フレーム描き直すことになる。区間に少しでも重なれば**その場面いっぱい出す**＝
+   * ずれる向きを「多め」に固定する（規約で困るのは足りないときだけ＝`13 §4`）。
+   */
+  it('「最初と最後」なら、真ん中の場面にはクレジットを焼かない（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    const three = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's3', templateId: 'tpl', durationSec: 8 },
+    ] as unknown as Scene[];
+    await buildExportScenes(
+      three, templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'both', seconds: 3 } },
+    );
+    const credits = vi.mocked(splitVideoSceneSvgMulti).mock.calls.map((c) => c[5]);
+    expect(credits[0]).toBe('VOICEVOX:ずんだもん'); // 最初の場面（[0,3] に重なる）
+    expect(credits[1]).toBeUndefined();            // 真ん中（どちらの区間にも重ならない）
+    expect(credits[2]).toBe('VOICEVOX:ずんだもん'); // 最後の場面（[21,24] に重なる）
+  });
+
+  /**
+   * ⚠️ **時間軸は「実際に書き出される尺」で採る**（PR #881 レビュー）。表示時間を順に足すだけだと、
+   * 切り替え（xfade）が重なるぶん実尺より長い時間軸になり、末尾の窓が本当の末尾より後ろへずれる。
+   * そのずれは**足りない側にも倒れる**＝「出るべきなのに出ない」を作る（`13 §4` に触れる）。
+   *
+   * この並びがちょうどその境目：尺 [8, 8, 5]・最後の境界だけ切り替え 2 秒・「最後の3秒」。
+   * - 単純合算：総尺 21 → 窓 [18,21]。真ん中の場面は 16 で終わる → **出さない**（誤り）
+   * - 実尺：総尺 19 → 窓 [16,19]。真ん中の場面は 16 で終わる → **出す**（正しい）
+   */
+  it('切り替えで詰まったぶんを見て、末尾の窓に入る場面へ焼く（#359・PR#881）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    const withTransition = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's3', templateId: 'tpl', durationSec: 5, transition: { in: 'fade', durationSec: 2 } },
+    ] as unknown as Scene[];
+    await buildExportScenes(
+      withTransition, templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'tail', seconds: 3 } },
+    );
+    const credits = vi.mocked(splitVideoSceneSvgMulti).mock.calls.map((c) => c[5]);
+    expect(credits[0]).toBeUndefined();             // [0,8]＝末尾の窓に届かない
+    expect(credits[1]).toBe('VOICEVOX:ずんだもん'); // [8,16]＝実尺の窓 [16,19] の端に触れる
+    expect(credits[2]).toBe('VOICEVOX:ずんだもん'); // [14,19]＝末尾
+  });
+
+  /**
+   * クレジットの時間軸（`sceneCreditVisibility`）と、書き出しが実際に FFmpeg へ渡す切り替えの位置
+   *（この関数の後処理）が**同じ `transitionTimeline` の結果**になることを固定する。
+   * 掛け合いの区間列は場面尺をちょうど敷き詰めるので合算すると `durationSec` に戻る、という前提が
+   * 崩れたら（片方だけ変えたら）ここが赤くなる。
+   */
+  it('クレジットの時間軸は、後処理のトランジション解決と同じ位置を指す（PR#881）', async () => {
+    const withTransition = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's3', templateId: 'tpl', durationSec: 5, transition: { in: 'fade', durationSec: 2 } },
+    ] as unknown as Scene[];
+    const out = await buildExportScenes(withTransition, templateById, noAsset);
+    const { steps } = transitionTimeline(
+      withTransition.map((sc) => sc.durationSec),
+      transitionBoundaryDs(withTransition),
+    );
+    // 後処理が out へ書いた切り替えの位置＝共有関数が返す位置。
+    expect(out[2].transition).toEqual({ name: 'fade', durationSec: steps[1].durationSec, offsetSec: steps[1].offsetSec });
+    // その位置は「クレジットが見る場面の開始秒」と同じもの（別々に数えていない）。
+    expect(steps[1].offsetSec).toBe(14);
+  });
+
+  it('「動画には出さない」ならどの場面にも焼かない（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'hidden' } },
+    );
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBeUndefined();
+  });
+
+  // ⚠️ **設定していない動画の見え方を変えない**＝既定（最初と最後）でも1場面なら出る。
+  it('設定していなければ従来どおり焼く（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん' },
+    );
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:ずんだもん');
   });
 
   it('動画スロットがあるのに分割できない場面は静かに静止画化せず停止（§2-5 エラー・#434）', async () => {

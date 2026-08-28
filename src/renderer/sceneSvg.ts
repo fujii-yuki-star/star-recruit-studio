@@ -7,6 +7,7 @@ import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
 import { charWidthEm, wrapText } from '../domain/text/textWrap';
+import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from '../domain/template/textStyle';
 
 // 折返し（charWidthEm/wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。
 // 既存の import 元（'./sceneSvg'）を保つため再エクスポートする。
@@ -22,6 +23,20 @@ function escapeXml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/** 同じ `<defs>` の行を1つに畳む（#264・影の filter は中身から id を作るので重複しうる）。 */
+function dedupeDefs(svg: string): string {
+  const seen = new Set<string>();
+  return svg
+    .split('\n')
+    .filter((line) => {
+      if (!line.startsWith('<defs>')) return true;
+      if (seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    })
+    .join('\n');
 }
 
 function textToSvg(item: TextItem, fontFamily: string): string {
@@ -51,10 +66,42 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
     : '';
 
+  // 字間（#264）＝**em で持つ**ので px へ直す（文字サイズを変えても詰め具合が変わらない）。
+  // ⚠️ 0 のときは属性を出さない＝**従来の出力は1バイトも変わらない**（golden が動かない）。
+  const spacingPx = (item.letterSpacing ?? 0) * item.fontSize;
+  const spacing = spacingPx !== 0 ? ` letter-spacing="${spacingPx}"` : '';
+
+  // 影（#264）。⚠️ **プレビューと書き出しは同じ Blink で描く**（`rasterize.ts`）ので、
+  // `feDropShadow` はどちらでも同じ絵になる（パリティは構造で保たれる）。
+  //
+  // ⚠️ **id は「影の中身」から作る**（要素の id ではない・PR #879 レビューで気づいた）＝
+  // ① 中身が違えば id も違うので、**同じ id の filter が混ざって全部が最後の影になる**ことが無い。
+  // ② **要素の id が変わっても絵が変わらない**＝「バラす」（ADR-0032 決定23）は要素に新しい id を
+  //    振るので、要素 id から作ると**中身が同じなのに SVG が変わり**、前後一致の検査が落ちる。
+  // ③ 同じ影を使う要素は**同じ filter を共有**する（重複する `<defs>` は `layoutToSvg` が畳む）。
+  let shadowAttr = '';
+  if (item.shadow) {
+    const dx = item.shadow.dx ?? 0;
+    const dy = item.shadow.dy ?? 0;
+    const sd = (item.shadow.blur ?? 0) / 2;
+    // ⚠️ **既定は定数から採る**（PR #879 レビュー ℹ️）＝`resolveTextStyle` を通れば埋まっているが、
+    // ここで別の数字を書くと**2か所に既定が生まれる**（片方だけ変えるドリフトの芽）。
+    const color = item.shadow.color ?? DEFAULT_SHADOW_COLOR;
+    const opacity = item.shadow.opacity ?? DEFAULT_SHADOW_OPACITY;
+    const filterId = `shadow-${[dx, dy, sd, color.replace('#', ''), opacity].join('_').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    parts.push(
+      `<defs><filter id="${filterId}" x="-50%" y="-50%" width="200%" height="200%">`
+      + `<feDropShadow dx="${dx}" dy="${dy}" stdDeviation="${sd}"`
+      + ` flood-color="${color}" flood-opacity="${opacity}"/>`
+      + `</filter></defs>`,
+    );
+    shadowAttr = ` filter="url(#${filterId})"`;
+  }
+
   const baseY = item.y + item.fontSize - shiftUp;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,
+      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}${spacing}${shadowAttr}>${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');
@@ -255,7 +302,10 @@ function itemsToSvg(items: readonly LayoutItem[], opts: LayoutToSvgOptions, font
 export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}): string {
   const fontFamily = opts.fontFamily ?? DEFAULT_FONT_FAMILY;
   const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
-  const body = itemsToSvg(items, opts, fontFamily);
+  // ⚠️ **同じ影の `<defs>` は1つに畳む**（#264）＝影の filter の id は**中身から**作るので、
+  // 同じ影を使う要素が複数あると同じ定義が並ぶ（同じ id が重複するのは行儀が悪い）。
+  // 中身が同じなので**どれを残しても絵は変わらない**＝先に出たものを残す。
+  const body = dedupeDefs(itemsToSvg(items, opts, fontFamily));
   // transparent 時は背景の全面塗りを出さない（動画が透けて見える上レイヤー用）。
   // responsive: ルート寸法を 100% にしてコンテナへフィットさせる（viewBox で座標系を保持）。
   // 既定は layout 実寸（書き出しのラスタライズは固定px が要るため）。

@@ -11,11 +11,15 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { fitToObjectFit } from "./fitToObjectFit";
 import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
+import { safeAreaRect } from "../../domain/preview/safeArea";
+import { ORIENTATION } from "../../domain/enums";
+import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { sceneCreditVisibility } from "../../domain/project/sceneCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
@@ -121,16 +125,31 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, showSafeArea, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /**
+   * 安全領域（セーフエリア）の枠を出すか（#265）。**編集を助けるためだけ**＝書き出しには焼かない。
+   * 省略＝利用者の記憶に従う。`false` を渡すと**記憶に関わらず出さない**（仕上がり確認など、
+   * 編集しない画面で線を出さないため）。`true` を渡しても記憶が「出さない」なら出さない。
+   */ showSafeArea?: boolean; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  // クレジットの見せ方（ADR-0025・#359）。**画面から渡してもらわず自分で読む**＝渡し忘れた画面だけ
+  // 「動画には入らないのに出ている」になる（PR #881 レビューで実際に3画面のうち2画面が漏れていた）。
+  const creditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
+  const projectScenes = useProjectStore((s) => s.scenes);
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
   // テンプレ向き（canvas）。未設定時は 16:9 を仮置き（プレースホルダ表示用）。
   const cw = template?.canvas.width ?? 16;
   const ch = template?.canvas.height ?? 9;
+  // 安全領域の枠（#265）。向きは**見た目パターンが持つもの**を見る（`aspectRatio`）＝
+  // 動画全体の設定ではなく、いま描いているキャンバスに合わせる（向き違いの見た目でもずれない）。
+  const safeRect = safeAreaRect({ width: cw, height: ch }, template?.aspectRatio ?? ORIENTATION.landscape);
+  // ⚠️ **記憶からも読む**（#265）＝画面ごとに渡し忘れると「場面編集では出るのに見た目パターン編集では
+  // 出ない」になる。明示の `showSafeArea` は**出さない側へ倒す上書き**（仕上がり確認では線を出さない）。
+  const [safeAreaPref] = useSafeAreaPref();
+  const drawSafeArea = showSafeArea !== false && safeAreaPref;
 
   /**
    * フィット時が実寸の何%か（#142）。**段を「いまの見え方」から数える**ために親へ返す
@@ -230,9 +249,20 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
         ...(subtitleSegment ? { subtitleSegment } : {}),
       }
     : undefined;
-  // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
+  // クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  const credit = creditLine ? creditForLine(creditLine, baseCredit) : baseCredit;
+  const creditText = creditLine ? creditForLine(creditLine, baseCredit) : baseCredit;
+  // 出す/出さないは**書き出しと同じ共有関数**（`sceneCreditVisibility`・ADR-0001）。
+  // 見た目パターンの画面が描く**見本の場面**はプロジェクトの場面ではない（index が無い）＝
+  // そこは従来どおり出す（「出来上がり」ではなく見た目の見本なので、動画の設定に従わせる意味がない）。
+  // ⚠️ `useMemo` は使わない＝この上に「表示する場面がありません」の早期 return があるので、
+  // ここでフックを足すと条件付き呼び出しになる（hooks 規則）。場面数ぶんの一次走査で、
+  // 同じ描画で走る `layoutScene`＋SVG 組み立てに対して無視できる。
+  const creditIndex = projectScenes.findIndex((s) => s.sceneId === scene.sceneId);
+  const credit =
+    creditIndex < 0 || sceneCreditVisibility(projectScenes, creditDisplay)[creditIndex]
+      ? creditText
+      : undefined;
   const fontFamily = fontFamilyForId(resolveFontId(scene.fontId, fontId));
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
@@ -249,7 +279,7 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   // 「字幕を入れる」OFF（hideSubtitles）は、書き出しと同じ itemFilter＋同じ述語（isSubtitleItem）で字幕を消す
   // ＝プレビュー＝書き出しのパリティ（ADR-0026③・#547 P2-7）。静止・実映像再生の両経路に同じ filter を渡す。
   const subtitleFilter = hideSubtitles ? (it: LayoutItem) => !isSubtitleItem(it) : undefined;
-  const svg = layoutToSvg(layout, { assetSrc, responsive: true, credit, fontFamily, itemFilter: subtitleFilter });
+  const svg = layoutToSvg(layout, { assetSrc, responsive: true, ...(credit != null ? { credit } : {}), fontFamily, itemFilter: subtitleFilter });
 
   // 実映像再生（#432）：再生中かつ動画スロットのある場面のみ、下SVG / video要素 / 上SVG の3層に分けて実映像を流す。
   // 分割は書き出し（splitVideoSceneSvgMulti）と同型＝スロットは穴（透過）にして video 要素で埋める＝ADR-0001 パリティ。
@@ -357,6 +387,22 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
           </div>
         ) : (
           <div role="img" aria-label="場面の仕上がり" style={boxStyle} dangerouslySetInnerHTML={{ __html: svg }} />
+        )}
+        {/* ⚠️ **安全領域の枠**（#265）＝端で切られやすいところを見せる**編集の補助**。
+            書き出しには焼かない（`layoutScene` を通らない＝プレビュー＝書き出しの一致に関わらない）。
+            ⚠️ **箱の子にする**＝拡大しても一緒に伸びる（`fit` 箱の実寸に追従＝#142・#273 と同じ理由）。
+            ⚠️ **割合で置く**＝`canvas` の大きさに依らず同じ見え方（`safeAreaRect` と同じ数字を使う）。 */}
+        {drawSafeArea && (
+          <div
+            aria-hidden="true"
+            className="safe-area-guide"
+            style={{
+              left: `${(safeRect.x / cw) * 100}%`,
+              top: `${(safeRect.y / ch) * 100}%`,
+              width: `${(safeRect.w / cw) * 100}%`,
+              height: `${(safeRect.h / ch) * 100}%`,
+            }}
+          />
         )}
         {/* 操作オーバーレイ（FREE/テンプレ編集）。fit 箱の子＝縦型でもプレビュー実寸と一致し、ドラッグ追従・配置が正確（#273）。 */}
         {children}

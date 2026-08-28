@@ -6,6 +6,7 @@ import type { VideoSlotPlayback } from "./ScenePreview";
 import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { firstFrameBoundary, sceneSegmentSpecs, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
+import { useProjectStore } from "../store/projectStore";
 
 // #386・A案＝掛け合いの先頭「間」は字幕なし。プレビュー（ScenePreview）が activeLineIndex<0（間）で
 // 行の字幕を描かず、有効行（0以上）では描くことをコンポーネントで検証する（ADR-0014・jsdom）。
@@ -327,5 +328,55 @@ describe("ScenePreview hideSubtitles×実映像再生（#547 P2-7・パリティ
     const { container } = render(<ScenePreview scene={vsubScene} template={vsubTemplate} activeLineIndex={0} videoPlayback={play} hideSubtitles />);
     expect(container.querySelector("video")).not.toBeNull(); // まだ再生パス
     expect(container.textContent).not.toContain("再生中の字幕文"); // 字幕だけ消える
+  });
+});
+
+/**
+ * クレジットの見せ方（ADR-0025・#359）をプレビューが**書き出しと同じ判定**で描くか（PR #881 レビュー）。
+ *
+ * ⚠️ ここが漏れると「編集画面には出ているのに焼いた動画には入っていない」になる（ADR-0001）。
+ * 判定は `sceneCreditVisibility`＝書き出し（`buildExportScenes`）と同じ共有関数を、この部品が
+ * **自分で**呼ぶ（画面から渡してもらうと渡し忘れた画面だけ漏れる）。
+ */
+describe("ScenePreview クレジットの見せ方（#359・PR#881）", () => {
+  const template = {
+    schemaVersion: "1.0",
+    templateId: "tpl_c",
+    name: "c",
+    category: "opening",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    layers: [],
+  } as unknown as Template;
+
+  const mk = (id: string, durationSec: number): Scene =>
+    ({ sceneId: id, templateId: "tpl_c", sceneType: "opening", durationSec, texts: {} }) as unknown as Scene;
+
+  function setProject(scenes: Scene[], creditDisplay: unknown): void {
+    useProjectStore.setState({
+      scenes,
+      meta: { ...useProjectStore.getState().meta, videoSettings: { ...useProjectStore.getState().meta.videoSettings, creditDisplay } },
+    } as never);
+  }
+
+  it("「動画には出さない」ならプレビューにも出さない", () => {
+    const scenes = [mk("s1", 8)];
+    setProject(scenes, { mode: "hidden" });
+    const { container } = render(<ScenePreview scene={scenes[0]} template={template} />);
+    expect(container.textContent).not.toContain("VOICEVOX");
+  });
+
+  it("「最初と最後」なら真ん中の場面には出さない（書き出しと同じ判定）", () => {
+    const scenes = [mk("s1", 8), mk("s2", 8), mk("s3", 8)];
+    setProject(scenes, { mode: "both", seconds: 3 });
+    expect(render(<ScenePreview scene={scenes[1]} template={template} />).container.textContent).not.toContain("VOICEVOX");
+    expect(render(<ScenePreview scene={scenes[0]} template={template} />).container.textContent).toContain("VOICEVOX");
+  });
+
+  it("見た目パターンの見本（動画の場面ではない）は従来どおり出す", () => {
+    setProject([mk("s1", 8)], { mode: "hidden" });
+    const sample = mk("sample_not_in_project", 8);
+    const { container } = render(<ScenePreview scene={sample} template={template} />);
+    expect(container.textContent).toContain("VOICEVOX");
   });
 });

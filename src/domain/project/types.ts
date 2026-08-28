@@ -6,7 +6,10 @@ import type {
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { Group } from '../group/types';
-import type { LayerBackground } from '../template/types';
+// ⚠️ **文字の体裁の語彙は `template/types` に1つ**（§2-7）＝`Layer` と `FreeElement` が同じ形を持つ
+// （同じ概念は同じ制約）。片方に写すと、片方だけ制約が変わったときに気づけない。
+import type { LayerBackground, TextShadow } from '../template/types';
+import type { CreditDisplay } from '../voice/creditDisplay';
 import type { AudioAutoSettings } from '../voice/audioAuto';
 
 export interface VideoSettings {
@@ -18,7 +21,13 @@ export interface VideoSettings {
   /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
   fontId?: FontId;
   /**
-   * 音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4・schema 1.26 で追加・任意）。
+   * クレジット（VOICEVOX）の**動画側**の見せ方（ADR-0025・#359）。
+   * 未指定＝最初と最後・3秒（`resolveCreditDisplay` が埋める）。
+   * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで扱うのは動画に焼く側だけ。
+   */
+  creditDisplay?: CreditDisplay;
+  /**
+   * 音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4・schema 1.29 で追加・任意）。
    *
    * ⚠️ **ここに置くのは「書き出し時の処理」だから**＝`Scene` には足さない（凍結3 に触れない）。
    * **場面ごとのダッキング設定は作らない**（追補4）ので、`BgmSettings` ではなくここに置く
@@ -269,6 +278,13 @@ export interface FreeElement {
   /** kind='text'/'subtitle' の背景帯（可読性の下地・#529）。enabled で描画。通常テンプレ字幕層の layer.background と同型・
    *  通常→FREE 化で移送（ADR-0030）。未指定/enabled:false＝背景帯なし。 */
   background?: LayerBackground;
+  /**
+   * 字間（em・#264）。**文字サイズに対する割合**＝サイズを変えても詰め具合が変わらない。
+   * 未指定＝0（従来の出力は不変）。負で詰める。
+   */
+  letterSpacing?: number;
+  /** 文字の影（#264）。未指定/`enabled:false`＝影なし（従来の出力は不変）。 */
+  shadow?: TextShadow;
   /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
   hidden?: boolean;
   /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
@@ -293,6 +309,12 @@ export interface TextStyleOverride {
   strokeColor?: string;
   /** 縁取りの太さ（canvas px・>=0）。0 で縁取りなし。 */
   strokeWidth?: number;
+  /** 字間（em・#264）。未指定＝テンプレ層を継承。 */
+  letterSpacing?: number;
+  /** 文字の影（#264）。未指定＝テンプレ層を継承。 */
+  shadow?: TextShadow;
+  /** 背景帯（#264 で文字にも一般化）。未指定＝テンプレ層を継承。 */
+  background?: LayerBackground;
 }
 
 export interface Scene {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { PlayIcon, StopIcon } from "../components/icons";
+import { BrandKitSection } from "../components/BrandKitSection";
 import { ReadingDictSection } from "../components/ReadingDictSection";
 import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -234,8 +235,10 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
         {/* ナレーターの声 */}
         <div className="card">
           <h2 className="section-title">ナレーターの声</h2>
+          {/* ⚠️ 「常に」ではない（ADR-0025・#359 で出し方を選べる）。この画面（About）側の表示は
+              必須のまま・変わるのは**動画に焼く側**だけ、という線で書き分ける。 */}
           <p className="page-desc text-pretty">
-            選んだ声のクレジット（{creditForSpeaker(speaker)}）を、動画とプレビューに常に表示します。
+            選んだ声のクレジット（{creditForSpeaker(speaker)}）は「ソフトについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
           </p>
 
           <div className="field">
@@ -274,8 +277,10 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
                 </optgroup>
               ))}
             </select>
+            {/* ⚠️ 出し方は選べるようになった（ADR-0025・#359）＝ここで「常時」と言い切ると事実と違う。
+                出し方の選択は書き出し画面（`CreditDisplayField`）にあるので、そこへ案内する。 */}
             <p className="field-hint">
-              選んだキャラクターの名前を、動画に常時クレジット表示します。
+              選んだキャラクターの名前を、動画にクレジット表示します。出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
             </p>
           </div>
 
@@ -379,6 +384,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           )}
         </div>
 
+        {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
+        <BrandKitSection />
         {/* 言葉の読み方（ADR-0037・#350）。ナレーターの声のすぐ下＝声にまつわる設定をひとかたまりにする。 */}
         <ReadingDictSection />
         {/* 持ち込みフォント（ADR-0038・#261）。 */}

@@ -91,8 +91,11 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
  * ⚠️ **持ち込みフォントは「形」で既知とみなす**（ADR-0038）＝ファイルが見つからないことと、
  * id が壊れていることは**別の壊れ方**。前者は書き出しの手前で断る（黙って別の字体にしない）、
  * 後者は読込時に既定へ落とす（従来どおり）。
+ *
+ * ⚠️ **型を狭める述語にしてある**（#351）＝呼ぶ側が `as FontId` を書かずに済む
+ *（キャストは検査を素通りさせるので、`unknown` から入る経路〔ブランドキットの読込〕で効く）。
  */
-export function isKnownFontId(fontId: unknown): boolean {
+export function isKnownFontId(fontId: unknown): fontId is FontId {
   return (
     (typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId)) || isUserFontId(fontId)
   );

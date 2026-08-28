@@ -7,8 +7,7 @@ import { frameTimeAt, timelineFramePlan } from '../../domain/timeline/export';
 import { isItemOfPlacement } from '../timelineLayout';
 import { videoPlacementsOf, videoFrameIndexAt, videoStagePlan } from '../../domain/timeline/video';
 import type { VideoPlacement } from '../../domain/timeline/video';
-import { creditSpeakerAt } from '../../domain/timeline/credit';
-import { creditForLine } from '../../domain/voice/narratorCredit';
+import { creditTextAt } from '../../domain/timeline/credit';
 import type { TimelineProject } from '../../domain/timeline/types';
 import type { Template } from '../../domain/template/types';
 import type { SourceSize } from '../../domain/timeline/cropFill';
@@ -121,6 +120,7 @@ export async function buildTimelineFrames(
   for (let f = 0; f < plan.frameCount; f += 1) {
     bail();
     const timeSec = frameTimeAt(f, plan.fps);
+    const creditText = creditTextAt(doc, timeSec, opts.fallbackCredit);
     const layout = layoutTimelineAt(doc, timeSec, { templateOf: opts.templateOf, assetSizeOf: opts.assetSizeOf });
     // そのフレームで映る動画のコマを読み、**その部品のアイテムだけ**差し替える
     // （素材 id で引くと、同じ動画を別の時刻に置いた2つが同じコマになる）。
@@ -140,7 +140,10 @@ export async function buildTimelineFrames(
             },
           }
         : {}),
-      credit: creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, opts.fallbackCredit),
+      // ⚠️ **見せ方の区間はプレビューと同じ「呼び口」で決める**（`creditTextAt`・ADR-0025・#359）＝
+      // 別々に書くと「プレビューでは出ているのに動画に入っていない」が起きる（ADR-0001）。
+      // 出さない時刻は `credit` を渡さない（`layoutToSvg` は未指定なら描かない）。
+      ...(creditText != null ? { credit: creditText } : {}),
       ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
     });
     const dataUrl = await svgToPngDataUrl(

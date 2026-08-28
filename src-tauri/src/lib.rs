@@ -220,6 +220,23 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
+/// 一覧に出す小さな絵（#397）を保存する。`projects/<id>/preview.png`。
+///
+/// ⚠️ **失敗しても保存そのものは止めない**（呼ぶ側が投げっぱなしにする）＝
+/// 絵が無くても一覧は開ける（プレースホルダで出る）。
+#[tauri::command]
+fn save_project_thumbnail(
+    app: tauri::AppHandle,
+    project_id: String,
+    data_url: String,
+) -> Result<(), String> {
+    let dir = crate::assets::project_dir(&app, &project_id)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let b64 = data_url.rsplit(',').next().unwrap_or_default();
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+        .map_err(|e| e.to_string())?;
+    fs::write(dir.join("preview.png"), bytes).map_err(|e| e.to_string())
+}
 /// appData/readingdict.json（読み方辞書・全プロジェクト共通＝ADR-0037 決定1）。
 ///
 /// ⚠️ **正典はアプリが持つ**＝エンジンを入れ替えても、外部エンジンを指しても同じ読みになる。
@@ -654,6 +671,40 @@ pub fn is_library_asset_id(id: &str) -> bool {
     rest.len() >= 3 && rest.chars().all(|c| c.is_ascii_digit())
 }
 
+/// appData/brandkit.json（ブランドキット・ADR-0036・#351）。
+///
+/// ⚠️ **棚を3つ目に増やさない**＝ロゴの実体は素材ライブラリ（`user_assets`・ADR-0035）に置き、
+/// キットは `lib_asset_NNN` を**指すだけ**。`appSettings`（`localStorage`）に置かないのは、
+/// ファイルが載せられず「会社のブランド」という性質に合わないため。
+fn brandkit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("brandkit.json"))
+}
+
+/// ブランドキットを読む。**無ければ空**（初回起動＝エラーにしない）。検証は呼び出し側（§2-2）。
+#[tauri::command]
+fn load_brand_kit(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = brandkit_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// ブランドキットを書く（丸ごと置き換え）。JSON として読めない本文は**書かない**
+/// ＝次に開けないファイルを作らない（`save_user_template` と同じ流儀）。
+#[tauri::command]
+fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&kit_json).map_err(|e| e.to_string())?;
+    let path = brandkit_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, &kit_json).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -676,6 +727,7 @@ pub fn run() {
             save_user_template,
             load_user_templates,
             delete_user_template,
+            save_project_thumbnail,
             load_reading_dict,
             save_reading_dict,
             export_reading_dict,
@@ -694,6 +746,8 @@ pub fn run() {
             copy_library_asset_to_project,
             delete_library_asset,
             update_library_asset,
+            load_brand_kit,
+            save_brand_kit,
             ffmpeg::export_video,
             ffmpeg::begin_export,
             ffmpeg::cancel_export,

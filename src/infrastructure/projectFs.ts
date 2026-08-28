@@ -82,3 +82,12 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return out;
 }
+
+/**
+ * 一覧に出す小さな絵を保存する（#397）。`projects/<id>/preview.png`。
+ * ⚠️ **失敗しても保存そのものは止めない**（呼ぶ側が投げっぱなしにする）＝絵が無くても一覧は開ける。
+ */
+export async function saveProjectThumbnail(projectId: string, dataUrl: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('save_project_thumbnail', { projectId, dataUrl });
+}

@@ -3,6 +3,7 @@ import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE } from "../
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
+import { CreditDisplayField } from "../components/CreditDisplayField";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -315,7 +316,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : [];
         },
         (done, total, frameFraction) => setProgress({ done, total, frameFraction }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), creditDisplay: snapMeta.videoSettings.creditDisplay, shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
@@ -484,6 +485,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
           <p className="field-hint">書き出した動画に反映されます。仕上がり確認でも同じ設定で表示されます。</p>
+          <hr className="divider" />
+          {/* 声の表記の出し方（ADR-0025・#359）。⚠️ **About 画面の表記は必須で不変**（`13 §4`）。 */}
+          <CreditDisplayField disabled={busy} />
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>

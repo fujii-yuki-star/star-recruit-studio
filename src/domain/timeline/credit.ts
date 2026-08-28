@@ -5,6 +5,9 @@
 // **同じ概念は同じ挙動**（ADR-0026②）。ここは「その時刻に誰がしゃべっているか」だけを決め、
 // 文言そのものは `domain/voice/narratorCredit` が持つ（文言の散逸を防ぐ・§6）。
 import { TIMELINE_CLIP_KIND } from '../enums';
+import { creditVisibleAt } from '../voice/creditDisplay';
+import { creditForLine } from '../voice/narratorCredit';
+import { timelineFramePlan } from './export';
 import type { TimelineProject } from './types';
 import { clipEndSec } from './validateTimelineDoc';
 
@@ -31,4 +34,26 @@ export function creditSpeakerAt(doc: TimelineProject, timeSec: number): number |
     )
     .sort((a, b) => a.startSec - b.startSec || a.id.localeCompare(b.id));
   return live[0]?.voice?.speaker ?? null;
+}
+
+/**
+ * その時刻に**描くクレジットの文言**。出さない時刻は `undefined`（呼ぶ側は `credit` を渡さない）。
+ *
+ * ⚠️ **プレビューと書き出しはこの1つを通す**（PR #881 レビュー）。前は書き出しだけが
+ * `creditVisibleAt` を通しており、「最初の数秒」「非表示」を選んだ動画が**編集画面では出ているのに
+ * 焼いた動画には入っていない**（またはその逆）状態になっていた＝ADR-0001 の一致がここで割れる。
+ * 「同じ関数で決める」とコメントに書くだけでは割れるので、**呼び口そのものを1つにする**。
+ *
+ * 尺は `timelineFramePlan`（＝書き出しが実際に描く枚数から導く尺）から採る＝プレビューが
+ * `timelineDurationSec` を直接見ると、端数フレームの切り上げぶんだけ末尾の窓がずれる。
+ */
+export function creditTextAt(
+  doc: TimelineProject,
+  timeSec: number,
+  fallbackCredit: string,
+): string | undefined {
+  if (!creditVisibleAt(doc.videoSettings.creditDisplay, timelineFramePlan(doc).durationSec, timeSec)) {
+    return undefined;
+  }
+  return creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, fallbackCredit);
 }

@@ -1273,3 +1273,16 @@ button.badge {
 /* 掴めるもの（#684 レビュー）。欄の見出し・帯と同じ見た目にする＝手を出す前に「掴める」と分かる。 */
 .grabbable { cursor: grab; }
 .grabbable:active { cursor: grabbing; }
+
+/* ── 安全領域（セーフエリア）の枠（#265）─────────────────────────
+   ⚠️ **編集を助けるためだけ**＝書き出しには焼かない（プレビューの箱に重ねるだけ）。
+   ⚠️ **操作を邪魔しない**＝`pointer-events: none`（掴む・置くは下のオーバーレイが受ける）。
+   ⚠️ **控えめに出す**＝主張しすぎると仕上がりが見えなくなる（点線・半透明）。 */
+.safe-area-guide {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgba(255, 255, 255, 0.75);
+  outline: 1px dashed rgba(0, 0, 0, 0.35); /* 明るい背景でも見える（白線だけだと消える） */
+  pointer-events: none;
+  z-index: 5;
+}

@@ -228,7 +228,7 @@ describe('編集操作と取り消し（#629 後半）', () => {
     s.moveSelectedClip({ startSec: 4 }); // clip_002（6秒〜）と重なる
     const after = useTimelineStore.getState();
     expect(after.doc!.clips[0].startSec).toBe(0);
-    expect(after.editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+    expect(after.editBlocked?.reason).toBe('TIMELINE_EDIT_OVERLAP');
     expect(after.history.past).toHaveLength(0); // 履歴も汚さない
   });
 
@@ -396,11 +396,11 @@ describe('自動保存（編集した内容が消えない）', () => {
   });
 
   it('選び直すと、前の操作の返事は落ちる（いまの部品の返事に見せない）', () => {
-    useTimelineStore.setState({ editBlocked: 'TIMELINE_EDIT_OVERLAP', voiceError: '声を作れませんでした。' });
+    useTimelineStore.setState({ editBlocked: { reason: 'TIMELINE_EDIT_OVERLAP', at: "arrange" }, voiceError: '声を作れませんでした。' });
     useTimelineStore.getState().selectClip('clip_001');
     expect(useTimelineStore.getState().editBlocked).toBeNull();
     expect(useTimelineStore.getState().voiceError).toBeNull();
-    useTimelineStore.setState({ editBlocked: 'TIMELINE_EDIT_OVERLAP' });
+    useTimelineStore.setState({ editBlocked: { reason: 'TIMELINE_EDIT_OVERLAP', at: "arrange" } });
     useTimelineStore.getState().clearSelection();
     expect(useTimelineStore.getState().editBlocked).toBeNull();
   });
@@ -716,7 +716,7 @@ describe('素材の取り込み（#712）', () => {
       exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 0, message: null, cancelling: false },
     });
     await useTimelineStore.getState().addAssets(somePaths(2));
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.exporting);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.exporting);
     expect(useTimelineStore.getState().importError).toBeNull();
   });
 
@@ -922,7 +922,7 @@ describe('素材の取り込み（#712）', () => {
     const copy = vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png');
     await importPath();
     expect(copy).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_EXPORTING');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_EXPORTING');
   });
 
   it('ファイルから取り込むとき、動画と写真で経路を分ける', async () => {
@@ -995,7 +995,7 @@ describe('置く先の探し方（#722）', () => {
     });
     useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_NOT_FOUND');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_NOT_FOUND');
   });
 
   it('落とした場所が指されているときは探さない（寄せない・ADR-0034 決定10）', () => {
@@ -1003,7 +1003,7 @@ describe('置く先の探し方（#722）', () => {
     // 手前の列の 0 秒＝塞がっている所へ落とす。空きへ寄せずに断る。
     useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at: { trackId: 'track_002', startSec: 0 } });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_OVERLAP');
   });
 });
 
@@ -1088,13 +1088,13 @@ describe('見た目パターンを置く（#724）', () => {
     useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 0 });
     useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 3 });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_OVERLAP');
   });
 
   it('音の列へは置かない（置いても映らない部品を作らない）', () => {
     useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_002', startSec: 0 });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_TRACK_KIND');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_TRACK_KIND');
   });
 });
 

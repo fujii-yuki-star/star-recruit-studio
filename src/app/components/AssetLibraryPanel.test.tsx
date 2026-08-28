@@ -35,7 +35,7 @@ beforeEach(() => {
     lib({ id: "lib_asset_002", displayName: "オフィス写真", assetType: ASSET_TYPE.image, tags: ["会社", "写真"] }),
     lib({ id: "lib_asset_003", displayName: "社員インタビュー", assetType: ASSET_TYPE.video, tags: ["採用"] }),
   ]);
-  useProjectStore.setState({ isImporting: false, importFromLibrary } as never);
+  useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => {}) } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -112,6 +112,30 @@ describe("AssetLibraryPanel", () => {
     await waitFor(() => expect(deleteLibraryAsset).toHaveBeenCalledWith("lib_asset_001"));
     // 説明文にも同じ言い回しがあるので、**外した素材の名前つき**の知らせで照合する。
     expect(await screen.findByText(/「会社ロゴ」を置き場から外しました/)).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **会社の見た目が消した素材を指したままにしない**（#351・PR #888 レビュー 🟡）＝
+   * 指し続けると、新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
+   */
+  it("会社の見た目のロゴを外すと、そちらの覚えも外して知らせる", async () => {
+    const updateBrandKit = vi.fn(async () => {});
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    await waitFor(() => expect(updateBrandKit).toHaveBeenCalledWith({ logoLibraryAssetId: undefined }));
+    expect(await screen.findByText(/会社の見た目のロゴも外しました/)).toBeInTheDocument();
+  });
+
+  it("会社の見た目が指していない素材なら、そちらは触らない", async () => {
+    const updateBrandKit = vi.fn(async () => {});
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_009" }, updateBrandKit } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    await waitFor(() => expect(deleteLibraryAsset).toHaveBeenCalled());
+    expect(updateBrandKit).not.toHaveBeenCalled();
   });
 
   it("名前とタグを直せる（区切りは読点・カンマ・空白）", async () => {

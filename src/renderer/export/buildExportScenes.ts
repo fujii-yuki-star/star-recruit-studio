@@ -13,6 +13,8 @@ import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
+import type { CreditDisplay } from '../../domain/voice/creditDisplay';
+import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
@@ -160,8 +162,14 @@ export interface ExportOptions {
   outputSize?: { width: number; height: number };
   /** 場面ごとの描画フォントを返す（場面→動画全体で解決済み・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
   fontFamilyFor?: (scene: Scene) => string;
-  /** 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
+  /** クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
   credit?: string;
+  /**
+   * クレジットの見せ方（ADR-0025・#359）。未指定＝最初と最後・3秒。
+   * ⚠️ **場面形式は場面ごとにしか決められない**（`creditVisibleForScene`）＝静止の場面は1枚の絵。
+   * ずれる向きは「多め」に固定してある（規約で困るのは足りないときだけ＝`13 §4`）。
+   */
+  creditDisplay?: CreditDisplay;
   /**
    * 中止要求の確認（#380）。true を返すと、場面境界・フレームループ・クリップ抽出の各所で ExportCancelledError を投げ、
    * 長い準備処理でも押した中止が体感すぐ効くようにする（走行中の ffmpeg は別途 cancel_export が kill）。未指定＝中止判定なし。
@@ -222,8 +230,17 @@ export async function buildExportScenes(
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
     opts.withSubtitle === false ? (it) => !isSubtitleItem(it) : undefined;
-  // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
-  const credit = opts.credit ?? NARRATOR_CREDIT;
+  // クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
+  const baseCredit = opts.credit ?? NARRATOR_CREDIT;
+  // ⚠️ **見せ方（ADR-0025・#359）は場面ごとに決める**＝静止の場面は1枚の絵なので、途中で消すには
+  // その場面だけ毎フレーム描き直すことになる。区間に少しでも重なれば**その場面いっぱい出す**＝
+  // ずれる向きを「多め」に固定する（規約で困るのは足りないときだけ＝`13 §4`）。
+  //
+  // ⚠️ **判定はプレビューと同じ共有関数**（`sceneCreditVisibility`）＝時間軸の採り方（切り替えの
+  // 重なりを引いた実尺）も含めて1か所にある。見た目が解決できない場面は下で throw する＝ここで
+  // 数える場面と書き出される場面は一致する。
+  const creditVisible = sceneCreditVisibility(scenes, opts.creditDisplay);
+  const creditFor = (index: number): string | undefined => (creditVisible[index] ? baseCredit : undefined);
   const out: ExportSceneData[] = [];
   // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
   const bail = (): void => {
@@ -234,6 +251,8 @@ export async function buildExportScenes(
   for (let i = 0; i < scenes.length; i += 1) {
     bail(); // 場面境界（次の場面の重い描画に入る前）
     const scene = scenes[i];
+    // この場面にクレジットを焼くか（#359）。焼かない場面は `undefined`＝描かれない。
+    const credit = creditFor(i);
     const template = templateById.get(scene.templateId);
     if (template) {
       included.push(scene);
@@ -314,7 +333,7 @@ export async function buildExportScenes(
             const spec = specs[k];
             // クレジットは話者連動（静止画の掛け合いと同じ規則・#243 の併記は行ごと表示で置き換え）。
             const segLine = spec.lineId ? lines.find((l) => l.lineId === spec.lineId) : undefined;
-            const segCredit = segLine ? creditForLine(segLine, credit) : credit;
+            const segCredit = credit != null && segLine ? creditForLine(segLine, credit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
                 ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
@@ -617,7 +636,7 @@ export async function buildExportScenes(
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
           // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
-          const segCredit = segLine ? creditForLine(segLine, credit) : credit;
+          const segCredit = credit != null && segLine ? creditForLine(segLine, credit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
           const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
           // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。
