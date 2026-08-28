@@ -1402,6 +1402,97 @@ pub fn extract_video_thumbnail(
     Ok(rel_out)
 }
 
+/// 動画の**その瞬間**を静止画（PNG）として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+///
+/// ⚠️ **サムネ（`extract_video_thumbnail`）とは別物**＝あちらは一覧用に横 640px へ縮める
+/// 「見せるための絵」。こちらは**素材として使う絵**なので**原寸のまま**出す（縮めると、
+/// 切り出した写真だけ解像度が落ちて動画に入る＝黙って劣化させない）。
+/// ⚠️ **ファイル名は呼ぶ側が決める**（`asset_NNN` の採番はドメイン側の責務・§4）。
+#[tauri::command]
+pub async fn extract_video_frame(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("frame extract join: {e}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        )
+    })?
+}
+
+fn extract_video_frame_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    // ⚠️ 区切りを含む名前は受けない（`resolve_project_file` も `..` 等を弾くが、ここで先に断る＝
+    // 「assets/ の直下に1つ置く」という約束を、名前の形として明示する）。
+    if out_file_name.is_empty()
+        || out_file_name.contains('/')
+        || out_file_name.contains('\\')
+        || out_file_name.contains("..")
+    {
+        return Err(export_failure(
+            format!("frame extract bad name: {out_file_name}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        ));
+    }
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("frame src missing: {}", input.display()),
+            "動画が見つかりませんでした。素材の一覧から取り込み直してください。",
+        ));
+    }
+    let rel_out = format!("assets/{out_file_name}");
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            export_failure(
+                format!("frame dir: {e}"),
+                "静止画の保存先を用意できませんでした。もう一度お試しください。",
+            )
+        })?;
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    // `-ss` を `-i` の**前**に置く（速い頭出し）。切り出しは1枚だけ。
+    // ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{}", at_sec.max(0.0)),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ];
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("frame extract: {e}"),
+            "静止画を切り出せませんでした。時間を少し動かしてもう一度お試しください。",
+        )
+    })?;
+    // ⚠️ **出来ていないのに成功にしない**＝尺の外を指すと FFmpeg は 0 個の絵で正常終了する。
+    if !out.exists() {
+        return Err(export_failure(
+            format!("frame extract produced nothing at {at_sec}"),
+            "その時間には映像がありませんでした。時間を少し戻してもう一度お試しください。",
+        ));
+    }
+    Ok(rel_out)
+}
+
 struct SceneFile {
     png: PathBuf,
     audio: Option<PathBuf>,
