@@ -131,14 +131,17 @@ pub async fn voicevox_user_dict_add(
         .await
         .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
     if !res.status().is_success() {
-        return Err("読み方を登録できませんでした。読み（カタカナ）を確かめてもう一度お試しください。".to_string());
+        return Err(
+            "読み方を登録できませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
+                .to_string(),
+        );
     }
-    let body = res
-        .text()
-        .await
-        .map_err(|_| "読み方の登録結果を読み取れませんでした。もう一度お試しください。".to_string())?;
+    let body = res.text().await.map_err(|_| {
+        "読み方の登録結果を読み取れませんでした。もう一度お試しください。".to_string()
+    })?;
     // 本文は `"<uuid>"`（JSON 文字列）。引用符が付かない実装でも拾えるように両対応。
-    Ok(serde_json::from_str::<String>(&body).unwrap_or_else(|_| body.trim().trim_matches('"').to_string()))
+    Ok(serde_json::from_str::<String>(&body)
+        .unwrap_or_else(|_| body.trim().trim_matches('"').to_string()))
 }
 
 /// 語を1つ直す。**`false` ＝その id の語がもう無い**（実測＝未知の uuid は `422`）。
@@ -169,7 +172,10 @@ pub async fn voicevox_user_dict_update(
     if is_missing_word(res.status()) {
         return Ok(false);
     }
-    Err("読み方を更新できませんでした。読み（カタカナ）を確かめてもう一度お試しください。".to_string())
+    Err(
+        "読み方を更新できませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
+            .to_string(),
+    )
 }
 
 /// 語を1つ消す。**`false` ＝その id の語がもう無い**（消し終わっているのと同じ＝エラーにしない）。
@@ -230,7 +236,10 @@ pub async fn voicevox_synthesize_with_accent(
         .await
         .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
     if !query_res.status().is_success() {
-        return Err("読み方を確かめられませんでした。読み（カタカナ）を確かめてもう一度お試しください。".to_string());
+        return Err(
+            "読み方を確かめられませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
+                .to_string(),
+        );
     }
     let mut query: serde_json::Value = query_res
         .json()
