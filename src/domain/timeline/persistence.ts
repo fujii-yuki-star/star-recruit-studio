@@ -7,6 +7,7 @@ import { validateTimelineProject } from '../validation/generated/validators.js';
 import { effectiveFps, lastFrameSec, quantizeToFrameSec } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineProject } from './types';
+import { OLD_PROJECT_AUDIO_AUTO } from '../voice/audioAuto';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
 
@@ -28,7 +29,22 @@ export function isSupportedTimelineSchemaVersion(version: string): boolean {
  * ここに実際の変換を足すこと**（版だけ上げて通すと、壊れた文書を通してしまう）。
  */
 export function migrateTimelineProject(doc: Record<string, unknown>): Record<string, unknown> {
-  return doc.schemaVersion === TIMELINE_SCHEMA_VERSION ? doc : { ...doc, schemaVersion: TIMELINE_SCHEMA_VERSION };
+  if (doc.schemaVersion === TIMELINE_SCHEMA_VERSION) return doc;
+  const next: Record<string, unknown> = { ...doc, schemaVersion: TIMELINE_SCHEMA_VERSION };
+  // 1.8→1.9: 音の自動処理（#257 ダッキング・#259 ノーマライズ）。
+  // ⚠️ **既に作った動画の音を変えない**（§2-5・場面形式の 1.25→1.26 と同じ扱い）＝新しい動画では
+  // 既定で「する」だが、**前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて
+  // 書き出し直しただけで BGM の鳴り方と全体の音量が変わり、前に書き出した動画と別物になる。
+  // ⚠️ **`videoSettings` は場面形式と `$ref` 共有**なので、片方だけ直すと形式で挙動が割れる（ADR-0026②）。
+  const vs = next.videoSettings;
+  if (isAudioSettingsRecord(vs) && vs.audioAuto === undefined) {
+    next.videoSettings = { ...vs, audioAuto: OLD_PROJECT_AUDIO_AUTO };
+  }
+  return next;
+}
+
+function isAudioSettingsRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 /** 読込に失敗したことを UI へ伝える例外（場面形式の `ProjectLoadError` と同じ役割）。 */

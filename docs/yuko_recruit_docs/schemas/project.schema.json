@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.25" },
+    "schemaVersion": { "const": "1.26" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -59,7 +59,20 @@
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
         "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+        "audioAuto": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4）。書き出し時の処理なので Scene には持たせない（場面ごとのダッキング設定は作らない）。未指定＝新規は既定で「する」／読み込んだ古い動画には読込時に「しない」を書き込む（既に作った動画の音を変えない）。",
+          "properties": {
+            "duckBgm": { "type": "boolean" },
+            "duckDepth": { "type": "number", "minimum": 0, "maximum": 1 },
+            "duckAttackSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "duckReleaseSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "normalize": { "type": "boolean" },
+            "targetLufs": { "type": "number", "minimum": -30, "maximum": -8 }
+          }
+        }
       }
     },
     "CompanyInfo": {

@@ -7,6 +7,7 @@ import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { Group } from '../group/types';
 import type { LayerBackground } from '../template/types';
+import type { AudioAutoSettings } from '../voice/audioAuto';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -16,6 +17,15 @@ export interface VideoSettings {
   maxDurationSec: number;
   /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
   fontId?: FontId;
+  /**
+   * 音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4・schema 1.26 で追加・任意）。
+   *
+   * ⚠️ **ここに置くのは「書き出し時の処理」だから**＝`Scene` には足さない（凍結3 に触れない）。
+   * **場面ごとのダッキング設定は作らない**（追補4）ので、`BgmSettings` ではなくここに置く
+   *（`BgmSettings` は場面にも生えているため、そちらへ置くと場面ごとに設定できてしまう）。
+   * `videoSettings` は `timeline-project.schema.json` が `$ref` で共有＝**両形式に効く**。
+   */
+  audioAuto?: AudioAutoSettings;
 }
 
 export interface CompanyInfo {

@@ -248,7 +248,7 @@ describe("ExportScreen 進捗の配線（#547 P2-1）", () => {
   it("共有関数の % と「場面 n / N」を実際に描く（バナーと同じ数字）", () => {
     setup([scene()]);
     useProjectStore.setState({
-      exportRun: { phase: "rendering", progress: { done: 2, total: 8 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+      exportRun: { phase: "rendering", progress: { done: 2, total: 8 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
     });
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("20%")).toBeTruthy();
@@ -276,7 +276,7 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
   it("書き出し中は（場面ゼロでも）空状態にせず進捗を出し続ける＝中止できる道を残す", () => {
     setup([]);
     useProjectStore.setState({
-      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
     });
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("まだ場面がありません")).toBeNull(); // 空状態で覆わない

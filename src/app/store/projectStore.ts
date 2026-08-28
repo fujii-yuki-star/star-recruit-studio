@@ -84,6 +84,7 @@ function joinVoiceFailure(e: unknown, before: NarrationStatus, hasAudio: boolean
   return `${base}${base.endsWith("。") ? "" : "。"}${KEPT_PREVIOUS_VOICE_SUFFIX}`;
 }
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
+import type { AudioAutoSettings } from "../../domain/voice/audioAuto";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
@@ -104,6 +105,8 @@ export interface ExportRunState {
   resultPath: string;
   message: string;
   bgmWarning: "" | "partial" | "all";
+  /** BGM を下げる区間をまとめたか（#257）＝点の上限に収めるために間の狭いところをつないだ。 */
+  duckMerged: boolean;
   // ユーザーが中止を要求したか（#380）。画面横断で保持し、書き出しの各段が「中止しました」で終えられるようにする。
   cancelling: boolean;
   /**
@@ -129,6 +132,7 @@ const IDLE_EXPORT_RUN: ExportRunState = {
   resultPath: "",
   message: "",
   bgmWarning: "",
+  duckMerged: false,
   cancelling: false,
   resultUnseen: false,
 };
@@ -315,6 +319,11 @@ interface ProjectState {
   applyStandardLookToUnresolvedScenes: () => StandardLookApplyResult;
   /** 動画全体のフォントを切り替える（videoSettings.fontId・保存時に永続化）。 */
   setFontId: (fontId: FontId) => void;
+  /**
+   * 音の自動処理（#257 ダッキング／#259 ノーマライズ）を部分更新する。
+   * ⚠️ **プロジェクト単位**（`videoSettings.audioAuto`）＝場面ごとには持たない（ADR-0032 追補4）。
+   */
+  updateAudioAuto: (patch: AudioAutoSettings) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -1357,6 +1366,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
+      saveStatus: "idle",
+    }));
+  },
+  updateAudioAuto: (patch) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        videoSettings: { ...s.meta.videoSettings, audioAuto: { ...s.meta.videoSettings.audioAuto, ...patch } },
+      },
       saveStatus: "idle",
     }));
   },

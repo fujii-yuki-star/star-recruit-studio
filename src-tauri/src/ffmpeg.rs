@@ -476,10 +476,19 @@ fn atempo_chain(speed: f64) -> String {
 /// 結合済み動画（ナレーション入り）へ、場面ごとBGMの各クリップをループ→切り出し→音量→フェード→adelay して amix する引数（純粋・ADR-0018 ③(7)）。
 /// クリップは planBgmMix が配置済み（曲が変わる境界は前後を重ねた delay/play＋フェードで amix ブレンド＝クロスフェード）。
 /// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。runs は1本以上（呼ぶ前に判定）。
+/// 全体の音量を整える設定（#259・ADR-0032 追補4）。
+#[derive(Debug, Clone, Copy)]
+pub struct NormalizeSpec {
+    /// 目安の大きさ（LUFS・負の値）。
+    pub target_lufs: f64,
+}
+
 pub fn mix_bgm_runs_args(
     video: &str,
     runs: &[BgmRunPlaced],
     total_sec: f64,
+    // 全体の音量を整える（#259）。`None` ＝整えない（従来どおり＝出力不変）。
+    normalize: Option<NormalizeSpec>,
     out: &str,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
@@ -540,10 +549,22 @@ pub fn mix_bgm_runs_args(
         labels.push(format!("[{label}]"));
     }
     let n = labels.len();
+    // ⚠️ **amix の `normalize=0` は「入力数で割らない」という意味**（#259 の「音量を整える」とは別物）。
+    // 割ると音源を足すたびに全体が小さくなるので従来どおり 0 のまま。整えるのは下の `loudnorm`。
+    let mixed = if normalize.is_some() { "[mixed]" } else { "[a]" };
     filters.push(format!(
-        "{}amix=inputs={n}:duration=first:normalize=0[a]",
+        "{}amix=inputs={n}:duration=first:normalize=0{mixed}",
         labels.join("")
     ));
+    // 全体の音量を整える（#259）。`loudnorm` で目安の大きさへ寄せ、`alimiter` で歪みを止める。
+    // ⚠️ **1回通しで測って整える**（2回通しは全体をもう一度読むので、書き出しが目に見えて遅くなる）。
+    // ⚠️ **`alimiter` を必ず後ろに置く**＝整えた結果が 0dBFS を超えると歪む（受け入れ条件「歪みが出ない」）。
+    if let Some(nz) = normalize {
+        filters.push(format!(
+            "[mixed]loudnorm=I={i}:TP=-1.5:LRA=11,alimiter=limit=0.95[a]",
+            i = nz.target_lufs
+        ));
+    }
     args.push("-filter_complex".into());
     args.push(filters.join(";"));
     args.extend([
@@ -2530,9 +2551,11 @@ pub async fn export_video(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
+    // 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。
+    normalize_lufs: Option<f64>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        export_video_impl(app, scenes, file_name, bgm_runs, project_id, output_path)
+        export_video_impl(app, scenes, file_name, bgm_runs, project_id, output_path, normalize_lufs)
     })
     .await
     .map_err(|e| {
@@ -2705,6 +2728,7 @@ fn export_video_impl(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
+    normalize_lufs: Option<f64>,
 ) -> Result<ExportReport, String> {
     // すでに別の書き出しが走っていれば弾く（二重実行での作業ディレクトリ相互破壊を防ぐ・#379）。
     // 取得できたら以降の全経路で RAII ガードが解除を保証する。
@@ -3200,7 +3224,12 @@ fn export_video_impl(
     // パス構成：場面結合 →（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
     // 旧・場面横断タイムラインのテロップ合成は #635 で退役（ADR-0032 決定11/12）＝この段そのものが無くなった。
     let has_bgm = bgm_runs.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
-    let joined_path = if has_bgm {
+    let normalize = normalize_lufs.map(|target_lufs| NormalizeSpec { target_lufs });
+    // ⚠️ **BGM が無くても音を整えるなら音の段を通す**（#259・ADR-0026②）＝BGM の有無で
+    // 「音量を整える」が効いたり効かなかったりすると、同じ設定で別の結果になる。
+    // 整えるだけのときは `amix=inputs=1`（既存音声だけ）を通る＝映像は `-c:v copy` のまま。
+    let needs_audio_pass = has_bgm || normalize.is_some();
+    let joined_path = if needs_audio_pass {
         tmp.join("video.mp4")
     } else {
         out.clone()
@@ -3219,7 +3248,8 @@ fn export_video_impl(
     )?;
 
     // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
-    if has_bgm {
+    // 音を整えるだけ（BGM 無し）のときもここを通る（#259）＝BGM のリストが空になるだけ。
+    if needs_audio_pass {
         emit_export_progress(Some(&app), "bgm", 0, 0); // BGM合成中（#376）
         let bgm_start = Instant::now();
         let list = bgm_runs.unwrap_or_default();
@@ -3293,6 +3323,7 @@ fn export_video_impl(
             &joined_path.to_string_lossy(),
             &placed,
             total,
+            normalize,
             &out.to_string_lossy(),
         );
         run_export(&ffmpeg, &args).map_err(|e| {
@@ -4119,7 +4150,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         assert!(a.windows(2).any(|w| w[0] == "-stream_loop" && w[1] == "-1"));
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         assert_eq!(
@@ -4145,7 +4176,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         assert!(!a.iter().any(|s| s == "-stream_loop")); // 繰り返さない
         assert!(a.windows(2).any(|w| w[0] == "-i" && w[1] == "voice.wav")); // 入力自体は載る
     }
@@ -4166,7 +4197,7 @@ mod tests {
             source_start_sec: 4.0,
             speed: 2.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
         assert!(fc.contains("atrim=4:10"), "{fc}");
         assert!(fc.contains("asetpts=N/SR/TB,atempo=2,volume=1"), "{fc}");
@@ -4190,7 +4221,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, None, "out.mp4");
         let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
         // 式は `'…'` で囲む（中の `,` を区切りと読ませない）＋ eval=frame（付けないと一定音量に化ける）。
         assert!(fc.contains(&format!("volume='{expr}':eval=frame")), "{fc}");
@@ -4213,7 +4244,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, None, "out.mp4");
         let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
         assert!(fc.contains("volume=0.25"), "{fc}");
         assert!(!fc.contains("eval=frame"), "{fc}");
@@ -4266,7 +4297,7 @@ mod tests {
                 speed: 1.0,
             },
         ];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, None, "out.mp4");
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3); // video + 2曲
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         let f = &a[fc + 1];
@@ -4291,7 +4322,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         assert!(!a.iter().any(|s| s.contains("afade")));
         assert!(!a.iter().any(|s| s.contains("adelay")));
         assert!(a
@@ -4547,7 +4578,7 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, &out.to_string_lossy());
+        let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, None, &out.to_string_lossy());
         run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }

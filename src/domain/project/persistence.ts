@@ -8,6 +8,7 @@ import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
+import { OLD_PROJECT_AUDIO_AUTO } from '../voice/audioAuto';
 import { validateProject } from '../validation/generated/validators.js';
 import { isTimelineProjectDoc } from '../projectFormat';
 import { normalizeDialogueTiming } from './narrationLines';
@@ -17,8 +18,8 @@ import type {
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。1.14→1.15：timelineOverlay（場面横断タイムラインの上位編集・ADR-0018）を追加（任意・未指定=場面射影のみ・無変換）。1.15→1.16：scene.bgmSettings（場面ごとのBGM・ADR-0018 ③(7)）を追加（任意・未指定=プロジェクト既定を継承・無変換）。1.16→1.17：timelineOverlay.animations（要素アニメーション＝キーフレーム・ADR-0019 ④）を追加（任意・未指定=アニメ無し＝静止・無変換）。1.17→1.18：scene.slotVideoStart（動画スロット本体アニメの再生開始タイミング＝モード明示・ADR-0027・#444）を追加（任意・未指定=withAnim＝アニメと同時・無変換）。1.18→1.19：scene.slotClips（動画クリップ調整の per-use 上書き＝範囲/速度/元音声・ADR-0028・#472）を追加（任意・未上書きフィールドは asset.clip を継承・無変換）。1.19→1.20：FREE 自由配置の字幕要素（FreeElement.kind='subtitle'）＋対象 FreeElement.subtitleSource（読み上げ/全行/話者・ADR-0029）を追加（任意・未指定=後方互換〔単独→読み上げ・掛け合い→全行〕・無変換）。1.20→1.21：掛け合いの同時開始 NarrationLine.startWithPrevious（前のセリフと同時に開始＝並行音声・ADR-0031）を追加（任意・未指定=逐次・無変換）。1.21→1.22：FREE 要素の任意表示名 FreeElement.name（重ね順一覧/チップの見分け用・#525-12）を追加（任意・未指定=種類＋連番の自動名・無変換）。1.22→1.23：FREE の text/subtitle 要素の背景帯 FreeElement.background（可読性の下地・通常字幕層 layer.background と同型・#529）を追加（任意・未指定/enabled:false=背景帯なし・無変換）。1.23→1.24・1.24→1.25：文字の体裁の場面別上書き scene.textStyles（テキスト種別ごとの色/サイズ/太さ/縁取り・#555）を追加（任意・各プロパティ未指定=テンプレ層→既定を継承・配置はテンプレ駆動のまま・無変換）。 */
-export const PROJECT_SCHEMA_VERSION = '1.25';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。1.14→1.15：timelineOverlay（場面横断タイムラインの上位編集・ADR-0018）を追加（任意・未指定=場面射影のみ・無変換）。1.15→1.16：scene.bgmSettings（場面ごとのBGM・ADR-0018 ③(7)）を追加（任意・未指定=プロジェクト既定を継承・無変換）。1.16→1.17：timelineOverlay.animations（要素アニメーション＝キーフレーム・ADR-0019 ④）を追加（任意・未指定=アニメ無し＝静止・無変換）。1.17→1.18：scene.slotVideoStart（動画スロット本体アニメの再生開始タイミング＝モード明示・ADR-0027・#444）を追加（任意・未指定=withAnim＝アニメと同時・無変換）。1.18→1.19：scene.slotClips（動画クリップ調整の per-use 上書き＝範囲/速度/元音声・ADR-0028・#472）を追加（任意・未上書きフィールドは asset.clip を継承・無変換）。1.19→1.20：FREE 自由配置の字幕要素（FreeElement.kind='subtitle'）＋対象 FreeElement.subtitleSource（読み上げ/全行/話者・ADR-0029）を追加（任意・未指定=後方互換〔単独→読み上げ・掛け合い→全行〕・無変換）。1.20→1.21：掛け合いの同時開始 NarrationLine.startWithPrevious（前のセリフと同時に開始＝並行音声・ADR-0031）を追加（任意・未指定=逐次・無変換）。1.21→1.22：FREE 要素の任意表示名 FreeElement.name（重ね順一覧/チップの見分け用・#525-12）を追加（任意・未指定=種類＋連番の自動名・無変換）。1.22→1.23：FREE の text/subtitle 要素の背景帯 FreeElement.background（可読性の下地・通常字幕層 layer.background と同型・#529）を追加（任意・未指定/enabled:false=背景帯なし・無変換）。1.23→1.24・1.24→1.25：文字の体裁の場面別上書き scene.textStyles（テキスト種別ごとの色/サイズ/太さ/縁取り・#555）を追加（任意・各プロパティ未指定=テンプレ層→既定を継承・配置はテンプレ駆動のまま・無変換）。1.25→1.26：音の自動処理 videoSettings.audioAuto（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4）を追加（任意・**新規は既定で「する」／読み込んだ古い動画には明示的に「しない」を書き込む**＝既に作った動画の音を変えない）。 */
+export const PROJECT_SCHEMA_VERSION = '1.26';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -378,6 +379,15 @@ function migrateProject(project: Project): Project {
       }
       return sc;
     });
+  }
+  // 1.25→1.26: 音の自動処理（#257 ダッキング・#259 ノーマライズ）。
+  // ⚠️ **既に作った動画の音を変えない**（§2-5）＝新しい動画では既定で「する」だが、
+  // **前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて書き出し直した
+  // だけで BGM の鳴り方と全体の音量が変わり、**前に書き出した動画と別物**になる。
+  // 触るのは `videoSettings` がオブジェクトのときだけ（壊れた値は検証へ＝#416 P1）。
+  const vsAuto: unknown = next.videoSettings;
+  if (isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
+    next.videoSettings = { ...vsAuto, audioAuto: OLD_PROJECT_AUDIO_AUTO } as unknown as VideoSettings;
   }
   // 同時開始（ADR-0031）：先頭行の休眠フラグ・startWithPrevious×startSec の併存を読込時に正規化する
   // （実装が無視する状態を残さない・schema は併存を許すが読込で解消・ADR-0026④）。lines が配列の場面のみ触る

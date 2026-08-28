@@ -43,6 +43,7 @@ import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeli
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
+import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
@@ -1432,7 +1433,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       set({ exportRun: { ...get().exportRun, phase: P.encoding } });
       const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
-      await exportVideo([frames], doc.projectName || "movie", bgmRuns, doc.projectId, outputPath);
+      // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
+      const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
+      await exportVideo(
+        [frames],
+        doc.projectName || "movie",
+        bgmRuns,
+        doc.projectId,
+        outputPath,
+        auto.normalize ? auto.targetLufs : undefined,
+      );
       set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;

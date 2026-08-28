@@ -119,6 +119,8 @@ const sceneBase = {
   narration: { text: 'x', status: 'none' }, warnings: [],
 };
 const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...extra }] });
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.26）。**プロジェクト単位**＝`videoSettings` に置く。
+const withVideoSettings = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
   ['videoSettings: 縦型 9:16（width/height なし）', { ...withBrief({}), videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
@@ -230,8 +232,22 @@ const mustReject = [
   ['scene: slotVideoStart mode 欠落は拒否（required）', withScene({ slotVideoStart: { mainVisual: { delaySec: 1 } } })],
   ['scene: slotVideoStart mode=delay で delaySec 欠落は拒否（if/then＝「途中から」が「同時」に化けない）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay' } } })],
   ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
-  ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 1, startSec: 2 } } })],
+  ['audioAuto: 未知フィールド(sidechain)は拒否（additionalProperties:false・1.26）', withVideoSettings({ audioAuto: { sidechain: true } })],
+  ['audioAuto: duckDepth 範囲外(1.5)は拒否', withVideoSettings({ audioAuto: { duckDepth: 1.5 } })],
+  ['audioAuto: duckDepth 負は拒否', withVideoSettings({ audioAuto: { duckDepth: -0.1 } })],
+  ['audioAuto: duckAttackSec 範囲外(5)は拒否', withVideoSettings({ audioAuto: { duckAttackSec: 5 } })],
+  ['audioAuto: targetLufs 正の値は拒否（LUFS は負）', withVideoSettings({ audioAuto: { targetLufs: 3 } })],
+  ['audioAuto: targetLufs 小さすぎ(-40)は拒否', withVideoSettings({ audioAuto: { targetLufs: -40 } })],
+  ['audioAuto: duckBgm 非真偽は拒否', withVideoSettings({ audioAuto: { duckBgm: 'yes' } })],
+  ['videoSettings: audioAuto を場面に置くのは拒否（設定はプロジェクト単位＝ADR-0032 追補4）', withScene({ audioAuto: { duckBgm: true } })],
 ];
+mustAccept.push(
+  ['audioAuto: 音の自動処理（ダッキング・ノーマライズ）を許容（1.26）', withVideoSettings({ audioAuto: { duckBgm: true, duckDepth: 0.6, duckAttackSec: 0.25, duckReleaseSec: 0.6, normalize: true, targetLufs: -16 } })],
+  ['audioAuto: 空オブジェクト（すべて既定）を許容', withVideoSettings({ audioAuto: {} })],
+  ['audioAuto: 未指定を許容（前の版のファイル）', withBrief({})],
+  ['audioAuto: 「しない」を明示できる（読み込んだ古い動画に書き込む値）', withVideoSettings({ audioAuto: { duckBgm: false, normalize: false } })],
+);
+
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);
   else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vProject.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }

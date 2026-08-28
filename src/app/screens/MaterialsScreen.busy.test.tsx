@@ -16,7 +16,7 @@ const setup = (phase: "idle" | "rendering") => {
     assets: [asset("asset_001")],
     assetSrcById: { asset_001: "data:image/png;base64,x" },
     scenes: [],
-    exportRun: { phase, progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+    exportRun: { phase, progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
   });
 };
 
