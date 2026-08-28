@@ -119,7 +119,7 @@ const sceneBase = {
   narration: { text: 'x', status: 'none' }, warnings: [],
 };
 const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...extra }] });
-// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.26）。**プロジェクト単位**＝`videoSettings` に置く。
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.27）。**プロジェクト単位**＝`videoSettings` に置く。
 const withVideoSettings = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
@@ -232,7 +232,8 @@ const mustReject = [
   ['scene: slotVideoStart mode 欠落は拒否（required）', withScene({ slotVideoStart: { mainVisual: { delaySec: 1 } } })],
   ['scene: slotVideoStart mode=delay で delaySec 欠落は拒否（if/then＝「途中から」が「同時」に化けない）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay' } } })],
   ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
-  ['audioAuto: 未知フィールド(sidechain)は拒否（additionalProperties:false・1.26）', withVideoSettings({ audioAuto: { sidechain: true } })],
+  ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim', startSec: 1 } } })],
+  ['audioAuto: 未知フィールド(sidechain)は拒否（additionalProperties:false・1.27）', withVideoSettings({ audioAuto: { sidechain: true } })],
   ['audioAuto: duckDepth 範囲外(1.5)は拒否', withVideoSettings({ audioAuto: { duckDepth: 1.5 } })],
   ['audioAuto: duckDepth 負は拒否', withVideoSettings({ audioAuto: { duckDepth: -0.1 } })],
   ['audioAuto: duckAttackSec 範囲外(5)は拒否', withVideoSettings({ audioAuto: { duckAttackSec: 5 } })],
@@ -241,8 +242,28 @@ const mustReject = [
   ['audioAuto: duckBgm 非真偽は拒否', withVideoSettings({ audioAuto: { duckBgm: 'yes' } })],
   ['videoSettings: audioAuto を場面に置くのは拒否（設定はプロジェクト単位＝ADR-0032 追補4）', withScene({ audioAuto: { duckBgm: true } })],
 ];
+// 持ち込みフォント（ADR-0038・#261・schema 1.26）。**enum ではなく形（pattern）で縛る**。
+const withFont = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
 mustAccept.push(
-  ['audioAuto: 音の自動処理（ダッキング・ノーマライズ）を許容（1.26）', withVideoSettings({ audioAuto: { duckBgm: true, duckDepth: 0.6, duckAttackSec: 0.25, duckReleaseSec: 0.6, normalize: true, targetLufs: -16 } })],
+  ['fontId: 同梱フォントを許容（従来どおり）', withFont({ fontId: 'gen-interface-jp' })],
+  ['fontId: 持ち込みフォント user_font_001 を許容（1.26）', withFont({ fontId: 'user_font_001' })],
+  ['fontId: 桁が増えても許容（user_font_1000）', withFont({ fontId: 'user_font_1000' })],
+  ['scene.fontId: 持ち込みフォントを許容', withScene({ fontId: 'user_font_002' })],
+  ['scene.fontId: null（継承）は従来どおり許容', withScene({ fontId: null })],
+  ['scene.textFontIds: 種別ごとに持ち込みフォントを許容', withScene({ textFontIds: { title: 'user_font_003', subtitle: 'gen-interface-jp' } })],
+  ['freeLayout の fontId も持ち込みフォントを許容', withScene({ freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_004' }] })],
+);
+mustReject.push(
+  ['fontId: 形の違う id は拒否（my-font）', withFont({ fontId: 'my-font' })],
+  ['fontId: 桁が足りない user_font_1 は拒否（3桁ゼロ詰め）', withFont({ fontId: 'user_font_1' })],
+  ['fontId: 前後に付いた文字は拒否（xuser_font_001）', withFont({ fontId: 'xuser_font_001' })],
+  ['fontId: パス区切りを含む id は拒否（user_font_001/../x）', withFont({ fontId: 'user_font_001/../x' })],
+  ['fontId: 空文字は拒否', withFont({ fontId: '' })],
+  ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
+);
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.27）。
+mustAccept.push(
+  ['audioAuto: 音の自動処理（ダッキング・ノーマライズ）を許容（1.27）', withVideoSettings({ audioAuto: { duckBgm: true, duckDepth: 0.6, duckAttackSec: 0.25, duckReleaseSec: 0.6, normalize: true, targetLufs: -16 } })],
   ['audioAuto: 空オブジェクト（すべて既定）を許容', withVideoSettings({ audioAuto: {} })],
   ['audioAuto: 未指定を許容（前の版のファイル）', withBrief({})],
   ['audioAuto: 「しない」を明示できる（読み込んだ古い動画に書き込む値）', withVideoSettings({ audioAuto: { duckBgm: false, normalize: false } })],

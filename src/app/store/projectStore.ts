@@ -7,6 +7,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import { createUserFontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -40,10 +41,13 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
-import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
+import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { probeAndThumbVideo } from "./assetImport";
+import { probeAndThumbVideo, probeImageSize } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -86,7 +90,7 @@ function joinVoiceFailure(e: unknown, before: NarrationStatus, hasAudio: boolean
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import type { AudioAutoSettings } from "../../domain/voice/audioAuto";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
-import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
+import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -406,8 +410,21 @@ interface ProjectState {
    * 空＝全部そろっている（調べていない状態と区別しない＝**無いことを警告に使わない**）。
    */
   missingAssetIds: string[];
+  /**
+   * いま持っている持ち込みフォントの id（#261）。**`null` ＝まだ調べていない**
+   *（`missingAssetIds` と同じ流儀＝調べていないのに「全部そろっている」と言わない）。
+   */
+  userFontIds: string[] | null;
   /** 見つからない素材を調べ直す（#347）。 */
   refreshMissingAssets: () => Promise<void>;
+  /** 持ち込みフォントの一覧を調べ直す（#261）。**実体があるものだけ**が入る。 */
+  refreshUserFonts: () => Promise<void>;
+  /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
+  addUserFont: (srcPath: string, displayName: string) => Promise<string | null>;
+  /** 持ち込みフォントを消す（#261）。使っている動画には公開前チェックが断りを出す。 */
+  removeUserFont: (fontId: string) => Promise<void>;
+  /** フォントの取り込み/削除で出た理由（§2-5）。 */
+  fontError: string | null;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
@@ -416,6 +433,17 @@ interface ProjectState {
    * 並行に走らせると、2件目以降が `isImporting` ガードに黙って弾かれる（入ったつもりで消える）。
    */
   addAssets: (items: File[] | string[]) => Promise<void>;
+  /**
+   * ユーザー素材ライブラリ（ADR-0035・#260）から、この動画へ**コピー**して取り込む。
+   * 成功したら足した素材の id、できなければ `null`（理由は `importError`）。
+   * ⚠️ **参照ではなくコピー**＝プロジェクトは自己完結のまま（ADR-0024 決定6）。
+   */
+  importFromLibrary: (libraryAssetId: string) => Promise<string | null>;
+  /**
+   * 動画の**その瞬間**を静止画として切り出し、**普通の写真素材**として足す（#349）。
+   * 成功したら足した素材の id、できなければ `null`（理由は `importError`）。
+   */
+  captureVideoFrame: (videoAssetId: string, atSec: number) => Promise<string | null>;
   clearImportError: () => void;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
@@ -436,6 +464,12 @@ interface ProjectState {
   _narrationRunSeq: number;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
+  /**
+   * 読み方の聞き比べ（ADR-0037 決定6・#350）。**読みと下がる場所をその場で鳴らす**。
+   * ⚠️ 辞書には**まだ入れていない**ものを聞くので、辞書経由（言葉→読み）ではなく
+   * **読みをそのまま読ませて**アクセントだけ差し替える＝登録前に確かめられる。
+   */
+  synthesizeReading: (yomi: string, accentType: number) => Promise<string>;
   // ── Undo/Redo（ADR-0020・#211）。文書slice（meta/parts/scenes）のスナップショット履歴。assets は対象外。 ──
   /** 過去（undo で戻る先）。末尾が直近の「編集前」。 */
   past: DocSnapshot[];
@@ -572,6 +606,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImporting: false,
   importProgress: null,
   missingAssetIds: [],
+  userFontIds: null,
+  fontError: null,
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -1712,6 +1748,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const savedPath = await importAssetFile(projectId, fileName, dataUrl!);
         const displayUrl = savedPath ? await assetDisplayUrl(projectId, savedPath) : null;
         if (displayUrl) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: displayUrl } }));
+        // ⚠️ **写真も大きさを測る**（#346・パス経路と同じ）＝取り込み方で片方だけ測ると、
+        // 「ぼやける素材」の注意が**入れ方によって出たり出なかったり**する（ADR-0026②）。
+        const size = savedPath ? await probeImageSize(projectId, savedPath) : null;
+        if (size) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -1755,6 +1795,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 画像の表示用 src を取り込んだ実体から解決（Tauri は asset://）。書き出しの data URL は書き出し時に別途読む（A3-2/ADR-0004）。
         const url = await assetDisplayUrl(projectId, relPath);
         if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: url } }));
+        // ⚠️ **写真も大きさを測る**（#346）＝測らないと「ぼやける素材」の注意が**写真では一度も
+        // 出ない**（判定の材料が無いので黙って素通り）。測れなくても取り込みは続ける。
+        const size = await probeImageSize(projectId, relPath);
+        if (size) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -1765,6 +1809,69 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         importError: importErrorMessage(e),
       }));
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+  importFromLibrary: async (libraryAssetId) => {
+    // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    const lib = (await listLibraryAssets()).find((a) => a.id === libraryAssetId);
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
+    const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
+    set({ isImporting: true, importError: null });
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        // 取り込みと同じく、保存前なら**ここで番号を採る**（素材の置き場が要るため）。
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((st) => ({ meta: { ...st.meta, projectId } }));
+      }
+      const relPath = await copyLibraryAssetToProject(libraryAssetId, projectId, fileName);
+      // ⚠️ **できてから一覧へ足す**（切り出し #349 と同じ）＝コピーは失敗しうるので、
+      // 先に足すと**中身の無い素材**が一瞬見えてから消える。
+      set((st) => ({ assets: [...st.assets, { ...asset, filePath: relPath }], saveStatus: "idle" }));
+      if (asset.assetType === ASSET_TYPE.video) {
+        const enrich = await probeAndThumbVideo(projectId, relPath);
+        set(applyEnrichment(asset.assetId, enrich));
+      } else {
+        const url = await assetDisplayUrl(projectId, relPath);
+        if (url) set((st) => ({ assetSrcById: { ...st.assetSrcById, [asset.assetId]: url } }));
+      }
+      return asset.assetId;
+    } catch (e) {
+      set({ importError: importErrorMessage(e) });
+      return null;
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+  captureVideoFrame: async (videoAssetId, atSec) => {
+    // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    const src = get().assets.find((a) => a.assetId === videoAssetId);
+    const projectId = get().meta.projectId;
+    // ⚠️ **保存前のプロジェクトでは切り出せない**＝元の動画がまだフォルダに無い（§2-5＝次の行動を出す）。
+    if (!src || src.assetType !== ASSET_TYPE.video || !projectId) {
+      set({ importError: "先に動画を取り込んでから、切り出したい時間を選んでください。" });
+      return null;
+    }
+    const { asset, fileName } = newFrameAsset(src.displayName, atSec, get().assets.map((a) => a.assetId));
+    set({ isImporting: true, importError: null });
+    try {
+      const relPath = await extractVideoFrame(projectId, src.filePath, atSec, fileName);
+      // ⚠️ **できてから一覧へ足す**（取り込みの楽観追加と違う）＝切り出しは失敗しうる（尺の外・壊れた動画）ので、
+      // 先に足すと**中身の無い素材**が一瞬見えてから消える。押した結果が出てから増やす。
+      set((s) => ({ assets: [...s.assets, { ...asset, filePath: relPath }], saveStatus: "idle" }));
+      const url = await assetDisplayUrl(projectId, relPath);
+      if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [asset.assetId]: url } }));
+      return asset.assetId;
+    } catch (e) {
+      set({ importError: importErrorMessage(e) });
+      return null;
     } finally {
       set({ isImporting: false });
     }
@@ -1892,6 +1999,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  addUserFont: async (srcPath, displayName) => {
+    set({ fontError: null });
+    try {
+      // ⚠️ **番号は「いま持っているもの」から採る**＝消した番号は使い回さない（`createUserFontId`）。
+      const list = await listUserFonts();
+      const id = createUserFontId(list.map((f) => f.id));
+      await importUserFont(id, displayName, srcPath);
+      await get().refreshUserFonts();
+      return id;
+    } catch (e) {
+      set({ fontError: typeof e === "string" ? e : "文字の形を取り込めませんでした。もう一度お試しください。" });
+      return null;
+    }
+  },
+  removeUserFont: async (fontId) => {
+    set({ fontError: null });
+    try {
+      await deleteUserFont(fontId);
+      await get().refreshUserFonts();
+    } catch (e) {
+      set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });
+    }
+  },
+  refreshUserFonts: async () => {
+    const list = await listUserFonts();
+    // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
+    // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
+    await loadUserFonts(list.map((f) => f.id));
+    set({ userFontIds: list.map((f) => f.id) });
+  },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();
     // ⚠️ **一覧に出るものだけを調べる**（`isListedMaterial`＝§2-7 で規則は1か所）＝音（BGM・読み上げ）は
@@ -2187,6 +2324,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 音声は履歴外＝状態変更だけでも未保存にして自動保存の対象にする（#390 の生成系と同じ扱い）。
       saveStatus: "idle",
     }));
+  },
+  synthesizeReading: async (yomi, accentType) => {
+    const v = resolveNarrationVoice({ text: yomi, status: NARRATION_STATUS.none }, get().meta.voiceSettings);
+    return synthesizeWithAccent(yomi, accentType, v);
   },
   synthesizePreview: async () => {
     const text = "こんにちは。ナレーションの聞こえ方を確認します。";
