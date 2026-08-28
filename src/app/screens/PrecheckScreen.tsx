@@ -24,7 +24,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets } = useProjectStore();
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, refreshUserFonts } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
   // 「まとめて標準にする」の結果（直した件数・入れ直しが要る場面）。この画面に取り消しの入口が無いため
@@ -44,6 +44,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
 
   // ⚠️ **開くたびに調べ直す**（#347）＝素材はアプリの外で動かされるので、書き出す直前に確かめる。
   useEffect(() => { void refreshMissingAssets(); }, [refreshMissingAssets]);
+  // 持ち込みフォント（#261）も同じ理由で開くたびに調べ直す＝アプリの外で消されうる。
+  useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
 
   // 場面ゼロは「全項目問題なし」に見えて書き出しに進めてしまう（押すと保存先選択後に失敗）＝空状態で止める（#403）。
   if (scenes.length === 0) {
@@ -56,7 +58,11 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     );
   }
 
-  const baseItems = buildPrecheckItems(scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds, meta.bgmSettings?.assetId);
+  const baseItems = buildPrecheckItems(
+    scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds, meta.bgmSettings?.assetId,
+    // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
+    { projectFontId: meta.videoSettings.fontId, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) },
+  );
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;
   const items: PrecheckItem[] = capNotice

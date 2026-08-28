@@ -1618,6 +1618,141 @@ pub fn extract_video_thumbnail(
     Ok(rel_out)
 }
 
+/// 動画の**その瞬間**を静止画（PNG）として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+///
+/// ⚠️ **サムネ（`extract_video_thumbnail`）とは別物**＝あちらは一覧用に横 640px へ縮める
+/// 「見せるための絵」。こちらは**素材として使う絵**なので**原寸のまま**出す（縮めると、
+/// 切り出した写真だけ解像度が落ちて動画に入る＝黙って劣化させない）。
+/// ⚠️ **ファイル名は呼ぶ側が決める**（`asset_NNN` の採番はドメイン側の責務・§4）。
+#[tauri::command]
+pub async fn extract_video_frame(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("frame extract join: {e}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        )
+    })?
+}
+
+fn extract_video_frame_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    if !is_safe_frame_file_name(&out_file_name) {
+        return Err(export_failure(
+            format!("frame extract bad name: {out_file_name}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        ));
+    }
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("frame src missing: {}", input.display()),
+            "動画が見つかりませんでした。素材の一覧から取り込み直してください。",
+        ));
+    }
+    let rel_out = format!("assets/{out_file_name}");
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            export_failure(
+                format!("frame dir: {e}"),
+                "静止画の保存先を用意できませんでした。もう一度お試しください。",
+            )
+        })?;
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    let seek = frame_seek_args(at_sec);
+    let mut args: Vec<String> = vec!["-y".into()];
+    if let Some(coarse) = seek.coarse_sec {
+        args.push("-ss".into());
+        args.push(format!("{coarse}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if seek.fine_sec > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{}", seek.fine_sec));
+    }
+    args.extend([
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("frame extract: {e}"),
+            "静止画を切り出せませんでした。時間を少し動かしてもう一度お試しください。",
+        )
+    })?;
+    // ⚠️ **出来ていないのに成功にしない**＝尺の外を指すと FFmpeg は 0 個の絵で正常終了する。
+    if !out.exists() {
+        return Err(export_failure(
+            format!("frame extract produced nothing at {at_sec}"),
+            "その時間には映像がありませんでした。時間を少し戻してもう一度お試しください。",
+        ));
+    }
+    Ok(rel_out)
+}
+
+/// 頭出しの引数（#349・PR #885 レビュー 🔴）。粗い頭出しと、そこからの端数に分ける。
+struct FrameSeek {
+    /// `-i` の**前**に置く秒（`None` ＝前置きしない＝先頭から読む）。
+    coarse_sec: Option<f64>,
+    /// `-i` の**後**に置く秒（0 ＝置かない）。
+    fine_sec: f64,
+}
+
+/// 切り出した絵のファイル名として受けてよいか（#349・PR #885 レビュー 🟡）。
+///
+/// ⚠️ **区切りを含む名前は受けない**（`resolve_project_file` も `..` 等を弾くが、ここで先に断る＝
+/// 「`assets/` の直下に1つ置く」という約束を、名前の形として明示する）。純粋なので単体でテストできる。
+fn is_safe_frame_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains("..")
+}
+
+/// 切り出しの頭出しを「粗い＋端数」に分ける（#349・PR #885 レビュー 🔴）。
+///
+/// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**＝前置きは
+/// **指定秒より前のキーフレーム**まで飛んでそこから1枚を返すので、キーフレームの間隔が広い動画
+///（スマホ撮影・画面収録）では**数秒ずれる**。しかもコマンドは正常終了しファイルもできるので、
+/// 「0枚で正常終了」の検査では捕まらない＝**見た画と違う絵を成功として返してしまう**。
+///
+/// ⚠️ **`-i` の後ろだけに置くと遅い**（先頭から全部デコードする）。長い動画で待たされる。
+///
+/// そこで**手前まで粗く飛び、残りを正確に進む**（二段シーク＝定石）。
+/// 手前に取る余白（`SEEK_BACKOFF_SEC`）は、よくあるキーフレーム間隔（2〜5秒）を跨げる長さにする。
+fn frame_seek_args(at_sec: f64) -> FrameSeek {
+    // ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    let t = at_sec.max(0.0);
+    const SEEK_BACKOFF_SEC: f64 = 10.0;
+    if t <= SEEK_BACKOFF_SEC {
+        // 近い時刻は前置きせず、そのまま正確に進む（10 秒ぶんのデコードは待たされない）。
+        return FrameSeek {
+            coarse_sec: None,
+            fine_sec: t,
+        };
+    }
+    let coarse = t - SEEK_BACKOFF_SEC;
+    FrameSeek {
+        coarse_sec: Some(coarse),
+        fine_sec: t - coarse,
+    }
+}
+
 struct SceneFile {
     png: PathBuf,
     audio: Option<PathBuf>,
@@ -3581,6 +3716,64 @@ fn export_video_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 切り出した絵のファイル名の検査（#349・PR #885 レビュー 🟡）。
+    ///
+    /// ⚠️ **「`assets/` の直下に1つ置く」という約束**を名前の形で守る（パスをまたがせない）。
+    #[test]
+    fn frame_file_name_rejects_path_pieces() {
+        assert!(is_safe_frame_file_name("asset_002.png"));
+        assert!(is_safe_frame_file_name("日本語の名前.png"));
+        assert!(!is_safe_frame_file_name(""));
+        assert!(!is_safe_frame_file_name("a/b.png"));
+        assert!(!is_safe_frame_file_name("a\\b.png"));
+        assert!(!is_safe_frame_file_name("../x.png"));
+        assert!(!is_safe_frame_file_name("a..b.png")); // 「..」を含むものは一律で断る（安全側）
+    }
+
+    /// 切り出しの頭出し（#349・PR #885 レビュー 🔴）。
+    ///
+    /// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**（キーフレームまで飛ぶ）。
+    /// ⚠️ **後ろだけだと遅い**（先頭から全部デコードする）。二段に分ける。
+    #[test]
+    fn frame_seek_splits_into_coarse_and_fine() {
+        let s = frame_seek_args(60.0);
+        assert_eq!(s.coarse_sec, Some(50.0)); // 手前まで粗く飛ぶ
+        assert!((s.fine_sec - 10.0).abs() < 1e-9); // 残りは正確に進む
+    }
+
+    #[test]
+    fn frame_seek_near_start_does_not_prefix() {
+        // 近い時刻は前置きしない（10 秒ぶんのデコードは待たされない）。
+        let s = frame_seek_args(3.5);
+        assert_eq!(s.coarse_sec, None);
+        assert!((s.fine_sec - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn frame_seek_at_zero_is_head() {
+        let s = frame_seek_args(0.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    #[test]
+    fn frame_seek_clamps_negative() {
+        let s = frame_seek_args(-5.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// 粗い頭出しと端数を足すと、必ず元の時刻になる（絵がずれない条件）。
+    #[test]
+    fn frame_seek_parts_sum_to_requested_time() {
+        for t in [0.0_f64, 1.0, 9.99, 10.0, 10.01, 123.456, 3600.0] {
+            let s = frame_seek_args(t);
+            let total = s.coarse_sec.unwrap_or(0.0) + s.fine_sec;
+            assert!((total - t).abs() < 1e-9, "t={t} total={total}");
+        }
+    }
 
     // フレームステージングのディレクトリ名はパストラバーサル防止で英数字と _ のみ許可（#書き出しRangeError）。
     #[test]

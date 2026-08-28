@@ -193,3 +193,19 @@ export async function extractVideoThumbnail(
     return null;
   }
 }
+
+/**
+ * 動画の**その瞬間**を静止画として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+ *
+ * ⚠️ **サムネ（`extractVideoThumbnail`）と違って失敗を握りつぶさない**＝あちらは
+ * 「無くても一覧が出る」best-effort だが、こちらは**利用者が押した操作**なので、
+ * できなかったら次の行動を出して知らせる（§2-5）。文言は Rust が返す。
+ */
+export async function extractVideoFrame(
+  projectId: string,
+  relPath: string,
+  atSec: number,
+  outFileName: string,
+): Promise<string> {
+  return invoke<string>('extract_video_frame', { projectId, relPath, atSec, outFileName });
+}

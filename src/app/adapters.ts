@@ -3,13 +3,14 @@
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
+import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
-import { sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
+import { isSubtitleItem, sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
 import { outsideSafeArea, safeAreaRect } from "../domain/preview/safeArea";
 import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
@@ -110,8 +111,14 @@ export function isExportBlocking(item: PrecheckItem): boolean {
  */
 export function exportBlockingItems(
   scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[],
+  /**
+   * 書き出しを止める判定に要る材料（#261）。⚠️ **`blocksExport` の項目が使う材料は、
+   * ここにも通さないと直行導線ですり抜ける**（PR #886 レビュー 🔴）＝サイドバーから
+   * 「動画を保存」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
+   */
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
 ): PrecheckItem[] {
-  return buildPrecheckItems(scenes, assets, templates, overlayAnimations).filter(isExportBlocking);
+  return buildPrecheckItems(scenes, assets, templates, overlayAnimations, undefined, undefined, fonts).filter(isExportBlocking);
 }
 
 /**
@@ -139,6 +146,12 @@ export function buildPrecheckItems(
   missingAssetIds?: readonly string[],
   /** 動画全体の BGM の素材 id（`meta.bgmSettings.assetId`）。使用中に数える（#348 レビュー）。 */
   projectBgmAssetId?: string | null,
+  /**
+   * 動画全体のフォント（`meta.videoSettings.fontId`）と、いま持っている持ち込みフォントの id（#261）。
+   * ⚠️ **`availableUserFontIds` の省略＝調べていない**（「全部そろっている」ではない）＝
+   * 調べられない場で嘘の「問題なし」を出さない（`missingAssetIds` と同じ流儀）。
+   */
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
@@ -227,11 +240,22 @@ export function buildPrecheckItems(
   // 既に「字幕の長さ」が出ている**ので、切り詰めは必ずそれと重なる（原因も直し方も同じ）。
   // ⚠️ **項目ごと消さない**＝縦型は枠が 44〜46 字ぶんなので、**45〜60 字は「字幕の長さ」を
   // 素通りして切り詰めだけで拾える**（本物の穴を塞いでいる）。
+  // ⚠️ **消すのは「長すぎると既に伝えた字幕」だけ**（PR #877 再レビュー 🟡×2）。
+  // 段階的に絞ってきた＝①場面ごと丸ごと飛ばしていた → ②字幕アイテム全部を外した → ③いまここ。
+  // ②でも足りなかったのは、**自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）ため＝
+  // 長い方の字幕で場面が「伝えた」になると、**別のボックスの切り詰め**（原因も直し方も別）まで消えていた。
+  // 除外の単位を**アイテムの文言**まで下ろす（長さを超えているものだけ外す）。
   const alreadyTold = new Set(scenes.filter((_, i) => subtitle.nums.includes(i + 1)).map((s) => s.sceneId));
   const truncated = offending((s) => {
-    if (alreadyTold.has(s.sceneId)) return false;
     const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
-    return found != null && truncatedTexts(found.items).length > 0;
+    if (found == null) return false;
+    // 字幕かどうかは**共有の述語**（`isSubtitleItem`）で見る＝書き出しの「字幕を入れる」OFF と同じ判定（§2-7）。
+    // 長さの基準も「字幕の長さ」の項目と**同じ関数**（`subtitleMax`）から採る（2か所に数字を書かない）。
+    const max = subtitleMax(s);
+    const items = alreadyTold.has(s.sceneId)
+      ? found.items.filter((it) => !(isSubtitleItem(it) && (it.kind === "text" ? it.text.length : 0) > max))
+      : found.items;
+    return truncatedTexts(items).length > 0;
   });
   if (truncated.nums.length > 0) {
     items.push({
@@ -312,6 +336,26 @@ export function buildPrecheckItems(
         severity: "action",
       });
     }
+  }
+
+  // 見つからない持ち込みフォント（#261・ADR-0038）。⚠️ **黙って別の字体の動画を出さない**（§2-5）＝
+  // 描画は既定へ倒れてよいが、**書き出しは止める**（`blocksExport`）。字体が変わった動画を
+  // 「成功しました」として出すと、利用者は見るまで気づけない。
+  const missingFonts = missingUserFontIds(
+    usedUserFontIds(scenes, fonts?.projectFontId, templates),
+    fonts?.availableUserFontIds,
+  );
+  if (missingFonts.length > 0) {
+    items.push({
+      id: "missingFont",
+      label: "見つからない文字の形",
+      detail:
+        `この動画で使っている文字の形（フォント）が${missingFonts.length}つ見つかりません。` +
+        `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
+        `使っている場面で別の文字の形を選び直してください。`,
+      severity: "action",
+      blocksExport: true,
+    });
   }
 
   // 自由配置（FREE 場面）の確認：要素が画面外・素材未解決・サイズ不正などがないか（ADR-0008 §8）。
