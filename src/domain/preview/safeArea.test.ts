@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ORIENTATION } from '../enums';
-import { outsideSafeArea, safeAreaRect, SAFE_AREA_INSET } from './safeArea';
+import { outsideSafeArea, rotatedBounds, safeAreaRect, SAFE_AREA_INSET } from './safeArea';
 
 const landscape = { width: 1920, height: 1080 };
 const portrait = { width: 1080, height: 1920 };
@@ -57,5 +57,45 @@ describe('outsideSafeArea（端に寄りすぎ）', () => {
   // ⚠️ **ぴったり接しているのは「出ていない」**＝境界で注意が点滅しない。
   it('枠にぴったり接しているのは出ていないとする', () => {
     expect(outsideSafeArea({ x: safe.x, y: safe.y, w: safe.w, h: safe.h }, safe)).toBe(false);
+  });
+});
+
+/**
+ * ⚠️ **回っているものは回した後の外枠で見る**（PR #878 再レビュー ℹ️）＝回転を無視すると、
+ * 傾けて端へ寄せた文字を**見落とす**。画面外の判定（`subtitleItemOutOfCanvas`）が回転込みで
+ * 見ている以上、こちらだけ見ないのは非対称（ADR-0026②）。
+ */
+describe('outsideSafeArea：回転', () => {
+  const safe = safeAreaRect({ width: 1920, height: 1080 }, '16:9');
+
+  it('回転が無ければ従来どおり（外枠＝そのまま）', () => {
+    expect(rotatedBounds({ x: 10, y: 20, w: 100, h: 50 })).toEqual({ x: 10, y: 20, w: 100, h: 50 });
+    expect(rotatedBounds({ x: 10, y: 20, w: 100, h: 50, rotation: 0 })).toEqual({ x: 10, y: 20, w: 100, h: 50 });
+  });
+
+  it('45度回すと外枠が広がる（中心は動かない）', () => {
+    const b = rotatedBounds({ x: 0, y: 0, w: 100, h: 100, rotation: 45 });
+    expect(b.w).toBeCloseTo(Math.SQRT2 * 100, 6);
+    expect(b.x + b.w / 2).toBeCloseTo(50, 6); // 中心は同じ
+  });
+
+  /** 線の内側にぎりぎり収まる箱でも、回すと角が線からはみ出す。 */
+  it('回すと線からはみ出す箱を見つける', () => {
+    // 安全領域の左端（96px）のすぐ内側に置いた正方形。回さなければ収まる。
+    const flat = { x: safe.x + 1, y: safe.y + 200, w: 100, h: 100 };
+    expect(outsideSafeArea(flat, safe)).toBe(false);
+    // 45度回すと外枠が約 141px になり、左へ約 20px 広がって線を越える。
+    expect(outsideSafeArea({ ...flat, rotation: 45 }, safe)).toBe(true);
+  });
+
+  it('回しても収まっているものは知らせない（誤検出しない）', () => {
+    expect(outsideSafeArea({ x: 800, y: 400, w: 100, h: 100, rotation: 45 }, safe)).toBe(false);
+  });
+
+  it('負の角・360を超える角でも同じに扱う', () => {
+    const a = rotatedBounds({ x: 0, y: 0, w: 100, h: 50, rotation: -45 });
+    const b = rotatedBounds({ x: 0, y: 0, w: 100, h: 50, rotation: 45 });
+    expect(a.w).toBeCloseTo(b.w, 6);
+    expect(a.h).toBeCloseTo(b.h, 6);
   });
 });
