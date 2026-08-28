@@ -1525,10 +1525,16 @@ fn frame_seek_args(at_sec: f64) -> FrameSeek {
     const SEEK_BACKOFF_SEC: f64 = 10.0;
     if t <= SEEK_BACKOFF_SEC {
         // 近い時刻は前置きせず、そのまま正確に進む（10 秒ぶんのデコードは待たされない）。
-        return FrameSeek { coarse_sec: None, fine_sec: t };
+        return FrameSeek {
+            coarse_sec: None,
+            fine_sec: t,
+        };
     }
     let coarse = t - SEEK_BACKOFF_SEC;
-    FrameSeek { coarse_sec: Some(coarse), fine_sec: t - coarse }
+    FrameSeek {
+        coarse_sec: Some(coarse),
+        fine_sec: t - coarse,
+    }
 }
 
 struct SceneFile {
