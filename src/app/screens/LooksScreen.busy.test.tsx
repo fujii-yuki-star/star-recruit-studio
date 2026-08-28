@@ -115,7 +115,7 @@ describe("LooksScreen 書き出し中は復帰導線を出す（#547 P2-1）", (
 
   it("書き出し中でも「書き出しへ戻る」を押せる（ロックの抜け道に到達できる）", () => {
     useProjectStore.setState({
-      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
     });
     const onNavigate = vi.fn();
     render(<LooksScreen onNavigate={onNavigate} />);

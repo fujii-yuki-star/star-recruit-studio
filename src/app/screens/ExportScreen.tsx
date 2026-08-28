@@ -14,7 +14,10 @@ import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
-import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
+import { applyDuckingToMix, planBgmMix, resolveBgmExportRuns, resolveSpeechSpans } from "../../domain/project/bgmExport";
+import { wavDurationSec } from "../../domain/voice/wavDuration";
+import { resolveAudioAuto } from "../../domain/voice/audioAuto";
+import { AudioAutoField } from "../components/AudioAutoField";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
@@ -22,7 +25,7 @@ import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
-import { lineAudioKey } from "../../domain/project/narrationLines";
+import { narrationAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
@@ -102,7 +105,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const capabilityBlocked = capability != null && blocksExport(capability);
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
-  const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
+  const { phase, progress, encode, resultPath, message, bgmWarning, duckMerged, cancelling } = exportRun;
   // この画面に**入った時点で既に終わっていた**結果を見ているか（#547 P3-11）。実行状態は画面横断で保持する
   //（#379＝書き出し中に他画面へ移っても進捗が見える）ため、離れて戻ると前回の「保存しました（100%）」
   //「失敗しました」が**いま起きたこと**のように残り続ける。マウント時の phase を初期値にし、以後は
@@ -117,6 +120,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const setMessage = (message: string) => setExportRun({ message });
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
   const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
+  const setDuckMergedNotice = (duckMerged: boolean) => setExportRun({ duckMerged });
 
   // 書き出しの持ち主（`exportLock`）。タイムライン形式と一時ファイルの置き場を取り合わないために使う。
   const EXPORT_OWNER = "scene" as const;
@@ -190,6 +194,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setMessage("");
     setResultPath("");
     setBgmWarning("");
+    setDuckMergedNotice(false);
     setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
     // 取り込み・生成中は書き出しを始めない（#570 P1・相互排他＝§2-5/ADR-0026④）。進行中の素材取り込みは同一パス上書きで
@@ -300,8 +305,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         templateById,
         resolveExportSrc,
         (scene, lineId) => ({
-          // 掛け合いは行ごとの音声キー（lineAudioKey）、単一 narration は従来の sceneId（ADR-0015 PR-E）。
-          audioBase64: snapNarration[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
+          // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
+          // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
+          // 場面が明示の行を持つかで決めるので、どちらの渡し方でも同じ答えになる。
+          audioBase64: snapNarration[narrationAudioKey(scene, lineId ?? "")],
           narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
         }),
         (scene) => {
@@ -331,7 +338,18 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setPhase("encoding");
       // 場面ごとBGM（ADR-0018 ③(7)）：区間を解決→配置＋クロスフェード計画→各区間のソースを data URL 化して Rust へ。
       // 表示用 src ではなく実体を data URL 化する（asset:// は FFmpeg へ渡せない）。同梱は public/bgm、自分のBGM はプロジェクトから。
-      const mixClips = planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC);
+      // ⚠️ **声が鳴っている区間だけ BGM を下げる**（#257・ADR-0032 追補4＝書き出し時の処理）。
+      // 声の長さは**作成済みの音声（WAV）から測る**＝表示の窓（次の行まで）で下げると、
+      // 声が終わったあとも下げっぱなしになる。まだ作っていない行は下げない（鳴らない声のために下げない）。
+      // ⚠️ **キーの規則は domain に1つ**（`narrationAudioKey`）＝掛け合いは行ごと・単独は場面 id。
+      // ここで分岐を書くと、単独読み上げだけ引けず**ダッキングが効かない**（PR #896 レビュー）。
+      const speech = resolveSpeechSpans(proj, (scene, lineId) => {
+        const a = snapNarration[narrationAudioKey(scene, lineId)];
+        return a ? wavDurationSec(a) : 0;
+      });
+      const ducked = applyDuckingToMix(planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC), speech, snapMeta.videoSettings.audioAuto);
+      if (ducked.merged) setDuckMergedNotice(true);
+      const mixClips = ducked.clips;
       const bgmRuns: BgmRunInput[] = [];
       let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
@@ -349,7 +367,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           }
         }
         if (audioBase64) {
-          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
+          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
           // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
           bgmLoadFailed = true;
@@ -362,7 +380,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         setPhase("cancelled");
         return;
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath);
+      // 全体の音量を整える（#259）。**整えないときは渡さない**＝従来どおりの音（出力不変）。
+      const auto = resolveAudioAuto(snapMeta.videoSettings.audioAuto);
+      const report = await exportVideo(
+        built,
+        fileName.trim() || "export",
+        bgmRuns,
+        pid || undefined,
+        outputPath,
+        auto.normalize ? auto.targetLufs : undefined,
+      );
       setResultPath(report.outputPath);
       // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/bgm＝Rust eprintln 内訳）。
       // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。
@@ -481,6 +508,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               仕上がり確認で選ぶ
             </button>
           </div>
+
+          <hr className="divider" />
+          {/* 音の自動処理（#257/#259・ADR-0032 追補4＝書き出し時の処理なのでここに置く）。
+              **プロジェクト単位**＝場面ごとには持たない。両形式（場面/タイムライン）に効く。 */}
+          <AudioAutoField disabled={busy} />
 
           <hr className="divider" />
           {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。
@@ -622,6 +654,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                     </div>
                   )}
                 </>
+              )}
+              {duckMerged && (
+                <div className="notice notice-warn mt">
+                  {/* ⚠️ **黙ってやらない**（§2-5）＝下げる区間をつないだので、声と声の間でも BGM が下がったままになる。 */}
+                  <span>
+                    セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。
+                    気になる場合は「BGM を下げる」を弱くするか、動画を分けてお試しください。
+                  </span>
+                </div>
               )}
               {bgmWarning && (
                 <div className="notice notice-warn mt">

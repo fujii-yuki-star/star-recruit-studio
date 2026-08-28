@@ -9,6 +9,7 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
+import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
 import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
@@ -122,6 +123,19 @@ export function timelineAudioRuns(
   templateOf?: (templateId: string) => Template | undefined,
 ): TimelineAudioRun[] {
   const runs: TimelineAudioRun[] = [];
+  // 声が鳴っている区間（#257）＝**作成済みの読み上げ**だけ（鳴らない声のために下げない）。
+  // 隠した列・隠したクリップも数えない＝`audioCuesAt` と同じ「聞こえるもの」の見方に合わせる。
+  const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
+  const duckSpans = auto.duckBgm
+    ? fitSpeechSpans(
+        doc.clips
+          .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
+          .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
+          .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
+        auto,
+        VOLUME_POINTS_MAX,
+      ).spans
+    : [];
   for (const clip of doc.clips) {
     const sourceKey = audioSourceKeyOfClip(clip);
     if (!sourceKey) continue; // 音源が無い（読み上げ未作成など）＝置くものが無い
@@ -130,8 +144,18 @@ export function timelineAudioRuns(
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!cue) continue;
+    const volume = clipBaseVolume(clip, doc);
+    // 声が鳴っている区間だけ BGM を下げる（#257・ADR-0032 追補4＝両形式に効く）。
+    // ⚠️ **読み上げそのものは下げない**（自分で自分を下げることになる）。動画の元の音は下の段で扱う。
+    const factor =
+      clip.kind === TIMELINE_CLIP_KIND.voice
+        ? []
+        : duckingFactorPoints(duckSpans, { startSec: clip.startSec, endSec: clipEndSec(clip) }, auto);
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
-    const expr = volumeExpr(clip.volumePoints);
+    const expr =
+      factor.length > 0
+        ? volumeExpr(applyDucking(normalizedVolumePoints(clip.volumePoints), volume, factor))
+        : volumeExpr(clip.volumePoints);
     runs.push({
       clipId: clip.id,
       sourceKey,
@@ -140,7 +164,7 @@ export function timelineAudioRuns(
       playSec: clipEndSec(clip) - clip.startSec,
       sourceStartSec: clip.sourceStartSec ?? 0,
       speed: cue.speed,
-      volume: clipBaseVolume(clip, doc),
+      volume,
       ...(expr ? { volumeExpr: expr } : {}),
       ...clipFadeSec(clip),
       loop: audioLoops(clip),

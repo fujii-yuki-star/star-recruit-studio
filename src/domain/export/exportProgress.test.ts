@@ -19,6 +19,8 @@ describe('exportEncodePercent（#376）', () => {
   it('後段は段階的に上がる（join<bgm・いずれも<100）', () => {
     const join = exportEncodePercent({ phase: 'join', step: 0, total: 0 });
     const bgm = exportEncodePercent({ phase: 'bgm', step: 0, total: 0 });
+    // 整えるだけの段も同じ進み具合（同じ「音を作る」段なので）。
+    expect(exportEncodePercent({ phase: 'loudness', step: 0, total: 0 })).toBe(bgm);
     expect(join).toBeLessThan(bgm);
     expect(bgm).toBeLessThan(100);
     expect(join).toBeGreaterThanOrEqual(92);
@@ -31,6 +33,9 @@ describe('exportPhaseLabel（§2-3：技術用語を出さない）', () => {
     expect(exportPhaseLabel({ phase: 'encode', step: 2, total: 4 })).toBe('映像を作成しています（2/4）');
     expect(exportPhaseLabel({ phase: 'join', step: 0, total: 0 })).toBe('つなぎ合わせています');
     expect(exportPhaseLabel({ phase: 'bgm', step: 0, total: 0 })).toBe('BGMを合わせています');
+    // ⚠️ **BGM が無いのに「BGMを合わせています」と出さない**（#259・PR #896 レビュー ℹ️）＝
+    // 音を整えるだけでも同じ段を通るので、段を分けて事実どおりの文言にする（§2-5）。
+    expect(exportPhaseLabel({ phase: 'loudness', step: 0, total: 0 })).toBe('音量をそろえています');
   });
 
   it('文言に技術用語（テロップ/エンコード/フレーム）を含まない', () => {

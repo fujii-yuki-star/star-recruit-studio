@@ -387,6 +387,29 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.22→1.23 へ昇格（任意追加＝変換不要）
     expect(back.scenes[0].freeLayout).toEqual(scene.freeLayout); // 背景帯を取りこぼさず保持（migrateProject のスプレッド保持）
   });
+  /**
+   * ⚠️ **既に作った動画の音を変えない**（#257/#259・ADR-0032 追補4）。新しい動画は既定で「する」だが、
+   * **前の版で作った動画には明示的に「しない」を書き込む**＝開いて書き出し直しただけで
+   * BGM の鳴り方と全体の音量が変わり、前に書き出した動画と別物になる、を作らない（§2-5）。
+   */
+  it('音の自動処理：前の版(1.25)には「しない」を書き込む（#257/#259）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.25' } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
+  it('音の自動処理：すでに設定があれば触らない（利用者が選んだ値を上書きしない）', () => {
+    const base = assembleProject(header(), [], [], []);
+    const doc = {
+      ...base,
+      schemaVersion: '1.25',
+      videoSettings: { ...base.videoSettings, audioAuto: { duckBgm: true, duckDepth: 0.3 } },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: true, duckDepth: 0.3 });
+  });
+
   it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
     const textStyles = {
       title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },

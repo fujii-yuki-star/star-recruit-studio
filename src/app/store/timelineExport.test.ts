@@ -75,10 +75,24 @@ describe('exportTimelineVideo', () => {
       [],
       'proj_20260729_001',
       '/out/movie.mp4',
+      // 全体の音量を整える（#259・ADR-0032 追補4）。新しい動画は既定で整える。
+      -16,
     );
     const run = useTimelineStore.getState().exportRun;
     expect(run.phase).toBe('done');
     expect(run.message).toContain('保存しました');
+  });
+
+  /**
+   * ⚠️ **整えないときは渡さない**（#259）＝前の版で作った動画は読込時に「しない」が書き込まれるので、
+   * 開いて書き出し直しても**前と同じ音**になる（§2-5＝黙って別の音の動画を出さない）。
+   */
+  it('「音量をそろえる」をしない設定なら、整える指定を渡さない', async () => {
+    const d = doc();
+    await open({ ...d, videoSettings: { ...d.videoSettings, audioAuto: { normalize: false } } });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const args = vi.mocked(ffmpegMod.exportVideo).mock.calls[0];
+    expect(args[5]).toBeUndefined();
   });
 
   it('何も置いていなければ、保存先を聞く前に断る（重い処理をさせない）', async () => {

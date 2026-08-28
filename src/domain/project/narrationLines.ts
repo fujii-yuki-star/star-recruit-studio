@@ -119,6 +119,18 @@ export function lineVoiceStem(sceneId: string, lineId: string): string {
 }
 
 /**
+ * その行の音声キー（`narrationAudioById` のキー）。**掛け合いは行ごと・単独は場面 id**。
+ *
+ * ⚠️ **この分岐を呼ぶ側に書かせない**（§2-7・PR #896 レビュー ℹ️）＝同じ規則が
+ * `liveNarrationAudioKeys`・`lineDurationsFromAudio`・書き出しの3か所に写っており、
+ * **単独読み上げだけ引けない**（`sceneId_line_001` を引いてしまう）事故が起きた。
+ * 単独読み上げの `lineId` は `sceneLines` が作る `line_001` だが、**保存されているキーは場面 id**。
+ */
+export function narrationAudioKey(scene: Scene, lineId: string): string {
+  return scene.lines && scene.lines.length > 0 ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId;
+}
+
+/**
  * 生存しているナレーション音声キー（narrationAudioById のキー）の集合（#390・メモリ効率）。
  * 掛け合い場面は行ごと（lineAudioKey）、単一 narration 場面は sceneId。掛け合い⇄単一の切替や場面/行の削除で
  * 孤児になった音声キャッシュ（narrationAudioById／dirty セット）を剪定するのに使う（保存時・削除時）。
@@ -126,11 +138,8 @@ export function lineVoiceStem(sceneId: string, lineId: string): string {
 export function liveNarrationAudioKeys(scenes: Scene[]): Set<string> {
   const keys = new Set<string>();
   for (const sc of scenes) {
-    if (sc.lines && sc.lines.length > 0) {
-      for (const l of sc.lines) keys.add(lineAudioKey(sc.sceneId, l.lineId));
-    } else {
-      keys.add(sc.sceneId);
-    }
+    // 規則は `narrationAudioKey` に1つ（写すと片方だけ直る）。
+    for (const l of sceneLines(sc)) keys.add(narrationAudioKey(sc, l.lineId));
   }
   return keys;
 }

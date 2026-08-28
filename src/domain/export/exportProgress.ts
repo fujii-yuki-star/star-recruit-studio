@@ -2,10 +2,13 @@
 // 実進捗（80→100%）で描く。純粋関数（副作用なし・§7 テスト対象）。UI 文言は非技術者向け（§2-3）。
 
 /**
- * 書き出し中の段階。encode＝場面ごとエンコード（step/total 有効）／join＝結合／bgm＝BGM合成。
+ * 書き出し中の段階。encode＝場面ごとエンコード（step/total 有効）／join＝結合／bgm＝BGM合成／
+ * loudness＝音量をそろえるだけ（BGM 無し・#259）。
+ * ⚠️ **BGM が無いのに「BGMを合わせています」と出さない**（PR #896 レビュー ℹ️）＝
+ * 音を整えるだけでも同じ段を通るので、段を分けて事実どおりの文言にする（§2-5）。
  * 旧・タイムラインのテロップ合成（`telop`）は #635 で退役＝**誰も emit しない段は持たない**（#663）。
  */
-export type ExportPhase = 'encode' | 'join' | 'bgm';
+export type ExportPhase = 'encode' | 'join' | 'bgm' | 'loudness';
 
 /** Rust から届く進捗イベント（"export_progress"）。step/total は encode のみ有効（他は 0）。 */
 export interface ExportProgressEvent {
@@ -35,7 +38,8 @@ export function exportEncodePercent(e: ExportProgressEvent): number {
     case 'join':
       return JOIN_PCT;
     case 'bgm':
-      return BGM_PCT;
+    case 'loudness':
+      return BGM_PCT; // 同じ段（音を作る）なので進み具合は同じ
   }
 }
 
@@ -48,6 +52,8 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
       return 'つなぎ合わせています';
     case 'bgm':
       return 'BGMを合わせています';
+    case 'loudness':
+      return '音量をそろえています';
   }
 }
 

@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.28" },
+    "schemaVersion": { "const": "1.29" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -76,6 +76,19 @@
           "properties": {
             "mode": { "enum": ["always", "head", "tail", "both", "hidden"] },
             "seconds": { "type": "number", "minimum": 1, "maximum": 10 }
+          }
+        },
+        "audioAuto": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4）。書き出し時の処理なので Scene には持たせない（場面ごとのダッキング設定は作らない）。未指定＝新規は既定で「する」／読み込んだ古い動画には読込時に「しない」を書き込む（既に作った動画の音を変えない）。",
+          "properties": {
+            "duckBgm": { "type": "boolean" },
+            "duckDepth": { "type": "number", "minimum": 0, "maximum": 1 },
+            "duckAttackSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "duckReleaseSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "normalize": { "type": "boolean" },
+            "targetLufs": { "type": "number", "minimum": -30, "maximum": -8 }
           }
         }
       }

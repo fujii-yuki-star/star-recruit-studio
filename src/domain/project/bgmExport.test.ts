@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSITION_TYPE } from '../enums';
 import type { Project, Scene } from './types';
-import { planBgmMix, resolveBgmExportRuns } from './bgmExport';
+import { applyDuckingToMix, planBgmMix, resolveBgmExportRuns, resolveSpeechSpans } from './bgmExport';
 import type { BgmExportRun } from './bgmExport';
 
 function scene(sceneId: string, durationSec: number, bgmSettings?: unknown, transition?: unknown): Scene {
@@ -73,5 +73,117 @@ describe('planBgmMix（配置＋フェード計画・クロスフェード）', 
     const clips = planBgmMix([run({ startSec: 0, endSec: 1, fadeInSec: 2, fadeOutSec: 2 })], 1);
     expect(clips[0].fadeInSec).toBe(0.5);
     expect(clips[0].fadeOutSec).toBe(0.5);
+  });
+});
+
+/**
+ * 声が鳴っている区間（#257）。⚠️ **「表示の窓」ではなく「実際に鳴っている長さ」で採る**＝
+ * 掛け合いの行の窓は「次の行が始まるまで」なので、そのまま使うと声が終わったあとも下げっぱなしになる。
+ */
+describe('resolveSpeechSpans（#257）', () => {
+  function lineScene(sceneId: string, durationSec: number, lines: unknown[]): Scene {
+    return { ...scene(sceneId, durationSec), lines } as unknown as Scene;
+  }
+
+  it('単独の読み上げは場面の先頭から音声の長さぶん', () => {
+    const p = project([scene('s1', 10)]);
+    expect(resolveSpeechSpans(p, () => 3)).toEqual([{ startSec: 0, endSec: 3 }]);
+  });
+
+  it('場面の尺を超えない（音声が長くても場面の外まで下げない）', () => {
+    expect(resolveSpeechSpans(project([scene('s1', 4)]), () => 30)).toEqual([{ startSec: 0, endSec: 4 }]);
+  });
+
+  it('まだ作っていない声は下げない（鳴らない声のために下げない）', () => {
+    expect(resolveSpeechSpans(project([scene('s1', 10)]), () => 0)).toEqual([]);
+  });
+
+  it('掛け合いは行ごと＝「次の行まで」ではなく音声の長さで終わる', () => {
+    const p = project([
+      lineScene('s1', 20, [
+        { lineId: 'line_001', text: 'あ', status: 'none' },
+        { lineId: 'line_002', text: 'い', startSec: 10, status: 'none' },
+      ]),
+    ]);
+    expect(resolveSpeechSpans(p, () => 2)).toEqual([
+      { startSec: 0, endSec: 2 },
+      { startSec: 10, endSec: 12 },
+    ]);
+  });
+
+  /**
+   * ⚠️ **開始秒を書いていない行**（＝自動逐次＝既定）でも、2行目が1行目の**後ろ**から始まる
+   *（PR #896 レビュー 🔴）。以前は行の長さを渡さずに窓を採っていたため**全部 0 秒に潰れ**、
+   * 本当は鳴っていない所で BGM が下がり、鳴っている所で下がらなかった。
+   * ⚠️ 上の「掛け合いは行ごと」のテストは **2行目に `startSec: 10` を明示**していたので、
+   * この経路（`?? cursor`）を踏んでおらず、穴を見つけられなかった。
+   */
+  it('開始秒を書いていない掛け合いは、前の行の音声の長さぶん後ろから始まる', () => {
+    const p = project([
+      lineScene('s1', 20, [
+        { lineId: 'line_001', text: 'あ', status: 'none' },
+        { lineId: 'line_002', text: 'い', status: 'none' },
+        { lineId: 'line_003', text: 'う', status: 'none' },
+      ]),
+    ]);
+    expect(resolveSpeechSpans(p, () => 3)).toEqual([
+      { startSec: 0, endSec: 3 },
+      { startSec: 3, endSec: 6 },
+      { startSec: 6, endSec: 9 },
+    ]);
+  });
+
+  /**
+   * ⚠️ **単独読み上げも「行」として引く**（PR #896 レビュー ℹ️）＝`sceneLines` は必ず1行返すので
+   * 「行が無い」分岐は一度も通らない。**渡す `lineId` は `line_001`**（`lineFromNarration` の固定値）で、
+   * 音声キーの解決は呼ぶ側の `narrationAudioKey` が「明示の行が無ければ場面 id」に倒す。
+   */
+  it('単独読み上げでも行として引く（渡る lineId は line_001）', () => {
+    const seen: (string | undefined)[] = [];
+    resolveSpeechSpans(project([scene('s1', 10)]), (_s, lineId) => {
+      seen.push(lineId);
+      return 3;
+    });
+    expect(seen).toEqual(['line_001']);
+  });
+
+  /** ⚠️ 時間軸は BGM 区間と同じ（`transitionTimeline`）＝切り替えで詰まったぶんも同じように見る。 */
+  it('切り替えで詰まったぶんを見る（BGM 区間と同じ時間軸）', () => {
+    const p = project([
+      scene('s1', 8),
+      scene('s2', 8, undefined, { in: TRANSITION_TYPE.fade, durationSec: 2 }),
+    ]);
+    // 2つ目の場面は 8 ではなく 6 から始まる（2秒重なる）。
+    expect(resolveSpeechSpans(p, () => 1)).toEqual([
+      { startSec: 0, endSec: 1 },
+      { startSec: 6, endSec: 7 },
+    ]);
+  });
+});
+
+describe('applyDuckingToMix（#257）', () => {
+  const clips = () => planBgmMix([{ bundledBgmId: 'summer-morning', assetId: null, volume: 0.5, fadeInSec: 0, fadeOutSec: 0, startSec: 0, endSec: 20 }] as BgmExportRun[], 1);
+
+  it('しない設定なら式を付けない（従来どおりの一定音量＝出力不変）', () => {
+    const r = applyDuckingToMix(clips(), [{ startSec: 2, endSec: 4 }], { duckBgm: false });
+    expect(r.clips[0].volumeExpr).toBeUndefined();
+  });
+
+  it('声が無ければ式を付けない', () => {
+    expect(applyDuckingToMix(clips(), [], {}).clips[0].volumeExpr).toBeUndefined();
+  });
+
+  it('声がある区間で下がる式を付ける（元の音量に倍率を掛けた絶対値）', () => {
+    const r = applyDuckingToMix(clips(), [{ startSec: 2, endSec: 4 }], { duckDepth: 0.5 });
+    // 元 0.5 × 倍率 0.5 ＝ 0.25 が式に現れる。
+    expect(r.clips[0].volumeExpr).toContain('0.25');
+    expect(r.merged).toBe(false);
+  });
+
+  /** ⚠️ **黙って点を捨てない**＝捨てるとその区間だけ下がらない。まとめたことを返して知らせる。 */
+  it('セリフが多すぎるときはまとめ、まとめたことを返す', () => {
+    // 間を空ける（狭いと最初の一回でまとまってしまい、まとめ直しが走らない）。
+    const many = Array.from({ length: 40 }, (_, i) => ({ startSec: i * 3, endSec: i * 3 + 1 }));
+    expect(applyDuckingToMix(clips(), many, {}).merged).toBe(true);
   });
 });

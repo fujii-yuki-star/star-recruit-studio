@@ -10,6 +10,7 @@ import type { Group } from '../group/types';
 // （同じ概念は同じ制約）。片方に写すと、片方だけ制約が変わったときに気づけない。
 import type { LayerBackground, TextShadow } from '../template/types';
 import type { CreditDisplay } from '../voice/creditDisplay';
+import type { AudioAutoSettings } from '../voice/audioAuto';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -25,6 +26,15 @@ export interface VideoSettings {
    * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで扱うのは動画に焼く側だけ。
    */
   creditDisplay?: CreditDisplay;
+  /**
+   * 音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4・schema 1.29 で追加・任意）。
+   *
+   * ⚠️ **ここに置くのは「書き出し時の処理」だから**＝`Scene` には足さない（凍結3 に触れない）。
+   * **場面ごとのダッキング設定は作らない**（追補4）ので、`BgmSettings` ではなくここに置く
+   *（`BgmSettings` は場面にも生えているため、そちらへ置くと場面ごとに設定できてしまう）。
+   * `videoSettings` は `timeline-project.schema.json` が `$ref` で共有＝**両形式に効く**。
+   */
+  audioAuto?: AudioAutoSettings;
 }
 
 export interface CompanyInfo {

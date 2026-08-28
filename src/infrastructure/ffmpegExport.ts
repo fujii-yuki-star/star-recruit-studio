@@ -139,6 +139,8 @@ export async function exportVideo(
   bgmRuns?: BgmRunInput[],
   projectId?: string,
   outputPath?: string,
+  /** 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。 */
+  normalizeLufs?: number,
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
@@ -146,6 +148,7 @@ export async function exportVideo(
     bgmRuns: bgmRuns && bgmRuns.length > 0 ? bgmRuns : null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
+    normalizeLufs: normalizeLufs ?? null,
   });
 }
 

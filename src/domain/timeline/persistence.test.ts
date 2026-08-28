@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { frameTimeSec, isSupportedTimelineSchemaVersion, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from './persistence';
+import { frameTimeSec, isSupportedTimelineSchemaVersion, migrateTimelineProject, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from './persistence';
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -150,5 +150,32 @@ describe('isSupportedTimelineSchemaVersion / frameTimeSec（/canon-check 指摘�
 
   it('何も置いていない動画では 0（負にしない）', () => {
     expect(frameTimeSec(doc(), 0)).toBe(0);
+  });
+});
+
+/**
+ * ⚠️ **既に作った動画の音を変えない**（#257/#259・ADR-0032 追補4）。
+ * 新しい動画は既定で「する」だが、**前の版で作った動画には明示的に「しない」を書き込む**。
+ * 書かないと、開いて書き出し直しただけで BGM の鳴り方と全体の音量が変わる（§2-5）。
+ */
+describe('migrateTimelineProject：音の自動処理（1.8→1.9）', () => {
+  it('前の版の文書には「しない」を書き込む', () => {
+    const r = migrateTimelineProject({ schemaVersion: '1.8', videoSettings: { aspectRatio: '16:9' } });
+    expect((r.videoSettings as Record<string, unknown>).audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
+  it('すでに設定があれば触らない（利用者が選んだ値を上書きしない）', () => {
+    const r = migrateTimelineProject({ schemaVersion: '1.8', videoSettings: { audioAuto: { duckBgm: true } } });
+    expect((r.videoSettings as Record<string, unknown>).audioAuto).toEqual({ duckBgm: true });
+  });
+
+  it('いまの版の文書は素通り（同一参照）', () => {
+    const doc = { schemaVersion: TIMELINE_SCHEMA_VERSION, videoSettings: {} };
+    expect(migrateTimelineProject(doc)).toBe(doc);
+  });
+
+  it('videoSettings がオブジェクトでなければ触らない（壊れた値は検証へ）', () => {
+    const r = migrateTimelineProject({ schemaVersion: '1.8', videoSettings: 3 });
+    expect(r.videoSettings).toBe(3);
   });
 });
