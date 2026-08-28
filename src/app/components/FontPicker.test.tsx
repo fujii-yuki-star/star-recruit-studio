@@ -47,6 +47,28 @@ describe("FontPicker", () => {
     expect(screen.queryByRole("button", { name: /動画全体に合わせる/ })).not.toBeInTheDocument();
   });
 
+  /**
+   * ⚠️ **見つからない字体を、無関係な字体の名前で見せない**（PR #901 レビュー 🟡・§2-5）。
+   * `isKnownFontId` は**形**しか見ないので、①起動直後でまだ一覧を取れていない
+   * ②実体が消えている（`listUserFonts` は実体があるものだけ返す）の2つで
+   * 「既知だが一覧に無い」が起きる。先頭へ倒すと**具体的に間違った名前**が出て、
+   * 押した瞬間その字体で上書きされる（🔴1 で直した失敗と同型）。
+   */
+  it("一覧に無い手持ちの文字の形は、同梱の名前にすり替えない", () => {
+    render(<FontPicker value={"user_font_003" as never} onChange={vi.fn()} allowInherit />);
+    const btn = screen.getByRole("button");
+    expect(btn.textContent).toContain("user_font_003");
+    expect(btn.textContent).toContain("見つかりません");
+    for (const f of FONT_CATALOG) expect(btn.textContent).not.toContain(f.label);
+  });
+
+  /** ⚠️ 一覧を取る前でも同じ（起動直後の窓）＝一時的でも間違った名前を見せない。 */
+  it("起動直後（一覧が空）でも、指定されている手持ちの id を保つ", () => {
+    useProjectStore.setState({ userFonts: [] } as never);
+    render(<FontPicker value={"user_font_001" as never} onChange={vi.fn()} allowInherit />);
+    expect(screen.getByRole("button").textContent).toContain("user_font_001");
+  });
+
   /** ⚠️ 一覧を取れていなくても、**同梱は選べる**（行き止まりにしない）。 */
   it("手持ちが1つも無ければ同梱だけを出す", () => {
     render(<FontPicker value={null} onChange={vi.fn()} allowInherit />);

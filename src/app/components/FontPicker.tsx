@@ -44,7 +44,14 @@ export function FontPicker({
   // allowInherit のとき、未選択/不明は「動画全体に合わせる」。そうでなければ既定フォント表示。
   const isInherit = allowInherit ? known === null : false;
   const currentId: FontId = known ?? DEFAULT_FONT_ID;
-  const current = choices.find((f) => f.id === currentId) ?? choices[0];
+  // ⚠️ **見つからない字体を、無関係な字体の名前で見せない**（PR #901 レビュー 🟡・§2-5）＝
+  // `isKnownFontId` は**形**しか見ないので、①起動直後でまだ一覧を取れていない ②実体が消えている
+  //（`listUserFonts` は実体があるものだけ返す）の2つで「既知だが一覧に無い」が起きる。
+  // 先頭へ倒すと**具体的に間違った名前**が出て、押した瞬間その字体で上書きされる
+  //（🔴1 で直した失敗と同型）。id を保ったまま「見つかりません」と出す。
+  const current = choices.find((f) => f.id === currentId)
+    ?? { id: currentId, label: `${currentId}（見つかりません）`, note: undefined };
+  const missing = !choices.some((f) => f.id === currentId);
 
   // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
   // `disabled` は見本のボタンにしか効かないので、開いたままだと一覧は選べてしまい、選んでから断られる。
@@ -84,7 +91,7 @@ export function FontPicker({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}
-        style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit ? undefined : fontFamilyForId(current.id) }}
+        style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit || missing ? undefined : fontFamilyForId(current.id) }}
       >
         {isInherit ? INHERIT_LABEL : current.label}
       </button>
