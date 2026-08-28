@@ -47,7 +47,7 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
+import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, type UserFont } from "../../infrastructure/userFontFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
@@ -462,6 +462,15 @@ interface ProjectState {
    *（`missingAssetIds` と同じ流儀＝調べていないのに「全部そろっている」と言わない）。
    */
   userFontIds: string[] | null;
+  /**
+   * 持ち込みフォントの一覧（**名前つき**・α-6 出口監査 🔴1）。
+   *
+   * ⚠️ **id だけでは選ばせられない**＝`FontPicker` は「その字形で名前を出す」ので表示名が要る。
+   * ⚠️ **部品が自分で store から読む**（ADR-0036 の色と同じ流儀）＝`FontPicker` の呼び出しは
+   * 6か所あり、一覧を渡し歩くと**配り忘れた所だけ同梱3種**になる（実際にそうなっていた）。
+   * `userFontIds` は「調べたか」を含む判定（`null`＝まだ調べていない）に使い続ける。
+   */
+  userFonts: UserFont[];
   /** 持ち込みフォントの一覧を調べ直す（#261）。**実体があるものだけ**が入る。 */
   refreshUserFonts: () => Promise<void>;
   /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
@@ -662,6 +671,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   missingAssetIds: [],
   brandKit: {},
   userFontIds: null,
+  userFonts: [],
   fontError: null,
   isTemplateMutating: false,
   narrationError: null,
@@ -2208,7 +2218,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
     await loadUserFonts(list.map((f) => f.id));
-    set({ userFontIds: list.map((f) => f.id) });
+    set({ userFontIds: list.map((f) => f.id), userFonts: list });
   },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();

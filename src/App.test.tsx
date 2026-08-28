@@ -198,3 +198,30 @@ describe("App の遷移が離れる前の関門を通る（#719 統合）", () =
     }
   });
 });
+
+/**
+ * 持ち込みフォントは**起動時に1回そろえる**（α-6 出口監査 🟡11）。
+ *
+ * ⚠️ `loadUserFonts` の入口が設定・公開前チェック・書き出しにしか無く、**場面編集・仕上がり確認・
+ * タイムライン編集ではプレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 が崩れる）。
+ * 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
+ */
+describe("持ち込みフォントを起動時に読み込む（α-6 出口監査 🟡11）", () => {
+  it("App を開いた時点で refreshUserFonts が呼ばれる", async () => {
+    const refreshUserFonts = vi.fn(async () => {});
+    useProjectStore.setState({ refreshUserFonts } as never);
+    render(<App />);
+    await waitFor(() => expect(refreshUserFonts).toHaveBeenCalled());
+  });
+
+  /** ⚠️ **読めなくても画面は開く**（同梱の字体は使えるので行き止まりにしない）。 */
+  it("読み込みに失敗しても画面は出る", async () => {
+    const refreshUserFonts = vi.fn(async () => {
+      throw new Error("読めません");
+    });
+    useProjectStore.setState({ refreshUserFonts } as never);
+    const { container } = render(<App />);
+    await waitFor(() => expect(refreshUserFonts).toHaveBeenCalled());
+    expect(container.querySelector(".sidebar")).toBeTruthy();
+  });
+});

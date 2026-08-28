@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { claimEscape } from "../hooks/escapeOwners";
-import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, type FontId } from "../../domain/font/fontCatalog";
+import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
+import { useProjectStore } from "../store/projectStore";
 
 // 動画フォントの選択（プルダウン）。各選択肢を「そのフォントの字形」で表示して直感的に選べるようにする。
 // native <select> は option 個別の font 装飾ができないため、開閉する自前のドロップダウンにする。
@@ -29,11 +30,21 @@ export function FontPicker({
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const known = value && FONT_CATALOG.some((f) => f.id === value) ? (value as FontId) : null;
+  // ⚠️ **一覧は自分で store から読む**（α-6 出口監査 🔴1）＝この部品の呼び出しは6か所あり、
+  // 呼ぶ側から渡す形にすると**配り忘れた所だけ同梱3種**になる（ADR-0036 の色と同じ流儀）。
+  const userFonts = useProjectStore((s) => s.userFonts);
+  // 同梱＋持ち込みを1つの一覧にする（`note` は持ち込みには無いので空）。
+  const choices: { id: FontId; label: string; note?: string }[] = [
+    ...FONT_CATALOG.map((f) => ({ id: f.id as FontId, label: f.label, note: f.note })),
+    ...userFonts.map((f) => ({ id: f.id as FontId, label: f.displayName, note: "手持ち" })),
+  ];
+  // ⚠️ **持ち込みフォントも「既知」として扱う**（🔴1）＝`FONT_CATALOG` だけを見ていたため、
+  // 既に持ち込みフォントが入っている文書で**実際と違う字体名を見せ**、一度触ると黙って上書きしていた。
+  const known = isKnownFontId(value) ? (value as FontId) : null;
   // allowInherit のとき、未選択/不明は「動画全体に合わせる」。そうでなければ既定フォント表示。
   const isInherit = allowInherit ? known === null : false;
   const currentId: FontId = known ?? DEFAULT_FONT_ID;
-  const current = FONT_CATALOG.find((f) => f.id === currentId) ?? FONT_CATALOG[0];
+  const current = choices.find((f) => f.id === currentId) ?? choices[0];
 
   // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
   // `disabled` は見本のボタンにしか効かないので、開いたままだと一覧は選べてしまい、選んでから断られる。
@@ -102,7 +113,7 @@ export function FontPicker({
                 </button>
               </li>
             )}
-            {FONT_CATALOG.map((f) => (
+            {choices.map((f) => (
               <li key={f.id}>
                 <button
                   type="button"
