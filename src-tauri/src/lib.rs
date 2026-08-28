@@ -260,6 +260,8 @@ pub fn run() {
             assets::read_asset_data_url,
             assets::missing_asset_files,
             assets::delete_project_files,
+            ffmpeg::audio_peaks,
+            ffmpeg::video_filmstrip,
             assets::project_files_size,
             assets::copy_project_files,
             assets::import_template_asset,

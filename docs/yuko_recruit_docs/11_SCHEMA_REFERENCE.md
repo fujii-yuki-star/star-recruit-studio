@@ -432,6 +432,11 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 | `timelineOverlay.animations`（FREE 場面のアニメ） | `ClipAnimation`（場面ローカル秒＝クリップローカル秒。要素クリップは場面の先頭から始まるため） |
 | `assets` | **焼く範囲で実際に使うものだけ**（`sceneActiveAssetIds`＝休眠の割当は数えない）＋鳴っている BGM の音源。実ファイルは**コピー**（決定13＝自己完結・ADR-0024 (6)） |
 
+> ⚠️ **`projects/<id>/cache/` は運ばない**（#332）＝帯に敷く絵（音の波形・動画のコマ列）の作り置き。
+> **正準ではなく、作り直せる**ので `project.json` に持たず、焼き出しのコピー・見積りにも入れない。
+> 素材の片づけ（#348）でも消さない（`assets/` 限定）ので、**起動時に古いものから捨てる**
+> （`remove_stale_analysis_cache`＝書き出しの一時置き場と同じ基準）。
+
 - **自由配置の場面かどうかの判定**（`isFreeScene`）：**見た目が解決できるならその `category` が正**（描画＝`layoutScene` と同じ規則ゆえ、通常テンプレに残った休眠 `freeLayout` は焼かない＝ADR-0030）。**解決できないときだけ `scene.sceneType`** へ落ちる＝見た目が見つからない場面でも `freeLayout`・グループ・場面内アニメを黙って落とさない（§2-5）。素材の絞り込み（`sceneActiveAssetIds`）は見た目未解決だと自由配置を数えないため、この場合だけ焼き出し側が要素の素材を足す（焼いたのに素材が無い状態にしない）。
 - **列（トラック）の割り当て**：1場面ぶんの列は必ず**連続した並び**で取り、空いた列は下から詰め直す。これで（a）同一トラックの時間の重なりが起きない（§8 V24）、（b）切り替えで重なる2場面は**片方が丸ごともう片方より手前**になる（層が互い違いに挟まらない）＝切り替えを場面まるごとの不透明度で表せる。入る側を常に手前へ固定はしない（切り替えのたびに列が増えるため）。
 - **範囲の先頭場面の入場の切り替えは効かない**（切り替え元が範囲の外＝`compileTimeline` の `boundaryDs[0]=0` と同じ）。
@@ -1343,9 +1348,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V26 | `groups[].members` ／ `animations[].targetId` が実在クリップ or グループを参照 | 描画で無視（堅牢性・V20 と同じ扱い） |
 | V27 | `clips[].character.poseAssetId`（非null時）が実在 yuko 素材（場面形式 V5 と同じ観点） | 警告（`ASSET_NOT_FOUND`・field は `clips.<id>.character`） |
 | V28 | `kind='voice'` の読み上げ文が空白だけでない／`voice` は読み上げクリップにだけ付く | 警告（`TIMELINE_VOICE_TEXT_EMPTY`＝info・`TIMELINE_VOICE_ON_NON_VOICE`） |
-
 | V29 | `clips[].voiceClipId`（字幕の連動先）が実在する**読み上げ**クリップを指す／連動先を持てるのは字幕だけ | 警告（`TIMELINE_SUBTITLE_LINK_NOT_FOUND` / `TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE`）＝字幕は自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに気づけない |
-
 | V30 | `clips[].crop` の同じ軸の合計が 1 未満（上下・左右それぞれ） | 警告（`TIMELINE_CROP_HIDES_ALL`）＝描画は **1px 残す**（丸ごと消えたことに気づけるようにする） |
 | V31 | **`animations[].targetId` は重複しない**（同じ対象に動きは1本まで・V26 と対） | 警告（`TIMELINE_ANIMATION_DUPLICATE`）＝読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して**1本しか見ない**ので、2本あると片方が黙って無視される（焼き出しが入場と退場を2本作り、切り替えがハードカットになっていた・#717） |
 | V32 | **id は入れ物ごとに文書内で一意**（`clips`/`tracks`/`groups`/`animations` のそれぞれで重ならない。入れ物をまたいだ衝突〔クリップ id ＝グループ id〕は接頭辞が違うので採番から起きない＝見ない） | 警告（`TIMELINE_DUPLICATE_ID`）＝読む側は id で引き当てるので、重なると**後勝ち／先勝ちが混ざって別のものに効く**（焼き出しでグループ id が重なり、片方の変形がもう片方のメンバーに掛かって要素が画面外へ飛んだ・#811）。動きも `targetId` が合流して1本に混ざる。**採番の穴は作る側で塞ぐのが本筋**だが、知らせる側もここで持つ。⚠️ **保存の門は schema だけでは足りない**＝配列をまたいだ id の一意は JSON Schema の語彙に無いので適合チェックを素通りする。判定は `duplicateIdsIn`（本ファイルから export）を**焼き出しの保存（`bakeToTimeline`）と共有**する |

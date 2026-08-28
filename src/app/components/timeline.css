@@ -350,3 +350,28 @@
   pointer-events: none;
   z-index: 6;
 }
+
+/* ── 帯に敷く絵（#332）＝音の波形／動画のコマ列 ─────────────────────────
+   ⚠️ **文字より下に敷く**＝名前が読めなくならない。`pointer-events: none` で
+   掴む・端をつまむ操作を邪魔しない（帯そのものが受け取る）。
+   ⚠️ **帯からはみ出さない**＝`.timeline-clip` が `overflow: hidden` なので任せる。 */
+.timeline-clip-strip,
+.timeline-clip-wave {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* コマ列は**1枚のPNGを帯の幅いっぱいに伸ばす**（コマごとに読み込まない＝#332 の実測）。 */
+.timeline-clip-strip {
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* 波形は 0..1 の座標系で描き、帯の幅が変わっても**描き直さずに伸びる**。 */
+.timeline-clip-wave > polyline {
+  fill: currentColor;
+  stroke: none;
+  opacity: 0.7;
+}

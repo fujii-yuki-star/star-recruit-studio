@@ -132,6 +132,7 @@ const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
 import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
+import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
@@ -209,6 +210,13 @@ export const CLIP_MENU_W_PX = 14;
  * CSS にだけ書くと、値を変えたときにこの下限が黙って合わなくなる（計算と描画が食い違う）。
  */
 const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_HIT_W_PX * 2 + CLIP_MENU_W_PX + 16;
+/**
+ * 帯に絵（波形・コマ列）を敷く最小の幅（px・#332）。
+ *
+ * ⚠️ **細い帯には敷かない**＝潰れて読めないうえ、作る手間（FFmpeg の起動）だけかかる。
+ * 取っ手を出す幅（`CLIP_HANDLES_MIN_W_PX`）より少し広く取る＝取っ手で隠れる幅では敷く意味が無い。
+ */
+const CLIP_ANALYSIS_MIN_W_PX = 60;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
@@ -362,6 +370,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
     addAssets, importError, importProgress, clearImportError, isImporting,
+    analysisByPath, ensureClipAnalysis,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -1220,6 +1229,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (isPlaying) followPlayhead();
   }, [isPlaying, playheadSec, followPlayhead]);
 
+  /**
+   * 1秒あたりの幅（px）。**倍率の決め方はここ1か所**（§2-7）＝帯を描く側と、帯に敷く絵を作る側が
+   * **同じ値**を見る。書き写すと「敷く幅の判定」と実際の帯の幅が黙ってずれる（#332 レビュー）。
+   * ⚠️ **早期 return より前**に置く＝下の `useEffect` から読むため（フックの数も毎回そろえる）。
+   */
+  const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
+  /**
+   * 帯に敷く絵（#332）を、**必要になったものだけ**たのむ。
+   *
+   * ⚠️ **たのむのは描いた後**（`useEffect`）＝描いている最中に store を書くと、React が
+   * 「描画中に別の部品を更新した」と怒り、再描画のたびに書き直す形にもなる。
+   * ⚠️ **早い段階（画面を返す前）に置く**＝上と同じ理由でフックの数を毎回そろえる。
+   * ⚠️ **細い帯には敷かない**＝潰れて読めないうえ、作る手間（FFmpeg の起動）だけかかる。
+   */
+  const analysisNeeds = (doc?.clips ?? [])
+    .filter((c) => pxPerSec * c.durationSec >= CLIP_ANALYSIS_MIN_W_PX)
+    .map((c) => ({ clipId: c.id, widthPx: pxPerSec * c.durationSec }));
+  // 毎回新しい配列になるので、**中身から作った鍵**で見る（毎描画で走らせない）。
+  const analysisKey = analysisNeeds.map((n) => `${n.clipId}:${Math.round(n.widthPx)}`).join(",");
+  useEffect(() => {
+    for (const n of analysisNeeds) ensureClipAnalysis(n.clipId, n.widthPx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisKey, ensureClipAnalysis]);
+
   const zoomIndexRef = useRef<number | null>(null);
   useEffect(() => {
     zoomIndexRef.current = zoomIndex;
@@ -1798,6 +1831,37 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 位置まで動かす理由は無い）。
    */
   const wideEnoughForHandles = (c: TimelineClip): boolean => pxPerSec * c.durationSec >= CLIP_HANDLES_MIN_W_PX;
+
+  /**
+   * 帯に敷く絵（#332）＝音の波形／動画のコマ列。**読むだけ**（作るのは上の `useEffect`）。
+   *
+   * ⚠️ **無くても編集はできる**＝作れなければ何も敷かない（欠けていることを知らせない・§2-5）。
+   */
+  const clipAnalysis = (c: TimelineClip): React.ReactNode => {
+    // ⚠️ **描く側でも幅を見る**（レビュー ℹ️）＝一度測った後に倍率を下げると、**細い帯にも敷かれる**
+    //（潰れて読めない絵が出る）。作る条件と同じものを見る。
+    if (pxPerSec * c.durationSec < CLIP_ANALYSIS_MIN_W_PX) return null;
+    const src = clipAnalysisSource(c, (id) => doc.assets.find((a) => a.assetId === id));
+    if (!src) return null;
+    const found = analysisByPath[src.key];
+    if (!found) return null;
+    if (found.stripUrl) {
+      return (
+        <span
+          className="timeline-clip-strip"
+          aria-hidden="true"
+          style={{ backgroundImage: `url("${found.stripUrl}")` }}
+        />
+      );
+    }
+    const points = waveformPoints(found.peaks ?? []);
+    if (!points) return null;
+    return (
+      <svg className="timeline-clip-wave" aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none">
+        <polyline points={points} />
+      </svg>
+    );
+  };
   const showHandles = (c: TimelineClip): boolean => grabbableClip(c) && wideEnoughForHandles(c);
   /**
    * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
@@ -2427,7 +2491,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 時間 → 画面上の長さ。短い動画でも列が潰れないよう下限を置く（横スクロールは既存 CSS が持つ）。
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
-  const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
@@ -2965,6 +3028,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
                           >
+                            {/* ⚠️ **帯の中身を見せる**（#332）＝音は波形、動画はコマ列。名前だけだと
+                                「どこで何が鳴っているか」が帯からは分からない。
+                                ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
+                            {clipAnalysis(c)}
                             {clipLabel(c)}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (

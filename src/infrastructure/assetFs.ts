@@ -90,6 +90,53 @@ export async function assetDisplayUrl(projectId: string, relPath: string): Promi
 }
 
 /**
+ * 音の波形の山（#332）。0.0〜1.0 を `buckets` 個返す（音が無い・読めないときは空）。
+ *
+ * ⚠️ **素材のバイトを JS に載せない**（ADR-0004・§2-1）＝Rust が PCM を受けて**山だけ**を返す。
+ * Web Audio の `decodeAudioData` は**ファイル丸ごとを JS のメモリへ展開する**ので採らない
+ *（`exceedsInlineAssetLimit` の趣旨に反する）。
+ */
+export async function audioPeaks(
+  projectId: string,
+  relPath: string,
+  buckets: number,
+  /** 素材のどこから測るか（秒）。 */
+  fromSec = 0,
+  /** 何秒ぶん測るか（`0`＝最後まで）。 */
+  lengthSec = 0,
+): Promise<number[]> {
+  if (!isTauri()) return [];
+  try {
+    return await invoke<number[]>('audio_peaks', { projectId, relPath, buckets, fromSec, lengthSec });
+  } catch (e) {
+    console.warn('[asset] audioPeaks 失敗:', e);
+    return [];
+  }
+}
+
+/**
+ * 動画のコマ列（#332）。**横に並べた PNG 1枚**を作り、表示用の URL を返す（作れなければ `null`）。
+ *
+ * ⚠️ **無くても編集はできる**＝失敗しても `null` を返すだけで、画面は止めない（§2-5＝求めることが無い）。
+ */
+export async function videoFilmstrip(
+  projectId: string,
+  relPath: string,
+  frames: number,
+  fromSec = 0,
+  lengthSec = 0,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const rel = await invoke<string>('video_filmstrip', { projectId, relPath, frames, fromSec, lengthSec });
+    return rel ? await assetDisplayUrl(projectId, rel) : null;
+  } catch (e) {
+    console.warn('[asset] videoFilmstrip 失敗:', e);
+    return null;
+  }
+}
+
+/**
  * 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
  *
  * ⚠️ **消せなくても失敗にしない**＝素材はもう文書から外れており、残ったファイルは次の取り込みで
