@@ -108,8 +108,14 @@ export function isExportBlocking(item: PrecheckItem): boolean {
  */
 export function exportBlockingItems(
   scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[],
+  /**
+   * 書き出しを止める判定に要る材料（#261）。⚠️ **`blocksExport` の項目が使う材料は、
+   * ここにも通さないと直行導線ですり抜ける**（PR #886 レビュー 🔴）＝サイドバーから
+   * 「動画を保存」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
+   */
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
 ): PrecheckItem[] {
-  return buildPrecheckItems(scenes, assets, templates, overlayAnimations).filter(isExportBlocking);
+  return buildPrecheckItems(scenes, assets, templates, overlayAnimations, undefined, undefined, fonts).filter(isExportBlocking);
 }
 
 /**
@@ -242,7 +248,7 @@ export function buildPrecheckItems(
       label: "見つからない文字の形",
       detail:
         `この動画で使っている文字の形（フォント）が${missingFonts.length}つ見つかりません。` +
-        `このまま書き出すと**別の字**になります。設定の「文字の形」から取り込み直すか、` +
+        `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
         `使っている場面で別の文字の形を選び直してください。`,
       severity: "action",
       blocksExport: true,

@@ -67,12 +67,31 @@ describe('fontCatalog（同梱フォント選択）', () => {
     expect(resolveFontId('bogus', 'also-bogus')).toBe(DEFAULT_FONT_ID);
   });
 
-  it('場面の fontId は同じ形を共有し、null（継承）も許す（ドリフト検知）', () => {
+  /**
+   * ⚠️ **8か所すべてが同じ定義を指すことを1つずつ確かめる**（PR #886 レビュー）＝
+   * 1か所だけ見ていると「一部だけ enum に戻す」誤修正を捕まえられない。
+   */
+  it('fontId は8か所すべてが共有の定義を指す（片方だけ古い、を防ぐ）', () => {
     const schema = JSON.parse(
       readFileSync(join(process.cwd(), 'docs/yuko_recruit_docs/schemas/project.schema.json'), 'utf8'),
     );
-    // ⚠️ **8か所すべてが同じ定義を指す**（`$ref`）＝形を1か所で変えられる（片方だけ古い、が起きない）。
-    expect(schema.$defs.Scene.properties.fontId.$ref).toBe('#/$defs/FontIdOrNull');
+    const textKeys = ['title', 'main', 'subtitle', 'caption', 'url'];
+    const sites: [string, unknown, string][] = [
+      ['videoSettings.fontId', schema.$defs.VideoSettings.properties.fontId, '#/$defs/FontId'],
+      ['Scene.fontId', schema.$defs.Scene.properties.fontId, '#/$defs/FontIdOrNull'],
+      ['FreeElement.fontId', schema.$defs.FreeElement.properties.fontId, '#/$defs/FontIdOrNull'],
+      ...textKeys.map((k): [string, unknown, string] => [
+        `Scene.textFontIds.${k}`,
+        schema.$defs.Scene.properties.textFontIds.properties[k],
+        '#/$defs/FontId',
+      ]),
+    ];
+    expect(sites).toHaveLength(8);
+    for (const [name, node, ref] of sites) {
+      expect({ [name]: (node as { $ref?: string }).$ref }).toEqual({ [name]: ref });
+      // enum に戻っていないことも明示（`$ref` があっても enum が併記されると値域が狭まる）。
+      expect((node as { enum?: unknown }).enum).toBeUndefined();
+    }
     const orNull = schema.$defs.FontIdOrNull.oneOf;
     expect(orNull).toContainEqual({ $ref: '#/$defs/FontId' });
     expect(orNull).toContainEqual({ type: 'null' }); // null=継承（動画全体に合わせる）
