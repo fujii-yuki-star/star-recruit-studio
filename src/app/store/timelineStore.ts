@@ -40,7 +40,7 @@ import {
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 // ⚠️ **欄の名前は画面と共有する**（#869）＝断りを「操作した欄の中」に返すため。
-import { BLOCK_GLOBAL, PANEL_ID, type BlockTarget } from "../timelinePanels";
+import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../timelinePanels";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
@@ -358,7 +358,7 @@ export interface TimelineState {
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
-  removeSelectedClips: () => void;
+  removeSelectedClips: (at?: BlockTarget) => void;
   /**
    * **id を名指しで消す**（#721 レビュー）。まとめて消すときの確認は「聞いた時点の相手」を持つので、
    * 確認を出している間に選択が変わっても**聞いた数と消える数がずれない**（`exploding` が相手を組で
@@ -942,10 +942,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || updates.length === 0) return;
     const r = moveClips(doc, updates);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: { reason: r.reason, at: PANEL_ID.arrange } });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
   },
   trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec), PANEL_ID.arrange),
-  setEditBlocked: (reason, at) => set({ editBlocked: { reason, at } }),
+  setEditBlocked: (reason, at) => set({ editBlocked: { reason, at: blockTargetFor(reason, at) } }),
   setSelectedClipBox: (patch) =>
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
   setClipBoxFor: (clipId, patch) =>
@@ -969,13 +969,15 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || updates.length === 0) return;
     const r = setClipBoxes(doc, dimsForOrientation(doc.videoSettings.aspectRatio), updates);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: { reason: r.reason, at: PANEL_ID.preview } });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.preview) } });
   },
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
-  removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),
+  removeSelectedClips: (at) => get().removeClipsByIds(get().selectedClipIds, at),
 
-  removeClipsByIds: (clipIds, at = PANEL_ID.arrange) => {
+  // ⚠️ **渡されなかったら帯**（#869 レビュー 🟡）＝消す入口は4つあり、どれか1つでも渡し忘れると
+  // **押していない欄に返事が出る**。安全側は「必ず見える所」＝帯（欄を閉じていても見える）。
+  removeClipsByIds: (clipIds, at = BLOCK_GLOBAL) => {
     const doc = get().doc;
     if (!doc || clipIds.length === 0) return;
     // **固定した列の部品が混ざっていたら断る**（#701 レビュー）＝`Ctrl+A` で全部選んでから消せてしまうと、
@@ -999,7 +1001,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = clearKeyframes(doc, targetId);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: { reason: r.reason, at: PANEL_ID.selected } });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
   },
 
   setSelectedSubtitleText: (text) => applyEdit(set, get, (d, id) => setSubtitleText(d, id, text)),
@@ -1035,7 +1037,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
         commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
       } else {
-        set({ editBlocked: { reason: r.reason, at: PANEL_ID.place } });
+        set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       }
       return;
     }
@@ -1050,7 +1052,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const placeable = placeableVisualTracks(doc);
     // 置ける列が1本も無いときは、理由を出す（押しても何も起きない、を作らない・§2-5）。
     if (placeable.length === 0) {
-      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: PANEL_ID.place } });
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
     // 欄で選んだ列があればそれを使う（表示と結果を割らない）。無い／置けない列なら手前へ落とす
@@ -1061,7 +1063,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const startSec = firstFreeStart(doc.clips, track.id, get().playheadSec, VISUAL_CLIP_DURATION_SEC);
     const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.place } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;
     }
     const placed = r.doc.clips[r.doc.clips.length - 1];
@@ -1074,7 +1076,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addAudioClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.audio } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.audio) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1228,7 +1230,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addVoiceClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.voice } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.voice) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1248,7 +1250,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const r = addLinkedSubtitleClip(doc, selectedClipIds[0]);
     if (!r.ok) {
       // 入口は「選んだ部品」欄の**その字幕を置く**ボタン（読み上げを置く欄ではない・実測）。
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.selected } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1319,7 +1321,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
-        ...(sized && !sized.ok ? { editBlocked: { reason: sized.reason, at: PANEL_ID.selected } } : {}),
+        ...(sized && !sized.ok ? { editBlocked: { reason: sized.reason, at: blockTargetFor(sized.reason, PANEL_ID.selected) } } : {}),
       }, { outsideGroup: true });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
@@ -1356,7 +1358,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addTemplateClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.templates } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.templates) } });
       return;
     }
     // 置いた部品をそのまま選ぶ（続けて中身を入れられる）。**id は増えたものを引き当てる**＝
@@ -1377,7 +1379,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     const r = duplicateTrack(doc, trackId);
-    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: PANEL_ID.arrange } }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   removeTrack: (trackId) => {
@@ -1385,7 +1387,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = removeTrack(doc, trackId);
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at: PANEL_ID.arrange } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
       return;
     }
     // 列と一緒に消えるクリップは選択からも外す（消えたものを選んだままにしない）。
@@ -1396,14 +1398,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     const r = moveTrackTo(doc, trackId, toIndex);
-    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: PANEL_ID.arrange } }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   moveTrackOrder: (trackId, direction) => {
     const doc = get().doc;
     if (!doc) return;
     const r = moveTrackOrder(doc, trackId, direction);
-    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: PANEL_ID.arrange } }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   setTrackFlag: (trackId, flag, value) => {

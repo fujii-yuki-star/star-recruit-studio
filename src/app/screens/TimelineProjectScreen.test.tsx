@@ -1700,6 +1700,75 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     expect(layoutArea.contains(notice!)).toBe(false); // 帯（欄の外）に出ている
   });
 
+  /**
+   * ⚠️ **消す入口は4つある**（#869 レビュー 🟡）＝「選んだ部品」欄のボタン2つ・仕上がり確認の
+   * 右クリック・並びの右クリック。渡し忘れると**押していない欄に返事が出る**。
+   */
+  it("「選んだ部品」欄から消せないときは、その欄の中に理由が出る", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().removeClipsByIds(["clip_001"], "selected");
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.lockedSelection]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(true);
+  });
+
+  /**
+   * ⚠️ **画面全体の話になる理由は、欄を渡されても帯へ倒す**（#869 レビュー 🟡）。
+   * 入口ごとに「書き出し中だけは帯」と書くと、入口が増えたとき片方だけ欄へ押し込まれ、
+   * **同じ状況なのに出る場所が違う**（ADR-0026②）。規則は `blockTargetFor` に1つだけ置いている。
+   */
+  it.each([
+    ["書き出し中", EDIT_BLOCKED.exporting],
+    ["再生中", EDIT_BLOCKED.playing],
+    ["対象が無い", EDIT_BLOCKED.notFound],
+  ])("%s は欄を渡しても帯に出る", (_name, reason) => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().setEditBlocked(reason, "selected"); // 欄を渡す
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[reason]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false);
+  });
+
+  /** ⚠️ 逆に、**欄の話である理由は欄へ**（規則が何でも帯へ倒していないことを確かめる）。 */
+  it("欄の話である理由は、渡した欄の中に出る", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().setEditBlocked(EDIT_BLOCKED.overlap, "selected");
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.overlap]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(true);
+  });
+
+  /** ⚠️ **渡し忘れは帯へ倒す**＝押していない欄に返事を出さない（安全側＝必ず見える所）。 */
+  it("どこから消したか渡されなければ帯に出る", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().removeClipsByIds(["clip_001"]);
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.lockedSelection]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false);
+  });
+
   /** ⚠️ 画面全体に効く断り（書き出し中）は今までどおり帯＝欄を閉じていても見える。 */
   it("画面全体に効く断りは帯に出る", () => {
     open();

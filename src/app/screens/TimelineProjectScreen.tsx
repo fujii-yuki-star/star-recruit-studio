@@ -432,7 +432,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **まとめて消すときの確認**（`06 §2` 統一規約1・ADR-0034 決定20）。**聞いた時点の相手を持つ**
   // （#721 レビュー）＝この確認は覆いではなく知らせの段なので、出したまま帯を押したり `Ctrl+A` したりできる。
   // 数だけ持つと「3個消しますか」と聞いて1個だけ消える／全部消える、が起きる（`exploding` と同じ流儀）。
-  const [confirmRemove, setConfirmRemove] = useState<string[] | null>(null);
+  // ⚠️ **消す相手と「どこから始めたか」を組で持つ**（#869 レビュー 🟡・`exploding` と同じ流儀）
+  //＝確認の後で断られたとき、返す欄が押したボタンと合う。
+  const [confirmRemove, setConfirmRemove] = useState<{ ids: string[]; from: BlockTarget } | null>(null);
   // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
   /**
    * 離れてよいか聞いている最中の**行き先**（`null`＝聞いていない・#719）。
@@ -745,7 +747,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         if (playRef.current.total <= 0) return; // 置いていないときは再生できない（ボタンと同じ条件）
         // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに
         // `Space` だけ黙ると、押せない見た目を持たない入口で挙動が割れる（ADR-0026②）。
-        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting, BLOCK_GLOBAL); return; }
+        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting, PANEL_ID.arrange); return; }
         playRef.current.play();
         return;
       }
@@ -1334,14 +1336,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * まとめて消すのが確認なしになる（キーからも同じ道を使うので、片方だけ確認、も作らない）。
    * ⚠️ **early return より前**に置く（抜ける回と抜けない回でフックの数が変わらない＝下の土台と同じ理由）。
    */
-  const requestRemoveSelected = useCallback(() => {
+  const requestRemoveSelected = useCallback((at: BlockTarget = BLOCK_GLOBAL) => {
     // ⚠️ **断るなら理由を出す**（#752-3・§2-5）。ボタンは押せない見た目と説明で伝わるが、
     // **キーには押せない見た目が無い**ので、ここで理由を立てないと `Delete` が無言で何も起きない
     //（分ける `Ctrl+K` は理由を立てているのに、消すだけ黙る＝入口で挙動が割れる・ADR-0026②）。
     // 選んでいないときだけ黙る（消す相手がそもそも無い＝他社の型でも何も出ない）。
-    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason, PANEL_ID.arrange); return; }
-    if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds);
-    else removeSelectedClips();
+    //
+    // ⚠️ **入口は4つある**（#869 レビュー 🟡）＝「選んだ部品」欄のボタン2つ・仕上がり確認の右クリック・
+    // 並びの右クリック。**始めた所を受け取る**（既定はキーの `Delete`＝欄を持たないので帯）。
+    // ⚠️ **書き出し中だけは常に帯**＝ほかの入口（`:1458` 等）と揃える（画面全体に効く断り）。
+    // 「書き出し中は帯」のような例外は `blockTargetFor`（`timelinePanels.ts`）が引き受けるので、
+    // ここは素直に**始めた欄**を渡す（入口ごとに例外を書かない＝片方だけ直る、を作らない）。
+    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason, at); return; }
+    if (selectedClipIds.length > 1) setConfirmRemove({ ids: selectedClipIds, from: at });
+    else removeSelectedClips(at);
   }, [removeBlocked, selectedClipIds, removeSelectedClips, setEditBlocked]);
   const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
   /**
@@ -1455,9 +1463,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
       if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
-      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, BLOCK_GLOBAL); return; }
-      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing, BLOCK_GLOBAL); return; } // 位置を使う操作＝再生中は断る（決定21）
-      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound, BLOCK_GLOBAL); return; }
+      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, PANEL_ID.arrange); return; }
+      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing, PANEL_ID.arrange); return; } // 位置を使う操作＝再生中は断る（決定21）
+      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound, PANEL_ID.arrange); return; }
       // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝渡さないと差し込み口の置き場所が
       // 1件も解けず、「素材を使い切った先」の判定が**差し込み口では必ず偽**になる。
       // ⚠️ ただし**このキーの道だけは、渡さなくても結果が変わらない**（この先の `splitSelectedClip` が
@@ -2331,7 +2339,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
           danger: true,
           ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
-          onSelect: requestRemoveSelected,
+          onSelect: () => requestRemoveSelected(PANEL_ID.arrange),
         },
       ]
     : [];
@@ -2614,7 +2622,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
               // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
               onDuplicate={() => duplicateSelectedClip()}
-              onDelete={() => requestRemoveSelected()}
+              onDelete={() => requestRemoveSelected(PANEL_ID.preview)}
               menuGuards={{
                 duplicate: duplicateMenuGuard,
                 delete: { disabled: removeGuard?.disabled, disabledHint: removeGuard?.title },
@@ -3158,7 +3166,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ここで分ける
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
-              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
+              <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -4087,7 +4095,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
+          <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
         )}
       </>
     ) },
@@ -4373,15 +4381,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {confirmRemove !== null && (
         <DeleteConfirm
-          message={`選んだ${confirmRemove.length}個の部品を削除しますか？`}
+          message={`選んだ${confirmRemove.ids.length}個の部品を削除しますか？`}
           onCancel={() => setConfirmRemove(null)}
           onConfirm={() => {
-            const ids = confirmRemove;
+            const { ids, from } = confirmRemove;
             setConfirmRemove(null);
             // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」と同じ）。
             // 固定・存在の判定は **id を渡す先**（`removeClipsByIds`）が見る＝聞いた相手が消えていたら理由が出る。
             if (exporting) return;
-            removeClipsByIds(ids);
+            removeClipsByIds(ids, from);
           }}
         />
       )}

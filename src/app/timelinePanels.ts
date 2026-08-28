@@ -45,3 +45,27 @@ export type BlockTarget = TimelinePanelId | typeof BLOCK_GLOBAL;
  * ⚠️ **行き先の欄を閉じているときも `global` へ倒す**（画面側が見る）＝出しても見えないので、
  * 押した結果が黙って消える（§2-5）。
  */
+
+/**
+ * **どこから始めても画面全体の話になる理由**（#869 レビュー 🟡）。
+ *
+ * ⚠️ **呼び出し側ごとに書かない**＝「書き出し中だけは帯」を入口ごとに書くと、入口が増えたときに
+ * 片方だけ欄へ押し込まれ、**同じ状況なのに出る場所が違う**（ADR-0026②）。理由の性質なので
+ * ここで1回だけ決める。
+ *
+ * ⚠️ **`notFound` も含める**＝対象が消えた後の操作なので、「その欄を見てください」と言っても直らない。
+ */
+const ALWAYS_GLOBAL = new Set<string>([
+  "TIMELINE_EDIT_EXPORTING",
+  "TIMELINE_PLAY_EXPORTING",
+  "TIMELINE_EDIT_PLAYING",
+  "TIMELINE_EDIT_NOT_FOUND",
+]);
+
+/**
+ * 断りの置き場所を決める（**理由が画面全体のものなら、始めた欄より優先して帯へ**）。
+ * 置く側は素直に「自分の欄」を渡してよい＝例外をここが引き受ける。
+ */
+export function blockTargetFor(reason: string, at: BlockTarget): BlockTarget {
+  return ALWAYS_GLOBAL.has(reason) ? BLOCK_GLOBAL : at;
+}
