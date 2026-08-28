@@ -6,10 +6,12 @@ import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
-import { subtitleOverflowsCanvas } from "../renderer/layout";
+import { isSubtitleItem, sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
+import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
@@ -216,6 +218,86 @@ export function buildPrecheckItems(
       ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。動画には入らないので、そのままでも問題ありません。`, severity: "warning" }
       : { id: "unused", label: "使っていない素材", detail: "すべての素材が使われています。", severity: "ok" },
   );
+
+  // ── 書き出す前の安心（#346）─────────────────────────────────────
+  //
+  // ⚠️ **判定は描画と同じものを通す**＝`layoutScene` が作ったアイテムを見る（別に数え直すと
+  // 「チェックは通ったのに動画では切れている」が起きる）。見た目が解決できない場面は見ない
+  //（そちらは「場面の見た目」の項目が受け持つ＝同じことを二度言わない）。
+  // ⚠️ **数え上げは共有関数（`sceneDrawnLayouts`）を通す**（レビュー 🔴・2エージェントが実測で指摘）＝
+  // `layoutScene` を opts なしで1回呼ぶと、掛け合いの場面では**実際に描かれる行ごとの字幕を
+  // 一度も見ず**、代わりに**動画に出ない静的字幕**を見てしまう（見落としと誤検出が同時に起きる）。
+  const laidOut = scenes
+    .map((s) => ({ scene: s, template: templateOf(s) }))
+    .filter((x): x is { scene: Scene; template: Template } => x.template != null)
+    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template).flatMap((l) => l.items) }));
+
+  // ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
+  // 「そう書いたのか」「切れたのか」が分からない。
+  // ⚠️ **同じ原因で2行出さない**（レビュー 🟡・`transitionShortened` の前例と同じ）＝
+  // 横型の標準テンプレは字幕の枠が 74 字ぶんあり、**60 字（`MAX_SUBTITLE_LEN_DEFAULT`）で
+  // 既に「字幕の長さ」が出ている**ので、切り詰めは必ずそれと重なる（原因も直し方も同じ）。
+  // ⚠️ **項目ごと消さない**＝縦型は枠が 44〜46 字ぶんなので、**45〜60 字は「字幕の長さ」を
+  // 素通りして切り詰めだけで拾える**（本物の穴を塞いでいる）。
+  // ⚠️ **消すのは「長すぎると既に伝えた字幕」だけ**（PR #877 再レビュー 🟡×2）。
+  // 段階的に絞ってきた＝①場面ごと丸ごと飛ばしていた → ②字幕アイテム全部を外した → ③いまここ。
+  // ②でも足りなかったのは、**自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）ため＝
+  // 長い方の字幕で場面が「伝えた」になると、**別のボックスの切り詰め**（原因も直し方も別）まで消えていた。
+  // 除外の単位を**アイテムの文言**まで下ろす（長さを超えているものだけ外す）。
+  const alreadyTold = new Set(scenes.filter((_, i) => subtitle.nums.includes(i + 1)).map((s) => s.sceneId));
+  const truncated = offending((s) => {
+    const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
+    if (found == null) return false;
+    // 字幕かどうかは**共有の述語**（`isSubtitleItem`）で見る＝書き出しの「字幕を入れる」OFF と同じ判定（§2-7）。
+    // 長さの基準も「字幕の長さ」の項目と**同じ関数**（`subtitleMax`）から採る（2か所に数字を書かない）。
+    const max = subtitleMax(s);
+    const items = alreadyTold.has(s.sceneId)
+      ? found.items.filter((it) => !(isSubtitleItem(it) && (it.kind === "text" ? it.text.length : 0) > max))
+      : found.items;
+    return truncatedTexts(items).length > 0;
+  });
+  if (truncated.nums.length > 0) {
+    items.push({
+      id: "truncatedText",
+      label: "切れている文字",
+      detail: `${fmtScenes(truncated.nums)}の文字が枠に入りきらず、末尾が「…」になります。短くするか、場面編集で文字を小さくしてください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: truncated.firstId,
+    });
+  }
+
+  // ⚠️ **引き伸ばしでぼやける素材**＝描く枠より元の絵が小さいもの。小さいこと自体は問題ではない
+  // （ロゴのように小さく置く素材もある）ので、**描かれる枠と比べる**。
+  const blurry = offending((s) => {
+    const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
+    return found != null && blurryAssets(found.items, assets).length > 0;
+  });
+  if (blurry.nums.length > 0) {
+    items.push({
+      id: "blurryAsset",
+      label: "ぼやける素材",
+      detail: `${fmtScenes(blurry.nums)}の写真・動画が、置いた大きさに対して小さいため、引き伸ばすとぼやけます。そのままでも動画は作れます。`,
+      severity: "warning",
+    });
+  }
+
+  // ⚠️ **「セリフの長さ」とは別**＝あちらは文字数そのもの、こちらは**尺に対して**多いか。
+  // 短い場面に長いセリフを入れると、声は最後まで鳴るのに**場面が先に切り替わる**。
+  // ⚠️ **同時に流す行はグループにまとめて渡す**（レビュー 🟡・ADR-0031）＝素朴に合算すると
+  // 2人同時が**人数ぶん二重計上**される。窓の分け方は `lineTimeline` と同じ `groupIndices`。
+  const tooFast = offending((s) => {
+    const lines = sceneLines(s);
+    return tooFastScenes(s, groupIndices(lines).map((g) => g.map((i) => lines[i].text)));
+  });
+  if (tooFast.nums.length > 0) {
+    items.push({
+      id: "tooFast",
+      label: "早口になる場面",
+      detail: `${fmtScenes(tooFast.nums)}は、表示する時間に対してセリフが多いです。表示時間を延ばすか、セリフを短くしてください。`,
+      severity: "warning",
+    });
+  }
 
   // ⚠️ **見つからない素材は書き出す前に知らせる**（#347・§2-5・ADR-0026④）＝そのまま書き出すと
   // その場面が**黙って抜けた**動画になる。「使っていない素材」（そのままでよい警告）とは重さが違う

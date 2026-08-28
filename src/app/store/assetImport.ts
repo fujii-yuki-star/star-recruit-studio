@@ -14,6 +14,27 @@ export type VideoEnrichment = { metadata?: AssetMetadata; thumbnailPath?: string
  * store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立
  * ＝メタが取れなくても素材そのものは使える）。
  */
+/**
+ * 写真の**大きさ**だけを測る（#346）。
+ *
+ * ⚠️ **これが無いと「ぼやける素材」の注意が写真では一度も出ない**＝`metadata` を書いていたのは
+ * 動画の取り込みだけで、写真には `width`/`height` が入らなかった（判定の材料が無いので黙って素通り）。
+ * ⚠️ **同じ probe で測れる**（同梱 FFmpeg で確認済み＝PNG も `Stream #0:0: Video: png, …, 256x256`
+ * の形で出る）。名前が `probeVideo` なのは経緯だけで、中身は「最初の映像ストリームの情報」。
+ * ⚠️ **長さ・音の有無は捨てる**＝静止画には意味が無く、持たせると「0秒の動画」に見える。
+ */
+export async function probeImageSize(projectId: string, relPath: string): Promise<AssetMetadata | null> {
+  try {
+    const meta = await probeVideo(projectId, relPath);
+    if (!meta || meta.width == null || meta.height == null) return null;
+    return { width: meta.width, height: meta.height };
+  } catch (e) {
+    // 測れなくても取り込みは続ける（注意が1つ出ないだけ＝§2-5）。
+    console.warn('[asset] 写真の大きさの取得に失敗:', e);
+    return null;
+  }
+}
+
 export async function probeAndThumbVideo(projectId: string, relPath: string): Promise<VideoEnrichment> {
   const out: VideoEnrichment = {};
   try {

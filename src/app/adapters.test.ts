@@ -807,3 +807,162 @@ describe("buildPrecheckItems 見つからない素材（#347）", () => {
     expect(find(items)?.detail).toContain("ほか1つ");
   });
 });
+
+describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate, templateId: "photo_v1", category: "photo_intro",
+    layers: [
+      { id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 400, h: 100, fontSize: 40, maxLines: 2, zIndex: 1 },
+    ],
+  } as unknown as Template;
+  const sc = (over: Partial<Scene> = {}): Scene =>
+    ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "photo_v1", ...over });
+  const find = (items: ReturnType<typeof buildPrecheckItems>, id: string) => items.find((i) => i.id === id);
+
+  /**
+   * ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
+   * 「そう書いたのか」「切れたのか」が分からない。
+   */
+  it("枠に入りきらない文字を要対応にする", () => {
+    const ok = buildPrecheckItems([sc({ texts: { title: "短い題" } })], [], [photoTemplate]);
+    expect(find(ok, "truncatedText")).toBeUndefined();
+    const ng = buildPrecheckItems([sc({ texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(ng, "truncatedText")?.severity).toBe("action");
+    expect(find(ng, "truncatedText")?.detail).toContain("短くする"); // §2-5＝次の行動
+  });
+
+  // ⚠️ **見た目が解決できない場面は見ない**＝そちらは「場面の見た目」の項目が受け持つ（二度言わない）。
+  it("見た目が分からない場面は見ない", () => {
+    const items = buildPrecheckItems([sc({ templateId: "unknown", texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(items, "truncatedText")).toBeUndefined();
+  });
+
+  // ⚠️ **小さいこと自体は問題ではない**＝描かれる枠と比べる（ロゴのように小さく置く素材もある）。
+  it("引き伸ばしでぼやける素材を注意にする（そのままでも作れる）", () => {
+    const small: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "小さい写真", filePath: "a.png", metadata: { width: 320, height: 180 } }];
+    const items = buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], small, [photoTemplate]);
+    expect(find(items, "blurryAsset")?.severity).toBe("warning"); // 止めない
+  });
+
+  it("大きい素材なら出さない", () => {
+    const big: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "a.png", metadata: { width: 3840, height: 2160 } }];
+    expect(find(buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], big, [photoTemplate]), "blurryAsset")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **「セリフの長さ」とは別の項目**＝あちらは文字数そのもの、こちらは**尺に対して**多いか。
+   * 両方出ることもあるので、混ぜずに別項目にする。
+   */
+  it("尺に対してセリフが多い場面を注意にする", () => {
+    const scene = sc({ durationSec: 2, narration: { text: "あ".repeat(60), status: "generated" } });
+    const items = buildPrecheckItems([scene], [], [photoTemplate]);
+    expect(find(items, "tooFast")?.severity).toBe("warning");
+    expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
+  });
+
+  it("ふつうの長さなら出さない", () => {
+    const scene = sc({ durationSec: 8, narration: { text: "こんにちは、よろしくお願いします。", status: "generated" } });
+    expect(find(buildPrecheckItems([scene], [], [photoTemplate]), "tooFast")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **掛け合いの場面では「実際に描かれる行の字幕」を見る**（レビュー 🔴・2エージェントが実測で指摘）＝
+   * `layoutScene` を opts なしで1回呼ぶと、行ごとの字幕が**一度も出てこず**、代わりに
+   * **動画に出ない静的字幕**（`texts.subtitle`）が載る。つまり**見落としと誤検出が同時**に起きる。
+   */
+  it("掛け合いは行の字幕を見る（休眠の静的字幕は見ない）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // ⚠️ **30字**にするのが肝＝60字（`MAX_SUBTITLE_LEN_DEFAULT`）を超えると「字幕の長さ」が先に
+    //    出て、こちらは重複として消される（＝dedupe が効いていて検査にならない）。
+    //    枠は 600px・40px・1行＝15字ぶんなので、30字なら**切り詰めだけ**が起きる。
+    const dialogue = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "あ".repeat(30), subtitleEnabled: true }],
+      texts: { subtitle: "短い" },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dialogue], [], [subTemplate]), "truncatedText")).toBeDefined();
+
+    // 休眠の静的字幕だけが長い＝動画には出ない → 出さない
+    const dormant = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "短い", subtitleEnabled: true }],
+      texts: { subtitle: "あ".repeat(30) },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dormant], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **同じ原因で2行出さない**（レビュー 🟡・`transitionShortened` の前例と同じ）＝
+   * 横型の標準テンプレは字幕の枠が広く、「字幕の長さ」で既に出ている場面は切り詰めも必ず重なる
+   *（原因も直し方も同じ）。
+   */
+  it("「字幕の長さ」で既に知らせた場面は、切れている文字を出さない", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // 60字超（「字幕の長さ」が出る）かつ枠に入りきらない（切り詰めも起きる）
+    const scene = sc({ texts: { subtitle: "あ".repeat(120) } });
+    const items = buildPrecheckItems([scene], [], [subTemplate]);
+    expect(find(items, "subtitle")?.severity).toBe("action");
+    expect(find(items, "truncatedText")).toBeUndefined(); // 2行にしない
+  });
+
+  /**
+   * ⚠️ **消すのは「字幕そのもの」だけ**（PR #877 再レビュー 🟡）＝場面ごと丸ごと飛ばしていたので、
+   * 同じ場面にある**別の文字**（見出し・会社名など）の切り詰めまで握りつぶしていた。
+   * そちらは字幕の長さとは**原因も直し方も別**なので、黙って消してはいけない（§2-5）。
+   */
+  it("「字幕の長さ」で知らせた場面でも、別の文字の切れは出す", () => {
+    const mixed: Template = {
+      ...photoTemplate,
+      layers: [
+        { id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 },
+        // 見出しの枠は 200px・40px・1行＝5字ぶん。20字入れると必ず切れる（字幕とは無関係）。
+        { id: "ttl", type: "text", textKey: "title", x: 0, y: 100, w: 200, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [mixed]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 字幕の長さは出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 見出しの切れも出る（握りつぶさない）
+  });
+
+  /**
+   * ⚠️ **自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）＝長い方の字幕で場面が
+   * 「伝えた」になっても、**別のボックスの切り詰め**（原因も直し方も別）まで消してはいけない（§2-5）。
+   * 除外の単位は「字幕アイテム全部」ではなく「**長さを超えている文言**」まで下ろす。
+   */
+  it("字幕が2つあり、長いのは片方だけなら、もう片方の切れは出す", () => {
+    const twoBoxes: Template = {
+      ...photoTemplate,
+      layers: [
+        // 長い方（60字超＝「字幕の長さ」が出る）。枠は広いので切り詰まらない。
+        { id: "subA", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 1800, h: 200, fontSize: 20, maxLines: 6, zIndex: 0 },
+        // 短いが枠が狭い方（切り詰まる）。長さは超えていないので除外の対象にしない。
+        { id: "subB", type: "subtitle", textKey: "caption", x: 0, y: 100, w: 120, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), caption: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [twoBoxes]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 長い方は「字幕の長さ」で出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 短い方の切れは握りつぶさない
+  });
+
+  it("「字幕の長さ」で知らせた場面で、切れているのが字幕だけなら出さない（重複を消す）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "短い" } });
+    expect(find(buildPrecheckItems([scene], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
+  // ⚠️ **問題が無ければ項目を出さない**＝「問題なし」の行で埋めない（読む気を削がない）。
+  it("何も無ければ3つとも出さない", () => {
+    const items = buildPrecheckItems([sc({ texts: { title: "題" }, durationSec: 8 })], [], [photoTemplate]);
+    for (const id of ["truncatedText", "blurryAsset", "tooFast"]) expect(find(items, id)).toBeUndefined();
+  });
+});
