@@ -89,7 +89,7 @@ function joinVoiceFailure(e: unknown, before: NarrationStatus, hasAudio: boolean
 }
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
-import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
+import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -455,6 +455,12 @@ interface ProjectState {
   _narrationRunSeq: number;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
+  /**
+   * 読み方の聞き比べ（ADR-0037 決定6・#350）。**読みと下がる場所をその場で鳴らす**。
+   * ⚠️ 辞書には**まだ入れていない**ものを聞くので、辞書経由（言葉→読み）ではなく
+   * **読みをそのまま読ませて**アクセントだけ差し替える＝登録前に確かめられる。
+   */
+  synthesizeReading: (yomi: string, accentType: number) => Promise<string>;
   // ── Undo/Redo（ADR-0020・#211）。文書slice（meta/parts/scenes）のスナップショット履歴。assets は対象外。 ──
   /** 過去（undo で戻る先）。末尾が直近の「編集前」。 */
   past: DocSnapshot[];
@@ -2298,6 +2304,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 音声は履歴外＝状態変更だけでも未保存にして自動保存の対象にする（#390 の生成系と同じ扱い）。
       saveStatus: "idle",
     }));
+  },
+  synthesizeReading: async (yomi, accentType) => {
+    const v = resolveNarrationVoice({ text: yomi, status: NARRATION_STATUS.none }, get().meta.voiceSettings);
+    return synthesizeWithAccent(yomi, accentType, v);
   },
   synthesizePreview: async () => {
     const text = "こんにちは。ナレーションの聞こえ方を確認します。";

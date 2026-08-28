@@ -1316,7 +1316,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 画面を離れると、着地したぶんを**誰も書かない**＝開き直すと作った声と合わせた長さが
       // 黙って消える（音声ファイルだけ残る）。取り込み（`runImport`）が同じ穴を同じ形で塞いでいる。
       void get().saveTimelineProject();
-    } catch {
+    } catch (e) {
+      // ⚠️ **合成側が返した文言があればそれを出す**（PR #883 レビュー）＝この境界は「失敗を文字列で
+      // 投げる」慣習（Rust の `invoke` が拒否する形）で、読み方の反映に失敗したときの次の行動
+      //（`READING_DICT_SYNC_FAILED`）もここを通る。捨てると「しばらくしてから、もう一度」＝
+      // 何度やっても同じ理由で失敗する、効かない案内になる（§2-5）。場面形式は `joinVoiceFailure` が同じ形。
+      const failedMessage = typeof e === "string" ? e : VOICE_FAILED_MESSAGE;
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
       const failed = now?.clips.find((c) => c.id === clipId);
@@ -1333,7 +1338,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (now && now.projectId === doc.projectId && failed && sameInput) {
         // 上と同じ理由＝**作り始める前が「作成済み」なら作れなかったことにしない**（#755-3）。
         setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
-        set({ voiceError: `${VOICE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
+        set({ voiceError: `${failedMessage}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
       }
       clearIfMine();

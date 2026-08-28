@@ -220,6 +220,74 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
+/// appData/readingdict.json（読み方辞書・全プロジェクト共通＝ADR-0037 決定1）。
+///
+/// ⚠️ **正典はアプリが持つ**＝エンジンを入れ替えても、外部エンジンを指しても同じ読みになる。
+/// エンジン側の辞書（`%LOCALAPPDATA%` の voicevox-engine 配下）は**そこへ映したもの**で、
+/// OS 上の固定パスを他の VOICEVOX と共有する（`--user_dict_path` に相当するオプションが無い）。
+fn reading_dict_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("readingdict.json"))
+}
+
+/// 読み方辞書を読む。**無ければ空**（初回起動＝エラーにしない）。検証は呼び出し側（§2-2）。
+#[tauri::command]
+fn load_reading_dict(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = reading_dict_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// 読み方辞書を書く（丸ごと置き換え）。JSON として読めない本文は**書かない**
+/// ＝次に開けないファイルを作らない（`save_user_template` と同じ流儀）。
+#[tauri::command]
+fn save_reading_dict(app: tauri::AppHandle, dict_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&dict_json).map_err(|e| e.to_string())?;
+    let path = reading_dict_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, &dict_json).map_err(|e| e.to_string())
+}
+
+/// 読み方辞書を、利用者が選んだ場所へ書き出す（ADR-0037 決定8）。
+///
+/// ⚠️ **汎用の「どこへでも書ける」コマンドにしない**（PR #883 レビュー）＝IPC の口は用途ごとに
+/// 狭く保つ。JSON として読めない本文は書かず、拡張子も `.json` に限る（次に読み込めるものだけ作る）。
+#[tauri::command]
+fn export_reading_dict(path: String, dict_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&dict_json).map_err(|e| e.to_string())?;
+    let p = PathBuf::from(&path);
+    if !is_json_path(&p) {
+        return Err("読み方の一覧は .json で保存してください。".to_string());
+    }
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&p, &dict_json).map_err(|e| e.to_string())
+}
+
+/// 読み方辞書を、利用者が選んだファイルから読む（ADR-0037 決定8）。中身の検証は呼び出し側（§2-2）。
+#[tauri::command]
+fn import_reading_dict(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !is_json_path(&p) {
+        return Err("読み方の一覧は .json のファイルを選んでください。".to_string());
+    }
+    fs::read_to_string(&p).map_err(|e| e.to_string())
+}
+
+/// 拡張子が `.json` か（大文字小文字は問わない）。
+fn is_json_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+}
 /// appData/user_fonts ディレクトリ（持ち込みフォント・ADR-0038・#261）。作成は呼び出し側。
 ///
 /// ⚠️ **プロジェクトには入れない**＝アプリが**再配布経路にならない**ようにする（`13 §6`）。
@@ -608,6 +676,15 @@ pub fn run() {
             save_user_template,
             load_user_templates,
             delete_user_template,
+            load_reading_dict,
+            save_reading_dict,
+            export_reading_dict,
+            import_reading_dict,
+            voicevox::voicevox_user_dict_list,
+            voicevox::voicevox_user_dict_add,
+            voicevox::voicevox_user_dict_update,
+            voicevox::voicevox_user_dict_delete,
+            voicevox::voicevox_synthesize_with_accent,
             list_user_fonts,
             import_user_font,
             read_user_font,
