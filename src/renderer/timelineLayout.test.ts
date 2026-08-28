@@ -426,3 +426,39 @@ describe('isItemOfClip（描いたアイテムがどの部品のものか・#746
     expect(isItemOfClip('clip_001', 'clip_001')).toBe(false);
   });
 });
+
+/**
+ * 体裁が「運ばれる」（PR #879 レビュー 🔴）。
+ *
+ * ⚠️ **`spatial` の一覧に無いものは、FREE 要素へ写すときに黙って落ちる**（型には生えているので
+ * 気づけない）。#264 で影・字間を足したとき、ここだけ漏れて**タイムラインの文字は影も字間も
+ * 描かれなかった**。**経路ごとにテストを持つ**ことで、次に体裁の項目を足したときも同じ形で気づける。
+ */
+describe('文字クリップの体裁が運ばれる（#264・#879）', () => {
+  it('影と字間が FREE 要素へ写る', () => {
+    const clip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002',
+      startSec: 0, durationSec: 5, x: 0, y: 0, w: 800, h: 200,
+      text: 'あいう', fontSize: 40,
+      letterSpacing: 0.1,
+      shadow: { enabled: true, color: '#123456', blur: 4, dx: 2, dy: 3 },
+    } as unknown as TimelineClip;
+    const d = doc({ tracks: [{ id: 'track_002', kind: TRACK_KIND.visual }], clips: [clip] });
+    const item = layoutTimelineAt(d, 1, opts).items.find((i) => i.kind === 'text');
+    expect(item).toMatchObject({ letterSpacing: 0.1, shadow: { color: '#123456', blur: 4 } });
+  });
+
+  // ⚠️ **描いた絵にも出ている**＝写るだけでなく、実際に SVG へ出ることまで見る。
+  it('描いた絵にも影と字間が出る', () => {
+    const clip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002',
+      startSec: 0, durationSec: 5, x: 0, y: 0, w: 800, h: 200,
+      text: 'あいう', fontSize: 40, letterSpacing: 0.1,
+      shadow: { enabled: true, color: '#123456' },
+    } as unknown as TimelineClip;
+    const d = doc({ tracks: [{ id: 'track_002', kind: TRACK_KIND.visual }], clips: [clip] });
+    const svg = layoutToSvg(layoutTimelineAt(d, 1, opts));
+    expect(svg).toContain('letter-spacing="4"');
+    expect(svg).toContain('flood-color="#123456"');
+  });
+});

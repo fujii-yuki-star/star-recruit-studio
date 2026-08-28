@@ -33,7 +33,7 @@ import { createAnimationId, createClipId, createGroupId, createTrackId } from '.
 import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
-import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields } from '../template/textStyle';
 import { stackedSubtitleBands } from '../text/subtitleBands';
 import { wrapText } from '../text/textWrap';
 import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene, Texts } from '../project/types';
@@ -430,7 +430,8 @@ export interface BakedLineSubtitle {
  *   （自由配置と同じ語彙）。そこで帯の**上端**（`stackedSubtitleBands` の `top`）を y に使う＝
  *   アンカーの違いを座標へ翻訳する（`freeLayoutFromPlacedContent` の `subtitleTopY` と同じ考え方だが、
  *   **行ごとに文が決まっている**ので最大行数へ寄せる必要がなく、実際の折返し行数で正確に置ける）。
- * - 体裁（大きさ・色・縁取り・帯）は場面の上書きを解決した実効値（`resolveTextStyle`）＝描画と同じ。
+ * - 体裁（大きさ・色・縁取り・**影・字間**・帯）は場面の上書きを解決した実効値（`freeTextStyleFields`）＝描画と同じ。
+ *   ⚠️ **項目を手で並べない**（PR #879 再レビュー 🔴）＝並べると新しい項目を足すたびに写し漏れる。
  */
 export function bakeLineSubtitles(
   scene: Scene,
@@ -444,7 +445,7 @@ export function bakeLineSubtitles(
   for (const layer of template.layers) {
     if (layer.type !== LAYER_TYPE.subtitle || isHiddenByGroup(layer.id, groups)) continue; // 描かれない層は焼かない
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
-    const style = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+    const style = freeTextStyleFields(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
     const maxLines = layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
     // 同時に流れる行は1つの窓を共有する＝窓ごとにまとめて段積みする（描画と同じ積み方）。
     const byWindow = new Map<string, typeof windows[number][]>();
@@ -481,15 +482,14 @@ export function bakeLineSubtitles(
             h: boxH,
             ...(cg.rotation ? { rotation: normalizeDeg(cg.rotation) } : {}),
             text: x.sub.text,
-            fontSize: style.fontSize,
-            color: style.color,
-            fontWeight: style.fontWeight,
+            // ⚠️ **体裁は `freeTextStyleFields` に丸ごと任せる**（PR #879 再レビュー 🔴）＝
+            // ここで項目を手で並べていたため、**影・字間がそもそも配線されておらず**、
+            // 背景帯も場面別の上書き（`scene.textStyles[key].background`）を見ていなかった。
+            // 数え上げる場所を1つにすれば、`TextStyle` が増えてもここは無変更で済む。
+            ...style,
             // フォントは**テンプレクリップと同じ解決**（種別ごと→場面）。渡さないと同じ場面で本文と字幕の
             // 字体が割れる（1フレームに複数クリップが混ざる本形式では、クリップが受け皿・§7.6.4）。
             ...(fontIdFor(scene, layer.textKey) != null ? { fontId: fontIdFor(scene, layer.textKey) } : {}),
-            ...(style.strokeColor != null ? { strokeColor: style.strokeColor } : {}),
-            ...(style.strokeWidth != null ? { strokeWidth: style.strokeWidth } : {}),
-            ...(layer.background != null ? { background: layer.background } : {}),
           },
         });
       });

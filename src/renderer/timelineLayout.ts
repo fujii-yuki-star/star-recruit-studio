@@ -135,6 +135,10 @@ export function freeElementFromClip(clip: TimelineClip, canvas: { width: number;
     'name', 'assetId', 'fit', 'text', 'fontSize', 'color', 'fontWeight', 'fontId', 'lineHeight',
     'textAlign', 'shapeType', 'fillColor', 'opacity', 'radius', 'strokeColor', 'strokeWidth',
     'background', 'hidden', 'locked',
+    // ⚠️ **新しい体裁の項目もここへ足す**（PR #879 レビュー 🔴）＝この一覧に無いものは
+    // FREE 要素へ写すときに**黙って落ちる**（型には生えているので気づけない）。#264 で影・字間を
+    // 足したとき、ここだけ漏れて**タイムラインの文字は影も字間も描かれなかった**。
+    'letterSpacing', 'shadow',
   ] as const satisfies readonly (keyof FreeElement & keyof TimelineClip)[];
   for (const key of spatial) {
     const v = clip[key];

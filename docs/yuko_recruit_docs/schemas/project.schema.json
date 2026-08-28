@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.26" },
+    "schemaVersion": { "const": "1.27" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -404,6 +404,8 @@
         "radius": { "type": "number", "minimum": 0 },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
         "strokeWidth": { "type": "number", "minimum": 0 },
+        "letterSpacing": { "type": "number", "minimum": -0.5, "maximum": 2, "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。" },
+        "shadow": { "$ref": "#/$defs/TextShadow" },
         "background": {
           "type": "object",
           "additionalProperties": false,
@@ -448,7 +450,32 @@
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "fontWeight": { "enum": ["normal", "bold"] },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 }
+        "strokeWidth": { "type": "number", "minimum": 0 },
+        "letterSpacing": { "type": "number", "minimum": -0.5, "maximum": 2, "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。" },
+        "shadow": { "$ref": "#/$defs/TextShadow" },
+        "background": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "radius": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "TextShadow": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "文字の影（#264）。enabled のときだけ描く。未指定/false＝影なし（従来の出力は不変）。blur/dx/dy は canvas px。",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "blur": { "type": "number", "minimum": 0 },
+        "dx": { "type": "number" },
+        "dy": { "type": "number" }
       }
     },
     "AssetRefs": {

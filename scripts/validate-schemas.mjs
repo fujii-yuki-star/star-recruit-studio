@@ -273,6 +273,12 @@ const tlAccept = [
   ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
   ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  // 文字の体裁（#264・ADR-0032 追補3＝両形式に効く共有の語彙）。
+  // ⚠️ **タイムライン側の schema は `$ref` ではなく同じ形を書き写している**（`fontId`・`strokeWidth`・
+  // `background` も同様）。書き足したとき**片方だけになりやすい**ので、両方に効いていることを
+  // ここで固定する（実際、最初は場面形式にしか足しておらず、この検査で気づいた）。
+  ['timeline: 字間（letterSpacing）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: 0.1 })],
+  ['timeline: 影（shadow）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
   // 読み上げクリップ（1.1・#628）。声は素材ではなく「中身」（読み上げ文＋話者）を持つ。
   ['timeline: 読み上げクリップ（voice）を許容（1.1）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 3, status: 'none' } })],
   ['timeline: 読み上げは話者/速度なし（既定を継承）でも許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none' } })],
@@ -311,6 +317,9 @@ const tlReject = [
   ['timeline: speed 0 は拒否（exclusiveMinimum＝止まった素材にしない）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_004', startSec: 0, durationSec: 1, speed: 0 })],
   ['timeline: bundledBgmId 未知は拒否（曲の一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_005', startSec: 0, durationSec: 1, bundledBgmId: 'nope' })],
   ['timeline: fontId 未知は拒否（フォント一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'old-font' })],
+  ['timeline: 字間の範囲外（3em）は拒否＝制約も場面形式と同じ（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: 3 })],
+  ['timeline: 影の未知フィールド(spread)は拒否＝同じ形（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, spread: 4 } })],
+  ['timeline: 影の色が非hexは拒否（場面形式と同じ制約・#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, color: 'black' } })],
   ['timeline: rotation 360（=0と重複）は除外（exclusiveMaximum・場面形式と同じ）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, rotation: 360 })],
   ['timeline: 未知の図形(hexagon)は拒否', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, shapeType: 'hexagon' })],
   ['timeline: color 非hexは拒否', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, color: 'white' })],

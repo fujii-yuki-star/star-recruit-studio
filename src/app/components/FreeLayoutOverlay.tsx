@@ -12,6 +12,7 @@ import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 // インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
 import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
+import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import { hexToRgb } from "../../domain/format/color";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
@@ -84,6 +85,17 @@ function bandStyle(el: FreeElement): { background: string; borderRadius?: number
   const rgb = bg ? hexToRgb(bg.color) : null;
   if (!bg || !rgb) return { background: "transparent" };
   return { background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bg.opacity})`, borderRadius: bg.radius };
+}
+
+/**
+ * 影の色（CSS の `text-shadow` 用）。**濃さを色へ畳む**（#264・PR #879 再レビュー ℹ️）＝
+ * CSS の `text-shadow` に不透明度の引数が無いので、`rgba()` にして表す。
+ * 既定は描画側（`enabledShadow`）と同じ定数を見る＝2か所に既定を書かない。
+ */
+function shadowCss(shadow: { color?: string; opacity?: number }): string {
+  const rgb = hexToRgb(shadow.color ?? DEFAULT_SHADOW_COLOR);
+  const a = shadow.opacity ?? DEFAULT_SHADOW_OPACITY;
+  return rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})` : (shadow.color ?? DEFAULT_SHADOW_COLOR);
 }
 
 const DOUBLE_TAP_MS = 350;
@@ -894,6 +906,16 @@ export function FreeLayoutOverlay({
                   // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
                   ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
                     ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
+                    : {}),
+                  // 字間・影（#264）も同じ TextItem 内＝伏せると消える。**編集中だけ字が詰まって影が消える**のを
+                  // 防ぐため近似再現する（PR #879 再レビュー ℹ️）。字間は em＝文字サイズに対する割合なので
+                  // 拡大率に依らない。影は px なので拡大率を掛ける（濃さは色へ畳む＝CSS の text-shadow に
+                  // 不透明度の引数が無いため）。
+                  ...(el.letterSpacing ? { letterSpacing: `${el.letterSpacing}em` } : {}),
+                  ...(el.shadow?.enabled && viewScale > 0
+                    ? {
+                        textShadow: `${(el.shadow.dx ?? 0) * viewScale}px ${(el.shadow.dy ?? 0) * viewScale}px ${(el.shadow.blur ?? 0) * viewScale}px ${shadowCss(el.shadow)}`,
+                      }
                     : {}),
                   overflow: "hidden", // はみ出しはSVG側の maxLines と揃えて見せない（実描画に寄せる）
                 }}
