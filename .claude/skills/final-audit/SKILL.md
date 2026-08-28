@@ -22,7 +22,7 @@ description: 機能・リリース単位の出口監査を実行する司令塔�
 
 ### 2. 機械層
 
-- `npm run check:frontend`（lint→typecheck→test→validate:schemas）。Rust 対象なら `npm run check:rust` も。
+- `npm run check:frontend`（lint→typecheck→test→validate:schemas）。Rust 対象なら **`npm run check:rust`（check→fmt→clippy）と `npm run check:rust:test`** も（⚠️ fmt/clippy を省かない＝CI と同じ3つ）。
 - **赤があれば監査を始めない**（最優先の🔴として報告して終了。壊れたコードの監査は無駄撃ち）。
 
 ### 3. 入力の組み立て（コンテキスト制御＝このスキルの中心責務）
