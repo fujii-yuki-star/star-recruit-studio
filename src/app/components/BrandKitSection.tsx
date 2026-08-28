@@ -20,6 +20,7 @@ import {
 
 export function BrandKitSection() {
   const brandKit = useProjectStore((s) => s.brandKit);
+  const undo = useProjectStore((s) => s.undo);
   const userFonts = useProjectStore((s) => s.userFonts);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
@@ -56,7 +57,11 @@ export function BrandKitSection() {
     // ⚠️ **できたときだけ「反映しました」と言う**（PR #888 レビュー 🟡・§2-5）＝ロゴの取り込みは
     // 失敗しうる（置き場から消えている等）。理由はこの画面には出ないので、ここで受け取って出す。
     const r = await applyBrandKit();
-    if (r.ok) setNotice("この動画に反映しました。元に戻すときは「取り消す」を押してください。");
+    // ⚠️ **この画面には「取り消す」が無い**（α-6 出口監査 🟡30）＝`UndoRedoButtons` は
+    // たたき台・公開前チェック・編集のツールバーにしか置いていない。**その場に押すものが無い**のに
+    // 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
+    // 知らせの中に戻す導線を出す。
+    if (r.ok) setNotice("この動画に反映しました。");
     else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
   }
 
@@ -165,7 +170,20 @@ export function BrandKitSection() {
               </button>
             </>
           )}
-          {notice && <p className="field-hint mt">{notice}</p>}
+          {notice && (
+            <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
+              <p className="field-hint" style={{ margin: 0 }}>{notice}</p>
+              {/* ⚠️ **その場で戻せるようにする**（α-6 出口監査 🟡30）＝この画面には共通の
+                  「取り消す」が無いので、案内するだけだと押すものが見つからない（§2-5）。 */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { undo(); setNotice(""); }}
+              >
+                元に戻す
+              </button>
+            </div>
+          )}
           {error && <p className="form-error mt" role="alert">{error}</p>}
         </div>
       )}

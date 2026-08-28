@@ -45,6 +45,13 @@ export function AudioAutoField({ disabled }: { disabled?: boolean }) {
   return (
     <div className="field">
       <span className="field-label">音の自動調整</span>
+      {/* ⚠️ **仕上がり確認では効かないことを言う**（α-6 出口監査 [プ]・§2-5）＝同じ画面の字幕の欄は
+          「仕上がり確認でも同じ設定で表示されます」と**明記している**のに、音だけ何も言っていなかった。
+          #257/#259 は ADR-0032 追補4 で「書き出し時の処理」と決めたので、確認の再生には出ない。
+          ⚠️ **実装を確認にも効かせる**のは追補4 に反するので採らない（言葉で揃える）。 */}
+      <p className="field-hint">
+        ここでの調整は<strong>保存した動画にだけ</strong>入ります。仕上がり確認の再生では、調整前の音のまま鳴ります。
+      </p>
 
       <label className="checkbox-row">
         <input

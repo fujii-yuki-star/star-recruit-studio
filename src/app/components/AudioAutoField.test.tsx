@@ -24,6 +24,17 @@ describe("AudioAutoField", () => {
     expect(container.textContent).not.toMatch(/ダッキング|ノーマライズ|LUFS|サイドチェイン|dB/i);
   });
 
+  /**
+   * ⚠️ **仕上がり確認では効かないことを言う**（α-6 出口監査 [プ]・§2-5）＝同じ画面の字幕の欄は
+   * 「仕上がり確認でも同じ設定で表示されます」と明記しているのに、音だけ何も言っていなかった。
+   * #257/#259 は ADR-0032 追補4 で「書き出し時の処理」と決めたので、確認の再生には出ない。
+   */
+  it("仕上がり確認では効かないことを画面に書く（黙って違わない）", () => {
+    render(<AudioAutoField />);
+    expect(screen.getByText(/保存した動画にだけ/)).toBeInTheDocument();
+    expect(screen.getByText(/仕上がり確認の再生では/)).toBeInTheDocument();
+  });
+
   it("未設定でも既定（両方する）で表示する", () => {
     render(<AudioAutoField />);
     expect(screen.getByRole("checkbox", { name: /BGMを控えめにする/ })).toBeChecked();
