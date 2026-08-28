@@ -3,6 +3,7 @@
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
+import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
@@ -136,6 +137,12 @@ export function buildPrecheckItems(
   missingAssetIds?: readonly string[],
   /** 動画全体の BGM の素材 id（`meta.bgmSettings.assetId`）。使用中に数える（#348 レビュー）。 */
   projectBgmAssetId?: string | null,
+  /**
+   * 動画全体のフォント（`meta.videoSettings.fontId`）と、いま持っている持ち込みフォントの id（#261）。
+   * ⚠️ **`availableUserFontIds` の省略＝調べていない**（「全部そろっている」ではない）＝
+   * 調べられない場で嘘の「問題なし」を出さない（`missingAssetIds` と同じ流儀）。
+   */
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
@@ -220,6 +227,26 @@ export function buildPrecheckItems(
         severity: "action",
       });
     }
+  }
+
+  // 見つからない持ち込みフォント（#261・ADR-0038）。⚠️ **黙って別の字体の動画を出さない**（§2-5）＝
+  // 描画は既定へ倒れてよいが、**書き出しは止める**（`blocksExport`）。字体が変わった動画を
+  // 「成功しました」として出すと、利用者は見るまで気づけない。
+  const missingFonts = missingUserFontIds(
+    usedUserFontIds(scenes, fonts?.projectFontId, templates),
+    fonts?.availableUserFontIds,
+  );
+  if (missingFonts.length > 0) {
+    items.push({
+      id: "missingFont",
+      label: "見つからない文字の形",
+      detail:
+        `この動画で使っている文字の形（フォント）が${missingFonts.length}つ見つかりません。` +
+        `このまま書き出すと**別の字**になります。設定の「文字の形」から取り込み直すか、` +
+        `使っている場面で別の文字の形を選び直してください。`,
+      severity: "action",
+      blocksExport: true,
+    });
   }
 
   // 自由配置（FREE 場面）の確認：要素が画面外・素材未解決・サイズ不正などがないか（ADR-0008 §8）。
