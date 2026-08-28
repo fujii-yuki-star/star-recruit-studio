@@ -910,6 +910,35 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     expect(find(items, "truncatedText")).toBeUndefined(); // 2行にしない
   });
 
+  /**
+   * ⚠️ **消すのは「字幕そのもの」だけ**（PR #877 再レビュー 🟡）＝場面ごと丸ごと飛ばしていたので、
+   * 同じ場面にある**別の文字**（見出し・会社名など）の切り詰めまで握りつぶしていた。
+   * そちらは字幕の長さとは**原因も直し方も別**なので、黙って消してはいけない（§2-5）。
+   */
+  it("「字幕の長さ」で知らせた場面でも、別の文字の切れは出す", () => {
+    const mixed: Template = {
+      ...photoTemplate,
+      layers: [
+        { id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 },
+        // 見出しの枠は 200px・40px・1行＝5字ぶん。20字入れると必ず切れる（字幕とは無関係）。
+        { id: "ttl", type: "text", textKey: "title", x: 0, y: 100, w: 200, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [mixed]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 字幕の長さは出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 見出しの切れも出る（握りつぶさない）
+  });
+
+  it("「字幕の長さ」で知らせた場面で、切れているのが字幕だけなら出さない（重複を消す）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "短い" } });
+    expect(find(buildPrecheckItems([scene], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
   // ⚠️ **問題が無ければ項目を出さない**＝「問題なし」の行で埋めない（読む気を削がない）。
   it("何も無ければ3つとも出さない", () => {
     const items = buildPrecheckItems([sc({ texts: { title: "題" }, durationSec: 8 })], [], [photoTemplate]);

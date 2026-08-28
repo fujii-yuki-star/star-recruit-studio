@@ -9,7 +9,7 @@ import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
-import { sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
+import { isSubtitleItem, sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
 import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
@@ -226,11 +226,17 @@ export function buildPrecheckItems(
   // 既に「字幕の長さ」が出ている**ので、切り詰めは必ずそれと重なる（原因も直し方も同じ）。
   // ⚠️ **項目ごと消さない**＝縦型は枠が 44〜46 字ぶんなので、**45〜60 字は「字幕の長さ」を
   // 素通りして切り詰めだけで拾える**（本物の穴を塞いでいる）。
+  // ⚠️ **消すのは「字幕そのもの」だけ**（PR #877 再レビュー 🟡）＝場面ごと丸ごと飛ばしていたので、
+  // 同じ場面にある**別の文字**（見出し・会社名など）の切り詰めまで握りつぶしていた。
+  // そちらは字幕の長さとは**原因も直し方も別**なので、黙って消してはいけない（§2-5）。
   const alreadyTold = new Set(scenes.filter((_, i) => subtitle.nums.includes(i + 1)).map((s) => s.sceneId));
   const truncated = offending((s) => {
-    if (alreadyTold.has(s.sceneId)) return false;
     const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
-    return found != null && truncatedTexts(found.items).length > 0;
+    if (found == null) return false;
+    // 「字幕の長さ」で既に伝えた場面では、**字幕のアイテムだけ**を外して測り直す。
+    // 字幕かどうかは**共有の述語**（`isSubtitleItem`）で見る＝書き出しの「字幕を入れる」OFF と同じ判定（§2-7）。
+    const items = alreadyTold.has(s.sceneId) ? found.items.filter((it) => !isSubtitleItem(it)) : found.items;
+    return truncatedTexts(items).length > 0;
   });
   if (truncated.nums.length > 0) {
     items.push({
