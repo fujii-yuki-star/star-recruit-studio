@@ -445,7 +445,9 @@ fn load_brand_kit(app: tauri::AppHandle) -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// ブランドキットを書く（丸ごと置き換え）。JSON として読めない本文は**書かない**
