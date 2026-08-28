@@ -129,11 +129,14 @@ export function applyDuckingToMix(
  * ⚠️ **「表示の窓」ではなく「実際に鳴っている長さ」で採る**＝掛け合いの行の窓は
  *「次の行が始まるまで」なので、そのまま使うと**声が終わったあとも下げっぱなし**になる。
  * 音声の長さが分からない行（まだ作っていない）は**下げない**＝鳴らない声のために下げない。
+ *
+ * ⚠️ **単独読み上げも「1行」として扱う**（`sceneLines` が `narration` から1行を作る）＝
+ * 場面用と行用で経路を分けない（分けると片方だけ直る）。`lineId` は `line_001`。
  */
 export function resolveSpeechSpans(
   project: Project,
-  /** その行（掛け合い）／その場面（単独）の**作成済み音声の長さ**（秒）。無ければ 0。 */
-  audioDurationFor: (scene: Scene, lineId?: string) => number,
+  /** その行の**作成済み音声の長さ**（秒）。無ければ 0。単独読み上げも `line_001` で引く。 */
+  audioDurationFor: (scene: Scene, lineId: string) => number,
 ): SpeechSpan[] {
   const scenes = project.scenes;
   if (scenes.length === 0) return [];
@@ -144,15 +147,19 @@ export function resolveSpeechSpans(
   scenes.forEach((scene, i) => {
     const base = starts[i];
     const sceneEnd = base + scene.durationSec;
+    // ⚠️ **`sceneLines` は必ず1行以上返す**（単独読み上げは `narration` から1行を作る）＝
+    // 「行が無い」分岐は**一度も通らない**ので持たない（PR #896 レビュー ℹ️）。
+    // 単独読み上げもここを通り、`lineId` は `line_001`（`lineFromNarration` の固定値）。
     const lines = sceneLines(scene);
-    if (lines.length === 0) {
-      const d = audioDurationFor(scene);
-      if (d > 0) out.push({ startSec: base, endSec: Math.min(base + d, sceneEnd) });
-      return;
-    }
-    const segs = lineSegments(scene, {});
+    // ⚠️ **実尺を渡してから窓を採る**（PR #896 レビュー 🔴）＝空の `{}` を渡すと、
+    // **明示の開始秒を持たない行**（＝自動逐次＝既定）の長さが全部 0 になり、
+    // **2行目以降が1行目と同じ位置に潰れる**。本当は鳴っていない所で BGM が下がり、
+    // 鳴っている所で下がらない（§2-5＝設定した意味どおりにならない）。
+    const durations: Record<string, number> = {};
+    for (const line of lines) durations[line.lineId] = audioDurationFor(scene, line.lineId);
+    const segs = lineSegments(scene, durations);
     lines.forEach((line, j) => {
-      const d = audioDurationFor(scene, line.lineId);
+      const d = durations[line.lineId] ?? 0;
       if (d <= 0) return; // まだ作っていない声のために下げない
       const from = base + (segs[j]?.startSec ?? 0);
       out.push({ startSec: from, endSec: Math.min(from + d, sceneEnd) });

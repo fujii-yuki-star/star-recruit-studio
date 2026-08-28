@@ -111,6 +111,42 @@ describe('resolveSpeechSpans（#257）', () => {
     ]);
   });
 
+  /**
+   * ⚠️ **開始秒を書いていない行**（＝自動逐次＝既定）でも、2行目が1行目の**後ろ**から始まる
+   *（PR #896 レビュー 🔴）。以前は行の長さを渡さずに窓を採っていたため**全部 0 秒に潰れ**、
+   * 本当は鳴っていない所で BGM が下がり、鳴っている所で下がらなかった。
+   * ⚠️ 上の「掛け合いは行ごと」のテストは **2行目に `startSec: 10` を明示**していたので、
+   * この経路（`?? cursor`）を踏んでおらず、穴を見つけられなかった。
+   */
+  it('開始秒を書いていない掛け合いは、前の行の音声の長さぶん後ろから始まる', () => {
+    const p = project([
+      lineScene('s1', 20, [
+        { lineId: 'line_001', text: 'あ', status: 'none' },
+        { lineId: 'line_002', text: 'い', status: 'none' },
+        { lineId: 'line_003', text: 'う', status: 'none' },
+      ]),
+    ]);
+    expect(resolveSpeechSpans(p, () => 3)).toEqual([
+      { startSec: 0, endSec: 3 },
+      { startSec: 3, endSec: 6 },
+      { startSec: 6, endSec: 9 },
+    ]);
+  });
+
+  /**
+   * ⚠️ **単独読み上げも「行」として引く**（PR #896 レビュー ℹ️）＝`sceneLines` は必ず1行返すので
+   * 「行が無い」分岐は一度も通らない。**渡す `lineId` は `line_001`**（`lineFromNarration` の固定値）で、
+   * 音声キーの解決は呼ぶ側の `narrationAudioKey` が「明示の行が無ければ場面 id」に倒す。
+   */
+  it('単独読み上げでも行として引く（渡る lineId は line_001）', () => {
+    const seen: (string | undefined)[] = [];
+    resolveSpeechSpans(project([scene('s1', 10)]), (_s, lineId) => {
+      seen.push(lineId);
+      return 3;
+    });
+    expect(seen).toEqual(['line_001']);
+  });
+
   /** ⚠️ 時間軸は BGM 区間と同じ（`transitionTimeline`）＝切り替えで詰まったぶんも同じように見る。 */
   it('切り替えで詰まったぶんを見る（BGM 区間と同じ時間軸）', () => {
     const p = project([

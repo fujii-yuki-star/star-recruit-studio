@@ -25,7 +25,7 @@ import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
-import { lineAudioKey } from "../../domain/project/narrationLines";
+import { narrationAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
@@ -305,8 +305,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         templateById,
         resolveExportSrc,
         (scene, lineId) => ({
-          // 掛け合いは行ごとの音声キー（lineAudioKey）、単一 narration は従来の sceneId（ADR-0015 PR-E）。
-          audioBase64: snapNarration[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
+          // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
+          // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
+          // 場面が明示の行を持つかで決めるので、どちらの渡し方でも同じ答えになる。
+          audioBase64: snapNarration[narrationAudioKey(scene, lineId ?? "")],
           narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
         }),
         (scene) => {
@@ -339,8 +341,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // ⚠️ **声が鳴っている区間だけ BGM を下げる**（#257・ADR-0032 追補4＝書き出し時の処理）。
       // 声の長さは**作成済みの音声（WAV）から測る**＝表示の窓（次の行まで）で下げると、
       // 声が終わったあとも下げっぱなしになる。まだ作っていない行は下げない（鳴らない声のために下げない）。
+      // ⚠️ **キーの規則は domain に1つ**（`narrationAudioKey`）＝掛け合いは行ごと・単独は場面 id。
+      // ここで分岐を書くと、単独読み上げだけ引けず**ダッキングが効かない**（PR #896 レビュー）。
       const speech = resolveSpeechSpans(proj, (scene, lineId) => {
-        const a = snapNarration[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId];
+        const a = snapNarration[narrationAudioKey(scene, lineId)];
         return a ? wavDurationSec(a) : 0;
       });
       const ducked = applyDuckingToMix(planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC), speech, snapMeta.videoSettings.audioAuto);
