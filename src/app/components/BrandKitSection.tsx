@@ -27,6 +27,11 @@ export function BrandKitSection() {
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const hasLogoAsset = useProjectStore((s) => s.assets.some((a) => a.assetType === ASSET_TYPE.logo));
+  // 覚えている字体が、同梱にも手持ちの一覧にも無いか（外した／まだ読めていない）。
+  const missingBrandFont =
+    brandKit.fontId != null
+    && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
+    && !userFonts.some((f) => f.id === brandKit.fontId);
   const hasProject = useProjectStore((s) => s.scenes.length > 0);
   const [logos, setLogos] = useState<LibraryAsset[]>([]);
   const [newColor, setNewColor] = useState("#1f9ea3");
@@ -88,6 +93,13 @@ export function BrandKitSection() {
           {/* ⚠️ **手持ちの文字の形も既定にできる**（ADR-0038 決定7・α-6 出口監査 🔴1）＝
               「`fontId` が `string` になれば持ち込みを既定にできる」と決めていたのに、
               ここが同梱3種のままで**決定が成立していなかった**。 */}
+          {/* ⚠️ **覚えているのに一覧に無い字体の受け皿を置く**（α-6 出口監査・再監査で発覚）＝
+              「外す」はキットに触らないので、既定にしていた字体を外すと**一致する選択肢が消え**、
+              覚えているのに画面は「覚えない（毎回選ぶ）」を見せる（そのまま新しい動画へは焼き込まれる）。
+              ⚠️ `FontPicker` で潰した失敗と**同型**＝片方だけ直すと同じ穴が残る。 */}
+          {missingBrandFont && (
+            <option value={brandKit.fontId}>取り込んだ文字の形（見つかりません）</option>
+          )}
           {userFonts.map((f) => (
             <option key={f.id} value={f.id}>{f.displayName}（手持ち）</option>
           ))}

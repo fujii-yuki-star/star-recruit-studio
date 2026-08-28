@@ -64,4 +64,28 @@ describe("BrandKitSection", () => {
     render(<BrandKitSection />);
     expect(screen.getByRole("option", { name: /会社の明朝/ })).toBeInTheDocument();
   });
+
+  /**
+   * ⚠️ **覚えているのに一覧に無い字体の受け皿**（再監査で発覚＝この差分で到達可能になった）。
+   * 「外す」はキットに触らないので、既定にしていた字体を外すと一致する選択肢が消え、
+   * **覚えているのに「覚えない（毎回選ぶ）」を見せる**（そのまま新しい動画へは焼き込まれる）。
+   * `FontPicker` で潰した失敗と**同型**。
+   */
+  it("覚えている字体が一覧に無くても、覚えていないようには見せない", () => {
+    useProjectStore.setState({ brandKit: { fontId: "user_font_009" }, userFonts: [] } as never);
+    render(<BrandKitSection />);
+    const sel = screen.getByLabelText("いつもの文字の形") as HTMLSelectElement;
+    expect(sel.value).toBe("user_font_009");
+    expect(screen.getByRole("option", { name: /見つかりません/ })).toBeInTheDocument();
+  });
+
+  /** ⚠️ 一覧にある字体では、その受け皿を出さない（いつも出ていたら意味が無い）。 */
+  it("覚えている字体が一覧にあれば、受け皿は出さない", () => {
+    useProjectStore.setState({
+      brandKit: { fontId: "user_font_001" },
+      userFonts: [{ id: "user_font_001", fileName: "a.ttf", displayName: "会社の明朝" }],
+    } as never);
+    render(<BrandKitSection />);
+    expect(screen.queryByRole("option", { name: /見つかりません/ })).not.toBeInTheDocument();
+  });
 });
