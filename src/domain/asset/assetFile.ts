@@ -111,3 +111,42 @@ export function newAssetFrom(
     fileName,
   };
 }
+
+/**
+ * 動画から切り出した静止画の**表示名**（#349）。元の動画の名前と、切り出した時間から作る。
+ *
+ * ⚠️ **一覧で見分けられる名前にする**＝「無題」が並ぶと、どの動画のどこを切ったのか分からない。
+ * ⚠️ **秒は「分:秒」で書く**（`75` ではなく `1:15`）＝画面に出る文字なので読める形にする（§2-3）。
+ */
+export function frameAssetName(videoName: string, atSec: number): string {
+  const t = Math.max(0, atSec);
+  const mm = Math.floor(t / 60);
+  const ss = Math.floor(t % 60);
+  return `${videoName || UNNAMED_ASSET_NAME}（${mm}:${String(ss).padStart(2, '0')}）`;
+}
+
+/**
+ * 動画から切り出した静止画1つぶん（#349）。**普通の画像素材として登録する**
+ *（ADR-0024＝Asset は元素材の源泉。切り出した絵はそれ自体が1つの素材）。
+ *
+ * ⚠️ **PNG で固定**＝切り出しは原寸のまま出す（縮めない・劣化させない）ので、
+ * 非可逆にしない。⚠️ **出自（どの動画のどこか）は表示名だけに持たせる**＝
+ * `Asset` へフィールドを足すと schema のバンプが要り、**使う側もいない**（#349 の「出自を残す場合のみ」）。
+ */
+export function newFrameAsset(
+  videoName: string,
+  atSec: number,
+  existingIds: readonly string[],
+): { asset: Asset; fileName: string } {
+  const assetId = createAssetId(existingIds);
+  const fileName = `${assetId}.png`;
+  return {
+    asset: {
+      assetId,
+      assetType: ASSET_TYPE.image,
+      displayName: frameAssetName(videoName, atSec),
+      filePath: `assets/${fileName}`,
+    },
+    fileName,
+  };
+}

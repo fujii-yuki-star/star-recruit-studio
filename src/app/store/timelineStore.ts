@@ -2,8 +2,9 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation } from "../../domain/constants";
-import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { exceedsInlineAssetLimit, fileNameOf, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
@@ -185,6 +186,21 @@ export interface TimelineState {
    * （絵として描く用）ので、実映像を流すにはこちらを使う。無い＝流せない＝静止のまま（穴を開けない）。
    */
   videoSrcById: Record<string, string>;
+  /**
+   * 帯に敷く絵（#332）＝音の波形／動画のコマ列。assetId → 中身。
+   *
+   * ⚠️ **文書に持たない**（作り直せるもの＝Issue の指定・既存の代表フレームと同じ扱い）。
+   * `null`＝作ろうとして作れなかった（もう一度たのまない＝同じ失敗を繰り返さない）。
+   */
+  analysisByPath: Record<string, AssetAnalysis | null>;
+  /**
+   * 帯に敷く絵を**必要になったときだけ**作る（#332）。渡すのは部品そのもの。
+   *
+   * ⚠️ **同じものに2回たのまない**＝帯は再描画のたびに呼ばれるので、素通しにすると
+   * FFmpeg が何度も起動する。作った／作れなかった、のどちらも記録して打ち止めにする。
+   * ⚠️ **鍵はファイルの場所**＝素材の番号ではない（読み上げは素材を持たず、作成済みの音声を直に指す）。
+   */
+  ensureClipAnalysis: (clipId: string, barWidthPx: number) => void;
   /**
    * 素材の**実寸**（assetId → px・#634）。絵を測らないと分からないので**画面が測って入れる**。
    * プレビューと書き出しが同じ値を見る＝同じ絵になる（ADR-0001）。測れていない素材は入らない。
@@ -591,7 +607,102 @@ function writesFor(projectId: string): Promise<void> | undefined {
  */
 let voiceRunSeq = 0;
 
+// ── 帯に敷く絵（#332）の順番待ち ─────────────────────────────────
+// ⚠️ **`emptyState()` から呼ぶので、あちらより前に置く**＝後ろに置くと、store を組み上げる
+// 途中（`...emptyState()`）で**まだ初期化されていない**ものに触って落ちる（実際に踏んだ）。
+
+/**
+ * 帯に敷く絵を作るとき、**同時に走らせる数**（#332）。
+ *
+ * ⚠️ **一斉に立てない**＝帯が20本並んでいると FFmpeg が20本同時に立つ（書き出し中でも立つ）。
+ * CPU を取り合って、**いま焼いている動画まで遅くなる**。順番に流せば絵は同じで、
+ * 見え方も「手前から埋まる」だけ。
+ */
+const ANALYSIS_CONCURRENCY = 2;
+
+let analysisRunning = 0;
+/**
+ * いま書き出し中か（順番待ちから取り出すときに見る）。
+ *
+ * ⚠️ **store の外から見る**＝順番待ちはモジュールの持ち物で `get()` を持たないので、
+ * `useTimelineStore.getState()` を直に読む（走り出させないことが唯一の止め方なので、
+ * ここで見ないと止まらない）。
+ */
+function isExportBusyNow(): boolean {
+  try {
+    return isTimelineExportBusy(useTimelineStore.getState().exportRun.phase);
+  } catch {
+    return false; // まだ store が組み上がっていない（起動直後）＝止める理由が無い
+  }
+}
+const analysisQueue: (() => Promise<void>)[] = [];
+/** いまの世代（#332）。文書を手放したら上げる＝前の文書の仕事の結果を捨てる。 */
+let analysisGeneration = 0;
+/** いまの世代を読む（着地したときに「まだ同じ世代か」を見るため）。 */
+function currentAnalysisGeneration(): number { return analysisGeneration; }
+
+/**
+ * 順番待ちを空にする（#332・テスト用）。
+ *
+ * ⚠️ **順番待ちは**（素材番号の予約＝`resetAssetIdReservations` と同じく）**アプリ起動中ずっと残る**
+ *（画面をまたいで効かせるため）。テストは1本ずつが別の起動なので、毎回捨てる。
+ * 捨てないと、前のテストが止めたままの仕事で**次のテストのぶんが順番待ちで止まる**（実際に踏んだ）。
+ */
+export function resetAnalysisQueue(): void {
+  analysisQueue.length = 0;
+  // ⚠️ **世代を上げてから空きも戻す**（レビュー ℹ️）＝単に 0 へ戻すだけだと、走行中の仕事が後から
+  // `finally` で減らして**負になり、同時に走らせる数の上限が黙って上がる**。世代を見て
+  // 「前の世代の仕事は数を戻さない」ことにすれば、負にならずに空きだけ返せる。
+  analysisGeneration += 1;
+  analysisRunning = 0;
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+/**
+ * 待たせている仕事を動かす（#332）。
+ *
+ * ⚠️ **書き出しが終わったときに呼ぶ必要がある**（PR #876 レビュー 🟡）＝`ensureClipAnalysis` は
+ * 積んだ時点で印を付けるので、書き出し中に取り出しを止めたぶんは**次の描画でも二度と
+ * たのまれない**（呼ばないと永久に空の帯が残る）。
+ */
+export function pumpAnalysisQueue(): void {
+  // ⚠️ **取り出すときにも書き出し中を見る**（PR #876 レビュー 🟡）＝関門を積むときだけに
+  // 置くと、**積んだ後に書き出しが始まった**ぶんはそのまま走る（帯が多い文書を開いた直後に
+  // 書き出すと再現する）。`run`/`run_bytes` は `EXPORT_CHILD` に載らず中止でも殺せないので、
+  // 走り出させないことが唯一の止め方。⚠️ **捨てずに残す**＝書き出しが終わったら流す。
+  if (isExportBusyNow()) return;
+  while (analysisRunning < ANALYSIS_CONCURRENCY && analysisQueue.length > 0) {
+    const next = analysisQueue.shift();
+    if (!next) return;
+    analysisRunning += 1;
+    // 失敗しても順番待ちを止めない（絵が1つ出ないだけ）。
+    // 走り出した世代を控える＝捨てられた世代の仕事は**数を戻さない**（負にしない）。
+    // ⚠️ その副作用で、捨てた直後は**旧世代の残りと新世代**が一時的に上限を超えて並ぶことがある
+    //（走り終われば収まる＝自分で収束する）。負にして上限が黙って上がるよりは安全。
+    const born = analysisGeneration;
+    void next().catch(() => {}).finally(() => {
+      if (born === analysisGeneration) analysisRunning -= 1;
+      pumpAnalysisQueue();
+    });
+  }
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+function runAnalysis(job: () => Promise<void>): void {
+  analysisQueue.push(job);
+  pumpAnalysisQueue();
+}
+
+/**
+ * 開いていない状態。**文書を手放す入口はすべてここを通る**（開く・閉じる・読込失敗・手放す）。
+ *
+ * ⚠️ **帯に敷く絵の順番待ちもここで捨てる**（PR #876 レビュー 🔴）＝以前は
+ * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
+ * そこを通らないので、**実機の主要な遷移で一度も走らなかった**。手放した文書のために FFmpeg が
+ * 走り続ける（着地しても捨てるだけの仕事に CPU を使う）。**呼び忘れを構造で防ぐ**ためここへ移す。
+ */
 function emptyState() {
+  resetAnalysisQueue();
   return {
     doc: null,
     loadError: null,
@@ -599,6 +710,7 @@ function emptyState() {
     playheadSec: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
+    analysisByPath: {} as Record<string, AssetAnalysis | null>,
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
@@ -762,6 +874,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
     if (isTimelineExportBusy(get().exportRun.phase)) return;
     releaseSaveGuard();
+    // 順番待ちの片づけは `emptyState()` の中（手放す入口すべてが通る）。
     set({ ...emptyState() });
   },
 
@@ -1008,6 +1121,48 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addAssetByPath: async (path) => {
     await runImport(set, get, path, async (fileName) =>
       await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+
+  ensureClipAnalysis: (clipId, barWidthPx) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    // 出どころの決め方は domain に1つ（`clipAnalysisSource`）＝音の部品・読み上げ・映像の
+    // どれを見るかを画面と store で書き分けない。
+    const src = clipAnalysisSource(clip, (id) => doc.assets.find((a) => a.assetId === id));
+    if (!src) return;
+    // ⚠️ **書き出し中は測らない**（レビュー 🟡・ADR-0032 決定22「走行中は入力を固定」）＝
+    // `run`/`run_bytes` は `EXPORT_CHILD` に載らないので、**中止でもアプリ終了でも殺せない**
+    // FFmpeg が焼いている最中に増える（CPU を取り合う）。
+    // ⚠️ **印を付ける前に返す**＝後ろに置くと、書き出しが終わってもその部品だけ
+    // 「もう一度たのまない」規則で**永久に空**のままになる。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    // ⚠️ **一度たのんだら二度たのまない**（`null` も記録）＝帯は再描画のたびに呼ばれるので、
+    // 素通しにすると FFmpeg が何度も起動する。`in` で見る（`null` を「まだ」と読まない）。
+    if (src.key in get().analysisByPath) return;
+    // 走り出したことを先に印す（同じ帯が続けて呼んでも1回で済む）。
+    set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: null } }));
+    const projectId = doc.projectId;
+    const generation = currentAnalysisGeneration();
+    // ⚠️ **同時に走らせる数を絞る**（`ANALYSIS_CONCURRENCY`）＝帯が20本並んでいると
+    // FFmpeg が20本**同時に**立つ（書き出し中でも立つ）。CPU を取り合って、いま焼いている
+    // 動画まで遅くなる。順番に流せば絵は同じで、見え方も「手前から埋まる」だけ。
+    void runAnalysis(async () => {
+      const result: AssetAnalysis = src.kind === ANALYSIS_KIND.waveform
+        ? { peaks: await audioPeaks(projectId, src.relPath, waveformBuckets(barWidthPx), src.fromSec, src.lengthSec) }
+        : { stripUrl: (await videoFilmstrip(projectId, src.relPath, filmstripFrames(barWidthPx), src.fromSec, src.lengthSec)) ?? undefined };
+      // ⚠️ **待っている間に別の動画へ移っていたら書かない**（`runImport` と同じ流儀）＝
+      // 別の文書の同じ場所の素材に、前の文書の波形が付く。
+      const now = get().doc;
+      if (!now || now.projectId !== projectId) return;
+      // ⚠️ **手放した後の着地は捨てる**＝文書を閉じてから戻ってきた結果を書かない
+      // （同じ動画を開き直したときに、前の並べ方のままの絵が残る）。
+      if (generation !== currentAnalysisGeneration()) return;
+      // 何も取れなかったら `null` のまま（もう一度たのまない）。
+      if (!result.peaks?.length && !result.stripUrl) return;
+      set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: result } }));
+    });
   },
 
   addAssets: async (items) => {
@@ -1467,6 +1622,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         await clearExportFramesStage();
       } finally {
         useExportLockStore.getState().release(EXPORT_OWNER);
+        // ⚠️ **書き出しが終わったら、待たせていた帯の絵を流す**（#332・PR #876 レビュー 🟡）＝
+        // 順番待ちは書き出し中に取り出しを止めるので、ここで動かさないと**永久に空の帯**が残る
+        //（`ensureClipAnalysis` は既に印を付けているので、次の描画では二度とたのまれない）。
+        pumpAnalysisQueue();
       }
     }
   },
@@ -1540,6 +1699,7 @@ type GetState = () => TimelineState;
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
  */
+
 /**
  * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
  * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。

@@ -47,3 +47,13 @@ export async function showOpenReadingDictDialog(): Promise<string | null> {
   });
   return typeof picked === 'string' ? picked : null;
 }
+
+/** 持ち込みフォントのファイルを選ぶ（ADR-0038・#261）。キャンセル時は null。 */
+export async function showOpenFontDialog(): Promise<string | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: '文字の形', extensions: ['ttf', 'otf', 'woff', 'woff2'] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}

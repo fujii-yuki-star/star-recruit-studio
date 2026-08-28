@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { PlayIcon, StopIcon } from "../components/icons";
 import { ReadingDictSection } from "../components/ReadingDictSection";
+import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -380,6 +381,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
 
         {/* 言葉の読み方（ADR-0037・#350）。ナレーターの声のすぐ下＝声にまつわる設定をひとかたまりにする。 */}
         <ReadingDictSection />
+        {/* 持ち込みフォント（ADR-0038・#261）。 */}
+        <UserFontSection />
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (

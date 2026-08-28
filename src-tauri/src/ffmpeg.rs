@@ -1219,6 +1219,222 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// `run` の生バイト版（#332）。stdout を**文字列にせず**そのまま返す。
+///
+/// ⚠️ **PCM は文字列にできない**＝`run` は `from_utf8_lossy` を通すので、音の波形（s16le）を
+/// 通すと**不正なバイトが `U+FFFD` に化けて値が壊れる**。波形専用にここを分ける。
+fn run_bytes(bin: &Path, args: &[String]) -> Result<Vec<u8>, String> {
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+}
+
+/// 素材の**中身が変わったか**を安く見分ける印（#332）。大きさと更新時刻から作る。
+///
+/// ⚠️ **これが無いとキャッシュが化ける**＝保存名は `assets/<assetId>.<ext>` で、`asset_NNN` は
+/// **空き番号を埋める**採番（`createAssetId`）。さらに #347 の「ファイルを選び直す」は
+/// **同じ名前のまま中身を入れ替える**。どちらも「名前は同じで中身が別」を作るので、
+/// 名前だけでキャッシュを引くと**前の動画のコマ列**が出る。
+fn file_stamp(path: &Path) -> String {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return "0_0".to_string(),
+    };
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{}_{}", meta.len(), mtime)
+}
+
+/// 波形の山（#332）。0.0〜1.0 を `buckets` 個返す（音が無い・読めないときは空）。
+///
+/// ⚠️ **素材のバイトを JS に載せない**（ADR-0004・§2-1）＝ここで PCM を受けて**山だけ**を返す。
+/// 5分の曲でも Rust 側で数MBを流すだけで、JS へ渡るのは数百個の数値で済む。
+/// 4000Hz・モノラルまで落とす＝波形の見た目には十分で、読み取り量が桁で減る。
+/// ⚠️ **メインスレッドを塞がない**（#375 と同じ形）＝同期の `#[tauri::command]` は
+/// **UI/IPC のイベントループ上**で走るので、ここで ffmpeg のフル復号を回すと**ウィンドウが応答なし**に
+/// なる。書き出しは**1フレーム＝1 invoke** をフロントが回しているので、塞ぐと**中止も閉じるも効かない**。
+/// 呼び出し側の同時実行の絞り（`ANALYSIS_CONCURRENCY`）は、別スレッドへ逃がして初めて意味を持つ。
+#[tauri::command]
+pub async fn audio_peaks(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    buckets: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<Vec<f32>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        audio_peaks_impl(app, project_id, rel_path, buckets, from_sec, length_sec)
+    })
+    .await
+    .map_err(|e| format!("audio peaks task join: {e}"))?
+}
+
+fn audio_peaks_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    buckets: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<Vec<f32>, String> {
+    // 山の数は画面の都合で決まる。極端な値でメモリを食わないよう範囲に収める。
+    let buckets = buckets.clamp(1, 2000);
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.is_file() {
+        // 見つからないのは #347 が知らせる話＝ここは**空で返す**（波形が出ないだけ）。
+        return Ok(Vec::new());
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    // ⚠️ **置いた範囲だけを測る**＝素材まるごとを測って帯へ伸ばすと、末尾だけを置いた帯に
+    // 頭からの波形が出る。`-ss` は `-i` の前（速い＝そこまで復号しない）、長さは `-t` で切る。
+    let mut args: Vec<String> = vec!["-v".into(), "error".into()];
+    if from_sec > 0.0 && from_sec.is_finite() {
+        args.push("-ss".into());
+        args.push(format!("{from_sec}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if length_sec > 0.0 && length_sec.is_finite() {
+        args.push("-t".into());
+        args.push(format!("{length_sec}"));
+    }
+    args.extend([
+        "-f".to_string(),
+        "s16le".to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-ar".to_string(),
+        "4000".to_string(),
+        "-".to_string(),
+    ]);
+    // ⚠️ **失敗しても空で返す**＝波形は「あると見やすい」もので、無くても編集はできる。
+    // 音の入っていない動画・壊れたファイルで**画面を止めない**（§2-5＝求めることが無い）。
+    let pcm = match run_bytes(&ffmpeg, &args) {
+        Ok(b) => b,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let samples = pcm.len() / 2;
+    if samples == 0 {
+        return Ok(Vec::new());
+    }
+    let mut out = vec![0.0f32; buckets];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let from = samples * i / buckets;
+        let to = (samples * (i + 1) / buckets).max(from + 1).min(samples);
+        let mut peak: i32 = 0;
+        for s in from..to {
+            let v = i16::from_le_bytes([pcm[s * 2], pcm[s * 2 + 1]]) as i32;
+            peak = peak.max(v.abs());
+        }
+        *slot = (peak as f32 / 32768.0).min(1.0);
+    }
+    Ok(out)
+}
+
+/// 動画のコマ列（#332）。`frames` コマを**横に並べた PNG 1枚**を作り、相対パスを返す。
+///
+/// ⚠️ **1枚にまとめる**＝コマごとに別ファイルにすると、帯1本を描くのに N 回の読み込みが要る。
+/// 1枚なら `background-image` で置いて `background-size` で割るだけで済む。
+/// 置き場は `cache/`＝**素材ではない**（#348 の片づけ・#347 の欠損検知が実体と勘違いしない）。
+/// ⚠️ **メインスレッドを塞がない**（`audio_peaks` と同じ理由・#375）。
+#[tauri::command]
+pub async fn video_filmstrip(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    frames: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        video_filmstrip_impl(app, project_id, rel_path, frames, from_sec, length_sec)
+    })
+    .await
+    .map_err(|e| format!("filmstrip task join: {e}"))?
+}
+
+fn video_filmstrip_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    frames: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<String, String> {
+    let frames = frames.clamp(1, 60);
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.is_file() {
+        return Ok(String::new());
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    // 尺が要る（何秒ごとに1コマ取るかを決めるため）。取れなければコマ列は作らない。
+    // ⚠️ **置いた範囲だけを測る**（波形と同じ理由）。範囲が渡っていれば尺を調べ直さない
+    //（probe の1プロセスぶん減る）。
+    let span = if length_sec > 0.0 && length_sec.is_finite() {
+        length_sec
+    } else {
+        ffmpeg_probe_stderr(&ffmpeg, &input)
+            .ok()
+            .and_then(|s| parse_video_meta(&s).duration_sec)
+            .unwrap_or(0.0)
+    };
+    if span <= 0.0 || !span.is_finite() {
+        return Ok(String::new());
+    }
+    let stem = Path::new(&rel_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "asset".to_string());
+    let rel_out = format!(
+        "cache/{}_{}_{}_{:.3}_{:.3}strip.png",
+        stem,
+        file_stamp(&input),
+        frames,
+        from_sec,
+        span
+    );
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    // 既にあるなら作り直さない（同じ中身・同じコマ数なら結果は同じ）。
+    if out.is_file() {
+        return Ok(rel_out);
+    }
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut args: Vec<String> = vec!["-y".into(), "-v".into(), "error".into()];
+    if from_sec > 0.0 && from_sec.is_finite() {
+        args.push("-ss".into());
+        args.push(format!("{from_sec}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    args.push("-t".into());
+    args.push(format!("{span}"));
+    args.push("-vf".into());
+    args.push(format!(
+        "fps={}/{},scale=-1:48,tile={}x1",
+        frames, span, frames
+    ));
+    args.extend(["-frames:v".to_string(), "1".to_string()]);
+    args.push(out.to_string_lossy().into_owned());
+    // ⚠️ **失敗しても空で返す**（波形と同じ）＝コマ列は無くても編集はできる。
+    match run(&ffmpeg, &args) {
+        Ok(_) => Ok(rel_out),
+        Err(_) => Ok(String::new()),
+    }
+}
+
 /// `ffmpeg -i <file>` を実行し stderr を返す（出力未指定で終了コード1だが stderr にメタ情報が出る）。
 /// 音声有無・メタ取得（probe 系）の共通土台。成否に関わらず stderr を見る。
 fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
@@ -1400,6 +1616,141 @@ pub fn extract_video_thumbnail(
         )
     })?;
     Ok(rel_out)
+}
+
+/// 動画の**その瞬間**を静止画（PNG）として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+///
+/// ⚠️ **サムネ（`extract_video_thumbnail`）とは別物**＝あちらは一覧用に横 640px へ縮める
+/// 「見せるための絵」。こちらは**素材として使う絵**なので**原寸のまま**出す（縮めると、
+/// 切り出した写真だけ解像度が落ちて動画に入る＝黙って劣化させない）。
+/// ⚠️ **ファイル名は呼ぶ側が決める**（`asset_NNN` の採番はドメイン側の責務・§4）。
+#[tauri::command]
+pub async fn extract_video_frame(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("frame extract join: {e}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        )
+    })?
+}
+
+fn extract_video_frame_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+) -> Result<String, String> {
+    if !is_safe_frame_file_name(&out_file_name) {
+        return Err(export_failure(
+            format!("frame extract bad name: {out_file_name}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        ));
+    }
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("frame src missing: {}", input.display()),
+            "動画が見つかりませんでした。素材の一覧から取り込み直してください。",
+        ));
+    }
+    let rel_out = format!("assets/{out_file_name}");
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            export_failure(
+                format!("frame dir: {e}"),
+                "静止画の保存先を用意できませんでした。もう一度お試しください。",
+            )
+        })?;
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    let seek = frame_seek_args(at_sec);
+    let mut args: Vec<String> = vec!["-y".into()];
+    if let Some(coarse) = seek.coarse_sec {
+        args.push("-ss".into());
+        args.push(format!("{coarse}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if seek.fine_sec > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{}", seek.fine_sec));
+    }
+    args.extend([
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("frame extract: {e}"),
+            "静止画を切り出せませんでした。時間を少し動かしてもう一度お試しください。",
+        )
+    })?;
+    // ⚠️ **出来ていないのに成功にしない**＝尺の外を指すと FFmpeg は 0 個の絵で正常終了する。
+    if !out.exists() {
+        return Err(export_failure(
+            format!("frame extract produced nothing at {at_sec}"),
+            "その時間には映像がありませんでした。時間を少し戻してもう一度お試しください。",
+        ));
+    }
+    Ok(rel_out)
+}
+
+/// 頭出しの引数（#349・PR #885 レビュー 🔴）。粗い頭出しと、そこからの端数に分ける。
+struct FrameSeek {
+    /// `-i` の**前**に置く秒（`None` ＝前置きしない＝先頭から読む）。
+    coarse_sec: Option<f64>,
+    /// `-i` の**後**に置く秒（0 ＝置かない）。
+    fine_sec: f64,
+}
+
+/// 切り出した絵のファイル名として受けてよいか（#349・PR #885 レビュー 🟡）。
+///
+/// ⚠️ **区切りを含む名前は受けない**（`resolve_project_file` も `..` 等を弾くが、ここで先に断る＝
+/// 「`assets/` の直下に1つ置く」という約束を、名前の形として明示する）。純粋なので単体でテストできる。
+fn is_safe_frame_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains("..")
+}
+
+/// 切り出しの頭出しを「粗い＋端数」に分ける（#349・PR #885 レビュー 🔴）。
+///
+/// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**＝前置きは
+/// **指定秒より前のキーフレーム**まで飛んでそこから1枚を返すので、キーフレームの間隔が広い動画
+///（スマホ撮影・画面収録）では**数秒ずれる**。しかもコマンドは正常終了しファイルもできるので、
+/// 「0枚で正常終了」の検査では捕まらない＝**見た画と違う絵を成功として返してしまう**。
+///
+/// ⚠️ **`-i` の後ろだけに置くと遅い**（先頭から全部デコードする）。長い動画で待たされる。
+///
+/// そこで**手前まで粗く飛び、残りを正確に進む**（二段シーク＝定石）。
+/// 手前に取る余白（`SEEK_BACKOFF_SEC`）は、よくあるキーフレーム間隔（2〜5秒）を跨げる長さにする。
+fn frame_seek_args(at_sec: f64) -> FrameSeek {
+    // ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    let t = at_sec.max(0.0);
+    const SEEK_BACKOFF_SEC: f64 = 10.0;
+    if t <= SEEK_BACKOFF_SEC {
+        // 近い時刻は前置きせず、そのまま正確に進む（10 秒ぶんのデコードは待たされない）。
+        return FrameSeek {
+            coarse_sec: None,
+            fine_sec: t,
+        };
+    }
+    let coarse = t - SEEK_BACKOFF_SEC;
+    FrameSeek {
+        coarse_sec: Some(coarse),
+        fine_sec: t - coarse,
+    }
 }
 
 struct SceneFile {
@@ -2099,6 +2450,7 @@ pub fn cleanup_stale_export_dirs(app: &tauri::AppHandle) {
         .map(|b| b.join("exports").join(".frames_stage"));
     // 作業ディレクトリの親 `%TEMP%`（yuko_recruit_export_* が並ぶ）。
     let temp_parent = std::env::temp_dir();
+    let app_for_cache = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = stage_parent {
             remove_stale_export_dirs(&parent, "proc_", STALE_EXPORT_DIR_MAX_AGE);
@@ -2108,7 +2460,51 @@ pub fn cleanup_stale_export_dirs(app: &tauri::AppHandle) {
             "yuko_recruit_export_",
             STALE_EXPORT_DIR_MAX_AGE,
         );
+        // 帯に敷く絵の作り置きも一緒に（#332）＝誰も消さないと増え続ける。
+        remove_stale_analysis_cache(&app_for_cache);
     });
+}
+
+/// 帯に敷く絵の作り置き（`projects/*/cache/`）を古い順に片づける（#332）。
+///
+/// ⚠️ **誰も消さないと増え続ける**＝鍵に「素材の中身の印」と「コマ数」と「範囲」が入るので、
+/// 中身を差し替えるたび・別の倍率で開くたび・別の範囲で置くたびに1枚増える。
+/// 素材の片づけ（`delete_project_files` は `assets/` 限定＝破壊的なコマンドは範囲を狭く）にも
+/// 焼き出しのコピー（明示パス）にも乗らないので、**起動時にまとめて捨てる**。
+/// **作り直せる**ものなので、消して困ることは無い（次に必要になったら作る）。
+fn remove_stale_analysis_cache(app: &tauri::AppHandle) {
+    let projects = match app.path().app_data_dir().ok().map(|b| b.join("projects")) {
+        Some(p) => p,
+        None => return,
+    };
+    let now = SystemTime::now();
+    let entries = match fs::read_dir(&projects) {
+        Ok(e) => e,
+        Err(_) => return, // まだ動画を作っていない＝掃除不要
+    };
+    for project in entries.flatten() {
+        let cache = project.path().join("cache");
+        let files = match fs::read_dir(&cache) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if !path.is_file() {
+                continue;
+            }
+            // 使われていない期間で見る（書き出しの一時置き場と同じ基準・同じ長さ）。
+            if let Ok(modified) = file.metadata().and_then(|m| m.modified()) {
+                if now
+                    .duration_since(modified)
+                    .map(|d| d > STALE_EXPORT_DIR_MAX_AGE)
+                    .unwrap_or(false)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
 }
 
 /// クリップの区間フレームを出力fpsでステージング（#442・動画スロット本体アニメ）。
@@ -3320,6 +3716,64 @@ fn export_video_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 切り出した絵のファイル名の検査（#349・PR #885 レビュー 🟡）。
+    ///
+    /// ⚠️ **「`assets/` の直下に1つ置く」という約束**を名前の形で守る（パスをまたがせない）。
+    #[test]
+    fn frame_file_name_rejects_path_pieces() {
+        assert!(is_safe_frame_file_name("asset_002.png"));
+        assert!(is_safe_frame_file_name("日本語の名前.png"));
+        assert!(!is_safe_frame_file_name(""));
+        assert!(!is_safe_frame_file_name("a/b.png"));
+        assert!(!is_safe_frame_file_name("a\\b.png"));
+        assert!(!is_safe_frame_file_name("../x.png"));
+        assert!(!is_safe_frame_file_name("a..b.png")); // 「..」を含むものは一律で断る（安全側）
+    }
+
+    /// 切り出しの頭出し（#349・PR #885 レビュー 🔴）。
+    ///
+    /// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**（キーフレームまで飛ぶ）。
+    /// ⚠️ **後ろだけだと遅い**（先頭から全部デコードする）。二段に分ける。
+    #[test]
+    fn frame_seek_splits_into_coarse_and_fine() {
+        let s = frame_seek_args(60.0);
+        assert_eq!(s.coarse_sec, Some(50.0)); // 手前まで粗く飛ぶ
+        assert!((s.fine_sec - 10.0).abs() < 1e-9); // 残りは正確に進む
+    }
+
+    #[test]
+    fn frame_seek_near_start_does_not_prefix() {
+        // 近い時刻は前置きしない（10 秒ぶんのデコードは待たされない）。
+        let s = frame_seek_args(3.5);
+        assert_eq!(s.coarse_sec, None);
+        assert!((s.fine_sec - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn frame_seek_at_zero_is_head() {
+        let s = frame_seek_args(0.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    #[test]
+    fn frame_seek_clamps_negative() {
+        let s = frame_seek_args(-5.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// 粗い頭出しと端数を足すと、必ず元の時刻になる（絵がずれない条件）。
+    #[test]
+    fn frame_seek_parts_sum_to_requested_time() {
+        for t in [0.0_f64, 1.0, 9.99, 10.0, 10.01, 123.456, 3600.0] {
+            let s = frame_seek_args(t);
+            let total = s.coarse_sec.unwrap_or(0.0) + s.fine_sec;
+            assert!((total - t).abs() < 1e-9, "t={t} total={total}");
+        }
+    }
 
     // フレームステージングのディレクトリ名はパストラバーサル防止で英数字と _ のみ許可（#書き出しRangeError）。
     #[test]
