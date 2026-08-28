@@ -410,6 +410,26 @@ describe('parseProjectDoc', () => {
     expect(back.videoSettings.audioAuto).toEqual({ duckBgm: true, duckDepth: 0.3 });
   });
 
+  /**
+   * ⚠️ **現行版の文書には書き込まない**（α-6 出口監査 🔴2）。`defaultVideoSettings()` は
+   * `audioAuto` を書かないので、版を見ないと**新しく作った動画も「未設定」**として条件に当たり、
+   * 開き直すたびに「しない」が焼き付く＝**既定で「する」だったものが黙って OFF に化ける**（§2-5）。
+   * 未設定のまま返れば `resolveAudioAuto` が既定（両方する）へ解く。
+   */
+  it('音の自動処理：現行版の文書には書き込まない（新規の動画を黙って OFF にしない）', () => {
+    const doc = assembleProject(header(), [], [], []) as unknown as Record<string, unknown>;
+    expect(doc.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 前提＝新規は現行版
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toBeUndefined();
+  });
+
+  /** ⚠️ タイムライン形式（`migrateTimelineProject` の早期 return）と**同じ扱い**にする（ADR-0026②）。 */
+  it('音の自動処理：1つ前の版(1.28)には書き込む（境界）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.28' } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
   it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
     const textStyles = {
       title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },
