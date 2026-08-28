@@ -551,7 +551,11 @@ pub fn mix_bgm_runs_args(
     let n = labels.len();
     // ⚠️ **amix の `normalize=0` は「入力数で割らない」という意味**（#259 の「音量を整える」とは別物）。
     // 割ると音源を足すたびに全体が小さくなるので従来どおり 0 のまま。整えるのは下の `loudnorm`。
-    let mixed = if normalize.is_some() { "[mixed]" } else { "[a]" };
+    let mixed = if normalize.is_some() {
+        "[mixed]"
+    } else {
+        "[a]"
+    };
     filters.push(format!(
         "{}amix=inputs={n}:duration=first:normalize=0{mixed}",
         labels.join("")
@@ -2555,7 +2559,15 @@ pub async fn export_video(
     normalize_lufs: Option<f64>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        export_video_impl(app, scenes, file_name, bgm_runs, project_id, output_path, normalize_lufs)
+        export_video_impl(
+            app,
+            scenes,
+            file_name,
+            bgm_runs,
+            project_id,
+            output_path,
+            normalize_lufs,
+        )
     })
     .await
     .map_err(|e| {
@@ -4578,7 +4590,13 @@ mod tests {
             source_start_sec: 0.0,
             speed: 1.0,
         }];
-        let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, None, &out.to_string_lossy());
+        let args = mix_bgm_runs_args(
+            &video.to_string_lossy(),
+            &runs,
+            2.0,
+            None,
+            &out.to_string_lossy(),
+        );
         run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
