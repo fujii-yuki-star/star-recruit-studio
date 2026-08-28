@@ -43,6 +43,8 @@ import {
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { probeAndThumbVideo } from "./assetImport";
@@ -422,6 +424,12 @@ interface ProjectState {
    * 並行に走らせると、2件目以降が `isImporting` ガードに黙って弾かれる（入ったつもりで消える）。
    */
   addAssets: (items: File[] | string[]) => Promise<void>;
+  /**
+   * ユーザー素材ライブラリ（ADR-0035・#260）から、この動画へ**コピー**して取り込む。
+   * 成功したら足した素材の id、できなければ `null`（理由は `importError`）。
+   * ⚠️ **参照ではなくコピー**＝プロジェクトは自己完結のまま（ADR-0024 決定6）。
+   */
+  importFromLibrary: (libraryAssetId: string) => Promise<string | null>;
   /**
    * 動画の**その瞬間**を静止画として切り出し、**普通の写真素材**として足す（#349）。
    * 成功したら足した素材の id、できなければ `null`（理由は `importError`）。
@@ -1767,6 +1775,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         importError: importErrorMessage(e),
       }));
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+  importFromLibrary: async (libraryAssetId) => {
+    // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    const lib = (await listLibraryAssets()).find((a) => a.id === libraryAssetId);
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
+    const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
+    set({ isImporting: true, importError: null });
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        // 取り込みと同じく、保存前なら**ここで番号を採る**（素材の置き場が要るため）。
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((st) => ({ meta: { ...st.meta, projectId } }));
+      }
+      const relPath = await copyLibraryAssetToProject(libraryAssetId, projectId, fileName);
+      // ⚠️ **できてから一覧へ足す**（切り出し #349 と同じ）＝コピーは失敗しうるので、
+      // 先に足すと**中身の無い素材**が一瞬見えてから消える。
+      set((st) => ({ assets: [...st.assets, { ...asset, filePath: relPath }], saveStatus: "idle" }));
+      if (asset.assetType === ASSET_TYPE.video) {
+        const enrich = await probeAndThumbVideo(projectId, relPath);
+        set(applyEnrichment(asset.assetId, enrich));
+      } else {
+        const url = await assetDisplayUrl(projectId, relPath);
+        if (url) set((st) => ({ assetSrcById: { ...st.assetSrcById, [asset.assetId]: url } }));
+      }
+      return asset.assetId;
+    } catch (e) {
+      set({ importError: importErrorMessage(e) });
+      return null;
     } finally {
       set({ isImporting: false });
     }
