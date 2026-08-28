@@ -220,6 +220,59 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
+/// appData/readingdict.json（読み方辞書・全プロジェクト共通＝ADR-0037 決定1）。
+///
+/// ⚠️ **正典はアプリが持つ**＝エンジンを入れ替えても、外部エンジンを指しても同じ読みになる。
+/// エンジン側の辞書（`%LOCALAPPDATA%` の voicevox-engine 配下）は**そこへ映したもの**で、
+/// OS 上の固定パスを他の VOICEVOX と共有する（`--user_dict_path` に相当するオプションが無い）。
+fn reading_dict_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("readingdict.json"))
+}
+
+/// 読み方辞書を読む。**無ければ空**（初回起動＝エラーにしない）。検証は呼び出し側（§2-2）。
+#[tauri::command]
+fn load_reading_dict(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = reading_dict_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// 読み方辞書を書く（丸ごと置き換え）。JSON として読めない本文は**書かない**
+/// ＝次に開けないファイルを作らない（`save_user_template` と同じ流儀）。
+#[tauri::command]
+fn save_reading_dict(app: tauri::AppHandle, dict_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&dict_json).map_err(|e| e.to_string())?;
+    let path = reading_dict_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, &dict_json).map_err(|e| e.to_string())
+}
+
+/// 選んだ場所へ文字列を書く（読み方辞書の書き出し・ADR-0037 決定8）。
+///
+/// ⚠️ **保存先はネイティブの「保存」で利用者が選んだパスだけ**を受け取る（アプリが場所を作らない）。
+/// 書き出す本文は呼ぶ側が組む（何を書き出すかは domain／infra の責務＝§4）。
+#[tauri::command]
+fn write_text_file(path: String, text: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&p, &text).map_err(|e| e.to_string())
+}
+
+/// 選んだファイルを文字列として読む（読み方辞書の読み込み・ADR-0037 決定8）。
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(PathBuf::from(&path)).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -242,6 +295,15 @@ pub fn run() {
             save_user_template,
             load_user_templates,
             delete_user_template,
+            load_reading_dict,
+            save_reading_dict,
+            write_text_file,
+            read_text_file,
+            voicevox::voicevox_user_dict_list,
+            voicevox::voicevox_user_dict_add,
+            voicevox::voicevox_user_dict_update,
+            voicevox::voicevox_user_dict_delete,
+            voicevox::voicevox_synthesize_with_accent,
             ffmpeg::export_video,
             ffmpeg::begin_export,
             ffmpeg::cancel_export,

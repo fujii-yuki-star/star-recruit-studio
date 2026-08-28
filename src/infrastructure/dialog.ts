@@ -29,3 +29,21 @@ export async function showOpenAssetsDialog(): Promise<string[]> {
   if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string');
   return typeof picked === 'string' ? [picked] : [];
 }
+
+/** 読み方辞書の書き出し先を選ぶ（ADR-0037 決定8）。キャンセル時は null。 */
+export async function showSaveReadingDictDialog(defaultName: string): Promise<string | null> {
+  return save({
+    defaultPath: `${defaultName}.json`,
+    filters: [{ name: '読み方の一覧', extensions: ['json'] }],
+  });
+}
+
+/** 読み方辞書の読み込み元を選ぶ（ADR-0037 決定8）。キャンセル時は null。 */
+export async function showOpenReadingDictDialog(): Promise<string | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: '読み方の一覧', extensions: ['json'] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}

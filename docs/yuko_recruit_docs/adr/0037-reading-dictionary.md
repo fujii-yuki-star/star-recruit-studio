@@ -117,6 +117,11 @@
    - **控えが無い／`422` が返る**（事実9＝移行後・エンジン再インストール後）→ **失敗として扱わず**、言葉で引き直す。見つかればその uuid を控え直し、無ければ `POST` で作り直す。⚠️ **無条件に `POST` しない**（事実8＝同じ言葉の `POST` は**重複を作る**ので、同期のたびに増える）。
    - **言葉は一致するが読みが違う語がエンジンにあり、アプリが控えていない** → **黙って上書きしない**（決定8 の読み込みと同じ規則＝§2-5）。利用者にどちらを残すか聞く。
    - ⚠️ **書き出すファイルに `word_uuid` を含めない**（渡した先では意味を持たず、`422` の原因にしかならない）。
+   - ⚠️ **実装では「規則」ではなく「構造」で守った**（#350 実装時の判断・2026-08-28）＝語（`ReadingEntry`）に
+     `word_uuid` を**持たせず**、控えは別の入れ物（`ReadingDictFile.links`＝言葉→uuid）に置いた。
+     語が uuid を持つ形にすると**書き出す側が毎回それを落とす**ことになり、落とし忘れると渡した先で
+     全語が `422` になって（決定7 と噛み合い）**声が作れなくなる**。書き出しは `entries` だけを書くので
+     **含めようがない**。控えは失っても壊れない（言葉で引き直せる／消せなくなるだけ＝触らない側＝安全な向き）。
 4. **アクセントは聞き比べて選ぶ**（既定＝先頭で下がる形。数値も専門語も画面に出さない）。
 5. **グローバル**（`project.schema` 不変）。⚠️ 他人に渡すと**作り直したときだけ**読みが変わりうる（作成済みの声は WAV で残るので既存の動画は変わらない）。
 6. **AI の扱いに特別な規則を作らない。**
@@ -157,3 +162,21 @@
 > ✅ **利用者確認の2点は決着済み**（2026-08-26・どちらも YES）＝決定4（聞き比べ）と決定8（書き出し／読み込み）を**どちらも α-6 に入れる**。
 - アプリのアンインストール時に **`%LOCALAPPDATA%` に残る語を消すか**（事実3・4＝共有ファイルなので**消さない**のが安全側だが、残り続けることの説明が要る）。
 - `priority`（0〜10）と `word_type`（固有名詞/普通名詞/…）を画面に出すか（出さずに既定で足りるか）。
+
+## 実装の所在（#350・2026-08-28）
+
+| 役割 | 場所 |
+|---|---|
+| 同期の規則（何を足す/直す/消すか・黙って上書きしない判定） | `src/domain/voice/readingDict.ts`（純粋・§7 テスト対象） |
+| 音の粒と「どこで下がるか」の候補・印（`ウ↓ツノミヤ`） | 同上（`splitMorae`／`accentCandidates`／`accentMark`／`defaultAccentType`） |
+| 保存（正典＝`appData/readingdict.json`）・書き出し/読み込み | `src/infrastructure/readingDictFs.ts` ＋ Rust `load_reading_dict`/`save_reading_dict`/`write_text_file`/`read_text_file` |
+| エンジンへ映す（`user_dict` API） | `src/infrastructure/voiceProviders/userDict.ts` ＋ Rust `voicevox_user_dict_*` |
+| 声を作る直前にそろえる | `src/infrastructure/voiceProviders/readingDictSync.ts`（**`VoicevoxProvider.synthesize` の中で通す**＝合成の入口は5か所あるので、各所に配線すると片方だけ漏れる。書き出し前に同梱フォントをそろえる `loadExportFonts` と同じ形） |
+| 聞き比べ（辞書に触らず鳴らす） | Rust `voicevox_synthesize_with_accent`（`audio_query` の下がる位置だけ差し替えて `synthesis`）＋ store `synthesizeReading` |
+| 画面 | `src/app/components/ReadingDictSection.tsx`（設定画面「言葉の読み方」・`06 §15`） |
+| 文言 | `15 §6` `READING_DICT_SYNC_FAILED` / `READING_DICT_WORD_CONFLICT` / `READING_DICT_IMPORT_DUPLICATE` |
+
+⚠️ **聞き比べは辞書に触らない**＝登録する前に確かめる機能なので、`user_dict` へ入れて消す、はしない（辞書は OS 上の
+固定パスで他の VOICEVOX と共有される＝途中で落ちるとゴミが残る・決定3）。読みが複数のかたまりに割れたときは
+**先頭だけ**下がる位置を差し替える（辞書は1語に1つの下がり方を持つので、登録後の聞こえ方に十分近い）。
+
