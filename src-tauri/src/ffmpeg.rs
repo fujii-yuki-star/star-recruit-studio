@@ -2248,11 +2248,9 @@ fn resolve_project_file(
             "動画の書き出しに失敗しました。アプリを再起動してもう一度お試しください。",
         ));
     }
-    if rel_path.contains("..")
-        || rel_path.starts_with('/')
-        || rel_path.starts_with('\\')
-        || Path::new(rel_path).is_absolute()
-    {
+    // ⚠️ **規則は写さず共有する**（#893・§2-7）＝ここに同じ条件を書き直していたため、
+    // `assets.rs` 側にコロン（Windows のドライブ相対パス）の検査を足しても**こちらだけ古いまま**だった。
+    if !crate::assets::is_safe_rel_path(rel_path) {
         return Err(export_failure(
             format!("unsafe rel_path: {rel_path}"),
             "動画の書き出しに失敗しました。素材を確認してもう一度お試しください。",

@@ -261,11 +261,19 @@ pub fn read_asset_data_url(
 ///
 /// filePath/voicePath は project.json 由来だが、悪意ある共有プロジェクト対策として読む側で毎回検証する。
 /// PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の `C:\` 含む）も拒否する。
-/// **プロジェクト相対パスを受け取る全コマンドがこの1関数を通る**（read_asset_data_url・焼き出しのコピー/容量）
-/// ＝どれか一方だけを直して安全条件が静かに乖離するのを防ぐ。
-fn is_safe_rel_path(rel_path: &str) -> bool {
+/// **プロジェクト相対パスを受け取る全コマンドがこの1関数を通る**（read_asset_data_url・焼き出しのコピー/容量・
+/// 書き出しの素材解決）＝どれか一方だけを直して安全条件が静かに乖離するのを防ぐ。
+///
+/// ⚠️ **コロンも弾く**（#893）＝Windows の**ドライブ相対パス**（`C:evil.txt`）は
+/// **prefix はあるが root が無い**ので `Path::is_absolute()` が **`false`** を返し、
+/// `..`・先頭の区切り・絶対パスの検査を**すべてすり抜ける**。しかし `PathBuf::join` へ渡すと
+/// **それまでの中身が丸ごと置き換わる**ので、プロジェクトの外へ書ける。
+/// `is_safe_single_file_name`（`/` も弾く）とは**別関数のまま**＝こちらは下位ディレクトリを許すので
+/// `/` を弾けない。共通なのは「コロン・`..`・空」の3つだけ。
+pub fn is_safe_rel_path(rel_path: &str) -> bool {
     !rel_path.is_empty()
         && !rel_path.contains("..")
+        && !rel_path.contains(':')
         && !rel_path.starts_with('/')
         && !rel_path.starts_with('\\')
         && !Path::new(rel_path).is_absolute()
@@ -430,6 +438,12 @@ mod tests {
         // 弾く：ルート起点（join がベースを置き換える）。
         assert!(!is_safe_rel_path("/etc/passwd"));
         assert!(!is_safe_rel_path("\\Windows\\System32"));
+        // 弾く：**ドライブ相対パス**（#893）＝`C:evil.txt` は prefix はあるが root が無いので
+        // `Path::is_absolute()` が **false** を返し、上の検査を**すべてすり抜ける**。しかし
+        // `PathBuf::join` へ渡すと**中身が丸ごと置き換わり**、プロジェクトの外へ書ける。
+        assert!(!is_safe_rel_path("C:evil.txt"));
+        assert!(!is_safe_rel_path("c:a.png"));
+        assert!(!is_safe_rel_path("assets/C:evil.txt"));
         // 弾く：Windows の絶対パス（ドライブレター・UNC）。
         assert!(!is_safe_rel_path("C:\\Windows\\System32"));
         assert!(!is_safe_rel_path("\\\\server\\share\\a.png"));
@@ -443,9 +457,10 @@ mod tests {
     /// **中なら何でも**通る（`project.json` も `voices/*.wav` も）。破壊的なコマンドは
     /// `delete_template_asset` の接頭辞と同じ流儀で**範囲を狭く**取る。
     ///
-    /// ⚠️ **Windows のドライブ相対（`C:foo`＝バックスラッシュ無し）は `is_absolute()` が false** で
-    /// `is_safe_rel_path` を通り抜ける。`starts_with("assets/")` は Rust の `Path` 解釈を経由しない
-    /// **単純な文字列比較**なので、`C:assets/...` は `"C:"` から始まって弾かれる。
+    /// ⚠️ **Windows のドライブ相対（`C:foo`＝バックスラッシュ無し）は `is_absolute()` が false**。
+    /// 以前はここを `is_safe_rel_path` が通してしまい、**`starts_with("assets/")` の文字列比較だけが
+    /// 防いでいた**（この関数の外では守られていない＝#893 で書き出しの経路に穴が空いていた）。
+    /// **いまは `is_safe_rel_path` がコロンを弾く**ので、範囲の限定と入口の検査の**二重で**守る。
     #[test]
     fn delete_scope_is_assets_only() {
         // この関数が実際に使う条件（`delete_project_files` の continue と同じ式）。
@@ -457,8 +472,10 @@ mod tests {
         assert!(!deletable("project.json"));
         assert!(!deletable("voices/scene_001.wav"));
         assert!(!deletable("cache/asset_001_strip.png"));
-        // 弾く：ドライブ相対（`is_absolute()` が false なので `is_safe_rel_path` は通る）。
-        assert!(is_safe_rel_path("C:assets/evil.txt"));
+        // 弾く：ドライブ相対。⚠️ **入口の `is_safe_rel_path` が落とす**（#893 で塞いだ）。
+        // ここで `deletable` も見るのは、**範囲の限定だけでも守れている**ことを残すため
+        //（入口の検査が将来ゆるんでも、この関数だけは `assets/` の外へ出ない）。
+        assert!(!is_safe_rel_path("C:assets/evil.txt"));
         assert!(!deletable("C:assets/evil.txt"));
         // 弾く：親への相対参照（先に `is_safe_rel_path` が落とす）。
         assert!(!deletable("assets/../project.json"));
@@ -515,5 +532,32 @@ mod safe_name_tests {
     fn accepts_plain_names() {
         assert!(is_safe_single_file_name("asset_001.png"));
         assert!(is_safe_single_file_name("日本語の名前.mp4"));
+    }
+}
+
+/// **相対パスの検査を写し直させない門番**（#893）。
+///
+/// ⚠️ **型では守れない**＝`ffmpeg.rs` が `rel_path.starts_with('/')` を自前で書いても
+/// コンパイルは通る。実際にそうなっており、`assets.rs` にコロンの検査を足しても
+/// **書き出しの経路だけ古いまま**だった。規則を写した瞬間に落ちるようにしておく。
+#[cfg(test)]
+mod rel_path_single_source_guard {
+    /// `resolve_project_file` は `is_safe_rel_path` に委ねる（自前で条件を並べない）。
+    #[test]
+    fn 書き出しの経路は検査を写さない() {
+        let src = include_str!("ffmpeg.rs");
+        assert!(
+            src.contains("crate::assets::is_safe_rel_path(rel_path)"),
+            "resolve_project_file が共有の検査を通っていない（規則を写すと片方だけ古くなる）",
+        );
+        for copied in [
+            "rel_path.starts_with('/')",
+            "Path::new(rel_path).is_absolute()",
+        ] {
+            assert!(
+                !src.contains(copied),
+                "相対パスの検査が写し直されている: {copied}（`is_safe_rel_path` へ委ねる）",
+            );
+        }
     }
 }
