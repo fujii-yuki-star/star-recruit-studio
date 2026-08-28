@@ -9,6 +9,8 @@ import { useProjectStore } from "../store/projectStore";
 //   選択中を示す（PR#161 レビュー）。Esc・背景クリックで閉じる。
 // allowInherit=true のとき、先頭に「動画全体に合わせる」(=null) を出す（場面ごとのフォント＝null は継承）。
 const INHERIT_LABEL = "動画全体に合わせる";
+/** 指している字体が一覧に無いとき（起動直後でまだ読めていない／実体が消えている）。 */
+const MISSING_LABEL = "取り込んだ文字の形（見つかりません）";
 
 export function FontPicker({
   value,
@@ -49,8 +51,11 @@ export function FontPicker({
   //（`listUserFonts` は実体があるものだけ返す）の2つで「既知だが一覧に無い」が起きる。
   // 先頭へ倒すと**具体的に間違った名前**が出て、押した瞬間その字体で上書きされる
   //（🔴1 で直した失敗と同型）。id を保ったまま「見つかりません」と出す。
+  // ⚠️ **内部の id は画面に出さない**（§2-3・PR #901 レビュー 🟡）＝`user_font_003` のような
+  // 内部の綴りは「見つからない」系の既存 UI（素材・見た目パターン）でも出していない（種別と件数まで）。
+  // 選び直せるように、指している値そのものは `title`（指したときの説明）に残す。
   const current = choices.find((f) => f.id === currentId)
-    ?? { id: currentId, label: `${currentId}（見つかりません）`, note: undefined };
+    ?? { id: currentId, label: MISSING_LABEL, note: undefined };
   const missing = !choices.some((f) => f.id === currentId);
 
   // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
@@ -87,7 +92,7 @@ export function FontPicker({
         type="button"
         className="select"
         disabled={disabled}
-        title={title}
+        title={missing ? `${title ? `${title} / ` : ""}指定：${currentId}` : title}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}

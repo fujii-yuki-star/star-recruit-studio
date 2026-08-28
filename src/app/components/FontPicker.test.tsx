@@ -57,16 +57,29 @@ describe("FontPicker", () => {
   it("一覧に無い手持ちの文字の形は、同梱の名前にすり替えない", () => {
     render(<FontPicker value={"user_font_003" as never} onChange={vi.fn()} allowInherit />);
     const btn = screen.getByRole("button");
-    expect(btn.textContent).toContain("user_font_003");
     expect(btn.textContent).toContain("見つかりません");
     for (const f of FONT_CATALOG) expect(btn.textContent).not.toContain(f.label);
   });
 
+  /**
+   * ⚠️ **内部の綴りは画面に出さない**（§2-3・PR #901 レビュー 🟡）＝「見つからない」系の既存 UI
+   *（素材・見た目パターン）も種別と件数までしか出していない。選び直せるように、
+   * 指している値そのものは**指したときの説明**（`title`）に残す。
+   */
+  it("見つからないときも内部の綴りは画面に出さず、説明にだけ残す", () => {
+    render(<FontPicker value={"user_font_003" as never} onChange={vi.fn()} allowInherit />);
+    const btn = screen.getByRole("button");
+    expect(btn.textContent).not.toContain("user_font_003");
+    expect(btn.getAttribute("title")).toContain("user_font_003");
+  });
+
   /** ⚠️ 一覧を取る前でも同じ（起動直後の窓）＝一時的でも間違った名前を見せない。 */
-  it("起動直後（一覧が空）でも、指定されている手持ちの id を保つ", () => {
+  it("起動直後（一覧が空）でも、同梱の名前へすり替えない", () => {
     useProjectStore.setState({ userFonts: [] } as never);
     render(<FontPicker value={"user_font_001" as never} onChange={vi.fn()} allowInherit />);
-    expect(screen.getByRole("button").textContent).toContain("user_font_001");
+    const btn = screen.getByRole("button");
+    expect(btn.textContent).toContain("見つかりません");
+    expect(btn.getAttribute("title")).toContain("user_font_001");
   });
 
   /** ⚠️ 一覧を取れていなくても、**同梱は選べる**（行き止まりにしない）。 */
