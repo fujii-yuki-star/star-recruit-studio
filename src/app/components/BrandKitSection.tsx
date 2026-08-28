@@ -47,10 +47,16 @@ export function BrandKitSection() {
   const plan = planBrandApply(brandKit, { fontId: projectFontId, hasLogoAsset });
   const nothingToApply = isNoopBrandApply(plan);
 
+  const [error, setError] = useState("");
+
   async function onApply(): Promise<void> {
     setNotice("");
-    await applyBrandKit();
-    setNotice("この動画に反映しました。元に戻すときは「取り消す」を押してください。");
+    setError("");
+    // ⚠️ **できたときだけ「反映しました」と言う**（PR #888 レビュー 🟡・§2-5）＝ロゴの取り込みは
+    // 失敗しうる（置き場から消えている等）。理由はこの画面には出ないので、ここで受け取って出す。
+    const r = await applyBrandKit();
+    if (r.ok) setNotice("この動画に反映しました。元に戻すときは「取り消す」を押してください。");
+    else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
   }
 
   return (
@@ -153,6 +159,7 @@ export function BrandKitSection() {
             </>
           )}
           {notice && <p className="field-hint mt">{notice}</p>}
+          {error && <p className="form-error mt" role="alert">{error}</p>}
         </div>
       )}
     </div>

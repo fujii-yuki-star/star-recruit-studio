@@ -43,6 +43,8 @@ export function AssetLibraryPanel() {
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string } | null>(null);
   const importFromLibrary = useProjectStore((s) => s.importFromLibrary);
   const isImporting = useProjectStore((s) => s.isImporting);
+  const brandKit = useProjectStore((s) => s.brandKit);
+  const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
   const refresh = async (): Promise<void> => {
     setItems(await listLibraryAssets());
@@ -102,10 +104,20 @@ export function AssetLibraryPanel() {
     setError("");
     setBusy(true);
     try {
+      // ⚠️ **消す前に「会社の見た目が指しているか」を覚える**＝下で書き換えるので、
+      // 判定を後回しにすると（読むタイミング次第で）知らせと実際がずれる。
+      const wasBrandLogo = brandKit.logoLibraryAssetId === a.id;
       await deleteLibraryAsset(a.id);
+      // ⚠️ **会社の見た目が指したままにしない**（PR #888 レビュー 🟡）＝消した素材を指し続けると、
+      // 新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
+      if (wasBrandLogo) await updateBrandKit({ ...brandKit, logoLibraryAssetId: undefined });
       await refresh();
       // ⚠️ **既に取り込んだ動画は影響を受けない**ことを伝える（コピーだから＝不安を残さない）。
-      setNotice(`「${a.displayName}」を置き場から外しました。取り込み済みの動画はそのまま使えます。`);
+      setNotice(
+        wasBrandLogo
+          ? `「${a.displayName}」を置き場から外し、会社の見た目のロゴも外しました。取り込み済みの動画はそのまま使えます。`
+          : `「${a.displayName}」を置き場から外しました。取り込み済みの動画はそのまま使えます。`,
+      );
     } catch (e) {
       setError(typeof e === "string" ? e : "素材を外せませんでした。もう一度お試しください。");
     } finally {

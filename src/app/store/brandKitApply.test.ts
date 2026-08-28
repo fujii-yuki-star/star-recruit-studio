@@ -100,6 +100,31 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
     expect(useProjectStore.getState().past.length).toBeGreaterThan(before);
   });
 
+  /**
+   * ⚠️ **できなかったら「反映しました」と言わせない**（PR #888 レビュー 🟡・§2-5）＝
+   * ロゴの取り込みは失敗しうる（置き場から消えている等）。理由は設定画面には出ないので、返り値で運ぶ。
+   */
+  it('ロゴを取り込めなければ、できなかったことと理由を返す', async () => {
+    importFromLibrary.mockResolvedValueOnce(null as never);
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' } } as never);
+    setProject({ assets: [] });
+    useProjectStore.setState({ importError: 'この素材は見つかりませんでした。' } as never);
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('見つかりませんでした');
+  });
+
+  it('取り込めたときはできたことを返す', async () => {
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' } } as never);
+    setProject({ assets: [] });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, error: null });
+  });
+
+  it('何も変わらないときも「できた」を返す（押せない状態を作らない）', async () => {
+    useProjectStore.setState({ brandKit: {} } as never);
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, error: null });
+  });
+
   /** ⚠️ 書き出し中は文書を固定する（設定した意味どおりの MP4 にする・#570 P1）。 */
   it('書き出し中は何もしない', async () => {
     useProjectStore.setState({ brandKit: { fontId: 'kaitou-yokoku-gothic' } } as never);
@@ -108,6 +133,32 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
     await useProjectStore.getState().applyBrandKit();
     expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('gen-interface-jp');
     useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+});
+
+/**
+ * ⚠️ **どの入口から新しく作っても効く**（PR #888 レビュー 🔴）。
+ * 当初は「白紙から作る」にだけ入れており、**AI で作る主経路（ウィザード）に効いていなかった**。
+ * どちらも `newProject` を通るので、そこに置いて両方を固定する。
+ */
+describe('新しく作る入口（#888 レビュー 🔴＝主経路に効いていなかった）', () => {
+  it('AI で作る主経路（newProject）でも会社の見た目が入る', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic' });
+    setProject({ fontId: 'gen-interface-jp' });
+    useProjectStore.getState().newProject();
+    // `newProject` は投げっぱなしで呼ぶので、着地を待つ。
+    await vi.waitFor(() =>
+      expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic'),
+    );
+  });
+
+  it('白紙から作る（newBlankProject）でも入る', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic' });
+    setProject({ fontId: 'gen-interface-jp' });
+    useProjectStore.getState().newBlankProject();
+    await vi.waitFor(() =>
+      expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic'),
+    );
   });
 });
 
