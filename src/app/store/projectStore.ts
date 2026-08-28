@@ -7,6 +7,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import { createUserFontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -40,6 +41,7 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
@@ -397,8 +399,21 @@ interface ProjectState {
    * 空＝全部そろっている（調べていない状態と区別しない＝**無いことを警告に使わない**）。
    */
   missingAssetIds: string[];
+  /**
+   * いま持っている持ち込みフォントの id（#261）。**`null` ＝まだ調べていない**
+   *（`missingAssetIds` と同じ流儀＝調べていないのに「全部そろっている」と言わない）。
+   */
+  userFontIds: string[] | null;
   /** 見つからない素材を調べ直す（#347）。 */
   refreshMissingAssets: () => Promise<void>;
+  /** 持ち込みフォントの一覧を調べ直す（#261）。**実体があるものだけ**が入る。 */
+  refreshUserFonts: () => Promise<void>;
+  /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
+  addUserFont: (srcPath: string, displayName: string) => Promise<string | null>;
+  /** 持ち込みフォントを消す（#261）。使っている動画には公開前チェックが断りを出す。 */
+  removeUserFont: (fontId: string) => Promise<void>;
+  /** フォントの取り込み/削除で出た理由（§2-5）。 */
+  fontError: string | null;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
@@ -568,6 +583,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImporting: false,
   importProgress: null,
   missingAssetIds: [],
+  userFontIds: null,
+  fontError: null,
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -1905,6 +1922,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  addUserFont: async (srcPath, displayName) => {
+    set({ fontError: null });
+    try {
+      // ⚠️ **番号は「いま持っているもの」から採る**＝消した番号は使い回さない（`createUserFontId`）。
+      const list = await listUserFonts();
+      const id = createUserFontId(list.map((f) => f.id));
+      await importUserFont(id, displayName, srcPath);
+      await get().refreshUserFonts();
+      return id;
+    } catch (e) {
+      set({ fontError: typeof e === "string" ? e : "文字の形を取り込めませんでした。もう一度お試しください。" });
+      return null;
+    }
+  },
+  removeUserFont: async (fontId) => {
+    set({ fontError: null });
+    try {
+      await deleteUserFont(fontId);
+      await get().refreshUserFonts();
+    } catch (e) {
+      set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });
+    }
+  },
+  refreshUserFonts: async () => {
+    const list = await listUserFonts();
+    // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
+    // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
+    await loadUserFonts(list.map((f) => f.id));
+    set({ userFontIds: list.map((f) => f.id) });
+  },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();
     // ⚠️ **一覧に出るものだけを調べる**（`isListedMaterial`＝§2-7 で規則は1か所）＝音（BGM・読み上げ）は

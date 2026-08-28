@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.25" },
+    "schemaVersion": { "const": "1.26" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -50,6 +50,15 @@
     "properties": { "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] } }
   },
   "$defs": {
+    "FontId": {
+      "description": "フォントの id（同梱＋持ち込み・ADR-0038・#261）。同梱は3つ、持ち込みは user_font_NNN（appData/user_fonts に置き、プロジェクトには入れない＝アプリを再配布経路にしない・13 §6）。⚠️ enum ではなく pattern＝持ち込みは利用者ごとに増えるので値を数え上げられない。",
+      "type": "string",
+      "pattern": "^(gen-interface-jp|gen-interface-jp-display|kaitou-yokoku-gothic|user_font_[0-9]{3,})$"
+    },
+    "FontIdOrNull": {
+      "description": "フォントの id、または null（=継承）。",
+      "oneOf": [{ "$ref": "#/$defs/FontId" }, { "type": "null" }]
+    },
     "VideoSettings": {
       "type": "object",
       "additionalProperties": false,
@@ -59,7 +68,7 @@
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
         "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+        "fontId": { "$ref": "#/$defs/FontId" }
       }
     },
     "CompanyInfo": {
@@ -268,17 +277,17 @@
         "sceneType": { "$ref": "#/$defs/SceneCategory" },
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "exclusiveMinimum": 0 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "fontId": { "$ref": "#/$defs/FontIdOrNull" },
         "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
         "textFontIds": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "main": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "subtitle": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "caption": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "url": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+            "title": { "$ref": "#/$defs/FontId" },
+            "main": { "$ref": "#/$defs/FontId" },
+            "subtitle": { "$ref": "#/$defs/FontId" },
+            "caption": { "$ref": "#/$defs/FontId" },
+            "url": { "$ref": "#/$defs/FontId" }
           }
         },
         "textStyles": {
@@ -386,7 +395,7 @@
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
         "fontWeight": { "enum": ["normal", "bold"] },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "fontId": { "$ref": "#/$defs/FontIdOrNull" },
         "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 3 },
         "textAlign": { "enum": ["left", "center", "right"] },
         "shapeType": { "enum": ["rect", "ellipse", "rounded_rect", "triangle", "star", "arrow", "speech_bubble"] },

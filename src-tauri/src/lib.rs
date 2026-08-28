@@ -220,6 +220,165 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
+/// appData/user_fonts ディレクトリ（持ち込みフォント・ADR-0038・#261）。作成は呼び出し側。
+///
+/// ⚠️ **プロジェクトには入れない**＝アプリが**再配布経路にならない**ようにする（`13 §6`）。
+/// 素材（ADR-0035）は「自己完結のためコピーする」が、フォントは**理由が逆**＝コピーしない。
+/// ⚠️ **焼き出し（タイムライン形式）もフォントを運ばない**（同じ PC の中の操作なので、
+/// 置き場所が1つあれば足りる）。
+fn user_fonts_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("user_fonts"))
+}
+
+/// 持ち込みフォント1つぶんの覚え書き（目録＝`user_fonts/fonts.json`）。
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UserFontEntry {
+    /// `user_font_NNN`（採番は呼び出し側＝ドメイン）。
+    id: String,
+    /// 保存したファイル名（`<id>.<ext>`）。
+    file_name: String,
+    /// 画面に出す名前（利用者が付ける・既定は元のファイル名）。
+    display_name: String,
+}
+
+fn user_fonts_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(user_fonts_dir(app)?.join("fonts.json"))
+}
+
+/// 目録を読む（無ければ空）。1件でも壊れていたら**全部を捨てず**空として扱う（次の書き込みで直る）。
+fn read_user_fonts(app: &tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> {
+    let path = user_fonts_manifest(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(serde_json::from_str::<Vec<UserFontEntry>>(&text).unwrap_or_default())
+}
+
+fn write_user_fonts(app: &tauri::AppHandle, list: &[UserFontEntry]) -> Result<(), String> {
+    let dir = user_fonts_dir(app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    fs::write(dir.join("fonts.json"), text).map_err(|e| e.to_string())
+}
+
+/// 持ち込みフォントの一覧（目録のうち**実体があるものだけ**）。
+///
+/// ⚠️ **実体が無い覚え書きは出さない**＝一覧に出ているのに描けない、を作らない。
+/// 消えたフォントを使っている動画には**書き出しの手前で断る**（別の経路・§2-5）。
+#[tauri::command]
+fn list_user_fonts(app: tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> {
+    let dir = user_fonts_dir(&app)?;
+    Ok(read_user_fonts(&app)?
+        .into_iter()
+        .filter(|e| dir.join(&e.file_name).exists())
+        .collect())
+}
+
+/// フォントを持ち込む（利用者が選んだファイルを `user_fonts/<id>.<ext>` へコピーし、目録に足す）。
+#[tauri::command]
+fn import_user_font(
+    app: tauri::AppHandle,
+    font_id: String,
+    display_name: String,
+    src_path: String,
+) -> Result<UserFontEntry, String> {
+    if !is_user_font_id(&font_id) {
+        return Err("フォントを取り込めませんでした。もう一度お試しください。".to_string());
+    }
+    let src = PathBuf::from(&src_path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    // ⚠️ **扱える形式だけ受ける**（利用者決定＝4つとも）。それ以外は「読めない字体」になるので先に断る。
+    if !matches!(ext.as_str(), "ttf" | "otf" | "woff" | "woff2") {
+        return Err("このファイルは文字の形として読み込めません。ttf・otf・woff・woff2 のいずれかを選んでください。".to_string());
+    }
+    if !src.exists() {
+        return Err("ファイルが見つかりませんでした。もう一度選び直してください。".to_string());
+    }
+    let dir = user_fonts_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file_name = format!("{font_id}.{ext}");
+    fs::copy(&src, dir.join(&file_name))
+        .map_err(|e| format!("フォントを取り込めませんでした。もう一度お試しください。（{e}）"))?;
+    let entry = UserFontEntry {
+        id: font_id.clone(),
+        file_name,
+        display_name: if display_name.trim().is_empty() {
+            font_id
+        } else {
+            display_name
+        },
+    };
+    let mut list = read_user_fonts(&app)?;
+    list.retain(|e| e.id != entry.id);
+    list.push(entry.clone());
+    write_user_fonts(&app, &list)?;
+    Ok(entry)
+}
+
+/// フォントの中身（base64）。**WebView へ載せて字を描くために要る**（`FontFace` に渡す）。
+///
+/// ⚠️ **素材（ADR-0004＝バイトを JS に載せない）とは事情が違う**＝字は WebView が描くので、
+/// 中身が WebView に無いと**描きようがない**（`asset://` で読ませる手もあるが、
+/// `FontFace` にバイト列を渡す方が読み込みの成否をその場で受け取れる）。
+#[tauri::command]
+fn read_user_font(app: tauri::AppHandle, font_id: String) -> Result<String, String> {
+    if !is_user_font_id(&font_id) {
+        return Err("文字の形を読み込めませんでした。".to_string());
+    }
+    let dir = user_fonts_dir(&app)?;
+    let entry = read_user_fonts(&app)?
+        .into_iter()
+        .find(|e| e.id == font_id)
+        .ok_or_else(|| {
+            "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string()
+        })?;
+    let bytes = fs::read(dir.join(&entry.file_name)).map_err(|_| {
+        "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string()
+    })?;
+    Ok(base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &bytes,
+    ))
+}
+
+/// 持ち込みフォントを消す（実体と目録の両方）。無ければ何もしない。
+#[tauri::command]
+fn delete_user_font(app: tauri::AppHandle, font_id: String) -> Result<(), String> {
+    if !is_user_font_id(&font_id) {
+        return Err("この文字の形は消せませんでした。".to_string());
+    }
+    let dir = user_fonts_dir(&app)?;
+    let list = read_user_fonts(&app)?;
+    if let Some(e) = list.iter().find(|e| e.id == font_id) {
+        let path = dir.join(&e.file_name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+    }
+    write_user_fonts(
+        &app,
+        &list
+            .into_iter()
+            .filter(|e| e.id != font_id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// `user_font_NNN` の形か（`fontCatalog.ts` の `USER_FONT_ID_RE` と一致させる＝パストラバーサル防止も兼ねる）。
+fn is_user_font_id(id: &str) -> bool {
+    let Some(rest) = id.strip_prefix("user_font_") else {
+        return false;
+    };
+    rest.len() >= 3 && rest.chars().all(|c| c.is_ascii_digit())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -242,6 +401,10 @@ pub fn run() {
             save_user_template,
             load_user_templates,
             delete_user_template,
+            list_user_fonts,
+            import_user_font,
+            read_user_font,
+            delete_user_font,
             ffmpeg::export_video,
             ffmpeg::begin_export,
             ffmpeg::cancel_export,

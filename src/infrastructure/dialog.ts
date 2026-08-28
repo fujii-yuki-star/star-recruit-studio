@@ -29,3 +29,13 @@ export async function showOpenAssetsDialog(): Promise<string[]> {
   if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string');
   return typeof picked === 'string' ? [picked] : [];
 }
+
+/** 持ち込みフォントのファイルを選ぶ（ADR-0038・#261）。キャンセル時は null。 */
+export async function showOpenFontDialog(): Promise<string | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: '文字の形', extensions: ['ttf', 'otf', 'woff', 'woff2'] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}
