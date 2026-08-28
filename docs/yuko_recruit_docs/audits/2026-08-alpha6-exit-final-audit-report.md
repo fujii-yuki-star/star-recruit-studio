@@ -1,0 +1,196 @@
+# 出口監査レポート：α-6（実用品化）
+
+- **凍結点**: `95d75f60ff91e6b250c4d6e262068a0f2a6ad224`（develop・作業ツリー clean）
+- **観点ファイル**: [`alpha6-final-audit-points.md`](alpha6-final-audit-points.md)（最終更新 2026-08-28＝監査直前に作成・凍結）
+- **実施日**: 2026-08-28
+- **機械層**: **緑**（`check:frontend` 4821 tests / ALL OK・`cargo test` 91 passed・`check:rust`（check→fmt→clippy）EXIT=0）
+- **完了条件**（#857 合意3）＝**α-6 スコープで 🔴 ゼロ**。→ **未達（🔴 5件）**
+
+## 判定表
+
+| 観点 | 判定 | 🔴 | 🟡 | ℹ️ |
+|---|---|---|---|---|
+| canon-schema | 要修正 | 0 | 7 | 4 |
+| correctness | 要修正 | **1** | 3 | 1 |
+| parity | 要修正 | 0 | 2 | 2 |
+| error-state | 要修正 | **1** | 6 | 0 |
+| resilience | 要修正 | 0 | 6 | 1 |
+| ui-terms | 要修正 | 0 | 1 | 0 |
+| tests | 要修正 | **3** | 1 | 1 |
+| ux-model | 要修正 | 0 | 7 | 5 |
+| [プ] 司令塔 | 要修正 | 0 | 1 | 0 |
+| **合計** | | **5** | **34** | **14** |
+
+---
+
+## 🔴 ブロッカー（5件・すべて検証済み）
+
+### 🔴1 取り込んだフォントを**どこからも選べない**（#261 が利用者から見て機能していない）
+
+- **file**: `src/app/components/FontPicker.tsx:105`・`:32`／`src/app/components/BrandKitSection.tsx:79`
+- **内容**: `fontId` を書ける入口は **6か所**（`SceneEditScreen` の動画全体・場面・種別ごと・FREE の文字・字幕／`TimelineProjectScreen:3338` の文字クリップ）＋会社の見た目だが、**すべて `FONT_CATALOG`（同梱3種）しか列挙していない**。`FontPicker` は選択肢を受け取る props を持たない。`FONT_CATALOG` に実行時追加する仕組みも無い（参照4ファイル・push/concat/再代入 0件）。
+- **利用者に起きること**: 設定で「文字の形を足す」と **「場面や文字の設定から選べます」と成功として案内される**のに、どこにも出てこない（§2-5＝実行できない次の行動を名指ししている）。取り込み・保存・描画解決・公開前チェック・`loadExportFonts` はすべて `user_font_NNN` を通す作りなのに、**値を入れる入口だけが無い**。
+- **副次**: 別経路で `user_font_NNN` が入っている文書を開くと、`FontPicker.tsx:32` の `known` 判定が `FONT_CATALOG` のみを見るため**実際と違う字体名を表示し**、一度触ると指定が黙って上書きされる。
+- **正典**: ADR-0038 `:118`（画面の約束）・**決定7**「`fontId` が `string` になれば持ち込みを既定にできる」／`06 §15:1203`「手持ちの文字の形を足すと、**動画の文字に使える**」／`15 §6` `USER_FONT_MISSING` は**構造的に一度も発火しない**（`usedUserFontIds` が常に空）
+- **CONFIRMED by**: 敵対的検証（反証失敗）。⚠️ 検証で**指摘より広い**ことが判明＝タイムライン形式の文字クリップも同じ（元の指摘は数え漏らしていた）。
+- **修正の方向**: `FontPicker` に持ち込みフォントの一覧を渡して選べるようにする（`displayName` ＋ `userFontCssFamily` で自字形プレビュー）。`known` 判定を `isKnownFontId`（`isUserFontId` 込み）にする。`BrandKitSection` の `<select>` も同じ一覧を出す（ADR-0038 決定7）。
+
+### 🔴2 音の自動処理が**新規の動画でも「しない」に化ける**
+
+- **file**: `src/domain/project/persistence.ts:388-391`（＋ `:48-56` `defaultVideoSettings`）
+- **内容**: `audioAuto` の後追い書き込みが**版で絞られていない**（`isRecord(vsAuto) && vsAuto.audioAuto === undefined` だけ）。`defaultVideoSettings()` は `audioAuto` を書かず、`migrateProject` は `parseProjectDoc` から**毎回**呼ばれるので、**現行版（1.29）で作った新規プロジェクトも条件に当たる**。
+- **失敗シナリオ**: 新規作成 →（音の自動調整に触らない）→ 保存 → 書き出し（既定 ON で**効く**）→ 閉じて開き直す → `{duckBgm:false, normalize:false}` が書き込まれる → 同じ設定のまま書き出すと**両方 OFF の別の音**。画面のチェックも ON→OFF に黙って化ける。#395 の複製も `parseProjectDoc` 経由なので、複製物に「しない」が焼き付く。
+- **正典**: §2-5（黙って別の結果にしない）。⚠️ **タイムライン形式は `domain/timeline/persistence.ts:32` で `schemaVersion === 現行` を早期 return しており、同じ概念が形式で割れている**（ADR-0026②）。
+- **CONFIRMED by**: 司令塔の実読（`defaultVideoSettings` に `audioAuto` 無し・`migrateProject` に版の門無し・`parseProjectDoc:272` が無条件呼び出し）
+- **修正の方向**: 上書き前の `project.schemaVersion` を見て **1.29 より前の文書にだけ**書く（タイムライン側と同じ流儀）。または `defaultVideoSettings()` で明示 seed。現行版で未設定なら書かないテストを `persistence.test.ts:395` の隣へ。
+
+### 🔴3 schema 1.27（文字の体裁）の検査が**場面形式・テンプレ側に1件も無い**
+
+- **file**: `scripts/validate-schemas.mjs`（`shadow`/`letterSpacing` の出現は**すべて `timeline:` 接頭辞**の4件のみ）
+- **未検証**: `project.schema.json` の `FreeElement.shadow/letterSpacing`・`TextStyle.shadow/letterSpacing/background`、`template.schema.json` の `Layer.shadow/letterSpacing`。
+- **壊れても気づけない**: `shadow.color` の pattern・`letterSpacing` の範囲・`additionalProperties:false` のどれを壊しても、**3か所のうち1つだけ直し忘れても**、`validate:schemas` は緑のまま。⚠️ **`slotVideoStart` の検査がマージで落ちていた前歴と同じ形**。
+- **正典**: §7「スキーマ検証テスト＝代表データ（正常・異常）を ajv で」
+- **CONFIRMED by**: 司令塔の grep（`timeline:` 以外 0件）
+- **修正の方向**: `withScene({ freeLayout: [...] })`・`withScene({ textStyles: {...} })` の must-accept/must-reject、`tplAccept`/`tplReject` に `Layer.shadow`/`letterSpacing`。
+
+### 🔴4 schema 1.28（クレジットの見せ方）の検査が**1件も無い**
+
+- **file**: `scripts/validate-schemas.mjs`（`creditDisplay` の出現 **0件**）
+- **未検証**: `mode` の enum 5値・`seconds` の 1〜10・`additionalProperties:false`。
+- **壊れても気づけない**: ADR-0025 の核である **`hidden`（非表示にできる）が enum から落ちても検知されない**。非表示は事業側の判断（社内利用）なので、保存できなくなっても気づけない影響が大きい。
+- **正典**: §7／§2-7（`CREDIT_MODE` と schema enum の二重定義）
+- **CONFIRMED by**: 司令塔の grep（0件）
+- **修正の方向**: 5モードの must-accept ＋ 秒数境界（1/10）、must-reject（未知 mode・`seconds:0`/`11`・未知フィールド）。可能なら `CREDIT_MODES` と schema enum の突き合わせ（`fontCatalog.test.ts` の8か所テストと同型）。
+
+### 🔴5 `is_user_font_id`（Rust）と `USER_FONT_ID_RE`（domain）の同値性が固定されていない
+
+- **file**: `src-tauri/src/lib.rs:459-465`（`#[cfg(test)]` 無し）／対して `is_library_asset_id` は `lib.rs:797` の `library_id_tests` で**同じ9入力**を両側に固定している
+- **壊れても気づけない**: 片方だけ桁数・prefix がずれると「**保存できるのに読めない**」（逆も）がテスト無しで入る。⚠️ 姉妹関数はまさにこの理由で PR #887 レビューを経てテストが足された前例がある。
+- **正典**: §2-7（同じ規則を2か所に置くなら突き合わせる）／`fontCatalog.ts:41` 自身が「片方だけ変えると保存できるのに読めない」と書いている
+- **CONFIRMED by**: 司令塔の grep（`mod user_font_id_tests` 不在）
+- **修正の方向**: `library_id_tests` と同型の Rust テスト。入力一覧は `fontCatalog.ts` 側に `USER_FONT_ID_SAMPLES` として置き、両側から参照（`lib_asset` と同じ形）。
+
+---
+
+## 🟡 直すべき（34件・観点別）
+
+### canon-schema（7）
+
+1. **共有 `$defs` を変えたのに片方だけ版を上げた（#359）＝`11 §1` が自己矛盾** — `11:19` vs `:21`／`timeline-project.schema.json:24`。#359 は `$defs/VideoSettings` に `creditDisplay` を足して project だけ 1.28 へ、#257 は timeline も 1.10 へ＝**同一状況に逆の判断が2つ正典に載っている**。ajv 実測で timeline 文書は `creditDisplay` を受理し、`bake.ts:589` が `videoSettings` をそのまま写すので**実在しうる**。→ どちらかへ揃える（α-6 未リリースなので実データ破損は無い＝🔴 にしない）。
+2. **版番号の書き誤りが7か所** — `audioAuto.ts:44,59`（1.25→1.26 と書いてあるが実際は 1.28→1.29）／`timeline/persistence.ts:27,34,35`／`validate-schemas.mjs:122,264`（「schema 1.27」→ 1.29）。⚠️ `timeline/persistence.ts:34` は**マイグレーション本体のコメント**＝次に版を足す人が誤った起点に積む。＋既存分＝`persistence.ts:21` の「1.24→1.25：`scene.textStyles`」が `11 §1`（1.25＝`Keyframe.easing`）と食い違う。
+3. **`migrateProject` の「変換が要る版」一覧に 1.28→1.29 が無い／docstring が別の関数（`isRecord`）に付いている** — `persistence.ts:311-332`。docstring は「ここに書くのは実際に変換が要る版だけ」と宣言しているのに、1.28→1.29 は実変換なのに一覧に無い＝宣言が嘘。⚠️ **JSDoc が関数から外れる**のは既知の再発パターン。
+4. **ADR-0038 が約束した `11 §2.1` への `user_font_NNN` 追記が無い** — `11:41-50`。`lib_asset_NNN` の隣に1行（**gap-fill しない**まで書く＝`scene`/`part` と別方針）。
+5. **「timeline が `$ref` で追従することをテストで固定」が実在しない** — `validate-schemas.mjs:287-311`（`tlAccept` に `fontId` の例が0件）。ajv 実測では追従できているが、固定が無いので写しが生まれた瞬間に無検知で割れる。
+6. **Rust `is_user_font_id` と domain の同値性が未固定** → 🔴5 に格上げ済み。
+7. **`creditDisplay` に schema テストが無い** → 🔴4 に格上げ済み。
+
+### correctness（3）
+
+8. **`createUserFontId`/`createLibraryAssetId` が「消した番号を使い回さない」と書いてあるのに使い回す** — `fontCatalog.ts:54-60`／`assetLibrary.ts:53-59`。入力が**実体があるものだけ**（`list_user_fonts` が存在フィルタ）なので、最大番号を消すと再発行される。→ 既存動画が**黙って別の字体**になり `USER_FONT_MISSING` も発火しない。
+9. **`importFromLibrary`／`applyBrandKitToNew` が `_docEpoch` を見ない** — `projectStore.ts:2009`／`:855-864`（誘発元 `:811` の投げっぱなし）。⚠️ **既存の `addAsset`/`captureVideoFrame` も見ていない**ので α-6 起因ではないが、**自動で走る経路**（`newProject` から）は α-6 で初めて生まれた＝ADR-0036 決定3「既存へは自動で遡及しない」が破れる。
+10. **ライブラリ経由の取り込みだけ `probeImageSize` を通らない** — `projectStore.ts:2010-2016` vs `:1972-1975`。→ `blurryAssets`（#346「ぼやける素材」）が**一度も出ない**（同じファイルを直接取り込めば出る）＝ADR-0026②。
+
+### parity（2）
+
+11. **「描く前に字体をそろえる」段が書き出し側にしか配線されていない** — `ScenePreview.tsx:201-206`／`TimelineProjectScreen.tsx:2397` vs `loadExportFonts.ts:28-33`。`loadUserFonts` の入口は `refreshUserFonts` だけで、呼ぶのは設定・公開前チェック・書き出しのみ。→ 場面編集・仕上がり確認・タイムライン編集では**プレビューだけ既定の字体**。（🔴1 を直した瞬間に表面化する）
+12. **音の自動処理が書き出しにだけ効き、画面がそう言っていない** → [プ] 指摘と同一（下記）。
+
+### error-state（6）
+
+13. **`removeUserFont` の失敗を成功として知らせる** — `UserFontSection.tsx:54`。失敗しても「「◯◯」を外しました。」＋赤いエラーが同時に並び、一覧にはそのフォントが残る。→ `addUserFont` と同型に `Promise<boolean>` を返す。
+14. **「この動画に反映する」が書き出し中でも押せる** — `BrandKitSection.tsx:156`。store 側コメント（`projectStore.ts:814`）の「押せないようにもしてある」が**実態と違う**。
+15. **「この動画で使う」が書き出し中でも押せる** — `AssetLibraryPanel.tsx:64,221`。`working` に書き出し中が入っておらず、断り文言も**素材画面上部のバナー**に出る＝すぐ隣の「素材を追加」は押す前に無効化＋理由＝同じ「取り込み」で断り方が2通り。
+16. **まとめて置いたとき、部分失敗で完了分を握りつぶす** — `AssetLibraryPanel.tsx:78-91`。N 件置けているのに「全部失敗した」と読め、もう一度押して**二重に置く**。
+17. **`applyEditTo` など4か所が `blockTargetFor` を通らない** — `timelineStore.ts:1916`（同型 `:962,988,1019`）。~20 操作の集約点なのに例外判定を通らず、`TIMELINE_EDIT_NOT_FOUND` が欄の中に落ちる。⚠️ `moveClipsBy` は帯へ倒すのに `moveClipById` は欄へ＝**同じ状況で出る場所が違う**（#869 で直したはずの形が残っている）。
+18. **α-6 の5コードが #855 の機械層の外** — `errorStateTable.test.ts:48-56`。`READING_DICT_*`3件・`USER_FONT_*`2件が走査対象外で、**既にズレが1件ある**（句点の有無）。
+
+### resilience（6）
+
+19. **目録が1件壊れると全件消える** — `lib.rs:342`（同型 `:506`）。`unwrap_or_default()` で空にしたあと次の書き込みが**残りを永久に消す**。doc コメントの主張とも食い違う。書き込みも非アトミック。
+20. **採番の入力が「実体があるものだけ」** → 🟡8 と同根（Rust 側で id を発行するか、未フィルタの一覧を返す口を分ける）。
+21. **`applyBrandKitToNew` が世代照合を持たない** → 🟡9 と同根。
+22. **読み方辞書の `persist` が画面の古い `links` を丸ごと書き戻す** — `ReadingDictSection.tsx:72-85`。**控えが巻き戻り**、直した読みが反映されないまま声が作られる。共有辞書からも消えなくなる。
+23. **`updateBrandKit` が保存の失敗を捕まえない** — `projectStore.ts:2179-2182`。書けていないのに覚えた顔をし、開き直すと消えている。
+24. **クレジットの秒欄が1キーストローク＝1履歴／空欄で `seconds:0` が入る** — `CreditDisplayField.tsx:59`。家の規則（`projectStore.ts:1595`「blur/Enter で確定＝1改名=1履歴」）から外れ、`minimum:1` 違反が文書へ入る（保存時検証は `console.warn` だけ）。
+
+### ui-terms（1）
+
+25. **同じ操作を別の名で呼んでいる** — `CaptureFrameControls.tsx:48`「素材を取り込み直す」vs 同画面の既存ボタン「**ファイルを選び直す**」（`MaterialsScreen.tsx:190,364-368,382` の4か所で統一）。
+
+### ux-model（7）
+
+26. **設定画面の並びが `06 §15` と自分のコメントの両方に反する** — `SettingsScreen.tsx:387-392`。正典は 読み方→フォント→会社の見た目（`06:1191,1201,1216`）、実装は 会社の見た目→読み方→フォント。⚠️ **389行のコメント自身が「ナレーターの声のすぐ下」と書いているのに直下ではない**。
+27. **新設の3欄の「外す」だけ確認が無い** — `AssetLibraryPanel.tsx:232`／`UserFontSection.tsx:87`／`ReadingDictSection.tsx:361`（いずれも `DeleteConfirm` 0件）。同じ画面の素材削除・接続キー削除は必ず確認を通す＝**同一画面に「確認する削除」と「1クリック削除」が同居**。とくにフォントは外すと実体が消え、使っている動画の書き出しが止まる。
+28. **絞り込みが上下段で別作法** — `AssetLibraryPanel.tsx:160-202` vs `MaterialsScreen.tsx:205-299`。種類＝ドロップダウン vs タブ／タグ＝複数AND vs 単一／クリア導線の有無／「名前で探す」vs「名前やタグで探す」。**素材画面で縦に並んで見える**。
+29. **「素材の一覧に増えています」が音楽では成り立たない** — `AssetLibraryPanel.tsx:99`。`isListedMaterial`（`assetFile.ts:45-47`）が `bgm`/`voice` を除くので、BGM を取り込んだ利用者は案内どおり探しても見つけられない。
+30. **「取り消す」が設定画面に無い** — `BrandKitSection.tsx:58`（`SettingsScreen` に `UndoRedoButtons` 0件）。反映直後に「元に戻すときは「取り消す」を押してください」と言われても押すものが無い。
+31. **「何がいくつ変わるか」に個別設定の場面が入っていない** — `BrandKitSection.tsx:47,151-155`。`planBrandApply` は**動画全体の `fontId` しか見ない**構造なので、場面ごとに文字の形を選んだ場面が変わらないことを数えられない。
+32. **複製と開くが片側しか互いを止めていない** — `HomeScreen.tsx:519,570-575`。開く最中でも複製は押せて黙って no-op／複製中はカードが無効化されず**素材と声のコピー中に別の動画を開ける**（後勝ち）。
+
+### [プ] プレビュー駆動（1）
+
+33. **「音の自動調整」だけ、仕上がり確認での鳴り方に触れていない** — 書き出し画面。**同じ画面の字幕の欄は「仕上がり確認でも同じ設定で表示されます」と明記**しているのに、音の2項目は効果の説明だけ。#257/#259 は書き出し時の処理なので**仕上がり確認では効かない**（parity 観点も同じ結論）。→ 説明に一文足す（実装をプレビューへ効かせるのは ADR-0032 追補4 に反するので採らない）。
+
+### tests（1）
+
+34. **`templateFontIds` がどのテストからも呼ばれていない** — `usedFonts.ts:33-40`。`usedUserFontIds` の `templates` 分岐も全ケースが引数を省略＝一度も踏まれていない。現状は `Layer.fontId` が schema に無く常に `[]` だが、壊しても誰も気づけない。
+
+---
+
+## ℹ️ 軽微・要確認（14件）
+
+- `is_safe_frame_file_name` が `is_safe_single_file_name` の**3つ目の写し**で、**コロンの検査だけ落ちている**（`ffmpeg.rs:1751-1752`）。現時点では下流の `is_safe_rel_path` が弾くので実害なし＝将来の順序変更で穴になる。写し検出ガード（#893）も `starts_with('/')` 系しか見ていない。
+- FREE 要素の `fontSize`/`color` だけ `resolveTextStyle` の外で解いている（`layout.ts:447,450,469,472`）。いまは同値だが、上書き層が入ると**この2項目だけ拾わない**。
+- 「端に寄った文字」の判定だけ“描かれる帯”の矩形を見ていない（`adapters.ts:312` vs `layout.ts:145-155`）。
+- `library.json` の `assetType` が検証されずに `Asset.assetType` へ入る（`assetLibraryFs.ts:12-20`）。兄弟（`parseBrandKit`・`readingDictFs`）は項目ごとに落としている。
+- `11 §1` の移行記述が 1.7 のまま（`11:20`）＝版の説明が3か所にある。
+- Rust コメントが存在しない識別子を指す（`lib.rs:666` の `LIBRARY_ASSET_ID_PATTERN`）。
+- timeline の `shadow` だけ共有 `$def` があるのに写しになっている（`timeline-project.schema.json:290-318`）。
+- `loadReadingDict` が落ちた語を知らせない（`readingDictFs.ts:70-72`）＝同ファイル `:39` の主張と食い違う。
+- 「名前とタグ」の編集中にどの行を直しているか印が無い（`AssetLibraryPanel.tsx:216-235`）。
+- 複製中だけ進行の表示が無い（`HomeScreen.tsx:547`）。
+- 「この動画に反映する」の塊が `scenes.length > 0` で黙って消える（`BrandKitSection.tsx:142`）。
+- 「『よく使う素材』にロゴを置くと」が場所を書いていない・行く導線も無い（`BrandKitSection.tsx:120-126`）。
+- ライブラリの取り込みに投げ込み（D&D）が無い可能性（`AssetLibraryPanel.tsx:154-158`・要確認）。
+- `sceneCreditVisibility` に専用テストが無い（間接テストは厚い）。
+
+---
+
+## 押し返し記録
+
+- **なし**（敵対的検証にかけた 🔴1 は反証できず CONFIRMED。⚠️ 検証の過程で**指摘より範囲が広い**ことが判明＝タイムライン形式の文字クリップも同じ穴だった）。
+
+---
+
+## 実機チェックリスト（利用者向け）
+
+コード・プレビューでは確かめられないもの。
+
+- [ ] **音の自動処理**（#257/#259）＝目標 −16 LUFS が自然か／`alimiter=limit=0.95` で歪みが止まるか／ダッキングの深さ 0.6・立ち上がり 0.25 秒・戻り 0.6 秒の効き方
+- [ ] ⚠️ **聞き比べで選んだ音と、登録後にナレーションで鳴る音が一致するか**（#350）＝ADR-0037 の未解決の論点（`AccentPhrase.accent` と `user_dict` の `accent_type` が「平板」を同じ値で表すか）。**実装は値をそのまま渡して寄せていない**
+- [ ] **持ち込みフォント**（#261）＝4形式が実際に描けるか／書き出しでも同じ字体か（**🔴1 を直したあと**）
+- [ ] **端の目安**（#265）＝実際のテレビ・SNS で切れないか
+- [ ] **文字の体裁**（#264）＝影・字間・帯の見え方（書き出した動画で）
+- [ ] **クレジットの見せ方**（#359）＝5方式それぞれが意図どおりの区間に出るか
+- [ ] **静止画の切り出し**（#349）＝指定した時刻のコマが出るか（2段階シークの精度）
+- [ ] **一覧の小さな絵**（#397）＝実素材で見分けがつくか
+- [ ] ライブラリの知らせは一覧の**上**、編集欄は**下**＝素材が増えたとき画面外に出ないか
+- [ ] 読み方の「聞き比べ」＝押してから鳴るまでの待ちと、候補を続けて押したときの重なり
+- [ ] 会社の見た目「この動画に反映する」の後、**「取り消す」1回で元に戻るか**（🟡30 と併せて）
+
+---
+
+## 総括
+
+**完了条件（🔴 ゼロ）は未達。** ただし内訳は**性質が分かれる**：
+
+| 🔴 | 性質 | 直す重さ |
+|---|---|---|
+| 1 フォントを選べない | **機能の欠け**（#261 が利用者から見て動いていない） | 中（`FontPicker` に一覧を渡す＋会社の見た目） |
+| 2 音の設定が化ける | **挙動の不具合**（新規の動画に影響） | 小（版の門を足す） |
+| 3・4 schema の検査が無い | **DoD §7 の欠け**（壊れても気づけない） | 小 |
+| 5 id 規則の同値性が未固定 | 同上 | 小 |
+
+⚠️ **🔴1 と 🟡11 は連動している**＝フォントを選べるようにした瞬間、プレビューだけ既定の字体になる（`loadUserFonts` がプレビュー側の起点で呼ばれない）。**同じ PR で両方直す**必要がある。
+
+⚠️ **🔴2 は α-6 の最後にマージした #896 で入った**＝レビューを4回に分けて通したが、**版の門は「見てほしい点」に挙げていなかった**（`migrateProject` の書き込み条件は挙げたが、`defaultVideoSettings` との組み合わせを見ていない）。観点の切り出し方の反省点として記録する。
