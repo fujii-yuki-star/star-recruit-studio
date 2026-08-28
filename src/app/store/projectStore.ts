@@ -468,8 +468,12 @@ let saveInFlight: Promise<void> | null = null;
 /**
  * 直近に焼いた一覧の絵の印（#397）。**文書には持たない**＝絵は作り直せるもので、動画の中身ではない。
  * 別の動画を開いたら `null` へ戻す（前の動画の印で焼き直しを飛ばさない）。
+ *
+ * ⚠️ **どの動画の印かまで持つ**（PR #889 レビュー 🟡）＝印だけだと、**中身が同じ別の動画**
+ *（複製した直後がまさにそれ）で「変わっていない」と誤判定し、**一度も焼いていない側の絵が
+ * 焼かれないまま**になる。投げっぱなしで走るので着地の順番も保証できない。
  */
-let lastThumbnailSignature: string | null = null;
+let lastThumbnail: { projectId: string; signature: string } | null = null;
 
 // 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
 // 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
@@ -685,7 +689,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   newProject: () => {
-    lastThumbnailSignature = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
+    lastThumbnail = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
     set((s) => ({
@@ -747,11 +751,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   _refreshProjectThumbnail: async (projectId) => {
     const s = get();
     const sig = thumbnailSignature({ scenes: s.scenes, assets: s.assets, videoSettings: s.meta.videoSettings });
-    if (sig === lastThumbnailSignature) return; // 絵に効くものが変わっていない＝焼き直さない
+    // ⚠️ **同じ動画の印と比べる**＝別の動画の印と当たっても「変わっていない」にしない。
+    if (lastThumbnail?.projectId === projectId && lastThumbnail.signature === sig) return;
     const scene = thumbnailScene(s.scenes);
     const template = scene ? s.templates.find((t) => t.templateId === scene.templateId) : undefined;
     if (!scene || !template) {
-      lastThumbnailSignature = sig; // 「絵が無い」も1つの状態として覚える（毎回試さない）
+      lastThumbnail = { projectId, signature: sig }; // 「絵が無い」も1つの状態として覚える（毎回試さない）
       return;
     }
     const dataUrl = await renderProjectThumbnail(
@@ -763,7 +768,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!dataUrl) return; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
     try {
       await saveProjectThumbnail(projectId, dataUrl);
-      lastThumbnailSignature = sig;
+      lastThumbnail = { projectId, signature: sig };
     } catch {
       /* 絵が無くても一覧は開ける＝黙って続ける */
     }
@@ -950,7 +955,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   loadProject: async (projectId) => {
-    lastThumbnailSignature = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
+    lastThumbnail = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
     if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);
