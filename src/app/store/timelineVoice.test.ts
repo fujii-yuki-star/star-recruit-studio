@@ -121,7 +121,7 @@ describe('generateSelectedVoice', () => {
     const clip = useTimelineStore.getState().doc?.clips.find((c) => c.id === 'clip_001');
     expect(clip?.voice?.status).toBe('generated'); // 声は残る
     expect(clip?.durationSec).toBe(3); // 長さは変わらない
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_OVERLAP');
   });
 
   it('作っている間に文を書き換えたら、その声は使わない（古い声を新しい文に貼らない）', async () => {
