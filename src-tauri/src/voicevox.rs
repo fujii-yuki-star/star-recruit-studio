@@ -14,6 +14,27 @@ fn http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
+/// 話し方（話速・高さ・抑揚）。**3つで1組**なので束ねて渡す。
+///
+/// ⚠️ **換算は `apply` だけが持つ**＝声を作る経路（`synthesize_voice`）と読み方の聞き比べ
+///（`voicevox_synthesize_with_accent`）で**同じ式**を使う。写すと片方だけ直る。
+#[derive(serde::Deserialize)]
+pub struct VoiceStyle {
+    pub speed: f64,
+    pub pitch: f64,
+    pub intonation: f64,
+}
+
+impl VoiceStyle {
+    /// 話速・高さ・抑揚を VOICEVOX のスケールへ反映する。
+    /// pitch は本アプリの目安値域 -1.0〜1.0 を VOICEVOX の pitchScale 推奨域 -0.15〜0.15 へ線形変換。
+    fn apply(&self, query: &mut serde_json::Value) {
+        query["speedScale"] = serde_json::json!(self.speed);
+        query["intonationScale"] = serde_json::json!(self.intonation);
+        query["pitchScale"] = serde_json::json!((self.pitch * 0.15).clamp(-0.15, 0.15));
+    }
+}
+
 /// テキストを VOICEVOX で音声合成し、WAV の data URL を返す。
 #[tauri::command]
 pub async fn synthesize_voice(
@@ -48,11 +69,12 @@ pub async fn synthesize_voice(
         .await
         .map_err(|_| "音声データの解析に失敗しました。もう一度お試しください。".to_string())?;
 
-    // 話速・高さ・抑揚を VOICEVOX のスケールへ反映。
-    // pitch は本アプリの目安値域 -1.0〜1.0 を VOICEVOX の pitchScale 推奨域 -0.15〜0.15 へ線形変換。
-    query["speedScale"] = serde_json::json!(speed);
-    query["intonationScale"] = serde_json::json!(intonation);
-    query["pitchScale"] = serde_json::json!((pitch * 0.15).clamp(-0.15, 0.15));
+    VoiceStyle {
+        speed,
+        pitch,
+        intonation,
+    }
+    .apply(&mut query);
 
     // 2) synthesis（speaker をクエリ、query を本文に）。
     let synth_res = client
@@ -219,9 +241,7 @@ pub async fn voicevox_synthesize_with_accent(
     yomi: String,
     accent_type: u32,
     speaker: u32,
-    speed: f64,
-    pitch: f64,
-    intonation: f64,
+    style: VoiceStyle,
     base_url: Option<String>,
     engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
 ) -> Result<String, String> {
@@ -263,9 +283,7 @@ pub async fn voicevox_synthesize_with_accent(
         let clamped = (accent_type as usize).min(mora_count);
         phrase["accent"] = serde_json::json!(clamped);
     }
-    query["speedScale"] = serde_json::json!(speed);
-    query["intonationScale"] = serde_json::json!(intonation);
-    query["pitchScale"] = serde_json::json!((pitch * 0.15).clamp(-0.15, 0.15));
+    style.apply(&mut query);
 
     let synth_res = client
         .post(format!("{base}/synthesis"))
@@ -283,4 +301,37 @@ pub async fn voicevox_synthesize_with_accent(
         .map_err(|_| "音声データの取得に失敗しました。もう一度お試しください。".to_string())?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:audio/wav;base64,{b64}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 画面が渡す形をそのまま受け取れることを固定する（#350）。
+    ///
+    /// ⚠️ **型では検知できない境界**＝画面（TypeScript）は `style: { speed, pitch, intonation }`
+    /// を送る。ばら渡しへ戻ると**受け取れずに落ちる**ので、送る側（`voicevoxProvider.synthesize.test.ts`）
+    /// と受ける側の両方で留める。
+    #[test]
+    fn 話し方をまとめて受け取れる() {
+        let style: VoiceStyle = serde_json::from_value(
+            serde_json::json!({"speed": 1.2, "pitch": 0.3, "intonation": 0.8}),
+        )
+        .expect("画面が送る形を受け取れること");
+        assert_eq!(style.speed, 1.2);
+    }
+
+    /// 声の作成と聞き比べで**同じ換算**を通ることを固定する（写すと片方だけ直る）。
+    #[test]
+    fn 高さは推奨域へ収める() {
+        let mut q = serde_json::json!({});
+        VoiceStyle {
+            speed: 1.0,
+            pitch: 5.0,
+            intonation: 1.0,
+        }
+        .apply(&mut q);
+        assert_eq!(q["pitchScale"], serde_json::json!(0.15));
+        assert_eq!(q["speedScale"], serde_json::json!(1.0));
+    }
 }

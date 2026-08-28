@@ -69,9 +69,8 @@ export async function synthesizeWithAccent(
     yomi,
     accentType,
     speaker: effectiveSpeaker(v, getVoicevoxSpeaker()),
-    speed: v.speed,
-    pitch: v.pitch,
-    intonation: v.intonation,
+    // 話し方は**3つで1組**（Rust 側は `VoiceStyle` で受け、スケールへの換算を声の作成と共有する）。
+    style: { speed: v.speed, pitch: v.pitch, intonation: v.intonation },
     baseUrl: getVoicevoxUrl() || null,
   });
 }
