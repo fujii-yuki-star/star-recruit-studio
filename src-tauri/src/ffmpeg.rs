@@ -1276,8 +1276,8 @@ pub async fn audio_peaks(
     tauri::async_runtime::spawn_blocking(move || {
         audio_peaks_impl(app, project_id, rel_path, buckets, from_sec, length_sec)
     })
-        .await
-        .map_err(|e| format!("audio peaks task join: {e}"))?
+    .await
+    .map_err(|e| format!("audio peaks task join: {e}"))?
 }
 
 fn audio_peaks_impl(
@@ -1310,9 +1310,12 @@ fn audio_peaks_impl(
         args.push(format!("{length_sec}"));
     }
     args.extend([
-        "-f".to_string(), "s16le".to_string(),
-        "-ac".to_string(), "1".to_string(),
-        "-ar".to_string(), "4000".to_string(),
+        "-f".to_string(),
+        "s16le".to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-ar".to_string(),
+        "4000".to_string(),
         "-".to_string(),
     ]);
     // ⚠️ **失敗しても空で返す**＝波形は「あると見やすい」もので、無くても編集はできる。
@@ -1357,8 +1360,8 @@ pub async fn video_filmstrip(
     tauri::async_runtime::spawn_blocking(move || {
         video_filmstrip_impl(app, project_id, rel_path, frames, from_sec, length_sec)
     })
-        .await
-        .map_err(|e| format!("filmstrip task join: {e}"))?
+    .await
+    .map_err(|e| format!("filmstrip task join: {e}"))?
 }
 
 fn video_filmstrip_impl(
@@ -1419,7 +1422,10 @@ fn video_filmstrip_impl(
     args.push("-t".into());
     args.push(format!("{span}"));
     args.push("-vf".into());
-    args.push(format!("fps={}/{},scale=-1:48,tile={}x1", frames, span, frames));
+    args.push(format!(
+        "fps={}/{},scale=-1:48,tile={}x1",
+        frames, span, frames
+    ));
     args.extend(["-frames:v".to_string(), "1".to_string()]);
     args.push(out.to_string_lossy().into_owned());
     // ⚠️ **失敗しても空で返す**（波形と同じ）＝コマ列は無くても編集はできる。
@@ -2354,7 +2360,11 @@ fn remove_stale_analysis_cache(app: &tauri::AppHandle) {
             }
             // 使われていない期間で見る（書き出しの一時置き場と同じ基準・同じ長さ）。
             if let Ok(modified) = file.metadata().and_then(|m| m.modified()) {
-                if now.duration_since(modified).map(|d| d > STALE_EXPORT_DIR_MAX_AGE).unwrap_or(false) {
+                if now
+                    .duration_since(modified)
+                    .map(|d| d > STALE_EXPORT_DIR_MAX_AGE)
+                    .unwrap_or(false)
+                {
                     let _ = fs::remove_file(&path);
                 }
             }
