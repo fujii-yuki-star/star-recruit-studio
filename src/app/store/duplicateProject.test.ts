@@ -102,8 +102,15 @@ describe('duplicateProject', () => {
     expect(useProjectStore.getState().meta.projectId).toBe(id);
   });
 
+  /**
+   * ⚠️ **日付は「その土地の日付」で採る**（α-6 出口監査で実際に落ちた）＝`createProjectId` は
+   * `formatYmd`（`getFullYear`/`getMonth`/`getDate`＝ローカル）で作るのに、ここは
+   * `toISOString()`（**UTC**）で作っていた。日本時間の 0〜9時は UTC がまだ前日なので、
+   * **その時間帯だけ必ず落ちる**テストになっていた。
+   */
   it('番号は既にあるものとかぶらない', async () => {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const d = new Date();
+    const today = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     vi.mocked(listProjectSummaries).mockResolvedValue([{ projectId: `proj_${today}_001` }] as never);
     const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
     expect(id).toBe(`proj_${today}_002`);

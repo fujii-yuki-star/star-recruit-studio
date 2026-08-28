@@ -308,6 +308,11 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
   return { valid: false, errors: formatProjectErrors(), structural };
 }
 
+/** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 /** 読込時に旧バージョンを現行（`PROJECT_SCHEMA_VERSION`）へ移行する。
  *
  *  ⚠️ **版ごとの変更一覧はここに置かない**（ファイル冒頭の `PROJECT_SCHEMA_VERSION` の docstring が
@@ -323,15 +328,15 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
  *  1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォントへ）。
  *  1.3→1.4: 未知の bgmSettings.bundledBgmId を標準BGM未選択へ落とす。
  *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす。null は継承の明示なので保持。
+ *  1.28→1.29: 音の自動処理（`videoSettings.audioAuto`）に「しない」を書き込む
+ *             ＝**前の版の文書だけ**（既に作った動画の音を変えない・§2-5）。
  *
  *  ⚠️ 版に紐づかない正規化も1つある＝**同時開始**（ADR-0031）の休眠フラグ・`startWithPrevious`×`startSec`
  *  の併存を読込時に解消する（実装が無視する状態を残さない・ADR-0026④）。版で分岐しないので上の一覧には無い。 */
-/** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
 function migrateProject(project: Project): Project {
+  // ⚠️ **書き換える前の版を控える**（α-6 出口監査 🔴2）＝下の「前の版にだけ書き込む」判定に要る。
+  // `next.schemaVersion` は現行版へ潰れるので、そちらを見ると**新規の文書も旧版と同じ扱い**になる。
+  const from = project.schemaVersion;
   const next: Project = {
     ...project,
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -384,9 +389,15 @@ function migrateProject(project: Project): Project {
   // ⚠️ **既に作った動画の音を変えない**（§2-5）＝新しい動画では既定で「する」だが、
   // **前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて書き出し直した
   // だけで BGM の鳴り方と全体の音量が変わり、**前に書き出した動画と別物**になる。
+  //
+  // ⚠️ **前の版の文書にだけ書く**（α-6 出口監査 🔴2）＝版を見ないと、`defaultVideoSettings()` が
+  // `audioAuto` を書かないぶん**現行版で作った動画も条件に当たり**、開き直すたびに「しない」が
+  // 焼き付く（既定で「する」だったものが黙って OFF に化ける＝§2-5）。タイムライン形式は
+  // `migrateTimelineProject` が現行版で早期 return しており、揃えないと形式で挙動が割れる
+  //（ADR-0026②）。
   // 触るのは `videoSettings` がオブジェクトのときだけ（壊れた値は検証へ＝#416 P1）。
   const vsAuto: unknown = next.videoSettings;
-  if (isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
+  if (from !== PROJECT_SCHEMA_VERSION && isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
     next.videoSettings = { ...vsAuto, audioAuto: OLD_PROJECT_AUDIO_AUTO } as unknown as VideoSettings;
   }
   // 同時開始（ADR-0031）：先頭行の休眠フラグ・startWithPrevious×startSec の併存を読込時に正規化する
