@@ -78,8 +78,5 @@ describe("CaptureFrameControls", () => {
     expect(screen.getByRole("button", { name: "切り出しています…" })).toBeDisabled();
   });
 
-  it("書き出し中は押せない", () => {
-    render(<CaptureFrameControls asset={video} disabled />);
-    expect(screen.getByRole("button", { name: "この瞬間を写真にする" })).toBeDisabled();
-  });
+  /** ⚠️ 書き出し中は**欄ごと出さない**（親の素材画面が持つ）＝ここに口を作らない（§9-2）。 */
 });

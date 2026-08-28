@@ -26,7 +26,7 @@ describe('frameAssetName', () => {
 
 describe('newFrameAsset', () => {
   it('普通の写真素材として作る（PNG・assets 直下）', () => {
-    const { asset, fileName } = newFrameAsset('会社紹介', 30, [], 'asset_007');
+    const { asset, fileName } = newFrameAsset('会社紹介', 30, ['asset_001', ...Array.from({ length: 5 }, (_, i) => `asset_00${i + 2}`)]);
     expect(asset).toEqual({
       assetId: 'asset_007',
       assetType: ASSET_TYPE.image,
@@ -38,7 +38,7 @@ describe('newFrameAsset', () => {
 
   /** ⚠️ 切り出しは原寸のまま出すので、非可逆の形式にしない。 */
   it('形式は PNG で固定（縮めない・劣化させない）', () => {
-    expect(newFrameAsset('あ', 0, [], 'asset_001').fileName.endsWith('.png')).toBe(true);
+    expect(newFrameAsset('あ', 0, []).fileName.endsWith('.png')).toBe(true);
   });
 
   it('番号を渡さなければ既存とかぶらない番号を採る', () => {

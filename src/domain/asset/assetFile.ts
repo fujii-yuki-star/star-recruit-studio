@@ -137,9 +137,8 @@ export function newFrameAsset(
   videoName: string,
   atSec: number,
   existingIds: readonly string[],
-  reservedId?: string,
 ): { asset: Asset; fileName: string } {
-  const assetId = reservedId ?? createAssetId(existingIds);
+  const assetId = createAssetId(existingIds);
   const fileName = `${assetId}.png`;
   return {
     asset: {

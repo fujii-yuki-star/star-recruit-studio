@@ -7,7 +7,7 @@ import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
 
-export function CaptureFrameControls({ asset, disabled }: { asset: Asset; disabled?: boolean }) {
+export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
   const captureVideoFrame = useProjectStore((s) => s.captureVideoFrame);
   const isImporting = useProjectStore((s) => s.isImporting);
@@ -15,7 +15,9 @@ export function CaptureFrameControls({ asset, disabled }: { asset: Asset; disabl
   const [atSec, setAtSec] = useState(0);
   const [notice, setNotice] = useState("");
 
-  const busy = disabled || isImporting;
+  // ⚠️ **書き出し中の非表示は親（素材画面）が持つ**（欄ごと出さない）＝ここは取り込み中だけ見る。
+  // 使われない口を作らない（§9-2「将来のために設計しない」・PR #885 レビュー ℹ️）。
+  const busy = isImporting;
 
   async function onCapture(): Promise<void> {
     setNotice("");
