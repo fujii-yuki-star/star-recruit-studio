@@ -45,10 +45,30 @@ describe('planDictSync：エンジンへ映す計画', () => {
    * ⚠️ **実測（ADR-0037 決定3b）＝未知の uuid への `PUT`/`DELETE` は `422`**。別PCへ持ち込む・
    * エンジンを入れ直すと控えは通用しないので、**言葉で引き直す**。
    */
-  it('控えが当たらなくても、同じ言葉・同じ読みがあれば送らずに控えを取り直す（重複を作らない）', () => {
-    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('新しいuuid', '宇都宮', 'ウツノミヤ', 4)], { 宇都宮: '古いuuid' });
+  /**
+   * ⚠️ **控えが当たらなかった語は「他人の語かもしれない」**（PR #883 再レビュー 🔴）。
+   * 覚えは「その言葉について過去に何か作った」ことしか示さず、**いま当たった語が自分のものだ**とは
+   * 示さない。実際に起きうる筋道＝アプリが登録 → エンジンを入れ直して控えが消える →
+   * その言葉を**別の主体**が独立に登録 → 同期すると言葉で当たるのは**他人の語**。
+   */
+  it('控えが当たらなければ、覚えがあっても控えを付け替えない（他人の語かもしれない）', () => {
+    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('他人のuuid', '宇都宮', 'ウツノミヤ', 4)], { 宇都宮: '古いuuid' });
     expect(plan.ops).toEqual([]);
-    expect(plan.links).toEqual({ 宇都宮: '新しいuuid' }); // 覚えがある＝自分の語なので付け替える
+    expect(plan.links).toEqual({}); // 消してよい語の名簿に載せない
+    expect(plan.adopted).toEqual(['宇都宮']);
+  });
+
+  it('控えが当たらず読みも違えば、覚えがあっても上書きしない（知らせて選ばせる）', () => {
+    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('他人のuuid', '宇都宮', 'ウツノミヤ', 0)], { 宇都宮: '古いuuid' });
+    expect(plan.ops).toEqual([]);
+    expect(plan.conflicts).toEqual([{ entry: e('宇都宮', 'ウツノミヤ', 4), engine: w('他人のuuid', '宇都宮', 'ウツノミヤ', 0) }]);
+  });
+
+  /** 控えを付け替えた語を一覧から外しても、他人の語は消さない（上の続き）。 */
+  it('付け替えなかった語は、一覧から外しても消す操作を出さない', () => {
+    const first = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('他人のuuid', '宇都宮', 'ウツノミヤ', 4)], { 宇都宮: '古いuuid' });
+    const second = planDictSync([], [w('他人のuuid', '宇都宮', 'ウツノミヤ', 4)], first.links);
+    expect(second.ops).toEqual([]);
   });
 
   /**
@@ -71,9 +91,10 @@ describe('planDictSync：エンジンへ映す計画', () => {
     expect(second.ops).toEqual([]);
   });
 
-  it('控えが当たらず読みも違うが、アプリが入れた覚えがあれば直す（uuid が変わっただけ）', () => {
-    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('新しいuuid', '宇都宮', 'ウツノミヤ', 0)], { 宇都宮: '古いuuid' });
-    expect(plan.ops).toEqual([{ kind: 'update', uuid: '新しいuuid', entry: e('宇都宮', 'ウツノミヤ', 4) }]);
+  /** ⚠️ 自分の語と見るのは**控えた uuid に実際に当たったとき**だけ（安全側の縮小）。 */
+  it('控えが当たれば自分の語＝読みが違えば直す', () => {
+    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('u1', '宇都宮', 'ウツノミヤ', 0)], { 宇都宮: 'u1' });
+    expect(plan.ops).toEqual([{ kind: 'update', uuid: 'u1', entry: e('宇都宮', 'ウツノミヤ', 4) }]);
     expect(plan.conflicts).toEqual([]);
   });
 

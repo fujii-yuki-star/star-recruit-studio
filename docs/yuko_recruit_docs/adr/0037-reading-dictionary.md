@@ -117,6 +117,12 @@
    - **控えが無い／`422` が返る**（事実9＝移行後・エンジン再インストール後）→ **失敗として扱わず**、言葉で引き直す。見つかればその uuid を控え直し、無ければ `POST` で作り直す。⚠️ **無条件に `POST` しない**（事実8＝同じ言葉の `POST` は**重複を作る**ので、同期のたびに増える）。
    - **言葉は一致するが読みが違う語がエンジンにあり、アプリが控えていない** → **黙って上書きしない**（決定8 の読み込みと同じ規則＝§2-5）。利用者にどちらを残すか聞く。
    - ⚠️ **書き出すファイルに `word_uuid` を含めない**（渡した先では意味を持たず、`422` の原因にしかならない）。
+   - ⚠️ **自分の語と見るのは「控えた `word_uuid` に実際に当たったとき」だけ**（PR #883 再レビュー・2026-08-28）＝
+     当初は「その言葉の控えを持っている＝自分の語」としていたが、**覚えは「その言葉について過去に何か作った」ことしか示さない**。
+     実際に起きうる筋道＝①アプリが登録 →②エンジンを入れ直して控えの uuid が消える（事実9）→③その言葉を**別の主体**
+     （VOICEVOX 本体・別PC・別のアプリ）が独立に登録 →④同期すると言葉で当たるのは**他人の語**。
+     ここで直すと利用者の読みを黙って書き換え、控えへ入れると一覧から外したときに**他人の語を消す**（決定3 に反する）。
+     失うのは「エンジンを入れ直した直後の自動の付け替え」だけ＝**安全側の縮小**として受け入れる。
    - ⚠️ **実装では「規則」ではなく「構造」で守った**（#350 実装時の判断・2026-08-28）＝語（`ReadingEntry`）に
      `word_uuid` を**持たせず**、控えは別の入れ物（`ReadingDictFile.links`＝言葉→uuid）に置いた。
      語が uuid を持つ形にすると**書き出す側が毎回それを落とす**ことになり、落とし忘れると渡した先で
@@ -170,7 +176,7 @@
 |---|---|
 | 同期の規則（何を足す/直す/消すか・黙って上書きしない判定） | `src/domain/voice/readingDict.ts`（純粋・§7 テスト対象） |
 | 音の粒と「どこで下がるか」の候補・印（`ウ↓ツノミヤ`） | 同上（`splitMorae`／`accentCandidates`／`accentMark`／`defaultAccentType`） |
-| 保存（正典＝`appData/readingdict.json`）・書き出し/読み込み | `src/infrastructure/readingDictFs.ts` ＋ Rust `load_reading_dict`/`save_reading_dict`/`write_text_file`/`read_text_file` |
+| 保存（正典＝`appData/readingdict.json`）・書き出し/読み込み | `src/infrastructure/readingDictFs.ts` ＋ Rust `load_reading_dict`/`save_reading_dict`/`export_reading_dict`/`import_reading_dict`（**汎用の「どこへでも書ける」コマンドにしない**＝IPC の口は用途ごとに狭く保つ・JSON 検証＋`.json` 限定） |
 | エンジンへ映す（`user_dict` API） | `src/infrastructure/voiceProviders/userDict.ts` ＋ Rust `voicevox_user_dict_*` |
 | 声を作る直前にそろえる | `src/infrastructure/voiceProviders/readingDictSync.ts`（**`VoicevoxProvider.synthesize` の中で通す**＝合成の入口は4か所あるので、各所に配線すると片方だけ漏れる。書き出し前に同梱フォントをそろえる `loadExportFonts` と同じ形） |
 | 聞き比べ（辞書に触らず鳴らす） | Rust `voicevox_synthesize_with_accent`（`audio_query` の下がる位置だけ差し替えて `synthesis`）＋ store `synthesizeReading` |
