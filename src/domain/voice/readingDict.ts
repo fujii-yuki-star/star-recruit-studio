@@ -28,9 +28,13 @@ export interface ReadingEntry {
 /**
  * いま繋がっているエンジンでの控え（言葉→`word_uuid`）。**正典ではない**＝作り直せる。
  *
- * 役割は2つだけ：**①同じ語を二重に登録しない**（実測＝同じ言葉の `POST` は重複を作る）
- * **②アプリが入れた語だけを消す**（利用者が VOICEVOX 本体で入れた語に触らない）。
- * 失っても壊れない＝言葉で引き直せるし、消せなくなるだけ（触らない側＝安全な向き）。
+ * ⚠️ **「アプリが作った語」だけを覚える**（決定3）＝控えは**消してよい語の名簿**でもあるので、
+ * 「言葉で引いたら同じ読みで既にあった」だけの語（＝利用者が VOICEVOX 本体で入れた語かもしれない）を
+ * ここへ入れてはいけない。入れると、アプリの一覧から外したときに**本体側の語を消してしまう**
+ *（辞書は OS 上の共有ファイル＝取り戻せない）。
+ *
+ * 二重登録を防ぐのは控えではなく**毎回の言葉での引き直し**（`GET /user_dict`）＝控えは速い道でしかない。
+ * だから失っても壊れない（消せなくなるだけ＝触らない側＝安全な向き）。
  */
 export type EngineLinks = Readonly<Record<string, string>>;
 
@@ -62,19 +66,34 @@ function sameReading(
 }
 
 /** エンジンへ映すための計画（`planDictSync` の答え）。 */
+/**
+ * **黙って上書きしなかった**語（決定3b）＝言葉は同じだが読みが違い、アプリが入れた覚えのない語。
+ * 画面がこれを出して「そのままにする／こちらの読みにする」を選ばせる。
+ */
+export interface EngineConflict {
+  entry: ReadingEntry;
+  engine: EngineWord;
+}
+
 export interface DictSyncPlan {
   /** エンジンへ送る操作。空＝そろっている（何も送らない）。 */
   ops: DictOp[];
   /**
-   * **送らずに控えだけ取り直す**もの（言葉→uuid）。同じ読みの語が既にエンジンにあるとき
-   *（別PCから持ち込んだ辞書・エンジンを入れ直した後など）＝送っても結果が変わらない。
+   * **送らずに控えだけ取り直す**もの（言葉→uuid）。**アプリが入れた覚えのある語だけ**＝
+   * エンジンを入れ直して uuid が変わった場合の付け替え。⚠️ 覚えの無い語をここへ入れない（決定3）。
    */
   links: Record<string, string>;
+  /**
+   * **同じ読みで既にあったので何もしなかった**語（言葉）。⚠️ **控えには入れない**＝
+   * 利用者が VOICEVOX 本体で入れた語かもしれないので、あとで消す対象にしない（決定3）。
+   * 送らないのはどちらも同じだが、**消してよいかが違う**ので分けて返す。
+   */
+  adopted: string[];
   /**
    * **黙って上書きしなかった**語（決定3b）＝言葉は同じだが読みが違い、**アプリが入れた覚えのない**語。
    * 利用者が VOICEVOX 本体で入れた読みを勝手に書き換えない。呼ぶ側が知らせて選ばせる。
    */
-  conflicts: { entry: ReadingEntry; engine: EngineWord }[];
+  conflicts: EngineConflict[];
 }
 
 /**
@@ -90,7 +109,7 @@ export function planDictSync(
 ): DictSyncPlan {
   const byUuid = new Map(engineWords.map((w) => [w.uuid, w]));
   const bySurface = new Map(engineWords.map((w) => [normalizeSurface(w.surface), w]));
-  const plan: DictSyncPlan = { ops: [], links: {}, conflicts: [] };
+  const plan: DictSyncPlan = { ops: [], links: {}, adopted: [], conflicts: [] };
   const wanted = new Set<string>();
 
   for (const raw of entries) {
@@ -114,7 +133,10 @@ export function planDictSync(
       continue;
     }
     if (sameReading(found, entry)) {
-      plan.links[surface] = found.uuid; // 送らない＝控えを取り直すだけ
+      // ⚠️ **覚えがあるときだけ控えを付け替える**（エンジンを入れ直して uuid が変わった＝自分の語）。
+      // 覚えが無いなら**控えに入れない**＝利用者が本体で入れた語かもしれず、消す対象にしてはいけない。
+      if (known != null) plan.links[surface] = found.uuid;
+      else plan.adopted.push(surface);
       continue;
     }
     // ③ 言葉は同じで読みが違う。**アプリが入れた覚えがあるなら**直す（uuid が変わっただけ）。

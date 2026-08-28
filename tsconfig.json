@@ -2,10 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    // `ES2022.Error` だけを足す（`Error` の `cause`＝元の失敗を捨てずに包む語彙。lint の
-    // `preserve-caught-error` が要求する）。ES2022 全体は開けない＝他の新しい API を
-    // うっかり使わないため。実行環境（WebView2）は cause を持つ。
-    "lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
 

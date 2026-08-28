@@ -14,6 +14,7 @@ import {
   isValidYomi,
   mergeDict,
   normalizeSurface,
+  type EngineConflict,
   type ReadingEntry,
 } from "../../domain/voice/readingDict";
 import {
@@ -24,7 +25,11 @@ import {
   saveReadingDict,
   type ReadingDictFile,
 } from "../../infrastructure/readingDictFs";
-import { markReadingDictChanged } from "../../infrastructure/voiceProviders/readingDictSync";
+import {
+  markReadingDictChanged,
+  overwriteConflict,
+  syncAndCollectConflicts,
+} from "../../infrastructure/voiceProviders/readingDictSync";
 import { showOpenReadingDictDialog, showSaveReadingDictDialog } from "../../infrastructure/dialog";
 
 /** 編集中の1語（新規と編集で同じ形）。 */
@@ -44,18 +49,50 @@ export function ReadingDictSection() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [duplicates, setDuplicates] = useState<{ current: ReadingEntry; incoming: ReadingEntry }[]>([]);
+  // 音声ソフト側に同じ言葉で違う読みがあり、**黙って上書きしなかった**もの（決定3b）。
+  const [conflicts, setConflicts] = useState<EngineConflict[]>([]);
   const audio = useAudioPreview();
   const synthesizeReading = useProjectStore((s) => s.synthesizeReading);
 
   useEffect(() => {
-    void loadReadingDict().then(setDict);
+    // 開いたときに読み、**その場で音声ソフトへ映す**（決定2「編集したら即反映」）。
+    // これが無いと、黙って上書きしなかった語（決定3b）を知らせる機会がどこにも無い。
+    void loadReadingDict().then(async (d) => {
+      setDict(d);
+      const r = await syncAndCollectConflicts();
+      setConflicts(r.conflicts);
+      if (r.error) setError(r.error);
+    });
   }, []);
 
-  async function persist(next: ReadingDictFile): Promise<void> {
+  /**
+   * 書き込む。⚠️ **書けなかったら次の行動を出す**（§2-5）＝画面だけ変わって保存されていない、を
+   * 黙って成功に見せない（PR #883 レビュー）。書けたら**その場で音声ソフトへ映す**（決定2）。
+   */
+  async function persist(next: ReadingDictFile): Promise<boolean> {
+    const before = dict;
     setDict(next);
-    await saveReadingDict(next);
-    // 次に声を作るときそろえ直す（決定2＝編集したら反映）。
+    try {
+      await saveReadingDict(next);
+    } catch {
+      setDict(before); // 画面を戻す＝保存されていないのに保存済みに見せない
+      setError("読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
+      return false;
+    }
     markReadingDictChanged();
+    await reflect();
+    return true;
+  }
+
+  /**
+   * 音声ソフトへ映し、**黙って上書きしなかった語**を受け取る（決定2「編集したら即」・決定3b）。
+   * ⚠️ **ここでは断らない**＝映せなくても画面は使える。声を作る側（`ensureReadingDictSynced`）が
+   * 止めるので、止める場所は1つ（§2-5）。
+   */
+  async function reflect(): Promise<void> {
+    const r = await syncAndCollectConflicts();
+    setConflicts(r.conflicts);
+    if (r.error) setError(r.error);
   }
 
   const surface = normalizeSurface(draft.surface);
@@ -83,14 +120,14 @@ export function ReadingDictSection() {
     const rest = dict.entries.filter(
       (e) => normalizeSurface(e.surface) !== draft.editing && normalizeSurface(e.surface) !== surface,
     );
-    await persist({ ...dict, entries: [...rest, entry] });
+    if (!(await persist({ ...dict, entries: [...rest, entry] }))) return;
     setDraft(EMPTY_DRAFT);
     setNotice(`「${surface}」の読み方を保存しました。次に声を作るときから反映されます。`);
   }
 
   async function onDelete(entry: ReadingEntry): Promise<void> {
     const key = normalizeSurface(entry.surface);
-    await persist({ ...dict, entries: dict.entries.filter((e) => normalizeSurface(e.surface) !== key) });
+    if (!(await persist({ ...dict, entries: dict.entries.filter((e) => normalizeSurface(e.surface) !== key) }))) return;
     if (draft.editing === key) setDraft(EMPTY_DRAFT);
     setNotice(`「${entry.surface}」を一覧から外しました。`);
   }
@@ -107,13 +144,9 @@ export function ReadingDictSection() {
       const url = await synthesizeReading(draft.yomi, accentType);
       audio.play(key, url, () => setError("聞き比べに失敗しました。もう一度お試しください。"));
     } catch (e) {
-      setError(
-        typeof e === "string"
-          ? e
-          : e instanceof Error
-            ? e.message
-            : "聞き比べに失敗しました。もう一度お試しください。",
-      );
+      // ⚠️ **`Error` の中身は見せない**（§2-5）＝この境界は「失敗を文字列で投げる」慣習で、
+      // 文字列でないものは生の技術的な文でありうる。次の行動を出す定型文へ倒す。
+      setError(typeof e === "string" ? e : "聞き比べに失敗しました。もう一度お試しください。");
     }
   }
 
@@ -135,15 +168,17 @@ export function ReadingDictSection() {
     try {
       const path = await showOpenReadingDictDialog();
       if (!path) return;
-      const incoming = await importReadingDictFrom(path);
+      const { entries: incoming, dropped } = await importReadingDictFrom(path);
       const { merged, duplicates: dup } = mergeDict(dict.entries, incoming);
       const added = merged.length - dict.entries.length;
-      await persist({ ...dict, entries: merged });
+      if (!(await persist({ ...dict, entries: merged }))) return;
       setDuplicates(dup);
+      // ⚠️ **入れられなかったものは黙って消さない**（§2-5）＝読みがカタカナでない等。
+      const dropNote = dropped > 0 ? `${dropped}件は読み方の形が違うため入れませんでした。` : "";
       setNotice(
         dup.length > 0
-          ? `${added}件を足しました。同じ言葉で読みが違うものが${dup.length}件あります（下で選べます）。`
-          : `${added}件を足しました。`,
+          ? `${added}件を足しました。${dropNote}同じ言葉で読みが違うものが${dup.length}件あります（下で選べます）。`
+          : `${added}件を足しました。${dropNote}`,
       );
     } catch {
       setError("読み込めませんでした。ファイルを確かめてもう一度お試しください。");
@@ -153,11 +188,23 @@ export function ReadingDictSection() {
   /** 重なった語を、読み込んだ側の読みに置き換える（1件ずつ選ぶ＝まとめて上書きにしない）。 */
   async function onTakeIncoming(pair: { current: ReadingEntry; incoming: ReadingEntry }): Promise<void> {
     const key = normalizeSurface(pair.incoming.surface);
-    await persist({
+    const ok = await persist({
       ...dict,
       entries: dict.entries.map((e) => (normalizeSurface(e.surface) === key ? pair.incoming : e)),
     });
-    setDuplicates((d) => d.filter((x) => x !== pair));
+    if (ok) setDuplicates((d) => d.filter((x) => x !== pair));
+  }
+
+  /** 「こちらの読みにする」＝音声ソフト側の語を、この読みで上書きする（決定3b・明示操作でだけ通る）。 */
+  async function onOverwrite(c: EngineConflict): Promise<void> {
+    setError("");
+    try {
+      await overwriteConflict(c.entry, c.engine.uuid);
+      setConflicts((list) => list.filter((x) => x.entry.surface !== c.entry.surface));
+      setNotice(`「${c.entry.surface}」の読み方を音声ソフトへ反映しました。`);
+    } catch {
+      setError("音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
+    }
   }
 
   const candidates = yomiOk ? accentCandidates(draft.yomi) : [];
@@ -267,6 +314,29 @@ export function ReadingDictSection() {
                 </span>
                 <button type="button" className="btn" onClick={() => void onTakeIncoming(pair)}>
                   読み込んだ方にする
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="mt">
+          {/* ⚠️ 決定3b＝利用者が VOICEVOX 本体で入れた読みを、アプリが黙って書き換えない。
+              知らせて選ばせる（`15 §6` READING_DICT_WORD_CONFLICT）。 */}
+          <p className="field-hint">
+            音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません。
+          </p>
+          <ul className="list-reset">
+            {conflicts.map((c) => (
+              <li key={c.entry.surface} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
+                <span style={{ flex: 1 }}>
+                  {c.entry.surface}：音声ソフト側「{accentMark(c.engine.yomi, c.engine.accentType)}」／
+                  ここでの登録「{accentMark(c.entry.yomi, c.entry.accentType)}」
+                </span>
+                <button type="button" className="btn" onClick={() => void onOverwrite(c)}>
+                  こちらの読みにする
                 </button>
               </li>
             ))}

@@ -162,6 +162,7 @@
 > ✅ **利用者確認の2点は決着済み**（2026-08-26・どちらも YES）＝決定4（聞き比べ）と決定8（書き出し／読み込み）を**どちらも α-6 に入れる**。
 - アプリのアンインストール時に **`%LOCALAPPDATA%` に残る語を消すか**（事実3・4＝共有ファイルなので**消さない**のが安全側だが、残り続けることの説明が要る）。
 - `priority`（0〜10）と `word_type`（固有名詞/普通名詞/…）を画面に出すか（出さずに既定で足りるか）。
+- ⚠️ **聞き比べの「下がらない」候補が、登録後の音と一致するか**（#350 実装時に未検証・2026-08-28）。聞き比べは `audio_query` の結果の `accent_phrases[0].accent` を差し替えて鳴らすが、**`AccentPhrase.accent` と `user_dict` の `accent_type` が「下がらない（平板）」を同じ値で表すか**を実機で確かめていない（1 起点で平板をモーラ数で表す実装もありうる）。推測で片方へ寄せると**聞いた音と登録後の音が食い違う**ので、**実機チェック（#352）で突き合わせてから**必要なら直す＝いまは値をそのまま渡している。
 
 ## 実装の所在（#350・2026-08-28）
 
@@ -171,7 +172,7 @@
 | 音の粒と「どこで下がるか」の候補・印（`ウ↓ツノミヤ`） | 同上（`splitMorae`／`accentCandidates`／`accentMark`／`defaultAccentType`） |
 | 保存（正典＝`appData/readingdict.json`）・書き出し/読み込み | `src/infrastructure/readingDictFs.ts` ＋ Rust `load_reading_dict`/`save_reading_dict`/`write_text_file`/`read_text_file` |
 | エンジンへ映す（`user_dict` API） | `src/infrastructure/voiceProviders/userDict.ts` ＋ Rust `voicevox_user_dict_*` |
-| 声を作る直前にそろえる | `src/infrastructure/voiceProviders/readingDictSync.ts`（**`VoicevoxProvider.synthesize` の中で通す**＝合成の入口は5か所あるので、各所に配線すると片方だけ漏れる。書き出し前に同梱フォントをそろえる `loadExportFonts` と同じ形） |
+| 声を作る直前にそろえる | `src/infrastructure/voiceProviders/readingDictSync.ts`（**`VoicevoxProvider.synthesize` の中で通す**＝合成の入口は4か所あるので、各所に配線すると片方だけ漏れる。書き出し前に同梱フォントをそろえる `loadExportFonts` と同じ形） |
 | 聞き比べ（辞書に触らず鳴らす） | Rust `voicevox_synthesize_with_accent`（`audio_query` の下がる位置だけ差し替えて `synthesis`）＋ store `synthesizeReading` |
 | 画面 | `src/app/components/ReadingDictSection.tsx`（設定画面「言葉の読み方」・`06 §15`） |
 | 文言 | `15 §6` `READING_DICT_SYNC_FAILED` / `READING_DICT_WORD_CONFLICT` / `READING_DICT_IMPORT_DUPLICATE` |

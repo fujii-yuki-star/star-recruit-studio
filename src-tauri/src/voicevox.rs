@@ -248,6 +248,9 @@ pub async fn voicevox_synthesize_with_accent(
             .and_then(|m| m.as_array())
             .map(|m| m.len())
             .unwrap_or(0);
+        // ⚠️ **値はそのまま渡す**（推測で寄せない・§9-2）。`AccentPhrase.accent` と `user_dict` の
+        // `accent_type` が「下がらない（平板）」を同じ値で表すかは**実機で未検証**（ADR-0037 未解決）。
+        // 片方へ寄せると聞いた音と登録後の音が食い違うので、実機で突き合わせてから直す。
         let clamped = (accent_type as usize).min(mora_count);
         phrase["accent"] = serde_json::json!(clamped);
     }

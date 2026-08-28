@@ -97,3 +97,23 @@ async function addWord(entry: ReadingEntry, baseUrl: string | null): Promise<str
     baseUrl,
   });
 }
+
+/**
+ * **利用者が「こちらの読みにする」を選んだ語**を、エンジンの語へ上書きする（決定3b）。
+ *
+ * ⚠️ **明示操作でだけ通る道**＝同期（`syncReadingDict`）は覚えの無い語を黙って上書きしない。
+ * 上書きした語は**アプリの語になる**ので、返した uuid を控えへ入れてよい。
+ */
+export async function overwriteEngineWord(entry: ReadingEntry, uuid: string): Promise<string> {
+  if (!isTauri()) return uuid;
+  const baseUrl = getVoicevoxUrl() || null;
+  const ok = await invoke<boolean>('voicevox_user_dict_update', {
+    wordUuid: uuid,
+    surface: entry.surface,
+    pronunciation: entry.yomi,
+    accentType: entry.accentType,
+    baseUrl,
+  });
+  // `false` ＝その語がもう無い（決定3b＝作り直しの合図）。
+  return ok ? uuid : addWord(entry, baseUrl);
+}

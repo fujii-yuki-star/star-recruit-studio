@@ -10,9 +10,13 @@ vi.mock("../../infrastructure/readingDictFs", () => ({
   loadReadingDict: vi.fn(),
   saveReadingDict: vi.fn(async () => {}),
   exportReadingDictTo: vi.fn(async () => {}),
-  importReadingDictFrom: vi.fn(async () => []),
+  importReadingDictFrom: vi.fn(async () => ({ entries: [], dropped: 0 })),
 }));
-vi.mock("../../infrastructure/voiceProviders/readingDictSync", () => ({ markReadingDictChanged: vi.fn() }));
+vi.mock("../../infrastructure/voiceProviders/readingDictSync", () => ({
+  markReadingDictChanged: vi.fn(),
+  syncAndCollectConflicts: vi.fn(async () => ({ conflicts: [], error: null })),
+  overwriteConflict: vi.fn(async () => {}),
+}));
 vi.mock("../../infrastructure/dialog", () => ({
   showSaveReadingDictDialog: vi.fn(async () => null),
   showOpenReadingDictDialog: vi.fn(async () => null),
@@ -118,7 +122,7 @@ describe("ReadingDictSection", () => {
   it("読み込みで重なった語は上書きせず、選ばせる", async () => {
     vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
     vi.mocked(showOpenReadingDictDialog).mockResolvedValue("C:/dict.json");
-    vi.mocked(importReadingDictFrom).mockResolvedValue([{ surface: "宇都宮", yomi: "ウツノミヤ", accentType: 0 }]);
+    vi.mocked(importReadingDictFrom).mockResolvedValue({ entries: [{ surface: "宇都宮", yomi: "ウツノミヤ", accentType: 0 }], dropped: 0 });
     render(<ReadingDictSection />);
     await screen.findByText(/宇都宮/);
     fireEvent.click(screen.getByRole("button", { name: "一覧を読み込む" }));

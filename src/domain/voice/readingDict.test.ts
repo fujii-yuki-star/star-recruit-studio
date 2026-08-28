@@ -48,7 +48,27 @@ describe('planDictSync：エンジンへ映す計画', () => {
   it('控えが当たらなくても、同じ言葉・同じ読みがあれば送らずに控えを取り直す（重複を作らない）', () => {
     const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('新しいuuid', '宇都宮', 'ウツノミヤ', 4)], { 宇都宮: '古いuuid' });
     expect(plan.ops).toEqual([]);
-    expect(plan.links).toEqual({ 宇都宮: '新しいuuid' });
+    expect(plan.links).toEqual({ 宇都宮: '新しいuuid' }); // 覚えがある＝自分の語なので付け替える
+  });
+
+  /**
+   * ⚠️ **決定3＝控えは「消してよい語の名簿」でもある**。言葉で引いて同じ読みだっただけの語を
+   * 控えへ入れると、アプリの一覧から外したときに**利用者が VOICEVOX 本体で入れた語を消してしまう**
+   *（辞書は OS 上の共有ファイル＝取り戻せない）。
+   */
+  it('覚えの無い語は、同じ読みで既にあっても控えに入れない（本体の語を消す名簿に載せない）', () => {
+    const plan = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('本体のuuid', '宇都宮', 'ウツノミヤ', 4)]);
+    expect(plan.ops).toEqual([]);
+    expect(plan.links).toEqual({});
+    expect(plan.adopted).toEqual(['宇都宮']);
+  });
+
+  it('覚えの無い語をアプリの一覧から外しても、本体の語は消さない（上のケースの続き）', () => {
+    // 1回目：同じ読みで既にあった＝控えに入らない。
+    const first = planDictSync([e('宇都宮', 'ウツノミヤ', 4)], [w('本体のuuid', '宇都宮', 'ウツノミヤ', 4)]);
+    // 2回目：一覧から外した。控えが空なので消す操作は出ない。
+    const second = planDictSync([], [w('本体のuuid', '宇都宮', 'ウツノミヤ', 4)], first.links);
+    expect(second.ops).toEqual([]);
   });
 
   it('控えが当たらず読みも違うが、アプリが入れた覚えがあれば直す（uuid が変わっただけ）', () => {

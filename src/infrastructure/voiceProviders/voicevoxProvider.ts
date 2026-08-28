@@ -31,7 +31,7 @@ export function effectiveSpeaker(
 
 export class VoicevoxProvider implements VoiceProvider {
   async synthesize(input: SynthesizeInput): Promise<SynthesizedVoice> {
-    // ⚠️ **声を作る直前に読み方辞書をそろえる**（ADR-0037 決定2・決定7）＝合成の入口は5か所あるので、
+    // ⚠️ **声を作る直前に読み方辞書をそろえる**（ADR-0037 決定2・決定7）＝合成の入口は4か所あるので、
     // ここ1か所で通す（書き出し前に同梱フォントをそろえる `loadExportFonts` と同じ形）。
     // 反映できなければ**投げる**＝誤読のまま成功にしない（§2-5）。
     await ensureReadingDictSynced();

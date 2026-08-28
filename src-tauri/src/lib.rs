@@ -254,23 +254,39 @@ fn save_reading_dict(app: tauri::AppHandle, dict_json: String) -> Result<(), Str
     fs::write(&path, &dict_json).map_err(|e| e.to_string())
 }
 
-/// 選んだ場所へ文字列を書く（読み方辞書の書き出し・ADR-0037 決定8）。
+/// 読み方辞書を、利用者が選んだ場所へ書き出す（ADR-0037 決定8）。
 ///
-/// ⚠️ **保存先はネイティブの「保存」で利用者が選んだパスだけ**を受け取る（アプリが場所を作らない）。
-/// 書き出す本文は呼ぶ側が組む（何を書き出すかは domain／infra の責務＝§4）。
+/// ⚠️ **汎用の「どこへでも書ける」コマンドにしない**（PR #883 レビュー）＝IPC の口は用途ごとに
+/// 狭く保つ。JSON として読めない本文は書かず、拡張子も `.json` に限る（次に読み込めるものだけ作る）。
 #[tauri::command]
-fn write_text_file(path: String, text: String) -> Result<(), String> {
+fn export_reading_dict(path: String, dict_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&dict_json).map_err(|e| e.to_string())?;
     let p = PathBuf::from(&path);
+    if !is_json_path(&p) {
+        return Err("読み方の一覧は .json で保存してください。".to_string());
+    }
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    fs::write(&p, &text).map_err(|e| e.to_string())
+    fs::write(&p, &dict_json).map_err(|e| e.to_string())
 }
 
-/// 選んだファイルを文字列として読む（読み方辞書の読み込み・ADR-0037 決定8）。
+/// 読み方辞書を、利用者が選んだファイルから読む（ADR-0037 決定8）。中身の検証は呼び出し側（§2-2）。
 #[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
-    fs::read_to_string(PathBuf::from(&path)).map_err(|e| e.to_string())
+fn import_reading_dict(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !is_json_path(&p) {
+        return Err("読み方の一覧は .json のファイルを選んでください。".to_string());
+    }
+    fs::read_to_string(&p).map_err(|e| e.to_string())
+}
+
+/// 拡張子が `.json` か（大文字小文字は問わない）。
+fn is_json_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -297,8 +313,8 @@ pub fn run() {
             delete_user_template,
             load_reading_dict,
             save_reading_dict,
-            write_text_file,
-            read_text_file,
+            export_reading_dict,
+            import_reading_dict,
             voicevox::voicevox_user_dict_list,
             voicevox::voicevox_user_dict_add,
             voicevox::voicevox_user_dict_update,
