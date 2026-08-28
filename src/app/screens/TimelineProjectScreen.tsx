@@ -119,17 +119,9 @@ type DragPlace = {
   } | null;
 };
 
-const PANEL_ID = {
-  preview: "preview",
-  arrange: "arrange",
-  selected: "selected",
-  templates: "templates",
-  place: "place",
-  audio: "audio",
-  voice: "voice",
-} as const;
-const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
+// ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
+import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
 import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
@@ -675,7 +667,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **聞いた時点の相手を組で持つ**（#701 レビュー）。id だけだと、確認の表示条件が「いま選んでいる部品」に
   // 依存してしまい、選択が変わると**確認が消えたように見えて状態だけ残る**。同じ見た目パターンの別の部品を
   // 選ぶと確認が復活し、押すと**画面で選んでいない方**がバラされる（バラすは取り消しでしか戻らない）。
-  const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
+  const [exploding, setExploding] = useState<{ clipId: string; template: Template; from: BlockTarget } | null>(null);
   // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
   // 答えを求める確認は**自分では `Escape` を処理しない**（答えるまで残す）ので、ここで名乗る側に回る。
   // ⚠️ **確認を足したらここへ必ず並べる**（#721 の実機確認で漏れが出た）＝入れ忘れると、確認を出したまま
@@ -753,7 +745,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         if (playRef.current.total <= 0) return; // 置いていないときは再生できない（ボタンと同じ条件）
         // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに
         // `Space` だけ黙ると、押せない見た目を持たない入口で挙動が割れる（ADR-0026②）。
-        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting); return; }
+        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting, BLOCK_GLOBAL); return; }
         playRef.current.play();
         return;
       }
@@ -1347,7 +1339,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // **キーには押せない見た目が無い**ので、ここで理由を立てないと `Delete` が無言で何も起きない
     //（分ける `Ctrl+K` は理由を立てているのに、消すだけ黙る＝入口で挙動が割れる・ADR-0026②）。
     // 選んでいないときだけ黙る（消す相手がそもそも無い＝他社の型でも何も出ない）。
-    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason); return; }
+    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason, PANEL_ID.arrange); return; }
     if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds);
     else removeSelectedClips();
   }, [removeBlocked, selectedClipIds, removeSelectedClips, setEditBlocked]);
@@ -1462,10 +1454,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
-      if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked); return; }
-      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting); return; }
-      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing); return; } // 位置を使う操作＝再生中は断る（決定21）
-      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound); return; }
+      if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
+      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, BLOCK_GLOBAL); return; }
+      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing, BLOCK_GLOBAL); return; } // 位置を使う操作＝再生中は断る（決定21）
+      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound, BLOCK_GLOBAL); return; }
       // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝渡さないと差し込み口の置き場所が
       // 1件も解けず、「素材を使い切った先」の判定が**差し込み口では必ず偽**になる。
       // ⚠️ ただし**このキーの道だけは、渡さなくても結果が変わらない**（この先の `splitSelectedClip` が
@@ -1473,7 +1465,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // ここを通らないので**そちらは実際に押せてしまう**（そこは固定してある）。3つの入口が同じ材料を
       // 見ている、を保つために合わせる。
       const issue = splitClipIssue(doc, selected.id, playheadSec, { templateOf });
-      if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue]); return; }
+      if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue], PANEL_ID.arrange); return; }
       splitSelectedClip(playheadSec);
     };
     changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
@@ -2325,14 +2317,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           label: "ここで分ける",
           ...singleClipMenuGuard,
           ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
-          onSelect: () => splitSelectedClip(playheadSec),
+          onSelect: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
         },
         ...(menuClipTemplate
           ? [{
               label: "中身をバラす",
               ...singleClipMenuGuard,
               // 戻せないので**押す前に断る**（ADR-0032 決定23）＝確認は共有の `DeleteConfirm`。
-              onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate }),
+              onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate, from: PANEL_ID.arrange }),
             }]
           : []),
         {
@@ -3159,7 +3151,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
               <button
                 className="btn btn-secondary"
-                onClick={() => splitSelectedClip(playheadSec)}
+                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.selected)}
                 {...splitGuard}
                 title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
               >
@@ -4073,7 +4065,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <button
                     className="btn btn-secondary"
                     {...editGuard()}
-                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate })}
+                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate, from: PANEL_ID.selected })}
                   >
                     中身をバラす
                   </button>
@@ -4299,6 +4291,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ) },
   ];
 
+  /**
+   * その場の返事を出す欄（ADR-0034 決定10・#869）。**操作した所で返す**＝欄がいくつも並ぶ画面で、
+   * 帯の位置からは「どの操作が断られたのか」が読めなかった。
+   *
+   * ⚠️ **閉じている欄には出さない**（帯へ倒す）＝出しても見えないので、押した結果が**黙って消える**
+   *（§2-5）。⚠️ `global`（書き出し中・再生中・見つからない）も帯のまま＝どの欄にも属さない。
+   */
+  const blockedPanelId =
+    editBlocked && editBlocked.at !== BLOCK_GLOBAL && !closed.includes(editBlocked.at) ? editBlocked.at : null;
+  // ⚠️ **帯に出すかどうかの判定は1つ**＝出す条件と文言を別々に書くと、片方だけ直って
+  // **囲いだけ出て中身が空**／**欄と帯に同じ文が2つ**になる（#869）。
+  const flashBlockedMessage = editBlocked && !blockedPanelId ? editBlockedMessage[editBlocked.reason] : null;
+  const shownPanels: PanelSpec[] = panels.map((p) =>
+    editBlocked && p.id === blockedPanelId
+      ? {
+          ...p,
+          content: (
+            <>
+              {/* ⚠️ **恒常の警告と見分ける**＝その場の返事は `timeline-flash`（次の操作で消える）で、
+                  直すまで残る警告は欄の外のいつもの位置に出る。同じ見た目で並べない（#869）。 */}
+              <p className="notice notice-warn timeline-flash" role="alert">
+                {editBlockedMessage[editBlocked.reason]}
+              </p>
+              {p.content}
+            </>
+          ),
+        }
+      : p,
+  );
+
   return (
     <div className="main-scroll">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
@@ -4343,7 +4365,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           busyLabel="バラしています…"
           onCancel={() => setExploding(null)}
           onConfirm={() => {
-            explodeClip(exploding.clipId, exploding.template);
+            explodeClip(exploding.clipId, exploding.template, exploding.from);
             setExploding(null);
           }}
         />
@@ -4410,7 +4432,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
       <div className="timeline-flash-zone">
-        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
@@ -4428,14 +4450,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </div>
         )}
 
-        {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
-            下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
-            上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
-            ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
-        {(voiceError || editBlocked || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
+        {/* **操作したその場の返事**は**操作した欄の中**に出す（ADR-0034 決定10・#869）。
+            ここに残るのは**どの欄にも属さない返事**＝画面全体に効く断り（書き出し中・再生中・
+            対象が見つからない）と、**行き先の欄を閉じている**とき（出しても見えない＝§2-5）。
+            置き方は欄のすぐ下＝下へ流すと、恒常の警告が出ているときに画面外へ落ちて
+            **同じ操作を繰り返す**（§2-5・ADR-0026④）。上に積まない（編集の場所を狭めない）。 */}
+        {(voiceError || flashBlockedMessage || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
-            {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+            {flashBlockedMessage && <p>{flashBlockedMessage}</p>}
             {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
             {drillBlockedNotice && <p>{drillBlockedNotice}</p>}
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
