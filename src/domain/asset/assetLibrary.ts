@@ -14,6 +14,24 @@ import type { Asset } from '../project/types';
  */
 export const LIBRARY_ASSET_ID_RE = /^lib_asset_[0-9]{3,}$/;
 
+/**
+ * ⚠️ **同じ規則が Rust 側（`is_library_asset_id`）にもある**（PR #887 レビュー 🟡）。
+ * Rust 側はパストラバーサル防止を兼ねるので落とせず、こちらは採番に要る。
+ * **片方だけ変えると保存できるのに読めない**ので、テストが**同じ入力で同じ答えになる**ことを固定する。
+ * ここに置くのは「テストが見る入力の一覧」＝規則そのものは上の正規表現が持つ。
+ */
+export const LIBRARY_ASSET_ID_SAMPLES: readonly string[] = [
+  'lib_asset_001',
+  'lib_asset_1000',
+  'lib_asset_1', // 3桁ゼロ詰めでない
+  'lib_asset_00a', // 数字でない
+  'xlib_asset_001', // 前に付いている
+  'lib_asset_001x', // 後ろに付いている
+  'lib_asset_', // 番号が無い
+  'asset_001', // 別の採番
+  '', // 空
+];
+
 /** ライブラリの素材1つぶん（Rust の `LibraryAsset` と対応）。 */
 export interface LibraryAsset {
   id: string;
