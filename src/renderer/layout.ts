@@ -162,6 +162,36 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
  * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
  * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
  */
+/**
+ * その場面が**実際に描く**レイアウトをすべて数え上げる（#346）。
+ *
+ * ⚠️ **`layoutScene(scene, template)` を opts なしで1回呼ぶだけでは足りない**＝掛け合い
+ *（`scene.lines`）の場面では、**実際に描かれる行ごとの字幕**（`subtitleText`/`subtitleSegment`）が
+ * 一度も出てこず、代わりに**動画に出ない静的字幕**（`texts.subtitle`）が載る。
+ * つまり検査すると**掛け合いは見落とし、休眠は誤検出**する（`/canon-check` の2エージェントが
+ * 独立に実測で指摘）。同じ取りこぼしは #547 P1-3・#563 でも一度潰している。
+ *
+ * `subtitleOverflowsCanvas` が持っていた数え上げをここへ出し、**同じものを見る検査で共有**する。
+ */
+export function sceneDrawnLayouts(scene: Scene, template: Template): SceneLayout[] {
+  // 単独ナレーション（lines 無し）＝静的字幕（`texts.subtitle`）をそのまま描く経路。
+  // opts を渡さない＝layoutScene 内の `subtitleEnabledDefault === false` で消える扱いもそのまま効く（#413）。
+  if (!scene.lines || scene.lines.length === 0) return [layoutScene(scene, template)];
+  const lines = sceneLines(scene);
+  return groupIndices(lines).map((g) => {
+    const primary = lines[g[0]];
+    const primarySub = resolveLineSubtitle(primary, scene);
+    const seg: SceneSegmentSpec = {
+      lineId: primary.lineId,
+      parallelLineIds: g.slice(1).map((i) => lines[i].lineId),
+      startSec: 0,
+      durationSec: scene.durationSec,
+      isFirst: true,
+    };
+    return layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
+  });
+}
+
 export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
@@ -175,27 +205,11 @@ export function subtitleOverflowsCanvas(scene: Scene, template: Template): boole
         subtitleLayerIds.has(item.id.split('__sub')[0]) && // FREE 字幕は対象外（利用者配置）
         subtitleItemOutOfCanvas(item, width, height),
     );
-  // 単独ナレーション（lines 無し）＝静的字幕（`texts.subtitle`）をそのまま描く経路で検査する（#563）。
-  // opts を渡さない＝layoutScene 内の `subtitleEnabledDefault === false` で消える扱いもそのまま効く（#413）。
-  if (!scene.lines || scene.lines.length === 0) return overflows(layoutScene(scene, template));
-  const lines = sceneLines(scene);
-  for (const g of groupIndices(lines)) {
-    // 同時グループ（2行以上）は帯を積む。**逐次/単独行（1行）も対象**＝1帯でも拡大・回転・長文で見切れるため（#563）。
-    // 以前は `g.length < 2` で読み飛ばしており、#555（文字の体裁の場面別上書き）で字幕を大きくできるようになって
-    // 到達性が上がった＝「黙って画面外に切れる」が単独/逐次だけ検出できない非対称になっていた（ADR-0026④）。
-    const primary = lines[g[0]];
-    const primarySub = resolveLineSubtitle(primary, scene);
-    const seg: SceneSegmentSpec = {
-      lineId: primary.lineId,
-      parallelLineIds: g.slice(1).map((i) => lines[i].lineId),
-      startSec: 0,
-      durationSec: scene.durationSec,
-      isFirst: true,
-    };
-    const layout = layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
-    if (overflows(layout)) return true;
-  }
-  return false;
+  // 数え上げは共有（`sceneDrawnLayouts`）＝**実際に描かれるもの**だけを見る。
+  // 同時グループ（2行以上）は帯を積む。**逐次/単独行（1行）も対象**＝1帯でも拡大・回転・長文で見切れるため（#563）。
+  // 以前は `g.length < 2` で読み飛ばしており、#555（文字の体裁の場面別上書き）で字幕を大きくできるようになって
+  // 到達性が上がった＝「黙って画面外に切れる」が単独/逐次だけ検出できない非対称になっていた（ADR-0026④）。
+  return sceneDrawnLayouts(scene, template).some(overflows);
 }
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */

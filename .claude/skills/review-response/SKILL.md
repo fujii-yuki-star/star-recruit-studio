@@ -38,7 +38,7 @@ PRレビューへの対応を**標準化・再現化**する。これは**司令
 ### 5. 検証（要件6）
 変更内容に応じて実行し、緑を確認：
 - フロント：`npm run check:frontend`（lint→typecheck→test→validate:schemas）／必要に応じ `npm run test`・`npm run validate:schemas`
-- Rust：`npm run check:rust` 系
+- Rust：**`npm run check:rust`（check→fmt→clippy）＋ `npm run check:rust:test`**（⚠️ fmt/clippy を省かない＝CI の `Rust (check/fmt/clippy)` と同じ3つ）
 - UI挙動が変わるなら preview で動作確認（screenshot はこの環境でハングするため eval/snapshot でDOM確認）
 
 ### 6. コミット（要件7）
