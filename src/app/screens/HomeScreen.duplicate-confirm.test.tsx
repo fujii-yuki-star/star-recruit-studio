@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import type { Scene } from "../../domain/project/types";
@@ -18,11 +18,11 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
 
   const ONE = [{ projectId: "proj_001", projectName: "テスト動画", updatedAt: "2026-07-09T00:00:00Z" }];
 
-  function setup(hasWork: boolean) {
+  function setup(hasWork: boolean, projects: unknown[] = ONE) {
     const loadProject = vi.fn(() => Promise.resolve());
     const duplicateProject = vi.fn(() => Promise.resolve("proj_002"));
     useProjectStore.setState({
-      listProjects: vi.fn(() => Promise.resolve(ONE as unknown as ProjectHeader[])),
+      listProjects: vi.fn(() => Promise.resolve(projects as unknown as ProjectHeader[])),
       loadProject,
       duplicateProject,
       saveStatus: "idle",
@@ -79,5 +79,40 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
     expect(screen.getByText(/別のプロジェクトを開きますか/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "開く" }));
     expect(loadProject).toHaveBeenCalledWith("proj_001");
+  });
+
+  /**
+   * ⚠️ **タイムライン形式は複製できない**（PR #889 レビュー 🟡）＝中で `parseProjectDoc` が
+   * 必ず断るので**構造的に必ず失敗**する。押せたままだと「もう一度お試しください」＝
+   * **何度押しても直らない行動**を勧めることになる（§2-5・#793 で直したのと同じ型）。
+   */
+  it("タイムラインで作った動画は複製ボタンを押せなくし、理由を出す", async () => {
+    const { duplicateProject } = setup(false, [
+      { projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" },
+    ]);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await screen.findByText("焼いた動画");
+    const btn = screen.getByRole("button", { name: "「焼いた動画」を複製" });
+    expect(btn).toBeDisabled();
+    expect(btn.getAttribute("title")).toContain("まだ複製できません");
+    expect(duplicateProject).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠️ **場面形式は今までどおり押せる**（門が広すぎて全部止めていない、を固定する）。
+   * ⚠️ 実行側の門（`onDuplicate` の先頭）は**押せない状態のボタンからは踏めない**ので、
+   * ここでは押せることだけを見る（実行側は入口が増えたときの保険）。
+   */
+  it("場面形式の動画は今までどおり複製できる", async () => {
+    const { duplicateProject } = setup(false, [
+      { projectId: "proj_001", projectName: "テスト動画", updatedAt: "2026-07-09T00:00:00Z" },
+      { projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" },
+    ]);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await screen.findByText("テスト動画");
+    const btn = screen.getByRole("button", { name: "「テスト動画」を複製" });
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    await waitFor(() => expect(duplicateProject).toHaveBeenCalledWith("proj_001"));
   });
 });

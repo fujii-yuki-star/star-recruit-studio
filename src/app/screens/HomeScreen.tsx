@@ -105,6 +105,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
    */
   async function onDuplicate(projectId: string): Promise<void> {
     if (duplicatingId !== null || isExporting) return;
+    // ⚠️ **押す前に断っているが、ここでも見る**（入口が増えても失敗する複製を始めない）。
+    if (isTimelineProjectDoc({ format: projects.find((x) => x.projectId === projectId)?.format })) return;
     if (openingId || pendingAction) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
     // ⚠️ **未保存があるなら確認を挟む**（複製したら開くので、いま編集しているものが閉じる＝
     // 同じ結果になる操作は同じ聞き方・ADR-0026②）。⚠️ ただし**行き先は「複製」のまま持つ**
@@ -561,9 +563,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
                         ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、
                         **開くのと同じガード**を掛ける（未保存の破棄確認・書き出し中・確認中）。 */}
+                    {/* ⚠️ **タイムライン形式はまだ複製できない**（PR #889 レビュー 🟡）＝中で
+                        `parseProjectDoc` が必ず断るので**構造的に必ず失敗**する。押せたままだと
+                        「もう一度お試しください」＝**何度押しても直らない行動**を勧めることになる
+                        （§2-5・#793 で直したのと同じ型）。押す前に理由を出して押せなくする。 */}
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={isExporting || pendingAction !== null || confirmNew || duplicatingId !== null}
+                      disabled={
+                        isExporting || pendingAction !== null || confirmNew || duplicatingId !== null
+                        || isTimelineProjectDoc({ format: p.format })
+                      }
                       onClick={() => void onDuplicate(p.projectId)}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を複製`}
                       title={
@@ -571,7 +580,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           ? "書き出しが終わるまでお待ちください"
                           : pendingAction !== null || confirmNew
                             ? "確認に答えてから操作できます"
-                            : "複製（素材と声ごとコピーします）"
+                            : isTimelineProjectDoc({ format: p.format })
+                              ? "タイムラインで作った動画はまだ複製できません"
+                              : "複製（素材と声ごとコピーします）"
                       }
                     >
                       <CopyIcon size={18} />
