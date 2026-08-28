@@ -25,6 +25,10 @@ import { substituteDeletedTemplateInScenes } from "../../domain/project/template
 import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { hasWorkInProgress } from "../hooks/newProjectGuard";
+import { duplicateProjectDoc, duplicatedFilePaths } from "../../domain/project/duplicate";
+import { thumbnailScene, thumbnailSignature } from "../../domain/project/thumbnail";
+import { renderProjectThumbnail } from "../../renderer/export/projectThumbnail";
+import { saveProjectThumbnail } from "../../infrastructure/projectFs";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
@@ -230,11 +234,19 @@ interface ProjectState {
   newProject: () => void;
   /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
   newBlankProject: () => void;
+  /**
+   * 動画を**複製する**（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
+   * 素材・場面・声・設定ごとコピーし、**新しい動画として開く**。
+   * 成功したら新しい `projectId`、できなければ `null`。
+   */
+  duplicateProject: (projectId: string) => Promise<string | null>;
   /** 生成失敗/中断から手動作成へ入る（#393 P1・12 §9.3／15）。入力済みの会社情報・素材は残し、status を "ready"・
    *  aiError をクリアして手動で組む状態にする（AI 生成はしない＝draftFromAi=false）。 */
   startManualEdit: () => void;
   /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
+  /** 一覧に出す小さな絵を焼き直す（#397・内部用）。 */
+  _refreshProjectThumbnail: (projectId: string) => Promise<void>;
   /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
   _doSave: () => Promise<void>;
   /** 保存済みプロジェクトを読み込んで反映する。 */
@@ -453,6 +465,11 @@ const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.
 // 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
 let saveInFlight: Promise<void> | null = null;
+/**
+ * 直近に焼いた一覧の絵の印（#397）。**文書には持たない**＝絵は作り直せるもので、動画の中身ではない。
+ * 別の動画を開いたら `null` へ戻す（前の動画の印で焼き直しを飛ばさない）。
+ */
+let lastThumbnailSignature: string | null = null;
 
 // 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
 // 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
@@ -668,6 +685,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   newProject: () => {
+    lastThumbnailSignature = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
     set((s) => ({
@@ -722,6 +740,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
+  /**
+   * 一覧に出す小さな絵を焼き直す（#397）。**保存の後に投げっぱなしで呼ぶ**（待たせない）。
+   * ⚠️ **失敗しても何も起きない**＝絵が無ければ一覧はプレースホルダで出る（§2-5 の行き止まりにしない）。
+   */
+  _refreshProjectThumbnail: async (projectId) => {
+    const s = get();
+    const sig = thumbnailSignature({ scenes: s.scenes, assets: s.assets, videoSettings: s.meta.videoSettings });
+    if (sig === lastThumbnailSignature) return; // 絵に効くものが変わっていない＝焼き直さない
+    const scene = thumbnailScene(s.scenes);
+    const template = scene ? s.templates.find((t) => t.templateId === scene.templateId) : undefined;
+    if (!scene || !template) {
+      lastThumbnailSignature = sig; // 「絵が無い」も1つの状態として覚える（毎回試さない）
+      return;
+    }
+    const dataUrl = await renderProjectThumbnail(
+      scene,
+      template,
+      (id) => (id ? s.assetSrcById[id] ?? s.templateAssetSrcById[id] : undefined),
+      s.meta.videoSettings.fontId,
+    );
+    if (!dataUrl) return; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
+    try {
+      await saveProjectThumbnail(projectId, dataUrl);
+      lastThumbnailSignature = sig;
+    } catch {
+      /* 絵が無くても一覧は開ける＝黙って続ける */
+    }
+  },
   saveProject: async () => {
     if (saveInFlight) return saveInFlight;
     saveInFlight = get()._doSave();
@@ -872,13 +918,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           _dirtyAudioKeys: nextDirty,
         };
       });
+      // 一覧に出す小さな絵（#397）＝**投げっぱなし**にする（保存の完了を待たせない＝体感で重くならない）。
+      // ⚠️ **先頭の場面が変わっていなければ焼き直さない**（印の比較）＝打つたびに焼かない。
+      void get()._refreshProjectThumbnail(projectId);
     } catch {
       // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
       if (stillOpen()) set({ saveStatus: "error" });
     }
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
+  duplicateProject: async (projectId) => {
+    // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
+    if (isExportBusy(get().exportRun.phase)) return null;
+    try {
+      // ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない（焼き出し＝ADR-0032 決定16 と同じ流儀）。
+      const src = parseProjectDoc(await loadProjectDoc(projectId));
+      const existing = await listProjectSummaries();
+      const newId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      const dup = duplicateProjectDoc(src, newId, new Date().toISOString());
+      // ⚠️ **ファイルを運んでから文書を保存する**（焼き出しと同じ順＝`bakeToTimeline`）＝
+      // 逆にすると、素材の無い動画が一覧に残る。
+      // ⚠️ **コピーの入口は1つ**（`copyBakedFiles`）＝焼き出しと同じ関数を使う（規則を写さない・§2-7）。
+      await copyBakedFiles(projectId, newId, duplicatedFilePaths(src));
+      await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
+      // 複製したら**開く**（作っただけで見えないと、できたかどうか分からない）。
+      await get().loadProject(newId);
+      return newId;
+    } catch (e) {
+      set({ importError: typeof e === "string" ? e : "動画を複製できませんでした。もう一度お試しください。" });
+      return null;
+    }
+  },
   loadProject: async (projectId) => {
+    lastThumbnailSignature = null; // 一覧の絵の印を戻す（#397）＝前の動画の印で焼き直しを飛ばさない
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
     if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);

@@ -6,13 +6,15 @@ import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../hooks/newProjectGuard";
+import { assetDisplayUrl } from "../../infrastructure/assetFs";
+import { PROJECT_THUMBNAIL_PATH } from "../../domain/project/thumbnail";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { useTimelineStore } from "../store/timelineStore";
 import { ProjectLoadError } from "../../domain/project/persistence";
-import {
+import { CopyIcon,
   PlusIcon,
   LayoutIcon,
   SettingsIcon,
@@ -87,6 +89,36 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const [deleteError, setDeleteError] = useState(false);
   // 別プロジェクトを開く前の破棄確認（#547 P1-2）。未保存があるとき「開く先」をここに保持し、確認後に実行する。
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 一覧の小さな絵（#397）。⚠️ **無ければ出さないだけ**＝古い動画でも一覧は普通に出る（後方互換）。
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  // 複製（#395）：作っている最中の id（連打で二重に作らない）。
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const duplicateProject = useProjectStore((s) => s.duplicateProject);
+
+  /**
+   * 複製する（#395）。⚠️ **複製したら開く**ので、**開くのと同じ破棄ガード**を先に通す
+   *（未保存の変更があるまま別の動画へ移らない・#547 P1-2）。
+   */
+  async function onDuplicate(projectId: string): Promise<void> {
+    if (duplicatingId !== null || isExporting) return;
+    if (openingId || pendingOpenId) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
+    // ⚠️ **未保存があるなら、まず「開く」と同じ確認へ寄せる**（複製したら開くので、
+    // いま編集しているものが閉じる＝同じ結果になる操作は同じ聞き方・ADR-0026②）。
+    if (hasWork) {
+      setPendingOpenId(projectId);
+      return;
+    }
+    setDuplicatingId(projectId);
+    setOpenError(null);
+    try {
+      const id = await duplicateProject(projectId);
+      // 成功したら開いた状態になっている（store が `loadProject` する）＝たたき台へ移る。
+      if (id) onNavigate("draft");
+      else setOpenError("動画を複製できませんでした。もう一度お試しください。");
+    } finally {
+      setDuplicatingId(null);
+    }
+  }
 
   async function removeProject(projectId: string) {
     if (deleteBusy || isExporting) return; // 書き出し中は削除しない（no-op 後に一覧だけ消える不整合を防ぐ・#379）
@@ -160,11 +192,20 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   useEffect(() => {
     let alive = true;
     listProjects()
-      .then((list) => {
-        if (alive) {
-          setProjects(list);
-          setListError(false);
-        }
+      .then(async (list) => {
+        if (!alive) return;
+        setProjects(list);
+        setListError(false);
+        // 一覧の小さな絵（#397）。⚠️ **無い動画は飛ばすだけ**＝古い動画でも一覧は普通に出る。
+        // ⚠️ **一覧の表示は待たせない**（絵は後から入る）＝取得に失敗しても一覧は出たまま。
+        const found: Record<string, string> = {};
+        await Promise.all(
+          list.map(async (p) => {
+            const url = await assetDisplayUrl(p.projectId, PROJECT_THUMBNAIL_PATH).catch(() => null);
+            if (url) found[p.projectId] = url;
+          }),
+        );
+        if (alive) setThumbs(found);
       })
       .catch(() => {
         // 取得失敗は「保存物なし」と混同させず、原因＋次の行動（再試行）を出す（§2-5・ADR-0026④）。
@@ -458,12 +499,22 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
                       style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || pendingOpenId !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
+                      {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
+                          （後方互換＝古い動画・まだ保存していない動画でも一覧は普通に出る）。 */}
                       <div
                         className="thumb thumb-photo"
-                        style={{ width: 96, flexShrink: 0 }}
+                        style={{ width: 96, flexShrink: 0, overflow: "hidden" }}
                         aria-hidden="true"
                       >
-                        <FolderIcon size={24} />
+                        {thumbs[p.projectId] ? (
+                          <img
+                            src={thumbs[p.projectId]}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          <FolderIcon size={24} />
+                        )}
                       </div>
                       <div className="grow">
                         <div className="row gap-sm">
@@ -487,6 +538,24 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
+                    </button>
+                    {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
+                        ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、
+                        **開くのと同じガード**を掛ける（未保存の破棄確認・書き出し中・確認中）。 */}
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={isExporting || pendingOpenId !== null || confirmNew || duplicatingId !== null}
+                      onClick={() => void onDuplicate(p.projectId)}
+                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を複製`}
+                      title={
+                        isExporting
+                          ? "書き出しが終わるまでお待ちください"
+                          : pendingOpenId !== null || confirmNew
+                            ? "確認に答えてから操作できます"
+                            : "複製（素材と声ごとコピーします）"
+                      }
+                    >
+                      <CopyIcon size={18} />
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
