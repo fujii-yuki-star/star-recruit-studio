@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
         return Err("不正なプロジェクトIDです。".to_string());
     }
