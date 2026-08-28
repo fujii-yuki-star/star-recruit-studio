@@ -304,9 +304,8 @@ fn import_user_font(
     let dir = user_fonts_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file_name = format!("{font_id}.{ext}");
-    fs::copy(&src, dir.join(&file_name)).map_err(|e| {
-        format!("フォントを取り込めませんでした。もう一度お試しください。（{e}）")
-    })?;
+    fs::copy(&src, dir.join(&file_name))
+        .map_err(|e| format!("フォントを取り込めませんでした。もう一度お試しください。（{e}）"))?;
     let entry = UserFontEntry {
         id: font_id.clone(),
         file_name,
@@ -337,10 +336,16 @@ fn read_user_font(app: tauri::AppHandle, font_id: String) -> Result<String, Stri
     let entry = read_user_fonts(&app)?
         .into_iter()
         .find(|e| e.id == font_id)
-        .ok_or_else(|| "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string())?;
-    let bytes = fs::read(dir.join(&entry.file_name))
-        .map_err(|_| "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string())?;
-    Ok(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes))
+        .ok_or_else(|| {
+            "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string()
+        })?;
+    let bytes = fs::read(dir.join(&entry.file_name)).map_err(|_| {
+        "この文字の形は見つかりませんでした。設定から取り込み直してください。".to_string()
+    })?;
+    Ok(base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        &bytes,
+    ))
 }
 
 /// 持ち込みフォントを消す（実体と目録の両方）。無ければ何もしない。
@@ -357,7 +362,13 @@ fn delete_user_font(app: tauri::AppHandle, font_id: String) -> Result<(), String
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
     }
-    write_user_fonts(&app, &list.into_iter().filter(|e| e.id != font_id).collect::<Vec<_>>())
+    write_user_fonts(
+        &app,
+        &list
+            .into_iter()
+            .filter(|e| e.id != font_id)
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// `user_font_NNN` の形か（`fontCatalog.ts` の `USER_FONT_ID_RE` と一致させる＝パストラバーサル防止も兼ねる）。
