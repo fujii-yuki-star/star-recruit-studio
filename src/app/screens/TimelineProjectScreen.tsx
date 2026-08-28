@@ -53,8 +53,8 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
-import { creditSpeakerAt } from "../../domain/timeline/credit";
-import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditTextAt } from "../../domain/timeline/credit";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
@@ -2380,18 +2380,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const shownLayout = layout && editingCanvasId
     ? { ...layout, items: layout.items.filter((i) => !isItemOfClip(i.id, editingCanvasId)) }
     : layout;
+  // クレジット（ADR-0003）は書き出しで**焼き込まれる**ので、プレビューにも同じものを出す
+  // ＝見えていたものと違う動画が出てこない（ADR-0001）。**出す/出さないの判断も書き出しと同じ
+  // 呼び口**（`creditTextAt`）を通す＝「最初の数秒」「非表示」を選んだ動画で、編集画面には出ている
+  // のに焼いた動画には入っていない（またはその逆）を作らない（PR #881 レビュー）。
+  const previewCredit = creditTextAt(
+    doc,
+    frameTimeSec(doc, playheadSec),
+    creditForSpeaker(getVoicevoxSpeaker()),
+  );
   const svg = shownLayout
     ? layoutToSvg(shownLayout, {
         assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
-        // クレジット（ADR-0003）は書き出しで**焼き込まれる**ので、プレビューにも同じものを出す
-        // ＝見えていたものと違う動画が出てこない（ADR-0001）。その時刻にしゃべっている声のキャラ。
         // 動画全体のフォント（`videoSettings.fontId`）＝部品ごとの指定が無いときの受け皿。書き出しにも
         // 同じものを渡している（渡さないとプレビューだけ既定の字体になり、焼いた動画と字が変わる）。
         fontFamily: fontFamilyForId(doc.videoSettings.fontId),
-        credit: creditForLine(
-          { speaker: creditSpeakerAt(doc, frameTimeSec(doc, playheadSec)) },
-          creditForSpeaker(getVoicevoxSpeaker()),
-        ),
+        // 出さない時刻は `credit` を渡さない（`layoutToSvg` は未指定なら描かない）＝書き出しと同じ渡し方。
+        ...(previewCredit != null ? { credit: previewCredit } : {}),
         responsive: true,
       })
     : "";
@@ -2480,10 +2485,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
           undefined,
           fontFamilyForId(doc.videoSettings.fontId),
-          creditForLine(
-            { speaker: creditSpeakerAt(doc, frameTimeSec(doc, playheadSec)) },
-            creditForSpeaker(getVoicevoxSpeaker()),
-          ),
+          previewCredit,
           true,
         )
       : null;

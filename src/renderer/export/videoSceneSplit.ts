@@ -3,7 +3,6 @@
 // スロット自身はどちらにも描かない（FFmpeg が動画で埋める＝透明な穴）。
 import type { LayoutItem, Rect, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
-import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 
 export interface VideoSceneSplit {
   /** 動画より下のレイヤー（背景含む・不透明・全面）。 */
@@ -24,7 +23,12 @@ export function splitVideoSceneSvg(
   assetSrc?: (assetId: string | null) => string | undefined,
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
-  credit: string = NARRATOR_CREDIT,
+  // ⚠️ **既定値を持たない**（PR #881 レビュー）＝ADR-0003「常時表示」時代の名残で `NARRATOR_CREDIT` を
+  // 既定にしていたが、ADR-0025 で**出す/出さないは呼ぶ側が決める**ようになった。既定があると、
+  // 呼ぶ側が「出さない」と判断して `undefined` を渡しても**ここで復活して焼き込まれる**
+  //（動画スロットのある場面は必ずこの経路＝「非表示」を選んでもクレジットが入っていた）。
+  // 未指定＝描かない（`layoutToSvg` の `credit?: string` と同じ契約）。
+  credit?: string,
 ): VideoSceneSplit | null {
   // 動画スロット（image かつ role=slot）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
   const slot = layout.items.find(
@@ -75,7 +79,12 @@ export function splitVideoSceneSvgMulti(
   assetSrc?: (assetId: string | null) => string | undefined,
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
-  credit: string = NARRATOR_CREDIT,
+  // ⚠️ **既定値を持たない**（PR #881 レビュー）＝ADR-0003「常時表示」時代の名残で `NARRATOR_CREDIT` を
+  // 既定にしていたが、ADR-0025 で**出す/出さないは呼ぶ側が決める**ようになった。既定があると、
+  // 呼ぶ側が「出さない」と判断して `undefined` を渡しても**ここで復活して焼き込まれる**
+  //（動画スロットのある場面は必ずこの経路＝「非表示」を選んでもクレジットが入っていた）。
+  // 未指定＝描かない（`layoutToSvg` の `credit?: string` と同じ契約）。
+  credit?: string,
   // responsive: SVG ルートを 100% にしてコンテナへフィット（プレビューの実映像3層描画用・#432）。書き出しは既定 false（固定寸法でラスタライズ）。
   responsive: boolean = false,
 ): VideoSceneSplitMulti | null {
