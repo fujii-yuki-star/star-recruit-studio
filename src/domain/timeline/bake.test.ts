@@ -821,6 +821,63 @@ describe('bakeTimelineProject: 素材はコピーする前提で持っていく�
   });
 });
 
+/**
+ * 掛け合いの行ごと字幕クリップ（#633）に、**文字の体裁が全部乗るか**（PR #879 再レビュー 🔴）。
+ * 以前はここで項目を手で並べていたので、**影・字間がそもそも配線されておらず**、
+ * 背景帯も場面別の上書き（`scene.textStyles[key].background`）を見ていなかった。
+ */
+describe('bakeTimelineProject: 掛け合い字幕の体裁（#633・#264）', () => {
+  const styled = (textStyles: unknown) =>
+    project({
+      scenes: [
+        scene('scene_001', {
+          lines: [{ lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none }],
+          textStyles,
+        } as never),
+      ],
+    });
+  const subtitleClip = (p: ReturnType<typeof styled>) =>
+    bakeTimelineProject(p, opts()).doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+
+  it('影・字間を運ぶ（テンプレ層の値）', () => {
+    const p = project({
+      scenes: [
+        scene('scene_001', { lines: [{ lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none }] }),
+      ],
+    });
+    const styledTemplate: Template = {
+      ...NORMAL_TEMPLATE,
+      layers: NORMAL_TEMPLATE.layers.map((l) =>
+        l.id === 'subtitle'
+          ? { ...l, letterSpacing: 0.1, shadow: { enabled: true, color: '#123456', opacity: 0.4, blur: 3, dx: 1, dy: 2 } }
+          : l,
+      ),
+    };
+    const { doc } = bakeTimelineProject(p, opts({ templateOf: (id) => (id === NORMAL_TEMPLATE.templateId ? styledTemplate : templateOf(id)) }));
+    const clip = doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+    expect(clip.letterSpacing).toBe(0.1);
+    expect(clip.shadow).toMatchObject({ enabled: true, color: '#123456', opacity: 0.4 });
+  });
+
+  it('影・字間の場面別の上書きを運ぶ（テンプレ既定へ戻さない）', () => {
+    const clip = subtitleClip(styled({ subtitle: { letterSpacing: 0.25, shadow: { enabled: true, color: '#abcdef' } } }));
+    expect(clip.letterSpacing).toBe(0.25);
+    expect(clip.shadow).toMatchObject({ enabled: true, color: '#abcdef' });
+  });
+
+  it('背景帯の場面別の上書きを運ぶ（生の形のまま）', () => {
+    const clip = subtitleClip(styled({ subtitle: { background: { enabled: true, color: '#ff0000', opacity: 0.9 } } }));
+    expect(clip.background).toEqual({ enabled: true, color: '#ff0000', opacity: 0.9 });
+  });
+
+  it('上書きが無ければ体裁を足さない（従来の絵を変えない）', () => {
+    const clip = subtitleClip(styled(undefined));
+    expect(clip.letterSpacing).toBeUndefined();
+    expect(clip.shadow).toBeUndefined();
+    expect(clip.background).toBeUndefined();
+  });
+});
+
 describe('bakeTimelineProject: 持っていけなかったものを黙って落とさない（§2-5）', () => {
   it('掛け合いの字幕は**焼けるようになった**ので記録しない（#633＝行ごとの字幕クリップ＋連動）', () => {
     const p = project({

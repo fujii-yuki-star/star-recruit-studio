@@ -97,6 +97,45 @@ export function resolveTextStyle(layer: TextStyleSource, ov?: TextStyleOverride)
   };
 }
 
+/**
+ * 解決した体裁を、**自由配置の要素へ写せる形**にして返す（#264・PR #879 再レビュー 🔴）。
+ *
+ * ⚠️ **項目を数え上げる場所を1つにする**＝写す側（通常→FREE 切替・「バラす」・掛け合い字幕の焼き出し）が
+ * `fontSize`／`color`／… と手で並べていたため、**新しい項目を足すたびに写し漏れ**が出た
+ *（#264 で `letterSpacing`/`shadow` が3経路とも漏れ、直したあとも `background` の場面別上書きが
+ * 2経路で漏れていた＝同じ癖の7回目）。ここを通せば、`TextStyle` に項目が増えても写す側は無変更で済む。
+ *
+ * ⚠️ **背景帯だけは「生の値」を返す**＝`FreeElement.background` は `LayerBackground`（`enabled` を持つ形）で、
+ * 解決後の `ResolvedBand`（既定を埋めた形）とは**別の型**。解決後を入れると往復で形が変わる。
+ * 上書きの継承（場面 → テンプレ層）はここで済ませる＝写す側が `layer.background` を直接見なくてよい。
+ */
+export function freeTextStyleFields(
+  layer: TextStyleSource,
+  ov?: TextStyleOverride,
+): {
+  fontSize: number;
+  color: string;
+  fontWeight: FontWeight;
+  strokeColor?: string;
+  strokeWidth?: number;
+  letterSpacing?: number;
+  shadow?: TextShadow;
+  background?: LayerBackground;
+} {
+  const st = resolveTextStyle(layer, ov);
+  const background = ov?.background ?? layer.background;
+  return {
+    fontSize: st.fontSize,
+    color: st.color,
+    fontWeight: st.fontWeight,
+    ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
+    ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
+    ...(st.letterSpacing != null ? { letterSpacing: st.letterSpacing } : {}),
+    ...(st.shadow != null ? { shadow: st.shadow } : {}),
+    ...(background != null ? { background } : {}),
+  };
+}
+
 /** `enabled` の影だけを返す（既定は黒・濃さ 0.5）。`enabled` でなければ `undefined`。 */
 export function enabledShadow(shadow: TextShadow | undefined): TextShadow | undefined {
   if (!shadow?.enabled) return undefined;

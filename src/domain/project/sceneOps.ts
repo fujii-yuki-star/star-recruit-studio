@@ -9,7 +9,7 @@ import type { Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
 import { templateSlotIds } from '../template/layerOps';
-import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields } from '../template/textStyle';
 import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
@@ -236,29 +236,19 @@ export function freeLayoutFromPlacedContent(
       // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
       // 変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る（隣の fontId は per-scene なのに体裁だけ戻る＝
       // ADR-0026②の非対称・ADR-0030「表示中の内容を持ち込む」に反する）。
-      const st = resolveTextStyle(layer, scene.textStyles?.[layer.textKey]);
+      // ⚠️ **体裁は `freeTextStyleFields` に丸ごと任せる**（PR #879 再レビュー 🔴）＝
+      // ここで項目を手で並べていたため、**新しい項目を足すたびに写し漏れ**が出た
+      //（`letterSpacing`/`shadow` が漏れ、直したあとも `background` の場面別上書きが漏れた）。
+      // 数え上げる場所を1つにすれば、`TextStyle` が増えてもここは無変更で済む。
+      const style = freeTextStyleFields(layer, scene.textStyles?.[layer.textKey]);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
-        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
+        h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         text,
-        fontSize: st.fontSize,
-        color: st.color,
-        fontWeight: st.fontWeight,
+        ...style,
         fontId: scene.textFontIds?.[layer.textKey],
-        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
-        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        // ⚠️ **体裁は解決したものを全部運ぶ**（PR #879 レビュー 🔴）＝`strokeColor`/`strokeWidth` だけ
-        // 書いていたので、**新しい項目（影・字間）を足したときに落ちた**。落ちると
-        // **バラす前後で絵が変わる**（ADR-0032 決定23）・**切替で戻したときに消える**（ADR-0030）。
-        ...(st.letterSpacing != null ? { letterSpacing: st.letterSpacing } : {}),
-        ...(st.shadow != null ? { shadow: st.shadow } : {}),
-        // 背景帯（可読性の下地）も移送（#529）。
-        // ⚠️ **`faithful` でも写すようになった**（#264）＝以前は「文字層の帯は通常テンプレでは
-        // 描かれない」ので写していなかったが、**#264 で文字層にも帯を出すようにした**ので、
-        // 写さないと**バラす前後で絵が変わる**（ADR-0032 決定23 に反する）。
-        ...(layer.background != null ? { background: layer.background } : {}),
       });
     } else if (opts.faithful && (layer.type === LAYER_TYPE.shape || layer.type === LAYER_TYPE.decor)) {
       // 図形・装飾＝描画（`layoutScene`）と同じ既定へ落とす（線は矩形として写す＝描画の扱いと同じ）。
@@ -276,26 +266,17 @@ export function freeLayoutFromPlacedContent(
     } else if (layer.type === LAYER_TYPE.subtitle) {
       if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
-      const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+      // 体裁は上の ⚠️ と同じ理由で `freeTextStyleFields` に任せる。
+      const style = freeTextStyleFields(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
-        y: subtitleTopY(scene, cg.y, cg.w, st.fontSize, layer.maxLines),
-        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
+        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines),
+        h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
-        fontSize: st.fontSize,
-        color: st.color,
-        fontWeight: st.fontWeight,
+        ...style,
         fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
-        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        // ⚠️ **体裁は解決したものを全部運ぶ**（PR #879 レビュー 🔴）＝`strokeColor`/`strokeWidth` だけ
-        // 書いていたので、**新しい項目（影・字間）を足したときに落ちた**。落ちると
-        // **バラす前後で絵が変わる**（ADR-0032 決定23）・**切替で戻したときに消える**（ADR-0030）。
-        ...(st.letterSpacing != null ? { letterSpacing: st.letterSpacing } : {}),
-        ...(st.shadow != null ? { shadow: st.shadow } : {}),
-        ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
       });
     }
   }

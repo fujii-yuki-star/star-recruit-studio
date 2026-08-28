@@ -333,7 +333,7 @@ describe('exportTimelineVideo', () => {
     });
     useTimelineStore.getState().addTrack(TRACK_KIND.visual);
     expect(useTimelineStore.getState().doc?.tracks).toHaveLength(2); // 増えていない
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_EXPORTING');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_EXPORTING');
   });
 
   it('書き出し中の取り消しも受け付けない', async () => {
@@ -342,7 +342,7 @@ describe('exportTimelineVideo', () => {
       exportRun: { phase: 'encoding', percent: 90, message: null, cancelling: false },
     });
     useTimelineStore.getState().undo();
-    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_EXPORTING');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_EXPORTING');
   });
 
   it('素材は**書き出しで描ける形**（data URL）へ解き直す（表示用のURLを渡さない）', async () => {

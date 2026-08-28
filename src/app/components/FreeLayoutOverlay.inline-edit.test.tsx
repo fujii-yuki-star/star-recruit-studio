@@ -94,6 +94,30 @@ describe("FreeLayoutOverlay インライン編集の見た目＝実描画に合�
     expect(ff).not.toContain("SceneFallbackFont");
   });
 
+  /**
+   * ⚠️ **編集中だけ影・字間が消えるのを作らない**（#264・PR #879 再レビュー ℹ️）＝
+   * 帯・縁取りと同じ理由（実描画では同じ文字アイテムの中にあり、親が伏せると一緒に消える）。
+   */
+  it("字間・影も編集中に再現する（帯・縁取りと同じ理由）", () => {
+    const { spies } = renderOverlay({
+      freeLayout: [
+        { ...textEl, letterSpacing: 0.2, shadow: { enabled: true, color: "#112233", opacity: 0.4, blur: 4, dx: 2, dy: 3 } },
+      ] as never,
+    });
+    void spies;
+    const ta = enterEdit();
+    expect(ta.style.letterSpacing).toBe("0.2em"); // 字間は em＝拡大率に依らない
+    // 影は px なので拡大率（0.5）を掛ける。濃さは色へ畳む（CSS に不透明度の引数が無い）。
+    expect(ta.style.textShadow).toBe("1px 1.5px 2px rgba(17, 34, 51, 0.4)");
+  });
+
+  it("字間・影が無ければ付けない（従来の見た目を変えない）", () => {
+    renderOverlay();
+    const ta = enterEdit();
+    expect(ta.style.letterSpacing).toBe("");
+    expect(ta.style.textShadow).toBe("");
+  });
+
   it("編集中の要素 id を親へ通知する（親が SVG 側を伏せて二重表示を防ぐ）", () => {
     const onEditingIdChange = vi.fn();
     renderOverlay({ onEditingIdChange });

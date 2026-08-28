@@ -594,6 +594,51 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(t.background).toBeUndefined(); // prevTemplate の title 層は background 未指定
   });
 
+  /**
+   * ⚠️ **場面別の上書き（`scene.textStyles[key]`）は帯にも効く**（PR #879 再レビュー 🔴）。
+   * 以前は生の `layer.background` を写していたので、**場面で変えた帯だけテンプレ既定へ戻って**いた
+   *（隣の色・大きさは実効値を写していたのに帯だけ＝ADR-0026② の非対称）。
+   */
+  it('通常→FREE：背景帯も場面別の上書きを写す（テンプレ既定へ戻さない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('title', 'text', { textKey: 'title', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#111111', opacity: 0.2 } })],
+    };
+    const sc = {
+      ...richScene(),
+      texts: { title: 'タイトル' },
+      textStyles: { title: { background: { enabled: true, color: '#ff0000', opacity: 0.9, radius: 20 } } },
+    } as unknown as Scene;
+    const t = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'text')!;
+    expect(t.background).toEqual({ enabled: true, color: '#ff0000', opacity: 0.9, radius: 20 });
+  });
+
+  it('通常→FREE：字幕の背景帯も場面別の上書きを写す', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('subtitle', 'subtitle', { textKey: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#111111' } })],
+    };
+    const sc = {
+      ...richScene(),
+      texts: { subtitle: '字幕' },
+      textStyles: { subtitle: { background: { enabled: true, color: '#00ff00', opacity: 0.3 } } },
+    } as unknown as Scene;
+    const el = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'subtitle')!;
+    expect(el.background).toEqual({ enabled: true, color: '#00ff00', opacity: 0.3 });
+  });
+
+  /** ⚠️ **`FreeElement.background` は生の形**（`enabled` を持つ）＝解決後の帯を入れると往復で形が変わる。 */
+  it('通常→FREE：帯は「生の形」で写す（解決後の既定埋め済みの形にしない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('title', 'text', { textKey: 'title', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#112233' } })],
+    };
+    const sc = { ...richScene(), texts: { title: 'あ' } } as Scene;
+    const t = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'text')!;
+    // 既定（濃さ 0.55・角丸 16）を埋めない＝テンプレが持っていたものだけ。
+    expect(t.background).toEqual({ enabled: true, color: '#112233' });
+  });
+
   it('通常→FREE：テンプレ既定素材（ADR-0021）も持ち込む（描画と同じ解決＝切替で絵が消えない）', () => {
     const tmpl: Template = {
       ...prevTemplate(),

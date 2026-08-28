@@ -34,7 +34,15 @@ function isTruncated(text: string, lines: readonly string[]): boolean {
  * そのまま `wrapText` に通す。
  */
 export function truncatedTexts(
-  items: readonly { kind: string; text?: string; w?: number; fontSize?: number; maxLines?: number }[],
+  items: readonly {
+    kind: string;
+    text?: string;
+    w?: number;
+    fontSize?: number;
+    maxLines?: number;
+    /** 字幕として描かれるアイテムか（重複した知らせを外すのに使う＝呼ぶ側の判断）。 */
+    isSubtitle?: boolean;
+  }[],
 ): string[] {
   const out: string[] = [];
   for (const it of items) {

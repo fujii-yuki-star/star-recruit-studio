@@ -7,6 +7,7 @@ import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
 import { charWidthEm, wrapText } from '../domain/text/textWrap';
+import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from '../domain/template/textStyle';
 
 // 折返し（charWidthEm/wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。
 // 既存の import 元（'./sceneSvg'）を保つため再エクスポートする。
@@ -83,8 +84,10 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     const dx = item.shadow.dx ?? 0;
     const dy = item.shadow.dy ?? 0;
     const sd = (item.shadow.blur ?? 0) / 2;
-    const color = item.shadow.color ?? '#000000';
-    const opacity = item.shadow.opacity ?? 0.5;
+    // ⚠️ **既定は定数から採る**（PR #879 レビュー ℹ️）＝`resolveTextStyle` を通れば埋まっているが、
+    // ここで別の数字を書くと**2か所に既定が生まれる**（片方だけ変えるドリフトの芽）。
+    const color = item.shadow.color ?? DEFAULT_SHADOW_COLOR;
+    const opacity = item.shadow.opacity ?? DEFAULT_SHADOW_OPACITY;
     const filterId = `shadow-${[dx, dy, sd, color.replace('#', ''), opacity].join('_').replace(/[^A-Za-z0-9_-]/g, '_')}`;
     parts.push(
       `<defs><filter id="${filterId}" x="-50%" y="-50%" width="200%" height="200%">`
