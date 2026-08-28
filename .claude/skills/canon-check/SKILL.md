@@ -18,7 +18,7 @@ description: 現在の差分を「すたりお（stario）」の正典（CLAUDE.
 - 変更が無ければその旨を述べて終了。
 
 ### 2. 機械層（DoD ①②：テスト緑・型/lintなし）
-- フロント差分があれば `npm run check:frontend`（lint→typecheck→test→validate:schemas）を実行。Rust 差分（`src-tauri/**`）があれば `npm run check:rust` 系も。
+- フロント差分があれば `npm run check:frontend`（lint→typecheck→test→validate:schemas）を実行。Rust 差分（`src-tauri/**`）があれば **`npm run check:rust`（check→fmt→clippy）と `npm run check:rust:test`** も。⚠️ **fmt/clippy を省かない**＝CI の `Rust (check/fmt/clippy)` はこの3つを見るので、`cargo check` だけでは手元が緑でも CI が落ちる。
 - 重い/不要なら引数 `--skip-mechanical` で省略可。結果（緑/赤と要点）を記録。**赤があれば最優先の🔴**。
 
 ### 3. 判断層（4レビュアを並列実行）
