@@ -475,7 +475,10 @@ fn atempo_chain(speed: f64) -> String {
 
 /// 結合済み動画（ナレーション入り）へ、場面ごとBGMの各クリップをループ→切り出し→音量→フェード→adelay して amix する引数（純粋・ADR-0018 ③(7)）。
 /// クリップは planBgmMix が配置済み（曲が変わる境界は前後を重ねた delay/play＋フェードで amix ブレンド＝クロスフェード）。
-/// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。runs は1本以上（呼ぶ前に判定）。
+/// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。
+/// ⚠️ **runs は0本もありうる**（PR #896 レビュー ℹ️）＝**整えるだけ**（`normalize` のみ）のときは
+/// BGM が無いまま呼ばれる（`needs_audio_pass = has_bgm || normalize.is_some()`）。
+/// 0本なら `amix=inputs=1`（既存音声だけ）を通る＝「1本以上」を前提に手を入れない。
 /// 全体の音量を整える設定（#259・ADR-0032 追補4）。
 #[derive(Debug, Clone, Copy)]
 pub struct NormalizeSpec {
@@ -3658,7 +3661,9 @@ fn export_video_impl(
     // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
     // 音を整えるだけ（BGM 無し）のときもここを通る（#259）＝BGM のリストが空になるだけ。
     if needs_audio_pass {
-        emit_export_progress(Some(&app), "bgm", 0, 0); // BGM合成中（#376）
+        // ⚠️ **BGM が無いのに「BGMを合わせています」と出さない**（PR #896 レビュー ℹ️）＝
+        // 整えるだけのときは別の段として出す（事実と違う進捗を見せない・§2-5）。
+        emit_export_progress(Some(&app), if has_bgm { "bgm" } else { "loudness" }, 0, 0);
         let bgm_start = Instant::now();
         let list = bgm_runs.unwrap_or_default();
         // xfade で重なった分だけ実効総尺が縮む（ADR-0009）。-t にこの値を使う。境界は joins[1..] のみ。
@@ -4628,6 +4633,55 @@ mod tests {
 
     /// 読み上げ（タイムライン形式の音声クリップ・#631）は繰り返さない＝素材が短くても言葉が二重に鳴らない。
     /// 既定（BGM）はループのままで、区別は入力の loop_source だけで決まる。
+    /// 音を整える（#259）＝**混ぜたあとに1回だけ通す**。順番が逆だと個々の音量・フェードを
+    /// 測ってしまい、`alimiter` が先だと整えた結果の 0dBFS 超えを止められない。
+    #[test]
+    fn mix_bgm_runs_args_normalize_appends_loudnorm_after_mix() {
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.5,
+            volume_expr: None,
+            delay_sec: 0.0,
+            play_sec: 10.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args(
+            "v.mp4",
+            &runs,
+            10.0,
+            Some(NormalizeSpec { target_lufs: -16.0 }),
+            "out.mp4",
+        );
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[1:a]atrim=0:10,asetpts=N/SR/TB,volume=0.5[bg0];[0:a][bg0]amix=inputs=2:duration=first:normalize=0[mixed];[mixed]loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[a]"
+        );
+    }
+
+    /// ⚠️ **BGM が無くても整える**（ADR-0026②＝BGM の有無で挙動を割らない）。
+    /// 既存の音声だけを `amix=inputs=1` で通し、そのあとに整える段を足す。
+    #[test]
+    fn mix_bgm_runs_args_normalize_without_bgm() {
+        let a = mix_bgm_runs_args(
+            "v.mp4",
+            &[],
+            10.0,
+            Some(NormalizeSpec { target_lufs: -20.0 }),
+            "out.mp4",
+        );
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[0:a]amix=inputs=1:duration=first:normalize=0[mixed];[mixed]loudnorm=I=-20:TP=-1.5:LRA=11,alimiter=limit=0.95[a]"
+        );
+        assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy")); // 映像は再エンコードしない
+    }
+
     #[test]
     fn mix_bgm_runs_args_no_loop_for_voice() {
         let runs = [BgmRunPlaced {
