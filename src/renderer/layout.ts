@@ -133,6 +133,7 @@ export function bandBackground(bg: LayerBackground | undefined): { color: string
 // 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
 export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
 import { SUBTITLE_BAND_PAD_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
+import { rotatedBounds } from '../domain/preview/safeArea';
 // 字幕帯の積み方（同時字幕・ADR-0031）は **domain が正典**＝描画・はみ出し判定・焼き出し（#633）で共有する。
 // ここからは再輸出だけ（既存の import 経路を保つ・`DEFAULT_LINE_HEIGHT` と同じ流儀）。
 export { SUBTITLE_BAND_PAD_EM, SUBTITLE_STACK_GAP_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
@@ -145,16 +146,10 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
   const y0 = item.y - (item.anchorBottom ? (n - 1) * lineHeightPx : 0); // 帯背景の上端（sceneSvg と一致）
   const w = item.w;
   const h = lineHeightPx * n + item.fontSize * SUBTITLE_BAND_PAD_EM;
-  const rot = ((item.rotation ?? 0) * Math.PI) / 180;
-  if (rot === 0) return x0 < 0 || y0 < 0 || x0 + w > canvasW || y0 + h > canvasH;
-  const cx = x0 + w / 2;
-  const cy = y0 + h / 2;
-  const cos = Math.cos(rot);
-  const sin = Math.sin(rot);
-  const corners: [number, number][] = [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
-  const xs = corners.map(([px, py]) => cx + (px - cx) * cos - (py - cy) * sin);
-  const ys = corners.map(([px, py]) => cy + (px - cx) * sin + (py - cy) * cos);
-  return Math.min(...xs) < 0 || Math.min(...ys) < 0 || Math.max(...xs) > canvasW || Math.max(...ys) > canvasH;
+  // ⚠️ **回した後の外枠の式は1か所**（PR #878 再レビュー ℹ️）＝端の目安（安全領域）の判定も
+  // 同じものを使う。別々に書くと、片方だけ回転を見る／見ないが起きる（実際に起きていた）。
+  const b = rotatedBounds({ x: x0, y: y0, w, h, rotation: item.rotation ?? 0 });
+  return b.x < 0 || b.y < 0 || b.x + b.w > canvasW || b.y + b.h > canvasH;
 }
 
 /**

@@ -43,10 +43,42 @@ export function safeAreaRect(canvas: { width: number; height: number }, orientat
  * **画面の中だが端に寄りすぎ**ているもの。切られる媒体でだけ問題になるので**注意止まり**。
  */
 export function outsideSafeArea(
-  item: { x: number; y: number; w: number; h: number },
+  item: { x: number; y: number; w: number; h: number; rotation?: number },
   safe: SafeAreaRect,
 ): boolean {
-  return item.x < safe.x || item.y < safe.y
-    || item.x + item.w > safe.x + safe.w
-    || item.y + item.h > safe.y + safe.h;
+  // ⚠️ **回っているものは回した後の外枠で見る**（PR #878 再レビュー ℹ️）＝
+  // 回転を無視すると、傾けて端へ寄せた文字を**見落とす**。画面外の判定
+  //（`subtitleItemOutOfCanvas`）が回転込みで見ている以上、こちらだけ見ないのは非対称（ADR-0026②）。
+  const box = rotatedBounds(item);
+  return box.x < safe.x || box.y < safe.y
+    || box.x + box.w > safe.x + safe.w
+    || box.y + box.h > safe.y + safe.h;
+}
+
+/**
+ * 中心まわりに回した矩形の**外枠**（AABB）。回転が無ければそのまま返す。
+ *
+ * ⚠️ **判定の式は1か所**（§2-7）＝画面外の判定（`subtitleItemOutOfCanvas`）も同じ式を使う。
+ * 別々に書くと、片方だけ回転を見る／見ないが起きる（実際に起きていた）。
+ */
+export function rotatedBounds(
+  item: { x: number; y: number; w: number; h: number; rotation?: number },
+): { x: number; y: number; w: number; h: number } {
+  const rot = ((item.rotation ?? 0) * Math.PI) / 180;
+  if (rot === 0) return { x: item.x, y: item.y, w: item.w, h: item.h };
+  const cx = item.x + item.w / 2;
+  const cy = item.y + item.h / 2;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const corners: [number, number][] = [
+    [item.x, item.y],
+    [item.x + item.w, item.y],
+    [item.x + item.w, item.y + item.h],
+    [item.x, item.y + item.h],
+  ];
+  const xs = corners.map(([px, py]) => cx + (px - cx) * cos - (py - cy) * sin);
+  const ys = corners.map(([px, py]) => cy + (px - cx) * sin + (py - cy) * cos);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
 }
