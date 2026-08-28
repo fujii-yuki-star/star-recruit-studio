@@ -61,12 +61,27 @@ const tplAccept = [
   ['template: strokeWidth=0（縁取りなし・境界）を許容', withLayer0({ strokeColor: '#ffffff', strokeWidth: 0 })],
   ['template: layer rotation を許容（#307）', withLayer0({ rotation: 30 })],
 ];
+// 文字の体裁（#264・schema 1.27）。⚠️ **`Layer`・`FreeElement`・`TextStyle` の3か所に同じ語彙**が
+// あるので、1つだけ直し忘れても気づけるよう**3つとも**検査する（α-6 出口監査 🔴3）。
+tplAccept.push(
+  ['template: 文字の影（shadow）を許容（1.27・#264）', withLayer0({ shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
+  ['template: 影は enabled だけでも許容（ほかは既定）', withLayer0({ shadow: { enabled: false } })],
+  ['template: 字間（letterSpacing）を許容（1.27・#264）', withLayer0({ letterSpacing: 0.1 })],
+  ['template: 字間は詰められる（負・境界 -0.5）', withLayer0({ letterSpacing: -0.5 })],
+  ['template: 字間の上限（2）を許容', withLayer0({ letterSpacing: 2 })],
+);
 const tplReject = [
   ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
   ['template: strokeWidth 負は拒否', withLayer0({ strokeWidth: -1 })],
   ['template: rotation 範囲外(400)は拒否', withLayer0({ rotation: 400 })],
   ['template: rotation 負(-1)は拒否', withLayer0({ rotation: -1 })],
   ['template: rotation 360（=0と重複）は除外（exclusiveMaximum）', withLayer0({ rotation: 360 })],
+  ['template: 影の色が非hexは拒否（1.27）', withLayer0({ shadow: { enabled: true, color: 'black' } })],
+  ['template: 影のぼかしが負は拒否（1.27）', withLayer0({ shadow: { enabled: true, blur: -1 } })],
+  ['template: 影の濃さ範囲外(1.5)は拒否（1.27）', withLayer0({ shadow: { enabled: true, opacity: 1.5 } })],
+  ['template: 影の未知フィールド(spread)は拒否（1.27）', withLayer0({ shadow: { enabled: true, spread: 4 } })],
+  ['template: 字間の範囲外(3)は拒否（1.27）', withLayer0({ letterSpacing: 3 })],
+  ['template: 字間の下限外(-1)は拒否（1.27）', withLayer0({ letterSpacing: -1 })],
 ];
 for (const [desc, data] of tplAccept) {
   if (vTemplate(data)) console.log(`PASS  must-accept  ${desc}`);
@@ -267,6 +282,49 @@ mustAccept.push(
   ['audioAuto: 空オブジェクト（すべて既定）を許容', withVideoSettings({ audioAuto: {} })],
   ['audioAuto: 未指定を許容（前の版のファイル）', withBrief({})],
   ['audioAuto: 「しない」を明示できる（読み込んだ古い動画に書き込む値）', withVideoSettings({ audioAuto: { duckBgm: false, normalize: false } })],
+);
+
+// 文字の体裁（#264・schema 1.27）＝場面形式の側（`FreeElement` と `$defs/TextStyle`）。
+// ⚠️ **timeline 側にしか検査が無かった**（α-6 出口監査 🔴3）＝同じ語彙が3か所（Layer／FreeElement／
+// TextStyle）にあるので、1つだけ直し忘れても `validate:schemas` は緑のままだった。
+const freeText = (prop) => withScene({
+  freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', ...prop }],
+});
+const styleOf = (prop) => withScene({ textStyles: { title: prop } });
+mustAccept.push(
+  ['FREE text: 影（shadow）を許容（1.27・#264）', freeText({ shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
+  ['FREE text: 字間（letterSpacing）を許容（1.27）', freeText({ letterSpacing: 0.1 })],
+  ['FREE text: 字間は詰められる（境界 -0.5）', freeText({ letterSpacing: -0.5 })],
+  ['textStyles: 影・字間・背景帯を許容（1.27＝文字にも一般化）', styleOf({ shadow: { enabled: true }, letterSpacing: 0.2, background: { enabled: true, color: '#000000', opacity: 0.4, radius: 4 } })],
+  ['textStyles: 未指定＝従来どおり（空でも許容）', styleOf({})],
+);
+mustReject.push(
+  ['FREE text: 影の色が非hexは拒否（1.27）', freeText({ shadow: { enabled: true, color: 'black' } })],
+  ['FREE text: 影のぼかしが負は拒否（1.27）', freeText({ shadow: { enabled: true, blur: -1 } })],
+  ['FREE text: 影の未知フィールド(spread)は拒否（1.27）', freeText({ shadow: { enabled: true, spread: 4 } })],
+  ['FREE text: 字間の範囲外(3)は拒否（1.27）', freeText({ letterSpacing: 3 })],
+  ['textStyles: 影の濃さ範囲外(1.5)は拒否（1.27）', styleOf({ shadow: { enabled: true, opacity: 1.5 } })],
+  ['textStyles: 字間の下限外(-1)は拒否（1.27）', styleOf({ letterSpacing: -1 })],
+  ['textStyles: 未知フィールドは拒否（additionalProperties:false）', styleOf({ shadowColor: '#000000' })],
+);
+
+// クレジットの見せ方（ADR-0025・#359・schema 1.28）。⚠️ **検査が1件も無かった**（🔴4）＝
+// ADR-0025 の核である `hidden`（非表示にできる）が enum から落ちても気づけない状態だった。
+mustAccept.push(
+  ...['always', 'head', 'tail', 'both', 'hidden'].map((mode) => [
+    `creditDisplay: mode=${mode} を許容（1.28・ADR-0025）`,
+    withVideoSettings({ creditDisplay: { mode } }),
+  ]),
+  ['creditDisplay: 秒数の下限(1)を許容', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 1 } })],
+  ['creditDisplay: 秒数の上限(10)を許容', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 10 } })],
+  ['creditDisplay: 未指定を許容（前の版のファイル＝最初と最後・3秒へ解く）', withBrief({})],
+);
+mustReject.push(
+  ['creditDisplay: 知らない mode は拒否', withVideoSettings({ creditDisplay: { mode: 'sometimes' } })],
+  ['creditDisplay: 秒数 0 は拒否（minimum:1）', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 0 } })],
+  ['creditDisplay: 秒数 11 は拒否（maximum:10）', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 11 } })],
+  ['creditDisplay: 未知フィールドは拒否（additionalProperties:false）', withVideoSettings({ creditDisplay: { mode: 'both', color: '#ffffff' } })],
+  ['videoSettings: creditDisplay を場面に置くのは拒否（設定はプロジェクト単位）', withScene({ creditDisplay: { mode: 'both' } })],
 );
 
 for (const [desc, data] of mustAccept) {

@@ -794,6 +794,35 @@ pub fn run() {
 }
 
 #[cfg(test)]
+mod user_font_id_tests {
+    use super::is_user_font_id;
+
+    /// ⚠️ **domain 側（`USER_FONT_ID_RE`）と同じ答えになること**を、同じ入力で固定する
+    ///（α-6 出口監査 🔴5）。入力の一覧は `fontCatalog.ts` の `USER_FONT_ID_SAMPLES` と同じ。
+    ///
+    /// ⚠️ **姉妹の `is_library_asset_id` には固定があったのに、こちらだけ空いていた**＝
+    /// 片方だけ桁数・接頭辞がずれると「保存できるのに読めない」がテスト無しで入る。
+    /// この関数はパストラバーサル防止も兼ねるので、緩む方向のずれは実害が出る。
+    #[test]
+    fn matches_domain_rule() {
+        let cases: &[(&str, bool)] = &[
+            ("user_font_001", true),
+            ("user_font_1000", true),
+            ("user_font_1", false),
+            ("user_font_00a", false),
+            ("xuser_font_001", false),
+            ("user_font_001x", false),
+            ("user_font_", false),
+            ("gen-interface-jp", false),
+            ("", false),
+        ];
+        for (id, want) in cases {
+            assert_eq!(is_user_font_id(id), *want, "id={id}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod library_id_tests {
     use super::is_library_asset_id;
 
