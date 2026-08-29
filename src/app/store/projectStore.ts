@@ -451,7 +451,7 @@ interface ProjectState {
    * ⚠️ **ロゴの取り込みは失敗しうる**（置き場から消えている等）ので、**成功を騙らない**ために
    * 結果を返す（呼ぶ側が「反映しました」と言ってよいかを決める）。
    */
-  applyBrandKit: () => Promise<{ ok: boolean; error: string | null }>;
+  applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; error: string | null }>;
   /**
    * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
    * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
@@ -822,13 +822,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyBrandKit: async () => {
     // 書き出し中は文書を固定（#570 P1）。押せないようにもしてあるが、二重に守る。
-    if (isExportBusy(get().exportRun.phase)) return { ok: false, error: EXPORT_BUSY_ASSET_MSG };
+    if (isExportBusy(get().exportRun.phase)) return { ok: false, applied: false, error: EXPORT_BUSY_ASSET_MSG };
     const kit = get().brandKit;
     const plan = planBrandApply(kit, {
       fontId: get().meta.videoSettings.fontId,
       hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
     });
-    if (isNoopBrandApply(plan)) return { ok: true, error: null }; // 何も変わらないなら履歴を積まない
+    if (isNoopBrandApply(plan)) return { ok: true, applied: false, error: null }; // 何も変わらないなら履歴を積まない
     get().pushHistory();
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
     if (plan.fontChanges && isKnownFontId(kit.fontId)) {
@@ -844,15 +844,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (plan.addsLogo && kit.logoLibraryAssetId != null) {
       const added = await get().importFromLibrary(kit.logoLibraryAssetId);
       if (added == null) {
+        // ⚠️ **一部だけ入った状態を隠さない**（PR #902 レビュー）＝フォントの変更は**この時点で
+        // 既に文書へ入っている**（`pushHistory` も積んである）。失敗として返すだけだと、
+        // 画面が戻す導線を出さず**変わったまま戻せない**（§2-5）。何が入ったかを返す。
         return {
           ok: false,
+          applied: plan.fontChanges,
           error:
             get().importError ??
             "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。",
         };
       }
     }
-    return { ok: true, error: null };
+    return { ok: true, applied: true, error: null };
   },
   newBlankProject: () => {
     // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、

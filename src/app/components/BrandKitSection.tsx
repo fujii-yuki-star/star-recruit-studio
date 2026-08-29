@@ -20,12 +20,18 @@ import {
 
 export function BrandKitSection() {
   const brandKit = useProjectStore((s) => s.brandKit);
+  const undo = useProjectStore((s) => s.undo);
   const userFonts = useProjectStore((s) => s.userFonts);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const hasLogoAsset = useProjectStore((s) => s.assets.some((a) => a.assetType === ASSET_TYPE.logo));
+  // 覚えている字体が、同梱にも手持ちの一覧にも無いか（外した／まだ読めていない）。
+  const missingBrandFont =
+    brandKit.fontId != null
+    && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
+    && !userFonts.some((f) => f.id === brandKit.fontId);
   const hasProject = useProjectStore((s) => s.scenes.length > 0);
   const [logos, setLogos] = useState<LibraryAsset[]>([]);
   const [newColor, setNewColor] = useState("#1f9ea3");
@@ -49,6 +55,8 @@ export function BrandKitSection() {
   const nothingToApply = isNoopBrandApply(plan);
 
   const [error, setError] = useState("");
+  // 失敗したが**一部は入っている**（フォントだけ変わってロゴが取り込めなかった等）。
+  const [partlyApplied, setPartlyApplied] = useState(false);
 
   async function onApply(): Promise<void> {
     setNotice("");
@@ -56,8 +64,15 @@ export function BrandKitSection() {
     // ⚠️ **できたときだけ「反映しました」と言う**（PR #888 レビュー 🟡・§2-5）＝ロゴの取り込みは
     // 失敗しうる（置き場から消えている等）。理由はこの画面には出ないので、ここで受け取って出す。
     const r = await applyBrandKit();
-    if (r.ok) setNotice("この動画に反映しました。元に戻すときは「取り消す」を押してください。");
+    // ⚠️ **この画面には「取り消す」が無い**（α-6 出口監査 🟡30）＝`UndoRedoButtons` は
+    // たたき台・公開前チェック・編集のツールバーにしか置いていない。**その場に押すものが無い**のに
+    // 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
+    // 知らせの中に戻す導線を出す。
+    if (r.ok) setNotice("この動画に反映しました。");
+    // ⚠️ **一部だけ入ったときも戻せるようにする**（PR #902 レビュー）＝フォントは入ったがロゴの
+    // 取り込みで失敗した、が起こりうる。理由だけ出して戻す導線を出さないと、**変わったまま戻せない**。
     else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
+    setPartlyApplied(!r.ok && r.applied);
   }
 
   return (
@@ -83,6 +98,13 @@ export function BrandKitSection() {
           {/* ⚠️ **手持ちの文字の形も既定にできる**（ADR-0038 決定7・α-6 出口監査 🔴1）＝
               「`fontId` が `string` になれば持ち込みを既定にできる」と決めていたのに、
               ここが同梱3種のままで**決定が成立していなかった**。 */}
+          {/* ⚠️ **覚えているのに一覧に無い字体の受け皿を置く**（α-6 出口監査・再監査で発覚）＝
+              「外す」はキットに触らないので、既定にしていた字体を外すと**一致する選択肢が消え**、
+              覚えているのに画面は「覚えない（毎回選ぶ）」を見せる（そのまま新しい動画へは焼き込まれる）。
+              ⚠️ `FontPicker` で潰した失敗と**同型**＝片方だけ直すと同じ穴が残る。 */}
+          {missingBrandFont && (
+            <option value={brandKit.fontId}>取り込んだ文字の形（見つかりません）</option>
+          )}
           {userFonts.map((f) => (
             <option key={f.id} value={f.id}>{f.displayName}（手持ち）</option>
           ))}
@@ -165,7 +187,32 @@ export function BrandKitSection() {
               </button>
             </>
           )}
-          {notice && <p className="field-hint mt">{notice}</p>}
+          {error && partlyApplied && (
+            <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
+              <p className="field-hint" style={{ margin: 0 }}>一部だけ反映されています。</p>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { undo(); setError(""); setPartlyApplied(false); }}
+              >
+                元に戻す
+              </button>
+            </div>
+          )}
+          {notice && (
+            <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
+              <p className="field-hint" style={{ margin: 0 }}>{notice}</p>
+              {/* ⚠️ **その場で戻せるようにする**（α-6 出口監査 🟡30）＝この画面には共通の
+                  「取り消す」が無いので、案内するだけだと押すものが見つからない（§2-5）。 */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { undo(); setNotice(""); }}
+              >
+                元に戻す
+              </button>
+            </div>
+          )}
           {error && <p className="form-error mt" role="alert">{error}</p>}
         </div>
       )}

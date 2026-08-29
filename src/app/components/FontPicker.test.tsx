@@ -86,7 +86,9 @@ describe("FontPicker", () => {
   it("手持ちが1つも無ければ同梱だけを出す", () => {
     render(<FontPicker value={null} onChange={vi.fn()} allowInherit />);
     fireEvent.click(screen.getByRole("button", { name: /動画全体に合わせる/ }));
-    expect(screen.queryByText("（手持ち）")).not.toBeInTheDocument();
+    // ⚠️ 以前ここに `queryByText("（手持ち）")` を書いていたが、`FontPicker` の note は括弧なしの
+    // 「手持ち」なので**永久に一致しない＝一度も出ない検査**だった（再監査で発覚）。実際の綴りで見る。
+    expect(screen.queryByText("手持ち")).not.toBeInTheDocument();
     expect(screen.queryByText("手書き風")).not.toBeInTheDocument();
   });
 });
