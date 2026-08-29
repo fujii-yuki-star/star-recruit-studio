@@ -143,6 +143,19 @@ export type ExportStartBlock = {
  * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
  * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
  */
+/**
+ * 書き出しの門へ渡してよい**持ち込みフォントの一覧**（`null`＝調べていない／読めなかった）。
+ *
+ * ⚠️ **場面形式の2画面と同じ規則**（`ExportScreen`／`PrecheckScreen`）＝ここだけ違うと、
+ * 同じ状況で**形式によって門の通り方が変わる**（ADR-0026②）。
+ * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
+ * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
+ */
+export function knownUserFontIds(): Set<string> | null {
+  const s = useProjectStore.getState();
+  return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
+}
+
 export function exportStartBlock(input: {
   doc: TimelineProject | null;
   isImporting: boolean;
@@ -1507,9 +1520,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       voiceRunning: get()._voiceRun != null,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
       // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
-      availableUserFontIds: useProjectStore.getState().userFontIds
-        ? new Set(useProjectStore.getState().userFontIds as string[])
-        : null,
+      // ⚠️ **「読めなかった」も見る**（PR #909 レビュー 🟡）＝一度成功したあとに読めなくなると
+      // 一覧は**古いまま残る**ので、見ないと「もう正しいとは限らない一覧」で門を通してしまう。
+      availableUserFontIds: knownUserFontIds(),
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
       // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
       cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),

@@ -93,4 +93,22 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
     expect(r?.phase).toBe('error');
     expect(r?.message).not.toContain('この環境では');
   });
+
+  /**
+   * ⚠️ **「読めなかった」一覧で門を通さない**（PR #909 レビュー 🟡）＝一度成功したあとに
+   * 読めなくなると `userFontIds` は**古いまま残る**。それを「調べた」ものとして使うと、
+   * もう手元に無いフォントを**あることにして**書き出してしまう（ADR-0038・ADR-0026②）。
+   */
+  it("読めなかったときの古い一覧では、見つからない扱いにしない", () => {
+    const withFont = doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_001' }],
+    } as never);
+    // 一覧は「user_font_001 がある」と言っているが、それは**古い**（いまは読めない）。
+    const stale = new Set(["user_font_001"]);
+    expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: stale })).toBeNull();
+    // 「調べていない」として扱う＝門は通すが、嘘の「そろっている」も出さない。
+    expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: null })).toBeNull();
+    // 手元に無いと分かっているときだけ止める。
+    expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: new Set() })?.message).toMatch(/文字の形/);
+  });
 });

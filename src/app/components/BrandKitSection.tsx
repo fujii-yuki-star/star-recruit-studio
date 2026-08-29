@@ -47,6 +47,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // コメントの「押せないようにもしてある」が実態と違っていた（押す前に理由を出す＝§2-5）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const [logos, setLogos] = useState<LibraryAsset[]>([]);
+  const [logosUnreadable, setLogosUnreadable] = useState(false);
   const [newColor, setNewColor] = useState("#1f9ea3");
   const [notice, setNotice] = useState("");
 
@@ -56,8 +57,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   useEffect(() => {
     let alive = true;
     void listLibraryAssets().then((list) => {
-      // 読めなかった（`null`）ときは前の一覧を残す＝「1つも無い」に見せない（差分再監査）。
-      if (alive && list) setLogos(list.filter((a) => a.assetType === ASSET_TYPE.logo));
+      if (!alive) return;
+      // ⚠️ **「読めなかった」を「1つも無い」に見せない**（PR #909 レビュー ℹ️）＝前の一覧を残す
+      // だけだと、**初回に失敗したとき**は空のまま「ロゴがまだありません」と出る（置いてあるのに）。
+      setLogosUnreadable(list == null);
+      if (list) setLogos(list.filter((a) => a.assetType === ASSET_TYPE.logo));
     });
     return () => {
       alive = false;
@@ -171,7 +175,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         <p className="field-hint">
           新しい動画に最初から入れておく1枚です。ほかの版は「よく使う素材」から取り込めます。
         </p>
-        {logos.length === 0 ? (
+        {logosUnreadable ? (
+          <p className="form-error" role="alert">
+            よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。
+          </p>
+        ) : logos.length === 0 ? (
           // ⚠️ **場所と行き方まで書く**（α-6 出口監査 ℹ️・§2-5）＝「よく使う素材」がどこにあるか
           // 書いていないうえ、そこへ行く導線も無く**次の行動が取れない**行き止まりだった。
           <p className="field-hint">
