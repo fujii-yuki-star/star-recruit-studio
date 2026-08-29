@@ -36,7 +36,7 @@ describe("BrandKitSection", () => {
    * 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
    */
   it("反映したら、その場で戻せる導線を出す（案内だけにしない）", async () => {
-    const applyBrandKit = vi.fn(async () => ({ ok: true, applied: true, error: null }));
+    const applyBrandKit = vi.fn(async () => ({ ok: true, applied: true, addedLogo: false, error: null }));
     const undo = vi.fn();
     useProjectStore.setState({ applyBrandKit, undo } as never);
     render(<BrandKitSection />);
@@ -50,7 +50,7 @@ describe("BrandKitSection", () => {
 
   /** ⚠️ できなかったときは「反映しました」と言わない（§2-5・PR #888）。 */
   it("何も入らずに失敗したら理由だけ出す（戻すものが無い）", async () => {
-    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: false, error: "ロゴを取り込めませんでした。" }));
+    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: false, addedLogo: false, error: "ロゴを取り込めませんでした。" }));
     useProjectStore.setState({ applyBrandKit, undo: vi.fn() } as never);
     render(<BrandKitSection />);
     fireEvent.click(screen.getByRole("button", { name: "この動画に反映する" }));
@@ -64,7 +64,7 @@ describe("BrandKitSection", () => {
    * 理由だけ出して戻す導線を出さないと、**変わったまま戻せない**（§2-5）。
    */
   it("一部だけ入って失敗したときは、その旨と戻す導線を出す", async () => {
-    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: true, error: "ロゴを取り込めませんでした。" }));
+    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: true, addedLogo: false, error: "ロゴを取り込めませんでした。" }));
     const undo = vi.fn();
     useProjectStore.setState({ applyBrandKit, undo } as never);
     render(<BrandKitSection />);
@@ -131,5 +131,21 @@ describe("BrandKitSection", () => {
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute("title", "書き出しが終わるまでお待ちください");
     useProjectStore.getState().setExportRun({ phase: "idle" });
+  });
+
+  /**
+   * ⚠️ **取り消しでロゴは戻らない**（差分再監査・§2-5）＝履歴が覚えるのは `{meta,parts,scenes}` だけ
+   *（ADR-0020＝assets は入れない）。「元に戻す」で全部戻るかのように見せず、**戻らないもの**を言う。
+   * ⚠️ **ロゴを足しただけなら「元に戻す」は出さない**＝押しても何も戻らないボタンを置かない。
+   */
+  it("ロゴを足しただけのときは、戻らないことを言い「元に戻す」を出さない", async () => {
+    // 動画側とキットのフォントを同じにして、変わるのはロゴだけにする。
+    useProjectStore.setState({ brandKit: { fontId: "gen-interface-jp", logoLibraryAssetId: "lib_asset_001" } } as never);
+    const applyBrandKit = vi.fn(async () => ({ ok: true, applied: true, addedLogo: true, error: null }));
+    useProjectStore.setState({ applyBrandKit } as never);
+    render(<BrandKitSection />);
+    fireEvent.click(screen.getByRole("button", { name: "この動画に反映する" }));
+    expect(await screen.findByText(/足したロゴは素材に残ります/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "元に戻す" })).toBeNull();
   });
 });

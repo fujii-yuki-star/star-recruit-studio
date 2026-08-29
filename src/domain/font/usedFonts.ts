@@ -63,3 +63,29 @@ export function missingUserFontIds(
   const have = new Set(availableIds);
   return usedIds.filter((id) => !have.has(id));
 }
+
+/**
+ * **タイムライン形式**の動画が使っている持ち込みフォントの id（重複なし）。
+ *
+ * ⚠️ **形式で挙動を割らない**（ADR-0026②）＝場面形式には「見つからない文字の形」の門があるのに
+ * タイムライン形式に無いと、**同じ設定・同じ字体で片方だけ黙って既定の字体の動画が出る**
+ *（ADR-0038「黙って別の字体の動画を成功として出さない」）。α-6 出口監査の 🔴1 を直して
+ * タイムラインの文字クリップでも持ち込みフォントを選べるようになったので、門も要る。
+ *
+ * 集める場所は**保存されているすべての `fontId`**＝動画全体（`videoSettings.fontId`）／
+ * クリップ（`clip.fontId`）／テンプレクリップの種別ごと（`clip.textFontIds`）。
+ * ⚠️ **隠したクリップも数える**＝表示を戻せば描かれる（場面形式が休眠の自由配置を数えるのと同じ）。
+ */
+export function usedTimelineUserFontIds(doc: {
+  videoSettings?: { fontId?: string | null };
+  clips: readonly { fontId?: string | null; textFontIds?: Record<string, string | null | undefined> }[];
+}): string[] {
+  const all: string[] = [];
+  const push = (v: unknown): void => { if (typeof v === 'string') all.push(v); };
+  push(doc.videoSettings?.fontId);
+  for (const c of doc.clips) {
+    push(c.fontId);
+    for (const v of Object.values(c.textFontIds ?? {})) push(v);
+  }
+  return [...new Set(all.filter(isUserFontId))];
+}

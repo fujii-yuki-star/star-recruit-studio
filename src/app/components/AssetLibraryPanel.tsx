@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
-import { showOpenAssetsDialog } from "../../infrastructure/dialog";
+import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import {
   addLibraryAsset,
   deleteLibraryAsset,
@@ -47,22 +47,31 @@ export function AssetLibraryPanel() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<{ id: string; name: string; tags: string } | null>(null);
+  // ⚠️ **種類も直せる**（差分再監査）＝**ロゴはファイル名から判らない**（拡張子は写真と同じ）ので、
+  // 置いたあとに選ぶしかない。選べないと ADR-0036 の「いつものロゴ」が**どこからも設定できない**。
+  const [editing, setEditing] = useState<{ id: string; name: string; tags: string; assetType: AssetType } | null>(null);
   const importFromLibrary = useProjectStore((s) => s.importFromLibrary);
   const isImporting = useProjectStore((s) => s.isImporting);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
+  // ⚠️ **「読めなかった」を「1つも無い」に見せない**（差分再監査・§2-5）＝空を出すと、
+  // 置いてあるものが**消えたように見える**（持ち込みフォント側と同じ流儀＝`null` は「まだ分からない」）。
+  const [unreadable, setUnreadable] = useState(false);
   const refresh = async (): Promise<void> => {
-    setItems(await listLibraryAssets());
+    const list = await listLibraryAssets();
+    setUnreadable(list == null);
+    if (list) setItems(list);
   };
   useEffect(() => {
     // ⚠️ **effect の中で同期に setState しない**（lint）＝一覧の読み込みは非同期なので、
     // `then` の中で入れる（読み込み前は空のまま＝「まだ何も置いていません」は出さない）。
     let alive = true;
     void listLibraryAssets().then((list) => {
-      if (alive) setItems(list);
+      if (!alive) return;
+      setUnreadable(list == null);
+      if (list) setItems(list);
     });
     return () => {
       alive = false;
@@ -86,7 +95,9 @@ export function AssetLibraryPanel() {
     setError("");
     setBusy(true);
     try {
-      const paths = await showOpenAssetsDialog();
+      // ⚠️ **音楽も選べる口を使う**（差分再監査）＝ADR-0035 は棚の中身に**ロゴ・写真・BGM**を
+      // 挙げているのに、写真・動画しか選べず「音楽」のタブが常に0件だった。
+      const paths = await showOpenLibraryAssetsDialog();
       if (paths.length === 0) return;
       // ⚠️ **1件ずつ順に採番する**（まとめて採ると重なる）。
       // ⚠️ **「これまでに使った番号」から採る**＝消した番号は使い回さない（α-6 出口監査 🟡8）。
@@ -149,14 +160,22 @@ export function AssetLibraryPanel() {
       await deleteLibraryAsset(a.id);
       // ⚠️ **会社の見た目が指したままにしない**（PR #888 レビュー 🟡）＝消した素材を指し続けると、
       // 新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
-      if (wasBrandLogo) await updateBrandKit({ ...brandKit, logoLibraryAssetId: undefined });
+      // ⚠️ **覚え直しの失敗を握りつぶさない**（差分再監査・§2-5）＝`updateBrandKit` は投げずに
+      // `false` を返して**画面の側を巻き戻す**ようになった（🟡23）。戻り値を捨てると、キットは
+      // 消した素材を指したまま「外しました」と出て、**新しい動画を作るたびにロゴの取り込みが失敗**する。
+      // 理由（`brandKitError`）はこの画面には出ないので、ここで受けて出す。
+      const brandOk = wasBrandLogo ? await updateBrandKit({ ...brandKit, logoLibraryAssetId: undefined }) : true;
       await refresh();
       // ⚠️ **既に取り込んだ動画は影響を受けない**ことを伝える（コピーだから＝不安を残さない）。
       setNotice(
-        wasBrandLogo
+        wasBrandLogo && brandOk
           ? `「${a.displayName}」を置き場から外し、会社の見た目のロゴも外しました。取り込み済みの動画はそのまま使えます。`
           : `「${a.displayName}」を置き場から外しました。取り込み済みの動画はそのまま使えます。`,
       );
+      // ⚠️ **できなかったことは言う**＝素材は外れたが、会社の見た目は消した素材を指したまま。
+      if (wasBrandLogo && !brandOk) {
+        setError("会社の見た目のロゴを外せませんでした。設定の「会社の見た目」から選び直してください。");
+      }
     } catch (e) {
       setError(typeof e === "string" ? e : "素材を外せませんでした。もう一度お試しください。");
     } finally {
@@ -172,6 +191,7 @@ export function AssetLibraryPanel() {
         editing.id,
         editing.name,
         editing.tags.split(/[,、\s]+/).map((t) => t.trim()).filter(Boolean),
+        editing.assetType,
       );
       await refresh();
       setEditing(null);
@@ -261,7 +281,13 @@ export function AssetLibraryPanel() {
 
       <div className="mt">
         {items.length === 0 ? (
-          <p className="field-hint">まだ何も置いていません。「素材を置く」から、よく使う写真やロゴを入れてください。</p>
+          unreadable ? (
+            <p className="form-error" role="alert">
+              よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。
+            </p>
+          ) : (
+            <p className="field-hint">まだ何も置いていません。「素材を置く」から、よく使う写真やロゴを入れてください。</p>
+          )
         ) : shown.length === 0 ? (
           // ⚠️ **絞り込みで0件のときは「無い」と言わない**＝条件を外せば見えることを伝える（行き止まりにしない）。
           <p className="field-hint">条件に合う素材がありません。名前・種類・タグを変えてみてください。</p>
@@ -303,9 +329,9 @@ export function AssetLibraryPanel() {
                   className="btn"
                   disabled={working}
                   title={blockedReason}
-                  onClick={() => setEditing({ id: a.id, name: a.displayName, tags: a.tags.join("、") })}
+                  onClick={() => setEditing({ id: a.id, name: a.displayName, tags: a.tags.join("、"), assetType: a.assetType })}
                 >
-                  名前とタグ
+                  名前・種類・タグ
                 </button>
                 <button type="button" className="btn" disabled={working} title={blockedReason} onClick={() => setConfirming(a.id)}>
                   外す
@@ -327,6 +353,19 @@ export function AssetLibraryPanel() {
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
             />
+          </label>
+          <label className="field">
+            <span className="field-label">種類</span>
+            {/* ⚠️ **ロゴはここでしか選べない**＝拡張子では写真と区別できない（ADR-0036 の「いつものロゴ」）。 */}
+            <select
+              className="input"
+              value={editing.assetType}
+              onChange={(e) => setEditing({ ...editing, assetType: e.target.value as AssetType })}
+            >
+              {TYPE_CHOICES.filter((c) => c.value != null).map((c) => (
+                <option key={c.label} value={c.value as string}>{c.label}</option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span className="field-label">タグ（読点・カンマ・空白で区切る）</span>

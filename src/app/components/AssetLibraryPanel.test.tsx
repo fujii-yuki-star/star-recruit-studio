@@ -10,10 +10,10 @@ vi.mock("../../infrastructure/assetLibraryFs", () => ({
   updateLibraryAsset: vi.fn(async () => {}),
   usedLibraryAssetIds: vi.fn(async () => []),
 }));
-vi.mock("../../infrastructure/dialog", () => ({ showOpenAssetsDialog: vi.fn(async () => []) }));
+vi.mock("../../infrastructure/dialog", () => ({ showOpenLibraryAssetsDialog: vi.fn(async () => []) }));
 
 import { AssetLibraryPanel } from "./AssetLibraryPanel";
-import { showOpenAssetsDialog } from "../../infrastructure/dialog";
+import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import { useProjectStore } from "../store/projectStore";
 import { addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -124,7 +124,7 @@ describe("AssetLibraryPanel", () => {
    * 指し続けると、新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
    */
   it("会社の見た目のロゴを外すと、そちらの覚えも外して知らせる", async () => {
-    const updateBrandKit = vi.fn(async () => {});
+    const updateBrandKit = vi.fn(async () => true);
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
@@ -150,11 +150,11 @@ describe("AssetLibraryPanel", () => {
   it("名前とタグを直せる（区切りは読点・カンマ・空白）", async () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
-    fireEvent.click(screen.getAllByRole("button", { name: "名前とタグ" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "名前・種類・タグ" })[0]);
     fireEvent.change(screen.getByLabelText(/タグ（読点/), { target: { value: "会社、ロゴ 新しい,タグ" } });
     fireEvent.click(screen.getByRole("button", { name: "直す" }));
     await waitFor(() =>
-      expect(updateLibraryAsset).toHaveBeenCalledWith("lib_asset_001", "会社ロゴ", ["会社", "ロゴ", "新しい", "タグ"]),
+      expect(updateLibraryAsset).toHaveBeenCalledWith("lib_asset_001", "会社ロゴ", ["会社", "ロゴ", "新しい", "タグ"], ASSET_TYPE.logo),
     );
   });
 
@@ -171,7 +171,7 @@ describe("AssetLibraryPanel", () => {
    */
   it("置くときの番号は「これまでに使った番号」から採る（外した番号を使い回さない）", async () => {
     vi.mocked(usedLibraryAssetIds).mockResolvedValue(["lib_asset_001", "lib_asset_007"]);
-    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/tmp/new.png"]);
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/tmp/new.png"]);
     render(<AssetLibraryPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     await waitFor(() => expect(vi.mocked(addLibraryAsset)).toHaveBeenCalled());
@@ -184,7 +184,7 @@ describe("AssetLibraryPanel", () => {
    */
   it("これまでの番号を取れなかったら、置かずに理由を出す", async () => {
     vi.mocked(usedLibraryAssetIds).mockRejectedValueOnce("一覧を読めませんでした。");
-    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png"]);
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png"]);
     render(<AssetLibraryPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     expect(await screen.findByText(/一覧を読めませんでした/)).toBeInTheDocument();
@@ -211,7 +211,7 @@ describe("AssetLibraryPanel", () => {
    * 「全部失敗した」と読めると、もう一度押して**二重に置く**。
    */
   it("まとめて置いて一部が失敗しても、置けた件数を知らせる", async () => {
-    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
     vi.mocked(addLibraryAsset).mockReset();
     vi.mocked(addLibraryAsset)
       .mockResolvedValueOnce({} as never)
@@ -226,7 +226,7 @@ describe("AssetLibraryPanel", () => {
 
   /** ⚠️ **2件以上失敗したときは件数と名前で示す**（PR #905 レビュー・`importPartlyFailedMessage` と同じ形）。 */
   it("まとめて置いて複数件が失敗したら、件数と名前を出す", async () => {
-    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
     vi.mocked(addLibraryAsset).mockReset();
     vi.mocked(addLibraryAsset)
       .mockResolvedValueOnce({} as never)
@@ -250,5 +250,37 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "この動画で使う" }));
     expect(await screen.findByText(/BGMから選べます/)).toBeInTheDocument();
     expect(screen.queryByText(/素材の一覧に増えています/)).toBeNull();
+  });
+
+  /**
+   * ⚠️ **覚え直しの失敗を握りつぶさない**（差分再監査・§2-5）＝`updateBrandKit` は投げずに `false` を
+   * 返して画面を巻き戻すので、戻り値を捨てると**キットは消した素材を指したまま「外しました」**になり、
+   * 新しい動画を作るたびにロゴの取り込みが失敗する（PR #888 で潰した失敗に戻る）。
+   */
+  it("会社の見た目のロゴを外せなかったら、そう言う", async () => {
+    const updateBrandKit = vi.fn(async () => false);
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
+    expect(await screen.findByText(/会社の見た目のロゴを外せませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/会社の見た目のロゴも外しました/)).toBeNull();
+  });
+
+  /**
+   * ⚠️ **ロゴは置いたあとに選ぶしかない**（差分再監査）＝拡張子では写真と区別できないので
+   * `detectAssetType` は必ず `image` を返す。ここで選べないと **ADR-0036 の「いつものロゴ」が
+   * どこからも設定できない**（会社の見た目の選択欄が常に空になる＝§2-5 の行き止まり）。
+   */
+  it("置いた素材の種類を「ロゴ」に直せる", async () => {
+    render(<AssetLibraryPanel />);
+    await screen.findByText("オフィス写真");
+    fireEvent.click(screen.getAllByRole("button", { name: "名前・種類・タグ" })[1]); // オフィス写真
+    fireEvent.change(screen.getByLabelText("種類"), { target: { value: ASSET_TYPE.logo } });
+    fireEvent.click(screen.getByRole("button", { name: "直す" }));
+    await waitFor(() =>
+      expect(updateLibraryAsset).toHaveBeenCalledWith("lib_asset_002", "オフィス写真", ["会社", "写真"], ASSET_TYPE.logo),
+    );
   });
 });

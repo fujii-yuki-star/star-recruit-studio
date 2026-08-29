@@ -14,6 +14,7 @@ import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enum
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
+import { usedTimelineUserFontIds } from '../font/usedFonts';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import { isDrawnClip, placementOriginalAudio, videoAssetIds, videoPlacementsOf, videoPlacementsOfClip } from './video';
@@ -238,6 +239,12 @@ export const TIMELINE_EXPORT_BLOCK = {
    * 成功として出る。描く前に断る（ADR-0026④・見た目未解決と同じ流儀）。
    */
   assetUnreadable: 'TIMELINE_EXPORT_ASSET_UNREADABLE',
+  /**
+   * 使っている**持ち込みフォント**が手元に無い（α-6 差分再監査）＝描画は既定の字体へ倒れるので、
+   * そのまま出すと**黙って別の字体の動画**が成功として返る（ADR-0038・§2-5）。
+   * ⚠️ **場面形式には同じ門がある**（公開前チェックの `missingFont`）＝形式で挙動を割らない（ADR-0026②）。
+   */
+  userFontMissing: 'TIMELINE_EXPORT_USER_FONT_MISSING',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
@@ -248,6 +255,11 @@ export interface TimelineExportCheckOptions {
    * 「見つからない」と断らない＝読み込み前の一瞬で嘘の理由を出さないため）。
    */
   knownTemplateIds?: ReadonlySet<string>;
+  /**
+   * いま手元にある**持ち込みフォント**の id。**渡さないと見ない**（`knownTemplateIds` と同じ流儀＝
+   * 「調べていない」と「そろっている」を分ける・`15 §6` `USER_FONT_MISSING`）。
+   */
+  availableUserFontIds?: ReadonlySet<string>;
 }
 
 export interface TimelineExportBlocker {
@@ -309,6 +321,16 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // `videoPlacementsOfClip` が置き場所として数え、コマの焼き出しと元の音が通る。
   // ⚠️ **見た目パターンが解けないときは置き場所にならない**（静止画の側へ倒れる）＝
   // そのケースは `templateUnresolved` が別に断っているので、ここで二重に見ない。
+  // 使っている持ち込みフォントが手元に無いときは断る（α-6 差分再監査）＝描画は既定の字体へ倒れるので、
+  // 通すと**黙って別の字体の動画**が成功として出る（ADR-0038）。**場面形式と同じ門**（ADR-0026②）。
+  // ⚠️ **調べていないときは見ない**（`availableUserFontIds` 未指定＝判定材料が無い）。
+  if (opts.availableUserFontIds) {
+    const missingFonts = usedTimelineUserFontIds(doc).filter((id) => !opts.availableUserFontIds?.has(id));
+    if (missingFonts.length > 0) {
+      // 部品ではなく**動画全体**の話なので、指す部品は挙げない（動画全体の指定でも起きる）。
+      blockers.push({ code: TIMELINE_EXPORT_BLOCK.userFontMissing, clipIds: [] });
+    }
+  }
   return blockers;
 }
 

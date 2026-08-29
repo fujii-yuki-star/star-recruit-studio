@@ -40,11 +40,14 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
     brandKit.fontId != null
     && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
     && !userFonts.some((f) => f.id === brandKit.fontId);
-  const hasProject = useProjectStore((s) => s.scenes.length > 0);
+  // ⚠️ **開いているかは `projectId` で見る**（差分再監査）＝場面の数で見ると、白紙から作った直後
+  //（場面0）でも「開いていません」と言ってしまう（実際は開いている＝嘘の理由・§2-5）。
+  const hasProject = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
   // ⚠️ **書き出し中は押せなくする**（α-6 出口監査 🟡14）＝store 側は断るのに画面は押せてしまい、
   // コメントの「押せないようにもしてある」が実態と違っていた（押す前に理由を出す＝§2-5）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const [logos, setLogos] = useState<LibraryAsset[]>([]);
+  const [logosUnreadable, setLogosUnreadable] = useState(false);
   const [newColor, setNewColor] = useState("#1f9ea3");
   const [notice, setNotice] = useState("");
 
@@ -54,7 +57,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   useEffect(() => {
     let alive = true;
     void listLibraryAssets().then((list) => {
-      if (alive) setLogos(list.filter((a) => a.assetType === ASSET_TYPE.logo));
+      if (!alive) return;
+      // ⚠️ **「読めなかった」を「1つも無い」に見せない**（PR #909 レビュー ℹ️）＝前の一覧を残す
+      // だけだと、**初回に失敗したとき**は空のまま「ロゴがまだありません」と出る（置いてあるのに）。
+      setLogosUnreadable(list == null);
+      if (list) setLogos(list.filter((a) => a.assetType === ASSET_TYPE.logo));
     });
     return () => {
       alive = false;
@@ -68,6 +75,10 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   const [error, setError] = useState("");
   // 失敗したが**一部は入っている**（フォントだけ変わってロゴが取り込めなかった等）。
   const [partlyApplied, setPartlyApplied] = useState(false);
+  // ⚠️ **取り消しでロゴは戻らない**（差分再監査）＝履歴は `{meta,parts,scenes}` だけ（ADR-0020＝
+  // assets は入れない）。「元に戻す」で全部戻るかのように見せず、**戻らないもの**をその場で言う。
+  const [undoRestoresFont, setUndoRestoresFont] = useState(false);
+  const [logoAdded, setLogoAdded] = useState(false);
 
   async function onApply(): Promise<void> {
     setNotice("");
@@ -84,6 +95,10 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
     // 取り込みで失敗した、が起こりうる。理由だけ出して戻す導線を出さないと、**変わったまま戻せない**。
     else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
     setPartlyApplied(!r.ok && r.applied);
+    // ⚠️ **取り消しが何を戻すか**（差分再監査）＝戻るのは文字の形だけ（履歴に assets は入らない）。
+    // 戻せるのは**文字の形が変わったときだけ**（成功なら計画・部分失敗なら `applied`＝入ったのは文字の形）。
+    setUndoRestoresFont(r.ok ? plan.fontChanges : r.applied);
+    setLogoAdded(r.addedLogo);
   }
 
   return (
@@ -160,7 +175,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         <p className="field-hint">
           新しい動画に最初から入れておく1枚です。ほかの版は「よく使う素材」から取り込めます。
         </p>
-        {logos.length === 0 ? (
+        {logosUnreadable ? (
+          <p className="form-error" role="alert">
+            よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。
+          </p>
+        ) : logos.length === 0 ? (
           // ⚠️ **場所と行き方まで書く**（α-6 出口監査 ℹ️・§2-5）＝「よく使う素材」がどこにあるか
           // 書いていないうえ、そこへ行く導線も無く**次の行動が取れない**行き止まりだった。
           <p className="field-hint">
@@ -243,16 +262,25 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           )}
           {notice && (
             <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
-              <p className="field-hint" style={{ margin: 0 }}>{notice}</p>
+              <p className="field-hint" style={{ margin: 0 }}>
+                {notice}
+                {/* ⚠️ **戻らないものを言う**（差分再監査・§2-5）＝足したロゴは素材なので、
+                    取り消しの対象（`{meta,parts,scenes}`＝ADR-0020）に入っていない。 */}
+                {logoAdded && "（足したロゴは素材に残ります。外すときは素材の画面から。）"}
+              </p>
               {/* ⚠️ **その場で戻せるようにする**（α-6 出口監査 🟡30）＝この画面には共通の
-                  「取り消す」が無いので、案内するだけだと押すものが見つからない（§2-5）。 */}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => { undo(); setNotice(""); }}
-              >
-                元に戻す
-              </button>
+                  「取り消す」が無いので、案内するだけだと押すものが見つからない（§2-5）。
+                  ⚠️ **戻すものが無いときは出さない**＝ロゴを足しただけなら取り消しは何も戻さない
+                  （押しても何も起きないボタンを置かない）。 */}
+              {undoRestoresFont && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => { undo(); setNotice(""); setLogoAdded(false); setUndoRestoresFont(false); }}
+                >
+                  元に戻す
+                </button>
+              )}
             </div>
           )}
           {error && <p className="form-error mt" role="alert">{error}</p>}

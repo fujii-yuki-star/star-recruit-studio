@@ -143,12 +143,30 @@ export type ExportStartBlock = {
  * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
  * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
  */
+/**
+ * 書き出しの門へ渡してよい**持ち込みフォントの一覧**（`null`＝調べていない／読めなかった）。
+ *
+ * ⚠️ **場面形式の2画面と同じ規則**（`ExportScreen`／`PrecheckScreen`）＝ここだけ違うと、
+ * 同じ状況で**形式によって門の通り方が変わる**（ADR-0026②）。
+ * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
+ * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
+ */
+export function knownUserFontIds(): Set<string> | null {
+  const s = useProjectStore.getState();
+  return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
+}
+
 export function exportStartBlock(input: {
   doc: TimelineProject | null;
   isImporting: boolean;
   /** 声を作る回が走っているか（#755）。⚠️ **印ではなく回**＝印は開き直しで消える。 */
   voiceRunning: boolean;
   knownTemplateIds: Set<string>;
+  /**
+   * いま手元にある**持ち込みフォント**の id（α-6 差分再監査）。**`null`＝まだ調べていない**＝見ない
+   *（`missingAsset`／#347 と同じ流儀で、調べていないのに「見つからない」と断らない）。
+   */
+  availableUserFontIds: Set<string> | null;
   otherExportRunning: boolean;
   /** 直前の回の後片づけ待ちか（#843）＝`isOwnCleanupPending`。押せるのに押すと断られる、を作らない。 */
   cleanupPending: boolean;
@@ -164,7 +182,10 @@ export function exportStartBlock(input: {
   // ⚠️ **自分の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
   // ボタンが戻っているのに `acquire` が失敗する。断り文は**別のもの**にする（走っている「ほかの動画」は無い）。
   if (input.cleanupPending) return { message: EXPORT_CLEANUP_PENDING_MESSAGE, phase: P.error, source: S.situation };
-  const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
+  const blockers = timelineExportBlockers(input.doc, {
+    knownTemplateIds: input.knownTemplateIds,
+    ...(input.availableUserFontIds ? { availableUserFontIds: input.availableUserFontIds } : {}),
+  });
   if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
   // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
   if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported, source: S.situation };
@@ -1498,6 +1519,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       isImporting: get().isImporting,
       voiceRunning: get()._voiceRun != null,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
+      // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
+      // ⚠️ **「読めなかった」も見る**（PR #909 レビュー 🟡）＝一度成功したあとに読めなくなると
+      // 一覧は**古いまま残る**ので、見ないと「もう正しいとは限らない一覧」で門を通してしまう。
+      availableUserFontIds: knownUserFontIds(),
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
       // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
       cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),

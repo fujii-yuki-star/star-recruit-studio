@@ -456,8 +456,11 @@ interface ProjectState {
    * 押す前に `planBrandApply` で見せる。取り消し（Undo）で戻せる。
    * ⚠️ **ロゴの取り込みは失敗しうる**（置き場から消えている等）ので、**成功を騙らない**ために
    * 結果を返す（呼ぶ側が「反映しました」と言ってよいかを決める）。
+   * ⚠️ **`addedLogo` も返す**（差分再監査）＝履歴は `{meta,parts,scenes}` だけを覚える（ADR-0020＝
+   * assets は入れない）ので、**取り消しでロゴは戻らない**。返さないと画面が
+   * 「元に戻す」で全部戻るかのように見せてしまう（§2-5＝できないことを名指ししない）。
    */
-  applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; error: string | null }>;
+  applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; addedLogo: boolean; error: string | null }>;
   /**
    * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
    * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
@@ -853,13 +856,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyBrandKit: async () => {
     // 書き出し中は文書を固定（#570 P1）。押せないようにもしてあるが、二重に守る。
-    if (isExportBusy(get().exportRun.phase)) return { ok: false, applied: false, error: EXPORT_BUSY_ASSET_MSG };
+    if (isExportBusy(get().exportRun.phase)) return { ok: false, applied: false, addedLogo: false, error: EXPORT_BUSY_ASSET_MSG };
     const kit = get().brandKit;
     const plan = planBrandApply(kit, {
       fontId: get().meta.videoSettings.fontId,
       hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
     });
-    if (isNoopBrandApply(plan)) return { ok: true, applied: false, error: null }; // 何も変わらないなら履歴を積まない
+    if (isNoopBrandApply(plan)) return { ok: true, applied: false, addedLogo: false, error: null }; // 何も変わらないなら履歴を積まない
     get().pushHistory();
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
     if (plan.fontChanges && isKnownFontId(kit.fontId)) {
@@ -881,13 +884,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         return {
           ok: false,
           applied: plan.fontChanges,
+          addedLogo: false,
           error:
             get().importError ??
             "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。",
         };
       }
     }
-    return { ok: true, applied: true, error: null };
+    return { ok: true, applied: true, addedLogo: plan.addsLogo, error: null };
   },
   newBlankProject: () => {
     // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
@@ -1868,6 +1872,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ importError: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
       return;
     }
+    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（差分再監査）＝ほかの取り込み5経路と同じ規則。
+    // ここだけ無防備だと、差し替えの完了が**別の動画の同じ番号の素材**を書き換える。
+    const stillOpen = sameDocGuard(get);
     // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。書き出し側は開始前に
     // isImporting を見て止まる（ExportScreen）。以降は全ての離脱経路で isImporting を戻す（下の catch/finally）。
     set({ isImporting: true });
@@ -1881,6 +1888,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     // 読み込み中に書き出しが始まっていたら、表示も上書きもせず戻る（開始チェックをすり抜けた残り窓・#570 P1）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG, isImporting: false }); return; }
+    if (!stillOpen()) { set({ isImporting: false }); return; }
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
@@ -1888,6 +1896,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
+        // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
+        if (!stillOpen()) return;
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
       // 拡張子処理は addAsset と同じ fileExtension に集約（§2-7：単一の参照元）。
@@ -1900,14 +1911,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // キャッシュバスターにし、再取得させる（filePath 自体はクエリ無し＝保存データは汚さない）。
         const displayUrl = await assetDisplayUrl(projectId, filePath);
         const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : displayUrl;
+        // ⚠️ **差し替えた絵の大きさも測り直す**（差分再監査）＝測らないと `metadata` に**前の絵の
+        // 解像度**が残り、「ぼやける素材」の注意が実物と食い違う（取り込みの4経路は測っている）。
+        const size = await probeImageSize(projectId, filePath);
+        if (!stillOpen()) return;
         set((s) => ({
-          assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)),
+          assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath, ...(size ? { metadata: size } : {}) } : a)),
           assetSrcById: freshUrl ? { ...s.assetSrcById, [assetId]: freshUrl } : s.assetSrcById,
         }));
       }
     } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
-      set({ importError: importErrorMessage(e) });
+      if (stillOpen()) set({ importError: importErrorMessage(e) });
     } finally {
       set({ isImporting: false });
     }
@@ -1920,6 +1935,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ importError: assetTooLargeMessage(ASSET_TOO_LARGE_USE_PICKER) });
       return;
     }
+    // ⚠️ **合図は採番より前に作る**（`sameDocGuard` の約束・差分再監査）＝`asset_NNN` は**この時点の**
+    // 一覧から採るので、画像を読んでいる間に別の動画を開くと**古い番号のまま新しい動画へ着地**する
+    //（番号が重なれば `11.2` の一意性が破れ、同名ファイルを上書きし、巻き戻しが別の素材を消す）。
+    const stillOpen = sameDocGuard(get);
     // 素材1つぶんの導出は domain に1つ（#712・§2-7）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
     const { asset, fileName } = newAssetFrom(file.name, get().assets.map((a) => a.assetId));
     const { assetId, assetType } = asset;
@@ -1938,9 +1957,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     // 読み込み中に書き出しが始まっていたら、一覧に足さず戻る（開始チェックをすり抜けた残り窓・#570 P1）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG, isImporting: false }); return; }
-    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（🟡9 と同じ理由）＝コピーの間に別の動画を
-    // 開けるので、括らないと**別の動画へこの素材が生える**／巻き戻しが**新しい方の同じ番号の素材を消す**。
-    const stillOpen = sameDocGuard(get);
+    // 着地は上で作った合図（`stillOpen`）で括る＝別の動画へこの素材が生えない。
+    if (!stillOpen()) { set({ isImporting: false }); return; }
     // 即時：一覧へ追加（画像は表示も）。素材追加で未保存に戻す（「保存しました」取り残し防止）。
     set((s) => ({
       assets: [...s.assets, asset],
@@ -1954,6 +1972,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
+        // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
+        if (!stillOpen()) return;
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
       if (assetType === ASSET_TYPE.video) {
@@ -2010,6 +2031,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
+        // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
+        if (!stillOpen()) return;
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
       // 元ファイルを Rust が直接コピー（バイトは JS を経由しない）。
@@ -2046,12 +2070,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
     if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
-    const lib = (await listLibraryAssets()).find((a) => a.id === libraryAssetId);
+    // ⚠️ **合図は最初の `await` より前**（`sameDocGuard` の約束・差分再監査）＝一覧を読んでいる間にも
+    // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
+    //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
+    const stillOpen = sameDocGuard(get);
+    const lib = (await listLibraryAssets())?.find((a) => a.id === libraryAssetId);
     if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
     const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
-    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（🟡9）＝コピーの間に別の動画を開けるので、
-    // 括らないと**別の動画へこの素材が生える**（番号も別の素材と重なる）。
-    const stillOpen = sameDocGuard(get);
+    if (!stillOpen()) return null;
     set({ isImporting: true, importError: null });
     try {
       let projectId = get().meta.projectId;

@@ -11,6 +11,15 @@ export const VIDEO_FILE_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv']
 /** 取り込みを「画像」として扱う拡張子（小文字・ドットなし）。表示可能な静止画形式（ダイアログの絞り込み用）。 */
 export const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif'] as const;
 
+/**
+ * 取り込みを「音楽」として扱う拡張子（小文字・ドットなし）。
+ *
+ * ⚠️ **よく使う素材（ADR-0035）でだけ使う**＝動画の素材の取り込み（写真・動画）は従来どおりで、
+ * BGM は BGM の導線から入れる。ADR-0035 は棚の中身に**ロゴ・写真・BGM**を挙げているので、
+ * 棚の側では音も置けないと「置けるはずのものが置けない」になる（α-6 差分再監査）。
+ */
+export const AUDIO_FILE_EXTENSIONS = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac'] as const;
+
 /** ファイル名末尾の拡張子を小文字・英数字のみで返す（無ければ ''）。 */
 export function fileExtension(name: string): string {
   const dot = name.lastIndexOf('.');
@@ -21,11 +30,19 @@ export function fileExtension(name: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-/** ファイル名から素材種別を判定する（動画拡張子なら video、ほかは image）。 */
-export function detectAssetType(name: string): Extract<AssetType, 'image' | 'video'> {
-  return (VIDEO_FILE_EXTENSIONS as readonly string[]).includes(fileExtension(name))
-    ? ASSET_TYPE.video
-    : ASSET_TYPE.image;
+/**
+ * ファイル名から素材種別を判定する（動画拡張子なら video、音の拡張子なら bgm、ほかは image）。
+ *
+ * ⚠️ **ロゴ（`logo`）はここでは判らない**＝拡張子は写真と同じなので、置いたあとに利用者が選ぶ
+ *（よく使う素材の「名前・種類・タグ」／ADR-0036 の「いつものロゴ」はこれで選べるようになる）。
+ * ⚠️ **音は「よく使う素材」でだけ通る**＝動画の素材の取り込みは写真・動画しか選ばせないので、
+ * この枝はそちらでは踏まない（規則は1か所に置き、入口の側で絞る）。
+ */
+export function detectAssetType(name: string): Extract<AssetType, 'image' | 'video' | 'bgm'> {
+  const ext = fileExtension(name);
+  if ((VIDEO_FILE_EXTENSIONS as readonly string[]).includes(ext)) return ASSET_TYPE.video;
+  if ((AUDIO_FILE_EXTENSIONS as readonly string[]).includes(ext)) return ASSET_TYPE.bgm;
+  return ASSET_TYPE.image;
 }
 
 /**

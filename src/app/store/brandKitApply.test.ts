@@ -135,13 +135,13 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
   it('取り込めたときはできたことを返す', async () => {
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' } } as never);
     setProject({ assets: [] });
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: true, error: null });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: true, addedLogo: true, error: null });
   });
 
   it('何も変わらないときも「できた」を返す（押せない状態を作らない）', async () => {
     useProjectStore.setState({ brandKit: {} } as never);
     // ⚠️ `applied:false`＝**文書は触っていない**（履歴も積んでいない）＝戻すものが無い。
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: false, error: null });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: false, addedLogo: false, error: null });
   });
 
   /** ⚠️ 書き出し中は文書を固定する（設定した意味どおりの MP4 にする・#570 P1）。 */

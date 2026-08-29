@@ -24,6 +24,10 @@ export function UserFontSection() {
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   const userFontIds = useProjectStore((s) => s.userFontIds);
   const fontError = useProjectStore((s) => s.fontError);
+  // ⚠️ **「調べられなかった」を「1つも無い」に見せない**（差分再監査・§2-5）＝公開前チェックは
+  // 「調べられません」と言って書き出しを止めているのに、この画面が「まだ足していません」と言うと
+  // **同じ状況で2つの違うことを言う**（ADR-0026②）。
+  const userFontsUnreadable = useProjectStore((s) => s.userFontsUnreadable);
 
   useEffect(() => {
     void refreshUserFonts();
@@ -82,7 +86,11 @@ export function UserFontSection() {
       {fontError && <p className="form-error mt" role="alert">{fontError}</p>}
 
       <div className="mt">
-        {fonts.length === 0 ? (
+        {userFontsUnreadable ? (
+          <p className="form-error" role="alert">
+            取り込んだ文字の形の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。
+          </p>
+        ) : fonts.length === 0 ? (
           <p className="field-hint">まだ足していません。同梱の文字の形はそのまま使えます。</p>
         ) : (
           <ul className="list-reset">

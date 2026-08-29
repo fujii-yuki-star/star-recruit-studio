@@ -95,9 +95,13 @@ export function ReadingDictSection() {
       const next: ReadingDictFile = { ...before, entries: [...entries], links: onDisk.links };
       await saveReadingDict(next);
       setDict(next);
-    } catch {
+    } catch (e) {
       setDict(before); // 画面を戻す＝保存されていないのに保存済みに見せない
-      setError("読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
+      // ⚠️ **理由を捨てない**（差分再監査・§2-5）＝一覧が壊れて読めないときは
+      // `READING_DICT_UNREADABLE` が投げられる。それを「しばらくしてから、もう一度」に丸めると、
+      // **何度やっても直らない行動**を勧めることになる（開いた直後は正しい文言が出るのに、
+      // 1語足した瞬間に効かない文言へ差し替わっていた）。
+      setError(typeof e === "string" ? e : "読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
       return false;
     }
     markReadingDictChanged();
@@ -372,7 +376,6 @@ export function ReadingDictSection() {
               <li key={normalizeSurface(e.surface)}>
                 <DeleteConfirm
                   confirmLabel="一覧から外す"
-                  busyLabel="外しています…"
                   message={`「${e.surface}」を一覧から外しますか？音声ソフトからも消え、元に戻せません。次に声を作るときから、もとの読みに戻ります。`}
                   onCancel={() => setConfirming(null)}
                   onConfirm={() => void onDelete(e)}

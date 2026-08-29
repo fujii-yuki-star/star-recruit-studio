@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension, newAssetFrom } from './assetFile';
 import { MAX_INLINE_ASSET_BYTES } from '../constants';
+import { ASSET_TYPE } from '../enums';
 
 describe('fileExtension', () => {
   it('末尾拡張子を小文字で返す', () => {
@@ -89,3 +90,23 @@ describe('newAssetFrom（取り込む素材1つぶんの導出・#712）', () =>
     expect(newAssetFrom('   .png', []).asset.displayName).toBe('新しい素材');
   });
 });
+
+describe('detectAssetType の音（よく使う素材・差分再監査）', () => {
+  /**
+   * ⚠️ **音も判定する**＝ADR-0035 は棚の中身に**ロゴ・写真・BGM**を挙げているので、
+   * よく使う素材では音も置ける。判定できないと「音楽」のタブが常に0件になる。
+   */
+  it('音の拡張子は bgm', () => {
+    for (const name of ['song.mp3', 'theme.M4A', 'bgm.wav', 'x.aac', 'y.ogg', 'z.flac']) {
+      expect(detectAssetType(name)).toBe(ASSET_TYPE.bgm);
+    }
+  });
+
+  /** ⚠️ **写真・動画の判定は変えない**＝動画の素材の取り込みは従来どおり。 */
+  it('写真・動画はこれまでどおり', () => {
+    expect(detectAssetType('a.png')).toBe(ASSET_TYPE.image);
+    expect(detectAssetType('b.MP4')).toBe(ASSET_TYPE.video);
+    expect(detectAssetType('noext')).toBe(ASSET_TYPE.image);
+  });
+});
+
