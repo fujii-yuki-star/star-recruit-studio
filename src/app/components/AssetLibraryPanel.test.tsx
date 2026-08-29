@@ -216,4 +216,18 @@ describe("AssetLibraryPanel", () => {
     // 1件だけ失敗したときは理由をそのまま出す（件数で案内を変えない＝ADR-0026②）。
     expect(screen.getByText(/だめでした/)).toBeInTheDocument();
   });
+
+  /** ⚠️ **2件以上失敗したときは件数と名前で示す**（PR #905 レビュー・`importPartlyFailedMessage` と同じ形）。 */
+  it("まとめて置いて複数件が失敗したら、件数と名前を出す", async () => {
+    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
+    vi.mocked(addLibraryAsset).mockReset();
+    vi.mocked(addLibraryAsset)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce("だめでした")
+      .mockRejectedValueOnce("だめでした");
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/2件を置けませんでした（b\.png、c\.png）/)).toBeInTheDocument();
+    expect(screen.getByText(/1件を置きました/)).toBeInTheDocument();
+  });
 });

@@ -528,6 +528,18 @@ export function importPartlyFailedMessage(failedNames: readonly string[], firstR
 }
 
 /**
+ * **よく使う素材に置く**とき、まとめて置いて一部が失敗したときの案内（PR #905 レビュー）。
+ *
+ * ⚠️ **言い回しを増やさない**（§6）＝同じ状況（まとめて入れて一部だけ失敗）に対して
+ * `importPartlyFailedMessage` があるのに、画面の中で**3つ目の言い方**を作りかけていた。
+ * ⚠️ **語彙だけ変える**＝よく使う素材は「取り込む」ではなく**「置く」**（`06 §4`）なので、
+ * 形（件数＋名前＋最初の理由）は揃えたうえで動詞だけ合わせる。
+ */
+export function libraryPartlyFailedMessage(failedNames: readonly string[], firstReason: string | null): string {
+  return `${failedNames.length}件を置けませんでした（${failedNames.join("、")}）。${firstReason ?? ""}`;
+}
+
+/**
  * 取り込んでいる最中に、もう一度まとめて取り込もうとしたときの案内（#858・§2-5）。
  *
  * ⚠️ **黙って落とさない**＝単発の取り込みは取り込み中を**黙って return** する（1件が入らないだけ）が、

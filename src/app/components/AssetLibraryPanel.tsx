@@ -21,6 +21,7 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { libraryPartlyFailedMessage } from "../uiLabels";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
@@ -107,7 +108,7 @@ export function AssetLibraryPanel() {
       if (added > 0) setNotice(`${added}件を置きました。動画から「この動画で使う」で取り込めます。`);
       // ⚠️ **1件だけ失敗したときは理由をそのまま出す**（件数で案内を変えない＝ADR-0026②・`addAssets` と同じ）。
       if (failedNames.length === 1) setError(firstMessage ?? "");
-      else if (failedNames.length > 1) setError(`${failedNames.join("・")}は置けませんでした。${firstMessage ?? ""}`);
+      else if (failedNames.length > 1) setError(libraryPartlyFailedMessage(failedNames, firstMessage));
     } catch (e) {
       setError(typeof e === "string" ? e : "素材を置けませんでした。もう一度お試しください。");
     } finally {
