@@ -553,6 +553,8 @@ mod rel_path_single_source_guard {
         for copied in [
             "rel_path.starts_with('/')",
             "Path::new(rel_path).is_absolute()",
+            // ⚠️ **1つぶんの名前の検査も写さない**（α-6 出口監査 ℹ️）＝写しはコロンだけ落ちていた。
+            "!name.contains('/')",
         ] {
             assert!(
                 !src.contains(copied),

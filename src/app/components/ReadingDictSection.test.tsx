@@ -30,7 +30,7 @@ import { showOpenReadingDictDialog } from "../../infrastructure/dialog";
 const entry = { surface: "宇都宮", yomi: "ウツノミヤ", accentType: 4 };
 
 beforeEach(() => {
-  vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [], links: {} });
+  vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [], links: {} }, dropped: 0 });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -41,14 +41,14 @@ describe("ReadingDictSection", () => {
   });
 
   it("保存済みの語を一覧に出す（下がる場所は印で見せる）", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     render(<ReadingDictSection />);
     expect(await screen.findByText(/宇都宮：ウツノミ↓ヤ/)).toBeInTheDocument();
   });
 
   /** ⚠️ §2-3＝実装用語を画面に出さない。 */
   it("「アクセント」「モーラ」を画面に出さない", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     const { container } = render(<ReadingDictSection />);
     await screen.findByText(/宇都宮/);
     fireEvent.change(screen.getByLabelText("読み（カタカナ）"), { target: { value: "ウツノミヤ" } });
@@ -96,7 +96,7 @@ describe("ReadingDictSection", () => {
   });
 
   it("同じ言葉を足そうとしたら、置き換わることを先に知らせる", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     render(<ReadingDictSection />);
     await screen.findByText(/宇都宮/);
     fireEvent.change(screen.getByLabelText("言葉"), { target: { value: "宇都宮" } });
@@ -104,14 +104,14 @@ describe("ReadingDictSection", () => {
   });
 
   it("「直す」で開いた語は、自分自身と重なったことにしない", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     render(<ReadingDictSection />);
     fireEvent.click(await screen.findByRole("button", { name: "直す" }));
     expect(screen.queryByText(/同じ言葉が既にあります/)).not.toBeInTheDocument();
   });
 
   it("一覧から外すと書き込む", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     render(<ReadingDictSection />);
     fireEvent.click(await screen.findByRole("button", { name: "一覧から外す" }));
     // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。
@@ -122,7 +122,7 @@ describe("ReadingDictSection", () => {
 
   /** ⚠️ 決定8＝読み込みは足すのが既定で、同じ言葉があるとき黙って上書きしない。 */
   it("読み込みで重なった語は上書きせず、選ばせる", async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
     vi.mocked(showOpenReadingDictDialog).mockResolvedValue("C:/dict.json");
     vi.mocked(importReadingDictFrom).mockResolvedValue({ entries: [{ surface: "宇都宮", yomi: "ウツノミヤ", accentType: 0 }], dropped: 0 });
     render(<ReadingDictSection />);
@@ -146,8 +146,8 @@ describe("ReadingDictSection", () => {
    */
   it("保存のとき、画面より新しい控えを巻き戻さない", async () => {
     vi.mocked(loadReadingDict)
-      .mockResolvedValueOnce({ version: 1, entries: [], links: {} }) // 画面が開いた時点
-      .mockResolvedValue({ version: 1, entries: [], links: { 宇都宮: "uuid-new" } }); // そろえた後のディスク
+      .mockResolvedValueOnce({ file: { version: 1, entries: [], links: {} }, dropped: 0 }) // 画面が開いた時点
+      .mockResolvedValue({ file: { version: 1, entries: [], links: { 宇都宮: "uuid-new" } }, dropped: 0 }); // そろえた後のディスク
     render(<ReadingDictSection />);
     fireEvent.change(await screen.findByLabelText("言葉"), { target: { value: "宇都宮" } });
     fireEvent.change(screen.getByLabelText("読み（カタカナ）"), { target: { value: "ウツノミヤ" } });

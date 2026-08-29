@@ -392,7 +392,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
         {/* 持ち込みフォント（ADR-0038・#261）。会社の見た目が既定に使うので、その手前に置く。 */}
         <UserFontSection />
         {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
-        <BrandKitSection />
+        <BrandKitSection onNavigate={onNavigate} />
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (

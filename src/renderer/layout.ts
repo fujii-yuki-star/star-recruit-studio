@@ -7,7 +7,7 @@ import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from
 import type { CropAlignX, CropAlignY } from '../domain/enums';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Template, TextShadow } from '../domain/template/types';
-import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
+import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -17,7 +17,6 @@ import { groupIndices, resolveLineSubtitle } from '../domain/project/lineTimelin
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
 import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
-import { wrapText } from '../domain/text/textWrap';
 
 export interface Rect {
   x: number;
@@ -135,23 +134,19 @@ export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textSt
 export { bandBackground } from '../domain/template/textStyle';
 // 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
 export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
-import { SUBTITLE_BAND_PAD_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
+import { drawnTextRect, stackedSubtitleBands } from '../domain/text/subtitleBands';
 import { rotatedBounds } from '../domain/preview/safeArea';
 // 字幕帯の積み方（同時字幕・ADR-0031）は **domain が正典**＝描画・はみ出し判定・焼き出し（#633）で共有する。
 // ここからは再輸出だけ（既存の import 経路を保つ・`DEFAULT_LINE_HEIGHT` と同じ流儀）。
-export { SUBTITLE_BAND_PAD_EM, SUBTITLE_STACK_GAP_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
+export { SUBTITLE_BAND_PAD_EM, SUBTITLE_STACK_GAP_EM, stackedSubtitleBands, drawnTextRect } from '../domain/text/subtitleBands';
 
 /** 字幕帯アイテム1つが回転後にキャンバス外へ出るか（上下左右すべての辺）。矩形＝x/y/w＋折返し行数＋anchorBottom、rotation は中心軸で回して AABB 判定（#533 P2）。 */
 function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: number): boolean {
-  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
-  const lineHeightPx = item.fontSize * DEFAULT_LINE_HEIGHT;
-  const x0 = item.x;
-  const y0 = item.y - (item.anchorBottom ? (n - 1) * lineHeightPx : 0); // 帯背景の上端（sceneSvg と一致）
-  const w = item.w;
-  const h = lineHeightPx * n + item.fontSize * SUBTITLE_BAND_PAD_EM;
-  // ⚠️ **回した後の外枠の式は1か所**（PR #878 再レビュー ℹ️）＝端の目安（安全領域）の判定も
-  // 同じものを使う。別々に書くと、片方だけ回転を見る／見ないが起きる（実際に起きていた）。
-  const b = rotatedBounds({ x: x0, y: y0, w, h, rotation: item.rotation ?? 0 });
+  // ⚠️ **描かれる矩形の式も1か所**（α-6 出口監査 ℹ️）＝「端に寄った文字」の注意（`outsideSafeArea`）が
+  // 置いた箱を見ていて、こちらと**別の矩形**だった（帯は上へ伸び、高さは実際の折返し行数で決まる）。
+  // ⚠️ **回した後の外枠の式も1か所**（PR #878 再レビュー ℹ️）＝別々に書くと、片方だけ回転を見る／
+  // 見ないが起きる（実際に起きていた）。
+  const b = rotatedBounds(drawnTextRect({ ...item, isSubtitle: true }));
   return b.x < 0 || b.y < 0 || b.x + b.w > canvasW || b.y + b.h > canvasH;
 }
 
@@ -444,14 +439,16 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         case 'text': {
           const text = el.text ?? '';
           if (text.length === 0) break;
-          const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
-          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
-          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
-          const color = el.color ?? DEFAULT_TEXT_COLOR;
           // ⚠️ **体裁の解決は通常テンプレ層と同じ関数を通す**（`resolveTextStyle`・PR #879 レビュー 🔴）＝
           // 手組みで並べていたので、**新しい項目（影・字間）を足したときに FREE 側だけ漏れた**。
           // 通せば、以後この種の追加で同じ漏れが起きない（縁取りの解決も中に入っている・#565）。
+          // ⚠️ **`fontSize`/`color` も同じ関数から採る**（α-6 出口監査 ℹ️）＝この2つだけ外で解いていたので、
+          // 上書き層が入ったときに**この2項目だけ拾わない**形になっていた（いまは同値）。
           const st = resolveTextStyle(el);
+          const fontSize = st.fontSize;
+          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
+          const color = st.color;
           items.push({ ...base, kind: 'text', text, fontSize, fontWeight: st.fontWeight, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: st.strokeColor, strokeWidth: st.strokeWidth, background: st.background, letterSpacing: st.letterSpacing, shadow: st.shadow });
           break;
         }
@@ -466,12 +463,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           // isSubtitle:true＝「字幕を出さない」書き出し（withSubtitle=false）でテンプレ字幕と同じく除外される（buildExportScenes）。
           const subText = resolveSubtitleForElement(el, scene, subMoment);
           if (subText == null || subText.length === 0) break;
-          const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
+          // 体裁の解決は上の `text` と同じ関数（`resolveTextStyle`）を通す（漏れを構造で防ぐ）。
+          // ⚠️ **`fontSize`/`color` もここから採る**（α-6 出口監査 ℹ️・上の `text` と同じ理由）。
+          const subSt = resolveTextStyle(el);
+          const fontSize = subSt.fontSize;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
-          const color = el.color ?? DEFAULT_TEXT_COLOR;
-          // 体裁の解決は上の `text` と同じ関数（`resolveTextStyle`）を通す（漏れを構造で防ぐ）。
-          const subSt = resolveTextStyle(el);
+          const color = subSt.color;
           items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: subSt.fontWeight, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: subSt.strokeColor, strokeWidth: subSt.strokeWidth, background: subSt.background, letterSpacing: subSt.letterSpacing, shadow: subSt.shadow });
           break;
         }

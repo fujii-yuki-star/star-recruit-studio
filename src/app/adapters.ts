@@ -12,6 +12,7 @@ import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "..
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import { isSubtitleItem, sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
 import { outsideSafeArea, safeAreaRect } from "../domain/preview/safeArea";
+import { drawnTextRect } from "../domain/text/subtitleBands";
 import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
@@ -309,7 +310,9 @@ export function buildPrecheckItems(
     if (!found || !t) return false;
     const safe = safeAreaRect(t.canvas, t.aspectRatio);
     // 文字だけを見る（写真・背景は端まで敷くのが普通＝出すと全場面に注意が付く）。
-    return found.items.some((it) => it.kind === "text" && outsideSafeArea(it, safe));
+    // ⚠️ **描かれる矩形で見る**（α-6 出口監査 ℹ️）＝字幕は `anchorBottom` で上へ伸び、高さは
+    // 実際の折返し行数で決まる。置いた箱のまま見ると、**画面外の断りと別の矩形**を見ることになる。
+    return found.items.some((it) => it.kind === "text" && outsideSafeArea(drawnTextRect(it), safe));
   });
   if (nearEdge.nums.length > 0) {
     items.push({

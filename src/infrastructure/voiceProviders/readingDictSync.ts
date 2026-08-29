@@ -69,7 +69,7 @@ export async function ensureReadingDictSynced(): Promise<void> {
   if (syncedFor === target) return;
   if (inFlight) return inFlight;
   inFlight = (async () => {
-    const dict = await loadReadingDict();
+    const dict = (await loadReadingDict()).file;
     if (dict.entries.length === 0 && Object.keys(dict.links).length === 0) {
       syncedFor = target;
       lastConflicts = [];
@@ -120,7 +120,7 @@ export async function syncAndCollectConflicts(): Promise<{
  * 上書きした語は**アプリの語になる**ので控えへ入れる（以後は同期で直せるし、外せば消える）。
  */
 export async function overwriteConflict(entry: ReadingEntry, uuid: string): Promise<void> {
-  const dict = await loadReadingDict();
+  const dict = (await loadReadingDict()).file;
   const newUuid = await overwriteEngineWord(entry, uuid);
   await saveReadingDict(withLinks(dict, { ...dict.links, [entry.surface]: newUuid }));
   lastConflicts = lastConflicts.filter((c) => c.entry.surface !== entry.surface);

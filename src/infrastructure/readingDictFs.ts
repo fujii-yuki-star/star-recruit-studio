@@ -66,7 +66,7 @@ export function parseReadingDictWithDrops(text: string): { file: ReadingDictFile
   return { file: { version: READING_DICT_VERSION, entries, links }, dropped };
 }
 
-/** 落とした数が要らないときの入口（保存ファイルの読込）。 */
+/** 落とした数が要らないときの入口（**読み込み**の重複判定など）。 */
 export function parseReadingDict(text: string): ReadingDictFile {
   return parseReadingDictWithDrops(text).file;
 }
@@ -74,18 +74,20 @@ export function parseReadingDict(text: string): ReadingDictFile {
 /**
  * 辞書を読む（無ければ空）。
  *
+ * ⚠️ **落とした語の数も返す**（α-6 出口監査 ℹ️）＝`parseReadingDictWithDrops` は数を返すのに、
+ * 保存ファイルの読込だけ数を捨てていた（同ファイルの「黙って消さない」の主張と食い違う）。
  * ⚠️ **壊れて読めないファイルは断る**（α-6 出口監査 🟡19 のレビュー・目録〔`parse_manifest`〕と同じ流儀）＝
  * 空として返すと、画面が「1つも無い」を見せ、次の保存が**その空で丸ごと上書き**して登録した読みが全部消える
  *（元のコメントは「上書きしない」と書いていたが、そうなっていなかった）。断れば書き込みが走らないので、
  * **壊れたファイルはそのまま残る**（利用者が直せる余地）。壊れた**語**は `parseReadingDictWithDrops` が
  * 1件ずつ落として数を返す＝丸ごと捨てるのは「JSON ですら無い」ときだけ。
  */
-export async function loadReadingDict(): Promise<ReadingDictFile> {
-  if (!isTauri()) return emptyReadingDict();
+export async function loadReadingDict(): Promise<{ file: ReadingDictFile; dropped: number }> {
+  if (!isTauri()) return { file: emptyReadingDict(), dropped: 0 };
   const text = await invoke<string | null>('load_reading_dict');
-  if (text == null) return emptyReadingDict();
+  if (text == null) return { file: emptyReadingDict(), dropped: 0 };
   try {
-    return parseReadingDict(text);
+    return parseReadingDictWithDrops(text);
   } catch {
     throw READING_DICT_UNREADABLE;
   }

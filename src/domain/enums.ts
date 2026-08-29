@@ -123,6 +123,16 @@ export const ASSET_TYPES = [
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+/**
+ * 素材の種類として受けてよい値か（α-6 出口監査 ℹ️）。
+ *
+ * ⚠️ **型を狭める述語にしてある**＝呼ぶ側が `as AssetType` を書かずに済む（キャストは検査を素通り
+ * させるので、`unknown` から入る経路〔よく使う素材の目録〕で効く。`isKnownFontId` と同じ流儀）。
+ */
+export function isAssetType(v: unknown): v is AssetType {
+  return typeof v === 'string' && (ASSET_TYPES as readonly string[]).includes(v);
+}
+
 /** AssetType の値を参照するための定数（§2-7：ロジックでの文字列直書きを避ける）。 */
 export const ASSET_TYPE = {
   image: 'image',

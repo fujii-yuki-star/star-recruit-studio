@@ -547,7 +547,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           {isTimelineProjectDoc({ format: p.format }) && <span className="badge">タイムライン</span>}
                         </div>
                         <div className="text-sm text-muted">
-                          {openingId === p.projectId ? "開いています…" : `更新日 ${formatDate(p.updatedAt)}`}
+                          {/* ⚠️ **複製中も進み具合を出す**（α-6 出口監査 ℹ️）＝素材と声のコピーは時間がかかるのに
+                              「開いています…」だけがあり、複製は**押しても何も変わらないように見えた**。 */}
+                          {openingId === p.projectId
+                            ? "開いています…"
+                            : duplicatingId === p.projectId
+                              ? "コピーしています…"
+                              : `更新日 ${formatDate(p.updatedAt)}`}
                         </div>
                       </div>
                       <ChevronRightIcon size={20} className="text-faint" />

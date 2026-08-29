@@ -1746,10 +1746,11 @@ struct FrameSeek {
 
 /// 切り出した絵のファイル名として受けてよいか（#349・PR #885 レビュー 🟡）。
 ///
-/// ⚠️ **区切りを含む名前は受けない**（`resolve_project_file` も `..` 等を弾くが、ここで先に断る＝
-/// 「`assets/` の直下に1つ置く」という約束を、名前の形として明示する）。純粋なので単体でテストできる。
+/// ⚠️ **規則は写さず共有する**（α-6 出口監査 ℹ️）＝ここは `is_safe_single_file_name` の**3つ目の写し**で、
+/// **コロンの検査だけ落ちていた**（Windows の `C:evil.txt` はドライブ相対＝`is_absolute()` を通る）。
+/// いまは下流の `is_safe_rel_path` が弾くので実害は無かったが、**順序が変われば穴になる**。
 fn is_safe_frame_file_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains("..")
+    crate::assets::is_safe_single_file_name(name)
 }
 
 /// 切り出しの頭出しを「粗い＋端数」に分ける（#349・PR #885 レビュー 🔴）。

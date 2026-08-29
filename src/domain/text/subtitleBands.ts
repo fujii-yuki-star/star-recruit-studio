@@ -40,3 +40,28 @@ export function stackedSubtitleBands(
   });
   return out;
 }
+
+/**
+ * 文字アイテムが**実際に描かれる**矩形（キャンバス座標・px）。
+ *
+ * ⚠️ **「置いた箱」ではなく「描かれるもの」で見る**（α-6 出口監査 ℹ️）＝字幕は `anchorBottom` で
+ * 上へ伸び、高さは**実際の折返し行数**＋帯のパディングで決まるので、`h` をそのまま使うと
+ * **画面外の判定（`subtitleItemOutOfCanvas`）と別の矩形**を見ることになる。
+ * 「端に寄った文字」の注意（`outsideSafeArea`）と画面外の断りが**同じものを見る**ようにここへ出す。
+ */
+export function drawnTextRect(item: {
+  x: number; y: number; w: number; h: number; rotation?: number;
+  text: string; fontSize: number; maxLines: number; anchorBottom?: boolean; isSubtitle?: boolean;
+}): { x: number; y: number; w: number; h: number; rotation?: number } {
+  // 字幕でなければ置いた箱のまま（写真・見出しは箱に収める前提で組んである）。
+  if (!item.isSubtitle) return { x: item.x, y: item.y, w: item.w, h: item.h, rotation: item.rotation };
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const lineHeightPx = item.fontSize * DEFAULT_LINE_HEIGHT;
+  return {
+    x: item.x,
+    y: item.y - (item.anchorBottom ? (n - 1) * lineHeightPx : 0), // 帯背景の上端（`sceneSvg` と一致）
+    w: item.w,
+    h: lineHeightPx * n + item.fontSize * SUBTITLE_BAND_PAD_EM,
+    rotation: item.rotation,
+  };
+}

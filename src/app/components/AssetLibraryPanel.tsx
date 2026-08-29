@@ -279,7 +279,18 @@ export function AssetLibraryPanel() {
                 />
               </li>
             ) : (
-              <li key={a.id} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
+              // ⚠️ **どの行を直しているか分かるようにする**（α-6 出口監査 ℹ️）＝欄は一覧の下に出るので、
+              // 印が無いと**どれを直しているのか**が分からない（一覧が長いほど分からない）。
+              <li
+                key={a.id}
+                aria-current={editing?.id === a.id ? "true" : undefined}
+                style={{
+                  display: "flex", alignItems: "center", gap: "var(--gap-sm)",
+                  ...(editing?.id === a.id
+                    ? { borderLeft: "3px solid var(--color-accent)", paddingLeft: 6, background: "var(--color-surface-alt)" }
+                    : {}),
+                }}
+              >
                 <span style={{ flex: 1 }}>
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}
@@ -307,6 +318,8 @@ export function AssetLibraryPanel() {
 
       {editing && (
         <div className="mt">
+          {/* ⚠️ **何を直しているかを欄にも書く**（α-6 出口監査 ℹ️）＝一覧の印と両方あると迷わない。 */}
+          <p className="field-hint">「{items.find((x) => x.id === editing.id)?.displayName ?? editing.name}」の名前とタグを直しています。</p>
           <label className="field">
             <span className="field-label">名前</span>
             <input
