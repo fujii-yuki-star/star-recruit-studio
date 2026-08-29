@@ -663,7 +663,7 @@ fn update_library_asset(
 ///
 /// ⚠️ **同じ規則が2か所にある**（Rust と domain）＝Rust 側はパストラバーサル防止を兼ねるので落とせず、
 /// domain 側は採番に要る。**片方だけ変えると保存できるのに読めない**ので、
-/// `assetLibrary.test.ts` が**同じ入力で同じ答えになる**ことを固定している（`LIBRARY_ASSET_ID_PATTERN`）。
+/// `assetLibrary.test.ts` が**同じ入力で同じ答えになる**ことを固定している（`LIBRARY_ASSET_ID_SAMPLES`）。
 pub fn is_library_asset_id(id: &str) -> bool {
     let Some(rest) = id.strip_prefix("lib_asset_") else {
         return false;

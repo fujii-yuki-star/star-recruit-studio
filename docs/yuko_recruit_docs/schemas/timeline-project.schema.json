@@ -288,33 +288,8 @@
           "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。制約は場面形式（FreeElement）と同一。"
         },
         "shadow": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "文字の影（#264）。enabled のときだけ描く。未指定/false＝影なし（従来の出力は不変）。blur/dx/dy は canvas px。制約は場面形式（FreeElement）と同一。",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "color": {
-              "type": "string",
-              "pattern": "^#[0-9a-fA-F]{6}$"
-            },
-            "opacity": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            },
-            "blur": {
-              "type": "number",
-              "minimum": 0
-            },
-            "dx": {
-              "type": "number"
-            },
-            "dy": {
-              "type": "number"
-            }
-          }
+          "$ref": "project.schema.json#/$defs/TextShadow",
+          "description": "文字の影（#264）。⚠️ **共有の `$def` を指す**＝場面形式と同じ制約（写すと片方だけ変わる・α-6 出口監査 ℹ️11）。"
         },
         "background": {
           "type": "object",

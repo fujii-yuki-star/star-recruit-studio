@@ -134,7 +134,7 @@ const sceneBase = {
   narration: { text: 'x', status: 'none' }, warnings: [],
 };
 const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...extra }] });
-// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.27）。**プロジェクト単位**＝`videoSettings` に置く。
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。**プロジェクト単位**＝`videoSettings` に置く。
 const withVideoSettings = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
@@ -276,7 +276,7 @@ mustReject.push(
   ['fontId: 空文字は拒否', withFont({ fontId: '' })],
   ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
 );
-// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.27）。
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。
 mustAccept.push(
   ['audioAuto: 音の自動処理（ダッキング・ノーマライズ）を許容（1.29）', withVideoSettings({ audioAuto: { duckBgm: true, duckDepth: 0.6, duckAttackSec: 0.25, duckReleaseSec: 0.6, normalize: true, targetLufs: -16 } })],
   ['audioAuto: 空オブジェクト（すべて既定）を許容', withVideoSettings({ audioAuto: {} })],
@@ -367,6 +367,16 @@ const tlAccept = [
   ['timeline: 連動先と自分の文の両方（言い換え）を許容（1.2・#633）', tlClips({ id: 'clip_001', kind: 'subtitle', trackId: 'track_003', startSec: 0, durationSec: 3, x: 0, y: 900, w: 1920, h: 120, voiceClipId: 'clip_007', text: '言い換えた字幕' })],
   ['timeline: テンプレクリップの textFontIds/character/slotClips を許容（1.1）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'opening_yuko_right_v1', textFontIds: { title: 'kaitou-yokoku-gothic' }, character: { enabled: true, characterId: 'yuko', poseAssetId: 'yuko_smile_001' }, slotClips: { background: { startSec: 1, endSec: 5, speed: 1.5 } } })],
 ];
+// ⚠️ **`$ref` で追従していることをテストで固定する**（ADR-0038 の約束・α-6 出口監査 🟡5）＝
+// `fontId` は `project.schema.json#/$defs/FontId` を `$ref` で共有しているので**追従は自動**だが、
+// 固定が無いと**写しが生まれた瞬間に無検知で割れる**（#264 では実際に片方だけになっていて、
+// この検査で気づいた）。
+tlAccept.push(
+  ['timeline: 持ち込みフォントを許容＝`$ref` で追従している（1.26・#261）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_001' })],
+  ['timeline: 同梱フォントも従来どおり許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'gen-interface-jp' })],
+  ['timeline: 動画全体の文字の形にも持ち込みを許容（videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, fontId: 'user_font_002' } })],
+);
+
 const tlReject = [
   ['timeline: 元の音の音量が範囲外(2.0)は拒否（値域は場面形式と共有＝$ref・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', originalAudioVolume: 2.0 })],
   ['timeline: 元の音を鳴らすかが真偽でないのは拒否（#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: 'yes' })],
@@ -376,6 +386,7 @@ const tlReject = [
   ['timeline: 寄せの未知の値は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, cropAlign: { x: 'middle' } })],
   ['timeline: 切り抜きが 1 以上（全部隠れる）は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, crop: { top: 1 } })],
   ['timeline: format="scene" は拒否（場面形式は project.schema で検証する）', tlWith({ format: 'scene' })],
+  ['timeline: 形の違うフォント id は拒否＝制約も `$ref` 越しに効く（1.26）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_1' })],
   ['timeline: format 欠落は拒否（形式の判別ができない）', (() => { const { format, ...rest } = tlBase; return rest; })()],
   ['timeline: schemaVersion 未知(2.0)は拒否', tlWith({ schemaVersion: '2.0' })],
   ['timeline: tracks 欠落は拒否（required）', (() => { const { tracks, ...rest } = tlBase; return rest; })()],
