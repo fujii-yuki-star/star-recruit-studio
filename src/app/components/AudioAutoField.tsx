@@ -52,7 +52,11 @@ export function AudioAutoField({
 }) {
   const sceneAudioAuto = useProjectStore((s) => s.meta.videoSettings.audioAuto);
   const updateAudioAuto = useProjectStore((s) => s.updateAudioAuto);
-  const v = resolveAudioAuto(value ?? sceneAudioAuto);
+  // ⚠️ **書き先を渡されたら、値もそちらのものだけを見る**＝`value ?? sceneAudioAuto` にすると、
+  // まだ何も設定していないタイムライン動画で**場面形式の動画の設定が表示される**（別の動画の値を
+  // 自分のものとして見せる）。持ち主は `onChange` の有無で決める。
+  const ownsValue = onChange != null;
+  const v = resolveAudioAuto(ownsValue ? value : sceneAudioAuto);
 
   const patch = (next: AudioAutoSettings): void => (onChange ?? updateAudioAuto)(next);
 
