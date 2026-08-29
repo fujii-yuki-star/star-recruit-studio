@@ -23,6 +23,8 @@ export function BrandKitSection() {
   const undo = useProjectStore((s) => s.undo);
   const userFonts = useProjectStore((s) => s.userFonts);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
+  // ⚠️ **覚え直しが書けなかった理由**（α-6 出口監査 🟡23）＝黙って覚えた顔をしない（§2-5）。
+  const brandKitError = useProjectStore((s) => s.brandKitError);
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
@@ -167,6 +169,10 @@ export function BrandKitSection() {
           </select>
         )}
       </div>
+
+      {/* ⚠️ **覚え直しの失敗は、動画を開いていなくても出す**（α-6 出口監査 🟡23）＝
+          この欄（文字の形・色・ロゴ）は動画を開いていなくても触れる。 */}
+      {brandKitError && <p className="form-error mt" role="alert">{brandKitError}</p>}
 
       {hasProject && (
         <div className="mt">

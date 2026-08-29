@@ -68,12 +68,21 @@ export function ReadingDictSection() {
   /**
    * 書き込む。⚠️ **書けなかったら次の行動を出す**（§2-5）＝画面だけ変わって保存されていない、を
    * 黙って成功に見せない（PR #883 レビュー）。書けたら**その場で音声ソフトへ映す**（決定2）。
+   *
+   * ⚠️ **語（`entries`）だけを渡す**（α-6 出口監査 🟡22）＝控え（`links`）は画面のものではない。
+   * 画面が持っているのは**開いた時点**の控えで、その後「そろえる」「こちらの読みにする」が
+   * ディスクへ**書き足している**。画面の側を丸ごと書き戻すと控えが巻き戻り、
+   * 直した読みが音声ソフトへ映らないまま声が作られ、外した語も共有辞書から消えなくなる。
    */
-  async function persist(next: ReadingDictFile): Promise<boolean> {
+  async function persist(entries: readonly ReadingEntry[]): Promise<boolean> {
     const before = dict;
-    setDict(next);
+    setDict((d) => ({ ...d, entries: [...entries] }));
     try {
+      // ⚠️ **控えはディスクの新しい方を採る**（上の ⚠️）。読めなければ書かない（巻き戻さない）。
+      const onDisk = await loadReadingDict();
+      const next: ReadingDictFile = { ...before, entries: [...entries], links: onDisk.links };
       await saveReadingDict(next);
+      setDict(next);
     } catch {
       setDict(before); // 画面を戻す＝保存されていないのに保存済みに見せない
       setError("読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
@@ -120,14 +129,14 @@ export function ReadingDictSection() {
     const rest = dict.entries.filter(
       (e) => normalizeSurface(e.surface) !== draft.editing && normalizeSurface(e.surface) !== surface,
     );
-    if (!(await persist({ ...dict, entries: [...rest, entry] }))) return;
+    if (!(await persist([...rest, entry]))) return;
     setDraft(EMPTY_DRAFT);
     setNotice(`「${surface}」の読み方を保存しました。次に声を作るときから反映されます。`);
   }
 
   async function onDelete(entry: ReadingEntry): Promise<void> {
     const key = normalizeSurface(entry.surface);
-    if (!(await persist({ ...dict, entries: dict.entries.filter((e) => normalizeSurface(e.surface) !== key) }))) return;
+    if (!(await persist(dict.entries.filter((e) => normalizeSurface(e.surface) !== key)))) return;
     if (draft.editing === key) setDraft(EMPTY_DRAFT);
     setNotice(`「${entry.surface}」を一覧から外しました。`);
   }
@@ -171,7 +180,7 @@ export function ReadingDictSection() {
       const { entries: incoming, dropped } = await importReadingDictFrom(path);
       const { merged, duplicates: dup } = mergeDict(dict.entries, incoming);
       const added = merged.length - dict.entries.length;
-      if (!(await persist({ ...dict, entries: merged }))) return;
+      if (!(await persist(merged))) return;
       setDuplicates(dup);
       // ⚠️ **入れられなかったものは黙って消さない**（§2-5）＝読みがカタカナでない等。
       const dropNote = dropped > 0 ? `${dropped}件は読み方の形が違うため入れませんでした。` : "";
@@ -188,10 +197,7 @@ export function ReadingDictSection() {
   /** 重なった語を、読み込んだ側の読みに置き換える（1件ずつ選ぶ＝まとめて上書きにしない）。 */
   async function onTakeIncoming(pair: { current: ReadingEntry; incoming: ReadingEntry }): Promise<void> {
     const key = normalizeSurface(pair.incoming.surface);
-    const ok = await persist({
-      ...dict,
-      entries: dict.entries.map((e) => (normalizeSurface(e.surface) === key ? pair.incoming : e)),
-    });
+    const ok = await persist(dict.entries.map((e) => (normalizeSurface(e.surface) === key ? pair.incoming : e)));
     if (ok) setDuplicates((d) => d.filter((x) => x !== pair));
   }
 

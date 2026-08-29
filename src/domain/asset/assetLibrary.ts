@@ -48,7 +48,9 @@ export function isLibraryAssetId(id: unknown): id is string {
 
 /**
  * 次のライブラリ id を採る（既存の最大＋1・3桁ゼロ詰め）。
- * ⚠️ **消した番号は使い回さない**＝ファイルが残っていた場合に別の素材を指さない。
+ * ⚠️ **消した番号は使い回さない**＝`existingIds` には **これまでに使った番号**（外したものを含む＝
+ * `usedLibraryAssetIds()`）を渡すこと。**一覧は渡さない**（実体があるものだけなので最大番号を外すと
+ * 同じ番号が再発行され、その番号を指している動画が黙って別のものになる＝α-6 出口監査 🟡8）。
  */
 export function createLibraryAssetId(existingIds: readonly string[]): string {
   const max = existingIds.reduce((m, id) => {

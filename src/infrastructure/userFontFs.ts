@@ -17,6 +17,22 @@ export interface UserFont {
   displayName: string;
 }
 
+/**
+ * **これまでに使った id**（外したものを含む）。**採番だけ**に使う（α-6 出口監査 🟡8）。
+ *
+ * ⚠️ **一覧（`listUserFonts`）は使えない**＝実体があるものだけを返すので、最大番号を外すと
+ * **同じ番号が再発行**され、その番号を指している動画が**黙って別の字体**になる
+ *（id は解決するので `USER_FONT_MISSING` も発火しない）。
+ */
+export async function usedUserFontIds(): Promise<string[]> {
+  if (!isTauri()) return [];
+  try {
+    return await invoke<string[]>('used_user_font_ids');
+  } catch {
+    return [];
+  }
+}
+
 /** 取り込める形式（利用者決定＝4つとも・ADR-0038）。 */
 export const USER_FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'] as const;
 

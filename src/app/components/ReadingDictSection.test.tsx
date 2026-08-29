@@ -136,4 +136,21 @@ describe("ReadingDictSection", () => {
     await screen.findByText(/まだ登録がありません/);
     expect(screen.getByRole("button", { name: "一覧を書き出す" })).toBeDisabled();
   });
+
+  /**
+   * ⚠️ **控え（エンジンの語との繋がり）を巻き戻さない**（α-6 出口監査 🟡22）＝画面が持っているのは
+   * 開いた時点の控えで、その後「そろえる」がディスクへ書き足している。画面の側を丸ごと書き戻すと
+   * 直した読みが音声ソフトへ映らないまま声が作られ、外した語も共有辞書から消えなくなる。
+   */
+  it("保存のとき、画面より新しい控えを巻き戻さない", async () => {
+    vi.mocked(loadReadingDict)
+      .mockResolvedValueOnce({ version: 1, entries: [], links: {} }) // 画面が開いた時点
+      .mockResolvedValue({ version: 1, entries: [], links: { 宇都宮: "uuid-new" } }); // そろえた後のディスク
+    render(<ReadingDictSection />);
+    fireEvent.change(await screen.findByLabelText("言葉"), { target: { value: "宇都宮" } });
+    fireEvent.change(screen.getByLabelText("読み（カタカナ）"), { target: { value: "ウツノミヤ" } });
+    fireEvent.click(screen.getByRole("button", { name: "読み方を追加する" }));
+    await waitFor(() => expect(vi.mocked(saveReadingDict)).toHaveBeenCalled());
+    expect(vi.mocked(saveReadingDict).mock.calls[0][0].links).toEqual({ 宇都宮: "uuid-new" });
+  });
 });

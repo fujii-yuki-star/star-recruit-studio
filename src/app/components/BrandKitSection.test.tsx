@@ -9,6 +9,7 @@ vi.mock("../../infrastructure/brandKitFs", () => ({
 }));
 
 import { BrandKitSection } from "./BrandKitSection";
+import { saveBrandKit } from "../../infrastructure/brandKitFs";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
 
@@ -24,6 +25,7 @@ beforeEach(() => {
     // 動画側は別のフォント＝「変わるものがある」状態（そうしないと反映のボタンが出ない）。
     meta: { ...meta, videoSettings: { ...meta.videoSettings, fontId: "gen-interface-jp" } },
   } as never);
+  useProjectStore.setState({ brandKitError: null } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -103,5 +105,18 @@ describe("BrandKitSection", () => {
     } as never);
     render(<BrandKitSection />);
     expect(screen.queryByRole("option", { name: /見つかりません/ })).not.toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **書けなかったら覚えた顔をしない**（α-6 出口監査 🟡23・§2-5）＝画面だけ変えて保存に失敗すると、
+   * 開き直したときに黙って消えている（何を変えたか本人にも分からない）。画面を戻して理由を出す。
+   */
+  it("覚え直しが保存できなければ、画面を戻して理由を出す", async () => {
+    vi.mocked(saveBrandKit).mockRejectedValueOnce(new Error("書けない"));
+    render(<BrandKitSection />);
+    fireEvent.change(screen.getByLabelText("いつもの文字の形"), { target: { value: "gen-interface-jp" } });
+    expect(await screen.findByText(/保存できませんでした/)).toBeInTheDocument();
+    // 覚えている内容は元のまま＝保存できていないのに変わった顔をしない。
+    await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("kaitou-yokoku-gothic"));
   });
 });

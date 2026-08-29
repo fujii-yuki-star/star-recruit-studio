@@ -11,6 +11,7 @@ import {
   addLibraryAsset,
   deleteLibraryAsset,
   listLibraryAssets,
+  usedLibraryAssetIds,
   updateLibraryAsset,
 } from "../../infrastructure/assetLibraryFs";
 import {
@@ -72,8 +73,10 @@ export function AssetLibraryPanel() {
     try {
       const paths = await showOpenAssetsDialog();
       if (paths.length === 0) return;
-      // ⚠️ **1件ずつ順に採番する**（`lib_asset_NNN` は一覧を見て採る＝まとめて採ると重なる）。
-      let known = (await listLibraryAssets()).map((a) => a.id);
+      // ⚠️ **1件ずつ順に採番する**（まとめて採ると重なる）。
+      // ⚠️ **「これまでに使った番号」から採る**＝消した番号は使い回さない（α-6 出口監査 🟡8）。
+      // 一覧は実体があるものだけなので、最大番号を外すと同じ番号が再発行される。
+      let known = await usedLibraryAssetIds();
       let added = 0;
       for (const path of paths) {
         const name = fileNameOf(path);

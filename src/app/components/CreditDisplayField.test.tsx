@@ -96,4 +96,26 @@ describe("声の表記の出し方（#359）", () => {
     render(<CreditDisplayField disabled />);
     expect(select()).toBeDisabled();
   });
+
+  /**
+   * ⚠️ **1キー＝1履歴にしない／空欄を 0 にしない**（α-6 出口監査 🟡24）＝生の数値入力だと
+   * 取り消しが1文字ずつ戻り、空欄が `Number("") === 0` で `seconds: 0`（schema の下限 1 違反）
+   * として文書に入る。家の数値欄（`NumberField`）は blur/Enter で確定し、空欄は元の値へ戻す。
+   */
+  it("秒は打っている途中では確定せず、空欄で 0 にならない", () => {
+    render(<CreditDisplayField />);
+    const input = screen.getByLabelText(/何秒出すか/);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.change(input, { target: { value: "5" } });
+    expect(setCreditDisplay).not.toHaveBeenCalled(); // 打っている間は確定しない
+    fireEvent.blur(input);
+    expect(setCreditDisplay).toHaveBeenCalledWith({ seconds: 5 });
+
+    setCreditDisplay.mockClear();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(setCreditDisplay).not.toHaveBeenCalled(); // 空欄は 0 を書かず元の値へ戻る
+  });
 });
