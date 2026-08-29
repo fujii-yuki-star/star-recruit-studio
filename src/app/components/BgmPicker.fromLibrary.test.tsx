@@ -45,4 +45,19 @@ describe("BgmPicker：この動画にある音", () => {
     render(<BgmPicker />);
     expect(screen.queryByText("この動画にある音")).toBeNull();
   });
+
+  /**
+   * ⚠️ **差し替えるのは「いま使っている音」だけ**（PR #911 レビュー 🟡）＝よく使う素材から音を
+   * 取り込めるようになり、**1つの動画が複数の音を持てる**ようになった。種類だけで探すと
+   * **配列の先頭にある別の音**（選んでもいないもの）のファイルを黙って上書きする（§2-5）。
+   */
+  it("いま使っていない音のファイルを上書きしない", async () => {
+    // 2つ目（asset_002）を使っている状態で、新しいファイルを読み込む。
+    useProjectStore.getState().setBgmAsset("asset_002");
+    await useProjectStore.getState().setBgm({ name: "new.mp3", dataUrl: "data:audio/mp3;base64,AA==" });
+    const s = useProjectStore.getState();
+    // 選んでいた asset_002 が差し替わる（先頭の asset_001 は無傷）。
+    expect(s.meta.bgmSettings?.assetId).toBe("asset_002");
+    expect(s.assets.find((a) => a.assetId === "asset_001")?.displayName).toBe("会社のテーマ");
+  });
 });

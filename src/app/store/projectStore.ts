@@ -2393,12 +2393,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // いる BGM ファイルと競合しうる＝setAssetImage と同クラスのハザード（#547 P2-1・ADR-0026②）。BgmPicker は bgmError を表示。
     if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; }
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
+    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（PR #911 レビュー ℹ️）＝ほかの取り込み経路と
+    // 同じ規則。括らないと、一覧を読んでいる間に別の動画を開いたとき**新しい動画へこの音が生える**／
+    // 番号の着地が別の動画を書き換える（#762 と同型）。
+    const stillOpen = sameDocGuard(get);
     set({ bgmError: null, isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        if (!stillOpen()) return;
+        set((st) => ({ meta: { ...st.meta, projectId } }));
       }
       const parts = file.name.split(".");
       const rawExt = parts.length > 1 ? parts[parts.length - 1] : "mp3";
@@ -2406,7 +2412,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
       // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
       // 新規IDは §2.1 の bgm_{slug}_{NNN}（slug=ファイル名）で採番する。
-      const existingBgm = get().assets.find((a) => a.assetType === ASSET_TYPE.bgm);
+      // ⚠️ **差し替えるのは「いま使っている音」だけ**（PR #911 レビュー 🟡）＝よく使う素材から
+      // 音を取り込めるようになり、**1つの動画が複数の音を持てる**ようになった。種類だけで探すと
+      // **配列の先頭にある別の音**（選んでもいないもの）のファイルを黙って上書きする（§2-5）。
+      // いま選んでいるものが無ければ**新しい番号で足す**（既存を壊さない）。
+      const selectedBgmId = get().meta.bgmSettings?.assetId;
+      const existingBgm = get().assets.find(
+        (a) => a.assetType === ASSET_TYPE.bgm && a.assetId === selectedBgmId,
+      );
       const assetId =
         existingBgm?.assetId ?? createBgmId(baseName, get().assets.map((a) => a.assetId));
       const fileName = `${assetId}.${ext}`;
@@ -2420,6 +2433,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         displayName: baseName.trim() || "BGM",
         filePath: filePath ?? `assets/${fileName}`,
       };
+      if (!stillOpen()) return;
       set((s) => ({
         meta: {
           ...s.meta,
