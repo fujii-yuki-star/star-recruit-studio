@@ -79,7 +79,7 @@ import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
+import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -487,8 +487,12 @@ interface ProjectState {
   refreshUserFonts: () => Promise<void>;
   /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
   addUserFont: (srcPath: string, displayName: string) => Promise<string | null>;
-  /** 持ち込みフォントを消す（#261）。使っている動画には公開前チェックが断りを出す。 */
-  removeUserFont: (fontId: string) => Promise<void>;
+  /**
+   * 持ち込みフォントを消す（#261）。使っている動画には公開前チェックが断りを出す。
+   * **外せたら `true`**（α-6 出口監査 🟡13）＝`addUserFont` と同型。⚠️ **失敗を成功として知らせない**
+   *（外せていないのに「外しました」と出すと、赤い理由と並んで**一覧にも残ったまま**になる＝§2-5）。
+   */
+  removeUserFont: (fontId: string) => Promise<boolean>;
   /** フォントの取り込み/削除で出た理由（§2-5）。 */
   fontError: string | null;
   /**
@@ -2250,7 +2254,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await saveBrandKit(next);
       return true;
     } catch {
-      set({ brandKit: before, brandKitError: "会社の見た目を保存できませんでした。しばらくしてから、もう一度お試しください。" });
+      set({ brandKit: before, brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
       return false;
     }
   },
@@ -2274,8 +2278,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       await deleteUserFont(fontId);
       await get().refreshUserFonts();
+      return true;
     } catch (e) {
       set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });
+      return false;
     }
   },
   refreshUserFonts: async () => {

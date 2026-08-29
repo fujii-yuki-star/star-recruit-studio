@@ -5,7 +5,7 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「ライブラリ」は定着しているので使うが、
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
 import { useEffect, useState } from "react";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import {
   addLibraryAsset,
@@ -21,6 +21,7 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { libraryPartlyFailedMessage } from "../uiLabels";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
@@ -44,6 +45,7 @@ export function AssetLibraryPanel() {
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string } | null>(null);
   const importFromLibrary = useProjectStore((s) => s.importFromLibrary);
   const isImporting = useProjectStore((s) => s.isImporting);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
@@ -62,7 +64,15 @@ export function AssetLibraryPanel() {
     };
   }, []);
 
-  const working = busy || isImporting;
+  // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
+  // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
+  const working = busy || isImporting || isExporting;
+  // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
+  const blockedReason = isExporting
+    ? "書き出しが終わるまでお待ちください"
+    : isImporting
+      ? "いま取り込んでいます"
+      : undefined;
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
@@ -78,15 +88,27 @@ export function AssetLibraryPanel() {
       // 一覧は実体があるものだけなので、最大番号を外すと同じ番号が再発行される。
       let known = await usedLibraryAssetIds();
       let added = 0;
+      // ⚠️ **途中で失敗しても、置けたぶんは残して数える**（α-6 出口監査 🟡16・§2-5）＝
+      // まとめて投げて途中でこけると「全部失敗した」と読め、**もう一度押して二重に置く**。
+      const failedNames: string[] = [];
+      let firstMessage: string | null = null;
       for (const path of paths) {
         const name = fileNameOf(path);
         const id = createLibraryAssetId(known);
-        await addLibraryAsset(id, name.replace(/\.[^.]+$/, "") || UNNAMED_ASSET_NAME, detectAssetType(name), [], path);
-        known = [...known, id];
-        added += 1;
+        try {
+          await addLibraryAsset(id, name.replace(/\.[^.]+$/, "") || UNNAMED_ASSET_NAME, detectAssetType(name), [], path);
+          known = [...known, id];
+          added += 1;
+        } catch (e) {
+          failedNames.push(name || UNNAMED_ASSET_NAME);
+          firstMessage ??= typeof e === "string" ? e : "素材を置けませんでした。もう一度お試しください。";
+        }
       }
       await refresh();
-      setNotice(`${added}件を置きました。動画から「この動画で使う」で取り込めます。`);
+      if (added > 0) setNotice(`${added}件を置きました。動画から「この動画で使う」で取り込めます。`);
+      // ⚠️ **1件だけ失敗したときは理由をそのまま出す**（件数で案内を変えない＝ADR-0026②・`addAssets` と同じ）。
+      if (failedNames.length === 1) setError(firstMessage ?? "");
+      else if (failedNames.length > 1) setError(libraryPartlyFailedMessage(failedNames, firstMessage));
     } catch (e) {
       setError(typeof e === "string" ? e : "素材を置けませんでした。もう一度お試しください。");
     } finally {
@@ -155,7 +177,7 @@ export function AssetLibraryPanel() {
       </p>
 
       <div className="row">
-        <button type="button" className="btn btn-primary" disabled={working} onClick={() => void onAdd()}>
+        <button type="button" className="btn btn-primary" disabled={working} title={blockedReason} onClick={() => void onAdd()}>
           {busy ? "置いています…" : "素材を置く"}
         </button>
       </div>
@@ -221,18 +243,19 @@ export function AssetLibraryPanel() {
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}
                 </span>
-                <button type="button" className="btn btn-secondary" disabled={working} onClick={() => void onImport(a)}>
+                <button type="button" className="btn btn-secondary" disabled={working} title={blockedReason} onClick={() => void onImport(a)}>
                   この動画で使う
                 </button>
                 <button
                   type="button"
                   className="btn"
                   disabled={working}
+                  title={blockedReason}
                   onClick={() => setEditing({ id: a.id, name: a.displayName, tags: a.tags.join("、") })}
                 >
                   名前とタグ
                 </button>
-                <button type="button" className="btn" disabled={working} onClick={() => void onDelete(a)}>
+                <button type="button" className="btn" disabled={working} title={blockedReason} onClick={() => void onDelete(a)}>
                   外す
                 </button>
               </li>

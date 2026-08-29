@@ -528,6 +528,18 @@ export function importPartlyFailedMessage(failedNames: readonly string[], firstR
 }
 
 /**
+ * **よく使う素材に置く**とき、まとめて置いて一部が失敗したときの案内（PR #905 レビュー）。
+ *
+ * ⚠️ **言い回しを増やさない**（§6）＝同じ状況（まとめて入れて一部だけ失敗）に対して
+ * `importPartlyFailedMessage` があるのに、画面の中で**3つ目の言い方**を作りかけていた。
+ * ⚠️ **語彙だけ変える**＝よく使う素材は「取り込む」ではなく**「置く」**（`06 §4`）なので、
+ * 形（件数＋名前＋最初の理由）は揃えたうえで動詞だけ合わせる。
+ */
+export function libraryPartlyFailedMessage(failedNames: readonly string[], firstReason: string | null): string {
+  return `${failedNames.length}件を置けませんでした（${failedNames.join("、")}）。${firstReason ?? ""}`;
+}
+
+/**
  * 取り込んでいる最中に、もう一度まとめて取り込もうとしたときの案内（#858・§2-5）。
  *
  * ⚠️ **黙って落とさない**＝単発の取り込みは取り込み中を**黙って return** する（1件が入らないだけ）が、
@@ -840,4 +852,43 @@ export function slotLabelsFor(layers: readonly Pick<Layer, "id" | "type">[]): st
     seen.set(base, n);
     return `${base}${n}`;
   });
+}
+
+/**
+ * α-6 で足した断り・知らせの文言（読み方辞書・持ち込みフォント・会社の見た目）。
+ *
+ * ⚠️ **`15 §6` の表と機械で突き合わせる**（α-6 出口監査 🟡18）＝これらは画面や
+ * `infrastructure` に直書きされていて `errorStateTable.test.ts` の走査の外にあり、
+ * **既に1件ズレていた**（句点の有無）。表と実装のどちらかだけ直すと落ちる形にする。
+ * ⚠️ **件数が入る文は関数**（下）＝表は `N` と書くので、`N` を入れて突き合わせる。
+ */
+export const alpha6Message = {
+  READING_DICT_WORD_CONFLICT: "音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません",
+  READING_DICT_IMPORT_DUPLICATE:
+    "読み込んだ一覧に、同じ言葉で読みが違うものがありました。そのままにするか、読み込んだ方に置き換えるかを選べます",
+  BRAND_KIT_SAVE_FAILED: "会社の見た目を保存できませんでした。しばらくしてから、もう一度お試しください",
+} as const;
+
+/**
+ * 使っている持ち込みフォントが**見つからない**（`USER_FONT_MISSING`）。
+ * ⚠️ **件数を差し込む**＝表は `N` と書くので、テストは `N` を渡して突き合わせる。
+ */
+export function userFontMissingMessage(count: string | number): string {
+  return (
+    `この動画で使っている文字の形（フォント）が${count}つ見つかりません。` +
+    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
+    `使っている場面で別の文字の形を選び直してください`
+  );
+}
+
+/**
+ * 使っている持ち込みフォントを**調べられなかった**（`USER_FONT_UNREADABLE`）。
+ * ⚠️ **「見つからない」とは別**＝目録そのものが読めないので、待っても埋まらない（§2-5）。
+ */
+export function userFontUnreadableMessage(count: string | number): string {
+  return (
+    `この動画は取り込んだ文字の形（フォント）を${count}つ使っていますが、` +
+    `いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。` +
+    `アプリを開き直してから、もう一度お試しください`
+  );
 }

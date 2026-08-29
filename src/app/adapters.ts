@@ -16,7 +16,7 @@ import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/p
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
-import { formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail } from "./uiLabels";
+import { formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -350,10 +350,7 @@ export function buildPrecheckItems(
     items.push({
       id: "unknownFont",
       label: "文字の形を調べられません",
-      detail:
-        `この動画は取り込んだ文字の形（フォント）を${usedFontIds.length}つ使っていますが、` +
-        `いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。` +
-        `アプリを開き直してから、もう一度お試しください。`,
+      detail: `${userFontUnreadableMessage(usedFontIds.length)}。`,
       severity: "action",
       blocksExport: true,
     });
@@ -362,10 +359,7 @@ export function buildPrecheckItems(
     items.push({
       id: "missingFont",
       label: "見つからない文字の形",
-      detail:
-        `この動画で使っている文字の形（フォント）が${missingFonts.length}つ見つかりません。` +
-        `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
-        `使っている場面で別の文字の形を選び直してください。`,
+      detail: `${userFontMissingMessage(missingFonts.length)}。`,
       severity: "action",
       blocksExport: true,
     });

@@ -49,7 +49,9 @@ export function UserFontSection() {
     setNotice("");
     setBusy(true);
     try {
-      await removeUserFont(f.id);
+      // ⚠️ **外せたときだけ「外しました」と言う**（α-6 出口監査 🟡13・§2-5）＝失敗しても知らせを出すと、
+      // 赤い理由と並ぶうえ**一覧にもそのまま残る**（何が起きたのか分からない）。理由は `fontError` が出す。
+      if (!(await removeUserFont(f.id))) return;
       // ⚠️ **使っている動画があるかはここでは見ない**＝消したあとに公開前チェックが
       // 「見つからない文字の形」として断る（黙って別の字体で書き出さない・ADR-0038）。
       setNotice(`「${f.displayName}」を外しました。この文字の形を使っている動画は、書き出す前に選び直してください。`);

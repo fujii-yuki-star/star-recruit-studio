@@ -959,7 +959,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。
     const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
     const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt, { templateOf: (id) => templateById.get(id) });
-    if (!r.ok) { set({ editBlocked: { reason: SPLIT_BLOCKED_REASON[r.reason], at } }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: SPLIT_BLOCKED_REASON[r.reason], at: blockTargetFor(SPLIT_BLOCKED_REASON[r.reason], at) } }); return; }
     // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
     // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
     // 空振りする（嘘の理由）。`explodeClip` と同じ形。
@@ -985,7 +985,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 固定が意味を失う。ほかの編集（動かす・複製する）が固定列を断るのと同じ扱い。
     const checked = removeSelectedClipsChecked(doc, clipIds);
     if (!checked.ok) {
-      set({ editBlocked: { reason: checked.reason, at } });
+      set({ editBlocked: { reason: checked.reason, at: blockTargetFor(checked.reason, at) } });
       return;
     }
     // 消した後は選択を空にする（消えたものを選んだままにしない）。
@@ -1016,7 +1016,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 戻せない操作が別の部品に効かない。
     const r = explodeTemplateClip(doc, clipId, template);
     if (!r.ok) {
-      set({ editBlocked: { reason: r.reason, at } });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
       return;
     }
     // バラした部品をまとめて選ぶ＝続けて動かせる（元の部品はもう無い）。
@@ -1913,7 +1913,11 @@ function applyEditTo(
   if (!doc) return;
   const r = run(doc, clipId);
   if (r.ok) commit(set, get, r.doc);
-  else set({ editBlocked: { reason: r.reason, at } });
+  // ⚠️ **例外の判定を通す**（α-6 出口監査 🟡17）＝`applyEditTo` は ~20 操作の集約点なのに
+  // `blockTargetFor` を通っておらず、**どの欄にも属さない理由**（書き出し中・再生中・見つからない）が
+  // 欄の中に落ちて、欄を閉じていると**押した返事が見えない**。`moveClipsBy` は帯へ倒すのに
+  // `moveClipById` は欄へ、という**同じ状況で出る場所が違う**形も同時に消える。
+  else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
 }
 
 /** 読み上げクリップの状態だけを差し替える（履歴に積まない＝作成中/失敗は編集ではない）。 */

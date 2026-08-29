@@ -4,7 +4,7 @@
 // ⚠️ **自動では遡及しない**（決定3・§2-5）＝既にある動画は「この動画に反映する」を押したときだけ変わる。
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
 import { useEffect, useState } from "react";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
@@ -35,6 +35,9 @@ export function BrandKitSection() {
     && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
     && !userFonts.some((f) => f.id === brandKit.fontId);
   const hasProject = useProjectStore((s) => s.scenes.length > 0);
+  // ⚠️ **書き出し中は押せなくする**（α-6 出口監査 🟡14）＝store 側は断るのに画面は押せてしまい、
+  // コメントの「押せないようにもしてある」が実態と違っていた（押す前に理由を出す＝§2-5）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const [logos, setLogos] = useState<LibraryAsset[]>([]);
   const [newColor, setNewColor] = useState("#1f9ea3");
   const [notice, setNotice] = useState("");
@@ -188,7 +191,13 @@ export function BrandKitSection() {
                 {/* ⚠️ **既にあるロゴは置き換えない**（作り込みを消さない）＝足すのは持っていないときだけ。 */}
                 {plan.addsLogo && <li>・ロゴを1つ足します（すでにあるロゴは置き換えません）</li>}
               </ul>
-              <button type="button" className="btn btn-secondary" onClick={() => void onApply()}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isExporting}
+                title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
+                onClick={() => void onApply()}
+              >
                 この動画に反映する
               </button>
             </>
