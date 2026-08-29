@@ -34,7 +34,7 @@ describe("BrandKitSection", () => {
    * 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
    */
   it("反映したら、その場で戻せる導線を出す（案内だけにしない）", async () => {
-    const applyBrandKit = vi.fn(async () => ({ ok: true, error: null }));
+    const applyBrandKit = vi.fn(async () => ({ ok: true, applied: true, error: null }));
     const undo = vi.fn();
     useProjectStore.setState({ applyBrandKit, undo } as never);
     render(<BrandKitSection />);
@@ -47,13 +47,29 @@ describe("BrandKitSection", () => {
   });
 
   /** ⚠️ できなかったときは「反映しました」と言わない（§2-5・PR #888）。 */
-  it("反映できなければ理由を出し、戻す導線は出さない", async () => {
-    const applyBrandKit = vi.fn(async () => ({ ok: false, error: "ロゴを取り込めませんでした。" }));
+  it("何も入らずに失敗したら理由だけ出す（戻すものが無い）", async () => {
+    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: false, error: "ロゴを取り込めませんでした。" }));
     useProjectStore.setState({ applyBrandKit, undo: vi.fn() } as never);
     render(<BrandKitSection />);
     fireEvent.click(screen.getByRole("button", { name: "この動画に反映する" }));
     await waitFor(() => expect(screen.getByText(/ロゴを取り込めませんでした/)).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "元に戻す" })).not.toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **一部だけ入ったときも戻せるようにする**（PR #902 レビュー）＝フォントは入ったが
+   * ロゴの取り込みで失敗した、が起こりうる（`applyBrandKit` は `pushHistory` の**後**に取り込む）。
+   * 理由だけ出して戻す導線を出さないと、**変わったまま戻せない**（§2-5）。
+   */
+  it("一部だけ入って失敗したときは、その旨と戻す導線を出す", async () => {
+    const applyBrandKit = vi.fn(async () => ({ ok: false, applied: true, error: "ロゴを取り込めませんでした。" }));
+    const undo = vi.fn();
+    useProjectStore.setState({ applyBrandKit, undo } as never);
+    render(<BrandKitSection />);
+    fireEvent.click(screen.getByRole("button", { name: "この動画に反映する" }));
+    await waitFor(() => expect(screen.getByText(/一部だけ反映されています/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "元に戻す" }));
+    expect(undo).toHaveBeenCalled();
   });
 
   /** ⚠️ 手持ちの文字の形も既定にできる（ADR-0038 決定7・α-6 出口監査 🔴1）。 */

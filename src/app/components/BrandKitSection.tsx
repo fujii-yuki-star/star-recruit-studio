@@ -55,6 +55,8 @@ export function BrandKitSection() {
   const nothingToApply = isNoopBrandApply(plan);
 
   const [error, setError] = useState("");
+  // 失敗したが**一部は入っている**（フォントだけ変わってロゴが取り込めなかった等）。
+  const [partlyApplied, setPartlyApplied] = useState(false);
 
   async function onApply(): Promise<void> {
     setNotice("");
@@ -67,7 +69,10 @@ export function BrandKitSection() {
     // 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
     // 知らせの中に戻す導線を出す。
     if (r.ok) setNotice("この動画に反映しました。");
+    // ⚠️ **一部だけ入ったときも戻せるようにする**（PR #902 レビュー）＝フォントは入ったがロゴの
+    // 取り込みで失敗した、が起こりうる。理由だけ出して戻す導線を出さないと、**変わったまま戻せない**。
     else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
+    setPartlyApplied(!r.ok && r.applied);
   }
 
   return (
@@ -181,6 +186,18 @@ export function BrandKitSection() {
                 この動画に反映する
               </button>
             </>
+          )}
+          {error && partlyApplied && (
+            <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
+              <p className="field-hint" style={{ margin: 0 }}>一部だけ反映されています。</p>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { undo(); setError(""); setPartlyApplied(false); }}
+              >
+                元に戻す
+              </button>
+            </div>
           )}
           {notice && (
             <div className="row mt" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>

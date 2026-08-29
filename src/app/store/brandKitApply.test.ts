@@ -112,17 +112,36 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
     const r = await useProjectStore.getState().applyBrandKit();
     expect(r.ok).toBe(false);
     expect(r.error).toContain('見つかりませんでした');
+    // ⚠️ **一部だけ入ったかを返す**（PR #902 レビュー）＝ここはロゴだけの計画なので `false`。
+    expect(r.applied).toBe(false);
+  });
+
+  /**
+   * ⚠️ **フォントは入ったがロゴで失敗した**＝`pushHistory` の後に取り込むので、文書は既に変わっている。
+   * 画面が戻す導線を出せるよう `applied:true` を返す（PR #902 レビュー）。
+   */
+  it('フォントだけ入ってロゴで失敗したら、入ったことを返す', async () => {
+    importFromLibrary.mockResolvedValueOnce(null as never);
+    useProjectStore.setState({
+      brandKit: { fontId: 'kaitou-yokoku-gothic', logoLibraryAssetId: 'lib_asset_001' },
+    } as never);
+    setProject({ fontId: 'gen-interface-jp', assets: [] });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.ok).toBe(false);
+    expect(r.applied).toBe(true);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
   });
 
   it('取り込めたときはできたことを返す', async () => {
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' } } as never);
     setProject({ assets: [] });
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, error: null });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: true, error: null });
   });
 
   it('何も変わらないときも「できた」を返す（押せない状態を作らない）', async () => {
     useProjectStore.setState({ brandKit: {} } as never);
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, error: null });
+    // ⚠️ `applied:false`＝**文書は触っていない**（履歴も積んでいない）＝戻すものが無い。
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: false, error: null });
   });
 
   /** ⚠️ 書き出し中は文書を固定する（設定した意味どおりの MP4 にする・#570 P1）。 */
