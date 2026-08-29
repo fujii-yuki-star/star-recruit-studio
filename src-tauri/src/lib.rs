@@ -938,10 +938,7 @@ mod manifest_tests {
     /// **開き直しても直らない**（直す手段が画面に無い＝行き止まり）。失う中身が無いので空として扱う。
     #[test]
     fn empty_file_is_no_entries() {
-        for text in [
-            "", "   ", "
-",
-        ] {
+        for text in ["", "   ", "\n"] {
             let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("通るはず");
             assert!(list.is_empty(), "text={text:?}");
         }
