@@ -119,4 +119,17 @@ describe("BrandKitSection", () => {
     // 覚えている内容は元のまま＝保存できていないのに変わった顔をしない。
     await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("kaitou-yokoku-gothic"));
   });
+
+  /**
+   * ⚠️ **書き出し中は押す前に止める**（α-6 出口監査 🟡14）＝store 側は断るのに画面は押せてしまい、
+   * store のコメント「押せないようにもしてある」が**実態と違って**いた（§2-5＝押せない理由を先に出す）。
+   */
+  it("書き出し中は「この動画に反映する」を押せず、理由が添えてある", () => {
+    useProjectStore.getState().setExportRun({ phase: "encoding" } as never);
+    render(<BrandKitSection />);
+    const btn = screen.getByRole("button", { name: "この動画に反映する" });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "書き出しが終わるまでお待ちください");
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+  });
 });

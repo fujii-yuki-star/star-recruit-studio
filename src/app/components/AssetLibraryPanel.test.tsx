@@ -176,11 +176,44 @@ describe("AssetLibraryPanel", () => {
    * 採り直しになり、**直したばかりの「番号の使い回し」が別経路で再現する**。理由を出して断る（§2-5）。
    */
   it("これまでの番号を取れなかったら、置かずに理由を出す", async () => {
-    vi.mocked(usedLibraryAssetIds).mockRejectedValue("一覧を読めませんでした。");
+    vi.mocked(usedLibraryAssetIds).mockRejectedValueOnce("一覧を読めませんでした。");
     vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png"]);
     render(<AssetLibraryPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     expect(await screen.findByText(/一覧を読めませんでした/)).toBeInTheDocument();
     expect(vi.mocked(addLibraryAsset)).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠️ **書き出し中は押す前に止める**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に
+   * 無効化＋理由なのに、ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で
+   * 断り方が2通り＝ADR-0026②）。
+   */
+  it("書き出し中は押せず、理由が添えてある", async () => {
+    useProjectStore.getState().setExportRun({ phase: "encoding" } as never);
+    render(<AssetLibraryPanel />);
+    const btn = (await screen.findAllByRole("button", { name: /この動画で使う/ }))[0];
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "書き出しが終わるまでお待ちください");
+    expect(screen.getByRole("button", { name: /素材を置く/ })).toBeDisabled();
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+  });
+
+  /**
+   * ⚠️ **途中で失敗しても、置けたぶんは残して数える**（α-6 出口監査 🟡16・§2-5）＝
+   * 「全部失敗した」と読めると、もう一度押して**二重に置く**。
+   */
+  it("まとめて置いて一部が失敗しても、置けた件数を知らせる", async () => {
+    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);
+    vi.mocked(addLibraryAsset).mockReset();
+    vi.mocked(addLibraryAsset)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce("だめでした")
+      .mockResolvedValueOnce({} as never);
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/2件を置きました/)).toBeInTheDocument();
+    // 1件だけ失敗したときは理由をそのまま出す（件数で案内を変えない＝ADR-0026②）。
+    expect(screen.getByText(/だめでした/)).toBeInTheDocument();
   });
 });

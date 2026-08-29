@@ -7,7 +7,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bakeNoteMessage, editBlockedMessage, exportBlockedMessage } from "./uiLabels";
+import {
+  alpha6Message, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  userFontMissingMessage, userFontUnreadableMessage,
+} from "./uiLabels";
+import { READING_DICT_SYNC_FAILED } from "../infrastructure/voiceProviders/readingDictSync";
+import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 
 /**
@@ -52,6 +57,36 @@ function codeMessages(): Record<string, string> {
     ...bakeNoteMessage,
     EXPORT_CLEANUP_PENDING: EXPORT_CLEANUP_PENDING_MESSAGE,
     EXPORT_OTHER_RUNNING: OTHER_EXPORT_RUNNING_MESSAGE,
+    // α-6 で足したぶん（α-6 出口監査 🟡18）＝画面や `infrastructure` に直書きされていて
+    // この走査の外にあり、**既に1件ズレていた**（句点の有無）。
+    ...alpha6Message,
+    READING_DICT_SYNC_FAILED,
+    READING_DICT_UNREADABLE,
+    // ⚠️ **件数が入る文は `N` を差し込んで比べる**（表は読みやすさのため ` N ` と空白つきで書く）。
+    USER_FONT_MISSING: userFontMissingMessage(" N "),
+    USER_FONT_UNREADABLE: userFontUnreadableMessage(" N "),
+  };
+}
+
+/**
+ * **Rust 側**に直書きされている利用者向け文言（コードから import できない）。
+ *
+ * ⚠️ **読み飛ばさない**（α-6 出口監査 🟡18）＝「TS から参照できないから対象外」にすると、
+ * 表と実装のズレが**Rust 側だけ**残る（`import_user_font` の断りは実際に画面へ出る）。
+ * ソースを読んで literal を取り出し、同じように突き合わせる。
+ */
+function rustMessages(): Record<string, string> {
+  const rs = readFileSync(join(process.cwd(), "src-tauri/src/lib.rs"), "utf8");
+  const pick = (re: RegExp): string => {
+    const m = re.exec(rs);
+    if (!m) throw new Error(`Rust 側の文言が見つかりません: ${re}`);
+    return m[1];
+  };
+  return {
+    USER_FONT_IMPORT_FAILED: pick(/return Err\("(このファイルは文字の形として読み込めません。[^"]*)"\.to_string\(\)\)/),
+    // `{what}` は「よく使う素材」「取り込んだ文字の形」のどちらかが入る＝表は〔…〕で両方を書くので、
+    // 差し込みの手前までを比べる（`format!` の中身をそのまま取り出す）。
+    MANIFEST_UNREADABLE: pick(/format!\("\{what\}(の一覧を読めませんでした。[^"]*)"\)/),
   };
 }
 
@@ -75,8 +110,25 @@ describe("15 §6 の表と実装の一致（#855）", () => {
 
   it("実装にある文言は、必ず表にも行がある（足したのに正典へ書き忘れたら落ちる）", () => {
     const rows = readErrorTable();
-    const missing = Object.keys(codeMessages()).filter((code) => !rows.has(code));
+    const missing = [...Object.keys(codeMessages()), ...Object.keys(rustMessages())].filter((code) => !rows.has(code));
     expect(missing).toEqual([]);
+  });
+
+  /**
+   * ⚠️ **Rust 側の文言も同じ扱い**（α-6 出口監査 🟡18）＝「TS から import できないから対象外」に
+   * すると、表と実装のズレが**Rust 側だけ**残る（この2つは実際に画面へ出る）。
+   */
+  it("Rust に直書きされた文言も表と一致する", () => {
+    const rows = readErrorTable();
+    const mismatched: string[] = [];
+    for (const [code, message] of Object.entries(rustMessages())) {
+      const cell = rows.get(code);
+      if (cell == null) continue;
+      // 表は〔よく使う素材／取り込んだ文字の形〕のように差し込みを書くので、その後ろを比べる。
+      const tail = norm(cell).replace(/^.*?〕/, "");
+      if (tail !== norm(message)) mismatched.push(`${code} / 表: ${tail} / 実装: ${message}`);
+    }
+    expect(mismatched.join(" | ")).toBe("");
   });
 
   it("表の行を1つも取りこぼしていない（拾えない行は検査の外に落ちる）", () => {

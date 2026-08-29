@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { PlayIcon, StopIcon } from "./icons";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useProjectStore } from "../store/projectStore";
+import { alpha6Message } from "../uiLabels";
 import {
   accentCandidates,
   accentMark,
@@ -311,7 +312,7 @@ export function ReadingDictSection() {
       {duplicates.length > 0 && (
         <div className="mt">
           <p className="field-hint">
-            読み込んだ一覧に、同じ言葉で読みが違うものがありました。そのままにするか、読み込んだ方に置き換えるかを選べます。
+            {alpha6Message.READING_DICT_IMPORT_DUPLICATE}。
           </p>
           <ul className="list-reset">
             {duplicates.map((pair) => (
@@ -337,7 +338,7 @@ export function ReadingDictSection() {
           {/* ⚠️ 決定3b＝利用者が VOICEVOX 本体で入れた読みを、アプリが黙って書き換えない。
               知らせて選ばせる（`15 §6` READING_DICT_WORD_CONFLICT）。 */}
           <p className="field-hint">
-            音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません。
+            {alpha6Message.READING_DICT_WORD_CONFLICT}。
           </p>
           <ul className="list-reset">
             {conflicts.map((c) => (
