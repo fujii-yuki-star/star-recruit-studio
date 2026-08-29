@@ -371,14 +371,33 @@ fn parse_manifest<T: serde::de::DeserializeOwned>(
 /// ⚠️ **形の合わない行も数える**＝`parse_manifest` が落とした行の番号を再発行しないため。
 /// 番号は「使ったことがあるか」だけが要るので、ほかのフィールドは見ない。
 fn raw_manifest_ids(path: &std::path::Path, what: &str) -> Result<Vec<String>, String> {
-    if !path.exists() {
-        return Ok(Vec::new());
+    let from_manifest: Vec<String> = if path.exists() {
+        let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+        parse_manifest::<serde_json::Value>(&text, what)?
+            .into_iter()
+            .filter_map(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // ⚠️ **実体のファイル名からも番号を起こす**（差分再監査 2巡目）＝目録が**空**（0バイト・
+    // 書き込みの中断で残る）だと、覚え書きが無いだけで**実体は残っている**。目録だけを見ると
+    // 採番が 001 からやり直しになり、`fs::copy` が**既存の実体を上書き**して、その番号を指している
+    // 動画が黙って別のものになる（🟡8 で塞いだ失敗の再現＝#908 の「空は通す」と噛み合う穴）。
+    let mut ids = from_manifest;
+    if let Some(dir) = path.parent() {
+        if let Ok(rd) = fs::read_dir(dir) {
+            for e in rd.flatten() {
+                // ファイル名の「.」より前が id（`user_font_001.ttf` / `lib_asset_001.png`）。
+                if let Some(stem) = e.file_name().to_str().and_then(|n| n.split('.').next()) {
+                    if !stem.is_empty() && !ids.iter().any(|i| i == stem) {
+                        ids.push(stem.to_owned());
+                    }
+                }
+            }
+        }
     }
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    Ok(parse_manifest::<serde_json::Value>(&text, what)?
-        .into_iter()
-        .filter_map(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned))
-        .collect())
+    Ok(ids)
 }
 
 /// 目録を**取り違えないように**書く（差分再監査＝🟡19 の残り）。

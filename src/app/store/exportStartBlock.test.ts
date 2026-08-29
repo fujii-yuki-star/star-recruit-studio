@@ -28,6 +28,7 @@ const base = {
   voiceRunning: false,
   knownTemplateIds: new Set<string>(),
   availableUserFontIds: null,
+  userFontsUnreadable: false,
   otherExportRunning: false,
   cleanupPending: false,
   canExportHere: true,
@@ -110,5 +111,20 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
     expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: null })).toBeNull();
     // 手元に無いと分かっているときだけ止める。
     expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: new Set() })?.message).toMatch(/文字の形/);
+  });
+
+  /**
+   * ⚠️ **「調べられなかった」も止める**（差分再監査 2巡目）＝場面形式は同じ状態を公開前チェックの
+   * `unknownFont` で止めるのに、こちらが素通りだと**同じ動画が形式によって止まったり出たり**する
+   *（ADR-0026②）。しかも描画は既定の字体へ倒れるので、通すと**別の字体の動画が成功**として出る。
+   */
+  it("目録が読めなかったときも、持ち込みフォントを使っていれば止める", () => {
+    const withFont = doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_001' }],
+    } as never);
+    expect(exportStartBlock({ ...base, doc: withFont, availableUserFontIds: null, userFontsUnreadable: true })?.message)
+      .toMatch(/調べられませんでした/);
+    // 使っていなければ止めない（読めなくても関係が無い）。
+    expect(exportStartBlock({ ...base, availableUserFontIds: null, userFontsUnreadable: true })).toBeNull();
   });
 });

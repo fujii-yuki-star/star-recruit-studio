@@ -66,9 +66,12 @@ export function isListedMaterial(assetType: AssetType): boolean {
 /**
  * 差し替えて**種類が変わる**か（#347）。
  *
- * ⚠️ **「動画かどうか」で見る**＝`detectAssetType` は `image`/`video` しか返さないので、
- * `assetType` と直接くらべると **`logo`/`yuko`/`qr`/`decor` が素通り**する（3人のレビューが揃って指摘）。
- * それらは絵なので**動画でないこと**を確かめれば守れる。音（BGM・読み上げ）はここへ来ない。
+ * ⚠️ **「動画かどうか」で見る**＝`assetType` と直接くらべると **`logo`/`yuko`/`qr`/`decor` が
+ * 素通り**する（3人のレビューが揃って指摘）。それらは絵なので**動画でないこと**を確かめれば守れる。
+ * ⚠️ **`detectAssetType` は `bgm` も返すようになった**（差分再監査＝よく使う素材で音を置けるように
+ * したため）。ここでは音は「動画でないもの」に含まれるので、**写真の素材へ音を差し替えても通る**が、
+ * 差し替えの入口（素材画面）は写真・動画しか選ばせないのでその状態には到達しない
+ *（到達するようになったら、`detectAssetType` の戻りが `bgm` のときも断る側へ足すこと）。
  */
 export function changesAssetKind(currentType: AssetType, newFileName: string): boolean {
   const wasVideo = currentType === ASSET_TYPE.video;

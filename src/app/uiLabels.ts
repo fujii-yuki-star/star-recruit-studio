@@ -694,6 +694,9 @@ export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeo
   // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
   TIMELINE_EXPORT_USER_FONT_MISSING:
     "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、使っている文字で別の文字の形を選び直してください",
+  // ⚠️ **「見つからない」とは別**＝目録が読めないので待っても埋まらない（場面形式の `unknownFont` と同じ）。
+  TIMELINE_EXPORT_USER_FONT_UNREADABLE:
+    "この動画は取り込んだ文字の形（フォント）を使っていますが、いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。アプリを開き直してから、もう一度お試しください",
 };
 
 /**

@@ -36,6 +36,25 @@ const TYPE_CHOICES: { label: string; value: AssetType | null }[] = [
   { label: "音楽", value: ASSET_TYPE.bgm },
 ];
 
+/**
+ * 「種類」で選べる選択肢（差分再監査 2巡目）。
+ *
+ * ⚠️ **中身から決まるものは付け替えさせない**＝写真↔動画↔音を変えると、**中身と種類がずれた素材**が
+ * できる（絵を動画スロットへ置けてしまい、書き出しの分岐を外れる）。拡張子で決まる種類はそのまま。
+ * ⚠️ **絵の中での付け替えだけ許す**（写真 ⇄ ロゴ）＝ロゴは拡張子では判らないので、ここでしか選べない。
+ * ⚠️ **いまの値は必ず選択肢に入れる**＝手で書いた目録の値（`yuko` 等）でも、開いた瞬間に
+ * 別の種類が選ばれた顔にならない（触らなければ変わらない）。
+ */
+function editableTypeChoices(current: AssetType): { label: string; value: AssetType }[] {
+  const pictures: { label: string; value: AssetType }[] = [
+    { label: "写真", value: ASSET_TYPE.image },
+    { label: "ロゴ", value: ASSET_TYPE.logo },
+  ];
+  if (pictures.some((c) => c.value === current)) return pictures;
+  const label = TYPE_CHOICES.find((c) => c.value === current)?.label ?? "そのまま";
+  return [{ label, value: current }];
+}
+
 export function AssetLibraryPanel() {
   const [items, setItems] = useState<LibraryAsset[]>([]);
   const [text, setText] = useState("");
@@ -276,18 +295,20 @@ export function AssetLibraryPanel() {
         </div>
       )}
 
+      {/* ⚠️ **件数に依らず出す**（差分再監査 2巡目）＝一度読めたあとに読めなくなると**古い一覧を
+          そのまま見せて何も言わない**（外したはずの行が残る）。兄弟2か所（持ち込みフォント・
+          会社の見た目）は件数を見ずに出しているので、同じ状態の見せ方を揃える（ADR-0026②）。 */}
+      {unreadable && (
+        <p className="form-error mt" role="alert">
+          よく使う素材の一覧を読めませんでした。ここに出ているものは古いかもしれません。アプリを開き直してから、もう一度お試しください。
+        </p>
+      )}
       {notice && <p className="field-hint mt">{notice}</p>}
       {error && <p className="form-error mt" role="alert">{error}</p>}
 
       <div className="mt">
         {items.length === 0 ? (
-          unreadable ? (
-            <p className="form-error" role="alert">
-              よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。
-            </p>
-          ) : (
-            <p className="field-hint">まだ何も置いていません。「素材を置く」から、よく使う写真やロゴを入れてください。</p>
-          )
+          <p className="field-hint">まだ何も置いていません。「素材を置く」から、よく使う写真やロゴを入れてください。</p>
         ) : shown.length === 0 ? (
           // ⚠️ **絞り込みで0件のときは「無い」と言わない**＝条件を外せば見えることを伝える（行き止まりにしない）。
           <p className="field-hint">条件に合う素材がありません。名前・種類・タグを変えてみてください。</p>
@@ -356,14 +377,17 @@ export function AssetLibraryPanel() {
           </label>
           <label className="field">
             <span className="field-label">種類</span>
-            {/* ⚠️ **ロゴはここでしか選べない**＝拡張子では写真と区別できない（ADR-0036 の「いつものロゴ」）。 */}
+            {/* ⚠️ **ロゴはここでしか選べない**＝拡張子では写真と区別できない（ADR-0036 の「いつものロゴ」）。
+                ⚠️ **選べるのは絵の種類だけ**（差分再監査 2巡目）＝写真↔動画↔音を付け替えると、
+                中身と種類がずれた素材ができる（絵を動画スロットへ置けてしまう）。中身から決まるもの
+                （写真・動画・音）は**取り込んだときのまま**にし、ここでは「写真 ⇄ ロゴ」だけ選べる。 */}
             <select
               className="input"
               value={editing.assetType}
               onChange={(e) => setEditing({ ...editing, assetType: e.target.value as AssetType })}
             >
-              {TYPE_CHOICES.filter((c) => c.value != null).map((c) => (
-                <option key={c.label} value={c.value as string}>{c.label}</option>
+              {editableTypeChoices(editing.assetType).map((c) => (
+                <option key={c.label} value={c.value}>{c.label}</option>
               ))}
             </select>
           </label>

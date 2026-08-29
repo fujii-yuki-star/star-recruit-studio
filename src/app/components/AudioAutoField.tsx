@@ -32,12 +32,29 @@ function nearest<T>(items: readonly T[], value: number, of: (t: T) => number): T
   return items.reduce((best, t) => (Math.abs(of(t) - value) < Math.abs(of(best) - value) ? t : best), items[0]);
 }
 
-export function AudioAutoField({ disabled }: { disabled?: boolean }) {
-  const audioAuto = useProjectStore((s) => s.meta.videoSettings.audioAuto);
+/**
+ * 音の自動処理の欄。**どちらの形式からも使える**（差分再監査 2巡目）。
+ *
+ * ⚠️ **タイムライン形式に入口が無かった**＝書き出しには効く（`domain/timeline/export.ts`）のに、
+ * 設定を書ける画面が場面形式にしか無く、**前の版の文書は読込時に「しない」を書き込まれる**ので
+ * **一度 OFF になると戻す手段が無い**（§2-5 の行き止まり）。欄を2つ作らず、値と書き先を渡せるようにする。
+ */
+export function AudioAutoField({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled?: boolean;
+  /** 省略＝場面形式の動画を読む（従来どおり）。 */
+  value?: AudioAutoSettings;
+  /** 省略＝場面形式の動画へ書く（従来どおり）。 */
+  onChange?: (next: AudioAutoSettings) => void;
+}) {
+  const sceneAudioAuto = useProjectStore((s) => s.meta.videoSettings.audioAuto);
   const updateAudioAuto = useProjectStore((s) => s.updateAudioAuto);
-  const v = resolveAudioAuto(audioAuto);
+  const v = resolveAudioAuto(value ?? sceneAudioAuto);
 
-  const patch = (next: AudioAutoSettings): void => updateAudioAuto(next);
+  const patch = (next: AudioAutoSettings): void => (onChange ?? updateAudioAuto)(next);
 
   const depth = nearest(DEPTH_CHOICES, v.duckDepth, (c) => c.value);
   const speed = nearest(SPEED_CHOICES, v.duckAttackSec, (c) => c.attack);
