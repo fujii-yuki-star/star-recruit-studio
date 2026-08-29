@@ -1119,7 +1119,10 @@ export function addVisualClip(
  */
 const VISUAL_CONTENT_KEYS = {
   [TIMELINE_CLIP_KIND.slot]: ['assetId', 'fit'],
-  [TIMELINE_CLIP_KIND.text]: ['text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign'],
+  // ⚠️ **影・字間も受ける**（差分再監査 3巡目・#264）＝ADR-0032 追補3 は「文字の体裁は**共有の語彙**」
+  // と決めており、描画（`layoutTimelineAt`→`layoutScene` の FREE 分岐）も焼き出しも通っているのに、
+  // **タイムライン側だけ書き込めない**と「同じ語彙なのに片方でしか編集できない項目」ができる。
+  [TIMELINE_CLIP_KIND.text]: ['text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign', 'letterSpacing', 'shadow'],
   [TIMELINE_CLIP_KIND.shape]: ['shapeType', 'fillColor'],
 } as const;
 
@@ -1127,7 +1130,8 @@ export function setVisualClipContent(
   doc: TimelineProject,
   clipId: string,
   patch: Partial<Pick<TimelineClip,
-    'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
+    'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'letterSpacing' | 'shadow'
+    | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);

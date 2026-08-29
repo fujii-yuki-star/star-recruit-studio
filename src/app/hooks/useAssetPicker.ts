@@ -6,11 +6,21 @@
 // **見た目の違う入口（はじめの入力の大きな枠）が共有から外れて取り残される**ので、振る舞いを分けて出す。
 import { useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isTauri } from "../../infrastructure/assetFs";
-import { IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from "../../domain/asset/assetFile";
-import { showOpenAssetsDialog } from "../../infrastructure/dialog";
+import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from "../../domain/asset/assetFile";
+import { showOpenAssetsDialog, showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 
 /** ファイル選択の絞り込み（`.png,.jpg,…`）。拡張子の正典から作る。 */
 const ACCEPT_ATTR = [...IMAGE_FILE_EXTENSIONS, ...VIDEO_FILE_EXTENSIONS].map((e) => `.${e}`).join(",");
+/**
+ * 音も選べる絞り込み（差分再監査 3巡目 ℹ️）。**タイムライン形式だけ**で使う。
+ *
+ * ⚠️ **場面形式は写真・動画のまま**＝BGM は BGM の導線から入れる（`BgmPicker`）。
+ * タイムライン形式は**音そのものが置ける部品**なので、取り込めないと
+ * **よく使う素材に置いた音楽がタイムラインへ届かない**（ADR-0035 が棚の中身に BGM を挙げている）。
+ */
+const ACCEPT_ATTR_WITH_AUDIO = [...IMAGE_FILE_EXTENSIONS, ...VIDEO_FILE_EXTENSIONS, ...AUDIO_FILE_EXTENSIONS]
+  .map((e) => `.${e}`)
+  .join(",");
 
 type Options = {
   /**
@@ -23,13 +33,18 @@ type Options = {
   onPick: (items: File[] | string[]) => void | Promise<void>;
   /** 押せないとき（取り込み中・書き出し中など）。 */
   disabled?: boolean;
+  /**
+   * 音も選べるようにするか（差分再監査 3巡目・**タイムライン形式だけ**）。
+   * ⚠️ 場面形式は写真・動画のまま＝BGM は BGM の導線から入れる。
+   */
+  withAudio?: boolean;
 };
 
 /**
  * `<label>` に広げて使う（中に `<input type=file>` を1つ置くこと）。
  * 返す `picking` は**ネイティブの「開く」を出している最中**＝二重に開かせない。
  */
-export function useAssetPicker({ onPick, disabled = false }: Options) {
+export function useAssetPicker({ onPick, disabled = false, withAudio = false }: Options) {
   const [picking, setPicking] = useState(false);
   const blocked = disabled || picking;
 
@@ -45,7 +60,9 @@ export function useAssetPicker({ onPick, disabled = false }: Options) {
   async function pickNative() {
     setPicking(true);
     try {
-      const paths = await showOpenAssetsDialog();
+      // ⚠️ **2つのふるいを揃える**＝`accept` で音を許すなら、ネイティブの「開く」も同じにする
+      // （片方だけだと、ボタンからは選べるのにアプリの中では選べない＝差分再監査 3巡目）。
+      const paths = withAudio ? await showOpenLibraryAssetsDialog() : await showOpenAssetsDialog();
       if (paths.length > 0) await onPick(paths);
     } finally {
       setPicking(false);
@@ -77,7 +94,7 @@ export function useAssetPicker({ onPick, disabled = false }: Options) {
       type: "file" as const,
       // 取り込める形式の正典（`assetFile.ts`）から作る＝ネイティブの「開く」の絞り込み
       // （`infrastructure/dialog.ts`）と**同じ一覧**を見る（2つのふるいが食い違わない）。
-      accept: ACCEPT_ATTR,
+      accept: withAudio ? ACCEPT_ATTR_WITH_AUDIO : ACCEPT_ATTR,
       // ⚠️ **ブラウザ側も複数選べる**（#858）＝アプリの中（ネイティブの「開く」）だけ一括だと、
       // 同じ画面の同じボタンで挙動が割れる（ADR-0026②）。
       multiple: true,

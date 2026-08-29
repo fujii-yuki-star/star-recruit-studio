@@ -6,6 +6,7 @@
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
 import { useEffect, useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
@@ -71,6 +72,10 @@ export function AssetLibraryPanel() {
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string; assetType: AssetType } | null>(null);
   const importFromLibrary = useProjectStore((s) => s.importFromLibrary);
   const isImporting = useProjectStore((s) => s.isImporting);
+  // ⚠️ **取り込み先は場面形式の動画**（差分再監査 3巡目 🟡）＝`importFromLibrary` は場面形式にしか
+  // 入らない。タイムラインを開いている間に押すと、**画面に映っていない別の文書**へ入って
+  // 「この動画へ取り込みました」と出る（場面形式が未オープンなら**新しい動画の番号まで採る**）。
+  const timelineOpen = useTimelineStore((s) => s.doc != null);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
@@ -99,13 +104,17 @@ export function AssetLibraryPanel() {
 
   // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
   // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
+  // ⚠️ **取り込みだけは行き先が違うと押せない**（🟡）＝置く・名前を直す・外すは棚の操作なので通す。
   const working = busy || isImporting || isExporting;
+  const importBlocked = working || timelineOpen;
   // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
   const blockedReason = isExporting
     ? "書き出しが終わるまでお待ちください"
     : isImporting
       ? "いま取り込んでいます"
-      : undefined;
+      : timelineOpen
+        ? "タイムラインで作った動画へは、ここからは取り込めません"
+        : undefined;
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
@@ -342,7 +351,7 @@ export function AssetLibraryPanel() {
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}
                 </span>
-                <button type="button" className="btn btn-secondary" disabled={working} title={blockedReason} onClick={() => void onImport(a)}>
+                <button type="button" className="btn btn-secondary" disabled={importBlocked} title={blockedReason} onClick={() => void onImport(a)}>
                   この動画で使う
                 </button>
                 <button

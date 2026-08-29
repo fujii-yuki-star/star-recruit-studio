@@ -8,15 +8,22 @@ function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-/** ブランドキットを読む（無ければ空）。 */
-export async function loadBrandKit(): Promise<BrandKit> {
+/**
+ * ブランドキットを読む（無ければ空）。**`null` ＝読めなかった**（「何も覚えていない」とは別）。
+ *
+ * ⚠️ **空に潰さない**（差分再監査 3巡目 🟡）＝空を見せた直後の `updateBrandKit` が**そのまま
+ * 上書き**して、覚えていた字体・色・ロゴが消える。目録（`parse_manifest`）も読み方辞書も、
+ * 同じ状況では**断ってファイルを守る**（ADR-0026②）。α-6 で3回直した「読めなかった≠1つも無い」
+ *（`listUserFonts`／`listLibraryAssets`／設定画面の表示）の取り残し。
+ */
+export async function loadBrandKit(): Promise<BrandKit | null> {
   if (!isTauri()) return emptyBrandKit();
   try {
     const text = await invoke<string | null>('load_brand_kit');
     return text == null ? emptyBrandKit() : parseBrandKit(text);
   } catch {
-    // 読めなくても画面は開ける（キットが無いのと同じ扱い）＝行き止まりにしない。
-    return emptyBrandKit();
+    // 読めなくても画面は開ける（行き止まりにしない）＝ただし**空とは区別する**。
+    return null;
   }
 }
 

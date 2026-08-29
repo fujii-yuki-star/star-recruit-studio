@@ -459,6 +459,11 @@ interface ProjectState {
   /** 会社の見た目の保存で出た理由（§2-5）。 */
   brandKitError: string | null;
   /**
+   * 会社の見た目を**読めなかった**か（差分再監査 3巡目）。**「何も覚えていない」とは別**＝
+   * 空に潰すと、直後の書き込みが**覚えていた中身をそのまま上書き**して消える。
+   */
+  brandKitUnreadable: boolean;
+  /**
    * ブランドキットをいまの動画へ**適用し直す**（#351 決定3）。**できたかどうかを返す**。
    * ⚠️ **自動では遡及しない**（§2-5）＝この明示操作のときだけ。何がいくつ変わるかは
    * 押す前に `planBrandApply` で見せる。取り消し（Undo）で戻せる。
@@ -711,6 +716,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   missingAssetIds: [],
   brandKit: {},
   brandKitError: null,
+  brandKitUnreadable: false,
   userFontIds: null,
   userFontsUnreadable: false,
   userFonts: [],
@@ -2284,6 +2290,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(projectId, relPath));
       const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : null;
 
+      // ⚠️ **本命の着地も括る**（差分再監査 3巡目 🟡）＝`projectId` だけ括っても足りない。
+      // 番号は動画ごとに採り直すので `asset_003` は新しい動画にも居る＝`curAsset` は見つかってしまい、
+      // **新しい動画の素材の場所を、前の動画のフォルダのパスで上書き**する（場面の収め直しごと）。
+      if (!stillOpen()) return;
       const cur = get();
       const curAsset = cur.assets.find((a) => a.assetId === assetId);
       if (!curAsset) return; // 待っている間に消されていたら何も書かない
@@ -2308,16 +2318,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses) : null,
       }));
     } catch (e) {
-      set({ importError: importErrorMessage(e) });
+      if (stillOpen()) set({ importError: importErrorMessage(e) });
     } finally {
       set({ isImporting: false });
     }
   },
 
   refreshBrandKit: async () => {
-    set({ brandKit: await loadBrandKit() });
+    const kit = await loadBrandKit();
+    // ⚠️ **読めなかったら「何も覚えていない」に潰さない**（差分再監査 3巡目 🟡）＝空を見せると、
+    // 直後の `updateBrandKit` が**そのまま上書き**して覚えていた字体・色・ロゴが消える。
+    // 読めていない間は**書かせない**（目録・読み方辞書と同じ流儀＝ADR-0026②）。
+    if (kit == null) { set({ brandKitUnreadable: true }); return; }
+    set({ brandKit: kit, brandKitUnreadable: false });
   },
   updateBrandKit: async (next) => {
+    // ⚠️ **読めていないものを上書きしない**（差分再監査 3巡目 🟡）＝覚えている中身が分からない
+    // 状態で書くと、消えたことにも気づけない。
+    if (get().brandKitUnreadable) {
+      set({ brandKitError: "会社の見た目を読めませんでした。中身を失わないよう、変えられません。アプリを開き直してください。" });
+      return false;
+    }
     // ⚠️ **書けなかったら覚えた顔をしない**（α-6 出口監査 🟡23・§2-5）＝画面だけ変えて保存に失敗すると、
     // 開き直したときに黙って消えている（何を変えたか本人も分からない）。画面を戻して理由を出す。
     const before = get().brandKit;

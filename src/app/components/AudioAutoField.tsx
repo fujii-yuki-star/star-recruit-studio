@@ -58,7 +58,18 @@ export function AudioAutoField({
   const ownsValue = onChange != null;
   const v = resolveAudioAuto(ownsValue ? value : sceneAudioAuto);
 
-  const patch = (next: AudioAutoSettings): void => (onChange ?? updateAudioAuto)(next);
+  /**
+   * 1項目だけ変える。⚠️ **重ねてから渡す**（差分再監査 3巡目 🔴）＝欄は「変えた項目だけ」を渡すが、
+   * 受け口が2つある（場面形式の `updateAudioAuto` は中で重ねる／タイムラインは `videoSettings` を
+   * 差し替える）ので、渡す側で重ねないと**触っていない項目が消えて既定に化ける**。
+   * 前の版の文書は `{duckBgm:false, normalize:false}` を持つので、片方を触ると
+   * **もう片方が既定の「する」に戻り、開いて触っただけで別の音の動画になる**（§2-5・ADR-0026①）。
+   * ⚠️ **重ねるのは「いまの値」で、既定を埋めた値ではない**＝触っていない項目に既定を書き込まない。
+   */
+  const patch = (next: AudioAutoSettings): void => {
+    const merged: AudioAutoSettings = { ...(ownsValue ? value : sceneAudioAuto), ...next };
+    (onChange ?? updateAudioAuto)(merged);
+  };
 
   const depth = nearest(DEPTH_CHOICES, v.duckDepth, (c) => c.value);
   const speed = nearest(SPEED_CHOICES, v.duckAttackSec, (c) => c.attack);

@@ -9,6 +9,8 @@ type Props = {
    * ブラウザは `File[]`、アプリの中は絶対パスの `string[]`。
    */
   onPick: (items: File[] | string[]) => void | Promise<void>;
+  /** 音も選べるようにするか（タイムライン形式だけ・差分再監査 3巡目）。 */
+  withAudio?: boolean;
   /** 取り込み中（押せなくし、そう見せる）。 */
   isImporting: boolean;
   /**
@@ -31,9 +33,9 @@ type Props = {
   className?: string;
 };
 
-export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, variant = "primary", label = "素材を追加", className }: Props) {
+export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, variant = "primary", label = "素材を追加", className, withAudio = false }: Props) {
   const disabled = isImporting || !!disabledReason;
-  const { picking, labelProps, inputProps } = useAssetPicker({ onPick, disabled });
+  const { picking, labelProps, inputProps } = useAssetPicker({ onPick, disabled, withAudio });
   const off = disabled || picking;
 
   return (
