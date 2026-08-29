@@ -11,7 +11,7 @@ import {
   alpha6Message, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage,
 } from "./uiLabels";
-import { READING_DICT_SYNC_FAILED } from "../infrastructure/voiceProviders/readingDictSync";
+import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 
@@ -62,6 +62,7 @@ function codeMessages(): Record<string, string> {
     ...alpha6Message,
     READING_DICT_SYNC_FAILED,
     READING_DICT_UNREADABLE,
+    READING_DICT_UNREADABLE_FOR_VOICE,
     // ⚠️ **件数が入る文は `N` を差し込んで比べる**（表は読みやすさのため ` N ` と空白つきで書く）。
     USER_FONT_MISSING: userFontMissingMessage(" N "),
     USER_FONT_UNREADABLE: userFontUnreadableMessage(" N "),

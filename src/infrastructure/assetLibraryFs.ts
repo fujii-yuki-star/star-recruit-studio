@@ -3,7 +3,7 @@
 // Tauri 非検出時（ブラウザ開発）は空・no-op＝開発フローを止めない（userTemplateFs と同方針）。
 import { invoke } from '@tauri-apps/api/core';
 import { isLibraryAssetId, type LibraryAsset } from '../domain/asset/assetLibrary';
-import { isAssetType } from '../domain/enums';
+import { isAssetType, type AssetType } from '../domain/enums';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -16,13 +16,17 @@ function isTauri(): boolean {
  * ファイルから来るのに、そのまま `Asset.assetType` へ流れていた（知らない種類は描画・書き出しで
  * 分岐を外れる）。兄弟（`parseBrandKit`・`parseReadingDictWithDrops`）と同じく**項目ごとに落とす**。
  */
-export async function listLibraryAssets(): Promise<LibraryAsset[]> {
+export async function listLibraryAssets(): Promise<LibraryAsset[] | null> {
+  // ⚠️ **ブラウザ開発は「0件」で確定**（`null` ではない）＝この環境に棚は無い。
   if (!isTauri()) return [];
   try {
     return (await invoke<unknown[]>('list_library_assets')).flatMap(toLibraryAsset);
   } catch {
+    // ⚠️ **「読めなかった」を「1つも無い」にしない**（差分再監査）＝空を返すと画面が
+    // 「まだ何も置いていません」と言い、置いてあるものが**消えたように見える**（§2-5）。
+    // 持ち込みフォント側（`listUserFonts`）と同じ流儀＝`null` は「まだ分からない」。
     // 一覧が読めなくても画面は開ける（プロジェクトの素材は使える）＝行き止まりにしない。
-    return [];
+    return null;
   }
 }
 
@@ -89,7 +93,9 @@ export async function updateLibraryAsset(
   assetId: string,
   displayName: string,
   tags: readonly string[],
+  /** 種類（差分再監査）。**ロゴはファイル名から判らない**ので、置いたあとに選ぶ。省略＝変えない。 */
+  assetType?: AssetType,
 ): Promise<void> {
   if (!isTauri()) return;
-  await invoke('update_library_asset', { assetId, displayName, tags: [...tags] });
+  await invoke('update_library_asset', { assetId, displayName, tags: [...tags], assetType: assetType ?? null });
 }

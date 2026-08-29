@@ -149,6 +149,11 @@ export function exportStartBlock(input: {
   /** 声を作る回が走っているか（#755）。⚠️ **印ではなく回**＝印は開き直しで消える。 */
   voiceRunning: boolean;
   knownTemplateIds: Set<string>;
+  /**
+   * いま手元にある**持ち込みフォント**の id（α-6 差分再監査）。**`null`＝まだ調べていない**＝見ない
+   *（`missingAsset`／#347 と同じ流儀で、調べていないのに「見つからない」と断らない）。
+   */
+  availableUserFontIds: Set<string> | null;
   otherExportRunning: boolean;
   /** 直前の回の後片づけ待ちか（#843）＝`isOwnCleanupPending`。押せるのに押すと断られる、を作らない。 */
   cleanupPending: boolean;
@@ -164,7 +169,10 @@ export function exportStartBlock(input: {
   // ⚠️ **自分の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
   // ボタンが戻っているのに `acquire` が失敗する。断り文は**別のもの**にする（走っている「ほかの動画」は無い）。
   if (input.cleanupPending) return { message: EXPORT_CLEANUP_PENDING_MESSAGE, phase: P.error, source: S.situation };
-  const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
+  const blockers = timelineExportBlockers(input.doc, {
+    knownTemplateIds: input.knownTemplateIds,
+    ...(input.availableUserFontIds ? { availableUserFontIds: input.availableUserFontIds } : {}),
+  });
   if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
   // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
   if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported, source: S.situation };
@@ -1498,6 +1506,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       isImporting: get().isImporting,
       voiceRunning: get()._voiceRun != null,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
+      // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
+      availableUserFontIds: useProjectStore.getState().userFontIds
+        ? new Set(useProjectStore.getState().userFontIds as string[])
+        : null,
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
       // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
       cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),

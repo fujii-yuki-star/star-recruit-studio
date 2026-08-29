@@ -18,6 +18,17 @@ import type { ReadingEntry } from '../../domain/voice/readingDict';
  * `Error` で投げると**この文言が一度も画面に出ず**、「しばらくしてから、もう一度」＝効かない
  * 次の行動に化ける（PR #883 レビュー）。
  */
+/**
+ * 辞書のファイルが読めないので声を作らない（差分再監査・ADR-0037 決定7）。
+ *
+ * ⚠️ **設定画面向けの文言を流用しない**＝あちらは「足す・外すは止めています」で、
+ * 声を作ろうとしている人には**いま何が起きたのか**が伝わらない（§2-5＝次の行動を示す）。
+ */
+export const READING_DICT_UNREADABLE_FOR_VOICE =
+  '読み方の一覧を読めませんでした。' +
+  'このまま声を作ると、会社名や人名が違う読みになることがあります。' +
+  'アプリを開き直してから、もう一度お試しください。';
+
 export const READING_DICT_SYNC_FAILED =
   '読み方を音声ソフトへ反映できませんでした。' +
   '設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。' +
@@ -69,7 +80,15 @@ export async function ensureReadingDictSynced(): Promise<void> {
   if (syncedFor === target) return;
   if (inFlight) return inFlight;
   inFlight = (async () => {
-    const dict = (await loadReadingDict()).file;
+    // ⚠️ **辞書が読めないときの断りは「声を作る」文脈の言葉にする**（差分再監査・§2-5）＝
+    // 目録の文言（「足す・外すは止めています」）をそのまま出すと、いましている操作と噛み合わない。
+    // 断ること自体は決定7 のとおり（誤読のまま成功にしない）。
+    let dict;
+    try {
+      dict = (await loadReadingDict()).file;
+    } catch {
+      throw READING_DICT_UNREADABLE_FOR_VOICE;
+    }
     if (dict.entries.length === 0 && Object.keys(dict.links).length === 0) {
       syncedFor = target;
       lastConflicts = [];

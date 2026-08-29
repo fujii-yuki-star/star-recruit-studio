@@ -1,7 +1,7 @@
 // 保存ダイアログ（Tauriプラグイン境界）。app 層から Tauri 依存を隔離する（CLAUDE.md §4）。
 // 呼び出し側は Tauri 検出済み（canExport 等）であること。キャンセル時は null を返す。
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from '../domain/asset/assetFile';
+import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from '../domain/asset/assetFile';
 
 /** 動画(MP4)の保存先をネイティブ保存ダイアログで選ぶ。defaultName は拡張子なしの初期ファイル名。キャンセル時は null。 */
 export async function showSaveVideoDialog(defaultName: string): Promise<string | null> {
@@ -26,6 +26,25 @@ export async function showOpenAssetsDialog(): Promise<string[]> {
     ],
   });
   // multiple:true でも 1件のときに string が返る実装があるため、どちらも配列へ正規化する。
+  if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string');
+  return typeof picked === 'string' ? [picked] : [];
+}
+
+/**
+ * **よく使う素材**（ADR-0035）へ置くファイルを選ぶ。写真・動画に加えて**音楽**も選べる。
+ *
+ * ⚠️ **動画の素材の取り込みとは別の口**（α-6 差分再監査）＝あちら（`showOpenAssetsDialog`）は
+ * 写真・動画だけで、BGM は BGM の導線から入れる。棚の側は ADR-0035 が**ロゴ・写真・BGM**を
+ * 挙げているので、音も選べないと「置けるはずのものが置けない」になる（種類のタブが常に0件）。
+ */
+export async function showOpenLibraryAssetsDialog(): Promise<string[]> {
+  const picked = await open({
+    multiple: true,
+    directory: false,
+    filters: [
+      { name: '写真・動画・音楽', extensions: [...IMAGE_FILE_EXTENSIONS, ...VIDEO_FILE_EXTENSIONS, ...AUDIO_FILE_EXTENSIONS] },
+    ],
+  });
   if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string');
   return typeof picked === 'string' ? [picked] : [];
 }

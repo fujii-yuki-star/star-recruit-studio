@@ -690,6 +690,10 @@ export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeo
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
   TIMELINE_EXPORT_ASSET_UNREADABLE:
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
+  // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
+  // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
+  TIMELINE_EXPORT_USER_FONT_MISSING:
+    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、使っている文字で別の文字の形を選び直してください",
 };
 
 /**

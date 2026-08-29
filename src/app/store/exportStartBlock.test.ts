@@ -27,6 +27,7 @@ const base = {
   isImporting: false,
   voiceRunning: false,
   knownTemplateIds: new Set<string>(),
+  availableUserFontIds: null,
   otherExportRunning: false,
   cleanupPending: false,
   canExportHere: true,

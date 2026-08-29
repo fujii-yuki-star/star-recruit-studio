@@ -364,6 +364,38 @@ fn parse_manifest<T: serde::de::DeserializeOwned>(
         .collect())
 }
 
+/// 目録から **`id` だけ**を生のまま拾う（採番の入力・差分再監査）。
+///
+/// ⚠️ **形の合わない行も数える**＝`parse_manifest` が落とした行の番号を再発行しないため。
+/// 番号は「使ったことがあるか」だけが要るので、ほかのフィールドは見ない。
+fn raw_manifest_ids(path: &std::path::Path, what: &str) -> Result<Vec<String>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(parse_manifest::<serde_json::Value>(&text, what)?
+        .into_iter()
+        .filter_map(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned))
+        .collect())
+}
+
+/// 目録を**取り違えないように**書く（差分再監査＝🟡19 の残り）。
+///
+/// ⚠️ **途中で止まっても壊れた目録を残さない**＝直に上書きすると、書いている最中の中断で
+/// **半端な JSON**や 0 バイトのファイルが残る（そこから先は `parse_manifest` が断り続ける）。
+/// 隣に書いてから**名前を付け替える**（同じフォルダなので付け替えは1手）。
+fn write_manifest_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    // ⚠️ **Windows は既存があると `rename` が失敗する**ので、先に消してから付け替える。
+    // （消してから付け替えるまでの間に落ちると目録が無い状態になるが、**壊れた目録より扱いやすい**
+    //   ＝「無ければ空」で開けて、次の書き込みで作り直せる。）
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
 /// 目録を読む（無ければ空）。**壊れた行だけ落とし、配列ですら無ければ断る**（`parse_manifest`）。
 fn read_user_fonts(app: &tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> {
     let path = user_fonts_manifest(app)?;
@@ -378,7 +410,7 @@ fn write_user_fonts(app: &tauri::AppHandle, list: &[UserFontEntry]) -> Result<()
     let dir = user_fonts_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
-    fs::write(dir.join("fonts.json"), text).map_err(|e| e.to_string())
+    write_manifest_atomic(&dir.join("fonts.json"), &text)
 }
 
 /// 持ち込みフォントの一覧（目録のうち**実体があるものだけ**）。
@@ -398,9 +430,11 @@ fn list_user_fonts(app: tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> 
 ///
 /// ⚠️ **一覧（`list_user_fonts`）は使えない**＝実体があるものだけを返すので、
 /// 最大番号を外すと**同じ番号が再発行**される（その番号を指す動画が黙って別の字体になる）。
+/// ⚠️ **壊れた行の番号も拾う**（差分再監査）＝`parse_manifest` は形の合わない行を落とすので、
+/// そこから採ると**落ちた行の番号が再発行**され、墓標で塞いだはずの失敗が再現する。
 #[tauri::command]
 fn used_user_font_ids(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    Ok(read_user_fonts(&app)?.into_iter().map(|e| e.id).collect())
+    raw_manifest_ids(&user_fonts_manifest(&app)?, "取り込んだ文字の形")
 }
 
 /// フォントを持ち込む（利用者が選んだファイルを `user_fonts/<id>.<ext>` へコピーし、目録に足す）。
@@ -563,7 +597,7 @@ fn write_library(app: &tauri::AppHandle, list: &[LibraryAsset]) -> Result<(), St
     let dir = user_assets_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
-    fs::write(dir.join("library.json"), text).map_err(|e| e.to_string())
+    write_manifest_atomic(&dir.join("library.json"), &text)
 }
 
 /// ライブラリの一覧（目録のうち**実体があるものだけ**）。
@@ -581,7 +615,7 @@ fn list_library_assets(app: tauri::AppHandle) -> Result<Vec<LibraryAsset>, Strin
 /// **これまでに使った番号**（墓標＝外したものを含む）。採番だけに使う（α-6 出口監査 🟡8）。
 #[tauri::command]
 fn used_library_asset_ids(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    Ok(read_library(&app)?.into_iter().map(|e| e.id).collect())
+    raw_manifest_ids(&user_assets_manifest(&app)?, "よく使う素材")
 }
 
 /// 素材をライブラリへ置く（利用者が選んだファイルをコピーし、目録に足す）。
@@ -711,6 +745,7 @@ fn update_library_asset(
     asset_id: String,
     display_name: String,
     tags: Vec<String>,
+    asset_type: Option<String>,
 ) -> Result<(), String> {
     if !is_library_asset_id(&asset_id) {
         return Err("この素材は直せませんでした。".to_string());
@@ -722,8 +757,27 @@ fn update_library_asset(
     if !display_name.trim().is_empty() {
         e.display_name = display_name;
     }
+    // ⚠️ **種類も直せる**（差分再監査）＝**ロゴはファイル名から判らない**（拡張子は写真と同じ）ので、
+    // 置いたあとに選ぶしかない。選べないと ADR-0036 の「いつものロゴ」がどこからも設定できない。
+    // ⚠️ **知らない値は入れない**＝目録は手で書き換えられるファイルなので、受け側で形を見る（§2-2）。
+    if let Some(t) = asset_type {
+        if is_known_asset_type(&t) {
+            e.asset_type = t;
+        }
+    }
     e.tags = tags;
     write_library(&app, &list)
+}
+
+/// 素材の種類として受けてよい値か（`domain/enums.ts` の `ASSET_TYPES` と同じ一覧）。
+///
+/// ⚠️ **一覧が2か所にある**（Rust と domain）＝境界で形を見るのに要る。増えたら両方へ足す
+///（`is_library_asset_id` と同じ事情。テストで同値性を固定する）。
+fn is_known_asset_type(v: &str) -> bool {
+    matches!(
+        v,
+        "image" | "video" | "bgm" | "voice" | "yuko" | "decor" | "logo" | "qr"
+    )
 }
 
 /// `lib_asset_NNN` の形か（`assetLibrary.ts` の `LIBRARY_ASSET_ID_RE` と一致＝パストラバーサル防止も兼ねる）。
@@ -942,6 +996,24 @@ mod manifest_tests {
             let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("通るはず");
             assert!(list.is_empty(), "text={text:?}");
         }
+    }
+
+    /// ⚠️ **採番の入力は壊れた行の番号も拾う**（差分再監査）＝`parse_manifest` が落とした行から
+    /// 採ると**その番号が再発行**され、墓標で塞いだ「同じ番号が別のものを指す」が再現する。
+    #[test]
+    fn raw_ids_include_broken_rows() {
+        let text = r#"[
+          {"id":"lib_asset_001","fileName":"a.png","displayName":"ロゴ","assetType":"logo","tags":[]},
+          {"id":"lib_asset_009"},
+          {"noId":true}
+        ]"#;
+        let ids: Vec<String> = parse_manifest::<serde_json::Value>(text, "よく使う素材")
+            .expect("読めるはず")
+            .into_iter()
+            .filter_map(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned))
+            .collect();
+        // 形の合わない `lib_asset_009` も番号として数える（落とすと再発行される）。
+        assert_eq!(ids, vec!["lib_asset_001", "lib_asset_009"]);
     }
 
     /// ⚠️ **配列ですら無いときは断る**＝「空だった」と扱うと書き込みが走って壊れたファイルを上書きする。

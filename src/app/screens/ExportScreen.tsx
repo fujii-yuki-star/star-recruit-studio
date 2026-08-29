@@ -90,7 +90,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const fontsForBlocking = useMemo(
     // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
-    () => ({ projectFontId, userFontsUnreadable, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) }),
+    // ⚠️ **読めなかったときは一覧を渡さない**（差分再監査）＝古い一覧が残っていると
+    // 「調べられません」と「N つ見つかりません」が同時に出る（矛盾する2つの断り）。
+    () => ({ projectFontId, userFontsUnreadable, ...(userFontIds && !userFontsUnreadable ? { availableUserFontIds: userFontIds } : {}) }),
     [projectFontId, userFontIds, userFontsUnreadable],
   );
   // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
@@ -215,7 +217,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const blocking = exportBlockingItems(
         st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations,
         // ⚠️ 押した瞬間の再確認でも同じ材料を見る（`null`＝まだ調べていない＝項目を出さない）。
-        { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds ? { availableUserFontIds: st.userFontIds } : {}) },
+        { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
       );
       if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;

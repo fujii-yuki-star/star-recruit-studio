@@ -1093,11 +1093,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
   // 別形式の書き出しが走っていないか（締めの持ち主）。store の開始チェックと同じものを見る。
   const exportLockOwner = useExportLockStore((s) => s.owner);
+  // ⚠️ **持ち込みフォントが手元にあるか**（α-6 差分再監査）＝場面形式と同じ門を通す（ADR-0026②）。
+  const userFontIds = useProjectStore((s) => s.userFontIds);
   const exportBlockers = useMemo(
     // 見た目の未解決も理由になる（描かれないものを黙って落とした動画を成功にしない・ADR-0026④）。
     // 一覧で並べるのは**文書の中身の理由**だけ（下の `exportBlocked` は「いま始められない事情」も含む）。
-    () => (doc ? timelineExportBlockers(doc, { knownTemplateIds: new Set(templates.map((t) => t.templateId)) }) : []),
-    [doc, templates],
+    () => (doc
+      ? timelineExportBlockers(doc, {
+        knownTemplateIds: new Set(templates.map((t) => t.templateId)),
+        ...(userFontIds ? { availableUserFontIds: new Set(userFontIds) } : {}),
+      })
+      : []),
+    [doc, templates, userFontIds],
   );
   /**
    * **押す前に断る理由**（#718）。store の開始チェックと**同じ述語**を通す＝画面が塞いでいない理由で
@@ -1110,11 +1117,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         isImporting,
         voiceRunning: voiceRunning,
         knownTemplateIds: new Set(templates.map((t) => t.templateId)),
+        // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
+        availableUserFontIds: userFontIds ? new Set(userFontIds) : null,
         otherExportRunning: exportLockOwner != null && exportLockOwner !== EXPORT_OWNER,
         cleanupPending: isOwnCleanupPending(exportLockOwner, EXPORT_OWNER, isTimelineExportBusy(exportRun.phase)),
         canExportHere: canExport(),
       }),
-    [doc, isImporting, voiceRunning, templates, exportLockOwner, exportRun.phase],
+    [doc, isImporting, voiceRunning, templates, userFontIds, exportLockOwner, exportRun.phase],
   );
   const exporting = isTimelineExportBusy(exportRun.phase);
   // 書き出しが終わったら「離れられない」理由も出しっぱなしにしない（出ている条件から導く）。
