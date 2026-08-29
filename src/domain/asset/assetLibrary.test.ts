@@ -118,6 +118,15 @@ describe('filterLibraryAssets（タグで探せる＝#260 で足りなかった�
     expect(filterLibraryAssets(items, { text: '  写真  ' }).map((a) => a.id)).toEqual(['lib_asset_002']);
   });
 
+  /**
+   * ⚠️ **名前とタグの両方で探せる**（α-6 出口監査 🟡28・素材画面と同じ作法＝#858）＝
+   * どちらで覚えているか分からないので片方だけにしない。**同じ画面に縦に並ぶ2つの絞り込みで
+   * 作法が違うと、片方で見つかるものが片方で見つからない**。
+   */
+  it('名前に無くてもタグで当たる', () => {
+    expect(filterLibraryAssets(items, { text: '採用' }).map((a) => a.id)).toEqual(['lib_asset_003']);
+  });
+
   it('種類でも絞れる', () => {
     expect(filterLibraryAssets(items, { assetType: ASSET_TYPE.video }).map((a) => a.id)).toEqual(['lib_asset_003']);
   });

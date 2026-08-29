@@ -3,7 +3,7 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「ブランドキット」「アセット」は出さず「会社の見た目」と書く。
 // ⚠️ **自動では遡及しない**（決定3・§2-5）＝既にある動画は「この動画に反映する」を押したときだけ変わる。
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
@@ -29,6 +29,11 @@ export function BrandKitSection() {
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const hasLogoAsset = useProjectStore((s) => s.assets.some((a) => a.assetType === ASSET_TYPE.logo));
+  // ⚠️ **場面ごとに文字の形を選んだ場面は変わらない**（α-6 出口監査 🟡31）＝数えて先に見せる。
+  // ⚠️ **選ぶのは `scenes` そのもの**＝選ぶ式の中で `map` すると**毎回ちがう配列**が返り、
+  // zustand が「変わった」と見て**描き直しが止まらなくなる**（実際に無限ループになった）。
+  const scenes = useProjectStore((s) => s.scenes);
+  const sceneFontIds = useMemo(() => scenes.map((sc) => sc.fontId), [scenes]);
   // 覚えている字体が、同梱にも手持ちの一覧にも無いか（外した／まだ読めていない）。
   const missingBrandFont =
     brandKit.fontId != null
@@ -56,7 +61,7 @@ export function BrandKitSection() {
   }, []);
 
   const colors = brandKit.colors ?? [];
-  const plan = planBrandApply(brandKit, { fontId: projectFontId, hasLogoAsset });
+  const plan = planBrandApply(brandKit, { fontId: projectFontId, hasLogoAsset, sceneFontIds });
   const nothingToApply = isNoopBrandApply(plan);
 
   const [error, setError] = useState("");
@@ -190,6 +195,11 @@ export function BrandKitSection() {
                 {plan.fontChanges && <li>・動画全体の文字の形が変わります</li>}
                 {/* ⚠️ **既にあるロゴは置き換えない**（作り込みを消さない）＝足すのは持っていないときだけ。 */}
                 {plan.addsLogo && <li>・ロゴを1つ足します（すでにあるロゴは置き換えません）</li>}
+                {/* ⚠️ **変わらないものも先に見せる**（🟡31）＝場面ごとの指定は動画全体より優先されるので、
+                    その場面は反映しても見た目が変わらない。言わないと押したあとに自分で気づくしかない。 */}
+                {plan.keptScenes > 0 && (
+                  <li>・自分で文字の形を選んでいる場面{plan.keptScenes}個は、そのままです</li>
+                )}
               </ul>
               <button
                 type="button"

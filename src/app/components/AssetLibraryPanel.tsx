@@ -6,6 +6,8 @@
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
 import { useEffect, useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { DeleteConfirm } from "./DeleteConfirm";
+import { isListedMaterial } from "../../domain/asset/assetFile";
 import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import {
   addLibraryAsset,
@@ -40,6 +42,9 @@ export function AssetLibraryPanel() {
   const [tags, setTags] = useState<string[]>([]);
   const [assetType, setAssetType] = useState<AssetType | null>(null);
   const [busy, setBusy] = useState(false);
+  // ⚠️ **外すのは確認を通す**（α-6 出口監査 🟡27）＝同じ画面の素材削除は必ず確認を通すのに、
+  // ここだけ1クリックで消えていた（同じ画面に「確認する削除」と「1クリック削除」を同居させない）。
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string } | null>(null);
@@ -121,10 +126,19 @@ export function AssetLibraryPanel() {
     setError("");
     const id = await importFromLibrary(a.id);
     // 失敗の文言は取り込みと同じ場所（`importError`）に出る＝ここでは成功したときだけ知らせる。
-    if (id) setNotice(`「${a.displayName}」をこの動画へ取り込みました。素材の一覧に増えています。`);
+    // ⚠️ **どこに増えたかは種類で変わる**（α-6 出口監査 🟡29）＝音（BGM・読み上げ）は**素材の一覧に出ない**
+    //（`isListedMaterial`）ので、「素材の一覧に増えています」と言うと**案内どおり探しても見つからない**（§2-5）。
+    if (id) {
+      setNotice(
+        isListedMaterial(a.assetType)
+          ? `「${a.displayName}」をこの動画へ取り込みました。素材の一覧に増えています。`
+          : `「${a.displayName}」をこの動画へ取り込みました。音は素材の一覧には並びません。「動画を保存」のBGMから選べます。`,
+      );
+    }
   }
 
   async function onDelete(a: LibraryAsset): Promise<void> {
+    setConfirming(null);
     setNotice("");
     setError("");
     setBusy(true);
@@ -182,23 +196,39 @@ export function AssetLibraryPanel() {
         </button>
       </div>
 
-      <div className="row mt" style={{ flexWrap: "wrap" }}>
-        <label className="field" style={{ margin: 0, flex: 1, minWidth: 180 }}>
-          <span className="field-label">名前で探す</span>
-          <input className="input" value={text} placeholder="例：ロゴ" onChange={(e) => setText(e.target.value)} />
-        </label>
-        <label className="field" style={{ margin: 0 }}>
-          <span className="field-label">種類</span>
-          <select
-            className="input"
-            value={TYPE_CHOICES.find((c) => c.value === assetType)?.label ?? "すべて"}
-            onChange={(e) => setAssetType(TYPE_CHOICES.find((c) => c.label === e.target.value)?.value ?? null)}
-          >
-            {TYPE_CHOICES.map((c) => (
-              <option key={c.label} value={c.label}>{c.label}</option>
-            ))}
-          </select>
-        </label>
+      {/* ⚠️ **絞り込みの作法は素材画面と同じにする**（α-6 出口監査 🟡28）＝この欄は素材画面の中に
+          あり、**すぐ下に別の絞り込みが縦に並んで見える**。種類＝タブ／探す＝「名前やタグで探す」／
+          消す＝「絞り込みをやめる」を揃える（同じ画面で作法を2つ持たない）。 */}
+      <div className="row gap-sm row-wrap mt" style={{ alignItems: "center" }}>
+        {/* ⚠️ **どちらの棚のタブか**を名前で分ける＝同じ画面にタブが2組並ぶ（下は素材の種類）。 */}
+        <div className="segment" role="group" aria-label="よく使う素材の種類" style={{ display: "inline-flex" }}>
+          {TYPE_CHOICES.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              className={assetType === c.value ? "active" : ""}
+              onClick={() => setAssetType(c.value)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <input
+          className="input"
+          style={{ maxWidth: 220 }}
+          type="search"
+          // ⚠️ **同じ画面に同じ名前の欄を2つ置かない**＝この欄は素材画面の中にあり、すぐ下に
+          // 素材の絞り込みが並ぶ。作法（タブ＋探す＋やめる）は揃えたうえで、**どちらの棚か**を名前で分ける。
+          aria-label="よく使う素材を名前やタグで探す"
+          placeholder="名前やタグで探す"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {text !== "" && (
+          <button type="button" className="btn btn-ghost text-sm" onClick={() => setText("")}>
+            絞り込みをやめる
+          </button>
+        )}
       </div>
 
       {allTags.length > 0 && (
@@ -237,7 +267,18 @@ export function AssetLibraryPanel() {
           <p className="field-hint">条件に合う素材がありません。名前・種類・タグを変えてみてください。</p>
         ) : (
           <ul className="list-reset">
-            {shown.map((a) => (
+            {shown.map((a) => (confirming === a.id ? (
+              <li key={a.id}>
+                <DeleteConfirm
+                  busy={working}
+                  confirmLabel="外す"
+                  busyLabel="外しています…"
+                  message={`「${a.displayName}」を置き場から外しますか？元に戻せません。取り込み済みの動画はそのまま使えます。`}
+                  onCancel={() => setConfirming(null)}
+                  onConfirm={() => void onDelete(a)}
+                />
+              </li>
+            ) : (
               <li key={a.id} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
                 <span style={{ flex: 1 }}>
                   {a.displayName}
@@ -255,11 +296,11 @@ export function AssetLibraryPanel() {
                 >
                   名前とタグ
                 </button>
-                <button type="button" className="btn" disabled={working} title={blockedReason} onClick={() => void onDelete(a)}>
+                <button type="button" className="btn" disabled={working} title={blockedReason} onClick={() => setConfirming(a.id)}>
                   外す
                 </button>
               </li>
-            ))}
+            )))}
           </ul>
         )}
       </div>

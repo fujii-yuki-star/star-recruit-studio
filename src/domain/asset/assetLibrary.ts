@@ -99,7 +99,11 @@ export function filterLibraryAssets(
   const tags = query.tags ?? [];
   return items.filter((a) => {
     if (query.assetType && a.assetType !== query.assetType) return false;
-    if (text !== '' && !a.displayName.toLowerCase().includes(text)) return false;
+    // ⚠️ **名前とタグの両方で探せる**（α-6 出口監査 🟡28・素材画面と同じ作法＝#858）＝
+    // どちらで覚えているか分からないので片方だけにしない。同じ画面に縦に並ぶ2つの絞り込みで
+    // 作法が違うと、片方で見つかるものが片方で見つからない。
+    if (text !== '' && !a.displayName.toLowerCase().includes(text)
+      && !a.tags.some((t) => t.toLowerCase().includes(text))) return false;
     return tags.every((t) => a.tags.includes(t));
   });
 }

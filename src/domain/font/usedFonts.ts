@@ -6,7 +6,6 @@
 // 同梱が増えたときに直す場所が2つになる。
 import { isUserFontId } from './fontCatalog';
 import type { FreeElement, Scene } from '../project/types';
-import type { Template } from '../template/types';
 
 /**
  * 場面が使っているフォントの id（動画全体の既定は含めない＝呼ぶ側が足す）。
@@ -29,29 +28,22 @@ export function sceneFontIds(scene: Scene): string[] {
   return out;
 }
 
-/** 見た目パターンが使っているフォントの id（テンプレは `fontId` を持たないが、将来のために入口を1つにする）。 */
-export function templateFontIds(template: Template): string[] {
-  const out: string[] = [];
-  for (const layer of template.layers ?? []) {
-    const f = (layer as { fontId?: unknown }).fontId;
-    if (typeof f === 'string') out.push(f);
-  }
-  return out;
-}
-
 /**
  * 動画が使っている**持ち込みフォント**の id（重複なし）。
  * `projectFontId` は動画全体の既定（`videoSettings.fontId`）。
+ *
+ * ⚠️ **見た目パターンは見ない**（α-6 出口監査 🟡34）＝`template.schema.json` に `fontId` は無いので、
+ * 見に行く枝は**一度も動かない**（「将来のために」置いていた `templateFontIds` を消した）。
+ * 正典に無いフィールドを先回りで読むと、動かない枝が残り**通っているつもり**になる（§9-2）。
+ * 見た目パターンがフォントを持つようになったら、そのとき schema と一緒に足す。
  */
 export function usedUserFontIds(
   scenes: readonly Scene[],
   projectFontId: string | null | undefined,
-  templates: readonly Template[] = [],
 ): string[] {
   const all = [
     ...(typeof projectFontId === 'string' ? [projectFontId] : []),
     ...scenes.flatMap(sceneFontIds),
-    ...templates.flatMap(templateFontIds),
   ];
   return [...new Set(all.filter(isUserFontId))];
 }

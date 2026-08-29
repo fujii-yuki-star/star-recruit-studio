@@ -234,6 +234,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   function requestOpenProject(projectId: string) {
     if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
     if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
+    // ⚠️ **複製中も開かない**（α-6 出口監査 🟡32）＝素材と声のコピーが走っている最中に別の動画を
+    // 開けると**後勝ち**になり、複製の着地が別の文書へ落ちる。カード側も押せなくしてある（対称）。
+    if (duplicatingId !== null) return;
     if (pendingAction) return; // 既に別の確認中は上書きしない（確認中は他カードも無効化＝多重防御・レビュー対応）
     // タイムライン形式は**別の文書**を別の画面で開くだけ＝場面形式の編集内容は閉じないので確認は出さない
     // （「保存していない素材や場面は失われます」は事実と違う・§2-5）。
@@ -242,7 +245,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     void doOpenProject(projectId);
   }
   async function doOpenProject(projectId: string) {
-    if (isExporting || openingId) return; // 確認中に書き出し開始/並走した場合の多重防御（requestOpenProject と同条件）
+    if (isExporting || openingId || duplicatingId !== null) return; // 確認中に状況が変わった場合の多重防御（requestOpenProject と同条件）
     setOpenError(null);
     setOpeningId(projectId);
     try {
@@ -516,9 +519,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
-                      disabled={isExporting || openingId !== null || pendingAction !== null || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : (pendingAction !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || pendingAction !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
+                      disabled={isExporting || openingId !== null || duplicatingId !== null || pendingAction !== null || confirmNew}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (pendingAction !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || duplicatingId !== null || pendingAction !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
                           （後方互換＝古い動画・まだ保存していない動画でも一覧は普通に出る）。 */}
@@ -571,6 +574,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="btn btn-ghost btn-icon"
                       disabled={
                         isExporting || pendingAction !== null || confirmNew || duplicatingId !== null
+                        // ⚠️ **開いている最中も押せなくする**（α-6 出口監査 🟡32）＝`onDuplicate` が
+                        // 黙って return するので、押せると**何も起きない**（§2-5）。
+                        || openingId !== null
                         || isTimelineProjectDoc({ format: p.format })
                       }
                       onClick={() => void onDuplicate(p.projectId)}
@@ -578,11 +584,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       title={
                         isExporting
                           ? "書き出しが終わるまでお待ちください"
-                          : pendingAction !== null || confirmNew
-                            ? "確認に答えてから操作できます"
-                            : isTimelineProjectDoc({ format: p.format })
-                              ? "タイムラインで作った動画はまだ複製できません"
-                              : "複製（素材と声ごとコピーします）"
+                          : openingId !== null
+                            ? "プロジェクトを開いています…"
+                            : pendingAction !== null || confirmNew
+                              ? "確認に答えてから操作できます"
+                              : isTimelineProjectDoc({ format: p.format })
+                                ? "タイムラインで作った動画はまだ複製できません"
+                                : "複製（素材と声ごとコピーします）"
                       }
                     >
                       <CopyIcon size={18} />

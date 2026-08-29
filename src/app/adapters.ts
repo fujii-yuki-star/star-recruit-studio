@@ -341,7 +341,7 @@ export function buildPrecheckItems(
   // 見つからない持ち込みフォント（#261・ADR-0038）。⚠️ **黙って別の字体の動画を出さない**（§2-5）＝
   // 描画は既定へ倒れてよいが、**書き出しは止める**（`blocksExport`）。字体が変わった動画を
   // 「成功しました」として出すと、利用者は見るまで気づけない。
-  const usedFontIds = usedUserFontIds(scenes, fonts?.projectFontId, templates);
+  const usedFontIds = usedUserFontIds(scenes, fonts?.projectFontId);
   const missingFonts = missingUserFontIds(usedFontIds, fonts?.availableUserFontIds);
   // ⚠️ **「調べられなかった」は3つ目の状態**（α-6 出口監査 🟡19 のレビュー）＝一覧が読めないときに
   // 「全部見つからない」と言うのは**嘘**（案内の「取り込み直す」も同じ目録を通るので必ず失敗＝行き止まり）、

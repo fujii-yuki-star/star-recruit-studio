@@ -114,6 +114,8 @@ describe("ReadingDictSection", () => {
     vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
     render(<ReadingDictSection />);
     fireEvent.click(await screen.findByRole("button", { name: "一覧から外す" }));
+    // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。
+    fireEvent.click(screen.getAllByRole("button", { name: "一覧から外す" })[0]);
     await waitFor(() => expect(saveReadingDict).toHaveBeenCalled());
     expect(vi.mocked(saveReadingDict).mock.calls[0][0].entries).toEqual([]);
   });

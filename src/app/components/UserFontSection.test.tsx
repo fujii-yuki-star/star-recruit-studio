@@ -37,6 +37,7 @@ describe("UserFontSection", () => {
     useProjectStore.setState({ removeUserFont: vi.fn(async () => false) } as never);
     render(<UserFontSection />);
     fireEvent.click(await screen.findByRole("button", { name: "外す" }));
+    fireEvent.click(await screen.findByRole("button", { name: /外す/, hidden: false })); // 確認の「外す」
     await waitFor(() => expect(useProjectStore.getState().removeUserFont).toHaveBeenCalled());
     expect(screen.queryByText(/外しました/)).toBeNull();
   });
@@ -44,6 +45,9 @@ describe("UserFontSection", () => {
   it("外せたら、次にすることまで知らせる", async () => {
     render(<UserFontSection />);
     fireEvent.click(await screen.findByRole("button", { name: "外す" }));
+    // ⚠️ **確認を通す**（α-6 出口監査 🟡27）＝1クリックでは消えない。
+    expect(screen.getByText(/元に戻せません/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^外す$/ }));
     expect(await screen.findByText(/外しました/)).toBeInTheDocument();
     expect(screen.getByText(/書き出す前に選び直して/)).toBeInTheDocument();
   });

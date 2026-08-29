@@ -99,6 +99,14 @@ export interface BrandApplyPlan {
   fromFontId?: string;
   /** ロゴを足すか（**既にあるロゴは置き換えない**＝作り込みを消さない）。 */
   addsLogo: boolean;
+  /**
+   * **自分で文字の形を選んでいる場面の数**（α-6 出口監査 🟡31）。
+   *
+   * ⚠️ **変わらないものも数える**＝場面ごとの指定は動画全体より優先されるので、その場面は
+   * 反映しても**見た目が変わらない**。数えずに「動画全体の文字の形が変わります」とだけ言うと、
+   * 押したあとに「変わっていない場面がある」ことに自分で気づくしかない（§2-5＝先に見せる）。
+   */
+  keptScenes: number;
 }
 
 /**
@@ -109,13 +117,16 @@ export interface BrandApplyPlan {
  */
 export function planBrandApply(
   kit: BrandKit,
-  project: { fontId?: string; hasLogoAsset: boolean },
+  project: { fontId?: string; hasLogoAsset: boolean; sceneFontIds?: readonly (string | null | undefined)[] },
 ): BrandApplyPlan {
   const fontChanges = kit.fontId != null && kit.fontId !== project.fontId;
   return {
     fontChanges,
     ...(fontChanges && project.fontId != null ? { fromFontId: project.fontId } : {}),
     addsLogo: kit.logoLibraryAssetId != null && !project.hasLogoAsset,
+    // ⚠️ **場面ごとの指定は動画全体より優先される**（`11 §7.1.1`）＝その場面は変わらない。
+    // 変えるとき（`fontChanges`）だけ数える＝変えないのに「そのままです」と言わない。
+    keptScenes: fontChanges ? (project.sceneFontIds ?? []).filter((f) => typeof f === 'string').length : 0,
   };
 }
 
