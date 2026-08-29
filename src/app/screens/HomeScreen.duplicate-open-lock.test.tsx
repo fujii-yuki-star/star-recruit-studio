@@ -55,4 +55,16 @@ describe("HomeScreen 複製と開くの相互ロック（🟡32）", () => {
     expect(openBtn("2本目")).toHaveAttribute("title", "コピーしています…");
   });
 
+
+  /**
+   * ⚠️ **進み具合を出す**（α-6 出口監査 ℹ️）＝素材と声のコピーは時間がかかるのに「開いています…」
+   * だけがあり、複製は**押しても何も変わらないように見えた**。
+   */
+  it("コピー中はその行に進み具合を出す", async () => {
+    setupPending("duplicate");
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await screen.findByText("1本目");
+    fireEvent.click(dupBtn("1本目"));
+    await waitFor(() => expect(screen.getByText("コピーしています…")).toBeInTheDocument());
+  });
 });

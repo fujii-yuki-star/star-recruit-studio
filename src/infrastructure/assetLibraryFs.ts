@@ -2,21 +2,40 @@
 // 保存先は appData/user_assets（全プロジェクト共通＝グローバル）。
 // Tauri 非検出時（ブラウザ開発）は空・no-op＝開発フローを止めない（userTemplateFs と同方針）。
 import { invoke } from '@tauri-apps/api/core';
-import type { LibraryAsset } from '../domain/asset/assetLibrary';
+import { isLibraryAssetId, type LibraryAsset } from '../domain/asset/assetLibrary';
+import { isAssetType } from '../domain/enums';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-/** ライブラリの一覧（**実体があるものだけ**が返る）。 */
+/**
+ * ライブラリの一覧（**実体があるものだけ**が返る）。
+ *
+ * ⚠️ **形を見てから内部へ渡す**（α-6 出口監査 ℹ️・§2-2）＝目録の `assetType` は手で書き換えられる
+ * ファイルから来るのに、そのまま `Asset.assetType` へ流れていた（知らない種類は描画・書き出しで
+ * 分岐を外れる）。兄弟（`parseBrandKit`・`parseReadingDictWithDrops`）と同じく**項目ごとに落とす**。
+ */
 export async function listLibraryAssets(): Promise<LibraryAsset[]> {
   if (!isTauri()) return [];
   try {
-    return await invoke<LibraryAsset[]>('list_library_assets');
+    return (await invoke<unknown[]>('list_library_assets')).flatMap(toLibraryAsset);
   } catch {
     // 一覧が読めなくても画面は開ける（プロジェクトの素材は使える）＝行き止まりにしない。
     return [];
   }
+}
+
+/** 目録の1行を受け取れる形か見る（受けられなければ落とす＝黙って内部へ流さない）。 */
+function toLibraryAsset(raw: unknown): LibraryAsset[] {
+  if (typeof raw !== 'object' || raw === null) return [];
+  const e = raw as Record<string, unknown>;
+  if (!isLibraryAssetId(e.id)) return [];
+  if (typeof e.fileName !== 'string' || e.fileName === '') return [];
+  if (typeof e.displayName !== 'string') return [];
+  if (!isAssetType(e.assetType)) return [];
+  const tags = Array.isArray(e.tags) ? e.tags.filter((t): t is string => typeof t === 'string') : [];
+  return [{ id: e.id, fileName: e.fileName, displayName: e.displayName, assetType: e.assetType, tags }];
 }
 
 /**

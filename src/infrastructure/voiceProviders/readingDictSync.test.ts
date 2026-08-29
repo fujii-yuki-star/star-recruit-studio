@@ -26,7 +26,7 @@ const entry = { surface: '宇都宮', yomi: 'ウツノミヤ', accentType: 4 };
 
 beforeEach(() => {
   resetReadingDictSync();
-  vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: {} });
+  vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
   vi.mocked(syncReadingDict).mockResolvedValue({ links: { 宇都宮: 'u1' }, conflicts: [], applied: 1 });
   vi.mocked(getVoicevoxUrl).mockReturnValue('');
 });
@@ -59,7 +59,7 @@ describe('ensureReadingDictSynced', () => {
   });
 
   it('控えが動いていなければ書かない（更新時刻を無駄に動かさない）', async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [entry], links: { 宇都宮: 'u1' } });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: { 宇都宮: 'u1' } }, dropped: 0 });
     await ensureReadingDictSynced();
     expect(saveReadingDict).not.toHaveBeenCalled();
   });
@@ -69,13 +69,13 @@ describe('ensureReadingDictSynced', () => {
    * 反映するものが無いので、送れないエンジンでも声は作れる。
    */
   it('辞書が空で控えも無ければエンジンに触らない', async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [], links: {} });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [], links: {} }, dropped: 0 });
     await ensureReadingDictSynced();
     expect(syncReadingDict).not.toHaveBeenCalled();
   });
 
   it('語は無いが控えが残っていればそろえる（消し残しを片づける）', async () => {
-    vi.mocked(loadReadingDict).mockResolvedValue({ version: 1, entries: [], links: { 宇都宮: 'u1' } });
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [], links: { 宇都宮: 'u1' } }, dropped: 0 });
     vi.mocked(syncReadingDict).mockResolvedValue({ links: {}, conflicts: [], applied: 1 });
     await ensureReadingDictSynced();
     expect(syncReadingDict).toHaveBeenCalled();

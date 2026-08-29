@@ -63,8 +63,11 @@ export function ReadingDictSection() {
     // 開いたときに読み、**その場で音声ソフトへ映す**（決定2「編集したら即反映」）。
     // これが無いと、黙って上書きしなかった語（決定3b）を知らせる機会がどこにも無い。
     void loadReadingDict()
-      .then(async (d) => {
-        setDict(d);
+      .then(async ({ file, dropped }) => {
+        setDict(file);
+        // ⚠️ **入れられなかった語は黙って消さない**（α-6 出口監査 ℹ️・§2-5）＝形が違う語は落ちるが、
+        // 数を出さないと「登録したはずのものが無い」に本人が気づけない（読み込みの案内と同じ流儀）。
+        if (dropped > 0) setNotice(`${dropped}件は読み方の形が違うため読み込めませんでした。`);
         const r = await syncAndCollectConflicts();
         setConflicts(r.conflicts);
         if (r.error) setError(r.error);
@@ -88,7 +91,7 @@ export function ReadingDictSection() {
     setDict((d) => ({ ...d, entries: [...entries] }));
     try {
       // ⚠️ **控えはディスクの新しい方を採る**（上の ⚠️）。読めなければ書かない（巻き戻さない）。
-      const onDisk = await loadReadingDict();
+      const onDisk = (await loadReadingDict()).file;
       const next: ReadingDictFile = { ...before, entries: [...entries], links: onDisk.links };
       await saveReadingDict(next);
       setDict(next);

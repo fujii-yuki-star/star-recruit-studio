@@ -4,6 +4,7 @@
 // ⚠️ **自動では遡及しない**（決定3・§2-5）＝既にある動画は「この動画に反映する」を押したときだけ変わる。
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
 import { useEffect, useMemo, useState } from "react";
+import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
@@ -18,7 +19,7 @@ import {
   removeBrandColor,
 } from "../../domain/brand/brandKit";
 
-export function BrandKitSection() {
+export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId) => void } = {}) {
   const brandKit = useProjectStore((s) => s.brandKit);
   const undo = useProjectStore((s) => s.undo);
   const userFonts = useProjectStore((s) => s.userFonts);
@@ -160,8 +161,18 @@ export function BrandKitSection() {
           新しい動画に最初から入れておく1枚です。ほかの版は「よく使う素材」から取り込めます。
         </p>
         {logos.length === 0 ? (
+          // ⚠️ **場所と行き方まで書く**（α-6 出口監査 ℹ️・§2-5）＝「よく使う素材」がどこにあるか
+          // 書いていないうえ、そこへ行く導線も無く**次の行動が取れない**行き止まりだった。
           <p className="field-hint">
-            「よく使う素材」にロゴを置くと、ここで選べます。
+            ロゴがまだありません。素材の画面の「よく使う素材」に置くと、ここで選べます。
+            {onNavigate && (
+              <>
+                {" "}
+                <button type="button" className="btn btn-ghost text-sm" onClick={() => onNavigate("materials")}>
+                  素材の画面へ
+                </button>
+              </>
+            )}
           </p>
         ) : (
           <select
@@ -182,11 +193,17 @@ export function BrandKitSection() {
           この欄（文字の形・色・ロゴ）は動画を開いていなくても触れる。 */}
       {brandKitError && <p className="form-error mt" role="alert">{brandKitError}</p>}
 
-      {hasProject && (
-        <div className="mt">
-          <hr className="divider" />
+      {/* ⚠️ **塊ごと黙って消さない**（α-6 出口監査 ℹ️）＝動画を開いていないと反映の一式が
+          何も言わずに消えるので、**そこに何かがあったこと**が分からない。見出しは残し、
+          押せない理由（＝先に動画を開く）をその場に出す（§2-5）。 */}
+      <div className="mt">
+        <hr className="divider" />
+        <span className="field-label">いま開いている動画に反映する</span>
+        {!hasProject ? (
+          <p className="field-hint">いまは動画を開いていません。動画を開くと、ここから反映できます。</p>
+        ) : (
+        <>
           {/* ⚠️ **押す前に何が変わるかを見せる**（決定3・#547 の「まとめて標準にする」と同型）。 */}
-          <span className="field-label">いま開いている動画に反映する</span>
           {nothingToApply ? (
             <p className="field-hint">この動画は、覚えている見た目と同じです。反映するものはありません。</p>
           ) : (
@@ -239,8 +256,9 @@ export function BrandKitSection() {
             </div>
           )}
           {error && <p className="form-error mt" role="alert">{error}</p>}
-        </div>
-      )}
+        </>
+        )}
+      </div>
     </div>
   );
 }
