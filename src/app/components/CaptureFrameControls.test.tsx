@@ -68,7 +68,8 @@ describe("CaptureFrameControls", () => {
   it("再生できないときは理由と次の行動を出し、押せなくする", () => {
     useProjectStore.setState({ assetSrcById: {} } as never);
     render(<CaptureFrameControls asset={video} />);
-    expect(screen.getByText(/取り込み直すと表示できる場合があります/)).toBeInTheDocument();
+    // ⚠️ **同じ操作は同じ名前で呼ぶ**（🟡25）＝素材画面の導線は「ファイルを選び直す」。
+    expect(screen.getByText(/「ファイルを選び直す」から入れ直すと、表示できる場合があります/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "この瞬間を写真にする" })).toBeDisabled();
   });
 

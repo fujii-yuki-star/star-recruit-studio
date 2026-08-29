@@ -10,11 +10,15 @@ import { useProjectStore } from "../store/projectStore";
 import { showOpenFontDialog } from "../../infrastructure/dialog";
 import { listUserFonts, type UserFont } from "../../infrastructure/userFontFs";
 import { userFontCssFamily } from "../../domain/font/fontCatalog";
+import { DeleteConfirm } from "./DeleteConfirm";
 
 export function UserFontSection() {
   const [fonts, setFonts] = useState<UserFont[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  // ⚠️ **外すのは確認を通す**（α-6 出口監査 🟡27）＝同じ画面の素材削除・接続キー削除は必ず確認を通すのに、
+  // ここだけ1クリックで消えていた（**実体も消え、使っている動画の書き出しが止まる**）。
+  const [confirming, setConfirming] = useState<string | null>(null);
   const addUserFont = useProjectStore((s) => s.addUserFont);
   const removeUserFont = useProjectStore((s) => s.removeUserFont);
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
@@ -51,7 +55,8 @@ export function UserFontSection() {
     try {
       // ⚠️ **外せたときだけ「外しました」と言う**（α-6 出口監査 🟡13・§2-5）＝失敗しても知らせを出すと、
       // 赤い理由と並ぶうえ**一覧にもそのまま残る**（何が起きたのか分からない）。理由は `fontError` が出す。
-      if (!(await removeUserFont(f.id))) return;
+      if (!(await removeUserFont(f.id))) { setConfirming(null); return; }
+      setConfirming(null);
       // ⚠️ **使っている動画があるかはここでは見ない**＝消したあとに公開前チェックが
       // 「見つからない文字の形」として断る（黙って別の字体で書き出さない・ADR-0038）。
       setNotice(`「${f.displayName}」を外しました。この文字の形を使っている動画は、書き出す前に選び直してください。`);
@@ -81,17 +86,28 @@ export function UserFontSection() {
           <p className="field-hint">まだ足していません。同梱の文字の形はそのまま使えます。</p>
         ) : (
           <ul className="list-reset">
-            {fonts.map((f) => (
+            {fonts.map((f) => (confirming === f.id ? (
+              <li key={f.id}>
+                <DeleteConfirm
+                  busy={busy}
+                  confirmLabel="外す"
+                  busyLabel="外しています…"
+                  message={`「${f.displayName}」を外しますか？このパソコンから消え、元に戻せません。この文字の形を使っている動画は、書き出す前に選び直すことになります。`}
+                  onCancel={() => setConfirming(null)}
+                  onConfirm={() => void onRemove(f)}
+                />
+              </li>
+            ) : (
               <li key={f.id} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
                 {/* ⚠️ **その字形で名前を描く**（同梱フォントの選択UIと同じ流儀）＝見て選べる。 */}
                 <span style={{ flex: 1, fontFamily: `'${userFontCssFamily(f.id)}', sans-serif`, fontSize: 18 }}>
                   {f.displayName}
                 </span>
-                <button type="button" className="btn" disabled={busy} onClick={() => void onRemove(f)}>
+                <button type="button" className="btn" disabled={busy} onClick={() => setConfirming(f.id)}>
                   外す
                 </button>
               </li>
-            ))}
+            )))}
           </ul>
         )}
       </div>

@@ -203,7 +203,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       </div>
 
       <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
-        <div className="segment" style={{ display: "inline-flex" }}>
+        <div className="segment" role="group" aria-label="素材の種類" style={{ display: "inline-flex" }}>
           {filters.map(([id, label]) => (
             <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); setBulkConfirm(null); }}>
               {label}

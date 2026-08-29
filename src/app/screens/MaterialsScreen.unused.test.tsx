@@ -75,7 +75,7 @@ describe("MaterialsScreen 使っていない素材（#348）", () => {
     });
     show();
     fireEvent.click(toggle());
-    fireEvent.click(screen.getByRole("button", { name: "動画" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "素材の種類" })).getByRole("button", { name: "動画" }));
     expect(screen.getByText("余りの動画")).toBeInTheDocument();
     expect(screen.queryByText("余りの写真")).toBeNull();
   });
@@ -205,7 +205,7 @@ describe("MaterialsScreen 使っていない素材（#348）", () => {
     show();
     fireEvent.click(toggle());
     fireEvent.click(screen.getByRole("button", { name: /まとめて消す/ }));
-    fireEvent.click(screen.getByRole("button", { name: "動画" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "素材の種類" })).getByRole("button", { name: "動画" }));
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

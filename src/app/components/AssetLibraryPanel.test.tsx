@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // よく使う素材（ユーザー素材ライブラリ・ADR-0035・#260）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 vi.mock("../../infrastructure/assetLibraryFs", () => ({
   listLibraryAssets: vi.fn(),
@@ -61,7 +61,8 @@ describe("AssetLibraryPanel", () => {
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getByRole("button", { name: "会社" }));
     expect(screen.queryByText("社員インタビュー")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "写真" }));
+    // ⚠️ 種類のタブにも「写真」があるので、タグの側（`aria-pressed` を持つ）を選ぶ。
+    fireEvent.click(screen.getAllByRole("button", { name: "写真" }).find((b) => b.hasAttribute("aria-pressed"))!);
     expect(screen.queryByText("会社ロゴ")).not.toBeInTheDocument();
     expect(screen.getByText("オフィス写真")).toBeInTheDocument();
   });
@@ -69,7 +70,7 @@ describe("AssetLibraryPanel", () => {
   it("名前でも絞り込む", async () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
-    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "オフィス" } });
+    fireEvent.change(screen.getByLabelText("よく使う素材を名前やタグで探す"), { target: { value: "オフィス" } });
     expect(screen.queryByText("会社ロゴ")).not.toBeInTheDocument();
     expect(screen.getByText("オフィス写真")).toBeInTheDocument();
   });
@@ -78,7 +79,7 @@ describe("AssetLibraryPanel", () => {
   it("絞り込みで0件のときは、条件を変えるよう案内する", async () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
-    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "存在しない" } });
+    fireEvent.change(screen.getByLabelText("よく使う素材を名前やタグで探す"), { target: { value: "存在しない" } });
     expect(screen.getByText(/条件に合う素材がありません/)).toBeInTheDocument();
     expect(screen.queryByText(/まだ何も置いていません/)).not.toBeInTheDocument();
   });
@@ -111,6 +112,8 @@ describe("AssetLibraryPanel", () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。確認の中の「外す」を押す。
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     await waitFor(() => expect(deleteLibraryAsset).toHaveBeenCalledWith("lib_asset_001"));
     // 説明文にも同じ言い回しがあるので、**外した素材の名前つき**の知らせで照合する。
     expect(await screen.findByText(/「会社ロゴ」を置き場から外しました/)).toBeInTheDocument();
@@ -126,6 +129,8 @@ describe("AssetLibraryPanel", () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。確認の中の「外す」を押す。
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     await waitFor(() => expect(updateBrandKit).toHaveBeenCalledWith({ logoLibraryAssetId: undefined }));
     expect(await screen.findByText(/会社の見た目のロゴも外しました/)).toBeInTheDocument();
   });
@@ -136,6 +141,8 @@ describe("AssetLibraryPanel", () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。確認の中の「外す」を押す。
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     await waitFor(() => expect(deleteLibraryAsset).toHaveBeenCalled());
     expect(updateBrandKit).not.toHaveBeenCalled();
   });
@@ -144,7 +151,7 @@ describe("AssetLibraryPanel", () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "名前とタグ" })[0]);
-    fireEvent.change(screen.getByLabelText(/タグ/), { target: { value: "会社、ロゴ 新しい,タグ" } });
+    fireEvent.change(screen.getByLabelText(/タグ（読点/), { target: { value: "会社、ロゴ 新しい,タグ" } });
     fireEvent.click(screen.getByRole("button", { name: "直す" }));
     await waitFor(() =>
       expect(updateLibraryAsset).toHaveBeenCalledWith("lib_asset_001", "会社ロゴ", ["会社", "ロゴ", "新しい", "タグ"]),
@@ -229,5 +236,19 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     expect(await screen.findByText(/2件を置けませんでした（b\.png、c\.png）/)).toBeInTheDocument();
     expect(screen.getByText(/1件を置きました/)).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **どこに増えたかは種類で変わる**（α-6 出口監査 🟡29）＝音（BGM・読み上げ）は**素材の一覧に出ない**
+   *（`isListedMaterial`）ので、「素材の一覧に増えています」と言うと**案内どおり探しても見つからない**（§2-5）。
+   */
+  it("音を取り込んだときは、素材の一覧ではなくBGMの導線を案内する", async () => {
+    vi.mocked(listLibraryAssets).mockResolvedValue([
+      lib({ id: "lib_asset_004", displayName: "会社のテーマ", assetType: ASSET_TYPE.bgm, tags: [] }),
+    ]);
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "この動画で使う" }));
+    expect(await screen.findByText(/BGMから選べます/)).toBeInTheDocument();
+    expect(screen.queryByText(/素材の一覧に増えています/)).toBeNull();
   });
 });

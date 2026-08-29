@@ -8,6 +8,7 @@ import { PlayIcon, StopIcon } from "./icons";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useProjectStore } from "../store/projectStore";
 import { alpha6Message } from "../uiLabels";
+import { DeleteConfirm } from "./DeleteConfirm";
 import {
   accentCandidates,
   accentMark,
@@ -50,6 +51,8 @@ export function ReadingDictSection() {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  // ⚠️ **外すのは確認を通す**（α-6 出口監査 🟡27）＝同じ画面の素材削除・接続キー削除は必ず確認を通す。
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<{ current: ReadingEntry; incoming: ReadingEntry }[]>([]);
   // 音声ソフト側に同じ言葉で違う読みがあり、**黙って上書きしなかった**もの（決定3b）。
   const [conflicts, setConflicts] = useState<EngineConflict[]>([]);
@@ -141,6 +144,7 @@ export function ReadingDictSection() {
   }
 
   async function onDelete(entry: ReadingEntry): Promise<void> {
+    setConfirming(null);
     const key = normalizeSurface(entry.surface);
     if (!(await persist(dict.entries.filter((e) => normalizeSurface(e.surface) !== key)))) return;
     if (draft.editing === key) setDraft(EMPTY_DRAFT);
@@ -361,7 +365,17 @@ export function ReadingDictSection() {
           <p className="field-hint">まだ登録がありません。読み間違えられる言葉を足してください。</p>
         ) : (
           <ul className="list-reset">
-            {dict.entries.map((e) => (
+            {dict.entries.map((e) => (confirming === normalizeSurface(e.surface) ? (
+              <li key={normalizeSurface(e.surface)}>
+                <DeleteConfirm
+                  confirmLabel="一覧から外す"
+                  busyLabel="外しています…"
+                  message={`「${e.surface}」を一覧から外しますか？音声ソフトからも消え、元に戻せません。次に声を作るときから、もとの読みに戻ります。`}
+                  onCancel={() => setConfirming(null)}
+                  onConfirm={() => void onDelete(e)}
+                />
+              </li>
+            ) : (
               <li
                 key={normalizeSurface(e.surface)}
                 style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}
@@ -370,9 +384,9 @@ export function ReadingDictSection() {
                   {e.surface}：{accentMark(e.yomi, e.accentType)}
                 </span>
                 <button type="button" className="btn" onClick={() => startEdit(e)}>直す</button>
-                <button type="button" className="btn" onClick={() => void onDelete(e)}>一覧から外す</button>
+                <button type="button" className="btn" onClick={() => setConfirming(normalizeSurface(e.surface))}>一覧から外す</button>
               </li>
-            ))}
+            )))}
           </ul>
         )}
       </div>
