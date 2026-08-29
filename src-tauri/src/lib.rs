@@ -991,7 +991,7 @@ mod library_id_tests {
 
 #[cfg(test)]
 mod manifest_tests {
-    use super::{parse_manifest, LibraryAsset, UserFontEntry};
+    use super::{parse_manifest, raw_manifest_ids, LibraryAsset, UserFontEntry};
 
     /// ⚠️ **壊れた行だけ落とす**（α-6 出口監査 🟡19）＝1行のせいで棚が空になると、
     /// 次の書き込みが**空で上書き**して置いてあるものの覚え書きが全部消える。
@@ -1015,6 +1015,31 @@ mod manifest_tests {
             let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("通るはず");
             assert!(list.is_empty(), "text={text:?}");
         }
+    }
+
+    /// ⚠️ **目録が空でも、実体のファイル名から番号を起こす**（PR #911 レビュー 🟡）＝
+    /// 目録が 0 バイトで残ると採番が 001 からやり直しになり、`fs::copy` が**既存の実体を上書き**する。
+    /// ⚠️ **目録そのもの・一時ファイルは番号にならない**（`fonts` / `library` は正規の形に一致しない）。
+    #[test]
+    fn raw_ids_recover_from_files_when_manifest_is_empty() {
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_raw_ids_test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("作れるはず");
+        let manifest = dir.join("fonts.json");
+        fs::write(&manifest, "").expect("書けるはず"); // 書き込みが途中で止まった状態
+        fs::write(dir.join("user_font_001.ttf"), "x").expect("書けるはず");
+        fs::write(dir.join("user_font_007.otf"), "x").expect("書けるはず");
+        fs::write(dir.join("fonts.json.tmp"), "x").expect("書けるはず"); // 一時ファイル
+
+        let ids = raw_manifest_ids(&manifest, "取り込んだ文字の形").expect("読めるはず");
+        assert!(ids.iter().any(|i| i == "user_font_001"), "ids={ids:?}");
+        assert!(ids.iter().any(|i| i == "user_font_007"), "ids={ids:?}");
+        // 目録そのもの・一時ファイルは「使った番号」ではない（正規の形に一致しないので採番でも無視される）。
+        assert!(!ids
+            .iter()
+            .any(|i| i.starts_with("user_font_") && i != "user_font_001" && i != "user_font_007"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// ⚠️ **`rename` は既存を置き換える**（PR #909 レビュー 🔴・この環境で実際に確かめる）＝

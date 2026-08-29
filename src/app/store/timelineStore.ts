@@ -63,6 +63,8 @@ import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timel
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
 import type { ExportRunPhase } from "../../domain/export/exportProgress";
@@ -151,6 +153,27 @@ export type ExportStartBlock = {
  * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
  * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
  */
+/**
+ * 新しいタイムライン動画へ**会社のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ *
+ * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
+ * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
+ * ⚠️ **入らなくても動画は作る**＝コピーは失敗しうる（置き場から消えている等）ので、
+ * 足せなければロゴ無しで作る（新規作成そのものは止めない＝場面形式と同じ）。
+ */
+async function withBrandLogo(doc: TimelineProject, logoLibraryAssetId: string | undefined): Promise<TimelineProject> {
+  if (logoLibraryAssetId == null) return doc;
+  try {
+    const lib = (await listLibraryAssets())?.find((a) => a.id === logoLibraryAssetId);
+    if (!lib) return doc;
+    const { asset, fileName } = assetFromLibrary(lib, doc.assets.map((a) => a.assetId));
+    const relPath = await copyLibraryAssetToProject(logoLibraryAssetId, doc.projectId, fileName);
+    return { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] };
+  } catch {
+    return doc;
+  }
+}
+
 export function knownUserFontIds(): Set<string> | null {
   const s = useProjectStore.getState();
   return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
@@ -803,14 +826,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const now = new Date().toISOString();
     const blank = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
     // ⚠️ **会社の見た目を新しい動画へ**（ADR-0036 決定2・差分再監査 2巡目）＝場面形式は `newProject` が
-    // 通すのに、こちらは通らず**「タイムラインで作る」で作った動画にだけ会社の見た目が効かない**
-    //（ADR-0026②）。⚠️ **キットは読み直してから使う**（設定直後でも効く＝場面形式と同じ流儀）。
-    // ⚠️ **ロゴは足さない**＝置き場所（トラック・時間）を勝手に決められない。文字の形だけを既定にする。
+    // 通すのに、こちらは通らず**「タイムラインで作った動画にだけ効かない」**（ADR-0026②）。
+    // ⚠️ **キットは読み直してから使う**（設定直後でも効く＝場面形式と同じ流儀）。
     await useProjectStore.getState().refreshBrandKit();
-    const kitFontId = useProjectStore.getState().brandKit.fontId;
-    const doc = isKnownFontId(kitFontId)
-      ? { ...blank, videoSettings: { ...blank.videoSettings, fontId: kitFontId } }
+    const kit = useProjectStore.getState().brandKit;
+    const withFont = isKnownFontId(kit.fontId)
+      ? { ...blank, videoSettings: { ...blank.videoSettings, fontId: kit.fontId } }
       : blank;
+    // ⚠️ **ロゴも足す**（PR #911 レビュー 🟡）＝当初「置き場所を決められないから足さない」と書いたが
+    // **事実と違った**＝場面形式もタイムラインも、取り込みは**素材の一覧へ足すだけ**で置き場所は決めない
+    //（見た目パターンの差し込み口から選ぶ）。決定2 の「作成時にコピー」を両形式で同じにする。
+    // ⚠️ **入らなくても動画は作る**＝ロゴのコピーは失敗しうる（置き場から消えている等）。
+    // 場面形式も新規作成そのものは止めない（失敗は取り込みの理由として出る）。
+    const doc = await withBrandLogo(withFont, kit.logoLibraryAssetId);
     // 焼き出しと同じ流儀＝**未適合なら保存しない**（一覧に出るのに開けない動画を作らない・ADR-0026④）。
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 新規作成した内容がスキーマに未適合:", validateTimelineProject.errors);
