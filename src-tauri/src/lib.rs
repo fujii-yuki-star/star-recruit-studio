@@ -343,10 +343,18 @@ fn user_fonts_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// 置いてあるものの覚え書きが全部消える（実体は残るのに画面から永久に消える＝§2-5）。
 /// ⚠️ **配列ですら無いときは断る**＝読めていないものを「空だった」と扱わない。
 /// 断ると `add_*`/`delete_*` は書き込む前に止まるので、**壊れたファイルはそのまま残る**。
+/// ⚠️ **ただし空のファイルは通す**＝書き込みが途中で止まると 0 バイトで残るので、断ると
+/// **開き直しても直らない行き止まり**になる（失う中身が無いので空として扱う）。
 fn parse_manifest<T: serde::de::DeserializeOwned>(
     text: &str,
     what: &str,
 ) -> Result<Vec<T>, String> {
+    // ⚠️ **空のファイルは「まだ何も無い」**（再監査で発見）＝書き込みが途中で止まると 0 バイトで残る。
+    // ここで断ると**開き直しても直らない**（足す・外すが止まったままで、直す手段が画面に無い＝§2-5 の
+    // 行き止まり）。失う中身が無い（1件も書かれていない）ので、空として通して先へ進ませる。
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
     let rows: Vec<serde_json::Value> = serde_json::from_str(text).map_err(|_| {
         format!("{what}の一覧を読めませんでした。中身を失わないよう、足す・外すは止めています。アプリを開き直してください。")
     })?;
@@ -924,6 +932,19 @@ mod manifest_tests {
         let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("読めるはず");
         let ids: Vec<&str> = list.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, vec!["lib_asset_001", "lib_asset_003"]);
+    }
+
+    /// ⚠️ **空のファイルは通す**（再監査）＝書き込みが途中で止まると 0 バイトで残る。断ると
+    /// **開き直しても直らない**（直す手段が画面に無い＝行き止まり）。失う中身が無いので空として扱う。
+    #[test]
+    fn empty_file_is_no_entries() {
+        for text in [
+            "", "   ", "
+",
+        ] {
+            let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("通るはず");
+            assert!(list.is_empty(), "text={text:?}");
+        }
     }
 
     /// ⚠️ **配列ですら無いときは断る**＝「空だった」と扱うと書き込みが走って壊れたファイルを上書きする。
