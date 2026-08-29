@@ -41,7 +41,7 @@ export interface ResolvedAudioAuto {
  *
  * ⚠️ **既定は「両方する」**（#257/#259 とも「既定でも自然」が受け入れ条件）。ただし
  * **既に作った動画の音が変わる**ので、**読み込んだ古い動画では両方 `false` に倒す**
- *（読込時に `OLD_PROJECT_AUDIO_AUTO` を書き込む＝`persistence.ts` の 1.25→1.26）＝
+ *（読込時に `OLD_PROJECT_AUDIO_AUTO` を書き込む＝`persistence.ts` の 1.28→1.29）＝
  * 黙って別の音の動画を出さない（§2-5）。
  */
 export const AUDIO_AUTO_DEFAULT: ResolvedAudioAuto = {
@@ -56,7 +56,7 @@ export const AUDIO_AUTO_DEFAULT: ResolvedAudioAuto = {
 };
 
 /**
- * **前の版で作った動画**に書き込む値（読込時＝`persistence.ts` の 1.25→1.26）。
+ * **前の版で作った動画**に書き込む値（読込時＝`persistence.ts` の 1.28→1.29）。
  * ⚠️ **既に作った動画の音を変えない**＝開いて書き出し直しただけで別物にならないように、
  * 明示的に「しない」を書く（未指定のままだと既定＝「する」に化ける）。
  */
