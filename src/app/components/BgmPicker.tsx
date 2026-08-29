@@ -4,6 +4,7 @@ import { Switch } from "./ui";
 import { useProjectStore } from "../store/projectStore";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import { ASSET_TYPE } from "../../domain/enums";
 import { BGM_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 
 /**
@@ -19,6 +20,10 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const setBgm = useProjectStore((s) => s.setBgm);
   const setBundledBgm = useProjectStore((s) => s.setBundledBgm);
+  // ⚠️ **この動画にある音の素材から選べるようにする**（PR #910 レビュー 🟡）＝よく使う素材から
+  // 取り込んだ音は `project.assets` に入るだけで、BGM にする導線が無かった（取り込みの案内は
+  // 「「動画を保存」のBGMから選べます」と言っているのに**選べない**＝§2-5）。
+  const setBgmAsset = useProjectStore((s) => s.setBgmAsset);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
   const bgmError = useProjectStore((s) => s.bgmError);
   const clearBgmError = useProjectStore((s) => s.clearBgmError);
@@ -27,6 +32,8 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
   const { dragGroup } = useHistoryGroup();
 
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
+  /** この動画にある音の素材（よく使う素材から取り込んだものもここに出る）。 */
+  const bgmAssets = assets.filter((a) => a.assetType === ASSET_TYPE.bgm);
   const withBgm = bgmSettings?.enabled ?? true;
 
   // 初回表示時、BGM が「入れる」状態で未選択なら標準BGMの先頭を既定にする（確認時にすぐ聴ける）。
@@ -97,6 +104,25 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
               </label>
             ))}
           </div>
+          {/* ⚠️ **この動画にある音の素材からも選べる**（PR #910 レビュー 🟡）＝よく使う素材から取り込んだ音は
+              ここに出る。読み込み直さずに使い回せる（ADR-0035 の棚の目的）。 */}
+          {bgmAssets.length > 0 && (
+            <div className="field" style={{ marginTop: 8 }}>
+              <span className="field-label">この動画にある音</span>
+              {bgmAssets.map((a) => (
+                <label key={a.assetId} className="row gap-sm" style={{ alignItems: "center", cursor: disabled ? "not-allowed" : "pointer" }}>
+                  <input
+                    type="radio"
+                    name="bgmAsset"
+                    disabled={disabled}
+                    checked={bgmSettings?.assetId === a.assetId && !bgmSettings?.bundledBgmId}
+                    onChange={() => setBgmAsset(a.assetId)}
+                  />
+                  <span className="text-sm">{a.displayName}</span>
+                </label>
+              ))}
+            </div>
+          )}
           {/* 標準3曲は単一選択（ラジオ）。自分のBGM は「ファイルを開く操作」なので button にする
               （ラジオだとキーボード選択→ダイアログのキャンセルで未選択に戻り aria 意味論と不一致になるため）。 */}
           <div className="row-between" style={{ marginTop: 8, alignItems: "center" }}>

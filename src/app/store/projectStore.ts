@@ -356,6 +356,14 @@ interface ProjectState {
   updateBgmSettings: (patch: BgmPatch) => void;
   /** 標準BGM（同梱）を選ぶ（bundledBgmId を設定し assetId を解除・BGMを有効化）。 */
   setBundledBgm: (bundledBgmId: BundledBgmId) => void;
+  /**
+   * **この動画にある音の素材**を BGM にする（PR #910 レビュー 🟡）。
+   *
+   * ⚠️ **選ぶ導線が無かった**＝よく使う素材から音を取り込んでも `project.assets` に入るだけで、
+   * BGM にできるのは**ファイルを読み込む**か**同梱の3曲**だけだった。取り込みの案内は
+   * 「「動画を保存」のBGMから選べます」と言っているのに**選べない**（§2-5＝実行できない行動）。
+   */
+  setBgmAsset: (assetId: string) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
@@ -1665,6 +1673,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
       saveStatus: "idle",
+    }));
+  },
+  setBgmAsset: (assetId) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; } // 書き出し中は固定（#570 P1）
+    // ⚠️ **この動画にある音だけ**＝一覧に無い id を書くと、書き出しで「素材が見つからない」になる。
+    if (!get().assets.some((a) => a.assetId === assetId && a.assetType === ASSET_TYPE.bgm)) return;
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        bgmSettings: {
+          ...s.meta.bgmSettings,
+          enabled: true,
+          // 同梱の曲とは**どちらか一方**（`setBundledBgm` と対称）。
+          bundledBgmId: null,
+          assetId,
+          volume: s.meta.bgmSettings?.volume ?? BGM_VOLUME,
+          loop: true,
+        },
+      },
+      saveStatus: "idle",
+      bgmError: null,
     }));
   },
   setBundledBgm: (bundledBgmId) => {
