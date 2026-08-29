@@ -62,7 +62,9 @@ import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
-import { fontFamilyForId } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
 import type { ExportRunPhase } from "../../domain/export/exportProgress";
@@ -151,6 +153,27 @@ export type ExportStartBlock = {
  * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
  * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
  */
+/**
+ * 新しいタイムライン動画へ**会社のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ *
+ * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
+ * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
+ * ⚠️ **入らなくても動画は作る**＝コピーは失敗しうる（置き場から消えている等）ので、
+ * 足せなければロゴ無しで作る（新規作成そのものは止めない＝場面形式と同じ）。
+ */
+async function withBrandLogo(doc: TimelineProject, logoLibraryAssetId: string | undefined): Promise<TimelineProject> {
+  if (logoLibraryAssetId == null) return doc;
+  try {
+    const lib = (await listLibraryAssets())?.find((a) => a.id === logoLibraryAssetId);
+    if (!lib) return doc;
+    const { asset, fileName } = assetFromLibrary(lib, doc.assets.map((a) => a.assetId));
+    const relPath = await copyLibraryAssetToProject(logoLibraryAssetId, doc.projectId, fileName);
+    return { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] };
+  } catch {
+    return doc;
+  }
+}
+
 export function knownUserFontIds(): Set<string> | null {
   const s = useProjectStore.getState();
   return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
@@ -167,6 +190,8 @@ export function exportStartBlock(input: {
    *（`missingAsset`／#347 と同じ流儀で、調べていないのに「見つからない」と断らない）。
    */
   availableUserFontIds: Set<string> | null;
+  /** 目録が**読めなかった**か（差分再監査 2巡目）＝「まだ調べていない」とは別に断る。 */
+  userFontsUnreadable: boolean;
   otherExportRunning: boolean;
   /** 直前の回の後片づけ待ちか（#843）＝`isOwnCleanupPending`。押せるのに押すと断られる、を作らない。 */
   cleanupPending: boolean;
@@ -184,6 +209,7 @@ export function exportStartBlock(input: {
   if (input.cleanupPending) return { message: EXPORT_CLEANUP_PENDING_MESSAGE, phase: P.error, source: S.situation };
   const blockers = timelineExportBlockers(input.doc, {
     knownTemplateIds: input.knownTemplateIds,
+    userFontsUnreadable: input.userFontsUnreadable,
     ...(input.availableUserFontIds ? { availableUserFontIds: input.availableUserFontIds } : {}),
   });
   if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
@@ -486,6 +512,14 @@ export interface TimelineState {
   addLinkedSubtitleClip: () => void;
   /** 見た目パターンを素材として置く（#632）。 */
   addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
+  /**
+   * この動画の**書き出しの設定**を直す（差分再監査 2巡目）。
+   *
+   * ⚠️ **入口が場面形式にしか無かった**＝音の自動処理は書き出しに効くのに設定できず、しかも
+   * 前の版の文書は読込時に「しない」を書き込まれるので**一度 OFF になると戻す手段が無かった**
+   *（§2-5 の行き止まり）。クレジットの見せ方・動画全体の文字の形も同じ（効くのに選べない）。
+   */
+  updateVideoSettings: (patch: Partial<TimelineProject["videoSettings"]>) => void;
   addTrack: (kind: TrackKind) => void;
   removeTrack: (trackId: string) => void;
   /**
@@ -790,7 +824,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const existing = await listProjectSummaries();
     const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
     const now = new Date().toISOString();
-    const doc = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
+    const blank = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
+    // ⚠️ **会社の見た目を新しい動画へ**（ADR-0036 決定2・差分再監査 2巡目）＝場面形式は `newProject` が
+    // 通すのに、こちらは通らず**「タイムラインで作った動画にだけ効かない」**（ADR-0026②）。
+    // ⚠️ **キットは読み直してから使う**（設定直後でも効く＝場面形式と同じ流儀）。
+    await useProjectStore.getState().refreshBrandKit();
+    const kit = useProjectStore.getState().brandKit;
+    const withFont = isKnownFontId(kit.fontId)
+      ? { ...blank, videoSettings: { ...blank.videoSettings, fontId: kit.fontId } }
+      : blank;
+    // ⚠️ **ロゴも足す**（PR #911 レビュー 🟡）＝当初「置き場所を決められないから足さない」と書いたが
+    // **事実と違った**＝場面形式もタイムラインも、取り込みは**素材の一覧へ足すだけ**で置き場所は決めない
+    //（見た目パターンの差し込み口から選ぶ）。決定2 の「作成時にコピー」を両形式で同じにする。
+    // ⚠️ **入らなくても動画は作る**＝ロゴのコピーは失敗しうる（置き場から消えている等）。
+    // 場面形式も新規作成そのものは止めない（失敗は取り込みの理由として出る）。
+    const doc = await withBrandLogo(withFont, kit.logoLibraryAssetId);
     // 焼き出しと同じ流儀＝**未適合なら保存しない**（一覧に出るのに開けない動画を作らない・ADR-0026④）。
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 新規作成した内容がスキーマに未適合:", validateTimelineProject.errors);
@@ -1398,6 +1446,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
   },
 
+  updateVideoSettings: (patch) => {
+    const doc = get().doc;
+    if (!doc) return;
+    commit(set, get, { ...doc, videoSettings: { ...doc.videoSettings, ...patch } });
+  },
   addTrack: (kind) => {
     const doc = get().doc;
     if (doc) commit(set, get, addTrack(doc, kind));
@@ -1523,6 +1576,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **「読めなかった」も見る**（PR #909 レビュー 🟡）＝一度成功したあとに読めなくなると
       // 一覧は**古いまま残る**ので、見ないと「もう正しいとは限らない一覧」で門を通してしまう。
       availableUserFontIds: knownUserFontIds(),
+      userFontsUnreadable: useProjectStore.getState().userFontsUnreadable,
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
       // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
       cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),

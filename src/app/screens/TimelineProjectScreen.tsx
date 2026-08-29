@@ -132,6 +132,7 @@ import { DEFAULT_FIT } from "../../domain/constants";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import type { FontWeight, TextAlign } from "../../domain/enums";
 import { FontPicker } from "../components/FontPicker";
+import { AudioAutoField } from "../components/AudioAutoField";
 import { DEFAULT_SHAPE_COLOR } from "../../domain/project/freeLayoutOps";
 import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
 import { isFreeSlotAssetType } from "../../domain/enums";
@@ -352,7 +353,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
+    isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
@@ -1107,10 +1108,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     () => (doc
       ? timelineExportBlockers(doc, {
         knownTemplateIds: new Set(templates.map((t) => t.templateId)),
+        userFontsUnreadable,
         ...(knownUserFontIds ? { availableUserFontIds: new Set(knownUserFontIds) } : {}),
       })
       : []),
-    [doc, templates, knownUserFontIds],
+    [doc, templates, knownUserFontIds, userFontsUnreadable],
   );
   /**
    * **押す前に断る理由**（#718）。store の開始チェックと**同じ述語**を通す＝画面が塞いでいない理由で
@@ -1125,11 +1127,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         knownTemplateIds: new Set(templates.map((t) => t.templateId)),
         // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
         availableUserFontIds: knownUserFontIds ? new Set(knownUserFontIds) : null,
+        userFontsUnreadable,
         otherExportRunning: exportLockOwner != null && exportLockOwner !== EXPORT_OWNER,
         cleanupPending: isOwnCleanupPending(exportLockOwner, EXPORT_OWNER, isTimelineExportBusy(exportRun.phase)),
         canExportHere: canExport(),
       }),
-    [doc, isImporting, voiceRunning, templates, knownUserFontIds, exportLockOwner, exportRun.phase],
+    [doc, isImporting, voiceRunning, templates, knownUserFontIds, userFontsUnreadable, exportLockOwner, exportRun.phase],
   );
   const exporting = isTimelineExportBusy(exportRun.phase);
   // 書き出しが終わったら「離れられない」理由も出しっぱなしにしない（出ている条件から導く）。
@@ -2742,6 +2745,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               閉じる
             </button>
           </p>
+        )}
+        {/* ⚠️ **書き出しに効く設定は、書き出す画面から触れる**（差分再監査 2巡目・§2-5）＝
+            音の自動処理は書き出しに効くのに設定できる画面が場面形式にしかなく、しかも**前の版の
+            文書は読込時に「しない」を書き込まれる**ので**一度 OFF になると戻す手段が無かった**。
+            部品は場面形式と同じもの（文言を2つ持たない＝§6）。 */}
+        {doc && (
+          <details className="field" style={{ marginTop: 8 }}>
+            <summary className="field-label">この動画の音とクレジット</summary>
+            <AudioAutoField
+              disabled={exporting}
+              value={doc.videoSettings.audioAuto}
+              onChange={(next) => updateVideoSettings({ audioAuto: next })}
+            />
+          </details>
         )}
         <label className="field">
           <span>再生位置</span>

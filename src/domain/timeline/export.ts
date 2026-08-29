@@ -245,6 +245,14 @@ export const TIMELINE_EXPORT_BLOCK = {
    * ⚠️ **場面形式には同じ門がある**（公開前チェックの `missingFont`）＝形式で挙動を割らない（ADR-0026②）。
    */
   userFontMissing: 'TIMELINE_EXPORT_USER_FONT_MISSING',
+  /**
+   * 使っている**持ち込みフォント**が手元にあるか**調べられなかった**（差分再監査 2巡目）。
+   *
+   * ⚠️ **「見つからない」とは別**＝目録そのものが読めないので待っても埋まらない。
+   * ⚠️ **黙って通さない**＝描画は既定の字体へ倒れるので、通すと別の字体の動画が成功として出る。
+   * 場面形式は同じ状態を公開前チェックの `unknownFont` で止めている（ADR-0026②）。
+   */
+  userFontUnreadable: 'TIMELINE_EXPORT_USER_FONT_UNREADABLE',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
@@ -260,6 +268,11 @@ export interface TimelineExportCheckOptions {
    * 「調べていない」と「そろっている」を分ける・`15 §6` `USER_FONT_MISSING`）。
    */
   availableUserFontIds?: ReadonlySet<string>;
+  /**
+   * 目録が**読めなかった**か（差分再監査 2巡目）。**「まだ調べていない」とは別**＝待っても
+   * 埋まらないので、使っているフォントがあるなら**そう言って止める**（場面形式の `unknownFont`）。
+   */
+  userFontsUnreadable?: boolean;
 }
 
 export interface TimelineExportBlocker {
@@ -324,6 +337,10 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 使っている持ち込みフォントが手元に無いときは断る（α-6 差分再監査）＝描画は既定の字体へ倒れるので、
   // 通すと**黙って別の字体の動画**が成功として出る（ADR-0038）。**場面形式と同じ門**（ADR-0026②）。
   // ⚠️ **調べていないときは見ない**（`availableUserFontIds` 未指定＝判定材料が無い）。
+  // 調べられなかったときは「見つからない」に倒さず、そう言って止める（場面形式と同じ3状態）。
+  if (opts.userFontsUnreadable && usedTimelineUserFontIds(doc).length > 0) {
+    blockers.push({ code: TIMELINE_EXPORT_BLOCK.userFontUnreadable, clipIds: [] });
+  }
   if (opts.availableUserFontIds) {
     const missingFonts = usedTimelineUserFontIds(doc).filter((id) => !opts.availableUserFontIds?.has(id));
     if (missingFonts.length > 0) {

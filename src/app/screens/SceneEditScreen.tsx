@@ -64,7 +64,7 @@ import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessag
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
-import { DEFAULT_TEXT_COLOR, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
+import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -954,6 +954,62 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     </div>
   );
 
+  /**
+   * 文字の**影と字間**（#264）。⚠️ **書き込む入口が1つも無かった**（差分再監査 2巡目）＝
+   * schema・解決（`resolveTextStyle`）・描画・焼き出しまで land しているのに、値を書ける画面が
+   * どこにも無く**利用者からは使えない**まま（🔴1 の持ち込みフォントと同じ形の3例目）。
+   * ⚠️ **既定値は `textStyle` から採る**（§2-7）＝画面の初期値と描画がずれない。
+   */
+  const renderFreeTextDecoration = (el: FreeElement) => (
+    <>
+      <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+        {/* ⚠️ **字間は「文字サイズに対する割合」**＝サイズを変えても詰め具合が変わらない（#264）。 */}
+        <NumberField
+          label="字間"
+          value={el.letterSpacing ?? 0}
+          min={-0.5}
+          max={2}
+          step={0.05}
+          onChange={(v) => patchFreeEl(el.id, { letterSpacing: v })}
+        />
+      </div>
+      <div className="col gap-sm" style={{ marginTop: 4 }}>
+        <div className="toggle-row">
+          <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+          <Switch
+            on={el.shadow?.enabled ?? false}
+            onChange={(on) => patchFreeEl(el.id, { shadow: { ...el.shadow, enabled: on } })}
+            label="影を付ける"
+          />
+        </div>
+        {el.shadow?.enabled && (
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</label>
+              <ColorPicker
+                value={el.shadow?.color ?? DEFAULT_SHADOW_COLOR}
+                onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, color: v } })}
+                ariaLabel="影の色を選ぶ"
+                onDragStart={beginHistoryGroup}
+                onDragEnd={endHistoryGroup}
+              />
+            </div>
+            <NumberField
+              label="濃さ(%)"
+              value={opacityToPercent(el.shadow?.opacity ?? DEFAULT_SHADOW_OPACITY)}
+              min={0}
+              max={100}
+              onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, opacity: percentToOpacity(v) } })}
+            />
+            <NumberField label="ぼかし" value={el.shadow?.blur ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, blur: v } })} />
+            <NumberField label="横のずれ" value={el.shadow?.dx ?? 0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, dx: v } })} />
+            <NumberField label="縦のずれ" value={el.shadow?.dy ?? 0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, dy: v } })} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   // FREE 要素の種別ごとの編集コントロール。右パネルのカードと、右クリック「編集」ポップオーバーで共用（DRY）。
   // 角の丸み（radius）は廃止（#185・図形種類を増やすため不要）。位置/サイズはカードのフッタとドラッグで扱う。
   const renderFreeKindControls = (el: FreeElement) => {
@@ -1031,6 +1087,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
+          {renderFreeTextDecoration(el)}
           {renderFreeBandBg(el)}
         </>
       );
@@ -1153,6 +1210,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
+          {renderFreeTextDecoration(el)}
           {renderFreeBandBg(el)}
         </>
       );

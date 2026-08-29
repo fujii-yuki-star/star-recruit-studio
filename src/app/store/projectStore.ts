@@ -356,6 +356,14 @@ interface ProjectState {
   updateBgmSettings: (patch: BgmPatch) => void;
   /** 標準BGM（同梱）を選ぶ（bundledBgmId を設定し assetId を解除・BGMを有効化）。 */
   setBundledBgm: (bundledBgmId: BundledBgmId) => void;
+  /**
+   * **この動画にある音の素材**を BGM にする（PR #910 レビュー 🟡）。
+   *
+   * ⚠️ **選ぶ導線が無かった**＝よく使う素材から音を取り込んでも `project.assets` に入るだけで、
+   * BGM にできるのは**ファイルを読み込む**か**同梱の3曲**だけだった。取り込みの案内は
+   * 「「動画を保存」のBGMから選べます」と言っているのに**選べない**（§2-5＝実行できない行動）。
+   */
+  setBgmAsset: (assetId: string) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
@@ -1667,6 +1675,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     }));
   },
+  setBgmAsset: (assetId) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; } // 書き出し中は固定（#570 P1）
+    // ⚠️ **この動画にある音だけ**＝一覧に無い id を書くと、書き出しで「素材が見つからない」になる。
+    if (!get().assets.some((a) => a.assetId === assetId && a.assetType === ASSET_TYPE.bgm)) return;
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        bgmSettings: {
+          ...s.meta.bgmSettings,
+          enabled: true,
+          // 同梱の曲とは**どちらか一方**（`setBundledBgm` と対称）。
+          bundledBgmId: null,
+          assetId,
+          volume: s.meta.bgmSettings?.volume ?? BGM_VOLUME,
+          loop: true,
+        },
+      },
+      saveStatus: "idle",
+      bgmError: null,
+    }));
+  },
   setBundledBgm: (bundledBgmId) => {
     if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; } // 書き出し中は固定（#570 P1・ADR-0026④）
     get().pushHistory();
@@ -2074,7 +2104,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
     const stillOpen = sameDocGuard(get);
-    const lib = (await listLibraryAssets())?.find((a) => a.id === libraryAssetId);
+    // ⚠️ **「読めなかった」と「1つも無い」を分ける**（差分再監査 2巡目・§2-5）＝`null` を潰して
+    // 「見つかりませんでした」に丸めると、**置いてあるのに置いていないかのような案内**になる
+    //（会社の見た目のロゴを足す経路では「「よく使う素材」に置いてあるか確かめてください」に化ける）。
+    const list = await listLibraryAssets();
+    if (list == null) {
+      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
+      return null;
+    }
+    const lib = list.find((a) => a.id === libraryAssetId);
     if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
     const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
     if (!stillOpen()) return null;
@@ -2085,6 +2123,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 取り込みと同じく、保存前なら**ここで番号を採る**（素材の置き場が要るため）。
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **番号の着地も括る**（差分再監査 2巡目）＝一覧を読んでいる間に別の動画を開くと、
+        // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ）。
+        if (!stillOpen()) return null;
         set((st) => ({ meta: { ...st.meta, projectId } }));
       }
       const relPath = await copyLibraryAssetToProject(libraryAssetId, projectId, fileName);
@@ -2206,6 +2247,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // **写真として動画を描く**ことになり何も映らない。どちらも黙って別の結果なので、断って手を示す。
     // ⚠️ 判定は **`changesAssetKind`（動画かどうか）**＝`assetType` と直接くらべると
     // `logo`/`yuko`/`qr`/`decor` が素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。
+    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（差分再監査 2巡目・ほかの取り込み経路と同じ規則）。
+    const stillOpen = sameDocGuard(get);
     if (changesAssetKind(target.assetType, srcPath)) {
       set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video) });
       return;
@@ -2217,6 +2260,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **番号の着地も括る**（差分再監査 2巡目）＝一覧を読んでいる間に別の動画を開くと、
+        // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ）。
+        if (!stillOpen()) return;
         set((st) => ({ meta: { ...st.meta, projectId } }));
       }
       // ⚠️ **保存名の導出は `newAssetFrom` に1つ**（§2-7）＝拡張子の既定・`assets/` の付け方を
@@ -2347,12 +2393,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // いる BGM ファイルと競合しうる＝setAssetImage と同クラスのハザード（#547 P2-1・ADR-0026②）。BgmPicker は bgmError を表示。
     if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; }
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
+    // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（PR #911 レビュー ℹ️）＝ほかの取り込み経路と
+    // 同じ規則。括らないと、一覧を読んでいる間に別の動画を開いたとき**新しい動画へこの音が生える**／
+    // 番号の着地が別の動画を書き換える（#762 と同型）。
+    const stillOpen = sameDocGuard(get);
     set({ bgmError: null, isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        if (!stillOpen()) return;
+        set((st) => ({ meta: { ...st.meta, projectId } }));
       }
       const parts = file.name.split(".");
       const rawExt = parts.length > 1 ? parts[parts.length - 1] : "mp3";
@@ -2360,7 +2412,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
       // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
       // 新規IDは §2.1 の bgm_{slug}_{NNN}（slug=ファイル名）で採番する。
-      const existingBgm = get().assets.find((a) => a.assetType === ASSET_TYPE.bgm);
+      // ⚠️ **差し替えるのは「いま使っている音」だけ**（PR #911 レビュー 🟡）＝よく使う素材から
+      // 音を取り込めるようになり、**1つの動画が複数の音を持てる**ようになった。種類だけで探すと
+      // **配列の先頭にある別の音**（選んでもいないもの）のファイルを黙って上書きする（§2-5）。
+      // いま選んでいるものが無ければ**新しい番号で足す**（既存を壊さない）。
+      const selectedBgmId = get().meta.bgmSettings?.assetId;
+      const existingBgm = get().assets.find(
+        (a) => a.assetType === ASSET_TYPE.bgm && a.assetId === selectedBgmId,
+      );
       const assetId =
         existingBgm?.assetId ?? createBgmId(baseName, get().assets.map((a) => a.assetId));
       const fileName = `${assetId}.${ext}`;
@@ -2374,6 +2433,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         displayName: baseName.trim() || "BGM",
         filePath: filePath ?? `assets/${fileName}`,
       };
+      if (!stillOpen()) return;
       set((s) => ({
         meta: {
           ...s.meta,

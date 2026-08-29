@@ -39,6 +39,10 @@ export function emptyReadingDict(): ReadingDictFile {
  * 落とした語は**数を返して知らせる**＝黙って消さない（§2-5）。
  */
 export function parseReadingDictWithDrops(text: string): { file: ReadingDictFile; dropped: number } {
+  // ⚠️ **空のファイルは「まだ何も無い」**（差分再監査 2巡目・目録〔`parse_manifest`〕と同じ扱い）＝
+  // 書き込みが途中で止まると 0 バイトで残る。断ると**開き直しても直らない**うえ、決定7 と噛み合って
+  // **すべての声作成が止まる**（画面からも直せない＝`persist` が先に読むため）。失う中身が無いので通す。
+  if (text.trim() === '') return { file: emptyReadingDict(), dropped: 0 };
   const raw: unknown = JSON.parse(text);
   if (typeof raw !== 'object' || raw === null) return { file: emptyReadingDict(), dropped: 0 };
   const obj = raw as Record<string, unknown>;
