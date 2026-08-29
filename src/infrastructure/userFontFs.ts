@@ -25,12 +25,11 @@ export interface UserFont {
  *（id は解決するので `USER_FONT_MISSING` も発火しない）。
  */
 export async function usedUserFontIds(): Promise<string[]> {
+  // ⚠️ **失敗を握りつぶさない**（PR #904 レビュー）＝`[]` を返すと採番が 001 から採り直しになり、
+  // **いま直したばかりの「番号の使い回し」が別経路で再現する**（一時的な失敗のあと取り込みだけ
+  // 成功する、が起こりうる）。取り込みは呼ぶ側が理由を出して断る（§2-5）。
   if (!isTauri()) return [];
-  try {
-    return await invoke<string[]>('used_user_font_ids');
-  } catch {
-    return [];
-  }
+  return invoke<string[]>('used_user_font_ids');
 }
 
 /** 取り込める形式（利用者決定＝4つとも・ADR-0038）。 */

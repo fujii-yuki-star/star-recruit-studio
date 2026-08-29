@@ -170,4 +170,17 @@ describe("AssetLibraryPanel", () => {
     await waitFor(() => expect(vi.mocked(addLibraryAsset)).toHaveBeenCalled());
     expect(vi.mocked(addLibraryAsset).mock.calls[0]?.[0]).toBe("lib_asset_008");
   });
+
+  /**
+   * ⚠️ **採番の口が失敗したら置かない**（PR #904 レビュー）＝`[]` として続けると番号が 001 から
+   * 採り直しになり、**直したばかりの「番号の使い回し」が別経路で再現する**。理由を出して断る（§2-5）。
+   */
+  it("これまでの番号を取れなかったら、置かずに理由を出す", async () => {
+    vi.mocked(usedLibraryAssetIds).mockRejectedValue("一覧を読めませんでした。");
+    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png"]);
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/一覧を読めませんでした/)).toBeInTheDocument();
+    expect(vi.mocked(addLibraryAsset)).not.toHaveBeenCalled();
+  });
 });

@@ -337,7 +337,6 @@ fn user_fonts_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(user_fonts_dir(app)?.join("fonts.json"))
 }
 
-/// 目録を読む（無ければ空）。1件でも壊れていたら**全部を捨てず**空として扱う（次の書き込みで直る）。
 /// 目録（`fonts.json` / `library.json`）の本文を**行ごと**に読む（α-6 出口監査 🟡19）。
 ///
 /// ⚠️ **丸ごと捨てない**＝1行が壊れているだけで空にすると、次の書き込みが**棚を空で上書き**し、
@@ -357,6 +356,7 @@ fn parse_manifest<T: serde::de::DeserializeOwned>(
         .collect())
 }
 
+/// 目録を読む（無ければ空）。**壊れた行だけ落とし、配列ですら無ければ断る**（`parse_manifest`）。
 fn read_user_fonts(app: &tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> {
     let path = user_fonts_manifest(app)?;
     if !path.exists() {
@@ -541,7 +541,7 @@ fn user_assets_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(user_assets_dir(app)?.join("library.json"))
 }
 
-/// 目録を読む（無ければ空）。壊れていたら空として扱う（次の書き込みで直る）。
+/// 目録を読む（無ければ空）。**壊れた行だけ落とし、配列ですら無ければ断る**（`parse_manifest`）。
 fn read_library(app: &tauri::AppHandle) -> Result<Vec<LibraryAsset>, String> {
     let path = user_assets_manifest(app)?;
     if !path.exists() {

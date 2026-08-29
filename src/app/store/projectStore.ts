@@ -450,8 +450,6 @@ interface ProjectState {
   updateBrandKit: (next: BrandKit) => Promise<boolean>;
   /** 会社の見た目の保存で出た理由（§2-5）。 */
   brandKitError: string | null;
-  /** 上の理由を消す（知らせを閉じる）。 */
-  clearBrandKitError: () => void;
   /**
    * ブランドキットをいまの動画へ**適用し直す**（#351 決定3）。**できたかどうかを返す**。
    * ⚠️ **自動では遡及しない**（§2-5）＝この明示操作のときだけ。何がいくつ変わるかは
@@ -2256,7 +2254,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return false;
     }
   },
-  clearBrandKitError: () => set({ brandKitError: null }),
   addUserFont: async (srcPath, displayName) => {
     set({ fontError: null });
     try {
