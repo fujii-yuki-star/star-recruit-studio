@@ -326,20 +326,44 @@ struct UserFontEntry {
     file_name: String,
     /// 画面に出す名前（利用者が付ける・既定は元のファイル名）。
     display_name: String,
+    /// 外したか（墓標）。⚠️ **番号を使い回さないために覚え書きは残す**（α-6 出口監査 🟡8）＝
+    /// 消して行ごと落とすと、次の取り込みで**同じ番号が再発行**され、その番号を指している動画が
+    /// **黙って別の字体**になる（`USER_FONT_MISSING` も発火しない）。実体は消す・行だけ残す。
+    #[serde(default)]
+    removed: bool,
 }
 
 fn user_fonts_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(user_fonts_dir(app)?.join("fonts.json"))
 }
 
-/// 目録を読む（無ければ空）。1件でも壊れていたら**全部を捨てず**空として扱う（次の書き込みで直る）。
+/// 目録（`fonts.json` / `library.json`）の本文を**行ごと**に読む（α-6 出口監査 🟡19）。
+///
+/// ⚠️ **丸ごと捨てない**＝1行が壊れているだけで空にすると、次の書き込みが**棚を空で上書き**し、
+/// 置いてあるものの覚え書きが全部消える（実体は残るのに画面から永久に消える＝§2-5）。
+/// ⚠️ **配列ですら無いときは断る**＝読めていないものを「空だった」と扱わない。
+/// 断ると `add_*`/`delete_*` は書き込む前に止まるので、**壊れたファイルはそのまま残る**。
+fn parse_manifest<T: serde::de::DeserializeOwned>(
+    text: &str,
+    what: &str,
+) -> Result<Vec<T>, String> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(text).map_err(|_| {
+        format!("{what}の一覧を読めませんでした。中身を失わないよう、足す・外すは止めています。アプリを開き直してください。")
+    })?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| serde_json::from_value(r).ok())
+        .collect())
+}
+
+/// 目録を読む（無ければ空）。**壊れた行だけ落とし、配列ですら無ければ断る**（`parse_manifest`）。
 fn read_user_fonts(app: &tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> {
     let path = user_fonts_manifest(app)?;
     if !path.exists() {
         return Ok(Vec::new());
     }
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(serde_json::from_str::<Vec<UserFontEntry>>(&text).unwrap_or_default())
+    parse_manifest::<UserFontEntry>(&text, "取り込んだ文字の形")
 }
 
 fn write_user_fonts(app: &tauri::AppHandle, list: &[UserFontEntry]) -> Result<(), String> {
@@ -358,8 +382,17 @@ fn list_user_fonts(app: tauri::AppHandle) -> Result<Vec<UserFontEntry>, String> 
     let dir = user_fonts_dir(&app)?;
     Ok(read_user_fonts(&app)?
         .into_iter()
-        .filter(|e| dir.join(&e.file_name).exists())
+        .filter(|e| !e.removed && dir.join(&e.file_name).exists())
         .collect())
+}
+
+/// **これまでに使った番号**（墓標＝外したものを含む）。採番だけに使う（α-6 出口監査 🟡8）。
+///
+/// ⚠️ **一覧（`list_user_fonts`）は使えない**＝実体があるものだけを返すので、
+/// 最大番号を外すと**同じ番号が再発行**される（その番号を指す動画が黙って別の字体になる）。
+#[tauri::command]
+fn used_user_font_ids(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    Ok(read_user_fonts(&app)?.into_iter().map(|e| e.id).collect())
 }
 
 /// フォントを持ち込む（利用者が選んだファイルを `user_fonts/<id>.<ext>` へコピーし、目録に足す）。
@@ -399,6 +432,7 @@ fn import_user_font(
         } else {
             display_name
         },
+        removed: false,
     };
     let mut list = read_user_fonts(&app)?;
     list.retain(|e| e.id != entry.id);
@@ -447,11 +481,18 @@ fn delete_user_font(app: tauri::AppHandle, font_id: String) -> Result<(), String
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
     }
+    // ⚠️ **行は残す（墓標）**＝番号を使い回さないため（🟡8）。実体は上で消してある。
     write_user_fonts(
         &app,
         &list
             .into_iter()
-            .filter(|e| e.id != font_id)
+            .map(|e| {
+                if e.id == font_id {
+                    UserFontEntry { removed: true, ..e }
+                } else {
+                    e
+                }
+            })
             .collect::<Vec<_>>(),
     )
 }
@@ -490,20 +531,24 @@ struct LibraryAsset {
     /// タグ（探すときに使う。取り込み時にプロジェクトへ持ち込む＝書き戻さない）。
     #[serde(default)]
     tags: Vec<String>,
+    /// 外したか（墓標）。⚠️ **番号を使い回さないために覚え書きは残す**（α-6 出口監査 🟡8・
+    /// 持ち込みフォントと同じ扱い＝ADR-0026②）。実体は消す・行だけ残す。
+    #[serde(default)]
+    removed: bool,
 }
 
 fn user_assets_manifest(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(user_assets_dir(app)?.join("library.json"))
 }
 
-/// 目録を読む（無ければ空）。壊れていたら空として扱う（次の書き込みで直る）。
+/// 目録を読む（無ければ空）。**壊れた行だけ落とし、配列ですら無ければ断る**（`parse_manifest`）。
 fn read_library(app: &tauri::AppHandle) -> Result<Vec<LibraryAsset>, String> {
     let path = user_assets_manifest(app)?;
     if !path.exists() {
         return Ok(Vec::new());
     }
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(serde_json::from_str::<Vec<LibraryAsset>>(&text).unwrap_or_default())
+    parse_manifest::<LibraryAsset>(&text, "よく使う素材")
 }
 
 fn write_library(app: &tauri::AppHandle, list: &[LibraryAsset]) -> Result<(), String> {
@@ -521,8 +566,14 @@ fn list_library_assets(app: tauri::AppHandle) -> Result<Vec<LibraryAsset>, Strin
     let dir = user_assets_dir(&app)?;
     Ok(read_library(&app)?
         .into_iter()
-        .filter(|e| dir.join(&e.file_name).exists())
+        .filter(|e| !e.removed && dir.join(&e.file_name).exists())
         .collect())
+}
+
+/// **これまでに使った番号**（墓標＝外したものを含む）。採番だけに使う（α-6 出口監査 🟡8）。
+#[tauri::command]
+fn used_library_asset_ids(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    Ok(read_library(&app)?.into_iter().map(|e| e.id).collect())
 }
 
 /// 素材をライブラリへ置く（利用者が選んだファイルをコピーし、目録に足す）。
@@ -564,6 +615,7 @@ fn add_library_asset(
         },
         asset_type,
         tags,
+        removed: false,
     };
     let mut list = read_library(&app)?;
     list.retain(|e| e.id != entry.id);
@@ -628,11 +680,18 @@ fn delete_library_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), S
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
     }
+    // ⚠️ **行は残す（墓標）**＝番号を使い回さないため（🟡8）。実体は上で消してある。
     write_library(
         &app,
         &list
             .into_iter()
-            .filter(|e| e.id != asset_id)
+            .map(|e| {
+                if e.id == asset_id {
+                    LibraryAsset { removed: true, ..e }
+                } else {
+                    e
+                }
+            })
             .collect::<Vec<_>>(),
     )
 }
@@ -738,10 +797,12 @@ pub fn run() {
             voicevox::voicevox_user_dict_delete,
             voicevox::voicevox_synthesize_with_accent,
             list_user_fonts,
+            used_user_font_ids,
             import_user_font,
             read_user_font,
             delete_user_font,
             list_library_assets,
+            used_library_asset_ids,
             add_library_asset,
             copy_library_asset_to_project,
             delete_library_asset,
@@ -844,5 +905,45 @@ mod library_id_tests {
         for (id, want) in cases {
             assert_eq!(is_library_asset_id(id), *want, "id={id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::{parse_manifest, LibraryAsset, UserFontEntry};
+
+    /// ⚠️ **壊れた行だけ落とす**（α-6 出口監査 🟡19）＝1行のせいで棚が空になると、
+    /// 次の書き込みが**空で上書き**して置いてあるものの覚え書きが全部消える。
+    #[test]
+    fn keeps_good_rows_when_one_row_is_broken() {
+        let text = r#"[
+          {"id":"lib_asset_001","fileName":"a.png","displayName":"ロゴ","assetType":"logo","tags":[]},
+          {"id":"lib_asset_002"},
+          {"id":"lib_asset_003","fileName":"c.png","displayName":"写真","assetType":"image","tags":[]}
+        ]"#;
+        let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("読めるはず");
+        let ids: Vec<&str> = list.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["lib_asset_001", "lib_asset_003"]);
+    }
+
+    /// ⚠️ **配列ですら無いときは断る**＝「空だった」と扱うと書き込みが走って壊れたファイルを上書きする。
+    #[test]
+    fn refuses_when_not_a_list() {
+        let err = match parse_manifest::<UserFontEntry>("こわれた", "取り込んだ文字の形")
+        {
+            Ok(_) => panic!("断るはず"),
+            Err(e) => e,
+        };
+        assert!(err.contains("取り込んだ文字の形"), "err={err}");
+        // §2-5＝次の行動を示す。
+        assert!(err.contains("開き直して"), "err={err}");
+    }
+
+    /// 墓標（`removed`）は既定 false ＝**前の版の目録もそのまま読める**（🟡8）。
+    #[test]
+    fn removed_defaults_to_false() {
+        let text = r#"[{"id":"user_font_001","fileName":"a.ttf","displayName":"手持ちの字"}]"#;
+        let list = parse_manifest::<UserFontEntry>(text, "取り込んだ文字の形").expect("読めるはず");
+        assert!(!list[0].removed);
     }
 }

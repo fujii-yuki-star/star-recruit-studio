@@ -27,7 +27,7 @@ export async function loadExportFonts(): Promise<void> {
   }
   // 持ち込みフォントは `FontFace` として登録する（同梱と違い `@font-face` の宣言が無い）。
   try {
-    await loadUserFonts((await listUserFonts()).map((f) => f.id));
+    await loadUserFonts((await listUserFonts() ?? []).map((f) => f.id));
   } catch {
     /* 同上 */
   }

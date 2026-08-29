@@ -19,6 +19,17 @@ export async function listLibraryAssets(): Promise<LibraryAsset[]> {
   }
 }
 
+/**
+ * **これまでに使った id**（外したものを含む）。**採番だけ**に使う（α-6 出口監査 🟡8）。
+ * ⚠️ **一覧は使えない**＝実体があるものだけを返すので、最大番号を外すと同じ番号が再発行される。
+ */
+export async function usedLibraryAssetIds(): Promise<string[]> {
+  // ⚠️ **失敗を握りつぶさない**（PR #904 レビュー）＝`[]` を返すと採番が 001 から採り直しになり、
+  // **いま直したばかりの「番号の使い回し」が別経路で再現する**。置く側が理由を出して断る（§2-5）。
+  if (!isTauri()) return [];
+  return invoke<string[]>('used_library_asset_ids');
+}
+
 /** 素材をライブラリへ置く（利用者が選んだファイルをコピーする）。失敗は文言つきで投げる（§2-5）。 */
 export async function addLibraryAsset(
   assetId: string,

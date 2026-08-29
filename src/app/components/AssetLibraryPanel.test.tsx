@@ -8,12 +8,14 @@ vi.mock("../../infrastructure/assetLibraryFs", () => ({
   addLibraryAsset: vi.fn(async () => ({})),
   deleteLibraryAsset: vi.fn(async () => {}),
   updateLibraryAsset: vi.fn(async () => {}),
+  usedLibraryAssetIds: vi.fn(async () => []),
 }));
 vi.mock("../../infrastructure/dialog", () => ({ showOpenAssetsDialog: vi.fn(async () => []) }));
 
 import { AssetLibraryPanel } from "./AssetLibraryPanel";
+import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { useProjectStore } from "../store/projectStore";
-import { deleteLibraryAsset, listLibraryAssets, updateLibraryAsset } from "../../infrastructure/assetLibraryFs";
+import { addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
 
@@ -154,5 +156,31 @@ describe("AssetLibraryPanel", () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).toBeDisabled();
+  });
+
+  /**
+   * ⚠️ **外した番号を使い回さない**（α-6 出口監査 🟡8）＝一覧は**実体があるものだけ**なので、
+   * 最大番号を外したあとに一覧から採ると同じ番号が再発行され、別の素材を指してしまう。
+   */
+  it("置くときの番号は「これまでに使った番号」から採る（外した番号を使い回さない）", async () => {
+    vi.mocked(usedLibraryAssetIds).mockResolvedValue(["lib_asset_001", "lib_asset_007"]);
+    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/tmp/new.png"]);
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    await waitFor(() => expect(vi.mocked(addLibraryAsset)).toHaveBeenCalled());
+    expect(vi.mocked(addLibraryAsset).mock.calls[0]?.[0]).toBe("lib_asset_008");
+  });
+
+  /**
+   * ⚠️ **採番の口が失敗したら置かない**（PR #904 レビュー）＝`[]` として続けると番号が 001 から
+   * 採り直しになり、**直したばかりの「番号の使い回し」が別経路で再現する**。理由を出して断る（§2-5）。
+   */
+  it("これまでの番号を取れなかったら、置かずに理由を出す", async () => {
+    vi.mocked(usedLibraryAssetIds).mockRejectedValue("一覧を読めませんでした。");
+    vi.mocked(showOpenAssetsDialog).mockResolvedValue(["C:/a.png"]);
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/一覧を読めませんでした/)).toBeInTheDocument();
+    expect(vi.mocked(addLibraryAsset)).not.toHaveBeenCalled();
   });
 });

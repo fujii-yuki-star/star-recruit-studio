@@ -17,17 +17,41 @@ export interface UserFont {
   displayName: string;
 }
 
+/**
+ * **これまでに使った id**（外したものを含む）。**採番だけ**に使う（α-6 出口監査 🟡8）。
+ *
+ * ⚠️ **一覧（`listUserFonts`）は使えない**＝実体があるものだけを返すので、最大番号を外すと
+ * **同じ番号が再発行**され、その番号を指している動画が**黙って別の字体**になる
+ *（id は解決するので `USER_FONT_MISSING` も発火しない）。
+ */
+export async function usedUserFontIds(): Promise<string[]> {
+  // ⚠️ **失敗を握りつぶさない**（PR #904 レビュー）＝`[]` を返すと採番が 001 から採り直しになり、
+  // **いま直したばかりの「番号の使い回し」が別経路で再現する**（一時的な失敗のあと取り込みだけ
+  // 成功する、が起こりうる）。取り込みは呼ぶ側が理由を出して断る（§2-5）。
+  if (!isTauri()) return [];
+  return invoke<string[]>('used_user_font_ids');
+}
+
 /** 取り込める形式（利用者決定＝4つとも・ADR-0038）。 */
 export const USER_FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'] as const;
 
-/** 持ち込みフォントの一覧（**実体があるものだけ**が返る）。 */
-export async function listUserFonts(): Promise<UserFont[]> {
+/**
+ * 持ち込みフォントの一覧（**実体があるものだけ**が返る）。
+ * **`null` ＝調べられなかった**（目録が読めない・Tauri 以外）＝`[]`（1つも無い）と**区別する**。
+ */
+export async function listUserFonts(): Promise<UserFont[] | null> {
+  // ⚠️ **ブラウザ開発は「0件」で確定**（`null` ではない）＝この環境に持ち込みフォントは無い。
+  // `null` は「読もうとしたが読めなかった」だけに使う（下の catch）。
   if (!isTauri()) return [];
   try {
     return await invoke<UserFont[]>('list_user_fonts');
   } catch {
+    // ⚠️ **「調べていない」を空と混ぜない**（α-6 出口監査 🟡19 のレビュー）＝目録が読めないときに
+    // `[]` を返すと「調べた・1つも無い」になり、公開前チェックが**使っている字体を全部「見つからない」**と
+    // 数えて書き出しを止める（しかも案内の「取り込み直す」は同じ目録を通るので**必ず失敗＝行き止まり**）。
+    // `missingAsset`／#347 と同じ流儀で `null`＝**まだ分からない**を返す（`15 §6` `USER_FONT_MISSING`）。
     // 一覧が読めなくても画面は開ける（同梱フォントは使える）＝行き止まりにしない。
-    return [];
+    return null;
   }
 }
 

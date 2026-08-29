@@ -5,6 +5,7 @@
 // 「概要欄などに書いてください」の案内と、**貼り付けられる一覧**を出す（それが無いと守れない）。
 import { useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { NumberField } from "./NumberField";
 import {
   CREDIT_MODE, CREDIT_SECONDS_MAX, CREDIT_SECONDS_MIN, creditClipboardText,
   resolveCreditDisplay, type CreditMode,
@@ -46,20 +47,21 @@ export function CreditDisplayField({ disabled }: { disabled?: boolean }) {
       </select>
 
       {showSeconds && (
-        <label className="row gap-sm text-sm" style={{ alignItems: "center", marginTop: 6 }}>
-          何秒出すか
-          <input
-            type="number"
-            className="input"
-            style={{ width: 80 }}
-            min={CREDIT_SECONDS_MIN}
-            max={CREDIT_SECONDS_MAX}
-            value={seconds}
-            disabled={disabled}
-            onChange={(e) => setCreditDisplay({ seconds: Number(e.target.value) })}
-          />
-          秒
-        </label>
+        /* ⚠️ **家の数値欄を使う**（α-6 出口監査 🟡24）＝生の `<input type="number">` だと
+           **1キー＝1履歴**（取り消しが1文字ずつ戻る）になり、空欄が `Number("") === 0` で
+           `seconds: 0` として文書に入る（schema の下限 1 に違反・保存時の検査は警告だけ）。
+           `NumberField` は blur/Enter で確定し、範囲へ収め、空欄は元の値へ戻す。 */
+        <NumberField
+          label="何秒出すか"
+          value={seconds}
+          min={CREDIT_SECONDS_MIN}
+          max={CREDIT_SECONDS_MAX}
+          suffix="秒"
+          disabled={disabled}
+          inputStyle={{ width: 80 }}
+          style={{ marginTop: 6, flex: "none" }}
+          onChange={(v) => setCreditDisplay({ seconds: v })}
+        />
       )}
 
       {/* ⚠️ **場面形式は場面ごとにしか切り替えられない**＝静止の場面は1枚の絵なので、途中で消すには

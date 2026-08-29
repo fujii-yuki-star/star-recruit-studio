@@ -26,7 +26,8 @@ export function UserFontSection() {
   }, [refreshUserFonts]);
   // 一覧（名前つき）は id だけでは足りないので、id の並びが変わったら取り直す。
   useEffect(() => {
-    void listUserFonts().then(setFonts);
+    // ⚠️ **調べられなかったら前の一覧を残す**（🟡19 のレビュー）＝`null` は「1つも無い」ではない。
+    void listUserFonts().then((list) => { if (list) setFonts(list); });
   }, [userFontIds]);
 
   async function onAdd(): Promise<void> {

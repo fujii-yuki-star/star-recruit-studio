@@ -68,7 +68,9 @@ export function isUserFontId(fontId: unknown): fontId is FontId {
 
 /**
  * 次の持ち込みフォント id を採る（`11 §2` の採番＝既存の最大＋1・3桁ゼロ詰め）。
- * ⚠️ **消した番号は使い回さない**（既存の最大から採る）＝古い動画が同じ id で別のフォントを指さない。
+ * ⚠️ **消した番号は使い回さない**＝`existingIds` には **これまでに使った番号**（外したものを含む＝
+ * `usedUserFontIds()`）を渡すこと。**一覧は渡さない**（実体があるものだけなので最大番号を外すと
+ * 同じ番号が再発行され、その番号を指している動画が黙って別のものになる＝α-6 出口監査 🟡8）。
  */
 export function createUserFontId(existingIds: readonly string[]): string {
   const max = existingIds.reduce((m, id) => {
