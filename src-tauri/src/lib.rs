@@ -268,7 +268,9 @@ fn save_reading_dict(app: tauri::AppHandle, dict_json: String) -> Result<(), Str
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, &dict_json).map_err(|e| e.to_string())
+    // ⚠️ **目録と同じく不可分に書く**（PR #909 レビュー ℹ️）＝途中で止まると半端な JSON が残り、
+    // 以後 `load_reading_dict` が断り続ける（声も作れなくなる）。失敗の性質が同じなので同じ手を使う。
+    write_manifest_atomic(&path, &dict_json)
 }
 
 /// 読み方辞書を、利用者が選んだ場所へ書き出す（ADR-0037 決定8）。
@@ -387,12 +389,10 @@ fn raw_manifest_ids(path: &std::path::Path, what: &str) -> Result<Vec<String>, S
 fn write_manifest_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    // ⚠️ **Windows は既存があると `rename` が失敗する**ので、先に消してから付け替える。
-    // （消してから付け替えるまでの間に落ちると目録が無い状態になるが、**壊れた目録より扱いやすい**
-    //   ＝「無ければ空」で開けて、次の書き込みで作り直せる。）
-    if path.exists() {
-        fs::remove_file(path).map_err(|e| e.to_string())?;
-    }
+    // ⚠️ **先に消さない**（PR #909 レビュー 🔴）＝`fs::rename` は**既存があっても置き換える**
+    //（Windows は `MoveFileEx` の `MOVEFILE_REPLACE_EXISTING`）。消してから付け替えると、
+    // その間に落ちたときに**目録が無い瞬間**を自分で作ってしまう（防ぎたかったものと逆）。
+    // 実際に置き換えられることは `rename_replaces_existing` で固定してある。
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
@@ -996,6 +996,23 @@ mod manifest_tests {
             let list = parse_manifest::<LibraryAsset>(text, "よく使う素材").expect("通るはず");
             assert!(list.is_empty(), "text={text:?}");
         }
+    }
+
+    /// ⚠️ **`rename` は既存を置き換える**（PR #909 レビュー 🔴・この環境で実際に確かめる）＝
+    /// 「Windows は上書きできない」は誤りで、先に消すと**目録が無い瞬間**を自分で作ってしまう。
+    #[test]
+    fn rename_replaces_existing() {
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_rename_test");
+        let _ = fs::create_dir_all(&dir);
+        let target = dir.join("m.json");
+        let tmp = dir.join("m.json.tmp");
+        fs::write(&target, "old").expect("書けるはず");
+        fs::write(&tmp, "new").expect("書けるはず");
+        fs::rename(&tmp, &target).expect("既存があっても置き換えられるはず");
+        assert_eq!(fs::read_to_string(&target).expect("読めるはず"), "new");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// ⚠️ **採番の入力は壊れた行の番号も拾う**（差分再監査）＝`parse_manifest` が落とした行から
