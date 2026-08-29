@@ -116,7 +116,7 @@ export function exportBlockingItems(
    * ここにも通さないと直行導線ですり抜ける**（PR #886 レビュー 🔴）＝サイドバーから
    * 「動画を保存」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
    */
-  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[]; userFontsUnreadable?: boolean },
 ): PrecheckItem[] {
   return buildPrecheckItems(scenes, assets, templates, overlayAnimations, undefined, undefined, fonts).filter(isExportBlocking);
 }
@@ -151,7 +151,7 @@ export function buildPrecheckItems(
    * ⚠️ **`availableUserFontIds` の省略＝調べていない**（「全部そろっている」ではない）＝
    * 調べられない場で嘘の「問題なし」を出さない（`missingAssetIds` と同じ流儀）。
    */
-  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[] },
+  fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[]; userFontsUnreadable?: boolean },
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
@@ -341,10 +341,23 @@ export function buildPrecheckItems(
   // 見つからない持ち込みフォント（#261・ADR-0038）。⚠️ **黙って別の字体の動画を出さない**（§2-5）＝
   // 描画は既定へ倒れてよいが、**書き出しは止める**（`blocksExport`）。字体が変わった動画を
   // 「成功しました」として出すと、利用者は見るまで気づけない。
-  const missingFonts = missingUserFontIds(
-    usedUserFontIds(scenes, fonts?.projectFontId, templates),
-    fonts?.availableUserFontIds,
-  );
+  const usedFontIds = usedUserFontIds(scenes, fonts?.projectFontId, templates);
+  const missingFonts = missingUserFontIds(usedFontIds, fonts?.availableUserFontIds);
+  // ⚠️ **「調べられなかった」は3つ目の状態**（α-6 出口監査 🟡19 のレビュー）＝一覧が読めないときに
+  // 「全部見つからない」と言うのは**嘘**（案内の「取り込み直す」も同じ目録を通るので必ず失敗＝行き止まり）、
+  // かといって黙ると**別の字体の動画を成功として出す**（ADR-0038）。どちらにも倒さず、そう言って止める。
+  if (usedFontIds.length > 0 && fonts?.userFontsUnreadable === true) {
+    items.push({
+      id: "unknownFont",
+      label: "文字の形を調べられません",
+      detail:
+        `この動画は取り込んだ文字の形（フォント）を${usedFontIds.length}つ使っていますが、` +
+        `いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。` +
+        `アプリを開き直してから、もう一度お試しください。`,
+      severity: "action",
+      blocksExport: true,
+    });
+  }
   if (missingFonts.length > 0) {
     items.push({
       id: "missingFont",

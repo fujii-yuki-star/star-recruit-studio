@@ -24,7 +24,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, refreshUserFonts } = useProjectStore();
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, userFontsUnreadable, refreshUserFonts } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
   // 「まとめて標準にする」の結果（直した件数・入れ直しが要る場面）。この画面に取り消しの入口が無いため
@@ -61,7 +61,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const baseItems = buildPrecheckItems(
     scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds, meta.bgmSettings?.assetId,
     // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
-    { projectFontId: meta.videoSettings.fontId, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) },
+    { projectFontId: meta.videoSettings.fontId, userFontsUnreadable, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) },
   );
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;

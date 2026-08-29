@@ -71,7 +71,15 @@ export function parseReadingDict(text: string): ReadingDictFile {
   return parseReadingDictWithDrops(text).file;
 }
 
-/** 辞書を読む（無ければ空）。 */
+/**
+ * 辞書を読む（無ければ空）。
+ *
+ * ⚠️ **壊れて読めないファイルは断る**（α-6 出口監査 🟡19 のレビュー・目録〔`parse_manifest`〕と同じ流儀）＝
+ * 空として返すと、画面が「1つも無い」を見せ、次の保存が**その空で丸ごと上書き**して登録した読みが全部消える
+ *（元のコメントは「上書きしない」と書いていたが、そうなっていなかった）。断れば書き込みが走らないので、
+ * **壊れたファイルはそのまま残る**（利用者が直せる余地）。壊れた**語**は `parseReadingDictWithDrops` が
+ * 1件ずつ落として数を返す＝丸ごと捨てるのは「JSON ですら無い」ときだけ。
+ */
 export async function loadReadingDict(): Promise<ReadingDictFile> {
   if (!isTauri()) return emptyReadingDict();
   const text = await invoke<string | null>('load_reading_dict');
@@ -79,10 +87,15 @@ export async function loadReadingDict(): Promise<ReadingDictFile> {
   try {
     return parseReadingDict(text);
   } catch {
-    // 壊れて読めないファイルは**上書きしない**（利用者が直せる余地を残す）＝空として扱うだけ。
-    return emptyReadingDict();
+    throw READING_DICT_UNREADABLE;
   }
 }
+
+/**
+ * 読めなかったときの断り（§2-5＝次の行動を示す）。⚠️ **中身を失わないよう書き込みも止める**。
+ */
+export const READING_DICT_UNREADABLE =
+  '読み方の一覧を読めませんでした。中身を失わないよう、足す・外すは止めています。アプリを開き直してください。';
 
 /** 辞書を書く（丸ごと置き換え）。 */
 export async function saveReadingDict(dict: ReadingDictFile): Promise<void> {

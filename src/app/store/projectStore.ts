@@ -479,6 +479,12 @@ interface ProjectState {
    * `userFontIds` は「調べたか」を含む判定（`null`＝まだ調べていない）に使い続ける。
    */
   userFonts: UserFont[];
+  /**
+   * 目録が**読めなかった**か（α-6 出口監査 🟡19 のレビュー）。**「まだ調べていない」とは別**＝
+   * あちら（`userFontIds === null`）は待てば埋まるので止めないが、こちらは待っても埋まらない。
+   * 黙ると**別の字体の動画を成功として出す**ので、公開前チェックがそう言って止める（ADR-0038）。
+   */
+  userFontsUnreadable: boolean;
   /** 持ち込みフォントの一覧を調べ直す（#261）。**実体があるものだけ**が入る。 */
   refreshUserFonts: () => Promise<void>;
   /** フォントを持ち込む（#261）。成功したら足した id、できなければ `null`（理由は `fontError`）。 */
@@ -693,6 +699,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   brandKit: {},
   brandKitError: null,
   userFontIds: null,
+  userFontsUnreadable: false,
   userFonts: [],
   fontError: null,
   isTemplateMutating: false,
@@ -2276,6 +2283,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   refreshUserFonts: async () => {
     const list = await listUserFonts();
+    // ⚠️ **「読めなかった」を「1つも無い」にしない**（🟡19 のレビュー）＝`[]` を書くと
+    // 公開前チェックが**使っている字体を全部「見つからない」**と数えて書き出しを止める
+    //（案内の「取り込み直す」も同じ目録を通るので必ず失敗＝行き止まり・§2-5）。
+    // ⚠️ **起動直後の「まだ調べていない」（`userFontIds: null`）とも別**＝あちらは待てば埋まるので
+    // 止めない。読めなかったことは別の印で持ち、公開前チェックがそう言って止める。
+    if (list == null) { set({ userFontsUnreadable: true }); return; }
+    set({ userFontsUnreadable: false });
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
     await loadUserFonts(list.map((f) => f.id));

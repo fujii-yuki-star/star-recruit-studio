@@ -22,6 +22,7 @@ import {
   exportReadingDictTo,
   importReadingDictFrom,
   loadReadingDict,
+  READING_DICT_UNREADABLE,
   saveReadingDict,
   type ReadingDictFile,
 } from "../../infrastructure/readingDictFs";
@@ -57,12 +58,16 @@ export function ReadingDictSection() {
   useEffect(() => {
     // 開いたときに読み、**その場で音声ソフトへ映す**（決定2「編集したら即反映」）。
     // これが無いと、黙って上書きしなかった語（決定3b）を知らせる機会がどこにも無い。
-    void loadReadingDict().then(async (d) => {
-      setDict(d);
-      const r = await syncAndCollectConflicts();
-      setConflicts(r.conflicts);
-      if (r.error) setError(r.error);
-    });
+    void loadReadingDict()
+      .then(async (d) => {
+        setDict(d);
+        const r = await syncAndCollectConflicts();
+        setConflicts(r.conflicts);
+        if (r.error) setError(r.error);
+      })
+      // ⚠️ **読めなかったら理由を出す**（§2-5）＝空の一覧を見せると「1つも登録していない」に見え、
+      // そのまま足すと**丸ごと上書き**して登録した読みが全部消える（`loadReadingDict` の ⚠️）。
+      .catch((e: unknown) => setError(typeof e === "string" ? e : READING_DICT_UNREADABLE));
   }, []);
 
   /**

@@ -82,13 +82,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
   // 持ち込みフォント（#261）＝**開くたびに調べ直す**（アプリの外で消されうる・公開前チェックと同じ流儀）。
   const userFontIds = useProjectStore((s) => s.userFontIds);
+  // ⚠️ **「読めなかった」は「まだ調べていない」とは別**（🟡19 のレビュー）＝待っても埋まらないので、
+  // 黙って別の字体で書き出さないよう、公開前チェックが**そう言って**止める。
+  const userFontsUnreadable = useProjectStore((s) => s.userFontsUnreadable);
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const fontsForBlocking = useMemo(
     // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
-    () => ({ projectFontId, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) }),
-    [projectFontId, userFontIds],
+    () => ({ projectFontId, userFontsUnreadable, ...(userFontIds ? { availableUserFontIds: userFontIds } : {}) }),
+    [projectFontId, userFontIds, userFontsUnreadable],
   );
   // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
   // useMemo：書き出し中は進捗更新のたびに再描画されるので、毎回 全場面のレイアウト計算をやり直さない（#376 の待ち時間に効く）。
@@ -212,7 +215,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const blocking = exportBlockingItems(
         st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations,
         // ⚠️ 押した瞬間の再確認でも同じ材料を見る（`null`＝まだ調べていない＝項目を出さない）。
-        { projectFontId: st.meta.videoSettings.fontId, ...(st.userFontIds ? { availableUserFontIds: st.userFontIds } : {}) },
+        { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds ? { availableUserFontIds: st.userFontIds } : {}) },
       );
       if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;
