@@ -299,9 +299,10 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
       missingTemplateMany: missingTemplateMessage(3),
       // 4分岐とも走査に入れる（差分再監査 11巡目 🟡＝登録しないと検査の外に落ちる）。
       sceneTemplateUnresolvedPickable: sceneTemplateProblemMessage(true, 3),
-      sceneTemplateUnresolvedNone: sceneTemplateProblemMessage(true, 0),
+      sceneTemplateUnresolvedNoneOtherKind: sceneTemplateProblemMessage(true, 0, true),
+      sceneTemplateUnresolvedNoneNothing: sceneTemplateProblemMessage(true, 0, false),
       sceneTemplateMismatchedPickable: sceneTemplateProblemMessage(false, 3),
-      sceneTemplateMismatchedNone: sceneTemplateProblemMessage(false, 0),
+      sceneTemplateMismatchedNone: sceneTemplateProblemMessage(false, 0, true),
       // ⚠️ **別 file の共有定数も載せる**（差分再監査 ℹ️）＝`exportLock.ts` は `uiLabels` の外だが、
       // 画面に出る文言であることは同じ。載せないと `15 §6` 直下が約束する「機械で守る」の外に落ちる
       //（`lockedTrackMessage`〔#819-2〕・`missingTemplateMessage`〔#834-2〕と同じ型の穴）。
@@ -441,8 +442,12 @@ describe('sceneTemplateProblemMessage', () => {
   });
 
   it('見つからない・候補なし＝選び直しを案内しない（実行できない次の行動を出さない）', () => {
-    // ⚠️ **候補ゼロでも次の行動で終わる**（行き止まりにしない）。
-    expect(sceneTemplateProblemMessage(true, 0)).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。');
+    // ⚠️ **候補ゼロでも次の行動で終わる**（行き止まりにしない）＝ただし**いま実際にできる手**を出す。
+    expect(sceneTemplateProblemMessage(true, 0, true)).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えると、別の見た目パターンを選べます。');
+  });
+
+  it('見つからない・候補なし・別の種類も無い＝できない手を名指ししない（行き止まりにしない）', () => {
+    expect(sceneTemplateProblemMessage(true, 0, false)).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。見た目パターンが読み込まれていません。アプリを開き直してください。改善しない場合は、お手数ですがご連絡ください。');
   });
 
   it('合っていない・候補あり', () => {
@@ -450,6 +455,6 @@ describe('sceneTemplateProblemMessage', () => {
   });
 
   it('合っていない・候補なし', () => {
-    expect(sceneTemplateProblemMessage(false, 0)).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。');
+    expect(sceneTemplateProblemMessage(false, 0, true)).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。種類を変えると、別の見た目パターンを選べます。');
   });
 });
