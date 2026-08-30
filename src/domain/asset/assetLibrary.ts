@@ -110,9 +110,3 @@ export function filterLibraryAssets(
   });
 }
 
-/** 一覧にあるタグを重複なく並べる（絞り込みの選択肢に使う。並びは出現順＝入れた順に見える）。 */
-export function libraryTags(items: readonly LibraryAsset[]): string[] {
-  const out: string[] = [];
-  for (const a of items) for (const t of a.tags) if (!out.includes(t)) out.push(t);
-  return out;
-}

@@ -7,7 +7,6 @@ import {
   createLibraryAssetId,
   filterLibraryAssets,
   isLibraryAssetId,
-  libraryTags,
   LIBRARY_ASSET_ID_SAMPLES,
   type LibraryAsset,
 } from './assetLibrary';
@@ -142,15 +141,7 @@ describe('filterLibraryAssets（タグで探せる＝#260 で足りなかった�
   });
 });
 
-describe('libraryTags', () => {
-  it('重複なく、出てきた順に並べる', () => {
-    expect(libraryTags([lib({ tags: ['あ', 'い'] }), lib({ tags: ['い', 'う'] })])).toEqual(['あ', 'い', 'う']);
-  });
 
-  it('タグが無ければ空', () => {
-    expect(libraryTags([lib({ tags: [] })])).toEqual([]);
-  });
-});
 
 // ⚠️ **予約した番号を必ず使う**（差分再監査 6巡目 🔴）＝タイムラインの取り込みは `existingIds` に空配列を
 // 渡し、番号は `reserveAssetId` が採る（消した番号を使い回さない規則）。この引数が落ちると

@@ -9,6 +9,7 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectS
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
+import { assetTagCounts } from "../../domain/project/assetSearch";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import {
   addLibraryAsset,
@@ -157,13 +158,9 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   // 全件から採ると、種類=音楽にして写真のタグを押せてしまい「条件に合う素材がありません」になる
   //（押しても0件になる候補を出さない＝ADR-0026②）。**いま選んでいるタグは残す**＝選んだ瞬間に
   // 自分が消えて外せなくなる、を作らない。
-  const tagPool = filterLibraryAssets(items, { text, assetType });
-  const tagCounts = new Map<string, number>();
-  for (const a of tagPool) for (const t of a.tags) if (t.trim() !== "") tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
-  for (const t of tags) if (!tagCounts.has(t)) tagCounts.set(t, 0);
-  const allTags = [...tagCounts.entries()]
-    .sort((x, y) => (y[1] - x[1]) || x[0].localeCompare(y[0], "ja"))
-    .map(([tag, count]) => ({ tag, count }));
+  // ⚠️ **数え方は素材画面と同じ関数**（`/canon-check` 🟡・§6）＝同じ規則を画面で書き直すと、
+  // 片方だけ並び順を変えたときに黙って割れる。
+  const allTags = assetTagCounts(filterLibraryAssets(items, { text, assetType }), tags);
 
   async function onAdd(): Promise<void> {
     setNotice("");
