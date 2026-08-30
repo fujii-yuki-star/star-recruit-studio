@@ -460,6 +460,22 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     expect(screen.getByText(/この見た目パターンの文字は自由配置で置きます/)).toBeInTheDocument();
   });
 
+  // ⚠️ **書き出しを止めている理由も畳める場所に置かない**（差分再監査 9巡目 🟡）＝
+  // `<details>` は畳んでも中身が DOM に残るので、**位置そのもの**を固定しないと戻っても気づけない。
+  it("見た目が見つからないときの理由は、畳める節の外に出す", () => {
+    useProjectStore.setState({
+      templates: [], // 見た目が解決できない
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene()],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const notice = screen.getByText(/今の見た目が見つかりません。下の/);
+    expect(notice.closest("details")).toBeNull();
+    // ⚠️ **存在しない見た目について語らない**＝別の次の行動が並ぶ。
+    expect(screen.queryByText("この見た目パターンは文字を表示しません。")).toBeNull();
+  });
+
   it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
     useProjectStore.setState({
       templates: [{ ...tpl, templateId: "user_tmpl_001", category: "free" } as unknown as Template],
