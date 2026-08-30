@@ -1131,22 +1131,29 @@ const VISUAL_CONTENT_KEYS = {
   // ⚠️ **#264 の語彙は3つそろえる**（差分再監査 4巡目 🟡・ADR-0032 追補3）＝影・字間だけ足すと、
   // **背景帯だけ片方でしか編集できない**（描画・焼き出し・schema は通っているのに解除できない）。
   // 行間（`lineHeight`）も場面形式の自由配置の文字では直せるので、同じ顔ぶれにする。
+  // ⚠️ **縁取りも受ける**（差分再監査 5巡目 🟡）＝描画は写す（`freeElementFromClip`）し「バラす」は
+  // 元の要素の値をそのまま持ち込むので、**縁取りのある見た目パターンをバラすと外せない縁取りが残る**
+  // （場面形式の自由配置の文字では外せる＝ADR-0026②）。
   [TIMELINE_CLIP_KIND.text]: [
     'text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign',
-    'letterSpacing', 'shadow', 'background', 'lineHeight',
+    'letterSpacing', 'shadow', 'background', 'lineHeight', 'strokeColor', 'strokeWidth',
   ],
   // ⚠️ **字幕クリップも体裁を持つ**（🟡）＝`addLinkedSubtitleClip` が `createFreeElement` の体裁を
   // 書き込み、描画も通る＝**効くのに選べない**。文言は連動先から採るので `text` は持たせない。
   [TIMELINE_CLIP_KIND.subtitle]: [
     'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign',
-    'letterSpacing', 'shadow', 'background', 'lineHeight',
+    'letterSpacing', 'shadow', 'background', 'lineHeight', 'strokeColor', 'strokeWidth',
   ],
   [TIMELINE_CLIP_KIND.shape]: ['shapeType', 'fillColor'],
   // ⚠️ **見た目パターンの部品も文字の形を持つ**（差分再監査 4巡目 🟡）＝焼き出しが `scene.fontId` を
   // ここへ書き、描画（`sceneFromClip`）と書き出しの門（`usedTimelineUserFontIds`）が見る。
   // 直せないと、門の案内どおりの操作が**この形式に存在しない**（§2-5 の行き止まり）。
   // ⚠️ **差し込み口と文は別の口**（`setClipAssetRef`／`setClipText`）＝ここでは足さない。
-  [TIMELINE_CLIP_KIND.template]: ['fontId'],
+  // ⚠️ **種別ごとの文字の形も受ける**（差分再監査 5巡目 🟡）＝焼き出しが `scene.textFontIds` をここへ
+  // 書き、書き出しの門（`usedTimelineUserFontIds`）が数えるのに**直す操作がこの形式に無かった**＝
+  // 持ち込みフォントが手元から消えると、門の案内どおりに選び直す先が無く**書き出しが止まったまま
+  // 解除できない**（取り込み直しても墓標で番号が戻らない＝§2-5 の行き止まり）。
+  [TIMELINE_CLIP_KIND.template]: ['fontId', 'textFontIds'],
 } as const;
 
 export function setVisualClipContent(
@@ -1154,7 +1161,8 @@ export function setVisualClipContent(
   clipId: string,
   patch: Partial<Pick<TimelineClip,
     'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'letterSpacing' | 'shadow'
-    | 'background' | 'lineHeight' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
+    | 'background' | 'lineHeight' | 'strokeColor' | 'strokeWidth' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'
+    | 'textFontIds'>>,
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);

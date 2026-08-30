@@ -25,7 +25,7 @@ import {
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { libraryPartlyFailedMessage } from "../uiLabels";
-import { ASSET_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
 /** 種類の絞り込み（画面に出す名前）。 */
@@ -84,7 +84,7 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   const sceneImporting = useProjectStore((s) => s.isImporting);
   const timelineImporting = useTimelineStore((s) => s.isImporting);
   const timelineExporting = useTimelineStore((s) => isTimelineExportBusy(s.exportRun.phase));
-  const isImporting = target === "timeline" ? timelineImporting : sceneImporting;
+  const isImporting = target === PROJECT_FORMAT.timeline ? timelineImporting : sceneImporting;
   /**
    * 取り込み先の**場面形式の動画の名前**（差分再監査 4巡目 🔴）。
    *
@@ -93,9 +93,9 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
    * 理由は事実と違う）＝解除できない行き止まり（§2-5）。**どの動画へ入るかは名前で解く**。
    */
   const sceneName = useProjectStore((s) => s.meta.projectName);
-  const destName = target === "timeline" ? timelineName : sceneName;
+  const destName = target === PROJECT_FORMAT.timeline ? timelineName : sceneName;
   const sceneExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
-  const isExporting = target === "timeline" ? timelineExporting : sceneExporting;
+  const isExporting = target === PROJECT_FORMAT.timeline ? timelineExporting : sceneExporting;
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
@@ -124,7 +124,13 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
   // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
   const working = busy || isImporting || isExporting;
-  const importBlocked = working;
+  // ⚠️ **入れる先が無いときは取り込ませない**（差分再監査 5巡目 🟡・`06 §15`）＝「素材」は
+  // 動画を開いていなくても開ける画面なので、そのまま押せると**画面に出ていない空の動画**が
+  // その場で作られ、そこへ入って**どこにも見えない**（知らせも名無しの「この動画へ」になる）。
+  // 判定は会社の見た目の反映と同じ式（`meta.projectId` か場面がある）＝同概念で流儀を割らない。
+  const sceneOpen = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
+  const destOpen = target === PROJECT_FORMAT.timeline ? timelineName != null : sceneOpen;
+  const importBlocked = working || !destOpen;
   // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
   // ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝タイムラインの理由を共通の
   // `title` に混ぜると、**押せる**「置く」「名前・種類・タグ」「外す」にも「取り込めません」と出て、
@@ -135,8 +141,8 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
     : isImporting
       ? "いま取り込んでいます"
       : undefined;
-  /** 取り込み（この動画で使う）が押せない理由（いまは棚の操作と同じ）。 */
-  const importBlockedReason = blockedReason;
+  /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
+  const importBlockedReason = blockedReason ?? (destOpen ? undefined : "先に動画を開いてください");
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
@@ -186,12 +192,19 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
     setNotice("");
     setError("");
     // ⚠️ **取り込み先は置かれた画面で決まる**＝タイムラインの欄からはタイムラインの文書へ入れる。
-    if (target === "timeline") {
+    if (target === PROJECT_FORMAT.timeline) {
       // ⚠️ **できたときだけ知らせる**（PR #913 レビュー 🔴）＝返り値を見ないと、失敗しても
       // 「取り込みました」と出て、画面下の本当の理由と**同時に**並ぶ（成功を騙る）。
       if (!(await importToTimeline(a.id))) return;
       const dest = destName ? `「${destName}」` : "この動画";
-      setNotice(`「${a.displayName}」を${dest}へ取り込みました。「素材・文字・図形を置く」から置けます。`);
+      // ⚠️ **どの欄から置けるかは種類で変わる**（差分再監査 5巡目 🟡）＝音は「素材・文字・図形を置く」の
+      // 候補に出ない（絵として置ける種別だけ＝`isFreeSlotAssetType`）ので、種類を見ずに1文で言うと
+      // **案内どおり探しても見つからない**（場面形式で同じ形を直したのと同型＝§2-5）。
+      setNotice(
+        isFreeSlotAssetType(a.assetType)
+          ? `「${a.displayName}」を${dest}へ取り込みました。「素材・文字・図形を置く」から置けます。`
+          : `「${a.displayName}」を${dest}へ取り込みました。音は「音を置く」から置けます。`,
+      );
       return;
     }
     const id = await importToScene(a.id);

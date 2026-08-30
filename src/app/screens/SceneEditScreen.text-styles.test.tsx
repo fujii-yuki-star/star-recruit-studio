@@ -321,6 +321,26 @@ describe("SceneEditScreen 文字の影・字間・背景帯の場面別上書き
     expect(screen.queryByText(/この場面だけ変更中/)).toBeNull();
   });
 
+  // ⚠️ **同じ絵に戻したら上書きは残さない**（差分再監査 5巡目 ℹ️）＝生の値で比べると、色を変えて
+  // 見た目パターンと同じ色へ戻したときに絵は同じなのに「この場面だけ変更中」が残る（嘘＋追従切れ）。
+  it("色を変えて見た目パターンと同じ色へ戻したら、上書きが残らない", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    const pick = (name: string): void => {
+      fireEvent.click(within(panel).getByRole("button", { name: "見出しの背景色を選ぶ" }));
+      const code = screen.getByLabelText("色コード");
+      fireEvent.change(code, { target: { value: name } });
+      fireEvent.blur(code); // 確定は Enter か欄を出たとき（#752-1）
+      fireEvent.keyDown(window, { key: "Escape" }); // 閉じてから次を開く（開いたまま押すと閉じるだけ）
+    };
+    // 欄が開いていることを先に確かめる（開いていないと以降が無言で素通りする）
+    expect(within(panel).getByRole("button", { name: "見出しの背景色を選ぶ" })).toBeTruthy();
+    pick("#123456");
+    expect(scene().textStyles?.title?.background?.color).toBe("#123456");
+    pick("#654321"); // 見た目パターンと同じ色へ戻す
+    expect(scene().textStyles).toBeUndefined();
+  });
+
   it("影も同じく往復で上書きが残らない", () => {
     const scene = setupDeco();
     const panel = openStyles();

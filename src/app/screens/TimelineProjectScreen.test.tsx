@@ -503,14 +503,46 @@ describe("TimelineProjectScreen: 音（#630 後半）", () => {
 });
 
 describe("TimelineProjectScreen: 書き出し（#631）", () => {
-  it("書き出しの導線を出し、押すと書き出しが走る", () => {
+  it("書き出しの導線を出し、押すと書き出しが走る", async () => {
     open();
     useProjectStore.setState({ templates: [], templateAssetSrcById: {} });
     const exportTimelineVideo = vi.fn().mockResolvedValue(undefined);
     useTimelineStore.setState({ exportTimelineVideo });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
-    expect(exportTimelineVideo).toHaveBeenCalledWith({ templates: [], templateAssetSrcById: {} });
+    await waitFor(() => expect(exportTimelineVideo).toHaveBeenCalledWith({ templates: [], templateAssetSrcById: {} }));
+  });
+
+  /**
+   * ⚠️ **始める直前に持ち込みフォントを取り直す**（差分再監査 5巡目 ℹ️）＝この画面は書き出す欄が
+   * 同じ画面にあるので、開いたまま長く編集すると**古い一覧のまま門を通り**、アプリの外で字体を
+   * 消しても**黙って別の字体の動画が成功として出る**（場面形式は書き出し直前の画面で取り直す）。
+   */
+  it("書き出しを始める前に、持ち込みフォントの一覧を取り直す", async () => {
+    open();
+    useProjectStore.setState({ templates: [], templateAssetSrcById: {} });
+    const order: string[] = [];
+    const refreshUserFonts = vi.fn(async () => { order.push("refresh"); });
+    const exportTimelineVideo = vi.fn(async () => { order.push("export"); });
+    useProjectStore.setState({ refreshUserFonts } as never);
+    useTimelineStore.setState({ exportTimelineVideo });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    refreshUserFonts.mockClear();
+    order.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
+    await waitFor(() => expect(exportTimelineVideo).toHaveBeenCalled());
+    expect(order).toEqual(["refresh", "export"]); // 取り直してから走らせる
+  });
+
+  it("フォントの一覧を取り直せなくても書き出しは始める（「調べられなかった」は門が見る）", async () => {
+    open();
+    useProjectStore.setState({ templates: [], templateAssetSrcById: {} });
+    const exportTimelineVideo = vi.fn().mockResolvedValue(undefined);
+    useProjectStore.setState({ refreshUserFonts: vi.fn(async () => { throw new Error("boom"); }) } as never);
+    useTimelineStore.setState({ exportTimelineVideo });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
+    await waitFor(() => expect(exportTimelineVideo).toHaveBeenCalled());
   });
 
   it("書き出せない理由があるときは、押す前に理由を見せて押せなくする（§2-5）", () => {
@@ -3055,7 +3087,7 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     expect(screen.getByRole("button", { name: "文字の色" })).toBeDisabled();
     // 理由も一緒に届いていること（押せないのに理由が無い＝なぜ触れないか分からない）。
     expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "いま動画を書き出しています。終わってから編集してください");
-    expect(screen.getByText("フォント").parentElement?.querySelector("button")).toBeDisabled();
+    expect(screen.getByText("この部品の文字の形").parentElement?.querySelector("button")).toBeDisabled();
   });
 
   it("枠への収め方も、書き出しの最中は触れない", () => {
@@ -3134,7 +3166,7 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
   it("フォントの一覧も、開いている最中に書き出しが始まったら閉じる（同概念同挙動）", () => {
     withText();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const trigger = screen.getByText("フォント").parentElement?.querySelector("button") as HTMLElement;
+    const trigger = screen.getByText("この部品の文字の形").parentElement?.querySelector("button") as HTMLElement;
     fireEvent.click(trigger);
     expect(screen.getByText("怪盗予告ゴシック")).toBeInTheDocument(); // 一覧が開いている
     act(() => {
@@ -3612,7 +3644,7 @@ describe("TimelineProjectScreen: フォントは動画全体に合わせられ�
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
-  const trigger = () => screen.getByText("フォント").closest("label")?.querySelector("button") as HTMLElement;
+  const trigger = () => screen.getByText("この部品の文字の形").closest("label")?.querySelector("button") as HTMLElement;
   // ⚠️ 引き金のボタンも継承中は同じ文字を出すので、**一覧の中の項目**に絞る（`li` の中にある方）。
   const inheritOption = () =>
     screen.getAllByText("動画全体に合わせる").find((el) => el.closest("li"))?.closest("button") as HTMLElement;
@@ -6732,5 +6764,115 @@ describe("TimelineProjectScreen: キャンバスで掴む × 履歴（#813）", 
     dragBox(boxOf(container, "clip_002")); // 選択が変わる＝ここでも畳んで開き直す
     expect(useTimelineStore.getState().history.past.length).toBe(before + 2);
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+});
+
+// 字幕クリップの「見た目」（差分再監査 5巡目 🔴＋レビュー）。
+//
+// ⚠️ **効くのに選べない、の裏返し**＝描画も書き込みも通っているのに入口が影と帯しか無く、
+// 大きさ・色・太さ・揃え・フォント・縁取りが直せなかった（場面形式の自由配置の字幕は直せる）。
+describe("字幕クリップの見た目", () => {
+  const openSubtitle = (): void => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "あ", status: "none" } },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 40, voiceClipId: "clip_001" },
+      ] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_002"] });
+  };
+  const openStyle = (): void => { fireEvent.click(screen.getByText("字幕の見た目")); };
+
+  it("文字の大きさを直せる（文字クリップと同じ顔ぶれ）", () => {
+    openSubtitle();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openStyle();
+    const size = screen.getByLabelText("文字の大きさ") as HTMLInputElement;
+    fireEvent.focus(size);
+    fireEvent.change(size, { target: { value: "48" } });
+    fireEvent.blur(size);
+    expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_002")!.fontSize).toBe(48);
+  });
+
+  it("縁取りの太さを直せる（バラした文字に残る縁取りを外せる）", () => {
+    openSubtitle();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openStyle();
+    const w = screen.getByLabelText("縁取りの太さ") as HTMLInputElement;
+    fireEvent.focus(w);
+    fireEvent.change(w, { target: { value: "3" } });
+    fireEvent.blur(w);
+    expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_002")!.strokeWidth).toBe(3);
+  });
+
+  // ⚠️ **面を撫でる色選びは1つのまとまりにする**（差分再監査 5巡目 🔴）＝渡さないと `pointermove`
+  // ごとに取り消しが積まれ、**取り消しでしか戻せない操作（「バラす」）が押し出される**。
+  it("影の色・背景色をドラッグで選んでも、取り消しは1回で戻る", () => {
+    openSubtitle();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openStyle();
+    fireEvent.click(screen.getByRole("switch", { name: "影を付ける" }));
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.click(screen.getByRole("button", { name: "影の色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(sv, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(sv, { pointerId: 1, clientX: 40, clientY: 20 });
+    fireEvent.pointerMove(sv, { pointerId: 1, clientX: 70, clientY: 30 });
+    fireEvent.pointerUp(sv, { pointerId: 1 });
+    // 撫でた回数ぶん積まれていない＝1ドラッグ＝1回（渡していないと `pointermove` ごとに積まれる）。
+    expect(useTimelineStore.getState().history.past.length - before).toBeLessThanOrEqual(1);
+  });
+});
+
+// 「バラす」は押す前に断る（差分再監査 5巡目 🟡）。
+//
+// ⚠️ **同意させてから断らない**＝理由は押す前に分かる（純粋関数を空撃ちできる）のに、取り返しの
+// つかない操作の顔をした確認に答えさせてから no-op にしていた（同じ画面の「分ける」は押す前に断る）。
+describe("バラせないときは押す前に理由を出す", () => {
+  const tpl: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_explode", name: "バラす用", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 }],
+  };
+  const openCropped = (crop?: object, cropAlign?: string): void => {
+    useProjectStore.setState({ templates: [tpl] });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+        templateId: "tmpl_explode",
+        ...(crop ? { crop } : {}), ...(cropAlign ? { cropAlign } : {}),
+      }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const explodeButton = (): HTMLButtonElement => {
+    fireEvent.click(screen.getByText("見た目パターン"));
+    return screen.getByRole("button", { name: "中身をバラす" }) as HTMLButtonElement;
+  };
+
+  it("切り抜いてある部品では押せず、理由が出る", () => {
+    openCropped({ left: 0.1 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = explodeButton();
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("切り抜き");
+  });
+
+  it("寄せだけ設定してある部品でも押せない（案内どおり解除できる文言）", () => {
+    openCropped(undefined, "top");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = explodeButton();
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("寄せ");
+  });
+
+  it("何も設定していない部品は押せる", () => {
+    openCropped();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(explodeButton()).not.toBeDisabled();
   });
 });
