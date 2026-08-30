@@ -60,7 +60,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT } from "../uiLabels";
+import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -508,11 +508,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   /** ここに欄が要るキー＝門が数えるもののうち「文字」節に出ないもの。 */
   const extraFontKeys = editableTextKeys(template?.layers ?? [], selected.textFontIds)
     .filter((k) => !shownTextKeys.includes(k));
-  /** そのうち**実際に描かれる**もの（自由配置の見た目が文字層を持つとき）＝休眠ではない。 */
-  const drawnExtraFontKeys = extraFontKeys.filter((k) => sceneTextKeys.includes(k));
-  /** そのうち**もう描かれない**もの＝知らせ（片づけの勧め）の対象。値が入っているものだけ。 */
-  const dormantFontKeys = extraFontKeys
+  /**
+   * そのうち**もう描かれない**もの＝知らせ（片づけの勧め）の対象。値が入っているものだけ。
+   *
+   * ⚠️ **見た目が見つからないときは数えない**（差分再監査 10巡目 🟡）＝**調べていない ≠ 使っていない**
+   *（`missingAsset`／#347 と同じ流儀）。未解決だと `sceneTextKeys` が空になるので、そのままだと
+   * 全キーを「使っていない」と呼び、案内どおり戻すと**見た目が戻った時点で字体が黙って変わる**。
+   */
+  const dormantFontKeys = template == null ? [] : extraFontKeys
     .filter((k) => !sceneTextKeys.includes(k) && selected.textFontIds?.[k] != null);
+  /** 休眠**ではない**ほう＝描かれる／見た目が見つからず調べられない。知らせを分けるための群。 */
+  const otherFontKeys = extraFontKeys.filter((k) => !dormantFontKeys.includes(k));
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
   // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
@@ -1811,12 +1817,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
-            {!isFree && (
+            {/* ⚠️ **未解決のときは節ごと出さない**（差分再監査 10巡目 ℹ️）＝中身が空になるだけの入れ物が
+                残り、理由は節の外にある。「見つからない」の次の行動は外の断りが担う。 */}
+            {!isFree && template != null && (
               <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字">
-              {/* ⚠️ **見つからない見た目について語らない**（差分再監査 9巡目 🟡・§2-5）＝未解決のときに
-                  「文字を表示しません」と言うと、**存在しない見た目についての嘘の理由**になり、
-                  すぐ下の「見た目が見つかりません。選び直してください」と**別の次の行動**が並ぶ。 */}
-              {template != null && sceneTextKeys.length === 0 && (
+              {/* ⚠️ **見つからない見た目について語らない**（差分再監査 9巡目 🟡・§2-5）＝この節は
+                  未解決のときは出さない（上のゲート）ので、ここへ来る時点で見た目は解決している。 */}
+              {sceneTextKeys.length === 0 && (
                 <div>
                   <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
                   {/* 行き止まりにしない：文字を重ねる次の行動を案内する（§2-5・#413。旧「タイムライン編集で
@@ -1881,22 +1888,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 （畳んだ記憶は既定より優先されるので一度畳むと二度と出ない）。休眠フォントと同じ流儀。 */}
             {unresolvedCurrent && (
               <p className="notice notice-warn" role="alert">
-                今の見た目が見つかりません。下の「見た目・フォント」で選び直してください。
+                {/* ⚠️ **文言は1か所から**（差分再監査 10巡目 🟡）＝節の中（見た目の選択欄の直下）と
+                    同じ関数から採る。直書きすると、候補ゼロのときに**片方だけが実行できない次の行動**
+                    （「選び直してください」）を出す＝同じ状態に断りが2通り並ぶ。 */}
+                {sceneTemplateProblemMessage(true, pickableOptions.length)}
+                {pickableOptions.length > 0 && "（下の「見た目・フォント」にあります）"}
               </p>
             )}
             {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
               <div className="field">
                 {/* ⚠️ **描かれているものを「使っていない」と言わない**（差分再監査 9巡目 🟡）＝
                     自由配置の見た目でも文字層は描かれる。知らせは**もう描かれないもの**にだけ出す。 */}
-                {drawnExtraFontKeys.length > 0 && (
-                  <p className="field-hint" style={{ marginTop: 0 }}>
-                    この見た目パターンの文字は自由配置で置きます。文字ごとのフォントはここで選べます。
-                  </p>
+                {/* ⚠️ **知らせと対象を1対1にする**（差分再監査 10巡目 🟡）＝1つの並びに混ぜると、
+                    「使わないなら戻せます」が**描かれている欄の上**に立ち、戻すと字体が変わる。
+                    ⚠️ 出どころは**見た目パターンの文字層**（自由配置で置いた文字ではない）＝
+                    言い方を取り違えない（本文は自由配置の編集面で直す）。 */}
+                {otherFontKeys.length > 0 && (
+                  <>
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      {template == null
+                        ? "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。"
+                        : "この見た目パターンの文字は、ここでフォントだけ選べます。"}
+                    </p>
+                    {otherFontKeys.map((key) => (
+                      <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
+                        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
+                        <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                      </div>
+                    ))}
+                  </>
                 )}
                 {(dormantFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
                   <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
                 )}
-                {extraFontKeys.map((key) => (
+                {dormantFontKeys.map((key) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
                     <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
@@ -1958,8 +1983,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </select>
               {mismatchedCurrent || unresolvedCurrent ? (
                 <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
-                  {unresolvedCurrent ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。"}
-                  {pickableOptions.length > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。"}
+                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length)}
                 </p>
               ) : pickableOptions.length <= 1 ? (
                 <p className="field-hint" style={{ marginTop: 4 }}>
@@ -1995,7 +2019,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             <div className="field">
               <label className="field-label">この場面のフォント</label>
-              <FontPicker value={selected.fontId} onChange={(id) => patch((s) => ({ ...s, fontId: id }))} allowInherit />
+              {/* 継承へ戻すときは**キーごと落とす**（差分再監査 10巡目 ℹ️）＝自由配置の要素・タイムラインの
+                  部品と同じ流儀（`null` と未指定は解決が同じ＝11.6。2通りの文書を作らない）。 */}
+              <FontPicker
+                value={selected.fontId}
+                onChange={(id) => patch((s) => {
+                  // ⚠️ **キーごと落とす**（PR #919 レビュー ℹ️）＝`updateScene` は素の差し替えなので、
+                  // `undefined` を書くと**値なしのキーがその場の文書に残る**（保存では消える＝2通りの形）。
+                  const next = { ...s };
+                  if (id) next.fontId = id; else delete next.fontId;
+                  return next;
+                })}
+                allowInherit
+              />
               <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
             </div>
 

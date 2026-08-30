@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
@@ -425,5 +425,25 @@ describe("resolveExportBlockedMessage（コードで振り分け・#831）", () 
 
   it("ほかのコードは exportBlockedMessage をそのまま返す（doc/clipIds は見ない）", () => {
     expect(resolveExportBlockedMessage(TIMELINE_EXPORT_BLOCK.empty, timelineDoc([]), [])).toBe(exportBlockedMessage.TIMELINE_EXPORT_EMPTY);
+  });
+});
+
+// 見た目の断りは**1か所から**（差分再監査 10巡目 🟡）＝画面へ直書きすると、候補ゼロのときに
+// 「選び直してください」（実行できない次の行動）を出す側と出さない側が並ぶ。
+describe('sceneTemplateProblemMessage', () => {
+  it('見つからない・候補あり＝選び直しを案内する', () => {
+    expect(sceneTemplateProblemMessage(true, 3)).toBe('今の見た目が見つかりません。下から選び直してください。');
+  });
+
+  it('見つからない・候補なし＝選び直しを案内しない（実行できない次の行動を出さない）', () => {
+    expect(sceneTemplateProblemMessage(true, 0)).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。');
+  });
+
+  it('合っていない・候補あり', () => {
+    expect(sceneTemplateProblemMessage(false, 1)).toBe('今の見た目は動画の向き・場面に合っていません。下から選び直してください。');
+  });
+
+  it('合っていない・候補なし', () => {
+    expect(sceneTemplateProblemMessage(false, 0)).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。');
   });
 });

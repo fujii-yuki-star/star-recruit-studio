@@ -762,6 +762,22 @@ export function missingTemplateMessage(count?: number): string {
     : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して、置き直してください。`;
 }
 
+/**
+ * 場面の見た目が**見つからない／合っていない**ときの断り（差分再監査 10巡目 🟡・`15 §6` `TEMPLATE_NOT_FOUND`）。
+ *
+ * ⚠️ **文言は1か所から**＝画面に直書きすると、同じ状態に**2通りの断り**が並ぶ（実際、節の外と中で
+ * 「選び直してください」と「合う見た目パターンがまだありません」が食い違っていた）。文言の検査
+ * （`errorStateTable.test.ts`／`uiLabels.test.ts`）も `uiLabels` から出たものしか見ない。
+ * ⚠️ **実行できない次の行動を出さない**＝候補が1つも無いときに「選び直してください」と言わない（§2-5）。
+ *
+ * @param unresolved 見つからない（`true`）か、向き・場面に合っていない（`false`）か。
+ * @param pickableCount いま選べる見た目パターンの数。
+ */
+export function sceneTemplateProblemMessage(unresolved: boolean, pickableCount: number): string {
+  const what = unresolved ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。";
+  return what + (pickableCount > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。");
+}
+
 /** {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。 */
 export function resolveExportBlockedMessage(code: TimelineExportBlockCode, doc: TimelineProject, clipIds: string[]): string {
   if (code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany) return volumePointsTooManyMessage(volumePointsTooManyHasSplittable(doc, clipIds));
