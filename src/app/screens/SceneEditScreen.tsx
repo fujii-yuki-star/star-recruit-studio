@@ -2021,7 +2021,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label">この場面のフォント</label>
               {/* 継承へ戻すときは**キーごと落とす**（差分再監査 10巡目 ℹ️）＝自由配置の要素・タイムラインの
                   部品と同じ流儀（`null` と未指定は解決が同じ＝11.6。2通りの文書を作らない）。 */}
-              <FontPicker value={selected.fontId} onChange={(id) => patch((s) => ({ ...s, fontId: id ?? undefined }))} allowInherit />
+              <FontPicker
+                value={selected.fontId}
+                onChange={(id) => patch((s) => {
+                  // ⚠️ **キーごと落とす**（PR #919 レビュー ℹ️）＝`updateScene` は素の差し替えなので、
+                  // `undefined` を書くと**値なしのキーがその場の文書に残る**（保存では消える＝2通りの形）。
+                  const next = { ...s };
+                  if (id) next.fontId = id; else delete next.fontId;
+                  return next;
+                })}
+                allowInherit
+              />
               <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
             </div>
 
