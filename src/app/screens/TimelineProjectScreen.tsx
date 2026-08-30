@@ -19,7 +19,7 @@ import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/ke
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
-import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
+import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
@@ -122,7 +122,7 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
-import { DORMANT_FONT_HINT, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { DORMANT_FONT_HINT, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -988,7 +988,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     [doc, selected, selectedTemplate],
   );
   // その部品の差し込み口に入っている動画（#512 段3b）＝元の音の欄を出す先。判定は domain の1か所。
-  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot) : [];
+  // ⚠️ **立ち絵も置き場所**（α-6 出口監査 🔴・#809）＝差し込み口だけに絞ると、立ち絵に入れた動画の
+  // **元の音の欄が出ない**＝書き出しにだけ効く設定になる（`resolveSlotClip` は同じ入れ物を共有）。
+  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }) : [];
   const slotNames = slotLabelsFor(slotLayers);
   // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
   // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
@@ -2704,8 +2706,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           const clip = placement.clip;
           // ⚠️ **置き場所そのもののアイテム**を探す（#512 段3）＝部品 id だけで探すと、
           // 見た目パターンの**別の枠**まで動画のコマで塗ってしまう。
+          // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝立ち絵に入れた動画も置き場所で、
+          // そのアイテムは `role:'character'`。絞ると**必ず一致せず**この置き場所ごと落ち、
+          // プレビューは静止・元の音も無音なのに**書き出しは実映像＋元の音**になる（ADR-0001）。
+          // 「どの置き場所のアイテムか」は `isItemOfPlacement` 1本に委ねる。
           const item = shownLayout.items.find(
-            (it) => it.kind === "image" && it.role === "slot" && isItemOfPlacement(it.id, placement),
+            (it) => it.kind === "image" && isItemOfPlacement(it.id, placement),
           ) as (LayoutItem & { kind: "image" }) | undefined;
           // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
           // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
@@ -3025,6 +3031,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               閉じる
             </button>
           </p>
+        )}
+        {/* ⚠️ **つないだことを知らせる**（α-6 出口監査 🟡・ADR-0032 追補4）＝つなぐと
+            「セリフとセリフの間でも BGM が下がったまま」になるので、黙ってやると設定した意味と違う音になる。
+            場面形式は書き出しの完了時に同じことを言っている（文言も同じ＝ADR-0026②）。 */}
+        {exportRun.duckMerged && exportRun.phase === EXPORT_RUN_PHASE.done && (
+          <p className="notice notice-warn" role="status">{DUCK_MERGED_MESSAGE}</p>
         )}
         {/* ⚠️ **書き出しに効く設定は、書き出す画面から触れる**（差分再監査 2巡目・§2-5）＝
             音の自動処理は書き出しに効くのに設定できる画面が場面形式にしかなく、しかも**前の版の

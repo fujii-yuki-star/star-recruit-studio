@@ -485,7 +485,7 @@ describe('timelineBgmRunInputs', () => {
 
   it('再生に使っている音源をそのまま渡す（聞いた音と書き出した音が一致する）', () => {
     const d = doc({ clips: [audioClip] });
-    const runs = timelineBgmRunInputs(d, { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    const { runs } = timelineBgmRunInputs(d, { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
     expect(runs).toEqual([
       {
         audioBase64: 'data:audio/mp3;base64,AAA',
@@ -507,7 +507,7 @@ describe('timelineBgmRunInputs', () => {
       id: 'clip_v', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
       voice: { text: 'あ', status: 'generated', voicePath: 'voices/clip_v.wav' },
     };
-    const runs = timelineBgmRunInputs(doc({ clips: [voice, audioClip] }), {
+    const { runs } = timelineBgmRunInputs(doc({ clips: [voice, audioClip] }), {
       'voice:voices/clip_v.wav': 'data:audio/wav;base64,AAA',
       'bgm:found-new-hope': 'data:audio/mp3;base64,BBB',
     });
@@ -515,17 +515,17 @@ describe('timelineBgmRunInputs', () => {
   });
 
   it('読めなかった音源は置かない（無い音を混ぜようとして書き出しごと失敗させない）', () => {
-    expect(timelineBgmRunInputs(doc({ clips: [audioClip] }), {})).toEqual([]);
+    expect(timelineBgmRunInputs(doc({ clips: [audioClip] }), {}).runs).toEqual([]);
   });
 
   it('音量の変化はそのまま式で渡す（#512・混ぜる側で組み直さない）', () => {
     const withPoints: TimelineClip = { ...audioClip, volumePoints: [{ timeSec: 0, volume: 0.1 }, { timeSec: 4, volume: 1 }] };
-    const runs = timelineBgmRunInputs(doc({ clips: [withPoints] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    const { runs } = timelineBgmRunInputs(doc({ clips: [withPoints] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
     expect(runs[0].volumeExpr).toBe(volumeExpr(withPoints.volumePoints));
   });
 
   it('点が無ければ式は付けない（従来どおり一定値の音量で出る＝場面形式と同じ引数）', () => {
-    const runs = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    const { runs } = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
     expect(runs[0]).not.toHaveProperty('volumeExpr');
   });
 
@@ -542,7 +542,7 @@ describe('timelineBgmRunInputs', () => {
     });
 
   it('動画の元の音は、音源の中身が無くてもパスで渡す（飛ばさない）', () => {
-    const runs = timelineBgmRunInputs(videoDoc(), {}); // ⚠️ 空の音源表＝中身は1つも無い
+    const { runs } = timelineBgmRunInputs(videoDoc(), {}); // ⚠️ 空の音源表＝中身は1つも無い
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       audioPath: 'media/v.mp4',
@@ -556,7 +556,7 @@ describe('timelineBgmRunInputs', () => {
   });
 
   it('音の部品にはパスを付けない（中身で渡す従来の経路のまま）', () => {
-    const runs = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    const { runs } = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
     expect(runs[0]).not.toHaveProperty('audioPath');
   });
 });

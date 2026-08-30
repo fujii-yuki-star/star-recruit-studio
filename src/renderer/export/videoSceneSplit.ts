@@ -30,9 +30,12 @@ export function splitVideoSceneSvg(
   // 未指定＝描かない（`layoutToSvg` の `credit?: string` と同じ契約）。
   credit?: string,
 ): VideoSceneSplit | null {
-  // 動画スロット（image かつ role=slot）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
+  // 絵のアイテム（`image`）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
+  // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝立ち絵に入れた動画も**置き場所**で、書き出しは
+  // 役割を問わず実フレームで差し替える（`isItemOfPlacement`）。ここで `role==='slot'` に絞ると
+  // **立ち絵だけ穴が開かず**、プレビューは静止・書き出しは実映像＝ADR-0001 のパリティが割れる。
   const slot = layout.items.find(
-    (it) => it.id === slotId && it.kind === 'image' && it.role === 'slot',
+    (it) => it.id === slotId && it.kind === 'image',
   );
   if (!slot) return null;
   const slotZ = slot.zIndex;
@@ -88,8 +91,9 @@ export function splitVideoSceneSvgMulti(
   // responsive: SVG ルートを 100% にしてコンテナへフィット（プレビューの実映像3層描画用・#432）。書き出しは既定 false（固定寸法でラスタライズ）。
   responsive: boolean = false,
 ): VideoSceneSplitMulti | null {
+  // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝上の `splitVideoSceneSvg` と同じ理由。
   const found = slotIds.map((id) =>
-    layout.items.find((it) => it.id === id && it.kind === 'image' && it.role === 'slot'),
+    layout.items.find((it) => it.id === id && it.kind === 'image'),
   );
   if (found.some((s) => !s)) return null; // 誤った id（fill/text 等）や未解決は分割不可
   const slots = (found as LayoutItem[]).slice().sort((a, b) => a.zIndex - b.zIndex);

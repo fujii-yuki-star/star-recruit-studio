@@ -159,18 +159,18 @@ function maxParenDepth(expr: string): number {
 
 describe('書き出しへの効き方（#512 段3）', () => {
   it('点があれば式を渡す（再生と同じ点列から組んだもの）', () => {
-    const runs = timelineAudioRuns(doc({ volumePoints: POINTS, volume: 0.05 }));
+    const { runs } = timelineAudioRuns(doc({ volumePoints: POINTS, volume: 0.05 }));
     expect(runs[0].volumeExpr).toBe(volumeExpr(POINTS));
   });
 
   it('点が無ければ式を持たない（従来どおり一定値の音量で出る）', () => {
-    const runs = timelineAudioRuns(doc({ volume: 0.3 }));
+    const { runs } = timelineAudioRuns(doc({ volume: 0.3 }));
     expect(runs[0]).not.toHaveProperty('volumeExpr');
     expect(runs[0].volume).toBeCloseTo(0.3, 6);
   });
 
   it('フェードは式と別に渡す（FFmpeg 側で上に掛かる＝再生と同じ「基準×フェード係数」）', () => {
-    const runs = timelineAudioRuns(doc({ volumePoints: POINTS, fadeInSec: 2, fadeOutSec: 1 }));
+    const { runs } = timelineAudioRuns(doc({ volumePoints: POINTS, fadeInSec: 2, fadeOutSec: 1 }));
     expect(runs[0]).toMatchObject({ fadeInSec: 2, fadeOutSec: 1 });
     expect(runs[0].volumeExpr).toBeDefined();
   });

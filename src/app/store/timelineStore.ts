@@ -598,6 +598,13 @@ export interface TimelineExportRun {
   message: string | null;
   /** 中止を押したか（描くループが次のフレームで気づく）。 */
   cancelling: boolean;
+  /**
+   * BGM を下げる区間を**つないだ**か（α-6 出口監査 🟡・ADR-0032 追補4）。
+   *
+   * ⚠️ **黙ってやらない**＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になるので、
+   * 設定した意味と違う音になる。場面形式は書き出しの完了時に知らせている（ADR-0026②）。
+   */
+  duckMerged?: boolean;
 }
 
 /**
@@ -1744,7 +1751,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       set({ exportRun: { ...get().exportRun, phase: P.encoding } });
-      const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
+      const { runs: bgmRuns, duckMerged } = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
       // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
       const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
       await exportVideo(
@@ -1755,7 +1762,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         outputPath,
         auto.normalize ? auto.targetLufs : undefined,
       );
-      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
       // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。
@@ -1815,10 +1822,13 @@ export function timelineBgmRunInputs(
   doc: TimelineProject,
   audioSrcByKey: Record<string, string>,
   templateOf?: (templateId: string) => Template | undefined,
-): BgmRunInput[] {
+): { runs: BgmRunInput[]; duckMerged: boolean } {
   const runs: BgmRunInput[] = [];
   // 見た目パターンは**差し込み口の元の音**（#512 段3b）を解くのに要る（渡さないと差し込み口は鳴らない）。
-  for (const run of timelineAudioRuns(doc, templateOf)) {
+  // ⚠️ **まとめたかどうかも運ぶ**（α-6 出口監査 🟡）＝知らせないと「セリフの間も BGM が下がったまま」を
+  // 黙って出すことになる（場面形式は書き出しの完了時に知らせている＝ADR-0026②）。
+  const built = timelineAudioRuns(doc, templateOf);
+  for (const run of built.runs) {
     // ⚠️ **動画の元の音はパスで渡す**（#512 段2）＝中身（base64）は要らない。
     // ここで `audioSrcByKey` を要求すると、動画を丸ごと文字列にしないと鳴らせなくなる。
     const audioBase64 = run.assetPath ? "" : audioSrcByKey[run.sourceKey];
@@ -1839,7 +1849,7 @@ export function timelineBgmRunInputs(
       speed: run.speed,
     });
   }
-  return runs;
+  return { runs, duckMerged: built.duckMerged };
 }
 
 

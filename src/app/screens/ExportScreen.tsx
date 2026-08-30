@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE } from "../uiLabels";
+import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
@@ -662,11 +662,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               )}
               {duckMerged && (
                 <div className="notice notice-warn mt">
-                  {/* ⚠️ **黙ってやらない**（§2-5）＝下げる区間をつないだので、声と声の間でも BGM が下がったままになる。 */}
-                  <span>
-                    セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。
-                    気になる場合は「BGM を下げる」を弱くするか、動画を分けてお試しください。
-                  </span>
+                  {/* ⚠️ **黙ってやらない**（§2-5）＝下げる区間をつないだので、声と声の間でも BGM が下がったままになる。
+                      ⚠️ **文言は1か所から**（α-6 出口監査 🟡）＝タイムライン形式でも同じことを言う。 */}
+                  <span>{DUCK_MERGED_MESSAGE}</span>
                 </div>
               )}
               {bgmWarning && (

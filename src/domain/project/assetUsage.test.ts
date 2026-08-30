@@ -186,3 +186,29 @@ describe('unusedAssetIds（どこからも指されていない素材・#348）'
     expect(unusedAssetIds([a('asset_003'), a('asset_001')], [])).toEqual(['asset_003', 'asset_001']);
   });
 });
+
+// ⚠️ **取り消しで戻る場面も数える**（α-6 出口監査 🔴）＝場面を消した／写真を外した直後に
+// 「まとめて消す」を押すと**実体ファイルごと消える**（`assets` は履歴の外＝ADR-0020）。
+// 取り消すと場面は戻るが素材は戻らず、死んだ参照と灰色の枠だけが残る。
+describe('unusedAssetIds と取り消しで戻る場面', () => {
+  const sceneWith = (assetId: string): Scene =>
+    ({ sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 't',
+      durationSec: 8, assetRefs: { photo: assetId }, character: { enabled: false, characterId: 'yuko' },
+      texts: {}, narration: { text: '', status: 'none' }, warnings: [] }) as unknown as Scene;
+
+  it('いま指されていなくても、取り消しで戻る場面が指していれば「未使用」にしない', () => {
+    expect(unusedAssetIds([{ assetId: 'asset_001' }], [], null, [[sceneWith('asset_001')]])).toEqual([]);
+  });
+
+  it('やり直しで戻る場面（future）も数える', () => {
+    expect(unusedAssetIds([{ assetId: 'asset_001' }], [], null, [[], [sceneWith('asset_001')]])).toEqual([]);
+  });
+
+  it('履歴のどこからも指されていなければ「未使用」（数え過ぎない）', () => {
+    expect(unusedAssetIds([{ assetId: 'asset_002' }], [], null, [[sceneWith('asset_001')]])).toEqual(['asset_002']);
+  });
+
+  it('履歴を渡さなくても従来どおり動く（既定は空）', () => {
+    expect(unusedAssetIds([{ assetId: 'asset_001' }], [])).toEqual(['asset_001']);
+  });
+});

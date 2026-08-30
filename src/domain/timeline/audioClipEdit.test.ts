@@ -112,7 +112,7 @@ describe('setClipSpeed', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(audioCuesAt(r.doc, 1)[0].speed).toBe(2);
-    expect(timelineAudioRuns(r.doc)[0].speed).toBe(2);
+    expect(timelineAudioRuns(r.doc).runs[0].speed).toBe(2);
   });
 
   it('固定した列では変えられない', () => {
@@ -129,7 +129,7 @@ describe('setClipSourceStart', () => {
     expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(30);
     if (!r.ok) return;
     expect(audioCuesAt(r.doc, 0)[0].offsetSec).toBe(30);
-    expect(timelineAudioRuns(r.doc)[0].sourceStartSec).toBe(30);
+    expect(timelineAudioRuns(r.doc).runs[0].sourceStartSec).toBe(30);
   });
 
   it('0 に戻すと値を持たない／負にはしない', () => {
@@ -175,7 +175,7 @@ describe('setClipVolume / setClipFade', () => {
     const r = setClipFade(doc({ clips: [bgm({ durationSec: 2 })] }), 'clip_001', 'in', 5);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(timelineAudioRuns(r.doc)[0].fadeInSec).toBe(1);
+    expect(timelineAudioRuns(r.doc).runs[0].fadeInSec).toBe(1);
   });
 });
 

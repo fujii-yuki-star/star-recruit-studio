@@ -803,6 +803,15 @@ export function sceneTemplateProblemMessage(
  * ⚠️ **双子（{@link DORMANT_FONT_HINT}）が `uiLabels` にあるのに片方だけ画面直書き**だった＝
  * §6（文言は1か所）／検査（`uiLabels.test.ts` の走査）の外に落ちる。
  */
+/**
+ * BGM を下げる区間を**つないだ**ときの知らせ（ADR-0032 追補4・α-6 出口監査 🟡）。
+ *
+ * ⚠️ **黙ってやらない**（§2-5）＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になる。
+ * ⚠️ **両形式で同じ文言**＝場面形式（`ExportScreen`）とタイムライン形式で同じことを言う（ADR-0026②）。
+ */
+export const DUCK_MERGED_MESSAGE =
+  "セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。気になる場合は「BGM を下げる」を弱くするか、動画を分けてお試しください。";
+
 export const UNKNOWN_FONT_HINT =
   "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。";
 

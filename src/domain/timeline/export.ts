@@ -10,7 +10,7 @@
 import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
-import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND, LAYER_TYPE } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
@@ -119,24 +119,44 @@ export interface TimelineAudioRun {
  * `afade` として掛けるので、ここでは**素の音量**と**フェードの秒数（切り詰め済み）**を渡す
  * ＝フェード込みの値から割り戻すような当て推量をしない。
  */
+/**
+ * ダッキングで増える点の数（α-6 出口監査 🟡）。**門と実際の式が同じ材料を見る**ための1か所。
+ *
+ * ⚠️ 1区間＝最大4点（`fitSpeechSpans` の見積りと同じ）。まとめた後の区間数から数える。
+ */
+export function duckFactorPointCount(
+  doc: TimelineProject,
+): number {
+  const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
+  if (!auto.duckBgm) return 0;
+  return duckSpansOf(doc, auto).spans.length * 4;
+}
+
+/** 下げる区間（まとめた後）。門と書き出しが同じ材料を見るための1か所。 */
+function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolveAudioAuto>) {
+  return fitSpeechSpans(
+    doc.clips
+      .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
+      .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
+      .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
+    auto,
+    VOLUME_POINTS_MAX,
+  );
+}
+
 export function timelineAudioRuns(
   doc: TimelineProject,
   templateOf?: (templateId: string) => Template | undefined,
-): TimelineAudioRun[] {
+): { runs: TimelineAudioRun[]; duckMerged: boolean } {
   const runs: TimelineAudioRun[] = [];
   // 声が鳴っている区間（#257）＝**作成済みの読み上げ**だけ（鳴らない声のために下げない）。
   // 隠した列・隠したクリップも数えない＝`audioCuesAt` と同じ「聞こえるもの」の見方に合わせる。
   const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
-  const duckSpans = auto.duckBgm
-    ? fitSpeechSpans(
-        doc.clips
-          .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
-          .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
-          .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
-        auto,
-        VOLUME_POINTS_MAX,
-      ).spans
-    : [];
+  // ⚠️ **まとめたかどうかを捨てない**（α-6 出口監査 🟡・ADR-0032 追補4）＝まとめると
+  // 「セリフとセリフの間でも BGM が下がったまま」になるので、黙ってやると設定した意味と違う音になる。
+  // 場面形式は書き出しの完了時に知らせている（`ExportScreen`）＝形式で割らない。
+  const fitted = auto.duckBgm ? duckSpansOf(doc, auto) : { spans: [], merged: false };
+  const duckSpans = fitted.spans;
   for (const clip of doc.clips) {
     const sourceKey = audioSourceKeyOfClip(clip);
     if (!sourceKey) continue; // 音源が無い（読み上げ未作成など）＝置くものが無い
@@ -201,7 +221,7 @@ export function timelineAudioRuns(
       loop: false,
     });
   }
-  return runs;
+  return { runs, duckMerged: fitted.merged };
 }
 
 /**
@@ -318,8 +338,13 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 同じ時刻の重複は式に出ないので、それで上限に当てない。
   // 見るのは**鳴る音を持つ部品だけ**（`isAudioClip`＝再生・編集と同じ述語）。絵の部品に点が入っていても
   // 式は組まれない（`timelineAudioRuns` に出ない）ので、数えると**書き出せるものを断る**ことになる。
+  // ⚠️ **実効の点数で数える**（α-6 出口監査 🟡）＝式へ渡るのは**保存の点とダッキングの点の和集合**
+  // （`applyDucking`）なので、保存の点だけを見ると**合わせて上限を超える**組み合わせを素通しする＝
+  // フィルタの組み立てごと失敗し、出るのは「もう一度お試しください」＝この門が防ぐはずのもの。
+  const duckPointsForGate = duckFactorPointCount(doc);
   const tooManyPoints = doc.clips
-    .filter((c) => isAudioClip(c) && normalizedVolumePoints(c.volumePoints).length > VOLUME_POINTS_MAX)
+    .filter((c) => isAudioClip(c)
+      && normalizedVolumePoints(c.volumePoints).length + duckPointsForGate > VOLUME_POINTS_MAX)
     .map((c) => c.id);
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
@@ -407,7 +432,7 @@ export function timelineImageAssetIds(
     //（直接置きの動画がある部品では、立ち絵の代表フレームまで要らない扱いになり灰色の枠が焼き込まれる）。
     const asVideo = new Set(videoPlacementsOfClip(doc, c, { ids: videoIds, ...(templateOf ? { templateOf } : {}) })
       .map((p) => assetUseKey(p.use, p.layerId)));
-    for (const u of clipImageAssetUses(c)) {
+    for (const u of clipImageAssetUses(c, templateOf)) {
       if (asVideo.has(assetUseKey(u.kind, u.layerId))) continue; // 実フレームで描く＝代表フレームは要らない
       stillOnly.add(u.assetId);
     }
@@ -450,10 +475,22 @@ import type { AssetUseKind } from '../enums';
  */
 export function clipImageAssetUses(
   clip: TimelineClip,
+  /**
+   * 見た目パターンの解決（α-6 出口監査 🟡）。⚠️ **立ち絵の層 id をそろえるために要る**＝
+   * `videoPlacementsOfClip` は立ち絵を**層 id つき**で返すので、ここで `null` のままだと
+   * **同じ立ち絵が別の鍵になり**、実フレームで描くものまで「代表フレームが要る」側に入る
+   *（代表フレームを読めないだけで、実際には描ける動画の書き出しを断ってしまう）。
+   */
+  templateOf?: (templateId: string) => { layers: { id: string; type: string }[] } | undefined,
 ): { kind: AssetUseKind; layerId: string | null; assetId: string }[] {
   const out: { kind: AssetUseKind; layerId: string | null; assetId: string }[] = [];
   if (clip.assetId) out.push({ kind: ASSET_USE_KIND.direct, layerId: null, assetId: clip.assetId });
-  if (clip.character?.poseAssetId) out.push({ kind: ASSET_USE_KIND.character, layerId: null, assetId: clip.character.poseAssetId });
+  if (clip.character?.poseAssetId) {
+    const charLayerId = clip.templateId != null
+      ? templateOf?.(clip.templateId)?.layers.find((l) => l.type === LAYER_TYPE.character)?.id ?? null
+      : null;
+    out.push({ kind: ASSET_USE_KIND.character, layerId: charLayerId, assetId: clip.character.poseAssetId });
+  }
   for (const [layerId, id] of Object.entries(clip.assetRefs ?? {})) {
     if (typeof id === 'string') out.push({ kind: ASSET_USE_KIND.slot, layerId, assetId: id });
   }
