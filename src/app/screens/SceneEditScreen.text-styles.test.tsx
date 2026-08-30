@@ -382,6 +382,31 @@ describe("SceneEditScreen いま使っていない種別のフォント", () => 
     expect(screen.getByText(/いまの見た目パターンでは使っていない文字/)).toBeInTheDocument();
   });
 
+  // ⚠️ **自由配置の場面でも出す**（差分再監査 7巡目 🟡）＝門は場面の種類を見ずに数えるので、
+  // 「文字」節（通常テンプレだけ）の中に置くと切り替えた場面で選び直す先が無くなる。
+  it("自由配置の場面でも直せる（切り替えても指定は休眠のまま残る）", () => {
+    useProjectStore.setState({
+      // 自由配置の見た目は文字の層を持たない＝この場面では見出しの指定が休眠になる。
+      templates: [{ ...tpl, templateId: "free_canvas_v1", category: "free", layers: [tpl.layers[0]] } as unknown as Template],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "free_canvas_v1", sceneType: "free", textFontIds: { title: "gen-interface-jp" } } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
+  });
+
+  it("見た目パターンが見つからない場面でも直せる（値が入っているのに欄が出ない、を作らない）", () => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ textFontIds: { title: "gen-interface-jp" } } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
+  });
+
   it("指定が無ければ出さない（使っていないものを並べない）", () => {
     openScene();
     expect(screen.queryByText("字幕のフォント")).toBeNull();

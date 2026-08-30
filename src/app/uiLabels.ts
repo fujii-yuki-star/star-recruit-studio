@@ -546,6 +546,12 @@ export function libraryPartlyFailedMessage(failedNames: readonly string[], first
  * まとめて渡すと**N件がそっくり消える**。入口で断り、いつやり直せばよいかを言う。
  * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
  */
+/**
+ * 取り込み先の動画が無いときの断り（差分再監査 7巡目 ℹ️）。**判定（`hasOpenProject`）は共有したのに
+ * 文言は各画面の直書きだった**＝片方だけ直る形が残る（§6・ADR-0026②「同じ断りを2通りにしない」）。
+ */
+export const IMPORT_NO_PROJECT_MESSAGE = "先に動画を開いてください";
+
 export const IMPORT_BUSY_MESSAGE =
   "いま素材を取り込んでいます。終わってからもう一度お試しください。";
 

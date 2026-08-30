@@ -171,10 +171,23 @@ describe("BrandKitSection", () => {
    */
   it("タイムラインだけ開いているときは、その旨を言う", () => {
     const meta = useProjectStore.getState().meta;
-    useProjectStore.setState({ meta: { ...meta, projectId: "", projectName: "" }, scenes: [] } as never);
+    // ⚠️ **「開いていない」の条件を明示する**（差分再監査 7巡目 🟡）＝`status` を書かないと、
+    // 暗黙の初期値に依っていることが読み取れない（判定は `hasOpenProject` の4条件）。
+    useProjectStore.setState({ meta: { ...meta, projectId: "", projectName: "", companyInfo: undefined }, scenes: [], status: "idle" } as never);
     useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
     render(<BrandKitSection />);
     expect(screen.getByText(/タイムラインで作った動画には、ここからは反映できません/)).toBeInTheDocument();
+    expect(screen.queryByText(/いまは動画を開いていません/)).toBeNull();
+  });
+
+  // ⚠️ **白紙から作った直後も「開いている」**（差分再監査 6巡目 🟡・判定は `hasOpenProject`）＝
+  // 番号だけで見ると「開いていません」と言い、その動画は一覧に無いので開き直せない。
+  it("白紙から作った直後（番号なし・場面なし）でも、反映先として名指しする", () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, projectId: "", projectName: "会社紹介" }, scenes: [], status: "ready" } as never);
+    useTimelineStore.setState({ doc: null } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/「会社紹介」に反映する/)).toBeInTheDocument();
     expect(screen.queryByText(/いまは動画を開いていません/)).toBeNull();
   });
 });

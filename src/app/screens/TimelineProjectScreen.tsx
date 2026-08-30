@@ -2544,14 +2544,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       : {};
 
   /**
-   * **いまバラせるか**（差分再監査 5巡目 🟡）。実際にバラす関数を**空撃ち**して理由を引く。
-   *
-   * ⚠️ **押す前に断る**＝バラせない理由（切り抜き・寄せ・動き・切り出した動画…）は押す前に分かるのに、
-   * 取り返しのつかない操作の顔をした確認に**同意させてから**断っていた（同じ画面の「分ける」は押す前に
-   * 断るので、同じ種類の操作で断り方が2通り＝ADR-0026②）。判定は実際に走る関数そのもの＝
-   * 「押せるのに何も起きない」も「押せないのに実はできる」も作らない。
-   */
-  /**
    * 文字の見た目が**何か入っているか**（差分再監査 6巡目 🟡）。節を「設定が入っていれば開く」に使う。
    * ⚠️ **欄が触る項目をすべて見る**＝一部だけ見ると、入れた設定が畳まれたままになる項目ができる。
    */
@@ -2560,7 +2552,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     || c.strokeWidth != null || c.strokeColor != null || c.letterSpacing != null || c.lineHeight != null
     || enabledShadow(c.shadow) != null || bandBackground(c.background) != null;
 
-  /** 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。 */
+  /**
+   * **いまバラせるか**（差分再監査 5巡目 🟡）。実際にバラす関数を**空撃ち**して理由を引く。
+   * 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。
+   *
+   * ⚠️ **押す前に断る**＝バラせない理由（切り抜き・寄せ・動き・切り出した動画…）は押す前に分かるのに、
+   * 取り返しのつかない操作の顔をした確認に**同意させてから**断っていた（同じ画面の「分ける」は押す前に
+   * 断るので、同じ種類の操作で断り方が2通り＝ADR-0026②）。判定は実際に走る関数そのもの＝
+   * 「押せるのに何も起きない」も「押せないのに実はできる」も作らない。
+   */
   const explodeExtra = (clipId: string, template: Template): { disabled?: boolean; hint?: string } => {
     if (!doc) return {};
     const r = explodeTemplateClip(doc, clipId, template);
@@ -4379,6 +4379,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       この部品へ書き、書き出しの門はそれを数えるのに**直す操作がこの形式に無かった**＝
                       持ち込みフォントが手元から消えると、案内どおりに選び直す先が無く**書き出しが
                       止まったまま解除できない**（§2-5 の行き止まり）。空＝この部品の指定を継承。 */}
+                  {/* ⚠️ **休眠の種別は断りを添える**（差分再監査 7巡目 ℹ️）＝この見た目パターンに層が
+                      無い種別が理由なしに混ざると「触ったのに何も起きない」に見える。場面編集と同じ言い方。 */}
+                  {editableTextKeys(selectedTemplate.layers, selected.textFontIds)
+                    .some((k) => !textKeys.includes(k)) && (
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
+                    </p>
+                  )}
                   {editableTextKeys(selectedTemplate.layers, selected.textFontIds).map((key) => (
                     <label className="field" key={`font-${key}`}>
                       <span>{textKeyLabel[key]}の文字の形</span>

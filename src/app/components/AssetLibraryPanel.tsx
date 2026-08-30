@@ -24,7 +24,7 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
-import { libraryPartlyFailedMessage } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabels";
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
@@ -149,10 +149,10 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
       // ⚠️ **棚の操作中の理由も持つ**（差分再監査 6巡目 ℹ️）＝`working` は `busy` も見るのに理由が
       // 無く、置く・直す・外すの最中は**理由なしで押せない**（この行のすぐ上の約束と食い違う）。
       : busy
-        ? "いまよく使う素材を直しています"
+        ? "いまよく使う素材を操作しています"
         : undefined;
   /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
-  const importBlockedReason = blockedReason ?? (destOpen ? undefined : "先に動画を開いてください");
+  const importBlockedReason = blockedReason ?? (destOpen ? undefined : IMPORT_NO_PROJECT_MESSAGE);
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
