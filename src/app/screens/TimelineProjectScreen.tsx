@@ -140,7 +140,7 @@ import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR } from "../../domain/template/tex
 import { isFreeSlotAssetType } from "../../domain/enums";
 import { ColorPicker } from "../components/ColorPicker";
 import { Switch } from "../components/ui";
-import { DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
+import { DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
 import { FitSelect } from "../components/FitSelect";
 import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
@@ -1128,7 +1128,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         />
         <NumberField
           label="行間"
-          value={sel.lineHeight ?? 1.3}
+          value={sel.lineHeight ?? DEFAULT_LINE_HEIGHT}
           min={0.5}
           max={3}
           step={0.1}

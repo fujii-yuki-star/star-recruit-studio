@@ -23,7 +23,8 @@ const projectSchema = load(join(base, 'schemas/project.schema.json'));
 // 全部落ちて「無関係な失敗」を直す作業が毎回発生する（実際 #555 の 1.24 で発生）。
 const PROJECT_VERSION = projectSchema.properties.schemaVersion.const;
 const vProject = ajv.compile(projectSchema);
-const vTemplate = ajv.compile(load(join(base, 'schemas/template.schema.json')));
+const templateSchema = load(join(base, 'schemas/template.schema.json'));
+const vTemplate = ajv.compile(templateSchema);
 const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')));
 // タイムライン形式（ADR-0032・#627）。project の $defs を $ref で共有するので、vProject を先に compile して
 // $id を ajv に登録しておく必要がある（上の行順に依存＝入れ替えると $ref が解決できず落ちる）。
@@ -115,6 +116,23 @@ for (const p of project.parts) {
   }
 }
 if (project.bgmSettings?.assetId && !assetIds.has(project.bgmSettings.assetId)) fail(`bgm assetId ${project.bgmSettings.assetId} missing`);
+// 背景帯の形は3か所が**写し**（`$ref` 共有ではない＝11 §1 の流儀）。見た目パターンの層の帯は
+// 場面の体裁上書き（`TextStyle.background`）へも自由配置の要素（`FreeElement.background`）へも
+// **そのままコピーされる**（体裁欄の「引き継ぐ」・通常→FREE 移送＝ADR-0030）ので、片方だけ拡張すると
+// コピーした project.json が schema を外れる。**ずれた瞬間に落とす**（後から気づく形にしない）。
+const bandShapes = {
+  'template Layer.background': templateSchema.$defs.Layer.properties.background,
+  'project TextStyle.background': projectSchema.$defs.TextStyle.properties.background,
+  'project FreeElement.background': projectSchema.$defs.FreeElement.properties.background,
+};
+const bandBase = JSON.stringify(bandShapes['template Layer.background']);
+let bandOk = true;
+for (const [name, shape] of Object.entries(bandShapes)) {
+  if (JSON.stringify(shape) !== bandBase) { bandOk = false; console.log(`  ${name} が他とずれています`); }
+}
+console.log(bandOk ? 'PASS  shape  background の形が3か所で一致' : 'FAIL  shape  background の形が3か所で一致');
+ok = ok && bandOk;
+
 console.log(sem ? 'PASS  semantic  project.sample cross-refs' : 'FAIL  semantic  project.sample cross-refs');
 ok = ok && sem;
 

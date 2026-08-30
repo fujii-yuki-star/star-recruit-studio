@@ -42,6 +42,8 @@ import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar"
 import { KeyboardNudge } from "../components/KeyboardNudge";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
+// 帯の既定は描画と同じ出どころから採る（§2-7＝`bandBackground` が使う値）。
+import { DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS } from "../../domain/template/textStyle";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
@@ -649,10 +651,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
+                    <ColorPicker value={l.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
                   </div>
-                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
-                  {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
+                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? DEFAULT_BAND_OPACITY), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
+                  {numField("角丸", l.background?.radius ?? DEFAULT_BAND_RADIUS, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
                 </div>
               )}
             </div>

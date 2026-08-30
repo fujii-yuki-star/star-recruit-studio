@@ -139,6 +139,8 @@
 
 ## 4. 定数カタログ（正典）
 
+> ⚠️ **ここに載るのは「意味の決めごと」**（尺・上限・採番・音量など、資料が言葉で説明している値）。**描画の既定値**（文字色・文字サイズ・行間・影/帯の既定など）は `src/domain/template/textStyle.ts` を単一の参照元とし、画面も描画もそこから採る（§2-7）＝二重管理にしないため、ここへは写さない。
+
 | 定数 | 値 | 用途 |
 |---|---:|---|
 | `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
@@ -340,7 +342,7 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | templateId | string | ● | 既存テンプレ参照 |
 | fontId | enum | ○ | 場面のフォント（同梱フォントの id・`domain/font/fontCatalog`）。null/未指定＝動画全体（`videoSettings.fontId`）を継承（1.5 追加） |
 | textFontIds | object | ○ | テキスト種別（textKey）ごとのフォント上書き（`{title?,main?,subtitle?,caption?,url?}`＝同梱フォントの id）。未設定の種別は `fontId`→動画全体→既定を継承（1.7 追加・#178） |
-| textStyles | object | ○ | テキスト種別（textKey）ごとの**体裁**上書き（`{title?,main?,subtitle?,caption?,url?}`＝各 `TextStyle`＝`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`）。**各プロパティ未指定＝テンプレ層（`layer.*`）→既定を継承**＝触ったものだけ固有値。**配置/座標は対象外**（テンプレ駆動＝§2-4）。AI は生成しない（1.24 追加・#555） |
+| textStyles | object | ○ | テキスト種別（textKey）ごとの**体裁**上書き（`{title?,main?,subtitle?,caption?,url?}`＝各 `TextStyle`＝`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`＋`letterSpacing?`/`shadow?`/`background?`〔1.27 追加・#264〕）。**各プロパティ未指定＝テンプレ層（`layer.*`）→既定を継承**＝触ったものだけ固有値。⚠️ **`shadow`/`background` はオブジェクト単位で解決する**（`ov?.shadow ?? layer.shadow`＝プロパティ単位では継承しない）＝1項目でも触ると残りの値も場面側に固定されるので、**書く側は継承している設定を引き継いでから1項目を変える**（引き継がないと色や角丸が既定へ落ちて黙って別の絵になる＝§2-5）。見た目パターンと同じ値・同じ「描かれない」に戻ったら**上書きごと落とす**（差分ゼロの上書きは「変更中」の嘘と追従切れを生む）。⚠️ 同じ `textKey` の層が複数あるとき、上書きは**全層に効く**が体裁欄は**先頭の層を代表**として見せる（キーが `TextKey` である以上の既知の限界）。**配置/座標は対象外**（テンプレ駆動＝§2-4）。AI は生成しない（1.24 追加・#555） |
 | durationSec | number | ● | `> 0`（schema も `exclusiveMinimum:0` で一致＝#586 で矛盾解消。**場面ごとの上限/下限は持たない**・#553）。手編集の確定は §9 で `(0, VIDEO_HARD_MAX_SEC]` へ自動補正。AI 生成時のみ目安 `[AI_SCENE_MIN, テンプレ上限 or AI_SCENE_MAX]` へ寄せる |
 | assetRefs | object | ● | §5。値は既存 assetId or null |
 | character | object | ● | enabled / characterId / poseAssetId(既存 yuko asset or null) |
