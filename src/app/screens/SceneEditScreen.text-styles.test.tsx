@@ -357,3 +357,40 @@ describe("SceneEditScreen 文字の影・字間・背景帯の場面別上書き
     expect(scene().textStyles).toBeUndefined();
   });
 });
+
+// 休眠の種別ごとフォント（差分再監査 6巡目 🟡）。
+//
+// ⚠️ **書き出しの門は休眠のぶんも数えて断る**（`usedFonts`）のに、欄が「いま使う種別」だけだと
+// 持ち込みフォントが手元から消えたとき**案内どおりに選び直す先が無い**（§2-5 の行き止まり）。
+// タイムライン側と同じ規則（`editableTextKeys`）＝片方だけ直る形にしない。
+describe("SceneEditScreen いま使っていない種別のフォント", () => {
+  const openScene = (textFontIds?: object): (() => Scene) => {
+    useProjectStore.setState({
+      templates: [tpl],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene(textFontIds ? ({ textFontIds } as Partial<Scene>) : undefined)],
+      assets: [], editingSceneId: "scene_001",
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    return () => useProjectStore.getState().scenes[0];
+  };
+
+  it("指定が残っていれば、いま使っていない種別でも直せる", () => {
+    openScene({ subtitle: "gen-interface-jp" }); // この見た目パターンに字幕の層は無い
+    expect(screen.getByText("字幕のフォント")).toBeInTheDocument();
+    expect(screen.getByText(/いまの見た目パターンでは使っていない文字/)).toBeInTheDocument();
+  });
+
+  it("指定が無ければ出さない（使っていないものを並べない）", () => {
+    openScene();
+    expect(screen.queryByText("字幕のフォント")).toBeNull();
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+
+  it("いま使う種別の欄には出さない（二重に並べない）", () => {
+    openScene({ title: "gen-interface-jp" });
+    expect(screen.getAllByText("見出しのフォント")).toHaveLength(1);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+});

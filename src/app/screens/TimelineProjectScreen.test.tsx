@@ -6875,4 +6875,91 @@ describe("バラせないときは押す前に理由を出す", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(explodeButton()).not.toBeDisabled();
   });
+
+  // ⚠️ **右クリックのメニューも同じ判定を通す**（差分再監査 6巡目 🟡）＝欄のボタンだけ塞ぐと、
+  // メニューから押せて**確認に同意させてから断る**（同じ操作の断り方が2通り＝ADR-0026②）。
+  it("右クリックのメニューでも押せず、理由が出る", () => {
+    openCropped({ left: 0.1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(container.querySelector(".timeline-clip") as HTMLElement);
+    const item = screen.getByRole("menuitem", { name: "中身をバラす" });
+    expect(item).toBeDisabled();
+    expect(item.title).toContain("切り抜き");
+  });
+
+  it("何も設定していなければ、右クリックのメニューからは押せる", () => {
+    openCropped();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(container.querySelector(".timeline-clip") as HTMLElement);
+    expect(screen.getByRole("menuitem", { name: "中身をバラす" })).not.toBeDisabled();
+  });
+});
+
+// 種別ごとの文字の形（差分再監査 6巡目 🟡）。
+//
+// ⚠️ **1つ選ぶと他が消える、を作らない**（まるごと差し替えで解かれるので、残りを引き継ぐ）。
+// ⚠️ **休眠の種別も直せる**＝書き出しの門は休眠のぶんも数えて断るので、欄が「いま使う種別」だけだと
+// 持ち込みフォントが消えたとき**案内どおりに選び直す先が無い**（§2-5 の行き止まり）。
+describe("見た目パターンの部品の種別ごとの文字の形", () => {
+  const tpl2: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_two_texts", name: "文字2つ", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 },
+      { id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 100, h: 50 },
+      { id: "main", type: "text", textKey: "main", x: 0, y: 60, w: 100, h: 50 },
+    ],
+  } as unknown as Template;
+  const openWith = (textFontIds?: object): void => {
+    useProjectStore.setState({ templates: [tpl2] });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+        templateId: "tmpl_two_texts", ...(textFontIds ? { textFontIds } : {}),
+      }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const clip = () => useTimelineStore.getState().doc!.clips[0];
+  /** 種別の欄を開いて選ぶ。開く側（`button.select`）と選ぶ側（一覧の項目）を取り違えない。 */
+  const pickFont = (fieldLabel: string, optionText: string): void => {
+    const field = screen.getByText(fieldLabel).closest("label") as HTMLElement;
+    fireEvent.click(field.querySelector("button.select") as HTMLElement);
+    const option = [...field.querySelectorAll("button")].find(
+      (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith(optionText),
+    ) as HTMLElement;
+    fireEvent.click(option);
+  };
+
+  it("1つ選び直しても、他の種別の指定は残る", () => {
+    openWith({ title: "gen-interface-jp", main: "kaitou-yokoku-gothic" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("見た目パターン"));
+    pickFont("本文の文字の形", "Gen Interface JP Display");
+    expect(clip().textFontIds?.title).toBe("gen-interface-jp"); // 触っていない方は残る
+    expect(clip().textFontIds?.main).toBe("gen-interface-jp-display");
+  });
+
+  it("最後の1つを「動画全体に合わせる」へ戻すと、指定ごと消える（空の入れ物を残さない）", () => {
+    openWith({ title: "gen-interface-jp" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("見た目パターン"));
+    pickFont("見出しの文字の形", "動画全体に合わせる");
+    expect(clip().textFontIds).toBeUndefined();
+  });
+
+  it("いまの見た目パターンで使っていない種別でも、指定が残っていれば直せる", () => {
+    openWith({ subtitle: "gen-interface-jp" }); // この見た目パターンに字幕の層は無い
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("見た目パターン"));
+    expect(screen.getByText("字幕の文字の形")).toBeInTheDocument();
+  });
+
+  it("指定が無い種別の欄は出さない（使っていないものを並べない）", () => {
+    openWith();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("見た目パターン"));
+    expect(screen.queryByText("字幕の文字の形")).toBeNull();
+  });
 });

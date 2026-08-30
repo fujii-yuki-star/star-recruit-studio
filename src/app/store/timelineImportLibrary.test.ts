@@ -55,6 +55,22 @@ describe('タイムラインの棚からの取り込み', () => {
     expect(added.assetId).toMatch(/^asset_\d{3}$/);
   });
 
+  // ⚠️ **番号は使い回さない**（差分再監査 6巡目 🔴）＝既にある素材の次を採る。予約した番号が
+  // 使われずに `asset_001` へ戻ると、**既存の `asset_001.png` を上書きして前の素材が消える**。
+  it('既に素材があるときは、その次の番号を採る（前の素材を上書きしない）', async () => {
+    useTimelineStore.setState({
+      doc: { ...doc('proj_t1'), assets: [
+        { assetId: 'asset_001', assetType: ASSET_TYPE.image, displayName: 'a', filePath: 'assets/asset_001.png' },
+        { assetId: 'asset_002', assetType: ASSET_TYPE.image, displayName: 'b', filePath: 'assets/asset_002.png' },
+      ] } as never,
+    } as never);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(true);
+    const list = useTimelineStore.getState().doc!.assets;
+    const added = list[list.length - 1];
+    expect(added.assetId).toBe('asset_003');
+    expect(added.displayName).toBe('会社ロゴ'); // 名前の引き継ぎも同時に効いている
+  });
+
   it('一覧を読んでいる間に別の動画を開いたら、そちらへ入れない', async () => {
     vi.mocked(listLibraryAssets).mockImplementation(async () => {
       useTimelineStore.setState({ doc: doc('proj_t2') } as never);

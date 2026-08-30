@@ -149,3 +149,27 @@ describe('libraryTags', () => {
     expect(libraryTags([lib({ tags: [] })])).toEqual([]);
   });
 });
+
+// ⚠️ **予約した番号を必ず使う**（差分再監査 6巡目 🔴）＝タイムラインの取り込みは `existingIds` に空配列を
+// 渡し、番号は `reserveAssetId` が採る（消した番号を使い回さない規則）。この引数が落ちると
+// `createAssetId([])` が黙って `asset_001` を返し、**既存の `asset_001.png` を上書きして前の素材が消える**。
+describe('assetFromLibrary の採番', () => {
+  it('予約した番号は、既にある番号より優先される', () => {
+    const { asset, fileName } = assetFromLibrary(
+      { id: 'lib_asset_001', fileName: 'lib_asset_001.png', displayName: 'ロゴ', assetType: ASSET_TYPE.logo, tags: [] },
+      ['asset_005'],
+      'asset_002',
+    );
+    expect(asset.assetId).toBe('asset_002');
+    expect(fileName).toBe('asset_002.png');
+    expect(asset.filePath).toBe('assets/asset_002.png');
+  });
+
+  it('予約が無いときは、既にある番号の次を採る', () => {
+    const { asset } = assetFromLibrary(
+      { id: 'lib_asset_001', fileName: 'lib_asset_001.png', displayName: 'ロゴ', assetType: ASSET_TYPE.logo, tags: [] },
+      ['asset_001', 'asset_002'],
+    );
+    expect(asset.assetId).toBe('asset_003');
+  });
+});

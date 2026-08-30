@@ -3,7 +3,7 @@ import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
-import { isExportBusy, useProjectStore } from "./app/store/projectStore";
+import { hasOpenProject, isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
@@ -74,7 +74,8 @@ function App() {
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
-  const hasProjectContent = useProjectStore((s) => s.status !== "idle" || s.scenes.length > 0);
+  // 「今の動画」を出すかは**同じ問い**（動画を開いているか）＝共有の判定から採る（差分再監査 6巡目 🟡）。
+  const hasProjectContent = useProjectStore(hasOpenProject);
   const projectName = useProjectStore((s) => s.meta.projectName);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =

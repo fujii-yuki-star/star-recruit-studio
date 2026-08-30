@@ -130,6 +130,18 @@ export interface ExportRunState {
    */
   resultUnseen: boolean;
 }
+/**
+ * **場面形式の動画を開いているか**（差分再監査 6巡目 🟡＝判定は1か所から採る）。
+ *
+ * ⚠️ **3つのどれかで開いている**＝読み込んだ（`projectId`）／白紙から作った（`status` が `idle` でない）／
+ * 場面がある。どれか1つで見ると取りこぼす：`projectId` だけだと**白紙から作った直後**（まだ番号を採って
+ * いない）を「開いていません」と言い、`status`＋場面だけだと**番号だけ採った文書**（素材を入れた
+ * ウィザードの途中）を取りこぼす。**同じ問いを画面ごとに書き直さない**（片方だけ直る形を作らない）。
+ */
+export function hasOpenProject(s: { meta: { projectId: string }; status: string; scenes: unknown[] }): boolean {
+  return s.meta.projectId !== "" || s.status !== "idle" || s.scenes.length > 0;
+}
+
 /** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除・素材編集のブロック判定で共有（#379/#547 P2-1）。 */
 export function isExportBusy(phase: ExportPhase): boolean {
   return phase === "rendering" || phase === "encoding";

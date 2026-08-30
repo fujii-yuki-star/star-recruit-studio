@@ -9,7 +9,7 @@ import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
-import { usedTextKeys } from "../../domain/template/layerOps";
+import { editableTextKeys, usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -497,6 +497,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isFree = template?.category === FREE_CATEGORY;
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
+  // ⚠️ **休眠の種別ごとフォントも直せるようにする**（差分再監査 6巡目 🟡）＝見た目パターンを替えても
+  //`textFontIds` は残り、書き出しの門は**休眠のぶんも数えて断る**。欄が「いま使う種別」だけだと、
+  // 持ち込みフォントが手元から消えたとき**案内どおりに選び直す先が無い**（§2-5 の行き止まり）。
+  const dormantFontKeys = template
+    ? editableTextKeys(template.layers, selected.textFontIds).filter((k) => !sceneTextKeys.includes(k))
+    : [];
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
   // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
@@ -1833,6 +1839,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 );
               })}
+              {dormantFontKeys.length > 0 && (
+                <div className="field" style={{ marginTop: 8 }}>
+                  <p className="field-hint" style={{ marginTop: 0 }}>
+                    いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
+                  </p>
+                  {dormantFontKeys.map((key) => (
+                    <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
+                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
                   掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
               {subtitleOverflows && (

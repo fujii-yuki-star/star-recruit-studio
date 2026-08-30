@@ -324,7 +324,7 @@ describe("AssetLibraryPanel", () => {
   // ⚠️ **入れる先が無いときは押せない**（差分再監査 5巡目 🟡）＝「素材」は動画を開いていなくても
   // 開ける画面なので、押せると**画面に出ていない空の動画**が作られてそこへ入る（どこにも見えない）。
   it("動画を開いていないときは取り込めず、理由を出す", async () => {
-    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [] } as never);
+    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [], status: "idle" } as never);
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
@@ -333,12 +333,21 @@ describe("AssetLibraryPanel", () => {
   });
 
   it("タイムラインの欄では、タイムラインの動画が開いていれば押せる（場面形式は関係ない）", async () => {
-    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [] } as never);
+    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [], status: "idle" } as never);
     useTimelineStore.setState({
       doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
       importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" },
     } as never);
     render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).not.toBeDisabled();
+  });
+
+  // ⚠️ **白紙から作った直後は「開いている」**（差分再監査 6巡目 🟡）＝番号（`projectId`）だけで見ると
+  // 開いていないことにされ、しかも一覧に無いので**案内どおりに開き直せない**（嘘の理由＋行き止まり）。
+  it("白紙から作った直後（番号なし・場面なし）でも取り込める", async () => {
+    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [], status: "ready" } as never);
+    render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).not.toBeDisabled();
   });
