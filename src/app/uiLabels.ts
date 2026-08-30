@@ -766,8 +766,9 @@ export function missingTemplateMessage(count?: number): string {
  * 場面の見た目が**見つからない／合っていない**ときの断り（差分再監査 10巡目 🟡・`15 §6` `TEMPLATE_NOT_FOUND`）。
  *
  * ⚠️ **文言は1か所から**＝画面に直書きすると、同じ状態に**2通りの断り**が並ぶ（実際、節の外と中で
- * 「選び直してください」と「合う見た目パターンがまだありません」が食い違っていた）。文言の検査
- * （`errorStateTable.test.ts`／`uiLabels.test.ts`）も `uiLabels` から出たものしか見ない。
+ * 「選び直してください」と「合う見た目パターンがまだありません」が食い違っていた）。⚠️ **検査にも
+ * 載せる**（`uiLabels.test.ts` の `MAPS.sharedFunctions`）＝Record しか見ない検査は、関数で作る文を
+ * そのままでは見ない（登録して初めて §2-3 の禁止語走査に入る・#819-2 の先例）。
  * ⚠️ **実行できない次の行動を出さない**＝候補が1つも無いときに「選び直してください」と言わない（§2-5）。
  *
  * @param unresolved 見つからない（`true`）か、向き・場面に合っていない（`false`）か。
@@ -775,7 +776,13 @@ export function missingTemplateMessage(count?: number): string {
  */
 export function sceneTemplateProblemMessage(unresolved: boolean, pickableCount: number): string {
   const what = unresolved ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。";
-  return what + (pickableCount > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。");
+  // ⚠️ **どこを指すかは呼ぶ側が足す**（差分再監査 11巡目）＝ここで「下から」と書くと、節の外へ出した
+  // 文でも「下から」と言い、呼ぶ側の「（下の…にあります）」と**方向を二重に指す**。
+  // ⚠️ **候補ゼロでも次の行動で終わる**（§2-5・`missingTemplateMessage` と同じ流儀）＝
+  // 「まだありません」で終わると行き止まりになる。実際に打てる手（種類を変える／見た目パターンを作る）を出す。
+  return what + (pickableCount > 0
+    ? "選び直してください。"
+    : "この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。");
 }
 
 /** {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。 */

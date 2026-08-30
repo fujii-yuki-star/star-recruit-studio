@@ -473,7 +473,7 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     // ⚠️ **候補ゼロなら「選び直して」と言わない**（差分再監査 10巡目 🟡）＝実行できない次の行動。
     // 節の外の断りは `role="alert"`（節の中の同じ文言と取り違えない）。
     const notice = screen.getByRole("alert");
-    expect(notice.textContent).toContain("今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。");
+    expect(notice.textContent).toContain("今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。");
     expect(notice.closest("details")).toBeNull();
     // ⚠️ **存在しない見た目について語らない**＝別の次の行動が並ぶ。
     expect(screen.queryByText("この見た目パターンは文字を表示しません。")).toBeNull();
@@ -492,6 +492,42 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     expect(screen.getByText("見出しのフォント")).toBeInTheDocument(); // 直せることは変えない
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
     expect(screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **自由配置の要素側にも同じ規則**（差分再監査 11巡目 🟡）＝`isFree` は見た目が見つからないとき
+  // false になるので、素通しだと全要素が「休眠」に落ちる（消えた見た目が自由配置なら描かれる）。
+  it("見た目が見つからない場面では、要素のフォントも「使っていない」と言わない", () => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    expect(screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/)).toBeInTheDocument();
+    // 直せることは変えない（知らせの群の中に欄がある）。
+    const hint = screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/);
+    expect(within(hint.parentElement as HTMLElement).getByText(/のフォント$/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **同時に持っていても同じ群に入る**（PR #920 レビュー ℹ️）＝片方ずつしか見ていないと、
+  // 条件を片方だけ壊しても気づけない（「同じ群」であること自体を固定する）。
+  it("種別ごとと要素の両方が残っていても、まとめて「分かりません」の群に入る", () => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({
+        textFontIds: { title: "gen-interface-jp" },
+        freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "kaitou-yokoku-gothic" }],
+      } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    const hint = screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/);
+    // 種別ごと（見出し）と要素、どちらの欄も同じ知らせの下に並ぶ。
+    expect(within(hint.parentElement as HTMLElement).getAllByText(/のフォント$/)).toHaveLength(2);
   });
 
   it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
@@ -575,7 +611,42 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
 });
 
 // 見た目が見つからない場面の見せ方（差分再監査 10巡目）。
+describe("SceneEditScreen 場面ぜんぶのフォント", () => {
+  // ⚠️ **継承へ戻すとキーごと落ちる**（差分再監査 11巡目 🟡＝3か所のうちここだけ双子が無かった）。
+  it("「動画全体に合わせる」へ戻すと、キーごと落ちる", () => {
+    useProjectStore.setState({
+      templates: [tpl],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ fontId: "gen-interface-jp" } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("見た目・フォント"));
+    const field = screen.getByText("この場面のフォント").closest("div") as HTMLElement;
+    fireEvent.click(field.querySelector("button.select") as HTMLElement);
+    const option = [...field.querySelectorAll("button")].find(
+      (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith("動画全体に合わせる"),
+    ) as HTMLElement;
+    fireEvent.click(option);
+    expect("fontId" in useProjectStore.getState().scenes[0]).toBe(false);
+  });
+});
+
 describe("SceneEditScreen 見た目が見つからない場面", () => {
+  // ⚠️ **候補があるときは行き先を名指しする**（差分再監査 11巡目 ℹ️）＝候補ゼロの分岐しか通っていなかった。
+  it("候補があるときは「見た目・フォント」を名指しする", () => {
+    useProjectStore.setState({
+      templates: [tpl], // 選べる見た目はある
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "gone" } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const notice = screen.getByRole("alert");
+    expect(notice.textContent).toContain("今の見た目が見つかりません。選び直してください。");
+    expect(notice.textContent).toContain("（下の「見た目・フォント」にあります）");
+  });
+
   const openUnresolved = (): void => {
     useProjectStore.setState({
       templates: [],

@@ -108,8 +108,13 @@ export function updateFreeElement(
     if (e.id !== id) return e;
     const next = { ...e, ...patch } as Record<string, unknown>;
     // ⚠️ **未指定はキーごと落とす**（差分再監査 10巡目）＝素の spread だと**値なしのキーが残り**、
-    // 保存では消えるのにその場の文書には残る＝同じ絵の文書が2通りできる（`setVisualClipContent`
-    // と同じ流儀）。「継承へ戻す」を `undefined` で表す入口（フォント）が増えたので、受け側でそろえる。
+    // 保存では消えるのにその場の文書には残る＝同じ絵の文書が2通りできる。「継承へ戻す」を
+    // `undefined` で表す入口（フォント）が増えたので、受け側でそろえる。
+    // ⚠️ **`null` は落とさない**（差分再監査 11巡目 🟡）＝タイムラインの `setVisualClipContent` は
+    // `null` も落とすので、**同じ流儀ではない**（写さない）。理由は「読み手が区別している」ではなく
+    // **書き手がそう書いている**＝`createFreeElement` は差し込み口に必ず `assetId: null` を置き、
+    // 画面も「なし」を `null` で書く。落とすと**保存される形が入口によって変わる**ので、
+    // 触っていない項目まで書き換えないこの関数の役目から外れる（読み手は `?? null` で解くため実害は無い）。
     for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k];
     return next as unknown as FreeElement;
   });
