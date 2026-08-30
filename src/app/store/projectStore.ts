@@ -2176,6 +2176,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
     if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    // ⚠️ **旗も最初の `await` より前に立てる**（差分再監査 ℹ️）＝一覧を読んでいる間は旗が下りたままなので、
+    // その窓では**2本ともこの門を通れる**。通ると両方が同じ `assets` から**同じ `asset_NNN`** を採り、
+    // 同じファイル名で上書きコピーして、`assets` に**同じ id が2件**並ぶ（保存時の検査は警告だけで通る）。
+    // ⚠️ **早期 return では必ず下ろす**（下ろし忘れると以後の取り込みが「いま取り込んでいます」で
+    // 通らなくなる＝直しようのない行き止まり）。
+    set({ isImporting: true });
+    const done = <T,>(v: T): T => { set({ isImporting: false }); return v; };
     // ⚠️ **合図は最初の `await` より前**（`sameDocGuard` の約束・差分再監査）＝一覧を読んでいる間にも
     // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
@@ -2186,13 +2193,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = await listLibraryAssets();
     if (list == null) {
       set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return null;
+      return done(null);
     }
     const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
     const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
-    if (!stillOpen()) return null;
-    set({ isImporting: true, importError: null });
+    if (!stillOpen()) return done(null);
+    set({ importError: null });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
