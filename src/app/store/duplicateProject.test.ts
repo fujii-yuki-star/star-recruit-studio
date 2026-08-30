@@ -161,4 +161,14 @@ describe('duplicateProject', () => {
     await useProjectStore.getState().duplicateProject('proj_20260101_001');
     expect(useProjectStore.getState().importError).not.toBe('前の操作の理由');
   });
+
+  // ⚠️ **成功したときも持ち越さない**（範囲7b レビュー）＝複製は成功したら**その動画を開く**ので、
+  // 残っていると**複製先の画面**に無関係な（前の動画の）警告が出る。しかもその警告は
+  // 「閉じる」を押すまで消えない＝身に覚えのない断りが居座る（§2-5）。
+  it('複製に成功したときも、前の理由を持ち越さない', async () => {
+    useProjectStore.setState({ importError: '別の画面で出た取り込みの失敗' } as never);
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id).not.toBeNull();
+    expect(useProjectStore.getState().importError).toBeNull();
+  });
 });
