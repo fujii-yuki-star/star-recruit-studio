@@ -528,7 +528,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // ⚠️ **自由配置の要素のフォントも同じ扱い**（差分再監査 8巡目 🟡）＝門は `freeLayout[].fontId` も
   // **休眠のぶんまで数える**のに、直す欄は自由配置の場面にしか無い。通常テンプレへ切り替えた場面では
   // 選び直す先が1つも無くなるので、種類に依らず出る所から直せるようにする。
-  const dormantFreeFonts = isFree ? [] : freeLayout.filter((el) => typeof el.fontId === "string");
+  // ⚠️ **こちらにも「調べていない ≠ 使っていない」を効かせる**（差分再監査 11巡目 🟡）＝`isFree` は
+  // 見た目が**見つからないとき false** になるので、素通しだと**全要素が休眠**に落ちる。消えた見た目が
+  // 自由配置なら要素は描かれるので、案内どおり戻すと**見た目が戻った時点で字体が黙って変わる**
+  //（`textFontIds` で直したのと同じ壊れ方＝兄弟経路に残っていた）。
+  const freeFontEls = freeLayout.filter((el) => typeof el.fontId === "string");
+  const dormantFreeFonts = template == null || isFree ? [] : freeFontEls;
+  /** 見た目が見つからず**使っているか調べられない**要素＝「使っていない」とは言わない群。 */
+  const unknownFreeFonts = template == null ? freeFontEls : [];
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
@@ -1895,7 +1902,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {pickableOptions.length > 0 && "（下の「見た目・フォント」にあります）"}
               </p>
             )}
-            {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
+            {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0 || unknownFreeFonts.length > 0) && (
               <div className="field">
                 {/* ⚠️ **描かれているものを「使っていない」と言わない**（差分再監査 9巡目 🟡）＝
                     自由配置の見た目でも文字層は描かれる。知らせは**もう描かれないもの**にだけ出す。 */}
@@ -1903,7 +1910,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     「使わないなら戻せます」が**描かれている欄の上**に立ち、戻すと字体が変わる。
                     ⚠️ 出どころは**見た目パターンの文字層**（自由配置で置いた文字ではない）＝
                     言い方を取り違えない（本文は自由配置の編集面で直す）。 */}
-                {otherFontKeys.length > 0 && (
+                {(otherFontKeys.length > 0 || unknownFreeFonts.length > 0) && (
                   <>
                     <p className="field-hint" style={{ marginTop: 0 }}>
                       {template == null
@@ -1914,6 +1921,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
                         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
                         <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                      </div>
+                    ))}
+                    {unknownFreeFonts.map((el) => (
+                      <div className="field" style={{ marginTop: 6 }} key={`unknown-free-${el.id}`}>
+                        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{freeName(el)}のフォント</label>
+                        <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
                       </div>
                     ))}
                   </>

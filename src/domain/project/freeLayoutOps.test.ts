@@ -773,8 +773,10 @@ describe('updateFreeElement の未指定', () => {
     expect(next.fontId).toBe('kaitou-yokoku-gothic');
   });
 
-  it('null は残す（`null` を意味として使う項目があるため落とさない）', () => {
-    const [next] = updateFreeElement([el()], 'free_001', { assetId: null } as never);
+  // ⚠️ `assetId: null`＝**差し込み口は空**（画面が明示的に書く・`createFreeElement` の既定）＝
+  // 落とすと「まだ決めていない」と区別が付かなくなる。タイムライン側とは流儀が違う。
+  it('null は残す（差し込み口が空、を明示している）', () => {
+    const [next] = updateFreeElement([el()], 'free_001', { assetId: null });
     expect(next.assetId).toBeNull();
   });
 
