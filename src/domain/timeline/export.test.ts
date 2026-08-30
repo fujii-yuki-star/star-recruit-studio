@@ -1,12 +1,12 @@
 // タイムラインの書き出しの並べ方（ADR-0032 決定22・#631）。全フレーム描画と音の配置を固定する。
 import { describe, expect, it } from 'vitest';
-import { FPS } from '../constants';
+import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable, duckFactorPointCount } from './export';
- import { duckingFactorPoints, resolveAudioAuto } from '../voice/audioAuto';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable, duckSpansOf, clipVolumePointsForExport } from './export';
+ import { resolveAudioAuto } from '../voice/audioAuto';
 import { frameTimeSec } from './persistence';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -618,10 +618,13 @@ describe('ダッキングで増える点も門が数える', () => {
     voiceClip(id, { startSec, durationSec: 1, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
   const manyVoices = (n: number): TimelineClip[] =>
     Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * 5));
+  // ⚠️ **保存の点は下げ幅の点と重ならない時刻に置く**（`/canon-check` 🟡 の是正）＝門が
+  // **実効の点数**（`applyDucking` の和集合）で数えるようになったので、整数秒に置くと声の区間の端
+  // （0,1／5,6…）と**同じ時刻に畳まれ**、合計が上限を超えない＝この検査が意図を失う。
   const bgm = (points: number): TimelineClip =>
     clip('clip_bgm', {
       kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 200,
-      assetId: 'asset_bgm', volumePoints: Array.from({ length: points }, (_, i) => ({ timeSec: i, volume: 0.5 })),
+      assetId: 'asset_bgm', volumePoints: Array.from({ length: points }, (_, i) => ({ timeSec: i + 0.37, volume: 0.5 })),
     } as never);
 
   it('保存の点だけなら上限内でも、下げ幅の点と合わせて超えたら止める', () => {
@@ -696,39 +699,80 @@ describe('timelineImageAssetIds：立ち絵に入れた動画', () => {
 
 // ⚠️ **門の見積りが実際の点数を下回らない**（PR #922 レビュー ℹ️）＝下回ると、上限を超える
 // 組み合わせを素通しして「何度やっても成功しない案内」に落ちる。`duckingFactorPoints` の実値と突き合わせる。
-describe('ダッキングの点数の見積り', () => {
+// 門（書き出しを断るか）と実際の式が、**同じ関数**で点を数えることを固定する（`/canon-check` 🟡）。
+// ⚠️ もとは門だけが**文書全体**のダッキング点数を**すべての音の部品**へ一律に足しており、
+// ①読み上げには倍率を当てない ②その部品に掛からない区間は捨てる、という実際の式とずれて
+// **出せる動画を止めていた**。
+describe('音量の点の数え方（門と式が同じ関数を通る）', () => {
   const voiceWithPath = (id: string, startSec: number, durationSec = 1): TimelineClip =>
     voiceClip(id, { startSec, durationSec, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
-  const build = (n: number, gap: number, auto: Record<string, unknown>): TimelineProject => doc({
+  const build = (n: number, gap: number, over: Partial<TimelineClip> = {}, auto: Record<string, unknown> = {}): TimelineProject => doc({
     clips: [
-      clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 500, assetId: 'asset_bgm' } as never),
+      clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 500, assetId: 'asset_bgm', ...over } as never),
       ...Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * gap)),
     ],
     assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
     videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true, ...auto } },
   } as never);
+  const spansOf = (d: TimelineProject) => {
+    const auto = resolveAudioAuto(d.videoSettings.audioAuto);
+    return { auto, spans: auto.duckBgm ? duckSpansOf(d, auto).spans : [] };
+  };
+  const pointsOf = (d: TimelineProject, clipId: string) => {
+    const { auto, spans } = spansOf(d);
+    const c = d.clips.find((x) => x.id === clipId) as TimelineClip;
+    return clipVolumePointsForExport(d, c, auto, spans).points.length;
+  };
 
   for (const [name, n, gap, auto] of [
     ['間が広い（まとめない）', 5, 10, {}],
     ['立ち上がりが0（端の点が重なる）', 5, 10, { duckAttackSec: 0 }],
     ['戻りも0（各区間が2点に縮む）', 5, 10, { duckAttackSec: 0, duckReleaseSec: 0 }],
     ['間が狭い（まとめる）', 8, 1.2, {}],
-    ['先頭が0秒（先頭へ戻す点が要らない）', 3, 10, { duckAttackSec: 0 }],
+    // 上限に当たって「さらに間を広げる」繰り返しへ入る側（PR #922 範囲5 レビュー ℹ️）。
+    ['本数が多くて何度もまとめる', 40, 3, {}],
   ] as [string, number, number, Record<string, unknown>][]) {
-    it(`実際の点数を下回らない：${name}`, () => {
-      const d = build(n, gap, auto);
-      const resolved = resolveAudioAuto(d.videoSettings.audioAuto);
-      const spans = d.clips
-        .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice)
-        .map((c) => ({ startSec: c.startSec, endSec: c.startSec + c.durationSec }));
-      const actual = duckingFactorPoints(spans, { startSec: 0, endSec: 500 }, resolved).length;
-      expect(duckFactorPointCount(d)).toBeGreaterThanOrEqual(actual);
+    it(`上限を超えない：${name}`, () => {
+      const d = build(n, gap, {}, auto);
+      expect(pointsOf(d, 'clip_bgm')).toBeLessThanOrEqual(VOLUME_POINTS_MAX);
+      expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
     });
   }
 
-  it('下げない設定なら0（数え過ぎて書き出せるものを断らない）', () => {
-    const d = build(5, 10, {});
+  it('下げない設定なら保存の点だけ（数え過ぎて書き出せるものを断らない）', () => {
+    const d = build(5, 10, { volumePoints: [{ timeSec: 0, volume: 1 }, { timeSec: 10, volume: 0.5 }] });
     (d.videoSettings as unknown as Record<string, unknown>).audioAuto = { duckBgm: false };
-    expect(duckFactorPointCount(d)).toBe(0);
+    expect(pointsOf(d, 'clip_bgm')).toBe(2);
+  });
+
+  // ⚠️ **読み上げには倍率を当てない**（自分で自分を下げない）＝門が全部品へ一律に足すと、
+  // 点が数個の読み上げが「点が多すぎます」で止まる。しかも案内の「部品を分ける」は読み上げにできない。
+  // ⚠️ 点の数は**一律加算なら上限を超える**ように取る（`5 + 区間数×4 > 60`）＝そうしないと、
+  // 元のバグ（全部品へ一律に足す）へ戻しても緑のままで、この検査が意味を持たない。
+  const fivePoints = Array.from({ length: 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+
+  // ⚠️ **まとめが要らない本数**にする（14本＝`14×4+1 ≤ 60`）＝40本だと `fitSpeechSpans` が
+  // 間を広げ切って**1区間**まで畳み、一律加算でも上限を超えず検査が空振りする。
+  it('声を多く置いても、点の少ない読み上げは止めない', () => {
+    const d = build(14, 10);
+    const withPoints = doc({
+      ...d,
+      clips: d.clips.map((c) => (c.id === 'clip_v0' ? { ...c, volumePoints: fivePoints } : c)),
+    } as never);
+    // 読み上げには倍率を当てない＝保存の点だけ。
+    expect(pointsOf(withPoints, 'clip_v0')).toBe(5);
+    // 一律加算だと `5 + 区間数×4` で上限を超える＝止まる。実効で数えれば止まらない。
+    expect(spansOf(withPoints).spans.length * 4 + 5).toBeGreaterThan(VOLUME_POINTS_MAX);
+    expect(timelineExportBlockers(withPoints).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+  });
+
+  // ⚠️ **掛からない区間は捨てられる**（`duckingFactorPoints`）＝冒頭だけの短い BGM に、
+  // 動画の最後のほうの声の区間まで数えない。
+  it('冒頭だけの短い BGM は、その区間に掛かる分しか数えない', () => {
+    const d = build(14, 10, { durationSec: 2, volumePoints: fivePoints });
+    expect(pointsOf(d, 'clip_bgm')).toBeLessThan(20);
+    expect(spansOf(d).spans.length * 4 + 5).toBeGreaterThan(VOLUME_POINTS_MAX);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
   });
 });
+

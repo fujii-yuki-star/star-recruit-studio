@@ -9,8 +9,10 @@
 // 後ろの1つしか宣言に付かない（＝前の1つは宙に浮いている）。
 //
 // ⚠️ **いまは 0 件にできない**＝同じ形が既に各所にあり（多くは同じ取り違え）、一掃すると
-// この監査PRの範囲を大きく超える。よって**現状を基準として据え置き、増えたら落とす**（ratchet）。
-// 直したら基準の数を下げること（下げ忘れても緑のままなので、下の「効いている」検査で門番自体を守る）。
+// この監査PRの範囲を大きく超える。よって**現状を基準として据え置き、ずれたら落とす**（ratchet）。
+// ⚠️ **「増えたら」ではなく「ずれたら」落とす**（PR #922 範囲5 レビュー ℹ️）＝増える側だけ見ると、
+// 直しても**基準が下がらないまま緑**＝減ったことが記録に残らず、次に増えたぶんを**直した枠が吸収**して
+// しまう（門番が静かに緩む）。直したら基準の数も一緒に下げる＝**その1行が「何件直したか」の記録**になる。
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -83,16 +85,24 @@ const BASELINE: Record<string, number> = {
 };
 
 describe('説明文を別の宣言から奪わない（再発防止の門番）', () => {
-  it('説明文が2つ並んだ箇所が、記録した数より増えていない', () => {
-    const grown: string[] = [];
+  it('説明文が2つ並んだ箇所が、記録した数と一致する', () => {
+    const drifted: string[] = [];
+    const seen = new Set<string>();
     for (const p of sourceFiles(SRC)) {
       const rel = p.slice(SRC.length + 1).split(sep).join('/');
+      seen.add(rel);
       const n = detachedDocCount(readFileSync(p, 'utf8'));
-      const max = BASELINE[rel] ?? 0;
-      if (n > max) grown.push(`${rel}: ${n}（上限 ${max}）`);
+      const want = BASELINE[rel] ?? 0;
+      // ⚠️ 増えた＝**差し込んだ位置の1つ上**を見る。奪った説明文を、本来の宣言のすぐ上へ戻す。
+      if (n > want) drifted.push(`${rel}: ${n} 件（記録は ${want} 件）＝説明文を奪った`);
+      // ⚠️ 減った＝直したのに記録が古い。`BASELINE` の数を下げる（消えたら行ごと消す）。
+      if (n < want) drifted.push(`${rel}: ${n} 件（記録は ${want} 件）＝記録を下げる`);
     }
-    // ⚠️ 落ちたら**差し込んだ位置の1つ上**を見る。奪った説明文を、本来の宣言のすぐ上へ戻す。
-    expect(grown).toEqual([]);
+    // 消えた・名前が変わったファイルの記録も残さない（数えられないものを守っている顔をしない）。
+    for (const rel of Object.keys(BASELINE)) {
+      if (!seen.has(rel)) drifted.push(`${rel}: このファイルが無い＝記録から消す`);
+    }
+    expect(drifted).toEqual([]);
   });
 
   it('門番が実際に効いている（走査と判定が壊れたら落ちる）', () => {

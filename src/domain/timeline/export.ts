@@ -20,7 +20,7 @@ import { clipEndSec } from './validateTimelineDoc';
 import { isDrawnClip, placementOriginalAudio, videoAssetIds, videoPlacementsOf, videoPlacementsOfClip } from './video';
 import { isUnsplittableClipKind } from './clipKind';
 import type { Template } from '../template/types';
-import type { TimelineClip, TimelineProject } from './types';
+import type { TimelineClip, TimelineProject, VolumePoint } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
 export interface TimelineFramePlan {
@@ -109,27 +109,35 @@ export interface TimelineAudioRun {
 }
 
 /**
- * ダッキングで増える点の数（α-6 出口監査 🟡）。**門と実際の式が同じ材料を見る**ための1か所。
+ * その部品の音量の式に**実際に渡る点列**（α-6 出口監査 🟡・`/canon-check` 🟡）。
  *
- * ⚠️ **1区間＝最大4点**（まとめた後の区間数から数える）。⚠️ **`+1` を足さない**＝`duckingFactorPoints` は
- * 先頭を1へ戻す点を足すことがあるが、**それが足されるのは立ち上がりが0のときだけ**（`from-0` と `from` が
- * 同じ時刻に落ちて1点に畳まれ、先頭が下がった値になる）＝**足す1点と畳んで減る1点が必ず相殺する**ので、
- * 上限は区間数×4 のまま。相殺は自明でないので `export.test.ts` の「ダッキングの点数の見積り」で
- * 実際の点数と突き合わせて固定している（PR #922 レビュー ℹ️）。
- *
- * ⚠️ **多めに見積もらない**＝この数は書き出しを**断る**門に足されるので、上振れさせると
- * 実際には組める式を「点が多すぎる」として拒む（上の門のコメントが避けたい方の失敗）。
+ * ⚠️ **門と書き出しが「同じ材料」ではなく「同じ関数」を通る**＝以前は門だけが**文書全体**の
+ * ダッキング点数（区間数×4）を**すべての音の部品**へ足していたが、実際の式は
+ * ①**読み上げには倍率を当てない**（自分で自分を下げない）②**その部品の区間に掛からない区間は捨てる**
+ *（`duckingFactorPoints`）ので、**実効より多く数えて出せる動画を止めていた**（声を14本置くと、点が
+ * 5個の読み上げや冒頭だけの短い BGM が「点が多すぎます」で止まる。しかも案内の「部品を分ける」は
+ * 読み上げにはできない＝**従える道が無い**・§2-5）。数える側と組む側を1つの関数に寄せて構造で消す。
  */
-export function duckFactorPointCount(
+export function clipVolumePointsForExport(
   doc: TimelineProject,
-): number {
-  const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
-  if (!auto.duckBgm) return 0;
-  return duckSpansOf(doc, auto).spans.length * 4;
+  clip: TimelineClip,
+  auto: ReturnType<typeof resolveAudioAuto>,
+  duckSpans: readonly { startSec: number; endSec: number }[],
+): { factor: VolumePoint[]; points: VolumePoint[] } {
+  // 声が鳴っている区間だけ BGM を下げる（#257・ADR-0032 追補4＝両形式に効く）。
+  // ⚠️ **読み上げそのものは下げない**（自分で自分を下げることになる）。動画の元の音は呼ぶ側で扱う。
+  const factor =
+    clip.kind === TIMELINE_CLIP_KIND.voice
+      ? []
+      : duckingFactorPoints(duckSpans, { startSec: clip.startSec, endSec: clipEndSec(clip) }, auto);
+  const saved = normalizedVolumePoints(clip.volumePoints);
+  return factor.length > 0
+    ? { factor, points: applyDucking(saved, clipBaseVolume(clip, doc), factor) }
+    : { factor, points: saved };
 }
 
 /** 下げる区間（まとめた後）。門と書き出しが同じ材料を見るための1か所。 */
-function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolveAudioAuto>) {
+export function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolveAudioAuto>) {
   return fitSpeechSpans(
     doc.clips
       .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
@@ -173,17 +181,10 @@ export function timelineAudioRuns(
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!cue) continue;
     const volume = clipBaseVolume(clip, doc);
-    // 声が鳴っている区間だけ BGM を下げる（#257・ADR-0032 追補4＝両形式に効く）。
-    // ⚠️ **読み上げそのものは下げない**（自分で自分を下げることになる）。動画の元の音は下の段で扱う。
-    const factor =
-      clip.kind === TIMELINE_CLIP_KIND.voice
-        ? []
-        : duckingFactorPoints(duckSpans, { startSec: clip.startSec, endSec: clipEndSec(clip) }, auto);
+    // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
+    const { factor, points } = clipVolumePointsForExport(doc, clip, auto, duckSpans);
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
-    const expr =
-      factor.length > 0
-        ? volumeExpr(applyDucking(normalizedVolumePoints(clip.volumePoints), volume, factor))
-        : volumeExpr(clip.volumePoints);
+    const expr = factor.length > 0 ? volumeExpr(points) : volumeExpr(clip.volumePoints);
     runs.push({
       clipId: clip.id,
       sourceKey,
@@ -348,10 +349,14 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // ⚠️ **実効の点数で数える**（α-6 出口監査 🟡）＝式へ渡るのは**保存の点とダッキングの点の和集合**
   // （`applyDucking`）なので、保存の点だけを見ると**合わせて上限を超える**組み合わせを素通しする＝
   // フィルタの組み立てごと失敗し、出るのは「もう一度お試しください」＝この門が防ぐはずのもの。
-  const duckPointsForGate = duckFactorPointCount(doc);
+  // ⚠️ **部品ごとに、書き出しと同じ関数で数える**（`/canon-check` 🟡）＝文書全体のダッキング点数を
+  // 全部品へ一律に足すと、**読み上げ**（倍率を当てない）や**短い BGM**（掛からない区間は捨てられる）で
+  // 実効より多く数え、**出せる動画を止める**（しかも読み上げは「部品を分ける」ができない＝従える道が無い）。
+  const autoForGate = resolveAudioAuto(doc.videoSettings.audioAuto);
+  const duckSpansForGate = autoForGate.duckBgm ? duckSpansOf(doc, autoForGate).spans : [];
   const tooManyPoints = doc.clips
     .filter((c) => isAudioClip(c)
-      && normalizedVolumePoints(c.volumePoints).length + duckPointsForGate > VOLUME_POINTS_MAX)
+      && clipVolumePointsForExport(doc, c, autoForGate, duckSpansForGate).points.length > VOLUME_POINTS_MAX)
     .map((c) => c.id);
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });

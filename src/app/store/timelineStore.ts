@@ -1206,7 +1206,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipOriginalAudioVolume: (volume) =>
     applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
-  setSelectedClipSlotAudio: (layerId, patch) => applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch)),
+  // ⚠️ **見た目パターンを渡す**（`/canon-check` 🔴・`splitClip` と同じ理由）＝どの枠が動画を受けるか、
+  // 立ち絵に動画が入っているかは**見た目が決める**。渡さないと置き場所が1つも作れず、欄は出るのに
+  // 押すと毎回断られる（しかも理由は「音が入っていない」＝事実と違う）。
+  setSelectedClipSlotAudio: (layerId, patch) => {
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch, { templateOf: (tid) => templateById.get(tid) }));
+  },
   setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedVolumePoint: (timeSec, volume) =>

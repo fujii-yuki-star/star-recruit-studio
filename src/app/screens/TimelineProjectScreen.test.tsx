@@ -7109,6 +7109,20 @@ describe("立ち絵に入れた動画のプレビュー", () => {
     expect(screen.getByText("ゆうこ（立ち絵）の動画の音")).toBeInTheDocument();
     expect(screen.getByText("この動画に入っている音を流す")).toBeInTheDocument();
   });
+
+  // ⚠️ **押した結果まで固定する**（`/canon-check` 🔴）＝欄が出ることだけを見ていたので、
+  // **書き込みが毎回断られている**（素材を `assetRefs` からしか探しておらず、立ち絵の素材は
+  // `character.poseAssetId` にある）のを緑のまま通していた。描けることと**設定できる**ことは別。
+  it("押すと設定が載る（欄は出るのに毎回断られる、を作らない）", () => {
+    openWithPose();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const cb = screen.getByLabelText("この動画に入っている音を流す");
+    act(() => { fireEvent.click(cb); });
+    expect(useTimelineStore.getState().doc?.clips[0].slotClips).toEqual({ yuko: { useOriginalAudio: true } });
+    // 断られていないこと＝理由が出ていない（出ていたら「音が入っていない」＝事実と違う理由）。
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
 });
 
 // BGM を下げる区間を**つないだ**ことは、場面形式と同じように**タイムライン形式でも言う**

@@ -15,7 +15,7 @@ import type { Group } from '../group/types';
 import type { SlotClipOverride } from '../project/types';
 import { isAudioClip } from './audio';
 import { clampVolume } from '../voice/audioMix';
-import { canUseOriginalAudio } from './video';
+import { canUseOriginalAudio, videoPlacementsOfClip } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
@@ -1459,10 +1459,13 @@ export function setClipOriginalAudioVolume(doc: TimelineProject, clipId: string,
  * 見た目パターンの**差し込み口ごと**の元の音（#512 段3b）。値は `slotClips[layerId]` へ置く
  * ＝場面形式と同じ語彙（ADR-0028・`$ref` 共有）なので schema は変わらない。
  *
- * ⚠️ **ここで見るのは「その枠に音の入った動画が入っているか」まで**（レビュー 🟡）＝
- * その層が動画を受ける差し込み口かどうかは**見た目パターンが決める**ので、ここでは判らない
- *（画面は `videoPlacementsOfClip`＋`placementAudioState` で先に絞るので、そこへは到達しない。
- * 万一書かれても**誰も読まない値が残るだけ**＝鳴りはしない）。
+ * ⚠️ **素材の解決は「画面が欄を出す条件」と同じ述語を通す**（`/canon-check` 🔴）＝
+ * `videoPlacementsOfClip` の**置き場所**から採る。もとは `assetRefs[layerId]` だけを見ていたので、
+ * **立ち絵に入れた動画**（素材は `character.poseAssetId`・#809）では必ず `undefined` になり、
+ * 欄は出るのに押すと毎回「この動画には音が入っていないので、元の音は鳴らせません」＝**事実と違う理由**で
+ * 断られていた（§2-5／ADR-0026②＝差し込み口と立ち絵で同じ概念が別挙動）。**読む側だけ共有・書く側は別**を解消する。
+ * ⚠️ **見た目パターンが要る**＝どの枠が動画を受けるかは見た目が決めるので、渡されないと置き場所が
+ * 1つも作れない（＝断る）。呼ぶ側は `splitClip` と同じように渡すこと。
  * ⚠️ **継承した値と同じなら書かない**＝素材既定（`asset.clip`）を覆すときだけ明示的に保存する。
  * ⚠️ **空になった `slotClips` の項目も落とす**＝意味の無い空の入れ物を文書に残さない。
  */
@@ -1471,11 +1474,13 @@ export function setClipSlotAudio(
   clipId: string,
   layerId: string,
   patch: { useOriginalAudio?: boolean; originalAudioVolume?: number | null },
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  const assetId = clip.assetRefs?.[layerId];
-  const asset = assetId != null ? doc.assets.find((a) => a.assetId === assetId) : undefined;
+  const placement = videoPlacementsOfClip(doc, clip, { templateOf: opts.templateOf })
+    .find((pl) => pl.layerId === layerId);
+  const asset = placement != null ? doc.assets.find((a) => a.assetId === placement.assetId) : undefined;
   if (asset?.assetType !== ASSET_TYPE.video) return blocked(EDIT_BLOCKED.noOriginalAudio);
   if (asset.metadata?.hasAudio !== true) return blocked(EDIT_BLOCKED.noOriginalAudio);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);

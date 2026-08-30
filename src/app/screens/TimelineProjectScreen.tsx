@@ -38,6 +38,7 @@ import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateT
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -2562,9 +2563,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **音の入った動画が入っている置き場所にだけ出す**＝押せない欄を並べない。
    * 音が無い／確かめられないときは、直接置きと同じ2文で理由を出す（§2-5）。
    */
-  const renderPlacementAudio = (p: { layerId: string | null; useOriginalAudio: boolean; originalAudioVolume: number } | undefined) => {
+  const renderPlacementAudio = (p: VideoPlacement | undefined) => {
     if (!doc || !selected || !p || p.layerId == null) return null;
-    const state = placementAudioState(doc, p as never);
+    // ⚠️ **`VideoPlacement` をそのまま受ける**（`/canon-check` ℹ️）＝構造的部分型にして `as never` で
+    // 通していたが、`never` は何にでも代入できるので**型検査が完全に外れる**（§6）。
+    const state = placementAudioState(doc, p);
     if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
     if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
     const layerId = p.layerId;
