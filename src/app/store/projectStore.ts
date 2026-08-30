@@ -606,6 +606,26 @@ interface ProjectState {
 /** 文書slice（undo 対象）を現在状態から取り出す。 */
 const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
 
+/**
+ * 取り消し・やり直しで戻した文書へ、**いまの動画の身元（`projectId`）を残す**（差分再監査 🔴）。
+ *
+ * ⚠️ **番号は「編集の中身」ではなく「実体の身元」**＝どのフォルダに保存するかを決める値で、
+ * 採るのは**遅い**（最初の保存か、最初の素材の取り込み）。採る前に積まれた履歴へ戻ると
+ * `projectId` が `""` に戻り、**次の自動保存が別の番号で別フォルダへ**書く＝素材は前のフォルダに
+ * あるので新しい方からは全部「見つかりません」になり、一覧に同じ名前の動画が2つ残る。
+ * 取り消しても素材は戻らない（`assets` は履歴の外＝ADR-0020）ので、**取り消しで壊れる**。
+ *
+ * ⚠️ **一度採った番号は戻さない**（`||` で live 優先）＝番号は `""` → 採番 の一方向にしか動かないので、
+ * これで「履歴が古い番号を持っている」ケースを作らない。ADR-0020 の「meta/parts/scenes を戻す」は
+ * **編集内容**の話で、フォルダ名の身元まで巻き戻す約束ではない。
+ */
+function keepIdentity(restored: DocSnapshot, live: ProjectState): DocSnapshot {
+  const projectId = live.meta.projectId || restored.meta.projectId;
+  return projectId === restored.meta.projectId
+    ? restored
+    : { ...restored, meta: { ...restored.meta, projectId } };
+}
+
 // 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
 let saveInFlight: Promise<void> | null = null;
@@ -905,9 +925,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
     });
     if (isNoopBrandApply(plan)) return { ok: true, applied: false, addedLogo: false, error: null }; // 何も変わらないなら履歴を積まない
-    get().pushHistory();
+    // ⚠️ **履歴が変わる枝でだけ積む**（差分再監査 🟡・ADR-0020「空振りを積まない」）＝
+    // ロゴだけ足す計画で加わるのは `assets`＝**履歴 slice の外**なので、先に積むと
+    // **いまと同じ内容のスナップショット**が1つ増える（上限50 と合わさって古い編集を1つ押し出す。
+    // 押しても何も戻らない「取り消す」も作る）。積むのは文字の形が変わるときだけ。
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
     if (plan.fontChanges && isKnownFontId(kit.fontId)) {
+      get().pushHistory();
       const fontId = kit.fontId;
       set((st) => ({
         meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } },
@@ -958,7 +982,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 棚が読めない・実体が消えたときに**何も出ず**、`importError` は2ステップ先の画面でしか描かれない
     // （身に覚えのない警告として現れる）。画面は「新しい動画に最初から入ります」と約束している。
     if (kit.logoLibraryAssetId != null && (await get().importFromLibrary(kit.logoLibraryAssetId)) == null) {
-      set({ importError: BRAND_LOGO_NOT_APPLIED_MESSAGE });
+      // ⚠️ **具体的な理由を一般文で潰さない**（差分再監査 🟡）＝`importFromLibrary` は
+      // 「一覧を読めませんでした」「取り込み中です」「素材が見つかりません」を先に入れて `null` を返す。
+      // 上書きすると**棚が読めないのに「置いてあるか確かめてください」**＝従っても直らない案内になる。
+      // 明示適用（`applyBrandKit`）は既に `??` で理由を優先しているので揃える（ADR-0026②）。
+      // ⚠️ **開き直していたら出さない**＝`importFromLibrary` は `!stillOpen()` のとき**わざと理由を出さず**
+      // `null` を返すので、コピー中に別の動画を開くと**開いたばかりの動画**に身に覚えのない警告が出る。
+      if (stillOpen()) set({ importError: get().importError ?? BRAND_LOGO_NOT_APPLIED_MESSAGE });
     }
   },
   startManualEdit: () => {
@@ -2397,7 +2427,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   addUserFont: async (srcPath, displayName) => {
-    set({ fontError: null });
+    // ⚠️ **前の知らせも消す**（差分再監査 ℹ️）＝残ると、取り込みに失敗したとき
+    // **赤い理由の隣に前の成功の知らせ**が並ぶ（画面を離れて戻っても出続ける）。
+    set({ fontError: null, fontNotice: null });
     try {
       // ⚠️ **番号は「これまでに使ったもの」から採る**＝消した番号は使い回さない（α-6 出口監査 🟡8）。
       // 一覧（`listUserFonts`）は**実体があるものだけ**なので、最大番号を外すと同じ番号が
@@ -2798,6 +2830,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない
+      r.restored = keepIdentity(r.restored, s); // 番号（実体の身元）は戻さない
       // ⚠️ **開いているまとめは畳む**（#817 レビュー 🟡＝タイムライン形式と同じ扱い・ADR-0026②）＝
       // 畳まないと、戻した**後**の編集が「まとめの続き」とみなされて**履歴に1件も積まれず**、
       // さらに自動保存が `historyDepth > 0` の間は走らないので**保存も止まる**。
@@ -2809,6 +2842,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {}; // 同上（書き出し中は redo も文書 slice を変えない・#379/#413）
       const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // やり直せない
+      r.restored = keepIdentity(r.restored, s); // 同上
       return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle", _historyGroupDepth: 0, _historyGroupPending: false }; // まとめは畳む（上と同じ理由）
     }),
 }));

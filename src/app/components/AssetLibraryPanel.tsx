@@ -154,13 +154,16 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
   const importBlockedReason = blockedReason ?? (destOpen ? undefined : IMPORT_NO_PROJECT_MESSAGE);
   const shown = filterLibraryAssets(items, { text, tags, assetType });
-  // ⚠️ **候補は「絞り込んだ後」から採り、件数を添える**（α-6 出口監査 🟡・素材画面と同じ作法）＝
+  // ⚠️ **候補は「いま出ているもの」から採り、件数を添える**（α-6 出口監査 🟡・素材画面と同じ作法）＝
   // 全件から採ると、種類=音楽にして写真のタグを押せてしまい「条件に合う素材がありません」になる
   //（押しても0件になる候補を出さない＝ADR-0026②）。**いま選んでいるタグは残す**＝選んだ瞬間に
-  // 自分が消えて外せなくなる、を作らない。
+  // 自分が消えて外せなくなる、を作らない（`assetTagCounts` の第2引数）。
+  // ⚠️ **選んでいるタグも掛けた集合から採る**（差分再監査 ℹ️）＝タグは**すべて含む**（AND）なので、
+  // 外した集合から採ると「a を選んだ状態で b（1件）」が残り、押すと0件になる（この作法が防ぐと
+  // 謳っているもの）。件数は「**いま出ているものの中で、そのタグも付いている数**」になる。
   // ⚠️ **数え方は素材画面と同じ関数**（`/canon-check` 🟡・§6）＝同じ規則を画面で書き直すと、
   // 片方だけ並び順を変えたときに黙って割れる。
-  const allTags = assetTagCounts(filterLibraryAssets(items, { text, assetType }), tags);
+  const allTags = assetTagCounts(shown, tags);
 
   async function onAdd(): Promise<void> {
     setNotice("");

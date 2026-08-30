@@ -28,6 +28,13 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // ⚠️ **覚え直しが書けなかった理由**（α-6 出口監査 🟡23）＝黙って覚えた顔をしない（§2-5）。
   const brandKitError = useProjectStore((s) => s.brandKitError);
   const brandKitUnreadable = useProjectStore((s) => s.brandKitUnreadable);
+  // ⚠️ **「変更はできません」と書いた欄は押せなくする**（差分再監査 🟡・§2-5 派生）＝
+  // `updateBrandKit` は読めていない間**必ず断る**ので、押せるままだと**選択が元へ戻って**
+  // 2つ目の赤字が増えるだけ（同じ状態に断り方が2通り）。同じ画面の書き出し中のボタンは
+  // 既に `disabled`＋`title` で押す前に断っており、そちらへ揃える。
+  const unreadableGuard = brandKitUnreadable
+    ? { disabled: true, title: "会社の見た目を読めていないので、いまは変えられません。アプリを開き直してからお試しください。" }
+    : {};
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
@@ -140,6 +147,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           id="brandFont"
           className="input"
           value={brandKit.fontId ?? ""}
+          {...unreadableGuard}
           onChange={(e) => void updateBrandKit({ ...brandKit, fontId: e.target.value || undefined })}
         >
           <option value="">覚えない（毎回選ぶ）</option>
@@ -171,7 +179,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
             <span key={c} className="chip">
               <span style={{ width: 14, height: 14, borderRadius: 3, background: c, display: "inline-block" }} />
               {c}
-              <button type="button" aria-label={`${c} を外す`} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
+              <button type="button" aria-label={`${c} を外す`} {...unreadableGuard} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
                 ×
               </button>
             </span>
@@ -182,7 +190,8 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           <button
             type="button"
             className="btn"
-            disabled={colors.length >= BRAND_COLORS_MAX}
+            {...unreadableGuard}
+            disabled={brandKitUnreadable || colors.length >= BRAND_COLORS_MAX}
             onClick={() => void updateBrandKit(addBrandColor(brandKit, newColor))}
           >
             この色を覚える
@@ -223,6 +232,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
             id="brandLogo"
             className="input"
             value={brandKit.logoLibraryAssetId ?? ""}
+            {...unreadableGuard}
             onChange={(e) => void updateBrandKit({ ...brandKit, logoLibraryAssetId: e.target.value || undefined })}
           >
             <option value="">覚えない</option>

@@ -192,6 +192,32 @@ describe('新しく作る入口（#888 レビュー 🔴＝主経路に効いて
   });
 });
 
+// ⚠️ **履歴に空振りを積まない**（差分再監査 🟡・ADR-0020）＝ロゴだけ足す計画で加わるのは `assets`＝
+// **履歴 slice の外**なので、先に積むと「押しても何も戻らない取り消す」が1つ増え、上限50 と
+// 合わさって**古い編集を1つ押し出す**。
+describe('applyBrandKit と履歴', () => {
+  it('文字の形が変わるときだけ積む', async () => {
+    useProjectStore.setState({ brandKit: { fontId: 'kaitou-yokoku-gothic' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(1);
+  });
+
+  it('ロゴだけ足すときは積まない（履歴の外だから戻らない）', async () => {
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it('何も変わらないときも積まない', async () => {
+    useProjectStore.setState({ brandKit: {}, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+});
+
 describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () => {
   it('覚えているフォントとロゴを入れる', async () => {
     vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic', logoLibraryAssetId: 'lib_asset_001' });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import { DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
@@ -98,6 +99,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // 複製（#395）：作っている最中の id（連打で二重に作らない）。
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const duplicateProject = useProjectStore((s) => s.duplicateProject);
+  const clearImportError = useProjectStore((s) => s.clearImportError);
 
   /**
    * 複製する（#395）。⚠️ **複製したら開く**ので、**開くのと同じ破棄ガード**を先に通す
@@ -127,7 +129,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       const id = await duplicateProject(projectId);
       // 成功したら開いた状態になっている（store が `loadProject` する）＝たたき台へ移る。
       if (id) onNavigate("draft");
-      else setOpenError("動画を複製できませんでした。もう一度お試しください。");
+      else {
+        // ⚠️ **保った理由を、押した場所に出す**（差分再監査 🟡・§2-5）＝store は
+        // `ProjectLoadError`（新しい版・壊れている＝**何度押しても直らない**）の文をそのまま
+        // `importError` へ入れるが、**この画面はそれを描かない**ので固定文だけが出ていた。
+        // 同じ行の「開く」は正しい理由を出す＝**入口で案内が割れる**（ADR-0026②）。
+        // ⚠️ **出したら消す**＝残すと、次に入った画面で**別の（正常な）動画についての警告**に見える。
+        setOpenError(useProjectStore.getState().importError ?? DUPLICATE_FAILED_MESSAGE);
+        clearImportError();
+      }
     } finally {
       setDuplicatingId(null);
     }
