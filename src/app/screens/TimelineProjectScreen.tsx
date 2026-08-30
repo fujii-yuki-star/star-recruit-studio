@@ -13,7 +13,7 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
@@ -123,7 +123,7 @@ import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
 import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
-import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
+import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
@@ -2551,6 +2551,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 断るので、同じ種類の操作で断り方が2通り＝ADR-0026②）。判定は実際に走る関数そのもの＝
    * 「押せるのに何も起きない」も「押せないのに実はできる」も作らない。
    */
+  /**
+   * 文字の見た目が**何か入っているか**（差分再監査 6巡目 🟡）。節を「設定が入っていれば開く」に使う。
+   * ⚠️ **欄が触る項目をすべて見る**＝一部だけ見ると、入れた設定が畳まれたままになる項目ができる。
+   */
+  const hasTextLook = (c: TimelineClip): boolean =>
+    c.fontSize != null || c.color != null || c.fontWeight != null || c.textAlign != null || c.fontId != null
+    || c.strokeWidth != null || c.strokeColor != null || c.letterSpacing != null || c.lineHeight != null
+    || enabledShadow(c.shadow) != null || bandBackground(c.background) != null;
+
   /** 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。 */
   const explodeExtra = (clipId: string, template: Template): { disabled?: boolean; hint?: string } => {
     if (!doc) return {};
@@ -4198,9 +4207,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* ⚠️ **字幕クリップも体裁を持つ**（差分再監査 4巡目 🟡）＝連動先から文言を採るので「文」は
                 持たないが、影・字間・帯・行間は**書き込まれて描かれる**（`addLinkedSubtitleClip` が
                 `createFreeElement` の体裁を入れる）＝**効くのに選べない**を作らない。
-                場面形式の自由配置の字幕は同じ顔ぶれを直せる（ADR-0026②）。 */}
+                場面形式の自由配置の字幕は同じ顔ぶれを直せる（ADR-0026②）。
+                ⚠️ **設定が入っていれば開く**（差分再監査 6巡目 🟡・`06 §12.1`）＝兄弟（切り抜き・動き・
+                音量の変化）と同じ作法。畳んだままだと、入れた体裁を選び直すたびに見失う。
+                `key`＝**部品を切り替えたら既定を見直す**（付けないと最初に選んだ部品の開閉のまま）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
-              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleStyle" title="字幕の見た目" defaultOpen={false}>
+              <CollapsibleSection
+                key={`subtitleStyle-${selected.id}`}
+                scope={SECTION_SCOPE.timeline}
+                storageKey="subtitleStyle"
+                title="字幕の見た目"
+                defaultOpen={hasTextLook(selected)}
+              >
                 {renderClipTextBasics(selected)}
                 {renderClipTextDecoration(selected)}
               </CollapsibleSection>
@@ -4361,7 +4379,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       この部品へ書き、書き出しの門はそれを数えるのに**直す操作がこの形式に無かった**＝
                       持ち込みフォントが手元から消えると、案内どおりに選び直す先が無く**書き出しが
                       止まったまま解除できない**（§2-5 の行き止まり）。空＝この部品の指定を継承。 */}
-                  {textKeys.map((key) => (
+                  {editableTextKeys(selectedTemplate.layers, selected.textFontIds).map((key) => (
                     <label className="field" key={`font-${key}`}>
                       <span>{textKeyLabel[key]}の文字の形</span>
                       <FontPicker
@@ -4427,7 +4445,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
             棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
         <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
-          <AssetLibraryPanel target="timeline" />
+          <AssetLibraryPanel target={PROJECT_FORMAT.timeline} />
         </CollapsibleSection>
         {importError && (
           <div className="notice notice-warn row-between mb-sm" role="alert">

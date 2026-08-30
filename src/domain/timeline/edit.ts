@@ -10,7 +10,7 @@ import { ASSET_TYPE, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMEL
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
-import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
+import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import type { SlotClipOverride } from '../project/types';
 import { isAudioClip } from './audio';
@@ -1154,7 +1154,9 @@ const VISUAL_CONTENT_KEYS = {
   // 持ち込みフォントが手元から消えると、門の案内どおりに選び直す先が無く**書き出しが止まったまま
   // 解除できない**（取り込み直しても墓標で番号が戻らない＝§2-5 の行き止まり）。
   [TIMELINE_CLIP_KIND.template]: ['fontId', 'textFontIds'],
-} as const;
+  // ⚠️ **`TimelineClip` の項目名で縛る**（差分再監査 6巡目 ℹ️・§2-7）＝`as const` だけだと綴り違いが
+  // 通り、その項目は**画面から書けるのに黙って弾かれる**（「単一の参照元」という主張が嘘になる）。
+} as const satisfies Partial<Record<TimelineClipKind, readonly (keyof TimelineClip)[]>>;
 
 export function setVisualClipContent(
   doc: TimelineProject,

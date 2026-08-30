@@ -5,7 +5,7 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「ライブラリ」は定着しているので使うが、
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
 import { useEffect, useState } from "react";
-import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
@@ -62,7 +62,8 @@ function editableTypeChoices(current: AssetType): { label: string; value: AssetT
  * ⚠️ **タイムラインには入口が無かった**＝「どの動画からでも取り込める」という棚の目的が
  * **片方の形式で成立していない**（ADR-0026②）。取り込み先を差し替えられるようにする。
  */
-export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
+// 取り込み先＝置かれた画面の形式（既定は場面形式）。**値も正典の enum から採る**（§2-7・差分再監査 6巡目 ℹ️）。
+export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.timeline } = {}) {
   const [items, setItems] = useState<LibraryAsset[]>([]);
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -127,8 +128,10 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   // ⚠️ **入れる先が無いときは取り込ませない**（差分再監査 5巡目 🟡・`06 §15`）＝「素材」は
   // 動画を開いていなくても開ける画面なので、そのまま押せると**画面に出ていない空の動画**が
   // その場で作られ、そこへ入って**どこにも見えない**（知らせも名無しの「この動画へ」になる）。
-  // 判定は会社の見た目の反映と同じ式（`meta.projectId` か場面がある）＝同概念で流儀を割らない。
-  const sceneOpen = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
+  // ⚠️ **判定は共有の1つから採る**（差分再監査 6巡目 🟡）＝`projectId` だけで見ると、
+  // **白紙から作った直後**（まだ番号を採っていない）を「開いていません」と言ってしまい、
+  // しかも一覧に無いので**案内どおりに開き直せない**（嘘の理由＋行き止まり・§2-5）。
+  const sceneOpen = useProjectStore(hasOpenProject);
   // ⚠️ **開いているかは文書の有無で見る**（PR #914 レビュー ℹ️）＝名前で見ると、会社の見た目の
   // 反映（`s.doc != null`）と**同じ意図なのに別の式**になり、将来 `projectName` の扱いが変わると片方だけ壊れる。
   const timelineOpen = useTimelineStore((s) => s.doc != null);
@@ -143,7 +146,11 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
     ? "書き出しが終わるまでお待ちください"
     : isImporting
       ? "いま取り込んでいます"
-      : undefined;
+      // ⚠️ **棚の操作中の理由も持つ**（差分再監査 6巡目 ℹ️）＝`working` は `busy` も見るのに理由が
+      // 無く、置く・直す・外すの最中は**理由なしで押せない**（この行のすぐ上の約束と食い違う）。
+      : busy
+        ? "いまよく使う素材を直しています"
+        : undefined;
   /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
   const importBlockedReason = blockedReason ?? (destOpen ? undefined : "先に動画を開いてください");
   const shown = filterLibraryAssets(items, { text, tags, assetType });

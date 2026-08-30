@@ -5,7 +5,7 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { pickPanelAsset } from "./materialsSelection";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
-import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -80,7 +80,10 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
-  const addDisabled = isImporting || isExporting; // 「素材を追加」は取り込み中・書き出し中は押せない
+  // ⚠️ **入れる先が無いときも押せない**（差分再監査 6巡目 🟡）＝棚からの取り込みだけ塞ぐと、
+  // 同じ「取り込み」で断り方が2通りになる（ADR-0026②）。判定は共有の1つから採る。
+  const projectOpen = useProjectStore(hasOpenProject);
+  const addDisabled = isImporting || isExporting || !projectOpen; // 取り込み中・書き出し中・行き先なしは押せない
   const [filter, setFilter] = useState<Filter>("all");
   /** 名前・タグの絞り込み（#858）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定14）。 */
   const [query, setQuery] = useState("");
@@ -169,7 +172,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onPick={addAssets}
             isImporting={isImporting}
             progress={importProgress}
-            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : "いま取り込んでいます") : null}
+            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : "先に動画を開いてください") : null}
           />
         }
       />

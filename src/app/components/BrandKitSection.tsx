@@ -5,7 +5,7 @@
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
 import { useEffect, useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
@@ -41,9 +41,10 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
     brandKit.fontId != null
     && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
     && !userFonts.some((f) => f.id === brandKit.fontId);
-  // ⚠️ **開いているかは `projectId` で見る**（差分再監査）＝場面の数で見ると、白紙から作った直後
-  //（場面0）でも「開いていません」と言ってしまう（実際は開いている＝嘘の理由・§2-5）。
-  const hasProject = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
+  // ⚠️ **開いているかは共有の1つから採る**（差分再監査 6巡目 🟡）＝`projectId` だけで見ると、
+  // 白紙から作った直後（まだ番号を採っていない）を「開いていません」と言ってしまう
+  //（実際は開いている＝嘘の理由・§2-5）。同じ問いを画面ごとに書き直さない。
+  const hasProject = useProjectStore(hasOpenProject);
   const projectName = useProjectStore((s) => s.meta.projectName);
   /**
    * タイムライン形式の文書が**メモリに載っている**か（差分再監査 4巡目 🔴）。

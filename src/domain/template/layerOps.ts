@@ -85,6 +85,21 @@ export function updateLayer(layers: Layer[], id: string, patch: Partial<Omit<Lay
  * テンプレのテキスト層が使う textKey を正規順（TEXT_KEYS 順）で返す（場面編集の入力欄生成・#214 ④b）。
  * text 層は textKey を持つもののみ、subtitle 層は textKey 未指定なら 'subtitle'（layoutScene の既定束縛に一致）。
  */
+/**
+ * **直せる種別の一覧**＝見た目パターンが使う種別 ∪ **すでに値が入っている種別**（差分再監査 6巡目 🟡）。
+ *
+ * ⚠️ **値が入っているのに欄が出ない、を作らない**＝種別ごとのフォント（`textFontIds`）は、見た目パターンを
+ * 替えても休眠のまま残り（ADR-0030 追補6）、焼き出しも丸ごと写す。書き出しの門（`usedFonts`）は
+ * **休眠のぶんも数えて断る**ので、欄が「いま使う種別」だけだと**案内どおりに選び直す先が無い**
+ * （持ち込みフォントが手元から消えると書き出しが止まったまま解除できない＝§2-5 の行き止まり）。
+ * 数える側を狭めない（消えたフォントを使っていることに変わりはない）で、**直す側を広げる**。
+ */
+export function editableTextKeys(layers: Layer[], overrides: Partial<Record<TextKey, unknown>> | undefined): TextKey[] {
+  const used = new Set<TextKey>(usedTextKeys(layers));
+  for (const k of TEXT_KEYS) if (overrides?.[k] != null) used.add(k);
+  return TEXT_KEYS.filter((k) => used.has(k));
+}
+
 export function usedTextKeys(layers: Layer[]): TextKey[] {
   const used = new Set<TextKey>();
   for (const l of layers) {

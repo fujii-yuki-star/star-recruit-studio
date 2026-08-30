@@ -176,7 +176,9 @@ export const DEFAULT_SHADOW_OPACITY = 0.5;
  * 字間・行間の**入れられる範囲**（schema と同じ値・§2-7）。
  *
  * ⚠️ **画面ごとに書き写さない**（差分再監査 5巡目 🟡）＝同じ値が場面編集・タイムライン編集の計5か所に
- * 散っていた。schema（`TextStyle`/`FreeElement`/`TimelineClip`）を動かすと**画面だけ黙ってずれる**。
+ * 散っていた。schema を動かすと**画面だけ黙ってずれる**。
+ * 出どころ＝字間は `TextStyle`／`FreeElement`／テンプレの層／`TimelineClip`、行間は `FreeElement`／`TimelineClip`
+ *（`TextStyle` に行間は無い＝**無い項目を足しに行かせない**・差分再監査 6巡目 ℹ️）。
  */
 export const LETTER_SPACING_MIN = -0.5;
 export const LETTER_SPACING_MAX = 2;
