@@ -190,4 +190,20 @@ describe("BrandKitSection", () => {
     expect(screen.getByText(/「会社紹介」に反映する/)).toBeInTheDocument();
     expect(screen.queryByText(/いまは動画を開いていません/)).toBeNull();
   });
+
+  // ⚠️ **読めていないことを言う**（`/canon-check` 🟡・§2-5）＝黙っていると**空のキット**
+  //（「覚えない」・色0件・ロゴ無し）を見せる。兄弟の欄（よく使う素材・文字の形）は同じ状況で
+  // 「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
+  it("会社の見た目を読めていないときは、その旨を出す（空のキットに見せない）", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/会社の見た目を読めませんでした/)).toBeInTheDocument();
+    expect(screen.getByText(/変更はできません/)).toBeInTheDocument();
+  });
+
+  it("読めているときは出さない（毎回出すと意味が薄れる）", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: false } as never);
+    render(<BrandKitSection />);
+    expect(screen.queryByText(/会社の見た目を読めませんでした/)).toBeNull();
+  });
 });
