@@ -6983,6 +6983,37 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     expect(screen.getByText("見出しの文字の形")).toBeInTheDocument();
   });
 
+  // ⚠️ **双子で見る**（差分再監査 9巡目 🟡）＝2つのフィールドをいつも一緒に有無させると、
+  // 「部品ぜんぶの指定」と「種別ごとの指定」を取り違える回帰を検知できない。
+  it("見た目が未解決でも、種別ごとの指定だけがあれば種別の欄は出る", () => {
+    useProjectStore.setState({ templates: [] });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+        templateId: "tmpl_gone", textFontIds: { title: "kaitou-yokoku-gothic" }, // 部品ぜんぶの指定は無い
+      }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しの文字の形")).toBeInTheDocument();
+  });
+
+  it("見た目が未解決で、部品ぜんぶの指定だけなら種別の欄は出さない", () => {
+    useProjectStore.setState({ templates: [] });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+        templateId: "tmpl_gone", fontId: "gen-interface-jp", // 種別ごとの指定は無い
+      }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("この部品の文字の形")).toBeInTheDocument();
+    expect(screen.queryByText("見出しの文字の形")).toBeNull();
+  });
+
   it("見た目が未解決でも、指定が無ければ欄は出さない", () => {
     useProjectStore.setState({ templates: [] });
     open({

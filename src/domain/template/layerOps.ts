@@ -2,6 +2,7 @@
 import { LAYER_TYPE, LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
 import { SCENE_DEFAULT_DURATION_SEC } from '../constants';
 import type { Layer, Template } from './types';
+import type { FontId } from '../font/fontCatalog';
 import { effectiveLayerZ } from './layerOrder';
 
 /** エディタで追加できるレイヤー型（ADR-0017：decor は開放しない＝静的装飾は slot/shape で代替）。 */
@@ -79,6 +80,25 @@ export function removeLayer(layers: Layer[], id: string): Layer[] {
 /** 指定 id のレイヤーを部分更新する（id/type は変えない）。 */
 export function updateLayer(layers: Layer[], id: string, patch: Partial<Omit<Layer, 'id' | 'type'>>): Layer[] {
   return layers.map((l) => (l.id === id ? { ...l, ...patch } : l));
+}
+
+/**
+ * 種別ごとのフォント上書きに1件を置く／外す（**規則は1か所**・差分再監査 9巡目 🟡）。
+ *
+ * ⚠️ **同じ規則が3か所に写っていた**（場面編集の `setSceneTextFont`／タイムラインの種別ごとの欄が2つ）＝
+ * 「残りの種別を引き継ぐ」「空になったらキーごと落とす」を各所で書き直すと、片方だけ直る形が残る。
+ * ⚠️ **空の入れ物を残さない**＝残すと、見た目に変化のない操作で取り消しが1段積まれ、
+ * 同じ絵の文書が2通りできる（`null` と未指定は解決が同じ＝11.6）。
+ */
+export function withTextFontId(
+  current: Partial<Record<TextKey, FontId>> | undefined,
+  textKey: TextKey,
+  id: FontId | null,
+): Partial<Record<TextKey, FontId>> | undefined {
+  const next = { ...(current ?? {}) };
+  if (id) next[textKey] = id;
+  else delete next[textKey];
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 /**

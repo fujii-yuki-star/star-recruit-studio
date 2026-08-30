@@ -445,6 +445,60 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
   // ⚠️ **絞るのは「実際に『文字』節へ出るキー」**（差分再監査 8巡目 🟡）＝あちらの節は自由配置では
   // 描かれないので、見た目パターンが使う種別で絞ると**文字層を持つ自由配置の見た目**（自作できる）で
   // どちらにも出ないキーができる（門は種類を見ずに数えるので、そのまま行き止まりになる）。
+  // ⚠️ **描かれているものを「使っていない」と言わない**（差分再監査 9巡目 🟡）＝自由配置の見た目でも
+  // 文字層は描かれる（`layoutScene` は種類で切らない）ので、案内どおり戻すと**出ている字体が変わる**。
+  it("文字の層を持つ自由配置の見た目では、「使っていない」と言わない", () => {
+    useProjectStore.setState({
+      templates: [{ ...tpl, templateId: "user_tmpl_001", category: "free" } as unknown as Template],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "user_tmpl_001", sceneType: "free", textFontIds: { title: "gen-interface-jp" } } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    expect(screen.getByText(/この見た目パターンの文字は自由配置で置きます/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **書き出しを止めている理由も畳める場所に置かない**（差分再監査 9巡目 🟡）＝
+  // `<details>` は畳んでも中身が DOM に残るので、**位置そのもの**を固定しないと戻っても気づけない。
+  it("見た目が見つからないときの理由は、畳める節の外に出す", () => {
+    useProjectStore.setState({
+      templates: [], // 見た目が解決できない
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene()],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const notice = screen.getByText(/今の見た目が見つかりません。下の/);
+    expect(notice.closest("details")).toBeNull();
+    // ⚠️ **存在しない見た目について語らない**＝別の次の行動が並ぶ。
+    expect(screen.queryByText("この見た目パターンは文字を表示しません。")).toBeNull();
+  });
+
+  it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
+    useProjectStore.setState({
+      templates: [{ ...tpl, templateId: "user_tmpl_001", category: "free" } as unknown as Template],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "user_tmpl_001", sceneType: "free" } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+
+  // ⚠️ **自由配置の場面では二重に並べない**（要素は自由配置の編集面で直せる）。
+  it("自由配置の場面では、要素のフォントをここに並べない", () => {
+    useProjectStore.setState({
+      templates: [{ ...tpl, templateId: "free_canvas_v1", category: "free", layers: [tpl.layers[0]] } as unknown as Template],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "free_canvas_v1", sceneType: "free", freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+
   it("文字の層を持つ自由配置の見た目でも、種別ごとのフォントを直せる", () => {
     useProjectStore.setState({
       // 自作の自由配置テンプレは文字の層を持てる（`TEMPLATE_ADDABLE_LAYER_TYPES` に text がある）。
@@ -455,6 +509,24 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
+  });
+
+  it("選び直すと、その要素のフォントだけが変わる（他の要素は触らない）", () => {
+    openScene({ freeLayout: [
+      { id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" },
+      { id: "free_002", kind: "text", x: 0, y: 60, w: 100, h: 40, text: "い", fontId: "kaitou-yokoku-gothic" },
+    ] } as Partial<Scene>);
+    const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
+    // ⚠️ **2つ目を触る**＝1つ目だと「常に先頭へ書く」変異でも緑のまま通る（取り違えを検知できない）。
+    const field = within(hint.parentElement as HTMLElement).getAllByText(/のフォント$/)[1].closest("div") as HTMLElement;
+    fireEvent.click(field.querySelector("button.select") as HTMLElement);
+    const option = [...field.querySelectorAll("button")].find(
+      (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith("Gen Interface JP Display"),
+    ) as HTMLElement;
+    fireEvent.click(option);
+    const els = useProjectStore.getState().scenes[0].freeLayout!;
+    expect(els.find((e) => e.id === "free_002")!.fontId).toBe("gen-interface-jp-display");
+    expect(els.find((e) => e.id === "free_001")!.fontId).toBe("gen-interface-jp"); // 他は不変
   });
 
   it("フォントの指定が無い要素は並べない", () => {
