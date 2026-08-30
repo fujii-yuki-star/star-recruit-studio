@@ -82,10 +82,6 @@ export function updateLayer(layers: Layer[], id: string, patch: Partial<Omit<Lay
 }
 
 /**
- * テンプレのテキスト層が使う textKey を正規順（TEXT_KEYS 順）で返す（場面編集の入力欄生成・#214 ④b）。
- * text 層は textKey を持つもののみ、subtitle 層は textKey 未指定なら 'subtitle'（layoutScene の既定束縛に一致）。
- */
-/**
  * **直せる種別の一覧**＝見た目パターンが使う種別 ∪ **すでに値が入っている種別**（差分再監査 6巡目 🟡）。
  *
  * ⚠️ **値が入っているのに欄が出ない、を作らない**＝種別ごとのフォント（`textFontIds`）は、見た目パターンを
@@ -100,6 +96,10 @@ export function editableTextKeys(layers: Layer[], overrides: Partial<Record<Text
   return TEXT_KEYS.filter((k) => used.has(k));
 }
 
+/**
+ * テンプレのテキスト層が使う textKey を正規順（TEXT_KEYS 順）で返す（場面編集の入力欄生成・#214 ④b）。
+ * text 層は textKey を持つもののみ、subtitle 層は textKey 未指定なら 'subtitle'（layoutScene の既定束縛に一致）。
+ */
 export function usedTextKeys(layers: Layer[]): TextKey[] {
   const used = new Set<TextKey>();
   for (const l of layers) {
