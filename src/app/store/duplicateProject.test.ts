@@ -146,10 +146,19 @@ describe('duplicateProject', () => {
   });
 
   /** ⚠️ 書き出し中は別の動画へ切り替えない（進行中の書き出しが見ているものを保つ・#379）。 */
-  it('書き出し中は複製しない', async () => {
+  it('書き出し中は複製しない（理由も置く＝定型文へ落とさない）', async () => {
     useProjectStore.getState().setExportRun({ phase: 'rendering' });
     expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
     expect(saveProjectDoc).not.toHaveBeenCalled();
+    // 何度押しても同じなので、「もう一度お試しください」に落とさない。
+    expect(useProjectStore.getState().importError).toContain('書き出しが終わってから');
     useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+
+  // ⚠️ **前の操作の理由を複製の理由として見せない**＝画面はこの操作のあと `importError` を読む。
+  it('入口で前の理由を消す', async () => {
+    useProjectStore.setState({ importError: '前の操作の理由' } as never);
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(useProjectStore.getState().importError).not.toBe('前の操作の理由');
   });
 });

@@ -1191,8 +1191,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
   duplicateProject: async (projectId) => {
+    // ⚠️ **入口で理由を消す**（差分再監査の対応で気づいた・§2-5）＝画面はこの操作のあと `importError` を
+    // 読んで出すので、消さないと**前の操作の理由**を複製の理由として見せうる（身に覚えのない案内）。
+    set({ importError: null });
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
-    if (isExportBusy(get().exportRun.phase)) return null;
+    // ⚠️ **理由を置いてから返す**＝置かずに `null` を返すと、画面は定型文（「もう一度お試しください」）へ
+    // 落ちる＝書き出し中は何度押しても同じなので、**従っても直らない案内**になる。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
     try {
       // ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない（焼き出し＝ADR-0032 決定16 と同じ流儀）。
       const src = parseProjectDoc(await loadProjectDoc(projectId));
