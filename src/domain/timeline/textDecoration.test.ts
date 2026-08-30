@@ -52,4 +52,40 @@ describe('タイムラインの文字クリップの体裁（#264）', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.doc).toBe(d); // 同一参照＝履歴に積まれない
   });
+
+  /**
+   * ⚠️ **#264 の語彙は3つそろえる**（差分再監査 4巡目 🟡・ADR-0032 追補3）＝影・字間だけだと
+   * **背景帯だけ片方でしか編集できない**（描画も焼き出しも通っているのに解除できない）。
+   */
+  it('背景帯と行間も書き込める', () => {
+    const r = setVisualClipContent(doc(), 'clip_001', { background: { enabled: true, opacity: 0.5 }, lineHeight: 1.6 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.doc.clips[0].background).toEqual({ enabled: true, opacity: 0.5 });
+      expect(r.doc.clips[0].lineHeight).toBeCloseTo(1.6);
+    }
+  });
+
+  /**
+   * ⚠️ **字幕クリップも体裁を持つ**（🟡）＝`addLinkedSubtitleClip` が体裁を書き込み描画も通る＝
+   * **効くのに選べない**を作らない。文言は連動先から採るので `text` は持たせない。
+   */
+  it('字幕クリップにも体裁を書き込める（ただし文は書けない）', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.subtitle } as never;
+    expect(setVisualClipContent(d, 'clip_001', { letterSpacing: 0.1 }).ok).toBe(true);
+    expect(setVisualClipContent(d, 'clip_001', { text: 'あ' }).ok).toBe(false);
+  });
+
+  /**
+   * ⚠️ **見た目パターンの部品も文字の形を持つ**（🟡）＝焼き出しが `scene.fontId` をここへ書き、
+   * 描画と書き出しの門が見る。直せないと門の案内どおりの操作が**この形式に存在しない**。
+   */
+  it('見た目パターンの部品は文字の形だけ書ける', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.template, templateId: 't1' } as never;
+    expect(setVisualClipContent(d, 'clip_001', { fontId: 'user_font_001' }).ok).toBe(true);
+    // 差し込み口と文は別の口（`setClipAssetRef`／`setClipText`）＝ここでは受けない。
+    expect(setVisualClipContent(d, 'clip_001', { text: 'あ' }).ok).toBe(false);
+  });
 });

@@ -924,9 +924,42 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 見本は実描画の解決値（`effective`＝太さ>0 なら既定色入り）。太さ0で縁取りが無いときは「足したらこうなる」既定を出す。 */}
           {colorField("縁取りの色", effective.strokeColor ?? defaultStrokeColor(effective.color), ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
         </div>
-        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
+        {/* ⚠️ **影と字間もここで直せる**（差分再監査 4巡目 🟡・#264）＝`TextStyle` は schema にあり
+            `resolveTextStyle` が解いて描画も通るのに、**書き込む入口がどこにも無かった**（到達不能な
+            定義）。自由配置の文字と同じ顔ぶれにする（ADR-0026②）。 */}
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          <NumberField
+            label="字間"
+            value={ov?.letterSpacing ?? null}
+            min={-0.5}
+            max={2}
+            step={0.05}
+            placeholder={String(inherited.letterSpacing ?? 0)}
+            onClear={() => set({ letterSpacing: undefined })}
+            onChange={(v) => set({ letterSpacing: v })}
+          />
+          <div className="toggle-row" style={{ flex: 1 }}>
+            <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+            <Switch
+              on={ov?.shadow?.enabled ?? false}
+              onChange={(on) => set({ shadow: on ? { ...ov?.shadow, enabled: true } : undefined })}
+              label={`${textKeyLabel[key]}に影を付ける`}
+            />
+          </div>
+        </div>
+        {ov?.shadow?.enabled && (
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            {colorField("影の色", ov.shadow.color ?? DEFAULT_SHADOW_COLOR, ov.shadow.color != null, `${textKeyLabel[key]}の影の色`, (v) => set({ shadow: { ...ov.shadow, color: v } }), () => set({ shadow: { ...ov.shadow, color: undefined } }))}
+            <NumberField label="濃さ(%)" value={opacityToPercent(ov.shadow.opacity ?? DEFAULT_SHADOW_OPACITY)} min={0} max={100} onChange={(v) => set({ shadow: { ...ov.shadow, opacity: percentToOpacity(v) } })} />
+            <NumberField label="ぼかし" value={ov.shadow.blur ?? 0} min={0} onChange={(v) => set({ shadow: { ...ov.shadow, blur: v } })} />
+            <NumberField label="横のずれ" value={ov.shadow.dx ?? 0} onChange={(v) => set({ shadow: { ...ov.shadow, dx: v } })} />
+            <NumberField label="縦のずれ" value={ov.shadow.dy ?? 0} onChange={(v) => set({ shadow: { ...ov.shadow, dy: v } })} />
+          </div>
+        )}
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。
+            ⚠️ **足した項目もここで戻す**（差分再監査 4巡目）＝落とすと「合わせる」を押しても残る。 */}
         {overridden && (
-          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
+          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined, letterSpacing: undefined, shadow: undefined })}>
             すべて見た目パターンに合わせる
           </button>
         )}

@@ -33,9 +33,10 @@ export async function showOpenAssetsDialog(): Promise<string[]> {
 /**
  * **よく使う素材**（ADR-0035）へ置くファイルを選ぶ。写真・動画に加えて**音楽**も選べる。
  *
- * ⚠️ **動画の素材の取り込みとは別の口**（α-6 差分再監査）＝あちら（`showOpenAssetsDialog`）は
+ * ⚠️ **場面形式の素材の取り込みとは別の口**（α-6 差分再監査）＝あちら（`showOpenAssetsDialog`）は
  * 写真・動画だけで、BGM は BGM の導線から入れる。棚の側は ADR-0035 が**ロゴ・写真・BGM**を
  * 挙げているので、音も選べないと「置けるはずのものが置けない」になる（種類のタブが常に0件）。
+ * ⚠️ **タイムライン形式の取り込みもこの口を使う**（差分再監査 4巡目）＝音そのものが置ける部品なので。
  */
 export async function showOpenLibraryAssetsDialog(): Promise<string[]> {
   const picked = await open({

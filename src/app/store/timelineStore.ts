@@ -63,7 +63,7 @@ import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timel
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
-import type { TextShadow } from "../../domain/template/types";
+import type { LayerBackground, TextShadow } from "../../domain/template/types";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
@@ -305,6 +305,14 @@ export interface TimelineState {
   /** ネイティブの「開く」で選んだパスから取り込む（バイトを JS に載せない・#712）。 */
   addAssetByPath: (path: string) => Promise<void>;
   /**
+   * **よく使う素材**（ADR-0035）から、この動画へ**コピー**して取り込む（差分再監査 4巡目 🟡）。
+   *
+   * ⚠️ **棚の入口がタイムラインに無かった**＝「どの動画からでも取り込める」という棚の目的が
+   * **片方の形式で成立していない**（ADR-0026②）。場面形式の `importFromLibrary` と同じ流儀
+   *（参照ではなくコピー＝プロジェクトは自己完結・ADR-0024 決定6）。
+   */
+  importFromLibrary: (libraryAssetId: string) => Promise<void>;
+  /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
    *
    * ⚠️ **失敗しても止めない**（§2-5）＝入った分は残し、入らなかったものを名前で示す。
@@ -471,7 +479,7 @@ export interface TimelineState {
     text?: string; fontSize?: number; color?: string;
     fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
     /** 字間・影（#264 の共有の語彙＝両形式で触れる・差分再監査 3巡目）。 */
-    letterSpacing?: number; shadow?: TextShadow;
+    letterSpacing?: number; shadow?: TextShadow; background?: LayerBackground; lineHeight?: number;
     shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
   }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
@@ -1226,6 +1234,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addAssetByPath: async (path) => {
     await runImport(set, get, path, async (fileName) =>
       await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+  importFromLibrary: async (libraryAssetId) => {
+    const list = await listLibraryAssets();
+    if (list == null) {
+      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
+      return;
+    }
+    const lib = list.find((a) => a.id === libraryAssetId);
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return; }
+    // ⚠️ **名前は棚のものを使う**＝取り込んだ先で「どれを入れたか」が分かる（拡張子は棚のファイル名から）。
+    await runImport(set, get, lib.fileName, async (fileName) =>
+      await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName));
   },
 
   ensureClipAnalysis: (clipId, barWidthPx) => {

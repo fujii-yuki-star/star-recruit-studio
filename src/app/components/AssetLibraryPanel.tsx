@@ -56,7 +56,13 @@ function editableTypeChoices(current: AssetType): { label: string; value: AssetT
   return [{ label, value: current }];
 }
 
-export function AssetLibraryPanel() {
+/**
+ * よく使う素材（ADR-0035）の棚。**どちらの形式からも使える**（差分再監査 4巡目 🟡）。
+ *
+ * ⚠️ **タイムラインには入口が無かった**＝「どの動画からでも取り込める」という棚の目的が
+ * **片方の形式で成立していない**（ADR-0026②）。取り込み先を差し替えられるようにする。
+ */
+export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   const [items, setItems] = useState<LibraryAsset[]>([]);
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -70,12 +76,19 @@ export function AssetLibraryPanel() {
   // ⚠️ **種類も直せる**（差分再監査）＝**ロゴはファイル名から判らない**（拡張子は写真と同じ）ので、
   // 置いたあとに選ぶしかない。選べないと ADR-0036 の「いつものロゴ」が**どこからも設定できない**。
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string; assetType: AssetType } | null>(null);
-  const importFromLibrary = useProjectStore((s) => s.importFromLibrary);
+  const importToScene = useProjectStore((s) => s.importFromLibrary);
+  const importToTimeline = useTimelineStore((s) => s.importFromLibrary);
+  const timelineName = useTimelineStore((s) => s.doc?.projectName);
   const isImporting = useProjectStore((s) => s.isImporting);
-  // ⚠️ **取り込み先は場面形式の動画**（差分再監査 3巡目 🟡）＝`importFromLibrary` は場面形式にしか
-  // 入らない。タイムラインを開いている間に押すと、**画面に映っていない別の文書**へ入って
-  // 「この動画へ取り込みました」と出る（場面形式が未オープンなら**新しい動画の番号まで採る**）。
-  const timelineOpen = useTimelineStore((s) => s.doc != null);
+  /**
+   * 取り込み先の**場面形式の動画の名前**（差分再監査 4巡目 🔴）。
+   *
+   * ⚠️ **タイムラインが載っているだけで塞がない**＝両形式は同時に開いたままにでき、**閉じる導線が
+   * 無い**ので、塞ぐと一度タイムラインを開いた**セッション中ずっと**取り込めなくなる（しかも
+   * 理由は事実と違う）＝解除できない行き止まり（§2-5）。**どの動画へ入るかは名前で解く**。
+   */
+  const sceneName = useProjectStore((s) => s.meta.projectName);
+  const destName = target === "timeline" ? timelineName : sceneName;
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
@@ -104,9 +117,8 @@ export function AssetLibraryPanel() {
 
   // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
   // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
-  // ⚠️ **取り込みだけは行き先が違うと押せない**（🟡）＝置く・名前を直す・外すは棚の操作なので通す。
   const working = busy || isImporting || isExporting;
-  const importBlocked = working || timelineOpen;
+  const importBlocked = working;
   // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
   // ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝タイムラインの理由を共通の
   // `title` に混ぜると、**押せる**「置く」「名前・種類・タグ」「外す」にも「取り込めません」と出て、
@@ -117,9 +129,8 @@ export function AssetLibraryPanel() {
     : isImporting
       ? "いま取り込んでいます"
       : undefined;
-  /** 取り込み（この動画で使う）だけの理由＝行き先が違うときも押せない。 */
-  const importBlockedReason = blockedReason
-    ?? (timelineOpen ? "タイムラインで作った動画へは、ここからは取り込めません" : undefined);
+  /** 取り込み（この動画で使う）が押せない理由（いまは棚の操作と同じ）。 */
+  const importBlockedReason = blockedReason;
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
@@ -168,15 +179,25 @@ export function AssetLibraryPanel() {
   async function onImport(a: LibraryAsset): Promise<void> {
     setNotice("");
     setError("");
-    const id = await importFromLibrary(a.id);
+    // ⚠️ **取り込み先は置かれた画面で決まる**＝タイムラインの欄からはタイムラインの文書へ入れる。
+    if (target === "timeline") {
+      await importToTimeline(a.id);
+      const dest = destName ? `「${destName}」` : "この動画";
+      setNotice(`「${a.displayName}」を${dest}へ取り込みました。「素材・文字・図形を置く」から置けます。`);
+      return;
+    }
+    const id = await importToScene(a.id);
     // 失敗の文言は取り込みと同じ場所（`importError`）に出る＝ここでは成功したときだけ知らせる。
     // ⚠️ **どこに増えたかは種類で変わる**（α-6 出口監査 🟡29）＝音（BGM・読み上げ）は**素材の一覧に出ない**
     //（`isListedMaterial`）ので、「素材の一覧に増えています」と言うと**案内どおり探しても見つからない**（§2-5）。
     if (id) {
+      // ⚠️ **どの動画へ入ったかを名指しする**（差分再監査 4巡目 🔴）＝開いている文書は2種類あるので、
+      // 「この動画へ」だけでは**どちらのことか分からない**（塞ぐ代わりに名前で解く）。
+      const dest = destName ? `「${destName}」` : "この動画";
       setNotice(
         isListedMaterial(a.assetType)
-          ? `「${a.displayName}」をこの動画へ取り込みました。素材の一覧に増えています。`
-          : `「${a.displayName}」をこの動画へ取り込みました。音は素材の一覧には並びません。「動画を保存」のBGMから選べます。`,
+          ? `「${a.displayName}」を${dest}へ取り込みました。素材の一覧に増えています。`
+          : `「${a.displayName}」を${dest}へ取り込みました。音は素材の一覧には並びません。「動画を保存」のBGMから選べます。`,
       );
     }
   }
