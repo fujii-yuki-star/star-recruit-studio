@@ -1154,8 +1154,13 @@ export function setVisualClipContent(
   // ⚠️ 比べるのは**解決した値**（#731）＝`null` と未指定は解決が同じ（どちらも継承／「なし」）。
   // 素の `===` だと `undefined === null` が false になり、**絵は変わらないのに文書だけ変わる**
   // ＝取り消しが1段空振りする。`setClipAssetRef` が既にこの流儀（`11 §7.6.3`）。
+  // ⚠️ **中身のある値（影）は中身で比べる**（PR #912 レビュー ℹ️）＝`shadow` はオブジェクトなので
+  // `===` だと**同じ内容でも「変わった」**になり、空振りの取り消しが積まれる（上の主張が嘘になる）。
+  const sameValue = (a: unknown, b: unknown): boolean =>
+    (a ?? null) === (b ?? null)
+    || (typeof a === 'object' && typeof b === 'object' && JSON.stringify(a ?? null) === JSON.stringify(b ?? null));
   const keys = Object.keys(patch) as (keyof typeof patch)[];
-  if (keys.every((k) => (clip[k] ?? null) === (patch[k] ?? null))) return ok(doc);
+  if (keys.every((k) => sameValue(clip[k], patch[k]))) return ok(doc);
   const next = { ...clip, ...patch };
   // **`null` はキーごと落とす**（同上）＝未指定との違いを文書に残さない。残すと、同じ絵の文書が
   // 2通りできて「取り消しても見た目が変わらない」段が生まれる。

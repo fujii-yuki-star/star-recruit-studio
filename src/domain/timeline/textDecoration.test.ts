@@ -40,4 +40,16 @@ describe('タイムラインの文字クリップの体裁（#264）', () => {
     d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.shape } as never;
     expect(setVisualClipContent(d, 'clip_001', { letterSpacing: 0.2 }).ok).toBe(false);
   });
+
+  /**
+   * ⚠️ **何も変わらないなら同じ文書を返す**（`11 §7.6.3`・PR #912 レビュー ℹ️）＝影は
+   * オブジェクトなので `===` で比べると**同じ内容でも「変わった」**になり、空振りの取り消しが積まれる。
+   */
+  it('同じ影を置き直しても、同じ文書を返す', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], shadow: { enabled: true, blur: 4 } } as never;
+    const r = setVisualClipContent(d, 'clip_001', { shadow: { enabled: true, blur: 4 } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc).toBe(d); // 同一参照＝履歴に積まれない
+  });
 });
