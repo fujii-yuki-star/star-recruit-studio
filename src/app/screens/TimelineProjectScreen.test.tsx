@@ -6954,6 +6954,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("見た目パターン"));
     expect(screen.getByText("字幕の文字の形")).toBeInTheDocument();
+    // ⚠️ **断りも添える**（8巡目）＝理由なしに混ざると「触ったのに何も起きない」に見える。
+    expect(screen.getByText(/いまの見た目パターンでは使っていない文字/)).toBeInTheDocument();
   });
 
   it("指定が無い種別の欄は出さない（使っていないものを並べない）", () => {
@@ -6961,5 +6963,34 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("見た目パターン"));
     expect(screen.queryByText("字幕の文字の形")).toBeNull();
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+
+  // ⚠️ **見た目が未解決でも文字の形は直せる**（差分再監査 8巡目 🟡）＝門は見た目の解決に関係なく
+  // 数えるので、欄ごと消すと「別の文字の形を選び直してください」がこの部品では実行できない。
+  it("見た目パターンが見つからない部品でも、指定が残っていれば文字の形を直せる", () => {
+    useProjectStore.setState({ templates: [] }); // 見た目が解決できない
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+        templateId: "tmpl_gone", fontId: "gen-interface-jp", textFontIds: { title: "kaitou-yokoku-gothic" },
+      }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("この部品の文字の形")).toBeInTheDocument();
+    expect(screen.getByText("見出しの文字の形")).toBeInTheDocument();
+  });
+
+  it("見た目が未解決でも、指定が無ければ欄は出さない", () => {
+    useProjectStore.setState({ templates: [] });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_gone" }] as never,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("この部品の文字の形")).toBeNull();
   });
 });

@@ -4418,7 +4418,41 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                    画面のどこにも無く（起動時に一度だけ）、自作のものを消した場合は読み直しても
                    戻らない＝**実行できない／効果の無い行動**になる（§2-5）。消して置き直す側だけを出す
                    （削除のボタンは選んでいれば必ず出る）。 */
-                <p className="notice notice-warn" role="alert">{missingTemplateMessage()}</p>
+                <>
+                  <p className="notice notice-warn" role="alert">{missingTemplateMessage()}</p>
+                  {/* ⚠️ **見た目が未解決でも文字の形は直せる**（差分再監査 8巡目 🟡）＝書き出しの門は
+                      見た目の解決に関係なく `fontId`／`textFontIds` を数えるので、欄ごと消すと
+                      「別の文字の形を選び直してください」が**この部品では実行できない**（同じ状態に
+                      断りが2通り）。場面形式は同じ理由で未解決でも出すようにした（ADR-0026②）。 */}
+                  {(selected.fontId != null || Object.keys(selected.textFontIds ?? {}).length > 0) && (
+                    <>
+                      <label className="field">
+                        <span>この部品の文字の形</span>
+                        <FontPicker
+                          value={selected.fontId ?? null}
+                          allowInherit
+                          {...editGuard()}
+                          onChange={(id) => setSelectedVisualContent({ fontId: id })}
+                        />
+                      </label>
+                      {editableTextKeys([], selected.textFontIds).map((key) => (
+                        <label className="field" key={`font-unresolved-${key}`}>
+                          <span>{textKeyLabel[key]}の文字の形</span>
+                          <FontPicker
+                            value={selected.textFontIds?.[key] ?? null}
+                            allowInherit
+                            {...editGuard()}
+                            onChange={(id) => {
+                              const next = { ...selected.textFontIds };
+                              if (id == null) delete next[key]; else next[key] = id;
+                              setSelectedVisualContent({ textFontIds: Object.keys(next).length ? next : undefined });
+                            }}
+                          />
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </>
               )
             )}
           </>

@@ -467,7 +467,9 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
             />
           </label>
           <div className="row">
-            <button type="button" className="btn btn-primary" disabled={working} onClick={() => void onSaveEdit()}>
+            {/* ⚠️ **理由も添える**（差分再監査 8巡目 ℹ️）＝ここだけ `title` が無く、編集フォームを
+                開いたまま取り込み・書き出しが走ると**無言で押せなくなる**（他の4つと同じ穴）。 */}
+            <button type="button" className="btn btn-primary" disabled={working} title={blockedReason} onClick={() => void onSaveEdit()}>
               直す
             </button>
             <button type="button" className="btn" onClick={() => setEditing(null)}>やめる</button>
