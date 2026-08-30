@@ -511,6 +511,25 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     expect(within(hint.parentElement as HTMLElement).getByText(/のフォント$/)).toBeInTheDocument();
   });
 
+  // ⚠️ **同時に持っていても同じ群に入る**（PR #920 レビュー ℹ️）＝片方ずつしか見ていないと、
+  // 条件を片方だけ壊しても気づけない（「同じ群」であること自体を固定する）。
+  it("種別ごとと要素の両方が残っていても、まとめて「分かりません」の群に入る", () => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({
+        textFontIds: { title: "gen-interface-jp" },
+        freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "kaitou-yokoku-gothic" }],
+      } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    const hint = screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/);
+    // 種別ごと（見出し）と要素、どちらの欄も同じ知らせの下に並ぶ。
+    expect(within(hint.parentElement as HTMLElement).getAllByText(/のフォント$/)).toHaveLength(2);
+  });
+
   it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
     useProjectStore.setState({
       templates: [{ ...tpl, templateId: "user_tmpl_001", category: "free" } as unknown as Template],

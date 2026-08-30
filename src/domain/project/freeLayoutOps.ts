@@ -111,9 +111,10 @@ export function updateFreeElement(
     // 保存では消えるのにその場の文書には残る＝同じ絵の文書が2通りできる。「継承へ戻す」を
     // `undefined` で表す入口（フォント）が増えたので、受け側でそろえる。
     // ⚠️ **`null` は落とさない**（差分再監査 11巡目 🟡）＝タイムラインの `setVisualClipContent` は
-    // `null` も落とすが、**あちらは `null` を「継承」の意味にしか使わない**。こちらは
-    // `assetId: null`＝「差し込み口は空」を**画面が明示的に書く**（`createFreeElement` の既定でもある）
-    // ので、落とすと「まだ決めていない」と区別が付かなくなる。**同じ流儀ではない**（写さない）。
+    // `null` も落とすので、**同じ流儀ではない**（写さない）。理由は「読み手が区別している」ではなく
+    // **書き手がそう書いている**＝`createFreeElement` は差し込み口に必ず `assetId: null` を置き、
+    // 画面も「なし」を `null` で書く。落とすと**保存される形が入口によって変わる**ので、
+    // 触っていない項目まで書き換えないこの関数の役目から外れる（読み手は `?? null` で解くため実害は無い）。
     for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k];
     return next as unknown as FreeElement;
   });
