@@ -109,17 +109,6 @@ export interface TimelineAudioRun {
 }
 
 /**
- * 音の並べ方を決める（#631）。**再生（`audioCuesAt`）と同じ値を使う**＝聞いた音と書き出した音が一致する。
- *
- * **音量の変化（`volumePoints`・#512）も渡す**（段3）＝再生と**同じ点列**から `volumeExpr` で式を組み、
- * FFmpeg 側は受け取った式を `volume` フィルタへ差し込むだけ（ADR-0032 追補＝案A）。式を Rust で組み直すと
- * 規則が2か所になるので、**組むのはここ（純粋関数）だけ**にしてずれを「式の書き方」に閉じ込める。
- *
- * 音量とフェードは**再生と同じ関数**（`clipBaseVolume` / `clipFadeSec`）から採る。フェードは FFmpeg 側で
- * `afade` として掛けるので、ここでは**素の音量**と**フェードの秒数（切り詰め済み）**を渡す
- * ＝フェード込みの値から割り戻すような当て推量をしない。
- */
-/**
  * ダッキングで増える点の数（α-6 出口監査 🟡）。**門と実際の式が同じ材料を見る**ための1か所。
  *
  * ⚠️ **1区間＝最大4点**（まとめた後の区間数から数える）。⚠️ **`+1` を足さない**＝`duckingFactorPoints` は
@@ -151,6 +140,17 @@ function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolveAudioA
   );
 }
 
+/**
+ * 音の並べ方を決める（#631）。**再生（`audioCuesAt`）と同じ値を使う**＝聞いた音と書き出した音が一致する。
+ *
+ * **音量の変化（`volumePoints`・#512）も渡す**（段3）＝再生と**同じ点列**から `volumeExpr` で式を組み、
+ * FFmpeg 側は受け取った式を `volume` フィルタへ差し込むだけ（ADR-0032 追補＝案A）。式を Rust で組み直すと
+ * 規則が2か所になるので、**組むのはここ（純粋関数）だけ**にしてずれを「式の書き方」に閉じ込める。
+ *
+ * 音量とフェードは**再生と同じ関数**（`clipBaseVolume` / `clipFadeSec`）から採る。フェードは FFmpeg 側で
+ * `afade` として掛けるので、ここでは**素の音量**と**フェードの秒数（切り詰め済み）**を渡す
+ * ＝フェード込みの値から割り戻すような当て推量をしない。
+ */
 export function timelineAudioRuns(
   doc: TimelineProject,
   templateOf?: (templateId: string) => Template | undefined,

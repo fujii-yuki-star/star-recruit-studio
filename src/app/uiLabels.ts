@@ -22,14 +22,14 @@ export function formatSceneNumbers(nums: number[]): string {
   return nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
 }
 
+/** 「枠への収め方」欄の見出し。正典 `06_UI_SPEC §9`（右パネル）＝「枠への収め方」。テンプレ編集・場面編集で共有（§6・#547 P2-10）。 */
+export const FIT_FIELD_LABEL = "枠への収め方";
+
 /**
  * 「枠への収め方」（Fit）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。
  * 語彙は `06_UI_SPEC §9`（シーン編集→右パネル・枠いっぱい/全体/伸縮）に合わせる。FitSelect（動画クリップ・画像スロット）と
  * LooksEditScreen（テンプレ編集）が**同じ語**を使うための単一の参照元（§6・#547 P2-10）。
  */
-/** 「枠への収め方」欄の見出し。正典 `06_UI_SPEC §9`（右パネル）＝「枠への収め方」。テンプレ編集・場面編集で共有（§6・#547 P2-10）。 */
-export const FIT_FIELD_LABEL = "枠への収め方";
-
 export const fitLabel: Record<Fit, string> = {
   cover: "枠いっぱいに表示（はみ出しは切り取り）",
   contain: "全体を表示（余白が入る）",
@@ -430,11 +430,6 @@ export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: 
 }
 
 /**
- * 置けなかった理由の案内（`15 §6` の `TIMELINE_EDIT_*`・ADR-0032）。**全コードに文言が要る**＝
- * 理由が増えたらコンパイルエラーで気づく（無言で操作が効かない状態を作らない）。
- * どれも「なぜ置けないか」でなく**次にどうすれば置けるか**を言う（§2-5）。
- */
-/**
  * 音量の変化を置いている間の案内（#512 段4）。点があるとその点が音量を決めるので、部品の「音量」欄
  * （一定の音量）は使われない＝**設定したのに音が変わらない**を作らないため、欄を押せなくして理由を出す
  * （ADR-0026①・§2-5）。
@@ -605,6 +600,11 @@ export function importErrorMessage(e: unknown): string {
   return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
+/**
+ * 置けなかった理由の案内（`15 §6` の `TIMELINE_EDIT_*`・ADR-0032）。**全コードに文言が要る**＝
+ * 理由が増えたらコンパイルエラーで気づく（無言で操作が効かない状態を作らない）。
+ * どれも「なぜ置けないか」でなく**次にどうすれば置けるか**を言う（§2-5）。
+ */
 export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
@@ -693,7 +693,6 @@ export const TIMELINE_VIDEO_STILL_UNPLAYABLE =
  */
 export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
   "回した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
-
 
 /**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
@@ -798,12 +797,6 @@ export function sceneTemplateProblemMessage(
 }
 
 /**
- * 見た目が見つからず、そのフォントを**どの文字に使っているか調べられない**ときの知らせ（12巡目 🟡）。
- *
- * ⚠️ **双子（{@link DORMANT_FONT_HINT}）が `uiLabels` にあるのに片方だけ画面直書き**だった＝
- * §6（文言は1か所）／検査（`uiLabels.test.ts` の走査）の外に落ちる。
- */
-/**
  * BGM を下げる区間を**つないだ**ときの知らせ（ADR-0032 追補4・α-6 出口監査 🟡）。
  *
  * ⚠️ **黙ってやらない**（§2-5）＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になる。
@@ -812,13 +805,13 @@ export function sceneTemplateProblemMessage(
 export const DUCK_MERGED_MESSAGE =
   "セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。気になる場合は「BGM を下げる」を弱くするか、動画を分けてお試しください。";
 
+/** 複製そのものに失敗したとき（読めた・書けた以外の理由）。読めない理由は `ProjectLoadError` を出す。 */
+export const DUPLICATE_FAILED_MESSAGE = "動画を複製できませんでした。もう一度お試しください。";
+
 /**
  * 会社の見た目のロゴが入らなかったときの案内（ADR-0036・α-6 出口監査 🟡）。
  * ⚠️ **明示適用と新規作成で同じことを言う**＝片方だけ黙る、を作らない（ADR-0026②・§6）。
  */
-/** 複製そのものに失敗したとき（読めた・書けた以外の理由）。読めない理由は `ProjectLoadError` を出す。 */
-export const DUPLICATE_FAILED_MESSAGE = "動画を複製できませんでした。もう一度お試しください。";
-
 export const BRAND_LOGO_NOT_APPLIED_MESSAGE =
   "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。";
 
@@ -830,6 +823,12 @@ export const BRAND_FONT_CLEARED_MESSAGE =
 export const BRAND_FONT_CLEAR_FAILED_MESSAGE =
   "この文字の形を外しましたが、会社の見た目の指定を外せませんでした。設定の「会社の見た目」から選び直してください。";
 
+/**
+ * 見た目が見つからず、そのフォントを**どの文字に使っているか調べられない**ときの知らせ（12巡目 🟡）。
+ *
+ * ⚠️ **双子（{@link DORMANT_FONT_HINT}）が `uiLabels` にあるのに片方だけ画面直書き**だった＝
+ * §6（文言は1か所）／検査（`uiLabels.test.ts` の走査）の外に落ちる。
+ */
 export const UNKNOWN_FONT_HINT =
   "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。";
 
