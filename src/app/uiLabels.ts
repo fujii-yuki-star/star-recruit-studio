@@ -773,21 +773,28 @@ export function missingTemplateMessage(count?: number): string {
  *
  * @param unresolved 見つからない（`true`）か、向き・場面に合っていない（`false`）か。
  * @param pickableCount いま選べる見た目パターンの数。
- * @param otherKindAvailable **別の種類なら見た目がある**か。候補ゼロのときの次の行動を分ける材料。
+ * @param avail 候補ゼロのときの次の行動を分ける材料。**「できる手」を実際の在庫から決める**。
+ *   - `otherKind` … **別の種類なら**この向きに見た目がある（＝種類を変えれば選べる）。
+ *   - `anyLoaded` … 見た目パターンが**1つでも読み込めている**（＝作る画面が使える）。
  */
 export function sceneTemplateProblemMessage(
-  unresolved: boolean, pickableCount: number, otherKindAvailable = false,
+  unresolved: boolean,
+  pickableCount: number,
+  avail: { otherKind: boolean; anyLoaded: boolean } = { otherKind: false, anyLoaded: true },
 ): string {
   const what = unresolved ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。";
   // ⚠️ **どこを指すかは呼ぶ側が足す**（差分再監査 11巡目）＝ここで「下から」と書くと、節の外へ出した
   // 文でも「下から」と言い、呼ぶ側の「（下の…にあります）」と**方向を二重に指す**。
   if (pickableCount > 0) return what + "選び直してください。";
-  // ⚠️ **次の行動は「いま実際にできる手」から選ぶ**（差分再監査 12巡目 🟡・§2-5）＝候補ゼロの主因は
-  // **見た目パターンが1つも読み込めていない**ことで、そのときは種類も変えられず、「見た目パターン」の
-  // 画面も作成ボタンごと出ない（同画面の案内は再起動）。できない手を名指しすると行き止まりになる。
-  return what + "この向き・場面に合う見た目パターンがまだありません。" + (otherKindAvailable
-    ? "種類を変えると、別の見た目パターンを選べます。"
-    : "見た目パターンが読み込まれていません。アプリを開き直してください。改善しない場合は、お手数ですがご連絡ください。");
+  const none = "この向き・場面に合う見た目パターンがまだありません。";
+  // ⚠️ **次の行動は「いま実際にできる手」から選ぶ**（差分再監査 12巡目 🟡・§2-5）＝**3段**に分かれる。
+  //   ①別の種類にある → 種類を変える（同じ画面でできる）
+  //   ②読み込めてはいる → 「見た目パターン」の画面で作る（作成の入口が出る）
+  //   ③1つも読み込めていない → 開き直す／連絡する（種類も変えられず、作成の入口も出ない）
+  // ⚠️ ②と③を混ぜると、**読み込めているのに「読み込まれていません」と嘘をつく**（PR #921 レビュー 🔴）。
+  if (avail.otherKind) return what + none + "種類を変えると、別の見た目パターンを選べます。";
+  if (avail.anyLoaded) return what + none + "「見た目パターン」の画面で作れます。";
+  return what + none + "見た目パターンが読み込まれていません。アプリを開き直してください。改善しない場合は、お手数ですがご連絡ください。";
 }
 
 /**

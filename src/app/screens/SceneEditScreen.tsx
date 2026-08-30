@@ -564,6 +564,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
   const sceneCategories = sceneCategoriesForOrientation(templates, aspectRatio);
+  /**
+   * 見た目の在庫＝**候補ゼロのときに実際にできる手**を決める材料（PR #921 レビュー 🔴）。
+   *
+   * ⚠️ **`> 0` で見る**＝候補ゼロなら**いまの種類はこの一覧に入らない**（この一覧は「この向きで
+   * 1つ以上ある種類」）ので、1つでもあれば**別の種類にある**ということ。`> 1` にすると、
+   * ちょうど1つのときに「種類を変えられない」と誤って案内する。
+   * ⚠️ **読み込めているかは別に見る**＝向きが違うだけでも候補ゼロになりうるので、
+   * 「読み込まれていません」と混ぜると**読み込めているのに嘘**になる。
+   */
+  const lookAvailability = { otherKind: sceneCategories.length > 0, anyLoaded: templates.length > 0 };
   // 「種類」を変えたら、その種類の先頭の見た目へ直接切り替える（同カテゴリ内の詳細は「見た目パターン」で選ぶ）。
   const switchSceneCategory = (category: SceneCategory) => {
     // いまの種類を選び直した＝切替をやめた、として確認も解く（`requestTemplateSwitch` 先頭と同じ挙動・ADR-0026②）。
@@ -1898,11 +1908,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* ⚠️ **文言は1か所から**（差分再監査 10巡目 🟡）＝節の中（見た目の選択欄の直下）と
                     同じ関数から採る。直書きすると、候補ゼロのときに**片方だけが実行できない次の行動**
                     （「選び直してください」）を出す＝同じ状態に断りが2通り並ぶ。 */}
-                {/* ⚠️ **行き先は分岐に依らず出す**（差分再監査 12巡目 🟡）＝候補ゼロのときに足した
-                    次の行動（種類を変える）の置き場所も**同じ節の中**なので、片方だけ行き先を
-                    言わないと 9・10巡目に直した構図が戻る。 */}
-                {sceneTemplateProblemMessage(true, pickableOptions.length, sceneCategories.length > 1)}
-                （下の「見た目・フォント」にあります）
+                {/* ⚠️ **行き先は「その節でできる手」を出したときだけ**（PR #921 レビュー 🟡）＝
+                    選び直す・種類を変える はどちらも「見た目・フォント」の節にあるが、
+                    作る・開き直す は**別の場所**なので、そこへ「下にあります」と続けると
+                    **同じ文がもう一度出るだけ**の案内になる（意味のない往復）。 */}
+                {sceneTemplateProblemMessage(true, pickableOptions.length, lookAvailability)}
+                {(pickableOptions.length > 0 || lookAvailability.otherKind) && "（下の「見た目・フォント」にあります）"}
               </p>
             )}
             {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0 || unknownFreeFonts.length > 0) && (
@@ -1998,7 +2009,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </select>
               {mismatchedCurrent || unresolvedCurrent ? (
                 <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
-                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, sceneCategories.length > 1)}
+                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, lookAvailability)}
                 </p>
               ) : pickableOptions.length <= 1 ? (
                 <p className="field-hint" style={{ marginTop: 4 }}>
