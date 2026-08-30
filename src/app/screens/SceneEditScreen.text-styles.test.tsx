@@ -473,7 +473,11 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     // ⚠️ **候補ゼロなら「選び直して」と言わない**（差分再監査 10巡目 🟡）＝実行できない次の行動。
     // 節の外の断りは `role="alert"`（節の中の同じ文言と取り違えない）。
     const notice = screen.getByRole("alert");
-    expect(notice.textContent).toContain("今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。");
+    // ⚠️ **できない手を名指ししない**＝見た目が1つも無い状態では、種類も変えられず作成の入口も出ない。
+    expect(notice.textContent).toContain("見た目パターンが読み込まれていません。アプリを開き直してください。");
+    // ⚠️ **その節でできない手には行き先を付けない**（PR #921 レビュー 🟡）＝
+    // 「開き直して」の直後に「下にあります」と続けると、行っても同じ文がもう一度出るだけ。
+    expect(notice.textContent).not.toContain("（下の「見た目・フォント」にあります）");
     expect(notice.closest("details")).toBeNull();
     // ⚠️ **存在しない見た目について語らない**＝別の次の行動が並ぶ。
     expect(screen.queryByText("この見た目パターンは文字を表示しません。")).toBeNull();
@@ -526,8 +530,13 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
     const hint = screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/);
-    // 種別ごと（見出し）と要素、どちらの欄も同じ知らせの下に並ぶ。
-    expect(within(hint.parentElement as HTMLElement).getAllByText(/のフォント$/)).toHaveLength(2);
+    // ⚠️ **「同じ群」はラベルの集合で見る**（PR #921 レビュー ℹ️）＝位置比較は**構造上ほぼ常に真**
+    // （知らせは常に欄より前にある）ので検知力が無い。**どのラベルが並ぶか**を固定する。
+    const labels = [...(hint.parentElement as HTMLElement).querySelectorAll("label")]
+      .map((n) => n.textContent ?? "").filter((t) => t.endsWith("のフォント"));
+    expect(labels).toEqual(["見出しのフォント", "文字1のフォント"]);
+    // 休眠側の知らせは出ない＝この2つは「調べられない」群に入っている。
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
   });
 
   it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
@@ -551,6 +560,9 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    // ⚠️ **どちらの群も出さない**（tests 🟡）＝片方の文言だけ見ると、群を取り違える変異を検知できない。
+    expect(screen.queryByText(/この見た目パターンの文字は、ここでフォントだけ選べます/)).toBeNull();
+    expect(screen.queryByText(/見た目が見つからないので、どの文字に使っているかは分かりません/)).toBeNull();
   });
 
   it("文字の層を持つ自由配置の見た目でも、種別ごとのフォントを直せる", () => {
@@ -610,7 +622,6 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
   });
 });
 
-// 見た目が見つからない場面の見せ方（差分再監査 10巡目）。
 describe("SceneEditScreen 場面ぜんぶのフォント", () => {
   // ⚠️ **継承へ戻すとキーごと落ちる**（差分再監査 11巡目 🟡＝3か所のうちここだけ双子が無かった）。
   it("「動画全体に合わせる」へ戻すと、キーごと落ちる", () => {
@@ -632,7 +643,24 @@ describe("SceneEditScreen 場面ぜんぶのフォント", () => {
   });
 });
 
+// 見た目が見つからない場面の見せ方（差分再監査 10巡目）。
 describe("SceneEditScreen 見た目が見つからない場面", () => {
+  // ⚠️ **別の種類が「ちょうど1つ」でも種類を変えられる**（PR #921 レビュー 🔴）＝候補ゼロなら
+  // いまの種類はこの一覧に入らないので、1つでもあれば別の種類にある。`> 1` だと誤って
+  // 「作れます」と案内する（種類を変えれば選べるのに、その手を隠す）。
+  it("別の種類に見た目が1つあるだけでも、種類を変える手を案内する", () => {
+    useProjectStore.setState({
+      templates: [tpl], // opening だけ（この場面の種類には無い）
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "gone", sceneType: "photo_intro" } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const notice = screen.getByRole("alert");
+    expect(notice.textContent).toContain("種類を変えると、別の見た目パターンを選べます。");
+    expect(notice.textContent).toContain("（下の「見た目・フォント」にあります）"); // その節でできる手
+  });
+
   // ⚠️ **候補があるときは行き先を名指しする**（差分再監査 11巡目 ℹ️）＝候補ゼロの分岐しか通っていなかった。
   it("候補があるときは「見た目・フォント」を名指しする", () => {
     useProjectStore.setState({
@@ -644,6 +672,7 @@ describe("SceneEditScreen 見た目が見つからない場面", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     const notice = screen.getByRole("alert");
     expect(notice.textContent).toContain("今の見た目が見つかりません。選び直してください。");
+    // その節でできる手（選び直す）なので、行き先を名指しする。
     expect(notice.textContent).toContain("（下の「見た目・フォント」にあります）");
   });
 

@@ -60,7 +60,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
+import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -564,6 +564,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
   const sceneCategories = sceneCategoriesForOrientation(templates, aspectRatio);
+  /**
+   * 見た目の在庫＝**候補ゼロのときに実際にできる手**を決める材料（PR #921 レビュー 🔴）。
+   *
+   * ⚠️ **`> 0` で見る**＝候補ゼロなら**いまの種類はこの一覧に入らない**（この一覧は「この向きで
+   * 1つ以上ある種類」）ので、1つでもあれば**別の種類にある**ということ。`> 1` にすると、
+   * ちょうど1つのときに「種類を変えられない」と誤って案内する。
+   * ⚠️ **読み込めているかは別に見る**＝向きが違うだけでも候補ゼロになりうるので、
+   * 「読み込まれていません」と混ぜると**読み込めているのに嘘**になる。
+   */
+  const lookAvailability = { otherKind: sceneCategories.length > 0, anyLoaded: templates.length > 0 };
   // 「種類」を変えたら、その種類の先頭の見た目へ直接切り替える（同カテゴリ内の詳細は「見た目パターン」で選ぶ）。
   const switchSceneCategory = (category: SceneCategory) => {
     // いまの種類を選び直した＝切替をやめた、として確認も解く（`requestTemplateSwitch` 先頭と同じ挙動・ADR-0026②）。
@@ -1898,8 +1908,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* ⚠️ **文言は1か所から**（差分再監査 10巡目 🟡）＝節の中（見た目の選択欄の直下）と
                     同じ関数から採る。直書きすると、候補ゼロのときに**片方だけが実行できない次の行動**
                     （「選び直してください」）を出す＝同じ状態に断りが2通り並ぶ。 */}
-                {sceneTemplateProblemMessage(true, pickableOptions.length)}
-                {pickableOptions.length > 0 && "（下の「見た目・フォント」にあります）"}
+                {/* ⚠️ **行き先は「その節でできる手」を出したときだけ**（PR #921 レビュー 🟡）＝
+                    選び直す・種類を変える はどちらも「見た目・フォント」の節にあるが、
+                    作る・開き直す は**別の場所**なので、そこへ「下にあります」と続けると
+                    **同じ文がもう一度出るだけ**の案内になる（意味のない往復）。 */}
+                {sceneTemplateProblemMessage(true, pickableOptions.length, lookAvailability)}
+                {(pickableOptions.length > 0 || lookAvailability.otherKind) && "（下の「見た目・フォント」にあります）"}
               </p>
             )}
             {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0 || unknownFreeFonts.length > 0) && (
@@ -1908,14 +1922,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     自由配置の見た目でも文字層は描かれる。知らせは**もう描かれないもの**にだけ出す。 */}
                 {/* ⚠️ **知らせと対象を1対1にする**（差分再監査 10巡目 🟡）＝1つの並びに混ぜると、
                     「使わないなら戻せます」が**描かれている欄の上**に立ち、戻すと字体が変わる。
-                    ⚠️ 出どころは**見た目パターンの文字層**（自由配置で置いた文字ではない）＝
-                    言い方を取り違えない（本文は自由配置の編集面で直す）。 */}
+                    ⚠️ **この群の中身は状態で変わる**（12巡目 ℹ️）＝見た目が解決できているときは
+                    **見た目パターンの文字層**（自由配置で置いた文字ではない）だけ、見つからないときは
+                    **自由配置の要素も**同じ群に入る（どちらも「使っていない」とは言えないため）。 */}
                 {(otherFontKeys.length > 0 || unknownFreeFonts.length > 0) && (
                   <>
                     <p className="field-hint" style={{ marginTop: 0 }}>
-                      {template == null
-                        ? "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。"
-                        : "この見た目パターンの文字は、ここでフォントだけ選べます。"}
+                      {template == null ? UNKNOWN_FONT_HINT : "この見た目パターンの文字は、ここでフォントだけ選べます。"}
                     </p>
                     {otherFontKeys.map((key) => (
                       <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
@@ -1996,7 +2009,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </select>
               {mismatchedCurrent || unresolvedCurrent ? (
                 <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
-                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length)}
+                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, lookAvailability)}
                 </p>
               ) : pickableOptions.length <= 1 ? (
                 <p className="field-hint" style={{ marginTop: 4 }}>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
@@ -299,9 +299,15 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
       missingTemplateMany: missingTemplateMessage(3),
       // 4分岐とも走査に入れる（差分再監査 11巡目 🟡＝登録しないと検査の外に落ちる）。
       sceneTemplateUnresolvedPickable: sceneTemplateProblemMessage(true, 3),
-      sceneTemplateUnresolvedNone: sceneTemplateProblemMessage(true, 0),
+      sceneTemplateUnresolvedNoneOtherKind: sceneTemplateProblemMessage(true, 0, { otherKind: true, anyLoaded: true }),
+      sceneTemplateUnresolvedNoneCreatable: sceneTemplateProblemMessage(true, 0, { otherKind: false, anyLoaded: true }),
+      sceneTemplateUnresolvedNoneNothing: sceneTemplateProblemMessage(true, 0, { otherKind: false, anyLoaded: false }),
       sceneTemplateMismatchedPickable: sceneTemplateProblemMessage(false, 3),
-      sceneTemplateMismatchedNone: sceneTemplateProblemMessage(false, 0),
+      sceneTemplateMismatchedNoneOtherKind: sceneTemplateProblemMessage(false, 0, { otherKind: true, anyLoaded: true }),
+      sceneTemplateMismatchedNoneNothing: sceneTemplateProblemMessage(false, 0, { otherKind: false, anyLoaded: false }),
+      // 双子の知らせも走査に入れる（PR #921 レビュー 🟡＝新設したのに登録していなかった）。
+      dormantFontHint: DORMANT_FONT_HINT,
+      unknownFontHint: UNKNOWN_FONT_HINT,
       // ⚠️ **別 file の共有定数も載せる**（差分再監査 ℹ️）＝`exportLock.ts` は `uiLabels` の外だが、
       // 画面に出る文言であることは同じ。載せないと `15 §6` 直下が約束する「機械で守る」の外に落ちる
       //（`lockedTrackMessage`〔#819-2〕・`missingTemplateMessage`〔#834-2〕と同じ型の穴）。
@@ -441,8 +447,18 @@ describe('sceneTemplateProblemMessage', () => {
   });
 
   it('見つからない・候補なし＝選び直しを案内しない（実行できない次の行動を出さない）', () => {
-    // ⚠️ **候補ゼロでも次の行動で終わる**（行き止まりにしない）。
-    expect(sceneTemplateProblemMessage(true, 0)).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。');
+    // ⚠️ **候補ゼロでも次の行動で終わる**（行き止まりにしない）＝ただし**いま実際にできる手**を出す。
+    expect(sceneTemplateProblemMessage(true, 0, { otherKind: true, anyLoaded: true })).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。種類を変えると、別の見た目パターンを選べます。');
+  });
+
+  // ⚠️ **読み込めているのに「読み込まれていません」と言わない**（PR #921 レビュー 🔴）＝
+  // 向きが違うだけでも候補ゼロになる。3段（種類を変える／作る／開き直す）に分ける。
+  it('見つからない・候補なし・別の種類も無いが読み込めている＝作る先を出す', () => {
+    expect(sceneTemplateProblemMessage(true, 0, { otherKind: false, anyLoaded: true })).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。「見た目パターン」の画面で作れます。');
+  });
+
+  it('見つからない・1つも読み込めていない＝できない手を名指ししない（行き止まりにしない）', () => {
+    expect(sceneTemplateProblemMessage(true, 0, { otherKind: false, anyLoaded: false })).toBe('今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。見た目パターンが読み込まれていません。アプリを開き直してください。改善しない場合は、お手数ですがご連絡ください。');
   });
 
   it('合っていない・候補あり', () => {
@@ -450,6 +466,10 @@ describe('sceneTemplateProblemMessage', () => {
   });
 
   it('合っていない・候補なし', () => {
-    expect(sceneTemplateProblemMessage(false, 0)).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。種類を変えるか、「見た目パターン」の画面で作ってください。');
+    expect(sceneTemplateProblemMessage(false, 0, { otherKind: true, anyLoaded: true })).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。種類を変えると、別の見た目パターンを選べます。');
+  });
+
+  it('合っていない・候補なし・別の種類も無い＝作る先を出す（読み込めてはいる）', () => {
+    expect(sceneTemplateProblemMessage(false, 0, { otherKind: false, anyLoaded: true })).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。「見た目パターン」の画面で作れます。');
   });
 });
