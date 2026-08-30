@@ -6991,6 +6991,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.queryByText("この部品の文字の形")).toBeNull();
+    // ⚠️ 部品ぜんぶの欄は**無条件に出す**（解決できているときと同じ）＝状態で現れたり消えたりしない。
+    expect(screen.getByText("この部品の文字の形")).toBeInTheDocument();
+    expect(screen.queryByText("見出しの文字の形")).toBeNull();
   });
 });

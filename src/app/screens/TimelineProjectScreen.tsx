@@ -4424,17 +4424,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       見た目の解決に関係なく `fontId`／`textFontIds` を数えるので、欄ごと消すと
                       「別の文字の形を選び直してください」が**この部品では実行できない**（同じ状態に
                       断りが2通り）。場面形式は同じ理由で未解決でも出すようにした（ADR-0026②）。 */}
-                  {(selected.fontId != null || Object.keys(selected.textFontIds ?? {}).length > 0) && (
+                  {/* ⚠️ **部品ぜんぶの文字の形は無条件に出す**（PR #917 レビュー ℹ️）＝解決できているときは
+                      無条件なのに、未解決のときだけ「値が入っていれば」にすると、同じ欄が状態によって
+                      現れたり消えたりする（新しく決める入口ごと消える）。 */}
+                  <label className="field">
+                    <span>この部品の文字の形</span>
+                    <FontPicker
+                      value={selected.fontId ?? null}
+                      allowInherit
+                      {...editGuard()}
+                      onChange={(id) => setSelectedVisualContent({ fontId: id })}
+                    />
+                  </label>
+                  {Object.keys(selected.textFontIds ?? {}).length > 0 && (
                     <>
-                      <label className="field">
-                        <span>この部品の文字の形</span>
-                        <FontPicker
-                          value={selected.fontId ?? null}
-                          allowInherit
-                          {...editGuard()}
-                          onChange={(id) => setSelectedVisualContent({ fontId: id })}
-                        />
-                      </label>
                       {editableTextKeys([], selected.textFontIds).map((key) => (
                         <label className="field" key={`font-unresolved-${key}`}>
                           <span>{textKeyLabel[key]}の文字の形</span>
