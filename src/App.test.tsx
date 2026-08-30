@@ -225,3 +225,33 @@ describe("持ち込みフォントを起動時に読み込む（α-6 出口監�
     expect(container.querySelector(".sidebar")).toBeTruthy();
   });
 });
+
+// サイドバーの「今の動画」も同じ判定（`hasOpenProject`）から採る（差分再監査 6・7巡目 🟡）。
+//
+// ⚠️ **同じ問いを画面ごとに書き直さない**＝棚からの取り込み・「素材を追加」・会社の見た目の反映と
+// 同じ式。1つの条件だけで見ると、白紙から作った直後やウィザードの途中を取りこぼす。
+describe("App「今の動画」を出すかの判定", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({ templates: sampleTemplates, parts: [], scenes: [], saveStatus: "saved" });
+  });
+
+  it("何も開いていなければ出さない", () => {
+    const { container } = render(<App />);
+    expect(within(container).queryByText("今の動画")).toBeNull();
+  });
+
+  it("白紙から作った直後（番号なし・場面なし）でも出す", () => {
+    useProjectStore.setState({ status: "ready" });
+    const { container } = render(<App />);
+    expect(within(container).getByText("今の動画")).toBeInTheDocument();
+  });
+
+  it("ウィザードの途中（会社名だけ入れた状態）でも出す", () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, companyInfo: { ...meta.companyInfo, companyName: "すたりお商事" } } } as never);
+    const { container } = render(<App />);
+    expect(within(container).getByText("今の動画")).toBeInTheDocument();
+  });
+});

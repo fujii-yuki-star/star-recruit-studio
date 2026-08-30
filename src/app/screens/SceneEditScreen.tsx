@@ -500,9 +500,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // ⚠️ **休眠の種別ごとフォントも直せるようにする**（差分再監査 6巡目 🟡）＝見た目パターンを替えても
   //`textFontIds` は残り、書き出しの門は**休眠のぶんも数えて断る**。欄が「いま使う種別」だけだと、
   // 持ち込みフォントが手元から消えたとき**案内どおりに選び直す先が無い**（§2-5 の行き止まり）。
-  const dormantFontKeys = template
-    ? editableTextKeys(template.layers, selected.textFontIds).filter((k) => !sceneTextKeys.includes(k))
-    : [];
+  // ⚠️ **見た目パターンが未解決でも出す**（差分再監査 7巡目 ℹ️）＝`textFontIds` は種別のキーなので
+  // 見た目に依らず解ける。解決できたときだけ出すと、そこだけ「値が入っているのに欄が出ない」が残る。
+  const dormantFontKeys = editableTextKeys(template?.layers ?? [], selected.textFontIds)
+    .filter((k) => !sceneTextKeys.includes(k));
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
   // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
@@ -1839,19 +1840,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 );
               })}
-              {dormantFontKeys.length > 0 && (
-                <div className="field" style={{ marginTop: 8 }}>
-                  <p className="field-hint" style={{ marginTop: 0 }}>
-                    いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
-                  </p>
-                  {dormantFontKeys.map((key) => (
-                    <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
-                    </div>
-                  ))}
-                </div>
-              )}
               {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
                   掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
               {subtitleOverflows && (
@@ -1865,6 +1853,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 二次的な節は既定で畳む（#550 ①）＝場面ごとに毎回いじる所ではない（種類/見た目/フォント/BGM は
                 だいたい最初に決めて以後は触らない）。一度開けば記憶される（③）ので、よく使う人の手間は増えない。 */}
             <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false}>
+            {/* ⚠️ **自由配置の場面でも出す**（差分再監査 7巡目 🟡）＝書き出しの門は場面の種類を見ずに
+                `textFontIds` を数えるのに、この欄が「文字」節（通常テンプレだけ）の中にあると、
+                通常→自由配置へ切り替えた場面では**選び直す先が1つも無い**（`textFontIds` は切替でも
+                休眠のまま残る＝ADR-0030 追補6）。持ち込みフォントが消えると書き出しが止まったまま
+                解除できない（§2-5 の行き止まり）。ここは種類に依らず出る節。 */}
+            {dormantFontKeys.length > 0 && (
+              <div className="field">
+                <p className="field-hint" style={{ marginTop: 0 }}>
+                  いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
+                </p>
+                {dormantFontKeys.map((key) => (
+                  <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
+                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
+                    <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                  </div>
+                ))}
+              </div>
+            )}
             {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
             <div className="field">
               <label className="field-label" htmlFor="scene-kind">種類</label>

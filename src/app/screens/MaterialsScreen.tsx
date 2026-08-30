@@ -6,6 +6,7 @@ import { isListedMaterial } from "../../domain/asset/assetFile";
 import { pickPanelAsset } from "./materialsSelection";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
+import { IMPORT_NO_PROJECT_MESSAGE } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -172,7 +173,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onPick={addAssets}
             isImporting={isImporting}
             progress={importProgress}
-            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : "先に動画を開いてください") : null}
+            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : IMPORT_NO_PROJECT_MESSAGE) : null}
           />
         }
       />
@@ -349,9 +350,14 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               message="いまある素材はすべて、どこかの場面に置かれています。上のチェックを外すと全部に戻せます。"
             />
           ) : (
+            // ⚠️ **押せないボタンを案内しない**（差分再監査 7巡目 🟡・§2-5）＝動画を開いていないときは
+            // 「素材を追加」が押せないのに、案内はそのボタンを指したままだった（理由はホバーにしか
+            // 出ないので、押しに行って初めて分かる）。その場に次の行動を出す。
             <EmptyState
               title="この種類の素材はまだありません"
-              message="「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
+              message={projectOpen
+                ? "「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
+                : "素材はどの動画に入れるかが決まってから登録します。先に動画を開くか、新しく作ってください。"}
             />
           )
         )}

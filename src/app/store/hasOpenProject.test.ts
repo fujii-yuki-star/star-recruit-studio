@@ -6,9 +6,14 @@
 import { describe, expect, it } from 'vitest';
 import { hasOpenProject } from './projectStore';
 
-const st = (over: { projectId?: string; status?: string; scenes?: unknown[] } = {}) => ({
-  meta: { projectId: over.projectId ?? '' },
-  status: over.status ?? 'idle',
+import type { GenerateStatus } from './projectStore';
+
+const st = (over: { projectId?: string; status?: GenerateStatus; scenes?: unknown[]; companyName?: string } = {}) => ({
+  meta: {
+    projectId: over.projectId ?? '',
+    ...(over.companyName ? { companyInfo: { companyName: over.companyName } } : {}),
+  },
+  status: over.status ?? ('idle' as GenerateStatus),
   scenes: over.scenes ?? [],
 });
 
@@ -31,5 +36,15 @@ describe('hasOpenProject', () => {
 
   it('番号だけ採った文書も true（ウィザードの途中で素材を入れた状態）', () => {
     expect(hasOpenProject(st({ projectId: 'proj_20260101_001', status: 'idle' }))).toBe(true);
+  });
+
+  // ⚠️ AI で作る主経路（`newProject`）は `status` を `idle` のままにする（自動生成を発火させるため）＝
+  // 会社名だけ入れた状態を落とすと、その動画は一覧にも無いので**案内どおりに開き直せない**。
+  it('たたき台の入力（会社名）があれば true（ウィザードの途中）', () => {
+    expect(hasOpenProject(st({ companyName: 'すたりお商事' }))).toBe(true);
+  });
+
+  it('会社名が空白だけなら false（入力したことにしない）', () => {
+    expect(hasOpenProject(st({ companyName: '   ' }))).toBe(false);
   });
 });

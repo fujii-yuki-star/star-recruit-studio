@@ -343,6 +343,20 @@ describe("AssetLibraryPanel", () => {
     expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).not.toBeDisabled();
   });
 
+  // ⚠️ **押せないのに理由が出ない、を作らない**（差分再監査 6巡目 ℹ️）＝棚の操作中（置く・直す・外す）は
+  // `working` に数えるのに理由を持っておらず、4つのボタンが無言で押せなくなっていた。
+  it("棚の操作中は、その理由を添える", async () => {
+    vi.mocked(showOpenLibraryAssetsDialog).mockImplementation(() => new Promise(() => {})); // 開いたまま返さない
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getByRole("button", { name: "素材を置く" }));
+    await waitFor(() => {
+      const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+      expect(btn).toBeDisabled();
+      expect(btn.title).toContain("いまよく使う素材を操作しています");
+    });
+  });
+
   // ⚠️ **白紙から作った直後は「開いている」**（差分再監査 6巡目 🟡）＝番号（`projectId`）だけで見ると
   // 開いていないことにされ、しかも一覧に無いので**案内どおりに開き直せない**（嘘の理由＋行き止まり）。
   it("白紙から作った直後（番号なし・場面なし）でも取り込める", async () => {

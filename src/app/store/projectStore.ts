@@ -27,7 +27,8 @@ import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSce
 import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
 import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
-import { hasWorkInProgress } from "../hooks/newProjectGuard";
+// たたき台の入力があるか＝**守る側と同じ判定**を共有する（破棄ガードと食い違わせない）。
+import { hasWizardBrief, hasWorkInProgress } from "../hooks/newProjectGuard";
 import { duplicateProjectDoc, duplicatedFilePaths } from "../../domain/project/duplicate";
 import { thumbnailScene, thumbnailSignature } from "../../domain/project/thumbnail";
 import { renderProjectThumbnail } from "../../renderer/export/projectThumbnail";
@@ -133,13 +134,21 @@ export interface ExportRunState {
 /**
  * **場面形式の動画を開いているか**（差分再監査 6巡目 🟡＝判定は1か所から採る）。
  *
- * ⚠️ **3つのどれかで開いている**＝読み込んだ（`projectId`）／白紙から作った（`status` が `idle` でない）／
- * 場面がある。どれか1つで見ると取りこぼす：`projectId` だけだと**白紙から作った直後**（まだ番号を採って
- * いない）を「開いていません」と言い、`status`＋場面だけだと**番号だけ採った文書**（素材を入れた
- * ウィザードの途中）を取りこぼす。**同じ問いを画面ごとに書き直さない**（片方だけ直る形を作らない）。
+ * ⚠️ **どれか1つでも当てはまれば開いている**＝読み込んだ（`projectId`）／白紙から作った（`status` が
+ * `idle` でない）／場面がある／**たたき台の入力がある**（会社名・発表テーマ）。1つだけで見ると取りこぼす：
+ * `projectId` だけだと**白紙から作った直後**（まだ番号を採っていない）を、`status`＋場面だけだと
+ * **番号だけ採った文書**を落とす。
+ * ⚠️ **たたき台の入力も数える**（差分再監査 7巡目 🟡）＝AI で作る主経路（`newProject`）は `status` を
+ * `idle` のままにする（自動生成を発火させるため）ので、上の3つだけだと**ウィザードの途中**が
+ * 「開いていません」に落ちる。その動画は一覧にも無いので**案内どおりに開き直せない**（§2-5 の
+ * 行き止まり）。守る側（`hasWorkInProgress`）が既に「作業中」と数えている状態と食い違わせない。
  */
-export function hasOpenProject(s: { meta: { projectId: string }; status: string; scenes: unknown[] }): boolean {
-  return s.meta.projectId !== "" || s.status !== "idle" || s.scenes.length > 0;
+export function hasOpenProject(s: {
+  meta: { projectId: string; companyInfo?: CompanyInfo; generalBrief?: GeneralBrief };
+  status: GenerateStatus;
+  scenes: unknown[];
+}): boolean {
+  return s.meta.projectId !== "" || s.status !== "idle" || s.scenes.length > 0 || hasWizardBrief(s.meta);
 }
 
 /** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除・素材編集のブロック判定で共有（#379/#547 P2-1）。 */

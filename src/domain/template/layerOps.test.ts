@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
 import { LAYER_TYPE, TEXT_KEY } from '../enums';
-import { addLayer, createLayerId, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
+import { addLayer, createLayerId, duplicateLayer, editableTextKeys, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -166,5 +166,43 @@ describe('duplicateLayer（中身ごと複製・#772 候補4）', () => {
 
   it('居ない id は何もしない（同一参照＝空の取り消しを作らない）', () => {
     expect(duplicateLayer(base, 'zzz', canvas)).toBe(base);
+  });
+});
+
+// 直せる種別の一覧（差分再監査 6巡目 🟡・7巡目で直接テストを追加）。
+//
+// ⚠️ **書き出しの門は休眠のぶんも数えて断る**ので、欄が「いま使う種別」だけだと選び直す先が無い。
+// 数える側は狭めず、直す側を広げる＝この関数がその「広げた側」の単一の参照元。
+describe('editableTextKeys', () => {
+  const textLayer = (textKey: string): Layer =>
+    ({ id: `l_${textKey}`, type: 'text', textKey, x: 0, y: 0, w: 10, h: 10 }) as unknown as Layer;
+
+  it('使う種別だけのときは、そのまま返す', () => {
+    expect(editableTextKeys([textLayer('title')], undefined)).toEqual(['title']);
+  });
+
+  it('値が入っている種別も足す（休眠でも直せる）', () => {
+    expect(editableTextKeys([textLayer('title')], { subtitle: 'gen-interface-jp' })).toEqual(['title', 'subtitle']);
+  });
+
+  it('両方に出てくる種別は1つにまとめる', () => {
+    expect(editableTextKeys([textLayer('title')], { title: 'gen-interface-jp' })).toEqual(['title']);
+  });
+
+  it('層が無くても、値が入っていれば返す（見た目パターンが未解決の場面）', () => {
+    expect(editableTextKeys([], { main: 'gen-interface-jp' })).toEqual(['main']);
+  });
+
+  it('null／未指定は「値が入っている」に数えない（明示の継承を欄に出さない）', () => {
+    expect(editableTextKeys([], { title: null, main: undefined } as never)).toEqual([]);
+  });
+
+  it('並びは正規順（TEXT_KEYS 順）＝入れた順に依らない', () => {
+    expect(editableTextKeys([textLayer('url')], { title: 'a', caption: 'b' } as never))
+      .toEqual(['title', 'caption', 'url']);
+  });
+
+  it('何も無ければ空', () => {
+    expect(editableTextKeys([], undefined)).toEqual([]);
   });
 });
