@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
 import { LAYER_TYPE, TEXT_KEY } from '../enums';
-import { addLayer, createLayerId, duplicateLayer, editableTextKeys, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
+import { addLayer, createLayerId, duplicateLayer, editableTextKeys, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer, withTextFontId } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -204,5 +204,34 @@ describe('editableTextKeys', () => {
 
   it('何も無ければ空', () => {
     expect(editableTextKeys([], undefined)).toEqual([]);
+  });
+});
+
+// 種別ごとのフォント上書きの置く／外す（差分再監査 9巡目 🟡＝規則は1か所）。
+describe('withTextFontId', () => {
+  it('置くと、残りの種別は引き継ぐ', () => {
+    expect(withTextFontId({ title: 'a', main: 'b' }, 'main', 'c')).toEqual({ title: 'a', main: 'c' });
+  });
+
+  it('外すとキーごと落ちる', () => {
+    expect(withTextFontId({ title: 'a', main: 'b' }, 'main', null)).toEqual({ title: 'a' });
+  });
+
+  it('最後の1つを外すと未設定になる（空の入れ物を残さない）', () => {
+    expect(withTextFontId({ title: 'a' }, 'title', null)).toBeUndefined();
+  });
+
+  it('未設定へ置くと、その1つだけを持つ', () => {
+    expect(withTextFontId(undefined, 'subtitle', 'a')).toEqual({ subtitle: 'a' });
+  });
+
+  it('未設定から外しても未設定のまま（空の入れ物を作らない）', () => {
+    expect(withTextFontId(undefined, 'subtitle', null)).toBeUndefined();
+  });
+
+  it('元の入れ物は書き換えない（純粋）', () => {
+    const before = { title: 'a' };
+    withTextFontId(before, 'main', 'b');
+    expect(before).toEqual({ title: 'a' });
   });
 });

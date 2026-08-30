@@ -9,7 +9,7 @@ import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
-import { editableTextKeys, usedTextKeys } from "../../domain/template/layerOps";
+import { editableTextKeys, usedTextKeys, withTextFontId } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -60,7 +60,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -473,14 +473,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
   // テキスト種別ごとのフォント上書き（#178）。null＝継承（その種別のキーを外す＝動画全体/場面に従う）。
+  // 置く／外すの規則は **domain に1つ**（`withTextFontId`）＝2画面3か所に写さない（差分再監査 9巡目 🟡）。
   const setSceneTextFont = (textKey: TextKey, id: FontId | null) =>
-    patch((s) => {
-      const next = { ...(s.textFontIds ?? {}) };
-      if (id) next[textKey] = id;
-      else delete next[textKey];
-      // 全種別を継承に戻したら空オブジェクトを残さず未設定へ（意味のない {} を永続化しない）。
-      return { ...s, textFontIds: Object.keys(next).length ? next : undefined };
-    });
+    patch((s) => ({ ...s, textFontIds: withTextFontId(s.textFontIds, textKey, id) }));
   // テキスト種別ごとの体裁上書き（#555）。undefined＝そのプロパティを継承（キーを外す）＝textFontIds と同じ流儀。
   // プロパティが全部消えたらその種別ごと、種別が全部消えたら textStyles ごと未設定へ（意味のない {} を永続化しない）。
   const setSceneTextStyle = (textKey: TextKey, patchStyle: Partial<TextStyleOverride>) =>
@@ -506,8 +501,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 描かれないので、`sceneTextKeys` で絞ると**文字層を持つ自由配置の見た目**（自作できる）で
   // どちらにも出ないキーができる（門は種類を見ずに数えるので、そのまま行き止まりになる）。
   const shownTextKeys = isFree ? [] : sceneTextKeys;
-  const dormantFontKeys = editableTextKeys(template?.layers ?? [], selected.textFontIds)
+  // ⚠️ **「欄を出すか」と「もう使っていないか」は別の問い**（差分再監査 9巡目 🟡）＝一緒にすると、
+  // **文字層を持つ自由配置の見た目**で「使っていない文字」と**嘘をつく**（`layoutScene` は種類で切らず
+  // その層を描き `textFontIds` を読む＝案内どおり戻すと**動画に出ている字体が変わる**）。しかも
+  // 指定が1つも無くても知らせが出る（片づける対象が無いのに片づけを勧める）。
+  /** ここに欄が要るキー＝門が数えるもののうち「文字」節に出ないもの。 */
+  const extraFontKeys = editableTextKeys(template?.layers ?? [], selected.textFontIds)
     .filter((k) => !shownTextKeys.includes(k));
+  /** そのうち**実際に描かれる**もの（自由配置の見た目が文字層を持つとき）＝休眠ではない。 */
+  const drawnExtraFontKeys = extraFontKeys.filter((k) => sceneTextKeys.includes(k));
+  /** そのうち**もう描かれない**もの＝知らせ（片づけの勧め）の対象。値が入っているものだけ。 */
+  const dormantFontKeys = extraFontKeys
+    .filter((k) => !sceneTextKeys.includes(k) && selected.textFontIds?.[k] != null);
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
   // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
@@ -1158,7 +1163,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+            <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
@@ -1282,7 +1288,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+            <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
@@ -1806,7 +1813,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
             {!isFree && (
               <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字">
-              {sceneTextKeys.length === 0 && (
+              {/* ⚠️ **見つからない見た目について語らない**（差分再監査 9巡目 🟡・§2-5）＝未解決のときに
+                  「文字を表示しません」と言うと、**存在しない見た目についての嘘の理由**になり、
+                  すぐ下の「見た目が見つかりません。選び直してください」と**別の次の行動**が並ぶ。 */}
+              {template != null && sceneTextKeys.length === 0 && (
                 <div>
                   <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
                   {/* 行き止まりにしない：文字を重ねる次の行動を案内する（§2-5・#413。旧「タイムライン編集で
@@ -1866,12 +1876,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 ⚠️ **種類に依らず出す**（7巡目 🟡）＝門は場面の種類を見ずに数えるのに、「文字」節
                 （通常テンプレだけ）の中にあると通常→自由配置へ切り替えた場面で選び直す先が無い。
                 ⚠️ **自由配置の要素のフォントも同じ**（8巡目 🟡）＝門は休眠のぶんまで数える。 */}
-            {(dormantFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
+            {/* ⚠️ **書き出しを止めている理由は節の外に出す**（差分再監査 9巡目 🟡）＝見た目が見つからない
+                場面は書き出しを止めるのに、理由も選び直す先も**既定で畳まれた節の中**にしかなかった
+                （畳んだ記憶は既定より優先されるので一度畳むと二度と出ない）。休眠フォントと同じ流儀。 */}
+            {unresolvedCurrent && (
+              <p className="notice notice-warn" role="alert">
+                今の見た目が見つかりません。下の「見た目・フォント」で選び直してください。
+              </p>
+            )}
+            {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
               <div className="field">
-                <p className="field-hint" style={{ marginTop: 0 }}>
-                  いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
-                </p>
-                {dormantFontKeys.map((key) => (
+                {/* ⚠️ **描かれているものを「使っていない」と言わない**（差分再監査 9巡目 🟡）＝
+                    自由配置の見た目でも文字層は描かれる。知らせは**もう描かれないもの**にだけ出す。 */}
+                {drawnExtraFontKeys.length > 0 && (
+                  <p className="field-hint" style={{ marginTop: 0 }}>
+                    この見た目パターンの文字は自由配置で置きます。文字ごとのフォントはここで選べます。
+                  </p>
+                )}
+                {(dormantFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
+                  <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
+                )}
+                {extraFontKeys.map((key) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
                     <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />

@@ -122,8 +122,8 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
-import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
-import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
+import { DORMANT_FONT_HINT, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
@@ -4383,9 +4383,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       無い種別が理由なしに混ざると「触ったのに何も起きない」に見える。場面編集と同じ言い方。 */}
                   {editableTextKeys(selectedTemplate.layers, selected.textFontIds)
                     .some((k) => !textKeys.includes(k)) && (
-                    <p className="field-hint" style={{ marginTop: 0 }}>
-                      いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。
-                    </p>
+                    <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
                   )}
                   {editableTextKeys(selectedTemplate.layers, selected.textFontIds).map((key) => (
                     <label className="field" key={`font-${key}`}>
@@ -4394,14 +4392,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         value={selected.textFontIds?.[key] ?? null}
                         allowInherit
                         {...editGuard()}
-                        onChange={(id) => {
-                          // まるごと差し替えで解かれるので**残りの種別を引き継ぐ**（1つ選ぶと他が消える、を作らない）。
-                          const next = { ...selected.textFontIds };
-                          if (id == null) delete next[key]; else next[key] = id;
-                          // ⚠️ **空になったらキーごと落とす**（PR #914 レビュー ℹ️・場面形式と同じ正規化）
-                          // ＝空の入れ物を残すと、見た目に変化のない操作で取り消しが1段積まれる。
-                          setSelectedVisualContent({ textFontIds: Object.keys(next).length ? next : undefined });
-                        }}
+                        // 置く／外すの規則は **domain に1つ**（`withTextFontId`＝残りを引き継ぐ・空なら落とす）。
+                        onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                       />
                     </label>
                   ))}
@@ -4445,11 +4437,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             value={selected.textFontIds?.[key] ?? null}
                             allowInherit
                             {...editGuard()}
-                            onChange={(id) => {
-                              const next = { ...selected.textFontIds };
-                              if (id == null) delete next[key]; else next[key] = id;
-                              setSelectedVisualContent({ textFontIds: Object.keys(next).length ? next : undefined });
-                            }}
+                            onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                           />
                         </label>
                       ))}
