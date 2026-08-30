@@ -151,3 +151,26 @@ describe('見た目パターンの部品の種別ごとの文字の形', () => {
     expect(setVisualClipContent(doc(), 'clip_001', { textFontIds: { title: 'gen-interface-jp' } }).ok).toBe(false);
   });
 });
+
+// ⚠️ **空の入れ物を残さない**（PR #914 レビュー ℹ️）＝場面形式と同じ正規化。残すと、見た目に変化の
+// 無い操作で取り消しが1段積まれ、同じ絵の文書が2通りできる。
+describe('種別ごとの文字の形を空にしたとき', () => {
+  const templateClip = (textFontIds?: object): TimelineProject => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_1', ...(textFontIds ? { textFontIds } : {}) } as never;
+    return d;
+  };
+
+  it('未指定を書くとキーごと落ちる', () => {
+    const r = setVisualClipContent(templateClip({ title: 'gen-interface-jp' }), 'clip_001', { textFontIds: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect('textFontIds' in r.doc.clips[0]).toBe(false);
+  });
+
+  it('もともと無いところへ未指定を書いても、何も変わらない（空振りの取り消しを積まない）', () => {
+    const d = templateClip();
+    const r = setVisualClipContent(d, 'clip_001', { textFontIds: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc).toBe(d); // 同じ文書＝履歴に載らない
+  });
+});

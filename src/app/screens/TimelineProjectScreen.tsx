@@ -968,6 +968,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? templates.find((t) => t.templateId === selected.templateId)
     : undefined;
   const slotLayers = selectedTemplate?.layers.filter((l) => templateSlotIds(selectedTemplate.layers).has(l.id)) ?? [];
+  /**
+   * **いまバラせるか**（差分再監査 5巡目 🟡）。実際にバラす関数を**空撃ち**して理由を引く。
+   *
+   * ⚠️ **押す前に断る**＝バラせない理由（切り抜き・寄せ・動き・切り出した動画…）は押す前に分かるのに、
+   * 取り返しのつかない操作の顔をした確認に**同意させてから**断っていた（同じ画面の「分ける」は押す前に
+   * 断るので、同じ種類の操作で断り方が2通り＝ADR-0026②）。判定は実際に走る関数そのもの＝
+   * 「押せるのに何も起きない」も「押せないのに実はできる」も作らない。
+   * ⚠️ **覚えておく**（PR #914 レビュー 🟡）＝`explodeTemplateClip` は中身を作り直す軽くない関数で、
+   * この欄は**再生中も出たまま**（再生位置の更新で毎フレーム描き直される）＝素で呼ぶと走り続ける。
+   */
+  const selectedExplodeIssue = useMemo(
+    () => (doc && selected && selectedTemplate
+      ? (() => {
+        const r = explodeTemplateClip(doc, selected.id, selectedTemplate);
+        return r.ok ? {} : { disabled: true, hint: editBlockedMessage[r.reason] };
+      })()
+      : {}),
+    [doc, selected, selectedTemplate],
+  );
   // その部品の差し込み口に入っている動画（#512 段3b）＝元の音の欄を出す先。判定は domain の1か所。
   const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot) : [];
   const slotNames = slotLabelsFor(slotLayers);
@@ -2532,6 +2551,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 断るので、同じ種類の操作で断り方が2通り＝ADR-0026②）。判定は実際に走る関数そのもの＝
    * 「押せるのに何も起きない」も「押せないのに実はできる」も作らない。
    */
+  /** 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。 */
   const explodeExtra = (clipId: string, template: Template): { disabled?: boolean; hint?: string } => {
     if (!doc) return {};
     const r = explodeTemplateClip(doc, clipId, template);
@@ -2589,9 +2609,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ? [{
               label: "中身をバラす",
               ...singleClipMenuGuard,
-              ...(explodeExtra(menuClip.id, menuClipTemplate).disabled
-                ? { disabled: true, disabledHint: explodeExtra(menuClip.id, menuClipTemplate).hint }
-                : {}),
+              // ⚠️ **評価は1回**（PR #914 レビュー 🟡）＝同じ引数で2回呼ぶのは無駄
+              // （`explodeTemplateClip` は中身を作り直す軽くない関数）。
+              ...(() => {
+                const issue = explodeExtra(menuClip.id, menuClipTemplate);
+                return issue.disabled ? { disabled: true, disabledHint: issue.hint } : {};
+              })(),
               // 戻せないので**押す前に断る**（ADR-0032 決定23）＝確認は共有の `DeleteConfirm`。
               onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate, from: PANEL_ID.arrange }),
             }]
@@ -4349,14 +4372,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           // まるごと差し替えで解かれるので**残りの種別を引き継ぐ**（1つ選ぶと他が消える、を作らない）。
                           const next = { ...selected.textFontIds };
                           if (id == null) delete next[key]; else next[key] = id;
-                          setSelectedVisualContent({ textFontIds: next });
+                          // ⚠️ **空になったらキーごと落とす**（PR #914 レビュー ℹ️・場面形式と同じ正規化）
+                          // ＝空の入れ物を残すと、見た目に変化のない操作で取り消しが1段積まれる。
+                          setSelectedVisualContent({ textFontIds: Object.keys(next).length ? next : undefined });
                         }}
                       />
                     </label>
                   ))}
                   <button
                     className="btn btn-secondary"
-                    {...editGuard(explodeExtra(selected.id, selectedTemplate))}
+                    {...editGuard(selectedExplodeIssue)}
                     onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate, from: PANEL_ID.selected })}
                   >
                     中身をバラす
