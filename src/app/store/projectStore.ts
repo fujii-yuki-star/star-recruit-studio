@@ -534,6 +534,11 @@ interface ProjectState {
   /** フォントの取り込み/削除で出た理由（§2-5）。 */
   fontError: string | null;
   /**
+   * 文字の形まわりの**知らせ**（`/canon-check` ℹ️）。⚠️ **成功を `fontError` に載せない**＝
+   * 画面はそれを赤字の `role="alert"` で出すので、うまくいったのに**失敗のように見える**。
+   */
+  fontNotice: string | null;
+  /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
    * ⚠️ **失敗しても止めない**（§2-5）＝成功した分は残し、入らなかったものを名前で示す。
@@ -743,6 +748,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   userFontsUnreadable: false,
   userFonts: [],
   fontError: null,
+  fontNotice: null,
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -2406,7 +2412,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   removeUserFont: async (fontId) => {
-    set({ fontError: null });
+    set({ fontError: null, fontNotice: null });
     try {
       await deleteUserFont(fontId);
       await get().refreshUserFonts();
@@ -2419,7 +2425,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         //（フォントを消しただけのつもりが会社の見た目が空になる・§2-5）。他の呼び出しは
         // 例外なく `...brandKit` を先に広げている＝ここだけ抜けていた。
         const ok = await get().updateBrandKit({ ...get().brandKit, fontId: undefined });
-        set({ fontError: ok ? BRAND_FONT_CLEARED_MESSAGE : BRAND_FONT_CLEAR_FAILED_MESSAGE });
+        // ⚠️ **うまくいったほうは知らせの側へ**（`/canon-check` ℹ️）＝赤字で出すと失敗に見える。
+        if (ok) set({ fontNotice: BRAND_FONT_CLEARED_MESSAGE });
+        else set({ fontError: BRAND_FONT_CLEAR_FAILED_MESSAGE });
       }
       return true;
     } catch (e) {

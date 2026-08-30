@@ -15,6 +15,8 @@ vi.mock('../../infrastructure/bakeFs', async (orig) => ({
 import { useProjectStore } from './projectStore';
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from '../../infrastructure/projectFs';
 import { copyBakedFiles } from '../../infrastructure/bakeFs';
+import { ProjectLoadError } from '../../domain/project/persistence';
+import { DUPLICATE_FAILED_MESSAGE } from '../uiLabels';
 
 const doc = {
   schemaVersion: '1.25',
@@ -121,6 +123,26 @@ describe('duplicateProject', () => {
     expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
     expect(useProjectStore.getState().importError).toBe('読めません');
     expect(saveProjectDoc).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **何度押しても直らない理由を「もう一度お試しください」に丸めない**（α-6 出口監査 🟡・§2-5）＝
+  // 新しい版で作られた・壊れている文書は再試行では直らない。同じ画面の「開く」は理由を保っているので、
+  // 複製だけ丸めると**同じ文書に対して入口で案内が割れる**（ADR-0026②）。
+  it('開けない理由（新しい版・壊れている）はそのまま出す', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(
+      new ProjectLoadError('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。'),
+    );
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError)
+      .toBe('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。');
+    expect(useProjectStore.getState().importError).not.toBe(DUPLICATE_FAILED_MESSAGE);
+  });
+
+  // 分類できない失敗のときだけ定型文（再試行で直りうる）。
+  it('分類できない失敗は定型文にする', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(new Error('EBUSY'));
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).toBe(DUPLICATE_FAILED_MESSAGE);
   });
 
   /** ⚠️ 書き出し中は別の動画へ切り替えない（進行中の書き出しが見ているものを保つ・#379）。 */

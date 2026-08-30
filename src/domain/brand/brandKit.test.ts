@@ -65,6 +65,16 @@ describe('parseBrandKit（生のまま内部へ流さない・§2-2）', () => {
   it('中身が空の JSON は「空のキット」（読めなかったとは区別する）', () => {
     expect(parseBrandKit('{}')).toEqual({});
   });
+
+  // ⚠️ **境界を戻す**（`/canon-check` ℹ️）＝戻り型を `BrandKit | null` へ変えたとき、
+  // 配列・JSON の `null` の分岐が検査から落ちていた（どちらも「読めなかった」との境目）。
+  it('配列は「空のキット」（形は違うが JSON としては読めている）', () => {
+    expect(parseBrandKit('[]')).toEqual({});
+  });
+
+  it('JSON の null は「読めなかった」（空のキットにしない）', () => {
+    expect(parseBrandKit('null')).toBeNull();
+  });
 });
 
 describe('hasBrandKit', () => {

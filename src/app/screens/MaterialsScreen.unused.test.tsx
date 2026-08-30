@@ -267,4 +267,25 @@ describe("MaterialsScreen 取り消しで戻る場面が指す素材", () => {
     setup({ past: [{ scenes: [scene({ main: "asset_001" })] }] });
     expect(screen.getByText(/どこにも置いていないものだけ（1）/)).toBeInTheDocument();
   });
+
+  // ⚠️ **1件ずつの削除でも同じことを言う**（`/canon-check` ℹ️）＝「まとめて消す」側だけ履歴を数えて
+  // いたので、1件削除の確認は**いまの場面だけ**を見て「どこでも使われていません」と言い切っていた
+  //（同じ穴が入口違いで残る＝ADR-0026②）。素材は履歴の外なので、消したあとに取り消しても戻らない。
+  const pickAndDelete = (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
+    fireEvent.click(screen.getByRole("button", { name: "この素材を削除" }));
+  };
+
+  it("取り消しで戻る場面が使っているときは、その旨を先に言う", () => {
+    setup({ past: [deleted] });
+    pickAndDelete("消した場面の写真");
+    expect(screen.getByText(/「元に戻す」で戻る場面が使っています/)).toBeInTheDocument();
+    expect(screen.queryByText(/この素材はどの場面でも使われていません。/)).toBeNull();
+  });
+
+  it("履歴にも無ければ、これまでどおり「どの場面でも使われていません」", () => {
+    setup({});
+    pickAndDelete("消した場面の写真");
+    expect(screen.getByText(/この素材はどの場面でも使われていません。/)).toBeInTheDocument();
+  });
 });

@@ -141,6 +141,15 @@ const copySets = {
     'template Layer.shadow': templateSchema.$defs.Layer.properties.shadow,
     'project TextShadow': projectSchema.$defs.TextShadow,
   },
+  // ⚠️ **写しはすべて群に入れる**（`/canon-check` 🟡）＝`letterSpacing` は写しなのに群に無く、
+  // timeline 側の値域を緩めても誰も落ちなかった（schema の説明は「形の一致検査で固定してある」と
+  // 書いていたので、**主張がコードより強い**状態だった）。
+  letterSpacing: {
+    'template Layer.letterSpacing': templateSchema.$defs.Layer.properties.letterSpacing,
+    'project TextStyle.letterSpacing': projectSchema.$defs.TextStyle.properties.letterSpacing,
+    'project FreeElement.letterSpacing': projectSchema.$defs.FreeElement.properties.letterSpacing,
+    'timeline TimelineClip.letterSpacing': timelineSchema.$defs.TimelineClip.properties.letterSpacing,
+  },
 };
 // ⚠️ **判定は群ごとに持つ**（PR #914 レビュー 🟡）＝1つの変数を使い回すと、先に落ちた群のせいで
 // **一致している群まで FAIL と表示**され、直す先を間違わせる（この検査が防ぐと謳っているもの）。
@@ -391,9 +400,11 @@ const tlAccept = [
   ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   // 文字の体裁（#264・ADR-0032 追補3＝両形式に効く共有の語彙）。
-  // ⚠️ **タイムライン側の schema は `$ref` ではなく同じ形を書き写している**（`fontId`・`strokeWidth`・
-  // `background` も同様）。書き足したとき**片方だけになりやすい**ので、両方に効いていることを
-  // ここで固定する（実際、最初は場面形式にしか足しておらず、この検査で気づいた）。
+  // ⚠️ **`$ref` と写しが混ざっている**（`/canon-check` 🟡で実態を調べ直した）＝タイムライン側は
+  // **`shadow`・`fontId` は `$ref`**（`project.schema.json` を指す）で、**`letterSpacing`・`background`・
+  // `strokeWidth` は同じ形の写し**。写しは書き足したとき**片方だけになりやすい**ので、
+  // 両方に効いていることをここで固定する（実際、最初は場面形式にしか足しておらず、この検査で気づいた）。
+  // 写しの**形そのもの**は下の `copySets` が突き合わせる（値域を緩めても気づける）。
   ['timeline: 字間（letterSpacing）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: 0.1 })],
   ['timeline: 影（shadow）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
   // 読み上げクリップ（1.1・#628）。声は素材ではなく「中身」（読み上げ文＋話者）を持つ。
@@ -425,6 +436,8 @@ tlAccept.push(
 );
 
 const tlReject = [
+  // ⚠️ **写しの値域は下限も突く**（`/canon-check` 🟡）＝上限だけ見ていると、下限を緩めても気づけない。
+  ['timeline: 字間が下限より小さい(-1)のは拒否（写しの値域＝場面形式と同じ -0.5〜2・#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: -1 })],
   // ⚠️ **`$ref` 共有の兄弟も拒否側で固定する**（α-6 出口監査 🟡）＝受け入れだけだと、
   // 写しが生まれて**制約が緩んだ**ときに気づけない。
   ['timeline: クレジットの未知の見せ方は拒否（1.28・$ref 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'sometimes' } } })],

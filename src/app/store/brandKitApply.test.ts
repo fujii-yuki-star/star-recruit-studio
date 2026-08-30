@@ -17,6 +17,7 @@ vi.mock('../../infrastructure/userFontFs', () => ({
 import { useProjectStore } from './projectStore';
 import { loadBrandKit, saveBrandKit } from '../../infrastructure/brandKitFs';
 import { ASSET_TYPE } from '../../domain/enums';
+import { BRAND_LOGO_NOT_APPLIED_MESSAGE } from '../uiLabels';
 import type { Asset } from '../../domain/project/types';
 
 const logo: Asset = {
@@ -42,6 +43,8 @@ beforeEach(() => {
   importFromLibrary.mockClear();
   vi.mocked(loadBrandKit).mockResolvedValue({});
   useProjectStore.getState().setExportRun({ phase: 'idle' });
+  // ⚠️ **前のテストの理由を持ち越さない**＝残ると「出さない」側の検査が別の理由で落ちる（切り分けにくい）。
+  useProjectStore.setState({ importError: null } as never);
   setProject();
 });
 afterEach(() => vi.clearAllMocks());
@@ -219,6 +222,24 @@ describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () 
     setProject({ assets: [logo] });
     await useProjectStore.getState().applyBrandKitToNew();
     expect(importFromLibrary).toHaveBeenCalledWith('lib_asset_001');
+  });
+
+  // ⚠️ **入らなくても動画は作るが、入らなかったことは言う**（ADR-0036・§2-5）＝
+  // 既存への明示適用（`applyBrandKit`）には対の検査があるのに、新規側は失敗の検査が無かった
+  //（`/canon-check` 🟡）＝**片方だけ黙る**を許してしまう（ADR-0026②）。
+  it('ロゴを取り込めなければ、理由を出す（黙って作らない）', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic', logoLibraryAssetId: 'lib_asset_001' });
+    importFromLibrary.mockResolvedValueOnce(null as never);
+    await useProjectStore.getState().applyBrandKitToNew();
+    expect(useProjectStore.getState().importError).toBe(BRAND_LOGO_NOT_APPLIED_MESSAGE);
+    // ⚠️ **フォントは入る**＝ロゴが入らなくても動画づくりは止めない。
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
+  });
+
+  it('ロゴが入ったときは理由を出さない', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ logoLibraryAssetId: 'lib_asset_001' });
+    await useProjectStore.getState().applyBrandKitToNew();
+    expect(useProjectStore.getState().importError).toBeNull();
   });
 });
 

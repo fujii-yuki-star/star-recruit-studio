@@ -18,6 +18,8 @@ function layout(): SceneLayout {
       { kind: 'image', id: 'slot', x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: 'asset_v', fit: 'cover', role: 'slot', label: 'メイン' },
       { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false },
       { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false },
+      // 立ち絵の絵（`role:'character'`）＝#809 で**ここも動画の置き場所になった**。
+      { kind: 'image', id: 'yuko', x: 1200, y: 200, w: 400, h: 800, zIndex: 20, assetId: 'asset_pose', fit: 'contain', role: 'character', label: 'ゆうこ' },
     ],
   };
 }
@@ -84,10 +86,21 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(noBg?.belowSvg).not.toContain('fill="#123456"');
   });
 
-  it('image/role=slot でない id（fill/text）や未知 id は null', () => {
+  // ⚠️ **役割では絞らない**（#809・α-6 出口監査 🔴1）＝当てるのは `kind==='image'` と id だけ。
+  // 役割で絞ると**立ち絵に入れた動画**（`role:'character'`）が必ず外れ、穴が開かないまま
+  // 実映像を重ねる＝プレビュー（静止）と書き出し（実映像）が割れる（ADR-0001）。
+  it('絵でない id（fill/text）や未知 id は null', () => {
     expect(splitVideoSceneSvg(layout(), 'bg')).toBeNull(); // fill
     expect(splitVideoSceneSvg(layout(), 'title')).toBeNull(); // text
     expect(splitVideoSceneSvg(layout(), 'nope')).toBeNull(); // 未知
+  });
+
+  it('立ち絵の絵（role=character）も穴を開ける対象になる', () => {
+    const r = splitVideoSceneSvg(layout(), 'yuko');
+    expect(r?.slot).toEqual({ x: 1200, y: 200, w: 400, h: 800 });
+    // 穴が開いている＝その絵は下にも上にも描かれない（実映像がそこへ入る）。
+    expect(r?.belowSvg).not.toContain('asset_pose');
+    expect(r?.aboveSvg).not.toContain('asset_pose');
   });
 });
 

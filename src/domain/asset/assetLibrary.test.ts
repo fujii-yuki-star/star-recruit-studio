@@ -11,7 +11,7 @@ import {
   LIBRARY_ASSET_ID_SAMPLES,
   type LibraryAsset,
 } from './assetLibrary';
-import { ASSET_TYPE, ASSET_TYPES, ASSET_TYPE_SAMPLES } from '../enums';
+import { ASSET_TYPE, ASSET_TYPES, ASSET_TYPE_SAMPLES, isAssetType } from '../enums';
 
 const lib = (over: Partial<LibraryAsset> = {}): LibraryAsset => ({
   id: 'lib_asset_001',
@@ -187,7 +187,10 @@ describe('ASSET_TYPE_SAMPLES（Rust と同じ答えになることの入力）',
     };
     expect(ASSET_TYPE_SAMPLES).toHaveLength(Object.keys(expected).length);
     for (const v of ASSET_TYPE_SAMPLES) {
-      expect([v, (ASSET_TYPES as readonly string[]).includes(v)]).toEqual([v, expected[v]]);
+      // ⚠️ **実際に使う述語で見る**（`/canon-check` ℹ️）＝一覧に含まれるかを直接見ると、
+      // `toLibraryAsset` が通す `isAssetType` に別の分岐（別名の受け入れ等）が入ったとき
+      // **Rust とのずれを素通しする**。門は「使う判定」で固定する。
+      expect([v, isAssetType(v)]).toEqual([v, expected[v]]);
     }
   });
 

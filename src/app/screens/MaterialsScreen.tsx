@@ -541,9 +541,15 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 message={
                   <>
                     「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
+                    {/* ⚠️ **取り消しで戻る場面も見る**（`/canon-check` ℹ️）＝「まとめて消す」側は
+                        数えているのに、1件削除は**いまの場面だけ**を見て「どこでも使われていません」と
+                        言い切っていた（同じ穴が入口違いで残る＝ADR-0026②）。素材は履歴の外なので、
+                        消したあとに取り消しても戻らない＝**先に言う**（§2-5）。 */}
                     {usedSceneCount > 0
                       ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
-                      : "この素材はどの場面でも使われていません。"}
+                      : unusedIds.has(selected.assetId)
+                        ? "この素材はどの場面でも使われていません。"
+                        : "いまはどの場面でも使われていませんが、「元に戻す」で戻る場面が使っています。削除すると、元に戻しても素材は戻りません。"}
                   </>
                 }
                 onCancel={() => setConfirmDeleteId(null)}

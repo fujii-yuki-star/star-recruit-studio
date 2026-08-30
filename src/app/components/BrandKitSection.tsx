@@ -27,6 +27,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
   // ⚠️ **覚え直しが書けなかった理由**（α-6 出口監査 🟡23）＝黙って覚えた顔をしない（§2-5）。
   const brandKitError = useProjectStore((s) => s.brandKitError);
+  const brandKitUnreadable = useProjectStore((s) => s.brandKitUnreadable);
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
@@ -121,6 +122,17 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         よく使う文字の形・色・ロゴを覚えておくと、新しい動画に最初から入ります。
         すでに作った動画は自動では変わりません（下のボタンを押したときだけ反映します）。
       </p>
+
+      {/* ⚠️ **読めていないことを言う**（`/canon-check` 🟡・§2-5）＝黙っていると**空のキット**
+          （「覚えない」・色0件・ロゴ無し）を見せる＝兄弟の欄（よく使う素材・文字の形）は同じ状況で
+          「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
+          ⚠️ **覚えている中身は上書きしない**ので、この間は変えられない（変えると消える）。 */}
+      {brandKitUnreadable && (
+        <p className="form-error" role="alert">
+          会社の見た目を読めませんでした。覚えている内容を失わないよう、変更はできません。
+          アプリを開き直すと直ることがあります。直らないときは、お手数ですがご連絡ください。
+        </p>
+      )}
 
       <div className="field">
         <label className="field-label" htmlFor="brandFont">いつもの文字の形</label>
