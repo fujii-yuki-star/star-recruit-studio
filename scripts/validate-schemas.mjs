@@ -142,14 +142,18 @@ const copySets = {
     'project TextShadow': projectSchema.$defs.TextShadow,
   },
 };
+// ⚠️ **判定は群ごとに持つ**（PR #914 レビュー 🟡）＝1つの変数を使い回すと、先に落ちた群のせいで
+// **一致している群まで FAIL と表示**され、直す先を間違わせる（この検査が防ぐと謳っているもの）。
 let copyOk = true;
 for (const [what, shapes] of Object.entries(copySets)) {
   const entries = Object.entries(shapes);
   const baseJson = JSON.stringify(shapeOnly(entries[0][1]));
+  let groupOk = true;
   for (const [name, shape] of entries) {
-    if (JSON.stringify(shapeOnly(shape)) !== baseJson) { copyOk = false; console.log(`  ${name} が他とずれています`); }
+    if (JSON.stringify(shapeOnly(shape)) !== baseJson) { groupOk = false; console.log(`  ${name} が他とずれています`); }
   }
-  console.log(`${copyOk ? 'PASS' : 'FAIL'}  shape  ${what} の形が${entries.length}か所で一致`);
+  console.log(`${groupOk ? 'PASS' : 'FAIL'}  shape  ${what} の形が${entries.length}か所で一致`);
+  copyOk = copyOk && groupOk;
 }
 ok = ok && copyOk;
 
