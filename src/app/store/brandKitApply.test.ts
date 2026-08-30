@@ -6,8 +6,16 @@ vi.mock('../../infrastructure/brandKitFs', () => ({
   saveBrandKit: vi.fn(async () => {}),
 }));
 
+vi.mock('../../infrastructure/userFontFs', () => ({
+  listUserFonts: vi.fn(async () => []),
+  loadUserFonts: vi.fn(async () => {}),
+  deleteUserFont: vi.fn(async () => {}),
+  importUserFont: vi.fn(),
+  usedUserFontIds: vi.fn(() => []),
+}));
+
 import { useProjectStore } from './projectStore';
-import { loadBrandKit } from '../../infrastructure/brandKitFs';
+import { loadBrandKit, saveBrandKit } from '../../infrastructure/brandKitFs';
 import { ASSET_TYPE } from '../../domain/enums';
 import type { Asset } from '../../domain/project/types';
 
@@ -211,5 +219,38 @@ describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () 
     setProject({ assets: [logo] });
     await useProjectStore.getState().applyBrandKitToNew();
     expect(importFromLibrary).toHaveBeenCalledWith('lib_asset_001');
+  });
+});
+
+// 会社の見た目は**丸ごと置き換えて**保存する（`updateBrandKit`）＝1項目だけ渡すと残りが消える。
+// ⚠️ **フォントを消しただけのつもりで色とロゴまで消えた**（PR #922 レビュー 🔴）ので、ここで固定する。
+describe('持ち込みフォントを消したとき、会社の見た目のほかの項目を巻き添えにしない', () => {
+  it('指していたフォントは外れ、色とロゴは残る', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' },
+      brandKitUnreadable: false,
+    } as never);
+
+    await useProjectStore.getState().removeUserFont('user_font_001');
+
+    expect(useProjectStore.getState().brandKit).toEqual({
+      colors: ['#112233'],
+      logoLibraryAssetId: 'lib_asset_001',
+    });
+    // 保存した中身も同じ（画面だけ残って保存が空、を作らない）。
+    expect(vi.mocked(saveBrandKit).mock.calls[vi.mocked(saveBrandKit).mock.calls.length - 1][0]).toEqual({
+      colors: ['#112233'],
+      logoLibraryAssetId: 'lib_asset_001',
+    });
+  });
+
+  it('別のフォントを消したときは会社の見た目に触らない', async () => {
+    const kit = { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' };
+    useProjectStore.setState({ brandKit: kit, brandKitUnreadable: false } as never);
+
+    await useProjectStore.getState().removeUserFont('user_font_002');
+
+    expect(useProjectStore.getState().brandKit).toEqual(kit);
+    expect(vi.mocked(saveBrandKit)).not.toHaveBeenCalled();
   });
 });

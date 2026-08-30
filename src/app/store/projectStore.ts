@@ -2364,6 +2364,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (kit == null) { set({ brandKitUnreadable: true }); return; }
     set({ brandKit: kit, brandKitUnreadable: false });
   },
+  /**
+   * 会社の見た目を**丸ごと置き換えて**保存する。
+   *
+   * ⚠️ **足りない項目は「変えない」ではなく「消す」**＝呼ぶ側は必ず `{ ...brandKit, 変える項目 }` の形で
+   * 渡すこと（1項目だけ渡すと**残りが消える**・PR #922 レビュー 🔴 の実例）。
+   * ⚠️ **混ぜる（merge）形にはしない**＝`undefined` を渡して**外す**（ロゴ・フォント）ができなくなる。
+   */
   updateBrandKit: async (next) => {
     // ⚠️ **読めていないものを上書きしない**（差分再監査 3巡目 🟡）＝覚えている中身が分からない
     // 状態で書くと、消えたことにも気づけない。
@@ -2407,7 +2414,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 以後に作る**すべての新規動画**が不在のフォントで始まり、プレビューは黙って既定の字体・
       // 気づけるのは**別の動画の書き出し直前**（公開前チェック）だけになる。
       if (get().brandKit.fontId === fontId) {
-        const ok = await get().updateBrandKit({ fontId: undefined });
+        // ⚠️ **いまの中身を広げてから外す**（PR #922 レビュー 🔴）＝`updateBrandKit` は**丸ごと
+        // 置き換える**ので、`{ fontId: undefined }` だけ渡すと**色とロゴを巻き添えで消す**
+        //（フォントを消しただけのつもりが会社の見た目が空になる・§2-5）。他の呼び出しは
+        // 例外なく `...brandKit` を先に広げている＝ここだけ抜けていた。
+        const ok = await get().updateBrandKit({ ...get().brandKit, fontId: undefined });
         set({ fontError: ok ? BRAND_FONT_CLEARED_MESSAGE : BRAND_FONT_CLEAR_FAILED_MESSAGE });
       }
       return true;
