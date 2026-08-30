@@ -290,7 +290,12 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         ) : (
         <>
           {/* ⚠️ **押す前に何が変わるかを見せる**（決定3・#547 の「まとめて標準にする」と同型）。 */}
-          {nothingToApply ? (
+          {/* ⚠️ **読めていないときに「同じです」と言わない**（差分再監査の対応で気づいた・§2-5）＝
+              覚えている中身が読めていないだけで、**同じだと確かめたわけではない**。上の断りと合わせて
+              「いまは反映できない」と言う（嘘の安心を出さない）。 */}
+          {brandKitUnreadable ? (
+            <p className="field-hint">会社の見た目を読めていないので、いまは反映できません。</p>
+          ) : nothingToApply ? (
             <p className="field-hint">この動画は、覚えている見た目と同じです。反映するものはありません。</p>
           ) : (
             <>

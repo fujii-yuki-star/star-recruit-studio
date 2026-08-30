@@ -236,6 +236,16 @@ describe("BrandKitSection", () => {
     expect(saveBrandKit).toHaveBeenCalledWith({});
   });
 
+  // ⚠️ **読めていないときに「同じです」と言わない**（§2-5）＝読めていないだけで、
+  // **同じだと確かめたわけではない**（嘘の安心を出さない）。
+  it("読めないときは「同じです」ではなく「反映できません」と言う", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/いまは反映できません/)).toBeInTheDocument();
+    expect(screen.queryByText(/覚えている見た目と同じです/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /この動画に反映する/ })).toBeNull();
+  });
+
   it("押す前に確認する（押した瞬間に消さない）", () => {
     useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
     render(<BrandKitSection />);
