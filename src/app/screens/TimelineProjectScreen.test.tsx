@@ -2488,7 +2488,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText(/この動画にはまだ写真がありません/)).toBeInTheDocument();
     expect(screen.queryByText(/素材の画面で取り込む/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /写真・動画を取り込む/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument(); // できることは残る
   });
 
@@ -2496,7 +2496,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText(/置ける映像の列がありません/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /写真・動画を取り込む/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
   });
 
   it("続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {

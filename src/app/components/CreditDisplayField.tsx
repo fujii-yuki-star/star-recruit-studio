@@ -8,7 +8,7 @@ import { useProjectStore } from "../store/projectStore";
 import { NumberField } from "./NumberField";
 import {
   CREDIT_MODE, CREDIT_SECONDS_MAX, CREDIT_SECONDS_MIN, creditClipboardText,
-  resolveCreditDisplay, type CreditMode,
+  resolveCreditDisplay, type CreditDisplay, type CreditMode,
 } from "../../domain/voice/creditDisplay";
 import { usedVoiceCredits } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -22,10 +22,32 @@ const MODE_LABEL: Record<CreditMode, string> = {
   [CREDIT_MODE.hidden]: "動画には出さない",
 };
 
-export function CreditDisplayField({ disabled }: { disabled?: boolean }) {
-  const creditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
+/**
+ * 声の表記の出し方の欄。**どちらの形式からも使える**（差分再監査 3巡目）。
+ *
+ * ⚠️ **タイムライン形式に入口が無かった**＝書き出しには効く（`creditTextAt` が毎フレーム焼く）のに
+ * 設定を書ける画面が場面形式にしか無く、**効くのに選べない**まま（ADR-0026②）。
+ * ⚠️ **値の持ち主は `onChange` の有無で決める**＝`value ?? 場面形式の値` にすると、別の動画の
+ * 設定を自分のものとして見せる（`AudioAutoField` で実際に踏んだ）。
+ */
+export function CreditDisplayField({
+  disabled,
+  value,
+  onChange,
+  /** 表記に載せる話者を数える材料（省略＝場面形式の場面を見る）。タイムライン形式は読み上げクリップ。 */
+  speakers,
+}: {
+  disabled?: boolean;
+  value?: CreditDisplay;
+  onChange?: (patch: CreditDisplay) => void;
+  speakers?: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>;
+}) {
+  const sceneCreditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
   const setCreditDisplay = useProjectStore((s) => s.setCreditDisplay);
-  const scenes = useProjectStore((s) => s.scenes);
+  const sceneScenes = useProjectStore((s) => s.scenes);
+  const ownsValue = onChange != null;
+  const creditDisplay = ownsValue ? value : sceneCreditDisplay;
+  const scenes = speakers ?? sceneScenes;
   const [copied, setCopied] = useState(false);
   const { mode, seconds } = resolveCreditDisplay(creditDisplay);
   const showSeconds = mode === CREDIT_MODE.head || mode === CREDIT_MODE.tail || mode === CREDIT_MODE.both;
@@ -39,7 +61,7 @@ export function CreditDisplayField({ disabled }: { disabled?: boolean }) {
         className="input"
         value={mode}
         disabled={disabled}
-        onChange={(e) => { setCreditDisplay({ mode: e.target.value as CreditMode }); setCopied(false); }}
+        onChange={(e) => { (onChange ?? setCreditDisplay)({ mode: e.target.value as CreditMode }); setCopied(false); }}
       >
         {Object.entries(MODE_LABEL).map(([v, label]) => (
           <option key={v} value={v}>{label}</option>
@@ -60,7 +82,7 @@ export function CreditDisplayField({ disabled }: { disabled?: boolean }) {
           disabled={disabled}
           inputStyle={{ width: 80 }}
           style={{ marginTop: 6, flex: "none" }}
-          onChange={(v) => setCreditDisplay({ seconds: v })}
+          onChange={(v) => (onChange ?? setCreditDisplay)({ seconds: v })}
         />
       )}
 

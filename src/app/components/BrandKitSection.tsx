@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
@@ -43,6 +44,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // ⚠️ **開いているかは `projectId` で見る**（差分再監査）＝場面の数で見ると、白紙から作った直後
   //（場面0）でも「開いていません」と言ってしまう（実際は開いている＝嘘の理由・§2-5）。
   const hasProject = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
+  const projectName = useProjectStore((s) => s.meta.projectName);
+  // ⚠️ **タイムライン形式の動画には反映できない**（差分再監査 3巡目 🔴）＝この欄は場面形式の文書に
+  // しか書かない。タイムラインを開いている間に押すと、**画面に映っていない別の文書**へ入って
+  // 「反映しました」と出る（見ているものは変わらない＝ADR-0026④・§2-5）。押す前に断る。
+  const timelineOpen = useTimelineStore((s) => s.doc != null);
   // ⚠️ **書き出し中は押せなくする**（α-6 出口監査 🟡14）＝store 側は断るのに画面は押せてしまい、
   // コメントの「押せないようにもしてある」が実態と違っていた（押す前に理由を出す＝§2-5）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
@@ -217,8 +223,21 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           押せない理由（＝先に動画を開く）をその場に出す（§2-5）。 */}
       <div className="mt">
         <hr className="divider" />
-        <span className="field-label">いま開いている動画に反映する</span>
-        {!hasProject ? (
+        {/* ⚠️ **どの動画に入るかを名指しする**（差分再監査 3巡目）＝開いている文書が2種類あるので、
+            「いま開いている動画」だけでは**どちらのことか分からない**。 */}
+        {/* ⚠️ **名指しと断りを食い違わせない**（PR #912 レビュー 🟡）＝場面形式とタイムラインは
+            **同時に開いていられる**ので、`hasProject` だけで名前を出すと「「◯◯」に反映する」の
+            直後に「反映できません」が並ぶ。名指しは**反映できるときだけ**にする。 */}
+        <span className="field-label">
+          {!timelineOpen && hasProject && projectName ? `「${projectName}」に反映する` : "いま開いている動画に反映する"}
+        </span>
+        {timelineOpen ? (
+          // ⚠️ **対象を名指しする**＝いま見ているのはタイムラインの動画なので、反映先が違うことを言う。
+          <p className="field-hint">
+            いま開いているタイムラインの動画には、ここからは反映できません。
+            会社の見た目は、新しく作る動画に最初から入ります。
+          </p>
+        ) : !hasProject ? (
           <p className="field-hint">いまは動画を開いていません。動画を開くと、ここから反映できます。</p>
         ) : (
         <>

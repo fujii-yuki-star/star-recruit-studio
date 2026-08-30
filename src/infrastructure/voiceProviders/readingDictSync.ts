@@ -13,12 +13,6 @@ import type { DictSyncResult } from './userDict';
 import type { ReadingEntry } from '../../domain/voice/readingDict';
 
 /**
- * ⚠️ **合成の失敗は「文字列」で投げる**のがこの境界の慣習（Rust の `invoke` が拒否する形）＝
- * 受ける側（`projectStore` / `timelineStore` / 設定画面）が `typeof e === "string"` で見る。
- * `Error` で投げると**この文言が一度も画面に出ず**、「しばらくしてから、もう一度」＝効かない
- * 次の行動に化ける（PR #883 レビュー）。
- */
-/**
  * 辞書のファイルが読めないので声を作らない（差分再監査・ADR-0037 決定7）。
  *
  * ⚠️ **設定画面向けの文言を流用しない**＝あちらは「足す・外すは止めています」で、
@@ -29,6 +23,12 @@ export const READING_DICT_UNREADABLE_FOR_VOICE =
   'このまま声を作ると、会社名や人名が違う読みになることがあります。' +
   'アプリを開き直してから、もう一度お試しください。';
 
+/**
+ * ⚠️ **合成の失敗は「文字列」で投げる**のがこの境界の慣習（Rust の `invoke` が拒否する形）＝
+ * 受ける側（`projectStore` / `timelineStore` / 設定画面）が `typeof e === "string"` で見る。
+ * `Error` で投げると**この文言が一度も画面に出ず**、「しばらくしてから、もう一度」＝効かない
+ * 次の行動に化ける（PR #883 レビュー）。
+ */
 export const READING_DICT_SYNC_FAILED =
   '読み方を音声ソフトへ反映できませんでした。' +
   '設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。' +

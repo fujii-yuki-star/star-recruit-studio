@@ -11,6 +11,7 @@ vi.mock("../../infrastructure/brandKitFs", () => ({
 import { BrandKitSection } from "./BrandKitSection";
 import { saveBrandKit } from "../../infrastructure/brandKitFs";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import type { Scene } from "../../domain/project/types";
 
 const scene = { sceneId: "scene_001" } as unknown as Scene;
@@ -25,7 +26,8 @@ beforeEach(() => {
     // 動画側は別のフォント＝「変わるものがある」状態（そうしないと反映のボタンが出ない）。
     meta: { ...meta, videoSettings: { ...meta.videoSettings, fontId: "gen-interface-jp" } },
   } as never);
-  useProjectStore.setState({ brandKitError: null } as never);
+  useProjectStore.setState({ brandKitError: null, brandKitUnreadable: false } as never);
+  useTimelineStore.setState({ doc: null } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -147,5 +149,28 @@ describe("BrandKitSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "この動画に反映する" }));
     expect(await screen.findByText(/足したロゴは素材に残ります/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "元に戻す" })).toBeNull();
+  });
+
+  /**
+   * ⚠️ **タイムラインの動画には反映できない**（差分再監査 3巡目 🔴）＝この欄は場面形式の文書にしか
+   * 書かない。押せると**画面に映っていない別の文書**が変わって「反映しました」と出る（ADR-0026④）。
+   */
+  it("タイムラインを開いている間は、反映のボタンを出さず理由を出す", () => {
+    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
+    render(<BrandKitSection />);
+    expect(screen.queryByRole("button", { name: "この動画に反映する" })).toBeNull();
+    expect(screen.getByText(/タイムラインの動画には、ここからは反映できません/)).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **名指しと断りを食い違わせない**（PR #912 レビュー 🟡）＝場面形式とタイムラインは
+   * **同時に開いていられる**ので、名前を出すのは**反映できるときだけ**にする。
+   */
+  it("両方開いているときは、場面形式の名前で名指ししない", () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, projectId: "proj_20260830_0001", projectName: "会社紹介" } } as never);
+    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
+    render(<BrandKitSection />);
+    expect(screen.queryByText(/「会社紹介」に反映する/)).toBeNull();
   });
 });

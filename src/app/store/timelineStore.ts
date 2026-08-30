@@ -63,6 +63,7 @@ import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timel
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import type { TextShadow } from "../../domain/template/types";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
@@ -161,16 +162,24 @@ export type ExportStartBlock = {
  * ⚠️ **入らなくても動画は作る**＝コピーは失敗しうる（置き場から消えている等）ので、
  * 足せなければロゴ無しで作る（新規作成そのものは止めない＝場面形式と同じ）。
  */
-async function withBrandLogo(doc: TimelineProject, logoLibraryAssetId: string | undefined): Promise<TimelineProject> {
-  if (logoLibraryAssetId == null) return doc;
+async function withBrandLogo(
+  doc: TimelineProject,
+  logoLibraryAssetId: string | undefined,
+): Promise<{ doc: TimelineProject; added?: { assetId: string; relPath: string }; error?: string }> {
+  if (logoLibraryAssetId == null) return { doc };
   try {
-    const lib = (await listLibraryAssets())?.find((a) => a.id === logoLibraryAssetId);
-    if (!lib) return doc;
+    const list = await listLibraryAssets();
+    if (list == null) {
+      return { doc, error: "よく使う素材の一覧を読めませんでした。会社のロゴは入っていません。" };
+    }
+    const lib = list.find((a) => a.id === logoLibraryAssetId);
+    if (!lib) return { doc, error: "会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください。" };
     const { asset, fileName } = assetFromLibrary(lib, doc.assets.map((a) => a.assetId));
     const relPath = await copyLibraryAssetToProject(logoLibraryAssetId, doc.projectId, fileName);
-    return { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] };
+    return { doc: { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] }, added: { assetId: asset.assetId, relPath } };
   } catch {
-    return doc;
+    // ⚠️ **黙って落とさない**（差分再監査 3巡目 ℹ️・§2-5）＝場面形式は同じ状況で理由を出す。
+    return { doc, error: "会社のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
   }
 }
 
@@ -461,6 +470,8 @@ export interface TimelineState {
   setSelectedVisualContent: (patch: {
     text?: string; fontSize?: number; color?: string;
     fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
+    /** 字間・影（#264 の共有の語彙＝両形式で触れる・差分再監査 3巡目）。 */
+    letterSpacing?: number; shadow?: TextShadow;
     shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
   }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
@@ -838,7 +849,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     //（見た目パターンの差し込み口から選ぶ）。決定2 の「作成時にコピー」を両形式で同じにする。
     // ⚠️ **入らなくても動画は作る**＝ロゴのコピーは失敗しうる（置き場から消えている等）。
     // 場面形式も新規作成そのものは止めない（失敗は取り込みの理由として出る）。
-    const doc = await withBrandLogo(withFont, kit.logoLibraryAssetId);
+    const logo = await withBrandLogo(withFont, kit.logoLibraryAssetId);
+    const doc = logo.doc;
     // 焼き出しと同じ流儀＝**未適合なら保存しない**（一覧に出るのに開けない動画を作らない・ADR-0026④）。
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 新規作成した内容がスキーマに未適合:", validateTimelineProject.errors);
@@ -849,7 +861,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 保存できたものをそのまま開く（読み直さない＝ディスクと同じ内容を持っている）。
     // **必ず `emptyState()` から作る**＝前に開いていた文書の取り消し履歴・選択・作成中の声を持ち越さない
     // （持ち越すと「新しい動画で取り消す」が**別の動画の内容**を書き戻し、自動保存がそちらを上書きする）。
-    set({ ...emptyState(), doc, saveStatus: "saved" });
+    // ⚠️ **足したロゴの表示先も解く**（差分再監査 3巡目 🟡）＝解かないと**作った直後は
+    // キャンバスに何も映らないのに書き出すと映る**（書き出しは `filePath` からディスクを読む）。
+    // 開き直せば映るので気づきにくい。場面形式（`importFromLibrary`）は解いている（ADR-0026②）。
+    const logoSrc = logo.added ? await assetDisplayUrl(projectId, logo.added.relPath) : null;
+    set({
+      ...emptyState(),
+      doc,
+      saveStatus: "saved",
+      ...(logo.added && logoSrc ? { assetSrcById: { [logo.added.assetId]: logoSrc } } : {}),
+      // ⚠️ **入らなかったことは言う**（§2-5）＝動画は作るが、黙って無かったことにしない。
+      ...(logo.error ? { importError: logo.error } : {}),
+    });
     return projectId;
   },
   openTimelineProject: async (projectId) => {
