@@ -182,9 +182,11 @@ export function timelineAudioRuns(
     if (!cue) continue;
     const volume = clipBaseVolume(clip, doc);
     // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
-    const { factor, points } = clipVolumePointsForExport(doc, clip, auto, duckSpans);
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
-    const expr = factor.length > 0 ? volumeExpr(points) : volumeExpr(clip.volumePoints);
+    // ⚠️ **倍率の有無で分岐しない**＝`volumeExpr` は中で `normalizedVolumePoints` を通す（べき等）ので、
+    // 倍率が空のときの `points` は「正規化した保存の点」＝生の点を渡したときと**同じ式**になる。
+    // 分けて書くと「なぜ違うのか」を毎回確かめることになる（式は1本にしておく）。
+    const expr = volumeExpr(clipVolumePointsForExport(doc, clip, auto, duckSpans).points);
     runs.push({
       clipId: clip.id,
       sourceKey,
