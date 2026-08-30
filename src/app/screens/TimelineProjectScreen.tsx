@@ -133,13 +133,14 @@ import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import type { FontWeight, TextAlign } from "../../domain/enums";
 import { FontPicker } from "../components/FontPicker";
 import { AudioAutoField } from "../components/AudioAutoField";
+import { AssetLibraryPanel } from "../components/AssetLibraryPanel";
 import { CreditDisplayField } from "../components/CreditDisplayField";
 import { DEFAULT_SHAPE_COLOR } from "../../domain/project/freeLayoutOps";
 import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
 import { isFreeSlotAssetType } from "../../domain/enums";
 import { ColorPicker } from "../components/ColorPicker";
 import { Switch } from "../components/ui";
-import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
+import { DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
 import { FitSelect } from "../components/FitSelect";
 import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
@@ -1107,11 +1108,115 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       .map((c) => ({ lines: [{ speaker: c.voice?.speaker ?? null }] })),
     [doc],
   );
+  /**
+   * 文字の体裁（影・字間・帯・行間）。**文字クリップと字幕クリップで共有**（差分再監査 4巡目 🟡）。
+   *
+   * ⚠️ **#264 の語彙は3つそろえる**（ADR-0032 追補3）＝影・字間だけ足すと**背景帯だけ片方でしか
+   * 編集できない**（描画も焼き出しも通っているのに解除できない）。場面編集の自由配置の文字と同じ顔ぶれ。
+   */
+  const renderClipTextDecoration = (sel: TimelineClip) => (
+    <>
+      <div className="row gap-sm">
+        <NumberField
+          label="字間"
+          value={sel.letterSpacing ?? 0}
+          min={-0.5}
+          max={2}
+          step={0.05}
+          {...editGuard()}
+          onChange={(v) => setSelectedVisualContent({ letterSpacing: v })}
+        />
+        <NumberField
+          label="行間"
+          value={sel.lineHeight ?? DEFAULT_LINE_HEIGHT}
+          min={0.5}
+          max={3}
+          step={0.1}
+          {...editGuard()}
+          onChange={(v) => setSelectedVisualContent({ lineHeight: v })}
+        />
+      </div>
+      <div className="col gap-sm">
+        <div className="toggle-row">
+          <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+          <Switch
+            on={sel.shadow?.enabled ?? false}
+            disabled={selectedLocked || exporting}
+            onChange={(on) => setSelectedVisualContent({ shadow: { ...sel.shadow, enabled: on } })}
+            label="影を付ける"
+          />
+        </div>
+        {sel.shadow?.enabled && (
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label className="field">
+              <span>影の色</span>
+              <ColorPicker
+                value={sel.shadow?.color ?? DEFAULT_SHADOW_COLOR}
+                disabled={selectedLocked || exporting}
+                onChange={(v) => setSelectedVisualContent({ shadow: { ...sel.shadow, color: v } })}
+                ariaLabel="影の色を選ぶ"
+              />
+            </label>
+            <NumberField
+              label="濃さ(%)"
+              value={Math.round((sel.shadow?.opacity ?? DEFAULT_SHADOW_OPACITY) * 100)}
+              min={0}
+              max={100}
+              {...editGuard()}
+              onChange={(v) => setSelectedVisualContent({ shadow: { ...sel.shadow, opacity: v / 100 } })}
+            />
+            <NumberField label="ぼかし" value={sel.shadow?.blur ?? 0} min={0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...sel.shadow, blur: v } })} />
+            <NumberField label="横のずれ" value={sel.shadow?.dx ?? 0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...sel.shadow, dx: v } })} />
+            <NumberField label="縦のずれ" value={sel.shadow?.dy ?? 0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...sel.shadow, dy: v } })} />
+          </div>
+        )}
+      </div>
+      <div className="col gap-sm">
+        <div className="toggle-row">
+          <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+          <Switch
+            on={sel.background?.enabled ?? false}
+            disabled={selectedLocked || exporting}
+            onChange={(on) => setSelectedVisualContent({ background: { ...sel.background, enabled: on } })}
+            label="背景帯を付ける"
+          />
+        </div>
+        {sel.background?.enabled && (
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label className="field">
+              <span>背景色</span>
+              <ColorPicker
+                value={sel.background?.color ?? DEFAULT_BAND_COLOR}
+                disabled={selectedLocked || exporting}
+                onChange={(v) => setSelectedVisualContent({ background: { ...sel.background, color: v } })}
+                ariaLabel="背景色を選ぶ"
+              />
+            </label>
+            <NumberField
+              label="濃さ(%)"
+              value={Math.round((sel.background?.opacity ?? DEFAULT_BAND_OPACITY) * 100)}
+              min={0}
+              max={100}
+              {...editGuard()}
+              onChange={(v) => setSelectedVisualContent({ background: { ...sel.background, opacity: v / 100 } })}
+            />
+            <NumberField label="角丸" value={sel.background?.radius ?? DEFAULT_BAND_RADIUS} min={0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ background: { ...sel.background, radius: v } })} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   // ⚠️ **持ち込みフォントが手元にあるか**（α-6 差分再監査）＝場面形式と同じ門を通す（ADR-0026②）。
   // ⚠️ **「読めなかった」も見る**（PR #909 レビュー 🟡）＝一度成功したあとに読めなくなると
   // `userFontIds` は**古いまま残る**ので、見ないと「もう正しいとは限らない一覧」を
   // 「調べた」ものとして使い続ける（この画面は `refreshUserFonts` を呼ばない）。
   const userFontIds = useProjectStore((s) => s.userFontIds);
+  // ⚠️ **書き出しの前に取り直す**（差分再監査 4巡目 ℹ️）＝場面形式（`PrecheckScreen`／`ExportScreen`）は
+  // 直前に取り直すのに、この画面は起動時の一覧に頼っていた＝**アプリの外でフォントを消したとき、
+  // 場面形式は止まるのにタイムラインは古い一覧で通る**（同じ状態で形式によって挙動が割れる＝ADR-0026②）。
+  const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
+  useEffect(() => { void refreshUserFonts().catch(() => {}); }, [refreshUserFonts]);
   const userFontsUnreadable = useProjectStore((s) => s.userFontsUnreadable);
   /** 渡してよい一覧（`null`＝調べていない／読めなかった）。場面形式の2画面と同じ規則。 */
   const knownUserFontIds = userFontIds && !userFontsUnreadable ? userFontIds : null;
@@ -3408,54 +3513,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         onChange={(id) => setSelectedVisualContent({ fontId: id })}
                       />
                     </label>
-                    {/* ⚠️ **影と字間もここで触れる**（差分再監査 3巡目・#264）＝ADR-0032 追補3 は
-                        「文字の体裁は**共有の語彙**」と決めており、描画も焼き出しも通っているのに
-                        **タイムライン側だけ書き込めない**と「同じ語彙なのに片方でしか編集できない
-                        項目」ができる（場面編集の自由配置の文字と同じ顔ぶれにする）。 */}
-                    <div className="row gap-sm">
-                      <NumberField
-                        label="字間"
-                        value={selected.letterSpacing ?? 0}
-                        min={-0.5}
-                        max={2}
-                        step={0.05}
-                        {...editGuard()}
-                        onChange={(v) => setSelectedVisualContent({ letterSpacing: v })}
-                      />
-                    </div>
-                    <div className="col gap-sm">
-                      <div className="toggle-row">
-                        <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
-                        <Switch
-                          on={selected.shadow?.enabled ?? false}
-                          onChange={(on) => setSelectedVisualContent({ shadow: { ...selected.shadow, enabled: on } })}
-                          label="影を付ける"
-                        />
-                      </div>
-                      {selected.shadow?.enabled && (
-                        <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-                          <label className="field">
-                            <span>影の色</span>
-                            <ColorPicker
-                              value={selected.shadow?.color ?? DEFAULT_SHADOW_COLOR}
-                              onChange={(v) => setSelectedVisualContent({ shadow: { ...selected.shadow, color: v } })}
-                              ariaLabel="影の色を選ぶ"
-                            />
-                          </label>
-                          <NumberField
-                            label="濃さ(%)"
-                            value={Math.round((selected.shadow?.opacity ?? DEFAULT_SHADOW_OPACITY) * 100)}
-                            min={0}
-                            max={100}
-                            {...editGuard()}
-                            onChange={(v) => setSelectedVisualContent({ shadow: { ...selected.shadow, opacity: v / 100 } })}
-                          />
-                          <NumberField label="ぼかし" value={selected.shadow?.blur ?? 0} min={0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...selected.shadow, blur: v } })} />
-                          <NumberField label="横のずれ" value={selected.shadow?.dx ?? 0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...selected.shadow, dx: v } })} />
-                          <NumberField label="縦のずれ" value={selected.shadow?.dy ?? 0} {...editGuard()} onChange={(v) => setSelectedVisualContent({ shadow: { ...selected.shadow, dy: v } })} />
-                        </div>
-                      )}
-                    </div>
+                    {renderClipTextDecoration(selected)}
                   </>
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.shape && (
@@ -4047,6 +4105,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             )}
 
             {/* 字幕は読み上げと連動できる（ADR-0032 決定24）＝文言と時間が付いてくる。 */}
+            {/* ⚠️ **字幕クリップも体裁を持つ**（差分再監査 4巡目 🟡）＝連動先から文言を採るので「文」は
+                持たないが、影・字間・帯・行間は**書き込まれて描かれる**（`addLinkedSubtitleClip` が
+                `createFreeElement` の体裁を入れる）＝**効くのに選べない**を作らない。
+                場面形式の自由配置の字幕は同じ顔ぶれを直せる（ADR-0026②）。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleStyle" title="字幕の見た目" defaultOpen={false}>
+                {renderClipTextDecoration(selected)}
+              </CollapsibleSection>
+            )}
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleLink" title="連動する読み上げ" defaultOpen={true}>
                 {voiceClips.length === 0 ? (
@@ -4124,7 +4191,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {assignableAssets(doc.assets, layer).length === 0 && (
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
-                            ? "入れられる動画がありません。「写真・動画を取り込む」で動画を取り込んでください。"
+                            ? "入れられる動画がありません。「写真・動画・音楽を取り込む」で動画を取り込んでください。"
                             : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}
@@ -4186,6 +4253,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       />
                     </label>
                   ))}
+                  {/* ⚠️ **この部品の文字の形も直せる**（差分再監査 4巡目 🟡）＝焼き出しは `scene.fontId` を
+                      ここへ書き、描画も書き出しも見る。直せないと、門の案内（「使っている文字で別の
+                      文字の形を選び直してください」）どおりの操作が**この形式に存在しない**＝
+                      取り込み直しても墓標で番号が戻らないので**回復手段が無い**（§2-5 の行き止まり）。 */}
+                  <label className="field">
+                    <span>この部品の文字の形</span>
+                    <FontPicker
+                      value={selected.fontId ?? null}
+                      allowInherit
+                      {...editGuard()}
+                      onChange={(id) => setSelectedVisualContent({ fontId: id })}
+                    />
+                  </label>
                   <button
                     className="btn btn-secondary"
                     {...editGuard()}
@@ -4231,6 +4311,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             label="写真・動画・音楽を取り込む"
           />
         </div>
+        {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
+            棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
+          <AssetLibraryPanel target="timeline" />
+        </CollapsibleSection>
         {importError && (
           <div className="notice notice-warn row-between mb-sm" role="alert">
             <span>{importError}</span>
@@ -4279,7 +4364,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </button>
             </div>
             {visualAssets.length === 0 ? (
-              <p className="field-hint">この動画にはまだ写真がありません。「写真・動画を取り込む」で足せます。文字と図形はいま置けます。</p>
+              <p className="field-hint">この動画にはまだ写真がありません。「写真・動画・音楽を取り込む」で足せます。文字と図形はいま置けます。</p>
             ) : (
               <PickerList
                 items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}

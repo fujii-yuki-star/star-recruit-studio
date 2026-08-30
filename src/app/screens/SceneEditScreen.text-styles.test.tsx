@@ -202,3 +202,138 @@ describe("SceneEditScreen 文字の体裁の場面別上書き（#555）", () =>
     expect(scene().textStyles).toBeUndefined();
   });
 });
+
+// #264 の影・字間・背景帯も同じ欄で場面別に上書きできる（差分再監査 4巡目 🟡＋PR #913 レビュー 🟡）。
+// ⚠️ 影と帯は `resolveTextStyle` が**まるごと差し替え**で解く（`ov?.shadow ?? layer.shadow`）ので、
+// 入／切と数値の見せ方を上書きの有無で作ると「見た目パターン側で付いている帯を『切』と偽る」
+// 「1項目だけ書いて残りが既定へ落ちる（黙って別の絵）」が起きる＝そこを固定する。
+const decoTpl = {
+  ...tpl,
+  layers: [
+    tpl.layers[0],
+    { ...tpl.layers[1], shadow: { enabled: true, color: "#123456", opacity: 0.4, blur: 3, dx: 2, dy: 1 }, background: { enabled: true, color: "#654321", opacity: 0.6, radius: 8 } },
+  ],
+} as unknown as Template;
+
+const setupDeco = (extra?: Partial<Scene>) => {
+  useProjectStore.setState({
+    templates: [decoTpl],
+    parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+    scenes: [baseScene(extra)], assets: [], editingSceneId: "scene_001",
+    past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+  });
+  render(<SceneEditScreen onNavigate={vi.fn()} />);
+  return () => useProjectStore.getState().scenes[0];
+};
+
+describe("SceneEditScreen 文字の影・字間・背景帯の場面別上書き（#264）", () => {
+  it("字間を入れると上書きになり、空に戻すと継承へ戻る", () => {
+    const scene = setup();
+    const panel = openStyles();
+    const ls = within(panel).getByLabelText("字間") as HTMLInputElement;
+    fireEvent.focus(ls);
+    fireEvent.change(ls, { target: { value: "0.2" } });
+    fireEvent.blur(ls);
+    expect(scene().textStyles?.title?.letterSpacing).toBeCloseTo(0.2);
+    fireEvent.focus(ls);
+    fireEvent.change(ls, { target: { value: "" } });
+    fireEvent.blur(ls);
+    expect(scene().textStyles).toBeUndefined();
+  });
+
+  it("入／切は「いま描かれているか」を出す（見た目パターンが付けている影・帯を『切』と偽らない）", () => {
+    setupDeco();
+    const panel = openStyles();
+    expect(within(panel).getByRole("switch", { name: "見出しに影を付ける" })).toBeChecked();
+    expect(within(panel).getByRole("switch", { name: "見出しに背景帯を付ける" })).toBeChecked();
+  });
+
+  it("継承している影を切ると、明示的に「切」と書く（落として継承へ戻すと切れないため）", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("switch", { name: "見出しに影を付ける" }));
+    expect(scene().textStyles?.title?.shadow?.enabled).toBe(false);
+    expect(within(panel).getByRole("switch", { name: "見出しに影を付ける" })).not.toBeChecked();
+  });
+
+  it("見た目パターンが付けていない帯は、切に戻すと上書きごと落ちる（意味のない上書きを残さない）", () => {
+    const scene = setup();
+    const panel = openStyles();
+    const sw = within(panel).getByRole("switch", { name: "見出しに背景帯を付ける" });
+    fireEvent.click(sw);
+    expect(scene().textStyles?.title?.background?.enabled).toBe(true);
+    fireEvent.click(within(panel).getByRole("switch", { name: "見出しに背景帯を付ける" }));
+    expect(scene().textStyles).toBeUndefined();
+  });
+
+  it("継承中に1項目だけ触っても、残りの設定を引き継ぐ（黙って別の絵にしない）", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    const radius = within(panel).getByLabelText("角丸") as HTMLInputElement;
+    expect(radius.value).toBe("8"); // 継承中もテンプレの実値を出す
+    fireEvent.focus(radius);
+    fireEvent.change(radius, { target: { value: "24" } });
+    fireEvent.blur(radius);
+    expect(scene().textStyles?.title?.background).toEqual({ enabled: true, color: "#654321", opacity: 0.6, radius: 24 });
+  });
+
+  it("影のぼかしも同じく残りを引き継ぐ", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    const blur = within(panel).getByLabelText("ぼかし") as HTMLInputElement;
+    expect(blur.value).toBe("3");
+    // 濃さも継承中の実値を出す（影＝40%／帯＝60%。上書き側から読むと両方とも既定に化ける）
+    const opacities = within(panel).getAllByLabelText("濃さ(%)") as HTMLInputElement[];
+    expect(opacities.map((o) => o.value)).toEqual(["40", "60"]);
+    fireEvent.focus(blur);
+    fireEvent.change(blur, { target: { value: "9" } });
+    fireEvent.blur(blur);
+    expect(scene().textStyles?.title?.shadow).toEqual({ enabled: true, color: "#123456", opacity: 0.4, blur: 9, dx: 2, dy: 1 });
+  });
+
+  it("切のときは詳細を出さない", () => {
+    setup();
+    const panel = openStyles();
+    expect(within(panel).queryByText("影の色")).toBeNull();
+    expect(within(panel).queryByText("背景色")).toBeNull();
+  });
+
+  it("見た目パターンが付けていない影も、切に戻すと上書きごと落ちる", () => {
+    const scene = setup();
+    const panel = openStyles();
+    const sw = () => within(panel).getByRole("switch", { name: "見出しに影を付ける" });
+    fireEvent.click(sw());
+    expect(scene().textStyles?.title?.shadow?.enabled).toBe(true);
+    fireEvent.click(sw());
+    expect(scene().textStyles).toBeUndefined();
+  });
+
+  // 入→切→入で**差分ゼロの上書き**が残ると、①絵は同じなのに「この場面だけ変更中」と出る（嘘）
+  // ②以後この場面だけ見た目パターンの変更に追従しない（見た目パターンは編集できる＝ADR-0017）。
+  it("入→切→入で往復しても、見た目パターンと同じ値なら上書きを残さない", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    const sw = () => within(panel).getByRole("switch", { name: "見出しに背景帯を付ける" });
+    fireEvent.click(sw()); // 切
+    expect(scene().textStyles?.title?.background?.enabled).toBe(false);
+    fireEvent.click(sw()); // 入＝見た目パターンと同じ絵へ戻った
+    expect(scene().textStyles).toBeUndefined();
+    expect(screen.queryByText(/この場面だけ変更中/)).toBeNull();
+  });
+
+  it("影も同じく往復で上書きが残らない", () => {
+    const scene = setupDeco();
+    const panel = openStyles();
+    const sw = () => within(panel).getByRole("switch", { name: "見出しに影を付ける" });
+    fireEvent.click(sw());
+    fireEvent.click(sw());
+    expect(scene().textStyles).toBeUndefined();
+  });
+
+  it("「すべて見た目パターンに合わせる」で影・字間・帯も戻る", () => {
+    const scene = setup({ textStyles: { title: { letterSpacing: 0.2, shadow: { enabled: true }, background: { enabled: true } } } });
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByText("すべて見た目パターンに合わせる"));
+    expect(scene().textStyles).toBeUndefined();
+  });
+});

@@ -383,6 +383,39 @@ describe('バラす前後で絵が変わらない', () => {
     expect(drawn(exploded(before))).toEqual(drawn(before));
   });
 
+  /**
+   * ⚠️ **もとの部品が持っていた「全体に効くもの」も写す**（差分再監査 4巡目 🔴・決定23）＝
+   * `fontId`（種別ごとの指定が無い文字の受け皿）と `crop`（箱の切り抜き）は要素側に無いので、
+   * 写さないと**バラした瞬間に別の字体・切っていない絵**になる（バラすは取り消しでしか戻らない）。
+   */
+  it('動画全体とは別の文字の形を持っていても、そのまま出る', () => {
+    const before = doc({ clips: [clip({ fontId: 'kaitou-yokoku-gothic' })] });
+    expect(drawn(exploded(before))).toEqual(drawn(before));
+  });
+
+  /**
+   * ⚠️ **切り抜いてある部品はバラせない**（決定23）＝切り抜きは**部品の箱ぜんぶ**を切るので、
+   * 要素ごとに分けると**各要素が自分の箱で切られる**＝別の絵になる。写せないものは**断る**。
+   */
+  /**
+   * ⚠️ **寄せ（`cropAlign`）も同じ**（PR #913 レビュー 🔴）＝`crop` とは**独立して**設定でき、
+   * `fit:'cover'` の絵に効く。写す先が `FreeElement` に無いので、断らないと
+   * **はみ出す側が変わって別の絵**になる。
+   */
+  it('寄せだけ設定してある部品もバラさない', () => {
+    const before = doc({ clips: [clip({ cropAlign: { x: 'left', y: 'top' } })] });
+    const r = explodeTemplateClip(before, 'clip_001', template);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('TIMELINE_EDIT_EXPLODE_CROP');
+  });
+
+  it('切り抜いてある部品はバラさない（黙って別の絵にしない）', () => {
+    const before = doc({ clips: [clip({ crop: { top: 0.1, bottom: 0.2, left: 0, right: 0.05 } })] });
+    const r = explodeTemplateClip(before, 'clip_001', template);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('TIMELINE_EDIT_EXPLODE_CROP');
+  });
+
   it('縦型でも変わらない', () => {
     const portrait: Template = { ...template, aspectRatio: '9:16', canvas: { width: 1080, height: 1920 } };
     const before = doc({ videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 } });

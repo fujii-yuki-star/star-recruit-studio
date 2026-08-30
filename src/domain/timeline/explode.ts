@@ -88,6 +88,14 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // 残すと「まだバラせません」という**嘘の理由**を持つ死んだコードになるので消した。
   if (elements.some(movesToVideo)) return { ok: false, reason: EDIT_BLOCKED.explodeBackgroundVideo };
 
+  // ⚠️ **切り抜いてある部品はバラせない**（差分再監査 4巡目 🔴・決定23「前後で絵が変わらない」）＝
+  // 切り抜きは**部品の箱ぜんぶ**を切る（`clipRect`）ので、要素ごとに分けると**各要素が自分の箱で
+  // 切られる**＝別の絵になる。写せないものは**バラす前に断る**（`explodeTrimEnd` と同じ流儀）。
+  // ⚠️ **寄せ（`cropAlign`）も同じ**（PR #913 レビュー 🔴）＝`crop` とは**独立して**設定でき、
+  // `fit:'cover'` の絵に効く（`timelineLayout` が `crop` の有無に関係なく見る）。写す先が
+  // `FreeElement` に無いので、断らないと**はみ出す側が変わって別の絵**になる。
+  if (clip.crop != null || clip.cropAlign != null) return { ok: false, reason: EDIT_BLOCKED.explodeCrop };
+
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {
     const perUse = shortened.some((pl) => pl.layerId != null && clip.slotClips?.[pl.layerId]?.endSec != null);
@@ -240,5 +248,12 @@ function clipFromElement(
       : {}),
     // 隠してある部品をバラしても表に出さない（前後で絵が変わらない・決定23）。
     ...(from.hidden ? { hidden: true } : {}),
+    // ⚠️ **もとの部品が持っていた「全体に効くもの」を写す**（差分再監査 4巡目 🔴・決定23）＝
+    // ここを写さないと**バラした瞬間に絵が変わる**（バラすは取り消しでしか戻らない）。
+    // ・`fontId` … 種別ごとの指定が無い文字の**受け皿**（`timelineLayout` が見る／焼き出しが
+    //   `scene.fontId` をここへ書く）。落ちると**別の字体**になる。
+    // ・`crop`（＋寄せ・効かせ方）… 種別を問わず箱を切り抜く（`clipRect`）。落ちると**切っていない絵**になる。
+    // ⚠️ **要素側が自分で持っていればそちらが勝つ**（`spatial` は上で展開済み）＝ここは受け皿として足す。
+    ...(from.fontId != null && spatial.fontId == null ? { fontId: from.fontId } : {}),
   };
 }

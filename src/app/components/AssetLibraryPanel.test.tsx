@@ -39,7 +39,6 @@ beforeEach(() => {
     lib({ id: "lib_asset_003", displayName: "社員インタビュー", assetType: ASSET_TYPE.video, tags: ["採用"] }),
   ]);
   useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => true) } as never);
-  useTimelineStore.setState({ doc: null } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -287,21 +286,48 @@ describe("AssetLibraryPanel", () => {
   });
 
   /**
-   * ⚠️ **取り込み先は場面形式の動画**（差分再監査 3巡目 🟡）＝タイムラインを開いている間に押すと、
-   * **画面に映っていない別の文書**へ入る（場面形式が未オープンなら新しい動画の番号まで採る）。
-   * ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝棚の操作（置く・直す・外す）は
-   * 通すので、そちらに「取り込めません」が出ると**間違った次の行動**を示すことになる。
+   * ⚠️ **塞がずに名指しで解く**（差分再監査 4巡目 🔴）＝両形式は同時に開いたままにでき、**閉じる
+   * 導線が無い**。タイムラインが載っているだけで取り込みを塞ぐと、一度開いた**セッション中ずっと**
+   * 取り込めなくなる（しかも理由は事実と違う）＝解除できない行き止まり（§2-5）。
+   * **どの動画へ入ったか**は知らせの名前で解く。
    */
-  it("タイムラインを開いている間は「この動画で使う」だけ押せない（理由も取り込みにだけ添える）", async () => {
-    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
+  it("取り込み先の動画を名指しする", async () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, projectName: "会社紹介" } } as never);
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
-    const importBtn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
-    expect(importBtn).toBeDisabled();
-    expect(importBtn).toHaveAttribute("title", "タイムラインで作った動画へは、ここからは取り込めません");
-    // 棚の操作は通す＝押せるものに取り込みの理由を出さない。
-    const place = screen.getByRole("button", { name: /素材を置く/ });
-    expect(place).not.toBeDisabled();
-    expect(place).not.toHaveAttribute("title");
+    fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
+    expect(await screen.findByText(/「会社紹介」へ取り込みました/)).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **できたときだけ知らせる**（PR #913 レビュー 🔴）＝返り値を見ないと、失敗しても
+   * 「取り込みました」と出て、画面下の本当の理由と**同時に**並ぶ（成功を騙る）。
+   */
+  it("タイムラインへ取り込めなかったら「取り込みました」と言わない", async () => {
+    const importFromLibraryT = vi.fn(async () => false);
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: importFromLibraryT,
+      isImporting: false,
+      exportRun: { phase: "idle" },
+    } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
+    await waitFor(() => expect(importFromLibraryT).toHaveBeenCalled());
+    expect(screen.queryByText(/取り込みました/)).toBeNull();
+  });
+
+  it("タイムラインへ取り込めたら、その動画を名指しで知らせる", async () => {
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: vi.fn(async () => true),
+      isImporting: false,
+    } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
+    expect(await screen.findByText(/「タイムライン動画」へ取り込みました/)).toBeInTheDocument();
   });
 });

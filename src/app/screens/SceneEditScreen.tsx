@@ -8,7 +8,7 @@ import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } 
 import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
-import type { Layer } from "../../domain/template/types";
+import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
@@ -64,7 +64,7 @@ import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessag
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
-import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
+import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -877,6 +877,32 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const effective = resolveTextStyle(layer, ov);
     const overridden = ov != null && Object.keys(ov).length > 0;
     const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
+    // 影・帯は**まるごと差し替え**なので、上書きの土台は「いまの上書き ?? 見た目パターンの設定」。
+    // 切にするときは**明示的に切と書く**（落とすと継承で帯が戻り「切れない」になる）。
+    // ⚠️ ただし**見た目パターンと同じ値になったら上書きごと落とす**（PR #913 レビュー 🟡）＝
+    // 入→切→入と往復すると**差分ゼロの上書き**が残り、①絵は同じなのに「この場面だけ変更中」と
+    // 出る（嘘の表示）②以後この場面だけ**見た目パターンの変更に追従しなくなる**（見た目パターンは
+    // 編集できる＝ADR-0017・種類を替えても `textStyles` は残る）。「触ったものだけ固有値」（#555）を保つ。
+    // ⚠️ 見た目パターンが元から付けていないものを切に戻すと、選んだ色や角丸は残らない（＝上書きが
+    // まるごと落ちる）。自由配置の同じ欄は値を覚えるが、**あちらは継承の無い持ち物**で、こちらは
+    // 「触ったものだけ固有値」の上書き＝**モデルが違うので流儀も違う**（ADR-0026② の同概念ではない）。
+    const sameAsLayer = (a: object | undefined, b: object | undefined): boolean => {
+      const norm = (o: object | undefined) => o == null ? null
+        : JSON.stringify(Object.entries(o).filter(([, v]) => v !== undefined).sort(([x], [y]) => x < y ? -1 : 1));
+      return norm(a) === norm(b);
+    };
+    const baseShadow = ov?.shadow ?? layer.shadow;
+    // 「見た目パターンと同じ」は**同じ値**か**どちらも描かれない**かの2通り（切のときは
+    // `{enabled:false}` と未指定が同じ絵になる）。描かれるかの判定は描画と同じ関数から採る（§2-7）。
+    const putShadow = (v: TextShadow) =>
+      set({ shadow: sameAsLayer(v, layer.shadow) || (enabledShadow(v) == null && enabledShadow(layer.shadow) == null) ? undefined : v });
+    const setShadow = (p: Partial<TextShadow>) => putShadow({ ...baseShadow, ...p, enabled: true });
+    const toggleShadow = (on: boolean) => putShadow({ ...baseShadow, enabled: on });
+    const baseBand = ov?.background ?? layer.background;
+    const putBand = (v: LayerBackground) =>
+      set({ background: sameAsLayer(v, layer.background) || (bandBackground(v) == null && bandBackground(layer.background) == null) ? undefined : v });
+    const setBand = (p: Partial<LayerBackground>) => putBand({ ...baseBand, ...p, enabled: true });
+    const toggleBand = (on: boolean) => putBand({ ...baseBand, enabled: on });
     return (
       <CollapsibleSection scope={SECTION_SCOPE.sceneEdit}
         title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`}
@@ -924,9 +950,59 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 見本は実描画の解決値（`effective`＝太さ>0 なら既定色入り）。太さ0で縁取りが無いときは「足したらこうなる」既定を出す。 */}
           {colorField("縁取りの色", effective.strokeColor ?? defaultStrokeColor(effective.color), ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
         </div>
-        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
+        {/* ⚠️ **影・字間・背景帯もここで直せる**（差分再監査 4巡目 🟡＋PR #913 レビュー 🟡・#264）＝
+            `TextStyle` は schema にあり `resolveTextStyle` が解いて描画も通るのに、**書き込む入口が
+            どこにも無かった**（到達不能な定義）。自由配置の文字と同じ顔ぶれにする（ADR-0026②）。
+            ⚠️ **影と帯は「まるごと差し替え」で解決される**（`ov?.shadow ?? layer.shadow`）＝
+            **入／切は実際に描かれている状態を出し**（上書きの有無ではない＝見た目パターン側で
+            付いている帯を「切」と偽らない）、**上書きを作るときは継承している設定を引き継ぐ**
+            （1項目だけ書くと残りが既定へ落ちて**黙って別の絵になる**＝§2-5）。 */}
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          <NumberField
+            label="字間"
+            value={ov?.letterSpacing ?? null}
+            min={-0.5}
+            max={2}
+            step={0.05}
+            placeholder={String(inherited.letterSpacing ?? 0)}
+            onClear={() => set({ letterSpacing: undefined })}
+            onChange={(v) => set({ letterSpacing: v })}
+          />
+          <div className="toggle-row" style={{ flex: 1 }}>
+            <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+            <Switch on={effective.shadow != null} onChange={toggleShadow} label={`${textKeyLabel[key]}に影を付ける`} />
+          </div>
+        </div>
+        {effective.shadow != null && (
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</label>
+              <ColorPicker value={effective.shadow.color ?? DEFAULT_SHADOW_COLOR} onChange={(v) => setShadow({ color: v })} ariaLabel={`${textKeyLabel[key]}の影の色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            </div>
+            <NumberField label="濃さ(%)" value={opacityToPercent(effective.shadow.opacity ?? DEFAULT_SHADOW_OPACITY)} min={0} max={100} onChange={(v) => setShadow({ opacity: percentToOpacity(v) })} />
+            <NumberField label="ぼかし" value={effective.shadow.blur ?? 0} min={0} onChange={(v) => setShadow({ blur: v })} />
+            <NumberField label="横のずれ" value={effective.shadow.dx ?? 0} onChange={(v) => setShadow({ dx: v })} />
+            <NumberField label="縦のずれ" value={effective.shadow.dy ?? 0} onChange={(v) => setShadow({ dy: v })} />
+          </div>
+        )}
+        <div className="toggle-row" style={{ marginBottom: 6 }}>
+          <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+          <Switch on={effective.background != null} onChange={toggleBand} label={`${textKeyLabel[key]}に背景帯を付ける`} />
+        </div>
+        {effective.background != null && (
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+              <ColorPicker value={effective.background.color} onChange={(v) => setBand({ color: v })} ariaLabel={`${textKeyLabel[key]}の背景色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            </div>
+            <NumberField label="濃さ(%)" value={opacityToPercent(effective.background.opacity)} min={0} max={100} onChange={(v) => setBand({ opacity: percentToOpacity(v) })} />
+            <NumberField label="角丸" value={effective.background.radius} min={0} onChange={(v) => setBand({ radius: v })} />
+          </div>
+        )}
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。
+            ⚠️ **足した項目もここで戻す**（差分再監査 4巡目）＝落とすと「合わせる」を押しても残る。 */}
         {overridden && (
-          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
+          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined, letterSpacing: undefined, shadow: undefined, background: undefined })}>
             すべて見た目パターンに合わせる
           </button>
         )}
@@ -945,10 +1021,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            <ColorPicker value={el.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
           </div>
-          <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? 0.55)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
-          <NumberField label="角丸" value={el.background?.radius ?? 16} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
+          <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? DEFAULT_BAND_OPACITY)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
+          <NumberField label="角丸" value={el.background?.radius ?? DEFAULT_BAND_RADIUS} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
         </div>
       )}
     </div>
@@ -1070,7 +1146,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.left} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
@@ -1193,7 +1269,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.center} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>

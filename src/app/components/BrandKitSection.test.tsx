@@ -152,25 +152,29 @@ describe("BrandKitSection", () => {
   });
 
   /**
-   * ⚠️ **タイムラインの動画には反映できない**（差分再監査 3巡目 🔴）＝この欄は場面形式の文書にしか
-   * 書かない。押せると**画面に映っていない別の文書**が変わって「反映しました」と出る（ADR-0026④）。
+   * ⚠️ **塞がずに名指しで解く**（差分再監査 4巡目 🔴）＝両形式は同時に開いたままにでき、**閉じる
+   * 導線が無い**。タイムラインが載っているだけで反映を塞ぐと、一度開いた**セッション中ずっと**
+   * 場面形式の動画にも反映できなくなる（解除できない行き止まり・§2-5）。
+   * どちらの文書の話かは**反映先の名前**で解く。
    */
-  it("タイムラインを開いている間は、反映のボタンを出さず理由を出す", () => {
-    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
-    render(<BrandKitSection />);
-    expect(screen.queryByRole("button", { name: "この動画に反映する" })).toBeNull();
-    expect(screen.getByText(/タイムラインの動画には、ここからは反映できません/)).toBeInTheDocument();
-  });
-
-  /**
-   * ⚠️ **名指しと断りを食い違わせない**（PR #912 レビュー 🟡）＝場面形式とタイムラインは
-   * **同時に開いていられる**ので、名前を出すのは**反映できるときだけ**にする。
-   */
-  it("両方開いているときは、場面形式の名前で名指ししない", () => {
+  it("両方開いていても、場面形式の動画へは名指しで反映できる", () => {
     const meta = useProjectStore.getState().meta;
     useProjectStore.setState({ meta: { ...meta, projectId: "proj_20260830_0001", projectName: "会社紹介" } } as never);
     useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
     render(<BrandKitSection />);
-    expect(screen.queryByText(/「会社紹介」に反映する/)).toBeNull();
+    expect(screen.getByText(/「会社紹介」に反映する/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "この動画に反映する" })).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **タイムラインだけ開いているときに「開いていません」と言わない**（嘘の理由・§2-5）。
+   */
+  it("タイムラインだけ開いているときは、その旨を言う", () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, projectId: "", projectName: "" }, scenes: [] } as never);
+    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/タイムラインで作った動画には、ここからは反映できません/)).toBeInTheDocument();
+    expect(screen.queryByText(/いまは動画を開いていません/)).toBeNull();
   });
 });
