@@ -21,6 +21,7 @@ import type { AiVideoPlan } from "../../domain/ai/types";
 import {
   assembleProject, createAnimationId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
+  ProjectLoadError,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from "../../domain/project/sceneOps";
@@ -80,7 +81,7 @@ import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message } from "../uiLabels";
+import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -921,8 +922,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           applied: plan.fontChanges,
           addedLogo: false,
           error:
-            get().importError ??
-            "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。",
+            get().importError ?? BRAND_LOGO_NOT_APPLIED_MESSAGE,
         };
       }
     }
@@ -948,7 +948,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const fontId = kit.fontId;
       set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
     }
-    if (kit.logoLibraryAssetId != null) await get().importFromLibrary(kit.logoLibraryAssetId);
+    // ⚠️ **入らなかったら、その場で言う**（α-6 出口監査 🟡・PR #888 と同じ流儀）＝返り値を捨てると、
+    // 棚が読めない・実体が消えたときに**何も出ず**、`importError` は2ステップ先の画面でしか描かれない
+    // （身に覚えのない警告として現れる）。画面は「新しい動画に最初から入ります」と約束している。
+    if (kit.logoLibraryAssetId != null && (await get().importFromLibrary(kit.logoLibraryAssetId)) == null) {
+      set({ importError: BRAND_LOGO_NOT_APPLIED_MESSAGE });
+    }
   },
   startManualEdit: () => {
     // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
@@ -1165,7 +1170,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().loadProject(newId);
       return newId;
     } catch (e) {
-      set({ importError: typeof e === "string" ? e : "動画を複製できませんでした。もう一度お試しください。" });
+      // ⚠️ **理由を潰さない**（α-6 出口監査 🟡）＝新しい版で作られた文書・壊れた文書は**何度押しても
+      // 直らない**のに「もう一度お試しください」と勧めていた。同じ画面の「開く」は理由を保っている
+      // （同じ文書に対して入口で案内が割れる＝ADR-0026②）。
+      const message = e instanceof ProjectLoadError ? e.message
+        : typeof e === "string" ? e
+          : DUPLICATE_FAILED_MESSAGE;
+      set({ importError: message });
       return null;
     }
   },
@@ -2392,6 +2403,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       await deleteUserFont(fontId);
       await get().refreshUserFonts();
+      // ⚠️ **消したものを指したままにしない**（α-6 出口監査 🟡・#888 のロゴと同型）＝残すと、
+      // 以後に作る**すべての新規動画**が不在のフォントで始まり、プレビューは黙って既定の字体・
+      // 気づけるのは**別の動画の書き出し直前**（公開前チェック）だけになる。
+      if (get().brandKit.fontId === fontId) {
+        const ok = await get().updateBrandKit({ fontId: undefined });
+        set({ fontError: ok ? BRAND_FONT_CLEARED_MESSAGE : BRAND_FONT_CLEAR_FAILED_MESSAGE });
+      }
       return true;
     } catch (e) {
       set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });

@@ -842,7 +842,10 @@ fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String>
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, &kit_json).map_err(|e| e.to_string())
+    // ⚠️ **不可分に書く**（α-6 出口監査 🟡）＝素の `write` だと、途中で落ちたときに**半端な JSON**が
+    // 残る。読む側が「読めなかった」と断るようにしたので、そのまま置くと直す手が無くなる。
+    // 目録・読み方辞書と同じ書き方（一時ファイル＋置き換え）へそろえる。
+    write_manifest_atomic(&path, &kit_json)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

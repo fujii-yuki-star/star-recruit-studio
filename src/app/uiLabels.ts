@@ -812,6 +812,24 @@ export function sceneTemplateProblemMessage(
 export const DUCK_MERGED_MESSAGE =
   "セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。気になる場合は「BGM を下げる」を弱くするか、動画を分けてお試しください。";
 
+/**
+ * 会社の見た目のロゴが入らなかったときの案内（ADR-0036・α-6 出口監査 🟡）。
+ * ⚠️ **明示適用と新規作成で同じことを言う**＝片方だけ黙る、を作らない（ADR-0026②・§6）。
+ */
+/** 複製そのものに失敗したとき（読めた・書けた以外の理由）。読めない理由は `ProjectLoadError` を出す。 */
+export const DUPLICATE_FAILED_MESSAGE = "動画を複製できませんでした。もう一度お試しください。";
+
+export const BRAND_LOGO_NOT_APPLIED_MESSAGE =
+  "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。";
+
+/** 持ち込みフォントを外したので、会社の見た目の指定も外したときの知らせ（α-6 出口監査 🟡）。 */
+export const BRAND_FONT_CLEARED_MESSAGE =
+  "この文字の形を外したので、会社の見た目の指定も外しました。設定の「会社の見た目」から選び直せます。";
+
+/** 上の片づけに失敗したときの案内＝**黙って指したままにしない**（§2-5）。 */
+export const BRAND_FONT_CLEAR_FAILED_MESSAGE =
+  "この文字の形を外しましたが、会社の見た目の指定を外せませんでした。設定の「会社の見た目」から選び直してください。";
+
 export const UNKNOWN_FONT_HINT =
   "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。";
 

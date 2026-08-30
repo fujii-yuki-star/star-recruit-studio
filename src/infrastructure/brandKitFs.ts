@@ -20,7 +20,7 @@ export async function loadBrandKit(): Promise<BrandKit | null> {
   if (!isTauri()) return emptyBrandKit();
   try {
     const text = await invoke<string | null>('load_brand_kit');
-    return text == null ? emptyBrandKit() : parseBrandKit(text);
+    return text == null ? emptyBrandKit() : parseBrandKit(text); // `null`＝読めなかった（空とは区別する）
   } catch {
     // 読めなくても画面は開ける（行き止まりにしない）＝ただし**空とは区別する**。
     return null;

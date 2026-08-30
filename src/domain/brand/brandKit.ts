@@ -37,14 +37,18 @@ export function emptyBrandKit(): BrandKit {
  * 保存されている形かを見る（§2-2＝生のまま内部へ流さない）。
  * ⚠️ **壊れた項目はその項目だけ落とす**（1つのせいでキット全部を失わない）。
  */
-export function parseBrandKit(text: string): BrandKit {
+export function parseBrandKit(text: string): BrandKit | null {
+  // ⚠️ **「JSON ですら無い」と「項目が壊れている」を分ける**（α-6 出口監査 🟡）＝前者を空に潰すと、
+  // 次の編集が**覚えていた字体・色・ロゴをまとめて上書き**して消す（保存中に落ちた等で起こりうる）。
+  // 読めなかったものは `null` で返し、呼ぶ側の「読めていないものを上書きしない」門へ載せる
+  //（目録・読み方辞書と同じ流儀＝ADR-0026②）。項目ごとの壊れは従来どおり**その項目だけ落とす**。
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
-    return emptyBrandKit();
+    return null;
   }
-  if (typeof raw !== 'object' || raw === null) return emptyBrandKit();
+  if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   const kit: BrandKit = {};
   // ⚠️ **知らないフォントは覚えない**＝新しい動画が開けない字体を既定にしない。

@@ -7027,3 +7027,35 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     expect(screen.queryByText("見出しの文字の形")).toBeNull();
   });
 });
+
+// ⚠️ **何も変わらない操作は積まない**（α-6 出口監査 🟡・ADR-0032 決定）＝`commit` は同一参照で
+// 弾く設計なのに、動画全体の設定は毎回作り直していたので**必ず別参照**になり、同じものを選び直す
+// だけで取り消しが1つ埋まり、再生も止まっていた。
+describe("動画全体の設定の空振り", () => {
+  const openWithFont = (): void => {
+    open({ videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: "gen-interface-jp" } } as never);
+  };
+
+  it("同じ値を書いても履歴が増えない・再生も止まらない", () => {
+    openWithFont();
+    useTimelineStore.setState({ isPlaying: true });
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ fontId: "gen-interface-jp" }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+  });
+
+  it("違う値なら積む（変えたことは取り消せる）", () => {
+    openWithFont();
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ fontId: "kaitou-yokoku-gothic" }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+  });
+
+  it("入れ物の中身が同じなら積まない（音の自動処理のような組の設定）", () => {
+    open({ videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true } } } as never);
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ audioAuto: { duckBgm: true } }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+  });
+});

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   addBrandColor,
   BRAND_COLORS_MAX,
-  emptyBrandKit,
   hasBrandKit,
   isNoopBrandApply,
   paletteWithBrand,
@@ -22,7 +21,7 @@ describe('parseBrandKit（生のまま内部へ流さない・§2-2）', () => {
 
   /** ⚠️ 知らないフォントは覚えない＝新しい動画が開けない字体を既定にしない。 */
   it('知らないフォントは覚えない', () => {
-    expect(parseBrandKit(JSON.stringify({ fontId: 'my-font' })).fontId).toBeUndefined();
+    expect(parseBrandKit(JSON.stringify({ fontId: 'my-font' }))!.fontId).toBeUndefined();
   });
 
   /**
@@ -31,33 +30,40 @@ describe('parseBrandKit（生のまま内部へ流さない・§2-2）', () => {
    */
   it('受け付ける id はフォントの目録と同じ（形を写さない）', () => {
     for (const id of ['gen-interface-jp', 'kaitou-yokoku-gothic', 'my-font', 'user_font_001', '']) {
-      const kept = parseBrandKit(JSON.stringify({ fontId: id })).fontId != null;
+      const kept = parseBrandKit(JSON.stringify({ fontId: id }))!.fontId != null;
       expect({ id, kept }).toEqual({ id, kept: isKnownFontId(id) });
     }
   });
 
   it('色は #rrggbb だけ受ける（壊れた項目だけ落とす）', () => {
-    expect(parseBrandKit(JSON.stringify({ colors: ['#112233', 'red', '#abc', 3] })).colors).toEqual(['#112233']);
+    expect(parseBrandKit(JSON.stringify({ colors: ['#112233', 'red', '#abc', 3] }))!.colors).toEqual(['#112233']);
   });
 
   it('色は上限まで（多すぎる候補は読めなくなる）', () => {
     const many = Array.from({ length: 20 }, (_, i) => `#0000${String(i).padStart(2, '0')}`);
-    expect(parseBrandKit(JSON.stringify({ colors: many })).colors).toHaveLength(BRAND_COLORS_MAX);
+    expect(parseBrandKit(JSON.stringify({ colors: many }))!.colors).toHaveLength(BRAND_COLORS_MAX);
   });
 
   it('色が1つも読めなければキーごと持たない（空配列を作らない）', () => {
-    expect(parseBrandKit(JSON.stringify({ colors: ['red'] })).colors).toBeUndefined();
+    expect(parseBrandKit(JSON.stringify({ colors: ['red'] }))!.colors).toBeUndefined();
   });
 
   /** ⚠️ ロゴは**素材ライブラリの id を指すだけ**（棚を3つ目に増やさない）。 */
   it('ロゴはライブラリの id の形だけ受ける', () => {
-    expect(parseBrandKit(JSON.stringify({ logoLibraryAssetId: 'asset_001' })).logoLibraryAssetId).toBeUndefined();
-    expect(parseBrandKit(JSON.stringify({ logoLibraryAssetId: 'lib_asset_009' })).logoLibraryAssetId).toBe('lib_asset_009');
+    expect(parseBrandKit(JSON.stringify({ logoLibraryAssetId: 'asset_001' }))!.logoLibraryAssetId).toBeUndefined();
+    expect(parseBrandKit(JSON.stringify({ logoLibraryAssetId: 'lib_asset_009' }))!.logoLibraryAssetId).toBe('lib_asset_009');
   });
 
-  it('読めない本文は空として扱う（例外を投げない）', () => {
-    expect(parseBrandKit('こわれています')).toEqual(emptyBrandKit());
-    expect(parseBrandKit('[]')).toEqual(emptyBrandKit());
+  // ⚠️ **「JSON ですら無い」は空ではなく「読めなかった」**（α-6 出口監査 🟡）＝空に潰すと、
+  // 次の編集が**覚えていた中身をまとめて上書き**して消す（保存中に落ちた等で起こりうる）。
+  it('読めない本文は「読めなかった」を返す（空と区別する）', () => {
+    expect(parseBrandKit('{')).toBeNull();
+    expect(parseBrandKit('')).toBeNull();
+    expect(parseBrandKit('123')).toBeNull();
+  });
+
+  it('中身が空の JSON は「空のキット」（読めなかったとは区別する）', () => {
+    expect(parseBrandKit('{}')).toEqual({});
   });
 });
 

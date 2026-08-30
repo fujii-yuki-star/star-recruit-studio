@@ -1516,7 +1516,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   updateVideoSettings: (patch) => {
     const doc = get().doc;
     if (!doc) return;
-    commit(set, get, { ...doc, videoSettings: { ...doc.videoSettings, ...patch } });
+    // ⚠️ **何も変わらないなら同じ文書を返す**（α-6 出口監査 🟡・ADR-0032 決定「空振りを積まない」）＝
+    // `commit` は同一参照で弾く設計なのに、ここが毎回作り直すので**必ず別参照**になり、
+    // 「文字の形を開いて、やはり同じものを選ぶ」だけで取り消しが1つ埋まり、**再生も止まる**。
+    const next = { ...doc.videoSettings, ...patch };
+    const same = (Object.keys(patch) as (keyof typeof patch)[])
+      .every((k) => JSON.stringify(next[k] ?? null) === JSON.stringify(doc.videoSettings[k] ?? null));
+    if (same) return;
+    commit(set, get, { ...doc, videoSettings: next });
   },
   addTrack: (kind) => {
     const doc = get().doc;
