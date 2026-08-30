@@ -38,6 +38,7 @@ import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateT
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -122,7 +123,7 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
-import { DORMANT_FONT_HINT, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { DORMANT_FONT_HINT, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -988,7 +989,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     [doc, selected, selectedTemplate],
   );
   // その部品の差し込み口に入っている動画（#512 段3b）＝元の音の欄を出す先。判定は domain の1か所。
-  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot) : [];
+  // ⚠️ **立ち絵も置き場所**（α-6 出口監査 🔴・#809）＝差し込み口だけに絞ると、立ち絵に入れた動画の
+  // **元の音の欄が出ない**＝書き出しにだけ効く設定になる（`resolveSlotClip` は同じ入れ物を共有）。
+  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }) : [];
   const slotNames = slotLabelsFor(slotLayers);
   // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
   // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
@@ -2553,6 +2556,50 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     || enabledShadow(c.shadow) != null || bandBackground(c.background) != null;
 
   /**
+   * 置き場所に入れた動画の**元の音**の欄（#512 段3b・α-6 出口監査 🔴）。
+   *
+   * ⚠️ **差し込み口と立ち絵で同じ欄を出す**＝立ち絵も置き場所なので、差し込み口だけに出すと
+   * **書き出しにだけ効く設定**になる（使い方の入れ物 `slotClips` も解決 `resolveSlotClip` も共有）。
+   * ⚠️ **音の入った動画が入っている置き場所にだけ出す**＝押せない欄を並べない。
+   * 音が無い／確かめられないときは、直接置きと同じ2文で理由を出す（§2-5）。
+   */
+  const renderPlacementAudio = (p: VideoPlacement | undefined) => {
+    if (!doc || !selected || !p || p.layerId == null) return null;
+    // ⚠️ **`VideoPlacement` をそのまま受ける**（`/canon-check` ℹ️）＝構造的部分型にして `as never` で
+    // 通していたが、`never` は何にでも代入できるので**型検査が完全に外れる**（§6）。
+    const state = placementAudioState(doc, p);
+    if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
+    if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
+    const layerId = p.layerId;
+    return (
+      <>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={p.useOriginalAudio}
+            {...editGuard()}
+            onChange={(e) => setSelectedClipSlotAudio(layerId, { useOriginalAudio: e.target.checked })}
+          />
+          <span>この動画に入っている音を流す</span>
+        </label>
+        <NumberField
+          label="音量"
+          step={VOLUME_STEP}
+          min={VOLUME_MIN}
+          max={VOLUME_MAX}
+          value={selected.slotClips?.[layerId]?.originalAudioVolume ?? null}
+          // ⚠️ 空欄＝**継承**なので、継承したときに実際に鳴る音量を出す
+          // （定数を出すと、素材側で決めた音量を隠して嘘の目安になる）。
+          placeholder={`指定なし（${Math.round(p.originalAudioVolume * 100)}%）`}
+          {...editGuard()}
+          onChange={(v) => setSelectedClipSlotAudio(layerId, { originalAudioVolume: v })}
+          onClear={() => setSelectedClipSlotAudio(layerId, { originalAudioVolume: null })}
+        />
+      </>
+    );
+  };
+
+  /**
    * **いまバラせるか**（差分再監査 5巡目 🟡）。実際にバラす関数を**空撃ち**して理由を引く。
    * 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。
    *
@@ -2704,8 +2751,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           const clip = placement.clip;
           // ⚠️ **置き場所そのもののアイテム**を探す（#512 段3）＝部品 id だけで探すと、
           // 見た目パターンの**別の枠**まで動画のコマで塗ってしまう。
+          // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝立ち絵に入れた動画も置き場所で、
+          // そのアイテムは `role:'character'`。絞ると**必ず一致せず**この置き場所ごと落ち、
+          // プレビューは静止・元の音も無音なのに**書き出しは実映像＋元の音**になる（ADR-0001）。
+          // 「どの置き場所のアイテムか」は `isItemOfPlacement` 1本に委ねる。
           const item = shownLayout.items.find(
-            (it) => it.kind === "image" && it.role === "slot" && isItemOfPlacement(it.id, placement),
+            (it) => it.kind === "image" && isItemOfPlacement(it.id, placement),
           ) as (LayoutItem & { kind: "image" }) | undefined;
           // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
           // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
@@ -3025,6 +3076,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               閉じる
             </button>
           </p>
+        )}
+        {/* ⚠️ **つないだことを知らせる**（α-6 出口監査 🟡・ADR-0032 追補4）＝つなぐと
+            「セリフとセリフの間でも BGM が下がったまま」になるので、黙ってやると設定した意味と違う音になる。
+            場面形式は書き出しの完了時に同じことを言っている（文言も同じ＝ADR-0026②）。 */}
+        {exportRun.duckMerged && exportRun.phase === EXPORT_RUN_PHASE.done && (
+          <p className="notice notice-warn" role="status">{DUCK_MERGED_MESSAGE}</p>
         )}
         {/* ⚠️ **書き出しに効く設定は、書き出す画面から触れる**（差分再監査 2巡目・§2-5）＝
             音の自動処理は書き出しに効くのに設定できる画面が場面形式にしかなく、しかも**前の版の
@@ -4308,41 +4365,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           ＝同じ概念を枠によって別の言い方にしない（ADR-0026②）。
                           ⚠️ **音の入った動画が入っている枠にだけ出す**＝押せない欄を並べない。
                           音が無い／確かめられない枠には、直接置きと同じ2文で理由を出す（§2-5）。 */}
-                      {(() => {
-                        const p = slotPlacements.find((x) => x.layerId === layer.id);
-                        if (!p) return null;
-                        const state = placementAudioState(doc, p);
-                        if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
-                        if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
-                        return (
-                          <>
-                            <label className="toggle-row">
-                              <input
-                                type="checkbox"
-                                checked={p.useOriginalAudio}
-                                {...editGuard()}
-                                onChange={(e) => setSelectedClipSlotAudio(layer.id, { useOriginalAudio: e.target.checked })}
-                              />
-                              <span>この動画に入っている音を流す</span>
-                            </label>
-                            <NumberField
-                              label="音量"
-                              step={VOLUME_STEP}
-                              min={VOLUME_MIN}
-                              max={VOLUME_MAX}
-                              value={selected.slotClips?.[layer.id]?.originalAudioVolume ?? null}
-                              // ⚠️ 空欄＝**継承**なので、継承したときに実際に鳴る音量を出す
-                              // （定数を出すと、素材側で決めた音量を隠して嘘の目安になる）。
-                              placeholder={`指定なし（${Math.round(p.originalAudioVolume * 100)}%）`}
-                              {...editGuard()}
-                              onChange={(v) => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: v })}
-                              onClear={() => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: null })}
-                            />
-                          </>
-                        );
-                      })()}
+                      {renderPlacementAudio(slotPlacements.find((x) => x.layerId === layer.id))}
                     </label>
                   ))}
+                  {/* ⚠️ **立ち絵に入れた動画の元の音も出す**（α-6 出口監査 🔴・#809）＝立ち絵も置き場所
+                      なので、差し込み口だけに出すと**書き出しにだけ効く設定**になる。 */}
+                  {(() => {
+                    const block = renderPlacementAudio(slotPlacements.find((x) => x.use === ASSET_USE_KIND.character));
+                    return block == null ? null : (
+                      <div className="field">
+                        <span className="field-label text-sm">ゆうこ（立ち絵）の動画の音</span>
+                        {block}
+                      </div>
+                    );
+                  })()}
                   {textKeys.map((key) => (
                     <label className="field" key={key}>
                       <span>{textKeyLabel[key]}</span>

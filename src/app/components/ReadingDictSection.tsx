@@ -225,8 +225,11 @@ export function ReadingDictSection() {
       await overwriteConflict(c.entry, c.engine.uuid);
       setConflicts((list) => list.filter((x) => x.entry.surface !== c.entry.surface));
       setNotice(`「${c.entry.surface}」の読み方を音声ソフトへ反映しました。`);
-    } catch {
-      setError("音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
+    } catch (e) {
+      // ⚠️ **理由を捨てない**（α-6 出口監査 ℹ️）＝この経路は辞書ファイルの読み書きも通るので、
+      // 常に接続先を疑わせると**従っても直らない案内**になる（同ファイルの `persist`／`onListen` は直済み）。
+      setError(typeof e === "string" ? e
+        : "音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
     }
   }
 
@@ -240,6 +243,11 @@ export function ReadingDictSection() {
         これから作る声すべてに使われます（作成済みの声はそのままです）。
       </p>
 
+      {/* ⚠️ **何を直しているか欄の側にも出す**（α-6 出口監査 🟡・棚と同じ作法）＝欄が一覧の上にあるので、
+          長い一覧から「直す」を押すと**どれを直しているのか**が欄からは分からない。 */}
+      {draft.editing && (
+        <p className="field-hint">「{draft.editing}」の読み方を直しています。</p>
+      )}
       <div className="field">
         <label className="field-label" htmlFor="readingSurface">言葉</label>
         <input
@@ -382,9 +390,17 @@ export function ReadingDictSection() {
                 />
               </li>
             ) : (
+              // ⚠️ **どの行を直しているか分かるようにする**（α-6 出口監査 🟡・棚と同じ作法）＝
+              // 印が無いと、登録語が増えるほど「直す」を押しても**手元では何も起きないように見える**。
               <li
                 key={normalizeSurface(e.surface)}
-                style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}
+                aria-current={draft.editing === normalizeSurface(e.surface) ? "true" : undefined}
+                style={{
+                  display: "flex", alignItems: "center", gap: "var(--gap-sm)",
+                  ...(draft.editing === normalizeSurface(e.surface)
+                    ? { borderLeft: "3px solid var(--color-accent)", paddingLeft: 6, background: "var(--color-surface-alt)" }
+                    : {}),
+                }}
               >
                 <span style={{ flex: 1 }}>
                   {e.surface}：{accentMark(e.yomi, e.accentType)}

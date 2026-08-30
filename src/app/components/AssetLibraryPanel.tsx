@@ -9,6 +9,7 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectS
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
+import { assetTagCounts } from "../../domain/project/assetSearch";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import {
   addLibraryAsset,
@@ -20,7 +21,6 @@ import {
 import {
   createLibraryAssetId,
   filterLibraryAssets,
-  libraryTags,
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
@@ -154,7 +154,16 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
   const importBlockedReason = blockedReason ?? (destOpen ? undefined : IMPORT_NO_PROJECT_MESSAGE);
   const shown = filterLibraryAssets(items, { text, tags, assetType });
-  const allTags = libraryTags(items);
+  // ⚠️ **候補は「いま出ているもの」から採り、件数を添える**（α-6 出口監査 🟡・素材画面と同じ作法）＝
+  // 全件から採ると、種類=音楽にして写真のタグを押せてしまい「条件に合う素材がありません」になる
+  //（押しても0件になる候補を出さない＝ADR-0026②）。**いま選んでいるタグは残す**＝選んだ瞬間に
+  // 自分が消えて外せなくなる、を作らない（`assetTagCounts` の第2引数）。
+  // ⚠️ **選んでいるタグも掛けた集合から採る**（差分再監査 ℹ️）＝タグは**すべて含む**（AND）なので、
+  // 外した集合から採ると「a を選んだ状態で b（1件）」が残り、押すと0件になる（この作法が防ぐと
+  // 謳っているもの）。件数は「**いま出ているものの中で、そのタグも付いている数**」になる。
+  // ⚠️ **数え方は素材画面と同じ関数**（`/canon-check` 🟡・§6）＝同じ規則を画面で書き直すと、
+  // 片方だけ並び順を変えたときに黙って割れる。
+  const allTags = assetTagCounts(shown, tags);
 
   async function onAdd(): Promise<void> {
     setNotice("");
@@ -341,7 +350,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
           <span className="field-label">タグで絞る</span>
           {/* ⚠️ **選ぶほど狭まる**（すべて含む＝AND）＝タグを足すと候補が減る、が直感に合う。 */}
           <div className="chip-input-row">
-            {allTags.map((t) => (
+            {allTags.map(({ tag: t, count }) => (
               <button
                 key={t}
                 type="button"
@@ -349,7 +358,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                 aria-pressed={tags.includes(t)}
                 onClick={() => setTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))}
               >
-                {t}
+                {t}（{count}）
               </button>
             ))}
             {tags.length > 0 && (

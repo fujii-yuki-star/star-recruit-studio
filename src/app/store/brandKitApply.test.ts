@@ -6,9 +6,18 @@ vi.mock('../../infrastructure/brandKitFs', () => ({
   saveBrandKit: vi.fn(async () => {}),
 }));
 
+vi.mock('../../infrastructure/userFontFs', () => ({
+  listUserFonts: vi.fn(async () => []),
+  loadUserFonts: vi.fn(async () => {}),
+  deleteUserFont: vi.fn(async () => {}),
+  importUserFont: vi.fn(),
+  usedUserFontIds: vi.fn(() => []),
+}));
+
 import { useProjectStore } from './projectStore';
-import { loadBrandKit } from '../../infrastructure/brandKitFs';
+import { loadBrandKit, saveBrandKit } from '../../infrastructure/brandKitFs';
 import { ASSET_TYPE } from '../../domain/enums';
+import { BRAND_LOGO_NOT_APPLIED_MESSAGE } from '../uiLabels';
 import type { Asset } from '../../domain/project/types';
 
 const logo: Asset = {
@@ -34,6 +43,8 @@ beforeEach(() => {
   importFromLibrary.mockClear();
   vi.mocked(loadBrandKit).mockResolvedValue({});
   useProjectStore.getState().setExportRun({ phase: 'idle' });
+  // ⚠️ **前のテストの理由を持ち越さない**＝残ると「出さない」側の検査が別の理由で落ちる（切り分けにくい）。
+  useProjectStore.setState({ importError: null } as never);
   setProject();
 });
 afterEach(() => vi.clearAllMocks());
@@ -181,6 +192,32 @@ describe('新しく作る入口（#888 レビュー 🔴＝主経路に効いて
   });
 });
 
+// ⚠️ **履歴に空振りを積まない**（差分再監査 🟡・ADR-0020）＝ロゴだけ足す計画で加わるのは `assets`＝
+// **履歴 slice の外**なので、先に積むと「押しても何も戻らない取り消す」が1つ増え、上限50 と
+// 合わさって**古い編集を1つ押し出す**。
+describe('applyBrandKit と履歴', () => {
+  it('文字の形が変わるときだけ積む', async () => {
+    useProjectStore.setState({ brandKit: { fontId: 'kaitou-yokoku-gothic' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(1);
+  });
+
+  it('ロゴだけ足すときは積まない（履歴の外だから戻らない）', async () => {
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it('何も変わらないときも積まない', async () => {
+    useProjectStore.setState({ brandKit: {}, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    await useProjectStore.getState().applyBrandKit();
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+});
+
 describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () => {
   it('覚えているフォントとロゴを入れる', async () => {
     vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic', logoLibraryAssetId: 'lib_asset_001' });
@@ -211,5 +248,56 @@ describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () 
     setProject({ assets: [logo] });
     await useProjectStore.getState().applyBrandKitToNew();
     expect(importFromLibrary).toHaveBeenCalledWith('lib_asset_001');
+  });
+
+  // ⚠️ **入らなくても動画は作るが、入らなかったことは言う**（ADR-0036・§2-5）＝
+  // 既存への明示適用（`applyBrandKit`）には対の検査があるのに、新規側は失敗の検査が無かった
+  //（`/canon-check` 🟡）＝**片方だけ黙る**を許してしまう（ADR-0026②）。
+  it('ロゴを取り込めなければ、理由を出す（黙って作らない）', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic', logoLibraryAssetId: 'lib_asset_001' });
+    importFromLibrary.mockResolvedValueOnce(null as never);
+    await useProjectStore.getState().applyBrandKitToNew();
+    expect(useProjectStore.getState().importError).toBe(BRAND_LOGO_NOT_APPLIED_MESSAGE);
+    // ⚠️ **フォントは入る**＝ロゴが入らなくても動画づくりは止めない。
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
+  });
+
+  it('ロゴが入ったときは理由を出さない', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ logoLibraryAssetId: 'lib_asset_001' });
+    await useProjectStore.getState().applyBrandKitToNew();
+    expect(useProjectStore.getState().importError).toBeNull();
+  });
+});
+
+// 会社の見た目は**丸ごと置き換えて**保存する（`updateBrandKit`）＝1項目だけ渡すと残りが消える。
+// ⚠️ **フォントを消しただけのつもりで色とロゴまで消えた**（PR #922 レビュー 🔴）ので、ここで固定する。
+describe('持ち込みフォントを消したとき、会社の見た目のほかの項目を巻き添えにしない', () => {
+  it('指していたフォントは外れ、色とロゴは残る', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' },
+      brandKitUnreadable: false,
+    } as never);
+
+    await useProjectStore.getState().removeUserFont('user_font_001');
+
+    expect(useProjectStore.getState().brandKit).toEqual({
+      colors: ['#112233'],
+      logoLibraryAssetId: 'lib_asset_001',
+    });
+    // 保存した中身も同じ（画面だけ残って保存が空、を作らない）。
+    expect(vi.mocked(saveBrandKit).mock.calls[vi.mocked(saveBrandKit).mock.calls.length - 1][0]).toEqual({
+      colors: ['#112233'],
+      logoLibraryAssetId: 'lib_asset_001',
+    });
+  });
+
+  it('別のフォントを消したときは会社の見た目に触らない', async () => {
+    const kit = { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' };
+    useProjectStore.setState({ brandKit: kit, brandKitUnreadable: false } as never);
+
+    await useProjectStore.getState().removeUserFont('user_font_002');
+
+    expect(useProjectStore.getState().brandKit).toEqual(kit);
+    expect(vi.mocked(saveBrandKit)).not.toHaveBeenCalled();
   });
 });

@@ -62,12 +62,31 @@ describe("AssetLibraryPanel", () => {
   it("タグを選ぶと絞り込む（重ねるほど狭まる）", async () => {
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
-    fireEvent.click(screen.getByRole("button", { name: "会社" }));
+    // ⚠️ タグの札には**件数**が付く（素材画面と同じ作法＝押しても0件になる候補を出さない）。
+    fireEvent.click(screen.getByRole("button", { name: /^会社（\d+）$/ }));
     expect(screen.queryByText("社員インタビュー")).not.toBeInTheDocument();
     // ⚠️ 種類のタブにも「写真」があるので、タグの側（`aria-pressed` を持つ）を選ぶ。
-    fireEvent.click(screen.getAllByRole("button", { name: "写真" }).find((b) => b.hasAttribute("aria-pressed"))!);
+    fireEvent.click(screen.getAllByRole("button", { name: /^写真（\d+）$/ }).find((b) => b.hasAttribute("aria-pressed"))!);
     expect(screen.queryByText("会社ロゴ")).not.toBeInTheDocument();
     expect(screen.getByText("オフィス写真")).toBeInTheDocument();
+  });
+
+  // ⚠️ **押しても0件になる候補を出さない**（α-6 出口監査 🟡・素材画面と同じ作法）＝
+  // 全件から候補を採ると、種類=音楽にして写真のタグを押せてしまい「条件に合う素材がありません」になる。
+  it("種類で絞ったら、その中に無いタグは候補に出さない", async () => {
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    expect(screen.getByRole("button", { name: /^会社（\d+）$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "音楽" })); // 種類のタブ
+    expect(screen.queryByRole("button", { name: /^会社（\d+）$/ })).toBeNull();
+  });
+
+  it("選んでいるタグは、候補から消えない（外せなくならない）", async () => {
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getByRole("button", { name: /^会社（\d+）$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "音楽" }));
+    expect(screen.getByRole("button", { name: /^会社（0）$/ })).toBeInTheDocument();
   });
 
   it("名前でも絞り込む", async () => {

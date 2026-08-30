@@ -1,15 +1,16 @@
 // ユーザー素材ライブラリ（ADR-0035・#260）の純粋な部分。
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   assetFromLibrary,
   createLibraryAssetId,
   filterLibraryAssets,
   isLibraryAssetId,
-  libraryTags,
   LIBRARY_ASSET_ID_SAMPLES,
   type LibraryAsset,
 } from './assetLibrary';
-import { ASSET_TYPE } from '../enums';
+import { ASSET_TYPE, ASSET_TYPES, ASSET_TYPE_SAMPLES, isAssetType } from '../enums';
 
 const lib = (over: Partial<LibraryAsset> = {}): LibraryAsset => ({
   id: 'lib_asset_001',
@@ -140,15 +141,7 @@ describe('filterLibraryAssets（タグで探せる＝#260 で足りなかった�
   });
 });
 
-describe('libraryTags', () => {
-  it('重複なく、出てきた順に並べる', () => {
-    expect(libraryTags([lib({ tags: ['あ', 'い'] }), lib({ tags: ['い', 'う'] })])).toEqual(['あ', 'い', 'う']);
-  });
 
-  it('タグが無ければ空', () => {
-    expect(libraryTags([lib({ tags: [] })])).toEqual([]);
-  });
-});
 
 // ⚠️ **予約した番号を必ず使う**（差分再監査 6巡目 🔴）＝タイムラインの取り込みは `existingIds` に空配列を
 // 渡し、番号は `reserveAssetId` が採る（消した番号を使い回さない規則）。この引数が落ちると
@@ -171,5 +164,42 @@ describe('assetFromLibrary の採番', () => {
       ['asset_001', 'asset_002'],
     );
     expect(asset.assetId).toBe('asset_003');
+  });
+});
+
+// ⚠️ **素材の種類の一覧も両側で同じ答えにする**（α-6 出口監査 🟡）＝Rust 側のコメントは
+// 「テストで同値性を固定する」と書いているのに、その固定が無かった。ずれると
+// `update_library_asset` が**選んだ種類を黙って捨てる**（知らない値は書かない）。
+describe('ASSET_TYPE_SAMPLES（Rust と同じ答えになることの入力）', () => {
+  it('既知の種類は受ける・それ以外は受けない', () => {
+    const expected: Record<string, boolean> = {
+      image: true, video: true, bgm: true, voice: true, yuko: true, decor: true, logo: true, qr: true,
+      Image: false, audio: false, movie: false, '': false,
+    };
+    expect(ASSET_TYPE_SAMPLES).toHaveLength(Object.keys(expected).length);
+    for (const v of ASSET_TYPE_SAMPLES) {
+      // ⚠️ **実際に使う述語で見る**（`/canon-check` ℹ️）＝一覧に含まれるかを直接見ると、
+      // `toLibraryAsset` が通す `isAssetType` に別の分岐（別名の受け入れ等）が入ったとき
+      // **Rust とのずれを素通しする**。門は「使う判定」で固定する。
+      expect([v, isAssetType(v)]).toEqual([v, expected[v]]);
+    }
+  });
+
+  // ⚠️ **表が2つあるだけでは「同じ答え」を固定できない**（PR #922 レビュー ℹ️）＝両側が自分の表としか
+  // 比べないので、**片方に種類が増えても相手は赤くならない**。Rust 側のコメントが謳う同値性が
+  // 実際には無かった（[[verify-claims-in-comments]] の型＝主張がコードより強い）。
+  // そこで **Rust の本文をそのまま読んで**一覧を突き合わせる＝どちらを増やしても、もう片方を
+  // 直すまで赤いままになる。
+  it('Rust の `is_known_asset_type` が同じ一覧を見ている', () => {
+    const rust = readFileSync(join(process.cwd(), 'src-tauri', 'src', 'lib.rs'), 'utf8');
+    const body = /fn is_known_asset_type\(v: &str\) -> bool \{\s*matches!\(([^)]*)\)/.exec(rust);
+    // 見つからない＝関数の書き方が変わった。**黙って緑にしない**（検査が空振りする）。
+    expect(body).not.toBeNull();
+    const arms = (body as RegExpExecArray)[1]
+      .split('|')
+      .map((a) => a.trim().replace(/^v\s*,\s*/, ''))
+      .map((a) => a.replace(/^"|"$/g, '').trim())
+      .filter((a) => a !== '');
+    expect([...arms].sort()).toEqual([...ASSET_TYPES].sort());
   });
 });

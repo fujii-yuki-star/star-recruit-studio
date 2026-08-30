@@ -7,10 +7,10 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
-import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND, LAYER_TYPE } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
@@ -20,7 +20,7 @@ import { clipEndSec } from './validateTimelineDoc';
 import { isDrawnClip, placementOriginalAudio, videoAssetIds, videoPlacementsOf, videoPlacementsOfClip } from './video';
 import { isUnsplittableClipKind } from './clipKind';
 import type { Template } from '../template/types';
-import type { TimelineClip, TimelineProject } from './types';
+import type { TimelineClip, TimelineProject, VolumePoint } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
 export interface TimelineFramePlan {
@@ -109,6 +109,62 @@ export interface TimelineAudioRun {
 }
 
 /**
+ * その部品の音量の式に**実際に渡る点列**（α-6 出口監査 🟡・`/canon-check` 🟡）。
+ *
+ * ⚠️ **門と書き出しが「同じ材料」ではなく「同じ関数」を通る**＝以前は門だけが**文書全体**の
+ * ダッキング点数（区間数×4）を**すべての音の部品**へ足していたが、実際の式は
+ * ①**読み上げには倍率を当てない**（自分で自分を下げない）②**その部品の区間に掛からない区間は捨てる**
+ *（`duckingFactorPoints`）ので、**実効より多く数えて出せる動画を止めていた**（声を14本置くと、点が
+ * 5個の読み上げや冒頭だけの短い BGM が「点が多すぎます」で止まる。しかも案内の「部品を分ける」は
+ * 読み上げにはできない＝**従える道が無い**・§2-5）。数える側と組む側を1つの関数に寄せて構造で消す。
+ */
+export function clipVolumePointsForExport(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  auto: ReturnType<typeof resolveAudioAuto>,
+  duckSpans: readonly { startSec: number; endSec: number }[],
+): { factor: VolumePoint[]; points: VolumePoint[] } {
+  // 声が鳴っている区間だけ BGM を下げる（#257・ADR-0032 追補4＝両形式に効く）。
+  // ⚠️ **読み上げそのものは下げない**（自分で自分を下げることになる）。動画の元の音は呼ぶ側で扱う。
+  const factor =
+    clip.kind === TIMELINE_CLIP_KIND.voice
+      ? []
+      : duckingFactorPoints(duckSpans, { startSec: clip.startSec, endSec: clipEndSec(clip) }, auto);
+  const saved = normalizedVolumePoints(clip.volumePoints);
+  return factor.length > 0
+    ? { factor, points: applyDucking(saved, clipBaseVolume(clip, doc), factor) }
+    : { factor, points: saved };
+}
+
+/** 下げる区間（まとめた後）。門と書き出しが同じ材料を見るための1か所。 */
+export function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolveAudioAuto>) {
+  return fitSpeechSpans(
+    doc.clips
+      .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
+      .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
+      .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
+    auto,
+    VOLUME_POINTS_MAX,
+  );
+}
+
+/**
+ * **実際に音として並ぶ部品か**（`/canon-check` の範囲6 レビュー ℹ️）。
+ *
+ * ⚠️ **門と書き出しが「同じ部品」を見るための1か所**＝`isAudioClip` だけで数えると、
+ * **音源が無い読み上げ**（まだ声を作っていない）や**隠した部品・隠した列**まで門が数える。
+ * それらは `timelineAudioRuns` に出ない＝**式を組まないのに書き出しを止める**（断る側へ倒れる）。
+ * 「音量の変化」の欄は声の作成前から開くので、未作成の読み上げに点を置くのは普通に起こりうる。
+ */
+export function isAudibleRunClip(doc: TimelineProject, clip: TimelineClip): boolean {
+  if (!audioSourceKeyOfClip(clip)) return false; // 音源が無い（読み上げ未作成など）＝置くものが無い
+  // 鳴るかどうかの判定（隠した列・隠したクリップ）は再生と同じ関数に委ねる＝規則を2か所に書かない。
+  // クリップの真ん中の時刻で見る（区間の端は半開なので、0秒に近いクリップでも必ず入る）。
+  const midSec = clip.startSec + clip.durationSec / 2;
+  return audioCuesAt(doc, midSec).some((q) => q.clipId === clip.id);
+}
+
+/**
  * 音の並べ方を決める（#631）。**再生（`audioCuesAt`）と同じ値を使う**＝聞いた音と書き出した音が一致する。
  *
  * **音量の変化（`volumePoints`・#512）も渡す**（段3）＝再生と**同じ点列**から `volumeExpr` で式を組み、
@@ -122,41 +178,31 @@ export interface TimelineAudioRun {
 export function timelineAudioRuns(
   doc: TimelineProject,
   templateOf?: (templateId: string) => Template | undefined,
-): TimelineAudioRun[] {
+): { runs: TimelineAudioRun[]; duckMerged: boolean } {
   const runs: TimelineAudioRun[] = [];
   // 声が鳴っている区間（#257）＝**作成済みの読み上げ**だけ（鳴らない声のために下げない）。
   // 隠した列・隠したクリップも数えない＝`audioCuesAt` と同じ「聞こえるもの」の見方に合わせる。
   const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
-  const duckSpans = auto.duckBgm
-    ? fitSpeechSpans(
-        doc.clips
-          .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
-          .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
-          .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
-        auto,
-        VOLUME_POINTS_MAX,
-      ).spans
-    : [];
+  // ⚠️ **まとめたかどうかを捨てない**（α-6 出口監査 🟡・ADR-0032 追補4）＝まとめると
+  // 「セリフとセリフの間でも BGM が下がったまま」になるので、黙ってやると設定した意味と違う音になる。
+  // 場面形式は書き出しの完了時に知らせている（`ExportScreen`）＝形式で割らない。
+  const fitted = auto.duckBgm ? duckSpansOf(doc, auto) : { spans: [], merged: false };
+  const duckSpans = fitted.spans;
   for (const clip of doc.clips) {
+    // 「音として並ぶか」の述語は**門と共有**（同じ部品を見る）。⚠️ **キャストで通さない**＝
+    // `as string` にすると述語を緩めたとき**型が嘘をつく**（実際の値は `undefined` になりうる）。
+    if (!isAudibleRunClip(doc, clip)) continue;
     const sourceKey = audioSourceKeyOfClip(clip);
-    if (!sourceKey) continue; // 音源が無い（読み上げ未作成など）＝置くものが無い
-    // 鳴るかどうかの判定（隠した列・隠したクリップ）は再生と同じ関数に委ねる＝規則を2か所に書かない。
-    // クリップの真ん中の時刻で見る（区間の端は半開なので、0秒に近いクリップでも必ず入る）。
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
-    if (!cue) continue;
+    if (!sourceKey || !cue) continue;
     const volume = clipBaseVolume(clip, doc);
-    // 声が鳴っている区間だけ BGM を下げる（#257・ADR-0032 追補4＝両形式に効く）。
-    // ⚠️ **読み上げそのものは下げない**（自分で自分を下げることになる）。動画の元の音は下の段で扱う。
-    const factor =
-      clip.kind === TIMELINE_CLIP_KIND.voice
-        ? []
-        : duckingFactorPoints(duckSpans, { startSec: clip.startSec, endSec: clipEndSec(clip) }, auto);
+    // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
-    const expr =
-      factor.length > 0
-        ? volumeExpr(applyDucking(normalizedVolumePoints(clip.volumePoints), volume, factor))
-        : volumeExpr(clip.volumePoints);
+    // ⚠️ **倍率の有無で分岐しない**＝`volumeExpr` は中で `normalizedVolumePoints` を通す（べき等）ので、
+    // 倍率が空のときの `points` は「正規化した保存の点」＝生の点を渡したときと**同じ式**になる。
+    // 分けて書くと「なぜ違うのか」を毎回確かめることになる（式は1本にしておく）。
+    const expr = volumeExpr(clipVolumePointsForExport(doc, clip, auto, duckSpans).points);
     runs.push({
       clipId: clip.id,
       sourceKey,
@@ -201,7 +247,7 @@ export function timelineAudioRuns(
       loop: false,
     });
   }
-  return runs;
+  return { runs, duckMerged: fitted.merged };
 }
 
 /**
@@ -318,8 +364,19 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 同じ時刻の重複は式に出ないので、それで上限に当てない。
   // 見るのは**鳴る音を持つ部品だけ**（`isAudioClip`＝再生・編集と同じ述語）。絵の部品に点が入っていても
   // 式は組まれない（`timelineAudioRuns` に出ない）ので、数えると**書き出せるものを断る**ことになる。
+  // ⚠️ **実効の点数で数える**（α-6 出口監査 🟡）＝式へ渡るのは**保存の点とダッキングの点の和集合**
+  // （`applyDucking`）なので、保存の点だけを見ると**合わせて上限を超える**組み合わせを素通しする＝
+  // フィルタの組み立てごと失敗し、出るのは「もう一度お試しください」＝この門が防ぐはずのもの。
+  // ⚠️ **部品ごとに、書き出しと同じ関数で数える**（`/canon-check` 🟡）＝文書全体のダッキング点数を
+  // 全部品へ一律に足すと、**読み上げ**（倍率を当てない）や**短い BGM**（掛からない区間は捨てられる）で
+  // 実効より多く数え、**出せる動画を止める**（しかも読み上げは「部品を分ける」ができない＝従える道が無い）。
+  const autoForGate = resolveAudioAuto(doc.videoSettings.audioAuto);
+  const duckSpansForGate = autoForGate.duckBgm ? duckSpansOf(doc, autoForGate).spans : [];
+  // ⚠️ **数える部品も書き出しと同じ**（`/canon-check` 範囲6 ℹ️）＝`isAudioClip` だけで数えると、
+  // 音源が無い読み上げ・隠した部品まで数え、**式を組まないのに書き出しを止める**。
   const tooManyPoints = doc.clips
-    .filter((c) => isAudioClip(c) && normalizedVolumePoints(c.volumePoints).length > VOLUME_POINTS_MAX)
+    .filter((c) => isAudibleRunClip(doc, c)
+      && clipVolumePointsForExport(doc, c, autoForGate, duckSpansForGate).points.length > VOLUME_POINTS_MAX)
     .map((c) => c.id);
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
@@ -407,7 +464,7 @@ export function timelineImageAssetIds(
     //（直接置きの動画がある部品では、立ち絵の代表フレームまで要らない扱いになり灰色の枠が焼き込まれる）。
     const asVideo = new Set(videoPlacementsOfClip(doc, c, { ids: videoIds, ...(templateOf ? { templateOf } : {}) })
       .map((p) => assetUseKey(p.use, p.layerId)));
-    for (const u of clipImageAssetUses(c)) {
+    for (const u of clipImageAssetUses(c, templateOf)) {
       if (asVideo.has(assetUseKey(u.kind, u.layerId))) continue; // 実フレームで描く＝代表フレームは要らない
       stillOnly.add(u.assetId);
     }
@@ -450,10 +507,22 @@ import type { AssetUseKind } from '../enums';
  */
 export function clipImageAssetUses(
   clip: TimelineClip,
+  /**
+   * 見た目パターンの解決（α-6 出口監査 🟡）。⚠️ **立ち絵の層 id をそろえるために要る**＝
+   * `videoPlacementsOfClip` は立ち絵を**層 id つき**で返すので、ここで `null` のままだと
+   * **同じ立ち絵が別の鍵になり**、実フレームで描くものまで「代表フレームが要る」側に入る
+   *（代表フレームを読めないだけで、実際には描ける動画の書き出しを断ってしまう）。
+   */
+  templateOf?: (templateId: string) => { layers: { id: string; type: string }[] } | undefined,
 ): { kind: AssetUseKind; layerId: string | null; assetId: string }[] {
   const out: { kind: AssetUseKind; layerId: string | null; assetId: string }[] = [];
   if (clip.assetId) out.push({ kind: ASSET_USE_KIND.direct, layerId: null, assetId: clip.assetId });
-  if (clip.character?.poseAssetId) out.push({ kind: ASSET_USE_KIND.character, layerId: null, assetId: clip.character.poseAssetId });
+  if (clip.character?.poseAssetId) {
+    const charLayerId = clip.templateId != null
+      ? templateOf?.(clip.templateId)?.layers.find((l) => l.type === LAYER_TYPE.character)?.id ?? null
+      : null;
+    out.push({ kind: ASSET_USE_KIND.character, layerId: charLayerId, assetId: clip.character.poseAssetId });
+  }
   for (const [layerId, id] of Object.entries(clip.assetRefs ?? {})) {
     if (typeof id === 'string') out.push({ kind: ASSET_USE_KIND.slot, layerId, assetId: id });
   }

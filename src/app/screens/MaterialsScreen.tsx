@@ -109,13 +109,21 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // ⚠️ **タグは付けられるのに探せなかった**（#858）＝付与UI も AI 利用も動いているのに、
   // 一覧の絞り込みは**種類だけ**だった。名前とタグの両方で絞れるようにする。
   // 規則は domain の1か所（`matchesAssetQuery`）＝画面で数え直さない。
+  // 取り消し・やり直しで戻る場面（この先の `unusedAssetIds` が数える）。
+  const historyPast = useProjectStore((s) => s.past);
+  const historyFuture = useProjectStore((s) => s.future);
   const byType = materials.filter((a) => filter === "all" || a.assetType === filter);
   // ⚠️ **種類とは別の軸**（#348）＝種類のタブに5つ目として混ぜると「どこにも置いていない動画だけ」が
   // 見られなくなる。掛け合わせられるように独立させる。
   // ⚠️ **判定は「どこからも指されていない」**（`unusedAssetIds`）＝公開前チェックの「使っていない素材」
   //（＝動画に出るか）とは**別の規則**。あちらは「そのままでよい」警告だが、こちらは**消す判断**で、
   // 間違えると取り消せない（`assets` は履歴の外＝ADR-0020/0028）。だから休眠も数えて**安全側**へ倒す。
-  const unusedIds = new Set(unusedAssetIds(materials, scenes, meta.bgmSettings?.assetId));
+  // ⚠️ **取り消しで戻る場面も数える**（α-6 出口監査 🔴）＝場面を消した／写真を外した直後に
+  // まとめて消すと、取り消しても素材は戻らない（実体ファイルごと消えている）。
+  const unusedIds = new Set(unusedAssetIds(
+    materials, scenes, meta.bgmSettings?.assetId,
+    [...historyPast, ...historyFuture].map((snap) => snap.scenes),
+  ));
   const byUse = unusedOnly ? byType.filter((a) => unusedIds.has(a.assetId)) : byType;
   // ⚠️ **件数も種類で絞った後で数える**＝タブと掛け合わせたとき、チェックの数と下の
   // 「いま出ているNつ」が食い違わない（レビュー 🟡）。
@@ -533,9 +541,15 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 message={
                   <>
                     「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
+                    {/* ⚠️ **取り消しで戻る場面も見る**（`/canon-check` ℹ️）＝「まとめて消す」側は
+                        数えているのに、1件削除は**いまの場面だけ**を見て「どこでも使われていません」と
+                        言い切っていた（同じ穴が入口違いで残る＝ADR-0026②）。素材は履歴の外なので、
+                        消したあとに取り消しても戻らない＝**先に言う**（§2-5）。 */}
                     {usedSceneCount > 0
                       ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
-                      : "この素材はどの場面でも使われていません。"}
+                      : unusedIds.has(selected.assetId)
+                        ? "この素材はどの場面でも使われていません。"
+                        : "いまはどの場面でも使われていませんが、「元に戻す」で戻る場面が使っています。削除すると、元に戻しても素材は戻りません。"}
                   </>
                 }
                 onCancel={() => setConfirmDeleteId(null)}

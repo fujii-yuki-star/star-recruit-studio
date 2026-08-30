@@ -8,6 +8,7 @@ import type { ScreenId } from "../data/mockData";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
+import { DeleteConfirm } from "./DeleteConfirm";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
@@ -27,6 +28,16 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
   // ⚠️ **覚え直しが書けなかった理由**（α-6 出口監査 🟡23）＝黙って覚えた顔をしない（§2-5）。
   const brandKitError = useProjectStore((s) => s.brandKitError);
+  const brandKitUnreadable = useProjectStore((s) => s.brandKitUnreadable);
+  const rebuildBrandKit = useProjectStore((s) => s.rebuildBrandKit);
+  const [rebuilding, setRebuilding] = useState(false);
+  // ⚠️ **「変更はできません」と書いた欄は押せなくする**（差分再監査 🟡・§2-5 派生）＝
+  // `updateBrandKit` は読めていない間**必ず断る**ので、押せるままだと**選択が元へ戻って**
+  // 2つ目の赤字が増えるだけ（同じ状態に断り方が2通り）。同じ画面の書き出し中のボタンは
+  // 既に `disabled`＋`title` で押す前に断っており、そちらへ揃える。
+  const unreadableGuard = brandKitUnreadable
+    ? { disabled: true, title: "会社の見た目を読めていないので、いまは変えられません。アプリを開き直してからお試しください。" }
+    : {};
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
@@ -122,12 +133,41 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         すでに作った動画は自動では変わりません（下のボタンを押したときだけ反映します）。
       </p>
 
+      {/* ⚠️ **読めていないことを言う**（`/canon-check` 🟡・§2-5）＝黙っていると**空のキット**
+          （「覚えない」・色0件・ロゴ無し）を見せる＝兄弟の欄（よく使う素材・文字の形）は同じ状況で
+          「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
+          ⚠️ **覚えている中身は上書きしない**ので、この間は変えられない（変えると消える）。 */}
+      {brandKitUnreadable && (
+        <div className="notice notice-warn" role="alert">
+          <p>
+            会社の見た目を読めませんでした。覚えている内容を失わないよう、いまは変更できません。
+            アプリを開き直すと直ることがあります。
+          </p>
+          {/* ⚠️ **行き止まりを作らない**（差分再監査 🟡・§2-5）＝上書きを断る門を下ろせるのは
+              「読み込みの成功」だけなので、ファイルが本当に壊れていると**二度と変えられない**。
+              利用者が**押したときだけ**通る出口を置く（何が失われるかを先に言う）。 */}
+          {rebuilding ? (
+            <DeleteConfirm
+              message="覚えていた文字の形・色・ロゴは読み取れないため、作り直すと空になります。よろしいですか？"
+              confirmLabel="作り直す"
+              onCancel={() => setRebuilding(false)}
+              onConfirm={() => { setRebuilding(false); void rebuildBrandKit(); }}
+            />
+          ) : (
+            <button type="button" className="btn" onClick={() => setRebuilding(true)}>
+              直らないときは作り直す
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="field">
         <label className="field-label" htmlFor="brandFont">いつもの文字の形</label>
         <select
           id="brandFont"
           className="input"
           value={brandKit.fontId ?? ""}
+          {...unreadableGuard}
           onChange={(e) => void updateBrandKit({ ...brandKit, fontId: e.target.value || undefined })}
         >
           <option value="">覚えない（毎回選ぶ）</option>
@@ -159,7 +199,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
             <span key={c} className="chip">
               <span style={{ width: 14, height: 14, borderRadius: 3, background: c, display: "inline-block" }} />
               {c}
-              <button type="button" aria-label={`${c} を外す`} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
+              <button type="button" aria-label={`${c} を外す`} {...unreadableGuard} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
                 ×
               </button>
             </span>
@@ -170,7 +210,8 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           <button
             type="button"
             className="btn"
-            disabled={colors.length >= BRAND_COLORS_MAX}
+            {...unreadableGuard}
+            disabled={brandKitUnreadable || colors.length >= BRAND_COLORS_MAX}
             onClick={() => void updateBrandKit(addBrandColor(brandKit, newColor))}
           >
             この色を覚える
@@ -211,6 +252,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
             id="brandLogo"
             className="input"
             value={brandKit.logoLibraryAssetId ?? ""}
+            {...unreadableGuard}
             onChange={(e) => void updateBrandKit({ ...brandKit, logoLibraryAssetId: e.target.value || undefined })}
           >
             <option value="">覚えない</option>
@@ -248,7 +290,12 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         ) : (
         <>
           {/* ⚠️ **押す前に何が変わるかを見せる**（決定3・#547 の「まとめて標準にする」と同型）。 */}
-          {nothingToApply ? (
+          {/* ⚠️ **読めていないときに「同じです」と言わない**（差分再監査の対応で気づいた・§2-5）＝
+              覚えている中身が読めていないだけで、**同じだと確かめたわけではない**。上の断りと合わせて
+              「いまは反映できない」と言う（嘘の安心を出さない）。 */}
+          {brandKitUnreadable ? (
+            <p className="field-hint">会社の見た目を読めていないので、いまは反映できません。</p>
+          ) : nothingToApply ? (
             <p className="field-hint">この動画は、覚えている見た目と同じです。反映するものはありません。</p>
           ) : (
             <>

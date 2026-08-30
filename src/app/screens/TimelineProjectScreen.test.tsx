@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, DUCK_MERGED_MESSAGE, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -7025,5 +7025,133 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
     // ⚠️ 部品ぜんぶの欄は**無条件に出す**（解決できているときと同じ）＝状態で現れたり消えたりしない。
     expect(screen.getByText("この部品の文字の形")).toBeInTheDocument();
     expect(screen.queryByText("見出しの文字の形")).toBeNull();
+  });
+});
+
+// ⚠️ **何も変わらない操作は積まない**（α-6 出口監査 🟡・ADR-0032 決定）＝`commit` は同一参照で
+// 弾く設計なのに、動画全体の設定は毎回作り直していたので**必ず別参照**になり、同じものを選び直す
+// だけで取り消しが1つ埋まり、再生も止まっていた。
+describe("動画全体の設定の空振り", () => {
+  const openWithFont = (): void => {
+    open({ videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: "gen-interface-jp" } } as never);
+  };
+
+  it("同じ値を書いても履歴が増えない・再生も止まらない", () => {
+    openWithFont();
+    useTimelineStore.setState({ isPlaying: true });
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ fontId: "gen-interface-jp" }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+  });
+
+  it("違う値なら積む（変えたことは取り消せる）", () => {
+    openWithFont();
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ fontId: "kaitou-yokoku-gothic" }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+  });
+
+  it("入れ物の中身が同じなら積まない（音の自動処理のような組の設定）", () => {
+    open({ videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true } } } as never);
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => { useTimelineStore.getState().updateVideoSettings({ audioAuto: { duckBgm: true } }); });
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+  });
+});
+
+// 立ち絵に入れた動画（#809・α-6 出口監査 🔴1）。
+//
+// ⚠️ **プレビューが当てるアイテムを役割で絞ると、立ち絵は必ず外れる**（立ち絵のアイテムは
+// `role:'character'`）＝プレビューは静止・元の音も無音なのに、書き出しは実映像＋元の音になる
+// （ADR-0001 の破れ）。domain 側の鍵の一致だけでなく、**画面の経路**も固定する。
+describe("立ち絵に入れた動画のプレビュー", () => {
+  const charTemplate: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_char", name: "立ち絵つき", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: "bg", type: "background", x: 0, y: 0, w: 1920, h: 1080 },
+      { id: "yuko", type: "character", x: 960, y: 0, w: 960, h: 1080 },
+    ],
+  } as unknown as Template;
+
+  const openWithPose = (): void => {
+    useProjectStore.setState({ templates: [charTemplate] });
+    open({
+      assets: [{ assetId: "asset_pose", assetType: "video", displayName: "立ち絵動画", filePath: "p.mp4", metadata: { hasAudio: true } }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 5, templateId: "tmpl_char",
+        character: { enabled: true, characterId: "yuko", poseAssetId: "asset_pose" },
+      }],
+    } as never);
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { asset_pose: "blob:thumb_pose" },
+        videoSrcById: { asset_pose: "blob:body_pose" },
+      });
+    });
+  };
+
+  it("実映像の窓が開く（代表フレームで静止させない）", () => {
+    openWithPose();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const videos = [...container.querySelectorAll(".preview-stage video")] as HTMLVideoElement[];
+    expect(videos).toHaveLength(1);
+    expect(videos[0].getAttribute("src")).toBe("blob:body_pose");
+  });
+
+  // ⚠️ **元の音の欄も出す**＝差し込み口だけに絞ると、書き出しにだけ効く設定になる。
+  it("元の音の欄が出る（書き出しにだけ効く設定を作らない）", () => {
+    openWithPose();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("ゆうこ（立ち絵）の動画の音")).toBeInTheDocument();
+    expect(screen.getByText("この動画に入っている音を流す")).toBeInTheDocument();
+  });
+
+  // ⚠️ **押した結果まで固定する**（`/canon-check` 🔴）＝欄が出ることだけを見ていたので、
+  // **書き込みが毎回断られている**（素材を `assetRefs` からしか探しておらず、立ち絵の素材は
+  // `character.poseAssetId` にある）のを緑のまま通していた。描けることと**設定できる**ことは別。
+  it("押すと設定が載る（欄は出るのに毎回断られる、を作らない）", () => {
+    openWithPose();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const cb = screen.getByLabelText("この動画に入っている音を流す");
+    act(() => { fireEvent.click(cb); });
+    expect(useTimelineStore.getState().doc?.clips[0].slotClips).toEqual({ yuko: { useOriginalAudio: true } });
+    // 断られていないこと＝理由が出ていない（出ていたら「音が入っていない」＝事実と違う理由）。
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
+});
+
+// BGM を下げる区間を**つないだ**ことは、場面形式と同じように**タイムライン形式でも言う**
+//（ADR-0026②・§2-5＝黙ってやると設定した意味と違う音になる）。ドメイン側の `duckMerged` の
+// 算出は `export.test.ts` で固定済みなので、ここで見るのは**画面まで配線されているか**だけ
+//（PR #922 範囲4 レビュー ℹ️＝配線のカバレッジが薄い）。
+describe("TimelineProjectScreen: BGM を下げる区間をつないだ知らせ", () => {
+  const done = (duckMerged: boolean) => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    useTimelineStore.setState({ exportRun: { phase: "done", percent: 100, message: "書き出しました。", cancelling: false, duckMerged } as never });
+  };
+
+  it("つないだときは出る（文言は場面形式と同じもの）", () => {
+    done(true);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(DUCK_MERGED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("つないでいないときは出さない（毎回出すと意味が薄れる）", () => {
+    done(false);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(DUCK_MERGED_MESSAGE)).toBeNull();
+  });
+
+  it("書き出しの途中では出さない（まだ結果が出ていない）", () => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    useTimelineStore.setState({ exportRun: { phase: "running", percent: 50, message: null, cancelling: false, duckMerged: true } as never });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(DUCK_MERGED_MESSAGE)).toBeNull();
+    useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
   });
 });

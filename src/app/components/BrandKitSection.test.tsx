@@ -9,7 +9,7 @@ vi.mock("../../infrastructure/brandKitFs", () => ({
 }));
 
 import { BrandKitSection } from "./BrandKitSection";
-import { saveBrandKit } from "../../infrastructure/brandKitFs";
+import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import type { Scene } from "../../domain/project/types";
@@ -114,12 +114,35 @@ describe("BrandKitSection", () => {
    * 開き直したときに黙って消えている（何を変えたか本人にも分からない）。画面を戻して理由を出す。
    */
   it("覚え直しが保存できなければ、画面を戻して理由を出す", async () => {
+    // ⚠️ **読み直しが終わってから触る**（差分再監査 ℹ️ の是正）＝この画面は表示時に
+    // `refreshBrandKit` を走らせるので、待たずに変えると**戻し先が読み直しの結果に上書きされる**
+    // タイミングに依存する（以前は「戻すときに丸ごと戻す」実装がその上書きを消していて緑だった）。
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: "kaitou-yokoku-gothic" });
     vi.mocked(saveBrandKit).mockRejectedValueOnce(new Error("書けない"));
     render(<BrandKitSection />);
+    await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("kaitou-yokoku-gothic"));
     fireEvent.change(screen.getByLabelText("いつもの文字の形"), { target: { value: "gen-interface-jp" } });
     expect(await screen.findByText(/保存できませんでした/)).toBeInTheDocument();
     // 覚えている内容は元のまま＝保存できていないのに変わった顔をしない。
     await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("kaitou-yokoku-gothic"));
+  });
+
+  // ⚠️ **戻すのは「自分が書いた値がまだ載っているとき」だけ**（差分再監査 ℹ️）＝丸ごと戻すと、
+  // 保存を待つ間に入った**次の変更まで巻き添えで巻き戻る**（ディスクは後勝ちなので食い違う）。
+  it("保存を待つ間に入った次の変更は、巻き戻さない", async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: "kaitou-yokoku-gothic" });
+    let reject: (e: Error) => void = () => {};
+    vi.mocked(saveBrandKit).mockImplementationOnce(() => new Promise((_, rj) => { reject = rj; }));
+    render(<BrandKitSection />);
+    await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("kaitou-yokoku-gothic"));
+
+    const first = useProjectStore.getState().updateBrandKit({ fontId: "gen-interface-jp" });
+    // 先の保存が着地する前に、次の変更が入る（こちらは成功する）。
+    await useProjectStore.getState().updateBrandKit({ fontId: "gen-interface-jp-display" });
+    reject(new Error("書けない"));
+    await first;
+
+    expect(useProjectStore.getState().brandKit.fontId).toBe("gen-interface-jp-display");
   });
 
   /**
@@ -189,5 +212,50 @@ describe("BrandKitSection", () => {
     render(<BrandKitSection />);
     expect(screen.getByText(/「会社紹介」に反映する/)).toBeInTheDocument();
     expect(screen.queryByText(/いまは動画を開いていません/)).toBeNull();
+  });
+
+  // ⚠️ **読めていないことを言う**（`/canon-check` 🟡・§2-5）＝黙っていると**空のキット**
+  //（「覚えない」・色0件・ロゴ無し）を見せる。兄弟の欄（よく使う素材・文字の形）は同じ状況で
+  // 「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
+  it("会社の見た目を読めていないときは、その旨を出す（空のキットに見せない）", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/会社の見た目を読めませんでした/)).toBeInTheDocument();
+    expect(screen.getByText(/いまは変更できません/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **行き止まりを作らない**（差分再監査 🟡・§2-5）＝上書きを断る門を下ろせるのは読み込みの成功
+  // だけなので、ファイルが本当に壊れていると**二度と変えられない**。押したときだけ通る出口を置く。
+  it("読めないときは、作り直す出口がある（何が失われるかを先に言う）", async () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    fireEvent.click(screen.getByRole("button", { name: "直らないときは作り直す" }));
+    expect(screen.getByText(/作り直すと空になります/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "作り直す" }));
+    await waitFor(() => expect(useProjectStore.getState().brandKitUnreadable).toBe(false));
+    expect(saveBrandKit).toHaveBeenCalledWith({});
+  });
+
+  // ⚠️ **読めていないときに「同じです」と言わない**（§2-5）＝読めていないだけで、
+  // **同じだと確かめたわけではない**（嘘の安心を出さない）。
+  it("読めないときは「同じです」ではなく「反映できません」と言う", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByText(/いまは反映できません/)).toBeInTheDocument();
+    expect(screen.queryByText(/覚えている見た目と同じです/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /この動画に反映する/ })).toBeNull();
+  });
+
+  it("押す前に確認する（押した瞬間に消さない）", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
+    render(<BrandKitSection />);
+    fireEvent.click(screen.getByRole("button", { name: "直らないときは作り直す" }));
+    expect(saveBrandKit).not.toHaveBeenCalled();
+  });
+
+  it("読めているときは出さない（毎回出すと意味が薄れる）", () => {
+    useProjectStore.setState({ brandKit: {}, brandKitUnreadable: false } as never);
+    render(<BrandKitSection />);
+    expect(screen.queryByText(/会社の見た目を読めませんでした/)).toBeNull();
   });
 });

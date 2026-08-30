@@ -15,6 +15,8 @@ vi.mock('../../infrastructure/bakeFs', async (orig) => ({
 import { useProjectStore } from './projectStore';
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from '../../infrastructure/projectFs';
 import { copyBakedFiles } from '../../infrastructure/bakeFs';
+import { ProjectLoadError } from '../../domain/project/persistence';
+import { DUPLICATE_FAILED_MESSAGE } from '../uiLabels';
 
 const doc = {
   schemaVersion: '1.25',
@@ -123,11 +125,50 @@ describe('duplicateProject', () => {
     expect(saveProjectDoc).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **何度押しても直らない理由を「もう一度お試しください」に丸めない**（α-6 出口監査 🟡・§2-5）＝
+  // 新しい版で作られた・壊れている文書は再試行では直らない。同じ画面の「開く」は理由を保っているので、
+  // 複製だけ丸めると**同じ文書に対して入口で案内が割れる**（ADR-0026②）。
+  it('開けない理由（新しい版・壊れている）はそのまま出す', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(
+      new ProjectLoadError('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。'),
+    );
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError)
+      .toBe('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。');
+    expect(useProjectStore.getState().importError).not.toBe(DUPLICATE_FAILED_MESSAGE);
+  });
+
+  // 分類できない失敗のときだけ定型文（再試行で直りうる）。
+  it('分類できない失敗は定型文にする', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(new Error('EBUSY'));
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).toBe(DUPLICATE_FAILED_MESSAGE);
+  });
+
   /** ⚠️ 書き出し中は別の動画へ切り替えない（進行中の書き出しが見ているものを保つ・#379）。 */
-  it('書き出し中は複製しない', async () => {
+  it('書き出し中は複製しない（理由も置く＝定型文へ落とさない）', async () => {
     useProjectStore.getState().setExportRun({ phase: 'rendering' });
     expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
     expect(saveProjectDoc).not.toHaveBeenCalled();
+    // 何度押しても同じなので、「もう一度お試しください」に落とさない。
+    expect(useProjectStore.getState().importError).toContain('書き出しが終わってから');
     useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+
+  // ⚠️ **前の操作の理由を複製の理由として見せない**＝画面はこの操作のあと `importError` を読む。
+  it('入口で前の理由を消す', async () => {
+    useProjectStore.setState({ importError: '前の操作の理由' } as never);
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(useProjectStore.getState().importError).not.toBe('前の操作の理由');
+  });
+
+  // ⚠️ **成功したときも持ち越さない**（範囲7b レビュー）＝複製は成功したら**その動画を開く**ので、
+  // 残っていると**複製先の画面**に無関係な（前の動画の）警告が出る。しかもその警告は
+  // 「閉じる」を押すまで消えない＝身に覚えのない断りが居座る（§2-5）。
+  it('複製に成功したときも、前の理由を持ち越さない', async () => {
+    useProjectStore.setState({ importError: '別の画面で出た取り込みの失敗' } as never);
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id).not.toBeNull();
+    expect(useProjectStore.getState().importError).toBeNull();
   });
 });

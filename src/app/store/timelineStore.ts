@@ -155,7 +155,7 @@ export type ExportStartBlock = {
  * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
  */
 /**
- * 新しいタイムライン動画へ**会社のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ * 新しいタイムライン動画へ**会社の見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
  *
  * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
  * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
@@ -170,7 +170,7 @@ async function withBrandLogo(
   try {
     const list = await listLibraryAssets();
     if (list == null) {
-      return { doc, error: "よく使う素材の一覧を読めませんでした。会社のロゴは入っていません。" };
+      return { doc, error: "よく使う素材の一覧を読めませんでした。会社の見た目のロゴは入っていません。" };
     }
     const lib = list.find((a) => a.id === logoLibraryAssetId);
     if (!lib) return { doc, error: "会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください。" };
@@ -179,7 +179,7 @@ async function withBrandLogo(
     return { doc: { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] }, added: { assetId: asset.assetId, relPath } };
   } catch {
     // ⚠️ **黙って落とさない**（差分再監査 3巡目 ℹ️・§2-5）＝場面形式は同じ状況で理由を出す。
-    return { doc, error: "会社のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
+    return { doc, error: "会社の見た目のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
   }
 }
 
@@ -598,6 +598,13 @@ export interface TimelineExportRun {
   message: string | null;
   /** 中止を押したか（描くループが次のフレームで気づく）。 */
   cancelling: boolean;
+  /**
+   * BGM を下げる区間を**つないだ**か（α-6 出口監査 🟡・ADR-0032 追補4）。
+   *
+   * ⚠️ **黙ってやらない**＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になるので、
+   * 設定した意味と違う音になる。場面形式は書き出しの完了時に知らせている（ADR-0026②）。
+   */
+  duckMerged?: boolean;
 }
 
 /**
@@ -1199,7 +1206,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipOriginalAudioVolume: (volume) =>
     applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
-  setSelectedClipSlotAudio: (layerId, patch) => applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch)),
+  // ⚠️ **見た目パターンを渡す**（`/canon-check` 🔴・`splitClip` と同じ理由）＝どの枠が動画を受けるか、
+  // 立ち絵に動画が入っているかは**見た目が決める**。渡さないと置き場所が1つも作れず、欄は出るのに
+  // 押すと毎回断られる（しかも理由は「音が入っていない」＝事実と違う）。
+  setSelectedClipSlotAudio: (layerId, patch) => {
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch, { templateOf: (tid) => templateById.get(tid) }));
+  },
   setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedVolumePoint: (timeSec, volume) =>
@@ -1509,7 +1522,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   updateVideoSettings: (patch) => {
     const doc = get().doc;
     if (!doc) return;
-    commit(set, get, { ...doc, videoSettings: { ...doc.videoSettings, ...patch } });
+    // ⚠️ **何も変わらないなら同じ文書を返す**（α-6 出口監査 🟡・ADR-0032 決定「空振りを積まない」）＝
+    // `commit` は同一参照で弾く設計なのに、ここが毎回作り直すので**必ず別参照**になり、
+    // 「文字の形を開いて、やはり同じものを選ぶ」だけで取り消しが1つ埋まり、**再生も止まる**。
+    const next = { ...doc.videoSettings, ...patch };
+    const same = (Object.keys(patch) as (keyof typeof patch)[])
+      .every((k) => JSON.stringify(next[k] ?? null) === JSON.stringify(doc.videoSettings[k] ?? null));
+    if (same) return;
+    commit(set, get, { ...doc, videoSettings: next });
   },
   addTrack: (kind) => {
     const doc = get().doc;
@@ -1744,7 +1764,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       set({ exportRun: { ...get().exportRun, phase: P.encoding } });
-      const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
+      const { runs: bgmRuns, duckMerged } = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
       // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
       const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
       await exportVideo(
@@ -1755,7 +1775,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         outputPath,
         auto.normalize ? auto.targetLufs : undefined,
       );
-      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
       // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。
@@ -1815,10 +1835,13 @@ export function timelineBgmRunInputs(
   doc: TimelineProject,
   audioSrcByKey: Record<string, string>,
   templateOf?: (templateId: string) => Template | undefined,
-): BgmRunInput[] {
+): { runs: BgmRunInput[]; duckMerged: boolean } {
   const runs: BgmRunInput[] = [];
   // 見た目パターンは**差し込み口の元の音**（#512 段3b）を解くのに要る（渡さないと差し込み口は鳴らない）。
-  for (const run of timelineAudioRuns(doc, templateOf)) {
+  // ⚠️ **まとめたかどうかも運ぶ**（α-6 出口監査 🟡）＝知らせないと「セリフの間も BGM が下がったまま」を
+  // 黙って出すことになる（場面形式は書き出しの完了時に知らせている＝ADR-0026②）。
+  const built = timelineAudioRuns(doc, templateOf);
+  for (const run of built.runs) {
     // ⚠️ **動画の元の音はパスで渡す**（#512 段2）＝中身（base64）は要らない。
     // ここで `audioSrcByKey` を要求すると、動画を丸ごと文字列にしないと鳴らせなくなる。
     const audioBase64 = run.assetPath ? "" : audioSrcByKey[run.sourceKey];
@@ -1839,7 +1862,7 @@ export function timelineBgmRunInputs(
       speed: run.speed,
     });
   }
-  return runs;
+  return { runs, duckMerged: built.duckMerged };
 }
 
 

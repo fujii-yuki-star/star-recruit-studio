@@ -1,11 +1,12 @@
 // タイムラインの書き出しの並べ方（ADR-0032 決定22・#631）。全フレーム描画と音の配置を固定する。
 import { describe, expect, it } from 'vitest';
-import { FPS } from '../constants';
+import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable } from './export';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable, duckSpansOf, clipVolumePointsForExport } from './export';
+ import { resolveAudioAuto } from '../voice/audioAuto';
 import { frameTimeSec } from './persistence';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -136,7 +137,7 @@ describe('timelineAudioRuns（差し込み口の元の音）', () => {
     });
 
   it('鳴らす設定にした枠だけが出る（枠ごとに別の音）', () => {
-    const runs = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } }), tmpl);
+    const { runs } = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } }), tmpl);
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       clipId: 'clip_t/left', // ⚠️ 部品 id だけだと、同じ id の音が並んで見分けられない
@@ -149,7 +150,7 @@ describe('timelineAudioRuns（差し込み口の元の音）', () => {
   });
 
   it('枠ごとに音量・速さ・使い始めを解く（場面形式と同じ語彙）', () => {
-    const runs = timelineAudioRuns(
+    const { runs } = timelineAudioRuns(
       twoVideos({ right: { useOriginalAudio: true, originalAudioVolume: 0.8, speed: 2, startSec: 3 } }),
       tmpl,
     );
@@ -159,22 +160,22 @@ describe('timelineAudioRuns（差し込み口の元の音）', () => {
   // ⚠️ **「ここまで」で切った動画の音は、その先まで鳴らさない**＝絵は最後のコマで凍るので、
   // 音だけ流れると食い違う。
   it('「ここまで」で切った枠は、音も同じところで終わる', () => {
-    const runs = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true, startSec: 2, endSec: 4 } }), tmpl);
+    const { runs } = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true, startSec: 2, endSec: 4 } }), tmpl);
     expect(runs[0].playSec).toBe(2); // 置いたのは4秒だが、使える素材は2秒ぶん
   });
 
   it('見た目パターンを渡さなければ鳴らない（枠を解決できない）', () => {
-    expect(timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } }))).toEqual([]);
+    expect(timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } })).runs).toEqual([]);
   });
 
   it('鳴らす設定でなければ出ない', () => {
-    expect(timelineAudioRuns(twoVideos({}), tmpl)).toEqual([]);
+    expect(timelineAudioRuns(twoVideos({}), tmpl).runs).toEqual([]);
   });
 
   // ⚠️ **同じ部品の2つの枠が同時に鳴る**＝`clipId` を部品 id だけにすると衝突して見分けられない
   //（この形が `<部品 id>/<層 id>` にした理由そのもの）。
   it('同じ部品の2つの枠が同時に鳴っても、見分けられる', () => {
-    const runs = timelineAudioRuns(
+    const { runs } = timelineAudioRuns(
       twoVideos({ left: { useOriginalAudio: true }, right: { useOriginalAudio: true } }),
       tmpl,
     );
@@ -186,7 +187,7 @@ describe('timelineAudioRuns（差し込み口の元の音）', () => {
 
 describe('timelineAudioRuns（動画の元の音）', () => {
   it('鳴らす設定なら、その動画をパスで渡す（中身は運ばない）', () => {
-    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true }))).toEqual([
+    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true })).runs).toEqual([
       {
         clipId: 'clip_001',
         sourceKey: 'asset:asset_v',
@@ -205,30 +206,30 @@ describe('timelineAudioRuns（動画の元の音）', () => {
   });
 
   it('鳴らす設定でなければ出さない', () => {
-    expect(timelineAudioRuns(videoDoc())).toEqual([]);
+    expect(timelineAudioRuns(videoDoc()).runs).toEqual([]);
   });
 
   it('音の入っていない動画は出さない（設定が残っていても）', () => {
     const d = videoDoc({ useOriginalAudio: true }, {
       assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'media/v.mp4', metadata: { hasAudio: false } }],
     } as Partial<TimelineProject>);
-    expect(timelineAudioRuns(d)).toEqual([]);
+    expect(timelineAudioRuns(d).runs).toEqual([]);
   });
 
   it('速さ・使い始め・音量は、その部品の値で出る', () => {
-    const runs = timelineAudioRuns(videoDoc({ useOriginalAudio: true, speed: 2, sourceStartSec: 4, originalAudioVolume: 0.9 }));
+    const { runs } = timelineAudioRuns(videoDoc({ useOriginalAudio: true, speed: 2, sourceStartSec: 4, originalAudioVolume: 0.9 }));
     expect(runs[0]).toMatchObject({ speed: 2, sourceStartSec: 4, volume: 0.9 });
   });
 
   it('隠した部品は書き出しにも出ない（聞こえないものを混ぜない）', () => {
-    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true, hidden: true }))).toEqual([]);
+    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true, hidden: true })).runs).toEqual([]);
   });
 });
 
 describe('timelineAudioRuns', () => {
   it('置く位置・長さ・音源を返す', () => {
     const d = doc({ clips: [voiceClip('clip_001', { startSec: 2, durationSec: 3 })] });
-    expect(timelineAudioRuns(d)).toEqual([
+    expect(timelineAudioRuns(d).runs).toEqual([
       {
         clipId: 'clip_001',
         sourceKey: 'voice:voices/clip_001.wav',
@@ -247,12 +248,12 @@ describe('timelineAudioRuns', () => {
 
   it('読み上げは繰り返さない／BGM は繰り返す（言葉が二重に鳴らない）', () => {
     const d = doc({ clips: [voiceClip('clip_001'), clip('clip_002', { bundledBgmId: 'found-new-hope' })] });
-    expect(timelineAudioRuns(d).map((r) => r.loop)).toEqual([false, true]);
+    expect(timelineAudioRuns(d).runs.map((r) => r.loop)).toEqual([false, true]);
   });
 
   it('音量は再生と同じ解決（BGM の既定は 0.25）', () => {
     const d = doc({ clips: [clip('clip_001', { bundledBgmId: 'found-new-hope' })] });
-    expect(timelineAudioRuns(d)[0].volume).toBeCloseTo(0.25);
+    expect(timelineAudioRuns(d).runs[0].volume).toBeCloseTo(0.25);
   });
 
   it('読み上げは動画全体の声の音量を継承する', () => {
@@ -260,22 +261,22 @@ describe('timelineAudioRuns', () => {
       voiceSettings: { defaultVoiceId: 'voicevox_zundamon', volume: 0.5 },
       clips: [voiceClip('clip_001')],
     });
-    expect(timelineAudioRuns(d)[0].volume).toBeCloseTo(0.5);
+    expect(timelineAudioRuns(d).runs[0].volume).toBeCloseTo(0.5);
   });
 
   it('フェードは尺の半分までに切り詰めて渡す（再生と同じ規則）', () => {
     const d = doc({ clips: [clip('clip_001', { durationSec: 2, fadeInSec: 4, fadeOutSec: 4, bundledBgmId: 'found-new-hope' })] });
-    expect(timelineAudioRuns(d)[0]).toMatchObject({ fadeInSec: 1, fadeOutSec: 1 });
+    expect(timelineAudioRuns(d).runs[0]).toMatchObject({ fadeInSec: 1, fadeOutSec: 1 });
   });
 
   it('速度を変えても、鳴らす長さは置いた長さのまま（素材側で長く読む）', () => {
     const d = doc({ clips: [clip('clip_001', { durationSec: 3, speed: 2, bundledBgmId: 'found-new-hope' })] });
-    expect(timelineAudioRuns(d)[0].playSec).toBeCloseTo(3);
+    expect(timelineAudioRuns(d).runs[0].playSec).toBeCloseTo(3);
   });
 
   it('素材のトリムと速度を渡す', () => {
     const d = doc({ clips: [clip('clip_001', { sourceStartSec: 10, speed: 2, bundledBgmId: 'found-new-hope' })] });
-    expect(timelineAudioRuns(d)[0]).toMatchObject({ sourceStartSec: 10, speed: 2 });
+    expect(timelineAudioRuns(d).runs[0]).toMatchObject({ sourceStartSec: 10, speed: 2 });
   });
 
   it('隠した列・隠したクリップの音は置かない（再生と同じ判定を通す）', () => {
@@ -283,18 +284,18 @@ describe('timelineAudioRuns', () => {
       tracks: [{ id: 'track_002', kind: TRACK_KIND.audio, hidden: true }],
       clips: [voiceClip('clip_001')],
     });
-    expect(timelineAudioRuns(hiddenTrack)).toEqual([]);
+    expect(timelineAudioRuns(hiddenTrack).runs).toEqual([]);
     const hiddenClip = doc({ clips: [voiceClip('clip_001', { hidden: true })] });
-    expect(timelineAudioRuns(hiddenClip)).toEqual([]);
+    expect(timelineAudioRuns(hiddenClip).runs).toEqual([]);
   });
 
   it('まだ作っていない読み上げは置かない（音源が無い）', () => {
     const d = doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.voice, voice: { text: 'あ', status: 'none' } })] });
-    expect(timelineAudioRuns(d)).toEqual([]);
+    expect(timelineAudioRuns(d).runs).toEqual([]);
   });
 
   it('絵のクリップは音として置かない', () => {
-    expect(timelineAudioRuns(doc({ clips: [textClip('clip_001')] }))).toEqual([]);
+    expect(timelineAudioRuns(doc({ clips: [textClip('clip_001')] })).runs).toEqual([]);
   });
 });
 
@@ -389,7 +390,7 @@ describe('音源ファイルの拡張子', () => {
         voiceClip('clip_003', { startSec: 20 }),
       ],
     });
-    expect(timelineAudioRuns(d).map((r) => r.fileExt)).toEqual(['mp3', 'm4a', 'wav']);
+    expect(timelineAudioRuns(d).runs.map((r) => r.fileExt)).toEqual(['mp3', 'm4a', 'wav']);
   });
 
   it('拡張子が判らないときも空にしない（形式を判定できる手がかりを渡す）', () => {
@@ -397,7 +398,7 @@ describe('音源ファイルの拡張子', () => {
       assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/song' }],
       clips: [clip('clip_001', { assetId: 'asset_001' })],
     });
-    expect(timelineAudioRuns(d)[0].fileExt).toBe('mp3');
+    expect(timelineAudioRuns(d).runs[0].fileExt).toBe('mp3');
   });
 });
 
@@ -606,3 +607,202 @@ describe('timelineImageAssetIds（書き出しで絵として描く素材・#716
     expect(timelineImageAssetIds(d)).toEqual(['asset_001']);
   });
 });
+
+// 音の自動処理と点の上限（α-6 出口監査 🟡）。
+//
+// ⚠️ **式へ渡るのは「保存の点 ∪ 下げ幅の点」**（`applyDucking`）＝保存の点だけを門で数えると、
+// 合わせて上限を超える組み合わせを素通しし、フィルタの組み立てごと失敗する
+//（出るのは「もう一度お試しください」＝**何度やっても成功しない案内**＝この門が防ぐはずのもの）。
+describe('ダッキングで増える点も門が数える', () => {
+  const voiceWithPath = (id: string, startSec: number): TimelineClip =>
+    voiceClip(id, { startSec, durationSec: 1, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
+  const manyVoices = (n: number): TimelineClip[] =>
+    Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * 5));
+  // ⚠️ **保存の点は下げ幅の点と重ならない時刻に置く**（`/canon-check` 🟡 の是正）＝門が
+  // **実効の点数**（`applyDucking` の和集合）で数えるようになったので、整数秒に置くと声の区間の端
+  // （0,1／5,6…）と**同じ時刻に畳まれ**、合計が上限を超えない＝この検査が意図を失う。
+  const bgm = (points: number): TimelineClip =>
+    clip('clip_bgm', {
+      kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 200,
+      assetId: 'asset_bgm', volumePoints: Array.from({ length: points }, (_, i) => ({ timeSec: i + 0.37, volume: 0.5 })),
+    } as never);
+
+  it('保存の点だけなら上限内でも、下げ幅の点と合わせて超えたら止める', () => {
+    const d = doc({
+      clips: [bgm(40), ...manyVoices(6)],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true } },
+    } as never);
+    const codes = timelineExportBlockers(d).map((b) => b.code);
+    expect(codes).toContain(TIMELINE_EXPORT_BLOCK.volumePointsTooMany);
+  });
+
+  it('下げない設定なら、同じ点の数でも止めない（数え過ぎて書き出せるものを断らない）', () => {
+    const d = doc({
+      clips: [bgm(40), ...manyVoices(6)],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: false } },
+    } as never);
+    const codes = timelineExportBlockers(d).map((b) => b.code);
+    expect(codes).not.toContain(TIMELINE_EXPORT_BLOCK.volumePointsTooMany);
+  });
+});
+
+// ⚠️ **まとめたことを知らせる**（ADR-0032 追補4）＝つなぐと「セリフとセリフの間でも BGM が下がったまま」。
+describe('下げる区間をつないだかを返す', () => {
+  const voiceWithPath = (id: string, startSec: number): TimelineClip =>
+    voiceClip(id, { startSec, durationSec: 1, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
+  const withVoices = (n: number): TimelineProject => doc({
+    clips: [
+      clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 200, assetId: 'asset_bgm' } as never),
+      ...Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * 5)),
+    ],
+    assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true } },
+  } as never);
+
+  it('区間が少なければ、つないでいないと返す', () => {
+    expect(timelineAudioRuns(withVoices(3)).duckMerged).toBe(false);
+  });
+
+  it('区間が多くてつないだら、そう返す（黙ってやらない）', () => {
+    expect(timelineAudioRuns(withVoices(20)).duckMerged).toBe(true);
+  });
+});
+
+// ⚠️ **立ち絵に入れた動画も「実フレームで描く」側**（#809・α-6 出口監査 🟡）＝
+// 数える側（`clipImageAssetUses`）と実フレーム側（`videoPlacementsOfClip`）が**同じ鍵**でないと、
+// 実際には描ける動画まで「代表フレームが要る」に入り、読めないだけで書き出しを断ってしまう。
+describe('timelineImageAssetIds：立ち絵に入れた動画', () => {
+  const charTmpl = () =>
+    ({
+      schemaVersion: '1.0', templateId: 'tmpl_char', name: '立ち絵つき', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'yuko', type: 'character', x: 0, y: 0, w: 960, h: 1080 }],
+    }) as unknown as Template;
+  const withPose = () => doc({
+    assets: [{ assetId: 'asset_pose', assetType: 'video', displayName: '立ち絵', filePath: 'p.mp4' }],
+    clips: [clip('clip_t', {
+      kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 4,
+      templateId: 'tmpl_char', character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' },
+    } as never)],
+  });
+
+  it('見た目パターンを渡せば、代表フレームを要求しない（実フレームで描くため）', () => {
+    expect(timelineImageAssetIds(withPose(), () => charTmpl())).toEqual([]);
+  });
+
+  it('見た目パターンを渡さないときは、実フレームで描くと判じない（代表フレームを要求する）', () => {
+    expect(timelineImageAssetIds(withPose())).toEqual(['asset_pose']);
+  });
+});
+
+// ⚠️ **門の見積りが実際の点数を下回らない**（PR #922 レビュー ℹ️）＝下回ると、上限を超える
+// 組み合わせを素通しして「何度やっても成功しない案内」に落ちる。`duckingFactorPoints` の実値と突き合わせる。
+// 門（書き出しを断るか）と実際の式が、**同じ関数**で点を数えることを固定する（`/canon-check` 🟡）。
+// ⚠️ もとは門だけが**文書全体**のダッキング点数を**すべての音の部品**へ一律に足しており、
+// ①読み上げには倍率を当てない ②その部品に掛からない区間は捨てる、という実際の式とずれて
+// **出せる動画を止めていた**。
+describe('音量の点の数え方（門と式が同じ関数を通る）', () => {
+  const voiceWithPath = (id: string, startSec: number, durationSec = 1): TimelineClip =>
+    voiceClip(id, { startSec, durationSec, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
+  const build = (n: number, gap: number, over: Partial<TimelineClip> = {}, auto: Record<string, unknown> = {}): TimelineProject => doc({
+    clips: [
+      clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 500, assetId: 'asset_bgm', ...over } as never),
+      ...Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * gap)),
+    ],
+    assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true, ...auto } },
+  } as never);
+  const spansOf = (d: TimelineProject) => {
+    const auto = resolveAudioAuto(d.videoSettings.audioAuto);
+    return { auto, spans: auto.duckBgm ? duckSpansOf(d, auto).spans : [] };
+  };
+  const pointsOf = (d: TimelineProject, clipId: string) => {
+    const { auto, spans } = spansOf(d);
+    const c = d.clips.find((x) => x.id === clipId) as TimelineClip;
+    return clipVolumePointsForExport(d, c, auto, spans).points.length;
+  };
+
+  for (const [name, n, gap, auto] of [
+    ['間が広い（まとめない）', 5, 10, {}],
+    ['立ち上がりが0（端の点が重なる）', 5, 10, { duckAttackSec: 0 }],
+    ['戻りも0（各区間が2点に縮む）', 5, 10, { duckAttackSec: 0, duckReleaseSec: 0 }],
+    ['間が狭い（まとめる）', 8, 1.2, {}],
+    // 上限に当たって「さらに間を広げる」繰り返しへ入る側（PR #922 範囲5 レビュー ℹ️）。
+    ['本数が多くて何度もまとめる', 40, 3, {}],
+  ] as [string, number, number, Record<string, unknown>][]) {
+    it(`上限を超えない：${name}`, () => {
+      const d = build(n, gap, {}, auto);
+      expect(pointsOf(d, 'clip_bgm')).toBeLessThanOrEqual(VOLUME_POINTS_MAX);
+      expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+    });
+  }
+
+  it('下げない設定なら保存の点だけ（数え過ぎて書き出せるものを断らない）', () => {
+    const d = build(5, 10, { volumePoints: [{ timeSec: 0, volume: 1 }, { timeSec: 10, volume: 0.5 }] });
+    (d.videoSettings as unknown as Record<string, unknown>).audioAuto = { duckBgm: false };
+    expect(pointsOf(d, 'clip_bgm')).toBe(2);
+  });
+
+  // ⚠️ **読み上げには倍率を当てない**（自分で自分を下げない）＝門が全部品へ一律に足すと、
+  // 点が数個の読み上げが「点が多すぎます」で止まる。しかも案内の「部品を分ける」は読み上げにできない。
+  // ⚠️ 点の数は**一律加算なら上限を超える**ように取る（`5 + 区間数×4 > 60`）＝そうしないと、
+  // 元のバグ（全部品へ一律に足す）へ戻しても緑のままで、この検査が意味を持たない。
+  const fivePoints = Array.from({ length: 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+
+  // ⚠️ **まとめが要らない本数**にする（14本＝`14×4+1 ≤ 60`）＝40本だと `fitSpeechSpans` が
+  // 間を広げ切って**1区間**まで畳み、一律加算でも上限を超えず検査が空振りする。
+  it('声を多く置いても、点の少ない読み上げは止めない', () => {
+    const d = build(14, 10);
+    const withPoints = doc({
+      ...d,
+      clips: d.clips.map((c) => (c.id === 'clip_v0' ? { ...c, volumePoints: fivePoints } : c)),
+    } as never);
+    // 読み上げには倍率を当てない＝保存の点だけ。
+    expect(pointsOf(withPoints, 'clip_v0')).toBe(5);
+    // 一律加算だと `5 + 区間数×4` で上限を超える＝止まる。実効で数えれば止まらない。
+    expect(spansOf(withPoints).spans.length * 4 + 5).toBeGreaterThan(VOLUME_POINTS_MAX);
+    expect(timelineExportBlockers(withPoints).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+  });
+
+  // ⚠️ **式を組まない部品は数えない**（範囲6 レビュー ℹ️）＝「音量の変化」の欄は声を作る前から開くので、
+  // **まだ声を作っていない読み上げ**に点を置けてしまう。それは `timelineAudioRuns` に出ない＝
+  // 式を組まないのに書き出しを止める（断る側へ倒れる）。
+  it('まだ声を作っていない読み上げに点を置いても、書き出しを止めない', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    const d = doc({
+      clips: [
+        clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 100, assetId: 'asset_bgm' } as never),
+        // `voicePath` が無い＝音源が無い（作成前）。
+        voiceClip('clip_v0', { startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'none' }, volumePoints: many } as never),
+      ],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as never);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+  });
+
+  it('声ができていれば、同じ点の数で止める（数え漏らさない）', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    const d = doc({
+      clips: [
+        clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 100, assetId: 'asset_bgm' } as never),
+        voiceClip('clip_v0', { startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'generated', voicePath: 'voices/v0.wav' }, volumePoints: many } as never),
+      ],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as never);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(true);
+  });
+
+  // ⚠️ **掛からない区間は捨てられる**（`duckingFactorPoints`）＝冒頭だけの短い BGM に、
+  // 動画の最後のほうの声の区間まで数えない。
+  it('冒頭だけの短い BGM は、その区間に掛かる分しか数えない', () => {
+    const d = build(14, 10, { durationSec: 2, volumePoints: fivePoints });
+    expect(pointsOf(d, 'clip_bgm')).toBeLessThan(20);
+    expect(spansOf(d).spans.length * 4 + 5).toBeGreaterThan(VOLUME_POINTS_MAX);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+  });
+});
+

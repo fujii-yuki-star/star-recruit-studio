@@ -29,7 +29,6 @@ import type { SlotClipOverride } from '../project/types';
 import type { Template } from '../template/types';
 import { videoPlacementsOfClip } from './video';
 import { isUnsplittableClipKind } from './clipKind';
-import { ASSET_USE_KIND } from './export';
 import { resolveSlotClip } from '../asset/clip';
 import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
@@ -135,13 +134,12 @@ function usesUpSource(
     // ⚠️ **素材既定（`asset.clip`）を足さない**＝`videoPlacementsOfClip` の直接置きの枝は
     // **クリップの値だけ**を読む（素材既定を効かせない）。ここだけが見ると、**画面では流れている先を
     // 門だけが「使い切った」と断る**＝描画・再生と同じ材料で判断する、が崩れる。
-    // ⚠️ **置き場所の種類は `use` で見る**（#844-1）＝`layerId` は種類の判別子ではない。
-    // `video.ts` の `VideoPlacement.use` が「**層 id から導き直さない**」と定めており、同じ file の
-    // `advancedSlotStarts` も `use` で見ている＝**使い方の単一の参照元は `use`**（§2-7）。
-    // いまは直接置き／差し込み口の2種しか無いので**挙動は同じ**。効いてくるのは、**層 id を持つ別の
-    // 使い方**が加わったとき＝旧式（`layerId != null`）はそれを差し込み口と取り違えて
-    // `slotClips[layerId]` を引くが、`use` で見れば取り違えない。
-    const endSec = p.use === ASSET_USE_KIND.slot && p.layerId != null
+    // ⚠️ **見るのは「置き場所ごとの使い方を持つか」**＝`slotClips[層 id]` を持つ置き場所すべて。
+    // ⚠️ **差し込み口だけに絞らない**（差分再監査 🟡・#809）＝**立ち絵も置き場所になった**（`use:'character'`）
+    // ので、`use === slot` で絞ると**立ち絵に入れた動画の「ここまで」だけが効かない**（同じ入れ物・同じ
+    // 解決〔`resolveSlotClip`〕を共有しているのに、この門だけ見ない＝ADR-0026②）。
+    // かつては「直接置き／差し込み口の2種しか無いので挙動は同じ」と書いていたが、**もう事実ではない**。
+    const endSec = p.layerId != null
       ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec
       : undefined;
     const sourceEnd = asset?.metadata?.durationSec ?? undefined;
@@ -378,7 +376,10 @@ function advancedSlotStarts(
   templateOf: ((templateId: string) => Template | undefined) | undefined,
 ): { slotClips?: Record<string, SlotClipOverride> } {
   if (clip.kind !== TIMELINE_CLIP_KIND.template) return {};
-  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot);
+  // ⚠️ **置き場所ごとの使い方を持つものすべて**（差分再監査 🟡・#809）＝立ち絵も置き場所になったので、
+  // `use === slot` で絞ると**分けたときに立ち絵の動画だけ頭出しが進まず**、後半が前半と同じところから
+  // 流れ直す（この関数が「作らない」と書いている状態そのもの）。値の置き場も解決も差し込み口と共有。
+  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.layerId != null);
   if (slots.length === 0) return {};
   const next: Record<string, SlotClipOverride> = { ...(clip.slotClips ?? {}) };
   for (const p of slots) {

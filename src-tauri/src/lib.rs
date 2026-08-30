@@ -652,6 +652,12 @@ fn add_library_asset(
     if !is_library_asset_id(&asset_id) {
         return Err("素材を置けませんでした。もう一度お試しください。".to_string());
     }
+    // ⚠️ **種類も検査する**（α-6 出口監査 ℹ️）＝直す側（`update_library_asset`）は検査するのに、
+    // 置く側は素通しだった。知らない種類が入ると読む側が**行ごと落とす**ので、
+    // **実体はあるのに棚から消える**（画面から消せない）＝生のまま内部へ流さない（§2-2）。
+    if !is_known_asset_type(&asset_type) {
+        return Err("素材を置けませんでした。もう一度お試しください。".to_string());
+    }
     let src = PathBuf::from(&src_path);
     if !src.exists() {
         return Err("ファイルが見つかりませんでした。もう一度選び直してください。".to_string());
@@ -791,7 +797,13 @@ fn update_library_asset(
 /// 素材の種類として受けてよい値か（`domain/enums.ts` の `ASSET_TYPES` と同じ一覧）。
 ///
 /// ⚠️ **一覧が2か所にある**（Rust と domain）＝境界で形を見るのに要る。増えたら両方へ足す
-///（`is_library_asset_id` と同じ事情。テストで同値性を固定する）。
+///（`is_library_asset_id` と同じ事情）。ずれると `update_library_asset` が**選んだ種類を黙って捨てる**。
+///
+/// ⚠️ **同値性は `assetLibrary.test.ts` が「この本文を読んで」固定している**（PR #922 レビュー ℹ️）＝
+/// 表を両側に置くだけでは、**片方に増やしても相手は赤くならない**（当初そう書いていたが実際には
+/// 固定できていなかった）。いまは下の `matches!` の並びをそのまま読んで `ASSET_TYPES` と突き合わせるので、
+/// **どちらを増やしても、もう片方を直すまで赤いまま**になる。
+/// ⚠️ **書き方を変えるときは向こうの正規表現も直す**（読めなくなったら赤くなる＝空振りで緑にはしない）。
 fn is_known_asset_type(v: &str) -> bool {
     matches!(
         v,
@@ -842,7 +854,10 @@ fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String>
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, &kit_json).map_err(|e| e.to_string())
+    // ⚠️ **不可分に書く**（α-6 出口監査 🟡）＝素の `write` だと、途中で落ちたときに**半端な JSON**が
+    // 残る。読む側が「読めなかった」と断るようにしたので、そのまま置くと直す手が無くなる。
+    // 目録・読み方辞書と同じ書き方（一時ファイル＋置き換え）へそろえる。
+    write_manifest_atomic(&path, &kit_json)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -966,7 +981,7 @@ mod user_font_id_tests {
 
 #[cfg(test)]
 mod library_id_tests {
-    use super::is_library_asset_id;
+    use super::{is_known_asset_type, is_library_asset_id};
 
     /// ⚠️ **domain 側（`LIBRARY_ASSET_ID_RE`）と同じ答えになること**を、同じ入力で固定する
     /// （PR #887 レビュー 🟡）。入力の一覧は `assetLibrary.ts` の `LIBRARY_ASSET_ID_SAMPLES` と同じ。
@@ -985,6 +1000,30 @@ mod library_id_tests {
         ];
         for (id, want) in cases {
             assert_eq!(is_library_asset_id(id), *want, "id={id}");
+        }
+    }
+
+    /// 素材の種類の受け入れが domain（`ASSET_TYPE_SAMPLES`）と**同じ答え**になること。
+    ///
+    /// ⚠️ 一覧が2か所にあるので、片方だけ増やすと **`update_library_asset` が選んだ種類を黙って捨てる**。
+    #[test]
+    fn asset_type_matches_domain_rule() {
+        let cases: &[(&str, bool)] = &[
+            ("image", true),
+            ("video", true),
+            ("bgm", true),
+            ("voice", true),
+            ("yuko", true),
+            ("decor", true),
+            ("logo", true),
+            ("qr", true),
+            ("Image", false),
+            ("audio", false),
+            ("movie", false),
+            ("", false),
+        ];
+        for (v, want) in cases {
+            assert_eq!(is_known_asset_type(v), *want, "{v}");
         }
     }
 }

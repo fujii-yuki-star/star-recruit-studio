@@ -24,9 +24,19 @@ export function isSupportedTimelineSchemaVersion(version: string): boolean {
 /**
  * 旧版の文書を現行版へ引き上げる（11 §1「破壊的変更時はマイグレーションを用意」）。
  *
- * **ここまでのバンプ（1.0→1.9）はいずれも任意フィールドの追加か値域の拡大だけ**（読み上げクリップ・字幕の連動・切り抜き・動き方・音量の変化・動画の元の音＝`11 §1`）なので、
- * データはそのままで版だけ上げれば現行スキーマに適合する。**中身の入れ替えが要るバンプを入れるときは、
- * ここに実際の変換を足すこと**（版だけ上げて通すと、壊れた文書を通してしまう）。
+ * ⚠️ **版の一覧はここに置かない**（#513 の方針・α-6 出口監査 🟡）＝ここに写すと**必ずずれる**
+ *（実際、1.8→1.9〔#264〕が抜け、現行が 1.10 なのに「1.0→1.9」のままだった）。
+ * ⚠️ **「1か所」ではない**（`/canon-check` ℹ️で数え直した）＝一覧は
+ * `timeline-project.schema.json` の `schemaVersion.description` と `11 §1` の**2か所**にあり、
+ * `11` は資料としてすべての形式の版を並べる場所なので**これは重複ではなく役割の違い**。
+ * ⚠️ **場面形式とは置き場所が違う**＝あちらの一覧は `PROJECT_SCHEMA_VERSION` の docstring
+ *（`domain/project/persistence.ts`・`11 §1` が単一の参照元と明記）で、`project.schema.json` の
+ * `schemaVersion` は `const` だけを持つ。**どちらへ寄せるかは決めていない**（揃えるなら
+ * `TIMELINE_SCHEMA_VERSION` の docstring へ移す）＝いま形式間で非対称なことをここに記録しておく。
+ *
+ * **書くのは「実際に変換が要る版」だけ**＝下の 1.9→1.10（音の自動処理）のように、
+ * データを書き込む必要があるものを書く。**任意フィールドの追加や値域の拡大は版だけ上げれば適合する**
+ * ので、ここには現れない。
  */
 export function migrateTimelineProject(doc: Record<string, unknown>): Record<string, unknown> {
   if (doc.schemaVersion === TIMELINE_SCHEMA_VERSION) return doc;

@@ -21,6 +21,7 @@ import type { AiVideoPlan } from "../../domain/ai/types";
 import {
   assembleProject, createAnimationId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
+  ProjectLoadError,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from "../../domain/project/sceneOps";
@@ -52,7 +53,7 @@ import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, usedUserF
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
-import { isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
+import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
@@ -80,7 +81,7 @@ import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message } from "../uiLabels";
+import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -533,6 +534,11 @@ interface ProjectState {
   /** フォントの取り込み/削除で出た理由（§2-5）。 */
   fontError: string | null;
   /**
+   * 文字の形まわりの**知らせ**（`/canon-check` ℹ️）。⚠️ **成功を `fontError` に載せない**＝
+   * 画面はそれを赤字の `role="alert"` で出すので、うまくいったのに**失敗のように見える**。
+   */
+  fontNotice: string | null;
+  /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
    * ⚠️ **失敗しても止めない**（§2-5）＝成功した分は残し、入らなかったものを名前で示す。
@@ -552,6 +558,8 @@ interface ProjectState {
    */
   captureVideoFrame: (videoAssetId: string, atSec: number) => Promise<string | null>;
   clearImportError: () => void;
+  /** 読めなくなった会社の見た目を作り直す（`updateBrandKit` の門の唯一の出口・§2-5）。 */
+  rebuildBrandKit: () => Promise<boolean>;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
@@ -599,6 +607,26 @@ interface ProjectState {
 
 /** 文書slice（undo 対象）を現在状態から取り出す。 */
 const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
+
+/**
+ * 取り消し・やり直しで戻した文書へ、**いまの動画の身元（`projectId`）を残す**（差分再監査 🔴）。
+ *
+ * ⚠️ **番号は「編集の中身」ではなく「実体の身元」**＝どのフォルダに保存するかを決める値で、
+ * 採るのは**遅い**（最初の保存か、最初の素材の取り込み）。採る前に積まれた履歴へ戻ると
+ * `projectId` が `""` に戻り、**次の自動保存が別の番号で別フォルダへ**書く＝素材は前のフォルダに
+ * あるので新しい方からは全部「見つかりません」になり、一覧に同じ名前の動画が2つ残る。
+ * 取り消しても素材は戻らない（`assets` は履歴の外＝ADR-0020）ので、**取り消しで壊れる**。
+ *
+ * ⚠️ **一度採った番号は戻さない**（`||` で live 優先）＝番号は `""` → 採番 の一方向にしか動かないので、
+ * これで「履歴が古い番号を持っている」ケースを作らない。ADR-0020 の「meta/parts/scenes を戻す」は
+ * **編集内容**の話で、フォルダ名の身元まで巻き戻す約束ではない。
+ */
+function keepIdentity(restored: DocSnapshot, live: ProjectState): DocSnapshot {
+  const projectId = live.meta.projectId || restored.meta.projectId;
+  return projectId === restored.meta.projectId
+    ? restored
+    : { ...restored, meta: { ...restored.meta, projectId } };
+}
 
 // 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
@@ -742,6 +770,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   userFontsUnreadable: false,
   userFonts: [],
   fontError: null,
+  fontNotice: null,
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -898,9 +927,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
     });
     if (isNoopBrandApply(plan)) return { ok: true, applied: false, addedLogo: false, error: null }; // 何も変わらないなら履歴を積まない
-    get().pushHistory();
+    // ⚠️ **履歴が変わる枝でだけ積む**（差分再監査 🟡・ADR-0020「空振りを積まない」）＝
+    // ロゴだけ足す計画で加わるのは `assets`＝**履歴 slice の外**なので、先に積むと
+    // **いまと同じ内容のスナップショット**が1つ増える（上限50 と合わさって古い編集を1つ押し出す。
+    // 押しても何も戻らない「取り消す」も作る）。積むのは文字の形が変わるときだけ。
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
     if (plan.fontChanges && isKnownFontId(kit.fontId)) {
+      get().pushHistory();
       const fontId = kit.fontId;
       set((st) => ({
         meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } },
@@ -921,8 +954,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           applied: plan.fontChanges,
           addedLogo: false,
           error:
-            get().importError ??
-            "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。",
+            get().importError ?? BRAND_LOGO_NOT_APPLIED_MESSAGE,
         };
       }
     }
@@ -948,7 +980,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const fontId = kit.fontId;
       set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
     }
-    if (kit.logoLibraryAssetId != null) await get().importFromLibrary(kit.logoLibraryAssetId);
+    // ⚠️ **入らなかったら、その場で言う**（α-6 出口監査 🟡・PR #888 と同じ流儀）＝返り値を捨てると、
+    // 棚が読めない・実体が消えたときに**何も出ず**、`importError` は2ステップ先の画面でしか描かれない
+    // （身に覚えのない警告として現れる）。画面は「新しい動画に最初から入ります」と約束している。
+    if (kit.logoLibraryAssetId != null && (await get().importFromLibrary(kit.logoLibraryAssetId)) == null) {
+      // ⚠️ **具体的な理由を一般文で潰さない**（差分再監査 🟡）＝`importFromLibrary` は
+      // 「一覧を読めませんでした」「取り込み中です」「素材が見つかりません」を先に入れて `null` を返す。
+      // 上書きすると**棚が読めないのに「置いてあるか確かめてください」**＝従っても直らない案内になる。
+      // 明示適用（`applyBrandKit`）は既に `??` で理由を優先しているので揃える（ADR-0026②）。
+      // ⚠️ **開き直していたら出さない**＝`importFromLibrary` は `!stillOpen()` のとき**わざと理由を出さず**
+      // `null` を返すので、コピー中に別の動画を開くと**開いたばかりの動画**に身に覚えのない警告が出る。
+      if (stillOpen()) set({ importError: get().importError ?? BRAND_LOGO_NOT_APPLIED_MESSAGE });
+    }
   },
   startManualEdit: () => {
     // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
@@ -1148,8 +1191,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
   duplicateProject: async (projectId) => {
+    // ⚠️ **入口で理由を消す**（差分再監査の対応で気づいた・§2-5）＝画面はこの操作のあと `importError` を
+    // 読んで出すので、消さないと**前の操作の理由**を複製の理由として見せうる（身に覚えのない案内）。
+    set({ importError: null });
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
-    if (isExportBusy(get().exportRun.phase)) return null;
+    // ⚠️ **理由を置いてから返す**＝置かずに `null` を返すと、画面は定型文（「もう一度お試しください」）へ
+    // 落ちる＝書き出し中は何度押しても同じなので、**従っても直らない案内**になる。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
     try {
       // ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない（焼き出し＝ADR-0032 決定16 と同じ流儀）。
       const src = parseProjectDoc(await loadProjectDoc(projectId));
@@ -1165,7 +1213,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().loadProject(newId);
       return newId;
     } catch (e) {
-      set({ importError: typeof e === "string" ? e : "動画を複製できませんでした。もう一度お試しください。" });
+      // ⚠️ **理由を潰さない**（α-6 出口監査 🟡）＝新しい版で作られた文書・壊れた文書は**何度押しても
+      // 直らない**のに「もう一度お試しください」と勧めていた。同じ画面の「開く」は理由を保っている
+      // （同じ文書に対して入口で案内が割れる＝ADR-0026②）。
+      const message = e instanceof ProjectLoadError ? e.message
+        : typeof e === "string" ? e
+          : DUPLICATE_FAILED_MESSAGE;
+      set({ importError: message });
       return null;
     }
   },
@@ -2127,6 +2181,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
     if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    // ⚠️ **旗も最初の `await` より前に立てる**（差分再監査 ℹ️）＝一覧を読んでいる間は旗が下りたままなので、
+    // その窓では**2本ともこの門を通れる**。通ると両方が同じ `assets` から**同じ `asset_NNN`** を採り、
+    // 同じファイル名で上書きコピーして、`assets` に**同じ id が2件**並ぶ（保存時の検査は警告だけで通る）。
+    // ⚠️ **早期 return では必ず下ろす**（下ろし忘れると以後の取り込みが「いま取り込んでいます」で
+    // 通らなくなる＝直しようのない行き止まり）。
+    set({ isImporting: true });
+    const done = <T,>(v: T): T => { set({ isImporting: false }); return v; };
     // ⚠️ **合図は最初の `await` より前**（`sameDocGuard` の約束・差分再監査）＝一覧を読んでいる間にも
     // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
@@ -2137,13 +2198,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = await listLibraryAssets();
     if (list == null) {
       set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return null;
+      return done(null);
     }
     const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return null; }
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
     const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
-    if (!stillOpen()) return null;
-    set({ isImporting: true, importError: null });
+    if (!stillOpen()) return done(null);
+    set({ importError: null });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -2353,6 +2414,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (kit == null) { set({ brandKitUnreadable: true }); return; }
     set({ brandKit: kit, brandKitUnreadable: false });
   },
+  /**
+   * 会社の見た目を**丸ごと置き換えて**保存する。
+   *
+   * ⚠️ **足りない項目は「変えない」ではなく「消す」**＝呼ぶ側は必ず `{ ...brandKit, 変える項目 }` の形で
+   * 渡すこと（1項目だけ渡すと**残りが消える**・PR #922 レビュー 🔴 の実例）。
+   * ⚠️ **混ぜる（merge）形にはしない**＝`undefined` を渡して**外す**（ロゴ・フォント）ができなくなる。
+   */
   updateBrandKit: async (next) => {
     // ⚠️ **読めていないものを上書きしない**（差分再監査 3巡目 🟡）＝覚えている中身が分からない
     // 状態で書くと、消えたことにも気づけない。
@@ -2368,12 +2436,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await saveBrandKit(next);
       return true;
     } catch {
-      set({ brandKit: before, brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
+      // ⚠️ **自分が書いた値がまだ載っているときだけ戻す**（差分再監査 ℹ️）＝丸ごと戻すと、
+      // 保存を待つ間に入った**次の変更まで巻き添えで巻き戻る**（ディスクは後勝ちなので食い違う）。
+      if (get().brandKit === next) set({ brandKit: before });
+      set({ brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
+      return false;
+    }
+  },
+  /**
+   * 読めなくなった会社の見た目を**作り直す**（差分再監査 🟡・§2-5＝行き止まりを作らない）。
+   *
+   * ⚠️ **上書きを断る門の唯一の出口**＝`updateBrandKit` は読めていない間ずっと断り、`brandKitUnreadable`
+   * を下ろすのは**読み込みの成功だけ**。ファイルが本当に壊れていると開き直しても直らないので、
+   * **アプリの中から会社の見た目を二度と変えられなくなる**（案内の「開き直す」にも従えない）。
+   * ⚠️ **黙って上書きしない**＝これは**利用者が明示的に押したときだけ**通る道で、
+   * 押す前に「覚えていた内容は失われる」と伝えるのは画面の役目。
+   */
+  rebuildBrandKit: async () => {
+    const empty = emptyBrandKit();
+    try {
+      await saveBrandKit(empty);
+      set({ brandKit: empty, brandKitUnreadable: false, brandKitError: null });
+      return true;
+    } catch {
+      set({ brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
       return false;
     }
   },
   addUserFont: async (srcPath, displayName) => {
-    set({ fontError: null });
+    // ⚠️ **前の知らせも消す**（差分再監査 ℹ️）＝残ると、取り込みに失敗したとき
+    // **赤い理由の隣に前の成功の知らせ**が並ぶ（画面を離れて戻っても出続ける）。
+    set({ fontError: null, fontNotice: null });
     try {
       // ⚠️ **番号は「これまでに使ったもの」から採る**＝消した番号は使い回さない（α-6 出口監査 🟡8）。
       // 一覧（`listUserFonts`）は**実体があるものだけ**なので、最大番号を外すと同じ番号が
@@ -2388,10 +2481,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   removeUserFont: async (fontId) => {
-    set({ fontError: null });
+    set({ fontError: null, fontNotice: null });
     try {
       await deleteUserFont(fontId);
       await get().refreshUserFonts();
+      // ⚠️ **消したものを指したままにしない**（α-6 出口監査 🟡・#888 のロゴと同型）＝残すと、
+      // 以後に作る**すべての新規動画**が不在のフォントで始まり、プレビューは黙って既定の字体・
+      // 気づけるのは**別の動画の書き出し直前**（公開前チェック）だけになる。
+      if (get().brandKit.fontId === fontId) {
+        // ⚠️ **いまの中身を広げてから外す**（PR #922 レビュー 🔴）＝`updateBrandKit` は**丸ごと
+        // 置き換える**ので、`{ fontId: undefined }` だけ渡すと**色とロゴを巻き添えで消す**
+        //（フォントを消しただけのつもりが会社の見た目が空になる・§2-5）。他の呼び出しは
+        // 例外なく `...brandKit` を先に広げている＝ここだけ抜けていた。
+        const ok = await get().updateBrandKit({ ...get().brandKit, fontId: undefined });
+        // ⚠️ **うまくいったほうは知らせの側へ**（`/canon-check` ℹ️）＝赤字で出すと失敗に見える。
+        if (ok) set({ fontNotice: BRAND_FONT_CLEARED_MESSAGE });
+        else set({ fontError: BRAND_FONT_CLEAR_FAILED_MESSAGE });
+      }
       return true;
     } catch (e) {
       set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });
@@ -2761,6 +2867,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない
+      r.restored = keepIdentity(r.restored, s); // 番号（実体の身元）は戻さない
       // ⚠️ **開いているまとめは畳む**（#817 レビュー 🟡＝タイムライン形式と同じ扱い・ADR-0026②）＝
       // 畳まないと、戻した**後**の編集が「まとめの続き」とみなされて**履歴に1件も積まれず**、
       // さらに自動保存が `historyDepth > 0` の間は走らないので**保存も止まる**。
@@ -2772,6 +2879,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {}; // 同上（書き出し中は redo も文書 slice を変えない・#379/#413）
       const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // やり直せない
+      r.restored = keepIdentity(r.restored, s); // 同上
       return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle", _historyGroupDepth: 0, _historyGroupPending: false }; // まとめは畳む（上と同じ理由）
     }),
 }));

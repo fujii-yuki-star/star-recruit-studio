@@ -62,15 +62,17 @@ describe("FontPicker", () => {
   });
 
   /**
-   * ⚠️ **内部の綴りは画面に出さない**（§2-3・PR #901 レビュー 🟡）＝「見つからない」系の既存 UI
-   *（素材・見た目パターン）も種別と件数までしか出していない。選び直せるように、
-   * 指している値そのものは**指したときの説明**（`title`）に残す。
+   * ⚠️ **内部の綴りは画面に出さない**（§2-3・PR #901 レビュー 🟡→α-6 出口監査 🟡 で徹底）＝
+   * 「見つからない」系の既存 UI（素材・見た目パターン）は種別と状態までしか出さない。
+   * ⚠️ **ホバーにも出さない**＝当初は「選び直せるように `title` へ残す」としていたが、
+   * ホバーすれば一般の利用者にも見えるので、原則（識別子を出さない）と食い違っていた。
    */
-  it("見つからないときも内部の綴りは画面に出さず、説明にだけ残す", () => {
+  it("見つからないときは、内部の綴りをどこにも出さない（ホバーにも）", () => {
     render(<FontPicker value={"user_font_003" as never} onChange={vi.fn()} allowInherit />);
     const btn = screen.getByRole("button");
     expect(btn.textContent).not.toContain("user_font_003");
-    expect(btn.getAttribute("title")).toContain("user_font_003");
+    expect(btn.getAttribute("title")).not.toContain("user_font_003");
+    expect(btn.getAttribute("title")).toContain("見つかりません"); // 状態は伝える
   });
 
   /** ⚠️ 一覧を取る前でも同じ（起動直後の窓）＝一時的でも間違った名前を見せない。 */
@@ -79,7 +81,7 @@ describe("FontPicker", () => {
     render(<FontPicker value={"user_font_001" as never} onChange={vi.fn()} allowInherit />);
     const btn = screen.getByRole("button");
     expect(btn.textContent).toContain("見つかりません");
-    expect(btn.getAttribute("title")).toContain("user_font_001");
+    expect(btn.getAttribute("title")).not.toContain("user_font_001");
   });
 
   /** ⚠️ 一覧を取れていなくても、**同梱は選べる**（行き止まりにしない）。 */

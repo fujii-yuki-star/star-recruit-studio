@@ -3,7 +3,7 @@
 //
 // ⚠️ **「アクセント型」「モーラ」を画面に出さない**（決定6・§2-3）を実際の描画で固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 vi.mock("../../infrastructure/readingDictFs", () => ({
   emptyReadingDict: () => ({ version: 1, entries: [], links: {} }),
@@ -154,5 +154,28 @@ describe("ReadingDictSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "読み方を追加する" }));
     await waitFor(() => expect(vi.mocked(saveReadingDict)).toHaveBeenCalled());
     expect(vi.mocked(saveReadingDict).mock.calls[0][0].links).toEqual({ 宇都宮: "uuid-new" });
+  });
+});
+
+// ⚠️ **どれを直しているか分かるようにする**（α-6 出口監査 🟡・棚と同じ作法）＝印が無いと、
+// 登録語が増えるほど「直す」を押しても手元では何も起きないように見える。
+describe("ReadingDictSection 直している語を示す", () => {
+  beforeEach(() => {
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [entry], links: {} }, dropped: 0 });
+  });
+
+  it("「直す」を押すと、その行に印が付き、欄にも名前が出る", async () => {
+    render(<ReadingDictSection />);
+    const row = (await screen.findByText(/^宇都宮：/)).closest("li") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "直す" }));
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(screen.getByText(/「宇都宮」の読み方を直しています/)).toBeInTheDocument();
+  });
+
+  it("直していないときは印も名前も出さない", async () => {
+    render(<ReadingDictSection />);
+    const row = (await screen.findByText(/^宇都宮：/)).closest("li") as HTMLElement;
+    expect(row.getAttribute("aria-current")).toBeNull();
+    expect(screen.queryByText(/の読み方を直しています/)).toBeNull();
   });
 });
