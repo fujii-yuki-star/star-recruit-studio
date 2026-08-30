@@ -8,6 +8,7 @@ import type { ScreenId } from "../data/mockData";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
+import { DeleteConfirm } from "./DeleteConfirm";
 import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
@@ -28,6 +29,8 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // ⚠️ **覚え直しが書けなかった理由**（α-6 出口監査 🟡23）＝黙って覚えた顔をしない（§2-5）。
   const brandKitError = useProjectStore((s) => s.brandKitError);
   const brandKitUnreadable = useProjectStore((s) => s.brandKitUnreadable);
+  const rebuildBrandKit = useProjectStore((s) => s.rebuildBrandKit);
+  const [rebuilding, setRebuilding] = useState(false);
   // ⚠️ **「変更はできません」と書いた欄は押せなくする**（差分再監査 🟡・§2-5 派生）＝
   // `updateBrandKit` は読めていない間**必ず断る**ので、押せるままだと**選択が元へ戻って**
   // 2つ目の赤字が増えるだけ（同じ状態に断り方が2通り）。同じ画面の書き出し中のボタンは
@@ -135,10 +138,27 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
           「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
           ⚠️ **覚えている中身は上書きしない**ので、この間は変えられない（変えると消える）。 */}
       {brandKitUnreadable && (
-        <p className="form-error" role="alert">
-          会社の見た目を読めませんでした。覚えている内容を失わないよう、変更はできません。
-          アプリを開き直すと直ることがあります。直らないときは、お手数ですがご連絡ください。
-        </p>
+        <div className="notice notice-warn" role="alert">
+          <p>
+            会社の見た目を読めませんでした。覚えている内容を失わないよう、いまは変更できません。
+            アプリを開き直すと直ることがあります。
+          </p>
+          {/* ⚠️ **行き止まりを作らない**（差分再監査 🟡・§2-5）＝上書きを断る門を下ろせるのは
+              「読み込みの成功」だけなので、ファイルが本当に壊れていると**二度と変えられない**。
+              利用者が**押したときだけ**通る出口を置く（何が失われるかを先に言う）。 */}
+          {rebuilding ? (
+            <DeleteConfirm
+              message="覚えていた文字の形・色・ロゴは読み取れないため、作り直すと空になります。よろしいですか？"
+              confirmLabel="作り直す"
+              onCancel={() => setRebuilding(false)}
+              onConfirm={() => { setRebuilding(false); void rebuildBrandKit(); }}
+            />
+          ) : (
+            <button type="button" className="btn" onClick={() => setRebuilding(true)}>
+              直らないときは作り直す
+            </button>
+          )}
+        </div>
       )}
 
       <div className="field">

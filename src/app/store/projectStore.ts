@@ -53,7 +53,7 @@ import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, usedUserF
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
-import { isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
+import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
@@ -558,6 +558,8 @@ interface ProjectState {
    */
   captureVideoFrame: (videoAssetId: string, atSec: number) => Promise<string | null>;
   clearImportError: () => void;
+  /** 読めなくなった会社の見た目を作り直す（`updateBrandKit` の門の唯一の出口・§2-5）。 */
+  rebuildBrandKit: () => Promise<boolean>;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
@@ -2422,7 +2424,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await saveBrandKit(next);
       return true;
     } catch {
-      set({ brandKit: before, brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
+      // ⚠️ **自分が書いた値がまだ載っているときだけ戻す**（差分再監査 ℹ️）＝丸ごと戻すと、
+      // 保存を待つ間に入った**次の変更まで巻き添えで巻き戻る**（ディスクは後勝ちなので食い違う）。
+      if (get().brandKit === next) set({ brandKit: before });
+      set({ brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
+      return false;
+    }
+  },
+  /**
+   * 読めなくなった会社の見た目を**作り直す**（差分再監査 🟡・§2-5＝行き止まりを作らない）。
+   *
+   * ⚠️ **上書きを断る門の唯一の出口**＝`updateBrandKit` は読めていない間ずっと断り、`brandKitUnreadable`
+   * を下ろすのは**読み込みの成功だけ**。ファイルが本当に壊れていると開き直しても直らないので、
+   * **アプリの中から会社の見た目を二度と変えられなくなる**（案内の「開き直す」にも従えない）。
+   * ⚠️ **黙って上書きしない**＝これは**利用者が明示的に押したときだけ**通る道で、
+   * 押す前に「覚えていた内容は失われる」と伝えるのは画面の役目。
+   */
+  rebuildBrandKit: async () => {
+    const empty = emptyBrandKit();
+    try {
+      await saveBrandKit(empty);
+      set({ brandKit: empty, brandKitUnreadable: false, brandKitError: null });
+      return true;
+    } catch {
+      set({ brandKitError: `${alpha6Message.BRAND_KIT_SAVE_FAILED}。` });
       return false;
     }
   },
