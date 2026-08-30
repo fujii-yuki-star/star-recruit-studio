@@ -129,7 +129,10 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   // その場で作られ、そこへ入って**どこにも見えない**（知らせも名無しの「この動画へ」になる）。
   // 判定は会社の見た目の反映と同じ式（`meta.projectId` か場面がある）＝同概念で流儀を割らない。
   const sceneOpen = useProjectStore((s) => s.meta.projectId !== "" || s.scenes.length > 0);
-  const destOpen = target === PROJECT_FORMAT.timeline ? timelineName != null : sceneOpen;
+  // ⚠️ **開いているかは文書の有無で見る**（PR #914 レビュー ℹ️）＝名前で見ると、会社の見た目の
+  // 反映（`s.doc != null`）と**同じ意図なのに別の式**になり、将来 `projectName` の扱いが変わると片方だけ壊れる。
+  const timelineOpen = useTimelineStore((s) => s.doc != null);
+  const destOpen = target === PROJECT_FORMAT.timeline ? timelineOpen : sceneOpen;
   const importBlocked = working || !destOpen;
   // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
   // ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝タイムラインの理由を共通の

@@ -343,6 +343,15 @@ describe("AssetLibraryPanel", () => {
     expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).not.toBeDisabled();
   });
 
+  it("タイムラインの動画を開いていないときは、タイムラインの欄でも取り込めない（双子）", async () => {
+    useTimelineStore.setState({ doc: null, importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" } } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("先に動画を開いてください");
+  });
+
   // ⚠️ **判定材料は行き先の側から採る**（PR #913 レビュー）＝場面形式の状態を見ると、
   // タイムラインが取り込み中・書き出し中でも押せて、中で静かに弾かれる。
   it("タイムラインが取り込み中・書き出し中のときは、タイムラインの欄が押せない", async () => {

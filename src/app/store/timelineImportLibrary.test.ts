@@ -66,6 +66,12 @@ describe('タイムラインの棚からの取り込み', () => {
     expect(copyLibraryAssetToProject).not.toHaveBeenCalled();
   });
 
+  it('動画を開いていなければ取り込まない（画面が塞ぐ前の守り）', async () => {
+    useTimelineStore.setState({ doc: null } as never);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(false);
+    expect(copyLibraryAssetToProject).not.toHaveBeenCalled();
+  });
+
   it('一覧を読めなかったら、次の行動を出して取り込まない', async () => {
     vi.mocked(listLibraryAssets).mockResolvedValue(null);
     expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(false);
