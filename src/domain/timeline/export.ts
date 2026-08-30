@@ -189,11 +189,13 @@ export function timelineAudioRuns(
   const fitted = auto.duckBgm ? duckSpansOf(doc, auto) : { spans: [], merged: false };
   const duckSpans = fitted.spans;
   for (const clip of doc.clips) {
-    if (!isAudibleRunClip(doc, clip)) continue; // 述語は門と共有（同じ部品を見る）
-    const sourceKey = audioSourceKeyOfClip(clip) as string;
+    // 「音として並ぶか」の述語は**門と共有**（同じ部品を見る）。⚠️ **キャストで通さない**＝
+    // `as string` にすると述語を緩めたとき**型が嘘をつく**（実際の値は `undefined` になりうる）。
+    if (!isAudibleRunClip(doc, clip)) continue;
+    const sourceKey = audioSourceKeyOfClip(clip);
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
-    if (!cue) continue;
+    if (!sourceKey || !cue) continue;
     const volume = clipBaseVolume(clip, doc);
     // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
