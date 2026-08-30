@@ -109,6 +109,10 @@ export function unusedAssetIds(
    * **実体ファイルごと消える**（`assets` は履歴の外＝ADR-0020）。取り消すと場面は戻るが素材は
    * 戻らず、死んだ参照と灰色の枠だけが残る（取り込み直しても番号が変わる）。
    * 読み上げ音声の剪定（`_doSave`）が同じ理由で `past`/`future` を数えているのと同じ流儀。
+   * ⚠️ **履歴側は動画全体の BGM（`bgmSettings.assetId`）を見ていない**（PR #922 レビュー ℹ️）＝
+   * いまの唯一の呼び出し（素材画面）は **BGM を一覧・削除の候補から外している**（`isListedMaterial`）ので
+   * 実害は無い。**別の画面から呼ぶときは、履歴の `meta` も渡す形へ広げること**（そのままだと
+   * 「BGM を差し替えて元を消す→取り消す」で同じ穴になる）。
    */
   historyScenes: readonly (readonly Scene[])[] = [],
 ): string[] {

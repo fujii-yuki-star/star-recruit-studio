@@ -231,3 +231,40 @@ describe("MaterialsScreen 使っていない素材（#348）", () => {
     expect(btn.getAttribute("title")).toContain("書き出し");
   });
 });
+
+// ⚠️ **取り消し・やり直しで戻る場面が指す素材は「どこにも置いていない」に出さない**
+//（α-6 出口監査 🔴2）＝出すと、まとめて消したときに**実体ファイルごと消える**（`assets` は履歴の外）。
+// 取り消すと場面は戻るが素材は戻らず、死んだ参照と灰色の枠だけが残る。
+describe("MaterialsScreen 取り消しで戻る場面が指す素材", () => {
+  const removeAssets = vi.fn();
+  const setup = (history: { past?: unknown[]; future?: unknown[] }): void => {
+    vi.spyOn(assetFsMod, "isTauri").mockReturnValue(false);
+    vi.spyOn(assetFsMod, "missingAssetFiles").mockResolvedValue([]);
+    useProjectStore.setState({
+      assets: [asset("asset_001", "使っている写真"), asset("asset_002", "消した場面の写真")],
+      scenes: [scene({ main: "asset_001" })],
+      parts: [{ partId: "part_001", title: "本編", order: 1, sceneIds: ["scene_001"] }],
+      templates: [template], assetSrcById: {}, missingAssetIds: [],
+      importError: null, isImporting: false, removeAssets,
+      past: [], future: [], ...history,
+    } as never);
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+  };
+  const deleted = { scenes: [scene({ main: "asset_002" })] };
+
+  it("取り消しで戻る場面（past）が指していれば数えない", () => {
+    setup({ past: [deleted] });
+    expect(screen.getByText(/どこにも置いていないものだけ（0）/)).toBeInTheDocument();
+  });
+
+  it("やり直しで戻る場面（future）でも数えない（両方を渡している）", () => {
+    setup({ future: [deleted] });
+    expect(screen.getByText(/どこにも置いていないものだけ（0）/)).toBeInTheDocument();
+  });
+
+  it("履歴のどこからも指されていなければ数える（片づけたいものが片づけられない、を作らない）", () => {
+    setup({ past: [{ scenes: [scene({ main: "asset_001" })] }] });
+    expect(screen.getByText(/どこにも置いていないものだけ（1）/)).toBeInTheDocument();
+  });
+});
