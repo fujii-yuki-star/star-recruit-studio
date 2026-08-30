@@ -7,7 +7,7 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
 import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND, LAYER_TYPE } from '../enums';
@@ -149,6 +149,22 @@ export function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolv
 }
 
 /**
+ * **実際に音として並ぶ部品か**（`/canon-check` の範囲6 レビュー ℹ️）。
+ *
+ * ⚠️ **門と書き出しが「同じ部品」を見るための1か所**＝`isAudioClip` だけで数えると、
+ * **音源が無い読み上げ**（まだ声を作っていない）や**隠した部品・隠した列**まで門が数える。
+ * それらは `timelineAudioRuns` に出ない＝**式を組まないのに書き出しを止める**（断る側へ倒れる）。
+ * 「音量の変化」の欄は声の作成前から開くので、未作成の読み上げに点を置くのは普通に起こりうる。
+ */
+export function isAudibleRunClip(doc: TimelineProject, clip: TimelineClip): boolean {
+  if (!audioSourceKeyOfClip(clip)) return false; // 音源が無い（読み上げ未作成など）＝置くものが無い
+  // 鳴るかどうかの判定（隠した列・隠したクリップ）は再生と同じ関数に委ねる＝規則を2か所に書かない。
+  // クリップの真ん中の時刻で見る（区間の端は半開なので、0秒に近いクリップでも必ず入る）。
+  const midSec = clip.startSec + clip.durationSec / 2;
+  return audioCuesAt(doc, midSec).some((q) => q.clipId === clip.id);
+}
+
+/**
  * 音の並べ方を決める（#631）。**再生（`audioCuesAt`）と同じ値を使う**＝聞いた音と書き出した音が一致する。
  *
  * **音量の変化（`volumePoints`・#512）も渡す**（段3）＝再生と**同じ点列**から `volumeExpr` で式を組み、
@@ -173,10 +189,8 @@ export function timelineAudioRuns(
   const fitted = auto.duckBgm ? duckSpansOf(doc, auto) : { spans: [], merged: false };
   const duckSpans = fitted.spans;
   for (const clip of doc.clips) {
-    const sourceKey = audioSourceKeyOfClip(clip);
-    if (!sourceKey) continue; // 音源が無い（読み上げ未作成など）＝置くものが無い
-    // 鳴るかどうかの判定（隠した列・隠したクリップ）は再生と同じ関数に委ねる＝規則を2か所に書かない。
-    // クリップの真ん中の時刻で見る（区間の端は半開なので、0秒に近いクリップでも必ず入る）。
+    if (!isAudibleRunClip(doc, clip)) continue; // 述語は門と共有（同じ部品を見る）
+    const sourceKey = audioSourceKeyOfClip(clip) as string;
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!cue) continue;
@@ -356,8 +370,10 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 実効より多く数え、**出せる動画を止める**（しかも読み上げは「部品を分ける」ができない＝従える道が無い）。
   const autoForGate = resolveAudioAuto(doc.videoSettings.audioAuto);
   const duckSpansForGate = autoForGate.duckBgm ? duckSpansOf(doc, autoForGate).spans : [];
+  // ⚠️ **数える部品も書き出しと同じ**（`/canon-check` 範囲6 ℹ️）＝`isAudioClip` だけで数えると、
+  // 音源が無い読み上げ・隠した部品まで数え、**式を組まないのに書き出しを止める**。
   const tooManyPoints = doc.clips
-    .filter((c) => isAudioClip(c)
+    .filter((c) => isAudibleRunClip(doc, c)
       && clipVolumePointsForExport(doc, c, autoForGate, duckSpansForGate).points.length > VOLUME_POINTS_MAX)
     .map((c) => c.id);
   if (tooManyPoints.length > 0) {

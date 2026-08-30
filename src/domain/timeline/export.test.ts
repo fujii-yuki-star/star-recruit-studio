@@ -766,6 +766,36 @@ describe('音量の点の数え方（門と式が同じ関数を通る）', () =
     expect(timelineExportBlockers(withPoints).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
   });
 
+  // ⚠️ **式を組まない部品は数えない**（範囲6 レビュー ℹ️）＝「音量の変化」の欄は声を作る前から開くので、
+  // **まだ声を作っていない読み上げ**に点を置けてしまう。それは `timelineAudioRuns` に出ない＝
+  // 式を組まないのに書き出しを止める（断る側へ倒れる）。
+  it('まだ声を作っていない読み上げに点を置いても、書き出しを止めない', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    const d = doc({
+      clips: [
+        clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 100, assetId: 'asset_bgm' } as never),
+        // `voicePath` が無い＝音源が無い（作成前）。
+        voiceClip('clip_v0', { startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'none' }, volumePoints: many } as never),
+      ],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as never);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(false);
+  });
+
+  it('声ができていれば、同じ点の数で止める（数え漏らさない）', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    const d = doc({
+      clips: [
+        clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 100, assetId: 'asset_bgm' } as never),
+        voiceClip('clip_v0', { startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'generated', voicePath: 'voices/v0.wav' }, volumePoints: many } as never),
+      ],
+      assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as never);
+    expect(timelineExportBlockers(d).some((b) => b.code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany)).toBe(true);
+  });
+
   // ⚠️ **掛からない区間は捨てられる**（`duckingFactorPoints`）＝冒頭だけの短い BGM に、
   // 動画の最後のほうの声の区間まで数えない。
   it('冒頭だけの短い BGM は、その区間に掛かる分しか数えない', () => {
