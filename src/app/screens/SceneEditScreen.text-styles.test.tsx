@@ -419,3 +419,53 @@ describe("SceneEditScreen いま使っていない種別のフォント", () => 
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
   });
 });
+
+// 自由配置の要素のフォントも、門は休眠のぶんまで数える（差分再監査 8巡目 🟡）。
+//
+// ⚠️ 直す欄は自由配置の場面にしかないので、通常テンプレへ切り替えた場面では選び直す先が
+// 1つも無くなる（書き出しが止まったまま解除できない＝§2-5 の行き止まり）。
+describe("SceneEditScreen 休眠した自由配置の要素のフォント", () => {
+  const openScene = (over: Partial<Scene>): void => {
+    useProjectStore.setState({
+      templates: [tpl],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene(over)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+  };
+
+  it("通常テンプレの場面でも、休眠した要素のフォントを直せる", () => {
+    openScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as Partial<Scene>);
+    // 要素の表示名（自動名）つきの欄が出る＝どれを直すのか分かる。
+    const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
+    expect(within(hint.parentElement as HTMLElement).getByText(/のフォント$/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **絞るのは「実際に『文字』節へ出るキー」**（差分再監査 8巡目 🟡）＝あちらの節は自由配置では
+  // 描かれないので、見た目パターンが使う種別で絞ると**文字層を持つ自由配置の見た目**（自作できる）で
+  // どちらにも出ないキーができる（門は種類を見ずに数えるので、そのまま行き止まりになる）。
+  it("文字の層を持つ自由配置の見た目でも、種別ごとのフォントを直せる", () => {
+    useProjectStore.setState({
+      // 自作の自由配置テンプレは文字の層を持てる（`TEMPLATE_ADDABLE_LAYER_TYPES` に text がある）。
+      templates: [{ ...tpl, templateId: "user_tmpl_001", category: "free" } as unknown as Template],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ templateId: "user_tmpl_001", sceneType: "free", textFontIds: { title: "gen-interface-jp" } } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
+  });
+
+  it("フォントの指定が無い要素は並べない", () => {
+    openScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ" }] } as Partial<Scene>);
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+  });
+
+  // ⚠️ **知らせは節の中に埋めない**＝畳んだ記憶は既定より優先されるので、一度畳むと二度と出ない。
+  it("知らせは畳める節の外に出す（一度畳んだら二度と出ない、を作らない）", () => {
+    openScene({ textFontIds: { subtitle: "gen-interface-jp" } } as Partial<Scene>);
+    const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
+    expect(hint.closest("details")).toBeNull();
+  });
+});

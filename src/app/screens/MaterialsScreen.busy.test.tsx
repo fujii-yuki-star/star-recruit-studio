@@ -69,6 +69,10 @@ describe("MaterialsScreen 動画を開いていないとき", () => {
     const label = screen.getByText("素材を追加").closest("label") as HTMLElement;
     expect(label.getAttribute("aria-disabled")).toBe("true");
     expect(label.title).toContain("先に動画を開いてください");
+    // ⚠️ **押せないボタンを案内しない**（差分再監査 7巡目 🟡）＝理由はホバーにしか無いので、
+    // 空の一覧の案内は**次の行動**（先に動画を開く／新しく作る）を出す。
+    expect(screen.getByText(/先に動画を開くか、新しく作ってください/)).toBeInTheDocument();
+    expect(screen.queryByText(/「素材を追加」から、写真・動画・ゆうこの素材を登録できます/)).toBeNull();
   });
 
   it("白紙から作った直後（番号なし・場面なし）は押せる", () => {
@@ -80,5 +84,6 @@ describe("MaterialsScreen 動画を開いていないとき", () => {
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     const label = screen.getByText("素材を追加").closest("label") as HTMLElement;
     expect(label.getAttribute("aria-disabled")).toBe("false");
+    expect(screen.getByText(/「素材を追加」から、写真・動画・ゆうこの素材を登録できます/)).toBeInTheDocument();
   });
 });
