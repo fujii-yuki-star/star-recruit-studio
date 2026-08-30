@@ -353,13 +353,6 @@ export function splitVolumePoints(
 }
 
 /**
- * 帯を `atSec` で2つに分ける。**前半は同じ id のまま**（選択・動き・連動の参照が切れない）、
- * 後半を新しい id で足す。分けられないときは理由を返す。
- *
- * `volumeAt` は音量の変化を解く関数（`domain/timeline/audio` の `volumeAt`）。**再生・書き出しと
- * 同じもの**を渡す＝切れ目の音量が画面と出力で食い違わない。
- */
-/**
  * 差し込み口に入れた動画の**頭出しを進めた** `slotClips`（#816-2）。分ける対象が見た目パターンの
  * 部品でないとき・進める枠が無いときは**何も足さない**（`{}` を返す＝スプレッドしても無害）。
  *
@@ -390,6 +383,13 @@ function advancedSlotStarts(
   return { slotClips: next };
 }
 
+/**
+ * 帯を `atSec` で2つに分ける。**前半は同じ id のまま**（選択・動き・連動の参照が切れない）、
+ * 後半を新しい id で足す。分けられないときは理由を返す。
+ *
+ * `volumeAt` は音量の変化を解く関数（`domain/timeline/audio` の `volumeAt`）。**再生・書き出しと
+ * 同じもの**を渡す＝切れ目の音量が画面と出力で食い違わない。
+ */
 export function splitClip(
   doc: TimelineProject,
   clipId: string,

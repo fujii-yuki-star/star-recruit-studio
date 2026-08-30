@@ -220,14 +220,6 @@ function creditToSvg(width: number, height: number, text: string): string {
 }
 
 /**
- * **合成の単位**（`compositeKey`）ごとに `<g opacity>` で包む（ADR-0032 決定19・#631）。
- *
- * 連続する同じキーのアイテムを1つの `<g>` にまとめる＝**1枚に合成してから不透明度を掛ける**ので、
- * 層が重なる所で下が透けない（アイテムごとに α を掛けると透ける）。キーを持たないアイテム
- * （場面形式はすべてこちら）は素通し＝出力は従来と1バイトも変わらない。
- * **連続でまとめる**のは、`items` が既に描画順（重ね順）に並んでいるため＝並びを崩さない。
- */
-/**
  * 切り抜き（`clipRect`）で1かたまりを包む（#634）。矩形の外は描かない。
  * `<clipPath>` の id はアイテム側が持つ（クリップ id 由来＝同じ矩形を何度も定義しない）。
  */
@@ -267,6 +259,14 @@ function sameClipRect(a: LayoutItem['clipRect'], b: LayoutItem['clipRect']): boo
   return a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && (a.rotation ?? 0) === (b.rotation ?? 0);
 }
 
+/**
+ * **合成の単位**（`compositeKey`）ごとに `<g opacity>` で包む（ADR-0032 決定19・#631）。
+ *
+ * 連続する同じキーのアイテムを1つの `<g>` にまとめる＝**1枚に合成してから不透明度を掛ける**ので、
+ * 層が重なる所で下が透けない（アイテムごとに α を掛けると透ける）。キーを持たないアイテム
+ * （場面形式はすべてこちら）は素通し＝出力は従来と1バイトも変わらない。
+ * **連続でまとめる**のは、`items` が既に描画順（重ね順）に並んでいるため＝並びを崩さない。
+ */
 function itemsToSvg(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fontFamily: string): string {
   const out: string[] = [];
   const closed = new Set<string>();

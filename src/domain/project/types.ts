@@ -385,7 +385,6 @@ export interface Keyframe {
   opacity?: number;
   /** 回転角（度）。 */
   rotation?: number;
-  /** 前KFからこのKFへ入るイージング（先頭KFでは無視）。未指定＝linear。 */
   /** 区間 [前KF, 当KF] のイージング（#262＝名前つき／自由なカーブ）。未指定＝`linear`。 */
   easing?: EasingSpec;
 }

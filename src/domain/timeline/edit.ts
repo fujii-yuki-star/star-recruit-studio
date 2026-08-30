@@ -413,10 +413,6 @@ function pruneGroups(groups: readonly Group[], removed: ReadonlySet<string>): Gr
 }
 
 /**
- * クリップを消す。**参照も一緒に片づける**＝グループのメンバーとキーフレームの対象から落とす
- * （残すと「消したのに動きだけ残る」参照切れになる・11 §8 V26）。
- */
-/**
  * 選んだ部品を消す（**固定した列のものが混ざっていたら断る**・#701 レビュー）。
  *
  * `removeClips` は列ごと消すとき（`removeTrack`）にも使う内部の道具で、そちらは列そのものを消すので
@@ -433,6 +429,10 @@ export function removeSelectedClipsChecked(doc: TimelineProject, clipIds: readon
   return { ok: true, doc: removeClips(doc, clipIds) };
 }
 
+/**
+ * クリップを消す。**参照も一緒に片づける**＝グループのメンバーとキーフレームの対象から落とす
+ * （残すと「消したのに動きだけ残る」参照切れになる・11 §8 V26）。
+ */
 export function removeClips(doc: TimelineProject, clipIds: readonly string[]): TimelineProject {
   const removed = new Set(clipIds);
   const clips = doc.clips.filter((c) => !removed.has(c.id));
@@ -904,21 +904,6 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
   return ok({ ...doc, tracks, clips: [...doc.clips, clip] });
 }
 
-/**
- * **音を置く**（#634）＝同梱BGM または持ち込んだ音の素材を音の列へ。
- *
- * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
- * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
- */
-/**
- * **絵のもの（写真・文字・図形）を置く**（#684・ADR-0034 段階1）。`addAudioClip` と同じ流儀＝
- * 置けない場所は理由を返し、黙って別の場所へ寄せない。
- *
- * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
- *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
- * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
- * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
- */
 /** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */
 export type VisualPlacement = {
   kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -1067,6 +1052,15 @@ export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacemen
   return clipPlacementIssue(doc, { kind: input.kind, assetId: input.assetId }, input.trackId, input.startSec);
 }
 
+/**
+ * **絵のもの（写真・文字・図形）を置く**（#684・ADR-0034 段階1）。`addAudioClip` と同じ流儀＝
+ * 置けない場所は理由を返し、黙って別の場所へ寄せない。
+ *
+ * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
+ *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
+ * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
+ * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
+ */
 export function addVisualClip(
   doc: TimelineProject,
   input: VisualPlacement & {
@@ -1114,12 +1108,6 @@ export function addVisualClip(
 }
 
 /**
- * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
- * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
- *
- * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は断る**。
- */
-/**
  * 種類ごとに直せる項目（#684）。`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
  * **どの種類が何を持つか**はここが単一の参照元（型では縛れない）。
  */
@@ -1158,6 +1146,12 @@ const VISUAL_CONTENT_KEYS = {
   // 通り、その項目は**画面から書けるのに黙って弾かれる**（「単一の参照元」という主張が嘘になる）。
 } as const satisfies Partial<Record<TimelineClipKind, readonly (keyof TimelineClip)[]>>;
 
+/**
+ * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
+ * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
+ *
+ * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は断る**。
+ */
 export function setVisualClipContent(
   doc: TimelineProject,
   clipId: string,
@@ -1216,6 +1210,12 @@ export function setVisualClipContent(
   return ok(withClip(doc, next));
 }
 
+/**
+ * **音を置く**（#634）＝同梱BGM または持ち込んだ音の素材を音の列へ。
+ *
+ * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
+ * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
+ */
 export function addAudioClip(
   doc: TimelineProject,
   input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },
@@ -1243,13 +1243,6 @@ export function addAudioClip(
   return ok({ ...doc, clips: [...doc.clips, clip] });
 }
 
-/**
- * 音・動画の素材の**再生速度**（#634・`11 §7.6.5`）。1＝そのまま。
- *
- * **クリップの長さは変えない**＝速さは「置き場所ぶんの時間に、素材のどれだけを流すか」を決める
- * （2倍速なら倍の長さぶんの素材が入る）。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）は
- * どちらもこの値を読むので、聞いた音と書き出した音が一致する。
- */
 /**
  * **置いた部品の位置・大きさ・向きを決める**（#685・`11 §7.6.3`）。
  *
@@ -1311,6 +1304,13 @@ export function setClipBoxes(
   return ok(next);
 }
 
+/**
+ * 音・動画の素材の**再生速度**（#634・`11 §7.6.5`）。1＝そのまま。
+ *
+ * **クリップの長さは変えない**＝速さは「置き場所ぶんの時間に、素材のどれだけを流すか」を決める
+ * （2倍速なら倍の長さぶんの素材が入る）。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）は
+ * どちらもこの値を読むので、聞いた音と書き出した音が一致する。
+ */
 export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);

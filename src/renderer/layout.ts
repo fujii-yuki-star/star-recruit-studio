@@ -151,11 +151,6 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
 }
 
 /**
- * 同時字幕（ADR-0031）が**キャンバス外へはみ出す**か（#533 レビュー P2）。**実描画（`layoutScene`）の字幕アイテム**を基に、
- * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
- * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
- */
-/**
  * その場面が**実際に描く**レイアウトをすべて数え上げる（#346）。
  *
  * ⚠️ **`layoutScene(scene, template)` を opts なしで1回呼ぶだけでは足りない**＝掛け合い
@@ -185,6 +180,11 @@ export function sceneDrawnLayouts(scene: Scene, template: Template): SceneLayout
   });
 }
 
+/**
+ * 同時字幕（ADR-0031）が**キャンバス外へはみ出す**か（#533 レビュー P2）。**実描画（`layoutScene`）の字幕アイテム**を基に、
+ * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
+ * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
+ */
 export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。

@@ -49,8 +49,8 @@ export function detachedDocCount(src: string): number {
  * ⚠️ **ファイル名だけの許可リストにしない**＝いちばん触るファイル（`uiLabels.ts`・
  * `TimelineProjectScreen.tsx`）ほど載ることになり、**そこでの再発を素通し**する。数で持つ。
  */
-// 凍結時点の数（合計 65 件・30ファイル）。⚠️ **`uiLabels.ts` と `domain/timeline/export.ts` は
-// このPRで 0 にした**＝文言の単一の参照元と、書き出しの入口だから先に片づけた。
+// 凍結時点の数（合計 39 件・11ファイル）。⚠️ **直したら数も一緒に下げる**（この1行が「何件直したか」の記録）。
+// #923 で domain / renderer / infrastructure の19件を 0 にした（残りは app 配下）。
 const BASELINE: Record<string, number> = {
   'app/components/ColorPicker.tsx': 1,
   'app/components/FreeLayoutOverlay.tsx': 1,
@@ -63,25 +63,6 @@ const BASELINE: Record<string, number> = {
   'app/store/projectStore.ts': 3,
   'app/store/timelineStore.ts': 11,
   'app/timelinePanels.ts': 1,
-  'domain/asset/relink.test.ts': 1,
-  'domain/constants.ts': 1,
-  'domain/enums.ts': 1,
-  'domain/project/compileTimeline.ts': 1,
-  'domain/project/sceneTransitions.ts': 2,
-  'domain/project/types.ts': 1,
-  'domain/template/layerOps.ts': 1,
-  'domain/timeline/bake.ts': 1,
-  'domain/timeline/clipEdge.ts': 1,
-  'domain/timeline/edit.ts': 5,
-  'domain/timeline/split.ts': 1,
-  'domain/voice/readingDict.test.ts': 1,
-  'domain/voice/readingDict.ts': 1,
-  'infrastructure/voiceProviders/readingDictSync.test.ts': 1,
-  'renderer/explodeParity.test.ts': 2,
-  'renderer/export/buildExportScenes.ts': 1,
-  'renderer/layout.ts': 1,
-  'renderer/sceneSvg.ts': 1,
-  'renderer/timelineLayout.ts': 2,
 };
 
 describe('説明文を別の宣言から奪わない（再発防止の門番）', () => {

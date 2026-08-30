@@ -226,11 +226,6 @@ export const TIMELINE_MIN_CLIP_SEC = 0.1;
 export const MIN_BOX_SIZE_PX = 1;
 
 /**
- * 角度（回転）の数値入力の下限/上限（度）。**要素とグループの角度欄で共有する単一の参照元**（§2-7・#554）。
- * 根拠は正典＝schema の `rotation` は `minimum:0` / `exclusiveMaximum:360`（360=0 は重複ゆえ除外）で、
- * 回転ドラッグ（`rotationFromPointer`/`snapAngle`）も整数 0..359 へ正規化する＝**欄とドラッグの到達域が一致**する。
- */
-/**
  * 角度を **0〜360 未満へ回り込ませる**（`-10` は `350`・`370` は `10`）。
  * ⚠️ schema が `0 <= rotation < 360` しか受けないので、はみ出した値は**保存できない**
  * （自動保存が黙って止まる）。同じ式が4か所に散っていたのを1つにした（#685 レビュー）。
@@ -239,6 +234,11 @@ export function normalizeDeg(deg: number): number {
   return ((deg % 360) + 360) % 360;
 }
 
+/**
+ * 角度（回転）の数値入力の下限/上限（度）。**要素とグループの角度欄で共有する単一の参照元**（§2-7・#554）。
+ * 根拠は正典＝schema の `rotation` は `minimum:0` / `exclusiveMaximum:360`（360=0 は重複ゆえ除外）で、
+ * 回転ドラッグ（`rotationFromPointer`/`snapAngle`）も整数 0..359 へ正規化する＝**欄とドラッグの到達域が一致**する。
+ */
 export const ROTATION_DEG_MIN = 0;
 export const ROTATION_DEG_MAX = 359;
 

@@ -79,7 +79,6 @@ function emptyTimeline(): Timeline {
   return { totalSec: 0, scenes: [], tracks: { video: [], telop: [], audio: [], bgm: [] }, transitions: [] };
 }
 
-/** BGM を全体1本のクリップとして出すか（有効かつ音源が選ばれているとき）。 */
 /** 場面の実効BGM設定（場面ごと ?? プロジェクト既定＝null=継承・§11.6・ADR-0018 ③(7)）。 */
 export function resolveSceneBgm(scene: Scene, projectBgm: BgmSettings | undefined): BgmSettings | undefined {
   return scene.bgmSettings ?? projectBgm;

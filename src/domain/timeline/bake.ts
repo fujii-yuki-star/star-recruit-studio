@@ -499,6 +499,15 @@ export function bakeLineSubtitles(
 }
 
 /**
+ * **明示のセリフ列**があるか。字幕の上書きは `scene.lines` があるときだけ効く（`sceneLines()` は
+ * 単独ナレーションから1行を合成して返すので、そちらで判定すると単独場面まで上書き扱いになる）。
+ * 判定の規則は `staticSubtitleFor`（`subtitleBinding`）と同じ。
+ */
+function hasExplicitLines(scene: Scene): boolean {
+  return (scene.lines?.length ?? 0) > 0;
+}
+
+/**
  * テンプレクリップから落とす `textKey`＝**場面形式で静的字幕が描かれない**字幕層のもの。
  *
  * 落とす基準は「行ごとに焼けたか」ではなく「**元は描かれていたか**」。
@@ -508,15 +517,6 @@ export function bakeLineSubtitles(
  * - どちらでもない（セリフ列が無い／窓が全部 0 秒＝場面まるごと1区間へ落ちる）ときは**残す**＝
  *   静的字幕が出ている場面の字幕を黙って消さない（§2-5）。
  */
-/**
- * **明示のセリフ列**があるか。字幕の上書きは `scene.lines` があるときだけ効く（`sceneLines()` は
- * 単独ナレーションから1行を合成して返すので、そちらで判定すると単独場面まで上書き扱いになる）。
- * 判定の規則は `staticSubtitleFor`（`subtitleBinding`）と同じ。
- */
-function hasExplicitLines(scene: Scene): boolean {
-  return (scene.lines?.length ?? 0) > 0;
-}
-
 export function subtitleTextKeysNotDrawn(
   scene: Scene,
   template: Template | undefined,

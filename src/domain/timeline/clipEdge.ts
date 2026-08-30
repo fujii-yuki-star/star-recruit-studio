@@ -31,14 +31,6 @@ export interface ClipSpan {
 }
 
 /**
- * 動かした端を `edgeSec` に置いたときのクリップを返す（クランプ込み）。
- *
- * @param clip     いまのクリップ（`edgeSec` と同じ座標系）
- * @param edgeSec  動かした端の新しい値。move/trim-start は**開始**、trim-end は**終了**（同座標系・吸着済み・未クランプ）
- * @param minStartSec 開始の下限（グローバル秒で呼ぶならアンカー場面の開始／アンカー相対で呼ぶなら 0）
- * @param minClipSec  最小の長さ
- */
-/**
  * 二進小数の**残差だけ**を落とす（#721）。`0.1 + 0.2` が `0.30000000000000004` になる類の、
  * 引き算で生まれる末尾のごみを消すためのもの。
  *
@@ -53,6 +45,14 @@ function withoutFloatResidue(sec: number): number {
   return Number(sec.toFixed(SEC_PRECISION));
 }
 
+/**
+ * 動かした端を `edgeSec` に置いたときのクリップを返す（クランプ込み）。
+ *
+ * @param clip     いまのクリップ（`edgeSec` と同じ座標系）
+ * @param edgeSec  動かした端の新しい値。move/trim-start は**開始**、trim-end は**終了**（同座標系・吸着済み・未クランプ）
+ * @param minStartSec 開始の下限（グローバル秒で呼ぶならアンカー場面の開始／アンカー相対で呼ぶなら 0）
+ * @param minClipSec  最小の長さ
+ */
 export function applyClipEdge(
   clip: ClipSpan,
   mode: ClipDragMode,

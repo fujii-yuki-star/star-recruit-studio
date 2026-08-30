@@ -65,16 +65,6 @@ export interface BoundaryTransition {
 }
 
 /**
- * A→B 境界（scenes[targetIndex] に入る遷移＝transition.in）の実効値を、**書き出しと同じ全場面 transitionTimeline**で
- * 解決する（#408 Part 2 のプレビュー用）。scenes は project.scenes と同じ再生順、targetIndex は当該場面の添字。
- * targetIndex<=0（先頭＝切り替え元なし）／type=none／希望 D<=0 は durationSec=0（プレビューしない）を返す。
- * clamp は書き出し（buildExportScenes）と同一：対象境界までの全場面尺 sceneDurations と境界希望 boundaryDs
- * （none/先頭=0）から transitionTimeline を回し steps[targetIndex-1] を採る。左 clamp を累積結合尺 acc で行うため、
- * **直前場面が実効 D より短い（prev<D）場面でもプレビュー=書き出しが一致**する（2場面近似 min(D,prev,cur) だと
- * prev で過小になっていた＝#408 レビュー P1）。type/direction は resolveTransition と同一（wipe/zoom→fade）
- * ＝プレビュー=書き出し（ADR-0001/0026）。
- */
-/**
  * 場面の並びから「場面 i への入場の希望 D」を組む（#727）。**全経路がこれを通す**。
  *
  * ⚠️ 以前は同じ式が6か所に手書きされていた。`transitionTimeline` は「各段が前より前だけで決まる」関数
@@ -89,6 +79,16 @@ export function transitionBoundaryDs(scenes: readonly { transition?: Transition 
   });
 }
 
+/**
+ * A→B 境界（scenes[targetIndex] に入る遷移＝transition.in）の実効値を、**書き出しと同じ全場面 transitionTimeline**で
+ * 解決する（#408 Part 2 のプレビュー用）。scenes は project.scenes と同じ再生順、targetIndex は当該場面の添字。
+ * targetIndex<=0（先頭＝切り替え元なし）／type=none／希望 D<=0 は durationSec=0（プレビューしない）を返す。
+ * clamp は書き出し（buildExportScenes）と同一：対象境界までの全場面尺 sceneDurations と境界希望 boundaryDs
+ * （none/先頭=0）から transitionTimeline を回し steps[targetIndex-1] を採る。左 clamp を累積結合尺 acc で行うため、
+ * **直前場面が実効 D より短い（prev<D）場面でもプレビュー=書き出しが一致**する（2場面近似 min(D,prev,cur) だと
+ * prev で過小になっていた＝#408 レビュー P1）。type/direction は resolveTransition と同一（wipe/zoom→fade）
+ * ＝プレビュー=書き出し（ADR-0001/0026）。
+ */
 export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number): BoundaryTransition {
   const scene = targetIndex >= 0 ? scenes[targetIndex] : undefined;
   const r = resolveTransition(scene?.transition);
@@ -104,6 +104,9 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
   const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), transitionBoundaryDs(scenes));
   return { type: r.type, direction: r.direction, durationSec: steps[targetIndex - 1]?.durationSec ?? 0 };
 }
+
+/** 浮動小数の丸めを吸収する許容差（比較のためだけの値＝尺の意味は持たない）。 */
+const FLOAT_EPS = 1e-9;
 
 /**
  * 「切り替えに飲み込まれて総尺に寄与しない場面」の番号（1始まり・公開前チェック用・#553/#554）。
@@ -129,9 +132,6 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
  *（それでも実質見えない）。次の場面の入場で覆われる場合は、左の clamp が「それまでの結合結果」に効くので
  * **1フレームも残らず丸ごと消える**（`[5,4,6]` の場面2）＝どちらも知らせる必要がある。
  */
-/** 浮動小数の丸めを吸収する許容差（比較のためだけの値＝尺の意味は持たない）。 */
-const FLOAT_EPS = 1e-9;
-
 export function swallowedByTransitionSceneNumbers(scenes: Scene[]): number[] {
   const own = swallowedByOwnTransitionSceneNumbers(scenes);
   const next = swallowedByNextTransitionSceneNumbers(scenes);
