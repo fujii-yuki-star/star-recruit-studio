@@ -69,8 +69,10 @@ export function createLibraryAssetId(existingIds: readonly string[]): string {
 export function assetFromLibrary(
   lib: LibraryAsset,
   existingIds: readonly string[],
+  /** 採番済みの番号を使う（呼び出し側が「使い回さない」規則で採ったとき＝`newAssetFrom` と同じ口）。 */
+  reservedId?: string,
 ): { asset: Asset; fileName: string } {
-  const assetId = createAssetId(existingIds);
+  const assetId = reservedId ?? createAssetId(existingIds);
   const ext = lib.fileName.split('.').pop() ?? 'bin';
   const fileName = `${assetId}.${ext}`;
   return {

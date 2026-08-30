@@ -89,3 +89,88 @@ describe('タイムラインの文字クリップの体裁（#264）', () => {
     expect(setVisualClipContent(d, 'clip_001', { text: 'あ' }).ok).toBe(false);
   });
 });
+
+// ⚠️ **縁取りも共有の語彙**（差分再監査 5巡目 🟡）＝描画は写す（`freeElementFromClip`）し「バラす」は
+// 元の要素の縁取りをそのまま持ち込むので、書けないと**外せない縁取り**が残る（場面形式では外せる）。
+describe('縁取り（バラした文字から外せる）', () => {
+  it('文字クリップに縁取りを書ける', () => {
+    const r = setVisualClipContent(doc(), 'clip_001', { strokeWidth: 4, strokeColor: '#ffffff' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect([r.doc.clips[0].strokeWidth, r.doc.clips[0].strokeColor]).toEqual([4, '#ffffff']);
+  });
+
+  it('字幕クリップにも縁取りを書ける', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.subtitle } as never;
+    const r = setVisualClipContent(d, 'clip_001', { strokeWidth: 2 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc.clips[0].strokeWidth).toBe(2);
+  });
+
+  it('図形には書けない（その種類が持つ項目だけを受ける）', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.shape } as never;
+    expect(setVisualClipContent(d, 'clip_001', { strokeWidth: 2 }).ok).toBe(false);
+  });
+
+  // ⚠️ **字幕は文言を持たない**（連動先から採る）＝ここだけは文字クリップと顔ぶれが違う。
+  it('字幕には文言を書けない（連動先から採る）', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.subtitle } as never;
+    expect(setVisualClipContent(d, 'clip_001', { text: 'あ' }).ok).toBe(false);
+  });
+
+  it('字幕にも大きさ・色・太さ・揃え・フォントを書ける（入口と同じ顔ぶれ）', () => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.subtitle } as never;
+    const r = setVisualClipContent(d, 'clip_001', { fontSize: 48, color: '#ff0000', fontWeight: 'bold', textAlign: 'center', fontId: 'gen-interface-jp' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc.clips[0].fontSize).toBe(48);
+  });
+});
+
+// 種別ごとの文字の形（差分再監査 5巡目 🟡）。
+//
+// ⚠️ **書き出しの門が数えるのに直せなかった**＝焼き出しが `scene.textFontIds` を見た目パターンの
+// 部品へ書き、`usedTimelineUserFontIds` が数えるので、持ち込みフォントが消えると**案内どおりに
+// 選び直す先がこの形式に無く**、書き出しが止まったまま解除できなかった（§2-5 の行き止まり）。
+describe('見た目パターンの部品の種別ごとの文字の形', () => {
+  const templateClip = (): TimelineProject => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_1' } as never;
+    return d;
+  };
+
+  it('種別ごとに書ける', () => {
+    const r = setVisualClipContent(templateClip(), 'clip_001', { textFontIds: { title: 'gen-interface-jp' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc.clips[0].textFontIds).toEqual({ title: 'gen-interface-jp' });
+  });
+
+  it('文字クリップには書けない（その種類が持つ項目だけを受ける）', () => {
+    expect(setVisualClipContent(doc(), 'clip_001', { textFontIds: { title: 'gen-interface-jp' } }).ok).toBe(false);
+  });
+});
+
+// ⚠️ **空の入れ物を残さない**（PR #914 レビュー ℹ️）＝場面形式と同じ正規化。残すと、見た目に変化の
+// 無い操作で取り消しが1段積まれ、同じ絵の文書が2通りできる。
+describe('種別ごとの文字の形を空にしたとき', () => {
+  const templateClip = (textFontIds?: object): TimelineProject => {
+    const d = doc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_1', ...(textFontIds ? { textFontIds } : {}) } as never;
+    return d;
+  };
+
+  it('未指定を書くとキーごと落ちる', () => {
+    const r = setVisualClipContent(templateClip({ title: 'gen-interface-jp' }), 'clip_001', { textFontIds: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect('textFontIds' in r.doc.clips[0]).toBe(false);
+  });
+
+  it('もともと無いところへ未指定を書いても、何も変わらない（空振りの取り消しを積まない）', () => {
+    const d = templateClip();
+    const r = setVisualClipContent(d, 'clip_001', { textFontIds: undefined });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.doc).toBe(d); // 同じ文書＝履歴に載らない
+  });
+});

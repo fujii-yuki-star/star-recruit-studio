@@ -38,7 +38,9 @@ beforeEach(() => {
     lib({ id: "lib_asset_002", displayName: "オフィス写真", assetType: ASSET_TYPE.image, tags: ["会社", "写真"] }),
     lib({ id: "lib_asset_003", displayName: "社員インタビュー", assetType: ASSET_TYPE.video, tags: ["採用"] }),
   ]);
-  useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => true) } as never);
+  // 取り込みは**入れる先がある**ときだけ押せる（動画を開いていない画面では押せない）ので、
+  // 既定では場面形式の動画を開いた状態にしておく（開いていない場合は個別のテストで作る）。
+  useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => true), meta: { projectId: "proj_20260101_001", projectName: "採用2026" } } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -317,6 +319,70 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
     await waitFor(() => expect(importFromLibraryT).toHaveBeenCalled());
     expect(screen.queryByText(/取り込みました/)).toBeNull();
+  });
+
+  // ⚠️ **入れる先が無いときは押せない**（差分再監査 5巡目 🟡）＝「素材」は動画を開いていなくても
+  // 開ける画面なので、押せると**画面に出ていない空の動画**が作られてそこへ入る（どこにも見えない）。
+  it("動画を開いていないときは取り込めず、理由を出す", async () => {
+    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [] } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("先に動画を開いてください");
+  });
+
+  it("タイムラインの欄では、タイムラインの動画が開いていれば押せる（場面形式は関係ない）", async () => {
+    useProjectStore.setState({ meta: { projectId: "", projectName: "" }, scenes: [] } as never);
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" },
+    } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).not.toBeDisabled();
+  });
+
+  it("タイムラインの動画を開いていないときは、タイムラインの欄でも取り込めない（双子）", async () => {
+    useTimelineStore.setState({ doc: null, importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" } } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("先に動画を開いてください");
+  });
+
+  // ⚠️ **判定材料は行き先の側から採る**（PR #913 レビュー）＝場面形式の状態を見ると、
+  // タイムラインが取り込み中・書き出し中でも押せて、中で静かに弾かれる。
+  it("タイムラインが取り込み中・書き出し中のときは、タイムラインの欄が押せない", async () => {
+    const doc = { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] };
+    useTimelineStore.setState({ doc, importFromLibrary: vi.fn(async () => true), isImporting: true, exportRun: { phase: "idle" } } as never);
+    const { unmount } = render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    expect(screen.getAllByRole("button", { name: "この動画で使う" })[0]).toBeDisabled();
+    unmount();
+    useTimelineStore.setState({ doc, importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "encoding" } } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    const btn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+    expect(btn).toBeDisabled();
+    expect(btn.title).toContain("書き出しが終わるまで");
+  });
+
+  // ⚠️ **どの欄から置けるかは種類で変わる**（差分再監査 5巡目 🟡）＝音は「素材・文字・図形を置く」の
+  // 候補に出ないので、種類を見ずに1文で言うと案内どおり探しても見つからない。
+  it("タイムラインへ音を取り込んだときは「音を置く」を案内する", async () => {
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" },
+    } as never);
+    vi.mocked(listLibraryAssets).mockResolvedValue([
+      lib({ id: "lib_asset_004", displayName: "会社のテーマ", assetType: ASSET_TYPE.bgm, tags: [] }),
+    ]);
+    render(<AssetLibraryPanel target="timeline" />);
+    fireEvent.click(await screen.findByRole("button", { name: "この動画で使う" }));
+    expect(await screen.findByText(/「音を置く」から置けます/)).toBeInTheDocument();
+    expect(screen.queryByText(/素材・文字・図形を置く/)).toBeNull();
   });
 
   it("タイムラインへ取り込めたら、その動画を名指しで知らせる", async () => {

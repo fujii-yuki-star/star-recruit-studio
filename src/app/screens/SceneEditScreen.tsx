@@ -64,7 +64,7 @@ import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessag
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
-import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
+import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -886,21 +886,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     // ⚠️ 見た目パターンが元から付けていないものを切に戻すと、選んだ色や角丸は残らない（＝上書きが
     // まるごと落ちる）。自由配置の同じ欄は値を覚えるが、**あちらは継承の無い持ち物**で、こちらは
     // 「触ったものだけ固有値」の上書き＝**モデルが違うので流儀も違う**（ADR-0026② の同概念ではない）。
-    const sameAsLayer = (a: object | undefined, b: object | undefined): boolean => {
-      const norm = (o: object | undefined) => o == null ? null
-        : JSON.stringify(Object.entries(o).filter(([, v]) => v !== undefined).sort(([x], [y]) => x < y ? -1 : 1));
-      return norm(a) === norm(b);
-    };
+    // この線引きは正典にも記録してある（`11 §5` の `textStyles` の行）＝次に同種の欄を作る人が
+    // 理由を見落とさないようにするため（コード内コメントだけに置かない）。
+    // ⚠️ **比べるのは「描かれる結果」**（差分再監査 5巡目 ℹ️）＝生の値で比べると、色を変えて
+    // 見た目パターンと同じ値へ戻したときに**絵は同じなのに上書きが残る**（「この場面だけ変更中」の
+    // 嘘＋以後この場面だけ追従しない）。判定は描画と同じ関数（`enabledShadow`/`bandBackground`）から
+    // 採る＝「どちらも描かれない」も同じ式で吸収できる（切のときの `{enabled:false}` と未指定）。
+    const sameDrawn = (a: object | undefined, b: object | undefined): boolean =>
+      JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
     const baseShadow = ov?.shadow ?? layer.shadow;
-    // 「見た目パターンと同じ」は**同じ値**か**どちらも描かれない**かの2通り（切のときは
-    // `{enabled:false}` と未指定が同じ絵になる）。描かれるかの判定は描画と同じ関数から採る（§2-7）。
     const putShadow = (v: TextShadow) =>
-      set({ shadow: sameAsLayer(v, layer.shadow) || (enabledShadow(v) == null && enabledShadow(layer.shadow) == null) ? undefined : v });
+      set({ shadow: sameDrawn(enabledShadow(v), enabledShadow(layer.shadow)) ? undefined : v });
     const setShadow = (p: Partial<TextShadow>) => putShadow({ ...baseShadow, ...p, enabled: true });
     const toggleShadow = (on: boolean) => putShadow({ ...baseShadow, enabled: on });
     const baseBand = ov?.background ?? layer.background;
     const putBand = (v: LayerBackground) =>
-      set({ background: sameAsLayer(v, layer.background) || (bandBackground(v) == null && bandBackground(layer.background) == null) ? undefined : v });
+      set({ background: sameDrawn(bandBackground(v), bandBackground(layer.background)) ? undefined : v });
     const setBand = (p: Partial<LayerBackground>) => putBand({ ...baseBand, ...p, enabled: true });
     const toggleBand = (on: boolean) => putBand({ ...baseBand, enabled: on });
     return (
@@ -961,8 +962,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <NumberField
             label="字間"
             value={ov?.letterSpacing ?? null}
-            min={-0.5}
-            max={2}
+            min={LETTER_SPACING_MIN}
+            max={LETTER_SPACING_MAX}
             step={0.05}
             placeholder={String(inherited.letterSpacing ?? 0)}
             onClear={() => set({ letterSpacing: undefined })}
@@ -1043,8 +1044,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <NumberField
           label="字間"
           value={el.letterSpacing ?? 0}
-          min={-0.5}
-          max={2}
+          min={LETTER_SPACING_MIN}
+          max={LETTER_SPACING_MAX}
           step={0.05}
           onChange={(v) => patchFreeEl(el.id, { letterSpacing: v })}
         />
@@ -1146,7 +1147,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.left} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
@@ -1269,7 +1270,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.center} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>

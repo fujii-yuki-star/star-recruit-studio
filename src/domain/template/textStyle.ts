@@ -172,6 +172,17 @@ export function bandBackground(bg: LayerBackground | undefined): ResolvedBand | 
 /** 影の既定（#264）。⚠️ **値の出どころは1か所**＝画面の初期値と描画がずれない（§2-7）。 */
 export const DEFAULT_SHADOW_COLOR = '#000000';
 export const DEFAULT_SHADOW_OPACITY = 0.5;
+/**
+ * 字間・行間の**入れられる範囲**（schema と同じ値・§2-7）。
+ *
+ * ⚠️ **画面ごとに書き写さない**（差分再監査 5巡目 🟡）＝同じ値が場面編集・タイムライン編集の計5か所に
+ * 散っていた。schema（`TextStyle`/`FreeElement`/`TimelineClip`）を動かすと**画面だけ黙ってずれる**。
+ */
+export const LETTER_SPACING_MIN = -0.5;
+export const LETTER_SPACING_MAX = 2;
+export const LINE_HEIGHT_MIN = 0.5;
+export const LINE_HEIGHT_MAX = 3;
+
 /** 背景帯の既定（#529 から引き継ぎ・`bandBackground` と同じ値）。 */
 export const DEFAULT_BAND_COLOR = '#000000';
 export const DEFAULT_BAND_OPACITY = 0.55;

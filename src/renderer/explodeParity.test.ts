@@ -394,6 +394,20 @@ describe('バラす前後で絵が変わらない', () => {
   });
 
   /**
+   * ⚠️ **受け皿は「要素が持っていないとき」だけ**（差分再監査 5巡目 🔴）＝部品の `fontId` は
+   * 種別ごとの指定（`textFontIds`）が無い文字の受け皿なので、**種別ごとに指定がある文字には
+   * 効かせない**。片方（要素が持たない側）しか固定していないと、優先順位が逆に壊れても
+   * 前後の絵の比較では気づけない（＝この一致テストが素通りする）。
+   */
+  it('種別ごとに文字の形を決めていたら、部品ぜんぶの指定で上書きしない', () => {
+    const before = doc({ clips: [clip({ fontId: 'kaitou-yokoku-gothic', textFontIds: { title: 'gen-interface-jp-display' } })] });
+    expect(drawn(exploded(before))).toEqual(drawn(before));
+    // 絵の比較だけでは「両方 `kaitou` になった」場合も一致しうるので、**実際に効いた字体**を見る。
+    const el = exploded(before).clips.find((c) => c.kind === 'text' && c.text != null);
+    expect(el?.fontId).toBe('gen-interface-jp-display');
+  });
+
+  /**
    * ⚠️ **切り抜いてある部品はバラせない**（決定23）＝切り抜きは**部品の箱ぜんぶ**を切るので、
    * 要素ごとに分けると**各要素が自分の箱で切られる**＝別の絵になる。写せないものは**断る**。
    */

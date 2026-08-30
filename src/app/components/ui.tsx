@@ -30,9 +30,11 @@ interface SwitchProps {
   onChange: (v: boolean) => void;
   label?: string;
   disabled?: boolean;
+  /** 押せない理由（§2-5＝押せないのに理由が出ない、を作らない）。`editGuard()` をそのまま展開できる形。 */
+  title?: string;
 }
 
-export function Switch({ on, onChange, label, disabled = false }: SwitchProps) {
+export function Switch({ on, onChange, label, disabled = false, title }: SwitchProps) {
   return (
     <button
       type="button"
@@ -40,6 +42,7 @@ export function Switch({ on, onChange, label, disabled = false }: SwitchProps) {
       aria-checked={on}
       aria-label={label}
       disabled={disabled}
+      title={title}
       className={`switch${on ? " on" : ""}`}
       style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
       onClick={() => onChange(!on)}

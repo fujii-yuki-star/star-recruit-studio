@@ -116,25 +116,46 @@ for (const p of project.parts) {
   }
 }
 if (project.bgmSettings?.assetId && !assetIds.has(project.bgmSettings.assetId)) fail(`bgm assetId ${project.bgmSettings.assetId} missing`);
-// 背景帯の形は3か所が**写し**（`$ref` 共有ではない＝11 §1 の流儀）。見た目パターンの層の帯は
-// 場面の体裁上書き（`TextStyle.background`）へも自由配置の要素（`FreeElement.background`）へも
-// **そのままコピーされる**（体裁欄の「引き継ぐ」・通常→FREE 移送＝ADR-0030）ので、片方だけ拡張すると
-// コピーした project.json が schema を外れる。**ずれた瞬間に落とす**（後から気づく形にしない）。
-const bandShapes = {
-  'template Layer.background': templateSchema.$defs.Layer.properties.background,
-  'project TextStyle.background': projectSchema.$defs.TextStyle.properties.background,
-  'project FreeElement.background': projectSchema.$defs.FreeElement.properties.background,
+// 文字の体裁のうち**`$ref` 共有ではなく写しになっているもの**を突き合わせる。
+//
+// 帯（`background`）は**4か所**が写し（見た目パターンの層／場面の体裁上書き／自由配置の要素／
+// タイムラインの部品）で、影（`shadow`）は見た目パターンの層だけが写し（他は `$defs/TextShadow` を指す）。
+// 見た目パターンの層の値は**そのままコピーされる**（体裁欄の「引き継ぐ」・通常→FREE 移送＝ADR-0030・
+// 焼き出し・バラす）ので、片方だけ拡張するとコピーした文書が schema を外れ、**自動保存が黙って
+// 書かれない**。**ずれた瞬間に落とす**（後から気づく形にしない）。
+// ⚠️ **説明文は比べない**（形の話ではない）／**キーの順番でも比べない**（並べ替えただけで落ちる検査は
+// そのうち信用されず無視される）。
+const timelineSchema = load(join(base, 'schemas/timeline-project.schema.json'));
+const shapeOnly = (v) => Array.isArray(v) ? v.map(shapeOnly)
+  : (v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).filter((k) => k !== 'description').sort().map((k) => [k, shapeOnly(v[k])]))
+    : v);
+const copySets = {
+  background: {
+    'template Layer.background': templateSchema.$defs.Layer.properties.background,
+    'project TextStyle.background': projectSchema.$defs.TextStyle.properties.background,
+    'project FreeElement.background': projectSchema.$defs.FreeElement.properties.background,
+    'timeline TimelineClip.background': timelineSchema.$defs.TimelineClip.properties.background,
+  },
+  shadow: {
+    'template Layer.shadow': templateSchema.$defs.Layer.properties.shadow,
+    'project TextShadow': projectSchema.$defs.TextShadow,
+  },
 };
-// ⚠️ **キーの順番では比べない**（並べ替えただけで落ちると、検査が信用されず無視されるようになる）。
-const stable = (v) => Array.isArray(v) ? v.map(stable)
-  : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])])) : v);
-const bandBase = JSON.stringify(stable(bandShapes['template Layer.background']));
-let bandOk = true;
-for (const [name, shape] of Object.entries(bandShapes)) {
-  if (JSON.stringify(stable(shape)) !== bandBase) { bandOk = false; console.log(`  ${name} が他とずれています`); }
+// ⚠️ **判定は群ごとに持つ**（PR #914 レビュー 🟡）＝1つの変数を使い回すと、先に落ちた群のせいで
+// **一致している群まで FAIL と表示**され、直す先を間違わせる（この検査が防ぐと謳っているもの）。
+let copyOk = true;
+for (const [what, shapes] of Object.entries(copySets)) {
+  const entries = Object.entries(shapes);
+  const baseJson = JSON.stringify(shapeOnly(entries[0][1]));
+  let groupOk = true;
+  for (const [name, shape] of entries) {
+    if (JSON.stringify(shapeOnly(shape)) !== baseJson) { groupOk = false; console.log(`  ${name} が他とずれています`); }
+  }
+  console.log(`${groupOk ? 'PASS' : 'FAIL'}  shape  ${what} の形が${entries.length}か所で一致`);
+  copyOk = copyOk && groupOk;
 }
-console.log(bandOk ? 'PASS  shape  background の形が3か所で一致' : 'FAIL  shape  background の形が3か所で一致');
-ok = ok && bandOk;
+ok = ok && copyOk;
 
 console.log(sem ? 'PASS  semantic  project.sample cross-refs' : 'FAIL  semantic  project.sample cross-refs');
 ok = ok && sem;

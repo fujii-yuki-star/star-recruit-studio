@@ -481,6 +481,10 @@ export interface TimelineState {
     fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
     /** 字間・影（#264 の共有の語彙＝両形式で触れる・差分再監査 3巡目）。 */
     letterSpacing?: number; shadow?: TextShadow; background?: LayerBackground; lineHeight?: number;
+    /** 縁取り（差分再監査 5巡目＝バラした文字に残る縁取りを外せるようにする）。 */
+    strokeColor?: string; strokeWidth?: number;
+    /** 種別ごとの文字の形（見た目パターンの部品＝焼き出しが書き、書き出しの門が数える）。 */
+    textFontIds?: Partial<Record<TextKey, FontId>>;
     shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
   }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
@@ -1237,6 +1241,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       await importAssetByPath(get().doc!.projectId, fileName, path));
   },
   importFromLibrary: async (libraryAssetId) => {
+    // ⚠️ **開いている動画は最初の await の前に控える**（差分再監査 5巡目 🟡）＝一覧を読んでいる間にも
+    // 別の動画を開けるので、控えないと**押した動画ではなく後から開いた動画へ入る**（場面形式は
+    // `sameDocGuard` で同じ窓を塞いでいる＝形式で守りを割らない）。
+    const started = get().doc?.projectId ?? null;
     const list = await listLibraryAssets();
     if (list == null) {
       set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
@@ -1244,13 +1252,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     const lib = list.find((a) => a.id === libraryAssetId);
     if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return false; }
-    // ⚠️ **名前は棚のものを使う**＝取り込んだ先で「どれを入れたか」が分かる（拡張子は棚のファイル名から）。
-    const before = get().doc?.assets.length ?? 0;
-    await runImport(set, get, lib.fileName, async (fileName) =>
-      await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName));
-    // ⚠️ **入ったかは素材が増えたかで見る**（`runImport` は成否を返さない）＝断られた（書き出し中・
-    // 取り込み中）ときも失敗したときも増えないので、**成功を騙らない**。
-    return (get().doc?.assets.length ?? 0) > before;
+    if (started == null || get().doc?.projectId !== started) return false;
+    // ⚠️ **棚の名前・種類・タグを引き継ぐ**（ADR-0035 決定3・差分再監査 5巡目 🔴）＝ファイル名から
+    // 作り直すと、棚のファイル名は `lib_asset_NNN.png` なので**機械の番号が素材名として画面に出る**うえ、
+    // 種類（ロゴ）とタグも黙って落ちる（場面形式は `assetFromLibrary` で3つとも持ち込む＝ADR-0026②）。
+    // 採番だけは**この形式の規則**（番号を使い回さない＝`reserveAssetId`）に従うので予約IDを渡す。
+    const added = await runImport(set, get, lib.fileName, async (fileName) =>
+      await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName),
+      (reservedId) => assetFromLibrary(lib, [], reservedId));
+    // ⚠️ **入ったかは「足した素材の番号が返ったか」で見る**（差分再監査 5巡目）＝件数の増減で見ると、
+    // 待っている間の取り消し・別経路の着地を拾って**成功を騙る／知らせが出ない**。
+    return added != null;
   },
 
   ensureClipAnalysis: (clipId, barWidthPx) => {
@@ -1886,13 +1898,18 @@ async function runImport(
   get: GetState,
   sourceName: string,
   copy: (fileName: string, assetType: AssetType) => Promise<string | null>,
-): Promise<void> {
+  /**
+   * 素材の作り方の差し替え（棚から取り込むときは**棚の名前・種類・タグを引き継ぐ**＝ADR-0035 決定3）。
+   * 既定はファイル名から作る（アプリの外から取り込む経路）。
+   */
+  build?: (reservedId: string) => { asset: Asset; fileName: string },
+): Promise<string | null> {
   const doc = get().doc;
-  if (!doc || !canStartImport(set, get)) return;
+  if (!doc || !canStartImport(set, get)) return null;
   // **番号は使い回さない**（`reserveAssetId`）＝取り消し・開き直しで文書から消えても、その番号のファイルは
   // ディスクに残っている。空き番号を埋めると**同じ名前のファイルを上書きして前の写真が消える**。
   const assetId = reserveAssetId(doc.projectId, doc.assets.map((a) => a.assetId), createAssetId);
-  const { asset, fileName } = newAssetFrom(sourceName, [], assetId);
+  const { asset, fileName } = build ? build(assetId) : newAssetFrom(sourceName, [], assetId);
   set({ isImporting: true, importError: null });
   try {
     const savedPath = await copy(fileName, asset.assetType);
@@ -1906,12 +1923,12 @@ async function runImport(
     // （2か所に置くと、片方を消しても、もう片方が拾ってしまい**壊れていることに気づけない**）。
     // 表示先だけ書くのも駄目（文書に無い素材の絵が残り、次に同じ番号が来たときそれが出る）。
     const cur = get().doc;
-    if (!cur || cur.projectId !== doc.projectId) return;
+    if (!cur || cur.projectId !== doc.projectId) return null;
     // 待っている間に書き出しが始まっていたら、`commit` は足さずに戻る。**そこで気づけるように**先に断る
     // ＝「終わってから編集してください」だけ出して取り込みが消えた、を作らない（§2-5・#570 P1 と同じ流儀）。
     if (isTimelineExportBusy(get().exportRun.phase)) {
       set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
-      return;
+      return null;
     }
     const full: Asset = { ...asset, filePath: relPath, ...(enrich?.metadata ? { metadata: enrich.metadata } : {}), ...(enrich?.thumbnailPath ? { thumbnailPath: enrich.thumbnailPath } : {}) };
     // **いまの文書へ足す**（取り込んでいる間の編集を巻き戻さない）。取り消しできる＝文書まるごとの履歴に載る。
@@ -1930,9 +1947,12 @@ async function runImport(
     }
     // 自動保存は**画面**が持っているので、離れた後に着地したぶんは誰も書かない＝ここで自分から保存する。
     void get().saveTimelineProject();
+    // 足せた番号を返す＝呼び出し側が**件数ではなく同一性**で成否を見られる（成功を騙らない）。
+    return asset.assetId;
   } catch (e) {
     // 足す前に断るので、戻すものは無い（一覧に幽霊を作らない）。触っていない動画へは出さない。
     if (get().doc?.projectId === doc.projectId) set({ importError: importErrorMessage(e) });
+    return null;
   } finally {
     // 取り込みの鍵は**始めた動画のもの**＝別の動画を開いた後に外さない（そちらの取り込みを止めてしまう）。
     if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
