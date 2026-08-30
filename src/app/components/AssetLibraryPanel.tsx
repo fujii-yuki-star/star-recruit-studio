@@ -108,13 +108,18 @@ export function AssetLibraryPanel() {
   const working = busy || isImporting || isExporting;
   const importBlocked = working || timelineOpen;
   // 押せない理由は必ず添える（押せないのに理由が出ない、を作らない＝§2-5・`MaterialsScreen` と同じ文言）。
+  // ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝タイムラインの理由を共通の
+  // `title` に混ぜると、**押せる**「置く」「名前・種類・タグ」「外す」にも「取り込めません」と出て、
+  // 実際にできる操作に対して**間違った次の行動**を示すことになる（§2-5）。
+  /** 棚の操作（置く・直す・外す）が押せない理由。 */
   const blockedReason = isExporting
     ? "書き出しが終わるまでお待ちください"
     : isImporting
       ? "いま取り込んでいます"
-      : timelineOpen
-        ? "タイムラインで作った動画へは、ここからは取り込めません"
-        : undefined;
+      : undefined;
+  /** 取り込み（この動画で使う）だけの理由＝行き先が違うときも押せない。 */
+  const importBlockedReason = blockedReason
+    ?? (timelineOpen ? "タイムラインで作った動画へは、ここからは取り込めません" : undefined);
   const shown = filterLibraryAssets(items, { text, tags, assetType });
   const allTags = libraryTags(items);
 
@@ -351,7 +356,7 @@ export function AssetLibraryPanel() {
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}
                 </span>
-                <button type="button" className="btn btn-secondary" disabled={importBlocked} title={blockedReason} onClick={() => void onImport(a)}>
+                <button type="button" className="btn btn-secondary" disabled={importBlocked} title={importBlockedReason} onClick={() => void onImport(a)}>
                   この動画で使う
                 </button>
                 <button

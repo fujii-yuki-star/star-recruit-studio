@@ -15,6 +15,7 @@ vi.mock("../../infrastructure/dialog", () => ({ showOpenLibraryAssetsDialog: vi.
 import { AssetLibraryPanel } from "./AssetLibraryPanel";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import { addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
@@ -37,7 +38,8 @@ beforeEach(() => {
     lib({ id: "lib_asset_002", displayName: "オフィス写真", assetType: ASSET_TYPE.image, tags: ["会社", "写真"] }),
     lib({ id: "lib_asset_003", displayName: "社員インタビュー", assetType: ASSET_TYPE.video, tags: ["採用"] }),
   ]);
-  useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => {}) } as never);
+  useProjectStore.setState({ isImporting: false, importFromLibrary, brandKit: {}, updateBrandKit: vi.fn(async () => true) } as never);
+  useTimelineStore.setState({ doc: null } as never);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -282,5 +284,24 @@ describe("AssetLibraryPanel", () => {
     await waitFor(() =>
       expect(updateLibraryAsset).toHaveBeenCalledWith("lib_asset_002", "オフィス写真", ["会社", "写真"], ASSET_TYPE.logo),
     );
+  });
+
+  /**
+   * ⚠️ **取り込み先は場面形式の動画**（差分再監査 3巡目 🟡）＝タイムラインを開いている間に押すと、
+   * **画面に映っていない別の文書**へ入る（場面形式が未オープンなら新しい動画の番号まで採る）。
+   * ⚠️ **理由は押せない相手にだけ添える**（PR #912 レビュー 🟡）＝棚の操作（置く・直す・外す）は
+   * 通すので、そちらに「取り込めません」が出ると**間違った次の行動**を示すことになる。
+   */
+  it("タイムラインを開いている間は「この動画で使う」だけ押せない（理由も取り込みにだけ添える）", async () => {
+    useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    const importBtn = screen.getAllByRole("button", { name: "この動画で使う" })[0];
+    expect(importBtn).toBeDisabled();
+    expect(importBtn).toHaveAttribute("title", "タイムラインで作った動画へは、ここからは取り込めません");
+    // 棚の操作は通す＝押せるものに取り込みの理由を出さない。
+    const place = screen.getByRole("button", { name: /素材を置く/ });
+    expect(place).not.toBeDisabled();
+    expect(place).not.toHaveAttribute("title");
   });
 });

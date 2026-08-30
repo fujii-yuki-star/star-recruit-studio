@@ -225,8 +225,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
         <hr className="divider" />
         {/* ⚠️ **どの動画に入るかを名指しする**（差分再監査 3巡目）＝開いている文書が2種類あるので、
             「いま開いている動画」だけでは**どちらのことか分からない**。 */}
+        {/* ⚠️ **名指しと断りを食い違わせない**（PR #912 レビュー 🟡）＝場面形式とタイムラインは
+            **同時に開いていられる**ので、`hasProject` だけで名前を出すと「「◯◯」に反映する」の
+            直後に「反映できません」が並ぶ。名指しは**反映できるときだけ**にする。 */}
         <span className="field-label">
-          {hasProject && projectName ? `「${projectName}」に反映する` : "いま開いている動画に反映する"}
+          {!timelineOpen && hasProject && projectName ? `「${projectName}」に反映する` : "いま開いている動画に反映する"}
         </span>
         {timelineOpen ? (
           // ⚠️ **対象を名指しする**＝いま見ているのはタイムラインの動画なので、反映先が違うことを言う。
