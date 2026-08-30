@@ -92,7 +92,10 @@ export function FontPicker({
         type="button"
         className="select"
         disabled={disabled}
-        title={missing ? `${title ? `${title} / ` : ""}指定：${currentId}` : title}
+        // ⚠️ **内部の綴りを出さない**（α-6 出口監査 🟡・§2-3）＝可視テキストからは外したのに
+        // ホバーには `user_font_NNN` がそのまま出ていた。素材・見た目パターンの「見つからない」表示と
+        // 同じ流儀（種別と状態だけ・識別子は出さない）にそろえる。
+        title={missing ? `${title ? `${title} / ` : ""}${MISSING_LABEL}` : title}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}

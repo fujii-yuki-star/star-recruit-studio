@@ -124,6 +124,22 @@ export const ASSET_TYPES = [
 export type AssetType = (typeof ASSET_TYPES)[number];
 
 /**
+ * 素材の種類の**受け入れ判定をテストで突き合わせる入力**（α-6 出口監査 🟡）。
+ *
+ * ⚠️ **同じ一覧が Rust 側（`is_known_asset_type`）にもある**＝境界で形を見るのに要る。
+ * Rust 側のコメントは「テストで同値性を固定する」と書いているのに**その固定が無かった**ので、
+ * `LIBRARY_ASSET_ID_SAMPLES` と同じ流儀でここに入力を置き、両側のテストが同じ答えになることを見る。
+ * ⚠️ **ずれると「選んだ種類を黙って捨てる」**（`update_library_asset` は知らない値を書かない）。
+ */
+export const ASSET_TYPE_SAMPLES: readonly string[] = [
+  ...ASSET_TYPES,
+  'Image', // 大文字
+  'audio', // 似ているが別の語
+  'movie',
+  '', // 空
+];
+
+/**
  * 素材の種類として受けてよい値か（α-6 出口監査 ℹ️）。
  *
  * ⚠️ **型を狭める述語にしてある**＝呼ぶ側が `as AssetType` を書かずに済む（キャストは検査を素通り

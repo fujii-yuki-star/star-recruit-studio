@@ -155,7 +155,7 @@ export type ExportStartBlock = {
  * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
  */
 /**
- * 新しいタイムライン動画へ**会社のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ * 新しいタイムライン動画へ**会社の見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
  *
  * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
  * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
@@ -170,7 +170,7 @@ async function withBrandLogo(
   try {
     const list = await listLibraryAssets();
     if (list == null) {
-      return { doc, error: "よく使う素材の一覧を読めませんでした。会社のロゴは入っていません。" };
+      return { doc, error: "よく使う素材の一覧を読めませんでした。会社の見た目のロゴは入っていません。" };
     }
     const lib = list.find((a) => a.id === logoLibraryAssetId);
     if (!lib) return { doc, error: "会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください。" };
@@ -179,7 +179,7 @@ async function withBrandLogo(
     return { doc: { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] }, added: { assetId: asset.assetId, relPath } };
   } catch {
     // ⚠️ **黙って落とさない**（差分再監査 3巡目 ℹ️・§2-5）＝場面形式は同じ状況で理由を出す。
-    return { doc, error: "会社のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
+    return { doc, error: "会社の見た目のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
   }
 }
 

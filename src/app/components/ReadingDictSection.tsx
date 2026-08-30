@@ -225,8 +225,11 @@ export function ReadingDictSection() {
       await overwriteConflict(c.entry, c.engine.uuid);
       setConflicts((list) => list.filter((x) => x.entry.surface !== c.entry.surface));
       setNotice(`「${c.entry.surface}」の読み方を音声ソフトへ反映しました。`);
-    } catch {
-      setError("音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
+    } catch (e) {
+      // ⚠️ **理由を捨てない**（α-6 出口監査 ℹ️）＝この経路は辞書ファイルの読み書きも通るので、
+      // 常に接続先を疑わせると**従っても直らない案内**になる（同ファイルの `persist`／`onListen` は直済み）。
+      setError(typeof e === "string" ? e
+        : "音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
     }
   }
 

@@ -9,7 +9,7 @@ import {
   LIBRARY_ASSET_ID_SAMPLES,
   type LibraryAsset,
 } from './assetLibrary';
-import { ASSET_TYPE } from '../enums';
+import { ASSET_TYPE, ASSET_TYPES, ASSET_TYPE_SAMPLES } from '../enums';
 
 const lib = (over: Partial<LibraryAsset> = {}): LibraryAsset => ({
   id: 'lib_asset_001',
@@ -171,5 +171,21 @@ describe('assetFromLibrary の採番', () => {
       ['asset_001', 'asset_002'],
     );
     expect(asset.assetId).toBe('asset_003');
+  });
+});
+
+// ⚠️ **素材の種類の一覧も両側で同じ答えにする**（α-6 出口監査 🟡）＝Rust 側のコメントは
+// 「テストで同値性を固定する」と書いているのに、その固定が無かった。ずれると
+// `update_library_asset` が**選んだ種類を黙って捨てる**（知らない値は書かない）。
+describe('ASSET_TYPE_SAMPLES（Rust と同じ答えになることの入力）', () => {
+  it('既知の種類は受ける・それ以外は受けない', () => {
+    const expected: Record<string, boolean> = {
+      image: true, video: true, bgm: true, voice: true, yuko: true, decor: true, logo: true, qr: true,
+      Image: false, audio: false, movie: false, '': false,
+    };
+    expect(ASSET_TYPE_SAMPLES).toHaveLength(Object.keys(expected).length);
+    for (const v of ASSET_TYPE_SAMPLES) {
+      expect([v, (ASSET_TYPES as readonly string[]).includes(v)]).toEqual([v, expected[v]]);
+    }
   });
 });

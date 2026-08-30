@@ -417,9 +417,20 @@ tlAccept.push(
   ['timeline: 持ち込みフォントを許容＝`$ref` で追従している（1.26・#261）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_001' })],
   ['timeline: 同梱フォントも従来どおり許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'gen-interface-jp' })],
   ['timeline: 動画全体の文字の形にも持ち込みを許容（videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, fontId: 'user_font_002' } })],
+  // ⚠️ **同じ `$ref` 共有の兄弟も固定する**（α-6 出口監査 🟡）＝`fontId` だけ固定して
+  // `creditDisplay`（1.28）・`audioAuto`（1.29）を空けておくと、写しが生まれた瞬間に無検知で割れる
+  //（この検査を足した理由がそのまま当てはまる＝片方の双子だけ検証）。
+  ['timeline: クレジットの見せ方を許容（1.28・videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'both', seconds: 3 } } })],
+  ['timeline: 音の自動処理を許容（1.29・同上）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckBgm: true, duckDepth: 0.6, normalize: true, targetLufs: -16 } } })],
 );
 
 const tlReject = [
+  // ⚠️ **`$ref` 共有の兄弟も拒否側で固定する**（α-6 出口監査 🟡）＝受け入れだけだと、
+  // 写しが生まれて**制約が緩んだ**ときに気づけない。
+  ['timeline: クレジットの未知の見せ方は拒否（1.28・$ref 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'sometimes' } } })],
+  ['timeline: クレジットの秒が範囲外(11)は拒否（1.28）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'head', seconds: 11 } } })],
+  ['timeline: 音の下げ幅が範囲外(1.5)は拒否（1.29）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckDepth: 1.5 } } })],
+  ['timeline: 音の自動処理の未知フィールドは拒否（1.29・additionalProperties:false）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckWhatever: true } } })],
   ['timeline: 元の音の音量が範囲外(2.0)は拒否（値域は場面形式と共有＝$ref・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', originalAudioVolume: 2.0 })],
   ['timeline: 元の音を鳴らすかが真偽でないのは拒否（#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: 'yes' })],
   ['timeline: 音量の変化が空配列は拒否（#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [] })],

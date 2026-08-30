@@ -592,11 +592,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           ? "書き出しが終わるまでお待ちください"
                           : openingId !== null
                             ? "プロジェクトを開いています…"
-                            : pendingAction !== null || confirmNew
-                              ? "確認に答えてから操作できます"
-                              : isTimelineProjectDoc({ format: p.format })
-                                ? "タイムラインで作った動画はまだ複製できません"
-                                : "複製（素材と声ごとコピーします）"
+                            // ⚠️ **押せない枝の理由を落とさない**（α-6 出口監査 🟡）＝複製中も押せなく
+                            // なるのに理由の分岐が無く、**実行内容の説明が出続けて**いた（同じ行の「開く」は
+                            // 同じ状態で「コピーしています…」と言う＝同じ状態に断り方が2通り）。
+                            : duplicatingId !== null
+                              ? "コピーしています…"
+                              : pendingAction !== null || confirmNew
+                                ? "確認に答えてから操作できます"
+                                : isTimelineProjectDoc({ format: p.format })
+                                  ? "タイムラインで作った動画はまだ複製できません"
+                                  : "複製（素材と声ごとコピーします）"
                       }
                     >
                       <CopyIcon size={18} />
