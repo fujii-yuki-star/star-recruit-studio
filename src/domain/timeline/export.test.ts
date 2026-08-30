@@ -5,7 +5,8 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable } from './export';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable, duckFactorPointCount } from './export';
+ import { duckingFactorPoints, resolveAudioAuto } from '../voice/audioAuto';
 import { frameTimeSec } from './persistence';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -690,5 +691,44 @@ describe('timelineImageAssetIds：立ち絵に入れた動画', () => {
 
   it('見た目パターンを渡さないときは、実フレームで描くと判じない（代表フレームを要求する）', () => {
     expect(timelineImageAssetIds(withPose())).toEqual(['asset_pose']);
+  });
+});
+
+// ⚠️ **門の見積りが実際の点数を下回らない**（PR #922 レビュー ℹ️）＝下回ると、上限を超える
+// 組み合わせを素通しして「何度やっても成功しない案内」に落ちる。`duckingFactorPoints` の実値と突き合わせる。
+describe('ダッキングの点数の見積り', () => {
+  const voiceWithPath = (id: string, startSec: number, durationSec = 1): TimelineClip =>
+    voiceClip(id, { startSec, durationSec, voice: { text: 'あ', status: 'generated', voicePath: `voices/${id}.wav` } } as never);
+  const build = (n: number, gap: number, auto: Record<string, unknown>): TimelineProject => doc({
+    clips: [
+      clip('clip_bgm', { kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 500, assetId: 'asset_bgm' } as never),
+      ...Array.from({ length: n }, (_, i) => voiceWithPath(`clip_v${i}`, i * gap)),
+    ],
+    assets: [{ assetId: 'asset_bgm', assetType: 'bgm', displayName: 'BGM', filePath: 'assets/b.mp3' }],
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, audioAuto: { duckBgm: true, ...auto } },
+  } as never);
+
+  for (const [name, n, gap, auto] of [
+    ['間が広い（まとめない）', 5, 10, {}],
+    ['立ち上がりが0（端の点が重なる）', 5, 10, { duckAttackSec: 0 }],
+    ['戻りも0（各区間が2点に縮む）', 5, 10, { duckAttackSec: 0, duckReleaseSec: 0 }],
+    ['間が狭い（まとめる）', 8, 1.2, {}],
+    ['先頭が0秒（先頭へ戻す点が要らない）', 3, 10, { duckAttackSec: 0 }],
+  ] as [string, number, number, Record<string, unknown>][]) {
+    it(`実際の点数を下回らない：${name}`, () => {
+      const d = build(n, gap, auto);
+      const resolved = resolveAudioAuto(d.videoSettings.audioAuto);
+      const spans = d.clips
+        .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice)
+        .map((c) => ({ startSec: c.startSec, endSec: c.startSec + c.durationSec }));
+      const actual = duckingFactorPoints(spans, { startSec: 0, endSec: 500 }, resolved).length;
+      expect(duckFactorPointCount(d)).toBeGreaterThanOrEqual(actual);
+    });
+  }
+
+  it('下げない設定なら0（数え過ぎて書き出せるものを断らない）', () => {
+    const d = build(5, 10, {});
+    (d.videoSettings as unknown as Record<string, unknown>).audioAuto = { duckBgm: false };
+    expect(duckFactorPointCount(d)).toBe(0);
   });
 });
