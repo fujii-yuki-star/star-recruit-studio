@@ -104,7 +104,15 @@ export function addFreeElement(
 export function updateFreeElement(
   freeLayout: FreeElement[], id: string, patch: Partial<Omit<FreeElement, 'id' | 'kind'>>,
 ): FreeElement[] {
-  return freeLayout.map((e) => (e.id === id ? { ...e, ...patch } : e));
+  return freeLayout.map((e) => {
+    if (e.id !== id) return e;
+    const next = { ...e, ...patch } as Record<string, unknown>;
+    // ⚠️ **未指定はキーごと落とす**（差分再監査 10巡目）＝素の spread だと**値なしのキーが残り**、
+    // 保存では消えるのにその場の文書には残る＝同じ絵の文書が2通りできる（`setVisualClipContent`
+    // と同じ流儀）。「継承へ戻す」を `undefined` で表す入口（フォント）が増えたので、受け側でそろえる。
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k];
+    return next as unknown as FreeElement;
+  });
 }
 
 /** 指定 id の要素を取り除いた配列を返す。 */

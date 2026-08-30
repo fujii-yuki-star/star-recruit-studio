@@ -457,7 +457,7 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("見出しのフォント")).toBeInTheDocument();
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
-    expect(screen.getByText(/この見た目パターンの文字は自由配置で置きます/)).toBeInTheDocument();
+    expect(screen.getByText(/この見た目パターンの文字は、ここでフォントだけ選べます/)).toBeInTheDocument();
   });
 
   // ⚠️ **書き出しを止めている理由も畳める場所に置かない**（差分再監査 9巡目 🟡）＝
@@ -470,10 +470,28 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
       assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
     });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    const notice = screen.getByText(/今の見た目が見つかりません。下の/);
+    // ⚠️ **候補ゼロなら「選び直して」と言わない**（差分再監査 10巡目 🟡）＝実行できない次の行動。
+    // 節の外の断りは `role="alert"`（節の中の同じ文言と取り違えない）。
+    const notice = screen.getByRole("alert");
+    expect(notice.textContent).toContain("今の見た目が見つかりません。この向き・場面に合う見た目パターンがまだありません。");
     expect(notice.closest("details")).toBeNull();
     // ⚠️ **存在しない見た目について語らない**＝別の次の行動が並ぶ。
     expect(screen.queryByText("この見た目パターンは文字を表示しません。")).toBeNull();
+  });
+
+  // ⚠️ **調べていない ≠ 使っていない**（差分再監査 10巡目 🟡）＝見た目が見つからないと「使っているか」は
+  // 分からない。「使っていない」と言って戻させると、見た目が戻った時点で**字体が黙って変わる**。
+  it("見た目が見つからない場面では「使っていない」と言わない", () => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene({ textFontIds: { title: "gen-interface-jp" } } as Partial<Scene>)],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("見出しのフォント")).toBeInTheDocument(); // 直せることは変えない
+    expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
+    expect(screen.getByText(/見た目が見つからないので、どの文字に使っているかは分かりません/)).toBeInTheDocument();
   });
 
   it("指定が1つも無ければ知らせを出さない（片づける対象が無いのに片づけを勧めない）", () => {
@@ -529,6 +547,20 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     expect(els.find((e) => e.id === "free_001")!.fontId).toBe("gen-interface-jp"); // 他は不変
   });
 
+  // ⚠️ **継承へ戻すとキーごと落ちる**（差分再監査 9巡目 ℹ️）＝`null` を残すと同じ絵の文書が2通りできる。
+  it("「動画全体に合わせる」へ戻すと、キーごと落ちる（null を残さない）", () => {
+    openScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as Partial<Scene>);
+    const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
+    const field = within(hint.parentElement as HTMLElement).getByText(/のフォント$/).closest("div") as HTMLElement;
+    fireEvent.click(field.querySelector("button.select") as HTMLElement);
+    const option = [...field.querySelectorAll("button")].find(
+      (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith("動画全体に合わせる"),
+    ) as HTMLElement;
+    fireEvent.click(option);
+    const el = useProjectStore.getState().scenes[0].freeLayout![0];
+    expect("fontId" in el).toBe(false);
+  });
+
   it("フォントの指定が無い要素は並べない", () => {
     openScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ" }] } as Partial<Scene>);
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
@@ -539,5 +571,35 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     openScene({ textFontIds: { subtitle: "gen-interface-jp" } } as Partial<Scene>);
     const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
     expect(hint.closest("details")).toBeNull();
+  });
+});
+
+// 見た目が見つからない場面の見せ方（差分再監査 10巡目）。
+describe("SceneEditScreen 見た目が見つからない場面", () => {
+  const openUnresolved = (): void => {
+    useProjectStore.setState({
+      templates: [],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene()],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+  };
+
+  // ⚠️ **空の入れ物を残さない**＝中身が空になるだけの節が残り、理由は節の外にある。
+  it("「文字」の節そのものを出さない", () => {
+    openUnresolved();
+    expect(screen.queryByText("文字")).toBeNull();
+  });
+
+  it("見た目が解決できていれば「文字」の節は出る", () => {
+    useProjectStore.setState({
+      templates: [tpl],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [baseScene()],
+      assets: [], editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("文字")).toBeInTheDocument();
   });
 });
