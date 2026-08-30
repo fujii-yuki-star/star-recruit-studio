@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, DUCK_MERGED_MESSAGE, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -7108,5 +7108,36 @@ describe("立ち絵に入れた動画のプレビュー", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("ゆうこ（立ち絵）の動画の音")).toBeInTheDocument();
     expect(screen.getByText("この動画に入っている音を流す")).toBeInTheDocument();
+  });
+});
+
+// BGM を下げる区間を**つないだ**ことは、場面形式と同じように**タイムライン形式でも言う**
+//（ADR-0026②・§2-5＝黙ってやると設定した意味と違う音になる）。ドメイン側の `duckMerged` の
+// 算出は `export.test.ts` で固定済みなので、ここで見るのは**画面まで配線されているか**だけ
+//（PR #922 範囲4 レビュー ℹ️＝配線のカバレッジが薄い）。
+describe("TimelineProjectScreen: BGM を下げる区間をつないだ知らせ", () => {
+  const done = (duckMerged: boolean) => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    useTimelineStore.setState({ exportRun: { phase: "done", percent: 100, message: "書き出しました。", cancelling: false, duckMerged } as never });
+  };
+
+  it("つないだときは出る（文言は場面形式と同じもの）", () => {
+    done(true);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(DUCK_MERGED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("つないでいないときは出さない（毎回出すと意味が薄れる）", () => {
+    done(false);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(DUCK_MERGED_MESSAGE)).toBeNull();
+  });
+
+  it("書き出しの途中では出さない（まだ結果が出ていない）", () => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    useTimelineStore.setState({ exportRun: { phase: "running", percent: 50, message: null, cancelling: false, duckMerged: true } as never });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(DUCK_MERGED_MESSAGE)).toBeNull();
+    useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
   });
 });
