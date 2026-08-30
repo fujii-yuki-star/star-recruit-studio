@@ -7059,3 +7059,54 @@ describe("動画全体の設定の空振り", () => {
     expect(useTimelineStore.getState().history.past.length).toBe(before);
   });
 });
+
+// 立ち絵に入れた動画（#809・α-6 出口監査 🔴1）。
+//
+// ⚠️ **プレビューが当てるアイテムを役割で絞ると、立ち絵は必ず外れる**（立ち絵のアイテムは
+// `role:'character'`）＝プレビューは静止・元の音も無音なのに、書き出しは実映像＋元の音になる
+// （ADR-0001 の破れ）。domain 側の鍵の一致だけでなく、**画面の経路**も固定する。
+describe("立ち絵に入れた動画のプレビュー", () => {
+  const charTemplate: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_char", name: "立ち絵つき", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: "bg", type: "background", x: 0, y: 0, w: 1920, h: 1080 },
+      { id: "yuko", type: "character", x: 960, y: 0, w: 960, h: 1080 },
+    ],
+  } as unknown as Template;
+
+  const openWithPose = (): void => {
+    useProjectStore.setState({ templates: [charTemplate] });
+    open({
+      assets: [{ assetId: "asset_pose", assetType: "video", displayName: "立ち絵動画", filePath: "p.mp4", metadata: { hasAudio: true } }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 5, templateId: "tmpl_char",
+        character: { enabled: true, characterId: "yuko", poseAssetId: "asset_pose" },
+      }],
+    } as never);
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { asset_pose: "blob:thumb_pose" },
+        videoSrcById: { asset_pose: "blob:body_pose" },
+      });
+    });
+  };
+
+  it("実映像の窓が開く（代表フレームで静止させない）", () => {
+    openWithPose();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const videos = [...container.querySelectorAll(".preview-stage video")] as HTMLVideoElement[];
+    expect(videos).toHaveLength(1);
+    expect(videos[0].getAttribute("src")).toBe("blob:body_pose");
+  });
+
+  // ⚠️ **元の音の欄も出す**＝差し込み口だけに絞ると、書き出しにだけ効く設定になる。
+  it("元の音の欄が出る（書き出しにだけ効く設定を作らない）", () => {
+    openWithPose();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("ゆうこ（立ち絵）の動画の音")).toBeInTheDocument();
+    expect(screen.getByText("この動画に入っている音を流す")).toBeInTheDocument();
+  });
+});

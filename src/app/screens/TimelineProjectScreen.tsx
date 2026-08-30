@@ -19,7 +19,7 @@ import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/ke
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
-import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
+import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
@@ -2555,6 +2555,48 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     || enabledShadow(c.shadow) != null || bandBackground(c.background) != null;
 
   /**
+   * 置き場所に入れた動画の**元の音**の欄（#512 段3b・α-6 出口監査 🔴）。
+   *
+   * ⚠️ **差し込み口と立ち絵で同じ欄を出す**＝立ち絵も置き場所なので、差し込み口だけに出すと
+   * **書き出しにだけ効く設定**になる（使い方の入れ物 `slotClips` も解決 `resolveSlotClip` も共有）。
+   * ⚠️ **音の入った動画が入っている置き場所にだけ出す**＝押せない欄を並べない。
+   * 音が無い／確かめられないときは、直接置きと同じ2文で理由を出す（§2-5）。
+   */
+  const renderPlacementAudio = (p: { layerId: string | null; useOriginalAudio: boolean; originalAudioVolume: number } | undefined) => {
+    if (!doc || !selected || !p || p.layerId == null) return null;
+    const state = placementAudioState(doc, p as never);
+    if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
+    if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
+    const layerId = p.layerId;
+    return (
+      <>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={p.useOriginalAudio}
+            {...editGuard()}
+            onChange={(e) => setSelectedClipSlotAudio(layerId, { useOriginalAudio: e.target.checked })}
+          />
+          <span>この動画に入っている音を流す</span>
+        </label>
+        <NumberField
+          label="音量"
+          step={VOLUME_STEP}
+          min={VOLUME_MIN}
+          max={VOLUME_MAX}
+          value={selected.slotClips?.[layerId]?.originalAudioVolume ?? null}
+          // ⚠️ 空欄＝**継承**なので、継承したときに実際に鳴る音量を出す
+          // （定数を出すと、素材側で決めた音量を隠して嘘の目安になる）。
+          placeholder={`指定なし（${Math.round(p.originalAudioVolume * 100)}%）`}
+          {...editGuard()}
+          onChange={(v) => setSelectedClipSlotAudio(layerId, { originalAudioVolume: v })}
+          onClear={() => setSelectedClipSlotAudio(layerId, { originalAudioVolume: null })}
+        />
+      </>
+    );
+  };
+
+  /**
    * **いまバラせるか**（差分再監査 5巡目 🟡）。実際にバラす関数を**空撃ち**して理由を引く。
    * 右クリックの相手は選んでいる部品と違いうるので、その場で引く（メニューを組み立てるときだけ）。
    *
@@ -4320,41 +4362,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           ＝同じ概念を枠によって別の言い方にしない（ADR-0026②）。
                           ⚠️ **音の入った動画が入っている枠にだけ出す**＝押せない欄を並べない。
                           音が無い／確かめられない枠には、直接置きと同じ2文で理由を出す（§2-5）。 */}
-                      {(() => {
-                        const p = slotPlacements.find((x) => x.layerId === layer.id);
-                        if (!p) return null;
-                        const state = placementAudioState(doc, p);
-                        if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
-                        if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
-                        return (
-                          <>
-                            <label className="toggle-row">
-                              <input
-                                type="checkbox"
-                                checked={p.useOriginalAudio}
-                                {...editGuard()}
-                                onChange={(e) => setSelectedClipSlotAudio(layer.id, { useOriginalAudio: e.target.checked })}
-                              />
-                              <span>この動画に入っている音を流す</span>
-                            </label>
-                            <NumberField
-                              label="音量"
-                              step={VOLUME_STEP}
-                              min={VOLUME_MIN}
-                              max={VOLUME_MAX}
-                              value={selected.slotClips?.[layer.id]?.originalAudioVolume ?? null}
-                              // ⚠️ 空欄＝**継承**なので、継承したときに実際に鳴る音量を出す
-                              // （定数を出すと、素材側で決めた音量を隠して嘘の目安になる）。
-                              placeholder={`指定なし（${Math.round(p.originalAudioVolume * 100)}%）`}
-                              {...editGuard()}
-                              onChange={(v) => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: v })}
-                              onClear={() => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: null })}
-                            />
-                          </>
-                        );
-                      })()}
+                      {renderPlacementAudio(slotPlacements.find((x) => x.layerId === layer.id))}
                     </label>
                   ))}
+                  {/* ⚠️ **立ち絵に入れた動画の元の音も出す**（α-6 出口監査 🔴・#809）＝立ち絵も置き場所
+                      なので、差し込み口だけに出すと**書き出しにだけ効く設定**になる。 */}
+                  {(() => {
+                    const block = renderPlacementAudio(slotPlacements.find((x) => x.use === ASSET_USE_KIND.character));
+                    return block == null ? null : (
+                      <div className="field">
+                        <span className="field-label text-sm">ゆうこ（立ち絵）の動画の音</span>
+                        {block}
+                      </div>
+                    );
+                  })()}
                   {textKeys.map((key) => (
                     <label className="field" key={key}>
                       <span>{textKeyLabel[key]}</span>
