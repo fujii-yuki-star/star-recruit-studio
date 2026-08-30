@@ -125,10 +125,13 @@ const bandShapes = {
   'project TextStyle.background': projectSchema.$defs.TextStyle.properties.background,
   'project FreeElement.background': projectSchema.$defs.FreeElement.properties.background,
 };
-const bandBase = JSON.stringify(bandShapes['template Layer.background']);
+// ⚠️ **キーの順番では比べない**（並べ替えただけで落ちると、検査が信用されず無視されるようになる）。
+const stable = (v) => Array.isArray(v) ? v.map(stable)
+  : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])])) : v);
+const bandBase = JSON.stringify(stable(bandShapes['template Layer.background']));
 let bandOk = true;
 for (const [name, shape] of Object.entries(bandShapes)) {
-  if (JSON.stringify(shape) !== bandBase) { bandOk = false; console.log(`  ${name} が他とずれています`); }
+  if (JSON.stringify(stable(shape)) !== bandBase) { bandOk = false; console.log(`  ${name} が他とずれています`); }
 }
 console.log(bandOk ? 'PASS  shape  background の形が3か所で一致' : 'FAIL  shape  background の形が3か所で一致');
 ok = ok && bandOk;
