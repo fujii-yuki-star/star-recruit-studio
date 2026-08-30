@@ -1,4 +1,6 @@
 // ユーザー素材ライブラリ（ADR-0035・#260）の純粋な部分。
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   assetFromLibrary,
@@ -187,5 +189,23 @@ describe('ASSET_TYPE_SAMPLES（Rust と同じ答えになることの入力）',
     for (const v of ASSET_TYPE_SAMPLES) {
       expect([v, (ASSET_TYPES as readonly string[]).includes(v)]).toEqual([v, expected[v]]);
     }
+  });
+
+  // ⚠️ **表が2つあるだけでは「同じ答え」を固定できない**（PR #922 レビュー ℹ️）＝両側が自分の表としか
+  // 比べないので、**片方に種類が増えても相手は赤くならない**。Rust 側のコメントが謳う同値性が
+  // 実際には無かった（[[verify-claims-in-comments]] の型＝主張がコードより強い）。
+  // そこで **Rust の本文をそのまま読んで**一覧を突き合わせる＝どちらを増やしても、もう片方を
+  // 直すまで赤いままになる。
+  it('Rust の `is_known_asset_type` が同じ一覧を見ている', () => {
+    const rust = readFileSync(join(process.cwd(), 'src-tauri', 'src', 'lib.rs'), 'utf8');
+    const body = /fn is_known_asset_type\(v: &str\) -> bool \{\s*matches!\(([^)]*)\)/.exec(rust);
+    // 見つからない＝関数の書き方が変わった。**黙って緑にしない**（検査が空振りする）。
+    expect(body).not.toBeNull();
+    const arms = (body as RegExpExecArray)[1]
+      .split('|')
+      .map((a) => a.trim().replace(/^v\s*,\s*/, ''))
+      .map((a) => a.replace(/^"|"$/g, '').trim())
+      .filter((a) => a !== '');
+    expect([...arms].sort()).toEqual([...ASSET_TYPES].sort());
   });
 });

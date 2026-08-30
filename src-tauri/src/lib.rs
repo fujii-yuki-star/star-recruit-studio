@@ -797,8 +797,13 @@ fn update_library_asset(
 /// 素材の種類として受けてよい値か（`domain/enums.ts` の `ASSET_TYPES` と同じ一覧）。
 ///
 /// ⚠️ **一覧が2か所にある**（Rust と domain）＝境界で形を見るのに要る。増えたら両方へ足す
-///（`is_library_asset_id` と同じ事情。**テストで同値性を固定してある**＝`asset_type_matches_domain_rule`
-/// と domain の `ASSET_TYPE_SAMPLES` が同じ入力表を見る）。
+///（`is_library_asset_id` と同じ事情）。ずれると `update_library_asset` が**選んだ種類を黙って捨てる**。
+///
+/// ⚠️ **同値性は `assetLibrary.test.ts` が「この本文を読んで」固定している**（PR #922 レビュー ℹ️）＝
+/// 表を両側に置くだけでは、**片方に増やしても相手は赤くならない**（当初そう書いていたが実際には
+/// 固定できていなかった）。いまは下の `matches!` の並びをそのまま読んで `ASSET_TYPES` と突き合わせるので、
+/// **どちらを増やしても、もう片方を直すまで赤いまま**になる。
+/// ⚠️ **書き方を変えるときは向こうの正規表現も直す**（読めなくなったら赤くなる＝空振りで緑にはしない）。
 fn is_known_asset_type(v: &str) -> bool {
     matches!(
         v,
