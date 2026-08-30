@@ -20,7 +20,6 @@ import {
 import {
   createLibraryAssetId,
   filterLibraryAssets,
-  libraryTags,
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
@@ -154,7 +153,17 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   /** 取り込み（この動画で使う）が押せない理由。棚の操作の理由に「入れる先が無い」が加わる。 */
   const importBlockedReason = blockedReason ?? (destOpen ? undefined : IMPORT_NO_PROJECT_MESSAGE);
   const shown = filterLibraryAssets(items, { text, tags, assetType });
-  const allTags = libraryTags(items);
+  // ⚠️ **候補は「絞り込んだ後」から採り、件数を添える**（α-6 出口監査 🟡・素材画面と同じ作法）＝
+  // 全件から採ると、種類=音楽にして写真のタグを押せてしまい「条件に合う素材がありません」になる
+  //（押しても0件になる候補を出さない＝ADR-0026②）。**いま選んでいるタグは残す**＝選んだ瞬間に
+  // 自分が消えて外せなくなる、を作らない。
+  const tagPool = filterLibraryAssets(items, { text, assetType });
+  const tagCounts = new Map<string, number>();
+  for (const a of tagPool) for (const t of a.tags) if (t.trim() !== "") tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+  for (const t of tags) if (!tagCounts.has(t)) tagCounts.set(t, 0);
+  const allTags = [...tagCounts.entries()]
+    .sort((x, y) => (y[1] - x[1]) || x[0].localeCompare(y[0], "ja"))
+    .map(([tag, count]) => ({ tag, count }));
 
   async function onAdd(): Promise<void> {
     setNotice("");
@@ -341,7 +350,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
           <span className="field-label">タグで絞る</span>
           {/* ⚠️ **選ぶほど狭まる**（すべて含む＝AND）＝タグを足すと候補が減る、が直感に合う。 */}
           <div className="chip-input-row">
-            {allTags.map((t) => (
+            {allTags.map(({ tag: t, count }) => (
               <button
                 key={t}
                 type="button"
@@ -349,7 +358,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                 aria-pressed={tags.includes(t)}
                 onClick={() => setTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))}
               >
-                {t}
+                {t}（{count}）
               </button>
             ))}
             {tags.length > 0 && (

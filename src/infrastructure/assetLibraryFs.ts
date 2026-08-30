@@ -30,8 +30,13 @@ export async function listLibraryAssets(): Promise<LibraryAsset[] | null> {
   }
 }
 
-/** 目録の1行を受け取れる形か見る（受けられなければ落とす＝黙って内部へ流さない）。 */
-function toLibraryAsset(raw: unknown): LibraryAsset[] {
+/**
+ * 目録の1行を受け取れる形か見る（受けられなければ落とす＝黙って内部へ流さない・§2-2）。
+ *
+ * ⚠️ **直接テストできるように出す**（α-6 出口監査 🟡）＝画面経由のテストはこのモジュールごと
+ * モックするので、**この判定はどのテストからも実行されていなかった**（一度実装漏れがあった箇所）。
+ */
+export function toLibraryAsset(raw: unknown): LibraryAsset[] {
   if (typeof raw !== 'object' || raw === null) return [];
   const e = raw as Record<string, unknown>;
   if (!isLibraryAssetId(e.id)) return [];
