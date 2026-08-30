@@ -397,6 +397,18 @@ describe('バラす前後で絵が変わらない', () => {
    * ⚠️ **切り抜いてある部品はバラせない**（決定23）＝切り抜きは**部品の箱ぜんぶ**を切るので、
    * 要素ごとに分けると**各要素が自分の箱で切られる**＝別の絵になる。写せないものは**断る**。
    */
+  /**
+   * ⚠️ **寄せ（`cropAlign`）も同じ**（PR #913 レビュー 🔴）＝`crop` とは**独立して**設定でき、
+   * `fit:'cover'` の絵に効く。写す先が `FreeElement` に無いので、断らないと
+   * **はみ出す側が変わって別の絵**になる。
+   */
+  it('寄せだけ設定してある部品もバラさない', () => {
+    const before = doc({ clips: [clip({ cropAlign: { x: 'left', y: 'top' } })] });
+    const r = explodeTemplateClip(before, 'clip_001', template);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('TIMELINE_EDIT_EXPLODE_CROP');
+  });
+
   it('切り抜いてある部品はバラさない（黙って別の絵にしない）', () => {
     const before = doc({ clips: [clip({ crop: { top: 0.1, bottom: 0.2, left: 0, right: 0.05 } })] });
     const r = explodeTemplateClip(before, 'clip_001', template);

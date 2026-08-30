@@ -91,7 +91,10 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // ⚠️ **切り抜いてある部品はバラせない**（差分再監査 4巡目 🔴・決定23「前後で絵が変わらない」）＝
   // 切り抜きは**部品の箱ぜんぶ**を切る（`clipRect`）ので、要素ごとに分けると**各要素が自分の箱で
   // 切られる**＝別の絵になる。写せないものは**バラす前に断る**（`explodeTrimEnd` と同じ流儀）。
-  if (clip.crop != null) return { ok: false, reason: EDIT_BLOCKED.explodeCrop };
+  // ⚠️ **寄せ（`cropAlign`）も同じ**（PR #913 レビュー 🔴）＝`crop` とは**独立して**設定でき、
+  // `fit:'cover'` の絵に効く（`timelineLayout` が `crop` の有無に関係なく見る）。写す先が
+  // `FreeElement` に無いので、断らないと**はみ出す側が変わって別の絵**になる。
+  if (clip.crop != null || clip.cropAlign != null) return { ok: false, reason: EDIT_BLOCKED.explodeCrop };
 
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {

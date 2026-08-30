@@ -311,7 +311,8 @@ export interface TimelineState {
    * **片方の形式で成立していない**（ADR-0026②）。場面形式の `importFromLibrary` と同じ流儀
    *（参照ではなくコピー＝プロジェクトは自己完結・ADR-0024 決定6）。
    */
-  importFromLibrary: (libraryAssetId: string) => Promise<void>;
+  /** ⚠️ **成否を返す**（PR #913 レビュー 🔴）＝返さないと呼ぶ側が**失敗しても「取り込みました」**と出す。 */
+  importFromLibrary: (libraryAssetId: string) => Promise<boolean>;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
    *
@@ -1239,13 +1240,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const list = await listLibraryAssets();
     if (list == null) {
       set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return;
+      return false;
     }
     const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return; }
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return false; }
     // ⚠️ **名前は棚のものを使う**＝取り込んだ先で「どれを入れたか」が分かる（拡張子は棚のファイル名から）。
+    const before = get().doc?.assets.length ?? 0;
     await runImport(set, get, lib.fileName, async (fileName) =>
       await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName));
+    // ⚠️ **入ったかは素材が増えたかで見る**（`runImport` は成否を返さない）＝断られた（書き出し中・
+    // 取り込み中）ときも失敗したときも増えないので、**成功を騙らない**。
+    return (get().doc?.assets.length ?? 0) > before;
   },
 
   ensureClipAnalysis: (clipId, barWidthPx) => {

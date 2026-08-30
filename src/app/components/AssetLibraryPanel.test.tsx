@@ -15,6 +15,7 @@ vi.mock("../../infrastructure/dialog", () => ({ showOpenLibraryAssetsDialog: vi.
 import { AssetLibraryPanel } from "./AssetLibraryPanel";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import { addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
@@ -297,5 +298,36 @@ describe("AssetLibraryPanel", () => {
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
     expect(await screen.findByText(/「会社紹介」へ取り込みました/)).toBeInTheDocument();
+  });
+
+  /**
+   * ⚠️ **できたときだけ知らせる**（PR #913 レビュー 🔴）＝返り値を見ないと、失敗しても
+   * 「取り込みました」と出て、画面下の本当の理由と**同時に**並ぶ（成功を騙る）。
+   */
+  it("タイムラインへ取り込めなかったら「取り込みました」と言わない", async () => {
+    const importFromLibraryT = vi.fn(async () => false);
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: importFromLibraryT,
+      isImporting: false,
+      exportRun: { phase: "idle" },
+    } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
+    await waitFor(() => expect(importFromLibraryT).toHaveBeenCalled());
+    expect(screen.queryByText(/取り込みました/)).toBeNull();
+  });
+
+  it("タイムラインへ取り込めたら、その動画を名指しで知らせる", async () => {
+    useTimelineStore.setState({
+      doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
+      importFromLibrary: vi.fn(async () => true),
+      isImporting: false,
+    } as never);
+    render(<AssetLibraryPanel target="timeline" />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
+    expect(await screen.findByText(/「タイムライン動画」へ取り込みました/)).toBeInTheDocument();
   });
 });

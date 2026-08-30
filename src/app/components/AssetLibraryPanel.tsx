@@ -6,7 +6,7 @@
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
 import { useEffect, useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { useTimelineStore } from "../store/timelineStore";
+import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
@@ -79,7 +79,12 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
   const importToScene = useProjectStore((s) => s.importFromLibrary);
   const importToTimeline = useTimelineStore((s) => s.importFromLibrary);
   const timelineName = useTimelineStore((s) => s.doc?.projectName);
-  const isImporting = useProjectStore((s) => s.isImporting);
+  // ⚠️ **判定材料も置かれた画面の側で決める**（PR #913 レビュー 🟡）＝行き先がタイムラインなのに
+  // 場面形式の状態を見ると、**タイムラインが書き出し中・取り込み中でも押せて**、中で静かに弾かれる。
+  const sceneImporting = useProjectStore((s) => s.isImporting);
+  const timelineImporting = useTimelineStore((s) => s.isImporting);
+  const timelineExporting = useTimelineStore((s) => isTimelineExportBusy(s.exportRun.phase));
+  const isImporting = target === "timeline" ? timelineImporting : sceneImporting;
   /**
    * 取り込み先の**場面形式の動画の名前**（差分再監査 4巡目 🔴）。
    *
@@ -89,7 +94,8 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
    */
   const sceneName = useProjectStore((s) => s.meta.projectName);
   const destName = target === "timeline" ? timelineName : sceneName;
-  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  const sceneExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  const isExporting = target === "timeline" ? timelineExporting : sceneExporting;
   const brandKit = useProjectStore((s) => s.brandKit);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
@@ -181,7 +187,9 @@ export function AssetLibraryPanel({ target }: { target?: "timeline" } = {}) {
     setError("");
     // ⚠️ **取り込み先は置かれた画面で決まる**＝タイムラインの欄からはタイムラインの文書へ入れる。
     if (target === "timeline") {
-      await importToTimeline(a.id);
+      // ⚠️ **できたときだけ知らせる**（PR #913 レビュー 🔴）＝返り値を見ないと、失敗しても
+      // 「取り込みました」と出て、画面下の本当の理由と**同時に**並ぶ（成功を騙る）。
+      if (!(await importToTimeline(a.id))) return;
       const dest = destName ? `「${destName}」` : "この動画";
       setNotice(`「${a.displayName}」を${dest}へ取り込みました。「素材・文字・図形を置く」から置けます。`);
       return;
