@@ -131,9 +131,13 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   // ⚠️ **絵が無くても行は消さない**＝`null`（ブラウザ開発・組み立て失敗）は「出せない」であって
   // 「素材が無い」ではない。
   const [thumbById, setThumbById] = useState<Record<string, string>>({});
+  // ⚠️ **読み込めなかったものは覚えて、取りに行き直さない**＝`thumbById` から消すだけだと
+  // 「持っていない」に戻り、effect が**また取りに行って何度も失敗する**（同じ絵で回り続ける）。
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     let alive = true;
-    const want = items.filter((a) => isPreviewableImageType(a.assetType) && !(a.id in thumbById));
+    const want = items.filter((a) => isPreviewableImageType(a.assetType)
+      && !(a.id in thumbById) && !failedIds.has(a.id));
     if (want.length === 0) return;
     void Promise.all(want.map(async (a) => [a.id, await libraryAssetDisplayUrl(a.fileName)] as const))
       .then((pairs) => {
@@ -143,7 +147,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
         if (Object.keys(add).length > 0) setThumbById((prev) => ({ ...prev, ...add }));
       });
     return () => { alive = false; };
-  }, [items, thumbById]);
+  }, [items, thumbById, failedIds]);
 
   // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
   // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
@@ -442,6 +446,18 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                   <img
                     src={thumbById[a.id]}
                     alt=""
+                    // ⚠️ **読み込めなかったら消す**（PR #939 レビュー）＝`asset://` は
+                    // `tauri.conf.json` の scope 次第で拒まれることがあり、**その効きは実機でしか
+                    // 確かめられない**（ADR-0021 が `asset://` を避けた理由）。放っておくと
+                    // **壊れた画像の印**が並ぶので、失敗したらその絵だけ落として行は普通に使える形にする。
+                    onError={() => {
+                      setFailedIds((prev) => new Set(prev).add(a.id));
+                      setThumbById((prev) => {
+                        const next = { ...prev };
+                        delete next[a.id];
+                        return next;
+                      });
+                    }}
                     style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }}
                   />
                 )}

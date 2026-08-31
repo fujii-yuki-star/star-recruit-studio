@@ -467,6 +467,22 @@ describe("小さな絵（#926）", () => {
     expect(libraryAssetDisplayUrl).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **読み込めなかったら絵を消す**（PR #939 レビュー）＝`asset://` は scope 次第で拒まれ、
+  // その効きは**実機でしか確かめられない**。放っておくと**壊れた画像の印**が並ぶ。
+  // ⚠️ **取りに行き直さない**＝消すだけだと「持っていない」に戻って**何度も失敗する**。
+  it("読み込めなかった絵は消し、取りに行き直さない", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x/ng.png" as never);
+    await showList([lib({ id: "lib_asset_005", displayName: "外観", assetType: ASSET_TYPE.image, fileName: "ng.png" })]);
+    const img = await screen.findByRole("presentation");
+    vi.mocked(libraryAssetDisplayUrl).mockClear();
+    fireEvent.error(img);
+    await waitFor(() => expect(screen.queryByRole("presentation")).toBeNull());
+    expect(screen.getByText("外観")).toBeInTheDocument(); // 行は残る
+    // 取りに行き直していない（何度も失敗するのを防ぐ）。
+    await new Promise((r) => { setTimeout(r, 0); });
+    expect(libraryAssetDisplayUrl).not.toHaveBeenCalled();
+  });
+
   // ⚠️ **絵が出せなくても行は消さない**＝`null` は「出せない」であって「素材が無い」ではない。
   it("絵を出せなくても素材の行は残る", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null as never);
