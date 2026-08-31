@@ -10,11 +10,12 @@
 // 実アプリでも「クリックを模す」だけでは気づけなかったので、ここでは**`pointerdown` の
 // `defaultPrevented` そのもの**を見る（焦点が移らないことの直接の条件）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
+import { DUPLICATE_LABEL } from "../uiLabels";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { TimelineProject } from "../../domain/timeline/types";
@@ -67,7 +68,34 @@ describe("帯を押しても焦点を帯へ移さない（#948）", () => {
       loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {},
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ **前提（掴めない帯であること）を先に確かめる**（レビュー ℹ️）＝`locked` の配線が外れて
+    // 掴める帯になると、`usePointerDrag` 側の `preventDefault` で**緑のまま通ってしまう**
+    // （この関門を狙ったテストが空振りになる）。掴める帯には `--editable` が付く。
+    expect(document.querySelector(".timeline-clip")?.className).not.toContain("timeline-clip--editable");
     expect(pressClip()).toEqual({ found: true, prevented: true });
+  });
+
+  // ⚠️ **3つ目の条件も同じ側**（レビュー ℹ️）＝`grabbableClip` は書き出し中も掴めない扱いにする。
+  // 2つだけ留めると「条件が3つある」ことが読めず、次に条件が増えたとき同じ穴が空く。
+  it("書き出し中の帯（掴めない）", () => {
+    useTimelineStore.setState({ doc: doc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(pressClip()).toEqual({ found: true, prevented: true });
+  });
+
+  // ⚠️ **右クリックのメニューが消えていないこと**（レビュー 🟡）＝既定を全ボタンで落とすので、
+  // `pointerdown` → `contextmenu` の**順に**通してメニューが開くところまで見る
+  //（`fireEvent.contextMenu` の直撃だけだと、この順序で壊れても気づけない）。
+  it("右ボタンでも既定は落ちるが、メニューは開く", async () => {
+    useTimelineStore.setState({ doc: doc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const clip = document.querySelector(".timeline-clip") as HTMLElement;
+    const down = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 2, buttons: 2 });
+    clip.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    fireEvent.contextMenu(clip, { clientX: 10, clientY: 10 });
+    expect(await screen.findByRole("button", { name: DUPLICATE_LABEL })).toBeTruthy();
   });
 
   // ⚠️ 同じく壊れていた側＝再生中も掴めない扱い（`grabbableClip` が `!isPlaying` を見る）。
