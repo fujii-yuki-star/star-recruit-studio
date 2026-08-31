@@ -574,6 +574,27 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("user_assets"))
 }
 
+/// `assetProtocol.scope` に書いてあるフォルダを作っておく（#945・起動時に1回）。
+///
+/// ⚠️ **失敗しても起動は止めない**＝作れないのは権限などの環境要因で、ここで落とすと
+/// アプリ自体が使えなくなる。作れなければ従来どおり（その回だけ絵が出ない）に留める。
+fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let scope = app.asset_protocol_scope();
+    // ⚠️ **`tauri.conf.json` の `assetProtocol.scope` と同じ広さにする**（PR #946 の自己点検）＝
+    // `allow_directory` の第2引数は `true` なら `**`（下の階層も）、`false` なら `*`（直下だけ）を足す。
+    // 設定は `projects/**` と `user_assets/*` で**広さが違う**ので、両方 `true` にすると
+    // **設定より広く許す**ことになる（`user_assets` は直下しか使わない設計＝#942）。
+    for (dir, recursive) in [(projects_dir(app), true), (user_assets_dir(app), false)] {
+        let Ok(dir) = dir else { continue };
+        // ⚠️ **作るだけでは足りない**＝設定に書いた許可は**起動の組み立て時**に一度だけ広げられるので、
+        // そのときフォルダが無いと、あとから作っても許可は増えない（開き直すまで 403）。
+        // 実行時に許可を足す口（`allow_directory`）を通す。
+        let _ = fs::create_dir_all(&dir);
+        let _ = scope.allow_directory(&dir, recursive);
+    }
+}
+
 /// ライブラリの素材1つぶんの覚え書き（目録＝`user_assets/library.json`）。
 ///
 /// ⚠️ **`lib_asset_NNN` は `project.json` に現れない**（ADR-0035 決定3＝取り込みは「コピー」で
@@ -867,6 +888,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(voicevox_engine::EngineState::default())
         .setup(|app| {
+            // 画像を配れる場所（`assetProtocol.scope`）のフォルダを、**起動時に作っておく**（#945）。
+            // ⚠️ **入れたばかりのアプリで、取り込んだ写真がどこにも映らなかった**＝許可は起動時に
+            // 組み立てられるのに、`projects` も `user_assets` も**書き込むコマンドの中で初めて作られる**ので、
+            // 初回だけ「起動時にフォルダが無い」状態になり、その回の `asset://` が全部 403 になっていた
+            //（開き直すと直る＝いちばん気づけない壊れ方。しかも読み込み失敗はその絵を落とすだけなので
+            // 知らせも壊れた画像の印も出ない＝§2-5 の行き止まり）。
+            // ⚠️ **許可範囲に書いてあるフォルダだけ**を作る＝`user_templates`／`user_fonts` は
+            // `asset://` に載っていない（data URL・バイト列で渡す）ので、ここで作ると許可の話と
+            // 実際の配り方がずれる。作る対象を増やすときは `tauri.conf.json` の scope と一緒に見ること。
+            ensure_asset_scope_dirs(app.handle());
             // 同梱 VOICEVOX ENGINE を自動起動（同梱が無ければ何もしない＝手動起動/設定の接続先へフォールバック・ADR-0005/#149）。
             voicevox_engine::start_bundled_engine(app.handle());
             // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
