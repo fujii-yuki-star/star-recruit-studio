@@ -15,6 +15,10 @@ export const PANEL_ID = {
   voice: "voice",
 } as const;
 
+/**
+ * 欄の id の集合（配置に出てくる id を照らす基準）。**値集合にする**＝綴り違いで
+ * `normalizeLayout` に落とされ、**欄が黙って消える**のを防ぐ（§2-7）。
+ */
 export const PANEL_IDS = Object.values(PANEL_ID);
 
 export type TimelinePanelId = (typeof PANEL_ID)[keyof typeof PANEL_ID];

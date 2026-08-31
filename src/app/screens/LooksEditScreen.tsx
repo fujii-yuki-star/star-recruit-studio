@@ -225,14 +225,6 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setSelectedLayerIds((cur) => cur.filter((x) => x !== id));
   }
   /**
-   * 選んでいる層を**まとめて消す**（#802-4）。場面編集の自由配置と同じ流儀＝
-   * 複数選んでいるときは**確認してから**まとめて消す（矢印は全部動くのに Delete だけ1枚、を作らない）。
-   *
-   * ⚠️ **最低1枚は残す**（`template.schema` の `layers.minItems:1`）＝全部選んで消そうとしても、
-   * 残せる枚数までにする…のではなく**何もしない**（どれが残るかを黙って決めない）。
-   * ⚠️ **固定したまとまりの層は消さない**（動かせないものは消せない＝ADR-0026②）。
-   */
-  /**
    * その選択のうち**実際に消せる層**（レビュー ℹ️）。
    * ⚠️ **いまの下書きに実在するものだけ**＝選択に残った古い id を数えると、件数が嘘になり
    * 「最低1枚」の判定も過剰に効く（消せるはずの削除が黙って空振りする）。
@@ -265,6 +257,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   function canBulkDelete(ids: readonly string[]): boolean {
     return removableLayerIds(ids).length > 0;
   }
+  /**
+   * 選んでいる層を**まとめて消す**（#802-4）。場面編集の自由配置と同じ流儀＝
+   * 複数選んでいるときは**確認してから**まとめて消す（矢印は全部動くのに Delete だけ1枚、を作らない）。
+   *
+   * ⚠️ **最低1枚は残す**（`template.schema` の `layers.minItems:1`）＝全部選んで消そうとしても、
+   * 残せる枚数までにする…のではなく**何もしない**（どれが残るかを黙って決めない）。
+   * ⚠️ **固定したまとまりの層は消さない**（動かせないものは消せない＝ADR-0026②）。
+   */
   function onRemoveLayers(ids: readonly string[]) {
     if (!draft) return;
     const removable = removableLayerIds(ids);
@@ -346,15 +346,6 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const activeGroup = tplGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
 
   /**
-   * 矢印キーで少しずつ動かす（#788-3）。**掴んで動かすのと同じ入口**（`onMoveLayers`／`transformGroup`）を
-   * 通す＝置ける条件をキーとドラッグで割らない。
-   * ⚠️ **まとまりを選んでいるときはまとまりごと**（場面編集の自由配置と同じ規準・ADR-0026②）。
-   * ⚠️ **固定したまとまりの中身は動かさない**（レビュー指摘）＝キャンバスのドラッグは固定なら選ぶだけで
-   * 止まるのに、キーだけ通ると「掴めないのにキーでは動く」になる（同じ理由で入口ごとに結果が変わる）。
-   * ⚠️ **押しっぱなしでも取り消しは1回ぶん**（`06 §12.1` 決定20＝タイムラインと同じ）＝1打鍵ごとに積むと、
-   * キーリピートで履歴の上限を数秒で流し切り、**この画面唯一の戻り道**（局所履歴）が消える。
-   */
-  /**
    * 矢印・`Delete` を**この画面が受け持つか**（レビュー指摘）。
    * ⚠️ **選んでいないときは奪わない**（`06 §12.1`＝奪って何も起きない＝行き止まりを作らない）。
    * ⚠️ **答えを求める確認が出ている間も奪わない**＝消すかどうかを聞いている最中にキーで別のものが動く、を作らない。
@@ -380,6 +371,15 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   };
   /** そのまとまりが固定されているか（入れ子の親も見る＝親を固定したら中身も動かさない）。 */
   const inLockedGroup = (layerId: string): boolean => topGroupOfMember(tplGroups, layerId)?.locked === true;
+  /**
+   * 矢印キーで少しずつ動かす（#788-3）。**掴んで動かすのと同じ入口**（`onMoveLayers`／`transformGroup`）を
+   * 通す＝置ける条件をキーとドラッグで割らない。
+   * ⚠️ **まとまりを選んでいるときはまとまりごと**（場面編集の自由配置と同じ規準・ADR-0026②）。
+   * ⚠️ **固定したまとまりの中身は動かさない**（レビュー指摘）＝キャンバスのドラッグは固定なら選ぶだけで
+   * 止まるのに、キーだけ通ると「掴めないのにキーでは動く」になる（同じ理由で入口ごとに結果が変わる）。
+   * ⚠️ **押しっぱなしでも取り消しは1回ぶん**（`06 §12.1` 決定20＝タイムラインと同じ）＝1打鍵ごとに積むと、
+   * キーリピートで履歴の上限を数秒で流し切り、**この画面唯一の戻り道**（局所履歴）が消える。
+   */
   const onCanvasNudge = (dx: number, dy: number): void => {
     if (effectiveActiveGroupId != null && activeGroup) {
       if (activeGroup.locked) return; // 固定＝ドラッグでも動かない
