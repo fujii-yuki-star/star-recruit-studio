@@ -53,9 +53,12 @@ describe("asset:// で配れる場所は、置き場所の深さと合ってい�
     // 関数があっても、起動時に呼ばれていなければ意味がない。
     expect(rs).toMatch(/\.setup\([\s\S]{0,1500}ensure_asset_scope_dirs\(/);
     // 許可範囲の場所が、どちらもその関数の中で扱われていること。
+    // ⚠️ **広さ（再帰かどうか）まで合わせる**＝`allow_directory` の第2引数は `true` で `**`、
+    // `false` で `*` を足すので、設定が `/*` の場所を `true` で足すと**設定より広く許す**ことになる。
     for (const entry of scope) {
       const dir = entry.replace("$APPDATA/", "").replace(/\/\*+$/, "");   // projects / user_assets
-      expect(body).toContain(`${dir}_dir(`);
+      const recursive = entry.endsWith("/**");
+      expect(body).toMatch(new RegExp(String.raw`${dir}_dir\(app\),\s*${recursive}`));
     }
   });
 

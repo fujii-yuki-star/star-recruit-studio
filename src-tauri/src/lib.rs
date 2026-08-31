@@ -581,15 +581,17 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
     use tauri::Manager;
     let scope = app.asset_protocol_scope();
-    for dir in [projects_dir(app), user_assets_dir(app)]
-        .into_iter()
-        .flatten()
-    {
+    // ⚠️ **`tauri.conf.json` の `assetProtocol.scope` と同じ広さにする**（PR #946 の自己点検）＝
+    // `allow_directory` の第2引数は `true` なら `**`（下の階層も）、`false` なら `*`（直下だけ）を足す。
+    // 設定は `projects/**` と `user_assets/*` で**広さが違う**ので、両方 `true` にすると
+    // **設定より広く許す**ことになる（`user_assets` は直下しか使わない設計＝#942）。
+    for (dir, recursive) in [(projects_dir(app), true), (user_assets_dir(app), false)] {
+        let Ok(dir) = dir else { continue };
         // ⚠️ **作るだけでは足りない**＝設定に書いた許可は**起動の組み立て時**に一度だけ広げられるので、
         // そのときフォルダが無いと、あとから作っても許可は増えない（開き直すまで 403）。
         // 実行時に許可を足す口（`allow_directory`）を通す。
         let _ = fs::create_dir_all(&dir);
-        let _ = scope.allow_directory(&dir, true);
+        let _ = scope.allow_directory(&dir, recursive);
     }
 }
 
