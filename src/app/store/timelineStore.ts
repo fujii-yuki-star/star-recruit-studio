@@ -136,25 +136,6 @@ export type ExportStartBlock = {
 };
 
 /**
- * **書き出しを始められるか**を1か所で見る（#718）。
- *
- * これまで store の開始チェックと画面のボタンで**条件が別々に書かれ**、画面は `timelineExportBlockers` と
- * 再生中しか見ていなかった＝取り込み中・別形式の書き出し中・この端末では書き出せない・**声を作っている最中**は
- * **押せてしまって、押してから断られていた**（#703 が場面編集で消した「押してから断る」の残り）。
- *
- * 特に**声を作っている最中**は実害が大きい＝合成が着地したときには書き出しが始まっていて `commit` が撥ねるので、
- * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
- * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
- */
-/**
- * 書き出しの門へ渡してよい**持ち込みフォントの一覧**（`null`＝調べていない／読めなかった）。
- *
- * ⚠️ **場面形式の2画面と同じ規則**（`ExportScreen`／`PrecheckScreen`）＝ここだけ違うと、
- * 同じ状況で**形式によって門の通り方が変わる**（ADR-0026②）。
- * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
- * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
- */
-/**
  * 新しいタイムライン動画へ**会社の見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
  *
  * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
@@ -183,11 +164,30 @@ async function withBrandLogo(
   }
 }
 
+/**
+ * 書き出しの門へ渡してよい**持ち込みフォントの一覧**（`null`＝調べていない／読めなかった）。
+ *
+ * ⚠️ **場面形式の2画面と同じ規則**（`ExportScreen`／`PrecheckScreen`）＝ここだけ違うと、
+ * 同じ状況で**形式によって門の通り方が変わる**（ADR-0026②）。
+ * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
+ * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
+ */
 export function knownUserFontIds(): Set<string> | null {
   const s = useProjectStore.getState();
   return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
 }
 
+/**
+ * **書き出しを始められるか**を1か所で見る（#718）。
+ *
+ * これまで store の開始チェックと画面のボタンで**条件が別々に書かれ**、画面は `timelineExportBlockers` と
+ * 再生中しか見ていなかった＝取り込み中・別形式の書き出し中・この端末では書き出せない・**声を作っている最中**は
+ * **押せてしまって、押してから断られていた**（#703 が場面編集で消した「押してから断る」の残り）。
+ *
+ * 特に**声を作っている最中**は実害が大きい＝合成が着地したときには書き出しが始まっていて `commit` が撥ねるので、
+ * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
+ * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
+ */
 export function exportStartBlock(input: {
   doc: TimelineProject | null;
   isImporting: boolean;
@@ -276,7 +276,6 @@ export interface TimelineState {
   audioSrcByKey: Record<string, string>;
   /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
   history: HistoryStacks<TimelineProject>;
-  /** 直前の操作が置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。次の操作で消す。 */
   /**
    * 置けなかった理由と、**どの欄の話か**（#869・ADR-0034 決定10）。
    *
@@ -310,8 +309,8 @@ export interface TimelineState {
    * ⚠️ **棚の入口がタイムラインに無かった**＝「どの動画からでも取り込める」という棚の目的が
    * **片方の形式で成立していない**（ADR-0026②）。場面形式の `importFromLibrary` と同じ流儀
    *（参照ではなくコピー＝プロジェクトは自己完結・ADR-0024 決定6）。
+   * ⚠️ **成否を返す**（PR #913 レビュー 🔴）＝返さないと呼ぶ側が**失敗しても「取り込みました」**と出す。
    */
-  /** ⚠️ **成否を返す**（PR #913 レビュー 🔴）＝返さないと呼ぶ側が**失敗しても「取り込みました」**と出す。 */
   importFromLibrary: (libraryAssetId: string) => Promise<boolean>;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
@@ -374,7 +373,6 @@ export interface TimelineState {
   createTimelineProject: (projectName: string, aspectRatio?: Orientation) => Promise<string>;
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
-  /** 消された動画を手放す（#755）＝以後どこからも書かない。走行中の印は残す。 */
   /**
    * 消された動画を手放す。**進行中の書き込みがあればその約束を返す**（#763-4）＝消す側が
    * 着地を待てるようにする（手放しても、すでに発行済みの書き込みは止まらない）。
@@ -627,7 +625,6 @@ const IDLE_EXPORT: TimelineExportRun = { phase: EXPORT_RUN_PHASE.idle, percent: 
 /** 段の値の短い別名（この file 内で何度も使う＝直書きしない・§2-7）。 */
 const P = EXPORT_RUN_PHASE;
 
-/** 書き出しの持ち主（`exportLock`）。場面形式と一時ファイルの置き場を取り合わないために使う。 */
 /** 書き出しの締めの持ち主（画面も同じものを見る＝#718）。 */
 export const EXPORT_OWNER = "timeline" as const;
 
@@ -695,10 +692,6 @@ function writesFor(projectId: string): Promise<void> | undefined {
 }
 
 /**
- * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
- * 将来その場書き換えが入ったときに別の文書へ選択が漏れる（構造で防ぐ）。
- */
-/**
  * 声を作る**回**の番号（#755）。⚠️ `emptyState` には入れない＝開き直しで 0 に戻ると、
  * まだ走っている前の回と**同じ番号**になり、印を横取りする。store の生きている間ずっと増える。
  */
@@ -754,7 +747,6 @@ export function resetAnalysisQueue(): void {
   analysisRunning = 0;
 }
 
-/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
 /**
  * 待たせている仕事を動かす（#332）。
  *
@@ -797,6 +789,9 @@ function runAnalysis(job: () => Promise<void>): void {
  * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
  * そこを通らないので、**実機の主要な遷移で一度も走らなかった**。手放した文書のために FFmpeg が
  * 走り続ける（着地しても捨てるだけの仕事に CPU を使う）。**呼び忘れを構造で防ぐ**ためここへ移す。
+ *
+ * ⚠️ **毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、将来その場書き換えが入ったときに
+ * 別の文書へ選択が漏れる（構造で防ぐ）。
  */
 function emptyState() {
   resetAnalysisQueue();
@@ -1875,17 +1870,6 @@ type SetState = (partial: Partial<TimelineState>) => void;
 type GetState = () => TimelineState;
 
 /**
- * 変更を確定して履歴へ積む（ADR-0020 と同じ＝**適用前**の文書を past へ）。
- * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない
- * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
- */
-/**
- * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
- *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
- *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
- */
-
-/**
  * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
  * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。
  */
@@ -1982,6 +1966,15 @@ async function runImport(
   }
 }
 
+/**
+ * 変更を確定して履歴へ積む（ADR-0020 と同じ＝**適用前**の文書を past へ）。
+ * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない
+ * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
+ *
+ * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
+ *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
+ *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
+ */
 function commit(
   set: SetState,
   get: GetState,
@@ -2018,10 +2011,6 @@ function commit(
   });
 }
 
-/**
- * 取り消し/やり直しで文書を差し替える。**消えたクリップを選んだままにしない**（戻した文書に無い
- * 選択が残ると、次の操作が「変化ゼロ」の履歴を積む）。
- */
 /** 書き出し中は取り消し・やり直しも止める（`commit` と同じ理由＝焼く文書は始めた時点のもの）。 */
 function blockedByExport(set: SetState, get: GetState): boolean {
   if (!isTimelineExportBusy(get().exportRun.phase)) return false;
@@ -2029,6 +2018,10 @@ function blockedByExport(set: SetState, get: GetState): boolean {
   return true;
 }
 
+/**
+ * 取り消し/やり直しで文書を差し替える。**消えたクリップを選んだままにしない**（戻した文書に無い
+ * 選択が残ると、次の操作が「変化ゼロ」の履歴を積む）。
+ */
 function restore(set: SetState, get: GetState, doc: TimelineProject, history: HistoryStacks<TimelineProject>): void {
   const ids = new Set(doc.clips.map((c) => c.id));
   set({
