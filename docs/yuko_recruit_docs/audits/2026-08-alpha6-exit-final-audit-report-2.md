@@ -226,9 +226,16 @@
 ⚠️ **限界（ここは越えられなかった）**
 
 - **ネイティブの「開く／保存」は自動で答えられない**＝`__TAURI_INTERNALS__.invoke` は
-  **`writable:false, configurable:false`** で差し替えられない。`Page.addScriptToEvaluateOnNewDocument`
-  も WebView2 では効かず、`DOM.setFileInputFiles` も入らなかった。よって**書き出し**（保存先を聞く）と
-  **ファイルの取り込み**は自動化できない。素材は**ディスク上に用意して開く**ことで代替した。
+  **`writable:false, configurable:false`**（外側の `window.__TAURI_INTERNALS__` も同じ）で差し替えられない。
+  `Page.addScriptToEvaluateOnNewDocument` も WebView2 では効かず、`DOM.setFileInputFiles` も入らなかった。
+  よって**書き出し**（保存先を聞く）と**ファイルの取り込み**は自動化できない。
+  素材は**ディスク上に用意して開く**ことで代替した。
+  ⚠️ **逃げ道は検討したうえで見送った**（PR #944 レビュー）＝Rust の `export_video` は
+  `output_path: Option<String>` で**保存先を省略できる**が、**先に聞くのは画面側**
+  （`ExportScreen.tsx:190` で `showSaveVideoDialog` → `null` なら何もせず戻る）なので、
+  ここを飛ばすには `export_video` を**直接呼ぶ**しかない。それは**画面が組み立てたコマ（`SceneInput`）を
+  使わない**＝項目3・11 が確かめたい「画面の描画から書き出しまで」が抜け落ちるので、
+  **確かめたことにならない**。よって「自動化できない」のまま残す（Rust だけの検査に格下げしない）。
 - **同梱の VOICEVOX（`run.exe`）はアプリを強制終了しても生き残り、次の `cargo build` を
   ファイルロックで失敗させる**（`os error 32`）。ビルド前に `run.exe` も落とすこと。
 - 画面を操作するときは**必ず節の中だけを探して押す**。文書全体からボタンを文字で探すと、
