@@ -50,7 +50,7 @@ export function detachedDocCount(src: string): number {
  * `TimelineProjectScreen.tsx`）ほど載ることになり、**そこでの再発を素通し**する。数で持つ。
  */
 // 凍結時点の数（合計 22 件・6ファイル）。⚠️ **直したら数も一緒に下げる**（この1行が「何件直したか」の記録）。
-// #923 で domain/renderer/infrastructure（19件）と store・hooks・panels（24件）を 0 にした。残りは画面。
+// #923 で domain/renderer/infrastructure（19ファイル26件）と store・hooks・panels（17件）を 0 にした。残りは画面。
 const BASELINE: Record<string, number> = {
   'app/components/ColorPicker.tsx': 1,
   'app/components/FreeLayoutOverlay.tsx': 1,
