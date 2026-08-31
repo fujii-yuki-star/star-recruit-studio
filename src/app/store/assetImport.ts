@@ -10,11 +10,6 @@ import type { AssetMetadata } from "../../domain/project/types";
 export type VideoEnrichment = { metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string };
 
 /**
- * 取り込んだ動画の付加情報（メタ＝長さ/音声有無/解像度、代表フレーム＝サムネ）を取得する純IO。
- * store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立
- * ＝メタが取れなくても素材そのものは使える）。
- */
-/**
  * 写真の**大きさ**だけを測る（#346）。
  *
  * ⚠️ **これが無いと「ぼやける素材」の注意が写真では一度も出ない**＝`metadata` を書いていたのは
@@ -35,6 +30,11 @@ export async function probeImageSize(projectId: string, relPath: string): Promis
   }
 }
 
+/**
+ * 取り込んだ動画の付加情報（メタ＝長さ/音声有無/解像度、代表フレーム＝サムネ）を取得する純IO。
+ * store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立
+ * ＝メタが取れなくても素材そのものは使える）。
+ */
 export async function probeAndThumbVideo(projectId: string, relPath: string): Promise<VideoEnrichment> {
   const out: VideoEnrichment = {};
   try {

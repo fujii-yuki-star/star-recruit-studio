@@ -49,20 +49,15 @@ export function detachedDocCount(src: string): number {
  * ⚠️ **ファイル名だけの許可リストにしない**＝いちばん触るファイル（`uiLabels.ts`・
  * `TimelineProjectScreen.tsx`）ほど載ることになり、**そこでの再発を素通し**する。数で持つ。
  */
-// 凍結時点の数（合計 39 件・11ファイル）。⚠️ **直したら数も一緒に下げる**（この1行が「何件直したか」の記録）。
-// #923 で domain / renderer / infrastructure の19件を 0 にした（残りは app 配下）。
+// 凍結時点の数（合計 22 件・6ファイル）。⚠️ **直したら数も一緒に下げる**（この1行が「何件直したか」の記録）。
+// #923 で domain/renderer/infrastructure（19件）と store・hooks・panels（24件）を 0 にした。残りは画面。
 const BASELINE: Record<string, number> = {
   'app/components/ColorPicker.tsx': 1,
   'app/components/FreeLayoutOverlay.tsx': 1,
   'app/components/layout/PanelLayoutView.tsx': 1,
-  'app/hooks/keyboardShortcut.ts': 1,
   'app/screens/LooksEditScreen.tsx': 2,
   'app/screens/SceneEditScreen.tsx': 1,
   'app/screens/TimelineProjectScreen.tsx': 16,
-  'app/store/assetImport.ts': 1,
-  'app/store/projectStore.ts': 3,
-  'app/store/timelineStore.ts': 11,
-  'app/timelinePanels.ts': 1,
 };
 
 describe('説明文を別の宣言から奪わない（再発防止の門番）', () => {

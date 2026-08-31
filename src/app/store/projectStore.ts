@@ -259,13 +259,13 @@ interface ProjectState {
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
-  /** 新規プロジェクト（作業状態を初期化）。 */
   /**
    * **いま開いている文書の世代**（#762）。開き直す・新規にする・消すたびに1つ進む。
    * ⚠️ 照合に `projectId` を使わない＝**新規の動画は id を持たない**（保存で初めて採番する）ので、
    * 保存中に別の新規を作ると「どちらも id 無し」で同じものに見え、**採番した id が別の文書へ乗る**。
    */
   _docEpoch: number;
+  /** 新規プロジェクト（作業状態を初期化）。 */
   newProject: () => void;
   /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
   newBlankProject: () => void;
@@ -306,7 +306,6 @@ interface ProjectState {
   addScene: () => string;
   /** 指定の場面を削除する（パートからも除き、order を 1..N に振り直す）。 */
   removeScene: (sceneId: string) => void;
-  /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
   /**
    * 開いたプロジェクトに**旧・場面横断タイムラインの手編集**（`timelineOverlay.clips`）が残っているか（#635）。
    * データは消さないが動画には出さないので、画面が一言断るために使う（`15 §6` TIMELINE_OVERLAY_RETIRED）。
@@ -314,6 +313,7 @@ interface ProjectState {
   hasRetiredTimelineEdits: boolean;
   /** その案内を閉じる（読み終えたら出し続けない）。 */
   dismissRetiredTimelineNotice: () => void;
+  /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
   moveScene: (sceneId: string, direction: "up" | "down") => void;
   /** 場面を任意の位置（移動後の配列index）へ動かす（ドラッグ&ドロップ・#398）。1操作=1履歴。 */
   moveSceneToIndex: (sceneId: string, toIndex: number) => void;
@@ -472,7 +472,6 @@ interface ProjectState {
   refreshMissingAssets: () => Promise<void>;
   /** ブランドキットを読み直す（#351）。 */
   refreshBrandKit: () => Promise<void>;
-  /** ブランドキットを書き換える（#351）。 */
   /**
    * 会社の見た目を覚え直す（#351）。**書けたら `true`**（α-6 出口監査 🟡23）。
    * ⚠️ **書けなかったら画面を戻して理由を `brandKitError` に置く**＝保存できていないのに覚えた顔をしない。

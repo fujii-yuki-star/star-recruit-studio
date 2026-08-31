@@ -4,10 +4,6 @@
 // タイムライン編集の選択操作（`Escape`／`Ctrl+A`）が同じ入口を通る。
 
 /**
- * 文字入力中の要素か（input/textarea/contentEditable）。
- * 「標準の文字 Undo を奪わない」判定と、履歴グループの「連続入力だけを1履歴に合成する」判定に使う。
- */
-/**
  * **文字を打つ入力**の種類（#701 レビュー）。`<input>` は種類で意味が全く違う＝スライダー（`range`）や
  * チェックボックスは「文字を打つ場所」ではないので、そこにフォーカスがあるだけでキー操作が
  * **黙って効かなくなる**のを避ける（再生位置のスライダーを触った直後に `Escape` が死ぬ、が実際に起きる）。
@@ -15,6 +11,10 @@
  */
 const NON_TEXT_INPUT_TYPES = new Set(["range", "checkbox", "radio", "button", "submit", "reset", "file", "image", "color"]);
 
+/**
+ * 文字入力中の要素か（input/textarea/contentEditable）。
+ * 「標準の文字 Undo を奪わない」判定と、履歴グループの「連続入力だけを1履歴に合成する」判定に使う。
+ */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   const t = target as HTMLElement | null;
   if (!t) return false;
