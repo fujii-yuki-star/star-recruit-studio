@@ -483,8 +483,9 @@ describe("小さな絵（#926）", () => {
     expect(libraryAssetDisplayUrl).not.toHaveBeenCalled();
   });
 
-  // ⚠️ **読み直したら「出せなかった」も忘れる**＝覚えたままだと、名前を直す・取り込み直すなどで
-  // 一覧を読み直しても**その素材だけ二度と絵が出ない**。
+  // ⚠️ **読み直したら「出せなかった」も忘れる**＝**一度きりの失敗**（ディスクや IPC がたまたま
+  // 詰まった等）を画面を開き直すまで引きずらないため。⚠️ **恒久的な失敗はまた失敗する**（実体は
+  // 変わらないので）＝ここが直すのは「一過性だったのに二度と試さない」ほう（PR #939 レビュー）。
   it("一覧を読み直したら、もう一度絵を取りに行く", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x/ng.png" as never);
     await showList([lib({ id: "lib_asset_006", displayName: "外観2", assetType: ASSET_TYPE.image, fileName: "ng.png" })]);

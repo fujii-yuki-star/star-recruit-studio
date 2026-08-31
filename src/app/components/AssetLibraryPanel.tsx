@@ -108,9 +108,12 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
     const list = await listLibraryAssets();
     setUnreadable(list == null);
     if (list) setItems(list);
-    // ⚠️ **読み直したら「出せなかった」も忘れる**（#926）＝覚えたままだと、名前を直す・取り込み直す
-    // などで一覧を読み直しても**その素材だけ二度と絵が出ない**。失敗は一度きりのこと（書き込みの途中
-    // だった等）でも起こるので、利用者の操作で一覧が変わるたびに試し直す。
+    // ⚠️ **読み直したら「出せなかった」も忘れる**（#926）＝**一度きりの失敗**（ディスクや IPC が
+    // たまたま詰まった等）を、画面を開き直すまで引きずらないため。**利用者が一覧を動かしたとき**だけ
+    // 試し直すので、何度も自動で叩き直すことにはならない。
+    // ⚠️ **名前を直しても実体は変わらない**（`updateLibraryAsset` は displayName/tags/種類だけ・
+    // `id` も `fileName` も不変＝PR #939 レビュー）ので、**恒久的な失敗はまた失敗する**。それでよい
+    // ＝ここが直すのは「一過性だったのに二度と試さない」ほうで、恒久的な失敗を隠すことではない。
     setFailedIds(new Set());
   };
   useEffect(() => {
