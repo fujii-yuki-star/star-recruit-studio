@@ -109,3 +109,56 @@ describe('消した動画には焼かない（#927）', () => {
     expect(saveProjectThumbnail).toHaveBeenCalledTimes(1);
   });
 });
+
+// 削除は**走っている焼き込みを全部**待つ（PR #934 レビュー 🔴）。
+//
+// ⚠️ 1枠で持つと、**続けて保存**したときに後から始まった焼き込みが枠を上書きし、
+// **先に始まったほうが終わった時点で枠が空**になる（`finally` が無条件に空へ戻すため）。
+// 空の枠を待っても素通りし、**まだ書いている最中の焼き込みとフォルダの削除がぶつかる**。
+describe('削除は走っている焼き込みを全部待つ（#927 の続き）', () => {
+  /** `saveProjectThumbnail` を手で着地させられるようにする。 */
+  function controllable(): { release: () => void; started: Promise<void> } {
+    let release = (): void => {};
+    let markStarted = (): void => {};
+    const started = new Promise<void>((res) => { markStarted = res; });
+    vi.mocked(saveProjectThumbnail).mockImplementationOnce(
+      () => new Promise<void>((res) => { markStarted(); release = () => res(); }),
+    );
+    return { release: () => release(), started };
+  }
+
+  it('2本走っているとき、後から始まったほうも待つ', async () => {
+    const { deleteProjectDoc } = await import('../../infrastructure/projectFs');
+    vi.mocked(deleteProjectDoc).mockClear();
+
+    const a = controllable();
+    const first = useProjectStore.getState()._refreshProjectThumbnail('proj_two_a');
+    await a.started;
+    const b = controllable();
+    // 別の中身にして印の一致で飛ばされないようにする。
+    useProjectStore.setState({ scenes: [{ ...scene, durationSec: 9 } as unknown as Scene] } as never);
+    const second = useProjectStore.getState()._refreshProjectThumbnail('proj_two_b');
+    await b.started;
+
+    // 先に始まったほうだけ着地させる＝1枠で持っていると、ここで枠が空になる。
+    a.release();
+    await first;
+
+    let deleted = false;
+    const del = useProjectStore.getState().deleteProject('proj_two_b').then(() => { deleted = true; });
+    // ⚠️ **マクロタスクを1回はさんで見る**＝`deleteProject` の経路は Promise の連なり
+    //（マイクロタスク）だけで出来ているので、`setTimeout` を1回待てば**その時点で積まれている
+    // マイクロタスクは全部掃ける**＝**内部の await が何段あっても効く**（段数に依存しない）。
+    // ⚠️ **`await Promise.resolve()` を数回では足りない**＝何回回すかが内部の段数に依存し、
+    // **待てていなくても未完了**に見えてバグを見逃す（実際に1回で書いて見逃した）。
+    await new Promise((r) => { setTimeout(r, 0); });
+    // まだ書いている最中なので、消し始めていない。
+    expect(deleteProjectDoc).not.toHaveBeenCalled();
+    expect(deleted).toBe(false);
+
+    b.release();
+    await second;
+    await del;
+    expect(deleteProjectDoc).toHaveBeenCalledWith('proj_two_b');
+  });
+});
