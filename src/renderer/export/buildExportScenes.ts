@@ -119,7 +119,6 @@ export type NarrationFor = (
   lineId?: string,
 ) => { audioBase64?: string; narrationVolume: number } | undefined;
 
-/** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
 /** 場面の動画スロットを**すべて**返すコールバック（空配列＝静止画シーン・#431 複数動画）。 */
 export type VideoSlotsFor = (scene: Scene) => VideoSlotInfo[];
 

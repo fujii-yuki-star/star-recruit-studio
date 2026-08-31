@@ -11,10 +11,10 @@ export const TEMPLATE_ADDABLE_LAYER_TYPES: LayerType[] = LAYER_TYPES.filter((t) 
 const LAYER_DEFAULT_W = 480;
 const LAYER_DEFAULT_H = 240;
 
-/** 既存と衝突しない layer id（layer_NNN・テンプレ内一意・空き番号を埋める）。 */
 /** 複製をずらす量（px）＝真下に重なって「増えていない」ように見えるのを防ぐ。 */
 const DUPLICATE_OFFSET_PX = 24;
 
+/** 既存と衝突しない layer id（layer_NNN・テンプレ内一意・空き番号を埋める）。 */
 export function createLayerId(layers: Layer[]): string {
   const used = new Set(layers.map((l) => l.id));
   let n = 1;

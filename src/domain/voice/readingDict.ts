@@ -65,7 +65,6 @@ function sameReading(
   return a.yomi === b.yomi && a.accentType === b.accentType;
 }
 
-/** エンジンへ映すための計画（`planDictSync` の答え）。 */
 /**
  * **黙って上書きしなかった**語（決定3b）＝言葉は同じだが読みが違い、アプリが入れた覚えのない語。
  * 画面がこれを出して「そのままにする／こちらの読みにする」を選ばせる。
@@ -75,6 +74,7 @@ export interface EngineConflict {
   engine: EngineWord;
 }
 
+/** エンジンへ映すための計画（`planDictSync` の答え）。 */
 export interface DictSyncPlan {
   /** エンジンへ送る操作。空＝そろっている（何も送らない）。 */
   ops: DictOp[];

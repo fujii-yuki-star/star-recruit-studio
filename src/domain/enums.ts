@@ -68,7 +68,6 @@ export const TEXT_ALIGN = {
 export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out'] as const;
 export type Easing = (typeof EASINGS)[number];
 
-/** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
 /**
  * **自由なカーブ**（#262）。CSS の `cubic-bezier(x1,y1,x2,y2)` と同じ形＝始点(0,0)・終点(1,1) を結ぶ
  * 3次ベジェの制御点。`x` は 0〜1（時間が戻らない）・`y` は範囲外も許す（行き過ぎて戻る動きを作れる）。
@@ -83,6 +82,7 @@ export interface BezierEasing {
  */
 export type EasingSpec = Easing | BezierEasing;
 
+/** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
 export const EASING = {
   linear: 'linear',
   easeIn: 'ease-in',
