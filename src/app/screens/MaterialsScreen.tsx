@@ -10,6 +10,7 @@ import { IMPORT_NO_PROJECT_MESSAGE } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
+import { NoticeZone } from "../components/NoticeZone";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { AssetLibraryPanel } from "../components/AssetLibraryPanel";
@@ -186,27 +187,29 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         }
       />
 
-      {importError && (
-        <div className="notice notice-warn row-between mb" role="alert">
-          <span>{importError}</span>
-          <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
-        </div>
-      )}
+      <NoticeZone>
+        {importError && (
+          <div className="notice notice-warn row-between mb" role="alert">
+            <span>{importError}</span>
+            <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+          </div>
+        )}
 
-      {/* ⚠️ **見つからない素材は書き出す前に知らせる**（#347・§2-5）＝黙って抜けた動画を成功として
-          出さない。次の行動は**そのファイルを選び直す**（`assetId` は変わらないので、置いた場所も
-          切り出す範囲も字幕の紐づけもそのまま戻る）。 */}
-      {missingAssetIds.length > 0 && (
-        <div className="notice notice-warn mb" role="alert">
-          {missingAssetIds.length}つの素材のファイルが見つかりません。動かしたか、消えている可能性があります。
-          その素材を選んで「ファイルを選び直す」から入れ直してください（置いた場所や設定はそのまま残ります）。
-        </div>
-      )}
+        {/* ⚠️ **見つからない素材は書き出す前に知らせる**（#347・§2-5）＝黙って抜けた動画を成功として
+            出さない。次の行動は**そのファイルを選び直す**（`assetId` は変わらないので、置いた場所も
+            切り出す範囲も字幕の紐づけもそのまま戻る）。 */}
+        {missingAssetIds.length > 0 && (
+          <div className="notice notice-warn mb" role="alert">
+            {missingAssetIds.length}つの素材のファイルが見つかりません。動かしたか、消えている可能性があります。
+            その素材を選んで「ファイルを選び直す」から入れ直してください（置いた場所や設定はそのまま残ります）。
+          </div>
+        )}
 
-      {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。以前はこの画面だけ独自文言で、進捗も戻る導線も無かった
-          ＝同じ状況なのに画面ごとに見え方が違う（§2-7・ADR-0026②）。素材操作を実際に試したときの個別案内は
-          store の `EXPORT_BUSY_ASSET_MSG`（importError）が出す。 */}
-      <ExportLockBanner onNavigate={onNavigate} />
+        {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。以前はこの画面だけ独自文言で、進捗も戻る導線も無かった
+            ＝同じ状況なのに画面ごとに見え方が違う（§2-7・ADR-0026②）。素材操作を実際に試したときの個別案内は
+            store の `EXPORT_BUSY_ASSET_MSG`（importError）が出す。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
+      </NoticeZone>
 
       {/* よく使う素材（ADR-0035・#260）＝動画をまたいで使い回す置き場。この動画の素材とは別の棚で、
           取り込みは**コピー**（プロジェクトは自己完結・ADR-0024 決定6）。 */}
