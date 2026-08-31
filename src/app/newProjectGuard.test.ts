@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Asset } from "../../domain/project/types";
-import { sampleAssets } from "../../infrastructure/sampleData";
+import type { Asset } from "../domain/project/types";
+import { sampleAssets } from "../infrastructure/sampleData";
 import { hasWizardBrief, hasWorkInProgress, hasUnsavedChanges } from "./newProjectGuard";
 
 describe("hasWorkInProgress", () => {

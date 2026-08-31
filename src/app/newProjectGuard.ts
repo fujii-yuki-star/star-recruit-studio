@@ -1,7 +1,13 @@
 // 新規作成の破棄ガード判定＋未保存検知（純粋ロジック・テスト容易／CLAUDE.md §4・§7）。
-import type { Asset, CompanyInfo, GeneralBrief } from "../../domain/project/types";
-import type { SaveStatus } from "../store/projectStore";
-import { sampleAssets } from "../../infrastructure/sampleData";
+//
+// ⚠️ **`hooks/` ではなく `app/` 直下**（#924）＝React のフックではないので、`hooks/` に置くと
+// 中身と置き場所が食い違う。`adapters.ts`／`navigation.ts`／`timelinePanels.ts`／`uiLabels.ts` と同じ並び。
+// ⚠️ **`domain/` へは移さない**＝この判定は `infrastructure/sampleData`（見本の素材）を見るので、
+// `domain` へ置くと**本番コードで初めての「domain → infrastructure」**を作る（§4 違反）。
+// 直したい「純粋関数が hooks/ にある」より重い問題を新しく作らない、という判断（#924 に記録）。
+import type { Asset, CompanyInfo, GeneralBrief } from "../domain/project/types";
+import type { SaveStatus } from "./saveStatus";
+import { sampleAssets } from "../infrastructure/sampleData";
 
 // サンプル素材以外（ユーザーが取り込んだ素材）を「作業中の内容」とみなす。
 const SAMPLE_ASSET_IDS = new Set(sampleAssets.map((a) => a.assetId));

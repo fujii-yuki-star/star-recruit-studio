@@ -6,7 +6,7 @@ import { DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
-import { hasUnsavedChanges } from "../hooks/newProjectGuard";
+import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import { PROJECT_THUMBNAIL_PATH } from "../../domain/project/thumbnail";
 import { ExportLockBanner } from "../components/ExportLockBanner";

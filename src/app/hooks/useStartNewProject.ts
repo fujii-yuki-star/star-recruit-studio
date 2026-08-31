@@ -6,7 +6,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Orientation } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
-import { hasUnsavedChanges } from "./newProjectGuard";
+import { hasUnsavedChanges } from "../newProjectGuard";
 
 // 新規作成の行き先。wizard＝従来（AI 生成前提）／blank＝白紙から手動で組む（#393）。
 type NewProjectKind = "wizard" | "blank" | "timeline";

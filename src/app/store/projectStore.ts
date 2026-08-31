@@ -29,7 +29,7 @@ import { substituteDeletedTemplateInScenes } from "../../domain/project/template
 import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 // たたき台の入力があるか＝**守る側と同じ判定**を共有する（破棄ガードと食い違わせない）。
-import { hasWizardBrief, hasWorkInProgress } from "../hooks/newProjectGuard";
+import { hasWizardBrief, hasWorkInProgress } from "../newProjectGuard";
 import { duplicateProjectDoc, duplicatedFilePaths } from "../../domain/project/duplicate";
 import { thumbnailScene, thumbnailSignature } from "../../domain/project/thumbnail";
 import { renderProjectThumbnail } from "../../renderer/export/projectThumbnail";
@@ -104,7 +104,9 @@ import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoice
 import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
-export type SaveStatus = "idle" | "saving" | "saved" | "error";
+// 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
+export type { SaveStatus } from "../saveStatus";
+import type { SaveStatus } from "../saveStatus";
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
 // 値の定義は domain（`exportProgress.ts`）に1か所だけ置く（§2-7）。ここは別名＝進捗計算と常に同じ語彙になる。
 export type ExportPhase = ExportRunPhase;
