@@ -2181,6 +2181,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 押せてしまうと、離してから `commit` が断る＝**押してから断る**になる（#703 で消した形の再発）。
    */
   const beginClipDrag = (e: ReactPointerEvent, clipId: string, mode: "move" | "trim-start" | "trim-end"): void => {
+    // ⚠️ **掴めるかに関わらず、焦点を帯へ移さない**（#948）＝帯は `<button>` なので、押すと焦点が
+    // そこへ移り、以後 `Space` は**ボタンの起動**に使われて再生・停止に届かなくなる。
+    // 掴める帯だけは `usePointerDrag` の `preventDefault` でたまたま焦点が移らずに済んでいたので、
+    // **再生中と固定した列でだけ `Space` が死ぬ**という状態で挙動が割れていた（ADR-0026②）。
+    // ここで先に落として、どの帯でも同じにする。
+    // ⚠️ **`click` は止まらない**＝帯を押して選ぶ操作はそのまま効く。
+    // ⚠️ **ボタンの種別で分けない**（PR #949 レビュー 🟡）＝掴む作法（`usePointerDrag`）は
+    // `if (e.button !== 0) return; e.preventDefault();` と**左ボタンだけ**に絞っているが、ここは
+    // **意図して全ボタンで落とす**。右クリックでも焦点は帯へ移るので、絞ると「右クリックしたあとは
+    // `Space` が死ぬ」が残る（同じ帯で押し方によって挙動が割れる＝ADR-0026②）。
+    // ⚠️ **右クリックのメニューは出る**＝実機（Tauri）で確認済み。Windows の `contextmenu` は
+    // ボタンの**離し**由来なので、`pointerdown` の既定を落としても開く。
+    // ⚠️ **キーボードでの到達は残る**＝`<button>` のままなので Tab では焦点を当てられ、
+    // そこでの `Space` が「選ぶ」に使われるのはボタンの作法どおり。直したいのは
+    // **マウスで押しただけで再生の操作が死ぬ**ほう。
+    e.preventDefault();
     // 前の `click` の取りこぼしは**共有の受け口**（`skipNextClick` の下の `pointerdown` 捕捉）が
     // 既に落としている（#743 レビューでここに書いていた同じ処理は #833-1 で1か所へ寄せた）＝
     // 掴む場所ごとに書き写すと、片方だけ直したときに「ここでは縮むのにあそこでは残る」が戻る。
