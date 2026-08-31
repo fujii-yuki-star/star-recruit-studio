@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { claimEscape } from "../hooks/escapeOwners";
 import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
+import { FONT_INHERIT_PROJECT_LABEL } from "../uiLabels";
 
 // 動画フォントの選択（プルダウン）。各選択肢を「そのフォントの字形」で表示して直感的に選べるようにする。
 // native <select> は option 個別の font 装飾ができないため、開閉する自前のドロップダウンにする。
 // ※ ARIA: listbox/option ロールは矢印キー移動など一式の実装が前提なので使わず、ボタン列＋aria-current で
 //   選択中を示す（PR#161 レビュー）。Esc・背景クリックで閉じる。
-// allowInherit=true のとき、先頭に「動画全体に合わせる」(=null) を出す（場面ごとのフォント＝null は継承）。
-const INHERIT_LABEL = "動画全体に合わせる";
+// allowInherit=true のとき、先頭に継承の項目 (=null) を出す（場面ごとのフォント＝null は継承）。
+// ⚠️ **継承先の名前は呼ぶ側が決める**（#925）＝どこに合わせるかは場所によって違う
+//（`resolveFontId`＝場面の指定 → 動画全体 → 既定）。**場面が自分の指定を持っているとき**に
+// 「動画全体に合わせる」と出すと**設定した意味と違うことを言う**（ADR-0026①）。既定は動画全体。
 /** 指している字体が一覧に無いとき（起動直後でまだ読めていない／実体が消えている）。 */
 const MISSING_LABEL = "取り込んだ文字の形（見つかりません）";
 
@@ -16,6 +19,7 @@ export function FontPicker({
   value,
   onChange,
   allowInherit,
+  inheritLabel = FONT_INHERIT_PROJECT_LABEL,
   disabled,
   title,
 }: {
@@ -23,6 +27,11 @@ export function FontPicker({
   /** null は「継承（動画全体に合わせる）」。allowInherit=false のときは null を返さない。 */
   onChange: (id: FontId | null) => void;
   allowInherit?: boolean;
+  /**
+   * 継承の項目に出す名前（#925）。未指定＝「動画全体に合わせる」。
+   * ⚠️ **場面の指定がある場面では「この場面の文字の形に合わせる」を渡す**＝実際の継承先を言う。
+   */
+  inheritLabel?: string;
   /**
    * 押せないとき（書き出し中・固定した列など・#720）。**受け口が無いと、渡された `disabled` は
    * 黙って捨てられる**＝触れてしまい、あとから断られる。
@@ -101,7 +110,7 @@ export function FontPicker({
         aria-expanded={open}
         style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit || missing ? undefined : fontFamilyForId(current.id) }}
       >
-        {isInherit ? INHERIT_LABEL : current.label}
+        {isInherit ? inheritLabel : current.label}
       </button>
       {open && (
         <>
@@ -123,7 +132,7 @@ export function FontPicker({
                   onClick={() => { onChange(null); setOpen(false); }}
                   style={optionStyle(isInherit)}
                 >
-                  <span>{INHERIT_LABEL}</span>
+                  <span>{inheritLabel}</span>
                   <span className="text-sm text-muted">既定</span>
                 </button>
               </li>

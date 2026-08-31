@@ -94,3 +94,26 @@ describe("FontPicker", () => {
     expect(screen.queryByText("手書き風")).not.toBeInTheDocument();
   });
 });
+// 継承の項目は**実際の継承先**を言う（#925・ADR-0026①）。
+//
+// ⚠️ 「動画全体に合わせる」と書いてあるのに動画全体の字体にならない場面がある＝
+// **場面が自分の文字の形を持っている**とき、種別ごと・部品ごとの継承は**その場面**へ合わせる
+//（`resolveFontId`＝場面の指定 → 動画全体 → 既定）。
+describe("継承の項目の名前（#925）", () => {
+  it("既定は「動画全体に合わせる」", () => {
+    render(<FontPicker value={null} onChange={vi.fn()} allowInherit />);
+    expect(screen.getByRole("button", { name: /動画全体に合わせる/ })).toBeInTheDocument();
+  });
+
+  it("渡した名前を出す（場面の指定があるとき）", () => {
+    render(<FontPicker value={null} onChange={vi.fn()} allowInherit inheritLabel="この場面の文字の形に合わせる" />);
+    expect(screen.getByRole("button", { name: /この場面の文字の形に合わせる/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /動画全体に合わせる/ })).toBeNull();
+  });
+
+  it("開いた一覧の中でも同じ名前を出す（見出しと中身で違う名前にしない）", () => {
+    render(<FontPicker value={null} onChange={vi.fn()} allowInherit inheritLabel="この場面の文字の形に合わせる" />);
+    fireEvent.click(screen.getByRole("button", { name: /この場面の文字の形に合わせる/ }));
+    expect(screen.getAllByText("この場面の文字の形に合わせる").length).toBeGreaterThan(1);
+  });
+});

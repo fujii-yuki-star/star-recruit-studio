@@ -60,8 +60,8 @@ import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
-import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
+import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
+import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
 import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
@@ -412,6 +412,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // この場面で解決済みの CSS font-family（場面→動画全体→既定）。FREE テキストのインライン編集を実描画と同じ
   // 見た目にするためオーバーレイへ渡す（#549）。解決順は ScenePreview／sceneSvg と同じ（要素の fontId は要素側で優先）。
   const sceneFontFamily = fontFamilyForId(resolveFontId(selected?.fontId, fontId));
+  // ⚠️ **継承先の名前は実際の解決先を言う**（#925・ADR-0026①）＝この場面が自分の文字の形を
+  // 持っていれば、種別ごと・部品ごとの「継承」はそこへ合わせる（動画全体ではない）。
+  // 「動画全体に合わせる」と書いてあるのに動画全体の字体にならない、を作らない。
+  const inheritLabelHere = isKnownFontId(selected?.fontId) ? FONT_INHERIT_SCENE_LABEL : FONT_INHERIT_PROJECT_LABEL;
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
@@ -1187,7 +1191,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
             <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
-                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
@@ -1312,7 +1316,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
             <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
-                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
@@ -1876,7 +1880,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     )}
                     <div className="field" style={{ marginTop: 6 }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                     </div>
                     {renderTextStyleControls(key)}
                   </div>
@@ -1933,13 +1937,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {otherFontKeys.map((key) => (
                       <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
                         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                        <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                        <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                       </div>
                     ))}
                     {unknownFreeFonts.map((el) => (
                       <div className="field" style={{ marginTop: 6 }} key={`unknown-free-${el.id}`}>
                         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{freeName(el)}のフォント</label>
-                        <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
+                        <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
                       </div>
                     ))}
                   </>
@@ -1950,13 +1954,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {dormantFontKeys.map((key) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                    <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                    <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                   </div>
                 ))}
                 {dormantFreeFonts.map((el) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-free-${el.id}`}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{freeName(el)}のフォント</label>
-                    <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit />
+                    <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
                   </div>
                 ))}
               </div>
