@@ -10,6 +10,7 @@ import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import { PROJECT_THUMBNAIL_PATH } from "../../domain/project/thumbnail";
 import { ExportLockBanner } from "../components/ExportLockBanner";
+import { NoticeZone } from "../components/NoticeZone";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
@@ -280,75 +281,77 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
-          {openError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>{openError}</span>
-            </div>
-          )}
-
-          {deleteError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>プロジェクトを削除できませんでした。もう一度お試しください。</span>
-            </div>
-          )}
-
-          {renameError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>名前を変更できませんでした。もう一度お試しください。</span>
-            </div>
-          )}
-
-          {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。ここは進捗も戻る導線も無い独自 notice だった＝
-              二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
-          <ExportLockBanner
-            onNavigate={onNavigate}
-            detail="書き出しが終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません。"
-          />
-
-          {confirmNew && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>
-                今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
-              </span>
-              {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
-              <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
-                  やめる
-                </button>
-                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
-                  新しく作る
-                </button>
+          <NoticeZone>
+            {openError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{openError}</span>
               </div>
-            </div>
-          )}
+            )}
 
-          {pendingAction && (
-            <div className="notice notice-warn mb" role="alert">
-              {/* ⚠️ **押したボタンのことを聞く**（PR #889 レビュー 🔴）＝複製なのに「開きますか？」と
-                  聞いていると、利用者は違うことが起きても気づけない。 */}
-              <span>
-                {pendingAction.kind === "duplicate"
-                  ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"
-                  : "今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"}
-              </span>
-              {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
-              <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon" onClick={() => setPendingAction(null)}>
-                  やめる
-                </button>
-                <button
-                  className="btn btn-primary btn-icon"
-                  onClick={() => {
-                    const a = pendingAction;
-                    setPendingAction(null);
-                    void (a.kind === "duplicate" ? doDuplicate(a.projectId) : doOpenProject(a.projectId));
-                  }}
-                >
-                  {pendingAction.kind === "duplicate" ? "複製して開く" : "開く"}
-                </button>
+            {deleteError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>プロジェクトを削除できませんでした。もう一度お試しください。</span>
               </div>
-            </div>
-          )}
+            )}
+
+            {renameError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>名前を変更できませんでした。もう一度お試しください。</span>
+              </div>
+            )}
+
+            {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。ここは進捗も戻る導線も無い独自 notice だった＝
+                二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
+            <ExportLockBanner
+              onNavigate={onNavigate}
+              detail="書き出しが終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません。"
+            />
+
+            {confirmNew && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>
+                  今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
+                </span>
+                {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
+                    やめる
+                  </button>
+                  <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
+                    新しく作る
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingAction && (
+              <div className="notice notice-warn mb" role="alert">
+                {/* ⚠️ **押したボタンのことを聞く**（PR #889 レビュー 🔴）＝複製なのに「開きますか？」と
+                    聞いていると、利用者は違うことが起きても気づけない。 */}
+                <span>
+                  {pendingAction.kind === "duplicate"
+                    ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"
+                    : "今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"}
+                </span>
+                {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost btn-icon" onClick={() => setPendingAction(null)}>
+                    やめる
+                  </button>
+                  <button
+                    className="btn btn-primary btn-icon"
+                    onClick={() => {
+                      const a = pendingAction;
+                      setPendingAction(null);
+                      void (a.kind === "duplicate" ? doDuplicate(a.projectId) : doOpenProject(a.projectId));
+                    }}
+                  >
+                    {pendingAction.kind === "duplicate" ? "複製して開く" : "開く"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </NoticeZone>
 
           {/* ヒーロー: 新しい動画を作る */}
           <div className="hero">
