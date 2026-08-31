@@ -44,7 +44,8 @@ export function detachedDocCount(src: string): number {
 }
 
 /**
- * ファイルごとの上限。**0 件が正しい状態**＝#923 で 65 件すべてを片づけたので空にしてある。
+ * ファイルごとの上限。**0 件が正しい状態**＝#923 で 65 件すべてを片づけたので空にしてある
+ * （内訳＝domain/renderer/infrastructure 26・store/hooks/panels 17・画面 22）。
  *
  * ⚠️ **ファイル名だけの許可リストにしない**＝いちばん触るファイル（`uiLabels.ts`・
  * `TimelineProjectScreen.tsx`）ほど載ることになり、**そこでの再発を素通し**する。数で持つ。
