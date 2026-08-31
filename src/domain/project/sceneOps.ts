@@ -103,7 +103,7 @@ function textBoxH(h: number, fontSize: number, maxLines: number | undefined): nu
  * している**ので動かさない（`行数-1 = 0`）。掛け合いは行ごとに行数が変わり単一の y では一致させられないため、
  * **全行の最大行数**に寄せる＝どの行でもテンプレより下がらない（はみ出しを増やさない）側を採る。
  */
-function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined): number {
+function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined, letterSpacingEm = 0): number {
   const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
   // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`defaultSubtitleSource` と同じ規則）。
   // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
@@ -115,10 +115,10 @@ function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxL
           1,
           ...lines.map((l) => {
             const sub = resolveLineSubtitle(l, scene);
-            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap).length : 1;
+            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap, letterSpacingEm).length : 1;
           }),
         )
-      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap).length;
+      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap, letterSpacingEm).length;
   return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
 }
 
@@ -272,7 +272,8 @@ export function freeLayoutFromPlacedContent(
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
-        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines),
+        // 字間も渡す（#928）＝行数が変われば上端も変わる（描画と同じ行数で翻訳する）。
+        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines, style.letterSpacing ?? 0),
         h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
         ...style,

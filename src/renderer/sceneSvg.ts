@@ -43,7 +43,9 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   const parts: string[] = [];
   // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
   const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
-  const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
+  // ⚠️ **折返しにも字間を渡す**（#928）＝渡さないと、字間を広げた文字が**実際より狭く**見積もられ、
+  // 描くときだけ横に伸びて**箱からはみ出す**（絵は割れないが、はみ出し判定が見逃す）。
+  const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines, item.letterSpacing ?? 0);
   const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
   // 下端基準（テンプレ字幕・ADR-0031）：行が増えたぶんを上へずらし、最終行は1行時の位置に留める＝画面下端に
   // 置いた字幕帯が2行で画面外へはみ出さない。anchorBottom でないもの（見出し・FREE text）は 0＝従来どおり上端起点。

@@ -42,6 +42,8 @@ export function truncatedTexts(
     maxLines?: number;
     /** 字幕として描かれるアイテムか（重複した知らせを外すのに使う＝呼ぶ側の判断）。 */
     isSubtitle?: boolean;
+    /** 字間（em・#264）。折返しが変わるので渡す（#928）＝渡さないと「切れている」を見逃す。 */
+    letterSpacing?: number;
   }[],
 ): string[] {
   const out: string[] = [];
@@ -49,7 +51,7 @@ export function truncatedTexts(
     if (it.kind !== 'text') continue;
     const { text, w, fontSize, maxLines } = it;
     if (!text || !w || !fontSize || !maxLines) continue;
-    if (isTruncated(text, wrapText(text, w, fontSize, maxLines))) out.push(text);
+    if (isTruncated(text, wrapText(text, w, fontSize, maxLines, it.letterSpacing ?? 0))) out.push(text);
   }
   return out;
 }
