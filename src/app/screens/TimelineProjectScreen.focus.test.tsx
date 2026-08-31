@@ -84,6 +84,43 @@ describe("帯を押しても焦点を帯へ移さない（#948）", () => {
     expect(pressClip()).toEqual({ found: true, prevented: true });
   });
 
+  // #950：**前に押した所からも手を降ろす**。焦点を「帯へ移さない」だけだと、`Space` の行き先が
+  // 直前に押したボタンに残り、押した場所によって別のことが起きる（型から外れる）。
+  it("前に押したボタンから手を降ろす（Space が別のことをしない）", () => {
+    useTimelineStore.setState({ doc: doc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // どれでもよいので画面のボタンへ手を移す（利用者がマウスで押した状態を作る）。
+    // ⚠️ **押せるボタンを選ぶ**＝`disabled` の要素は焦点を持てないので、前提が立たない。
+    const someButton = [...container.querySelectorAll("button:not(.timeline-clip)")]
+      .find((b) => !(b as HTMLButtonElement).disabled) as HTMLElement;
+    someButton.focus();
+    expect(document.activeElement).toBe(someButton); // 前提が立っていることを確かめてから見る
+    pressClip();
+    expect(document.activeElement).not.toBe(someButton);
+    // ⚠️ **帯へ移ってもいないこと**（レビュー ℹ️）＝`blur()` を `focus()` に取り違えても
+    // 「前のボタンから外れた」だけは真になるので、行き先まで見ないと退行を捕まえられない。
+    expect(document.activeElement).not.toBe(document.querySelector(".timeline-clip"));
+  });
+
+  // ⚠️ **掴めない帯でも降ろす**（レビュー ℹ️）＝`blur()` を `grabbableClip` の判定より**後ろ**へ
+  // 動かすと、掴める帯のテストだけでは通ってしまう（位置を留めていない）。固定した列で見る。
+  it("固定した列の帯でも、前に押した所から手を降ろす", () => {
+    useTimelineStore.setState({
+      doc: doc({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {},
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const someButton = [...container.querySelectorAll("button:not(.timeline-clip)")]
+      .find((b) => !(b as HTMLButtonElement).disabled) as HTMLElement;
+    someButton.focus();
+    expect(document.activeElement).toBe(someButton);
+    pressClip();
+    expect(document.activeElement).not.toBe(someButton);
+    // ⚠️ **帯へ移ってもいないこと**（レビュー ℹ️）＝`blur()` を `focus()` に取り違えても
+    // 「前のボタンから外れた」だけは真になるので、行き先まで見ないと退行を捕まえられない。
+    expect(document.activeElement).not.toBe(document.querySelector(".timeline-clip"));
+  });
+
   // ⚠️ **右クリックのメニューが消えていないこと**（レビュー 🟡）＝既定を全ボタンで落とすので、
   // `pointerdown` → `contextmenu` の**順に**通してメニューが開くところまで見る
   //（`fireEvent.contextMenu` の直撃だけだと、この順序で壊れても気づけない）。
