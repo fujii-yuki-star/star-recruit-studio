@@ -17,6 +17,7 @@ import {
   listLibraryAssets,
   usedLibraryAssetIds,
   updateLibraryAsset,
+  libraryAssetDisplayUrl,
 } from "../../infrastructure/assetLibraryFs";
 import {
   createLibraryAssetId,
@@ -25,7 +26,7 @@ import {
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabels";
-import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType } from "../../domain/enums";
+import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
 /** 種類の絞り込み（画面に出す名前）。 */
@@ -107,6 +108,13 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
     const list = await listLibraryAssets();
     setUnreadable(list == null);
     if (list) setItems(list);
+    // ⚠️ **読み直したら「出せなかった」も忘れる**（#926）＝**一度きりの失敗**（ディスクや IPC が
+    // たまたま詰まった等）を、画面を開き直すまで引きずらないため。**利用者が一覧を動かしたとき**だけ
+    // 試し直すので、何度も自動で叩き直すことにはならない。
+    // ⚠️ **名前を直しても実体は変わらない**（`updateLibraryAsset` は displayName/tags/種類だけ・
+    // `id` も `fileName` も不変＝PR #939 レビュー）ので、**恒久的な失敗はまた失敗する**。それでよい
+    // ＝ここが直すのは「一過性だったのに二度と試さない」ほうで、恒久的な失敗を隠すことではない。
+    setFailedIds(new Set());
   };
   useEffect(() => {
     // ⚠️ **effect の中で同期に setState しない**（lint）＝一覧の読み込みは非同期なので、
@@ -121,6 +129,32 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
       alive = false;
     };
   }, []);
+
+  // 小さな絵（#926）＝名前とタグの文字だけだと**数十件で見分けがつかない**。
+  //
+  // ⚠️ **URL を組むだけ**（`asset://`）でバイトは JS に載せない（ADR-0004＝素材画面と同じ流儀）。
+  // ⚠️ **出せない種別には出さない**（`isPreviewableImageType`）＝動画は代表フレームが要るが棚には
+  // 無いので、`<img>` にすると**壊れた画像枠が並ぶ**。
+  // ⚠️ **絵が無くても行は消さない**＝`null`（ブラウザ開発・組み立て失敗）は「出せない」であって
+  // 「素材が無い」ではない。
+  const [thumbById, setThumbById] = useState<Record<string, string>>({});
+  // ⚠️ **読み込めなかったものは覚えて、取りに行き直さない**＝`thumbById` から消すだけだと
+  // 「持っていない」に戻り、effect が**また取りに行って何度も失敗する**（同じ絵で回り続ける）。
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    const want = items.filter((a) => isPreviewableImageType(a.assetType)
+      && !(a.id in thumbById) && !failedIds.has(a.id));
+    if (want.length === 0) return;
+    void Promise.all(want.map(async (a) => [a.id, await libraryAssetDisplayUrl(a.fileName)] as const))
+      .then((pairs) => {
+        if (!alive) return;
+        const add: Record<string, string> = {};
+        for (const [id, url] of pairs) if (url) add[id] = url;
+        if (Object.keys(add).length > 0) setThumbById((prev) => ({ ...prev, ...add }));
+      });
+    return () => { alive = false; };
+  }, [items, thumbById, failedIds]);
 
   // ⚠️ **書き出し中も押せなくする**（α-6 出口監査 🟡15）＝すぐ隣の「素材を追加」は押す前に無効化＋理由なのに、
   // ここだけ押せて**画面上部のバナー**で断っていた（同じ「取り込み」で断り方が2通り＝ADR-0026②）。
@@ -413,6 +447,27 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                     : {}),
                 }}
               >
+                {/* 小さな絵（#926）＝出せるものだけ。⚠️ **無いときは枠も出さない**＝
+                    空の四角が並ぶと「読み込み中」に見える（実際は出せない種別）。 */}
+                {thumbById[a.id] && (
+                  <img
+                    src={thumbById[a.id]}
+                    alt=""
+                    // ⚠️ **読み込めなかったら消す**（PR #939 レビュー）＝`asset://` は
+                    // `tauri.conf.json` の scope 次第で拒まれることがあり、**その効きは実機でしか
+                    // 確かめられない**（ADR-0021 が `asset://` を避けた理由）。放っておくと
+                    // **壊れた画像の印**が並ぶので、失敗したらその絵だけ落として行は普通に使える形にする。
+                    onError={() => {
+                      setFailedIds((prev) => new Set(prev).add(a.id));
+                      setThumbById((prev) => {
+                        const next = { ...prev };
+                        delete next[a.id];
+                        return next;
+                      });
+                    }}
+                    style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }}
+                  />
+                )}
                 <span style={{ flex: 1 }}>
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}
