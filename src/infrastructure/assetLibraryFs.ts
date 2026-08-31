@@ -59,10 +59,14 @@ export function toLibraryAsset(raw: unknown): LibraryAsset[] {
  * ⚠️ **`null` は「出せない」であって「無い」ではない**＝ブラウザ開発（asset protocol が無い）や
  * 組み立ての失敗。呼ぶ側は**絵を出さないだけ**にして、行そのものは消さない。
  *
- * ⚠️ **`tauri.conf.json` の `assetProtocol.scope` に `$APPDATA/user_assets/**` が要る**（PR #939 レビュー）＝
+ * ⚠️ **`tauri.conf.json` の `assetProtocol.scope` に `$APPDATA/user_assets/*` が要る**（#942・実機で確認）＝
  * scope の外は protocol 側が拒むので、**URL は組めるのに読み込みだけ失敗する**（静かに壊れる）。
- * ⚠️ **scope の効きは実機でしか確かめられない**（ADR-0021 が `asset://` を避けた理由）ので、
- * 呼ぶ側は**読み込みに失敗したら絵を消す**（壊れた画像の印を出さない）＝失敗しても行は普通に使える。
+ * ⚠️ **`/**` ではなく `/*`**＝`/**` は**直下のファイルに当たらない**。ここの中身は `lib_asset_NNN.<ext>` と
+ * `library.json` で**常に直下**なので、`/**` と書くと 403 で絵が1枚も出ない（隣の `projects/**` は
+ * `projects/<id>/assets/<file>` と階層があるので当たる＝**見た目をそろえると再発する**）。
+ * `src/test/assetScope.test.ts` で固定した。
+ * ⚠️ 呼ぶ側は**読み込みに失敗したら絵を消す**（壊れた画像の印を出さない）＝失敗しても行は普通に使える。
+ * ⚠️ **この作りゆえ、効かなくなっても静かに絵が無いだけ**になる（#942 で見落とした理由）。
  */
 // `appDataDir()` は起動中は変わらないので控える（素材の数だけ IPC を往復しない＝
 // プロジェクト素材側〔`assetFs.cachedAppDataDir`〕と同じ流儀・PR #939 レビュー ℹ️）。

@@ -87,6 +87,7 @@ ADR-0017 はユーザーテンプレを **AI 入力から既定で除外**して
 ### コード
 
 - 新設＝`src/infrastructure/userAssetFs.ts`（`templateAssetFs.ts` と同型）＋ Rust コマンド。**パス検証は既存の流儀に揃える**＝`src-tauri/src/lib.rs` の `is_safe_template_id` 等と同型（ADR-0017 のパストラバーサル対策）。⚠️ **packaged では dev と挙動が違う**（`asset://` のキャッシュ・ビルド時のファイルロック・CSP）＝`13_DEPENDENCIES_AND_LICENSING.md` と #119/#120 の配布まわりの記録を実装前に確認する。
+- ⚠️ **`asset://` で配れる場所の書き方は「置き場所の深さ」と合わせる**（#942・実機で確認）＝`$APPDATA/user_assets/**` と書くと**直下のファイルに当たらず 403**。`user_assets/` の中身は `lib_asset_NNN.<ext>` と `library.json` で**常に直下**なので `$APPDATA/user_assets/*` が正しい。実測＝`user_assets/lib_asset_001.png`（直下）は 403／`projects/<id>/assets/asset_001.png`（階層あり）は 200。⚠️ **隣の `projects/**` に見た目をそろえると再発する**うえ、#926 の作りは「読み込めなかったらその絵だけ落とす」ので**壊れた画像の印も出ず静かに絵が消える**（`src/test/assetScope.test.ts` で固定した）。
 - 取り込みは既存の `importAssetByPath` を再利用（**ライブラリ→プロジェクトは「ファイルパスからの取り込み」に還元できる**＝新しい経路を作らない）。
 - 画面＝素材画面に「ライブラリ」の導線（一覧・取り込み・削除・改名）。**技術用語を出さない**（§2-3）＝言い方は「素材の棚」等を UI 文言の一本化（`uiLabels`）で決める。
 
