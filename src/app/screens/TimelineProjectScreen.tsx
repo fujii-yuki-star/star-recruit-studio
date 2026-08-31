@@ -76,10 +76,6 @@ import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 
-/**
- * この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。**値集合にする**＝
- * 綴り違いで `normalizeLayout` に落とされ、**欄が黙って消える**のを防ぐ（§2-7）。
- */
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
 
@@ -186,7 +182,6 @@ function drillFieldOf(template: Template, layerId: string): string | null {
  */
 const NUDGE_BOX_PX = 1;
 const NUDGE_BOX_FAST_PX = 10;
-/** 矢印で動かす手が止まったとみなすまで（ms）。ここを過ぎたら取り消しのまとめを閉じる。 */
 
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
@@ -223,7 +218,6 @@ const CLIP_ANALYSIS_MIN_W_PX = 60;
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
 
-/** 列の種別ごとの色分け（読み取り専用タイムラインの既存クラスを使い回す＝見え方を揃える）。 */
 /**
  * 帯の色（#701）。**部品の種類ごと**に分ける＝列の種類（映像／音）の2色だけだと、
  * 見た目パターン・写真・文字・図形・字幕が全部同じ色になり、並びを見ても何が置いてあるか読めない。
@@ -1459,7 +1453,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const pendingZoomRef = useRef<{ scrollLeft: number; anchorPx: number; fromPxPerSec: number } | null>(null);
   /** 利用者が自分で倍率を触ったか（触ったら**自動の合わせをやめる**＝勝手に戻さない）。 */
   const zoomTouchedRef = useRef(false);
-  /** ホイールの実リスナーから読む今の段（リスナーは張り直さないので ref で渡す）。 */
   /**
    * **再生位置が枠の外にあれば、見える範囲を送る**（#819-1）＝送らないと、再生ヘッドが枠の外へ
    * 出た時点で**いま何が出ているのかが画面から消える**（倍率を上げるほど早く外れる）。送り方は
@@ -1513,6 +1506,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisKey, ensureClipAnalysis]);
 
+  /** ホイールの実リスナーから読む今の段（リスナーは張り直さないので ref で渡す）。 */
   const zoomIndexRef = useRef<number | null>(null);
   useEffect(() => {
     zoomIndexRef.current = zoomIndex;
@@ -1575,8 +1569,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **同じものを見る**＝入口ごとに条件を書き分けると、キーだけ固定した列の部品を消せる、が起きる
    * （`exportStartBlock` と同じ流儀）。`selectionHasLocked` は選んでいる全部を見るので、
    * 1つだけのときも `selectedLocked` と同じ答えになる（片方だけ直す事故を作らないよう、こちらに寄せる）。
-   */
-  /**
+   *
    * ⚠️ **理由の組はボタンへそのまま流さない**（#752 レビュー）。React は知らない小文字の属性を
    * 素通しするので、`reason` を混ぜたままスプレッドすると `<button reason="TIMELINE_EDIT_...">`
    * として**内部の合図が描画結果に出る**（§2-3）。ボタンへ渡すのは `removeGuard`（`{disabled,title}`）、
@@ -1622,8 +1615,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **いまキャンバスに出ているか**（#752 レビュー）。キャンバスの顔ぶれ（`canvasEls`）と、
    * 矢印で動かす相手が**同じ規則**を見る＝選んでいるだけで見えていない部品（再生位置の外・
    * 出さない列）を、画面のどこも変わらないまま動かして保存する、を作らない。
-   */
-  /**
+   *
    * その時刻に**描かれる部品**（描く順・実効の箱つき）＝**描画と同じ関数**から採る（#746-4/5）。
    * 自前で並べたり隠す条件を書いたりしない＝重なった所で奥が掴まれる／描かれていないものが掴める、
    * を構造で防ぐ。
@@ -1744,12 +1736,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     };
     changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
   });
-  /**
-   * **帯を掴んでいる間**（#686・ADR-0034 決定9/10）。作法は欄のドラッグ（ADR-0033 段階3）と同じ。
-   *
-   * 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
-   * 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
-   */
+  // **帯を掴んでいる間**（#686・ADR-0034 決定9/10）。作法は欄のドラッグ（ADR-0033 段階3）と同じ。
+  //
+  // 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
+  // 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
   /** キャンバスで**文字を直している**部品の id（#746-2）。SVG 側の同じ文字を伏せる（二重表示回避）。 */
   const [editingCanvasId, setEditingCanvasId] = useState<string | null>(null);
   /** 吸着した先（#686 段階4）＝縦の点線を出す位置。吸着していなければ `null`。 */
@@ -1809,16 +1799,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **`Enter` の1回目が無言で飲み込まれる**（キーで到達できなくなる＝ADR-0034 決定19 違反）。
    * 指の経路かどうかは `detail`（押した回数）で**状態を持たずに見分けられる**（`isKeyboardActivation`）。
    */
-  /**
-   * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
-   * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
-   * 選択が丸ごと消える**（帯の上で離したときだけ守られる、という当たり外れを作らない）。
-   */
   const consumeSkipClick = (e: { detail: number }): boolean => {
     if (isKeyboardActivation(e) || !skipClickRef.current) return false;
     skipClickRef.current = false;
     return true;
   };
+  /**
+   * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
+   * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
+   * 選択が丸ごと消える**（帯の上で離したときだけ守られる、という当たり外れを作らない）。
+   */
   const clearSelectionByClick = (e: { detail: number }): void => {
     if (consumeSkipClick(e)) return;
     clearSelection();
@@ -1842,13 +1832,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const [trackDrag, setTrackDrag] = useState<{ trackId: string; gap: number } | null>(null);
   /**
-   * その高さに来る**すき間**（表示上・0＝いちばん上の行の上／`n`＝いちばん下の行の下）。
-   *
-   * ⚠️ **「行」ではなく「すき間」で持つ**（レビュー 🔴）＝行で持つと、線は「その行の上」を指すのに
-   * 確定は**抜いた後の位置**として効くので、**下向きに運んだときだけ1つ余計に下がる**
-   *（線を引いた所と違う絵が黙って確定する＝重ね順は絵そのもの）。
-   */
-  /**
    * 列を並べている枠（縦にスクロールする器）。端まで運んだときの送り先・可視域の基準にする。
    * ⚠️ 列そのものの枠（`.timeline-scroll`）は**横だけ**（`overflow-y: hidden`）なので、縦は欄の器が持つ。
    */
@@ -1856,6 +1839,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     for (const el of rowRefs.current.values()) return el.closest<HTMLElement>(`.${PANEL_BODY_CLASS}`);
     return null;
   };
+  /**
+   * その高さに来る**すき間**（表示上・0＝いちばん上の行の上／`n`＝いちばん下の行の下）。
+   *
+   * ⚠️ **「行」ではなく「すき間」で持つ**（レビュー 🔴）＝行で持つと、線は「その行の上」を指すのに
+   * 確定は**抜いた後の位置**として効くので、**下向きに運んだときだけ1つ余計に下がる**
+   *（線を引いた所と違う絵が黙って確定する＝重ね順は絵そのもの）。
+   */
   const displayGapAt = (clientY: number): number => {
     const rows = [...(doc?.tracks ?? [])].reverse().map((t) => rowRefs.current.get(t.id));
     // ⚠️ **見えている範囲へ丸めてから当てる**（#802-3）＝置く・運ぶ側（#714 項目5）と同じ規則。
@@ -1976,18 +1966,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     disabled: exporting || !!extra?.disabled,
     title: exporting ? exportingHint : extra?.hint,
   });
-  /**
-   * **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
-   *
-   * 落とし先は2つ＝**仕上がり確認**（動画の中の場所を決める）と**列**（時刻と列を決める）。
-   * 置けるかどうかは domain の `clipPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
-   * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
-   */
+  // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
+  //
+  // 落とし先は2つ＝**仕上がり確認**（動画の中の場所を決める）と**列**（時刻と列を決める）。
+  // 置けるかどうかは domain の `clipPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
+  // （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
 
-  /**
-   * 選んだ部品の**箱**（#685）。**箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンの
-   * クリップは枠そのもの＝幾何を持たない）＝出す条件は domain の `setClipBox` が断る条件と同じもの。
-   */
   /**
    * **キャンバスで触れる部品**（#685 後半）＝いま画面に出ていて、箱を自分で持てるもの。
    *
@@ -2084,13 +2068,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setClipBoxFor(clipId, patch);
   };
 
+  /**
+   * 選んだ部品の**箱**（#685）。**箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンの
+   * クリップは枠そのもの＝幾何を持たない）＝出す条件は domain の `setClipBox` が断る条件と同じもの。
+   */
   const selectedBox = selected && canHaveBox(selected.kind) && doc
     ? resolveClipBox(selected, dimsForOrientation(doc.videoSettings.aspectRatio))
     : null;
-  /**
-   * 端の取っ手を出すか。**細い帯では出さない**＝左右の取っ手と「⋮」で**本体を掴む所が無くなる**。
-   * 長さは数値の欄で変えられる（ドラッグ専用の操作を作らない・決定19）ので行き止まりにならない。
-   */
   /**
    * 取っ手を置く**幅があるか**。⚠️ 「⋮」の位置はこちらだけを見る（#752 レビュー）＝掴めるかまで
    * 見ると、**再生の開始・停止のたびに「⋮」が 14px 跳ぶ**（取っ手が消えるのは意図どおりでも、
@@ -2128,11 +2112,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </svg>
     );
   };
-  const showHandles = (c: TimelineClip): boolean => grabbableClip(c) && wideEnoughForHandles(c);
   /**
-   * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
-   * 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
+   * 端の取っ手を出すか。**細い帯では出さない**＝左右の取っ手と「⋮」で**本体を掴む所が無くなる**。
+   * 長さは数値の欄で変えられる（ドラッグ専用の操作を作らない・決定19）ので行き止まりにならない。
    */
+  const showHandles = (c: TimelineClip): boolean => grabbableClip(c) && wideEnoughForHandles(c);
+  // 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
+  // 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
   /**
    * その帯を**いまどの列に描くか**（#686 段階4）。運んでいる間は**運び先の列**へ描く
    * ＝指と一緒に列をまたぐ（元の列に置いたまま行き先だけ光らせる、にしない）。
@@ -2241,11 +2227,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       return Math.max(0, origin + (ev.clientX - startX + scrolled) / pxPerSec);
     };
     // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
-    /**
-     * まとめて動かすときの**行き先ぜんぶ**（#686 段階4）。ゴーストの色と確定が**同じもの**を見る。
-     * 掴んだ相手の動いた量を、選択ぶんへ同じだけ。**列が変わるのは掴んだ相手だけ**
-     * （まとめて別の列へ移すと、他の帯が知らない列へ飛ぶ＝見ていない所が動く）。
-     */
+    // まとめて動かすときの**行き先ぜんぶ**（#686 段階4）。ゴーストの色と確定が**同じもの**を見る。
+    // 掴んだ相手の動いた量を、選択ぶんへ同じだけ。**列が変わるのは掴んだ相手だけ**
+    // （まとめて別の列へ移すと、他の帯が知らない列へ飛ぶ＝見ていない所が動く）。
     /**
      * ⚠️ **ずれは群ぜんぶで丸める**（`/canon-check`）。帯ごとに `Math.max(0, …)` で切ると、
      * 先頭側だけ 0 に張り付いて**間隔が消える**（別の列どうしなら成功として確定してしまう）。
@@ -2422,9 +2406,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return null;
   };
 
-  /** 一覧・ボタンから掴む。**動かさずに離したときは何もしない**（そのまま `click` が走って再生位置へ置く）。 */
   /**
-   * 一覧・ボタンから掴んで置く（#684・#714）。
+   * 一覧・ボタンから掴んで置く（#684・#714）。**動かさずに離したときは何もしない**
+   *（そのまま `click` が走って再生位置へ置く）。
    *
    * `place` は**実際に置く**手（ボタンで押したときと同じもの）＝置き先が決まっていなければ
    * 欄に出ている列と再生位置へ置く。**種類ごとの違いは呼ぶ側に残す**（掴む作法はここで1つ）。
@@ -2535,7 +2519,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const menuClipTemplate = menuClip?.kind === TIMELINE_CLIP_KIND.template
     ? templates.find((t) => t.templateId === menuClip.templateId)
     : undefined;
-  /** 1つの帯にだけ効く項目の関門（複製・バラす）。まとめて選んでいるときは押せなくして理由を出す。 */
+  // 1つの帯にだけ効く項目の関門（複製・バラす）。まとめて選んでいるときは押せなくして理由を出す。
   /**
    * **複製だけ**の追加条件（#744 レビュー）＝隠した列では新しく作れない。
    * ⚠️ `editGuard` に入れてはいけない＝動かす・縮めるは隠した列でも通る規則なので、

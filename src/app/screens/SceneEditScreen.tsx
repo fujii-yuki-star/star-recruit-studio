@@ -866,13 +866,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
 
   /**
-   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
-   *
-   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
-   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
-   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
-   */
-  /**
    * 体裁の色欄（#555 レビュー P2）。**項目ごとに継承へ戻せる**ようにする。
    *
    * 数値欄は空欄、太さは「見た目パターンに合わせる」で個別に継承へ戻せるのに、色は ColorPicker が常に色を返す
@@ -906,6 +899,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     </div>
   );
 
+  /**
+   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
+   *
+   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
+   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
+   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
+   */
   const renderTextStyleControls = (key: TextKey) => {
     const layer = template?.layers.find((l) => (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) && l.textKey === key);
     if (!layer) return null;
