@@ -25,6 +25,7 @@ export function stackedSubtitleBands(
   w: number,
   fontSize: number,
   maxLines: number,
+  letterSpacingEm = 0,
 ): { y: number; top: number }[] {
   const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
   const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
@@ -33,7 +34,7 @@ export function stackedSubtitleBands(
   let prevTop = Number.POSITIVE_INFINITY;
   bandTexts.forEach((t, i) => {
     const y = i === 0 ? baseY : prevTop - gapPx - bottomOffsetPx;
-    const n = wrapText(t, w, fontSize, maxLines).length; // 実際の折返し行数（描画と同じ wrapText）
+    const n = wrapText(t, w, fontSize, maxLines, letterSpacingEm).length; // 実際の折返し行数（描画と同じ wrapText）
     const top = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
     out.push({ y, top });
     prevTop = top;
@@ -52,10 +53,12 @@ export function stackedSubtitleBands(
 export function drawnTextRect(item: {
   x: number; y: number; w: number; h: number; rotation?: number;
   text: string; fontSize: number; maxLines: number; anchorBottom?: boolean; isSubtitle?: boolean;
+  /** 字間（em・#264）。折返しの行数が変わるので渡す（#928）。 */
+  letterSpacing?: number;
 }): { x: number; y: number; w: number; h: number; rotation?: number } {
   // 字幕でなければ置いた箱のまま（写真・見出しは箱に収める前提で組んである）。
   if (!item.isSubtitle) return { x: item.x, y: item.y, w: item.w, h: item.h, rotation: item.rotation };
-  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines, item.letterSpacing ?? 0).length;
   const lineHeightPx = item.fontSize * DEFAULT_LINE_HEIGHT;
   return {
     x: item.x,

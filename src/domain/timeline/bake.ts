@@ -459,9 +459,10 @@ export function bakeLineSubtitles(
         .map((w) => ({ w, sub: resolveLineSubtitle(w.line, scene) }))
         .filter((x) => x.sub.enabled && x.sub.text.length > 0);
       if (shown.length === 0) continue;
-      const bands = stackedSubtitleBands(shown.map((x) => x.sub.text), cg.y, cg.w, style.fontSize, maxLines);
+      // 字間も渡す（#928）＝描画（`layoutScene`）と同じ行数で積む。
+      const bands = stackedSubtitleBands(shown.map((x) => x.sub.text), cg.y, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0);
       shown.forEach((x, k) => {
-        const lines = wrapText(x.sub.text, cg.w, style.fontSize, maxLines).length;
+        const lines = wrapText(x.sub.text, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0).length;
         const boxH = boxHeightForLines(lines, style.fontSize);
         // 旧箱の中心（アンカー y ＋ 層の高さ）と新箱の中心（帯の上端＋この行数の高さ）の差。
         const shift = rotationShift(cg.rotation ?? 0, (bands[k].y + cg.h / 2) - (bands[k].top + boxH / 2));

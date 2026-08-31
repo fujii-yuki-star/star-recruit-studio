@@ -381,7 +381,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         }
         // 帯を配置：字幕は下→上に積む（実折返し行数で詰める＝重ならない・共有 stackedSubtitleBands・#533 P1）。text 層は単一で base.y。
         if (isSub) {
-          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES);
+          // ⚠️ **字間も渡す**（#928）＝渡さないと折返し行数が実際より少なく出て、**帯が重なる**
+          // （段を詰める計算が実折返し行数を前提にしているため）。
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, style.letterSpacing ?? 0);
           bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
         } else if (bands.length > 0) {
           pushBand(bands[0].text, base.y, bands[0].idSuffix);
