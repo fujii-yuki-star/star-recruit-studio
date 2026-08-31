@@ -81,7 +81,7 @@ import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
+import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -495,8 +495,11 @@ interface ProjectState {
    * ⚠️ **`addedLogo` も返す**（差分再監査）＝履歴は `{meta,parts,scenes}` だけを覚える（ADR-0020＝
    * assets は入れない）ので、**取り消しでロゴは戻らない**。返さないと画面が
    * 「元に戻す」で全部戻るかのように見せてしまう（§2-5＝できないことを名指ししない）。
+   * ⚠️ **入らなかったものを返す**（#929）＝覚えている字体が**もう手元に無い**とき、以前は
+   * 黙って飛ばして `ok:true` を返していた（ロゴだけ入って「反映しました」＝失敗を成功に見せる・§2-5）。
+   * `fontSkipped` で**何が入らなかったか**を返し、画面がその場で言う。
    */
-  applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; addedLogo: boolean; error: string | null }>;
+  applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; addedLogo: boolean; fontSkipped: boolean; error: string | null }>;
   /**
    * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
    * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
@@ -934,18 +937,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyBrandKit: async () => {
     // 書き出し中は文書を固定（#570 P1）。押せないようにもしてあるが、二重に守る。
-    if (isExportBusy(get().exportRun.phase)) return { ok: false, applied: false, addedLogo: false, error: EXPORT_BUSY_ASSET_MSG };
+    if (isExportBusy(get().exportRun.phase)) return { ok: false, applied: false, addedLogo: false, fontSkipped: false, error: EXPORT_BUSY_ASSET_MSG };
     const kit = get().brandKit;
     const plan = planBrandApply(kit, {
       fontId: get().meta.videoSettings.fontId,
       hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
     });
-    if (isNoopBrandApply(plan)) return { ok: true, applied: false, addedLogo: false, error: null }; // 何も変わらないなら履歴を積まない
+    if (isNoopBrandApply(plan)) return { ok: true, applied: false, addedLogo: false, fontSkipped: false, error: null }; // 何も変わらないなら履歴を積まない
     // ⚠️ **履歴が変わる枝でだけ積む**（差分再監査 🟡・ADR-0020「空振りを積まない」）＝
     // ロゴだけ足す計画で加わるのは `assets`＝**履歴 slice の外**なので、先に積むと
     // **いまと同じ内容のスナップショット**が1つ増える（上限50 と合わさって古い編集を1つ押し出す。
     // 押しても何も戻らない「取り消す」も作る）。積むのは文字の形が変わるときだけ。
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
+    // ⚠️ **飛ばしたことを持ち帰る**（#929）＝覚えている字体が手元に無いと入らない。
+    // 黙って飛ばすと**ロゴだけ入って「反映しました」**になる（失敗を成功に見せる・§2-5）。
+    const fontSkipped = plan.fontChanges && !isKnownFontId(kit.fontId);
     if (plan.fontChanges && isKnownFontId(kit.fontId)) {
       get().pushHistory();
       const fontId = kit.fontId;
@@ -965,14 +971,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 画面が戻す導線を出さず**変わったまま戻せない**（§2-5）。何が入ったかを返す。
         return {
           ok: false,
-          applied: plan.fontChanges,
+          // ⚠️ **入ったものだけを「入った」と言う**（#929）＝字体を飛ばしたなら履歴も積んでいない。
+          applied: plan.fontChanges && !fontSkipped,
           addedLogo: false,
+          fontSkipped,
           error:
             get().importError ?? BRAND_LOGO_NOT_APPLIED_MESSAGE,
         };
       }
     }
-    return { ok: true, applied: true, addedLogo: plan.addsLogo, error: null };
+    // ⚠️ **字体を飛ばしたなら「全部入った」と言わない**（#929）＝`ok` は「操作が通ったか」で、
+    // **何が入ったか**は `applied`／`addedLogo`／`fontSkipped` が持つ。画面はそれを見て文言を出す。
+    return { ok: true, applied: (plan.fontChanges && !fontSkipped) || plan.addsLogo, addedLogo: plan.addsLogo, fontSkipped, error: null };
   },
   newBlankProject: () => {
     // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
@@ -993,6 +1003,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isKnownFontId(kit.fontId)) {
       const fontId = kit.fontId;
       set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
+    } else if (kit.fontId != null) {
+      // ⚠️ **入らなかったことは言う**（#929）＝覚えている字体が手元に無いと入らない。
+      // 黙ると、新しい動画が**別の字体で始まっているのに気づけない**（明示適用と同じ扱い＝ADR-0026②）。
+      if (stillOpen()) set({ importError: BRAND_FONT_NOT_APPLIED_MESSAGE });
     }
     // ⚠️ **入らなかったら、その場で言う**（α-6 出口監査 🟡・PR #888 と同じ流儀）＝返り値を捨てると、
     // 棚が読めない・実体が消えたときに**何も出ず**、`importError` は2ステップ先の画面でしか描かれない

@@ -16,7 +16,21 @@ import type { Scene } from "../../domain/project/types";
 
 const scene = { sceneId: "scene_001" } as unknown as Scene;
 
+/**
+ * 本物の実装（差し替えたテストの後で戻すため）。
+ *
+ * ⚠️ **戻さないと次のテストが偽物を使う**＝このファイルは `applyBrandKit`/`undo` を `vi.fn` で
+ * 差し替えるテストがあるのに、`beforeEach` が戻していなかった。**押した結果を見るテストが
+ * 別のテストの戻り値で判定される**（実際に落ちた＝`addedLogo:true` が返ってきた）。
+ * `vi.clearAllMocks()` は呼び出し履歴を消すだけで、**store へ差し込んだ関数は戻さない**。
+ */
+const realActions = {
+  applyBrandKit: useProjectStore.getState().applyBrandKit,
+  undo: useProjectStore.getState().undo,
+};
+
 beforeEach(() => {
+  useProjectStore.setState(realActions as never);
   const meta = useProjectStore.getState().meta;
   useProjectStore.setState({
     brandKit: { fontId: "kaitou-yokoku-gothic" },
@@ -27,6 +41,9 @@ beforeEach(() => {
     meta: { ...meta, videoSettings: { ...meta.videoSettings, fontId: "gen-interface-jp" } },
   } as never);
   useProjectStore.setState({ brandKitError: null, brandKitUnreadable: false } as never);
+  // ⚠️ **書き出しの状態を持ち越さない**＝「書き出し中は押せない」のテストが `encoding` を立てたままなので、
+  // 以降のテストでボタンが**押せないまま**になり、押した結果を見るテストが**別の理由で落ちる**（実際に落ちた）。
+  useProjectStore.getState().setExportRun({ phase: "idle" });
   useTimelineStore.setState({ doc: null } as never);
 });
 afterEach(() => vi.clearAllMocks());
@@ -257,5 +274,20 @@ describe("BrandKitSection", () => {
     useProjectStore.setState({ brandKit: {}, brandKitUnreadable: false } as never);
     render(<BrandKitSection />);
     expect(screen.queryByText(/会社の見た目を読めませんでした/)).toBeNull();
+  });
+
+  // ⚠️ **入らなかったものがあれば言う**（#929・§2-5）＝黙ると「ロゴだけ入ったのに反映しました」
+  // ＝失敗を成功に見せることになる。
+  it("覚えている字体が手元に無いときは、入らなかったことを言う", async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue({ fontId: "user_font_999_gone" } as never);
+    useProjectStore.setState({ brandKit: { fontId: "user_font_999_gone" }, brandKitUnreadable: false } as never);
+    render(<BrandKitSection />);
+    // ⚠️ **読み直しが終わってから押す**＝この画面は表示時に `refreshBrandKit` を走らせるので、
+    // 待たずに押すと**読み直し前のキット**（`beforeEach` が入れた既知の字体）で反映が通り、
+    // テストが**時々通って時々落ちる**（実際に落ちた）。
+    await waitFor(() => expect(useProjectStore.getState().brandKit.fontId).toBe("user_font_999_gone"));
+    fireEvent.click(screen.getByRole("button", { name: /この動画に反映する/ }));
+    expect(await screen.findByText(/いまこのパソコンにありません/)).toBeInTheDocument();
+    expect(screen.queryByText(/^この動画に反映しました。$/)).toBeNull();
   });
 });
