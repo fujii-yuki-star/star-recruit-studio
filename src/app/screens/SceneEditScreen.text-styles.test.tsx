@@ -620,6 +620,22 @@ describe("SceneEditScreen 休眠した自由配置の要素のフォント", () 
     const hint = screen.getByText(/いまの見た目パターンでは使っていない文字/);
     expect(hint.closest("details")).toBeNull();
   });
+  // 継承の項目は**実際の継承先**を言う（#925・ADR-0026①）。
+  //
+  // ⚠️ **場面が自分の文字の形を持っている**とき、部品ごとの継承は**その場面**へ合わせる
+  //（`resolveFontId`＝場面の指定 → 動画全体 → 既定）。それを「動画全体に合わせる」と書くと、
+  // **設定した意味と違うこと**を言う（選んでも動画全体の字体にならない）。
+  it("場面が文字の形を持っていなければ「動画全体に合わせる」", () => {
+    openScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as never);
+    expect(screen.getAllByText(/動画全体に合わせる/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/この場面の文字の形に合わせる/)).toBeNull();
+  });
+
+  it("場面が文字の形を持っていれば「この場面の文字の形に合わせる」", () => {
+    openScene({ fontId: "kaitou-yokoku-gothic", freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 100, h: 40, text: "あ", fontId: "gen-interface-jp" }] } as never);
+    expect(screen.getAllByText(/この場面の文字の形に合わせる/).length).toBeGreaterThan(0);
+  });
+
 });
 
 describe("SceneEditScreen 場面ぜんぶのフォント", () => {
