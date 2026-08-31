@@ -8,7 +8,7 @@ import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
-import { isKnownFontId } from "../../domain/font/fontCatalog";
+import { isFontAvailable, isKnownFontId } from "../../domain/font/fontCatalog";
 import { createUserFontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
@@ -925,6 +925,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
       _historyGroupPending: false,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
+      // ⚠️ **前の動画の理由を持ち越さない**（PR #936 レビュー・§2-5）＝残すと、新しい動画の
+      // たたき台に**身に覚えのない警告**（前の動画の取り込み失敗など）がそのまま出る。
+      importError: null,
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
       exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
@@ -951,8 +954,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
     // ⚠️ **飛ばしたことを持ち帰る**（#929）＝覚えている字体が手元に無いと入らない。
     // 黙って飛ばすと**ロゴだけ入って「反映しました」**になる（失敗を成功に見せる・§2-5）。
-    const fontSkipped = plan.fontChanges && !isKnownFontId(kit.fontId);
-    if (plan.fontChanges && isKnownFontId(kit.fontId)) {
+    // ⚠️ **形ではなく「いま手元にあるか」で見る**（PR #936 レビュー）＝`isKnownFontId` は
+    // **形しか見ない**ので、「id は正しいが実体が無い」（別PCへ移した・`user_fonts` を外で消した）を
+    // **通して**しまい、**存在しない字体が `videoSettings.fontId` へ黙って書かれる**。
+    // 画面（「見つかりません」の表示）は実体の一覧を見ているので、**同じ状態に別の答え**になっていた。
+    const fontSkipped = plan.fontChanges && !isFontAvailable(kit.fontId, get().userFontIds);
+    if (plan.fontChanges && !fontSkipped && isKnownFontId(kit.fontId)) {
       get().pushHistory();
       const fontId = kit.fontId;
       set((st) => ({
@@ -1000,7 +1007,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await get().refreshBrandKit();
     if (!stillOpen()) return;
     const kit = get().brandKit;
-    if (isKnownFontId(kit.fontId)) {
+    if (isKnownFontId(kit.fontId) && isFontAvailable(kit.fontId, get().userFontIds)) {
       const fontId = kit.fontId;
       set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
     } else if (kit.fontId != null) {

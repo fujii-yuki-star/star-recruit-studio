@@ -123,6 +123,26 @@ export function isKnownFontId(fontId: unknown): fontId is FontId {
 }
 
 /**
+ * その字体が**いま手元にあるか**（#928 の隣・#929）。`isKnownFontId` は**形**しか見ないので、
+ * 「`user_font_007` という形は正しいが、実体はもう無い」を**既知**として通す（ADR-0038＝実在は
+ * 書き出しの手前で断る、という分担）。**入れてよいかを決める場面ではそれでは足りない**＝
+ * 入れても描かれず、気づけるのは**別の動画の書き出し直前**になる。
+ *
+ * ⚠️ **「調べていない」と「無い」を分ける**（`missingAsset`／#347 と同じ流儀）＝
+ * `userFontIds === null`（まだ読んでいない／読めなかった）のときは**「無い」と言わない**。
+ * 待てば埋まるので、ここで断ると**あるものを入れられない**。
+ *
+ * ⚠️ **画面と store で同じ述語を通す**（§6）＝以前は画面（「見つかりません」の表示）だけが
+ * 実体の一覧を見ており、**入れる側は形だけ見て黙って入れて**いた（同じ状態に別の答え）。
+ */
+export function isFontAvailable(fontId: unknown, userFontIds: readonly string[] | null): boolean {
+  if (typeof fontId !== 'string') return false;
+  if (FONT_CATALOG.some((f) => f.id === fontId)) return true;
+  if (!isUserFontId(fontId)) return false;
+  return userFontIds == null || userFontIds.includes(fontId); // 調べていないなら「無い」と言わない
+}
+
+/**
  * 場面フォントの解決（null=継承）：場面の fontId（既知ならそれ）→ 動画全体の fontId（既知なら）→ 既定。
  * 未指定/不明は次段へフォールバックする（描画・書き出しで共通利用）。
  */

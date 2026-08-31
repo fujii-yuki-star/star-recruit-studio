@@ -35,6 +35,7 @@ beforeEach(() => {
   useProjectStore.setState({
     brandKit: { fontId: "kaitou-yokoku-gothic" },
     userFonts: [],
+    userFontIds: [],
     scenes: [scene],
     assets: [],
     // 動画側は別のフォント＝「変わるものがある」状態（そうしないと反映のボタンが出ない）。
@@ -109,7 +110,10 @@ describe("BrandKitSection", () => {
    * `FontPicker` で潰した失敗と**同型**。
    */
   it("覚えている字体が一覧に無くても、覚えていないようには見せない", () => {
-    useProjectStore.setState({ brandKit: { fontId: "user_font_009" }, userFonts: [] } as never);
+    // ⚠️ **一覧は2つで1組**＝`userFonts`（表示用）と `userFontIds`（「調べたか」を含む判定用）は
+    // `refreshUserFonts` が**同時に**入れる。片方だけ置くと「まだ調べていない」扱いになり、
+    // 「見つかりません」を出さない（＝実際には起きない状態でテストすることになる）。
+    useProjectStore.setState({ brandKit: { fontId: "user_font_009" }, userFonts: [], userFontIds: [] } as never);
     render(<BrandKitSection />);
     const sel = screen.getByLabelText("いつもの文字の形") as HTMLSelectElement;
     expect(sel.value).toBe("user_font_009");
@@ -121,6 +125,7 @@ describe("BrandKitSection", () => {
     useProjectStore.setState({
       brandKit: { fontId: "user_font_001" },
       userFonts: [{ id: "user_font_001", fileName: "a.ttf", displayName: "会社の明朝" }],
+      userFontIds: ["user_font_001"],
     } as never);
     render(<BrandKitSection />);
     expect(screen.queryByRole("option", { name: /見つかりません/ })).not.toBeInTheDocument();

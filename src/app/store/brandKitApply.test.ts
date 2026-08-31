@@ -246,6 +246,43 @@ describe('知らない字体は入らないことを返す（#929）', () => {
     expect(r.ok).toBe(true);
   });
 
+  // ⚠️ **形は正しいが実体が無い**＝これが本命の経路（別PCへ移した／`user_fonts` を外で消した）。
+  // `isKnownFontId` は**形しか見ない**ので、以前はここを**通して**存在しない id を書き込んでいた。
+  it('形は正しいが手元に無い字体も飛ばす（PR #936 レビュー）', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: [], // 調べた結果「無い」（`null` は「まだ調べていない」）
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(true);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('gen-interface-jp');
+  });
+
+  // ⚠️ **「調べていない」を「無い」にしない**（`missingAsset`／#347 と同じ流儀）＝
+  // 待てば埋まるので、ここで断ると**あるものを入れられない**。
+  it('まだ調べていないときは飛ばさない（あるものを入れられない、を作らない）', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: null,
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(false);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('user_font_007');
+  });
+
+  it('手元にある持ち込みの字体は入る', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: ['user_font_007'],
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(false);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('user_font_007');
+  });
+
   it('知っている字体なら飛ばさない', async () => {
     useProjectStore.setState({ brandKit: { fontId: 'kaitou-yokoku-gothic' }, past: [] } as never);
     setProject({ fontId: 'gen-interface-jp' });
@@ -259,6 +296,18 @@ describe('知らない字体は入らないことを返す（#929）', () => {
     vi.mocked(loadBrandKit).mockResolvedValue(unknownFont);
     await useProjectStore.getState().applyBrandKitToNew();
     expect(useProjectStore.getState().importError).toBe(BRAND_FONT_NOT_APPLIED_MESSAGE);
+  });
+});
+
+// 新しい動画に**前の動画の理由**を持ち越さない（PR #936 レビュー・§2-5）。
+//
+// ⚠️ `newProject` は `importError` を消していなかった＝素材の取り込みに失敗したあとで
+// 「新しい動画を作る」を押すと、**身に覚えのない警告**がたたき台にそのまま出ていた。
+describe('新しい動画は前の理由を持ち越さない', () => {
+  it('新規作成で理由を消す', () => {
+    useProjectStore.setState({ importError: '前の動画の取り込み失敗' } as never);
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().importError).toBeNull();
   });
 });
 
