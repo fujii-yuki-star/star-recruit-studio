@@ -640,6 +640,19 @@ let saveInFlight: Promise<void> | null = null;
  * 焼かれないまま**になる。投げっぱなしで走るので着地の順番も保証できない。
  */
 let lastThumbnail: { projectId: string; signature: string } | null = null;
+/**
+ * 進行中の**一覧の絵の焼き込み**（#927）。保存の後に**投げっぱなし**で走るので、
+ * `saveInFlight` には入らない＝削除の待ちからも外れていた。
+ *
+ * ⚠️ **消した後に着地すると、`preview.png` だけのフォルダが復活する**（一覧には出ないので
+ * 利用者からは気づけない残骸）。`deleteProject` がこれも待つ。
+ */
+let thumbnailInFlight: Promise<void> | null = null;
+/**
+ * 消した動画の id（#927）。**待ったあとに始まった焼き込み**を止めるための印＝
+ * 待つだけでは、待っている最中に次の焼き込みが積まれたときに素通りする。
+ */
+const deletedProjectIds = new Set<string>();
 
 // 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
 // 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
@@ -1025,6 +1038,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       s.meta.videoSettings.fontId,
     );
     if (!dataUrl) return; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
+    // ⚠️ **消した動画へは書かない**（#927）＝絵を描いている間に消されることがある。
+    // 書くとフォルダが**`preview.png` だけで復活**する（一覧には出ないので気づけない残骸）。
+    if (deletedProjectIds.has(projectId)) return;
     try {
       await saveProjectThumbnail(projectId, dataUrl);
       lastThumbnail = { projectId, signature: sig };
@@ -1183,7 +1199,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       // 一覧に出す小さな絵（#397）＝**投げっぱなし**にする（保存の完了を待たせない＝体感で重くならない）。
       // ⚠️ **先頭の場面が変わっていなければ焼き直さない**（印の比較）＝打つたびに焼かない。
-      void get()._refreshProjectThumbnail(projectId);
+      // ⚠️ **投げっぱなしでも控えておく**（#927）＝削除がこの着地を待てるようにする。
+      thumbnailInFlight = get()._refreshProjectThumbnail(projectId).finally(() => { thumbnailInFlight = null; });
     } catch {
       // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
       if (stillOpen()) set({ saveStatus: "error" });
@@ -1345,8 +1362,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **手放すだけでは足りない**（#763-4）＝「これ以上書かない」にはできるが、**すでに発行済みの
     // 書き込み**はバックエンドで走っており、消した**後**に着地しうる。自分と受け手の**進行中の
     // 書き込みが着地するまで待ってから**消す。失敗した書き込みも待つ（着地したことだけが要る）。
+    // ⚠️ **これ以上焼かない印を先に立てる**（#927）＝待っている間に積まれた焼き込みも止める。
+    deletedProjectIds.add(projectId);
     const restoreOthers = await emitProjectDeleted(projectId);
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
+    // ⚠️ **一覧の絵の焼き込みも待つ**（#927）＝保存の後に投げっぱなしで走るので `saveInFlight` に
+    // 入らず、消した後に着地して**`preview.png` だけのフォルダが復活**しうる（気づけない残骸）。
+    await thumbnailInFlight?.catch(() => { /* 着地したことだけが要る */ });
     // ⚠️ **消せなかったら開き直す**（#763-4 レビュー）＝手放しを削除の前へ動かした結果、失敗すると
     // 一覧には動画が残るのに編集画面だけ空になる（利用者から見ると作業が消えたように見える）。
     // 最後に保存した状態へ戻す＝空の画面に置き去りにしない。理由は呼び出し側（一覧）が出す。
@@ -1363,6 +1385,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 無条件に開き直すと、**いま開いている方を黙って上書きする**（§2-5）。手放したときのまま
       //（空の新規で、作業中の内容も無い）ときだけ戻す。
       const now = get();
+      // ⚠️ **消せなかったら印を戻す**（#927）＝残したまま失敗すると、その動画は**以後ずっと
+      // 一覧の絵を焼けない**（消えていないのに焼けない、という直しようのない状態になる）。
+      deletedProjectIds.delete(projectId);
       const untouched = now.meta.projectId === "" && !hasWorkInProgress(now.scenes.length, now.assets, now.meta);
       if (hadOpen && untouched) await get().loadProject(projectId);
       await restoreOthers();
