@@ -282,6 +282,8 @@ interface ProjectState {
   saveProject: () => Promise<void>;
   /** 一覧に出す小さな絵を焼き直す（#397・内部用）。 */
   _refreshProjectThumbnail: (projectId: string) => Promise<void>;
+  /** 実際に焼く中身（`_refreshProjectThumbnail` が控えたうえで呼ぶ）。直接呼ばない。 */
+  _doRefreshProjectThumbnail: (projectId: string) => Promise<void>;
   /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
   _doSave: () => Promise<void>;
   /** 保存済みプロジェクトを読み込んで反映する。 */
@@ -645,8 +647,14 @@ let lastThumbnail: { projectId: string; signature: string } | null = null;
  *
  * ⚠️ **消した後に着地すると、`preview.png` だけのフォルダが復活する**（一覧には出ないので
  * 利用者からは気づけない残骸）。`deleteProject` がこれも待つ。
+ *
+ * ⚠️ **1つの枠でなく集合で持つ**（PR #934 レビュー 🔴）＝1枠だと**続けて保存**したときに
+ * 後から始まった焼き込みが枠を上書きし、**先に始まったほうが終わった時点で枠が空になる**
+ *（`finally` が無条件に空へ戻すため）。空になった枠を削除が待っても**素通り**し、
+ * まだ書いている最中の焼き込みと**フォルダの削除がぶつかる**＝このPRが塞ぐはずのものが残る。
+ * 集合なら**何本走っていても全部待てる**（同一性の判定も要らない）。
  */
-let thumbnailInFlight: Promise<void> | null = null;
+const thumbnailInFlight = new Set<Promise<void>>();
 /**
  * 消した動画の id（#927）。**待ったあとに始まった焼き込み**を止めるための印＝
  * 待つだけでは、待っている最中に次の焼き込みが積まれたときに素通りする。
@@ -1020,6 +1028,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
    * ⚠️ **失敗しても何も起きない**＝絵が無ければ一覧はプレースホルダで出る（§2-5 の行き止まりにしない）。
    */
   _refreshProjectThumbnail: async (projectId) => {
+    // ⚠️ **控えるのは「始める側」ではなく「始まる場所」**（PR #934 レビュー 🔴）＝
+    // 呼び出し側で控えると、投げっぱなしの入口が増えたとき**控え忘れた道**ができる。
+    const run = get()._doRefreshProjectThumbnail(projectId);
+    thumbnailInFlight.add(run);
+    void run.finally(() => { thumbnailInFlight.delete(run); });
+    return run;
+  },
+  _doRefreshProjectThumbnail: async (projectId) => {
     const s = get();
     const sig = thumbnailSignature({ scenes: s.scenes, assets: s.assets, videoSettings: s.meta.videoSettings });
     // ⚠️ **同じ動画の印と比べる**＝別の動画の印と当たっても「変わっていない」にしない。
@@ -1198,8 +1214,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       // 一覧に出す小さな絵（#397）＝**投げっぱなし**にする（保存の完了を待たせない＝体感で重くならない）。
       // ⚠️ **先頭の場面が変わっていなければ焼き直さない**（印の比較）＝打つたびに焼かない。
-      // ⚠️ **投げっぱなしでも控えておく**（#927）＝削除がこの着地を待てるようにする。
-      thumbnailInFlight = get()._refreshProjectThumbnail(projectId).finally(() => { thumbnailInFlight = null; });
+      // 投げっぱなしでよい＝控えるのは `_refreshProjectThumbnail` の中（#927・PR #934 レビュー）。
+      void get()._refreshProjectThumbnail(projectId);
     } catch {
       // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
       if (stillOpen()) set({ saveStatus: "error" });
@@ -1367,7 +1383,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
     // ⚠️ **一覧の絵の焼き込みも待つ**（#927）＝保存の後に投げっぱなしで走るので `saveInFlight` に
     // 入らず、消した後に着地して**`preview.png` だけのフォルダが復活**しうる（気づけない残骸）。
-    await thumbnailInFlight?.catch(() => { /* 着地したことだけが要る */ });
+    await Promise.all([...thumbnailInFlight].map((p) => p.catch(() => { /* 着地だけが要る */ })));
     // ⚠️ **消せなかったら開き直す**（#763-4 レビュー）＝手放しを削除の前へ動かした結果、失敗すると
     // 一覧には動画が残るのに編集画面だけ空になる（利用者から見ると作業が消えたように見える）。
     // 最後に保存した状態へ戻す＝空の画面に置き去りにしない。理由は呼び出し側（一覧）が出す。
