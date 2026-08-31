@@ -99,6 +99,22 @@ describe("帯を押しても焦点を帯へ移さない（#948）", () => {
     expect(document.activeElement).not.toBe(someButton);
   });
 
+  // ⚠️ **掴めない帯でも降ろす**（レビュー ℹ️）＝`blur()` を `grabbableClip` の判定より**後ろ**へ
+  // 動かすと、掴める帯のテストだけでは通ってしまう（位置を留めていない）。固定した列で見る。
+  it("固定した列の帯でも、前に押した所から手を降ろす", () => {
+    useTimelineStore.setState({
+      doc: doc({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {},
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const someButton = [...container.querySelectorAll("button:not(.timeline-clip)")]
+      .find((b) => !(b as HTMLButtonElement).disabled) as HTMLElement;
+    someButton.focus();
+    expect(document.activeElement).toBe(someButton);
+    pressClip();
+    expect(document.activeElement).not.toBe(someButton);
+  });
+
   // ⚠️ **右クリックのメニューが消えていないこと**（レビュー 🟡）＝既定を全ボタンで落とすので、
   // `pointerdown` → `contextmenu` の**順に**通してメニューが開くところまで見る
   //（`fireEvent.contextMenu` の直撃だけだと、この順序で壊れても気づけない）。
