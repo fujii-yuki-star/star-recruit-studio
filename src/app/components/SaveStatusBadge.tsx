@@ -2,7 +2,7 @@
 // （未保存 / 保存中 / 保存失敗）。保存済み・空の新規状態は何も出さない（保存ボタン側が「保存しました」を表示）。
 // 文言は技術用語なし（§2-3）、失敗は「次の行動」を示す（§2-5）。
 import { useProjectStore } from "../store/projectStore";
-import { hasUnsavedChanges } from "../hooks/newProjectGuard";
+import { hasUnsavedChanges } from "../newProjectGuard";
 
 // 未保存インジケータの単一実装（#410 sub6）。プロジェクト保存（SaveStatusBadge）とテンプレ編集
 // （LooksEditScreen＝テンプレ下書きの dirty）で状態の出どころは違うが、見た目・文言はこれ1つに揃える。
