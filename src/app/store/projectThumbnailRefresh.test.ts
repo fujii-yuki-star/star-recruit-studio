@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../infrastructure/projectFs', async (orig) => ({
   ...(await orig<typeof import('../../infrastructure/projectFs')>()),
   saveProjectThumbnail: vi.fn(async () => {}),
+  deleteProjectDoc: vi.fn(async () => {}),
 }));
 vi.mock('../../renderer/export/projectThumbnail', () => ({
   renderProjectThumbnail: vi.fn(async () => 'data:image/png;base64,AA=='),
@@ -74,6 +75,37 @@ describe('_refreshProjectThumbnail（焼き直しを飛ばす判定）', () => {
     await refresh('proj_d1');
     expect(saveProjectThumbnail).not.toHaveBeenCalled();
     await refresh('proj_d1');
+    expect(saveProjectThumbnail).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 消した動画へ**一覧の絵を書かない**（#927）。
+//
+// ⚠️ 焼き込みは保存の後に**投げっぱなし**で走るので `saveInFlight` に入らず、**削除の待ちからも
+// 外れていた**＝消した後に着地すると `preview.png` だけのフォルダが復活する（一覧には出ないので
+// 利用者からは気づけない残骸）。
+describe('消した動画には焼かない（#927）', () => {
+  it('削除のあとに焼き込みが来ても書かない', async () => {
+    // 描くところまでは行くが、書く手前で止める（描画は止められない＝既に走っている）。
+    await useProjectStore.getState().deleteProject('proj_gone');
+    vi.mocked(saveProjectThumbnail).mockClear();
+    await useProjectStore.getState()._refreshProjectThumbnail('proj_gone');
+    expect(saveProjectThumbnail).not.toHaveBeenCalled();
+  });
+
+  it('別の動画は今までどおり焼く（消した1つだけを止める）', async () => {
+    await useProjectStore.getState().deleteProject('proj_gone2');
+    vi.mocked(saveProjectThumbnail).mockClear();
+    await useProjectStore.getState()._refreshProjectThumbnail('proj_alive');
+    expect(saveProjectThumbnail).toHaveBeenCalledTimes(1);
+  });
+
+  it('消せなかったら印を戻す（消えていないのに焼けない、を作らない）', async () => {
+    const { deleteProjectDoc } = await import('../../infrastructure/projectFs');
+    vi.mocked(deleteProjectDoc).mockRejectedValueOnce(new Error('消せない'));
+    await expect(useProjectStore.getState().deleteProject('proj_kept')).rejects.toThrow();
+    vi.mocked(saveProjectThumbnail).mockClear();
+    await useProjectStore.getState()._refreshProjectThumbnail('proj_kept');
     expect(saveProjectThumbnail).toHaveBeenCalledTimes(1);
   });
 });
