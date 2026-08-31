@@ -97,6 +97,9 @@ describe("帯を押しても焦点を帯へ移さない（#948）", () => {
     expect(document.activeElement).toBe(someButton); // 前提が立っていることを確かめてから見る
     pressClip();
     expect(document.activeElement).not.toBe(someButton);
+    // ⚠️ **帯へ移ってもいないこと**（レビュー ℹ️）＝`blur()` を `focus()` に取り違えても
+    // 「前のボタンから外れた」だけは真になるので、行き先まで見ないと退行を捕まえられない。
+    expect(document.activeElement).not.toBe(document.querySelector(".timeline-clip"));
   });
 
   // ⚠️ **掴めない帯でも降ろす**（レビュー ℹ️）＝`blur()` を `grabbableClip` の判定より**後ろ**へ
@@ -113,6 +116,9 @@ describe("帯を押しても焦点を帯へ移さない（#948）", () => {
     expect(document.activeElement).toBe(someButton);
     pressClip();
     expect(document.activeElement).not.toBe(someButton);
+    // ⚠️ **帯へ移ってもいないこと**（レビュー ℹ️）＝`blur()` を `focus()` に取り違えても
+    // 「前のボタンから外れた」だけは真になるので、行き先まで見ないと退行を捕まえられない。
+    expect(document.activeElement).not.toBe(document.querySelector(".timeline-clip"));
   });
 
   // ⚠️ **右クリックのメニューが消えていないこと**（レビュー 🟡）＝既定を全ボタンで落とすので、
