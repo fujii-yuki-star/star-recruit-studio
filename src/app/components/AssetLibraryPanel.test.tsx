@@ -9,6 +9,8 @@ vi.mock("../../infrastructure/assetLibraryFs", () => ({
   deleteLibraryAsset: vi.fn(async () => {}),
   updateLibraryAsset: vi.fn(async () => {}),
   usedLibraryAssetIds: vi.fn(async () => []),
+  // 小さな絵（#926）＝この試験では出さない（`null`＝出せない＝絵の枠も出ない）。
+  libraryAssetDisplayUrl: vi.fn(async () => null),
 }));
 vi.mock("../../infrastructure/dialog", () => ({ showOpenLibraryAssetsDialog: vi.fn(async () => []) }));
 
@@ -16,7 +18,7 @@ import { AssetLibraryPanel } from "./AssetLibraryPanel";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
-import { addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
+import { libraryAssetDisplayUrl, addLibraryAsset, deleteLibraryAsset, listLibraryAssets, updateLibraryAsset, usedLibraryAssetIds } from "../../infrastructure/assetLibraryFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
 
@@ -437,5 +439,39 @@ describe("AssetLibraryPanel", () => {
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "この動画で使う" })[0]);
     expect(await screen.findByText(/「タイムライン動画」へ取り込みました/)).toBeInTheDocument();
+  });
+});
+// 小さな絵（#926）＝名前とタグの文字だけだと**数十件で見分けがつかない**。
+describe("小さな絵（#926）", () => {
+  const showList = async (items: LibraryAsset[]) => {
+    vi.mocked(listLibraryAssets).mockResolvedValue(items);
+    render(<AssetLibraryPanel />);
+    await screen.findByText(items[0].displayName);
+  };
+
+  it("絵として出せる素材には小さな絵を出す", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x/logo.png" as never);
+    await showList([lib({ id: "lib_asset_001", displayName: "ロゴ", assetType: ASSET_TYPE.logo, fileName: "logo.png" })]);
+    const img = await screen.findByRole("presentation");
+    expect(img.getAttribute("src")).toBe("asset://x/logo.png");
+  });
+
+  // ⚠️ **動画は代表フレームが要る**が棚には無い＝`<img>` にすると壊れた画像枠が並ぶ。
+  it("動画・音には出さない（壊れた画像枠を並べない）", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x/movie.mp4" as never);
+    await showList([
+      lib({ id: "lib_asset_002", displayName: "紹介ムービー", assetType: ASSET_TYPE.video, fileName: "movie.mp4" }),
+      lib({ id: "lib_asset_003", displayName: "BGM", assetType: ASSET_TYPE.bgm, fileName: "a.mp3" }),
+    ]);
+    expect(screen.queryByRole("presentation")).toBeNull();
+    expect(libraryAssetDisplayUrl).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **絵が出せなくても行は消さない**＝`null` は「出せない」であって「素材が無い」ではない。
+  it("絵を出せなくても素材の行は残る", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null as never);
+    await showList([lib({ id: "lib_asset_004", displayName: "会社の外観", assetType: ASSET_TYPE.image, fileName: "p.png" })]);
+    expect(screen.getByText("会社の外観")).toBeInTheDocument();
+    expect(screen.queryByRole("presentation")).toBeNull();
   });
 });

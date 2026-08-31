@@ -1,7 +1,8 @@
 // ユーザー素材ライブラリ（ADR-0035・#260）の保存/読込（Tauri コマンド境界・§4）。
 // 保存先は appData/user_assets（全プロジェクト共通＝グローバル）。
 // Tauri 非検出時（ブラウザ開発）は空・no-op＝開発フローを止めない（userTemplateFs と同方針）。
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import { isLibraryAssetId, type LibraryAsset } from '../domain/asset/assetLibrary';
 import { isAssetType, type AssetType } from '../domain/enums';
 
@@ -45,6 +46,28 @@ export function toLibraryAsset(raw: unknown): LibraryAsset[] {
   if (!isAssetType(e.assetType)) return [];
   const tags = Array.isArray(e.tags) ? e.tags.filter((t): t is string => typeof t === 'string') : [];
   return [{ id: e.id, fileName: e.fileName, displayName: e.displayName, assetType: e.assetType, tags }];
+}
+
+/**
+ * 棚の素材の**表示用URL**（#926）。プロジェクトの素材（`assetDisplayUrl`）と**同じ流儀**＝
+ * `asset://` を組むだけで、バイトは JS に載せない（ADR-0004・大容量でも重くならない）。
+ *
+ * ⚠️ **置き場所の組み立ては1か所に寄せられない**＝プロジェクトは `projects/<id>/<相対パス>`、
+ * 棚は `user_assets/<ファイル名>`（Rust の `user_assets_dir` と対）。同じ関数にすると
+ * **どちらの規則で組むか**を引数で分けることになり、取り違えが起きる。
+ *
+ * ⚠️ **`null` は「出せない」であって「無い」ではない**＝ブラウザ開発（asset protocol が無い）や
+ * 組み立ての失敗。呼ぶ側は**絵を出さないだけ**にして、行そのものは消さない。
+ */
+export async function libraryAssetDisplayUrl(fileName: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return convertFileSrc(await join(await appDataDir(), 'user_assets', fileName));
+  } catch (e) {
+    // 絵が出ないときに追える形にする（他の読み出しと同じ流儀）。
+    console.warn('[library] libraryAssetDisplayUrl 失敗:', e);
+    return null;
+  }
 }
 
 /**

@@ -175,6 +175,18 @@ export function isFreeSlotAssetType(type: AssetType): boolean {
   return (FREE_SLOT_ASSET_TYPES as readonly AssetType[]).includes(type);
 }
 
+/**
+ * **そのファイル自体が絵として出せる**種別か（#926）。小さな絵（サムネイル）を出す判定。
+ *
+ * ⚠️ **`isFreeSlotAssetType` とは別**＝あちらは「映像として置けるか」で**動画を含む**が、
+ * 動画は**ファイルをそのまま `<img>` にできない**（代表フレームが要る）。棚には代表フレームが
+ * 無いので、ここでは含めない＝**出せない絵を出そうとして壊れた画像枠を並べない**。
+ */
+export function isPreviewableImageType(type: AssetType): boolean {
+  return type === ASSET_TYPE.image || type === ASSET_TYPE.yuko
+    || type === ASSET_TYPE.logo || type === ASSET_TYPE.qr || type === ASSET_TYPE.decor;
+}
+
 // 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
 export const VIDEO_KINDS = ['recruit', 'general'] as const;
 export type VideoKind = (typeof VIDEO_KINDS)[number];
