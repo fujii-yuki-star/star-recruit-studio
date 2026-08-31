@@ -17,7 +17,7 @@ vi.mock('../../infrastructure/userFontFs', () => ({
 import { useProjectStore } from './projectStore';
 import { loadBrandKit, saveBrandKit } from '../../infrastructure/brandKitFs';
 import { ASSET_TYPE } from '../../domain/enums';
-import { BRAND_LOGO_NOT_APPLIED_MESSAGE } from '../uiLabels';
+import { BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE } from '../uiLabels';
 import type { Asset } from '../../domain/project/types';
 
 const logo: Asset = {
@@ -146,13 +146,13 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
   it('取り込めたときはできたことを返す', async () => {
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: 'lib_asset_001' } } as never);
     setProject({ assets: [] });
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: true, addedLogo: true, error: null });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: true, addedLogo: true, fontSkipped: false, error: null });
   });
 
   it('何も変わらないときも「できた」を返す（押せない状態を作らない）', async () => {
     useProjectStore.setState({ brandKit: {} } as never);
     // ⚠️ `applied:false`＝**文書は触っていない**（履歴も積んでいない）＝戻すものが無い。
-    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: false, addedLogo: false, error: null });
+    expect(await useProjectStore.getState().applyBrandKit()).toEqual({ ok: true, applied: false, addedLogo: false, fontSkipped: false, error: null });
   });
 
   /** ⚠️ 書き出し中は文書を固定する（設定した意味どおりの MP4 にする・#570 P1）。 */
@@ -215,6 +215,99 @@ describe('applyBrandKit と履歴', () => {
     setProject({ fontId: 'gen-interface-jp' });
     await useProjectStore.getState().applyBrandKit();
     expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+});
+
+// 覚えている字体が**もう手元に無い**とき、黙って飛ばして「反映しました」と言わない（#929・§2-5）。
+//
+// ⚠️ 到達には3段の失敗が要る（持ち込みフォントを外す→キットの保存が失敗→巻き戻しで消えた id が残る）が、
+// **失敗を成功に見せない**は到達しにくさで免除されるものではない（ADR-0026④）。
+describe('知らない字体は入らないことを返す（#929）', () => {
+  // 形は正しいが**手元に無い** id（ が絞るので通常は入らないが、巻き戻しで残りうる）。
+  const unknownFont = { fontId: 'user_font_999_gone' };
+
+  it('飛ばしたことを返し、履歴も積まない', async () => {
+    useProjectStore.setState({ brandKit: unknownFont, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(true);
+    expect(r.applied).toBe(false); // 入っていないので「入った」と言わない
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('gen-interface-jp'); // 変わらない
+    expect(useProjectStore.getState().past).toHaveLength(0); // 戻すものが無いので積まない
+  });
+
+  it('ロゴだけ入ったときも「全部入った」と言わない', async () => {
+    useProjectStore.setState({ brandKit: { ...unknownFont, logoLibraryAssetId: 'lib_asset_001' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(true);
+    expect(r.addedLogo).toBe(true);
+    expect(r.applied).toBe(true); // ロゴは入った
+    expect(r.ok).toBe(true);
+  });
+
+  // ⚠️ **形は正しいが実体が無い**＝これが本命の経路（別PCへ移した／`user_fonts` を外で消した）。
+  // `isKnownFontId` は**形しか見ない**ので、以前はここを**通して**存在しない id を書き込んでいた。
+  it('形は正しいが手元に無い字体も飛ばす（PR #936 レビュー）', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: [], // 調べた結果「無い」（`null` は「まだ調べていない」）
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(true);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('gen-interface-jp');
+  });
+
+  // ⚠️ **「調べていない」を「無い」にしない**（`missingAsset`／#347 と同じ流儀）＝
+  // 待てば埋まるので、ここで断ると**あるものを入れられない**。
+  it('まだ調べていないときは飛ばさない（あるものを入れられない、を作らない）', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: null,
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(false);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('user_font_007');
+  });
+
+  it('手元にある持ち込みの字体は入る', async () => {
+    useProjectStore.setState({
+      brandKit: { fontId: 'user_font_007' }, past: [],
+      userFonts: [], userFontIds: ['user_font_007'],
+    } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(false);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('user_font_007');
+  });
+
+  it('知っている字体なら飛ばさない', async () => {
+    useProjectStore.setState({ brandKit: { fontId: 'kaitou-yokoku-gothic' }, past: [] } as never);
+    setProject({ fontId: 'gen-interface-jp' });
+    const r = await useProjectStore.getState().applyBrandKit();
+    expect(r.fontSkipped).toBe(false);
+    expect(useProjectStore.getState().meta.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
+  });
+
+  // ⚠️ **新しい動画でも同じことを言う**（片方だけ黙らない＝ADR-0026②）。
+  it('新しい動画では、入らなかったことを理由として出す', async () => {
+    vi.mocked(loadBrandKit).mockResolvedValue(unknownFont);
+    await useProjectStore.getState().applyBrandKitToNew();
+    expect(useProjectStore.getState().importError).toBe(BRAND_FONT_NOT_APPLIED_MESSAGE);
+  });
+});
+
+// 新しい動画に**前の動画の理由**を持ち越さない（PR #936 レビュー・§2-5）。
+//
+// ⚠️ `newProject` は `importError` を消していなかった＝素材の取り込みに失敗したあとで
+// 「新しい動画を作る」を押すと、**身に覚えのない警告**がたたき台にそのまま出ていた。
+describe('新しい動画は前の理由を持ち越さない', () => {
+  it('新規作成で理由を消す', () => {
+    useProjectStore.setState({ importError: '前の動画の取り込み失敗' } as never);
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().importError).toBeNull();
   });
 });
 

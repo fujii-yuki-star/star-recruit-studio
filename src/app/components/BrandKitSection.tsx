@@ -9,7 +9,8 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectS
 import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
 import { DeleteConfirm } from "./DeleteConfirm";
-import { FONT_CATALOG, DEFAULT_FONT_ID } from "../../domain/font/fontCatalog";
+import { BRAND_FONT_NOT_APPLIED_MESSAGE } from "../uiLabels";
+import { FONT_CATALOG, DEFAULT_FONT_ID, isFontAvailable } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -47,11 +48,11 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // zustand が「変わった」と見て**描き直しが止まらなくなる**（実際に無限ループになった）。
   const scenes = useProjectStore((s) => s.scenes);
   const sceneFontIds = useMemo(() => scenes.map((sc) => sc.fontId), [scenes]);
-  // 覚えている字体が、同梱にも手持ちの一覧にも無いか（外した／まだ読めていない）。
-  const missingBrandFont =
-    brandKit.fontId != null
-    && !FONT_CATALOG.some((f) => f.id === brandKit.fontId)
-    && !userFonts.some((f) => f.id === brandKit.fontId);
+  // 覚えている字体が、同梱にも手持ちの一覧にも無いか（外した／別PCへ移した）。
+  // ⚠️ **判定は store と同じ述語**（PR #936 レビュー・§6）＝以前はここだけが実体の一覧を見ており、
+  // **入れる側（`applyBrandKit`）は形だけ見て黙って入れて**いた（同じ状態に別の答え）。
+  const userFontIds = useProjectStore((s) => s.userFontIds);
+  const missingBrandFont = brandKit.fontId != null && !isFontAvailable(brandKit.fontId, userFontIds);
   // ⚠️ **開いているかは共有の1つから採る**（差分再監査 6巡目 🟡）＝`projectId` だけで見ると、
   // 白紙から作った直後（まだ番号を採っていない）を「開いていません」と言ってしまう
   //（実際は開いている＝嘘の理由・§2-5）。同じ問いを画面ごとに書き直さない。
@@ -114,14 +115,21 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
     // たたき台・公開前チェック・編集のツールバーにしか置いていない。**その場に押すものが無い**のに
     // 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
     // 知らせの中に戻す導線を出す。
-    if (r.ok) setNotice("この動画に反映しました。");
+    // ⚠️ **入らなかったものがあれば、それも言う**（#929・§2-5）＝覚えている字体が手元に無いと
+    // 飛ばされる。黙ると**ロゴだけ入ったのに「反映しました」**＝失敗を成功に見せることになる。
+    if (r.ok && r.fontSkipped) setNotice(`${r.addedLogo ? "ロゴを入れました。" : ""}${BRAND_FONT_NOT_APPLIED_MESSAGE}`);
+    else if (r.ok) setNotice("この動画に反映しました。");
     // ⚠️ **一部だけ入ったときも戻せるようにする**（PR #902 レビュー）＝フォントは入ったがロゴの
     // 取り込みで失敗した、が起こりうる。理由だけ出して戻す導線を出さないと、**変わったまま戻せない**。
-    else setError(r.error ?? "反映できませんでした。もう一度お試しください。");
+    // ⚠️ **両方だめだったときは両方言う**（PR #936 レビュー）＝ロゴの理由だけ出すと、
+    // **字体が入らなかったことがどこにも出ない**（#929 が塞ぐはずのもの）。
+    else setError(`${r.error ?? "反映できませんでした。もう一度お試しください。"}${r.fontSkipped ? `
+${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
     setPartlyApplied(!r.ok && r.applied);
     // ⚠️ **取り消しが何を戻すか**（差分再監査）＝戻るのは文字の形だけ（履歴に assets は入らない）。
-    // 戻せるのは**文字の形が変わったときだけ**（成功なら計画・部分失敗なら `applied`＝入ったのは文字の形）。
-    setUndoRestoresFont(r.ok ? plan.fontChanges : r.applied);
+    // ⚠️ **飛ばした字体は戻らない**（#929）＝履歴も積んでいないので、「取り消す」を出すと
+    // **押しても何も戻らないボタン**になる。入ったときだけ出す。
+    setUndoRestoresFont(r.applied && (r.ok ? plan.fontChanges && !r.fontSkipped : true));
     setLogoAdded(r.addedLogo);
   }
 
