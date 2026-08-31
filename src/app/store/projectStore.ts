@@ -105,8 +105,8 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
-export type { SaveStatus } from "../saveStatus";
 import type { SaveStatus } from "../saveStatus";
+export type { SaveStatus };
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
 // 値の定義は domain（`exportProgress.ts`）に1か所だけ置く（§2-7）。ここは別名＝進捗計算と常に同じ語彙になる。
 export type ExportPhase = ExportRunPhase;
