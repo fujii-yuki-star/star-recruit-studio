@@ -146,9 +146,11 @@ describe('削除は走っている焼き込みを全部待つ（#927 の続き�
 
     let deleted = false;
     const del = useProjectStore.getState().deleteProject('proj_two_b').then(() => { deleted = true; });
-    // ⚠️ **十分に回してから見る**＝`deleteProject` は消す前に何度も await するので、
-    // 1tick だけだと**待てていなくても** `deleted` はまだ false＝**バグを見逃す**（実際に見逃した）。
-    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    // ⚠️ **マクロタスクを1回はさんで見る**＝`deleteProject` の経路は Promise の連なり
+    //（マイクロタスク）だけで出来ているので、`setTimeout` を1回待てば**その時点で積まれている
+    // マイクロタスクは全部掃ける**＝**内部の await が何段あっても効く**（段数に依存しない）。
+    // ⚠️ **`await Promise.resolve()` を数回では足りない**＝何回回すかが内部の段数に依存し、
+    // **待てていなくても未完了**に見えてバグを見逃す（実際に1回で書いて見逃した）。
     await new Promise((r) => { setTimeout(r, 0); });
     // まだ書いている最中なので、消し始めていない。
     expect(deleteProjectDoc).not.toHaveBeenCalled();
