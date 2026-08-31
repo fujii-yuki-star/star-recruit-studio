@@ -108,6 +108,10 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
     const list = await listLibraryAssets();
     setUnreadable(list == null);
     if (list) setItems(list);
+    // ⚠️ **読み直したら「出せなかった」も忘れる**（#926）＝覚えたままだと、名前を直す・取り込み直す
+    // などで一覧を読み直しても**その素材だけ二度と絵が出ない**。失敗は一度きりのこと（書き込みの途中
+    // だった等）でも起こるので、利用者の操作で一覧が変わるたびに試し直す。
+    setFailedIds(new Set());
   };
   useEffect(() => {
     // ⚠️ **effect の中で同期に setState しない**（lint）＝一覧の読み込みは非同期なので、

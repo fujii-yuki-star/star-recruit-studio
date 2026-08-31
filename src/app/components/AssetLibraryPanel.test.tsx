@@ -483,6 +483,21 @@ describe("小さな絵（#926）", () => {
     expect(libraryAssetDisplayUrl).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **読み直したら「出せなかった」も忘れる**＝覚えたままだと、名前を直す・取り込み直すなどで
+  // 一覧を読み直しても**その素材だけ二度と絵が出ない**。
+  it("一覧を読み直したら、もう一度絵を取りに行く", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x/ng.png" as never);
+    await showList([lib({ id: "lib_asset_006", displayName: "外観2", assetType: ASSET_TYPE.image, fileName: "ng.png" })]);
+    fireEvent.error(await screen.findByRole("presentation"));
+    await waitFor(() => expect(screen.queryByRole("presentation")).toBeNull());
+
+    // 名前を直す＝一覧を読み直す経路（`updateLibraryAsset` のあと `refresh`）。
+    vi.mocked(libraryAssetDisplayUrl).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "名前・種類・タグ" }));
+    fireEvent.click(screen.getByRole("button", { name: "直す" }));
+    await waitFor(() => expect(libraryAssetDisplayUrl).toHaveBeenCalled());
+  });
+
   // ⚠️ **絵が出せなくても行は消さない**＝`null` は「出せない」であって「素材が無い」ではない。
   it("絵を出せなくても素材の行は残る", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null as never);
