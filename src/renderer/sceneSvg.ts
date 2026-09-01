@@ -62,16 +62,24 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   // ※ 'middle'/'end'/'start' は SVG text-anchor の値（外部API）であり TextAlign enum とは別物。
   const align = item.textAlign ?? TEXT_ALIGN.left;
   const anchor = align === TEXT_ALIGN.center ? 'middle' : align === TEXT_ALIGN.right ? 'end' : 'start';
-  const textX = align === TEXT_ALIGN.center ? item.x + item.w / 2 : align === TEXT_ALIGN.right ? item.x + item.w : item.x;
+  // 字間（#264）＝**em で持つ**ので px へ直す（文字サイズを変えても詰め具合が変わらない）。
+  // ⚠️ 0 のときは属性を出さない＝**従来の出力は1バイトも変わらない**（golden が動かない）。
+  const spacingPx = (item.letterSpacing ?? 0) * item.fontSize;
+  const spacing = spacingPx !== 0 ? ` letter-spacing="${spacingPx}"` : '';
+  // ⚠️ **字間があるとき、揃えの位置を戻す**（#954）＝`letter-spacing` は**最後の文字のうしろにも**
+  // 送りを入れる（実測：1文字でも幅が送りぶん増える）。`text-anchor` はその送りを含んだ幅で揃えるので、
+  // **見えている文字は送りのぶんだけ左へ寄る**（中央で半分・右端で1つぶん）。実測では字間 200 の
+  // 中央揃えでインクの中心が 100px 左へずれていた。x を戻して「設定した意味どおり」にする（ADR-0026①）。
+  // ⚠️ **左揃えは補正しない**＝送りは最後のうしろに付くので、先頭の位置は変わらない。
+  // ⚠️ **字間が 0 なら補正も 0**＝**従来の出力は1バイトも変わらない**（golden が動かない）。
+  // ⚠️ **プレビューと書き出しは同じ関数を通る**ので、直すとどちらも同じだけ動く（パリティは不変）。
+  const anchorFix = align === TEXT_ALIGN.center ? spacingPx / 2 : align === TEXT_ALIGN.right ? spacingPx : 0;
+  const textX = anchorFix + (align === TEXT_ALIGN.center ? item.x + item.w / 2 : align === TEXT_ALIGN.right ? item.x + item.w : item.x);
   // 縁取り（#209）：strokeWidth>0 のとき文字に stroke を敷く。paint-order=stroke で塗りの下に置き可読性を保つ。
   const stroke = item.strokeColor && item.strokeWidth && item.strokeWidth > 0
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
     : '';
 
-  // 字間（#264）＝**em で持つ**ので px へ直す（文字サイズを変えても詰め具合が変わらない）。
-  // ⚠️ 0 のときは属性を出さない＝**従来の出力は1バイトも変わらない**（golden が動かない）。
-  const spacingPx = (item.letterSpacing ?? 0) * item.fontSize;
-  const spacing = spacingPx !== 0 ? ` letter-spacing="${spacingPx}"` : '';
 
   // 影（#264）。⚠️ **プレビューと書き出しは同じ Blink で描く**（`rasterize.ts`）ので、
   // `feDropShadow` はどちらでも同じ絵になる（パリティは構造で保たれる）。
