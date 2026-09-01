@@ -136,7 +136,7 @@ function checkLengths(
   // セリフ本体＝掛け合いなら各行、そうでなければ単一 narration（precheck の `sceneLines` と同じ対象）。
   const narrationTexts = hasLines ? aiLines.map((l) => l.text) : [narrationText];
   if (narrationTexts.some((t) => t.length > maxNarration)) {
-    warnings.push(warn('TEXT_OVERFLOW', 'セリフが長いため読みづらくなる可能性があります', 'narration', 'warning', false));
+    warnings.push(warn('TEXT_OVERFLOW', TRANSFORM_WARNING.NARRATION_TOO_LONG, 'narration', 'warning', false));
   }
   // 字幕は**両方**見る：掛け合いの行字幕（`narrationLines[].subtitle`）と、テンプレ字幕層に載る `texts.subtitle`。
   // どちらが実際に表示されるかは場面のテンプレ/FREE 字幕の対象で決まる（ADR-0029）が、ここは生成直後の**助言**なので
@@ -149,9 +149,23 @@ function checkLengths(
     ...(hasLines ? aiLines.map((l) => l.subtitle ?? l.text) : []),
   ];
   if (subtitleTexts.some((t) => t.length > maxSubtitle)) {
-    warnings.push(warn('TEXT_OVERFLOW', '字幕が長いため読みづらくなる可能性があります', 'texts.subtitle', 'warning', false));
+    warnings.push(warn('TEXT_OVERFLOW', TRANSFORM_WARNING.SUBTITLE_TOO_LONG, 'texts.subtitle', 'warning', false));
   }
 }
+
+/**
+ * たたき台の警告の文言（`15 §6`）。
+ *
+ * ⚠️ **名前つきにしてある**（#962）＝`errorStateTable.test.ts` は**コード側の定数**としか
+ * 突き合わせないので、ここに直書きすると**表とずれても緑**のまま通る。
+ * ⚠️ **次の行動は、たたき台の表にある操作の名前で言う**（`DraftScreen` の「セリフを直す」「素材を変更」）＝
+ * 「短くしてください」だけだと、どこで直すのかが分からない（§2-5）。
+ */
+export const TRANSFORM_WARNING = {
+  REQUIRED_SLOT_EMPTY: 'この場面に入れる写真・動画がまだ選ばれていません。表の「素材を変更」から選んでください',
+  NARRATION_TOO_LONG: 'セリフが長いので読みづらくなります。表の「セリフを直す」から短くしてください',
+  SUBTITLE_TOO_LONG: '字幕が長いので読みづらくなります。表の「セリフを直す」から短くしてください',
+} as const;
 
 /**
  * ai-video-plan を検証・補正しながら内部 Part/Scene へ変換する。
@@ -243,7 +257,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         for (const layer of template.layers) {
           const bearsAsset = layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.logo;
           if (bearsAsset && layer.required && !assetRefs[layer.id]) {
-            w.push(warn('REQUIRED_SLOT_EMPTY', 'この場面に必要な素材が未設定です', `assetRefs.${layer.id}`, 'warning', false));
+            w.push(warn('REQUIRED_SLOT_EMPTY', TRANSFORM_WARNING.REQUIRED_SLOT_EMPTY, `assetRefs.${layer.id}`, 'warning', false));
           }
         }
       }

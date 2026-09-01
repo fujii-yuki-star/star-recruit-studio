@@ -78,7 +78,7 @@ import {
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
-import { exportBlockedMessage, resolveExportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
+import { exportFailedMessage, exportBlockedMessage, resolveExportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, isOwnCleanupPending, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
@@ -110,7 +110,7 @@ const EXPORT_BUSY_OPEN_MESSAGE = "いま動画を書き出しています。終�
 const IMPORTING_OPEN_MESSAGE = "いま素材を取り込んでいます。終わってから、別の動画を開いてください。";
 const IMPORTING_CREATE_MESSAGE = "いま素材を取り込んでいます。終わってから、新しい動画を作ってください。";
 const EXPORT_DONE_MESSAGE = "動画を保存しました。";
-const EXPORT_FAILED_MESSAGE = "動画を書き出せませんでした。しばらくしてから、もう一度お試しください。";
+const EXPORT_FAILED_MESSAGE = exportFailedMessage.EXPORT_FAILED_TIMELINE;
 const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
 const EXPORT_UNSUPPORTED_MESSAGE = "この環境では動画を書き出せません。アプリから起動し直してお試しください。";
 

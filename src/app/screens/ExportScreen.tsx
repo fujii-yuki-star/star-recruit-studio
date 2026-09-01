@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
+import { exportFailedMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
@@ -409,7 +409,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
         // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
         const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-        setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
+        setMessage(detail || exportFailedMessage.EXPORT_FAILED_SCENE);
         setPhase("error");
         console.error("[export] failed:", e);
       }

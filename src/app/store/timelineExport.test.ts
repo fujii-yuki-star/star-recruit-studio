@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ラスタライズ（canvas）は環境依存＝ここでは差し替える（`buildTimelineFrames.test.ts` と同じ扱い）。
 // 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
 vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
+import { exportFailedMessage } from '../uiLabels';
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
 import { EXPORT_CLEANUP_PENDING_MESSAGE, useExportLockStore } from './exportLock';
 import * as fsMod from '../../infrastructure/projectFs';
@@ -225,7 +226,7 @@ describe('exportTimelineVideo', () => {
     await useTimelineStore.getState().exportTimelineVideo(deps);
     const run = useTimelineStore.getState().exportRun;
     expect(run.phase).toBe('error');
-    expect(run.message).toBe('動画を書き出せませんでした。しばらくしてから、もう一度お試しください。');
+    expect(run.message).toBe(exportFailedMessage.EXPORT_FAILED_TIMELINE);
   });
 
   it('成功しても失敗しても一時ファイルを片づける（次の書き出しに古い絵を混ぜない）', async () => {
