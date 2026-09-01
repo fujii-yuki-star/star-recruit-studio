@@ -1024,6 +1024,14 @@ export function backupSavedAtLabel(savedAt: Date): string {
 export const RESTORE_FAILED_MESSAGE =
   "前に保存できていたところから開けませんでした。一覧から別の動画を選んでください。";
 
+/** 復元ポイントの一覧を読めなかったとき（§2-5＝次の行動）。 */
+export const RESTORE_POINTS_UNREADABLE =
+  "戻れる時点の一覧を読めませんでした。しばらくしてから、もう一度お試しください";
+
+/** 戻れる時点がまだ無いとき（押せるのに何も無い、を説明する）。 */
+export const RESTORE_POINTS_EMPTY =
+  "まだ戻れる時点がありません。編集して保存していくと、少しずつ増えていきます";
+
 /**
  * 動画を書き出せなかったとき（`15 §6` `EXPORT_FAILED`）。
  *

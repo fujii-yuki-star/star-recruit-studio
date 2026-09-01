@@ -1,5 +1,6 @@
 // project.json の保存/読込（Tauriコマンド境界）。domain は型と純粋ロジックのみ、I/Oはここに隔離（CLAUDE.md §4）。
 // Tauri 非検出時（ブラウザでの開発・プレビュー）は localStorage にフォールバックし、開発フローを止めない。
+import type { RestorePoint } from '../domain/project/restorePoints';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface ProjectSummary {
@@ -113,4 +114,40 @@ export async function projectBackupTime(projectId: string): Promise<Date | null>
 export async function restoreProjectBackup(projectId: string): Promise<void> {
   if (!isTauri()) return;
   await invoke('restore_project_backup', { projectId });
+}
+
+/**
+ * 復元ポイントの一覧（#263 段階2）。非 Tauri は空。
+ *
+ * ⚠️ **時刻は名前に入っている**＝ファイルの更新時刻から採らない（コピーや同期で変わる）。
+ */
+export async function listRestorePoints(projectId: string): Promise<RestorePoint[]> {
+  if (!isTauri()) return [];
+  const rows = await invoke<[string, number][]>('list_restore_points', { projectId });
+  return rows.map(([name, savedAt]) => ({ name, savedAt }));
+}
+
+/** いまの内容を復元ポイントとして控える（作るかどうかは呼び出し側が決める）。 */
+export async function takeRestorePoint(projectId: string, atMs: number): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('take_restore_point', { projectId, atMs });
+}
+
+/** 古い復元ポイントを消す（残す数は呼び出し側が決める）。 */
+export async function dropRestorePoint(projectId: string, name: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('drop_restore_point', { projectId, name });
+}
+
+/**
+ * 復元ポイントへ戻す（利用者の明示操作・#263 段階2）。
+ *
+ * ⚠️ **戻す前の状態も復元ポイントとして残る**＝「戻したけど、やっぱり戻す前がよかった」に戻れる。
+ */
+export async function restoreFromPoint(projectId: string, name: string): Promise<void> {
+  if (!isTauri()) return;
+  // ⚠️ **時計はここで読む**＝呼ぶのは画面（描画中に `Date.now()` を読むと、
+  // 再描画のたびに違う値になりうる＝React の規則）。`takeRestorePoint` が時刻を受け取るのは、
+  // 「作るかどうかの判断」と「作る時刻」を**同じ瞬間**でそろえる必要があるため（別の理由）。
+  await invoke('restore_from_point', { projectId, name, nowMs: Date.now() });
 }

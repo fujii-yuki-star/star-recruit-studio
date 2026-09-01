@@ -1,0 +1,82 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useProjectStore } from "../store/projectStore";
+import * as projectFs from "../../infrastructure/projectFs";
+import type { ProjectHeader } from "../../domain/project/persistence";
+import type { Scene } from "../../domain/project/types";
+import { HomeScreen } from "./HomeScreen";
+
+// #263 段階2：前の状態に戻す。
+// ⚠️ **戻したら開き直す**＝画面が持っている内容は戻す前のものなので、開き直さないと
+// 次の保存で戻したはずのファイルを上書きする。
+const ONE = [{ projectId: "p_001", projectName: "テスト動画", updatedAt: "2026-09-01T00:00:00Z" }];
+const point = (savedAt: number) => ({ name: `p-${savedAt}.json`, savedAt });
+
+describe("前の状態に戻す（#263 段階2）", () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      scenes: [], assets: [], saveStatus: "saved",
+      listProjects: vi.fn(async () => ONE as unknown as ProjectHeader[]),
+      loadProject: vi.fn(async () => {}),
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const openPanel = async () => {
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText("「テスト動画」を前の状態に戻す"));
+  };
+
+  it("時点を新しい順に見せる（どこまで戻るか分からないまま押させない）", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(1_000_000), point(3_000_000), point(2_000_000)]);
+    await openPanel();
+    const buttons = await screen.findAllByText("ここへ戻す");
+    expect(buttons).toHaveLength(3);
+    expect(document.body.textContent).toMatch(/戻す前の状態も残る/);
+  });
+
+  it("まだ無いときは、その旨と増え方を言う（押せるのに何も無い、を説明する）", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    await openPanel();
+    await waitFor(() => expect(document.body.textContent).toMatch(/まだ戻れる時点がありません/));
+    expect(screen.queryByText("ここへ戻す")).toBeNull();
+  });
+
+  it("押すと戻してから開き直す", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    const restore = vi.spyOn(projectFs, "restoreFromPoint").mockResolvedValue(undefined);
+    const load = vi.fn(async () => {});
+    useProjectStore.setState({ loadProject: load });
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith("p_001", "p-3000000.json"));
+    await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
+  });
+
+  it("未保存があるときは、先に確認する（戻すと画面の編集が失われる）", async () => {
+    useProjectStore.setState({ scenes: [{ sceneId: "scene_001" } as unknown as Scene], saveStatus: "idle" });
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    const restore = vi.spyOn(projectFs, "restoreFromPoint").mockResolvedValue(undefined);
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    expect(restore).not.toHaveBeenCalled();
+    expect(await screen.findByText("戻して開く")).toBeTruthy();
+    fireEvent.click(screen.getByText("戻して開く"));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith("p_001", "p-3000000.json"));
+  });
+
+  it("一覧を読めなかったら黙らせない（次の行動を出す）", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockRejectedValue(new Error("むり"));
+    await openPanel();
+    await waitFor(() => expect(document.body.textContent).toMatch(/戻れる時点の一覧を読めませんでした/));
+  });
+
+  it("戻せなかったら理由をそのまま見せる", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    vi.spyOn(projectFs, "restoreFromPoint").mockRejectedValue(new Error("その復元ポイントが見つかりませんでした。一覧から選び直してください。"));
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await waitFor(() => expect(document.body.textContent).toMatch(/一覧から選び直してください/));
+  });
+});

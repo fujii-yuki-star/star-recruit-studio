@@ -14,7 +14,7 @@ import {
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
-import { RESTORE_FAILED_MESSAGE, restoreOfferMessage } from "./uiLabels";
+import { RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage } from "./uiLabels";
 
 /**
  * 表の行に**見える**すべての行（ゆるい判定）。
@@ -64,6 +64,8 @@ function codeMessages(): Record<string, string> {
     // α-7 で足したぶん（#960 レビュー）＝同じ穴を開け直さない。
     ...templateSaveMessage,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
+    RESTORE_POINTS_UNREADABLE,
+    RESTORE_POINTS_EMPTY,
     // ⚠️ **日時が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
     PROJECT_BACKUP_AVAILABLE: restoreOfferMessage(" 〔日時〕 "),
     READING_DICT_SYNC_FAILED,

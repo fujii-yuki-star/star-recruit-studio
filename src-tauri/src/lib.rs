@@ -97,6 +97,116 @@ fn back_up_previous(path: &std::path::Path) {
     let _ = write_json_atomic(&backup_path(path), &text);
 }
 
+/// 復元ポイントの置き場（`projects/<id>/restore/`）。
+fn restore_dir(app: &tauri::AppHandle, project_id: &str) -> Result<std::path::PathBuf, String> {
+    Ok(projects_dir(app)?.join(project_id).join("restore"))
+}
+
+/// 復元ポイントの一覧（ファイル名と、作った時刻＝1970年からのミリ秒）。
+///
+/// ⚠️ **時刻はファイルの更新時刻から採らない**＝コピーや同期で変わる。**名前に入れて持つ**
+/// （`p-<ミリ秒>.json`）＝並べ替えも選び直しも、名前だけで決まる。
+/// ⚠️ **どれを残すか・いつ作るかの規則はここに書かない**（`domain/project/restorePoints.ts`）＝
+/// 同じ考え方を2か所に置くと、すぐ食い違う。
+#[tauri::command]
+fn list_restore_points(
+    app: tauri::AppHandle,
+    project_id: String,
+) -> Result<Vec<(String, u64)>, String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    let dir = restore_dir(&app, &project_id)?;
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new()); // まだ1つも作っていない
+    };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if let Some(ms) = restore_point_time(&name) {
+            out.push((name, ms));
+        }
+    }
+    Ok(out)
+}
+
+/// 名前から時刻を読む（`p-<ミリ秒>.json` 以外は復元ポイントとして扱わない）。
+fn restore_point_time(name: &str) -> Option<u64> {
+    let rest = name.strip_prefix("p-")?.strip_suffix(".json")?;
+    rest.parse::<u64>().ok()
+}
+
+/// いまの `project.json` を復元ポイントとして控える（作るかどうかは呼び出し側が決める）。
+///
+/// ⚠️ **読める版だけ**（`back_up_previous` と同じ理由＝戻り先にならないものを増やさない）。
+#[tauri::command]
+fn take_restore_point(app: tauri::AppHandle, project_id: String, at_ms: u64) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    let src = projects_dir(&app)?.join(&project_id).join("project.json");
+    let Ok(text) = fs::read_to_string(&src) else {
+        return Ok(()); // まだ保存されていない＝控えるものが無い
+    };
+    if serde_json::from_str::<serde_json::Value>(&text).is_err() {
+        return Ok(()); // 壊れている＝戻り先にならない
+    }
+    let dir = restore_dir(&app, &project_id)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_json_atomic(&dir.join(format!("p-{at_ms}.json")), &text)
+}
+
+/// 指定の復元ポイントを消す（古いぶんの片づけ＝残す数は呼び出し側が決める）。
+#[tauri::command]
+fn drop_restore_point(
+    app: tauri::AppHandle,
+    project_id: String,
+    name: String,
+) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    // ⚠️ **名前を検証する**＝`..` や別のファイルを指されると、関係ないものを消してしまう。
+    if restore_point_time(&name).is_none() {
+        return Err("不正な復元ポイントです。".to_string());
+    }
+    let path = restore_dir(&app, &project_id)?.join(&name);
+    let _ = fs::remove_file(&path); // 既に無いのは失敗ではない
+    Ok(())
+}
+
+/// 指定の復元ポイントへ戻す（利用者の明示操作）。
+///
+/// ⚠️ **いまの内容も消さない**＝戻す直前の状態を復元ポイントとして残してから書き換える。
+/// 「戻したけど、やっぱり戻す前がよかった」に戻れる（取り消しの効かない操作にしない）。
+#[tauri::command]
+fn restore_from_point(
+    app: tauri::AppHandle,
+    project_id: String,
+    name: String,
+    now_ms: u64,
+) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    if restore_point_time(&name).is_none() {
+        return Err("不正な復元ポイントです。".to_string());
+    }
+    let dir = restore_dir(&app, &project_id)?;
+    let text = fs::read_to_string(dir.join(&name)).map_err(|_| {
+        "その復元ポイントが見つかりませんでした。一覧から選び直してください。".to_string()
+    })?;
+    // 戻す前の状態を残す（同じ名前があれば上書きしない＝時刻が違えば別の世代）。
+    let target = projects_dir(&app)?.join(&project_id).join("project.json");
+    if let Ok(cur) = fs::read_to_string(&target) {
+        if serde_json::from_str::<serde_json::Value>(&cur).is_ok() {
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            write_json_atomic(&dir.join(format!("p-{now_ms}.json")), &cur)?;
+        }
+    }
+    write_json_atomic(&target, &text)
+}
+
 /// 前に保存できていたところが**いつのものか**（無ければ `None`・1970年からの秒）。
 ///
 /// ⚠️ **黙って差し替えない**（§2-5）＝これは「開けなかったときに、利用者が選んで戻る」ためのもの。
@@ -1019,6 +1129,10 @@ pub fn run() {
             save_project,
             project_backup_time,
             restore_project_backup,
+            list_restore_points,
+            take_restore_point,
+            drop_restore_point,
+            restore_from_point,
             load_project,
             list_projects,
             delete_project,
@@ -1224,6 +1338,33 @@ mod manifest_tests {
             .iter()
             .any(|i| i.starts_with("user_font_") && i != "user_font_001" && i != "user_font_007"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 復元ポイントの名前から時刻を読む（#263 段階2）。
+    ///
+    /// ⚠️ **これが名前の検証そのもの**＝`drop_restore_point` / `restore_from_point` は
+    /// ここが `None` を返すものを断る。緩めると、`..` や関係ないファイルを指されて**別のものを消す**。
+    #[test]
+    fn restore_point_time_reads_only_our_names() {
+        use super::restore_point_time;
+        assert_eq!(
+            restore_point_time("p-1700000000000.json"),
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(restore_point_time("p-0.json"), Some(0));
+        // 形が違うものは復元ポイントとして扱わない。
+        for bad in [
+            "project.json",
+            "p-.json",
+            "p-abc.json",
+            "p-123.txt",
+            "../project.json",
+            "p-123.json.tmp",
+            "P-123.json",
+            "p--1.json",
+        ] {
+            assert_eq!(restore_point_time(bad), None, "bad={bad}");
+        }
     }
 
     /// 開けなかったほうを取っておけないときは、戻さない（#964 レビュー 🟡1）。
