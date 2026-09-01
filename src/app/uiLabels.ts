@@ -997,6 +997,18 @@ export const alpha6Message = {
 } as const;
 
 /**
+ * 見た目パターンの保存で断るときの文言（`15 §6`）。
+ *
+ * ⚠️ **表と機械で結ぶために family にする**（#960 レビュー）＝`errorStateTable.test.ts` は
+ * `codeMessages()` に載っている文言としか突き合わせないので、画面や store に直書きすると
+ * **表にだけ行があってコードとずれても緑**のまま通る（`alpha6Message` を作ったのと同じ穴）。
+ */
+export const templateSaveMessage = {
+  USER_TEMPLATE_SAVE_INVALID:
+    "この見た目パターンは、いまの内容では保存できません。直前に変えた項目を「取り消す」で元に戻してから、もう一度お試しください。",
+} as const;
+
+/**
  * 使っている持ち込みフォントが**見つからない**（`USER_FONT_MISSING`）。
  * ⚠️ **件数を差し込む**＝表は `N` と書くので、テストは `N` を渡して突き合わせる。
  */

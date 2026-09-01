@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
-import { LAYER_TYPE, TEXT_KEY, type LayerType } from '../enums';
+import { LAYER_TYPE, LAYER_TYPES, TEXT_KEY } from '../enums';
 import { addLayer, createLayerId, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_SUBTITLE, DEFAULT_TEXT_KEY_TEXT, duplicateLayer, editableTextKeys, removeLayer, requiredFieldsForLayerType, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer, withTextFontId } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
@@ -249,20 +249,27 @@ describe('requiredFieldsForLayerType（種別ごとの「無いと読み込め�
       expect(requiredFieldsForLayerType(t)).toEqual({});
     }
   });
-  it('schema が種別ごとに必須にしている項目を1つ残らず埋める（表と schema の食い違いを検出）', async () => {
-    // 正典 template.schema.json の allOf（if type → then required）を読み、表がそれを満たすか照合する。
-    // ⚠️ 期待値を手で写さない＝schema に条件が増えたとき、この表だけ古いまま通るのを防ぐ（#959 の再発防止）。
+  it('表と schema が「ちょうど一致」する（どちらへずれても検出する）', async () => {
+    // 正典 template.schema.json の allOf（if type → then required）を読み、表と**集合として**突き合わせる。
+    // ⚠️ **期待値を手で写さない**＝schema に条件が増えたとき、この表だけ古いまま通るのを防ぐ（#959 の再発防止）。
+    // ⚠️ **両方向を見る**（#960 レビュー）＝schema→表（必須が表に有るか）だけだと、
+    // **schema が必須にしていない項目を表に足す**のを止められない。それをやると `withRequiredLayerFields` が
+    // **いま読み込めている全テンプレ**に効いてしまい、絵が黙って変わる（例：立ち絵に `fit: cover` を足すと、
+    // `fit` 未指定の立ち絵が既定の `contain` から変わる）。補正が安全なのは
+    // **「必須欠け＝schema 不適合＝一度も読み込めていない文書」にしか当たらない**からで、
+    // その前提を保つのが集合一致。
     const schema = (await import('../../../docs/yuko_recruit_docs/schemas/template.schema.json')).default as {
       $defs: { Layer: { allOf: { if: { properties: { type: { const?: string; enum?: string[] } } }; then: { required: string[] } }[] } };
     };
-    for (const rule of schema.$defs.Layer.allOf) {
-      const t = rule.if.properties.type;
-      for (const type of t.const ? [t.const] : (t.enum ?? [])) {
-        const filled = requiredFieldsForLayerType(type as LayerType);
-        for (const key of rule.then.required) {
-          expect(Object.keys(filled), `${type} の必須 ${key} が表に無い`).toContain(key);
-        }
-      }
+    const requiredOfSchema = (type: string): string[] =>
+      schema.$defs.Layer.allOf
+        .filter((r) => {
+          const t = r.if.properties.type;
+          return t.const === type || (t.enum ?? []).includes(type);
+        })
+        .flatMap((r) => r.then.required);
+    for (const type of LAYER_TYPES) {
+      expect(Object.keys(requiredFieldsForLayerType(type)).sort(), `${type}`).toEqual(requiredOfSchema(type).sort());
     }
   });
 });

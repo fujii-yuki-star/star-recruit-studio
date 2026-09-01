@@ -7,6 +7,7 @@ import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
+import { parseTemplatePack } from '../../infrastructure/templateFs';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
 import type { Asset, Scene } from '../../domain/project/types';
@@ -411,8 +412,31 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
       await useProjectStore.getState().saveUserTemplate(slotTmpl({ slotType: 'audio' }));
       expect(spy).not.toHaveBeenCalled(); // ファイルに書かない
       expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_gate')).toBe(false); // 一覧にも出さない
-      expect(useProjectStore.getState().templateError).toMatch(/元に戻して/); // 「もう一度」だけでは次の行動にならない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/); // 「もう一度」だけでは次の行動にならない
       expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 排他を握ったままにしない
+      spy.mockRestore();
+    });
+
+    // ⚠️ **複製・ゼロから作成も門を通ることを固定する**（#960 レビュー）＝いまは薄いラッパーで
+    // `saveUserTemplate` へ委譲しているが、直接 `userTemplateFs.saveUserTemplate` を呼ぶ形へ書き換えられると
+    // 門を迂回でき、#959 が別の入口から戻ってくる。
+    it('複製も門を通る（不正な内容は保存せず id を返さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates, slotTmpl({ slotType: 'audio' })], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().duplicateAsUserTemplate('user_tmpl_gate');
+      expect(spy).not.toHaveBeenCalled();
+      expect(id).toBe(''); // 呼び出し側が選ばない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/);
+      spy.mockRestore();
+    });
+
+    it('ゼロから作成も門を通る（作れたものは検証を通っている）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().createBlankUserTemplate('新規', 'opening', '16:9');
+      expect(id).not.toBe('');
+      // 門を通った＝保存された文書は読み込みの検証を通っている。
+      expect(parseTemplatePack(spy.mock.calls[0][0]).rejected).toEqual([]);
       spy.mockRestore();
     });
   });

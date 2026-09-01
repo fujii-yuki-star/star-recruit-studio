@@ -952,7 +952,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
                   {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
                   {/* 表示は実効 z（一覧・描画と同じ基準）。zIndex 未指定でも「一覧で上なら大きい数」になり、↑↓ と値が食い違わない。 */}
-                  {numField(Z_ORDER_LABEL, effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }), 0)}
+                  {/* ⚠️ **整数に丸める**（#960 レビュー）＝重ね順は「1段」を表す語彙で schema も整数。
+                      `NumberField` は下限クランプしかしないので `2.5` を確定でき、保存の門（#959）が
+                      テンプレ**全体**の保存を止める。門は理由を欄まで絞れないので、入口で防ぐ。 */}
+                  {numField(Z_ORDER_LABEL, effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: Math.round(v) }), 0)}
                 </div>
               </div>
               {renderLayerControls(selectedLayer)}

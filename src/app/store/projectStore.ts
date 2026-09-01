@@ -81,7 +81,7 @@ import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
+import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -1946,7 +1946,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 複製・ゼロから作成もこの action を通るので、入口ごとに書き足す必要はない。
     const { templates: accepted } = parseTemplatePack(template);
     const saving = accepted[0];
-    if (!saving) { set({ templateError: "この見た目パターンは、いまの内容では保存できません。直前に変えた項目を元に戻してから、もう一度お試しください。" }); return; }
+    if (!saving) { set({ templateError: templateSaveMessage.USER_TEMPLATE_SAVE_INVALID }); return; }
     set({ isTemplateMutating: true }); // 最初の await 前に排他を立てる＝書き出し開始側がこれを見て止まる（#570 レビュー・isImporting と対称）。
     try {
       // 排他フラグで書き出し開始をブロックするので、await 中に書き出しが割り込まない＝保存はファイル/一覧まで完走できる

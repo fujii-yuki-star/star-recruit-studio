@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
@@ -60,6 +60,8 @@ function codeMessages(): Record<string, string> {
     // α-6 で足したぶん（α-6 出口監査 🟡18）＝画面や `infrastructure` に直書きされていて
     // この走査の外にあり、**既に1件ズレていた**（句点の有無）。
     ...alpha6Message,
+    // α-7 で足したぶん（#960 レビュー）＝同じ穴を開け直さない。
+    ...templateSaveMessage,
     READING_DICT_SYNC_FAILED,
     READING_DICT_UNREADABLE,
     READING_DICT_UNREADABLE_FOR_VOICE,

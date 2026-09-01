@@ -115,9 +115,9 @@
 | enum | 値 |
 |---|---|
 | `layer.type` | `background` / `slot` / `text` / `subtitle` / `character` / `decor` / `shape` / `logo` |
-| `slotType` | `image_or_video` / `image` / `video` |
+| `slotType` | `image_or_video` / `image` / `video`（定数 `DEFAULT_SLOT_TYPE`＝`domain/template/layerOps.ts`・**`slot` 層では必須**〔`allOf`〕・欠落は読込時に `image_or_video` へ補正＝`§9`・#959） |
 | `fit` | `cover` / `contain` / `stretch` |
-| `textKey` | `title` / `main` / `subtitle` / `caption` / `url` |
+| `textKey` | `title` / `main` / `subtitle` / `caption` / `url`（定数 `DEFAULT_TEXT_KEY_TEXT`／`DEFAULT_TEXT_KEY_SUBTITLE`＝`domain/template/layerOps.ts`・**`text`/`subtitle` 層では必須**〔`allOf`〕・欠落は読込時に `text`→`title` / `subtitle`→`subtitle` へ補正＝`§9`・#959） |
 | `layer.shapeType`（テンプレ shape レイヤー＝`layer.type=shape`） | `rect` / `ellipse` / `line`（定数 `LAYER_SHAPE_TYPE`・未指定=`rect`） |
 | `transition`（MVP） | `none` / `fade` / `slide`（方向 `direction`: `left`/`right`/`up`/`down`）／（将来）`wipe` / `zoom`（ADR-0009） |
 | `videoStartMode`（動画スロット再生開始・ADR-0027） | `withAnim` / `afterAnim` / `delay`（定数 `VIDEO_START_MODE`・未指定=`withAnim`。`delay` のみ `delaySec`≥0 が必須） |
@@ -1392,6 +1392,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | `durationSec < AI_SCENE_MIN_DURATION_SEC`（**AI 生成時のみ**） | `AI_SCENE_MIN_DURATION_SEC`（3秒）へ＝生成のペース配分の目安（手編集は縛らない・#553） |
 | `durationSec >` テンプレ上限（**AI 生成時のみ**） | テンプレ `aiHint.maxDurationSec`（無ければ `AI_SCENE_MAX_DURATION_SEC`=15秒）へ。**手編集は縛らない**（`VIDEO_HARD_MAX_SEC` で頭打ち・#553） |
 | テンプレ上限が生成の下限を下回る（`aiHint.maxDurationSec < AI_SCENE_MIN_DURATION_SEC`） | **上限を優先**（範囲は上限の1点へ潰れる）＝#607。下限は全テンプレ共通の既定で per-template の上書きが無いのに対し、上限は**そのテンプレについて作者が明示した値**なので、具体的な宣言を一般的な既定より優先する（ADR-0026①）。どちらも #553 の「生成の目安」で硬い制約ではないため、`durationSec > 0`（`§7`）は保たれる。警告は既存の `DURATION_CLAMPED` のまま（`aiHint` は作成エディタ非開放＝利用者に別の次の行動が無い・`§2-5`） |
+| 見た目パターンの層で、種別ごとの必須項目が欠けている（`slot` の `slotType` / `text`・`subtitle` の `textKey`） | `requiredFieldsForLayerType`（`domain/template/layerOps.ts`）の既定を補う（`slot`→`image_or_video`／`text`→`title`／`subtitle`→`subtitle`）。**#959**＝見た目パターン作成エディタが `slotType` を書いておらず、**保存はできるのに読み込みで却下され一覧から静かに消えていた**。⚠️ **無言でよい**＝必須欠けは schema 不適合で**これまで100%却下＝一度も描かれていない**ため、補正が当たるのは**いま読み込めていない文書だけ**で、既存の絵は変わらない（本節末の「`scene.warnings[]` に記録」は場面への取り込みの話で、見た目パターンの読込には場面が無い）。⚠️ **この前提は表と schema が「ちょうど一致」していることで保たれる**（`layerOps.test.ts` が両方向を検査。schema が必須にしていない項目を表へ足すと、補正が**読み込めている全テンプレ**に効いて絵が黙って変わる） |
 | `poseTag` 解決不可 / `poseAssetId` 不在 | 既定yuko（`isDefaultYuko` → 無ければ先頭 yuko）へ。yuko素材皆無かつ character 任意 → 非表示 |
 | テキストがテンプレ上限超過 | 警告＋「AIで短くする」提示（自動切詰めはしない） |
 

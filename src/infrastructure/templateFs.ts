@@ -42,12 +42,18 @@ function readTemplateId(item: unknown): string | null {
 }
 
 /**
- * 種別ごとの必須項目が欠けている層を補う（`15 §6` 取り込み時の自動補正・#959）。
+ * 種別ごとの必須項目が欠けている層を補う（`11 §9` 自動補正・#959）。
  *
- * ⚠️ **見た目は変えない**＝補う値は**すでに画面に出ている値**そのもの。`slotType` の読み手
- * （`slotAssign` / `findVideoSlot` / `timeline/video`）はいずれも `image` と `video` だけを特別扱いし、
- * **未指定は元から「写真・動画」として扱っている**ので、書き下しても絵も入れられる素材も変わらない。
- * §2-5 が禁じているのは**別の見た目への差し替え**であって、表示どおりの値を書き下すことではない。
+ * ⚠️ **既存の見た目は変わらない**。根拠は**構造**であって値の一致ではない＝
+ * **必須が欠けた層を持つ文書は schema 不適合で、これまで100%却下されていた**（＝一度も描かれていない）。
+ * つまりこの補正が当たるのは**いま読み込めていない文書だけ**で、読み込めている文書には触れない。
+ * ⚠️ **この前提は `requiredFieldsForLayerType` が schema の必須と「ちょうど一致」していることで保たれる**
+ * （`layerOps.test.ts` が両方向を検査する）。schema が必須にしていない項目を表へ足すと、
+ * 補正が**読み込めている全テンプレ**に効いて絵が黙って変わる（#960 レビュー）。
+ * ⚠️ **「補う値＝いま画面に出ている値」は `slotType` にしか当てはまらない**（読み手は
+ * `slotAssign` / `findVideoSlot` / `timeline/video` ほかで、いずれも `image` と `video` だけを特別扱いし
+ * 未指定は「写真・動画」と同じ枝）。`textKey` は違う＝`textKeyOfLayer` は `text` 層の未指定を `null` にし
+ * 描画は空文字になるので、安全なのは上の構造の理由だけ。**根拠を取り違えたまま残さない**。
  * ⚠️ **欠けている項目だけ**触る（値が入っているものは上書きしない）。ほかが壊れていれば検証がそのまま却下する
  * ＝補正で不正データを通さない（§2-2）。
  */
@@ -72,7 +78,7 @@ function withRequiredLayerFields(item: unknown): unknown {
 /**
  * 生データ（テンプレ単体 or 配列）を正典スキーマで検証し、採用(Template[])と不採用(rejected)へ振り分ける（純粋）。
  * 検証を通った要素だけを Template として返す＝未検証データを内部に流さない（§2-2）。
- * 検証の前に `withRequiredLayerFields` で取り込み時の自動補正を行う（#959）。
+ * 検証の前に `withRequiredLayerFields` で自動補正を行う（`11 §9`・#959）。
  */
 export function parseTemplatePack(raw: unknown): ParsedTemplatePack {
   const items = Array.isArray(raw) ? raw : [raw];
