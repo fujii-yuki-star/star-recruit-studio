@@ -139,15 +139,19 @@ export async function dropRestorePoint(projectId: string, name: string): Promise
   await invoke('drop_restore_point', { projectId, name });
 }
 
+/** 復元ポイントの中身（戻す前に、いまの内容と見比べるため）。 */
+export async function readRestorePoint(projectId: string, name: string): Promise<string> {
+  if (!isTauri()) return '';
+  return await invoke<string>('read_restore_point', { projectId, name });
+}
+
 /**
- * 復元ポイントへ戻す（利用者の明示操作・#263 段階2）。
+ * 戻した内容を書き込む（利用者の明示操作・#263 段階2）。
  *
  * ⚠️ **戻す前の状態も復元ポイントとして残る**＝「戻したけど、やっぱり戻す前がよかった」に戻れる。
+ * ⚠️ **時計はここで読む**＝呼ぶのは画面（描画中の `Date.now()` は再描画のたびに違う値になりうる）。
  */
-export async function restoreFromPoint(projectId: string, name: string): Promise<void> {
+export async function restoreProjectText(projectId: string, text: string): Promise<void> {
   if (!isTauri()) return;
-  // ⚠️ **時計はここで読む**＝呼ぶのは画面（描画中に `Date.now()` を読むと、
-  // 再描画のたびに違う値になりうる＝React の規則）。`takeRestorePoint` が時刻を受け取るのは、
-  // 「作るかどうかの判断」と「作る時刻」を**同じ瞬間**でそろえる必要があるため（別の理由）。
-  await invoke('restore_from_point', { projectId, name, nowMs: Date.now() });
+  await invoke('restore_project_text', { projectId, text, nowMs: Date.now() });
 }

@@ -8,7 +8,16 @@ import {
   sortRestorePoints,
   type RestorePoint,
 } from "../../domain/project/restorePoints";
-import { dropRestorePoint, listRestorePoints, takeRestorePoint } from "../../infrastructure/projectFs";
+import {
+  dropRestorePoint,
+  listRestorePoints,
+  loadProjectDoc,
+  readRestorePoint,
+  restoreProjectText,
+  takeRestorePoint,
+} from "../../infrastructure/projectFs";
+import { clearStaleVoices } from "../../domain/project/restoreVoices";
+import { parseProjectDoc } from "../../domain/project/persistence";
 
 /**
  * いまの `project.json` を、必要なら復元ポイントとして控え、古いぶんを片づける。
@@ -34,4 +43,36 @@ export async function keepRestorePoints(projectId: string, now: number): Promise
 /** 画面に出す順（新しい順）で一覧を取る。 */
 export async function loadRestorePoints(projectId: string): Promise<RestorePoint[]> {
   return sortRestorePoints(await listRestorePoints(projectId));
+}
+
+
+/**
+ * 復元ポイントへ戻す（#263 段階2）。
+ *
+ * ⚠️ **書き込む前に、いまの音と食い違う読み上げを「作成前」に戻す**（#967 レビュー 🟡2）＝
+ * 音のファイルは決まった名前で上書きされるので**戻らない**。そのまま書くと
+ * **セリフは戻った文なのに声はいまの文**という動画が、何も言われずに出る。
+ * ⚠️ **戻す内容が読めないときは、そのまま書く**＝比べられないだけで、戻すこと自体は成り立つ
+ *（比べられないから戻さない、にすると壊れた文書から戻れなくなる）。
+ * ⚠️ **上限もここで効かせる**（#967 レビュー 🟡4）＝戻すと「戻す前の状態」が1つ増えるので、
+ * 何度も戻すと**上限を超えて溜まり続ける**（次の自動保存まで刈られない）。規則は domain に1つ。
+ */
+export async function restoreToPoint(projectId: string, name: string): Promise<number> {
+  const text = await readRestorePoint(projectId, name);
+  let finalText = text;
+  let cleared = 0;
+  try {
+    const restored = parseProjectDoc(text);
+    const current = parseProjectDoc(await loadProjectDoc(projectId));
+    const fixed = clearStaleVoices(restored, current);
+    cleared = fixed.count.cleared;
+    finalText = JSON.stringify(fixed.project, null, 2);
+  } catch {
+    /* 比べられないときは、戻す内容をそのまま書く */
+  }
+  for (const p of restorePointsToDrop(await listRestorePoints(projectId))) {
+    await dropRestorePoint(projectId, p.name);
+  }
+  await restoreProjectText(projectId, finalText);
+  return cleared;
 }

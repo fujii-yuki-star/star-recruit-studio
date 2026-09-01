@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as projectFs from "../../infrastructure/projectFs";
 import { RESTORE_POINT_MAX, RESTORE_POINT_MIN_INTERVAL_MS } from "../../domain/project/restorePoints";
-import { keepRestorePoints, loadRestorePoints } from "./restorePointKeeper";
+import { keepRestorePoints, loadRestorePoints, restoreToPoint } from "./restorePointKeeper";
+import { assembleProject, defaultVideoSettings, defaultVoiceSettings } from "../../domain/project/persistence";
+import type { Scene } from "../../domain/project/types";
 
 const at = (savedAt: number) => ({ name: `p-${savedAt}.json`, savedAt });
 
@@ -57,5 +59,77 @@ describe("loadRestorePoints", () => {
   it("新しい順で返す（戻りたいのはたいてい直前の状態）", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([at(1), at(3), at(2)]);
     expect((await loadRestorePoints("proj_001")).map((p) => p.savedAt)).toEqual([3, 2, 1]);
+  });
+});
+
+describe("restoreToPoint（#967 レビュー 🟡2・🟡4）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // ⚠️ **正典どおりの文書を作る**（`assembleProject`）＝手で並べると必須の取りこぼしで
+  // `parseProjectDoc` が断り、**比べられないまま素通り**して検査が空振りする（実際にそうなった）。
+  const doc = (scenes: Scene[]) =>
+    JSON.stringify(
+      assembleProject(
+        {
+          projectId: "proj_20260901_001", projectName: "テスト", purpose: "new_graduate",
+          createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+          videoSettings: defaultVideoSettings(), companyInfo: { companyName: "テスト" },
+          voiceSettings: defaultVoiceSettings(),
+        },
+        [],
+        [{ partId: "part_001", order: 1, title: "本編", sceneIds: scenes.map((x) => x.sceneId) }],
+        scenes,
+      ),
+    );
+  const sc = (text: string) =>
+    ({
+      sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "opening",
+      templateId: "tmpl_opening_01", durationSec: 5,
+      assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {}, warnings: [],
+      narration: { text, status: "generated", voicePath: "voices/scene_001.wav" },
+    }) as unknown as Scene;
+
+  it("いまの音と食い違う読み上げを「作成前」に戻してから書く（文と声が違う動画を出さない）", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([sc("古い文")]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(doc([sc("新しい文")]));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    const cleared = await restoreToPoint("proj_20260901_001", "p-1.json");
+    expect(cleared).toBe(1);
+    const written = JSON.parse(write.mock.calls[0][1]) as { scenes: { narration: { status: string; voicePath: unknown } }[] };
+    expect(written.scenes[0].narration.status).toBe("none");
+    expect(written.scenes[0].narration.voicePath).toBeNull();
+  });
+
+  it("文が同じなら触らない（戻すたびに全部作り直させない）", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([sc("同じ文")]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(doc([sc("同じ文")]));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    expect(await restoreToPoint("proj_20260901_001", "p-1.json")).toBe(0);
+    const written = JSON.parse(write.mock.calls[0][1]) as { scenes: { narration: { status: string } }[] };
+    expect(written.scenes[0].narration.status).toBe("generated");
+  });
+
+  it("比べられないときは、戻す内容をそのまま書く（壊れた文書から戻れなくしない）", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([sc("戻す文")]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue("{こわれ");
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    expect(await restoreToPoint("proj_20260901_001", "p-1.json")).toBe(0);
+    expect(write.mock.calls[0][1]).toContain("戻す文");
+  });
+
+  it("戻すときも上限を効かせる（何度も戻すと溜まり続ける、を作らない）", async () => {
+    const points = Array.from({ length: RESTORE_POINT_MAX }, (_, i) => at(i * 1000));
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue(points);
+    const drop = vi.spyOn(projectFs, "dropRestorePoint").mockResolvedValue(undefined);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    await restoreToPoint("proj_20260901_001", "p-1.json");
+    expect(drop).toHaveBeenCalledWith("proj_20260901_001", "p-0.json"); // いちばん古いもの
+    // ⚠️ **落としてから書く**（書いてから消すと、一瞬だけ上限を超える）。
+    expect(drop.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
   });
 });

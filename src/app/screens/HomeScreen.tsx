@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { projectBackupTime, restoreFromPoint, restoreProjectBackup } from "../../infrastructure/projectFs";
+import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
 import type { RestorePoint } from "../../domain/project/restorePoints";
-import { loadRestorePoints } from "../store/restorePointKeeper";
+import { loadRestorePoints, restoreToPoint } from "../store/restorePointKeeper";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -322,9 +322,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     setRestoring(true);
     setOpenError(null);
     try {
-      await restoreFromPoint(projectId, name);
+      const cleared = await restoreToPoint(projectId, name);
       setRestoreFor(null);
       await doOpenProject(projectId);
+      // ⚠️ **声を作り直す必要があることを黙らせない**（#967 レビュー 🟡2）＝
+      // 音のファイルは戻らないので、セリフが変わっていた読み上げは「作成前」に戻してある。
+      // 何も言わないと、利用者は**声が消えた**ように見える。
+      if (cleared > 0) setOpenError(voicesClearedMessage(cleared));
     } catch (e) {
       const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
       setOpenError(detail || RESTORE_FAILED_MESSAGE);

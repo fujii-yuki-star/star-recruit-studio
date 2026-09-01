@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import * as projectFs from "../../infrastructure/projectFs";
+import * as keeper from "../store/restorePointKeeper";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import type { Scene } from "../../domain/project/types";
 import { HomeScreen } from "./HomeScreen";
@@ -45,7 +46,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
 
   it("押すと戻してから開き直す", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    const restore = vi.spyOn(projectFs, "restoreFromPoint").mockResolvedValue(undefined);
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
     const load = vi.fn(async () => {});
     useProjectStore.setState({ loadProject: load });
     await openPanel();
@@ -54,10 +55,21 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
   });
 
+  // #967 レビュー 🟡2：音のファイルは戻らないので、セリフが変わっていた読み上げは作成前に戻す。
+  // ⚠️ **黙って消したように見せない**＝何も言わないと、利用者は声が消えたように見える。
+  it("作り直しが要る読み上げがあれば、その旨と次の行動を出す", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(2);
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await waitFor(() => expect(document.body.textContent).toMatch(/2件の読み上げは、音が前のままになるので作成前に戻しました/));
+    expect(document.body.textContent).toMatch(/「声を作り直す」から作り直してください/);
+  });
+
   it("未保存があるときは、先に確認する（戻すと画面の編集が失われる）", async () => {
     useProjectStore.setState({ scenes: [{ sceneId: "scene_001" } as unknown as Scene], saveStatus: "idle" });
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    const restore = vi.spyOn(projectFs, "restoreFromPoint").mockResolvedValue(undefined);
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     expect(restore).not.toHaveBeenCalled();
@@ -74,7 +86,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
 
   it("戻せなかったら理由をそのまま見せる", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    vi.spyOn(projectFs, "restoreFromPoint").mockRejectedValue(new Error("その復元ポイントが見つかりませんでした。一覧から選び直してください。"));
+    vi.spyOn(keeper, "restoreToPoint").mockRejectedValue(new Error("その復元ポイントが見つかりませんでした。一覧から選び直してください。"));
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(document.body.textContent).toMatch(/一覧から選び直してください/));

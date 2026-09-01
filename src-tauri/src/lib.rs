@@ -175,31 +175,44 @@ fn drop_restore_point(
     Ok(())
 }
 
-/// 指定の復元ポイントへ戻す（利用者の明示操作）。
-///
-/// ⚠️ **いまの内容も消さない**＝戻す直前の状態を復元ポイントとして残してから書き換える。
-/// 「戻したけど、やっぱり戻す前がよかった」に戻れる（取り消しの効かない操作にしない）。
+/// 復元ポイントの中身を読む（戻す前に、いまの内容と見比べるため）。
 #[tauri::command]
-fn restore_from_point(
+fn read_restore_point(
     app: tauri::AppHandle,
     project_id: String,
     name: String,
-    now_ms: u64,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if !is_safe_project_id(&project_id) {
         return Err("不正なプロジェクトIDです。".to_string());
     }
     if restore_point_time(&name).is_none() {
         return Err("不正な復元ポイントです。".to_string());
     }
-    let dir = restore_dir(&app, &project_id)?;
-    let text = fs::read_to_string(dir.join(&name)).map_err(|_| {
+    fs::read_to_string(restore_dir(&app, &project_id)?.join(&name)).map_err(|_| {
         "その復元ポイントが見つかりませんでした。一覧から選び直してください。".to_string()
-    })?;
-    // 戻す前の状態を残す（同じ名前があれば上書きしない＝時刻が違えば別の世代）。
+    })
+}
+
+/// 戻した内容を書き込む（利用者の明示操作）。
+///
+/// ⚠️ **いまの内容も消さない**＝書き換える前に復元ポイントとして残す。
+/// 「戻したけど、やっぱり戻す前がよかった」に戻れる（取り消しの効かない操作にしない）。
+/// ⚠️ **何を書くかは呼び出し側が決める**（#967 レビュー 🟡2）＝戻す内容には
+/// **いまの音と食い違う読み上げ**が混じりうるので、そこの手当ては規則を持つ側（domain）で行う。
+#[tauri::command]
+fn restore_project_text(
+    app: tauri::AppHandle,
+    project_id: String,
+    text: String,
+    now_ms: u64,
+) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
     let target = projects_dir(&app)?.join(&project_id).join("project.json");
     if let Ok(cur) = fs::read_to_string(&target) {
         if serde_json::from_str::<serde_json::Value>(&cur).is_ok() {
+            let dir = restore_dir(&app, &project_id)?;
             fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             write_json_atomic(&dir.join(format!("p-{now_ms}.json")), &cur)?;
         }
@@ -1132,7 +1145,8 @@ pub fn run() {
             list_restore_points,
             take_restore_point,
             drop_restore_point,
-            restore_from_point,
+            read_restore_point,
+            restore_project_text,
             load_project,
             list_projects,
             delete_project,
