@@ -6,6 +6,8 @@
 // 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
 import { validateTemplate as validate } from '../domain/validation/generated/validators.js';
 import type { Template } from '../domain/template/types';
+import { requiredFieldsForLayerType } from '../domain/template/layerOps';
+import type { LayerType } from '../domain/enums';
 import type { Orientation } from '../domain/enums';
 import { sampleTemplates } from './sampleData';
 
@@ -40,16 +42,46 @@ function readTemplateId(item: unknown): string | null {
 }
 
 /**
+ * 種別ごとの必須項目が欠けている層を補う（`15 §6` 取り込み時の自動補正・#959）。
+ *
+ * ⚠️ **見た目は変えない**＝補う値は**すでに画面に出ている値**そのもの。`slotType` の読み手
+ * （`slotAssign` / `findVideoSlot` / `timeline/video`）はいずれも `image` と `video` だけを特別扱いし、
+ * **未指定は元から「写真・動画」として扱っている**ので、書き下しても絵も入れられる素材も変わらない。
+ * §2-5 が禁じているのは**別の見た目への差し替え**であって、表示どおりの値を書き下すことではない。
+ * ⚠️ **欠けている項目だけ**触る（値が入っているものは上書きしない）。ほかが壊れていれば検証がそのまま却下する
+ * ＝補正で不正データを通さない（§2-2）。
+ */
+function withRequiredLayerFields(item: unknown): unknown {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const t = item as Record<string, unknown>;
+  if (!Array.isArray(t.layers)) return item;
+  let changed = false;
+  const layers = t.layers.map((l) => {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) return l;
+    const layer = l as Record<string, unknown>;
+    if (typeof layer.type !== 'string') return l;
+    const required = requiredFieldsForLayerType(layer.type as LayerType);
+    const missing = Object.entries(required).filter(([k]) => layer[k] === undefined);
+    if (missing.length === 0) return l;
+    changed = true;
+    return { ...layer, ...Object.fromEntries(missing) };
+  });
+  return changed ? { ...t, layers } : item;
+}
+
+/**
  * 生データ（テンプレ単体 or 配列）を正典スキーマで検証し、採用(Template[])と不採用(rejected)へ振り分ける（純粋）。
  * 検証を通った要素だけを Template として返す＝未検証データを内部に流さない（§2-2）。
+ * 検証の前に `withRequiredLayerFields` で取り込み時の自動補正を行う（#959）。
  */
 export function parseTemplatePack(raw: unknown): ParsedTemplatePack {
   const items = Array.isArray(raw) ? raw : [raw];
   const templates: Template[] = [];
   const rejected: RejectedTemplate[] = [];
   for (const item of items) {
-    if (validate(item)) {
-      templates.push(item as Template);
+    const repaired = withRequiredLayerFields(item);
+    if (validate(repaired)) {
+      templates.push(repaired as Template);
     } else {
       rejected.push({ templateId: readTemplateId(item), errors: formatErrors(validate.errors) });
     }

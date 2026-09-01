@@ -1,5 +1,5 @@
 // テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
-import { LAYER_TYPE, LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
+import { LAYER_TYPE, LAYER_TYPES, SLOT_TYPE, TEXT_KEY, TEXT_KEYS, type LayerType, type SlotType, type TextKey } from '../enums';
 import { SCENE_DEFAULT_DURATION_SEC } from '../constants';
 import type { Layer, Template } from './types';
 import type { FontId } from '../font/fontCatalog';
@@ -13,6 +13,28 @@ const LAYER_DEFAULT_H = 240;
 
 /** 複製をずらす量（px）＝真下に重なって「増えていない」ように見えるのを防ぐ。 */
 const DUPLICATE_OFFSET_PX = 24;
+
+/**
+ * **種別ごとの「無いと読み込めない」既定値**（`template.schema.json` の `allOf` が種別ごとに必須にしている項目）。
+ *
+ * ⚠️ **表示の既定と保存の既定を同じものにする**（#959）＝以前は編集画面のセレクタが
+ * `value={l.slotType ?? '写真・動画'}` と**表示だけ**の既定を持ち、`addLayer` は何も書いていなかった。
+ * 画面には「写真・動画」と出ているのに、その欄を触らない限り値が入らない＝**見えている値と保存される値が食い違い**、
+ * 保存はできるのに読み込みで却下されて一覧から静かに消えていた。
+ * ⚠️ **`slot` だけ抜けていた**＝`text`/`subtitle` の `textKey` は入れていたのに `slotType` は入れていない、という
+ * 「双子の片方だけ直す」形だったので、**種別を1か所に並べて**片方だけ足せないようにする。
+ * 種別を増やすときは schema の `allOf` とこの表を必ず一緒に見ること。
+ */
+export const DEFAULT_SLOT_TYPE: SlotType = SLOT_TYPE.image_or_video;
+export const DEFAULT_TEXT_KEY_TEXT: TextKey = TEXT_KEY.title;
+export const DEFAULT_TEXT_KEY_SUBTITLE: TextKey = TEXT_KEY.subtitle;
+
+export function requiredFieldsForLayerType(type: LayerType): Partial<Layer> {
+  if (type === LAYER_TYPE.slot) return { slotType: DEFAULT_SLOT_TYPE };
+  if (type === LAYER_TYPE.text) return { textKey: DEFAULT_TEXT_KEY_TEXT };
+  if (type === LAYER_TYPE.subtitle) return { textKey: DEFAULT_TEXT_KEY_SUBTITLE };
+  return {};
+}
 
 /** 既存と衝突しない layer id（layer_NNN・テンプレ内一意・空き番号を埋める）。 */
 export function createLayerId(layers: Layer[]): string {
@@ -54,8 +76,9 @@ export function addLayer(layers: Layer[], type: LayerType, canvas: { width: numb
   const id = createLayerId(layers);
   // 「最前面」は**実効 z**で測る（種別ごとの既定を持つ層より後ろに入らない＝追加したのに下に出る、を防ぐ）。
   const zIndex = layers.reduce((m, l) => Math.max(m, effectiveLayerZ(l)), 0) + 1;
-  // 文字系は textKey 既定を入れて追加直後から場面テキストに紐づく（text→見出し / subtitle→字幕）。未設定だと描画で空になる。
-  const textKey = type === LAYER_TYPE.text ? TEXT_KEY.title : type === LAYER_TYPE.subtitle ? TEXT_KEY.subtitle : undefined;
+  // 種別ごとの必須項目を入れる（文字系は textKey→場面テキストに紐づく／差し込み口は slotType→入れられる素材が決まる）。
+  // 入れないと保存はできるのに読み込みで却下され、一覧から静かに消える（#959）。
+  const required = requiredFieldsForLayerType(type);
   const layer: Layer =
     type === LAYER_TYPE.background
       ? { id, type, x: 0, y: 0, w: canvas.width, h: canvas.height, zIndex }
@@ -67,7 +90,7 @@ export function addLayer(layers: Layer[], type: LayerType, canvas: { width: numb
           y: Math.round(canvas.height / 2 - LAYER_DEFAULT_H / 2),
           w: Math.min(LAYER_DEFAULT_W, canvas.width),
           h: Math.min(LAYER_DEFAULT_H, canvas.height),
-          ...(textKey ? { textKey } : {}),
+          ...required,
         };
   return [...layers, layer];
 }

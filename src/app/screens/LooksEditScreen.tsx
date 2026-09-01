@@ -5,8 +5,8 @@ import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
-import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
-import { addLayer, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPES, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
+import { addLayer, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_SUBTITLE, DEFAULT_TEXT_KEY_TEXT, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { DELETE_LABEL, DUPLICATE_LABEL, deleteLookConfirmMessage } from "../uiLabels";
@@ -609,7 +609,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
-            <select className="select" value={l.textKey ?? (l.type === LAYER_TYPE.subtitle ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+            <select className="select" value={l.textKey ?? (l.type === LAYER_TYPE.subtitle ? DEFAULT_TEXT_KEY_SUBTITLE : DEFAULT_TEXT_KEY_TEXT)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
               {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
             </select>
           </div>
@@ -684,7 +684,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
-              <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+              <select className="select" value={l.slotType ?? DEFAULT_SLOT_TYPE} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
                 {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
               </select>
             </div>

@@ -383,6 +383,40 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, ...(assetId ? { assetId } : {}) }],
   });
 
+  // #959：保存の前に「読み込みと同じ経路」を通す＝**保存できたのに読み込めない**を構造で無くす。
+  describe('保存の門（#959）', () => {
+    const slotTmpl = (slot: Record<string, unknown>): Template => ({
+      ...userTmpl('user_tmpl_gate'),
+      layers: [
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'layer_001', type: 'slot', x: 0, y: 0, w: 100, h: 100, ...slot } as Template['layers'][number],
+      ],
+    });
+
+    it('slotType の無い差し込み口は補って保存する＝行き止まりにしない', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      expect(useProjectStore.getState().templateError).toBeNull();
+      // 保存されたファイルにも一覧にも、補正後が入る（片方だけ元のままにしない）。
+      expect(spy.mock.calls[0][0].layers[1].slotType).toBe('image_or_video');
+      const listed = useProjectStore.getState().templates.find((t) => t.templateId === 'user_tmpl_gate');
+      expect(listed?.layers[1].slotType).toBe('image_or_video');
+      spy.mockRestore();
+    });
+
+    it('補正でも直せない内容は保存せず、次の行動を出す（成功に見せない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({ slotType: 'audio' }));
+      expect(spy).not.toHaveBeenCalled(); // ファイルに書かない
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_gate')).toBe(false); // 一覧にも出さない
+      expect(useProjectStore.getState().templateError).toMatch(/元に戻して/); // 「もう一度」だけでは次の行動にならない
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 排他を握ったままにしない
+      spy.mockRestore();
+    });
+  });
+
   it('deleteUserTemplate はテンプレ削除時に所有素材の表示用src も掃除する（無関係な素材は残す）', async () => {
     useProjectStore.setState({
       templates: [...sampleTemplates, userTmpl('user_tmpl_001', 'tmpl_asset_001')],

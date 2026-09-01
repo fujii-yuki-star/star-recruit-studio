@@ -40,7 +40,7 @@ import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider"
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
-import { loadBundledTemplates } from "../../infrastructure/templateFs";
+import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
@@ -1940,12 +1940,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // snap するのに保存/仕上がり確認だけ新しくなる＝MP4 と食い違う（15§4・ADR-0026④）。duplicate/createBlank もここを通る。
     if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
     if (get().isTemplateMutating) return; // 進行中の見た目変更を1本に保つ（isImporting と対称）。無いと2本目の finally が先に flag を落とし、その隙に書き出しが割り込む（#570 レビュー）。
+    // ⚠️ **保存の前に「読み込みと同じ経路」を通す**（#959）＝これで「保存できたのに読み込めない」が構造的に起きない。
+    // 以前は保存が素通りだったため、差し込み口のある見た目パターンは保存でき、次に開くと一覧から静かに消えていた。
+    // parseTemplatePack は取り込み時の自動補正も兼ねるので、補える欠けはここで補われ、行き止まりにならない。
+    // 複製・ゼロから作成もこの action を通るので、入口ごとに書き足す必要はない。
+    const { templates: accepted } = parseTemplatePack(template);
+    const saving = accepted[0];
+    if (!saving) { set({ templateError: "この見た目パターンは、いまの内容では保存できません。直前に変えた項目を元に戻してから、もう一度お試しください。" }); return; }
     set({ isTemplateMutating: true }); // 最初の await 前に排他を立てる＝書き出し開始側がこれを見て止まる（#570 レビュー・isImporting と対称）。
     try {
       // 排他フラグで書き出し開始をブロックするので、await 中に書き出しが割り込まない＝保存はファイル/一覧まで完走できる
       //（途中で set をスキップするとファイルだけ残り一覧に出ない不整合になるため、完了側の中断はしない）。
-      await userTemplateFs.saveUserTemplate(template);
-      set((s) => ({ templates: upsertUserTemplate(s.templates, template), templateError: null }));
+      // ⚠️ 保存も一覧も**補正後**を使う（片方だけ元のままだと、画面と保存済みファイルが食い違う）。
+      await userTemplateFs.saveUserTemplate(saving);
+      set((s) => ({ templates: upsertUserTemplate(s.templates, saving), templateError: null }));
     } catch {
       set({ templateError: "見た目パターンを保存できませんでした。もう一度お試しください。" });
     } finally {
