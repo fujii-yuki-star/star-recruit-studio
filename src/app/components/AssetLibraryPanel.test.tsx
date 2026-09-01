@@ -59,50 +59,46 @@ const rowOf = (name: string): HTMLElement => {
   let el = screen.getByText(new RegExp(name)).parentElement as HTMLElement | null;
   while (el && others.some((n) => el!.textContent?.includes(n))) el = el.parentElement;
   // 逆に、行の中身（印か絵）が入るところまでは上がる必要がある
-  while (el && !el.querySelector("img, span[title]")) el = el.parentElement;
+  while (el && !el.querySelector("img, .thumb")) el = el.parentElement;
   return el as HTMLElement;
 };
 
 describe("よく使う素材の一覧は、行の作りが揃っている（#952）", () => {
-  it("絵を出せない種別（動画）にも、同じ大きさの印が出る", async () => {
+  it("絵を出せない種別（動画）にも、同じ大きさの枠が出る", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
     render(<AssetLibraryPanel />);
     await screen.findByText(/社員インタビュー/);
     const videoRow = rowOf("社員インタビュー");
-    // 画像でなくてもよいので、40px の枠が付いていること（＝名前の左が揃う）。
-    const marks = [...videoRow.querySelectorAll("img, span[title]")]
-      .filter((e) => (e as HTMLElement).style.width === "40px" || e.tagName === "IMG");
-    expect(marks.length).toBeGreaterThan(0);
+    // ⚠️ **素材画面と同じ部品**（`AssetThumb`）を使う＝`.thumb` の枠がどの行にも付く。
+    const box = videoRow.querySelector(".thumb") as HTMLElement | null;
+    expect(box).not.toBeNull();
+    expect(box?.style.width).toBe("40px");
   });
 
-  it("その印は「動画」だと分かる（何の種別か読める）", async () => {
+  it("その枠は「動画」だと分かる（何の種別か読める）", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
     render(<AssetLibraryPanel />);
     await screen.findByText(/社員インタビュー/);
-    const videoRow = rowOf("社員インタビュー");
-    expect(videoRow.querySelector('span[title="動画"]')).not.toBeNull();
+    expect(rowOf("社員インタビュー").querySelector('.thumb[title="動画"]')).not.toBeNull();
   });
 
-  // ⚠️ **絵が出たら印は出さない**＝絵と印が二重に並ばない。
-  it("絵が出た行には印を出さない", async () => {
+  // ⚠️ **絵が出たら種類の名前は出さない**＝絵が語るので、指したときの説明が重複しない。
+  it("絵が出た行には種類の名前を付けない", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
     render(<AssetLibraryPanel />);
     await screen.findByText(/オフィス写真/);
     const photoRow = rowOf("オフィス写真");
     await waitFor(() => expect(photoRow.querySelector("img")).not.toBeNull());
-    // ⚠️ **印だけを見る**＝行には別の `title` 付きの要素もあるので、40px の枠に絞る。
-    const marks = [...photoRow.querySelectorAll("span[title]")].filter((e) => (e as HTMLElement).style.width === "40px");
-    expect(marks).toHaveLength(0);
+    expect(photoRow.querySelector(".thumb[title]")).toBeNull();
   });
 
   // ⚠️ **絵を出せる種別でも、出せなかったときは印にする**（#942/#945 で実際に起きた形）＝
   // そこだけ名前が左へ戻る、を作らない。
-  it("写真でも絵を出せなかったときは印が出る（名前の位置が揃う）", async () => {
+  it("写真でも絵を出せなかったときは枠と種類の名前が出る", async () => {
     vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null);
     render(<AssetLibraryPanel />);
     await screen.findByText(/オフィス写真/);
-    const photoRow = rowOf("オフィス写真");
-    expect(photoRow.querySelector('span[title="写真"]')).not.toBeNull();
+    expect(rowOf("オフィス写真").querySelector('.thumb[title="写真"]')).not.toBeNull();
   });
 });
 

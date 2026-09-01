@@ -4,6 +4,7 @@ import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { pickPanelAsset } from "./materialsSelection";
+import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { IMPORT_NO_PROJECT_MESSAGE } from "../uiLabels";
@@ -21,9 +22,6 @@ import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { assetTagCounts, matchesAssetQuery } from "../../domain/project/assetSearch";
 import {
-  PhotoIcon,
-  VideoIcon,
-  MusicIcon,
   UploadIcon,
   PlusIcon,
   TrashIcon,
@@ -55,27 +53,6 @@ const VISUAL_TYPES: Asset["assetType"][] = [
 ];
 const isVisual = (type: Asset["assetType"]) => VISUAL_TYPES.includes(type);
 
-function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: string; size?: number }) {
-  const cls =
-    type === ASSET_TYPE.video ? "thumb-video" : type === ASSET_TYPE.bgm ? "thumb-audio" : "thumb-photo";
-  return (
-    <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%", overflow: "hidden" }}>
-      {src ? (
-        <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-      ) : (
-        <>
-          {type === ASSET_TYPE.video && <VideoIcon size={size} />}
-          {type === ASSET_TYPE.bgm && <MusicIcon size={size} />}
-          {type === ASSET_TYPE.yuko && <span style={{ fontWeight: 700 }}>ゆ</span>}
-          {(type === ASSET_TYPE.image ||
-            type === ASSET_TYPE.logo ||
-            type === ASSET_TYPE.qr ||
-            type === ASSET_TYPE.voice) && <PhotoIcon size={size} />}
-        </>
-      )}
-    </div>
-  );
-}
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const { assets, scenes, templates, meta, updateAsset, removeAsset, removeAssets, assetSrcById, setAssetImage, addAssets, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
