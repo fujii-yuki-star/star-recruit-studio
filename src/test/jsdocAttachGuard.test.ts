@@ -90,3 +90,60 @@ describe('説明文を別の宣言から奪わない（再発防止の門番）'
     expect(detachedDocCount('// a\n// b\nexport const x = 1;\n')).toBe(0);
   });
 });
+
+/**
+ * Rust 側の同じ形（#263）。
+ *
+ * ⚠️ **同じ間違いを Rust でもやった**＝`#[test]` と関数の間に新しい関数を差し込み、
+ * **`#[test]` が差し込んだ側へ移って、元のテストが登録されなくなっていた**（走らないのに緑）。
+ * TS 側は説明文が浮くだけだが、Rust は**属性が動く**ので**守りが静かに外れる**＝こちらのほうが重い。
+ * ⚠️ **型でも lint でも守れない**（どちらの並びも文法として正しい）。
+ *
+ * 見るのは2つ：
+ * - **属性（`#[…]`）の直後に説明文（`///`）**＝属性と、その持ち主のあいだに割り込んだ形
+ * - **説明文が2つ並ぶ**＝TS 側と同じ（前の1つが宙に浮く）
+ */
+export function detachedRustDocCount(src: string): number {
+  const lines = src.split('\n');
+  let n = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const t = lines[i].trim();
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === '') j += 1;
+    if (j >= lines.length) continue;
+    const next = lines[j].trim();
+    // 属性の直後に説明文＝割り込み。
+    if (t.startsWith('#[') && next.startsWith('///')) n += 1;
+    // 説明文ブロックの終わり（次の行が `///` でない）の後に、空行を挟んでまた説明文。
+    else if (t.startsWith('///') && !(lines[i + 1] ?? '').trim().startsWith('///') && next.startsWith('///') && j > i + 1) n += 1;
+  }
+  return n;
+}
+
+describe('Rust でも説明文・属性を別の宣言から奪わない（#263）', () => {
+  it('属性の直後に説明文が来る箇所は無い', () => {
+    const dir = join(process.cwd(), 'src-tauri', 'src');
+    const files = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.rs'))
+      .map((e) => join(dir, e.name));
+    expect(files.length).toBeGreaterThan(3); // 走査が空振りしていないこと
+    const drifted = files
+      .map((p) => [p, detachedRustDocCount(readFileSync(p, 'utf8'))] as const)
+      .filter(([, n]) => n > 0)
+      .map(([p, n]) => `${p.split(sep).pop()}: ${n} 件`);
+    expect(drifted).toEqual([]);
+  });
+
+  it('門番が実際に効いている（走査と判定が壊れたら落ちる）', () => {
+    // 私が実際にやった形＝`#[test]` と関数の間に差し込む。
+    expect(detachedRustDocCount('#[test]\n/// あたらしい説明\nfn a() {}\n')).toBe(1);
+    // 説明文が2つ並ぶ。
+    expect(detachedRustDocCount('/// a\n\n/// b\nfn x() {}\n')).toBe(1);
+    // 正しい並びは拾わない（説明→属性→宣言）。
+    expect(detachedRustDocCount('/// a\n#[test]\nfn x() {}\n')).toBe(0);
+    // 続きの説明文（同じブロック）は拾わない。
+    expect(detachedRustDocCount('/// a\n/// b\nfn x() {}\n')).toBe(0);
+    // 属性が続くのも拾わない。
+    expect(detachedRustDocCount('/// a\n#[cfg(test)]\n#[test]\nfn x() {}\n')).toBe(0);
+  });
+});

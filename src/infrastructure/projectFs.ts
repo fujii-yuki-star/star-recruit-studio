@@ -91,3 +91,26 @@ export async function saveProjectThumbnail(projectId: string, dataUrl: string): 
   if (!isTauri()) return;
   await invoke('save_project_thumbnail', { projectId, dataUrl });
 }
+
+/**
+ * 前に保存できていたところが**いつのものか**（無ければ `null`・#263）。
+ *
+ * ⚠️ **いつのものかを返す**＝どれだけ巻き戻るかが分からないと、戻すかどうかを決められない。
+ * 非 Tauri は `null`（控えの仕組みはアプリ側にある）。
+ */
+export async function projectBackupTime(projectId: string): Promise<Date | null> {
+  if (!isTauri()) return null;
+  const secs = await invoke<number | null>('project_backup_time', { projectId });
+  return secs == null ? null : new Date(secs * 1000);
+}
+
+/**
+ * 前に保存できていたところへ戻す（利用者の明示操作・#263）。
+ *
+ * ⚠️ **黙って戻さない**（§2-5）＝開けなかったときに、利用者が選んで押したときだけ通る。
+ * 開けなかったほうも消さずに残る（`project.broken.json`）。
+ */
+export async function restoreProjectBackup(projectId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('restore_project_backup', { projectId });
+}
