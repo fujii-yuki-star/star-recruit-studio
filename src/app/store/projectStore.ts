@@ -503,7 +503,11 @@ interface ProjectState {
    */
   applyBrandKit: () => Promise<{ ok: boolean; applied: boolean; addedLogo: boolean; fontSkipped: boolean; error: string | null }>;
   /**
-   * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
+   * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。**`newProject` から呼ばれる**
+   *（＝AI で作る主経路と「白紙から作る」の両方が通る）。
+   * ⚠️ **以前は `newBlankProject` だけに入れていて主経路に効いていなかった**（PR #888 レビュー 🔴）。
+   * 呼び出し元を移したのに**この説明だけ古いまま**だった（PR #953 レビュー）＝直したときに
+   * 説明も一緒に直す。
    * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
    */
   applyBrandKitToNew: () => Promise<void>;

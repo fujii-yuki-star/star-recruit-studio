@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { DraftScreen } from "./DraftScreen";
+import { PrecheckScreen } from "./PrecheckScreen";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 
@@ -49,5 +50,25 @@ describe("たたき台でも知らせを描く（#952）", () => {
   it("知らせが無いときは出さない", () => {
     render(<DraftScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/なにかの理由/)).toBeNull();
+  });
+
+  // ⚠️ **同じ型は同じ所で留める**（PR #953 レビュー）＝公開前チェックも場面ゼロと場面ありで
+  // `return` が分かれており、声の一括生成に失敗した理由が**場面ゼロのときだけ消えて**いた。
+  describe("公開前チェックも枝の両方で知らせを描く", () => {
+    it("場面ゼロでも声の失敗の理由が出る", () => {
+      useProjectStore.setState({ scenes: [], parts: [], narrationError: "声を作れませんでした。" } as never);
+      render(<PrecheckScreen onNavigate={vi.fn()} />);
+      expect(screen.getByText("声を作れませんでした。")).toBeTruthy();
+    });
+
+    it("場面があるときも出る", () => {
+      useProjectStore.setState({
+        narrationError: "声を作れませんでした。",
+        scenes: [{ sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "opening", templateId: "t", durationSec: 5, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {}, narration: { text: "", status: "none" }, warnings: [] }],
+        parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      } as never);
+      render(<PrecheckScreen onNavigate={vi.fn()} />);
+      expect(screen.getByText("声を作れませんでした。")).toBeTruthy();
+    });
   });
 });

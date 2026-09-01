@@ -47,12 +47,27 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   // 持ち込みフォント（#261）も同じ理由で開くたびに調べ直す＝アプリの外で消されうる。
   useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
 
+  /**
+   * 声の一括生成に失敗したとき（VOICEVOX 未起動など）の「次の行動」（§2-5）。
+   *
+   * ⚠️ **枝の両方で描く**（PR #953 レビュー）＝この画面は場面ゼロと場面ありで `return` が分かれており、
+   * 以前は本編の枝にしか置いていなかったので、**場面ゼロのときだけ理由が消えて**いた（#952 と同じ型）。
+   */
+  const narrationNotice = narrationError ? (
+    <div className="notice notice-warn mt" role="alert">
+      <span>{narrationError}</span>
+    </div>
+  ) : null;
+
   // 場面ゼロは「全項目問題なし」に見えて書き出しに進めてしまう（押すと保存先選択後に失敗）＝空状態で止める（#403）。
   if (scenes.length === 0) {
     return (
       <div className="main-scroll">
         <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
         <ExportLockBanner onNavigate={onNavigate} />
+        {/* ⚠️ **場面ゼロの枝でも知らせを描く**（PR #953 レビュー）＝声の一括生成に失敗した理由は
+            この枝では握り潰されていた。たたき台と同じ形（#952）＝**枝がある画面は全部に置く**。 */}
+        {narrationNotice}
         <NoScenesState purpose="ここで公開前チェックができます" onNavigate={onNavigate} />
       </div>
     );
@@ -214,12 +229,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         </div>
       )}
 
-      {/* 声の一括生成に失敗したとき（VOICEVOX 未起動など）は「次の行動」を示す（§2-5）。 */}
-      {narrationError && (
-        <div className="notice notice-warn mt" role="alert">
-          <span>{narrationError}</span>
-        </div>
-      )}
+      {narrationNotice}
 
       {/* 操作 */}
       <div className="row-between mt-lg">
