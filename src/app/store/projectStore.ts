@@ -41,6 +41,7 @@ import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
+import { keepRestorePoints } from "./restorePointKeeper";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
@@ -1177,6 +1178,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
       const pv = validateProjectDoc(project);
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
+      // ⚠️ **上書きの前に控える**（#263 段階2）＝控えたいのは「この保存で消える前」の状態。
+      // 後に置くと、いま保存した内容がそのまま世代になり、戻っても何も変わらない。
+      await keepRestorePoints(projectId, Date.now());
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       // ここから先は**いまの状態**へ書き戻す＝別の動画へ移っていたら何もしない（書けたファイルはそのまま
       // ディスクに残る＝内容は正しい。持ち帰らないのは「いまの画面の状態」への反映だけ）。

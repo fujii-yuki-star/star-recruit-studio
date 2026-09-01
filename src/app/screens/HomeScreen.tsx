@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, restoreOfferMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
+import type { RestorePoint } from "../../domain/project/restorePoints";
+import { loadRestorePoints, restoreToPoint } from "../store/restorePointKeeper";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -25,7 +27,7 @@ import { CopyIcon,
   ChevronRightIcon,
   FolderIcon,
   TrashIcon,
-  PencilIcon,
+  HistoryIcon, PencilIcon,
 } from "../components/icons";
 
 interface HomeProps {
@@ -93,6 +95,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
    */
   const [recoverable, setRecoverable] = useState<{ projectId: string; savedAt: Date } | null>(null);
   const [recovering, setRecovering] = useState(false);
+  /** 「前の状態に戻す」を開いている動画と、その時点の一覧（#263 段階2）。 */
+  const [restoreFor, setRestoreFor] = useState<{ projectId: string; points: RestorePoint[] } | null>(null);
+  const [restoring, setRestoring] = useState(false);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -104,7 +109,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // ⚠️ **「開く」と「複製して開く」を1つの id で持たない**（PR #889 レビュー 🔴）＝以前は複製でも
   // `pendingOpenId` を使い回しており、確認の「開く」を押すと **複製されずに元の動画が開いて**いた
   //（押したボタンと違うことが起きる・§2-5）。何をするかまで持たせて、実行と文言を分ける。
-  const [pendingAction, setPendingAction] = useState<{ kind: "open" | "duplicate"; projectId: string } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ kind: "open" | "duplicate" | "restore"; projectId: string; pointName?: string } | null>(null);
   // 一覧の小さな絵（#397）。⚠️ **無ければ出さないだけ**＝古い動画でも一覧は普通に出る（後方互換）。
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   // 複製（#395）：作っている最中の id（連打で二重に作らない）。
@@ -295,6 +300,43 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     }
   }
 
+  /** 「前の状態に戻す」を開く（#263 段階2）。 */
+  async function openRestorePanel(projectId: string) {
+    setOpenError(null);
+    try {
+      setRestoreFor({ projectId, points: await loadRestorePoints(projectId) });
+    } catch {
+      // ⚠️ **一覧が取れないことを黙らせない**＝押したのに何も起きないように見せない（§2-5）。
+      setOpenError(RESTORE_POINTS_UNREADABLE);
+    }
+  }
+
+  /**
+   * 選んだ時点へ戻して、そのまま開き直す（#263 段階2）。
+   *
+   * ⚠️ **戻したら開く**＝いま画面が持っている内容は戻す前のものなので、開き直さないと
+   * 次の保存で**戻したはずのファイルを上書きする**（戻した意味が消える）。
+   */
+  async function doRestorePoint(projectId: string, name: string) {
+    if (restoring || !name) return;
+    setRestoring(true);
+    setOpenError(null);
+    try {
+      const cleared = await restoreToPoint(projectId, name);
+      setRestoreFor(null);
+      await doOpenProject(projectId);
+      // ⚠️ **声を作り直す必要があることを黙らせない**（#967 レビュー 🟡2）＝
+      // 音のファイルは戻らないので、セリフが変わっていた読み上げは「作成前」に戻してある。
+      // 何も言わないと、利用者は**声が消えた**ように見える。
+      if (cleared > 0) setOpenError(voicesClearedMessage(cleared));
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+      setOpenError(detail || RESTORE_FAILED_MESSAGE);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   /** 控えへ戻してから、そのまま開き直す（#263）。 */
   async function doRecover(projectId: string) {
     if (recovering) return;
@@ -324,6 +366,43 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             {openError && (
               <div className="notice notice-warn mb" role="alert">
                 <span>{openError}</span>
+              </div>
+            )}
+
+            {/* 前の状態に戻す（#263 段階2）。⚠️ **時点を見せてから選んでもらう**＝
+                どこまで戻るか分からないまま押させない（§2-5）。 */}
+            {restoreFor && (
+              <div className="notice notice-warn mb" role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div className="row-between">
+                  <span>
+                    {restoreFor.points.length > 0
+                      ? "戻したい時点を選んでください。戻す前の状態も残るので、やっぱり戻したいときは戻せます。"
+                      : RESTORE_POINTS_EMPTY}
+                  </span>
+                  <button className="btn btn-ghost" onClick={() => setRestoreFor(null)} disabled={restoring}>
+                    やめる
+                  </button>
+                </div>
+                {restoreFor.points.length > 0 && (
+                  <ul style={{ margin: "var(--gap-sm) 0 0", padding: 0, listStyle: "none" }}>
+                    {restoreFor.points.map((pt) => (
+                      <li key={pt.name} className="row-between" style={{ marginBottom: 4 }}>
+                        <span className="text-sm">{backupSavedAtLabel(new Date(pt.savedAt))}</span>
+                        <button
+                          className="btn btn-secondary text-sm"
+                          disabled={restoring}
+                          onClick={() => {
+                            // ⚠️ **未保存があるときは先に確認する**＝戻すと、いま画面にある編集は失われる。
+                            if (hasWork) { setPendingAction({ kind: "restore", projectId: restoreFor.projectId, pointName: pt.name }); setRestoreFor(null); return; }
+                            void doRestorePoint(restoreFor.projectId, pt.name);
+                          }}
+                        >
+                          {restoring ? "戻しています…" : "ここへ戻す"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -383,7 +462,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 {/* ⚠️ **押したボタンのことを聞く**（PR #889 レビュー 🔴）＝複製なのに「開きますか？」と
                     聞いていると、利用者は違うことが起きても気づけない。 */}
                 <span>
-                  {pendingAction.kind === "duplicate"
+                  {pendingAction.kind === "restore"
+                    ? "今の編集内容を閉じて、選んだ時点に戻しますか？保存していない素材や場面は失われます。"
+                    : pendingAction.kind === "duplicate"
                     ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"
                     : "今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"}
                 </span>
@@ -397,10 +478,14 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     onClick={() => {
                       const a = pendingAction;
                       setPendingAction(null);
-                      void (a.kind === "duplicate" ? doDuplicate(a.projectId) : doOpenProject(a.projectId));
+                      void (a.kind === "restore"
+                        ? doRestorePoint(a.projectId, a.pointName ?? "")
+                        : a.kind === "duplicate"
+                          ? doDuplicate(a.projectId)
+                          : doOpenProject(a.projectId));
                     }}
                   >
-                    {pendingAction.kind === "duplicate" ? "複製して開く" : "開く"}
+                    {pendingAction.kind === "restore" ? "戻して開く" : pendingAction.kind === "duplicate" ? "複製して開く" : "開く"}
                   </button>
                 </div>
               </div>
@@ -635,6 +720,25 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
+                    </button>
+                    {/* 前の状態に戻す（#263 段階2）。⚠️ **開くのと同じガード**＝
+                        戻したあとその動画を開くので、開けない状況では押せないようにする。 */}
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={isExporting || pendingAction !== null || openingId !== null || duplicatingId !== null || restoring}
+                      onClick={() => void openRestorePanel(p.projectId)}
+                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を前の状態に戻す`}
+                      title={
+                        isExporting
+                          ? "書き出しが終わるまでお待ちください"
+                          : openingId !== null
+                            ? "プロジェクトを開いています…"
+                            : pendingAction !== null
+                              ? "確認に答えてから操作できます"
+                              : "前の状態に戻す"
+                      }
+                    >
+                      <HistoryIcon size={18} />
                     </button>
                     {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
                         ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、
