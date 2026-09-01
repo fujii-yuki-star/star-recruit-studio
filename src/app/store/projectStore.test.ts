@@ -7,6 +7,7 @@ import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
+import { parseTemplatePack } from '../../infrastructure/templateFs';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
 import type { Asset, Scene } from '../../domain/project/types';
@@ -381,6 +382,63 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',
     canvas: { width: 1920, height: 1080 },
     layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, ...(assetId ? { assetId } : {}) }],
+  });
+
+  // #959：保存の前に「読み込みと同じ経路」を通す＝**保存できたのに読み込めない**を構造で無くす。
+  describe('保存の門（#959）', () => {
+    const slotTmpl = (slot: Record<string, unknown>): Template => ({
+      ...userTmpl('user_tmpl_gate'),
+      layers: [
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'layer_001', type: 'slot', x: 0, y: 0, w: 100, h: 100, ...slot } as Template['layers'][number],
+      ],
+    });
+
+    it('slotType の無い差し込み口は補って保存する＝行き止まりにしない', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      expect(useProjectStore.getState().templateError).toBeNull();
+      // 保存されたファイルにも一覧にも、補正後が入る（片方だけ元のままにしない）。
+      expect(spy.mock.calls[0][0].layers[1].slotType).toBe('image_or_video');
+      const listed = useProjectStore.getState().templates.find((t) => t.templateId === 'user_tmpl_gate');
+      expect(listed?.layers[1].slotType).toBe('image_or_video');
+      spy.mockRestore();
+    });
+
+    it('補正でも直せない内容は保存せず、次の行動を出す（成功に見せない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({ slotType: 'audio' }));
+      expect(spy).not.toHaveBeenCalled(); // ファイルに書かない
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_gate')).toBe(false); // 一覧にも出さない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/); // 「もう一度」だけでは次の行動にならない
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 排他を握ったままにしない
+      spy.mockRestore();
+    });
+
+    // ⚠️ **複製・ゼロから作成も門を通ることを固定する**（#960 レビュー）＝いまは薄いラッパーで
+    // `saveUserTemplate` へ委譲しているが、直接 `userTemplateFs.saveUserTemplate` を呼ぶ形へ書き換えられると
+    // 門を迂回でき、#959 が別の入口から戻ってくる。
+    it('複製も門を通る（不正な内容は保存せず id を返さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates, slotTmpl({ slotType: 'audio' })], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().duplicateAsUserTemplate('user_tmpl_gate');
+      expect(spy).not.toHaveBeenCalled();
+      expect(id).toBe(''); // 呼び出し側が選ばない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/);
+      spy.mockRestore();
+    });
+
+    it('ゼロから作成も門を通る（作れたものは検証を通っている）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().createBlankUserTemplate('新規', 'opening', '16:9');
+      expect(id).not.toBe('');
+      // 門を通った＝保存された文書は読み込みの検証を通っている。
+      expect(parseTemplatePack(spy.mock.calls[0][0]).rejected).toEqual([]);
+      spy.mockRestore();
+    });
   });
 
   it('deleteUserTemplate はテンプレ削除時に所有素材の表示用src も掃除する（無関係な素材は残す）', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
-import { LAYER_TYPE, TEXT_KEY } from '../enums';
-import { addLayer, createLayerId, duplicateLayer, editableTextKeys, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer, withTextFontId } from './layerOps';
+import { LAYER_TYPE, LAYER_TYPES, TEXT_KEY } from '../enums';
+import { addLayer, createLayerId, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_SUBTITLE, DEFAULT_TEXT_KEY_TEXT, duplicateLayer, editableTextKeys, removeLayer, requiredFieldsForLayerType, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer, withTextFontId } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -233,5 +233,62 @@ describe('withTextFontId', () => {
     const before = { title: 'a' };
     withTextFontId(before, 'main', 'b');
     expect(before).toEqual({ title: 'a' });
+  });
+});
+
+describe('requiredFieldsForLayerType（種別ごとの「無いと読み込めない」既定・#959）', () => {
+  it('差し込み口には slotType が入る＝入れないと保存できても読み込めない', () => {
+    expect(requiredFieldsForLayerType(LAYER_TYPE.slot)).toEqual({ slotType: DEFAULT_SLOT_TYPE });
+  });
+  it('文字系には textKey が入る（見出し / 字幕）', () => {
+    expect(requiredFieldsForLayerType(LAYER_TYPE.text)).toEqual({ textKey: DEFAULT_TEXT_KEY_TEXT });
+    expect(requiredFieldsForLayerType(LAYER_TYPE.subtitle)).toEqual({ textKey: DEFAULT_TEXT_KEY_SUBTITLE });
+  });
+  it('必須の追加項目が無い種別は空（余計な項目を作らない）', () => {
+    for (const t of [LAYER_TYPE.background, LAYER_TYPE.character, LAYER_TYPE.shape, LAYER_TYPE.logo, LAYER_TYPE.decor]) {
+      expect(requiredFieldsForLayerType(t)).toEqual({});
+    }
+  });
+  it('表と schema が「ちょうど一致」する（どちらへずれても検出する）', async () => {
+    // 正典 template.schema.json の allOf（if type → then required）を読み、表と**集合として**突き合わせる。
+    // ⚠️ **期待値を手で写さない**＝schema に条件が増えたとき、この表だけ古いまま通るのを防ぐ（#959 の再発防止）。
+    // ⚠️ **両方向を見る**（#960 レビュー）＝schema→表（必須が表に有るか）だけだと、
+    // **schema が必須にしていない項目を表に足す**のを止められない。それをやると `withRequiredLayerFields` が
+    // **いま読み込めている全テンプレ**に効いてしまい、絵が黙って変わる（例：立ち絵に `fit: cover` を足すと、
+    // `fit` 未指定の立ち絵が既定の `contain` から変わる）。補正が安全なのは
+    // **「必須欠け＝schema 不適合＝一度も読み込めていない文書」にしか当たらない**からで、
+    // その前提を保つのが集合一致。
+    const schema = (await import('../../../docs/yuko_recruit_docs/schemas/template.schema.json')).default as {
+      $defs: { Layer: { allOf: { if: { properties: { type: { const?: string; enum?: string[] } } }; then: { required: string[] } }[] } };
+    };
+    const requiredOfSchema = (type: string): string[] =>
+      schema.$defs.Layer.allOf
+        .filter((r) => {
+          const t = r.if.properties.type;
+          return t.const === type || (t.enum ?? []).includes(type);
+        })
+        .flatMap((r) => r.then.required);
+    for (const type of LAYER_TYPES) {
+      expect(Object.keys(requiredFieldsForLayerType(type)).sort(), `${type}`).toEqual(requiredOfSchema(type).sort());
+    }
+  });
+});
+
+describe('addLayer が必須項目を入れる（#959）', () => {
+  it('差し込み口を足すと slotType が入っている＝そのまま保存して読み戻せる', () => {
+    const [l] = addLayer([], LAYER_TYPE.slot, canvas);
+    expect(l.slotType).toBe(DEFAULT_SLOT_TYPE);
+  });
+  it('文字・字幕も従来どおり textKey が入る', () => {
+    expect(addLayer([], LAYER_TYPE.text, canvas)[0].textKey).toBe(DEFAULT_TEXT_KEY_TEXT);
+    expect(addLayer([], LAYER_TYPE.subtitle, canvas)[0].textKey).toBe(DEFAULT_TEXT_KEY_SUBTITLE);
+  });
+  it('足せる種別すべてが、追加した直後に schema の必須を満たす', () => {
+    for (const type of TEMPLATE_ADDABLE_LAYER_TYPES) {
+      const [l] = addLayer([], type, canvas);
+      for (const [k, v] of Object.entries(requiredFieldsForLayerType(type))) {
+        expect(l[k as keyof Layer], `${type} の ${k}`).toBe(v);
+      }
+    }
   });
 });

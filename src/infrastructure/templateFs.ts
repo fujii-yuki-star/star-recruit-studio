@@ -6,6 +6,8 @@
 // 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
 import { validateTemplate as validate } from '../domain/validation/generated/validators.js';
 import type { Template } from '../domain/template/types';
+import { requiredFieldsForLayerType } from '../domain/template/layerOps';
+import type { LayerType } from '../domain/enums';
 import type { Orientation } from '../domain/enums';
 import { sampleTemplates } from './sampleData';
 
@@ -40,16 +42,52 @@ function readTemplateId(item: unknown): string | null {
 }
 
 /**
+ * 種別ごとの必須項目が欠けている層を補う（`11 §9` 自動補正・#959）。
+ *
+ * ⚠️ **既存の見た目は変わらない**。根拠は**構造**であって値の一致ではない＝
+ * **必須が欠けた層を持つ文書は schema 不適合で、これまで100%却下されていた**（＝一度も描かれていない）。
+ * つまりこの補正が当たるのは**いま読み込めていない文書だけ**で、読み込めている文書には触れない。
+ * ⚠️ **この前提は `requiredFieldsForLayerType` が schema の必須と「ちょうど一致」していることで保たれる**
+ * （`layerOps.test.ts` が両方向を検査する）。schema が必須にしていない項目を表へ足すと、
+ * 補正が**読み込めている全テンプレ**に効いて絵が黙って変わる（#960 レビュー）。
+ * ⚠️ **「補う値＝いま画面に出ている値」は `slotType` にしか当てはまらない**（読み手は
+ * `slotAssign` / `findVideoSlot` / `timeline/video` ほかで、いずれも `image` と `video` だけを特別扱いし
+ * 未指定は「写真・動画」と同じ枝）。`textKey` は違う＝`textKeyOfLayer` は `text` 層の未指定を `null` にし
+ * 描画は空文字になるので、安全なのは上の構造の理由だけ。**根拠を取り違えたまま残さない**。
+ * ⚠️ **欠けている項目だけ**触る（値が入っているものは上書きしない）。ほかが壊れていれば検証がそのまま却下する
+ * ＝補正で不正データを通さない（§2-2）。
+ */
+function withRequiredLayerFields(item: unknown): unknown {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const t = item as Record<string, unknown>;
+  if (!Array.isArray(t.layers)) return item;
+  let changed = false;
+  const layers = t.layers.map((l) => {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) return l;
+    const layer = l as Record<string, unknown>;
+    if (typeof layer.type !== 'string') return l;
+    const required = requiredFieldsForLayerType(layer.type as LayerType);
+    const missing = Object.entries(required).filter(([k]) => layer[k] === undefined);
+    if (missing.length === 0) return l;
+    changed = true;
+    return { ...layer, ...Object.fromEntries(missing) };
+  });
+  return changed ? { ...t, layers } : item;
+}
+
+/**
  * 生データ（テンプレ単体 or 配列）を正典スキーマで検証し、採用(Template[])と不採用(rejected)へ振り分ける（純粋）。
  * 検証を通った要素だけを Template として返す＝未検証データを内部に流さない（§2-2）。
+ * 検証の前に `withRequiredLayerFields` で自動補正を行う（`11 §9`・#959）。
  */
 export function parseTemplatePack(raw: unknown): ParsedTemplatePack {
   const items = Array.isArray(raw) ? raw : [raw];
   const templates: Template[] = [];
   const rejected: RejectedTemplate[] = [];
   for (const item of items) {
-    if (validate(item)) {
-      templates.push(item as Template);
+    const repaired = withRequiredLayerFields(item);
+    if (validate(repaired)) {
+      templates.push(repaired as Template);
     } else {
       rejected.push({ templateId: readTemplateId(item), errors: formatErrors(validate.errors) });
     }
