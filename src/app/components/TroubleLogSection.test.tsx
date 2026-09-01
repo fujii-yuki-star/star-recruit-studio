@@ -59,4 +59,12 @@ describe("うまくいかないときの記録（#396）", () => {
     expect(container.textContent).not.toMatch(/ログ|log|stderr|FFmpeg/i);
     expect(container.textContent).toMatch(/外へは何も送りません/);
   });
+
+  // #957 レビュー：この記録には**入力した内容から作られた文章の一部**が混じることがある。
+  // 利用者はこのファイルを人に送るので、送る前に中身の見当がつくようにしておく。
+  it("記録に入るものを説明する（送る前に見当がつく）", async () => {
+    const { container } = render(<TroubleLogSection />);
+    await screen.findByRole("button", { name: "記録の場所を開く" });
+    expect(container.textContent).toMatch(/入力した内容の一部が記録に含まれることがある/);
+  });
 });

@@ -9,13 +9,23 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// 記録の置き場（`appData/logs`）。**起動時に一度だけ**決める。
 ///
 /// ⚠️ **`AppHandle` を持ち回らない**＝技術詳細を出す所は 68 か所以上あり、そこへ引数を足して回ると
 /// 差分が広がるうえ、**足し忘れた所だけ記録が残らない**（片方だけ直す型）。process 全体で1つ持つ。
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// 書き込みの順番待ち。
+///
+/// ⚠️ **同時に書くと記録が消えうる**（#957 レビュー）＝Tauri のコマンドは既定で並行に走るので、
+/// 「書き出しが失敗した」と「画面側が同時に何件も警告を出した」が重なると、`rotate_if_needed` の
+/// **サイズ確認→削除→リネーム**が競合して片方の行が落ちる。**複数箇所が同時にこけたときの調査材料**が
+/// この記録の存在意義なので、まさにその場面で消えるのはいちばん困る。
+/// ⚠️ **頻度は低いので待たせて構わない**（失敗したときにしか書かない）。
+/// ⚠️ **毒された錠でも書き続ける**（`unwrap` しない）＝記録を残せないことでアプリを落とさない。
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 1つのファイルの上限。超えたら1世代だけ退避する。
 /// ⚠️ **無制限にしない**＝長く使うと際限なく太る。**世代を増やしすぎない**＝調べたいのは直近の失敗。
@@ -49,10 +59,29 @@ pub fn dir() -> Option<PathBuf> {
 pub fn record(tag: &str, detail: &str) {
     eprintln!("[{tag}] {detail}");
     let Some(dir) = LOG_DIR.get() else { return };
+    record_to(dir, tag, detail, MAX_BYTES);
+}
+
+/// 置き場と上限を受け取って1行残す（`record` の中身）。
+///
+/// ⚠️ **切り出してあるのはテストが実装を通るため**（#957 レビュー）＝`record` は置き場を
+/// process 全体の `OnceLock` から採るので、テストからは**他のテストが先に設定していると早期 return** し、
+/// 何も試していないのに緑になる（実際そうなっていた）。上限も渡せるようにして、
+/// **退避が何度も起きる状況**を作れるようにする（1回しか退避しないと競合そのものを踏まない）。
+fn record_to(dir: &std::path::Path, tag: &str, detail: &str, max_bytes: u64) {
     let path = dir.join("stario.log");
-    rotate_if_needed(&path);
-    let one = one_line(detail);
-    let line = format!("{}\t[{}]\t{}\n", now_stamp(), tag, one);
+    // ⚠️ **札の側も1行に潰す**（#957 レビュー）＝いまは固定の言葉だが、可変にする改修が入ったとき
+    // 改行が混じると「時刻・札・中身」の並びが黙って崩れる（気づける形になっていない）。
+    let line = format!(
+        "{}\t[{}]\t{}\n",
+        now_stamp(),
+        one_line(tag),
+        one_line(detail)
+    );
+    // ⚠️ **確認→退避→書き込みをひとまとまりにする**＝間に別の書き込みが割り込むと行が落ちる。
+    let _guard = WRITE_LOCK.lock();
+    let _watch = watch_region();
+    rotate_if_needed(&path, max_bytes);
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = f.write_all(line.as_bytes());
     }
@@ -67,10 +96,53 @@ fn one_line(detail: &str) -> String {
     detail.replace('\r', "").replace('\n', " / ")
 }
 
+/// **テストのときだけ**、「同時に何本が中に居たか」を測る見張り。
+///
+/// ⚠️ **守りたいのは「ひとまとまりであること」そのもの**（#957 レビュー）なので、それを直接測る。
+/// ファイルの最後の状態を見る形にしていたが、**毎回退避する設定では最後の1本が書き直すので勝手に整い**、
+/// 錠を外しても緑のままだった（＝確かめられていなかった）。
+/// ⚠️ **少し待つ**のは、待たないと窓が狭すぎて重ならないから（錠がある側は中で待つだけなので影響しない）。
+/// ⚠️ **配布されるものには入らない**（`cfg(test)`）＝実際の書き込みは遅くならない。
+#[cfg(test)]
+mod probe {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    pub static NOW: AtomicUsize = AtomicUsize::new(0);
+    pub static MAX: AtomicUsize = AtomicUsize::new(0);
+    pub struct Guard;
+    impl Guard {
+        pub fn enter() -> Self {
+            let n = NOW.fetch_add(1, Ordering::SeqCst) + 1;
+            MAX.fetch_max(n, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_micros(200));
+            Guard
+        }
+    }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            NOW.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(test)]
+fn watch_region() -> probe::Guard {
+    probe::Guard::enter()
+}
+
+/// 配布されるものでは**何もしない**（見張りはテストのときだけ）。
+/// ⚠️ 呼び出し側を分けないため、**同じ形**（受け取って持っておくもの）を返す。
+#[cfg(not(test))]
+pub struct NoWatch;
+
+#[cfg(not(test))]
+fn watch_region() -> NoWatch {
+    NoWatch
+}
+
 /// 上限を超えていたら1世代だけ退避する（`stario.log` → `stario.1.log`）。
-fn rotate_if_needed(path: &PathBuf) {
+fn rotate_if_needed(path: &PathBuf, max_bytes: u64) {
     let Ok(meta) = fs::metadata(path) else { return };
-    if meta.len() < MAX_BYTES {
+    if meta.len() < max_bytes {
         return;
     }
     let old = path.with_file_name("stario.1.log");
@@ -123,6 +195,91 @@ macro_rules! tlog {
 mod tests {
     use super::*;
 
+    /// 同時に書いても行が落ちない（#957 レビュー）。
+    ///
+    /// ⚠️ **この記録の存在意義は「複数箇所が同時にこけたときの調査材料」**なので、まさにその場面で
+    /// 消えるのがいちばん困る。`rotate_if_needed` の**サイズ確認→削除→リネーム**は分けて書くと
+    /// 競合するので、書き込みまでをひとまとまりにしてある。
+    /// ⚠️ **上限を跨がせる**＝退避が起きる状況で試さないと、競合そのものを踏まない。
+    #[test]
+    fn record_keeps_every_line_under_concurrency() {
+        use std::sync::Barrier;
+        let dir = std::env::temp_dir().join("stario_tlog_concurrency");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // ⚠️ **上限を小さくして退避を何度も起こす**＝1回しか退避しないと競合そのものを踏まない。
+        const SMALL_MAX: u64 = 1; // ⚠️ **毎回退避させる**＝退避の競合を確実に踏ませる（緩いと race を踏まずに緑になる）
+
+        probe::MAX.store(0, std::sync::atomic::Ordering::SeqCst);
+        const THREADS: usize = 8;
+        const EACH: usize = 60;
+        let barrier = std::sync::Arc::new(Barrier::new(THREADS));
+        let hs: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let b = barrier.clone();
+                let d = dir.clone();
+                std::thread::spawn(move || {
+                    b.wait(); // いっせいに書き始める＝競合を起こしにくくしない
+                    for i in 0..EACH {
+                        record_to(&d, "t", &format!("line-{t}-{i}"), SMALL_MAX);
+                    }
+                })
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+
+        // ⚠️ **「全部残っている」は言えない**＝退避は1世代しか持たないので、捨てられるのが正しい。
+        // 競合したときに実際に壊れるのは次の2つなので、そこを見る。
+        // (1) **行が混ざる**＝別の書き込みが1行の途中に刺さる。
+        // (2) **退避が効かなくなる**＝Windows では他のスレッドが開いている間の rename は失敗し、
+        //     `let _ =` で握られるので**上限を超えて太り続ける**（気づけないまま記録が肥大する）。
+        let mut lines: Vec<String> = Vec::new();
+        for name in ["stario.1.log", "stario.log"] {
+            for l in fs::read_to_string(dir.join(name))
+                .unwrap_or_default()
+                .lines()
+            {
+                lines.push(l.to_string());
+            }
+        }
+        assert!(!lines.is_empty(), "1行も残っていない");
+        for l in &lines {
+            // 形は「時刻・[札]・line-<t>-<i>」の1件ぶんだけ。混線すると `line-` が2つ以上出る。
+            assert_eq!(l.matches("line-").count(), 1, "行が混ざった: {l}");
+            assert_eq!(l.matches('[').count(), 1, "行が混ざった: {l}");
+        }
+        // 退避が実際に起きた＝競合する経路を通した（通っていないテストで安心しない）。
+        assert!(
+            dir.join("stario.1.log").exists(),
+            "退避が一度も起きていない＝競合を踏んでいない"
+        );
+        // ⚠️ **守りたい性質そのものを見る**＝「確認→退避→書き込み」に同時に2本入らないこと。
+        // ファイルの最後の状態で見ると、毎回退避する設定では最後の1本が書き直して**勝手に整う**ため、
+        // 錠を外しても緑のままだった（実際に確かめて分かった）。
+        let max = probe::MAX.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            max, 1,
+            "同時に {max} 本が退避と書き込みの中に居た＝ひとまとまりになっていない"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 札に改行が混じっても1行のまま（#957 レビュー）。
+    /// ⚠️ **`one_line` を直接見ない**＝それだと `record` が札へ通していなくても緑になる（実際そうだった）。
+    #[test]
+    fn record_flattens_tag_too() {
+        let dir = std::env::temp_dir().join("stario_tlog_tag");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        record_to(&dir, "ui\nwarn", "detail", MAX_BYTES);
+        let body = fs::read_to_string(dir.join("stario.log")).unwrap();
+        assert_eq!(body.lines().count(), 1, "札の改行で行が割れた: {body:?}");
+        assert!(body.contains("[ui / warn]"), "札が潰れていない: {body:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// 日付の変換（`civil_from_days`）。
     /// ⚠️ **外部の日付クレートを入れない代わりに、ここで固定する**＝閏年と月末の境目で1日ずれると、
     /// 記録の日付が黙って間違う（読む側は気づけない）。
@@ -165,19 +322,19 @@ mod tests {
 
         // 小さいうちは動かさない。
         fs::write(&path, b"small").unwrap();
-        rotate_if_needed(&path);
+        rotate_if_needed(&path, MAX_BYTES);
         assert!(path.exists(), "小さいうちは退避しない");
         assert!(!old.exists());
 
         // 上限を超えたら退避する。
         fs::write(&path, vec![b'x'; (MAX_BYTES + 1) as usize]).unwrap();
-        rotate_if_needed(&path);
+        rotate_if_needed(&path, MAX_BYTES);
         assert!(!path.exists(), "退避したので元の名前は消える");
         assert!(old.exists(), "1世代目へ移る");
 
         // もう一度あふれても、増えるのは1世代まで。
         fs::write(&path, vec![b'y'; (MAX_BYTES + 1) as usize]).unwrap();
-        rotate_if_needed(&path);
+        rotate_if_needed(&path, MAX_BYTES);
         assert!(old.exists());
         assert_eq!(fs::read(&old).unwrap()[0], b'y', "古い方は上書きされる");
         assert!(!dir.join("stario.2.log").exists(), "2世代目は作らない");
