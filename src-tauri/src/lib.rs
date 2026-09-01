@@ -575,6 +575,17 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("user_assets"))
 }
 
+/// 画面側の技術詳細を1行残す（#396）。
+///
+/// ⚠️ **画面側にも同じ穴がある**＝`console.warn`/`console.error` は配布版では**どこにも残らない**
+///（WebView のコンソールは見えない）。Rust だけ記録しても、**書き出しの失敗の多くは画面側から始まる**
+/// ので原因まで辿れない。受け口を1つ作って、画面側は `console` を包んでここへ流す。
+/// ⚠️ **外へは送らない**（§2-6）＝ここも書き出すだけ。
+#[tauri::command]
+fn trouble_log_record(tag: String, detail: String) {
+    trouble_log::record(&tag, &detail);
+}
+
 /// うまくいかないときの記録の**置き場**を返す（#396）。画面はここを開くだけ（中身は読まない）。
 ///
 /// ⚠️ **中身を画面へ渡さない**（§2-3）＝入っているのは実装の言葉。渡すのは場所だけにして、
@@ -942,6 +953,7 @@ pub fn run() {
             read_user_font,
             delete_user_font,
             trouble_log_dir,
+            trouble_log_record,
             list_library_assets,
             used_library_asset_ids,
             add_library_asset,
