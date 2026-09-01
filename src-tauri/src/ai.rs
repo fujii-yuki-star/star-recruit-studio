@@ -172,7 +172,7 @@ pub async fn ai_generate(
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
         let head: String = body.chars().take(500).collect();
-        eprintln!("[ai] Gemini API エラー: status={status} body={head}");
+        crate::tlog!("ai", "Gemini API エラー: status={status} body={head}");
         return Err(
             "AI への要求が失敗しました。時間をおいて、もう一度お試しください。".to_string(),
         );

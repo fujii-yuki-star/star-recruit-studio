@@ -1085,8 +1085,7 @@ pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
             if !p.is_empty() {
                 // 配布版で診断フラグにより外部 FFmpeg を使う場合は、pin 構成外（LGPL+h264_mf 保証外）を警告。
                 if !dev {
-                    eprintln!(
-                        "[ffmpeg] 診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
+                    crate::tlog!("ffmpeg","診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
                     );
                 }
                 return PathBuf::from(p);
@@ -1486,10 +1485,13 @@ fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
     Ok(ffmpeg_probe_stderr(ffmpeg, clip)?.contains("Audio:"))
 }
 
-/// 技術詳細を開発者向けに stderr へ記録し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
-/// `log` クレート未導入のため eprintln! で記録する（tauri dev のコンソールに出る）。
+/// 技術詳細を**このパソコンの記録へ**残し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
+///
+/// ⚠️ **`eprintln!` だけにしない**（#396）＝配布版はコンソールを持たないので、**stderr はどこにも残らない**。
+/// 「失敗しました」と言われても調べる材料が無かった。`tlog!` は stderr にも出しつつ
+/// `appData/logs` にも残す（外へは送らない＝§2-6）。
 fn export_failure(detail: impl std::fmt::Display, user_message: impl Into<String>) -> String {
-    eprintln!("[export] {detail}");
+    crate::trouble_log::record("export", &format!("{}", detail));
     user_message.into()
 }
 
@@ -2121,8 +2123,9 @@ fn encode_jobs(
         // 場面1本を焼くたびに実進捗を通知＝encoding 段のバーが場面ごとに進む（#376）。
         emit_export_progress(progress, "encode", i + 1, jobs.len());
     }
-    eprintln!(
-        "[export] encode {} clips: {} ms",
+    crate::tlog!(
+        "export",
+        "encode {} clips: {} ms",
         jobs.len(),
         encode_start.elapsed().as_millis()
     );
@@ -2217,8 +2220,9 @@ fn encode_jobs(
         })?;
     }
     if files.len() >= 2 {
-        eprintln!(
-            "[export] join {} clips: {} ms",
+        crate::tlog!(
+            "export",
+            "join {} clips: {} ms",
             files.len(),
             join_start.elapsed().as_millis()
         );
@@ -3744,11 +3748,12 @@ fn export_video_impl(
                 "BGMの合成に失敗しました。もう一度お試しください。",
             )
         })?;
-        eprintln!("[export] bgm mix: {} ms", bgm_start.elapsed().as_millis());
+        crate::tlog!("export", "bgm mix: {} ms", bgm_start.elapsed().as_millis());
     }
     // 書き出し全体（エンコード＋結合＋字幕＋BGM）の所要時間。代表ケースで Before/After を測るための計測ログ（#376）。
-    eprintln!(
-        "[export] total (encode+join+bgm): {} ms / {} scenes",
+    crate::tlog!(
+        "export",
+        "total (encode+join+bgm): {} ms / {} scenes",
         export_start.elapsed().as_millis(),
         scenes.len()
     );

@@ -67,7 +67,10 @@ pub fn start_bundled_engine(app: &AppHandle) {
         return; // 同梱なし（開発時・未配置）＝既定/設定の接続先を使う。
     };
     let Some(port) = pick_free_port() else {
-        eprintln!("[voicevox] 空きポートの確保に失敗。同梱エンジンの起動を見送ります。");
+        crate::tlog!(
+            "voicevox",
+            "空きポートの確保に失敗。同梱エンジンの起動を見送ります。"
+        );
         return;
     };
     let mut cmd = Command::new(&exe);
@@ -91,10 +94,13 @@ pub fn start_bundled_engine(app: &AppHandle) {
         Ok(child) => {
             let base_url = format!("http://127.0.0.1:{port}");
             app.state::<EngineState>().store(child, base_url.clone());
-            eprintln!("[voicevox] 同梱エンジンを起動しました: {base_url}");
+            crate::tlog!("voicevox", "同梱エンジンを起動しました: {base_url}");
         }
         Err(e) => {
-            eprintln!("[voicevox] 同梱エンジンの起動に失敗（設定の接続先／手動起動へフォールバック）: {e}");
+            crate::tlog!(
+                "voicevox",
+                "同梱エンジンの起動に失敗（設定の接続先／手動起動へフォールバック）: {e}"
+            );
         }
     }
 }

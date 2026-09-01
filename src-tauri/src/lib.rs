@@ -7,6 +7,7 @@ use tauri::Manager;
 mod ai;
 mod assets;
 mod ffmpeg;
+mod trouble_log;
 mod voicevox;
 mod voicevox_engine;
 
@@ -197,7 +198,7 @@ fn load_user_templates(app: tauri::AppHandle) -> Result<UserTemplatesLoad, Strin
             // ただし件数は返す＝在庫が不完全なことを呼び出し側に伝え、掃除(#299)の安全条件に使う。
             Err(e) => {
                 skipped += 1;
-                eprintln!("[user_templates] 読み込みスキップ {:?}: {}", path, e);
+                crate::tlog!("user_templates", "読み込みスキップ {:?}: {}", path, e);
             }
         }
     }
@@ -574,6 +575,15 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("user_assets"))
 }
 
+/// うまくいかないときの記録の**置き場**を返す（#396）。画面はここを開くだけ（中身は読まない）。
+///
+/// ⚠️ **中身を画面へ渡さない**（§2-3）＝入っているのは実装の言葉。渡すのは場所だけにして、
+/// 見るかどうか・送るかどうかは利用者が決める（§2-6＝アプリは外へ送らない）。
+#[tauri::command]
+fn trouble_log_dir() -> Option<String> {
+    trouble_log::dir().map(|p| p.to_string_lossy().to_string())
+}
+
 /// `assetProtocol.scope` に書いてあるフォルダを作っておく（#945・起動時に1回）。
 ///
 /// ⚠️ **失敗しても起動は止めない**＝作れないのは権限などの環境要因で、ここで落とすと
@@ -897,6 +907,9 @@ pub fn run() {
             // ⚠️ **許可範囲に書いてあるフォルダだけ**を作る＝`user_templates`／`user_fonts` は
             // `asset://` に載っていない（data URL・バイト列で渡す）ので、ここで作ると許可の話と
             // 実際の配り方がずれる。作る対象を増やすときは `tauri.conf.json` の scope と一緒に見ること。
+            // うまくいかないときの記録の置き場を作る（#396）。**いちばん先に**＝この後の処理が失敗したら
+            // それも残したい（VOICEVOX の起動・書き出しの後片づけ）。
+            trouble_log::init(app.handle());
             ensure_asset_scope_dirs(app.handle());
             // 同梱 VOICEVOX ENGINE を自動起動（同梱が無ければ何もしない＝手動起動/設定の接続先へフォールバック・ADR-0005/#149）。
             voicevox_engine::start_bundled_engine(app.handle());
@@ -928,6 +941,7 @@ pub fn run() {
             import_user_font,
             read_user_font,
             delete_user_font,
+            trouble_log_dir,
             list_library_assets,
             used_library_asset_ids,
             add_library_asset,

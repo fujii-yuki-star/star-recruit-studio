@@ -372,7 +372,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
         let path = match entry {
             Ok(e) => e.path(),
             Err(e) => {
-                eprintln!("[template_assets] エントリ読み込みスキップ: {}", e);
+                crate::tlog!("template_assets", "エントリ読み込みスキップ: {}", e);
                 continue;
             }
         };
@@ -390,7 +390,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
                 let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
                 out.push((stem, format!("data:{mime};base64,{b64}")));
             }
-            Err(e) => eprintln!("[template_assets] 読み込みスキップ {:?}: {}", path, e),
+            Err(e) => crate::tlog!("template_assets", "読み込みスキップ {:?}: {}", path, e),
         }
     }
     Ok(out)
