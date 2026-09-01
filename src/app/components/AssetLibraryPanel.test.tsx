@@ -46,6 +46,66 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+// #952：**行の作りを割らない**＝絵を出せる種別（写真・ロゴ）だけに小さな絵を出すと、
+// 同じ一覧で**名前の位置が揃わず**、絵の無い行は「まだ読み込めていない」のか「そういう種別」なのか
+// 見て分からない。出せない種別には**種類のしるし**を同じ大きさで出す。
+/**
+ * その素材の**行だけ**を取る（#952 のテスト用）。
+ * ⚠️ **`closest("div")` では足りない**＝隣の行まで含む入れ物に当たり、**別の行の印を拾う**
+ *（実際そうなって誤って落ちた）。他の素材の名前を含まなくなるまで上へ辿る。
+ */
+const rowOf = (name: string): HTMLElement => {
+  const others = ["会社ロゴ", "オフィス写真", "社員インタビュー"].filter((n) => n !== name);
+  let el = screen.getByText(new RegExp(name)).parentElement as HTMLElement | null;
+  while (el && others.some((n) => el!.textContent?.includes(n))) el = el.parentElement;
+  // 逆に、行の中身（印か絵）が入るところまでは上がる必要がある
+  while (el && !el.querySelector("img, span[title]")) el = el.parentElement;
+  return el as HTMLElement;
+};
+
+describe("よく使う素材の一覧は、行の作りが揃っている（#952）", () => {
+  it("絵を出せない種別（動画）にも、同じ大きさの印が出る", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/社員インタビュー/);
+    const videoRow = rowOf("社員インタビュー");
+    // 画像でなくてもよいので、40px の枠が付いていること（＝名前の左が揃う）。
+    const marks = [...videoRow.querySelectorAll("img, span[title]")]
+      .filter((e) => (e as HTMLElement).style.width === "40px" || e.tagName === "IMG");
+    expect(marks.length).toBeGreaterThan(0);
+  });
+
+  it("その印は「動画」だと分かる（何の種別か読める）", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/社員インタビュー/);
+    const videoRow = rowOf("社員インタビュー");
+    expect(videoRow.querySelector('span[title="動画"]')).not.toBeNull();
+  });
+
+  // ⚠️ **絵が出たら印は出さない**＝絵と印が二重に並ばない。
+  it("絵が出た行には印を出さない", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/オフィス写真/);
+    const photoRow = rowOf("オフィス写真");
+    await waitFor(() => expect(photoRow.querySelector("img")).not.toBeNull());
+    // ⚠️ **印だけを見る**＝行には別の `title` 付きの要素もあるので、40px の枠に絞る。
+    const marks = [...photoRow.querySelectorAll("span[title]")].filter((e) => (e as HTMLElement).style.width === "40px");
+    expect(marks).toHaveLength(0);
+  });
+
+  // ⚠️ **絵を出せる種別でも、出せなかったときは印にする**（#942/#945 で実際に起きた形）＝
+  // そこだけ名前が左へ戻る、を作らない。
+  it("写真でも絵を出せなかったときは印が出る（名前の位置が揃う）", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null);
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/オフィス写真/);
+    const photoRow = rowOf("オフィス写真");
+    expect(photoRow.querySelector('span[title="写真"]')).not.toBeNull();
+  });
+});
+
 describe("AssetLibraryPanel", () => {
   /** ⚠️ §2-3＝実装用語を画面に出さない。 */
   it("「アセット」「マニフェスト」「グローバル」を画面に出さない", async () => {

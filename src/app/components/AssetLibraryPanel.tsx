@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { DeleteConfirm } from "./DeleteConfirm";
+import { MusicIcon, PhotoIcon, VideoIcon } from "./icons";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { assetTagCounts } from "../../domain/project/assetSearch";
 import { showOpenLibraryAssetsDialog } from "../../infrastructure/dialog";
@@ -25,7 +26,7 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
-import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, assetTypeLabel, libraryPartlyFailedMessage } from "../uiLabels";
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 
@@ -447,9 +448,15 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                     : {}),
                 }}
               >
-                {/* 小さな絵（#926）＝出せるものだけ。⚠️ **無いときは枠も出さない**＝
-                    空の四角が並ぶと「読み込み中」に見える（実際は出せない種別）。 */}
-                {thumbById[a.id] && (
+                {/* 小さな絵（#926）と、絵が無いときの**種類のしるし**（#952）。
+                    ⚠️ **どの行も 40px の枠を必ず持つ**＝以前は絵を出せる種別だけに絵を出していたので、
+                    同じ一覧で**名前の位置が揃わず**（写真とロゴだけ右へ寄る）、絵の無い行は
+                    「まだ読み込めていない」のか「そういう種別」なのか見て分からなかった。
+                    ⚠️ **絵が出せる種別でも、出せなかったときは印にする**＝そこだけ名前が左へ戻る、を作らない
+                    （`asset://` が拒まれる・ブラウザ開発など＝#942/#945 で実際に起きた）。
+                    ⚠️ **空の四角にしない**＝「読み込み中」に見えるので、種類が読める印を入れる。 */}
+                {thumbById[a.id] ? (
+
                   <img
                     src={thumbById[a.id]}
                     alt=""
@@ -467,6 +474,19 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                     }}
                     style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }}
                   />
+                ) : (
+                  <span
+                    title={assetTypeLabel[a.assetType]}
+                    style={{
+                      width: 40, height: 40, borderRadius: 4, flex: "0 0 auto",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "var(--color-surface-alt)", color: "var(--color-text-muted)",
+                    }}
+                  >
+                    {a.assetType === ASSET_TYPE.video ? <VideoIcon size={20} />
+                      : a.assetType === ASSET_TYPE.bgm ? <MusicIcon size={20} />
+                        : <PhotoIcon size={20} />}
+                  </span>
                 )}
                 <span style={{ flex: 1 }}>
                   {a.displayName}

@@ -33,7 +33,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo, importError, clearImportError } =
     useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
   // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
@@ -94,6 +94,24 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     void autoGenerateIfSafe(); // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。実プロバイダは空状態のまま。
   }, [status, autoGenerateIfSafe]);
 
+  /**
+   * 画面ぜんぶに効く知らせ（#952）。
+   *
+   * ⚠️ **場面ゼロの枝でも描く**＝「白紙から作る」の着地先はこの画面で、そのときは**まだ場面が無い**ので
+   * 早い方の `return` が使われる。片方だけに置くと、**いちばん出したい場面**（新しい動画を作った直後）で
+   * 出ない（実際そう書いてテストに捕まった）。
+   * ⚠️ **この画面だけ描いていなかった**＝会社の見た目の文字の形が入らなかったこと（#929）は
+   * 新しい動画を作った直後に立つのに、描かないと**誰にも届かない**まま既定の字体で作り始めることになる
+   *（素材画面へ寄って初めて出る＝経路で届いたり届かなかったりする・ADR-0026②）。
+   * 他の4画面（素材・場面編集・タイムライン編集・ウィザード）は既に描いている。
+   * ⚠️ **閉じる道を付ける**＝立ちっぱなしにしない（他の画面と同じ流儀）。
+   */
+  const notice = importError ? (
+    <div className="notice notice-warn row-between mb" role="alert">
+      <span>{importError}</span>
+      <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+    </div>
+  ) : null;
   const rows = scenes.map((s) => sceneToDraftRow(s, parts, templates, assets));
   const draftWarnings = warningsToDraftWarnings(warnings);
 
@@ -105,6 +123,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
         <ExportLockBanner onNavigate={onNavigate} />
+        {notice}
         <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => addScene()} />
       </div>
     );
@@ -113,6 +132,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   return (
     <div className="main-scroll" ref={scrollRef}>
       <ExportLockBanner onNavigate={onNavigate} />
+      {notice}
       <div className="content-with-yuko" inert={isExporting}>
         <div>
           <PageHead
