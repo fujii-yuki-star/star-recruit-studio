@@ -3277,9 +3277,6 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     key("Delete");
     expect(screen.getByText("選んだ2個の部品を削除しますか？")).toBeInTheDocument();
-    // 確認は答えるまで残る。ここで背後の選択が解けると、「削除する」を押しても**何も消えない**。
-    key("Escape");
-    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
     // 再生位置も動かさない（答えを求めている最中に別の操作を通さない）。
     key("ArrowRight");
     expect(useTimelineStore.getState().playheadSec).toBe(0);
@@ -3288,6 +3285,27 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
     expect(useTimelineStore.getState().doc!.clips.map((c) => c.id)).toEqual(["clip_003"]);
+  });
+
+  // #354：`Escape` は**確認への答え（やめる）**として扱う。背後の選択は解かない。
+  // ⚠️ 以前はこの確認が `Escape` を無視しており、キーボードだけでは「やめる」に到達できなかった。
+  // 「答えるまで残す」（#547 P2-9）は**別の状態の変化で勝手に消さない**という規則で、
+  // 利用者が押した `Escape` はその「答え」にあたる（消して足し直したら蘇る、とは別の話）。
+  it("確認が出ている間の Escape は「やめる」（背後の選択は解かない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 40, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 100, h: 40, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(screen.getByText("選んだ2個の部品を削除しますか？")).toBeInTheDocument();
+    key("Escape");
+    expect(screen.queryByRole("button", { name: "削除する" })).toBeNull(); // 確認は閉じる
+    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2); // 背後は触らない
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 消えてもいない
   });
 
   it("色の面など、開いているものがある間もキーで背後を触らせない", () => {

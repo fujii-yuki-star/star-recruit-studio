@@ -318,7 +318,7 @@ export function buildPrecheckItems(
     items.push({
       id: "nearEdge",
       label: "端に寄った文字",
-      detail: `${fmtScenes(nearEdge.nums)}の文字が画面の端に近いです。テレビやSNSで切れることがあります（編集画面の「端の目安」で確かめられます）。`,
+      detail: `${fmtScenes(nearEdge.nums)}の文字が画面の端に近いです。テレビやSNSで切れることがあります（編集画面の「端の目安を出す」で確かめられます）。`,
       severity: "warning",
     });
   }
