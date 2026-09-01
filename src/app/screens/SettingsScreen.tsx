@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { PlayIcon, StopIcon } from "../components/icons";
 import { BrandKitSection } from "../components/BrandKitSection";
+import { TroubleLogSection } from "../components/TroubleLogSection";
 import { ReadingDictSection } from "../components/ReadingDictSection";
 import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -393,6 +394,10 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
         <UserFontSection />
         {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
         <BrandKitSection onNavigate={onNavigate} />
+
+        {/* うまくいかないときの記録（#396）。⚠️ **いちばん下**＝ふだんは使わない導線なので、
+            日常の設定（声・読み方・文字の形・会社の見た目）の後ろに置く。 */}
+        <TroubleLogSection />
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (
