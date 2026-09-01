@@ -9,18 +9,43 @@
 // ⚠️ **戻す時点では、どちらの文も手元にある**（戻す内容といまの内容）ので、
 // **文が変わっている読み上げだけ**「作成前」に戻せば足りる（全部作り直させない）。
 import { NARRATION_STATUS } from '../enums';
-import type { Project, Scene } from './types';
+import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from '../voice/voiceProvider';
+import type { SynthesizeInput } from '../voice/voiceProvider';
+import type { Project, Scene, VoiceSettings } from './types';
 
 /** 「作成済み」の扱いを取り消して、作り直しが要ると分かる形にする。 */
 function unmade<T extends { status?: string; voicePath?: string | null }>(v: T): T {
   return { ...v, status: NARRATION_STATUS.none, voicePath: null };
 }
 
-/** 場面ごとの、読み上げの文（単独＋掛け合いの各行）。 */
-function textsOf(scene: Scene): { narration: string; lines: Map<string, string> } {
+/**
+ * 場面ごとの、**声を作るときの入力**（単独＋掛け合いの各行）。
+ *
+ * ⚠️ **文だけ比べない**（#967 レビュー 🟡）＝同じ文でも**話者・速さ・高さ・抑揚**が変われば、
+ * できあがる音は別物になる。文だけを見ていると、
+ * 「セリフは同じなのに、鳴るのは別の声」という**同じ種類の食い違い**が別の道から戻ってくる。
+ * ⚠️ **継承をほどいてから比べる**＝行や場面が未指定（null）のときは動画全体の設定を継ぐので、
+ * **全体の設定だけが変わった**ときも取りこぼさない。
+ * ⚠️ **比べ方は既存のものを使う**（`resolveNarrationVoice` / `resolveLineVoice` / `sameSynthInput`）＝
+ * 声を作り直すかどうかの判定は既に2か所（`affectsVoice` / `sameSynthInput`）にあり、
+ * ここで3つ目の規則を書くと、また食い違う。
+ */
+function voiceInputsOf(
+  scene: Scene,
+  // ⚠️ **欠けていても落ちない**＝ここで投げると、戻す側が握って**元の（食い違う）内容をそのまま書く**
+  // ＝直したはずの不具合が、黙って戻ってくる。
+  voice: Partial<VoiceSettings>,
+): { narration: SynthesizeInput | null; lines: Map<string, SynthesizeInput> } {
+  const base = scene.narration ? resolveNarrationVoice(scene.narration, voice as VoiceSettings) : null;
   return {
-    narration: scene.narration?.text ?? '',
-    lines: new Map((scene.lines ?? []).map((l) => [l.lineId, l.text])),
+    narration:
+      scene.narration && base ? { text: scene.narration.text, ...base, speaker: null } : null,
+    lines: new Map(
+      (scene.lines ?? []).map((l) => [
+        l.lineId,
+        resolveLineVoice(l, base ?? resolveNarrationVoice({ text: '' } as Scene['narration'], voice as VoiceSettings)),
+      ]),
+    ),
   };
 }
 
@@ -41,21 +66,31 @@ export function clearStaleVoices(
   restored: Project,
   current: Project,
 ): { project: Project; count: StaleVoiceCount } {
-  const now = new Map((current.scenes ?? []).map((s) => [s.sceneId, textsOf(s)]));
+  // ⚠️ **それぞれの文書の設定で解く**＝戻す内容といまの内容で、動画全体の声の設定が違うことがある。
+  const now = new Map(
+    (current.scenes ?? []).map((s) => [s.sceneId, voiceInputsOf(s, current.voiceSettings ?? {})]),
+  );
   let cleared = 0;
   const scenes = (restored.scenes ?? []).map((s) => {
     const cur = now.get(s.sceneId);
     if (!cur) return s; // いまに無い場面＝音のファイルも無い
+    const mine = voiceInputsOf(s, restored.voiceSettings ?? {});
     let next = s;
-    if (s.narration?.status === NARRATION_STATUS.generated && cur.narration !== (s.narration.text ?? '')) {
+    if (
+      s.narration?.status === NARRATION_STATUS.generated &&
+      mine.narration != null &&
+      (cur.narration == null || !sameSynthInput(mine.narration, cur.narration))
+    ) {
       next = { ...next, narration: unmade(s.narration) };
       cleared += 1;
     }
     if (s.lines && s.lines.length > 0) {
       let touched = false;
       const lines = s.lines.map((l) => {
-        const curText = cur.lines.get(l.lineId);
-        if (l.status !== NARRATION_STATUS.generated || curText === undefined || curText === l.text) return l;
+        const curInput = cur.lines.get(l.lineId);
+        const myInput = mine.lines.get(l.lineId);
+        if (l.status !== NARRATION_STATUS.generated || curInput === undefined || myInput === undefined) return l;
+        if (sameSynthInput(myInput, curInput)) return l;
         touched = true;
         cleared += 1;
         return unmade(l);
