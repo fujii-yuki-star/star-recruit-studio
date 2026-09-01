@@ -72,10 +72,20 @@ describe("開けなかった動画の復旧（#263）", () => {
   });
 
 
-  it("戻せなかったら黙らせない（次の行動を出す）", async () => {
+  it("理由が取れないときは決まり文句へ倒す（黙らない）", async () => {
     await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
-    vi.spyOn(projectFs, "restoreProjectBackup").mockRejectedValue(new Error("むり"));
+    vi.spyOn(projectFs, "restoreProjectBackup").mockRejectedValue("");
     fireEvent.click(await screen.findByText("前に保存できていたところから開く"));
     await waitFor(() => expect(document.body.textContent).toMatch(/一覧から別の動画を選んでください/));
+  });
+
+  it("戻せなかったら黙らせない（次の行動を出す）", async () => {
+    await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
+    // ⚠️ **断った側の理由をそのまま見せる**（次の行動はそこに書いてある）。
+    vi.spyOn(projectFs, "restoreProjectBackup").mockRejectedValue(
+      new Error("開けなかったほうを取っておけなかったので、戻していません。別のアプリで開いていないか確かめてください。"),
+    );
+    fireEvent.click(await screen.findByText("前に保存できていたところから開く"));
+    await waitFor(() => expect(document.body.textContent).toMatch(/別のアプリで開いていないか/));
   });
 });

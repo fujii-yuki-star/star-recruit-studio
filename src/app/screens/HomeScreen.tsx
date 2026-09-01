@@ -304,9 +304,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       await restoreProjectBackup(projectId);
       setRecoverable(null);
       await doOpenProject(projectId);
-    } catch {
+    } catch (e) {
       // ⚠️ **戻せなかったことを黙らせない**＝押したのに何も起きないように見せない（§2-5）。
-      setOpenError(RESTORE_FAILED_MESSAGE);
+      // ⚠️ **理由を潰さない**＝断った側が「次の行動」を持っているので、それをそのまま見せる
+      //（例：開けなかったほうを取っておけなかった＝別のアプリで開いていないか確かめる）。
+      //  理由が取れないときだけ、こちらの決まり文句へ倒す。
+      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+      setOpenError(detail || RESTORE_FAILED_MESSAGE);
     } finally {
       setRecovering(false);
     }

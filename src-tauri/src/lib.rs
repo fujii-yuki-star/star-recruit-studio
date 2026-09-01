@@ -140,8 +140,10 @@ fn restore_project_backup(app: tauri::AppHandle, project_id: String) -> Result<(
 /// （#396 で同じことをして変異チェックが素通りした）。
 fn restore_backup_files(path: &std::path::Path) -> Result<(), String> {
     let bak = backup_path(path);
-    let text = fs::read_to_string(&bak)
-        .map_err(|_| "前に保存できていたところが見つかりませんでした。".to_string())?;
+    let text = fs::read_to_string(&bak).map_err(|_| {
+        "前に保存できていたところが見つかりませんでした。一覧から別の動画を選んでください。"
+            .to_string()
+    })?;
     if path.exists() {
         // ⚠️ **寄せられなかったら書かない**（#964 レビュー 🟡1）＝握りつぶすと、そのまま上書きして
         // **開けなかったほうが一度も残らないまま消える**。「消さない」という約束が、
