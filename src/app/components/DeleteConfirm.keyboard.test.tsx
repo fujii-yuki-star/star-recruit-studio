@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 import { DeleteConfirm } from "./DeleteConfirm";
 
 // #354：確認はキーボードだけでも「やめる」に戻れること。
@@ -14,32 +15,47 @@ describe("削除の確認のキーボード操作（#354）", () => {
   it("Escape でやめる", () => {
     const onCancel = vi.fn();
     render(<DeleteConfirm message="消しますか？" onCancel={onCancel} onConfirm={vi.fn()} />);
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("Escape は奥へ通さない（やめると同時に選択まで解除しない）", () => {
-    const outer = vi.fn();
-    document.addEventListener("keydown", outer);
-    render(<DeleteConfirm message="消しますか？" onCancel={vi.fn()} onConfirm={vi.fn()} />);
-    fireEvent.keyDown(document, { key: "Escape" });
-    document.removeEventListener("keydown", outer);
-    expect(outer).not.toHaveBeenCalled();
+  // #963 レビュー 🟡1：横取りせず、**名簿**（`escapeOwners`）で外側と調停する。
+  it("受け持っている間は名簿に名乗る（外側の後始末を同時に走らせない）", () => {
+    expect(hasEscapeOwner()).toBe(false);
+    const { unmount } = render(<DeleteConfirm message="消しますか？" onCancel={vi.fn()} onConfirm={vi.fn()} />);
+    expect(hasEscapeOwner()).toBe(true);
+    unmount();
+    expect(hasEscapeOwner()).toBe(false);
   });
 
-  it("Escape 以外は通す（ほかの操作を奪わない）", () => {
-    const outer = vi.fn();
-    document.addEventListener("keydown", outer);
-    render(<DeleteConfirm message="消しますか？" onCancel={vi.fn()} onConfirm={vi.fn()} />);
-    fireEvent.keyDown(document, { key: "a" });
-    document.removeEventListener("keydown", outer);
-    expect(outer).toHaveBeenCalled();
+  it("実行中は名乗らない（止められないものを受け持たない）", () => {
+    const { unmount } = render(<DeleteConfirm message="消しますか？" busy onCancel={vi.fn()} onConfirm={vi.fn()} />);
+    expect(hasEscapeOwner()).toBe(false);
+    unmount();
+  });
+
+  it("入力中の Escape は横取りしない（打っている欄のもの）", () => {
+    const onCancel = vi.fn();
+    const area = document.createElement("textarea");
+    document.body.appendChild(area);
+    render(<DeleteConfirm message="消しますか？" onCancel={onCancel} onConfirm={vi.fn()} />);
+    area.focus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onCancel).not.toHaveBeenCalled();
+    area.remove();
+  });
+
+  it("Escape 以外は何もしない", () => {
+    const onCancel = vi.fn();
+    render(<DeleteConfirm message="消しますか？" onCancel={onCancel} onConfirm={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a" });
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it("実行中は Escape で止めない／押せないボタンへ焦点を移さない", () => {
     const onCancel = vi.fn();
     render(<DeleteConfirm message="消しますか？" busy onCancel={onCancel} onConfirm={vi.fn()} />);
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).not.toHaveBeenCalled();
     expect(document.activeElement).not.toBe(screen.getByText("やめる").closest("button"));
   });
@@ -48,7 +64,7 @@ describe("削除の確認のキーボード操作（#354）", () => {
     const onCancel = vi.fn();
     const { unmount } = render(<DeleteConfirm message="消しますか？" onCancel={onCancel} onConfirm={vi.fn()} />);
     unmount();
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).not.toHaveBeenCalled();
   });
 });

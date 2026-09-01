@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useEscapeOwner } from "../hooks/escapeOwners";
 import { TrashIcon } from "./icons";
 
 // 削除の確認を全画面で統一する（#410 sub1）。警告 notice ＋ [やめる（ghost・左）] [削除する（btn-danger・右）]。
@@ -30,6 +31,7 @@ export function DeleteConfirm({
   className?: string;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
 
   // ⚠️ **安全な側（やめる）へ焦点を置く**＝Enter をそのまま押しても消えない。
   // 実行中は動かさない（押せないボタンへ焦点を移しても行き止まり）。
@@ -37,22 +39,36 @@ export function DeleteConfirm({
     if (!busy) cancelRef.current?.focus();
   }, [busy]);
 
-  // ⚠️ **Escape でやめる**。実行中は効かせない（両ボタンを無効にしているのと同じ扱い＝走っている処理は止まらない）。
-  // ⚠️ **奥へ通さない**（capture＋`stopPropagation`）＝この確認は自由配置の編集面の中にも出るので、
-  // 通すと**やめると同時に選択も解除**され、やめたのに画面が変わったように見える。
+  // ⚠️ **Escape の名簿に参加する**（#963 レビュー 🟡1）＝この画面には既に
+  // 「いま Escape を受け持っているものが名乗る」仕組み（`escapeOwners`）があり、
+  // メニュー・色や文字の選び欄・ドラッグの中止はすべてそこに参加している。
+  // 最初は自分だけ document の capture で握って `stopPropagation` していたが、
+  // それだと**名簿より必ず先に走って横取りする**＝確認を出したまま自由配置の文字を編集していると、
+  // 編集を終えるつもりの Escape が**無関係な確認だけを閉じて**編集は終わらない。
+  // 既にある仕組みを使わずに別のやり方を持ち込むと、こういう形で噛み合わなくなる。
+  useEscapeOwner(!busy);
+  // ⚠️ **実行中は効かせない**（両ボタンを無効にしているのと同じ扱い＝走っている処理は止まらない）。
   useEffect(() => {
     if (busy) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
-      e.stopPropagation();
+      // ⚠️ **入力中は横取りしない**＝文字を打っている最中の Escape は、その欄のもの。
+      // 確認は答えるまで残る作りなので、**別の場所で入力している間ずっと**奪い続けることになる。
+      const active = document.activeElement;
+      const editing =
+        active instanceof HTMLElement &&
+        !boxRef.current?.contains(active) &&
+        (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
+      if (editing) return;
+      // ⚠️ **奥へ通す**（`stopPropagation` しない）＝止め方は名簿に任せる（既存の受け手と同じ流儀）。
       onCancel();
     };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [busy, onCancel]);
 
   return (
-    <div className={`notice notice-warn${className ? ` ${className}` : ""}`} role="alert">
+    <div ref={boxRef} className={`notice notice-warn${className ? ` ${className}` : ""}`} role="alert">
       <span>{message}</span>
       <div className="row gap-sm">
         <button ref={cancelRef} className="btn btn-ghost btn-icon" onClick={onCancel} disabled={busy}>

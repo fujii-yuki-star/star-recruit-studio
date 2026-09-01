@@ -56,6 +56,27 @@ function stripComments(text: string): string {
 }
 
 /**
+ * その本文の中に、その名前が**画面へ出るラベル**として在るか。
+ *
+ * ⚠️ **前方一致で見る**＝実際の表示は「枠いっぱいに表示（はみ出しは切り取り）」のように補足が付き、
+ * 案内はその前半だけを引くことがある（利用者はそれで見つけられる）。
+ * ⚠️ **ただし境界は要る**（#963 レビュー 🟡3）＝「行がその名前で始まる」だけだと引用符も `>` も
+ * 要求しない**いちばん緩い条件**になり、型の項目名や別の文がたまたま同じ書き出しなら
+ * 「在る」と誤判定する＝**見逃し**（この検査でいちばん困る向き）。
+ * ⚠️ **切り出してあるのは、この緩さ／厳しさ自体をテストで固定するため**＝
+ * 中に埋めたままだと、緩めても何も落ちない。
+ */
+export function labelExistsIn(source: string, name: string): boolean {
+  const quotes = ['"', "'", "`"];
+  return source.split("\n").some((raw) => {
+    const s = raw.trim();
+    if (s === name) return true; // JSX の子要素（その行が名前だけ）
+    if (s.includes(">" + name)) return true; // >名前 / >名前（補足）
+    return quotes.some((q) => s.includes(q + name));
+  });
+}
+
+/**
  * **押す先を名指ししていない引用**＝この検査の対象外。
  *
  * ⚠️ **理由を書いて外す**（`errorStateTable.test.ts` と同じ流儀）＝黙って外すと、
@@ -86,17 +107,7 @@ describe("案内が指す名前は実在する（#354）", () => {
     }
     expect(refs.size).toBeGreaterThanOrEqual(30); // 走査が空振りしていないこと
 
-    // 画面に出ているか＝JSX の子要素／属性／文字列リテラル。
-    // ⚠️ **前方一致で見る**＝実際のラベルは「枠いっぱいに表示（はみ出しは切り取り）」のように
-    // 補足が付くことがあり、案内はその前半だけを引く（利用者はそれで見つけられる）。
-    const quotes = ['"', "'", "`"];
-    const hasLabel = (name: string): boolean =>
-      stripped.some(([, t]) =>
-        t.split("\n").some((raw) => {
-          const s = raw.trim();
-          return s.startsWith(name) || s.includes(">" + name) || quotes.some((q) => s.includes(q + name));
-        }),
-      );
+    const hasLabel = (name: string): boolean => stripped.some(([, t]) => labelExistsIn(t, name));
 
     const dangling: string[] = [];
     for (const [name, where] of refs) {
@@ -104,6 +115,17 @@ describe("案内が指す名前は実在する（#354）", () => {
     }
     // ⚠️ **どちらを直すかは人が決める**（名前を変えたのか、案内が古いのか）ので、両方を出す。
     expect(dangling.join("\n")).toBe("");
+  });
+
+  it("ラベルの判定が緩まない（境界を落とすと落ちる）", () => {
+    // JSX の子要素＝その行が名前だけ。
+    expect(labelExistsIn("      端の目安を出す\n", "端の目安を出す")).toBe(true);
+    // 引用符・`>` の直後＝補足が付いていてもよい。
+    expect(labelExistsIn('  title: "枠いっぱいに表示（はみ出しは切り取り）",\n', '枠いっぱいに表示')).toBe(true);
+    expect(labelExistsIn("  <span>端の目安を出す</span>\n", "端の目安を出す")).toBe(true);
+    // ⚠️ **たまたま同じ書き出しの行**は在ることにしない（これを許すと見逃す）。
+    expect(labelExistsIn("      端の目安を出す\n", "端の目安")).toBe(false);
+    expect(labelExistsIn("  const 端の目安つき = 1;\n", "端の目安")).toBe(false);
   });
 
   it("対象外にした引用は、いまも本文に在る（理由だけが残らない）", () => {
