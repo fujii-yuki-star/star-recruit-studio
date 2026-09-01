@@ -1,4 +1,9 @@
-// テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
+// テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）と、**種別ごとの必須項目の単一の参照元**。
+// Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
+//
+// ⚠️ **`requiredFieldsForLayerType` はエディタ専用ではない**（#960 レビュー）＝取り込み時の自動補正
+//（`infrastructure/templateFs.ts`）と編集画面のセレクタの表示既定も、同じ表を見る。
+// `template.schema.json` の `allOf`（種別ごとの必須）と対になるもので、**足す・変えるときは schema と一緒に見る**。
 import { LAYER_TYPE, LAYER_TYPES, SLOT_TYPE, TEXT_KEY, TEXT_KEYS, type LayerType, type SlotType, type TextKey } from '../enums';
 import { SCENE_DEFAULT_DURATION_SEC } from '../constants';
 import type { Layer, Template } from './types';
