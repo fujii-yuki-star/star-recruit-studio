@@ -80,7 +80,8 @@ fn record_to(dir: &std::path::Path, tag: &str, detail: &str, max_bytes: u64) {
     );
     // ⚠️ **確認→退避→書き込みをひとまとまりにする**＝間に別の書き込みが割り込むと行が落ちる。
     let _guard = WRITE_LOCK.lock();
-    let _watch = watch_region();
+    #[cfg(test)]
+    let _watch = probe::Guard::enter();
     rotate_if_needed(&path, max_bytes);
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = f.write_all(line.as_bytes());
@@ -122,21 +123,6 @@ mod probe {
             NOW.fetch_sub(1, Ordering::SeqCst);
         }
     }
-}
-
-#[cfg(test)]
-fn watch_region() -> probe::Guard {
-    probe::Guard::enter()
-}
-
-/// 配布されるものでは**何もしない**（見張りはテストのときだけ）。
-/// ⚠️ 呼び出し側を分けないため、**同じ形**（受け取って持っておくもの）を返す。
-#[cfg(not(test))]
-pub struct NoWatch;
-
-#[cfg(not(test))]
-fn watch_region() -> NoWatch {
-    NoWatch
 }
 
 /// 上限を超えていたら1世代だけ退避する（`stario.log` → `stario.1.log`）。
