@@ -67,8 +67,92 @@ fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, S
     let dir = projects_dir(&app)?.join(project_id);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("project.json");
-    fs::write(&path, &project_json).map_err(|e| e.to_string())?;
+    back_up_previous(&path);
+    // ⚠️ **直に上書きしない**（#263）＝書いている最中に落ちると**半端な JSON**が残り、
+    // そこから先は読み込みが断り続ける＝**動画がまるごと開けなくなる**。
+    // 目録（読み方・フォント・素材・会社の見た目）は既に原子的に書いていたのに、
+    // **いちばん大事な動画そのものだけ素の上書き**だった（「双子の片方だけ直す」）。
+    write_json_atomic(&path, &project_json)?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 前に保存できていたところ（`project.prev.json`）。壊れたときの戻り先。
+fn backup_path(project_json: &std::path::Path) -> std::path::PathBuf {
+    project_json.with_file_name("project.prev.json")
+}
+
+/// いまの `project.json` を「前に保存できていたところ」として控える（#263）。
+///
+/// ⚠️ **読める版だけ控える**＝壊れた版で控えを上書きすると、**戻り先が無くなる**
+/// （壊れたまま開いて保存し直した瞬間に、唯一の良い版が消える）。
+/// ⚠️ **控えられなくても保存は続ける**＝控えは「あると助かる」もので、保存を止める理由にならない。
+/// ⚠️ **控えも原子的に書く**＝半端な控えは、戻り先として使えないのに在るように見える。
+fn back_up_previous(path: &std::path::Path) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return; // まだ無い＝控えるものが無い
+    };
+    if serde_json::from_str::<serde_json::Value>(&text).is_err() {
+        return; // 壊れている＝控えない（良い控えを潰さない）
+    }
+    let _ = write_json_atomic(&backup_path(path), &text);
+}
+
+/// 前に保存できていたところが**いつのものか**（無ければ `None`・1970年からの秒）。
+///
+/// ⚠️ **黙って差し替えない**（§2-5）＝これは「開けなかったときに、利用者が選んで戻る」ためのもの。
+/// 読み込みが自動でこちらへ倒れると、**古い内容の動画を新しいものとして見せる**ことになる。
+/// ⚠️ **いつのものかを返す**＝どれだけ巻き戻るかが分からないと、戻すかどうかを決められない。
+#[tauri::command]
+fn project_backup_time(app: tauri::AppHandle, project_id: String) -> Result<Option<u64>, String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    let path = backup_path(&projects_dir(&app)?.join(&project_id).join("project.json"));
+    let Ok(meta) = fs::metadata(&path) else {
+        return Ok(None);
+    };
+    let secs = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    Ok(secs)
+}
+
+/// 前に保存できていたところへ戻す（利用者の明示操作）。
+///
+/// ⚠️ **開けなかったほうも捨てない**＝`project.broken.json` へ寄せて残す。
+/// 中身を見れば直せることもあるし、**戻した結果のほうが困る**と分かったときの手がかりになる。
+/// ⚠️ **寄せてから書く**＝先に上書きすると、途中で落ちたときに両方失う。
+/// ⚠️ **控えは消さない**＝戻した直後にまた壊れても、もう一度戻れる。
+#[tauri::command]
+fn restore_project_backup(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    restore_backup_files(&projects_dir(&app)?.join(&project_id).join("project.json"))
+}
+
+/// 戻す手順（ファイルの操作だけ）。
+///
+/// ⚠️ **切り出してあるのはテストが実装を通るため**＝コマンドは `AppHandle` を要るので、
+/// テストから呼べない。手順をテストの中に書き写すと、**実装を壊しても赤くならない**
+/// （#396 で同じことをして変異チェックが素通りした）。
+fn restore_backup_files(path: &std::path::Path) -> Result<(), String> {
+    let bak = backup_path(path);
+    let text = fs::read_to_string(&bak).map_err(|_| {
+        "前に保存できていたところが見つかりませんでした。一覧から別の動画を選んでください。"
+            .to_string()
+    })?;
+    if path.exists() {
+        // ⚠️ **寄せられなかったら書かない**（#964 レビュー 🟡1）＝握りつぶすと、そのまま上書きして
+        // **開けなかったほうが一度も残らないまま消える**。「消さない」という約束が、
+        // その失敗経路でだけ静かに破れる。**戻せたが手がかりは失った**より、**戻せなかった**と断る。
+        fs::rename(path, path.with_file_name("project.broken.json")).map_err(|_| {
+            "開けなかったほうを取っておけなかったので、戻していません。".to_string()
+        })?;
+    }
+    write_json_atomic(path, &text)
 }
 
 /// appData/projects/<projectId>/project.json を読み、本文を返す。
@@ -159,7 +243,9 @@ fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<St
     let dir = user_templates_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.json", template_id));
-    fs::write(&path, &template_json).map_err(|e| e.to_string())?;
+    // ⚠️ **こちらも原子的に**（#263）＝半端な見た目パターンは読み込みで却下され、
+    // 利用者から見ると**一覧から静かに消える**（#959 と同じ症状になる）。
+    write_json_atomic(&path, &template_json)?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -271,7 +357,7 @@ fn save_reading_dict(app: tauri::AppHandle, dict_json: String) -> Result<(), Str
     }
     // ⚠️ **目録と同じく不可分に書く**（PR #909 レビュー ℹ️）＝途中で止まると半端な JSON が残り、
     // 以後 `load_reading_dict` が断り続ける（声も作れなくなる）。失敗の性質が同じなので同じ手を使う。
-    write_manifest_atomic(&path, &dict_json)
+    write_json_atomic(&path, &dict_json)
 }
 
 /// 読み方辞書を、利用者が選んだ場所へ書き出す（ADR-0037 決定8）。
@@ -406,7 +492,7 @@ fn raw_manifest_ids(path: &std::path::Path, what: &str) -> Result<Vec<String>, S
 /// ⚠️ **途中で止まっても壊れた目録を残さない**＝直に上書きすると、書いている最中の中断で
 /// **半端な JSON**や 0 バイトのファイルが残る（そこから先は `parse_manifest` が断り続ける）。
 /// 隣に書いてから**名前を付け替える**（同じフォルダなので付け替えは1手）。
-fn write_manifest_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
+fn write_json_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
     // ⚠️ **先に消さない**（PR #909 レビュー 🔴）＝`fs::rename` は**既存があっても置き換える**
@@ -430,7 +516,7 @@ fn write_user_fonts(app: &tauri::AppHandle, list: &[UserFontEntry]) -> Result<()
     let dir = user_fonts_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
-    write_manifest_atomic(&dir.join("fonts.json"), &text)
+    write_json_atomic(&dir.join("fonts.json"), &text)
 }
 
 /// 持ち込みフォントの一覧（目録のうち**実体があるものだけ**）。
@@ -658,7 +744,7 @@ fn write_library(app: &tauri::AppHandle, list: &[LibraryAsset]) -> Result<(), St
     let dir = user_assets_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
-    write_manifest_atomic(&dir.join("library.json"), &text)
+    write_json_atomic(&dir.join("library.json"), &text)
 }
 
 /// ライブラリの一覧（目録のうち**実体があるものだけ**）。
@@ -899,7 +985,7 @@ fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String>
     // ⚠️ **不可分に書く**（α-6 出口監査 🟡）＝素の `write` だと、途中で落ちたときに**半端な JSON**が
     // 残る。読む側が「読めなかった」と断るようにしたので、そのまま置くと直す手が無くなる。
     // 目録・読み方辞書と同じ書き方（一時ファイル＋置き換え）へそろえる。
-    write_manifest_atomic(&path, &kit_json)
+    write_json_atomic(&path, &kit_json)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -931,6 +1017,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             save_project,
+            project_backup_time,
+            restore_project_backup,
             load_project,
             list_projects,
             delete_project,
@@ -1135,6 +1223,110 @@ mod manifest_tests {
         assert!(!ids
             .iter()
             .any(|i| i.starts_with("user_font_") && i != "user_font_001" && i != "user_font_007"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 開けなかったほうを取っておけないときは、戻さない（#964 レビュー 🟡1）。
+    ///
+    /// ⚠️ **握りつぶすと約束が静かに破れる**＝寄せられないままそのまま上書きすると、
+    /// 開けなかったほうが**一度も残らないまま消える**。
+    /// ここでは寄せ先を**フォルダ**にして rename を失敗させ、書き込みまで進まないことを見る。
+    #[test]
+    fn restore_stops_when_broken_cannot_be_kept() {
+        use super::{backup_path, restore_backup_files, write_json_atomic};
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_restore_stops");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        fs::write(&path, "{半端").unwrap();
+        write_json_atomic(&backup_path(&path), r#"{"projectId":"p_001"}"#).unwrap();
+        // 寄せ先を先に**フォルダ**として作っておく＝rename は失敗する。
+        fs::create_dir_all(dir.join("project.broken.json")).unwrap();
+
+        assert!(restore_backup_files(&path).is_err(), "失敗を握りつぶした");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{半端",
+            "戻せていないのに上書きした（開けなかったほうが消える）"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 戻したとき、**開けなかったほうも残る**（#263）。
+    ///
+    /// ⚠️ **捨てると手がかりが無くなる**＝中身を見れば直せることもあり、
+    /// 「戻した結果のほうが困る」と分かったときに戻る先も無くなる。
+    /// ⚠️ **控えも残す**＝戻した直後にまた壊れても、もう一度戻れる。
+    #[test]
+    fn restore_keeps_broken_and_backup() {
+        use super::{backup_path, write_json_atomic};
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_restore_keeps");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        let bak = backup_path(&path);
+        fs::write(&path, "{半端").unwrap();
+        write_json_atomic(&bak, r#"{"projectId":"p_001"}"#).unwrap();
+
+        super::restore_backup_files(&path).expect("戻せるはず");
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            r#"{"projectId":"p_001"}"#
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("project.broken.json")).unwrap(),
+            "{半端",
+            "開けなかったほうを捨てた"
+        );
+        assert!(bak.exists(), "控えまで消した");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 前に保存できていたところを控える（#263）。
+    ///
+    /// ⚠️ **壊れた版で控えを潰さない**＝ここが破れると、壊れたまま開いて保存し直した瞬間に
+    /// **唯一の良い版が消える**（戻り先が無くなる）。
+    #[test]
+    fn back_up_previous_keeps_only_readable() {
+        use super::{back_up_previous, backup_path};
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_backup_keeps_only_readable");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        let bak = backup_path(&path);
+
+        // まだ無い＝控えない（空の控えを作らない）。
+        back_up_previous(&path);
+        assert!(!bak.exists(), "無いものを控えた");
+
+        // 読める版＝控える。
+        fs::write(&path, r#"{"projectId":"p_001"}"#).unwrap();
+        back_up_previous(&path);
+        assert_eq!(
+            fs::read_to_string(&bak).unwrap(),
+            r#"{"projectId":"p_001"}"#
+        );
+
+        eprintln!(
+            "DBG after-good: {:?}",
+            fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect::<Vec<_>>()
+        );
+        // 壊れた版＝控えない（良い控えがそのまま残る）。
+        fs::write(&path, "{半端").unwrap();
+        back_up_previous(&path);
+        assert_eq!(
+            fs::read_to_string(&bak).unwrap(),
+            r#"{"projectId":"p_001"}"#,
+            "壊れた版で控えを潰した"
+        );
+
         let _ = fs::remove_dir_all(&dir);
     }
 

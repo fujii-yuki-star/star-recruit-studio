@@ -997,6 +997,34 @@ export const alpha6Message = {
 } as const;
 
 /**
+ * 開けなかった動画を、控えから戻せると知らせる（#263）。
+ *
+ * ⚠️ **どこまで戻るかを言う**＝日時が無いと「どれだけの作業が消えるか」が分からず、決められない。
+ * ⚠️ **開けなかったほうを消さないことも言う**＝戻すのをためらわせない。
+ */
+export function restoreOfferMessage(savedAt: string): string {
+  return (
+    `この動画は開けませんでしたが、${savedAt} に保存できていたところが残っています。` +
+    "そこから開き直せます。開けなかったほうも消さずに残ります。"
+  );
+}
+
+/**
+ * 控えの日時の見せ方。
+ *
+ * ⚠️ **文言と分けてある**＝差し込む値を外から渡せる形にしておくと、
+ * `15 §6` の表と**等値で突き合わせられる**（`errorStateTable.test.ts` は families としか比べない）。
+ * 日時を中で作ると、表に書けるのは実際に出る文と違うものになる。
+ */
+export function backupSavedAtLabel(savedAt: Date): string {
+  return savedAt.toLocaleString("ja-JP", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** 控えへ戻せなかったとき（§2-5＝次の行動）。 */
+export const RESTORE_FAILED_MESSAGE =
+  "前に保存できていたところから開けませんでした。一覧から別の動画を選んでください。";
+
+/**
  * 見た目パターンの保存で断るときの文言（`15 §6`）。
  *
  * ⚠️ **表と機械で結ぶために family にする**（#960 レビュー）＝`errorStateTable.test.ts` は

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, restoreOfferMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -83,6 +84,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // 「一覧から**別のプロジェクトを選んでください**」＝**§2-5 が禁じる「実行しても直らない行動」**
   // だった。タイムライン形式（`timelineStore`）は既に理由を運んでいる＝**非対称も解消する**。
   const [openError, setOpenError] = useState<string | null>(null);
+  /**
+   * 開けなかった動画を「前に保存できていたところ」から戻せるとき（#263）。
+   *
+   * ⚠️ **壊れているときだけ**＝新しい版・別の形式は壊れていないので、戻しても直らず
+   * **古い内容へ黙って巻き戻す**ことになる（§2-5）。
+   * ⚠️ **控えがあるときだけ**＝押せるのに何も起きない導線を作らない。
+   */
+  const [recoverable, setRecoverable] = useState<{ projectId: string; savedAt: Date } | null>(null);
+  const [recovering, setRecovering] = useState(false);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -258,6 +268,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   async function doOpenProject(projectId: string) {
     if (isExporting || openingId || duplicatingId !== null) return; // 確認中に状況が変わった場合の多重防御（requestOpenProject と同条件）
     setOpenError(null);
+    // ⚠️ **前の動画の「戻す」を残さない**（#964 レビュー 🟡2）＝残すと、画面に出ている理由は
+    // いま開こうとした動画のものなのに、押すと**前の動画が戻って開く**（指しているものがずれる）。
+    setRecoverable(null);
     setOpeningId(projectId);
     try {
       // 形式で開く先を分ける（ADR-0032・11 §1）＝開いてから「形式が違う」と断らない。
@@ -274,6 +287,32 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       // それ以外（想定外）は従来の固定文へ倒す＝黙って何も出さない、を作らない。
       setOpenError(e instanceof ProjectLoadError ? e.message : OPEN_FAILED_MESSAGE);
       setOpeningId(null); // 失敗時のみ解除して再度開けるように。
+      // 中身が壊れているときだけ、控えから戻す導線を出す（控えがあれば）。
+      if (e instanceof ProjectLoadError && e.failure === "broken") {
+        const savedAt = await projectBackupTime(projectId).catch(() => null);
+        if (savedAt) setRecoverable({ projectId, savedAt });
+      }
+    }
+  }
+
+  /** 控えへ戻してから、そのまま開き直す（#263）。 */
+  async function doRecover(projectId: string) {
+    if (recovering) return;
+    setRecovering(true);
+    setOpenError(null);
+    try {
+      await restoreProjectBackup(projectId);
+      setRecoverable(null);
+      await doOpenProject(projectId);
+    } catch (e) {
+      // ⚠️ **戻せなかったことを黙らせない**＝押したのに何も起きないように見せない（§2-5）。
+      // ⚠️ **理由を潰さない**＝断った側が「次の行動」を持っているので、それをそのまま見せる
+      //（例：開けなかったほうを取っておけなかった＝別のアプリで開いていないか確かめる）。
+      //  理由が取れないときだけ、こちらの決まり文句へ倒す。
+      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+      setOpenError(detail || RESTORE_FAILED_MESSAGE);
+    } finally {
+      setRecovering(false);
     }
   }
 
@@ -285,6 +324,21 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             {openError && (
               <div className="notice notice-warn mb" role="alert">
                 <span>{openError}</span>
+              </div>
+            )}
+
+            {/* ⚠️ **黙って戻さない**（§2-5）＝どこまで戻るかを見せてから、押してもらう。 */}
+            {recoverable && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{restoreOfferMessage(backupSavedAtLabel(recoverable.savedAt))}</span>
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost" onClick={() => setRecoverable(null)} disabled={recovering}>
+                    そのままにする
+                  </button>
+                  <button className="btn btn-primary" onClick={() => void doRecover(recoverable.projectId)} disabled={recovering}>
+                    {recovering ? "戻しています…" : "前に保存できていたところから開く"}
+                  </button>
+                </div>
               </div>
             )}
 
