@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
+import { AssetThumb } from "./AssetThumb";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { assetTagCounts } from "../../domain/project/assetSearch";
@@ -447,27 +448,17 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
                     : {}),
                 }}
               >
-                {/* 小さな絵（#926）＝出せるものだけ。⚠️ **無いときは枠も出さない**＝
-                    空の四角が並ぶと「読み込み中」に見える（実際は出せない種別）。 */}
-                {thumbById[a.id] && (
-                  <img
-                    src={thumbById[a.id]}
-                    alt=""
-                    // ⚠️ **読み込めなかったら消す**（PR #939 レビュー）＝`asset://` は
-                    // `tauri.conf.json` の scope 次第で拒まれることがあり、**その効きは実機でしか
-                    // 確かめられない**（ADR-0021 が `asset://` を避けた理由）。放っておくと
-                    // **壊れた画像の印**が並ぶので、失敗したらその絵だけ落として行は普通に使える形にする。
-                    onError={() => {
-                      setFailedIds((prev) => new Set(prev).add(a.id));
-                      setThumbById((prev) => {
-                        const next = { ...prev };
-                        delete next[a.id];
-                        return next;
-                      });
-                    }}
-                    style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }}
-                  />
-                )}
+                {/* 小さな絵（#926）と、絵が無いときの種類のしるし（#952）。
+                    ⚠️ **素材画面と同じ部品を使う**（§2-7・自己点検）＝もとはここだけ自作していたので、
+                    **同じ概念が2実装**になり見た目が割れていた（素材画面は最初から絵＋種類の印だった）。
+                    ⚠️ **読み込めなかったら忘れて印へ戻す**＝`asset://` は拒まれることがあり
+                    （#942/#945）、放っておくと**壊れた画像の印**が並ぶ。 */}
+                <span onError={() => {
+                  setFailedIds((prev) => new Set(prev).add(a.id));
+                  setThumbById((prev) => { const next = { ...prev }; delete next[a.id]; return next; });
+                }} style={{ display: "contents" }}>
+                  <AssetThumb type={a.assetType} src={thumbById[a.id]} box={40} />
+                </span>
                 <span style={{ flex: 1 }}>
                   {a.displayName}
                   {a.tags.length > 0 && <span className="text-sm text-muted">（{a.tags.join("・")}）</span>}

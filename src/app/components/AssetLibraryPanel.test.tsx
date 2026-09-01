@@ -46,6 +46,62 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+// #952：**行の作りを割らない**＝絵を出せる種別（写真・ロゴ）だけに小さな絵を出すと、
+// 同じ一覧で**名前の位置が揃わず**、絵の無い行は「まだ読み込めていない」のか「そういう種別」なのか
+// 見て分からない。出せない種別には**種類のしるし**を同じ大きさで出す。
+/**
+ * その素材の**行だけ**を取る（#952 のテスト用）。
+ * ⚠️ **`closest("div")` では足りない**＝隣の行まで含む入れ物に当たり、**別の行の印を拾う**
+ *（実際そうなって誤って落ちた）。他の素材の名前を含まなくなるまで上へ辿る。
+ */
+const rowOf = (name: string): HTMLElement => {
+  const others = ["会社ロゴ", "オフィス写真", "社員インタビュー"].filter((n) => n !== name);
+  let el = screen.getByText(new RegExp(name)).parentElement as HTMLElement | null;
+  while (el && others.some((n) => el!.textContent?.includes(n))) el = el.parentElement;
+  // 逆に、行の中身（印か絵）が入るところまでは上がる必要がある
+  while (el && !el.querySelector("img, .thumb")) el = el.parentElement;
+  return el as HTMLElement;
+};
+
+describe("よく使う素材の一覧は、行の作りが揃っている（#952）", () => {
+  it("絵を出せない種別（動画）にも、同じ大きさの枠が出る", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/社員インタビュー/);
+    const videoRow = rowOf("社員インタビュー");
+    // ⚠️ **素材画面と同じ部品**（`AssetThumb`）を使う＝`.thumb` の枠がどの行にも付く。
+    const box = videoRow.querySelector(".thumb") as HTMLElement | null;
+    expect(box).not.toBeNull();
+    expect(box?.style.width).toBe("40px");
+  });
+
+  it("その枠は「動画」だと分かる（何の種別か読める）", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/社員インタビュー/);
+    expect(rowOf("社員インタビュー").querySelector('.thumb[title="動画"]')).not.toBeNull();
+  });
+
+  // ⚠️ **絵が出たら種類の名前は出さない**＝絵が語るので、指したときの説明が重複しない。
+  it("絵が出た行には種類の名前を付けない", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue("asset://x.png");
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/オフィス写真/);
+    const photoRow = rowOf("オフィス写真");
+    await waitFor(() => expect(photoRow.querySelector("img")).not.toBeNull());
+    expect(photoRow.querySelector(".thumb[title]")).toBeNull();
+  });
+
+  // ⚠️ **絵を出せる種別でも、出せなかったときは印にする**（#942/#945 で実際に起きた形）＝
+  // そこだけ名前が左へ戻る、を作らない。
+  it("写真でも絵を出せなかったときは枠と種類の名前が出る", async () => {
+    vi.mocked(libraryAssetDisplayUrl).mockResolvedValue(null);
+    render(<AssetLibraryPanel />);
+    await screen.findByText(/オフィス写真/);
+    expect(rowOf("オフィス写真").querySelector('.thumb[title="写真"]')).not.toBeNull();
+  });
+});
+
 describe("AssetLibraryPanel", () => {
   /** ⚠️ §2-3＝実装用語を画面に出さない。 */
   it("「アセット」「マニフェスト」「グローバル」を画面に出さない", async () => {
