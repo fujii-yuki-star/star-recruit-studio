@@ -51,7 +51,10 @@ describe("配布する版がそろっている（#355）", () => {
     // ⚠️ **#413 でアプリから取る形にした**＝直書きに戻ると、また手で直す場所が1つ増える。
     const about = read("src/app/screens/AboutScreen.tsx");
     expect(about).toMatch(/getAppVersion|getVersion/);
-    expect(about, "About 画面に版が直書きされている").not.toMatch(/\d+\.\d+\.\d+/);
+    // ⚠️ **「3つ組の数字」を丸ごと禁じない**（#968 レビュー 🟡）＝クレジットには
+    // 依存の版（`OpenSSL 3.0.13` など）を正当に書きたくなることがあり、無関係な理由で落ちる。
+    // 見たいのは**この版が直書きされていないか**なので、いまの版そのものを探す。
+    expect(about, "About 画面に版が直書きされている").not.toContain(baseVersion());
   });
 
   it("門番が実際に効いている（走査が壊れたら落ちる）", () => {

@@ -35,20 +35,38 @@ describe("クレジット表示（#355・13 §9）", () => {
     expect(existsSync(join(process.cwd(), "FFmpeg_SOURCE.md"))).toBe(true);
   });
 
-  it("同梱フォントの数だけ、フォントのクレジットが在る（足したのに書き忘れ、を防ぐ）", () => {
+  /**
+   * いま同梱しているフォントの家族（#355）。
+   *
+   * ⚠️ **増やしたらここも直す**＝直さないと落ちる。ついでに **About のクレジットも足す**こと
+   *（同じ提供元で既存のライセンス文書を使い回すなら、クレジットは増えないこともある）。
+   * ⚠️ **数の下限だけでは守れない**（#968 レビュー 🔴）＝最初は
+   * `Math.min(families.size, 2)` と書いており、**2で頭打ち**になって
+   * 4つ目以降を足しても落ちなかった＝**この検査の目的そのものが効いていなかった**。
+   */
+  const KNOWN_FONT_FAMILIES = ["GenInterfaceJP", "GenInterfaceJPDisplay", "KaitouYokokuGothic"];
+
+  it("同梱フォントの顔ぶれが変わったら気づく（足したのに書き忘れ、を防ぐ）", () => {
     const dir = join(process.cwd(), "public", "fonts");
-    if (!existsSync(dir)) return; // 置き場が変わったら、この検査は次の検査（数の下限）で気づく
-    const families = new Set(
-      readdirSync(dir)
-        .filter((n) => /\.(woff2?|ttf|otf)$/i.test(n))
-        .map((n) => n.replace(/\.(woff2?|ttf|otf)$/i, "").replace(/-(Regular|Bold|Medium)$/i, "")),
-    );
-    const text = about();
-    // ⚠️ **名前そのものではなく「数」で見る**＝表示名（「怪盗予告ゴシック」）とファイル名は別物なので、
-    // 名前で突き合わせると、正しく書いてあるのに落ちる。ここは**書き忘れ**が見つかれば足りる。
-    const credited = (text.match(/Open Font License/g) ?? []).length;
-    expect(credited, `同梱フォント ${families.size} 種に対しクレジット ${credited} 件`).toBeGreaterThanOrEqual(
-      Math.min(families.size, 2),
+    expect(existsSync(dir), "同梱フォントの置き場が無い").toBe(true);
+    const families = [
+      ...new Set(
+        readdirSync(dir)
+          .filter((n) => /\.(woff2?|ttf|otf)$/i.test(n))
+          .map((n) => n.replace(/\.(woff2?|ttf|otf)$/i, "").replace(/-(Regular|Bold|Medium)$/i, "")),
+      ),
+    ].sort();
+    expect(families).toEqual([...KNOWN_FONT_FAMILIES].sort());
+  });
+
+  it("同梱したライセンス文書の数だけ、フォントのクレジットが在る", () => {
+    // ⚠️ **ライセンス文書の数で見る**＝フォントを同梱するなら、その文書も同梱することになるので、
+    // 「別の提供元を足した」が**必ず**ここに現れる。ファイル名と表示名は別物なので、名前では突き合わせない。
+    const dir = join(process.cwd(), "public", "fonts");
+    const licenses = readdirSync(dir).filter((n) => /^OFL.*\.txt$/i.test(n)).length;
+    const credited = (about().match(/Open Font License/g) ?? []).length;
+    expect(credited, `ライセンス文書 ${licenses} 件に対しクレジット ${credited} 件`).toBeGreaterThanOrEqual(
+      licenses,
     );
   });
 
