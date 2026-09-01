@@ -268,6 +268,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   async function doOpenProject(projectId: string) {
     if (isExporting || openingId || duplicatingId !== null) return; // 確認中に状況が変わった場合の多重防御（requestOpenProject と同条件）
     setOpenError(null);
+    // ⚠️ **前の動画の「戻す」を残さない**（#964 レビュー 🟡2）＝残すと、画面に出ている理由は
+    // いま開こうとした動画のものなのに、押すと**前の動画が戻って開く**（指しているものがずれる）。
+    setRecoverable(null);
     setOpeningId(projectId);
     try {
       // 形式で開く先を分ける（ADR-0032・11 §1）＝開いてから「形式が違う」と断らない。

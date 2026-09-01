@@ -143,7 +143,12 @@ fn restore_backup_files(path: &std::path::Path) -> Result<(), String> {
     let text = fs::read_to_string(&bak)
         .map_err(|_| "前に保存できていたところが見つかりませんでした。".to_string())?;
     if path.exists() {
-        let _ = fs::rename(path, path.with_file_name("project.broken.json"));
+        // ⚠️ **寄せられなかったら書かない**（#964 レビュー 🟡1）＝握りつぶすと、そのまま上書きして
+        // **開けなかったほうが一度も残らないまま消える**。「消さない」という約束が、
+        // その失敗経路でだけ静かに破れる。**戻せたが手がかりは失った**より、**戻せなかった**と断る。
+        fs::rename(path, path.with_file_name("project.broken.json")).map_err(|_| {
+            "開けなかったほうを取っておけなかったので、戻していません。".to_string()
+        })?;
     }
     write_json_atomic(path, &text)
 }
@@ -1216,6 +1221,33 @@ mod manifest_tests {
         assert!(!ids
             .iter()
             .any(|i| i.starts_with("user_font_") && i != "user_font_001" && i != "user_font_007"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 開けなかったほうを取っておけないときは、戻さない（#964 レビュー 🟡1）。
+    ///
+    /// ⚠️ **握りつぶすと約束が静かに破れる**＝寄せられないままそのまま上書きすると、
+    /// 開けなかったほうが**一度も残らないまま消える**。
+    /// ここでは寄せ先を**フォルダ**にして rename を失敗させ、書き込みまで進まないことを見る。
+    #[test]
+    fn restore_stops_when_broken_cannot_be_kept() {
+        use super::{backup_path, restore_backup_files, write_json_atomic};
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_restore_stops");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        fs::write(&path, "{半端").unwrap();
+        write_json_atomic(&backup_path(&path), r#"{"projectId":"p_001"}"#).unwrap();
+        // 寄せ先を先に**フォルダ**として作っておく＝rename は失敗する。
+        fs::create_dir_all(dir.join("project.broken.json")).unwrap();
+
+        assert!(restore_backup_files(&path).is_err(), "失敗を握りつぶした");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{半端",
+            "戻せていないのに上書きした（開けなかったほうが消える）"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

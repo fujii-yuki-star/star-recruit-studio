@@ -58,6 +58,20 @@ describe("開けなかった動画の復旧（#263）", () => {
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
   });
 
+  // #964 レビュー 🟡2：別の動画を開こうとしたら、前の動画の「戻す」は消える。
+  it("次に別の動画を開こうとしたら、前の「戻す」は残らない", async () => {
+    await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
+    expect(await screen.findByText("前に保存できていたところから開く")).toBeTruthy();
+    // 2つ目は壊れていない理由で失敗＝戻す導線は出ない。前のものも消えている。
+    useProjectStore.setState({
+      loadProject: vi.fn(async () => { throw new ProjectLoadError("新しい版です。", "unsupported"); }),
+    });
+    fireEvent.click((await screen.findByText("テスト動画")).closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(document.body.textContent).toMatch(/新しい版です/));
+    expect(screen.queryByText("前に保存できていたところから開く")).toBeNull();
+  });
+
+
   it("戻せなかったら黙らせない（次の行動を出す）", async () => {
     await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
     vi.spyOn(projectFs, "restoreProjectBackup").mockRejectedValue(new Error("むり"));
