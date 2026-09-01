@@ -25,6 +25,33 @@ describe('字間（#264）', () => {
     expect(layoutToSvg(layout({ letterSpacing: 0 }))).not.toContain('letter-spacing');
   });
 
+  // #954：`letter-spacing` は**最後の文字のうしろにも**送りを入れるので、`text-anchor` が
+  // その送りを含んだ幅で揃える＝**見えている文字が送りのぶんだけ左へ寄る**（中央で半分・右端で1つぶん）。
+  // 実測（画素）では字間 200 の中央揃えでインクの中心が 100px 左へずれていた。x を戻す。
+  describe('揃えの位置を字間ぶん戻す（#954）', () => {
+    it('中央揃えは送りの半分だけ右へ戻す', () => {
+      const svg = layoutToSvg(layout({ textAlign: 'center', letterSpacing: 0.5 }));  // 40px × 0.5 = 20
+      expect(svg).toContain('text-anchor="middle"');
+      expect(svg).toContain('x="510"'); // 100 + 800/2 = 500 → +20/2 = 510
+    });
+
+    it('右揃えは送り1つぶん右へ戻す', () => {
+      const svg = layoutToSvg(layout({ textAlign: 'right', letterSpacing: 0.5 }));
+      expect(svg).toContain('text-anchor="end"');
+      expect(svg).toContain('x="920"'); // 100 + 800 = 900 → +20 = 920
+    });
+
+    // ⚠️ **左揃えは動かさない**＝送りは最後のうしろに付くので、先頭の位置は変わらない。
+    it('左揃えは動かさない', () => {
+      expect(layoutToSvg(layout({ letterSpacing: 0.5 }))).toContain('x="100"');
+    });
+
+    // ⚠️ **字間 0 なら補正も 0**＝既に作った動画の絵が動かない。
+    it('字間が無いときは中央揃えでも動かさない', () => {
+      expect(layoutToSvg(layout({ textAlign: 'center' }))).toContain('x="500"');
+    });
+  });
+
   // ⚠️ **em で持つ**＝文字サイズを変えても詰め具合が変わらない。描くときに px へ直す。
   it('em を文字サイズに掛けて px にする', () => {
     expect(layoutToSvg(layout({ letterSpacing: 0.1 }))).toContain('letter-spacing="4"'); // 40px × 0.1
