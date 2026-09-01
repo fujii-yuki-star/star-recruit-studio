@@ -46,6 +46,20 @@ describe("クレジット表示（#355・13 §9）", () => {
    */
   const KNOWN_FONT_FAMILIES = ["GenInterfaceJP", "GenInterfaceJPDisplay", "KaitouYokokuGothic"];
 
+  /**
+   * ⚠️ **この検査で守れないこと**（#968 レビュー・**わざと残す限界**）。
+   *
+   * - **名前だけ既存に似せた差し替え**は見つけられない＝`KaitouYokokuGothic-Bold.ttf` という名前で
+   *   **別の提供元のフォント**を入れると、顔ぶれも文書の数も変わらないので通る。
+   *   `13 §6`（同梱できるのは OFL 系だけ）を**機械では守れていない**＝そこは人が見る。
+   * - **入れ子のフォルダは数えない**（`readdirSync` は直下だけ）＝`public/fonts/xx/` に置くと
+   *   どちらの検査にも乗らない。いまは全部直下にあるので実害は無い。
+   *
+   * ⚠️ **「数が合っている」は「中身が同じ」ではない**＝ここが守るのは**うっかりの足し忘れ**まで。
+   * 中身まで見るには、ファイルの中身そのもので突き合わせる必要があり、それはこの門番の役目ではない。
+   */
+  const FONT_CHECK_LIMITS = "名前だけ似せた差し替えと、入れ子のフォルダは見つけられない";
+
   it("同梱フォントの顔ぶれが変わったら気づく（足したのに書き忘れ、を防ぐ）", () => {
     const dir = join(process.cwd(), "public", "fonts");
     expect(existsSync(dir), "同梱フォントの置き場が無い").toBe(true);
@@ -56,7 +70,12 @@ describe("クレジット表示（#355・13 §9）", () => {
           .map((n) => n.replace(/\.(woff2?|ttf|otf)$/i, "").replace(/-(Regular|Bold|Medium)$/i, "")),
       ),
     ].sort();
-    expect(families).toEqual([...KNOWN_FONT_FAMILIES].sort());
+    expect(
+      families,
+      `同梱フォントの顔ぶれが変わった。KNOWN_FONT_FAMILIES を直すだけで終わらせず、` +
+        `About 画面のクレジット（提供元・ライセンス）も足りているか確かめること。` +
+        `なお ${FONT_CHECK_LIMITS}`,
+    ).toEqual([...KNOWN_FONT_FAMILIES].sort());
   });
 
   it("同梱したライセンス文書の数だけ、フォントのクレジットが在る", () => {
