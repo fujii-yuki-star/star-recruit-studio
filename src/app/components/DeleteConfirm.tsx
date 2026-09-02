@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { useEscapeOwner } from "../hooks/escapeOwners";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { TrashIcon } from "./icons";
 
 // 削除の確認を全画面で統一する（#410 sub1）。警告 notice ＋ [やめる（ghost・左）] [削除する（btn-danger・右）]。
@@ -46,26 +46,24 @@ export function DeleteConfirm({
   // それだと**名簿より必ず先に走って横取りする**＝確認を出したまま自由配置の文字を編集していると、
   // 編集を終えるつもりの Escape が**無関係な確認だけを閉じて**編集は終わらない。
   // 既にある仕組みを使わずに別のやり方を持ち込むと、こういう形で噛み合わなくなる。
-  useEscapeOwner(!busy);
-  // ⚠️ **実行中は効かせない**（両ボタンを無効にしているのと同じ扱い＝走っている処理は止まらない）。
-  useEffect(() => {
-    if (busy) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      // ⚠️ **入力中は横取りしない**＝文字を打っている最中の Escape は、その欄のもの。
-      // 確認は答えるまで残る作りなので、**別の場所で入力している間ずっと**奪い続けることになる。
-      const active = document.activeElement;
-      const editing =
-        active instanceof HTMLElement &&
-        !boxRef.current?.contains(active) &&
-        (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
-      if (editing) return;
-      // ⚠️ **奥へ通す**（`stopPropagation` しない）＝止め方は名簿に任せる（既存の受け手と同じ流儀）。
-      onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onCancel]);
+  // ⚠️ **処理は名簿へ預ける**（#965）＝色や文字の選び欄を開いたままこの確認を開いたとき、
+  // 自分で購読していると1回の `Escape` で両方いっぺんに閉じる。**実行中は名乗らない**
+  //（両ボタンを無効にしているのと同じ扱い＝走っている処理は止まらない）。
+  useEscapeReceiver(!busy, () => {
+    // ⚠️ **入力中は横取りしない**＝文字を打っている最中の Escape は、その欄のもの。
+    // 確認は答えるまで残る作りなので、**別の場所で入力している間ずっと**奪い続けることになる。
+    const active = document.activeElement;
+    const editing =
+      active instanceof HTMLElement &&
+      !boxRef.current?.contains(active) &&
+      (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
+    // ⚠️ **見送りは `false`**（#965 レビュー 🟡）＝ここで受け取ったことにすると、
+    // **奥の受け手（開いたままの選び欄など）まで黙る**＝`Escape` が完全に死ぬ（§2-5）。
+    if (editing) return false;
+    // ⚠️ **奥へ通す**（`stopPropagation` しない）＝止め方は名簿に任せる（既存の受け手と同じ流儀）。
+    onCancel();
+    return true;
+  });
 
   return (
     <div ref={boxRef} className={`notice notice-warn${className ? ` ${className}` : ""}`} role="alert">

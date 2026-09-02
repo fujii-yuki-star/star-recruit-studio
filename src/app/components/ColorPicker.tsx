@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { paletteWithBrand } from "../../domain/brand/brandKit";
-import { claimEscape } from "../hooks/escapeOwners";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { registerExternalDrag } from "../hooks/usePointerDrag";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../domain/format/color";
@@ -360,24 +360,24 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
       if (!disabled && codeDirtyRef.current) commitCodeRef.current();
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // ⚠️ **撫でている最中の `Escape` は「やめる」**（#763-2）＝撫で始めの色へ戻して掴むのをやめる。
-      // ポップオーバーは**閉じない**（2度目の `Escape` で閉じる）。理由は2つ：
-      // ①掴む作法（`usePointerDrag`）は「`Escape` は開始値へ戻す」＝同じ画面で作法を割らない。
-      // ②`escapeOwners` は「1段はがす」ための仕組みなので、掴みと開きを**一度に2段**はがさない。
-      if (draggingSv.current || draggingHue.current) { cancelDragRef.current(); return; }
-      setOpen(false);
-    };
-    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
     window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-      release();
     };
   }, [open, disabled]);
+
+  // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）。
+  // ⚠️ **処理は名簿へ預ける**（#965）＝自分で購読すると、この面を開いたまま削除の確認を開いたとき
+  // 両方が同じ `Escape` で閉じる（「手前から1段ずつはがす」から外れる）。
+  useEscapeReceiver(open, () => {
+    // ⚠️ **撫でている最中の `Escape` は「やめる」**（#763-2）＝撫で始めの色へ戻して掴むのをやめる。
+    // ポップオーバーは**閉じない**（2度目の `Escape` で閉じる）。理由は2つ：
+    // ①掴む作法（`usePointerDrag`）は「`Escape` は開始値へ戻す」＝同じ画面で作法を割らない。
+    // ②`escapeOwners` は「1段はがす」ための仕組みなので、掴みと開きを**一度に2段**はがさない。
+    if (draggingSv.current || draggingHue.current) { cancelDragRef.current(); return true; }
+    setOpen(false);
+    return true;
+  });
 
   const applyHsv = (next: Hsv) => {
     codeDirtyRef.current = false; // 面・バーで書き替えた＝打ちかけではない

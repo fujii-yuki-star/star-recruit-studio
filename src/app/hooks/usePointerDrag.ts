@@ -17,7 +17,7 @@
 // ADR-0034 決定6 は**キャンバスで動かす（#685）でそれを流用する**としているので、そのときに
 // **この作法へ寄せる**こと（寄せないまま流用すると、同じ画面の中でドラッグの作法が2つになる）。
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { claimEscape } from "./escapeOwners";
+import { claimEscapeReceiver } from "./escapeOwners";
 
 let dragging = 0;
 /**
@@ -137,7 +137,6 @@ export function usePointerDrag() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
-      window.removeEventListener("keydown", onKey);
       releaseEscape?.(); // 外し忘れると `Escape` が永久に効かなくなる
       releaseEscape = null;
       stopRef.current = null;
@@ -164,16 +163,16 @@ export function usePointerDrag() {
       detach();
       h.onCancel?.(started);
     };
-    const onKey = (ev: KeyboardEvent): void => {
-      if (ev.key === "Escape") onCancel();
-    };
-
     // 掴んでいる間は `Escape` を受け持っていると名乗る（中止しただけで外側まで走らせない）。
-    releaseEscape = claimEscape();
+    // ⚠️ **処理は名簿へ預ける**（#965）＝自分で購読すると、掴んでいる最中に前へ出た受け手と
+    // 同じ `Escape` で一緒に走る（「手前から1段ずつはがす」から外れる）。
+    releaseEscape = claimEscapeReceiver(() => {
+      onCancel();
+      return true;
+    });
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
-    window.addEventListener("keydown", onKey);
     stopRef.current = onCancel;
   };
 

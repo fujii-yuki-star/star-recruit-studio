@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { claimEscape } from "../hooks/escapeOwners";
+import { useState } from "react";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
 import { FONT_INHERIT_PROJECT_LABEL } from "../uiLabels";
@@ -74,18 +74,12 @@ export function FontPicker({
   if (disabled && open) setOpen(false);
 
   // 開いている間は Esc で閉じる（キーボードのみのユーザーがフォーカスを外さず閉じられるように）。
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      release();
-    };
-  }, [open]);
+  // ⚠️ **処理は名簿へ預ける**（#965）＝自分で購読すると、開けたまま別の確認が出たときに
+  // 1回の `Escape` で両方いっぺんに閉じる。名乗りは外側の後始末を止める役目も兼ねる（#701）。
+  useEscapeReceiver(open, () => {
+    setOpen(false);
+    return true;
+  });
 
   const optionStyle = (active: boolean, family?: string) => ({
     display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
