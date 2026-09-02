@@ -83,7 +83,7 @@ import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { isOtherExportRunning } from "./exportLock";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
+import { PROJECT_SAVE_WOULD_BREAK, KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -207,6 +207,11 @@ interface ProjectState {
    *  たたき台の「ゆうこ(AI)が作成した」文言はこれが true のときだけ出す＝表示と実挙動を一致させる（ADR-0026）。 */
   draftFromAi: boolean;
   saveStatus: SaveStatus;
+  /**
+   * **保存しなかった理由**（#974）。`null`＝ふつうの失敗（もう一度で直りうる）。
+   * ⚠️ **「もう一度」で直らない失敗**を区別するために持つ＝同じ内容を書き直しても同じ結果になる。
+   */
+  saveBlockedReason: string | null;
   /** 素材の取り込み失敗のユーザー向け文言（§2-5。プロジェクト保存状態とは別物。再試行/成功で消える）。 */
   importError: string | null;
   /** Project の見出し情報（projectId/名前/目的/各種設定）。Asset/Part/Scene は別フィールド。 */
@@ -779,6 +784,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   draftFromAi: false,
   hasRetiredTimelineEdits: false,
   saveStatus: "idle",
+  saveBlockedReason: null,
   _docEpoch: 0,
   importError: null,
   past: [],
@@ -1110,7 +1116,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   // 実際の保存処理（saveProject 経由でのみ呼ぶ）。saveStatus を saving→saved/error に更新。
   _doSave: async () => {
-    set({ saveStatus: "saving" });
+    set({ saveStatus: "saving", saveBlockedReason: null }); // ⚠️ 直したのに古い理由が残らないよう、始めるときに消す
     // ⚠️ **着地は「まだ同じ文書を開いているか」で括る**（#762）。書き終えるまでの間に別の動画を開けるので
     //（保存中は「未保存あり」と見なさない＝ホームは確認なしで開ける）、括らないと**完了の set が新しい方の
     // meta へ古い projectId を書き込み**、以後その動画の自動保存が**古い方の `project.json` を上書きする**
@@ -1187,9 +1193,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const updatedAt = new Date().toISOString();
       const meta: ProjectHeader = { ...s.meta, projectId, updatedAt };
       const project = assembleProject(meta, s.assets, s.parts, scenes);
-      // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
+      // 保存前検証（#416 の続き＝#974）。
+      // ⚠️ **次に開けなくなる内容は書かない**＝読み込みは型・必須の欠け（`structural`）を拒否するので、
+      // そのまま書くと**保存はできたのに次に開けない**（#959 とまったく同じ形）。書かなければ
+      // **前に保存できていた内容がそのまま残る**ので、取り消して直せば続けられる。
+      // ⚠️ **「いま不適合な文書を持っている利用者が保存できなくなる」は起きない**＝
+      // そういう文書は**そもそも開けない**（読み込みが拒否する）ので、保存の入口に来ない。
+      // ⚠️ **範囲違反（`structural` でない）は従来どおり警告だけ**＝読み込みは拒否しないので、
+      // 止めると**開ける動画を保存できなくする**ほうの害が出る。
       const pv = validateProjectDoc(project);
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
+      if (pv.structural) {
+        if (stillOpen()) set({ saveStatus: "error", saveBlockedReason: PROJECT_SAVE_WOULD_BREAK });
+        return;
+      }
       // ⚠️ **上書きの前に控える**（#263 段階2）＝控えたいのは「この保存で消える前」の状態。
       // 後に置くと、いま保存した内容がそのまま世代になり、戻っても何も変わらない。
       await keepRestorePoints(projectId, Date.now());
@@ -1266,7 +1283,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       void get()._refreshProjectThumbnail(projectId);
     } catch {
       // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
-      if (stillOpen()) set({ saveStatus: "error" });
+      if (stillOpen()) set({ saveStatus: "error", saveBlockedReason: null });
     }
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
