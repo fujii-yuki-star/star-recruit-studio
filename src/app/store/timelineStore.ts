@@ -46,9 +46,10 @@ import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../
 import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
-import { resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
+import { sameSynthInput } from "../../domain/voice/voiceProvider";
+// ⚠️ **声の設定の解決は domain に1つ**（#977）＝戻すときの突き合わせでも同じ解決が要る。
+import { resolveTimelineVoice } from "../../domain/timeline/voice";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
-import { characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -56,8 +57,6 @@ import { importVoiceFile } from "../../infrastructure/voiceFs";
 import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { NarrationStatus } from "../../domain/enums";
-import type { TimelineVoice } from "../../domain/timeline/types";
-import type { VoiceSettings } from "../../domain/project/types";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -233,6 +232,8 @@ export interface TimelineState {
   doc: TimelineProject | null;
   /** 開けなかった理由（利用者向け文言）。 */
   loadError: string | null;
+  /** どういう落ち方か（`broken`＝控えから戻す導線を出す側・#977）。 */
+  loadFailure: "broken" | "unsupported" | null;
   /** 読み込み中（二重に開かない）。 */
   isLoading: boolean;
   /** 再生ヘッドの位置（秒）。 */
@@ -799,6 +800,7 @@ function emptyState() {
   return {
     doc: null,
     loadError: null,
+    loadFailure: null,
     isLoading: false,
     playheadSec: 0,
     selectedClipIds: [] as string[],
@@ -953,7 +955,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
-      set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
+      // ⚠️ **落ち方も持ち帰る**（#977）＝これまで理由の文字列だけを持っていたので、
+      // 画面は「壊れているのか・版が新しいのか」を見分けられず、**控えから戻す導線が出せなかった**
+      //（`save_project` の控えは両形式に効き、一覧にも行が出るのに、開いた先で控えの存在を言えない）。
+      set({
+        ...emptyState(),
+        loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE,
+        loadFailure: e instanceof TimelineLoadError ? e.failure : "unsupported",
+      });
     }
   },
 
@@ -2132,19 +2141,6 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
   }
 }
 
-/**
- * 読み上げクリップの声の設定を解く（`11 §6` null=継承）。場面形式の `resolveNarrationVoice` と同じ順序で、
- * **話者だけはクリップが持つ**（掛け合いの行と同じ扱い＝ADR-0015）。
- */
-function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettings) {
-  const resolved = resolveNarrationVoice(
-    { text: voice.text, status: voice.status, speed: voice.speed, pitch: voice.pitch, intonation: voice.intonation },
-    settings,
-  );
-  // catalog に無い話者は既定の声へ落とす（場面形式の `resolveLineVoice`＝V19 と同じ扱い）。
-  const speaker = voice.speaker != null && characterForSpeaker(voice.speaker) != null ? voice.speaker : null;
-  return { ...resolved, speaker };
-}
 
 // 動画が消えたら、その文書を持っている間は手放す（#755）。**画面ではなく store で受ける**＝
 // 画面を離れていても効く（本番の導線は `closeTimelineProject` を通らない）。

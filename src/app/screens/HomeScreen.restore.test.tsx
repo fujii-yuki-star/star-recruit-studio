@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import * as projectFs from "../../infrastructure/projectFs";
 
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -14,6 +15,10 @@ import { HomeScreen } from "./HomeScreen";
 // ⚠️ **戻したら開き直す**＝画面が持っている内容は戻す前のものなので、開き直さないと
 // 次の保存で戻したはずのファイルを上書きする。
 const ONE = [{ projectId: "p_001", projectName: "テスト動画", updatedAt: "2026-09-01T00:00:00Z" }];
+const TIMELINE_ONE = [
+  { projectId: "p_002", projectName: "タイムライン動画", updatedAt: "2026-09-01T00:00:00Z", format: "timeline" },
+];
+
 const point = (savedAt: number) => ({ name: `p-${savedAt}.json`, savedAt });
 
 describe("前の状態に戻す（#263 段階2）", () => {
@@ -156,5 +161,45 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(document.body.textContent).toMatch(/一覧から選び直してください/));
+  });
+});
+
+// タイムライン形式でも、壊れていれば控えから戻す導線を出す（#977）。
+// ⚠️ もとはタイムライン形式の失敗が store の状態に飲まれ、そのまま遷移していたので、
+// **控えがあることを誰も言わなかった**（`save_project` の控えは両形式に効くのに）。
+describe("タイムライン形式の控えの導線（#977）", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it("壊れていれば、控えから戻す導線が出る", async () => {
+    useProjectStore.setState({
+      listProjects: vi.fn(async () => TIMELINE_ONE as unknown as ProjectHeader[]),
+    });
+    vi.spyOn(projectFs, "projectBackupTime").mockResolvedValue(new Date("2026-09-01T00:00:00Z"));
+    useTimelineStore.setState({
+      openTimelineProject: vi.fn(async () => {
+        useTimelineStore.setState({ loadError: "この動画の内容が正しくありません。", loadFailure: "broken" });
+      }),
+    } as never);
+    const onNavigate = vi.fn();
+    render(<HomeScreen onNavigate={onNavigate} />);
+    fireEvent.click(await screen.findByText("タイムライン動画"));
+    await waitFor(() => expect(screen.getByText(/前に保存できていたところ/)).toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled(); // 壊れた先へ連れて行かない
+  });
+
+  it("版が新しいだけなら、控えの導線は出さない（壊れていないものを巻き戻させない）", async () => {
+    useProjectStore.setState({
+      listProjects: vi.fn(async () => TIMELINE_ONE as unknown as ProjectHeader[]),
+    });
+    const backup = vi.spyOn(projectFs, "projectBackupTime").mockResolvedValue(new Date("2026-09-01T00:00:00Z"));
+    useTimelineStore.setState({
+      openTimelineProject: vi.fn(async () => {
+        useTimelineStore.setState({ loadError: "アプリを更新してください。", loadFailure: "unsupported" });
+      }),
+    } as never);
+    const onNavigate = vi.fn();
+    render(<HomeScreen onNavigate={onNavigate} />);
+    fireEvent.click(await screen.findByText("タイムライン動画"));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("timeline-project"));
+    expect(backup).not.toHaveBeenCalled();
   });
 });

@@ -155,3 +155,42 @@ describe("restoreToPoint（#967 レビュー 🟡2・🟡4）", () => {
     await expect(restoreToPoint("proj_20260901_001", "p-1.json")).resolves.toBe(0);
   });
 });
+
+// タイムライン形式でも文と音の食い違いを見る（#977）。
+// ⚠️ もとは場面形式の読み手にだけ通していたので、タイムライン形式では**必ず落ちて catch に入り**、
+// `clearStaleVoices` が**一度も走らなかった**＝手当て無しで「文は戻った・音はいまの文」が残った。
+describe("形式で読み分ける（#977）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const timelineDoc = (text: string, status = "generated") =>
+    JSON.stringify({
+      schemaVersion: "1.0", format: "timeline", projectId: "proj_20260901_001", projectName: "T",
+      createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
+      videoSettings: defaultVideoSettings(), voiceSettings: defaultVoiceSettings(),
+      tracks: [{ id: "track_001", kind: "audio", name: "音" }],
+      clips: [{ id: "clip_001", trackId: "track_001", kind: "voice", startSec: 0, durationSec: 2,
+                voice: { text, status, voicePath: "voices/clip_001.wav" } }],
+      assets: [],
+    });
+
+  it("タイムライン形式でも、文が変わった読み上げを作成前に戻す", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(timelineDoc("むかしの文"));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(timelineDoc("いまの文"));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    expect(await restoreToPoint("proj_20260901_001", "p-1.json")).toBe(1);
+    // ⚠️ **書いた中身も見る**＝件数だけだと、書く文字列に反映されていなくても緑になる。
+    const written = JSON.parse(write.mock.calls[0][1]);
+    expect(written.clips[0].voice.status).toBe("none");
+    expect(written.clips[0].voice.voicePath).toBeNull();
+  });
+
+  it("タイムライン形式で文が同じなら、作った音はそのまま", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(timelineDoc("おなじ文"));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(timelineDoc("おなじ文"));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([]);
+    const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    expect(await restoreToPoint("proj_20260901_001", "p-1.json")).toBe(0);
+    expect(JSON.parse(write.mock.calls[0][1]).clips[0].voice.status).toBe("generated");
+  });
+});

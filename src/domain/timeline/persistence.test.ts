@@ -179,3 +179,33 @@ describe('migrateTimelineProject：音の自動処理（1.8→1.9）', () => {
     expect(r.videoSettings).toBe(3);
   });
 });
+
+// ⚠️ **場面形式で直したものの双子**（#980 レビュー 🟡）。
+// 版が読めない壊れ方と、新しすぎる版を一緒にしていたので、**壊れた**動画にも
+// 「アプリを更新してください」＝更新しても直らない次の行動が出て、
+// しかも `broken` にならないので**控えから戻す導線が出なかった**。
+describe('版が読めない壊れ方は broken（#980 レビュー 🟡）', () => {
+  const doc = (extra: Record<string, unknown>) =>
+    JSON.stringify({ format: 'timeline', projectId: 'p', ...extra });
+
+  it('schemaVersion が無いと broken（戻す導線が出る側）', () => {
+    try {
+      parseTimelineProjectDoc(doc({}));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TimelineLoadError);
+      expect((e as TimelineLoadError).failure).toBe('broken');
+      expect((e as TimelineLoadError).message).not.toMatch(/アプリを更新/);
+    }
+  });
+
+  it('版が文字列だが対応外なら unsupported（更新すれば開ける側）', () => {
+    try {
+      parseTimelineProjectDoc(doc({ schemaVersion: '99.0' }));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect((e as TimelineLoadError).failure).toBe('unsupported');
+      expect((e as TimelineLoadError).message).toMatch(/アプリを更新/);
+    }
+  });
+});

@@ -58,7 +58,18 @@ function isAudioSettingsRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** 読込に失敗したことを UI へ伝える例外（場面形式の `ProjectLoadError` と同じ役割）。 */
-export class TimelineLoadError extends Error {}
+export class TimelineLoadError extends Error {
+  constructor(
+    message: string,
+    /**
+     * どういう落ち方か。**既定は `unsupported`＝控えから戻す導線を出さない側**
+     *（壊れていないものを巻き戻させない）。場面形式の `ProjectLoadError` と同じ語彙にそろえる（#977）。
+     */
+    readonly failure: 'broken' | 'unsupported' = 'unsupported',
+  ) {
+    super(message);
+  }
+}
 
 /**
  * 文字列(JSON) → タイムライン形式の文書。形式・版・スキーマ適合を確かめる。
@@ -73,13 +84,21 @@ export function parseTimelineProjectDoc(text: string): TimelineProject {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new TimelineLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。');
+    throw new TimelineLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。', 'broken');
   }
   if (typeof raw !== 'object' || raw === null || !isTimelineProjectDoc(raw)) {
     throw new TimelineLoadError('この動画はタイムラインで編集する形式ではありません。一覧から別の動画を選んでください。');
   }
   const doc = raw as Record<string, unknown>;
-  if (typeof doc.schemaVersion !== 'string' || !isSupportedTimelineSchemaVersion(doc.schemaVersion)) {
+  // ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（#980 レビュー 🟡）＝
+  // **場面形式で直したものの双子**（α-7 再監査 🟡）を、こちらへ持ち込んでいた。
+  // 一緒にしていると、`schemaVersion` が欠けた**壊れた**動画にも「アプリを更新してください」＝
+  // **更新しても直らない次の行動**が出て、しかも `broken` にならないので
+  // **控えから戻す導線が出ない**（いちばん助けが要る場面でいちばん助けが出ない）。
+  if (typeof doc.schemaVersion !== 'string') {
+    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
+  }
+  if (!isSupportedTimelineSchemaVersion(doc.schemaVersion)) {
     // **「バージョン」と言う**（「形式」は場面/タイムラインの別を指す確定語なので、すぐ上の行と同じ語を
     // 別の意味で使わない＝#640 で場面形式側に入れた「版と形式のすり替えをしない」の裏返し・15 §6）。
     throw new TimelineLoadError('この動画は対応していないバージョンで作成されています。アプリを更新してください。');
@@ -95,7 +114,7 @@ export function parseTimelineProjectDoc(text: string): TimelineProject {
   const migrated = migrateTimelineProject(doc);
   if (!validateTimelineProject(migrated)) {
     console.warn('[timeline] 読み込んだ内容がスキーマに未適合:', validateTimelineProject.errors);
-    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。');
+    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   return migrated as unknown as TimelineProject;
 }

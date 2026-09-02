@@ -99,3 +99,65 @@ describe("戻したら、開いていた文書を手放す（α-7 再監査 🔴
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+// ⚠️ **両方の形式の受け手に手放させる**（#977）。
+// もとは場面形式だけを手放し、場面形式の保存だけを待っていた＝タイムライン形式は
+// **待たれも手放されもしない**ので、走っている保存の着地が戻した内容を上書きした。
+describe("戻すときは、両方の形式へ手放させる（#977）", () => {
+  beforeEach(() => useProjectStore.setState({ _doSave: 本物の保存 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("タイムライン形式の受け手にも知らせる（着地を待つ）", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const deletion = await import("./projectDeletion");
+    const heard: string[] = [];
+    const off = deletion.onProjectDeleted((id) => { heard.push(id); return undefined; });
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_007", "p-1.json");
+    off();
+    expect(heard).toEqual(["proj_20260901_007"]);
+  });
+
+  it("別の形式が書き出している間は戻さない", async () => {
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const lock = await import("./exportLock");
+    lock.useExportLockStore.getState().acquire("timeline");
+    expect(await useProjectStore.getState().restoreToRestorePoint("proj_20260901_008", "p-1.json")).toBe(0);
+    expect(restore).not.toHaveBeenCalled();
+    lock.useExportLockStore.getState().release("timeline");
+  });
+
+  it("自分の形式が書き出していない・錠も空いていれば戻す", async () => {
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_009", "p-1.json");
+    expect(restore).toHaveBeenCalled();
+  });
+});
+
+// ⚠️ **戻せなかったら、手放した相手を戻す**（#980 レビュー 🟡）。
+// 手放しを先にやる以上、失敗したときに戻さないと**一覧には動画が残るのに編集画面だけ空**になる。
+describe("戻せなかったときの後始末（#980 レビュー 🟡）", () => {
+  beforeEach(() => useProjectStore.setState({ _doSave: 本物の保存 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("失敗したら、手放した受け手を戻す", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockRejectedValue(new Error("戻せない"));
+    const deletion = await import("./projectDeletion");
+    let restored = 0;
+    const off = deletion.onProjectDeleted(() => ({ restore: () => { restored += 1; } }));
+    await expect(
+      useProjectStore.getState().restoreToRestorePoint("proj_20260901_010", "p-1.json"),
+    ).rejects.toThrow();
+    off();
+    expect(restored).toBe(1);
+  });
+
+  it("成功したときは戻さない（答える前に画面を変えない）", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const deletion = await import("./projectDeletion");
+    let restored = 0;
+    const off = deletion.onProjectDeleted(() => ({ restore: () => { restored += 1; } }));
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_011", "p-1.json");
+    off();
+    expect(restored).toBe(0);
+  });
+});
