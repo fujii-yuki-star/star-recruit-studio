@@ -96,6 +96,8 @@ describe("前の状態に戻す（#263 段階2）", () => {
     const card = screen.getAllByRole("button").find((b) => b.textContent?.includes("テスト動画"));
     expect(card, "一覧のカードが見つからない").toBeDefined();
     expect(card).toBeDisabled();
+    // ⚠️ **押せない理由も出す**（#976 レビュー）＝理由の出ない無効化は「壊れている」に見える。
+    expect(card).toHaveAttribute("title", "前の状態に戻しています…");
     // ⚠️ **後始末まで見届ける**＝ここで放置すると、次のテストの最中に着地して状態を書き換える。
     finish!();
     await waitFor(() => expect(screen.queryByText("ここへ戻す")).toBeNull());

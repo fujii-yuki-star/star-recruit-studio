@@ -726,7 +726,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
                       disabled={isExporting || listBusy || awaitingAnswer || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : restoring ? "前の状態に戻しています…" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
                       style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || listBusy || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
