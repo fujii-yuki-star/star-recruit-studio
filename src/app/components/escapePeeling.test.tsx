@@ -158,3 +158,35 @@ describe("Escape は手前から1段ずつはがれる（#965）", () => {
     expect(onCancel).not.toHaveBeenCalled(); // 掴みは残る
   });
 });
+
+// ⚠️ **レビューで挙がった「理論上の余地」を実測で確かめる**（#973 レビュー）＝
+// 確認は `document.activeElement` を見て見送るので、**同じ Escape の中で欄が先に `blur()` する**と、
+// 見た時点では焦点が外れており「打っていない」と判断して受け取ってしまうのではないか。
+describe("欄が自分で抜ける Escape と、確認の見送り（#965／#973 レビュー）", () => {
+  it("欄が先に抜けても、その1回で確認まで答えたことにならない", () => {
+    // 欄は自分の `onKeyDown` で抜ける（タイムライン編集の差し込み口・文字欄と同じ形）。
+    const onCancel = vi.fn();
+    function Field() {
+      return (
+        <input
+          aria-label="欄"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") e.currentTarget.blur();
+          }}
+        />
+      );
+    }
+    render(
+      <>
+        <Field />
+        <DeleteConfirm message="消しますか？" onCancel={onCancel} onConfirm={vi.fn()} />
+      </>,
+    );
+    const field = screen.getByLabelText("欄");
+    field.focus();
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(document.activeElement).not.toBe(field); // 1段目＝欄を抜ける
+    expect(onCancel).not.toHaveBeenCalled(); // ⚠️ ここが本体＝2段いっぺんに進まない
+  });
+});

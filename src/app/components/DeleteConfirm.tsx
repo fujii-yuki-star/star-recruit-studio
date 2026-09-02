@@ -49,10 +49,15 @@ export function DeleteConfirm({
   // ⚠️ **処理は名簿へ預ける**（#965）＝色や文字の選び欄を開いたままこの確認を開いたとき、
   // 自分で購読していると1回の `Escape` で両方いっぺんに閉じる。**実行中は名乗らない**
   //（両ボタンを無効にしているのと同じ扱い＝走っている処理は止まらない）。
-  useEscapeReceiver(!busy, () => {
+  useEscapeReceiver(!busy, (e) => {
     // ⚠️ **入力中は横取りしない**＝文字を打っている最中の Escape は、その欄のもの。
     // 確認は答えるまで残る作りなので、**別の場所で入力している間ずっと**奪い続けることになる。
-    const active = document.activeElement;
+    // ⚠️ **「いま焦点がある所」ではなく「キーを押した所」を見る**（#973 レビュー）＝
+    // 欄は自分の `onKeyDown` で抜ける（`blur()`）ものがあり、それは**この判定より先に走る**。
+    // `document.activeElement` を見ると、抜けた後の姿を見て「打っていない」と誤り、
+    // **1回のキーで欄を抜けて確認まで答えたことになる**（実測で再現した）。
+    // 押した先が要素でないとき（窓へ直に投げた合成のキーなど）だけ、いまの焦点で代用する。
+    const active = e.target instanceof HTMLElement ? e.target : document.activeElement;
     const editing =
       active instanceof HTMLElement &&
       !boxRef.current?.contains(active) &&
