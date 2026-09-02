@@ -27,6 +27,9 @@ static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// ⚠️ **毒された錠でも書き続ける**（`unwrap` しない）＝記録を残せないことでアプリを落とさない。
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
+/// いま開いている記録のファイル（**開き直しを避ける**ため持ち続ける・置き場ごと）。
+static OPEN_FILE: Mutex<Option<(PathBuf, std::fs::File)>> = Mutex::new(None);
+
 /// 1つのファイルの上限。超えたら1世代だけ退避する。
 /// ⚠️ **無制限にしない**＝長く使うと際限なく太る。**世代を増やしすぎない**＝調べたいのは直近の失敗。
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
@@ -83,9 +86,46 @@ fn record_to(dir: &std::path::Path, tag: &str, detail: &str, max_bytes: u64) {
     #[cfg(test)]
     let _watch = probe::Guard::enter();
     rotate_if_needed(&path, max_bytes);
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+    // ⚠️ **開いたまま持ち続ける**（α-7 出口監査の未対応項目・#958）＝1件ごとに開き直していたが、
+    // 実測すると **開くのに 13.8ms・書くのは 6us**（Windows）＝ほぼ全部が開き直しの代金だった。
+    // 書き出しの警告は続けて来るので、そのぶん画面が固まる。**開くのを1回にする**と 2000 倍速くなる。
+    // ⚠️ **溜めてから書くのではない**＝`File` は素通しなので、**落ちたときに残る量は変わらない**
+    //（記録は「うまくいかないとき」に読むものなので、そこを弱めては本末転倒）。
+    // ⚠️ **毒された錠でも進む**（#975 レビュー）＝`WRITE_LOCK` と同じ流儀。
+    let mut slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    let reopen = match slot.as_ref() {
+        Some((have, _)) => have != &path,
+        None => true,
+    };
+    if reopen {
+        #[cfg(test)]
+        probe::OPENS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *slot = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .ok()
+            .map(|f| (path.clone(), f));
+    }
+    if let Some((_, f)) = slot.as_mut() {
         let _ = f.write_all(line.as_bytes());
     }
+}
+
+/// 持っている控えを手放す（退避の前・置き場が変わったとき）。
+fn close_open_file() {
+    // ⚠️ **毒された錠でも進む**（#975 レビュー）＝`WRITE_LOCK` と同じ流儀にそろえる。
+    // `Ok` だけを見る形にしていたので、一度毒されると**そのプロセスでは二度と記録が書けなく**なった。
+    let mut slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = None;
+}
+
+/// いま握っている手から見たファイルの大きさ（握っていなければ `None`）。
+fn held_len() -> Option<u64> {
+    let slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref()
+        .and_then(|(_, f)| f.metadata().ok())
+        .map(|m| m.len())
 }
 
 /// 1件を1行に潰す。
@@ -103,18 +143,30 @@ fn one_line(detail: &str) -> String {
 /// ファイルの最後の状態を見る形にしていたが、**毎回退避する設定では最後の1本が書き直すので勝手に整い**、
 /// 錠を外しても緑のままだった（＝確かめられていなかった）。
 /// ⚠️ **少し待つ**のは、待たないと窓が狭すぎて重ならないから（錠がある側は中で待つだけなので影響しない）。
+/// ⚠️ **眠らずに回して待つ**＝`sleep(200us)` は **Windows では実際に約 15.6ms 眠る**（時計の刻みが粗い）。
+/// 窓を開ける目的には長すぎるうえ、**書き込みの速さを測るテストがその15.6msを測ってしまう**
+///（実際に「1件 16ms」という嘘の数字が出た）。
 /// ⚠️ **配布されるものには入らない**（`cfg(test)`）＝実際の書き込みは遅くならない。
 #[cfg(test)]
 mod probe {
     use std::sync::atomic::{AtomicUsize, Ordering};
     pub static NOW: AtomicUsize = AtomicUsize::new(0);
     pub static MAX: AtomicUsize = AtomicUsize::new(0);
+    /// ファイルを**開いた回数**（開き直していないことを見る）。
+    pub static OPENS: AtomicUsize = AtomicUsize::new(0);
+    /// ⚠️ **記録を書くテスト同士を並ばせる**＝この module は錠も開いたファイルも**process にひとつ**なので、
+    /// 並行に走らせると互いの置き場で開き直しが起き、**測っているものが変わる**
+    ///（実際、単独なら 358us/件のところが、並行だと 15490us/件という嘘の数字になった）。
+    pub static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     pub struct Guard;
     impl Guard {
         pub fn enter() -> Self {
             let n = NOW.fetch_add(1, Ordering::SeqCst) + 1;
             MAX.fetch_max(n, Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_micros(200));
+            let until = std::time::Instant::now() + std::time::Duration::from_micros(200);
+            while std::time::Instant::now() < until {
+                std::hint::spin_loop();
+            }
             Guard
         }
     }
@@ -127,10 +179,30 @@ mod probe {
 
 /// 上限を超えていたら1世代だけ退避する（`stario.log` → `stario.1.log`）。
 fn rotate_if_needed(path: &PathBuf, max_bytes: u64) {
-    let Ok(meta) = fs::metadata(path) else { return };
+    let Ok(meta) = fs::metadata(path) else {
+        // ⚠️ **無くなっていたら控えを手放す**＝外で消されたとき、開いたままだと
+        // **誰も読めない亡霊へ書き続ける**（次の書き込みで作り直す）。
+        close_open_file();
+        return;
+    };
+    // ⚠️ **「消された」だけでなく「置き換えられた」も見る**（#975 レビュー）＝外の道具が
+    // 「一時ファイルへ書いてから名前を付け替える」（安全な保存の作法）をすると、
+    // **パスには別の実体があるので `metadata` は成功**し、上の関門を素通りする。
+    // そのまま書き続けると、やはり**誰も読めない亡霊**へ入る（実測で確かめた）。
+    // ⚠️ **大きさで見分ける**＝実体の番号（`file_index`）は安定版の Rust では使えない。
+    // 書くのはこのプロセスだけなので、握っている手とパスの大きさは本来いつも一致する。
+    if held_len().is_some_and(|held| held != meta.len()) {
+        close_open_file();
+        return; // 作り直しは次の書き込みに任せる（大きさの比較はもう当てにならない）
+    }
     if meta.len() < max_bytes {
         return;
     }
+    // ⚠️ **退避の前に手放す**＝**開いた手は付け替えた先へ付いていく**（実測で確かめた＝Rust の
+    // ファイルは Windows でも共有指定で開くので `rename` は成功し、そのあとの書き込みは
+    // **`stario.1.log` の側へ入る**）。手放さないと、退避を起こした1件が**古い世代へ紛れ**、
+    // 次の退避で消える。「名前を付け替えられない」ではない（そう書いていたが違った）。
+    close_open_file();
     let old = path.with_file_name("stario.1.log");
     let _ = fs::remove_file(&old);
     let _ = fs::rename(path, &old);
@@ -189,6 +261,7 @@ mod tests {
     /// ⚠️ **上限を跨がせる**＝退避が起きる状況で試さないと、競合そのものを踏まない。
     #[test]
     fn record_keeps_every_line_under_concurrency() {
+        let _serial = probe::SERIAL.lock(); // process にひとつの錠を共有するので並ばせる
         use std::sync::Barrier;
         let dir = std::env::temp_dir().join("stario_tlog_concurrency");
         let _ = fs::remove_dir_all(&dir);
@@ -260,6 +333,7 @@ mod tests {
     /// FFmpeg の出力は複数行で来るので、**この機能の主な使い道**がまさにここ。
     #[test]
     fn record_flattens_detail_too() {
+        let _serial = probe::SERIAL.lock(); // process にひとつの錠を共有するので並ばせる
         use super::record_to;
         use std::fs;
         let dir = std::env::temp_dir().join("stario_tlog_detail");
@@ -284,6 +358,7 @@ mod tests {
 
     #[test]
     fn record_flattens_tag_too() {
+        let _serial = probe::SERIAL.lock(); // process にひとつの錠を共有するので並ばせる
         let dir = std::env::temp_dir().join("stario_tlog_tag");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -329,6 +404,7 @@ mod tests {
     /// 上限を超えていなければ退避しない／超えたら1世代だけ退避する。
     #[test]
     fn 大きくなったら一世代だけ退避する() {
+        let _serial = probe::SERIAL.lock(); // process にひとつの錠を共有するので並ばせる
         let dir = std::env::temp_dir().join(format!("stario_log_test_{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("stario.log");
@@ -354,5 +430,162 @@ mod tests {
         assert!(!dir.join("stario.2.log").exists(), "2世代目は作らない");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **退避を起こした1件が、古い世代へ紛れないこと**（#958）。
+    ///
+    /// ⚠️ **開いた手は付け替えた先へ付いていく**（実測）＝`rename` は成功するので
+    /// 「退避できない」形では現れない。現れ方は**退避を起こした1件が `stario.1.log` の側へ入る**で、
+    /// それは**次の退避で消える**。直接 `rotate_if_needed` を呼ぶ既存のテストでは、
+    /// **手を掴んでいない**ので踏めない。
+    #[test]
+    fn 退避を起こした一件は新しい方へ書かれる() {
+        let _serial = probe::SERIAL.lock();
+        let dir = std::env::temp_dir().join(format!("stario_log_rot_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        close_open_file();
+
+        const SMALL: u64 = 300;
+        let path = dir.join("stario.log");
+        let old = dir.join("stario.1.log");
+        let mut trigger = None;
+        for i in 0..8 {
+            let mark = format!("mark-{i}");
+            record_to(&dir, "t", &format!("{mark} {}", "x".repeat(200)), SMALL);
+            if old.exists() {
+                trigger = Some(mark); // この1件が退避を起こした
+                break;
+            }
+        }
+
+        let now = fs::read_to_string(&path).unwrap_or_default();
+        let rotated = fs::read_to_string(&old).unwrap_or_default();
+        let _ = fs::remove_dir_all(&dir);
+        close_open_file();
+
+        let mark = trigger.expect("上限を超えたのに退避が起きていない");
+        assert!(
+            now.contains(&mark),
+            "退避を起こした {mark} が新しい方に無い"
+        );
+        assert!(
+            !rotated.contains(&mark),
+            "退避を起こした {mark} が古い世代へ紛れた"
+        );
+    }
+
+    /// **外で消されても、次の1件から書き直せること**（#958）。
+    ///
+    /// ⚠️ 開いた手を持ち続けるので、**ファイルだけ外で消される**（掃除・検疫）と
+    /// **誰も読めない亡霊へ書き続ける**＝記録は「うまくいかないとき」に読むものなので、
+    /// 静かに何も残らないのがいちばん困る。
+    #[test]
+    fn 外で消されても次から書き直す() {
+        let _serial = probe::SERIAL.lock();
+        let dir = std::env::temp_dir().join(format!("stario_log_del_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        close_open_file();
+
+        record_to(&dir, "t", "まえ", MAX_BYTES);
+        let path = dir.join("stario.log");
+        assert!(path.exists());
+        fs::remove_file(&path).unwrap(); // 外で消される
+
+        record_to(&dir, "t", "あと", MAX_BYTES);
+        let after = fs::read_to_string(&path).unwrap_or_default();
+        let _ = fs::remove_dir_all(&dir);
+        close_open_file();
+
+        assert!(
+            after.contains("あと"),
+            "消された後の1件がどこにも残っていない"
+        );
+    }
+
+    /// **外で置き換えられても、次の1件から書き直せること**（#975 レビュー）。
+    ///
+    /// ⚠️ **「消された」だけでは足りない**＝外の道具が「一時ファイルへ書いてから名前を付け替える」
+    /// （安全な保存の作法）をすると、**パスには別の実体があるので `metadata` は成功**し、
+    /// 消されたときの関門を素通りする。そのまま書き続けると誰も読めない亡霊へ入る。
+    #[test]
+    fn 外で置き換えられても次から書き直す() {
+        let _serial = probe::SERIAL.lock();
+        let dir = std::env::temp_dir().join(format!("stario_log_swap_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        close_open_file();
+
+        record_to(&dir, "t", "まえ", MAX_BYTES);
+        let path = dir.join("stario.log");
+        // 外の道具が置き換える（消してから作り直すのではなく、別のファイルを名前ごと被せる）。
+        let tmp = dir.join("other.tmp");
+        fs::write(
+            &tmp,
+            b"replaced
+",
+        )
+        .unwrap();
+        fs::rename(&tmp, &path).unwrap();
+
+        record_to(&dir, "t", "あと1", MAX_BYTES);
+        record_to(&dir, "t", "あと2", MAX_BYTES);
+        let after = fs::read_to_string(&path).unwrap_or_default();
+        let _ = fs::remove_dir_all(&dir);
+        close_open_file();
+
+        assert!(
+            after.contains("あと2"),
+            "置き換えの後の1件がどこにも残っていない"
+        );
+    }
+
+    /// **記録を1件ごとに開き直していないこと**（α-7 出口監査の未対応項目・#958）。
+    ///
+    /// ⚠️ **数字を出さずに「引っかかる／引っかからない」を決めない**＝監査は
+    /// 「1件ごとに同期で書くので、警告が続く場面での引っかかりは実測が要る」と保留していた。
+    /// 実測（最適化した単体の計測・Windows）＝**開くのに 13.8ms・書くのは 6us**＝
+    /// **ほぼ全部が開き直しの代金**だった。書き出しの警告は続けて来るので、そのぶん画面が固まる。
+    ///
+    /// ⚠️ **時間そのものは検査にしない**＝機械と同時に走っているものに左右される
+    /// （このテスト自体、並行だと 15490us/件・単独だと 358us/件という別の数字が出た）。
+    /// 効いているかどうかは**開いた回数**で見る＝これは機械に依らない。
+    #[test]
+    fn 記録は一件ごとに開き直さない() {
+        let _serial = probe::SERIAL.lock();
+        let dir = std::env::temp_dir().join(format!("stario_log_open_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // 開いたままだと退避できないので、**置き場を変えて**必ず1回目から開かせる。
+        close_open_file();
+
+        // ⚠️ **上限は本番と同じ**＝小さくすると退避が何度も起きて、そのたび開き直すのが正しい挙動になる。
+        const N: u32 = 50;
+        let detail = "ffmpeg
+frame= 100 fps=30
+error: "
+            .to_string()
+            + &"x".repeat(400);
+
+        probe::OPENS.store(0, std::sync::atomic::Ordering::SeqCst);
+        let start = std::time::Instant::now();
+        for i in 0..N {
+            record_to(&dir, "export", &format!("{i} {detail}"), MAX_BYTES);
+        }
+        let each_us = start.elapsed().as_micros() / u128::from(N);
+        let opens = probe::OPENS.load(std::sync::atomic::Ordering::SeqCst);
+
+        let path = dir.join("stario.log");
+        let written = fs::read_to_string(&path).unwrap();
+        assert_eq!(written.lines().count(), N as usize, "全部書けている");
+        let _ = fs::remove_dir_all(&dir);
+        close_open_file(); // 消した置き場を掴んだままにしない
+
+        eprintln!("[measure] {N}件で {opens}回開いた・1件あたり {each_us}us");
+        assert_eq!(
+            opens, 1,
+            "{N}件で {opens}回開いた（1回のはず＝開き直している）"
+        );
     }
 }
