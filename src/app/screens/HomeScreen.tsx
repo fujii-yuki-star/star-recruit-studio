@@ -19,6 +19,7 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { useTimelineStore } from "../store/timelineStore";
 import { ProjectLoadError } from "../../domain/project/persistence";
+import { useNavigationGuard } from "../hooks/navigationGuard";
 import { CopyIcon,
   PlusIcon,
   LayoutIcon,
@@ -128,7 +129,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     if (duplicatingId !== null || isExporting) return;
     // ⚠️ **押す前に断っているが、ここでも見る**（入口が増えても失敗する複製を始めない）。
     if (isTimelineProjectDoc({ format: projects.find((x) => x.projectId === projectId)?.format })) return;
-    if (openingId || pendingAction) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
+    if (openingId || awaitingAnswer) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
     // ⚠️ **未保存があるなら確認を挟む**（複製したら開くので、いま編集しているものが閉じる＝
     // 同じ結果になる操作は同じ聞き方・ADR-0026②）。⚠️ ただし**行き先は「複製」のまま持つ**
     //（"開く" に寄せると押したボタンと違うことが起きる＝PR #889 レビュー 🔴）。
@@ -312,6 +313,17 @@ export function HomeScreen({ onNavigate }: HomeProps) {
    * 既にある確認（`pendingAction`）と同じ扱いにする＝守り方を2通りに増やさない。
    */
   const awaitingAnswer = pendingAction !== null || voicesCleared !== null;
+
+  /**
+   * **サイドバーからも抜けさせない**（#971 レビュー 🟡）。
+   *
+   * ⚠️ **ボタンを押せなくするだけでは足りない**＝サイドバーは画面の外にあり、
+   * この画面のボタンとは関係なく押せる（#719 で同じ形を直した記録がある）。
+   * 答えを待っている間は、既にある関門（`useNavigationGuard`）で止める。
+   * ⚠️ **止めるだけにする**＝ここで確認を出し直すと、同じことを2か所で聞くことになる。
+   * 画面には既に知らせが出ているので、それに答えれば通れる。
+   */
+  useNavigationGuard(awaitingAnswer ? () => false : null);
 
   /** 「前の状態に戻す」を開く（#263 段階2）。 */
   async function openRestorePanel(projectId: string) {

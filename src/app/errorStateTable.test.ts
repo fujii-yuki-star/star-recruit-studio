@@ -160,8 +160,13 @@ function sourceBlob(): string {
  * `POSE_FALLBACK` は**2つ目の文**（「ゆうこの素材が見つかりません」）が表から漏れていた。
  * ⚠️ **1つのコードが複数の文を持つ**（出る場面で言うことが違う）ので、**コードと文の組**で拾う。
  */
-function domainWarnMessages(): { code: string; message: string; where: string }[] {
+function domainWarnMessages(): {
+  found: { code: string; message: string; where: string }[];
+  /** 見つけた `warn(` 呼び出しすべて（解けたかどうかに関わらず）。 */
+  seen: { code: string; where: string }[];
+} {
   const out: { code: string; message: string; where: string }[] = [];
+  const seen: { code: string; where: string }[] = [];
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name);
@@ -174,6 +179,11 @@ function domainWarnMessages(): { code: string; message: string; where: string }[
         const consts = new Map<string, string>();
         for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*$/gm)) consts.set(m[1], "");
         for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*'([^']+)',?$/gm)) consts.set(m[1], m[2]);
+        // ⚠️ **解けなかったものを黙って捨てない**（#971 レビュー 🟡）＝
+        // 定数を**別のファイル**へ切り出す／テンプレートリテラルで書く、のどちらでも
+        // `consts` から引けず、**検査から静かに消える**（今回塞いだのと**3回目の同じ形**）。
+        // 呼び出しの総数と、解けた数が合うかを外で見る。
+        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'/g)) seen.push({ code: m[1], where: name });
         for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*(?:'([^']+)'|[A-Za-z_$][\w$]*\.([A-Z_][A-Z_0-9]*))/g)) {
           const message = m[2] ?? consts.get(m[3] ?? "");
           if (message) out.push({ code: m[1], message, where: name });
@@ -182,7 +192,7 @@ function domainWarnMessages(): { code: string; message: string; where: string }[
     }
   };
   walk(join(process.cwd(), "src", "domain"));
-  return out;
+  return { found: out, seen };
 }
 
 /** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
@@ -291,7 +301,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   it("domain が出す断りの文が、表のどこかに在る", () => {
     const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
     const flat = md.replace(/\s/g, "");
-    const missing = domainWarnMessages()
+    const missing = domainWarnMessages().found
       .filter(({ message }) => !flat.includes(message.replace(/\s/g, "")))
       .map(({ code, message, where }) => `${code}（${where}）: ${message}`);
     // ⚠️ **どちらを直すかは人が決める**（文を変えたのか、表に足し忘れたのか）ので、両方を出す。
@@ -299,9 +309,12 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   });
 
   it("domain の断りを1つも拾えていない、が起きない（走査が壊れたら落ちる）", () => {
-    const found = domainWarnMessages();
-    expect(found.length).toBeGreaterThanOrEqual(20);
-    expect(new Set(found.map((f) => f.code)).size).toBeGreaterThanOrEqual(15);
+    const { found, seen } = domainWarnMessages();
+    expect(seen.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(seen.map((f) => f.code)).size).toBeGreaterThanOrEqual(15);
+    // ⚠️ **解けなかったものが1つも無い**＝これが本体（黙って検査から消えるのを防ぐ）。
+    const unresolved = seen.length - found.length;
+    expect(unresolved, "文言を解けなかった `warn(` がある（別ファイルの定数・テンプレートリテラル）").toBe(0);
   });
 
   it("守れている件数が黙って減らない（対象の families を外すと落ちる）", () => {

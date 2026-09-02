@@ -6,6 +6,8 @@ import * as projectFs from "../../infrastructure/projectFs";
 
 import type { ProjectHeader } from "../../domain/project/persistence";
 import type { Scene } from "../../domain/project/types";
+import { canNavigate } from "../hooks/navigationGuard";
+import type { ScreenId } from "../data/mockData";
 import { HomeScreen } from "./HomeScreen";
 
 // #263 段階2：前の状態に戻す。
@@ -74,6 +76,19 @@ describe("前の状態に戻す（#263 段階2）", () => {
     expect((screen.getByText("白紙から作る").closest("button") as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText("動画を開く"));
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
+  });
+
+  // ⚠️ **サイドバーからも抜けさせない**（#971 レビュー 🟡）＝ボタンを押せなくするだけでは、
+  // 画面の外にあるサイドバーから素通しできる（#719 で同じ形を直した記録がある）。
+  it("知らせに答えるまで、サイドバーからも移れない", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    useProjectStore.setState({ restoreToRestorePoint: vi.fn(async () => 2), loadProject: vi.fn(async () => {}) });
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await screen.findByText("あとで開く");
+    expect(canNavigate("settings" as ScreenId)).toBe(false);
+    fireEvent.click(screen.getByText("あとで開く"));
+    await waitFor(() => expect(canNavigate("settings" as ScreenId)).toBe(true));
   });
 
   // ⚠️ **閉じる手段がある**＝答えるまで他を塞ぐので、「開く」しか無いと行き止まりになる。
