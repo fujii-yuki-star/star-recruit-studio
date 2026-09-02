@@ -389,12 +389,19 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             {voicesCleared && (
               <div className="notice notice-warn mb" role="alert">
                 <span>{voicesClearedMessage(voicesCleared.count)}</span>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => { const id = voicesCleared.projectId; setVoicesCleared(null); void doOpenProject(id); }}
-                >
-                  動画を開く
-                </button>
+                {/* ⚠️ **閉じる手段を用意する**（自分で挙げた懸念）＝答えるまで他を塞ぐので、
+                    「開く」しか無いと**開きたくない人が行き止まり**になる。見たことは押した時点で足りる。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost" onClick={() => setVoicesCleared(null)}>
+                    あとで開く
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => { const id = voicesCleared.projectId; setVoicesCleared(null); void doOpenProject(id); }}
+                  >
+                    動画を開く
+                  </button>
+                </div>
               </div>
             )}
 

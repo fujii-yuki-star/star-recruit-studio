@@ -76,6 +76,21 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
   });
 
+  // ⚠️ **閉じる手段がある**＝答えるまで他を塞ぐので、「開く」しか無いと行き止まりになる。
+  it("開かずに閉じられる（塞いだまま行き止まりにしない）", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    const load = vi.fn(async () => {});
+    useProjectStore.setState({ restoreToRestorePoint: vi.fn(async () => 2), loadProject: load });
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await screen.findByText("あとで開く");
+    fireEvent.click(screen.getByText("あとで開く"));
+    await waitFor(() =>
+      expect((screen.getByText("白紙から作る").closest("button") as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it("未保存があるときは、先に確認する（戻すと画面の編集が失われる）", async () => {
     useProjectStore.setState({ scenes: [{ sceneId: "scene_001" } as unknown as Scene], saveStatus: "idle" });
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
