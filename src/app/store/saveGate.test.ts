@@ -57,3 +57,34 @@ describe("次に開けなくなる内容は保存しない（#974）", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 });
+
+// ⚠️ **理由の寿命**（#982 レビュー 🟡）＝前の動画で断られた理由が残ると、
+// **別の動画で「保存できません」と出続ける**。文書が入れ替わる所で明示的に落とす。
+describe("断りの理由は文書と一緒に消える（#982 レビュー 🟡）", () => {
+  beforeEach(() => {
+    vi.spyOn(keeper, "keepRestorePoints").mockResolvedValue(undefined);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("新しく作ると消える", () => {
+    useProjectStore.setState({ saveBlockedReason: PROJECT_SAVE_WOULD_BREAK });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().saveBlockedReason).toBeNull();
+  });
+});
+
+// ⚠️ **押しても変わらないボタンを押させ続けない**（#982 レビュー 🟡）＝
+// ふきだしを出さない画面（ウィザード）では、**ボタンの文字だけ**が利用者の見るものになる。
+describe("保存ボタンの文言（#982 レビュー 🟡）", () => {
+  it("もう一度で直らない失敗は、そう言う", async () => {
+    const { saveButtonLabel } = await import("../components/saveButtonLabel");
+    expect(saveButtonLabel("error", PROJECT_SAVE_WOULD_BREAK)).not.toMatch(/もう一度/);
+    expect(saveButtonLabel("error", PROJECT_SAVE_WOULD_BREAK)).toMatch(/取り消して直す/);
+  });
+
+  it("ふつうの失敗は、これまでどおり「もう一度押す」", async () => {
+    const { saveButtonLabel } = await import("../components/saveButtonLabel");
+    expect(saveButtonLabel("error", null)).toMatch(/もう一度押す/);
+    expect(saveButtonLabel("error")).toMatch(/もう一度押す/);
+  });
+});

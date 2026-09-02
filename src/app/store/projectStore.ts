@@ -910,7 +910,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   reset: () => {
     if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は場面/構成を破壊しない（#379 と同方針・#570 レビュー follow-up）
     set((s) => ({
-      status: "idle", draftFromAi: false, hasRetiredTimelineEdits: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null,
+      status: "idle", draftFromAi: false, hasRetiredTimelineEdits: false, saveStatus: "idle", saveBlockedReason: null, parts: [], scenes: [], warnings: [], aiError: null,
       _generationSeq: s._generationSeq + 1,
       // 声の一括作成も打ち切る（newProject/loadProject と同じ扱い・#547 P2-6）。放置すると空になった文書の上を
       // 空回りで走り続け、「作成中…」と前の文書の「中止しました」を持ち越す。
@@ -928,6 +928,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       draftFromAi: false,
       hasRetiredTimelineEdits: false, // 別の動画に前の案内を持ち越さない（#635）
       saveStatus: "idle",
+      // ⚠️ **文書が入れ替わったら理由も落とす**（#982 レビュー 🟡）＝前の動画で断られた理由が残ると、
+      // **別の動画で「保存できません」と出続ける**（暗黙の前提に頼らず、入れ替えの所で明示的に消す）。
+      saveBlockedReason: null,
       _docEpoch: s._docEpoch + 1, // 別の文書になった（走っている保存の着地を受け取らない・#762）
       meta: defaultHeader(),
       parts: [],
@@ -1390,6 +1393,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       hasRetiredTimelineEdits,
       draftFromAi: false, // 読込済みプロジェクトは「生成直後」ではない＝AI作成文言は出さない（#467）
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
+      // ⚠️ **文書が入れ替わったら理由も落とす**（#982 レビュー 🟡）＝前の動画で断られた理由が残ると、
+      // **別の動画で「保存できません」と出続ける**（暗黙の前提に頼らず、入れ替えの所で明示的に消す）。
+      saveBlockedReason: null,
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
       // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
       meta: projectHeaderFromProject(project),

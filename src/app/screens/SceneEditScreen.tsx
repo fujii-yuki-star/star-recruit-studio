@@ -216,7 +216,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAssets, importError, importProgress, clearImportError, isImporting,
-    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
+    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus, saveBlockedReason,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements, addAnimationsForElement,
@@ -3004,7 +3004,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             extra={(
               <button className="btn btn-primary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
                 <SaveIcon size={18} />
-                {saveButtonLabel(saveStatus)}
+                {saveButtonLabel(saveStatus, saveBlockedReason)}
               </button>
             )}
             back={{ label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
