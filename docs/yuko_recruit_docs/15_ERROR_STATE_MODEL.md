@@ -281,6 +281,25 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `BRAND_FONT_CLEAR_FAILED` | warning | — | この文字の形を外しましたが、会社の見た目の指定を外せませんでした。設定の「会社の見た目」から選び直してください | ADR-0036。**片方だけ済んだ**ことを言う（成功に見せない） |
 | `TROUBLE_LOG_OPEN_FAILED` | warning | — | 記録の場所を開けませんでした。もう一度お試しください | `#396` |
 | `PROJECT_OPEN_FAILED` | error | — | このプロジェクトを開けませんでした。もう一度お試しください | 想定外の失敗の受け皿（読み込み側が理由を出せたときはそちらを優先＝**黙って何も出さない、を作らない**） |
+| `BRAND_LOGO_CLEAR_FAILED` | warning | — | 会社の見た目のロゴを外せませんでした。設定の「会社の見た目」から選び直してください | ADR-0036。**素材は外れたが、会社の見た目は消した素材を指したまま**＝片方だけ済んだことを言う |
+| `BRAND_LOGO_LOOKUP_FAILED` | warning | — | 会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください | ADR-0035/0036。**タイムライン形式の新規作成でロゴを持ち込むとき**（`BRAND_LOGO_NOT_APPLIED` と別＝見つからないのか、取り込めないのか） |
+| `BRAND_LOGO_COPY_FAILED` | warning | — | 会社の見た目のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください | 同上（**見つかったが運べなかった**） |
+| `BAKE_ESTIMATE_FAILED` | error | — | 作る内容を確かめられませんでした。もう一度お試しください | ADR-0032 決定15（#635）。焼き出しは**押した瞬間に作らない2段階**なので、その1段目が失敗したとき |
+| `READING_DICT_PREVIEW_FAILED` | error | — | 聞き比べに失敗しました。もう一度お試しください | ADR-0037（#350）。**アクセントは聞き比べて選ぶ**ので、聞けないと選べない |
+| `READING_DICT_EXPORT_FAILED` | error | — | 書き出せませんでした。保存先を確かめてもう一度お試しください | ADR-0037（#350）。辞書の書き出し |
+| `READING_DICT_IMPORT_FAILED` | error | — | 読み込めませんでした。ファイルを確かめてもう一度お試しください | ADR-0037（#350）。辞書の読み込み |
+| `VOICE_PREVIEW_FAILED` | error | — | 声の確認に失敗しました。もう一度お試しください | 設定画面の声の試聴（ADR-0005） |
+| `WIZARD_TITLE_REQUIRED` | warning | — | 動画のテーマ・タイトルを入力してください | ADR-0011（`videoKind=general`）。**入れないと先へ進めない**ので、その場で言う |
+| `WIZARD_COMPANY_REQUIRED` | warning | — | 会社名を入力してください | ADR-0011（`videoKind=recruit`）。同上 |
+| `USER_TEMPLATE_SAVE_FAILED` | error | — | 見た目パターンを保存できませんでした。もう一度お試しください | ADR-0017。⚠️ **`USER_TEMPLATE_SAVE_INVALID`（内容が不適合）と別**＝書けなかったのか、書ける内容でなかったのか |
+| `USER_TEMPLATE_DELETE_FAILED` | error | — | 見た目パターンを削除できませんでした。もう一度お試しください | ADR-0017 |
+| `ASSET_IMAGE_UNREADABLE` | warning | — | 画像を読み込めませんでした。別の画像をお選びください | 素材の取り込み（`13 §5`） |
+| `LIBRARY_LIST_UNREADABLE` | error | — | よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください | ADR-0035（#260）。⚠️ **`MANIFEST_UNREADABLE` と別**＝あちらは目録そのもの、こちらは一覧を出す操作 |
+| `LIBRARY_ASSET_MISSING` | warning | — | この素材は見つかりませんでした。一覧を開き直してください | ADR-0035（#260） |
+| `FRAME_CAPTURE_NO_VIDEO` | warning | — | 先に動画を取り込んでから、切り出したい時間を選んでください | `#349`。**順番を言う**（押せるのに何も起きない、を作らない） |
+| `BRAND_KIT_UNREADABLE` | warning | — | 会社の見た目を読めませんでした。中身を失わないよう、変えられません。アプリを開き直してください | ADR-0036（#351）。⚠️ **読めないものを空で上書きしない**（目録の扱いと同じ流儀＝`11 §2.1`） |
+| `BGM_FILE_UNREADABLE` | warning | — | BGMを読み込めませんでした。別のファイルでお試しください | `13 §8` |
+| `AI_RESPONSE_UNREADABLE` | error | 再生成/手動 | AIからの提案を読み取れませんでした。もう一度お試しください | `12 §9.3`。⚠️ **`AI_RESPONSE_INVALID` と別**＝あちらは形が合わない、こちらは読み取り自体ができない（プロバイダ側） |
 
 > ⚠️ **この表の「利用者に出す文言」は機械で守る**（#750 再レビュー）＝`uiLabels.test.ts` が
 > `editBlockedMessage`／`exportBlockedMessage`／`bakeNoteMessage` の各表**と、共有関数が返す文**
