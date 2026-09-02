@@ -81,6 +81,7 @@ const BAKE_BROKEN_RESULT_MESSAGE =
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
+import { isOtherExportRunning } from "./exportLock";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import { KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
 
@@ -1411,10 +1412,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   restoreToRestorePoint: async (projectId, name) => {
     // ⚠️ **書き出し中はやらない**（多重防御）＝ほかの入口（開く・消す・複製）と揃える。
     // 一覧のボタンも押せなくしてあるが、押せないようにするだけでは守りにならない。
-    if (isExportBusy(get().exportRun.phase)) return 0;
-    // ⚠️ **走っている保存の着地を待つ**（α-7 出口監査 🔴）＝`_doSave` は書き込みの**後**でしか
-    // 「まだ同じ文書か」を見ないので、待たずに戻すと**戻した `project.json` を戻す前の内容で
-    // 上書き**する（何も言われずに復元が無かったことになる）。`deleteProject` と同じ手順。
+    // ⚠️ **どちらの形式が書き出していても戻さない**（#977）＝`exportRun` は場面形式のものしか見ない。
+    // タイムライン形式の書き出し中に戻すと、焼いている最中の入力が入れ替わる（ADR-0032「走っている間は入力を固定」）。
+    if (isExportBusy(get().exportRun.phase) || isOtherExportRunning("scene")) return 0;
+    // ⚠️ **両方の形式の受け手に手放させ、飛んでいる書き込みの着地を待つ**（#977）＝
+    // もとは場面形式だけを手放し、場面形式の `saveInFlight` だけを待っていた。タイムライン形式は
+    // **待たれも手放されもしない**ので、走っている保存の着地が**戻した `project.json` を上書き**した
+    //（出口監査の🔴とまったく同じ形）。`deleteProject` が使っている仕組みをそのまま通す＝
+    // **受け手が増えたときに数え漏れない**（画面が形式を数え上げる形にしない）。
+    // ⚠️ **戻す用の `restore` は使わない**＝戻した内容で開き直すのは呼び出し側（知らせに答えてから）。
+    await emitProjectDeleted(projectId);
+    // ⚠️ **自分の保存も待つ**＝`emitProjectDeleted` の受け手は「他の store」で、この store 自身は
+    // 手放し（`newProject`）はするが `saveInFlight` の着地は別に待つ必要がある。
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
     // ⚠️ **開いていたら手放す**（α-7 再監査 🔴）＝印を進めるだけでは、**画面に戻す前の文書が開いたまま**
     // 残る。そのまま編集を続けられると次の保存が**戻した `project.json` を戻す前の内容で上書き**し、

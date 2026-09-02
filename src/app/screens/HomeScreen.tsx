@@ -286,6 +286,18 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       // タイムライン形式は別の文書なので別の store・別の画面（読み込めなかった理由は画面側が出す）。
       if (isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format })) {
         await openTimelineProject(projectId);
+        // ⚠️ **開けなかったときは、控えの導線まで面倒を見る**（#977）＝
+        // タイムライン形式は失敗を store の状態に飲むので、そのまま遷移すると
+        // **控えがあることを誰も言わない**（`save_project` の控えは両形式に効くのに）。
+        // 場面形式の catch と同じ扱いにそろえる。
+        const failed = useTimelineStore.getState();
+        if (failed.loadError && failed.loadFailure === "broken") {
+          setOpenError(failed.loadError);
+          setOpeningId(null);
+          const savedAt = await projectBackupTime(projectId).catch(() => null);
+          if (savedAt) setRecoverable({ projectId, savedAt });
+          return;
+        }
         onNavigate("timeline-project");
         return;
       }

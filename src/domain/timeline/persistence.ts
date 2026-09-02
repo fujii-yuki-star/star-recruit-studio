@@ -58,7 +58,18 @@ function isAudioSettingsRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** 読込に失敗したことを UI へ伝える例外（場面形式の `ProjectLoadError` と同じ役割）。 */
-export class TimelineLoadError extends Error {}
+export class TimelineLoadError extends Error {
+  constructor(
+    message: string,
+    /**
+     * どういう落ち方か。**既定は `unsupported`＝控えから戻す導線を出さない側**
+     *（壊れていないものを巻き戻させない）。場面形式の `ProjectLoadError` と同じ語彙にそろえる（#977）。
+     */
+    readonly failure: 'broken' | 'unsupported' = 'unsupported',
+  ) {
+    super(message);
+  }
+}
 
 /**
  * 文字列(JSON) → タイムライン形式の文書。形式・版・スキーマ適合を確かめる。
@@ -73,7 +84,7 @@ export function parseTimelineProjectDoc(text: string): TimelineProject {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new TimelineLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。');
+    throw new TimelineLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。', 'broken');
   }
   if (typeof raw !== 'object' || raw === null || !isTimelineProjectDoc(raw)) {
     throw new TimelineLoadError('この動画はタイムラインで編集する形式ではありません。一覧から別の動画を選んでください。');
@@ -95,7 +106,7 @@ export function parseTimelineProjectDoc(text: string): TimelineProject {
   const migrated = migrateTimelineProject(doc);
   if (!validateTimelineProject(migrated)) {
     console.warn('[timeline] 読み込んだ内容がスキーマに未適合:', validateTimelineProject.errors);
-    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。');
+    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   return migrated as unknown as TimelineProject;
 }

@@ -18,6 +18,9 @@ import {
 } from "../../infrastructure/projectFs";
 import { clearStaleVoices } from "../../domain/project/restoreVoices";
 import { parseProjectDoc } from "../../domain/project/persistence";
+import { isTimelineProjectDoc } from "../../domain/projectFormat";
+import { clearStaleTimelineVoices } from "../../domain/timeline/restoreVoices";
+import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 
 /**
  * いまの `project.json` を、必要なら復元ポイントとして控え、古いぶんを片づける。
@@ -62,11 +65,22 @@ export async function restoreToPoint(projectId: string, name: string): Promise<n
   let finalText = text;
   let cleared = 0;
   try {
-    const restored = parseProjectDoc(text);
-    const current = parseProjectDoc(await loadProjectDoc(projectId));
-    const fixed = clearStaleVoices(restored, current);
-    cleared = fixed.count.cleared;
-    finalText = JSON.stringify(fixed.project, null, 2);
+    const currentText = await loadProjectDoc(projectId);
+    // ⚠️ **形式で読み分ける**（#977）＝場面形式の読み手に通すだけだったので、
+    // タイムライン形式では**必ず落ちて `clearStaleVoices` が一度も走らなかった**＝
+    // 文と音の食い違いが**手当て無しで残っていた**（タイムラインの読み上げも決まった名前で上書きされる）。
+    if (isTimelineProjectDoc(JSON.parse(text) as Parameters<typeof isTimelineProjectDoc>[0])) {
+      const fixed = clearStaleTimelineVoices(
+        parseTimelineProjectDoc(text),
+        parseTimelineProjectDoc(currentText),
+      );
+      cleared = fixed.count.cleared;
+      finalText = JSON.stringify(fixed.doc, null, 2);
+    } else {
+      const fixed = clearStaleVoices(parseProjectDoc(text), parseProjectDoc(currentText));
+      cleared = fixed.count.cleared;
+      finalText = JSON.stringify(fixed.project, null, 2);
+    }
   } catch {
     /* 比べられないときは、戻す内容をそのまま書く */
   }

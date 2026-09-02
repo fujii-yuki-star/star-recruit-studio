@@ -99,3 +99,36 @@ describe("戻したら、開いていた文書を手放す（α-7 再監査 🔴
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+// ⚠️ **両方の形式の受け手に手放させる**（#977）。
+// もとは場面形式だけを手放し、場面形式の保存だけを待っていた＝タイムライン形式は
+// **待たれも手放されもしない**ので、走っている保存の着地が戻した内容を上書きした。
+describe("戻すときは、両方の形式へ手放させる（#977）", () => {
+  beforeEach(() => useProjectStore.setState({ _doSave: 本物の保存 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("タイムライン形式の受け手にも知らせる（着地を待つ）", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const deletion = await import("./projectDeletion");
+    const heard: string[] = [];
+    const off = deletion.onProjectDeleted((id) => { heard.push(id); return undefined; });
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_007", "p-1.json");
+    off();
+    expect(heard).toEqual(["proj_20260901_007"]);
+  });
+
+  it("別の形式が書き出している間は戻さない", async () => {
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const lock = await import("./exportLock");
+    lock.useExportLockStore.getState().acquire("timeline");
+    expect(await useProjectStore.getState().restoreToRestorePoint("proj_20260901_008", "p-1.json")).toBe(0);
+    expect(restore).not.toHaveBeenCalled();
+    lock.useExportLockStore.getState().release("timeline");
+  });
+
+  it("自分の形式が書き出していない・錠も空いていれば戻す", async () => {
+    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_009", "p-1.json");
+    expect(restore).toHaveBeenCalled();
+  });
+});
