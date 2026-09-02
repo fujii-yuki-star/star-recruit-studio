@@ -1420,8 +1420,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // **待たれも手放されもしない**ので、走っている保存の着地が**戻した `project.json` を上書き**した
     //（出口監査の🔴とまったく同じ形）。`deleteProject` が使っている仕組みをそのまま通す＝
     // **受け手が増えたときに数え漏れない**（画面が形式を数え上げる形にしない）。
-    // ⚠️ **戻す用の `restore` は使わない**＝戻した内容で開き直すのは呼び出し側（知らせに答えてから）。
-    await emitProjectDeleted(projectId);
+    // ⚠️ **戻せなかったら、手放した相手を戻す**（#980 レビュー 🟡）＝`deleteProject` と同じ形。
+    // 手放しを先にやる以上、失敗したときに戻さないと**一覧には動画が残るのに編集画面だけ空**になる
+    //（利用者から見ると作業が消えたように見える）。⚠️ **成功したときは戻さない**＝
+    // 戻した内容で開き直すのは呼び出し側（知らせに答えてから）で、ここで開くと**答える前に画面が変わる**。
+    const restoreOthers = await emitProjectDeleted(projectId);
     // ⚠️ **自分の保存も待つ**＝`emitProjectDeleted` の受け手は「他の store」で、この store 自身は
     // 手放し（`newProject`）はするが `saveInFlight` の着地は別に待つ必要がある。
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
@@ -1430,7 +1433,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 復元が何も言われずに消える。⚠️ **どのボタンを押したかに依存させない**＝知らせに「あとで開く」を
     // 足した時点で、開き直さずに編集へ帰る道ができた（`deleteProject` が「消す前に手放す」のと同じ理由）。
     if (get().meta.projectId === projectId) get().newProject();
-    return await restoreToPoint(projectId, name);
+    try {
+      return await restoreToPoint(projectId, name);
+    } catch (e) {
+      await restoreOthers();
+      throw e;
+    }
   },
 
   deleteProject: async (projectId) => {

@@ -132,3 +132,32 @@ describe("戻すときは、両方の形式へ手放させる（#977）", () => 
     expect(restore).toHaveBeenCalled();
   });
 });
+
+// ⚠️ **戻せなかったら、手放した相手を戻す**（#980 レビュー 🟡）。
+// 手放しを先にやる以上、失敗したときに戻さないと**一覧には動画が残るのに編集画面だけ空**になる。
+describe("戻せなかったときの後始末（#980 レビュー 🟡）", () => {
+  beforeEach(() => useProjectStore.setState({ _doSave: 本物の保存 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("失敗したら、手放した受け手を戻す", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockRejectedValue(new Error("戻せない"));
+    const deletion = await import("./projectDeletion");
+    let restored = 0;
+    const off = deletion.onProjectDeleted(() => ({ restore: () => { restored += 1; } }));
+    await expect(
+      useProjectStore.getState().restoreToRestorePoint("proj_20260901_010", "p-1.json"),
+    ).rejects.toThrow();
+    off();
+    expect(restored).toBe(1);
+  });
+
+  it("成功したときは戻さない（答える前に画面を変えない）", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const deletion = await import("./projectDeletion");
+    let restored = 0;
+    const off = deletion.onProjectDeleted(() => ({ restore: () => { restored += 1; } }));
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_011", "p-1.json");
+    off();
+    expect(restored).toBe(0);
+  });
+});
