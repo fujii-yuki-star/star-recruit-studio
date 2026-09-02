@@ -6,8 +6,8 @@
 //
 // 自由配置エディタ（`FreeLayoutOverlay`）が持っていた同じ作りをここへ出して**1つにする**（§6）＝
 // 画面ごとに閉じ方や見た目が割れない。
-import { useEffect } from "react";
-import { useEscapeOwner } from "../hooks/escapeOwners";
+
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 
 export interface ContextMenuItem {
   label: string;
@@ -41,14 +41,13 @@ export function ContextMenu({
 }): React.ReactElement | null {
   // **`Escape` を受け持っている間は名乗る**（#701 レビュー）＝外側（画面）の `Escape` が同時に走って
   // 「メニューを閉じただけなのに選択も解ける」を作らない。
-  useEscapeOwner(true);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // ⚠️ **処理は名簿へ預ける**（#965）＝メニューを開いたまま別の受け手（削除の確認など）が出ると、
+  // 自分で購読していたときは1回の `Escape` で両方いっぺんに閉じた（「1段ずつはがす」から外れる）。
+  // ⚠️ **項目が無いときは名乗らない**＝下の早い `return` で**描かれないのに順番を占める**（#965 レビュー）。
+  useEscapeReceiver(items.length > 0, () => {
+    onClose();
+    return true;
+  });
 
   if (items.length === 0) return null;
   // 画面幅・高さは実行時にしか分からないので、ここで寄せる（開く側に同じ計算を書かせない）。
