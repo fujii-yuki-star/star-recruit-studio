@@ -8,7 +8,10 @@ vi.mock('../../infrastructure/assetLibraryFs', () => ({
   listLibraryAssets: vi.fn(),
   copyLibraryAssetToProject: vi.fn(),
 }));
-vi.mock('./assetImport', () => ({
+// ⚠️ **丸ごと差し替えない**（α-7 出口監査 🟡）＝`reserveAssetId`（番号を使い回さない規則）まで
+// 消えると、素材の番号が空き番号を埋める形に戻る＝**前の写真を上書きする**作りをテストが素通しする。
+vi.mock('./assetImport', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./assetImport')>()),
   probeImageSize: vi.fn(async () => ({ width: 1920, height: 1080 })),
   probeAndThumbVideo: vi.fn(async () => ({})),
 }));
@@ -19,7 +22,7 @@ vi.mock('../../infrastructure/brandKitFs', () => ({
 
 import { useProjectStore } from './projectStore';
 import { copyLibraryAssetToProject, listLibraryAssets } from '../../infrastructure/assetLibraryFs';
-import { probeImageSize } from './assetImport';
+import { resetAssetIdReservations, probeImageSize } from './assetImport';
 import { loadBrandKit } from '../../infrastructure/brandKitFs';
 import { ASSET_TYPE } from '../../domain/enums';
 
@@ -40,6 +43,11 @@ beforeEach(() => {
   useProjectStore.getState().setExportRun({ phase: 'idle' });
 });
 afterEach(() => vi.clearAllMocks());
+
+// ⚠️ **番号の予約は起動中ずっと残る**（#712・α-7 出口監査 🟡）＝素材の番号を使い回すと、
+// 前の写真を上書きする。テストの間は毎回まっさらにする（**ファイルの直下に置く**＝
+// describe の中に入れると、その describe のテストにしか効かない）。
+afterEach(() => resetAssetIdReservations());
 
 describe('よく使う素材からの取り込み（🟡9）', () => {
   it('コピーの間に別の動画を開いたら、その動画へ素材を生やさない', async () => {

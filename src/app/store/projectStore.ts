@@ -19,7 +19,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAnimationId, createBgmId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAnimationId, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
   ProjectLoadError,
 } from "../../domain/project/persistence";
@@ -59,7 +59,7 @@ import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { probeAndThumbVideo, probeImageSize } from "./assetImport";
+import { probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -2151,7 +2151,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（番号が重なれば `11.2` の一意性が破れ、同名ファイルを上書きし、巻き戻しが別の素材を消す）。
     const stillOpen = sameDocGuard(get);
     // 素材1つぶんの導出は domain に1つ（#712・§2-7）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
-    const { asset, fileName } = newAssetFrom(file.name, get().assets.map((a) => a.assetId));
+      // ⚠️ **番号は使い回さない**（α-7 出口監査 🟡）＝素材のファイル名は `assets/<番号>.<拡張子>` で
+      // 固定なので、空き番号を埋めると**同じ名前のファイルを上書きして前の写真が消える**。
+      // 〈素材を消す → 別の素材を入れる（同じ番号を拾う）→ 前の状態に戻す〉で、戻した文書の
+      // その番号が**別の写真の中身**を指す＝ファイルは在るので「見つかりません」でも拾えず、
+      // **黙って別の絵の動画が出る**。⚠️ **通常の取り消しでも起きる**（履歴は `assets` を持たない）。
+      // 同じ規則が既にタイムライン形式にある（`reserveAssetId`）ので、そちらへ揃える。
+    const { asset, fileName } = newAssetFrom(file.name, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     const { assetId, assetType } = asset;
     // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。以降の離脱は isImporting を戻す。
     set({ isImporting: true });
@@ -2230,7 +2236,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // パス末尾から種別・拡張子・表示名を決める（導出は domain に1つ＝#712・§2-7）。
-    const { asset, fileName } = newAssetFrom(path, get().assets.map((a) => a.assetId));
+    const { asset, fileName } = newAssetFrom(path, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     const { assetId, assetType } = asset;
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（🟡9 と同じ理由）。
     const stillOpen = sameDocGuard(get);
@@ -2302,7 +2308,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const lib = list.find((a) => a.id === libraryAssetId);
     if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
-    const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
+    const { asset, fileName } = assetFromLibrary(lib, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     if (!stillOpen()) return done(null);
     set({ importError: null });
     try {

@@ -3,6 +3,7 @@
 // ⚠️ **`assetId` を付け替えないのが肝**（ADR-0024＝Asset は元素材の源泉）＝置いた場所・切り出す
 // 範囲・キーフレーム・字幕の紐づけは**構造的に**そのまま残る（参照の書き換え漏れが起きない）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetAssetIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
@@ -19,6 +20,11 @@ const scene = (over: Partial<Scene> = {}): Scene => ({
   character: { enabled: false, characterId: 'yuko' }, texts: {},
   narration: { text: '', status: 'none' }, warnings: [], ...over,
 } as Scene);
+
+// ⚠️ **番号の予約は起動中ずっと残る**（#712・α-7 出口監査 🟡）＝素材の番号を使い回すと、
+// 前の写真を上書きする。テストの間は毎回まっさらにする（**ファイルの直下に置く**＝
+// describe の中に入れると、その describe のテストにしか効かない）。
+afterEach(() => resetAssetIdReservations());
 
 describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
   beforeEach(() => {

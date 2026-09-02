@@ -293,6 +293,34 @@ fn load_project(app: tauri::AppHandle, project_id: String) -> Result<String, Str
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 一覧に出すための中身を採る（`project.json` が読めなければ**戻り先**から）。
+///
+/// ⚠️ **順番に意味がある**＝いまの内容 → 前に保存できていたところ → いちばん新しい復元ポイント。
+/// ⚠️ **どれも無ければ `None`**＝戻り先が無いフォルダの行を出しても、押して何もできない。
+fn read_project_value(dir: &std::path::Path) -> Option<serde_json::Value> {
+    let read = |p: PathBuf| -> Option<serde_json::Value> {
+        let text = fs::read_to_string(p).ok()?;
+        serde_json::from_str::<serde_json::Value>(&text).ok()
+    };
+    if let Some(v) = read(dir.join("project.json")) {
+        return Some(v);
+    }
+    if let Some(v) = read(dir.join("project.prev.json")) {
+        return Some(v);
+    }
+    // 復元ポイントは名前に時刻が入っているので、いちばん新しいものを選ぶ。
+    let mut points: Vec<(u64, PathBuf)> = fs::read_dir(dir.join("restore"))
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            restore_point_time(&name).map(|ms| (ms, e.path()))
+        })
+        .collect();
+    points.sort_by_key(|(ms, _)| *ms);
+    read(points.pop()?.1)
+}
+
 /// 保存済みプロジェクトの要約一覧を更新日時の新しい順で返す。
 #[tauri::command]
 fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
@@ -306,11 +334,14 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
         if !entry.path().is_dir() {
             continue;
         }
-        let Ok(text) = fs::read_to_string(entry.path().join("project.json")) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
+        // ⚠️ **読めない動画も、戻り先があるなら行を出す**（α-7 出口監査 🔴）＝
+        // 戻す入口（控えから開く・前の状態に戻す）は**一覧の行からしか押せない**ので、
+        // ここで飛ばすと **#263 が救おうとした場面（半端な JSON で開けない）がちょうど到達不能**になる。
+        // ⚠️ **中身は控えから採る**＝名前が出ないと、どれが自分の動画か分からない。
+        // ⚠️ **戻り先が何も無いフォルダは出さない**（押しても何もできない行を作らない）。
+        let value = match read_project_value(&entry.path()) {
+            Some(v) => v,
+            None => continue,
         };
         let get = |key: &str| {
             value
@@ -1356,6 +1387,56 @@ mod manifest_tests {
         assert!(!ids
             .iter()
             .any(|i| i.starts_with("user_font_") && i != "user_font_001" && i != "user_font_007"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 読めない動画も、戻り先があるなら一覧に出す（α-7 出口監査 🔴）。
+    ///
+    /// ⚠️ **戻す入口は一覧の行からしか押せない**ので、ここで飛ばすと
+    /// **#263 が救おうとした場面（半端な JSON で開けない）がちょうど到達不能**になる。
+    #[test]
+    fn read_project_value_falls_back_to_backups() {
+        use super::read_project_value;
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_list_fallback");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // 何も無い＝行を出さない（押して何もできない行を作らない）。
+        assert!(
+            read_project_value(&dir).is_none(),
+            "戻り先が無いのに行を出した"
+        );
+
+        // 復元ポイントだけある＝いちばん新しいものを使う。
+        fs::create_dir_all(dir.join("restore")).unwrap();
+        fs::write(dir.join("restore/p-100.json"), r#"{"projectName":"古い"}"#).unwrap();
+        fs::write(
+            dir.join("restore/p-200.json"),
+            r#"{"projectName":"新しい"}"#,
+        )
+        .unwrap();
+        let v = read_project_value(&dir).expect("復元ポイントから採れるはず");
+        assert_eq!(
+            v.get("projectName").and_then(|x| x.as_str()),
+            Some("新しい")
+        );
+
+        // 控えがあれば、そちらを優先する。
+        fs::write(dir.join("project.prev.json"), r#"{"projectName":"控え"}"#).unwrap();
+        let v = read_project_value(&dir).expect("控えから採れるはず");
+        assert_eq!(v.get("projectName").and_then(|x| x.as_str()), Some("控え"));
+
+        // いまの内容が読めるなら、それがいちばん優先。
+        fs::write(dir.join("project.json"), r#"{"projectName":"いま"}"#).unwrap();
+        let v = read_project_value(&dir).expect("いまの内容から採れるはず");
+        assert_eq!(v.get("projectName").and_then(|x| x.as_str()), Some("いま"));
+
+        // 半端な JSON は「読めない」＝控えへ落ちる（#263 が名指しする場面）。
+        fs::write(dir.join("project.json"), "{半端").unwrap();
+        let v = read_project_value(&dir).expect("控えへ落ちるはず");
+        assert_eq!(v.get("projectName").and_then(|x| x.as_str()), Some("控え"));
+
         let _ = fs::remove_dir_all(&dir);
     }
 
