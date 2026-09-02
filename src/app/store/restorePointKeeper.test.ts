@@ -129,7 +129,29 @@ describe("restoreToPoint（#967 レビュー 🟡2・🟡4）", () => {
     const write = vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
     await restoreToPoint("proj_20260901_001", "p-1.json");
     expect(drop).toHaveBeenCalledWith("proj_20260901_001", "p-0.json"); // いちばん古いもの
-    // ⚠️ **落としてから書く**（書いてから消すと、一瞬だけ上限を超える）。
-    expect(drop.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
+    // ⚠️ **書いてから落とす**（α-7 再監査 🟡で**順番を逆にした**）＝
+    // もとは「落としてから書く（書いてから消すと、一瞬だけ上限を超える）」だったが、
+    // それだと**書き込みに失敗したとき、戻れていないのに世代だけ減る**（次の手が1つ減る）。
+    // 一瞬1つ多いのは見た目だけの話で、戻せずに減るほうが重い。
+    expect(write.mock.invocationCallOrder[0]).toBeLessThan(drop.mock.invocationCallOrder[0]);
+  });
+
+  it("戻せなかったら、古い世代を落とさない（戻れていないのに手が減る、を作らない）", async () => {
+    const points = Array.from({ length: RESTORE_POINT_MAX }, (_, i) => at(i * 1000));
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue(points);
+    const drop = vi.spyOn(projectFs, "dropRestorePoint").mockResolvedValue(undefined);
+    vi.spyOn(projectFs, "restoreProjectText").mockRejectedValue(new Error("書けない"));
+    await expect(restoreToPoint("proj_20260901_001", "p-1.json")).rejects.toThrow();
+    expect(drop).not.toHaveBeenCalled();
+  });
+
+  it("刈り取りに失敗しても、戻す操作は失敗にしない（あると助かる後始末）", async () => {
+    vi.spyOn(projectFs, "readRestorePoint").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "loadProjectDoc").mockResolvedValue(doc([]));
+    vi.spyOn(projectFs, "listRestorePoints").mockRejectedValue(new Error("一覧が読めない"));
+    vi.spyOn(projectFs, "restoreProjectText").mockResolvedValue(undefined);
+    await expect(restoreToPoint("proj_20260901_001", "p-1.json")).resolves.toBe(0);
   });
 });

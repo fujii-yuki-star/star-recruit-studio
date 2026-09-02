@@ -60,7 +60,9 @@ export interface StaleVoiceCount {
  *
  * ⚠️ **文が同じものは触らない**＝いまの音はその文で作ったものなので、そのまま使える
  * （戻すたびに全部作り直させると、戻すこと自体が重すぎて使われなくなる）。
- * ⚠️ **いまに無い場面・行は触らない**＝音のファイルも無いので、`status` は戻す内容のままでよい。
+ * ⚠️ **いまに無い場面・行は「作成前」へ倒す**（#975 レビューで説明のズレを直した）＝
+ * 読み上げの WAV（`voices/…`）は**場面や行を消しても残る**ので、素通りさせると
+ * 「文は戻った・音はいまの文」が復活する。⚠️ **比べようが無いので、分からない側へ倒す**。
  */
 export function clearStaleVoices(
   restored: Project,
@@ -111,8 +113,12 @@ export function clearStaleVoices(
       const lines = s.lines.map((l) => {
         const curInput = cur.lines.get(l.lineId);
         const myInput = mine.lines.get(l.lineId);
-        if (l.status !== NARRATION_STATUS.generated || curInput === undefined || myInput === undefined) return l;
-        if (sameSynthInput(myInput, curInput)) return l;
+        if (l.status !== NARRATION_STATUS.generated || myInput === undefined) return l;
+        // ⚠️ **いまに無い行も、分からない側へ倒す**（α-7 再監査 🟡・場面と同じ扱い）＝
+        // 読み上げの WAV（`voices/<場面>__<行>.wav`）は**行を消しても残る**ので、素通りさせると
+        // 〈行の文を直して作り直す → その行を消す → 前の時点へ戻す〉で
+        // **字幕は戻った文・音はいまの文**が復活する（場面について書いた理由がそのまま当てはまる）。
+        if (curInput !== undefined && sameSynthInput(myInput, curInput)) return l;
         touched = true;
         cleared += 1;
         return unmade(l);

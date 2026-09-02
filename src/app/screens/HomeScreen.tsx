@@ -313,6 +313,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
    * 既にある確認（`pendingAction`）と同じ扱いにする＝守り方を2通りに増やさない。
    */
   const awaitingAnswer = pendingAction !== null || voicesCleared !== null;
+  // ⚠️ **戻している間も、他の動画を触らせない**（α-7 再監査 🟡）＝戻す操作は走っている保存の
+  // 着地を待つので**数秒かかりうる**。その間に別の動画を押せると、開いた直後に
+  // `doRestorePoint` の続きが戻した動画を開き直し、**開いたばかりの動画が黙ってすり替わる**。
+  const listBusy = openingId !== null || duplicatingId !== null || restoring;
 
   /**
    * **サイドバーからも抜けさせない**（#971 レビュー 🟡）。
@@ -339,8 +343,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   /**
    * 選んだ時点へ戻して、そのまま開き直す（#263 段階2）。
    *
-   * ⚠️ **戻したら開く**＝いま画面が持っている内容は戻す前のものなので、開き直さないと
-   * 次の保存で**戻したはずのファイルを上書きする**（戻した意味が消える）。
+   * ⚠️ **開いていた動画は `restoreToRestorePoint` が手放す**（α-7 再監査 🔴）＝
+   * 画面が持っている内容は戻す前のものなので、持ったままだと次の保存で
+   * **戻したはずのファイルを上書きする**（戻した意味が消える）。手放しは store 側でやる＝
+   * **どのボタンを押したかに依存させない**（「あとで開く」で編集へ帰る道ができたため）。
    */
   async function doRestorePoint(projectId: string, name: string) {
     if (restoring || !name) return;
@@ -719,9 +725,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
-                      disabled={isExporting || openingId !== null || duplicatingId !== null || awaitingAnswer || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || duplicatingId !== null || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
+                      disabled={isExporting || listBusy || awaitingAnswer || confirmNew}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : restoring ? "前の状態に戻しています…" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || listBusy || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
                           （後方互換＝古い動画・まだ保存していない動画でも一覧は普通に出る）。 */}
@@ -773,7 +779,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                         戻したあとその動画を開くので、開けない状況では押せないようにする。 */}
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={isExporting || awaitingAnswer || openingId !== null || duplicatingId !== null || restoring}
+                      disabled={isExporting || awaitingAnswer || listBusy}
                       onClick={() => void openRestorePanel(p.projectId)}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を前の状態に戻す`}
                       title={

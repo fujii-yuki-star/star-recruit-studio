@@ -284,10 +284,16 @@ fn restore_backup_files(path: &std::path::Path) -> Result<(), String> {
         // **開けなかったほうが一度も残らないまま消える**。「消さない」という約束が、
         // その失敗経路でだけ静かに破れる。**戻せたが手がかりは失った**より、**戻せなかった**と断る。
         fs::rename(path, path.with_file_name("project.broken.json")).map_err(|_| {
-            "開けなかったほうを取っておけなかったので、戻していません。".to_string()
+            // ⚠️ **次の行動を出す**（α-7 再監査 🟡）＝「戻していません」だけだと、
+            // 利用者はここから何をすればよいか分からない（§2-5）。
+            "開けなかったほうを取っておけなかったので、戻していません。もう一度お試しください。"
+                .to_string()
         })?;
     }
-    write_json_atomic(path, &text)
+    // ⚠️ **双子の片方だけ包まない**（α-7 再監査 🟡）＝`restore_project_text` の書き込みは
+    // `RESTORE_WRITE_FAILED` へ包んだのに、こちらは `os error 3` のような**英語の技術詳細**を
+    // そのまま返していた（画面は Rust の文字列を優先して出す＝§2-3・§2-5）。
+    write_json_atomic(path, &text).map_err(|_| RESTORE_WRITE_FAILED.to_string())
 }
 
 /// appData/projects/<projectId>/project.json を読み、本文を返す。

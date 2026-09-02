@@ -59,7 +59,7 @@ import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
+import { adoptPendingAssetIds, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -1121,6 +1121,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
       }
       // ナレーション音声をディスクへ保存し、voicePath を更新（生成済みのみ）。
       // 生成済みでない場面は古い音声参照を残さない（再生成で上書きされる）。
@@ -1188,6 +1192,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ **上書きの前に控える**（#263 段階2）＝控えたいのは「この保存で消える前」の状態。
       // 後に置くと、いま保存した内容がそのまま世代になり、戻っても何も変わらない。
       await keepRestorePoints(projectId, Date.now());
+      // ⚠️ **書く直前にも「まだ同じ文書か」を見る**（α-7 再監査 🔴）＝これまでは書き込みの**後**でしか
+      // 見ておらず、`_docEpoch` を進めても**ディスクへは書かれていた**（止まるのは画面への持ち帰りだけ）。
+      // そのため「前の状態に戻す」の直後に積まれた保存が、**戻した内容を戻す前の内容で上書き**した。
+      // 待っている間（`keepRestorePoints` も待つ）に手放されることがあるので、**待ちのすぐ後**で見る。
+      if (!stillOpen()) return;
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       // ここから先は**いまの状態**へ書き戻す＝別の動画へ移っていたら何もしない（書けたファイルはそのまま
       // ディスクに残る＝内容は正しい。持ち帰らないのは「いまの画面の状態」への反映だけ）。
@@ -1407,9 +1416,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 「まだ同じ文書か」を見ないので、待たずに戻すと**戻した `project.json` を戻す前の内容で
     // 上書き**する（何も言われずに復元が無かったことになる）。`deleteProject` と同じ手順。
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
-    // ⚠️ **これ以上この文書へ書かない印を立てる**＝待っている間に積まれた保存が、
-    // 戻したあとに着地して同じことをする。`_docEpoch` を進めると `sameDocGuard` が弾く。
-    if (get().meta.projectId === projectId) set((s) => ({ _docEpoch: s._docEpoch + 1, saveStatus: "saved" }));
+    // ⚠️ **開いていたら手放す**（α-7 再監査 🔴）＝印を進めるだけでは、**画面に戻す前の文書が開いたまま**
+    // 残る。そのまま編集を続けられると次の保存が**戻した `project.json` を戻す前の内容で上書き**し、
+    // 復元が何も言われずに消える。⚠️ **どのボタンを押したかに依存させない**＝知らせに「あとで開く」を
+    // 足した時点で、開き直さずに編集へ帰る道ができた（`deleteProject` が「消す前に手放す」のと同じ理由）。
+    if (get().meta.projectId === projectId) get().newProject();
     return await restoreToPoint(projectId, name);
   },
 
@@ -2107,6 +2118,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
         // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
         if (!stillOpen()) return;
@@ -2189,6 +2204,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
         // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
         if (!stillOpen()) return;
@@ -2248,6 +2267,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         // ⚠️ **番号の着地も括る**（差分再監査）＝一覧を読んでいる間に別の動画を開くと、
         // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ＝#762）。
         if (!stillOpen()) return;
@@ -2317,6 +2340,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 取り込みと同じく、保存前なら**ここで番号を採る**（素材の置き場が要るため）。
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         // ⚠️ **番号の着地も括る**（差分再監査 2巡目）＝一覧を読んでいる間に別の動画を開くと、
         // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ）。
         if (!stillOpen()) return null;
@@ -2357,7 +2384,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ importError: "先に動画を取り込んでから、切り出したい時間を選んでください。" });
       return null;
     }
-    const { asset, fileName } = newFrameAsset(src.displayName, atSec, get().assets.map((a) => a.assetId));
+    const { asset, fileName } = newFrameAsset(src.displayName, atSec, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（🟡9 と同じ理由＝切り出しの間に開き直せる）。
     const stillOpen = sameDocGuard(get);
     set({ isImporting: true, importError: null });
@@ -2454,6 +2481,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         // ⚠️ **番号の着地も括る**（差分再監査 2巡目）＝一覧を読んでいる間に別の動画を開くと、
         // **新しい動画の projectId を採り立ての別 id で上書き**する（以後の自動保存が別フォルダへ）。
         if (!stillOpen()) return;
@@ -2657,6 +2688,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!projectId) {
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        // ⚠️ **まだ番号の無いうちに取った素材の予約を引き継ぐ**（α-7 再監査 🟡）＝
+        // 引き継がないと、保存して番号が付いた後の取り込みが**1件目と同じ番号を再発行**し、
+        // `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける）。
+        adoptPendingAssetIds(projectId);
         if (!stillOpen()) return;
         set((st) => ({ meta: { ...st.meta, projectId } }));
       }

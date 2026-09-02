@@ -7,7 +7,7 @@
 // **黙って別の絵の動画が出る**。⚠️ **通常の取り消しでも起きる**（履歴は `assets` を持たない）。
 import { afterEach, describe, expect, it } from "vitest";
 import { createAssetId } from "../../domain/project/persistence";
-import { reserveAssetId, resetAssetIdReservations } from "./assetImport";
+import { adoptPendingAssetIds, reserveAssetId, resetAssetIdReservations } from "./assetImport";
 
 describe("素材の番号を使い回さない（α-7 出口監査 🟡）", () => {
   afterEach(() => resetAssetIdReservations());
@@ -41,24 +41,26 @@ describe("素材の番号を使い回さない（α-7 出口監査 🟡）", () 
  * 場面形式の**取り込みの入口**が、すべて予約を通ること（α-7 出口監査 🟡）。
  *
  * ⚠️ **規則を作っても、配線が漏れたら効かない**＝同じ規則は既にタイムライン形式にあったのに、
- * 場面形式だけ通っておらず、そこで実害が出ていた。**入口の数**を機械で見る。
+ * 場面形式だけ通っておらず、そこで実害が出ていた。**入口の数**を機械で見る。⚠️ **動画から切り出す入口が漏れていた**（α-7 再監査 🟡）。
  * ⚠️ **数で見る**＝どの行かはリファクタで動くが、「3つの入口が予約を通る」は動かない。
  */
 describe("場面形式の取り込みが予約を通る（配線の漏れを見る）", () => {
-  it("素材を作る3つの入口が、すべて予約経由になっている", async () => {
+  it("素材を作る入口が、すべて予約経由になっている", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(process.cwd(), "src/app/store/projectStore.ts"), "utf8");
-    const calls = [...src.matchAll(/(newAssetFrom|assetFromLibrary)\(/g)].length;
+    const calls = [...src.matchAll(/(newAssetFrom|assetFromLibrary|newFrameAsset)\(/g)].length;
     // ⚠️ **2つ目の引数が `[]` か**で見る＝そこに `get().assets.map(...)` を渡す形が
     // 「空き番号を埋める」呼び方。番号は3つ目で渡す（予約したもの／再リンクは既にある番号）。
-    const noGapFill = [...src.matchAll(/(newAssetFrom|assetFromLibrary)\([^,]+,\s*\[\],/g)].length;
-    const reserved = [...src.matchAll(/(newAssetFrom|assetFromLibrary)\([^,]+,\s*\[\],\s*reserveAssetId\(/g)].length;
-    expect(calls, "走査が空振りしている").toBeGreaterThanOrEqual(3);
+    // ⚠️ **引数の位置で見ない**（α-7 再監査）＝`newFrameAsset` は `atSec` を挟むので、
+    // 「2つ目が `[]`」と決め打つと**新しい入口を足した瞬間に走査から外れる**（実際に外れた）。
+    const noGapFill = [...src.matchAll(/(newAssetFrom|assetFromLibrary|newFrameAsset)\([^;]*?\[\],/g)].length;
+    const reserved = [...src.matchAll(/(newAssetFrom|assetFromLibrary|newFrameAsset)\([^;]*?\[\],\s*reserveAssetId\(/g)].length;
+    expect(calls, "走査が空振りしている").toBeGreaterThanOrEqual(4);
     // ⚠️ **空き番号を埋める呼び方が1つも無い**＝ここが本体（前の写真を上書きしない）。
     expect(noGapFill, "空き番号を埋める呼び方が残っている").toBe(calls);
     // ⚠️ **取り込みの入口は予約を通る**＝再リンク（既にある番号を使い直す）だけが例外。
-    expect(reserved, "予約を通る入口が減った").toBeGreaterThanOrEqual(3);
+    expect(reserved, "予約を通る入口が減った").toBeGreaterThanOrEqual(4);
   });
 });
 
@@ -79,5 +81,39 @@ describe("両形式が復元ポイントを作る（配線の漏れを見る）"
     });
     const missing = hits.filter((h) => h.calls === 0).map((h) => h.rel);
     expect(missing, "この形式は復元ポイントを作らない（戻すボタンが空のまま）").toEqual([]);
+  });
+});
+
+// ⚠️ **まだ番号の無いうちに取った予約も引き継ぐ**（α-7 再監査 🟡）。
+// 新しい動画は**取り込みの後で** `proj_YYYYMMDD_NNN` を採るので、1件目の予約は `""` の名前で入る。
+// 引き継がないと、保存して番号が付いた後の2件目が**1件目と同じ番号を再発行**して
+// `assets/asset_001.png` を上書きする（前の写真が別の絵に化ける＝この予約が防ぎたかったこと）。
+describe("番号の無いうちの予約を引き継ぐ（α-7 再監査 🟡）", () => {
+  afterEach(() => resetAssetIdReservations());
+
+  it("番号が付く前に取った番号は、付いた後も再発行されない", () => {
+    const mint = (ids: readonly string[]) => createAssetId(ids);
+    // まだ番号の無い動画で1件目。
+    const first = reserveAssetId("", [], mint);
+    // 保存されて番号が付いた＝引き継ぐ。
+    adoptPendingAssetIds("proj_20260902_001");
+    // 1件目を消したので、いまの文書には素材が無い。
+    const second = reserveAssetId("proj_20260902_001", [], mint);
+    expect(second).not.toBe(first);
+  });
+
+  it("引き継いだら、番号の無い側には残さない（次の新しい動画が飛ばない）", () => {
+    const mint = (ids: readonly string[]) => createAssetId(ids);
+    const first = reserveAssetId("", [], mint);
+    adoptPendingAssetIds("proj_20260902_001");
+    // 別の新しい動画の1件目＝前の動画の番号に引きずられない。
+    expect(reserveAssetId("", [], mint)).toBe(first);
+  });
+
+  it("番号が空のままなら何もしない（呼んでも壊れない）", () => {
+    const mint = (ids: readonly string[]) => createAssetId(ids);
+    const first = reserveAssetId("", [], mint);
+    adoptPendingAssetIds("");
+    expect(reserveAssetId("", [], mint)).not.toBe(first);
   });
 });

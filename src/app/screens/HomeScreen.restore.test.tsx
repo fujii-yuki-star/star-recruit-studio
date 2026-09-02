@@ -68,7 +68,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(document.body.textContent).toMatch(/2件の読み上げは、音が前のままになるので作成前に戻しました/));
-    expect(document.body.textContent).toMatch(/その場面の声の欄から、もう一度作ってください/);
+    expect(document.body.textContent).toMatch(/開き直して、その場面の声の欄からもう一度作ってください/);
     // ⚠️ **まだ開いていない**＝知らせを見る前に画面が変わらない。
     expect(load).not.toHaveBeenCalled();
     // ⚠️ **知らせに答えるまで、別の操作へ抜けられない**（α-7 出口監査 🟡）＝
@@ -76,6 +76,31 @@ describe("前の状態に戻す（#263 段階2）", () => {
     expect((screen.getByText("白紙から作る").closest("button") as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText("動画を開く"));
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
+  });
+
+  // ⚠️ **戻している間は一覧を押せない**（α-7 再監査 🟡）＝戻す操作は走っている保存の着地を待つので
+  // 数秒かかりうる。その間に別の動画を押せると、開いた直後に戻した動画が開き直され、
+  // **開いたばかりの動画が黙ってすり替わる**。
+  it("戻している間は、一覧のほかの動画を押せない", async () => {
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    let finish: (() => void) | null = null;
+    useProjectStore.setState({
+      restoreToRestorePoint: vi.fn(() => new Promise<number>((resolve) => { finish = () => resolve(0); })),
+      loadProject: vi.fn(async () => {}),
+    });
+    await openPanel();
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    await waitFor(() => expect(finish).not.toBeNull());
+    // ⚠️ **実在するボタンで見る**＝当てが外れると `for` が0回まわって**空振り**になる
+    //（最初「べつの動画」で書いて、そのまま緑だった）。
+    const card = screen.getAllByRole("button").find((b) => b.textContent?.includes("テスト動画"));
+    expect(card, "一覧のカードが見つからない").toBeDefined();
+    expect(card).toBeDisabled();
+    // ⚠️ **押せない理由も出す**（#976 レビュー）＝理由の出ない無効化は「壊れている」に見える。
+    expect(card).toHaveAttribute("title", "前の状態に戻しています…");
+    // ⚠️ **後始末まで見届ける**＝ここで放置すると、次のテストの最中に着地して状態を書き換える。
+    finish!();
+    await waitFor(() => expect(screen.queryByText("ここへ戻す")).toBeNull());
   });
 
   // ⚠️ **サイドバーからも抜けさせない**（#971 レビュー 🟡）＝ボタンを押せなくするだけでは、

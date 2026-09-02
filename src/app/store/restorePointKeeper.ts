@@ -70,9 +70,16 @@ export async function restoreToPoint(projectId: string, name: string): Promise<n
   } catch {
     /* 比べられないときは、戻す内容をそのまま書く */
   }
-  for (const p of restorePointsToDrop(await listRestorePoints(projectId))) {
-    await dropRestorePoint(projectId, p.name);
-  }
   await restoreProjectText(projectId, finalText);
+  // ⚠️ **古い世代を落とすのは、戻せてから**（α-7 再監査 🟡）＝先に落とすと、書き込みに失敗したとき
+  // **戻れていないのに世代だけ減る**（次の手が1つ減る）。一瞬1つ多いのは、戻せずに減るより軽い。
+  // ⚠️ **刈り取りの失敗で「戻せなかった」にしない**＝あると助かる後始末であって、戻す操作の一部ではない。
+  try {
+    for (const p of restorePointsToDrop(await listRestorePoints(projectId))) {
+      await dropRestorePoint(projectId, p.name);
+    }
+  } catch {
+    /* 次の保存でまた刈られる（利用者へは出さない） */
+  }
   return cleared;
 }

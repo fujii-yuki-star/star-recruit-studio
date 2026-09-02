@@ -3,9 +3,13 @@
 // ⚠️ `_doSave` は「まだ同じ文書か」を**書き込みの後**でしか見ない＝待たずに戻すと、
 // **戻した `project.json` を戻す前の内容で上書き**する（何も言われずに復元が無かったことになる）。
 // ⚠️ 画面の未保存確認も、`saveStatus === "saving"` の間は false になるので**素通り**する。
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "./projectStore";
 import * as keeper from "./restorePointKeeper";
+
+// ⚠️ **差し替えた `_doSave` は `restoreAllMocks` では戻らない**（`setState` なので）＝
+// 戻さないと、後のテストが**前のテストの止まった保存**を待って固まる（実際に固まった）。
+const 本物の保存 = useProjectStore.getState()._doSave;
 
 describe("戻す操作は走っている保存を待つ（α-7 出口監査 🔴）", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -55,5 +59,43 @@ describe("戻す操作は走っている保存を待つ（α-7 出口監査 🔴
     expect(await useProjectStore.getState().restoreToRestorePoint("proj_20260901_001", "p-1.json")).toBe(0);
     expect(restore).not.toHaveBeenCalled();
     useProjectStore.getState().setExportRun({ phase: "idle" });
+  });
+});
+
+// ⚠️ **戻した後、開いていた文書を持ち続けない**（α-7 再監査 🔴）。
+//
+// 印（`_docEpoch`）を進めるだけでは足りなかった＝`_doSave` は書き込みの**後**でしか印を見ないので、
+// **ディスクへは書かれていた**。しかも知らせに「あとで開く」を足した時点で、
+// **開き直さずに編集へ帰る道**ができ、次の保存が戻した内容を上書きした。
+describe("戻したら、開いていた文書を手放す（α-7 再監査 🔴）", () => {
+  beforeEach(() => useProjectStore.setState({ _doSave: 本物の保存 }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("開いていた動画を戻すと、その動画を持たなくなる", async () => {
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, projectId: "proj_20260901_001" } });
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_001", "p-1.json");
+    expect(useProjectStore.getState().meta.projectId).not.toBe("proj_20260901_001");
+  });
+
+  it("開いていない動画を戻しても、いま開いている動画は閉じない", async () => {
+    // ⚠️ **巻き添えにしない**＝一覧から別の動画を戻しただけで、編集中の動画が閉じたら作業が飛ぶ。
+    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, projectId: "proj_20260901_002" } });
+    await useProjectStore.getState().restoreToRestorePoint("proj_20260901_001", "p-1.json");
+    expect(useProjectStore.getState().meta.projectId).toBe("proj_20260901_002");
+  });
+
+  it("書き込みの前にも「まだ同じ文書か」を見る（手放した後は書かない）", async () => {
+    // ⚠️ **これが本体**＝手放しても、書き込みが後ろの門しか通らないなら上書きは止まらない。
+    const fs = await import("../../infrastructure/projectFs");
+    const save = vi.spyOn(fs, "saveProjectDoc").mockResolvedValue("");
+    vi.spyOn(keeper, "keepRestorePoints").mockImplementation(async () => {
+      // 保存の途中（控えを取っている最中）に手放される＝待っている間に起きうる。
+      useProjectStore.getState().newProject();
+    });
+    useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, projectId: "proj_20260901_003" } });
+    await useProjectStore.getState().saveProject();
+    expect(save).not.toHaveBeenCalled();
   });
 });
