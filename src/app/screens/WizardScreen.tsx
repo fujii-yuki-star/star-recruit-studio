@@ -115,7 +115,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
@@ -767,7 +767,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 disabled={saveStatus === "saving"}
               >
                 <SaveIcon size={18} />
-                {saveButtonLabel(saveStatus)}
+                {saveButtonLabel(saveStatus, saveBlockedReason)}
               </button>
               {step < steps.length - 1 && (
                 <button className="btn btn-primary" onClick={next}>

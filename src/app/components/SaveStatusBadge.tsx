@@ -15,15 +15,18 @@ export function SaveStatusBadge() {
   const sceneCount = useProjectStore((s) => s.scenes.length);
   const assets = useProjectStore((s) => s.assets);
   const meta = useProjectStore((s) => s.meta); // ウィザード入力も「未保存の変更」に含める（#401）
+  const saveBlockedReason = useProjectStore((s) => s.saveBlockedReason);
 
   if (saveStatus === "saving") {
     return <span className="text-sm text-muted">保存中…</span>;
   }
   if (saveStatus === "error") {
-    // 実際の保存ボタンは「保存に失敗（もう一度押す）」表示。バッジの案内も同じ行動へ揃える（存在しない「保存」ラベルを指さない・§2-5）。
+    // ⚠️ **「もう一度」で直らない失敗は、そう言う**（#974）＝同じ内容を書き直しても同じ結果に
+    // なるものに「もう一度お試しください」と出すと、押しても変わらないボタンを押させ続けることになる。
+    // 実際の保存ボタンは「保存に失敗（もう一度押す）」表示。バッジの案内も同じ行動を促す。
     return (
       <span className="text-sm" role="alert" style={{ color: "var(--color-danger)" }}>
-        保存できませんでした（もう一度お試しください）
+        {saveBlockedReason ?? "保存できませんでした（もう一度お試しください）"}
       </span>
     );
   }

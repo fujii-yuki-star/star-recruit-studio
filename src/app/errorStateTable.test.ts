@@ -14,7 +14,7 @@ import {
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
-import { RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "./uiLabels";
+import { PROJECT_SAVE_WOULD_BREAK, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "./uiLabels";
 
 /**
  * 表の行に**見える**すべての行（ゆるい判定）。
@@ -56,6 +56,10 @@ function codeMessages(): Record<string, string> {
     ...editBlockedMessage,
     ...exportBlockedMessage,
     ...bakeNoteMessage,
+    // ⚠️ **`+` を含む文は等値で守る**（#982）＝「実装のどこかに在る」の走査は
+    // 文字列の継ぎ目（`+`）を落とすので、`Ctrl+Z` のような**本文に `+` を含む文**は
+    // `CtrlZ` になって一致しない。等値の側へ載せれば、そもそも走査に頼らない。
+    PROJECT_SAVE_WOULD_BREAK,
     EXPORT_CLEANUP_PENDING: EXPORT_CLEANUP_PENDING_MESSAGE,
     EXPORT_OTHER_RUNNING: OTHER_EXPORT_RUNNING_MESSAGE,
     // α-6 で足したぶん（α-6 出口監査 🟡18）＝画面や `infrastructure` に直書きされていて
@@ -331,10 +335,10 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(154);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(155);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(51);
+    ).toBe(52);
   });
 });
