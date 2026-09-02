@@ -86,6 +86,28 @@ export function reserveAssetId(projectId: string, existingIds: readonly string[]
   return id;
 }
 
+// ⚠️ **まだ番号の無い動画の予約は `""` の名前で入る**（α-7 再監査 🟡）＝新しい動画は
+// **取り込みの後で** `proj_YYYYMMDD_NNN` を採るため。引き継がないと、保存して番号が付いた後の
+// 2件目が `""` の予約を見ず、**1件目と同じ番号を再発行**して `assets/asset_001.png` を上書きする
+//（前の写真が別の絵に化ける＝この予約が防ぎたかったこと）。
+// ⚠️ **予約のときに `""` を覗きに行く形は採らない**＝別の新しい動画が残した予約まで拾い、
+// 関係のない動画で番号が飛ぶ（引き継ぎの側で移すだけで足りる＝変異チェックで等価と分かった）。
+const PENDING_PROJECT = "";
+
+/**
+ * まだ番号の無いうちに取った予約を、決まった番号の動画へ引き継ぐ。
+ * **番号が決まった所で呼ぶ**（取り込みの中で `createProjectId` した直後）。
+ */
+export function adoptPendingAssetIds(projectId: string): void {
+  if (!projectId) return;
+  const pending = reservedByProject.get(PENDING_PROJECT);
+  if (!pending || pending.size === 0) return;
+  const used = reservedByProject.get(projectId) ?? new Set<string>();
+  for (const id of pending) used.add(id);
+  reservedByProject.set(projectId, used);
+  reservedByProject.delete(PENDING_PROJECT);
+}
+
 /** テスト用：予約を捨てる（アプリでは呼ばない＝起動中は覚えたままが正しい）。 */
 export function resetAssetIdReservations(): void {
   reservedByProject.clear();

@@ -668,3 +668,32 @@ describe('isSupportedSchemaVersion', () => {
     expect(isSupportedSchemaVersion('2.0')).toBe(false);
   });
 });
+
+// ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（α-7 再監査 🟡）。
+// 一緒にしていたので、`schemaVersion` が欠けた壊れた動画にも「アプリを更新してください」＝
+// **更新しても直らない次の行動**が出て、しかも `broken` にならないので
+// **控えから戻す導線（#263）が出なかった**（いちばん助けが要る場面でいちばん助けが出ない）。
+describe('版が読めない壊れ方は broken（α-7 再監査 🟡）', () => {
+  it('schemaVersion が無いと broken（戻す導線が出る側）', () => {
+    try {
+      parseProjectDoc(JSON.stringify({ projectId: 'p', scenes: [] }));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as ProjectLoadError).failure).toBe('broken');
+      expect((e as ProjectLoadError).message).not.toMatch(/アプリを更新/);
+    }
+  });
+
+  it('版が文字列だが対応外なら unsupported（更新すれば開ける側）', () => {
+    try {
+      parseProjectDoc(JSON.stringify({ schemaVersion: '99.0', projectId: 'p', scenes: [] }));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect((e as ProjectLoadError).failure).toBe('unsupported');
+      expect((e as ProjectLoadError).message).toMatch(/アプリを更新/);
+      // ⚠️ **版を「形式」と呼ばない**＝本当の形式違い（`PROJECT_FORMAT_UNSUPPORTED`）と語が衝突する。
+      expect((e as ProjectLoadError).message).not.toMatch(/形式/);
+    }
+  });
+});

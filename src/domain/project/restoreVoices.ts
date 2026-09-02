@@ -111,8 +111,12 @@ export function clearStaleVoices(
       const lines = s.lines.map((l) => {
         const curInput = cur.lines.get(l.lineId);
         const myInput = mine.lines.get(l.lineId);
-        if (l.status !== NARRATION_STATUS.generated || curInput === undefined || myInput === undefined) return l;
-        if (sameSynthInput(myInput, curInput)) return l;
+        if (l.status !== NARRATION_STATUS.generated || myInput === undefined) return l;
+        // ⚠️ **いまに無い行も、分からない側へ倒す**（α-7 再監査 🟡・場面と同じ扱い）＝
+        // 読み上げの WAV（`voices/<場面>__<行>.wav`）は**行を消しても残る**ので、素通りさせると
+        // 〈行の文を直して作り直す → その行を消す → 前の時点へ戻す〉で
+        // **字幕は戻った文・音はいまの文**が復活する（場面について書いた理由がそのまま当てはまる）。
+        if (curInput !== undefined && sameSynthInput(myInput, curInput)) return l;
         touched = true;
         cleared += 1;
         return unmade(l);

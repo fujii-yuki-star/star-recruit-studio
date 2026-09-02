@@ -98,6 +98,9 @@ function rustMessages(): Record<string, string> {
     // `{what}` は「よく使う素材」「取り込んだ文字の形」のどちらかが入る＝表は〔…〕で両方を書くので、
     // 差し込みの手前までを比べる（`format!` の中身をそのまま取り出す）。
     MANIFEST_UNREADABLE: pick(/format!\("\{what\}(の一覧を読めませんでした。[^"]*)"\)/),
+    // ⚠️ **Rust 側に足した文も表と結ぶ**（α-7 再監査 ℹ️）＝走査は TS の文言だけなので、
+    // ここへ登録しないと**表と実装のズレが機械では見えない**（#263 で足した文が漏れていた）。
+    RESTORE_WRITE_FAILED: pick(/const RESTORE_WRITE_FAILED: &str =\s*"([^"]+)"/),
   };
 }
 
@@ -178,14 +181,18 @@ function domainWarnMessages(): {
         // その場に文字が無いので**素通り**していた＝**この検査自身が、塞いだのと同じ穴を持っていた**。
         const consts = new Map<string, string>();
         for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*$/gm)) consts.set(m[1], "");
-        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*'([^']+)',?$/gm)) consts.set(m[1], m[2]);
+        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*(['"])(.+?)\2,?$/gm)) consts.set(m[1], m[3]);
         // ⚠️ **解けなかったものを黙って捨てない**（#971 レビュー 🟡）＝
         // 定数を**別のファイル**へ切り出す／テンプレートリテラルで書く、のどちらでも
         // `consts` から引けず、**検査から静かに消える**（今回塞いだのと**3回目の同じ形**）。
         // 呼び出しの総数と、解けた数が合うかを外で見る。
-        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'/g)) seen.push({ code: m[1], where: name });
-        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*(?:'([^']+)'|[A-Za-z_$][\w$]*\.([A-Z_][A-Z_0-9]*))/g)) {
-          const message = m[2] ?? consts.get(m[3] ?? "");
+        // ⚠️ **引用符の種類で見落とさない**（α-7 再監査 🔴）＝`'` だけを見ていたので、
+        // `warn("CODE", "文言")` と**ダブルクォートで書いた1件が、数にも入らず素通り**した
+        //（このリポジトリに引用符を揃える設定は無い）＝**4回目の同じ形**。
+        // **数える側（`seen`）にも引用符を書かない**＝ここが漏れると、下の件数チェックも一緒に黙る。
+        for (const m of text.matchAll(/warn\(\s*['"]([A-Z_]+)['"]/g)) seen.push({ code: m[1], where: name });
+        for (const m of text.matchAll(/warn\(\s*['"]([A-Z_]+)['"]\s*,\s*(?:(['"])(.+?)\2|[A-Za-z_$][\w$]*\.([A-Z_][A-Z_0-9]*))/g)) {
+          const message = m[3] ?? consts.get(m[4] ?? "");
           if (message) out.push({ code: m[1], message, where: name });
         }
       }

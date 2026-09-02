@@ -158,8 +158,12 @@ export function newFrameAsset(
   videoName: string,
   atSec: number,
   existingIds: readonly string[],
+  reservedId?: string,
 ): { asset: Asset; fileName: string } {
-  const assetId = createAssetId(existingIds);
+  // ⚠️ **番号は使い回さない**（α-7 再監査 🟡）＝他の3経路と同じ口を持つ。
+  // ファイル名は `assets/<番号>.png` 固定で、書き出しは `-y`（無条件上書き）なので、
+  // 空き番号を埋めると**前に切り出した絵を潰す**（戻すと別の絵になる）。
+  const assetId = reservedId ?? createAssetId(existingIds);
   const fileName = `${assetId}.png`;
   return {
     asset: {

@@ -1038,7 +1038,7 @@ export const RESTORE_FAILED_MESSAGE =
 export function voicesClearedMessage(count: number): string {
   return (
     `戻しました。セリフが変わっていた${count}件の読み上げは、音が前のままになるので作成前に戻しました。` +
-    "その場面の声の欄から、もう一度作ってください"
+    "この動画はいったん閉じています。開き直して、その場面の声の欄からもう一度作ってください"
   );
 }
 

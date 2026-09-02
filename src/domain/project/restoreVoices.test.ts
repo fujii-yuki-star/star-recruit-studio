@@ -120,3 +120,28 @@ describe('clearStaleVoices（#967 レビュー 🟡2）', () => {
     expect(restored.scenes[0].narration.status).toBe('generated');
   });
 });
+
+// ⚠️ **場面の双子＝行**（α-7 再監査 🟡）。場面だけ直して行を素通りさせていた。
+describe('いまに無い行（α-7 再監査 🟡）', () => {
+  const withLines = (ls: { lineId: string; text: string; status: string }[]) =>
+    proj([scene('scene_001', '', 'none', ls)]);
+
+  it('いまに無い行は、比べようが無いので作成前に戻す', () => {
+    // 読み上げの WAV は**行を消しても残る**ので、素通りさせると
+    // 〈行の文を直して作り直す → その行を消す → 前の時点へ戻す〉で音だけ新しいものが復活する。
+    const restored = withLines([{ lineId: 'line_001', text: 'むかしの文', status: 'generated' }]);
+    const current = withLines([]);
+    const { project, count } = clearStaleVoices(restored, current);
+    expect(project.scenes[0].lines![0].status).toBe('none');
+    expect(project.scenes[0].lines![0].voicePath).toBeNull();
+    expect(count.cleared).toBe(1);
+  });
+
+  it('いまにも同じ行があって内容も同じなら、作った音はそのまま', () => {
+    const restored = withLines([{ lineId: 'line_001', text: 'おなじ文', status: 'generated' }]);
+    const current = withLines([{ lineId: 'line_001', text: 'おなじ文', status: 'generated' }]);
+    const { project, count } = clearStaleVoices(restored, current);
+    expect(project.scenes[0].lines![0].status).toBe('generated');
+    expect(count.cleared).toBe(0);
+  });
+});

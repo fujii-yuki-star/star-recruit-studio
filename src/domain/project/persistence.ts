@@ -267,8 +267,15 @@ export function parseProjectDoc(text: string): Project {
     throw new ProjectLoadError('この動画はタイムラインで編集する形式です。場面の編集画面では開けません。一覧から別の動画を選んでください。');
   }
   const version = doc.schemaVersion;
-  if (typeof version !== 'string' || !isSupportedSchemaVersion(version)) {
-    throw new ProjectLoadError('このプロジェクトは新しい形式のため開けません。アプリを更新してください。');
+  // ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（α-7 再監査 🟡）＝一緒にしていたので、
+  // `schemaVersion` が欠けた**壊れた**動画にも「アプリを更新してください」と出ていた＝
+  // **更新しても直らない次の行動**。しかも `broken` にならないので、#263 の**控えから戻す導線が出ない**
+  //（いちばん助けが要る場面でいちばん助けが出ない）。
+  if (typeof version !== 'string') {
+    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。', 'broken');
+  }
+  if (!isSupportedSchemaVersion(version)) {
+    throw new ProjectLoadError('このプロジェクトは新しい版で作られているため開けません。アプリを更新してください。');
   }
   // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝上の関門は**メジャーしか見ない**ので、
   // **同じメジャーの新しいマイナー**（1.26 等）はここまで通ってしまう。そのまま進むと
