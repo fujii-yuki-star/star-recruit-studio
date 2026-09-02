@@ -152,6 +152,25 @@ describe('schema の条件付き必須（#961）', () => {
     }
   });
 
+  it('共有している定義には条件つきの規則を入れていない（入れたら一覧の集め方を足す）', () => {
+    // ⚠️ **`$ref` の先は追っていない**（#961 レビューの提案）＝`timeline-project.schema.json` は
+    // project の `$defs` を `$ref` で共有しているので、**共有している定義**に `if` が入ると、
+    // 一覧には `project …` の1行としてしか出ず **timeline 側の作る側を追う手がかりが出ない**。
+    // 追う実装は入れない（歩く関数の単純さを保つ）代わりに、**入った瞬間に赤くする**。
+    // ⚠️ **参照しているのは節そのもの**（`$defs/Scene/properties/slotClips` のように途中まで）＝
+    // 名前だけで見ると、共有していない兄弟（`Scene.slotVideoStart` の規則）まで拾ってしまう。
+    const refs = new Set(
+      [...JSON.stringify(timelineSchema).matchAll(/project\.schema\.json#\/\$defs\/([A-Za-z0-9_/]+)/g)].map((m) => m[1]!),
+    );
+    expect(refs.size, '共有している定義が1つも見つからない＝当て先が変わった').toBeGreaterThan(0);
+    for (const pointer of refs) {
+      let node: unknown = (projectSchema as { $defs: Record<string, unknown> }).$defs;
+      for (const seg of pointer.split('/')) node = (node as Record<string, unknown> | undefined)?.[seg];
+      expect(node, `${pointer} が project 側に無い`).toBeDefined();
+      expect(JSON.stringify(node ?? null), `共有している ${pointer} に条件つきの規則が入った`).not.toContain('"if"');
+    }
+  });
+
   it('`dependentRequired` は使っていない（使い始めたら一覧の集め方を足す）', () => {
     // 同じ効果を持つ別の書き方（draft 2020-12）。使い始めたときに **黙って一覧から漏れる** のを防ぐ。
     const all = [['project', projectSchema], ['timeline', timelineSchema], ['template', templateSchema], ['ai-video-plan', aiPlanSchema]] as const;
