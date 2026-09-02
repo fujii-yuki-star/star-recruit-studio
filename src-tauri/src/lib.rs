@@ -117,8 +117,13 @@ fn list_restore_points(
         return Err("不正なプロジェクトIDです。".to_string());
     }
     let dir = restore_dir(&app, &project_id)?;
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Ok(Vec::new()); // まだ1つも作っていない
+    // ⚠️ **「まだ無い」と「読めない」を分ける**（α-7 出口監査 🟡）＝どちらも空にすると、
+    // 読めないときにも「編集して保存していくと、少しずつ増えていきます」＝**来ない次の行動**を出す。
+    // 無いだけなら空、それ以外は断って `RESTORE_POINTS_UNREADABLE` へ落とす。
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.to_string()),
     };
     let mut out = Vec::new();
     for e in entries.flatten() {

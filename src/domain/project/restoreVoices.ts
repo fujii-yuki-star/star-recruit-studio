@@ -73,7 +73,29 @@ export function clearStaleVoices(
   let cleared = 0;
   const scenes = (restored.scenes ?? []).map((s) => {
     const cur = now.get(s.sceneId);
-    if (!cur) return s; // いまに無い場面＝音のファイルも無い
+    if (!cur) {
+      // ⚠️ **いまに無い場面でも、音のファイルは残っている**（α-7 出口監査 🟡）＝
+      // 読み上げの WAV を消す経路は（動画ごと消す以外に）無く、`voices/<場面 id>.wav` は
+      // **場面を消しても残る**。ここを素通りさせると「文は戻った・音はいまの文」が復活する。
+      // ⚠️ **比べようが無いので、分からない側へ倒す**（作り直しが要ると知らせる）。
+      let touched = false;
+      let next = s;
+      if (s.narration?.status === NARRATION_STATUS.generated) {
+        next = { ...next, narration: unmade(s.narration) };
+        cleared += 1;
+        touched = true;
+      }
+      if (s.lines && s.lines.length > 0) {
+        const lines = s.lines.map((l) => {
+          if (l.status !== NARRATION_STATUS.generated) return l;
+          cleared += 1;
+          touched = true;
+          return unmade(l);
+        });
+        if (touched) next = { ...next, lines };
+      }
+      return next;
+    }
     const mine = voiceInputsOf(s, restored.voiceSettings ?? {});
     let next = s;
     if (

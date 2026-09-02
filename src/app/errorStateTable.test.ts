@@ -150,6 +150,34 @@ function sourceBlob(): string {
   return files.map((p) => readFileSync(p, "utf8")).join("\n").replace(/[\s"\u0027\u0060+]/g, "");
 }
 
+
+/**
+ * **domain が出す断りのコード**（`warn('CODE', '文言', …)`）を、本文から拾う。
+ *
+ * ⚠️ **ここが走査の外にあった**（α-7 出口監査 🟡）＝`codeMessages()` はコード側の**定数**しか見ないので、
+ * `warn('SCENE_TYPE_FALLBACK', '不明な場面種別を調整しました', …)` のように**その場で書いた文**は
+ * 表に無くても誰も気づかない。実際に `SCENE_TYPE_FALLBACK` は表に1行も無く、
+ * `POSE_FALLBACK` は**2つ目の文**（「ゆうこの素材が見つかりません」）が表から漏れていた。
+ * ⚠️ **1つのコードが複数の文を持つ**（出る場面で言うことが違う）ので、**コードと文の組**で拾う。
+ */
+function domainWarnMessages(): { code: string; message: string; where: string }[] {
+  const out: { code: string; message: string; where: string }[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.ts$/.test(name) && !name.includes(".test.")) {
+        const text = readFileSync(p, "utf8");
+        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*'([^']+)'/g)) {
+          out.push({ code: m[1], message: m[2], where: name });
+        }
+      }
+    }
+  };
+  walk(join(process.cwd(), "src", "domain"));
+  return out;
+}
+
 /** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
 const norm = (s: string): string => s.replace(/。$/, "").trim();
 
@@ -244,6 +272,29 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   it("理由つきで外した行は、いまも表に在る（消えた行の言い訳が残らない）", () => {
     const rows = readErrorTable();
     expect([...Object.keys(ASSEMBLED_AT_RUNTIME), ...Object.keys(NOT_SURFACED)].filter((c) => !rows.has(c))).toEqual([]);
+  });
+
+
+  /**
+   * domain が出す断りも、表に載っていること（α-7 出口監査 🟡）。
+   *
+   * ⚠️ **文まで見る**＝コードだけ見ると、**同じコードで別の文**（出る場面で言うことが違う）が
+   * 漏れていても気づけない。実際 `POSE_FALLBACK` はそれで漏れていた。
+   */
+  it("domain が出す断りの文が、表のどこかに在る", () => {
+    const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
+    const flat = md.replace(/\s/g, "");
+    const missing = domainWarnMessages()
+      .filter(({ message }) => !flat.includes(message.replace(/\s/g, "")))
+      .map(({ code, message, where }) => `${code}（${where}）: ${message}`);
+    // ⚠️ **どちらを直すかは人が決める**（文を変えたのか、表に足し忘れたのか）ので、両方を出す。
+    expect([...new Set(missing)].join("\n")).toBe("");
+  });
+
+  it("domain の断りを1つも拾えていない、が起きない（走査が壊れたら落ちる）", () => {
+    const found = domainWarnMessages();
+    expect(found.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(found.map((f) => f.code)).size).toBeGreaterThanOrEqual(15);
   });
 
   it("守れている件数が黙って減らない（対象の families を外すと落ちる）", () => {

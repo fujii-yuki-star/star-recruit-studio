@@ -41,7 +41,7 @@ import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
-import { keepRestorePoints } from "./restorePointKeeper";
+import { keepRestorePoints, restoreToPoint } from "./restorePointKeeper";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
@@ -295,6 +295,13 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 保存済みプロジェクトをディスクから完全に削除する（#212）。 */
   deleteProject: (projectId: string) => Promise<void>;
+  /**
+   * 復元ポイントへ戻す（#263 段階2・α-7 出口監査 🔴）。戻した「作り直しが要る読み上げ」の数を返す。
+   *
+   * ⚠️ **store の action にしてある**＝画面から直に書くと、**走っている保存の着地**が
+   * 戻した内容を「戻す前」で上書きする（保存の直列化＝`saveInFlight` は外から待てない）。
+   */
+  restoreToRestorePoint: (projectId: string, name: string) => Promise<number>;
   /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
   renameProject: (projectId: string, newName: string) => Promise<void>;
   /** 焼き出したときに増えるディスク容量（バイト）と、持っていけないもの（焼く前の確認用・ADR-0032 決定13）。 */
@@ -1392,6 +1399,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
+  restoreToRestorePoint: async (projectId, name) => {
+    // ⚠️ **書き出し中はやらない**（多重防御）＝ほかの入口（開く・消す・複製）と揃える。
+    // 一覧のボタンも押せなくしてあるが、押せないようにするだけでは守りにならない。
+    if (isExportBusy(get().exportRun.phase)) return 0;
+    // ⚠️ **走っている保存の着地を待つ**（α-7 出口監査 🔴）＝`_doSave` は書き込みの**後**でしか
+    // 「まだ同じ文書か」を見ないので、待たずに戻すと**戻した `project.json` を戻す前の内容で
+    // 上書き**する（何も言われずに復元が無かったことになる）。`deleteProject` と同じ手順。
+    await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
+    // ⚠️ **これ以上この文書へ書かない印を立てる**＝待っている間に積まれた保存が、
+    // 戻したあとに着地して同じことをする。`_docEpoch` を進めると `sameDocGuard` が弾く。
+    if (get().meta.projectId === projectId) set((s) => ({ _docEpoch: s._docEpoch + 1, saveStatus: "saved" }));
+    return await restoreToPoint(projectId, name);
+  },
+
   deleteProject: async (projectId) => {
     // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
     // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。

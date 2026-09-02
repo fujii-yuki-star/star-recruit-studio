@@ -7,7 +7,7 @@ import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
 import type { RestorePoint } from "../../domain/project/restorePoints";
-import { loadRestorePoints, restoreToPoint } from "../store/restorePointKeeper";
+import { loadRestorePoints } from "../store/restorePointKeeper";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../newProjectGuard";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -49,6 +49,7 @@ const OPEN_FAILED_MESSAGE = "このプロジェクトを開けませんでした
 
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
+  const restoreToRestorePoint = useProjectStore((s) => s.restoreToRestorePoint);
   const loadProject = useProjectStore((s) => s.loadProject);
   const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
@@ -98,6 +99,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   /** 「前の状態に戻す」を開いている動画と、その時点の一覧（#263 段階2）。 */
   const [restoreFor, setRestoreFor] = useState<{ projectId: string; points: RestorePoint[] } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  /** 戻したことで作り直しが要る読み上げの数（0＝知らせるものが無い）。 */
+  const [voicesCleared, setVoicesCleared] = useState<{ projectId: string; count: number } | null>(null);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -322,13 +325,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     setRestoring(true);
     setOpenError(null);
     try {
-      const cleared = await restoreToPoint(projectId, name);
+      const cleared = await restoreToRestorePoint(projectId, name);
       setRestoreFor(null);
+      // ⚠️ **開き直す前に知らせる**（α-7 出口監査 🔴）＝開き直すと**この画面が消える**ので、
+      // 後に置いた知らせは**一度も描かれない**（読み上げが黙って「作成前」に戻る）。
+      // しかも開き直しに失敗した経路では、`doOpenProject` が入れた**理由を上書き**して
+      // 「戻しました」と出る＝**失敗が成功に見える**。
+      // ⚠️ **答えてもらってから開く**＝押すまで待つので、見落とされない。
+      if (cleared > 0) { setVoicesCleared({ projectId, count: cleared }); return; }
       await doOpenProject(projectId);
-      // ⚠️ **声を作り直す必要があることを黙らせない**（#967 レビュー 🟡2）＝
-      // 音のファイルは戻らないので、セリフが変わっていた読み上げは「作成前」に戻してある。
-      // 何も言わないと、利用者は**声が消えた**ように見える。
-      if (cleared > 0) setOpenError(voicesClearedMessage(cleared));
     } catch (e) {
       const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
       setOpenError(detail || RESTORE_FAILED_MESSAGE);
@@ -366,6 +371,20 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             {openError && (
               <div className="notice notice-warn mb" role="alert">
                 <span>{openError}</span>
+              </div>
+            )}
+
+            {/* ⚠️ **開く前に、声のことを知らせる**（α-7 出口監査 🔴）＝開くとこの画面が消えるので、
+                後から出しても描かれない。押してもらってから開く。 */}
+            {voicesCleared && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{voicesClearedMessage(voicesCleared.count)}</span>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => { const id = voicesCleared.projectId; setVoicesCleared(null); void doOpenProject(id); }}
+                >
+                  動画を開く
+                </button>
               </div>
             )}
 

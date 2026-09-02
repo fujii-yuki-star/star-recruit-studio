@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import * as projectFs from "../../infrastructure/projectFs";
-import * as keeper from "../store/restorePointKeeper";
+
 import type { ProjectHeader } from "../../domain/project/persistence";
 import type { Scene } from "../../domain/project/types";
 import { HomeScreen } from "./HomeScreen";
@@ -46,9 +46,9 @@ describe("前の状態に戻す（#263 段階2）", () => {
 
   it("押すと戻してから開き直す", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const restore = vi.fn(async () => 0);
     const load = vi.fn(async () => {});
-    useProjectStore.setState({ loadProject: load });
+    useProjectStore.setState({ loadProject: load, restoreToRestorePoint: restore });
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(restore).toHaveBeenCalledWith("p_001", "p-3000000.json"));
@@ -57,19 +57,27 @@ describe("前の状態に戻す（#263 段階2）", () => {
 
   // #967 レビュー 🟡2：音のファイルは戻らないので、セリフが変わっていた読み上げは作成前に戻す。
   // ⚠️ **黙って消したように見せない**＝何も言わないと、利用者は声が消えたように見える。
-  it("作り直しが要る読み上げがあれば、その旨と次の行動を出す", async () => {
+  // ⚠️ **開き直す前に出す**（α-7 出口監査 🔴）＝開くとこの画面が消えるので、
+  // 後に置いた知らせは**一度も描かれない**。押してもらってから開く。
+  it("作り直しが要る読み上げがあれば、開く前に知らせて、押してから開く", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(2);
+    const load = vi.fn(async () => {});
+    useProjectStore.setState({ restoreToRestorePoint: vi.fn(async () => 2), loadProject: load });
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(document.body.textContent).toMatch(/2件の読み上げは、音が前のままになるので作成前に戻しました/));
-    expect(document.body.textContent).toMatch(/「声を作り直す」から作り直してください/);
+    expect(document.body.textContent).toMatch(/その場面の声の欄から、もう一度作ってください/);
+    // ⚠️ **まだ開いていない**＝知らせを見る前に画面が変わらない。
+    expect(load).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("動画を開く"));
+    await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
   });
 
   it("未保存があるときは、先に確認する（戻すと画面の編集が失われる）", async () => {
     useProjectStore.setState({ scenes: [{ sceneId: "scene_001" } as unknown as Scene], saveStatus: "idle" });
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    const restore = vi.spyOn(keeper, "restoreToPoint").mockResolvedValue(0);
+    const restore = vi.fn(async () => 0);
+    useProjectStore.setState({ restoreToRestorePoint: restore });
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     expect(restore).not.toHaveBeenCalled();
@@ -86,7 +94,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
 
   it("戻せなかったら理由をそのまま見せる", async () => {
     vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
-    vi.spyOn(keeper, "restoreToPoint").mockRejectedValue(new Error("その復元ポイントが見つかりませんでした。一覧から選び直してください。"));
+    useProjectStore.setState({ restoreToRestorePoint: vi.fn(async () => { throw new Error("その復元ポイントが見つかりませんでした。一覧から選び直してください。"); }) });
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await waitFor(() => expect(document.body.textContent).toMatch(/一覧から選び直してください/));
