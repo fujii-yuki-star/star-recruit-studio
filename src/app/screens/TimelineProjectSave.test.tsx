@@ -17,6 +17,11 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enu
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { TimelineProject } from "../../domain/timeline/types";
 
+// ⚠️ **控えの処理はここでは切る**（α-7 出口監査 🟡の追補）＝このテストは保存の**着地の瞬間**を
+// 押さえているので、保存の手前に非同期の処理が増えると待ち合わせがずれる（機能の話ではない）。
+vi.mock("../store/restorePointKeeper", () => ({ keepRestorePoints: vi.fn(async () => {}), restoreToPoint: vi.fn(async () => 0), loadRestorePoints: vi.fn(async () => []) }));
+
+
 function doc(): TimelineProject {
   return {
     schemaVersion: TIMELINE_SCHEMA_VERSION,
@@ -210,6 +215,9 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     const onNavigate = vi.fn();
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     act(() => { void useTimelineStore.getState().saveTimelineProject(); }); // 書き込み中にする
+    // ⚠️ **書き込みが始まるのを待つ**（α-7 出口監査 🟡の追補）＝保存の手前に控えの処理が入ったので、
+    // `saveProjectDoc` はもう同期では呼ばれない（`release` はまだ無い）。
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     // 待っている間に2か所を続けて押す（サイドバーの素早い2クリック）。
     act(() => { canNavigate("materials" as ScreenId); });
     act(() => { canNavigate("settings" as ScreenId); });

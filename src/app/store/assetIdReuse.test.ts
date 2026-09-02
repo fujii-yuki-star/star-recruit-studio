@@ -61,3 +61,23 @@ describe("場面形式の取り込みが予約を通る（配線の漏れを見�
     expect(reserved, "予約を通る入口が減った").toBeGreaterThanOrEqual(3);
   });
 });
+
+/**
+ * **両形式が復元ポイントを作る**こと（α-7 出口監査 🟡）。
+ *
+ * ⚠️ 場面形式にだけ入れていたので、タイムライン形式は**一度も作られない**のに
+ * 一覧の「前の状態に戻す」は出ており、「編集して保存していくと増えていきます」＝
+ * **来ない次の行動**を案内していた。⚠️ **配線の漏れは、規則を書くだけでは防げない**。
+ */
+describe("両形式が復元ポイントを作る（配線の漏れを見る）", () => {
+  it("場面形式とタイムライン形式の保存が、どちらも控える経路を通る", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const hits = ["src/app/store/projectStore.ts", "src/app/store/timelineStore.ts"].map((rel) => {
+      const src = readFileSync(join(process.cwd(), rel), "utf8");
+      return { rel, calls: (src.match(/await keepRestorePoints\(/g) ?? []).length };
+    });
+    const missing = hits.filter((h) => h.calls === 0).map((h) => h.rel);
+    expect(missing, "この形式は復元ポイントを作らない（戻すボタンが空のまま）").toEqual([]);
+  });
+});

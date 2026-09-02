@@ -16,6 +16,11 @@ import { MAX_INLINE_ASSET_BYTES } from '../../domain/constants';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
 
+// ⚠️ **控えの処理はここでは切る**（α-7 出口監査 🟡の追補）＝このテストは保存の**着地の瞬間**を
+// 押さえているので、保存の手前に非同期の処理が増えると待ち合わせがずれる（機能の話ではない）。
+vi.mock("./restorePointKeeper", () => ({ keepRestorePoints: vi.fn(async () => {}), restoreToPoint: vi.fn(async () => 0), loadRestorePoints: vi.fn(async () => []) }));
+
+
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
     schemaVersion: TIMELINE_SCHEMA_VERSION,
@@ -40,6 +45,14 @@ beforeEach(() => {
   useTimelineStore.getState().closeTimelineProject();
   vi.spyOn(assetFsMod, 'assetDisplayUrl').mockResolvedValue('asset://a.png');
 });
+
+/**
+ * 保存が**書き込みまで進む**のを待つ（α-7 出口監査 🟡の追補）。
+ *
+ * ⚠️ 保存の手前に**復元ポイントを控える処理**が入ったので、`saveProjectDoc` は
+ * もう同期では呼ばれない。「頼んだ直後に書き込みが始まっている」を前提にした検査は、ここで待つ。
+ */
+const flushSaveStart = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('openTimelineProject', () => {
   it('開いた文書と素材の表示先を持つ', async () => {
@@ -333,6 +346,7 @@ describe('自動保存（編集した内容が消えない）', () => {
     vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((_r, j) => { fail = j; }));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     void useTimelineStore.getState().saveTimelineProject();
+    await flushSaveStart();
     expect(useTimelineStore.getState().saveStatus).toBe('saving');
     // 別の動画を開く（一覧からの経路＝閉じるを経由しない）。
     vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
@@ -353,6 +367,7 @@ describe('自動保存（編集した内容が消えない）', () => {
     vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((resolve) => { land = (): void => { resolve('path'); }; }));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     const stuck = useTimelineStore.getState().saveTimelineProject();
+    await flushSaveStart();
     vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
     await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
     vi.mocked(fsMod.saveProjectDoc).mockResolvedValue('path');
@@ -370,12 +385,14 @@ describe('自動保存（編集した内容が消えない）', () => {
     vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((r) => { pending.push(r); }));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     void useTimelineStore.getState().saveTimelineProject(); // 前の動画（A）の書き込みが始まる
+    await flushSaveStart();
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
 
     vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
     await useTimelineStore.getState().openTimelineProject('proj_20260728_002'); // 見張りを手放す
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     void useTimelineStore.getState().saveTimelineProject(); // 新しい動画（B）の書き込みが始まる
+    await flushSaveStart();
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2);
 
     pending[0]('path'); // A の書き込みだけ完了＝A の後始末が走る
@@ -384,6 +401,7 @@ describe('自動保存（編集した内容が消えない）', () => {
     await Promise.resolve();
 
     void useTimelineStore.getState().saveTimelineProject(); // B へさらに依頼
+    await flushSaveStart();
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2); // B に合流する（3本目を始めない）
   });
 
@@ -416,9 +434,11 @@ describe('自動保存（編集した内容が消えない）', () => {
     });
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     const first = useTimelineStore.getState().saveTimelineProject();
+    await flushSaveStart();
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
     useTimelineStore.getState().addTrack(TRACK_KIND.visual); // 保存中の編集
     void useTimelineStore.getState().saveTimelineProject();
+    await flushSaveStart();
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1); // 並べて走らせない
     release();
     await first;

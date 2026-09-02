@@ -180,6 +180,10 @@ fn drop_restore_point(
     Ok(())
 }
 
+/// 戻せなかったときの断り（§2-5＝次の行動）。⚠️ **生の OS エラーを画面に出さない**（§2-3）。
+const RESTORE_WRITE_FAILED: &str =
+    "戻した内容を書き込めませんでした。空き容量を確かめて、もう一度お試しください。";
+
 /// 復元ポイントの中身を読む（戻す前に、いまの内容と見比べるため）。
 #[tauri::command]
 fn read_restore_point(
@@ -218,11 +222,14 @@ fn restore_project_text(
     if let Ok(cur) = fs::read_to_string(&target) {
         if serde_json::from_str::<serde_json::Value>(&cur).is_ok() {
             let dir = restore_dir(&app, &project_id)?;
-            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            write_json_atomic(&dir.join(format!("p-{now_ms}.json")), &cur)?;
+            fs::create_dir_all(&dir).map_err(|_| RESTORE_WRITE_FAILED.to_string())?;
+            write_json_atomic(&dir.join(format!("p-{now_ms}.json")), &cur)
+                .map_err(|_| RESTORE_WRITE_FAILED.to_string())?;
         }
     }
-    write_json_atomic(&target, &text)
+    // ⚠️ **生のエラーをそのまま出さない**（α-7 出口監査 🟡）＝画面は Rust の文字列を優先して出すので、
+    // `os error 3` のような**英語の技術詳細**が利用者に見える（§2-3）。次の行動つきの文へ包む。
+    write_json_atomic(&target, &text).map_err(|_| RESTORE_WRITE_FAILED.to_string())
 }
 
 /// 前に保存できていたところが**いつのものか**（無ければ `None`・1970年からの秒）。
