@@ -91,9 +91,8 @@ fn record_to(dir: &std::path::Path, tag: &str, detail: &str, max_bytes: u64) {
     // 書き出しの警告は続けて来るので、そのぶん画面が固まる。**開くのを1回にする**と 2000 倍速くなる。
     // ⚠️ **溜めてから書くのではない**＝`File` は素通しなので、**落ちたときに残る量は変わらない**
     //（記録は「うまくいかないとき」に読むものなので、そこを弱めては本末転倒）。
-    let Ok(mut slot) = OPEN_FILE.lock() else {
-        return;
-    };
+    // ⚠️ **毒された錠でも進む**（#975 レビュー）＝`WRITE_LOCK` と同じ流儀。
+    let mut slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
     let reopen = match slot.as_ref() {
         Some((have, _)) => have != &path,
         None => true,
@@ -115,9 +114,18 @@ fn record_to(dir: &std::path::Path, tag: &str, detail: &str, max_bytes: u64) {
 
 /// 持っている控えを手放す（退避の前・置き場が変わったとき）。
 fn close_open_file() {
-    if let Ok(mut slot) = OPEN_FILE.lock() {
-        *slot = None;
-    }
+    // ⚠️ **毒された錠でも進む**（#975 レビュー）＝`WRITE_LOCK` と同じ流儀にそろえる。
+    // `Ok` だけを見る形にしていたので、一度毒されると**そのプロセスでは二度と記録が書けなく**なった。
+    let mut slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = None;
+}
+
+/// いま握っている手から見たファイルの大きさ（握っていなければ `None`）。
+fn held_len() -> Option<u64> {
+    let slot = OPEN_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref()
+        .and_then(|(_, f)| f.metadata().ok())
+        .map(|m| m.len())
 }
 
 /// 1件を1行に潰す。
@@ -177,6 +185,16 @@ fn rotate_if_needed(path: &PathBuf, max_bytes: u64) {
         close_open_file();
         return;
     };
+    // ⚠️ **「消された」だけでなく「置き換えられた」も見る**（#975 レビュー）＝外の道具が
+    // 「一時ファイルへ書いてから名前を付け替える」（安全な保存の作法）をすると、
+    // **パスには別の実体があるので `metadata` は成功**し、上の関門を素通りする。
+    // そのまま書き続けると、やはり**誰も読めない亡霊**へ入る（実測で確かめた）。
+    // ⚠️ **大きさで見分ける**＝実体の番号（`file_index`）は安定版の Rust では使えない。
+    // 書くのはこのプロセスだけなので、握っている手とパスの大きさは本来いつも一致する。
+    if held_len().is_some_and(|held| held != meta.len()) {
+        close_open_file();
+        return; // 作り直しは次の書き込みに任せる（大きさの比較はもう当てにならない）
+    }
     if meta.len() < max_bytes {
         return;
     }
@@ -483,6 +501,43 @@ mod tests {
         assert!(
             after.contains("あと"),
             "消された後の1件がどこにも残っていない"
+        );
+    }
+
+    /// **外で置き換えられても、次の1件から書き直せること**（#975 レビュー）。
+    ///
+    /// ⚠️ **「消された」だけでは足りない**＝外の道具が「一時ファイルへ書いてから名前を付け替える」
+    /// （安全な保存の作法）をすると、**パスには別の実体があるので `metadata` は成功**し、
+    /// 消されたときの関門を素通りする。そのまま書き続けると誰も読めない亡霊へ入る。
+    #[test]
+    fn 外で置き換えられても次から書き直す() {
+        let _serial = probe::SERIAL.lock();
+        let dir = std::env::temp_dir().join(format!("stario_log_swap_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        close_open_file();
+
+        record_to(&dir, "t", "まえ", MAX_BYTES);
+        let path = dir.join("stario.log");
+        // 外の道具が置き換える（消してから作り直すのではなく、別のファイルを名前ごと被せる）。
+        let tmp = dir.join("other.tmp");
+        fs::write(
+            &tmp,
+            b"replaced
+",
+        )
+        .unwrap();
+        fs::rename(&tmp, &path).unwrap();
+
+        record_to(&dir, "t", "あと1", MAX_BYTES);
+        record_to(&dir, "t", "あと2", MAX_BYTES);
+        let after = fs::read_to_string(&path).unwrap_or_default();
+        let _ = fs::remove_dir_all(&dir);
+        close_open_file();
+
+        assert!(
+            after.contains("あと2"),
+            "置き換えの後の1件がどこにも残っていない"
         );
     }
 
