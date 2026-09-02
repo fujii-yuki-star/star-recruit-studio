@@ -266,7 +266,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     // ⚠️ **複製中も開かない**（α-6 出口監査 🟡32）＝素材と声のコピーが走っている最中に別の動画を
     // 開けると**後勝ち**になり、複製の着地が別の文書へ落ちる。カード側も押せなくしてある（対称）。
     if (duplicatingId !== null) return;
-    if (pendingAction) return; // 既に別の確認中は上書きしない（確認中は他カードも無効化＝多重防御・レビュー対応）
+    if (awaitingAnswer) return; // 既に別の確認・知らせに答えていない（確認中は他カードも無効）（確認中は他カードも無効化＝多重防御・レビュー対応）
     // タイムライン形式は**別の文書**を別の画面で開くだけ＝場面形式の編集内容は閉じないので確認は出さない
     // （「保存していない素材や場面は失われます」は事実と違う・§2-5）。
     const isTimeline = isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format });
@@ -302,6 +302,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       }
     }
   }
+
+  /**
+   * **答えを待っている**（別の操作を通さない）。
+   *
+   * ⚠️ **確認だけでなく、戻したあとの知らせも含める**（α-7 出口監査 🟡）＝
+   * 知らせを出したまま「新しい動画を作る」などを押せると、**この画面が消えて**
+   * 「作り直しが要る読み上げが N 件あります」を**一度も見ないまま**次へ進める。
+   * 既にある確認（`pendingAction`）と同じ扱いにする＝守り方を2通りに増やさない。
+   */
+  const awaitingAnswer = pendingAction !== null || voicesCleared !== null;
 
   /** 「前の状態に戻す」を開く（#263 段階2）。 */
   async function openRestorePanel(projectId: string) {
@@ -523,12 +533,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 内容を確認・修正してから、動画として保存できます。
               </p>
               <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
-                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting || pendingAction !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingAction !== null ? "確認に答えてから操作できます" : undefined}>
+                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : undefined}>
                   <PlusIcon size={20} />
                   新しい動画を作る
                 </button>
                 {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
-                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || pendingAction !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingAction !== null ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
                   白紙から作る
                 </button>
                 {/* タイムラインで作る（#635・ADR-0032 決定7/15）＝場面に区切らず、時間の流れの上に自分で
@@ -536,8 +546,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 <button
                   className="btn btn-secondary btn-lg"
                   onClick={() => setChoosingTimeline((v) => !v)}
-                  disabled={isExporting || pendingAction !== null || creatingTimeline}
-                  title={isExporting ? "書き出しが終わるまでお待ちください" : pendingAction !== null ? "確認に答えてから操作できます" : "場面に区切らず、時間の流れの上に自分で並べます"}
+                  disabled={isExporting || awaitingAnswer || creatingTimeline}
+                  title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "場面に区切らず、時間の流れの上に自分で並べます"}
                 >
                   {creatingTimeline ? "作っています…" : "タイムラインで作る"}
                 </button>
@@ -580,7 +590,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
           {/* クイック操作 */}
           <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew} disabled={isExporting || pendingAction !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingAction !== null ? "確認に答えてから操作できます" : undefined}>
+            <button className="action-card" onClick={startNew} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : undefined}>
               <div
                 className="action-card-icon"
                 style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
@@ -690,9 +700,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
-                      disabled={isExporting || openingId !== null || duplicatingId !== null || pendingAction !== null || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (pendingAction !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || duplicatingId !== null || pendingAction !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
+                      disabled={isExporting || openingId !== null || duplicatingId !== null || awaitingAnswer || confirmNew}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || duplicatingId !== null || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
                           （後方互換＝古い動画・まだ保存していない動画でも一覧は普通に出る）。 */}
@@ -744,7 +754,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                         戻したあとその動画を開くので、開けない状況では押せないようにする。 */}
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={isExporting || pendingAction !== null || openingId !== null || duplicatingId !== null || restoring}
+                      disabled={isExporting || awaitingAnswer || openingId !== null || duplicatingId !== null || restoring}
                       onClick={() => void openRestorePanel(p.projectId)}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を前の状態に戻す`}
                       title={
@@ -752,7 +762,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           ? "書き出しが終わるまでお待ちください"
                           : openingId !== null
                             ? "プロジェクトを開いています…"
-                            : pendingAction !== null
+                            : awaitingAnswer
                               ? "確認に答えてから操作できます"
                               : "前の状態に戻す"
                       }
@@ -769,7 +779,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="btn btn-ghost btn-icon"
                       disabled={
-                        isExporting || pendingAction !== null || confirmNew || duplicatingId !== null
+                        isExporting || awaitingAnswer || confirmNew || duplicatingId !== null
                         // ⚠️ **開いている最中も押せなくする**（α-6 出口監査 🟡32）＝`onDuplicate` が
                         // 黙って return するので、押せると**何も起きない**（§2-5）。
                         || openingId !== null
@@ -787,7 +797,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                             // 同じ状態で「コピーしています…」と言う＝同じ状態に断り方が2通り）。
                             : duplicatingId !== null
                               ? "コピーしています…"
-                              : pendingAction !== null || confirmNew
+                              : awaitingAnswer || confirmNew
                                 ? "確認に答えてから操作できます"
                                 : isTimelineProjectDoc({ format: p.format })
                                   ? "タイムラインで作った動画はまだ複製できません"
@@ -800,13 +810,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="btn btn-ghost btn-icon"
                       // 確認バナー表示中は削除も止める（確認中の「開く先」を消せてしまい、「開く」が失敗するのを防ぐ＝
                       // カード/新規作成ボタンと同じ「確認中は他操作を止める」方針に揃える・レビュー対応）。
-                      disabled={isExporting || pendingAction !== null || confirmNew}
+                      disabled={isExporting || awaitingAnswer || confirmNew}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : (pendingAction !== null || confirmNew) ? "確認に答えてから操作できます" : "削除"}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>

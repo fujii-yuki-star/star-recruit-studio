@@ -168,8 +168,15 @@ function domainWarnMessages(): { code: string; message: string; where: string }[
       if (statSync(p).isDirectory()) walk(p);
       else if (/\.ts$/.test(name) && !name.includes(".test.")) {
         const text = readFileSync(p, "utf8");
-        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*'([^']+)'/g)) {
-          out.push({ code: m[1], message: m[2], where: name });
+        // ⚠️ **名前で渡された文言も解く**（α-7 出口監査 🟡）＝
+        // `warn('TEXT_OVERFLOW', TRANSFORM_WARNING.NARRATION_TOO_LONG, …)` のように定数で渡す形は、
+        // その場に文字が無いので**素通り**していた＝**この検査自身が、塞いだのと同じ穴を持っていた**。
+        const consts = new Map<string, string>();
+        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*$/gm)) consts.set(m[1], "");
+        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*'([^']+)',?$/gm)) consts.set(m[1], m[2]);
+        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*(?:'([^']+)'|[A-Za-z_$][\w$]*\.([A-Z_][A-Z_0-9]*))/g)) {
+          const message = m[2] ?? consts.get(m[3] ?? "");
+          if (message) out.push({ code: m[1], message, where: name });
         }
       }
     }
