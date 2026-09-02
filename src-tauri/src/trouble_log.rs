@@ -254,6 +254,34 @@ mod tests {
 
     /// 札に改行が混じっても1行のまま（#957 レビュー）。
     /// ⚠️ **`one_line` を直接見ない**＝それだと `record` が札へ通していなくても緑になる（実際そうだった）。
+    /// 中身の改行も1行に潰れる（α-7 出口監査 🟡）。
+    ///
+    /// ⚠️ **`one_line` を直接見るだけでは足りない**＝`record_to` がそれを通していなくても緑になる。
+    /// FFmpeg の出力は複数行で来るので、**この機能の主な使い道**がまさにここ。
+    #[test]
+    fn record_flattens_detail_too() {
+        use super::record_to;
+        use std::fs;
+        let dir = std::env::temp_dir().join("stario_tlog_detail");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        record_to(
+            &dir,
+            "t",
+            "1行目
+2行目
+3行目",
+            MAX_BYTES,
+        );
+        let body = fs::read_to_string(dir.join("stario.log")).unwrap();
+        assert_eq!(body.lines().count(), 1, "中身の改行で行が割れた: {body:?}");
+        assert!(
+            body.contains("1行目 / 2行目 / 3行目"),
+            "潰れていない: {body:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn record_flattens_tag_too() {
         let dir = std::env::temp_dir().join("stario_tlog_tag");

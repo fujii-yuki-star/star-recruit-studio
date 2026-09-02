@@ -46,11 +46,32 @@ describe('clearStaleVoices（#967 レビュー 🟡2）', () => {
     expect(count.cleared).toBe(1);
   });
 
-  it('いまに無い場面は触らない（音のファイルも無い）', () => {
+  // ⚠️ **このテストは事実と違う前提を固定していた**（α-7 出口監査 🟡）＝
+  // 「いまに無い場面＝音のファイルも無い」と書いていたが、読み上げの WAV を消す経路は
+  // （動画ごと消す以外に）無く、`voices/<場面 id>.wav` は**場面を消しても残る**。
+  // 素通りさせると「文は戻った・音はいまの文」の場面が復活する。
+  it('いまに無い場面は、比べようが無いので作成前に戻す（音のファイルは残っている）', () => {
     const restored = proj([scene('scene_009', '消えた場面', 'generated')]);
     const { project, count } = clearStaleVoices(restored, proj([]));
-    expect(project.scenes[0].narration.status).toBe('generated');
-    expect(count.cleared).toBe(0);
+    expect(project.scenes[0].narration.status).toBe('none');
+    expect(project.scenes[0].narration.voicePath).toBeNull();
+    expect(count.cleared).toBe(1);
+  });
+
+  it('いまに無い場面でも、作っていない読み上げは数えない', () => {
+    const restored = proj([scene('scene_009', '消えた場面', 'none')]);
+    expect(clearStaleVoices(restored, proj([])).count.cleared).toBe(0);
+  });
+
+  it('いまに無い場面の掛け合いも、作成済みの行だけ戻す', () => {
+    const restored = proj([scene('scene_009', '', 'none', [
+      { lineId: 'line_001', text: 'あ', status: 'generated' },
+      { lineId: 'line_002', text: 'い', status: 'none' },
+    ])]);
+    const { project, count } = clearStaleVoices(restored, proj([]));
+    expect(project.scenes[0].lines![0].status).toBe('none');
+    expect(project.scenes[0].lines![1].status).toBe('none');
+    expect(count.cleared).toBe(1);
   });
 
   it('まだ作っていない読み上げは数えない（作り直すものが無い）', () => {

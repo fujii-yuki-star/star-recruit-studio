@@ -14,6 +14,7 @@ import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
+import { keepRestorePoints } from "./restorePointKeeper";
 import { createProjectId } from "../../domain/project/persistence";
 import { useProjectStore } from "./projectStore";
 import { onProjectDeleted } from "./projectDeletion";
@@ -2117,6 +2118,11 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
     return;
   }
   try {
+    // ⚠️ **上書きの前に控える**（α-7 出口監査 🟡）＝場面形式にだけ入れていたので、
+    // タイムライン形式は**復元ポイントが一度も作られない**のに一覧の「前の状態に戻す」は出ており、
+    // 「編集して保存していくと増えていきます」＝**来ない次の行動**を案内していた。
+    // 規則は domain に1つ（`restorePoints.ts`）＝両形式が同じものを通る。
+    await keepRestorePoints(next.projectId, Date.now());
     await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
     if (!stillOpen()) return;
     // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。

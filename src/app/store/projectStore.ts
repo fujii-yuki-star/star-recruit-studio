@@ -19,7 +19,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAnimationId, createBgmId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAnimationId, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
   ProjectLoadError,
 } from "../../domain/project/persistence";
@@ -41,7 +41,7 @@ import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
-import { keepRestorePoints } from "./restorePointKeeper";
+import { keepRestorePoints, restoreToPoint } from "./restorePointKeeper";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
@@ -59,7 +59,7 @@ import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { probeAndThumbVideo, probeImageSize } from "./assetImport";
+import { probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -295,6 +295,13 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 保存済みプロジェクトをディスクから完全に削除する（#212）。 */
   deleteProject: (projectId: string) => Promise<void>;
+  /**
+   * 復元ポイントへ戻す（#263 段階2・α-7 出口監査 🔴）。戻した「作り直しが要る読み上げ」の数を返す。
+   *
+   * ⚠️ **store の action にしてある**＝画面から直に書くと、**走っている保存の着地**が
+   * 戻した内容を「戻す前」で上書きする（保存の直列化＝`saveInFlight` は外から待てない）。
+   */
+  restoreToRestorePoint: (projectId: string, name: string) => Promise<number>;
   /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
   renameProject: (projectId: string, newName: string) => Promise<void>;
   /** 焼き出したときに増えるディスク容量（バイト）と、持っていけないもの（焼く前の確認用・ADR-0032 決定13）。 */
@@ -1392,6 +1399,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
+  restoreToRestorePoint: async (projectId, name) => {
+    // ⚠️ **書き出し中はやらない**（多重防御）＝ほかの入口（開く・消す・複製）と揃える。
+    // 一覧のボタンも押せなくしてあるが、押せないようにするだけでは守りにならない。
+    if (isExportBusy(get().exportRun.phase)) return 0;
+    // ⚠️ **走っている保存の着地を待つ**（α-7 出口監査 🔴）＝`_doSave` は書き込みの**後**でしか
+    // 「まだ同じ文書か」を見ないので、待たずに戻すと**戻した `project.json` を戻す前の内容で
+    // 上書き**する（何も言われずに復元が無かったことになる）。`deleteProject` と同じ手順。
+    await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
+    // ⚠️ **これ以上この文書へ書かない印を立てる**＝待っている間に積まれた保存が、
+    // 戻したあとに着地して同じことをする。`_docEpoch` を進めると `sameDocGuard` が弾く。
+    if (get().meta.projectId === projectId) set((s) => ({ _docEpoch: s._docEpoch + 1, saveStatus: "saved" }));
+    return await restoreToPoint(projectId, name);
+  },
+
   deleteProject: async (projectId) => {
     // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
     // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。
@@ -2130,7 +2151,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（番号が重なれば `11.2` の一意性が破れ、同名ファイルを上書きし、巻き戻しが別の素材を消す）。
     const stillOpen = sameDocGuard(get);
     // 素材1つぶんの導出は domain に1つ（#712・§2-7）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
-    const { asset, fileName } = newAssetFrom(file.name, get().assets.map((a) => a.assetId));
+      // ⚠️ **番号は使い回さない**（α-7 出口監査 🟡）＝素材のファイル名は `assets/<番号>.<拡張子>` で
+      // 固定なので、空き番号を埋めると**同じ名前のファイルを上書きして前の写真が消える**。
+      // 〈素材を消す → 別の素材を入れる（同じ番号を拾う）→ 前の状態に戻す〉で、戻した文書の
+      // その番号が**別の写真の中身**を指す＝ファイルは在るので「見つかりません」でも拾えず、
+      // **黙って別の絵の動画が出る**。⚠️ **通常の取り消しでも起きる**（履歴は `assets` を持たない）。
+      // 同じ規則が既にタイムライン形式にある（`reserveAssetId`）ので、そちらへ揃える。
+    const { asset, fileName } = newAssetFrom(file.name, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     const { assetId, assetType } = asset;
     // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。以降の離脱は isImporting を戻す。
     set({ isImporting: true });
@@ -2209,7 +2236,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // パス末尾から種別・拡張子・表示名を決める（導出は domain に1つ＝#712・§2-7）。
-    const { asset, fileName } = newAssetFrom(path, get().assets.map((a) => a.assetId));
+    const { asset, fileName } = newAssetFrom(path, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     const { assetId, assetType } = asset;
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（🟡9 と同じ理由）。
     const stillOpen = sameDocGuard(get);
@@ -2281,7 +2308,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const lib = list.find((a) => a.id === libraryAssetId);
     if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
-    const { asset, fileName } = assetFromLibrary(lib, get().assets.map((a) => a.assetId));
+    const { asset, fileName } = assetFromLibrary(lib, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     if (!stillOpen()) return done(null);
     set({ importError: null });
     try {

@@ -6,11 +6,17 @@
 // 取り込み中は**黙って return** するため、まとめて渡すと数件が理由なしに消える（§2-5）。
 // 取り込みの状態（`isImporting`/`importError`/採番）を持っている側で回すのが唯一の正しい置き場所。
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import { resetAssetIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
 
 const BUSY = /書き出し/;
+
+// ⚠️ **番号の予約は起動中ずっと残る**（#712・α-7 出口監査 🟡）＝素材の番号を使い回すと、
+// 前の写真を上書きする。テストの間は毎回まっさらにする（**ファイルの直下に置く**＝
+// describe の中に入れると、その describe のテストにしか効かない）。
+afterEach(() => resetAssetIdReservations());
 
 describe('projectStore addAssets（まとめて取り込む・#858）', () => {
   beforeEach(() => {

@@ -150,6 +150,51 @@ function sourceBlob(): string {
   return files.map((p) => readFileSync(p, "utf8")).join("\n").replace(/[\s"\u0027\u0060+]/g, "");
 }
 
+
+/**
+ * **domain が出す断りのコード**（`warn('CODE', '文言', …)`）を、本文から拾う。
+ *
+ * ⚠️ **ここが走査の外にあった**（α-7 出口監査 🟡）＝`codeMessages()` はコード側の**定数**しか見ないので、
+ * `warn('SCENE_TYPE_FALLBACK', '不明な場面種別を調整しました', …)` のように**その場で書いた文**は
+ * 表に無くても誰も気づかない。実際に `SCENE_TYPE_FALLBACK` は表に1行も無く、
+ * `POSE_FALLBACK` は**2つ目の文**（「ゆうこの素材が見つかりません」）が表から漏れていた。
+ * ⚠️ **1つのコードが複数の文を持つ**（出る場面で言うことが違う）ので、**コードと文の組**で拾う。
+ */
+function domainWarnMessages(): {
+  found: { code: string; message: string; where: string }[];
+  /** 見つけた `warn(` 呼び出しすべて（解けたかどうかに関わらず）。 */
+  seen: { code: string; where: string }[];
+} {
+  const out: { code: string; message: string; where: string }[] = [];
+  const seen: { code: string; where: string }[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.ts$/.test(name) && !name.includes(".test.")) {
+        const text = readFileSync(p, "utf8");
+        // ⚠️ **名前で渡された文言も解く**（α-7 出口監査 🟡）＝
+        // `warn('TEXT_OVERFLOW', TRANSFORM_WARNING.NARRATION_TOO_LONG, …)` のように定数で渡す形は、
+        // その場に文字が無いので**素通り**していた＝**この検査自身が、塞いだのと同じ穴を持っていた**。
+        const consts = new Map<string, string>();
+        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*$/gm)) consts.set(m[1], "");
+        for (const m of text.matchAll(/^\s{2}([A-Z_][A-Z_0-9]*):\s*'([^']+)',?$/gm)) consts.set(m[1], m[2]);
+        // ⚠️ **解けなかったものを黙って捨てない**（#971 レビュー 🟡）＝
+        // 定数を**別のファイル**へ切り出す／テンプレートリテラルで書く、のどちらでも
+        // `consts` から引けず、**検査から静かに消える**（今回塞いだのと**3回目の同じ形**）。
+        // 呼び出しの総数と、解けた数が合うかを外で見る。
+        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'/g)) seen.push({ code: m[1], where: name });
+        for (const m of text.matchAll(/warn\(\s*'([A-Z_]+)'\s*,\s*(?:'([^']+)'|[A-Za-z_$][\w$]*\.([A-Z_][A-Z_0-9]*))/g)) {
+          const message = m[2] ?? consts.get(m[3] ?? "");
+          if (message) out.push({ code: m[1], message, where: name });
+        }
+      }
+    }
+  };
+  walk(join(process.cwd(), "src", "domain"));
+  return { found: out, seen };
+}
+
 /** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
 const norm = (s: string): string => s.replace(/。$/, "").trim();
 
@@ -244,6 +289,32 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   it("理由つきで外した行は、いまも表に在る（消えた行の言い訳が残らない）", () => {
     const rows = readErrorTable();
     expect([...Object.keys(ASSEMBLED_AT_RUNTIME), ...Object.keys(NOT_SURFACED)].filter((c) => !rows.has(c))).toEqual([]);
+  });
+
+
+  /**
+   * domain が出す断りも、表に載っていること（α-7 出口監査 🟡）。
+   *
+   * ⚠️ **文まで見る**＝コードだけ見ると、**同じコードで別の文**（出る場面で言うことが違う）が
+   * 漏れていても気づけない。実際 `POSE_FALLBACK` はそれで漏れていた。
+   */
+  it("domain が出す断りの文が、表のどこかに在る", () => {
+    const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
+    const flat = md.replace(/\s/g, "");
+    const missing = domainWarnMessages().found
+      .filter(({ message }) => !flat.includes(message.replace(/\s/g, "")))
+      .map(({ code, message, where }) => `${code}（${where}）: ${message}`);
+    // ⚠️ **どちらを直すかは人が決める**（文を変えたのか、表に足し忘れたのか）ので、両方を出す。
+    expect([...new Set(missing)].join("\n")).toBe("");
+  });
+
+  it("domain の断りを1つも拾えていない、が起きない（走査が壊れたら落ちる）", () => {
+    const { found, seen } = domainWarnMessages();
+    expect(seen.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(seen.map((f) => f.code)).size).toBeGreaterThanOrEqual(15);
+    // ⚠️ **解けなかったものが1つも無い**＝これが本体（黙って検査から消えるのを防ぐ）。
+    const unresolved = seen.length - found.length;
+    expect(unresolved, "文言を解けなかった `warn(` がある（別ファイルの定数・テンプレートリテラル）").toBe(0);
   });
 
   it("守れている件数が黙って減らない（対象の families を外すと落ちる）", () => {
