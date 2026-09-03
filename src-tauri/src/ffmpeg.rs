@@ -3643,10 +3643,22 @@ fn export_video_impl(
     // 「音量を整える」が効いたり効かなかったりすると、同じ設定で別の結果になる。
     // 整えるだけのときは `amix=inputs=1`（既存音声だけ）を通る＝映像は `-c:v copy` のまま。
     let needs_audio_pass = has_bgm || normalize.is_some();
+    // ⚠️ **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）＝ffmpeg は出力を**開いた時点で切り詰める**ので、
+    // 既にある動画を選んで「上書きしますか→はい」と答えた直後に中止・失敗すると、
+    // **前の動画が失われ、開けないファイルだけが残る**（実測＝10,748 バイトの再生できる動画が
+    // 262,192 バイトの `moov atom not found` になった）。しかも成功時と同じ名前・拡張子なので、
+    // **開くまで気づけない**（§2-5「黙って別の結果にしない」）。
+    // → **隣に一時名で書き、成功したときだけ名前を付け替える**。
+    let staged = staged_output_path(&out);
     let joined_path = if needs_audio_pass {
         tmp.join("video.mp4")
     } else {
-        out.clone()
+        staged.clone()
+    };
+    // ⚠️ **書きかけは、どの抜け方でも片づける**（中止・失敗・途中の `?`）＝
+    // 残すと、次に同じ場所へ書き出すときに**前回の書きかけ**が隣にいる（利用者から見ると謎のファイル）。
+    let _staged_cleanup = StagedCleanup {
+        path: staged.clone(),
     };
     let export_start = Instant::now();
     encode_jobs(
@@ -3740,7 +3752,7 @@ fn export_video_impl(
             &placed,
             total,
             normalize,
-            &out.to_string_lossy(),
+            &staged.to_string_lossy(),
         );
         run_export(&ffmpeg, &args).map_err(|e| {
             export_failure(
@@ -3758,11 +3770,61 @@ fn export_video_impl(
         scenes.len()
     );
 
+    // ⚠️ **ここで初めて利用者の場所へ置く**＝ここまで来たものだけが「開ける動画」。
+    // `rename` は同じ場所どうしなので取り違えが起きない（別ドライブへ跨がない）。
+    finish_staged_output(&staged, &out)?;
+
     Ok(ExportReport {
         output_path: out.to_string_lossy().into_owned(),
         codec: codec.encoder().to_string(),
         scene_count: scenes.len(),
     })
+}
+
+/// 書きかけを置く場所（利用者の選んだ場所の**隣**）。
+///
+/// ⚠️ **同じフォルダに置く**＝別の場所（一時フォルダ）だと、最後の付け替えが
+/// **ドライブをまたぐコピー**になり、大きな動画で時間がかかるうえ途中で失敗しうる。
+fn staged_output_path(out: &Path) -> PathBuf {
+    let name = out
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "video.mp4".to_string());
+    out.with_file_name(format!(".{name}.writing"))
+}
+
+/// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
+fn finish_staged_output(staged: &Path, out: &Path) -> Result<(), String> {
+    // 既にあるものは、置き換える直前まで残しておく（ここで初めて消える）。
+    if out.exists() {
+        fs::remove_file(out).map_err(|e| {
+            export_failure(
+                format!("remove existing output: {e}"),
+                "前からあった動画を置き換えられませんでした。別の名前で保存し直してください。",
+            )
+        })?;
+    }
+    fs::rename(staged, out).map_err(|e| {
+        export_failure(
+            format!("rename staged output: {e}"),
+            "動画を保存先へ置けませんでした。空き容量を確かめて、もう一度お試しください。",
+        )
+    })
+}
+
+/// 書きかけの後始末（**どの抜け方でも**片づける）。
+///
+/// ⚠️ **`?` での早期離脱が多い**ので、片づけを手で書くと**必ずどこかで抜ける**。
+/// 置いた場所を持たせて、抜けた時点で消えるようにする。成功したときは
+/// `finish_staged_output` が先に名前を付け替えているので、ここでの削除は空振りする。
+struct StagedCleanup {
+    path: PathBuf,
+}
+
+impl Drop for StagedCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[cfg(test)]
@@ -6721,5 +6783,80 @@ mod tests {
                 .len()
                 > 1000
         );
+    }
+}
+
+#[cfg(test)]
+mod staged_output_tests {
+    use super::*;
+
+    /// **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）。
+    ///
+    /// ⚠️ **実測で確かめた壊れ方**＝ffmpeg は出力を**開いた時点で切り詰める**ので、
+    /// 既にある動画を選んで「上書きしますか→はい」と答えた直後に中止・失敗すると、
+    /// **前の動画が失われ、開けないファイルだけが残る**
+    ///（10,748 バイトの再生できる動画が 262,192 バイトの `moov atom not found` になった）。
+    #[test]
+    fn 書きかけは利用者の場所に触らない() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前に作った大事な動画".as_bytes()).unwrap();
+
+        let staged = staged_output_path(&out);
+        // ⚠️ **隣に置く**＝別ドライブへ跨ぐと、最後の付け替えがコピーになって遅く・失敗しうる。
+        assert_eq!(staged.parent(), out.parent(), "書きかけは同じ場所へ置く");
+        assert_ne!(staged, out, "利用者の選んだ場所そのものへ書かない");
+
+        // 書き出しが途中まで進んだ（＝書きかけができた）。
+        fs::write(&staged, "書きかけ".as_bytes()).unwrap();
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前に作った大事な動画".as_bytes(),
+            "書きかけができても、前の動画はそのまま"
+        );
+
+        // 中止・失敗＝見張りが落ちて片づく。
+        {
+            let _cleanup = StagedCleanup {
+                path: staged.clone(),
+            };
+        }
+        assert!(!staged.exists(), "書きかけを残さない");
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前に作った大事な動画".as_bytes(),
+            "中止しても前の動画は失われない"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 成功したときだけ置き換える() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_ok_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前の動画".as_bytes()).unwrap();
+        let staged = staged_output_path(&out);
+        fs::write(&staged, "新しい動画".as_bytes()).unwrap();
+
+        finish_staged_output(&staged, &out).unwrap();
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "新しい動画".as_bytes(),
+            "置き換わる"
+        );
+        assert!(!staged.exists(), "書きかけは残らない");
+
+        // 成功した後に見張りが落ちても、置いたものを消さない。
+        {
+            let _cleanup = StagedCleanup {
+                path: staged.clone(),
+            };
+        }
+        assert!(out.exists(), "成功した動画を後片づけで消さない");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
