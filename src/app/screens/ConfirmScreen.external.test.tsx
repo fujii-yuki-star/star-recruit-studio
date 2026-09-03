@@ -18,6 +18,13 @@ beforeEach(() => {
   vi.restoreAllMocks();
   useProjectStore.getState().setExportRun({ phase: "idle" });
   useProjectStore.getState().newProject();
+  // ⚠️ **素材を1つ置く**＝「文字情報を確認する」は送る文字があるときだけ出るので、
+  // 置かないと**その言い方を一度も見ないまま緑**になる。
+  useProjectStore.setState({
+    assets: [
+      { assetId: "asset_001", assetType: "image", displayName: "会社の外観.jpg", filePath: "assets/asset_001.jpg" },
+    ] as never,
+  });
 });
 
 describe("送信前確認の言い方が、実際に送るかで変わる（#995 ④）", () => {
@@ -31,9 +38,31 @@ describe("送信前確認の言い方が、実際に送るかで変わる（#995
   it("送らないときは、送る前提の言い方も個人情報の注意も出さない", async () => {
     vi.spyOn(ai, "willSendExternally").mockResolvedValue(false);
     render(<ConfirmScreen onNavigate={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText(/外へ送られることはありません/)).toBeInTheDocument());
+    // ⚠️ 2か所（説明文と強調ボックス）で言うので、`getAllByText` で受ける。
+    await waitFor(() => expect(screen.getAllByText(/外へ送られることはありません/).length).toBeGreaterThan(0));
     expect(screen.queryByText(/ゆうこに渡して/), "送らないのに「渡して」と言っている").toBeNull();
     expect(screen.queryByText(/送信してよい内容か/), "送らないのに送信の確認を出している").toBeNull();
+  });
+
+  // ⚠️ **画面ぜんぶの言い方を見る**（PR #1027 レビュー 🔴）＝最初は説明文と個人情報の注意しか
+  // 直しておらず、**「送る文字情報を確認する」「ゆうこに渡します」「送信して動画案を作る」**が
+  // 残っていた（とくに最後は**いちばん目立つ主ボタン**＝この画面で直したはずのことが残る）。
+  it("送るときは、画面ぜんぶが送る前提で言う", async () => {
+    vi.spyOn(ai, "willSendExternally").mockResolvedValue(true);
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /送信して動画案を作る/ })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "送る文字情報を確認する" })).toBeInTheDocument();
+    expect(screen.getByText(/ゆうこに渡します/)).toBeInTheDocument();
+  });
+
+  it("送らないときは、画面のどこにも「送る」前提の言い方が残らない", async () => {
+    vi.spyOn(ai, "willSendExternally").mockResolvedValue(false);
+    const { container } = render(<ConfirmScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /この内容で動画案を作る/ })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "使う文字情報を確認する" })).toBeInTheDocument();
+    expect(screen.queryByText(/ゆうこに渡します/), "送らないのに「渡します」と言っている").toBeNull();
+    // ⚠️ **画面まるごとで見る**＝直し漏れた1か所を、文言ごとに書き並べても見つけられない。
+    expect(container.textContent, "送らないのに「送信」と書いてある所が残っている").not.toMatch(/送信/);
   });
 
   // ⚠️ **判定できないうちは「送る」側**＝先に「送りません」と見せると、

@@ -151,7 +151,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                       onClick={() => setShowAssetText((v) => !v)}
                       aria-expanded={showAssetText}
                     >
-                      {showAssetText ? "文字情報を隠す" : "送る文字情報を確認する"}
+                      {showAssetText ? "文字情報を隠す" : external ? "送る文字情報を確認する" : "使う文字情報を確認する"}
                     </button>
                   )}
                 </div>
@@ -190,11 +190,22 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           </div>
 
           {/* 強調: 写真・動画ファイルは送信しない（MVP は文字情報のみ） */}
+          {/* ⚠️ **送るときの話は、送るときだけ**（#995 ④・PR #1027 レビュー 🔴）＝
+              送らないのに「渡します」「送信しません」と言うと、**送っている前提**の説明になる。 */}
           <div className="notice notice-strong mb">
             <CheckIcon size={18} />
             <span>
-              写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
-              説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+              {external ? (
+                <>
+                  写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
+                  説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+                </>
+              ) : (
+                <>
+                  この動画のたたき台は、<strong>この端末の中だけ</strong>で作ります。
+                  入力いただいた内容も素材も、外へ送られることはありません。
+                </>
+              )}
             </span>
           </div>
 
@@ -232,7 +243,9 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               onClick={() => onNavigate("generating")}
             >
               <SparkleIcon size={20} />
-              送信して動画案を作る
+              {/* ⚠️ **いちばん目立つ所こそ、実際に起きることを言う**（PR #1027 レビュー 🔴）＝
+                  送らないのに「送信して」と書くと、**この画面で直したはずのことが主ボタンに残る**。 */}
+              {external ? "送信して動画案を作る" : "この内容で動画案を作る"}
             </button>
           </div>
         </div>
