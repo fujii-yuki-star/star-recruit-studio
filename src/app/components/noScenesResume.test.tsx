@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NoScenesState } from "./NoScenesState";
 import { useProjectStore } from "../store/projectStore";
-import { EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM, RESUME_WIZARD_LABEL } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM, RESUME_WIZARD_LABEL } from "../uiLabels";
 
 const withMeta = (meta: Record<string, unknown>) =>
   useProjectStore.setState({
@@ -157,3 +157,32 @@ describe("作る手前で、上書きになることを告げる（#985 レビ�
     }
   });
 });
+
+// 白紙から作った動画にも道がある（#1003・決定 (a)）。
+describe("白紙から作った動画にも、会社情報を入れる道がある（#1003）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // ⚠️ **ここが元の穴**＝白紙の動画には**何も出なかった**＝ゆうこにたたき台を作ってもらう道が
+  // 永久に無い（会社情報が無いと渡すものが無い）＝作り直すしかない行き止まり。
+  it("何も入れていなくても道が出る（言い方は「入れる」）", () => {
+    withMeta({ companyInfo: undefined, generalBrief: undefined });
+    render(<NoScenesState purpose="ここで場面を作ります" onNavigate={vi.fn()} onAddScene={vi.fn()} />);
+    expect(screen.getByRole("button", { name: new RegExp(ADD_WIZARD_INPUT_LABEL) })).toBeTruthy();
+  });
+
+  // ⚠️ **まだ無いものを「続き」と言わない**（`06 §12.1`＝名指しするものはその画面に実在すること）。
+  it("何も入れていないのに「続き」とは言わない", () => {
+    withMeta({ companyInfo: undefined, generalBrief: undefined });
+    render(<NoScenesState purpose="ここで場面を作ります" onNavigate={vi.fn()} onAddScene={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: new RegExp(RESUME_WIZARD_LABEL) })).toBeNull();
+  });
+
+  it("押すとウィザードへ行く", () => {
+    withMeta({ companyInfo: undefined, generalBrief: undefined });
+    const onNavigate = vi.fn();
+    render(<NoScenesState purpose="ここで場面を作ります" onNavigate={onNavigate} onAddScene={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(ADD_WIZARD_INPUT_LABEL) }));
+    expect(onNavigate).toHaveBeenCalledWith("wizard");
+  });
+});
+
