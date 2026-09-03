@@ -8,7 +8,7 @@ import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
-import { IMPORT_NO_PROJECT_MESSAGE } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -164,7 +164,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onPick={addAssets}
             isImporting={isImporting}
             progress={importProgress}
-            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : IMPORT_NO_PROJECT_MESSAGE) : null}
+            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : timelineOpen ? IMPORT_TIMELINE_OPEN_MESSAGE : IMPORT_NO_PROJECT_MESSAGE) : null}
           />
         }
       />
