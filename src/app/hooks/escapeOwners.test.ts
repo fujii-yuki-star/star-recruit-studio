@@ -122,3 +122,23 @@ describe("名簿が配る（#965）", () => {
     expect(hasEscapeOwner()).toBe(false);
   });
 });
+
+// 日本語の変換中は奪わない（#989）。
+describe("変換中の Escape は名簿へ渡さない", () => {
+  it("変換中は受け手が呼ばれない（打ちかけを消さない）", () => {
+    const seen: string[] = [];
+    const release = claimEscapeReceiver(() => { seen.push("hit"); return true; });
+    const key = (over: Partial<KeyboardEvent>): KeyboardEvent =>
+      ({ key: "Escape", isComposing: false, keyCode: 27, ...over }) as unknown as KeyboardEvent;
+    try {
+      expect(handleEscapeKey(key({})), "ふつうの Escape が届いていない＝検査が空振り").toBe(true);
+      expect(seen).toEqual(["hit"]);
+      expect(handleEscapeKey(key({ isComposing: true })), "変換中なのに受け手へ渡した").toBe(false);
+      // ⚠️ **古い環境は `isComposing` を持たない**＝`keyCode === 229` でも変換中と見る。
+      expect(handleEscapeKey(key({ keyCode: 229 })), "keyCode 229 を変換中と見ていない").toBe(false);
+      expect(seen, "変換中なのに受け手が呼ばれた").toEqual(["hit"]);
+    } finally {
+      release();
+    }
+  });
+});

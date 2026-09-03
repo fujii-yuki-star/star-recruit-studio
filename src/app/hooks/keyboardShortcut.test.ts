@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // キー操作を奪ってよいかの共有判定（#701・監査 §7-6）。**日本語の変換中に奪わない**ことを固定する。
 // DOM が要る判定（`activatesOnSpace`/`usesArrowKeys`・#721）を足したので jsdom へ（ADR-0014 の個別切替）。
-import { describe, expect, it } from "vitest";
-import { activatesOnSpace, isImeComposing, isTextEntryTarget, shouldIgnoreShortcut, usesArrowKeys } from "./keyboardShortcut";
+import { describe, expect, it, vi } from "vitest";
+import { menuAnchorFrom } from "./usePointerDrag";
+import { activatesOnSpace, isImeComposing, isTextEntryTarget, shouldIgnoreShortcut, usesArrowKeys, renameFieldKeys } from "./keyboardShortcut";
 
 const key = (over: Partial<KeyboardEvent> & { target?: unknown }): KeyboardEvent =>
   ({ isComposing: false, keyCode: 27, target: null, ...over }) as unknown as KeyboardEvent;
@@ -83,5 +84,70 @@ describe('activatesOnSpace / usesArrowKeys（そのキーは要素のものか�
     expect(usesArrowKeys(el('<div>x</div>'))).toBe(false);
     expect(usesArrowKeys(null)).toBe(false);
     expect(usesArrowKeys(window)).toBe(false);
+  });
+});
+
+// 名前を打ち替える欄のキー（#989）。
+describe("renameFieldKeys（変換中は奪わない）", () => {
+  const ev = (key: string, composing = false) =>
+    ({ key, nativeEvent: { isComposing: composing } }) as never;
+
+  it("Enter で決める・Escape でやめる", () => {
+    const commit = vi.fn();
+    const cancel = vi.fn();
+    const h = renameFieldKeys({ commit, cancel });
+    h(ev("Enter"));
+    expect(commit).toHaveBeenCalledTimes(1);
+    h(ev("Escape"));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  // ⚠️ **ここが4か所で抜けていた**＝変換中の Enter は「変換を確定する」、Escape は「変換をやめる」。
+  // 奪うと**変換前の文字のまま欄が閉じる**。
+  it("変換中は Enter も Escape も奪わない", () => {
+    const commit = vi.fn();
+    const cancel = vi.fn();
+    const h = renameFieldKeys({ commit, cancel });
+    h(ev("Enter", true));
+    h(ev("Escape", true));
+    expect(commit).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **古い環境は `isComposing` を持たない**＝`keyCode === 229` でも変換中と見る
+  //（判定は `isImeComposing` と同じ規則）。
+  it("keyCode 229 でも変換中と見る", () => {
+    const commit = vi.fn();
+    renameFieldKeys({ commit })({ key: "Enter", nativeEvent: { keyCode: 229 } } as never);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("ほかのキーには何もしない", () => {
+    const commit = vi.fn();
+    const cancel = vi.fn();
+    renameFieldKeys({ commit, cancel })(ev("a"));
+    expect(commit).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("片方だけ渡しても落ちない（もう片方のキーで何も起きない）", () => {
+    const commit = vi.fn();
+    const h = renameFieldKeys({ commit });
+    expect(() => h(ev("Escape"))).not.toThrow();
+  });
+});
+
+// メニューを開く位置（#989）。
+describe("menuAnchorFrom（キーで押したら押したボタンの下）", () => {
+  const rect = { left: 120, bottom: 340 };
+  const target = { getBoundingClientRect: () => rect };
+
+  it("指で押したときは押した所", () => {
+    expect(menuAnchorFrom({ detail: 1, clientX: 50, clientY: 60, currentTarget: target })).toEqual({ x: 50, y: 60 });
+  });
+
+  // ⚠️ **キーの click は座標を持たない**（0,0）＝そのまま渡すとメニューが**画面の左上**に出る。
+  it("キーで押したときはボタンの下（左上に出さない）", () => {
+    expect(menuAnchorFrom({ detail: 0, clientX: 0, clientY: 0, currentTarget: target })).toEqual({ x: 120, y: 340 });
   });
 });

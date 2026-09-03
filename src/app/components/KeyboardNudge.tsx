@@ -19,6 +19,7 @@
 import { useEffect } from "react";
 import { keyboardNudgeDelta } from "../../domain/project/freeLayoutOps";
 import { activatesOnSpace, isImeComposing, isTextEntryTarget, usesArrowKeys } from "../hooks/keyboardShortcut";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 
 export interface KeyboardNudgeProps {
   /** 効かせるか（選んでいる・書き出し中でない など、画面ごとの条件）。 */
@@ -34,6 +35,13 @@ export function KeyboardNudge({ active, onArrow, onDelete }: KeyboardNudgeProps)
     if (!active) return;
     const onKey = (e: KeyboardEvent): void => {
       if (isTextEntryTarget(e.target) || isImeComposing(e)) return;
+      // ⚠️ **前へ出ているものがあるうちは動かさない**（#989）＝タイムラインは同じ規則を
+      // 持っている（「3個消しますか」の表示中に全選択できると、聞いた数と消える数がずれる）のに、
+      // **こちらは名簿を見ていなかった**＝同じ規則の別の入口が開いたまま（ADR-0026②）。
+      // 届く経路＝**色を選ぶ面を開いたまま矢印**（手はトリガーの `<button>` なので
+      // `usesArrowKeys` は偽）／**右クリックでメニューを開いたまま `Delete`**
+      //（右クリックでは焦点が移らないので手は `body`）。
+      if (hasEscapeOwner()) return;
       const d = keyboardNudgeDelta(e.key, e.shiftKey);
       if (d) {
         if (usesArrowKeys(e.target)) return; // 矢印はその相手のもの（セレクト・スライダー・数値欄）

@@ -81,6 +81,34 @@ export function usesArrowKeys(target: EventTarget | null): boolean {
 }
 
 /**
+ * 日本語を打っている最中か（React の合成イベント版）。
+ *
+ * ⚠️ **`isImeComposing` と別に要る**＝あちらは窓の購読（`KeyboardEvent`）用で、
+ * 欄の `onKeyDown` に来るのは React の合成イベント（`nativeEvent` の中に本物がいる）。
+ */
+export function isComposingReact(e: { nativeEvent: { isComposing?: boolean; keyCode?: number } }): boolean {
+  return !!e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+}
+
+/**
+ * **名前を打ち替える欄**のキー（`Enter` で決める・`Escape` でやめる）。#989
+ *
+ * ⚠️ **変換中は奪わない**＝変換中の `Enter` は「変換を確定する」、`Escape` は「変換をやめる」。
+ * 奪うと**変換前の文字のまま欄が閉じる**（実害がはっきりしている）。
+ *
+ * ⚠️ **1か所に置く**＝同じ形が画面のあちこちに手書きされていて、**4か所で抜けていた**
+ *（グループ名・自由配置の要素名・見た目パターンの文字欄・動画の名前）。
+ * 写して増やすと、次に足す欄でも同じように抜ける。
+ */
+export function renameFieldKeys(handlers: { commit?: () => void; cancel?: () => void }) {
+  return (e: { key: string; nativeEvent: { isComposing?: boolean; keyCode?: number } }): void => {
+    if (isComposingReact(e)) return;
+    if (e.key === "Enter") handlers.commit?.();
+    else if (e.key === "Escape") handlers.cancel?.();
+  };
+}
+
+/**
  * このキー操作を**アプリが横取りしてはいけない**か（文字を打っている最中＝入力欄／日本語の変換中）。
  * 画面のキー操作はまずこれを通す。
  */

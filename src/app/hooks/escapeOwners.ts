@@ -22,6 +22,7 @@
 // `stopPropagation` するので、**この名簿より先に独占する**（掴んでいる間は掴みの中止だけが走る）。
 // そちらは「塞ぐだけ」で足りる＝`useCanvasDrag` は `claimEscape` のまま。
 import { useEffect, useRef } from "react";
+import { isImeComposing } from "./keyboardShortcut";
 
 /** `Escape` を処理する関数。**受け取ったら `true`**（見送ると次の受け手へ渡る）。 */
 export type EscapeHandler = (e: KeyboardEvent) => boolean;
@@ -46,6 +47,13 @@ export function hasEscapeOwner(): boolean {
  * （購読した順に走るので、手前が見送るより先に奥が走ってしまう）。
  */
 export function handleEscapeKey(e: KeyboardEvent): boolean {
+  // ⚠️ **日本語を打っている最中は奪わない**（#989・`06 §12.1`）＝変換中の `Escape` は
+  // 「変換をやめる」なので、奪うと**打ちかけの文字ごと面が閉じる**。
+  // ⚠️ **配る側に置く**＝受け手ごとに書くと、**書き忘れた受け手だけ**が奪う（実際に
+  // 場面編集のポップオーバーで抜けていた）。名乗った全員に同じ規則を効かせる。
+  // ⚠️ **`isTextEntryTarget` では絞らない**＝面や確認は**欄の中から**開くのが普通で、
+  // そこで絞ると「打っている最中は `Escape` で閉じられない」＝閉じる道が無くなる。
+  if (isImeComposing(e)) return false;
   // ⚠️ **控えを取ってから回す**＝処理の中で名簿が変わる（閉じれば降りる）。
   const snapshot = owners.slice();
   for (let i = snapshot.length - 1; i >= 0; i -= 1) {

@@ -4,7 +4,7 @@
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
 import { useRef, useState } from "react";
-import { usePointerDrag } from "../../hooks/usePointerDrag";
+import { menuAnchorFrom, usePointerDrag } from "../../hooks/usePointerDrag";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ContextMenu } from "../ContextMenu";
 import type { ContextMenuItem } from "../ContextMenu";
@@ -212,7 +212,9 @@ export function PanelLayoutView({
               className="btn btn-ghost btn-sm"
               aria-label={`${spec.title}の欄の操作`}
               title="この欄の操作（右クリックでも開けます）"
-              onClick={(e) => setMenu({ panelId: spec.id, x: e.clientX, y: e.clientY })}
+              // ⚠️ **キーで押したときは押したボタンの下へ**（#989）＝キーの click は座標を持たないので、
+              // そのまま渡すとメニューが**画面の左上**に出る。規則は `menuAnchorFrom` に1つだけ。
+              onClick={(e) => setMenu({ panelId: spec.id, ...menuAnchorFrom(e) })}
             >
               ⋮
             </button>
