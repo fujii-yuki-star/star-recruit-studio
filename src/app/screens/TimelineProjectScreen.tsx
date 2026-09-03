@@ -61,6 +61,7 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import type { LayoutItem } from "../../renderer/layout";
 import { PageHead } from "../components/ui";
+import { ExportDoneActions } from "../components/ExportDoneActions";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
@@ -3131,6 +3132,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               閉じる
             </button>
           </p>
+        )}
+        {/* ⚠️ **終わったあとの導線も、場面形式と同じものを出す**（#991）＝こちらは
+            「動画を保存しました。」と「閉じる」だけで、**保存先も開く道も無かった**
+            （`06 §12.1` に導線を落とす理由は書かれていない＝ADR-0026②）。部品は共有。 */}
+        {exportRun.phase === EXPORT_RUN_PHASE.done && (
+          <ExportDoneActions key={exportRun.outPath ?? ""} path={exportRun.outPath ?? null} onBack={() => onNavigate("home")} />
         )}
         {/* ⚠️ **つないだことを知らせる**（α-6 出口監査 🟡・ADR-0032 追補4）＝つなぐと
             「セリフとセリフの間でも BGM が下がったまま」になるので、黙ってやると設定した意味と違う音になる。

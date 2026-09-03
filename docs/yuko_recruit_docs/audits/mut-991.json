@@ -1,0 +1,46 @@
+{
+  "tests": [
+    "src/app/screens/HomeScreen.restore.test.tsx",
+    "src/app/screens/HomeScreen.open-format.test.tsx",
+    "src/app/screens/MaterialsScreen.timeline-open.test.tsx",
+    "src/app/components/ExportDoneActions.test.tsx"
+  ],
+  "mutants": [
+    {
+      "label": "① 形式を見ず、いつも「その場面の声の欄」と言う",
+      "file": "src/app/uiLabels.ts",
+      "find": "const where = format === \"timeline\" ? \"「読み上げ」の欄\" : \"その場面の声の欄\";",
+      "replace": "const where = \"その場面の声の欄\";"
+    },
+    {
+      "label": "② 削除の確認がいつも「場面」と言う",
+      "file": "src/app/screens/HomeScreen.tsx",
+      "find": "isTimelineProjectDoc({ format: p.format }) ? \"部品\" : \"場面\"",
+      "replace": "\"場面\""
+    },
+    {
+      "label": "③ タイムラインを開いていても「先に動画を開いて」と言う",
+      "file": "src/app/screens/MaterialsScreen.tsx",
+      "find": "  const timelineOpen = useTimelineStore((s) => s.doc != null);",
+      "replace": "  const timelineOpen = false;"
+    },
+    {
+      "label": "④ 保存先が無くても導線を出す",
+      "file": "src/app/components/ExportDoneActions.tsx",
+      "find": "  if (!path) return null;",
+      "replace": "  if (false) return null;"
+    },
+    {
+      "label": "④ 開けなかった理由を、押した操作で言い分けない",
+      "file": "src/app/components/ExportDoneActions.tsx",
+      "find": "  return kind === \"open\"\n    ? \"動画を再生できませんでした。",
+      "replace": "  return kind === \"xxx\"\n    ? \"動画を再生できませんでした。"
+    },
+    {
+      "label": "④ 押し直しても前の断りが残る",
+      "file": "src/app/components/ExportDoneActions.tsx",
+      "find": "onClick={() => { setFailed(null); void openSavedFile(path).catch(() => setFailed(\"open\")); }}",
+      "replace": "onClick={() => { void openSavedFile(path).catch(() => setFailed(\"open\")); }}"
+    }
+  ]
+}

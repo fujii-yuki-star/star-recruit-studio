@@ -419,7 +419,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 後から出しても描かれない。押してもらってから開く。 */}
             {voicesCleared && (
               <div className="notice notice-warn mb" role="alert">
-                <span>{voicesClearedMessage(voicesCleared.count)}</span>
+                {/* ⚠️ **形式で作り直す場所が違う**（#991）＝タイムライン形式に「場面」は無く、
+                    作り直すのは「読み上げ」の欄。名指しするものは**その画面に実在すること**（#723・決定5）。 */}
+                <span>
+                  {voicesClearedMessage(
+                    voicesCleared.count,
+                    isTimelineProjectDoc({ format: projects.find((p) => p.projectId === voicesCleared.projectId)?.format })
+                      ? "timeline"
+                      : "scene",
+                  )}
+                </span>
                 {/* ⚠️ **閉じる手段を用意する**（自分で挙げた懸念）＝答えるまで他を塞ぐので、
                     「開く」しか無いと**開きたくない人が行き止まり**になる。見たことは押した時点で足りる。 */}
                 <div className="row gap-sm">
@@ -725,7 +734,11 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   <DeleteConfirm
                     key={p.projectId}
                     busy={deleteBusy}
-                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。`}
+                    // ⚠️ **形式で語彙を割らない**（#991・ADR-0026②）＝同じ一覧に「タイムライン」の行が
+                    // 並ぶのに、削除の確認だけ場面形式の言葉（「場面」）で言っていた。
+                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した${
+                      isTimelineProjectDoc({ format: p.format }) ? "部品" : "場面"
+                    }・素材・音声ごと消え、元に戻せません。`}
                     onCancel={() => {
                       setDeletingId(null);
                       setDeleteError(false);
