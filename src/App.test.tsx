@@ -255,3 +255,4 @@ describe("App「今の動画」を出すかの判定", () => {
     expect(within(container).getByText("今の動画")).toBeInTheDocument();
   });
 });
+
