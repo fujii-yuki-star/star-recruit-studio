@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
+import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { DELETE_LABEL, DUPLICATE_LABEL, DUCK_MERGED_MESSAGE, clipOutsidePlayheadMessage, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
@@ -7476,5 +7477,42 @@ describe("TimelineProjectScreen: 選んでいるのに掴めないとき（#996�
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "5" } }); // clip_002 は 0〜2秒
     fireEvent.click(screen.getByRole("button", { name: /よろしく/ }));
     expect(screen.getByText(clipOutsidePlayheadMessage(0, 2, "鳴っている", "置いて"))).toBeInTheDocument();
+  });
+});
+
+// 答えを求める確認の置き場所（#990・`06 §2` 統一規約10／#940）。
+describe("TimelineProjectScreen: 確認はスクロールで視界から出ない（#990）", () => {
+  /**
+   * スクロールしても消えないか（`NoticeZone.placement.test.tsx` と**同じ物差し**）。
+   * 満たし方は2通りで、どちらでも結果は同じ＝**スクロールする側の外に居る**か、**貼り付いている**か。
+   */
+  const staysVisibleOnScroll = (el: Element): boolean =>
+    el.closest(".main-scroll") == null || el.closest(`.${NOTICE_ZONE_CLASS}`) != null;
+
+  // ⚠️ **守りのテストは動画の一覧と素材の2画面しか見ていなかった**（#990）＝
+  // この画面は全体が `.main-scroll` なので、素で置くと**下へ送ったとたん確認が視野の外**へ出る。
+  // 出しっぱなしのまま押せない状態が続くので、利用者からは「固まった」ようにしか見えない（§2-5）。
+  it("まとめて削除の確認が、スクロールする側の外に出ている", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 5, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "よろしく" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByRole("button", { name: "よろしく" }), { shiftKey: true });
+    fireEvent.keyDown(window, { key: "Delete" });
+    const confirm = screen.getByText(/2個の部品を削除しますか/);
+    expect(staysVisibleOnScroll(confirm), "確認が一緒に流れていく所に置かれている").toBe(true);
+  });
+
+  it("列を削除する確認も同じ", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("映像1の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
+    const confirm = screen.getByText(/この列に置いてある|を削除しますか/);
+    expect(staysVisibleOnScroll(confirm)).toBe(true);
   });
 });

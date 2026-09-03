@@ -21,6 +21,8 @@ export function DeleteConfirm({
   onCancel,
   onConfirm,
   className,
+  showIcon = true,
+  inline = false,
 }: {
   /** 何を消すか＋影響（例:「Xを削除しますか？元に戻せません。…」）。 */
   message: ReactNode;
@@ -30,6 +32,24 @@ export function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
   className?: string;
+  /**
+   * ゴミ箱の絵を出すか（既定＝出す）。
+   *
+   * ⚠️ **消えないものには出さない**（#990）＝`06 §2` 統一規約1 が
+   * 【やめる／削除する（危険色＋ゴミ箱）】を**削除の固定形**と決めているのは
+   * 「やめるのつもりが削除」を防ぐため。**何も消えない操作に同じ見た目を当てると、
+   * その合図が薄まる**（「バラす」「保存しないで移る」は取り消しでしか戻らないので
+   * 危険色は妥当だが、**消えるものは無い**）。
+   */
+  showIcon?: boolean;
+  /**
+   * 行の中に置く形（既定＝知らせの箱）。
+   *
+   * ⚠️ **箱が入らない所のため**（`06 §2-1`＝表の行内など）。**並び・色・焦点・`Escape` は同じ**
+   * ＝手書きに逃がすと、そこだけ**焦点も `Escape` も名簿への名乗りも無い**確認になる
+   *（実際に4か所そうなっていた）。
+   */
+  inline?: boolean;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -78,15 +98,18 @@ export function DeleteConfirm({
     return true;
   });
 
+  const boxClass = inline
+    ? `row gap-sm${className ? ` ${className}` : ""}`
+    : `notice notice-warn${className ? ` ${className}` : ""}`;
   return (
-    <div ref={boxRef} className={`notice notice-warn${className ? ` ${className}` : ""}`} role="alert">
-      <span>{message}</span>
+    <div ref={boxRef} className={boxClass} role="alert" style={inline ? { alignItems: "center", flexWrap: "wrap" } : undefined}>
+      <span className={inline ? "text-sm" : undefined}>{message}</span>
       <div className="row gap-sm">
-        <button ref={cancelRef} className="btn btn-ghost btn-icon" onClick={onCancel} disabled={busy}>
+        <button ref={cancelRef} className={`btn btn-ghost btn-icon${inline ? " text-sm" : ""}`} onClick={onCancel} disabled={busy}>
           やめる
         </button>
-        <button className="btn btn-danger btn-icon" onClick={onConfirm} disabled={busy}>
-          <TrashIcon size={16} />
+        <button className={`btn btn-danger btn-icon${inline ? " text-sm" : ""}`} onClick={onConfirm} disabled={busy}>
+          {showIcon && <TrashIcon size={16} />}
           {busy ? busyLabel : confirmLabel}
         </button>
       </div>
