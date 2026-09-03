@@ -4,6 +4,8 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
+import { hasWizardBrief } from "../newProjectGuard";
+import { EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -355,7 +357,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           {confirmRegen && (
             <div className="notice notice-warn mt-lg" role="alert">
               <span>
-                今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？
+                {REGENERATE_OVERWRITE_CONFIRM}
               </span>
               {/* 確認は「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
@@ -394,6 +396,15 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 主操作 */}
           <div className="row-between mt-lg">
+            {/* ⚠️ **入れた内容へ戻れるようにする**（#985）＝ウィザードは
+                「会社情報は、あとからでも直せます」と案内しているのに、**指す先がどこにも無かった**
+                （`06 §12.1`「案内の中で名指しするものは、その画面に実在すること」）。
+                ⚠️ **入力があるときだけ出す**＝白紙から作った動画には行き先が無い。 */}
+            {hasWizardBrief(meta) ? (
+              <button className="btn btn-ghost" onClick={() => onNavigate("wizard")} disabled={status === "generating"}>
+                {EDIT_WIZARD_INPUT_LABEL}
+              </button>
+            ) : null}
             <button
               className="btn btn-secondary"
               onClick={() => setConfirmRegen(true)}

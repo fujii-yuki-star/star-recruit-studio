@@ -4,7 +4,7 @@ import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
 import { assetSentText, selectAssetsForSend } from "../../domain/ai/assetSendText";
-import { assetTypeLabel, omittedAssetsNote, sentAssetTextSummary } from "../uiLabels";
+import { assetTypeLabel, omittedAssetsNote, REGENERATE_OVERWRITE_CONFIRM, sentAssetTextSummary } from "../uiLabels";
 import { SparkleIcon, CheckIcon } from "../components/icons";
 
 interface ConfirmProps {
@@ -19,6 +19,8 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
     useProjectStore.getState().setConfirmReturnTo(null);
   }, []);
   const videoKind = useProjectStore((s) => s.meta.videoKind);
+  // ⚠️ **作り直すと入れ替わる**ので、いま場面があるかを見る（#985 レビュー 🔴）。
+  const scenes = useProjectStore((s) => s.scenes);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
   const generalBrief = useProjectStore((s) => s.meta.generalBrief);
   const toneSettings = useProjectStore((s) => s.meta.toneSettings);
@@ -182,6 +184,16 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           </div>
 
           {/* ボタン（送信前確認は §2-6 で毎回必須＝「次回から表示しない」は設けない） */}
+          {/* ⚠️ **押す前に、何が起きるかを告げる**（#985 レビュー 🔴）＝作り直すと
+              **いまの場面は入れ替わる**。もとはたたき台の「作り直す」にしか確認が無く、
+              **入れた内容を見直す道（#985）を通ると、場面が黙って消えた**。
+              ⚠️ **ここでは「はい/いいえ」を二重に聞かない**＝たたき台から来た人は既に答えている。
+              **作る手前に必ず目に入る**ことが要件なので、告げるだけにする（主ボタンが答えになる）。 */}
+          {scenes.length > 0 && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>{REGENERATE_OVERWRITE_CONFIRM}</span>
+            </div>
+          )}
           <div className="row gap-sm mt-lg">
             <button
               className="btn btn-ghost grow"

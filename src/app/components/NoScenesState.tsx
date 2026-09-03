@@ -3,7 +3,8 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { hasWizardBrief } from "../newProjectGuard";
 
 /**
  * 「場面がまだ1つも無い」ときの表示（#590）。**公開前チェック／仕上がり確認／書き出し／たたき台**が共有する。
@@ -30,6 +31,12 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
   const aiError = useProjectStore((s) => s.aiError);
   const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const canAddScene = onAddScene != null;
+  // ⚠️ **入力の続きへ戻れるようにする**（#985）＝ウィザードで「ここまで保存」した動画を開き直すと、
+  // 場面0の空状態で「場面を追加」しか出ず、**たたき台を作る道も、入れた会社情報を直す道も無かった**
+  //（ウィザードへ行く導線はアプリ全体で1本だけで、それは必ず `newProject()` で**中身を捨てる**）。
+  // ⚠️ **入力があるときだけ出す**＝何も入れていない動画に「続き」と言っても行き先が空。
+  const meta = useProjectStore((s) => s.meta);
+  const canResumeWizard = hasWizardBrief(meta);
 
   const toDraft = (
     <button className="btn btn-primary btn-icon" onClick={() => onNavigate("draft")}>
@@ -55,10 +62,21 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       // たたき台は自分自身なので送り先が無く、作りかけの動画案に場面を足させるのも避けたい＝待たせる（唯一ボタン無し）。
       canAddScene ? undefined : toDraft
     ) : canAddScene ? (
-      <button className="btn btn-primary" onClick={onAddScene}>
-        <PlusIcon size={18} />
-        場面を追加
-      </button>
+      // ⚠️ **入力の続きがあるときは、そちらを主にする**（#985）＝
+      // ウィザードの途中で保存した人が本当にやりたいのは「続きを入れてたたき台を作る」で、
+      // 手で場面を並べることではない。**手動の道も残す**（消さない）。
+      <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
+        {canResumeWizard ? (
+          <button className="btn btn-primary btn-icon" onClick={() => onNavigate("wizard")}>
+            {RESUME_WIZARD_LABEL}
+            <ChevronRightIcon size={18} />
+          </button>
+        ) : null}
+        <button className={canResumeWizard ? "btn btn-secondary" : "btn btn-primary"} onClick={onAddScene}>
+          <PlusIcon size={18} />
+          場面を追加
+        </button>
+      </div>
     ) : (
       toDraft
     );
