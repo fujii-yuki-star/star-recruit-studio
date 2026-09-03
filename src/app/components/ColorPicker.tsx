@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useProjectStore } from "../store/projectStore";
 import { paletteWithBrand } from "../../domain/brand/brandKit";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { registerExternalDrag } from "../hooks/usePointerDrag";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../domain/format/color";
@@ -79,6 +80,10 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   const codeDirtyRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  // ⚠️ **キーボードで中へ入れるようにする**（#986）＝面は `createPortal` で **body の末尾**へ出すので、
+  // 開いても手はトリガーに残り、`Tab` は**面ではなく画面の続き**へ進んでいた。
+  // 色を変える唯一の入口なので、キーボードだけの人は**実質どの色も変えられなかった**。
+  useFocusTrap(open, popRef);
   const svRef = useRef<HTMLDivElement>(null);
   const hueRef = useRef<HTMLDivElement>(null);
   const draggingSv = useRef(false);
