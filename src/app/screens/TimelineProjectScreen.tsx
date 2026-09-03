@@ -2583,7 +2583,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 将来レーンへ右クリックを足したときに食い合わないための保険として残す。
     e.stopPropagation();
     if (!selectedClipIds.includes(clipId)) selectClip(clipId);
-    setClipMenu({ clipId, x: e.clientX, y: e.clientY });
+    // ⚠️ **キーで押したときは押したボタンの下へ**（#989）＝規則は `menuAnchorFrom` に1つだけ。
+    setClipMenu({ clipId, ...menuAnchorFrom(e) });
   };
   const menuClip = clipMenu ? doc?.clips.find((c) => c.id === clipMenu.clipId) : undefined;
   const menuClipTemplate = menuClip?.kind === TIMELINE_CLIP_KIND.template
@@ -3519,10 +3520,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             aria-label={`${clipLabel(c)}の操作`}
                             title="この部品の操作（右クリックでも開けます）"
                             onClick={(e) => {
-                              // キーボード（Enter/Space）の click は座標を持たない＝そのまま渡すと
-                              // メニューが画面の左上に出る。押した要素の位置から開く。
-                              if (!selectedClipIds.includes(c.id)) selectClip(c.id);
-                              setClipMenu({ clipId: c.id, ...menuAnchorFrom(e) });
+                              // ⚠️ **右クリックと同じ入口を通す**（#1015 レビュー 補足）＝
+                              // 手書きに分けたとき、`preventDefault`／`stopPropagation` が
+                              // **押した経路でだけ落ちて**いた。同じ入口なら落としようがない
+                              //（キーで押したときの位置合わせは `menuAnchorFrom` が中で見る）。
+                              openClipMenu(e, c.id);
                             }}
                           >
                             ⋮
