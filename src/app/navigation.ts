@@ -86,26 +86,3 @@ export function currentProjectEntries(input: {
   return out;
 }
 
-/**
- * サイドバーの「今の動画」に出すもの（#987）。
- *
- * ⚠️ **2つの形式は同時に開いたままが正規の状態**＝一覧はタイムラインを開くとき
- * 「別の文書なので」と確認を出さず、場面形式を閉じさせない。だから
- * **「どちらを開いているか」では決まらない**＝**いま（直近に）いる方**で決める。
- *
- * ⚠️ **これを画面の中で書かない**＝場面形式からしか採っていなかったせいで、
- * タイムライン編集中は「今の動画」が出ないか、**別の動画の名前を出したまま押すと別の文書へ飛んだ**。
- */
-export function currentProjectLabel(input: {
-  /** 「今の動画」を押したときの戻り先（`stickyProjectScreen` が覚えているもの）。 */
-  returnTo: ScreenId;
-  /** 場面形式を開いているか。 */
-  sceneOpen: boolean;
-  sceneName: string;
-  /** タイムライン形式の動画名（開いていなければ `null`）。 */
-  timelineName: string | null;
-}): { show: boolean; name: string } {
-  const onTimeline = input.returnTo === "timeline-project" && input.timelineName != null;
-  if (onTimeline) return { show: true, name: input.timelineName as string };
-  return { show: input.sceneOpen, name: input.sceneName };
-}
