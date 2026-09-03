@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { overflowFallback } from "../hooks/useKeepInViewport";
 import { paletteWithBrand } from "../../domain/brand/brandKit";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { useFocusTrap } from "../hooks/useFocusTrap";
@@ -72,7 +73,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   // prop で配ると**渡し忘れた画面だけ会社の色が出ない**（このα-6で何度も踏んだ「片方だけ漏れる」）。
   const brandColors = useProjectStore((s) => s.brandKit.colors);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight?: number; overflowY?: "auto" } | null>(null);
   // 開いている間の作業用 HSV（value からの往復で色相が飛ばないよう保持）。開くたびに現在値へ同期する。
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(value) ?? { h: 0, s: 0, v: 0 });
   const [codeText, setCodeText] = useState(value);
@@ -228,7 +229,15 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     let top = tr.bottom + 4;
     if (top + ph > window.innerHeight - pad) top = tr.top - ph - 4; // 下に入らなければ上へ
     top = Math.max(pad, top);
-    setPos((prev) => (prev && prev.left === left && prev.top === top ? prev : { left, top })); // 変化時のみ再描画
+    // ⚠️ **画面より高いときは、上端で止めるだけでは足りない**（#1023＝実機の指摘）＝
+    // 止めても**下がはみ出したまま**で、そこにある操作（下のボタン）に手が届かない。
+    // 規則はメニューと**同じもの**を使う（置き方は違うが、はみ出しの始末は同じ）。
+    const over = overflowFallback(popRef.current?.scrollHeight ?? ph, window.innerHeight);
+    setPos((prev) =>
+      prev && prev.left === left && prev.top === top && (prev.maxHeight ?? null) === (over?.maxHeight ?? null)
+        ? prev // 変化時のみ再描画
+        : { left, top, ...(over ?? {}) },
+    );
   }, []);
 
   useLayoutEffect(() => {
@@ -429,6 +438,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
           aria-label={ariaLabel}
           style={{
             position: "fixed", left: pos?.left ?? -9999, top: pos?.top ?? -9999,
+            ...(pos?.maxHeight != null ? { maxHeight: pos.maxHeight, overflowY: pos.overflowY } : {}),
             visibility: pos ? "visible" : "hidden", zIndex: 1000,
             width: POPOVER_W, boxSizing: "border-box", padding: 10,
             background: "var(--color-surface)", border: "1px solid var(--color-border-strong)",

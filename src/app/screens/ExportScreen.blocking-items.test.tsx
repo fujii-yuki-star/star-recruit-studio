@@ -34,7 +34,10 @@ const setup = (scenes: Scene[]) => {
   });
 };
 
-const saveBtn = (): HTMLButtonElement => screen.getByText("動画を保存").closest("button") as HTMLButtonElement;
+// ⚠️ **押した瞬間に文言が変わる**（#993 ①）＝保存先を選んでいる間も走行中に数えるので、
+// 「動画を保存」→「書き出し中…」。どちらでも同じボタンを掴めるようにする。
+const saveBtn = (): HTMLButtonElement =>
+  screen.getByRole("button", { name: /動画を保存|書き出し中…/ }) as HTMLButtonElement;
 
 describe("ExportScreen 書き出せない項目があるときは保存させない（#547 P2-5 後続）", () => {
   beforeEach(() => {

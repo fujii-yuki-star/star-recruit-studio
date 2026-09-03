@@ -24,12 +24,15 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
     void generate();
   }, [generate]);
 
+  // ⚠️ **できるまでは「わからない」と見せる**（#993 ②）＝以前は 180ms ごとに +6 して
+  // **2.5秒で 90% まで行き、そこで止まって**いた。AI は最長60秒待つので、実際の相手だと
+  // **90% のまま数十秒動かない**＝「固まった」ようにしか見えない。
+  // ⚠️ **数字は出していないので嘘はついていなかった**が、止まったバーは固まって見える。
+  // 書き出しが「わからない区間」に使っている**流れるバー**へ寄せる（ADR-0026②）。
+  // できたら 100% まで詰めて終わりを見せる（そこは分かっている）。
   useEffect(() => {
-    if (status === "error") return;
-    // ready になるまでは 90% で頭打ち＝生成完了前に 100% へ達して「100%なのに終わらない」表示になるのを防ぐ（#392）。
-    const tick = setInterval(() => {
-      setProgress((p) => Math.min(status === "ready" ? 100 : 90, p + 6));
-    }, 180);
+    if (status !== "ready") return;
+    const tick = setInterval(() => setProgress((p) => Math.min(100, p + 6)), 180);
     return () => clearInterval(tick);
   }, [status]);
 
@@ -71,7 +74,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             ? "内容を確認して、自由に修正できます。"
             : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
         }
-        progress={progress}
+        progress={status === "ready" ? progress : "indeterminate"}
         onCancel={
           ready
             ? undefined
