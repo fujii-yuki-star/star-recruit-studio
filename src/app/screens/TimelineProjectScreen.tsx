@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
@@ -354,7 +354,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -1590,6 +1590,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const removeGuard: { disabled: boolean; title: string | undefined } | null =
     removeBlocked ? { disabled: removeBlocked.disabled, title: removeBlocked.title } : null;
   /**
+   * **まとめて長さをそろえる**（#1005）＝実際に変わる数と、その門番。
+   *
+   * ⚠️ **数え方は domain と共有する**（`trimTargetsAt`）＝ここで書き直すと、
+   * ボタンに出る数と実際に変わる数がずれる（このリポジトリで繰り返している型）。
+   */
+  const trimTargets = useMemo(
+    () => (doc ? trimTargetsAt(doc, selectedClipIds, playheadSec) : []),
+    [doc, selectedClipIds, playheadSec],
+  );
+  const trimTargetCount = trimTargets.length;
+  /**
+   * ⚠️ **固定は「実際にそろえる帯」だけで見る**（#1005 レビュー）＝選択ぜんぶで見ると、
+   * **再生位置にかかっていない固定の帯が混ざっただけで、そろえられる帯まで押せなくなる**
+   *（`11 §7.6.3` が `moveClips` について避けよと書いた「混ざっただけで止まる」形）。
+   * domain 側（`trimClips`）も**絞った後の並び**を受け取るので、ここを揃えないと
+   * **画面は押せないのに domain は通す**という食い違いになる。
+   */
+  const trimTargetsHaveLocked = trimTargets.some((id) => {
+    const c = doc?.clips.find((x) => x.id === id);
+    return !!c && !!doc?.tracks.find((t) => t.id === c.trackId)?.locked;
+  });
+  /**
    * **消す（どの入口からでも同じ流れ）**（#721）。単体は**即時＋取り消し**、**まとめては確認**
    * ＝`06 §2` 統一規約1／ADR-0034 決定20。ここを通さずに `removeSelectedClips` を直に呼ぶと、
    * まとめて消すのが確認なしになる（キーからも同じ道を使うので、片方だけ確認、も作らない）。
@@ -1965,6 +1987,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const busyGuard = (extra?: { disabled?: boolean; hint?: string }): { disabled: boolean; title: string | undefined } => ({
     disabled: exporting || !!extra?.disabled,
     title: exporting ? exportingHint : extra?.hint,
+  });
+  /**
+   * **再生位置で長さをそろえる**ボタンの門番（#1005）。
+   *
+   * ⚠️ **選んだ数で門番を割らない**＝単体とまとめてで別々に書くと、片方だけ塞ぎ忘れる
+   *（このリポジトリで繰り返している型）。固定の言い方だけ、domain と同じ規則で出し分ける。
+   * ⚠️ **1つも当てはまらないときは押せなくして理由を出す**＝押しても何も起きない、を作らない。
+   */
+  const trimAtPlayheadGuard = busyGuard({
+    disabled: trimTargetsHaveLocked || isPlaying || trimTargetCount === 0,
+    hint: trimTargetsHaveLocked
+      // ⚠️ **言い分けも「そろえる帯の数」で見る**＝domain（`trimClips`）が同じ数で決めるので、
+      // 選択数で決めると**説明と実際の断り文が食い違う**。
+      ? editBlockedMessage[trimTargetCount > 1 ? EDIT_BLOCKED.lockedSelection : EDIT_BLOCKED.locked]
+      : isPlaying
+        ? playingHint
+        : trimTargetCount === 0
+          ? editBlockedMessage[EDIT_BLOCKED.trimNoneAtTime]
+          : undefined,
   });
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
   //
@@ -3550,10 +3591,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 再生位置へ
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
                 ここから始める
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
                 ここで終わる
               </button>
               {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
@@ -4494,9 +4535,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <p className="text-muted">
             {selectedClipIds.length > 1
-              ? "1つだけ選ぶと、位置や長さを変えられます（まとめて削除することはできます）。"
+              ? "1つだけ選ぶと、中身や位置を変えられます（長さをそろえる・まとめて削除は、このままできます）。"
               : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
           </p>
+        )}
+        {/* ⚠️ **長さは複数でもそろえられる**（#1005＝実機の指摘）＝動かすのと消すのは複数に効くのに、
+            長さだけ入口が消えていた（同じ選択で操作が割れる）。
+            ⚠️ **再生位置にかかっている部品だけ**が相手＝かかっていない部品をそろえると
+            **置いた場所が動く**（トリムのつもりが移動になる）。
+            ⚠️ **何個が変わるかを押す前に出す**＝選んだ数をそのまま出すと、
+            かかっていない帯が混ざったとき**押したのに数が合わない**（数え方は domain と共有する）。 */}
+        {selectedClipIds.length > 1 && (
+          <div className="row gap-sm mt">
+            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
+              ここから始める（{trimTargetCount}個）
+            </button>
+            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
+              ここで終わる（{trimTargetCount}個）
+            </button>
+          </div>
         )}
         {selectedClipIds.length > 1 && (
           <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>

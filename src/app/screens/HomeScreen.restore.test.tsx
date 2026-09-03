@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import * as projectFs from "../../infrastructure/projectFs";
@@ -116,6 +116,10 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await screen.findByText("あとで開く");
+    // ⚠️ **文字が出た＝関門が名乗った、ではない**（#1007）＝`findByText` は DOM の変化で返るが、
+    // 関門を名乗るのは `useEffect`（描き終えた**後**に走る）。詰まっているときほど間が空くので、
+    // ここで**残っている effect を流し切ってから**見る（通し実行でだけまれに落ちていた）。
+    await act(async () => {});
     expect(canNavigate("settings" as ScreenId)).toBe(false);
     fireEvent.click(screen.getByText("あとで開く"));
     await waitFor(() => expect(canNavigate("settings" as ScreenId)).toBe(true));

@@ -12,7 +12,7 @@ import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
-import { currentProjectLabel, DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -84,11 +84,14 @@ function App() {
   const sceneName = useProjectStore((s) => s.meta.projectName);
   const timelineName = useTimelineStore((s) => s.doc?.projectName ?? null);
   // ⚠️ **決め方は `navigation.ts` に1つ**＝画面の中で書くと、片方の形式を足したときに配り忘れる。
-  const { show: hasProjectContent, name: projectName } = currentProjectLabel({
+  // ⚠️ **開いている形式のぶんだけ並べる**（#1006）＝直近にいた方だけを出すと、
+  // **もう片方へサイドバーから戻れない**（一覧を経由するしかない＝開いたままなのに遠い）。
+  const currentProjects = currentProjectEntries({
     returnTo: projectReturnTo,
     sceneOpen,
     sceneName,
     timelineName,
+    current: screen,
   });
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
@@ -171,7 +174,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={navigate} projectName={projectName} hasProjectContent={hasProjectContent} currentProjectTarget={projectReturnTo} />
+      <Sidebar current={screen} onNavigate={navigate} currentProjects={currentProjects} />
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">

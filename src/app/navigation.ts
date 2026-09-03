@@ -44,6 +44,49 @@ export function stickyProjectScreen(prev: ScreenId, current: ScreenId): ScreenId
 }
 
 /**
+ * サイドバーの「今の動画」に出すもの（#987→#1006）。
+ *
+ * ⚠️ **2つの形式は同時に開いたままが正規の状態**＝一覧はタイムラインを開くとき
+ * 「別の文書なので」と確認を出さず、場面形式を閉じさせない。だから
+ * **「どちらを開いているか」では決まらない**＝**開いている方をすべて**出す。
+ *
+ * ⚠️ **1つに畳まない**（#1006＝実機の指摘「どちらも確認できるべき」）＝直近にいた方だけを
+ * 出していたので、**もう片方へはサイドバーから戻れず**、一覧を経由するしかなかった
+ *（一覧から開き直すと確認や読み込みが挟まる＝開いたままなのに遠い）。
+ *
+ * ⚠️ **どちらへ行くのか、押す前に分かるようにする**＝同じ「今の動画」が2つ並ぶと
+ * 見分けられないので、タイムライン形式には一覧と**同じ言葉**（「タイムライン」）を添える。
+ *
+ * ⚠️ **これを画面の中で書かない**＝場面形式からしか採っていなかったせいで、
+ * タイムライン編集中は「今の動画」が出ないか、**別の動画の名前を出したまま押すと別の文書へ飛んだ**。
+ */
+export function currentProjectEntries(input: {
+  /** 「今の動画」を押したときの戻り先（`stickyProjectScreen` が覚えているもの）。 */
+  returnTo: ScreenId;
+  /** 場面形式を開いているか。 */
+  sceneOpen: boolean;
+  sceneName: string;
+  /** タイムライン形式の動画名（開いていなければ `null`）。 */
+  timelineName: string | null;
+  /** いまの画面（工程画面にいる間は、開いていなくても出す＝従来の `showCurrentProject`）。 */
+  current: ScreenId;
+}): { kind: 'scene' | 'timeline'; name: string; target: ScreenId; sub: string }[] {
+  const out: { kind: 'scene' | 'timeline'; name: string; target: ScreenId; sub: string }[] = [];
+  // 場面形式＝工程画面にいる間は、まだ開いていなくても出す（従来どおり）。
+  // ⚠️ タイムライン編集の画面は**場面形式の工程画面ではない**ので、ここには数えない。
+  const sceneShow = input.sceneOpen || (isProjectScreen(input.current) && input.current !== 'timeline-project');
+  if (sceneShow) {
+    // ⚠️ **戻り先がタイムラインのままだと、場面形式の入口がタイムラインへ飛ぶ**。
+    const target = input.returnTo === 'timeline-project' ? DEFAULT_PROJECT_RETURN : input.returnTo;
+    out.push({ kind: 'scene', name: input.sceneName, target, sub: '今の動画' });
+  }
+  if (input.timelineName != null) {
+    out.push({ kind: 'timeline', name: input.timelineName, target: 'timeline-project', sub: '今の動画（タイムライン）' });
+  }
+  return out;
+}
+
+/**
  * サイドバーの「今の動画」に出すもの（#987）。
  *
  * ⚠️ **2つの形式は同時に開いたままが正規の状態**＝一覧はタイムラインを開くとき

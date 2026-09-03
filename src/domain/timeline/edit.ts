@@ -46,6 +46,12 @@ export const EDIT_BLOCKED = {
    */
   lockedSelection: 'TIMELINE_EDIT_LOCKED_SELECTION',
   /**
+   * まとめて長さをそろえようとしたが、**その時刻をまたいでいる部品が1つも無い**（#1005）。
+   * ⚠️ **またいでいない部品を「そろえる」と、置いた場所が動く**（トリムのつもりが移動になる）ので
+   * 触らない。全部が対象外なら**押しても何も起きない**ことになるので、理由を出す（§2-5）。
+   */
+  trimNoneAtTime: 'TIMELINE_EDIT_TRIM_NONE_AT_TIME',
+  /**
    * 列を複製しようとしたが、その列の部品が**ほかの列の部品とまとまりになっている**（#767）。
    * まとまりは変形を持つので、片側だけ複製すると**複製した方だけ見た目が変わる**
    *（複製をまとまりへ入れれば、今度は元の絵まで動く）。黙って違う絵を作らない（ADR-0026④）。
@@ -377,6 +383,68 @@ export function moveClips(
     return blocked(before.voiceClipId != null ? EDIT_BLOCKED.linkedSubtitle : issue);
   }
   return ok(next);
+}
+
+/**
+ * **その時刻で実際に長さが変わる部品**（`clipIds` のうち、再生位置が中にかかっているもの）。
+ *
+ * ⚠️ **かかっていないものは相手にしない**＝端をその時刻へ動かすと**置いた場所ごと動く**ので、
+ * 長さをそろえたつもりが**移動**になる（`06 §2`「黙って別の結果にしない」）。
+ * ⚠️ **画面と同じ数を数える**＝押す前に「何個が変わるか」を出すために、画面もこの関数を通す。
+ * 数え方を写すと、**ボタンに出る数と実際に変わる数がずれる**（このリポジトリで繰り返している型）。
+ */
+export function trimTargetsAt(doc: TimelineProject, clipIds: readonly string[], sec: number): string[] {
+  return clipIds.filter((id) => {
+    const c = doc.clips.find((x) => x.id === id);
+    return c != null && c.startSec < sec && sec < c.startSec + c.durationSec;
+  });
+}
+
+/**
+ * **選んだ帯すべての端を、同じ時刻へそろえる**（#1005＝実機の指摘）。
+ *
+ * ⚠️ **動かすのと消すのは複数に効くのに、長さだけ効かなかった**＝「選んだ部品」の欄が
+ * **1件のときしか出ない**ので、複数選ぶと長さを変える入口が消えていた（同じ選択で操作が割れる）。
+ *
+ * ⚠️ **1件ずつと同じことをするだけ**＝`trimClip` を並べて当てる（伸ばすのも縮めるのも同じ）。
+ * **ここでは「再生位置をまたいでいるか」で絞らない**＝**どれを相手にするかは押す側が決める**
+ *（再生位置のボタンは `trimTargetsAt` で絞ってから渡す＝`timelineStore.trimSelectedClipsAt`）。
+ * ここへ絞り込みを畳むと、**この関数は「再生位置でそろえる」専用**になり、
+ * 数値で端を決める道（`trimClip` を1件へ当てる「長さ（秒）」の欄）と規則が食い違う
+ *（伸ばす先は必ず帯の外なので、絞ると長くできない）。**当てる係と、選ぶ係を分ける。**
+ *
+ * ⚠️ **連動している字幕は外さない**＝`moveClips` は「混ざっただけで全体が動かせなくなる」を避けて
+ * 対象から外すが、こちらは `trimClip` が `linkedSubtitleTime` で**全体を断る**。
+ * 長さは**読み上げが決める**（`11 §7.6.2.3`「連動＝区間が一致している」）ので、
+ * 字幕だけ外して残りをそろえると、**字幕と読み上げの区間がずれた文書**ができる。
+ *
+ * ⚠️ **1つでも通らなければ全体を変えない**（`moveClips` と同じ流儀＝決定15）＝
+ * 途中まで当たった文書は捨てる。
+ */
+export function trimClips(
+  doc: TimelineProject,
+  clipIds: readonly string[],
+  edge: 'start' | 'end',
+  sec: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditResult {
+  if (clipIds.length === 0) return ok(doc);
+  if (clipIds.length === 1) return trimClip(doc, clipIds[0]!, edge, sec, opts);
+  // ⚠️ **固定した列は、まとめてのときも断る**（`moveClips` と同じ言い方＝どの列か言えないので）。
+  for (const id of clipIds) {
+    const clip = doc.clips.find((c) => c.id === id);
+    if (!clip) return blocked(EDIT_BLOCKED.notFound);
+    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.lockedSelection);
+  }
+  let next = doc;
+  for (const id of clipIds) {
+    const r = trimClip(next, id, edge, sec, opts);
+    // ⚠️ **1つでも置けないなら、まとめて断る**＝半分だけ変わった状態を残さない
+    //（取り消し1回で戻せない形にしない＝履歴は文書まるごとの写し）。
+    if (!r.ok) return r;
+    next = r.doc;
+  }
+  return next === doc ? ok(doc) : ok(next);
 }
 
 /**
