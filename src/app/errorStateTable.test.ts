@@ -9,7 +9,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
-  userFontMissingMessage, userFontUnreadableMessage,
+  userFontMissingMessage, userFontUnreadableMessage, clipOutsidePlayheadMessage,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -80,6 +80,10 @@ function codeMessages(): Record<string, string> {
     // ⚠️ **件数が入る文は `N` を差し込んで比べる**（表は読みやすさのため ` N ` と空白つきで書く）。
     USER_FONT_MISSING: userFontMissingMessage(" N "),
     USER_FONT_UNREADABLE: userFontUnreadableMessage(" N "),
+    // ⚠️ **秒が入る文も差し込み口を渡して比べる**（上と同じ流儀）＝#996。
+    // ⚠️ **同じ節にある `canvasHoldMessage` は、まだこの走査の外**（表にも無い）＝
+    // ついでに載せると本題（#996）の差分がぼやけるので、別で追う。
+    TIMELINE_CLIP_OUTSIDE_PLAYHEAD: clipOutsidePlayheadMessage(0, 0),
   };
 }
 
