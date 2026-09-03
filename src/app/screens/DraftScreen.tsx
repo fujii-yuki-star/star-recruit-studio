@@ -4,6 +4,8 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
+import { hasWizardBrief } from "../newProjectGuard";
+import { EDIT_WIZARD_INPUT_LABEL } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -394,6 +396,15 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 主操作 */}
           <div className="row-between mt-lg">
+            {/* ⚠️ **入れた内容へ戻れるようにする**（#985）＝ウィザードは
+                「会社情報は、あとからでも直せます」と案内しているのに、**指す先がどこにも無かった**
+                （`06 §12.1`「案内の中で名指しするものは、その画面に実在すること」）。
+                ⚠️ **入力があるときだけ出す**＝白紙から作った動画には行き先が無い。 */}
+            {hasWizardBrief(meta) ? (
+              <button className="btn btn-ghost" onClick={() => onNavigate("wizard")} disabled={status === "generating"}>
+                {EDIT_WIZARD_INPUT_LABEL}
+              </button>
+            ) : null}
             <button
               className="btn btn-secondary"
               onClick={() => setConfirmRegen(true)}

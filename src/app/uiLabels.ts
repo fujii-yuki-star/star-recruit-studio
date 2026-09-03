@@ -357,6 +357,24 @@ export const GO_TO_DRAFT_LABEL = "たたき台へ";
 export const GENERATE_FAILED_TITLE = "動画案の作成に失敗しました";
 export const RETRY_GENERATE_LABEL = "もう一度試す";
 export const START_MANUAL_LABEL = "手動で場面を作る";
+
+/**
+ * 入れた内容を使って、たたき台を作りにいく（#985）。
+ *
+ * ⚠️ **「新しく作る」と言わない**＝いま開いている動画の入力を使うので、
+ * 新規作成と読み違えると「入れた内容が消える」と思わせる（実際には消えない）。
+ * ⚠️ **「続きから」と言わない**＝開き直すと段は先頭に戻る（`wizardStep` は保存しない＝画面の状態であって
+ * 動画の中身ではない・§5）。**入れた内容は残る**が、**段は続きではない**ので、そこは約束しない。
+ */
+export const RESUME_WIZARD_LABEL = "入れた内容から、たたき台を作る";
+
+/**
+ * 入れた内容（会社情報・発表テーマ）を見直しにいく（#985）。
+ *
+ * ⚠️ **ウィザードの案内と対にする**＝「会社情報は、あとからでも直せます」と言っているのに、
+ * **指す先がどこにも無かった**（`06 §12.1`＝案内の中で名指しするものは、その画面に実在すること）。
+ */
+export const EDIT_WIZARD_INPUT_LABEL = "入れた内容を見直す";
 /** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
 export function generateFailedMessage(reason?: string | null): string {
   return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
