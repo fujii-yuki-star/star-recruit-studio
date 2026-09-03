@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
+    "mutate": "node scripts/mutate.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "validate:schemas": "node scripts/validate-schemas.mjs",
