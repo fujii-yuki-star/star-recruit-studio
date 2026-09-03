@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
+import { useNavigationGuard } from "../hooks/navigationGuard";
+import type { ScreenId } from "../data/mockData";
 import { BakeError } from "../../domain/timeline/bake";
 import { BAKE_RANGE_KIND, sceneIdsBetween } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange } from "../../domain/timeline/bake";
-import { bakeNoteText, formatDiskSize } from "../uiLabels";
+import { bakeNoteText, formatDiskSize, BAKE_LEAVE_BLOCKED_MESSAGE } from "../uiLabels";
 
 /** 焼き出す範囲の選び方（ADR-0032 決定17）。UI 内部の分類なので永続データの enum ではない。 */
 type RangeChoice = "whole" | "part" | "between";
@@ -15,7 +18,7 @@ type RangeChoice = "whole" | "part" | "between";
  * **増えるディスク容量**（決定13＝素材をコピーするため）、**持っていけないもの**（`BakeNote`）。
  * 確認は2段階（[作る内容を確かめる] → 内容を見てから [この内容で作る]）＝押した瞬間に作らない。
  */
-export function BakeToTimelinePanel() {
+export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) {
   const { parts, scenes, meta, estimateBake, bakeToTimeline } = useProjectStore();
   const [choice, setChoice] = useState<RangeChoice>("whole");
   const [partId, setPartId] = useState<string>(parts[0]?.partId ?? "");
@@ -24,8 +27,50 @@ export function BakeToTimelinePanel() {
   const [name, setName] = useState<string>(`${meta.projectName}（タイムライン）`);
   const [preview, setPreview] = useState<{ bytes: number; notes: BakeNote[] } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
+  // ⚠️ **作った動画の番号も覚える**（#992 ⑤）＝一覧まで自力で辿らせない。
+  // 複製は「作っただけで見えないと、できたかどうか分からない」から**作ったら開く**としており、
+  // 同じ理屈がここに効いていなかった。⚠️ タイムラインを開いても場面形式は閉じないので、
+  // 開く導線を足しても「元はそのまま残る」（決定16）は壊れない。
+  const [done, setDone] = useState<{ name: string; projectId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
+
+  /**
+   * 作っている間は画面を離れない（#992 ②）。
+   *
+   * ⚠️ **成否の受け皿が部品のローカル**なので、離れた瞬間に**消える**＝
+   * 「できたのか、失敗したのか、二度と分からない」。素材を丸ごとコピーする＝分単位に
+   * なりうる操作なので、その間に離れられてしまう（サイドバー・同じ画面の戻る導線）。
+   * ⚠️ **黙って止めない**（§2-5）＝`navigationGuard` は「`false` を返した側が理由を出す責任を持つ」
+   * 決まりなので、止めると同時にその場へ理由を出す（サイドバーは押せない見た目にできないので、
+   * 何も出さないと**押しても何も起きない画面**になる）。
+   */
+  useNavigationGuard(
+    busy
+      ? () => {
+          setError(BAKE_LEAVE_BLOCKED_MESSAGE);
+          return false;
+        }
+      : null,
+  );
+
+  /**
+   * 作った動画をその場で開く（#992 ⑤）。
+   *
+   * ⚠️ **開けなかったら、そう言う**＝黙って何も起きない、を作らない（§2-5）。
+   * ⚠️ **行き先が無いときは押させない**（下でボタンごと出さない）＝この部品は
+   * 画面に埋め込まれるので、行き先を渡さない使い方もありうる。
+   */
+  const openBaked = async (projectId: string): Promise<void> => {
+    setError(null);
+    await openTimelineProject(projectId);
+    const failed = useTimelineStore.getState();
+    if (failed.loadError) {
+      setError(failed.loadError);
+      return;
+    }
+    onNavigate?.("timeline-project");
+  };
 
   const range = ((): BakeRange => {
     if (choice === "part") return { kind: BAKE_RANGE_KIND.part, partId };
@@ -62,12 +107,12 @@ export function BakeToTimelinePanel() {
     setBusy(true);
     setError(null);
     try {
-      await bakeToTimeline(range, name.trim() || meta.projectName);
+      const { projectId } = await bakeToTimeline(range, name.trim() || meta.projectName);
       // 作った後に注意書きを出し直さない：**確認で見せた `notes` と同じもの**が返る
       // （見積りも作成も store の同じ変換を通る）ので、上書きしても画面は変わらない。
       // 出し分けが要るとしたら「確認と作成の間に中身が変わりうる」設計にしたときで、そのときは
       // ここで結果の `notes` を出す（いまは同じものを2度見せない＝完了だけを伝える）。
-      setDone(name.trim() || meta.projectName);
+      setDone({ name: name.trim() || meta.projectName, projectId });
     } catch (e) {
       // 作れない理由を持っている例外（`BakeError`）はその文言を出す＝**中身の問題を「空き容量」と
       // 案内しない**（言われたとおりにしても直らない・§2-5／ADR-0026④）。読込の `TimelineLoadError`
@@ -148,9 +193,22 @@ export function BakeToTimelinePanel() {
       {error && <p className="notice notice-warn" role="alert">{error}</p>}
 
       {done ? (
-        <p className="notice" role="status">
-          「{done}」を作りました。動画の一覧に追加されています。いまの動画はそのままです。
-        </p>
+        <div className="notice" role="status">
+          <p>「{done.name}」を作りました。いまの動画はそのままです。</p>
+          {/* ⚠️ **作った先で何ができなくなるかを言う**（#992 ⑥）＝戻れないことは伝わるが、
+              「そこでは AI（ゆうこ）も場面編集も使えない」はどこにも書かれていなかった。 */}
+          <p className="text-sm text-muted">
+            作った先では、ゆうこにたたき台を作ってもらうことと、場面ごとの編集はできません。
+          </p>
+          <div className="row gap-sm">
+            {onNavigate && (
+              <button className="btn btn-primary" onClick={() => void openBaked(done.projectId)}>
+                作った動画を開く
+              </button>
+            )}
+            <button className="btn btn-ghost" onClick={() => setDone(null)}>閉じる</button>
+          </div>
+        </div>
       ) : preview ? (
         <div className="notice">
           <p>

@@ -52,7 +52,7 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
       <div className="card">
         <TimelineView timeline={timeline} />
       </div>
-      <BakeToTimelinePanel />
+      <BakeToTimelinePanel onNavigate={onNavigate} />
       <div className="row gap-sm mt-lg">
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("preview")}>
           <ArrowLeftIcon size={16} />

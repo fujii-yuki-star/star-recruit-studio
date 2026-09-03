@@ -5,6 +5,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BakeError } from "../../domain/timeline/bake";
 import { BakeToTimelinePanel } from "./BakeToTimelinePanel";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
+import { canNavigate } from "../hooks/navigationGuard";
+import { BAKE_LEAVE_BLOCKED_MESSAGE } from "../uiLabels";
 import type { Scene } from "../../domain/project/types";
 
 function scene(id: string, partId = "part_001"): Scene {
@@ -132,3 +135,68 @@ describe("BakeToTimelinePanel", () => {
     expect(screen.queryByText(/空き容量/)).not.toBeInTheDocument();
   });
 });
+
+// 待ち時間と失敗の面倒（#992 ②⑤⑥）。
+describe("BakeToTimelinePanel：作っている間と、作ったあと（#992）", () => {
+  /** 「確かめる」→「この内容で作る」まで進める。 */
+  const runBake = async (onNavigate?: (s: never) => void) => {
+    render(<BakeToTimelinePanel onNavigate={onNavigate as never} />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    fireEvent.click(await screen.findByText("この内容で作る"));
+  };
+
+  // ⚠️ **作っただけで見えないと、できたかどうか分からない**（複製が同じ理屈で「作ったら開く」）。
+  it("作った動画を、その場で開ける", async () => {
+    const openTimelineProject = vi.fn(async () => {});
+    useTimelineStore.setState({ openTimelineProject, loadError: null } as never);
+    const onNavigate = vi.fn();
+    await runBake(onNavigate);
+    fireEvent.click(await screen.findByText("作った動画を開く"));
+    await waitFor(() => expect(openTimelineProject).toHaveBeenCalledWith("proj_20260728_001"));
+    expect(onNavigate).toHaveBeenCalledWith("timeline-project");
+  });
+
+  // ⚠️ **開けなかったら、そう言う**（黙って何も起きない、を作らない・§2-5）。
+  it("開けなかったら理由を出し、画面は移らない", async () => {
+    useTimelineStore.setState({
+      openTimelineProject: vi.fn(async () => {
+        useTimelineStore.setState({ loadError: "この動画の内容が正しくありません。" } as never);
+      }),
+      loadError: null,
+    } as never);
+    const onNavigate = vi.fn();
+    await runBake(onNavigate);
+    fireEvent.click(await screen.findByText("作った動画を開く"));
+    await waitFor(() => expect(screen.getByText(/この動画の内容が正しくありません/)).toBeInTheDocument());
+    expect(onNavigate, "開けていないのに画面を移した").not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **行き先が無ければ押させない**＝押しても何も起きないボタンを作らない。
+  it("行き先を渡していなければ「開く」を出さない", async () => {
+    await runBake();
+    await screen.findByText(/を作りました/);
+    expect(screen.queryByText("作った動画を開く")).toBeNull();
+  });
+
+  // ⚠️ **作った先で何ができなくなるかを言う**（#992 ⑥）。
+  it("作った先では AI と場面編集が使えないことを伝える", async () => {
+    await runBake();
+    expect(await screen.findByText(/ゆうこにたたき台を作ってもらうことと、場面ごとの編集はできません/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **作っている間は離れさせない**＝離れると成否の受け皿ごと消える（#992 ②）。
+  it("作っている間は画面を離れられず、理由が出る", async () => {
+    let finish: (v: unknown) => void = () => {};
+    bakeToTimeline.mockImplementation(() => new Promise((res) => { finish = res; }));
+    render(<BakeToTimelinePanel />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    fireEvent.click(await screen.findByText("この内容で作る"));
+    await screen.findByText("作成中…");
+    expect(canNavigate("home" as never), "作っている最中に離れられる").toBe(false);
+    expect(await screen.findByText(BAKE_LEAVE_BLOCKED_MESSAGE)).toBeInTheDocument();
+    // 終われば、また離れられる（塞ぎっぱなしにしない）。
+    finish({ projectId: "proj_20260728_001", notes: [] });
+    await waitFor(() => expect(canNavigate("home" as never)).toBe(true));
+  });
+});
+
