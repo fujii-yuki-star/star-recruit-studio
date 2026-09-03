@@ -8,6 +8,8 @@ import {
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
 import { ASSET_TYPE, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
+// ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
+import { advancedSlotStarts, advancedSourceStart } from './sourceTime';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
@@ -385,7 +387,15 @@ export function moveClips(
  * 「長さを引き算してから `Math.max`」と書くと、同じ入力を2度通したときに下限をわずかに割る
  * （そこで潰した不具合を書き戻さない）。最小の長さは `TIMELINE_MIN_CLIP_SEC`（§2-7）。
  */
-export function trimClip(doc: TimelineProject, clipId: string, edge: 'start' | 'end', sec: number): EditResult {
+export function trimClip(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'start' | 'end',
+  sec: number,
+  // ⚠️ **見た目パターンの差し込み口を解くのに要る**（#988）＝渡さないと、
+  // 差し込み口に入れた動画だけ頭出しが進まず、**置き場所で挙動が割れる**。
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
@@ -394,7 +404,16 @@ export function trimClip(doc: TimelineProject, clipId: string, edge: 'start' | '
   const span = applyClipEdge(clip, edge === 'start' ? 'trim-start' : 'trim-end', sec, 0, TIMELINE_MIN_CLIP_SEC);
   // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
   if (span.startSec === clip.startSec && span.durationSec === clip.durationSec) return ok(doc);
-  const next = { ...clip, ...span };
+  // ⚠️ **左端を詰めたら、素材の頭出しも進める**（#988）＝進めないと、
+  // **頭は切れず中身が右へずれ、代わりに末尾が落ちる**（他社の型と逆の結果）。
+  // しかも**「ここで分けて前半を消す」と結果が食い違う**（分けるほうは進めていた）＝
+  // 同じことをする2つの操作で、鳴る音・映る絵が違った。**規則は `sourceTime.ts` に1つ**。
+  const headSec = edge === 'start' ? span.startSec - clip.startSec : 0;
+  const advanced =
+    headSec > 0
+      ? { ...advancedSourceStart(clip, headSec), ...advancedSlotStarts(doc, clip, headSec, opts.templateOf) }
+      : {};
+  const next = { ...clip, ...span, ...advanced };
   const issue = placementIssue(doc, next, next.trackId, next.startSec, next.durationSec);
   if (issue) return blocked(issue);
   // 連動している字幕も同じ区間になる（声を作り直して長さが変わるときも、この関数を通す約束＝#633 の残り）。
