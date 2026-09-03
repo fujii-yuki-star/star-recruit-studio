@@ -98,6 +98,15 @@ describe('bakeToTimeline / estimateBake', () => {
     expect(vi.mocked(fsMod.saveProjectDoc).mock.calls.every((c) => c[0] === 'proj_20260701_001')).toBe(true);
   });
 
+  // ⚠️ **確かめる段でも同じ門を通す**（#992 ④・PR #1022 レビュー 🟡）＝作る段だけで見ていたので、
+  // 「約◯MB増えます／持っていけないものは…」まで見せてから断っていた
+  //（`15 §3` が公開前チェックで採った「保存先を選ばせた後に落とさない」の逆＝ADR-0026④）。
+  // ⚠️ この検査を書くまで、**正典と PR 本文だけが「通している」と言っていた**（実装は通っていなかった）。
+  it('確かめる段でも、作れない内容なら先に断る（見せてから落とさない）', async () => {
+    useProjectStore.setState({ scenes: [scene('scene_001', 1, { durationSec: 0 })] });
+    await expect(useProjectStore.getState().estimateBake({ kind: BAKE_RANGE_KIND.whole })).rejects.toThrow(BakeError);
+  });
+
   // #811＝焼き出しの採番が壊れて id が重なったとき、**適合チェックは素通りする**（配列をまたいだ
   // id の一意は JSON Schema の語彙に無い）。重なった文書は読む側の引き当てが別のものに効くので、
   // 一覧に出るのに絵が変わる動画を作らない＝門をここにも置く。

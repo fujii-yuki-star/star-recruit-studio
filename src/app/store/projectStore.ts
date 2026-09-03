@@ -1542,6 +1542,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   estimateBake: async (range) => {
     const { doc, notes } = get()._bake(range, get().meta.projectName);
+    // ⚠️ **確かめる段でも同じ門を通す**（#992 ④）＝作る段だけで見ていたので、
+    // 「約◯MB増えます／持っていけないものは…」まで見せてから断っていた
+    // （`15 §3` が公開前チェックで採った「**保存先を選ばせた後に落とさない**」の逆＝ADR-0026④）。
+    // `_bake` は同じ純粋変換なので、ここでも同じ判定ができる（番号がまだ無くても、
+    // スキーマ適合と id の重なりは判定できる）。
+    // ⚠️ **門は作る段にも残す**＝範囲や名前を変えたら確かめ直す作りなので、間で変わりうる。
+    assertBakeable(doc);
     return { bytes: await bakeSizeBytes(get().meta.projectId, bakedFilePaths(doc)), notes };
   },
   bakeToTimeline: async (range, projectName) => {
@@ -1559,7 +1566,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // **未適合／id の重なりなら保存しない**＝一覧に出るのに開けない動画を作らない
     // （読込側は適合を要求する。id の重なりは JSON Schema では表せないので別に見る）。
     // 門は `assertBakeable` に1つ＝**確かめる段でも同じものを通す**（#992 ④）。
-    // ⚠️ **運ぶ前に見る**＝運んだ後に断ると、素材だけが置き去りになる。
+    // ⚠️ **運ぶ前に見る**＝運んだ後に断ると、素材だけが置き去りになる（もとからこの順）。
     assertBakeable(doc);
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));
