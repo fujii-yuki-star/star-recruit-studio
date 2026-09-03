@@ -27,7 +27,18 @@ export const USES_SOURCE_TIME = new Set<string>([TIMELINE_CLIP_KIND.audio, TIMEL
  */
 export function advancedSourceStart(clip: TimelineClip, headSec: number): { sourceStartSec?: number } {
   if (!USES_SOURCE_TIME.has(clip.kind)) return {};
-  return { sourceStartSec: (clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1) };
+  return { sourceStartSec: clampSourceStart((clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1)) };
+}
+
+/**
+ * 素材の頭より前へは戻さない（0 で止める）。
+ *
+ * ⚠️ **負の値は意味が無いだけでなく、開けない動画を作る**＝素材の -2 秒は存在せず、
+ * schema も 0 以上しか許さないので、**保存はできて次に開けない**（#974 と同じ形）。
+ * ⚠️ **戻す向きを通すようにして初めて到達する**（進めるだけなら負にならなかった）。
+ */
+function clampSourceStart(sec: number): number {
+  return sec > 0 ? sec : 0;
 }
 
 /**
@@ -50,7 +61,7 @@ export function advancedSlotStarts(
   const next: Record<string, SlotClipOverride> = { ...(clip.slotClips ?? {}) };
   for (const p of slots) {
     if (p.layerId == null) continue;
-    next[p.layerId] = { ...(clip.slotClips?.[p.layerId] ?? {}), startSec: p.sourceStartSec + headSec * p.speed };
+    next[p.layerId] = { ...(clip.slotClips?.[p.layerId] ?? {}), startSec: clampSourceStart(p.sourceStartSec + headSec * p.speed) };
   }
   return { slotClips: next };
 }

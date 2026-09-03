@@ -9,6 +9,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import { trimClip } from './edit';
 import { splitClip } from './split';
+import { validateTimelineProject } from '../validation/generated/validators.js';
 import type { Template } from '../template/types';
 
 const clip = (over: Partial<TimelineClip> = {}): TimelineClip => ({
@@ -53,6 +54,30 @@ describe('左端を詰めると、素材の頭出しが進む（#988）', () => 
   it('既に頭出しがあるときは、そこから足す', () => {
     const r = trimClip(doc([clip({ sourceStartSec: 5 })]), 'clip_001', 'start', 2);
     expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(7);
+  });
+
+  it('左端を左へ戻すと、頭出しも戻る（他社の型と同じ）', () => {
+    // ⚠️ **戻したのに頭出しが進んだまま**だと、詰めて戻すだけで中身がずれ続ける。
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 5 })]);
+    const r = trimClip(before, 'clip_001', 'start', 3);
+    expect(r.ok && r.doc.clips[0].sourceStartSec, '2秒ぶん戻る').toBe(3);
+  });
+
+  it('詰めて戻すと、元に戻る（行って来いで狂わない）', () => {
+    const before = doc([clip()]);
+    const trimmed = trimClip(before, 'clip_001', 'start', 3);
+    const back = trimmed.ok ? trimClip(trimmed.doc, 'clip_001', 'start', 0) : null;
+    expect(back?.ok && back.doc.clips[0].sourceStartSec).toBe(0);
+    expect(back?.ok && back.doc.clips[0].startSec).toBe(0);
+    expect(back?.ok && back.doc.clips[0].durationSec).toBe(10);
+  });
+
+  it('素材の頭より前へは戻さない（0 で止まる）', () => {
+    // ⚠️ **負の頭出しは意味が無い**＝素材の -2 秒は存在しない。
+    // schema も 0 以上しか許さないので、書けてしまうと**開けない動画**になる。
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 1 })]);
+    const r = trimClip(before, 'clip_001', 'start', 0);
+    expect(r.ok && (r.doc.clips[0].sourceStartSec ?? 0)).toBeGreaterThanOrEqual(0);
   });
 
   it('右端は進めない（素材の使い始めは変わらない）', () => {
@@ -145,5 +170,35 @@ describe('画面が、見た目パターンを渡している（#988）', () => 
     expect(movesHead.length, '左端を動かしうる呼び出しを1つも拾えていない').toBeGreaterThanOrEqual(2);
     const without = movesHead.filter((t) => !t.includes('templateOf'));
     expect(without, '見た目パターンを渡していない呼び出しがある').toEqual([]);
+  });
+});
+
+// ⚠️ **開けない動画を作らない**（#988）＝`sourceStartSec` は schema が 0 以上しか許さない。
+// 負を書くと**保存はできて次に開けない**（#974 と同じ形）。
+describe('戻しても、開ける文書のままでいる（#988）', () => {
+  it('左端を戻し切っても、スキーマに適合する', () => {
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 1 })]);
+    const r = trimClip(before, 'clip_001', 'start', 0);
+    expect(r.ok).toBe(true);
+    expect(r.ok && validateTimelineProject(r.doc), '次に開けない文書になっている').toBe(true);
+  });
+
+  it('差し込み口の使い始めも 0 で止まる', () => {
+    const template = {
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+    } as unknown as Template;
+    const d = {
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 5, durationSec: 5, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+        slotClips: { main: { startSec: 1 } },
+      } as TimelineClip],
+    } as TimelineProject;
+    const r = trimClip(d, 'clip_001', 'start', 0, { templateOf: () => template });
+    expect(r.ok && (r.doc.clips[0].slotClips?.main?.startSec ?? 0)).toBeGreaterThanOrEqual(0);
   });
 });

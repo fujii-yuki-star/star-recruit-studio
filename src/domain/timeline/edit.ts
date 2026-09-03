@@ -408,9 +408,12 @@ export function trimClip(
   // **頭は切れず中身が右へずれ、代わりに末尾が落ちる**（他社の型と逆の結果）。
   // しかも**「ここで分けて前半を消す」と結果が食い違う**（分けるほうは進めていた）＝
   // 同じことをする2つの操作で、鳴る音・映る絵が違った。**規則は `sourceTime.ts` に1つ**。
+  // ⚠️ **戻したぶんも戻す**（負の値も通す）＝`> 0` に絞ると、
+  // **詰めて左へ戻しても頭出しが進んだまま**になり、行って来いで中身がずれ続ける
+  //（他社の型では戻すと素材も戻る）。自分で挙げた懸念を検査にしたら、実際にそうなっていた。
   const headSec = edge === 'start' ? span.startSec - clip.startSec : 0;
   const advanced =
-    headSec > 0
+    headSec !== 0
       ? { ...advancedSourceStart(clip, headSec), ...advancedSlotStarts(doc, clip, headSec, opts.templateOf) }
       : {};
   const next = { ...clip, ...span, ...advanced };
