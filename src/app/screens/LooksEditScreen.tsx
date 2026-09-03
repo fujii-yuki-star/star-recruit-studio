@@ -816,21 +816,25 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               ⚠️ **消すのは「確認した集合」**（`confirmBulkDeleteIds`）＝確認中に選び直しても、
               確認していないものは消さない。⚠️ 消せなくなったら**確認を引っ込める**（隣のグループ削除と同型）。 */}
           {showBulkDeleteConfirm && confirmBulkDeleteIds && (
-            <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
-              <span className="text-sm">
-                {removableLayerIds(confirmBulkDeleteIds).length}件をまとめて削除しますか？
-                {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。
-                    ⚠️ 出すのは**本当にロックがあるときだけ**＝もう無い層で数が減っただけのときに
-                    ロックの話をしない（探しても見つからない理由を出さない・§2-5）。 */}
-                {lockedLayerIdsIn(confirmBulkDeleteIds).length > 0
-                  && "（ロック中のまとまりに入っている分は残ります）"}
-              </span>
-              <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDeleteIds(null)}>やめる</button>
-              <button
-                className="btn btn-danger text-sm"
-                onClick={() => { onRemoveLayers(confirmBulkDeleteIds); setConfirmBulkDeleteIds(null); }}
-              >削除する</button>
-            </div>
+            /* ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                行の中なので `inline`（箱にしない）＝並び・色は同じ。 */
+            <DeleteConfirm
+              inline
+              className="mt"
+              message={
+                <>
+                  {removableLayerIds(confirmBulkDeleteIds).length}件をまとめて削除しますか？
+                  {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。
+                      ⚠️ 出すのは**本当にロックがあるときだけ**＝もう無い層で数が減っただけのときに
+                      ロックの話をしない（探しても見つからない理由を出さない・§2-5）。 */}
+                  {lockedLayerIdsIn(confirmBulkDeleteIds).length > 0
+                    && "（ロック中のまとまりに入っている分は残ります）"}
+                </>
+              }
+              onCancel={() => setConfirmBulkDeleteIds(null)}
+              onConfirm={() => { onRemoveLayers(confirmBulkDeleteIds); setConfirmBulkDeleteIds(null); }}
+            />
           )}
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
           {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && !showGroupDeleteConfirm && (

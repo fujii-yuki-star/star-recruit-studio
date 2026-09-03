@@ -249,25 +249,25 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               いま出ている{visible.length}つをまとめて消す
             </button>
           ) : (
-            <div className="notice notice-warn row-between" style={{ flex: 1 }} role="alert">
-              <span>
-                {/* ⚠️ **名前も「押した瞬間のもの」から引く**（レビュー 🔴）＝生きている一覧（`visible`）から
-                    作ると、確認を出したまま種類タブや言葉を変えたときに**見せている名前と実際に消えるもの**
-                    がずれる（件数は控えた id、名前は今の一覧、という食い違い）。 */}
-                {confirmTargets.length}つの素材を削除します（
-                {confirmTargets.slice(0, 3).map((a) => a.displayName).join("、")}
-                {confirmTargets.length > 3 ? ` ほか${confirmTargets.length - 3}つ` : ""}）。元に戻せません。
-              </span>
-              <span className="row gap-sm">
-                <button
-                  className="btn btn-danger text-sm"
-                  onClick={() => { removeAssets(bulkConfirm); setBulkConfirm(null); }}
-                >
-                  <TrashIcon size={16} /> 削除する
-                </button>
-                <button className="btn btn-ghost text-sm" onClick={() => setBulkConfirm(null)}>やめる</button>
-              </span>
-            </div>
+            /* ⚠️ **共有の確認を通す**（#990）＝手書きだったので、**焦点の移動も `Escape` も
+                名簿への名乗りも無く**、さらに **`削除する` → `やめる` の順**で `06 §2-1` の
+                【やめる（左）／削除する（右）】と**逆**だった＝`.row` は素の flex なので
+                見た目も `Tab` の順も**取り返しのつかない側が先**になっていた。 */
+            <DeleteConfirm
+              className="row-between"
+              message={
+                <>
+                  {/* ⚠️ **名前も「押した瞬間のもの」から引く**（レビュー 🔴）＝生きている一覧から
+                      作ると、確認を出したまま種類タブや言葉を変えたときに**見せている名前と消えるもの**
+                      がずれる。 */}
+                  {confirmTargets.length}つの素材を削除します（
+                  {confirmTargets.slice(0, 3).map((a) => a.displayName).join("、")}
+                  {confirmTargets.length > 3 ? ` ほか${confirmTargets.length - 3}つ` : ""}）。元に戻せません。
+                </>
+              }
+              onCancel={() => setBulkConfirm(null)}
+              onConfirm={() => { removeAssets(bulkConfirm); setBulkConfirm(null); }}
+            />
           )}
         </div>
       )}

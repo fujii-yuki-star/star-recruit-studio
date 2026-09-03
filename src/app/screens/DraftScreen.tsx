@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
@@ -304,21 +305,20 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                           見た目
                         </button>
                         {confirmId === row.id ? (
-                          // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（やめる左・削除する=danger右＝#410）。
-                          <>
-                            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmId(null)}>
-                              やめる
-                            </button>
-                            <button
-                              className="btn btn-danger btn-icon"
-                              onClick={() => {
-                                removeScene(row.id);
-                                setConfirmId(null);
-                              }}
-                            >
-                              削除する
-                            </button>
-                          </>
+                          // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（`06 §2-1`）。
+                          // ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                          // 名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                          // ⚠️ **ここは走査で見つけた5か所目**＝レビューが挙げた4か所には入っていなかった
+                          //（人の目では数えられないので、機械で見る＝`deleteConfirmScan.test.ts`）。
+                          <DeleteConfirm
+                            inline
+                            message=""
+                            onCancel={() => setConfirmId(null)}
+                            onConfirm={() => {
+                              removeScene(row.id);
+                              setConfirmId(null);
+                            }}
+                          />
                         ) : (
                           <button
                             className="btn btn-ghost btn-icon"
