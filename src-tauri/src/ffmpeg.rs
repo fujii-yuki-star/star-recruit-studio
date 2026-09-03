@@ -3795,15 +3795,12 @@ fn staged_output_path(out: &Path) -> PathBuf {
 
 /// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
 fn finish_staged_output(staged: &Path, out: &Path) -> Result<(), String> {
-    // 既にあるものは、置き換える直前まで残しておく（ここで初めて消える）。
-    if out.exists() {
-        fs::remove_file(out).map_err(|e| {
-            export_failure(
-                format!("remove existing output: {e}"),
-                "前からあった動画を置き換えられませんでした。別の名前で保存し直してください。",
-            )
-        })?;
-    }
+    // ⚠️ **先に消さない**（#984 レビュー 🔴）＝当初は「Windows は既にあるファイルへ rename できない」
+    // と思って `remove_file` してから rename していたが、**実測したら上書きできた**
+    //（Rust の `fs::rename` は Windows で `MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)` を使う）。
+    // 先に消すと、**消せたが rename に失敗した**ときに**前の動画も新しい動画も無い**状態になる＝
+    // このPRが防ごうとしていた「前の動画が失われる」を、別の形で自分で作っていた。
+    // rename ひとつなら、失敗しても**前の動画はそのまま残る**。
     fs::rename(staged, out).map_err(|e| {
         export_failure(
             format!("rename staged output: {e}"),
@@ -6828,6 +6825,34 @@ mod staged_output_tests {
             fs::read(&out).unwrap(),
             "前に作った大事な動画".as_bytes(),
             "中止しても前の動画は失われない"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **置き換えに失敗しても、前の動画は残る**（#984 レビュー 🔴）。
+    ///
+    /// ⚠️ 当初は「Windows は既にあるファイルへ rename できない」と思って**先に消して**いたが、
+    /// **実測したら上書きできた**。先に消すと、**消せたが rename に失敗した**ときに
+    /// **前の動画も新しい動画も無い**状態になる＝防ごうとしていたものを自分で作っていた。
+    #[test]
+    fn 置き換えに失敗しても前の動画は残る() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_ng_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前の動画".as_bytes()).unwrap();
+        // 書きかけが無い＝rename が必ず失敗する状況を作る。
+        let staged = staged_output_path(&out);
+        assert!(!staged.exists());
+
+        assert!(
+            finish_staged_output(&staged, &out).is_err(),
+            "失敗を握り潰さない"
+        );
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前の動画".as_bytes(),
+            "置き換えに失敗しても、前の動画はそのまま"
         );
         let _ = fs::remove_dir_all(&dir);
     }
