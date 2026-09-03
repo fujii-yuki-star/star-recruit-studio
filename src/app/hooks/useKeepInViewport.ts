@@ -27,7 +27,11 @@ export const EDGE_MARGIN_PX = 8;
  * 色の面は「トリガーの下、入らなければ上」に出す＝**置き方は違うが、はみ出しの始末は同じ**。
  * 別々に書くと片方だけ直る（このリポジトリで繰り返している型）。
  *
- * @param height 中身の実寸（`scrollHeight`＝縮める前の高さ）。
+ * ⚠️ **横には無い**＝いまの使い所は幅が固定・短いラベルなので、寄せるだけで足りる。
+ * **長いラベルが出る所へ広げるときは、横も同じ始末が要る**（`06 §2` 統一規約9.4 に明記した）。
+ *
+ * @param height 中身の実寸（`scrollHeight`＝**縮める前**の高さ）。
+ *   ⚠️ `offsetHeight` は `maxHeight` を掛けた**後**なので、測り直しで「入る」と読めてしまう。
  * @param viewportHeight 画面の高さ。
  */
 export function overflowFallback(

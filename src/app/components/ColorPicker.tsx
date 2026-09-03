@@ -221,7 +221,11 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     const tr = triggerRef.current?.getBoundingClientRect();
     if (!tr) return;
     const pw = popRef.current?.offsetWidth || POPOVER_W;
-    const ph = popRef.current?.offsetHeight || POPOVER_H;
+    // ⚠️ **縮める前の高さで見る**（`scrollHeight`・PR #1025 レビュー 🟡）＝`offsetHeight` は
+    // **`maxHeight` を掛けた後**の高さなので、一度縮めた後の測り直し（スクロール・大きさ変更で
+    // 走る）では「下に入る」と読めてしまい、**上下の反転を誤って画面の下へはみ出す**。
+    // 共有の判定（`overflowFallback`）と**同じ長さを見る**＝ここだけ別の長さで判断しない。
+    const ph = popRef.current?.scrollHeight || POPOVER_H;
     const pad = 8;
     let left = tr.left;
     if (left + pw > window.innerWidth - pad) left = window.innerWidth - pw - pad;
@@ -232,7 +236,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     // ⚠️ **画面より高いときは、上端で止めるだけでは足りない**（#1023＝実機の指摘）＝
     // 止めても**下がはみ出したまま**で、そこにある操作（下のボタン）に手が届かない。
     // 規則はメニューと**同じもの**を使う（置き方は違うが、はみ出しの始末は同じ）。
-    const over = overflowFallback(popRef.current?.scrollHeight ?? ph, window.innerHeight);
+    const over = overflowFallback(ph, window.innerHeight);
     setPos((prev) =>
       prev && prev.left === left && prev.top === top && (prev.maxHeight ?? null) === (over?.maxHeight ?? null)
         ? prev // 変化時のみ再描画

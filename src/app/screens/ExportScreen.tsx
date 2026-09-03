@@ -20,7 +20,7 @@ import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { AudioAutoField } from "../components/AudioAutoField";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -595,15 +595,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {(busy || (phase === "done" && !showsPastResult)) && (
             <>
               <div className="text-center mb">
-                <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
-                  {percent}%
-                </div>
+                {/* ⚠️ **言えない段に数を出さない**（#993 ①）＝`preparing` は進み具合を持っていない。
+                    0% と出すと「止まっている」に見える。 */}
+                {hasExportPercent(phase) && (
+                  <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
+                    {percent}%
+                  </div>
+                )}
                 <div className="text-muted">{exportHeadingLabel({ phase, progress, encode })}</div>
               </div>
               <div className="progress mb">
                 {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
                     「動いている」ことだけ伝える（#391）。レンダリング段/完了は常に幅で表す。 */}
-                {phase === "encoding" && !encode ? (
+                {(phase === "encoding" && !encode) || !hasExportPercent(phase) ? (
                   <div className="progress-fill progress-fill--indeterminate" />
                 ) : (
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
