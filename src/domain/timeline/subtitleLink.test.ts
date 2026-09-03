@@ -421,6 +421,36 @@ describe('その読み上げの字幕を置く（#633）', () => {
       expect(placed?.y, '画面の外（負の位置）へ置いている').toBe(0);
     });
 
+    // ⚠️ **「置くその瞬間」しか見ない**ことを、検査として固定する（#1010 レビュー 🔴）＝
+    // これは**不具合ではなく承知のうえの線引き**（あとから計算し直すと、利用者が手で置いた
+    // 場所を黙って動かす）。線引きが黙って変わらないよう、いまの挙動を書いておく。
+    // 重なりを**知らせる**ほうは #1014 で追う。
+    it('置いた後にずらして重なっても、位置は動かさない（手で置いた場所を奪わない）', () => {
+      const d = doc({
+        tracks: [
+          { id: 'track_001', kind: TRACK_KIND.visual },
+          { id: 'track_002', kind: TRACK_KIND.audio },
+          { id: 'track_003', kind: TRACK_KIND.audio },
+        ],
+        clips: [
+          voice('clip_001', { startSec: 0, durationSec: 3 }),
+          voice('clip_002', { startSec: 20, durationSec: 3, trackId: 'track_003' }, 'よろしく'),
+          // 2本目の字幕が別の映像列へ行くよう、track_001 の 20〜23 を塞ぐ。
+          { id: 'clip_900', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 19, durationSec: 6, x: 0, y: 0, w: 10, h: 10, text: 'x' },
+        ],
+      });
+      const r1 = addLinkedSubtitleClip(d, 'clip_001');
+      const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
+      // 置いた時点では時間が重なっていないので、どちらも既定の位置。
+      const placed = r2?.ok ? r2.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle) : [];
+      expect(placed.map((c) => c.y)).toEqual([placed[0]?.y, placed[0]?.y]);
+      // あとから読み上げをずらして同じ時間にする。
+      const r3 = r2?.ok ? moveClip(r2.doc, 'clip_002', { startSec: 0 }) : null;
+      const after = r3?.ok ? r3.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle) : [];
+      expect(after.map((c) => c.startSec), '連動している字幕の時間は追従する').toEqual([0, 0]);
+      expect(after.map((c) => c.y), '位置は据え置き（重なるが、手で置いた場所を奪わない）').toEqual(placed.map((c) => c.y));
+    });
+
     it('積み上げた字幕もスキーマに適合する', () => {
       const r1 = addLinkedSubtitleClip(two(), 'clip_001');
       const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
