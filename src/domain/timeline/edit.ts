@@ -24,6 +24,8 @@ import { createFreeElement } from '../project/freeLayoutOps';
 import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
+// ⚠️ **すき間の広さは場面形式と共有する**（#1009）＝別に決めると、同じ「2人目を上へ」が形式で違う間隔になる。
+import { SUBTITLE_STACK_GAP_EM } from '../text/subtitleBands';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import type { Texts } from '../project/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
@@ -954,6 +956,47 @@ export function setVoiceSpeaker(doc: TimelineProject, clipId: string, speaker: n
 }
 
 /**
+ * **同じ時間に置いてある字幕の上**へ積んだ y（重なっていなければ既定のまま）。
+ *
+ * ⚠️ **同じ時間のものだけを見る**＝別の時間の字幕は画面に同時に出ないので、避ける相手ではない
+ *（避けると、1本ずつ置くたびに上へ上へと逃げて画面の外へ出る）。
+ * ⚠️ **上へ積む**＝場面形式と同じ向き（#530「2人目以降を上へ」）。下へ積むと画面の外が近い。
+ * ⚠️ **画面の外へは出さない**（0 で止める）＝出すと**置いたのに映らない**字幕が黙って生まれる。
+ * 止めた結果また重なることはあるが、**見えない**より**見えて重なっている**ほうが気づける。
+ */
+function stackedSubtitleY(
+  doc: TimelineProject,
+  startSec: number,
+  durationSec: number,
+  baseY: number,
+  h: number,
+  fontSize: number,
+): number {
+  // すき間は**文字の大きさ**を基準にする（場面形式と同じ＝`stackedSubtitleBands`）。
+  const gap = Math.round(fontSize * SUBTITLE_STACK_GAP_EM);
+  let y = baseY;
+  // 重なりが解けるまで上へ。**回数を区切る**＝壊れたデータ（高さ0の字幕が大量）で回り続けない。
+  for (let i = 0; i < doc.clips.length + 1; i += 1) {
+    const hit = doc.clips.find(
+      (c) =>
+        c.kind === TIMELINE_CLIP_KIND.subtitle &&
+        spansOverlap(c.startSec, clipEndSec(c), startSec, startSec + durationSec) &&
+        boxesOverlapY(c.y ?? 0, c.h ?? 0, y, h),
+    );
+    if (!hit) break;
+    const next = (hit.y ?? 0) - gap - h;
+    if (next < 0) return 0; // 画面の外へは出さない
+    y = next;
+  }
+  return y;
+}
+
+/** 縦に重なっているか（半開＝上下が接しているだけなら重なっていない）。 */
+function boxesOverlapY(aY: number, aH: number, bY: number, bH: number): boolean {
+  return aY < bY + bH && bY < aY + aH;
+}
+
+/**
  * **その読み上げの字幕を置く**（#633＝「声を作る → 字幕が連動して出る」の入口）。
  *
  * 置き場所は**同じ時間が空いている映像の列**を探し、無ければ**列を足す**（置けないと言って終わらせない）。
@@ -984,6 +1027,11 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
   const tracks = free ? doc.tracks : [...doc.tracks, { id: trackId, kind: TRACK_KIND.visual }];
   const clip: TimelineClip = {
     ...spatial,
+    // ⚠️ **同じ時間に字幕があれば、その上へ積む**（#1009）＝既定の箱は位置が固定なので、
+    // 同時にしゃべる2人ぶんを置くと**まったく同じ場所に重なり**、下の字幕が読めなくなる。
+    // 場面形式は同じ状況（同時2ボイス・ADR-0031）で**2人目以降を上へ**置く（#530）＝
+    // 形式で挙動を割らない（ADR-0026②）。
+    y: stackedSubtitleY(doc, voice.startSec, voice.durationSec, spatial.y ?? 0, spatial.h ?? 0, spatial.fontSize ?? 0),
     id: createClipId(doc.clips.map((c) => c.id)),
     kind: TIMELINE_CLIP_KIND.subtitle,
     trackId,
