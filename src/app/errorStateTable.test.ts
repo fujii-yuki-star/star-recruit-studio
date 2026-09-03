@@ -72,6 +72,8 @@ function codeMessages(): Record<string, string> {
     RESTORE_POINTS_EMPTY,
     // ⚠️ **件数が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
     RESTORE_VOICES_CLEARED: voicesClearedMessage(" N " as unknown as number),
+    // ⚠️ **形式ごとの文も表で守る**（#991）＝片方だけ表に載せると、もう片方が黙ってずれる。
+    RESTORE_VOICES_CLEARED_TIMELINE: voicesClearedMessage(" N " as unknown as number, "timeline"),
     // ⚠️ **日時が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
     PROJECT_BACKUP_AVAILABLE: restoreOfferMessage(" 〔日時〕 "),
     READING_DICT_SYNC_FAILED,

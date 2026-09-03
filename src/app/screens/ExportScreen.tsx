@@ -29,7 +29,7 @@ import { narrationAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
-import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
+import { ExportDoneActions } from "../components/ExportDoneActions";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
@@ -69,8 +69,6 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const fileName = exportForm.fileName ?? (projectName.trim() || "動画");
   const size = exportForm.size;
   const withSubtitle = exportForm.withSubtitle;
-  // 完了後の導線に失敗したとき、押した操作に応じた文言を出す（§2-5・#404）。""＝正常／"reveal"＝保存先を開く失敗／"open"＝再生失敗。
-  const [openError, setOpenError] = useState<"" | "reveal" | "open">("");
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
   // 出力解像度（向き＋画質）。書き出し時に PNG をこの解像度で焼く。向きは videoSettings.aspectRatio から導出（ADR-0012）。
@@ -200,7 +198,6 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setResultPath("");
     setBgmWarning("");
     setDuckMergedNotice(false);
-    setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
     // 取り込み・生成中は書き出しを始めない（#570 P1・相互排他＝§2-5/ADR-0026④）。進行中の素材取り込みは同一パス上書きで
     // 「壊れたMP4」に、進行中の音声/動画案生成は開始時 snap の外で完了して「保存/画面は新・MP4 は旧（無音MP4が成功扱い）」に
@@ -625,41 +622,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               前回の結果として見ているときも**保存したファイルへ辿れる**必要がある（#404 の導線を消さない）。 */}
           {phase === "done" && (
             <>
-              {resultPath && (
-                <>
-                  <div className="notice notice-info mt">
-                    <span>保存先：{resultPath}</span>
-                  </div>
-                  {/* 完了後の導線（06_UI_SPEC §13 完了時・#404）：長いパスを自力で辿らずワンクリックで開ける。 */}
-                  <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => { setOpenError(""); void revealSavedFile(resultPath).catch(() => setOpenError("reveal")); }}
-                    >
-                      保存した場所を開く
-                    </button>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => { setOpenError(""); void openSavedFile(resultPath).catch(() => setOpenError("open")); }}
-                    >
-                      動画を再生
-                    </button>
-                    <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("home")}>
-                      <ArrowLeftIcon size={16} />
-                      プロジェクト一覧へ戻る
-                    </button>
-                  </div>
-                  {openError && (
-                    <div className="notice notice-warn mt" role="alert">
-                      <span>
-                        {openError === "open"
-                          ? `動画を再生できませんでした。ファイルが移動・削除されていないか、再生できるアプリがあるかご確認ください（保存先：${resultPath}）。`
-                          : `保存した場所を開けませんでした。ファイルが移動・削除されていないかご確認ください（保存先：${resultPath}）。`}
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
+              {/* ⚠️ **導線は共有部品から出す**（#991）＝タイムライン形式には**同じものが無かった**
+                  ので、片方だけ直る形を止めて1か所へ寄せた（`06 §13` 完了時・#404）。 */}
+              {/* ⚠️ **結果ごとに作り直す**（`key`）＝開けなかったときの断りを部品が自分で持つので、
+                  key を付けないと**前回の断りが次の結果に持ち越される**（もとは画面が明示的に消していた）。 */}
+              <ExportDoneActions key={resultPath} path={resultPath} onBack={() => onNavigate("home")} />
               {duckMerged && (
                 <div className="notice notice-warn mt">
                   {/* ⚠️ **黙ってやらない**（§2-5）＝下げる区間をつないだので、声と声の間でも BGM が下がったままになる。

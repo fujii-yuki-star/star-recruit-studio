@@ -207,3 +207,36 @@ describe("タイムライン形式の控えの導線（#977）", () => {
     expect(backup).not.toHaveBeenCalled();
   });
 });
+
+// 形式で「作り直す場所」を言い分ける（#991）。
+describe("戻したあとの知らせが、その画面に実在する場所を指す（#991）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** 「戻す」を押して、声を作り直す知らせまで進める。 */
+  const restoreAndGetNotice = async (list: unknown[], name: string) => {
+    useProjectStore.setState({
+      listProjects: vi.fn(async () => list as ProjectHeader[]),
+      restoreToRestorePoint: vi.fn(async () => 2), // 2件が作成前に戻った
+      loadProject: vi.fn(async () => {}),
+    });
+    vi.spyOn(projectFs, "listRestorePoints").mockResolvedValue([point(3_000_000)]);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText(`「${name}」を前の状態に戻す`));
+    fireEvent.click(await screen.findByText("ここへ戻す"));
+    return await screen.findByText(/もう一度作ってください/);
+  };
+
+  // ⚠️ **名指しするものは、その画面に実在すること**（#723・決定5）。
+  it("場面形式では「その場面の声の欄」と言う", async () => {
+    const el = await restoreAndGetNotice(ONE, "テスト動画");
+    expect(el.textContent).toContain("その場面の声の欄");
+  });
+
+  // ⚠️ **タイムライン形式に「場面」は無い**＝作り直すのは「読み上げ」の欄。
+  it("タイムライン形式では「読み上げ」の欄と言う（場面と言わない）", async () => {
+    const el = await restoreAndGetNotice(TIMELINE_ONE, "タイムライン動画");
+    expect(el.textContent).toContain("「読み上げ」の欄");
+    expect(el.textContent, "この形式に無い「場面」を名指ししている").not.toContain("その場面の");
+  });
+});
+

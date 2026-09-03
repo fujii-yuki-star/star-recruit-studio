@@ -59,3 +59,25 @@ describe("HomeScreen：形式で開く先を分ける", () => {
     expect(screen.queryByText(/保存していない素材や場面は失われます/)).not.toBeInTheDocument();
   });
 });
+
+// 削除の確認も形式で語彙を割らない（#991・ADR-0026②）。
+describe("削除の確認が、その形式の言葉で言う（#991）", () => {
+  const openDeleteConfirm = async (name: string) => {
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText(`「${name}」を削除`));
+    return await screen.findByText(/を削除しますか/);
+  };
+
+  it("場面形式では「場面」と言う", async () => {
+    const el = await openDeleteConfirm("場面の動画");
+    expect(el.textContent).toContain("保存した場面・素材・音声ごと");
+  });
+
+  // ⚠️ **同じ一覧に「タイムライン」の行が並ぶ**のに、確認だけ場面形式の語彙だった。
+  it("タイムライン形式では「場面」と言わない", async () => {
+    const el = await openDeleteConfirm("タイムラインの動画");
+    expect(el.textContent, "この形式に無い「場面」を名指ししている").not.toContain("場面");
+    expect(el.textContent).toContain("保存した部品・素材・音声ごと");
+  });
+});
+

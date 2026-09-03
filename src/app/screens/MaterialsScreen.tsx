@@ -7,6 +7,7 @@ import { pickPanelAsset } from "./materialsSelection";
 import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import { IMPORT_NO_PROJECT_MESSAGE } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -62,6 +63,10 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // ⚠️ **入れる先が無いときも押せない**（差分再監査 6巡目 🟡）＝棚からの取り込みだけ塞ぐと、
   // 同じ「取り込み」で断り方が2通りになる（ADR-0026②）。判定は共有の1つから採る。
   const projectOpen = useProjectStore(hasOpenProject);
+  // ⚠️ **「開いていない」と言い切らない**（#991）＝この画面が扱うのは**場面形式の素材**だが、
+  // タイムライン形式を開いている人には「先に動画を開くか、新しく作る」が**嘘**に見える（開いているので）。
+  // ⚠️ **次の行動も変わる**＝そちらの素材は**その編集画面から**取り込む。
+  const timelineOpen = useTimelineStore((s) => s.doc != null);
   const addDisabled = isImporting || isExporting || !projectOpen; // 取り込み中・書き出し中・行き先なしは押せない
   const [filter, setFilter] = useState<Filter>("all");
   /** 名前・タグの絞り込み（#858）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定14）。 */
@@ -345,7 +350,11 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               title="この種類の素材はまだありません"
               message={projectOpen
                 ? "「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
-                : "素材はどの動画に入れるかが決まってから登録します。先に動画を開くか、新しく作ってください。"}
+                : timelineOpen
+                  // ⚠️ **開いているのに「開いてください」と言わない**（#991・§2-5）＝ここは
+                  // 場面から作る動画の素材置き場。タイムラインで作る動画の素材は、その画面で取り込む。
+                  ? "この画面は、場面から作る動画の素材置き場です。いま開いているタイムラインの動画へ入れるなら、その編集画面から取り込んでください。"
+                  : "素材はどの動画に入れるかが決まってから登録します。先に動画を開くか、新しく作ってください。"}
             />
           )
         )}
