@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NoScenesState } from "./NoScenesState";
 import { useProjectStore } from "../store/projectStore";
-import { EDIT_WIZARD_INPUT_LABEL, RESUME_WIZARD_LABEL } from "../uiLabels";
+import { EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM, RESUME_WIZARD_LABEL } from "../uiLabels";
 
 const withMeta = (meta: Record<string, unknown>) =>
   useProjectStore.setState({
@@ -115,5 +115,45 @@ describe("たたき台からも、入れた内容へ戻れる（#985）", () => 
     const { DraftScreen } = await import("../screens/DraftScreen");
     render(<DraftScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(EDIT_WIZARD_INPUT_LABEL)).toBeNull();
+  });
+});
+
+// ⚠️ **作り直すと、いまの場面は入れ替わる**（#985 レビュー 🔴）。
+// もとはたたき台の「作り直す」にしか確認が無く、**入れた内容を見直す道（#985）を通ると
+// 場面が黙って消えた**＝行き止まりを直して**別の穴を開けた**形だった。
+describe("作る手前で、上書きになることを告げる（#985 レビュー 🔴）", () => {
+  const scene = (id: string) =>
+    ({ sceneId: id, partId: "part_001", order: 1, sceneType: "opening", templateId: "corp_title",
+       durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+       narration: { text: "", voiceId: null, status: "none" }, warnings: [] }) as never;
+
+  it("場面があるときは、送信前確認で上書きになると告げる", async () => {
+    useProjectStore.setState({
+      scenes: [scene("scene_001")],
+      meta: { ...useProjectStore.getState().meta, companyInfo: { companyName: "株式会社テスト" } },
+    } as never);
+    const { ConfirmScreen } = await import("../screens/ConfirmScreen");
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(REGENERATE_OVERWRITE_CONFIRM)).toBeInTheDocument();
+  });
+
+  it("場面が無ければ告げない（消えるものが無い）", async () => {
+    useProjectStore.setState({
+      scenes: [],
+      meta: { ...useProjectStore.getState().meta, companyInfo: { companyName: "株式会社テスト" } },
+    } as never);
+    const { ConfirmScreen } = await import("../screens/ConfirmScreen");
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(REGENERATE_OVERWRITE_CONFIRM)).toBeNull();
+  });
+
+  it("たたき台の確認と、同じ文を使う（片方だけ変わらない）", async () => {
+    // ⚠️ **文言は1か所**＝2か所に書くと、片方だけ直って言うことが割れる。
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const f of ["ConfirmScreen.tsx", "DraftScreen.tsx"]) {
+      const src = readFileSync(join(process.cwd(), "src", "app", "screens", f), "utf8");
+      expect(src, `${f} が共有の文を使っていない`).toContain("REGENERATE_OVERWRITE_CONFIRM");
+    }
   });
 });

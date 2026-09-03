@@ -5,7 +5,7 @@ import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { EDIT_WIZARD_INPUT_LABEL } from "../uiLabels";
+import { EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -357,7 +357,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           {confirmRegen && (
             <div className="notice notice-warn mt-lg" role="alert">
               <span>
-                今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？
+                {REGENERATE_OVERWRITE_CONFIRM}
               </span>
               {/* 確認は「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
