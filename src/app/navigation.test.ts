@@ -114,7 +114,12 @@ describe("画面が、決め方を通っている（#987）", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(process.cwd(), "src", "App.tsx"), "utf8");
-    expect(src, "決め方を通っていない＝画面の中で書き直している").toContain("currentProjectLabel(");
+    // ⚠️ **戻り値の行き先まで見る**（#1001 レビューの提案）＝呼び出しの有無だけだと、
+    // **呼んでいるが結果を捨てて、別の変数を渡している**形を捕まえられない。
+    expect(
+      src,
+      "決め方の結果が、サイドバーへ渡す値になっていない（呼んでいるが捨てている）",
+    ).toMatch(/const\s*\{\s*show:\s*hasProjectContent,\s*name:\s*projectName\s*\}\s*=\s*currentProjectLabel\(/);
     expect(src, "タイムライン側の名前を渡していない").toMatch(/timelineName/);
   });
 });
