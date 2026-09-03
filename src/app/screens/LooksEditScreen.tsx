@@ -198,6 +198,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   if (!editing || !draft) {
     return (
       <div className="main-scroll">
+        {/* ⚠️ **両方の枝に置く**（#984 レビュー ℹ️）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**（#953 と同じ型）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <div className="notice notice-warn" role="alert">
           <span>編集する見た目パターンが選ばれていません。一覧から選んでください。</span>
           <button className="btn btn-primary btn-icon" onClick={backToList}>一覧へ戻る</button>

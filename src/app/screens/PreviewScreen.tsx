@@ -433,6 +433,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     return (
       <div className="main-scroll">
         <PageHead title="仕上がり確認" desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。" />
+        {/* ⚠️ **両方の枝に置く**（UI/UX レビュー①）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**。たたき台は両方に置いてある（#952）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
           <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
             <ArrowLeftIcon size={16} />

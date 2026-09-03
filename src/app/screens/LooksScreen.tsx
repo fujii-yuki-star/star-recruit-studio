@@ -6,7 +6,7 @@ import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { deleteLookConfirmMessage } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
-import { ExportLock } from "../components/ExportLockBanner";
+import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
@@ -171,6 +171,9 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     return (
       <div className="main-scroll">
         <PageHead title="見た目パターンを管理" desc="動画の見た目のパターンを確認できます。" />
+        {/* ⚠️ **両方の枝に置く**（#984 レビュー ℹ️）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**（#953 と同じ型）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <EmptyState
           title="見た目パターンがありません"
           message="標準の見た目パターンが読み込まれていません。アプリを再起動してください。改善しない場合は、お手数ですがご連絡ください。"

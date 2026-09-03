@@ -108,6 +108,9 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         title="公開前チェック"
         desc="動画を書き出す前に内容を点検しました。気になる項目は直してから進めましょう。"
       />
+      {/* ⚠️ **両方の枝に置く**（UI/UX レビュー①）＝場面ゼロの枝にだけ置いてあり、
+          **場面がある普通の状態で書き出し中に来ると、進捗も「書き出しへ戻る」導線も出なかった**。 */}
+      <ExportLockBanner onNavigate={onNavigate} />
 
       {/* サマリ */}
       <div className="card-grid cols-3 mb">

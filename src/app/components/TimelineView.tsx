@@ -22,7 +22,8 @@ interface TimelineViewProps {
 const LANES: { kind: TimelineTrackKind; label: string; sub: string }[] = [
   { kind: "video", label: "場面", sub: "映像" },
   { kind: "telop", label: "テロップ", sub: "字幕" },
-  { kind: "audio", label: "音声", sub: "ナレーション" },
+  // ⚠️ **「ナレーション」は画面に出さない**（§2-3・`16 §1`）＝この `sub` は列の見出しに描かれる。
+  { kind: "audio", label: "音声", sub: "セリフ" },
   { kind: "bgm", label: "BGM", sub: "音楽" },
 ];
 
