@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import type { SceneEditFocus } from "../data/mockData";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
@@ -36,7 +37,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo, importError, clearImportError } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setEditingSceneFocus, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo, importError, clearImportError } =
     useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
   // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
@@ -44,7 +45,14 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
-  const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
+  // ⚠️ **押した言葉の欄から見せる**（#995 ③）＝「セリフ」「素材」「見た目」は
+  // **3つとも同じ場所へ行く**だけで、行き先でその欄に寄る仕掛けが無かった
+  //（＝押した言葉と着地がずれる）。`focus` を渡さなければ、いつもどおり（記憶した開閉のまま）。
+  const editScene = (sceneId: string, focus?: SceneEditFocus) => {
+    setEditingSceneId(sceneId);
+    setEditingSceneFocus(focus ?? null);
+    onNavigate("scene-edit");
+  };
   // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。↑/↓ も併存（下記・キーボード用）。
   // 端まで運んだら送る（#714 項目5）＝画面の外にある行へも1回のドラッグで運べる。
   // ⚠️ 送る枠は**この画面のスクロールする器**（`.main-scroll`）＝頁ぜんぶが動く。
@@ -295,13 +303,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         >
                           複製
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id)}>
+                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id, "narration")}>
                           セリフ
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => editScene(row.id)}>
+                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => editScene(row.id, "assets")}>
                           素材
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => editScene(row.id)}>
+                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => editScene(row.id, "look")}>
                           見た目
                         </button>
                         {confirmId === row.id ? (

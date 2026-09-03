@@ -319,3 +319,15 @@ export const purposeOptions: PurposeOption[] = PURPOSES.map((id) => ({ id, ...RE
 
 /** 目的の選択肢（一般・社内発表 general・`videoKind=general` のとき表示）。 */
 export const generalPurposeOptions: PurposeOption[] = GENERAL_PURPOSES.map((id) => ({ id, ...GENERAL_PURPOSE_TEXT[id] }));
+
+/**
+ * 場面編集を開いたときに**最初に見せる欄**（#995 ③）。
+ *
+ * ⚠️ **押した言葉と着地を合わせる**＝たたき台の「セリフ」「素材」「見た目」は
+ * 3つとも同じ場所へ行くだけで、行き先でその欄に寄る仕掛けが無かった
+ *（＝押した言葉と着地がずれる）。
+ * ⚠️ **値は欄の記憶キーと合わせる**（`CollapsibleSection` の `storageKey`）＝
+ * 別に決めると、名前が変わったとき**片方だけ直る**。
+ */
+export type SceneEditFocus = "narration" | "assets" | "look";
+
