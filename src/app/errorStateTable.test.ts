@@ -9,7 +9,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
-  userFontMissingMessage, userFontUnreadableMessage,
+  userFontMissingMessage, userFontUnreadableMessage, clipOutsidePlayheadMessage,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -80,6 +80,10 @@ function codeMessages(): Record<string, string> {
     // ⚠️ **件数が入る文は `N` を差し込んで比べる**（表は読みやすさのため ` N ` と空白つきで書く）。
     USER_FONT_MISSING: userFontMissingMessage(" N "),
     USER_FONT_UNREADABLE: userFontUnreadableMessage(" N "),
+    // ⚠️ **秒が入る文も差し込み口を渡して比べる**（上と同じ流儀）＝#996。
+    // ⚠️ **同じ節にある `canvasHoldMessage` は、まだこの走査の外**（表にも無い）＝
+    // ついでに載せると本題（#996）の差分がぼやけるので、別で追う。
+    TIMELINE_CLIP_OUTSIDE_PLAYHEAD: clipOutsidePlayheadMessage(0, 0),
   };
 }
 
@@ -335,10 +339,10 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(156);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(157);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(53);
+    ).toBe(54);
   });
 });
