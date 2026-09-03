@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { TrashIcon } from "./icons";
 
@@ -32,9 +33,16 @@ export function DeleteConfirm({
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  // ⚠️ **閉じたときに元へ戻す**（#986）＝出た瞬間に「やめる」へ手を移すのに（#354）、
+  // **閉じるときに戻していなかった**ので、押した瞬間に焦点が `body` へ落ちる＝
+  // #354 が直そうとした症状（「押した直後にどこにいるか分からなくなる」）が、出る方向に残っていた。
+  // ⚠️ **実行中も閉じ込める**＝両ボタンが無効でも、外へ `Tab` で抜けて別の操作を始められない。
+  useFocusTrap(true, boxRef, cancelRef);
 
   // ⚠️ **安全な側（やめる）へ焦点を置く**＝Enter をそのまま押しても消えない。
   // 実行中は動かさない（押せないボタンへ焦点を移しても行き止まり）。
+  // ⚠️ **出た瞬間の1回は上の `useFocusTrap` が済ませている**＝ここが受け持つのは
+  // **実行が終わって押せるようになったとき**に安全な側へ戻すこと（同じ所へ2度当てても害はない）。
   useEffect(() => {
     if (!busy) cancelRef.current?.focus();
   }, [busy]);

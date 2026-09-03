@@ -7,7 +7,9 @@
 // 自由配置エディタ（`FreeLayoutOverlay`）が持っていた同じ作りをここへ出して**1つにする**（§6）＝
 // 画面ごとに閉じ方や見た目が割れない。
 
+import { useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export interface ContextMenuItem {
   label: string;
@@ -48,6 +50,26 @@ export function ContextMenu({
     onClose();
     return true;
   });
+  // ⚠️ **`role="menu"` を名乗るなら、その作法を持つ**（#986）＝
+  // 焦点移動も矢印キーも `tabIndex` も無いまま名乗っていた。
+  // `FontPicker` は**逆の判断**（一式が無いのでロールを付けない）を自分で書いており、割れていた。
+  // ここは**作法を足す側**にそろえる（メニューは矢印で選べることが強く期待される）。
+  // ⚠️ **覆いは `onPointerDown` しか見ない**＝キーボードでは背後へ `Tab` で抜けて Enter で起動できた。
+  const menuRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(items.length > 0, menuRef);
+  const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+    if (buttons.length === 0) return;
+    e.preventDefault();
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      e.key === "Home" ? 0
+      : e.key === "End" ? buttons.length - 1
+      : e.key === "ArrowDown" ? (at + 1 + buttons.length) % buttons.length
+      : (at - 1 + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  };
 
   if (items.length === 0) return null;
   // 画面幅・高さは実行時にしか分からないので、ここで寄せる（開く側に同じ計算を書かせない）。
@@ -68,6 +90,8 @@ export function ContextMenu({
         }}
       />
       <div
+        ref={menuRef}
+        onKeyDown={onMenuKey}
         role="menu"
         style={{
           position: "fixed",
