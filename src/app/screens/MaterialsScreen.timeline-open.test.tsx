@@ -5,11 +5,12 @@
 // ただし文が「先に動画を開くか、新しく作ってください」＝**開いている人には嘘**に見え、
 // しかも**次の行動が違う**（そちらの素材は、その編集画面から取り込む）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { MaterialsScreen } from "./MaterialsScreen";
+import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE } from "../uiLabels";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -30,5 +31,17 @@ describe("素材画面の空状態が、開いている形式で言い分ける�
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/先に動画を開くか/), "開いているのに「開いてください」と言っている").toBeNull();
     expect(screen.getByText(/その編集画面から取り込んでください/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **同じ画面の「双子」も直す**（PR #1020 レビュー 🟡1）＝空状態の文だけ直して、
+  // ヘッダーの「素材を追加」ボタンの**押せない理由（ホバー）**は「先に動画を開いてください」の
+  // ままだった。同じ画面で同じ状況に2通りの言い方が残る（このリポジトリで繰り返している型）。
+  it("「素材を追加」の押せない理由も、開いている形式で言い分ける", () => {
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("素材を追加").closest("label")).toHaveAttribute("title", IMPORT_NO_PROJECT_MESSAGE);
+    cleanup();
+    useTimelineStore.setState({ doc: { projectName: "タイムラインの動画" } as never });
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("素材を追加").closest("label")).toHaveAttribute("title", IMPORT_TIMELINE_OPEN_MESSAGE);
   });
 });

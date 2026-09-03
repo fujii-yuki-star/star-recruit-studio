@@ -16,10 +16,15 @@ import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
  * ⚠️ **`export` しない**＝部品のファイルから関数も出すと、開発中の差し替え（Fast Refresh）が効かなくなる。
  * 外から見たいときは `uiLabels` 側へ移す（いまは使う相手がここだけ）。
  */
-function openFailedMessage(kind: "open" | "reveal"): string {
+function openFailedMessage(kind: "open" | "reveal", path: string): string {
+  // ⚠️ **元の文をそのまま持ってくる**（PR #1020 レビュー 🟡2）＝部品へ寄せたとき、
+  // **再生の側にだけあった手がかり**（「再生できるアプリがあるかご確認ください」）と
+  // **保存先の再掲**を落としていた。共有は**言い方を弱めるためではない**。
+  // ⚠️ **保存先をもう一度出す**＝断りが出た時点で上の「保存先：…」から目が離れているので、
+  // 探しに行く先をその場に置く。
   return kind === "open"
-    ? "動画を再生できませんでした。ファイルが移動・削除されていないか確かめて、もう一度お試しください。"
-    : "保存した場所を開けませんでした。ファイルが移動・削除されていないか確かめて、もう一度お試しください。";
+    ? `動画を再生できませんでした。ファイルが移動・削除されていないか、再生できるアプリがあるかご確認ください（保存先：${path}）。`
+    : `保存した場所を開けませんでした。ファイルが移動・削除されていないかご確認ください（保存先：${path}）。`;
 }
 
 /**
@@ -60,7 +65,7 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
       </div>
       {failed && (
         <div className="notice notice-warn mt" role="alert">
-          <span>{openFailedMessage(failed)}</span>
+          <span>{openFailedMessage(failed, path)}</span>
         </div>
       )}
     </>

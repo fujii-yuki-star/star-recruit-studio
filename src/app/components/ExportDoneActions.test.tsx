@@ -34,14 +34,19 @@ describe("ExportDoneActions（#991）", () => {
     vi.spyOn(opener, "openSavedFile").mockRejectedValue(new Error("x"));
     render(<ExportDoneActions path="C:/out/movie.mp4" />);
     fireEvent.click(screen.getByRole("button", { name: "動画を再生" }));
-    await waitFor(() => expect(screen.getByText(/動画を再生できませんでした/)).toBeInTheDocument());
+    // ⚠️ **手がかりと保存先を落とさない**（PR #1020 レビュー 🟡2）＝部品へ寄せたとき、
+    // 再生の側にだけあった「再生できるアプリ」と保存先の再掲が消えていた。
+    const msg = await screen.findByText(/動画を再生できませんでした/);
+    expect(msg.textContent).toContain("再生できるアプリがあるかご確認ください");
+    expect(msg.textContent, "探しに行く先が書かれていない").toContain("C:/out/movie.mp4");
   });
 
   it("場所を開けなければ、そちらの理由を出す（同じ文にしない）", async () => {
     vi.spyOn(opener, "revealSavedFile").mockRejectedValue(new Error("x"));
     render(<ExportDoneActions path="C:/out/movie.mp4" />);
     fireEvent.click(screen.getByRole("button", { name: "保存した場所を開く" }));
-    await waitFor(() => expect(screen.getByText(/保存した場所を開けませんでした/)).toBeInTheDocument());
+    const msg2 = await screen.findByText(/保存した場所を開けませんでした/);
+    expect(msg2.textContent).toContain("C:/out/movie.mp4");
   });
 
   // ⚠️ **押し直したら断りを引っ込める**＝直ったのに古い断りが残る、を作らない。
