@@ -40,7 +40,7 @@ import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
-import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -3659,8 +3659,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ⚠️ **同じ画面で流儀を割らない**（ADR-0026②）＝「動き」「音量の変化」の節は
                     同じ状況を**文で断っている**のに、ここだけ黙って取っ手が消えていた。
                     ⚠️ **行き止まりにしない**＝理由だけでなく**そこへ跳ぶ道**を置く
-                    （キーフレーム・音量の点の「この位置へ」と同じ流儀）。 */}
-                {!isOnCanvas(selected) && (
+                    （キーフレーム・音量の点の「この位置へ」と同じ流儀）。
+                    ⚠️ **見るのは「時刻だけ」**（#1013 レビュー 🟡）＝`isOnCanvas` は
+                    **隠した列・隠した部品・隠したまとまり**も落とすので、
+                    **時間の中に居るのに「外にあります」と言い、跳んでも消えない**（＝行き止まり）。
+                    隣の「動き」「音量の変化」の節も**時刻だけ**を見ているので、そちらへ揃える。
+                    隠れている理由は別の話（`canvasHoldMessage`／#1012 の射程）。
+                    ⚠️ **端の見方は「描く側」に合わせる**（半開＝`clipIsLiveAt`）＝この欄は
+                    「キャンバスで掴めるか」の話なので、取っ手を出す側と同じ規則で見る。
+                    隣の「音量の変化」が終わりちょうどを含む（閉じている）のは、そちらが
+                    **点を置ける位置**の話だから（#512）＝規則が違うのは意図。 */}
+                {!clipIsLiveAt(selected, frameTimeSec(doc, playheadSec)) && (
                   <div className="row gap-sm" style={{ alignItems: "baseline" }}>
                     <p className="text-sm" style={{ color: "var(--color-text-muted)", margin: 0 }}>
                       {clipOutsidePlayheadMessage(selected.startSec, clipEndSec(selected))}
