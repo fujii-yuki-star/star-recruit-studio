@@ -1,6 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
+import type { SceneEditFocus } from "../data/mockData";
 import type { TimelineProject } from "../../domain/timeline/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
@@ -445,6 +446,15 @@ interface ProjectState {
    *  たたき台の行ボタン・仕上がり確認「場面を直す」等が set→遷移し、SceneEditScreen が初期選択に使う。null=先頭場面。 */
   editingSceneId: string | null;
   setEditingSceneId: (sceneId: string | null) => void;
+  /**
+   * 場面編集を「どの欄から見せるか」（#995 ③・一度きり＝`editingSceneId` と同じ流儀）。
+   *
+   * ⚠️ **押した言葉と着地がずれていた**＝たたき台の「セリフ」「素材」「見た目」は
+   * **3つとも同じ場所へ行く**だけで、行き先でその欄に寄る仕掛けが無かった。
+   * ⚠️ **`null` は「どこも指定しない」**＝いつもどおり（記憶した開閉のまま）開く。
+   */
+  editingSceneFocus: SceneEditFocus | null;
+  setEditingSceneFocus: (focus: SceneEditFocus | null) => void;
   /** ウィザードの現在ステップ（#401）。画面遷移/離脱でローカル state が消えても復元できるよう store に保持する。
    *  サイドバー離脱→復帰・confirm「キャンセル」→ウィザードで、step0 に戻らず直前のステップを開く。新規/読込で 0。 */
   wizardStep: number;
@@ -850,6 +860,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templateError: null,
   editingTemplateId: null,
   editingSceneId: null,
+  editingSceneFocus: null,
   wizardStep: 0,
   confirmReturnTo: null,
   previewReturnTo: null,
@@ -2144,6 +2155,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
+  setEditingSceneFocus: (focus) => set({ editingSceneFocus: focus }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
