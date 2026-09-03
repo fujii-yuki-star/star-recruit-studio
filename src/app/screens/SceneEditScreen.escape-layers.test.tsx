@@ -98,4 +98,17 @@ describe("Escape は手前のものから1段ずつはがす（#714-4 レビュ�
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: /を編集/ })).toBeNull();
   });
+
+  // ⚠️ **日本語を打っている最中は奪わない**（#989・`06 §12.1`）＝この欄には文字を打つ場所があり、
+  // 変換中の `Escape` は「変換をやめる」。奪うと**打ちかけの文字ごと欄が閉じる**。
+  // 以前は自分で窓を購読していて、この除外が**抜けていた**（名簿へ預けて1か所に寄せた）。
+  it("変換中の Escape では閉じない（打ちかけを消さない）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    openEditPopover();
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true });
+    expect(screen.queryByRole("dialog", { name: /を編集/ }), "変換中に欄が閉じた").not.toBeNull();
+    // 変換が終われば、いつもどおり閉じる（塞ぎっぱなしにしない）。
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: /を編集/ })).toBeNull();
+  });
 });

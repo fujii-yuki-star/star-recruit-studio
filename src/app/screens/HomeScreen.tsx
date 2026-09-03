@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
@@ -694,14 +695,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       placeholder="プロジェクト名"
                       aria-label="プロジェクト名"
                       autoFocus
-                      onKeyDown={(e) => {
-                        // IME 変換確定の Enter では保存しない（日本語入力中の誤確定を防ぐ）。
-                        if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveRename(p.projectId);
-                        if (e.key === "Escape") {
-                          setRenamingId(null);
-                          setRenameError(false);
-                        }
-                      }}
+                      // ⚠️ **`Escape` 側も変換中は奪わない**（#989）＝`Enter` だけ守っていたので、
+                      // 変換中の `Escape`（＝変換をやめる）で**欄ごと閉じて打ちかけが消える**。
+                      // 規則は `renameFieldKeys` に1つだけ。
+                      onKeyDown={renameFieldKeys({
+                        commit: () => void saveRename(p.projectId),
+                        cancel: () => { setRenamingId(null); setRenameError(false); },
+                      })}
                     />
                     <button
                       className="btn btn-primary btn-icon"

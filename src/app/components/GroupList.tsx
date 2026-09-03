@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Group } from "../../domain/group/types";
+import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { PencilIcon } from "./icons";
 
@@ -80,7 +81,8 @@ export function GroupList({
                   aria-label="グループ名"
                   onChange={(e) => setDraftName(e.target.value)}
                   onBlur={commit}
-                  onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") setRenamingId(null); }}
+                  // ⚠️ **変換中は奪わない**（#989）＝規則は `renameFieldKeys` に1つだけ。
+                  onKeyDown={renameFieldKeys({ commit, cancel: () => setRenamingId(null) })}
                 />
               ) : (
                 <button
