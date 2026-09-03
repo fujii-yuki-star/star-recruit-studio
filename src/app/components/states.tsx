@@ -12,7 +12,14 @@ export function LoadingView({
 }: {
   title: string;
   message?: string;
-  progress?: number;
+  /**
+   * 進み具合（%）。**分かっているときだけ**渡す。
+   *
+   * ⚠️ **分からない区間に数字を当てない**（#993 ②）＝`"indeterminate"` を渡すと、
+   * 書き出しが「わからない区間」に使っているのと**同じ流れるバー**になる。
+   * 止まったバーは「固まった」に見え、動くバーは「進んでいる」と嘘をつく。どちらでもない見せ方。
+   */
+  progress?: number | "indeterminate";
   onCancel?: () => void;
 }) {
   return (
@@ -22,9 +29,14 @@ export function LoadingView({
       </div>
       <h2 className="section-title">{title}</h2>
       {message && <p className="page-desc text-pretty">{message}</p>}
-      {typeof progress === "number" && (
+      {progress != null && (
         <div className="progress mt" aria-hidden="true">
-          <div className="progress-fill" style={{ width: `${progress}%` }} />
+          {progress === "indeterminate" ? (
+            // 書き出しの「わからない区間」と**同じ見せ方**（#993 ②・ADR-0026②）。
+            <div className="progress-fill progress-fill--indeterminate" />
+          ) : (
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          )}
         </div>
       )}
       {onCancel && (
