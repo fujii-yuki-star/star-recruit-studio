@@ -9,7 +9,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
-  userFontMissingMessage, userFontUnreadableMessage, clipOutsidePlayheadMessage,
+  userFontMissingMessage, userFontUnreadableMessage, clipOutsidePlayheadMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -71,6 +71,7 @@ function codeMessages(): Record<string, string> {
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
     // ⚠️ **件数が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
+    BAKE_LEAVE_BLOCKED: BAKE_LEAVE_BLOCKED_MESSAGE,
     RESTORE_VOICES_CLEARED: voicesClearedMessage(" N " as unknown as number),
     // ⚠️ **形式ごとの文も表で守る**（#991）＝片方だけ表に載せると、もう片方が黙ってずれる。
     RESTORE_VOICES_CLEARED_TIMELINE: voicesClearedMessage(" N " as unknown as number, "timeline"),
@@ -345,6 +346,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(55);
+    ).toBe(56);
   });
 });

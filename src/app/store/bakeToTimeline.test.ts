@@ -1,5 +1,6 @@
 // 焼き出し（場面形式 → タイムライン形式・ADR-0032・#628）の store 側。片道であること・ファイルを運ぶ順序を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetProjectIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as bakeFsMod from '../../infrastructure/bakeFs';
@@ -27,6 +28,9 @@ function scene(id: string, order: number, over: Partial<Scene> = {}): Scene {
 
 describe('bakeToTimeline / estimateBake', () => {
   beforeEach(() => {
+  // ⚠️ **番号の予約はモジュールに残る**（#992 ③＝アプリ起動中は覚えたままが正しい）＝
+  // テスト間で持ち越すと、2件目以降の番号がずれる。
+  resetProjectIdReservations();
     vi.restoreAllMocks();
     // 新しい id は作成日から採るので、時計を固定して期待値を決定的にする。
     vi.useFakeTimers();

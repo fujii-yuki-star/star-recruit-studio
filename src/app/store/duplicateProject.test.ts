@@ -1,5 +1,6 @@
 // 動画の複製（#395）。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetProjectIdReservations } from "./assetImport";
 
 vi.mock('../../infrastructure/projectFs', async (orig) => ({
   ...(await orig<typeof import('../../infrastructure/projectFs')>()),
@@ -38,6 +39,9 @@ const doc = {
 const savedById = new Map<string, string>();
 
 beforeEach(() => {
+  // ⚠️ **番号の予約はモジュールに残る**（#992 ③＝アプリ起動中は覚えたままが正しい）＝
+  // テスト間で持ち越すと、2件目以降の番号がずれる。
+  resetProjectIdReservations();
   savedById.clear();
   vi.mocked(saveProjectDoc).mockImplementation(async (id, json) => {
     savedById.set(id, json);
