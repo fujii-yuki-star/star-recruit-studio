@@ -344,6 +344,90 @@ describe('その読み上げの字幕を置く（#633）', () => {
     expect(addLinkedSubtitleClip(d, 'clip_002').ok).toBe(false);
   });
 
+  // 同時にしゃべる2人（重複ナレーション）＝#1009。
+  // ⚠️ **実測で見つけた**＝2人ぶん置くと `y:900` で**まったく同じ箱**に重なり、下が読めなかった。
+  describe('同じ時間に字幕があれば、その上へ積む（#1009）', () => {
+    /** 同じ時間に鳴る読み上げを2本（別々の音の列）。 */
+    const two = () => doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.audio },
+        { id: 'track_003', kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        voice('clip_001', { startSec: 0, durationSec: 3 }),
+        voice('clip_002', { startSec: 0, durationSec: 3, trackId: 'track_003' }, 'よろしく'),
+      ],
+    });
+
+    it('2人目は上へ置く（同じ場所に重ねない）', () => {
+      const r1 = addLinkedSubtitleClip(two(), 'clip_001');
+      expect(r1.ok).toBe(true);
+      const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
+      const subs = r2?.ok ? r2.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle) : [];
+      expect(subs).toHaveLength(2);
+      expect(subs[1]!.y, '2人目が1人目より上に来ていない').toBeLessThan(subs[0]!.y!);
+      // 縦に重なっていない（帯どうしが接するのも許さない＝読みやすさのすき間を空ける）。
+      expect(subs[1]!.y! + subs[1]!.h!, '2人ぶんの字幕が縦に重なっている').toBeLessThan(subs[0]!.y!);
+    });
+
+    it('3人目はさらに上へ（人数が増えても重ならない）', () => {
+      const d = two();
+      const withThird = { ...d, clips: [...d.clips, voice('clip_003', { startSec: 0, durationSec: 3, trackId: 'track_003' }, 'どうも')] };
+      const r1 = addLinkedSubtitleClip(withThird, 'clip_001');
+      const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
+      const r3 = r2?.ok ? addLinkedSubtitleClip(r2.doc, 'clip_003') : null;
+      const ys = r3?.ok ? r3.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle).map((c) => c.y!) : [];
+      expect(ys).toHaveLength(3);
+      expect(ys[2]).toBeLessThan(ys[1]!);
+      expect(ys[1]).toBeLessThan(ys[0]!);
+    });
+
+    // ⚠️ **時間が重ならない字幕は避ける相手ではない**＝避けると、1本ずつ置くたびに
+    // 上へ上へと逃げて画面の外へ出る。
+    it('時間が重なっていなければ、いつもの場所に置く', () => {
+      const d = doc({
+        tracks: [
+          { id: 'track_001', kind: TRACK_KIND.visual },
+          { id: 'track_002', kind: TRACK_KIND.audio },
+        ],
+        clips: [
+          voice('clip_001', { startSec: 0, durationSec: 3 }),
+          voice('clip_002', { startSec: 10, durationSec: 3 }),
+        ],
+      });
+      const r1 = addLinkedSubtitleClip(d, 'clip_001');
+      const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
+      const subs = r2?.ok ? r2.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle) : [];
+      expect(subs[1]!.y).toBe(subs[0]!.y);
+    });
+
+    // ⚠️ **画面の外へは出さない**＝出すと「置いたのに映らない」字幕が黙って生まれる。
+    // 止めた結果また重なることはあるが、**見えない**より**見えて重なっている**ほうが気づける。
+    it('積み上げても画面の外へは出さない', () => {
+      const d = doc({
+        tracks: [
+          { id: 'track_001', kind: TRACK_KIND.visual },
+          { id: 'track_002', kind: TRACK_KIND.audio },
+        ],
+        clips: [
+          voice('clip_001', { startSec: 0, durationSec: 3 }),
+          // 画面のいちばん上を、同じ時間の字幕がすでに占めている。
+          subtitle('clip_900', { startSec: 0, durationSec: 3, y: 0, h: 1000 }),
+        ],
+      });
+      const r = addLinkedSubtitleClip(d, 'clip_001');
+      const placed = r.ok ? r.doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle && c.voiceClipId === 'clip_001') : null;
+      expect(placed?.y, '画面の外（負の位置）へ置いている').toBe(0);
+    });
+
+    it('積み上げた字幕もスキーマに適合する', () => {
+      const r1 = addLinkedSubtitleClip(two(), 'clip_001');
+      const r2 = r1.ok ? addLinkedSubtitleClip(r1.doc, 'clip_002') : null;
+      expect(r2?.ok && validateTimelineProject(r2.doc)).toBe(true);
+    });
+  });
+
   it('置いた字幕はスキーマに適合する', () => {
     const d = doc({ clips: [voice('clip_001')] });
     const r = addLinkedSubtitleClip(d, 'clip_001');
