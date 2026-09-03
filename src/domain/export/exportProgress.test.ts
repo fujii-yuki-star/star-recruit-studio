@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, finishedExportNotice, isExportFinished, pastExportNotice } from './exportProgress';
+import { EXPORT_RUN_PHASE, EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, finishedExportNotice, hasExportPercent, isExportFinished, pastExportNotice } from './exportProgress';
 
 describe('exportEncodePercent（#376）', () => {
   it('encode は step/total を 80→92 に按分する', () => {
@@ -165,3 +165,24 @@ describe('finishedExportNotice（たったいま終わった通知・#589）', (
     }
   });
 });
+
+// 始めた段（#993 ①・PR #1025 レビュー 🟡）。
+describe('始めた段は「わからない」と見せる', () => {
+  // ⚠️ **この段を作ったのに、見出しは空・数字は 0% のままだった**＝
+  // 「押した瞬間に始まったと分かる」と書きながら、画面はほとんど何も言っていなかった。
+  it('見出しを出す（空にしない）', () => {
+    expect(exportHeadingLabel({ phase: EXPORT_RUN_PHASE.preparing } as never)).toBe('準備しています');
+  });
+
+  // ⚠️ **進み具合を持っていない段に数を出さない**＝0% は「止まっている」に見え、動かすと嘘になる。
+  it('数では言えないと答える', () => {
+    expect(hasExportPercent(EXPORT_RUN_PHASE.preparing)).toBe(false);
+  });
+
+  it('進み具合を持っている段では、数で言える', () => {
+    for (const p of [EXPORT_RUN_PHASE.rendering, EXPORT_RUN_PHASE.encoding, EXPORT_RUN_PHASE.done]) {
+      expect(hasExportPercent(p), p).toBe(true);
+    }
+  });
+});
+

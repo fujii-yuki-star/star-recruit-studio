@@ -469,3 +469,49 @@ describe("ColorPicker", () => {
     expect(screen.getByRole("button", { name: "文字の色を選ぶ" })).toBeInTheDocument();
   });
 });
+
+// 画面より高いときの始末（#1023・PR #1025 レビュー 🟡）。
+describe("ColorPicker：画面より高いときは縮めて中でスクロールさせる", () => {
+  /** 面の実寸を決める（jsdom には配置が無いので、読まれる値を固定する）。 */
+  const stub = (el: HTMLElement, { scroll, offset }: { scroll: number; offset: number }): void => {
+    Object.defineProperty(el, "scrollHeight", { value: scroll, configurable: true });
+    Object.defineProperty(el, "offsetHeight", { value: offset, configurable: true });
+    Object.defineProperty(el, "offsetWidth", { value: 236, configurable: true });
+  };
+
+  it("画面より高ければ、上端に置いて中でスクロールさせる", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    stub(pop, { scroll: 1200, offset: 1200 });
+    fireEvent.scroll(window); // 測り直させる
+    expect(pop.style.maxHeight, "画面より高いのに縮めていない").toBe(`${800 - 8 * 2}px`);
+    expect(pop.style.overflowY).toBe("auto");
+  });
+
+  // ⚠️ **ここが「同じ理由の再発」**（レビュー 🟡）＝一度縮めた後、`offsetHeight` は
+  // **縮んだ後の高さ**を返すので、それで上下を決めると「入る」と読めてしまう。
+  // 縮める前（`scrollHeight`）を見ていれば、測り直しても答えは変わらない。
+  it("一度縮めた後に測り直しても、縮めたままになる（入ると読み違えない）", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    // 縮んだ後の姿＝`offsetHeight` は 784（= 800 - 8*2）、`scrollHeight` は本来の 1200。
+    stub(pop, { scroll: 1200, offset: 784 });
+    fireEvent.scroll(window);
+    expect(pop.style.maxHeight, "縮めた後の高さで判断して、縮めるのをやめている").toBe(`${800 - 8 * 2}px`);
+  });
+
+  it("収まる高さなら、縮めない", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    stub(pop, { scroll: 300, offset: 300 });
+    fireEvent.scroll(window);
+    expect(pop.style.maxHeight).toBe("");
+  });
+});
+
