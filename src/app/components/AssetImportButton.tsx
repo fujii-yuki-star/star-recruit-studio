@@ -3,32 +3,32 @@
 import { UploadIcon } from "./icons";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 
+/**
+ * 取り込みの**一式**（store が持つ4つ）。
+ *
+ * ⚠️ **バラバラに受け取っていたのが事故のもとだった**（PR #1034 レビュー 🔴）＝
+ * タイムライン編集の画面は、取り込みを**タイムライン形式の store** から取りながら、
+ * 中止だけ**場面形式の store** から渡していた（押しても止まらない）。
+ * 型は合うので気づけない＝**store を1つ受け取って4つとも自分で取り出す**形にして、
+ * 混ざりようがなくした。
+ */
+export type AssetImportStore = {
+  addAssets: (items: File[] | string[]) => void | Promise<void>;
+  isImporting: boolean;
+  importProgress: { done: number; total: number } | null;
+  cancelAssetImport: () => void;
+};
+
 type Props = {
   /**
-   * 選んだものを**まとめて**取り込む（#858・store の `addAssets`）。
-   * ブラウザは `File[]`、アプリの中は絶対パスの `string[]`。
+   * 取り込みを持っている store（`useProjectStore` / `useTimelineStore`）。
+   * **選ぶ・進み具合・中止**をここから取り出す＝別々の store が混ざらない。
    */
-  onPick: (items: File[] | string[]) => void | Promise<void>;
+  store: <T>(selector: (state: AssetImportStore) => T) => T;
   /** 音も選べるようにするか（タイムライン形式だけ・差分再監査 3巡目）。 */
   withAudio?: boolean;
-  /** 取り込み中（押せなくし、そう見せる）。 */
-  isImporting: boolean;
-  /**
-   * まとめて取り込んでいるときの進み具合（store の `importProgress`）。`null`＝出さない。
-   *
-   * ⚠️ **失敗の案内はここに置かない**＝4画面とも `importError` を自分で出しているので、
-   * ここでも出すと**同じ失敗が二重に見える**（#858 のレビュー中に気づいて寄せた）。
-   */
-  progress?: { done: number; total: number } | null;
   /** 押せない理由（あれば押せなくし、指したときに出す）。 */
   disabledReason?: string | null;
-  /**
-   * まとめて取り込みを中止する（#1024 ③）。渡さなければ中止のボタンを出さない。
-   *
-   * ⚠️ **いま運んでいる1件は止まらない**（IPC の往復は途中で切れない）＝
-   * **入ったものは残す**（取り消しではない）。
-   */
-  onCancel?: () => void;
   /** 見た目（既定＝目立つボタン）。 */
   variant?: "primary" | "secondary" | "ghost";
   /** 表示する文言（既定＝「素材を追加」）。 */
@@ -40,7 +40,12 @@ type Props = {
   className?: string;
 };
 
-export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, onCancel, variant = "primary", label = "素材を追加", className, withAudio = false }: Props) {
+export function AssetImportButton({ store, disabledReason, variant = "primary", label = "素材を追加", className, withAudio = false }: Props) {
+  // ⚠️ **4つとも同じ store から取る**＝渡し歩くと配り忘れる／別の store が混ざる（上の注記）。
+  const onPick = store((s) => s.addAssets);
+  const isImporting = store((s) => s.isImporting);
+  const progress = store((s) => s.importProgress);
+  const onCancel = store((s) => s.cancelAssetImport);
   const disabled = isImporting || !!disabledReason;
   const { picking, labelProps, inputProps } = useAssetPicker({ onPick, disabled, withAudio });
   const off = disabled || picking;
@@ -59,11 +64,14 @@ export function AssetImportButton({ onPick, isImporting, progress = null, disabl
       <input {...inputProps} />
     </label>
   );
+  // ⚠️ **失敗の案内はここに置かない**＝4画面とも `importError` を自分で出しているので、
+  // ここでも出すと**同じ失敗が二重に見える**（#858 のレビュー中に気づいて寄せた）。
   // ⚠️ **やめられるようにする**（#1024 ③）＝書き出しと声には中止があるのに、
   // 取り込みだけ**打ち切る入口が無かった**（大きな動画を10件入れたら終わるまで待つしかない）。
   // ⚠️ **まとめてのときだけ出す**＝1件は一瞬で終わるので、押す間もない。
   // ⚠️ **入ったものは残す**（取り消しではない）＝言い方も「中止」で揃える。
-  if (!progress || !onCancel) return button;
+  // **まとめてのときだけ**中止を出す（1件は一瞬で終わるので、押す間もない）。
+  if (!progress) return button;
   return (
     <span className="row gap-sm" style={{ alignItems: "center" }}>
       {button}

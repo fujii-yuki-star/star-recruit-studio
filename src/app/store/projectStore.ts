@@ -59,10 +59,11 @@ import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
-import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE, importCancelledMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -626,8 +627,6 @@ interface ProjectState {
    * **入ったものは残す**（§2-5＝途中まで入れた素材を黙って捨てない）。
    */
   cancelAssetImport: () => void;
-  /** 直前のまとめて取り込みを中止したか（UI の案内用）。次に取り込みを始めると false へ戻す。 */
-  importCancelled: boolean;
   /** 取り込みの世代番号（内部）。中止・新規開始で進める。 */
   _importRunSeq: number;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
@@ -856,7 +855,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isGeneratingNarration: false,
   narrationCancelled: false,
   _narrationRunSeq: 0,
-  importCancelled: false,
   _importRunSeq: 0,
   isImporting: false,
   importProgress: null,
@@ -2514,68 +2512,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
     if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return; }
     if (items.length === 0) return;
-
-    // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
-    if (items.length > 1) set({ importProgress: { done: 0, total: items.length } });
-    // ⚠️ **この回の世代を控える**（#1024 ③・声の一括作成と同じ仕組み）＝
-    // 中止すると番号が進むので、**次の1件へ進む前に**自分がもう現行でないと分かる。
-    // ⚠️ **始めるときに「中止した」印を下ろす**＝前回の中止の案内を持ち越さない。
-    const runSeq = get()._importRunSeq;
-    if (get().importCancelled) set({ importCancelled: false });
-    const failedNames: string[] = [];
-    let firstMessage: string | null = null;
-    let cancelled = false;
-    let doneCount = 0;
-    try {
-      for (const [i, item] of items.entries()) {
-        // ⚠️ **中止されたら、次の1件へ進まない**＝残りは「入らなかったもの」として名前に挙げる
-        // （黙って減らさない・§2-5）。⚠️ **入ったものは残す**（取り消しではない）。
-        if (get()._importRunSeq !== runSeq) {
-          cancelled = true;
-          doneCount = i; // ここまでに入った件数（失敗した分は下で名前に挙がる）
-          break;
-        }
-        // ⚠️ **別の取り込みに横取りされていたら、そこで止める**（#858 レビュー ℹ️）＝
-        // 一括の**途中は無ロック**（各件が `finally` で下ろす）なので、隙に BGM 取り込み等が
-        // ロックを取ると、次の1件は取り込み側で**黙って return** し、`importError` も立たないため
-        // **成功として数えてしまう**。残りは入らないので、ここで打ち切って名前に挙げる。
-        if (get().isImporting) {
-          for (const rest of items.slice(i)) failedNames.push(fileNameOf(typeof rest === "string" ? rest : rest.name) || UNNAMED_ASSET_NAME);
-          firstMessage ??= IMPORT_BUSY_MESSAGE;
-          break;
-        }
-        // 1件ぶんの結果を見分けるため、直前に消してから通す（成功時は取り込み側が null にする）。
-        set({ importError: null });
-        // ⚠️ **必ず `await` で1件ずつ**（11.2）＝`asset_NNN` は `get().assets` を見て採る。
-        // `Promise.all` にすると、まず**2件目以降が `isImporting` ガードに黙って弾かれ**
-        //（＝入ったつもりで消える）、そのガードを外すと**同じ番号を2つ採る**。
-        // どちらも「衝突しないから並列で安全」ではない。
-        if (typeof item === "string") await get().addAssetByPath(item);
-        else await get().addAsset(item);
-        const message = get().importError;
-        if (message) {
-          // ⚠️ **失敗しても止めない**＝成功した分は残す（§2-5）。
-          failedNames.push(fileNameOf(typeof item === "string" ? item : item.name) || UNNAMED_ASSET_NAME);
-          firstMessage ??= message;
-        }
-        if (items.length > 1) set({ importProgress: { done: i + 1, total: items.length } });
-      }
-    } finally {
-      set({ importProgress: null });
-    }
-
-    // ⚠️ **1件だけ失敗したときは、その理由をそのまま出す**＝単発で取り込んだときと同じ文言になる
-    // （ADR-0026②＝件数で案内が変わらない）。複数なら**何が入らなかったか**を名前で足す。
-    // ⚠️ **全部入ったときにここで消し直さない**＝各件の**直前**で消しているので、最後の1件が成功した
-    // 時点で既に空（変異チェックで「消す」行を外しても挙動が変わらなかった＝死んだ枝だった）。
-    // ⚠️ **中止は「失敗」ではない**（#1024 ③）＝入ったものは残っているので、
-    // 何件入ったかと、もう一度できることを言う（§2-5＝次の行動）。
-    if (cancelled) {
-      set({ importError: importCancelledMessage(doneCount - failedNames.length) });
-      return;
-    }
-    if (failedNames.length === 1) set({ importError: firstMessage });
-    else if (failedNames.length > 1) set({ importError: importPartlyFailedMessage(failedNames, firstMessage) });
+    // ⚠️ **回し方は共有**（PR #1034 レビュー 🔴）＝ここに写して持つと、中止のような直しが
+    // **片方にだけ入る**（実際にそうなった）。
+    await runBulkImport(
+      {
+        isImporting: () => get().isImporting,
+        importError: () => get().importError,
+        setImportError: (message) => set({ importError: message }),
+        setProgress: (progress) => set({ importProgress: progress }),
+        runSeq: () => get()._importRunSeq,
+        importOne: async (item) => {
+          // ⚠️ **必ず1件ずつ**（11.2）＝`asset_NNN` は `get().assets` を見て採る。
+          if (typeof item === "string") await get().addAssetByPath(item);
+          else await get().addAsset(item);
+        },
+      },
+      items,
+    );
   },
   relinkAssetByPath: async (assetId, srcPath) => {
     // 断り方は取り込みと同じ経路（同じ状況で同じ案内＝ADR-0026②）。
@@ -3079,7 +3032,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **走っているループを世代で降ろす**（声の一括作成と同じ仕組み）。
     // ⚠️ **いま運んでいる1件は止めない**（IPC の往復は途中で切れない）＝
     // 入ったものは残す（§2-5＝途中まで入れた素材を黙って捨てない）。
-    set((s) => ({ _importRunSeq: s._importRunSeq + 1, importCancelled: true }));
+    set((s) => ({ _importRunSeq: s._importRunSeq + 1 }));
   },
   cancelNarrationGeneration: () => {
     if (!get().isGeneratingNarration) return;

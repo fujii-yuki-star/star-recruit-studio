@@ -366,7 +366,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
-    addAssets, importError, importProgress, clearImportError, isImporting,
+    importError, clearImportError, isImporting,
     analysisByPath, ensureClipAnalysis,
   } = useTimelineStore();
 
@@ -429,8 +429,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     });
   }, []);
   const templates = useProjectStore((s) => s.templates);
-  // 取り込みの中止は**場面形式の store**が持つ（素材はそちらへ入る）。
-  const cancelAssetImportFromProject = useProjectStore((s) => s.cancelAssetImport);
   // テンプレが持つ既定素材（ADR-0021）は全プロジェクト共通の置き場にある＝場面形式のプレビュー・書き出しと
   // 同じフォールバック（素材 → テンプレ既定素材）を通す。無いと同じ見た目が場面形式と違う絵になる（ADR-0026②）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -4605,10 +4603,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
         <div className="row gap-sm mb-sm">
           <AssetImportButton
-            onPick={addAssets}
-            isImporting={isImporting}
-            progress={importProgress}
-            onCancel={cancelAssetImportFromProject}
+            store={useTimelineStore}
             disabledReason={exporting ? exportingHint : null}
             variant="secondary"
             withAudio
