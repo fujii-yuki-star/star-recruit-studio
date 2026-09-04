@@ -216,7 +216,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAssets, importError, importProgress, clearImportError, isImporting,
+    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAssets, importError, importProgress, cancelAssetImport, clearImportError, isImporting,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus, saveBlockedReason,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
@@ -1622,6 +1622,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               onPick={addAssets}
               isImporting={isImporting}
               progress={importProgress}
+              onCancel={cancelAssetImport}
               variant="secondary"
               className="btn-block mt"
             />
