@@ -59,5 +59,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ⚠️ **落ちた理由が「脆弱性が見つかった」でない落ち方をしていた**（#1038）＝
+      #   `npm audit` は**レジストリのエンドポイントがエラーを返したときも** exit 1 になる
+      #   （実際に 503 Service Unavailable と 400 Bad Request の両方を1日で観測）。
+      #   門番として嘘をつくうえ、「とりあえず再実行する」が習慣になって**本当に脆弱性が出たときも
+      #   同じ反応をしてしまう**（門番の信用が落ちる）。
+      # ⚠️ **門番は緩めない**＝high / critical が1件でもあれば**落ちる**のは変えない。
+      #   変えたのは「**エンドポイントのエラーと、脆弱性ありを区別する**」ところだけ。
+      #   エンドポイントが最後まで応答しなければ、**確認できていないので落とす**（黙って通さない）。
       - name: Run node dependency audit
-        run: npm audit --audit-level=high
+        run: node scripts/node-audit.mjs
