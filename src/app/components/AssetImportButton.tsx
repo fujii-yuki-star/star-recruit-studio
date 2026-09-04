@@ -22,6 +22,13 @@ type Props = {
   progress?: { done: number; total: number } | null;
   /** 押せない理由（あれば押せなくし、指したときに出す）。 */
   disabledReason?: string | null;
+  /**
+   * まとめて取り込みを中止する（#1024 ③）。渡さなければ中止のボタンを出さない。
+   *
+   * ⚠️ **いま運んでいる1件は止まらない**（IPC の往復は途中で切れない）＝
+   * **入ったものは残す**（取り消しではない）。
+   */
+  onCancel?: () => void;
   /** 見た目（既定＝目立つボタン）。 */
   variant?: "primary" | "secondary" | "ghost";
   /** 表示する文言（既定＝「素材を追加」）。 */
@@ -33,12 +40,12 @@ type Props = {
   className?: string;
 };
 
-export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, variant = "primary", label = "素材を追加", className, withAudio = false }: Props) {
+export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, onCancel, variant = "primary", label = "素材を追加", className, withAudio = false }: Props) {
   const disabled = isImporting || !!disabledReason;
   const { picking, labelProps, inputProps } = useAssetPicker({ onPick, disabled, withAudio });
   const off = disabled || picking;
 
-  return (
+  const button = (
     <label
       {...labelProps}
       className={`btn btn-${variant}${className ? ` ${className}` : ""}`}
@@ -51,5 +58,18 @@ export function AssetImportButton({ onPick, isImporting, progress = null, disabl
       {progress ? `取り込み中… ${progress.done}/${progress.total}` : isImporting ? "取り込み中…" : label}
       <input {...inputProps} />
     </label>
+  );
+  // ⚠️ **やめられるようにする**（#1024 ③）＝書き出しと声には中止があるのに、
+  // 取り込みだけ**打ち切る入口が無かった**（大きな動画を10件入れたら終わるまで待つしかない）。
+  // ⚠️ **まとめてのときだけ出す**＝1件は一瞬で終わるので、押す間もない。
+  // ⚠️ **入ったものは残す**（取り消しではない）＝言い方も「中止」で揃える。
+  if (!progress || !onCancel) return button;
+  return (
+    <span className="row gap-sm" style={{ alignItems: "center" }}>
+      {button}
+      <button type="button" className="btn btn-ghost text-sm" onClick={onCancel}>
+        取り込みを中止
+      </button>
+    </span>
   );
 }

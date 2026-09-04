@@ -133,6 +133,7 @@ const ASSEMBLED_AT_RUNTIME: Record<string, string> = {
   TIMELINE_AUDIO_SOURCE_MISSING: "件数を差し込む",
   BGM_FILE_BROKEN: "一部の場面か全体かで文が変わる",
   TIMELINE_OVERLAY_RETIRED: "退役の断り＝画面の文と表の要約を分けている（#635）",
+  IMPORT_CANCELLED: "入った件数を差し込む（0件のときは件数を言わない＝#1024 ③）",
 };
 
 /**

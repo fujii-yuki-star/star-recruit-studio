@@ -62,7 +62,7 @@ import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructu
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE, importCancelledMessage } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -616,6 +616,20 @@ interface ProjectState {
   narrationCancelled: boolean;
   /** 声の作成の世代番号（内部）。中止・新規開始で進め、実行中のループは自分の世代が現行と一致するときだけ次を始める。 */
   _narrationRunSeq: number;
+  /**
+   * 素材のまとめて取り込みを**中止する**（#1024 ③）。
+   *
+   * ⚠️ **「やめられるか」が操作で割れていた**＝書き出しと声には中止があるのに、
+   * 取り込みだけ**打ち切る入口が無かった**（大きな動画を10件入れたら終わるまで待つしかない）。
+   * ⚠️ **仕組みは声と同じ**（世代番号）＝進めると、走っているループが**次の1件へ進む前に降りる**。
+   * ⚠️ **いま運んでいる1件は止まらない**（IPC の往復は途中で切れない）＝
+   * **入ったものは残す**（§2-5＝途中まで入れた素材を黙って捨てない）。
+   */
+  cancelAssetImport: () => void;
+  /** 直前のまとめて取り込みを中止したか（UI の案内用）。次に取り込みを始めると false へ戻す。 */
+  importCancelled: boolean;
+  /** 取り込みの世代番号（内部）。中止・新規開始で進める。 */
+  _importRunSeq: number;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
   /**
@@ -842,6 +856,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isGeneratingNarration: false,
   narrationCancelled: false,
   _narrationRunSeq: 0,
+  importCancelled: false,
+  _importRunSeq: 0,
   isImporting: false,
   importProgress: null,
   missingAssetIds: [],
@@ -2501,10 +2517,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
     if (items.length > 1) set({ importProgress: { done: 0, total: items.length } });
+    // ⚠️ **この回の世代を控える**（#1024 ③・声の一括作成と同じ仕組み）＝
+    // 中止すると番号が進むので、**次の1件へ進む前に**自分がもう現行でないと分かる。
+    // ⚠️ **始めるときに「中止した」印を下ろす**＝前回の中止の案内を持ち越さない。
+    const runSeq = get()._importRunSeq;
+    if (get().importCancelled) set({ importCancelled: false });
     const failedNames: string[] = [];
     let firstMessage: string | null = null;
+    let cancelled = false;
+    let doneCount = 0;
     try {
       for (const [i, item] of items.entries()) {
+        // ⚠️ **中止されたら、次の1件へ進まない**＝残りは「入らなかったもの」として名前に挙げる
+        // （黙って減らさない・§2-5）。⚠️ **入ったものは残す**（取り消しではない）。
+        if (get()._importRunSeq !== runSeq) {
+          cancelled = true;
+          doneCount = i; // ここまでに入った件数（失敗した分は下で名前に挙がる）
+          break;
+        }
         // ⚠️ **別の取り込みに横取りされていたら、そこで止める**（#858 レビュー ℹ️）＝
         // 一括の**途中は無ロック**（各件が `finally` で下ろす）なので、隙に BGM 取り込み等が
         // ロックを取ると、次の1件は取り込み側で**黙って return** し、`importError` も立たないため
@@ -2538,6 +2568,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // （ADR-0026②＝件数で案内が変わらない）。複数なら**何が入らなかったか**を名前で足す。
     // ⚠️ **全部入ったときにここで消し直さない**＝各件の**直前**で消しているので、最後の1件が成功した
     // 時点で既に空（変異チェックで「消す」行を外しても挙動が変わらなかった＝死んだ枝だった）。
+    // ⚠️ **中止は「失敗」ではない**（#1024 ③）＝入ったものは残っているので、
+    // 何件入ったかと、もう一度できることを言う（§2-5＝次の行動）。
+    if (cancelled) {
+      set({ importError: importCancelledMessage(doneCount - failedNames.length) });
+      return;
+    }
     if (failedNames.length === 1) set({ importError: firstMessage });
     else if (failedNames.length > 1) set({ importError: importPartlyFailedMessage(failedNames, firstMessage) });
   },
@@ -3039,6 +3075,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 中止には `isExportBusy` ガードを**置かない**（scenes を書く他の action とは非対称だが意図的）。中止は「止める」
   // 側の操作で、止められないと 15 §4 の抜け道が消える。書き出し中は `generateAllNarrations` に入れない＝
   // `isGeneratingNarration` が立たず、下の早期 return で実質到達しないが、仮に到達しても止められる方が正しい。
+  cancelAssetImport: () => {
+    // ⚠️ **走っているループを世代で降ろす**（声の一括作成と同じ仕組み）。
+    // ⚠️ **いま運んでいる1件は止めない**（IPC の往復は途中で切れない）＝
+    // 入ったものは残す（§2-5＝途中まで入れた素材を黙って捨てない）。
+    set((s) => ({ _importRunSeq: s._importRunSeq + 1, importCancelled: true }));
+  },
   cancelNarrationGeneration: () => {
     if (!get().isGeneratingNarration) return;
     set((s) => ({
