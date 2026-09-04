@@ -31,7 +31,9 @@
 //
 // ⚠️ **`expect` の数ではなく「落ちたかどうか」で判定する**＝落ちた件数は検査の書き方で変わるので、
 // 「1件でも落ちれば捕まえた」を基準にする。捕まえられなかった変異は**生き残り**として並べる。
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
@@ -72,7 +74,55 @@ function abort(message) {
   process.exit(1);
 }
 
+/**
+ * 書き換える前の中身をディスクにも控える場所（PR #1018 レビュー 🔴）。
+ *
+ * ⚠️ **`spawnSync` の最中は signal のハンドラが走らない**（Node のイベントループが止まる）。
+ * Ctrl+C は子まで届いて道連れになるので大抵は助かるが、**Node の PID だけへ `kill`** が来ると
+ * ハンドラは発火せず、**書き換わったまま**止まる。メモリの控えは道連れで消えるので、
+ * **ディスクにも置く**＝次の起動が気づいて戻せる（`--restore`）。
+ */
+const RECOVERY_PATH = join(tmpdir(), "stario-mutate-recovery.json");
+
+/** 控えをディスクへ置く（失敗しても本編は止めない＝保険なので）。 */
+function writeRecovery(map) {
+  try {
+    mkdirSync(dirname(RECOVERY_PATH), { recursive: true });
+    writeFileSync(RECOVERY_PATH, JSON.stringify(Object.fromEntries(map), null, 2));
+  } catch {
+    /* 置けなくても、メモリの控えと `finally` は効く */
+  }
+}
+
+/** 前回落ちた分を戻す（`--restore`）。 */
+function restoreFromDisk() {
+  if (!existsSync(RECOVERY_PATH)) {
+    console.log("戻すものはありません（控えが残っていません）。");
+    return 0;
+  }
+  const saved = JSON.parse(readFileSync(RECOVERY_PATH, "utf8"));
+  const failed = [];
+  for (const [file, text] of Object.entries(saved)) {
+    try {
+      writeFileSync(file, text);
+      console.log(`  戻しました: ${file}`);
+    } catch (e) {
+      failed.push(`${file}（${e.message}）`);
+    }
+  }
+  if (failed.length > 0) {
+    console.error("✖ 戻せなかったもの:");
+    for (const f of failed) console.error(`   - ${f}`);
+    console.error("  `git checkout -- <上のファイル>` で戻してください。");
+    return 1;
+  }
+  rmSync(RECOVERY_PATH, { force: true });
+  return 0;
+}
+
 const arg = process.argv[2];
+if (arg === "--restore") process.exit(restoreFromDisk());
+
 if (!arg || arg === "--help" || arg === "-h") {
   console.log("使い方: node scripts/mutate.mjs <spec.json>   （雛形: --print-template）");
   process.exit(arg ? 0 : 1);
@@ -92,6 +142,16 @@ if (!Array.isArray(spec.tests) || spec.tests.length === 0) abort("spec の `test
 if (!Array.isArray(spec.mutants) || spec.mutants.length === 0) abort("spec の `mutants` が空です。");
 
 // ── ③ 先にベースライン（赤いまま変異させない） ───────────────────────────
+// ⚠️ **前回落ちた控えが残っていたら、先に言う**＝そのまま回すと、
+// **書き換わったファイルをベースラインとして測る**ことになる（緑でも赤でも意味が無い）。
+if (existsSync(RECOVERY_PATH)) {
+  abort(
+    `前回の変異チェックが**戻さずに終わっています**（控え: ${RECOVERY_PATH}）。
+` +
+      "  そのまま回すと、書き換わったファイルをベースラインとして測ることになります。\n" +
+      "  先に戻してください:  node scripts/mutate.mjs --restore",
+  );
+}
 console.log(`◆ ベースライン: ${spec.tests.join(" ")}`);
 const base = runTests(spec.tests);
 console.log(`  ${base.line}`);
@@ -118,13 +178,42 @@ for (const m of spec.mutants) {
   }
 }
 
-// ── ① 必ず戻す（中断されても） ─────────────────────────────────────────
+// ⚠️ **戻せなかったことを黙って終わらない**（PR #1018 レビュー 🔴）＝もとは書き戻しを
+// **無条件**に呼んでいたので、途中の1件が失敗（空き容量・権限・ロック）すると
+// **例外がそのまま外へ出て、残りのファイルは書き換わったまま**止まっていた。
+// しかも**どれが戻らなかったかも出ない**。1件ずつ受け止めて、**次の行動**まで出す（§2-5）。
 let restored = false;
 const restoreAll = () => {
   if (restored) return;
   restored = true;
-  for (const [file, text] of originals) writeFileSync(file, text);
+  const failed = [];
+  for (const [file, text] of originals) {
+    try {
+      writeFileSync(file, text);
+    } catch (e) {
+      failed.push(`${file}（${e.message}）`);
+    }
+  }
+  if (failed.length > 0) {
+    console.error("\n✖ 書き換えたファイルを戻せませんでした:");
+    for (const f of failed) console.error(`   - ${f}`);
+    console.error("\n  次のどちらかで戻してください:");
+    console.error("    git checkout -- <上のファイル>");
+    console.error(`    node scripts/mutate.mjs --restore`);
+    return;
+  }
+  // ⚠️ **戻し終えたら控えを片づける**＝残すと、次の起動が「前回落ちた」と誤って言う。
+  try {
+    rmSync(RECOVERY_PATH, { force: true });
+  } catch {
+    /* 片づけに失敗しても、戻し自体は済んでいる */
+  }
 };
+// ⚠️ **`spawnSync` の最中は signal のハンドラが走らない**（PR #1018 レビュー 🔴）＝
+// テストを回している間は Node のイベントループが止まっているので、`kill` を受けても
+// **ハンドラは `spawnSync` が返るまで発火しない**（Ctrl+C は子まで届いて道連れになるので
+// 大抵は助かるが、Node の PID だけへ送られると**戻らないまま止まる**）。
+// そこで**控えをディスクにも置く**＝落ちても、次の起動が気づいて戻せる（`--restore`）。
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     restoreAll();
@@ -133,12 +222,17 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
   });
 }
 
+writeRecovery(originals);
+
 const survived = [];
 try {
   for (const [i, m] of spec.mutants.entries()) {
     const label = m.label ?? m.find.slice(0, 30);
     const before = originals.get(m.file);
-    writeFileSync(m.file, before.replace(m.find, m.replace));
+    // ⚠️ **置換の文字列を「そのまま」書く**（PR #1018 レビュー 🟡）＝`String.replace` は
+    // 検索が文字列でも、**置換側の `$&` `$$` `` $` `` `$'` を特殊な意味に解釈する**。
+    // TS/JSX には `$` がよく出るので、関数形にしないと**気づかれずに違う変異**が走る。
+    writeFileSync(m.file, before.replace(m.find, () => m.replace));
     const r = runTests(spec.tests);
     writeFileSync(m.file, before); // 次の変異と混ざらないよう、1つずつ戻す
     const mark = r.green ? "✖ 生き残り" : "✓ 捕まえた";
