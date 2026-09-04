@@ -8,6 +8,17 @@ import type { Asset } from '../project/types';
 import type { Layer } from './types';
 
 /**
+ * **主役の差し込み口**の id（#1030・PR #1041 レビュー 🔴）。
+ *
+ * ⚠️ **主役の決め方を2か所に書かない**＝台本表（`adapters.ts` の `mainAsset`）が既に
+ * `mainVisual` → `background` の順で見ている。押したときの入れ先も**同じ順**にする
+ * （層の並び順をそのまま使うと `background` が先頭になり、**主役の口が空のまま**になる）。
+ */
+export const MAIN_VISUAL_LAYER_ID = 'mainVisual';
+/** 主役として見る順（前が優先）。台本表と押したときの入れ先で共有する。 */
+export const MAIN_ASSET_LAYER_KEYS = [MAIN_VISUAL_LAYER_ID, 'background'] as const;
+
+/**
  * その層の差し込み口に入れられる素材か。
  * - ロゴの層＝ロゴか写真
  * - 写真だけの差し込み口＝写真／動画だけの差し込み口＝動画
@@ -46,12 +57,34 @@ export function slotForAsset(
   layers: readonly Layer[],
   assetRefs: Readonly<Record<string, string | null | undefined>>,
 ): { layerId: string; replacing: string | null } | null {
-  const usable = layers.filter((l) => isAssignableToLayer(asset, l));
+  const usable = orderedForAssign(layers.filter((l) => isAssignableToLayer(asset, l)));
   if (usable.length === 0) return null;
   const empty = usable.find((l) => !assetRefs[l.id]);
   if (empty) return { layerId: empty.id, replacing: null };
   const head = usable[0]!;
   return { layerId: head.id, replacing: assetRefs[head.id] ?? null };
+}
+
+/**
+ * 入れ先を見る**順番**（#1030・PR #1041 レビュー 🔴）。
+ *
+ * ⚠️ **層の並び順をそのまま使うと `background` が先頭になる**＝実際の見た目パターンは
+ * 例外なく `background` を配列の先頭（`zIndex:0`＝いちばん奥）に置いており、
+ * `isAssignableToLayer` は種別を決めていない `background` を写真にも動画にも「入れられる」と見る。
+ * その結果、**空の場面で写真を押すと背景に入り、`mainVisual` は空のまま**になる。
+ * 空の `slot` は**不透明な灰色のプレースホルダ**（`zIndex:10`）として背景の**手前**に描かれるので、
+ * 置いた写真が覆い隠されて見えない＝この Issue が直そうとしている症状そのものになる。
+ *
+ * ⚠️ **主役の決め方は既にある**（台本表の `mainAsset`＝`mainVisual` → `background` の順）ので、
+ * **同じ順番**にする：`mainVisual` → その他の `slot`／`logo`（層の並び順）→ `background`。
+ * 背景は「他に入れる所が無いときの受け皿」であって、押したときの第一候補ではない。
+ */
+function orderedForAssign(layers: readonly Layer[]): Layer[] {
+  const rank = (l: Layer): number => {
+    if (l.id === MAIN_VISUAL_LAYER_ID) return 0;
+    return l.type === LAYER_TYPE.background ? 2 : 1;
+  };
+  return [...layers].sort((a, b) => rank(a) - rank(b));
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from './slotAssign';
+import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, MAIN_ASSET_LAYER_KEYS, slotForAsset } from './slotAssign';
 import type { Asset } from '../project/types';
 import type { Layer } from './types';
 
@@ -68,8 +68,50 @@ describe('slotForAsset（#1030）', () => {
     expect(slotForAsset(image, [main, sub], { main: 'asset_x' })).toEqual({ layerId: 'sub', replacing: null });
   });
 
-  it('層の順に見る（見た目パターンの並びをそのまま使う）', () => {
-    expect(slotForAsset(image, [bg, main, sub], {})).toEqual({ layerId: 'background', replacing: null });
+  // ⚠️ **層の並び順をそのまま使わない**（PR #1041 レビュー 🔴）＝実際の見た目パターンは
+  //   例外なく `background` を配列の先頭に置いており、そのままだと**空の場面で写真を押すと
+  //   背景に入り、`mainVisual` は空のまま**になる。空の `slot` は不透明な灰色の枠として
+  //   背景の**手前**に描かれるので、置いた写真が覆い隠されて見えない。
+  it('背景が先頭にあっても、主役（mainVisual）から埋める', () => {
+    const mainVisual = layer({ id: 'mainVisual', type: 'slot' });
+    expect(slotForAsset(image, [bg, mainVisual, sub], {})).toEqual({ layerId: 'mainVisual', replacing: null });
+  });
+
+  // ⚠️ **主役は「並び順で先だから」ではなく「主役だから」先**（変異チェックで見つかった穴）＝
+  //   並びの後ろにあっても先に埋める（並び順に頼ると、見た目パターンの書き方1つで崩れる）。
+  it('主役が並びの後ろにあっても、そこから埋める', () => {
+    const mainVisual = layer({ id: 'mainVisual', type: 'slot' });
+    expect(slotForAsset(image, [bg, sub, mainVisual], {})).toEqual({ layerId: 'mainVisual', replacing: null });
+  });
+
+  it('主役の口が無ければ、背景より先に他の差し込み口を埋める', () => {
+    expect(slotForAsset(image, [bg, main, sub], {})).toEqual({ layerId: 'main', replacing: null });
+  });
+
+  // ⚠️ **背景は「他に入れる所が無いときの受け皿」**＝候補から外すわけではない。
+  it('他に入れる所が無ければ背景へ入れる', () => {
+    expect(slotForAsset(image, [bg], {})).toEqual({ layerId: 'background', replacing: null });
+  });
+
+  it('主役の口が埋まっていれば、次の差し込み口へ（背景はまだ後）', () => {
+    const mainVisual = layer({ id: 'mainVisual', type: 'slot' });
+    expect(slotForAsset(image, [bg, mainVisual, sub], { mainVisual: 'asset_a' })).toEqual({
+      layerId: 'sub',
+      replacing: null,
+    });
+  });
+
+  // ⚠️ **置き換える相手も「主役」**（背景ではない）。
+  it('全部埋まっているときは、主役を置き換える相手として返す', () => {
+    const mainVisual = layer({ id: 'mainVisual', type: 'slot' });
+    expect(
+      slotForAsset(image, [bg, mainVisual, sub], { background: 'asset_bg', mainVisual: 'asset_a', sub: 'asset_b' }),
+    ).toEqual({ layerId: 'mainVisual', replacing: 'asset_a' });
+  });
+
+  // ⚠️ **台本表と同じ順**（`adapters.ts` の `mainAsset`）＝主役の決め方を2か所に書かない。
+  it('主役の順は台本表と共有している', () => {
+    expect(MAIN_ASSET_LAYER_KEYS).toEqual(['mainVisual', 'background']);
   });
 
   // ⚠️ **空きが無いときは黙って何もしない、にしない**（§2-5）＝置き換える相手を返し、呼ぶ側が確認を出す。
