@@ -42,10 +42,15 @@ export function readAudit(stdout) {
 }
 
 function runOnce() {
-  const r = spawnSync("npm", ["audit", "--audit-level=high", "--json"], {
+  // ⚠️ **`--audit-level` は渡さない**（PR #1039 レビュー）＝あれは**終了コード**にしか効かず、
+  // ここは終了コードを見ない（`BLOCKING` が本体）＝残すと「変えれば挙動が変わる」と誤読される。
+  // ⚠️ **受け皿を広く取る**（同レビュー）＝既定の約 1MB を超えると `stdout` が切り詰められ、
+  // **無関係な理由で「読めなかった」**になる（fail-closed なので緩みはしないが、赤くなる）。
+  const r = spawnSync("npm", ["audit", "--json"], {
     encoding: "utf8",
     shell: true,
     windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
   });
   return readAudit(r.stdout ?? "");
 }
@@ -65,8 +70,11 @@ async function main() {
     console.log(`npm audit のエンドポイントがエラーを返しました（${attempt} 回目）: ${result.reason}`);
     if (attempt < ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_MS));
   }
+  // ⚠️ **次の行動を書く**（PR #1039 レビュー）＝CI のログは §2-5 の対象外だが、
+  // 「どうすればいいか」が無いと**とりあえず再実行する**しかなくなる（それが #1038 の元の症状）。
   console.log(
-    `::error::npm audit のエンドポイントが ${ATTEMPTS} 回とも応答しませんでした。脆弱性の有無を確認できていないため、通しません。`,
+    `::error::npm audit のエンドポイントが ${ATTEMPTS} 回とも応答しませんでした。脆弱性の有無を確認できていないため、通しません。` +
+      "しばらく置いてからこの job だけ再実行するか、https://status.npmjs.org でレジストリの状態を確認してください。",
   );
   process.exit(1);
 }
