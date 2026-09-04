@@ -25,11 +25,9 @@ import type { BezierEasing, EasingSpec } from '../enums';
 import type { Keyframe } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
-import { videoPlacementsOfClip } from './video';
 import { isUnsplittableClipKind } from './clipKind';
 // ⚠️ **頭出しの規則は1か所**（#988）＝トリムでも同じものを使う（写すと片方だけ直る）。
-import { advancedSlotStarts, advancedSourceStart } from './sourceTime';
-import { resolveSlotClip } from '../asset/clip';
+import { advancedSlotStarts, advancedSourceStart, usesUpSource } from './sourceTime';
 import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
@@ -107,43 +105,6 @@ export function splitClipIssue(
   return null;
 }
 
-/**
- * その切り方だと、**素材を使い切った先**から後半が始まるか（#816 レビュー 🔴）。
- *
- * 見るのは**置き場所ごとの実効値**（直接置き／差し込み口とも `videoPlacementsOfClip` 経由）＝
- * 継承（per-use → 素材既定）を解いた後の値で判断する（描画・再生と同じ材料）。
- * 判る材料が無い（終端も実尺も未指定）ときは**断らない**＝分からないことを理由にしない。
- */
-function usesUpSource(
-  doc: TimelineProject,
-  clip: TimelineClip,
-  headSec: number,
-  templateOf: ((templateId: string) => Template | undefined) | undefined,
-): boolean {
-  return videoPlacementsOfClip(doc, clip, { templateOf }).some((p) => {
-    const advanced = p.sourceStartSec + headSec * p.speed;
-    const asset = doc.assets.find((a) => a.assetId === p.assetId);
-    // ⚠️ **直接置きに「切り出す終わり」は無い**（#834-3）＝クリップが持つのは `sourceStartSec`/`speed` だけで
-    // `endSec` に当たる項目が無い（`timeline-project.schema` の `TimelineClip`）。以前はここも
-    // `resolveSlotClip` へ通していたが、上書きにも既定にも `endSec` が入らないので**必ず `undefined`**
-    // ＝実質デッドコードで、「継承が抜けている」と誤読される形だった。
-    // ⚠️ **素材既定（`asset.clip`）を足さない**＝`videoPlacementsOfClip` の直接置きの枝は
-    // **クリップの値だけ**を読む（素材既定を効かせない）。ここだけが見ると、**画面では流れている先を
-    // 門だけが「使い切った」と断る**＝描画・再生と同じ材料で判断する、が崩れる。
-    // ⚠️ **見るのは「置き場所ごとの使い方を持つか」**＝`slotClips[層 id]` を持つ置き場所すべて。
-    // ⚠️ **差し込み口だけに絞らない**（差分再監査 🟡・#809）＝**立ち絵も置き場所になった**（`use:'character'`）
-    // ので、`use === slot` で絞ると**立ち絵に入れた動画の「ここまで」だけが効かない**（同じ入れ物・同じ
-    // 解決〔`resolveSlotClip`〕を共有しているのに、この門だけ見ない＝ADR-0026②）。
-    // かつては「直接置き／差し込み口の2種しか無いので挙動は同じ」と書いていたが、**もう事実ではない**。
-    const endSec = p.layerId != null
-      ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec
-      : undefined;
-    const sourceEnd = asset?.metadata?.durationSec ?? undefined;
-    // 判る材料が無ければ限界は無限＝この比較は必ず偽になる（別に見張りを置かない＝守れない枝を作らない）。
-    const limit = Math.min(endSec ?? Infinity, sourceEnd ?? Infinity);
-    return advanced >= limit;
-  });
-}
 
 /**
  * キーフレームの時刻は**マイクロ秒へ丸めて**保存する（`keyframeTimeAt`）ので、それより細かい差は
