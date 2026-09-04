@@ -85,6 +85,6 @@ describe("runBulkImport（まとめて取り込みの回し方）", () => {
     const t = stub([null]);
     t.port.importOne = vi.fn().mockRejectedValue(new Error("boom"));
     await expect(runBulkImport(t.port, ["a.png", "b.png"])).rejects.toThrow("boom");
-    expect(t.progress.at(-1)).toBeNull();
+    expect(t.progress[t.progress.length - 1]).toBeNull();
   });
 });
