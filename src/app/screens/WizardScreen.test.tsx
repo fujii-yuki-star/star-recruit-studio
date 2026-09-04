@@ -27,7 +27,7 @@ describe("WizardScreen 入力保護（#401）", () => {
     useProjectStore.setState({ applyProjectInfo: spy });
     const { unmount } = render(<WizardScreen onNavigate={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0(種類/目的)→step1(会社情報)
-    fireEvent.change(screen.getByLabelText("会社名"), { target: { value: "テスト株式会社" } });
+    fireEvent.change(screen.getByLabelText(/会社名/), { target: { value: "テスト株式会社" } });
     spy.mockClear(); // ここまでの commit は除き、離脱(unmount)時の挙動だけを見る
     unmount();
     expect(spy).toHaveBeenCalledTimes(1); // 離脱で1回だけ確定される
@@ -39,7 +39,7 @@ describe("WizardScreen 入力保護（#401）", () => {
     useProjectStore.setState({ applyProjectInfo: spy });
     const { unmount } = render(<WizardScreen onNavigate={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0→1
-    fireEvent.change(screen.getByLabelText("会社名"), { target: { value: "テスト株式会社" } });
+    fireEvent.change(screen.getByLabelText(/会社名/), { target: { value: "テスト株式会社" } });
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step1→2：ここで1回 commit
     const afterCommit = spy.mock.calls.length;
     expect(afterCommit).toBeGreaterThan(0);
@@ -98,3 +98,35 @@ describe("WizardScreen 素材の外す（#547 P3-8）", () => {
     expect(useProjectStore.getState().saveStatus).toBe("idle");
   });
 });
+
+// 必須は欄の側でも分かる（#1026）。
+//
+// ⚠️ **押して初めて分かる形だった**＝未入力だと「次へ」で止められるのに、欄の側に印が無く、
+// 押すまで required と分からない（§2-5＝先に言う）。
+// ⚠️ **色だけで伝えない**＝読み上げにも届くよう、文字（必須）で書く。
+describe("必須の欄は、押す前に分かる（#1026）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    // ⚠️ **段は持ち越される**（`wizardStep` は離脱しても残る＝#401）＝先頭から始める。
+    useProjectStore.setState({ wizardStep: 0 });
+  });
+
+  /** ⚠️ **入口は種類/目的の段**＝会社情報の欄は「次へ」で1つ進めてから出る。 */
+  const toCompanyStep = () => {
+    render(<WizardScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+  };
+
+  it("会社名（採用で必須）に印が付いている", () => {
+    toCompanyStep();
+    expect((screen.getByLabelText(/会社名/) as HTMLInputElement).labels?.[0]?.textContent, "必須の印が無い").toContain("必須");
+  });
+
+  // ⚠️ **必須でない欄には付けない**＝全部に付けると印の意味が無くなる。
+  it("必須でない欄には印を付けない", () => {
+    toCompanyStep();
+    expect((screen.getByLabelText(/業種/) as HTMLInputElement).labels?.[0]?.textContent).not.toContain("必須");
+  });
+});
+

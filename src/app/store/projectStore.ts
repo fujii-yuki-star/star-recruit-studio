@@ -469,6 +469,15 @@ interface ProjectState {
    *  タイムライン→「仕上がり確認へ戻る」で Preview に再入場しても直前の入口ラベルを保つため（消費すると退行）。
    *  ※「編集中の場面」自体は editingSceneId（一度きり）で別に受け渡す（場面編集→仕上がり確認→戻るで同じ場面へ）。 */
   previewReturnTo: ScreenId | null;
+  /**
+   * 公開前チェックへ**どこから来たか**（#1026・仕上がり確認と同じ流儀）。
+   *
+   * ⚠️ **戻る先が固定だった**＝入口は仕上がり確認と書き出しの2つなのに、戻るは常に
+   * 「場面編集へ戻る」で、**来ていない画面**を指していた（§2-5＝次の行動が実際と違う）。
+   * 仕上がり確認は前から入口を覚えている（`previewReturnTo`）ので、**扱いが割れていた**。
+   */
+  precheckReturnTo: ScreenId | null;
+  setPrecheckReturnTo: (screen: ScreenId | null) => void;
   setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
@@ -878,6 +887,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   wizardStep: 0,
   confirmReturnTo: null,
   previewReturnTo: null,
+  precheckReturnTo: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   exportForm: IDLE_EXPORT_FORM,
@@ -2173,6 +2183,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
+  setPrecheckReturnTo: (screen) => set({ precheckReturnTo: screen }),
   setExportRun: (patch) =>
     set((s) => {
       // 「終わったがまだ見ていない」は phase の遷移から自動で決める（#589）＝呼び出し側が立て忘れない。
