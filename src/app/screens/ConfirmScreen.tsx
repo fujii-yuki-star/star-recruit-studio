@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { willSendExternally } from "../../infrastructure/aiClient";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
@@ -41,6 +42,26 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   // ＝人名入りファイル名（例「田中さん.jpg」）を最後の送信ゲートで確認できる（件数集約にしない・#547 P2-8 レビュー）。
   const sentTexts = sentAssets.map(assetSentText);
   const [showAssetText, setShowAssetText] = useState(false);
+  /**
+   * 本当に外へ送るか（#995 ④）。
+   *
+   * ⚠️ **送らないのに「送信してよい内容か」と聞いていた**＝既定（Mock）では**何も送らない**のに、
+   * 「ゆうこに渡して」「送信してよい内容か、もう一度ご確認ください」が出ていた。
+   * たたき台の「作り直す」は同じ判定（`willSendExternally`）で確認を飛ばすのに、
+   * ウィザードの最終段は**常に**ここへ来る＝**同じ概念の挙動が経路で割れていた**（ADR-0026②）。
+   *
+   * ⚠️ **確認そのものは残す**（§2-6＝外部送信は事前確認必須）＝変えるのは**言い方**だけ。
+   * ⚠️ **判定できないうちは「送る」側**（fail-closed）＝`willSendExternally` が答える前に
+   * 「送りません」と見せると、実際は送る場合に**注意を読ませないまま通す**。
+   */
+  const [external, setExternal] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void willSendExternally()
+      .then((v) => { if (alive) setExternal(v); })
+      .catch(() => { /* 判定できないときは「送る」側のまま（fail-closed） */ });
+    return () => { alive = false; };
+  }, []);
   const isGeneral = videoKind === VIDEO_KIND.general;
   // 目的の表示名は採用/一般どちらの選択肢からも引く（混在しても1件だけ一致する）。
   const purposeLabel =
@@ -68,7 +89,9 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               この内容で動画案を作ります
             </h1>
             <p className="page-desc text-pretty">
-              下の情報をゆうこに渡して、動画のたたき台を作ります。内容を確認してください。
+              {external
+                ? "下の情報をゆうこに渡して、動画のたたき台を作ります。内容を確認してください。"
+                : "下の情報から、動画のたたき台を作ります。内容を確認してください。この内容が外へ送られることはありません。"}
             </p>
           </div>
 
@@ -128,7 +151,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                       onClick={() => setShowAssetText((v) => !v)}
                       aria-expanded={showAssetText}
                     >
-                      {showAssetText ? "文字情報を隠す" : "送る文字情報を確認する"}
+                      {showAssetText ? "文字情報を隠す" : external ? "送る文字情報を確認する" : "使う文字情報を確認する"}
                     </button>
                   )}
                 </div>
@@ -167,21 +190,35 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           </div>
 
           {/* 強調: 写真・動画ファイルは送信しない（MVP は文字情報のみ） */}
+          {/* ⚠️ **送るときの話は、送るときだけ**（#995 ④・PR #1027 レビュー 🔴）＝
+              送らないのに「渡します」「送信しません」と言うと、**送っている前提**の説明になる。 */}
           <div className="notice notice-strong mb">
             <CheckIcon size={18} />
             <span>
-              写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
-              説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+              {external ? (
+                <>
+                  写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
+                  説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+                </>
+              ) : (
+                <>
+                  この動画のたたき台は、<strong>この端末の中だけ</strong>で作ります。
+                  入力いただいた内容も素材も、外へ送られることはありません。
+                </>
+              )}
             </span>
           </div>
 
-          {/* 個人情報の注意（§2-6） */}
-          <div className="notice notice-warn mb">
-            <span>
-              人物が写っている素材の説明などには、個人情報が含まれることがあります。
-              送信してよい内容か、もう一度ご確認ください。
-            </span>
-          </div>
+          {/* 個人情報の注意（§2-6）。⚠️ **送るときだけ出す**（#995 ④）＝送らないのに
+              「送信してよい内容か」と聞くと、注意の重みが薄まる（毎回出る警告は読まれなくなる）。 */}
+          {external && (
+            <div className="notice notice-warn mb">
+              <span>
+                人物が写っている素材の説明などには、個人情報が含まれることがあります。
+                送信してよい内容か、もう一度ご確認ください。
+              </span>
+            </div>
+          )}
 
           {/* ボタン（送信前確認は §2-6 で毎回必須＝「次回から表示しない」は設けない） */}
           {/* ⚠️ **押す前に、何が起きるかを告げる**（#985 レビュー 🔴）＝作り直すと
@@ -206,7 +243,9 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               onClick={() => onNavigate("generating")}
             >
               <SparkleIcon size={20} />
-              送信して動画案を作る
+              {/* ⚠️ **いちばん目立つ所こそ、実際に起きることを言う**（PR #1027 レビュー 🔴）＝
+                  送らないのに「送信して」と書くと、**この画面で直したはずのことが主ボタンに残る**。 */}
+              {external ? "送信して動画案を作る" : "この内容で動画案を作る"}
             </button>
           </div>
         </div>

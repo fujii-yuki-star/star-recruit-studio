@@ -78,7 +78,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
     expect(load).not.toHaveBeenCalled();
     // ⚠️ **知らせに答えるまで、別の操作へ抜けられない**（α-7 出口監査 🟡）＝
     // 抜けられると**この画面が消えて**、知らせを一度も見ないまま次へ進める。
-    expect((screen.getByText("白紙から作る").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "白紙から作る" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText("動画を開く"));
     await waitFor(() => expect(load).toHaveBeenCalledWith("p_001"));
   });
@@ -135,7 +135,7 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await screen.findByText("あとで開く");
     fireEvent.click(screen.getByText("あとで開く"));
     await waitFor(() =>
-      expect((screen.getByText("白紙から作る").closest("button") as HTMLButtonElement).disabled).toBe(false),
+      expect((screen.getByRole("button", { name: "白紙から作る" }) as HTMLButtonElement).disabled).toBe(false),
     );
     expect(load).not.toHaveBeenCalled();
   });

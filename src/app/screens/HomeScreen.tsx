@@ -599,6 +599,21 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   {creatingTimeline ? "作っています…" : "タイムラインで作る"}
                 </button>
               </div>
+              {/* ⚠️ **選び方の説明を、見える形で置く**（#995 ①）＝これまで「白紙から作る」
+                  「タイムラインで作る」の説明は `title`（ホバー）にしか無く、**タッチ・キーボードでは読めなかった**。
+                  とくに「タイムラインで作る」は**別の形式で片道・AI が関与しない**（ADR-0032）という
+                  重い選択なのに、押すまで分からなかった（向きだけは押した後に聞く）。 */}
+              <dl className="text-sm text-muted mt" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", margin: 0 }}>
+                <dt style={{ fontWeight: 600 }}>新しい動画を作る</dt>
+                <dd style={{ margin: 0 }}>伝えたい内容と素材を入れると、ゆうこがたたき台を作ります。</dd>
+                <dt style={{ fontWeight: 600 }}>白紙から作る</dt>
+                <dd style={{ margin: 0 }}>ゆうこに頼まず、空の状態から自分で場面を組み立てます。</dd>
+                <dt style={{ fontWeight: 600 }}>タイムラインで作る</dt>
+                <dd style={{ margin: 0 }}>
+                  場面に区切らず、時間の流れの上に素材を並べます。
+                  <strong>場面から作る動画とは別のもの</strong>で、ゆうこにたたき台を頼むことはできません。
+                </dd>
+              </dl>
               {/* 向きは作るときにしか選べない（あとから変える導線が無い）ので、押した瞬間に作らず先に聞く（#664）。 */}
               {choosingTimeline && !creatingTimeline && (
                 <div className="notice notice-info mt" role="group" aria-label="動画の向きを選ぶ">

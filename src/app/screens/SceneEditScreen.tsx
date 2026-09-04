@@ -251,6 +251,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // タイムライン/公開前チェックの「場面を直す」）で残留値が誤採用される（#400 レビュー）。null/不在は先頭場面へ。
   // subscribe せず getState で読む＝破棄時の再描画を避ける（selectedId は state 保持されるので消えない）。
   const [selectedId, setSelectedId] = useState(() => useProjectStore.getState().editingSceneId ?? "");
+  // ⚠️ **どの欄から見せるかも一度きりで受ける**（#995 ③・`editingSceneId` と同じ流儀）＝
+  // たたき台の「セリフ」「素材」「見た目」は**3つとも同じ場所へ行く**だけで、
+  // 行き先でその欄に寄る仕掛けが無かった（＝押した言葉と着地がずれる）。
+  // ⚠️ **初期化子で捕まえる**＝上の後始末（`null` へ戻す）より前に読む必要がある。
+  const [focus] = useState(() => useProjectStore.getState().editingSceneFocus);
   // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
   // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。
   // sceneId を持つことで、場面を切り替えたら（sceneId 不一致で）自動的にドラフトが無効化される（effect 不要・別場面の値を見せない）。
@@ -407,6 +412,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // これで editingSceneId を set しない他導線は「未指定＝先頭場面」の決定的挙動に戻る。getState 経由で依存なし・1回のみ。
   useEffect(() => {
     useProjectStore.getState().setEditingSceneId(null);
+    useProjectStore.getState().setEditingSceneFocus(null);
   }, []);
 
 
@@ -1968,7 +1974,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 ))}
               </div>
             )}
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false} forceOpen={focus === "look"}>
             {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
             <div className="field">
               <label className="field-label" htmlFor="scene-kind">種類</label>
@@ -2110,7 +2116,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" defaultOpen={false} forceOpen={focus === "assets"}>
             <div className="field">
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
@@ -2516,7 +2522,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </CollapsibleSection>
             )}
 
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ">
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ" forceOpen={focus === "narration"}>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
