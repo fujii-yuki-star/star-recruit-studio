@@ -99,12 +99,19 @@ function codeMessages(): Record<string, string> {
  */
 function rustMessages(): Record<string, string> {
   const rs = readFileSync(join(process.cwd(), "src-tauri/src/lib.rs"), "utf8");
-  const pick = (re: RegExp): string => {
-    const m = re.exec(rs);
+  // ⚠️ **`lib.rs` だけを読まない**（PR #1036 レビュー 🟡）＝文言は他のモジュールにもある。
+  // `voicevox.rs` の時間切れの2文は、載せないと**弱い段**（「実装のどこかに在る」）でしか
+  // 守られず、**表と実装のどちらかだけ書き換えても気づけない**（#263 の再発）。
+  const vv = readFileSync(join(process.cwd(), "src-tauri/src/voicevox.rs"), "utf8");
+  const pickIn = (src: string, re: RegExp): string => {
+    const m = re.exec(src);
     if (!m) throw new Error(`Rust 側の文言が見つかりません: ${re}`);
     return m[1];
   };
+  const pick = (re: RegExp): string => pickIn(rs, re);
   return {
+    VOICE_TIMEOUT: pickIn(vv, /const VOICE_TIMEOUT_MESSAGE: &str =\s*"([^"]+)"/),
+    ENGINE_TIMEOUT: pickIn(vv, /const ENGINE_TIMEOUT_MESSAGE: &str =\s*"([^"]+)"/),
     USER_FONT_IMPORT_FAILED: pick(/return Err\("(このファイルは文字の形として読み込めません。[^"]*)"\.to_string\(\)\)/),
     // `{what}` は「よく使う素材」「取り込んだ文字の形」のどちらかが入る＝表は〔…〕で両方を書くので、
     // 差し込みの手前までを比べる（`format!` の中身をそのまま取り出す）。
@@ -343,7 +350,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(162);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(164);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
