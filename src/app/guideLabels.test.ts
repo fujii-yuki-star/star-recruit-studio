@@ -45,6 +45,26 @@ function appSources(): string {
 const guide = (): string =>
   readFileSync(join(process.cwd(), "docs", "yuko_recruit_docs", "guides", "timeline-advanced-editing.md"), "utf8");
 
+/**
+ * 付録「うまくいかないときに出る言葉」の表から、**1列目のセルの中身**を拾う。
+ *
+ * ⚠️ **この表がいちばん腐りやすい**（PR #1011 レビュー 🟡）＝実機で詰まった人が最初に引く表なのに、
+ * 書式が地の文と違うと `quotedUiLabels` の射程から**丸ごと外れる**（実際に外れていた）。
+ * そこで**表の1列目は必ず `**「…」**` で書く**ことを検査する＝行を足した人が書式を外せば、
+ * ここで止まる（`quotedUiLabels` の floor だけでは、**新しい行が1つ抜ける**のを見つけられない）。
+ */
+export function appendixMessageCells(text: string): string[] {
+  const lines = text.split("\n");
+  const head = lines.findIndex((l) => l.includes("| 出る言葉 |"));
+  if (head < 0) return [];
+  const out: string[] = [];
+  for (const line of lines.slice(head + 2)) {
+    if (!line.startsWith("|")) break;
+    out.push(line.split("|")[1]!.trim());
+  }
+  return out;
+}
+
 // ⚠️ **画面に無い言葉は、理由を書いて明示的に外す**（黙って落とさない）。
 const NOT_IN_APP: Record<string, string> = {
   "（N個）": "ボタンの名前に数を差し込む形（`ここで終わる（{n}個）`）なので、そのままの文字列では在らない",
@@ -53,7 +73,16 @@ const NOT_IN_APP: Record<string, string> = {
 describe("手順書の画面の言葉が、実際に画面にある（実機テスト用資料）", () => {
   it("拾えている（走査が空振りしていない）", () => {
     // ⚠️ **拾えていないのに緑**を作らない（拾い方が壊れたら、下の検査は無条件で通る）。
-    expect(quotedUiLabels(guide()).length, "手順書から画面の言葉を1つも拾えていない").toBeGreaterThanOrEqual(15);
+    // ⚠️ **実数に寄せて固定する**＝floor を低く置くと、**まとまって射程から外れても**気づけない
+    //   （付録の表 5 行が丸ごと外れていたのに 15 は通っていた＝PR #1011 レビュー 🟡）。
+    expect(quotedUiLabels(guide()).length, "手順書から画面の言葉を1つも拾えていない").toBeGreaterThanOrEqual(28);
+  });
+
+  it("付録の表の言葉も射程に入っている（1列目は太字の鉤括弧で書く）", () => {
+    const cells = appendixMessageCells(guide());
+    expect(cells.length, "付録『うまくいかないときに出る言葉』の表が見つからない").toBeGreaterThanOrEqual(5);
+    const wrong = cells.filter((c) => !/^\*\*「[^」*]+」\*\*$/.test(c));
+    expect(wrong, "付録の表の1列目は `**「…」**` で書く（そうしないと画面との照合から外れる）").toEqual([]);
   });
 
   it("書いた言葉が画面にある", () => {
@@ -93,5 +122,18 @@ describe("画面の言葉の拾い方", () => {
 
   it("同じ語を二重に数えない", () => {
     expect(quotedUiLabels("**「声を作る」** と **「声を作る」**")).toEqual(["声を作る"]);
+  });
+});
+
+// ⚠️ **拾い方そのものを検査する**（上と同じ理由）。
+describe("付録の表の拾い方", () => {
+  const table = ["| 出る言葉 | 意味 | 次にすること |", "|---|---|---|", "| **「あ」** | い | う |", "| え | お | か |", "", "あとの文"].join("\n");
+
+  it("表の1列目だけを拾う", () => {
+    expect(appendixMessageCells(table)).toEqual(["**「あ」**", "え"]);
+  });
+
+  it("表が無ければ空（見つからないことを『合格』にしない＝件数の検査が受け止める）", () => {
+    expect(appendixMessageCells("表のない文書")).toEqual([]);
   });
 });
