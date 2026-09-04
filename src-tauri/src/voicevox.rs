@@ -8,11 +8,57 @@ fn voicevox_base() -> String {
     std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string())
 }
 
+/// 声を作る1回の待ち時間の上限（秒）。#1024 ④。
+///
+/// ⚠️ **上限が無いと「作成中…」のまま止まりうる**＝同梱エンジンは同じPCの中なので普段は速いが、
+/// 起動直後のモデル読み込み・別プロセスの固まり・外部エンジンを指した設定では**返らないことがある**。
+/// 一括作成は中止できるので行き止まりにはならないが、**1件ずつ作るときは抜け道が無い**。
+/// ⚠️ **AI（60秒）より長く採る**＝あちらは外部サービスへの1往復だが、こちらは
+/// **長いセリフの音声合成**で、同梱エンジンでも数十秒かかることがある（短く採ると正常な合成を切る）。
+const VOICE_REQUEST_TIMEOUT_SECS: u64 = 180;
+/// つなぐまでの上限（秒）。**つながらないことは速く分かる**＝エンジンが動いていないときに
+/// 3分待たせない（合成そのものの上限とは別に持つ）。
+const VOICE_CONNECT_TIMEOUT_SECS: u64 = 10;
+
 /// reqwest クライアントは接続プール再利用のため一度だけ生成する。
+/// **待ち時間の上限を持つ**（#1024 ④）＝応答が返らないときに「作成中…」で止まらない。
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(VOICE_REQUEST_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(VOICE_CONNECT_TIMEOUT_SECS))
+            .build()
+            // build() が失敗するのは TLS バックエンドの初期化不能など**致命的な環境不備のみ**＝実質到達不能。
+            // その場合は HTTP を一切送れず継続に意味がないため fail-fast（ai.rs と同方針）。
+            .expect("HTTP クライアントの初期化に失敗しました")
+    })
 }
+
+/// 送信の失敗を、**次の行動が違うもの**へ分ける（§2-5・#1024 ④）。
+///
+/// ⚠️ **時間切れを「つながりません」と言わない**＝エンジンには**届いている**ので
+/// 接続先を見ても直らない（見に行かせるのは実行できない次の行動）。
+/// ⚠️ **つながらないほうは元の文のまま**＝そちらは設定で直る。
+/// ⚠️ **1か所に寄せる**＝送る所は8か所あり、写すと**片方だけ時間切れを見分ける**ようになる。
+fn send_error(e: &reqwest::Error, timeout: &str, unreachable: &str) -> String {
+    pick_send_message(e.is_timeout(), timeout, unreachable)
+}
+
+/// 見分けそのもの（`reqwest::Error` は外から作れないので、判定だけ切り出して検査する）。
+fn pick_send_message(is_timeout: bool, timeout: &str, unreachable: &str) -> String {
+    if is_timeout { timeout } else { unreachable }.to_string()
+}
+
+const VOICE_UNAVAILABLE_MESSAGE: &str =
+    "ゆうこの声の準備ができていません。設定を確認してください。";
+const ENGINE_UNREACHABLE_MESSAGE: &str = "音声ソフトにつながりません。接続先を確認してください。";
+/// 声を作るのが返らないとき＝**セリフを短くする**という、この場でできる手が1つある。
+const VOICE_TIMEOUT_MESSAGE: &str =
+    "ゆうこの声を作るのに時間がかかりすぎました。セリフを短く分けるか、アプリを開き直してから、もう一度お試しください。";
+/// 読み方の聞き比べ・読み方辞書が返らないとき＝短くする手は無いので、開き直しだけを言う。
+const ENGINE_TIMEOUT_MESSAGE: &str =
+    "音声ソフトの応答に時間がかかりすぎました。アプリを開き直してから、もう一度お試しください。";
 
 /// 話し方（話速・高さ・抑揚）。**3つで1組**なので束ねて渡す。
 ///
@@ -60,7 +106,7 @@ pub async fn synthesize_voice(
         .query(&[("text", text.as_str()), ("speaker", speaker_str.as_str())])
         .send()
         .await
-        .map_err(|_| "ゆうこの声の準備ができていません。設定を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE))?;
     if !query_res.status().is_success() {
         return Err("ゆうこの声の作成に失敗しました。もう一度お試しください。".to_string());
     }
@@ -83,7 +129,7 @@ pub async fn synthesize_voice(
         .json(&query)
         .send()
         .await
-        .map_err(|_| "ゆうこの声の準備ができていません。設定を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE))?;
     if !synth_res.status().is_success() {
         return Err("ゆうこの声の作成に失敗しました。もう一度お試しください。".to_string());
     }
@@ -123,7 +169,7 @@ pub async fn voicevox_user_dict_list(
         .get(format!("{base}/user_dict"))
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if !res.status().is_success() {
         return Err("読み方の一覧を取れませんでした。もう一度お試しください。".to_string());
     }
@@ -151,7 +197,7 @@ pub async fn voicevox_user_dict_add(
         ])
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if !res.status().is_success() {
         return Err(
             "読み方を登録できませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
@@ -187,7 +233,7 @@ pub async fn voicevox_user_dict_update(
         ])
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if res.status().is_success() {
         return Ok(true);
     }
@@ -212,7 +258,7 @@ pub async fn voicevox_user_dict_delete(
         .delete(format!("{base}/user_dict_word/{word_uuid}"))
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if res.status().is_success() {
         return Ok(true);
     }
@@ -254,7 +300,7 @@ pub async fn voicevox_synthesize_with_accent(
         .query(&[("text", yomi.as_str()), ("speaker", speaker_str.as_str())])
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if !query_res.status().is_success() {
         return Err(
             "読み方を確かめられませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
@@ -291,7 +337,7 @@ pub async fn voicevox_synthesize_with_accent(
         .json(&query)
         .send()
         .await
-        .map_err(|_| "音声ソフトにつながりません。接続先を確認してください。".to_string())?;
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
     if !synth_res.status().is_success() {
         return Err("読み方を確かめられませんでした。もう一度お試しください。".to_string());
     }
@@ -312,6 +358,30 @@ mod tests {
     /// ⚠️ **型では検知できない境界**＝画面（TypeScript）は `style: { speed, pitch, intonation }`
     /// を送る。ばら渡しへ戻ると**受け取れずに落ちる**ので、送る側（`voicevoxProvider.synthesize.test.ts`）
     /// と受ける側の両方で留める。
+    #[test]
+    fn 時間切れはつながりませんと言わない() {
+        // ⚠️ **時間切れは設定を見ても直らない**＝接続先を見に行かせない（§2-5）。
+        assert_eq!(
+            pick_send_message(true, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE),
+            VOICE_TIMEOUT_MESSAGE
+        );
+        assert_eq!(
+            pick_send_message(false, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE),
+            VOICE_UNAVAILABLE_MESSAGE
+        );
+    }
+
+    #[test]
+    fn 時間切れの文には次の行動がある() {
+        // 声＝セリフを短くする手がある／聞き比べ・辞書＝開き直すだけ。どちらも「もう一度」で終わらない。
+        assert!(VOICE_TIMEOUT_MESSAGE.contains("短く"));
+        assert!(VOICE_TIMEOUT_MESSAGE.contains("開き直して"));
+        assert!(ENGINE_TIMEOUT_MESSAGE.contains("開き直して"));
+        // ⚠️ **「接続先を確認」を混ぜない**＝届いているのに設定を見に行かせない。
+        assert!(!VOICE_TIMEOUT_MESSAGE.contains("接続先"));
+        assert!(!ENGINE_TIMEOUT_MESSAGE.contains("接続先"));
+    }
+
     #[test]
     fn 話し方をまとめて受け取れる() {
         let style: VoiceStyle = serde_json::from_value(

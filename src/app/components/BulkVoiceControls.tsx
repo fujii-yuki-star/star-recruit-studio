@@ -1,4 +1,5 @@
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { useBulkVoiceControlsPresence } from "../hooks/useBulkVoicePresence";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import {
@@ -38,6 +39,9 @@ export function BulkVoiceControls({
   /** 一括作成が終わったとき（中止で打ち切られた場合も含む）。画面ごとの完了通知に使う。 */
   onFinished?: (result: { cancelled: boolean }) => void;
 }) {
+  // ⚠️ **早期 return より前で数える**＝`hideWhenNothingToDo` で何も描かないときも「居る」
+  // （その画面には操作の置き場所があるので、作り始めれば出る＝全画面バナーと二重にならない）。
+  useBulkVoiceControlsPresence();
   const scenes = useProjectStore((s) => s.scenes);
   const generating = useProjectStore((s) => s.isGeneratingNarration);
   const cancelled = useProjectStore((s) => s.narrationCancelled);
