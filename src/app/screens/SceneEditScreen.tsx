@@ -2337,16 +2337,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="row-between">
                           {confirmBulkDelete ? (
                             <>
-                              <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
-                              <div className="row gap-sm">
-                                <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
-                                <button
-                                  className="btn btn-danger text-sm"
-                                  onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
-                                >
-                                  削除する
-                                </button>
-                              </div>
+                              {/* ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                                  名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                                  行の中なので `inline`（箱にしない）＝並び・色は同じ。 */}
+                              <DeleteConfirm
+                                inline
+                                message={`${selectedFreeIds.length}件をまとめて削除しますか？`}
+                                onCancel={() => setConfirmBulkDelete(false)}
+                                onConfirm={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
+                              />
                             </>
                           ) : (
                             <>
@@ -2572,16 +2571,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           <span className="text-sm" style={{ fontWeight: 600 }}>セリフ {i + 1}</span>
                           {/* 削除は確認してから（#410・即時削除だった）。行内が狭く notice が入らないため Draft 同様のインライン確認＝やめる左/削除する danger右で順序・色は揃える。 */}
                           {confirmDeleteLineId === line.lineId ? (
-                            <div className="row gap-sm">
-                              <span className="text-sm text-muted" style={{ alignSelf: "center" }}>削除しますか？</span>
-                              <button className="btn btn-ghost btn-icon text-sm" onClick={() => setConfirmDeleteLineId(null)}>やめる</button>
-                              <button
-                                className="btn btn-danger btn-icon text-sm"
-                                onClick={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
-                              >
-                                削除する
-                              </button>
-                            </div>
+                            /* ⚠️ **共有の確認を通す**（#990・上と同じ理由）。行の中なので `inline`。 */
+                            <DeleteConfirm
+                              inline
+                              message="削除しますか？"
+                              onCancel={() => setConfirmDeleteLineId(null)}
+                              onConfirm={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
+                            />
                           ) : (
                             <div className="row gap-sm">
                               <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>

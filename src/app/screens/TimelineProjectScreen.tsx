@@ -2583,7 +2583,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 将来レーンへ右クリックを足したときに食い合わないための保険として残す。
     e.stopPropagation();
     if (!selectedClipIds.includes(clipId)) selectClip(clipId);
-    setClipMenu({ clipId, x: e.clientX, y: e.clientY });
+    // ⚠️ **キーで押したときは押したボタンの下へ**（#989）＝規則は `menuAnchorFrom` に1つだけ。
+    setClipMenu({ clipId, ...menuAnchorFrom(e) });
   };
   const menuClip = clipMenu ? doc?.clips.find((c) => c.id === clipMenu.clipId) : undefined;
   const menuClipTemplate = menuClip?.kind === TIMELINE_CLIP_KIND.template
@@ -3519,10 +3520,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             aria-label={`${clipLabel(c)}の操作`}
                             title="この部品の操作（右クリックでも開けます）"
                             onClick={(e) => {
-                              // キーボード（Enter/Space）の click は座標を持たない＝そのまま渡すと
-                              // メニューが画面の左上に出る。押した要素の位置から開く。
-                              if (!selectedClipIds.includes(c.id)) selectClip(c.id);
-                              setClipMenu({ clipId: c.id, ...menuAnchorFrom(e) });
+                              // ⚠️ **右クリックと同じ入口を通す**（#1015 レビュー 補足）＝
+                              // 手書きに分けたとき、`preventDefault`／`stopPropagation` が
+                              // **押した経路でだけ落ちて**いた。同じ入口なら落としようがない
+                              //（キーで押したときの位置合わせは `menuAnchorFrom` が中で見る）。
+                              openClipMenu(e, c.id);
                             }}
                           >
                             ⋮
@@ -4824,7 +4826,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   );
 
   return (
-    <div className="main-scroll">
+    <>
+      <div className="main-scroll">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       <PageHead
@@ -4860,70 +4863,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       />
 
-      {exploding && (
-        <DeleteConfirm
-          message={`「${exploding.template.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
-          confirmLabel="バラす"
-          busyLabel="バラしています…"
-          onCancel={() => setExploding(null)}
-          onConfirm={() => {
-            explodeClip(exploding.clipId, exploding.template, exploding.from);
-            setExploding(null);
-          }}
-        />
-      )}
-
-      {confirmRemove !== null && (
-        <DeleteConfirm
-          message={`選んだ${confirmRemove.ids.length}個の部品を削除しますか？`}
-          onCancel={() => setConfirmRemove(null)}
-          onConfirm={() => {
-            const { ids, from } = confirmRemove;
-            setConfirmRemove(null);
-            // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」と同じ）。
-            // 固定・存在の判定は **id を渡す先**（`removeClipsByIds`）が見る＝聞いた相手が消えていたら理由が出る。
-            if (exporting) return;
-            removeClipsByIds(ids, from);
-          }}
-        />
-      )}
-
-      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
-        <DeleteConfirm
-          message={`「${trackLabel(doc.tracks, removingTrackId)}」を削除しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
-          onCancel={() => setRemovingTrackId(null)}
-          onConfirm={() => {
-            removeTrack(removingTrackId);
-            setRemovingTrackId(null);
-          }}
-        />
-      )}
-
-      {/*
-        保存できていないまま戻ると変更は消える（#693）。**答えを求める確認は上に出す**＝下だと見落として
-        そのまま進んでしまう（バラす・列を消すと同じ扱い）。「やめる」を選べば「保存し直す」を押しに戻れる。
-      */}
-      {confirmLeave !== null && (
-        <DeleteConfirm
-          message="保存できていない変更があります。このまま画面を移ると、その変更は失われます。移る前に「保存し直す」を試せます。"
-          confirmLabel="保存しないで移る"
-          onCancel={() => setConfirmLeave(null)}
-          onConfirm={() => {
-            const to = confirmLeave;
-            setConfirmLeave(null);
-            // 出しっぱなしの確認から戻れると、書き出し中でも画面を離れられてしまう（ボタン側と同じ条件で見る）。
-            // 行き先は**聞いたときのもの**へ（サイドバーから離れようとしたなら、その画面へ）。
-            if (exporting) {
-              // 出しっぱなしの確認から抜けられると、書き出し中でも画面を離れられてしまう。
-              // 黙って閉じずに理由を出す（押しても何も起きない、を作らない・§2-5）。
-              setLeaveBlocked(LEAVE_BLOCKED_EXPORTING_MESSAGE);
-              return;
-            }
-            leaveConfirmedRef.current = true;
-            onNavigate(to);
-          }}
-        />
-      )}
 
 
       {/*
@@ -5016,6 +4955,87 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {clipMenu && menuClip && (
         <ContextMenu x={clipMenu.x} y={clipMenu.y} items={clipMenuItems} onClose={() => setClipMenu(null)} />
       )}
-    </div>
+      </div>
+      {/* ⚠️ **答えを求める確認は、流れていかない所へ出す**（#990・`06 §2` 統一規約10／#940）＝
+          この画面は全体が `.main-scroll` なので、素で置くと**下へ送ったとたん確認が視野の外**へ出る。
+          出しっぱなしのまま押せない状態が続くので、利用者からは「固まった」ようにしか見えない（§2-5）。
+          場面編集は同じ確認を重なりで出している（`06 §2-1`）ので、そちらへ揃える。 */}
+      {exploding && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+          message={`「${exploding.template.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          confirmLabel="バラす"
+          // ⚠️ **ゴミ箱は出さない**（#990）＝何も消えない（取り消しでしか戻らないので危険色は残す）。
+          showIcon={false}
+          busyLabel="バラしています…"
+          onCancel={() => setExploding(null)}
+          onConfirm={() => {
+            explodeClip(exploding.clipId, exploding.template, exploding.from);
+            setExploding(null);
+          }}
+          />
+        </div>
+      )}
+
+      {confirmRemove !== null && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+          message={`選んだ${confirmRemove.ids.length}個の部品を削除しますか？`}
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => {
+            const { ids, from } = confirmRemove;
+            setConfirmRemove(null);
+            // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」と同じ）。
+            // 固定・存在の判定は **id を渡す先**（`removeClipsByIds`）が見る＝聞いた相手が消えていたら理由が出る。
+            if (exporting) return;
+            removeClipsByIds(ids, from);
+          }}
+          />
+        </div>
+      )}
+
+      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+          message={`「${trackLabel(doc.tracks, removingTrackId)}」を削除しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
+          onCancel={() => setRemovingTrackId(null)}
+          onConfirm={() => {
+            removeTrack(removingTrackId);
+            setRemovingTrackId(null);
+          }}
+          />
+        </div>
+      )}
+
+      {/*
+        保存できていないまま戻ると変更は消える（#693）。**答えを求める確認は上に出す**＝下だと見落として
+        そのまま進んでしまう（バラす・列を消すと同じ扱い）。「やめる」を選べば「保存し直す」を押しに戻れる。
+      */}
+      {confirmLeave !== null && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+          message="保存できていない変更があります。このまま画面を移ると、その変更は失われます。移る前に「保存し直す」を試せます。"
+          confirmLabel="保存しないで移る"
+          // ⚠️ **ゴミ箱は出さない**（#990）＝消えるものは無い（失われるのは保存していない変更）。
+          showIcon={false}
+          onCancel={() => setConfirmLeave(null)}
+          onConfirm={() => {
+            const to = confirmLeave;
+            setConfirmLeave(null);
+            // 出しっぱなしの確認から戻れると、書き出し中でも画面を離れられてしまう（ボタン側と同じ条件で見る）。
+            // 行き先は**聞いたときのもの**へ（サイドバーから離れようとしたなら、その画面へ）。
+            if (exporting) {
+              // 出しっぱなしの確認から抜けられると、書き出し中でも画面を離れられてしまう。
+              // 黙って閉じずに理由を出す（押しても何も起きない、を作らない・§2-5）。
+              setLeaveBlocked(LEAVE_BLOCKED_EXPORTING_MESSAGE);
+              return;
+            }
+            leaveConfirmedRef.current = true;
+            onNavigate(to);
+          }}
+          />
+        </div>
+      )}
+    </>
   );
 }
