@@ -8,8 +8,12 @@
 // （IPC の往復は途中で切れない）ので、そこまでは入る。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "./projectStore";
+import { useTimelineStore } from "./timelineStore";
 import { importCancelledMessage } from "../uiLabels";
 import { resetAssetIdReservations } from "./assetImport";
+import { PROJECT_FORMAT, TRACK_KIND } from "../../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
+import type { TimelineProject } from "../../domain/timeline/types";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -65,14 +69,16 @@ describe("まとめて取り込みの中止（#1024 ③）", () => {
     expect(useProjectStore.getState().importError).toBeNull();
   });
 
-  // ⚠️ **前回の中止を持ち越さない**＝始めるときに印を下ろす。
-  it("次に取り込みを始めると、中止の印は下りる", async () => {
+  // ⚠️ **前回の中止を持ち越さない**＝次に取り込むと案内は入れ替わる。
+  // （中止したことを覚える印は**持たない**＝どの画面も読んでいなかったのに
+  //   コメントだけが「UI の案内用」と言っていた＝PR #1034 レビュー ℹ️）。
+  it("次に取り込みを始めると、中止の案内は残らない", async () => {
     stubAddAsset((n) => { if (n === 1) useProjectStore.getState().cancelAssetImport(); });
     await useProjectStore.getState().addAssets(["a.png", "b.png"]);
-    expect(useProjectStore.getState().importCancelled).toBe(true);
+    expect(useProjectStore.getState().importError).toBe(importCancelledMessage(1));
     stubAddAsset();
     await useProjectStore.getState().addAssets(["c.png"]);
-    expect(useProjectStore.getState().importCancelled, "前回の中止を持ち越している").toBe(false);
+    expect(useProjectStore.getState().importError, "前回の中止を持ち越している").toBeNull();
   });
 });
 
@@ -86,5 +92,68 @@ describe("importCancelledMessage（#1024 ③）", () => {
   it("1件も入っていなければ、そう言う", () => {
     expect(importCancelledMessage(0)).toContain("まだ何も入っていません");
     expect(importCancelledMessage(0)).not.toMatch(/0件/);
+  });
+});
+
+// ⚠️ **もう片方の形式でも止まる**（PR #1034 レビュー 🔴）＝画面のボタンは
+// **タイムライン形式の store** から取った取り込みを回しながら、中止だけ
+// **場面形式の store** を呼んでいた（世代番号はそれぞれの store が自分のものを見るので、
+// 別の store の番号を進めても**何も起きない**）。回し方を共有したうえで、ここで固定する。
+function timelineDoc(): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: "proj_20260904_001",
+    projectName: "テスト動画",
+    createdAt: "2026-09-04T00:00:00.000Z",
+    updatedAt: "2026-09-04T00:00:00.000Z",
+    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+    assets: [],
+    tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+    clips: [],
+  };
+}
+
+/** タイムライン形式でも1件ずつ取り込む代わりに、呼ばれた回数を数える。 */
+function stubTimelineAddAsset(onEach?: (n: number) => void) {
+  let n = 0;
+  useTimelineStore.setState({
+    addAssetByPath: vi.fn(async () => {
+      n += 1;
+      onEach?.(n);
+      useTimelineStore.setState({ importError: null });
+    }),
+  } as never);
+  return () => n;
+}
+
+describe("まとめて取り込みの中止（タイムライン形式・PR #1034 レビュー 🔴）", () => {
+  beforeEach(() => {
+    useTimelineStore.setState({ doc: timelineDoc(), importError: null, isImporting: false, importProgress: null, _importRunSeq: 0 } as never);
+  });
+
+  it("中止すると、次の1件へ進まない", async () => {
+    const count = stubTimelineAddAsset((n) => {
+      if (n === 2) useTimelineStore.getState().cancelAssetImport();
+    });
+    await useTimelineStore.getState().addAssets(["a.png", "b.png", "c.png", "d.png"]);
+    expect(count(), "中止したのに残りまで取り込んでいる").toBe(2);
+  });
+
+  it("中止したことと、入った件数を知らせる（場面形式と同じ文言）", async () => {
+    stubTimelineAddAsset((n) => { if (n === 2) useTimelineStore.getState().cancelAssetImport(); });
+    await useTimelineStore.getState().addAssets(["a.png", "b.png", "c.png"]);
+    expect(useTimelineStore.getState().importError).toBe(importCancelledMessage(2));
+  });
+
+  // ⚠️ **もう片方の store の中止では止まらない**＝取り違えを固定する
+  //   （型は合うので、ここを検査していないと同じ配線ミスがまた通る）。
+  it("場面形式の中止では止まらない（取り違えを見つける）", async () => {
+    const count = stubTimelineAddAsset((n) => {
+      if (n === 2) useProjectStore.getState().cancelAssetImport();
+    });
+    await useTimelineStore.getState().addAssets(["a.png", "b.png", "c.png"]);
+    expect(count(), "別の store の中止で止まっている（世代番号を共有してしまっている）").toBe(3);
   });
 });
