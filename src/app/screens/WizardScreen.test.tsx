@@ -128,5 +128,29 @@ describe("必須の欄は、押す前に分かる（#1026）", () => {
     toCompanyStep();
     expect((screen.getByLabelText(/業種/) as HTMLInputElement).labels?.[0]?.textContent).not.toContain("必須");
   });
+
+  // ⚠️ **画面まるごとで見る**（PR #1035 レビュー ℹ️・CLAUDE.md §7）＝欄ごとに書き並べる検査は、
+  //   **付け忘れた1か所**を構造的に見つけられない（次に必須の欄が増えたとき何も言わない）。
+  //   文字の印（`（必須）`）と欄の印（`aria-required`）は**必ず一致する**、を画面全体で見る。
+  it("文字の印と欄の印がずれている欄が無い（画面まるごと）", () => {
+    toCompanyStep();
+    const mismatched: string[] = [];
+    for (const el of Array.from(document.querySelectorAll("input, textarea"))) {
+      const field = el as HTMLInputElement | HTMLTextAreaElement;
+      const labelled = field.labels?.[0]?.textContent?.includes("必須") ?? false;
+      const marked = field.getAttribute("aria-required") === "true";
+      if (labelled !== marked) mismatched.push(`${field.labels?.[0]?.textContent ?? field.id}: 文字=${labelled} 欄=${marked}`);
+    }
+    expect(mismatched, "「（必須）」と `aria-required` が食い違う欄がある").toEqual([]);
+  });
+
+  it("見ている欄がある（走査が空振りしていない）", () => {
+    toCompanyStep();
+    expect(document.querySelectorAll("input, textarea").length, "欄を1つも見ていない").toBeGreaterThan(1);
+    expect(
+      Array.from(document.querySelectorAll("[aria-required=\"true\"]")).length,
+      "必須の欄を1つも見ていない",
+    ).toBeGreaterThanOrEqual(1);
+  });
 });
 
