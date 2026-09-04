@@ -58,9 +58,10 @@ import { PreviewZoomControl } from "../components/PreviewZoomControl";
 import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
+import { AssetThumb } from "../components/AssetThumb";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { assignableAssetsFor } from "../../domain/template/slotAssign";
+import { assignableAssetsFor, emptySlotLayerIds, slotForAsset } from "../../domain/template/slotAssign";
 import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
@@ -82,8 +83,6 @@ import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
   SearchIcon,
   PhotoIcon,
-  VideoIcon,
-  MusicIcon,
   PlusIcon,
   SaveIcon,
   TrashIcon,
@@ -208,15 +207,9 @@ function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
   return assignableAssetsFor(assets, layer);
 }
 
-function assetThumbClass(type: Asset["assetType"]): string {
-  if (type === ASSET_TYPE.video) return "thumb-video";
-  if (type === ASSET_TYPE.bgm) return "thumb-audio";
-  return "thumb-photo";
-}
-
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, importError, clearImportError,
+    status, scenes, templates, assets, assetSrcById, autoGenerateIfSafe, updateScene, importError, clearImportError,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus, saveBlockedReason,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
@@ -321,6 +314,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    *（真偽値だと、確認を出したまま別の場面を選んだときに対象がずれる）。
    */
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
+  /**
+   * 差し込み口の**置き換えの確認**（#1030 ①）＝空きが無いときに黙って上書きしない（`06 §2` 規約1）。
+   * ⚠️ **早期 return より前**に置く（hooks の並びを揃える）。
+   */
+  const [confirmReplaceSlot, setConfirmReplaceSlot] = useState<
+    { asset: Asset; layerId: string; replacing: string } | null
+  >(null);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // FREE→通常テンプレへ戻すと素材が動画に出なくなる場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
@@ -485,6 +485,32 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+
+  /**
+   * 左欄の素材タイルから**差し込み口へ入れる**（#1030 ①）。
+   *
+   * ⚠️ **空きが無いときは黙って置き換えない**（§2-5・`06 §2` 規約1）＝いま入っている素材が
+   * 何の合図も無く消えるので、**先に何が入れ替わるかを見せて**から入れる。
+   * ⚠️ **どの差し込み口かは domain が決める**（`slotForAsset`）＝画面で決めると `<select>` の
+   * 候補と食い違う。
+   */
+  const assignSlot = (layerId: string, assetId: string): void =>
+    patch((sc) => ({ ...sc, assetRefs: { ...sc.assetRefs, [layerId]: assetId } }));
+  /**
+   * 素材の入っていない差し込み口があるか（#1030 ④＝節を開いた状態で出すかの判断）。
+   *
+   * ⚠️ **判定は domain に1つ**（`emptySlotLayerIds`）＝「差し込み口ぜんぶ」ではない。
+   * 空の `background` は**塗り**になり、空の `logo` は**何も置かれない**ので問題ではなく、
+   * 灰色の枠が焼き込まれるのは `slot` だけ（描く側＝`layoutScene` を読んで確かめた）。
+   */
+  const hasEmptySlot = template ? emptySlotLayerIds(template.layers, selected.assetRefs).length > 0 : false;
+  const putAssetIntoSlot = (asset: Asset, target: { layerId: string; replacing: string | null }): void => {
+    if (target.replacing) {
+      setConfirmReplaceSlot({ asset, layerId: target.layerId, replacing: target.replacing });
+      return;
+    }
+    assignSlot(target.layerId, asset.assetId);
+  };
   // テキスト種別ごとのフォント上書き（#178）。null＝継承（その種別のキーを外す＝動画全体/場面に従う）。
   // 置く／外すの規則は **domain に1つ**（`withTextFontId`）＝2画面3か所に写さない（差分再監査 9巡目 🟡）。
   const setSceneTextFont = (textKey: TextKey, id: FontId | null) =>
@@ -1601,21 +1627,58 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ))}
             </div>
 
+            {/* ⚠️ **押した場所の近くに出す**（#990・`06 §2` 規約1）＝一覧の上に置くので、
+                長い一覧を下までたどっていても確認が視界の外へ流れない。 */}
+            {confirmReplaceSlot && (
+              <DeleteConfirm
+                className="mb"
+                showIcon={false}
+                confirmLabel="入れ替える"
+                message={
+                  <>
+                    <strong>{assets.find((a) => a.assetId === confirmReplaceSlot.replacing)?.displayName ?? "いま入っている素材"}</strong>
+                    {"を "}
+                    <strong>{confirmReplaceSlot.asset.displayName}</strong>
+                    {" に入れ替えますか？（この場面の見た目には空いている場所がありません。取り消しで戻せます）"}
+                  </>
+                }
+                onCancel={() => setConfirmReplaceSlot(null)}
+                onConfirm={() => {
+                  assignSlot(confirmReplaceSlot.layerId, confirmReplaceSlot.asset.assetId);
+                  setConfirmReplaceSlot(null);
+                }}
+              />
+            )}
             <div className="col" style={{ gap: 2 }}>
-              {visibleAssets.map((a) => (
-                <div className="asset-tile" key={a.assetId}>
-                  <div className={`asset-tile-thumb thumb ${assetThumbClass(a.assetType)}`} style={{ aspectRatio: "auto" }}>
-                    {a.assetType === ASSET_TYPE.video ? (
-                      <VideoIcon size={16} />
-                    ) : a.assetType === ASSET_TYPE.bgm ? (
-                      <MusicIcon size={16} />
-                    ) : (
-                      <PhotoIcon size={16} />
-                    )}
-                  </div>
-                  <span className="text-sm">{a.displayName}</span>
-                </div>
-              ))}
+              {/* ⚠️ **押しても何も起きない一覧を作らない**（#1030 ①）＝ここは表示専用で、
+                  差し替えは右欄の**畳まれた**節の中の名前の `<select>` だけだった＝
+                  画面1面ぶんが「押せそうに見えて何も起きない」で埋まっていた（ADR-0034 決定5）。
+                  ⚠️ **どの差し込み口へ入れるかは domain に1つ**（`slotForAsset`）＝
+                  `<select>` の候補と同じ規則を通す（片方でだけ入る素材を作らない）。
+                  ⚠️ **絵で選べるようにする**（#1030 ③）＝種別アイコンだけだと、同じ種類の写真が
+                  並んだときに名前でしか区別できない。素材画面と**同じ部品**（`AssetThumb`）。 */}
+              {visibleAssets.map((a) => {
+                const target = template ? slotForAsset(a, slotLayers, selected.assetRefs) : null;
+                const why = !template
+                  ? "この場面の見た目パターンが見つかりません。場面編集で選び直してください。"
+                  : target
+                    ? undefined
+                    : `${a.displayName}を入れられる場所が、この場面の見た目にはありません。別の見た目を選ぶか、下の「使用素材」で確かめてください。`;
+                return (
+                  <button
+                    type="button"
+                    className="asset-tile"
+                    key={a.assetId}
+                    disabled={!target}
+                    title={why}
+                    style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: target ? "pointer" : "default", opacity: target ? 1 : 0.55 }}
+                    onClick={() => target && putAssetIntoSlot(a, target)}
+                  >
+                    <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} size={16} box={28} />
+                    <span className="text-sm">{a.displayName}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <AssetImportButton
@@ -2114,7 +2177,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" defaultOpen={false} forceOpen={focus === "assets"}>
+            {/* ⚠️ **入っていない差し込み口があるときは、開いた状態で出す**（#1030 ④）＝
+                「素材が入っていません」の警告は出るのに、直す欄は**畳まれた節の中**にあった
+                （`06 §2-5`＝次の行動が見えていない）。条件つきの `defaultOpen` は
+                「この場面だけ声の大きさ」が既に採っている流儀。`key` を場面 id にするのは、
+                この画面が場面切替で**再マウントしない**ため（切り替えるたびに見直す）。 */}
+            <CollapsibleSection
+              scope={SECTION_SCOPE.sceneEdit}
+              key={`assets-${selected.sceneId}`}
+              title="使用素材"
+              defaultOpen={hasEmptySlot}
+              forceOpen={focus === "assets"}
+            >
             <div className="field">
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
