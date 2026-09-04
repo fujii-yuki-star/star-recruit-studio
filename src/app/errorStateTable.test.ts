@@ -72,6 +72,8 @@ function codeMessages(): Record<string, string> {
     RESTORE_POINTS_EMPTY,
     // ⚠️ **件数が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
     RESTORE_VOICES_CLEARED: voicesClearedMessage(" N " as unknown as number),
+    // ⚠️ **形式ごとの文も表で守る**（#991）＝片方だけ表に載せると、もう片方が黙ってずれる。
+    RESTORE_VOICES_CLEARED_TIMELINE: voicesClearedMessage(" N " as unknown as number, "timeline"),
     // ⚠️ **日時が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
     PROJECT_BACKUP_AVAILABLE: restoreOfferMessage(" 〔日時〕 "),
     READING_DICT_SYNC_FAILED,
@@ -339,10 +341,10 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(158);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(160);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(55);
+    ).toBe(56);
   });
 });

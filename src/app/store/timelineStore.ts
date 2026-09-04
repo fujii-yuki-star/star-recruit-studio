@@ -610,6 +610,13 @@ export interface TimelineExportRun {
    * 設定した意味と違う音になる。場面形式は書き出しの完了時に知らせている（ADR-0026②）。
    */
   duckMerged?: boolean;
+  /**
+   * 保存したファイルの場所（終わったときだけ入る・#991）。
+   *
+   * ⚠️ **無いときは導線を出さない**＝場所が分からないのに「保存した場所を開く」を出すと、
+   * 押しても何も起きないボタンになる（§2-5）。
+   */
+  outPath?: string;
 }
 
 /**
@@ -1816,7 +1823,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         outputPath,
         auto.normalize ? auto.targetLufs : undefined,
       );
-      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged } });
+      // ⚠️ **保存先も持ち帰る**（#991）＝場面形式は保存先と「開く」導線を出すのに、
+      // こちらは文だけだった（`06 §12.1` に導線を落とす理由は無い＝ADR-0026②）。
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged, outPath: outputPath } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
       // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。
