@@ -42,12 +42,28 @@ fn http_client() -> &'static reqwest::Client {
 /// ⚠️ **つながらないほうは元の文のまま**＝そちらは設定で直る。
 /// ⚠️ **1か所に寄せる**＝送る所は8か所あり、写すと**片方だけ時間切れを見分ける**ようになる。
 fn send_error(e: &reqwest::Error, timeout: &str, unreachable: &str) -> String {
-    pick_send_message(e.is_timeout(), timeout, unreachable)
+    pick_send_message(e.is_timeout(), e.is_connect(), timeout, unreachable)
 }
 
 /// 見分けそのもの（`reqwest::Error` は外から作れないので、判定だけ切り出して検査する）。
-fn pick_send_message(is_timeout: bool, timeout: &str, unreachable: &str) -> String {
-    if is_timeout { timeout } else { unreachable }.to_string()
+///
+/// ⚠️ **`is_timeout()` だけでは足りない**（PR #1036 レビュー 🔴）＝**つなぐまでの上限**
+/// （`connect_timeout`）が切れたときも `is_timeout()` は真になる。そこを「時間切れ」に倒すと、
+/// **届いてすらいないのに「開き直してください」**と言うことになり、接続先の設定を直せば
+/// 直る人に**実行できない次の行動**を出す（§2-5）。**つなぐ前に落ちたものは、拒否も
+/// 名前解決の失敗も時間切れも、まとめて「つながりません」**へ倒す。
+fn pick_send_message(
+    is_timeout: bool,
+    is_connect: bool,
+    timeout: &str,
+    unreachable: &str,
+) -> String {
+    if is_timeout && !is_connect {
+        timeout
+    } else {
+        unreachable
+    }
+    .to_string()
 }
 
 const VOICE_UNAVAILABLE_MESSAGE: &str =
@@ -362,11 +378,41 @@ mod tests {
     fn 時間切れはつながりませんと言わない() {
         // ⚠️ **時間切れは設定を見ても直らない**＝接続先を見に行かせない（§2-5）。
         assert_eq!(
-            pick_send_message(true, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE),
+            pick_send_message(
+                true,
+                false,
+                VOICE_TIMEOUT_MESSAGE,
+                VOICE_UNAVAILABLE_MESSAGE
+            ),
             VOICE_TIMEOUT_MESSAGE
         );
         assert_eq!(
-            pick_send_message(false, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE),
+            pick_send_message(
+                false,
+                false,
+                VOICE_TIMEOUT_MESSAGE,
+                VOICE_UNAVAILABLE_MESSAGE
+            ),
+            VOICE_UNAVAILABLE_MESSAGE
+        );
+    }
+
+    #[test]
+    fn つなぐ前に落ちたものはつながりませんへ倒す() {
+        // ⚠️ **つなぐまでの上限が切れたときも `is_timeout()` は真**（PR #1036 レビュー 🔴）＝
+        // そこを「時間切れ」に倒すと、届いてすらいないのに「開き直してください」と言うことになる。
+        assert_eq!(
+            pick_send_message(true, true, VOICE_TIMEOUT_MESSAGE, VOICE_UNAVAILABLE_MESSAGE),
+            VOICE_UNAVAILABLE_MESSAGE
+        );
+        // 拒否・名前解決の失敗（時間切れではない接続の失敗）も同じ側。
+        assert_eq!(
+            pick_send_message(
+                false,
+                true,
+                VOICE_TIMEOUT_MESSAGE,
+                VOICE_UNAVAILABLE_MESSAGE
+            ),
             VOICE_UNAVAILABLE_MESSAGE
         );
     }
