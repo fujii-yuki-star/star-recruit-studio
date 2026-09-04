@@ -177,6 +177,31 @@ describe("白紙から作った動画にも、会社情報を入れる道があ�
     expect(screen.queryByRole("button", { name: new RegExp(RESUME_WIZARD_LABEL) })).toBeNull();
   });
 
+  // ⚠️ **道を出すことと、そちらを勧めることは別**（PR #1028 レビュー 🟡）＝決定 (a) の理由は
+  // 「通るかどうかは利用者が決める」なので、白紙（＝手で組み立てる道・#393）では
+  // **「場面を追加」が主のまま**であるべき。最初はここが入れ替わっていた。
+  it("白紙のときは「場面を追加」が主のまま（会社情報の入口は控えめ）", () => {
+    withMeta({ companyInfo: undefined, generalBrief: undefined });
+    render(<NoScenesState purpose="ここで場面を作ります" onNavigate={vi.fn()} onAddScene={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /場面を追加/ }).className).toContain("btn-primary");
+    expect(screen.getByRole("button", { name: new RegExp(ADD_WIZARD_INPUT_LABEL) }).className).toContain("btn-secondary");
+  });
+
+  // 入力がある動画では、続きへ戻るのが主（#985 のまま＝この PR で変えていない）。
+  it("入力があるときは、続きへ戻るのが主", () => {
+    withMeta({ companyInfo: { companyName: "株式会社テスト" } });
+    render(<NoScenesState purpose="ここで場面を作ります" onNavigate={vi.fn()} onAddScene={vi.fn()} />);
+    expect(screen.getByRole("button", { name: new RegExp(RESUME_WIZARD_LABEL) }).className).toContain("btn-primary");
+    expect(screen.getByRole("button", { name: /場面を追加/ }).className).toContain("btn-secondary");
+  });
+
+  // ⚠️ **動画の種類を選ばない言い方**（PR #1028 レビュー 🟡）＝入れるものは種類で変わる
+  //（採用なら会社情報・一般なら発表の内容）ので、「会社情報」と決め打つと社内発表の動画で
+  // **入れないものを指す**ことになる。
+  it("入れるものを、動画の種類で決め打たない", () => {
+    expect(ADD_WIZARD_INPUT_LABEL, "種類で変わるものを決め打っている").not.toMatch(/会社/);
+  });
+
   it("押すとウィザードへ行く", () => {
     withMeta({ companyInfo: undefined, generalBrief: undefined });
     const onNavigate = vi.fn();
