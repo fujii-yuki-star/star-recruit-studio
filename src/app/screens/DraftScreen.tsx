@@ -7,7 +7,7 @@ import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -407,12 +407,14 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             {/* ⚠️ **入れた内容へ戻れるようにする**（#985）＝ウィザードは
                 「会社情報は、あとからでも直せます」と案内しているのに、**指す先がどこにも無かった**
                 （`06 §12.1`「案内の中で名指しするものは、その画面に実在すること」）。
-                ⚠️ **入力があるときだけ出す**＝白紙から作った動画には行き先が無い。 */}
-            {hasWizardBrief(meta) ? (
-              <button className="btn btn-ghost" onClick={() => onNavigate("wizard")} disabled={status === "generating"}>
-                {EDIT_WIZARD_INPUT_LABEL}
-              </button>
-            ) : null}
+                ⚠️ **白紙から作った動画にも出す**（#1003・決定 (a)）＝出さないと、白紙で始めた人は
+                **ゆうこにたたき台を作ってもらう道が永久に無い**（会社情報が無いと渡すものが無い）。
+                #393「白紙はウィザードを通らない道」は**始めるときの話**で、あとから入れる道を
+                塞ぐ意味ではない。⚠️ **言い方は分ける**＝まだ何も入れていないのに「見直す」と
+                言うと、在りもしないものを指す（`06 §12.1`）。 */}
+            <button className="btn btn-ghost" onClick={() => onNavigate("wizard")} disabled={status === "generating"}>
+              {hasWizardBrief(meta) ? EDIT_WIZARD_INPUT_LABEL : ADD_WIZARD_INPUT_LABEL}
+            </button>
             <button
               className="btn btn-secondary"
               onClick={() => setConfirmRegen(true)}

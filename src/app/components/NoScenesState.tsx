@@ -3,7 +3,7 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL } from "../uiLabels";
 import { hasWizardBrief } from "../newProjectGuard";
 
 /**
@@ -66,12 +66,21 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       // ウィザードの途中で保存した人が本当にやりたいのは「続きを入れてたたき台を作る」で、
       // 手で場面を並べることではない。**手動の道も残す**（消さない）。
       <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-        {canResumeWizard ? (
-          <button className="btn btn-primary btn-icon" onClick={() => onNavigate("wizard")}>
-            {RESUME_WIZARD_LABEL}
-            <ChevronRightIcon size={18} />
-          </button>
-        ) : null}
+        {/* ⚠️ **白紙から作った動画にも出す**（#1003・決定 (a)）＝出さないと、白紙で始めた人は
+            **ゆうこにたたき台を作ってもらう道が永久に無い**（会社情報が無いと渡すものが無い）。
+            ⚠️ **言い方は分ける**＝まだ何も入れていないのに「続き」と言うと、在りもしないものを指す。 */}
+        {/* ⚠️ **白紙のときは「場面を追加」を主のままにする**（PR #1028 レビュー 🟡）＝
+            決定 (a) の理由は「**通るかどうかは利用者が決める**」なので、道を出すことと
+            **そちらを勧めること**は別。白紙は「手で組み立てる道」（#393）なので、
+            主操作はそのまま置き、会社情報の入口は**控えめに**添える。
+            入力がある動画では、続きへ戻るのが主（#985 のまま）。 */}
+        <button
+          className={canResumeWizard ? "btn btn-primary btn-icon" : "btn btn-secondary btn-icon"}
+          onClick={() => onNavigate("wizard")}
+        >
+          {canResumeWizard ? RESUME_WIZARD_LABEL : ADD_WIZARD_INPUT_LABEL}
+          <ChevronRightIcon size={18} />
+        </button>
         <button className={canResumeWizard ? "btn btn-secondary" : "btn btn-primary"} onClick={onAddScene}>
           <PlusIcon size={18} />
           場面を追加
