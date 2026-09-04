@@ -1,6 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
+import type { TimelineProject } from "../../domain/timeline/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
@@ -59,7 +60,7 @@ import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { adoptPendingAssetIds, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
+import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -778,6 +779,29 @@ function defaultHeader(): ProjectHeader {
     voiceSettings: defaultVoiceSettings(),
   };
 }
+/**
+ * 焼き出した内容が**保存してよいか**（#992 ④＝確かめる段と作る段で**同じ門**を通す）。
+ *
+ * ⚠️ **もとは作る段にしか無かった**＝「約◯MB増えます／持っていけないものは…」まで見せてから
+ * 断っていた（`15 §3` が公開前チェックで採った「**保存先を選ばせた後に落とさない**」の逆・
+ * ADR-0026④）。`_bake` は同じ純粋変換なので、確かめる段でも同じ判定ができる。
+ *
+ * ⚠️ **2つ見る**＝①スキーマ適合（一覧に出るのに開けない動画を作らない＝読込側は適合を要求する）
+ * ②**id の重なり**（配列をまたいだ一意は JSON Schema で表せないので別に見る。重なると読む側の
+ * 引き当てが別のものに効き、**焼く前と絵が変わる**＝#811・ADR-0032 決定20）。
+ */
+function assertBakeable(doc: TimelineProject): void {
+  if (!validateTimelineProject(doc)) {
+    console.warn("[timeline] 焼き出した内容がスキーマに未適合:", validateTimelineProject.errors);
+    throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
+  }
+  const dup = duplicateIdsIn(doc);
+  if (dup.length > 0) {
+    console.warn("[timeline] 焼き出した内容に id の重なり:", dup);
+    throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
+  }
+}
+
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
@@ -1302,7 +1326,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない（焼き出し＝ADR-0032 決定16 と同じ流儀）。
       const src = parseProjectDoc(await loadProjectDoc(projectId));
       const existing = await listProjectSummaries();
-      const newId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      // ⚠️ **複製も同じ穴**（#992 ③）＝運んでいる間は作りかけの動画が一覧に居ないので、
+      // 続けて2回押すと**同じ番号**が返る。焼き出しと同じ予約を通す（片方だけ直さない）。
+      const newId = reserveProjectId(existing.map((p) => p.projectId), (ids) => createProjectId(new Date(), ids));
       const dup = duplicateProjectDoc(src, newId, new Date().toISOString());
       // ⚠️ **ファイルを運んでから文書を保存する**（焼き出しと同じ順＝`bakeToTimeline`）＝
       // 逆にすると、素材の無い動画が一覧に残る。
@@ -1516,6 +1542,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   estimateBake: async (range) => {
     const { doc, notes } = get()._bake(range, get().meta.projectName);
+    // ⚠️ **確かめる段でも同じ門を通す**（#992 ④）＝作る段だけで見ていたので、
+    // 「約◯MB増えます／持っていけないものは…」まで見せてから断っていた
+    // （`15 §3` が公開前チェックで採った「**保存先を選ばせた後に落とさない**」の逆＝ADR-0026④）。
+    // `_bake` は同じ純粋変換なので、ここでも同じ判定ができる（番号がまだ無くても、
+    // スキーマ適合と id の重なりは判定できる）。
+    // ⚠️ **門は作る段にも残す**＝範囲や名前を変えたら確かめ直す作りなので、間で変わりうる。
+    assertBakeable(doc);
     return { bytes: await bakeSizeBytes(get().meta.projectId, bakedFilePaths(doc)), notes };
   },
   bakeToTimeline: async (range, projectName) => {
@@ -1524,22 +1557,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await get().saveProject();
     const srcProjectId = get().meta.projectId;
     const existing = await listProjectSummaries();
-    const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+    // ⚠️ **番号を予約してから採る**（#992 ③）＝ファイルを運んでいる間、作りかけの動画は
+    // **一覧に居ない**（`list_projects` は `project.json` を読めないフォルダを飛ばす）ので、
+    // その間に2回目を始めると**同じ番号が返る**＝両方が同じフォルダへ運び、後の保存が勝って
+    // **2つ頼んで1つしかできず、素材だけが混ざる**。素材番号と同じ形で防ぐ。
+    const projectId = reserveProjectId(existing.map((p) => p.projectId), (ids) => createProjectId(new Date(), ids));
     const { doc, notes } = get()._bake(range, projectName, projectId);
-    // **未適合なら保存しない**＝一覧に出るのに開けない動画を作らない（読込側は適合を要求する・ADR-0026④）。
-    // 失敗は呼び出し側（入口 UI）が「作れませんでした…」として見せる（§2-5）。
-    if (!validateTimelineProject(doc)) {
-      console.warn("[timeline] 焼き出した内容がスキーマに未適合:", validateTimelineProject.errors);
-      throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
-    }
-    // ⚠️ **id の重なりは適合チェックを素通りする**（配列をまたいだ id の一意は JSON Schema の語彙に無い）。
-    // 重なると読む側の引き当てが別のものに効き、**焼く前と絵が変わる**（#811・ADR-0032 決定23）。
-    // 採番の穴は `bake.ts` 側で塞いだが、**門をここにも置く**＝壊れた文書をディスクへ書かない。
-    const dup = duplicateIdsIn(doc);
-    if (dup.length > 0) {
-      console.warn("[timeline] 焼き出した内容に id の重なり:", dup);
-      throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
-    }
+    // **未適合／id の重なりなら保存しない**＝一覧に出るのに開けない動画を作らない
+    // （読込側は適合を要求する。id の重なりは JSON Schema では表せないので別に見る）。
+    // 門は `assertBakeable` に1つ＝**確かめる段でも同じものを通す**（#992 ④）。
+    // ⚠️ **運ぶ前に見る**＝運んだ後に断ると、素材だけが置き去りになる（もとからこの順）。
+    assertBakeable(doc);
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));

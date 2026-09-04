@@ -115,3 +115,34 @@ export function adoptPendingAssetIds(projectId: string): void {
 export function resetAssetIdReservations(): void {
   reservedByProject.clear();
 }
+
+// ── 動画そのものの番号（`proj_YYYYMMDD_NNN`）の予約（#992 ③） ─────────────────
+//
+// ⚠️ **同じ番号の動画が2つ作られ、片方が消える**＝焼き出し（`bakeToTimeline`）と複製は
+// **ファイルを運んでから `project.json` を書く**（途中で失敗しても「素材の無い動画」を一覧に
+// 残さないため）。ところが番号は一覧から採り、一覧の側は **`project.json` を読めないフォルダを
+// 飛ばす**ので、**運んでいる最中は、作りかけの動画が一覧に居ない**。
+// ＝その間に2回目を始めると**同じ番号が返り**、両方が同じフォルダへ運んで、
+// 後から書いた `project.json` が勝つ＝**2つ頼んで1つしかできず、素材だけが混ざる**。
+//
+// ⚠️ **素材番号と同じ形で防ぐ**＝ディスクではなく**モジュール**に覚える（store の初期化や
+// 画面の行き来をまたいで効かせる）。⚠️ **`project.json` を先に書く手もあるが採らない**＝
+// 運んでいる途中で失敗したとき、**中身の無い動画が一覧に残る**（いまの順番はそれを避けている）。
+const reservedProjectIds = new Set<string>();
+
+/**
+ * まだ使っていない**動画の番号**を1つ取り、使用済みとして覚える。
+ *
+ * @param existingIds いま一覧に出ている番号（毎回渡す＝開き直しで戻ってきたものを数えるため）。
+ * @param mint 採番の規則（`createProjectId` を渡す＝規則はあちらに1つ）。
+ */
+export function reserveProjectId(existingIds: readonly string[], mint: (ids: readonly string[]) => string): string {
+  const id = mint([...existingIds, ...reservedProjectIds]);
+  reservedProjectIds.add(id);
+  return id;
+}
+
+/** テスト用：予約を捨てる（アプリでは呼ばない＝起動中は覚えたままが正しい）。 */
+export function resetProjectIdReservations(): void {
+  reservedProjectIds.clear();
+}

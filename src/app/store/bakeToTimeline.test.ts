@@ -1,5 +1,6 @@
 // 焼き出し（場面形式 → タイムライン形式・ADR-0032・#628）の store 側。片道であること・ファイルを運ぶ順序を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetProjectIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as bakeFsMod from '../../infrastructure/bakeFs';
@@ -27,6 +28,9 @@ function scene(id: string, order: number, over: Partial<Scene> = {}): Scene {
 
 describe('bakeToTimeline / estimateBake', () => {
   beforeEach(() => {
+  // ⚠️ **番号の予約はモジュールに残る**（#992 ③＝アプリ起動中は覚えたままが正しい）＝
+  // テスト間で持ち越すと、2件目以降の番号がずれる。
+  resetProjectIdReservations();
     vi.restoreAllMocks();
     // 新しい id は作成日から採るので、時計を固定して期待値を決定的にする。
     vi.useFakeTimers();
@@ -92,6 +96,15 @@ describe('bakeToTimeline / estimateBake', () => {
     await expect(useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画')).rejects.toThrow(BakeError);
     // 焼いた文書は保存されていない（走るのは元の保存だけ）。
     expect(vi.mocked(fsMod.saveProjectDoc).mock.calls.every((c) => c[0] === 'proj_20260701_001')).toBe(true);
+  });
+
+  // ⚠️ **確かめる段でも同じ門を通す**（#992 ④・PR #1022 レビュー 🟡）＝作る段だけで見ていたので、
+  // 「約◯MB増えます／持っていけないものは…」まで見せてから断っていた
+  //（`15 §3` が公開前チェックで採った「保存先を選ばせた後に落とさない」の逆＝ADR-0026④）。
+  // ⚠️ この検査を書くまで、**正典と PR 本文だけが「通している」と言っていた**（実装は通っていなかった）。
+  it('確かめる段でも、作れない内容なら先に断る（見せてから落とさない）', async () => {
+    useProjectStore.setState({ scenes: [scene('scene_001', 1, { durationSec: 0 })] });
+    await expect(useProjectStore.getState().estimateBake({ kind: BAKE_RANGE_KIND.whole })).rejects.toThrow(BakeError);
   });
 
   // #811＝焼き出しの採番が壊れて id が重なったとき、**適合チェックは素通りする**（配列をまたいだ
