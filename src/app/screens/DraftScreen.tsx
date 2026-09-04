@@ -7,7 +7,7 @@ import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -358,7 +358,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </button>
             {/* 時間の流れを見わたす／タイムライン編集用に作り直す入口（#394 → #635 へ吸収・ADR-0032）。 */}
             <button className="btn btn-ghost" onClick={() => onNavigate("timeline")}>
-              タイムラインで見る
+              {GO_TO_TIMELINE_VIEW_LABEL}
             </button>
           </div>
 

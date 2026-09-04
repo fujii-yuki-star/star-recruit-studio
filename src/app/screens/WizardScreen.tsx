@@ -325,8 +325,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {videoKind === VIDEO_KIND.recruit && (
                   <>
                 <div className="field">
+                  {/* ⚠️ **必須は欄の側でも分かるようにする**（#1026）＝未入力だと「次へ」で
+                      止められるのに、**押して初めて分かる**形だった（§2-5＝先に言う）。
+                      ⚠️ **色だけで伝えない**＝読み上げにも届くよう、文字（必須）で書く。 */}
                   <label className="field-label" htmlFor="companyName">
-                    会社名
+                    会社名<span className="text-sm" style={{ color: "var(--color-danger)", marginLeft: 4 }}>（必須）</span>
                   </label>
                   <input
                     id="companyName"
@@ -440,7 +443,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {videoKind === VIDEO_KIND.general && (
                   <>
                     <div className="field">
-                      <label className="field-label" htmlFor="title">テーマ・タイトル</label>
+                      {/* ⚠️ **必須は欄の側でも分かるようにする**（#1026・上と同じ理由）。 */}
+                      <label className="field-label" htmlFor="title">
+                        テーマ・タイトル<span className="text-sm" style={{ color: "var(--color-danger)", marginLeft: 4 }}>（必須）</span>
+                      </label>
                       <input
                         id="title"
                         className="input"

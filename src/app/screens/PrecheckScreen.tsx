@@ -23,7 +23,22 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
   action: { label: "要対応", color: "var(--color-danger)", bg: "var(--color-danger-soft)" },
 };
 
+/**
+ * 公開前チェックの「戻る」ラベル（来た画面ごと・#1026）。入口はこの2つ。
+ *
+ * ⚠️ **仕上がり確認と同じ形にする**（`PREVIEW_BACK_LABEL`）＝もとは常に「場面編集へ戻る」で、
+ * **来ていない画面**を指していた（§2-5＝次の行動が実際と違う）。
+ */
+const PRECHECK_BACK_LABEL: Partial<Record<ScreenId, string>> = {
+  preview: "仕上がり確認へ戻る",
+  export: "書き出しへ戻る",
+};
+
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
+  // 来た画面（既知の入口以外・未設定は仕上がり確認＝順路の1つ手前）。
+  const precheckReturnTo = useProjectStore((s) => s.precheckReturnTo);
+  const precheckBackTo: ScreenId =
+    precheckReturnTo && PRECHECK_BACK_LABEL[precheckReturnTo] ? precheckReturnTo : "preview";
   const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, userFontsUnreadable, refreshUserFonts } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
@@ -236,9 +251,12 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
 
       {/* 操作 */}
       <div className="row-between mt-lg">
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("scene-edit")}>
+        {/* ⚠️ **来た画面へ戻る**（#1026）＝入口は仕上がり確認と書き出しの2つなのに、
+            戻るは常に「場面編集へ戻る」で、**来ていない画面**を指していた（§2-5）。
+            仕上がり確認は前から入口を覚えている（`previewReturnTo`）ので、扱いが割れていた。 */}
+        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(precheckBackTo)}>
           <ArrowLeftIcon size={16} />
-          場面編集へ戻る
+          {PRECHECK_BACK_LABEL[precheckBackTo]}
         </button>
         <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
           <button
