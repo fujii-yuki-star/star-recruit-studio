@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PreviewZoomControl } from "../components/PreviewZoomControl";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
@@ -49,7 +50,7 @@ const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
-  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, updateVoiceSettings, previewReturnTo } =
+  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, setPrecheckReturnTo, updateVoiceSettings, previewReturnTo } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   // 「戻る」先＝来た画面（#410 sub3）。既知の入口（たたき台/場面編集/書き出し）以外や未設定はたたき台へ。
@@ -653,9 +654,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="col gap-sm mt-lg">
-            {/* 見わたす画面には「タイムラインで編集する形にする」も置いてある（#394 → #635 へ吸収）。 */}
+            {/* 行き先は見わたす画面（そこから焼き出せる）。**呼び方は入口ごとに揃える**（#1026・`06 §8.7`）。 */}
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
-              タイムラインで見る・編集する形にする
+              {GO_TO_TIMELINE_VIEW_LABEL}
             </button>
             <button
               className="btn btn-secondary btn-block"
@@ -667,7 +668,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             >
               場面を直す
             </button>
-            <button className="btn btn-primary btn-block btn-lg" onClick={() => onNavigate("precheck")}>
+            <button className="btn btn-primary btn-block btn-lg" onClick={() => { setPrecheckReturnTo("preview"); onNavigate("precheck"); }}>
               公開前チェックへ進む
               <ChevronRightIcon size={18} />
             </button>

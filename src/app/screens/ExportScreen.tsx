@@ -49,6 +49,8 @@ interface ExportProps {
 
 export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
+  // 公開前チェックへ「どこから来たか」を渡す（#1026＝戻る先が固定だった）。
+  const setPrecheckReturnTo = useProjectStore((s) => s.setPrecheckReturnTo);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
   const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
@@ -542,7 +544,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <div className="row-between mt-lg">
-            <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("precheck")} disabled={busy}>
+            <button className="btn btn-ghost btn-icon" onClick={() => { setPrecheckReturnTo("export"); onNavigate("precheck"); }} disabled={busy}>
               <ArrowLeftIcon size={16} />
               公開前チェックへ戻る
             </button>
