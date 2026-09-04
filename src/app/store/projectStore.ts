@@ -159,7 +159,11 @@ export function hasOpenProject(s: {
 
 /** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除・素材編集のブロック判定で共有（#379/#547 P2-1）。 */
 export function isExportBusy(phase: ExportPhase): boolean {
-  return phase === "rendering" || phase === "encoding";
+  // ⚠️ **保存先を選んでいる間も走行中に数える**（#993 ①⑥・`06 §12.1`）＝
+  // ここから下には**同期で重い処理**（`startBlockedMessage` は全場面のレイアウト計算を回る）が
+  // 並んでいて UI が固まるのに、走行中でないと**押した手応えが何も出ない**。
+  // ⚠️ **タイムライン形式は前から数えている**（`isTimelineExportBusy`）＝形式で割らない（ADR-0026②）。
+  return phase === "preparing" || phase === "rendering" || phase === "encoding";
 }
 // 書き出し中に素材/BGM を変更しようとしたときの案内（#547 P2-1・§2-5 次の行動）。ガードは無言 no-op にせず
 // これを出す＝素材画面以外（場面編集・ウィザードは importError を表示）からの操作でも「押しても効かない」を避ける（ADR-0026④）。

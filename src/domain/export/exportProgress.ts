@@ -129,7 +129,22 @@ export function exportProgressLabel(run: ExportProgressState, opts?: { compact?:
 export function exportHeadingLabel(run: ExportProgressState): string {
   if (run.phase === 'done') return '保存しました';
   if (run.phase === 'rendering' || run.phase === 'encoding') return '動画を書き出しています';
+  // ⚠️ **始めた段にも言葉を出す**（#993 ①・PR #1025 レビュー 🟡）＝この段を作ったのに、
+  // 見出しは空・数字は 0% のままだった＝**「押した瞬間に始まったと分かる」と書きながら、
+  // 画面はほとんど何も言っていなかった**（言い分が実装より強い）。
+  if (run.phase === 'preparing') return '準備しています';
   return '';
+}
+
+/**
+ * 進み具合を**数で言えるか**（#993 ①）。
+ *
+ * ⚠️ **言えない段に数を出さない**＝`preparing` は保存先を選んでもらっている間と、
+ * 場面ぜんぶの下ごしらえ＝**どれだけ進んだかを持っていない**。0% と出すと「止まっている」に見え、
+ * 動かすと嘘になる。**わからない区間の見せ方**（流れるバー）へ倒す。
+ */
+export function hasExportPercent(phase: ExportRunPhase): boolean {
+  return phase !== 'preparing';
 }
 
 /**

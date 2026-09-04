@@ -10,6 +10,7 @@
 import { useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { useFocusTrap } from "../hooks/useFocusTrap";
+import { useKeepInViewport } from "../hooks/useKeepInViewport";
 
 export interface ContextMenuItem {
   label: string;
@@ -21,10 +22,6 @@ export interface ContextMenuItem {
   onSelect: () => void;
 }
 
-/** はみ出さないように寄せるための見込みサイズ（実測ではなく上限の目安）。 */
-const MENU_W = 176;
-const ITEM_H = 34;
-const MENU_PAD = 8;
 
 /**
  * 右クリックの位置に出すメニュー。**画面の外へ出さない**ように寄せる（出ると押せない＝§2-5）。
@@ -71,12 +68,13 @@ export function ContextMenu({
     buttons[next]?.focus();
   };
 
+  // ⚠️ **大きさは見積もらず、実物を測って寄せる**（#1023＝実機の指摘）＝もとは
+  // 「1項目 34px × 件数 ＋ 余白8px」で高さを見積もっていたが、**実際は見積もりより大きくなる**
+  //（長い項目が2行に折り返す・余白や枠の実寸が違う）ので、**寄せたつもりで見切れて**いた。
+  // 見切れると、そこにある項目（「この欄を閉じる」「下へ移す」など）に**永久に手が届かない**。
+  const { style: fit } = useKeepInViewport(menuRef, x, y, items.length > 0);
+
   if (items.length === 0) return null;
-  // 画面幅・高さは実行時にしか分からないので、ここで寄せる（開く側に同じ計算を書かせない）。
-  const maxX = typeof window !== "undefined" ? window.innerWidth - MENU_W : x;
-  const maxY = typeof window !== "undefined" ? window.innerHeight - (items.length * ITEM_H + MENU_PAD) : y;
-  const left = Math.max(0, Math.min(x, Math.max(0, maxX)));
-  const top = Math.max(0, Math.min(y, Math.max(0, maxY)));
 
   return (
     <>
@@ -95,8 +93,7 @@ export function ContextMenu({
         role="menu"
         style={{
           position: "fixed",
-          left,
-          top,
+          ...fit,
           zIndex: 51,
           background: "#fff",
           border: "1px solid rgba(0,0,0,0.15)",

@@ -20,7 +20,7 @@ import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { AudioAutoField } from "../components/AudioAutoField";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -182,11 +182,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setPhase("error");
       return;
     }
+    // ⚠️ **押した瞬間に「始まった」と分かるようにする**（#993 ①⑥）＝ここから下には
+    // **同期で重い処理**（`startBlockedMessage` は**全場面のレイアウト計算**を回る・2回走る）が
+    // 並んでいて、その間 UI は固まる。それまで文言は「動画を保存」、右の欄は
+    // 「押すと進行状況が表示されます」＝**何も始まっていないように見える**（場面が多いほど長い）。
+    // ⚠️ **保存先を選んでいる間も走行中に数える**（`06 §12.1`＝二重に始めない）。
+    // タイムライン形式は先に `preparing` を立てている＝そちらへ揃える（ADR-0026②）。
+    setPhase(EXPORT_RUN_PHASE.preparing);
     // 先に保存先を選んでもらう（キャンセルしたら何もせず元の画面のまま）。
     let outputPath: string;
     try {
       const picked = await showSaveVideoDialog(fileName.trim() || "export");
-      if (!picked) return; // キャンセル
+      // ⚠️ **やめたら走行中を降ろす**＝立てたまま返ると、押せないまま固まる。
+      if (!picked) { setPhase(EXPORT_RUN_PHASE.idle); return; }
       outputPath = picked;
     } catch (e) {
       setMessage("保存先を選べませんでした。もう一度お試しください。");
@@ -587,15 +595,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {(busy || (phase === "done" && !showsPastResult)) && (
             <>
               <div className="text-center mb">
-                <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
-                  {percent}%
-                </div>
+                {/* ⚠️ **言えない段に数を出さない**（#993 ①）＝`preparing` は進み具合を持っていない。
+                    0% と出すと「止まっている」に見える。 */}
+                {hasExportPercent(phase) && (
+                  <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
+                    {percent}%
+                  </div>
+                )}
                 <div className="text-muted">{exportHeadingLabel({ phase, progress, encode })}</div>
               </div>
               <div className="progress mb">
                 {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
                     「動いている」ことだけ伝える（#391）。レンダリング段/完了は常に幅で表す。 */}
-                {phase === "encoding" && !encode ? (
+                {(phase === "encoding" && !encode) || !hasExportPercent(phase) ? (
                   <div className="progress-fill progress-fill--indeterminate" />
                 ) : (
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
