@@ -154,6 +154,18 @@ export function bulkVoiceProgressText(done: number, total: number, state: BulkVo
 }
 
 /**
+ * 声をまとめて作っている間、**どの画面にいても**出す一言（#1024 ⑤）。
+ *
+ * ⚠️ **書き出しの全画面バナーと同じ理由**（#547 P2-1・`15 §4`）＝離れた画面からは
+ * **止まったように見える**（進み具合も中止も、置いてある3画面でしか見えなかった）。
+ * ⚠️ **待つ以外の次の行動を言う**＝この状態は**書き出しを止める**ので、
+ * 「終わるのを待つ」か「中止する」かを選べることまで言う（§2-5）。
+ */
+export function bulkVoiceRunningNotice(done: number, total: number): string {
+  return `${bulkVoiceProgressText(done, total, "generating")}。書き出しは、声ができてから始められます。`;
+}
+
+/**
  * 一括作成が押せない理由（押せないのに理由が出ない、を作らない＝§2-5）。押せるときは undefined。
  *
  * 「作る対象が無い」は2種類あり、混同すると嘘になる：**セリフが1つも無い**（まだ何も書いていない）と

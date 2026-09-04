@@ -8,6 +8,7 @@ import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
+import { BulkVoiceBanner } from "./app/components/BulkVoiceBanner";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
@@ -227,6 +228,10 @@ function App() {
             （`hasOwnHeader` で囲まない）＝場面編集で待っている利用者にこそ必要。書き出し画面では出さない
             （そこに結果が出ており二重になる）＝開いた時点で既読にする（下の ExportScreen 側で解除）。 */}
         {screen !== "export" && <ExportResultNotice onNavigate={navigate} />}
+        {/* 声をまとめて作っている間の進み具合と中止を、**どの画面にいても**出す（#1024 ⑤）。
+            ⚠️ **独自ヘッダの画面でも出す**（`hasOwnHeader` で囲まない）＝場面編集・タイムライン編集で
+            待っている利用者にこそ要る。操作が画面に出ている間は部品側が数えて自分で引っ込む。 */}
+        <BulkVoiceBanner />
         {renderScreen()}
       </div>
     </div>
