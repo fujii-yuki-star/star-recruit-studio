@@ -39,7 +39,7 @@ import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
-import { subtitleOverflowsCanvas } from "../../renderer/layout";
+import { layoutScene, subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -59,6 +59,9 @@ import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { AssetThumb } from "../components/AssetThumb";
+import { SlotDropOverlay } from "../components/SlotDropOverlay";
+import { slotDropTargets, type SlotDropTarget } from "../components/slotDropTargets";
+import { usePointerDrag } from "../hooks/usePointerDrag";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { assignableAssetsFor, emptySlotLayerIds, slotForAsset } from "../../domain/template/slotAssign";
@@ -321,6 +324,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmReplaceSlot, setConfirmReplaceSlot] = useState<
     { asset: Asset; layerId: string; replacing: string } | null
   >(null);
+  /**
+   * **掴んでプレビューの差し込み口へ落とす**（#1030 ②）ための道具。
+   * ⚠️ **早期 return より前**に置く（hooks の並びを揃える）。
+   */
+  const beginDrag = usePointerDrag();
+  const [dragging, setDragging] = useState<{ asset: Asset; at: { x: number; y: number }; over: string | null } | null>(null);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // FREE→通常テンプレへ戻すと素材が動画に出なくなる場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
@@ -504,6 +513,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    * 灰色の枠が焼き込まれるのは `slot` だけ（描く側＝`layoutScene` を読んで確かめた）。
    */
   const hasEmptySlot = template ? emptySlotLayerIds(template.layers, selected.assetRefs).length > 0 : false;
+  /**
+   * **掴んでプレビューの差し込み口へ落とす**（#1030 ②・ADR-0034 決定2＝二重導線）ときの落とし先。
+   * 箱は描く側（`layoutScene`）が返したものをそのまま使う＝**見えている枠と判定がずれない**。
+   *
+   * ⚠️ **押す道は残す**（#1030 ①）＝**ドラッグでしかできない操作は作らない**（決定19）。
+   * ⚠️ **作法は共有**（`usePointerDrag`）＝左ボタンだけ・少し動かすまで掴まない・
+   * `Escape` と `pointercancel` でやめられる、を画面ごとに書かない。
+   */
+  const dropTargets: SlotDropTarget[] = template ? slotDropTargets(layoutScene(selected, template)) : [];
+  /**
+   * いま指の下にある差し込み口（`elementFromPoint`）。
+   * ⚠️ **枠の座標を自分で計算し直さない**＝拡大率（`previewZoom`）や縦型で
+   * **見えている枠と判定がずれる**。
+   */
+  const slotAt = (x: number, y: number): string | null => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-slot-drop]");
+    return el?.dataset.slotDrop ?? null;
+  };
   const putAssetIntoSlot = (asset: Asset, target: { layerId: string; replacing: string | null }): void => {
     if (target.replacing) {
       setConfirmReplaceSlot({ asset, layerId: target.layerId, replacing: target.replacing });
@@ -1673,6 +1700,31 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     title={why}
                     style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: target ? "pointer" : "default", opacity: target ? 1 : 0.55 }}
                     onClick={() => target && putAssetIntoSlot(a, target)}
+                    onPointerDown={(e) => {
+                      if (!target) return; // 入れられない素材は掴めない（押せないのと同じ扱い）
+                      beginDrag(e, {
+                        onStart: (ev) => setDragging({ asset: a, at: { x: ev.clientX, y: ev.clientY }, over: slotAt(ev.clientX, ev.clientY) }),
+                        onMove: (ev) => setDragging({ asset: a, at: { x: ev.clientX, y: ev.clientY }, over: slotAt(ev.clientX, ev.clientY) }),
+                        onEnd: (ev, started) => {
+                          setDragging(null);
+                          // 掴まずに離した＝押しただけ（`onClick` が受ける）。
+                          // ⚠️ **この行を外しても、いまは同じ結果になる**（変異チェックで生き残った）＝
+                          //   落とし先の目印は掴んでいる間しか描かれないので、`slotAt` が誰も返さない。
+                          //   それでも残すのは、**振る舞いを目印の寿命に頼らせない**ため（目印を常に
+                          //   描くように変えた瞬間、押しただけで落ちるようになる）。
+                          if (!started) return;
+                          const layerId = slotAt(ev.clientX, ev.clientY);
+                          // ⚠️ **差し込み口の外で離したら何もしない**＝寄せない（ADR-0034 決定10）。
+                          if (!layerId) return;
+                          // ⚠️ **落とし先は指した口**＝押したときの「空いている先頭」ではない。
+                          //   入れられない口へ落としたら何もしない（黙って別の口へ入れない）。
+                          const layer = slotLayers.find((l) => l.id === layerId);
+                          if (!layer || !assignableFor(layer, assets).some((x) => x.assetId === a.assetId)) return;
+                          putAssetIntoSlot(a, { layerId, replacing: selected.assetRefs[layerId] ?? null });
+                        },
+                        onCancel: () => setDragging(null),
+                      });
+                    }}
                   >
                     <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} size={16} box={28} />
                     <span className="text-sm">{a.displayName}</span>
@@ -1740,6 +1792,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   「出来上がり」を見る場所なので線を出さない。 */}
               <SafeAreaToggle />
               <ScenePreview zoom={previewZoom} onFitPercent={setPreviewFitPct} scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
+                {/* **掴んだ間だけ落とし先を見せる**（#1030 ②）＝どこへ入るかを、離す前に分かるようにする。
+                    箱は描く側（`layoutScene`）が返したものをそのまま使う＝見えている枠と判定がずれない。 */}
+                {dragging && template && dropTargets.length > 0 && (
+                  <SlotDropOverlay
+                    targets={dropTargets}
+                    canvas={template.canvas}
+                    hoveredLayerId={dragging.over}
+                    labelOf={(id) => slotLabels[slotLayers.findIndex((l) => l.id === id)] ?? "素材"}
+                  />
+                )}
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
