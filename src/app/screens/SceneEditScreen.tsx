@@ -64,7 +64,7 @@ import { slotDropTargets, type SlotDropTarget } from "../components/slotDropTarg
 import { usePointerDrag } from "../hooks/usePointerDrag";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { assignableAssetsFor, emptySlotLayerIds, slotForAsset } from "../../domain/template/slotAssign";
+import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
 import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
@@ -521,7 +521,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    * ⚠️ **作法は共有**（`usePointerDrag`）＝左ボタンだけ・少し動かすまで掴まない・
    * `Escape` と `pointercancel` でやめられる、を画面ごとに書かない。
    */
-  const dropTargets: SlotDropTarget[] = template ? slotDropTargets(layoutScene(selected, template)) : [];
+  // ⚠️ **掴んでいる素材ごとに決める**（PR #1042 レビュー 🔴）＝入れられる口だけを出す。
+  //   入らない口の枠を出すと「落とせそうに見えて何も起きない」。判定は押す道と同じ関数。
+  const dropTargets: SlotDropTarget[] =
+    template && dragging ? slotDropTargets(layoutScene(selected, template), slotLayers, selected.assetRefs, dragging.asset) : [];
   /**
    * いま指の下にある差し込み口（`elementFromPoint`）。
    * ⚠️ **枠の座標を自分で計算し直さない**＝拡大率（`previewZoom`）や縦型で
@@ -1718,8 +1721,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           if (!layerId) return;
                           // ⚠️ **落とし先は指した口**＝押したときの「空いている先頭」ではない。
                           //   入れられない口へ落としたら何もしない（黙って別の口へ入れない）。
+                          // ⚠️ **入れられるかは domain の同じ関数で見る**（枠を出す側と同じ）。
+                          //   ⚠️ `dropTargets` は**見ない**＝あれは描いた時点の値で、掴み始めた
+                          //   描画では空（`dragging` がまだ null）＝いつも「落とせない」になる。
                           const layer = slotLayers.find((l) => l.id === layerId);
-                          if (!layer || !assignableFor(layer, assets).some((x) => x.assetId === a.assetId)) return;
+                          if (!layer || !isAssignableToLayer(a, layer)) return;
                           putAssetIntoSlot(a, { layerId, replacing: selected.assetRefs[layerId] ?? null });
                         },
                         onCancel: () => setDragging(null),

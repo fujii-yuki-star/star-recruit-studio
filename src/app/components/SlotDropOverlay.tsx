@@ -41,6 +41,11 @@ export function SlotDropOverlay({
               alignItems: "center",
               justifyContent: "center",
               boxSizing: "border-box",
+              // ⚠️ **枠だけ当たり判定を戻す**（PR #1042 レビュー 🔴）＝外側の箱は `pointerEvents:"none"`
+              //   （プレビューの操作を邪魔しないため）だが、`pointer-events` は**受け継がれる**ので、
+              //   このままだと `elementFromPoint` がこの枠を**素通りして下の SVG を返す**＝
+              //   どこへ持って行っても落とせない（検査は `elementFromPoint` を差し替えているので出ない）。
+              pointerEvents: "auto",
             }}
           >
             <span
