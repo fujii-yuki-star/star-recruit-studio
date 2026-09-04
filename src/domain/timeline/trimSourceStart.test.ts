@@ -1,0 +1,298 @@
+// 左端を詰めたら、素材の頭出しも進める（#988）。
+//
+// ⚠️ **進めないと、頭は切れず中身が右へずれ、代わりに末尾が落ちる**（他社の型と逆の結果）。
+// ⚠️ **しかも「ここで分けて前半を消す」と結果が食い違っていた**（分けるほうは進めていた）＝
+// 同じことをする2つの操作で、鳴る音・映る絵が違った。
+import { describe, expect, it } from 'vitest';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { TIMELINE_SCHEMA_VERSION } from './types';
+import type { TimelineClip, TimelineProject } from './types';
+import { EDIT_BLOCKED, trimClip } from './edit';
+import { splitClip } from './split';
+import { validateTimelineProject } from '../validation/generated/validators.js';
+import type { Template } from '../template/types';
+
+const clip = (over: Partial<TimelineClip> = {}): TimelineClip => ({
+  id: 'clip_001',
+  kind: TIMELINE_CLIP_KIND.audio,
+  trackId: 'track_002',
+  startSec: 0,
+  durationSec: 10,
+  bundledBgmId: 'found-new-hope',
+  ...over,
+});
+
+const doc = (clips: TimelineClip[]): TimelineProject =>
+  ({
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_20260902_001',
+    projectName: 'テスト',
+    createdAt: '2026-09-02T00:00:00.000Z',
+    updatedAt: '2026-09-02T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [],
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+    ],
+    clips,
+  }) as TimelineProject;
+
+describe('左端を詰めると、素材の頭出しが進む（#988）', () => {
+  it('音の部品＝詰めたぶんだけ進む', () => {
+    const r = trimClip(doc([clip()]), 'clip_001', 'start', 3);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(3);
+  });
+
+  it('速さのぶんも進む（置いた長さ × 速さ ＝ 使う素材の長さ）', () => {
+    const r = trimClip(doc([clip({ speed: 2 })]), 'clip_001', 'start', 3);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(6);
+  });
+
+  it('既に頭出しがあるときは、そこから足す', () => {
+    const r = trimClip(doc([clip({ sourceStartSec: 5 })]), 'clip_001', 'start', 2);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(7);
+  });
+
+  it('左端を左へ戻すと、頭出しも戻る（他社の型と同じ）', () => {
+    // ⚠️ **戻したのに頭出しが進んだまま**だと、詰めて戻すだけで中身がずれ続ける。
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 5 })]);
+    const r = trimClip(before, 'clip_001', 'start', 3);
+    expect(r.ok && r.doc.clips[0].sourceStartSec, '2秒ぶん戻る').toBe(3);
+  });
+
+  it('詰めて戻すと、元に戻る（行って来いで狂わない）', () => {
+    const before = doc([clip()]);
+    const trimmed = trimClip(before, 'clip_001', 'start', 3);
+    const back = trimmed.ok ? trimClip(trimmed.doc, 'clip_001', 'start', 0) : null;
+    expect(back?.ok && back.doc.clips[0].sourceStartSec).toBe(0);
+    expect(back?.ok && back.doc.clips[0].startSec).toBe(0);
+    expect(back?.ok && back.doc.clips[0].durationSec).toBe(10);
+  });
+
+  it('素材の頭より前へは戻さない（0 で止まる）', () => {
+    // ⚠️ **負の頭出しは意味が無い**＝素材の -2 秒は存在しない。
+    // schema も 0 以上しか許さないので、書けてしまうと**開けない動画**になる。
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 1 })]);
+    const r = trimClip(before, 'clip_001', 'start', 0);
+    expect(r.ok && (r.doc.clips[0].sourceStartSec ?? 0)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('右端は進めない（素材の使い始めは変わらない）', () => {
+    const r = trimClip(doc([clip({ sourceStartSec: 5 })]), 'clip_001', 'end', 8);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(5);
+  });
+
+  it('素材の時間を持たない部品（文字）には書かない', () => {
+    const text = clip({ kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', bundledBgmId: undefined });
+    const r = trimClip(doc([text]), 'clip_001', 'start', 3);
+    expect(r.ok && 'sourceStartSec' in r.doc.clips[0]).toBe(false);
+  });
+});
+
+// ⚠️ **ここが本体**＝同じことをする2つの操作で、結果が同じになる。
+describe('「分けて前半を消す」と「左端を詰める」が同じ結果になる（#988）', () => {
+  it('音の部品', () => {
+    const before = doc([clip()]);
+    // ① 3秒で分けて、前半を消す＝後半だけが残る。
+    const split = splitClip(before, 'clip_001', 3, () => 1);
+    expect(split.ok).toBe(true);
+    const tail = split.ok ? split.doc.clips.find((c) => c.id !== 'clip_001')! : null;
+    // ② 左端を3秒まで詰める。
+    const trimmed = trimClip(before, 'clip_001', 'start', 3);
+    expect(trimmed.ok).toBe(true);
+    const head = trimmed.ok ? trimmed.doc.clips[0] : null;
+    expect(head?.sourceStartSec, '素材のどこから使うかが食い違う').toBe(tail?.sourceStartSec);
+    expect(head?.startSec).toBe(tail?.startSec);
+    expect(head?.durationSec).toBe(tail?.durationSec);
+  });
+
+  it('速さが掛かっていても同じ', () => {
+    const before = doc([clip({ speed: 1.5, sourceStartSec: 2 })]);
+    const split = splitClip(before, 'clip_001', 4, () => 1);
+    const tail = split.ok ? split.doc.clips.find((c) => c.id !== 'clip_001')! : null;
+    const trimmed = trimClip(before, 'clip_001', 'start', 4);
+    const head = trimmed.ok ? trimmed.doc.clips[0] : null;
+    expect(head?.sourceStartSec).toBe(tail?.sourceStartSec);
+  });
+});
+
+// ⚠️ **差し込み口に入れた動画も同じ**（#988）＝値はクリップ自身でなく**置き場所ごと**に持つので、
+// `kind` で絞ると取り残され、**同じ動画が置き場所で挙動が割れる**（直接置きは進むのに）。
+describe('差し込み口に入れた動画も、左端を詰めたら進む（#988）', () => {
+  const template = {
+    schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+  } as unknown as Template;
+  const opts = { templateOf: () => template };
+  const tmplDoc = (over: Partial<TimelineClip> = {}): TimelineProject =>
+    ({
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' }, ...over,
+      } as TimelineClip],
+    }) as TimelineProject;
+
+  it('置き場所ごとの使い始めが進む', () => {
+    const r = trimClip(tmplDoc(), 'clip_001', 'start', 3, opts);
+    expect(r.ok && r.doc.clips[0].slotClips?.main?.startSec).toBe(3);
+  });
+
+  it('「分けて前半を消す」と同じ結果になる', () => {
+    const before = tmplDoc();
+    const split = splitClip(before, 'clip_001', 3, () => 1, opts);
+    const tail = split.ok ? split.doc.clips.find((c) => c.id !== 'clip_001')! : null;
+    const trimmed = trimClip(before, 'clip_001', 'start', 3, opts);
+    const head = trimmed.ok ? trimmed.doc.clips[0] : null;
+    expect(head?.slotClips?.main?.startSec, '置き場所で挙動が割れている').toBe(tail?.slotClips?.main?.startSec);
+  });
+});
+
+// ⚠️ **画面が見た目パターンを渡しているか**（#988）＝domain が正しくても、
+// store が渡さなければ**差し込み口だけ取り残される**（同じ動画が置き場所で挙動が割れる）。
+// 分けるほうは渡しているので、**片方だけ渡し忘れる**のがこのリポジトリで繰り返している型。
+describe('画面が、見た目パターンを渡している（#988）', () => {
+  it('トリムも「分ける」と同じように渡している', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(process.cwd(), 'src', 'app', 'store', 'timelineStore.ts'), 'utf8');
+    const trims = [...src.matchAll(/trimClip\((?:[^;]*?)\)/g)].map((m) => m[0]);
+    expect(trims.length, '走査が空振りしている').toBeGreaterThanOrEqual(2);
+    // ⚠️ **左端を動かしうる呼び出しだけを見る**＝`'end'` と決め打った呼び出し
+    //（声の実尺合わせ）は頭出しに関係しないので、渡していなくても問題にならない。
+    // ここを絞らないと、**関係の無い呼び出しのせいで門番が鳴り続け、信用されなくなる**。
+    const movesHead = trims.filter((t) => !/,\s*'end'\s*,/.test(t));
+    expect(movesHead.length, '左端を動かしうる呼び出しを1つも拾えていない').toBeGreaterThanOrEqual(2);
+    const without = movesHead.filter((t) => !t.includes('templateOf'));
+    expect(without, '見た目パターンを渡していない呼び出しがある').toEqual([]);
+  });
+});
+
+// ⚠️ **開けない動画を作らない**（#988）＝`sourceStartSec` は schema が 0 以上しか許さない。
+// 負を書くと**保存はできて次に開けない**（#974 と同じ形）。
+describe('戻しても、開ける文書のままでいる（#988）', () => {
+  it('左端を戻し切っても、スキーマに適合する', () => {
+    const before = doc([clip({ startSec: 5, durationSec: 5, sourceStartSec: 1 })]);
+    const r = trimClip(before, 'clip_001', 'start', 0);
+    expect(r.ok).toBe(true);
+    expect(r.ok && validateTimelineProject(r.doc), '次に開けない文書になっている').toBe(true);
+  });
+
+  it('差し込み口の使い始めも 0 で止まる', () => {
+    const template = {
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+    } as unknown as Template;
+    const d = {
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 5, durationSec: 5, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+        slotClips: { main: { startSec: 1 } },
+      } as TimelineClip],
+    } as TimelineProject;
+    const r = trimClip(d, 'clip_001', 'start', 0, { templateOf: () => template });
+    expect(r.ok && (r.doc.clips[0].slotClips?.main?.startSec ?? 0)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// 素材を使い切った先までは詰めない（PR #1004 レビュー 🔴）。
+//
+// ⚠️ **「分ける」には前からあった門が、トリムに移植されていなかった**＝進めた頭出しが
+// 切り出す終わり（`endSec`）や素材の実尺を追い越すと、`resolveSlotClip` が終端を「無し」へ
+// 正規化して**切り捨てたはずの素材の続きが黙って流れ出す**（#816 と同じ形）。
+// ⚠️ **トリムのほうがドラッグで日常的に触る**ぶん、起こりやすい。
+describe('素材を使い切った先までは詰めない（#1004 レビュー 🔴）', () => {
+  const template = {
+    schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+  } as unknown as Template;
+  const opts = { templateOf: () => template };
+  /** 「ここまで」を決めた動画が差し込み口に入っている文書。 */
+  const withEnd = (endSec: number): TimelineProject =>
+    ({
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+        slotClips: { main: { endSec } },
+      } as TimelineClip],
+    }) as TimelineProject;
+
+  it('切り出す終わりを追い越すほど詰めると、断る', () => {
+    const r = trimClip(withEnd(4), 'clip_001', 'start', 5, opts);
+    expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.trimPastSource });
+  });
+
+  it('手前までなら詰められる（使えるうちは断らない）', () => {
+    const r = trimClip(withEnd(4), 'clip_001', 'start', 3, opts);
+    expect(r.ok && r.doc.clips[0].slotClips?.main?.startSec).toBe(3);
+  });
+
+  // ⚠️ **素材の実尺でも同じ**＝進めた先に絵が1枚も無いと、書き出しが何度やっても直らない案内で落ちる。
+  it('素材の実尺を追い越すほど詰めても、断る', () => {
+    const d = {
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { durationSec: 4 } }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+      } as TimelineClip],
+    } as TimelineProject;
+    expect(trimClip(d, 'clip_001', 'start', 5, opts)).toEqual({ ok: false, reason: EDIT_BLOCKED.trimPastSource });
+  });
+
+  // ⚠️ **分からないことを理由にしない**＝終端も実尺も無ければ断らない。
+  it('判る材料が無ければ断らない', () => {
+    const d = {
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+      } as TimelineClip],
+    } as TimelineProject;
+    expect(trimClip(d, 'clip_001', 'start', 8, opts).ok).toBe(true);
+  });
+
+  // ⚠️ **右端を詰めるときは頭出しが進まない**ので、この門は当たらない。
+  it('右端を詰めるときは断らない（頭出しが進まない）', () => {
+    expect(trimClip(withEnd(4), 'clip_001', 'end', 5, opts).ok).toBe(true);
+  });
+
+  // ⚠️ **既に使い切った先を指している壊れたデータでも、右端は詰められる**＝
+  // 門を「詰める向きに関係なく」当てると、**直す手立てごと塞ぐ**（短くすることもできなくなる）。
+  // ここが `headSec > 0` の効いている所（この検査が無いと、外しても気づけない）。
+  it('もう使い切った所から始まっている壊れたデータでも、右端は詰められる', () => {
+    // ⚠️ **素材の実尺で作る**（`endSec` では作れない）＝`resolveSlotClip` は
+    // 「終わり ≦ 始まり」を**終端なしへ正規化する**ので、`endSec` を使うとこの状態を再現できない
+    //（最初そう書いて、変異が生き残って気づいた）。
+    const d = {
+      ...doc([]),
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { durationSec: 4 } }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' },
+        slotClips: { main: { startSec: 9 } }, // 素材（4秒）を使い切った先から始まっている
+      } as TimelineClip],
+    } as TimelineProject;
+    expect(trimClip(d, 'clip_001', 'end', 5, opts).ok, '壊れたデータで、直す手立てごと塞いでいる').toBe(true);
+  });
+
+  // ⚠️ **「分ける」と同じ原因でも、次の行動が違う**＝同じ文を使い回すと
+  // 案内が「分けられません」になって、していない操作を指す。
+  it('「分ける」とは別の理由を返す（案内の次の行動が違う）', () => {
+    const r = trimClip(withEnd(4), 'clip_001', 'start', 5, opts);
+    expect(r.ok ? null : r.reason).not.toBe(EDIT_BLOCKED.splitPastSource);
+  });
+});
+

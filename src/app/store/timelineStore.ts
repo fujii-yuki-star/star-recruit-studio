@@ -826,6 +826,11 @@ function emptyState() {
   };
 }
 
+// ⚠️ **見た目パターンを渡す**（#988）＝差し込み口に入れた動画の頭出しを進めるのに要る
+// （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。分けるときと同じ。
+const templateOfNow = (id: string): Template | undefined =>
+  useProjectStore.getState().templates.find((t) => t.templateId === id);
+
 export const useTimelineStore = create<TimelineState>((set, get) => ({
   ...emptyState(),
   // ⚠️ **開き直しでも消さない**（`/canon-check`）＝`emptyState` に入れると、走っている合成が
@@ -1053,7 +1058,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set((s) => ({ _historyGroupDepth: 0, _historyGroupPending: false, _historyGroupGen: s._historyGroupGen + 1 })),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
-  trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
+  trimSelectedClip: (edge, sec) =>
+    applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec, { templateOf: templateOfNow })),
   moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to), PANEL_ID.arrange),
   moveClipsBy: (updates) => {
     const doc = get().doc;
@@ -1062,7 +1068,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (r.ok) commit(set, get, r.doc);
     else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
   },
-  trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec), PANEL_ID.arrange),
+  trimClipById: (clipId, edge, sec) =>
+    applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec, { templateOf: templateOfNow }), PANEL_ID.arrange),
   setEditBlocked: (reason, at) => set({ editBlocked: { reason, at: blockTargetFor(reason, at) } }),
   setSelectedClipBox: (patch) =>
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),

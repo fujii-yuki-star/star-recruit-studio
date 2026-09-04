@@ -20,25 +20,19 @@ import {
   sameEasingCurve,
   splitEasingCurve,
 } from '../project/keyframes';
-import { TIMELINE_CLIP_KIND } from '../enums';
 import { TIMELINE_MIN_CLIP_SEC, VOLUME_POINTS_MAX } from '../constants';
 import type { BezierEasing, EasingSpec } from '../enums';
 import type { Keyframe } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
-import type { SlotClipOverride } from '../project/types';
 import type { Template } from '../template/types';
-import { videoPlacementsOfClip } from './video';
 import { isUnsplittableClipKind } from './clipKind';
-import { resolveSlotClip } from '../asset/clip';
+// ⚠️ **頭出しの規則は1か所**（#988）＝トリムでも同じものを使う（写すと片方だけ直る）。
+import { advancedSlotStarts, advancedSourceStart, usesUpSource } from './sourceTime';
 import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
 
-/**
- * **素材の時間を持つ種類**（分けたら頭出しを進める相手）。文字・図形・字幕・見た目パターンは
- * 素材の時間を持たないので進めない（意味の無い項目を書かない）。
- */
-const USES_SOURCE_TIME = new Set<string>([TIMELINE_CLIP_KIND.audio, TIMELINE_CLIP_KIND.slot]);
+
 
 /**
  * 切れ目が「キーフレームちょうど」と言える幅（＝保存の丸めの単位。`keyframeTimeAt` がマイクロ秒へ丸める）。
@@ -111,43 +105,6 @@ export function splitClipIssue(
   return null;
 }
 
-/**
- * その切り方だと、**素材を使い切った先**から後半が始まるか（#816 レビュー 🔴）。
- *
- * 見るのは**置き場所ごとの実効値**（直接置き／差し込み口とも `videoPlacementsOfClip` 経由）＝
- * 継承（per-use → 素材既定）を解いた後の値で判断する（描画・再生と同じ材料）。
- * 判る材料が無い（終端も実尺も未指定）ときは**断らない**＝分からないことを理由にしない。
- */
-function usesUpSource(
-  doc: TimelineProject,
-  clip: TimelineClip,
-  headSec: number,
-  templateOf: ((templateId: string) => Template | undefined) | undefined,
-): boolean {
-  return videoPlacementsOfClip(doc, clip, { templateOf }).some((p) => {
-    const advanced = p.sourceStartSec + headSec * p.speed;
-    const asset = doc.assets.find((a) => a.assetId === p.assetId);
-    // ⚠️ **直接置きに「切り出す終わり」は無い**（#834-3）＝クリップが持つのは `sourceStartSec`/`speed` だけで
-    // `endSec` に当たる項目が無い（`timeline-project.schema` の `TimelineClip`）。以前はここも
-    // `resolveSlotClip` へ通していたが、上書きにも既定にも `endSec` が入らないので**必ず `undefined`**
-    // ＝実質デッドコードで、「継承が抜けている」と誤読される形だった。
-    // ⚠️ **素材既定（`asset.clip`）を足さない**＝`videoPlacementsOfClip` の直接置きの枝は
-    // **クリップの値だけ**を読む（素材既定を効かせない）。ここだけが見ると、**画面では流れている先を
-    // 門だけが「使い切った」と断る**＝描画・再生と同じ材料で判断する、が崩れる。
-    // ⚠️ **見るのは「置き場所ごとの使い方を持つか」**＝`slotClips[層 id]` を持つ置き場所すべて。
-    // ⚠️ **差し込み口だけに絞らない**（差分再監査 🟡・#809）＝**立ち絵も置き場所になった**（`use:'character'`）
-    // ので、`use === slot` で絞ると**立ち絵に入れた動画の「ここまで」だけが効かない**（同じ入れ物・同じ
-    // 解決〔`resolveSlotClip`〕を共有しているのに、この門だけ見ない＝ADR-0026②）。
-    // かつては「直接置き／差し込み口の2種しか無いので挙動は同じ」と書いていたが、**もう事実ではない**。
-    const endSec = p.layerId != null
-      ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec
-      : undefined;
-    const sourceEnd = asset?.metadata?.durationSec ?? undefined;
-    // 判る材料が無ければ限界は無限＝この比較は必ず偽になる（別に見張りを置かない＝守れない枝を作らない）。
-    const limit = Math.min(endSec ?? Infinity, sourceEnd ?? Infinity);
-    return advanced >= limit;
-  });
-}
 
 /**
  * キーフレームの時刻は**マイクロ秒へ丸めて**保存する（`keyframeTimeAt`）ので、それより細かい差は
@@ -352,36 +309,6 @@ export function splitVolumePoints(
   return { head, tail };
 }
 
-/**
- * 差し込み口に入れた動画の**頭出しを進めた** `slotClips`（#816-2）。分ける対象が見た目パターンの
- * 部品でないとき・進める枠が無いときは**何も足さない**（`{}` を返す＝スプレッドしても無害）。
- *
- * ⚠️ **どの枠が動画を受けるかは見た目パターンが決める**（`videoPlacementsOfClip` と同じ規則）＝
- * `assetRefs` を全部数えると、背景の層に入れた動画まで進めてしまう。
- * ⚠️ **持っているかどうかで決めない**（#750 レビュー 🔴 と同じ理由）＝置いたばかりの枠は
- * `slotClips` を持たないので、条件にすると**後半が頭から流れ直す**。進める枠なら必ず書く。
- * ⚠️ 見た目が解けないときは進めない＝そのときはその部品自体が描かれない（書き出しも断る）。
- */
-function advancedSlotStarts(
-  doc: TimelineProject,
-  clip: TimelineClip,
-  headSec: number,
-  templateOf: ((templateId: string) => Template | undefined) | undefined,
-): { slotClips?: Record<string, SlotClipOverride> } {
-  if (clip.kind !== TIMELINE_CLIP_KIND.template) return {};
-  // ⚠️ **置き場所ごとの使い方を持つものすべて**（差分再監査 🟡・#809）＝立ち絵も置き場所になったので、
-  // `use === slot` で絞ると**分けたときに立ち絵の動画だけ頭出しが進まず**、後半が前半と同じところから
-  // 流れ直す（この関数が「作らない」と書いている状態そのもの）。値の置き場も解決も差し込み口と共有。
-  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.layerId != null);
-  if (slots.length === 0) return {};
-  const next: Record<string, SlotClipOverride> = { ...(clip.slotClips ?? {}) };
-  for (const p of slots) {
-    if (p.layerId == null) continue;
-    // 置いた長さ × 速度 ＝ 使う素材の長さ（`11 §7.6.3.2`）＝速さのぶんも進む。
-    next[p.layerId] = { ...(clip.slotClips?.[p.layerId] ?? {}), startSec: p.sourceStartSec + headSec * p.speed };
-  }
-  return { slotClips: next };
-}
 
 /**
  * 帯を `atSec` で2つに分ける。**前半は同じ id のまま**（選択・動き・連動の参照が切れない）、
@@ -422,9 +349,7 @@ export function splitClip(
     // （置いた長さ × 速度 ＝ 使う素材の長さ・`11 §7.6.3.2`）。
     // ⚠️ **持っているかどうかで決めない**（#750 レビュー 🔴）＝置いたばかりの音は両方とも持たないので、
     // 条件にすると**後半が曲の頭から鳴り直す**。素材の時間を持つ種類なら**必ず書く**。
-    ...(USES_SOURCE_TIME.has(clip.kind)
-      ? { sourceStartSec: (clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1) }
-      : {}),
+    ...advancedSourceStart(clip, headSec),
     // ⚠️ **差し込み口に入れた動画も進める**（#816-2）＝見た目パターンの部品は素材の時間を
     // クリップ自身でなく**置き場所ごと**（`slotClips[layerId].startSec`）に持つので、`kind` で
     // 判定すると取り残される＝**後半が前半と同じところから流れ直す**（絵も音も）。
