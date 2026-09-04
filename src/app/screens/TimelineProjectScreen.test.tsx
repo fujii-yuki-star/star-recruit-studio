@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL, DUCK_MERGED_MESSAGE, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, DUCK_MERGED_MESSAGE, clipOutsidePlayheadMessage, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -7386,5 +7386,95 @@ describe("timelineStore: 再生位置でそろえる（#1005）", () => {
     });
     useTimelineStore.getState().trimSelectedClipsAt("end", 3);
     expect(useTimelineStore.getState().doc?.clips.map((c) => c.durationSec)).toEqual([3, 2]);
+  });
+});
+
+// 再生位置が部品の外にあるとき（#996）。
+describe("TimelineProjectScreen: 選んでいるのに掴めないとき（#996）", () => {
+  const two = () =>
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 4, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "よろしく", status: NARRATION_STATUS.generated, voicePath: "voices/clip_002.wav" } },
+      ],
+    });
+
+  // ⚠️ **同じ画面で流儀を割らない**（ADR-0026②）＝「動き」「音量の変化」は文で断っているのに、
+  // 「位置・大きさ」だけ黙って取っ手が消えていた。
+  it("再生位置が部品の外なら、理由を出す", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" })); // 4.0〜7.0秒
+    expect(screen.getByText(clipOutsidePlayheadMessage(4, 7))).toBeInTheDocument();
+  });
+
+  it("中にいるときは出さない（いつも出す、を作らない）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.queryByText(clipOutsidePlayheadMessage(4, 7))).toBeNull();
+  });
+
+  // ⚠️ **行き止まりにしない**＝理由だけでなく、そこへ跳ぶ道を置く。
+  it("「この部品の時間へ」で、その部品の先頭へ跳ぶ", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByRole("button", { name: "この部品の時間へ" }));
+    expect(useTimelineStore.getState().playheadSec).toBe(4);
+    // 跳んだ先では理由が消える（＝取っ手が出る状態になった）。
+    expect(screen.queryByText(clipOutsidePlayheadMessage(4, 7))).toBeNull();
+  });
+
+  it("再生中は跳べない（走っている位置を掴ませない）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByText("再生"));
+    const btn = screen.getByRole("button", { name: "この部品の時間へ" });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "再生を止めてから使えます");
+  });
+
+  // ⚠️ **「時間の外」と「隠れている」を混ぜない**（#1013 レビュー 🟡）＝
+  // 描画に出ているかで見ると、隠した列・隠した部品・隠したまとまりも落ちるので、
+  // **時間の中に居るのに「外にあります」と言い、跳んでも消えない**（＝行き止まり）。
+  it("隠した列の部品でも、時間の中に居れば「外にあります」とは言わない", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual, hidden: true },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.queryByText(clipOutsidePlayheadMessage(0, 5)), "時間の中に居るのに「外」と言っている").toBeNull();
+    expect(screen.queryByRole("button", { name: "この部品の時間へ" }), "押しても何も変わらない道が出ている").toBeNull();
+  });
+
+  it("隠した部品でも同じ（隠れている理由は別の話）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは", hidden: true },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.queryByText(clipOutsidePlayheadMessage(0, 5))).toBeNull();
+  });
+
+  // ⚠️ **音の部品に「出ている」と言わない**（画面に映ると誤解する）。
+  it("音の部品には「鳴っている」と言う", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "5" } }); // clip_002 は 0〜2秒
+    fireEvent.click(screen.getByRole("button", { name: /よろしく/ }));
+    expect(screen.getByText(clipOutsidePlayheadMessage(0, 2, "鳴っている", "置いて"))).toBeInTheDocument();
   });
 });

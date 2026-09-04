@@ -40,7 +40,7 @@ import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
-import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -119,7 +119,7 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
-import { DORMANT_FONT_HINT, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -3654,6 +3654,35 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {selected.kind === TIMELINE_CLIP_KIND.text ? "（文言は「中身」で直せます）" : ""}
                   </p>
                 )}
+                {/* ⚠️ **再生位置が部品の外なら、そう言う**（#996）＝キャンバスの取っ手は
+                    **その時刻に出ている部品**にしか付かないので、選んでいるのに掴めない。
+                    ⚠️ **同じ画面で流儀を割らない**（ADR-0026②）＝「動き」「音量の変化」の節は
+                    同じ状況を**文で断っている**のに、ここだけ黙って取っ手が消えていた。
+                    ⚠️ **行き止まりにしない**＝理由だけでなく**そこへ跳ぶ道**を置く
+                    （キーフレーム・音量の点の「この位置へ」と同じ流儀）。
+                    ⚠️ **見るのは「時刻だけ」**（#1013 レビュー 🟡）＝`isOnCanvas` は
+                    **隠した列・隠した部品・隠したまとまり**も落とすので、
+                    **時間の中に居るのに「外にあります」と言い、跳んでも消えない**（＝行き止まり）。
+                    隣の「動き」「音量の変化」の節も**時刻だけ**を見ているので、そちらへ揃える。
+                    隠れている理由は別の話（`canvasHoldMessage`／#1012 の射程）。
+                    ⚠️ **端の見方は「描く側」に合わせる**（半開＝`clipIsLiveAt`）＝この欄は
+                    「キャンバスで掴めるか」の話なので、取っ手を出す側と同じ規則で見る。
+                    隣の「音量の変化」が終わりちょうどを含む（閉じている）のは、そちらが
+                    **点を置ける位置**の話だから（#512）＝規則が違うのは意図。 */}
+                {!clipIsLiveAt(selected, frameTimeSec(doc, playheadSec)) && (
+                  <div className="row gap-sm" style={{ alignItems: "baseline" }}>
+                    <p className="text-sm" style={{ color: "var(--color-text-muted)", margin: 0 }}>
+                      {clipOutsidePlayheadMessage(selected.startSec, clipEndSec(selected))}
+                    </p>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                      onClick={() => { setPlayhead(selected.startSec); followPlayhead(); }}
+                    >
+                      この部品の時間へ
+                    </button>
+                  </div>
+                )}
                 <div className="row gap-sm">
                   <NumberField label="横位置" value={selectedBox.x} {...editGuard()} onChange={(v) => setSelectedClipBox({ x: v })} inputStyle={{ width: 90 }} />
                   <NumberField label="縦位置" value={selectedBox.y} {...editGuard()} onChange={(v) => setSelectedClipBox({ y: v })} inputStyle={{ width: 90 }} />
@@ -3863,8 +3892,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 </p>
                 {!keyframeAtPlayhead.live ? (
                   <p className="notice notice-warn" role="alert">
-                    再生位置がこの部品の外にあります。部品が出ている時間（
-                    {selected.startSec.toFixed(1)}〜{clipEndSec(selected).toFixed(1)}秒）へ動かしてから置いてください。
+                    {clipOutsidePlayheadMessage(selected.startSec, clipEndSec(selected), "出ている", "置いて")}
                   </p>
                 ) : (
                   <>
@@ -4221,8 +4249,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 </p>
                 {!volumePointAtPlayhead.live ? (
                   <p className="notice notice-warn" role="alert">
-                    再生位置がこの部品の外にあります。部品が鳴っている時間（
-                    {selected.startSec.toFixed(1)}〜{clipEndSec(selected).toFixed(1)}秒）へ動かしてから置いてください。
+                    {clipOutsidePlayheadMessage(selected.startSec, clipEndSec(selected), "鳴っている", "置いて")}
                   </p>
                 ) : (
                   <div className="row gap-sm">
