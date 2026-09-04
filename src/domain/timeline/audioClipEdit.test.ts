@@ -494,3 +494,106 @@ describe('setClipAssetRef の後始末', () => {
     expect(r.ok && r.doc).toBe(d);
   });
 });
+
+// 直接置いた動画にも「速さ」「素材の使い始め」がある（#1019 ⑦）。
+//
+// ⚠️ **持てるのに触れなかった**＝`videoPlacementsOfClip` は直接置きで `sourceStartSec`／`speed` を
+// **読んで**いるのに、書く側は `kind === 'audio'` で断っていた。しかも `splitClip`／
+// `explodeTemplateClip` は**その値を書く**ので、**置いた覚えのない頭出し・速さが付いた部品**ができ、
+// 見ることも直すことも既定へ戻すこともできなかった（§2-5・ADR-0026④）。
+describe('直接置いた動画の速さ・素材の使い始め（#1019 ⑦）', () => {
+  const videoDoc = (over: Partial<TimelineClip> = {}): TimelineProject =>
+    doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_v', ...over,
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+
+  it('速さを変えられる（等速は持たない）', () => {
+    const r = setClipSpeed(videoDoc(), 'clip_001', 2);
+    expect(r.ok && r.doc.clips[0].speed).toBe(2);
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+    if (!r.ok) return;
+    const back = setClipSpeed(r.doc, 'clip_001', 1);
+    expect(back.ok && back.doc.clips[0].speed).toBeUndefined();
+  });
+
+  it('素材の使い始めを変えられる（0 は持たない）', () => {
+    const r = setClipSourceStart(videoDoc(), 'clip_001', 5);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(5);
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+    if (!r.ok) return;
+    const back = setClipSourceStart(r.doc, 'clip_001', 0);
+    expect(back.ok && back.doc.clips[0].sourceStartSec).toBeUndefined();
+  });
+
+  // ⚠️ **分ける・バラすで付いた値を、既定へ戻せる**（#1019 ⑦の実害）。
+  it('置いた覚えのない値を、既定へ戻せる', () => {
+    const r = setClipSourceStart(videoDoc({ sourceStartSec: 5, speed: 2 }), 'clip_001', 0);
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBeUndefined();
+  });
+
+  it('保存できる範囲へ収める（速さの上下限・使い始めは負にしない）', () => {
+    const hi = setClipSpeed(videoDoc(), 'clip_001', 99);
+    expect(hi.ok && hi.doc.clips[0].speed).toBe(CLIP_SPEED_MAX);
+    expect(hi.ok && validateTimelineProject(hi.doc)).toBe(true);
+    const lo = setClipSpeed(videoDoc(), 'clip_001', -1);
+    expect(lo.ok && lo.doc.clips[0].speed).toBe(CLIP_SPEED_MIN);
+    const neg = setClipSourceStart(videoDoc(), 'clip_001', -3);
+    expect(neg.ok && neg.doc.clips[0].sourceStartSec).toBeUndefined();
+  });
+
+  // ⚠️ **写真の差し込み口には出さない**＝動かない絵に「速さ」は意味が無い。
+  it('写真の部品は断る（音の理由を流用しない）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_p', assetType: 'image', displayName: '外観', filePath: 'p.png' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_p',
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+    const r = setClipSpeed(d, 'clip_001', 2);
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.notPlayable);
+    // 「音や読み上げの部品で変えてください」は動画の話をしていない＝流用しない（§2-5）。
+    expect(!r.ok && r.reason).not.toBe(EDIT_BLOCKED.notAudio);
+  });
+
+  // ⚠️ **読み上げは断ったまま**＝長さは声の実尺で決まっており、速さを変えると
+  //   連動している字幕の区間も意味を失う（決定24）。
+  it('読み上げは断ったまま（この項目が無い、と言う）', () => {
+    const d = doc({
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002',
+        startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'none' },
+      } as unknown as TimelineClip],
+    } as Partial<TimelineProject>);
+    const r = setClipSpeed(d, 'clip_001', 2);
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.contentField);
+  });
+
+  // ⚠️ **2つの setter が同じ門を通る**＝片方だけ開くと、速さは変えられるのに使い始めは断られる。
+  it('速さと使い始めは、同じ相手に対して同じ答えを返す', () => {
+    const photo = doc({
+      assets: [{ assetId: 'asset_p', assetType: 'image', displayName: '外観', filePath: 'p.png' }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_p',
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+    for (const d of [videoDoc(), photo]) {
+      const a = setClipSpeed(d, 'clip_001', 2);
+      const b = setClipSourceStart(d, 'clip_001', 2);
+      expect(a.ok).toBe(b.ok);
+      if (!a.ok && !b.ok) expect(a.reason).toBe(b.reason);
+    }
+  });
+
+  it('固定した列では変えられない', () => {
+    const d = videoDoc();
+    const locked = { ...d, tracks: d.tracks.map((t) => (t.id === 'track_001' ? { ...t, locked: true } : t)) };
+    const r = setClipSpeed(locked, 'clip_001', 2);
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.locked);
+  });
+});

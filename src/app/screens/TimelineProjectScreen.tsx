@@ -37,7 +37,7 @@ import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
@@ -2011,6 +2011,33 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ? editBlockedMessage[EDIT_BLOCKED.trimNoneAtTime]
           : undefined,
   });
+  /**
+   * **速さ・素材の使い始め**の欄（#1019 ⑦）。音の部品と、直接置いた動画で**同じものを出す**。
+   *
+   * ⚠️ **写して2つ置かない**＝上限・刻み・既定の見せ方が片方だけずれる（このリポジトリで繰り返している型）。
+   * 断り方（どの部品で変えられるか）は domain 側の1つの門（`blockPlaybackEdit`）が持つ。
+   */
+  const playbackFields = selected && (
+    <>
+      <NumberField
+        label="速さ（倍）"
+        step={0.1}
+        min={CLIP_SPEED_MIN}
+        max={CLIP_SPEED_MAX}
+        value={selected.speed ?? 1}
+        {...editGuard()}
+        onChange={(v) => setSelectedClipSpeed(v)}
+      />
+      <NumberField
+        label="素材の使い始め（秒）"
+        step={0.5}
+        min={0}
+        value={selected.sourceStartSec ?? 0}
+        {...editGuard()}
+        onChange={(v) => setSelectedClipSourceStart(v)}
+      />
+    </>
+  );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
   //
   // 落とし先は2つ＝**仕上がり確認**（動画の中の場所を決める）と**列**（時刻と列を決める）。
@@ -4095,28 +4122,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ))}
                   </select>
                 </label>
-                                  <NumberField
-                    label="速さ（倍）"
-                    step={0.1}
-                    min={CLIP_SPEED_MIN}
-                    max={CLIP_SPEED_MAX}
-                    value={selected.speed ?? 1}
-                    {...editGuard()}
-                    onChange={(v) => setSelectedClipSpeed(v)}
-                  />
-
-                                  <NumberField
-                    label="素材の使い始め（秒）"
-                    step={0.5}
-                    min={0}
-                    value={selected.sourceStartSec ?? 0}
-                    {...editGuard()}
-                    onChange={(v) => setSelectedClipSourceStart(v)}
-                  />
-
+                {playbackFields}
                 <p className="text-muted">
                   速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
                   素材が置き場所より短いときは繰り返して埋まります。
+                </p>
+              </CollapsibleSection>
+            )}
+
+            {/* **直接置いた動画にも、速さと素材の使い始めを出す**（#1019 ⑦）。
+                ⚠️ **持てるのに触れなかった**＝描画（`videoPlacementsOfClip`）はこの2つを**読んで**おり、
+                分ける・バラすは**書いて**いたので、**置いた覚えのない頭出し・速さが付いた部品**ができ、
+                見ることも直すことも既定へ戻すこともできなかった（§2-5・ADR-0026④）。
+                ⚠️ **欄そのものは音と同じものを出す**（`playbackFields`）＝写すと片方だけ直る。 */}
+            {doc && isDirectVideoClip(doc, selected) && (
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="videoPlayback" title="この動画の使い方" defaultOpen={true}>
+                {playbackFields}
+                <p className="text-muted">
+                  速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
                 </p>
               </CollapsibleSection>
             )}

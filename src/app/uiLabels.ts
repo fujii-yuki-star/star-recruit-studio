@@ -710,6 +710,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
   TIMELINE_EDIT_NOT_AUDIO: "その部品は音を持っていません。音の設定は、音や読み上げの部品で変えてください",
+  TIMELINE_EDIT_NOT_PLAYABLE: "その部品には速さ・素材の使い始めがありません。音か動画の部品で変えてください",
   TIMELINE_EDIT_NO_ORIGINAL_AUDIO: "この動画には音が入っていないので、元の音は鳴らせません。音を付けるなら、音の列に音を置いてください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
