@@ -56,7 +56,7 @@ const isVisual = (type: Asset["assetType"]) => VISUAL_TYPES.includes(type);
 
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
-  const { assets, scenes, templates, meta, updateAsset, removeAsset, removeAssets, assetSrcById, setAssetImage, addAssets, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  const { assets, scenes, templates, meta, updateAsset, removeAsset, removeAssets, assetSrcById, setAssetImage, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
@@ -161,9 +161,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
         actions={
           <AssetImportButton
-            onPick={addAssets}
-            isImporting={isImporting}
-            progress={importProgress}
+            store={useProjectStore}
             disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : timelineOpen ? IMPORT_TIMELINE_OPEN_MESSAGE : IMPORT_NO_PROJECT_MESSAGE) : null}
           />
         }

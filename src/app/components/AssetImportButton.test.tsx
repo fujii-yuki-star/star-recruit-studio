@@ -4,11 +4,16 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { AssetImportButton } from "./AssetImportButton";
+import { AssetImportButton, type AssetImportStore } from "./AssetImportButton";
 import * as assetFsMod from "../../infrastructure/assetFs";
 import * as dialogMod from "../../infrastructure/dialog";
 
-const props = () => ({ onPick: vi.fn(), isImporting: false });
+// ⚠️ **store を1つ渡す**（PR #1034 レビュー 🔴）＝取り込み・進み具合・中止が
+// **別々の store から混ざる**のを、部品の受け口の形で防いでいる。
+const props = (over: Partial<AssetImportStore> = {}) => {
+  const state: AssetImportStore = { addAssets: vi.fn(), isImporting: false, importProgress: null, cancelAssetImport: vi.fn(), ...over };
+  return { state, store: <T,>(sel: (s: AssetImportStore) => T): T => sel(state) };
+};
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -18,19 +23,19 @@ describe("AssetImportButton（取り込みの入口）", () => {
   it("アプリの中ではネイティブの「開く」で選ぶ（素材のバイトを読まない）", async () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
     const p = props();
-    render(<AssetImportButton {...p} />);
+    render(<AssetImportButton store={p.store} />);
     fireEvent.click(screen.getByRole("button", { name: /素材を追加/ }));
-    await vi.waitFor(() => expect(p.onPick).toHaveBeenCalledWith(["C:/pics/a.png"]));
+    await vi.waitFor(() => expect(p.state.addAssets).toHaveBeenCalledWith(["C:/pics/a.png"]));
   });
 
   it("ブラウザではファイル選択に落ちる", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(false);
     const p = props();
-    const { container } = render(<AssetImportButton {...p} />);
+    const { container } = render(<AssetImportButton store={p.store} />);
     const input = container.querySelector("input")!;
     const file = new File(["x"], "外観.png", { type: "image/png" });
     fireEvent.change(input, { target: { files: [file] } });
-    expect(p.onPick).toHaveBeenCalledWith([file]);
+    expect(p.state.addAssets).toHaveBeenCalledWith([file]);
     // ※「同じファイルを選び直しても届くよう値を空に戻す」（`e.target.value = ""`）は、
     //   jsdom のファイル入力が値を持たないため断言できない＝守れない検査は置かない。
   });
@@ -38,14 +43,14 @@ describe("AssetImportButton（取り込みの入口）", () => {
   it("キーボードでも同じところへ行ける（ドラッグ専用の操作を作らない・ADR-0034 決定19）", async () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
     const p = props();
-    render(<AssetImportButton {...p} />);
+    render(<AssetImportButton store={p.store} />);
     const btn = screen.getByRole("button", { name: /素材を追加/ });
     // 関係ないキーでは開かない（フォーカスが乗っているだけで「開く」が出る、を作らない）。
     fireEvent.keyDown(btn, { key: "a" });
     fireEvent.keyDown(btn, { key: "Tab" });
     expect(dialogMod.showOpenAssetsDialog).not.toHaveBeenCalled();
     fireEvent.keyDown(btn, { key: "Enter" });
-    await vi.waitFor(() => expect(p.onPick).toHaveBeenCalled());
+    await vi.waitFor(() => expect(p.state.addAssets).toHaveBeenCalled());
   });
 
   it("「開く」を出している間は二重に開かない", async () => {
@@ -53,7 +58,7 @@ describe("AssetImportButton（取り込みの入口）", () => {
     let release: (v: string[]) => void = () => {};
     const open = vi.spyOn(dialogMod, "showOpenAssetsDialog").mockReturnValue(new Promise((r) => { release = r; }));
     const p = props();
-    render(<AssetImportButton {...p} />);
+    render(<AssetImportButton store={p.store} />);
     const btn = screen.getByRole("button", { name: /素材を追加/ });
     fireEvent.click(btn);
     await vi.waitFor(() => expect(btn).toHaveAttribute("aria-disabled", "true"));
@@ -64,20 +69,20 @@ describe("AssetImportButton（取り込みの入口）", () => {
 
   it("取り込み中・押せない理由があるときは押しても何もしない", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
-    const p = { ...props(), isImporting: true };
-    render(<AssetImportButton {...p} />);
+    const p = props({ isImporting: true });
+    render(<AssetImportButton store={p.store} />);
     const btn = screen.getByRole("button", { name: /取り込み中/ });
     expect(btn).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(btn);
     fireEvent.keyDown(btn, { key: "Enter" });
     // 「開く」を出そうとした時点で捕まえる（`onPath` は非同期なので、後で見ると素通りに見える）。
     expect(dialogMod.showOpenAssetsDialog).not.toHaveBeenCalled();
-    expect(p.onPick).not.toHaveBeenCalled();
+    expect(p.state.addAssets).not.toHaveBeenCalled();
   });
 
   it("置き場所ごとの見た目を落とさない（置き換えで幅や余白が黙って変わらない）", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
-    render(<AssetImportButton {...props()} variant="secondary" className="btn-block mt" />);
+    render(<AssetImportButton store={props().store} variant="secondary" className="btn-block mt" />);
     const btn = screen.getByRole("button", { name: /素材を追加/ });
     // `.btn` は inline-flex なので、`btn-block` が落ちるとボタンが中身の幅に縮む。
     expect(btn).toHaveClass("btn", "btn-secondary", "btn-block", "mt");
@@ -85,7 +90,7 @@ describe("AssetImportButton（取り込みの入口）", () => {
 
   it("押せない理由は指したときに出す（黙って効かないボタンにしない・§2-5）", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
-    render(<AssetImportButton {...props()} disabledReason="書き出しが終わるまでお待ちください" />);
+    render(<AssetImportButton store={props().store} disabledReason="書き出しが終わるまでお待ちください" />);
     expect(screen.getByRole("button", { name: /素材を追加/ })).toHaveAttribute("title", "書き出しが終わるまでお待ちください");
   });
   // ── まとめて取り込む（#858）──────────────────────────────────────
@@ -99,34 +104,50 @@ describe("AssetImportButton（取り込みの入口）", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
     vi.spyOn(dialogMod, "showOpenAssetsDialog").mockResolvedValue(["C:/pics/a.png", "C:/pics/b.png", "C:/pics/c.png"]);
     const p = props();
-    render(<AssetImportButton {...p} />);
+    render(<AssetImportButton store={p.store} />);
     fireEvent.click(screen.getByRole("button", { name: /素材を追加/ }));
     // ⚠️ **1件ずつに割らない**＝`asset_NNN` の採番は取り込み側が直列で回すことに依っている（11.2）。
-    await vi.waitFor(() => expect(p.onPick).toHaveBeenCalledTimes(1));
-    expect(p.onPick).toHaveBeenCalledWith(["C:/pics/a.png", "C:/pics/b.png", "C:/pics/c.png"]);
+    await vi.waitFor(() => expect(p.state.addAssets).toHaveBeenCalledTimes(1));
+    expect(p.state.addAssets).toHaveBeenCalledWith(["C:/pics/a.png", "C:/pics/b.png", "C:/pics/c.png"]);
   });
 
   it("何も選ばずに閉じたら何もしない", async () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
     vi.spyOn(dialogMod, "showOpenAssetsDialog").mockResolvedValue([]);
     const p = props();
-    render(<AssetImportButton {...p} />);
+    render(<AssetImportButton store={p.store} />);
     const btn = screen.getByRole("button", { name: /素材を追加/ });
     fireEvent.click(btn);
     await vi.waitFor(() => expect(btn).toHaveAttribute("aria-disabled", "false"));
-    expect(p.onPick).not.toHaveBeenCalled();
+    expect(p.state.addAssets).not.toHaveBeenCalled();
   });
 
   // ⚠️ **進み具合を出す**＝10枚入れている間「取り込み中…」だけだと、進んでいるのか止まっているのか分からない。
   it("進み具合が渡されたら何件目かを出す", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
-    render(<AssetImportButton {...props()} isImporting progress={{ done: 3, total: 10 }} />);
+    render(<AssetImportButton store={props({ isImporting: true, importProgress: { done: 3, total: 10 } }).store} />);
     expect(screen.getByRole("button", { name: "取り込み中… 3/10" })).toBeInTheDocument();
+  });
+
+  // ⚠️ **中止のボタンが本当に届くか**（PR #1034 レビュー）＝この検査が無かったので、
+  //   画面が**別の store の中止**を渡していても誰も気づかなかった。
+  it("中止を押すと、渡した store の中止が呼ばれる", () => {
+    vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
+    const p = props({ isImporting: true, importProgress: { done: 3, total: 10 } });
+    render(<AssetImportButton store={p.store} />);
+    fireEvent.click(screen.getByRole("button", { name: "取り込みを中止" }));
+    expect(p.state.cancelAssetImport).toHaveBeenCalledTimes(1);
+  });
+
+  it("まとめてでなければ中止は出さない（1件は押す間もない）", () => {
+    vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
+    render(<AssetImportButton store={props({ isImporting: true }).store} />);
+    expect(screen.queryByRole("button", { name: "取り込みを中止" })).toBeNull();
   });
 
   it("進み具合が無ければ件数を出さない（1件だけのとき＝一瞬出て消える表示にしない）", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
-    render(<AssetImportButton {...props()} isImporting progress={null} />);
+    render(<AssetImportButton store={props({ isImporting: true }).store} />);
     expect(screen.getByRole("button", { name: "取り込み中…" })).toBeInTheDocument();
     expect(screen.queryByText(/取り込み中… \d/)).toBeNull();
   });
@@ -135,11 +156,11 @@ describe("AssetImportButton（取り込みの入口）", () => {
   it("ブラウザでも複数まとめて渡せる", async () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(false);
     const p = props();
-    const { container } = render(<AssetImportButton {...p} />);
+    const { container } = render(<AssetImportButton store={p.store} />);
     const input = container.querySelector("input")!;
     expect(input).toHaveAttribute("multiple");
     const files = [new File(["x"], "1.png"), new File(["y"], "2.png")];
     fireEvent.change(input, { target: { files } });
-    await vi.waitFor(() => expect(p.onPick).toHaveBeenCalledWith(files));
+    await vi.waitFor(() => expect(p.state.addAssets).toHaveBeenCalledWith(files));
   });
 });
