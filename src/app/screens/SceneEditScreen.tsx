@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
+import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
@@ -49,7 +50,7 @@ import { TransitionPreview } from "../components/TransitionPreview";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { KeyboardNudge } from "../components/KeyboardNudge";
 import { useDragReorder } from "../hooks/useDragReorder";
-import { hasEscapeOwner } from "../hooks/escapeOwners";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -387,17 +388,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   }, [status, autoGenerateIfSafe]);
 
   // Escape で kind 別エディタのポップオーバーを閉じる。
-  // ⚠️ **手前で `Escape` を受け持っているものがある間は閉じない**（#714-4 レビュー）＝`Escape` は
-  // **手前のものから1段ずつはがす**（`06 §12.1`）。見ないと**1回のキーで2段はがれる**。
-  // 見るのは「掴んでいるか」ではなく**名簿**（`hasEscapeOwner`）＝この欄の中には色や書体を選ぶ面が
-  // 入れ子で開くが、それらは**撫でていなくても**開いている間ずっと受け持つ（`ColorPicker`/`FontPicker`）。
-  // 掴んでいる間も `usePointerDrag` が名乗るので、並べ替えの中止もこの1つで賄える（TimelineProjectScreen と同じ流儀）。
-  useEffect(() => {
-    if (!editPopover) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !hasEscapeOwner()) setEditPopover(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editPopover]);
+  // ⚠️ **手前のものから1段ずつはがす**（`06 §12.1`・#714-4）＝この欄の中には色や書体の面が
+  // 入れ子で開き、それらは**撫でていなくても**開いている間ずっと受け持つ（`ColorPicker` は自分で名乗る）。
+  // 掴んでいる間も `usePointerDrag` が名乗るので、並べ替えの中止もこの1つで賄える。
+  // ⚠️ **順番は名簿が見る**（#989）＝以前は自分で窓を購読して `hasEscapeOwner()` を見ていたが、
+  // 名簿へ預ければ「手前から順に渡して、受け取った所で止める」が**自動で効く**。
+  // ⚠️ **名簿へ預ける**（#989）＝自分で窓を購読すると、**打っている最中・変換中の除外**を
+  // 自前で書くことになり、実際に**抜けていた**（このポップオーバーには日本語を打つ「文字」欄がある
+  // ＝変換中の `Escape`〔＝変換をやめる〕でポップオーバーごと閉じていた・`06 §12.1` 違反）。
+  // 預ければ、見送りと入力中の除外が `DeleteConfirm` と同じ1か所に寄る。
+  useEscapeReceiver(editPopover != null, () => {
+    setEditPopover(null);
+    return true;
+  });
 
   // 場面編集を開く「一度きりのペイロード」editingSceneId を消費後に破棄する（#400 レビュー）。
   // 初期化子（上）が捕捉した後にマウント直後で null へ戻す＝editingTemplateId が backToList で戻すのと同じ規律。
@@ -2245,7 +2248,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                   aria-label="要素名"
                                   onChange={(e) => setDraftFreeName(e.target.value)}
                                   onBlur={commitFreeRename}
-                                  onKeyDown={(e) => { if (e.key === "Enter") commitFreeRename(); else if (e.key === "Escape") setRenamingFreeId(null); }}
+                                  // ⚠️ **変換中は奪わない**（#989）＝規則は `renameFieldKeys` に1つだけ。
+                                  onKeyDown={renameFieldKeys({ commit: commitFreeRename, cancel: () => setRenamingFreeId(null) })}
                                 />
                               ) : (
                                 <button

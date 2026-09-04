@@ -92,6 +92,27 @@ export function isKeyboardActivation(e: { detail: number }): boolean {
   return e.detail === 0;
 }
 
+/**
+ * メニューを開く位置（#989）＝**指なら押した所・キーなら押したボタンの下**。
+ *
+ * ⚠️ **キーの click は座標を持たない**（`clientX/Y` が 0）＝そのまま渡すと
+ * メニューが**画面の左上**に出る。押したものと関係ない所に出るので、
+ * キーボードだけで使う人には**どこに出たのか分からない**。
+ *
+ * ⚠️ **1か所に置く**＝もとは帯の「⋮」だけが直していて、**列の「⋮」と欄の「⋮」は
+ * そのまま**だった（同じ部品の同じ穴を、片方だけ直した形＝このリポジトリで繰り返している型）。
+ */
+export function menuAnchorFrom(e: {
+  detail: number;
+  clientX: number;
+  clientY: number;
+  currentTarget: { getBoundingClientRect(): { left: number; bottom: number } };
+}): { x: number; y: number } {
+  if (!isKeyboardActivation(e)) return { x: e.clientX, y: e.clientY };
+  const r = e.currentTarget.getBoundingClientRect();
+  return { x: r.left, y: r.bottom };
+}
+
 export type DragHandlers = {
   /**
    * 掴んだとみなすまでの距離（px・既定 `DRAG_START_PX`）。**0 を渡すと最初の動きから効く**

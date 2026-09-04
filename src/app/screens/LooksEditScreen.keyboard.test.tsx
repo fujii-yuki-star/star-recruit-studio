@@ -5,6 +5,7 @@ import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Layer } from "../../domain/template/types";
 import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
+import { claimEscape } from "../hooks/escapeOwners";
 
 // #788-3：見た目パターン編集のキャンバスは**掴んで動かせるのにキーでは動かせなかった**
 //（#769 で揃えたのは `Escape`／`Ctrl+Z` の遮断まで＝矢印と `Delete` は結線されていなかった）。
@@ -56,6 +57,38 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     fireEvent.keyDown(window, { key: "ArrowDown", shiftKey: true });
     expect(layerOf("layer_a")).toMatchObject({ x: 101, y: 210 });
     expect(layerOf("layer_b")).toMatchObject({ x: 0, y: 0 }); // 選んでいない層は動かない
+  });
+
+  // ⚠️ **前へ出ているものがあるうちは動かさない**（#989）＝タイムラインは同じ規則を持っている
+  // （「3個消しますか」の表示中に全選択できると、聞いた数と消える数がずれる）のに、
+  // 矢印・Delete の側は名簿を見ていなかった＝同じ規則の別の入口が開いたまま（ADR-0026②）。
+  // 届く経路＝**色を選ぶ面を開いたまま矢印**（手はトリガーの `<button>` なので相手のキーにならない）。
+  it("前へ出ているものがある間は、矢印で動かない", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    const before = layerOf("layer_a");
+    const release = claimEscape();
+    try {
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(layerOf("layer_a"), "面が開いている最中に動いた").toMatchObject({ x: before!.x, y: before!.y });
+    } finally {
+      release();
+    }
+    // 閉じれば、また動く（塞ぎっぱなしにしない）。
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(layerOf("layer_a")).toMatchObject({ x: before!.x + 1 });
+  });
+
+  it("前へ出ているものがある間は、Delete でも消えない", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    const release = claimEscape();
+    try {
+      fireEvent.keyDown(window, { key: "Delete" });
+      expect(layerOf("layer_a"), "メニューが開いている最中に消えた").toBeTruthy();
+    } finally {
+      release();
+    }
   });
 
   // ⚠️ **畳まれた後も、続けた矢印は1つの取り消しにまとまる**（#817 レビュー・PR #826 レビュー）＝

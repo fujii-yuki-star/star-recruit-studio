@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
-import { isKeyboardActivation, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
+import { isKeyboardActivation, menuAnchorFrom, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
 import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
 import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
@@ -26,7 +26,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
+import { activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -872,6 +872,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [textGroup]);
   /** 欄を抜けるだけ（選択は解かない）＝`Escape` の1段目（#832）。 */
   const onDrilledFieldKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
+    // ⚠️ **変換中は奪わない**（#989）＝変換中の `Escape` は「変換をやめる」なので、
+    // 奪うと**打ちかけの文字を消したうえで欄から手が離れる**（打ち直しになる）。
+    if (isComposingReact(e)) return;
     if (e.key === "Escape") e.currentTarget.blur();
   };
   // 入った直後にその欄へ手を移す（描き終わってから当てる＝欄はこの後の描画で出る）。
@@ -2564,7 +2567,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
   const openTrackMenu = (e: ReactMouseEvent, trackId: string): void => {
     e.preventDefault();
-    setTrackMenu({ trackId, x: e.clientX, y: e.clientY });
+    // ⚠️ **キーで押したときは押したボタンの下へ**（#989）＝キーの click は座標を持たないので、
+    // そのまま渡すとメニューが**画面の左上**に出る。規則は `menuAnchorFrom` に1つだけ。
+    setTrackMenu({ trackId, ...menuAnchorFrom(e) });
   };
   /**
    * 帯の操作（#701・ADR-0034 決定19「ドラッグ専用の操作を作らない」）。
@@ -3516,13 +3521,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             onClick={(e) => {
                               // キーボード（Enter/Space）の click は座標を持たない＝そのまま渡すと
                               // メニューが画面の左上に出る。押した要素の位置から開く。
-                              if (isKeyboardActivation(e)) {
-                                const r = e.currentTarget.getBoundingClientRect();
-                                if (!selectedClipIds.includes(c.id)) selectClip(c.id);
-                                setClipMenu({ clipId: c.id, x: r.left, y: r.bottom });
-                                return;
-                              }
-                              openClipMenu(e, c.id);
+                              if (!selectedClipIds.includes(c.id)) selectClip(c.id);
+                              setClipMenu({ clipId: c.id, ...menuAnchorFrom(e) });
                             }}
                           >
                             ⋮
