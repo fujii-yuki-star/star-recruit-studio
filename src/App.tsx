@@ -12,7 +12,7 @@ import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
-import { currentProjectLabel, DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -76,19 +76,22 @@ function App() {
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
   // 「今の動画」を出すかは**同じ問い**（動画を開いているか）＝共有の判定から採る（差分再監査 6巡目 🟡）。
-  // ⚠️ **いま（直近に）いる方の動画を指す**（#987）＝2つの形式は**同時に開いたままが正規の状態**
-  //（`HomeScreen` は「タイムラインは別の文書なので確認を出さない」＝閉じさせない）。
-  // 場面形式からしか採っていなかったので、タイムライン編集中は
-  // **「今の動画」が出ない**か、**別の動画の名前を出したまま押すと別の文書へ飛んだ**。
+  // ⚠️ **2つの形式は同時に開いたままが正規の状態**（#987→#1006）＝`HomeScreen` は
+  //「タイムラインは別の文書なので確認を出さない」＝場面形式を閉じさせない。
+  // 場面形式からしか採っていなかったので、タイムライン編集中は**「今の動画」が出ない**か、
+  // **別の動画の名前を出したまま押すと別の文書へ飛んだ**（#987）。
+  // さらに直近にいる方だけを指す形にしても**もう片方へは戻れない**ままだった（#1006）ので、
+  // いまは**開いている形式のぶんだけ並べる**。
   const sceneOpen = useProjectStore(hasOpenProject);
   const sceneName = useProjectStore((s) => s.meta.projectName);
   const timelineName = useTimelineStore((s) => s.doc?.projectName ?? null);
   // ⚠️ **決め方は `navigation.ts` に1つ**＝画面の中で書くと、片方の形式を足したときに配り忘れる。
-  const { show: hasProjectContent, name: projectName } = currentProjectLabel({
+  const currentProjects = currentProjectEntries({
     returnTo: projectReturnTo,
     sceneOpen,
     sceneName,
     timelineName,
+    current: screen,
   });
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
@@ -171,7 +174,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={navigate} projectName={projectName} hasProjectContent={hasProjectContent} currentProjectTarget={projectReturnTo} />
+      <Sidebar current={screen} onNavigate={navigate} currentProjects={currentProjects} />
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">

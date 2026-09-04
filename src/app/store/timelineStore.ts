@@ -36,7 +36,7 @@ import {
   moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
   setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
-  setVoiceText, trimClip,
+  setVoiceText, trimClip, trimClips, trimTargetsAt,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
@@ -388,8 +388,13 @@ export interface TimelineState {
 
   /** 選んでいるクリップを動かす（列を替える／時間をずらす）。置けなければ何も変えず理由を持つ。 */
   moveSelectedClip: (to: { trackId?: string; startSec?: number }) => void;
-  /** 選んでいるクリップの端を動かす（トリム）。 */
+  /** 選んでいるクリップの端を動かす（トリム）。数値の欄から呼ぶので**伸ばす向きも通る**。 */
   trimSelectedClip: (edge: "start" | "end", sec: number) => void;
+  /**
+   * **再生位置で長さをそろえる**（#1005）＝選んだうち**その時刻をまたいでいる帯だけ**を相手にする。
+   * 選んだ数で挙動を割らない（1件でも同じ規則）。
+   */
+  trimSelectedClipsAt: (edge: "start" | "end", sec: number) => void;
   /**
    * **id で受ける**移動とトリム（#686 レビュー）。掴んで動かす経路は、掴んだ相手が `clipId` で決まる
    * のに `moveSelectedClip` は選択に効くので、**掴んでいる間に選択が変わると別の帯が動く**
@@ -1060,6 +1065,30 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) =>
     applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec, { templateOf: templateOfNow })),
+  /**
+   * **再生位置で長さをそろえる**（#1005＝実機の指摘「帯を複数選択できるのに長さを一緒に調整できない」）。
+   *
+   * ⚠️ **相手はその時刻をまたいでいる帯だけ**＝またいでいない帯の端をその時刻へ動かすと、
+   * 遠くにある帯が**いちばん短い長さまで潰れる**（画面の外で起きるので気づけない）。
+   * 他社の型（Premiere の「再生ヘッドまでトリミング」等）も、またいでいる帯だけを相手にする。
+   * ⚠️ **選んだ数で挙動を割らない**（ADR-0026②）＝1件のときも同じ規則で通す。
+   * 伸ばす操作は数値の欄（「長さ（秒）」＝`trimSelectedClip`）が受け持つので、失われない。
+   * ⚠️ **1つも当てはまらないときの理由は、ボタンの説明として出る**（押せない見た目＋`title`）。
+   * ここで `editBlocked` も立てるのは**保険**＝いまの入口はボタン4か所だけだが、
+   * キーやメニューから呼ぶ道が増えたとき、**無言で何も起きない**を作らないため。
+   */
+  trimSelectedClipsAt: (edge, sec) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const ids = trimTargetsAt(doc, get().selectedClipIds, sec);
+    if (ids.length === 0) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.selected) } });
+      return;
+    }
+    const r = trimClips(doc, ids, edge, sec, { templateOf: templateOfNow });
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
+  },
   moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to), PANEL_ID.arrange),
   moveClipsBy: (updates) => {
     const doc = get().doc;

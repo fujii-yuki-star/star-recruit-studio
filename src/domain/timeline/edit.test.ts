@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, clipPlacementIssue, duplicateClip, EDIT_BLOCKED, isFreeSpan, placedDurationSec, VISUAL_CLIP_DURATION_SEC,
-  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip, trimClips, trimTargetsAt,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { validateTimelineDoc } from './validateTimelineDoc';
@@ -1549,5 +1549,132 @@ describe('moveClips（まとめて動かす）', () => {
   it('空なら何もしない', () => {
     const d = three();
     expect(moveClips(d, []).ok && moveClips(d, []) as { doc: TimelineProject }).toMatchObject({ doc: d });
+  });
+});
+
+// まとめて長さをそろえる（#1005＝実機の指摘「帯を複数選択できるのに長さを一緒に調整できない」）。
+describe('trimClips（まとめて長さをそろえる）', () => {
+  const three = (over: Partial<TimelineProject> = {}) => doc({
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 10, text: 'あ' },
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0, durationSec: 8, text: 'い' },
+      { id: 'clip_003', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_003', startSec: 0, durationSec: 2, text: 'う' },
+    ],
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+      { id: 'track_003', kind: TRACK_KIND.visual },
+    ],
+    ...over,
+  });
+
+  it('選んだ全部の終わりを、同じ時刻へそろえる', () => {
+    const r = trimClips(three(), ['clip_001', 'clip_002'], 'end', 5);
+    expect(r.ok && r.doc.clips.map((c) => c.durationSec)).toEqual([5, 5, 2]);
+  });
+
+  it('始まりも同じ時刻へそろえる（置いた場所ごと動く）', () => {
+    const r = trimClips(three(), ['clip_001', 'clip_002'], 'start', 3);
+    expect(r.ok && r.doc.clips.map((c) => [c.startSec, c.durationSec])).toEqual([[3, 7], [3, 5], [0, 2]]);
+  });
+
+  // ⚠️ **ここで絞らない**＝この関数は数値の欄（「長さ（秒）」）からも通るので、
+  // 「再生位置をまたいでいるか」で絞ると**長くする操作が黙って断られる**（伸ばす先は必ず帯の外）。
+  // どれを相手にするかは押す側が決める（下の `trimTargetsAt`）。
+  it('伸ばす向きも通る（数値の欄が通る道を塞がない）', () => {
+    const r = trimClips(three(), ['clip_002', 'clip_003'], 'end', 12);
+    expect(r.ok && r.doc.clips.map((c) => c.durationSec)).toEqual([10, 12, 12]);
+  });
+
+  // ⚠️ **1件のときは今までどおり**＝理由の言い分けも `moveClips` と同じ（「この列」／「選んだ中」）。
+  it('1件なら trimClip と同じ結果になる（入口が増えても挙動を割らない）', () => {
+    const d = three();
+    expect(trimClips(d, ['clip_001'], 'end', 5)).toEqual(trimClip(d, 'clip_001', 'end', 5));
+  });
+
+  it('固定した列は、1つなら「この列」・まとめてなら「選んだ中」と言い分ける', () => {
+    const locked = three({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual, locked: true },
+        { id: 'track_002', kind: TRACK_KIND.visual, locked: true },
+        { id: 'track_003', kind: TRACK_KIND.visual },
+      ],
+    });
+    expect(trimClips(locked, ['clip_001'], 'end', 5)).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    expect(trimClips(locked, ['clip_001', 'clip_002'], 'end', 5)).toEqual({ ok: false, reason: EDIT_BLOCKED.lockedSelection });
+  });
+
+  it('固定が混ざったら、当て始める前に断る（一部だけ変わった結果を作らない）', () => {
+    const locked = three({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.visual },
+        { id: 'track_003', kind: TRACK_KIND.visual, locked: true },
+      ],
+    });
+    expect(trimClips(locked, ['clip_001', 'clip_003'], 'end', 5)).toEqual({ ok: false, reason: EDIT_BLOCKED.lockedSelection });
+  });
+
+  // ⚠️ **自分で書いた「1つでも通らなければ全体を変えない」を検査にする**（変異チェックで生き残った）＝
+  // 途中で断ったのに、そこまで当てた文書を返す形が緑のままだった。
+  it('1つが置けなければ、先に通ったぶんも戻す（半分だけ変わった状態を残さない）', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 10, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0, durationSec: 3, text: 'い' },
+        { id: 'clip_003', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 6, durationSec: 3, text: 'う' }, // clip_002 の伸ばす先
+      ],
+    });
+    // clip_001 は 8 秒へ縮められるが、clip_002 を 8 秒まで伸ばすと clip_003 と重なる。
+    const r = trimClips(d, ['clip_001', 'clip_002'], 'end', 8);
+    expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.overlap });
+  });
+
+  // ⚠️ **連動している字幕は前もって弾いていない**＝`trimClip` の中で断る。
+  // 途中で握り潰すと、**字幕だけ元の区間に取り残される**（`11 §7.6.2.3` の「連動＝区間が一致」が崩れる）。
+  it('連動している字幕が混ざったら、全体を断る', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 10, voice: { text: 'あ', status: NARRATION_STATUS.none } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    expect(trimClips(d, ['clip_002', 'clip_001'], 'end', 5)).toEqual({ ok: false, reason: EDIT_BLOCKED.linkedSubtitleTime });
+  });
+
+  it('見つからない部品が混ざったら断る（残りだけ変えない）', () => {
+    expect(trimClips(three(), ['clip_001', 'clip_999'], 'end', 5)).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+  });
+
+  it('何も選んでいなければ、そのままの文書を返す（履歴に積まない）', () => {
+    const d = three();
+    const r = trimClips(d, [], 'end', 5);
+    expect(r.ok && r.doc).toBe(d);
+  });
+});
+
+describe('trimTargetsAt（実際に長さが変わる部品）', () => {
+  const d = doc({
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 10, text: 'あ' },
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 20, durationSec: 5, text: 'い' },
+    ],
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+  });
+
+  it('その時刻が中にかかっているものだけを返す', () => {
+    expect(trimTargetsAt(d, ['clip_001', 'clip_002'], 5)).toEqual(['clip_001']);
+  });
+
+  // ⚠️ **端はまたいでいない**＝端で切ると長さ0か、何も変わらない（どちらも操作の意味が無い）。
+  it('端ちょうどは数えない', () => {
+    expect(trimTargetsAt(d, ['clip_001'], 0)).toEqual([]);
+    expect(trimTargetsAt(d, ['clip_001'], 10)).toEqual([]);
+  });
+
+  it('見つからない id は数えない（ボタンの数が実際より多くならない）', () => {
+    expect(trimTargetsAt(d, ['clip_999'], 5)).toEqual([]);
   });
 });

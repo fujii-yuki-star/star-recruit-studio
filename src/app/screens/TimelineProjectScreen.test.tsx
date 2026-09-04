@@ -7173,3 +7173,218 @@ describe("TimelineProjectScreen: BGM を下げる区間をつないだ知らせ"
     useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
   });
 });
+
+// まとめて長さをそろえる（#1005＝実機の指摘「帯を複数選択できるのに長さを一緒に調整できない」）。
+describe("TimelineProjectScreen: まとめて長さをそろえる（#1005）", () => {
+  /** 3秒の帯を2本（別々の列）＋再生位置を中に置く。 */
+  const two = () =>
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "よろしく" },
+      ],
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+      ],
+    });
+
+  const selectBoth = (): void => {
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByRole("button", { name: "よろしく" }), { shiftKey: true });
+  };
+
+  it("複数選んでも長さの入口が出る（1つだけのときしか出ない、を直す）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    selectBoth();
+    expect(screen.getByRole("button", { name: /ここで終わる（2個）/ })).toBeEnabled();
+  });
+
+  it("選んだ全部の終わりが、再生位置へそろう", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    selectBoth();
+    fireEvent.click(screen.getByRole("button", { name: /ここで終わる（2個）/ }));
+    expect(useTimelineStore.getState().doc?.clips.map((c) => c.durationSec)).toEqual([2, 2]);
+  });
+
+  it("始まりもそろう", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "1.5" } });
+    selectBoth();
+    fireEvent.click(screen.getByRole("button", { name: /ここから始める（2個）/ }));
+    expect(useTimelineStore.getState().doc?.clips.map((c) => [c.startSec, c.durationSec])).toEqual([[1.5, 3.5], [1.5, 2.5]]);
+  });
+
+  // ⚠️ **押す前に何個変わるかを出す**＝選んだ数をそのまま出すと、
+  // かかっていない帯が混ざったとき**押したのに数が合わない**（数え方は domain と共有する）。
+  it("再生位置にかかっている数を出す（選んだ数ではない）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "4.5" } }); // clip_002 は 4 秒で終わり
+    selectBoth();
+    expect(screen.getByRole("button", { name: /ここで終わる（1個）/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /ここで終わる（1個）/ }));
+    // ⚠️ かかっていない帯は**置いた場所ごと動かさない**（潰さない）。
+    expect(useTimelineStore.getState().doc?.clips.map((c) => c.durationSec)).toEqual([4.5, 4]);
+  });
+
+  it("1つもかかっていなければ押せず、次の行動を出す", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "0" } }); // 端はまたいでいない
+    selectBoth();
+    const btn = screen.getByRole("button", { name: /ここで終わる（0個）/ });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", editBlockedMessage[EDIT_BLOCKED.trimNoneAtTime]);
+  });
+
+  it("固定した列が混ざったら押せず、選び直す案内を出す", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "よろしく" },
+      ],
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual, locked: true },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    selectBoth();
+    const btn = screen.getByRole("button", { name: /ここで終わる（2個）/ });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", editBlockedMessage[EDIT_BLOCKED.lockedSelection]);
+  });
+
+  // ⚠️ **再生中は押せない**（走っている位置を掴ませない＝「再生位置へ」と同じ理由）。
+  // ⚠️ 門番は単体とまとめてで**共有**しているので、両方を見る（片方だけ塞ぐ形を作らない）。
+  it("再生中は、単体でもまとめても押せない", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.getByRole("button", { name: "ここで終わる" })).toBeEnabled();
+    fireEvent.click(screen.getByText("再生"));
+    const single = screen.getByRole("button", { name: "ここで終わる" });
+    expect(single).toBeDisabled();
+    expect(single).toHaveAttribute("title", "再生を止めてから使えます");
+    fireEvent.click(screen.getByRole("button", { name: "よろしく" }), { shiftKey: true });
+    const many = screen.getByRole("button", { name: /ここで終わる（2個）/ });
+    expect(many).toBeDisabled();
+    expect(many).toHaveAttribute("title", "再生を止めてから使えます");
+  });
+
+  // ⚠️ **混ざっただけで止まらない**（#1005 レビュー ℹ️）＝再生位置にかかっていない固定の帯を
+  // 選んでいるだけで、そろえられる帯まで押せなくなる形を作らない。
+  it("固定の帯が再生位置にかかっていなければ、残りはそろえられる", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 8, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "よろしく" },
+      ],
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual, locked: true }, // 再生位置より後ろ＝相手にならない
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByRole("button", { name: "よろしく" }), { shiftKey: true });
+    const btn = screen.getByRole("button", { name: /ここで終わる（1個）/ });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(useTimelineStore.getState().doc?.clips.map((c) => c.durationSec)).toEqual([2, 4]);
+  });
+
+  // ⚠️ **選んだ数で挙動を割らない**（ADR-0026②）＝1件のときも同じ規則で通す。
+  // ここは**意図して変えた挙動**＝これまで単体の「ここで終わる」は、再生位置が帯の外にあると
+  // その位置まで**伸ばして**いた。まとめてのときに同じことをすると、遠くの帯が
+  // **いちばん短い長さまで潰れる**（画面の外で起きるので気づけない）ので、
+  // 他社の型（再生ヘッドまでトリミング）に合わせて「またいでいる帯だけ」に統一した。
+  // 伸ばす操作は「長さ（秒）」の欄が受け持つ（下の検査）。
+  it("1件でも同じ規則＝またいでいるときだけ、その位置で終わる", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    fireEvent.click(screen.getByRole("button", { name: "ここで終わる" }));
+    expect(useTimelineStore.getState().doc?.clips[0]?.durationSec).toBe(3);
+  });
+
+  it("1件でも、またいでいなければ押せず次の行動を出す（伸ばす道は数値の欄）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } }); // clip_001 は 5 秒で終わり
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    const btn = screen.getByRole("button", { name: "ここで終わる" });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", editBlockedMessage[EDIT_BLOCKED.trimNoneAtTime]);
+  });
+
+  it("1件で固定された列なら「この列」の言い方になる（まとめてと言い分ける）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" }],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.getByRole("button", { name: "ここで終わる" })).toHaveAttribute("title", editBlockedMessage[EDIT_BLOCKED.locked]);
+  });
+
+  // ⚠️ **数値の欄は伸ばす向きも通る**＝ボタンと同じ道にすると、
+  // 伸ばす先は必ず帯の外なので「かかっていない」と判定され、**長くできなくなる**（実際に踏んだ）。
+  it("「長さ（秒）」で長くできる（ボタンの絞り込みに巻き込まれない）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    // ⚠️ **数値の欄は「変えた」だけでは確定しない**（`NumberField` は blur/Enter で確定）＝
+    // change だけで緑になる検査は嘘の安心になる（このリポジトリで記録済みの型）。
+    const len = screen.getByLabelText("長さ（秒）");
+    fireEvent.change(len, { target: { value: "9" } });
+    fireEvent.blur(len);
+    expect(useTimelineStore.getState().doc?.clips[0]?.durationSec).toBe(9);
+  });
+});
+
+// ⚠️ **押せない見た目の裏にある枝も通す**（#1005 レビュー 🟡）＝ボタンからは 0件で押せないので、
+// store の「1つも当てはまらない」枝は**クリック経由では一度も通らない**。
+// キーやメニューから呼ぶ道が増えたとき無言にならないための保険なので、ここで直接確かめる。
+describe("timelineStore: 再生位置でそろえる（#1005）", () => {
+  it("1つも当てはまらなければ、理由を立てて文書を変えない", () => {
+    useTimelineStore.setState({
+      doc: doc({
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+      }),
+      selectedClipIds: ["clip_001"],
+      editBlocked: null,
+    });
+    const before = useTimelineStore.getState().doc;
+    useTimelineStore.getState().trimSelectedClipsAt("end", 9); // 帯の外
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.trimNoneAtTime);
+    expect(useTimelineStore.getState().doc, "断ったのに文書を書き換えている").toBe(before);
+  });
+
+  it("当てはまるものがあれば、そこだけそろえる", () => {
+    useTimelineStore.setState({
+      doc: doc({
+        clips: [
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 50, text: "い" },
+        ],
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      }),
+      selectedClipIds: ["clip_001", "clip_002"],
+      editBlocked: null,
+    });
+    useTimelineStore.getState().trimSelectedClipsAt("end", 3);
+    expect(useTimelineStore.getState().doc?.clips.map((c) => c.durationSec)).toEqual([3, 2]);
+  });
+});

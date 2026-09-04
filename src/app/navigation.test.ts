@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScreenId } from "./data/mockData";
-import { currentProjectLabel, DEFAULT_PROJECT_RETURN, isProjectScreen, PROJECT_SCREENS, stickyProjectScreen } from "./navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, isProjectScreen, PROJECT_SCREENS, stickyProjectScreen } from "./navigation";
 
 describe("isProjectScreen（工程画面の線引き・#399/#547 P3-7）", () => {
   it("工程画面（ウィザード〜書き出し）は true", () => {
@@ -70,47 +70,89 @@ describe("タイムライン編集も工程画面（#987）", () => {
 });
 
 // サイドバーの「今の動画」に出すもの（#987）。
-describe("「今の動画」は、いま（直近に）いる方の動画を指す（#987）", () => {
-  const base = { sceneOpen: true, sceneName: "場面のほう", timelineName: null as string | null };
+describe("「今の動画」は、開いている形式のぶんだけ並ぶ（#987→#1006）", () => {
+  const base = {
+    returnTo: DEFAULT_PROJECT_RETURN,
+    sceneOpen: true,
+    sceneName: "場面のほう",
+    timelineName: null as string | null,
+    current: "home" as ScreenId,
+  };
 
-  it("タイムライン編集にいる間は、そちらの名前を出す", () => {
-    // ⚠️ **元の穴**＝場面形式からしか採っておらず、**別の動画の名前を出したまま
-    // 押すと別の文書へ飛んだ**（2つの形式は同時に開いたままが正規の状態）。
-    const r = currentProjectLabel({ ...base, returnTo: "timeline-project" as ScreenId, timelineName: "タイムラインのほう" });
-    expect(r).toEqual({ show: true, name: "タイムラインのほう" });
+  // ⚠️ **元の穴**＝直近にいた方だけを出していたので、**もう片方へサイドバーから戻れなかった**
+  //（一覧を経由するしかない＝開いたままなのに遠い）。実機の指摘「どちらも確認できるべき」。
+  it("両方開いていれば、両方への道が出る", () => {
+    const r = currentProjectEntries({ ...base, timelineName: "タイムラインのほう" });
+    expect(r.map((e) => [e.kind, e.name, e.target])).toEqual([
+      ["scene", "場面のほう", DEFAULT_PROJECT_RETURN],
+      ["timeline", "タイムラインのほう", "timeline-project"],
+    ]);
+  });
+
+  // ⚠️ **どちらへ行くのか押す前に分かる**＝同じ「今の動画」が2つ並ぶと見分けられない。
+  it("どちらの形式かを添える", () => {
+    const r = currentProjectEntries({ ...base, timelineName: "タイムラインのほう" });
+    expect(r.map((e) => e.sub)).toEqual(["今の動画", "今の動画（タイムライン）"]);
+  });
+
+  // ⚠️ **戻り先がタイムラインのままだと、場面形式の入口がタイムラインへ飛ぶ**
+  //（`stickyProjectScreen` はタイムライン編集も工程画面として覚える＝#987）。
+  it("タイムラインにいた後でも、場面形式の入口は場面形式へ行く", () => {
+    const r = currentProjectEntries({ ...base, returnTo: "timeline-project" as ScreenId, timelineName: "タイムラインのほう" });
+    expect(r.find((e) => e.kind === "scene")?.target).toBe(DEFAULT_PROJECT_RETURN);
+  });
+
+  it("場面形式の工程画面にいたなら、その画面へ戻る（居場所を失わない）", () => {
+    const r = currentProjectEntries({ ...base, returnTo: "export" as ScreenId, timelineName: "タイムラインのほう" });
+    expect(r.find((e) => e.kind === "scene")?.target).toBe("export");
   });
 
   it("タイムラインだけ開いていても、戻る道が出る", () => {
-    const r = currentProjectLabel({
+    const r = currentProjectEntries({
+      ...base,
       returnTo: "timeline-project" as ScreenId,
       sceneOpen: false,
       sceneName: "",
       timelineName: "タイムラインのほう",
+      current: "timeline-project" as ScreenId,
     });
-    expect(r.show, "開いているのに「今の動画」が出ない＝戻る道が無い").toBe(true);
+    expect(r.map((e) => e.kind), "開いているのに「今の動画」が出ない＝戻る道が無い").toEqual(["timeline"]);
   });
 
-  it("場面形式の工程画面にいる間は、そちらの名前を出す", () => {
-    const r = currentProjectLabel({ ...base, returnTo: "scene-edit" as ScreenId, timelineName: "タイムラインのほう" });
-    expect(r).toEqual({ show: true, name: "場面のほう" });
-  });
-
-  it("タイムラインを閉じていれば、戻り先が残っていても場面形式を指す", () => {
+  it("タイムラインを閉じていれば、戻り先が残っていても場面形式だけを出す", () => {
     // ⚠️ **文書の有無も見る**＝戻り先だけで決めると、閉じた後に**名前の無い動画**を指す。
-    const r = currentProjectLabel({ ...base, returnTo: "timeline-project" as ScreenId, timelineName: null });
-    expect(r).toEqual({ show: true, name: "場面のほう" });
+    const r = currentProjectEntries({ ...base, returnTo: "timeline-project" as ScreenId, timelineName: null });
+    expect(r.map((e) => [e.kind, e.name])).toEqual([["scene", "場面のほう"]]);
+  });
+
+  it("場面形式の工程画面にいる間は、まだ開いていなくても出す", () => {
+    const r = currentProjectEntries({ ...base, sceneOpen: false, current: "wizard" as ScreenId });
+    expect(r.map((e) => e.kind)).toEqual(["scene"]);
+  });
+
+  // ⚠️ **タイムライン編集の画面は「場面形式の工程画面」ではない**＝ここで数えると、
+  // 場面形式を開いていないのに**名前の無い「今の動画」**が並ぶ。
+  it("タイムライン編集にいるだけでは、場面形式の道は出さない", () => {
+    const r = currentProjectEntries({
+      ...base,
+      sceneOpen: false,
+      sceneName: "",
+      timelineName: "タイムラインのほう",
+      current: "timeline-project" as ScreenId,
+    });
+    expect(r.map((e) => e.kind)).toEqual(["timeline"]);
   });
 
   it("どちらも開いていなければ出さない", () => {
-    const r = currentProjectLabel({ returnTo: "draft" as ScreenId, sceneOpen: false, sceneName: "", timelineName: null });
-    expect(r.show).toBe(false);
+    const r = currentProjectEntries({ returnTo: "draft" as ScreenId, sceneOpen: false, sceneName: "", timelineName: null, current: "home" as ScreenId });
+    expect(r).toEqual([]);
   });
 });
 
 // ⚠️ **配線が生きているか**（#987）＝純粋関数が正しくても、画面が呼んでいなければ効かない。
 // #547 P3-7 の統合テストと同じ理由（両単体テストが緑のまま結線だけ崩れる、を防ぐ）。
 describe("画面が、決め方を通っている（#987）", () => {
-  it("App がタイムライン側の名前を渡している", async () => {
+  it("App が決め方を通し、その結果をサイドバーへ渡している", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(process.cwd(), "src", "App.tsx"), "utf8");
@@ -119,7 +161,7 @@ describe("画面が、決め方を通っている（#987）", () => {
     expect(
       src,
       "決め方の結果が、サイドバーへ渡す値になっていない（呼んでいるが捨てている）",
-    ).toMatch(/const\s*\{\s*show:\s*hasProjectContent,\s*name:\s*projectName\s*\}\s*=\s*currentProjectLabel\(/);
+    ).toMatch(/const\s+currentProjects\s*=\s*currentProjectEntries\(/);
     expect(src, "タイムライン側の名前を渡していない").toMatch(/timelineName/);
   });
 });

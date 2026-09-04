@@ -639,6 +639,8 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
   TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
   TIMELINE_EDIT_LOCKED_SELECTION: "固定された列の部品が選ばれています。固定を外すか、選び直してください",
+  TIMELINE_EDIT_TRIM_NONE_AT_TIME:
+    "選んだ部品が、いま再生位置にかかっていません。再生位置を部品の上へ移すか、かかっている部品だけを選んでください",
   TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とまとまりになっています。まとまりを外してから複製してください",
   TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
