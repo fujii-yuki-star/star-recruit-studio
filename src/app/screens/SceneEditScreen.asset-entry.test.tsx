@@ -15,9 +15,13 @@ import { SceneEditScreen } from "./SceneEditScreen";
 const template = {
   schemaVersion: "1.0", templateId: "tmpl_a", name: "本文", category: "body", aspectRatio: "16:9",
   canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+  // ⚠️ **実物と同じ形にする**（PR #1041 レビュー 🔴）＝実際の見た目パターンは例外なく
+  //   `background` を**配列の先頭**（zIndex 0）に置き、主役は `mainVisual`。
+  //   ここに背景が無かったせいで「背景に入ってしまう」経路が一度も検査されていなかった。
   layers: [
-    { id: "main", type: "slot", slotType: "image", x: 0, y: 0, w: 960, h: 1080, zIndex: 1 },
-    { id: "sub", type: "slot", slotType: "image", x: 960, y: 0, w: 960, h: 1080, zIndex: 2 },
+    { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+    { id: "mainVisual", type: "slot", slotType: "image", x: 0, y: 0, w: 960, h: 1080, zIndex: 10 },
+    { id: "sub", type: "slot", slotType: "image", x: 960, y: 0, w: 960, h: 1080, zIndex: 11 },
   ],
 } as unknown as Template;
 
@@ -44,6 +48,8 @@ function setup(assetRefs: Record<string, string> = {}) {
 
 const tile = (name: string) => screen.getByRole("button", { name: new RegExp(name) });
 const refs = () => useProjectStore.getState().scenes[0].assetRefs;
+/** 入れ先が**ぜんぶ**埋まっている状態（背景まで）。 */
+const FULL = { background: "asset_003", mainVisual: "asset_001", sub: "asset_002" };
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -54,39 +60,39 @@ describe("素材タイルから差し込み口へ入れられる（#1030 ①）"
   it("押すと、空いている差し込み口へ入る", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(tile("外観"));
-    expect(refs().main).toBe("asset_001");
+    expect(refs().mainVisual).toBe("asset_001");
   });
 
   it("2枚目は次の空いている差し込み口へ入る", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(tile("外観"));
     fireEvent.click(tile("社員"));
-    expect(refs()).toMatchObject({ main: "asset_001", sub: "asset_002" });
+    expect(refs()).toMatchObject({ mainVisual: "asset_001", sub: "asset_002" });
   });
 
   // ⚠️ **空きが無いときに黙って置き換えない**（§2-5・`06 §2` 規約1）。
   it("空きが無いときは、入れ替える前に確認を出す", () => {
-    setup({ main: "asset_001", sub: "asset_002" });
+    setup(FULL); // ⚠️ **背景も入れ先の候補**（受け皿）なので、そこまで埋めないと「空きが無い」にならない
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(tile("社員"));
-    expect(refs().main, "確認の前に入れ替えている").toBe("asset_001");
+    expect(refs().mainVisual, "確認の前に入れ替えている").toBe("asset_001");
     expect(screen.getByText(/入れ替えますか/)).toBeInTheDocument();
   });
 
   it("確認で「入れ替える」を押すと入れ替わる", () => {
-    setup({ main: "asset_001", sub: "asset_002" });
+    setup(FULL); // ⚠️ **背景も入れ先の候補**（受け皿）なので、そこまで埋めないと「空きが無い」にならない
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(tile("社員"));
     fireEvent.click(screen.getByRole("button", { name: "入れ替える" }));
-    expect(refs().main).toBe("asset_002");
+    expect(refs().mainVisual).toBe("asset_002");
   });
 
   it("確認で「やめる」を押すと何も変わらない", () => {
-    setup({ main: "asset_001", sub: "asset_002" });
+    setup(FULL); // ⚠️ **背景も入れ先の候補**（受け皿）なので、そこまで埋めないと「空きが無い」にならない
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(tile("社員"));
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
-    expect(refs().main).toBe("asset_001");
+    expect(refs().mainVisual).toBe("asset_001");
     expect(screen.queryByText(/入れ替えますか/)).toBeNull();
   });
 
@@ -126,7 +132,7 @@ describe("使用素材の節（#1030 ④）", () => {
   });
 
   it("全部埋まっているときは畳んで出す（要らない節を開いたままにしない）", () => {
-    setup({ main: "asset_001", sub: "asset_002" });
+    setup(FULL); // ⚠️ **背景も入れ先の候補**（受け皿）なので、そこまで埋めないと「空きが無い」にならない
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     expect(assetsSectionOpen(), "全部埋まっているのに開いている").toBe(false);
   });
