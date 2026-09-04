@@ -28,6 +28,20 @@ export function videoAssetIdOfClip(clip: TimelineClip, videoAssetIds: ReadonlySe
 }
 
 /**
+ * **直接置いた動画の部品か**（#1019 ⑦）＝速さ・素材の使い始めを持てる部品かどうか。
+ *
+ * ⚠️ **持てるのに触れなかった**＝`videoPlacementsOfClip` は直接置きで `clip.sourceStartSec` と
+ * `effectiveSpeed(clip)` を**読んでいる**のに、書く側（`setClipSpeed`／`setClipSourceStart`）は
+ * `kind === 'audio'` で断っていた。しかも `splitClip`／`explodeTemplateClip` は
+ * **差し込み口の部品にその値を書く**ので、**置いた覚えのない頭出し・速さが付いた部品**ができ、
+ * 見ることも直すことも既定へ戻すこともできなかった（§2-5・ADR-0026④）。
+ * ⚠️ **写真の差し込み口は含めない**＝動かない絵に「速さ」は意味が無い（欄だけ出しても何も起きない）。
+ */
+export function isDirectVideoClip(doc: TimelineProject, clip: TimelineClip): boolean {
+  return videoAssetIdOfClip(clip, videoAssetIds(doc)) != null;
+}
+
+/**
  * 動画を映す**置き場所**1つ分（#512 段3）。
  *
  * ⚠️ **1つの部品に複数の動画がありうる**＝見た目パターンのクリップは差し込み口の数だけ持てる。
