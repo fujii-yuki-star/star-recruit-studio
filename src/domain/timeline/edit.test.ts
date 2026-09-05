@@ -621,24 +621,36 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
 
   it('文字の部品には速さ・使い始め・音量・フェードを書けない', () => {
     const d = withText();
+    // ⚠️ **音量・フェードは「音を持っていない」**（`notAudio`）。
     for (const r of [
-      setClipSpeed(d, 'clip_001', 2),
-      setClipSourceStart(d, 'clip_001', 1),
       setClipVolume(d, 'clip_001', 0.5),
       setClipFade(d, 'clip_001', 'in', 1),
     ]) {
       expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
+    // ⚠️ **速さ・使い始めは「その2つを持っていない」**（`notPlayable`・#1019 ⑦）＝この2つは
+    // **動画にもある**ので、「音や読み上げの部品で変えてください」だと動画の部品を探せない（§2-5）。
+    for (const r of [
+      setClipSpeed(d, 'clip_001', 2),
+      setClipSourceStart(d, 'clip_001', 1),
+    ]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notPlayable });
     }
   });
 
   // ⚠️ **「見つかりません」で断らない**＝選び直しても直らない案内になる（§2-5）。
   it('理由は「音を持っていない」＝見つからないではない', () => {
     expect(EDIT_BLOCKED.notAudio).not.toBe(EDIT_BLOCKED.notFound);
+    expect(EDIT_BLOCKED.notPlayable).not.toBe(EDIT_BLOCKED.notFound);
+    // ⚠️ **2つは別物**（音を持たない／速さ・使い始めを持たない）＝同じ値に潰さない。
+    expect(EDIT_BLOCKED.notPlayable).not.toBe(EDIT_BLOCKED.notAudio);
   });
 
-  // ⚠️ **速さ・使い始めは音だけ**（`11 §7.6.3.2` の**既存の**決定）＝読み上げの長さは声の実尺で `trimClip`
+  // ⚠️ **速さ・使い始めは読み上げには出さない**（`11 §7.6.3.2`）＝読み上げの長さは声の実尺で `trimClip`
   // してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24）。
   // レビューで判明＝追記した節に既に書いてあった決定を読まずに `isAudioClip` へ広げていた。
+  // ⚠️ **「音だけ」ではなくなった**（#1019 ⑦・PR #1037 レビュー ℹ️）＝**直接置いた動画にも出す**。
+  // 除くのは読み上げ（上の理由）と、速さが意味を持たない部品（文字・図形・写真の差し込み口）だけ。
   it('読み上げには速さ・使い始めを書けない（音量とフェードは書ける）', () => {
     const v = doc({
       tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
@@ -653,10 +665,10 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
     expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
     expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
 
-    // ⚠️ **音を持たない部品は `notAudio` のまま**（2と3が別のものを指していることを対で固定する）。
+    // ⚠️ **速さ・使い始めを持たない部品は `notPlayable`**（#1019 ⑦）＝2と3が別のものを指していることを対で固定する。
     const t = doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })] });
-    expect(setClipSpeed(t, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipSourceStart(t, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSpeed(t, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notPlayable });
+    expect(setClipSourceStart(t, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notPlayable });
   });
 
   // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆だと
@@ -666,13 +678,13 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
       tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
       clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
     });
-    for (const r of [
-      setClipVolume(d, 'clip_001', 0.5),
-      setClipSpeed(d, 'clip_001', 2),
-      setClipSourceStart(d, 'clip_001', 1), // レビュー指摘＝4つとも固定する（2つだけだと順序の書き違いが残る）
-      setClipFade(d, 'clip_001', 'in', 1),
-    ]) {
+    // レビュー指摘＝4つとも固定する（2つだけだと順序の書き違いが残る）。
+    // ⚠️ **どちらの断りでも「固定」より先**＝外しても直らない案内にしない。
+    for (const r of [setClipVolume(d, 'clip_001', 0.5), setClipFade(d, 'clip_001', 'in', 1)]) {
       expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
+    for (const r of [setClipSpeed(d, 'clip_001', 2), setClipSourceStart(d, 'clip_001', 1)]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notPlayable });
     }
   });
 

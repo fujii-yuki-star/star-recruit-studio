@@ -17,7 +17,7 @@ import type { Group } from '../group/types';
 import type { SlotClipOverride } from '../project/types';
 import { isAudioClip } from './audio';
 import { clampVolume } from '../voice/audioMix';
-import { canUseOriginalAudio, videoPlacementsOfClip } from './video';
+import { canUseOriginalAudio, isDirectVideoClip, videoPlacementsOfClip } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
@@ -66,6 +66,13 @@ export const EDIT_BLOCKED = {
    * ⚠️ `notFound` で断らない＝「その部品は見つかりませんでした」は嘘になり、選び直しても直らない。
    */
   notAudio: 'TIMELINE_EDIT_NOT_AUDIO',
+  /**
+   * **速さ・素材の使い始め**を、その2つを持たない部品へ書こうとした（#1019 ⑦）。
+   * ⚠️ `notAudio` と分ける＝この2つは**動画にもある**（直接置いた動画は再生され、
+   * `videoPlacementsOfClip` が `sourceStartSec`／`speed` を読む）ので、
+   * 「音の部品で変えてください」だと**動画の部品を探せない**（従っても直らない）。
+   */
+  notPlayable: 'TIMELINE_EDIT_NOT_PLAYABLE',
   /**
    * 元の音（#512 段2）を、**動画ではない部品**か**音の入っていない動画**へ書こうとした。
    * ⚠️ `notAudio` と分ける＝「音の部品で変えてください」は動画の話をしていないので、
@@ -1472,6 +1479,28 @@ export function setClipBoxes(
 }
 
 /**
+ * **速さ・素材の使い始め**を書ける部品か（#1019 ⑦）。書けないなら断る理由を返す。
+ *
+ * ⚠️ **2つの setter で同じ門を通す**＝写すと片方だけ開く（このリポジトリで繰り返している型）。
+ * ⚠️ **読み上げは断る**＝長さは声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると
+ * 尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24「連動している＝区間が一致している」）。
+ * 読み上げは音を持つので `contentField`（この項目が無い）が正しい（`notAudio` は自己矛盾＝PR #865）。
+ * ⚠️ **直接置いた動画は書ける**（#1019 ⑦・利用者判断は下記）＝`videoPlacementsOfClip` が既に
+ * この2つを**読んで**おり、`splitClip`／`explodeTemplateClip` は**書いて**いた。開かないと
+ * 「置いた覚えのない頭出し・速さが付いていて、見ることも直すこともできない」が残る（§2-5）。
+ * ⚠️ **断る順は「その部品には無いか」→「固定した列か」**（`§7.6.3`・#795）。
+ */
+function blockPlaybackEdit(doc: TimelineProject, clip: TimelineClip): EditBlockedReason | null {
+  const playable = clip.kind === TIMELINE_CLIP_KIND.audio || isDirectVideoClip(doc, clip);
+  if (!playable) {
+    // 音を持つ部品（読み上げ）なら「この項目が無い」／持たないなら「速さ・使い始めが無い」。
+    return isAudioClip(clip) ? EDIT_BLOCKED.contentField : EDIT_BLOCKED.notPlayable;
+  }
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return EDIT_BLOCKED.locked;
+  return null;
+}
+
+/**
  * 音・動画の素材の**再生速度**（#634・`11 §7.6.5`）。1＝そのまま。
  *
  * **クリップの長さは変えない**＝速さは「置き場所ぶんの時間に、素材のどれだけを流すか」を決める
@@ -1481,17 +1510,8 @@ export function setClipBoxes(
 export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
-  // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
-  // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
-  // ⚠️ **断る順は「音を持たない部品か」→「その項目が無いか」→「固定した列か」**（`§7.6.3`・#795）。
-  // 以前は `kind !== audio` の1段で `notAudio` に倒しており、**読み上げの部品にも**「その部品は音を
-  // 持っていません。音の設定は、音や**読み上げの部品で**変えてください」を返していた＝**読み上げを
-  // 操作しているのに読み上げでやれと言う**自己矛盾（PR #865 レビュー）。読み上げは音を持つので
-  // `contentField`（この項目が無い）が正しい。
-  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
-  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const why = blockPlaybackEdit(doc, clip);
+  if (why) return blocked(why);
   // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
   const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
   if ((clip.speed ?? 1) === next) return ok(doc);
@@ -1505,17 +1525,8 @@ export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number
 export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
-  // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
-  // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
-  // ⚠️ **断る順は「音を持たない部品か」→「その項目が無いか」→「固定した列か」**（`§7.6.3`・#795）。
-  // 以前は `kind !== audio` の1段で `notAudio` に倒しており、**読み上げの部品にも**「その部品は音を
-  // 持っていません。音の設定は、音や**読み上げの部品で**変えてください」を返していた＝**読み上げを
-  // 操作しているのに読み上げでやれと言う**自己矛盾（PR #865 レビュー）。読み上げは音を持つので
-  // `contentField`（この項目が無い）が正しい。
-  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
-  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const why = blockPlaybackEdit(doc, clip);
+  if (why) return blocked(why);
   const next = Math.max(0, sec);
   if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
   const patched = { ...clip };
