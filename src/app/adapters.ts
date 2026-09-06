@@ -6,6 +6,7 @@ import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { MAIN_ASSET_LAYER_KEYS } from "../domain/template/slotAssign";
 import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
@@ -49,7 +50,8 @@ function mainAsset(scene: Scene, template: Template | undefined, assets: Asset[]
   const active = new Set(activeIds);
   const find = (id: string | null | undefined): Asset | undefined =>
     id && active.has(id) ? assets.find((a) => a.assetId === id) : undefined;
-  for (const key of ["mainVisual", "background"]) {
+  // 主役の決め方は domain に1つ（押したときの入れ先＝`slotForAsset` と共有・#1030）。
+  for (const key of MAIN_ASSET_LAYER_KEYS) {
     const found = find(scene.assetRefs[key]);
     if (found) return found;
   }
