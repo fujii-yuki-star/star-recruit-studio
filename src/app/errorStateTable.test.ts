@@ -92,6 +92,12 @@ function codeMessages(): Record<string, string> {
     // ⚠️ **理由 × 単体/まとめて＝6通りを、6行として等値で守る**（#1012）＝1つの行に畳むと
     // **どれか1通りだけ書き換えても気づけない**（この関数はまさに「言い方が2か所にあると
     // 片方だけ直す」を畳むために作ったもの＝畳んだ先で同じ穴を開けない）。
+    // ⚠️ **`ASSEMBLED_AT_RUNTIME` との線引き**（PR #1048 レビュー 🟡）＝**返す文が有限個に
+    // 打ち切れるか**で決める。ここは `reason` が3値の union・`count` は有無の2値なので**6通りで尽きる**
+    // ＝1つずつ書ける。件数や名前を差し込むだけの文（`userFontMissingMessage` 等）も、差し込み口を
+    // ` N ` のような目印にすれば1通りに落ちるので等値で守れる。**候補の有無や状況で締めが変わる**もの
+    //（`sceneTemplateProblemMessage`・`missingTemplateMessage` 等）は組み合わせが表の行と1対1にならない
+    // ので、あちらへ理由つきで載せる。
     TIMELINE_CANVAS_HOLD_TRACK: canvasHoldMessage("track"),
     TIMELINE_CANVAS_HOLD_TRACK_MANY: canvasHoldMessage("track", " N " as unknown as number),
     TIMELINE_CANVAS_HOLD_ANIMATION: canvasHoldMessage("animation"),
@@ -100,16 +106,18 @@ function codeMessages(): Record<string, string> {
     TIMELINE_CANVAS_HOLD_GROUP_MANY: canvasHoldMessage("group", " N " as unknown as number),
     // ⚠️ **走査の外にあった文言をまとめて載せる**（#1012 の3つ目）＝ここへ載せていない文言は
     // 「表だけ古くなったら落ちる」の**弱い段**（実装のどこかに在るか）でしか見られておらず、
-    // **表と実装のどちらを書き換えても気づけない**。`uiLabels.ts` の `*_MESSAGE` 14件のうち
-    // **3件は表に1行も無く**（`BGM_DUCK_MERGED`・`PROJECT_DUPLICATE_FAILED`・`VOICE_BUSY_EXPORT`）、
-    // 残り11件も等値では守られていなかった。下の「取りこぼしを構造で止める」検査が、
-    // 次に足したぶんをここへ載せさせる。
+    // **表と実装のどちらを書き換えても気づけない**。`uiLabels.ts` の `*_MESSAGE` **14件すべて**が
+    // その状態だった（行は前からあるのに、等値では守られていなかった）。
+    // ⚠️ **コードの名前は表の側に合わせる**（PR #1048 レビュー 🟡）＝`DUCK_MERGED` /
+    // `DUPLICATE_FAILED` / `EXPORT_BLOCKED_VOICE_BUSY` は表に前からある行で、新しい名前で
+    // 足すと**同じ文言が2行**になる＝このPRが問題にしている「片方だけ直る」を正典に作ってしまう。
+    // 下の「取りこぼしを構造で止める」検査が、次に足したぶんをここへ載せさせる。
     BRAND_FONT_CLEARED: BRAND_FONT_CLEARED_MESSAGE,
     BRAND_FONT_CLEAR_FAILED: BRAND_FONT_CLEAR_FAILED_MESSAGE,
     BRAND_FONT_NOT_APPLIED: BRAND_FONT_NOT_APPLIED_MESSAGE,
     BRAND_LOGO_NOT_APPLIED: BRAND_LOGO_NOT_APPLIED_MESSAGE,
-    BGM_DUCK_MERGED: DUCK_MERGED_MESSAGE,
-    PROJECT_DUPLICATE_FAILED: DUPLICATE_FAILED_MESSAGE,
+    DUCK_MERGED: DUCK_MERGED_MESSAGE,
+    DUPLICATE_FAILED: DUPLICATE_FAILED_MESSAGE,
     EXPORT_BLOCKED_IMPORTING: EXPORT_BLOCKED_IMPORTING_MESSAGE,
     IMPORT_BLOCKED_EXPORTING: IMPORT_BLOCKED_EXPORTING_MESSAGE,
     IMPORT_BUSY: IMPORT_BUSY_MESSAGE,
@@ -117,7 +125,7 @@ function codeMessages(): Record<string, string> {
     IMPORT_TIMELINE_OPEN: IMPORT_TIMELINE_OPEN_MESSAGE,
     LEAVE_BLOCKED_EXPORTING: LEAVE_BLOCKED_EXPORTING_MESSAGE,
     TIMELINE_SAVE_FAILED: TIMELINE_SAVE_FAILED_MESSAGE,
-    VOICE_BUSY_EXPORT: VOICE_BUSY_EXPORT_MESSAGE,
+    EXPORT_BLOCKED_VOICE_BUSY: VOICE_BUSY_EXPORT_MESSAGE,
   };
 }
 
@@ -340,6 +348,12 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 次に読む人は「書き忘れ」と読む。いまは1件も外していない。
   };
 
+  // ⚠️ **この段が見るのは `uiLabels.ts` の `*_MESSAGE` だけ**（PR #1048 レビュー ℹ️）＝関数で
+  //    組み立てる文言・画面やほかの層に直書きした文字列は**この段の外**（弱い段でしか守られていない）。
+  //    「これで全部守られている」と読まれないように書き残す。射程を広げるのは別で追う。
+  // ⚠️ **エスケープを含む文言は取り違えうる**＝ソースの文字をそのまま読むので、改行の記号（\n）を含む文言を
+  //    足すと**実際の値と別の文字列**として拾う。ただし拾い方が崩れれば `literal: null` に落ち、
+  //    `MESSAGE_EXEMPT` に無ければ**赤くなる**（黙って通らない＝失敗の向きは安全側）。
   it("`uiLabels` の `*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
     const found = messageConstsOf(readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8"));
     const guarded = new Set(Object.values(codeMessages()).map(norm));
@@ -439,7 +453,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(174);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(171);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
