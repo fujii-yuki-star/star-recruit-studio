@@ -152,6 +152,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // どちらも到達する（相手の書き出しが終わると走行中の判定が落ちるので、その直後にこの画面へ来ると
   // 締めだけが残っている）。押す前の表示と押した瞬間の判定は**同じ述語**から採る（`06 §12.1`）。
   const lockBlockedMessage = exportLockBlockedMessage(useExportLockStore((st) => st.owner), EXPORT_OWNER, busy || starting);
+  // **書き出しの入口を 1 つにする**（#1032）。失敗の知らせからもやり直せるようにしたので、
+  // 押せる条件を書き並べると**片方だけ塞がれていない**が起きる（`06 §12.1`＝押す前に見せて押せなくする）。
+  const exportDisabled = busy || starting || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked;
+  // 公開前チェックへの入口も 1 つ＝**戻り先の覚え方**（`setPrecheckReturnTo`）を書き忘れた入口を作らない（#1026）。
+  const openPrecheck = (): void => {
+    setPrecheckReturnTo("export");
+    onNavigate("precheck");
+  };
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
   // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
@@ -544,14 +552,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <div className="row-between mt-lg">
-            <button className="btn btn-ghost btn-icon" onClick={() => { setPrecheckReturnTo("export"); onNavigate("precheck"); }} disabled={busy}>
+            <button className="btn btn-ghost btn-icon" onClick={openPrecheck} disabled={busy}>
               <ArrowLeftIcon size={16} />
               公開前チェックへ戻る
             </button>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || starting || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={exportDisabled}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}
               </button>
@@ -663,8 +671,21 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {/* 失敗の中身（原因と次の行動）。前回の結果として見ているときは読み上げの割り込み（alert）にしない
               ＝画面に入るたび「たったいま失敗した」と再通知しない。いつのことかは上の1行が示す。 */}
           {phase === "error" && (
-            <div className="notice notice-warn" role={showsPastResult ? "status" : "alert"}>
+            <div className="notice notice-warn row-between" role={showsPastResult ? "status" : "alert"}>
               <span>{message}</span>
+              {/* ⚠️ **次の行動をその場に置く**（#1032・§2-5）＝直す入口（公開前チェック）も
+                  やり直す入口（動画を保存）も**遠く上にしか無かった**（進行バーや保存先の欄を挟んで
+                  画面外になりうる）。他画面向けの終了通知（`ExportResultNotice`）は行動を持っているのに、
+                  **失敗を直に見ているこの画面だけが読むだけ**だった。
+                  ⚠️ **押せる条件は上のボタンと同じ述語**（`exportDisabled`）＝書き並べると片方だけ塞がれない。 */}
+              <div className="row gap-sm">
+                <button className="btn btn-secondary text-sm" onClick={openPrecheck} disabled={busy}>
+                  公開前チェックを開く
+                </button>
+                <button className="btn btn-ghost text-sm" onClick={() => void startExport()} disabled={exportDisabled}>
+                  もう一度書き出す
+                </button>
+              </div>
             </div>
           )}
 

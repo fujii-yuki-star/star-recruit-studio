@@ -32,9 +32,14 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
 
   return (
     <div className="main-scroll">
+      {/* ⚠️ **見るだけであることを、読む前に見せる**（#1032）＝説明の一文だけだと、
+          帯を掴もうとして空振りしてから気づく。
+          ⚠️ **名前は正典のものをそのまま使う**（`06 §12`「見わたすタイムライン」）＝見出しは
+          「タイムライン」だけで、**編集画面（タイムライン編集）と見分けがつかなかった**。 */}
       <PageHead
-        title="タイムライン"
+        title="見わたすタイムライン"
         desc="動画全体の時間の流れを、場面・テロップ・音声・BGM のトラックで見渡せます。ここでは見るだけで、時間の流れを直すときはタイムライン編集用の動画を作ります。"
+        actions={<span className="badge badge-gray">見るだけ</span>}
       />
       {/* 旧・場面横断タイムラインの手編集（#635）。**消していない**ことと、次の行動を伝える（§2-5）。 */}
       {hasRetiredTimelineEdits && (
