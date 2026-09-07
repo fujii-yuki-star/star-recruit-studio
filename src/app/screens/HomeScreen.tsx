@@ -40,15 +40,6 @@ function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
 
-/**
- * **理由が分からないとき**の案内（#793 レビュー）。読み込み側が理由を出せた場合はそちらを見せる。
- *
- * ⚠️ **「別のプロジェクトを選んでください」と書かない**＝以前の固定文はそう書いていたが、
- * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
- * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
- */
-
-
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const restoreToRestorePoint = useProjectStore((s) => s.restoreToRestorePoint);
