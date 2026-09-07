@@ -1249,7 +1249,6 @@ pub fn run() {
             ffmpeg::video_filmstrip,
             assets::project_files_size,
             assets::copy_project_files,
-            assets::cancel_project_copy,
             assets::import_template_asset,
             assets::load_template_assets,
             assets::delete_template_asset,
