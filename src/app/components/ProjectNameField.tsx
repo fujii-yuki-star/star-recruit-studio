@@ -22,7 +22,7 @@ export function ProjectNameField() {
     <input
       className="input"
       value={draft ?? projectName}
-      placeholder="無題のプロジェクト"
+      placeholder="無題の動画"
       aria-label="動画の名前"
       title="動画の名前（ここで変えられます）"
       maxLength={PROJECT_NAME_MAX_LENGTH} // schema の projectName 上限（1–80字）に合わせる（貼り付け等での超過を UI で予防・#411）

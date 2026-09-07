@@ -88,7 +88,7 @@ describe("画面ぜんぶに効く知らせは、スクロールしても消え�
     setupHome();
     render(<HomeScreen onNavigate={vi.fn()} />);
     fireEvent.click((await screen.findByText("テスト動画")).closest("button") as HTMLButtonElement);
-    const confirmText = screen.getByText(/別のプロジェクトを開きますか/);
+    const confirmText = screen.getByText(/別の動画を開きますか/);
     expect(staysVisibleOnScroll(confirmText)).toBe(true);
     // 答える手段（やめる／開く）も一緒に見えていること＝文だけ見えても行き止まり（§2-5）。
     expect(staysVisibleOnScroll(screen.getByRole("button", { name: "やめる" }))).toBe(true);
@@ -150,7 +150,7 @@ describe("画面ぜんぶに効く知らせは、スクロールしても消え�
       render(<HomeScreen onNavigate={vi.fn()} />);
       await screen.findByText("テスト動画");
       fireEvent.click(screen.getByRole("button", { name: "「テスト動画」の名前を変更" }));
-      const input = await screen.findByLabelText("プロジェクト名");
+      const input = await screen.findByLabelText("動画の名前");
       fireEvent.change(input, { target: { value: "べつの名前" } });
       fireEvent.keyDown(input, { key: "Enter" });
       expect(inZone(await screen.findByText(/名前を変更できませんでした/))).toBe(true);

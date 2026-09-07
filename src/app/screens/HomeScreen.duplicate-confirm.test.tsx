@@ -76,7 +76,7 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
     const { loadProject } = setup(true);
     render(<HomeScreen onNavigate={vi.fn()} />);
     fireEvent.click((await screen.findByText("テスト動画")).closest("button") as HTMLButtonElement);
-    expect(screen.getByText(/別のプロジェクトを開きますか/)).toBeTruthy();
+    expect(screen.getByText(/別の動画を開きますか/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "開く" }));
     expect(loadProject).toHaveBeenCalledWith("proj_001");
   });

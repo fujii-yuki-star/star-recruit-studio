@@ -43,7 +43,7 @@ describe("HomeScreen 複製と開くの相互ロック（🟡32）", () => {
     await screen.findByText("1本目");
     fireEvent.click(openBtn("1本目"));
     await waitFor(() => expect(dupBtn("2本目")).toBeDisabled());
-    expect(dupBtn("2本目")).toHaveAttribute("title", "プロジェクトを開いています…");
+    expect(dupBtn("2本目")).toHaveAttribute("title", "動画を開いています…");
   });
 
   it("コピーしている最中は、別の動画を開けない（理由も出す）", async () => {

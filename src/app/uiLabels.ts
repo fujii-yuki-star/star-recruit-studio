@@ -311,7 +311,7 @@ export function deleteLookConfirmMessage(
   if (impact.losingContent > 0) parts.push(`うち${impact.losingContent}個の場面は写真・文字などが動画に出なくなります。`);
   // 合う標準が無い場面は変わらず「見つからない」まま残る＝そのままでは書き出せない（§2-5）。
   if (impact.unresolved > 0) parts.push(`${impact.unresolved}個の場面は合う標準が無いため、見た目を選び直すまで書き出せません。`);
-  parts.push("他のプロジェクトで使っている場面は、開いたときに見た目を選び直してください。");
+  parts.push("他の動画で使っている場面は、開いたときに見た目を選び直してください。");
   return parts.join("");
 }
 
