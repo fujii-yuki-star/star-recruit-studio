@@ -36,6 +36,17 @@ export function useTimelineAudio(): void {
   const ctxRef = useRef<AudioContext | null>(null) as AudioCtxRef;
   const volumeRef = useRef<Map<string, VolumeControl>>(new Map());
 
+  /**
+   * **まだ用意していない音源をそろえる**（#1061）＝取り込んで置いた直後から鳴るようにする。
+   *
+   * ⚠️ **ここに置くのは「鳴らす側が1つだから」**＝音源を増やす操作は多い（置く・鳴らす音を選ぶ・
+   * 複製・貼り付け・バラす…）ので、操作ごとに書くと**書き忘れた入口だけ無音**になる。
+   * ⚠️ **鳴らす直前ではなく、文書が変わったとき**に読む（鳴らす瞬間に読みに行くと頭が欠ける＝`§7.6.2.2`）。
+   */
+  useEffect(() => {
+    if (doc) void useTimelineStore.getState().ensureAudioSrcs();
+  }, [doc]);
+
   useEffect(() => {
     const playing = playingRef.current;
     const vols = volumeRef.current;
