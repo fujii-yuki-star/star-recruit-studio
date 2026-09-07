@@ -116,11 +116,16 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await screen.findByText("あとで開く");
-    // ⚠️ **文字が出た＝関門が名乗った、ではない**（#1007）＝`findByText` は DOM の変化で返るが、
-    // 関門を名乗るのは `useEffect`（描き終えた**後**に走る）。詰まっているときほど間が空くので、
-    // ここで**残っている effect を流し切ってから**見る（通し実行でだけまれに落ちていた）。
+    // ⚠️ **残っている effect を流し切ってから見る**（#1007）。通し実行でだけまれに落ちたので入れた。
+    // ⚠️ **見立ては裏取れていない**＝当初は「`findByText` は DOM の変化で返るので、
+    // `useEffect` で名乗る前に見ている」と考えたが、**その仕組みは再現しなかった**：
+    // ① act の外で状態を変えて `findByText` した直後を見る実験では、effect は**既に走っていた**
+    //（RTL の `waitFor` は `asyncAct` に包まれていて、抜けるときに effect を流し切る）。
+    // ② この1行を**外す変異を 1703 件規模の通し実行でかけても、緑のままだった**（生き残り）。
+    // つまりこの1行は**いま見えている範囲では等価**で、揺れの原因は**まだ分かっていない**。
+    // 残してあるのは安い保険としてで、**「これで直った」とは書かない**（次に踏んだ人が偽の説明を引き継がないため）。
     await act(async () => {});
-    expect(canNavigate("settings" as ScreenId)).toBe(false);
+    expect(canNavigate("settings" as ScreenId), "知らせが出ているのに、サイドバーから移れてしまう").toBe(false);
     fireEvent.click(screen.getByText("あとで開く"));
     await waitFor(() => expect(canNavigate("settings" as ScreenId)).toBe(true));
   });
