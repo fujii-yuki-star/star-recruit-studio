@@ -31,6 +31,21 @@ export async function showOpenAssetsDialog(): Promise<string[]> {
 }
 
 /**
+ * **音のファイルを1つ**選ぶ（#1050＝音の素材の選び直し）。キャンセル時は `null`。
+ *
+ * ⚠️ **写真・動画の口と分ける**＝差し替えは**同じ種類**でしか通さない（`changesAssetKind`）ので、
+ * 選ばせる時点で音だけにする＝**選んでから断られる**、を作らない（§2-5）。
+ */
+export async function showOpenAudioDialog(): Promise<string | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: '音楽', extensions: [...AUDIO_FILE_EXTENSIONS] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}
+
+/**
  * **よく使う素材**（ADR-0035）へ置くファイルを選ぶ。写真・動画に加えて**音楽**も選べる。
  *
  * ⚠️ **場面形式の素材の取り込みとは別の口**（α-6 差分再監査）＝あちら（`showOpenAssetsDialog`）は

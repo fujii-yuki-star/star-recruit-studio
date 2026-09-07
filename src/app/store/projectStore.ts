@@ -59,7 +59,7 @@ import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
-import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
+import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
@@ -2592,7 +2592,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（差分再監査 2巡目・ほかの取り込み経路と同じ規則）。
     const stillOpen = sameDocGuard(get);
     if (changesAssetKind(target.assetType, srcPath)) {
-      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video, PROJECT_FORMAT.scene) });
+      set({ importError: assetTypeMismatchMessage(assetKindOf(target.assetType), PROJECT_FORMAT.scene) });
       return;
     }
 

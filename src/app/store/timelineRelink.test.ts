@@ -10,6 +10,7 @@ vi.mock("../../infrastructure/assetFs", async (orig) => ({
   importAssetByPath: vi.fn(async (_projectId: string, fileName: string) => `assets/${fileName}`),
   assetDisplayUrl: vi.fn(async () => "asset://asset_001.mp4"),
   probeVideo: vi.fn(async () => ({ durationSec: 30, hasAudio: true, width: 1920, height: 1080 })),
+  readAssetDataUrl: vi.fn(async () => "data:audio/mp3;base64,NEW"),
   extractVideoThumbnail: vi.fn(async () => "assets/asset_001.png"),
   missingAssetFiles: vi.fn(async () => []),
 }));
@@ -153,6 +154,32 @@ describe("素材のファイルを選び直す（#1019 ⑤）", () => {
     vi.mocked(missingAssetFiles).mockResolvedValueOnce(["assets/asset_001.mp4"]);
     await useTimelineStore.getState().refreshMissingAssets();
     expect(useTimelineStore.getState().missingAssetIds).toEqual(["asset_001"]);
+  });
+
+  // ⚠️ **鳴らす側も読み直す**（#1050）＝音源の鍵は**素材の番号**なので、選び直しても鍵は変わらない
+  //    ＝読み直さないと**前の音が鳴り続ける**（絵の側で `?t=` を付けているのと同じ話）。
+  it("音の素材を差し替えたら、鳴らす側も読み直す", async () => {
+    useTimelineStore.setState({
+      doc: {
+        ...doc([{ assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "assets/asset_002.mp3" } as Asset], []),
+        clips: [{ id: "clip_a", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_002" } as TimelineClip],
+      },
+      audioSrcByKey: { "asset:asset_002": "data:audio/mp3;base64,OLD" },
+    } as never);
+    await useTimelineStore.getState().relinkAssetByPath("asset_002", "D:/new/曲.mp3");
+    expect(useTimelineStore.getState().audioSrcByKey["asset:asset_002"], "前の音のまま").toBe("data:audio/mp3;base64,NEW");
+  });
+
+  // ⚠️ **音と絵は差し替えない**（#1050）＝もとは「音は動画でないもの」に含まれていて、
+  //    絵の素材へ音を差し替えても通った（`changesAssetKind` の JSDoc が予告していた穴）。
+  it("音の素材を写真へは差し替えない（理由を出す）", async () => {
+    useTimelineStore.setState({
+      doc: doc([{ assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "assets/asset_002.mp3" } as Asset], []),
+    } as never);
+    await useTimelineStore.getState().relinkAssetByPath("asset_002", "D:/new/外観.png");
+    const msg = useTimelineStore.getState().importError ?? "";
+    expect(msg, "音だと言っていない").toContain("音");
+    expect(useTimelineStore.getState().doc!.assets[0].filePath, "差し替わってしまった").toBe("assets/asset_002.mp3");
   });
 
   // ⚠️ **取り消しで戻せる**＝文書まるごとの履歴に載る（作った状態を戻せない、を作らない）。

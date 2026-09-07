@@ -1,5 +1,7 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
+import { ASSET_KIND } from "../domain/asset/assetFile";
+import type { AssetKind } from "../domain/asset/assetFile";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
@@ -611,15 +613,26 @@ export function assetTooLargeMessage(nextAction: string): string {
  * かといって種類を変えずに中身だけ入れ替えると、**写真として動画を描く**ことになり何も映らない。
  * どちらも「黙って別の結果」なので、**差し替えずに断り、代わりの手を示す**。
  *
- * ⚠️ **判定は「動画かどうか」**（`changesAssetKind`）＝種類と直接くらべると、ロゴ・ゆうこ・QR・装飾が
+ * ⚠️ **判定は「動画／音／絵」**（`changesAssetKind`）＝種類と直接くらべると、ロゴ・ゆうこ・QR・装飾が
  * 素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。文言も「写真」でひとまとめにする＝
  * 利用者に「ロゴ素材」「QR 素材」と言い分けても直し方は同じ。
  */
-export function assetTypeMismatchMessage(isVideo: boolean, format: ProjectFormat): string {
-  const kind = isVideo ? '動画' : '写真';
-  const other = isVideo ? '写真' : '動画';
-  return `この素材は${kind}です。${kind}のファイルをお選びください。${other}に変えたいときは、${other}を取り込んでから${assetPickAgainWhere(format)}。`;
+export function assetTypeMismatchMessage(kind: AssetKind, format: ProjectFormat): string {
+  const name = assetKindName[kind];
+  return `この素材は${name}です。${name}のファイルをお選びください。`
+    + `別の種類に変えたいときは、そのファイルを取り込んでから${assetPickAgainWhere(format)}。`;
 }
+
+/**
+ * 素材の種類の呼び名（#1050）。⚠️ **「音」も種類として数える**＝もとは動画／写真の2つしか無く、
+ * **絵の素材へ音を差し替えても通って**いた（`changesAssetKind` の JSDoc が「到達するようになったら
+ * 足すこと」と予告していた）。音の素材も選び直せるようになったので、その時が来た。
+ */
+const assetKindName: Record<AssetKind, string> = {
+  [ASSET_KIND.video]: '動画',
+  [ASSET_KIND.audio]: '音',
+  [ASSET_KIND.image]: '写真',
+};
 
 /**
  * **取り込んだ後にどこで選び直すか**（#1019 ⑤）。形式で行き先が違う＝**タイムライン形式に「場面」は無い**

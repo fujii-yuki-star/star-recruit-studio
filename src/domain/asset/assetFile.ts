@@ -64,19 +64,28 @@ export function isListedMaterial(assetType: AssetType): boolean {
   return assetType !== ASSET_TYPE.bgm && assetType !== ASSET_TYPE.voice;
 }
 
+/** 差し替えで守る「種類」＝**動画／音／絵**（ロゴ・ゆうこ・QR・装飾は「絵」にまとめる）。 */
+export const ASSET_KIND = { video: 'video', audio: 'audio', image: 'image' } as const;
+export type AssetKind = (typeof ASSET_KIND)[keyof typeof ASSET_KIND];
+
+/** その素材はどの種類か（差し替えの可否と、断りの文言が同じものを見るための1か所）。 */
+export function assetKindOf(type: AssetType): AssetKind {
+  if (type === ASSET_TYPE.video) return ASSET_KIND.video;
+  if (type === ASSET_TYPE.bgm) return ASSET_KIND.audio;
+  return ASSET_KIND.image;
+}
+
 /**
  * 差し替えて**種類が変わる**か（#347）。
  *
- * ⚠️ **「動画かどうか」で見る**＝`assetType` と直接くらべると **`logo`/`yuko`/`qr`/`decor` が
+ * ⚠️ **「動画かどうか」だけでは足りない**＝`assetType` と直接くらべると **`logo`/`yuko`/`qr`/`decor` が
  * 素通り**する（3人のレビューが揃って指摘）。それらは絵なので**動画でないこと**を確かめれば守れる。
- * ⚠️ **`detectAssetType` は `bgm` も返すようになった**（差分再監査＝よく使う素材で音を置けるように
- * したため）。ここでは音は「動画でないもの」に含まれるので、**写真の素材へ音を差し替えても通る**が、
- * 差し替えの入口（素材画面）は写真・動画しか選ばせないのでその状態には到達しない
- *（到達するようになったら、`detectAssetType` の戻りが `bgm` のときも断る側へ足すこと）。
+ * ⚠️ **音も種類として数える**（#1050）＝もとは「音は『動画でないもの』に含まれるので、写真の素材へ
+ * 音を差し替えても通る。**到達するようになったら足すこと**」と書いていた。**音の素材も選び直せるように
+ * したので、その時が来た**＝動画／音／絵の3つで見る（絵の素材へ音を入れると、絵として描いて何も映らない）。
  */
 export function changesAssetKind(currentType: AssetType, newFileName: string): boolean {
-  const wasVideo = currentType === ASSET_TYPE.video;
-  return detectAssetType(newFileName) === ASSET_TYPE.video ? !wasVideo : wasVideo;
+  return assetKindOf(currentType) !== assetKindOf(detectAssetType(newFileName));
 }
 
 /**
