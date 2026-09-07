@@ -331,7 +331,12 @@ export interface TimelineExportCheckOptions {
 }
 
 export interface TimelineExportBlocker {
-  code: TimelineExportBlockCode;
+  /**
+   * ⚠️ **音が読めない**（`audioUnreadable`）は**ここには出ない**（#1064）＝ディスクを読んで初めて
+   * 分かるので、この同期の関門ではなく**書き出しの手前**で見る（絵の `assetUnreadable` と同じ）。
+   * 型から外しておくと、**文言を引く側が「種類ごとの出し分け」を忘れられない**（`audioUnreadableMessage`）。
+   */
+  code: Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.audioUnreadable>;
   /** どの部品のことか（画面で示す）。理由によっては空。 */
   clipIds: string[];
 }

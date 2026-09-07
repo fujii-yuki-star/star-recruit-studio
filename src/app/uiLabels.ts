@@ -10,6 +10,8 @@ import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
 import type { Layer } from "../domain/template/types";
 import type { EditBlockedReason } from "../domain/timeline/edit";
 import { TIMELINE_EXPORT_BLOCK, volumePointsTooManyHasSplittable } from "../domain/timeline/export";
+import { AUDIO_SOURCE_KIND } from "../domain/timeline/audio";
+import type { AudioSourceKind } from "../domain/timeline/audio";
 import type { TimelineExportBlockCode } from "../domain/timeline/export";
 import type { TimelineProject } from "../domain/timeline/types";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
@@ -892,11 +894,16 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
  * **全コードに文言が要る**＝理由が増えたら気づく。
  * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
  * だけ（そこだけ静止画のまま）。静止画で出すのを成功にしない（ADR-0026④）。
+ * ⚠️ **`audioUnreadable` もここに無い**（#1064・PR #1066 レビュー 🟡）＝音源の種類（読み上げ／同梱の曲／
+ * 取り込んだ素材）で**できることが違う**ので、1つの締めを書くと**2種類では実行できない行動**を勧めることになる。
  * ⚠️ **`volumePointsTooMany` はここに無い**（#831）＝挙げる部品に読み上げが混ざりうる集計型の理由で、
  * 「分けてください」を添えてよいかが**部品ごとに違う**。`lockedTrackMessage` と同じ流儀＝呼び出し側が
  * 状況を渡して締めを変える {@link volumePointsTooManyMessage} を直接呼ぶ。
  */
-export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.volumePointsTooMany>, string> = {
+export const exportBlockedMessage: Record<
+  Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.volumePointsTooMany | typeof TIMELINE_EXPORT_BLOCK.audioUnreadable>,
+  string
+> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     // ⚠️ 「読み込み直す」は書かない（#812）＝読み直す操作が画面に無く、自作のものを消した場合は
@@ -906,8 +913,6 @@ export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeo
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
   TIMELINE_EXPORT_ASSET_UNREADABLE:
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
-  TIMELINE_EXPORT_AUDIO_UNREADABLE:
-    "動画で使っている音を読み込めませんでした。そのままだとその部分は無音になります。「ファイルを選び直す」から入れ直すか、その部品を消してから書き出してください",
   // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
   // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
   TIMELINE_EXPORT_USER_FONT_MISSING:
@@ -916,6 +921,23 @@ export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeo
   TIMELINE_EXPORT_USER_FONT_UNREADABLE:
     "この動画は取り込んだ文字の形（フォント）を使っていますが、いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。アプリを開き直してから、もう一度お試しください",
 };
+
+/**
+ * 音が読み込めないときの案内（#1064）。**音源の種類で次の行動が違う**（PR #1066 レビュー 🟡）。
+ *
+ * ⚠️ **「ファイルを選び直す」は取り込んだ素材だけの導線**＝読み上げにも同梱の曲にも**その操作は無い**
+ *（読み上げは「声を作る」で作り直す／同梱の曲は一覧から選び直す）。1つの締めを書くと、
+ * 2種類では**実行できない行動**を勧めることになる（§2-5・`volumePointsTooManyMessage` と同じ流儀）。
+ */
+export function audioUnreadableMessage(kind: AudioSourceKind): string {
+  const head = "動画で使っている音を読み込めませんでした。そのままだとその部分は無音になります。";
+  const how = kind === AUDIO_SOURCE_KIND.voice
+    ? "その読み上げを選んで「声を作る」でもう一度作ってください"
+    : kind === AUDIO_SOURCE_KIND.bundled
+      ? "その部品を選んで「音」の「鳴らす音」で選び直してください"
+      : "その素材の「ファイルを選び直す」から入れ直すか、その部品を消してください";
+  return `${head}${how}`;
+}
 
 /**
  * 音量の点が多すぎる、の案内（#831）。
@@ -1053,8 +1075,18 @@ export const FONT_INHERIT_SCENE_LABEL = "この場面の文字の形に合わせ
 export const UNKNOWN_FONT_HINT =
   "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。";
 
-/** {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。 */
-export function resolveExportBlockedMessage(code: TimelineExportBlockCode, doc: TimelineProject, clipIds: string[]): string {
+/**
+ * {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。
+ *
+ * ⚠️ **音が読めない断りはここを通らない**（#1064）＝**音源の種類**（読み上げ／同梱の曲／取り込んだ素材）で
+ * 次の行動が変わるが、それは `doc`＋`clipIds` からは決まらない（読めなかった音源そのものを見る必要がある）。
+ * 呼ぶ側が {@link audioUnreadableMessage} を直接使う。
+ */
+export function resolveExportBlockedMessage(
+  code: Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.audioUnreadable>,
+  doc: TimelineProject,
+  clipIds: string[],
+): string {
   if (code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany) return volumePointsTooManyMessage(volumePointsTooManyHasSplittable(doc, clipIds));
   return exportBlockedMessage[code];
 }

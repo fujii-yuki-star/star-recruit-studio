@@ -13,6 +13,8 @@ import * as dialogMod from '../../infrastructure/dialog';
 import * as ffmpegMod from '../../infrastructure/ffmpegExport';
 import * as framesMod from '../../renderer/export/buildTimelineFrames';
 import * as fontsMod from '../../renderer/export/loadExportFonts';
+import * as voiceFsMod from '../../infrastructure/voiceFs';
+import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import { volumeExpr } from '../../domain/timeline/audio';
@@ -217,7 +219,44 @@ describe('exportTimelineVideo', () => {
     await open(d);
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(dialogMod.showSaveVideoDialog), '読めないのに保存先を聞いた').not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message, '黙って無音の動画を出そうとした').toContain('無音');
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '黙って無音の動画を出そうとした').toContain('無音');
+    // ⚠️ **種類で次の行動が違う**（PR #1066 レビュー 🟡）＝取り込んだ素材なので「ファイルを選び直す」。
+    expect(msg, '取り込んだ素材なのに別の手を案内した').toContain('ファイルを選び直す');
+  });
+
+  // ⚠️ **同梱の曲にも「ファイルを選び直す」は無い**（一覧から選び直す）＝取り込んだ素材と取り違えない。
+  it('同梱の曲が読めないときは、鳴らす音を選び直す手を出す', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, bundledBgmId: 'summer-morning' },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(bgmMod, 'readBundledBgmDataUrl').mockResolvedValue(undefined); // 同梱なのに読めない
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '同梱の曲なのに「ファイルを選び直す」を勧めた').toContain('鳴らす音');
+    expect(msg).not.toContain('ファイルを選び直す');
+  });
+
+  // ⚠️ **読み上げには「ファイルを選び直す」が無い**（PR #1066 レビュー 🟡）＝
+  //    作った声が読めないときは「声を作る」で作り直す（実行できない行動を勧めない）。
+  it('作った読み上げが読めないときは、作り直す手を出す', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
+          voice: { text: 'よみあげ', status: 'generated', voicePath: 'voices/clip_002.wav' } },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue(null); // 作ったが読めない
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '読み上げなのに「ファイルを選び直す」を勧めた').toContain('声を作る');
+    expect(msg).not.toContain('ファイルを選び直す');
   });
 
   // ⚠️ **まだ作っていない読み上げは止めない**＝音源そのものを持たない（元から鳴らない）ので、

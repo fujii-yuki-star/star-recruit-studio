@@ -179,6 +179,20 @@ export function audioSourcesOf(doc: TimelineProject): AudioSource[] {
 }
 
 /**
+ * 音源の種類（#1064）。**できる次の行動が種類で違う**ので、断りの文言が見分けるのに使う
+ *（読み上げ＝作り直す／同梱の曲＝一覧から選び直す／取り込んだ素材＝ファイルを選び直す）。
+ */
+export const AUDIO_SOURCE_KIND = { voice: 'voice', bundled: 'bundled', asset: 'asset' } as const;
+export type AudioSourceKind = (typeof AUDIO_SOURCE_KIND)[keyof typeof AUDIO_SOURCE_KIND];
+
+/** その音源はどの種類か（鍵の作り方と**同じ順**で見る＝見分けを2か所に持たない）。 */
+export function audioSourceKindOf(src: AudioSource): AudioSourceKind {
+  if (src.voicePath) return AUDIO_SOURCE_KIND.voice;
+  if (src.bundledBgmId) return AUDIO_SOURCE_KIND.bundled;
+  return AUDIO_SOURCE_KIND.asset;
+}
+
+/**
  * 音源を**中身で見分けるキー**（クリップ id ではない）。同じ曲を使う複数のクリップで音源を使い回し、
  * **セッション中に増えたクリップ**（複製など）でも読み直さずに鳴らせる＝黙って無音にならない。
  */

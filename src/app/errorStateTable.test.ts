@@ -187,6 +187,7 @@ const ASSEMBLED_AT_RUNTIME: Record<string, string> = {
   ASSET_FILE_MISSING: "件数と素材名を差し込む（`MaterialsScreen` の一覧と `adapters` の事前確認で別の文）",
   TIMELINE_TEMPLATE_NOT_FOUND: "件数の有無で締めが変わる（`missingTemplateMessage`）",
   TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY: "分けられる部品の有無で締めが変わる（`volumePointsTooManyMessage`）",
+  TIMELINE_EXPORT_AUDIO_UNREADABLE: "音源の種類（読み上げ／同梱の曲／取り込んだ素材）で次の行動が変わる（#1064）",
   TIMELINE_AUDIO_SOURCE_MISSING: "件数を差し込む",
   BGM_FILE_BROKEN: "一部の場面か全体かで文が変わる",
   TIMELINE_OVERLAY_RETIRED: "退役の断り＝画面の文と表の要約を分けている（#635）",
@@ -468,6 +469,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(83);
+    ).toBe(82);
   });
 });

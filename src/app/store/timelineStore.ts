@@ -9,12 +9,12 @@ import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, ty
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
+import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
-import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
+import { audioSourceKey, audioSourceKindOf, audioSourcesOf } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { keepRestorePoints } from "./restorePointKeeper";
@@ -2024,8 +2024,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       //   ⚠️ **まだ作っていない読み上げは対象外**＝音源そのものを持たないので `audioSourcesOf` に
       //   出てこない（直し方は「もう一度作る」＝画面の知らせが担う）。
       //   ⚠️ **保存先を聞く前**にやる（絵の判定と同じ順＝聞いてから断らない）。
-      if (audioSourcesOf(doc).some((src) => !get().audioSrcByKey[audioSourceKey(src)])) {
-        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.audioUnreadable] } });
+      // ⚠️ **種類で次の行動が違う**（PR #1066 レビュー 🟡）＝読み上げ／同梱の曲／取り込んだ素材で
+      //   できることが違うので、**読めなかった最初のもの**の種類で言い分ける。
+      const unreadableAudio = audioSourcesOf(doc).find((src) => !get().audioSrcByKey[audioSourceKey(src)]);
+      if (unreadableAudio) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: audioUnreadableMessage(audioSourceKindOf(unreadableAudio)) } });
         return;
       }
       // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
