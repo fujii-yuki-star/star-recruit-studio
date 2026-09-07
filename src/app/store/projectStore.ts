@@ -8,7 +8,7 @@ import { standardLookFixesForUnresolved } from '../../domain/template/templateSe
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, PROJECT_FORMAT, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { isFontAvailable, isKnownFontId } from "../../domain/font/fontCatalog";
 import { createUserFontId } from "../../domain/font/fontCatalog";
@@ -2555,7 +2555,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（差分再監査 2巡目・ほかの取り込み経路と同じ規則）。
     const stillOpen = sameDocGuard(get);
     if (changesAssetKind(target.assetType, srcPath)) {
-      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video) });
+      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video, PROJECT_FORMAT.scene) });
       return;
     }
 
@@ -2618,7 +2618,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         missingAssetIds: st.missingAssetIds.filter((id) => id !== assetId),
         saveStatus: "idle",
         // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
-        importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses) : null,
+        importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses, PROJECT_FORMAT.scene) : null,
       }));
     } catch (e) {
       if (stillOpen()) set({ importError: importErrorMessage(e) });

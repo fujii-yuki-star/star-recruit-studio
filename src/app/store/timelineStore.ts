@@ -2,13 +2,14 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation } from "../../domain/constants";
-import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
-import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
+import { changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
+import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -22,7 +23,7 @@ import { onProjectDeleted } from "./projectDeletion";
 import type { DeletionHandoff } from "./projectDeletion";
 import { createEmptyTimelineProject } from "../../domain/timeline/create";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
-import { ASSET_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
@@ -256,6 +257,17 @@ export interface TimelineState {
    */
   analysisByPath: Record<string, AssetAnalysis | null>;
   /**
+   * **ファイルが実際に見つからない素材**の番号（#1019 ⑤・場面形式の `missingAssetIds` と同じ材料）。
+   *
+   * ⚠️ **表示用の URL では分からない**＝`assetDisplayUrl` は URL を組むだけでディスクを見ないので、
+   * ファイルが動いた・消えた状態でも非 null。これで判定すると**選び直す入口が実機で一度も出ない**
+   * （`15 §6` `ASSET_FILE_MISSING`＝場面形式は Rust の実在確認で拾っている・ADR-0026②）。
+   * ⚠️ **調べられない場（ブラウザ）では空**＝「全部見つからない」は嘘になる（`missingAssetFiles`）。
+   */
+  missingAssetIds: string[];
+  /** 見つからない素材を調べ直す（開いたとき・選び直した後）。 */
+  refreshMissingAssets: () => Promise<void>;
+  /**
    * 帯に敷く絵を**必要になったときだけ**作る（#332）。渡すのは部品そのもの。
    *
    * ⚠️ **同じものに2回たのまない**＝帯は再描画のたびに呼ばれるので、素通しにすると
@@ -306,6 +318,15 @@ export interface TimelineState {
   addAsset: (file: File) => Promise<void>;
   /** ネイティブの「開く」で選んだパスから取り込む（バイトを JS に載せない・#712）。 */
   addAssetByPath: (path: string) => Promise<void>;
+  /**
+   * 素材の**ファイルを選び直す**（#1019 ⑤）＝`assetId` は変えない。
+   *
+   * ⚠️ **場面形式には前からある**（`relinkAssetByPath`）のに、こちらには無く、案内は
+   * 「取り込み直すか置き直してください」＝**新しい番号になる**ので、
+   * **切り抜き・動き・連動する字幕まで作り直し**になっていた（`15 §6` `ASSET_FILE_MISSING` は
+   * 「置いた場所・切り出す範囲・キーフレーム・字幕の紐づけは**構造的に**残る」と、形式を限定せず書いている）。
+   */
+  relinkAssetByPath: (assetId: string, srcPath: string) => Promise<void>;
   /**
    * **よく使う素材**（ADR-0035）から、この動画へ**コピー**して取り込む（差分再監査 4巡目 🟡）。
    *
@@ -855,6 +876,7 @@ function emptyState() {
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
+    missingAssetIds: [] as string[],
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
@@ -1011,6 +1033,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const audioSrcByKey: Record<string, string> = {};
       for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
       set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
+      // ⚠️ **実在も調べる**（#1019 ⑤）＝表示用の URL は組むだけなので、これが無いと
+      //   ファイルが動いた・消えた素材を**一度も知らせられない**（選び直す入口も出ない）。
+      void get().refreshMissingAssets();
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
       // ⚠️ **落ち方も持ち帰る**（#977）＝これまで理由の文字列だけを持っていたので、
@@ -1346,6 +1371,84 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     await runImport(set, get, path, async (fileName) =>
       await importAssetByPath(get().doc!.projectId, fileName, path));
   },
+  refreshMissingAssets: async () => {
+    const doc = get().doc;
+    if (!doc || doc.assets.length === 0) { set({ missingAssetIds: [] }); return; }
+    const missing = new Set(await missingAssetFiles(doc.projectId, doc.assets.map((a) => a.filePath)));
+    // ⚠️ **書き戻しは「いまの文書」で絞る**（`projectstore-async-clobber` と同じ流儀）＝調べている間に
+    //   別の動画を開いた／素材が消えたときに、**消したものが「見つかりません」で復活**しないようにする。
+    const now = get().doc;
+    if (!now || now.projectId !== doc.projectId) return;
+    set({ missingAssetIds: now.assets.filter((a) => missing.has(a.filePath)).map((a) => a.assetId) });
+  },
+  relinkAssetByPath: async (assetId, srcPath) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // 断り方は取り込みと同じ経路（同じ状況で同じ案内＝ADR-0026②）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    const target = doc.assets.find((a) => a.assetId === assetId);
+    if (!target) return;
+    // ⚠️ **種類の違うファイルへは差し替えない**（§2-5・ADR-0026④）＝写真↔動画で入れ替えると、
+    // 種類を変えれば**置いた差し込み口が受け付けなくなって黙って消え**、種類を変えなければ
+    // **写真として動画を描く**ことになり何も映らない。判定は場面形式と**同じ関数**。
+    if (changesAssetKind(target.assetType, srcPath)) {
+      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video, PROJECT_FORMAT.timeline) });
+      return;
+    }
+    set({ isImporting: true, importError: null });
+    try {
+      // ⚠️ **保存名の導出は `newAssetFrom` に1つ**（§2-7・場面形式の再リンクと同じ＝ADR-0026②）。
+      //   ここへ写すと**取り込みと選び直しで保存名が黙ってずれる**＝古い拡張子のまま中身だけ差し替わり、
+      //   表示・書き出しの種類は**拡張子から決まる**ので「`.mp4` という名前の中身は MOV」ができる。
+      //   番号は採り直さない（`target.assetId`）＝**同じ素材のファイルを入れ替える**だけ。
+      const { fileName, asset: shape } = newAssetFrom(srcPath, [], target.assetId);
+      const savedPath = await importAssetByPath(doc.projectId, fileName, srcPath);
+      const relPath = savedPath ?? shape.filePath;
+      const enrich = target.assetType === ASSET_TYPE.video ? await probeAndThumbVideo(doc.projectId, relPath) : null;
+      // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
+      // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
+      const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(doc.projectId, relPath));
+      const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : null;
+      // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**（取り込みと同じ判定位置）。
+      const cur = get().doc;
+      if (!cur || cur.projectId !== doc.projectId) return;
+      if (isTimelineExportBusy(get().exportRun.phase)) {
+        set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+        return;
+      }
+      const now = cur.assets.find((a) => a.assetId === assetId);
+      if (!now) return; // 待っている間に消されていたら何も書かない
+      const r = relinkTimelineAsset(now, cur.clips, templateOfNow, relPath, enrich?.metadata ?? null, enrich?.thumbnailPath ?? null);
+      commit(set, get, {
+        ...cur,
+        assets: cur.assets.map((a) => (a.assetId === assetId ? r.asset : a)),
+        clips: r.clips,
+      }, {
+        // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
+        ...(r.clampedUses > 0 ? { importError: clipClampedMessage(r.clampedUses, PROJECT_FORMAT.timeline) } : { importError: null }),
+        assetSrcById: freshUrl ? { ...get().assetSrcById, [assetId]: freshUrl } : get().assetSrcById,
+        // ⚠️ **コマ列・波形の下書きも捨てる**（PR レビュー 🟡）＝あれは**パス基準**のキャッシュ
+        //（`${filePath}#範囲`）で、`ensureClipAnalysis` は「もうある」だけで打ち切るので、
+        //   落とさないと**前のファイルの絵と波形が帯に残り続ける**（表示の URL だけ取り直しても足りない）。
+        analysisByPath: withoutAnalysisOf(get().analysisByPath, [target.filePath, relPath]),
+      }, { outsideGroup: true });
+      if (target.assetType === ASSET_TYPE.video) {
+        const bodyUrl = await assetDisplayUrl(doc.projectId, relPath);
+        const after = get().doc;
+        if (bodyUrl && after && after.projectId === doc.projectId) {
+          set({ videoSrcById: { ...get().videoSrcById, [assetId]: `${bodyUrl}?t=${Date.now()}` } });
+        }
+      }
+      void get().saveTimelineProject();
+      // 見つかるようになったぶんを消す（直したのに知らせが残る、を作らない）。
+      void get().refreshMissingAssets();
+    } catch (e) {
+      if (get().doc?.projectId === doc.projectId) set({ importError: importErrorMessage(e) });
+    } finally {
+      if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
+    }
+  },
+
   importFromLibrary: async (libraryAssetId) => {
     // ⚠️ **開いている動画は最初の await の前に控える**（差分再監査 5巡目 🟡）＝一覧を読んでいる間にも
     // 別の動画を開けるので、控えないと**押した動画ではなく後から開いた動画へ入る**（場面形式は
@@ -1983,6 +2086,21 @@ export function timelineBgmRunInputs(
 /** 素材 id → プロジェクト相対のファイルパス（音の素材を読むのに使う）。 */
 function assetPathOf(doc: TimelineProject, assetId: string): string | undefined {
   return doc.assets.find((a) => a.assetId === assetId)?.filePath;
+}
+
+/**
+ * 帯のコマ列・波形の下書きから、そのファイルのぶんを落とす（#1019 ⑤）。
+ *
+ * ⚠️ **鍵はパス**（`` `${filePath}#範囲` `` ＝`domain/asset/analysis.ts`）＝同じ名前へ入れ替えると
+ * 鍵が変わらず、`ensureClipAnalysis` は「もうある」で打ち切る＝**前のファイルの絵と波形が残る**。
+ */
+function withoutAnalysisOf<T>(byKey: Record<string, T>, relPaths: readonly string[]): Record<string, T> {
+  const heads = relPaths.map((p) => `${p}#`);
+  const keys = Object.keys(byKey).filter((k) => heads.some((h) => k.startsWith(h)));
+  if (keys.length === 0) return byKey; // 何も落とさないなら同じものを返す（無駄な再描画を起こさない）
+  const out = { ...byKey };
+  for (const k of keys) delete out[k];
+  return out;
 }
 
 type SetState = (partial: Partial<TimelineState>) => void;

@@ -451,6 +451,42 @@ describe("TimelineProjectScreen: 絵が出せない素材（#726 レビュー）
     expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材"))).toBe(false);
   });
 
+  // ⚠️ **表示先があっても、ファイルが無ければ知らせる**（#1019 ⑤）＝`assetDisplayUrl` は URL を
+  //    組むだけでディスクを見ないので、実在で調べないと**実機では一度も知らせが出ない**。
+  it("表示先があっても、ファイルが見つからない素材は知らせて選び直せる", () => {
+    withPhoto({ asset_001: "asset://a.png" });
+    useTimelineStore.setState({ missingAssetIds: ["asset_001"] } as never);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材を使っている部品が1個"))).toBe(true);
+    expect(screen.getByRole("button", { name: "ファイルを選び直す" })).toBeInTheDocument();
+  });
+
+  // ⚠️ **選び直せる素材が1つも無くても知らせは出す**（母集合が違う）＝未解決が見た目パターンの
+  //    持ち物（ADR-0021）だけのとき、知らせごと消すと**絵が出ないことすら伝わらない**。
+  it("見た目パターンの持ち物だけが出せないときは、知らせだけ出して別の手を示す", () => {
+    useProjectStore.setState({
+      templates: [{
+        schemaVersion: "1.0", templateId: "tmpl_001", name: "テンプレ", category: "opening",
+        aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+        layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 100, h: 100 }],
+      } as Template],
+      templateAssetSrcById: {},
+    });
+    useTimelineStore.setState({
+      doc: doc({
+        assets: [],
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+                  templateId: "tmpl_001", assetRefs: { mainVisual: "tmpl_asset_001" } }],
+      }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {}, missingAssetIds: [],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材を使っている部品が1個"))).toBe(true);
+    expect(screen.queryByRole("button", { name: "ファイルを選び直す" }), "選び直せない素材に入口を出した").not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("見た目パターンが持っている素材"))).toBe(true);
+  });
+
   // ⚠️ **差し込み口の動画は実フレームで描く**（#512 段3）＝代表フレームが無くても絵は出るので、
   // 「絵が出せない」と数えない。数えると**誤った理由**で警告が出る（見た目パターンを渡し忘れると起きる）。
   it("差し込み口の動画は、代表フレームが無くても「絵が出せない」と数えない", () => {

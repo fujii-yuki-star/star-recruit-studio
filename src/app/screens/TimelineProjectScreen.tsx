@@ -40,6 +40,7 @@ import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
+import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
@@ -358,7 +359,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
@@ -370,7 +371,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
-    importError, clearImportError, isImporting,
+    importError, clearImportError, isImporting, relinkAssetByPath,
     analysisByPath, ensureClipAnalysis,
   } = useTimelineStore();
 
@@ -1411,21 +1412,50 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     }).length;
   }, [doc, audioSrcByKey]);
   /**
+   * 絵として使っていて**出せない**素材の番号（件数と一覧の**単一の参照元**）。
+   *
+   * ⚠️ **材料は2つ**（#1019 ⑤）＝①表示先を用意できなかった（代表フレームが無い等）②**ファイルが
+   * 実際に見つからない**（`missingAssetIds`）。②を入れないと、**実機では一度も知らせが出ない**＝
+   * `assetDisplayUrl` は URL を組むだけでディスクを見ないので、動かした・消した素材でも非 null になる。
+   */
+  const unresolvedImageIds = useMemo(() => {
+    if (!doc) return new Set<string>();
+    const gone = new Set(missingAssetIds);
+    return new Set(
+      // ⚠️ **見た目パターンを渡す**（レビュー 🟡）＝渡さないと差し込み口を解決できず、実映像で描く
+      // 枠まで代表フレームが要る扱いになり、**誤った理由**で「絵が出せない」と数える。
+      timelineImageAssetIds(doc, templateOf)
+        .filter((id) => gone.has(id) || (!assetSrcById[id] && !templateAssetSrcById[id])),
+    );
+  }, [doc, assetSrcById, templateAssetSrcById, templateOf, missingAssetIds]);
+
+  /**
    * **絵が出せない素材を使っている部品**の数（#726 レビュー・監査）。音（`missingAudioCount`）と同じ形で
    * 知らせる＝同じ状況なのに絵だけ無言、を作らない（ADR-0026②）。
    * 開いたときに表示先を用意できなかった素材＝ファイルが読めない見込みなので、書き出しでも同じ理由で断られる
    * （断りそのものは書き出しの入口が出す＝`TIMELINE_EXPORT_ASSET_UNREADABLE`。ここは**押す前の知らせ**）。
    */
   const missingImageCount = useMemo(() => {
-    if (!doc) return 0;
-    const unresolved = new Set(
-      // ⚠️ **見た目パターンを渡す**（レビュー 🟡）＝渡さないと差し込み口を解決できず、実映像で描く
-      // 枠まで代表フレームが要る扱いになり、**誤った理由**で「絵が出せない」と数える。
-      timelineImageAssetIds(doc, templateOf).filter((id) => !assetSrcById[id] && !templateAssetSrcById[id]),
-    );
-    if (unresolved.size === 0) return 0;
-    return doc.clips.filter((c) => clipImageAssetIds(c).some((id) => unresolved.has(id))).length;
-  }, [doc, assetSrcById, templateAssetSrcById, templateOf]);
+    if (!doc || unresolvedImageIds.size === 0) return 0;
+    return doc.clips.filter((c) => clipImageAssetIds(c).some((id) => unresolvedImageIds.has(id))).length;
+  }, [doc, unresolvedImageIds]);
+
+  /**
+   * **絵が出せない素材そのもの**（#1019 ⑤）＝件数だけでなく、**どれを選び直すか**を出すために要る。
+   *
+   * ⚠️ **一覧が空でも知らせは出す**（レビュー 🟡）＝未解決が**見た目パターンの持ち物**（ADR-0021）だけの
+   * ときは選び直せる素材が1つも無いが、絵が出ないことは変わらない＝母集合が違うので**表示条件は件数のまま**。
+   */
+  const missingAssets = useMemo(
+    () => (doc ? doc.assets.filter((a) => unresolvedImageIds.has(a.assetId)) : []),
+    [doc, unresolvedImageIds],
+  );
+
+  /** 素材のファイルを選び直す（`assetId` は変わらないので配置も紐づけも残る）。 */
+  const onRelink = async (assetId: string): Promise<void> => {
+    const paths = await showOpenAssetsDialog();
+    if (paths[0]) await relinkAssetByPath(assetId, paths[0]);
+  };
 
   /**
    * 表示倍率（#686・ADR-0034 決定13）。段は場面形式の見わたす画面と**同じ型**（`ZOOM_LEVELS`）。
@@ -4966,10 +4996,35 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
         </p>
       )}
+      {/* ⚠️ **選び直す道をその場に出す**（#1019 ⑤）＝前は「取り込み直すか置き直してください」だけで、
+          どちらも**新しい番号になる**＝**切り抜き・動き・連動する字幕まで作り直し**だった。
+          場面形式には前から「ファイルを選び直す」があり、`15 §6` `ASSET_FILE_MISSING` は
+          「置いた場所・切り出す範囲・キーフレーム・字幕の紐づけは**構造的に**残る」と、
+          形式を限定せずに書いている（ADR-0026②）。 */}
       {missingImageCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          絵が出せない素材を使っている部品が{missingImageCount}個あります。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください。
-        </p>
+        <div className="notice notice-warn" role="alert">
+          <p>
+            絵が出せない素材を使っている部品が{missingImageCount}個あります。そのままでは動画にその絵が出ません。
+            {missingAssets.length > 0
+              ? "ファイルを選び直すと、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります。"
+              // ⚠️ **選び直せないときは、そう言う**（§2-5＝できない手を名指ししない）。
+              : "これは見た目パターンが持っている素材です。別の見た目パターンを選んでください。"}
+          </p>
+          <div className="col gap-sm">
+            {missingAssets.map((a) => (
+              <div key={a.assetId} className="row-between" style={{ alignItems: "center" }}>
+                <span className="text-sm">{a.displayName}</span>
+                <button
+                  className="btn btn-secondary text-sm"
+                  {...busyGuard({ disabled: isImporting, hint: isImporting ? "いま取り込んでいます" : undefined })}
+                  onClick={() => void onRelink(a.assetId)}
+                >
+                  ファイルを選び直す
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {missingAudioCount > 0 && (
         <p className="notice notice-warn" role="alert">
