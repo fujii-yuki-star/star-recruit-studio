@@ -254,10 +254,10 @@ export function parseProjectDoc(text: string): Project {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new ProjectLoadError('プロジェクトファイルを読み取れませんでした。別のプロジェクトを選んでください。', 'broken');
+    throw new ProjectLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。', 'broken');
   }
   if (typeof raw !== 'object' || raw === null) {
-    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。', 'broken');
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   const doc = raw as Record<string, unknown>;
   // タイムライン編集の形式（ADR-0032）は**別の文書**なので、場面形式として読み込まない。
@@ -272,27 +272,27 @@ export function parseProjectDoc(text: string): Project {
   // **更新しても直らない次の行動**。しかも `broken` にならないので、#263 の**控えから戻す導線が出ない**
   //（いちばん助けが要る場面でいちばん助けが出ない）。
   if (typeof version !== 'string') {
-    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。', 'broken');
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   if (!isSupportedSchemaVersion(version)) {
-    throw new ProjectLoadError('このプロジェクトは新しい版で作られているため開けません。アプリを更新してください。');
+    throw new ProjectLoadError('この動画は新しい版で作られているため開けません。アプリを更新してください。');
   }
   // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝上の関門は**メジャーしか見ない**ので、
   // **同じメジャーの新しいマイナー**（1.26 等）はここまで通ってしまう。そのまま進むと
   // `migrateProject` が版を**現行へ書き換え**（印が黙って下がる）、新しい語彙があれば ajv が落ちて
-  // 「プロジェクトの内容が正しくありません。**別のプロジェクトを選んでください**」＝**嘘**になる
+  // 「この動画の内容が正しくありません。**別の動画を選んでください**」＝**嘘**になる
   //（壊れておらず、アプリを更新すれば開ける。別のを選んでも解決しない・§2-5）。
   if (isNewerSchemaVersion(version, PROJECT_SCHEMA_VERSION)) {
     throw new ProjectLoadError(PROJECT_NEWER_VERSION_MESSAGE);
   }
   for (const key of ['projectId', 'projectName', 'purpose'] as const) {
     if (typeof doc[key] !== 'string') {
-      throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。', 'broken');
+      throw new ProjectLoadError('この動画に必要な情報が欠けています。一覧から別の動画を選んでください。', 'broken');
     }
   }
   for (const key of ['assets', 'parts', 'scenes'] as const) {
     if (!Array.isArray(doc[key])) {
-      throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。', 'broken');
+      throw new ProjectLoadError('この動画に必要な情報が欠けています。一覧から別の動画を選んでください。', 'broken');
     }
   }
   let migrated: Project;
@@ -301,7 +301,7 @@ export function parseProjectDoc(text: string): Project {
   } catch (e) {
     // 移行中の想定外エラー（防御しきれない型不正）も §2-5 文言で拒否する＝生 TypeError を UI へ出さない（#416 P1）。
     console.warn('[project] 移行中に想定外のエラー:', e);
-    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。', 'broken');
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   // 移行後（現行版）を正典スキーマで検証する（11 §8 V2・#416）。旧版は migrate 済みなので現行スキーマで判定できる（後方互換）。
   // 読込拒否は「型不正・必須欠落」（構造破損）に限定する（受け入れ条件）。minLength/enum/範囲などの内容制約違反は
@@ -311,7 +311,7 @@ export function parseProjectDoc(text: string): Project {
   if (!check.valid) {
     console.warn('[project] 読込スキーマ検証に失敗:', check.errors);
     if (check.structural) {
-      throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。', 'broken');
+      throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
     }
   }
   return migrated;

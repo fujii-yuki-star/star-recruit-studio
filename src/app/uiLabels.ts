@@ -311,7 +311,7 @@ export function deleteLookConfirmMessage(
   if (impact.losingContent > 0) parts.push(`うち${impact.losingContent}個の場面は写真・文字などが動画に出なくなります。`);
   // 合う標準が無い場面は変わらず「見つからない」まま残る＝そのままでは書き出せない（§2-5）。
   if (impact.unresolved > 0) parts.push(`${impact.unresolved}個の場面は合う標準が無いため、見た目を選び直すまで書き出せません。`);
-  parts.push("他のプロジェクトで使っている場面は、開いたときに見た目を選び直してください。");
+  parts.push("他の動画で使っている場面は、開いたときに見た目を選び直してください。");
   return parts.join("");
 }
 
@@ -495,6 +495,21 @@ export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?
   const order = tracks.filter((t) => t.kind === track.kind).findIndex((t) => t.id === trackId) + 1;
   return `${trackKindLabel[track.kind]}${order}`;
 }
+
+/**
+ * 動画を開けなかった／削除できなかったときの断り（#1026）。
+ *
+ * ⚠️ **`uiLabels` に置く**（PR #1056 レビュー 🟡）＝画面のローカル定数のままだと、表と実装の
+ * **等値の突き合わせ**（`errorStateTable` の `codeMessages`）に載らず、**弱い段**（実装のどこかに
+ * その文字列が在るか）でしか守られない。語をそろえたときに実際にここで取りこぼした。
+ * ⚠️ **原因は書かない**（§2-5）＝どちらも「もう一度」で直りうる想定外の失敗（読めない・版が新しいは
+ * `ProjectLoadError` が理由つきで出す＝そちらが優先される）。
+ * ⚠️ **「一覧から別の動画を選んでください」と書かない**（#793 レビュー）＝以前の固定文はそう書いていたが、
+ * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
+ * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
+ */
+export const PROJECT_OPEN_FAILED_MESSAGE = "この動画を開けませんでした。もう一度お試しください。";
+export const PROJECT_DELETE_FAILED_MESSAGE = "この動画を削除できませんでした。もう一度お試しください。";
 
 /**
  * クリップのユーザー向け名称（ADR-0032・#629）。名前が付いていれば優先し、無ければ中身から短く作る。

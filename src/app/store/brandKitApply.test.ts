@@ -394,3 +394,13 @@ describe('持ち込みフォントを消したとき、会社の見た目のほ�
     expect(vi.mocked(saveBrandKit)).not.toHaveBeenCalled();
   });
 });
+
+// 新しい動画の既定の名前（#1026）。
+// ⚠️ **これは「真値」として保存される**＝空文字ではないので、名前欄の placeholder は通らない。
+//    語をそろえるときに置き換えを忘れると、**新規の名前欄だけ古い語のまま**になる。
+describe('新しい動画の既定の名前（#1026）', () => {
+  it('「無題の動画」で始まる（1つを指すので「動画」）', () => {
+    useProjectStore.getState().newBlankProject();
+    expect(useProjectStore.getState().meta.projectName, '1つを指すのに「プロジェクト」と呼んでいる').toBe('無題の動画');
+  });
+});

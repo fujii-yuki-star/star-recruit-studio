@@ -360,7 +360,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           </div>
 
           <p className="field-hint">
-            話す速さ・高さ・抑揚はこのプロジェクトの読み上げの声に使われます（保存すると残ります）。
+            話す速さ・高さ・抑揚はこの動画の読み上げの声に使われます（保存すると残ります）。
           </p>
 
           <button

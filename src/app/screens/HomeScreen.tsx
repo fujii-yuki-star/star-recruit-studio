@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
@@ -39,15 +39,6 @@ interface HomeProps {
 function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
-
-/**
- * **理由が分からないとき**の案内（#793 レビュー）。読み込み側が理由を出せた場合はそちらを見せる。
- *
- * ⚠️ **「別のプロジェクトを選んでください」と書かない**＝以前の固定文はそう書いていたが、
- * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
- * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
- */
-const OPEN_FAILED_MESSAGE = "このプロジェクトを開けませんでした。もう一度お試しください。";
 
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
@@ -307,7 +298,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     } catch (e) {
       // 読み込み側が出した**理由**をそのまま見せる（次の行動がそこに書いてある）。
       // それ以外（想定外）は従来の固定文へ倒す＝黙って何も出さない、を作らない。
-      setOpenError(e instanceof ProjectLoadError ? e.message : OPEN_FAILED_MESSAGE);
+      setOpenError(e instanceof ProjectLoadError ? e.message : PROJECT_OPEN_FAILED_MESSAGE);
       setOpeningId(null); // 失敗時のみ解除して再度開けるように。
       // 中身が壊れているときだけ、控えから戻す導線を出す（控えがあれば）。
       if (e instanceof ProjectLoadError && e.failure === "broken") {
@@ -499,7 +490,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
             {deleteError && (
               <div className="notice notice-warn mb" role="alert">
-                <span>プロジェクトを削除できませんでした。もう一度お試しください。</span>
+                <span>{PROJECT_DELETE_FAILED_MESSAGE}</span>
               </div>
             )}
 
@@ -513,13 +504,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
             <ExportLockBanner
               onNavigate={onNavigate}
-              detail="書き出しが終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません。"
+              detail="書き出しが終わるまで、新しい動画づくり・動画の切り替え・削除はできません。"
             />
 
             {confirmNew && (
               <div className="notice notice-warn mb" role="alert">
                 <span>
-                  今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
+                  今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。
                 </span>
                 {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
                 <div className="row gap-sm">
@@ -541,8 +532,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   {pendingAction.kind === "restore"
                     ? "今の編集内容を閉じて、選んだ時点に戻しますか？保存していない素材や場面は失われます。"
                     : pendingAction.kind === "duplicate"
-                    ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"
-                    : "今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。"}
+                    ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。"
+                    : "今の編集内容を閉じて別の動画を開きますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。"}
                 </span>
                 {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
                 <div className="row gap-sm">
@@ -698,14 +689,14 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             {listError ? (
               // 取得失敗（§2-5）：空（保存物なし）と区別し、原因＋次の行動（再試行）を出す＝無言で「保存物なし」にしない。
               <div className="notice notice-warn" role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
-                <span>保存したプロジェクトの一覧を読み込めませんでした。もう一度お試しください。</span>
+                <span>保存した動画の一覧を読み込めませんでした。もう一度お試しください。</span>
                 <button className="btn btn-secondary mt" onClick={refreshProjects} disabled={listRetrying}>
                   {listRetrying ? "読み込み中…" : "もう一度読み込む"}
                 </button>
               </div>
             ) : projects.length === 0 ? (
               <div className="text-sm text-muted">
-                保存したプロジェクトはまだありません。「新しい動画を作る」から始めましょう。
+                保存した動画はまだありません。「新しい動画を作る」から始めましょう。
               </div>
             ) : (
               projects.map((p) =>
@@ -716,8 +707,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
                       maxLength={PROJECT_NAME_MAX_LENGTH}
-                      placeholder="プロジェクト名"
-                      aria-label="プロジェクト名"
+                      placeholder="動画の名前"
+                      aria-label="動画の名前"
                       autoFocus
                       // ⚠️ **`Escape` 側も変換中は奪わない**（#989）＝`Enter` だけ守っていたので、
                       // 変換中の `Escape`（＝変換をやめる）で**欄ごと閉じて打ちかけが消える**。
@@ -751,7 +742,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     busy={deleteBusy}
                     // ⚠️ **形式で語彙を割らない**（#991・ADR-0026②）＝同じ一覧に「タイムライン」の行が
                     // 並ぶのに、削除の確認だけ場面形式の言葉（「場面」）で言っていた。
-                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した${
+                    message={`「${p.projectName || "無題の動画"}」を削除しますか？保存した${
                       isTimelineProjectDoc({ format: p.format }) ? "部品" : "場面"
                     }・素材・音声ごと消え、元に戻せません。`}
                     onCancel={() => {
@@ -766,7 +757,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
                       disabled={isExporting || listBusy || awaitingAnswer || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : restoring ? "前の状態に戻しています…" : openingId !== null ? "プロジェクトを開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : restoring ? "前の状態に戻しています…" : openingId !== null ? "動画を開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
                       style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || listBusy || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
@@ -788,7 +779,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       </div>
                       <div className="grow">
                         <div className="row gap-sm">
-                          <strong>{p.projectName || "無題のプロジェクト"}</strong>
+                          <strong>{p.projectName || "無題の動画"}</strong>
                           {/* どちらの作り方の動画か一目で分かるように（開く先が違うため・ADR-0032）。 */}
                           {isTimelineProjectDoc({ format: p.format }) && <span className="badge">タイムライン</span>}
                         </div>
@@ -810,7 +801,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       // store 側も no-op で守るが、鉛筆を無効化して「押せるのに効かない」を避ける（ADR-0026④）。
                       disabled={isExporting}
                       onClick={() => startRename(p)}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」の名前を変更`}
+                      aria-label={`「${p.projectName || "無題の動画"}」の名前を変更`}
                       title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
@@ -821,12 +812,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="btn btn-ghost btn-icon"
                       disabled={isExporting || awaitingAnswer || listBusy}
                       onClick={() => void openRestorePanel(p.projectId)}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を前の状態に戻す`}
+                      aria-label={`「${p.projectName || "無題の動画"}」を前の状態に戻す`}
                       title={
                         isExporting
                           ? "書き出しが終わるまでお待ちください"
                           : openingId !== null
-                            ? "プロジェクトを開いています…"
+                            ? "動画を開いています…"
                             : awaitingAnswer
                               ? "確認に答えてから操作できます"
                               : "前の状態に戻す"
@@ -851,12 +842,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                         || isTimelineProjectDoc({ format: p.format })
                       }
                       onClick={() => void onDuplicate(p.projectId)}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を複製`}
+                      aria-label={`「${p.projectName || "無題の動画"}」を複製`}
                       title={
                         isExporting
                           ? "書き出しが終わるまでお待ちください"
                           : openingId !== null
-                            ? "プロジェクトを開いています…"
+                            ? "動画を開いています…"
                             // ⚠️ **押せない枝の理由を落とさない**（α-6 出口監査 🟡）＝複製中も押せなく
                             // なるのに理由の分岐が無く、**実行内容の説明が出続けて**いた（同じ行の「開く」は
                             // 同じ状態で「コピーしています…」と言う＝同じ状態に断り方が2通り）。
@@ -880,7 +871,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
+                      aria-label={`「${p.projectName || "無題の動画"}」を削除`}
                       title={isExporting ? "書き出しが終わるまでお待ちください" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : "削除"}
                     >
                       <TrashIcon size={18} />
@@ -896,7 +887,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
           messages={[
             "こんにちは、ゆうこです。今日も動画づくりをお手伝いします。",
             "まずは「新しい動画を作る」から始めてみましょう。伝えたい内容と写真があれば大丈夫です。",
-            "前に作ったプロジェクトは、下の一覧からいつでも開けますよ。",
+            "前に作った動画は、下の一覧からいつでも開けますよ。",
           ]}
         />
       </div>
