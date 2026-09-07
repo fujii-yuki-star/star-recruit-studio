@@ -16,6 +16,7 @@ import {
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
+import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { PROJECT_SAVE_WOULD_BREAK, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "./uiLabels";
@@ -93,6 +94,7 @@ function codeMessages(): Record<string, string> {
     TIMELINE_SUBTITLE_OVERLAP: subtitleOverlapMessage(" N " as unknown as number),
     // ⚠️ **画面のローカル定数のままにしない**（PR #1056 レビュー 🟡）＝ここへ載せないと
     // **弱い段**（実装のどこかに在るか）でしか守られず、片方だけ書き換えても気づけない。
+    PROJECT_NEWER_VERSION: PROJECT_NEWER_VERSION_MESSAGE,
     PROJECT_OPEN_FAILED: PROJECT_OPEN_FAILED_MESSAGE,
     PROJECT_DELETE_FAILED: PROJECT_DELETE_FAILED_MESSAGE,
     // ⚠️ **理由 × 単体/まとめて＝6通りを、6行として等値で守る**（#1012）＝1つの行に畳むと
@@ -282,8 +284,11 @@ export function messageConstsOf(src: string): { name: string; literal: string | 
   const out: { name: string; literal: string | null }[] = [];
   for (const m of src.matchAll(/export const ([A-Z0-9_]+_MESSAGE)\s*=\s*([\s\S]*?);$/gm)) {
     const [, name, body] = m;
-    const plain = /^\s*(?:"[^"]*"\s*\+?\s*)+$/.test(body);
-    out.push({ name, literal: plain ? [...body.matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("") : null });
+    // ⚠️ **引用符は両方**（#1051）＝`uiLabels` は `"`、`domain` は `'` を使う（層で流儀が違う）。
+    const plain = /^\s*(?:(?:"[^"]*"|'[^']*')\s*\+?\s*)+$/.test(body);
+    // 中身は**どちらの引用符でも**取り出す（片方だけ見ると `null` に落ちて誤って赤くなる）。
+    const parts = [...body.matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2] ?? '');
+    out.push({ name, literal: plain ? parts.join('') : null });
   }
   return out;
 }
@@ -346,6 +351,43 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   });
 
 
+  /** `*_MESSAGE`（素の文字列）を置いているファイル（#1051＝`uiLabels` だけを見ていた）。 */
+  const MESSAGE_CONST_FILES = [
+    "src/app/uiLabels.ts",
+    "src/app/store/exportLock.ts",
+    "src/domain/schemaVersionCompare.ts",
+  ];
+
+  /**
+   * **組み立てる文言のうち、表と1対1で結べないもの**（#1051）。⚠️ **理由を書く**。
+   * `ASSEMBLED_AT_RUNTIME`（表の行を外す側）とは別＝こちらは**関数の側**を外す。
+   */
+  const MESSAGE_FN_EXEMPT: Record<string, string> = {
+    // ── 状況で締めが変わる（1つの行に対して複数の文）＝等値では守れない ──
+    lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
+    hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
+    volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
+    missingTemplateMessage: "件数の有無で締めが変わる",
+    sceneTemplateProblemMessage: "候補の有無で締めが変わる（3段の出し分け）",
+    subtitleOverflowMessage: "原因（同時に出しすぎ／1帯が大きい）で次の行動が変わる",
+    silentSubtitleMessage: "出ない理由（`SubtitleSilentReason`）ごとに次の行動が変わる",
+    assetTooLargeMessage: "画面ごとに次の行動が違う（別の取り込み方があるか）＝`15 §6` も①②で書いている",
+    noScenesMessage: "4画面で共有し、画面ごとに次の行動が違う",
+    standardLookResultMessage: "直った数・直せなかった数の組み合わせで文が変わる",
+    freeSwitchConfirmMessage: "動画に出なくなる中身の件数と種類で文が変わる",
+    // ── 外から来た文字列を運ぶ（この関数は文言を持たない） ──
+    importErrorMessage: "取り込み側が返した理由をそのまま出す（持っているのは既定の1文だけ）",
+    generateFailedMessage: "作成側が返した理由をそのまま出す",
+    resolveExportBlockedMessage: "状況から**既にある文**を選んで返すだけ（自分では持たない）",
+    // ── 名前・件数を差し込むだけ（表は代表の1文を持つ）＝等値へ寄せられる余地あり ──
+    deleteLookConfirmMessage: "見た目の名前を差し込むだけ（表は名前を〔…〕で書く）＝等値へ寄せる余地あり",
+    importPartlyFailedMessage: "件数と名前を差し込むだけ＝等値へ寄せる余地あり",
+    libraryPartlyFailedMessage: "同上（よく使う素材の側）",
+    importCancelledMessage: "入った件数で言い方が変わる（0件のときは件数を言わない）",
+    assetTypeMismatchMessage: "種類（動画／音／写真）×形式（場面／タイムライン）＝6通り。表は1行",
+    clipClampedMessage: "件数×形式＝表は1行",
+  };
+
   /**
    * **載せ忘れを構造で止める**（#1012）。
    *
@@ -359,14 +401,34 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 次に読む人は「書き忘れ」と読む。いまは1件も外していない。
   };
 
+  /**
+   * **組み立てる文言（`*Message` の関数）も、どちらかで見られている**（#1051）。
+   *
+   * ⚠️ **`*_MESSAGE`（素の文字列）だけを見ていた**＝関数で組み立てる文言は**この段の外**で、
+   * 弱い段（実装のどこかに在るか）でしか守られていなかった。**名前で線を引く**＝
+   * `*Message` は断り・知らせ、それ以外（`*Label`・`format*`・`*Text`）は**ラベルや書式**なので対象外。
+   */
+  it("`uiLabels` の `*Message` 関数は、等値で守るか、理由つきで外してある", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8");
+    const names = [...src.matchAll(/export function ([a-z][A-Za-z0-9_]*Message)\s*\(/g)].map((m) => m[1]);
+    expect(names.length, "1つも拾えていない＝走査が壊れている").toBeGreaterThanOrEqual(10);
+    const guarded = new Set([...Object.keys(codeMessages()), ...Object.keys(ASSEMBLED_AT_RUNTIME)]);
+    const body = readFileSync(join(process.cwd(), "src/app/errorStateTable.test.ts"), "utf8");
+    // 等値で守るときは `codeMessages()` の中で呼ぶ（＝この検査ファイルに名前が出る）。
+    const unguarded = names.filter((n) => !body.includes(`${n}(`) && !guarded.has(n) && !(n in MESSAGE_FN_EXEMPT));
+    expect(unguarded, "`codeMessages()` へ載せるか、理由つきで `MESSAGE_FN_EXEMPT` へ").toEqual([]);
+  });
+
   // ⚠️ **この段が見るのは `uiLabels.ts` の `*_MESSAGE` だけ**（PR #1048 レビュー ℹ️）＝関数で
   //    組み立てる文言・画面やほかの層に直書きした文字列は**この段の外**（弱い段でしか守られていない）。
   //    「これで全部守られている」と読まれないように書き残す。射程を広げるのは別で追う。
   // ⚠️ **エスケープを含む文言は取り違えうる**＝ソースの文字をそのまま読むので、改行の記号（\n）を含む文言を
   //    足すと**実際の値と別の文字列**として拾う。ただし拾い方が崩れれば `literal: null` に落ち、
   //    `MESSAGE_EXEMPT` に無ければ**赤くなる**（黙って通らない＝失敗の向きは安全側）。
-  it("`uiLabels` の `*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
-    const found = messageConstsOf(readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8"));
+  it("`*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
+    // ⚠️ **`uiLabels.ts` の外も見る**（#1051）＝`domain`・`store` にも `*_MESSAGE` があり、
+    //   そこは**弱い段でしか守られていなかった**（`PROJECT_NEWER_VERSION_MESSAGE` ほか）。
+    const found = MESSAGE_CONST_FILES.flatMap((f) => messageConstsOf(readFileSync(join(process.cwd(), f), "utf8")));
     const guarded = new Set(Object.values(codeMessages()).map(norm));
     // ⚠️ **「中身を取れなかった」も見逃さない**＝組み立てた文（テンプレート）は等値で守れないので、
     // **理由つきで外させる**（黙って素通りさせると、そこだけ誰も見ていない状態に戻る）。
@@ -380,16 +442,29 @@ describe("15 §6 の表と実装の一致（#855）", () => {
 
   // ⚠️ **門番そのものを見る**（`guard-gets-holes`）＝いまの `uiLabels.ts` に「組み立てた文」が
   //    1つも無いので、上の検査だけでは**その枝が本当に働くか分からない**（外しても緑のまま）。
+  // ⚠️ **見る範囲そのものを固定する**（#1051）＝ファイルを1つに戻しても、載っているものが
+  //    載っているだけなら**緑のまま**通る（範囲が狭まったことに気づけない）。
+  it("`uiLabels` の外の `*_MESSAGE` も拾っている（見る範囲が狭まったら落ちる）", () => {
+    const names = MESSAGE_CONST_FILES.flatMap((f) =>
+      messageConstsOf(readFileSync(join(process.cwd(), f), "utf8")).map((x) => x.name),
+    );
+    expect(names, "`domain` の断りを見ていない").toContain("PROJECT_NEWER_VERSION_MESSAGE");
+    expect(names, "`store` の断りを見ていない").toContain("OTHER_EXPORT_RUNNING_MESSAGE");
+  });
+
   it("組み立てた文は「中身を取れない」として拾う（門番の枝を直接見る）", () => {
     const fixture = [
       'export const A_MESSAGE = "あ" + "い";',
       "export const B_MESSAGE = `${name}を読み込めません`;",
       'export const C_MESSAGE = "「や、め、る」は。区切りを含む";',
+      // ⚠️ **引用符は両方**（#1051）＝層で流儀が違う。
+      "export const D_MESSAGE =\n  'ひとえの引用符でも読む';",
     ].join("\n");
     expect(messageConstsOf(fixture)).toEqual([
       { name: "A_MESSAGE", literal: "あい" },
       { name: "B_MESSAGE", literal: null },
       { name: "C_MESSAGE", literal: "「や、め、る」は。区切りを含む" },
+      { name: "D_MESSAGE", literal: "ひとえの引用符でも読む" },
     ]);
   });
 
@@ -468,6 +543,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(82);
+    ).toBe(83);
   });
 });
