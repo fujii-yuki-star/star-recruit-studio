@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
@@ -22,6 +22,9 @@ export function FontPicker({
   inheritLabel = FONT_INHERIT_PROJECT_LABEL,
   disabled,
   title,
+  label,
+  labelClassName = "field-label",
+  ariaLabel,
 }: {
   value: FontId | null | undefined;
   /** null は「継承（動画全体に合わせる）」。allowInherit=false のときは null を返さない。 */
@@ -39,7 +42,28 @@ export function FontPicker({
   disabled?: boolean;
   /** 押せない理由（指したときに出す）。 */
   title?: string;
+  /**
+   * 見出し（#1075）。**渡すと、この部品が見出しごと描いて欄と結ぶ**。
+   *
+   * ⚠️ **結び方を呼び出し側に書かせない**＝この部品の呼び出しは多く、
+   * 外で `<label htmlFor>` を書く形にすると**結び忘れた所だけ残る**（実際に全部結ばれていなかった）。
+   * id はここで作るので、**重複しない**（一覧の中で何個並んでもよい）。
+   */
+  label?: ReactNode;
+  /** 見出しの見た目（周りの欄とそろえるため）。 */
+  labelClassName?: string;
+  /**
+   * 見出しを出さない場所向けの呼び名（`ColorPicker` と同じ形）。
+   *
+   * ⚠️ **`label` を渡したときは付けない**＝`aria-label` は見出しより優先されるので、
+   * 両方あると**画面に見えている見出しが読まれなくなる**（見えている言葉と読み上げが食い違う）。
+   */
+  ariaLabel?: string;
 }) {
+  // 見出しと欄を結ぶ id（React が一意にする）。
+  const fieldId = useId();
+  const labelId = `${fieldId}-label`;
+  const valueId = `${fieldId}-value`;
   const [open, setOpen] = useState(false);
   // ⚠️ **一覧は自分で store から読む**（α-6 出口監査 🔴1）＝この部品の呼び出しは6か所あり、
   // 呼ぶ側から渡す形にすると**配り忘れた所だけ同梱3種**になる（ADR-0036 の色と同じ流儀）。
@@ -91,8 +115,18 @@ export function FontPicker({
 
   return (
     <div style={{ position: "relative" }}>
+      {label != null && (
+        <label id={labelId} className={labelClassName} htmlFor={fieldId} style={{ display: "block", margin: "0 0 2px" }}>{label}</label>
+      )}
       <button
         type="button"
+        id={label != null ? fieldId : undefined}
+        // ⚠️ **見出しといまの値の両方を読み上げる**（#1075）＝`htmlFor` だけだと
+        // 呼び名が見出しの言葉で置き換わり、**いまどの字体かが読まれなくなる**。
+        // 見出しと自分自身を並べて指し、「この場面のフォント 会社の明朝」と読ませる。
+        // ⚠️ **既定の `aria-label` は持たない**＝付けると見えている値（字体の名前）を上書きしてしまう。
+        aria-labelledby={label != null ? `${labelId} ${valueId}` : undefined}
+        aria-label={label != null ? undefined : ariaLabel}
         className="select"
         disabled={disabled}
         // ⚠️ **内部の綴りを出さない**（α-6 出口監査 🟡・§2-3）＝可視テキストからは外したのに
@@ -104,7 +138,10 @@ export function FontPicker({
         aria-expanded={open}
         style={{ width: "100%", textAlign: "left", cursor: "pointer", fontFamily: isInherit || missing ? undefined : fontFamilyForId(current.id) }}
       >
-        {isInherit ? inheritLabel : current.label}
+        {/* ⚠️ **いまの値にも id を付ける**（#1075）＝`aria-labelledby` は中身を置き換えるので、
+            見出しだけを指すと**どの字体かが読まれなくなる**。自分自身を指しても解けないので、
+            値を包んで名前を付ける。 */}
+        <span id={valueId}>{isInherit ? inheritLabel : current.label}</span>
       </button>
       {open && (
         <>

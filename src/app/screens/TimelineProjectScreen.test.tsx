@@ -3721,7 +3721,11 @@ describe("TimelineProjectScreen: フォントは動画全体に合わせられ�
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
-  const trigger = () => screen.getByText("この部品の文字の形").closest("label")?.querySelector("button") as HTMLElement;
+  // ⚠️ 見出しは `<label htmlFor>` で欄と結ばれている（#1075）＝包む形ではなくなったので、結び先から掴む。
+  const trigger = () => {
+    const label = screen.getByText("この部品の文字の形") as HTMLLabelElement;
+    return document.getElementById(label.htmlFor) as HTMLElement;
+  };
   // ⚠️ 引き金のボタンも継承中は同じ文字を出すので、**一覧の中の項目**に絞る（`li` の中にある方）。
   const inheritOption = () =>
     screen.getAllByText("動画全体に合わせる").find((el) => el.closest("li"))?.closest("button") as HTMLElement;
