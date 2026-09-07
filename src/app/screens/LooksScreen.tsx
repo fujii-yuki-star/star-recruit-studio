@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
-import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
+import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { deleteLookConfirmMessage } from "../uiLabels";
@@ -75,7 +75,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   // ゼロから新規作成フォーム（ADR-0017「ゼロから作成」の導線＝複製に頼らず一から作る）。向き/カテゴリは編集画面で変えられないため作成時に決める。
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("新しい見た目");
-  const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
+  // ⚠️ **既定はこの動画の向き**（#1031）＝いつも横型で始まると、縦型で作っている人は
+  //   **注意文を読んで直す**ことになる（`aspectRatio` は上で取っているのに使っていなかった）。
+  // ⚠️ **開くときにも取り直す**（下の「ゼロから作る」）＝画面を出したまま動画の向きが変わっても、
+  //   次に開いたときは新しい向きで始まる。ここの初期値は**最初に描いたときのぶん**。
+  const [newOrientation, setNewOrientation] = useState<Orientation>(aspectRatio);
   const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
   // 読み込みの file input（label htmlFor でなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
   const packInputRef = useRef<HTMLInputElement>(null);
@@ -216,14 +220,16 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             </div>
             <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>向き</label>
-                <select className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
+                {/* ⚠️ **見出しと欄を結ぶ**（#1031）＝結んでいないと、読み上げでは「何の欄か」が分からない
+                    （見た目には見出しが出ているので、目で見ている限り気づけない）。 */}
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="new-look-orientation">向き</label>
+                <select id="new-look-orientation" className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
                   {ORIENTATIONS.map((o) => (<option key={o} value={o}>{orientationLabel[o]}</option>))}
                 </select>
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>種類</label>
-                <select className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="new-look-category">種類</label>
+                <select id="new-look-category" className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
                   {SCENE_CATEGORIES.map((c) => (<option key={c} value={c}>{categoryLabel[c]}</option>))}
                 </select>
               </div>
@@ -242,7 +248,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           </div>
         </div>
       ) : (
-        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} disabled={busyAction !== null} onClick={() => { clearTemplateError(); setCreating(true); }}>
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} disabled={busyAction !== null} onClick={() => { clearTemplateError(); setNewOrientation(aspectRatio); setCreating(true); }}>
           ＋ ゼロから新しい見た目を作る
         </button>
       )}
