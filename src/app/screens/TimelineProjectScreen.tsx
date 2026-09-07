@@ -1486,6 +1486,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     [doc, unresolvedImageIds],
   );
 
+  /**
+   * 直せば良くなる注意の**合計**（#1032）。
+   *
+   * ⚠️ **知らせは帯の器（76vh）の下にある**＝編集している間は**画面外**なので、
+   * 出ていても気づかない（見えていない知らせは無いのと同じ＝`EditorToolbar` の注記と同じ理由）。
+   * 見出しの行（貼り付いている）に**件数だけ**を出し、押すと知らせまで寄る。
+   * ⚠️ **中身は見出しへ出さない**＝知らせは7種あり、全部を上へ出すと**編集の場所を上から狭める**
+   *（利用者指摘 2026-08-04）。数だけを出して、読むのは元の場所で。
+   */
+  // ⚠️ **数える側と出す側を 1 つの名簿から採る**（PR #1076 レビュー）＝
+  // 式に書き並べていたとき、**知らせは出ているのに合計に入っていない**項（音が出せない素材）があった。
+  // ⚠️ この種の漏れは**変異チェックでは見つからない**（壊せるのは「ある項」だけで、
+  // 「最初から無い項」は壊しようがない）。だから**出す側の条件もこの名簿を見る**形にして、
+  // 「出ているのに数えていない」を構造で作れなくする。
+  const notices = {
+    missingTemplate: missingTemplateCount,
+    emptySlot: emptySlotCount,
+    danglingLink: danglingLinkCount,
+    subtitleOverlap: subtitleOverlapCount,
+    missingImage: missingImageCount,
+    /** 音が出せない**素材**（選び直せる）。下の `missingAudio`（部品）とは**排他**。 */
+    missingAudioAsset: missingAudioAssets.length,
+    missingAudio: missingAudioCount,
+    invalid: warnings.length,
+  };
+  const noticeCount = Object.values(notices).reduce((a, b) => a + b, 0);
+  const noticesRef = useRef<HTMLDivElement | null>(null);
+  /** 知らせまで寄る（`scrollIntoView` は一部の環境（jsdom）に無いので任意呼び出し）。 */
+  const scrollToNotices = (): void => { noticesRef.current?.scrollIntoView?.({ block: "start" }); };
+
   /** 素材のファイルを選び直す（`assetId` は変わらないので配置も紐づけも残る）。 */
   const onRelink = async (assetId: string): Promise<void> => {
     const paths = await showOpenAssetsDialog();
@@ -4971,6 +5001,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // 保存できたことも控えめに出す（「勝手に保存されている」を信じられるようにする）。
               <span className="text-sm text-muted" role="status">{timelineSaveStatusLabel(saveStatus)}</span>
             )}
+            extra={(
+              <>
+                {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器（76vh）の下にあり、
+                    編集している間は画面外だった（見えていない知らせは無いのと同じ）。
+                    中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}
+                {noticeCount > 0 && (
+                  <button
+                    className="btn btn-ghost text-sm"
+                    onClick={scrollToNotices}
+                    title="直すと良くなる知らせまで移ります"
+                  >
+                    <span className="badge badge-yellow">注意 {noticeCount}件</span>
+                  </button>
+                )}
+              </>
+            )}
             back={{
               // 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。
               label: <><ArrowLeftIcon size={16} />{leaving ? "保存しています…" : "動画の一覧へ"}</>,
@@ -5026,21 +5072,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </div>
 
-      {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。 */}
-      {missingTemplateCount > 0 && (
+      {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。
+          ⚠️ **見出しの行の「注意 N 件」からここへ寄る**（#1032）＝帯の器（76vh）の下なので、
+          編集している間は**画面外**だった。 */}
+      <div ref={noticesRef}>
+      {notices.missingTemplate > 0 && (
         <p className="notice notice-warn" role="alert">{missingTemplateMessage(missingTemplateCount)}</p>
       )}
-      {emptySlotCount > 0 && (
+      {notices.emptySlot > 0 && (
         <p className="notice notice-warn" role="alert">
           素材が入っていない差し込み口が{emptySlotCount}個あります。そのままだと灰色の枠が動画に出ます。部品を選んで素材を入れてください。
         </p>
       )}
-      {danglingLinkCount > 0 && (
+      {notices.danglingLink > 0 && (
         <p className="notice notice-warn" role="alert">
           連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
         </p>
       )}
-      {subtitleOverlapCount > 0 && (
+      {notices.subtitleOverlap > 0 && (
         <p className="notice notice-warn" role="alert">{subtitleOverlapMessage(subtitleOverlapCount)}</p>
       )}
       {/* ⚠️ **選び直す道をその場に出す**（#1019 ⑤）＝前は「取り込み直すか置き直してください」だけで、
@@ -5048,7 +5097,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           場面形式には前から「ファイルを選び直す」があり、`15 §6` `ASSET_FILE_MISSING` は
           「置いた場所・切り出す範囲・キーフレーム・字幕の紐づけは**構造的に**残る」と、
           形式を限定せずに書いている（ADR-0026②）。 */}
-      {missingImageCount > 0 && (
+      {notices.missingImage > 0 && (
         <div className="notice notice-warn" role="alert">
           <p>
             絵が出せない素材を使っている部品が{missingImageCount}個あります。そのままでは動画にその絵が出ません。
@@ -5073,7 +5122,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </div>
         </div>
       )}
-      {missingAudioAssets.length > 0 && (
+      {notices.missingAudioAsset > 0 && (
         <div className="notice notice-warn" role="alert">
           {/* ⚠️ **絵の側と同じ手を出す**（#1050）＝番号を変えずファイルだけ差し替えるので、
               置いた場所・切り出す範囲・音量の変化はそのまま残る（取り込み直すと作り直しになる）。 */}
@@ -5094,18 +5143,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </div>
         </div>
       )}
-      {missingAudioCount > 0 && (
+      {notices.missingAudio > 0 && (
         <p className="notice notice-warn" role="alert">
           音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。その部品を選んで「音」の「鳴らす音」で選び直すか、読み上げなら「声を作る」でもう一度作ってください。
         </p>
       )}
-      {warnings.length > 0 && (
+      {notices.invalid > 0 && (
         <ul className="notice notice-warn" role="alert">
           {warnings.map((w) => (
             <li key={`${w.code}/${w.field}`}>{w.message}</li>
           ))}
         </ul>
       )}
+      </div>
 
       <div className="row gap-sm mt-lg">
         {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
