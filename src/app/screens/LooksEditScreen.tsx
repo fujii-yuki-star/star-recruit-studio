@@ -621,7 +621,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             {numField("文字の大きさ", l.fontSize ?? DEFAULT_FONT_SIZE, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -639,7 +641,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v }), 0, STROKE_WIDTH_MAX)}
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+                {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                    `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
                 <ColorPicker value={l.strokeColor ?? defaultStrokeColor(l.color ?? DEFAULT_TEXT_COLOR)} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
               </div>
             )}
@@ -656,7 +660,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {l.background?.enabled && (
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+                    {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                        `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                    <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
                     <ColorPicker value={l.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
                   </div>
                   {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? DEFAULT_BAND_OPACITY), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
@@ -678,7 +684,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
             <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </div>
@@ -710,7 +718,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <>
           {renderDefaultAssetControl(l)}
           <div className="field" style={{ margin: "8px 0 0" }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</span>
             <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </>
