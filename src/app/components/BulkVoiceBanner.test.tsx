@@ -8,7 +8,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { BulkVoiceBanner } from "./BulkVoiceBanner";
 import { BulkVoiceControls } from "./BulkVoiceControls";
-import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
+import { useSceneBulkVoice, useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
+import { useTimelineStore } from "../store/timelineStore";
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import { useProjectStore } from "../store/projectStore";
 
 /** 出どころは画面と同じ経路（場面形式）で通す（#1019 ⑥）。 */
@@ -92,3 +95,87 @@ describe("声をまとめて作っている間の全画面バナー（#1024 ⑤�
     expect(screen.getByRole("status")).toHaveTextContent("声 1/2");
   });
 });
+
+// **両方の形式を見る**（#1019 ⑥・PR #1044 レビュー）。
+//
+// ⚠️ タイムライン形式にも一括作成ができた以上、`06 §9.0.1`（どの画面にいても進み具合と中止）は
+// そちらにも及ぶ。見ていなかった間は、欄を閉じただけで**走っているのにどこにも出ない**＝
+// #1024 ⑤ が直した症状がそのまま再発していた。
+function TimelineControls() {
+  return <BulkVoiceControls source={useTimelineBulkVoice()} />;
+}
+
+function timelineDocWithVoice() {
+  useTimelineStore.setState({
+    doc: {
+      schemaVersion: TIMELINE_SCHEMA_VERSION,
+      format: PROJECT_FORMAT.timeline,
+      projectId: "proj_20260906_001",
+      projectName: "テスト",
+      createdAt: "2026-09-06T00:00:00.000Z",
+      updatedAt: "2026-09-06T00:00:00.000Z",
+      videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+      voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+      assets: [],
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "generated" } },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 3, durationSec: 3, voice: { text: "い", status: "none" } },
+      ],
+    },
+    isGeneratingVoices: false,
+    voicesCancelled: false,
+  } as never);
+}
+
+describe("タイムライン形式のまとめて作るも、全画面バナーに出る（#1019 ⑥）", () => {
+  beforeEach(() => {
+    timelineDocWithVoice();
+    useProjectStore.setState({ isGeneratingNarration: false });
+  });
+
+  it("作っている間は進み具合と中止を出す", () => {
+    useTimelineStore.setState({ isGeneratingVoices: true } as never);
+    render(<BulkVoiceBanner />);
+    expect(screen.getByRole("status")).toHaveTextContent("声 1/2");
+  });
+
+  it("中止を押すと、作成が打ち切られる", () => {
+    useTimelineStore.setState({ isGeneratingVoices: true } as never);
+    render(<BulkVoiceBanner />);
+    fireEvent.click(screen.getByRole("button", { name: "中止する" }));
+    expect(useTimelineStore.getState().isGeneratingVoices).toBe(false);
+  });
+
+  // ⚠️ **形式ごとに数える**＝片方の操作が画面に出ているだけで、もう片方まで引っ込めない。
+  it("場面形式の操作が出ていても、タイムライン形式のぶんは出す", () => {
+    useTimelineStore.setState({ isGeneratingVoices: true } as never);
+    render(
+      <>
+        <BulkVoiceBanner />
+        <Controls />
+      </>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("声 1/2");
+  });
+
+  it("タイムライン形式の操作が出ているときは、そのぶんは出さない", () => {
+    useTimelineStore.setState({ isGeneratingVoices: true } as never);
+    render(
+      <>
+        <BulkVoiceBanner />
+        <TimelineControls />
+      </>,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  // ⚠️ **同時に走りうる**（2つの形式は同時に開いたままが正規の状態）＝走っているぶんだけ並べる。
+  it("両方走っていれば、2つ並べる", () => {
+    useProjectStore.setState({ isGeneratingNarration: true });
+    useTimelineStore.setState({ isGeneratingVoices: true } as never);
+    render(<BulkVoiceBanner />);
+    expect(screen.getAllByRole("status")).toHaveLength(2);
+  });
+});
+

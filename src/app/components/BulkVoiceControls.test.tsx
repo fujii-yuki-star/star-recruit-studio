@@ -4,6 +4,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { BulkVoiceControls } from "./BulkVoiceControls";
 import { useProjectStore } from "../store/projectStore";
 import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
+import { bulkVoiceDisabledReason, BULK_VOICE_TIMELINE_LABEL } from "../uiLabels";
+import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
+import { useTimelineStore } from "../store/timelineStore";
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { Scene } from "../../domain/project/types";
 
 // #547 P2-6：たたき台・場面編集・公開前チェックが同じ操作を共有することの検証。
@@ -12,6 +17,11 @@ import type { Scene } from "../../domain/project/types";
 // 検査では**場面形式の出どころ**（`useSceneBulkVoice`）をそのまま通す＝画面と同じ経路。
 function Scene(props: Omit<Parameters<typeof BulkVoiceControls>[0], "source">) {
   return <BulkVoiceControls source={useSceneBulkVoice()} {...props} />;
+}
+
+/** タイムライン形式の出どころ（呼び名の配線まで通す）。 */
+function Timeline() {
+  return <BulkVoiceControls source={useTimelineBulkVoice()} label={BULK_VOICE_TIMELINE_LABEL} />;
 }
 // 「進捗が出る」「作成中だけ中止が出る」「中止後は分数が残る」「やることが無ければ押せない＋理由」を固定する。
 const scene = (id: string, order: number, status: Scene["narration"]["status"]): Scene => ({
@@ -122,3 +132,53 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
     expect(screen.getByRole("button", { name: "声を作成" })).toBeInTheDocument();
   });
 });
+
+// **押せない理由も形式ごとに言い分ける**（#1019 ⑥・PR #1044 レビュー 🔴）。
+//
+// ⚠️ ボタンの文言だけ分けても、**押せない理由に分岐が漏れる**と #991 ①（タイムライン形式に
+// 無い「場面」を名指しする）がそのまま再発する＝実際に漏れていた。
+describe("押せない理由の呼び名（#1019 ⑥）", () => {
+  it("場面形式は「場面」と言う", () => {
+    useProjectStore.setState({ scenes: [scene("scene_001", 1, "generated")] });
+    render(<Scene />);
+    expect(screen.getByRole("button", { name: "全場面の声を作成" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("すべての場面の声が作成済みです"),
+    );
+  });
+
+  // ⚠️ **画面に出る文で見る**＝関数を直に叩くだけだと、**出どころが渡す呼び名**が
+  //   間違っていても緑になる（変異チェックで生き残った＝レビューが見つけたのはまさに配線）。
+  it("タイムライン形式は「場面」と言わない（画面に出る文で見る）", () => {
+    useTimelineStore.setState({
+      doc: {
+        schemaVersion: TIMELINE_SCHEMA_VERSION,
+        format: PROJECT_FORMAT.timeline,
+        projectId: "proj_20260906_001",
+        projectName: "テスト",
+        createdAt: "2026-09-06T00:00:00.000Z",
+        updatedAt: "2026-09-06T00:00:00.000Z",
+        videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+        assets: [],
+        tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+        // 作成済みだけ＝まとめて作る対象が無い（押せない理由が出る状態）。
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "generated" } }],
+      },
+      isGeneratingVoices: false,
+      voicesCancelled: false,
+      exportRun: { phase: "idle", percent: 0, message: null, cancelling: false },
+    } as never);
+    render(<Timeline />);
+    const title = screen.getByRole("button", { name: /まとめて作る/ }).getAttribute("title") ?? "";
+    expect(title).toContain("読み上げ");
+    expect(title, "タイムライン形式に場面は無い").not.toContain("場面");
+  });
+
+  it("セリフが1つも無いときも、呼び名を言い分ける", () => {
+    const base = { isExporting: false, generating: false, needsVoice: false, hasNarrationText: false };
+    expect(bulkVoiceDisabledReason({ ...base, unitLabel: "場面" })).toContain("場面にセリフ");
+    expect(bulkVoiceDisabledReason({ ...base, unitLabel: "読み上げ" })).not.toContain("場面");
+  });
+});
+

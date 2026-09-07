@@ -47,10 +47,10 @@ export function BulkVoiceControls({
 }) {
   // ⚠️ **早期 return より前で数える**＝`hideWhenNothingToDo` で何も描かないときも「居る」
   // （その画面には操作の置き場所があるので、作り始めれば出る＝全画面バナーと二重にならない）。
-  useBulkVoiceControlsPresence();
+  useBulkVoiceControlsPresence(source.format);
   const { progress, generating, cancelled, needsWork: needsVoice, isExporting } = source;
   const { done, total } = progress;
-  const disabledReason = bulkVoiceDisabledReason({ isExporting, generating, needsVoice, hasNarrationText: total > 0 });
+  const disabledReason = bulkVoiceDisabledReason({ isExporting, generating, needsVoice, hasNarrationText: total > 0, unitLabel: source.unitLabel });
   // 全部できて何も起きていないときは進捗を出さない（3画面に散っていた同じ条件をここへ集約）。
   const showProgress = total > 0 && (generating || cancelled || done < total);
 

@@ -11,8 +11,21 @@ import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { timelineVoiceProgress, voiceClipNeedsVoice } from "../../domain/timeline/voice";
 
+/** どちらの形式のまとめて作るか（バナーが形式ごとに数えるための鍵）。 */
+export type BulkVoiceFormat = "scene" | "timeline";
+
 /** まとめて作るのに要るものひと揃い。 */
 export interface BulkVoiceSource {
+  /** どちらの形式か（バナー・数え方の鍵）。 */
+  format: BulkVoiceFormat;
+  /**
+   * セリフを置く単位の呼び名（押せない理由の文言に差し込む）。
+   *
+   * ⚠️ **「場面」と決め打たない**＝タイムライン形式に**場面は無い**（`06 §12.1` 決定5）。
+   * ボタンの文言だけ分けても**押せない理由に分岐が漏れる**と、#991 ① がそのまま再発する
+   * （PR #1044 レビュー 🔴＝実際に漏れていた）。
+   */
+  unitLabel: string;
   /** 作成済み / 文のある読み上げ。 */
   progress: { done: number; total: number };
   /** いままとめて作っている最中か。 */
@@ -38,6 +51,8 @@ export function useSceneBulkVoice(): BulkVoiceSource {
   const generateAll = useProjectStore((s) => s.generateAllNarrations);
   const cancel = useProjectStore((s) => s.cancelNarrationGeneration);
   return {
+    format: "scene",
+    unitLabel: "場面",
     progress: narrationProgress(scenes),
     generating,
     cancelled,
@@ -60,6 +75,9 @@ export function useTimelineBulkVoice(): BulkVoiceSource {
   const cancel = useTimelineStore((s) => s.cancelVoiceGeneration);
   const list = clips ?? [];
   return {
+    format: "timeline",
+    // ⚠️ タイムライン形式に「場面」は無い＝セリフは**読み上げの部品**に入る。
+    unitLabel: "読み上げ",
     progress: timelineVoiceProgress(list),
     generating,
     cancelled,

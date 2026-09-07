@@ -185,12 +185,20 @@ export function bulkVoiceDisabledReason(state: {
   needsVoice: boolean;
   /** 声の対象になるセリフが1つでもあるか（`narrationProgress().total > 0`）。 */
   hasNarrationText: boolean;
+  /**
+   * セリフを置く単位の呼び名（#1019 ⑥・PR #1044 レビュー 🔴）。
+   *
+   * ⚠️ **「場面」と決め打たない**＝タイムライン形式に**場面は無い**（`06 §12.1` 決定5）。
+   * ボタンの文言だけ形式ごとに分けても、**押せない理由の文言に分岐が漏れる**と
+   * #991 ① と同じ間違いがそのまま再発する（実際に漏れていた）。
+   */
+  unitLabel: string;
 }): string | undefined {
   if (state.isExporting) return "動画の書き出し中は声を作成できません。書き出しが終わってから、もう一度お試しください。";
   if (state.generating) return "いま声を作成しています。止めるときは「中止する」を押してください。";
   // 対象が無いのに押せると「押しても何も起きない」になる（ADR-0026④）。どうすれば押せるようになるかを添える。
-  if (!state.hasNarrationText) return "まだセリフがありません。場面にセリフを入れると、ここで声を作れます。";
-  if (!state.needsVoice) return "すべての場面の声が作成済みです。セリフを書き直すと、その場面の声を作り直せます。";
+  if (!state.hasNarrationText) return `まだセリフがありません。${state.unitLabel}にセリフを入れると、ここで声を作れます。`;
+  if (!state.needsVoice) return `すべての${state.unitLabel}の声が作成済みです。セリフを書き直すと、その${state.unitLabel}の声を作り直せます。`;
   return undefined;
 }
 
