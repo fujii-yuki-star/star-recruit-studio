@@ -479,6 +479,40 @@ describe('overlappingSubtitleClips（#1014）', () => {
     expect(hits.map((h) => [h.aId, h.bId])).toEqual([['clip_001', 'clip_002']]);
   });
 
+  // ⚠️ **字幕はテンプレの層からも描かれる**（PR #1052 レビュー 🔴）＝種別だけで絞ると、
+  //    **テンプレの字幕が後から始まる**組み合わせで重なった瞬間を一度も見ない。
+  const SUB_TEMPLATE: Template = {
+    ...NORMAL_TEMPLATE,
+    templateId: 'tmpl_sub',
+    layers: [
+      { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#112233' },
+      { id: 'subtitle', type: 'subtitle', textKey: 'subtitle', x: 200, y: 900, w: 1520, h: 90, fontSize: 48 },
+    ],
+  };
+  const withSub = { templateOf: (id: string) => (id === 'tmpl_sub' ? SUB_TEMPLATE : templateOf(id)) };
+  const tmplSub = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({
+      id, kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 5,
+      templateId: 'tmpl_sub', texts: { subtitle: 'あいうえお' },
+      ...over,
+    }) as TimelineClip;
+
+  it('テンプレの字幕層どうしの重なりも挙げる', () => {
+    const d = doc({ clips: [tmplSub('clip_001'), tmplSub('clip_002', { trackId: 'track_002' })] });
+    expect(overlappingSubtitleClips(d, withSub).map((h) => [h.aId, h.bId])).toEqual([['clip_001', 'clip_002']]);
+  });
+
+  // ⚠️ **後から始まるのがテンプレ側**＝見る時刻に**テンプレの開始秒**が入っていないと見落とす。
+  it('自由配置の字幕の途中から、テンプレの字幕が重なってくる場合も挙げる', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { startSec: 0, durationSec: 10 }),
+        tmplSub('clip_002', { trackId: 'track_002', startSec: 4, durationSec: 5 }),
+      ],
+    });
+    expect(overlappingSubtitleClips(d, withSub).length, 'テンプレの開始秒を見ていない').toBe(1);
+  });
+
   it('時間が重ならなければ挙げない', () => {
     const d = doc({ clips: [sub('clip_001'), sub('clip_002', { trackId: 'track_002', startSec: 5 })] });
     expect(overlappingSubtitleClips(d, opts)).toEqual([]);

@@ -9,7 +9,7 @@ import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
-import { CROP_MODE, FIT, FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
@@ -549,10 +549,15 @@ export function overlappingSubtitleClips(
   doc: TimelineProject,
   opts: TimelineLayoutOptions,
 ): { aId: string; bId: string; atSec: number }[] {
-  const subs = doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle);
+  // ⚠️ **字幕を描きうる部品は2種類**（PR #1052 レビュー 🔴）＝自由配置の字幕クリップと、
+  //   **字幕の層を持つ見た目パターンのクリップ**（焼き出しで焼き込まれた字幕はこちら）。
+  //   種別だけで絞ると、**テンプレの字幕が後から始まる**組み合わせで重なった瞬間を一度も見ない。
+  const subs = doc.clips.filter((c) => drawsSubtitle(c, opts.templateOf));
   if (subs.length < 2) return [];
   // 見る時刻＝**どれかの字幕が出はじめる瞬間**。2つの字幕の時間が重なっているなら、
-  // **遅いほうの開始秒**では必ず両方が出ている（半開区間）＝この集合で重なりは尽きる。
+  // **遅いほうの開始秒**では必ず両方が出ている（半開区間）＝**位置が時間で変わらないなら**尽きる。
+  // ⚠️ **動く字幕どうしの、途中で交差する重なりは見ない**（同レビュー 🟡）＝キーフレームで
+  //   位置が変わる字幕は、区間の**途中**で初めて重なることがある（別で追う）。
   // ⚠️ **組ごとに時刻を作らない**＝字幕が増えると二乗で描き直すことになる（ここは字幕の数まで）。
   const times = new Set(subs.map((c) => c.startSec));
   const out: { aId: string; bId: string; atSec: number }[] = [];
@@ -590,4 +595,17 @@ function rectsOverlap(
 /** 描いたアイテムの id（`${clip.id}/${中身の id}`）から、部品の id を取る。 */
 function clipIdOfItem(itemId: string): string {
   return itemId.split('/')[0];
+}
+
+/**
+ * その部品は字幕を描きうるか（自由配置の字幕／**字幕の層を持つ**見た目パターン）。
+ *
+ * ⚠️ **字幕の層を持たない見た目を外すのは「速さのため」**＝入れても結果は変わらない
+ *（その時刻を見ても字幕のアイテムが増えないので、挙がる組は同じ）。**見落としを防ぐのは前半**
+ * （字幕の層を持つテンプレを**入れる**こと）で、そちらは検査で固定してある。
+ */
+function drawsSubtitle(clip: TimelineClip, templateOf: (templateId: string) => Template | undefined): boolean {
+  if (clip.kind === TIMELINE_CLIP_KIND.subtitle) return true;
+  if (clip.kind !== TIMELINE_CLIP_KIND.template || clip.templateId == null) return false;
+  return templateOf(clip.templateId)?.layers.some((l) => l.type === LAYER_TYPE.subtitle) === true;
 }
