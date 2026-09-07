@@ -19,6 +19,12 @@ import { SceneEditScreen } from "../app/screens/SceneEditScreen";
 import { SettingsScreen } from "../app/screens/SettingsScreen";
 import { MaterialsScreen } from "../app/screens/MaterialsScreen";
 import { LooksScreen } from "../app/screens/LooksScreen";
+import { LooksEditScreen } from "../app/screens/LooksEditScreen";
+import { TimelineProjectScreen } from "../app/screens/TimelineProjectScreen";
+import { useTimelineStore } from "../app/store/timelineStore";
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
+import type { TimelineProject } from "../domain/timeline/types";
 
 /** `<label>` が包めば結ばれる部品（HTML の "labelable elements"）。**`button` は入らない**。 */
 const LABELABLE = "input, select, textarea, meter, output, progress";
@@ -38,6 +44,50 @@ function unassociatedLabels(root: HTMLElement | Document): string[] {
     }
     if (el.querySelector(LABELABLE) != null) continue; // 包んでいる
     out.push(text);
+  }
+  return out;
+}
+
+const timelineDoc = (): TimelineProject => ({
+  schemaVersion: TIMELINE_SCHEMA_VERSION,
+  format: PROJECT_FORMAT.timeline,
+  projectId: "proj_20260728_001",
+  projectName: "焼いた動画",
+  createdAt: "2026-07-28T00:00:00.000Z",
+  updatedAt: "2026-07-28T00:00:00.000Z",
+  videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+  voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+  assets: [],
+  tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+  clips: [
+    { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+    // ⚠️ **見た目パターンの部品も置く**（PR #1077 レビュー）＝種別ごとのフォントの欄は
+    // **この部品を選んだときだけ**出るので、置かないと門番の外になる（実際に直し漏れていた）。
+    {
+      id: "clip_003", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 6, durationSec: 5,
+      templateId: sampleTemplates[0].templateId, textFontIds: { title: "gen-interface-jp" },
+    },
+    { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 5, voice: { text: "よろしく", status: "none" } },
+  ],
+});
+
+/**
+ * **欄の顔をしたボタン**（`button.select`）で、呼び名を持たないもの（#1075）。
+ *
+ * ⚠️ **見出しを消しただけだと上の検査では捕まらない**（結ばれていない `<label>` が
+ * 残るのではなく、**`<label>` そのものが無くなる**）。実際に変異チェックで生き残った。
+ * ⚠️ **普通のボタンとは別扱い**＝普通のボタンは中の文字がそのまま呼び名になるが、
+ * 欄の顔をしたボタンは中の文字が**いまの値**（字体名・色）なので、名前が別に要る。
+ */
+function unnamedFieldButtons(root: HTMLElement | Document): string[] {
+  const out: string[] = [];
+  for (const el of Array.from(root.querySelectorAll("button.select"))) {
+    if (el.getAttribute("aria-label")) continue;
+    const by = el.getAttribute("aria-labelledby");
+    if (by && by.split(/\s+/).every((id) => document.getElementById(id) != null)) continue;
+    const id = el.getAttribute("id");
+    if (id && document.querySelector(`label[for="${id}"]`) != null) continue;
+    out.push((el.textContent ?? "").trim() || "(文字の無い欄)");
   }
   return out;
 }
@@ -68,23 +118,19 @@ const BASELINE: Record<string, string[]> = {
   "場面編集": [
     "色",
     "縁取りの色",
-    "影を付ける",
-    "背景帯を付ける",
     "色",
     "縁取りの色",
-    "影を付ける",
-    "背景帯を付ける",
     "背景色",
     "背景",
     "ロゴ",
-    "話す速さ",
-    "声の高さ",
-    "抑揚",
-    "画面の切り替え（結び先 \"transition\" が無い）",
   ],
-  "設定": ["いつものロゴ（結び先 \"brandLogo\" が無い）"],
+  "設定": [],
   "素材を管理": [],
   "見た目パターンを管理": [],
+  "見た目パターンを編集": [],
+  // ⚠️ 残りは `ColorPicker`（中身がボタン）＝`FontPicker` と同じ形へ寄せるのが次の一手。
+  "タイムライン編集（文字）": ["文字の色", "縁取りの色"],
+  "タイムライン編集（見た目パターン）": [],
 };
 
 describe("見出しは欄と結ばれている（#1075）", () => {
@@ -102,22 +148,56 @@ describe("見出しは欄と結ばれている（#1075）", () => {
 
   it("場面編集", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
     expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["場面編集"]);
   });
 
   it("設定", () => {
     render(<SettingsScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
     expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["設定"]);
   });
 
   it("素材を管理", () => {
     render(<MaterialsScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
     expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["素材を管理"]);
   });
 
   it("見た目パターンを管理", () => {
     render(<LooksScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
     expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["見た目パターンを管理"]);
+  });
+
+  it("見た目パターンを編集", () => {
+    useProjectStore.setState({ editingTemplateId: sampleTemplates[0].templateId } as never);
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
+    expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["見た目パターンを編集"]);
+  });
+
+  // ⚠️ **タイムライン編集も見る**（PR #1077 レビュー）＝見ていない画面は門番の外で、
+  // 実際にこの画面だけ 2 か所直し漏れていた。
+  // ⚠️ **選んでいる部品で欄の顔ぶれが変わる**ので、両方を見る（片方だけだともう片方が門番の外）。
+  const openTimeline = (selected: string): void => {
+    useTimelineStore.setState({
+      doc: timelineDoc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [selected], assetSrcById: {},
+    } as never);
+  };
+
+  it("タイムライン編集（文字の部品を選んでいる）", () => {
+    openTimeline("clip_001");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
+    expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["タイムライン編集（文字）"]);
+  });
+
+  it("タイムライン編集（見た目パターンの部品を選んでいる）", () => {
+    openTimeline("clip_003");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(unnamedFieldButtons(document), "欄の顔をしたボタンが呼び名を持っていない").toEqual([]);
+    expect(unassociatedLabels(document), "結ばれていない見出しが増えた（直したなら控えも減らす）").toEqual(BASELINE["タイムライン編集（見た目パターン）"]);
   });
 
   // ⚠️ **物差しが効いていることを確かめる**＝上が全部 `[]` なので、判定を壊しても緑になりうる。

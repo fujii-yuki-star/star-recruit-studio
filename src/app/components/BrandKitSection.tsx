@@ -247,7 +247,13 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
       </div>
 
       <div className="field">
-        <label className="field-label" htmlFor="brandLogo">いつものロゴ</label>
+        {/* ⚠️ **欄が無いときは見出しにしない**（#1075）＝読めていないときとロゴが1つも無いときは
+            選択欄を出さないので、`htmlFor` の指し先が**実在しない**（結んだつもりで結ばれていない）。 */}
+        {!logosUnreadable && logos.length > 0 ? (
+          <label className="field-label" htmlFor="brandLogo">いつものロゴ</label>
+        ) : (
+          <span className="field-label" style={{ display: "block" }}>いつものロゴ</span>
+        )}
         {/* ⚠️ **覚えるのは1つだけ**（決定6）＝白抜き版などは「よく使う素材」から取り込む。 */}
         <p className="field-hint">
           新しい動画に最初から入れておく1枚です。ほかの版は「よく使う素材」から取り込めます。

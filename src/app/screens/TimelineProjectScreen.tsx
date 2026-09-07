@@ -1279,7 +1279,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
       <div className="col gap-sm">
         <div className="toggle-row">
-          <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>影を付ける</span>
           <Switch
             on={enabledShadow(sel.shadow) != null}
             {...editGuard()}
@@ -1316,7 +1317,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
       <div className="col gap-sm">
         <div className="toggle-row">
-          <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</span>
           <Switch
             on={bandBackground(sel.background) != null}
             {...editGuard()}
@@ -4642,16 +4644,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
                   )}
                   {editableTextKeys(selectedTemplate.layers, selected.textFontIds).map((key) => (
-                    <label className="field" key={`font-${key}`}>
-                      <span>{textKeyLabel[key]}の文字の形</span>
+                    <div className="field" key={`font-${key}`}>
                       <FontPicker
+                        label={`${textKeyLabel[key]}の文字の形`}
+                        labelClassName=""
                         value={selected.textFontIds?.[key] ?? null}
                         allowInherit
                         {...editGuard()}
                         // 置く／外すの規則は **domain に1つ**（`withTextFontId`＝残りを引き継ぐ・空なら落とす）。
                         onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                       />
-                    </label>
+                    </div>
                   ))}
                   <button
                     className="btn btn-secondary"
@@ -4688,15 +4691,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {Object.keys(selected.textFontIds ?? {}).length > 0 && (
                     <>
                       {editableTextKeys([], selected.textFontIds).map((key) => (
-                        <label className="field" key={`font-unresolved-${key}`}>
-                          <span>{textKeyLabel[key]}の文字の形</span>
+                        <div className="field" key={`font-unresolved-${key}`}>
                           <FontPicker
+                            label={`${textKeyLabel[key]}の文字の形`}
+                            labelClassName=""
                             value={selected.textFontIds?.[key] ?? null}
                             allowInherit
                             {...editGuard()}
                             onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                           />
-                        </label>
+                        </div>
                       ))}
                     </>
                   )}

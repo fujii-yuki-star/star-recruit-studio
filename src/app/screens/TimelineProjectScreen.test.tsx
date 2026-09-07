@@ -7005,7 +7005,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   const clip = () => useTimelineStore.getState().doc!.clips[0];
   /** 種別の欄を開いて選ぶ。開く側（`button.select`）と選ぶ側（一覧の項目）を取り違えない。 */
   const pickFont = (fieldLabel: string, optionText: string): void => {
-    const field = screen.getByText(fieldLabel).closest("label") as HTMLElement;
+    // ⚠️ 見出しは `<label htmlFor>` で欄と結ばれた（#1075）＝包む形ではなくなったので、囲いは親から採る。
+    const field = screen.getByText(fieldLabel).closest(".field") as HTMLElement;
     fireEvent.click(field.querySelector("button.select") as HTMLElement);
     const option = [...field.querySelectorAll("button")].find(
       (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith(optionText),
