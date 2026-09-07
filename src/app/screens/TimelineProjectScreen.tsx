@@ -1412,15 +1412,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       }),
     [],
   );
-  // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
-  const missingAudioCount = useMemo(() => {
-    if (!doc) return 0;
-    return doc.clips.filter((c) => {
-      if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
-      const key = audioSourceKeyOfClip(c);
-      return !key || !audioSrcByKey[key];
-    }).length;
-  }, [doc, audioSrcByKey]);
   /**
    * **音が出せない素材そのもの**（#1050）＝件数だけでなく、**どれを選び直すか**を出すために要る。
    *
@@ -1441,6 +1432,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     );
     return doc.assets.filter((a) => unresolved.has(a.assetId));
   }, [doc, audioSrcByKey, missingAssetIds]);
+  // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
+  const missingAudioCount = useMemo(() => {
+    if (!doc) return 0;
+    // ⚠️ **選び直せるものは、そちらの知らせに任せる**（PR #1059 レビュー 🟡）＝両方出すと、
+    //   同じ1つの部品について**別々の次の行動**（「ファイルを選び直す」と「鳴らす音で選び直す」）が
+    //   並ぶ。絵の側は1つの知らせに畳んでいるので、音も同じ形にする（§2-5・ADR-0026②）。
+    const relinkable = new Set(missingAudioAssets.map((a) => a.assetId));
+    return doc.clips.filter((c) => {
+      if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
+      if (c.assetId && relinkable.has(c.assetId)) return false;
+      const key = audioSourceKeyOfClip(c);
+      return !key || !audioSrcByKey[key];
+    }).length;
+  }, [doc, audioSrcByKey, missingAudioAssets]);
   /**
    * 絵として使っていて**出せない**素材の番号（件数と一覧の**単一の参照元**）。
    *

@@ -7574,3 +7574,42 @@ describe("TimelineProjectScreen: 確認はスクロールで視界から出な�
     expect(staysVisibleOnScroll(confirm)).toBe(true);
   });
 });
+
+// 音の素材の選び直し（#1050）。⚠️ **同じ1つの部品に、別々の次の行動を2つ出さない**（PR #1059 レビュー 🟡）。
+describe("TimelineProjectScreen: 音が出せない素材（#1050）", () => {
+  const withBgm = (srcByKey: Record<string, string>) => {
+    useTimelineStore.setState({
+      doc: doc({
+        assets: [{ assetId: "asset_009", assetType: "bgm", displayName: "曲", filePath: "assets/asset_009.mp3" }],
+        tracks: [{ id: "track_009", kind: TRACK_KIND.audio }],
+        clips: [{ id: "clip_009", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_009", startSec: 0, durationSec: 5, assetId: "asset_009" }],
+      }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {},
+      audioSrcByKey: srcByKey, missingAssetIds: [],
+    });
+  };
+
+  it("音が出せない素材ごとに「ファイルを選び直す」を出す", () => {
+    withBgm({});
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("音が出せない素材があります"))).toBe(true);
+    expect(screen.getByRole("button", { name: "ファイルを選び直す" })).toBeInTheDocument();
+  });
+
+  // ⚠️ **2つの知らせを重ねない**＝「ファイルを選び直す」と「鳴らす音で選び直す」は別々の次の行動なので、
+  //    同じ部品について両方出すと、どちらに従えばよいのか読めない（§2-5）。
+  it("選び直せる素材は、古いほうの知らせに数えない", () => {
+    withBgm({});
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(
+      screen.queryAllByRole("alert").some((el) => el.textContent?.includes("音が見つからない部品が")),
+      "同じ部品について2つの次の行動を並べた",
+    ).toBe(false);
+  });
+
+  it("音が鳴る素材では知らせない", () => {
+    withBgm({ "asset:asset_009": "data:audio/mp3;base64,X" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("音が出せない素材"))).toBe(false);
+  });
+});

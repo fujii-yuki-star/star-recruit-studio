@@ -68,7 +68,13 @@ export function isListedMaterial(assetType: AssetType): boolean {
 export const ASSET_KIND = { video: 'video', audio: 'audio', image: 'image' } as const;
 export type AssetKind = (typeof ASSET_KIND)[keyof typeof ASSET_KIND];
 
-/** その素材はどの種類か（差し替えの可否と、断りの文言が同じものを見るための1か所）。 */
+/**
+ * その素材はどの種類か（差し替えの可否と、断りの文言が同じものを見るための1か所）。
+ *
+ * ⚠️ **読み上げ（`voice`）は「絵」に入る**（PR #1059 レビュー ℹ️）＝いまの呼び出し口
+ *（素材の選び直し）には渡らない（素材の一覧に出ない＝`isListedMaterial`）ので実害は無いが、
+ * **別の用途で使い回すときは「読み上げ＝絵」で良いか確かめること**。
+ */
 export function assetKindOf(type: AssetType): AssetKind {
   if (type === ASSET_TYPE.video) return ASSET_KIND.video;
   if (type === ASSET_TYPE.bgm) return ASSET_KIND.audio;
