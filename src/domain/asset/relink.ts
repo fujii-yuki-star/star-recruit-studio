@@ -21,10 +21,13 @@ export type RelinkResult = {
 /**
  * 切り出す範囲を新しい長さへ収める。
  *
+ * ⚠️ **タイムライン形式も同じ規則を通す**（#1019 ⑤＝`domain/timeline/relink.ts`）＝
+ * 収め方を写すと、**同じ素材が形式によって違う範囲になる**（ADR-0026②）。
+ *
  * ⚠️ **範囲が丸ごと外に出たら、範囲そのものを外す**（先頭から全部にする）＝
  * 開始＝終了の**長さ0**を作らない（鳴らない・映らないクリップになる）。
  */
-function clampClip(clip: Clip | undefined, durationSec: number | null | undefined): { clip?: Clip; changed: boolean } {
+export function clampClip(clip: Clip | undefined, durationSec: number | null | undefined): { clip?: Clip; changed: boolean } {
   if (!clip) return { clip, changed: false };
   if (typeof durationSec !== 'number' || !(durationSec > 0)) return { clip, changed: false };
   const start = clip.startSec;

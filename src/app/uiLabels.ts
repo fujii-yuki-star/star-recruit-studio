@@ -1,7 +1,7 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
-import { FREE_ELEMENT_KINDS, LAYER_TYPE, SUBTITLE_SOURCE_KIND } from "../domain/enums";
-import type { AssetType, Fit, FreeElementKind, FreeShapeType, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
@@ -581,10 +581,21 @@ export function assetTooLargeMessage(nextAction: string): string {
  * 素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。文言も「写真」でひとまとめにする＝
  * 利用者に「ロゴ素材」「QR 素材」と言い分けても直し方は同じ。
  */
-export function assetTypeMismatchMessage(isVideo: boolean): string {
+export function assetTypeMismatchMessage(isVideo: boolean, format: ProjectFormat): string {
   const kind = isVideo ? '動画' : '写真';
   const other = isVideo ? '写真' : '動画';
-  return `この素材は${kind}です。${kind}のファイルをお選びください。${other}に変えたいときは、${other}を取り込んでから場面で選び直してください。`;
+  return `この素材は${kind}です。${kind}のファイルをお選びください。${other}に変えたいときは、${other}を取り込んでから${assetPickAgainWhere(format)}。`;
+}
+
+/**
+ * **取り込んだ後にどこで選び直すか**（#1019 ⑤）。形式で行き先が違う＝**タイムライン形式に「場面」は無い**
+ *（ADR-0032＝場面の区切りを持たない）ので、場面形式の言い方をそのまま出すと**存在しない行き先**へ案内する。
+ *
+ * ⚠️ **形式は必ず渡させる**（既定値を持たせない）＝新しい呼び出し口が黙って片方の言い方を持ち込まない
+ *（§2-5・ADR-0026②＝同じ状況で同じ案内。**片方だけ直す**を構造で止める）。
+ */
+function assetPickAgainWhere(format: ProjectFormat): string {
+  return format === PROJECT_FORMAT.timeline ? '部品を選んで入れ直してください' : '場面で選び直してください';
 }
 
 /**
@@ -593,8 +604,10 @@ export function assetTypeMismatchMessage(isVideo: boolean): string {
  * ⚠️ **黙って直さない**＝範囲は利用者が決めたものなので、勝手に変わったことを知らせる
  *（`§2-5`＝直した結果と次に見るところを示す）。「失敗」ではないので原因は書かない。
  */
-export function clipClampedMessage(count: number): string {
-  return `差し替えた素材が短いため、${count}か所の使う範囲を新しい長さに合わせました。場面編集でご確認ください。`;
+export function clipClampedMessage(count: number, format: ProjectFormat): string {
+  // ⚠️ **見に行く先も形式で違う**（`assetPickAgainWhere` と同じ理由）。
+  const where = format === PROJECT_FORMAT.timeline ? '「選んだ部品」の欄' : '場面編集';
+  return `差し替えた素材が短いため、${count}か所の使う範囲を新しい長さに合わせました。${where}でご確認ください。`;
 }
 
 /**
