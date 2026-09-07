@@ -45,7 +45,7 @@ describe('bakeToTimeline / estimateBake', () => {
     });
     vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([{ projectId: 'proj_20260701_001', projectName: '元の動画', updatedAt: '' }]);
     vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('path');
-    vi.spyOn(bakeFsMod, 'copyBakedFiles').mockResolvedValue(undefined);
+    vi.spyOn(bakeFsMod, 'copyBakedFiles').mockResolvedValue({ copied: 0, cancelled: false });
     vi.spyOn(bakeFsMod, 'bakeSizeBytes').mockResolvedValue(1234);
   });
 
@@ -68,9 +68,60 @@ describe('bakeToTimeline / estimateBake', () => {
     expect(doc.projectName).toBe('焼いた動画');
   });
 
+  // ⚠️ **中止したら作りかけを残さない**（#1021）＝運んだものは Rust が片づけるので、
+  //    ここで文書を保存すると**素材の無い動画が一覧に残る**。
+  it('中止したら文書を保存せず、番号も返さない', async () => {
+    vi.mocked(bakeFsMod.copyBakedFiles).mockResolvedValue({ copied: 3, cancelled: true });
+    const r = await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(r.projectId, '中止したのに番号を返した').toBeNull();
+    // ⚠️ **元の保存（焼く前に1回）とは分ける**＝見るのは「焼いた先の番号で保存したか」。
+    const saved = vi.mocked(fsMod.saveProjectDoc).mock.calls.map((c) => c[0]);
+    expect(saved.filter((id) => id !== 'proj_20260701_001'), '中止したのに焼いた先を保存した').toEqual([]);
+  });
+
+  // ⚠️ **運ぶものが無いときは進み具合を立てない**（PR #1054 レビュー ℹ️）＝
+  //    一瞬だけ「中止する」が見える窓を作らない（押しても何も起きない）。
+  it('運ぶファイルが無いときは進み具合を立てない', async () => {
+    vi.spyOn(bakeFsMod, 'listenCopyProgress').mockResolvedValue(() => {});
+    let seen: unknown = 'not-called';
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async (_s, _d, paths) => {
+      seen = paths.length === 0 ? useProjectStore.getState().bakeRun : 'had-paths';
+      return { copied: 0, cancelled: false };
+    });
+    // 素材も声も持たない動画にする（運ぶものが無い）。
+    useProjectStore.setState({ assets: [] });
+    await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(seen, '運ぶものが無いのに進み具合を立てた').toBeNull();
+  });
+
+  // ⚠️ **止めるのは走っている回だけ**（同レビュー 🔴）＝1つの旗にすると、並行する複製まで巻き込む。
+  it('中止は、走っている回の合図で止める', async () => {
+    const cancel = vi.spyOn(bakeFsMod, 'cancelProjectCopy').mockResolvedValue();
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => {
+      useProjectStore.getState().cancelBake();
+      return { copied: 0, cancelled: true };
+    });
+    await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(cancel, '中止の合図を渡していない').toHaveBeenCalledWith(expect.stringContaining('bake_proj_'));
+  });
+
+  // ⚠️ **進み具合を出す**＝素材を丸ごと運ぶので分単位になりうる（書き出しと同じ扱い）。
+  it('運んでいる間は進み具合を持ち、終わったら降ろす', async () => {
+    let send: ((e: { step: number; total: number }) => void) | null = null;
+    vi.spyOn(bakeFsMod, 'listenCopyProgress').mockImplementation(async (cb) => { send = cb; return () => {}; });
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => {
+      expect(useProjectStore.getState().bakeRun, '運んでいるのに進み具合が無い').not.toBeNull();
+      send?.({ step: 2, total: 5 });
+      expect(useProjectStore.getState().bakeRun).toMatchObject({ step: 2, total: 5 });
+      return { copied: 5, cancelled: false };
+    });
+    await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(useProjectStore.getState().bakeRun, '終わったのに進み具合が残った').toBeNull();
+  });
+
   it('文書を保存する前に素材を運ぶ（途中で失敗しても素材の無いプロジェクトを残さない）', async () => {
     const order: string[] = [];
-    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => { order.push('copy'); });
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => { order.push('copy'); return { copied: 0, cancelled: false }; });
     vi.mocked(fsMod.saveProjectDoc).mockImplementation(async (id) => { order.push(`save:${id}`); return 'path'; });
 
     await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
