@@ -864,10 +864,32 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(select?.querySelector('option[value="asset_003"]')).toBeDisabled();
   });
 
+  // ⚠️ **数えるのは「空だと灰色の枠が出る」層だけ**（#1040）＝この見た目は背景＋差し込み口1つなので
+  //    1個（背景は空でも**塗り**が描かれるので枠は出ない）。
   it("素材が入っていない差し込み口を知らせる（灰色の枠が動画に出る）", () => {
     openWithTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("素材が入っていない差し込み口が2個"))).toBe(true);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("素材が入っていない差し込み口が1個"))).toBe(true);
+  });
+
+  // ⚠️ **出ないものを「出る」と言わない**（§2-5）＝背景に色を使う見た目・ロゴを置かない場面で
+  //    知らせが出ると、**消す手が「要らない素材を入れる」しかない**（正しい使い方なのに直せない）。
+  it("背景とロゴだけの見た目では知らせない（灰色の枠は出ない）", () => {
+    const noSlot: Template = {
+      ...template,
+      layers: [
+        { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, fillColor: "#123456" },
+        { id: "logo", type: "logo", x: 0, y: 0, w: 200, h: 100 },
+      ],
+    } as Template;
+    useProjectStore.setState({ templates: [noSlot], templateAssetSrcById: {} });
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_001" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("素材が入っていない差し込み口"))).toBe(false);
   });
 
   it("向きが違う見た目パターンは一覧に出さない（押せるのに置けないものを並べない）", () => {
