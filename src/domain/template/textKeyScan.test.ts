@@ -13,13 +13,19 @@ const EXEMPT: Record<string, string> = {
   'layerOps.ts': '解き方そのものを持つ場所（`textKeyOfLayer` の定義と、層を作るときの既定）',
 };
 
-/** `<何か>.textKey` を**読んでいる**所（`textKey:` の書き込みと、型宣言は除く）。 */
+/**
+ * `.textKey` を**読んでいる**所（`textKey:` の書き込みと、型宣言は除く）。
+ *
+ * ⚠️ **点の前は見ない**（PR #1060 レビュー 🟡）＝名前だけを拾う形にしていたので、
+ * `layer?.textKey`（省略可の点）や `(l as X).textKey`（括弧のあと）を**拾い漏れて**いた。
+ * **読むときは必ず点が付く**（書き込みは `textKey:`＝コロン）ので、**点だけを見る**。
+ */
 export function directTextKeyReads(text: string): string[] {
   const out: string[] = [];
   for (const line of text.split('\n')) {
     const t = line.trim();
     if (t.startsWith('*') || t.startsWith('//')) continue; // コメントは対象外
-    for (const m of line.matchAll(/([A-Za-z_$][\w$]*)\.textKey\b/g)) out.push(`${m[1]}.textKey`);
+    for (const _m of line.matchAll(/\??\.textKey\b/g)) out.push(t.slice(0, 60));
   }
   return out;
 }
@@ -56,6 +62,10 @@ describe('textKey の解き方は1か所（#1058）', () => {
     expect(directTextKeyReads('const x = { textKey: "title" };')).toEqual([]);
     expect(directTextKeyReads('  // layer.textKey を直に見ない')).toEqual([]);
     expect(directTextKeyReads('   * `layer.textKey` の話')).toEqual([]);
-    expect(directTextKeyReads('if (layer.textKey) return layer.textKey;')).toEqual(['layer.textKey', 'layer.textKey']);
+    expect(directTextKeyReads('if (layer.textKey) return 1;')).toEqual(['if (layer.textKey) return 1;']);
+    // ⚠️ **点の付き方で漏らさない**（PR #1060 レビュー 🟡）＝省略可の点・括弧のあと・添字も読み。
+    expect(directTextKeyReads('const a = layer?.textKey;')).toEqual(['const a = layer?.textKey;']);
+    expect(directTextKeyReads('const b = (l as Layer).textKey;')).toEqual(['const b = (l as Layer).textKey;']);
+    expect(directTextKeyReads('const c = layers[0].textKey;')).toEqual(['const c = layers[0].textKey;']);
   });
 });
