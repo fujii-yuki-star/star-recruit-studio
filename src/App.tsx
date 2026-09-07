@@ -40,7 +40,7 @@ const titles: Record<ScreenId, string> = {
   draft: "動画のたたき台を確認",
   "scene-edit": "場面編集",
   preview: "仕上がり確認",
-  timeline: "タイムライン",
+  timeline: "見わたすタイムライン", // 正典（`06 §12`）の呼び名。「タイムライン編集」と見分けがつく（#1032）
   "timeline-project": "タイムライン編集",
   precheck: "公開前チェック",
   export: "動画を書き出す",

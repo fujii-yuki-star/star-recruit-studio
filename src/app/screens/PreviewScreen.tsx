@@ -23,6 +23,7 @@ import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { lineAdvanceWindowSec } from "./previewLineTiming";
 import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
+import { activatesOnSpace, shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -215,6 +216,45 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       startIdx = i;
       break;
     }
+
+  // 再生・停止の**入口を 1 つにする**（#1032）。ボタンとキーで別々に書くと、
+  // `Space` だけ**前回の警告が消えない**・**範囲の終端から動かない**という別の振る舞いになる（ADR-0026②）。
+  const canPlay = scenes.length > 0;
+  const startPlayback = (): void => {
+    setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
+    setNarrationPlayWarning(false); // ナレーション再生失敗の警告も同様にクリア（#452 P2）
+    if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
+    setPlaying(true);
+  };
+  const stopPlayback = (): void => setPlaying(false);
+
+  // いちばん新しい値を**控えで見る**（窓の購読を毎描画張り替えない）。
+  // ⚠️ ref の書き込みは**描画中ではなく effect の中**で行う（`useEscapeReceiver` と同じ形）。
+  const playRef = useRef({ playing, canPlay, start: startPlayback, stop: stopPlayback });
+  useEffect(() => {
+    playRef.current = { playing, canPlay, start: startPlayback, stop: stopPlayback };
+  });
+
+  // `Space` で再生⇄停止（#1032）。タイムライン編集には前からあるので、**同じキーの意味を画面で割らない**（ADR-0026②）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== " ") return;
+      // 文字を打っている途中・変換中は奪わない（打ちかけの文字ごと再生が始まる、を作らない）。
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // 修飾キー付きは OS/ブラウザのものを奪わない
+      // **押した要素が `Space` で反応するなら、そちらに譲る**（「停止」を押したら止まったうえに
+      // また再生が始まる、を作らない）。一律に奪うと画面じゅうのボタンがキーボードで押せなくなる。
+      if (activatesOnSpace(e.target)) return;
+      const p = playRef.current;
+      // **場面が無いときは奪わない**＝押して何も起きない、を作らない（ボタンと同じ条件）。
+      if (!p.playing && !p.canPlay) return;
+      e.preventDefault(); // 既定の「画面を下へ送る」を止める
+      if (p.playing) { p.stop(); return; } // 止めるのはいつでも通す
+      p.start();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // 再生時に流す BGM の解決＝現在場面の実効BGM（場面ごと ?? プロジェクト＝null=継承・ADR-0018 ③(7)）。
   // 同じソースが続く場面では再起動しない（連続する同じ曲は途切れない）＝下の effect の deps を bundledBgm/bgmAsset にする。
@@ -531,24 +571,22 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             </div>
           )}
 
+          {/* 押せるときは**キーの割り当てを添える**（タイムライン編集と同じ流儀＝キーだけの操作を作らない）。 */}
           <div className="preview-controls">
             <button
               className="btn btn-icon btn-secondary"
               aria-label="再生"
-              onClick={() => {
-                setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
-                setNarrationPlayWarning(false); // ナレーション再生失敗の警告も同様にクリア（#452 P2）
-                if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
-                setPlaying(true);
-              }}
-              disabled={playing || scenes.length === 0}
+              title={playing || !canPlay ? undefined : "再生します（Space）"}
+              onClick={startPlayback}
+              disabled={playing || !canPlay}
             >
               <PlayIcon size={20} />
             </button>
             <button
               className="btn btn-icon btn-secondary"
               aria-label="停止"
-              onClick={() => setPlaying(false)}
+              title={playing ? "再生を止めます（Space）" : undefined}
+              onClick={stopPlayback}
               disabled={!playing}
             >
               <StopIcon size={20} />
