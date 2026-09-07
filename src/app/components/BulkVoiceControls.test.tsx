@@ -3,9 +3,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { BulkVoiceControls } from "./BulkVoiceControls";
 import { useProjectStore } from "../store/projectStore";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
+import { bulkVoiceDisabledReason, BULK_VOICE_TIMELINE_LABEL } from "../uiLabels";
+import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
+import { useTimelineStore } from "../store/timelineStore";
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { Scene } from "../../domain/project/types";
 
 // #547 P2-6：たたき台・場面編集・公開前チェックが同じ操作を共有することの検証。
+//
+// ⚠️ **出どころは1つの物で渡す**（#1019 ⑥）＝場面形式とタイムライン形式で同じ部品を使うため。
+// 検査では**場面形式の出どころ**（`useSceneBulkVoice`）をそのまま通す＝画面と同じ経路。
+function Scene(props: Omit<Parameters<typeof BulkVoiceControls>[0], "source">) {
+  return <BulkVoiceControls source={useSceneBulkVoice()} {...props} />;
+}
+
+/** タイムライン形式の出どころ（呼び名の配線まで通す）。 */
+function Timeline() {
+  return <BulkVoiceControls source={useTimelineBulkVoice()} label={BULK_VOICE_TIMELINE_LABEL} />;
+}
 // 「進捗が出る」「作成中だけ中止が出る」「中止後は分数が残る」「やることが無ければ押せない＋理由」を固定する。
 const scene = (id: string, order: number, status: Scene["narration"]["status"]): Scene => ({
   sceneId: id, partId: "part_001", order, sceneType: "photo_intro", templateId: "t",
@@ -24,7 +41,7 @@ beforeEach(() => {
 
 describe("BulkVoiceControls（#547 P2-6）", () => {
   it("未作成があると進捗と作成ボタンを出す（中止は出さない）", () => {
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     expect(screen.getByText("声 1/2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "全場面の声を作成" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "中止する" })).toBeNull();
@@ -32,7 +49,7 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
 
   it("作成中は「作成中…」＋中止ボタンを出し、押せない理由として止め方を示す", () => {
     useProjectStore.setState({ isGeneratingNarration: true });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     expect(screen.getByText("声 1/2（作成中…）")).toBeInTheDocument();
     const btn = screen.getByRole("button", { name: "作成中…" });
     expect(btn).toBeDisabled();
@@ -46,7 +63,7 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
       isGeneratingNarration: true,
       exportRun: { ...useProjectStore.getState().exportRun, phase: "rendering" },
     });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     const title = screen.getByRole("button", { name: "作成中…" }).getAttribute("title") ?? "";
     expect(title).toContain("書き出し中");
     expect(title).not.toContain("中止する");
@@ -55,14 +72,14 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
   it("中止を押すと store の中止を呼ぶ", () => {
     const cancel = vi.fn();
     useProjectStore.setState({ isGeneratingNarration: true, cancelNarrationGeneration: cancel });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     fireEvent.click(screen.getByRole("button", { name: "中止する" }));
     expect(cancel).toHaveBeenCalled();
   });
 
   it("中止後は分数を残したまま「中止しました」＝作った声が消えていないと分かる", () => {
     useProjectStore.setState({ isGeneratingNarration: false, narrationCancelled: true });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     expect(screen.getByText("声 1/2（中止しました）")).toBeInTheDocument();
     // 次の行動（作り直す）は隣のボタンがそのまま担う。
     expect(screen.getByRole("button", { name: "全場面の声を作成" })).toBeEnabled();
@@ -70,7 +87,7 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
 
   it("全部作成済みなら進捗は出さず、ボタンは押せない＋理由を出す（押しても何も起きない、を作らない）", () => {
     useProjectStore.setState({ scenes: [scene("scene_001", 1, "generated")] });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     expect(screen.queryByText(/^声 /)).toBeNull();
     const btn = screen.getByRole("button", { name: "全場面の声を作成" });
     expect(btn).toBeDisabled();
@@ -79,23 +96,23 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
 
   it("hideWhenNothingToDo なら、やることが無いとき操作ごと出さない（たたき台の専用行）", () => {
     useProjectStore.setState({ scenes: [scene("scene_001", 1, "generated")] });
-    render(<BulkVoiceControls hideWhenNothingToDo />);
+    render(<Scene hideWhenNothingToDo />);
     expect(screen.queryByRole("button", { name: "全場面の声を作成" })).toBeNull();
   });
 
   it("rowClassName の行は、隠れるときに空の行として残らない（余白だけの行を作らない）", () => {
     useProjectStore.setState({ scenes: [scene("scene_001", 1, "generated")] });
-    const { container, rerender } = render(<BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo />);
+    const { container, rerender } = render(<Scene rowClassName="row-between mb" hideWhenNothingToDo />);
     expect(container.querySelector(".row-between")).toBeNull();
     // 作る声が戻れば行も戻る。
     useProjectStore.setState({ scenes: [scene("scene_001", 1, "none")] });
-    rerender(<BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo />);
+    rerender(<Scene rowClassName="row-between mb" hideWhenNothingToDo />);
     expect(container.querySelector(".row-between")).not.toBeNull();
   });
 
   it("書き出し中は押せず、理由を出す", () => {
     useProjectStore.setState({ exportRun: { ...useProjectStore.getState().exportRun, phase: "rendering" } });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     const btn = screen.getByRole("button", { name: "全場面の声を作成" });
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute("title", expect.stringContaining("書き出し中"));
@@ -103,7 +120,7 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
 
   it("セリフが1つも無いときは「作成済み」と言わず、セリフを入れるよう促す", () => {
     useProjectStore.setState({ scenes: [{ ...scene("scene_001", 1, "none"), narration: { text: "", status: "none" } } as Scene] });
-    render(<BulkVoiceControls />);
+    render(<Scene />);
     const btn = screen.getByRole("button", { name: "全場面の声を作成" });
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute("title", expect.stringContaining("まだセリフがありません"));
@@ -111,7 +128,57 @@ describe("BulkVoiceControls（#547 P2-6）", () => {
   });
 
   it("画面ごとのボタン文言を差し替えられる（公開前チェックは「声を作成」）", () => {
-    render(<BulkVoiceControls label="声を作成" />);
+    render(<Scene label="声を作成" />);
     expect(screen.getByRole("button", { name: "声を作成" })).toBeInTheDocument();
   });
 });
+
+// **押せない理由も形式ごとに言い分ける**（#1019 ⑥・PR #1044 レビュー 🔴）。
+//
+// ⚠️ ボタンの文言だけ分けても、**押せない理由に分岐が漏れる**と #991 ①（タイムライン形式に
+// 無い「場面」を名指しする）がそのまま再発する＝実際に漏れていた。
+describe("押せない理由の呼び名（#1019 ⑥）", () => {
+  it("場面形式は「場面」と言う", () => {
+    useProjectStore.setState({ scenes: [scene("scene_001", 1, "generated")] });
+    render(<Scene />);
+    expect(screen.getByRole("button", { name: "全場面の声を作成" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("すべての場面の声が作成済みです"),
+    );
+  });
+
+  // ⚠️ **画面に出る文で見る**＝関数を直に叩くだけだと、**出どころが渡す呼び名**が
+  //   間違っていても緑になる（変異チェックで生き残った＝レビューが見つけたのはまさに配線）。
+  it("タイムライン形式は「場面」と言わない（画面に出る文で見る）", () => {
+    useTimelineStore.setState({
+      doc: {
+        schemaVersion: TIMELINE_SCHEMA_VERSION,
+        format: PROJECT_FORMAT.timeline,
+        projectId: "proj_20260906_001",
+        projectName: "テスト",
+        createdAt: "2026-09-06T00:00:00.000Z",
+        updatedAt: "2026-09-06T00:00:00.000Z",
+        videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+        assets: [],
+        tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+        // 作成済みだけ＝まとめて作る対象が無い（押せない理由が出る状態）。
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "generated" } }],
+      },
+      isGeneratingVoices: false,
+      voicesCancelled: false,
+      exportRun: { phase: "idle", percent: 0, message: null, cancelling: false },
+    } as never);
+    render(<Timeline />);
+    const title = screen.getByRole("button", { name: /まとめて作る/ }).getAttribute("title") ?? "";
+    expect(title).toContain("読み上げ");
+    expect(title, "タイムライン形式に場面は無い").not.toContain("場面");
+  });
+
+  it("セリフが1つも無いときも、呼び名を言い分ける", () => {
+    const base = { isExporting: false, generating: false, needsVoice: false, hasNarrationText: false };
+    expect(bulkVoiceDisabledReason({ ...base, unitLabel: "場面" })).toContain("場面にセリフ");
+    expect(bulkVoiceDisabledReason({ ...base, unitLabel: "読み上げ" })).not.toContain("場面");
+  });
+});
+

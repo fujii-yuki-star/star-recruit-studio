@@ -26,6 +26,7 @@ import { animationsForElement, vanishedAnimationTargets } from "../../domain/pro
 import type { ElementAnimation } from "../../domain/project/types";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { GroupList } from "../components/GroupList";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { GroupTransformFields } from "../components/GroupTransformFields";
@@ -211,6 +212,8 @@ function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
   const {
     status, scenes, templates, assets, assetSrcById, autoGenerateIfSafe, updateScene, importError, clearImportError,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus, saveBlockedReason,
@@ -3133,7 +3136,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <div className="topbar-actions">
           {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
               以前はここだけ「準備中…」と表示していた。 */}
-          <BulkVoiceControls buttonClassName="btn btn-ghost" />
+          <BulkVoiceControls source={sceneBulkVoice} buttonClassName="btn btn-ghost" />
           {/* ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝以前は取り消すが「編集」の欄の中、
               保存の状態が別の欄の下にあり、**欄を閉じたり配置を変えると見えなくなった**（ADR-0033 で
               配置を動かせるようにしたので、欄の中に置くほど見失いやすい）。

@@ -49,7 +49,7 @@ import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../doma
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { sameSynthInput } from "../../domain/voice/voiceProvider";
 // ⚠️ **声の設定の解決は domain に1つ**（#977）＝戻すときの突き合わせでも同じ解決が要る。
-import { resolveTimelineVoice } from "../../domain/timeline/voice";
+import { resolveTimelineVoice, voiceClipNeedsVoice } from "../../domain/timeline/voice";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
@@ -549,6 +549,31 @@ export interface TimelineState {
   setSelectedVoiceSpeaker: (speaker: number | null) => void;
   /** 選んでいる読み上げの声を作る（VOICEVOX）。作れたら**長さを実際の尺へ合わせる**（#633）。 */
   generateSelectedVoice: () => Promise<void>;
+  /**
+   * 1つの読み上げの声を作る（内部）。**選んだ1件**（`generateSelectedVoice`）と
+   * **まとめて作る**（`generateAllVoices`）が**同じ経路を通る**ための切り出し（#1019 ⑥）。
+   *
+   * ⚠️ **写して2つ持たない**＝この処理は「作っている間に文書や設定が変わったらその声は使わない」
+   * 「失敗しても作成済みの印を消さない」など、**細かい約束を10個以上**持っている。
+   * まとめて作る側に写すと、片方だけ直る（このリポジトリで繰り返している型）。
+   */
+  _generateVoiceFor: (clipId: string) => Promise<void>;
+  /**
+   * **声をまとめて作る**（#1019 ⑥）＝文があってまだ作っていない読み上げを、上から順に作る。
+   *
+   * ⚠️ **場面形式には既にある**（`generateAllNarrations`）のに、タイムライン形式は
+   * **選んだ読み上げ1件ずつ**しか無かった＝同じ動画を作るのに、形式で手間が違う（ADR-0026②）。
+   * ⚠️ **中止できる**（世代番号）＝書き出しと取り込みと同じ流儀。
+   */
+  generateAllVoices: () => Promise<void>;
+  /** まとめて作るのをやめる（`generateAllVoices` を次の1件へ進む前に降ろす）。 */
+  cancelVoiceGeneration: () => void;
+  /** まとめて作っている最中か。 */
+  isGeneratingVoices: boolean;
+  /** 直前のまとめて作るのを中止したか（案内の出し分けに使う）。始めると false へ戻す。 */
+  voicesCancelled: boolean;
+  /** まとめて作るの世代番号（内部）。中止・新規開始で進める。 */
+  _bulkVoiceRun: number;
   /** 選んでいる読み上げに連動する字幕を置く（#633）。 */
   addLinkedSubtitleClip: () => void;
   /** 見た目パターンを素材として置く（#632）。 */
@@ -841,6 +866,8 @@ function emptyState() {
     importProgress: null as { done: number; total: number } | null,
     _importRunSeq: 0,
     generatingVoiceClipId: null as string | null,
+    isGeneratingVoices: false,
+    voicesCancelled: false,
     _historyGroupDepth: 0,
     _historyGroupPending: false,
     _historyGroupGen: 0,
@@ -862,6 +889,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // 見えなくなって**書き出しを始められる**。着地は `commit` に断られ、その直後の保存が
   // **声の入っていない文書**を書く＝作った声が wav だけ残って消える。
   _voiceRun: null,
+  _bulkVoiceRun: 0,
 
   createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
@@ -1445,9 +1473,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   },
 
   generateSelectedVoice: async () => {
-    const { doc, selectedClipIds } = get();
-    if (!doc || selectedClipIds.length !== 1) return;
-    const clipId = selectedClipIds[0];
+    const { selectedClipIds } = get();
+    if (selectedClipIds.length !== 1) return;
+    await get()._generateVoiceFor(selectedClipIds[0]);
+  },
+
+  _generateVoiceFor: async (clipId) => {
+    const doc = get().doc;
+    if (!doc) return;
     const clip = doc.clips.find((c) => c.id === clipId);
     if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return;
     if (clip.voice.text.trim().length === 0) return; // 空の文では鳴らない（V28 が案内済み）
@@ -1542,6 +1575,42 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       }
       clearIfMine();
     }
+  },
+
+  generateAllVoices: async () => {
+    if (get().isGeneratingVoices) return; // 連打・再入で二重に回さない
+    // 書き出し中は始めない（1件ずつのときと同じ理由＝作れても文書へ入れられない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ voiceError: VOICE_EXPORTING_MESSAGE });
+      return;
+    }
+    const doc = get().doc;
+    if (!doc) return;
+    const runSeq = get()._bulkVoiceRun + 1;
+    set({ isGeneratingVoices: true, voicesCancelled: false, _bulkVoiceRun: runSeq });
+    try {
+      // ⚠️ **1件ずつ順に回す**（場面形式は3並列）＝こちらの1件ぶん（`_generateVoiceFor`）は
+      // `_voiceRun` という**1つしかない枠**で二重起動を防いでいるので、並列に投げると
+      // **2件目以降が黙って return する**（作ったつもりで作られていない＝いちばん質の悪い失敗）。
+      // 枠を増やす改修は、あの関数が持つ「作っている間に設定が変わったら使わない」等の
+      // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
+      for (const id of doc.clips.filter(voiceClipNeedsVoice).map((c) => c.id)) {
+        // ⚠️ **中止されたら次の1件へ進まない**＝作った声はそのまま残す（取り消しではない）。
+        if (get()._bulkVoiceRun !== runSeq) break;
+        // ⚠️ **文書が入れ替わったら止める**＝別の動画の読み上げを作りにいかない。
+        if (get().doc?.projectId !== doc.projectId) break;
+        await get()._generateVoiceFor(id);
+      }
+    } finally {
+      // 中止・文書切替で世代が進んでいたら、この実行はもう現行ではない＝後発が立てた状態を消さない。
+      if (get()._bulkVoiceRun === runSeq) set({ isGeneratingVoices: false });
+    }
+  },
+
+  // 中止に書き出し中のガードは置かない（場面形式と同じ理由＝止める側の操作は止められる方が正しい）。
+  cancelVoiceGeneration: () => {
+    if (!get().isGeneratingVoices) return;
+    set((s) => ({ _bulkVoiceRun: s._bulkVoiceRun + 1, isGeneratingVoices: false, voicesCancelled: true }));
   },
 
   addTemplateClip: (input) => {

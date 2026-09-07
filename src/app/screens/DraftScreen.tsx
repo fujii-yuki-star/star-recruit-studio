@@ -12,6 +12,7 @@ import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge } from "../components/states";
@@ -37,6 +38,8 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
   const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setEditingSceneFocus, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo, importError, clearImportError } =
     useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
@@ -190,7 +193,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。進捗・中止・
               「すべて作成済みなら隠す」の条件は共通操作へ集約（3画面で同じ見え方にする＝#547 P2-6・ADR-0026②）。
               専用の行なので行ごと共通操作に任せる＝隠れるときに空の行の余白を残さない。 */}
-          <BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
+          <BulkVoiceControls source={sceneBulkVoice} rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
           {/* 一括作成の完了通知（現在は進捗が消えるだけ＝#413）。全部できたら仕上がり確認へ誘導、一部失敗は次の行動を案内。 */}
           {voiceResult && !isGeneratingNarration &&
             (voiceResult.remaining === 0 ? (
