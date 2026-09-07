@@ -11,7 +11,7 @@
  * 記憶の名前空間（画面ごと）。**値は localStorage のキーになるので気軽に変えない**
  * （変えると利用者の開閉の記憶がその画面ぶんだけ失われる）。
  */
-export const SECTION_SCOPE = { sceneEdit: "sceneEdit", timeline: "timeline" } as const;
+export const SECTION_SCOPE = { sceneEdit: "sceneEdit", timeline: "timeline", settings: "settings" } as const;
 // ⚠️ 配置の `PANEL_SCREEN`（ADR-0033・`domain/layout/panelLayout.ts`）とは**値がずれている**（`sceneEdit` ⇄ `scene`）。
 // 揃えたくなるが、この値は既存の localStorage のキーそのものなので**変えると利用者の記憶がその画面ぶん消える**。
 // 揃えるなら「名前空間 → キー」の写像を挟むこと（値の直接の付け替えはしない）。

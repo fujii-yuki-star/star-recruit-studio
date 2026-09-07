@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { SECTION_SCOPE } from "../components/sectionOpen";
 import { PlayIcon, StopIcon } from "../components/icons";
 import { BrandKitSection } from "../components/BrandKitSection";
 import { TroubleLogSection } from "../components/TroubleLogSection";
@@ -209,23 +211,30 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             </div>
           )}
 
-          <div className="field" style={{ marginTop: "var(--gap-md)" }}>
-            <label className="field-label" htmlFor="aiModel">
-              モデル
-            </label>
-            <input
-              id="aiModel"
-              className="input"
-              value={aiModel}
-              onChange={(e) => onChangeModel(e.target.value)}
-              placeholder={DEFAULT_AI_MODEL}
-            />
-            <p className="field-hint">
-              通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
-            </p>
-          </div>
-
-          <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
+          {/* ⚠️ **普段は触らないものは畳んでおく**（#1032）＝自分で「通常は変更不要です」と
+              書いている欄が**先頭で開きっぱなし**で、読み飛ばしを文章でお願いしていた。
+              ⚠️ **既定と違う値が入っているときは開いて出す**（PR #1072 レビュー ℹ️）＝
+              自分で変えた設定を畳んで出すと見失う（「この場面だけ声の大きさ」・場面の BGM と同じ流儀）。
+              ⚠️ **`key` は付けない**＝ここで値を `key` にすると**1文字打つごとに作り直されて焦点が外れる**。
+              開閉は描画の1回目だけで決める（入力中に畳んだり開いたりしない）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="ai-advanced" defaultOpen={aiModel !== DEFAULT_AI_MODEL}>
+            <div className="field">
+              <label className="field-label" htmlFor="aiModel">
+                モデル
+              </label>
+              <input
+                id="aiModel"
+                className="input"
+                value={aiModel}
+                onChange={(e) => onChangeModel(e.target.value)}
+                placeholder={DEFAULT_AI_MODEL}
+              />
+              <p className="field-hint">
+                通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
+              </p>
+            </div>
+            <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
+          </CollapsibleSection>
 
           <hr className="divider" />
           <p className="field-hint">
@@ -239,24 +248,28 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           {/* ⚠️ 「常に」ではない（ADR-0025・#359 で出し方を選べる）。この画面（About）側の表示は
               必須のまま・変わるのは**動画に焼く側**だけ、という線で書き分ける。 */}
           <p className="page-desc text-pretty">
+            ここで選んだ声は、これから作るものを含めてすべての動画に使われます。
             選んだ声のクレジット（{creditForSpeaker(speaker)}）は「ソフトについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
           </p>
 
-          <div className="field">
-            <label className="field-label" htmlFor="voicevoxUrl">
-              音声ソフトの接続先
-            </label>
-            <input
-              id="voicevoxUrl"
-              className="input"
-              value={voicevoxUrl}
-              onChange={(e) => onChangeUrl(e.target.value)}
-              placeholder="http://localhost:50021"
-            />
-            <p className="field-hint">
-              通常は空のままで大丈夫です（標準の接続先を使います）。場所を変えている場合だけ入力してください。
-            </p>
-          </div>
+          {/* 既定と違う接続先を入れてあるなら開いて出す（上の注記と同じ理由）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="voice-advanced" defaultOpen={voicevoxUrl.trim() !== ""}>
+            <div className="field">
+              <label className="field-label" htmlFor="voicevoxUrl">
+                音声ソフトの接続先
+              </label>
+              <input
+                id="voicevoxUrl"
+                className="input"
+                value={voicevoxUrl}
+                onChange={(e) => onChangeUrl(e.target.value)}
+                placeholder="http://localhost:50021"
+              />
+              <p className="field-hint">
+                通常は空のままで大丈夫です（標準の接続先を使います）。場所を変えている場合だけ入力してください。
+              </p>
+            </div>
+          </CollapsibleSection>
 
           <div className="field">
             <label className="field-label" htmlFor="voiceStyle">
@@ -285,8 +298,21 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             </p>
           </div>
 
+        </div>
+
+        {/* ⚠️ **範囲で分ける**（#1032）＝上のカードは**すべての動画に効く**設定（声・接続先）、
+            こちらは**いま開いている動画だけ**の設定。以前は同じカードに混ざっており、
+            違いは**末尾の一文だけ**で示していた（先に触ってから読むことになる）。
+            ⚠️ **声のまとまりは崩さない**（`06 §15` の並び）＝声 → この動画の読み上げ → 言葉の読み方、の順に置く。 */}
+        <div className="card">
+          <h2 className="section-title">この動画の読み上げ</h2>
+          <p className="page-desc text-pretty">
+            話す速さ・声の高さ・抑揚は、いま開いている動画の読み上げにだけ使われます（保存すると残ります）。上の「ナレーターの声」は、これから作るものを含めてすべての動画に効きます。
+          </p>
+
           {/* 話す速さ/高さ/抑揚は updateVoiceSettings＝書き出し中は固定（#570 P1）。生成パラメタなので今回のMP4は不変だが、
-              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので section 全体でなくここに置く。 */}
+              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので、
+              そちらは上のカードに残してある（このバナーもこのカードの中だけ）。 */}
           <ExportLockBanner onNavigate={onNavigate} />
           <div className="field">
             <label className="field-label" htmlFor="speed">
@@ -358,10 +384,6 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               <span>ゆたか</span>
             </div>
           </div>
-
-          <p className="field-hint">
-            話す速さ・高さ・抑揚はこの動画の読み上げの声に使われます（保存すると残ります）。
-          </p>
 
           <button
             className="btn btn-secondary btn-icon"
