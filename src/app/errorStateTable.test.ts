@@ -129,6 +129,9 @@ function codeMessages(): Record<string, string> {
     TIMELINE_SAVE_FAILED: TIMELINE_SAVE_FAILED_MESSAGE,
     EXPORT_BLOCKED_VOICE_BUSY: VOICE_BUSY_EXPORT_MESSAGE,
     // ⚠️ **名前が入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）＝#1045。
+    // ⚠️ **`ASSEMBLED_AT_RUNTIME` へは移さない**（PR #1049 レビュー ℹ️・意図的）＝画面に出るのは
+    // 「この文（固定）＋出た理由の文」だが、**理由の文はそれぞれ表に行があり等値で守られている**。
+    // ここを外すと**土台の文だけが誰にも見られなくなる**＝守りが減る。組み立てであることは表の由来欄に書いた。
     TIMELINE_BULK_VOICE_NOT_FITTED: bulkVoiceNotFittedMessage([" 〇〇 "]),
   };
 }
