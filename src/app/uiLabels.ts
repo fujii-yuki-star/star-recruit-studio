@@ -497,6 +497,18 @@ export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?
 }
 
 /**
+ * 動画を開けなかった／削除できなかったときの断り（#1026）。
+ *
+ * ⚠️ **`uiLabels` に置く**（PR #1056 レビュー 🟡）＝画面のローカル定数のままだと、表と実装の
+ * **等値の突き合わせ**（`errorStateTable` の `codeMessages`）に載らず、**弱い段**（実装のどこかに
+ * その文字列が在るか）でしか守られない。語をそろえたときに実際にここで取りこぼした。
+ * ⚠️ **原因は書かない**（§2-5）＝どちらも「もう一度」で直りうる想定外の失敗（読めない・版が新しいは
+ * `ProjectLoadError` が理由つきで出す＝そちらが優先される）。
+ */
+export const PROJECT_OPEN_FAILED_MESSAGE = "この動画を開けませんでした。もう一度お試しください。";
+export const PROJECT_DELETE_FAILED_MESSAGE = "この動画を削除できませんでした。もう一度お試しください。";
+
+/**
  * クリップのユーザー向け名称（ADR-0032・#629）。名前が付いていれば優先し、無ければ中身から短く作る。
  * 全値必須＝`TimelineClipKind` が増えたらコンパイルエラーで気づく（無名の部品ができない）。
  */

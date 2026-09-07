@@ -35,7 +35,7 @@ describe('duplicatedProjectName', () => {
   });
 
   it('名前が空でも無名にしない', () => {
-    expect(duplicatedProjectName('   ')).toBe(`無題のプロジェクト${COPY_NAME_SUFFIX}`);
+    expect(duplicatedProjectName('   ')).toBe(`無題の動画${COPY_NAME_SUFFIX}`);
   });
 });
 

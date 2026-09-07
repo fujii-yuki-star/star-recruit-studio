@@ -23,7 +23,7 @@ const PROJECT_NAME_MAX = 80;
  * 既に付いていれば足さない（同じ名前が並ぶが、作った順で見分けられる）。
  */
 export function duplicatedProjectName(name: string): string {
-  const base = name.trim() || '無題のプロジェクト';
+  const base = name.trim() || '無題の動画';
   if (base.endsWith(COPY_NAME_SUFFIX)) return base.slice(0, PROJECT_NAME_MAX);
   const room = PROJECT_NAME_MAX - COPY_NAME_SUFFIX.length;
   return `${base.slice(0, Math.max(0, room))}${COPY_NAME_SUFFIX}`;

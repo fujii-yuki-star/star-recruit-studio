@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
@@ -47,13 +47,7 @@ function formatDate(iso: string): string {
  * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
  * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
  */
-const OPEN_FAILED_MESSAGE = "この動画を開けませんでした。もう一度お試しください。";
-/**
- * 削除できなかったときの断り（#1026）。⚠️ **名前を付けて置く**＝画面へ直に書いた文は
- * **表との突き合わせ（`uiMessageScan`）の外**に落ちるので、片方だけ直しても誰も気づかない
- *（実際に語をそろえたとき、この文だけ検査に掛からなかった）。
- */
-const DELETE_FAILED_MESSAGE = "この動画を削除できませんでした。もう一度お試しください。";
+
 
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
@@ -313,7 +307,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     } catch (e) {
       // 読み込み側が出した**理由**をそのまま見せる（次の行動がそこに書いてある）。
       // それ以外（想定外）は従来の固定文へ倒す＝黙って何も出さない、を作らない。
-      setOpenError(e instanceof ProjectLoadError ? e.message : OPEN_FAILED_MESSAGE);
+      setOpenError(e instanceof ProjectLoadError ? e.message : PROJECT_OPEN_FAILED_MESSAGE);
       setOpeningId(null); // 失敗時のみ解除して再度開けるように。
       // 中身が壊れているときだけ、控えから戻す導線を出す（控えがあれば）。
       if (e instanceof ProjectLoadError && e.failure === "broken") {
@@ -505,7 +499,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
             {deleteError && (
               <div className="notice notice-warn mb" role="alert">
-                <span>{DELETE_FAILED_MESSAGE}</span>
+                <span>{PROJECT_DELETE_FAILED_MESSAGE}</span>
               </div>
             )}
 

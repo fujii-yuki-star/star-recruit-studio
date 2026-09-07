@@ -10,7 +10,7 @@ import type { Part, Scene } from './types';
 function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
   return {
     projectId: 'proj_20260612_001',
-    projectName: '無題のプロジェクト',
+    projectName: '無題の動画',
     purpose: 'new_graduate',
     createdAt: '2026-06-12T00:00:00.000Z',
     updatedAt: '2026-06-12T00:00:00.000Z',
@@ -206,8 +206,22 @@ describe('parseProjectDoc', () => {
   });
   // ⚠️ **アプリより新しいマイナー版は「壊れている」と言わない**（#793）＝`isSupportedSchemaVersion` は
   // **メジャーしか見ない**ので、1.99 のような文書はここまで通る。以前はそのまま `migrateProject` が
-  // 版を**現行へ書き下げ**、新しい語彙があれば ajv が落ちて「プロジェクトの内容が正しくありません。
-  // **別のプロジェクトを選んでください**」＝**嘘**（壊れておらず、別のを選んでも解決しない）。
+  // 版を**現行へ書き下げ**、新しい語彙があれば ajv が落ちて「この動画の内容が正しくありません。
+  // **別の動画を選んでください**」＝**嘘**（壊れておらず、別のを選んでも解決しない）。
+  // ⚠️ **メジャーが違う版は別の関門**（同じ「新しい版」でも文が違う）＝こちらは検査が無く、
+  //    語をそろえたときに**この1文だけ古い語のまま**残せてしまう（#1026）。
+  it('メジャーが違う版も「アプリを更新して」と案内する（語も「動画」でそろえる）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as Error).message).toContain('アプリを更新');
+      expect((e as Error).message, '1つを指すのに「プロジェクト」と呼んでいる').not.toContain('プロジェクト');
+    }
+  });
+
   it('アプリより新しい版は「アプリを更新して」と案内する（壊れているとは言わない）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.99' };
     try {
@@ -217,7 +231,9 @@ describe('parseProjectDoc', () => {
       expect(e).toBeInstanceOf(ProjectLoadError);
       expect((e as Error).message).toContain('アプリを更新');
       expect((e as Error).message).not.toContain('正しくありません');
-      expect((e as Error).message).not.toContain('別のプロジェクト');
+      // ⚠️ **1つを指すときは「動画」**（#1026）＝同じ関数の中で語を混ぜない
+      //   （この行だけ「プロジェクト」のまま残っていた）。
+      expect((e as Error).message, '1つを指すのに「プロジェクト」と呼んでいる').not.toContain('プロジェクト');
     }
   });
 
@@ -613,7 +629,7 @@ describe('parseProjectDoc', () => {
         err = e;
       }
       expect(err).toBeInstanceOf(ProjectLoadError);
-      expect((err as Error).message).toContain('別のプロジェクトを選んでください');
+      expect((err as Error).message).toContain('別の動画を選んでください');
     };
 
     it('場面の型不正（durationSec が文字列）は読込拒否', () => {

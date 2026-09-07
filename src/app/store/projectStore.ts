@@ -801,7 +801,7 @@ function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
     projectId: "",
-    projectName: "無題のプロジェクト",
+    projectName: "無題の動画",
     purpose: "new_graduate",
     createdAt: now,
     updatedAt: now,
