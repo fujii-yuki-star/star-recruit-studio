@@ -212,8 +212,12 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           )}
 
           {/* ⚠️ **普段は触らないものは畳んでおく**（#1032）＝自分で「通常は変更不要です」と
-              書いている欄が**先頭で開きっぱなし**で、読み飛ばしを文章でお願いしていた。 */}
-          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="ai-advanced" defaultOpen={false}>
+              書いている欄が**先頭で開きっぱなし**で、読み飛ばしを文章でお願いしていた。
+              ⚠️ **既定と違う値が入っているときは開いて出す**（PR #1072 レビュー ℹ️）＝
+              自分で変えた設定を畳んで出すと見失う（「この場面だけ声の大きさ」・場面の BGM と同じ流儀）。
+              ⚠️ **`key` は付けない**＝ここで値を `key` にすると**1文字打つごとに作り直されて焦点が外れる**。
+              開閉は描画の1回目だけで決める（入力中に畳んだり開いたりしない）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="ai-advanced" defaultOpen={aiModel !== DEFAULT_AI_MODEL}>
             <div className="field">
               <label className="field-label" htmlFor="aiModel">
                 モデル
@@ -248,7 +252,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             選んだ声のクレジット（{creditForSpeaker(speaker)}）は「ソフトについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
           </p>
 
-          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="voice-advanced" defaultOpen={false}>
+          {/* 既定と違う接続先を入れてあるなら開いて出す（上の注記と同じ理由）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="voice-advanced" defaultOpen={voicevoxUrl.trim() !== ""}>
             <div className="field">
               <label className="field-label" htmlFor="voicevoxUrl">
                 音声ソフトの接続先

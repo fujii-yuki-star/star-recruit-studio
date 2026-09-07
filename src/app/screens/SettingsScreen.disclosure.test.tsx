@@ -53,6 +53,24 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
     expect(fold?.open, "既定で開いている").toBe(false);
   });
 
+  it("既定と違う値を入れてあるときは開いて出す（自分で変えた設定を見失わない）", async () => {
+    // モデルも接続先も**既定ではない**状態で開く。
+    window.localStorage.setItem("app.aiModel", "gemini-2.5-flash-lite");
+    window.localStorage.setItem("app.voicevoxUrl", "http://192.168.0.9:50021");
+    render(<SettingsScreen onNavigate={vi.fn()} />);
+    await screen.findByText("接続の状態");
+    expect(foldOf("モデル")?.open, "既定と違うモデルなのに畳んでいる").toBe(true);
+    expect(foldOf("音声ソフトの接続先")?.open, "既定と違う接続先なのに畳んでいる").toBe(true);
+  });
+
+  it("空白だけの接続先は「入っていない」と数える（畳んだまま）", async () => {
+    // 画面から入れると前後の空白は落ちるが、古い版や手書きの値は残りうる。
+    window.localStorage.setItem("app.voicevoxUrl", "   ");
+    render(<SettingsScreen onNavigate={vi.fn()} />);
+    await screen.findByText("接続の状態");
+    expect(foldOf("音声ソフトの接続先")?.open, "空白だけなのに「入っている」と数えている").toBe(false);
+  });
+
   it("2つの「上級者向け」は別々に覚える（片方を開くともう片方も開く、を作らない）", async () => {
     const first = render(<SettingsScreen onNavigate={vi.fn()} />);
     await screen.findByText("接続の状態");
