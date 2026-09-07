@@ -42,6 +42,7 @@ import type { Template } from '../template/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { normalizeDeg } from '../constants';
+import { textKeyOfLayer } from '../template/layerOps';
 
 /** 焼き出す範囲の種別（ADR-0032 決定17）。文字列直書きを避ける（§2-7）。 */
 export const BAKE_RANGE_KIND = {
@@ -445,7 +446,9 @@ export function bakeLineSubtitles(
   for (const layer of template.layers) {
     if (layer.type !== LAYER_TYPE.subtitle || isHiddenByGroup(layer.id, groups)) continue; // 描かれない層は焼かない
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
-    const style = freeTextStyleFields(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+    // **どの文字を指すか**は1か所で解く（#1058＝字幕層の未指定は `subtitle`）。
+    const layerTextKey = textKeyOfLayer(layer);
+    const style = freeTextStyleFields(layer, layerTextKey ? scene.textStyles?.[layerTextKey] : undefined);
     const maxLines = layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
     // 同時に流れる行は1つの窓を共有する＝窓ごとにまとめて段積みする（描画と同じ積み方）。
     const byWindow = new Map<string, typeof windows[number][]>();
@@ -468,7 +471,7 @@ export function bakeLineSubtitles(
         const shift = rotationShift(cg.rotation ?? 0, (bands[k].y + cg.h / 2) - (bands[k].top + boxH / 2));
         out.push({
           lineId: x.w.line.lineId,
-          textKey: layer.textKey ?? TEXT_KEY.subtitle, // 既定束縛は描画（`layoutScene`）と同じ
+          textKey: layerTextKey ?? TEXT_KEY.subtitle, // 既定束縛は描画（`layoutScene`）と同じ＝解き方は1か所（#1058）
           startSec: x.w.startSec,
           durationSec: x.w.durationSec,
           spatial: {
@@ -490,7 +493,7 @@ export function bakeLineSubtitles(
             ...style,
             // フォントは**テンプレクリップと同じ解決**（種別ごと→場面）。渡さないと同じ場面で本文と字幕の
             // 字体が割れる（1フレームに複数クリップが混ざる本形式では、クリップが受け皿・§7.6.4）。
-            ...(fontIdFor(scene, layer.textKey) != null ? { fontId: fontIdFor(scene, layer.textKey) } : {}),
+            ...(fontIdFor(scene, layerTextKey ?? undefined) != null ? { fontId: fontIdFor(scene, layerTextKey ?? undefined) } : {}),
           },
         });
       });
@@ -528,7 +531,8 @@ export function subtitleTextKeysNotDrawn(
   const groups = template.groups ?? [];
   return template.layers
     .filter((l) => l.type === LAYER_TYPE.subtitle && !isHiddenByGroup(l.id, groups))
-    .map((l) => l.textKey ?? TEXT_KEY.subtitle);
+    // 未指定の解き方は `textKeyOfLayer` に1か所（#1058）＝ここへ写すと2つ目の既定になる。
+    .map((l) => textKeyOfLayer(l) ?? TEXT_KEY.subtitle);
 }
 
 /** 字幕クリップに載せるフォント（種別ごと→場面。動画全体は受け側が持つ）。 */

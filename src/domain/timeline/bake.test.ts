@@ -839,6 +839,20 @@ describe('bakeTimelineProject: 掛け合い字幕の体裁（#633・#264）', ()
   const subtitleClip = (p: ReturnType<typeof styled>) =>
     bakeTimelineProject(p, opts()).doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
 
+  // ⚠️ **`textKey` を書いていない字幕層でも、場面別の上書きが乗る**（#1058・PR #1060 レビュー 🟡）＝
+  //    もとは `layer.textKey` を直に見ており、未指定だと**上書きを見ずにテンプレ既定で焼いて**いた
+  //    （描く側は `textKeyOfLayer` で `subtitle` と解いていたので、**焼く前と後で体裁が変わった**）。
+  it('textKey を書いていない字幕層でも、場面別の体裁を焼き込む', () => {
+    const noKey: Template = {
+      ...NORMAL_TEMPLATE,
+      layers: NORMAL_TEMPLATE.layers.map((l) => (l.id === 'subtitle' ? { ...l, textKey: undefined } : l)),
+    } as Template;
+    const p = styled({ subtitle: { color: '#ff0000' } });
+    const { doc } = bakeTimelineProject(p, opts({ templateOf: (id) => (id === NORMAL_TEMPLATE.templateId ? noKey : templateOf(id)) }));
+    const clip = doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+    expect(clip.color, '場面別の体裁を見ていない（描く側とずれる）').toBe('#ff0000');
+  });
+
   it('影・字間を運ぶ（テンプレ層の値）', () => {
     const p = project({
       scenes: [

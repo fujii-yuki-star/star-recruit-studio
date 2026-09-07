@@ -82,6 +82,7 @@ import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
+import { textKeyOfLayer } from "../../domain/template/layerOps";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
@@ -979,7 +980,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
    */
   const renderTextStyleControls = (key: TextKey) => {
-    const layer = template?.layers.find((l) => (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) && l.textKey === key);
+    // 字幕層の未指定は `subtitle`（#1058）＝直に見ると、欄はあるのに層が引けない。
+    const layer = template?.layers.find((l) => (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) && textKeyOfLayer(l) === key);
     if (!layer) return null;
     const ov = selected.textStyles?.[key];
     // 2つを使い分ける（#555 レビュー）：

@@ -163,6 +163,9 @@ export function usedTextKeys(layers: Layer[]): TextKey[] {
  * ⚠️ **字幕層は未指定なら `subtitle`**（`layoutScene` の既定束縛と同じ）＝この既定を呼び出し側で
  * 書き直すと、**欄はあるのに「無い」と判断される**（#818 レビュー 🟡＝ドリルインが字幕の層で
  * 空振りし、「文字の層にも入れる」が崩れていた）。
+ * ⚠️ **「ここだけ」を走査で守る**（#1058）＝この JSDoc は前から「既定の解き方はここだけ」と書いていたのに、
+ * 描画・数える側・見本・焼き出しが**直に見ていた**（3回同じ食い違いを踏んだ）。
+ * `textKeyScan.test.ts` が `<何か>.textKey` の**直読み**を止める（外すときは理由つき）。
  */
 export function textKeyOfLayer(layer: Layer): TextKey | null {
   if (layer.type === LAYER_TYPE.text) return layer.textKey ?? null;

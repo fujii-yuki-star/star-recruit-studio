@@ -11,6 +11,7 @@ import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
 import type { Template } from '../template/types';
+import { textKeyOfLayer } from '../template/layerOps';
 
 /** 字幕解決の正準状態（プレビュー＝書き出しで共有・ADR-0029）。segment は sceneSegmentSpecs 由来の「その瞬間のセグメント」。 */
 export interface SubtitleMoment {
@@ -193,7 +194,8 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
   );
   if (visibleSubtitleLayers.length > 0) {
     if (hasLines) out.push(...lineSubs(scene));
-    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, l.textKey));
+    // 字幕層の未指定は `subtitle`（#1058＝解き方は `textKeyOfLayer` に1か所）。
+    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, textKeyOfLayer(l) ?? undefined));
   }
   // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
   //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝除外。
