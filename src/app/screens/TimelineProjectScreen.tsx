@@ -43,7 +43,7 @@ import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
-import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -123,7 +123,7 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
-import { DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -1054,6 +1054,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 連動先が見つからない字幕（V29）。自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに
   // 気づけない＝知らせる（§2-5）。
   const danglingLinkCount = useMemo(() => (doc ? danglingSubtitleLinks(doc).length : 0), [doc]);
+  /**
+   * **同じ時刻に重なって出る字幕**（#1014）。⚠️ **位置は直さない**＝手で置いた場所を黙って動かさない
+   *（§2-5）。実際に**描かれる矩形**で見る（箱ではない）＝`renderer` の1か所と共有。
+   */
+  const subtitleOverlapCount = useMemo(
+    () => (doc ? overlappingSubtitleClips(doc, { templateOf }).length : 0),
+    [doc, templateOf],
+  );
   // 連動先の候補（この動画にある読み上げの部品）。
   const voiceClips = useMemo(() => (doc ? doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice) : []), [doc]);
   // 素材が入っていない差し込み口は、灰色の「（未設定）」の枠がそのまま動画に焼き込まれる（`sceneSvg`）。
@@ -4997,6 +5005,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <p className="notice notice-warn" role="alert">
           連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
         </p>
+      )}
+      {subtitleOverlapCount > 0 && (
+        <p className="notice notice-warn" role="alert">{subtitleOverlapMessage(subtitleOverlapCount)}</p>
       )}
       {/* ⚠️ **選び直す道をその場に出す**（#1019 ⑤）＝前は「取り込み直すか置き直してください」だけで、
           どちらも**新しい番号になる**＝**切り抜き・動き・連動する字幕まで作り直し**だった。
