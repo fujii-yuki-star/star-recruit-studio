@@ -202,6 +202,39 @@ describe('exportTimelineVideo', () => {
     );
   });
 
+  // ⚠️ **音が読めないまま書き出さない**（#1064）＝混ぜる側が黙って読み飛ばすので、
+  //    そのまま焼くと**その部分だけ無音になった動画**が「成功」として出る（絵は前から断っている）。
+  it('読めない音があれば、保存先を聞く前に断る', async () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.mp3' }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001' },
+      ],
+    } as Partial<TimelineProject>);
+    // ⚠️ **音だけ読めない**ようにする（絵まで読めなくすると、別の断り〔絵が読めない〕で止まる）。
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockImplementation(async (_p: string, rel: string) => (rel.endsWith('.mp3') ? null : 'data:image/png;base64,X'));
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '読めないのに保存先を聞いた').not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message, '黙って無音の動画を出そうとした').toContain('無音');
+  });
+
+  // ⚠️ **まだ作っていない読み上げは止めない**＝音源そのものを持たない（元から鳴らない）ので、
+  //    直し方は「もう一度作る」＝画面の知らせが担う。
+  it('まだ作っていない読み上げがあっても書き出せる', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
+          voice: { text: 'まだ作っていない', status: 'none' } },
+      ],
+    } as Partial<TimelineProject>);
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '作っていない読み上げで止めた').toHaveBeenCalled();
+  });
+
   it('保存先を選ばなければ何もしない（勝手に書き出さない）', async () => {
     vi.mocked(dialogMod.showSaveVideoDialog).mockResolvedValue(null);
     await open(doc());

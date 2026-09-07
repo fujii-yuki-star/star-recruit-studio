@@ -2015,6 +2015,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
         return;
       }
+      // ⚠️ **音源をそろえてから見る**（#1061）＝置いた直後の音は、鳴らす側の画面が描かれていないと
+      //   **まだ読まれていない**。書き出しが**自分で確かめる**＝描画の巡り合わせで
+      //   「聞こえるのに書き出しには入らない」を作らない（もう用意してあるものは読み直さない）。
+      await get().ensureAudioSrcs();
+      // ⚠️ **音も絵と同じように断る**（#1064）＝読めない音源は混ぜる側が**黙って読み飛ばす**ので、
+      //   そのまま焼くと**その部分だけ無音になった動画**が「成功」として出る（ADR-0026④）。
+      //   ⚠️ **まだ作っていない読み上げは対象外**＝音源そのものを持たないので `audioSourcesOf` に
+      //   出てこない（直し方は「もう一度作る」＝画面の知らせが担う）。
+      //   ⚠️ **保存先を聞く前**にやる（絵の判定と同じ順＝聞いてから断らない）。
+      if (audioSourcesOf(doc).some((src) => !get().audioSrcByKey[audioSourceKey(src)])) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.audioUnreadable] } });
+        return;
+      }
       // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
       const outputPath = await showSaveVideoDialog(doc.projectName || "movie");
       if (!outputPath) {
@@ -2025,13 +2038,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       // 再生したまま書き出すと、鳴っている音と作業が重なる。止めてから始める（ADR-0032 追補と同じ流儀）。
       get().pause();
-      // ⚠️ **取っておく前に、音源をそろえる**（#1061）＝置いた直後の音は、鳴らす側の画面が
-      //   描かれていないと**まだ読まれていない**。書き出しが**自分で確かめる**＝描画の巡り合わせで
-      //   「聞こえるのに書き出しには入らない」を作らない（もう用意してあるものは読み直さない）。
-      await get().ensureAudioSrcs();
       // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
       // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
       const { audioSrcByKey, assetSizes } = get();
+
       set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
       await beginExport();
       unlisten = await listenExportProgress((ev) => {
