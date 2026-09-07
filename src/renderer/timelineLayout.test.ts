@@ -7,7 +7,7 @@ import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
-import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, templatePartAt } from './timelineLayout';
+import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, overlappingSubtitleClips, templatePartAt } from './timelineLayout';
 
 const NORMAL_TEMPLATE: Template = {
   schemaVersion: '1.0',
@@ -460,5 +460,103 @@ describe('文字クリップの体裁が運ばれる（#264・#879）', () => {
     const svg = layoutToSvg(layoutTimelineAt(d, 1, opts));
     expect(svg).toContain('letter-spacing="4"');
     expect(svg).toContain('flood-color="#123456"');
+  });
+});
+
+// 同じ時刻の字幕が重なっていることを知らせる（#1014）。
+// ⚠️ **位置は動かさない**＝手で置いた場所を奪わないので、**知らせる**のが筋（§2-5）。
+describe('overlappingSubtitleClips（#1014）', () => {
+  const sub = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({
+      id, kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 5,
+      x: 200, y: 900, w: 1520, h: 90, fontSize: 48, text: 'あいうえお',
+      ...over,
+    }) as TimelineClip;
+
+  it('同じ時刻・同じ場所の字幕を挙げる', () => {
+    const d = doc({ clips: [sub('clip_001'), sub('clip_002', { trackId: 'track_002' })] });
+    const hits = overlappingSubtitleClips(d, opts);
+    expect(hits.map((h) => [h.aId, h.bId])).toEqual([['clip_001', 'clip_002']]);
+  });
+
+  // ⚠️ **字幕はテンプレの層からも描かれる**（PR #1052 レビュー 🔴）＝種別だけで絞ると、
+  //    **テンプレの字幕が後から始まる**組み合わせで重なった瞬間を一度も見ない。
+  const SUB_TEMPLATE: Template = {
+    ...NORMAL_TEMPLATE,
+    templateId: 'tmpl_sub',
+    layers: [
+      { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#112233' },
+      { id: 'subtitle', type: 'subtitle', textKey: 'subtitle', x: 200, y: 900, w: 1520, h: 90, fontSize: 48 },
+    ],
+  };
+  const withSub = { templateOf: (id: string) => (id === 'tmpl_sub' ? SUB_TEMPLATE : templateOf(id)) };
+  const tmplSub = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({
+      id, kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 5,
+      templateId: 'tmpl_sub', texts: { subtitle: 'あいうえお' },
+      ...over,
+    }) as TimelineClip;
+
+  it('テンプレの字幕層どうしの重なりも挙げる', () => {
+    const d = doc({ clips: [tmplSub('clip_001'), tmplSub('clip_002', { trackId: 'track_002' })] });
+    expect(overlappingSubtitleClips(d, withSub).map((h) => [h.aId, h.bId])).toEqual([['clip_001', 'clip_002']]);
+  });
+
+  // ⚠️ **後から始まるのがテンプレ側**＝見る時刻に**テンプレの開始秒**が入っていないと見落とす。
+  it('自由配置の字幕の途中から、テンプレの字幕が重なってくる場合も挙げる', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { startSec: 0, durationSec: 10 }),
+        tmplSub('clip_002', { trackId: 'track_002', startSec: 4, durationSec: 5 }),
+      ],
+    });
+    expect(overlappingSubtitleClips(d, withSub).length, 'テンプレの開始秒を見ていない').toBe(1);
+  });
+
+  it('時間が重ならなければ挙げない', () => {
+    const d = doc({ clips: [sub('clip_001'), sub('clip_002', { trackId: 'track_002', startSec: 5 })] });
+    expect(overlappingSubtitleClips(d, opts)).toEqual([]);
+  });
+
+  // ⚠️ **横も見る**＝左右に分けて置いた字幕は視覚的に重なっていない。
+  it('左右に分けて置いた字幕は挙げない', () => {
+    const d = doc({
+      clips: [sub('clip_001', { x: 0, w: 900 }), sub('clip_002', { trackId: 'track_002', x: 1000, w: 900 })],
+    });
+    expect(overlappingSubtitleClips(d, opts)).toEqual([]);
+  });
+
+  // ⚠️ **箱ではなく「描かれるもの」で見る**＝帯は上へ伸び、高さは折返し行数＋余白で決まるので、
+  //    箱が離れていても描画は重なる。
+  it('箱は離れていても、描かれる帯が重なれば挙げる', () => {
+    // 箱＝[950,1010] と [880,940]（**接してもいない**）。描かれる帯は 1行ぶんの行間＋余白まで伸びるので
+    // [950,1046] と [880,976] になり、**重なる**。箱で見ていると、この重なりを見落とす。
+    const d = doc({
+      clips: [
+        sub('clip_001', { y: 950, h: 60 }),
+        sub('clip_002', { trackId: 'track_002', y: 880, h: 60 }),
+      ],
+    });
+    expect(overlappingSubtitleClips(d, opts).length, '描かれる高さで見ていない').toBe(1);
+  });
+
+  // ⚠️ **出ていないものを「重なっている」と言わない**＝隠したクリップは描かれない。
+  it('隠した字幕は挙げない', () => {
+    const d = doc({ clips: [sub('clip_001'), sub('clip_002', { trackId: 'track_002', hidden: true })] });
+    expect(overlappingSubtitleClips(d, opts)).toEqual([]);
+  });
+
+  // ⚠️ **見る時刻が複数あっても、同じ組は一度だけ**＝3つ重なると t=1 と t=2 の両方で
+  //    （1つ目・2つ目）の組が見えるので、畳まないと同じ組を何度も挙げる。
+  it('同じ組は一度だけ挙げる（重なる時刻が複数あっても）', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { durationSec: 10 }),
+        sub('clip_002', { trackId: 'track_002', startSec: 1, durationSec: 8 }),
+        sub('clip_003', { trackId: 'track_002', startSec: 2, durationSec: 6 }),
+      ],
+    });
+    // 3つの組み合わせ＝3組（同じ組を重ねて数えない）。
+    expect(overlappingSubtitleClips(d, opts).length).toBe(3);
   });
 });

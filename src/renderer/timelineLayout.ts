@@ -9,7 +9,7 @@ import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
-import { CROP_MODE, FIT, FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
@@ -21,6 +21,8 @@ import { TEMPLATE_SCHEMA_VERSION } from '../domain/template/types';
 import type { Template } from '../domain/template/types';
 import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
+import { rotatedBounds } from '../domain/preview/safeArea';
+import { drawnTextRect } from '../domain/text/subtitleBands';
 import { applyInterpolatedTransform, layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
@@ -526,4 +528,84 @@ function pivotShift(fill: FillPlacement, box: Box): { dx: number; dy: number } {
   const dx = fill.x + fill.w / 2 - box.w / 2;
   const dy = fill.y + fill.h / 2 - box.h / 2;
   return { dx: dx * cos - dy * sin - dx, dy: dx * sin + dy * cos - dy };
+}
+
+/**
+ * 同じ時刻に出ている字幕どうしで、**描かれる矩形が重なっている**もの（#1014）。
+ *
+ * ⚠️ **位置は計算し直さない**（`stackedSubtitleY` の JSDoc と同じ理由）＝あとから直すと
+ * 利用者が**手で置いた場所を黙って動かす**（§2-5）。場面形式（`stackedSubtitleBands`）が重ならないのは
+ * 帯の位置を**保存せず描くたびに出している**からで、こちらは y が**利用者の編集できるデータ**。
+ * だから**知らせる**（場面形式の `subtitleOverflowsCanvas`／#563 と同じ流儀）。
+ *
+ * ⚠️ **箱ではなく「描かれるもの」で見る**＝高さは実際の折返し行数＋帯の余白で決まるので、
+ * 箱を1行ぎりぎりまで詰めた字幕では**箱が重なっていなくても描画は重なる**（`drawnTextRect`）。
+ * ⚠️ **横も見る**＝左右に分けて置いた字幕は視覚的に重なっていない。
+ * ⚠️ **回した後の外枠で見る**（`rotatedBounds`）＝はみ出しの検査と**同じ式**を通す。
+ * ⚠️ **実際に描かれるものだけ**＝隠した列・隠したクリップ・見た目の引けないクリップは
+ * `layoutTimelineAt` が落とすので、ここでは数えない（出ていないものを「重なっている」と言わない）。
+ */
+export function overlappingSubtitleClips(
+  doc: TimelineProject,
+  opts: TimelineLayoutOptions,
+): { aId: string; bId: string; atSec: number }[] {
+  // ⚠️ **字幕を描きうる部品は2種類**（PR #1052 レビュー 🔴）＝自由配置の字幕クリップと、
+  //   **字幕の層を持つ見た目パターンのクリップ**（焼き出しで焼き込まれた字幕はこちら）。
+  //   種別だけで絞ると、**テンプレの字幕が後から始まる**組み合わせで重なった瞬間を一度も見ない。
+  const subs = doc.clips.filter((c) => drawsSubtitle(c, opts.templateOf));
+  if (subs.length < 2) return [];
+  // 見る時刻＝**どれかの字幕が出はじめる瞬間**。2つの字幕の時間が重なっているなら、
+  // **遅いほうの開始秒**では必ず両方が出ている（半開区間）＝**位置が時間で変わらないなら**尽きる。
+  // ⚠️ **動く字幕どうしの、途中で交差する重なりは見ない**（同レビュー 🟡）＝キーフレームで
+  //   位置が変わる字幕は、区間の**途中**で初めて重なることがある（別で追う）。
+  // ⚠️ **組ごとに時刻を作らない**＝字幕が増えると二乗で描き直すことになる（ここは字幕の数まで）。
+  const times = new Set(subs.map((c) => c.startSec));
+  const out: { aId: string; bId: string; atSec: number }[] = [];
+  const seen = new Set<string>();
+  for (const atSec of [...times].sort((x, y) => x - y)) {
+    const drawn = layoutTimelineAt(doc, atSec, opts).items.filter(
+      (it): it is Extract<LayoutItem, { kind: 'text' }> => it.kind === 'text' && it.isSubtitle === true,
+    );
+    for (let i = 0; i < drawn.length; i += 1) {
+      for (let j = i + 1; j < drawn.length; j += 1) {
+        const [a, b] = [drawn[i], drawn[j]];
+        // ⚠️ **アイテムの id は「部品の id ＋ 中身の id」**（`${clip.id}/${…}`）＝そのまま出すと
+        //   画面が部品を引けない。**前半だけ**を取る（部品の id に `/` は入らない＝`clip_NNN`）。
+        const [aId, bId] = [clipIdOfItem(a.id), clipIdOfItem(b.id)];
+        if (aId === bId) continue; // 同じ部品の中（帯の背景など）は重なりではない
+        const key = [aId, bId].sort().join("\u0000");
+        if (seen.has(key)) continue;
+        if (!rectsOverlap(rotatedBounds(drawnTextRect({ ...a, isSubtitle: true })), rotatedBounds(drawnTextRect({ ...b, isSubtitle: true })))) continue;
+        seen.add(key);
+        out.push({ aId, bId, atSec });
+      }
+    }
+  }
+  return out;
+}
+
+/** 矩形どうしが重なっているか（半開＝辺が接しているだけなら重なっていない・`boxesOverlapY` と同じ流儀）。 */
+function rectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/** 描いたアイテムの id（`${clip.id}/${中身の id}`）から、部品の id を取る。 */
+function clipIdOfItem(itemId: string): string {
+  return itemId.split('/')[0];
+}
+
+/**
+ * その部品は字幕を描きうるか（自由配置の字幕／**字幕の層を持つ**見た目パターン）。
+ *
+ * ⚠️ **字幕の層を持たない見た目を外すのは「速さのため」**＝入れても結果は変わらない
+ *（その時刻を見ても字幕のアイテムが増えないので、挙がる組は同じ）。**見落としを防ぐのは前半**
+ * （字幕の層を持つテンプレを**入れる**こと）で、そちらは検査で固定してある。
+ */
+function drawsSubtitle(clip: TimelineClip, templateOf: (templateId: string) => Template | undefined): boolean {
+  if (clip.kind === TIMELINE_CLIP_KIND.subtitle) return true;
+  if (clip.kind !== TIMELINE_CLIP_KIND.template || clip.templateId == null) return false;
+  return templateOf(clip.templateId)?.layers.some((l) => l.type === LAYER_TYPE.subtitle) === true;
 }
