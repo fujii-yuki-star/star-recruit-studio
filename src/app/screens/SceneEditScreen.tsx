@@ -2185,12 +2185,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
 
             <div className="field">
-              <label className="field-label">フォント（動画全体）</label>
-              <FontPicker value={fontId} onChange={(id) => id && setFontId(id)} />
-              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
-            </div>
-
-            <div className="field">
               <label className="field-label">この場面のフォント</label>
               {/* 継承へ戻すときは**キーごと落とす**（差分再監査 10巡目 ℹ️）＝自由配置の要素・タイムラインの
                   部品と同じ流儀（`null` と未指定は解決が同じ＝11.6。2通りの文書を作らない）。 */}
@@ -2208,9 +2202,35 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
             </div>
 
+            {/* ⚠️ **この欄だけ場面の話ではない**（#1032）＝この節は「この場面」の欄が並ぶ中で、
+                ここだけ**全場面に効く**。印を付けて、この場面の欄の**後ろ**へ置く。 */}
             <div className="field">
-              <label className="field-label">この場面のBGM</label>
+              <label className="field-label">
+                フォント <span className="badge badge-gray">動画全体</span>
+              </label>
+              <FontPicker value={fontId} onChange={(id) => id && setFontId(id)} />
+              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
+            </div>
+            </CollapsibleSection>
+
+            {/* ⚠️ **節の見出しと中身を合わせる**（#1032）＝BGM は見た目でもフォントでもないのに
+                「見た目・フォント」の中に入っており、見出しからは探せなかった。
+                ⚠️ **入っているときは開いて出す**（「この場面だけ声の大きさ」と同じ流儀）＝
+                この場面だけ別の曲にしてあるのに畳んで出すと、入れた設定を見失う。
+                `key` を場面 id にするのは、この画面が場面切替で**再マウントしない**ため。 */}
+            <CollapsibleSection
+              scope={SECTION_SCOPE.sceneEdit}
+              key={`bgm-${selected.sceneId}`}
+              title="この場面のBGM"
+              storageKey="scene-bgm"
+              defaultOpen={selected.bgmSettings !== undefined}
+            >
+            <div className="field">
+              {/* ⚠️ **見出しと欄を結ぶ**（#1032）＝`htmlFor` が無く、読み上げでは何の欄か分からなかった
+                  （見た目には見出しが出ているので、目で見ている限り気づけない）。 */}
+              <label className="field-label" htmlFor="scene-bgm">鳴らす曲</label>
               <select
+                id="scene-bgm"
                 className="select"
                 value={
                   selected.bgmSettings === undefined
