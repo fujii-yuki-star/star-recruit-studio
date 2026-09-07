@@ -541,6 +541,52 @@ describe('overlappingSubtitleClips（#1014）', () => {
   });
 
   // ⚠️ **出ていないものを「重なっている」と言わない**＝隠したクリップは描かれない。
+  // ⚠️ **動いた先で重なる**（#1053）＝出はじめでは離れていても、キーフレームで動かした先で重なる。
+  //    よくある使い方（別の場所へ動かして着地する）なので、**動きの節目**も見る。
+  it('動いた先で重なる字幕を挙げる（出はじめでは離れている）', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { y: 900, durationSec: 10 }),
+        sub('clip_002', { trackId: 'track_002', y: 100, durationSec: 10 }), // 出はじめは上の方
+      ],
+      // 2秒かけて下（900）へ動く＝着地したところで重なる。
+      animations: [{ id: 'anim_001', targetId: 'clip_002', keyframes: [
+        { timeSec: 0, y: 0 }, { timeSec: 2, y: 800 },
+      ] }],
+    } as Partial<TimelineProject>);
+    expect(overlappingSubtitleClips(d, opts).length, '動きの節目を見ていない').toBe(1);
+  });
+
+  // ⚠️ **まとまりに付いた動きも見る**＝字幕はまとまりの一員として動くこともある。
+  //    起点は**所属するクリップのいちばん早い開始秒**（描く側と同じ）。
+  it('まとまりの動きで重なる字幕も挙げる', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { y: 900, durationSec: 10 }),
+        sub('clip_002', { trackId: 'track_002', y: 100, durationSec: 10 }),
+      ],
+      groups: [{ id: 'group_001', members: ['clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [
+        { timeSec: 0, y: 0 }, { timeSec: 2, y: 800 },
+      ] }],
+    } as Partial<TimelineProject>);
+    expect(overlappingSubtitleClips(d, opts).length, 'まとまりの動きを見ていない').toBe(1);
+  });
+
+  // ⚠️ **動いて離れる場合は挙げない**＝節目で見て重なっていなければ、そのままにする。
+  it('動いて離れる字幕は挙げない', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { y: 900, durationSec: 10 }),
+        sub('clip_002', { trackId: 'track_002', y: 900, startSec: 5, durationSec: 5 }),
+      ],
+      animations: [{ id: 'anim_001', targetId: 'clip_002', keyframes: [
+        { timeSec: 0, y: -800 }, { timeSec: 1, y: -800 },
+      ] }],
+    } as Partial<TimelineProject>);
+    expect(overlappingSubtitleClips(d, opts).length, '離れているのに挙げた').toBe(0);
+  });
+
   it('隠した字幕は挙げない', () => {
     const d = doc({ clips: [sub('clip_001'), sub('clip_002', { trackId: 'track_002', hidden: true })] });
     expect(overlappingSubtitleClips(d, opts)).toEqual([]);
