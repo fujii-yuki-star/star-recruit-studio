@@ -15,7 +15,6 @@ import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
-import type { AudioSource } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { keepRestorePoints } from "./restorePointKeeper";
 import { createProjectId } from "../../domain/project/persistence";
@@ -1030,7 +1029,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       for (const e of videoEntries) if (e) videoSrcById[e[0]] = e[1];
       // 音源も**先に**用意する（鳴らす瞬間に読みに行くと頭が欠ける）。読めないものは黙って飛ばし、
       // その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
-      const audioEntries = await Promise.all(audioSourcesOf(doc).map((src) => loadAudioSrc(doc, src)));
+      const audioEntries = await Promise.all(
+        audioSourcesOf(doc).map(async (src): Promise<[string, string] | null> => {
+          const url = src.voicePath
+            ? await readVoiceDataUrl(doc.projectId, src.voicePath)
+            : src.bundledBgmId
+              ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
+              : src.assetId
+                ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
+                : null;
+          return url ? [audioSourceKey(src), url] : null;
+        }),
+      );
       const audioSrcByKey: Record<string, string> = {};
       for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
       set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
@@ -1438,20 +1448,6 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         const after = get().doc;
         if (bodyUrl && after && after.projectId === doc.projectId) {
           set({ videoSrcById: { ...get().videoSrcById, [assetId]: `${bodyUrl}?t=${Date.now()}` } });
-        }
-      }
-      // ⚠️ **鳴らす側も読み直す**（#1050）＝音源の鍵は**素材の番号**なので、選び直しても鍵は変わらない
-      //   ＝読み直さないと**前の音が鳴り続ける**（絵の側で `?t=` を付けているのと同じ話）。
-      //   経路は開いたときと**同じ関数**（`loadAudioSrc`）＝入口ごとに読み方を作らない。
-      const nowDoc = get().doc;
-      if (nowDoc && nowDoc.projectId === doc.projectId) {
-        const uses = audioSourcesOf(nowDoc).filter((src) => src.assetId === assetId);
-        const loaded = await Promise.all(uses.map((src) => loadAudioSrc(nowDoc, src)));
-        const after2 = get().doc;
-        if (after2 && after2.projectId === doc.projectId && loaded.some(Boolean)) {
-          const next = { ...get().audioSrcByKey };
-          for (const e of loaded) if (e) next[e[0]] = e[1];
-          set({ audioSrcByKey: next });
         }
       }
       void get().saveTimelineProject();
@@ -2162,24 +2158,6 @@ function withoutAnalysisOf<T>(byKey: Record<string, T>, relPaths: readonly strin
   const out = { ...byKey };
   for (const k of keys) delete out[k];
   return out;
-}
-
-/**
- * 音源を**1件だけ**読む（#1050）。開いたときも、素材を選び直した後も**同じ道**を通す。
- *
- * ⚠️ **鍵は素材の番号**（`asset:asset_001`＝`audioSourceKey`）＝**ファイル名では無い**ので、
- * 選び直しても鍵は変わらない＝**読み直さないと前の音が鳴り続ける**（絵の側の `?t=` と同じ話）。
- * 読めないものは `null`＝その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
- */
-async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[string, string] | null> {
-  const url = src.voicePath
-    ? await readVoiceDataUrl(doc.projectId, src.voicePath)
-    : src.bundledBgmId
-      ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
-      : src.assetId
-        ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
-        : null;
-  return url ? [audioSourceKey(src), url] : null;
 }
 
 type SetState = (partial: Partial<TimelineState>) => void;
