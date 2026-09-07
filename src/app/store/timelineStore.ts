@@ -2025,6 +2025,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       // 再生したまま書き出すと、鳴っている音と作業が重なる。止めてから始める（ADR-0032 追補と同じ流儀）。
       get().pause();
+      // ⚠️ **取っておく前に、音源をそろえる**（#1061）＝置いた直後の音は、鳴らす側の画面が
+      //   描かれていないと**まだ読まれていない**。書き出しが**自分で確かめる**＝描画の巡り合わせで
+      //   「聞こえるのに書き出しには入らない」を作らない（もう用意してあるものは読み直さない）。
+      await get().ensureAudioSrcs();
       // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
       // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
       const { audioSrcByKey, assetSizes } = get();
