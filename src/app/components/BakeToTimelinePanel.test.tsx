@@ -211,7 +211,7 @@ describe("BakeToTimelinePanel: 進み具合と中止（#1021）", () => {
     bakeToTimeline.mockImplementation(
       () => new Promise((resolve) => { release = () => resolve({ projectId: "proj_20260728_001", notes: [] }); }),
     );
-    useProjectStore.setState({ cancelBake, bakeRun: { step: 2, total: 5 } });
+    useProjectStore.setState({ cancelBake, bakeRun: { step: 2, total: 5, copyId: 'bake_x' } });
     render(<BakeToTimelinePanel />);
     fireEvent.click(screen.getByText("作る内容を確かめる"));
     await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());

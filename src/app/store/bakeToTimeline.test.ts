@@ -79,6 +79,32 @@ describe('bakeToTimeline / estimateBake', () => {
     expect(saved.filter((id) => id !== 'proj_20260701_001'), '中止したのに焼いた先を保存した').toEqual([]);
   });
 
+  // ⚠️ **運ぶものが無いときは進み具合を立てない**（PR #1054 レビュー ℹ️）＝
+  //    一瞬だけ「中止する」が見える窓を作らない（押しても何も起きない）。
+  it('運ぶファイルが無いときは進み具合を立てない', async () => {
+    vi.spyOn(bakeFsMod, 'listenCopyProgress').mockResolvedValue(() => {});
+    let seen: unknown = 'not-called';
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async (_s, _d, paths) => {
+      seen = paths.length === 0 ? useProjectStore.getState().bakeRun : 'had-paths';
+      return { copied: 0, cancelled: false };
+    });
+    // 素材も声も持たない動画にする（運ぶものが無い）。
+    useProjectStore.setState({ assets: [] });
+    await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(seen, '運ぶものが無いのに進み具合を立てた').toBeNull();
+  });
+
+  // ⚠️ **止めるのは走っている回だけ**（同レビュー 🔴）＝1つの旗にすると、並行する複製まで巻き込む。
+  it('中止は、走っている回の合図で止める', async () => {
+    const cancel = vi.spyOn(bakeFsMod, 'cancelProjectCopy').mockResolvedValue();
+    vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => {
+      useProjectStore.getState().cancelBake();
+      return { copied: 0, cancelled: true };
+    });
+    await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');
+    expect(cancel, '中止の合図を渡していない').toHaveBeenCalledWith(expect.stringContaining('bake_proj_'));
+  });
+
   // ⚠️ **進み具合を出す**＝素材を丸ごと運ぶので分単位になりうる（書き出しと同じ扱い）。
   it('運んでいる間は進み具合を持ち、終わったら降ろす', async () => {
     let send: ((e: { step: number; total: number }) => void) | null = null;
@@ -86,7 +112,7 @@ describe('bakeToTimeline / estimateBake', () => {
     vi.mocked(bakeFsMod.copyBakedFiles).mockImplementation(async () => {
       expect(useProjectStore.getState().bakeRun, '運んでいるのに進み具合が無い').not.toBeNull();
       send?.({ step: 2, total: 5 });
-      expect(useProjectStore.getState().bakeRun).toEqual({ step: 2, total: 5 });
+      expect(useProjectStore.getState().bakeRun).toMatchObject({ step: 2, total: 5 });
       return { copied: 5, cancelled: false };
     });
     await useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画');

@@ -329,7 +329,7 @@ interface ProjectState {
    * 焼き出しでファイルを運んでいる進み具合（#1021）。`null`＝運んでいない。
    * ⚠️ **分単位になりうる操作**（素材を丸ごとコピー）なので、進み具合と中止を出す（書き出しと同じ扱い）。
    */
-  bakeRun: { step: number; total: number } | null;
+  bakeRun: { step: number; total: number; copyId: string } | null;
   /** 焼き出しのファイルのコピーを中止する（#1021）。運んだものは片づけられる。 */
   cancelBake: () => void;
   /** 焼き出しの変換だけ（内部・estimateBake / bakeToTimeline が共有＝見積りと本番で同じ結果を見る）。 */
@@ -1383,7 +1383,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ **ファイルを運んでから文書を保存する**（焼き出しと同じ順＝`bakeToTimeline`）＝
       // 逆にすると、素材の無い動画が一覧に残る。
       // ⚠️ **コピーの入口は1つ**（`copyBakedFiles`）＝焼き出しと同じ関数を使う（規則を写さない・§2-7）。
-      await copyBakedFiles(projectId, newId, duplicatedFilePaths(src));
+      // ⚠️ **中止（＝運んだものは片づけ済み）なら保存しない**（PR #1054 レビュー 🔴）＝
+      //   ここで保存すると**素材の消えた複製**が一覧に残る（開けるのに中身が欠けている＝いちばん悪い形）。
+      //   複製に中止の入口はまだ無いが、**戻り値を見ない経路を残さない**（増えたときに片方だけ直る）。
+      const copied = await copyBakedFiles(projectId, newId, duplicatedFilePaths(src), `dup_${newId}`);
+      if (copied.cancelled) return null;
       await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
       // 複製したら**開く**（作っただけで見えないと、できたかどうか分からない）。
       await get().loadProject(newId);
@@ -1602,7 +1606,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return { bytes: await bakeSizeBytes(get().meta.projectId, bakedFilePaths(doc)), notes };
   },
   bakeRun: null,
-  cancelBake: () => { void cancelProjectCopy(); },
+  // ⚠️ **止めるのは走っている回だけ**（PR #1054 レビュー 🔴）＝1つの旗にすると、
+  //   並行して走っている複製まで巻き込む（逆に、複製の開始が中止を握りつぶす）。
+  cancelBake: () => { const id = get().bakeRun?.copyId; if (id) void cancelProjectCopy(id); },
   bakeToTimeline: async (range, projectName) => {
     // 焼く前に元を保存する＝**ディスクにあるファイル**（素材・作成済みの声）を運ぶので、
     // 保存していない声が抜け落ちるのを防ぐ。元の中身は変えない（片道＝決定16）。
@@ -1623,13 +1629,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     // 素材を丸ごと運ぶので分単位になりうる（#1021）＝**進み具合を出し、中止を受ける**。
     const paths = bakedFilePaths(doc);
+    const copyId = `bake_${projectId}`;
     const stop = await listenCopyProgress((e) => {
       // 走っている焼き出しのぶんだけ出す（別の動画へ移った後に前の進み具合を出さない）。
-      if (get().bakeRun) set({ bakeRun: { step: e.step, total: e.total } });
+      const run = get().bakeRun;
+      if (run) set({ bakeRun: { ...run, step: e.step, total: e.total } });
     });
-    set({ bakeRun: { step: 0, total: paths.length } });
+    // ⚠️ **運ぶものが無いときは出さない**（PR #1054 レビュー ℹ️）＝一瞬だけ「中止する」が見える窓を作らない。
+    if (paths.length > 0) set({ bakeRun: { step: 0, total: paths.length, copyId } });
     try {
-      const r = await copyBakedFiles(srcProjectId, projectId, paths);
+      const r = await copyBakedFiles(srcProjectId, projectId, paths, copyId);
       // ⚠️ **中止したら文書を保存しない**＝運んだものは Rust が片づけているので、
       //   ここで保存すると**素材の無い動画が一覧に残る**（作りかけを残さない）。
       if (r.cancelled) return { projectId: null, notes };

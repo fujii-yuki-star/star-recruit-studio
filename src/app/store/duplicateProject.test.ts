@@ -76,7 +76,16 @@ describe('duplicateProject', () => {
 
   it('素材と声のファイルを運ぶ', async () => {
     await useProjectStore.getState().duplicateProject('proj_20260101_001');
-    expect(copyBakedFiles).toHaveBeenCalledWith('proj_20260101_001', expect.any(String), ['assets/asset_001.png']);
+    expect(copyBakedFiles).toHaveBeenCalledWith('proj_20260101_001', expect.any(String), ['assets/asset_001.png'], expect.any(String));
+  });
+
+  // ⚠️ **中止（＝運んだものは片づけ済み）なら保存しない**（PR #1054 レビュー 🔴）＝
+  //    保存すると**素材の消えた複製**が一覧に残る（開けるのに中身が欠けている）。
+  it('中止されたら文書を保存しない', async () => {
+    vi.mocked(copyBakedFiles).mockResolvedValue({ copied: 0, cancelled: true });
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id, '中止したのに番号を返した').toBeNull();
+    expect(saveProjectDoc, '中止したのに保存した').not.toHaveBeenCalled();
   });
 
   /**

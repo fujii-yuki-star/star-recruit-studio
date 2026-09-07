@@ -23,19 +23,21 @@ export async function copyBakedFiles(
   srcProjectId: string,
   destProjectId: string,
   relPaths: readonly string[],
+  /**
+   * この回のコピーの合図（#1021）。**中止はこの合図でだけ効く**（PR #1054 レビュー 🔴）＝
+   * 1つの旗にすると**プロセス全体で共有**され、焼き出しの中止が**並行して走っている複製**を巻き込む。
+   */
+  copyId = `copy_${Date.now()}`,
 ): Promise<CopyResult> {
   if (!isTauri() || relPaths.length === 0) return { copied: 0, cancelled: false };
-  try {
-    return { copied: await invoke<number>('copy_project_files', { srcProjectId, destProjectId, relPaths }), cancelled: false };
-  } catch (e) {
-    // ⚠️ **中止は失敗ではない**（#1021）＝止めたのは利用者なので、理由を出さずに「中止した」として返す。
-    //   ⚠️ **見分けは内部の目印で**＝文言で見分けると、翻訳や言い回しを変えたとたんに**失敗として扱われる**。
-    if (typeof e === 'string' && e === COPY_CANCELLED_MARK) return { copied: 0, cancelled: true };
-    throw e;
-  }
+  return await invoke<CopyResult>('copy_project_files', { srcProjectId, destProjectId, relPaths, copyId });
 }
 
-/** コピーの結果（#1021）。**中止は失敗と分けて返す**＝呼び出し側が理由を出すか決められる。 */
+/**
+ * コピーの結果（#1021）。⚠️ **中止は失敗と分けて返す**＝呼び出し側が理由を出すか決められる。
+ * ⚠️ **`Err` の文字列では見分けない**（PR #1054 レビュー 🟡）＝**同じ文字列を両側に持つ**ことになり
+ *（§2-7 違反）、言い回しを変えたとたんに**失敗として扱われる**。Rust がこの形で返す。
+ */
 export interface CopyResult {
   /** 実際に運んだ件数（元に無いファイルは飛ばすので、渡した数より少ないことがある）。 */
   copied: number;
@@ -46,11 +48,12 @@ export interface CopyResult {
 /**
  * コピーを中止する（#1021）。**運んだものは Rust 側が片づける**＝素材だけがあって
  * `project.json` が無い**見えないゴミ**を残さない。失敗しても中止操作は続けられるよう握りつぶす。
+ * ⚠️ **止めるのは合図で指した回だけ**（別の回を巻き込まない）。
  */
-export async function cancelProjectCopy(): Promise<void> {
+export async function cancelProjectCopy(copyId: string): Promise<void> {
   if (!isTauri()) return;
   try {
-    await invoke('cancel_project_copy');
+    await invoke('cancel_project_copy', { copyId });
   } catch {
     /* 中止の要求が届かなくても、画面の操作は続けられる（届いていれば次のファイルの手前で止まる） */
   }
@@ -74,6 +77,3 @@ export async function listenCopyProgress(cb: (e: CopyProgressEvent) => void): Pr
     return () => {};
   }
 }
-
-/** 中止したときに Rust が返す内部の目印（利用者には出さない）。`assets.rs` と同じ文字列。 */
-const COPY_CANCELLED_MARK = 'project copy cancelled by user';

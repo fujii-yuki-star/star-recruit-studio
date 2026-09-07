@@ -2,9 +2,10 @@
 // プロジェクトフォルダ <appData>/projects/<id>/{assets,voices}/ に保管し、相対パスを project.json に持つ（11 §7.2）。
 // 描画は data URL（ADR-0004：canvas汚染回避）なので、読み出しは data URL を返す（音声も同形式で復元）。
 use base64::Engine as _;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
@@ -301,19 +302,35 @@ pub fn project_files_size(
     Ok(total)
 }
 
-/// プロジェクト間のコピーの中止要求（#1021）。**1回の呼び出し＝1つの中止の範囲**とし、
-/// `copy_project_files` の入口で必ず降ろす＝前回の中止要求を持ち越して**次のコピーが黙って落ちる**、を作らない
-///（焼き出しも複製もコピーは1回きりなので、書き出しのような `begin_*` は要らない）。
-static COPY_CANCELLED: AtomicBool = AtomicBool::new(false);
+/// プロジェクト間のコピーの**中止要求**（#1021）。
+///
+/// ⚠️ **呼び出しごとに分ける**（PR #1054 レビュー 🔴）＝1つの真偽値にすると**プロセス全体で共有**され、
+/// 焼き出しの中止が**並行して走っている複製**を巻き込む（逆に、複製の開始が焼き出しの中止を握りつぶす）。
+/// 呼ぶ側が渡した `copy_id` で覚える＝**自分の回だけ**止まる。
+static CANCELLED_COPIES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn cancelled_copies() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
+    // 毒されても中身を取り出して続ける（中止できないより、続けられるほうがまし）。
+    CANCELLED_COPIES.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// 走行中のコピーを中止する（#1021）。ユーザーの「中止」から呼ぶ。副作用のみ（表示は呼び出し側）。
 #[tauri::command]
-pub fn cancel_project_copy() {
-    COPY_CANCELLED.store(true, Ordering::SeqCst);
+pub fn cancel_project_copy(copy_id: String) {
+    cancelled_copies()
+        .get_or_insert_with(HashSet::new)
+        .insert(copy_id);
 }
 
-/// コピーを中止したときに返す内部マーカー（呼び出し側が「中止」と見分けるためのもの・利用者には出さない）。
-pub const COPY_CANCELLED_MARK: &str = "project copy cancelled by user";
+/// コピーの結果（#1021）。⚠️ **中止は失敗と分けて返す**＝`Err` の文字列で見分けると、
+/// **同じ文字列を呼ぶ側にも持つ**ことになり（§2-7 違反）、言い回しを変えたとたんに失敗として扱われる。
+#[derive(Clone, serde::Serialize)]
+pub struct CopyResult {
+    /// 実際に運んだ件数（元に無いファイルは飛ばすので、渡した数より少ないことがある）。
+    pub copied: usize,
+    /// 利用者が中止したか（運んだものは片づけ済み）。
+    pub cancelled: bool,
+}
 
 #[derive(Clone, serde::Serialize)]
 struct CopyProgressEvent {
@@ -326,7 +343,7 @@ struct CopyProgressEvent {
 /// **元プロジェクトには一切書き込まない**（片道＝決定16）。
 ///
 /// 素材を丸ごと運ぶので分単位になりうる（#1021）＝**進み具合を送り、中止を受ける**。
-/// ⚠️ **中止したら運んだものを片づける**＝途中まで運んだフォルダを残すと、素材だけがあって
+/// ⚠️ **中止・失敗のどちらでも運んだものを片づける**＝途中まで運んだフォルダを残すと、素材だけがあって
 /// `project.json` が無い状態になり、一覧にも出ない**見えないゴミ**が残る。
 /// ⚠️ **片づけるのは「自分が運んだファイル」だけ**（フォルダを丸ごと消さない）＝
 /// 消してよいものだけを消す。空になった入れ物はその後で畳む。
@@ -336,59 +353,97 @@ pub fn copy_project_files(
     src_project_id: String,
     dest_project_id: String,
     rel_paths: Vec<String>,
-) -> Result<usize, String> {
+    copy_id: String,
+) -> Result<CopyResult, String> {
     if src_project_id == dest_project_id {
         return Err("コピー元とコピー先が同じです。".to_string());
     }
-    // 入口で降ろす＝前回の中止要求を持ち越さない（この呼び出しが1つの中止の範囲）。
-    COPY_CANCELLED.store(false, Ordering::SeqCst);
+    // 入口で自分の回の印を落とす＝前回の中止要求を持ち越さない（同じ id を再利用しても止まらない）。
+    if let Some(set) = cancelled_copies().as_mut() {
+        set.remove(&copy_id);
+    }
     let src_dir = project_dir(&app, &src_project_id)?;
     let dest_dir = project_dir(&app, &dest_project_id)?;
     let total = rel_paths.len();
     let mut copied: Vec<PathBuf> = Vec::new();
     for (i, rel) in rel_paths.iter().enumerate() {
         if !is_safe_rel_path(rel) {
+            cleanup_copied(&copied, &dest_dir);
             return Err("不正なパスです。".to_string());
         }
-        if COPY_CANCELLED.load(Ordering::SeqCst) {
+        if is_copy_cancelled(&copy_id) {
             cleanup_copied(&copied, &dest_dir);
-            return Err(COPY_CANCELLED_MARK.to_string());
+            return Ok(CopyResult {
+                copied: 0,
+                cancelled: true,
+            });
         }
         let src = src_dir.join(rel);
         // 元に無いファイルは飛ばす（未配置のサンプル素材など）。欠けたぶんは焼いた側で
         // 「素材が見つかりません」として扱われる（15 §6）＝ここで丸ごと失敗させない。
         if src.is_file() {
             let dest = dest_dir.join(rel);
+            // ⚠️ **失敗したときも片づける**（PR #1054 レビュー 🟡）＝中止だけ片づけて失敗を残すと、
+            // 「見えないゴミを残さない」が**失敗系では守れない**（同じ状態が別の入口からできる）。
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+                if fs::create_dir_all(parent).is_err() {
+                    cleanup_copied(&copied, &dest_dir);
+                    return Err(ASSET_SAVE_ERR.to_string());
+                }
             }
-            fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+            if fs::copy(&src, &dest).is_err() {
+                cleanup_copied(&copied, &dest_dir);
+                return Err(ASSET_SAVE_ERR.to_string());
+            }
             copied.push(dest);
         }
         // 進み具合は best-effort（送れなくてもコピーは続ける＝書き出しと同じ流儀）。
         let _ = app.emit("copy_progress", CopyProgressEvent { step: i + 1, total });
     }
-    Ok(copied.len())
+    // 終わったら自分の印を片づける（覚えっぱなしにしない）。
+    if let Some(set) = cancelled_copies().as_mut() {
+        set.remove(&copy_id);
+    }
+    Ok(CopyResult {
+        copied: copied.len(),
+        cancelled: false,
+    })
 }
 
-/// 中止したときの後始末＝**自分が運んだファイル**を消し、空になった入れ物を畳む（#1021）。
-/// ⚠️ **コピー先のフォルダそのものは消さない**（自分が作ったとは限らない）＝空なら畳むだけ。
+/// この回のコピーが中止されたか。
+fn is_copy_cancelled(copy_id: &str) -> bool {
+    cancelled_copies()
+        .as_ref()
+        .is_some_and(|set| set.contains(copy_id))
+}
+
+/// 中止・失敗したときの後始末＝**自分が運んだファイル**を消し、空になった入れ物を畳む（#1021）。
+///
+/// ⚠️ **畳むのは「自分が作った入れ物」まで**＝コピー先の中の空になった入れ物と、コピー先そのもの
+/// （このコマンドは**新しいプロジェクト**へ運ぶ用途しか無いので、空になったなら誰も使っていない）。
+/// 中身が残っていれば `remove_dir` が失敗して残る＝**消してよいものだけが消える**。
 fn cleanup_copied(copied: &[PathBuf], dest_dir: &Path) {
     for p in copied {
         let _ = fs::remove_file(p);
     }
-    // 深い所から畳む＝assets/ のような入れ物が空なら消える（空でなければ `remove_dir` が失敗して残る）。
-    let mut dirs: Vec<PathBuf> = copied
-        .iter()
-        .filter_map(|p| p.parent().map(|d| d.to_path_buf()))
-        .collect();
+    // ⚠️ **途中の入れ物も畳む**（同レビュー ℹ️）＝直接の親だけだと、2階層以上のときに空の中間が残る。
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for p in copied {
+        let mut cur = p.parent();
+        while let Some(d) = cur {
+            if !d.starts_with(dest_dir) || d == dest_dir {
+                break;
+            }
+            dirs.push(d.to_path_buf());
+            cur = d.parent();
+        }
+    }
     dirs.sort();
     dirs.dedup();
+    // 深い所から畳む（中が空になってから外側を見る）。
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     for d in dirs {
-        if d.starts_with(dest_dir) && d != dest_dir {
-            let _ = fs::remove_dir(&d);
-        }
+        let _ = fs::remove_dir(&d);
     }
     let _ = fs::remove_dir(dest_dir);
 }
@@ -480,6 +535,37 @@ pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 中止の印は**回ごと**に持つ（#1021・PR #1054 レビュー 🔴）＝1つの真偽値だと、
+    /// 焼き出しの中止が**並行して走っている複製**を巻き込む（逆も同じ）。
+    #[test]
+    fn cancel_is_per_copy() {
+        cancel_project_copy("bake_1".to_string());
+        assert!(is_copy_cancelled("bake_1"), "止めた回が止まっていない");
+        assert!(!is_copy_cancelled("dup_1"), "別の回まで巻き込んだ");
+        // 片づけ（テスト間で持ち越さない）。
+        if let Some(set) = cancelled_copies().as_mut() {
+            set.remove("bake_1");
+        }
+    }
+
+    /// 途中の入れ物も畳む（#1021・同レビュー ℹ️）＝直接の親だけだと、2階層以上で空の中間が残る。
+    #[test]
+    fn cleanup_folds_nested_dirs() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup3_{}", std::process::id()));
+        let dest = base.join("dest");
+        let deep = dest.join("assets").join("sub");
+        fs::create_dir_all(&deep).unwrap();
+        let a = deep.join("a.png");
+        fs::write(&a, b"x").unwrap();
+
+        cleanup_copied(std::slice::from_ref(&a), &dest);
+
+        assert!(!deep.exists(), "いちばん内側が残った");
+        assert!(!dest.join("assets").exists(), "途中の入れ物が残った");
+        assert!(!dest.exists(), "コピー先が残った");
+        let _ = fs::remove_dir_all(&base);
+    }
 
     /// 中止したときの後始末（#1021）。**自分が運んだファイルだけ**を消し、空になった入れ物を畳む。
     /// ⚠️ **運んでいないものは消さない**＝コピー先に元からあるものを巻き込まない。
