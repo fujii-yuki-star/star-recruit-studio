@@ -9,7 +9,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
-  userFontMissingMessage, userFontUnreadableMessage, clipOutsidePlayheadMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
+  userFontMissingMessage, userFontUnreadableMessage, canvasHoldMessage, clipOutsidePlayheadMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
+  BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
+  DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
+  IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -84,9 +88,36 @@ function codeMessages(): Record<string, string> {
     USER_FONT_MISSING: userFontMissingMessage(" N "),
     USER_FONT_UNREADABLE: userFontUnreadableMessage(" N "),
     // ⚠️ **秒が入る文も差し込み口を渡して比べる**（上と同じ流儀）＝#996。
-    // ⚠️ **同じ節にある `canvasHoldMessage` は、まだこの走査の外**（表にも無い）＝
-    // ついでに載せると本題（#996）の差分がぼやけるので、別で追う。
     TIMELINE_CLIP_OUTSIDE_PLAYHEAD: clipOutsidePlayheadMessage(0, 0),
+    // ⚠️ **理由 × 単体/まとめて＝6通りを、6行として等値で守る**（#1012）＝1つの行に畳むと
+    // **どれか1通りだけ書き換えても気づけない**（この関数はまさに「言い方が2か所にあると
+    // 片方だけ直す」を畳むために作ったもの＝畳んだ先で同じ穴を開けない）。
+    TIMELINE_CANVAS_HOLD_TRACK: canvasHoldMessage("track"),
+    TIMELINE_CANVAS_HOLD_TRACK_MANY: canvasHoldMessage("track", " N " as unknown as number),
+    TIMELINE_CANVAS_HOLD_ANIMATION: canvasHoldMessage("animation"),
+    TIMELINE_CANVAS_HOLD_ANIMATION_MANY: canvasHoldMessage("animation", " N " as unknown as number),
+    TIMELINE_CANVAS_HOLD_GROUP: canvasHoldMessage("group"),
+    TIMELINE_CANVAS_HOLD_GROUP_MANY: canvasHoldMessage("group", " N " as unknown as number),
+    // ⚠️ **走査の外にあった文言をまとめて載せる**（#1012 の3つ目）＝ここへ載せていない文言は
+    // 「表だけ古くなったら落ちる」の**弱い段**（実装のどこかに在るか）でしか見られておらず、
+    // **表と実装のどちらを書き換えても気づけない**。`uiLabels.ts` の `*_MESSAGE` 14件のうち
+    // **3件は表に1行も無く**（`BGM_DUCK_MERGED`・`PROJECT_DUPLICATE_FAILED`・`VOICE_BUSY_EXPORT`）、
+    // 残り11件も等値では守られていなかった。下の「取りこぼしを構造で止める」検査が、
+    // 次に足したぶんをここへ載せさせる。
+    BRAND_FONT_CLEARED: BRAND_FONT_CLEARED_MESSAGE,
+    BRAND_FONT_CLEAR_FAILED: BRAND_FONT_CLEAR_FAILED_MESSAGE,
+    BRAND_FONT_NOT_APPLIED: BRAND_FONT_NOT_APPLIED_MESSAGE,
+    BRAND_LOGO_NOT_APPLIED: BRAND_LOGO_NOT_APPLIED_MESSAGE,
+    BGM_DUCK_MERGED: DUCK_MERGED_MESSAGE,
+    PROJECT_DUPLICATE_FAILED: DUPLICATE_FAILED_MESSAGE,
+    EXPORT_BLOCKED_IMPORTING: EXPORT_BLOCKED_IMPORTING_MESSAGE,
+    IMPORT_BLOCKED_EXPORTING: IMPORT_BLOCKED_EXPORTING_MESSAGE,
+    IMPORT_BUSY: IMPORT_BUSY_MESSAGE,
+    IMPORT_NO_PROJECT: IMPORT_NO_PROJECT_MESSAGE,
+    IMPORT_TIMELINE_OPEN: IMPORT_TIMELINE_OPEN_MESSAGE,
+    LEAVE_BLOCKED_EXPORTING: LEAVE_BLOCKED_EXPORTING_MESSAGE,
+    TIMELINE_SAVE_FAILED: TIMELINE_SAVE_FAILED_MESSAGE,
+    VOICE_BUSY_EXPORT: VOICE_BUSY_EXPORT_MESSAGE,
   };
 }
 
@@ -221,6 +252,23 @@ function domainWarnMessages(): {
   return { found: out, seen };
 }
 
+
+/**
+ * `uiLabels` の `*_MESSAGE` を、名前と（**素の文字列なら**）中身に分けて拾う（#1012）。
+ *
+ * ⚠️ **組み立てた文（テンプレート）は `null` を返す**＝等値では守れないので、呼び出し側に
+ * **理由つきで外させる**ため。黙って飛ばすと、そこだけ誰も見ていない状態に戻る。
+ */
+export function messageConstsOf(src: string): { name: string; literal: string | null }[] {
+  const out: { name: string; literal: string | null }[] = [];
+  for (const m of src.matchAll(/export const ([A-Z0-9_]+_MESSAGE)\s*=\s*([\s\S]*?);$/gm)) {
+    const [, name, body] = m;
+    const plain = /^\s*(?:"[^"]*"\s*\+?\s*)+$/.test(body);
+    out.push({ name, literal: plain ? [...body.matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("") : null });
+  }
+  return out;
+}
+
 /** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
 const norm = (s: string): string => s.replace(/。$/, "").trim();
 
@@ -278,6 +326,47 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(wrong).toEqual([]);
   });
 
+
+  /**
+   * **載せ忘れを構造で止める**（#1012）。
+   *
+   * ⚠️ **この走査は「載せたものは表にもある」を見る**＝`codeMessages()` へ載せていない文言は
+   * **存在ごと見えない**（弱い段の「実装のどこかに在る」でしか守られず、表と実装のどちらを
+   * 書き換えても気づけない）。実際に `canvasHoldMessage` の6通りと `*_MESSAGE` の3件が
+   * **表に1行も無い**まま残っていた。人が気づく形にせず、**次に足した文言が自動でここへ呼ばれる**ようにする。
+   */
+  const MESSAGE_EXEMPT: Record<string, string> = {
+    // ⚠️ **外すときは理由を書く**（`ASSEMBLED_AT_RUNTIME` と同じ流儀）＝空欄で外すと、
+    // 次に読む人は「書き忘れ」と読む。いまは1件も外していない。
+  };
+
+  it("`uiLabels` の `*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
+    const found = messageConstsOf(readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8"));
+    const guarded = new Set(Object.values(codeMessages()).map(norm));
+    // ⚠️ **「中身を取れなかった」も見逃さない**＝組み立てた文（テンプレート）は等値で守れないので、
+    // **理由つきで外させる**（黙って素通りさせると、そこだけ誰も見ていない状態に戻る）。
+    const unreadable = found.filter((f) => f.literal == null && !(f.name in MESSAGE_EXEMPT)).map((f) => f.name);
+    expect(unreadable, "素の文字列でない `*_MESSAGE` は、理由つきで `MESSAGE_EXEMPT` へ").toEqual([]);
+    const unguarded = found
+      .filter((f) => f.literal != null && !(f.name in MESSAGE_EXEMPT) && !guarded.has(norm(f.literal)))
+      .map((f) => f.name);
+    expect(unguarded, "`codeMessages()` に載っていない文言がある（表と実装のズレが機械では見えない）").toEqual([]);
+  });
+
+  // ⚠️ **門番そのものを見る**（`guard-gets-holes`）＝いまの `uiLabels.ts` に「組み立てた文」が
+  //    1つも無いので、上の検査だけでは**その枝が本当に働くか分からない**（外しても緑のまま）。
+  it("組み立てた文は「中身を取れない」として拾う（門番の枝を直接見る）", () => {
+    const fixture = [
+      'export const A_MESSAGE = "あ" + "い";',
+      "export const B_MESSAGE = `${name}を読み込めません`;",
+      'export const C_MESSAGE = "「や、め、る」は。区切りを含む";',
+    ].join("\n");
+    expect(messageConstsOf(fixture)).toEqual([
+      { name: "A_MESSAGE", literal: "あい" },
+      { name: "B_MESSAGE", literal: null },
+      { name: "C_MESSAGE", literal: "「や、め、る」は。区切りを含む" },
+    ]);
+  });
 
   /**
    * **どの行も、必ずどれかの方法で見られている**（#354）。
@@ -350,10 +439,10 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(165);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(174);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(58);
+    ).toBe(78);
   });
 });
