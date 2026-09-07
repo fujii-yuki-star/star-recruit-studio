@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { sceneTypeLabel } from "../adapters";
@@ -167,10 +167,12 @@ function freeStrokeSwatch(el: FreeElement): string {
 function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, onReset }: { label: string; range: ParamRange; value: number | null | undefined; lowLabel: string; highLabel: string; onChange: (v: number) => void; onReset: () => void }) {
   const isSet = value != null;
   const { dragGroup } = useHistoryGroup(); // ドラッグ中の連続変更を1履歴に（#389）
+  // 見出しと滑りを結ぶ id（#1075）。行ごとに何個でも並ぶので、**重ならない id** を作る。
+  const fieldId = useId();
   return (
     <div className="field" style={{ margin: "8px 0 0" }}>
       <div className="row-between" style={{ alignItems: "center" }}>
-        <label className="field-label text-sm" style={{ margin: 0 }}>{label}</label>
+        <label className="field-label text-sm" style={{ margin: 0 }} htmlFor={fieldId}>{label}</label>
         {isSet ? (
           <button type="button" className="btn btn-ghost text-sm" style={{ padding: "0 6px", height: 22 }} onClick={onReset}>全体に合わせる</button>
         ) : (
@@ -178,6 +180,7 @@ function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, on
         )}
       </div>
       <input
+        id={fieldId}
         type="range"
         min={0}
         max={100}
@@ -1087,7 +1090,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             onChange={(v) => set({ letterSpacing: v })}
           />
           <div className="toggle-row" style={{ flex: 1 }}>
-            <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+            {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: 0 }}>影を付ける</span>
             <Switch on={effective.shadow != null} onChange={toggleShadow} label={`${textKeyLabel[key]}に影を付ける`} />
           </div>
         </div>
@@ -1104,7 +1108,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
         )}
         <div className="toggle-row" style={{ marginBottom: 6 }}>
-          <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</span>
           <Switch on={effective.background != null} onChange={toggleBand} label={`${textKeyLabel[key]}に背景帯を付ける`} />
         </div>
         {effective.background != null && (
@@ -1259,8 +1264,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+            <FontPicker label="フォント" labelClassName="field-label text-sm" value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
                         onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
@@ -1384,8 +1388,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+            <FontPicker label="フォント" labelClassName="field-label text-sm" value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
                         onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
@@ -2022,8 +2025,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       />
                     )}
                     <div className="field" style={{ marginTop: 6 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                      <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                     </div>
                     {renderTextStyleControls(key)}
                   </div>
@@ -2079,14 +2081,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </p>
                     {otherFontKeys.map((key) => (
                       <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
-                        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                        <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                        <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                       </div>
                     ))}
                     {unknownFreeFonts.map((el) => (
                       <div className="field" style={{ marginTop: 6 }} key={`unknown-free-${el.id}`}>
-                        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{freeName(el)}のフォント</label>
-                        <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
+                        <FontPicker label={`${freeName(el)}のフォント`} labelClassName="field-label text-sm" value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
                       </div>
                     ))}
                   </>
@@ -2096,14 +2096,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 )}
                 {dormantFontKeys.map((key) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                    <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                    <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                   </div>
                 ))}
                 {dormantFreeFonts.map((el) => (
                   <div className="field" style={{ marginTop: 6 }} key={`dormant-free-${el.id}`}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{freeName(el)}のフォント</label>
-                    <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
+                    <FontPicker label={`${freeName(el)}のフォント`} labelClassName="field-label text-sm" value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
                   </div>
                 ))}
               </div>
@@ -2185,10 +2183,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
 
             <div className="field">
-              <label className="field-label">この場面のフォント</label>
               {/* 継承へ戻すときは**キーごと落とす**（差分再監査 10巡目 ℹ️）＝自由配置の要素・タイムラインの
                   部品と同じ流儀（`null` と未指定は解決が同じ＝11.6。2通りの文書を作らない）。 */}
               <FontPicker
+                label="この場面のフォント"
                 value={selected.fontId}
                 onChange={(id) => patch((s) => {
                   // ⚠️ **キーごと落とす**（PR #919 レビュー ℹ️）＝`updateScene` は素の差し替えなので、
@@ -2205,10 +2203,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* ⚠️ **この欄だけ場面の話ではない**（#1032）＝この節は「この場面」の欄が並ぶ中で、
                 ここだけ**全場面に効く**。印を付けて、この場面の欄の**後ろ**へ置く。 */}
             <div className="field">
-              <label className="field-label">
-                フォント <span className="badge badge-gray">動画全体</span>
-              </label>
-              <FontPicker value={fontId} onChange={(id) => id && setFontId(id)} />
+              <FontPicker
+                label={<>フォント <span className="badge badge-gray">動画全体</span></>}
+                value={fontId}
+                onChange={(id) => id && setFontId(id)}
+              />
               <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
             </div>
             </CollapsibleSection>
@@ -3074,7 +3073,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 画面の切り替え（トランジション）は常時表示（「詳細編集」トグル撤廃・#278）。 */}
             <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
               <div className="field">
-                <label className="field-label" htmlFor="transition">画面の切り替え</label>
+                {/* ⚠️ **欄が無いときは見出しにしない**（#1075）＝最初の場面では選択欄を出さないので、
+                    `htmlFor` の指し先が**実在しない**（結んだつもりで結ばれていない）。 */}
+                {isFirstScene ? (
+                  <span className="field-label" style={{ display: "block" }}>画面の切り替え</span>
+                ) : (
+                  <label className="field-label" htmlFor="transition">画面の切り替え</label>
+                )}
                 {isFirstScene ? (
                   <p className="field-hint" style={{ marginTop: 0 }}>
                     最初の場面のため、前からの切り替えはありません。

@@ -1227,23 +1227,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           />
         </label>
       </div>
-      <label className="field">
+      <div className="field">
         {/* ⚠️ **1つの画面で呼び名を割らない**（差分再監査 5巡目 ℹ️）＝同じ `FontPicker` を
             見た目パターンの部品では「この部品の文字の形」と呼んでおり、同じ操作に2つの言い方が
             並んでいた。動画全体の欄（「この動画全体の文字の形」）とも語をそろえる。 */}
-        <span>この部品の文字の形</span>
         {/* **「動画全体に合わせる」へ戻せる**（#731）＝`clip.fontId` の `null` は継承で、
             描画も動画全体の指定を受け皿にしている（§5）。`allowInherit` が無いと、
             継承中でも**既定フォントの名前を現在値として表示**し（動画全体を別の字体に
             していると表示と実際が食い違う）、一度選ぶと戻せない。場面編集は既に付いている
             ので、無いままだと形式の間で非対称でもあった（ADR-0026②）。 */}
+        {/* ⚠️ **見出しは部品に描かせる**（#1075）＝`<label>` で包んでも、中身がボタンの
+            ときは**結ばれない**（ボタンは `<label>` の対象外）。 */}
         <FontPicker
+          label="この部品の文字の形"
+          labelClassName=""
           value={sel.fontId ?? null}
           allowInherit
           {...editGuard()}
           onChange={(id) => setSelectedVisualContent({ fontId: id })}
         />
-      </label>
+      </div>
     </>
   );
   /**
@@ -1276,7 +1279,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
       <div className="col gap-sm">
         <div className="toggle-row">
-          <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>影を付ける</span>
           <Switch
             on={enabledShadow(sel.shadow) != null}
             {...editGuard()}
@@ -1313,7 +1317,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
       <div className="col gap-sm">
         <div className="toggle-row">
-          <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</span>
           <Switch
             on={bandBackground(sel.background) != null}
             {...editGuard()}
@@ -3305,14 +3310,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 別の文字の形を選び直してください」だが、動画全体の指定を選び直す入口が無いと
                 **書き出しが止まったまま案内どおりの操作ができない**（§2-5 の行き止まり）。
                 部品ごとの指定は「中身」の欄にある（こちらは受け皿）。 */}
-            <label className="field">
-              <span className="field-label">動画全体の文字の形</span>
+            <div className="field">
               <FontPicker
+                label="動画全体の文字の形"
                 value={doc.videoSettings.fontId ?? null}
                 disabled={exporting}
                 onChange={(id) => updateVideoSettings({ fontId: id ?? undefined })}
               />
-            </label>
+            </div>
           </details>
         )}
         <label className="field">
@@ -4618,15 +4623,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ここへ書き、描画も書き出しも見る。直せないと、門の案内（「使っている文字で別の
                       文字の形を選び直してください」）どおりの操作が**この形式に存在しない**＝
                       取り込み直しても墓標で番号が戻らないので**回復手段が無い**（§2-5 の行き止まり）。 */}
-                  <label className="field">
-                    <span>この部品の文字の形</span>
+                  <div className="field">
                     <FontPicker
+                      label="この部品の文字の形"
+                      labelClassName=""
                       value={selected.fontId ?? null}
                       allowInherit
                       {...editGuard()}
                       onChange={(id) => setSelectedVisualContent({ fontId: id })}
                     />
-                  </label>
+                  </div>
                   {/* ⚠️ **種別ごとにも選び直せる**（差分再監査 5巡目 🟡）＝焼き出しは `scene.textFontIds` を
                       この部品へ書き、書き出しの門はそれを数えるのに**直す操作がこの形式に無かった**＝
                       持ち込みフォントが手元から消えると、案内どおりに選び直す先が無く**書き出しが
@@ -4638,16 +4644,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
                   )}
                   {editableTextKeys(selectedTemplate.layers, selected.textFontIds).map((key) => (
-                    <label className="field" key={`font-${key}`}>
-                      <span>{textKeyLabel[key]}の文字の形</span>
+                    <div className="field" key={`font-${key}`}>
                       <FontPicker
+                        label={`${textKeyLabel[key]}の文字の形`}
+                        labelClassName=""
                         value={selected.textFontIds?.[key] ?? null}
                         allowInherit
                         {...editGuard()}
                         // 置く／外すの規則は **domain に1つ**（`withTextFontId`＝残りを引き継ぐ・空なら落とす）。
                         onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                       />
-                    </label>
+                    </div>
                   ))}
                   <button
                     className="btn btn-secondary"
@@ -4671,27 +4678,29 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {/* ⚠️ **部品ぜんぶの文字の形は無条件に出す**（PR #917 レビュー ℹ️）＝解決できているときは
                       無条件なのに、未解決のときだけ「値が入っていれば」にすると、同じ欄が状態によって
                       現れたり消えたりする（新しく決める入口ごと消える）。 */}
-                  <label className="field">
-                    <span>この部品の文字の形</span>
+                  <div className="field">
                     <FontPicker
+                      label="この部品の文字の形"
+                      labelClassName=""
                       value={selected.fontId ?? null}
                       allowInherit
                       {...editGuard()}
                       onChange={(id) => setSelectedVisualContent({ fontId: id })}
                     />
-                  </label>
+                  </div>
                   {Object.keys(selected.textFontIds ?? {}).length > 0 && (
                     <>
                       {editableTextKeys([], selected.textFontIds).map((key) => (
-                        <label className="field" key={`font-unresolved-${key}`}>
-                          <span>{textKeyLabel[key]}の文字の形</span>
+                        <div className="field" key={`font-unresolved-${key}`}>
                           <FontPicker
+                            label={`${textKeyLabel[key]}の文字の形`}
+                            labelClassName=""
                             value={selected.textFontIds?.[key] ?? null}
                             allowInherit
                             {...editGuard()}
                             onChange={(id) => setSelectedVisualContent({ textFontIds: withTextFontId(selected.textFontIds, key, id) })}
                           />
-                        </label>
+                        </div>
                       ))}
                     </>
                   )}

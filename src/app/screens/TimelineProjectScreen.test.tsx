@@ -3721,7 +3721,11 @@ describe("TimelineProjectScreen: フォントは動画全体に合わせられ�
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
-  const trigger = () => screen.getByText("この部品の文字の形").closest("label")?.querySelector("button") as HTMLElement;
+  // ⚠️ 見出しは `<label htmlFor>` で欄と結ばれている（#1075）＝包む形ではなくなったので、結び先から掴む。
+  const trigger = () => {
+    const label = screen.getByText("この部品の文字の形") as HTMLLabelElement;
+    return document.getElementById(label.htmlFor) as HTMLElement;
+  };
   // ⚠️ 引き金のボタンも継承中は同じ文字を出すので、**一覧の中の項目**に絞る（`li` の中にある方）。
   const inheritOption = () =>
     screen.getAllByText("動画全体に合わせる").find((el) => el.closest("li"))?.closest("button") as HTMLElement;
@@ -7001,7 +7005,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   const clip = () => useTimelineStore.getState().doc!.clips[0];
   /** 種別の欄を開いて選ぶ。開く側（`button.select`）と選ぶ側（一覧の項目）を取り違えない。 */
   const pickFont = (fieldLabel: string, optionText: string): void => {
-    const field = screen.getByText(fieldLabel).closest("label") as HTMLElement;
+    // ⚠️ 見出しは `<label htmlFor>` で欄と結ばれた（#1075）＝包む形ではなくなったので、囲いは親から採る。
+    const field = screen.getByText(fieldLabel).closest(".field") as HTMLElement;
     fireEvent.click(field.querySelector("button.select") as HTMLElement);
     const option = [...field.querySelectorAll("button")].find(
       (b) => !b.classList.contains("select") && (b.textContent ?? "").startsWith(optionText),

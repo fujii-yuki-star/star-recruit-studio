@@ -649,7 +649,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {l.type === LAYER_TYPE.subtitle && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>
               <div className="toggle-row">
-                <label className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</label>
+                {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                <span className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</span>
                 <Switch on={l.background?.enabled ?? false} onChange={(on) => onUpdateLayer(l.id, { background: { ...l.background, enabled: on } })} label="字幕の背景帯を付ける" />
               </div>
               {l.background?.enabled && (
@@ -889,13 +890,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       <div className="col gap-sm">
           {/* 名前 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
-            <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="lookName">名前</label>
+            <input id="lookName" className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </div>
 
           {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
+            {/* ⚠️ **一覧の見出しは `<label>` にしない**（#1075）＝層の行が並ぶ場所の見出しで、欄を指していない。 */}
+            <span className="field-label text-sm" style={{ display: "block", margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</span>
             <div className="col" style={{ gap: 2 }}>
               {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse する＝描画（renderer/layout の
                   昇順・安定ソート＝同 z は配列後方が手前）と同 z でも一致する。降順ソートだと同 z のとき前後が逆に出て、
