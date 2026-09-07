@@ -20,6 +20,7 @@ vi.mock("../../infrastructure/projectFs", () => ({
   loadProjectDoc: vi.fn(async () => ""),
 }));
 
+import { editBlockedMessage } from "../uiLabels";
 import { useTimelineStore } from "./timelineStore";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { timelineVoiceProgress, voiceClipNeedsVoice } from "../../domain/timeline/voice";
@@ -58,9 +59,9 @@ function gatedSynth() {
   );
   return {
     get started() { return started; },
-    resolveAll() {
+    resolveAll(durationSec = 1) {
       const pending = resolvers.splice(0, resolvers.length);
-      for (const r of pending) r({ audioDataUrl: "wav", durationSec: 1 });
+      for (const r of pending) r({ audioDataUrl: "wav", durationSec });
     },
   };
 }
@@ -70,7 +71,14 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   vi.restoreAllMocks();
   useTimelineStore.setState({
-    doc: doc([voiceClip("clip_001", "あ"), voiceClip("clip_002", "い"), voiceClip("clip_003", "う")]),
+    // ⚠️ **重ならないように並べる**＝同じ列で時間は重ならない（V24）。前は3つとも 0〜3 秒に
+    //   置いており**保存できない形**だったので、「長さを合わせる」が**必ず失敗する**状態だった
+    //   （成功したときの振る舞いを、この検査は一度も見ていなかった）。
+    doc: doc([
+      { ...voiceClip("clip_001", "あ"), startSec: 0 } as TimelineClip,
+      { ...voiceClip("clip_002", "い"), startSec: 3 } as TimelineClip,
+      { ...voiceClip("clip_003", "う"), startSec: 6 } as TimelineClip,
+    ]),
     isGeneratingVoices: false,
     voicesCancelled: false,
     _bulkVoiceRun: 0,
@@ -93,6 +101,83 @@ describe("まとめて声を作る（#1019 ⑥）", () => {
     await run;
     expect(synth.started).toBe(3);
     expect(useTimelineStore.getState().isGeneratingVoices).toBe(false);
+    // ⚠️ **ぜんぶ収まったら何も言わない**＝成功に警告を添えない（#1045）。
+    expect(useTimelineStore.getState().voiceError, "収まったのに案内を出した").toBeNull();
+  });
+
+  // ⚠️ **長さを合わせられなかったぶんの案内は、相手が誰か分かる形で出す**（#1045）＝
+  //    1件ずつのときの断りは「選んだ部品」の欄に出すので相手＝いま選んでいる部品だが、
+  //    まとめて作ると**選んでいない部品**が相手になる（欄を指すだけでは読めない・§2-5）。
+  it("まとめて作って長さを合わせられなかったら、部品の名前を出す", async () => {
+    // 後ろに部品を置いて、伸ばすと重なるようにする（V24＝同じ列で時間は重ならない）。
+    // ⚠️ **合わせられない部品を「最後に作るもの」にする**＝`commit` は毎回 `editBlocked` を空にするので、
+    //   途中の部品で試すと**次の1件が消してしまい**、間違った欄へ出しても緑のまま通る。
+    //   いちばん後ろ（`clip_003`）は**作成済み**にして、作る対象から外す（＝重なる相手として置くだけ）。
+    useTimelineStore.setState({
+      doc: doc([
+        { ...voiceClip("clip_001", "あいさつ"), startSec: 0, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_002", "しめ"), startSec: 3, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_003", "あと", "generated"), startSec: 6, durationSec: 3,
+          voice: { text: "あと", status: "generated", voicePath: "voices/clip_003.wav" } } as unknown as TimelineClip,
+      ]),
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    await flush();
+    synth.resolveAll(1); // 1件目＝収まる
+    await flush();
+    synth.resolveAll(5); // 2件目＝伸ばすと後ろの部品と重なる
+    await flush();
+    await run;
+    const msg = useTimelineStore.getState().voiceError ?? "";
+    expect(msg, "どの部品の話か分からない").toContain("しめ");
+    expect(msg, "収まったぶんまで名指しした").not.toContain("あいさつ");
+    expect(useTimelineStore.getState().editBlocked, "相手の違う欄へ出した").toBeNull();
+    // ⚠️ **理由ごとの次の行動が添えてある**＝理由は重なりとは限らないので、まとめの文に締めを書かない。
+    expect(msg, "次の行動が無い").toContain(editBlockedMessage.TIMELINE_EDIT_OVERLAP);
+  });
+
+  // ⚠️ **文書が入れ替わったら、そちらへは出さない**（PR #1049 レビュー 🔴）＝文書切替は `break` する
+  //    だけで世代番号を進めないので、世代だけ見ていると**別の動画へ前の動画の部品名が出る**。
+  it("途中で別の動画を開いたら、そちらへ案内を出さない", async () => {
+    useTimelineStore.setState({
+      doc: doc([
+        { ...voiceClip("clip_001", "あいさつ"), startSec: 0, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_002", "しめ"), startSec: 3, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_003", "あと", "generated"), startSec: 6, durationSec: 3,
+          voice: { text: "あと", status: "generated", voicePath: "voices/clip_003.wav" } } as unknown as TimelineClip,
+      ]),
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    await flush();
+    synth.resolveAll(9); // 1件目＝伸ばすと後ろの部品と重なる（積まれる）
+    await flush();
+    // 2件目を待っている間に別の動画を開く。
+    useTimelineStore.setState({ doc: { ...doc([]), projectId: "proj_20260906_002" } } as never);
+    synth.resolveAll(1);
+    await flush();
+    await run;
+    expect(useTimelineStore.getState().voiceError, "別の動画へ前の動画の案内を出した").toBeNull();
+  });
+
+  // ⚠️ **1件ずつのときは今までどおり**＝相手＝いま選んでいる部品なので、その欄へ出すのが正しい。
+  it("1件ずつのときは「選んだ部品」の欄へ出す", async () => {
+    useTimelineStore.setState({
+      doc: doc([
+        { ...voiceClip("clip_001", "あいさつ"), startSec: 0, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_002", "しめ"), startSec: 3, durationSec: 3 } as TimelineClip,
+      ]),
+      selectedClipIds: ["clip_001"],
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateSelectedVoice();
+    await flush();
+    synth.resolveAll(5);
+    await flush();
+    await run;
+    expect(useTimelineStore.getState().editBlocked, "断りが出ていない").not.toBeNull();
+    expect(useTimelineStore.getState().voiceError, "1件ずつなのに、まとめての案内を出した").toBeNull();
   });
 
   // ⚠️ **中止は「これ以上作らない」だけ**＝できた声は取り消さない。

@@ -9,7 +9,7 @@ import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, ty
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
+import { bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -85,6 +85,17 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { volumeAt } from "../../domain/timeline/audio";
+
+/**
+ * 声を作ったあと**長さを合わせられなかった**ときに、断りをどこへ出すか（#1045）。
+ *
+ * ⚠️ **1つの物として渡す**＝真偽値を足す形にすると、呼び出し側が**渡し忘れても型が通る**。
+ * `"selected"`＝1件ずつ（相手＝いま選んでいる部品なので「選んだ部品」の欄へ）／
+ * `"collect"`＝まとめて（相手は選んでいない部品なので、名前を集めて最後にまとめて出す）。
+ */
+export type VoiceNoticeSink =
+  | { kind: "selected" }
+  | { kind: "collect"; notFitted: { label: string; reason: EditBlockedReason }[] };
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -578,7 +589,7 @@ export interface TimelineState {
    * 「失敗しても作成済みの印を消さない」など、**細かい約束を10個以上**持っている。
    * まとめて作る側に写すと、片方だけ直る（このリポジトリで繰り返している型）。
    */
-  _generateVoiceFor: (clipId: string) => Promise<void>;
+  _generateVoiceFor: (clipId: string, notice: VoiceNoticeSink) => Promise<void>;
   /**
    * **声をまとめて作る**（#1019 ⑥）＝文があってまだ作っていない読み上げを、上から順に作る。
    *
@@ -1578,10 +1589,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   generateSelectedVoice: async () => {
     const { selectedClipIds } = get();
     if (selectedClipIds.length !== 1) return;
-    await get()._generateVoiceFor(selectedClipIds[0]);
+    await get()._generateVoiceFor(selectedClipIds[0], { kind: "selected" });
   },
 
-  _generateVoiceFor: async (clipId) => {
+  _generateVoiceFor: async (clipId, notice) => {
     const doc = get().doc;
     if (!doc) return;
     const clip = doc.clips.find((c) => c.id === clipId);
@@ -1641,9 +1652,31 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         result.durationSec > 0 ? trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec) : null;
       // 長さを合わせられない（置けない）ときは、**声はそのまま置いて**理由を出す＝作った声を捨てない。
       // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
+      // ⚠️ **断りの出し先は呼び出し側が決める**（#1045）＝1件ずつなら相手は「選んだ部品」だが、
+      //   まとめて作ると**選んでいない部品**が相手になる＝欄を指すだけでは**どの部品の話か読めない**
+      //  （§2-5・ADR-0034 決定10「操作した所で返す」）。まとめて作る側は名前を集めて最後に出す。
+      // ⚠️ **出し先の振り分けは1か所・網羅で書く**（PR #1049 レビュー 🟡）＝独立した `if` を2つ置くと、
+      //   3つ目の出し先が増えたとき**どちらもコンパイルエラーにならずに素通り**する（片方だけ直せてしまう）。
+      const blocked = sized && !sized.ok ? sized.reason : null;
+      let editBlocked: { reason: EditBlockedReason; at: BlockTarget } | undefined;
+      if (blocked) {
+        switch (notice.kind) {
+          case "selected":
+            editBlocked = { reason: blocked, at: blockTargetFor(blocked, PANEL_ID.selected) };
+            break;
+          case "collect":
+            notice.notFitted.push({ label: clipLabel(current), reason: blocked });
+            break;
+          default: {
+            // 網羅（`never` チェック）＝`VoiceNoticeSink` に出し先が増えたら、ここが型で止める。
+            const _exhaustive: never = notice;
+            void _exhaustive;
+          }
+        }
+      }
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
-        ...(sized && !sized.ok ? { editBlocked: { reason: sized.reason, at: blockTargetFor(sized.reason, PANEL_ID.selected) } } : {}),
+        ...(editBlocked ? { editBlocked } : {}),
       }, { outsideGroup: true });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
@@ -1697,12 +1730,36 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // **2件目以降が黙って return する**（作ったつもりで作られていない＝いちばん質の悪い失敗）。
       // 枠を増やす改修は、あの関数が持つ「作っている間に設定が変わったら使わない」等の
       // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
+      // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
+      // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
+      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [] };
       for (const id of doc.clips.filter(voiceClipNeedsVoice).map((c) => c.id)) {
         // ⚠️ **中止されたら次の1件へ進まない**＝作った声はそのまま残す（取り消しではない）。
         if (get()._bulkVoiceRun !== runSeq) break;
         // ⚠️ **文書が入れ替わったら止める**＝別の動画の読み上げを作りにいかない。
         if (get().doc?.projectId !== doc.projectId) break;
-        await get()._generateVoiceFor(id);
+        await get()._generateVoiceFor(id, notice);
+      }
+      // ⚠️ **自分の実行のときだけ出す**＝中止・文書切替の後に、もう関係ない動画へ案内を残さない。
+      // ⚠️ **1件ずつの失敗（声そのものが作れない）は `voiceError` に出ている**ので上書きしない。
+      // ⚠️ **文書の一致も見る**（PR #1049 レビュー 🔴）＝文書が入れ替わったときは `break` するだけで
+      //   世代番号は進まないので、世代だけ見ていると**別の動画へ前の動画の部品名が出る**。
+      if (
+        notice.notFitted.length > 0 &&
+        get()._bulkVoiceRun === runSeq &&
+        get().doc?.projectId === doc.projectId &&
+        !get().voiceError
+      ) {
+        // ⚠️ **理由ごとの次の行動を添える**（PR #1049 レビュー 🟡）＝合わせられない理由は重なりとは
+        //   限らない（列が固定されていることもある）ので、まとめの文に1つの締めを書くと**片方では
+        //   効かない案内**になる。理由の文はそれぞれが次の行動を持っているので、**出た理由のぶんだけ**添える。
+        const reasons = [...new Set(notice.notFitted.map((n) => n.reason))];
+        set({
+          voiceError: [
+            bulkVoiceNotFittedMessage(notice.notFitted.map((n) => n.label)),
+            ...reasons.map((r) => `${editBlockedMessage[r]}。`),
+          ].join(""),
+        });
       }
     } finally {
       // 中止・文書切替で世代が進んでいたら、この実行はもう現行ではない＝後発が立てた状態を消さない。
