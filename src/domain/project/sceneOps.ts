@@ -16,6 +16,7 @@ import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource, freeSubtitleElementTexts, sceneDisplayedSubtitleTexts } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
+import { textKeyOfLayer } from '../template/layerOps';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
 export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
@@ -230,8 +231,9 @@ export function freeLayoutFromPlacedContent(
       const id = nextId();
       characterElementIds.add(id); // 差し込み口の層ではない＝slotLayerByElementId には入れない（#831）
       elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
-    } else if (layer.type === LAYER_TYPE.text && layer.textKey) {
-      const text = scene.texts[layer.textKey];
+    } else if (layer.type === LAYER_TYPE.text && textKeyOfLayer(layer)) {
+      const textKey = textKeyOfLayer(layer)!;
+      const text = scene.texts[textKey];
       if (!text) continue; // 空文字は持ち込まない
       // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
       // 変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る（隣の fontId は per-scene なのに体裁だけ戻る＝
@@ -240,7 +242,7 @@ export function freeLayoutFromPlacedContent(
       // ここで項目を手で並べていたため、**新しい項目を足すたびに写し漏れ**が出た
       //（`letterSpacing`/`shadow` が漏れ、直したあとも `background` の場面別上書きが漏れた）。
       // 数え上げる場所を1つにすれば、`TextStyle` が増えてもここは無変更で済む。
-      const style = freeTextStyleFields(layer, scene.textStyles?.[layer.textKey]);
+      const style = freeTextStyleFields(layer, scene.textStyles?.[textKey]);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
@@ -248,7 +250,7 @@ export function freeLayoutFromPlacedContent(
         h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         text,
         ...style,
-        fontId: scene.textFontIds?.[layer.textKey],
+        fontId: scene.textFontIds?.[textKey],
       });
     } else if (opts.faithful && (layer.type === LAYER_TYPE.shape || layer.type === LAYER_TYPE.decor)) {
       // 図形・装飾＝描画（`layoutScene`）と同じ既定へ落とす（線は矩形として写す＝描画の扱いと同じ）。
@@ -267,7 +269,9 @@ export function freeLayoutFromPlacedContent(
       if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
       // 体裁は上の ⚠️ と同じ理由で `freeTextStyleFields` に任せる。
-      const style = freeTextStyleFields(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+      // **どの文字を指すか**は1か所で解く（#1058・`textKeyOfLayer` は字幕層の未指定を `subtitle` と解く）。
+      const subKey = textKeyOfLayer(layer);
+      const style = freeTextStyleFields(layer, subKey ? scene.textStyles?.[subKey] : undefined);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
@@ -277,7 +281,7 @@ export function freeLayoutFromPlacedContent(
         h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
         ...style,
-        fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+        fontId: subKey ? scene.textFontIds?.[subKey] : undefined,
       });
     }
   }
@@ -348,8 +352,9 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
   if (poseAssetId) for (const l of shownLayers) if (l.type === LAYER_TYPE.character) add(assetBag, poseAssetId);
   const textBag = new Map<string, number>();
   for (const layer of shownLayers) {
-    if (layer.type !== LAYER_TYPE.text || !layer.textKey) continue;
-    const text = scene.texts[layer.textKey];
+    const tk = textKeyOfLayer(layer);
+    if (layer.type !== LAYER_TYPE.text || !tk) continue;
+    const text = scene.texts[tk];
     // 空文字だけを除く＝`layoutScene` が描く条件（`text.length > 0`）と同じ。空白だけの文字も**描かれる**
     // （背景帯つきなら帯が出る）ので、trim で落とすと受け皿を数え落とす。
     if (text) add(textBag, text);

@@ -6,7 +6,7 @@ import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../..
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPES, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
-import { addLayer, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_SUBTITLE, DEFAULT_TEXT_KEY_TEXT, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { addLayer, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_TEXT, textKeyOfLayer, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { DELETE_LABEL, DUPLICATE_LABEL, deleteLookConfirmMessage } from "../uiLabels";
@@ -283,7 +283,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // テキスト層は差し込み先（見出し／本文…）を併記する。場面編集の FREE 一覧が名前＋中身で区別できるのと揃える。
   const layerRowName = (l: Layer): string => {
     const base = layerLabel[l.type];
-    const key = l.textKey ? textKeyLabel[l.textKey] : "";
+    // 字幕層の未指定は `subtitle`（#1058）＝直に見ると、名前に「（字幕）」が出ない。
+    const tk = textKeyOfLayer(l);
+    const key = tk ? textKeyLabel[tk] : "";
     return key && key !== base ? `${base}（${key}）` : base; // 「字幕（字幕）」のような重複は付けない
   };
 
@@ -612,7 +614,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
-            <select className="select" value={l.textKey ?? (l.type === LAYER_TYPE.subtitle ? DEFAULT_TEXT_KEY_SUBTITLE : DEFAULT_TEXT_KEY_TEXT)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+            <select className="select" value={textKeyOfLayer(l) ?? DEFAULT_TEXT_KEY_TEXT} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
               {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
             </select>
           </div>

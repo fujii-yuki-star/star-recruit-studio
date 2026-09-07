@@ -6,6 +6,7 @@ import type { Scene } from '../project/types';
 import { templateSlotIds } from './layerOps';
 import { isUserTemplate } from './userTemplate';
 import { freeContentHiddenBySwitch } from '../project/sceneOps';
+import { textKeyOfLayer } from './layerOps';
 
 /** 場面編集の見た目ピッカーに渡す整合結果（#415）。 */
 export interface PickableTemplates {
@@ -152,7 +153,8 @@ export function contentHiddenBySwitch(scene: Scene, next: Template, prev?: Templ
 
 /** テンプレが表示できる文字の種別。 */
 function textKeysOfTemplate(t: Template): Set<TextKey> {
-  return new Set(t.layers.map((l) => l.textKey).filter((k): k is TextKey => !!k));
+  // 字幕層の未指定は `subtitle`（#1058）＝数え落とすと「文字を持たない見た目」と見なされる。
+  return new Set(t.layers.map((l) => textKeyOfLayer(l)).filter((k): k is TextKey => !!k));
 }
 
 /** 中身が入っている文字の種別（空文字は「失うもの」に数えない）。 */
