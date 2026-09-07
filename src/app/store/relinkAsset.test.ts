@@ -170,6 +170,16 @@ describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
     expect(useProjectStore.getState().importError).toContain('写真のファイルをお選びください');
   });
 
+  // ⚠️ **音も種類として数える**（#1050・PR #1059 レビュー 🟡）＝もとは「動画かどうか」だけで、
+  //    **絵の素材へ音を差し替えても通って**いた（絵として描いて何も映らない）。両形式ともここで断る。
+  it('写真の素材を音で差し替えようとしても断る', async () => {
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png' })] });
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath');
+    await relink('D:/new/曲.mp3');
+    expect(copy, '音のファイルを運んでしまった').not.toHaveBeenCalled();
+    expect(useProjectStore.getState().importError).toContain('写真のファイルをお選びください');
+  });
+
   /**
    * ⚠️ **絵の種類は写真と同じ扱いで守る**（レビュー 3人が指摘）＝判定を `assetType` と直接くらべると
    * `logo`/`yuko`/`qr`/`decor` が素通りし、**無言で動画に差し替わる**（この画面はそれらも一覧に出す）。

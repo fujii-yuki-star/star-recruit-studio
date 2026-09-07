@@ -59,7 +59,7 @@ import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
-import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
+import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
@@ -2587,12 +2587,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **種類の違うファイルへは差し替えない**（§2-5・ADR-0026④）＝写真↔動画で入れ替えると、
     // 種類を変えれば**置いた差し込み口が受け付けなくなって黙って消え**、種類を変えなければ
     // **写真として動画を描く**ことになり何も映らない。どちらも黙って別の結果なので、断って手を示す。
-    // ⚠️ 判定は **`changesAssetKind`（動画かどうか）**＝`assetType` と直接くらべると
+    // ⚠️ 判定は **`changesAssetKind`（動画／音／絵の3つ）**＝`assetType` と直接くらべると
     // `logo`/`yuko`/`qr`/`decor` が素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。
+    // ⚠️ **音も種類として数える**（#1050）＝もとは「動画かどうか」だけで、**絵の素材へ音を差し替えても
+    // 通って**いた（絵として描いて何も映らない）。タイムライン形式で音の選び直しができるようになって
+    // 到達するようになったので、両形式ともここで断る。
     // ⚠️ **着地は「まだ同じ動画を開いているか」で括る**（差分再監査 2巡目・ほかの取り込み経路と同じ規則）。
     const stillOpen = sameDocGuard(get);
     if (changesAssetKind(target.assetType, srcPath)) {
-      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video, PROJECT_FORMAT.scene) });
+      set({ importError: assetTypeMismatchMessage(assetKindOf(target.assetType), PROJECT_FORMAT.scene) });
       return;
     }
 

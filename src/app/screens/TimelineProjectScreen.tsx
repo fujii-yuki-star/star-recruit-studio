@@ -40,7 +40,7 @@ import { assignableAssetsFor, emptySlotLayerIds } from "../../domain/template/sl
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
-import { showOpenAssetsDialog } from "../../infrastructure/dialog";
+import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
@@ -1412,15 +1412,40 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       }),
     [],
   );
+  /**
+   * **音が出せない素材そのもの**（#1050）＝件数だけでなく、**どれを選び直すか**を出すために要る。
+   *
+   * ⚠️ **材料は絵の側と同じ2つ**＝①鳴らす材料を用意できなかった ②**ファイルが実際に見つからない**。
+   * ⚠️ **読み上げは対象外**＝あれは素材ではなく作った音声なので、直し方は「もう一度作る」（`§9`）。
+   */
+  const missingAudioAssets = useMemo(() => {
+    if (!doc) return [];
+    const gone = new Set(missingAssetIds);
+    const unresolved = new Set(
+      doc.clips
+        .filter((c) => c.kind === TIMELINE_CLIP_KIND.audio && c.assetId)
+        .filter((c) => {
+          const key = audioSourceKeyOfClip(c);
+          return gone.has(c.assetId ?? "") || !key || !audioSrcByKey[key];
+        })
+        .map((c) => c.assetId ?? ""),
+    );
+    return doc.assets.filter((a) => unresolved.has(a.assetId));
+  }, [doc, audioSrcByKey, missingAssetIds]);
   // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
   const missingAudioCount = useMemo(() => {
     if (!doc) return 0;
+    // ⚠️ **選び直せるものは、そちらの知らせに任せる**（PR #1059 レビュー 🟡）＝両方出すと、
+    //   同じ1つの部品について**別々の次の行動**（「ファイルを選び直す」と「鳴らす音で選び直す」）が
+    //   並ぶ。絵の側は1つの知らせに畳んでいるので、音も同じ形にする（§2-5・ADR-0026②）。
+    const relinkable = new Set(missingAudioAssets.map((a) => a.assetId));
     return doc.clips.filter((c) => {
       if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
+      if (c.assetId && relinkable.has(c.assetId)) return false;
       const key = audioSourceKeyOfClip(c);
       return !key || !audioSrcByKey[key];
     }).length;
-  }, [doc, audioSrcByKey]);
+  }, [doc, audioSrcByKey, missingAudioAssets]);
   /**
    * 絵として使っていて**出せない**素材の番号（件数と一覧の**単一の参照元**）。
    *
@@ -1465,6 +1490,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const onRelink = async (assetId: string): Promise<void> => {
     const paths = await showOpenAssetsDialog();
     if (paths[0]) await relinkAssetByPath(assetId, paths[0]);
+  };
+
+  /**
+   * **音の**素材のファイルを選び直す（#1050）。⚠️ **選ばせる口を種類で分ける**＝
+   * 差し替えは同じ種類でしか通らないので、写真・動画を選べる口から入ると**選んでから断られる**。
+   */
+  const onRelinkAudio = async (assetId: string): Promise<void> => {
+    const path = await showOpenAudioDialog();
+    if (path) await relinkAssetByPath(assetId, path);
   };
 
   /**
@@ -5031,6 +5065,27 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   className="btn btn-secondary text-sm"
                   {...busyGuard({ disabled: isImporting, hint: isImporting ? "いま取り込んでいます" : undefined })}
                   onClick={() => void onRelink(a.assetId)}
+                >
+                  ファイルを選び直す
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {missingAudioAssets.length > 0 && (
+        <div className="notice notice-warn" role="alert">
+          {/* ⚠️ **絵の側と同じ手を出す**（#1050）＝番号を変えずファイルだけ差し替えるので、
+              置いた場所・切り出す範囲・音量の変化はそのまま残る（取り込み直すと作り直しになる）。 */}
+          <p>音が出せない素材があります。ファイルを選び直すと、置いた場所・切り出す範囲・音量の変化はそのまま残ります。</p>
+          <div className="col gap-sm">
+            {missingAudioAssets.map((a) => (
+              <div key={a.assetId} className="row-between" style={{ alignItems: "center" }}>
+                <span className="text-sm">{a.displayName}</span>
+                <button
+                  className="btn btn-secondary text-sm"
+                  {...busyGuard({ disabled: isImporting, hint: isImporting ? "いま取り込んでいます" : undefined })}
+                  onClick={() => void onRelinkAudio(a.assetId)}
                 >
                   ファイルを選び直す
                 </button>
