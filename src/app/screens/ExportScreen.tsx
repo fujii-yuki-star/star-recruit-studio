@@ -674,7 +674,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <div className="notice notice-warn row-between" role={showsPastResult ? "status" : "alert"}>
               <span>{message}</span>
               {/* ⚠️ **次の行動をその場に置く**（#1032・§2-5）＝直す入口（公開前チェック）も
-                  やり直す入口（動画を保存）も**遠く上にしか無かった**（進行バーや保存先の欄を挣んで
+                  やり直す入口（動画を保存）も**遠く上にしか無かった**（進行バーや保存先の欄を挟んで
                   画面外になりうる）。他画面向けの終了通知（`ExportResultNotice`）は行動を持っているのに、
                   **失敗を直に見ているこの画面だけが読むだけ**だった。
                   ⚠️ **押せる条件は上のボタンと同じ述語**（`exportDisabled`）＝書き並べると片方だけ塞がれない。 */}
