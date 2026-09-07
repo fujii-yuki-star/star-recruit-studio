@@ -9,6 +9,7 @@ import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Template, TextShadow } from '../domain/template/types';
 import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
+import { textKeyOfLayer } from '../domain/template/layerOps';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
@@ -329,7 +330,14 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           ? opts.subtitleText ?? ''
           : staticSubtitleOff
             ? ''
-            : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
+            // ⚠️ **どの文字を出すかの解き方は1か所**（§2-7・#1055）＝`textKeyOfLayer` は
+            //   **字幕層の未指定を `subtitle` と解く**のに、ここは `layer.textKey` を直に見ており、
+            //   **場面編集には字幕の欄が出るのに描く側は何も出さない**、という食い違いになっていた。
+            //   ⚠️ **いま実害は無い**＝`textKey` は schema の必須で、欠けた文書は読込時に補われる
+            //   （`11 §9`・`withRequiredLayerFields`）ので、この形は普通の経路では届かない。
+            //   それでも直すのは、**コメント（`textKeyOfLayer` の「`layoutScene` の既定束縛と同じ」）が
+            //   実装より強いことを言っている**＝そこがドリフトの起点になるため。
+            : (() => { const k = textKeyOfLayer(layer); return k ? scene.texts[k] ?? '' : ''; })();
         // ⚠️ **帯は字幕だけのものではなくなった**（#264）＝文字層にも出す。
         // 以前は `isSub` で切っていたので、テンプレ作者が文字層に帯を設定しても**描かれなかった**。
         // ⚠️ **場面の上書きも効かせる**（`style.background`）＝場面ごとに帯を出し入れできる。
