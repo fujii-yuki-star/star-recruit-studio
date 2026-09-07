@@ -331,3 +331,11 @@ export const generalPurposeOptions: PurposeOption[] = GENERAL_PURPOSES.map((id) 
  */
 export type SceneEditFocus = "narration" | "assets" | "look";
 
+/**
+ * 設定画面を開いたとき、どの欄へ寄るか（#1032）。
+ *
+ * 設定は縦に長く、目的の欄（会社の見た目）は**下の方**にある。導線を置くだけだと
+ * **押しても目的の欄が見えない**ので、行き先を持たせる（{@link SceneEditFocus} と同じ流儀）。
+ */
+export type SettingsFocus = "brandKit";
+

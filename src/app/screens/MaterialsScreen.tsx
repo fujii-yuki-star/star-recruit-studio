@@ -10,6 +10,7 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectS
 import { useTimelineStore } from "../store/timelineStore";
 import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
+import { BrandKitLink } from "../components/BrandKitLink";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { NoticeZone } from "../components/NoticeZone";
@@ -166,6 +167,10 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           />
         }
       />
+
+      {/* 会社の見た目（ADR-0036）への入口（#1032）。素材を選んでいるときにこそ思い出すのに、
+          設定画面の奥だけにしか入口が無かった。 */}
+      <BrandKitLink onNavigate={onNavigate} />
 
       <NoticeZone>
         {importError && (

@@ -10,6 +10,7 @@ import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
+import { BrandKitLink } from "../components/BrandKitLink";
 import { EmptyState } from "../components/states";
 import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
@@ -202,9 +203,14 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
       />
       <ExportLock onNavigate={onNavigate}>
       {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
-      <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
-        場面編集を開く
-      </button>
+      <div className="row gap-sm">
+        <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
+          場面編集を開く
+        </button>
+        {/* 会社の見た目（ADR-0036）への入口（#1032）。見た目を選んでいるときにこそ思い出すのに、
+            設定画面の奥だけにしか入口が無かった。 */}
+        <BrandKitLink onNavigate={onNavigate} />
+      </div>
 
       {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
       {creating ? (

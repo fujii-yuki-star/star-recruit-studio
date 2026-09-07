@@ -62,7 +62,19 @@ function App() {
     // 離れる前に聞きたい画面があれば、ここで一度だけ聞く（#719）。断られたら**遷移しない**
     // ＝確認を出すのは断った側の責任（黙って止めない・§2-5）。サイドバーもこの入口を通るので、
     // 画面内のボタンだけに確認が付いていて素通しできる、という穴が構造的に塞がる。
-    if (!canNavigate(next)) return;
+    if (!canNavigate(next)) {
+      // ⚠️ **断られたら、行き先で寄る指定も落とす**（PR #1074 レビュー）。
+      // 導線はどれも**指定を置いてから遷移を頑む**形なので、ここで断ると**指定だけが残る**。
+      // 残ると、あとでサイドバーから素直にその画面を開いたときに**勝手に寄る**（押してもいない指定で動く）。
+      // ⚠️ **入口はここひとつ**なので、どの画面が関門を持っても同じように守れる
+      //（導線ごとに書くと、関門が後から付いた画面でだけ漏れる）。
+      // ⚠️ 落とすのは**寄る先の指定だけ**＝「どの場面を編集中か」（`editingSceneId`）は
+      // 遷移とは別に意味を持つので触らない。
+      const st = useProjectStore.getState();
+      st.setEditingSceneFocus(null);
+      st.setSettingsFocus(null);
+      return;
+    }
     setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
     setScreen(next);
   }, []);
