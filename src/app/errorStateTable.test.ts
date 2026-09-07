@@ -16,6 +16,7 @@ import {
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE,
 } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
+import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { PROJECT_SAVE_WOULD_BREAK, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "./uiLabels";
@@ -93,6 +94,7 @@ function codeMessages(): Record<string, string> {
     TIMELINE_SUBTITLE_OVERLAP: subtitleOverlapMessage(" N " as unknown as number),
     // ⚠️ **画面のローカル定数のままにしない**（PR #1056 レビュー 🟡）＝ここへ載せないと
     // **弱い段**（実装のどこかに在るか）でしか守られず、片方だけ書き換えても気づけない。
+    PROJECT_NEWER_VERSION: PROJECT_NEWER_VERSION_MESSAGE,
     PROJECT_OPEN_FAILED: PROJECT_OPEN_FAILED_MESSAGE,
     PROJECT_DELETE_FAILED: PROJECT_DELETE_FAILED_MESSAGE,
     // ⚠️ **理由 × 単体/まとめて＝6通りを、6行として等値で守る**（#1012）＝1つの行に畳むと
@@ -282,8 +284,11 @@ export function messageConstsOf(src: string): { name: string; literal: string | 
   const out: { name: string; literal: string | null }[] = [];
   for (const m of src.matchAll(/export const ([A-Z0-9_]+_MESSAGE)\s*=\s*([\s\S]*?);$/gm)) {
     const [, name, body] = m;
-    const plain = /^\s*(?:"[^"]*"\s*\+?\s*)+$/.test(body);
-    out.push({ name, literal: plain ? [...body.matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("") : null });
+    // ⚠️ **引用符は両方**（#1051）＝`uiLabels` は `"`、`domain` は `'` を使う（層で流儀が違う）。
+    const plain = /^\s*(?:(?:"[^"]*"|'[^']*')\s*\+?\s*)+$/.test(body);
+    // 中身は**どちらの引用符でも**取り出す（片方だけ見ると `null` に落ちて誤って赤くなる）。
+    const parts = [...body.matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2] ?? '');
+    out.push({ name, literal: plain ? parts.join('') : null });
   }
   return out;
 }
@@ -347,6 +352,69 @@ describe("15 §6 の表と実装の一致（#855）", () => {
 
 
   /**
+   * `*_MESSAGE`（素の文字列）を置いている**すべてのファイル**（#1051・PR #1065 レビュー 🟡）。
+   *
+   * ⚠️ **一覧で持たない**＝新しいファイルへ置いた人が**一覧への追加を忘れても緑のまま**通る
+   *（このPR自身が直そうとしている「載せ忘れを構造で止められない」形そのもの）。`src` を歩く。
+   * ⚠️ **検査のファイルは除く**（`sourceBlob` と同じ流儀＝fixture を拾わない）。
+   */
+  const messageConstFiles = (): string[] => {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p2 = join(dir, name);
+        if (statSync(p2).isDirectory()) walk(p2);
+        else if (/\.tsx?$/.test(name) && !name.includes(".test.")) out.push(p2);
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    return out;
+  };
+
+  /**
+   * **組み立てる文言のうち、表と1対1で結べないもの**（#1051）。⚠️ **理由を書く**。
+   * `ASSEMBLED_AT_RUNTIME`（表の行を外す側）とは別＝こちらは**関数の側**を外す。
+   */
+  const MESSAGE_FN_EXEMPT: Record<string, string> = {
+    // ── 状況で締めが変わる（1つの行に対して複数の文）＝等値では守れない ──
+    lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
+    hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
+    volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
+    missingTemplateMessage: "件数の有無で締めが変わる",
+    sceneTemplateProblemMessage: "候補の有無で締めが変わる（3段の出し分け）",
+    subtitleOverflowMessage: "原因（同時に出しすぎ／1帯が大きい）で次の行動が変わる",
+    silentSubtitleMessage: "出ない理由（`SubtitleSilentReason`）ごとに次の行動が変わる",
+    assetTooLargeMessage: "画面ごとに次の行動が違う（別の取り込み方があるか）＝`15 §6` も①②で書いている",
+    noScenesMessage: "4画面で共有し、画面ごとに次の行動が違う",
+    standardLookResultMessage: "直った数・直せなかった数の組み合わせで文が変わる",
+    freeSwitchConfirmMessage: "動画に出なくなる中身の件数と種類で文が変わる",
+    // ⚠️ **名前は受け取っていない**（PR #1065 レビュー 🟡＝私の分類が実装と食い違っていた）＝
+    //   3つの数（変わる／出なくなる／直せない）で**最大4つの節が有無で組み合わさる**。
+    deleteLookConfirmMessage: "3つの数で節の有無が変わる（名前は受け取らない）",
+    // ── 押せない理由・進み具合の知らせ（`15 §6` の「エラー・状態」の行とは別のもの） ──
+    // ⚠️ **表に載せる筋のものではない**＝どれも「いまはこうだから押せない」を**その場で**言うもので、
+    //   状態の一覧（`15 §6`）に対応する行を持たない（持たせると、表が画面の文字の一覧になる）。
+    bulkVoiceRunningNotice: "走っている件数を差し込む進み具合の知らせ（状態の行ではない）",
+    bulkVoiceDisabledReason: "押せない理由を状況で選ぶ（形式ごとの呼び名も差し込む）",
+    standardLookButtonReason: "押せない理由を状況で選ぶ",
+    subtitleOverflowPrecheckDetail: "公開前チェックの詳しい説明（原因ごとに変わる）",
+    swallowedByNextPrecheckDetail: "同上（次の場面に飲まれる場面の説明）",
+    omittedAssetsNote: "送信前確認で「送らなかったもの」を件数つきで添える",
+    // ── 外から来た文字列を運ぶ（この関数は文言を持たない） ──
+    importErrorMessage: "取り込み側が返した理由をそのまま出す（持っているのは既定の1文だけ）",
+    generateFailedMessage: "作成側が返した理由をそのまま出す",
+    resolveExportBlockedMessage: "状況から**既にある文**を選んで返すだけ（自分では持たない）",
+    // ── 名前・件数を差し込むだけ（表は代表の1文を持つ）＝等値へ寄せられる余地あり ──
+    importPartlyFailedMessage: "件数と名前を差し込むだけ＝等値へ寄せる余地あり",
+    libraryPartlyFailedMessage: "同上（よく使う素材の側）",
+    importCancelledMessage: "入った件数で言い方が変わる（0件のときは件数を言わない）",
+    // ⚠️ **等値へ寄せるには、先に表へ行を足す必要がある**（同レビュー）＝いまは表に対応する行が無い
+    //   （`clipClampedMessage` は `ASSET_FILE_MISSING` の由来欄で触れられているだけ）。
+    assetTypeMismatchMessage: "種類（動画／音／写真）×形式（場面／タイムライン）＝6通り。表に行が無い",
+    clipClampedMessage: "件数×形式。表に行が無い（由来欄で触れているだけ）",
+  };
+
+  /**
    * **載せ忘れを構造で止める**（#1012）。
    *
    * ⚠️ **この走査は「載せたものは表にもある」を見る**＝`codeMessages()` へ載せていない文言は
@@ -359,14 +427,53 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 次に読む人は「書き忘れ」と読む。いまは1件も外していない。
   };
 
+  /**
+   * **組み立てる文言（`*Message` の関数）も、どちらかで見られている**（#1051）。
+   *
+   * ⚠️ **`*_MESSAGE`（素の文字列）だけを見ていた**＝関数で組み立てる文言は**この段の外**で、
+   * 弱い段（実装のどこかに在るか）でしか守られていなかった。**名前で線を引く**＝
+   * `*Message` は断り・知らせ、それ以外（`*Label`・`format*`・`*Text`）は**ラベルや書式**なので対象外。
+   */
+  // ⚠️ **外した控えが腐らないようにする**（PR #1065 レビュー 🟡）＝`ASSEMBLED_AT_RUNTIME` には
+  //    同じ検査があるのに、こちらには無かった（消えた関数を外し続けても気づけない）。
+  it("外したまま実装から消えた関数が残っていない", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8");
+    const gone = (keys: string[]): string[] => keys.filter((n) => !src.includes(`export function ${n}(`));
+    expect(gone(Object.keys(MESSAGE_FN_EXEMPT)), "実装から消えたのに外し続けている").toEqual([]);
+    // ⚠️ **見つけられることも見る**＝いま腐りが1つも無いので、上の行だけでは
+    //   「見つけられない実装」でも緑になる（門番の枝を直接見る）。
+    expect(gone(["thisFunctionDoesNotExist"]), "腐りを見つけられない").toEqual(["thisFunctionDoesNotExist"]);
+  });
+
+  it("`uiLabels` の断り・知らせの関数は、等値で守るか、理由つきで外してある", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8");
+    // ⚠️ **`*Message` だけでは足りない**（PR #1065 レビュー 🟡）＝`*Reason`／`*Notice`／`*Detail`／`*Note`
+    //   という名前の**断り・知らせ**が実在し、命名規約1つの外側に同じ穴が残っていた。
+    const names = [...src.matchAll(/export function ([a-z][A-Za-z0-9_]*(?:Message|Reason|Notice|Detail|Note))\s*\(/g)].map((m) => m[1]);
+    expect(names.length, "1つも拾えていない＝走査が壊れている").toBeGreaterThanOrEqual(15);
+    // ⚠️ **線引きそのものを固定する**（PR #1065 レビュー 🟡）＝`*Message` だけへ戻しても、
+    //   外してあるものが外してあるだけなら**緑のまま**通る（狭まったことに気づけない）。
+    expect(names, "`*Reason` を見ていない").toContain("bulkVoiceDisabledReason");
+    expect(names, "`*Notice` を見ていない").toContain("bulkVoiceRunningNotice");
+    expect(names, "`*Detail` を見ていない").toContain("subtitleOverflowPrecheckDetail");
+    expect(names, "`*Note` を見ていない").toContain("omittedAssetsNote");
+    const guarded = new Set([...Object.keys(codeMessages()), ...Object.keys(ASSEMBLED_AT_RUNTIME)]);
+    const body = readFileSync(join(process.cwd(), "src/app/errorStateTable.test.ts"), "utf8");
+    // 等値で守るときは `codeMessages()` の中で呼ぶ（＝この検査ファイルに名前が出る）。
+    const unguarded = names.filter((n) => !body.includes(`${n}(`) && !guarded.has(n) && !(n in MESSAGE_FN_EXEMPT));
+    expect(unguarded, "`codeMessages()` へ載せるか、理由つきで `MESSAGE_FN_EXEMPT` へ").toEqual([]);
+  });
+
   // ⚠️ **この段が見るのは `uiLabels.ts` の `*_MESSAGE` だけ**（PR #1048 レビュー ℹ️）＝関数で
   //    組み立てる文言・画面やほかの層に直書きした文字列は**この段の外**（弱い段でしか守られていない）。
   //    「これで全部守られている」と読まれないように書き残す。射程を広げるのは別で追う。
   // ⚠️ **エスケープを含む文言は取り違えうる**＝ソースの文字をそのまま読むので、改行の記号（\n）を含む文言を
   //    足すと**実際の値と別の文字列**として拾う。ただし拾い方が崩れれば `literal: null` に落ち、
   //    `MESSAGE_EXEMPT` に無ければ**赤くなる**（黙って通らない＝失敗の向きは安全側）。
-  it("`uiLabels` の `*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
-    const found = messageConstsOf(readFileSync(join(process.cwd(), "src/app/uiLabels.ts"), "utf8"));
+  it("`*_MESSAGE` は、必ず等値で守られている（載せ忘れたら落ちる）", () => {
+    // ⚠️ **`uiLabels.ts` の外も見る**（#1051）＝`domain`・`store` にも `*_MESSAGE` があり、
+    //   そこは**弱い段でしか守られていなかった**（`PROJECT_NEWER_VERSION_MESSAGE` ほか）。
+    const found = messageConstFiles().flatMap((f) => messageConstsOf(readFileSync(f, "utf8")));
     const guarded = new Set(Object.values(codeMessages()).map(norm));
     // ⚠️ **「中身を取れなかった」も見逃さない**＝組み立てた文（テンプレート）は等値で守れないので、
     // **理由つきで外させる**（黙って素通りさせると、そこだけ誰も見ていない状態に戻る）。
@@ -380,16 +487,30 @@ describe("15 §6 の表と実装の一致（#855）", () => {
 
   // ⚠️ **門番そのものを見る**（`guard-gets-holes`）＝いまの `uiLabels.ts` に「組み立てた文」が
   //    1つも無いので、上の検査だけでは**その枝が本当に働くか分からない**（外しても緑のまま）。
+  // ⚠️ **見る範囲そのものを固定する**（#1051）＝ファイルを1つに戻しても、載っているものが
+  //    載っているだけなら**緑のまま**通る（範囲が狭まったことに気づけない）。
+  it("`uiLabels` の外の `*_MESSAGE` も拾っている（見る範囲が狭まったら落ちる）", () => {
+    const names = messageConstFiles().flatMap((f) => messageConstsOf(readFileSync(f, "utf8")).map((x) => x.name));
+    expect(names, "`domain` の断りを見ていない").toContain("PROJECT_NEWER_VERSION_MESSAGE");
+    expect(names, "`store` の断りを見ていない").toContain("OTHER_EXPORT_RUNNING_MESSAGE");
+  });
+
   it("組み立てた文は「中身を取れない」として拾う（門番の枝を直接見る）", () => {
     const fixture = [
       'export const A_MESSAGE = "あ" + "い";',
       "export const B_MESSAGE = `${name}を読み込めません`;",
       'export const C_MESSAGE = "「や、め、る」は。区切りを含む";',
+      // ⚠️ **引用符は両方**（#1051）＝層で流儀が違う。
+      "export const D_MESSAGE =\n  'ひとえの引用符でも読む';",
+      // ⚠️ **混ざった連結**（同レビュー ℹ️）＝1つの式の中で二重と単の引用符が混ざっても取り違えない。
+      "export const E_MESSAGE = \"ふた\" + 'えの';",
     ].join("\n");
     expect(messageConstsOf(fixture)).toEqual([
       { name: "A_MESSAGE", literal: "あい" },
       { name: "B_MESSAGE", literal: null },
       { name: "C_MESSAGE", literal: "「や、め、る」は。区切りを含む" },
+      { name: "D_MESSAGE", literal: "ひとえの引用符でも読む" },
+      { name: "E_MESSAGE", literal: "ふたえの" },
     ]);
   });
 
@@ -468,6 +589,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(82);
+    ).toBe(83);
   });
 });
