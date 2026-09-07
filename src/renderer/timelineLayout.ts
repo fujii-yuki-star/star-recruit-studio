@@ -556,10 +556,14 @@ export function overlappingSubtitleClips(
   if (subs.length < 2) return [];
   // 見る時刻＝**どれかの字幕が出はじめる瞬間**。2つの字幕の時間が重なっているなら、
   // **遅いほうの開始秒**では必ず両方が出ている（半開区間）＝**位置が時間で変わらないなら**尽きる。
-  // ⚠️ **動く字幕どうしの、途中で交差する重なりは見ない**（同レビュー 🟡）＝キーフレームで
-  //   位置が変わる字幕は、区間の**途中**で初めて重なることがある（別で追う）。
-  // ⚠️ **組ごとに時刻を作らない**＝字幕が増えると二乗で描き直すことになる（ここは字幕の数まで）。
+  // ⚠️ **動く字幕は「動きの節目」も見る**（#1053）＝キーフレームで位置が変わる字幕は、
+  //   **出はじめでは重なっていなくても、動いた先で重なる**（よくある使い方＝別の場所へ動かして着地する）。
+  //   その着地はキーフレームの時刻なので、**節目を足せば拾える**。
+  //   ⚠️ **節目と節目の「間」で交差して離れる**場合までは拾えない（等速で通り過ぎるなど）。
+  //   刻んで見れば拾えるが、字幕の数 × 刻みの数だけ1フレームを組み直すことになる（重い）。
+  // ⚠️ **組ごとに時刻を作らない**＝字幕が増えると二乗で描き直すことになる（ここは字幕の数＋節目の数）。
   const times = new Set(subs.map((c) => c.startSec));
+  for (const t of animationTimesOf(doc, subs)) times.add(t);
   const out: { aId: string; bId: string; atSec: number }[] = [];
   const seen = new Set<string>();
   for (const atSec of [...times].sort((x, y) => x - y)) {
@@ -608,4 +612,39 @@ function drawsSubtitle(clip: TimelineClip, templateOf: (templateId: string) => T
   if (clip.kind === TIMELINE_CLIP_KIND.subtitle) return true;
   if (clip.kind !== TIMELINE_CLIP_KIND.template || clip.templateId == null) return false;
   return templateOf(clip.templateId)?.layers.some((l) => l.type === LAYER_TYPE.subtitle) === true;
+}
+
+/**
+ * 字幕を描きうる部品に効く**動きの節目**（絶対秒）（#1053）。
+ *
+ * ⚠️ **起点は対象によって違う**（`11 §7.6`）＝部品に付いた動きは**その部品の開始秒**、
+ * まとまりに付いた動きは**所属するクリップのいちばん早い開始秒**（描く側と同じ `groupStartSec`）。
+ * ⚠️ **その部品が出ている間の節目だけ**を見る（出ていない時刻を見ても、その字幕は描かれない）。
+ */
+function animationTimesOf(doc: TimelineProject, subs: readonly TimelineClip[]): number[] {
+  const anims = doc.animations ?? [];
+  if (anims.length === 0) return [];
+  const groups = doc.groups ?? [];
+  const clipById = new Map(doc.clips.map((c) => [c.id, c]));
+  const out: number[] = [];
+  for (const clip of subs) {
+    // この部品に効く動き＝自分に付いたもの＋自分が入っているまとまりに付いたもの。
+    const targets: { id: string; origin: number }[] = [{ id: clip.id, origin: clip.startSec }];
+    for (const g of groups) {
+      if (groupElementIds(groups, g.id).includes(clip.id)) {
+        targets.push({ id: g.id, origin: groupStartSec(groups, g.id, clipById) });
+      }
+    }
+    for (const t of targets) {
+      const anim = anims.find((a) => a.targetId === t.id);
+      if (!anim) continue;
+      for (const kf of anim.keyframes) {
+        const at = t.origin + kf.timeSec;
+        // ⚠️ **その部品が出ている間だけ**に絞るのは**速さのため**（外の時刻を見ても、その字幕は
+        //   描かれないので結果は同じ）＝動きの節目が多い動画で、要らない1フレームを組み直さない。
+        if (at >= clip.startSec && at < clipEndSec(clip)) out.push(at);
+      }
+    }
+  }
+  return out;
 }
