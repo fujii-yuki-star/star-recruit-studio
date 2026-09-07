@@ -1,7 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
-import type { SceneEditFocus } from "../data/mockData";
+import type { SceneEditFocus, SettingsFocus } from "../data/mockData";
 import type { TimelineProject } from "../../domain/timeline/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
@@ -467,6 +467,12 @@ interface ProjectState {
    */
   editingSceneFocus: SceneEditFocus | null;
   setEditingSceneFocus: (focus: SceneEditFocus | null) => void;
+  /**
+   * 設定画面を開いたとき寄る欄（#1032）。**寄ったら落とす**＝残すと、
+   * あとでサイドバーから設定を開いたときにも**勝手にスクロールする**。
+   */
+  settingsFocus: SettingsFocus | null;
+  setSettingsFocus: (focus: SettingsFocus | null) => void;
   /** ウィザードの現在ステップ（#401）。画面遷移/離脱でローカル state が消えても復元できるよう store に保持する。
    *  サイドバー離脱→復帰・confirm「キャンセル」→ウィザードで、step0 に戻らず直前のステップを開く。新規/読込で 0。 */
   wizardStep: number;
@@ -895,6 +901,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingTemplateId: null,
   editingSceneId: null,
   editingSceneFocus: null,
+  settingsFocus: null,
   wizardStep: 0,
   confirmReturnTo: null,
   previewReturnTo: null,
@@ -2217,6 +2224,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
   setEditingSceneFocus: (focus) => set({ editingSceneFocus: focus }),
+  setSettingsFocus: (focus) => set({ settingsFocus: focus }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),

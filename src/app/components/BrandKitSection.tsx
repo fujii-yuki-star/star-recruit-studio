@@ -3,7 +3,7 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「ブランドキット」「アセット」は出さず「会社の見た目」と書く。
 // ⚠️ **自動では遡及しない**（決定3・§2-5）＝既にある動画は「この動画に反映する」を押したときだけ変わる。
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
@@ -40,6 +40,21 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
     ? { disabled: true, title: "会社の見た目を読めていないので、いまは変えられません。アプリを開き直してからお試しください。" }
     : {};
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
+  /**
+   * 素材画面・見た目パターンの画面から来たとき、**この欄まで寄る**（#1032）。
+   *
+   * 設定は縦に長く、この欄は下の方にあるので、導線を置くだけだと**押しても見えない**。
+   * ⚠️ **寄ったら落とす**＝残すと、あとでサイドバーから設定を開いたときにも勝手にスクロールする。
+   * ⚠️ `scrollIntoView` は一部の環境（jsdom）に無いので任意呼び出し（`PreviewScreen` と同じ）。
+   */
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const settingsFocus = useProjectStore((s) => s.settingsFocus);
+  const setSettingsFocus = useProjectStore((s) => s.setSettingsFocus);
+  useEffect(() => {
+    if (settingsFocus !== "brandKit") return;
+    cardRef.current?.scrollIntoView?.({ block: "start" });
+    setSettingsFocus(null);
+  }, [settingsFocus, setSettingsFocus]);
   const applyBrandKit = useProjectStore((s) => s.applyBrandKit);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const hasLogoAsset = useProjectStore((s) => s.assets.some((a) => a.assetType === ASSET_TYPE.logo));
@@ -134,7 +149,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
   }
 
   return (
-    <div className="card">
+    <div className="card" ref={cardRef}>
       <h2 className="section-title">会社の見た目</h2>
       <p className="page-desc text-pretty">
         よく使う文字の形・色・ロゴを覚えておくと、新しい動画に最初から入ります。
