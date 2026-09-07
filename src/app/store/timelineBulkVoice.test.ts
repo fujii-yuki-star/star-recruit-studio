@@ -20,6 +20,7 @@ vi.mock("../../infrastructure/projectFs", () => ({
   loadProjectDoc: vi.fn(async () => ""),
 }));
 
+import { editBlockedMessage } from "../uiLabels";
 import { useTimelineStore } from "./timelineStore";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { timelineVoiceProgress, voiceClipNeedsVoice } from "../../domain/timeline/voice";
@@ -132,6 +133,8 @@ describe("まとめて声を作る（#1019 ⑥）", () => {
     expect(msg, "どの部品の話か分からない").toContain("しめ");
     expect(msg, "収まったぶんまで名指しした").not.toContain("あいさつ");
     expect(useTimelineStore.getState().editBlocked, "相手の違う欄へ出した").toBeNull();
+    // ⚠️ **理由ごとの次の行動が添えてある**＝理由は重なりとは限らないので、まとめの文に締めを書かない。
+    expect(msg, "次の行動が無い").toContain(editBlockedMessage.TIMELINE_EDIT_OVERLAP);
   });
 
   // ⚠️ **文書が入れ替わったら、そちらへは出さない**（PR #1049 レビュー 🔴）＝文書切替は `break` する

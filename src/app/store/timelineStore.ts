@@ -9,7 +9,7 @@ import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, ty
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { bulkVoiceNotFittedMessage, clipLabel, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
+import { bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -93,7 +93,9 @@ import { volumeAt } from "../../domain/timeline/audio";
  * `"selected"`＝1件ずつ（相手＝いま選んでいる部品なので「選んだ部品」の欄へ）／
  * `"collect"`＝まとめて（相手は選んでいない部品なので、名前を集めて最後にまとめて出す）。
  */
-export type VoiceNoticeSink = { kind: "selected" } | { kind: "collect"; notFitted: string[] };
+export type VoiceNoticeSink =
+  | { kind: "selected" }
+  | { kind: "collect"; notFitted: { label: string; reason: EditBlockedReason }[] };
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -1663,7 +1665,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
             editBlocked = { reason: blocked, at: blockTargetFor(blocked, PANEL_ID.selected) };
             break;
           case "collect":
-            notice.notFitted.push(clipLabel(current));
+            notice.notFitted.push({ label: clipLabel(current), reason: blocked });
             break;
           default: {
             // 網羅（`never` チェック）＝`VoiceNoticeSink` に出し先が増えたら、ここが型で止める。
@@ -1748,7 +1750,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         get().doc?.projectId === doc.projectId &&
         !get().voiceError
       ) {
-        set({ voiceError: bulkVoiceNotFittedMessage(notice.notFitted) });
+        // ⚠️ **理由ごとの次の行動を添える**（PR #1049 レビュー 🟡）＝合わせられない理由は重なりとは
+        //   限らない（列が固定されていることもある）ので、まとめの文に1つの締めを書くと**片方では
+        //   効かない案内**になる。理由の文はそれぞれが次の行動を持っているので、**出た理由のぶんだけ**添える。
+        const reasons = [...new Set(notice.notFitted.map((n) => n.reason))];
+        set({
+          voiceError: [
+            bulkVoiceNotFittedMessage(notice.notFitted.map((n) => n.label)),
+            ...reasons.map((r) => `${editBlockedMessage[r]}。`),
+          ].join(""),
+        });
       }
     } finally {
       // 中止・文書切替で世代が進んでいたら、この実行はもう現行ではない＝後発が立てた状態を消さない。

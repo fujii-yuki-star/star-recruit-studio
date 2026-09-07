@@ -540,12 +540,14 @@ export function subtitleOverlapMessage(count: number): string {
  * **頭のいくつかと件数**にする。**読み上げは動画の数だけ増える**（取り込みは一度に選んだぶんで止まる）ので、
  * 全件並べると案内が画面を埋める＝場面の番号（`formatSceneNumbers`）と同じ理由で打ち切る。
  * ⚠️ **声は残っている**ことを言う＝「失敗」ではないので作り直させない。
+ * ⚠️ **次の行動はここに書かない**（PR #1049 レビュー 🟡）＝合わせられない理由は**重なり**とは限らず
+ *（**列が固定されている**こともある）、1つの締めを書くと**片方では効かない案内**になる（§2-5）。
+ * 理由ごとの次の行動は**その理由の文**（`editBlockedMessage`）が既に持っているので、呼び出し側が**添える**。
  */
 export function bulkVoiceNotFittedMessage(names: readonly string[]): string {
   const head = names.slice(0, 3).join("」「");
   const rest = names.length > 3 ? `」ほか${names.length - 3}件` : "」";
-  return `「${head}${rest}は、声は作りましたが長さを合わせられませんでした（ほかの部品と重なる・列が固定されている、など）。`
-    + `その部品を選んで、前後をあけてから長さを直してください。`;
+  return `「${head}${rest}は、声は作りましたが長さを合わせられませんでした。`;
 }
 
 /**
