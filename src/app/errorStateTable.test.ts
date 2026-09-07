@@ -381,6 +381,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
     hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
     volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
+    audioUnreadableMessage: "音源の種類（読み上げ／同梱の曲／取り込んだ素材）で次の行動が変わる",
     missingTemplateMessage: "件数の有無で締めが変わる",
     sceneTemplateProblemMessage: "候補の有無で締めが変わる（3段の出し分け）",
     subtitleOverflowMessage: "原因（同時に出しすぎ／1帯が大きい）で次の行動が変わる",
