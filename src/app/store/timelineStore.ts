@@ -1653,12 +1653,28 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **断りの出し先は呼び出し側が決める**（#1045）＝1件ずつなら相手は「選んだ部品」だが、
       //   まとめて作ると**選んでいない部品**が相手になる＝欄を指すだけでは**どの部品の話か読めない**
       //  （§2-5・ADR-0034 決定10「操作した所で返す」）。まとめて作る側は名前を集めて最後に出す。
-      if (sized && !sized.ok && notice.kind === "collect") notice.notFitted.push(clipLabel(current));
+      // ⚠️ **出し先の振り分けは1か所・網羅で書く**（PR #1049 レビュー 🟡）＝独立した `if` を2つ置くと、
+      //   3つ目の出し先が増えたとき**どちらもコンパイルエラーにならずに素通り**する（片方だけ直せてしまう）。
+      const blocked = sized && !sized.ok ? sized.reason : null;
+      let editBlocked: { reason: EditBlockedReason; at: BlockTarget } | undefined;
+      if (blocked) {
+        switch (notice.kind) {
+          case "selected":
+            editBlocked = { reason: blocked, at: blockTargetFor(blocked, PANEL_ID.selected) };
+            break;
+          case "collect":
+            notice.notFitted.push(clipLabel(current));
+            break;
+          default: {
+            // 網羅（`never` チェック）＝`VoiceNoticeSink` に出し先が増えたら、ここが型で止める。
+            const _exhaustive: never = notice;
+            void _exhaustive;
+          }
+        }
+      }
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
-        ...(sized && !sized.ok && notice.kind === "selected"
-          ? { editBlocked: { reason: sized.reason, at: blockTargetFor(sized.reason, PANEL_ID.selected) } }
-          : {}),
+        ...(editBlocked ? { editBlocked } : {}),
       }, { outsideGroup: true });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
@@ -1724,7 +1740,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       }
       // ⚠️ **自分の実行のときだけ出す**＝中止・文書切替の後に、もう関係ない動画へ案内を残さない。
       // ⚠️ **1件ずつの失敗（声そのものが作れない）は `voiceError` に出ている**ので上書きしない。
-      if (notice.notFitted.length > 0 && get()._bulkVoiceRun === runSeq && !get().voiceError) {
+      // ⚠️ **文書の一致も見る**（PR #1049 レビュー 🔴）＝文書が入れ替わったときは `break` するだけで
+      //   世代番号は進まないので、世代だけ見ていると**別の動画へ前の動画の部品名が出る**。
+      if (
+        notice.notFitted.length > 0 &&
+        get()._bulkVoiceRun === runSeq &&
+        get().doc?.projectId === doc.projectId &&
+        !get().voiceError
+      ) {
         set({ voiceError: bulkVoiceNotFittedMessage(notice.notFitted) });
       }
     } finally {

@@ -134,6 +134,30 @@ describe("まとめて声を作る（#1019 ⑥）", () => {
     expect(useTimelineStore.getState().editBlocked, "相手の違う欄へ出した").toBeNull();
   });
 
+  // ⚠️ **文書が入れ替わったら、そちらへは出さない**（PR #1049 レビュー 🔴）＝文書切替は `break` する
+  //    だけで世代番号を進めないので、世代だけ見ていると**別の動画へ前の動画の部品名が出る**。
+  it("途中で別の動画を開いたら、そちらへ案内を出さない", async () => {
+    useTimelineStore.setState({
+      doc: doc([
+        { ...voiceClip("clip_001", "あいさつ"), startSec: 0, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_002", "しめ"), startSec: 3, durationSec: 3 } as TimelineClip,
+        { ...voiceClip("clip_003", "あと", "generated"), startSec: 6, durationSec: 3,
+          voice: { text: "あと", status: "generated", voicePath: "voices/clip_003.wav" } } as unknown as TimelineClip,
+      ]),
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    await flush();
+    synth.resolveAll(9); // 1件目＝伸ばすと後ろの部品と重なる（積まれる）
+    await flush();
+    // 2件目を待っている間に別の動画を開く。
+    useTimelineStore.setState({ doc: { ...doc([]), projectId: "proj_20260906_002" } } as never);
+    synth.resolveAll(1);
+    await flush();
+    await run;
+    expect(useTimelineStore.getState().voiceError, "別の動画へ前の動画の案内を出した").toBeNull();
+  });
+
   // ⚠️ **1件ずつのときは今までどおり**＝相手＝いま選んでいる部品なので、その欄へ出すのが正しい。
   it("1件ずつのときは「選んだ部品」の欄へ出す", async () => {
     useTimelineStore.setState({
