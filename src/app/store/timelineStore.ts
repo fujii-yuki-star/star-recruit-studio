@@ -301,6 +301,17 @@ export interface TimelineState {
    * 読めなかったものは入らない（その部品は鳴らない）。
    */
   audioSrcByKey: Record<string, string>;
+  /**
+   * **まだ用意していない音源をそろえる**（#1061）＝置いた直後から鳴るようにする。
+   *
+   * ⚠️ **開いたときにまとめて読むだけでは足りない**＝取り込んだ素材を音の部品へ入れると、
+   * その音源は**まだ鍵が無い**（開き直すまで無音）。同じ形は動画で一度直している（#512 段1＝
+   * 「忘れると『開き直すと映るのに、取り込んだ直後は映らない』という入口ごとの割れになる」）。
+   * ⚠️ **読めなかったものは覚えて、二度とたのまない**（`§7.6.2.2`＝再試行しない）。
+   */
+  ensureAudioSrcs: () => Promise<void>;
+  /** 読もうとした音源キー（内部）＝読めなかったものを何度もたのまない。 */
+  _audioTried: Set<string>;
   /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
   history: HistoryStacks<TimelineProject>;
   /**
@@ -892,6 +903,7 @@ function emptyState() {
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
+    _audioTried: new Set<string>(),
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as { reason: EditBlockedReason; at: BlockTarget } | null,
     voiceError: null as string | null,
@@ -1371,6 +1383,26 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addAssetByPath: async (path) => {
     await runImport(set, get, path, async (fileName) =>
       await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+  ensureAudioSrcs: async () => {
+    const doc = get().doc;
+    if (!doc) return;
+    const have = get().audioSrcByKey;
+    const tried = get()._audioTried;
+    const missing = audioSourcesOf(doc).filter((src) => {
+      const key = audioSourceKey(src);
+      return !have[key] && !tried.has(key);
+    });
+    if (missing.length === 0) return;
+    // ⚠️ **先に印を付ける**＝読んでいる間に何度も呼ばれても、同じものを二重にたのまない。
+    for (const src of missing) tried.add(audioSourceKey(src));
+    const loaded = await Promise.all(missing.map((src) => loadAudioSrc(doc, src)));
+    // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**（取り込みと同じ判定位置）。
+    const now = get().doc;
+    if (!now || now.projectId !== doc.projectId) return;
+    const add = loaded.filter((e): e is [string, string] => e != null);
+    if (add.length === 0) return;
+    set({ audioSrcByKey: { ...get().audioSrcByKey, ...Object.fromEntries(add) } });
   },
   refreshMissingAssets: async () => {
     const doc = get().doc;
@@ -1993,6 +2025,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       // 再生したまま書き出すと、鳴っている音と作業が重なる。止めてから始める（ADR-0032 追補と同じ流儀）。
       get().pause();
+      // ⚠️ **取っておく前に、音源をそろえる**（#1061）＝置いた直後の音は、鳴らす側の画面が
+      //   描かれていないと**まだ読まれていない**。書き出しが**自分で確かめる**＝描画の巡り合わせで
+      //   「聞こえるのに書き出しには入らない」を作らない（もう用意してあるものは読み直さない）。
+      await get().ensureAudioSrcs();
       // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
       // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
       const { audioSrcByKey, assetSizes } = get();
