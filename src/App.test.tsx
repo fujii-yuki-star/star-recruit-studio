@@ -187,6 +187,36 @@ describe("App の遷移が離れる前の関門を通る（#719 統合）", () =
     }
   });
 
+  // ⚠️ **断られたら、行き先で寄る指定も落とす**（PR #1074 レビュー）。
+  // 導線はどれも「指定を置いてから遷移を頑む」形なので、断ると**指定だけが残る**。
+  // 残ると、あとでサイドバーから素直にその画面を開いたときに**勝手に寄る**。
+  it("関門が断ったら、行き先で寄る指定も残さない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setSettingsFocus("brandKit");
+      useProjectStore.getState().setEditingSceneFocus("look");
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().settingsFocus, "寄る指定が残っている").toBeNull();
+      expect(useProjectStore.getState().editingSceneFocus, "寄る指定が残っている").toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  // ⚠️ **落とすのは寄る先の指定だけ**＝「どの場面を編集中か」は遷移と別に意味を持つ。
+  it("断られても、編集中の場面は忘れない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setEditingSceneId("scene_001");
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().editingSceneId).toBe("scene_001");
+    } finally {
+      release();
+    }
+  });
+
   it("関門が許せば、これまでどおり移れる", () => {
     const release = registerNavigationGuardForTest(() => true);
     try {
