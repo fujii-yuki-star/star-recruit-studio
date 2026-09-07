@@ -890,3 +890,44 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
     }
   });
 });
+
+// 字幕層の `textKey` 未指定（#1055）。**場面編集と描く側で解き方をそろえる**。
+describe('layoutScene：字幕層の textKey は未指定でも `subtitle`（#1055）', () => {
+  const noKey: Template = {
+    ...openingTemplate,
+    templateId: 'tmpl_nokey',
+    layers: openingTemplate.layers.map((l) => (l.id === 'subtitle' ? { ...l, textKey: undefined } : l)),
+  } as Template;
+
+  // ⚠️ **打っても出ない、を作らない**＝`textKeyOfLayer` は未指定を `subtitle` と解くので、
+  //    場面編集には字幕の欄が出る。描く側だけ `layer.textKey` を直に見ていたため何も出なかった。
+  //    ⚠️ **いま実害は無い**（`textKey` は schema の必須で、欠けた文書は読込時に補われる）＝
+  //    ここで固定するのは**解き方が1か所であること**（コメントが実装より強いことを言わないため）。
+  it('textKey が無くても、場面の字幕を描く（欄はあるのに出ない、を作らない）', () => {
+    const items = layoutScene(scene, noKey).items.filter((i): i is TextItem => isSubtitleItem(i));
+    expect(items.map((i) => i.text), '字幕の欄に入れた文が描かれない').toEqual([scene.texts.subtitle]);
+  });
+
+  // ⚠️ **体裁とフォントも同じ鍵で解く**（PR #1057 レビュー 🔴）＝文言だけ直すと、
+  //    同じ関数の3行違いで**また解き方が割れる**（文字は出るのに体裁だけ効かない）。
+  it('textKey が無くても、場面別の体裁とフォントが効く', () => {
+    const s2 = {
+      ...scene,
+      textStyles: { subtitle: { color: '#ff0000' } },
+      textFontIds: { subtitle: 'gen_interface_jp_display' },
+    } as Scene;
+    const item = layoutScene(s2, noKey).items.filter((i): i is TextItem => isSubtitleItem(i))[0];
+    expect(item.color, '場面別の体裁が効いていない').toBe('#ff0000');
+    expect(item.fontId, '場面別のフォントが効いていない').toBe('gen_interface_jp_display');
+  });
+
+  // ⚠️ **文字層は今までどおり**＝`textKey` を持たない文字層は文言を持たない（既定を足さない）。
+  it('文字層は textKey が無ければ何も出さない', () => {
+    const t = {
+      ...openingTemplate,
+      layers: [{ id: 'free', type: 'text', x: 0, y: 0, w: 100, h: 40, fontSize: 20 }],
+    } as unknown as Template;
+    const texts = layoutScene(scene, t).items.filter((i): i is TextItem => i.kind === 'text');
+    expect(texts, '文字層に既定の文言を足してしまった').toEqual([]);
+  });
+});
