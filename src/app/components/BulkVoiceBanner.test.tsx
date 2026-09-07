@@ -8,7 +8,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { BulkVoiceBanner } from "./BulkVoiceBanner";
 import { BulkVoiceControls } from "./BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { useProjectStore } from "../store/projectStore";
+
+/** 出どころは画面と同じ経路（場面形式）で通す（#1019 ⑥）。 */
+function Controls() {
+  return <BulkVoiceControls source={useSceneBulkVoice()} />;
+}
 
 /** 声が要る場面を2つ持ち、1つだけできている状態にする。 */
 function scenesWithVoice() {
@@ -62,7 +68,7 @@ describe("声をまとめて作っている間の全画面バナー（#1024 ⑤�
     render(
       <>
         <BulkVoiceBanner />
-        <BulkVoiceControls />
+        <Controls />
       </>,
     );
     expect(screen.queryByRole("status")).toBeNull();
@@ -74,7 +80,7 @@ describe("声をまとめて作っている間の全画面バナー（#1024 ⑤�
     const { rerender } = render(
       <>
         <BulkVoiceBanner />
-        <BulkVoiceControls />
+        <Controls />
       </>,
     );
     expect(screen.queryByRole("status")).toBeNull();

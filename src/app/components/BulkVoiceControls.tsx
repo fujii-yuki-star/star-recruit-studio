@@ -1,7 +1,5 @@
-import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useBulkVoiceControlsPresence } from "../hooks/useBulkVoicePresence";
-import { narrationProgress } from "../../domain/voice/narrationProgress";
-import { sceneNeedsVoice } from "../../domain/project/narrationLines";
+import type { BulkVoiceSource } from "../hooks/useBulkVoiceSource";
 import {
   BULK_VOICE_BUSY_LABEL, BULK_VOICE_CANCEL_LABEL, BULK_VOICE_LABEL,
   bulkVoiceDisabledReason, bulkVoiceProgressText,
@@ -22,12 +20,20 @@ import {
  * どちらでも使える）。`rowClassName` を渡すと自前の行で包み、**隠すときは行ごと消える**（空の行の余白を残さない）。
  */
 export function BulkVoiceControls({
+  source,
   label = BULK_VOICE_LABEL,
   buttonClassName = "btn btn-primary",
   rowClassName,
   hideWhenNothingToDo = false,
   onFinished,
 }: {
+  /**
+   * まとめて作る**出どころ**（`useSceneBulkVoice` / `useTimelineBulkVoice`）。
+   *
+   * ⚠️ **1つの物で受け取る**（#1019 ⑥）＝進み具合・作成中・中止をバラバラに渡すと、
+   * **型は合うまま別の形式のものが混ざる**（取り込みの中止で実際にやった＝#1034）。
+   */
+  source: BulkVoiceSource;
   /** 通常時のボタン文言。公開前チェックは検査項目側の導線名（「声を作成」）を渡す。 */
   label?: string;
   /** ボタンの見た目（画面ごとの主/副の位置づけに合わせる）。 */
@@ -42,23 +48,15 @@ export function BulkVoiceControls({
   // ⚠️ **早期 return より前で数える**＝`hideWhenNothingToDo` で何も描かないときも「居る」
   // （その画面には操作の置き場所があるので、作り始めれば出る＝全画面バナーと二重にならない）。
   useBulkVoiceControlsPresence();
-  const scenes = useProjectStore((s) => s.scenes);
-  const generating = useProjectStore((s) => s.isGeneratingNarration);
-  const cancelled = useProjectStore((s) => s.narrationCancelled);
-  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
-  const generateAllNarrations = useProjectStore((s) => s.generateAllNarrations);
-  const cancelNarrationGeneration = useProjectStore((s) => s.cancelNarrationGeneration);
-  const { done, total } = narrationProgress(scenes);
-  // 作る対象があるか。一括作成の対象判定（sceneNeedsVoice）を store と共有＝「押せるのに何も起きない」を作らない
-  // （ADR-0026④）。掛け合いも行ごとに見る（#403）。
-  const needsVoice = scenes.some(sceneNeedsVoice);
+  const { progress, generating, cancelled, needsWork: needsVoice, isExporting } = source;
+  const { done, total } = progress;
   const disabledReason = bulkVoiceDisabledReason({ isExporting, generating, needsVoice, hasNarrationText: total > 0 });
   // 全部できて何も起きていないときは進捗を出さない（3画面に散っていた同じ条件をここへ集約）。
   const showProgress = total > 0 && (generating || cancelled || done < total);
 
   const run = async () => {
-    await generateAllNarrations();
-    onFinished?.({ cancelled: useProjectStore.getState().narrationCancelled });
+    await source.generateAll();
+    onFinished?.({ cancelled: source.wasCancelled() });
   };
 
   if (hideWhenNothingToDo && !needsVoice && !generating && !cancelled) return null;
@@ -81,7 +79,7 @@ export function BulkVoiceControls({
         </button>
         {/* 中止は作成中だけ出す（押せない中止ボタンを常設しない）。 */}
         {generating && (
-          <button className="btn btn-ghost text-sm" onClick={() => cancelNarrationGeneration()}>
+          <button className="btn btn-ghost text-sm" onClick={() => source.cancel()}>
             {BULK_VOICE_CANCEL_LABEL}
           </button>
         )}

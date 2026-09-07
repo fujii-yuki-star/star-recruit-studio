@@ -133,6 +133,13 @@ export function silentSubtitleMessage(reason: SubtitleSilentReason, sourceKind: 
 
 /** 一括作成ボタンの通常時の文言（既定）。公開前チェックだけは検査項目側の導線名（「声を作成」）を使う。 */
 export const BULK_VOICE_LABEL = "全場面の声を作成";
+/**
+ * タイムライン形式の「まとめて作る」（#1019 ⑥）。
+ *
+ * ⚠️ **「全場面」と言わない**＝タイムライン形式に**場面は無い**（`06 §12.1` 決定5＝
+ * 案内の中で名指しするものは、その画面に実在すること）。#991 ① と同じ型の間違いを作らない。
+ */
+export const BULK_VOICE_TIMELINE_LABEL = "まだ作っていない声をまとめて作る";
 /** 作成中のボタン文言。以前は画面ごとに「作成中…」「準備中…」が混在していた（#547 ④）。 */
 export const BULK_VOICE_BUSY_LABEL = "作成中…";
 /** 一括作成を止めるボタンの文言。 */

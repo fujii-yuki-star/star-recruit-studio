@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -40,6 +40,8 @@ import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
@@ -353,6 +355,8 @@ function keyframeSummary(k: Keyframe): string {
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
+  // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const timelineBulkVoice = useTimelineBulkVoice();
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
@@ -4816,6 +4820,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               >
                 読み上げを置く
               </button>
+            </div>
+            {/* **まとめて声を作る**（#1019 ⑥）＝場面形式には前からあるのに、こちらは
+                **選んだ読み上げ1件ずつ**しか無かった（同じ動画を作るのに形式で手間が違う＝ADR-0026②）。
+                ⚠️ **選んでいなくても押せる所に置く**＝1件ずつの「声を作る」は「選んだ部品」の欄の中なので、
+                まとめて作る導線までそこに置くと、**何か選ぶまで始められない**。
+                ⚠️ **部品は場面形式と同じもの**（進み具合・中止・押せない理由の出し方が揃う）。 */}
+            <div className="row-between mt" style={{ alignItems: "center" }}>
+              <BulkVoiceControls
+                source={timelineBulkVoice}
+                label={BULK_VOICE_TIMELINE_LABEL}
+                buttonClassName="btn btn-secondary"
+                hideWhenNothingToDo
+              />
             </div>
           </>
         )}

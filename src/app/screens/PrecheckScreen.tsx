@@ -8,6 +8,7 @@ import { standardLookFixesForUnresolved } from "../../domain/template/templateSe
 import { standardLookButtonReason, standardLookResultMessage } from "../uiLabels";
 import { PageHead } from "../components/ui";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
 import { NoScenesState } from "../components/NoScenesState";
@@ -35,6 +36,8 @@ const PRECHECK_BACK_LABEL: Partial<Record<ScreenId, string>> = {
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
   // 来た画面（既知の入口以外・未設定は仕上がり確認＝順路の1つ手前）。
   const precheckReturnTo = useProjectStore((s) => s.precheckReturnTo);
   const precheckBackTo: ScreenId =
@@ -175,7 +178,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         // 「声を作成」はラベルどおりその場で一括生成する（従来は場面編集へ飛ぶだけだった＝#403）。
                         // 進捗・中止は他画面と同じ共通操作を使う（この画面だけ進捗が無かった＝#547 P2-6・ADR-0026②）。
                         <span className="col gap-xs" style={{ alignItems: "flex-start" }}>
-                          <BulkVoiceControls label={item.action} buttonClassName="btn btn-ghost btn-icon text-sm" />
+                          <BulkVoiceControls source={sceneBulkVoice} label={item.action} buttonClassName="btn btn-ghost btn-icon text-sm" />
                         </span>
                       ) : item.id === "sceneTemplate" ? (
                         // 見た目が見つからない場面（TEMPLATE_NOT_FOUND）。自動では置換しない方針なので、
