@@ -36,7 +36,7 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { assignableAssetsFor } from "../../domain/template/slotAssign";
+import { assignableAssetsFor, emptySlotLayerIds } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
@@ -1066,10 +1066,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if (clip.kind !== TIMELINE_CLIP_KIND.template) continue;
       const tmpl = byId.get(clip.templateId ?? "");
       if (!tmpl) continue; // 見た目が見つからない部品は別の案内が出る
-      for (const layer of tmpl.layers) {
-        if (!templateSlotIds(tmpl.layers).has(layer.id)) continue;
-        if (!(clip.assetRefs?.[layer.id] ?? layer.assetId)) n += 1;
-      }
+      // ⚠️ **数えるのは「空だと灰色の枠が出る」層だけ**（#1040）＝層の種類で空のときの扱いが違う
+      //（背景＝**塗り**／ロゴ＝**何も置かない**／差し込み口＝**灰色の枠**・`renderer/layout.ts`）。
+      //   `templateSlotIds`（＝素材を**入れられる**場所）で数えると、背景に色を使う見た目や
+      //   ロゴを置かない場面で**事実でない知らせ**が出て、しかも消すには要らない素材を入れるしかない。
+      //   数え方は場面編集と**同じ関数**（`emptySlotLayerIds`＝テンプレ既定素材も描画と同じ順で見る）。
+      n += emptySlotLayerIds(tmpl.layers, clip.assetRefs ?? {}).length;
     }
     return n;
   }, [doc, templates]);
