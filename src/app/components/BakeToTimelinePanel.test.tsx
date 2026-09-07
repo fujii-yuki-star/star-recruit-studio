@@ -200,3 +200,58 @@ describe("BakeToTimelinePanel：作っている間と、作ったあと（#992�
   });
 });
 
+
+// 焼き出しの進み具合と中止（#1021）。素材を丸ごと運ぶので分単位になりうる＝書き出しと同じ扱い。
+describe("BakeToTimelinePanel: 進み具合と中止（#1021）", () => {
+  const cancelBake = vi.fn();
+
+  /** 「作る」を押して、運んでいる最中で止めた状態にする。 */
+  const startAndHold = async (): Promise<void> => {
+    let release: (() => void) | null = null;
+    bakeToTimeline.mockImplementation(
+      () => new Promise((resolve) => { release = () => resolve({ projectId: "proj_20260728_001", notes: [] }); }),
+    );
+    useProjectStore.setState({ cancelBake, bakeRun: { step: 2, total: 5 } });
+    render(<BakeToTimelinePanel />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("この内容で作る"));
+    await waitFor(() => expect(screen.getByText(/作成中/)).toBeInTheDocument());
+    void release;
+  };
+
+  beforeEach(() => { cancelBake.mockReset(); });
+
+  it("どれだけ運んだかを出す（作成中…だけにしない）", async () => {
+    await startAndHold();
+    expect(screen.getByText(/作成中… 2\/5件/), "進み具合が出ていない").toBeInTheDocument();
+  });
+
+  it("止められる", async () => {
+    await startAndHold();
+    fireEvent.click(screen.getByRole("button", { name: "中止する" }));
+    expect(cancelBake).toHaveBeenCalled();
+  });
+
+  // ⚠️ **運んでいないときに中止ボタンを出さない**（押しても何も起きない、を作らない）。
+  it("運んでいないときは中止ボタンを出さない", async () => {
+    useProjectStore.setState({ cancelBake, bakeRun: null });
+    render(<BakeToTimelinePanel />);
+    // ⚠️ **ボタンの並びが出ているところで見る**＝確認の前は並び自体が無いので、
+    //    そこで見ても「出していない」を確かめたことにならない（空振りの検査）。
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "中止する" })).toBeNull();
+  });
+
+  // ⚠️ **中止したら「できた」と言わない**＝動画はできていない（失敗でもないので理由は出さない）。
+  it("中止したら完了の知らせを出さない", async () => {
+    bakeToTimeline.mockResolvedValue({ projectId: null, notes: [] });
+    render(<BakeToTimelinePanel />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("この内容で作る"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+    expect(screen.queryByText(/を作りました/), "中止したのに作ったと言った").toBeNull();
+  });
+});

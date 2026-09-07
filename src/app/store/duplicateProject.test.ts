@@ -10,7 +10,7 @@ vi.mock('../../infrastructure/projectFs', async (orig) => ({
 }));
 vi.mock('../../infrastructure/bakeFs', async (orig) => ({
   ...(await orig<typeof import('../../infrastructure/bakeFs')>()),
-  copyBakedFiles: vi.fn(async () => {}),
+  copyBakedFiles: vi.fn(async () => ({ copied: 0, cancelled: false })),
 }));
 
 import { useProjectStore } from './projectStore';
@@ -85,7 +85,7 @@ describe('duplicateProject', () => {
    */
   it('ファイルを運んでから文書を保存する', async () => {
     const order: string[] = [];
-    vi.mocked(copyBakedFiles).mockImplementation(async () => { order.push('copy'); });
+    vi.mocked(copyBakedFiles).mockImplementation(async () => { order.push('copy'); return { copied: 0, cancelled: false }; });
     vi.mocked(saveProjectDoc).mockImplementation(async (id, json) => {
       order.push('save');
       savedById.set(id, json);

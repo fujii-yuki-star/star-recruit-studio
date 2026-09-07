@@ -4,7 +4,8 @@
 use base64::Engine as _;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{Emitter, Manager};
 
 pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
@@ -300,38 +301,96 @@ pub fn project_files_size(
     Ok(total)
 }
 
+/// プロジェクト間のコピーの中止要求（#1021）。**1回の呼び出し＝1つの中止の範囲**とし、
+/// `copy_project_files` の入口で必ず降ろす＝前回の中止要求を持ち越して**次のコピーが黙って落ちる**、を作らない
+///（焼き出しも複製もコピーは1回きりなので、書き出しのような `begin_*` は要らない）。
+static COPY_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// 走行中のコピーを中止する（#1021）。ユーザーの「中止」から呼ぶ。副作用のみ（表示は呼び出し側）。
+#[tauri::command]
+pub fn cancel_project_copy() {
+    COPY_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// コピーを中止したときに返す内部マーカー（呼び出し側が「中止」と見分けるためのもの・利用者には出さない）。
+pub const COPY_CANCELLED_MARK: &str = "project copy cancelled by user";
+
+#[derive(Clone, serde::Serialize)]
+struct CopyProgressEvent {
+    step: usize,
+    total: usize,
+}
+
 /// 焼き出し（ADR-0032）でプロジェクト間にファイルをコピーする。
 /// 相対パスの構造（assets/…・voices/…）はそのまま保ち、コピー先の親ディレクトリは作る。
 /// **元プロジェクトには一切書き込まない**（片道＝決定16）。
+///
+/// 素材を丸ごと運ぶので分単位になりうる（#1021）＝**進み具合を送り、中止を受ける**。
+/// ⚠️ **中止したら運んだものを片づける**＝途中まで運んだフォルダを残すと、素材だけがあって
+/// `project.json` が無い状態になり、一覧にも出ない**見えないゴミ**が残る。
+/// ⚠️ **片づけるのは「自分が運んだファイル」だけ**（フォルダを丸ごと消さない）＝
+/// 消してよいものだけを消す。空になった入れ物はその後で畳む。
 #[tauri::command]
 pub fn copy_project_files(
     app: tauri::AppHandle,
     src_project_id: String,
     dest_project_id: String,
     rel_paths: Vec<String>,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     if src_project_id == dest_project_id {
         return Err("コピー元とコピー先が同じです。".to_string());
     }
+    // 入口で降ろす＝前回の中止要求を持ち越さない（この呼び出しが1つの中止の範囲）。
+    COPY_CANCELLED.store(false, Ordering::SeqCst);
     let src_dir = project_dir(&app, &src_project_id)?;
     let dest_dir = project_dir(&app, &dest_project_id)?;
-    for rel in &rel_paths {
+    let total = rel_paths.len();
+    let mut copied: Vec<PathBuf> = Vec::new();
+    for (i, rel) in rel_paths.iter().enumerate() {
         if !is_safe_rel_path(rel) {
             return Err("不正なパスです。".to_string());
+        }
+        if COPY_CANCELLED.load(Ordering::SeqCst) {
+            cleanup_copied(&copied, &dest_dir);
+            return Err(COPY_CANCELLED_MARK.to_string());
         }
         let src = src_dir.join(rel);
         // 元に無いファイルは飛ばす（未配置のサンプル素材など）。欠けたぶんは焼いた側で
         // 「素材が見つかりません」として扱われる（15 §6）＝ここで丸ごと失敗させない。
-        if !src.is_file() {
-            continue;
+        if src.is_file() {
+            let dest = dest_dir.join(rel);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+            }
+            fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+            copied.push(dest);
         }
-        let dest = dest_dir.join(rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|_| ASSET_SAVE_ERR.to_string())?;
-        }
-        fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+        // 進み具合は best-effort（送れなくてもコピーは続ける＝書き出しと同じ流儀）。
+        let _ = app.emit("copy_progress", CopyProgressEvent { step: i + 1, total });
     }
-    Ok(())
+    Ok(copied.len())
+}
+
+/// 中止したときの後始末＝**自分が運んだファイル**を消し、空になった入れ物を畳む（#1021）。
+/// ⚠️ **コピー先のフォルダそのものは消さない**（自分が作ったとは限らない）＝空なら畳むだけ。
+fn cleanup_copied(copied: &[PathBuf], dest_dir: &Path) {
+    for p in copied {
+        let _ = fs::remove_file(p);
+    }
+    // 深い所から畳む＝assets/ のような入れ物が空なら消える（空でなければ `remove_dir` が失敗して残る）。
+    let mut dirs: Vec<PathBuf> = copied
+        .iter()
+        .filter_map(|p| p.parent().map(|d| d.to_path_buf()))
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs {
+        if d.starts_with(dest_dir) && d != dest_dir {
+            let _ = fs::remove_dir(&d);
+        }
+    }
+    let _ = fs::remove_dir(dest_dir);
 }
 
 /// テンプレ所有素材の保管ディレクトリ <appData>/user_templates/assets（全プロジェクト共通＝ADR-0021）。
@@ -421,6 +480,45 @@ pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 中止したときの後始末（#1021）。**自分が運んだファイルだけ**を消し、空になった入れ物を畳む。
+    /// ⚠️ **運んでいないものは消さない**＝コピー先に元からあるものを巻き込まない。
+    #[test]
+    fn cleanup_removes_only_copied_files() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup_{}", std::process::id()));
+        let dest = base.join("dest");
+        let assets = dest.join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let mine = assets.join("asset_001.png");
+        let theirs = assets.join("keep.png");
+        fs::write(&mine, b"x").unwrap();
+        fs::write(&theirs, b"y").unwrap();
+
+        cleanup_copied(std::slice::from_ref(&mine), &dest);
+
+        assert!(!mine.exists(), "運んだファイルが残った");
+        assert!(theirs.exists(), "運んでいないファイルまで消した");
+        assert!(assets.exists(), "中身が残っている入れ物を畳んだ");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 中止して**全部片づいたら**、空になった入れ物とコピー先そのものも畳む
+    /// （素材だけがあって project.json が無い＝一覧に出ない**見えないゴミ**を残さない）。
+    #[test]
+    fn cleanup_folds_empty_dirs() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup2_{}", std::process::id()));
+        let dest = base.join("dest");
+        let assets = dest.join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let a = assets.join("a.png");
+        fs::write(&a, b"x").unwrap();
+
+        cleanup_copied(&[a], &dest);
+
+        assert!(!assets.exists(), "空になった入れ物が残った");
+        assert!(!dest.exists(), "空になったコピー先が残った");
+        let _ = fs::remove_dir_all(&base);
+    }
 
     /// プロジェクト相対パスの安全判定（パストラバーサル・絶対パス・空文字）。
     /// read_asset_data_url と焼き出しのコピー/容量が**同じこの関数**を通るので、ここが唯一の網。

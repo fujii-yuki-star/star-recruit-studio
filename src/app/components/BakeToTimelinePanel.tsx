@@ -19,7 +19,7 @@ type RangeChoice = "whole" | "part" | "between";
  * 確認は2段階（[作る内容を確かめる] → 内容を見てから [この内容で作る]）＝押した瞬間に作らない。
  */
 export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) {
-  const { parts, scenes, meta, estimateBake, bakeToTimeline } = useProjectStore();
+  const { parts, scenes, meta, estimateBake, bakeToTimeline, bakeRun, cancelBake } = useProjectStore();
   const [choice, setChoice] = useState<RangeChoice>("whole");
   const [partId, setPartId] = useState<string>(parts[0]?.partId ?? "");
   const [fromSceneId, setFromSceneId] = useState<string>(scenes[0]?.sceneId ?? "");
@@ -108,6 +108,9 @@ export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: Scre
     setError(null);
     try {
       const { projectId } = await bakeToTimeline(range, name.trim() || meta.projectName);
+      // ⚠️ **中止したときは「できた」と言わない**（#1021）＝運んだものは片づけられ、動画はできていない。
+      //   失敗でもないので理由は出さない（止めたのは利用者＝§2-5「原因」ではなく次の行動を出す場面ではない）。
+      if (projectId == null) return;
       // 作った後に注意書きを出し直さない：**確認で見せた `notes` と同じもの**が返る
       // （見積りも作成も store の同じ変換を通る）ので、上書きしても画面は変わらない。
       // 出し分けが要るとしたら「確認と作成の間に中身が変わりうる」設計にしたときで、そのときは
@@ -228,8 +231,14 @@ export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: Scre
           <div className="row gap-sm">
             <button className="btn btn-ghost" onClick={resetPreview} disabled={busy}>やめる</button>
             <button className="btn btn-primary" onClick={run} disabled={busy}>
-              {busy ? "作成中…" : "この内容で作る"}
+              {/* ⚠️ **どれだけ進んだかを出す**（#1021）＝素材を丸ごと運ぶので分単位になりうる。
+                  進み具合が出せる（運ぶファイルがある）ときだけ数を出す＝0/0 を見せない。 */}
+              {busy ? (bakeRun && bakeRun.total > 0 ? `作成中… ${bakeRun.step}/${bakeRun.total}件` : "作成中…") : "この内容で作る"}
             </button>
+            {/* ⚠️ **止められるようにする**＝運んだものは片づけられる（作りかけを残さない）。 */}
+            {bakeRun !== null && (
+              <button className="btn btn-secondary" onClick={cancelBake}>中止する</button>
+            )}
           </div>
         </div>
       ) : (

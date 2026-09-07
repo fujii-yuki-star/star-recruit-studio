@@ -70,7 +70,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
-import { bakeSizeBytes, copyBakedFiles } from "../../infrastructure/bakeFs";
+import { bakeSizeBytes, cancelProjectCopy, copyBakedFiles, listenCopyProgress } from "../../infrastructure/bakeFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { duplicateIdsIn } from "../../domain/timeline/validateTimelineDoc";
 
@@ -319,8 +319,19 @@ interface ProjectState {
   renameProject: (projectId: string, newName: string) => Promise<void>;
   /** 焼き出したときに増えるディスク容量（バイト）と、持っていけないもの（焼く前の確認用・ADR-0032 決定13）。 */
   estimateBake: (range: BakeRange) => Promise<{ bytes: number; notes: BakeNote[] }>;
-  /** タイムライン編集の形式へ焼き出して**新しいプロジェクト**として保存する（片道・ADR-0032 決定16）。 */
-  bakeToTimeline: (range: BakeRange, projectName: string) => Promise<{ projectId: string; notes: BakeNote[] }>;
+  /**
+   * タイムライン編集の形式へ焼き出して**新しいプロジェクト**として保存する（片道・ADR-0032 決定16）。
+   *
+   * **中止したときは `projectId: null`**（#1021）＝作りかけを残さない（運んだものは片づけ済み・文書も書かない）。
+   */
+  bakeToTimeline: (range: BakeRange, projectName: string) => Promise<{ projectId: string | null; notes: BakeNote[] }>;
+  /**
+   * 焼き出しでファイルを運んでいる進み具合（#1021）。`null`＝運んでいない。
+   * ⚠️ **分単位になりうる操作**（素材を丸ごとコピー）なので、進み具合と中止を出す（書き出しと同じ扱い）。
+   */
+  bakeRun: { step: number; total: number } | null;
+  /** 焼き出しのファイルのコピーを中止する（#1021）。運んだものは片づけられる。 */
+  cancelBake: () => void;
   /** 焼き出しの変換だけ（内部・estimateBake / bakeToTimeline が共有＝見積りと本番で同じ結果を見る）。 */
   _bake: (range: BakeRange, projectName: string, projectId?: string) => BakeResult;
   /** 編集中プロジェクトの名前を変更する（#252・メモリの meta.projectName を更新＝保存/自動保存で永続化）。 */
@@ -1590,6 +1601,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     assertBakeable(doc);
     return { bytes: await bakeSizeBytes(get().meta.projectId, bakedFilePaths(doc)), notes };
   },
+  bakeRun: null,
+  cancelBake: () => { void cancelProjectCopy(); },
   bakeToTimeline: async (range, projectName) => {
     // 焼く前に元を保存する＝**ディスクにあるファイル**（素材・作成済みの声）を運ぶので、
     // 保存していない声が抜け落ちるのを防ぐ。元の中身は変えない（片道＝決定16）。
@@ -1608,9 +1621,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **運ぶ前に見る**＝運んだ後に断ると、素材だけが置き去りになる（もとからこの順）。
     assertBakeable(doc);
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
-    await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));
-    await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
-    return { projectId, notes };
+    // 素材を丸ごと運ぶので分単位になりうる（#1021）＝**進み具合を出し、中止を受ける**。
+    const paths = bakedFilePaths(doc);
+    const stop = await listenCopyProgress((e) => {
+      // 走っている焼き出しのぶんだけ出す（別の動画へ移った後に前の進み具合を出さない）。
+      if (get().bakeRun) set({ bakeRun: { step: e.step, total: e.total } });
+    });
+    set({ bakeRun: { step: 0, total: paths.length } });
+    try {
+      const r = await copyBakedFiles(srcProjectId, projectId, paths);
+      // ⚠️ **中止したら文書を保存しない**＝運んだものは Rust が片づけているので、
+      //   ここで保存すると**素材の無い動画が一覧に残る**（作りかけを残さない）。
+      if (r.cancelled) return { projectId: null, notes };
+      await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+      return { projectId, notes };
+    } finally {
+      stop();
+      set({ bakeRun: null });
+    }
   },
   _bake: (range, projectName, projectId) => {
     const s = get();
