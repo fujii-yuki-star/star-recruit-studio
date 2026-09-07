@@ -908,6 +908,19 @@ describe('layoutScene：字幕層の textKey は未指定でも `subtitle`（#10
     expect(items.map((i) => i.text), '字幕の欄に入れた文が描かれない').toEqual([scene.texts.subtitle]);
   });
 
+  // ⚠️ **体裁とフォントも同じ鍵で解く**（PR #1057 レビュー 🔴）＝文言だけ直すと、
+  //    同じ関数の3行違いで**また解き方が割れる**（文字は出るのに体裁だけ効かない）。
+  it('textKey が無くても、場面別の体裁とフォントが効く', () => {
+    const s2 = {
+      ...scene,
+      textStyles: { subtitle: { color: '#ff0000' } },
+      textFontIds: { subtitle: 'gen_interface_jp_display' },
+    } as Scene;
+    const item = layoutScene(s2, noKey).items.filter((i): i is TextItem => isSubtitleItem(i))[0];
+    expect(item.color, '場面別の体裁が効いていない').toBe('#ff0000');
+    expect(item.fontId, '場面別のフォントが効いていない').toBe('gen_interface_jp_display');
+  });
+
   // ⚠️ **文字層は今までどおり**＝`textKey` を持たない文字層は文言を持たない（既定を足さない）。
   it('文字層は textKey が無ければ何も出さない', () => {
     const t = {

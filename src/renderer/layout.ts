@@ -325,6 +325,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で primary 行を
         // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）。同時行は下の parallelLineIds から解決する。
         const isSub = layer.type === LAYER_TYPE.subtitle;
+        // **この層がどの文字を指すか**は1回だけ解き、文言・体裁・フォントで使い回す（#1055）。
+        const textKey = textKeyOfLayer(layer);
         const staticSubtitleOff = isSub && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''
@@ -337,14 +339,14 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             //   （`11 §9`・`withRequiredLayerFields`）ので、この形は普通の経路では届かない。
             //   それでも直すのは、**コメント（`textKeyOfLayer` の「`layoutScene` の既定束縛と同じ」）が
             //   実装より強いことを言っている**＝そこがドリフトの起点になるため。
-            : (() => { const k = textKeyOfLayer(layer); return k ? scene.texts[k] ?? '' : ''; })();
+            : (textKey ? scene.texts[textKey] ?? '' : '');
         // ⚠️ **帯は字幕だけのものではなくなった**（#264）＝文字層にも出す。
         // 以前は `isSub` で切っていたので、テンプレ作者が文字層に帯を設定しても**描かれなかった**。
         // ⚠️ **場面の上書きも効かせる**（`style.background`）＝場面ごとに帯を出し入れできる。
         // 文字の体裁は場面別に上書きできる（#555・schema 1.24）。未指定はテンプレ層→既定を継承＝
         // 触ったものだけが固有値（フォント＝textFontIds と同型・§2-4 の対象は配置なので体裁は自由化してよい）。
         // 解決は共有 resolveTextStyle（場面編集の体裁欄と同じ関数＝欄の「テンプレに合わせる」表示と描画が一致）。
-        const style = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+        const style = resolveTextStyle(layer, textKey ? scene.textStyles?.[textKey] : undefined);
         // fontSize は下の stackedSubtitleBands（同時字幕の段組み）にも渡るため、**上書き後の値**を使う
         // ＝上書きで文字が大きくなっても帯が重ならない（#533 P1 の実折返し行数計算と同じ値）。
         const fontSize = style.fontSize;
@@ -364,7 +366,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             isSubtitle: isSub,
             // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
             anchorBottom: isSub,
-            fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+            fontId: textKey ? scene.textFontIds?.[textKey] : undefined,
             // 縁取り（#275）。太さ>0 で色未指定なら既定色（resolveTextStyle が担保）。
             strokeColor: style.strokeColor,
             strokeWidth: style.strokeWidth,
