@@ -573,6 +573,25 @@ describe('overlappingSubtitleClips（#1014）', () => {
     expect(overlappingSubtitleClips(d, opts).length, 'まとまりの動きを見ていない').toBe(1);
   });
 
+  // ⚠️ **入れ子のまとまりも辿る**（PR #1062 レビュー ①）＝外側のまとまりに付いた動きも、
+  //    中の字幕へ効く（`groupElementIds` は推移的に辿る）。
+  it('外側のまとまりの動きで重なる字幕も挙げる（入れ子）', () => {
+    const d = doc({
+      clips: [
+        sub('clip_001', { y: 900, durationSec: 10 }),
+        sub('clip_002', { trackId: 'track_002', y: 100, durationSec: 10 }),
+      ],
+      groups: [
+        { id: 'group_inner', members: ['clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+        { id: 'group_outer', members: ['group_inner'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+      ],
+      animations: [{ id: 'anim_001', targetId: 'group_outer', keyframes: [
+        { timeSec: 0, y: 0 }, { timeSec: 2, y: 800 },
+      ] }],
+    } as Partial<TimelineProject>);
+    expect(overlappingSubtitleClips(d, opts).length, '入れ子のまとまりを辿っていない').toBe(1);
+  });
+
   // ⚠️ **動いて離れる場合は挙げない**＝節目で見て重なっていなければ、そのままにする。
   it('動いて離れる字幕は挙げない', () => {
     const d = doc({
