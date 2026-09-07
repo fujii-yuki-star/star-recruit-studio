@@ -83,6 +83,24 @@ describe("タイムライン編集：注意の件数を見出しの行に出す�
     expect(scrollIntoView, "押しても知らせまで寄らない").toHaveBeenCalled();
   });
 
+  // ⚠️ **出ているのに数えていない項を作らない**（PR #1076 レビュー）。
+  // 「音が出せない素材」は自分の知らせを出すのに、合計に入っていなかった。
+  // ⚠️ この種の漏れは**変異チェックでは見つからない**（壊せるのは「ある項」だけ）。
+  it("音が出せない素材だけのときも、件数に入る", () => {
+    open({
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "消えたBGM", filePath: "assets/bgm.mp3", tags: [] }],
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, assetId: "asset_001" },
+      ],
+    } as Partial<TimelineProject>);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 知らせ自体は出ている。
+    expect(screen.getByText(/音が出せない素材があります/)).toBeInTheDocument();
+    // その知らせが件数にも入っている（見出しの行に印が出る）。
+    expect(screen.getByRole("button", { name: /注意 \d+件/ }), "出ている知らせが件数に入っていない").toBeInTheDocument();
+  });
+
   it("知らせの中身は見出しの行へ出さない（編集の場所を上から狭めない）", () => {
     open({
       clips: [
