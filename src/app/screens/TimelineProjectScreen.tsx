@@ -2747,6 +2747,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       : {};
 
   /**
+   * 文字の**体裁**（字間・行間・影・帯）に手が入っているか（#1032）。
+   *
+   * ⚠️ **入っているときは開いて出す**＝畳んで出すと入れた設定を見失う
+   *（場面の BGM・「この場面だけ声の大きさ」と同じ流儀）。
+   */
+  const hasTextDecoration = (c: TimelineClip): boolean =>
+    c.letterSpacing != null || c.lineHeight != null
+    || enabledShadow(c.shadow) != null || bandBackground(c.background) != null;
+
+  /**
    * 文字の見た目が**何か入っているか**（差分再監査 6巡目 🟡）。節を「設定が入っていれば開く」に使う。
    * ⚠️ **欄が触る項目をすべて見る**＝一部だけ見ると、入れた設定が畳まれたままになる項目ができる。
    */
@@ -3900,7 +3910,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       />
                     </label>
                     {renderClipTextBasics(selected)}
-                    {renderClipTextDecoration(selected)}
+                    {/* ⚠️ **体裁は畳んで出す**（#1032）＝字間・行間・影・帯は項目が多く、
+                        開きっぱなしだと**文字を直すたびに下へ長くなる**。字幕の部品は既に
+                        同じ形（「字幕の見た目」）で畳んでおり、**同じものを部品で別の出し方にしない**（ADR-0026②）。 */}
+                    <CollapsibleSection
+                      key={`textLook-${selected.id}`}
+                      scope={SECTION_SCOPE.timeline}
+                      storageKey="textLook"
+                      title="文字の体裁"
+                      defaultOpen={hasTextDecoration(selected)}
+                    >
+                      {renderClipTextDecoration(selected)}
+                    </CollapsibleSection>
                   </>
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.shape && (
