@@ -373,7 +373,6 @@ function saveSnapEnabled(on: boolean): void {
  * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
-
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
@@ -826,6 +825,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
   const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
+  /**
+   * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
+   *
+   * ⚠️ **部品まで覚える**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なる（`background`・
+   * `title` などは同梱の見本でも共通）。層 id だけで覚えると、**別の部品の帯を選んだだけで**
+   * 同じ id の欄へ手が飛び、そのまま矢印を押すと**再生位置を送るつもりで素材が変わる**。
+   * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
+   * 返すので、帯を選ぶだけで効果が走る）。
+   */
   const [drilled, setDrilled] = useState<{ clipId: string; layerId: string; sel: readonly string[] } | null>(null);
   /**
    * **その回の「入った」に手を移したか**（#832）＝ `drilled` **そのもの（同一性）**を覚える。
@@ -923,16 +931,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 変わっても「もう入っていない」と判る（1か所で担保できる・ADR-0026②）。
    */
   const drilledHere = drilled && drilled.sel === selectedClipIds ? drilled : null;
-
-  /**
-   * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
-   *
-   * ⚠️ **部品まで覚える**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なる（`background`・
-   * `title` などは同梱の見本でも共通）。層 id だけで覚えると、**別の部品の帯を選んだだけで**
-   * 同じ id の欄へ手が飛び、そのまま矢印を押すと**再生位置を送るつもりで素材が変わる**。
-   * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
-   * 返すので、帯を選ぶだけで効果が走る）。
-   */
 
   const layout = useMemo(() => {
     if (!doc) return null;
@@ -2604,7 +2602,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
    * 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
    */
-
   const snapPlacement = (
     sec: number,
     edgesOf: (sec: number) => number[],
@@ -3456,7 +3453,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 on={snapEnabled}
                 onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
                 label="吸着"
-                title={snapEnabled ? "切ると、掛んだ場所へそのまま置けます" : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"}
+                title={snapEnabled ? "切ると、掴んだ場所へそのまま置けます" : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"}
               />
             </div>
             {snapEnabled && (
