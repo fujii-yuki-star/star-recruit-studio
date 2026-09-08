@@ -33,6 +33,9 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/** 欄の出し入れは**見出しの行のメニュー**の中（#1032）＝欄の下に並べると視界の外だった。 */
+const openPanelMenu = (): void => { fireEvent.click(screen.getByRole("button", { name: /^欄/ })); };
+
 describe("SceneEditScreen: 欄の配置（ADR-0033 段階4）", () => {
   it("既定はいままでと同じ顔ぶれ（素材一覧・仕上がり確認・場面の並び・編集が同時に見える）", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
@@ -46,8 +49,19 @@ describe("SceneEditScreen: 欄の配置（ADR-0033 段階4）", () => {
     fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     expect(screen.queryByRole("heading", { name: "素材一覧" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "「素材一覧」を表示する" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "「素材一覧」を表示する" }));
     expect(screen.getByRole("heading", { name: "素材一覧" })).toBeInTheDocument();
+  });
+
+  // ⚠️ **閉じている欄があることを、開く前に言う**（#1032）＝メニューを開くまで気づけないと、
+  //    「欄が消えた」と思ったまま戻し方に辿り着けない（§2-5＝行き止まりを作らない）。
+  it("閉じている欄の数を、メニューを開く前に出す", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /^欄/ }).textContent, "閉じていないのに数が出ている").not.toMatch(/閉じている/);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.getByRole("button", { name: /^欄/ }).textContent, "閉じた欄があるのに数が出ていない").toMatch(/閉じている 1/);
   });
 
   it("配置は覚えていて、開き直しても同じ（#276 の幅の記憶を置き換える）", () => {
@@ -63,7 +77,8 @@ describe("SceneEditScreen: 欄の配置（ADR-0033 段階4）", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
     expect(screen.getByRole("heading", { name: "素材一覧" })).toBeInTheDocument();
   });
 
@@ -102,7 +117,8 @@ describe("SceneEditScreen: 触っていない画面は覚えない（#550 の教
     const first = render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
     first.unmount();
     expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
   });

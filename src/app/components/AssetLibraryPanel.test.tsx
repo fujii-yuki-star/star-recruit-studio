@@ -349,6 +349,39 @@ describe("AssetLibraryPanel", () => {
   });
 
   /**
+   * ⚠️ **次の行動を言葉だけで済ませない**（#1032 ℹ️・§2-5）＝直しに行く場所は設定の**下の方**にあり、
+   * 「会社の見た目から選び直してください」と書くだけでは自分で探させる。断りからそのまま行けるようにする。
+   */
+  it("そのロゴを外し直しに行ける（断りから直接）", async () => {
+    const updateBrandKit = vi.fn(async () => false);
+    const setSettingsFocus = vi.fn();
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit, setSettingsFocus } as never);
+    const onNavigate = vi.fn();
+    render(<AssetLibraryPanel onNavigate={onNavigate} />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "会社の見た目を決める" }));
+    expect(onNavigate, "行き先へ連れて行っていない").toHaveBeenCalledWith("settings");
+    // ⚠️ **欄まで指定する**＝設定は縦に長い（押しても目的の欄が見えない、を作らない）。
+    expect(setSettingsFocus, "寄る欄を指定していない").toHaveBeenCalledWith("brandKit");
+  });
+
+  // ⚠️ **別の断りにボタンを付け足さない**＝行き先が関係ない失敗にも出ると、押した先で何もできない。
+  it("会社の見た目と関係ない失敗には、その入口を出さない", async () => {
+    const onNavigate = vi.fn();
+    useProjectStore.setState({ brandKit: {}, updateBrandKit: vi.fn(async () => true) } as never);
+    vi.mocked(deleteLibraryAsset).mockRejectedValueOnce("素材を外せませんでした。もう一度お試しください。");
+    render(<AssetLibraryPanel onNavigate={onNavigate} />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).queryByRole("button", { name: "会社の見た目を決める" }), "関係ない失敗に入口が出ている").toBeNull();
+  });
+
+  /**
    * ⚠️ **ロゴは置いたあとに選ぶしかない**（差分再監査）＝拡張子では写真と区別できないので
    * `detectAssetType` は必ず `image` を返す。ここで選べないと **ADR-0036 の「いつものロゴ」が
    * どこからも設定できない**（会社の見た目の選択欄が常に空になる＝§2-5 の行き止まり）。

@@ -5,7 +5,7 @@ import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
+import { PANEL_SCREEN, SPLIT_DIR, emptyLayout } from "../../domain/layout/panelLayout";
 import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
@@ -29,6 +29,7 @@ import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { GroupList } from "../components/GroupList";
 import { EditorToolbar } from "../components/EditorToolbar";
+import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -3303,10 +3304,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             // 保存を出さず・`saveProject` の入口もここだけ＝§2-5「次の行動」が行き止まりになる）。
             // 他の2画面も知らせの隣に押せるものがある（見た目パターン編集＝保存／タイムライン＝保存し直す）＝ADR-0026②。
             extra={(
-              <button className="btn btn-primary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
-                <SaveIcon size={18} />
-                {saveButtonLabel(saveStatus, saveBlockedReason)}
-              </button>
+              <>
+                {/* 欄の出し入れも**見出しの行**へ（#1032）＝欄の下に置くと、編集している間は視界の外だった。 */}
+                <PanelLayoutMenu layout={panelLayout} panels={panels} closed={closedPanels} onChange={changeLayout} onReset={resetLayout} />
+                <button className="btn btn-primary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
+                  <SaveIcon size={18} />
+                  {saveButtonLabel(saveStatus, saveBlockedReason)}
+                </button>
+              </>
             )}
             back={{ label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
           />
@@ -3322,15 +3327,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* 欄は器いっぱいに広げ、**下の操作行は必ず残す**＝閉じた欄を戻す道が画面から切れない（決定6/8）。 */}
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />
-        <div className="row gap-sm" style={{ flexShrink: 0, flexWrap: "wrap" }}>
-          {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8）。 */}
-          {closedPanels.map((id) => (
-            <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
-              「{panels.find((p) => p.id === id)?.title}」を表示する
-            </button>
-          ))}
-          <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
-        </div>
       </div>
             {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
           ⚠️ 欄の最下部にある同じ操作は**残す**＝右クリックを知らない人の道を塞がない

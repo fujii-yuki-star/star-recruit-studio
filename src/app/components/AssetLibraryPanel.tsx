@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { AssetThumb } from "./AssetThumb";
+import { BrandKitLink } from "./BrandKitLink";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { assetTagCounts } from "../../domain/project/assetSearch";
@@ -29,6 +30,7 @@ import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/as
 import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabels";
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
+import type { ScreenId } from "../data/mockData";
 
 /** 種類の絞り込み（画面に出す名前）。 */
 const TYPE_CHOICES: { label: string; value: AssetType | null }[] = [
@@ -65,7 +67,7 @@ function editableTypeChoices(current: AssetType): { label: string; value: AssetT
  * **片方の形式で成立していない**（ADR-0026②）。取り込み先を差し替えられるようにする。
  */
 // 取り込み先＝置かれた画面の形式（既定は場面形式）。**値も正典の enum から採る**（§2-7・差分再監査 6巡目 ℹ️）。
-export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.timeline } = {}) {
+export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJECT_FORMAT.timeline; onNavigate?: (screen: ScreenId) => void } = {}) {
   const [items, setItems] = useState<LibraryAsset[]>([]);
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -76,6 +78,9 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  // その断りから**そのまま直しに行ける**か（#1032 ℹ️）＝「設定の『会社の見た目』から選び直して
+  // ください」と言うだけでは、行き先を自分で探させる（§2-5 の「次の行動」を言葉だけで済ませない）。
+  const [errorGoesToBrandKit, setErrorGoesToBrandKit] = useState(false);
   // ⚠️ **種類も直せる**（差分再監査）＝**ロゴはファイル名から判らない**（拡張子は写真と同じ）ので、
   // 置いたあとに選ぶしかない。選べないと ADR-0036 の「いつものロゴ」が**どこからも設定できない**。
   const [editing, setEditing] = useState<{ id: string; name: string; tags: string; assetType: AssetType } | null>(null);
@@ -203,6 +208,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   async function onAdd(): Promise<void> {
     setNotice("");
     setError("");
+    setErrorGoesToBrandKit(false);
     setBusy(true);
     try {
       // ⚠️ **音楽も選べる口を使う**（差分再監査）＝ADR-0035 は棚の中身に**ロゴ・写真・BGM**を
@@ -245,6 +251,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
   async function onImport(a: LibraryAsset): Promise<void> {
     setNotice("");
     setError("");
+    setErrorGoesToBrandKit(false);
     // ⚠️ **取り込み先は置かれた画面で決まる**＝タイムラインの欄からはタイムラインの文書へ入れる。
     if (target === PROJECT_FORMAT.timeline) {
       // ⚠️ **できたときだけ知らせる**（PR #913 レビュー 🔴）＝返り値を見ないと、失敗しても
@@ -283,6 +290,7 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
     setConfirming(null);
     setNotice("");
     setError("");
+    setErrorGoesToBrandKit(false);
     setBusy(true);
     try {
       // ⚠️ **消す前に「会社の見た目が指しているか」を覚える**＝下で書き換えるので、
@@ -305,7 +313,8 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
       );
       // ⚠️ **できなかったことは言う**＝素材は外れたが、会社の見た目は消した素材を指したまま。
       if (wasBrandLogo && !brandOk) {
-        setError("会社の見た目のロゴを外せませんでした。設定の「会社の見た目」から選び直してください。");
+        setError("会社の見た目のロゴを外せませんでした。会社の見た目から選び直してください。");
+        setErrorGoesToBrandKit(true);
       }
     } catch (e) {
       setError(typeof e === "string" ? e : "素材を外せませんでした。もう一度お試しください。");
@@ -416,7 +425,13 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
         </p>
       )}
       {notice && <p className="field-hint mt">{notice}</p>}
-      {error && <p className="form-error mt" role="alert">{error}</p>}
+      {error && (
+        <div className="form-error mt" role="alert">
+          {error}
+          {/* ⚠️ **行き先まで連れて行く**＝押す言葉も寄る欄も `BrandKitLink` が持つ（画面ごとに書かない）。 */}
+          {errorGoesToBrandKit && onNavigate && <div><BrandKitLink onNavigate={onNavigate} /></div>}
+        </div>
+      )}
 
       <div className="mt">
         {items.length === 0 ? (

@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState, type ChangeEvent, useEffect } from
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
+import { PANEL_SCREEN, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPES, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
@@ -39,6 +39,7 @@ import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
 import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar";
+import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { KeyboardNudge } from "../components/KeyboardNudge";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
@@ -1023,9 +1024,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           undo={{ canUndo, canRedo, onUndo: undoDraft, onRedo: redoDraft, disabled: busyAction !== null }}
           status={dirty ? <UnsavedMark /> : null}
           extra={(
-            <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
-              {busyAction === "save" ? "保存中…" : "保存"}
-            </button>
+            <>
+              {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
+              <PanelLayoutMenu layout={panelLayout} panels={panels} closed={closedPanels} onChange={changeLayout} onReset={resetLayout} />
+              <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
+                {busyAction === "save" ? "保存中…" : "保存"}
+              </button>
+            </>
           )}
           back={{ label: <><ArrowLeftIcon size={16} />一覧へ戻る</>, onClick: onBack, disabled: busyAction !== null }}
         />
@@ -1054,14 +1059,6 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
       >
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
-        <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-          {closedPanels.map((id) => (
-            <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
-              「{panels.find((p) => p.id === id)?.title}」を表示する
-            </button>
-          ))}
-          <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
-        </div>
       </div>
     </div>
   );

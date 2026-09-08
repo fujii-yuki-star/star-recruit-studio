@@ -111,6 +111,36 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     expect(inHeader("一覧へ戻る")).toBe(true);
   });
 
+  // ⚠️ **欄の出し入れも3画面で同じ場所**（#1032）＝これまでは**欄の下**にあり、欄は画面の高さ
+  //    いっぱいまで広がるので編集中は視界の外だった（＝閉じた欄を戻す道が見えない・§2-5）。
+  //    ⚠️ **3画面まとめて見る**＝1画面だけだと、残りの2画面が欄の下に戻っても緑のまま。
+  it("3画面とも、欄の出し入れが見出しの行にある", () => {
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [scene()], assets: [], editingSceneId: "scene_001",
+      past: [], future: [], saveStatus: "saved",
+    } as never);
+    const sceneEdit = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(inHeaderEl(screen.getByRole("button", { name: /^欄/ })), "場面編集").toBe(true);
+    sceneEdit.unmount();
+
+    useTimelineStore.setState({ doc: timelineDoc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
+    useProjectStore.setState({ templates: [] });
+    const timeline = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(inHeaderEl(screen.getByRole("button", { name: /^欄/ })), "タイムライン編集").toBe(true);
+    // 見出しの行にあっても、スクロールする側の中で貼り付いていなければ消える（#774 と同じ物差し）。
+    expect(staysVisibleOnScrollEl(screen.getByRole("button", { name: /^欄/ })), "タイムライン編集（スクロール）").toBe(true);
+    timeline.unmount();
+
+    useProjectStore.setState({
+      templates: sampleTemplates, assets: [], scenes: [],
+      editingTemplateId: sampleTemplates[0].templateId,
+    } as never);
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(inHeaderEl(screen.getByRole("button", { name: /^欄/ })), "見た目パターン編集").toBe(true);
+  });
+
   // ⚠️ **物差しが効いていることを確かめる**＝`inHeader` が何にでも真を返すなら、上の3件は
   // 何も検査していないのと同じ（欄の中の操作では偽になることを見る）。
   it("欄の中の操作は「見出しの行」と見なさない（物差しの自己検査）", () => {
@@ -197,7 +227,8 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     useTimelineStore.setState({ doc: timelineDoc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
     useProjectStore.setState({ templates: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(staysVisibleOnScroll("配置を既定に戻す")).toBe(false);
+    // ⚠️ 「配置を既定に戻す」は**欄のメニューへ移した**（#1032）ので、ここでは欄の中の操作で見る。
+    expect(staysVisibleOnScroll("文字を置く")).toBe(false);
   });
 
   // ⚠️ **印が本当に「貼り付ける」意味を持つか**まで見る＝この検査が無いと、`.editor-header` を
