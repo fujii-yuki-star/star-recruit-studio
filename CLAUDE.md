@@ -11,7 +11,7 @@
 | 区分 | ファイル | 性質 |
 |---|---|---|
 | 製品・要件 | `docs/yuko_recruit_docs/01`〜`10` | 解説・背景（example混在） |
-| **データ規範** | `docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md` ＋ `docs/yuko_recruit_docs/schemas/*.schema.json` | **正典** |
+| **データ規範** | `docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md`（タイムライン形式の `§7.6` は `11_TIMELINE_REFERENCE.md` へ切り出し・**節番号は据え置き**） ＋ `docs/yuko_recruit_docs/schemas/*.schema.json` | **正典** |
 | **AI規範** | `docs/yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md` | **正典** |
 | AI開発規約 | `CLAUDE.md`（本ファイル） | **正典** |
 
