@@ -49,7 +49,43 @@ export function guidanceLiteralsIn(text: string): { name: string; text: string }
     if (out.some((o) => o.text === literal)) continue; // 定数として既に拾っている
     out.push({ name: `（その場に書いた文）${literal.slice(0, 12)}…`, text: literal });
   }
+  // ③ **画面に直に書いた文**（#1051 ③）。①② は**引用符の中**しか見ていないので、
+  // `<p>…ください</p>` のように**タグの間へ直に書いた文**はこの段の外だった。
+  //
+  // ⚠️ **拾う範囲を「断りの器の中」へ絞る**（#1051 の「誤検出を出さない形を先に決める」の答え）。
+  // 文の形（`ください` で終わる）だけで拾うと、**入力のヒント・見出し・手順の説明**まで入る
+  //（実測 29 件。例：「短い言葉で複数入れてください」は欄のヒントであって断りではない）。
+  // **断りは必ず断りの器に入る**（`notice` / `form-error` / `role="alert"`）ので、そこを錠にする（実測 9 件）。
+  // ⚠️ **コメントを先に落とす**＝複数行の説明の**続きの行**は `//` で始まらないので、
+  // 落とさないとコメントの中の文を拾ってしまう（実測で 8 件混ざった）。
+  const body = stripComments(text);
+  for (const m of body.matchAll(
+    /(?:className="[^"]*(?:notice|form-error)[^"]*"|role="alert")([\s\S]{0,900}?)(?=\n\s*(?:<\/div>|<\/p>|<\/ul>|\)\}))/g,
+  )) {
+    for (const line of m[1]!.split("\n")) {
+      const t = line.trim();
+      const inline = t.match(/^(?:>)?([^<>{}"'`]+)(?:<\/[a-zA-Z]+>)?$/);
+      if (!inline) continue;
+      const literal = inline[1]!.trim();
+      if (!looksLikeGuidance(literal)) continue;
+      if (out.some((o) => o.text === literal)) continue;
+      out.push({ name: `（画面に直に書いた文）${literal.slice(0, 12)}…`, text: literal });
+    }
+  }
   return out;
+}
+
+/**
+ * 説明（コメント）を落とす。JSX の中の説明・ブロックコメント・行コメントの3つ。
+ *
+ * ⚠️ **行コメントは続きの行が `//` で始まらない**ので、行単位で見るだけでは落としきれない。
+ * ここでは断りの器を鍵にするので、器の外にある説明はそもそも拾わない（二重の守り）。
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/.*$/gm, " ");
 }
 
 /** `app`・`infrastructure` に**直に書かれた**断りを集める。 */
@@ -77,7 +113,19 @@ const tableText = (): string =>
 
 // ⚠️ **表に載せない**と決めたものは、**理由を書いて明示的に外す**（黙って落とさない）。
 // 増やすときは「なぜ表に無くてよいか」を必ず書く（空欄で増やせないよう検査する）。
-const NOT_IN_TABLE: Record<string, string> = {};
+const NOT_IN_TABLE: Record<string, string> = {
+  // ── 断りではない「知らせ・案内」（#1051 ③）──
+  // ⚠️ `15 §6` は**エラー・状態の正典**であって、画面の文字すべての一覧ではない。
+  // 「何かができなかった」ではない文は、表へ載せると表の意味が薄まる。
+  "（画面に直に書いた文）動画に声の表記が入りませ…":
+    "クレジットを非表示にしたときの**注意**（ADR-0025）。失敗ではなく、選んだ結果の知らせ",
+  "（画面に直に書いた文）送信してよい内容か、もう…":
+    "外部送信の前に必ず通す確認の案内（§2-6）。状態ではなく手順",
+  "（画面に直に書いた文）このたたき台はゆうこ（A…":
+    "たたき台が AI の作ったものであることの知らせ。失敗ではない",
+  "（画面に直に書いた文）時間の流れを細かく作ると…":
+    "`TIMELINE_OVERLAY_RETIRED` の**次の行動の文**（行は表にある）。知らせ本体と別の行に分かれているだけ",
+};
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();
@@ -97,8 +145,12 @@ describe("画面に直書きした断りも、表に載っている（#978）", 
   });
 
   it("外した理由が空でない", () => {
+    // ⚠️ **空を見つけられることも見る**（門番の自己検査）＝いま空の行が1つも無いので、
+    // 上の行だけだと**判定を緩めても緑**になる（実際に変異チェックで生き残った）。
+    const hasReason = (why: string): boolean => why.length > 0;
+    expect(hasReason(""), "空の理由を見つけられない").toBe(false);
     for (const [name, why] of Object.entries(NOT_IN_TABLE)) {
-      expect(why.length, `${name} を外した理由が書かれていない`).toBeGreaterThan(0);
+      expect(hasReason(why), `${name} を外した理由が書かれていない`).toBe(true);
     }
   });
 
@@ -124,6 +176,30 @@ describe("断りの拾い方（#981 レビュー）", () => {
       `throw new TimelineLoadError("読み取れませんでした。一覧から選び直してください。");`,
     ];
     for (const src of cases) expect(guidanceLiteralsIn(src), src).toHaveLength(1);
+  });
+
+  it("画面に直に書いた文も拾う（断りの器の中だけ）", () => {
+    const inNotice = `
+      <p className="notice notice-warn" role="alert">
+        選んだ範囲に場面がありません。範囲を選び直してください。
+      </p>`;
+    expect(guidanceLiteralsIn(inNotice)).toHaveLength(1);
+  });
+
+  it("断りの器の外にある文は拾わない（欄のヒント・手順の説明）", () => {
+    const hint = `
+      <p className="field-hint">
+        短い言葉で複数入れてください。あとから直せます。
+      </p>`;
+    expect(guidanceLiteralsIn(hint)).toEqual([]);
+  });
+
+  it("説明（コメント）の中の文は拾わない（続きの行も）", () => {
+    const commented = `
+      {/* ⚠️ ここでは「もう一度お試しください」とは書かない
+          ＝何度押しても直らない行動を勧めることになるので、別の手を出してください。 */}
+      <p className="notice" role="alert">何もありません</p>`;
+    expect(guidanceLiteralsIn(commented)).toEqual([]);
   });
 
   it("入力のヒント・見出し・下書きは拾わない（表の意味を薄めない）", () => {
