@@ -1162,6 +1162,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   );
 
   /**
+   * 文字の**体裁**（字間・影・帯）に手が入っているか（#1032）。
+   *
+   * ⚠️ **入っているときは開いて出す**＝畳んで出すと入れた設定を見失う
+   *（場面の BGM・「この場面だけ声の大きさ」と同じ流儀）。
+   */
+  const hasFreeTextDecoration = (el: FreeElement): boolean =>
+    el.letterSpacing != null || (el.shadow?.enabled ?? false) || (el.background?.enabled ?? false);
+
+  /**
+   * 文字の体裁を**畳んで出す**（#1032）。
+   *
+   * ⚠️ **通常の場面とタイムラインは既に畳んでいる**（「〜の見た目」「文字の体裁」）のに、
+   * 自由配置のカードだけ開きっぱなしだった＝**同じものを場所で別の出し方にしない**（ADR-0026②）。
+   * ⚠️ **`key` は付けるが、いまは等価**＝`CollapsibleSection` の注記は「選んだもので変わる
+   * `defaultOpen` を渡すときは `key` を付けよ」だが、**カード自体が `key={el.id}` で作り直される**ので
+   * 付けなくても見直される（変異チェックで生き残った＝同じ結果）。
+   * カードの作りを変えたときに黙って壊れないよう、注記の通りに付けておく。
+   */
+  const renderFreeTextLook = (el: FreeElement) => (
+    <CollapsibleSection
+      key={`freeTextLook-${el.id}`}
+      scope={SECTION_SCOPE.sceneEdit}
+      storageKey="freeTextLook"
+      title="文字の体裁"
+      defaultOpen={hasFreeTextDecoration(el)}
+    >
+      {renderFreeTextDecoration(el)}
+      {renderFreeBandBg(el)}
+    </CollapsibleSection>
+  );
+
+  /**
    * 文字の**影と字間**（#264）。⚠️ **書き込む入口が1つも無かった**（差分再監査 2巡目）＝
    * schema・解決（`resolveTextStyle`）・描画・焼き出しまで land しているのに、値を書ける画面が
    * どこにも無く**利用者からは使えない**まま（🔴1 の持ち込みフォントと同じ形の3例目）。
@@ -1300,8 +1332,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          {renderFreeTextDecoration(el)}
-          {renderFreeBandBg(el)}
+          {renderFreeTextLook(el)}
         </>
       );
     }
@@ -1431,8 +1462,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          {renderFreeTextDecoration(el)}
-          {renderFreeBandBg(el)}
+          {renderFreeTextLook(el)}
         </>
       );
     }
