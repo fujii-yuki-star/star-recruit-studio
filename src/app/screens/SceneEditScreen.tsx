@@ -2008,7 +2008,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       {sceneTemplate ? (
                         <SceneThumb scene={s} template={sceneTemplate} />
                       ) : (
-                        <div className="scene-card-thumb thumb thumb-photo">
+                        <div
+                          className="scene-card-thumb thumb thumb-photo"
+                          // 見本と同じ形にする（PR #1084 レビュー）＝見た目が引けないときだけ
+                          // 16:9 の箱になると、縦型の動画で**カードの高さが揃わない**。
+                          style={{ aspectRatio: aspectRatio === "9:16" ? "9 / 16" : "16 / 9" }}
+                        >
                           <PhotoIcon size={18} />
                         </div>
                       )}

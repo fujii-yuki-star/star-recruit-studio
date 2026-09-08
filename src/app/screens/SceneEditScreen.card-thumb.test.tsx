@@ -19,9 +19,9 @@ const scene = (id: string, order: number, over: Partial<Scene> = {}): Scene =>
     narration: { text: "", status: "none" }, warnings: [], ...over,
   } as unknown as Scene);
 
-const setup = (scenes: Scene[]) => {
+const setup = (scenes: Scene[], templates = sampleTemplates) => {
   useProjectStore.setState({
-    templates: sampleTemplates,
+    templates,
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: scenes.map((s) => s.sceneId) }],
     scenes, assets: [], editingSceneId: scenes[0]?.sceneId ?? null,
     past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
@@ -56,6 +56,24 @@ describe("場面カードの見本（#1031）", () => {
     expect(svgs[0], "2枚とも同じ絵になっている").not.toBe(svgs[1]);
     expect(svgs[0]).toContain("はじめまして");
     expect(svgs[1]).toContain("さようなら");
+  });
+
+  // ⚠️ **箱の形を画面に合わせる**（PR #1084 レビュー）＝CSS の既定は 16:9 なので、
+  // 縦型（9:16・ADR-0012）だと**左右に大きな余白**が出る。
+  it("縦型の見た目なら、箱も縦型になる", () => {
+    const portrait = { ...sampleTemplates[0], templateId: "tpl_portrait", aspectRatio: "9:16", canvas: { width: 1080, height: 1920 } };
+    const { container } = setup(
+      [scene("scene_001", 1, { templateId: "tpl_portrait" } as Partial<Scene>)],
+      [portrait as never],
+    );
+    const thumb = cards(container)[0]?.querySelector(".scene-card-thumb") as HTMLElement;
+    expect(thumb?.style.aspectRatio, "箱が横型のまま").toBe("1080 / 1920");
+  });
+
+  it("横型の見た目なら、箱も横型のまま", () => {
+    const { container } = setup([scene("scene_001", 1)]);
+    const thumb = cards(container)[0]?.querySelector(".scene-card-thumb") as HTMLElement;
+    expect(thumb?.style.aspectRatio).toBe("1920 / 1080");
   });
 
   it("見た目が引けない場面は、絵にせず写真の印を出す（存在しない見た目について語らない）", () => {

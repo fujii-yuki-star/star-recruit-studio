@@ -35,6 +35,10 @@ export function SceneThumb({ scene, template }: { scene: Scene; template: Templa
   return (
     <div
       className="scene-card-thumb thumb"
+      // ⚠️ **箱の形は見た目パターンの画面に合わせる**（PR #1084 レビュー）＝
+      // CSS の既定は 16:9 なので、**縦型（9:16・ADR-0012）だと左右に大きな余白**が出る。
+      // 描く中身と同じもの（見た目の画面寸法）から採る＝箱と絵の形を割らない。
+      style={{ aspectRatio: `${template.canvas.width} / ${template.canvas.height}` }}
       // 中身は SVG の文字列（`ScenePreview` と同じ流儀）。
       dangerouslySetInnerHTML={{ __html: svg }}
     />
