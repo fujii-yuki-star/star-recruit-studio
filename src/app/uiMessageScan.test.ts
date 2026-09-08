@@ -60,11 +60,14 @@ export function guidanceLiteralsIn(text: string): { name: string; text: string }
   // 落とさないとコメントの中の文を拾ってしまう（実測で 8 件混ざった）。
   const body = stripComments(text);
   for (const m of body.matchAll(
-    /(?:className="[^"]*(?:notice|form-error)[^"]*"|role="alert")([\s\S]{0,900}?)(?=\n\s*(?:<\/div>|<\/p>|<\/ul>|\)\}))/g,
+    /(?:className="[^"]*(?:notice|form-error)[^"]*"|role="alert")([\s\S]{0,900}?)(?=\n\s*(?:<\/div>|<\/p>|<\/ul>|<\/span>|\)\}))/g,
   )) {
     for (const line of m[1]!.split("\n")) {
-      const t = line.trim();
-      const inline = t.match(/^(?:>)?([^<>{}"'`]+)(?:<\/[a-zA-Z]+>)?$/);
+      // ⚠️ **行の中のタグを先に落とす**（PR #1079 レビュー）＝以前は「行が本文で始まる」形だけを
+      // 見ていたので、`<span>…ください</span>` のように**1行に収まった断りを取りこぼしていた**。
+      // 器の中なので、タグを落としても拾うのは断りの本文だけ。
+      const t = line.replace(/<[^>]*>/g, "").trim();
+      const inline = t.match(/^([^<>{}"`]+)$/);
       if (!inline) continue;
       const literal = inline[1]!.trim();
       if (!looksLikeGuidance(literal)) continue;
@@ -184,6 +187,16 @@ describe("断りの拾い方（#981 レビュー）", () => {
         選んだ範囲に場面がありません。範囲を選び直してください。
       </p>`;
     expect(guidanceLiteralsIn(inNotice)).toHaveLength(1);
+  });
+
+  it("1行に収まった断りも拾う（`<span>…</span>` の形）", () => {
+    // ⚠️ **この形を取りこぼしていた**（PR #1079 レビュー）＝行が本文で始まる形だけを見ていた。
+    // 実際にこれで 7 件の断りが見つかり、表へ行を足すことになった。
+    const oneLine = `
+      <div className="notice notice-warn" role="alert">
+        <span>BGMを再生できませんでした。別のBGMを選ぶか、もう一度お試しください。</span>
+      </div>`;
+    expect(guidanceLiteralsIn(oneLine)).toHaveLength(1);
   });
 
   it("断りの器の外にある文は拾わない（欄のヒント・手順の説明）", () => {
