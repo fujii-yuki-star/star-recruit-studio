@@ -556,6 +556,23 @@ describe("TimelineProjectScreen: 絵が出せない素材（#726 レビュー）
     expect(screen.getByRole("button", { name: "ファイルを選び直す" })).toBeInTheDocument();
   });
 
+  // ⚠️ **直接置いた動画も同じ**（3種の置き方＝直接置き・差し込み口・立ち絵。PR #1102 レビュー 🟡）＝
+  //    1つでも漏らすと、その置き方だけ作り直しを迫る側に取り残される。
+  it("直接置いた動画でも、ファイルが見つからなければ選び直せる", () => {
+    useTimelineStore.setState({
+      doc: doc({
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" }],
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_v" }],
+      }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [],
+      assetSrcById: { asset_v: "asset://v.mp4" }, missingAssetIds: ["asset_v"],
+    } as never);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材を使っている部品が1個"))).toBe(true);
+    expect(screen.getByRole("button", { name: "ファイルを選び直す" })).toBeInTheDocument();
+  });
+
   // ⚠️ **立ち絵に入れた動画も同じ**（#809＝置き場所として数えている）。
   it("立ち絵に入れた動画でも、ファイルが見つからなければ選び直せる", () => {
     useProjectStore.setState({
