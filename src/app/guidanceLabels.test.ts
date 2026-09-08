@@ -94,9 +94,13 @@ describe("案内が指す名前は実在する（#354）", () => {
     const stripped = uiFiles.map((p) => [p, stripComments(readFileSync(p, "utf8"))] as const);
 
     // 案内文の中で名指ししているもの（「〇〇」を押す／「〇〇」から／「〇〇」で）。
+    //
+    // ⚠️ **間に入る語も許す**（PR #1094 レビュー）＝以前は**閉じ引用符の直後**だけを見ており、
+    // 「〇〇」**の欄**から・「〇〇」**の画面**で、のように一語挟むだけで**素通り**していた。
+    // 実際、欄をタブへまとめたときに**消えた欄の名前を指す案内が2件残った**（門番自体の穴）。
     const refs = new Map<string, Set<string>>();
     for (const [p, t] of stripped) {
-      for (const m of t.matchAll(/「([^」\n]{2,20})」(を押|から|で)/g)) {
+      for (const m of t.matchAll(/「([^」\n]{2,20})」(?:の[^「」\n]{1,4})?(を押|から|で)/g)) {
         const name = m[1];
         // 差し込み（`${…}`）や英字だけの識別子は名前として扱わない。
         if (/[a-zA-Z_.*+?^${}()|[\]「]/.test(name)) continue;

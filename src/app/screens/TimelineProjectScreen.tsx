@@ -3415,7 +3415,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             空のときは「次の一歩」を添える＝置き方が2通りあることを、置く前に知らせる（§2-5・ADR-0034 決定22）。 */}
         {doc.clips.length === 0 && (
           <p className="text-muted">
-            まだ何も置かれていません。「素材・文字・図形を置く」の欄から運んでくるか、「文字を置く」を押すと再生位置へ置けます。
+            まだ何も置かれていません。「置く」の「素材・文字・図形」から運んでくるか、「文字を置く」を押すと再生位置へ置けます。
           </p>
         )}
         {doc.tracks.length === 0 ? (
@@ -4668,7 +4668,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
                             ? "入れられる動画がありません。「写真・動画・音楽を取り込む」で動画を取り込んでください。"
-                            : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
+                            : "入れられる写真がありません。「置く」の「素材・文字・図形」で写真を取り込んでください。"}
                         </span>
                       )}
                       {/* その枠に入れた動画の**元の音**（#512 段3b）。直接置きの「この動画の音」と同じ形
