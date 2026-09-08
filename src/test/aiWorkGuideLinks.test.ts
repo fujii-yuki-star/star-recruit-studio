@@ -18,19 +18,24 @@ const GUIDE_DIR = 'docs/ai_work_guides';
 const guideFiles = readdirSync(GUIDE_DIR).filter((f) => f.endsWith('.md'));
 const read = (f: string): string => readFileSync(join(GUIDE_DIR, f), 'utf8');
 
-/** ガイドが節番号で引いてよい資料（呼び名 → パス）。 */
-const CANON: Record<string, string> = {
-  '04': 'docs/yuko_recruit_docs/04_TEMPLATE_SPEC.md',
-  '05': 'docs/yuko_recruit_docs/05_RENDERING_SPEC.md',
-  '06': 'docs/yuko_recruit_docs/06_UI_SPEC.md',
-  '08': 'docs/yuko_recruit_docs/08_TEST_PLAN.md',
-  '11': 'docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md',
-  '12': 'docs/yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md',
-  '13': 'docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md',
-  '14': 'docs/yuko_recruit_docs/14_TEST_STRATEGY.md',
-  '15': 'docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md',
-  '16': 'docs/yuko_recruit_docs/16_GLOSSARY.md',
-  'CLAUDE.md': 'CLAUDE.md',
+/**
+ * ガイドが節番号で引いてよい資料（呼び名 → パス）。
+ *
+ * ⚠️ **`11` は2ファイルにまたがる**（2026-09-08 に `§7.6` を切り出した）＝**節番号は据え置き**なので、
+ * `11 §7.6.3` のような呼び方はそのまま使える。**両方を見ないと「実在するのに無い」と言う**（嘘の赤）。
+ */
+const CANON: Record<string, string[]> = {
+  '04': ['docs/yuko_recruit_docs/04_TEMPLATE_SPEC.md'],
+  '05': ['docs/yuko_recruit_docs/05_RENDERING_SPEC.md'],
+  '06': ['docs/yuko_recruit_docs/06_UI_SPEC.md'],
+  '08': ['docs/yuko_recruit_docs/08_TEST_PLAN.md'],
+  '11': ['docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md', 'docs/yuko_recruit_docs/11_TIMELINE_REFERENCE.md'],
+  '12': ['docs/yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md'],
+  '13': ['docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md'],
+  '14': ['docs/yuko_recruit_docs/14_TEST_STRATEGY.md'],
+  '15': ['docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md'],
+  '16': ['docs/yuko_recruit_docs/16_GLOSSARY.md'],
+  'CLAUDE.md': ['CLAUDE.md'],
 };
 
 /**
@@ -80,8 +85,8 @@ function docsOnLine(line: string): string[] {
       if (line.includes('CLAUDE.md')) out.add(key);
       continue;
     }
-    const fileName = CANON[key]!.split('/').pop()!.replace('.md', '');
-    if (line.includes(fileName) || new RegExp(namePattern(key) + SEP + '§').test(line)) out.add(key);
+    const fileNames = CANON[key]!.map((p) => p.split('/').pop()!.replace('.md', ''));
+    if (fileNames.some((n) => line.includes(n)) || new RegExp(namePattern(key) + SEP + '§').test(line)) out.add(key);
   }
   return [...out];
 }
@@ -163,7 +168,12 @@ export function tooLong(entries: readonly (readonly [string, number])[]): string
     .map(([f, n]) => `${f}=${n}`);
 }
 
-const canonSections = new Map(Object.entries(CANON).map(([k, p]) => [k, sectionsOf(readFileSync(p, 'utf8'))]));
+const canonSections = new Map(
+  Object.entries(CANON).map(([k, paths]) => [
+    k,
+    new Set(paths.flatMap((p) => [...sectionsOf(readFileSync(p, 'utf8'))])),
+  ]),
+);
 
 describe('作業ガイドの行き先（docs/ai_work_guides）', () => {
   it('リンクの指し先が実在する', () => {

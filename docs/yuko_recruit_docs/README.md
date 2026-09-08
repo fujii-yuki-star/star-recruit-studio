@@ -21,6 +21,7 @@
 | 09 | `09_CODEX_IMPLEMENTATION_PROMPT.md` | Codexへ渡す初期実装指示 |
 | 10 | `10_USER_MANUAL_DRAFT.md` | 採用担当向け操作マニュアル草案 |
 | 11 | `11_SCHEMA_REFERENCE.md` | **【正典】** データ規範・enum・定数・バインディング・解決順序 |
+| 11 | `11_TIMELINE_REFERENCE.md` | **【正典】** `11` の **§7.6**（タイムライン形式のフィールド表）を切り出したもの。**節番号は据え置き**（`11 §7.6.3` のような呼び方はそのまま） |
 | 12 | `12_AI_PROMPT_AND_MAPPING.md` | **【正典】** AIプロンプト・構造化出力・AI出力→内部変換 |
 | 13 | `13_DEPENDENCIES_AND_LICENSING.md` | 依存・ライセンス・配布（FFmpeg/VOICEVOX/ずんだもん/フォント/APIキー） |
 | 14 | `14_TEST_STRATEGY.md` | 自動テスト戦略（08の手動観点を補完。仕様→テストのカタログ） |
