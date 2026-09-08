@@ -11,7 +11,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
 import { editableTextKeys, usedTextKeys, withTextFontId } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
@@ -48,6 +48,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
+import { TransitionTiles } from "../components/TransitionTiles";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { KeyboardNudge } from "../components/KeyboardNudge";
 import { useDragReorder } from "../hooks/useDragReorder";
@@ -460,7 +461,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const prevTemplate = prevScene ? templates.find((t) => t.templateId === prevScene.templateId) : undefined;
   const transitionPreview = useSceneTransitionPreview(scenes, selectedIdx);
   // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
+  // ⚠️ **重ねて描ける条件まで見る**（#1095 レビュー）＝`transitionActive` は前場面の見た目が解決できるかを見ない。
+  // それだけで再生を始めると、前の場面の見た目が見つからない壊れた動画で**何も重ならないまま再生中**になる
+  // （オーバーレイも「停止」も出ない無言の状態＝ADR-0026④）。
   const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
+
+  /**
+   * 選んだらその場で切り替えを再生する（#1032）。
+   *
+   * ⚠️ **注釈を読ませない**＝以前は「※ 上の『切り替えを見る』で確認できます」と書いて、
+   * 利用者に**別のボタンを探させて**いた（#1031 §3 の「文章依存」3つの型の1つ）。
+   * ⚠️ **場面を切り替えたときは再生しない**＝選び直したときだけ。場面を選ぶたびに動き出すと、
+   * 一覧を見て回るだけで毎回何かが動く（**押していないのに動く**を作らない）。
+   * ⚠️ **効果が無いときは再生しない**（「なし」・最初の場面）＝押しても何も起きない再生をしない。
+   * ⚠️ **早期 return より前に置く**＝フックの順序を場面の有無で変えない。
+   */
+  const transitionKey = selected ? deriveTransitionSelectValue(selected.transition) : null;
+  // 再生の入口は毎レンダー入れ替える（依存に積むと毎回張り替えることになる＝`playRef` と同じ形）。
+  const previewRef = useRef({ transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition });
+  useEffect(() => {
+    previewRef.current = { transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition };
+  });
+  const lastTransition = useRef({ sceneId: selected?.sceneId, value: transitionKey });
+  useEffect(() => {
+    const prev = lastTransition.current;
+    lastTransition.current = { sceneId: selected?.sceneId, value: transitionKey };
+    if (prev.sceneId !== selected?.sceneId || prev.value === transitionKey) return;
+    // 押しても何も起きない再生を始めない（「なし」・最初の場面・前の場面の見た目が見つからない）。
+    if (!previewRef.current.canPlay) return;
+    previewRef.current.motion.stop(); // 排他：切替を見る間は動き再生を止める（ボタンと同じ扱い）
+    previewRef.current.transition.play();
+  }, [selected?.sceneId, transitionKey]);
+
   // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。
   // 「設定だけできて無効」を避けるため（#469・ADR-0026④）、この組み合わせでは動きUIを設定不可＋理由提示にする。
   const animBlockedByDialogueVideo = motionPreview.hasVideoSlot && !!(selected?.lines && selected.lines.length > 0);
@@ -3183,35 +3215,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* ⚠️ **欄が無いときは見出しにしない**（#1075）＝最初の場面では選択欄を出さないので、
                     `htmlFor` の指し先が**実在しない**（結んだつもりで結ばれていない）。 */}
                 {isFirstScene ? (
-                  <span className="field-label" style={{ display: "block" }}>画面の切り替え</span>
-                ) : (
-                  <label className="field-label" htmlFor="transition">画面の切り替え</label>
-                )}
-                {isFirstScene ? (
-                  <p className="field-hint" style={{ marginTop: 0 }}>
-                    最初の場面のため、前からの切り替えはありません。
-                  </p>
-                ) : (
                   <>
-                    <select
-                      id="transition"
-                      className="select"
-                      value={transitionValue}
-                      onChange={(e) => onTransitionChange(e.target.value)}
-                    >
-                      <option value={TRANSITION_TYPE.none}>なし</option>
-                      <option value={TRANSITION_TYPE.fade}>フェード</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.left}`}>スライド（左へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.right}`}>スライド（右へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.up}`}>スライド（上へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
-                    </select>
-                    <p className="field-hint">
-                      {transitionPreview.transitionActive
-                        ? "※ 上の「切り替えを見る」で、書き出しと同じ切り替わり方を確認できます。"
-                        : "※「なし」では切り替えません。効果を選ぶと、上の「切り替えを見る」で確認できます。"}
+                    <span className="field-label" style={{ display: "block" }}>画面の切り替え</span>
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      最初の場面のため、前からの切り替えはありません。
                     </p>
                   </>
+                ) : (
+                  /* ⚠️ **効果は絵で選ぶ**（#1032）＝名前だけの一覧だと、選んで再生してみるまで
+                     何が起きるか分からず、注釈（「※ 上の『切り替えを見る』で…」）で補っていた。
+                     選んだら**その場で再生する**ので、案内文も不要になった。 */
+                  <TransitionTiles
+                    label="画面の切り替え"
+                    value={transitionValue}
+                    onChange={onTransitionChange}
+                  />
                 )}
               </div>
               <p className="field-hint">
