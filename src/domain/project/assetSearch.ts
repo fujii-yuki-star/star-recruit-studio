@@ -4,11 +4,7 @@
 // AI 利用（poseTag 解決・入力の語彙・送信文）も動いているのに、一覧の絞り込みは**種類だけ**だった。
 // 横断ライブラリ（#260）とは独立に成立するので、そちらを待たずに解消する。
 import type { Asset } from './types';
-
-/** 探すときの言葉をそろえる（大文字小文字・前後の空白を無視）。 */
-function normalize(s: string): string {
-  return s.trim().toLowerCase();
-}
+import { matchesSearchWords } from '../search';
 
 /**
  * 名前・タグでの絞り込み。
@@ -19,10 +15,8 @@ function normalize(s: string): string {
  * ⚠️ **空白で区切った語は全部含む**（AND）＝絞り込みは足すほど狭くなる、が普通の期待。
  */
 export function matchesAssetQuery(asset: Asset, query: string): boolean {
-  const words = normalize(query).split(/\s+/).filter((w) => w !== '');
-  if (words.length === 0) return true;
-  const haystack = [asset.displayName, ...(asset.tags ?? [])].map(normalize).join(' ');
-  return words.every((w) => haystack.includes(w));
+  // 規則（そろえ方・AND・空は絞らない）は見た目パターンの一覧と共有（#1031 レビュー）。
+  return matchesSearchWords([asset.displayName, ...(asset.tags ?? [])], query);
 }
 
 /**

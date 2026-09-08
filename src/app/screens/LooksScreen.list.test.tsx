@@ -1,0 +1,156 @@
+// @vitest-environment jsdom
+// 見た目パターンの一覧を「見て選ぶ」（#1031）。
+//
+// ⚠️ 以前は**名前＋カテゴリの文字だけ**で、絞り込みも向きの印も無かった＝選んで右に出してみるまで
+//    どんな見た目か分からず、この動画で使えるのかも分からなかった。
+// ⚠️ **見本は右の大きなものと同じ作り**（`buildSampleScene`）＝描画の核を共有する（ADR-0001）。
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { useProjectStore } from "../store/projectStore";
+import { sampleTemplates } from "../../infrastructure/sampleData";
+import type { Template } from "../../domain/template/types";
+import { layoutScene } from "../../renderer/layout";
+import { buildSampleScene } from "./looksShared";
+import { LooksScreen } from "./LooksScreen";
+
+// 見本を何回描いたか数える（一覧は20枚以上並ぶ）。
+vi.mock("../../renderer/layout", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../renderer/layout")>();
+  return { ...mod, layoutScene: vi.fn(mod.layoutScene) };
+});
+// 見本の場面を何回**作った**かも数える（描く回数とは別の無駄）。
+vi.mock("./looksShared", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./looksShared")>();
+  return { ...mod, buildSampleScene: vi.fn(mod.buildSampleScene) };
+});
+
+const portrait = {
+  ...sampleTemplates[0], templateId: "tpl_portrait", name: "縦のオープニング",
+  aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+} as unknown as Template;
+
+const setup = (templates: Template[] = [...sampleTemplates, portrait], aspectRatio: "16:9" | "9:16" = "16:9") => {
+  const meta = useProjectStore.getState().meta;
+  useProjectStore.setState({
+    templates, assets: [], scenes: [], parts: [],
+    meta: { ...meta, videoSettings: { ...meta.videoSettings, aspectRatio } },
+  });
+  return render(<LooksScreen onNavigate={vi.fn()} />);
+};
+
+/** 一覧のカード（見た目を選ぶボタン）。 */
+const cards = (container: HTMLElement): HTMLButtonElement[] =>
+  [...container.querySelectorAll("button.action-card")] as HTMLButtonElement[];
+
+/** カードの名前（`action-card-title`）。 */
+const names = (container: HTMLElement): string[] =>
+  cards(container).map((c) => c.querySelector(".action-card-title")?.textContent ?? "");
+
+describe("見た目パターンの一覧（#1031）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("カードに見本（絵）が出る", () => {
+    const { container } = setup();
+    for (const c of cards(container)) {
+      expect(c.querySelector("svg"), `「${c.querySelector(".action-card-title")?.textContent}」に見本が無い`).toBeTruthy();
+    }
+  });
+
+  it("カードに向きが出る（この動画で使えるかが分かる）", () => {
+    const { container } = setup();
+    const card = cards(container).find((c) => c.textContent?.includes("縦のオープニング"));
+    expect(card?.querySelector(".action-card-desc")?.textContent, "向きが出ていない").toContain("縦型（9:16）");
+  });
+
+  it("向きで絞れる", () => {
+    const { container } = setup();
+    expect(names(container), "はじめから縦型が隠れている").toContain("縦のオープニング");
+    const landscape = names(container).filter((n) => n !== "縦のオープニング" && !n.includes("縦"));
+    expect(landscape.length, "横型の見本が一つも無い").toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "縦型（9:16）" }));
+    const shown = cards(container);
+    expect(shown.length, "全部消えている").toBeGreaterThan(0);
+    for (const c of shown) {
+      expect(c.querySelector(".action-card-desc")?.textContent, `横型が残っている（${c.querySelector(".action-card-title")?.textContent}）`)
+        .toContain("縦型（9:16）");
+    }
+    expect(names(container), "横型が残っている").not.toContain(landscape[0]);
+  });
+
+  it("種類で絞れる", () => {
+    const { container } = setup();
+    const before = names(container).length;
+    fireEvent.click(screen.getByRole("button", { name: "写真紹介" }));
+    const after = names(container);
+    expect(after.length, "絞り込みが効いていない").toBeLessThan(before);
+    expect(after.length, "全部消えている").toBeGreaterThan(0);
+  });
+
+  // ⚠️ **探し方の規則は素材画面と共有**（PR #1086 レビュー）＝素の `includes` だと
+  //    ローマ字の名前で当たらない・空白を入れると急に0件、になる。
+  it("大文字小文字を区別せずに探せる", () => {
+    const roman = { ...sampleTemplates[0], templateId: "tpl_roman", name: "Simple Opening" } as unknown as Template;
+    const { container } = setup([...sampleTemplates, roman]);
+    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "simple" } });
+    expect(names(container), "大文字小文字で当たらない").toEqual(["Simple Opening"]);
+  });
+
+  // ⚠️ **1枚選ぶだけで全枚を描き直さない**（PR #1086 レビュー）＝一覧は20枚以上並ぶので、
+  //    選ぶたびに全枚の絵を作り直すと引っかかる（探す欄の1文字ごとにも走る）。
+  it("カードを選んでも、ほかの見本は描き直さない", () => {
+    const { container } = setup();
+    const drawnAtFirst = vi.mocked(layoutScene).mock.calls.length;
+    expect(drawnAtFirst, "はじめに一覧を描いていない").toBeGreaterThan(5);
+    vi.mocked(layoutScene).mockClear();
+    fireEvent.click(cards(container)[1]!);
+    // 選んだ後に描くのは**右の大きな見本**だけ（一覧の分は作り直さない）。
+    // ⚠️ **実数で固定する**（PR #1086 レビュー）＝「何枚以下」だと、右の見本を
+    // 余分に作り直す退行を見逃す（実際に1回分の無駄が残っていた）。
+    expect(vi.mocked(layoutScene).mock.calls.length, "選ぶたびに余分に描いている").toBe(2);
+  });
+
+  // ⚠️ **右の大きな見本も作り直さない**（PR #1086 レビュー）＝一覧と同じものがあるのに
+  //    別に作り直しており、**探す欄の1文字ごと**にも走っていた。
+  //    ⚠️ **描く回数では見えない**（場面を作るのと描くのは別の仕事）ので、作った回数を数える。
+  it("カードを選んでも、見本の場面を作り直さない", () => {
+    const { container } = setup();
+    expect(vi.mocked(buildSampleScene).mock.calls.length, "はじめに作っていない").toBeGreaterThan(5);
+    vi.mocked(buildSampleScene).mockClear();
+    fireEvent.click(cards(container)[1]!);
+    expect(vi.mocked(buildSampleScene).mock.calls.length, "選ぶたび見本の場面を作り直している").toBe(0);
+  });
+
+  it("名前で探せる", () => {
+    const { container } = setup();
+    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "縦の" } });
+    expect(names(container)).toEqual(["縦のオープニング"]);
+  });
+
+  // ⚠️ **行き止まりを作らない**（§2-5）＝0件のときに、戻し方が画面から分からない状態にしない。
+  it("1つも当たらないときは、戻し方を出す", () => {
+    const { container } = setup();
+    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "そんな名前は無い" } });
+    expect(cards(container), "当たっていないのにカードが出ている").toHaveLength(0);
+    expect(container.textContent).toContain("絞り込みをやめる");
+    fireEvent.click(screen.getByRole("button", { name: "絞り込みをやめる" }));
+    expect(names(container).length, "戻せていない").toBeGreaterThan(0);
+  });
+
+  // ⚠️ **絞り込みは一覧の見え方だけ**＝探している途中で右の中身が入れ替わらない。
+  it("絞り込んでも、選んでいる見た目は右に出たまま", () => {
+    const { container } = setup();
+    fireEvent.click(cards(container).find((c) => c.textContent?.includes("縦のオープニング"))!);
+    fireEvent.click(screen.getByRole("button", { name: "横型（16:9）" }));
+    expect(names(container), "絞り込みが効いていない").not.toContain("縦のオープニング");
+    expect(screen.getByText("名前").parentElement?.textContent, "右の中身が入れ替わった").toContain("縦のオープニング");
+  });
+
+  // ⚠️ **使えない向きは印で言う**＝並べるのをやめると「作ったのに出てこない」になる。
+  it("この動画で使えない向きの見た目は、その旨を出す", () => {
+    const { container } = setup();
+    fireEvent.click(cards(container).find((c) => c.textContent?.includes("縦のオープニング"))!);
+    expect(container.textContent, "使えないことが分からない").toContain("この動画では使えません");
+  });
+});
