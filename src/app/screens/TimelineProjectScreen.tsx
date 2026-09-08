@@ -78,7 +78,7 @@ import { PickerList } from "../components/PickerList";
 import { PANEL_BODY_CLASS, PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -122,7 +122,7 @@ type DragPlace = {
 
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
-import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
+import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, type BlockTarget, type PlaceTabId } from "../timelinePanels";
 import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
@@ -671,6 +671,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // この見張りはテストで固定できない。無駄に開け閉てしないためのもので、正しさは閉じ方が担う。
     if (dragging) openDragHistoryGroup();
   }, [selectedKey, openDragHistoryGroup]);
+  /**
+   * 「置く」欄のいまのタブ（#1031）。
+   *
+   * ⚠️ **覚えない**＝配置（どこに欄を置くか）は画面の好みなので覚えるが、いまどのタブを見ていたかは
+   * その場の状態（ADR-0034「文書に依存する状態は覚えない」と同じ向き）。開き直したら**いちばん多い操作**
+   * （素材を置く）から始める。
+   */
+  const [placeTab, setPlaceTab] = useState<PlaceTabId>(PANEL_ID.place);
+  // ⚠️ **断りは、それが指しているタブの上に出す**（#1031）＝キーボードだけの操作など、
+  // 押した場所と違うタブを見ているときに「見えているのは音の欄なのに、断りは見た目パターンの話」
+  // という食い違いを作らない。押した直後は既にそのタブなので、実際には何も動かない。
+  useEffect(() => {
+    if (editBlocked && isPlaceTab(editBlocked.at)) setPlaceTab(editBlocked.at);
+  }, [editBlocked]);
+
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
   // 帯の右クリックメニュー（#701）。列の行と**同じ作法**（右クリック＋「⋮」の逃げ道）。
@@ -683,18 +698,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     l.nodes.center = { panelId: PANEL_ID.preview };
     l.nodes.right = { panelId: PANEL_ID.selected };
     l.nodes.bottom = { panelId: PANEL_ID.arrange };
-    l.nodes.left = {
-      dir: SPLIT_DIR.column,
-      sizes: [1 / 4, 1 / 4, 1 / 4, 1 / 4],
-      // **置くものは上から**（写真・文字・図形 → 見た目パターン → 音 → 読み上げ）＝#684。
-      // 素材を置くのがいちばん多い操作なので先頭に出す（他社も素材の欄が最上位＝#683 の調査）。
-      children: [
-        { panelId: PANEL_ID.place },
-        { panelId: PANEL_ID.templates },
-        { panelId: PANEL_ID.audio },
-        { panelId: PANEL_ID.voice },
-      ],
-    };
+    // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4分割しており（#684）、
+    // 左の幅 0.28 を四等分するので**1欄の中身の高さが 70〜80px**しかなく、
+    // 3手順①の入口（素材の一覧・見た目の一覧）が**既定の配置で視界に入らなかった**。
+    // 型（CapCut / Canva / YMM4）も「置く」は1欄＋タブ（#683 の調査）。
+    l.nodes.left = { panelId: PANEL_ID.place };
     return l;
   }, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
@@ -4817,222 +4825,240 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
-    // **写真・文字・図形を置く**（#684・ADR-0034 段階1）＝置く手段がこれまで無かった。
-    { id: PANEL_ID.place, title: '素材・文字・図形を置く', content: (
+    // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4つの欄に分けており（#684）、
+    // 左の幅を四等分するので**1欄の中身の高さが 70〜80px**しかなく、素材と見た目の一覧が
+    // **既定の配置で視界に入らなかった**（型も「置く」は1欄＋タブ＝#683 の調査）。
+    // ⚠️ **タブは覚えない**＝文書にも設定にも残さない（配置は覚えるが、いまどのタブを
+    // 見ていたかはその場の状態＝ADR-0034 「文書に依存する状態は覚えない」と同じ向き）。
+    { id: PANEL_ID.place, title: '置く', content: (
       <>
-        {/* **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。
-            ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
-        <div className="row gap-sm mb-sm">
-          <AssetImportButton
-            store={useTimelineStore}
-            disabledReason={exporting ? exportingHint : null}
-            variant="secondary"
-            withAudio
-            label="写真・動画・音楽を取り込む"
-          />
+        <div className="segment mb-sm" role="group" aria-label="置くもの" style={{ display: "inline-flex", flexWrap: "wrap" }}>
+          {PLACE_TABS.map(([id, label]) => (
+            <button key={id} className={placeTab === id ? "active" : ""} onClick={() => setPlaceTab(id)}>
+              {label}
+            </button>
+          ))}
         </div>
-        {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
-            棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
-        <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
-          <AssetLibraryPanel target={PROJECT_FORMAT.timeline} />
-        </CollapsibleSection>
-        {importError && (
-          <div className="notice notice-warn row-between mb-sm" role="alert">
-            <span>{importError}</span>
-            <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
-          </div>
-        )}
-        {placeableTracks.length === 0 ? (
-          <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
-        ) : (
+        {placeTab === PANEL_ID.place && (
           <>
-            <p className="text-muted">
-              押すと再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。
-              つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
-            </p>
-            {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
-                ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
-                既定は「いちばん手前の置ける列」＝欄に出ている列が実際に置く列（表示と結果を割らない）。 */}
-            <label className="field">
-              <span>置く列</span>
-              <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
-                {placeableTracks.map((t) => (
-                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                ))}
-              </select>
-            </label>
-            <div className="row gap-sm">
-              {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
-                  掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
-              <button
-                className="btn btn-secondary grabbable"
-                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.text }, clipLabel({ kind: TIMELINE_CLIP_KIND.text }), (at, center) =>
-                  addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at, center, trackId: visualTrackId }))}
-                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text, trackId: visualTrackId }))}
-              >
-                文字を置く
-              </button>
-              <button
-                className="btn btn-secondary grabbable"
-                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.shape }, clipLabel({ kind: TIMELINE_CLIP_KIND.shape }), (at, center) =>
-                  addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, at, center, trackId: visualTrackId }))}
-                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, trackId: visualTrackId }))}
-              >
-                図形を置く
-              </button>
-            </div>
-            {visualAssets.length === 0 ? (
-              <p className="field-hint">この動画にはまだ写真がありません。「写真・動画・音楽を取り込む」で足せます。文字と図形はいま置けます。</p>
-            ) : (
-              <PickerList
-                items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
-                disabled={isPlaying || exporting}
-                disabledHint={exporting ? exportingHint : playingHint}
-                searchLabel="素材の絞り込み"
-                onGrab={(e, assetId) => grabToPlace(
-                  e,
-                  { kind: TIMELINE_CLIP_KIND.slot, assetId },
-                  doc.assets.find((a) => a.assetId === assetId)?.displayName ?? clipLabel({ kind: TIMELINE_CLIP_KIND.slot }),
-                  (at, center) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, at, center, trackId: visualTrackId }),
-                )}
-                onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, trackId: visualTrackId })}
+            {/* **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。
+                ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
+            <div className="row gap-sm mb-sm">
+              <AssetImportButton
+                store={useTimelineStore}
+                disabledReason={exporting ? exportingHint : null}
+                variant="secondary"
+                withAudio
+                label="写真・動画・音楽を取り込む"
               />
+            </div>
+            {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
+                棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
+            <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
+              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} />
+            </CollapsibleSection>
+            {importError && (
+              <div className="notice notice-warn row-between mb-sm" role="alert">
+                <span>{importError}</span>
+                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
+            {placeableTracks.length === 0 ? (
+              <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
+            ) : (
+              <>
+                <p className="text-muted">
+                  押すと再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。
+                  つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
+                </p>
+                {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
+                    ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
+                    既定は「いちばん手前の置ける列」＝欄に出ている列が実際に置く列（表示と結果を割らない）。 */}
+                <label className="field">
+                  <span>置く列</span>
+                  <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                    {placeableTracks.map((t) => (
+                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="row gap-sm">
+                  {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
+                      掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
+                  <button
+                    className="btn btn-secondary grabbable"
+                    {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                    onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.text }, clipLabel({ kind: TIMELINE_CLIP_KIND.text }), (at, center) =>
+                      addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at, center, trackId: visualTrackId }))}
+                    onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text, trackId: visualTrackId }))}
+                  >
+                    文字を置く
+                  </button>
+                  <button
+                    className="btn btn-secondary grabbable"
+                    {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                    onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.shape }, clipLabel({ kind: TIMELINE_CLIP_KIND.shape }), (at, center) =>
+                      addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, at, center, trackId: visualTrackId }))}
+                    onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, trackId: visualTrackId }))}
+                  >
+                    図形を置く
+                  </button>
+                </div>
+                {visualAssets.length === 0 ? (
+                  <p className="field-hint">この動画にはまだ写真がありません。「写真・動画・音楽を取り込む」で足せます。文字と図形はいま置けます。</p>
+                ) : (
+                  <PickerList
+                    items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
+                    disabled={isPlaying || exporting}
+                    disabledHint={exporting ? exportingHint : playingHint}
+                    searchLabel="素材の絞り込み"
+                    onGrab={(e, assetId) => grabToPlace(
+                      e,
+                      { kind: TIMELINE_CLIP_KIND.slot, assetId },
+                      doc.assets.find((a) => a.assetId === assetId)?.displayName ?? clipLabel({ kind: TIMELINE_CLIP_KIND.slot }),
+                      (at, center) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, at, center, trackId: visualTrackId }),
+                    )}
+                    onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, trackId: visualTrackId })}
+                  />
+                )}
+              </>
+            )}
+          </>
+        )}
+        {placeTab === PANEL_ID.templates && (
+          <>
+            {placeableTemplates.length === 0 ? (
+              <p className="text-muted">この向きの動画に置ける見た目パターンがありません。左の「見た目パターン」の画面で、この向きのものを足してください。</p>
+            ) : placeableTracks.length === 0 ? (
+              <p className="text-muted">置ける列がありません。「映像の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
+            ) : (
+              <>
+                <p className="text-muted">
+                  選んだ見た目パターンを、再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとも中身は差し替えられます。
+                </p>
+                <label className="field">
+                  <span>置く列</span>
+                  <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                    {placeableTracks.map((t) => (
+                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                    ))}
+                  </select>
+                </label>
+                <PickerList
+                  items={placeableTemplates.map((t) => ({ id: t.templateId, label: t.name }))}
+                  disabled={isPlaying || exporting}
+                  disabledHint={exporting ? exportingHint : playingHint}
+                  searchLabel="見た目パターンの絞り込み"
+                  onGrab={(e, templateId) => {
+                    const t = placeableTemplates.find((x) => x.templateId === templateId);
+                    if (!t) return;
+                    grabToPlace(e, { kind: TIMELINE_CLIP_KIND.template, template: t }, t.name, (at) =>
+                      placeTemplate(t, at));
+                  }}
+                  onPick={(templateId) => {
+                    const t = placeableTemplates.find((x) => x.templateId === templateId);
+                    if (!t) return;
+                    placeTemplate(t);
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+        {placeTab === PANEL_ID.audio && (
+          <>
+            {voiceTracks.length === 0 ? (
+              <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
+            ) : (
+              <>
+                <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
+                {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
+                    列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
+                <label className="field">
+                  <span>置く列</span>
+                  <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
+                    {voiceTracks.map((t) => (
+                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                    ))}
+                  </select>
+                </label>
+                <PickerList
+                  items={[
+                    ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
+                    ...audioAssets.map((a) => ({ id: `asset:${a.assetId}`, label: a.displayName })),
+                  ]}
+                  disabled={isPlaying || exporting}
+                  disabledHint={exporting ? exportingHint : playingHint}
+                  searchLabel="音の絞り込み"
+                  onGrab={(e, id) => {
+                    const src = audioSourceOf(id);
+                    if (!src) return;
+                    grabToPlace(e, { kind: TIMELINE_CLIP_KIND.audio, ...src.spec }, src.label, (at) =>
+                      placeAudio(src.spec, at));
+                  }}
+                  onPick={(id) => {
+                    const src = audioSourceOf(id);
+                    if (!src) return;
+                    placeAudio(src.spec);
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+        {placeTab === PANEL_ID.voice && (
+          <>
+            {voiceTracks.length === 0 ? (
+              <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
+            ) : (
+              <>
+                <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
+                {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
+                    列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
+                <label className="field">
+                  <span>置く列</span>
+                  <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
+                    {voiceTracks.map((t) => (
+                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="row gap-sm">
+                  {/* 掴めるものは手を出す前に分かる（`grabbable`＝文字・図形のボタンや帯と同じ見た目・#714）。 */}
+                  <button
+                    className="btn btn-secondary grabbable"
+                    {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                    onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
+                      addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
+                    onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
+                  >
+                    読み上げを置く
+                  </button>
+                </div>
+                {/* **まとめて声を作る**（#1019 ⑥）＝場面形式には前からあるのに、こちらは
+                    **選んだ読み上げ1件ずつ**しか無かった（同じ動画を作るのに形式で手間が違う＝ADR-0026②）。
+                    ⚠️ **選んでいなくても押せる所に置く**＝1件ずつの「声を作る」は「選んだ部品」の欄の中なので、
+                    まとめて作る導線までそこに置くと、**何か選ぶまで始められない**。
+                    ⚠️ **部品は場面形式と同じもの**（進み具合・中止・押せない理由の出し方が揃う）。 */}
+                <div className="row-between mt" style={{ alignItems: "center" }}>
+                  <BulkVoiceControls
+                    source={timelineBulkVoice}
+                    label={BULK_VOICE_TIMELINE_LABEL}
+                    buttonClassName="btn btn-secondary"
+                    hideWhenNothingToDo
+                  />
+                </div>
+              </>
             )}
           </>
         )}
       </>
     ) },
-    // 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。
-    { id: PANEL_ID.templates, title: '見た目パターンを置く', content: (
-      <>
-        {placeableTemplates.length === 0 ? (
-          <p className="text-muted">この向きの動画に置ける見た目パターンがありません。左の「見た目パターン」の画面で、この向きのものを足してください。</p>
-        ) : placeableTracks.length === 0 ? (
-          <p className="text-muted">置ける列がありません。「映像の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
-        ) : (
-          <>
-            <p className="text-muted">
-              選んだ見た目パターンを、再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとも中身は差し替えられます。
-            </p>
-            <label className="field">
-              <span>置く列</span>
-              <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
-                {placeableTracks.map((t) => (
-                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                ))}
-              </select>
-            </label>
-            <PickerList
-              items={placeableTemplates.map((t) => ({ id: t.templateId, label: t.name }))}
-              disabled={isPlaying || exporting}
-              disabledHint={exporting ? exportingHint : playingHint}
-              searchLabel="見た目パターンの絞り込み"
-              onGrab={(e, templateId) => {
-                const t = placeableTemplates.find((x) => x.templateId === templateId);
-                if (!t) return;
-                grabToPlace(e, { kind: TIMELINE_CLIP_KIND.template, template: t }, t.name, (at) =>
-                  placeTemplate(t, at));
-              }}
-              onPick={(templateId) => {
-                const t = placeableTemplates.find((x) => x.templateId === templateId);
-                if (!t) return;
-                placeTemplate(t);
-              }}
-            />
-          </>
-        )}
-      </>
-    ) },
-    { id: PANEL_ID.audio, title: '音を置く', content: (
-      <>
-        {voiceTracks.length === 0 ? (
-          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
-        ) : (
-          <>
-            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
-            {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
-                列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
-            <label className="field">
-              <span>置く列</span>
-              <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
-                {voiceTracks.map((t) => (
-                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                ))}
-              </select>
-            </label>
-            <PickerList
-              items={[
-                ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
-                ...audioAssets.map((a) => ({ id: `asset:${a.assetId}`, label: a.displayName })),
-              ]}
-              disabled={isPlaying || exporting}
-              disabledHint={exporting ? exportingHint : playingHint}
-              searchLabel="音の絞り込み"
-              onGrab={(e, id) => {
-                const src = audioSourceOf(id);
-                if (!src) return;
-                grabToPlace(e, { kind: TIMELINE_CLIP_KIND.audio, ...src.spec }, src.label, (at) =>
-                  placeAudio(src.spec, at));
-              }}
-              onPick={(id) => {
-                const src = audioSourceOf(id);
-                if (!src) return;
-                placeAudio(src.spec);
-              }}
-            />
-          </>
-        )}
-      </>
-    ) },
-    { id: PANEL_ID.voice, title: '読み上げを置く', content: (
-      <>
-        {voiceTracks.length === 0 ? (
-          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
-        ) : (
-          <>
-            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
-            {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
-                列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
-            <label className="field">
-              <span>置く列</span>
-              <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
-                {voiceTracks.map((t) => (
-                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                ))}
-              </select>
-            </label>
-            <div className="row gap-sm">
-              {/* 掴めるものは手を出す前に分かる（`grabbable`＝文字・図形のボタンや帯と同じ見た目・#714）。 */}
-              <button
-                className="btn btn-secondary grabbable"
-                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
-                  addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
-                onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
-              >
-                読み上げを置く
-              </button>
-            </div>
-            {/* **まとめて声を作る**（#1019 ⑥）＝場面形式には前からあるのに、こちらは
-                **選んだ読み上げ1件ずつ**しか無かった（同じ動画を作るのに形式で手間が違う＝ADR-0026②）。
-                ⚠️ **選んでいなくても押せる所に置く**＝1件ずつの「声を作る」は「選んだ部品」の欄の中なので、
-                まとめて作る導線までそこに置くと、**何か選ぶまで始められない**。
-                ⚠️ **部品は場面形式と同じもの**（進み具合・中止・押せない理由の出し方が揃う）。 */}
-            <div className="row-between mt" style={{ alignItems: "center" }}>
-              <BulkVoiceControls
-                source={timelineBulkVoice}
-                label={BULK_VOICE_TIMELINE_LABEL}
-                buttonClassName="btn btn-secondary"
-                hideWhenNothingToDo
-              />
-            </div>
-          </>
-        )}
-      </>
-    ) },
   ];
+
+  // ⚠️ **「置く」のタブは欄へ寄せる**（#1031）＝タブになった id は配置に無いので、
+  // そのままだと「閉じている欄」と見なされ、**出す場所を失う**（黙って何も出さない・§2-5）。
+  const blockedAt = editBlocked ? panelOfTarget(editBlocked.at) : null;
 
   /**
    * その場の返事を出す欄（ADR-0034 決定10・#869）。**操作した所で返す**＝欄がいくつも並ぶ画面で、
@@ -5042,7 +5068,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    *（§2-5）。⚠️ `global`（書き出し中・再生中・見つからない）も帯のまま＝どの欄にも属さない。
    */
   const blockedPanelId =
-    editBlocked && editBlocked.at !== BLOCK_GLOBAL && !closed.includes(editBlocked.at) ? editBlocked.at : null;
+    editBlocked && blockedAt !== null && blockedAt !== BLOCK_GLOBAL && !closed.includes(blockedAt) ? blockedAt : null;
   // ⚠️ **帯に出すかどうかの判定は1つ**＝出す条件と文言を別々に書くと、片方だけ直って
   // **囲いだけ出て中身が空**／**欄と帯に同じ文が2つ**になる（#869）。
   const flashBlockedMessage = editBlocked && !blockedPanelId ? editBlockedMessage[editBlocked.reason] : null;

@@ -469,9 +469,9 @@ describe("AssetLibraryPanel", () => {
     expect(btn.title).toContain("書き出しが終わるまで");
   });
 
-  // ⚠️ **どの欄から置けるかは種類で変わる**（差分再監査 5巡目 🟡）＝音は「素材・文字・図形を置く」の
+  // ⚠️ **どの欄から置けるかは種類で変わる**（差分再監査 5巡目 🟡）＝音は「置く」の「素材・文字・図形」の
   // 候補に出ないので、種類を見ずに1文で言うと案内どおり探しても見つからない。
-  it("タイムラインへ音を取り込んだときは「音を置く」を案内する", async () => {
+  it("タイムラインへ音を取り込んだときは「置く」の「音」を案内する", async () => {
     useTimelineStore.setState({
       doc: { projectId: "proj_t", projectName: "タイムライン動画", clips: [], tracks: [], assets: [] },
       importFromLibrary: vi.fn(async () => true), isImporting: false, exportRun: { phase: "idle" },
@@ -481,8 +481,8 @@ describe("AssetLibraryPanel", () => {
     ]);
     render(<AssetLibraryPanel target="timeline" />);
     fireEvent.click(await screen.findByRole("button", { name: "この動画で使う" }));
-    expect(await screen.findByText(/「音を置く」から置けます/)).toBeInTheDocument();
-    expect(screen.queryByText(/素材・文字・図形を置く/)).toBeNull();
+    expect(await screen.findByText(/「置く」の「音」から置けます/)).toBeInTheDocument();
+    expect(screen.queryByText(/「素材・文字・図形」から置けます/)).toBeNull();
   });
 
   it("タイムラインへ取り込めたら、その動画を名指しで知らせる", async () => {

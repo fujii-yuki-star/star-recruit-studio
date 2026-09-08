@@ -251,13 +251,15 @@ export function AssetLibraryPanel({ target }: { target?: typeof PROJECT_FORMAT.t
       // 「取り込みました」と出て、画面下の本当の理由と**同時に**並ぶ（成功を騙る）。
       if (!(await importToTimeline(a.id))) return;
       const dest = destName ? `「${destName}」` : "この動画";
-      // ⚠️ **どの欄から置けるかは種類で変わる**（差分再監査 5巡目 🟡）＝音は「素材・文字・図形を置く」の
+      // ⚠️ **どのタブから置けるかは種類で変わる**（差分再監査 5巡目）＝音は「素材・文字・図形」の
       // 候補に出ない（絵として置ける種別だけ＝`isFreeSlotAssetType`）ので、種類を見ずに1文で言うと
       // **案内どおり探しても見つからない**（場面形式で同じ形を直したのと同型＝§2-5）。
+      // ⚠️ **行き先は「置く」の中のタブ**（#1031）＝欄をタブにまとめたので、古い欄の
+      // 名前のままだと**探しても無い**（門番＝`src/app/guidanceLabels.test.ts`）。
       setNotice(
         isFreeSlotAssetType(a.assetType)
-          ? `「${a.displayName}」を${dest}へ取り込みました。「素材・文字・図形を置く」から置けます。`
-          : `「${a.displayName}」を${dest}へ取り込みました。音は「音を置く」から置けます。`,
+          ? `「${a.displayName}」を${dest}へ取り込みました。「置く」の「素材・文字・図形」から置けます。`
+          : `「${a.displayName}」を${dest}へ取り込みました。音は「置く」の「音」から置けます。`
       );
       return;
     }

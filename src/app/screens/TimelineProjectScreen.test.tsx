@@ -46,6 +46,17 @@ function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   };
 }
 
+/**
+ * 「置く」欄のタブを開く（#1031＝4つの欄を1つの欄にタブでまとめた）。
+ *
+ * ⚠️ **既定は「素材・文字・図形」**なので、それ以外を触るテストはここを通す。
+ * ⚠️ **タブの群の中から引く**＝「音」「読み上げ」は画面のほかの場所にも出るので、
+ *    画面全体から名前で引くと別のものに当たる。
+ */
+const openPlaceTab = (label: string): void => {
+  fireEvent.click(within(screen.getByRole("group", { name: "置くもの" })).getByRole("button", { name: label }));
+};
+
 const open = (over: Partial<TimelineProject> = {}) =>
   useTimelineStore.setState({ doc: doc(over), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
 
@@ -897,6 +908,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     useProjectStore.setState({ templates: [template, portrait], templateAssetSrcById: {} });
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("見た目パターン");
     expect(screen.getByRole("button", { name: "シンプル" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "たて型" })).not.toBeInTheDocument();
   });
@@ -954,6 +966,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     open({ clips: [] });
     useTimelineStore.setState({ playheadSec: 2 });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("見た目パターン");
     fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
     const clip = useTimelineStore.getState().doc?.clips[0];
     expect(clip).toMatchObject({ kind: TIMELINE_CLIP_KIND.template, templateId: "tmpl_001", startSec: 2 });
@@ -963,6 +976,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("見た目パターン");
     fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
     expect(useTimelineStore.getState().selectedClipIds).toEqual([useTimelineStore.getState().doc?.clips[0].id]);
   });
@@ -972,6 +986,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     open();
     useTimelineStore.setState({ playheadSec: 1 }); // 既にある部品と重なる位置
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("見た目パターン");
     fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
     expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("先に置いてある部品があります"))).toBe(true);
   });
@@ -1068,6 +1083,7 @@ describe("TimelineProjectScreen: 読み上げを置く・声を作る（#633）"
     });
     useTimelineStore.setState({ playheadSec: 4 });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("読み上げ");
     fireEvent.click(screen.getByRole("button", { name: "読み上げを置く" }));
     const clip = useTimelineStore.getState().doc?.clips[0];
     expect(clip).toMatchObject({ kind: TIMELINE_CLIP_KIND.voice, startSec: 4, trackId: "track_002" });
@@ -1329,6 +1345,7 @@ describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量�
     });
     useTimelineStore.setState({ playheadSec: 5 });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("音");
     fireEvent.click(screen.getByRole("button", { name: "前向きなポップ" }));
     expect(useTimelineStore.getState().doc?.clips[0]).toMatchObject({
       kind: TIMELINE_CLIP_KIND.audio, bundledBgmId: "found-new-hope", startSec: 5,
@@ -1345,6 +1362,7 @@ describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量�
       clips: [],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("音");
     fireEvent.click(screen.getByRole("button", { name: "自前の曲" }));
     expect(useTimelineStore.getState().doc?.clips[0].assetId).toBe("asset_001");
   });
@@ -1657,30 +1675,30 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
   it("欄を閉じられて、閉じたら戻す導線が出る（戻せない欄を作らない）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByLabelText("置くの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
-    expect(screen.queryByRole("heading", { name: "音を置く" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "「音を置く」を表示する" }));
-    expect(screen.getByRole("heading", { name: "音を置く" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "置く" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "「置く」を表示する" }));
+    expect(screen.getByRole("heading", { name: "置く" })).toBeInTheDocument();
   });
 
   it("配置は覚えていて、開き直しても同じ（動画ごとには変わらない）", () => {
     open();
     const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByLabelText("置くの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     first.unmount();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.queryByRole("heading", { name: "音を置く" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "置く" })).not.toBeInTheDocument();
   });
 
   it("「配置を既定に戻す」で戻る（組み替えたあとの逃げ道）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByLabelText("置くの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
-    expect(screen.getByRole("heading", { name: "音を置く" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "置く" })).toBeInTheDocument();
   });
 
   it("欄はメニューで別の領域へ移せる（ドラッグが使えなくても組み替えられる）", () => {
@@ -2166,8 +2184,11 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
     fireEvent.click(screen.getByRole("button", { name: "あ" }));
     // 欄の境界を掴む（ADR-0033）。掴んでいる間は欄の側が Escape を受け持つ。
     // jsdom は大きさを持たないので、割合を決める親の箱を置く（置かないと掴み始めない）。
-    const divider = screen.getAllByLabelText("欄の境目")[0];
-    (divider.parentElement as HTMLElement).getBoundingClientRect = () =>
+    // ⚠️ **域の境界で見る**（#1031）＝「置く」をタブにまとめたので、
+    // 既定の配置には**域の中の境目（欄どうし）が無い**。掴む仕組みは同じ。
+    const divider = screen.getAllByLabelText("左の欄の幅")[0];
+    // 域の境界は**配置全体の箱**を見る（分かれ目の境界は親の箱）。
+    (document.querySelector(".panel-layout") as HTMLElement).getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     pointerDownAt(divider, 1000, { clientX: 0, clientY: 50 });
     fireEvent.keyDown(window, { key: "Escape" });
@@ -2819,6 +2840,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     // ⚠️ 列は**手前が上**＝`lanes[0]` は並びの後ろ（track_002＝音の列）。
     stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列
     stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    openPlaceTab("読み上げ");
     grab(screen.getByRole("button", { name: "読み上げを置く" }));
     moveTo(380, 420); // 200 + 5×36 ＝ 5秒
     dropAt(380, 420);
@@ -2842,6 +2864,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     const lanes = container.querySelectorAll(".timeline-lane");
     stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列（手前が上）
     stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    openPlaceTab("見た目パターン");
     grab(screen.getByText("よこ型テンプレ"));
     moveTo(560, 460); // 200 + 10×36 ＝ 10秒
     dropAt(560, 460);
@@ -2858,6 +2881,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     const lanes = container.querySelectorAll(".timeline-lane");
     stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列（手前が上）
     stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    openPlaceTab("音");
     grab(screen.getByText("曲")); // 素材の音（一覧の名前で掴む）
     moveTo(272, 420); // 200 + 2×36 ＝ 2秒
     dropAt(272, 420);
@@ -2874,6 +2898,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列
     stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
     const before = useTimelineStore.getState().doc!.clips.length;
+    openPlaceTab("音");
     grab(screen.getByText("曲"));
     moveTo(380, 460); // 絵の列の上
     dropAt(380, 460);
@@ -2890,6 +2915,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
     const before = useTimelineStore.getState().doc!.clips.length;
+    openPlaceTab("音");
     grab(screen.getByText("曲"));
     moveTo(160, 90);
     dropAt(160, 90);
@@ -2900,6 +2926,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
   it("読み上げを押しただけ（動かさず離す）なら、欄の列と再生位置へ置く", () => {
     withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPlaceTab("読み上げ");
     grab(screen.getByRole("button", { name: "読み上げを置く" }));
     dropAt(0, 0); // 動かしていない
     const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.voice)!;
@@ -3663,35 +3690,43 @@ describe("TimelineProjectScreen: どこへ置くかを見せる（#724）", () =
       clips: [],
     });
   };
-  const placeSelect = (panelId: string) =>
-    (document.querySelector(`[data-panel-id="${panelId}"]`) as HTMLElement)
+  /**
+   * その種別の「置く列」の欄（#1031＝置くものは1つの欄のタブになった）。
+   *
+   * ⚠️ **タブを開いてから読む**＝閉じているタブの中身は描かれない。
+   */
+  const placeSelect = (tab: string) => {
+    openPlaceTab(tab);
+    return (document.querySelector('[data-panel-id="place"]') as HTMLElement)
       .querySelector("select") as HTMLSelectElement;
+  };
 
   it("音・読み上げにも「置く列」が出る（無言で1本に固定しない）", () => {
     twoEach();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(placeSelect("audio")).not.toBeNull();
-    expect(placeSelect("voice")).not.toBeNull();
+    expect(placeSelect("音")).not.toBeNull();
+    expect(placeSelect("読み上げ")).not.toBeNull();
   });
 
   it("既定はどの種別も**いちばん手前**の置ける列（種別で割らない）", () => {
     twoEach();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 手前＝配列の末尾（`11 §7.6` の重ね順）。奥を既定にすると、手前の部品の裏に隠れる（#722 と同じ理由）。
-    expect(placeSelect("audio").value).toBe("track_004");
-    expect(placeSelect("templates").value).toBe("track_002");
+    expect(placeSelect("音").value).toBe("track_004");
+    expect(placeSelect("見た目パターン").value).toBe("track_002");
   });
 
   it("見た目パターンの「置く列」が空欄で固まらない（どこへ入るか読めない、を作らない）", () => {
     twoEach();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(placeSelect("templates").value).not.toBe("");
+    expect(placeSelect("見た目パターン").value).not.toBe("");
   });
 
   it("読み上げは選んだ列へ置く（欄に出ている列＝実際の置き先）", () => {
     twoEach();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.change(placeSelect("voice"), { target: { value: "track_003" } });
+    fireEvent.change(placeSelect("読み上げ"), { target: { value: "track_003" } });
+    openPlaceTab("読み上げ");
     fireEvent.click(screen.getByRole("button", { name: "読み上げを置く" }));
     expect(useTimelineStore.getState().doc!.clips[0].trackId).toBe("track_003");
   });
@@ -6954,7 +6989,8 @@ describe("バラせないときは押す前に理由を出す", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
   const explodeButton = (): HTMLButtonElement => {
-    fireEvent.click(screen.getByText("見た目パターン"));
+    // ⚠️ **帯の方を押す**（#1031）＝「置く」欄のタブにも同じ名前のボタンができた。
+    fireEvent.click(screen.getAllByText("見た目パターン").find((el) => el.closest(".timeline-clip"))!);
     return screen.getByRole("button", { name: "中身をバラす" }) as HTMLButtonElement;
   };
 
@@ -7040,7 +7076,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   it("1つ選び直しても、他の種別の指定は残る", () => {
     openWith({ title: "gen-interface-jp", main: "kaitou-yokoku-gothic" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("見た目パターン"));
+    // ⚠️ **帯の方を押す**（#1031）＝「置く」欄のタブにも同じ名前のボタンができた。
+    fireEvent.click(screen.getAllByText("見た目パターン").find((el) => el.closest(".timeline-clip"))!);
     pickFont("本文の文字の形", "Gen Interface JP Display");
     expect(clip().textFontIds?.title).toBe("gen-interface-jp"); // 触っていない方は残る
     expect(clip().textFontIds?.main).toBe("gen-interface-jp-display");
@@ -7049,7 +7086,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   it("最後の1つを「動画全体に合わせる」へ戻すと、指定ごと消える（空の入れ物を残さない）", () => {
     openWith({ title: "gen-interface-jp" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("見た目パターン"));
+    // ⚠️ **帯の方を押す**（#1031）＝「置く」欄のタブにも同じ名前のボタンができた。
+    fireEvent.click(screen.getAllByText("見た目パターン").find((el) => el.closest(".timeline-clip"))!);
     pickFont("見出しの文字の形", "動画全体に合わせる");
     expect(clip().textFontIds).toBeUndefined();
   });
@@ -7057,7 +7095,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   it("いまの見た目パターンで使っていない種別でも、指定が残っていれば直せる", () => {
     openWith({ subtitle: "gen-interface-jp" }); // この見た目パターンに字幕の層は無い
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("見た目パターン"));
+    // ⚠️ **帯の方を押す**（#1031）＝「置く」欄のタブにも同じ名前のボタンができた。
+    fireEvent.click(screen.getAllByText("見た目パターン").find((el) => el.closest(".timeline-clip"))!);
     expect(screen.getByText("字幕の文字の形")).toBeInTheDocument();
     // ⚠️ **断りも添える**（8巡目）＝理由なしに混ざると「触ったのに何も起きない」に見える。
     expect(screen.getByText(/いまの見た目パターンでは使っていない文字/)).toBeInTheDocument();
@@ -7066,7 +7105,8 @@ describe("見た目パターンの部品の種別ごとの文字の形", () => {
   it("指定が無い種別の欄は出さない（使っていないものを並べない）", () => {
     openWith();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("見た目パターン"));
+    // ⚠️ **帯の方を押す**（#1031）＝「置く」欄のタブにも同じ名前のボタンができた。
+    fireEvent.click(screen.getAllByText("見た目パターン").find((el) => el.closest(".timeline-clip"))!);
     expect(screen.queryByText("字幕の文字の形")).toBeNull();
     expect(screen.queryByText(/いまの見た目パターンでは使っていない文字/)).toBeNull();
   });
