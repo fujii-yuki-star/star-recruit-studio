@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
+import { DUPLICATE_BUSY_LABEL, DUPLICATE_LOOK_LABEL } from "../uiLabels";
 import { LooksScreen } from "./LooksScreen";
 
 // #410 sub4 レビュー：画面が busy を配線し忘れても CI が通っていた回帰を防ぐ。
@@ -21,12 +22,12 @@ describe("LooksScreen busy 表示（#410 sub4 レビュー）", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("複製中は「複製中…」＋ボタン無効（連打不可）", () => {
+  it("もとに作っている間は「作成中…」＋ボタン無効（連打不可）", () => {
     const [p] = pendingPromise<string>();
     useProjectStore.setState({ duplicateAsUserTemplate: vi.fn(() => p) });
     render(<LooksScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("この見た目を複製して編集する"));
-    const btn = screen.getByText("複製中…").closest("button") as HTMLButtonElement;
+    fireEvent.click(screen.getByText(DUPLICATE_LOOK_LABEL));
+    const btn = screen.getByText(DUPLICATE_BUSY_LABEL).closest("button") as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
 
