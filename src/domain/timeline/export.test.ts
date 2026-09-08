@@ -453,6 +453,24 @@ describe('timelineVideoRelPaths：焼く元のファイルのありか（#1068�
     expect(timelineVideoRelPaths(d)).toEqual([]);
   });
 
+  // ⚠️ **立ち絵に入れた動画も焼く元**（#809）＝置き場所として数えているのに、ここで漏らすと
+  //    立ち絵だけ「押す前に断る」の対象外に戻り、走り出してから落ちる（PR #1100 レビュー）。
+  it('立ち絵に入れた動画も返す', () => {
+    const tmpl = {
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'chara', type: 'character', x: 0, y: 0, w: 400, h: 800 }],
+    } as unknown as Template;
+    const d = doc({
+      assets: [v('asset_v', 'v.mp4')],
+      clips: [textClip('clip_001', {
+        kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001',
+        character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      })],
+    });
+    expect(timelineVideoRelPaths(d, () => tmpl)).toEqual(['v.mp4']);
+  });
+
   it('写真は返さない（焼く元ではない）', () => {
     const d = doc({
       assets: [{ assetId: 'asset_p', assetType: 'image' as const, displayName: '写真', filePath: 'p.png' }],
