@@ -40,6 +40,10 @@ export function useSceneTransitionPreview(
 
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  // 再生し直しの世代（#1095 レビュー 🟡）。再生中にもう一度 play() が来たとき、playing は true のままなので
+  // アニメーションの effect が張り直されず、**古い rAF ループが古い開始時刻のまま progress を上書きし続ける**
+  // （＝選び直しても頭出しされず前の続きから見える）。世代を上げて依存に入れることで必ず 0 から流し直す。
+  const [playToken, setPlayToken] = useState(0);
   // 描画中に state を正す React 推奨パターン（effect 内 setState を避ける・useSceneMotionPreview と同型）。
   const sceneId = scene?.sceneId;
   const [syncId, setSyncId] = useState(sceneId);
@@ -71,7 +75,7 @@ export function useSceneTransitionPreview(
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, transitionActive, boundary.durationSec, sceneId]);
+  }, [playing, transitionActive, boundary.durationSec, sceneId, playToken]);
 
   return {
     transitionActive,
@@ -81,6 +85,7 @@ export function useSceneTransitionPreview(
     play: () => {
       setProgress(0);
       setPlaying(true);
+      setPlayToken((n) => n + 1); // 再生中の play() でも頭出しから流し直す
     },
     stop: () => {
       setPlaying(false);
