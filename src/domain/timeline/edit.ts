@@ -238,6 +238,32 @@ export function firstFreeStart(
   return found ?? candidates[candidates.length - 1];
 }
 
+/**
+ * 絵の部品（文字・図形・素材）をボタンで置くときの**実際の置き先**（列と時刻）。#1096 レビュー 🔴。
+ *
+ * ⚠️ **押す前に見せる帯と、押した結果を同じ関数から採る**＝画面が `playheadSec` をそのまま帯の左端に
+ * していたので、**再生位置が塞がっているときだけ帯が嘘になっていた**（実際は次の空きへずれる）。
+ * 「手を伸ばすと本当の置き先が見える」（#1032）は、置く側と同じ規則を通して初めて成り立つ。
+ *
+ * 置ける列が1本も無ければ `null`（＝置けない。画面は帯を出さない・押した側は理由を出す）。
+ */
+export function visualPlacementAt(
+  doc: TimelineProject,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+): { trackId: string; startSec: number; durationSec: number } | null {
+  const placeable = placeableVisualTracks(doc);
+  if (placeable.length === 0) return null;
+  // 欄で選んだ列が置けないなら手前へ落とす（押した側と同じ＝選び直しを強いない）。
+  const track = placeable.find((t) => t.id === preferredTrackId) ?? placeable[0];
+  return {
+    trackId: track.id,
+    // **間の空きを飛び越さない**（#684 レビュー）。
+    startSec: firstFreeStart(doc.clips, track.id, fromSec, VISUAL_CLIP_DURATION_SEC),
+    durationSec: VISUAL_CLIP_DURATION_SEC,
+  };
+}
+
 /** 置き先として成り立つか（列の実在・種別の一致・固定・隠し・重なり）を1か所で見る。 */
 function placementIssue(
   doc: TimelineProject,

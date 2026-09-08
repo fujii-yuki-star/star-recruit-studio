@@ -1026,6 +1026,18 @@ export const DUPLICATE_LOOK_LABEL = "この見た目をもとに作る";
 export const DUPLICATE_BUSY_LABEL = "作成中…";
 
 /**
+ * 「置く」欄の案内（#1032）。
+ *
+ * ⚠️ **同じ文を4か所に書かない**＝以前は「再生位置（X秒）から置きます」を種別ごとに写しており、
+ * 片方だけ直る形になっていた（§6）。**どこへ入るかは帯で見せる**ので、文は種別ごとの続きだけ。
+ * ⚠️ **何を置くのかが一覧から読めないときは `lead` で言う**（PR #1096 レビュー）＝見た目パターンは
+ * 一覧で1つ選んでから押す形なので、「選んだものを置く」が落ちると何が置かれるのか分からない。
+ */
+export function placeAtPlayheadHint(playheadSec: number, tail: string, lead = ""): string {
+  return `${lead}再生位置（${playheadSec.toFixed(1)}秒）から置きます。${tail}`;
+}
+
+/**
  * 選べない候補に添える理由（#1031）。
  *
  * ⚠️ **同じ状態を別の言い回しで出さない**（PR #1085 レビュー）＝見た目と素材で
