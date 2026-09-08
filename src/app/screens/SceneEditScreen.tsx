@@ -2416,6 +2416,118 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
                 ) : (
                   <div className="col gap-sm">
+                    {/* ⚠️ **選んでいるものを先に見せる**（#1032）＝以前は重ね順一覧・グループ・
+                        一括操作の**あと**にあり、選んだ直後に**下へ長くスクロール**しないと目的の欄に届かなかった
+                        （実測：要素 5 つでこの節だけ 3492px）。ADR-0033 の既定も「選んだ部品を同時に見られる」。 */}
+                    {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
+                    {focusSelectedFree && (
+                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                        {freeLayout.map((el) => (
+                          <button
+                            key={el.id}
+                            className="btn btn-ghost text-sm"
+                            style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
+                            onClick={() => selectFree(el.id)}
+                            aria-pressed={el.id === selectedFreeId}
+                          >
+                            {freeName(el)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {focusSelectedFree && !freeLayout.some((el) => el.id === selectedFreeId) && (
+                      <p className="text-sm text-muted">編集する要素を、上のボタンかプレビューで選んでください。</p>
+                    )}
+                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
+                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
+                    {(focusSelectedFree
+                      ? freeLayout.filter((el) => el.id === selectedFreeId)
+                      : freeLayout
+                    ).map((el) => (
+                      <div
+                        key={el.id}
+                        className="card-tight"
+                        onClick={(e) => {
+                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
+                          const tag = (e.target as HTMLElement).tagName;
+                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+                          selectFree(el.id, e.shiftKey && !isField);
+                        }}
+                        style={{
+                          background: "var(--color-surface-alt)",
+                          outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
+                          opacity: el.hidden ? 0.6 : 1, // 非表示要素は淡色（重ね順パネルと一貫＝プレビューに出ていないと分かる）
+                        }}
+                      >
+                        <div className="row-between" style={{ marginBottom: 4 }}>
+                          <strong className="text-sm">{freeName(el)}{el.hidden ? "（非表示）" : ""}</strong>
+                          <div className="row gap-sm">
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); copyFreeEl(el.id); }}
+                              aria-label="この配置をコピー"
+                            >
+                              コピー
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
+                              aria-label="この配置を複製"
+                            >
+                              複製
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); bringFreeElForward(el.id); }}
+                              aria-label="前面へ移動"
+                            >
+                              前面
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); sendFreeElBackward(el.id); }}
+                              aria-label="背面へ移動"
+                            >
+                              背面
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-icon text-sm"
+                              style={{ color: "var(--color-danger)" }}
+                              onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
+                              aria-label="この配置を削除"
+                            >
+                              <TrashIcon size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {renderFreeKindControls(el)}
+
+                        {/* グループのメンバー（ドリルイン選択・#525-5）は位置/大きさ/角度が「グループの中での値」＝画面の
+                            見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
+                        {topGroupOfMember(sceneGroups, el.id) != null && (
+                          <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
+                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（まとまりで動かすにはグループを選び直してください）。
+                          </p>
+                        )}
+                        <div className="row gap-sm" style={{ marginBottom: 4 }}>
+                          <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
+                          <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
+                        </div>
+                        <div className="row gap-sm">
+                          {/* 下限は**両方の形式で同じ**（`MIN_BOX_SIZE_PX`）＝同じ概念を画面で別の下限にしない。 */}
+                          <NumberField label="幅" value={el.w} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { w: v })} />
+                          <NumberField label="高さ" value={el.h} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { h: v })} />
+                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                          {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
+                              回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
+                          <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
+                        </div>
+
+                        {renderAnimationControls(el.id, el.opacity ?? 1)}
+                        {renderVideoStartControls(el.id)}
+                      </div>
+                    ))}
                     {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
                     <div className="field" style={{ marginBottom: 4 }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
@@ -2595,115 +2707,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         )}
                       </div>
                     )}
-                    {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
-                    {focusSelectedFree && (
-                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-                        {freeLayout.map((el) => (
-                          <button
-                            key={el.id}
-                            className="btn btn-ghost text-sm"
-                            style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
-                            onClick={() => selectFree(el.id)}
-                            aria-pressed={el.id === selectedFreeId}
-                          >
-                            {freeName(el)}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {focusSelectedFree && !freeLayout.some((el) => el.id === selectedFreeId) && (
-                      <p className="text-sm text-muted">編集する要素を、上のボタンかプレビューで選んでください。</p>
-                    )}
-                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
-                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
-                    {(focusSelectedFree
-                      ? freeLayout.filter((el) => el.id === selectedFreeId)
-                      : freeLayout
-                    ).map((el) => (
-                      <div
-                        key={el.id}
-                        className="card-tight"
-                        onClick={(e) => {
-                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
-                          const tag = (e.target as HTMLElement).tagName;
-                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
-                          selectFree(el.id, e.shiftKey && !isField);
-                        }}
-                        style={{
-                          background: "var(--color-surface-alt)",
-                          outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
-                          opacity: el.hidden ? 0.6 : 1, // 非表示要素は淡色（重ね順パネルと一貫＝プレビューに出ていないと分かる）
-                        }}
-                      >
-                        <div className="row-between" style={{ marginBottom: 4 }}>
-                          <strong className="text-sm">{freeName(el)}{el.hidden ? "（非表示）" : ""}</strong>
-                          <div className="row gap-sm">
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); copyFreeEl(el.id); }}
-                              aria-label="この配置をコピー"
-                            >
-                              コピー
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
-                              aria-label="この配置を複製"
-                            >
-                              複製
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); bringFreeElForward(el.id); }}
-                              aria-label="前面へ移動"
-                            >
-                              前面
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); sendFreeElBackward(el.id); }}
-                              aria-label="背面へ移動"
-                            >
-                              背面
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-icon text-sm"
-                              style={{ color: "var(--color-danger)" }}
-                              onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
-                              aria-label="この配置を削除"
-                            >
-                              <TrashIcon size={14} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {renderFreeKindControls(el)}
-
-                        {/* グループのメンバー（ドリルイン選択・#525-5）は位置/大きさ/角度が「グループの中での値」＝画面の
-                            見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
-                        {topGroupOfMember(sceneGroups, el.id) != null && (
-                          <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
-                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（まとまりで動かすにはグループを選び直してください）。
-                          </p>
-                        )}
-                        <div className="row gap-sm" style={{ marginBottom: 4 }}>
-                          <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
-                          <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
-                        </div>
-                        <div className="row gap-sm">
-                          {/* 下限は**両方の形式で同じ**（`MIN_BOX_SIZE_PX`）＝同じ概念を画面で別の下限にしない。 */}
-                          <NumberField label="幅" value={el.w} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { w: v })} />
-                          <NumberField label="高さ" value={el.h} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { h: v })} />
-                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
-                          {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
-                              回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
-                          <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
-                        </div>
-
-                        {renderAnimationControls(el.id, el.opacity ?? 1)}
-                        {renderVideoStartControls(el.id)}
-                      </div>
-                    ))}
                   </div>
                 )}
               </div>
