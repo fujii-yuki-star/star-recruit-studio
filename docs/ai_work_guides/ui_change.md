@@ -30,6 +30,7 @@
 | タイムラインの操作（掴む・置く・吸着）を触る | [`adr/0034`](../yuko_recruit_docs/adr/0034-timeline-interaction-model.md)＋[`timeline_change.md`](timeline_change.md) |
 | 文言が「断り」「注意」になる | [`error_message.md`](error_message.md)（`15 §6` の表と機械で突き合わせる門番がある） |
 | 場面編集の編集機能を**増やす** | **止まって確認**＝場面形式は凍結（`CLAUDE.md §11` ADR-0032 の線引き） |
+| **AI 送信確認画面**（06 §7）を触る | `12 §4` 入力アセンブリ方針＋`12 §6`＝この画面は**実際に送るもの**を数えて見せるので、`12` を読まずに直すと**表示と実送信が食い違う**（`CLAUDE.md §2-6`） |
 
 ## 読まない
 

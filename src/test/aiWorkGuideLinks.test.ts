@@ -125,6 +125,23 @@ export function brokenLinks(text: string, dir: string): string[] {
 }
 
 /**
+ * ガイドが挙げているコードのパスのうち、実在しないもの。
+ *
+ * ⚠️ **リンクと節だけでは足りない**（PR #1089 レビュー 🟡）＝ガイドは門番や関数のありかを
+ * **バッククォートのパス**で示すが、そこはリンクでも節でもないので**誰も確かめていなかった**
+ * （実際に `src/test/errorStateTable.test.ts` と書いて外していた＝実体は `src/app/` の下）。
+ * ⚠️ **`*` を含むものは見ない**＝`src/app/**` のような「あたり」を示す書き方は実在確認になじまない。
+ */
+export function missingPaths(text: string, exists: (p: string) => boolean): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/`((?:src|docs|scripts)\/[^`\s]+)`/g)) {
+    const p = m[1]!.replace(/\/$/, '');
+    if (!p.includes('*') && !exists(p)) out.push(m[1]!);
+  }
+  return out;
+}
+
+/**
  * 入口の一覧と実ファイルの食い違い。
  *
  * ⚠️ **両向きを見る**＝片方だけだと「一覧に無いガイド」（誰も開かない）か
@@ -174,6 +191,11 @@ describe('作業ガイドの行き先（docs/ai_work_guides）', () => {
   //    1回の作業で読む量（入口＋ガイド1本）を実数で縛る。
   it('入口とガイドは短いまま', () => {
     expect(tooLong(guideFiles.map((f) => [f, read(f).length] as const)), '入口資料が肥大化している').toEqual([]);
+  });
+
+  it('挙げているコードのありかが実在する', () => {
+    const missing = guideFiles.flatMap((f) => missingPaths(read(f), existsSync).map((p) => `${f} -> ${p}`));
+    expect(missing, '実在しないパスを指している').toEqual([]);
   });
 
   it('posix 区切りのリンクだけを書く（Windows 区切りを混ぜない）', () => {
@@ -239,6 +261,18 @@ describe('門番自身の検査（わざと壊した入力を通す）', () => {
 
   it('実在する節は見つけない（嘘の赤を出さない）', () => {
     expect(badCitations('11 §7.6 を読む', sections)).toEqual([]);
+  });
+
+  it('実在しないコードのありかを見つける', () => {
+    expect(missingPaths('門番は `src/test/no_such.ts`', () => false)).toEqual(['src/test/no_such.ts']);
+  });
+
+  it('実在するありかは見つけない（嘘の赤を出さない）', () => {
+    expect(missingPaths('門番は `src/app/errorStateTable.test.ts`', () => true)).toEqual([]);
+  });
+
+  it('あたりを示す書き方（`*`）は実在を問わない', () => {
+    expect(missingPaths('画面は `src/app/**`', () => false)).toEqual([]);
   });
 
   it('一覧に載っていないガイドを見つける', () => {

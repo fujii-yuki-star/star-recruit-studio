@@ -32,7 +32,7 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
 
 ## よく踏むところ
 
-- **表と実装のどちらかだけ直す**＝門番 `src/test/errorStateTable.test.ts` が突き合わせている。**行数も固定してある**（`15 §6` は 184 行）ので、足したら数も直す
+- **表と実装のどちらかだけ直す**＝門番 `src/app/errorStateTable.test.ts` が突き合わせている。**行数も固定してある**（`15 §6` は 184 行）ので、足したら数も直す
 - **画面に直接書く**＝文言は `src/app/uiLabels.ts` へ。門番＝`src/app/uiMessageScan.test.ts`
 - **「調べていない」と「無い」を混ぜる**＝一覧が取れない場では項目を出さない（`missingAsset` の流儀）
 - **実行できない次の行動を出す**＝候補ゼロなら「選び直して」と言わない（`06 §9` の3段の出し分け）

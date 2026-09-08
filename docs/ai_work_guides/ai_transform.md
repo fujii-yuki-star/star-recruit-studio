@@ -7,7 +7,7 @@
 | 資料 | 範囲 | なぜ |
 |---|---|---|
 | [`12_AI_PROMPT_AND_MAPPING.md`](../yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md) | **§8 変換マッピング**・**§9 検証・補正・リカバリ**（正典・全体でも 15,881字） | 何をどう写すか／落とすかの規範 |
-| [`schemas/ai-video-plan.schema.json`](../yuko_recruit_docs/schemas/ai-video-plan.schema.json) | 全文（90行） | AI 出力の実体 |
+| [`docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json`](../yuko_recruit_docs/schemas/ai-video-plan.schema.json) | 全文（90行） | AI 出力の実体 |
 | [`11_SCHEMA_REFERENCE.md`](../yuko_recruit_docs/11_SCHEMA_REFERENCE.md) | **§2 ID採番**・**§9 自動補正ルール**（計 6,300字ほど） | `part_NNN`/`scene_NNN` の採番・clamp |
 
 ## 必要なら読む

@@ -30,6 +30,7 @@
 | 欄の配置 | [`adr/0033`](../yuko_recruit_docs/adr/0033-editor-panel-layout.md) |
 | 焼き出しの規則を変える | [`adr/0032`](../yuko_recruit_docs/adr/0032-timeline-project-format.md) 決定20・`11 §7.6.1` |
 | 保存する形を足す | [`schema_change.md`](schema_change.md)（timeline schema は project と**版が独立**・ただし共有 `$defs` は同時バンプ） |
+| 断り・注意の文言を足す（`TIMELINE_*`） | [`error_message.md`](error_message.md)＝`15 §6` の表と実装を門番が突き合わせる |
 
 ## 読まない
 

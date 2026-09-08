@@ -9,7 +9,7 @@
 | [`11_SCHEMA_REFERENCE.md`](../yuko_recruit_docs/11_SCHEMA_REFERENCE.md) | **§1 スキーマ一覧とバージョニング**（12,975字） | 版の上げ方・移行・**共有 `$defs` を変えたら参照する全形式を同時にバンプ** |
 | 同上 | **11 §2 共通規約**（4,216字） | 追加の作法・`additionalProperties` |
 | 同上 | **11 §3 enum カタログ**・**11 §4 定数カタログ**（計 5,877字） | ⚠️ 直書き禁止の出どころ（`CLAUDE.md §2-7`） |
-| 同上 | **11 §8 検証ルール**（5,182字） | V1〜V30。足すなら番号を続ける |
+| 同上 | **11 §8 検証ルール**（5,182字） | ⚠️ **上限を覚えない**＝表の**最終行を見て**番号を続ける（ここに実数を書くと陳腐化し、**既存の番号と衝突する**） |
 | 触る `schemas/*.schema.json` | 全文 | 実体が正典 |
 
 フィールド表（`11 §7`）は**触るエンティティの小節だけ**：`11 §7.1 Project` 7,054／`11 §7.2 Asset` 697／`11 §7.4 Scene` 6,039／`11 §7.6 TimelineProject` **71,784**。
@@ -20,8 +20,9 @@
 |---|---|
 | `Scene` に足す | **止まって確認**＝場面形式は凍結（ADR-0032 の線引き＝`Scene` への新フィールドは凍結側） |
 | AI 出力（`ai-video-plan`）を触る | [`ai_transform.md`](ai_transform.md) |
-| 版を上げる | `src/domain/project/persistence.ts` の `PROJECT_SCHEMA_VERSION` / `src/domain/timeline/types.ts` の `TIMELINE_SCHEMA_VERSION`。**`scripts/validate-schemas`** の must-accept / must-reject に例を足す |
+| 版を上げる | `src/domain/project/persistence.ts` の `PROJECT_SCHEMA_VERSION` / `src/domain/timeline/types.ts` の `TIMELINE_SCHEMA_VERSION`。**`scripts/validate-schemas.mjs`** の must-accept / must-reject に例を足す |
 | 既に作った動画の挙動が変わる | `CLAUDE.md §2-5`＝**読み込んだ前の版には旧挙動を書き込む**（版で絞る） |
+| 新しい検証ルール（`Warning.code`）を足す | [`error_message.md`](error_message.md)＝`15 §6` の表への追記が要る（忘れると門番が落ちる） |
 
 ## 読まない
 
