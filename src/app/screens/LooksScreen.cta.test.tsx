@@ -45,12 +45,18 @@ describe("見た目をもとに作る導線（#1031）", () => {
   });
 
   // ⚠️ **見本の直下**＝ほかの節（名前・使用している要素・使用場面）より前に出す。
+  // ⚠️ **「使用場面より前」だけでは緩い**（PR #1093 レビュー）＝間にある「名前」の節より
+  //    下へ押し下げても通ってしまう（見本と CTA の間に別の情報が割り込む壊れ方）。
+  //    **すぐ下の節**（名前）より前で見る。
   it("「もとに作る」は、ほかの節より前に出る", () => {
     const { container } = setup([...sampleTemplates]);
     const btn = screen.getByText(DUPLICATE_LOOK_LABEL).closest("button")!;
+    const after = (el: Element): boolean =>
+      !!(btn.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const nameRow = [...container.querySelectorAll(".text-muted")].find((e) => e.textContent === "名前")!;
     const usedHead = [...container.querySelectorAll(".field-label")].find((h) => h.textContent === "使用場面")!;
-    expect(btn.compareDocumentPosition(usedHead) & Node.DOCUMENT_POSITION_FOLLOWING, "使用場面より後ろにある")
-      .toBeTruthy();
+    expect(after(nameRow), "名前の節より後ろにある（見本の直下ではない）").toBe(true);
+    expect(after(usedHead), "使用場面より後ろにある").toBe(true);
   });
 
   // ⚠️ **同じボタンを2か所に出さない**＝上と下のどちらを押せばいいのか分からなくなる。
