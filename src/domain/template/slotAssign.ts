@@ -40,7 +40,7 @@ export function assignableAssetsFor(assets: readonly Asset[], layer: Layer): Ass
  * 押した素材を**どの差し込み口へ入れるか**（#1030）。純粋・副作用なし。
  *
  * ⚠️ **押しても何も起きない一覧を作らない**＝場面編集の左欄の素材タイルは**表示専用**で、
- * 実際の差し替えは右欄の畳まれた節の中の**名前の `<select>`** だけだった（画面1面ぶんが
+ * 実際の差し替えは右欄の畳まれた節の中の**名前だけの一覧**だけだった（画面1面ぶんが
  * 「押せそうに見えて何も起きない」で埋まっていた・`06 §2` 規約・ADR-0034 決定5）。
  *
  * 選び方（有名ツールの素材パネルと同じ型）：
@@ -49,7 +49,7 @@ export function assignableAssetsFor(assets: readonly Asset[], layer: Layer): Ass
  *    （`replacing` に、いま入っている素材の id が入る）
  * 3. 入れられる差し込み口がひとつも無ければ `null`（呼ぶ側が理由を出す）
  *
- * ⚠️ **入れられるかの規則は `isAssignableToLayer` を共有**＝`<select>` の候補と同じ
+ * ⚠️ **入れられるかの規則は `isAssignableToLayer` を共有**＝差し込み口の候補と同じ
  * （片方でだけ入る素材、を作らない）。
  */
 export function slotForAsset(

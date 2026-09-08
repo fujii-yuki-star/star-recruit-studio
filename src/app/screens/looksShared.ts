@@ -1,4 +1,5 @@
-// 見た目パターンの一覧（LooksScreen）と編集画面（LooksEditScreen）で共有する小物（§6＝文言/ロジックは1か所）。
+// 見た目パターンの一覧（LooksScreen）・編集画面（LooksEditScreen）・場面編集の見た目ピッカー
+// （SceneEditScreen・#1031）で共有する小物（§6＝文言/ロジックは1か所）。
 // コンポーネントを export しないファイルに分けることで Fast Refresh の警告も避ける。
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";

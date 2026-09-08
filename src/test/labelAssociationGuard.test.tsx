@@ -26,7 +26,14 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../domain/enums"
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
 import type { TimelineProject } from "../domain/timeline/types";
 
-/** `<label>` が包めば結ばれる部品（HTML の "labelable elements"）。**`button` は入らない**。 */
+/**
+ * `<label>` で包むだけで**呼び名になる**部品。
+ *
+ * ⚠️ **`button` は入れない**（PR #1085 レビューで言い方を正した）＝HTML の "labelable elements" に
+ * `button` は**含まれる**が、`<button>` の**呼び名は中身から作られる**ので、包むだけでは
+ * 見出しが読まれるとは限らない（実装で差が出る）。だからボタンの欄には
+ * `aria-label` / `aria-labelledby` を要求する（下の `unnamedFieldButtons`）。
+ */
 const LABELABLE = "input, select, textarea, meter, output, progress";
 
 /** 結ばれていない `<label>` の文言（空の見出しは対象外＝何も指していない飾り）。 */

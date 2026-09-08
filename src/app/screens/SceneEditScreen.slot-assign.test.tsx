@@ -3,7 +3,8 @@
 // 見ているが、**画面がその規則を通しているか**はここでしか分からない
 //（タイムライン編集と規則を共有した差し替えで、片方だけ外れても domain のテストは緑のまま）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
+import { pickerOptions } from "../../test/thumbPicker";
 import "@testing-library/jest-dom/vitest";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset, Scene } from "../../domain/project/types";
@@ -34,12 +35,9 @@ const scene = (): Scene =>
     narration: { text: "", status: "none" }, warnings: [],
   }) as unknown as Scene;
 
-/** その差し込み口の選択肢に出ている素材の名前。 */
+/** その差し込み口の候補に出ている素材の名前（押して開いて読む）。 */
 function optionsOf(label: string): string[] {
-  const select = screen.getByText(label).parentElement?.querySelector("select");
-  return [...(select?.querySelectorAll("option") ?? [])]
-    .map((o) => o.textContent ?? "")
-    .filter((t) => t !== "" && !t.includes("なし") && !t.includes("選択"));
+  return pickerOptions(document.body, label).filter((t) => t !== "" && t !== "なし");
 }
 
 describe("SceneEditScreen 差し込み口の素材の絞り込み（#512 段3）", () => {
