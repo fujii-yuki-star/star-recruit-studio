@@ -75,6 +75,7 @@ import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
+import { SceneThumb } from "../components/SceneThumb";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
@@ -1963,7 +1964,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </div>
               <div className="scene-strip" ref={sceneStripRef}>
-                {scenes.map((s, i) => (
+                {scenes.map((s, i) => {
+                  // 見た目を引くのは**1回だけ**（#1031）＝見本と名前で別々に引くと、
+                  // 片方だけ別の見た目を指す余地ができる。
+                  const sceneTemplate = templates.find((t) => t.templateId === s.templateId);
+                  return (
                   <Fragment key={s.sceneId}>
                     {/* **落ちる場所を線で見せる**（#771(c)）＝カードを囲むと「その前か後ろか」が読めない。
                         線はすき間そのものなので、指したとおりの場所に入る。 */}
@@ -1997,16 +2002,28 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           ⠿
                         </span>
                       </div>
-                      <div className="scene-card-thumb thumb thumb-photo">
-                        <PhotoIcon size={18} />
-                      </div>
+                      {/* ⚠️ **見て選べるようにする**（#1031）＝以前は全カードが**同じ写真の絵**で、
+                          中身は下の文字（種類・見た目の名前・セリフの先頭）でしか分からなかった。
+                          ⚠️ **見た目が引けない場面は写真の絵のまま**＝存在しない見た目について語らない（`06 §9`）。 */}
+                      {sceneTemplate ? (
+                        <SceneThumb scene={s} template={sceneTemplate} />
+                      ) : (
+                        <div
+                          className="scene-card-thumb thumb thumb-photo"
+                          // 見本と同じ形にする（PR #1084 レビュー）＝見た目が引けないときだけ
+                          // 16:9 の箱になると、縦型の動画で**カードの高さが揃わない**。
+                          style={{ aspectRatio: aspectRatio === "9:16" ? "9 / 16" : "16 / 9" }}
+                        >
+                          <PhotoIcon size={18} />
+                        </div>
+                      )}
                       <div className="text-sm">
                         <strong>
                           {s.order}. {sceneTypeLabel[s.sceneType]}
                         </strong>
                       </div>
                       <div className="text-faint" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
+                        {sceneTemplate?.name ?? ""}
                       </div>
                       {/* セリフ先頭を出して全カード同一アイコンでも中身で見分けられるようにする（#413）。カード幅は固定（theme.css）で
                           1行省略（全文は title）。セリフが無い場面も空の1行を確保し、カード高さ＝下の ←/→ の位置を揃える（#413 レビュー）。 */}
@@ -2025,7 +2042,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </div>
                   </div>
                   </Fragment>
-                ))}
+                  );
+                })}
                 {/* 末尾の後ろへ落とすときの線（すき間は 0〜n＝カードの数だけ「間」がある）。 */}
                 {sceneDnd.draggingId && sceneDnd.overGap === scenes.length && <span className="drop-line" aria-hidden />}
               </div>
