@@ -9,6 +9,7 @@ import { useProjectStore } from "../store/projectStore";
 import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
+import { SceneThumb } from "../components/SceneThumb";
 import { PageHead } from "../components/ui";
 import { BrandKitLink } from "../components/BrandKitLink";
 import { EmptyState } from "../components/states";
@@ -85,6 +86,31 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   // 読み込みの file input（label htmlFor でなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
   const packInputRef = useRef<HTMLInputElement>(null);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
+
+  /**
+   * 一覧の絞り込み（#1031）。
+   *
+   * ⚠️ **選んでいるものは絞り込みで消さない**＝右の見本・情報は `current` のままで、
+   * 一覧の見え方だけを変える（探している途中で**右の中身が入れ替わらない**）。
+   */
+  const [catFilter, setCatFilter] = useState<SceneCategory | "all">("all");
+  const [orientFilter, setOrientFilter] = useState<Orientation | "all">("all");
+  const [query, setQuery] = useState("");
+  const categoryFilters: [SceneCategory | "all", string][] = [
+    ["all", "すべて"],
+    ...SCENE_CATEGORIES.map((c): [SceneCategory | "all", string] => [c, categoryLabel[c]]),
+  ];
+  const orientationFilters: [Orientation | "all", string][] = [
+    ["all", "両方"],
+    ...ORIENTATIONS.map((o): [Orientation | "all", string] => [o, orientationLabel[o]]),
+  ];
+  const filtering = catFilter !== "all" || orientFilter !== "all" || query !== "";
+  const visibleTemplates = templates.filter(
+    (t) =>
+      (catFilter === "all" || t.category === catFilter) &&
+      (orientFilter === "all" || t.aspectRatio === orientFilter) &&
+      (query === "" || t.name.includes(query)),
+  );
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
   const [syncedId, setSyncedId] = useState<string | undefined>(undefined);
@@ -268,22 +294,72 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         }}
       >
         {/* 左: 見た目パターン一覧 */}
-        <div className="card-grid cols-2">
-          {templates.map((t) => (
-            <button
-              key={t.templateId}
-              className="action-card"
-              style={{
-                borderColor: current.templateId === t.templateId ? "var(--color-primary)" : undefined,
-                background: current.templateId === t.templateId ? "var(--color-primary-soft)" : undefined,
-              }}
-              disabled={busyAction !== null}
-              onClick={() => setSelectedId(t.templateId)}
-            >
-              <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}</span>
-            </button>
-          ))}
+        <div>
+          {/* ⚠️ **探し方は素材画面と揃える**（#1031）＝種類のタブ＋名前で探す＋「絞り込みをやめる」。
+              ⚠️ **件数で出し分けない**＝素材画面は常に出しているので、ここだけ途中から欄が現れると
+              同じ「探す」が画面で別挙動になる（ADR-0026②）。 */}
+          <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
+            <div className="segment" role="group" aria-label="場面の種類" style={{ display: "inline-flex" }}>
+              {categoryFilters.map(([id, label]) => (
+                <button key={id} className={catFilter === id ? "active" : ""} onClick={() => setCatFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* ⚠️ **向きも見せる**＝この画面は**向きを問わず全部**並べるので（作ったものが
+                見えなくならないように）、どれがこの動画で使えるのかが分かる印が要る。 */}
+            <div className="segment" role="group" aria-label="動画の向き" style={{ display: "inline-flex" }}>
+              {orientationFilters.map(([id, label]) => (
+                <button key={id} className={orientFilter === id ? "active" : ""} onClick={() => setOrientFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              className="input"
+              style={{ maxWidth: 200 }}
+              type="search"
+              aria-label="名前で探す"
+              placeholder="名前で探す"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {filtering && (
+              <button className="btn btn-ghost text-sm" onClick={() => { setCatFilter("all"); setOrientFilter("all"); setQuery(""); }}>
+                絞り込みをやめる
+              </button>
+            )}
+          </div>
+          {visibleTemplates.length === 0 ? (
+            <EmptyState
+              title="この絞り込みに合う見た目パターンはありません"
+              message="ほかの言葉で探すか、上の「絞り込みをやめる」で全部に戻せます。"
+            />
+          ) : (
+          <div className="card-grid cols-2">
+            {visibleTemplates.map((t) => (
+              <button
+                key={t.templateId}
+                className="action-card"
+                style={{
+                  borderColor: current.templateId === t.templateId ? "var(--color-primary)" : undefined,
+                  background: current.templateId === t.templateId ? "var(--color-primary-soft)" : undefined,
+                }}
+                disabled={busyAction !== null}
+                onClick={() => setSelectedId(t.templateId)}
+              >
+                {/* ⚠️ **見本を出す**（#1031）＝名前とカテゴリの文字だけだと、選んで右に
+                    出してみるまでどんな見た目か分からない。見本は右の大きなものと**同じ作り**
+                    （`buildSampleScene`）で、描画の核も共有する（ADR-0001）。 */}
+                <SceneThumb scene={buildSampleScene(t, assets)} template={t} />
+                <span className="action-card-title">{t.name}</span>
+                <span className="action-card-desc">
+                  {categoryLabel[t.category]}・{orientationLabel[t.aspectRatio]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+          )}
         </div>
 
         {/* 右: 選択中の見た目のプレビュー＋情報 */}
@@ -305,6 +381,15 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             <div className="row-between">
               <span className="text-muted">カテゴリ</span>
               <span className="badge badge-teal">{categoryLabel[current.category]}</span>
+            </div>
+            {/* ⚠️ **向きも出す**（#1031）＝この画面は向きを問わず並べるので、
+                見ている見た目が**この動画で使えるのか**が分からなかった。 */}
+            <div className="row-between">
+              <span className="text-muted">向き</span>
+              <span className={`badge ${current.aspectRatio === aspectRatio ? "badge-teal" : "badge-gray"}`}>
+                {orientationLabel[current.aspectRatio]}
+                {current.aspectRatio === aspectRatio ? "" : "（この動画では使えません）"}
+              </span>
             </div>
           </div>
 
