@@ -44,7 +44,7 @@ export function detachedDocCount(src: string): number {
     // 説明文の終わり（複数行の `*/` か、1行で閉じた `/** … */`）。
     const closes = t === '*/' || (t.startsWith('/**') && t.endsWith('*/'));
     if (!closes) continue;
-    // 空行を挙んでいる＝宣言に付いていない（PR #1083 レビュー）。
+    // 空行を挟んでいる＝宣言に付いていない（PR #1083 レビュー）。
     if (i + 1 < lines.length && lines[i + 1].trim() === '') { n += 1; continue; }
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === '') j += 1;
