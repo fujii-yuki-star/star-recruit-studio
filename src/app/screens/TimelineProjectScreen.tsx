@@ -68,6 +68,7 @@ import { ExportDoneActions } from "../components/ExportDoneActions";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
+import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -4899,7 +4900,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
                 棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
             <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
-              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} />
+              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} onNavigate={onNavigate} />
             </CollapsibleSection>
             {importError && (
               <div className="notice notice-warn row-between mb-sm" role="alert">
@@ -5175,6 +5176,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             )}
             extra={(
               <>
+                {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
+                <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} />
                 {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器（76vh）の下にあり、
                     編集している間は画面外だった（見えていない知らせは無いのと同じ）。
                     中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}
@@ -5327,16 +5330,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ))}
         </ul>
       )}
-      </div>
-
-      <div className="row gap-sm mt-lg">
-        {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
-        {closed.map((id) => (
-          <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
-            「{panels.find((p) => p.id === id)?.title}」を表示する
-          </button>
-        ))}
-        <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
       </div>
 
       {trackMenu && menuTrack && (

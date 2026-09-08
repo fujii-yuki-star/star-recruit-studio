@@ -199,7 +199,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       {/* よく使う素材（ADR-0035・#260）＝動画をまたいで使い回す置き場。この動画の素材とは別の棚で、
           取り込みは**コピー**（プロジェクトは自己完結・ADR-0024 決定6）。 */}
       <div className="mb">
-        <AssetLibraryPanel />
+        <AssetLibraryPanel onNavigate={onNavigate} />
       </div>
 
       <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>

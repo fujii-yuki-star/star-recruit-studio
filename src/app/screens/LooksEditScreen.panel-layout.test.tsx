@@ -21,6 +21,9 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/** 欄の出し入れは**見出しの行のメニュー**の中（#1032）＝欄の下に並べると視界の外だった。 */
+const openPanelMenu = (): void => { fireEvent.click(screen.getByRole("button", { name: /^欄/ })); };
+
 describe("LooksEditScreen: 欄の配置（ADR-0033 段階4 後半）", () => {
   it("既定はいままでと同じ顔ぶれ（プレビューと編集が同時に見える）", () => {
     render(<LooksEditScreen onNavigate={vi.fn()} />);
@@ -33,7 +36,8 @@ describe("LooksEditScreen: 欄の配置（ADR-0033 段階4 後半）", () => {
     fireEvent.click(screen.getByLabelText("プレビューの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     expect(screen.queryByRole("heading", { name: "プレビュー" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "「プレビュー」を表示する" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "「プレビュー」を表示する" }));
     expect(screen.getByRole("heading", { name: "プレビュー" })).toBeInTheDocument();
   });
 
@@ -52,7 +56,8 @@ describe("LooksEditScreen: 欄の配置（ADR-0033 段階4 後半）", () => {
     const first = render(<LooksEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("プレビューの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
     expect(screen.getByRole("heading", { name: "プレビュー" })).toBeInTheDocument();
     first.unmount();
     expect(localStorage.getItem("app.panelLayout.looks")).toBeNull();

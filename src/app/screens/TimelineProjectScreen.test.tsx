@@ -79,6 +79,9 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/** 欄の出し入れは**見出しの行のメニュー**の中（#1032）＝欄の下に並べると視界の外だった。 */
+const openPanelMenu = (): void => { fireEvent.click(screen.getByRole("button", { name: /^欄/ })); };
+
 describe("TimelineProjectScreen", () => {
   it("開いていないときは理由と、一覧へ戻る導線を出す（§2-5）", () => {
     useTimelineStore.setState({ loadError: "この動画を開けませんでした。一覧から選び直してください。" });
@@ -1678,7 +1681,8 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
     fireEvent.click(screen.getByLabelText("置くの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     expect(screen.queryByRole("heading", { name: "置く" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "「置く」を表示する" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "「置く」を表示する" }));
     expect(screen.getByRole("heading", { name: "置く" })).toBeInTheDocument();
   });
 
@@ -1697,7 +1701,8 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("置くの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
     expect(screen.getByRole("heading", { name: "置く" })).toBeInTheDocument();
   });
 
