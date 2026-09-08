@@ -10,12 +10,18 @@ import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
+import { buildSampleScene } from "./looksShared";
 import { LooksScreen } from "./LooksScreen";
 
 // 見本を何回描いたか数える（一覧は20枚以上並ぶ）。
 vi.mock("../../renderer/layout", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../renderer/layout")>();
   return { ...mod, layoutScene: vi.fn(mod.layoutScene) };
+});
+// 見本の場面を何回**作った**かも数える（描く回数とは別の無駄）。
+vi.mock("./looksShared", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./looksShared")>();
+  return { ...mod, buildSampleScene: vi.fn(mod.buildSampleScene) };
 });
 
 const portrait = {
@@ -100,7 +106,20 @@ describe("見た目パターンの一覧（#1031）", () => {
     vi.mocked(layoutScene).mockClear();
     fireEvent.click(cards(container)[1]!);
     // 選んだ後に描くのは**右の大きな見本**だけ（一覧の分は作り直さない）。
-    expect(vi.mocked(layoutScene).mock.calls.length, "選ぶたびに一覧を描き直している").toBeLessThanOrEqual(3);
+    // ⚠️ **実数で固定する**（PR #1086 レビュー）＝「何枚以下」だと、右の見本を
+    // 余分に作り直す退行を見逃す（実際に1回分の無駄が残っていた）。
+    expect(vi.mocked(layoutScene).mock.calls.length, "選ぶたびに余分に描いている").toBe(2);
+  });
+
+  // ⚠️ **右の大きな見本も作り直さない**（PR #1086 レビュー）＝一覧と同じものがあるのに
+  //    別に作り直しており、**探す欄の1文字ごと**にも走っていた。
+  //    ⚠️ **描く回数では見えない**（場面を作るのと描くのは別の仕事）ので、作った回数を数える。
+  it("カードを選んでも、見本の場面を作り直さない", () => {
+    const { container } = setup();
+    expect(vi.mocked(buildSampleScene).mock.calls.length, "はじめに作っていない").toBeGreaterThan(5);
+    vi.mocked(buildSampleScene).mockClear();
+    fireEvent.click(cards(container)[1]!);
+    expect(vi.mocked(buildSampleScene).mock.calls.length, "選ぶたび見本の場面を作り直している").toBe(0);
   });
 
   it("名前で探せる", () => {

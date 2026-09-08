@@ -224,7 +224,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     );
   }
 
-  const sampleScene = buildSampleScene(current, assets);
+  // ⚠️ **右の見本も作り直さない**（PR #1086 レビュー）＝一覧と同じものが既にあるのに
+  // 別に作り直しており、**探す欄の1文字ごと**にも走っていた（同じ目的の直しを片方だけやらない）。
+  // ⚠️ **一覧に無い見た目はその場で作る**＝`templates` に無い `current` は起きないが、
+  // 黙って見本が消える形にはしない。
+  const sampleScene = sampleById.get(current.templateId) ?? buildSampleScene(current, assets);
   // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
   const usedScenes = scenesUsingTemplate(scenes, current.templateId);
   // 削除したときにこのプロジェクトで何が起きるか（#547・削除は取り消せないので先に示す）。
