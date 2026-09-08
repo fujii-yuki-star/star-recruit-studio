@@ -4,7 +4,7 @@ import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage } from "../uiLabels";
+import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -387,6 +387,23 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               : `選択中の見た目「${current.name}」の見本です（写真・文字は例として表示しています）。`}
           </p>
 
+          {/* ⚠️ **主な操作は見本の直下**（#1031）＝以前は右欄の**4本目の区切り線の下**に
+              secondary で置いており、初回は探すことになっていた（実機確認済み）。
+              ⚠️ **出すのは1つだけ**＝自分の見た目なら「編集する」、標準なら「もとに作る」。
+              同じボタンを上と下の2か所に出さない（どちらを押せばいいのか分からなくなる）。 */}
+          <div className="col gap-sm mt">
+            {isUserCurrent ? (
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={onEdit}>この見た目を編集する</button>
+            ) : (
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={() => void onDuplicate()}>
+                {busyAction === "duplicate" ? DUPLICATE_BUSY_LABEL : DUPLICATE_LOOK_LABEL}
+              </button>
+            )}
+            <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`} style={{ alignSelf: "flex-start" }}>
+              {isUserCurrent ? "自分の見た目" : "標準（直接は編集できません）"}
+            </span>
+          </div>
+
           <hr className="divider" />
           <div className="col gap-sm">
             <div className="row-between">
@@ -423,22 +440,19 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           <h3 className="field-label">使用場面</h3>
           <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" disabled={busyAction !== null} />
 
+          {/* ⚠️ **主な操作は上へ出した**（#1031）＝ここに残るのは「自分の見た目」だけの操作。
+              標準の見た目では**節ごと出さない**（中身が空の入れ物を残さない）。 */}
+          {isUserCurrent && (
+          <>
           <hr className="divider" />
-          {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}
-          <h3 className="field-label">この見た目を編集</h3>
-          <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
-            {isUserCurrent ? "自分の見た目" : "標準（編集するには複製します）"}
-          </span>
+          <h3 className="field-label">ほかの操作</h3>
           <div className="col gap-sm mt">
-            {isUserCurrent && (
-              <button className="btn btn-primary" disabled={busyAction !== null} onClick={onEdit}>この見た目を編集する</button>
-            )}
             <button className="btn btn-secondary" disabled={busyAction !== null} onClick={() => void onDuplicate()}>
-              {busyAction === "duplicate" ? "複製中…" : "この見た目を複製して編集する"}
+              {busyAction === "duplicate" ? DUPLICATE_BUSY_LABEL : DUPLICATE_LOOK_LABEL}
             </button>
 
             {/* 削除（マイテンプレのみ） */}
-            {isUserCurrent && (confirmDelete ? (
+            {(confirmDelete ? (
               <DeleteConfirm
                 busy={busyAction === "delete"}
                 message={deleteLookConfirmMessage(deleteImpactCounts(deleteImpact))}
@@ -456,6 +470,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </button>
             ))}
           </div>
+          </>
+          )}
           {templateError && (
             <div className="notice notice-warn mt" role="alert">
               <span>{templateError}</span>
