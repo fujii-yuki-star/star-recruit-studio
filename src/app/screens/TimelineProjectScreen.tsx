@@ -152,7 +152,7 @@ import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
 import { freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
-import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
+import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
@@ -349,12 +349,31 @@ function keyframeSummary(k: Keyframe): string {
 }
 
 /**
+ * 吸着を使うか（#1032）の記憶。既定 ON。
+ *
+ * ⚠️ **画面の好みは覚える**（ADR-0033 決定）＝毎回切り直す手間を作らない。
+ * ⚠️ **文書には入れない**＝吸着は動画の中身ではない（§5・ADR-0033 と同じ理由）。
+ * ⚠️ **倍率（ズーム）は覚えない**のと対照的＝あちらは**文書に依存する状態**（ADR-0034 決定）。
+ */
+const LS_SNAP = "timeline.snap";
+function loadSnapEnabled(): boolean {
+  try {
+    const v = localStorage.getItem(LS_SNAP);
+    return v === null ? true : v === "1"; // 未設定＝既定 ON
+  } catch { return true; }
+}
+function saveSnapEnabled(on: boolean): void {
+  try { localStorage.setItem(LS_SNAP, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
+}
+
+/**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
  *
  * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
  * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
+
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
@@ -803,14 +822,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return (id: string) => byId.get(id);
   }, [templates]);
   /**
-   * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
-   *
-   * ⚠️ **部品まで覚える**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なる（`background`・
-   * `title` などは同梱の見本でも共通）。層 id だけで覚えると、**別の部品の帯を選んだだけで**
-   * 同じ id の欄へ手が飛び、そのまま矢印を押すと**再生位置を送るつもりで素材が変わる**。
-   * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
-   * 返すので、帯を選ぶだけで効果が走る）。
+   * 吸着を使うか（#1032）。**切る方法を文章でお願いしない**ための切替。
+   * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
+  const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
   const [drilled, setDrilled] = useState<{ clipId: string; layerId: string; sel: readonly string[] } | null>(null);
   /**
    * **その回の「入った」に手を移したか**（#832）＝ `drilled` **そのもの（同一性）**を覚える。
@@ -908,6 +923,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 変わっても「もう入っていない」と判る（1か所で担保できる・ADR-0026②）。
    */
   const drilledHere = drilled && drilled.sel === selectedClipIds ? drilled : null;
+
+  /**
+   * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
+   *
+   * ⚠️ **部品まで覚える**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なる（`background`・
+   * `title` などは同梱の見本でも共通）。層 id だけで覚えると、**別の部品の帯を選んだだけで**
+   * 同じ id の欄へ手が飛び、そのまま矢印を押すと**再生位置を送るつもりで素材が変わる**。
+   * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
+   * 返すので、帯を選ぶだけで効果が走る）。
+   */
 
   const layout = useMemo(() => {
     if (!doc) return null;
@@ -2432,7 +2457,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // 運ぶときは開始と終わりの両方・端を縮めるときは**動かしている端だけ**を見る。
       snapPlacement(sec, (t) => (mode === "move" ? [t, t + clipLen] : [t]), {
         exceptId: clipId,
-        off: ev.ctrlKey || ev.metaKey || timeFixed,
+        off: snapOff(ev) || timeFixed,
       });
     const at = (ev: PointerEvent): number => {
       if (timeFixed) return origin;
@@ -2562,6 +2587,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   };
 
   /**
+   * この操作で吸着を切るか（#1032）。**判定はここひとつ**＝
+   * 呼び出し側で書き並べると、**置くときだけ切れない**のような割れ方をする
+   *（実際に「置くときも帯を運ぶときと同じ吸着」を後から揃えた経緯がある≡#771(a)）。
+   */
+  const snapOff = (ev: { ctrlKey: boolean; metaKey: boolean }): boolean =>
+    snapDisabled({ enabled: snapEnabled, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey });
+
+  /**
    * **時刻を吸着させる**（決定12）＝他の帯の端・再生位置・0秒へ寄せる。**`Ctrl` で切れる**。
    * 寄せ先は**画面内に見えているものだけ**（見えていない所へ吸い付くと理由が読めない）。
    * しきい値は px で決めて倍率で秒へ換算する＝**倍率が変わっても指の感覚が同じ**。
@@ -2571,6 +2604,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
    * 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
    */
+
   const snapPlacement = (
     sec: number,
     edgesOf: (sec: number) => number[],
@@ -2634,10 +2668,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   ): void => {
     if (exporting || isPlaying) return; // 押せない状況では掴ませない（押してから断らない）
     beginDrag(e, {
-      onStart: (ev) => setDrag({ spec, label, x: ev.clientX, y: ev.clientY, drop: resolveDrop(spec, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey) }),
+      onStart: (ev) => setDrag({ spec, label, x: ev.clientX, y: ev.clientY, drop: resolveDrop(spec, ev.clientX, ev.clientY, snapOff(ev)) }),
       onMove: (ev) => {
         const show = (e2: PointerEvent): void => {
-          const drop = resolveDrop(spec, e2.clientX, e2.clientY, e2.ctrlKey || e2.metaKey);
+          const drop = resolveDrop(spec, e2.clientX, e2.clientY, snapOff(e2));
           setDrag({ spec, label, x: e2.clientX, y: e2.clientY, drop });
           // 寄せ先の点線は帯を運ぶときと同じもの（同じ state を使う＝画面に2本出ない）。
           setSnapGuideSec(drop?.guideSec ?? null);
@@ -2652,7 +2686,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // **動かさずに離した＝押しただけ**。ここで置く（`click` を待たない＝指の経路はここで完結する）。
         // 動かさずに離した＝押しただけ＝**欄に出ている列**へ置く（ボタンと同じ・#771(b)）。
         if (!started) { place(); return; }
-        const drop = resolveDrop(spec, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey);
+        const drop = resolveDrop(spec, ev.clientX, ev.clientY, snapOff(ev));
         setSnapGuideSec(null); // 離したら線を消す（帯を運ぶときと同じ）
         // 落とし先の外・置けない所で離したら**何も置かない**（寄せない）。理由は離したときだけ出す（決定10）。
         if (!drop) return;
@@ -3411,11 +3445,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 全体を表示
               </button>
             </div>
-            {/* ⚠️ **吸着の外し方を画面に書く**（#819-3）＝掴むと勝手に隣へ寄るのに、切る方法が
-                どこにも書かれておらず「思った所へ置けない」ままになる（決定12 は切れると定めている）。 */}
-            <p className="text-muted text-sm">
-              帯を掴むと、ほかの帯の端・再生位置・0秒へ吸い寄せます。<kbd>Ctrl</kbd> を押しながら動かすと吸着しません。
-            </p>
+            {/* ⚠️ **文章でお願いしない**（#1032）＝以前は「`Ctrl` を押しながら動かすと
+                吸着しません」と**説明だけ**で、切るにはその一文を読むしかなかった（#819-3 で書いたもの）。
+                切替を置いて**押せば切れる**ようにする。
+                ⚠️ **`Ctrl` は残す**（ADR-0034 決定）＝押している間だけ切れるのは、
+                吸着を使いながら**その回だけ外したい**ときの道。 */}
+            <div className="toggle-row" style={{ maxWidth: 420 }}>
+              <span className="field-label text-sm" style={{ margin: 0 }}>吸着（帯の端・再生位置・0秒へ寄せる）</span>
+              <Switch
+                on={snapEnabled}
+                onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
+                label="吸着"
+                title={snapEnabled ? "切ると、掛んだ場所へそのまま置けます" : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"}
+              />
+            </div>
+            {snapEnabled && (
+              <p className="text-muted text-sm">
+                <kbd>Ctrl</kbd> を押しながら動かすと、その回だけ吸着しません。
+              </p>
+            )}
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">

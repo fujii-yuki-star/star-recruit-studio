@@ -1,8 +1,24 @@
 // 帯の吸着（#686 段階4・ADR-0034 決定12）。
 import { describe, expect, it } from 'vitest';
-import { snapTime, timeSnapTargets, visibleTimeRange, TIME_SNAP_KIND } from './snap';
+import { snapDisabled, snapTime, timeSnapTargets, visibleTimeRange, TIME_SNAP_KIND } from './snap';
 
 const clip = (id: string, startSec: number, durationSec: number) => ({ id, startSec, durationSec });
+
+// 吸着を切る2つの道（#1032）。切替（ずっと）と `Ctrl`（その回だけ）。
+describe('snapDisabled（吸着を切るか）', () => {
+  it('切替が入っていて修飾キーもなければ、吸着する', () => {
+    expect(snapDisabled({ enabled: true, ctrlKey: false, metaKey: false })).toBe(false);
+  });
+
+  it('切替を切っていれば、吸着しない（ずっと）', () => {
+    expect(snapDisabled({ enabled: false, ctrlKey: false, metaKey: false })).toBe(true);
+  });
+
+  it('`Ctrl`（`Cmd`）を押していれば、その回だけ吸着しない', () => {
+    expect(snapDisabled({ enabled: true, ctrlKey: true, metaKey: false })).toBe(true);
+    expect(snapDisabled({ enabled: true, ctrlKey: false, metaKey: true })).toBe(true);
+  });
+});
 
 describe('timeSnapTargets（どこへ寄せるか）', () => {
   const base = {

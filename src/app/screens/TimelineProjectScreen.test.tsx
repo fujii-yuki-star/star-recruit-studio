@@ -6441,6 +6441,29 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(px / 36, 5); // 吸わない
   });
 
+  // #1032：**切替を切ると、押しっぱなしにしなくても吸着しない**。
+  // ⚠️ これが無いと**画面が切替を渡し忘れても緑**になる（変異チェックで生き残った）。
+  it("吸着の切替を切ると、`Ctrl` なしでも吸着しない（#1032）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    fireEvent.click(screen.getByRole("switch", { name: "吸着" })); // 切る
+    const px = 36 * 2 - 3;
+    drag(band("あ"), px);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(px / 36, 5); // 吸わない
+  });
+
+  it("吸着の切替を戻すと、また寄る（切ったまま固めない）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    const sw = screen.getByRole("switch", { name: "吸着" });
+    fireEvent.click(sw); // 切る
+    fireEvent.click(sw); // 戻す
+    drag(band("あ"), 36 * 2 - 3);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(2, 5);
+  });
+
   it("`Ctrl` を先に離しても**見えていた位置**に落ちる（離す順で結果を変えない）", () => {
     // ⚠️ 離した瞬間に計算し直すと、点線が出ていなかったのに落ちた瞬間に寄る（逆順なら寄らない）。
     two();

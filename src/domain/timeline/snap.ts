@@ -10,6 +10,20 @@ import { SNAP_THRESHOLD_PX } from '../project/freeSnap';
 
 export { SNAP_THRESHOLD_PX };
 
+/**
+ * **この操作で吸着を切るか**（#1032）。切れる道は2つある：
+ *
+ * - **切替を OFF にする**（`enabled: false`）＝ずっと切れる。画面の好みとして覚える。
+ * - **`Ctrl`（または `Cmd`）を押しながら動かす**＝**その回だけ**切れる（ADR-0034 決定）。
+ *
+ * ⚠️ **判定をここひとつにする**＝呼び出し側（帯を運ぶ・端を縮める・新しく置くの3つ）で
+ * 書き並べると、**置くときだけ切れない**のような割れ方をする
+ *（実際に「置くときも帯を運ぶときと同じ吸着」を後から揃えた経緯がある＝#771(a)）。
+ */
+export function snapDisabled(input: { enabled: boolean; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return !input.enabled || input.ctrlKey || input.metaKey;
+}
+
 /** 吸着先の種類。画面はこれで線の見せ方を変えられる（いまはどれも同じ縦の点線）。 */
 export const TIME_SNAP_KIND = {
   /** 他の帯の端（開始・終わり）。 */
