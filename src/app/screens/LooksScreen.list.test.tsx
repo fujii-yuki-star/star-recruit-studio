@@ -9,7 +9,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Template } from "../../domain/template/types";
+import { layoutScene } from "../../renderer/layout";
 import { LooksScreen } from "./LooksScreen";
+
+// 見本を何回描いたか数える（一覧は20枚以上並ぶ）。
+vi.mock("../../renderer/layout", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../renderer/layout")>();
+  return { ...mod, layoutScene: vi.fn(mod.layoutScene) };
+});
 
 const portrait = {
   ...sampleTemplates[0], templateId: "tpl_portrait", name: "縦のオープニング",
@@ -73,6 +80,27 @@ describe("見た目パターンの一覧（#1031）", () => {
     const after = names(container);
     expect(after.length, "絞り込みが効いていない").toBeLessThan(before);
     expect(after.length, "全部消えている").toBeGreaterThan(0);
+  });
+
+  // ⚠️ **探し方の規則は素材画面と共有**（PR #1086 レビュー）＝素の `includes` だと
+  //    ローマ字の名前で当たらない・空白を入れると急に0件、になる。
+  it("大文字小文字を区別せずに探せる", () => {
+    const roman = { ...sampleTemplates[0], templateId: "tpl_roman", name: "Simple Opening" } as unknown as Template;
+    const { container } = setup([...sampleTemplates, roman]);
+    fireEvent.change(screen.getByLabelText("名前で探す"), { target: { value: "simple" } });
+    expect(names(container), "大文字小文字で当たらない").toEqual(["Simple Opening"]);
+  });
+
+  // ⚠️ **1枚選ぶだけで全枚を描き直さない**（PR #1086 レビュー）＝一覧は20枚以上並ぶので、
+  //    選ぶたびに全枚の絵を作り直すと引っかかる（探す欄の1文字ごとにも走る）。
+  it("カードを選んでも、ほかの見本は描き直さない", () => {
+    const { container } = setup();
+    const drawnAtFirst = vi.mocked(layoutScene).mock.calls.length;
+    expect(drawnAtFirst, "はじめに一覧を描いていない").toBeGreaterThan(5);
+    vi.mocked(layoutScene).mockClear();
+    fireEvent.click(cards(container)[1]!);
+    // 選んだ後に描くのは**右の大きな見本**だけ（一覧の分は作り直さない）。
+    expect(vi.mocked(layoutScene).mock.calls.length, "選ぶたびに一覧を描き直している").toBeLessThanOrEqual(3);
   });
 
   it("名前で探せる", () => {

@@ -11,6 +11,7 @@
 //
 // ⚠️ **見た目パターンが引けないときは描かない**＝呼ぶ側が代わりの見た目を出す
 // （存在しない見た目について語らない・`06 §9`）。
+import { memo } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
@@ -18,7 +19,12 @@ import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 
-export function SceneThumb({ scene, template }: { scene: Scene; template: Template }) {
+/**
+ * ⚠️ **同じものは描き直さない**（PR #1086 レビュー）＝見本は一覧に20枚以上並ぶので、
+ * 包まないと**1枚選ぶだけで全枚の絵を作り直す**（探す欄の1文字ごとにも）。
+ * ⚠️ **包む側で `scene` の参照を安定させる**＝毎回作り直したオブジェクトを渡すと、包んでも効かない。
+ */
+export const SceneThumb = memo(function SceneThumb({ scene, template }: { scene: Scene; template: Template }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（ADR-0021）は場面素材に無い id のフォールバック（`ScenePreview` と同じ順）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -43,4 +49,4 @@ export function SceneThumb({ scene, template }: { scene: Scene; template: Templa
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
-}
+});

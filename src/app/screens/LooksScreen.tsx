@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
@@ -16,6 +16,7 @@ import { EmptyState } from "../components/states";
 import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { layerLabel, buildSampleScene } from "./looksShared";
+import { matchesSearchWords } from "../../domain/search";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
 const categoryLabel: Record<SceneCategory, string> = {
@@ -104,12 +105,22 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     ["all", "両方"],
     ...ORIENTATIONS.map((o): [Orientation | "all", string] => [o, orientationLabel[o]]),
   ];
+  /**
+   * 一覧の見本（PR #1086 レビュー）。
+   *
+   * ⚠️ **描くたびに作り直さない**＝毎回新しい場面を渡すと、**1枚選ぶだけで
+   * 全枚の絵を作り直す**（見た目は20枚以上並ぶ・探す欄の1文字ごとにも走る）。
+   */
+  const sampleById = useMemo(
+    () => new Map(templates.map((t) => [t.templateId, buildSampleScene(t, assets)])),
+    [templates, assets],
+  );
   const filtering = catFilter !== "all" || orientFilter !== "all" || query !== "";
   const visibleTemplates = templates.filter(
     (t) =>
       (catFilter === "all" || t.category === catFilter) &&
       (orientFilter === "all" || t.aspectRatio === orientFilter) &&
-      (query === "" || t.name.includes(query)),
+      matchesSearchWords([t.name], query),
   );
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
@@ -351,7 +362,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
                 {/* ⚠️ **見本を出す**（#1031）＝名前とカテゴリの文字だけだと、選んで右に
                     出してみるまでどんな見た目か分からない。見本は右の大きなものと**同じ作り**
                     （`buildSampleScene`）で、描画の核も共有する（ADR-0001）。 */}
-                <SceneThumb scene={buildSampleScene(t, assets)} template={t} />
+                <SceneThumb scene={sampleById.get(t.templateId)!} template={t} />
                 <span className="action-card-title">{t.name}</span>
                 <span className="action-card-desc">
                   {categoryLabel[t.category]}・{orientationLabel[t.aspectRatio]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}
