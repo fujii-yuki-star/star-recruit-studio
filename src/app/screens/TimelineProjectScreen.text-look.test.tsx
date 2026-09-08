@@ -66,6 +66,25 @@ describe("タイムライン編集：文字の体裁は畳んで出す（#1032�
     expect(section("文字の体裁").open, "入れてあるのに畳んでいる").toBe(true);
   });
 
+  // ⚠️ **4つの項目をそれぞれ見る**（PR #1081 レビュー）＝代表の1件だけだと、
+  // **他の項を落とす変異が生き残る**（入れた設定が畳まれたままになる項目ができる）。
+  it.each([
+    ["行間", { lineHeight: 1.4 }],
+    ["影", { shadow: { enabled: true } }],
+    ["背景帯", { background: { enabled: true } }],
+  ])("%s を入れてあれば開いて出す", (_name, over) => {
+    open({
+      clips: [
+        {
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5,
+          x: 0, y: 0, w: 100, h: 50, text: "こんにちは", ...(over as object),
+        },
+      ],
+    } as Partial<TimelineProject>);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("文字の体裁").open, "入れてあるのに畳んでいる").toBe(true);
+  });
+
   it("大きさ・色などの基本は畳まない（毎回触るもの）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
