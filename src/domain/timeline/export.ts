@@ -308,6 +308,18 @@ export const TIMELINE_EXPORT_BLOCK = {
    * 場面形式は同じ状態を公開前チェックの `unknownFont` で止めている（ADR-0026②）。
    */
   userFontUnreadable: 'TIMELINE_EXPORT_USER_FONT_UNREADABLE',
+  /**
+   * 実フレームで描く**動画のファイルが手元に無い**（#1068）。
+   *
+   * ⚠️ **「読めない素材」（`assetUnreadable`）とは別の門**＝あちらは**代表フレームが作れるか**を見る。
+   * 実フレームで描く動画は代表フレームを要らないので、あちらへ混ぜると
+   * 「実フレームで描けるのに、代表フレームが作れないせいで永久に書き出せない」を作る（`timelineImageAssetIds`）。
+   * ここは**ファイルがあるか**だけを見る＝無ければコマを焼く段（`stage_clip_frames`）で**必ず落ちる**ので、
+   * 保存先を聞いて走り出してから途中で止まるより、押す前に断るほうがよい（`06 §12.1`）。
+   * ⚠️ **調べられないときは断らない**（`missingAssetFiles` は空を返す）＝嘘の警告を出さない。
+   * ⚠️ **壊れている動画はここでは判らない**（開いてみるまで分からない）＝そちらは書き出しの最中に断る。
+   */
+  videoFileMissing: 'TIMELINE_EXPORT_VIDEO_FILE_MISSING',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
@@ -484,6 +496,26 @@ export function timelineImageAssetIds(
     }
   }
   return [...ids].filter((id) => !audioIds.has(id) && (!videoIds.has(id) || stillOnly.has(id)));
+}
+
+/**
+ * 実フレームで描く動画の**ファイルのありか**（プロジェクトからの相対パス・#1068）。
+ *
+ * ⚠️ **代表フレームの要否（`timelineImageAssetIds`）とは別の問い**＝あちらは「絵として描くか」、
+ * ここは「焼く元のファイルがあるか」。**同じ素材を別の使い方で置いていても1つに畳む**（同じファイルを
+ * 2度調べない）。使う側は `missingAssetFiles`（調べられない場では空）に渡す。
+ */
+export function timelineVideoRelPaths(
+  doc: TimelineProject,
+  templateOf?: (templateId: string) => Template | undefined,
+): string[] {
+  const pathOf = new Map(doc.assets.map((a) => [a.assetId, a.filePath]));
+  const out = new Set<string>();
+  for (const p of videoPlacementsOf(doc, templateOf)) {
+    const fp = pathOf.get(p.assetId);
+    if (fp) out.add(fp);
+  }
+  return [...out];
 }
 
 /**

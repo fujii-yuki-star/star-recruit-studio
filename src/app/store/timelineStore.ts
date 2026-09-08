@@ -62,7 +62,7 @@ import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { NarrationStatus } from "../../domain/enums";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
-import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds } from "../../domain/timeline/export";
+import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds, timelineVideoRelPaths } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
@@ -2008,6 +2008,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // （開いた時点の表示先で）写真が出たままなので**見えていたものと違う動画**が成功として出る（ADR-0026④）。
       if (timelineImageAssetIds(doc, templateOf).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
         set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
+        return;
+      }
+      // ⚠️ **実フレームで描く動画は、ファイルがあるかだけ見る**（#1068）＝上の「読めない素材」の門は
+      //   代表フレームが作れるかを見ており、実フレームで描く動画は**わざと外してある**
+      //  （`timelineImageAssetIds`＝混ぜると「描けるのに永久に書き出せない」を作る）。
+      //   無ければコマを焼く段（`stage_clip_frames`）で**必ず落ちる**ので、保存先を聞いて走り出してから
+      //   途中で止めない（`06 §12.1`「書き出せない理由は押す前に見せる」）。
+      //   ⚠️ **調べられないときは断らない**（`missingAssetFiles` は空を返す）＝嘘の警告を出さない。
+      const missingVideoFiles = await missingAssetFiles(doc.projectId, timelineVideoRelPaths(doc, templateOf));
+      if (missingVideoFiles.length > 0) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.videoFileMissing] } });
         return;
       }
       // ⚠️ **音源をそろえてから見る**（#1061）＝置いた直後の音は、鳴らす側の画面が描かれていないと
