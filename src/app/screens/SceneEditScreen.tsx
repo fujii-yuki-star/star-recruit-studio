@@ -460,6 +460,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const prevScene = selectedIdx > 0 ? scenes[selectedIdx - 1] : undefined;
   const prevTemplate = prevScene ? templates.find((t) => t.templateId === prevScene.templateId) : undefined;
   const transitionPreview = useSceneTransitionPreview(scenes, selectedIdx);
+  // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
+  // ⚠️ **重ねて描ける条件まで見る**（#1095 レビュー）＝`transitionActive` は前場面の見た目が解決できるかを見ない。
+  // それだけで再生を始めると、前の場面の見た目が見つからない壊れた動画で**何も重ならないまま再生中**になる
+  // （オーバーレイも「停止」も出ない無言の状態＝ADR-0026④）。
+  const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
 
   /**
    * 選んだらその場で切り替えを再生する（#1032）。
@@ -473,25 +478,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    */
   const transitionKey = selected ? deriveTransitionSelectValue(selected.transition) : null;
   // 再生の入口は毎レンダー入れ替える（依存に積むと毎回張り替えることになる＝`playRef` と同じ形）。
-  const previewRef = useRef({ transition: transitionPreview, motion: motionPreview });
+  const previewRef = useRef({ transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition });
   useEffect(() => {
-    previewRef.current = { transition: transitionPreview, motion: motionPreview };
+    previewRef.current = { transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition };
   });
   const lastTransition = useRef({ sceneId: selected?.sceneId, value: transitionKey });
   useEffect(() => {
     const prev = lastTransition.current;
     lastTransition.current = { sceneId: selected?.sceneId, value: transitionKey };
     if (prev.sceneId !== selected?.sceneId || prev.value === transitionKey) return;
-    // ℹ️ **この見張りは外から見えない**（変異チェックで生き残る）＝外しても
-    // `useSceneTransitionPreview` が**描画中に止め直す**（`playing && !transitionActive`）ので結果は同じ。
-    // 意図（押しても何も起きない再生を始めない）を残すために置く。
-    if (!previewRef.current.transition.transitionActive) return;
+    // 押しても何も起きない再生を始めない（「なし」・最初の場面・前の場面の見た目が見つからない）。
+    if (!previewRef.current.canPlay) return;
     previewRef.current.motion.stop(); // 排他：切替を見る間は動き再生を止める（ボタンと同じ扱い）
     previewRef.current.transition.play();
   }, [selected?.sceneId, transitionKey]);
 
-  // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
-  const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
   // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。
   // 「設定だけできて無効」を避けるため（#469・ADR-0026④）、この組み合わせでは動きUIを設定不可＋理由提示にする。
   const animBlockedByDialogueVideo = motionPreview.hasVideoSlot && !!(selected?.lines && selected.lines.length > 0);

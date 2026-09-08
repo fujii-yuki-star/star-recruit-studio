@@ -126,6 +126,31 @@ describe("画面の切り替えを絵で選ぶ（#1032）", () => {
     expect(container.textContent).toContain("最初の場面のため、前からの切り替えはありません");
   });
 
+  // ⚠️ **重ならないのに「再生中」にしない**（#1095 レビュー）＝前の場面の見た目が見つからないと
+  //    合成そのものを描けない。それでも再生を始めると、何も重ならないまま編集用の枠だけが消える
+  //    （＝無言の状態遷移・ADR-0026④）。自由配置の場面で見ると、その枠の有無で観測できる。
+  it("前の場面の見た目が見つからないときは再生を始めない", () => {
+    const freeTemplate = {
+      schemaVersion: "1.0", templateId: "free_canvas_v1", name: "自由配置", category: "free", aspectRatio: "16:9",
+      canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+      layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+    };
+    const freeScene = (id: string, order: number, templateId: string): Scene =>
+      ({ ...scene(id, order), sceneType: "free", templateId, freeLayout: [] } as unknown as Scene);
+    useProjectStore.setState({
+      templates: [freeTemplate],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      // 前の場面だけ見つからない見た目を指す（グローバル削除などで起こる）。
+      scenes: [freeScene("scene_001", 1, "tmpl_gone"), freeScene("scene_002", 2, "free_canvas_v1")],
+      assets: [], editingSceneId: "scene_002",
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    } as never);
+    const { container } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".free-layout-overlay"), "前提が崩れている（枠が最初から無い）").toBeTruthy();
+    pick("フェード");
+    expect(container.querySelector(".free-layout-overlay"), "重ならないのに再生を始めている").toBeTruthy();
+  });
+
   // ⚠️ **注釈が消えたこと**も固定する（この PR の目的そのもの）。
   it("「上の『切り替えを見る』で確認」という注釈は出さない", () => {
     const { container } = setup();
