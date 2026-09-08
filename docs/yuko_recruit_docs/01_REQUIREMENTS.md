@@ -1,5 +1,9 @@
 # すたりお（stario）要件定義書 v0.1
 
+> ⚠️ **これは正典ではありません**（解説・背景）。型・必須・enum・制約の正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md) と [`schemas/`](schemas/)、AI 変換の正典は [`12_AI_PROMPT_AND_MAPPING.md`](12_AI_PROMPT_AND_MAPPING.md)。**食い違ったら正典が正しい**（`CLAUDE.md §0`）。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 概要
 
 ### 1.1 プロダクト名

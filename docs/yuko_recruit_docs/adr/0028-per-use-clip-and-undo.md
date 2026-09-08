@@ -92,3 +92,13 @@ scene の per-use 上書きは **`slotFits`（1.13）／`slotVideoStart`（1.18�
 - **`fit` の扱い**：現状 `slotFits` と `slotClips` が別マップ（per-use は3マップ）。将来 `slotClips` に一本化するかは別途（本 ADR は additive を優先し slotFits 据え置き・D6 の共通ライフサイクルで足並みは揃える）。
 - **crop/reframe 等の拡張**（ADR-0024 の将来枠）：`SlotClipOverride` にフィールド追加で後付け（schema マイナーバンプ）。
 - **導線文言の具体化**（§2-3）：「素材の既定に合わせる／この場面だけ変える」等の場面側UI文言は実装で確定。
+
+---
+
+## `CLAUDE.md §11` から移した要約・追補（2026-09-08）
+
+> ⚠️ **意味は変えずにそのまま移したもの**。以前は `CLAUDE.md §11` に各 ADR の要約が丸ごと置かれており、
+> **毎セッション全文が読まれる**ファイルの 83%（42,288字）を占め、ADR 本体との**二重管理**にもなっていた。
+> ⚠️ **本文と重なる記述が残っている**＝消すときは**本文と突き合わせてから**（この段は実装の履歴と追補を含む）。
+
+動画クリップ調整の per-use 化＋Undo（**α-4・#472**）: [`adr/0028`](0028-per-use-clip-and-undo.md) **Accepted**（2026-07-11・利用者承認／per-use の挙動変化は「一旦決定・指摘が上がれば再検討」）— クリップ調整（範囲/速度/元音声）は `asset.clip`（assets）更新で、ADR-0020 の履歴 slice（`meta/parts/scenes`・assets 除外）の外＝**Undo 不可**（#472）。ADR-0024 決定1（per-use 上書き `scene.slotClips`・`slotFits` 同型・`Asset.clip` は既定）を**確定**し、クリップ調整を**場面（scenes）に載せる**ことで ADR-0020 履歴で**自動 Undo**＋per-use（場面ごと別範囲）を得る。**`scene.slotClips?: Record<layerId, { startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }>`**（`fit` は既に `slotFits` で per-use ゆえ対象外）。継承＝`slotClips ?? asset.clip ?? 既定`（null=継承）。描画は `findVideoSlots` に per-use 解決を1か所追加（preview=export 不変）。場面編集の `ClipDetailControls` は slotClips を編集（Undo 可・drag は履歴グループ復活＝#389 巻き戻し）・素材画面は `asset.clip`（既定）を編集（従来どおり Undo 外）。schema マイナーバンプ（additive・移行不要）。**assets を履歴に入れない**（ADR-0020 の除外理由を尊重）。**実装は段階＝schema→描画解決→ClipDetailControls 編集先分岐＋Undo**。

@@ -101,3 +101,13 @@
 - **保存先**：`appData/user_templates/assets/<tmpl_asset_NNN>.<ext>`（Tauri: `import_template_asset` / `load_template_assets` / `delete_template_asset`）。`templateAssetFs`（infra）が wrap（非 Tauri は no-op）。
 - **ストア合流（`templateAssetSrcById`）＋ ScenePreview の解決合流・テンプレ削除時の素材掃除は PR C**（編集UIと同時に配線し実機で検証）。**書き出しの解決は PR D**。
 - **孤立素材の掃除（#299・α-4）**：下書き破棄（素材ファイルは選択時に即保存）やテンプレ削除時の削除失敗で残る孤立ファイル（`tmpl_asset_*`）は、次回起動の `loadUserTemplates` に相乗りして**安全条件下でのみ**掃除する（純粋関数 `orphanTemplateAssetIds`）。安全条件＝読込が確実に成功し**全テンプレが健全に揃った**とき（`loadUserTemplates` が `{templates, complete}` を返し `complete=true`）だけ、全テンプレの `layer.assetId` 参照集合に**無い** disk 上ファイルを削除。**読込失敗/一部スキップ/破損/検証却下時は何もしない**＝「空が返った瞬間に全削除＝データ消失」を防ぐ。とくに Rust 側 `load_user_templates` は個別ファイルの `read_to_string` 失敗を握ってスキップし得るため、スキップ件数(`skipped`)を JS へ返し `complete=false` に落とす（部分失敗を「ファイルが無い」と誤認しない・#299 レビュー対応）。影響は disk 容量のみ。
+
+---
+
+## `CLAUDE.md §11` から移した要約・追補（2026-09-08）
+
+> ⚠️ **意味は変えずにそのまま移したもの**。以前は `CLAUDE.md §11` に各 ADR の要約が丸ごと置かれており、
+> **毎セッション全文が読まれる**ファイルの 83%（42,288字）を占め、ADR 本体との**二重管理**にもなっていた。
+> ⚠️ **本文と重なる記述が残っている**＝消すときは**本文と突き合わせてから**（この段は実装の履歴と追補を含む）。
+
+テンプレ既定素材（template-owned default assets）: [`adr/0021`](0021-template-owned-assets.md) **Accepted**（2026-06-29・α-3 追加・実装は EPIC サブPR A〜D）— テンプレが**既定素材（背景等）を持てる**。素材ファイルは**グローバル保存**（`user_templates/assets`・id=`tmpl_asset_NNN`）、`Layer.assetId`＋テンプレ `assets` マニフェストで参照。描画は **`scene.assetRefs[layer.id] ?? layer.assetId`**（場面素材が優先・テンプレ既定はフォールバック）。見本は持ち主写真の自動流し込みをやめる（①）。**ADR-0017 の「`template.schema` 不変／1テンプレ=1ファイル」を一部改める**（schema は任意追加で版据え置き＝`11 §1`／素材を持つテンプレは単一JSON共有不可＝bundle は将来）。

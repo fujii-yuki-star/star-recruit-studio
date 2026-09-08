@@ -1,6 +1,8 @@
 # データスキーマ設計書
 
 > ⚠️ **本書は理解のための「例示」です。** 型・必須・enum・制約・ID規則・バインディング・解決順序の**正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md) と [`schemas/*.schema.json`](schemas/)**。矛盾時は正典を優先します。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
 > 本書作成後に確定した差分: `purpose` を project に追加 / `scene.audioMix`（音量上書き）を新設 / `assetRefs`⇄レイヤーのバインディング契約（`11 §5`）/ enum・定数の一元化（`11 §3,§4`）。
 
 ## 1. 目的

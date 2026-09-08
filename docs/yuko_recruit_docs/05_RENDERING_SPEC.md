@@ -2,6 +2,8 @@
 
 > ⚠️ **描画アーキテクチャの正典は [`adr/0001-rendering-parity.md`](adr/0001-rendering-parity.md)（Accepted：方式A2ハイブリッド）。** 本書が同ADRと矛盾する場合はADRを優先する（特に「テキストはFFmpegで描画」ではなく、**プレビューと同一のWeb描画でPNG化**してFFmpegで合成する点）。要点は §2.5。
 
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 目的
 
 本資料は、AIが生成した動画構成JSONおよびユーザー編集内容をもとに、テンプレートに沿ってプレビュー表示およびMP4出力を行う仕様を定義する。
