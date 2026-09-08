@@ -121,3 +121,13 @@ clipTimeAtSceneTime(t, { startDelaySec: d, clipStartSec: c, speed: s }) = c + ma
 - **`clipAudio.delaySec` の Rust 実装詳細**（`build_window_audio` の `adelay` 合成順）。IPC 入力拡張のみ（schema 不変）。
 - **掛け合い×動画×アニメ**：現状 `sceneAnimationActive`（`sceneAnimation.ts:27`）が `hasVideoSlot && lines>0` を preview/export/UI の3面で静止に倒しており（#469）、**この組み合わせは現在存在しない**＝本 ADR の対象外。**#469 は **ADR-0019 決定11（2026-08-03）で当面解除しない**（場面形式は凍結）。将来もし解除するときに**、行区間×窓の `d` 基準を別途決める。
 - 将来 ADR-0024 `scene.slotClips` 導入時に `slotVideoStart` を統合するか（移行方針は `slotClips` PR で）。アニメ削除時のエントリ落とし（D4）で再追加時に再設定が要る点のUXは実装で確認。
+
+---
+
+## `CLAUDE.md §11` から移した要約・追補（2026-09-08）
+
+> ⚠️ **意味は変えずにそのまま移したもの**。以前は `CLAUDE.md §11` に各 ADR の要約が丸ごと置かれており、
+> **毎セッション全文が読まれる**ファイルの 83%（42,288字）を占め、ADR 本体との**二重管理**にもなっていた。
+> ⚠️ **本文と重なる記述が残っている**＝消すときは**本文と突き合わせてから**（この段は実装の履歴と追補を含む）。
+
+動画スロット本体アニメの再生開始タイミング（**α-4・#442 後続**）: [`adr/0027`](0027-video-slot-start-timing.md) **Accepted**（2026-07-10・利用者承認／実装は段階＝schema 1.18→書き出し→UI）— #442 は「アニメと同時・先頭から」固定。利用者要望で**同時／途中／アニメ後**を選べるようにする。保存は**モード明示（discriminated）**＝**`scene.slotVideoStart?: Record<layerId, { mode: 'withAnim'|'afterAnim'|'delay', delaySec? }>`**（`slotFits` 同型・enum は正典化＝`VIDEO_START_MODE`・欠落=`withAnim`）。**絶対秒保存を採らない理由**＝アニメ長 W 変化で「アニメの後」が黙って「途中」に化ける（ADR-0026①違反）。`project.schema` **1.17→1.18**（additive・移行不要＝`persistence.ts` の `PROJECT_SCHEMA_VERSION` も 1.18 へ）。意味＝共有純粋関数 `clipTimeAtSceneTime(t,{d,c,s}) = c + max(0,t−d)·s`（preview シーク＝export 量子化で共有・パリティ）。settled 開始 `= c+(W−d)·s`。**アニメ対象スロットのみ**（`slotIsAnimated`）UI 表示・アニメ削除時はエントリを落とす（黙って無視しない・#469 流儀）。**`afterAnim` は settled が残る場面のみ**（`animEnd≥尺` は非表示＋理由・§2-5／precheck 警告）。書き出しは #442 窓経路を再利用（IPC に `clipAudio.delaySec`＝schema 不変）。掛け合い×動画×アニメは #469 で静止に倒れており対象外。**実装は段階＝schema 1.18（本PR #1）→書き出し→UI**。

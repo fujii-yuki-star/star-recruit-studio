@@ -1,6 +1,8 @@
 # AI機能仕様書
 
 > ⚠️ **本書は背景・方針の「例示」です。** 実プロンプト本体・構造化出力の強制・AI出力→内部Scene変換・検証/補正の**正典は [`12_AI_PROMPT_AND_MAPPING.md`](12_AI_PROMPT_AND_MAPPING.md)**（データ正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md)）。矛盾時は正典を優先します。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
 > 注: 本書の `purpose` 値（`new_graduate_recruit` / `company_intro` 等）は `11 §3.1` の enum に統一済み。
 
 ## 1. 目的

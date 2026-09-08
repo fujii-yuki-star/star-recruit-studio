@@ -1,5 +1,9 @@
 # 画面仕様書
 
+> ⚠️ **本書は画面と文言の規範です**（操作の統一規約は §2・用語は §3）。**データの正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md)・[`12_AI_PROMPT_AND_MAPPING.md`](12_AI_PROMPT_AND_MAPPING.md)・[`schemas/`](schemas/)**、断り・注意の文言は [`15_ERROR_STATE_MODEL.md`](15_ERROR_STATE_MODEL.md) §6。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 目的
 
 本資料は、「すたりお（stario）」の画面構成、画面遷移、主要UI要素を定義する。

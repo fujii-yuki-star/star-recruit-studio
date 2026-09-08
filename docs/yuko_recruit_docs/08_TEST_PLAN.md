@@ -1,5 +1,9 @@
 # テスト計画・受け入れ条件
 
+> ⚠️ **本書は手動の受け入れ観点です**。自動テストの方針・必須対象は [`14_TEST_STRATEGY.md`](14_TEST_STRATEGY.md) と `CLAUDE.md §7`。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 目的
 
 本資料は、「すたりお（stario）」のMVP完成判定、手動テスト観点、異常系テスト観点を定義する。
