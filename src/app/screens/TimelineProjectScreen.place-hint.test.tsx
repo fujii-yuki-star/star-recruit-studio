@@ -80,22 +80,34 @@ describe("押す前に置き先を見せる（#1032）", () => {
   });
 
   // ⚠️ **再生位置から・置く長さぶん**＝「どこに・何秒ぶん」を実寸で見せる。
+  //    ⚠️ 既存の部品（[0,5)）を避けた時刻から見る＝空いているときは再生位置そのもの。
   it("帯は再生位置から始まり、置く長さぶんの幅を持つ", () => {
-    const { container } = setup(2);
+    const { container } = setup(10);
     fireEvent.mouseEnter(screen.getByRole("button", { name: "文字を置く" }));
-    const band = hints(container)[0]!;
-    expect(band.style.left, "再生位置から始まっていない").not.toBe("0px");
-    expect(parseFloat(band.style.width), "幅が無い").toBeGreaterThan(0);
+    const left10 = parseFloat(hints(container)[0]!.style.left);
+    expect(parseFloat(hints(container)[0]!.style.width), "幅が無い").toBeGreaterThan(0);
+    fireEvent.mouseLeave(screen.getByRole("button", { name: "文字を置く" }));
+    const { container: c2 } = setup(20);
+    fireEvent.mouseEnter(within(c2).getByRole("button", { name: "文字を置く" }));
+    // 20 秒は 10 秒のちょうど倍の位置（＝再生位置を実寸で写している）。
+    expect(parseFloat(hints(c2)[0]!.style.left) / left10, "再生位置を実寸で写していない").toBeCloseTo(2, 5);
   });
 
-  it("再生位置を動かすと、帯の位置も動く", () => {
-    const { container } = setup(0);
+  // ⚠️ **押した結果と同じ場所を見せる**（#1096 レビュー 🔴）＝絵の部品は再生位置が塞がっていれば
+  //    **次の空きへずれて**置かれる。再生位置をそのまま帯にすると、そのときだけ帯が嘘になる。
+  it("再生位置が塞がっているときは、実際に置かれる先へ帯を出す", () => {
+    const { container } = setup(0); // [0,5) に文字がある＝0 秒は塞がっている
     fireEvent.mouseEnter(screen.getByRole("button", { name: "文字を置く" }));
-    const at0 = hints(container)[0]!.style.left;
-    fireEvent.mouseLeave(screen.getByRole("button", { name: "文字を置く" }));
-    const { container: c2 } = setup(3);
-    fireEvent.mouseEnter(within(c2).getByRole("button", { name: "文字を置く" }));
-    expect(hints(c2)[0]!.style.left, "再生位置を変えても同じ場所").not.toBe(at0);
+    const band = hints(container)[0]!.style.left;
+    expect(parseFloat(band), "塞がっている再生位置にそのまま帯を出している").toBeGreaterThan(0);
+    // 押して、置かれた部品の帯と**同じ位置**であることを確かめる（別々の計算になっていない）。
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== "clip_001");
+    expect(placed?.startSec, "塞がった再生位置にそのまま置かれた").toBe(5);
+    // 置いた部品は最後に足される＝いちばん後ろの帯がそれ。見せた帯と同じ左端であること。
+    const els = [...container.querySelectorAll(".timeline-clip")] as HTMLElement[];
+    expect(els.length, "置いた部品が描かれていない").toBe(2);
+    expect(els[els.length - 1]!.style.left, "見せた帯と、実際に置かれた場所が違う").toBe(band);
   });
 
   // ⚠️ **音は音の列へ**＝置く先は種別で変わるので、絵の列に出すと嘘になる。
@@ -131,6 +143,18 @@ describe("押す前に置き先を見せる（#1032）", () => {
     expect(hints(container)).toHaveLength(1);
     act(() => { useTimelineStore.setState({ isPlaying: true } as never); });
     expect(hints(container), "再生が始まっても帯が残っている").toHaveLength(0);
+  });
+
+  // ⚠️ **書き出し中も単独で見る**（#1096 レビュー 🟡）＝再生中とまとめて1本にすると、
+  //    書き出し中の見張りだけを外しても緑のままになる。
+  //    ⚠️ **手を伸ばしたまま始まる**筋で見る＝書き出し中はボタン自体が押せなくなり、
+  //    そもそも手を伸ばす出来事が起きない（先に伸ばしてから始めないと、この見張りに届かない）。
+  it("手を伸ばしたまま書き出しが始まったら帯を消す", () => {
+    const { container } = setup();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "文字を置く" }));
+    expect(hints(container)).toHaveLength(1);
+    act(() => { useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } } as never); });
+    expect(hints(container).length, "書き出しが始まっても帯が残っている").toBe(0);
   });
 
   it("再生中は出さない", () => {

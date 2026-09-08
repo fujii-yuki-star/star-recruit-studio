@@ -33,8 +33,8 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
-  firstFreeStart, moveClip, placeableVisualTracks,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
+  moveClip, visualPlacementAt,
   setVisualClipContent,
   moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
@@ -1289,19 +1289,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
     // 条件は `placeableVisualTracks` を見る。その中身は `trackPlacementIssue`（列そのものの事情の
     // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
-    const placeable = placeableVisualTracks(doc);
-    // 置ける列が1本も無いときは、理由を出す（押しても何も起きない、を作らない・§2-5）。
-    if (placeable.length === 0) {
+    // 列選びと時刻の規則は `visualPlacementAt`（domain）に1つだけ置く＝**押す前に見せる帯**（#1096）と
+    // 押した結果が別々の計算にならない。置ける列が無ければ理由を出す（押しても何も起きない、を作らない・§2-5）。
+    const at = visualPlacementAt(doc, input.trackId, get().playheadSec);
+    if (!at) {
       set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
-    // 欄で選んだ列があればそれを使う（表示と結果を割らない）。無い／置けない列なら手前へ落とす
-    // ＝**選び直しを強いない**（列を消した直後でも押せる・§2-5 の行き止まりを作らない）。
-    const track = placeable.find((t) => t.id === input.trackId) ?? placeable[0];
-    // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
-    // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
-    const startSec = firstFreeStart(doc.clips, track.id, get().playheadSec, VISUAL_CLIP_DURATION_SEC);
-    const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
+    const r = addVisualClip(doc, { ...input, trackId: at.trackId, startSec: at.startSec });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;

@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
@@ -2674,9 +2674,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return null;
   };
 
-  /** 置き先を見せる手（一覧の項目・ボタンの両方から使う）。 */
+  /**
+   * 置き先を見せる手（一覧の項目・ボタンの両方から使う）。
+   *
+   * ⚠️ **置く側と同じ関数で位置を採る**（#1096 レビュー 🔴）＝絵の部品（文字・図形・素材）は
+   * 再生位置が塞がっていれば**次の空きへずれて**置かれる。再生位置をそのまま帯の左端にしていた頃は、
+   * まさにその場合だけ帯が嘘（重なった位置）になり、押すと別の場所へ入っていた。
+   */
   const showPlaceHint = (trackId: string | undefined, spec: ClipPlacement | null): void => {
-    if (!trackId || !spec || exporting || isPlaying) { setPlaceHint(null); return; }
+    if (!spec || exporting || isPlaying || !doc) { setPlaceHint(null); return; }
+    if (spec.kind === TIMELINE_CLIP_KIND.text || spec.kind === TIMELINE_CLIP_KIND.shape || spec.kind === TIMELINE_CLIP_KIND.slot) {
+      const at = visualPlacementAt(doc, trackId, playheadSec);
+      setPlaceHint(at); // 置ける列が無ければ null＝帯を出さない（押しても置けない）
+      return;
+    }
+    // ほかの種類は時刻をずらさない（塞がっていれば置かずに断る）＝再生位置がそのまま置き先。
+    if (!trackId) { setPlaceHint(null); return; }
     setPlaceHint({ trackId, startSec: playheadSec, durationSec: placedDurationSec(spec) });
   };
   /** ボタンに付ける（一覧は `PickerList` の `onHover`）。 */
@@ -4968,7 +4981,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             ) : (
               <>
                 <p className="text-muted">
-                  {placeAtPlayheadHint(playheadSec, "置いたあとも中身は差し替えられます。")}
+                  {placeAtPlayheadHint(playheadSec, "置いたあとも中身は差し替えられます。", "選んだ見た目パターンを、")}
                 </p>
                 <label className="field">
                   <span>置く列</span>
