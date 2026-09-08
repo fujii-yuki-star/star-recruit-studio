@@ -1513,12 +1513,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const unresolvedImageIds = useMemo(() => {
     if (!doc) return new Set<string>();
     const gone = new Set(missingAssetIds);
-    return new Set(
+    const ids = new Set(
       // ⚠️ **見た目パターンを渡す**（レビュー 🟡）＝渡さないと差し込み口を解決できず、実映像で描く
       // 枠まで代表フレームが要る扱いになり、**誤った理由**で「絵が出せない」と数える。
       timelineImageAssetIds(doc, templateOf)
         .filter((id) => gone.has(id) || (!assetSrcById[id] && !templateAssetSrcById[id])),
     );
+    // ⚠️ **実フレームで描く動画も、ファイルが無いことは知らせる**（#1101）＝あれは代表フレームを
+    // 要らないので上の集合に**わざと出てこない**（#512 段1）。その結果、実写動画だけ
+    // **「ファイルを選び直す」に辿り着けず作り直しを迫って**いた（#1019 ⑤ の判断から漏れていた）。
+    // ⚠️ **表示先の有無では判じない**＝代表フレームは作れなくてよいので、見るのは
+    // **ファイルがあるか**だけ（混ぜると「実フレームで描けるのに直せと言われる」に戻る）。
+    for (const p of videoPlacementsOf(doc, templateOf)) if (gone.has(p.assetId)) ids.add(p.assetId);
+    return ids;
   }, [doc, assetSrcById, templateAssetSrcById, templateOf, missingAssetIds]);
 
   /**
