@@ -45,7 +45,7 @@ import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
-import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
+import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -242,14 +242,23 @@ const CLIP_KIND_CLASS = {
 
 
 /**
- * いま入っているのに選択肢に出せない素材。`<select className="select">` の value に合う option が
- * 無いと**空欄**になり「なし」と見分けが付かないので、名前だけ出す（選び直しはできない＝`disabled`）。
- * ⚠️ **動画は段3 で選べるようになった**（差し込み口でも映る）＝残るのは種別の合わない素材だけ。
+ * いま入っているのに選択肢に出せない素材の**名前**（出すものが無ければ `null`）。
+ *
+ * `<select className="select">` の value に合う option が無いと、ブラウザは**先頭の候補（「なし」）を
+ * 選択済みに見せる**ので、選び直せないまま名前だけ出す（`disabled`）。
+ *
+ * ⚠️ **素材そのものが消えているときも出す**（#1087）＝以前は `assets.find` が `undefined` を
+ * 返すので**選択肢が1つも出ず**、この関数が防ごと言っている壊れ方そのものが起きていた
+ *（素材を消しても差し込み口の参照は残るので到達する＝入っているのに「なし」に見える・ADR-0026①）。
+ * ⚠️ **「見つからない」と「この口には入れられない」を言い分ける**＝同じ「出ない」でも次の行動が違う。
+ * 文言は場面編集と共有する（#1085 で `uiLabels` へ寄せた＝ADR-0026②）。
+ * ⚠️ **動画は段3 で選べるようになった**（差し込み口でも映る）＝種別で弾かれるのは合わない素材だけ。
  */
-function unselectableCurrent(assets: readonly Asset[], assetId: string | null | undefined, layer: Layer): Asset | undefined {
-  if (!assetId) return undefined;
-  if (assignableAssets(assets, layer).some((a) => a.assetId === assetId)) return undefined;
-  return assets.find((a) => a.assetId === assetId);
+function unselectableCurrentLabel(assets: readonly Asset[], assetId: string | null | undefined, layer: Layer): string | null {
+  if (!assetId) return null;
+  if (assignableAssets(assets, layer).some((a) => a.assetId === assetId)) return null;
+  const found = assets.find((a) => a.assetId === assetId);
+  return found ? `${found.displayName}（${PICKER_NOTE.assetNotAssignable}）` : PICKER_MISSING_LABEL.asset;
 }
 
 function assignableAssets(assets: readonly Asset[], layer: Layer): Asset[] {
@@ -1120,7 +1129,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    *
    * 候補に無い値をそのまま `<select value>` へ渡すと、ブラウザは**先頭の候補を選択済みに見せる**＝
    * 「音が見つかりません」と警告しているのに、欄では別の曲が入っているように読める。
-   * 素材の差し込み口の `unselectableCurrent` と同じ扱い（名前だけ出して選び直せる）。
+   * 素材の差し込み口の `unselectableCurrentLabel` と同じ扱い（名前だけ出して選び直せる）。
    */
   const audioSourceValue = selected?.bundledBgmId
     ? `bgm:${selected.bundledBgmId}`
@@ -4291,7 +4300,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {/* ⚠️ **いま指している音が候補に無いとき**（＝この欄が救おうとしている「音が見つからない」
                         状態そのもの）は、その値の option を出す。無いと `<select>` は**先頭の候補を選択済みに
                         見せる**ので、「見つかりません」と警告しているのに欄では別の曲が入っているように読める
-                        （§2-5・黙って別のものに差し替えない）。素材の差し込み口と同じ流儀（`unselectableCurrent`）。 */}
+                        （§2-5・黙って別のものに差し替えない）。素材の差し込み口と同じ流儀（`unselectableCurrentLabel`）。 */}
                     {audioSourceMissing && (
                       <option value={audioSourceValue} disabled>元の音が見つかりません</option>
                     )}
@@ -4637,10 +4646,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         {assignableAssets(doc.assets, layer).map((a) => (
                           <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
                         ))}
-                        {/* いま入っているが選び直せないもの（種別の合わない素材）は、名前だけ出す＝「なし」と見分けが付く。 */}
-                        {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer) && (
+                        {/* いま入っているが選び直せないもの（見つからない・この口には入れられない）は
+                            名前だけ出す＝「なし」と見分けが付く（#1087）。 */}
+                        {unselectableCurrentLabel(doc.assets, selected.assetRefs?.[layer.id], layer) != null && (
                           <option value={selected.assetRefs?.[layer.id] ?? ""} disabled>
-                            {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer)?.displayName}（この形式では使えません）
+                            {unselectableCurrentLabel(doc.assets, selected.assetRefs?.[layer.id], layer)}
                           </option>
                         )}
                       </select>
