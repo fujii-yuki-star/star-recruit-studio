@@ -28,6 +28,7 @@ export function PickerList({
   disabledHint,
   searchLabel = "絞り込み",
   maxVisible = DEFAULT_MAX_VISIBLE,
+  onHover,
 }: {
   items: PickerItem[];
   onPick: (id: string) => void;
@@ -41,6 +42,14 @@ export function PickerList({
    * 押しただけ・キーボードで選んだだけの経路は変わらない（ドラッグ専用の操作を作らない＝決定19）。
    */
   onGrab?: (e: ReactPointerEvent, id: string) => void;
+  /**
+   * どれに手を伸ばしているかを知らせる（#1032）＝`id`／離れたら `null`。
+   *
+   * ⚠️ **押す前に「どこへ入るか」を見せる**ために使う（並びの上に置き先の帯を出す）＝
+   * 以前は「再生位置（X秒）から置きます」という**同じ文が4か所**にあり、文章で補っていた。
+   * ⚠️ **キーボードでも同じ**＝`focus` でも呼ぶ（ホバー専用の情報を作らない・ADR-0034 決定19）。
+   */
+  onHover?: (id: string | null) => void;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -77,6 +86,10 @@ export function PickerList({
               disabled={disabled}
               title={disabled ? disabledHint : it.note}
               onPointerDown={onGrab && !disabled ? (e) => onGrab(e, it.id) : undefined}
+              onMouseEnter={onHover && !disabled ? () => onHover(it.id) : undefined}
+              onMouseLeave={onHover ? () => onHover(null) : undefined}
+              onFocus={onHover && !disabled ? () => onHover(it.id) : undefined}
+              onBlur={onHover ? () => onHover(null) : undefined}
               // 掴める一覧では、指の経路は掴んだ側（`onEnd`）で完結している＝`click` はキーボードのぶんだけ拾う
               // （拾わないと二重に実行する・#684 レビュー）。掴めない一覧はこれまでどおり全部拾う。
               onClick={(e) => { if (!onGrab || isKeyboardActivation(e)) onPick(it.id); }}

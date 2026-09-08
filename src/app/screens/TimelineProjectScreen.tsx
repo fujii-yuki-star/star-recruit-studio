@@ -123,7 +123,7 @@ type DragPlace = {
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, type BlockTarget, type PlaceTabId } from "../timelinePanels";
-import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -686,6 +686,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (editBlocked && isPlaceTab(editBlocked.at)) setPlaceTab(editBlocked.at);
   }, [editBlocked]);
 
+  // 押す前に**どこへ入るか**を見せる（#1032）。`null`＝いまは何も指していない。
+  // ⚠️ **文章で言わない**＝以前は「再生位置（X秒）から置きます」という**同じ文が4か所**にあり、
+  // 「どの列の・どこに・何秒ぶん」は読んでも分からなかった（#1031 §3「文章依存」の型③）。
+  // ⚠️ **運んでいる最中は出さない**＝そちらの帯（`drag.drop`）が正しい置き先を出しているので、
+  // 2本並ぶと**どちらが本当か**が読めない。
+  // ⚠️ **キーボードでも出す**（`focus`）＝ホバー専用の情報を作らない（ADR-0034 決定19）。
+  const [placeHint, setPlaceHint] = useState<{ trackId: string; startSec: number; durationSec: number } | null>(null);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
   // 帯の右クリックメニュー（#701）。列の行と**同じ作法**（右クリック＋「⋮」の逃げ道）。
@@ -2667,6 +2674,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return null;
   };
 
+  /** 置き先を見せる手（一覧の項目・ボタンの両方から使う）。 */
+  const showPlaceHint = (trackId: string | undefined, spec: ClipPlacement | null): void => {
+    if (!trackId || !spec || exporting || isPlaying) { setPlaceHint(null); return; }
+    setPlaceHint({ trackId, startSec: playheadSec, durationSec: placedDurationSec(spec) });
+  };
+  /** ボタンに付ける（一覧は `PickerList` の `onHover`）。 */
+  const placeHintProps = (trackId: string | undefined, spec: ClipPlacement | null) => ({
+    onMouseEnter: () => showPlaceHint(trackId, spec),
+    onMouseLeave: () => setPlaceHint(null),
+    onFocus: () => showPlaceHint(trackId, spec),
+    onBlur: () => setPlaceHint(null),
+  });
+
   /**
    * 一覧・ボタンから掴んで置く（#684・#714）。**動かさずに離したときは何もしない**
    *（そのまま `click` が走って再生位置へ置く）。
@@ -3668,6 +3688,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         <div
                           className={`timeline-drop-preview${drag.drop.issue ? " timeline-drop-preview--blocked" : ""}`}
                           style={{ left: `${pxPerSec * drag.drop.at.startSec}px`, width: `${pxPerSec * placedDurationSec(drag.spec)}px` }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      {/* **押す前に置き先を見せる**（#1032）＝運んでいる最中は上の帯が出しているので出さない
+                          （2本並ぶと、どちらが本当の置き先か読めない）。
+                          ⚠️ **再生中・書き出し中は出さない**＝手を伸ばしたまま再生が始まると、
+                          **押せない置き先**が出たままになる（置く手を止めているのに置けそうに見える）。 */}
+                      {!drag && !isPlaying && !exporting && placeHint?.trackId === track.id && (
+                        <div
+                          className="timeline-drop-preview timeline-drop-preview--hint"
+                          style={{ left: `${pxPerSec * placeHint.startSec}px`, width: `${pxPerSec * placeHint.durationSec}px` }}
                           aria-hidden="true"
                         />
                       )}
@@ -4868,7 +4899,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             ) : (
               <>
                 <p className="text-muted">
-                  押すと再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。
+                  {placeAtPlayheadHint(playheadSec, "塞がっているときは、その次に空いている時刻へ置きます。")}
                   つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
                 </p>
                 {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
@@ -4891,6 +4922,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.text }, clipLabel({ kind: TIMELINE_CLIP_KIND.text }), (at, center) =>
                       addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at, center, trackId: visualTrackId }))}
                     onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text, trackId: visualTrackId }))}
+                    {...placeHintProps(visualTrackId, { kind: TIMELINE_CLIP_KIND.text })}
                   >
                     文字を置く
                   </button>
@@ -4900,6 +4932,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.shape }, clipLabel({ kind: TIMELINE_CLIP_KIND.shape }), (at, center) =>
                       addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, at, center, trackId: visualTrackId }))}
                     onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, trackId: visualTrackId }))}
+                    {...placeHintProps(visualTrackId, { kind: TIMELINE_CLIP_KIND.shape })}
                   >
                     図形を置く
                   </button>
@@ -4919,6 +4952,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       (at, center) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, at, center, trackId: visualTrackId }),
                     )}
                     onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, trackId: visualTrackId })}
+                    onHover={(assetId) => showPlaceHint(visualTrackId, assetId ? { kind: TIMELINE_CLIP_KIND.slot, assetId } : null)}
                   />
                 )}
               </>
@@ -4934,7 +4968,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             ) : (
               <>
                 <p className="text-muted">
-                  選んだ見た目パターンを、再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとも中身は差し替えられます。
+                  {placeAtPlayheadHint(playheadSec, "置いたあとも中身は差し替えられます。")}
                 </p>
                 <label className="field">
                   <span>置く列</span>
@@ -4960,6 +4994,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     if (!t) return;
                     placeTemplate(t);
                   }}
+                  onHover={(templateId) => {
+                    const t = templateId ? placeableTemplates.find((x) => x.templateId === templateId) : undefined;
+                    showPlaceHint(visualTrackId, t ? { kind: TIMELINE_CLIP_KIND.template, template: t } : null);
+                  }}
                 />
               </>
             )}
@@ -4971,7 +5009,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
+                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "置いたあとに速さ・音量を変えられます。")}</p>
                 {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
                     列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
                 <label className="field">
@@ -5001,6 +5039,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     if (!src) return;
                     placeAudio(src.spec);
                   }}
+                  onHover={(id) => {
+                    const src = id ? audioSourceOf(id) : null;
+                    showPlaceHint(audioTrackId, src ? { kind: TIMELINE_CLIP_KIND.audio, ...src.spec } : null);
+                  }}
                 />
               </>
             )}
@@ -5012,7 +5054,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
+                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "置いたあとに文を書いて声を作ります。")}</p>
                 {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
                     列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
                 <label className="field">
@@ -5031,6 +5073,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
                       addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
                     onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
+                    {...placeHintProps(audioTrackId, { kind: TIMELINE_CLIP_KIND.voice })}
                   >
                     読み上げを置く
                   </button>
