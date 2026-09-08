@@ -8,6 +8,7 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
+import { droppedRejectMessage } from "../uiLabels";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -177,7 +178,15 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // ⚠️ **取り込み中は押せなくする**（#858 レビュー）＝ここだけ `disabled` を渡しておらず、
   //    取り込み中に選び直すと**まとめて渡した分がそっくり落ちていた**（歩き回って戻ると
   //    「開く」を出している最中の印〔`picking`〕も消えるので、押せてしまう）。
-  const assetPicker = useAssetPicker({ onPick: addAssets, disabled: isImporting });
+  // ⚠️ **落とせるようにする**（#1026 ②）＝破線の枠とアップロードの絵なのに、落としても無反応だった
+  //    （初めての人が最初に試す操作）。通らなかったものは黙って捨てず、その場で知らせる。
+  const [dropReject, setDropReject] = useState<string[]>([]);
+  const assetPicker = useAssetPicker({
+    onPick: addAssets,
+    disabled: isImporting,
+    acceptsDrop: true,
+    onReject: setDropReject,
+  });
 
   // 箇条書き（強み・章立て・要点）共通の追加ロジック。
   function addItem(raw: string, list: string[], setList: (v: string[]) => void, clear: () => void) {
@@ -613,15 +622,18 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   {...assetPicker.labelProps}
                   className="card-tight text-center"
                   style={{
-                    border: "2px dashed var(--color-border-strong)",
-                    background: "var(--color-surface-alt)",
+                    // 落とし込みが上に来たら**受けられることを見た目で言う**（枠だけでは伝わらない）。
+                    border: `2px dashed ${assetPicker.dropOver ? "var(--color-primary)" : "var(--color-border-strong)"}`,
+                    background: assetPicker.dropOver ? "var(--color-primary-weak, var(--color-surface-alt))" : "var(--color-surface-alt)",
                     padding: "var(--gap-xl)",
                     display: "block",
                     cursor: "pointer",
                   }}
                 >
                   <UploadIcon size={32} className="text-faint" />
-                  <p className="mt text-muted">ここから写真や動画を選んでください</p>
+                  {/* ⚠️ **落とせることを言う**＝見た目が落とし枠なのに文が「選んでください」だけだと、
+                      最初に試す操作（落とす）が案内されていない。 */}
+                  <p className="mt text-muted">ここに写真や動画を落とすか、下から選んでください</p>
                   <span className="btn btn-primary mt">
                     <UploadIcon size={18} />
                     写真・動画を選ぶ
@@ -629,6 +641,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   <input {...assetPicker.inputProps} />
                 </label>
 
+                {dropReject.length > 0 && (
+                  <div className="notice notice-warn row-between mt" role="alert">
+                    <span>{droppedRejectMessage(dropReject)}</span>
+                    <button className="btn btn-ghost text-sm" onClick={() => setDropReject([])}>閉じる</button>
+                  </div>
+                )}
                 {importError && (
                   <div className="notice notice-warn row-between mt" role="alert">
                     <span>{importError}</span>

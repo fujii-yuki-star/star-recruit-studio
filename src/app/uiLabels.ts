@@ -699,6 +699,16 @@ export function libraryPartlyFailedMessage(failedNames: readonly string[], first
 }
 
 /**
+ * 落としたものの中に**取り込めない形式**が混ざっていたときの案内（#1026 ②・§2-5）。
+ *
+ * ⚠️ **黙って捨てない**＝落とした本人は全部入ったと思うので、増えていないことに気づけない。
+ * ⚠️ **次の行動を言う**＝「どうすれば入るか」（形式を変える／別の導線）まで書く。
+ */
+export function droppedRejectMessage(names: readonly string[]): string {
+  return `${names.length}件は取り込めない形式でした（${names.join("、")}）。写真・動画のファイルを落としてください。音楽は書き出しの「BGM」から選べます。`;
+}
+
+/**
  * 取り込んでいる最中に、もう一度まとめて取り込もうとしたときの案内（#858・§2-5）。
  *
  * ⚠️ **黙って落とさない**＝単発の取り込みは取り込み中を**黙って return** する（1件が入らないだけ）が、

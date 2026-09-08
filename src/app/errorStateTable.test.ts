@@ -194,6 +194,7 @@ const ASSEMBLED_AT_RUNTIME: Record<string, string> = {
   BGM_FILE_BROKEN: "一部の場面か全体かで文が変わる",
   TIMELINE_OVERLAY_RETIRED: "退役の断り＝画面の文と表の要約を分けている（#635）",
   IMPORT_CANCELLED: "入った件数を差し込む（0件のときは件数を言わない＝#1024 ③）",
+  DROP_REJECTED: "件数と、通らなかったファイル名を差し込む（#1026 ②）",
 };
 
 /**
@@ -408,6 +409,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     resolveExportBlockedMessage: "状況から**既にある文**を選んで返すだけ（自分では持たない）",
     // ── 名前・件数を差し込むだけ（表は代表の1文を持つ）＝等値へ寄せられる余地あり ──
     importPartlyFailedMessage: "件数と名前を差し込むだけ＝等値へ寄せる余地あり",
+    droppedRejectMessage: "同上（落とせない形式が混ざったとき＝`DROP_REJECTED`）",
     libraryPartlyFailedMessage: "同上（よく使う素材の側）",
     importCancelledMessage: "入った件数で言い方が変わる（0件のときは件数を言わない）",
     // ⚠️ **等値へ寄せるには、先に表へ行を足す必要がある**（同レビュー）＝いまは表に対応する行が無い
@@ -587,7 +589,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(184);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(185);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
