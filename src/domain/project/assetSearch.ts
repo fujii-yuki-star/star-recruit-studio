@@ -15,7 +15,7 @@ import { matchesSearchWords } from '../search';
  * ⚠️ **空白で区切った語は全部含む**（AND）＝絞り込みは足すほど狭くなる、が普通の期待。
  */
 export function matchesAssetQuery(asset: Asset, query: string): boolean {
-  // 規則（さろえ方・AND・空は絞らない）は見た目パターンの一覧と共有（#1031 レビュー）。
+  // 規則（そろえ方・AND・空は絞らない）は見た目パターンの一覧と共有（#1031 レビュー）。
   return matchesSearchWords([asset.displayName, ...(asset.tags ?? [])], query);
 }
 
