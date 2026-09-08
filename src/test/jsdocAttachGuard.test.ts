@@ -27,7 +27,15 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** その本文の中で「説明文の直後にまた説明文」が何回あるか。 */
+/**
+ * その本文の中で**宣言に付いていない説明文**が何回あるか。形は2つ：
+ *
+ * - **説明文の直後にまた説明文**（前の1つは宣言に付かない）。
+ * - **説明文の直後が空行**（PR #1083 レビュー）＝宣言から離れて宙に浮いている。
+ *   ⚠️ **この形を見ていなかった**ので、宙に浮いた説明を「直した」つもりで
+ *   **別の場所へ置き直しただけ**のときに緑になった（門番自体の穴）。
+ *   TypeScript では説明文は**宣言のすぐ上**に置くので、間の空行は常に間違い。
+ */
 export function detachedDocCount(src: string): number {
   const lines = src.split('\n');
   let n = 0;
@@ -36,6 +44,8 @@ export function detachedDocCount(src: string): number {
     // 説明文の終わり（複数行の `*/` か、1行で閉じた `/** … */`）。
     const closes = t === '*/' || (t.startsWith('/**') && t.endsWith('*/'));
     if (!closes) continue;
+    // 空行を挟んでいる＝宣言に付いていない（PR #1083 レビュー）。
+    if (i + 1 < lines.length && lines[i + 1].trim() === '') { n += 1; continue; }
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === '') j += 1;
     if (j < lines.length && lines[j].trim().startsWith('/**')) n += 1;
@@ -83,6 +93,9 @@ describe('説明文を別の宣言から奪わない（再発防止の門番）'
     expect(sourceFiles(SRC).length).toBeGreaterThan(100);
     expect(detachedDocCount('/** a */\n/** b */\nexport const x = 1;\n')).toBe(1);
     expect(detachedDocCount('/**\n * a\n */\n\n/** b */\nexport const x = 1;\n')).toBe(1);
+    // ⚠️ **説明文の直後が空行**も拾う（PR #1083 レビュー）＝宣言から離れて宙に浮いている。
+    // この形を見ていなかったため、宙に浮いた説明を「直した」つもりで**別の場所へ置いただけ**のときに緑になった。
+    expect(detachedDocCount('/** a */\n\nexport const x = 1;\n')).toBe(1);
     // 正しい並び（説明文の直後が宣言）は拾わない。
     expect(detachedDocCount('/** a */\nexport const x = 1;\n/** b */\nexport const y = 2;\n')).toBe(0);
     // ふつうの行コメントや、宣言の中の説明文は拾わない。
