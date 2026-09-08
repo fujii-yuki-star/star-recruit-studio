@@ -9,7 +9,7 @@
     ⚠️ **他のADRの状態遷移も引き金になる**＝本ADRの Accepted 化で ADR-0018／ADR-0023 が宣言していた
     「一部 Superseded へ改める」も同時に実施した（2026-08-17）。
 - **日付**: 2026-07-28
-- **関連**: [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式＝**本ADRが一部 supersede**）/ [`adr/0023`](0023-integrated-timeline-editing.md)（統合タイムライン編集＝**本ADRが置き換え・段階(1)〜(9) は再編**）/ [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集・素材＝源泉・自己完結）/ [`adr/0008`](0008-free-layout.md)（FREE 自由配置＝**本形式の空間モデルの前身**）/ [`adr/0019`](0019-keyframe-animation-model.md)（per-frame 描画）/ [`adr/0001`](0001-rendering-parity.md)（プレビュー＝書き出し）/ [`adr/0007`](0007-ai-pipeline.md)（単一パイプライン・AI 親和性）/ `CLAUDE.md §2-4`（テンプレ駆動）・`§10`（本格タイムライン編集）・`§11`
+- **関連**: [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式＝**本ADRが一部 supersede**）/ [`adr/0023`](0023-integrated-timeline-editing.md)（統合タイムライン編集＝**本ADRが置き換え・段階(1)〜(9) は再編**）/ [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集・素材＝源泉・自己完結）/ [`adr/0008`](0008-free-layout-editor.md)（FREE 自由配置＝**本形式の空間モデルの前身**）/ [`adr/0019`](0019-keyframe-animation-model.md)（per-frame 描画）/ [`adr/0001`](0001-rendering-parity.md)（プレビュー＝書き出し）/ [`adr/0007`](0007-detailed-edit-mode.md)（単一パイプライン・AI 親和性）/ `CLAUDE.md §2-4`（テンプレ駆動）・`§10`（本格タイムライン編集）・`§11`
 
 ---
 

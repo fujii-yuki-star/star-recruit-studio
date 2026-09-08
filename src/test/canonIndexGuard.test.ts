@@ -10,7 +10,7 @@
 // ⚠️ **門番自身にも穴が空く**（α-7 で20件）＝判定は純粋関数に出し、下の「門番自身の検査」で
 // **わざと壊した入力**を通して、見つけることまで固定する。
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const CLAUDE = 'CLAUDE.md';
 const ADR_DIR = 'docs/yuko_recruit_docs/adr';
@@ -105,6 +105,24 @@ export function listingGap(actual: readonly string[], listed: readonly string[])
   };
 }
 
+/**
+ * `docs/` の中の相対リンクのうち、指し先が無いもの（`ファイル -> 指し先`）。
+ *
+ * ⚠️ **資料どうしのリンクは誰も確かめていなかった**＝2026-09-08 の整理でまとめて見たところ、
+ * ADR-0032 の「関連」に**存在しないファイル名**が2つあった（`0008-free-layout.md`／`0007-ai-pipeline.md`）。
+ * 読む側は「そこに書いてある」と信じて開くので、**指し先が無いリンクは無いより悪い**。
+ */
+export function brokenDocLinks(files: readonly (readonly [string, string])[], exists: (p: string) => boolean): string[] {
+  const out: string[] = [];
+  for (const [path, text] of files) {
+    const dir = path.slice(0, path.lastIndexOf('/'));
+    for (const m of text.matchAll(/\]\((?!https?:|#)([^)#\s]+)(?:#[^)]*)?\)/g)) {
+      if (!exists(`${dir}/${m[1]!}`)) out.push(`${path} -> ${m[1]}`);
+    }
+  }
+  return out;
+}
+
 const adrFiles = readdirSync(ADR_DIR);
 const claude = readFileSync(CLAUDE, 'utf8');
 
@@ -141,6 +159,20 @@ describe('正典の索引（二重管理へ戻らない）', () => {
     expect(names.length, '対象の資料が見つからない').toBe(10);
     const entries = names.map((f) => [f, readFileSync(`${DOCS_DIR}/${f}`, 'utf8')] as const);
     expect(docsWithoutBanner(entries), '帯か導線が無い資料').toEqual([]);
+  });
+
+  // ⚠️ **資料どうしのリンクを機械で見る**＝整理でまとめて見たら、既に2つ壊れていた。
+  it('docs の中の相対リンクは、指し先が実在する', () => {
+    const files: [string, string][] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) walk(`${dir}/${e.name}`);
+        else if (e.name.endsWith('.md')) files.push([`${dir}/${e.name}`, readFileSync(`${dir}/${e.name}`, 'utf8')]);
+      }
+    };
+    walk('docs');
+    expect(files.length, '資料が見つからない').toBeGreaterThan(30);
+    expect(brokenDocLinks(files, existsSync), '指し先が無いリンク').toEqual([]);
   });
 
   // ⚠️ **移した段を二度足さない**＝同じ移設を再実行すると、ADR の末尾に同じ段が積み重なる。
@@ -223,6 +255,18 @@ describe('門番自身の検査（わざと壊した入力を通す）', () => {
   // ⚠️ §10 と §11 の両方から受け取った ADR がある＝**別の目印は別に数える**（0012・0018・0032）。
   it('別の節から来た段が並んでいても重複と呼ばない', () => {
     expect(duplicatedMovedSections([['a.md', 'から移した要約・追補\nから移した注記']])).toEqual([]);
+  });
+
+  it('指し先が無い資料のリンクを見つける', () => {
+    expect(brokenDocLinks([['docs/a/x.md', '[y](y.md)']], () => false)).toEqual(['docs/a/x.md -> y.md']);
+  });
+
+  it('生きているリンクは見つけない（嘘の赤を出さない）', () => {
+    expect(brokenDocLinks([['docs/a/x.md', '[y](y.md)']], (p) => p === 'docs/a/y.md')).toEqual([]);
+  });
+
+  it('外部と見出し内リンクは見ない', () => {
+    expect(brokenDocLinks([['docs/a/x.md', '[y](https://example.com) [z](#midashi)']], () => false)).toEqual([]);
   });
 
   it('上限は 16,000 字（相対で書かず実数で固定する）', () => {
