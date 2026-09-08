@@ -27,8 +27,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ⚠️ **落ちた回の出力をそのまま残す**（#1007）＝通し実行でだけまれに落ちる揺れがあり、
+      # 原因が分かっていない。CI のログは流れて消えるので、次に踏んだときに読み返せる形で残す。
+      # 既定の出力（人が読む側）はそのまま出しつつ、機械で読める写しを1つ足すだけ。
       - name: Run frontend tests
-        run: npm test
+        run: npm test -- --reporter=default --reporter=json --outputFile=vitest-report.json
+
+      - name: Keep the failing run's output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-report
+          path: vitest-report.json
+          if-no-files-found: warn
+          retention-days: 30
 
   rust-tests:
     name: Rust Tests

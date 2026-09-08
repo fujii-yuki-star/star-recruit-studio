@@ -36,3 +36,6 @@ dist-ssr
 
 # 自動生成 ajv バリデータ（#156）。pre フックで毎回生成するため追跡しない（型は validators.d.ts を手書きで追跡）。
 src/domain/validation/generated/validators.js
+
+# 落ちた回の出力を残すための写し（#1007・CI が作る）
+vitest-report.json
