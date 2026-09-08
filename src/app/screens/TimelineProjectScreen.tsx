@@ -1166,8 +1166,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {...editGuard()}
           onChange={(v) => setSelectedVisualContent({ fontSize: v })}
         />
-        <label className="field">
-          <span>文字の色</span>
+        <div className="field">
+          {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれない。 */}
+          <span className="field-label text-sm" style={{ display: "block" }}>文字の色</span>
           <ColorPicker
             value={sel.color ?? DEFAULT_TEXT_COLOR}
             ariaLabel="文字の色"
@@ -1176,7 +1177,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             onDragEnd={endHistoryGroup}
             {...editGuard()}
           />
-        </label>
+        </div>
       </div>
       {/* 太さ・フォント・揃えも直せる（ADR-0034 決定4 が名指し・場面編集と同じ顔ぶれ）。
           バラした文字はテンプレ由来の太字・中央揃えを持つので、これが無いと直せない。 */}
@@ -1215,8 +1216,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {...editGuard()}
           onChange={(v) => setSelectedVisualContent({ strokeWidth: v })}
         />
-        <label className="field">
-          <span>縁取りの色</span>
+        <div className="field">
+          {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれない。 */}
+          <span className="field-label text-sm" style={{ display: "block" }}>縁取りの色</span>
           <ColorPicker
             value={sel.strokeColor ?? defaultStrokeColor(sel.color ?? DEFAULT_TEXT_COLOR)}
             ariaLabel="縁取りの色を選ぶ"
@@ -1225,7 +1227,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             onDragEnd={endHistoryGroup}
             {...editGuard()}
           />
-        </label>
+        </div>
       </div>
       <div className="field">
         {/* ⚠️ **1つの画面で呼び名を割らない**（差分再監査 5巡目 ℹ️）＝同じ `FontPicker` を
@@ -1290,8 +1292,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </div>
         {enabledShadow(sel.shadow) != null && (
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-            <label className="field">
-              <span>影の色</span>
+            <div className="field">
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれない。 */}
+              <span className="field-label text-sm" style={{ display: "block" }}>影の色</span>
               <ColorPicker
                 value={sel.shadow?.color ?? DEFAULT_SHADOW_COLOR}
                 {...editGuard()}
@@ -1300,7 +1303,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 onDragStart={beginHistoryGroup}
                 onDragEnd={endHistoryGroup}
               />
-            </label>
+            </div>
             <NumberField
               label="濃さ(%)"
               value={opacityToPercent(sel.shadow?.opacity ?? DEFAULT_SHADOW_OPACITY)}
@@ -1328,8 +1331,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </div>
         {bandBackground(sel.background) != null && (
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-            <label className="field">
-              <span>背景色</span>
+            <div className="field">
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれない。 */}
+              <span className="field-label text-sm" style={{ display: "block" }}>背景色</span>
               <ColorPicker
                 value={sel.background?.color ?? DEFAULT_BAND_COLOR}
                 {...editGuard()}
@@ -1338,7 +1342,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 onDragStart={beginHistoryGroup}
                 onDragEnd={endHistoryGroup}
               />
-            </label>
+            </div>
             <NumberField
               label="濃さ(%)"
               value={opacityToPercent(sel.background?.opacity ?? DEFAULT_BAND_OPACITY)}
@@ -3914,8 +3918,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         ))}
                       </select>
                     </label>
-                    <label className="field">
-                      <span>色</span>
+                    <div className="field">
+                      {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれない。 */}
+                      <span className="field-label text-sm" style={{ display: "block" }}>色</span>
                       <ColorPicker
                         value={selected.fillColor ?? DEFAULT_SHAPE_COLOR}
                         ariaLabel="図形の色"
@@ -3924,7 +3929,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         onDragEnd={endHistoryGroup}
                         {...editGuard()}
                       />
-                    </label>
+                    </div>
                   </div>
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.slot && (

@@ -958,7 +958,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     onClear: () => void,
   ) => (
     <div className="field" style={{ margin: 0 }}>
-      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+          `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+      <span className="field-label text-sm" style={{ display: "block", margin: "0 0 2px" }}>{label}</span>
       <span className="row gap-sm" style={{ alignItems: "center" }}>
         <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
         {isOverridden && (
@@ -1098,7 +1100,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         {effective.shadow != null && (
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</span>
               <ColorPicker value={effective.shadow.color ?? DEFAULT_SHADOW_COLOR} onChange={(v) => setShadow({ color: v })} ariaLabel={`${textKeyLabel[key]}の影の色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <NumberField label="濃さ(%)" value={opacityToPercent(effective.shadow.opacity ?? DEFAULT_SHADOW_OPACITY)} min={0} max={100} onChange={(v) => setShadow({ opacity: percentToOpacity(v) })} />
@@ -1115,7 +1119,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         {effective.background != null && (
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
               <ColorPicker value={effective.background.color} onChange={(v) => setBand({ color: v })} ariaLabel={`${textKeyLabel[key]}の背景色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <NumberField label="濃さ(%)" value={opacityToPercent(effective.background.opacity)} min={0} max={100} onChange={(v) => setBand({ opacity: percentToOpacity(v) })} />
@@ -1143,7 +1149,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       {el.background?.enabled && (
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
             <ColorPicker value={el.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
           </div>
           <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? DEFAULT_BAND_OPACITY)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
@@ -1184,7 +1192,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         {el.shadow?.enabled && (
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</span>
               <ColorPicker
                 value={el.shadow?.color ?? DEFAULT_SHADOW_COLOR}
                 onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, color: v } })}
@@ -1252,7 +1262,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -1282,7 +1294,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -1305,7 +1319,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -1318,7 +1334,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -1376,7 +1394,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -1405,7 +1425,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -2294,8 +2316,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   // 動画スロットのクリップ調整は場面側 per-use（scene.slotClips[layer.id]・Undo 可）へ。編集先の振り分けは sceneClipPatch。
                   return (
                     <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }}>{slotLabels[i]}</label>
+                      {/* ⚠️ **実在する欄と結ぶ**（#1075）＝差し込み口は何個でも並ぶので id を層ごとに作る。 */}
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }} htmlFor={`slot-${layer.id}`}>{slotLabels[i]}</label>
                       <select
+                        id={`slot-${layer.id}`}
                         className="select"
                         value={assignedId ?? ""}
                         onChange={(e) =>
