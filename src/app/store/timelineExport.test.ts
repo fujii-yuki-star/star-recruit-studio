@@ -464,6 +464,34 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.message).toContain('素材のファイルを読めませんでした');
   });
 
+  // ⚠️ **実フレームで描く動画は「読めない素材」の門の対象外**（`timelineImageAssetIds` が意図的に外す）
+  //    ＝ファイルが無いことは誰も見ておらず、保存先を聞いて走り出してから途中で落ちていた（#1068）。
+  it('置いた動画のファイルが無かったら、描く前に断る（走り出してから落とさない）', async () => {
+    const missing = vi.spyOn(assetFsMod, 'missingAssetFiles').mockResolvedValue(['assets/asset_v.mp4']);
+    await open(doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/asset_v.mp4' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_v' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(missing).toHaveBeenCalledWith('proj_20260729_001', ['assets/asset_v.mp4']);
+    expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled(); // 描き始めない
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+    expect(useTimelineStore.getState().exportRun.message).toContain('動画のファイルが見つかりません');
+  });
+
+  // ⚠️ **調べられなかったときは断らない**＝`missingAssetFiles` は調べられない場（ブラウザ）で空を返す。
+  //    そこで断ると、動画を置いただけで書き出せなくなる（嘘の警告）。
+  it('ファイルの有無を調べられなかったときは、そのまま書き出す', async () => {
+    vi.spyOn(assetFsMod, 'missingAssetFiles').mockResolvedValue([]);
+    await open(doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/asset_v.mp4' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_v' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.phase).not.toBe('error');
+    expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalled();
+  });
+
   it('使っていない素材は読まない（記憶に載せない）', async () => {
     const read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
     // 素材はあるが、どの部品も使っていない。

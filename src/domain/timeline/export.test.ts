@@ -5,7 +5,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable, duckSpansOf, clipVolumePointsForExport } from './export';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, timelineVideoRelPaths, volumePointsTooManyHasSplittable, duckSpansOf, clipVolumePointsForExport } from './export';
  import { resolveAudioAuto } from '../voice/audioAuto';
 import { frameTimeSec } from './persistence';
 
@@ -421,6 +421,44 @@ describe('見た目が見つからない部品（書き出しを止める）', (
   it('判定材料が無いときは見ない（嘘の理由を出さない）', () => {
     const d = doc({ clips: [tmplClip('clip_001', 'tmpl_missing')] });
     expect(timelineExportBlockers(d)).toEqual([]);
+  });
+});
+
+// #1068＝実フレームで描く動画は代表フレームを要らない（下の describe）ぶん、**ファイルがあるか**は
+// 誰も見ていなかった＝無いまま書き出すと、保存先を聞いて走り出してから途中で落ちる。
+describe('timelineVideoRelPaths：焼く元のファイルのありか（#1068）', () => {
+  const v = (id: string, path: string) => ({ assetId: id, assetType: 'video' as const, displayName: id, filePath: path });
+
+  it('直接置いた動画のファイルを返す', () => {
+    const d = doc({ assets: [v('asset_v', 'v.mp4')], clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v' })] });
+    expect(timelineVideoRelPaths(d)).toEqual(['v.mp4']);
+  });
+
+  // ⚠️ **同じファイルを2度調べない**＝置き場所ごとに数えると、同じ動画を並べただけで問い合わせが増える。
+  it('同じ動画を2つ置いても1つに畳む', () => {
+    const d = doc({
+      assets: [v('asset_v', 'v.mp4')],
+      clips: [
+        textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v' }),
+        textClip('clip_002', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v', startSec: 20 }),
+      ],
+    });
+    expect(timelineVideoRelPaths(d)).toEqual(['v.mp4']);
+  });
+
+  // ⚠️ **描かれないものは焼かない**＝隠した部品はコマを焼かないので、無くても書き出しは落ちない
+  //    （数えると「描かれもしないものを理由に断る」＝`timelineImageAssetIds` と同じ轍）。
+  it('隠した動画は返さない', () => {
+    const d = doc({ assets: [v('asset_v', 'v.mp4')], clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v', hidden: true })] });
+    expect(timelineVideoRelPaths(d)).toEqual([]);
+  });
+
+  it('写真は返さない（焼く元ではない）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_p', assetType: 'image' as const, displayName: '写真', filePath: 'p.png' }],
+      clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_p' })],
+    });
+    expect(timelineVideoRelPaths(d)).toEqual([]);
   });
 });
 
