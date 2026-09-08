@@ -1,7 +1,7 @@
 // 落とされたファイルのふるい（#1026 ②）。
 import { describe, expect, it } from "vitest";
 import { cssPointOf, droppableExtensions, isPointInRect, triageDroppedFiles } from "./fileDrop";
-import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from "./assetFile";
+import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, UNNAMED_ASSET_NAME, VIDEO_FILE_EXTENSIONS } from "./assetFile";
 
 describe("落としたものを分ける（#1026 ②）", () => {
   // ⚠️ **「開く」の絞り込みと同じ一覧**＝落とすときだけ通る／通らない形式を作らない（ADR-0026②）。
@@ -23,6 +23,14 @@ describe("落としたものを分ける（#1026 ②）", () => {
     const r = triageDroppedFiles(["C:\\書類\\会社案内.pdf"], (p) => p, false);
     expect(r.accepted).toEqual([]);
     expect(r.rejectedNames, "パスが丸ごと出ている").toEqual(["会社案内.pdf"]);
+  });
+
+  // ⚠️ **名前が取れないときも空欄にしない**（PR #1098 レビュー 🟡）＝フォルダを落とすと
+  //    区切りで終わるパスが来て、「1件は取り込めない形式でした（）」になる。
+  it("フォルダ（区切りで終わるパス）を落としたら、既定の名で言う", () => {
+    const r = triageDroppedFiles(["C:\\pics\\"], (p) => p, false);
+    expect(r.accepted).toEqual([]);
+    expect(r.rejectedNames).toEqual([UNNAMED_ASSET_NAME]);
   });
 
   it("落とされた順は変えない", () => {

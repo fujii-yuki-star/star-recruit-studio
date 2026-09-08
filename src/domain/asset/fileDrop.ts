@@ -3,7 +3,7 @@
 // ⚠️ **「開く」の絞り込みと同じ一覧を見る**（`useAssetPicker` の `accept`・`infrastructure/dialog` の
 // filters）＝落とすときだけ通る/通らない形式があると、同じ画面の同じ枠で挙動が割れる（ADR-0026②）。
 // ⚠️ **落とせないものは黙って捨てない**（§2-5）＝何が通らなかったかを返し、画面が次の行動を出す。
-import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS, fileExtension, fileNameOf } from './assetFile';
+import { AUDIO_FILE_EXTENSIONS, IMAGE_FILE_EXTENSIONS, UNNAMED_ASSET_NAME, VIDEO_FILE_EXTENSIONS, fileExtension, fileNameOf } from './assetFile';
 
 /** 取り込める拡張子（音を含めるかは入口が決める＝場面形式は写真・動画のまま）。 */
 export function droppableExtensions(withAudio: boolean): readonly string[] {
@@ -36,7 +36,9 @@ export function triageDroppedFiles<T>(
   for (const item of items) {
     const name = nameOf(item);
     if (ok.includes(fileExtension(name))) accepted.push(item);
-    else rejectedNames.push(fileNameOf(name));
+    // ⚠️ **名前が取れないときは既定の名で言う**（PR #1098 レビュー 🟡）＝区切りで終わるパス
+    // （フォルダを落としたとき）は末尾が空になり、「1件は取り込めない形式でした（）」になる。
+    else rejectedNames.push(fileNameOf(name) || UNNAMED_ASSET_NAME);
   }
   return { accepted, rejectedNames };
 }
