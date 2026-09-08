@@ -2,7 +2,7 @@
 // 場面編集の素材タイルが「見える入口」になっている（#1030 ①③④）。
 //
 // ⚠️ **押しても何も起きない一覧だった**＝タイルは表示専用で、差し替えは右欄の**畳まれた**節の中の
-// 名前の `<select>` だけ＝画面1面ぶんが「押せそうに見えて何も起きない」で埋まっていた
+// 名前だけの一覧だけ＝画面1面ぶんが「押せそうに見えて何も起きない」で埋まっていた
 // （ADR-0034 決定5・`06 §2-5`）。AI 生成動画を直す**最頻の操作**がここ。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
@@ -46,7 +46,10 @@ function setup(assetRefs: Record<string, string> = {}) {
   });
 }
 
-const tile = (name: string) => screen.getByRole("button", { name: new RegExp(name) });
+// ⚠️ **素材欄のタイルに限って引く**（#1031）＝差し込み口の欄も「見出し＋いまの素材名」を
+// 呼び名に持つボタンになったので（名前の `<select>` ではなくなった）、画面全体から名前で引くと両方に当たる。
+const tile = (name: string) =>
+  screen.getAllByRole("button", { name: new RegExp(name) }).find((b) => b.classList.contains("asset-tile"))!;
 const refs = () => useProjectStore.getState().scenes[0].assetRefs;
 /** 入れ先が**ぜんぶ**埋まっている状態（背景まで）。 */
 const FULL = { background: "asset_003", mainVisual: "asset_001", sub: "asset_002" };

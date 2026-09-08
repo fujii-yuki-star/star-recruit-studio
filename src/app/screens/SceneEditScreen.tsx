@@ -65,8 +65,9 @@ import { slotDropTargets, type SlotDropTarget } from "../components/slotDropTarg
 import { usePointerDrag } from "../hooks/usePointerDrag";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
+import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
 import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
-import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage } from "../uiLabels";
+import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -76,6 +77,7 @@ import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SceneThumb } from "../components/SceneThumb";
+import { buildSampleScene } from "./looksShared";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
@@ -469,6 +471,55 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     : { options: [], mismatchedCurrent: undefined };
   // 参照先テンプレが存在しない（グローバル削除等で見つからない）現行＝未解決。mismatchedCurrent（Template あり）とは別に扱う（#415 レビュー）。
   const unresolvedCurrent = !!selected && !template;
+  /**
+   * 見た目ピッカーのタイル（#1031）。
+   *
+   * ⚠️ **選べない候補も一覧から消さない**＝合っていない現行・見つからない現行を
+   * 落とすと、「いま何が選ばれているのか」が読めない空の欄になる（#415 P2 の挙動を引き継ぐ）。
+   */
+  const lookOptions: ThumbOption[] = [
+    ...(mismatchedCurrent
+      ? [{ value: mismatchedCurrent.templateId, label: mismatchedCurrent.name, disabled: true, note: PICKER_NOTE.lookMismatched }]
+      : []),
+    ...(unresolvedCurrent && selected
+      ? [{ value: selected.templateId, label: PICKER_MISSING_LABEL.look, disabled: true }]
+      : []),
+    ...pickableOptions.map((t) => ({
+      value: t.templateId,
+      label: t.name,
+      thumb: <SceneThumb scene={buildSampleScene(t, assets)} template={t} />,
+    })),
+  ];
+  /**
+   * 差し込み口の候補（#1031）。
+   *
+   * ⚠️ **いま指しているものが候補に無いときも一覧に残す**（見た目のピッカーと同じ形・
+   * PR #1085 レビュー）＝素材を消しても `assetRefs` は残る（`removeAssets` は場面を触らない）ので、
+   * 候補に無い id を指した状態になりうる。名前だけの一覧だった頃は**先頭（「なし」）が選ばれて見え**、
+   * 入っていないと言いながら実際は消えた素材を指していた（ADR-0026①）。
+   * ⚠️ **「無い」と「この口には入れられない」を言い分ける**＝同じ「出ない」でも次の行動が違う。
+   */
+  const slotOptions = (layer: Layer, assignedId: string | null | undefined): ThumbOption[] => {
+    const usable = assignableFor(layer, assets);
+    const stale = assignedId != null && assignedId !== "" && !usable.some((a) => a.assetId === assignedId);
+    const staleAsset = stale ? assets.find((a) => a.assetId === assignedId) : undefined;
+    return [
+      ...(stale
+        ? [{
+            value: assignedId,
+            label: staleAsset?.displayName ?? PICKER_MISSING_LABEL.asset,
+            note: staleAsset ? PICKER_NOTE.assetNotAssignable : undefined,
+            disabled: true,
+          }]
+        : []),
+      { value: "", label: "なし" },
+      ...usable.map((a) => ({
+        value: a.assetId,
+        label: a.displayName,
+        thumb: <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} />,
+      })),
+    ];
+  };
   // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
   const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
@@ -508,7 +559,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    *
    * ⚠️ **空きが無いときは黙って置き換えない**（§2-5・`06 §2` 規約1）＝いま入っている素材が
    * 何の合図も無く消えるので、**先に何が入れ替わるかを見せて**から入れる。
-   * ⚠️ **どの差し込み口かは domain が決める**（`slotForAsset`）＝画面で決めると `<select>` の
+   * ⚠️ **どの差し込み口かは domain が決める**（`slotForAsset`）＝画面で決めると差し込み口の
    * 候補と食い違う。
    */
   const assignSlot = (layerId: string, assetId: string): void =>
@@ -1742,10 +1793,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             )}
             <div className="col" style={{ gap: 2 }}>
               {/* ⚠️ **押しても何も起きない一覧を作らない**（#1030 ①）＝ここは表示専用で、
-                  差し替えは右欄の**畳まれた**節の中の名前の `<select>` だけだった＝
+                  差し替えは右欄の**畳まれた**節の中の名前だけの一覧だけだった＝
                   画面1面ぶんが「押せそうに見えて何も起きない」で埋まっていた（ADR-0034 決定5）。
                   ⚠️ **どの差し込み口へ入れるかは domain に1つ**（`slotForAsset`）＝
-                  `<select>` の候補と同じ規則を通す（片方でだけ入る素材を作らない）。
+                  差し込み口の候補と同じ規則を通す（片方でだけ入る素材を作らない）。
                   ⚠️ **絵で選べるようにする**（#1030 ③）＝種別アイコンだけだと、同じ種類の写真が
                   並んだときに名前でしか区別できない。素材画面と**同じ部品**（`AssetThumb`）。 */}
               {visibleAssets.map((a) => {
@@ -2197,31 +2248,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <p className="field-hint" style={{ marginTop: 4 }}>この場面の種類。変えると、その種類の見た目に切り替わります。</p>
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="look">見た目パターン</label>
-              <select
-                id="look"
-                className="select"
+              {/* ⚠️ **見て選ぶ**（#1031）＝見た目は名前では想像がつかないので、候補を見本の絵つきで並べる。
+                  ⚠️ **見本は一覧画面と同じものを使う**（`buildSampleScene`）＝この場面の中身を
+                  候補ごとに**当て直して見せない**。切替は非破壊の移送（ADR-0030）で、差し込み口の
+                  対応付けも変わるので、ここだけで簡易に再現すると**実際に切り替えた結果と違う絵**を
+                  見せる（ADR-0026①）。 */}
+              <ThumbPicker
+                label="見た目パターン"
                 value={pendingActive ? pendingTemplateId : selected.templateId}
-                onChange={(e) => requestTemplateSwitch(e.target.value)}
-              >
-                {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
-                {mismatchedCurrent && (
-                  <option value={mismatchedCurrent.templateId} disabled>
-                    {mismatchedCurrent.name}（今の動画に合いません）
-                  </option>
-                )}
-                {/* 現行が見つからない（未解決）ときも選択不可の目印を出し、選択値が消えて空 select にならないようにする（#415 レビュー）。 */}
-                {unresolvedCurrent && selected && (
-                  <option value={selected.templateId} disabled>
-                    （今の見た目が見つかりません）
-                  </option>
-                )}
-                {pickableOptions.map((t) => (
-                  <option key={t.templateId} value={t.templateId}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+                onChange={requestTemplateSwitch}
+                options={lookOptions}
+              />
               {mismatchedCurrent || unresolvedCurrent ? (
                 <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
                   {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, lookAvailability)}
@@ -2364,26 +2401,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   // 動画スロットのクリップ調整は場面側 per-use（scene.slotClips[layer.id]・Undo 可）へ。編集先の振り分けは sceneClipPatch。
                   return (
                     <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
-                      {/* ⚠️ **実在する欄と結ぶ**（#1075）＝差し込み口は何個でも並ぶので id を層ごとに作る。 */}
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }} htmlFor={`slot-${layer.id}`}>{slotLabels[i]}</label>
-                      <select
-                        id={`slot-${layer.id}`}
-                        className="select"
+                      {/* ⚠️ **見て選ぶ**（#1031）＝名前だけの一覧だと、入れてみるまで何の絵か分からない
+                          （試し打ちになる）。見出しと欄を結ぶのもこの部品が担う（#1075＝差し込み口は
+                          何個でも並ぶので、外で id を作る形にすると**結び忘れた所だけ残る**）。 */}
+                      <ThumbPicker
+                        label={slotLabels[i]}
+                        labelClassName="field-label text-sm"
                         value={assignedId ?? ""}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           patch((s) => ({
                             ...s,
-                            assetRefs: { ...s.assetRefs, [layer.id]: e.target.value || null },
+                            assetRefs: { ...s.assetRefs, [layer.id]: v || null },
                           }))
                         }
-                      >
-                        <option value="">なし</option>
-                        {assignableFor(layer, assets).map((a) => (
-                          <option key={a.assetId} value={a.assetId}>
-                            {a.displayName}
-                          </option>
-                        ))}
-                      </select>
+                        options={slotOptions(layer, assignedId)}
+                      />
 
                       {/* 収め方（fit）は画像/動画とも per-use＝scene.slotFits[layer.id]（layoutScene が読む・Undo 可・「見た目の既定に合わせる」で継承）＝#472 P1 で動画も統一。 */}
                       {assignedAsset && (

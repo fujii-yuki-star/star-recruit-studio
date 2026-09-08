@@ -71,7 +71,10 @@ function pointAt(layerId: string | null) {
   };
 }
 
-const tile = (name: string) => screen.getByRole("button", { name: new RegExp(name) });
+// ⚠️ **素材欄のタイルに限って引く**（#1031）＝差し込み口の欄も「見出し＋いまの素材名」を
+// 呼び名に持つボタンになったので（名前の `<select>` ではなくなった）、画面全体から名前で引くと両方に当たる。
+const tile = (name: string) =>
+  screen.getAllByRole("button", { name: new RegExp(name) }).find((b) => b.classList.contains("asset-tile"))!;
 const refs = () => useProjectStore.getState().scenes[0].assetRefs;
 const down = (el: HTMLElement) => fireEvent.pointerDown(el, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
 const move = (x = 200, y = 200) => fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: x, clientY: y });

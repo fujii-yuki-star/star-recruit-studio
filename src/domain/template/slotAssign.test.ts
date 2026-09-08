@@ -57,7 +57,7 @@ describe('assignableAssetsFor', () => {
 // 押した素材を**どの差し込み口へ入れるか**（#1030）。
 //
 // ⚠️ **押しても何も起きない一覧を作らない**＝場面編集の左欄の素材タイルは表示専用で、
-// 実際の差し替えは右欄の畳まれた節の中の名前の `<select>` だけだった。
+// 実際の差し替えは右欄の畳まれた節の中の名前だけの一覧だけだった。
 describe('slotForAsset（#1030）', () => {
   const bg = layer({ id: 'background', type: 'background' });
   const main = layer({ id: 'main', type: 'slot' });
@@ -122,7 +122,7 @@ describe('slotForAsset（#1030）', () => {
     });
   });
 
-  // ⚠️ **入れられるかの規則は `<select>` の候補と共有**＝片方でだけ入る素材を作らない。
+  // ⚠️ **入れられるかの規則は差し込み口の候補と共有**＝片方でだけ入る素材を作らない。
   it('入れられる差し込み口だけを見る（動画はロゴの層に入らない）', () => {
     expect(slotForAsset(video, [logoLayer, main], {})).toEqual({ layerId: 'main', replacing: null });
   });
