@@ -368,6 +368,27 @@ describe("AssetLibraryPanel", () => {
     expect(setSettingsFocus, "寄る欄を指定していない").toHaveBeenCalledWith("brandKit");
   });
 
+  // ⚠️ **前の断りの印を持ち越さない**（PR #1097 レビュー 🔴）＝1つずつ見ると通るのに、
+  //    「先に立った断り」→「関係ない失敗」の順で操作すると入口が残っていた。
+  it("会社の見た目の断りのあと、関係ない失敗に変わったらその入口は消える", async () => {
+    const updateBrandKit = vi.fn(async () => false);
+    useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
+    render(<AssetLibraryPanel onNavigate={vi.fn()} />);
+    await screen.findByText("会社ロゴ");
+    fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
+    await screen.findByText(/会社の見た目のロゴを外せませんでした/);
+    // そのまま別の素材を編集して、関係ない失敗を起こす。
+    vi.mocked(updateLibraryAsset).mockRejectedValueOnce("直せませんでした。もう一度お試しください。");
+    fireEvent.click(screen.getAllByRole("button", { name: "名前・種類・タグ" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: "直す" }));
+    const alert = await screen.findByText(/直せませんでした/);
+    expect(
+      within(alert.closest("[role=alert]") as HTMLElement).queryByRole("button", { name: "会社の見た目を決める" }),
+      "関係ない失敗に、前の断りの入口が残っている",
+    ).toBeNull();
+  });
+
   // ⚠️ **別の断りにボタンを付け足さない**＝行き先が関係ない失敗にも出ると、押した先で何もできない。
   it("会社の見た目と関係ない失敗には、その入口を出さない", async () => {
     const onNavigate = vi.fn();

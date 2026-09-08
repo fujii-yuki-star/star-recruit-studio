@@ -325,6 +325,10 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
 
   async function onSaveEdit(): Promise<void> {
     if (!editing) return;
+    // ⚠️ **前の断りの印を降ろす**（PR #1097 レビュー 🔴）＝ここだけ他の3つ（`onAdd`/`onImport`/`onDelete`）と
+    // 揃っておらず、**会社の見た目と関係ない失敗の下に、その入口が残った**（押した先で何もできない）。
+    setError("");
+    setErrorGoesToBrandKit(false);
     setBusy(true);
     try {
       await updateLibraryAsset(

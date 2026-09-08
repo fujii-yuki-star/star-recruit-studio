@@ -3325,7 +3325,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       </div>
 
       <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {/* 欄は器いっぱいに広げ、**下の操作行は必ず残す**＝閉じた欄を戻す道が画面から切れない（決定6/8）。 */}
+        {/* 欄は器いっぱいに広げる。閉じた欄を戻す道は**見出しの行の「欄」メニュー**（#1032・決定6/8）。 */}
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />
       </div>
             {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
