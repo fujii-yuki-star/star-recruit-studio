@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prefersDark, resolveAppearance } from "./hooks/useAppearance";
 import { APPEARANCE_DEFAULT, getAppearance, setAppearance } from "../infrastructure/appSettings";
 import { APPEARANCE_CHOICES } from "./screens/SettingsScreen";
+import { layoutToSvg } from "../renderer/sceneSvg";
+import type { SceneLayout } from "../renderer/layout";
 
 const css = readFileSync(join(process.cwd(), "src/styles/theme.css"), "utf8");
 
@@ -77,9 +79,39 @@ describe("暗い見た目のトークン（ADR-0039）", () => {
 });
 
 describe("動画の絵は見た目で変わらない（ADR-0001）", () => {
-  it("描画の層は、テーマの色を1つも参照しない", () => {
-    // ⚠️ **ここが破れるとプレビューと書き出しが食い違う**＝画面の設定で焼かれる画素が変わる。
-    // `src/renderer/**`（プレビュー・書き出し）と `src/domain/**`（描画の計算）が対象。
+  /** 代表的な場面の絵（画像スロット＋文字＋図形）。 */
+  function sampleLayout(): SceneLayout {
+    return {
+      width: 1920,
+      height: 1080,
+      backgroundColor: "#ffffff",
+      items: [
+        { kind: "image", id: "slot", x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: "asset_001", fit: "cover", role: "slot", label: "メイン画像" },
+        { kind: "text", id: "t1", x: 1200, y: 200, w: 600, h: 200, zIndex: 20, text: "見出しの文字", color: "#20323c", fontSize: 64, align: "left", role: "text" },
+        { kind: "shape", id: "s1", x: 0, y: 980, w: 1920, h: 100, zIndex: 5, shape: "rect", fillColor: "#1f9ea3" },
+      ],
+    } as unknown as SceneLayout;
+  }
+
+  it("**焼かれる絵そのもの**に、テーマの色が1つも入らない", () => {
+    // ⚠️ **層を歩くだけでは足りない**（レビュー 🟡）＝`src/renderer/preview/` は**空**で、
+    // プレビューの描画は `src/app/components/ScenePreview.tsx` が `layoutScene`→`layoutToSvg` を
+    // 呼んで行っている。**歩き先を並べる形はプレビューを1行も見ていなかった**。
+    // だから**出てきた絵そのもの**を見る＝置き場所がどこへ動いても穴が空かない。
+    const svg = layoutToSvg(sampleLayout(), { assetSrc: () => "data:image/png;base64,AAAA" });
+    expect(svg.length).toBeGreaterThan(100); // 空の絵で通さない
+    expect(svg).not.toContain("var(--");
+    expect(svg).not.toContain("currentColor"); // 継承で外の色をもらう形も作らない
+  });
+
+  it("描画の層は、テーマの色も見た目の状態も参照しない", () => {
+    // ⚠️ **絵に入らなくても、条件分岐に使われたら同じこと**＝`data-theme` や `matchMedia` を
+    // 読んで描き分けると、プレビューと書き出しが食い違う。**いまは 0 件＝その状態を固定する**。
+    // ⚠️ **`dataset.theme` も禁じる**（変異チェックで判明）＝`data-theme` の走査だけだと、
+    // `document.documentElement.dataset.theme` という**キャメル形の読み方が素通り**する。
+    const banned = [
+      "var(--", "data-theme", "dataset.theme", "matchMedia", "prefers-color-scheme", "getComputedStyle",
+    ];
     const hits: string[] = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -87,7 +119,7 @@ describe("動画の絵は見た目で変わらない（ADR-0001）", () => {
         if (e.isDirectory()) { walk(p); continue; }
         if (!/\.tsx?$/.test(e.name) || e.name.includes(".test.")) continue;
         const src = readFileSync(p, "utf8");
-        if (src.includes("var(--color")) hits.push(p);
+        for (const b of banned) if (src.includes(b)) hits.push(`${p} :: ${b}`);
       }
     };
     walk(join(process.cwd(), "src/renderer"));
