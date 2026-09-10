@@ -14,6 +14,7 @@ const setup = (over: {
   currentProjects?: { kind: "scene" | "timeline"; name: string; target: ScreenId; sub: string }[];
 } = {}) => {
   const onNavigate = vi.fn();
+  const onCollapse = vi.fn();
   const fallback: { kind: "scene" | "timeline"; name: string; target: ScreenId; sub: string }[] =
     over.hasProjectContent ?? false
       ? [{ kind: "scene", name: over.projectName ?? "無題のプロジェクト", target: over.currentProjectTarget ?? "draft", sub: "今の動画" }]
@@ -23,9 +24,10 @@ const setup = (over: {
       current={over.current ?? "home"}
       onNavigate={onNavigate}
       currentProjects={over.currentProjects ?? fallback}
+      onCollapse={onCollapse}
     />,
   );
-  return { onNavigate };
+  return { onNavigate, onCollapse };
 };
 
 // 「今の動画」ボタン（2行構成）を取得。ラベル「今の動画」の最寄り button。

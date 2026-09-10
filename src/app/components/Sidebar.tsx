@@ -9,6 +9,7 @@ import {
   HelpIcon,
   MailIcon,
   BellIcon,
+  ChevronRightIcon,
 } from "./icons";
 
 interface SidebarProps {
@@ -22,6 +23,13 @@ interface SidebarProps {
    * 決め方は `navigation.ts` の `currentProjectEntries` に1つだけ置く（画面で書かない）。
    */
   currentProjects: { kind: "scene" | "timeline"; name: string; target: ScreenId; sub: string }[];
+  /**
+   * 帯を畳む（#1103）。
+   *
+   * ⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝隠したあとに戻す取っ手を出すのは
+   * 親（`App`）の仕事。ここは「畳んでほしい」と伝えるだけ。
+   */
+  onCollapse: () => void;
 }
 
 // 先頭「プロジェクト」＝一覧（現ホームを統合）＋素材/見た目/設定。「今の動画」は工程画面群を束ねる別項目で条件表示（#399 B案）。
@@ -32,7 +40,7 @@ const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
   { id: "settings", label: "設定", icon: SettingsIcon },
 ];
 
-export function Sidebar({ current, onNavigate, currentProjects }: SidebarProps) {
+export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: SidebarProps) {
   // 「プロジェクト」（一覧）は一覧画面でのみ active。工程画面は「今の動画」を active にする。
   // 「見た目パターン」は一覧(looks)＋編集(looks-edit)を束ねて active にする（工程画面群と同じ考え方・#399 レビュー）。
   const isActive = (id: ScreenId): boolean =>
@@ -40,7 +48,7 @@ export function Sidebar({ current, onNavigate, currentProjects }: SidebarProps) 
   const currentIsProject = isProjectScreen(current);
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" id="app-sidebar">
       <div className="sidebar-brand">
         {/* ロゴマークはナレーター「ゆうこ」の頭文字＝マスコット表示。製品名（すたりお）とは別物なので据え置く（ADR-0011）。 */}
         <div className="sidebar-brand-mark">ゆ</div>
@@ -48,6 +56,18 @@ export function Sidebar({ current, onNavigate, currentProjects }: SidebarProps) 
           <span className="sidebar-brand-title">すたりお</span>
           <span className="sidebar-brand-sub">動画づくり支援ソフト</span>
         </div>
+        {/* 畳む（#1103）。⚠️ **戻す取っ手は親が出す**＝押した先で行き止まりにしない（ADR-0033 決定6/8）。 */}
+        <button
+          type="button"
+          className="sidebar-collapse"
+          onClick={onCollapse}
+          aria-label="メニューを畳む"
+          aria-expanded
+          aria-controls="app-sidebar"
+          title="メニューを畳む（作業する場所が広がります）"
+        >
+          <ChevronRightIcon size={18} style={{ transform: "rotate(180deg)" }} />
+        </button>
       </div>
 
       <nav className="sidebar-nav" aria-label="メインメニュー">

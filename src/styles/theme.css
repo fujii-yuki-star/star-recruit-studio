@@ -128,6 +128,45 @@ button {
   padding: var(--gap-lg) var(--gap);
 }
 
+/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
+   ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠した側には下の細い取っ手を必ず出す。
+   フォーカスの輪は共有の規則（`.btn:focus-visible` の並び）に足してあるので、ここでは書かない。 */
+.sidebar-collapse {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+.sidebar-collapse:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* 畳んでいる間に残す細い取っ手。**画面の端にいつも見えている**＝戻る道を探させない。 */
+.sidebar-reveal {
+  width: 20px;
+  flex-shrink: 0;
+  border: none;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-sidebar);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-reveal:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -363,7 +402,9 @@ button {
 .btn:focus-visible,
 .nav-item:focus-visible,
 .segment button:focus-visible,
-.switch:focus-visible {
+.switch:focus-visible,
+.sidebar-collapse:focus-visible,
+.sidebar-reveal:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
