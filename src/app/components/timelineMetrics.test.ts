@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { TIMELINE_CLIP_INSET_PX, TIMELINE_LANE_H_PX } from "../../domain/constants";
 
 const css = readFileSync(join(process.cwd(), "src/app/components/timeline.css"), "utf8");
 
@@ -89,6 +90,17 @@ describe("タイムラインの寸法は1か所から導く（#1104）", () => {
     expect(hardCodesPx(menu ?? "", "line-height")).toBe(false);
     expect(menu).toContain("var(--timeline-clip-inset)");
     expect(menu).toContain("var(--timeline-clip-line-h)");
+  });
+
+  it("CSS の既定は TS の値と一致する（片方だけ変えて黙ってずれない）", () => {
+    // ⚠️ 流し込みは必ず行われるので既定は普通は使われないが、**書き写しである以上ずれ得る**
+    //（`--timeline-label-w` と同じ流儀・#752 レビュー）。CSS に「単一の参照元は TS」と書いた以上、
+    // 一致を見る検査が無いと**その主張が成り立たないまま**になる（レビュー 🟡）。
+    const root = ruleBody(css, ".timeline") ?? "";
+    const decl = (name: string): string | undefined =>
+      new RegExp(`${name}:([^;]+);`).exec(root)?.[1].trim();
+    expect(decl("--timeline-lane-h")).toBe(`${TIMELINE_LANE_H_PX}px`);
+    expect(decl("--timeline-clip-inset")).toBe(`${TIMELINE_CLIP_INSET_PX}px`);
   });
 
   it("帯の枠線の太さも1か所から引く（文字の高さの計算と食い違わせない）", () => {

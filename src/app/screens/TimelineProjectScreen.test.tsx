@@ -4426,10 +4426,8 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(decl("--clip-menu-w")).toBe(`${CLIP_MENU_W_PX}px`);
     expect(decl("--clip-handle-w")).toBe(`${CLIP_HANDLE_W_PX}px`);
     expect(decl("--clip-handle-hit-w")).toBe(`${CLIP_HANDLE_HIT_W_PX}px`);
-    // ⚠️ **高さも同じ扱い**（#1104・レビュー 🟡）＝CSS の側に「単一の参照元は TS」と書いたのに、
-    // 一致を見る検査がここに無いと、**その主張が成り立たないまま**になる。
-    expect(decl("--timeline-lane-h")).toBe(`${TIMELINE_LANE_H_PX}px`);
-    expect(decl("--timeline-clip-inset")).toBe(`${TIMELINE_CLIP_INSET_PX}px`);
+    // ⚠️ **高さ（`--timeline-lane-h` / `--timeline-clip-inset`）の一致は
+    // `src/app/components/timelineMetrics.test.ts` が見る**（#1104）＝二重に持たない。
   });
 
   it("取っ手の**当たり判定は見た目より広い**（指が乗る前に本体を掴まない・#752-7）", () => {
