@@ -33,6 +33,7 @@ VOICEVOX 連携（`src/infrastructure/voicevox*`）・読み上げ・BGM・音�
 - **作った声を黙って捨てる／黙って古い声を使う**＝文・話者・話し方が変わったらその声は使わない（`sameSynthInput`）
 - **反映できないのに成功にする**＝辞書を送れないときは断る（ADR-0037・`CLAUDE.md §2-5`）
 - **声そのものを下げる**＝ダッキングの対象は BGM（自分で自分を下げない）
+- **同梱エンジンを直に起こす**＝Windows で**黒い窓が開いて消える**。`src-tauri` 側は必ず `proc::no_window_command` を通す（門番＝`src/test/noWindowSpawnGuard.test.ts`・#1107）
 
 ## 終わったら
 
