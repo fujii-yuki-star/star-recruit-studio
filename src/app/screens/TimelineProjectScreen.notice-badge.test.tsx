@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 注意の件数を、いつも見える所に出す（#1032）。
 //
-// ⚠️ 知らせは**帯の器（76vh）の下**にあり、編集している間は画面外だった＝
+// ⚠️ 知らせは**帯の器の下**にあり、編集している間は目の届かない所にある＝
 //    見えていない知らせは無いのと同じ（`EditorToolbar` の注記と同じ理由）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";

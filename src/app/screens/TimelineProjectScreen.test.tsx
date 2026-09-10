@@ -7,7 +7,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
-import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
@@ -2697,7 +2696,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     // #712 でこの画面に取り込みが付いたので、案内はここの導線を指す。
     withAsset({ assets: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/この動画にはまだ写真がありません/)).toBeInTheDocument();
+    expect(screen.getByText(/写真がまだありません/)).toBeInTheDocument();
     expect(screen.queryByText(/素材の画面で取り込む/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument(); // できることは残る
@@ -4134,6 +4133,31 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(screen.getAllByRole("button", { name: "映像の列を足す" })).toHaveLength(1);
   });
 
+  // ⚠️ **実機で測って直した**（#1104・2026-09-10）＝列を12本にすると、欄ごと縦に流れるので
+  // 「列を足す」が画面の外へ出て**列を足せなくなり**、帯は欄の下端で切り落とされていた。
+  // ⚠️ **jsdom は高さを持たない**ので見られるのは配線だけ＝「どこが流す役か」（CSS の側）は
+  // `timelineMetrics.test.ts`、実寸は `tools/uiProbe.mjs`。
+  it("**「並び」は道具立てを留めて帯だけ流す**（列を足す道が画面の外へ出ない・#1104）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const panel = container.querySelector(".timeline-panel") as HTMLElement | null;
+    expect(panel).not.toBeNull();
+    // 欄の器は流す役を中身へ渡している（欄ごと流すと道具立てが一緒に出ていく）。
+    const body = panel!.closest(".panel-frame-body") as HTMLElement | null;
+    expect(body).not.toBeNull();
+    expect(body!.classList.contains("panel-frame-body--fill")).toBe(true);
+    // 「列を足す」は**流れる枠の外**にある＝帯をいくら送っても押せる場所に留まる。
+    const add = screen.getByRole("button", { name: "映像の列を足す" });
+    expect(add.closest(".timeline-scroll")).toBeNull();
+    expect(add.closest(".timeline-panel")).toBe(panel);
+    // 道具立て（表示倍率・吸着）も同じく流れる枠の外。
+    expect(container.querySelector(".timeline-toolbar")!.closest(".timeline-scroll")).toBeNull();
+    // 帯（列の行）は流れる枠の中＝列が増えたときに動くのはここ。
+    expect(container.querySelector(".timeline-row")!.closest(".timeline-scroll")).not.toBeNull();
+  });
+
   it("**列を中身ごと複製できる**（空の列だけ増やすなら「足す」と同じ・#767）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
@@ -4241,8 +4265,9 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     rows.forEach((row, i) => {
       row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
     });
-    // 列を並べている器（欄）は 0〜100 しか見えていない＝3行目（80〜120）は下半分が隠れている。
-    const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement | null;
+    // 列を並べている器（帯の枠）は 0〜100 しか見えていない＝3行目（80〜120）は下半分が隠れている。
+    // ⚠️ **縦に流れるのは帯の枠**（#1104）＝欄ごと流すと道具立てが画面の外へ出るので移した。
+    const body = rows[0].closest(".timeline-scroll") as HTMLElement | null;
     if (body) {
       body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 70, width: 900, height: 70, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     }
@@ -4287,8 +4312,8 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
       rows.forEach((row, i) => {
         row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
       });
-      const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement;
-      expect(body).not.toBeNull(); // 欄が見つからなければ送り先が無い＝この検査自体が空振りする
+      const body = rows[0].closest(".timeline-scroll") as HTMLElement;
+      expect(body).not.toBeNull(); // 帯の枠が見つからなければ送り先が無い＝この検査自体が空振りする
       body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 200, width: 900, height: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
       Object.defineProperty(body, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(body, "scrollHeight", { value: 1000, configurable: true });
@@ -4436,6 +4461,19 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     const widthVar = /width:\s*var\((--[\w-]+)\)/.exec(handleBlock)?.[1];
     expect(widthVar).toBeTruthy();
     expect(left).toContain(`- var(--clip-menu-w) - var(${widthVar})`);
+  });
+
+  it("編集の場所は**ページのスクロールの外**（#1104・実機の指摘）", () => {
+    // ⚠️ **実機の報告**（2026-09-10）＝「タイムライン編集画面にスクロールをする必要が
+    // 出てきてしまっています。これは絶対避けたいです」。
+    // 器を高さで決め打つ形（`76vh` でも「画面の残り」でも）だと、上の見出しか下の知らせのぶん必ずはみ出す。
+    // **器をスクロールの外へ出して flex で分ける**のが唯一の解なので、その骨格を留める。
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".main-scroll--fixed"), "ページがスクロールする骨格に戻っている").not.toBeNull();
+    expect(container.querySelector(".panel-layout--fill"), "器が高さの決め打ちに戻っている").not.toBeNull();
+    // 知らせは自分の中でスクロールする（消すと「注意 N件」から寄れる先が無くなる）。
+    expect(container.querySelector(".timeline-notices")).not.toBeNull();
   });
 
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
@@ -4851,8 +4889,9 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
     fireEvent.keyDown(container.querySelector(".timeline-ruler") as HTMLElement, { key: "End" });
     expect(useTimelineStore.getState().playheadSec).toBe(60);
-    // 60秒＝2160px。見えている幅は 500−84（列の名前の欄）＝416px なので、行き止まりまで送る。
-    expect(scroll.scrollLeft).toBe(2160 - (500 - 84));
+    // 60秒＝2160px。見えている幅は 500−（列の名前の欄）なので、行き止まりまで送る。
+    // ⚠️ **欄の幅を直書きしない**（#1104）＝TS が単一の参照元なので、広げたときにここだけ古くなる。
+    expect(scroll.scrollLeft).toBe(2160 - (500 - TIMELINE_LABEL_W_PX));
   });
 
   // ⚠️ **`End` と対称に固定する**（レビュー 🟡）＝同じ形（`setPlayhead` の直後に追う）なのに
