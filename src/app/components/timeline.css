@@ -83,10 +83,16 @@
   z-index: 5;
   flex: 0 0 auto;
   width: var(--timeline-label-w);
+  /* ⚠️ **横並びにする**（#1104・実機のスクショで判明 2026-09-10）＝縦積みだと
+     名前の**下**に「⋮」が来て、**この欄の高さが行の高さを決めてしまう**（実測 約57px）。
+     帯を 28px に詰めても「間がばがばに空いてんだもん」（利用者）はこれが原因。 */
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  /* ⚠️ **中身で押し広げない**＝はみ出すぶんは隠す（行の高さは帯が決める）。 */
+  overflow: hidden;
+  padding: 0 4px;
   /* ⚠️ **行間を詰める**（#1104・利用者指摘 2026-09-10）＝`:root` の 1.6 を継ぐと
      名前(12px)＋添え(10px)で 35px 要り、**列の高さがそれに引きずられていた**（40px の理由）。
      普通の動画エディタの密度にするには、まずここを詰める。 */
@@ -96,9 +102,33 @@
   font-size: 12px;
   color: var(--color-text);
 }
+/* 名前は伸び縮みして、長いときは省略する（欄の幅は 84px しかない）。 */
+.timeline-row-label > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .timeline-row-label .sub {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--color-text-faint);
+}
+
+/* 列の操作（「⋮」）。⚠️ **共通のボタンの見た目を使わない**＝上下の余白で行が伸びる。 */
+.timeline-row-menu {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 14px;
+}
+.timeline-row-menu:hover {
+  color: var(--color-text);
 }
 
 .timeline-track {

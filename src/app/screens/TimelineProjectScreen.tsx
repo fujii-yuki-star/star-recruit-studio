@@ -3701,7 +3701,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {track.hidden && <span className="sub">出さない</span>}
                       {track.locked && <span className="sub">固定中</span>}
                       <button
-                        className="btn btn-ghost btn-sm"
+                        // ⚠️ **共通のボタンの見た目を使わない**（#1104）＝上下の余白で**行が伸びる**。
+                        // 名前の横に置くので、行の高さは帯が決める。
+                        className="timeline-row-menu"
                         // ⚠️ **親（掴んで並べ替える面）へ渡さない**（レビュー）＝押してから少し動かすと
                         // 列が並べ替わる（帯の端の取っ手が本体のドラッグを兼ねないのと同じ理由）。
                         onPointerDown={(e) => e.stopPropagation()}

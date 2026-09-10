@@ -258,7 +258,12 @@ export function PanelLayoutView({
   // **中身の最小の高さより縮まない**。器がスクロールしない画面では、上の欄（仕上がり確認）が縮まずに
   // 下の欄を押し潰し、**器からはみ出すので欄の中のスクロールも効かなくなる**
   // （「並びブロック内のスクロールまで消えた」「かなり窮屈」＝利用者指摘 2026-09-10）。
-  const rows = hasBottom ? `minmax(0, 1fr) auto ${bottom * 100}%` : "minmax(0, 1fr)";
+  // ⚠️ **割合は `%` ではなく `fr`**（#1104・実機で発覚）＝器の高さが flex で決まるとき、
+  // `%` は解決できずに**行が中身なりに伸びて器からはみ出す**（欄の中のスクロールも効かなくなる）。
+  // `fr` は残りの場所を配るので、器の高さの決まり方に依らない。
+  const rows = hasBottom
+    ? `minmax(0, ${1 - bottom}fr) auto minmax(0, ${bottom}fr)`
+    : "minmax(0, 1fr)";
   return (
     <div className={`panel-layout${fill ? " panel-layout--fill" : ""}`} ref={rootRef} style={{ gridTemplateRows: rows }}>
       <div className="panel-layout-main">
