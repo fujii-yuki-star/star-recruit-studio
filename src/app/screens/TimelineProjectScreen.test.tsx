@@ -18,7 +18,7 @@ import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
-import { TIMELINE_LABEL_W_PX, VOLUME_POINTS_MAX } from "../../domain/constants";
+import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME_POINTS_MAX } from "../../domain/constants";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
@@ -4077,6 +4077,9 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const timeline = container.querySelector(".timeline") as HTMLElement;
     expect(timeline.style.getPropertyValue("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
+    // ⚠️ **高さも同じ扱い**（#1104）＝行の高さと帯の余白を CSS の既定に頼ると、詰めたときに黙ってずれる。
+    expect(timeline.style.getPropertyValue("--timeline-lane-h")).toBe(`${TIMELINE_LANE_H_PX}px`);
+    expect(timeline.style.getPropertyValue("--timeline-clip-inset")).toBe(`${TIMELINE_CLIP_INSET_PX}px`);
   });
 
   it("`--clip-menu-w` は**「⋮」から見える所**で宣言する（帯で宣言すると届かない）", () => {
@@ -4423,6 +4426,10 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(decl("--clip-menu-w")).toBe(`${CLIP_MENU_W_PX}px`);
     expect(decl("--clip-handle-w")).toBe(`${CLIP_HANDLE_W_PX}px`);
     expect(decl("--clip-handle-hit-w")).toBe(`${CLIP_HANDLE_HIT_W_PX}px`);
+    // ⚠️ **高さも同じ扱い**（#1104・レビュー 🟡）＝CSS の側に「単一の参照元は TS」と書いたのに、
+    // 一致を見る検査がここに無いと、**その主張が成り立たないまま**になる。
+    expect(decl("--timeline-lane-h")).toBe(`${TIMELINE_LANE_H_PX}px`);
+    expect(decl("--timeline-clip-inset")).toBe(`${TIMELINE_CLIP_INSET_PX}px`);
   });
 
   it("取っ手の**当たり判定は見た目より広い**（指が乗る前に本体を掴まない・#752-7）", () => {

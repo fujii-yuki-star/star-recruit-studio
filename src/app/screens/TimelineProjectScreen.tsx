@@ -54,7 +54,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditTextAt } from "../../domain/timeline/credit";
@@ -3468,6 +3468,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             // 幅は**TS が単一の参照元**（下限の計算がこの値を引くので、CSS の既定に頼ると黙ってずれる）。
             style={{
               ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px`,
+              // 高さも**TS が単一の参照元**（#1104）＝行と帯と「⋮」が同じ数字から導かれる。
+              ["--timeline-lane-h" as string]: `${TIMELINE_LANE_H_PX}px`,
+              ["--timeline-clip-inset" as string]: `${TIMELINE_CLIP_INSET_PX}px`,
               ["--clip-handle-w" as string]: `${CLIP_HANDLE_W_PX}px`,
               ["--clip-handle-hit-w" as string]: `${CLIP_HANDLE_HIT_W_PX}px`,
               ["--clip-menu-w" as string]: `${CLIP_MENU_W_PX}px`,
