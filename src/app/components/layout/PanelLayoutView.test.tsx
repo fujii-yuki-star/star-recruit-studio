@@ -263,3 +263,21 @@ describe("PanelLayoutView: メニューからの並べ替え（決定12）", () 
     expect(placedPanelIds(next)).toContain("b");
   });
 });
+
+describe("欄が縮めること（#1104・実機で発覚）", () => {
+  // ⚠️ **`1fr` は `minmax(auto, 1fr)` と同じ**＝**中身の最小の高さより縮まない**。
+  // 器がスクロールしない画面では、上の欄が縮まずに下の欄を押し潰し、
+  // **器からはみ出すので欄の中のスクロールも効かなくなる**（実機で起きた）。
+  it("行は minmax(0, 1fr)＝中身より小さくなれる", () => {
+    const layout = { ...emptyLayout(), nodes: { left: null, center: { panelId: "a" }, right: null, bottom: { panelId: "b" } } };
+    const { container } = render(
+      <PanelLayoutView layout={layout} panels={[{ id: "a", title: "A", content: <div /> }, { id: "b", title: "B", content: <div /> }]} onChange={() => {}} />,
+    );
+    const root = container.querySelector(".panel-layout") as HTMLElement;
+    expect(root.style.gridTemplateRows).toContain("minmax(0, 1fr)");
+    // ⚠️ **`minmax(0, 1fr)` の中の `1fr` を数えない**＝それを取り除いてから、素の `1fr` が
+    // 残っていないことを見る（残っていたら、その行は中身より縮めない）。
+    const bare = root.style.gridTemplateRows.split("minmax(0, 1fr)").join("");
+    expect(bare, "素の 1fr が残っている＝その行は中身より縮めない").not.toContain("1fr");
+  });
+});

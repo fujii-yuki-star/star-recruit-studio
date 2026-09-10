@@ -253,7 +253,12 @@ export function PanelLayoutView({
 
   // 下の欄があるときの子は「本体・境界・下の欄」の**3つ**。境界ぶんの行を書かないと、境界が下の欄の行を取り、
   // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
-  const rows = hasBottom ? `1fr auto ${bottom * 100}%` : "1fr";
+  //
+  // ⚠️ **`1fr` ではなく `minmax(0, 1fr)`**（#1104・実機で発覚）＝`1fr` は `minmax(auto, 1fr)` と同じで、
+  // **中身の最小の高さより縮まない**。器がスクロールしない画面では、上の欄（仕上がり確認）が縮まずに
+  // 下の欄を押し潰し、**器からはみ出すので欄の中のスクロールも効かなくなる**
+  // （「並びブロック内のスクロールまで消えた」「かなり窮屈」＝利用者指摘 2026-09-10）。
+  const rows = hasBottom ? `minmax(0, 1fr) auto ${bottom * 100}%` : "minmax(0, 1fr)";
   return (
     <div className={`panel-layout${fill ? " panel-layout--fill" : ""}`} ref={rootRef} style={{ gridTemplateRows: rows }}>
       <div className="panel-layout-main">
