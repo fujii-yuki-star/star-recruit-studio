@@ -32,6 +32,15 @@
   flex-wrap: wrap;
 }
 
+/* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
+.timeline-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4em;
+  background: var(--color-border-strong);
+  margin: 0 var(--gap-xs);
+}
+
 .timeline-scroll {
   overflow-x: auto;
   overflow-y: hidden;

@@ -2697,7 +2697,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     // #712 でこの画面に取り込みが付いたので、案内はここの導線を指す。
     withAsset({ assets: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/この動画にはまだ写真がありません/)).toBeInTheDocument();
+    expect(screen.getByText(/写真がまだありません/)).toBeInTheDocument();
     expect(screen.queryByText(/素材の画面で取り込む/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument(); // できることは残る

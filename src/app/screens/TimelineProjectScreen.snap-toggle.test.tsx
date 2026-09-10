@@ -64,11 +64,16 @@ describe("タイムライン編集：吸着は切替で切れる（#1032）", ()
     expect(snapSwitch(), "覚えていない").toHaveAttribute("aria-checked", "false");
   });
 
-  it("入っている間だけ `Ctrl` の案内を出す（切っているときに要らない説明を並べない）", () => {
+  it("`Ctrl` の案内は、入っている間だけホバーで出す（行を1つも使わない）", () => {
+    // ⚠️ **行から外した**（#1104・実機の指摘 2026-09-10）＝以前は独立した1行で出していたが、
+    // 「表示倍率」「吸着」と合わせて**欄の中身が入る前に3行**を使い、帯が2〜3列しか見えなかった
+    // （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
+    // ⚠️ **意味は落とさない**＝`Ctrl` の道は残し（ADR-0034 決定）、説明を切替のホバーへ移す。
+    // ⚠️ **切っているときは言わない**＝吸着していないのに「その回だけ吸着しません」は意味を成さない。
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/Ctrl/)).toBeInTheDocument();
+    expect(snapSwitch().getAttribute("title")).toMatch(/Ctrl/);
     fireEvent.click(snapSwitch());
-    expect(screen.queryByText(/Ctrl/), "切っているのに案内が残っている").toBeNull();
+    expect(snapSwitch().getAttribute("title"), "切っているのに案内が残っている").not.toMatch(/Ctrl/);
   });
 });

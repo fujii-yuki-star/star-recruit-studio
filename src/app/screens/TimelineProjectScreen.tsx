@@ -3518,26 +3518,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               >
                 全体を表示
               </button>
-            </div>
-            {/* ⚠️ **文章でお願いしない**（#1032）＝以前は「`Ctrl` を押しながら動かすと
-                吸着しません」と**説明だけ**で、切るにはその一文を読むしかなかった（#819-3 で書いたもの）。
-                切替を置いて**押せば切れる**ようにする。
-                ⚠️ **`Ctrl` は残す**（ADR-0034 決定）＝押している間だけ切れるのは、
-                吸着を使いながら**その回だけ外したい**ときの道。 */}
-            <div className="toggle-row" style={{ maxWidth: 420 }}>
-              <span className="field-label text-sm" style={{ margin: 0 }}>吸着（帯の端・再生位置・0秒へ寄せる）</span>
+              {/* ⚠️ **操作は1行に畳む**（#1104・実機の指摘 2026-09-10）＝以前は「表示倍率」「吸着」
+                  「`Ctrl` の説明」で**3行**を使っており、欄の中身（帯）が入る前に高さを食い潰していた
+                  （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
+                  ⚠️ **文章でお願いしない**（#1032）＝切替は残す（押せば切れる）。
+                  ⚠️ **`Ctrl` は残す**（ADR-0034 決定）＝押している間だけ切れる道は消さず、
+                  **説明はホバーへ移す**（読まないと使えない状態にはしない）。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <span className="field-label text-sm" style={{ margin: 0 }}>吸着</span>
               <Switch
                 on={snapEnabled}
                 onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
                 label="吸着"
-                title={snapEnabled ? "切ると、掴んだ場所へそのまま置けます" : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"}
+                title={
+                  snapEnabled
+                    ? "切ると、掴んだ場所へそのまま置けます。Ctrl を押しながら動かすと、その回だけ吸着しません"
+                    : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"
+                }
               />
             </div>
-            {snapEnabled && (
-              <p className="text-muted text-sm">
-                <kbd>Ctrl</kbd> を押しながら動かすと、その回だけ吸着しません。
-              </p>
-            )}
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
@@ -4938,9 +4937,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">
-                  {placeAtPlayheadHint(playheadSec, "塞がっているときは、その次に空いている時刻へ置きます。")}
-                  つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
+                {/* ⚠️ **3文を1〜2行に詰める**（#1104・実機の指摘 2026-09-10「文を縦に3つ並べるのでは
+                    なく、1~2行に圧縮する」）＝欄が縦に狭いので、説明が3行あると入口そのものが押し出される。
+                    ⚠️ **意味は落とさない**＝どこへ入るかは押す前に帯で見せてある（#1096）ので、
+                    文は「押したら」「運んだら」の2つだけに絞る。 */}
+                <p className="text-muted text-sm">
+                  {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
+                  つかんで運べば落とした所へ。
                 </p>
                 {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
                     ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
@@ -4977,8 +4980,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     図形を置く
                   </button>
                 </div>
+                {/* ⚠️ **1行に詰める**（#1104・実機の指摘）＝3文だと欄の高さを食う。 */}
                 {visualAssets.length === 0 ? (
-                  <p className="field-hint">この動画にはまだ写真がありません。「写真・動画・音楽を取り込む」で足せます。文字と図形はいま置けます。</p>
+                  <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
                   <PickerList
                     items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
