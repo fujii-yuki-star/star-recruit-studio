@@ -116,6 +116,27 @@ describe("タイムラインの寸法は1か所から導く（#1104）", () => {
   });
 });
 
+describe("帯の密度（#1104・実機の指摘）", () => {
+  // ⚠️ **実機の報告から直した**（2026-09-10）＝「明らかに帯一つ一つの間の空間が今は広すぎます。
+  // 普通の動画エディターツールでももっとぎちぎちだと思います」。
+  it("列の高さと帯の余白を、実数で留める", () => {
+    // ⚠️ **相対で書かない**＝「前より小さい」では、戻されたときに気づけない。
+    expect(TIMELINE_LANE_H_PX).toBe(28);
+    expect(TIMELINE_CLIP_INSET_PX).toBe(2);
+  });
+
+  it("列の名前の欄は、行間を詰めてある（詰めないと列の高さがそれに引きずられる）", () => {
+    // ⚠️ **これが 40px だった理由**＝`:root` の `line-height: 1.6` を継ぐと、
+    // 名前(12px)＋添え(10px)で 35.2px 要り、列はそれ以上でないと収まらなかった。
+    const label = ruleBody(css, ".timeline-row-label");
+    expect(label).not.toBeNull();
+    const lh = Number(/line-height:\s*([\d.]+)\s*;/.exec(label ?? "")?.[1]);
+    expect(Number.isFinite(lh)).toBe(true);
+    // 名前と添えの2行が、列の高さに収まること（これが崩れると文字が行からはみ出す）。
+    expect(12 * lh + 10 * lh).toBeLessThanOrEqual(TIMELINE_LANE_H_PX);
+  });
+});
+
 describe("門番自身の検査（わざと壊した入力）", () => {
   it("規則が無ければ null（中身が空だから通った、にしない）", () => {
     expect(ruleBody(".other { a: 1px; }", ".timeline-lane")).toBeNull();

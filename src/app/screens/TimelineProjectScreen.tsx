@@ -158,7 +158,6 @@ import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/spli
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
-import { panelLayoutHeight, useStickyHeaderHeight } from "../hooks/usePanelViewportHeight";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -704,8 +703,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
-  // 貼り付く見出しの高さ（#1104）＝器はこれを引いた「画面の残り」を使う。
-  const stickyHeaderPx = useStickyHeaderHeight();
   const defaultLayout = useMemo(() => {
     const l = emptyLayout();
     l.nodes.center = { panelId: PANEL_ID.preview };
@@ -5178,7 +5175,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   return (
     <>
-      <div className="main-scroll">
+      <div className="main-scroll main-scroll--fixed">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       <PageHead
@@ -5241,14 +5238,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         囲わないと、貼り付いた知らせがそれらを覆って押せなくなる（§2-5＝戻れない状態を作らない）。
         ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
-      {/* ⚠️ **器は「画面の残り」いっぱいにする**（#1104）＝`76vh` の決め打ちだと、貼り付く見出しと
-          余白のぶん器の下が画面からはみ出し、初期表示で帯が隠れる。ページのスクロールは残す
-          （器の下の「注意」の知らせに辿り着けなくなるため）。 */}
-      <div
-        className="timeline-flash-zone"
-        style={{ ["--panel-layout-h" as string]: panelLayoutHeight(stickyHeaderPx) }}
-      >
-        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} />
+      {/* ⚠️ **ここが編集の場所**＝スクロールの外で、残りの高さを全部使う（#1104）。
+          `76vh` の決め打ちだと上の見出しと足して画面をはみ出し、画面の残りいっぱいにすると
+          下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
+      <div className="timeline-flash-zone">
+        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} fill />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
@@ -5285,7 +5279,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。
           ⚠️ **見出しの行の「注意 N 件」からここへ寄る**（#1032）＝帯の器（76vh）の下なので、
           編集している間は**画面外**だった。 */}
-      <div ref={noticesRef}>
+      {/* ⚠️ **知らせは自分の中でスクロールする**（#1104）＝ページをスクロールさせないので、
+          ここが伸びると編集の場所を押し出す。見出しの行の「注意 N件」から寄れる先はここのまま。 */}
+      <div ref={noticesRef} className="timeline-notices">
       {notices.missingTemplate > 0 && (
         <p className="notice notice-warn" role="alert">{missingTemplateMessage(missingTemplateCount)}</p>
       )}

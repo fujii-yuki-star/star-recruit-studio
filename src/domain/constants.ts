@@ -70,7 +70,7 @@ export const TIMELINE_LABEL_W_PX = 84;
  * ⚠️ **いまは値を変えていない**（40px のまま）＝#1104 の「行を詰めるか」は**実機で何本の列で
  * 溢れるかを見てから**決める。ここはそのときに**1行で変えられる**ようにするための下ごしらえ。
  */
-export const TIMELINE_LANE_H_PX = 40;
+export const TIMELINE_LANE_H_PX = 28;
 
 /**
  * 帯（クリップ）の上下の余白（px）。行の高さから上下ぶん引いたものが帯の高さになる。
@@ -78,7 +78,7 @@ export const TIMELINE_LANE_H_PX = 40;
  * ⚠️ **行の高さと対で意味を持つ**＝`TIMELINE_LANE_H_PX` だけ変えると、帯が行に対して
  * 太すぎる／細すぎるになる。行内の文字の高さは CSS がこの2つから導く（数字を3つ目に増やさない）。
  */
-export const TIMELINE_CLIP_INSET_PX = 4;
+export const TIMELINE_CLIP_INSET_PX = 2;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。

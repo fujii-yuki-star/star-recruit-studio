@@ -13,8 +13,8 @@
      タイムライン画面が流し込む。ここは流し込みが無いときの保険（幅と同じ扱い）。
      ⚠️ **`.timeline` で宣言する**＝行（`.timeline-lane`）と帯（`.timeline-clip`）とその中の「⋮」の
      **すべてから**見える必要がある（カスタムプロパティは子孫にしか継承しない）。 */
-  --timeline-lane-h: 40px;
-  --timeline-clip-inset: 4px;
+  --timeline-lane-h: 28px;
+  --timeline-clip-inset: 2px;
   /* 帯の枠線の太さ。⚠️ **下の `calc` と `.timeline-clip` の両方が引く**＝直書きすると、
      太さを変えたときに文字の高さだけ取り残される（レビュー 🟡）。 */
   --timeline-clip-border-w: 1px;
@@ -78,6 +78,10 @@
   flex-direction: column;
   justify-content: center;
   padding: 0 8px;
+  /* ⚠️ **行間を詰める**（#1104・利用者指摘 2026-09-10）＝`:root` の 1.6 を継ぐと
+     名前(12px)＋添え(10px)で 35px 要り、**列の高さがそれに引きずられていた**（40px の理由）。
+     普通の動画エディタの密度にするには、まずここを詰める。 */
+  line-height: 1.15;
   background: var(--color-surface-alt);
   border-right: 1px solid var(--color-border-strong);
   font-size: 12px;

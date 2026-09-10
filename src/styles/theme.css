@@ -157,6 +157,19 @@ button {
   padding: var(--gap-xl);
 }
 
+/* **ページをスクロールさせない画面**（#1104・タイムライン編集）。
+   ⚠️ **編集の場所はスクロールの外に置く**（利用者指摘 2026-09-10「タイムライン編集画面に
+   スクロールをする必要が出てきてしまっています。これは絶対避けたいです」）＝
+   器を `76vh` で決め打つと上の見出しと足して画面をはみ出し、逆に画面の残りいっぱいにすると
+   下の知らせのぶんはみ出す。**器そのものをスクロールの外に出して flex で分ける**のが唯一の解。
+   ⚠️ **余白も詰める**＝`--gap-xl`(36px) は上下で 72px＝列2本ぶん。編集の場所を削るには大きすぎる。 */
+.main-scroll--fixed {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: var(--gap);
+}
+
 .content-with-yuko {
   display: grid;
   grid-template-columns: 1fr 300px;
@@ -1236,9 +1249,7 @@ button.badge {
   gap: 0;
   /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
      `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。
-     ⚠️ **画面ごとに差し替えられる**（#1104）＝タイムライン編集は貼り付く見出しのぶんを引いた
-     「画面の残り」を流し込む。流し込まない画面はこれまでどおり `76vh`。 */
-  height: var(--panel-layout-h, 76vh);
+  height: 76vh;
   min-height: 420px;
   margin-bottom: var(--space-lg, 16px);
 }
@@ -1350,6 +1361,25 @@ button.badge {
    貼り付き（sticky）は**自分より後ろの兄弟のために場所を空けない**ので、囲いで区切るのが唯一の確実な防ぎ方。 */
 .timeline-flash-zone {
   margin-bottom: var(--space-lg, 16px);
+}
+
+/* **編集の場所は残りの高さを全部使う**（#1104）。⚠️ `min-height: 0` が無いと、
+   flex の子は中身の高さより縮まないので**器がはみ出してページがスクロールする**。 */
+.main-scroll--fixed .timeline-flash-zone {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--gap-sm);
+}
+
+/* **知らせは自分の中でスクロールする**（#1104）＝ページをスクロールさせないので、
+   ここが伸びると編集の場所を押し出してしまう。⚠️ **消さずに残す**＝見出しの行の
+   「注意 N件」から寄れる先が要る（`06 §12.1`・#1032）。出るものが無ければ高さ 0。 */
+.main-scroll--fixed .timeline-notices {
+  flex: 0 0 auto;
+  max-height: 26vh;
+  overflow-y: auto;
 }
 
 .timeline-flash {

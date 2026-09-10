@@ -4438,6 +4438,19 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(left).toContain(`- var(--clip-menu-w) - var(${widthVar})`);
   });
 
+  it("編集の場所は**ページのスクロールの外**（#1104・実機の指摘）", () => {
+    // ⚠️ **実機の報告**（2026-09-10）＝「タイムライン編集画面にスクロールをする必要が
+    // 出てきてしまっています。これは絶対避けたいです」。
+    // 器を高さで決め打つ形（`76vh` でも「画面の残り」でも）だと、上の見出しか下の知らせのぶん必ずはみ出す。
+    // **器をスクロールの外へ出して flex で分ける**のが唯一の解なので、その骨格を留める。
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".main-scroll--fixed"), "ページがスクロールする骨格に戻っている").not.toBeNull();
+    expect(container.querySelector(".panel-layout--fill"), "器が高さの決め打ちに戻っている").not.toBeNull();
+    // 知らせは自分の中でスクロールする（消すと「注意 N件」から寄れる先が無くなる）。
+    expect(container.querySelector(".timeline-notices")).not.toBeNull();
+  });
+
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
     // ⚠️ 流し込みは必ず行われるので既定は普通は使われないが、**書き写しである以上ずれ得る**。
     // ずれると、この file を単独で読んだときの見え方と計算が食い違う（`--timeline-label-w` と同じ流儀）。
