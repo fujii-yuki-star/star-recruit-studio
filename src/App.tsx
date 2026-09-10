@@ -6,6 +6,8 @@ import type { ScreenId } from "./app/data/mockData";
 import { hasOpenProject, isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
+import { ChevronRightIcon } from "./app/components/icons";
+import { useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
 import { BulkVoiceBanner } from "./app/components/BulkVoiceBanner";
@@ -111,6 +113,8 @@ function App() {
     useStartNewProject(navigate);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
+  // 左の帯を畳んでいるか（#1103）。画面の好みなので覚える（`localStorage`・ADR-0033）。
+  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
   // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。
   // 有効にするのは「取り消す/やり直す」UI がある画面だけ（UNDO_REDO_SCREENS＝たたき台/場面編集/タイムライン編集）。
   // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、
@@ -187,7 +191,28 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={navigate} currentProjects={currentProjects} />
+      {/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
+          ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠している間は細い取っ手をいつも出す。
+          `<button>` なので `Tab` で辿り着けて押せる（掴む操作しか無い戻り方を作らない）。 */}
+      {sidebarCollapsed ? (
+        <button
+          type="button"
+          className="sidebar-reveal"
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="メニューを出す"
+          aria-expanded={false}
+          title="メニューを出す"
+        >
+          <ChevronRightIcon size={18} />
+        </button>
+      ) : (
+        <Sidebar
+          current={screen}
+          onNavigate={navigate}
+          currentProjects={currentProjects}
+          onCollapse={() => setSidebarCollapsed(true)}
+        />
+      )}
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">

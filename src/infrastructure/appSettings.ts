@@ -18,6 +18,38 @@ function write(key: string, value: string): void {
   if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
 }
 
+/**
+ * 「はい／いいえ」の画面の好み（#1103）。
+ *
+ * ⚠️ **読み書きはここに置く**（`CLAUDE.md §4`＝外部I/O は `infrastructure` に隔離する）＝
+ * `localStorage` を画面や hook から直に触ると、**同じことを何通りにも持つ**ことになる
+ * （ADR-0033 段階4「同じことを2通りで持たない」）。React 側の糊（この場の正・他の使い手への合図）は
+ * `app/hooks/booleanPref.ts` が持つ。
+ *
+ * ⚠️ **壊れた値・読めないときは既定へ倒す**（ADR-0033 結果・影響＝起動できない状態を作らない）。
+ * `getPanelLayout` が壊れた値を「無い」と同じ扱いにしているのと同じ流儀。
+ * ⚠️ **`"1"`/`"0"` 以外を「いいえ」に倒さない**＝既定が「はい」の好みで、壊れた値のときだけ
+ * 黙って「いいえ」になる（＝**既定が効かない**）。
+ */
+export function getBooleanSetting(key: string, fallback: boolean): boolean {
+  try {
+    const v = read(key);
+    if (v === '1') return true;
+    if (v === '0') return false;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setBooleanSetting(key: string, value: boolean): void {
+  try {
+    write(key, value ? '1' : '0');
+  } catch {
+    // 覚えられなくても、その場では効かせる（呼び出し側が正を持つ）。
+  }
+}
+
 /** VOICEVOX 接続先URL。未設定なら ''（Rust 側が既定 http://localhost:50021 を使う）。 */
 export function getVoicevoxUrl(): string {
   return read(VOICEVOX_URL_KEY) ?? '';
