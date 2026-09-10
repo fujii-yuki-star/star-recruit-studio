@@ -6815,31 +6815,35 @@ mod bgm_mix_message_tests {
     #[test]
     fn bgm_mix_failure_has_two_branches() {
         assert!(SRC.contains("if has_bgm {"), "状況で言い分けていない");
-        assert!(SRC.contains("BGMの合成に失敗しました。"), "BGM がある側の文が無い");
-        assert!(SRC.contains("音量の調整に失敗しました。"), "音量をそろえるだけの側の文が無い");
+        assert!(
+            SRC.contains("BGMの合成に失敗しました。"),
+            "BGM がある側の文が無い"
+        );
+        assert!(
+            SRC.contains("音量の調整に失敗しました。"),
+            "音量をそろえるだけの側の文が無い"
+        );
     }
 
     /// ⚠️ **次の行動を言う**（`CLAUDE.md` §2-5）＝どちらの枝も「〜してください」で終わること。
     #[test]
     fn both_branches_tell_the_next_action() {
-        for msg in [
-            "BGMの合成に失敗しました。",
-            "音量の調整に失敗しました。",
-        ] {
+        for msg in ["BGMの合成に失敗しました。", "音量の調整に失敗しました。"]
+        {
             let at = SRC.find(msg).expect("文が見つからない");
             let line_end = SRC[at..].find('\n').map(|i| at + i).unwrap_or(SRC.len());
             let line = &SRC[at..line_end];
-            assert!(
-                line.contains("ください"),
-                "次の行動を言っていない: {line}"
-            );
+            assert!(line.contains("ください"), "次の行動を言っていない: {line}");
         }
     }
 
     /// ⚠️ **手がかりを捨てない**（#1105）＝ffmpeg が言ったことを記録に残していること。
     #[test]
     fn ffmpeg_stderr_is_recorded() {
-        assert!(SRC.contains("bgm mix failed (has_bgm="), "失敗の中身を記録していない");
+        assert!(
+            SRC.contains("bgm mix failed (has_bgm="),
+            "失敗の中身を記録していない"
+        );
         assert!(SRC.contains("bgm mix args:"), "渡した引数を記録していない");
     }
 }
