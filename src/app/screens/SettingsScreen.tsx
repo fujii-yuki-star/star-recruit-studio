@@ -34,11 +34,12 @@ import {
  * 見た目の3択（ADR-0039）。
  *
  * ⚠️ **画面に出す語は「見た目・明るい・暗い」**（§2-3＝`テーマ` `ダークモード` `ライト/ダーク` は出さない）。
- * ⚠️ **「OS に合わせる」を先頭に置く**＝これが既定（`APPEARANCE_DEFAULT`）なので、
+ * ⚠️ **「パソコンの設定に合わせる」を先頭に置く**＝これが既定（`APPEARANCE_DEFAULT`）なので、
  * いま何が効いているのかが並びの先頭で分かる。
  */
-const APPEARANCE_CHOICES: [Appearance, string][] = [
-  ["system", "OS に合わせる"],
+// ⚠️ **「OS」と書かない**（レビュー 🟡・§2-3）＝利用者は人事・非エンジニア。技術寄りの略語を画面に出さない。
+export const APPEARANCE_CHOICES: [Appearance, string][] = [
+  ["system", "パソコンの設定に合わせる"],
   ["light", "明るい"],
   ["dark", "暗い"],
 ];

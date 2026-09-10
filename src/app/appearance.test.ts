@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prefersDark, resolveAppearance } from "./hooks/useAppearance";
 import { APPEARANCE_DEFAULT, getAppearance, setAppearance } from "../infrastructure/appSettings";
+import { APPEARANCE_CHOICES } from "./screens/SettingsScreen";
 
 const css = readFileSync(join(process.cwd(), "src/styles/theme.css"), "utf8");
 
@@ -103,13 +104,34 @@ describe("動画の絵は見た目で変わらない（ADR-0001）", () => {
   });
 });
 
+describe("画面に出す言い方（§2-3）", () => {
+  it("3択の言い方と並びを留める（技術用語を出さない）", () => {
+    // ⚠️ **「OS」と書かない**（レビュー 🟡）＝利用者は人事・非エンジニア。技術寄りの略語を画面に出さない。
+    // ⚠️ **並びも留める**＝既定を先頭に置く（いま何が効いているのかが並びの先頭で分かる）。
+    expect(APPEARANCE_CHOICES).toEqual([
+      ["system", "パソコンの設定に合わせる"],
+      ["light", "明るい"],
+      ["dark", "暗い"],
+    ]);
+    // 先頭が既定であること（並びと既定がばらばらにならない）。
+    expect(APPEARANCE_CHOICES[0][0]).toBe(APPEARANCE_DEFAULT);
+  });
+
+  it("`テーマ` `ダークモード` `ライト/ダーク` を画面に出さない", () => {
+    const shown = APPEARANCE_CHOICES.map(([, l]) => l).join(" ");
+    for (const banned of ["テーマ", "ダークモード", "ライト", "ダーク", "OS"]) {
+      expect(shown).not.toContain(banned);
+    }
+  });
+});
+
 describe("好みの解き方（純粋関数）", () => {
   it("選んだ見た目はそのまま当たる（OS に関わらず）", () => {
     expect(resolveAppearance("light", true)).toBe("light");
     expect(resolveAppearance("dark", false)).toBe("dark");
   });
 
-  it("「OS に合わせる」だけが OS を見る", () => {
+  it("「パソコンの設定に合わせる」だけがパソコン側を見る", () => {
     expect(resolveAppearance("system", true)).toBe("dark");
     expect(resolveAppearance("system", false)).toBe("light");
   });
@@ -119,7 +141,7 @@ describe("見た目の覚え", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("覚えが無ければ既定（いまは「OS に合わせる」）", () => {
+  it("覚えが無ければ既定（いまは「パソコンの設定に合わせる」）", () => {
     expect(getAppearance()).toBe(APPEARANCE_DEFAULT);
     expect(APPEARANCE_DEFAULT).toBe("system");
   });
