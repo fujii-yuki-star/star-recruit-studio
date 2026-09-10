@@ -8,6 +8,21 @@
   /* ⚠️ **単一の参照元は TS 側**（`TIMELINE_LABEL_W_PX`）＝両方のタイムライン画面が流し込む。
      ここは流し込みが無いときの保険（全体表示・錨点の計算も同じ値を引くので、ずれると黙って合わなくなる）。 */
   --timeline-label-w: 84px;
+  /* 列1本の高さと、帯の上下の余白（#1104）。
+     ⚠️ **単一の参照元は TS 側**（`TIMELINE_LANE_H_PX` / `TIMELINE_CLIP_INSET_PX`）＝両方の
+     タイムライン画面が流し込む。ここは流し込みが無いときの保険（幅と同じ扱い）。
+     ⚠️ **`.timeline` で宣言する**＝行（`.timeline-lane`）と帯（`.timeline-clip`）とその中の「⋮」の
+     **すべてから**見える必要がある（カスタムプロパティは子孫にしか継承しない）。 */
+  --timeline-lane-h: 40px;
+  --timeline-clip-inset: 4px;
+  /* 帯の枠線の太さ。⚠️ **下の `calc` と `.timeline-clip` の両方が引く**＝直書きすると、
+     太さを変えたときに文字の高さだけ取り残される（レビュー 🟡）。 */
+  --timeline-clip-border-w: 1px;
+  /* 帯の中の文字の高さ。⚠️ **3つ目の数字を増やさない**＝上の3つから導く。直書きすると、
+     行を詰めたときに**文字だけ元の高さのまま**になって行からはみ出す。 */
+  --timeline-clip-line-h: calc(
+    var(--timeline-lane-h) - var(--timeline-clip-inset) * 2 - var(--timeline-clip-border-w) * 2
+  );
 }
 
 .timeline-toolbar {
@@ -111,7 +126,7 @@
   --clip-handle-w: 7px;
   /* 取っ手の**当たり判定**（見た目の2倍以上＝業界の型・#752-7）。見た目は `--clip-handle-w` のまま。 */
   --clip-handle-hit-w: 14px;
-  height: 40px;
+  height: var(--timeline-lane-h);
   border-bottom: 1px solid var(--color-border);
 }
 .timeline-lane:last-child {
@@ -121,15 +136,15 @@
 /* クリップ */
 .timeline-clip {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: var(--timeline-clip-inset);
+  bottom: var(--timeline-clip-inset);
   min-width: 2px;
   box-sizing: border-box;
-  border: 1px solid;
+  border: var(--timeline-clip-border-w) solid;
   border-radius: var(--radius-sm);
   padding: 0 6px;
   font-size: 11px;
-  line-height: 30px;
+  line-height: var(--timeline-clip-line-h);
   color: var(--color-text);
   overflow: hidden;
   white-space: nowrap;
@@ -158,15 +173,17 @@
   position: absolute;
   /* 常は薄く、指したときに濃く（下の :hover/:focus-visible が効くための基準）。 */
   opacity: 0.6;
-  top: 4px;
-  bottom: 4px;
+  /* ⚠️ **帯と同じ余白を引く**（レビュー 🔴）＝「⋮」は帯の**兄弟**で包含ブロックも同じなので、
+     ここだけ直書きだと、余白を詰めたとき**箱より文字が高くなって帯とも上下がずれる**。 */
+  top: var(--timeline-clip-inset);
+  bottom: var(--timeline-clip-inset);
   width: var(--clip-menu-w);
   padding: 0;
   border: none;
   background: transparent;
   color: var(--color-text);
   font-size: 11px;
-  line-height: 30px;
+  line-height: var(--timeline-clip-line-h);
   cursor: pointer;
   /* 選んだ帯（`z-index: 3`）より上に置く＝選んだ帯の上に出すため。 */
   z-index: 4;
@@ -243,9 +260,11 @@
   background: var(--color-danger-soft);
   border-color: var(--color-danger);
 }
-/* ⚠️ 選んだ枠は**帯の内側**に描く（実機で発覚）。外側（`outline-offset: 1px`）だと枠が上下 3px はみ出し、
-   40px の列の中で**隣の列へ食い込んで見える**（帯の高さは 32px なので余白 4px を超える）。
-   左は列の名前の欄（`--timeline-label-w` の固定列）へ食い込む。内側なら太さを変えずに収まる。 */
+/* ⚠️ 選んだ枠は**帯の内側**に描く（実機で発覚）。外側（`outline-offset: 1px`）だと枠が上下にはみ出し、
+   列の中で**隣の列へ食い込んで見える**（帯の高さ＝`--timeline-lane-h` から `--timeline-clip-inset` を
+   上下ぶん引いたもの／はみ出す量がその余白を超える）。左は列の名前の欄（`--timeline-label-w` の固定列）
+   へ食い込む。内側なら太さを変えずに収まる。
+   ⚠️ **実数で書かない**（レビュー ℹ️）＝#1104 ② で列の高さを変えた瞬間、この説明だけ古くなる。 */
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;

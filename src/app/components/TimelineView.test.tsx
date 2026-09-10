@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from "../../domain/enums";
 import type { Timeline } from "../../domain/project/compileTimeline";
 import { TimelineView } from "./TimelineView";
-import { TIMELINE_LABEL_W_PX } from "../../domain/constants";
+import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX } from "../../domain/constants";
 
 function sampleTimeline(): Timeline {
   return {
@@ -76,5 +76,14 @@ describe("TimelineView: 列の名前の欄の幅（#686）", () => {
     const { container } = render(<TimelineView timeline={sampleTimeline()} />);
     const el = container.querySelector(".timeline") as HTMLElement;
     expect(el.style.getPropertyValue("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
+  });
+
+  // ⚠️ **高さにも正がある**（#1104）＝行の高さと帯の余白が別々の数字だと、**片方だけ詰めたとき
+  // 帯が行からはみ出す**。見わたす側と編集側で同じ数字を流し込む（§2-7）。
+  it("列の高さと帯の余白も流し込む（見わたす側と編集側でずれない）", () => {
+    const { container } = render(<TimelineView timeline={sampleTimeline()} />);
+    const el = container.querySelector(".timeline") as HTMLElement;
+    expect(el.style.getPropertyValue("--timeline-lane-h")).toBe(`${TIMELINE_LANE_H_PX}px`);
+    expect(el.style.getPropertyValue("--timeline-clip-inset")).toBe(`${TIMELINE_CLIP_INSET_PX}px`);
   });
 });
