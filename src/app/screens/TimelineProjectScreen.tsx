@@ -157,6 +157,7 @@ import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTime
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
+import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -359,22 +360,23 @@ function keyframeSummary(k: Keyframe): string {
 }
 
 /**
- * 吸着を使うか（#1032）の記憶。既定 ON。
+ * 吸着を使うか（#1032）の記憶の**置き場**。既定 ON。
  *
  * ⚠️ **画面の好みは覚える**（ADR-0033 決定）＝毎回切り直す手間を作らない。
  * ⚠️ **文書には入れない**＝吸着は動画の中身ではない（§5・ADR-0033 と同じ理由）。
  * ⚠️ **倍率（ズーム）は覚えない**のと対照的＝あちらは**文書に依存する状態**（ADR-0034 決定）。
+ * ⚠️ **気軽に変えない**＝変えると利用者の記憶がこの好みぶん消える。
  */
-const LS_SNAP = "timeline.snap";
-function loadSnapEnabled(): boolean {
-  try {
-    const v = localStorage.getItem(LS_SNAP);
-    return v === null ? true : v === "1"; // 未設定＝既定 ON
-  } catch { return true; }
-}
-function saveSnapEnabled(on: boolean): void {
-  try { localStorage.setItem(LS_SNAP, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
-}
+export const LS_SNAP = "timeline.snap";
+/** 覚えが無いときの姿＝**吸着する**。 */
+export const SNAP_DEFAULT = true;
+// ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
+// 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
+// ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
+// ADR-0033「読めない/壊れている値は既定として扱う」と食い違っていたので、寄せて揃えた。
+/** 覚えを読む（**配線ごと**検査で留めるため外へ出す＝鍵と既定を取り違えても気づける）。 */
+export const loadSnapEnabled = (): boolean => getBooleanSetting(LS_SNAP, SNAP_DEFAULT);
+const saveSnapEnabled = (on: boolean): void => setBooleanSetting(LS_SNAP, on);
 
 /**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。

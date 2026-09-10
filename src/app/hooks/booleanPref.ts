@@ -6,12 +6,12 @@
 //
 // ⚠️ **写して増やさない**＝この糊は細かいところで間違えやすく、**双子の片方だけ直す**が起きる。
 //
-// ⚠️ **いま通っているのは2つだけ**（`useSafeAreaPref` と `useSidebarCollapsed`）。
-// **画面に直書きの好みが2件残っている**（`SceneEditScreen.tsx` の `sceneEdit.focusSelectedFree`／
-// `TimelineProjectScreen.tsx` の `timeline.snap`）＝どちらも**画面の中で閉じている**（別の入口へ
-// 知らせる必要が無い）ので合図の仕組みが要らず、寄せると余分な仕掛けを配ることになる。
-// ⚠️ **ただし「壊れた値は既定へ倒す」だけは揃っていない**（あの2件は壊れた値を「いいえ」に倒す）＝
-// **#1112 で寄せる**。ここで「土台は1つ」と言い切らないのは、言い切ると嘘になるため。
+// ⚠️ **この糊（合図つき）を通るのは2つ**（`useSafeAreaPref` と `useSidebarCollapsed`）＝
+// **同じ好みを複数の入口から切り替える**ものだけ。画面の中で閉じている好み
+// （`SceneEditScreen` の「選択した要素だけ編集」／`TimelineProjectScreen` の「吸着」）は
+// **合図が要らない**ので、`appSettings` の読み書きだけを使う（#1112 で寄せた）。
+// ＝**読み書きは全員 `appSettings`**、**合図が要るものだけここを通る**、という線引き。
+// ⚠️ **画面が `localStorage` を直に読む所は 0 件**（`grep -rn 'localStorage.getItem' src/app/screens` で確認）。
 import { useCallback, useEffect, useState } from "react";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
 

@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBooleanSetting } from "../../infrastructure/appSettings";
 import { SAFE_AREA_DEFAULT, SAFE_AREA_KEY } from "./useSafeAreaPref";
 import { SIDEBAR_COLLAPSED_DEFAULT, SIDEBAR_COLLAPSED_KEY } from "./useSidebarCollapsed";
+import { FOCUS_FREE_DEFAULT, LS_FOCUS_FREE, loadFocusSelectedFree } from "../screens/SceneEditScreen";
+import { LS_SNAP, SNAP_DEFAULT, loadSnapEnabled } from "../screens/TimelineProjectScreen";
 
 const KEY = "test.pref";
 
@@ -75,6 +77,41 @@ describe("覚えが無いときの姿（既定の配線）", () => {
 
   it("好みどうしで鍵がぶつからない", () => {
     // ⚠️ 同じ鍵を使うと、片方を切り替えたときにもう片方まで動く。
-    expect(SIDEBAR_COLLAPSED_KEY).not.toBe(SAFE_AREA_KEY);
+    const keys = [SIDEBAR_COLLAPSED_KEY, SAFE_AREA_KEY, LS_FOCUS_FREE, LS_SNAP];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  // ⚠️ **既定が ON の好みこそ、壊れた値の扱いが効く**（#1112）＝以前この2つは画面で
+  // `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた。
+  // ADR-0033「読めない/壊れている値は既定として扱う」と食い違っていたので、寄せて揃えた。
+  it("選択した要素だけ編集：はじめは ON・壊れた値でも ON", () => {
+    expect(FOCUS_FREE_DEFAULT).toBe(true);
+    localStorage.removeItem(LS_FOCUS_FREE);
+    expect(getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT)).toBe(true);
+    localStorage.setItem(LS_FOCUS_FREE, "はい");
+    expect(getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT)).toBe(true);
+    // 選んだ「いいえ」は覚えが勝つ（既定へ戻されない）。
+    localStorage.setItem(LS_FOCUS_FREE, "0");
+    expect(getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT)).toBe(false);
+    // ⚠️ **配線ごと見る**＝画面が正しい鍵と正しい既定を渡していることまで留める。
+    localStorage.removeItem(LS_FOCUS_FREE);
+    expect(loadFocusSelectedFree()).toBe(true);
+    localStorage.setItem(LS_FOCUS_FREE, "0");
+    expect(loadFocusSelectedFree()).toBe(false);
+  });
+
+  it("吸着：はじめは ON・壊れた値でも ON", () => {
+    expect(SNAP_DEFAULT).toBe(true);
+    localStorage.removeItem(LS_SNAP);
+    expect(getBooleanSetting(LS_SNAP, SNAP_DEFAULT)).toBe(true);
+    localStorage.setItem(LS_SNAP, "はい");
+    expect(getBooleanSetting(LS_SNAP, SNAP_DEFAULT)).toBe(true);
+    localStorage.setItem(LS_SNAP, "0");
+    expect(getBooleanSetting(LS_SNAP, SNAP_DEFAULT)).toBe(false);
+    // ⚠️ **配線ごと見る**＝画面が正しい鍵と正しい既定を渡していることまで留める。
+    localStorage.removeItem(LS_SNAP);
+    expect(loadSnapEnabled()).toBe(true);
+    localStorage.setItem(LS_SNAP, "0");
+    expect(loadSnapEnabled()).toBe(false);
   });
 });
