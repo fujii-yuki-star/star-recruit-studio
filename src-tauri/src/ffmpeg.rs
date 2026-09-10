@@ -3760,9 +3760,23 @@ fn export_video_impl(
             &staged.to_string_lossy(),
         );
         run_export(&ffmpeg, &args).map_err(|e| {
+            // ⚠️ **ffmpeg が言ったことを記録に残す**（#1105）＝画面には技術用語を出せないので（§2-3）、
+            // ここで捨てると**原因を追う手がかりが完全に消える**。実際、利用者から
+            // 「BGM を外しているのに『BGMの合成に失敗しました』が出る」と報告が来たとき、
+            // **こちらは何が起きたか一切分からなかった**。記録は外へ送られないので、
+            // 送るかどうかは利用者が決める（設定の「記録の場所を開く」）。
+            crate::tlog!("export", "bgm mix failed (has_bgm={has_bgm}): {e}");
+            crate::tlog!("export", "bgm mix args: {}", args.join(" "));
             export_failure(
                 format!("bgm mix: {e}"),
-                "BGMの合成に失敗しました。もう一度お試しください。",
+                // ⚠️ **状況で言い分ける**（#1105）＝BGM を1つも置いていない人に「BGMの合成に失敗」と
+                // 言うと、身に覚えのない語で断ることになる（§2-5）。この段は
+                // `needs_audio_pass = has_bgm || normalize.is_some()` なので、**音量をそろえるだけでも通る**。
+                if has_bgm {
+                    "BGMの合成に失敗しました。もう一度お試しください。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                } else {
+                    "音量の調整に失敗しました。書き出しの「音の自動調整」で「全体の音量をそろえる」を切ると、そのまま書き出せることがあります。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                },
             )
         })?;
         crate::tlog!("export", "bgm mix: {} ms", bgm_start.elapsed().as_millis());
@@ -6785,6 +6799,48 @@ mod tests {
                 .len()
                 > 1000
         );
+    }
+}
+
+#[cfg(test)]
+mod bgm_mix_message_tests {
+    /// ⚠️ **BGM を置いていない人に「BGMの合成に失敗」と言わない**（#1105・利用者の実機報告）。
+    /// この段は `needs_audio_pass = has_bgm || normalize.is_some()` なので、
+    /// **音量をそろえるだけでも通る**＝身に覚えのない語で断ることになっていた。
+    ///
+    /// ⚠️ **文そのものは `export_video_impl` の中にある**（借用の都合で外へ出せない）ので、
+    /// ここでは**ソースを読んで**、2つの枝が在ることと、どちらも次の行動を言っていることを見る。
+    const SRC: &str = include_str!("ffmpeg.rs");
+
+    #[test]
+    fn bgm_mix_failure_has_two_branches() {
+        assert!(SRC.contains("if has_bgm {"), "状況で言い分けていない");
+        assert!(SRC.contains("BGMの合成に失敗しました。"), "BGM がある側の文が無い");
+        assert!(SRC.contains("音量の調整に失敗しました。"), "音量をそろえるだけの側の文が無い");
+    }
+
+    /// ⚠️ **次の行動を言う**（`CLAUDE.md` §2-5）＝どちらの枝も「〜してください」で終わること。
+    #[test]
+    fn both_branches_tell_the_next_action() {
+        for msg in [
+            "BGMの合成に失敗しました。",
+            "音量の調整に失敗しました。",
+        ] {
+            let at = SRC.find(msg).expect("文が見つからない");
+            let line_end = SRC[at..].find('\n').map(|i| at + i).unwrap_or(SRC.len());
+            let line = &SRC[at..line_end];
+            assert!(
+                line.contains("ください"),
+                "次の行動を言っていない: {line}"
+            );
+        }
+    }
+
+    /// ⚠️ **手がかりを捨てない**（#1105）＝ffmpeg が言ったことを記録に残していること。
+    #[test]
+    fn ffmpeg_stderr_is_recorded() {
+        assert!(SRC.contains("bgm mix failed (has_bgm="), "失敗の中身を記録していない");
+        assert!(SRC.contains("bgm mix args:"), "渡した引数を記録していない");
     }
 }
 
