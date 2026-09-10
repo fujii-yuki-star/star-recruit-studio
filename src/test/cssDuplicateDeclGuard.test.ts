@@ -49,6 +49,37 @@ export function duplicateDeclarations(css: string): { selector: string; props: s
   return out;
 }
 
+/** 注記と波かっこの釣り合い（開いたまま閉じていないものを見つける）。 */
+export function unbalanced(css: string): { openComments: number; braces: number } {
+  let i = 0;
+  let openComments = 0;
+  while (i < css.length - 1) {
+    const two = css.slice(i, i + 2);
+    if (two === "/*") { openComments += 1; i += 2; continue; }
+    if (two === "*/") { openComments -= 1; i += 2; continue; }
+    i += 1;
+  }
+  const body = stripCssComments(css);
+  const braces = (body.match(/\{/g) ?? []).length - (body.match(/\}/g) ?? []).length;
+  return { openComments, braces };
+}
+
+describe("スタイルシートが壊れていない（#1104）", () => {
+  // ⚠️ **実際に壊した**（2026-09-10）＝置換のときに注記の閉じ（`*/`）を一緒に消してしまい、
+  // **そこから約 150 行の CSS が丸ごと注記として無効**になった。
+  // 画面は崩れるが、**型も lint も検査も全部緑**で、利用者のスクリーンショット2往復ぶん気づけなかった。
+  // ⚠️ **1文字の欠けが、遠くの規則を静かに殺す**＝機械で見るしかない。
+  it("注記と波かっこが釣り合っている", () => {
+    const broken = cssFiles(join(process.cwd(), "src")).flatMap((p) => {
+      const u = unbalanced(readFileSync(p, "utf8"));
+      return u.openComments !== 0 || u.braces !== 0
+        ? [`${p} 注記の開き残り=${u.openComments} 波かっこの差=${u.braces}`]
+        : [];
+    });
+    expect(broken).toEqual([]);
+  });
+});
+
 describe("同じ性質を2回宣言しない（#1104）", () => {
   it("どのスタイルシートにも二重宣言が無い", () => {
     const found = cssFiles(join(process.cwd(), "src")).flatMap((p) =>
@@ -81,4 +112,15 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("性質の名前だけを見る（値が違っても同じ性質なら二重）", () => {
     expect(duplicateDeclarations(".a { top: 0; top: 4px; }")[0].props).toEqual(["top"]);
   });
+
+  it("閉じていない注記を見つける（門番自身の検査）", () => {
+    expect(unbalanced("/* 開きっぱなし\n.a { top: 0; }").openComments).toBe(1);
+    expect(unbalanced("/* ふつう */\n.a { top: 0; }").openComments).toBe(0);
+  });
+
+  it("釣り合わない波かっこを見つける（門番自身の検査）", () => {
+    expect(unbalanced(".a { top: 0;").braces).toBe(1);
+    expect(unbalanced(".a { top: 0; }").braces).toBe(0);
+  });
+
 });

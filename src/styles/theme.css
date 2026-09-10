@@ -1253,7 +1253,7 @@ button.badge {
   display: grid;
   gap: 0;
   /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
-     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。
+     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
   height: 76vh;
   min-height: 420px;
   margin-bottom: var(--space-lg, 16px);
@@ -1330,6 +1330,15 @@ button.badge {
   min-height: 0;
   overflow: auto;
   padding: 8px;
+}
+
+/* 中身が自分でスクロールを持つ欄（#1104・`PanelSpec.fillBody`）。
+   ⚠️ **ここでは流さない**（`overflow: hidden`）＝中身にも流す場所があると**縦棒が二重**になり、
+   どちらが動くか押すまで分からない。流すのは中身の側（「並び」なら帯の枠だけ）。 */
+.panel-frame-body--fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 /* **欄の中では折り返す**（#687＝利用者要望）。`.row` は既定で折り返さないので、ボタンや入力が増えると
    欄からはみ出して**横スクロール**を求めていた。デスクトップで横スクロールはしづらい＝縦に折り返す。
