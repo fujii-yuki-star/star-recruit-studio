@@ -3809,7 +3809,19 @@ fn staged_output_path(out: &Path) -> PathBuf {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "video.mp4".to_string());
-    out.with_file_name(format!(".{name}.writing"))
+    // ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明 2026-09-10）＝以前は `.<名前>.mp4.writing`
+    // にしていたが、**ffmpeg は出力の形式を拡張子で決める**ので `.writing` で終わると
+    // 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    // 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため。
+    // BGM とは無関係で、**音を混ぜる段を通る書き出しはすべて落ちていた**）。
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
+            (stem.to_string(), ext.to_string())
+        }
+        // 拡張子が無いときは、そのまま隠し名だけ付ける（ffmpeg 側は元から形式を決められない）。
+        _ => return out.with_file_name(format!(".{name}.writing")),
+    };
+    out.with_file_name(format!(".{stem}.writing.{ext}"))
 }
 
 /// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
@@ -6851,6 +6863,36 @@ mod bgm_mix_message_tests {
 #[cfg(test)]
 mod staged_output_tests {
     use super::*;
+
+    /// ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明）。
+    ///
+    /// ffmpeg は出力の形式を**拡張子で決める**ので、`.writing` で終わる名前にすると
+    /// 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    /// 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため）。
+    #[test]
+    fn 書きかけの名前は拡張子で終わる() {
+        let out = std::path::Path::new("C:/dir/新しいタイムライン.mp4");
+        let staged = staged_output_path(out);
+        let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.ends_with(".mp4"), "拡張子が最後に無い: {name}");
+        // 隠し名であること（利用者の一覧に紛れない）と、元の名前とぶつからないこと。
+        assert!(name.starts_with('.'), "隠し名になっていない: {name}");
+        assert_ne!(staged, out);
+        // 同じフォルダに置く（別ドライブへ跨がない＝付け替えが速い・失敗しない）。
+        assert_eq!(staged.parent(), out.parent());
+    }
+
+    /// 拡張子が無い保存先でも落ちない（そのときは ffmpeg 側も元から形式を決められない）。
+    #[test]
+    fn 拡張子が無いときも名前を作れる() {
+        let out = std::path::Path::new("C:/dir/video");
+        let name = staged_output_path(out)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with('.'), "隠し名になっていない: {name}");
+    }
 
     /// **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）。
     ///
