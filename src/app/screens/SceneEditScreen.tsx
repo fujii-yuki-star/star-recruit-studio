@@ -102,6 +102,7 @@ import {
   ArrowLeftIcon,
   PencilIcon,
 } from "../components/icons";
+import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
 
 interface SceneEditProps {
   onNavigate: (screen: ScreenId) => void;
@@ -118,19 +119,20 @@ type AssetFilter = "all" | "image" | "video" | "bgm";
 const PANEL_ID = { assets: "assets", preview: "preview", scenes: "scenes", edit: "edit" } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 /**
- * 「選択した要素だけ編集」（#179）の記憶（#550 ②）。既定 ON。節の開閉（③）と同じ理由で覚える＝
- * 既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
+ * 「選択した要素だけ編集」（#179）の記憶（#550 ②）の**置き場**。既定 ON。
+ * 節の開閉（③）と同じ理由で覚える＝既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
+ *
+ * ⚠️ **気軽に変えない**＝変えると利用者の記憶がこの好みぶん消える。
  */
-const LS_FOCUS_FREE = "sceneEdit.focusSelectedFree";
-function loadFocusSelectedFree(): boolean {
-  try {
-    const v = localStorage.getItem(LS_FOCUS_FREE);
-    return v === null ? true : v === "1"; // 未設定＝既定 ON
-  } catch { return true; }
-}
-function saveFocusSelectedFree(on: boolean): void {
-  try { localStorage.setItem(LS_FOCUS_FREE, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
-}
+export const LS_FOCUS_FREE = "sceneEdit.focusSelectedFree";
+/** 覚えが無いときの姿＝**選択した要素だけ編集する**（#550 ②）。 */
+export const FOCUS_FREE_DEFAULT = true;
+// ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
+// 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
+// ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
+// ADR-0033「読めない/壊れている値は既定として扱う」と食い違っていたので、寄せて揃えた。
+const loadFocusSelectedFree = (): boolean => getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT);
+const saveFocusSelectedFree = (on: boolean): void => setBooleanSetting(LS_FOCUS_FREE, on);
 
 
 // FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
