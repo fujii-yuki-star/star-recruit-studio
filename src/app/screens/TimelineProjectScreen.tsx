@@ -76,10 +76,10 @@ import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
-import { PANEL_BODY_CLASS, PanelLayoutView } from "../components/layout/PanelLayoutView";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout, TIMELINE_BOTTOM_DEFAULT_RATIO } from "../../domain/layout/panelLayout";
 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -370,6 +370,19 @@ function keyframeSummary(k: Keyframe): string {
 export const LS_SNAP = "timeline.snap";
 /** 覚えが無いときの姿＝**吸着する**。 */
 export const SNAP_DEFAULT = true;
+
+/**
+ * 吸着の添え書き（**画面に出す**・`06 §12.1`／`06 §9.3`）。
+ *
+ * ⚠️ **ホバー（`title`）だけに置かない**（レビュー由来 🟡・2026-09-10）＝`06 §9.3` が名指しで
+ * 禁じている（タッチでもキーボードでも読めない）。#1104 で高さを詰めるときに一度ホバーへ移したが、
+ * **正典が「並びの欄の上に一文で置く」と決めている**ので、同じ行に短い一文として戻した。
+ * ⚠️ **入れているときは「何に寄るか」を出す**＝寄せ先が画面から消えると、
+ * 効いているのに何が起きているか分からない。
+ */
+export const SNAP_ON_HINT = "帯の端・再生位置・0秒へ寄せます（Ctrl を押しながらで一時解除）";
+/** 切っているときの添え書き＝入れると何が起きるか。 */
+export const SNAP_OFF_HINT = "掴んだ場所へそのまま置けます";
 // ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
 // 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
 // ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
@@ -713,6 +726,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 3手順①の入口（素材の一覧・見た目の一覧）が**既定の配置で視界に入らなかった**。
     // 型（CapCut / Canva / YMM4）も「置く」は1欄＋タブ（#683 の調査）。
     l.nodes.left = { panelId: PANEL_ID.place };
+    // ⚠️ **「並び」は主戦場なので既定を上限まで広げる**（#1104・実機の指摘②③）＝
+    // 既定の 0.28 では、1080px の画面で器（当時は 76vh）の 28%＝約 230px しか無く、
+    // 目盛りを引くと**列が約3本しか見えなかった**（「とても実用的ではない」）。
+    // 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
+    // ⚠️ **既定は「上限いっぱい」という意図を名前で持つ**（レビュー由来 ℹ️）＝
+    // `MAX_REGION_RATIO` を直に使うと、上限を変えたときにこの画面の既定まで黙って動く。
+    // ⚠️ **覚えた配置がある人には効かない**（ADR-0033＝利用者が動かしたときだけ覚える）＝
+    // 実機で見るときは「配置を既定に戻す」を1回押してもらう。
+    l.regionSizes = { ...l.regionSizes, bottom: TIMELINE_BOTTOM_DEFAULT_RATIO };
     return l;
   }, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
@@ -1555,8 +1577,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /**
    * 直せば良くなる注意の**合計**（#1032）。
    *
-   * ⚠️ **知らせは帯の器（76vh）の下にある**＝編集している間は**画面外**なので、
+   * ⚠️ **知らせは帯の器の下にある**＝編集している間は**目の届かない所**なので、
    * 出ていても気づかない（見えていない知らせは無いのと同じ＝`EditorToolbar` の注記と同じ理由）。
+   * ⚠️ **以前は「画面外」だった**（器が `76vh` で、ページごとスクロールしていた）＝#1104 で
+   * ページをスクロールさせない形（`.main-scroll--fixed`）にしたので、いまは**下段に居るが
+   * 自分の中で流れる**（`.timeline-notices`）。どちらにせよ**目を離した先**なので、件数は上に出す。
    * 見出しの行（貼り付いている）に**件数だけ**を出し、押すと知らせまで寄る。
    * ⚠️ **中身は見出しへ出さない**＝知らせは7種あり、全部を上へ出すと**編集の場所を上から狭める**
    *（利用者指摘 2026-08-04）。数だけを出して、読むのは元の場所で。
@@ -2033,12 +2058,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [trackDrag, setTrackDrag] = useState<{ trackId: string; gap: number } | null>(null);
   /**
    * 列を並べている枠（縦にスクロールする器）。端まで運んだときの送り先・可視域の基準にする。
-   * ⚠️ 列そのものの枠（`.timeline-scroll`）は**横だけ**（`overflow-y: hidden`）なので、縦は欄の器が持つ。
+   * ⚠️ **帯の枠そのもの**（`.timeline-scroll` ＝ `scrollRef`）が縦横とも流す（#1104）。
+   * 以前は欄の器（`.panel-frame-body`）が縦を持っていたが、それだと帯を見に下へ送ったときに
+   * **道具立てごと画面の外へ出る**ので、流す場所を帯の枠へ移した（`.panel-frame-body--fill`）。
    */
-  const trackScroller = (): HTMLElement | null => {
-    for (const el of rowRefs.current.values()) return el.closest<HTMLElement>(`.${PANEL_BODY_CLASS}`);
-    return null;
-  };
+  const trackScroller = (): HTMLElement | null => scrollRef.current;
   /**
    * その高さに来る**すき間**（表示上・0＝いちばん上の行の上／`n`＝いちばん下の行の下）。
    *
@@ -3459,8 +3483,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
       </>
     ) },
-    { id: PANEL_ID.arrange, title: '並び', content: (
-      <>
+    { id: PANEL_ID.arrange, title: '並び', fillBody: true, content: (
+      <div className="timeline-panel">
         {/* **部品が無くても列は描く**（#684 レビュー）。新しい動画は最初から映像と音の列を1本ずつ持っているのに、
             空のときだけ列を消していたので**最初の1個をここへ運べなかった**（3手順の1歩目がドラッグで通らない）。
             空のときは「次の一歩」を添える＝置き方が2通りあることを、置く前に知らせる（§2-5・ADR-0034 決定22）。 */}
@@ -3512,26 +3536,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               >
                 全体を表示
               </button>
-            </div>
-            {/* ⚠️ **文章でお願いしない**（#1032）＝以前は「`Ctrl` を押しながら動かすと
-                吸着しません」と**説明だけ**で、切るにはその一文を読むしかなかった（#819-3 で書いたもの）。
-                切替を置いて**押せば切れる**ようにする。
-                ⚠️ **`Ctrl` は残す**（ADR-0034 決定）＝押している間だけ切れるのは、
-                吸着を使いながら**その回だけ外したい**ときの道。 */}
-            <div className="toggle-row" style={{ maxWidth: 420 }}>
-              <span className="field-label text-sm" style={{ margin: 0 }}>吸着（帯の端・再生位置・0秒へ寄せる）</span>
+              {/* ⚠️ **操作は1行に畳む**（#1104・実機の指摘 2026-09-10）＝以前は「表示倍率」「吸着」
+                  「`Ctrl` の説明」で**3行**を使っており、欄の中身（帯）が入る前に高さを食い潰していた
+                  （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
+                  ⚠️ **文章でお願いしない**（#1032）＝切替は残す（押せば切れる）。
+                  ⚠️ **`Ctrl` の案内をホバーだけにしない**（レビュー由来 🟡・`06 §9.3`）＝
+                  一度そうしたが、`title` は**タッチでもキーボードでも読めない**うえ、
+                  `06 §12.1` が「並びの欄の上に一文で置く」と明記していた。
+                  **同じ行に、短い一文として置く**（行は増やさない・寄せ先も画面に残す）。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <span className="field-label text-sm" style={{ margin: 0 }}>吸着</span>
               <Switch
                 on={snapEnabled}
                 onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
                 label="吸着"
-                title={snapEnabled ? "切ると、掴んだ場所へそのまま置けます" : "入れると、ほかの帯の端・再生位置・0秒へ寄せます"}
               />
+              <span className="text-sm text-muted">{snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}</span>
             </div>
-            {snapEnabled && (
-              <p className="text-muted text-sm">
-                <kbd>Ctrl</kbd> を押しながら動かすと、その回だけ吸着しません。
-              </p>
-            )}
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
@@ -3696,7 +3717,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {track.hidden && <span className="sub">出さない</span>}
                       {track.locked && <span className="sub">固定中</span>}
                       <button
-                        className="btn btn-ghost btn-sm"
+                        // ⚠️ **共通のボタンの見た目を使わない**（#1104）＝上下の余白で**行が伸びる**。
+                        // 名前の横に置くので、行の高さは帯が決める。
+                        className="timeline-row-menu"
                         // ⚠️ **親（掴んで並べ替える面）へ渡さない**（レビュー）＝押してから少し動かすと
                         // 列が並べ替わる（帯の端の取っ手が本体のドラッグを兼ねないのと同じ理由）。
                         onPointerDown={(e) => e.stopPropagation()}
@@ -3832,7 +3855,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
         </div>
-      </>
+      </div>
     ) },
     { id: PANEL_ID.selected, title: '選んだ部品', content: (
       <>
@@ -4932,9 +4955,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">
-                  {placeAtPlayheadHint(playheadSec, "塞がっているときは、その次に空いている時刻へ置きます。")}
-                  つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
+                {/* ⚠️ **3文を1〜2行に詰める**（#1104・実機の指摘 2026-09-10「文を縦に3つ並べるのでは
+                    なく、1~2行に圧縮する」）＝欄が縦に狭いので、説明が3行あると入口そのものが押し出される。
+                    ⚠️ **意味は落とさない**＝どこへ入るかは押す前に帯で見せてある（#1096）ので、
+                    文は「押したら」「運んだら」の2つだけに絞る。 */}
+                <p className="text-muted text-sm">
+                  {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
+                  つかんで運べば落とした所へ。
                 </p>
                 {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
                     ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
@@ -4971,8 +4998,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     図形を置く
                   </button>
                 </div>
+                {/* ⚠️ **1行に詰める**（#1104・実機の指摘）＝3文だと欄の高さを食う。 */}
                 {visualAssets.length === 0 ? (
-                  <p className="field-hint">この動画にはまだ写真がありません。「写真・動画・音楽を取り込む」で足せます。文字と図形はいま置けます。</p>
+                  <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
                   <PickerList
                     items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
@@ -5169,7 +5197,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   return (
     <>
-      <div className="main-scroll">
+      <div className="main-scroll main-scroll--fixed">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       <PageHead
@@ -5198,7 +5226,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <>
                 {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
                 <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} />
-                {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器（76vh）の下にあり、
+                {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器の下にあり、
                     編集している間は画面外だった（見えていない知らせは無いのと同じ）。
                     中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}
                 {noticeCount > 0 && (
@@ -5232,8 +5260,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         囲わないと、貼り付いた知らせがそれらを覆って押せなくなる（§2-5＝戻れない状態を作らない）。
         ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
+      {/* ⚠️ **ここが編集の場所**＝スクロールの外で、残りの高さを全部使う（#1104）。
+          `76vh` の決め打ちだと上の見出しと足して画面をはみ出し、画面の残りいっぱいにすると
+          下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
       <div className="timeline-flash-zone">
-        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} />
+        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} fill />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
@@ -5268,9 +5299,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
 
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。
-          ⚠️ **見出しの行の「注意 N 件」からここへ寄る**（#1032）＝帯の器（76vh）の下なので、
+          ⚠️ **見出しの行の「注意 N 件」からここへ寄る**（#1032）＝帯の器の下なので、
           編集している間は**画面外**だった。 */}
-      <div ref={noticesRef}>
+      {/* ⚠️ **知らせは自分の中でスクロールする**（#1104）＝ページをスクロールさせないので、
+          ここが伸びると編集の場所を押し出す。見出しの行の「注意 N件」から寄れる先はここのまま。 */}
+      <div ref={noticesRef} className="timeline-notices">
       {notices.missingTemplate > 0 && (
         <p className="notice notice-warn" role="alert">{missingTemplateMessage(missingTemplateCount)}</p>
       )}

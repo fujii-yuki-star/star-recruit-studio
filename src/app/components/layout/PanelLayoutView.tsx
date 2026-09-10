@@ -30,6 +30,15 @@ export interface PanelSpec {
   id: PanelId;
   title: string;
   content: ReactNode;
+  /**
+   * **中身が自分でスクロールを持つ欄**（#1104）。既定（`false`）は**欄ごと**縦に流す。
+   *
+   * ⚠️ **なぜ要るか**＝「並び」の欄は、道具立て（表示倍率・吸着・「列を足す」）と帯が縦に並ぶ。
+   * 欄ごと流すと、帯を見に下へ送った瞬間に**道具立ても一緒に画面の外へ出る**（実機で確認・
+   * 列を12本にすると「列を足す」に手が届かない）。中身の側に流す場所を持たせると、
+   * 道具立ては留まったまま帯だけが動く（一般的な動画編集ソフトの型＝ADR-0034）。
+   */
+  fillBody?: boolean;
 }
 
 /** 領域のユーザー向け名（§2-3＝「欄」「配置」の言い方に合わせる）。 */
@@ -44,9 +53,9 @@ const REGION_LABEL: Record<PanelRegion, string> = {
 const DIVIDER_PX = 6;
 
 /**
- * 欄の中身を入れる箱のクラス名。**縦にスクロールするのはここ**（ADR-0033）。
- * ⚠️ 運ぶ最中に「見えている範囲」を測る側（`TimelineProjectScreen` の列の並べ替え）も
- * このクラスで探すので、**綴りの持ち主を1つにする**（片方だけ変えると黙って丸めが効かなくなる）。
+ * 欄の中身を入れる箱のクラス名。**既定では縦にスクロールするのはここ**（ADR-0033）。
+ * ⚠️ `fillBody` の欄はここでは流さず、**中身が自分で流す場所を持つ**（#1104）＝
+ * 「見えている範囲」を測る側は、**この箱ではなく実際に流れている箱**を見ること。
  */
 export const PANEL_BODY_CLASS = "panel-frame-body";
 
@@ -219,7 +228,7 @@ export function PanelLayoutView({
               ⋮
             </button>
           </header>
-          <div className={PANEL_BODY_CLASS}>{spec.content}</div>
+          <div className={`${PANEL_BODY_CLASS}${spec.fillBody ? ` ${PANEL_BODY_CLASS}--fill` : ""}`}>{spec.content}</div>
         </section>
       );
     }
@@ -253,7 +262,17 @@ export function PanelLayoutView({
 
   // 下の欄があるときの子は「本体・境界・下の欄」の**3つ**。境界ぶんの行を書かないと、境界が下の欄の行を取り、
   // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
-  const rows = hasBottom ? `1fr auto ${bottom * 100}%` : "1fr";
+  //
+  // ⚠️ **`1fr` ではなく `minmax(0, 1fr)`**（#1104・実機で発覚）＝`1fr` は `minmax(auto, 1fr)` と同じで、
+  // **中身の最小の高さより縮まない**。器がスクロールしない画面では、上の欄（仕上がり確認）が縮まずに
+  // 下の欄を押し潰し、**器からはみ出すので欄の中のスクロールも効かなくなる**
+  // （「並びブロック内のスクロールまで消えた」「かなり窮屈」＝利用者指摘 2026-09-10）。
+  // ⚠️ **割合は `%` ではなく `fr`**（#1104・実機で発覚）＝器の高さが flex で決まるとき、
+  // `%` は解決できずに**行が中身なりに伸びて器からはみ出す**（欄の中のスクロールも効かなくなる）。
+  // `fr` は残りの場所を配るので、器の高さの決まり方に依らない。
+  const rows = hasBottom
+    ? `minmax(0, ${1 - bottom}fr) auto minmax(0, ${bottom}fr)`
+    : "minmax(0, 1fr)";
   return (
     <div className={`panel-layout${fill ? " panel-layout--fill" : ""}`} ref={rootRef} style={{ gridTemplateRows: rows }}>
       <div className="panel-layout-main">

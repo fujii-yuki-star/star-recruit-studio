@@ -3655,6 +3655,11 @@ fn export_video_impl(
     // **開くまで気づけない**（§2-5「黙って別の結果にしない」）。
     // → **隣に一時名で書き、成功したときだけ名前を付け替える**。
     let staged = staged_output_path(&out);
+    // ⚠️ **前の回の書きかけを先に掃く**（レビュー由来 ℹ️ 2026-09-10）＝強制終了で `StagedCleanup` が
+    // 走らなかったぶんは**誰も消さない**まま保存先に残る。とくに **#1105 より前の形**
+    //（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので永久に残っていた。
+    // ⚠️ **同じ保存先の書きかけだけ**を消す（他のファイルは触らない）。
+    remove_stale_staged(&out);
     let joined_path = if needs_audio_pass {
         tmp.join("video.mp4")
     } else {
@@ -3760,9 +3765,23 @@ fn export_video_impl(
             &staged.to_string_lossy(),
         );
         run_export(&ffmpeg, &args).map_err(|e| {
+            // ⚠️ **ffmpeg が言ったことを記録に残す**（#1105）＝画面には技術用語を出せないので（§2-3）、
+            // ここで捨てると**原因を追う手がかりが完全に消える**。実際、利用者から
+            // 「BGM を外しているのに『BGMの合成に失敗しました』が出る」と報告が来たとき、
+            // **こちらは何が起きたか一切分からなかった**。記録は外へ送られないので、
+            // 送るかどうかは利用者が決める（設定の「記録の場所を開く」）。
+            crate::tlog!("export", "bgm mix failed (has_bgm={has_bgm}): {e}");
+            crate::tlog!("export", "bgm mix args: {}", args.join(" "));
             export_failure(
                 format!("bgm mix: {e}"),
-                "BGMの合成に失敗しました。もう一度お試しください。",
+                // ⚠️ **状況で言い分ける**（#1105）＝BGM を1つも置いていない人に「BGMの合成に失敗」と
+                // 言うと、身に覚えのない語で断ることになる（§2-5）。この段は
+                // `needs_audio_pass = has_bgm || normalize.is_some()` なので、**音量をそろえるだけでも通る**。
+                if has_bgm {
+                    "BGMの合成に失敗しました。もう一度お試しください。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                } else {
+                    "音量の調整に失敗しました。書き出しの「音の自動調整」で「全体の音量をそろえる」を切ると、そのまま書き出せることがあります。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                },
             )
         })?;
         crate::tlog!("export", "bgm mix: {} ms", bgm_start.elapsed().as_millis());
@@ -3795,7 +3814,33 @@ fn staged_output_path(out: &Path) -> PathBuf {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "video.mp4".to_string());
-    out.with_file_name(format!(".{name}.writing"))
+    // ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明 2026-09-10）＝以前は `.<名前>.mp4.writing`
+    // にしていたが、**ffmpeg は出力の形式を拡張子で決める**ので `.writing` で終わると
+    // 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    // 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため。
+    // BGM とは無関係で、**音を混ぜる段を通る書き出しはすべて落ちていた**）。
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
+            (stem.to_string(), ext.to_string())
+        }
+        // 拡張子が無いときは、先頭のドットだけ付ける（ffmpeg 側は元から形式を決められない）。
+        _ => return out.with_file_name(format!(".{name}.writing")),
+    };
+    out.with_file_name(format!(".{stem}.writing.{ext}"))
+}
+
+/// **この保存先の書きかけ**（いまの形と、#1105 より前の形）を消す。
+///
+/// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+/// 残ると、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+/// ⚠️ **名前で当てる**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**のものまで消しうる。
+/// ⚠️ **消せなくても止めない**＝掃除は書き出しの本筋ではない。
+fn remove_stale_staged(out: &Path) {
+    let _ = fs::remove_file(staged_output_path(out));
+    if let Some(name) = out.file_name().map(|n| n.to_string_lossy().into_owned()) {
+        // #1105 より前の形（拡張子で終わらないので、ffmpeg が形式を決められず必ず失敗していた）。
+        let _ = fs::remove_file(out.with_file_name(format!(".{name}.writing")));
+    }
 }
 
 /// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
@@ -6789,8 +6834,118 @@ mod tests {
 }
 
 #[cfg(test)]
+mod bgm_mix_message_tests {
+    /// ⚠️ **BGM を置いていない人に「BGMの合成に失敗」と言わない**（#1105・利用者の実機報告）。
+    /// この段は `needs_audio_pass = has_bgm || normalize.is_some()` なので、
+    /// **音量をそろえるだけでも通る**＝身に覚えのない語で断ることになっていた。
+    ///
+    /// ⚠️ **文そのものは `export_video_impl` の中にある**（借用の都合で外へ出せない）ので、
+    /// ここでは**ソースを読んで**、2つの枝が在ることと、どちらも次の行動を言っていることを見る。
+    const SRC: &str = include_str!("ffmpeg.rs");
+
+    #[test]
+    fn bgm_mix_failure_has_two_branches() {
+        assert!(SRC.contains("if has_bgm {"), "状況で言い分けていない");
+        assert!(
+            SRC.contains("BGMの合成に失敗しました。"),
+            "BGM がある側の文が無い"
+        );
+        assert!(
+            SRC.contains("音量の調整に失敗しました。"),
+            "音量をそろえるだけの側の文が無い"
+        );
+    }
+
+    /// ⚠️ **次の行動を言う**（`CLAUDE.md` §2-5）＝どちらの枝も「〜してください」で終わること。
+    #[test]
+    fn both_branches_tell_the_next_action() {
+        for msg in ["BGMの合成に失敗しました。", "音量の調整に失敗しました。"]
+        {
+            let at = SRC.find(msg).expect("文が見つからない");
+            let line_end = SRC[at..].find('\n').map(|i| at + i).unwrap_or(SRC.len());
+            let line = &SRC[at..line_end];
+            assert!(line.contains("ください"), "次の行動を言っていない: {line}");
+        }
+    }
+
+    /// ⚠️ **手がかりを捨てない**（#1105）＝ffmpeg が言ったことを記録に残していること。
+    #[test]
+    fn ffmpeg_stderr_is_recorded() {
+        assert!(
+            SRC.contains("bgm mix failed (has_bgm="),
+            "失敗の中身を記録していない"
+        );
+        assert!(SRC.contains("bgm mix args:"), "渡した引数を記録していない");
+    }
+}
+
+#[cfg(test)]
 mod staged_output_tests {
     use super::*;
+
+    /// ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明）。
+    ///
+    /// ffmpeg は出力の形式を**拡張子で決める**ので、`.writing` で終わる名前にすると
+    /// 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    /// 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため）。
+    #[test]
+    fn 書きかけの名前は拡張子で終わる() {
+        let out = std::path::Path::new("C:/dir/新しいタイムライン.mp4");
+        let staged = staged_output_path(out);
+        let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.ends_with(".mp4"), "拡張子が最後に無い: {name}");
+        // ⚠️ **「隠しファイルになる」とは書かない**（レビュー由来 ℹ️ 2026-09-10）＝
+        // 先頭のドットで隠れるのは Unix 系だけで、**Windows では普通に一覧へ並ぶ**。
+        // ここで見るのは「印が付いていること」と「元の名前とぶつからないこと」だけ。
+        // 一覧に残さないことは**掃除**（`StagedCleanup` と `remove_stale_staged`）が担う。
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
+        assert_ne!(staged, out);
+        // 同じフォルダに置く（別ドライブへ跨がない＝付け替えが速い・失敗しない）。
+        assert_eq!(staged.parent(), out.parent());
+    }
+
+    /// **前の回の書きかけを掃く**（レビュー由来 ℹ️ 2026-09-10）。
+    ///
+    /// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+    /// とくに **#1105 より前の形**（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので
+    /// 永久に残り、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+    /// ⚠️ **他のファイルは触らない**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**の
+    /// ものまで消しうる。だから**この保存先の名前で当てる**。
+    #[test]
+    fn 前の回の書きかけを掃く() {
+        let dir = std::env::temp_dir().join(format!("stario-stale-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let out = dir.join("動画.mp4");
+        let now = staged_output_path(&out);
+        let legacy = dir.join(".動画.mp4.writing");
+        // 巻き添えにしてはいけないもの（本物・別の動画・別の動画の書きかけ）。
+        let real = dir.join("動画.mp4");
+        let other = dir.join("別の動画.mp4");
+        let other_staged = staged_output_path(&other);
+        for f in [&now, &legacy, &real, &other, &other_staged] {
+            fs::write(f, b"x").unwrap();
+        }
+
+        remove_stale_staged(&out);
+
+        assert!(!now.exists(), "いまの形の書きかけが残っている");
+        assert!(!legacy.exists(), "#1105 より前の形の書きかけが残っている");
+        assert!(other_staged.exists(), "別の動画の書きかけまで消している");
+        assert!(other.exists(), "関係のないファイルを消している");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 拡張子が無い保存先でも落ちない（そのときは ffmpeg 側も元から形式を決められない）。
+    #[test]
+    fn 拡張子が無いときも名前を作れる() {
+        let out = std::path::Path::new("C:/dir/video");
+        let name = staged_output_path(out)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
+    }
 
     /// **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）。
     ///

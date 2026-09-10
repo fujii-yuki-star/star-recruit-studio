@@ -83,6 +83,17 @@ export const MAX_SIDE_TOTAL_RATIO = 0.75;
 /** 外枠の既定（左を少し広め・下は控えめ）。 */
 export const DEFAULT_REGION_SIZES: RegionSizes = { left: 0.28, right: 0.24, bottom: 0.28 };
 
+/**
+ * **タイムライン編集の「並び」の既定**（#1104・実機の指摘②③）＝下段を上限いっぱいで始める。
+ *
+ * ⚠️ **上限（`MAX_REGION_RATIO`）を既定として使い回さない**（レビュー由来 ℹ️）＝
+ * 使い回すと、**上限を変えたときにこの画面の既定まで黙って動く**（意味の違う2つが同じ値を指す）。
+ * いまは同じ値だが、**「上限いっぱいにしたい」という意図**を名前で宣言しておく。
+ * ⚠️ **なぜ上限まで広げるか**＝既定の 0.28 では列が約3本しか見えず「とても実用的ではない」（利用者）。
+ * 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
+ */
+export const TIMELINE_BOTTOM_DEFAULT_RATIO = MAX_REGION_RATIO;
+
 export function isSplit(node: PanelNode): node is PanelSplit {
   return typeof node === 'object' && node != null && 'children' in node;
 }

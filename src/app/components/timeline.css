@@ -7,14 +7,14 @@
   /* 左の固定ラベル幅。再生ヘッド（ADR-0023 (1)）の位置合わせもこれを見る＝単一の参照元（§2-7）。 */
   /* ⚠️ **単一の参照元は TS 側**（`TIMELINE_LABEL_W_PX`）＝両方のタイムライン画面が流し込む。
      ここは流し込みが無いときの保険（全体表示・錨点の計算も同じ値を引くので、ずれると黙って合わなくなる）。 */
-  --timeline-label-w: 84px;
+  --timeline-label-w: 124px;
   /* 列1本の高さと、帯の上下の余白（#1104）。
      ⚠️ **単一の参照元は TS 側**（`TIMELINE_LANE_H_PX` / `TIMELINE_CLIP_INSET_PX`）＝両方の
      タイムライン画面が流し込む。ここは流し込みが無いときの保険（幅と同じ扱い）。
      ⚠️ **`.timeline` で宣言する**＝行（`.timeline-lane`）と帯（`.timeline-clip`）とその中の「⋮」の
      **すべてから**見える必要がある（カスタムプロパティは子孫にしか継承しない）。 */
-  --timeline-lane-h: 40px;
-  --timeline-clip-inset: 4px;
+  --timeline-lane-h: 28px;
+  --timeline-clip-inset: 2px;
   /* 帯の枠線の太さ。⚠️ **下の `calc` と `.timeline-clip` の両方が引く**＝直書きすると、
      太さを変えたときに文字の高さだけ取り残される（レビュー 🟡）。 */
   --timeline-clip-border-w: 1px;
@@ -32,9 +32,53 @@
   flex-wrap: wrap;
 }
 
+/* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
+.timeline-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4em;
+  background: var(--color-border-strong);
+  margin: 0 var(--gap-xs);
+}
+
+/* 「並び」の欄の中身（#1104）＝道具立て（表示倍率・吸着・「列を足す」）を**留めたまま**、
+   帯だけを縦に流す。⚠️ **欄ごと流さない**＝実機で列を12本にすると、帯を見に下へ送った瞬間に
+   「列を足す」が画面の外へ出て**列を足せなくなった**（欄の器＝`.panel-frame-body--fill`）。 */
+.timeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  flex: 1 1 0;
+  /* ⚠️ **無いと縮まない**＝flex の中身は既定で「中身なりの高さ」より小さくならないので、
+     器を越えた分がそのまま外へ出る（＝下の帯が切り落とされて見えない）。 */
+  min-height: 0;
+}
+
+/* 添え書きと「列を足す」は**縮めない**（帯だけが伸び縮みする）。
+   ⚠️ **間は `gap` だけで取る**＝段落やボタン行が持つ既定の余白と足し算になると、
+   帯に回せる高さがそのぶん減る（実測で約32px＝列1本ぶん）。 */
+.timeline-panel > * {
+  flex: 0 0 auto;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.timeline-panel > .timeline {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 帯の枠が**縦に流れる場所**（列が増えたときに動くのはここ1か所）。 */
+.timeline-panel > .timeline > .timeline-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .timeline-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  /* ⚠️ **縦も `auto`**（#1104）＝列が増えたときに流れるのは**この枠**（欄ではない）。
+     見わたす側（読み取り専用）は高さが決まっていないので、この指定でも縦棒は出ない。 */
+  overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -50,6 +94,19 @@
 .timeline-row {
   display: flex;
   align-items: stretch;
+}
+
+/* 目盛りの行は**貼り付ける**（#1104 レビュー由来 ℹ️）。
+   ⚠️ **縦に流れる箱を帯の枠へ移した副作用**＝列が増えて下へ送ると、目盛りも一緒に流れて
+   視界から消え、「いま何秒の所を見ているか」が分からなくなる。
+   一般的な動画編集ソフトでは**ルーラーは残る**（ADR-0034＝業界の型に合わせる）。
+   ⚠️ **下地を敷く**＝敷かないと、下から来た帯が目盛りの文字に透ける。
+   ⚠️ **列の名前の欄（`z-index: 5`）より上**＝行ごと前に出す。 */
+.timeline-panel .timeline-inner > .timeline-row:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--color-surface);
 }
 
 /* 列の並べ替え（#767）。**掴んでいる行**は薄く、**落ちる先**はその行の上端に線を引く
@@ -74,18 +131,57 @@
   z-index: 5;
   flex: 0 0 auto;
   width: var(--timeline-label-w);
+  /* ⚠️ **横並びにする**（#1104・実機のスクショで判明 2026-09-10）＝縦積みだと
+     名前の**下**に「⋮」が来て、**この欄の高さが行の高さを決めてしまう**（実測 約57px）。
+     帯を 28px に詰めても「間がばがばに空いてんだもん」（利用者）はこれが原因。 */
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  /* ⚠️ **中身で押し広げない**＝はみ出すぶんは隠す（行の高さは帯が決める）。 */
+  overflow: hidden;
+  padding: 0 4px;
+  /* ⚠️ **行間を詰める**（#1104・利用者指摘 2026-09-10）＝`:root` の 1.6 を継ぐと
+     名前(12px)＋添え(10px)で 35px 要り、**列の高さがそれに引きずられていた**（40px の理由）。
+     普通の動画エディタの密度にするには、まずここを詰める。 */
+  line-height: 1.15;
   background: var(--color-surface-alt);
   border-right: 1px solid var(--color-border-strong);
   font-size: 12px;
   color: var(--color-text);
 }
+/* 名前は伸び縮みして、長いときは省略する。
+   ⚠️ **省略の指定だけでは名前は守れない**（#1104 レビュー由来 🟡・2026-09-10 実機で実測）＝
+   `min-width: 0` は**幅 0 まで潰れることを許す**ので、横並びにした結果
+   「出さない 固定中 ⋮」だけが残り、**どの列か分からなくなっていた**（名前の実測幅は 0px）。
+   守ったのは**欄の幅を実測どおりに広げたこと**（`TIMELINE_LABEL_W_PX` 84 → 124）で、
+   ここは「それでも長い名前」を三点で切るための指定。 */
+.timeline-row-label > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .timeline-row-label .sub {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--color-text-faint);
+}
+
+/* 列の操作（「⋮」）。⚠️ **共通のボタンの見た目を使わない**＝上下の余白で行が伸びる。 */
+.timeline-row-menu {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 14px;
+}
+.timeline-row-menu:hover {
+  color: var(--color-text);
 }
 
 .timeline-track {
