@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBooleanSetting } from "../../infrastructure/appSettings";
 import { SAFE_AREA_DEFAULT, SAFE_AREA_KEY } from "./useSafeAreaPref";
 import { SIDEBAR_COLLAPSED_DEFAULT, SIDEBAR_COLLAPSED_KEY } from "./useSidebarCollapsed";
-import { FOCUS_FREE_DEFAULT, LS_FOCUS_FREE } from "../screens/SceneEditScreen";
-import { LS_SNAP, SNAP_DEFAULT } from "../screens/TimelineProjectScreen";
+import { FOCUS_FREE_DEFAULT, LS_FOCUS_FREE, loadFocusSelectedFree } from "../screens/SceneEditScreen";
+import { LS_SNAP, SNAP_DEFAULT, loadSnapEnabled } from "../screens/TimelineProjectScreen";
 
 const KEY = "test.pref";
 
@@ -93,6 +93,11 @@ describe("覚えが無いときの姿（既定の配線）", () => {
     // 選んだ「いいえ」は覚えが勝つ（既定へ戻されない）。
     localStorage.setItem(LS_FOCUS_FREE, "0");
     expect(getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT)).toBe(false);
+    // ⚠️ **配線ごと見る**＝画面が正しい鍵と正しい既定を渡していることまで留める。
+    localStorage.removeItem(LS_FOCUS_FREE);
+    expect(loadFocusSelectedFree()).toBe(true);
+    localStorage.setItem(LS_FOCUS_FREE, "0");
+    expect(loadFocusSelectedFree()).toBe(false);
   });
 
   it("吸着：はじめは ON・壊れた値でも ON", () => {
@@ -103,5 +108,10 @@ describe("覚えが無いときの姿（既定の配線）", () => {
     expect(getBooleanSetting(LS_SNAP, SNAP_DEFAULT)).toBe(true);
     localStorage.setItem(LS_SNAP, "0");
     expect(getBooleanSetting(LS_SNAP, SNAP_DEFAULT)).toBe(false);
+    // ⚠️ **配線ごと見る**＝画面が正しい鍵と正しい既定を渡していることまで留める。
+    localStorage.removeItem(LS_SNAP);
+    expect(loadSnapEnabled()).toBe(true);
+    localStorage.setItem(LS_SNAP, "0");
+    expect(loadSnapEnabled()).toBe(false);
   });
 });

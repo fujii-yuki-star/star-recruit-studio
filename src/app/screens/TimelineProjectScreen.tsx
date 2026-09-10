@@ -374,7 +374,8 @@ export const SNAP_DEFAULT = true;
 // 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
 // ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
 // ADR-0033「読めない/壊れている値は既定として扱う」と食い違っていたので、寄せて揃えた。
-const loadSnapEnabled = (): boolean => getBooleanSetting(LS_SNAP, SNAP_DEFAULT);
+/** 覚えを読む（**配線ごと**検査で留めるため外へ出す＝鍵と既定を取り違えても気づける）。 */
+export const loadSnapEnabled = (): boolean => getBooleanSetting(LS_SNAP, SNAP_DEFAULT);
 const saveSnapEnabled = (on: boolean): void => setBooleanSetting(LS_SNAP, on);
 
 /**
