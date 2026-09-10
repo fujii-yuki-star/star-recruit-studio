@@ -1,7 +1,9 @@
 # 出口監査レポート：α-6（実用品化）
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **凍結点**: `95d75f60ff91e6b250c4d6e262068a0f2a6ad224`（develop・作業ツリー clean）
-- **観点ファイル**: [`alpha6-final-audit-points.md`](alpha6-final-audit-points.md)（最終更新 2026-08-28＝監査直前に作成・凍結）
+- **観点ファイル**: [`alpha6-final-audit-points.md`](../../audits/alpha6-final-audit-points.md)（最終更新 2026-08-28＝監査直前に作成・凍結）
 - **実施日**: 2026-08-28
 - **機械層**: **緑**（`check:frontend` 4821 tests / ALL OK・`cargo test` 91 passed・`check:rust`（check→fmt→clippy）EXIT=0）
 - **完了条件**（#857 合意3）＝**α-6 スコープで 🔴 ゼロ**。→ **未達（🔴 5件）**

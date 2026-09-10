@@ -1,5 +1,7 @@
 # 出口監査レポート：α-7（配布品質）
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **凍結点**: `e01dd12`（develop・#968 が land した時点）
 - **観点ファイル**: `docs/yuko_recruit_docs/audits/alpha7-final-audit-points.md`（最終更新 2026-09-02＝監査直前）
 - **実施日**: 2026-09-02

@@ -1,11 +1,13 @@
 # 書き出し方式の技術判断：Media Foundation（h264_mf）vs OpenH264（自前ビルド）
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **種別**: 調査・影響分析・推奨判断（**製品実装は含まない**）
 - **日付**: 2026-06-18
 - **対象**: H.264/MP4 書き出しのエンコーダ方式
-- **関連**: `adr/0002-ffmpeg-codec.md` / `research/ffmpeg-openh264-windows.md` / `adr/0001` / `adr/0006` / `13_DEPENDENCIES_AND_LICENSING.md §3,§9`
+- **関連**: `../../adr/0002-ffmpeg-codec.md` / `ffmpeg-openh264-windows.md` / `../../adr/0001` / `../../adr/0006` / `13_DEPENDENCIES_AND_LICENSING.md §3,§9`
 - **重要な前提**: 当初は調査と推奨までの資料。
-- **結果（2026-06-18 更新）**: 推奨どおりスパイクを実施し、**案A（FFmpeg＋h264_mf）の採用を確定**（画質問題はビットレート未指定が原因で解消、機能は実機で全成功）。正式決定は [`ADR-0013`](../adr/0013-h264-via-media-foundation.md)、スパイク記録は [`spike-h264-mf-verification.md`](spike-h264-mf-verification.md)。以降この資料は判断の背景・比較として参照。
+- **結果（2026-06-18 更新）**: 推奨どおりスパイクを実施し、**案A（FFmpeg＋h264_mf）の採用を確定**（画質問題はビットレート未指定が原因で解消、機能は実機で全成功）。正式決定は [`ADR-0013`](../../adr/0013-h264-via-media-foundation.md)、スパイク記録は [`spike-h264-mf-verification.md`](spike-h264-mf-verification.md)。以降この資料は判断の背景・比較として参照。
 
 ---
 
@@ -22,9 +24,9 @@
 ## 1. リポジトリ調査（引用付き）
 
 ### 1.1 現在の書き出し処理の全体像（ADR-0001 A2ハイブリッド）
-- 静止レイヤーはプレビューと同一の Web 描画で **SVG→PNG** 化（`adr/0004` WebView Canvas）。FFmpeg は **動画スロット合成・トランジション・音声ミックス・尺・結合・エンコードに限定**（`adr/0001` 決定部）。
-- フロント側の入口：[`src/app/screens/ExportScreen.tsx`](../../../src/app/screens/ExportScreen.tsx) → [`buildExportScenes`](../../../src/renderer/export/buildExportScenes.ts) で各場面PNG生成 → [`exportVideo`](../../../src/infrastructure/ffmpegExport.ts) が Tauri コマンド `export_video` を呼ぶ。
-- バックエンド：[`src-tauri/src/ffmpeg.rs`](../../../src-tauri/src/ffmpeg.rs) の `#[tauri::command] export_video`（行 999〜）。
+- 静止レイヤーはプレビューと同一の Web 描画で **SVG→PNG** 化（`../../adr/0004` WebView Canvas）。FFmpeg は **動画スロット合成・トランジション・音声ミックス・尺・結合・エンコードに限定**（`../../adr/0001` 決定部）。
+- フロント側の入口：[`src/app/screens/ExportScreen.tsx`](../../../../src/app/screens/ExportScreen.tsx) → [`buildExportScenes`](../../../../src/renderer/export/buildExportScenes.ts) で各場面PNG生成 → [`exportVideo`](../../../../src/infrastructure/ffmpegExport.ts) が Tauri コマンド `export_video` を呼ぶ。
+- バックエンド：[`src-tauri/src/ffmpeg.rs`](../../../../src-tauri/src/ffmpeg.rs) の `#[tauri::command] export_video`（行 999〜）。
 
 ### 1.2 FFmpeg sidecar 呼び出しとコーデック抽象（**最重要**）
 - `ffmpeg.rs:23-44` にコーデック抽象：
@@ -45,7 +47,7 @@
 - **結論：`h264_mf` 追加は「`VideoCodec` に変種を1つ追加＋`pick_codec` の検出文字列追加」で収まる。** これが本判断の土台。
 
 ### 1.3 PNGフレーム生成（寸法非依存）
-- [`buildExportScenes.ts:107-117`](../../../src/renderer/export/buildExportScenes.ts)：
+- [`buildExportScenes.ts:107-117`](../../../../src/renderer/export/buildExportScenes.ts)：
   ```ts
   const cw = template.canvas.width; const ch = template.canvas.height;
   const width = opts.outputSize?.width ?? cw;  // 出力解像度（未指定はキャンバス）
@@ -56,7 +58,7 @@
 
 ### 1.4 音声・BGM・素材動画の合成
 - ナレーション音声（VOICEVOX 由来 WAV）：`export_video` が `scene_NNN.wav` に展開し各クリップへ付与。
-- 素材動画あり場面（`adr/0006`）：下PNG→動画(scale/overlay)→上PNG を `overlay`、音声は **ナレーション＋元動画音声を `amix`**、最後に **BGM を全体へ重ねる**（`mix_bgm_args`）。
+- 素材動画あり場面（`../../adr/0006`）：下PNG→動画(scale/overlay)→上PNG を `overlay`、音声は **ナレーション＋元動画音声を `amix`**、最後に **BGM を全体へ重ねる**（`mix_bgm_args`）。
 - **すべてエンコーダ非依存**（コンテナ mp4・音声 aac は固定）。エンコーダを替えても合成ロジックは不変。
 
 ### 1.5 進捗通知・キャンセル
@@ -65,8 +67,8 @@
 - → 進捗・キャンセルの作りは**どの案を選んでも同じ**（コーデックと無関係）。改善するなら別タスク。
 
 ### 1.6 開発時と配布時の FFmpeg 取り扱い
-- `ffmpeg.rs` ヘッダ＆`adr/0002` 実装方針：FFmpeg は **静的リンクせず sidecar**。解決順 **環境変数 `FFMPEG_PATH` → `<appData>/bin/` → `<localAppData>/bin/` → PATH**（`resolve_ffmpeg`）。
-- 現状の開発：`ffmpeg-static`（GPL/libx264）を**スパイク専用**として利用。配布版は LGPL 構成へ差し替える前提（`adr/0002` 決定）。
+- `ffmpeg.rs` ヘッダ＆`../../adr/0002` 実装方針：FFmpeg は **静的リンクせず sidecar**。解決順 **環境変数 `FFMPEG_PATH` → `<appData>/bin/` → `<localAppData>/bin/` → PATH**（`resolve_ffmpeg`）。
+- 現状の開発：`ffmpeg-static`（GPL/libx264）を**スパイク専用**として利用。配布版は LGPL 構成へ差し替える前提（`../../adr/0002` 決定）。
 
 ### 1.7 縦型・解像度・尺の現況（正典）
 - 定数 `src/domain/constants.ts:14-19`：`FPS=30`、`WIDTH=1920`、`HEIGHT=1080`、`HD_WIDTH=1280`、`HD_HEIGHT=720`。`VIDEO_HARD_MAX_SEC=600`（10分）、`VIDEO_TARGET_MAX_SEC_MVP=300`（5分）。
@@ -80,8 +82,8 @@
 |---|---|---|
 | `ffmpeg.rs:23-44` `VideoCodec`/`pick_codec` | コーデック抽象（OpenH264優先） | 既存（ADR-0002実装） |
 | `ffmpegExport.ts` `ExportReport.codec` | 使用エンコーダ名を返す（UI非表示） | 既存 |
-| `adr/0002-ffmpeg-codec.md` | FFmpeg/H.264 決定 | 既存 |
-| `research/ffmpeg-openh264-windows.md` | 自前ビルド＋dlopen＋初回取得の調査 | **PR #114** |
+| `../../adr/0002-ffmpeg-codec.md` | FFmpeg/H.264 決定 | 既存 |
+| `ffmpeg-openh264-windows.md` | 自前ビルド＋dlopen＋初回取得の調査 | **PR #114** |
 | `domain/export/h264Feature.ts`＋`.test.ts` | 状態型 `unavailable/ready/disabled/error/verificationRequired`、`OPENH264_FEATURE_ENABLED=false`、必須クレジット文字列 | **PR #115** |
 | `SettingsScreen.tsx` H.264機能セクション | 状態ラベル＋詳細（OpenH264/Cisco/版/検証/配置）、既定非表示 | **PR #115** |
 | `AboutScreen.tsx` credits | OpenH264 クレジット（`OPENH264_FEATURE_ENABLED` でゲート） | **PR #113/#115** |
@@ -100,7 +102,7 @@
 | 予備 | WebM/VP9・Opus 任意出力 | そのまま流用（`-c:v libvpx-vp9 -c:a libopus`） | ロイヤリティフリー | LGPL FFmpeg（libvpx同梱） |
 
 - **案B評価**：合成（overlay/xfade/amix/BGM）も自作することになり、現に動いている資産を捨てる。工数最大・手戻り最大。**将来 FFmpeg 完全排除を要件化した場合の超長期オプション**に留める。本判断では非推奨。
-- **予備（WebM）評価**：特許を完全回避できるが、**PowerPoint 埋め込み・一部Windows標準プレーヤーの互換が落ちる**（要件＝採用サイト/会社説明会PowerPoint）。`adr/0002` も「将来の任意出力」。主方式にはしない。
+- **予備（WebM）評価**：特許を完全回避できるが、**PowerPoint 埋め込み・一部Windows標準プレーヤーの互換が落ちる**（要件＝採用サイト/会社説明会PowerPoint）。`../../adr/0002` も「将来の任意出力」。主方式にはしない。
 
 ---
 
@@ -134,7 +136,7 @@
 | 22 | エンコード速度 | △ HW経路は速い可能性／SW経路は機種差 【実機】 | ○ SWで一定（やや遅め） | △ 【実機】 |
 | 23 | CPU/GPU | △ HW(GPU)/SW(CPU)を選べる（`hw_encoding`）【実機】 | ○ SW(CPU)固定 | △ |
 | 24 | 画質（同ビットレート） | △ MFのH.264品質は機種差 【実機】 | △ OpenH264はおおむねConstrained Baseline寄り | △ |
-| 25 | ファイルサイズ | △ 【実機】（libx264比較） | △ libx264より大きめ（`adr/0002`） | △ |
+| 25 | ファイルサイズ | △ 【実機】（libx264比較） | △ libx264より大きめ（`../../adr/0002`） | △ |
 | 26 | 将来 macOS/Linux | △ MFはWindows専用→他OSは別エンコーダ必須 | ○ OpenH264はクロスプラットフォーム | ✗ Windows専用 |
 | 27 | テスト容易性 | ◎ `pick_codec`/引数生成は純粋関数で単体テスト可 | ◎ 同左 | △ |
 | 28 | CI検証可能性 | △ 実符号化はWindows実機/ランナー必須 【実機】 | △ 同左 | △ |
@@ -195,7 +197,7 @@
 | **抽象化が必要** | `pick_codec` の優先順位ポリシー（MF>OpenH264>libx264 等）を定数/設定化 | 将来差し替え容易性のため |
 | **作り直し** | （案Aでは無し）／案Bなら合成全般 | — |
 | **削除可能** | 当面なし | — |
-| **OpenH264前提で今は不要化** | `research/ffmpeg-openh264-windows.md` の「初回取得/dlopen/版pin」本実装、`h264Feature.ts` の取得・検証・配置の将来実装 | **案A採用時はフォールバック資料として保持**。状態型・UI枠（#115）は**エンコーダ可用性表示として再利用**（捨てない） |
+| **OpenH264前提で今は不要化** | `ffmpeg-openh264-windows.md` の「初回取得/dlopen/版pin」本実装、`h264Feature.ts` の取得・検証・配置の将来実装 | **案A採用時はフォールバック資料として保持**。状態型・UI枠（#115）は**エンコーダ可用性表示として再利用**（捨てない） |
 
 > #115 の `H264FeatureStatus`（`unavailable/ready/disabled/error/verificationRequired`）と設定画面の「H.264動画保存機能」枠は、**「OpenH264取得状況」から「H.264書き出しの可用性」への読み替え**でそのまま活きる。クレジットゲート `OPENH264_FEATURE_ENABLED` は「MF採用時は false 維持＝Cisco表記を出さない」で整合。
 
@@ -243,7 +245,7 @@
 - それ以外（合成・音声・UI）は**触らない**。
 
 ### 8.3 成果物
-- 検証ログ（コマンド・ffprobe出力・所要時間・サイズ・再生可否・スクリーンショット）を `research/` に追記。
+- 検証ログ（コマンド・ffprobe出力・所要時間・サイズ・再生可否・スクリーンショット）を `` に追記。
 - 合否判定（採用条件§7を満たすか）と、本実装時の確定パラメータ（pix_fmt/hw_encoding/優先順位）。
 
 ### 8.4 受け入れ基準
@@ -268,7 +270,7 @@
 | 配布バイナリの同梱可否 | OSコンポーネントのため同梱問題なし | **同梱不可**（"ダウンロード前に第三者ソフトへ統合しない"条件）＝初回取得 | 構成で確認可 |
 | 必須クレジット | MF（OS）には固有の常時表示義務なし | **"OpenH264 Video Codec provided by Cisco Systems, Inc." 常時表示が必要** | 構成で確認可（表示はAbout/設定にゲート実装済み） |
 | 完成H.264コンテンツ（MP4）の配布で AVC ロイヤリティ要否 | **MFが解決しない**（H.264規格の問題でエンコーダ実装と別軸） | **同左** | **社内（法務）確認**（MPEG-LA。ただし本ソフトの想定は無収益用途＝リスク低） |
-| AAC音声の特許背景 | ネイティブaac使用（実害小、`adr/0002`） | 同左 | 社内確認（影響小） |
+| AAC音声の特許背景 | ネイティブaac使用（実害小、`../../adr/0002`） | 同左 | 社内確認（影響小） |
 
 - **MFが解決する事**：OpenH264 の「同梱不可・初回取得・DLL/版/ハッシュ・dlopenパッチ・Cisco必須クレジット」という**配布/運用の制約を不要化**。
 - **MFでも残る事**：H.264 という**規格自体**に関わる商用配布の MPEG-LA 許諾要否（＝エンコーダをOSに替えても消えない別軸）。本ソフトは無収益用途想定でリスクは低いが、最終判断は社内確認事項（`13 §9` の継続課題）。
@@ -279,5 +281,5 @@
 - FFmpeg 上流コミット「avcodec: Add MediaFoundation encoder wrapper」（h264_mf/hevc_mf/aac_mf/ac3_mf/mp3_mf、hw_encoding、NV12/YUV420P、`--enable-mediafoundation`、Windows 8+）。
 - gyan.dev FFmpeg builds（構成に mediafoundation、ただし GPLv3 ＋ libx264/x265）。
 - FFmpeg Codecs Documentation（ネイティブ aac エンコーダ、MediaFoundation 節）。
-- 社内：`adr/0002-ffmpeg-codec.md`、`research/ffmpeg-openh264-windows.md`、`13_DEPENDENCIES_AND_LICENSING.md §3,§9`。
+- 社内：`../../adr/0002-ffmpeg-codec.md`、`ffmpeg-openh264-windows.md`、`13_DEPENDENCIES_AND_LICENSING.md §3,§9`。
 </invoke>

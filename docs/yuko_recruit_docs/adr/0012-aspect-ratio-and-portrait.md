@@ -3,7 +3,7 @@
 - **状態**: **Accepted**（2026-06-19 ユーザー確定 ／ 2026-06-18 起案）
 - **日付**: 2026-06-18（起案）／ 2026-06-19（Accepted）
 - **関連**: `01_REQUIREMENTS §4.1-4.2,§16.2` / `02_MVP_ROADMAP §4` / `05_RENDERING_SPEC §4` / `CLAUDE.md §10` / `schemas/project.schema.json` / `schemas/template.schema.json` / `11_SCHEMA_REFERENCE` / `12_AI_PROMPT_AND_MAPPING` / `ADR-0001` / `ADR-0004` / `ADR-0006`
-- **重要**: 本 ADR は **書き出しコーデック方式（案A/案C, `research/export-encoder-mediafoundation-vs-openh264.md`）とは独立**。縦型はコーデックの問題ではなく、データモデル＋テンプレ＋UI の横断対応である。
+- **重要**: 本 ADR は **書き出しコーデック方式（案A/案C, `archive/research/export-encoder-mediafoundation-vs-openh264.md`）とは独立**。縦型はコーデックの問題ではなく、データモデル＋テンプレ＋UI の横断対応である。
 
 ---
 

@@ -7,10 +7,10 @@
 
 | 記号 | レポート | 凍結点 | 実施日 |
 |---|---|---|---|
-| 監① | [タイムライン編集（段階0〜1・#691 ドライラン）](2026-08-timeline-editing-final-audit-report.md) | `f423d70` | 2026-08-06 |
-| 監② | [α-5 タイムライン編集（#689 本番）](2026-08-alpha5-timeline-exit-final-audit-report.md) | `84d1e63` | 2026-08-20 |
-| 再① | [差分再監査①](2026-08-alpha5-timeline-differential-reaudit-report.md) | `21e4071` | 2026-08-25 |
-| 再② | [差分再監査②](2026-08-alpha5-timeline-differential-reaudit-2-report.md) | `b75e70c` | 2026-08-25 |
+| 監① | [タイムライン編集（段階0〜1・#691 ドライラン）](../archive/audits/2026-08-timeline-editing-final-audit-report.md) | `f423d70` | 2026-08-06 |
+| 監② | [α-5 タイムライン編集（#689 本番）](../archive/audits/2026-08-alpha5-timeline-exit-final-audit-report.md) | `84d1e63` | 2026-08-20 |
+| 再① | [差分再監査①](../archive/audits/2026-08-alpha5-timeline-differential-reaudit-report.md) | `21e4071` | 2026-08-25 |
+| 再② | [差分再監査②](../archive/audits/2026-08-alpha5-timeline-differential-reaudit-2-report.md) | `b75e70c` | 2026-08-25 |
 
 ## 読み方（⚠️ 重要）
 

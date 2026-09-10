@@ -1,5 +1,7 @@
 # 出口監査レポート：タイムライン編集（ADR-0034 段階0〜1）
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **凍結点**: `f423d70`（Merge pull request #715 / 作業ツリー clean）
 - **観点ファイル**: `docs/yuko_recruit_docs/audits/alpha5-timeline-final-audit-points.md`（最終更新 2026-08-04）
 - **実施日**: 2026-08-06
