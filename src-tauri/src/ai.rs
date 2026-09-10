@@ -55,7 +55,7 @@ fn key_entry(provider: &str) -> Result<keyring::Entry, String> {
 #[tauri::command]
 pub fn save_api_key(provider: String, api_key: String) -> Result<(), String> {
     if !is_supported_provider(&provider) {
-        return Err("対応していない接続先です。".to_string());
+        return Err("対応していない接続先です。設定で別の接続先を選んでください。".to_string());
     }
     if api_key.trim().is_empty() {
         return Err("キーが空です。キーを入力してください。".to_string());
@@ -82,7 +82,7 @@ pub fn has_api_key(provider: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn delete_api_key(provider: String) -> Result<(), String> {
     if !is_supported_provider(&provider) {
-        return Err("対応していない接続先です。".to_string());
+        return Err("対応していない接続先です。設定で別の接続先を選んでください。".to_string());
     }
     match key_entry(&provider)?.delete_credential() {
         Ok(()) => Ok(()),
@@ -144,7 +144,7 @@ pub async fn ai_generate(
     user: String,
 ) -> Result<String, String> {
     if !is_supported_provider(&provider) {
-        return Err("対応していない接続先です。".to_string());
+        return Err("対応していない接続先です。設定で別の接続先を選んでください。".to_string());
     }
     // model は URL パスへ埋め込むため、安全な文字種のみ許可する（インジェクション防止）。
     if !is_valid_gemini_model(&model) {

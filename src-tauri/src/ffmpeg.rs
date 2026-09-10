@@ -1626,7 +1626,7 @@ pub fn extract_video_thumbnail(
         fs::create_dir_all(dir).map_err(|e| {
             export_failure(
                 format!("thumbnail dir: {e}"),
-                "動画のサムネイル作成に失敗しました。",
+                "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
             )
         })?;
     }
@@ -1647,7 +1647,7 @@ pub fn extract_video_thumbnail(
     run(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("thumbnail extract: {e}"),
-            "動画のサムネイル作成に失敗しました。",
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
         )
     })?;
     Ok(rel_out)
@@ -3321,7 +3321,7 @@ fn export_video_impl(
                 return Err(export_failure(
                     format!("invalid slot size: {}x{}", v.slot_w, v.slot_h),
                     format!(
-                        "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                        "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                         i + 1
                     ),
                 ));
@@ -3371,7 +3371,7 @@ fn export_video_impl(
                     return Err(export_failure(
                         format!("invalid layer slot size: {}x{}", vl.slot_w, vl.slot_h),
                         format!(
-                            "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                            "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                             i + 1
                         ),
                     ));
@@ -3574,7 +3574,7 @@ fn export_video_impl(
             if p.components().any(|c| c.as_os_str() == "..") {
                 return Err(export_failure(
                     "output_path contains '..': path traversal rejected",
-                    "保存先が不正です。保存先を選び直してください。",
+                    "保存先が使えません。保存先を選び直してください。",
                 ));
             }
             if let Some(parent) = p.parent() {

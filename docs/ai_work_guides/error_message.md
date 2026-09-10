@@ -33,6 +33,8 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
 ## よく踏むところ
 
 - **表と実装のどちらかだけ直す**＝門番 `src/app/errorStateTable.test.ts` が突き合わせている。**行数も固定してある**（`15 §6` は 184 行）ので、足したら数も直す
+- ⚠️ **その門番は向きが片方だけ**（#1111）＝見ているのは「**表にある行**が実装のどこかに在るか」で、**実装にしか無い文**は見ていない。Rust が返す文は `src/test/rustUserMessageGuard.test.ts` が別に見る（次の行動を示すか・実装用語が混じっていないか）
+- **断りの中身（`detail`）に表の行は作らない**＝`15 §6.0` の決め（#1111）。ただし §2-3／§2-5 は同じだけ効く
 - **画面に直接書く**＝文言は `src/app/uiLabels.ts` へ。門番＝`src/app/uiMessageScan.test.ts`
 - **「調べていない」と「無い」を混ぜる**＝一覧が取れない場では項目を出さない（`missingAsset` の流儀）
 - **実行できない次の行動を出す**＝候補ゼロなら「選び直して」と言わない（`06 §9` の3段の出し分け）
@@ -40,4 +42,5 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
 
 ## 終わったら
 
-`errorStateTable.test.ts` と `uiMessageScan.test.ts` を通す → **`15 §6` の表を同じ PR で直す** → `/canon-check`。
+`errorStateTable.test.ts` と `uiMessageScan.test.ts` を通す（Rust の文を足したら `rustUserMessageGuard.test.ts` も）
+→ **`15 §6` の表を同じ PR で直す** → `/canon-check`。

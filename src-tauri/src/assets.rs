@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager};
 
 pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
-        return Err("不正なプロジェクトIDです。".to_string());
+        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
     }
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(base.join("projects").join(project_id))
