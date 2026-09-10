@@ -6,6 +6,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 // ここは二度押しではないが、同じファイルに「押す→離す→押す」が並ぶので同じ流儀にそろえる。
 import { pointerDownAt } from "../../../test/pointer";
 import { PanelLayoutView } from "./PanelLayoutView";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+// ⚠️ **拾い方は1か所**（`src/test/cssRules.ts`）＝`timelineMetrics.test.ts` と同じ取り出しを使う。
+import { ruleBody } from "../../../test/cssRules";
 import { SPLIT_DIR, emptyLayout, isSplit, placedPanelIds } from "../../../domain/layout/panelLayout";
 import type { PanelLayout } from "../../../domain/layout/panelLayout";
 
@@ -38,6 +42,40 @@ const drag = (from: HTMLElement, to: { x: number; y: number }): void => {
 };
 
 describe("PanelLayoutView", () => {
+  // ⚠️ **実機で踏んだ**（#1104）＝「並び」の欄は道具立てと帯が縦に並ぶので、**欄ごと**流すと
+  // 帯を見に下へ送った瞬間に「列を足す」が画面の外へ出る（列を12本にすると足せなくなった）。
+  // 流す役を中身へ渡す印がこのクラス。⚠️ **既定では付けない**＝ほかの欄は欄ごと流すまま。
+  it("`fillBody` の欄だけ、中身に流す役を渡す印が付く", () => {
+    const { container } = render(
+      <PanelLayoutView
+        layout={sideBySide()}
+        panels={[
+          { id: "a", title: "あ", content: <p>あの中身</p>, fillBody: true },
+          { id: "b", title: "い", content: <p>いの中身</p> },
+        ]}
+        onChange={vi.fn()}
+      />,
+    );
+    const bodyOf = (id: string): HTMLElement =>
+      container.querySelector(`[data-panel-id="${id}"] .panel-frame-body`) as HTMLElement;
+    expect(bodyOf("a").classList.contains("panel-frame-body--fill")).toBe(true);
+    expect(bodyOf("b").classList.contains("panel-frame-body--fill")).toBe(false);
+    // 印を付けても、中身の箱そのものは同じ綴りのまま（探している側を取り違えさせない）。
+    expect(bodyOf("a").classList.contains("panel-frame-body")).toBe(true);
+  });
+
+  // ⚠️ **印だけでは効かない**＝印に対応する書き方が無ければ、欄は今までどおり自分で流す
+  // （＝実機では「列を足す」が画面の外へ出たまま）。jsdom は CSS を読まないので**書き方を見る**。
+  it("`fillBody` の印に、欄が流さない書き方が伴っている", () => {
+    const theme = readFileSync(join(process.cwd(), "src/styles/theme.css"), "utf8");
+    const fill = ruleBody(theme, ".panel-frame-body--fill");
+    expect(fill).not.toBeNull();
+    // ⚠️ **欄では流さない**＝中身にも流す場所があると縦棒が二重になり、どちらが動くか押すまで分からない。
+    expect(/overflow:\s*hidden\s*;/.test(fill ?? "")).toBe(true);
+    // 中身を縦に積む（道具立て → 帯 → 「列を足す」の順に積み、帯だけが伸び縮みする）。
+    expect(fill).toContain("flex-direction: column");
+  });
+
   it("欄の見出しと中身を出す", () => {
     render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "あ" })).toBeInTheDocument();

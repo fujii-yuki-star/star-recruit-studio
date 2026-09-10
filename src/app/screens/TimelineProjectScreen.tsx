@@ -76,7 +76,7 @@ import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
-import { PANEL_BODY_CLASS, PanelLayoutView } from "../components/layout/PanelLayoutView";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout, MAX_REGION_RATIO } from "../../domain/layout/panelLayout";
@@ -2039,12 +2039,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [trackDrag, setTrackDrag] = useState<{ trackId: string; gap: number } | null>(null);
   /**
    * 列を並べている枠（縦にスクロールする器）。端まで運んだときの送り先・可視域の基準にする。
-   * ⚠️ 列そのものの枠（`.timeline-scroll`）は**横だけ**（`overflow-y: hidden`）なので、縦は欄の器が持つ。
+   * ⚠️ **帯の枠そのもの**（`.timeline-scroll` ＝ `scrollRef`）が縦横とも流す（#1104）。
+   * 以前は欄の器（`.panel-frame-body`）が縦を持っていたが、それだと帯を見に下へ送ったときに
+   * **道具立てごと画面の外へ出る**ので、流す場所を帯の枠へ移した（`.panel-frame-body--fill`）。
    */
-  const trackScroller = (): HTMLElement | null => {
-    for (const el of rowRefs.current.values()) return el.closest<HTMLElement>(`.${PANEL_BODY_CLASS}`);
-    return null;
-  };
+  const trackScroller = (): HTMLElement | null => scrollRef.current;
   /**
    * その高さに来る**すき間**（表示上・0＝いちばん上の行の上／`n`＝いちばん下の行の下）。
    *
@@ -3465,8 +3464,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
       </>
     ) },
-    { id: PANEL_ID.arrange, title: '並び', content: (
-      <>
+    { id: PANEL_ID.arrange, title: '並び', fillBody: true, content: (
+      <div className="timeline-panel">
         {/* **部品が無くても列は描く**（#684 レビュー）。新しい動画は最初から映像と音の列を1本ずつ持っているのに、
             空のときだけ列を消していたので**最初の1個をここへ運べなかった**（3手順の1歩目がドラッグで通らない）。
             空のときは「次の一歩」を添える＝置き方が2通りあることを、置く前に知らせる（§2-5・ADR-0034 決定22）。 */}
@@ -3839,7 +3838,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
         </div>
-      </>
+      </div>
     ) },
     { id: PANEL_ID.selected, title: '選んだ部品', content: (
       <>

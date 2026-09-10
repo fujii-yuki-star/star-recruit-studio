@@ -30,6 +30,15 @@ export interface PanelSpec {
   id: PanelId;
   title: string;
   content: ReactNode;
+  /**
+   * **中身が自分でスクロールを持つ欄**（#1104）。既定（`false`）は**欄ごと**縦に流す。
+   *
+   * ⚠️ **なぜ要るか**＝「並び」の欄は、道具立て（表示倍率・吸着・「列を足す」）と帯が縦に並ぶ。
+   * 欄ごと流すと、帯を見に下へ送った瞬間に**道具立ても一緒に画面の外へ出る**（実機で確認・
+   * 列を12本にすると「列を足す」に手が届かない）。中身の側に流す場所を持たせると、
+   * 道具立ては留まったまま帯だけが動く（一般的な動画編集ソフトの型＝ADR-0034）。
+   */
+  fillBody?: boolean;
 }
 
 /** 領域のユーザー向け名（§2-3＝「欄」「配置」の言い方に合わせる）。 */
@@ -44,9 +53,9 @@ const REGION_LABEL: Record<PanelRegion, string> = {
 const DIVIDER_PX = 6;
 
 /**
- * 欄の中身を入れる箱のクラス名。**縦にスクロールするのはここ**（ADR-0033）。
- * ⚠️ 運ぶ最中に「見えている範囲」を測る側（`TimelineProjectScreen` の列の並べ替え）も
- * このクラスで探すので、**綴りの持ち主を1つにする**（片方だけ変えると黙って丸めが効かなくなる）。
+ * 欄の中身を入れる箱のクラス名。**既定では縦にスクロールするのはここ**（ADR-0033）。
+ * ⚠️ `fillBody` の欄はここでは流さず、**中身が自分で流す場所を持つ**（#1104）＝
+ * 「見えている範囲」を測る側は、**この箱ではなく実際に流れている箱**を見ること。
  */
 export const PANEL_BODY_CLASS = "panel-frame-body";
 
@@ -219,7 +228,7 @@ export function PanelLayoutView({
               ⋮
             </button>
           </header>
-          <div className={PANEL_BODY_CLASS}>{spec.content}</div>
+          <div className={`${PANEL_BODY_CLASS}${spec.fillBody ? ` ${PANEL_BODY_CLASS}--fill` : ""}`}>{spec.content}</div>
         </section>
       );
     }

@@ -13,22 +13,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TIMELINE_CLIP_INSET_PX, TIMELINE_LANE_H_PX } from "../../domain/constants";
+// ⚠️ **拾い方は1か所**（`src/test/cssRules.ts`）＝同じ取り出しを `PanelLayoutView.test.tsx` も使う。
+import { ruleBody } from "../../test/cssRules";
 
 const css = readFileSync(join(process.cwd(), "src/app/components/timeline.css"), "utf8");
-
-/**
- * 規則の中身（`{` から `}` まで）を取り出す。無ければ `null`。
- *
- * ⚠️ **`null` を返す**＝規則ごと消えたときに「中身が空だから通った」にしない（見落とす側に倒れる）。
- */
-export function ruleBody(source: string, selector: string): string | null {
-  const head = `${selector} {`;
-  const at = source.indexOf(head);
-  if (at < 0) return null;
-  const end = source.indexOf("}", at);
-  if (end < 0) return null;
-  return source.slice(at + head.length, end);
-}
 
 /**
  * その規則が、その変数を**宣言している**か（`var(--x)` で使っているだけ、と区別する）。
@@ -137,6 +125,37 @@ describe("帯の密度（#1104・実機の指摘）", () => {
   });
 });
 
+describe("「並び」は道具立てを留めて帯だけ流す（#1104）", () => {
+  // ⚠️ **実機で測って直した**（2026-09-10・`tools/uiProbe.mjs`）＝列を12本にすると、
+  // 欄ごと縦に流れるので**「列を足す」が画面の外へ出て列を足せなくなり**、しかも
+  // 帯は欄の下端で**切り落とされて**いた（どこもスクロールしないまま消える）。
+  // ⚠️ **jsdom は高さを計算しない**ので、ここで見られるのは「どこが流す役か」という**書き方**だけ。
+  // 実寸の確認は `tools/uiProbe.mjs`（PR 本文に測定値）。
+  it("帯の枠が縦にも流す（`overflow-y: hidden` に戻さない）", () => {
+    const scroll = ruleBody(css, ".timeline-scroll");
+    expect(scroll).not.toBeNull();
+    expect(/overflow-y:\s*auto\s*;/.test(scroll ?? "")).toBe(true);
+  });
+
+  it("並びの中身は縦に積み、帯の枠だけが伸び縮みする", () => {
+    const panel = ruleBody(css, ".timeline-panel");
+    expect(panel).not.toBeNull();
+    expect(panel).toContain("flex-direction: column");
+    // ⚠️ **`min-height: 0` が要る**＝無いと中身なりの高さより縮まず、器を越えた分が外へ出る。
+    expect(/min-height:\s*0\s*;/.test(panel ?? "")).toBe(true);
+    const inner = ruleBody(css, ".timeline-panel > .timeline > .timeline-scroll");
+    expect(inner).not.toBeNull();
+    expect(/flex:\s*1 1 0\s*;/.test(inner ?? "")).toBe(true);
+    expect(/min-height:\s*0\s*;/.test(inner ?? "")).toBe(true);
+  });
+
+  it("添え書きと「列を足す」は縮まない（帯だけが伸び縮みする）", () => {
+    const kids = ruleBody(css, ".timeline-panel > *");
+    expect(kids).not.toBeNull();
+    expect(/flex:\s*0 0 auto\s*;/.test(kids ?? "")).toBe(true);
+  });
+});
+
 describe("門番自身の検査（わざと壊した入力）", () => {
   it("規則が無ければ null（中身が空だから通った、にしない）", () => {
     expect(ruleBody(".other { a: 1px; }", ".timeline-lane")).toBeNull();
@@ -154,6 +173,14 @@ describe("門番自身の検査（わざと壊した入力）", () => {
     expect(declares("\n  height: var(--a);\n", "--a")).toBe(false);
     // 似た名前を巻き込まない。
     expect(declares("\n  --ab: 1px;\n", "--a")).toBe(false);
+  });
+
+  it("規則は行頭で当てる（末尾が同じ綴りの規則に先を越されない）", () => {
+    // ⚠️ 実際にこの綴りを足した＝`.timeline-panel > .timeline > .timeline-scroll` が
+    // `.timeline-scroll` の探しものに先に当たると、**別の規則の中身を見て通ってしまう**。
+    const src = ".a > .b {\n  height: 1px;\n}\n.b {\n  height: 2px;\n}\n";
+    expect(ruleBody(src, ".b")).toContain("2px");
+    expect(ruleBody(src, ".b")).not.toContain("1px");
   });
 
   it("数字の直書きを見つける", () => {

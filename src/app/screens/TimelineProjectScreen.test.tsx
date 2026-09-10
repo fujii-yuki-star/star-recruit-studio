@@ -7,7 +7,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
-import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
@@ -4134,6 +4133,31 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(screen.getAllByRole("button", { name: "映像の列を足す" })).toHaveLength(1);
   });
 
+  // ⚠️ **実機で測って直した**（#1104・2026-09-10）＝列を12本にすると、欄ごと縦に流れるので
+  // 「列を足す」が画面の外へ出て**列を足せなくなり**、帯は欄の下端で切り落とされていた。
+  // ⚠️ **jsdom は高さを持たない**ので見られるのは配線だけ＝「どこが流す役か」（CSS の側）は
+  // `timelineMetrics.test.ts`、実寸は `tools/uiProbe.mjs`。
+  it("**「並び」は道具立てを留めて帯だけ流す**（列を足す道が画面の外へ出ない・#1104）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const panel = container.querySelector(".timeline-panel") as HTMLElement | null;
+    expect(panel).not.toBeNull();
+    // 欄の器は流す役を中身へ渡している（欄ごと流すと道具立てが一緒に出ていく）。
+    const body = panel!.closest(".panel-frame-body") as HTMLElement | null;
+    expect(body).not.toBeNull();
+    expect(body!.classList.contains("panel-frame-body--fill")).toBe(true);
+    // 「列を足す」は**流れる枠の外**にある＝帯をいくら送っても押せる場所に留まる。
+    const add = screen.getByRole("button", { name: "映像の列を足す" });
+    expect(add.closest(".timeline-scroll")).toBeNull();
+    expect(add.closest(".timeline-panel")).toBe(panel);
+    // 道具立て（表示倍率・吸着）も同じく流れる枠の外。
+    expect(container.querySelector(".timeline-toolbar")!.closest(".timeline-scroll")).toBeNull();
+    // 帯（列の行）は流れる枠の中＝列が増えたときに動くのはここ。
+    expect(container.querySelector(".timeline-row")!.closest(".timeline-scroll")).not.toBeNull();
+  });
+
   it("**列を中身ごと複製できる**（空の列だけ増やすなら「足す」と同じ・#767）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
@@ -4241,8 +4265,9 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     rows.forEach((row, i) => {
       row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
     });
-    // 列を並べている器（欄）は 0〜100 しか見えていない＝3行目（80〜120）は下半分が隠れている。
-    const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement | null;
+    // 列を並べている器（帯の枠）は 0〜100 しか見えていない＝3行目（80〜120）は下半分が隠れている。
+    // ⚠️ **縦に流れるのは帯の枠**（#1104）＝欄ごと流すと道具立てが画面の外へ出るので移した。
+    const body = rows[0].closest(".timeline-scroll") as HTMLElement | null;
     if (body) {
       body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 70, width: 900, height: 70, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     }
@@ -4287,8 +4312,8 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
       rows.forEach((row, i) => {
         row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
       });
-      const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement;
-      expect(body).not.toBeNull(); // 欄が見つからなければ送り先が無い＝この検査自体が空振りする
+      const body = rows[0].closest(".timeline-scroll") as HTMLElement;
+      expect(body).not.toBeNull(); // 帯の枠が見つからなければ送り先が無い＝この検査自体が空振りする
       body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 200, width: 900, height: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
       Object.defineProperty(body, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(body, "scrollHeight", { value: 1000, configurable: true });
