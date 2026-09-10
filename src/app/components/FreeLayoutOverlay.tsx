@@ -17,6 +17,7 @@ import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import { hexToRgb } from "../../domain/format/color";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import { useCanvasDrag } from "../hooks/useCanvasDrag";
+import { SNAP_GUIDE_COLOR } from "./overlayColors";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -70,8 +71,7 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
 // composeGroupGeometry と同じ anchor（メンバー回転後 AABB 基準）を使うため、回転メンバーを含むグループでも
 // 枠中心＝拡縮/回転 pivot が実描画と一致する（旧実装の素 bbox ずれ＝#312 既知制限を解消）。
 
-// 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
-const SNAP_GUIDE_COLOR = "#ff3d8b";
+// 吸着ガイド線の色は共有（#1108）＝同じ値を2か所に写さない。
 
 // 右クリックメニューの推定サイズ（画面端からはみ出さないようクランプするため）。
 

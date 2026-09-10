@@ -10,6 +10,9 @@
   --drag-source-opacity: 0.5;
 
   /* カラートークン */
+  /* 素の部品（スクロールバー・`<input>` の内側など）にも見た目を伝える（ADR-0039）。 */
+  color-scheme: light;
+
   --color-bg: #f3f8fb;          /* 全体背景: ごく薄い水色 */
   --color-surface: #ffffff;     /* カード・面 */
   --color-surface-alt: #eef6fb; /* 薄い水色の面 */
@@ -64,6 +67,56 @@
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== 暗い見た目（ADR-0039・#1108） =====
+   ⚠️ **暗くするのはアプリの外枠だけ**＝`layoutScene`/`layoutToSvg` が描く**動画の絵は変えない**
+   （ADR-0001）。ここで上書きするのは器・帯・文字・枠の色だけで、キャンバスの中身には届かない。
+
+   ⚠️ **暗い版はここ1か所**＝`@media (prefers-color-scheme: dark)` にも同じ値を書くと
+   **25 個のトークンを二重に持つ**ことになり、片方だけ直す事故が必ず起きる。
+   「OS に合わせる」は JS が解いて `data-theme` に落とす（`useAppearance.ts`）。
+
+   ⚠️ **純黒（#000）と純白（#fff）を本文に使わない**＝動機が「目がつらい」なので、
+   最大コントラストは目的に反する。面は暗いグレー、文字は少し落とした白にする。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #161b1e;          /* 全体背景: 暗いスレート（黒ではない） */
+  --color-surface: #1e2529;     /* カード・面 */
+  --color-surface-alt: #252d32; /* 一段持ち上げた面 */
+  --color-sidebar: #1a2125;
+
+  /* 主操作色は**暗い面で沈まない**よう明るめへ寄せる（色相は同じ青緑のまま）。 */
+  --color-primary: #3fbcc0;
+  --color-primary-hover: #56cdd1;
+  --color-primary-soft: #1d3335;
+  --color-primary-rgb: 63, 188, 192; /* 上の #3fbcc0 のチャンネル値（半透明の選択面を合成する参照元） */
+
+  --color-accent: #6fb8ea;
+  --color-accent-soft: #1c2a35;
+
+  /* 注意の帯は「淡い黄色の面＋濃い文字」を**反転**する＝暗い面に淡い文字は読めない。 */
+  --color-yellow: #3a3423;
+  --color-yellow-strong: #4d4429;
+  --color-warn: #e8c86a;
+
+  --color-text: #dbe4e8;        /* 純白にしない */
+  --color-text-muted: #9db0b9;
+  --color-text-faint: #708590;
+
+  --color-border: #2c353a;
+  --color-border-strong: #3d4a51;
+
+  --color-danger: #e8837a;
+  --color-danger-soft: #35211f;
+  --color-success: #5fbe86;
+  --color-success-soft: #1c2e24;
+
+  /* 影は暗い面では**濃くしないと見えない**（明るい版の薄い青みでは消える）。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
 
 * {

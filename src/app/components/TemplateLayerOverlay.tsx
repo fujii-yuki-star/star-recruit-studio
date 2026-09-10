@@ -9,6 +9,7 @@ import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
+import { SNAP_GUIDE_COLOR } from "./overlayColors";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着＋複数選択するオーバーレイ（ADR-0017・#306）。
 // ①の FREE オーバーレイの純粋 ops（{x,y,w,h} を受ける move/resize/snap、id 集合を返す freeElementsInRect）を Layer 編集へ流用する。
@@ -40,7 +41,7 @@ const HANDLES: { corner: ResizeCorner; left: string; top: string; cursor: string
   { corner: "sw", left: "0%", top: "100%", cursor: "nesw-resize" },
   { corner: "se", left: "100%", top: "100%", cursor: "nwse-resize" },
 ];
-const SNAP_GUIDE_COLOR = "#ff3d8b";
+// 吸着ガイド線の色は共有（#1108）＝同じ値を2か所に写さない。
 
 // 回転を考慮したリサイズカーソル（FREE #279 と同じ）：対角軸角度（nwse=45°/nesw=135°）＋回転を 45°単位で 4種へ丸める。
 const RESIZE_CURSORS = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];

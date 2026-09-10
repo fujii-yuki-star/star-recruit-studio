@@ -18,6 +18,38 @@ function write(key: string, value: string): void {
   if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
 }
 
+/** 画面の見た目（ADR-0039・#1108）。`system` ＝ OS の設定に合わせる。 */
+export type Appearance = 'system' | 'light' | 'dark';
+
+/** 覚えの置き場。⚠️ **気軽に変えない**＝変えると利用者の記憶が消える。 */
+const APPEARANCE_KEY = 'app.appearance';
+
+/**
+ * 覚えが無いときの見た目。
+ *
+ * ⚠️ **ここ1つで既定を変えられる**（ADR-0039 は Proposed＝決定3「既定を OS に合わせる」だけが
+ * 利用者確認待ち）。「明るいまま」にするなら `'light'` にするだけでよい。
+ */
+export const APPEARANCE_DEFAULT: Appearance = 'system';
+
+/** 見た目の好み。⚠️ **知らない値は既定へ倒す**（ADR-0033 結果・影響＝起動できない状態を作らない）。 */
+export function getAppearance(): Appearance {
+  try {
+    const v = read(APPEARANCE_KEY);
+    return v === 'light' || v === 'dark' || v === 'system' ? v : APPEARANCE_DEFAULT;
+  } catch {
+    return APPEARANCE_DEFAULT;
+  }
+}
+
+export function setAppearance(value: Appearance): void {
+  try {
+    write(APPEARANCE_KEY, value);
+  } catch {
+    // 覚えられなくても、その場では効かせる（呼び出し側が正を持つ）。
+  }
+}
+
 /**
  * 「はい／いいえ」の画面の好み（#1103）。
  *
