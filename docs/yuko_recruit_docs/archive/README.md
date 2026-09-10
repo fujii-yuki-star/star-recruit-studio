@@ -1,4 +1,4 @@
-# archive — その時点の記録（作業中は読まない）
+# archive — その時点の記録（自分からは読みに行かない）
 
 ⚠️ **ここは正典ではありません。** 決定は [`adr/`](../adr/)、規範は `11`／`12`／`schemas/`／`CLAUDE.md` にあります。
 ここに置くのは**その時点で調べたこと・見たこと**で、**あとから読み返す価値はあるが、作業中に開く必要は無い**ものです。
@@ -32,3 +32,15 @@ AI が「どれを読むか」を決めるとき、**読まなくてよいもの
 - **決定の理由をたどる**＝ADR から張られたリンクをたどって、この中の1本を開く
 - **同じ失敗を繰り返していないか見る**＝`audits/` の報告に「何度も踏んだ型」が書いてある
 - ⚠️ **作業を始めるときに、ここから読み始めない**＝入口は [`../../ai_work_guides/README.md`](../../ai_work_guides/README.md)
+
+⚠️ **「読むな」ではありません**（レビュー由来 🟡・2026-09-10）＝**入口や ADR が名指しで送り込む**ときは開きます。
+実際に名指ししている側：
+
+| 送り込む側 | 送り先 | 何のために |
+|---|---|---|
+| [`ai_work_guides/timeline_change.md`](../../ai_work_guides/timeline_change.md) | `research/2026-08-timeline-editing-ux*.md` | 操作感（掴む・置く・吸着・ズーム）を直すとき |
+| [`adr/0034`](../adr/0034-timeline-interaction-model.md) | 同上＋`2026-08-video-editor-user-reviews.md` | 決定の根拠をたどるとき |
+| `.claude/agents/ux-model-reviewer.md` | `research/2026-08-timeline-editing-ux.md §3` | 「業界の型」の物差しそのもの |
+| [`adr/0013`](../adr/0013-h264-via-media-foundation.md) | `research/export-encoder-*.md`・`spike-h264-mf-verification.md` | 書き出しコーデックの経緯 |
+
+⚠️ **自分から棚を漁らない／呼ばれたら開く**——この線引きです。

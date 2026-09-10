@@ -1,5 +1,7 @@
 # 差分再監査レポート②：α-5 タイムライン編集（#689 の閉じ条件の確認）
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **凍結点**: `b75e70c`（2026-08-25・`Merge pull request #853`）
 - **比較の基準**: `21e4071`（前回の凍結点＝[レポート①](2026-08-alpha5-timeline-differential-reaudit-report.md)）＝この間の **#842・#843・#844〔6件〕・#841／22 files／+777 −56**
 - **観点ファイル**: [`alpha5-timeline-final-audit-points.md`](../../audits/alpha5-timeline-final-audit-points.md)

@@ -31,6 +31,7 @@
 | — | `schemas/*.schema.json` | **【正典】** project / template / ai-video-plan のJSON Schema実体 |
 | — | `../../CLAUDE.md` | AI開発規約（全AIエージェント共通の行動規範・資料の地図） |
 | — | `adr/` | アーキテクチャ決定記録（ADR）。重要な設計判断の根拠 |
+| その時点の記録 | [`archive/`](archive/README.md) | 監査の報告・調査資料。**正典ではない**＝自分からは読みに行かず、入口や ADR が名指ししたときだけ開く（#1090 案D） |
 
 ## 正典と例示の区別（重要）
 

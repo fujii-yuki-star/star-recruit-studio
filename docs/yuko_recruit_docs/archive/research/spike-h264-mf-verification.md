@@ -1,5 +1,7 @@
 # スパイク：Media Foundation（h264_mf）実機検証手順
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **種別**: 使い捨てスパイク（製品実装ではない）。合格後に正式実装へ整理し直す。
 - **目的**: 案A（FFmpeg＋`h264_mf`）が本ソフトの書き出し用途で実用かを、**Windows実機**で判定する。
 - **前提コード**: `src-tauri/src/ffmpeg.rs` に **スパイク変更を投入済み**＝`pick_codec` が `h264_mf` を最優先で検出（`VideoCodec::MediaFoundation` → エンコーダ名 `h264_mf`）。現行の開発用 ffmpeg-static は `h264_mf` を持たないため、この変更だけでは既存挙動は変わらない（`h264_mf` を持つ FFmpeg を置いたときのみ MF が選ばれる）。
@@ -126,7 +128,7 @@
 - すべてクリアなら案Aを正式採用へ。いずれか不可なら案C（OpenH264）フォールバックの要否を判断。
 
 ## スパイク後の後始末
-- 合格：`pick_codec` の h264_mf 最優先化を正式実装として整理（優先順位の定数化・テスト維持・`05_RENDERING_SPEC`/`adr/0002` 追補）。
+- 合格：`pick_codec` の h264_mf 最優先化を正式実装として整理（優先順位の定数化・テスト維持・`05_RENDERING_SPEC`/`../../adr/0002` 追補）。
 - 不合格：`ffmpeg.rs` のスパイク変更（`VideoCodec::MediaFoundation` と `h264_mf` 検出）を revert し、案Cを継続。
 
 ---
