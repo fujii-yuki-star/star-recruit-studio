@@ -219,7 +219,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 操作は右クリックのメニューへ畳んだ（ADR-0033）＝行のボタンではなくメニューから消す。
     fireEvent.click(screen.getByLabelText("映像1の操作")); // 映像1（クリップ2個）
-    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
     expect(screen.getByRole("alert").textContent).toContain("2個の部品も一緒に消えます");
     fireEvent.click(screen.getByText("削除する"));
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_002"]);
@@ -1704,7 +1704,18 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(trackRowLabel("映像1"));
     expect(screen.getByRole("menuitem", { name: "動画に出さない" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "この列を削除" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "削除" })).toBeInTheDocument();
+  });
+
+  it("列のメニューは**まるごと**この顔ぶれ・この言い方（#1106）", () => {
+    // ⚠️ **1つずつ書き並べる検査では、直し漏れた1か所を構造的に見つけられない**（#1027）＝
+    // メニュー全体を1つの配列で見る。**主語なしでそろえる**（利用者決定 2026-09-10）＝
+    // 「この列を◯◯」は少数派だったので、多数派（手前へ・奥へ・動画に出す）へ寄せた。
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(trackRowLabel("映像1"));
+    const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
+    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
   });
 
   it("メニューから操作でき、選ぶと閉じる", () => {
@@ -2460,7 +2471,7 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("映像2の操作"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
     expect(screen.getByRole("button", { name: "削除する" })).toBeInTheDocument();
     // 確認を出したまま「動画を書き出す」を押す＝答えを求める確認は閉じてから始める。
     fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
@@ -4126,7 +4137,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     const labels = [...container.querySelectorAll(".timeline-row-label")].filter((el) => (el.textContent || "").trim() !== "") as HTMLElement[];
     const label = labels[labels.length - 1];
     fireEvent.contextMenu(label);
-    fireEvent.click(screen.getByText("この列を中身ごと複製"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "複製" }));
     const st = useTimelineStore.getState().doc!;
     expect(st.tracks).toHaveLength(3); // 1本増える
     expect(st.clips).toHaveLength(4); // 中身も増える（元の2つ＋複製の2つ）
@@ -7720,7 +7731,7 @@ describe("TimelineProjectScreen: 確認はスクロールで視界から出な�
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("映像1の操作"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
     const confirm = screen.getByText(/この列に置いてある|を削除しますか/);
     expect(staysVisibleOnScroll(confirm)).toBe(true);
   });
