@@ -156,6 +156,35 @@ describe("「並び」は道具立てを留めて帯だけ流す（#1104）", ()
   });
 });
 
+describe("列の名前の欄と目盛り（#1104 レビュー由来）", () => {
+  it("名前は伸び縮みして、添え書きと「⋮」は縮まない", () => {
+    // ⚠️ **実機で名前が幅 0 まで潰れていた**（2026-09-10 実測）＝横並びにしたとき、
+    // 縮むのが名前だけだと「出さない 固定中 ⋮」しか残らず、**どの列か分からなくなる**。
+    // 守ったのは欄の幅（`TIMELINE_LABEL_W_PX` 84 → 124）だが、
+    // **伸び縮みの向き**（名前が伸びる・添え書きは縮まない）も戻されないように留める。
+    const name = ruleBody(css, ".timeline-row-label > span:first-child");
+    expect(name).not.toBeNull();
+    expect(/flex:\s*1 1 auto\s*;/.test(name ?? "")).toBe(true);
+    expect(/text-overflow:\s*ellipsis\s*;/.test(name ?? "")).toBe(true);
+    const sub = ruleBody(css, ".timeline-row-label .sub");
+    expect(/flex:\s*0 0 auto\s*;/.test(sub ?? "")).toBe(true);
+    const menu = ruleBody(css, ".timeline-row-menu");
+    expect(/flex:\s*0 0 auto\s*;/.test(menu ?? "")).toBe(true);
+  });
+
+  it("目盛りの行は貼り付く（列を送っても残る）", () => {
+    // ⚠️ **縦に流れる箱を帯の枠へ移した副作用**（レビュー由来 ℹ️）＝列が増えて下へ送ると
+    // 目盛りも一緒に流れて消え、「いま何秒の所を見ているか」が分からなくなる。
+    // 一般的な動画編集ソフトでは**ルーラーは残る**（ADR-0034＝業界の型に合わせる）。
+    const ruler = ruleBody(css, ".timeline-panel .timeline-inner > .timeline-row:first-child");
+    expect(ruler).not.toBeNull();
+    expect(/position:\s*sticky\s*;/.test(ruler ?? "")).toBe(true);
+    expect(/top:\s*0\s*;/.test(ruler ?? "")).toBe(true);
+    // ⚠️ **下地を敷く**＝敷かないと、下から来た帯が目盛りの文字に透ける。
+    expect(ruler).toContain("background:");
+  });
+});
+
 describe("門番自身の検査（わざと壊した入力）", () => {
   it("規則が無ければ null（中身が空だから通った、にしない）", () => {
     expect(ruleBody(".other { a: 1px; }", ".timeline-lane")).toBeNull();

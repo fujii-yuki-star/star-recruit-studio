@@ -64,16 +64,19 @@ describe("タイムライン編集：吸着は切替で切れる（#1032）", ()
     expect(snapSwitch(), "覚えていない").toHaveAttribute("aria-checked", "false");
   });
 
-  it("`Ctrl` の案内は、入っている間だけホバーで出す（行を1つも使わない）", () => {
-    // ⚠️ **行から外した**（#1104・実機の指摘 2026-09-10）＝以前は独立した1行で出していたが、
-    // 「表示倍率」「吸着」と合わせて**欄の中身が入る前に3行**を使い、帯が2〜3列しか見えなかった
-    // （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
-    // ⚠️ **意味は落とさない**＝`Ctrl` の道は残し（ADR-0034 決定）、説明を切替のホバーへ移す。
-    // ⚠️ **切っているときは言わない**＝吸着していないのに「その回だけ吸着しません」は意味を成さない。
+  it("`Ctrl` の案内は**画面に**出す（ホバーだけにしない）", () => {
+    // ⚠️ **一度ホバーへ移して差し戻した**（#1104 レビュー由来 🟡・2026-09-10）＝高さを詰めるために
+    // `title` だけにしたが、`06 §9.3` は「`title`（ホバー）だけに置かない＝タッチ・キーボードでは
+    // 読めない」と名指しで禁じており、`06 §12.1` も「並びの欄の上に一文で置く」と決めていた。
+    // ⚠️ **行は増やさない**＝同じ行の続きに短い一文として置く（3行に戻さない）。
+    // ⚠️ **切っているときは言い方を変える**＝吸着していないのに「一時解除」は意味を成さない。
     open();
-    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(snapSwitch().getAttribute("title")).toMatch(/Ctrl/);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const toolbar = () => container.querySelector(".timeline-toolbar")!.textContent ?? "";
+    expect(toolbar(), "入っているのに `Ctrl` の道が画面に出ていない").toContain("Ctrl");
+    expect(toolbar(), "何に寄るのかが画面から消えている").toContain("再生位置");
     fireEvent.click(snapSwitch());
-    expect(snapSwitch().getAttribute("title"), "切っているのに案内が残っている").not.toMatch(/Ctrl/);
+    expect(toolbar(), "切っているのに一時解除の案内が残っている").not.toContain("Ctrl");
+    expect(toolbar(), "切っているときに入れると何が起きるかを言っていない").toContain("そのまま置けます");
   });
 });

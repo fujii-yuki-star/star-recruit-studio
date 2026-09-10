@@ -3655,6 +3655,11 @@ fn export_video_impl(
     // **開くまで気づけない**（§2-5「黙って別の結果にしない」）。
     // → **隣に一時名で書き、成功したときだけ名前を付け替える**。
     let staged = staged_output_path(&out);
+    // ⚠️ **前の回の書きかけを先に掃く**（レビュー由来 ℹ️ 2026-09-10）＝強制終了で `StagedCleanup` が
+    // 走らなかったぶんは**誰も消さない**まま保存先に残る。とくに **#1105 より前の形**
+    //（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので永久に残っていた。
+    // ⚠️ **同じ保存先の書きかけだけ**を消す（他のファイルは触らない）。
+    remove_stale_staged(&out);
     let joined_path = if needs_audio_pass {
         tmp.join("video.mp4")
     } else {
@@ -3818,10 +3823,24 @@ fn staged_output_path(out: &Path) -> PathBuf {
         Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
             (stem.to_string(), ext.to_string())
         }
-        // 拡張子が無いときは、そのまま隠し名だけ付ける（ffmpeg 側は元から形式を決められない）。
+        // 拡張子が無いときは、先頭のドットだけ付ける（ffmpeg 側は元から形式を決められない）。
         _ => return out.with_file_name(format!(".{name}.writing")),
     };
     out.with_file_name(format!(".{stem}.writing.{ext}"))
+}
+
+/// **この保存先の書きかけ**（いまの形と、#1105 より前の形）を消す。
+///
+/// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+/// 残ると、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+/// ⚠️ **名前で当てる**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**のものまで消しうる。
+/// ⚠️ **消せなくても止めない**＝掃除は書き出しの本筋ではない。
+fn remove_stale_staged(out: &Path) {
+    let _ = fs::remove_file(staged_output_path(out));
+    if let Some(name) = out.file_name().map(|n| n.to_string_lossy().into_owned()) {
+        // #1105 より前の形（拡張子で終わらないので、ffmpeg が形式を決められず必ず失敗していた）。
+        let _ = fs::remove_file(out.with_file_name(format!(".{name}.writing")));
+    }
 }
 
 /// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
@@ -6875,11 +6894,45 @@ mod staged_output_tests {
         let staged = staged_output_path(out);
         let name = staged.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.ends_with(".mp4"), "拡張子が最後に無い: {name}");
-        // 隠し名であること（利用者の一覧に紛れない）と、元の名前とぶつからないこと。
-        assert!(name.starts_with('.'), "隠し名になっていない: {name}");
+        // ⚠️ **「隠しファイルになる」とは書かない**（レビュー由来 ℹ️ 2026-09-10）＝
+        // 先頭のドットで隠れるのは Unix 系だけで、**Windows では普通に一覧へ並ぶ**。
+        // ここで見るのは「印が付いていること」と「元の名前とぶつからないこと」だけ。
+        // 一覧に残さないことは**掃除**（`StagedCleanup` と `remove_stale_staged`）が担う。
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
         assert_ne!(staged, out);
         // 同じフォルダに置く（別ドライブへ跨がない＝付け替えが速い・失敗しない）。
         assert_eq!(staged.parent(), out.parent());
+    }
+
+    /// **前の回の書きかけを掃く**（レビュー由来 ℹ️ 2026-09-10）。
+    ///
+    /// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+    /// とくに **#1105 より前の形**（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので
+    /// 永久に残り、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+    /// ⚠️ **他のファイルは触らない**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**の
+    /// ものまで消しうる。だから**この保存先の名前で当てる**。
+    #[test]
+    fn 前の回の書きかけを掃く() {
+        let dir = std::env::temp_dir().join(format!("stario-stale-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let out = dir.join("動画.mp4");
+        let now = staged_output_path(&out);
+        let legacy = dir.join(".動画.mp4.writing");
+        // 巻き添えにしてはいけないもの（本物・別の動画・別の動画の書きかけ）。
+        let real = dir.join("動画.mp4");
+        let other = dir.join("別の動画.mp4");
+        let other_staged = staged_output_path(&other);
+        for f in [&now, &legacy, &real, &other, &other_staged] {
+            fs::write(f, b"x").unwrap();
+        }
+
+        remove_stale_staged(&out);
+
+        assert!(!now.exists(), "いまの形の書きかけが残っている");
+        assert!(!legacy.exists(), "#1105 より前の形の書きかけが残っている");
+        assert!(other_staged.exists(), "別の動画の書きかけまで消している");
+        assert!(other.exists(), "関係のないファイルを消している");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// 拡張子が無い保存先でも落ちない（そのときは ffmpeg 側も元から形式を決められない）。
@@ -6891,7 +6944,7 @@ mod staged_output_tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        assert!(name.starts_with('.'), "隠し名になっていない: {name}");
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
     }
 
     /// **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）。

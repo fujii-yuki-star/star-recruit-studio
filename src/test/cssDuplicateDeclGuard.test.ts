@@ -11,7 +11,7 @@
 // ⚠️ **意図的な二重宣言（古い環境向けの控え）は「いまは無い」**＝出てきたら、
 // このファイルに理由つきで除外を書く（黙って通さない）。
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** 走査するスタイルシート（`src` 以下すべて）。 */
@@ -80,6 +80,57 @@ describe("スタイルシートが壊れていない（#1104）", () => {
   });
 });
 
+/**
+ * 注記を落としたあとに残っている**宣言の数**（`性質: 値;` の数）。
+ *
+ * ⚠️ **釣り合いだけでは呑み込みを見つけられない**（レビュー由来 🟡）＝`unbalanced()` は
+ * 注記の**開きと閉じの総数の差**しか見ないので、**別々の注記の開きと閉じを1回の編集で壊す**と
+ * 差し引きゼロになって素通りする（そして間の規則は丸ごと注記に呑まれて消える＝今回の事故の亜種）。
+ * ⚠️ **呑まれれば宣言は必ず減る**ので、数で留めれば釣り合いに関係なく気づける。
+ */
+export function declarationCount(css: string): number {
+  return stripCssComments(css).split(";").filter((d) => d.includes(":")).length;
+}
+
+/**
+ * 各スタイルシートが持つ宣言の数の**下限**（実測 2026-09-10）。
+ *
+ * ⚠️ **下限にする**＝足すたびに数を直させない（そこは差分で見える）。**減るとき**だけ立ち止まる。
+ * ⚠️ **規則をわざと消したら、この数も一緒に下げる**（下げた事実が差分に残るのが狙い）。
+ */
+const MIN_DECLARATIONS: Record<string, number> = {
+  "timeline.css": 223,
+  "fonts.css": 20,
+  "theme.css": 809,
+};
+
+describe("注記が規則を呑み込んでいない（#1104）", () => {
+  it("宣言の数が、記録した下限を割っていない", () => {
+    const shrunk = cssFiles(join(process.cwd(), "src")).flatMap((p) => {
+      const name = basename(p);
+      const min = MIN_DECLARATIONS[name];
+      if (min == null) return [`${name} の下限が記録されていない（足したら数も記録する）`];
+      const now = declarationCount(readFileSync(p, "utf8"));
+      return now < min ? [`${name} 宣言が ${min} → ${now} に減っている`] : [];
+    });
+    expect(shrunk).toEqual([]);
+  });
+
+  it("記録した下限が、実態からかけ離れていない（下げて無効化しない）", () => {
+    // ⚠️ **下限は下げれば無力化できる**（変異チェックで露見）＝`0` にしておけば、
+    // 規則が丸ごと呑まれても通ってしまう。下限は「**いまの数の少し下**」であるべきなので、
+    // その関係も機械で見る（1割以上増えたら、下限も上げ直すことになる＝そこで一度目を通す）。
+    const off = cssFiles(join(process.cwd(), "src")).flatMap((p) => {
+      const name = basename(p);
+      const min = MIN_DECLARATIONS[name];
+      if (min == null) return [];
+      const now = declarationCount(readFileSync(p, "utf8"));
+      return min < Math.floor(now * 0.9) ? [`${name} 下限 ${min} が実態 ${now} より低すぎる`] : [];
+    });
+    expect(off).toEqual([]);
+  });
+});
+
 describe("同じ性質を2回宣言しない（#1104）", () => {
   it("どのスタイルシートにも二重宣言が無い", () => {
     const found = cssFiles(join(process.cwd(), "src")).flatMap((p) =>
@@ -116,6 +167,20 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("閉じていない注記を見つける（門番自身の検査）", () => {
     expect(unbalanced("/* 開きっぱなし\n.a { top: 0; }").openComments).toBe(1);
     expect(unbalanced("/* ふつう */\n.a { top: 0; }").openComments).toBe(0);
+  });
+
+  it("宣言の数を数える（注記の中は数えない）", () => {
+    expect(declarationCount(".a { top: 0; left: 1px; }")).toBe(2);
+    expect(declarationCount(".a { /* top: 0; */ left: 1px; }")).toBe(1);
+  });
+
+  it("**釣り合ったまま呑み込む**壊し方を、数で見つける（釣り合いでは見つからない）", () => {
+    // ⚠️ **レビューで挙がった穴**＝注記Aの閉じと注記Bの開きを同時に消すと、`/*` と `*/` の数は
+    // 1つずつ減って**釣り合いは崩れない**のに、間の規則は注記に呑まれて消える。
+    const before = "/* A */\n.sel1 { color: red; }\n/* B */\n.sel2 { color: blue; }\n";
+    const after = "/* A\n.sel1 { color: red; }\n B */\n.sel2 { color: blue; }\n";
+    expect(unbalanced(after)).toEqual(unbalanced(before)); // 釣り合いでは差が出ない
+    expect(declarationCount(after)).toBeLessThan(declarationCount(before)); // 数なら出る
   });
 
   it("釣り合わない波かっこを見つける（門番自身の検査）", () => {

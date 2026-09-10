@@ -4889,8 +4889,9 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
     fireEvent.keyDown(container.querySelector(".timeline-ruler") as HTMLElement, { key: "End" });
     expect(useTimelineStore.getState().playheadSec).toBe(60);
-    // 60秒＝2160px。見えている幅は 500−84（列の名前の欄）＝416px なので、行き止まりまで送る。
-    expect(scroll.scrollLeft).toBe(2160 - (500 - 84));
+    // 60秒＝2160px。見えている幅は 500−（列の名前の欄）なので、行き止まりまで送る。
+    // ⚠️ **欄の幅を直書きしない**（#1104）＝TS が単一の参照元なので、広げたときにここだけ古くなる。
+    expect(scroll.scrollLeft).toBe(2160 - (500 - TIMELINE_LABEL_W_PX));
   });
 
   // ⚠️ **`End` と対称に固定する**（レビュー 🟡）＝同じ形（`setPlayhead` の直後に追う）なのに
