@@ -3,11 +3,12 @@
 // コーデックは h264_mf（Media Foundation＝主経路）→ libopenh264（フォールバック）→ libx264（開発=GPL）を自動選択（ADR-0002/0013）。
 // → LGPL+mediafoundation ビルドを所定フォルダに置くだけで h264_mf 出力へ無改修で切り替わる（コマンド生成は不変）。
 // SVG→PNG は ADR-0004（WebView Canvas）で生成。FFmpegは PNG/動画/音声の合成のみ（ADR-0001）。
+use crate::proc::no_window_command;
 use base64::Engine as _;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
@@ -1114,7 +1115,7 @@ pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
 
 /// ffmpeg を実行。成功時 stdout、失敗時 stderr を返す。
 pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
-    let out = Command::new(bin)
+    let out = no_window_command(bin)
         .args(args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1183,7 +1184,7 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(EXPORT_CANCELLED_MARK.to_string());
     }
-    let mut child = Command::new(bin)
+    let mut child = no_window_command(bin)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1251,7 +1252,7 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
 /// ⚠️ **PCM は文字列にできない**＝`run` は `from_utf8_lossy` を通すので、音の波形（s16le）を
 /// 通すと**不正なバイトが `U+FFFD` に化けて値が壊れる**。波形専用にここを分ける。
 fn run_bytes(bin: &Path, args: &[String]) -> Result<Vec<u8>, String> {
-    let out = Command::new(bin)
+    let out = no_window_command(bin)
         .args(args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1465,7 +1466,7 @@ fn video_filmstrip_impl(
 /// `ffmpeg -i <file>` を実行し stderr を返す（出力未指定で終了コード1だが stderr にメタ情報が出る）。
 /// 音声有無・メタ取得（probe 系）の共通土台。成否に関わらず stderr を見る。
 fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
-    match Command::new(ffmpeg)
+    match no_window_command(ffmpeg)
         .arg("-hide_banner")
         .arg("-i")
         .arg(file)

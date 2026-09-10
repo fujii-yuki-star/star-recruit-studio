@@ -7,6 +7,7 @@ use tauri::Manager;
 mod ai;
 mod assets;
 mod ffmpeg;
+mod proc;
 mod trouble_log;
 mod voicevox;
 mod voicevox_engine;

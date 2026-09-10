@@ -1,9 +1,10 @@
 // VOICEVOX ENGINE（ローカル HTTP サーバ）の同梱・自動起動・自動終了（ADR-0005・#149）。
 // 同梱した ENGINE（resource_dir/voicevox_engine/run[.exe]）を空きポートで起動し、アプリ終了時に終了する。
 // バイナリが同梱されていなければ何もしない＝従来どおり手動起動の ENGINE／設定の接続先へフォールバック（dev/CI も不変）。
+use crate::proc::no_window_command;
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::Child;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
@@ -73,7 +74,9 @@ pub fn start_bundled_engine(app: &AppHandle) {
         );
         return;
     };
-    let mut cmd = Command::new(&exe);
+    // Windows: GUI アプリ（windows_subsystem=windows）からコンソール向けの run.exe を起こすと、
+    // 継承するコンソールが無いため新しい窓が開く。抑止は入口（`proc::no_window_command`）が持つ。
+    let mut cmd = no_window_command(&exe);
     cmd.arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
@@ -81,14 +84,6 @@ pub fn start_bundled_engine(app: &AppHandle) {
     // DLL・モデル・辞書を解決できるよう、作業ディレクトリを ENGINE 直下にする。
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
-    }
-    // Windows: GUI アプリ（windows_subsystem=windows）からコンソールアプリ run.exe を起動すると、
-    // 継承するコンソールが無いため新規コンソール窓が表示される。CREATE_NO_WINDOW で抑止する。
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     match cmd.spawn() {
         Ok(child) => {
