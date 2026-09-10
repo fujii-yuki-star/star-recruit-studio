@@ -18,6 +18,10 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
+// ⚠️ **拾い方は1か所**（`src/test/rustSource.ts`）＝画面へ返す文を見る門番
+// （`rustUserMessageGuard.test.ts`）も同じものを使う。別々に書いたら、片方だけが
+// **文字リテラル `'"'` で対応が反転する**罠を踏んだ（#1111）。
+import { stripRustCommentsAndStrings } from './rustSource';
 
 /** Rust のソースの置き場。 */
 const RUST_DIR = join('src-tauri', 'src');
@@ -62,58 +66,6 @@ const ANY_CREATION_FLAGS = /\bcreation_flags\s*\(/;
  * `Command::new(` の形では拾えない。取り込みごと禁じれば、その道はふさがる。
  */
 const COMMAND_IMPORT = /use\s+std::process::(?:\{[^}]*\bCommand\b[^}]*\}|Command\b)/;
-
-/**
- * Rust のソースから**注記と文字列の中身**を落とす（行数は保つ）。
- *
- * ⚠️ **注記の中の語で赤くしない**＝門番が誤検出すると信用を落とす
- * （`// Command::new を直に呼ばない` と書いた瞬間に落ちる門番は使えない）。
- * ⚠️ **文字列の中も落とす**＝`"http://127.0.0.1"` の `//` を行注記と取り違えると、
- * **その行の残りが見えなくなる**（見落とす側に倒れる）。
- * ⚠️ **`'"'` のような文字リテラルを飛ばす**＝この repo に実在し（`ffmpeg.rs` の禁止文字の判定）、
- * 素通しすると中の `"` から**文字列が始まったことになって以降が全部消える**。
- */
-export function stripRustCommentsAndStrings(src: string): string {
-  let out = '';
-  let i = 0;
-  while (i < src.length) {
-    const two = src.slice(i, i + 2);
-    if (two === '//') {
-      while (i < src.length && src[i] !== '\n') i += 1; // 改行は次の周でそのまま写す
-      continue;
-    }
-    if (two === '/*') {
-      let depth = 1; // Rust のブロック注記は入れ子になれる
-      i += 2;
-      while (i < src.length && depth > 0) {
-        if (src.slice(i, i + 2) === '/*') { depth += 1; i += 2; continue; }
-        if (src.slice(i, i + 2) === '*/') { depth -= 1; i += 2; continue; }
-        if (src[i] === '\n') out += '\n';
-        i += 1;
-      }
-      continue;
-    }
-    if (src[i] === '"') {
-      i += 1;
-      out += '""';
-      while (i < src.length && src[i] !== '"') {
-        if (src[i] === '\n') out += '\n'; // 複数行にまたがる文字列でも行数を保つ
-        i += src[i] === '\\' ? 2 : 1;
-      }
-      i += 1;
-      continue;
-    }
-    const charLit = /^'(?:\\.|[^\\'])'/.exec(src.slice(i, i + 4));
-    if (charLit) {
-      out += "''";
-      i += charLit[0].length;
-      continue;
-    }
-    out += src[i];
-    i += 1;
-  }
-  return out;
-}
 
 /**
  * 抑止の行が**どの `#[cfg(...)]` の側にあるか**を返す（無ければ `null`）。
@@ -248,7 +200,10 @@ describe('門番自身の検査（わざと壊した入力）', () => {
   it('文字列の中の // で、その行の残りを見落とさない', () => {
     // ⚠️ ここが素通しだと `format!("http://…")` のある行以降を丸ごと見落とす。
     const src = 'let u = "http://127.0.0.1"; let out = Command::new(bin);\n';
-    expect(hits(src, DIRECT_SPAWN)).toEqual(['1: let u = ""; let out = Command::new(bin);']);
+    // ⚠️ **中身は空白で埋める**（長さと行を保つ＝元のソースと同じ座標で読める・#1111）。
+    const [line] = hits(src, DIRECT_SPAWN);
+    expect(line).toMatch(/^1: let u = +; let out = Command::new\(bin\);$/);
+    expect(line).not.toContain('http');
   });
 
   it("引用符そのものの文字リテラル（'\"'）で、以降を丸ごと落とさない", () => {

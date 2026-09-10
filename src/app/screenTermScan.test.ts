@@ -11,59 +11,25 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+// ⚠️ **拾い方と禁止語は1か所**（`src/test/uiTerms.ts`）＝Rust が返す文を見る門番
+// （`src/test/rustUserMessageGuard.test.ts`）も同じものを使う（#1111）。
+import { bannedTermsIn, hasJapanese } from "../test/uiTerms";
 
 /**
- * 画面に出さない語（§2-3・`16 §1` の置き換え表）。
+ * 1つのファイルから、画面に出る文字に混じった禁止語を拾う。
  *
- * ⚠️ **`uiLabels.test.ts` の一覧とは別に持つ**＝あちらは文言の集約先を見る門番で、
- * こちらは**画面の直書き**を見る門番。射程が違うので、片方に足しても他方には効かない
- *（実際、「ナレーション」を `uiLabels.test.ts` へ足しても画面の直書きは素通りだった）。
+ * ⚠️ **1つの関数にまとめる**（#1111）＝下の「拾い方」の検査が**この道**を通るようにするため。
+ * 走る所と自己検査が別の道だと、走る所だけ物差しを狭めても誰も気づかない（変異チェックで露見）。
  */
-const BANNED_IN_SCREENS = [
-  "ナレーション",
-  "レンダリング",
-  "バリデーション",
-  "スキーマ",
-  // ⚠️ **素の「テンプレート」も入れる**（#984 レビュー ℹ️）＝`16 §1`／`06 §3` は
-  // `template / テンプレート` を内部用語（表示は「見た目パターン」）としているのに、
-  // `テンプレートID` しか入っておらず「テンプレートを選ぶ」のような直書きを拾えなかった。
-  "テンプレート",
-  "アセット",
-  "プロバイダ",
-  "キーフレーム",
-];
+export function screenTermHitsIn(text: string): { word: string; text: string }[] {
+  return bannedTermsIn(text);
+}
 
-/** 画面に出る文字とみなす＝**日本語を含む**文字列リテラルと、JSX のテキスト。 */
-const hasJapanese = (s: string): boolean => /[ぁ-んァ-ヶ一-龠]/.test(s);
-
+/** 見つかった禁止語（どのファイルの、どの文か）。 */
 interface Hit {
   word: string;
   text: string;
   where: string;
-}
-
-/**
- * 1ファイルの本文から、**画面に出る日本語**を拾って禁止語を探す。
- *
- * ⚠️ **純粋関数として切り出す**＝ディレクトリを歩く形のままだと、
- * 「拾い方を消しても、いまのコードに漏れが無いので緑」になる（#981 で踏んだ）。
- */
-export function bannedTermsIn(text: string, banned: readonly string[] = BANNED_IN_SCREENS): { word: string; text: string }[] {
-  const out: { word: string; text: string }[] = [];
-  // ⚠️ **コメントを外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  const seen = new Set<string>();
-  const add = (raw: string): void => {
-    const s = raw.trim();
-    if (!s || !hasJapanese(s) || seen.has(s)) return;
-    seen.add(s);
-    for (const word of banned) if (s.includes(word)) out.push({ word, text: s });
-  };
-  // ① 文字列リテラル（属性・変数・関数の引数）。
-  for (const m of code.matchAll(/(['"])((?:[^'"\\\r\n]|\\.)+)\1/g)) add(m[2]!);
-  // ② JSX のテキスト（タグとタグの間）。`{...}` の式は中身を見ない（識別子が混じるだけ）。
-  for (const m of code.matchAll(/>([^<>{}]+)</g)) add(m[1]!);
-  return out;
 }
 
 /** 走査の対象（画面と部品＝利用者が見る層）。 */
@@ -77,7 +43,7 @@ function screenHits(): Hit[] {
         continue;
       }
       if (!/\.tsx?$/.test(name) || name.includes(".test.")) continue;
-      for (const h of bannedTermsIn(readFileSync(p, "utf8"))) out.push({ ...h, where: name });
+      for (const h of screenTermHitsIn(readFileSync(p, "utf8"))) out.push({ ...h, where: name });
     }
   };
   walk(join(process.cwd(), "src", "app", "screens"));
@@ -112,11 +78,11 @@ describe("画面に直書きした文字に、実装用語が混じっていな�
 // ディレクトリを歩く形だけだと、拾い方を消しても「いまのコードに漏れが無いので緑」になる。
 describe("拾い方（画面の直書き）", () => {
   it("JSX のテキストを拾う", () => {
-    expect(bannedTermsIn(`<label>ナレーション音量</label>`)).toHaveLength(1);
+    expect(screenTermHitsIn(`<label>ナレーション音量</label>`)).toHaveLength(1);
   });
 
   it("文字列リテラルを拾う（属性・データの値）", () => {
-    expect(bannedTermsIn(`const LANES = [{ sub: "ナレーション" }];`)).toHaveLength(1);
+    expect(screenTermHitsIn(`const LANES = [{ sub: "ナレーション" }];`)).toHaveLength(1);
     expect(bannedTermsIn(`<span title="ナレーションの設定" />`)).toHaveLength(1);
   });
 
