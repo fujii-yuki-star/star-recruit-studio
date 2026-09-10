@@ -1261,9 +1261,6 @@ button.badge {
 /* スクロールしない器に入れるとき（場面編集）＝器いっぱいに広げる。画面の高さで決め打つと、小さい
    ウィンドウで下の操作行（閉じた欄を戻す・配置を既定に戻す）が切れて**戻す道が消える**（決定6/8）。 */
 .panel-layout--fill {
-  /* ⚠️ **`flex: 1 1 0`**（#1104・実機で発覚）＝`flex: 1 1 auto` だと高さが中身なりに決まり、
-     行の割合が解決できずに**器がはみ出す**（欄の中のスクロールも効かなくなる）。 */
-  flex: 1 1 0;
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
@@ -1371,14 +1368,24 @@ button.badge {
   margin-bottom: var(--space-lg, 16px);
 }
 
-/* **編集の場所は残りの高さを全部使う**（#1104）。⚠️ `min-height: 0` が無いと、
-   flex の子は中身の高さより縮まないので**器がはみ出してページがスクロールする**。 */
+/* **編集の場所は残りの高さを全部使う**（#1104）。
+   ⚠️ **flex の連鎖に頼らない**（実機で3回外した）＝`flex` だけで高さを渡そうとすると、
+   途中の1つが `auto` のままでも**誰も気づけない**（実際、`.panel-layout--fill` の中で
+   後ろの `flex: 1 1 auto` が前の宣言を打ち消しており、直したつもりが無効だった）。
+   **中の器は `position: absolute; inset: 0` で貼る**＝高さが**確実に**この箱と同じになり、
+   行の割合（`fr`）が必ず解決する。中身が増えても器は伸びない（欄の中でスクロールする）。 */
 .main-scroll--fixed .timeline-flash-zone {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  position: relative;
   margin-bottom: var(--gap-sm);
+}
+.main-scroll--fixed .timeline-flash-zone > .panel-layout {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  margin: 0;
 }
 
 /* **知らせは自分の中でスクロールする**（#1104）＝ページをスクロールさせないので、
