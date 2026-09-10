@@ -59,7 +59,7 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
         {onBack && (
           <button className="btn btn-ghost btn-icon" onClick={onBack}>
             <ArrowLeftIcon size={16} />
-            プロジェクト一覧へ戻る
+            動画の一覧へ戻る
           </button>
         )}
       </div>

@@ -174,7 +174,7 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("組み立てで割られた断片の実装用語も拾う（レビュー由来 🟡）", () => {
     // ⚠️ 句点で絞ると、`format!` の**引数側**（句点が無い）に入った禁止語を見落とす。
     const src = 'format!("{}動画の一覧から開き直してください。", "不正なプロジェクトIDです")';
-    expect(termHitsIn(src).map((h) => h.word)).toEqual(["プロジェクトID"]);
+    expect(termHitsIn(src).map((h) => h.word)).toEqual(["プロジェクト"]);
     // ⚠️ §2-5（次の行動）は句点のある文だけを見る＝断片に「次の行動」は求めようがない。
     expect(userMessagesIn(src)).toEqual(["{}動画の一覧から開き直してください。"]);
   });
@@ -221,7 +221,7 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("実装用語を拾う（画面の直書きと同じ一覧を使っている）", () => {
     // ⚠️ **走る所と同じ道を通る**＝物差しを狭めたり、一覧から語を落としたら、ここが赤くなる。
     const hits = termHitsIn('return Err("不正なプロジェクトIDです。".to_string());');
-    expect(hits.map((h) => h.word)).toEqual(["プロジェクトID"]);
+    expect(hits.map((h) => h.word)).toEqual(["プロジェクト"]);
     expect(termHitsIn('return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());')).toEqual([]);
   });
 });

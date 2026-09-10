@@ -26,7 +26,7 @@ describe("ExportDoneActions（#991）", () => {
 
   it("戻り先を渡さなければ「一覧へ戻る」は出さない（画面によっては別の戻り道がある）", () => {
     render(<ExportDoneActions path="C:/out/movie.mp4" />);
-    expect(screen.queryByRole("button", { name: /プロジェクト一覧へ戻る/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /動画の一覧へ戻る/ })).toBeNull();
   });
 
   // ⚠️ **開けなかったら、押した操作に応じて言う**（§2-5＝黙って何も起きない、を作らない）。

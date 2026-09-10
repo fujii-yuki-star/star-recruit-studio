@@ -34,9 +34,9 @@ const setup = (over: {
 const currentVideoButton = (): HTMLElement | null => screen.queryByText("今の動画")?.closest("button") ?? null;
 
 describe("Sidebar（IA再構成・#399 B案）", () => {
-  it("先頭は「プロジェクト」＝一覧。押すと一覧（home）へ", () => {
+  it("先頭は「動画」＝一覧。押すと一覧（home）へ", () => {
     const { onNavigate } = setup();
-    fireEvent.click(screen.getByText("プロジェクト").closest("button")!);
+    fireEvent.click(screen.getByText("動画").closest("button")!);
     expect(onNavigate).toHaveBeenCalledWith("home");
   });
 
@@ -69,9 +69,9 @@ describe("Sidebar（IA再構成・#399 B案）", () => {
     expect(btn!.className).toContain("active"); // 工程画面では「今の動画」が active
   });
 
-  it("一覧画面では「プロジェクト」が active・「今の動画」は非active", () => {
+  it("一覧画面では「動画」が active・「今の動画」は非active", () => {
     setup({ current: "home", hasProjectContent: true });
-    expect(screen.getByText("プロジェクト").closest("button")!.className).toContain("active");
+    expect(screen.getByText("動画").closest("button")!.className).toContain("active");
     expect(currentVideoButton()!.className).not.toContain("active");
   });
 
