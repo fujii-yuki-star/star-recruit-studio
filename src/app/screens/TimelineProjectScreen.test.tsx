@@ -1718,6 +1718,16 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
   });
 
+  it("固定した列では、言い方が「固定を外す」に変わる（#1106）", () => {
+    // ⚠️ **いまの状態で意味が通る言い方にする**（`06 §12.1`）＝固定中に「固定する」と出ると、
+    // 押すと何が起きるか分からない。⚠️ **この側は一度も検査されていなかった**（変異チェックで判明）。
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(trackRowLabel("映像1"));
+    const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
+    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定を外す", "削除"]);
+  });
+
   it("メニューから操作でき、選ぶと閉じる", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
