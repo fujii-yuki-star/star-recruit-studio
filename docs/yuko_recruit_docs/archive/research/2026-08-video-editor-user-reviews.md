@@ -1,5 +1,7 @@
 # 調査：ユーザーレビュー横断 — 褒められる操作・機能／不満と改善要望
 
+> ⚠️ **ここは [`archive/`](../README.md)**＝その時点の記録で、正典ではありません。
+
 - **日付**: 2026-08-04
 - **位置づけ**: **調査資料**（決定ではない）。[`2026-08-timeline-editing-ux.md`](2026-08-timeline-editing-ux.md)（ツール別の操作感）・[`2026-08-timeline-editing-ux-audit.md`](2026-08-timeline-editing-ux-audit.md)（監査と不足観点）に続く3本目。**特定のソフトに限らず**、世の中のユーザーレビュー・コミュニティの声を横断し、「よく褒められる・求められる操作/機能」と「よく不満・改善要望が出る操作/機能」を型として抽出した。**ADR-0034 と α-6 以降の計画の材料**。
 - **調べた場所**: レビューサイト（[ITreview](https://www.itreview.jp/categories/video-editing)・[G2](https://www.g2.com/categories/video-editing)・Capterra）／App Store のユーザーレビュー／Adobe Community（不満・要望スレッド）／Yahoo!知恵袋／個人ブログ・note の使用記。

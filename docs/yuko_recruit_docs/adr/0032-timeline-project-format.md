@@ -195,7 +195,7 @@ ADR-0029（FREE 字幕の `subtitleSource`）で作った「字幕は対象か�
 実機で「操作感がつかめない・窮屈」という指摘を受け、他社エディタ（Premiere / Final Cut / DaVinci / Clipchamp /
 Canva / FlexClip / CapCut / **nizima ACTION!!** / ゆっくりMovieMaker4 / Vrew）の作りと利用者の声を調べた。
 **本形式が約束している「空間の自由」が未実装**であることも判明している（#683）。
-→ [`research/2026-08-timeline-editing-ux.md`](../research/2026-08-timeline-editing-ux.md)・EPIC #683。
+→ [`archive/research/2026-08-timeline-editing-ux.md`](../archive/research/2026-08-timeline-editing-ux.md)・EPIC #683。
 操作モデルは **ADR-0034** で決める（本ADRは文書モデルと形式の話に留める）。
 
 ## 未解決の論点
