@@ -1184,8 +1184,12 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(EXPORT_CANCELLED_MARK.to_string());
     }
+    // ⚠️ **入力は明示して塞ぐ**（#1107）＝コンソール窓を出さなくしたので、受け継ぐ入力の口が無い。
+    // 既定（受け継ぐ）のままだと「無効な口を受け継いだ」状態になるので、意図を書いて空にする。
+    // `output()` を使う他の3か所は元から空なので、ここだけ揃えれば同じになる。
     let mut child = no_window_command(bin)
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -6,7 +6,10 @@
 //
 // ⚠️ **各所に1行ずつ書き足さない**＝以前 VOICEVOX にだけ入れて ffmpeg の4か所が漏れていた
 // （`git log -S "creation_flags"` に出るのは VOICEVOX の1件だけだった）。同じ規則は入口を1つにして、
-// 直に起こしていないことを門番（`src/test/noWindowSpawnGuard.test.ts`）が見る（`CLAUDE.md` §2-7）。
+// 直に起こしていないことを門番（`src/test/noWindowSpawnGuard.test.ts`）が見る。
+//
+// ⚠️ **根拠の射程**＝`CLAUDE.md` §2-7（数値を直書きしない）が効くのは**値**（`CREATE_NO_WINDOW` を
+// 1か所に置いた点）だけで、**入口を1つにすること自体**は §4（外部I/O は infrastructure に隔離する）の側。
 use std::ffi::OsStr;
 use std::process::Command;
 
