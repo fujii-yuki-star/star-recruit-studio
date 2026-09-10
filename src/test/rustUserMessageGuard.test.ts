@@ -44,21 +44,34 @@ const NOT_ON_SCREEN = ["tlog", "eprintln", "println"] as const;
  * ⚠️ **検査（`#[cfg(test)]`）から後ろは見ない**＝fixture の文は画面に出ない。
  * ⚠️ **記録（`tlog!`）の中は見ない**＝`trouble_log.rs` の冒頭が「画面には出さない」と定義している。
  */
-export function userMessagesIn(src: string): string[] {
+export function testModuleAt(code: string): number {
+  // ⚠️ **`#[cfg(test)]` を見つけただけで切らない**（レビュー由来 🔴・2026-09-10）＝
+  // この repo には**関数の途中に置かれたインラインの `#[cfg(test)]`** が実在する
+  //（`trouble_log.rs:86` と `:101`＝`record_to` の中）。そこで切ると、**そのファイルの
+  // 残り全部が門番の外**になる（`'"'` で対応が反転していたのと**まったく同じ型**の穴）。
+  // ⚠️ **落としたいのは検査のモジュール**なので、`mod` が続くものだけを境目にする。
+  const m = /#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub\s+)?mod\b/.exec(code);
+  return m?.index ?? -1;
+}
+
+/** 画面へ返るかもしれない**日本語の文字列**（句点の有無は問わない）。 */
+export function japaneseLiteralsIn(src: string): string[] {
   const { code, literals } = scanRust(src);
-  // 検査は**ファイルの末尾まで**落とす（`#[cfg(test)] mod tests { … }`）。
-  const testAt = code.indexOf("#[cfg(test)]");
-  const limit = testAt < 0 ? code.length : testAt;
+  const at0 = testModuleAt(code);
+  const limit = at0 < 0 ? code.length : at0;
   const skip = macroCallRanges(code, NOT_ON_SCREEN);
   const inSkip = (at: number): boolean => skip.some(([from, to]) => at >= from && at <= to);
   const out = new Set<string>();
   for (const { text, at } of literals) {
     if (at >= limit || inSkip(at)) continue;
     if (!/[ぁ-んァ-ヶ一-龠]/.test(text)) continue;
-    if (!text.includes("。")) continue;
     out.add(text);
   }
   return [...out].sort();
+}
+
+export function userMessagesIn(src: string): string[] {
+  return japaneseLiteralsIn(src).filter((t) => t.includes("。"));
 }
 
 /**
@@ -80,7 +93,11 @@ export function showsNextAction(message: string): boolean {
  * 走る所と自己検査が別の道だと、走る所だけ物差しを狭めても誰も気づかない（変異チェックで露見）。
  */
 export function termHitsIn(src: string): { word: string; text: string }[] {
-  return userMessagesIn(src).flatMap((m) => bannedTermsIn(`"${m}"`));
+  // ⚠️ **句点で絞らない**（レビュー由来 🟡・2026-09-10）＝`format!("{}…してください。", "不正なプロジェクトIDです")`
+  // のように**組み立てで割られた側**には句点が無い。句点で絞ると、まさにその断片に入っている
+  // 実装用語を見落とす（次に誰かが文を割った瞬間、この門番は静かに素通りする）。
+  // ⚠️ **§2-5（次の行動）は句点で絞ったまま**＝断片には「次の行動」を求めようがない。
+  return japaneseLiteralsIn(src).flatMap((m) => bannedTermsIn(`"${m}"`));
 }
 
 /**
@@ -101,7 +118,7 @@ describe("Rust が画面へ返す文（#1111）", () => {
     // ⚠️ **実数で留める**＝最初は「29 以上」にしていたが、文字リテラルで走査が反転して
     // **半分しか拾えていない状態でも通って**いた（実際に踏んだ）。数を固定すると、その場で気づく。
     const all = files().flatMap((p) => userMessagesIn(readFileSync(p, "utf8")));
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(90);
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(93);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {
@@ -127,6 +144,39 @@ describe("門番自身の検査（わざと壊した入力）", () => {
     // 素朴に `"` を対にして数えると、**ここから後ろの文字列を1つも拾えなくなる**。
     const src = "if matches!(c, '/' | '\\\\' | '\"' | '<') { }\nlet m = \"この先の文。押してください。\";";
     expect(userMessagesIn(src)).toEqual(["この先の文。押してください。"]);
+  });
+
+  it("**関数の途中の `#[cfg(test)]` で切らない**（実際に踏んだ・レビュー由来 🔴）", () => {
+    // ⚠️ `trouble_log.rs:86` は `record_to` の**中**にインラインの `#[cfg(test)]` を持つ。
+    // 見つけただけで切ると、そのファイルの残り全部が門番の外になる。
+    const src = [
+      "fn record_to() {",
+      "    #[cfg(test)]",
+      "    let x = 1;",
+      "}",
+      'fn f() -> Result<(), String> { Err("この先の文。押してください。".to_string()) }',
+      "#[cfg(test)]",
+      "mod tests {",
+      '    const M: &str = "検査の文。押してください。";',
+      "}",
+    ].join("\n");
+    expect(userMessagesIn(src)).toEqual(["この先の文。押してください。"]);
+  });
+
+  it("生の文字列（`r#\"…\"#`）で対応が反転しない（レビュー由来 🟡）", () => {
+    // ⚠️ 中に `"` を書けるので、素通しすると `'\"'` と同じ形で以降が全部消える。
+    // ⚠️ **中の `"` が奇数個の例にする**＝偶数個だと素朴な数え方でも釣り合いが戻ってしまい、
+    // 見分けを外しても通る（変異チェックで露見）。
+    const src = 'let j = r#"a"b"#;\nlet m = "この先の文。押してください。";';
+    expect(userMessagesIn(src)).toEqual(["この先の文。押してください。"]);
+  });
+
+  it("組み立てで割られた断片の実装用語も拾う（レビュー由来 🟡）", () => {
+    // ⚠️ 句点で絞ると、`format!` の**引数側**（句点が無い）に入った禁止語を見落とす。
+    const src = 'format!("{}動画の一覧から開き直してください。", "不正なプロジェクトIDです")';
+    expect(termHitsIn(src).map((h) => h.word)).toEqual(["プロジェクトID"]);
+    // ⚠️ §2-5（次の行動）は句点のある文だけを見る＝断片に「次の行動」は求めようがない。
+    expect(userMessagesIn(src)).toEqual(["{}動画の一覧から開き直してください。"]);
   });
 
   it("記録（`tlog!`）は画面の文と数えない", () => {

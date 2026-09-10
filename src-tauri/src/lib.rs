@@ -7,6 +7,7 @@ use tauri::Manager;
 mod ai;
 mod assets;
 mod ffmpeg;
+mod messages;
 mod proc;
 mod trouble_log;
 mod voicevox;
@@ -61,9 +62,9 @@ fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, S
         .get("projectId")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "projectId がありません".to_string())?;
+        .ok_or_else(|| crate::messages::PROJECT_ID_MISSING.to_string())?;
     if !is_safe_project_id(project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let dir = projects_dir(&app)?.join(project_id);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -115,7 +116,7 @@ fn list_restore_points(
     project_id: String,
 ) -> Result<Vec<(String, u64)>, String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let dir = restore_dir(&app, &project_id)?;
     // ⚠️ **「まだ無い」と「読めない」を分ける**（α-7 出口監査 🟡）＝どちらも空にすると、
@@ -148,7 +149,7 @@ fn restore_point_time(name: &str) -> Option<u64> {
 #[tauri::command]
 fn take_restore_point(app: tauri::AppHandle, project_id: String, at_ms: u64) -> Result<(), String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let src = projects_dir(&app)?.join(&project_id).join("project.json");
     let Ok(text) = fs::read_to_string(&src) else {
@@ -170,11 +171,11 @@ fn drop_restore_point(
     name: String,
 ) -> Result<(), String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     // ⚠️ **名前を検証する**＝`..` や別のファイルを指されると、関係ないものを消してしまう。
     if restore_point_time(&name).is_none() {
-        return Err("戻れる時点が見つかりませんでした。一覧から選び直してください。".to_string());
+        return Err(crate::messages::RESTORE_POINT_UNUSABLE.to_string());
     }
     let path = restore_dir(&app, &project_id)?.join(&name);
     let _ = fs::remove_file(&path); // 既に無いのは失敗ではない
@@ -193,10 +194,10 @@ fn read_restore_point(
     name: String,
 ) -> Result<String, String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     if restore_point_time(&name).is_none() {
-        return Err("戻れる時点が見つかりませんでした。一覧から選び直してください。".to_string());
+        return Err(crate::messages::RESTORE_POINT_UNUSABLE.to_string());
     }
     fs::read_to_string(restore_dir(&app, &project_id)?.join(&name)).map_err(|_| {
         "その復元ポイントが見つかりませんでした。一覧から選び直してください。".to_string()
@@ -217,7 +218,7 @@ fn restore_project_text(
     now_ms: u64,
 ) -> Result<(), String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let target = projects_dir(&app)?.join(&project_id).join("project.json");
     if let Ok(cur) = fs::read_to_string(&target) {
@@ -241,7 +242,7 @@ fn restore_project_text(
 #[tauri::command]
 fn project_backup_time(app: tauri::AppHandle, project_id: String) -> Result<Option<u64>, String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let path = backup_path(&projects_dir(&app)?.join(&project_id).join("project.json"));
     let Ok(meta) = fs::metadata(&path) else {
@@ -264,7 +265,7 @@ fn project_backup_time(app: tauri::AppHandle, project_id: String) -> Result<Opti
 #[tauri::command]
 fn restore_project_backup(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     restore_backup_files(&projects_dir(&app)?.join(&project_id).join("project.json"))
 }
@@ -301,7 +302,7 @@ fn restore_backup_files(path: &std::path::Path) -> Result<(), String> {
 #[tauri::command]
 fn load_project(app: tauri::AppHandle, project_id: String) -> Result<String, String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let path = projects_dir(&app)?.join(&project_id).join("project.json");
     fs::read_to_string(&path).map_err(|e| e.to_string())
@@ -382,7 +383,7 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
 #[tauri::command]
 fn delete_project(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
     if !is_safe_project_id(&project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let dir = projects_dir(&app)?.join(&project_id);
     // 冪等：消そうとした瞬間に既に無くても成功扱い（exists→remove の TOCTOU を避け、エラー種別で振り分ける）。
@@ -409,12 +410,9 @@ fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<St
         .get("templateId")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "templateId がありません".to_string())?;
+        .ok_or_else(|| crate::messages::TEMPLATE_ID_MISSING.to_string())?;
     if !is_safe_template_id(template_id) {
-        return Err(
-            "この見た目パターンは保存できませんでした。名前を変えて、もう一度お試しください。"
-                .to_string(),
-        );
+        return Err(crate::messages::TEMPLATE_SAVE_FAILED.to_string());
     }
     let dir = user_templates_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -474,10 +472,7 @@ fn load_user_templates(app: tauri::AppHandle) -> Result<UserTemplatesLoad, Strin
 #[tauri::command]
 fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<(), String> {
     if !is_safe_template_id(&template_id) {
-        return Err(
-            "この見た目パターンは消せませんでした。見た目パターンの一覧から選び直してください。"
-                .to_string(),
-        );
+        return Err(crate::messages::TEMPLATE_DELETE_FAILED.to_string());
     }
     let path = user_templates_dir(&app)?.join(format!("{}.json", template_id));
     if path.exists() {

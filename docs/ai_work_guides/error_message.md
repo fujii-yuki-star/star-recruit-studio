@@ -32,7 +32,10 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
 
 ## よく踏むところ
 
-- **表と実装のどちらかだけ直す**＝門番 `src/app/errorStateTable.test.ts` が突き合わせている。**行数も固定してある**（`15 §6` は 184 行）ので、足したら数も直す
+- **表と実装のどちらかだけ直す**＝門番 `src/app/errorStateTable.test.ts` が突き合わせている
+  （見ているのは「**2通りの読み取りが一致するか**」＝`readErrorTable().size === looseErrorRows().length`）。
+  ⚠️ **行数は機械で固定していない**（レビュー由来 🟡・2026-09-10）＝以前ここに「184 行」と書いてあったが、
+  実数は **186 行**で、しかも**その数はコードのどこにも無い**（`git grep 184 -- src/` は無関係な1件だけ）
 - ⚠️ **その門番は向きが片方だけ**（#1111）＝見ているのは「**表にある行**が実装のどこかに在るか」で、**実装にしか無い文**は見ていない。Rust が返す文は `src/test/rustUserMessageGuard.test.ts` が別に見る（次の行動を示すか・実装用語が混じっていないか）
 - **断りの中身（`detail`）に表の行は作らない**＝`15 §6.0` の決め（#1111）。ただし §2-3／§2-5 は同じだけ効く
 - **画面に直接書く**＝文言は `src/app/uiLabels.ts` へ。門番＝`src/app/uiMessageScan.test.ts`

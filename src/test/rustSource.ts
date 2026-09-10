@@ -39,6 +39,7 @@ export interface RustScan {
  * **その行の残りが見えなくなる**（見落とす側に倒れる）。
  * ⚠️ **`'"'` のような文字リテラルを飛ばす**＝この repo に実在し、素通しすると中の `"` から
  * **文字列が始まったことになって以降が全部消える**。
+ * ⚠️ **生の文字列（`r#"…"#`）も見分ける**＝中に `"` を書けるので、素通しすると同じ形で反転する。
  */
 export function scanRust(src: string): RustScan {
   let code = "";
@@ -66,6 +67,20 @@ export function scanRust(src: string): RustScan {
         i += 1;
       }
       blank(start, i);
+      continue;
+    }
+    // 生の文字列（`r"…"` / `r#"…"#`）＝中の `"` で終わらない。
+    // ⚠️ **見分けないと、埋め込みの `"` から対応が反転する**（`'"'` と同じ型・レビュー由来 🟡）。
+    const raw = /^r(#*)"/.exec(src.slice(i, i + 16));
+    if (raw) {
+      const open = i;
+      const close = `"${raw[1]}`;
+      const from = i + raw[0].length;
+      const end = src.indexOf(close, from);
+      const to = end < 0 ? src.length : end + close.length;
+      literals.push({ text: src.slice(from, end < 0 ? src.length : end), at: open });
+      blank(open, to);
+      i = to;
       continue;
     }
     if (src[i] === '"') {

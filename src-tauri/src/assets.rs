@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager};
 
 pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
-        return Err("この動画を開けませんでした。動画の一覧から開き直してください。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(base.join("projects").join(project_id))
@@ -134,7 +134,7 @@ pub fn import_asset_path(
 ) -> Result<String, String> {
     // 相対参照(..)は拒否（read_asset_data_url と同じ defense-in-depth。直接 invoke 対策）。
     if src_path.contains("..") {
-        return Err("そのファイルは扱えません。素材の一覧から選び直してください。".to_string());
+        return Err(crate::messages::SRC_PATH_UNUSABLE.to_string());
     }
     let src = PathBuf::from(&src_path);
     // 元ファイルが実在する通常ファイルか確認（ダイアログ経由なら満たすが防御）。
@@ -171,12 +171,10 @@ pub fn import_asset_bytes(
         return Err("素材を読み取れませんでした。もう一度お試しください。".to_string());
     };
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
-    let project_id = header("projectId").ok_or_else(|| {
-        "取り込みの情報が足りません。もう一度取り込み直してください。".to_string()
-    })?;
-    let file_name = header("fileName").ok_or_else(|| {
-        "取り込みの情報が足りません。もう一度取り込み直してください。".to_string()
-    })?;
+    let project_id =
+        header("projectId").ok_or_else(|| crate::messages::IMPORT_INFO_MISSING.to_string())?;
+    let file_name =
+        header("fileName").ok_or_else(|| crate::messages::IMPORT_INFO_MISSING.to_string())?;
     write_asset(&app, project_id, file_name, bytes)
 }
 
@@ -254,7 +252,7 @@ pub fn read_asset_data_url(
     rel_path: String,
 ) -> Result<String, String> {
     if !is_safe_rel_path(&rel_path) {
-        return Err("そのファイルは扱えません。素材の一覧から選び直してください。".to_string());
+        return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
     }
     let path = project_dir(&app, &project_id)?.join(&rel_path);
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
@@ -297,7 +295,7 @@ pub fn project_files_size(
     let mut total: u64 = 0;
     for rel in &rel_paths {
         if !is_safe_rel_path(rel) {
-            return Err("そのファイルは扱えません。素材の一覧から選び直してください。".to_string());
+            return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
         }
         if let Ok(meta) = fs::metadata(dir.join(rel)) {
             total = total.saturating_add(meta.len());
@@ -360,7 +358,7 @@ pub fn copy_project_files(
     copy_id: String,
 ) -> Result<CopyResult, String> {
     if src_project_id == dest_project_id {
-        return Err("同じ場所へは複製できません。別の場所を選んでください。".to_string());
+        return Err(crate::messages::COPY_SAME_PLACE.to_string());
     }
     // 入口で自分の回の印を落とす＝前回の中止要求を持ち越さない（同じ id を再利用しても止まらない）。
     if let Some(set) = cancelled_copies().as_mut() {
@@ -373,7 +371,7 @@ pub fn copy_project_files(
     for (i, rel) in rel_paths.iter().enumerate() {
         if !is_safe_rel_path(rel) {
             cleanup_copied(&copied, &dest_dir);
-            return Err("そのファイルは扱えません。素材の一覧から選び直してください。".to_string());
+            return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
         }
         if is_copy_cancelled(&copy_id) {
             cleanup_copied(&copied, &dest_dir);
@@ -520,9 +518,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
 pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), String> {
     // defense-in-depth：テンプレ所有素材以外の id を弾く（呼び出しミスで他種ファイルを stem 一致で消さない）。
     if !asset_id.starts_with("tmpl_asset_") {
-        return Err(
-            "この素材が見つかりませんでした。素材の一覧から選び直してください。".to_string(),
-        );
+        return Err(crate::messages::ASSET_ID_UNUSABLE.to_string());
     }
     let dir = template_assets_dir(&app)?;
     if !dir.exists() {
