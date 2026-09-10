@@ -35,6 +35,83 @@ export function adrNumbers(files: readonly string[]): string[] {
     .sort();
 }
 
+/**
+ * 行に**最初に現れる**状態の語（無ければ `null`）。
+ *
+ * ⚠️ **「最初の語」で見る**＝本文は `**一部 Superseded by …**／もとは Accepted（…）` のように
+ * 経緯を続けて書く流儀があり、語を全部拾うと必ず食い違う。README も同じ流儀なので、
+ * **先頭の語**どうしなら突き合わせられる。
+ */
+export function firstStatusWord(line: string): string | null {
+  let best: string | null = null;
+  let at = Number.POSITIVE_INFINITY;
+  for (const w of STATUS_WORDS) {
+    const i = line.indexOf(w);
+    if (i >= 0 && i < at) {
+      at = i;
+      best = w;
+    }
+  }
+  return best;
+}
+
+/**
+ * **ADR 本文の状態**と **`adr/README.md` の状態欄**が食い違っている番号（`CLAUDE.md §11`）。
+ *
+ * ⚠️ **正典は「2点を同時に直す」と決めているのに、機械は見ていなかった**（レビュー由来 ℹ️・2026-09-10）
+ * ＝この門番が見ていたのは「一覧に**載っているか**」（番号だけ）で、**状態が合っているか**は
+ * 誰も見ていなかった。実際 ADR-0032 の Accepted 化で片方だけ動いた事故が起きている
+ *（このファイルの冒頭がその経緯を書いている）のに、いまも捕まえられない状態だった。
+ *
+ * @param bodies `[ファイル名, 本文]` の一覧（`0000-template.md` は呼ぶ側で外す）
+ */
+export function adrStatusMismatch(
+  bodies: readonly (readonly [string, string])[],
+  readme: string,
+): string[] {
+  const listed = new Map<string, string | null>();
+  for (const line of readme.split("\n")) {
+    const m = /^\|\s*\[(\d{4})\]\(/.exec(line);
+    if (!m) continue;
+    const cells = line.split("|");
+    // 状態欄は**最後の列**（一覧の形＝`| 番号 | 題 | 状態 |`）。
+    listed.set(m[1]!, firstStatusWord(cells[cells.length - 2] ?? ""));
+  }
+  const out: string[] = [];
+  for (const [file, text] of bodies) {
+    const n = /^(\d{4})-/.exec(file)?.[1];
+    if (n == null || file.startsWith("0000")) continue;
+    const body = firstStatusWord(text.split("\n").find((l) => l.startsWith("- **状態**")) ?? "");
+    const row = listed.get(n) ?? null;
+    if (body !== row) out.push(`${n} 本文=${body ?? "無し"} / README=${row ?? "無し"}`);
+  }
+  return out;
+}
+
+/**
+ * **実装が ADR の状態を書き写している行**（`CLAUDE.md §11`＝状態を持つのは2点だけ）。
+ *
+ * ⚠️ **実際に3点目が居た**（レビュー由来 🔴・2026-09-10）＝`appSettings.ts` の説明が
+ * 「ADR-0039 は Proposed＝…利用者確認待ち」と書いており、状態を動かした瞬間に**嘘になった**。
+ * ⚠️ **ADR を参照すること自体は禁じない**＝禁じるのは「ADR の番号と状態の語が**同じ行に**並ぶ」形。
+ * `ADR-0033 結果・影響` のような参照はそのまま書けるので、誤検出にならない。
+ *
+ * @param entries `[ファイル名, 本文]` の一覧
+ */
+export function adrStatusInCode(
+  entries: readonly (readonly [string, string])[],
+): string[] {
+  const out: string[] = [];
+  for (const [file, text] of entries) {
+    text.split("\n").forEach((line, i) => {
+      if (!/ADR-\d{4}/.test(line)) return;
+      const word = STATUS_WORDS.find((w) => line.includes(w));
+      if (word != null) out.push(`${file}:${i + 1} 「${word}」← ${line.trim()}`);
+    });
+  }
+  return out;
+}
+
 /** `adr/README.md` の一覧に載っている番号。 */
 export function listedNumbers(readme: string): string[] {
   return [...new Set([...readme.matchAll(/\[(\d{4})\]\(/g)].map((m) => m[1]!))].sort();
@@ -175,6 +252,43 @@ describe('正典の索引（二重管理へ戻らない）', () => {
     expect(brokenDocLinks(files, existsSync), '指し先が無いリンク').toEqual([]);
   });
 
+  // ⚠️ **状態は2点を同時に直す**（`CLAUDE.md §11`）＝**その2点が合っているか**を機械で見る。
+  // これが無かったので、ADR-0032 の Accepted 化で片方だけ動いた事故を捕まえられなかった
+  //（このファイルの冒頭がその経緯を書いているのに、検査は番号の有無しか見ていなかった）。
+  it('ADR 本文の状態と、一覧の状態欄が合っている', () => {
+    const bodies = adrFiles
+      .filter((f) => /^\d{4}-.*\.md$/.test(f))
+      .map((f) => [f, readFileSync(`${ADR_DIR}/${f}`, 'utf8')] as const);
+    expect(
+      adrStatusMismatch(bodies, readFileSync(`${ADR_DIR}/README.md`, 'utf8')),
+      '状態は ADR 本文と `adr/README.md` の2点を同時に直してください（`CLAUDE.md §11`）',
+    ).toEqual([]);
+  });
+
+  // ⚠️ **3点目を作らない**（`CLAUDE.md §11`）＝実装の説明に状態を書き写すと、状態を動かした
+  // 瞬間に嘘になる（実際に `appSettings.ts` がそうなっていた＝レビュー由来 🔴）。
+  it('実装が ADR の状態を書き写していない', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const p = `${dir}/${e.name}`;
+        if (e.isDirectory()) return walk(p);
+        return /\.(ts|tsx|rs)$/.test(e.name) ? [p] : [];
+      });
+    // ⚠️ **この門番のファイルは除く**（状態の語を一覧として持っているのはここ＝定義元）。
+    const files = [...walk('src'), ...walk('src-tauri/src')].filter(
+      (p) => !p.endsWith('canonIndexGuard.test.ts'),
+    );
+    // ⚠️ **両方を見ていることを確かめる**＝片方だけ歩く形に戻しても、いまのコードには
+    // 3点目が無いので**赤くならない**（変異チェックで生き残った）。走査そのものを見る。
+    expect(files.some((p) => p.endsWith('.ts')), '画面側を1つも見ていない').toBe(true);
+    expect(files.some((p) => p.endsWith('.rs')), 'Rust 側を1つも見ていない').toBe(true);
+    const entries = files.map((p) => [p, readFileSync(p, 'utf8')] as const);
+    expect(
+      adrStatusInCode(entries),
+      '状態を持つのは ADR 本文と `adr/README.md` の2点だけです（`CLAUDE.md §11`）',
+    ).toEqual([]);
+  });
+
   // ⚠️ **移した段を二度足さない**＝同じ移設を再実行すると、ADR の末尾に同じ段が積み重なる。
   it('ADR へ移した段は、1ファイルにつき高々1つ', () => {
     const entries = adrFiles
@@ -186,6 +300,40 @@ describe('正典の索引（二重管理へ戻らない）', () => {
 
 // ⚠️ **門番自身の検査**＝いまの資料が正しい間は、規則を壊しても上の検査は緑のまま。
 describe('門番自身の検査（わざと壊した入力を通す）', () => {
+  it('状態が片方だけ動いたら見つける（2点同時の規則）', () => {
+    const readme = '| 番号 | 題 | 状態 |\n|---|---|---|\n| [0001](0001-a.md) | あ | **Accepted**（…） |\n';
+    // 揃っている＝通す。
+    expect(adrStatusMismatch([['0001-a.md', '- **状態**: Accepted（…）\n']], readme)).toEqual([]);
+    // 本文だけ動かした＝見つける（これが実際に起きた事故の形）。
+    expect(adrStatusMismatch([['0001-a.md', '- **状態**: Proposed\n']], readme)).toHaveLength(1);
+    // 本文に状態の行が無い＝見つける（黙って空にしない）。
+    expect(adrStatusMismatch([['0001-a.md', '# ADR-0001\n']], readme)).toHaveLength(1);
+    // 雛形は数えない。
+    expect(adrStatusMismatch([['0000-template.md', '- **状態**: Proposed\n']], readme)).toEqual([]);
+  });
+
+  it('実装が状態を書き写したら見つける（参照そのものは通す）', () => {
+    expect(adrStatusInCode([['a.ts', '// ADR-0039 は Proposed なので…\n']])).toHaveLength(1);
+    // ⚠️ **参照だけなら通す**＝これを赤くすると、ADR を引くコメントが書けなくなる。
+    expect(adrStatusInCode([['a.ts', '// 覚えの置き場（ADR-0033 結果・影響）\n']])).toEqual([]);
+    // 状態の語だけ・ADR の番号だけ、では赤くしない。
+    expect(adrStatusInCode([['a.ts', '// Accepted な案\n// ADR-0039 の決定3\n']])).toEqual([]);
+  });
+
+  it('一覧の状態欄は**最後の列**で見る（題に状態の語が混ざっても取り違えない）', () => {
+    // ⚠️ 行まるごとで見ると、題に出てきた語を状態と読んでしまう。
+    const readme = '| [0001](0001-a.md) | Accepted な話をした件 | **Proposed**（…） |\n';
+    expect(adrStatusMismatch([['0001-a.md', '- **状態**: Proposed\n']], readme)).toEqual([]);
+    expect(adrStatusMismatch([['0001-a.md', '- **状態**: Accepted\n']], readme)).toHaveLength(1);
+  });
+
+  it('経緯を続けて書いてある行でも、先頭の語で見る', () => {
+    // ⚠️ この流儀は実在する（`0018` / `0023` / `0025`）＝語を全部拾うと必ず食い違う。
+    expect(firstStatusWord('- **状態**: **一部 Superseded by …**／もとは Accepted（…）')).toBe('Superseded');
+    expect(firstStatusWord('- **状態**: **Accepted**（…設計は Proposed）')).toBe('Accepted');
+    expect(firstStatusWord('- **日付**: 2026-09-10')).toBeNull();
+  });
+
   it('雛形（0000）は ADR の数に入れない', () => {
     expect(adrNumbers(['0000-template.md', '0001-a.md', 'README.md'])).toEqual(['0001']);
   });
