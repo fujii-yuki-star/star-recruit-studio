@@ -8,6 +8,7 @@ import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { ChevronRightIcon } from "./app/components/icons";
 import { useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
+import { useAppearance } from "./app/hooks/useAppearance";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
 import { BulkVoiceBanner } from "./app/components/BulkVoiceBanner";
@@ -113,6 +114,9 @@ function App() {
     useStartNewProject(navigate);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
+  // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
+  // OS の明暗が変わったら追いつく（「OS に合わせる」を選んだ人は開き直しを強いられない）。
+  useAppearance();
   // 左の帯を畳んでいるか（#1103）。画面の好みなので覚える（`localStorage`・ADR-0033）。
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
   // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { CollapsibleSection } from "../components/CollapsibleSection";
+import { useAppearance } from "../hooks/useAppearance";
+import type { Appearance } from "../../infrastructure/appSettings";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import { PlayIcon, StopIcon } from "../components/icons";
 import { BrandKitSection } from "../components/BrandKitSection";
@@ -28,7 +30,22 @@ import {
   type H264FeatureStatus,
 } from "../../domain/export/h264Feature";
 
+/**
+ * 見た目の3択（ADR-0039）。
+ *
+ * ⚠️ **画面に出す語は「見た目・明るい・暗い」**（§2-3＝`テーマ` `ダークモード` `ライト/ダーク` は出さない）。
+ * ⚠️ **「OS に合わせる」を先頭に置く**＝これが既定（`APPEARANCE_DEFAULT`）なので、
+ * いま何が効いているのかが並びの先頭で分かる。
+ */
+const APPEARANCE_CHOICES: [Appearance, string][] = [
+  ["system", "OS に合わせる"],
+  ["light", "明るい"],
+  ["dark", "暗い"],
+];
+
 export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
+  // 見た目（ADR-0039・#1108）。⚠️ **動画の絵は変わらない**＝暗くなるのはアプリの枠だけ。
+  const [appearance, setAppearance] = useAppearance();
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
@@ -137,6 +154,21 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
+        {/* 画面の見た目（ADR-0039・#1108）。⚠️ **動画の絵は変わらない**＝暗くなるのはアプリの枠だけ。 */}
+        <div className="card">
+          <h2 className="section-title">見た目</h2>
+          <p className="page-desc text-pretty">
+            アプリの明るさを選べます。暗くしても、作っている動画の色は変わりません。
+          </p>
+          <div className="segment" role="group" aria-label="見た目" style={{ display: "inline-flex" }}>
+            {APPEARANCE_CHOICES.map(([id, label]) => (
+              <button key={id} className={appearance === id ? "active" : ""} onClick={() => setAppearance(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* 動画案を作るAI（接続キーの保存・削除） */}
         <div className="card">
           <h2 className="section-title">動画案を作るAI</h2>
