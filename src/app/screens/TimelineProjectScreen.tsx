@@ -2989,21 +2989,29 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? [
         { label: "手前へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "front") },
         { label: "奥へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "back") },
-        // **中身ごと複製**（#767・利用者決定）＝空の列だけ増やすなら「列を足す」と同じ。
+        // **中身ごと複製する**（#767・利用者決定）＝空の列だけ増やすなら「列を足す」と同じ。
+        // ⚠️ **その説明は画面に出さない**（#1106・利用者決定 2026-09-10）＝「中身も付いてくる」は
+        // 業界の型（ADR-0034）で、毎回読ませるほどのことではない。**振る舞いは変えない**ので、
+        // #767 の意図はこのコメントに残す（画面から消えても、次に読む人には残る）。
         // 言い方は共有の語（`uiLabels`）から採る＝同じ操作を場所で別の語にしない（#763-6）。
-        { label: `この列を中身ごと${DUPLICATE_LABEL}`, ...trackMenuGuard, onSelect: () => duplicateTrack(menuTrack.id) },
+        { label: DUPLICATE_LABEL, ...trackMenuGuard, onSelect: () => duplicateTrack(menuTrack.id) },
         {
           label: menuTrack.hidden ? "動画に出す" : "動画に出さない",
           ...trackMenuGuard,
           onSelect: () => setTrackFlag(menuTrack.id, "hidden", !menuTrack.hidden),
         },
         {
-          label: menuTrack.locked ? "固定を外す" : "動かせないように固定する",
+          // ⚠️ **主語も説明も落とす**（#1106・利用者決定 2026-09-10）＝このメニューは
+          // 「手前へ」「奥へ」「動画に出す」のように**主語なしが多数派**だったので、そちらへそろえる。
+          label: menuTrack.locked ? "固定を外す" : "固定する",
           ...trackMenuGuard,
           onSelect: () => setTrackFlag(menuTrack.id, "locked", !menuTrack.locked),
         },
         {
-          label: `この列を${DELETE_LABEL}`,
+          // ⚠️ **主語を落としても迷わせない**（#1106）＝取り返しがつかない操作なので主語を残す手もあるが、
+          // **確認の画面が名前と件数を出す**（下の `DeleteConfirm`＝「〈列名〉」を削除しますか？この列に
+          // 置いてある N 個の部品も一緒に消えます）。メニューの語だけで判じさせる作りではない。
+          label: DELETE_LABEL,
           danger: true,
           // 固定した列は消せない（`removeTrack` が断る＝ADR-0032）。押してから断られるのではなく、
           // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。

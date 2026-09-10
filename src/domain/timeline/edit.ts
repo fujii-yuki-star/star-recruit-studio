@@ -736,7 +736,7 @@ export function moveTrackTo(doc: TimelineProject, trackId: string, toIndex: numb
   const from = doc.tracks.findIndex((t) => t.id === trackId);
   if (from < 0) return blocked(EDIT_BLOCKED.notFound);
   // ⚠️ **固定した列は並べ替えない**（レビュー）＝並べ替えは**重ね順＝絵そのもの**を変える操作。
-  // 「動かせないように固定する」と言いながら絵が変わる、を作らない（消せないのと同じ扱い・ADR-0026②）。
+  // 「固定する」と言いながら絵が変わる、を作らない（消せないのと同じ扱い・ADR-0026②）。
   if (doc.tracks[from].locked) return blocked(EDIT_BLOCKED.locked);
   const to = Math.max(0, Math.min(doc.tracks.length - 1, toIndex));
   if (to === from) return ok(doc); // 変わらないなら**同じ文書を返す**（空振りの取り消しを積まない）
