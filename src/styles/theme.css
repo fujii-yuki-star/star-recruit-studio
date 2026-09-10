@@ -1235,8 +1235,10 @@ button.badge {
   display: grid;
   gap: 0;
   /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
-     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
-  height: 76vh;
+     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。
+     ⚠️ **画面ごとに差し替えられる**（#1104）＝タイムライン編集は貼り付く見出しのぶんを引いた
+     「画面の残り」を流し込む。流し込まない画面はこれまでどおり `76vh`。 */
+  height: var(--panel-layout-h, 76vh);
   min-height: 420px;
   margin-bottom: var(--space-lg, 16px);
 }

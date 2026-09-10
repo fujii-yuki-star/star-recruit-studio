@@ -79,7 +79,7 @@ import { PickerList } from "../components/PickerList";
 import { PANEL_BODY_CLASS, PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout, MAX_REGION_RATIO } from "../../domain/layout/panelLayout";
 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -158,6 +158,7 @@ import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/spli
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
+import { panelLayoutHeight, useStickyHeaderHeight } from "../hooks/usePanelViewportHeight";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -703,6 +704,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
+  // 貼り付く見出しの高さ（#1104）＝器はこれを引いた「画面の残り」を使う。
+  const stickyHeaderPx = useStickyHeaderHeight();
   const defaultLayout = useMemo(() => {
     const l = emptyLayout();
     l.nodes.center = { panelId: PANEL_ID.preview };
@@ -713,6 +716,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 3手順①の入口（素材の一覧・見た目の一覧）が**既定の配置で視界に入らなかった**。
     // 型（CapCut / Canva / YMM4）も「置く」は1欄＋タブ（#683 の調査）。
     l.nodes.left = { panelId: PANEL_ID.place };
+    // ⚠️ **「並び」は主戦場なので既定を上限まで広げる**（#1104・実機の指摘②③）＝
+    // 既定の 0.28 では、1080px の画面で器 76vh の 28%＝約 230px しか無く、
+    // 目盛りを引くと**列が約3本しか見えなかった**（「とても実用的ではない」）。
+    // 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
+    // ⚠️ **上限は 0.5**（`MAX_REGION_RATIO`）＝中央（仕上がり確認）が潰れないための枠。
+    l.regionSizes = { ...l.regionSizes, bottom: MAX_REGION_RATIO };
     return l;
   }, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
@@ -5232,7 +5241,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         囲わないと、貼り付いた知らせがそれらを覆って押せなくなる（§2-5＝戻れない状態を作らない）。
         ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
-      <div className="timeline-flash-zone">
+      {/* ⚠️ **器は「画面の残り」いっぱいにする**（#1104）＝`76vh` の決め打ちだと、貼り付く見出しと
+          余白のぶん器の下が画面からはみ出し、初期表示で帯が隠れる。ページのスクロールは残す
+          （器の下の「注意」の知らせに辿り着けなくなるため）。 */}
+      <div
+        className="timeline-flash-zone"
+        style={{ ["--panel-layout-h" as string]: panelLayoutHeight(stickyHeaderPx) }}
+      >
         <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
