@@ -26,7 +26,7 @@
 
 | 条件 | 読むもの |
 |---|---|
-| 操作感（掴む・置く・吸着・ズーム） | [`adr/0034`](../yuko_recruit_docs/adr/0034-timeline-interaction-model.md)＋`research/2026-08-timeline-editing-ux*.md` |
+| 操作感（掴む・置く・吸着・ズーム） | [`adr/0034`](../yuko_recruit_docs/adr/0034-timeline-interaction-model.md)＋`archive/research/2026-08-timeline-editing-ux*.md` |
 | 欄の配置 | [`adr/0033`](../yuko_recruit_docs/adr/0033-editor-panel-layout.md) |
 | 焼き出しの規則を変える | [`adr/0032`](../yuko_recruit_docs/adr/0032-timeline-project-format.md) 決定20・`11 §7.6.1` |
 | 保存する形を足す | [`schema_change.md`](schema_change.md)（timeline schema は project と**版が独立**・ただし共有 `$defs` は同時バンプ） |

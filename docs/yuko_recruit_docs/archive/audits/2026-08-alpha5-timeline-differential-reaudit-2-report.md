@@ -2,7 +2,7 @@
 
 - **凍結点**: `b75e70c`（2026-08-25・`Merge pull request #853`）
 - **比較の基準**: `21e4071`（前回の凍結点＝[レポート①](2026-08-alpha5-timeline-differential-reaudit-report.md)）＝この間の **#842・#843・#844〔6件〕・#841／22 files／+777 −56**
-- **観点ファイル**: [`alpha5-timeline-final-audit-points.md`](alpha5-timeline-final-audit-points.md)
+- **観点ファイル**: [`alpha5-timeline-final-audit-points.md`](../../audits/alpha5-timeline-final-audit-points.md)
 - **実施日**: 2026-08-25
 - **機械層**: 緑（`npm run check:frontend` EXIT=0・245 files / 4164 tests）。tests-reviewer も独立に実行し同一結果。
 

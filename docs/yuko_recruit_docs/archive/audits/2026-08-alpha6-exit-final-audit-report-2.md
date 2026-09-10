@@ -1,6 +1,6 @@
 # 出口監査レポート（再走）：α-6 実用品化
 
-- **凍結点**: `audit6-freeze13`（`58ad19a`）／**観点ファイル**: [`alpha6-final-audit-points.md`](alpha6-final-audit-points.md)（最終更新 2026-08-30）／**実施日**: 2026-08-30
+- **凍結点**: `audit6-freeze13`（`58ad19a`）／**観点ファイル**: [`alpha6-final-audit-points.md`](../../audits/alpha6-final-audit-points.md)（最終更新 2026-08-30）／**実施日**: 2026-08-30
 - **機械層**: 緑（`check:frontend` 313 files / 5044 tests・`check:rust` 緑・`validate:schemas` ALL OK）
 - **これは再走**。1回目（[`2026-08-alpha6-exit-final-audit-report.md`](2026-08-alpha6-exit-final-audit-report.md)）の指摘をすべて直したあと、
   **差分再監査を12巡**回して修正の修正まで潰してから、**同じ観点ファイルで全体を回し直した**もの。

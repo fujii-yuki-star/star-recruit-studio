@@ -2,7 +2,7 @@
 
 - **凍結点**: `21e4071`（2026-08-25・`Merge pull request #840`）
 - **比較の基準**: `c01e51b`（前回の凍結点・`Merge pull request #828`）＝この間の **6 PR（#835〜#840）／37 files／+1393 −158** が対象
-- **観点ファイル**: [`alpha5-timeline-final-audit-points.md`](alpha5-timeline-final-audit-points.md)（最終更新 2026-08-24＝#833 の PR で同期済み）
+- **観点ファイル**: [`alpha5-timeline-final-audit-points.md`](../../audits/alpha5-timeline-final-audit-points.md)（最終更新 2026-08-24＝#833 の PR で同期済み）
 - **実施日**: 2026-08-25
 - **機械層**: 緑（`npm run check:frontend` EXIT=0・245 files / 4147 tests）。tests-reviewer も独立にフルスイートを実行し同一結果を確認。
 - **この監査の位置づけ**: #689 の判断1・条件②「🔴 修正後は全8観点の再走ではなく、**該当観点だけの差分再監査**（凍結点を更新し 🔴 の消滅を確認）で閉じる」。当初は観点を絞る想定だったが、差分が8観点すべてに触れていた（正典5ファイル＋ドリルイン／再生ヘッド／分割の門／書き出しの締め／履歴のまとめ／文言の集約）ため、**観点を絞らず入力を差分に絞る**形で実施した。

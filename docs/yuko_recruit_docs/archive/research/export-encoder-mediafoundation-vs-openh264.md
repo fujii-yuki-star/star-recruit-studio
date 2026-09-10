@@ -5,7 +5,7 @@
 - **対象**: H.264/MP4 書き出しのエンコーダ方式
 - **関連**: `adr/0002-ffmpeg-codec.md` / `research/ffmpeg-openh264-windows.md` / `adr/0001` / `adr/0006` / `13_DEPENDENCIES_AND_LICENSING.md §3,§9`
 - **重要な前提**: 当初は調査と推奨までの資料。
-- **結果（2026-06-18 更新）**: 推奨どおりスパイクを実施し、**案A（FFmpeg＋h264_mf）の採用を確定**（画質問題はビットレート未指定が原因で解消、機能は実機で全成功）。正式決定は [`ADR-0013`](../adr/0013-h264-via-media-foundation.md)、スパイク記録は [`spike-h264-mf-verification.md`](spike-h264-mf-verification.md)。以降この資料は判断の背景・比較として参照。
+- **結果（2026-06-18 更新）**: 推奨どおりスパイクを実施し、**案A（FFmpeg＋h264_mf）の採用を確定**（画質問題はビットレート未指定が原因で解消、機能は実機で全成功）。正式決定は [`ADR-0013`](../../adr/0013-h264-via-media-foundation.md)、スパイク記録は [`spike-h264-mf-verification.md`](spike-h264-mf-verification.md)。以降この資料は判断の背景・比較として参照。
 
 ---
 
@@ -23,8 +23,8 @@
 
 ### 1.1 現在の書き出し処理の全体像（ADR-0001 A2ハイブリッド）
 - 静止レイヤーはプレビューと同一の Web 描画で **SVG→PNG** 化（`adr/0004` WebView Canvas）。FFmpeg は **動画スロット合成・トランジション・音声ミックス・尺・結合・エンコードに限定**（`adr/0001` 決定部）。
-- フロント側の入口：[`src/app/screens/ExportScreen.tsx`](../../../src/app/screens/ExportScreen.tsx) → [`buildExportScenes`](../../../src/renderer/export/buildExportScenes.ts) で各場面PNG生成 → [`exportVideo`](../../../src/infrastructure/ffmpegExport.ts) が Tauri コマンド `export_video` を呼ぶ。
-- バックエンド：[`src-tauri/src/ffmpeg.rs`](../../../src-tauri/src/ffmpeg.rs) の `#[tauri::command] export_video`（行 999〜）。
+- フロント側の入口：[`src/app/screens/ExportScreen.tsx`](../../../../src/app/screens/ExportScreen.tsx) → [`buildExportScenes`](../../../../src/renderer/export/buildExportScenes.ts) で各場面PNG生成 → [`exportVideo`](../../../../src/infrastructure/ffmpegExport.ts) が Tauri コマンド `export_video` を呼ぶ。
+- バックエンド：[`src-tauri/src/ffmpeg.rs`](../../../../src-tauri/src/ffmpeg.rs) の `#[tauri::command] export_video`（行 999〜）。
 
 ### 1.2 FFmpeg sidecar 呼び出しとコーデック抽象（**最重要**）
 - `ffmpeg.rs:23-44` にコーデック抽象：
@@ -45,7 +45,7 @@
 - **結論：`h264_mf` 追加は「`VideoCodec` に変種を1つ追加＋`pick_codec` の検出文字列追加」で収まる。** これが本判断の土台。
 
 ### 1.3 PNGフレーム生成（寸法非依存）
-- [`buildExportScenes.ts:107-117`](../../../src/renderer/export/buildExportScenes.ts)：
+- [`buildExportScenes.ts:107-117`](../../../../src/renderer/export/buildExportScenes.ts)：
   ```ts
   const cw = template.canvas.width; const ch = template.canvas.height;
   const width = opts.outputSize?.width ?? cw;  // 出力解像度（未指定はキャンバス）

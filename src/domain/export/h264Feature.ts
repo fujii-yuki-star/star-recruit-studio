@@ -1,5 +1,5 @@
 // H.264 動画保存機能の抽象状態・表示文言・機能フラグ。
-// 主経路は Media Foundation（h264_mf・OS提供＝ADR-0013）。OpenH264 はフォールバック（ADR-0002 / research/ffmpeg-openh264-windows.md）。
+// 主経路は Media Foundation（h264_mf・OS提供＝ADR-0013）。OpenH264 はフォールバック（ADR-0002 / archive/research/ffmpeg-openh264-windows.md）。
 // 状態型・ラベルはエンコーダ非依存（MF/OpenH264 共通の「可用性」表示）。OpenH264 の取得・検証・配置の本実装は版/URL/ハッシュ確定後（pin 後）。
 // ここには URL・ファイル名・具体バージョン等は持たせない（UI 表示用の汎用状態のみ）。
 

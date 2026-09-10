@@ -62,7 +62,9 @@ description: 機能・リリース単位の出口監査を実行する司令塔�
 
 ### 7. レポート保存
 
-`docs/yuko_recruit_docs/audits/<YYYY-MM>-<scope>-final-audit-report.md` に保存：
+`docs/yuko_recruit_docs/archive/audits/<YYYY-MM>-<scope>-final-audit-report.md` に保存：
+⚠️ **報告は `archive/` へ**（#1090 案D・2026-09-10）＝その時点の記録で、作業中に読むものではない。
+**観点ファイル**（`audits/*-points.md`）は入力として使うので `audits/` に残す。
 
 ```
 # 出口監査レポート：<scope>
