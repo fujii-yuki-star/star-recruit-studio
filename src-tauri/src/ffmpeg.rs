@@ -1626,7 +1626,7 @@ pub fn extract_video_thumbnail(
         fs::create_dir_all(dir).map_err(|e| {
             export_failure(
                 format!("thumbnail dir: {e}"),
-                "動画のサムネイル作成に失敗しました。",
+                "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
             )
         })?;
     }
@@ -1647,7 +1647,7 @@ pub fn extract_video_thumbnail(
     run(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("thumbnail extract: {e}"),
-            "動画のサムネイル作成に失敗しました。",
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
         )
     })?;
     Ok(rel_out)
@@ -3165,7 +3165,7 @@ fn export_video_impl(
     // 準備中に押された中止を取りこぼす（本体開始で flag が消える）ため、ここでは初期化しない。
 
     if scenes.is_empty() {
-        return Err("書き出す場面がありません。".into());
+        return Err("書き出す場面がありません。場面を1つ以上作ってからお試しください。".into());
     }
     let ffmpeg = resolve_ffmpeg(&app);
     let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).map_err(|_| {
@@ -3221,7 +3221,7 @@ fn export_video_impl(
             let pid = project_id.as_deref().ok_or_else(|| {
                 export_failure(
                     "video scene without project_id",
-                    "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                    "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
                 )
             })?;
             // 下層PNG：below_frames_dir（動画×アニメ・#435）があれば静止 below は書き出さない（per-frame を使う）。
@@ -3321,7 +3321,7 @@ fn export_video_impl(
                 return Err(export_failure(
                     format!("invalid slot size: {}x{}", v.slot_w, v.slot_h),
                     format!(
-                        "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                        "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                         i + 1
                     ),
                 ));
@@ -3371,7 +3371,7 @@ fn export_video_impl(
                     return Err(export_failure(
                         format!("invalid layer slot size: {}x{}", vl.slot_w, vl.slot_h),
                         format!(
-                            "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                            "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                             i + 1
                         ),
                     ));
@@ -3483,7 +3483,7 @@ fn export_video_impl(
                 let pid = project_id.as_deref().ok_or_else(|| {
                     export_failure(
                         "clip audio without project_id",
-                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                        "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
                     )
                 })?;
                 let mut clips: Vec<(PathBuf, &ClipAudioInput)> =
@@ -3574,7 +3574,7 @@ fn export_video_impl(
             if p.components().any(|c| c.as_os_str() == "..") {
                 return Err(export_failure(
                     "output_path contains '..': path traversal rejected",
-                    "保存先が不正です。保存先を選び直してください。",
+                    "保存先が使えません。保存先を選び直してください。",
                 ));
             }
             if let Some(parent) = p.parent() {
@@ -3710,7 +3710,7 @@ fn export_video_impl(
                 let pid = project_id.as_deref().ok_or_else(|| {
                     export_failure(
                         "video clip audio without project_id",
-                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                        "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
                     )
                 })?;
                 let src = resolve_project_file(&app, pid, rel)?;
