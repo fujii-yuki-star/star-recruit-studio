@@ -7,6 +7,7 @@
 // ⚠️ **1か所に置く**＝画面ごとに書くと、片方だけ直る（このリポジトリで繰り返している型）。
 // 開けなかったときの断りも**同じ文**から出す。
 import { useState } from "react";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
 import { ArrowLeftIcon } from "./icons";
 import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
 
@@ -59,7 +60,7 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
         {onBack && (
           <button className="btn btn-ghost btn-icon" onClick={onBack}>
             <ArrowLeftIcon size={16} />
-            プロジェクト一覧へ戻る
+            {BACK_TO_HOME_LABEL}
           </button>
         )}
       </div>
