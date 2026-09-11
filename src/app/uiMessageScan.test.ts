@@ -110,8 +110,16 @@ function directGuidanceConstants(): Found[] {
   return out;
 }
 
-/** `15 §6` の本文（行の照合ではなく、文が載っているかだけを見る）。 */
+/**
+ * 表の本文（行の照合ではなく、文が載っているかだけを見る）。
+ *
+ * ⚠️ **表の実体は `15 §6` から移した**（#1090 案C・2026-09-10）＝
+ * `docs/yuko_recruit_docs/errors/error-state-table.tsv`。正典であることは変わらない。
+ * ⚠️ **規則の側（`15 §6` 本文）も読む**＝退役の説明など、表の外に書いてある文がある。
+ */
 const tableText = (): string =>
+  readFileSync(join(process.cwd(), "docs", "yuko_recruit_docs", "errors", "error-state-table.tsv"), "utf8") +
+  "\n" +
   readFileSync(join(process.cwd(), "docs", "yuko_recruit_docs", "15_ERROR_STATE_MODEL.md"), "utf8");
 
 // ⚠️ **表に載せない**と決めたものは、**理由を書いて明示的に外す**（黙って落とさない）。
