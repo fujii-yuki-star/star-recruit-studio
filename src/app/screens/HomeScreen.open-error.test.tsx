@@ -41,7 +41,7 @@ describe("HomeScreen 開けなかった理由を出す（#793）", () => {
 
   // ⚠️ **理由ごとに違う文が出る**ことを2つ目で固定する＝1つだけだと「常にその文を出す」実装でも緑になる。
   it("別の理由なら別の文が出る（固定文に潰さない）", async () => {
-    setup(new ProjectLoadError("プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。"));
+    setup(new ProjectLoadError("動画の必須情報が欠けています。別の動画を選んでください。"));
     render(<HomeScreen onNavigate={vi.fn()} />);
     await open();
     expect(await screen.findByText(/必須情報が欠けています/)).toBeInTheDocument();

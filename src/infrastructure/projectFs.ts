@@ -55,7 +55,7 @@ export async function saveProjectDoc(projectId: string, projectJson: string): Pr
 export async function loadProjectDoc(projectId: string): Promise<string> {
   if (isTauri()) return invoke<string>('load_project', { projectId });
   const text = localStorage.getItem(LS_PREFIX + projectId);
-  if (text === null) throw new Error('保存されたプロジェクトが見つかりません。');
+  if (text === null) throw new Error('保存された動画が見つかりません。');
   return text;
 }
 

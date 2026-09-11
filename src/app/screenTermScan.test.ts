@@ -55,8 +55,12 @@ export function screenFiles(): string[] {
       out.push(p);
     }
   };
-  walk(join(process.cwd(), "src", "app", "screens"), true);
-  walk(join(process.cwd(), "src", "app", "components"), true);
+  // ⚠️ **`src/app` を丸ごと歩く**（#1109 ⑤ レビュー由来 🟡）＝`screens`/`components` だけでは
+  // **文言の置き場そのもの**（`src/app/uiLabels.ts`）と `src/app/store/**` が走査の外だった。
+  // 前例＝`src/app/uiMessageScan.test.ts` は `src/app` と `src/infrastructure` を丸ごと歩いている。
+  walk(join(process.cwd(), "src", "app"), true);
+  walk(join(process.cwd(), "src", "infrastructure"), true);
+  // 画面の外枠（`src/App.tsx`）＝`src` 直下は入れ子まで行かない（`domain`/`renderer` は描画の層）。
   walk(join(process.cwd(), "src"), false);
   return out;
 }
@@ -75,6 +79,13 @@ const ALLOWED: Record<string, string> = {
 };
 
 describe("画面に直書きした文字に、実装用語が混じっていない（§2-3）", () => {
+  it("免除は1件だけ（増やすときは、この数も一緒に動かす）", () => {
+    // ⚠️ **無制限の抜け道になっていた**（レビュー由来 🟡）＝`ALLOWED` に1行足すだけで、
+    // そのファイルの違反が**全部**消える。改名を黙って戻せる道が、走査の棚とは別に残っていた。
+    // ⚠️ **実数で留める**＝増やすなら、なぜ免除してよいかを書いたうえでこの数も動かす。
+    expect(Object.keys(ALLOWED)).toEqual(["AboutScreen.tsx"]);
+  });
+
   it("走査が空振りしていない（日本語を拾えている）", () => {
     // ⚠️ **拾えていないのに緑**を作らない＝走査が壊れたら、下の検査は無条件で通る。
     const sample = readFileSync(join(process.cwd(), "src", "app", "screens", "HomeScreen.tsx"), "utf8");
@@ -92,6 +103,9 @@ describe("画面に直書きした文字に、実装用語が混じっていな�
     expect(walked, "画面（screens）を1つも見ていない").toContain("HomeScreen.tsx");
     expect(walked, "部品（components）を1つも見ていない").toContain("Sidebar.tsx");
     expect(walked, "画面の外枠（`src/App.tsx`）を見ていない").toContain("App.tsx");
+    // ⚠️ **入れ子の部品まで届いているか**（レビュー由来 🟡）＝上の3つは**再帰しなくても**見つかる
+    // 位置にあるので、再帰を止めても緑のままだった。**下の階層のファイル**で留める。
+    expect(walked, "入れ子の部品（`components/layout/`）を見ていない").toContain("PanelLayoutView.tsx");
   });
 
   it("禁止語が画面に出ていない", () => {
@@ -118,6 +132,17 @@ describe("拾い方（画面の直書き）", () => {
   it("文字列リテラルを拾う（属性・データの値）", () => {
     expect(screenTermHitsIn(`const LANES = [{ sub: "ナレーション" }];`)).toHaveLength(1);
     expect(bannedTermsIn(`<span title="ナレーションの設定" />`)).toHaveLength(1);
+  });
+
+  it("開発用の記録は拾わない（画面に出ない＝誤検出にしない）", () => {
+    // ⚠️ 走査を `src/app` 丸ごとへ広げたら、記録の文で赤くなった（レビュー由来 🟡の対応で判明）。
+    expect(screenTermHitsIn('console.warn("[timeline] 保存内容がスキーマに未適合:", e);')).toEqual([]);
+    // ⚠️ **記録を落としても、その外側の文は残す**＝落としすぎると本物を見逃す。
+    expect(
+      screenTermHitsIn('console.warn("[x] スキーマに未適合");\nconst t = "ナレーション音量";').map((h) => h.word),
+    ).toEqual(["ナレーション"]);
+    // ⚠️ **括弧の釣り合いを数える**＝中で組み立てていても、その呼び出しの終わりまで落とす。
+    expect(screenTermHitsIn('console.error("[x]", String(1), `スキーマ`);')).toEqual([]);
   });
 
   it("コメントは拾わない（説明文に実装用語が出てよい）", () => {

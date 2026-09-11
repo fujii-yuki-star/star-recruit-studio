@@ -1,4 +1,5 @@
 import type { ScreenId } from "../data/mockData";
+import { HOME_SCREEN_LABEL } from "../uiLabels";
 import { isProjectScreen } from "../navigation";
 import {
   FolderIcon,
@@ -37,7 +38,6 @@ interface SidebarProps {
 // タイムライン画面の右上は「動画の一覧へ」と**2つの言葉で呼んでいた**（実機で確認）。
 // 利用者は人事・非エンジニアなので、作るものの名前（動画）で呼ぶ。「今の動画」は工程画面群を束ねる別項目で条件表示（#399 B案）。
 const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
-  { id: "home", label: "動画", icon: FolderIcon },
   { id: "materials", label: "素材", icon: PhotoIcon },
   { id: "looks", label: "見た目パターン", icon: LayoutIcon },
   { id: "settings", label: "設定", icon: SettingsIcon },
@@ -81,7 +81,7 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
           aria-current={isActive("home") ? "page" : undefined}
         >
           <FolderIcon size={20} className="nav-icon" />
-          動画
+          {HOME_SCREEN_LABEL}
         </button>
 
         {/* 今の動画（開いている間だけ・工程画面群を束ねる）。押すと直近に開いていた工程画面へ戻る（たたき台固定にしない・
@@ -108,7 +108,7 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
           );
         })}
 
-        {mainMenu.slice(1).map((item) => {
+        {mainMenu.map((item) => {
           const Icon = item.icon;
           return (
             <button

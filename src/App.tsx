@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { HOME_SCREEN_LABEL } from "./app/uiLabels";
 import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
 import "./styles/fonts.css";
@@ -36,7 +37,7 @@ import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
 
 const titles: Record<ScreenId, string> = {
-  home: "動画", // サイドバー先頭「動画」＝一覧（現ホーム統合・#399 B案）。名前と画面を一致させる。
+  home: HOME_SCREEN_LABEL, // サイドバー先頭「動画」＝一覧（現ホーム統合・#399 B案）。名前と画面を一致させる。
   // ⚠️ **「プロジェクト」から改名**（#1109 ⑤・利用者判断 2026-09-10）＝同じ場所を左の帯と
   // タイムライン画面の右上で**2つの言葉で呼んでいた**（実機で確認）。画面には出さない語にした。
   wizard: "新しい動画を作る",
@@ -254,7 +255,7 @@ function App() {
         {!hasOwnHeader && screen !== "home" && confirmNew && (
           <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
             <span>
-              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みの動画は「動画」の一覧からいつでも開けます）。
+              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みの動画は一覧からいつでも開けます）。
             </span>
             {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
             <div className="row gap-sm">

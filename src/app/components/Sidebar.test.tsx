@@ -17,7 +17,7 @@ const setup = (over: {
   const onCollapse = vi.fn();
   const fallback: { kind: "scene" | "timeline"; name: string; target: ScreenId; sub: string }[] =
     over.hasProjectContent ?? false
-      ? [{ kind: "scene", name: over.projectName ?? "無題のプロジェクト", target: over.currentProjectTarget ?? "draft", sub: "今の動画" }]
+      ? [{ kind: "scene", name: over.projectName ?? "無題の動画", target: over.currentProjectTarget ?? "draft", sub: "今の動画" }]
       : [];
   render(
     <Sidebar
@@ -63,7 +63,7 @@ describe("Sidebar（IA再構成・#399 B案）", () => {
   // ⚠️ **「出すかどうか」の規則は `navigation.ts` へ移した**（#1006）＝ここは**渡されたものを描く**だけ。
   // 規則そのものの検査は `navigation.test.ts`（工程画面にいる間は開いていなくても出す）。
   it("工程画面にいる間も「今の動画」を出す（active）", () => {
-    setup({ current: "wizard", currentProjects: [{ kind: "scene", name: "無題のプロジェクト", target: "draft", sub: "今の動画" }] });
+    setup({ current: "wizard", currentProjects: [{ kind: "scene", name: "無題の動画", target: "draft", sub: "今の動画" }] });
     const btn = currentVideoButton();
     expect(btn).not.toBeNull();
     expect(btn!.className).toContain("active"); // 工程画面では「今の動画」が active
