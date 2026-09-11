@@ -47,6 +47,9 @@ pub fn init(app: &tauri::AppHandle) {
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
+    // ⚠️ **画面から開ける先として覚える**（#1118）＝`open_path` は画面から任意の場所を
+    // 渡せない形にしたので、アプリが作った場所は**作った側が覚える**。
+    crate::opener::remember(&dir);
     let _ = LOG_DIR.set(dir);
 }
 

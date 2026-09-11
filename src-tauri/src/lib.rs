@@ -8,6 +8,7 @@ mod ai;
 mod assets;
 mod ffmpeg;
 mod messages;
+mod opener;
 mod proc;
 mod trouble_log;
 mod voicevox;
@@ -1223,6 +1224,7 @@ pub fn run() {
             read_user_font,
             delete_user_font,
             trouble_log_dir,
+            opener::open_produced_path,
             trouble_log_record,
             list_library_assets,
             used_library_asset_ids,

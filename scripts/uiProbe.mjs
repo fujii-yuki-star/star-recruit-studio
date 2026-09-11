@@ -84,7 +84,13 @@ async function evaluate(cdp, expression) {
     returnByValue: true,
     awaitPromise: true,
   });
-  if (r.exceptionDetails) throw new Error(`ページの中で失敗: ${r.exceptionDetails.text}`);
+  if (r.exceptionDetails) {
+    // ⚠️ **中身まで出す**＝`text` は "Uncaught" だけのことがあり、それだけでは直せない（実際に踏んだ）。
+    const d = r.exceptionDetails;
+    const detail = d.exception?.description ?? d.exception?.value ?? d.text ?? "（詳細なし）";
+    const at = d.lineNumber != null ? `（${d.lineNumber}行目 ${d.columnNumber ?? "?"}列）` : "";
+    throw new Error(`ページの中で失敗${at}: ${detail}`);
+  }
   return r.result.value;
 }
 

@@ -3797,6 +3797,9 @@ fn export_video_impl(
     // ⚠️ **ここで初めて利用者の場所へ置く**＝ここまで来たものだけが「開ける動画」。
     // `rename` は同じ場所どうしなので取り違えが起きない（別ドライブへ跨がない）。
     finish_staged_output(&staged, &out)?;
+    // ⚠️ **ここで初めて「開ける動画」になる**（#1118）＝画面の「動画を再生」はこの覚えだけを見る。
+    // 失敗した回は覚えない（書きかけを開かせない）。
+    crate::opener::remember(&out);
 
     Ok(ExportReport {
         output_path: out.to_string_lossy().into_owned(),
