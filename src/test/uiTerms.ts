@@ -26,7 +26,11 @@ export const BANNED_IN_SCREENS = [
   // ⚠️ **Rust 側で見つけた語**（#1111）＝画面へ返る `Err` の文に入っていた。
   // 「プロジェクトID」は §2-3 が名指しする ID そのもの、「サムネイル」の画面語は「小さな絵」
   //（`06 §12`）、「ポート」は接続の実装語。
-  "プロジェクトID",
+  // ⚠️ **画面では「動画」と呼ぶ**（#1026・利用者判断 2026-09-10）＝同じ場所を、左の帯は
+  // 「プロジェクト」、タイムライン画面の右上は「動画の一覧へ」と**2つの言葉で呼んでいた**。
+  // 利用者は人事・非エンジニアなので、作るものの名前で呼ぶ。**内部用語としては残す**（`projectId` ほか）。
+  // ⚠️ **「プロジェクトID」は別に持たない**＝この1語が**部分一致で**そちらも拾う（自己検査で露見）。
+  "プロジェクト",
   "サムネイル",
   // ⚠️ **部分一致であることに注意**（レビュー由来 ℹ️）＝`サポート` `エクスポート` `インポート`
   // `ビューポート` を含む文が入ると赤くなる。ADR-0034 決定21 は「動画編集の一般語は置き換えない」と
@@ -45,6 +49,41 @@ export const BANNED_IN_SCREENS = [
   "Provider",
 ] as const;
 
+/**
+ * 開発用の記録（`console.warn(…)` ほか）を**構造で**落とす。
+ *
+ * ⚠️ **一覧で外さない**（#1026 レビュー由来・2026-09-10）＝走査を `src/app` 丸ごとへ広げたら、
+ * `[timeline] 保存内容がスキーマに未適合:` のような**記録の文**で赤くなった。これは画面に出ない。
+ * 「このファイルは対象外」と名前で外すと**次に足された記録が素通り**するので、**役目で外す**
+ *（Rust 側で `tlog!` を外しているのと同じ流儀＝`src/test/rustUserMessageGuard.test.ts`）。
+ * ⚠️ **括弧の釣り合いを数える**＝素朴に「次の `)` まで」だと、中の `format` 等で切れて続きを拾う。
+ */
+export function dropDevLogs(code: string): string {
+  let out = "";
+  let i = 0;
+  const heads = ["console.warn(", "console.error(", "console.log(", "console.info(", "console.debug("];
+  outer: while (i < code.length) {
+    for (const h of heads) {
+      if (code.startsWith(h, i)) {
+        let depth = 0;
+        let j = i + h.length - 1;
+        for (; j < code.length; j += 1) {
+          if (code[j] === "(") depth += 1;
+          else if (code[j] === ")") {
+            depth -= 1;
+            if (depth === 0) break;
+          }
+        }
+        i = j + 1;
+        continue outer;
+      }
+    }
+    out += code[i];
+    i += 1;
+  }
+  return out;
+}
+
 /** 画面に出る文字とみなす＝**日本語を含む**文字列。 */
 export const hasJapanese = (s: string): boolean => /[ぁ-んァ-ヶ一-龠]/.test(s);
 
@@ -60,7 +99,7 @@ export function bannedTermsIn(
 ): { word: string; text: string }[] {
   const out: { word: string; text: string }[] = [];
   // ⚠️ **コメントを外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const code = dropDevLogs(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
   const seen = new Set<string>();
   const add = (raw: string): void => {
     const s = raw.trim();

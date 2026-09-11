@@ -683,8 +683,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </button>
           </div>
 
-          {/* 最近のプロジェクト（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
-          <h2 className="section-title mb">最近のプロジェクト</h2>
+          {/* 最近の動画（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
+          <h2 className="section-title mb">最近の動画</h2>
           <div className="col gap-sm">
             {listError ? (
               // 取得失敗（§2-5）：空（保存物なし）と区別し、原因＋次の行動（再試行）を出す＝無言で「保存物なし」にしない。

@@ -17,7 +17,7 @@ const setup = (over: {
   const onCollapse = vi.fn();
   const fallback: { kind: "scene" | "timeline"; name: string; target: ScreenId; sub: string }[] =
     over.hasProjectContent ?? false
-      ? [{ kind: "scene", name: over.projectName ?? "無題のプロジェクト", target: over.currentProjectTarget ?? "draft", sub: "今の動画" }]
+      ? [{ kind: "scene", name: over.projectName ?? "無題の動画", target: over.currentProjectTarget ?? "draft", sub: "今の動画" }]
       : [];
   render(
     <Sidebar
@@ -34,9 +34,9 @@ const setup = (over: {
 const currentVideoButton = (): HTMLElement | null => screen.queryByText("今の動画")?.closest("button") ?? null;
 
 describe("Sidebar（IA再構成・#399 B案）", () => {
-  it("先頭は「プロジェクト」＝一覧。押すと一覧（home）へ", () => {
+  it("先頭は「動画」＝一覧。押すと一覧（home）へ", () => {
     const { onNavigate } = setup();
-    fireEvent.click(screen.getByText("プロジェクト").closest("button")!);
+    fireEvent.click(screen.getByText("動画").closest("button")!);
     expect(onNavigate).toHaveBeenCalledWith("home");
   });
 
@@ -63,15 +63,15 @@ describe("Sidebar（IA再構成・#399 B案）", () => {
   // ⚠️ **「出すかどうか」の規則は `navigation.ts` へ移した**（#1006）＝ここは**渡されたものを描く**だけ。
   // 規則そのものの検査は `navigation.test.ts`（工程画面にいる間は開いていなくても出す）。
   it("工程画面にいる間も「今の動画」を出す（active）", () => {
-    setup({ current: "wizard", currentProjects: [{ kind: "scene", name: "無題のプロジェクト", target: "draft", sub: "今の動画" }] });
+    setup({ current: "wizard", currentProjects: [{ kind: "scene", name: "無題の動画", target: "draft", sub: "今の動画" }] });
     const btn = currentVideoButton();
     expect(btn).not.toBeNull();
     expect(btn!.className).toContain("active"); // 工程画面では「今の動画」が active
   });
 
-  it("一覧画面では「プロジェクト」が active・「今の動画」は非active", () => {
+  it("一覧画面では「動画」が active・「今の動画」は非active", () => {
     setup({ current: "home", hasProjectContent: true });
-    expect(screen.getByText("プロジェクト").closest("button")!.className).toContain("active");
+    expect(screen.getByText("動画").closest("button")!.className).toContain("active");
     expect(currentVideoButton()!.className).not.toContain("active");
   });
 
