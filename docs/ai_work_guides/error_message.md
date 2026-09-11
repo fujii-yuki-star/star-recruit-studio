@@ -7,13 +7,14 @@
 | 資料 | 範囲 | なぜ |
 |---|---|---|
 | `CLAUDE.md` | **§2-5**（自動で読み込み済み） | 「原因」でなく「次の行動」・**黙って別の結果にしない** |
-| [`15_ERROR_STATE_MODEL.md`](../yuko_recruit_docs/15_ERROR_STATE_MODEL.md) | **§5 分類**（324字）＋**§6 の該当行だけ**（§6 全体は 46,002字・184行） | コード語彙と文言の正典 |
+| [`15_ERROR_STATE_MODEL.md`](../yuko_recruit_docs/15_ERROR_STATE_MODEL.md) | **§5 分類**（324字）＋**§6 の規則**（全体で 16,823字＝表を外へ出した・#1090 案C） | コード語彙と規則の正典 |
+| [`errors/error-state-table.tsv`](../yuko_recruit_docs/errors/error-state-table.tsv) | **該当の1行だけ**（189 行・43,204字） | **文言の正典**（1行=1コード・タブ区切り） |
 | [`06_UI_SPEC.md`](../yuko_recruit_docs/06_UI_SPEC.md) | **§3 用語置き換え**（2,297字） | 出してよい言葉 |
 
-`15 §6` の行は `grep` で当てる（全文を開かない）:
+表の行は `grep` で当てる（全文を開かない）。⚠️ **表の実体は `15` ではなく TSV**（#1090 案C）:
 
 ```bash
-grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
+grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/errors/error-state-table.tsv
 ```
 
 ## 必要なら読む
@@ -46,4 +47,5 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md
 ## 終わったら
 
 `errorStateTable.test.ts` と `uiMessageScan.test.ts` を通す（Rust の文を足したら `rustUserMessageGuard.test.ts` も）
-→ **`15 §6` の表を同じ PR で直す** → `/canon-check`。
+→ **表（`errors/error-state-table.tsv`）を同じ PR で直す** → `/canon-check`。
+⚠️ **タブ区切り・1行=1コード**＝セルにタブと改行を入れない（門番が見ています）。
