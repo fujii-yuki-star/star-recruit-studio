@@ -3112,7 +3112,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return synthesizeWithAccent(yomi, accentType, v);
   },
   synthesizePreview: async () => {
-    // ⚠️ **読み上げられる文にも §2-3 は効く**（#1109 ⑤ レビュー由来・2026-09-10）＝
+    // ⚠️ **読み上げられる文にも §2-3 は効く**（#1026 レビュー由来・2026-09-10）＝
     // 画面に出ないからと「ナレーション」を使っていたが、**利用者は耳で聞く**。
     // 画面の語は「読み上げ」（`16 §1`＝narration は内部用語・`06 §15` も「この動画の読み上げ」）。
     const text = "こんにちは。読み上げの聞こえ方を確認します。";
