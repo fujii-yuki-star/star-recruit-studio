@@ -36,6 +36,7 @@ import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, exportLockBlockedMessage, useExportLockStore } from "../store/exportLock";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
+import { userFacingMessage } from "../userFacingError";
 
 // 画面タイトルは1か所（空状態と通常の両分岐で共有＝片方だけ直して drift しない・§6）。
 const EXPORT_TITLE = "動画を書き出す";
@@ -421,10 +422,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       if (useProjectStore.getState().exportRun.cancelling || e instanceof ExportCancelledError) {
         setPhase("cancelled");
       } else {
-        // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
-        // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
-        const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-        setMessage(detail || exportFailedMessage.EXPORT_FAILED_SCENE);
+        // ⚠️ **「そのまま表示する」は嘘だった**（#1123）＝ここには
+        // `map_err(|e| e.to_string())`（56 か所）が返す**生の OS エラー**（`os error 3` など）も届く。
+        // 関門（`userFacingMessage`）で**画面に出せる文か**を見て、出せないものは記録へ流す。
+        const detail = userFacingMessage(e, "export-scene");
+        setMessage(detail ?? exportFailedMessage.EXPORT_FAILED_SCENE);
         setPhase("error");
         console.error("[export] failed:", e);
       }

@@ -16,6 +16,7 @@ import type { TimelineExportBlockCode } from "../domain/timeline/export";
 import type { TimelineProject } from "../domain/timeline/types";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
+import { userFacingMessage } from "./userFacingError";
 /**
  * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
  * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
@@ -800,13 +801,15 @@ export const ASSET_TOO_LARGE_USE_PICKER = "大きいファイルは「写真・�
 export const ASSET_TOO_LARGE_PICK_SMALLER = "もっと小さいファイルをお選びください。";
 
 /**
- * 素材を取り込めなかったときの案内（#712＝両形式で共有）。アプリの中の取り込みは文字列で失敗を返す
- * （Rust 側が §2-5 準拠で整えた文言）のでそのまま出し、それ以外は定型文へ落とす。生の例外は見せない。
+ * 素材を取り込めなかったときの案内（#712＝両形式で共有）。
+ *
+ * ⚠️ **注記が嘘だった**（#1123）＝「生の例外は見せない」と書いてあったのに、**文字列なら中身を見ずに
+ * そのまま通して**いた（`e.message` も同じ）。Rust には `map_err(|e| e.to_string())` が **56 か所**
+ * あるので、`os error 3` のような生の OS エラーが**この関数を素通り**して画面へ出る道が在った。
+ * ⚠️ **物差しを2つ持たない**＝判定は `userFacingMessage` に1つだけ置き、ここは**既定の文**を与える薄い包み。
  */
 export function importErrorMessage(e: unknown): string {
-  if (typeof e === "string" && e.trim()) return e;
-  if (e instanceof Error && e.message) return e.message;
-  return "素材を取り込めませんでした。もう一度お選びください。";
+  return userFacingMessage(e, "asset-import") ?? "素材を取り込めませんでした。もう一度お選びください。";
 }
 
 /**

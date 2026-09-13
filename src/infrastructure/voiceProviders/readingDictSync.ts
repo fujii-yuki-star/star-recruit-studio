@@ -130,6 +130,9 @@ export async function syncAndCollectConflicts(): Promise<{
     await ensureReadingDictSynced();
     return { conflicts: readingDictConflicts(), error: null };
   } catch (e) {
+    // ⚠️ **ここでは「画面に出してよい文か」を判定しない**（#1123・§4＝`infrastructure` は
+    // 画面の規則を持たない）＝返すのはあくまで**データ**で、出す所（`ReadingDictSection`）が
+    // `userFacingMessage` を通す。ここで返る文字列には Rust の生のエラーも混じりうる。
     return { conflicts: [], error: typeof e === 'string' ? e : READING_DICT_SYNC_FAILED };
   }
 }

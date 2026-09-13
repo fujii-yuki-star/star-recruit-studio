@@ -1,14 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, importErrorMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
 import type { TimelineClip, TimelineProject } from "../domain/timeline/types";
 
+afterEach(() => vi.restoreAllMocks());
+
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
+describe("素材を取り込めなかったときの案内（#712・#1123）", () => {
+  // ⚠️ **注記が嘘だった**＝「生の例外は見せない」と書いてあったのに、**文字列なら中身を見ずに
+  // そのまま通して**いた。Rust には `map_err(|e| e.to_string())` が 56 か所あるので、
+  // `os error 3` のような生の OS エラーが**この関数を素通り**して画面へ出る道が在った。
+  it("取り込み側が整えた理由は、そのまま出す", () => {
+    const reason = "この形の写真は置けませんでした。別のものをお選びください。";
+    expect(importErrorMessage(reason)).toBe(reason);
+  });
+
+  it("生の OS エラーは出さない（§2-3）", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(importErrorMessage("os error 3")).toBe("素材を取り込めませんでした。もう一度お選びください。");
+    expect(importErrorMessage(new Error("ENOENT: no such file"))).toBe("素材を取り込めませんでした。もう一度お選びください。");
+  });
+
+  it("何も取れなくても、次の行動を出す（押しても何も出ない、を作らない）", () => {
+    expect(importErrorMessage(undefined)).toContain("もう一度お選びください");
+    expect(importErrorMessage("")).toContain("もう一度お選びください");
+  });
+});
+
 describe("standardLookButtonReason（押せない理由・#547）", () => {
   it("書き出し中は書き出し中だと言う（実行内容の説明を出し続けない）", () => {
     const r = standardLookButtonReason(3, true);

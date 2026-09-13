@@ -131,11 +131,23 @@ describe('duplicateProject', () => {
     expect(id).toBe(`proj_${today}_002`);
   });
 
+  // ⚠️ **検査用の文は実物と同じ形で**（#1123）＝以前ここは「読めません」（句点なし）で、
+  // Rust が返す文の形と違っていた。実物どおり句点まで書く。
   it('読めなければ理由を出し、null を返す', async () => {
-    vi.mocked(loadProjectDoc).mockRejectedValue('読めません');
+    const REASON = 'この動画のファイルを読めませんでした。別のアプリで開いていないかご確認ください。';
+    vi.mocked(loadProjectDoc).mockRejectedValue(REASON);
     expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
-    expect(useProjectStore.getState().importError).toBe('読めません');
+    expect(useProjectStore.getState().importError).toBe(REASON);
     expect(saveProjectDoc).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **生の OS エラーは画面へ出さない**（#1123・§2-3）。
+  it('画面に出せない断り（生のエラー）は、自前の文に置き換える', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(loadProjectDoc).mockRejectedValue('os error 3');
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).not.toContain('os error');
+    expect(useProjectStore.getState().importError).toContain('複製');
   });
 
   // ⚠️ **何度押しても直らない理由を「もう一度お試しください」に丸めない**（α-6 出口監査 🟡・§2-5）＝

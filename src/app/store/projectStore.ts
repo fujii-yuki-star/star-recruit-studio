@@ -98,7 +98,7 @@ import { PROJECT_SAVE_WOULD_BREAK, KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, te
  * ⚠️ **区切りを入れる**＝合成側から来た生の文字列が句点で終わらないと1文に繋がって読めなくなる。
  */
 function joinVoiceFailure(e: unknown, before: NarrationStatus, hasAudio: boolean): string {
-  const base = typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。";
+  const base = userFacingMessage(e, "voice-make") ?? "音声の作成に失敗しました。もう一度お試しください。";
   const kept = statusAfterVoiceFailure(before) === NARRATION_STATUS.generated && hasAudio;
   if (!kept) return base;
   return `${base}${base.endsWith("。") ? "" : "。"}${KEPT_PREVIOUS_VOICE_SUFFIX}`;
@@ -111,6 +111,7 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
+import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
 // 値の定義は domain（`exportProgress.ts`）に1か所だけ置く（§2-7）。ここは別名＝進捗計算と常に同じ語彙になる。
@@ -972,8 +973,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (get()._generationSeq !== seq) return; // キャンセル済みなら失敗表示も出さない（#402）
       // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
       // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
-      const aiError =
-        e instanceof Error ? e.message : typeof e === "string" ? e : "生成に失敗しました。もう一度お試しください。";
+      const aiError = userFacingMessage(e, "ai-generate") ?? "生成に失敗しました。もう一度お試しください。";
       set({ status: "error", aiError });
     }
   },
@@ -1404,8 +1404,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 直らない**のに「もう一度お試しください」と勧めていた。同じ画面の「開く」は理由を保っている
       // （同じ文書に対して入口で案内が割れる＝ADR-0026②）。
       const message = e instanceof ProjectLoadError ? e.message
-        : typeof e === "string" ? e
-          : DUPLICATE_FAILED_MESSAGE;
+        : userFacingMessage(e, "duplicate") ?? DUPLICATE_FAILED_MESSAGE;
       set({ importError: message });
       return null;
     }
@@ -2745,7 +2744,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().refreshUserFonts();
       return id;
     } catch (e) {
-      set({ fontError: typeof e === "string" ? e : "文字の形を取り込めませんでした。もう一度お試しください。" });
+      set({ fontError: userFacingMessage(e, "font-import") ?? "文字の形を取り込めませんでした。もう一度お試しください。" });
       return null;
     }
   },
@@ -2769,7 +2768,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       return true;
     } catch (e) {
-      set({ fontError: typeof e === "string" ? e : "文字の形を消せませんでした。もう一度お試しください。" });
+      set({ fontError: userFacingMessage(e, "font-delete") ?? "文字の形を消せませんでした。もう一度お試しください。" });
       return false;
     }
   },

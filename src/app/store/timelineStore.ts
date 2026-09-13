@@ -86,6 +86,7 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { volumeAt } from "../../domain/timeline/audio";
+import { userFacingMessage } from "../userFacingError";
 
 /**
  * 声を作ったあと**長さを合わせられなかった**ときに、断りをどこへ出すか（#1045）。
@@ -1722,7 +1723,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 投げる」慣習（Rust の `invoke` が拒否する形）で、読み方の反映に失敗したときの次の行動
       //（`READING_DICT_SYNC_FAILED`）もここを通る。捨てると「しばらくしてから、もう一度」＝
       // 何度やっても同じ理由で失敗する、効かない案内になる（§2-5）。場面形式は `joinVoiceFailure` が同じ形。
-      const failedMessage = typeof e === "string" ? e : VOICE_FAILED_MESSAGE;
+      const failedMessage = userFacingMessage(e, "timeline-voice") ?? VOICE_FAILED_MESSAGE;
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
       const failed = now?.clips.find((c) => c.id === clipId);
@@ -2120,10 +2121,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // Tauri のコマンドは**文字列で**失敗を返す（`Error` ではない）。#512 段1 でコマの焼き出しが本走行に
       // 入り、「動画が見つかりませんでした。もう一度取り込んでください」等が新たに届くようになったのに、
       // 常に「もう一度お試しください」へ潰すと**何度やっても成功しない案内**になる。
-      // ⚠️ **文字列で返ったものだけ**を出す＝Tauri のコマンドは**文字列で** reject し、それは Rust が
-      // 利用者向けに整えた「次の行動」つきの文言（技術詳細は stderr へ）。`Error` は中の失敗
-      // （`ffmpeg exited with code 1` 等）なので**見せない**（§2-5・既存テストが守っている規則）。
-      const detail = typeof e === "string" ? e : "";
+      // ⚠️ **文字列で返ったものを、そのまま全部は出さない**（#1123）＝ここには
+      // `map_err(|e| e.to_string())`（56 か所）が返す**生の OS エラー**も文字列で届く。
+      // 関門（`userFacingMessage`）で**画面に出せる文か**を見る。`Error` は中の失敗
+      // （`ffmpeg exited with code 1` 等）なので、もとより通らない（§2-5）。
+      const detail = userFacingMessage(e, "export-timeline") ?? "";
       set({
         exportRun: {
           ...IDLE_EXPORT,

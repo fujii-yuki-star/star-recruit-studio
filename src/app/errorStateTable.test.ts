@@ -434,7 +434,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     swallowedByNextPrecheckDetail: "同上（次の場面に飲まれる場面の説明）",
     omittedAssetsNote: "送信前確認で「送らなかったもの」を件数つきで添える",
     // ── 外から来た文字列を運ぶ（この関数は文言を持たない） ──
-    importErrorMessage: "取り込み側が返した理由をそのまま出す（持っているのは既定の1文だけ）",
+    importErrorMessage: "取り込み側が返した理由を関門（`userFacingMessage`）越しに出す（持っているのは既定の1文だけ・#1123）",
     generateFailedMessage: "作成側が返した理由をそのまま出す",
     resolveExportBlockedMessage: "状況から**既にある文**を選んで返すだけ（自分では持たない）",
     // ── 名前・件数を差し込むだけ（表は代表の1文を持つ）＝等値へ寄せられる余地あり ──

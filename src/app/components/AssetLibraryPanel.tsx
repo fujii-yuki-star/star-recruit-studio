@@ -31,6 +31,7 @@ import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabe
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import type { ScreenId } from "../data/mockData";
+import { userFacingMessage } from "../userFacingError";
 
 /** 種類の絞り込み（画面に出す名前）。 */
 const TYPE_CHOICES: { label: string; value: AssetType | null }[] = [
@@ -233,7 +234,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
           added += 1;
         } catch (e) {
           failedNames.push(name || UNNAMED_ASSET_NAME);
-          firstMessage ??= typeof e === "string" ? e : "素材を置けませんでした。もう一度お試しください。";
+          firstMessage ??= userFacingMessage(e, "asset-drop") ?? "素材を置けませんでした。もう一度お試しください。";
         }
       }
       await refresh();
@@ -242,7 +243,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
       if (failedNames.length === 1) setError(firstMessage ?? "");
       else if (failedNames.length > 1) setError(libraryPartlyFailedMessage(failedNames, firstMessage));
     } catch (e) {
-      setError(typeof e === "string" ? e : "素材を置けませんでした。もう一度お試しください。");
+      setError(userFacingMessage(e, "asset-add") ?? "素材を置けませんでした。もう一度お試しください。");
     } finally {
       setBusy(false);
     }
@@ -317,7 +318,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
         setErrorGoesToBrandKit(true);
       }
     } catch (e) {
-      setError(typeof e === "string" ? e : "素材を外せませんでした。もう一度お試しください。");
+      setError(userFacingMessage(e, "asset-remove") ?? "素材を外せませんでした。もう一度お試しください。");
     } finally {
       setBusy(false);
     }
@@ -340,7 +341,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
       await refresh();
       setEditing(null);
     } catch (e) {
-      setError(typeof e === "string" ? e : "直せませんでした。もう一度お試しください。");
+      setError(userFacingMessage(e, "asset-rename") ?? "直せませんでした。もう一度お試しください。");
     } finally {
       setBusy(false);
     }

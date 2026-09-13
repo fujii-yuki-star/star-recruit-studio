@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { userFacingMessage } from "../userFacingError";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -106,7 +107,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
     } catch (e) {
       // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
       setTestError(
-        typeof e === "string" ? e : "声の確認に失敗しました。もう一度お試しください。",
+        userFacingMessage(e, "voice-test") ?? "声の確認に失敗しました。もう一度お試しください。",
       );
       setTestState("error");
     }
@@ -127,7 +128,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       setKeyInput("");
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(typeof e === "string" ? e : "キーを保存できませんでした。もう一度お試しください。");
+      setKeyError(userFacingMessage(e, "api-key-save") ?? "キーを保存できませんでした。もう一度お試しください。");
     } finally {
       setKeyBusy(false);
     }
@@ -140,7 +141,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       await deleteApiKey(GEMINI_PROVIDER);
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
+      setKeyError(userFacingMessage(e, "api-key-delete") ?? "接続を削除できませんでした。もう一度お試しください。");
     } finally {
       setKeyBusy(false);
       setConfirmClearKey(false);

@@ -1,0 +1,140 @@
+// 画面が**生の断りをそのまま出す**道が残っていないことの門番（#1123）。
+//
+// ⚠️ **正典はすでに禁じていた**（`15 §6` の `RESTORE_WRITE_FAILED` の行）＝
+// 「生の OS エラーを出さない＝包まないと `os error 3` が利用者に見える（§2-3）」。
+// ところが**それを見る側が居なかった**＝#1111 の門番（`rustUserMessageGuard`）は
+// 「日本語で書かれ、句点を持つ文」しか拾わないので、`map_err(|e| e.to_string())`（**56 か所**）が
+// 返す中身は**構造的に射程外**だった。
+//
+// ⚠️ **両端で正反対のことをしていた**＝一方は `.catch(() => …)` で**中身を全部捨て**（原因を3つに
+// 書き分けても画面では1文に潰れる＝#1118）、もう一方は `e.message` を**無条件で出して**いた。
+// どちらも「**この文は画面に出してよいか**」を見ていない。関門は `src/app/userFacingError.ts`。
+//
+// ⚠️ **`src/app` だけを見る**（§4）＝`infrastructure` が返す文字列は**データ**で、
+// 画面の規則を持たない。出す所（`src/app`）が関門を通す（`readingDictSync.ts` の注記）。
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { describe, expect, it } from "vitest";
+
+/** 関門を置いてある file（ここだけは物差しそのものを書く）。 */
+const GATE = "src/app/userFacingError.ts";
+
+/**
+ * その file で**捕まえている断りの名前**（`catch (e)` と `.catch((e: unknown) => …)` の両方）。
+ *
+ * ⚠️ **名前を決め打ちしない**（`e` / `err` だけを見る等）＝`catch (problem)` と書かれた瞬間に
+ * 黙って素通りする。**捕まえた所から名前を取る**ので、どう名付けても効く。
+ */
+export function caughtNames(src: string): string[] {
+  const out = new Set<string>();
+  for (const m of src.matchAll(/catch\s*\(\s*\(?\s*([A-Za-z_$][\w$]*)/g)) out.add(m[1]);
+  return [...out].sort();
+}
+
+/**
+ * **捕まえた断りの中身を、見ずに通している**書き方を拾う。
+ *
+ * ⚠️ **拾い方を純粋関数にする**（`CLAUDE.md §7`）＝歩く形だけだと、拾い方を消しても
+ * 「いまのコードに漏れが無いので緑」になる（#981 で踏んだ）。
+ *
+ * ⚠️ **`.message` を丸ごと禁じない**＝`ProjectLoadError` のように**画面向けに整えた文**を持つ
+ * 例外があり、それは出してよい（誤検出は門番の信用を落とす）。ここで断つのは
+ * 「**型を確かめただけで中身を確かめずに通す**」2つの形だけ。
+ *
+ * ⚠️ **断り以外の型の見分けまで拾わない**＝`typeof easing === "string" ? easing : …` のような
+ * **値の場合分け**は別物（実際に3件の誤検出を出した＝`TimelineProjectScreen` の緩急、
+ * `bulkImport` の取り込み物）。**捕まえた名前**に限って見る。
+ */
+export function rawErrorReads(src: string): string[] {
+  const names = caughtNames(src);
+  if (names.length === 0) return [];
+  const alt = names.join("|");
+  const passThrough = new RegExp(`typeof\\s+(${alt})\\s*===\\s*["']string["']\\s*\\?\\s*\\1\\b`);
+  const messageThrough = new RegExp(`\\b(${alt})\\s+instanceof\\s+Error\\s*\\?\\s*\\1\\.message`);
+  return src
+    .split("\n")
+    .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+    // ⚠️ **注記は数えない**＝この門番の理由を書いた行で赤くしない。
+    .filter(({ line }) => !line.startsWith("//") && !line.startsWith("*") && !line.startsWith("/*"))
+    .filter(({ line }) => passThrough.test(line) || messageThrough.test(line))
+    .map(({ line, n }) => `${n}: ${line}`);
+}
+
+function appFiles(dir: string, root: string): { path: string; src: string }[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) return appFiles(p, root);
+    if (!/\.tsx?$/.test(e.name) || e.name.includes(".test.")) return [];
+    const path = relative(root, p).split(sep).join("/");
+    if (path === GATE) return [];
+    return [{ path, src: readFileSync(p, "utf8") }];
+  });
+}
+
+describe("画面は生の断りをそのまま出さない（#1123）", () => {
+  const root = process.cwd();
+  const files = appFiles(join(root, "src", "app"), root);
+
+  it("走査が画面へ届いている（見えていないのに緑、を作らない）", () => {
+    // ⚠️ **実数で留める**＝走査の根を間違えると 0 件でも緑になる（この型を4回踏んだ）。
+    expect(files.length, "画面の file が見つからない＝走査の根が違う").toBeGreaterThan(100);
+    expect(files.map((f) => f.path)).toContain("src/app/screens/ExportScreen.tsx");
+    expect(files.map((f) => f.path)).toContain("src/app/store/projectStore.ts");
+    expect(files.map((f) => f.path), "関門そのものは対象外").not.toContain(GATE);
+  });
+
+  it("生の断りを通している所は無い", () => {
+    const hits = files.flatMap((f) => rawErrorReads(f.src).map((l) => `${f.path}:${l}`));
+    expect(hits, "`userFacingMessage(e, \"どこで\") ?? 既定文` を通してください").toEqual([]);
+  });
+
+  it("関門を通している所を、実数で留める", () => {
+    // ⚠️ **数で留める**＝関門を外しても、上の検査は「生の形が無い」だけで緑になりうる
+    //（`.catch(() => 既定文)` へ戻す＝**中身を全部捨てる**形は、生の形を残さない）。
+    const gated = files.reduce((n, f) => n + f.src.split("userFacingMessage(").length - 1, 0);
+    expect(gated, "関門を通す所が変わりました＝減っていれば、その断りは画面へ届かなくなっています").toBe(26);
+  });
+});
+
+describe("門番自身の検査（わざと壊した入力）", () => {
+  const caught = (body: string): string => `try { f(); } catch (e) {\n${body}\n}`;
+
+  it("文字列をそのまま通す形を見つける", () => {
+    expect(rawErrorReads(caught('setError(typeof e === "string" ? e : "既定");'))).toHaveLength(1);
+    expect(rawErrorReads("try { f(); } catch (err) {\nsetError(typeof err === 'string' ? err : DEF);\n}")).toHaveLength(1);
+  });
+
+  it("`Error` の中身をそのまま通す形を見つける", () => {
+    expect(rawErrorReads(caught('const d = e instanceof Error ? e.message : "";'))).toHaveLength(1);
+  });
+
+  it("どう名付けても効く（名前を決め打ちしない）", () => {
+    // ⚠️ **`e` / `err` だけを見る形にすると、こう書かれた瞬間に素通りする**。
+    expect(rawErrorReads('try { f(); } catch (problem) {\nsetError(typeof problem === "string" ? problem : DEF);\n}')).toHaveLength(1);
+    expect(caughtNames('try { f(); } catch (problem) {}')).toEqual(["problem"]);
+    expect(caughtNames('p.catch((e: unknown) => g(e));')).toEqual(["e"]);
+  });
+
+  it("断り以外の型の見分けは拾わない（誤検出は門番の信用を落とす）", () => {
+    // ⚠️ **実際に3件の誤検出を出した**＝緩急の値と、取り込み物の場合分け。
+    expect(rawErrorReads(caught("return typeof easing === 'string' ? easing : CURVE;"))).toEqual([]);
+    expect(rawErrorReads(caught('names.push(typeof item === "string" ? item : item.name);'))).toEqual([]);
+    // 捕まえた所が無ければ、そもそも断りではない。
+    expect(rawErrorReads('const s = typeof v === "string" ? v : "";')).toEqual([]);
+  });
+
+  it("関門を通している行は拾わない", () => {
+    expect(rawErrorReads(caught('setError(userFacingMessage(e, "x") ?? DEF);'))).toEqual([]);
+    // 画面向けに整えた文を持つ例外は、出してよい。
+    expect(rawErrorReads(caught("const m = e instanceof ProjectLoadError ? e.message : DEF;"))).toEqual([]);
+  });
+
+  it("注記の中の形では赤くしない", () => {
+    expect(rawErrorReads(caught('// typeof e === "string" ? e : 既定文 は使わない'))).toEqual([]);
+    expect(rawErrorReads(caught(' * `typeof e === "string" ? e` は関門を通していない'))).toEqual([]);
+  });
+
+  it("行番号を付けて返す（どこを直すか分かる）", () => {
+    expect(rawErrorReads(caught('setError(typeof e === "string" ? e : DEF);'))[0]).toMatch(/^2: /);
+  });
+});
