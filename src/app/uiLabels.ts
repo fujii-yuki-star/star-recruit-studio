@@ -1435,6 +1435,15 @@ export const exportFailedMessage = {
 export const templateSaveMessage = {
   USER_TEMPLATE_SAVE_INVALID:
     "この見た目パターンは、いまの内容では保存できません。直前に変えた項目を「取り消す」で元に戻してから、もう一度お試しください。",
+  /**
+   * 保存・削除が失敗したときの**既定**（#1129 レビュー由来 🟡）。
+   *
+   * ⚠️ **以前は `projectStore` に直書き**していた＝表の行（`USER_TEMPLATE_SAVE_FAILED` /
+   * `USER_TEMPLATE_DELETE_FAILED`）と**同じ文が2か所**にあり、片方だけ直る形だった（§6）。
+   * ⚠️ **Rust が理由を返せたときはそちらを出す**＝呼び側は `userFacingMessage(e, …) ?? ここ`。
+   */
+  USER_TEMPLATE_SAVE_FAILED: "見た目パターンを保存できませんでした。もう一度お試しください。",
+  USER_TEMPLATE_DELETE_FAILED: "見た目パターンを削除できませんでした。もう一度お試しください。",
 } as const;
 
 /**
