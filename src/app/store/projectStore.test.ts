@@ -209,7 +209,7 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     // 1行目は成功・2行目で失敗させる（mid-sequence エラー）。
     const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize')
       .mockResolvedValueOnce({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 })
-      .mockRejectedValueOnce('合成エラー');
+      .mockRejectedValueOnce('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     const st = useProjectStore.getState();
     expect(st.scenes[0].lines?.[0].status).toBe('generated'); // 先行成功は保持（🔴2）
@@ -233,11 +233,37 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
       narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' }, // 鳴らす材料がある
       isGeneratingNarration: false,
     });
-    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     const st = useProjectStore.getState();
     expect(st.scenes[0].narration.status).toBe('generated');
     expect(st.narrationError).toContain('前に作った声はそのまま使えます');
+    // ⚠️ **中身そのものを見る**（PR #1130 レビュー由来 🟡）＝添えの有無だけを見ていると、
+    // 本体が**別の文へすり替わっても緑**になる（検査用の文が実物と同じ形でないと、実際にそうなる）。
+    expect(st.narrationError, '合成側が返した理由が画面まで届いていない').toContain('音声ソフトの接続先');
+    spy.mockRestore();
+  });
+
+  // ⚠️ **生の断りは画面へ出さない**（#1123・§2-3）＝合成側は文字列で失敗を返すが、
+  // その中身が**文になっていない**ことがある（`map_err(|e| e.to_string())` は 56 か所）。
+  it('画面に出せない断り（生のエラー）は、自前の文に置き換える', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'idle' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('os error 3');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const msg = useProjectStore.getState().narrationError ?? '';
+    expect(msg).not.toContain('os error');
+    expect(msg).toContain('音声の作成に失敗しました');
     spy.mockRestore();
   });
 
@@ -257,7 +283,7 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
       narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' },
       isGeneratingNarration: false,
     });
-    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('failed'); // 古い声を「作成済み」に戻さない
     // ⚠️ **「そのまま使えます」も言わない**＝印は「作れなかった」なのに使ってよいと言うと、
@@ -279,7 +305,7 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
       narrationAudioById: {}, // 読み込めていない
       isGeneratingNarration: false,
     });
-    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     expect(useProjectStore.getState().narrationError).not.toContain('前に作った声はそのまま使えます');
     spy.mockRestore();
@@ -299,7 +325,7 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
       narrationAudioById: { 'scene_001/line_001': 'data:audio/wav;base64,AAAA' },
       isGeneratingNarration: false,
     });
-    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     const st = useProjectStore.getState();
     expect(st.scenes[0].lines?.[0].status).toBe('generated');

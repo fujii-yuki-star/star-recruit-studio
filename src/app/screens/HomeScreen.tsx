@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { userFacingMessage } from "../userFacingError";
 import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -367,8 +368,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       if (cleared > 0) { setVoicesCleared({ projectId, count: cleared }); return; }
       await doOpenProject(projectId);
     } catch (e) {
-      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-      setOpenError(detail || RESTORE_FAILED_MESSAGE);
+      setOpenError(userFacingMessage(e, "restore") ?? RESTORE_FAILED_MESSAGE);
     } finally {
       setRestoring(false);
     }
@@ -388,8 +388,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       // ⚠️ **理由を潰さない**＝断った側が「次の行動」を持っているので、それをそのまま見せる
       //（例：開けなかったほうを取っておけなかった＝別のアプリで開いていないか確かめる）。
       //  理由が取れないときだけ、こちらの決まり文句へ倒す。
-      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-      setOpenError(detail || RESTORE_FAILED_MESSAGE);
+      setOpenError(userFacingMessage(e, "recover") ?? RESTORE_FAILED_MESSAGE);
     } finally {
       setRecovering(false);
     }

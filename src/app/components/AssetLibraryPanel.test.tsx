@@ -295,13 +295,43 @@ describe("AssetLibraryPanel", () => {
     vi.mocked(addLibraryAsset).mockReset();
     vi.mocked(addLibraryAsset)
       .mockResolvedValueOnce({} as never)
-      .mockRejectedValueOnce("だめでした")
+      .mockRejectedValueOnce("この形の写真は置けませんでした。別のものをお選びください。")
       .mockResolvedValueOnce({} as never);
     render(<AssetLibraryPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     expect(await screen.findByText(/2件を置きました/)).toBeInTheDocument();
     // 1件だけ失敗したときは理由をそのまま出す（件数で案内を変えない＝ADR-0026②）。
-    expect(screen.getByText(/だめでした/)).toBeInTheDocument();
+    expect(screen.getByText(/別のものをお選びください/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **生の OS エラーは画面へ出さない**（#1123・§2-3）＝Rust には `map_err(|e| e.to_string())` が
+  // 56 か所あり、`os error 3` のような**文になっていない断り**もこの経路へ届く。
+  // ⚠️ **検査用の文は実物と同じ形で**＝以前ここは「だめでした」（句点なし）で、Rust が返す文の形と
+  // 違っていた。実物どおり句点まで書くと、関門を通る側／通らない側の**両方**を確かめられる。
+  it("画面に出せない断り（生のエラー）は、自前の文に置き換える", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png"]);
+    vi.mocked(addLibraryAsset).mockReset();
+    vi.mocked(addLibraryAsset).mockRejectedValueOnce("os error 3");
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/素材を置けませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/os error/)).toBeNull();
+  });
+
+  // ⚠️ **既定文を「最初の理由」に確定させない**（PR #1130 レビュー由来 ℹ️）＝1件目が生のエラーだと
+  // 既定文で埋まり、**2件目に来た本物の理由が捨てられる**（関門で既定文へ落ちる頻度が上がったぶん、
+  // 当たりやすくなった）。関門を通った理由を先取りする。
+  it("1件目が生のエラーでも、あとから来た本物の理由を出す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png"]);
+    vi.mocked(addLibraryAsset).mockReset();
+    vi.mocked(addLibraryAsset)
+      .mockRejectedValueOnce("os error 3")
+      .mockRejectedValueOnce("この形の写真は置けませんでした。別のものをお選びください。");
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/別のものをお選びください/)).toBeInTheDocument();
   });
 
   /** ⚠️ **2件以上失敗したときは件数と名前で示す**（PR #905 レビュー・`importPartlyFailedMessage` と同じ形）。 */
@@ -310,8 +340,8 @@ describe("AssetLibraryPanel", () => {
     vi.mocked(addLibraryAsset).mockReset();
     vi.mocked(addLibraryAsset)
       .mockResolvedValueOnce({} as never)
-      .mockRejectedValueOnce("だめでした")
-      .mockRejectedValueOnce("だめでした");
+      .mockRejectedValueOnce("この形の写真は置けませんでした。別のものをお選びください。")
+      .mockRejectedValueOnce("この形の写真は置けませんでした。別のものをお選びください。");
     render(<AssetLibraryPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
     expect(await screen.findByText(/2件を置けませんでした（b\.png、c\.png）/)).toBeInTheDocument();

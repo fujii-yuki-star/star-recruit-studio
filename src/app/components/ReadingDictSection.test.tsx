@@ -179,3 +179,34 @@ describe("ReadingDictSection 直している語を示す", () => {
     expect(screen.queryByText(/の読み方を直しています/)).toBeNull();
   });
 });
+
+// ⚠️ **配線そのものを見る**（#1123・PR #1130 レビュー由来 🟡）＝走査は「生の形が無い」ことしか
+// 見られないので、関門を通しておきながら結果を捨てる配線の取り違えは拾えない。
+describe("読み方の断りは、画面に出せる文だけ出す（#1123）", () => {
+  /** 1語足して保存する（既存の「保存すると書き込み…」と同じ手順）。 */
+  async function addOneAndSave(): Promise<void> {
+    render(<ReadingDictSection />);
+    await screen.findByText(/まだ登録がありません/);
+    fireEvent.change(screen.getByLabelText("言葉"), { target: { value: "宇都宮" } });
+    fireEvent.change(screen.getByLabelText("読み（カタカナ）"), { target: { value: "ウツノミヤ" } });
+    fireEvent.click(screen.getByRole("button", { name: "ウツノミ↓ヤ" }));
+    fireEvent.click(screen.getByRole("button", { name: "読み方を追加する" }));
+  }
+
+  it("整えた理由が返れば、その文を出す（丸めない）", async () => {
+    vi.mocked(saveReadingDict).mockRejectedValue(
+      "読み方の一覧を書き込めませんでした。別のアプリで開いていないかご確認ください。",
+    );
+    await addOneAndSave();
+    await waitFor(() => expect(document.body.textContent).toMatch(/別のアプリで開いていないか/));
+  });
+
+  it("生の OS エラーは出さず、定型文へ倒す（§2-3）", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(saveReadingDict).mockRejectedValue("os error 3");
+    await addOneAndSave();
+    await waitFor(() => expect(document.body.textContent).toMatch(/読み方を保存できませんでした/));
+    expect(document.body.textContent).not.toMatch(/os error/);
+  });
+});
+

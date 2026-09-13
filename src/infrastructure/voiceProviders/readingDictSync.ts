@@ -24,10 +24,12 @@ export const READING_DICT_UNREADABLE_FOR_VOICE =
   'アプリを開き直してから、もう一度お試しください。';
 
 /**
- * ⚠️ **合成の失敗は「文字列」で投げる**のがこの境界の慣習（Rust の `invoke` が拒否する形）＝
- * 受ける側（`projectStore` / `timelineStore` / 設定画面）が `typeof e === "string"` で見る。
- * `Error` で投げると**この文言が一度も画面に出ず**、「しばらくしてから、もう一度」＝効かない
- * 次の行動に化ける（PR #883 レビュー）。
+ * ⚠️ **投げ方は問わないが、「文」で投げる**（#1123 で改訂・PR #1130 レビュー由来）＝
+ * 受ける側（`projectStore` / `timelineStore` / 設定画面）は関門
+ * （`src/app/userFacingError.ts`）を通すので、**文字列でも `Error` でも**画面へ届く。
+ * 届く条件は**日本語を含み、句点を持つ文**であること。
+ * ⚠️ **以前はここに「文字列で投げること」と書いてあった**＝受ける側が `typeof e === "string"` で
+ * 見ていた頃の話で、いまは偽（PR #883 レビューの趣旨＝「この文言を画面まで届ける」は変わらない）。
  */
 export const READING_DICT_SYNC_FAILED =
   '読み方を音声ソフトへ反映できませんでした。' +
@@ -130,6 +132,9 @@ export async function syncAndCollectConflicts(): Promise<{
     await ensureReadingDictSynced();
     return { conflicts: readingDictConflicts(), error: null };
   } catch (e) {
+    // ⚠️ **ここでは「画面に出してよい文か」を判定しない**（#1123・§4＝`infrastructure` は
+    // 画面の規則を持たない）＝返すのはあくまで**データ**で、出す所（`ReadingDictSection`）が
+    // `userFacingMessage` を通す。ここで返る文字列には Rust の生のエラーも混じりうる。
     return { conflicts: [], error: typeof e === 'string' ? e : READING_DICT_SYNC_FAILED };
   }
 }

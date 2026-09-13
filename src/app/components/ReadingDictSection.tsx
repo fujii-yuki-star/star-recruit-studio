@@ -32,8 +32,10 @@ import {
   markReadingDictChanged,
   overwriteConflict,
   syncAndCollectConflicts,
+  READING_DICT_SYNC_FAILED,
 } from "../../infrastructure/voiceProviders/readingDictSync";
 import { showOpenReadingDictDialog, showSaveReadingDictDialog } from "../../infrastructure/dialog";
+import { userFacingMessage } from "../userFacingError";
 
 /** 編集中の1語（新規と編集で同じ形）。 */
 interface Draft {
@@ -70,11 +72,13 @@ export function ReadingDictSection() {
         if (dropped > 0) setNotice(`${dropped}件は読み方の形が違うため読み込めませんでした。`);
         const r = await syncAndCollectConflicts();
         setConflicts(r.conflicts);
-        if (r.error) setError(r.error);
+        // ⚠️ **`infrastructure` が返した文字列も関門を通す**（#1123）＝`syncAndCollectConflicts` は
+        // 失敗を文字列で返すが、その中身は**Rust の生のエラー**でもありうる（`readingDictSync.ts` の注記）。
+        if (r.error) setError(userFacingMessage(r.error, "reading-dict-sync") ?? READING_DICT_SYNC_FAILED);
       })
       // ⚠️ **読めなかったら理由を出す**（§2-5）＝空の一覧を見せると「1つも登録していない」に見え、
       // そのまま足すと**丸ごと上書き**して登録した読みが全部消える（`loadReadingDict` の ⚠️）。
-      .catch((e: unknown) => setError(typeof e === "string" ? e : READING_DICT_UNREADABLE));
+      .catch((e: unknown) => setError(userFacingMessage(e, "reading-dict-load") ?? READING_DICT_UNREADABLE));
   }, []);
 
   /**
@@ -101,7 +105,7 @@ export function ReadingDictSection() {
       // `READING_DICT_UNREADABLE` が投げられる。それを「しばらくしてから、もう一度」に丸めると、
       // **何度やっても直らない行動**を勧めることになる（開いた直後は正しい文言が出るのに、
       // 1語足した瞬間に効かない文言へ差し替わっていた）。
-      setError(typeof e === "string" ? e : "読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
+      setError(userFacingMessage(e, "reading-dict-save") ?? "読み方を保存できませんでした。しばらくしてから、もう一度お試しください。");
       return false;
     }
     markReadingDictChanged();
@@ -117,7 +121,7 @@ export function ReadingDictSection() {
   async function reflect(): Promise<void> {
     const r = await syncAndCollectConflicts();
     setConflicts(r.conflicts);
-    if (r.error) setError(r.error);
+    if (r.error) setError(userFacingMessage(r.error, "reading-dict-sync") ?? READING_DICT_SYNC_FAILED);
   }
 
   const surface = normalizeSurface(draft.surface);
@@ -170,9 +174,10 @@ export function ReadingDictSection() {
       const url = await synthesizeReading(draft.yomi, accentType);
       audio.play(key, url, () => setError("聞き比べに失敗しました。もう一度お試しください。"));
     } catch (e) {
-      // ⚠️ **`Error` の中身は見せない**（§2-5）＝この境界は「失敗を文字列で投げる」慣習で、
-      // 文字列でないものは生の技術的な文でありうる。次の行動を出す定型文へ倒す。
-      setError(typeof e === "string" ? e : "聞き比べに失敗しました。もう一度お試しください。");
+      // ⚠️ **見分けるのは「型」ではなく「文の形」**（#1123・PR #1130 レビュー由来）＝
+      // 以前はここで `typeof e === "string"` と型で見ていたが、関門は **`Error` の `message` も読む**。
+      // 通すのは**日本語を含み、句点を持つ文**だけで、そうでないものは次の行動を出す定型文へ倒す。
+      setError(userFacingMessage(e, "reading-dict-listen") ?? "聞き比べに失敗しました。もう一度お試しください。");
     }
   }
 
@@ -228,8 +233,8 @@ export function ReadingDictSection() {
     } catch (e) {
       // ⚠️ **理由を捨てない**（α-6 出口監査 ℹ️）＝この経路は辞書ファイルの読み書きも通るので、
       // 常に接続先を疑わせると**従っても直らない案内**になる（同ファイルの `persist`／`onListen` は直済み）。
-      setError(typeof e === "string" ? e
-        : "音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
+      setError(userFacingMessage(e, "reading-dict-apply")
+        ?? "音声ソフトへ反映できませんでした。設定の「音声ソフトの接続先」を確かめてから、もう一度お試しください。");
     }
   }
 
