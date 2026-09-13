@@ -34,6 +34,40 @@ export function hardCodesPx(body: string, prop: string): boolean {
   return new RegExp(String.raw`(^|;|\n)\s*${prop}\s*:\s*[-\d.]+px\s*(;|$)`).test(body);
 }
 
+/**
+ * その規則の宣言を**数として**取り出す（`font-size: 12px` → `12`）。
+ *
+ * ⚠️ **検査側に書き写さない**（#1122）＝以前ここは `12 * lh + 10 * lh` と**数字を書いて**いた。
+ * CSS の `font-size` だけ変えても門番は**古い数字のまま通る**＝「行の高さに収まる」という主張が、
+ * 実際には守られていない状態になりえた（`CLAUDE.md §7`「作った門番自体に穴が空く」）。
+ * ⚠️ **どちらを先に決めるかは固定しない**＝字の大きさから導くのでも、行の高さから導くのでもなく、
+ * **いまの値どうしが収まっているか**だけを見る（案 A・向きは決めない）。
+ */
+export function pxOf(body: string | null, prop: string): number {
+  const m = new RegExp(String.raw`(^|;|\n)\s*${prop}\s*:\s*([-\d.]+)px\s*(;|$)`).exec(body ?? "");
+  return m ? Number(m[2]) : NaN;
+}
+
+describe("取り出しそのものの検査（わざと壊した入力）", () => {
+  it("数として取り出す（単位を落とす）", () => {
+    expect(pxOf("font-size: 12px;", "font-size")).toBe(12);
+    expect(pxOf("  font-size:10px ;", "font-size")).toBe(10);
+    expect(pxOf("line-height: 1.15;\n  font-size: 14px;", "font-size")).toBe(14);
+  });
+
+  it("無ければ数にならない（0 を返して黙って通さない）", () => {
+    expect(Number.isNaN(pxOf("color: red;", "font-size"))).toBe(true);
+    expect(Number.isNaN(pxOf(null, "font-size"))).toBe(true);
+    // ⚠️ **`px` でない値は取らない**＝`font-size: 1.2rem` を 1.2px として扱わない。
+    expect(Number.isNaN(pxOf("font-size: 1.2rem;", "font-size"))).toBe(true);
+  });
+
+  it("別の宣言を巻き込まない（名前の前を見る）", () => {
+    // `font-size` を探して `-webkit-font-size` のような別名まで拾わない。
+    expect(Number.isNaN(pxOf("-x-font-size: 99px;", "font-size"))).toBe(true);
+  });
+});
+
 describe("タイムラインの寸法は1か所から導く（#1104）", () => {
   it("行の高さ・帯の余白・行内の文字の高さは、`.timeline` が宣言する", () => {
     // ⚠️ **`.timeline` で宣言する**＝行・帯・「⋮」の**すべてから**見える必要がある
@@ -115,13 +149,25 @@ describe("帯の密度（#1104・実機の指摘）", () => {
 
   it("列の名前の欄は、行間を詰めてある（詰めないと列の高さがそれに引きずられる）", () => {
     // ⚠️ **これが 40px だった理由**＝`:root` の `line-height: 1.6` を継ぐと、
-    // 名前(12px)＋添え(10px)で 35.2px 要り、列はそれ以上でないと収まらなかった。
+    // 名前(12px)＋添え(10px)を**縦に積んで** 35.2px 要り、列はそれ以上でないと収まらなかった。
     const label = ruleBody(css, ".timeline-row-label");
     expect(label).not.toBeNull();
     const lh = Number(/line-height:\s*([\d.]+)\s*;/.exec(label ?? "")?.[1]);
     expect(Number.isFinite(lh)).toBe(true);
-    // 名前と添えの2行が、列の高さに収まること（これが崩れると文字が行からはみ出す）。
-    expect(12 * lh + 10 * lh).toBeLessThanOrEqual(TIMELINE_LANE_H_PX);
+
+    // ⚠️ **字の大きさは CSS から読む**（#1122）＝検査側に書き写すと、CSS だけ変えたときに
+    // **古い数字のまま通る**。
+    const nameSize = pxOf(label, "font-size");
+    const subSize = pxOf(ruleBody(css, ".timeline-row-label .sub"), "font-size");
+    expect(Number.isFinite(nameSize), "名前の字の大きさが読めない＝取り出しが実態と合っていない").toBe(true);
+    expect(Number.isFinite(subSize), "添えの字の大きさが読めない").toBe(true);
+
+    // ⚠️ **足さない**（#1122 の裏取りで判明）＝以前ここは `12 * lh + 10 * lh` と**足して**おり、
+    // 「名前と添えの**2行**が収まる」＝**縦積み**の前提だった。CSS は #1104 で
+    // `flex-direction: row`（横並び）に変えてあるので、実際の拘束は**高いほうの1行**。
+    // 主張と実態が食い違ったまま（赤くならないので気づけない）にしない。
+    expect(ruleBody(css, ".timeline-row-label"), "横並びでなくなった＝下の拘束が変わる").toContain("flex-direction: row");
+    expect(Math.max(nameSize, subSize) * lh).toBeLessThanOrEqual(TIMELINE_LANE_H_PX);
   });
 });
 
