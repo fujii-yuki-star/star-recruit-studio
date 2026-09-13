@@ -174,8 +174,9 @@ export function ReadingDictSection() {
       const url = await synthesizeReading(draft.yomi, accentType);
       audio.play(key, url, () => setError("聞き比べに失敗しました。もう一度お試しください。"));
     } catch (e) {
-      // ⚠️ **`Error` の中身は見せない**（§2-5）＝この境界は「失敗を文字列で投げる」慣習で、
-      // 文字列でないものは生の技術的な文でありうる。次の行動を出す定型文へ倒す。
+      // ⚠️ **見分けるのは「型」ではなく「文の形」**（#1123・PR #1130 レビュー由来）＝
+      // 以前はここで `typeof e === "string"` と型で見ていたが、関門は **`Error` の `message` も読む**。
+      // 通すのは**日本語を含み、句点を持つ文**だけで、そうでないものは次の行動を出す定型文へ倒す。
       setError(userFacingMessage(e, "reading-dict-listen") ?? "聞き比べに失敗しました。もう一度お試しください。");
     }
   }

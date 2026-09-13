@@ -156,7 +156,12 @@ pub fn import_asset(
 ) -> Result<String, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(strip_data_url(&data_base64))
-        .map_err(|e| format!("素材を読み取れませんでした: {e}"))?;
+        // 詳細は記録へ（画面には出さない＝§2-3／#1123）。
+        // 句点の無い文は受け側の関門で落ちるので、利用者は既定の文しか見られなかった。
+        .map_err(|e| {
+            crate::tlog!("assets", "base64 decode failed: {e}");
+            crate::messages::ASSET_UNREADABLE.to_string()
+        })?;
     write_asset(&app, &project_id, &file_name, &bytes)
 }
 

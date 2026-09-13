@@ -2123,9 +2123,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 常に「もう一度お試しください」へ潰すと**何度やっても成功しない案内**になる。
       // ⚠️ **文字列で返ったものを、そのまま全部は出さない**（#1123）＝ここには
       // `map_err(|e| e.to_string())`（56 か所）が返す**生の OS エラー**も文字列で届く。
-      // 関門（`userFacingMessage`）で**画面に出せる文か**を見る。`Error` は中の失敗
-      // （`ffmpeg exited with code 1` 等）なので、もとより通らない（§2-5）。
-      const detail = userFacingMessage(e, "export-timeline") ?? "";
+      // 関門（`userFacingMessage`）で**画面に出せる文か**を見る。
+      // ⚠️ **`Error` を型で外しているのではない**（PR #1130 レビュー由来）＝関門は `Error` の
+      // `message` も読む。中の失敗（`ffmpeg exited with code 1` 等）が出ないのは、その文が
+      // **日本語の文になっていない**からで、日本語＋句点の `Error` なら**通る**
+      //（焼き出しの断り＝`renderer/export/rasterize.ts`。だからあちらにも次の行動を持たせてある）。
+      // ここを「型で守れている」と読むと、次にそういう `Error` を足したときに気づけない。
+      // ⚠️ **既定文はこの行で与える**（正典が定めた書き方＝`15 §6`「受け側の関門」1）。
+      const detail = userFacingMessage(e, "export-timeline") ?? EXPORT_FAILED_MESSAGE;
       set({
         exportRun: {
           ...IDLE_EXPORT,

@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { bannedTermsIn } from "./uiTerms";
 import { hasJapanese, isUserFacingSentence } from "../app/userFacingError";
 import { macroCallRanges, scanRust } from "./rustSource";
+import { showsNextAction } from "./nextAction";
 
 /** Rust の置き場（再帰＝サブフォルダも見る）。 */
 function rustFiles(dir: string): string[] {
@@ -80,12 +81,10 @@ export function userMessagesIn(src: string): string[] {
 /**
  * その文が**次の行動**を示しているか（§2-5）。
  *
- * ⚠️ **「〜してください」以外の形もある**＝「完了までお待ちください」は待つことが次の行動。
- * 逆に「〜に失敗しました。」で終わる文は、**何をすればよいか誰にも分からない**。
+ * ⚠️ **定義は `src/test/nextAction.ts` に1つ**（PR #1130 レビュー由来）＝焼き出しの断りを見る門番
+ * （`renderer/export/rasterize.messages.test.ts`）も同じ物差しを使う。ここは名前を配り直すだけ。
  */
-export function showsNextAction(message: string): boolean {
-  return /ください/.test(message);
-}
+export { showsNextAction };
 
 /**
  * 1つの Rust ソースから、**画面へ返す文に混じった実装用語**を拾う（§2-3）。
@@ -121,7 +120,9 @@ describe("Rust が画面へ返す文（#1111）", () => {
     // ⚠️ **実数で留める**＝最初は「29 以上」にしていたが、文字リテラルで走査が反転して
     // **半分しか拾えていない状態でも通って**いた（実際に踏んだ）。数を固定すると、その場で気づく。
     const all = files().flatMap((p) => userMessagesIn(readFileSync(p, "utf8")));
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(97);
+    // ⚠️ **+1**＝`ASSET_UNREADABLE`（#1123／PR #1130）。以前は `format!("素材を読み取れませんでした: {e}")`
+    //   と**句点が無く生の詳細を埋めた形**だったので、この走査の射程外だった（かつ受け側の関門で落ちた）。
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(98);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {

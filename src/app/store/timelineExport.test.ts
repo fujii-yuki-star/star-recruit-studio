@@ -113,6 +113,40 @@ describe('exportTimelineVideo', () => {
     expect(args[5]).toBeUndefined();
   });
 
+  // ⚠️ **断りは画面に出せる文だけ**（#1123・PR #1130 レビュー由来）＝`map_err(|e| e.to_string())` は
+  // `src-tauri` に 56 か所あり、`os error 3` のような生の OS エラーも文字列で届く。
+  it('整えた理由が返れば、その文を出す（丸めない）', async () => {
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue(
+      'この動画を書き出せませんでした。素材を選び直してから、もう一度お試しください。',
+    );
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.message).toContain('素材を選び直してから');
+  });
+
+  it('生の OS エラーは出さず、次の行動つきの定型文へ倒す（§2-3）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue('os error 3');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg).not.toContain('os error');
+    expect(msg).toContain('記録の場所を開く');
+  });
+
+  // ⚠️ **`Error` を型で外しているのではない**（PR #1130 レビュー由来 🟡）＝関門は `Error` の
+  // `message` も読むので、**日本語＋句点の `Error` は通る**（焼き出しの断りがこれ）。
+  // だから焼き出し側の文にも「次の行動」を持たせてある（`renderer/export/rasterize.ts`）。
+  it('中の失敗（`Error`）は出さない（`ffmpeg exited with code 1` 等）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue(new Error('ffmpeg exited with code 1'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg).not.toContain('ffmpeg');
+    expect(msg).toContain('記録の場所を開く');
+  });
+
   it('何も置いていなければ、保存先を聞く前に断る（重い処理をさせない）', async () => {
     await open(doc({ clips: [] }));
     await useTimelineStore.getState().exportTimelineVideo(deps);

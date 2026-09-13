@@ -42,7 +42,7 @@ export function guidanceLiteralsIn(text: string): { name: string; text: string }
   // 下書きの中身まで拾ってしまい（実測 86 件）、全部を表へ載せると表の意味が消える
   //（`15 §6` は「エラー・状態」の正典であって、画面の文字すべての一覧ではない）。
   for (const m of text.matchAll(
-    /(?:set\w*Error\(|\w*[eE]rror:\s*|throw new \w*Error\(|Message:\s*)(['"])((?:[^'"\\r\n]|\.){12,}?)\1/g,
+    /(?:set\w*Error\(|\w*[eE]rror:\s*|throw new \w*Error\(|Message:\s*|\?\?\s*)(['"])((?:[^'"\\r\n]|\.){12,}?)\1/g,
   )) {
     const literal = m[2]!;
     if (!looksLikeGuidance(literal)) continue;
@@ -138,12 +138,19 @@ const NOT_IN_TABLE: Record<string, string> = {
     "`TIMELINE_OVERLAY_RETIRED` の**次の行動の文**（行は表にある）。知らせ本体と別の行に分かれているだけ",
 };
 
+/** いま拾えている断りの数（実測）。 */
+const FOUND_COUNT = 94;
+
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();
 
-  it("走査が空振りしていない", () => {
+  it("走査が空振りしていない（実数で留める）", () => {
     // ⚠️ **拾えていないのに緑**を作らない（走査が壊れたら、下の検査は無条件で通る）。
-    expect(found.length, "断りの定数を1つも拾えていない＝走査が壊れている").toBeGreaterThanOrEqual(5);
+    // ⚠️ **下限では足りない**（PR #1130 の変異チェックで生き残った）＝`5 以上` にしていたので、
+    // **拾い方を1段まるごと外しても緑**だった（見つかる数が減るだけで、見つかったものは表にある）。
+    // これは `errorStateTable.test.ts` が「下限ではなく実数で固定する」と決めたのと**同じ型**。
+    // 増減したら、そのぶんの対応（表へ足す／外した理由を書く）を確かめてからこの数を直す。
+    expect(found.length, "拾えた断りの数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(FOUND_COUNT);
   });
 
   it("拾った断りは、表に載っているか、理由つきで外してある", () => {

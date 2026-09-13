@@ -28,6 +28,14 @@ const GATE = "src/app/userFacingError.ts";
 export function caughtNames(src: string): string[] {
   const out = new Set<string>();
   for (const m of src.matchAll(/catch\s*\(\s*\(?\s*([A-Za-z_$][\w$]*)/g)) out.add(m[1]);
+  // ⚠️ **1回だけ別名へ移した形も追う**（PR #1130 レビュー由来 🟡）＝
+  // `catch (e) { const msg = e; return typeof msg === "string" ? msg : DEF; }` は、
+  // 捕まえた名前だけを見ていると**素通り**する。移した先も「捕まえた断り」として扱う。
+  // ⚠️ **追うのは1回だけ**＝何段でも追うと、無関係な代入まで巻き込んで誤検出になる。
+  for (const name of [...out]) {
+    const re = new RegExp(String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*${name}\s*;`, "g");
+    for (const m of src.matchAll(re)) out.add(m[1]);
+  }
   return [...out].sort();
 }
 
@@ -73,13 +81,19 @@ function appFiles(dir: string, root: string): { path: string; src: string }[] {
 
 describe("画面は生の断りをそのまま出さない（#1123）", () => {
   const root = process.cwd();
-  const files = appFiles(join(root, "src", "app"), root);
+  // ⚠️ **画面の入口は `src/app` の外にある**（PR #1130 レビュー由来 ℹ️）＝`src/App.tsx` を
+  // 落とすと、そこに生の断りを書いても 0 件のまま緑になる。
+  const files = [
+    ...appFiles(join(root, "src", "app"), root),
+    { path: "src/App.tsx", src: readFileSync(join(root, "src", "App.tsx"), "utf8") },
+  ];
 
   it("走査が画面へ届いている（見えていないのに緑、を作らない）", () => {
     // ⚠️ **実数で留める**＝走査の根を間違えると 0 件でも緑になる（この型を4回踏んだ）。
     expect(files.length, "画面の file が見つからない＝走査の根が違う").toBeGreaterThan(100);
     expect(files.map((f) => f.path)).toContain("src/app/screens/ExportScreen.tsx");
     expect(files.map((f) => f.path)).toContain("src/app/store/projectStore.ts");
+    expect(files.map((f) => f.path), "画面の入口が対象外＝そこに書けば素通りする").toContain("src/App.tsx");
     expect(files.map((f) => f.path), "関門そのものは対象外").not.toContain(GATE);
   });
 
@@ -113,6 +127,14 @@ describe("門番自身の検査（わざと壊した入力）", () => {
     expect(rawErrorReads('try { f(); } catch (problem) {\nsetError(typeof problem === "string" ? problem : DEF);\n}')).toHaveLength(1);
     expect(caughtNames('try { f(); } catch (problem) {}')).toEqual(["problem"]);
     expect(caughtNames('p.catch((e: unknown) => g(e));')).toEqual(["e"]);
+  });
+
+  it("別名へ移してからの場合分けも拾う（1回だけ追う）", () => {
+    // ⚠️ **捕まえた名前だけを見ていると素通りする**（PR #1130 レビュー由来 🟡）。
+    expect(rawErrorReads('try { f(); } catch (e) {\nconst msg = e;\nsetError(typeof msg === "string" ? msg : DEF);\n}')).toHaveLength(1);
+    expect(caughtNames('try { f(); } catch (e) {\nconst msg = e;\n}')).toEqual(["e", "msg"]);
+    // ⚠️ **2段は追わない**＝無関係な代入まで巻き込むと誤検出になる（門番の信用が落ちる）。
+    expect(caughtNames('try { f(); } catch (e) {\nconst a = e;\nconst b = a;\n}')).toEqual(["a", "e"]);
   });
 
   it("断り以外の型の見分けは拾わない（誤検出は門番の信用を落とす）", () => {

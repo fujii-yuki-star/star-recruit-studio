@@ -319,6 +319,21 @@ describe("AssetLibraryPanel", () => {
     expect(screen.queryByText(/os error/)).toBeNull();
   });
 
+  // ⚠️ **既定文を「最初の理由」に確定させない**（PR #1130 レビュー由来 ℹ️）＝1件目が生のエラーだと
+  // 既定文で埋まり、**2件目に来た本物の理由が捨てられる**（関門で既定文へ落ちる頻度が上がったぶん、
+  // 当たりやすくなった）。関門を通った理由を先取りする。
+  it("1件目が生のエラーでも、あとから来た本物の理由を出す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png"]);
+    vi.mocked(addLibraryAsset).mockReset();
+    vi.mocked(addLibraryAsset)
+      .mockRejectedValueOnce("os error 3")
+      .mockRejectedValueOnce("この形の写真は置けませんでした。別のものをお選びください。");
+    render(<AssetLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /素材を置く/ }));
+    expect(await screen.findByText(/別のものをお選びください/)).toBeInTheDocument();
+  });
+
   /** ⚠️ **2件以上失敗したときは件数と名前で示す**（PR #905 レビュー・`importPartlyFailedMessage` と同じ形）。 */
   it("まとめて置いて複数件が失敗したら、件数と名前を出す", async () => {
     vi.mocked(showOpenLibraryAssetsDialog).mockResolvedValue(["C:/a.png", "C:/b.png", "C:/c.png"]);

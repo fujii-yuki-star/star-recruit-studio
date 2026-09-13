@@ -79,6 +79,17 @@ describe("開けなかった動画の復旧（#263）", () => {
     await waitFor(() => expect(document.body.textContent).toMatch(/一覧から別の動画を選んでください/));
   });
 
+  // ⚠️ **生の OS エラーは出さない**（#1123・§2-3）＝`map_err(|e| e.to_string())` は 56 か所あり、
+  // 控えへ戻す経路にも届きうる。
+  it("生の OS エラーは出さず、決まり文句へ倒す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
+    vi.spyOn(projectFs, "restoreProjectBackup").mockRejectedValue("os error 3");
+    fireEvent.click(await screen.findByText("前に保存できていたところから開く"));
+    await waitFor(() => expect(document.body.textContent).toMatch(/一覧から別の動画を選んでください/));
+    expect(document.body.textContent).not.toMatch(/os error/);
+  });
+
   it("戻せなかったら黙らせない（次の行動を出す）", async () => {
     await openAndFail("broken", new Date("2026-09-01T03:04:00.000Z"));
     // ⚠️ **断った側の理由をそのまま見せる**（次の行動はそこに書いてある）。

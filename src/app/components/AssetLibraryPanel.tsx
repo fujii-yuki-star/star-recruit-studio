@@ -27,7 +27,7 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
-import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage, LIBRARY_ADD_FAILED } from "../uiLabels";
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import type { ScreenId } from "../data/mockData";
@@ -234,16 +234,19 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
           added += 1;
         } catch (e) {
           failedNames.push(name || UNNAMED_ASSET_NAME);
-          firstMessage ??= userFacingMessage(e, "asset-drop") ?? "素材を置けませんでした。もう一度お試しください。";
+          // ⚠️ **既定文まで「最初の理由」に確定させない**（PR #1130 レビュー由来 ℹ️）＝
+          // 1件目が生のエラーだと既定文で埋まり、**2件目に来た本物の理由が捨てられる**。
+          // 関門を通った理由だけを先取りし、1つも無ければ最後に既定文へ倒す。
+          firstMessage ??= userFacingMessage(e, "asset-drop");
         }
       }
       await refresh();
       if (added > 0) setNotice(`${added}件を置きました。動画から「この動画で使う」で取り込めます。`);
       // ⚠️ **1件だけ失敗したときは理由をそのまま出す**（件数で案内を変えない＝ADR-0026②・`addAssets` と同じ）。
-      if (failedNames.length === 1) setError(firstMessage ?? "");
+      if (failedNames.length === 1) setError(firstMessage ?? LIBRARY_ADD_FAILED);
       else if (failedNames.length > 1) setError(libraryPartlyFailedMessage(failedNames, firstMessage));
     } catch (e) {
-      setError(userFacingMessage(e, "asset-add") ?? "素材を置けませんでした。もう一度お試しください。");
+      setError(userFacingMessage(e, "asset-add") ?? LIBRARY_ADD_FAILED);
     } finally {
       setBusy(false);
     }
