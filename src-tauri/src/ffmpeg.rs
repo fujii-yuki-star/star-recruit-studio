@@ -3797,9 +3797,17 @@ fn export_video_impl(
     // ⚠️ **ここで初めて利用者の場所へ置く**＝ここまで来たものだけが「開ける動画」。
     // `rename` は同じ場所どうしなので取り違えが起きない（別ドライブへ跨がない）。
     finish_staged_output(&staged, &out)?;
+    // ⚠️ **ここで初めて「開ける動画」になる**（#1118）＝画面の「動画を再生」はこの覚えだけを見る。
+    // 失敗した回は覚えない（書きかけを開かせない）。
+    // ⚠️ **返す文字列そのものを覚える**（レビュー由来 ℹ️）＝覚えるのが `PathBuf`、返すのが
+    // `to_string_lossy()` だと**別の道**で作った値どうしを突き合わせることになる。
+    // 画面は返した文字列を戻してくるので、**それを覚えておけば構造的に同値**になる
+    //（食い違うと「この場所は開けませんでした」になり、原因が追いにくい）。
+    let output_path = out.to_string_lossy().into_owned();
+    crate::opener::remember(std::path::Path::new(&output_path));
 
     Ok(ExportReport {
-        output_path: out.to_string_lossy().into_owned(),
+        output_path,
         codec: codec.encoder().to_string(),
         scene_count: scenes.len(),
     })

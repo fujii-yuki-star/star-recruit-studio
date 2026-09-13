@@ -170,6 +170,10 @@ function rustMessages(): Record<string, string> {
   // `voicevox.rs` の時間切れの2文は、載せないと**弱い段**（「実装のどこかに在る」）でしか
   // 守られず、**表と実装のどちらかだけ書き換えても気づけない**（#263 の再発）。
   const vv = readFileSync(join(process.cwd(), "src-tauri/src/voicevox.rs"), "utf8");
+  // ⚠️ **文言を寄せた置き場も読む**（#1128 レビュー由来 ℹ️）＝`messages.rs` は
+  // 「文言は1か所」（§6）のために作った置き場なのに、**表と結ばれていなかった**＝
+  // 表と実装のどちらかだけ書き換えても機械では気づけない（#263 と同じ壊れ方）。
+  const msg = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
   const pickIn = (src: string, re: RegExp): string => {
     const m = re.exec(src);
     if (!m) throw new Error(`Rust 側の文言が見つかりません: ${re}`);
@@ -186,6 +190,10 @@ function rustMessages(): Record<string, string> {
     // ⚠️ **Rust 側に足した文も表と結ぶ**（α-7 再監査 ℹ️）＝走査は TS の文言だけなので、
     // ここへ登録しないと**表と実装のズレが機械では見えない**（#263 で足した文が漏れていた）。
     RESTORE_WRITE_FAILED: pick(/const RESTORE_WRITE_FAILED: &str =\s*"([^"]+)"/),
+    // 画面から「開く」を頼んだときの3つの断り（#1118）。
+    OPEN_NOT_ALLOWED: pickIn(msg, /const OPEN_NOT_ALLOWED: &str =\s*"([^"]+)"/),
+    OPEN_GONE: pickIn(msg, /const OPEN_GONE: &str =\s*"([^"]+)"/),
+    OPEN_FAILED: pickIn(msg, /const OPEN_FAILED: &str =\s*"([^"]+)"/),
   };
 }
 
@@ -370,7 +378,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   it("表の行数を実数で留める（黙って減っていない）", () => {
     // ⚠️ **移したときに落ちていないことを、数で留める**（#1090 案C）＝
     // `15 §6` から移す前の実測は **189 行**（うち退役 3）。増やすなら、この数も一緒に動かす。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(189);
+    // ⚠️ **+3**＝画面から「開く」を頼んだときの3つの断り（#1118・`messages.rs`）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(192);
   });
 
 
@@ -610,7 +619,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // 外れた行は弱い段（「文言がソースに在る」）へ落ちて素通りするので、**気づけない**。
     // ⚠️ **増えても落ちる**＝そのぶん表と実装の対応を1件ずつ確かめて数を更新する
     //（「増えるぶんには構わない」で通すと、**足したのに検査へ載っていない**行が混ざる）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(186);
+    // ⚠️ **+3**＝`OPEN_NOT_ALLOWED` / `OPEN_GONE` / `OPEN_FAILED`（#1118）。
+    // どれも `rustMessages()` へ登録したので、表と実装の食い違いは機械で見える。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(189);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

@@ -24,6 +24,42 @@ describe("ExportDoneActions（#991）", () => {
     expect(container.textContent).toBe("");
   });
 
+  // ⚠️ **Rust が書き分けた断りを、画面まで届ける**（#1118 レビュー由来 🟡）＝以前は
+  // `.catch(() => setFailed("open"))` で**中身を捨てて**おり、「覚えていない」も「もう無い」も
+  // 「開くアプリが無い」も**同じ1文**に潰れていた（原因を3つに分けた意味が消える）。
+  it("開けなかった理由が Rust から返ったら、その文を出す", async () => {
+    vi.spyOn(opener, "openSavedFile").mockRejectedValue(
+      "開こうとしたものが見つかりませんでした。移動または削除されていないかご確認ください。",
+    );
+    render(<ExportDoneActions path="C:/out/movie.mp4" onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "動画を再生" }));
+    expect(await screen.findByText(/移動または削除されていないか/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **保存先の再掲は、どちらの道でも落とさない**（#1128 レビュー由来 🟡）＝自前の定型文には
+  // 付いていた手がかり（探しに行く先）が、Rust の断りを優先した途端に消えると、
+  // 「言っていることが道によって違う」状態になる（上の「保存先：…」からは目が離れている）。
+  it("Rust の断りを出すときも、保存先を添える", async () => {
+    vi.spyOn(opener, "openSavedFile").mockRejectedValue(
+      "開こうとしたものが見つかりませんでした。移動または削除されていないかご確認ください。",
+    );
+    render(<ExportDoneActions path="C:/out/movie.mp4" onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "動画を再生" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("移動または削除されていないか");
+    expect(alert.textContent, "断りの中に保存先が無い＝探しに行く先が消えている").toContain("C:/out/movie.mp4");
+  });
+
+  // ⚠️ **生の技術詳細は出さない**（§2-3・#1123）＝画面には自前の定型文、中身は記録へ。
+  it("画面に出せない断り（生のエラー）は、自前の文に置き換える", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(opener, "openSavedFile").mockRejectedValue(new Error("os error 3"));
+    render(<ExportDoneActions path="C:/out/movie.mp4" onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "動画を再生" }));
+    expect(await screen.findByText(/動画を再生できませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/os error/)).toBeNull();
+  });
+
   it("戻り先を渡さなければ「一覧へ戻る」は出さない（画面によっては別の戻り道がある）", () => {
     render(<ExportDoneActions path="C:/out/movie.mp4" />);
     expect(screen.queryByRole("button", { name: /動画の一覧へ戻る/ })).toBeNull();

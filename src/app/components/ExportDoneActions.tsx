@@ -10,6 +10,15 @@ import { useState } from "react";
 import { BACK_TO_HOME_LABEL } from "../uiLabels";
 import { ArrowLeftIcon } from "./icons";
 import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
+import { userFacingMessage } from "../userFacingError";
+
+/**
+ * 開けなかったときに画面が持つもの。
+ *
+ * - `builtin` … こちらの定型文を出す合図（理由が言葉で返らなかったとき）
+ * - `reason` … **Rust が書き分けた断り**（「覚えていない」「もう無い」「開くアプリが無い」）
+ */
+type OpenFailure = { kind: "builtin"; which: "open" | "reveal" } | { kind: "reason"; text: string } | null;
 
 /**
  * 開けなかったときの断り（§2-5＝原因の候補と、次にできること）。
@@ -35,7 +44,11 @@ function openFailedMessage(kind: "open" | "reveal", path: string): string {
  * @param onBack 一覧へ戻る（渡さなければ「戻る」を出さない＝画面によっては別の戻り道がある）。
  */
 export function ExportDoneActions({ path, onBack }: { path: string | null; onBack?: () => void }) {
-  const [failed, setFailed] = useState<"open" | "reveal" | null>(null);
+  // ⚠️ **合図と本文を型で分ける**（レビュー由来 ℹ️）＝以前は `"open" | "reveal" | string` と
+  // 書いていたが、TypeScript ではリテラルの union は `string` に**吸収される**ので、
+  // 「合図」と「Rust が書き分けた断り」の区別は**型では守られていなかった**
+  //（いま衝突する値は無いが、合図の文字列が本文として出る形を作れてしまう）。
+  const [failed, setFailed] = useState<OpenFailure>(null);
   // ⚠️ **場所が分からないときは何も出さない**＝押しても何も起きないボタンを作らない（§2-5）。
   if (!path) return null;
   return (
@@ -47,13 +60,20 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
       <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
         <button
           className="btn btn-secondary"
-          onClick={() => { setFailed(null); void revealSavedFile(path).catch(() => setFailed("reveal")); }}
+          onClick={() => { setFailed(null); void revealSavedFile(path).catch(() => setFailed({ kind: "builtin", which: "reveal" })); }}
         >
           保存した場所を開く
         </button>
         <button
           className="btn btn-ghost"
-          onClick={() => { setFailed(null); void openSavedFile(path).catch(() => setFailed("open")); }}
+          // ⚠️ **理由も捨てない**（レビュー由来 🟡・#1118）＝Rust が書き分けた断りを優先して出す。
+          onClick={() => {
+            setFailed(null);
+            void openSavedFile(path).catch((e: unknown) => {
+              const reason = userFacingMessage(e, "open-video");
+              setFailed(reason ? { kind: "reason", text: reason } : { kind: "builtin", which: "open" });
+            });
+          }}
         >
           動画を再生
         </button>
@@ -66,7 +86,14 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
       </div>
       {failed && (
         <div className="notice notice-warn mt" role="alert">
-          <span>{openFailedMessage(failed, path)}</span>
+          {/* ⚠️ **保存先はどちらの道でも出す**（レビュー由来 🟡）＝Rust の断りを優先した結果、
+              自前の定型文にだけ付いていた**保存先の再掲**が落ちると、探しに行く先がその場から消える
+              （上の「保存先：…」からは目が離れている）。言っていることの差を残さない。 */}
+          <span>
+            {failed.kind === "builtin"
+              ? openFailedMessage(failed.which, path)
+              : `${failed.text}（保存先：${path}）`}
+          </span>
         </div>
       )}
     </>

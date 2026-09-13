@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { openSavedFile } from "../../infrastructure/opener";
 import { troubleLogDir } from "../../infrastructure/troubleLogFs";
 import { TROUBLE_LOG_DESC, TROUBLE_LOG_OPEN, TROUBLE_LOG_OPEN_FAILED, TROUBLE_LOG_TITLE } from "../uiLabels";
+import { userFacingMessage } from "../userFacingError";
 
 /**
  * うまくいかないときの記録（#396）＝**場所を開く導線だけ**を出す。
@@ -14,7 +15,7 @@ import { TROUBLE_LOG_DESC, TROUBLE_LOG_OPEN, TROUBLE_LOG_OPEN_FAILED, TROUBLE_LO
  */
 export function TroubleLogSection() {
   const [dir, setDir] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -33,15 +34,19 @@ export function TroubleLogSection() {
           type="button"
           className="btn btn-secondary"
           onClick={() => {
-            setFailed(false);
+            setFailed(null);
             // ⚠️ **失敗を握りつぶさない**（§2-5）＝押しても何も起きない、を作らない。
-            void openSavedFile(dir).catch(() => setFailed(true));
+            // ⚠️ **理由も捨てない**（レビュー由来 🟡・#1118）＝Rust は「覚えていない／もう無い／
+            // パソコン側で開けない」を書き分けて返すのに、受け取らないと**画面では1つに潰れる**。
+            void openSavedFile(dir).catch((e: unknown) =>
+              setFailed(userFacingMessage(e, "trouble-log") ?? TROUBLE_LOG_OPEN_FAILED),
+            );
           }}
         >
           {TROUBLE_LOG_OPEN}
         </button>
       </div>
-      {failed && <p className="field-hint mt" role="alert">{TROUBLE_LOG_OPEN_FAILED}</p>}
+      {failed != null && <p className="field-hint mt" role="alert">{failed}</p>}
     </div>
   );
 }

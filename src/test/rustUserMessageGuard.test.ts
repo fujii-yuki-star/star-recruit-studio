@@ -22,6 +22,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { bannedTermsIn } from "./uiTerms";
+import { hasJapanese, isUserFacingSentence } from "../app/userFacingError";
 import { macroCallRanges, scanRust } from "./rustSource";
 
 /** Rust の置き場（再帰＝サブフォルダも見る）。 */
@@ -64,14 +65,16 @@ export function japaneseLiteralsIn(src: string): string[] {
   const out = new Set<string>();
   for (const { text, at } of literals) {
     if (at >= limit || inSkip(at)) continue;
-    if (!/[ぁ-んァ-ヶ一-龠]/.test(text)) continue;
+    if (!hasJapanese(text)) continue;
     out.add(text);
   }
   return [...out].sort();
 }
 
 export function userMessagesIn(src: string): string[] {
-  return japaneseLiteralsIn(src).filter((t) => t.includes("。"));
+  // ⚠️ **物差しは関門と同じものを使う**（レビュー由来 🟡）＝以前は「日本語か」も「句点を持つか」も
+  // ここに書き写してあり、画面側の関門（`userFacingMessage`）と**黙ってずれ得た**。
+  return japaneseLiteralsIn(src).filter(isUserFacingSentence);
 }
 
 /**
@@ -118,7 +121,7 @@ describe("Rust が画面へ返す文（#1111）", () => {
     // ⚠️ **実数で留める**＝最初は「29 以上」にしていたが、文字リテラルで走査が反転して
     // **半分しか拾えていない状態でも通って**いた（実際に踏んだ）。数を固定すると、その場で気づく。
     const all = files().flatMap((p) => userMessagesIn(readFileSync(p, "utf8")));
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(94);
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(97);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {
