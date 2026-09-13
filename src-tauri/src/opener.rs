@@ -94,6 +94,18 @@ pub fn guard_produced(path: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// パソコン側で開けなかったときの断り（**純粋関数**＝分岐そのものを検査が叩ける）。
+///
+/// ⚠️ **断りを取り違えない**（レビュー由来 ℹ️）＝関門を通ってから開くまでの間に消されると、
+/// 「開くためのアプリが入っているかご確認ください」という**見当違いの次の行動**を出してしまう
+///（探すべきは移動・削除の方）。もう一度だけ在るかを見て、無ければ「もう無い」へ倒す。
+pub fn open_failure(path: &Path) -> &'static str {
+    if !path.exists() {
+        return crate::messages::OPEN_GONE;
+    }
+    crate::messages::OPEN_FAILED
+}
+
 /// **アプリが作った場所だけ**を開く（画面からの唯一の入口）。
 ///
 /// ⚠️ **断りは「次の行動」を示す**（§2-5）＝開けなかった理由が**画面まで届く**
@@ -108,13 +120,7 @@ pub fn open_produced_path(app: AppHandle, path: String) -> Result<(), String> {
     }
     app.opener().open_path(path, None::<&str>).map_err(|e| {
         crate::tlog!("opener", "open_path failed: {e}");
-        // ⚠️ **断りを取り違えない**（レビュー由来 ℹ️）＝関門を通ってから開くまでの間に消されると、
-        // 「開くためのアプリが入っているかご確認ください」と**見当違いの次の行動**を出してしまう。
-        // もう一度だけ在るかを見て、無ければ「もう無い」へ倒す。
-        if !p.exists() {
-            return crate::messages::OPEN_GONE.to_string();
-        }
-        crate::messages::OPEN_FAILED.to_string()
+        open_failure(&p).to_string()
     })
 }
 
@@ -161,6 +167,34 @@ mod tests {
         fs::write(&p, b"x").unwrap();
         remember(&p);
         assert_eq!(guard_produced(&p), Ok(()), "覚えていて在るのに通らない");
+        let _ = fs::remove_file(&p);
+    }
+
+    /// **開く直前に消えていたら「もう無い」へ倒す**（レビュー由来 ℹ️）。
+    ///
+    /// ⚠️ **関門を通ってから開くまでに間がある**＝そこで消されると、「開くアプリが入っているか」
+    /// という**探す先の違う次の行動**を出してしまう。
+    #[test]
+    fn 開けなかったとき無ければもう無いと言う() {
+        let gone = std::env::temp_dir().join(format!("stario-gone-{}.mp4", std::process::id()));
+        let _ = fs::remove_file(&gone);
+        assert_eq!(
+            open_failure(&gone),
+            crate::messages::OPEN_GONE,
+            "消えているのに「開くアプリが入っているか」と言っている"
+        );
+    }
+
+    /// **在るのに開けなかったならパソコン側の事情**（断りを取り違えない・逆側）。
+    #[test]
+    fn 開けなかったとき在ればパソコン側と言う() {
+        let p = std::env::temp_dir().join(format!("stario-there-{}.mp4", std::process::id()));
+        fs::write(&p, b"x").unwrap();
+        assert_eq!(
+            open_failure(&p),
+            crate::messages::OPEN_FAILED,
+            "在るのに「見つかりませんでした」と言っている"
+        );
         let _ = fs::remove_file(&p);
     }
 

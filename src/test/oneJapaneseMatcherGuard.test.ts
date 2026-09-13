@@ -8,7 +8,7 @@
 //
 // ⚠️ **「1か所へ寄せた」は数えて出す**（`CLAUDE.md §7`）＝寄せたと書くだけなら、
 // 片方が残っていても書ける。ここが**実数**で留める。
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
