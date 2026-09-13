@@ -10,6 +10,7 @@ import { useState } from "react";
 import { BACK_TO_HOME_LABEL } from "../uiLabels";
 import { ArrowLeftIcon } from "./icons";
 import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
+import { userFacingMessage } from "../userFacingError";
 
 /**
  * 開けなかったときの断り（§2-5＝原因の候補と、次にできること）。
@@ -35,7 +36,9 @@ function openFailedMessage(kind: "open" | "reveal", path: string): string {
  * @param onBack 一覧へ戻る（渡さなければ「戻る」を出さない＝画面によっては別の戻り道がある）。
  */
 export function ExportDoneActions({ path, onBack }: { path: string | null; onBack?: () => void }) {
-  const [failed, setFailed] = useState<"open" | "reveal" | null>(null);
+  // ⚠️ **Rust が返した文もそのまま持てる形**（#1118 レビュー由来 🟡）＝
+  // "open"/"reveal" は**自前の定型文を出す合図**、それ以外の文字列は**Rust が書き分けた断り**。
+  const [failed, setFailed] = useState<"open" | "reveal" | string | null>(null);
   // ⚠️ **場所が分からないときは何も出さない**＝押しても何も起きないボタンを作らない（§2-5）。
   if (!path) return null;
   return (
@@ -53,7 +56,8 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
         </button>
         <button
           className="btn btn-ghost"
-          onClick={() => { setFailed(null); void openSavedFile(path).catch(() => setFailed("open")); }}
+          // ⚠️ **理由も捨てない**（レビュー由来 🟡・#1118）＝Rust が書き分けた断りを優先して出す。
+          onClick={() => { setFailed(null); void openSavedFile(path).catch((e: unknown) => setFailed(userFacingMessage(e, "open-video") ?? "open")); }}
         >
           動画を再生
         </button>
@@ -66,7 +70,8 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
       </div>
       {failed && (
         <div className="notice notice-warn mt" role="alert">
-          <span>{openFailedMessage(failed, path)}</span>
+          {/* ⚠️ Rust が返した文はそのまま出す（"open"/"reveal" は自前の定型文の合図）。 */}
+          <span>{failed === "open" || failed === "reveal" ? openFailedMessage(failed, path) : failed}</span>
         </div>
       )}
     </>

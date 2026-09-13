@@ -1,5 +1,7 @@
 // 外部URL（クレジットのソース入手先など）を既定ブラウザで開く／保存したファイルの場所を開く（#404）。
-// Tauri は opener プラグイン（capabilities: opener:default ＋ reveal-item-in-dir/open-path）、ブラウザ環境は window.open。
+// Tauri は opener プラグイン（capabilities: opener:default ＋ reveal-item-in-dir）、ブラウザ環境は window.open。
+// ⚠️ **`open-path` は capabilities に無い**（#1118 で外した）＝開くのは Rust の `open_produced_path`。
+// 足し戻すと、画面から**任意の場所**を指せる道が復活する（門番＝`src/test/openPathGuard.test.ts`）。
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 

@@ -42,13 +42,29 @@ describe("画面から「開く」を頼む道は1つだけ（#1118）", () => {
     expect(src, "Rust の入口を呼んでいない").toContain("open_produced_path");
   });
 
-  it("Rust の入口が、覚えている場所だけを開く", () => {
+  it("Rust の入口が、関門を通る（分岐そのものは Rust の検査が見る）", () => {
     const rs = read("src-tauri/src/opener.rs");
-    // ⚠️ **関門があること**＝覚えていない場所は断る。
-    expect(rs).toContain("if !is_produced(");
-    // ⚠️ **覚える側が2つとも繋がっていること**＝記録の置き場と、書き出した動画。
-    expect(read("src-tauri/src/trouble_log.rs"), "記録の置き場を覚えていない").toContain("opener::remember");
-    expect(read("src-tauri/src/ffmpeg.rs"), "書き出した動画を覚えていない").toContain("opener::remember");
+    // ⚠️ **字面だけでは足りない**（レビュー由来 🔴）＝以前は `if !is_produced(` を含むかだけを見ており、
+    // **中身の `return Err` を消す**変異が捕まらなかった（判定は残るが関門は効かない）。
+    // いまは関門を**純粋関数**（`guard_produced`）に切り出し、**分岐そのもの**を Rust の検査が叩く
+    //（`opener.rs` の `関門は覚えていない場所を断る` ほか3件）。ここは**通していること**だけを見る。
+    expect(rs).toContain("guard_produced(&p)");
+    expect(rs).toContain("pub fn guard_produced(");
+  });
+
+  it("「覚える側」と「開く側」の数が合っている", () => {
+    // ⚠️ **決め打ちの2ファイルでは足りない**（レビュー由来 🟡）＝将来3つ目の「開く」導線を足したとき、
+    // `remember` を忘れても**この門番は気づかなかった**（#1118 と**同じ壊れ方**が再発する）。
+    // **数で留める**＝増やしたらここも見直すことになる。
+    const callers = [read("src/app/components/ExportDoneActions.tsx"), read("src/app/components/TroubleLogSection.tsx")]
+      .join("\n")
+      .split("openSavedFile(").length - 1;
+    expect(callers, "「開く」導線の数が変わった＝覚える側も足したか確かめて、この数を直す").toBe(2);
+
+    const remembers = ["src-tauri/src/trouble_log.rs", "src-tauri/src/ffmpeg.rs"]
+      .map((f) => read(f).split("opener::remember(").length - 1)
+      .reduce((a, b) => a + b, 0);
+    expect(remembers, "覚える側の数が変わった＝開く導線と対応しているか確かめて、この数を直す").toBe(2);
   });
 });
 

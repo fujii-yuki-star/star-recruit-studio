@@ -2100,7 +2100,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const { runs: bgmRuns, duckMerged } = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
       // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
       const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
-      await exportVideo(
+      // ⚠️ **保存先は Rust の戻り値から採る**（レビュー由来 ℹ️・#1118）＝ダイアログで選ばれた
+      // 文字列をそのまま使うと、Rust が拡張子を補った（`ffmpeg.rs` の `set_extension("mp4")`）ときに
+      // **覚えた場所と開く場所が食い違う**＝「この場所は開けませんでした」になる（保存先の表示もずれる）。
+      const report = await exportVideo(
         [frames],
         doc.projectName || "movie",
         bgmRuns,
@@ -2110,7 +2113,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       );
       // ⚠️ **保存先も持ち帰る**（#991）＝場面形式は保存先と「開く」導線を出すのに、
       // こちらは文だけだった（`06 §12.1` に導線を落とす理由は無い＝ADR-0026②）。
-      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged, outPath: outputPath } });
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged, outPath: report.outputPath } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
       // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。

@@ -87,6 +87,21 @@ describe('exportTimelineVideo', () => {
   });
 
   /**
+   * ⚠️ **保存先は書き出しの戻り値から採る**（#1118 レビュー由来 ℹ️）＝Rust は拡張子を補う
+   * （`ffmpeg.rs` の `set_extension("mp4")`）ので、ダイアログで選ばれた文字列をそのまま持つと
+   * **覚えた場所と開く場所が食い違う**＝「動画を再生」が「この場所は開けませんでした」になる
+   * （覚える側は Rust が補ったあとの場所を覚えている＝`opener::remember`）。
+   * ⚠️ **だから2つを違う値にして見る**＝同じ値だと、どちらから採っても緑になる。
+   */
+  it('保存先は書き出しの戻り値から採る（ダイアログの文字列ではない）', async () => {
+    vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/out/movie');
+    vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: '/out/movie.mp4' } as never);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.outPath).toBe('/out/movie.mp4');
+  });
+
+  /**
    * ⚠️ **整えないときは渡さない**（#259）＝前の版で作った動画は読込時に「しない」が書き込まれるので、
    * 開いて書き出し直しても**前と同じ音**になる（§2-5＝黙って別の音の動画を出さない）。
    */
