@@ -84,8 +84,17 @@ export function dropDevLogs(code: string): string {
   return out;
 }
 
-/** 画面に出る文字とみなす＝**日本語を含む**文字列。 */
-export const hasJapanese = (s: string): boolean => /[ぁ-んァ-ヶ一-龠]/.test(s);
+/**
+ * 画面に出る文字とみなす＝**日本語を含む**文字列。
+ *
+ * ⚠️ **定義は `src/app/userFacingError.ts` に1つ**（レビュー由来 🟡）＝以前はここと
+ * `rustUserMessageGuard.test.ts` と関門の**3か所に同じ正規表現が並んで**いた。
+ * ここは名前を配り直すだけ（使う側の取り込み先を変えずに済ませる）。
+ * ⚠️ **`export ... from` だけでは足りない**＝この file の中でも使っているので、
+ * **取り込んでから配り直す**（再輸出だけだと局所の名前が未定義になる＝実際に3件赤くなった）。
+ */
+import { hasJapanese } from "../app/userFacingError";
+export { hasJapanese };
 
 /**
  * 本文から、**画面に出る日本語**を拾って禁止語を探す。

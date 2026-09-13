@@ -10,11 +10,33 @@
 //
 // ⚠️ **だから「権限を戻す」ことを禁じる**＝戻すと、画面から**任意の場所**を指せる道が復活する
 //（`open_path` は**プログラムを起動しうる**）。しかも範囲を書き忘れれば、また**黙って全部弾かれる**。
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const read = (p: string): string => readFileSync(join(process.cwd(), p), "utf8");
+
+/**
+ * 何件あるかを数える（走査そのものを叩けるように、純粋関数にしてある）。
+ *
+ * ⚠️ **決め打ちの file 一覧では足りない**（レビュー由来 🟡・2件）＝以前はここで
+ * `ExportDoneActions.tsx` と `TroubleLogSection.tsx` を**名指しで**読んでいた。
+ * それだと**3つ目の導線を別の file に足しても数は 2 のまま緑**で、
+ * 「増やしたらここも見直すことになる」という注記の主張が**成り立っていなかった**。
+ */
+export function countIn(files: { src: string }[], needle: string): number {
+  return files.reduce((n, { src }) => n + src.split(needle).length - 1, 0);
+}
+
+/** 置き場ごと集める（`.test.` は除く＝検査の中の呼び出しは導線ではない）。 */
+function filesUnder(dir: string, ext: RegExp, root: string): { path: string; src: string }[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) return filesUnder(p, ext, root);
+    if (!ext.test(e.name) || e.name.includes(".test.")) return [];
+    return [{ path: relative(root, p).split(sep).join("/"), src: readFileSync(p, "utf8") }];
+  });
+}
 
 /** 画面から直に `open_path` を呼んでいる所（プラグインの取り込みを見る）。 */
 export function pluginOpenPathUses(src: string): string[] {
@@ -52,19 +74,29 @@ describe("画面から「開く」を頼む道は1つだけ（#1118）", () => {
     expect(rs).toContain("pub fn guard_produced(");
   });
 
-  it("「覚える側」と「開く側」の数が合っている", () => {
-    // ⚠️ **決め打ちの2ファイルでは足りない**（レビュー由来 🟡）＝将来3つ目の「開く」導線を足したとき、
-    // `remember` を忘れても**この門番は気づかなかった**（#1118 と**同じ壊れ方**が再発する）。
-    // **数で留める**＝増やしたらここも見直すことになる。
-    const callers = [read("src/app/components/ExportDoneActions.tsx"), read("src/app/components/TroubleLogSection.tsx")]
-      .join("\n")
-      .split("openSavedFile(").length - 1;
-    expect(callers, "「開く」導線の数が変わった＝覚える側も足したか確かめて、この数を直す").toBe(2);
+  it("「覚える側」と「開く側」の数が合っている（置き場ごと走査する）", () => {
+    // ⚠️ **数で留める**＝3つ目の「開く」導線を足したとき、`remember` を忘れれば
+    // #1118 と**同じ壊れ方**（画面から開けない）が再発する。ここが赤くなれば、足す側も見直すことになる。
+    const root = process.cwd();
+    const ts = filesUnder(join(root, "src"), /\.tsx?$/, root);
+    const rs = filesUnder(join(root, "src-tauri", "src"), /\.rs$/, root);
 
-    const remembers = ["src-tauri/src/trouble_log.rs", "src-tauri/src/ffmpeg.rs"]
-      .map((f) => read(f).split("opener::remember(").length - 1)
-      .reduce((a, b) => a + b, 0);
-    expect(remembers, "覚える側の数が変わった＝開く導線と対応しているか確かめて、この数を直す").toBe(2);
+    // 「開く」を頼む側＝画面の導線2つと、その実装（`infrastructure/opener.ts` の定義）で3。
+    expect(
+      countIn(ts, "openSavedFile("),
+      "「開く」導線の数が変わりました＝覚える側（`opener::remember`）も足したか確かめて、この数を直してください",
+    ).toBe(3);
+    // Rust の入口を通す所は1本だけ（画面から直に散らさない）。
+    expect(
+      countIn(ts, 'invoke("open_produced_path"'),
+      "Rust の入口を呼ぶ所が増えました＝`infrastructure/opener.ts` の1本に寄せてください",
+    ).toBe(1);
+
+    // 覚える側＝アプリが作った場所（記録の置き場・書き出した動画）。
+    expect(
+      countIn(rs, "opener::remember("),
+      "覚える側の数が変わりました＝開く導線と対応しているか確かめて、この数を直してください",
+    ).toBe(2);
   });
 });
 
@@ -76,6 +108,15 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("注記の中の `openPath` では赤くしない（誤検出は門番の信用を落とす）", () => {
     expect(pluginOpenPathUses("// openPath を直に呼ばない")).toEqual([]);
     expect(pluginOpenPathUses(" * `openPath` は範囲を見る")).toEqual([]);
+  });
+
+  it("数え方そのものを叩く（走査の形だけ真似ない）", () => {
+    // ⚠️ **歩くだけの走査にしない**＝拾い方を壊しても「いまのコードに漏れが無いので緑」になる形を作らない。
+    expect(countIn([{ src: "openSavedFile(a); openSavedFile(b);" }], "openSavedFile(")).toBe(2);
+    expect(countIn([{ src: "a" }, { src: "openSavedFile(b)" }], "openSavedFile(")).toBe(1);
+    expect(countIn([], "openSavedFile(")).toBe(0);
+    // 似た名前は数えない（`(` まで見ている）。
+    expect(countIn([{ src: "openSavedFileLabel = 1" }], "openSavedFile(")).toBe(0);
   });
 
   it("似た名前を巻き込まない（語の切れ目で見る）", () => {

@@ -108,6 +108,12 @@ pub fn open_produced_path(app: AppHandle, path: String) -> Result<(), String> {
     }
     app.opener().open_path(path, None::<&str>).map_err(|e| {
         crate::tlog!("opener", "open_path failed: {e}");
+        // ⚠️ **断りを取り違えない**（レビュー由来 ℹ️）＝関門を通ってから開くまでの間に消されると、
+        // 「開くためのアプリが入っているかご確認ください」と**見当違いの次の行動**を出してしまう。
+        // もう一度だけ在るかを見て、無ければ「もう無い」へ倒す。
+        if !p.exists() {
+            return crate::messages::OPEN_GONE.to_string();
+        }
         crate::messages::OPEN_FAILED.to_string()
     })
 }
