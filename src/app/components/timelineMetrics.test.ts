@@ -34,6 +34,71 @@ export function hardCodesPx(body: string, prop: string): boolean {
   return new RegExp(String.raw`(^|;|\n)\s*${prop}\s*:\s*[-\d.]+px\s*(;|$)`).test(body);
 }
 
+/**
+ * その規則の宣言を**数として**取り出す（`font-size: 12px` → `12`）。
+ *
+ * ⚠️ **検査側に書き写さない**（#1122）＝以前ここは `12 * lh + 10 * lh` と**数字を書いて**いた。
+ * CSS の `font-size` だけ変えても門番は**古い数字のまま通る**＝「行の高さに収まる」という主張が、
+ * 実際には守られていない状態になりえた（`CLAUDE.md §7`「作った門番自体に穴が空く」）。
+ * ⚠️ **どちらを先に決めるかは固定しない**＝字の大きさから導くのでも、行の高さから導くのでもなく、
+ * **いまの値どうしが収まっているか**だけを見る（案 A・向きは決めない）。
+ */
+export function pxOf(body: string | null, prop: string): number {
+  const m = new RegExp(String.raw`(^|;|\n)\s*${prop}\s*:\s*([-\d.]+)px\s*(;|$)`).exec(body ?? "");
+  return m ? Number(m[2]) : NaN;
+}
+
+/** その規則が宣言している `line-height`（単位なしの倍率）。無ければ `NaN`。 */
+export function lineHeightOf(body: string | null): number {
+  const m = /(^|;|\n)\s*line-height:\s*([\d.]+)\s*(;|$)/.exec(body ?? "");
+  return m ? Number(m[2]) : NaN;
+}
+
+/**
+ * **欄に並ぶもの1つぶんの高さ**（字の大きさ × 行間）。
+ *
+ * ⚠️ **行間は自分のものを優先する**（PR #1132 レビュー由来 🟡）＝「⋮」は `line-height: 1` を
+ * 自分で宣言しているので、欄の 1.15 を掛けると**実際より高く見積もる**。
+ * 宣言が無いものは欄の値を継ぐ。
+ */
+export function lineBoxPx(body: string | null, fallbackLh: number): number {
+  const own = lineHeightOf(body);
+  return pxOf(body, "font-size") * (Number.isFinite(own) ? own : fallbackLh);
+}
+
+describe("取り出しそのものの検査（わざと壊した入力）", () => {
+  it("数として取り出す（単位を落とす）", () => {
+    expect(pxOf("font-size: 12px;", "font-size")).toBe(12);
+    expect(pxOf("  font-size:10px ;", "font-size")).toBe(10);
+    expect(pxOf("line-height: 1.15;\n  font-size: 14px;", "font-size")).toBe(14);
+  });
+
+  it("無ければ数にならない（0 を返して黙って通さない）", () => {
+    expect(Number.isNaN(pxOf("color: red;", "font-size"))).toBe(true);
+    expect(Number.isNaN(pxOf(null, "font-size"))).toBe(true);
+    // ⚠️ **`px` でない値は取らない**＝`font-size: 1.2rem` を 1.2px として扱わない。
+    expect(Number.isNaN(pxOf("font-size: 1.2rem;", "font-size"))).toBe(true);
+  });
+
+  it("別の宣言を巻き込まない（名前の前を見る）", () => {
+    // `font-size` を探して `-webkit-font-size` のような別名まで拾わない。
+    expect(Number.isNaN(pxOf("-x-font-size: 99px;", "font-size"))).toBe(true);
+  });
+
+  it("行間は自分のものを優先し、無ければ継ぐ", () => {
+    // ⚠️ **「⋮」は自分で `line-height: 1` を宣言している**＝欄の 1.15 を掛けると高く見積もる。
+    expect(lineBoxPx("font-size: 14px; line-height: 1;", 1.15)).toBe(14);
+    expect(lineBoxPx("font-size: 10px;", 1.15)).toBeCloseTo(11.5, 5);
+    expect(lineHeightOf("font-size: 14px; line-height: 1;")).toBe(1);
+    expect(Number.isNaN(lineHeightOf("font-size: 10px;"))).toBe(true);
+  });
+
+  it("読めないものは高さにならない（0 で黙って通さない）", () => {
+    expect(Number.isNaN(lineBoxPx("color: red;", 1.15))).toBe(true);
+    expect(Number.isNaN(lineBoxPx(null, 1.15))).toBe(true);
+  });
+});
+
 describe("タイムラインの寸法は1か所から導く（#1104）", () => {
   it("行の高さ・帯の余白・行内の文字の高さは、`.timeline` が宣言する", () => {
     // ⚠️ **`.timeline` で宣言する**＝行・帯・「⋮」の**すべてから**見える必要がある
@@ -115,13 +180,41 @@ describe("帯の密度（#1104・実機の指摘）", () => {
 
   it("列の名前の欄は、行間を詰めてある（詰めないと列の高さがそれに引きずられる）", () => {
     // ⚠️ **これが 40px だった理由**＝`:root` の `line-height: 1.6` を継ぐと、
-    // 名前(12px)＋添え(10px)で 35.2px 要り、列はそれ以上でないと収まらなかった。
+    // 名前(12px)＋添え(10px)を**縦に積んで** 35.2px 要り、列はそれ以上でないと収まらなかった。
     const label = ruleBody(css, ".timeline-row-label");
     expect(label).not.toBeNull();
     const lh = Number(/line-height:\s*([\d.]+)\s*;/.exec(label ?? "")?.[1]);
     expect(Number.isFinite(lh)).toBe(true);
-    // 名前と添えの2行が、列の高さに収まること（これが崩れると文字が行からはみ出す）。
-    expect(12 * lh + 10 * lh).toBeLessThanOrEqual(TIMELINE_LANE_H_PX);
+
+    // ⚠️ **字の大きさは CSS から読む**（#1122）＝検査側に書き写すと、CSS だけ変えたときに
+    // **古い数字のまま通る**。
+    // ⚠️ **欄に並ぶものを全部数える**（PR #1132 レビュー由来 🟡）＝最初は名前と添えだけを見ていたが、
+    // **いま列の高さを決めているのは「⋮」**（14px × 行間1 = 14px＞名前 13.8px＞添え 11.5px）。
+    // 数え漏らすと、**「⋮」を大きくしても緑のまま行がはみ出す**＝この PR が潰したのと同じ型の穴。
+    const boxes = {
+      名前: lineBoxPx(label, lh),
+      添え: lineBoxPx(ruleBody(css, ".timeline-row-label .sub"), lh),
+      "⋮": lineBoxPx(ruleBody(css, ".timeline-row-menu"), lh),
+    };
+    // ⚠️ **1つずつ見る**（PR #1132 の変異チェックで生き残った）＝いちばん高いものだけを見ると、
+    // **集合から1つ落としても残りが収まっているので緑**になる（数え漏らしに気づけない）。
+    for (const [what, px] of Object.entries(boxes)) {
+      expect(Number.isFinite(px), `${what}の高さが読めない＝取り出しが実態と合っていない`).toBe(true);
+      expect(px, `${what}が列の高さに収まっていない`).toBeLessThanOrEqual(TIMELINE_LANE_H_PX);
+    }
+
+    // ⚠️ **足さない**（#1122 の裏取りで判明）＝以前ここは `12 * lh + 10 * lh` と**足して**おり、
+    // 「名前と添えの**2行**が収まる」＝**縦積み**の前提だった。CSS は #1104 で
+    // `flex-direction: row`（横並び）に変えてあるので、実際の拘束は**いちばん高い1つ**。
+    // 主張と実態が食い違ったまま（赤くならないので気づけない）にしない。
+    // ⚠️ **`display: flex` も見る**（レビュー由来 ℹ️）＝`flex-direction` は `display: flex` が
+    // 消えると**無視される宣言**なので、`block` にされると縦積みに戻っても緑のままになる。
+    expect(label, "並べ方が変わった＝下の拘束が変わる").toContain("display: flex");
+    expect(label, "横並びでなくなった＝下の拘束が変わる").toContain("flex-direction: row");
+    // ⚠️ **いちばん高いのが誰かまで留める**（同上）＝集合から落ちた瞬間に赤くなる。
+    // いま列の高さを決めているのは「⋮」（14px）で、名前（13.8px）より高い。
+    const tallest = Object.entries(boxes).sort((a, b) => b[1] - a[1])[0]!;
+    expect(tallest[0], "いちばん高いものが変わりました＝欄に並ぶものを数え直してください").toBe("⋮");
   });
 });
 
