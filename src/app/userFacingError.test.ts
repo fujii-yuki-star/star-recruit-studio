@@ -33,6 +33,15 @@ describe("画面に出してよい断りを見分ける", () => {
     expect(userFacingMessage("", "t")).toBeNull();
     expect(userFacingMessage(undefined, "t")).toBeNull();
     expect(userFacingMessage({ code: 1 }, "t")).toBeNull();
+    // ⚠️ **中身の無い `Error`** も同じ（`new Error()` は `message` が空）。
+    expect(userFacingMessage(new Error(""), "t")).toBeNull();
+  });
+
+  it("句点はあっても、日本語の中身が無ければ通さない（両方を見ている）", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // ⚠️ **記号だけの文は文になっていない**＝「。」を含むかだけを見ると、これが画面へ出る。
+    expect(userFacingMessage("　。", "t")).toBeNull();
+    expect(userFacingMessage("ERROR: open failed。", "t")).toBeNull();
   });
 
   it("**通さなかった中身は捨てない**＝記録へ流す（`troubleLogBridge` が運ぶ）", () => {

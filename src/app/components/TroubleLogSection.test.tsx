@@ -44,11 +44,26 @@ describe("うまくいかないときの記録（#396）", () => {
   });
 
   // ⚠️ **開けなかったことを黙らない**（§2-5）。
+  // ⚠️ **画面に出せない中身のときは、こちらの定型文へ倒す**（`userFacingMessage` が `null` を返す）。
   it("開けなかったら、次の行動を出す", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(openSavedFile).mockRejectedValue(new Error("x"));
     render(<TroubleLogSection />);
     fireEvent.click(await screen.findByRole("button", { name: "記録の場所を開く" }));
     expect(await screen.findByText(/記録の場所を開けませんでした/)).toBeTruthy();
+  });
+
+  // ⚠️ **Rust が書き分けた断りは、画面まで届ける**（#1118・#1128 レビュー由来 🟡）＝
+  // 以前は `.catch(() => …)` で**中身を全部捨てて**いたので、「覚えていない」も「もう無い」も
+  // 「開くアプリが無い」も**同じ定型文**に潰れていた（原因を3つに分けた意味が無くなる）。
+  // ⚠️ Tauri のコマンドは**文字列で**失敗を返す（`Error` ではない）＝その形で確かめる。
+  it("開けなかった理由が言葉になっていれば、その言葉を出す", async () => {
+    vi.mocked(openSavedFile).mockRejectedValue(
+      "開こうとしたものが見つかりませんでした。移動または削除されていないかご確認ください。",
+    );
+    render(<TroubleLogSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "記録の場所を開く" }));
+    expect(await screen.findByText(/移動または削除されていないか/)).toBeTruthy();
   });
 
   // ⚠️ **中身を画面に出さない**＝入っているのは実装の言葉。導線は場所を開くまで。
