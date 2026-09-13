@@ -29,21 +29,36 @@ import { PROJECT_SAVE_WOULD_BREAK, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY,
  * 拾えていない行は**検査の外に落ちる**＝このテストの趣旨（何も黙って逃がさない）に反する。
  */
 function looseErrorRows(): string[] {
-  const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
-  return md.split("\n").filter((line) => /^\|\s*`[A-Z_]+`/.test(line));
+  // ⚠️ **退役（`~~CODE~~`）は数えない**＝移す前の判定（`^\|\s*`[A-Z_]+``）と同じ意味にする。
+  // 退役の行は等値で守る対象ではない（`15 §6` の流儀＝行は消さず残す）。
+  return tableLines().filter((line) => /^`[A-Z_]+`\t/.test(line));
 }
 
-/** `15 §6` の表：コード → 「ユーザー向け文言」の列（4列目）。 */
+/** 表の実体の置き場（`15 §6` が指している先）。 */
+const TABLE_PATH = "docs/yuko_recruit_docs/errors/error-state-table.tsv";
+
+/**
+ * 表の実体（`errors/error-state-table.tsv`）の行（見出しを除く）。
+ *
+ * ⚠️ **`15 §6` から移した**（#1090 案C・利用者判断 2026-09-10）＝表は「1行を引く」使い方しか
+ * しないのに、`15` を開くと必ず全部ついてきた（`15` の 74% が表だった）。
+ * ⚠️ **正典であることは変わらない**＝文言の単一の参照元は、いまもこの表（置き場が変わっただけ）。
+ */
+export function tableLines(): string[] {
+  const tsv = readFileSync(join(process.cwd(), TABLE_PATH), "utf8");
+  return tsv.split("\n").slice(1).filter((l) => l.trim() !== "");
+}
+
+/** 表：コード → 「ユーザー向け文言」の列（4列目）。 */
 function readErrorTable(): Map<string, string> {
-  const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
   const rows = new Map<string, string>();
-  for (const line of md.split("\n")) {
-    const m = /^\| `([A-Z_]+)` \|/.exec(line);
-    if (!m) continue;
-    const cells = line.split("|");
-    // | code | severity | 既定の自動対応 | ユーザー向け文言 | 由来 |  → 文言は index 4
-    if (cells.length < 5) continue;
-    rows.set(m[1], (cells[4] ?? "").trim());
+  for (const line of tableLines()) {
+    const cells = line.split("\t");
+    // code / severity / auto / message / origin → 文言は index 3
+    const m = /^`([A-Z_]+)`$/.exec(cells[0] ?? "");
+    if (!m) continue; // 退役（`~~CODE~~`）は等値の対象外＝これまでと同じ
+    if (cells.length < 4) continue;
+    rows.set(m[1], (cells[3] ?? "").trim());
   }
   return rows;
 }
@@ -344,12 +359,18 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   });
 
   it("どの行も列が5つ（セルの中に区切りが紛れると、読む列がずれる）", () => {
-    // ⚠️ 文言は**4列目**を位置で取っているので、セルの中に `|` が入ると**別の列を文言として読む**。
-    // 件数は減らないので上のテストでは気づけない＝ここで見る（`| a | b | c | d | e |` は区切り6本）。
-    const wrong = looseErrorRows()
-      .filter((line) => (line.match(/\|/g) ?? []).length !== 6)
+    // ⚠️ 文言は**4列目**を位置で取っているので、セルの中にタブが入ると**別の列を文言として読む**。
+    // 件数は減らないので上のテストでは気づけない＝ここで見る（5列＝タブは4本）。
+    const wrong = tableLines()
+      .filter((line) => (line.match(/\t/g) ?? []).length !== 4)
       .map((line) => line.slice(0, 60));
     expect(wrong).toEqual([]);
+  });
+
+  it("表の行数を実数で留める（黙って減っていない）", () => {
+    // ⚠️ **移したときに落ちていないことを、数で留める**（#1090 案C）＝
+    // `15 §6` から移す前の実測は **189 行**（うち退役 3）。増やすなら、この数も一緒に動かす。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(189);
   });
 
 
@@ -564,8 +585,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
    * 漏れていても気づけない。実際 `POSE_FALLBACK` はそれで漏れていた。
    */
   it("domain が出す断りの文が、表のどこかに在る", () => {
-    const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
-    const flat = md.replace(/\s/g, "");
+    // ⚠️ **表の実体を見る**（#1090 案C で `15 §6` から `errors/error-state-table.tsv` へ移した）。
+    const flat = tableLines().join("\n").replace(/\s/g, "");
     const missing = domainWarnMessages().found
       .filter(({ message }) => !flat.includes(message.replace(/\s/g, "")))
       .map(({ code, message, where }) => `${code}（${where}）: ${message}`);
