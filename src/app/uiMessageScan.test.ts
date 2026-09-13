@@ -139,7 +139,9 @@ const NOT_IN_TABLE: Record<string, string> = {
 };
 
 /** いま拾えている断りの数（実測）。 */
-const FOUND_COUNT = 94;
+// ⚠️ **-2**＝見た目パターンの保存・削除の既定文を `uiLabels` の `templateSaveMessage` へ出したので、
+// この走査（その場に書いた文）ではなく **`codeMessages()` の完全一致**（`errorStateTable`）が守る側へ移った。
+const FOUND_COUNT = 92;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

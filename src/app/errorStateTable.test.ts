@@ -196,12 +196,19 @@ function rustMessages(): Record<string, string> {
  *
  * ⚠️ **手挙げをやめた**＝`messages.rs` は「文言は1か所」（§6）のために作った置き場なのに、
  * ここへ**1本ずつ登録する**形だったので、**足しただけでは表と結ばれなかった**
- *（16 本のうち 12 本が表に無い状態で、機械では見えなかった＝#263 と同じ壊れ方）。
+ *（16 本のうち **13 本**が表に無い状態で、機械では見えなかった＝#263 と同じ壊れ方）。
  * 丸ごと読めば、**足した瞬間に「表へ行を足せ」と言われる**。
  *
  * ⚠️ **2行に割れた形も拾う**＝`rustfmt` は長い定数を
- * `pub const X: &str =\n    "…";` と改行するので、1行だけを見る正規表現だと**16 本中 10 本を
+ * `pub const X: &str =\n    "…";` と改行するので、1行だけを見る正規表現だと**16 本中 11 本を
  * 取りこぼす**（そしてその取りこぼしは「見つからない」ではなく「**黙って少ない**」になる）。
+ * ⚠️ **この数も検査で留める**（下の「1行の形と2行の形の数」）＝書いた主張を数えずに置かない。
+ *
+ * ⚠️ **拾えない書き方**（正直に書く・#1129 レビュー由来 ℹ️）＝`pub(crate) const` /
+ * `concat!` で組む定数 / `&'static str` の表記は**黙って拾われない**（本数の実数固定も
+ * 「見つかった数」を留めるだけなので、拾われない形が増えても赤くならない）。
+ * いまの 16 本はすべて `pub const NAME: &str = "…";` なので実害は無いが、
+ * **そう書き続けること**がこの門番の前提になっている。
  */
 export function messagesModule(): Record<string, string> {
   const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
@@ -338,7 +345,14 @@ export function messageConstsOf(src: string): { name: string; literal: string | 
   return out;
 }
 
-/** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
+/**
+ * 文末の「。」の**あるなしを吸う**（比べる前に落とす）。
+ *
+ * ⚠️ **「既存行がすべて句点を落とす形」は嘘になっていた**（#1129 レビュー由来 ℹ️）＝
+ * #1118・#1130・#1129 で足した行を含め、いまは **38 行以上**が句点つきで書かれている。
+ * どちらでも通るのでテストは緑のままだが、**注記だけが古い**と次の人が書き方に迷う。
+ * 表の作法は「どちらでもよい（ここが吸う）」。
+ */
 const norm = (s: string): string => s.replace(/。$/, "").trim();
 
 describe("`messages.rs` を丸ごと拾う（#1129）", () => {
@@ -346,6 +360,17 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **下限にしない**＝PR #1130 で「下限だと拾い方を1段外しても緑」を実際に踏んだ。
     // 増えたら、そのぶん表へ行を足してからこの数を直す。
     expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(16);
+  });
+
+  it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
+    // ⚠️ **注記に「16 本中 11 本」と書いた**＝書いたのに検査していない主張を残さない
+    //（レビューで「10 本」という**実測と違う数**を書いていたのが見つかった）。
+    const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
+    const oneLine = [...src.matchAll(/pub const [A-Z_0-9]+: &str = "/g)].length;
+    const all = Object.keys(messagesIn(src)).length;
+    expect(all, "定数の数が変わった").toBe(16);
+    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(5);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(11);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -681,6 +706,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
-    ).toBe(84);
+      // ⚠️ **+2**＝見た目パターンの保存・削除の既定文（#1129 レビュー由来 🟡）。
+      //   `projectStore` の直書きをやめて `templateSaveMessage` へ出したので、
+      //   **その場に書いた文の走査**から**完全一致で守る側**へ移った（守りは強くなる）。
+    ).toBe(86);
   });
 });

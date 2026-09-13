@@ -432,6 +432,41 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
       spy.mockRestore();
     });
 
+    // ⚠️ **理由を丸ごと捨てない**（#1129 レビュー由来 🟡・`15 §6.0` 決定3）＝以前は
+    // `catch { 既定文 }` だったので、Rust が書き分けた断り（`TEMPLATE_SAVE_FAILED` /
+    // `TEMPLATE_ID_MISSING`）が**一度も画面に出なかった**。
+    // ⚠️ **走査では拾えない形**＝生の `typeof e === "string"` が残らないので、
+    // `rawErrorDisplayGuard` は気づけない（走査の限界＝挙動で見るしかない）。
+    it('保存が断られた理由が言葉なら、その言葉を出す', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate')
+        .mockRejectedValue('この見た目パターンは保存できませんでした。名前を変えて、もう一度お試しください。');
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      expect(useProjectStore.getState().templateError).toMatch(/名前を変えて/);
+      spy.mockRestore();
+    });
+
+    it('保存の断りが生のエラーなら、自前の文へ倒す（§2-3）', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValue('os error 3');
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      const msg = useProjectStore.getState().templateError ?? '';
+      expect(msg).not.toContain('os error');
+      expect(msg).toMatch(/見た目パターンを保存できませんでした/);
+      spy.mockRestore();
+    });
+
+    // ⚠️ **双子の片方だけ直さない**＝削除側も同じ形。
+    it('削除が断られた理由が言葉なら、その言葉を出す', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates, userTmpl('user_tmpl_gate')], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'deleteUserTemplate')
+        .mockRejectedValue('この見た目パターンは消せませんでした。見た目パターンの一覧から選び直してください。');
+      await useProjectStore.getState().deleteUserTemplate('user_tmpl_gate');
+      expect(useProjectStore.getState().templateError).toMatch(/一覧から選び直して/);
+      spy.mockRestore();
+    });
+
     it('補正でも直せない内容は保存せず、次の行動を出す（成功に見せない）', async () => {
       useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
       const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);

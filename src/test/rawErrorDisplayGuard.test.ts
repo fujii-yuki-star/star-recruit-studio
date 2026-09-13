@@ -68,6 +68,15 @@ export function rawErrorReads(src: string): string[] {
     .map(({ line, n }) => `${n}: ${line}`);
 }
 
+/** 関門を**呼んでいる**行の数（注記の中の言及は数えない）。 */
+export function gateCalls(src: string): number {
+  return src
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("//") && !line.startsWith("*") && !line.startsWith("/*"))
+    .reduce((n, line) => n + line.split("userFacingMessage(").length - 1, 0);
+}
+
 function appFiles(dir: string, root: string): { path: string; src: string }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = join(dir, e.name);
@@ -105,8 +114,12 @@ describe("画面は生の断りをそのまま出さない（#1123）", () => {
   it("関門を通している所を、実数で留める", () => {
     // ⚠️ **数で留める**＝関門を外しても、上の検査は「生の形が無い」だけで緑になりうる
     //（`.catch(() => 既定文)` へ戻す＝**中身を全部捨てる**形は、生の形を残さない）。
-    const gated = files.reduce((n, f) => n + f.src.split("userFacingMessage(").length - 1, 0);
-    expect(gated, "関門を通す所が変わりました＝減っていれば、その断りは画面へ届かなくなっています").toBe(26);
+    // ⚠️ **注記は数えない**（PR #1133 のレビュー対応で気づいた）＝説明の中に
+    // `userFacingMessage(e, …)` と書いただけで数が動くと、この数が「呼び出しの数」でなくなる。
+    // ⚠️ **+2**＝見た目パターンの保存・削除（#1129 レビュー由来 🟡）＝以前は
+    // `catch { 既定文 }` で**中身を全部捨てて**おり、この走査では**生の形が残らないので拾えない**。
+    const gated = files.reduce((n, f) => n + gateCalls(f.src), 0);
+    expect(gated, "関門を通す所が変わりました＝減っていれば、その断りは画面へ届かなくなっています").toBe(28);
   });
 });
 
@@ -154,6 +167,14 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("注記の中の形では赤くしない", () => {
     expect(rawErrorReads(caught('// typeof e === "string" ? e : 既定文 は使わない'))).toEqual([]);
     expect(rawErrorReads(caught(' * `typeof e === "string" ? e` は関門を通していない'))).toEqual([]);
+  });
+
+  it("関門の呼び出しを数える（注記の中の言及は数えない）", () => {
+    expect(gateCalls('setError(userFacingMessage(e, "x") ?? DEF);')).toBe(1);
+    expect(gateCalls('a(userFacingMessage(e, "x"));\nb(userFacingMessage(e, "y"));')).toBe(2);
+    // ⚠️ **説明に書いただけでは数えない**＝この数が「呼び出しの数」であり続けるように。
+    expect(gateCalls(' * 呼び側は `userFacingMessage(e, …) ?? 既定文`。')).toBe(0);
+    expect(gateCalls('// userFacingMessage(e, "x") を通す')).toBe(0);
   });
 
   it("行番号を付けて返す（どこを直すか分かる）", () => {

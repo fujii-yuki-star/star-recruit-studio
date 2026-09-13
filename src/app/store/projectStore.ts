@@ -2140,8 +2140,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ 保存も一覧も**補正後**を使う（片方だけ元のままだと、画面と保存済みファイルが食い違う）。
       await userTemplateFs.saveUserTemplate(saving);
       set((s) => ({ templates: upsertUserTemplate(s.templates, saving), templateError: null }));
-    } catch {
-      set({ templateError: "見た目パターンを保存できませんでした。もう一度お試しください。" });
+    } catch (e) {
+      // ⚠️ **理由を丸ごと捨てない**（#1129 レビュー由来 🟡・`15 §6.0` 決定3）＝以前は
+      // `catch { 既定文 }` で**中身を全部捨てて**おり、Rust が書き分けた断り
+      //（`TEMPLATE_SAVE_FAILED` / `TEMPLATE_ID_MISSING`）が**一度も画面に出なかった**。
+      // ⚠️ **走査では拾えない形**＝生の `typeof e === "string"` が残らないので
+      // `rawErrorDisplayGuard` は気づけない（#1123 のときに書いた「走査の限界」そのもの）。
+      set({ templateError: userFacingMessage(e, "template-save") ?? templateSaveMessage.USER_TEMPLATE_SAVE_FAILED });
     } finally {
       set({ isTemplateMutating: false });
     }
@@ -2178,8 +2183,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         };
       });
       return true;
-    } catch {
-      set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
+    } catch (e) {
+      // ⚠️ **双子の片方だけ直さない**（#1129 レビュー由来 🟡）＝保存側と同じ形。
+      set({ templateError: userFacingMessage(e, "template-delete") ?? templateSaveMessage.USER_TEMPLATE_DELETE_FAILED });
       return false;
     } finally {
       set({ isTemplateMutating: false });
