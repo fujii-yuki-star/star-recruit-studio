@@ -205,3 +205,16 @@ code	severity	auto	message	origin
 `FONT_IMPORT_FAILED_DEFAULT`	warning	—	文字の形を取り込めませんでした。もう一度お試しください。	`#1130`。持ち込みフォントを取り込めなかったときの**既定**（Rust が理由を返せたときは `USER_FONT_IMPORT_FAILED` 等）
 `FONT_DELETE_FAILED`	warning	—	文字の形を消せませんでした。もう一度お試しください。	`#1130`。持ち込みフォントを消せなかったときの既定
 `ASSET_IMPORT_FAILED_DEFAULT`	warning	—	素材を取り込めませんでした。もう一度お選びください。	`#1130`。写真・動画を取り込めなかったときの**既定**（`importErrorMessage`＝関門の上に載せる薄い包み）。Rust が理由を返せたときはそちら
+`PROJECT_UNUSABLE`	warning	—	この動画を扱えませんでした。動画の一覧から開き直してください。	`messages.rs`。動画の番号が扱えないとき。⚠️ **「開けません」と言い切らない**＝保存・削除・控えの取得でも返るので、起きたことと食い違う言い方にしない（ADR-0026①）
+`PROJECT_ID_MISSING`	warning	—	この動画の情報が足りないため保存できませんでした。動画の一覧から開き直してください。	`messages.rs`。動画の中身に番号が入っていないとき（保存の入口）。⚠️ 実装の語を出さない（§2-3）
+`RESTORE_POINT_UNUSABLE`	warning	—	戻れる時点が見つかりませんでした。一覧から選び直してください。	`messages.rs`。戻れる時点が扱えないとき。画面の語は `uiLabels` の `RESTORE_POINTS_*` に合わせる
+`TEMPLATE_SAVE_FAILED`	warning	—	この見た目パターンは保存できませんでした。名前を変えて、もう一度お試しください。	`messages.rs`。見た目パターンの番号が扱えないとき（保存）
+`TEMPLATE_ID_MISSING`	warning	—	この見た目パターンの情報が足りないため保存できませんでした。作り直してからお試しください。	`messages.rs`。見た目パターンの中身に番号が入っていないとき（保存の入口）。⚠️ 実装の語を出さない（§2-3）
+`TEMPLATE_DELETE_FAILED`	warning	—	この見た目パターンは消せませんでした。見た目パターンの一覧から選び直してください。	`messages.rs`。見た目パターンの番号が扱えないとき（削除）
+`REL_PATH_UNUSABLE`	warning	—	そのファイルは扱えません。素材の一覧から選び直してください。	`messages.rs`。アプリの中のファイルの場所が扱えないとき（読み込み・複製）
+`SRC_PATH_UNUSABLE`	warning	—	そのファイルは扱えません。別のファイルを選び直してください。	`messages.rs`。外から持ち込んだファイルの場所が扱えないとき。⚠️ **「一覧から選び直す」と言わない**＝この時点では利用者は一覧から選んでいない（ファイル選択やドロップの直後）＝実行できない次の行動になる
+`ASSET_ID_UNUSABLE`	warning	—	この素材が見つかりませんでした。素材の一覧から選び直してください。	`messages.rs`。素材の番号が扱えないとき
+`IMPORT_INFO_MISSING`	warning	—	取り込みの情報が足りません。もう一度取り込み直してください。	`messages.rs`。取り込みの情報が足りないとき
+`COPY_SAME_PLACE`	warning	—	同じ場所へは複製できません。別の場所を選んでください。	`messages.rs`。同じ場所へ複製しようとしたとき
+`AI_PROVIDER_UNSUPPORTED`	warning	—	この接続先には対応していません。設定の「動画案を作るAI」を確かめてください。	`messages.rs`。対応していない接続先を指されたとき。⚠️ **選び直す先を言わない**＝AI の接続先を選ぶ画面はまだ無い（`is_supported_provider` は1つしか通さない）＝実行できない次の行動になる
+`ASSET_UNREADABLE`	warning	—	素材を読み取れませんでした。もう一度お選びください。	`#1123`。素材を読み取れなかったとき。⚠️ 以前は `format!("素材を読み取れませんでした: {e}")` で**句点が無く生の詳細も埋めて**いた＝受け側の関門で落ちて利用者に届かなかった

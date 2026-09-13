@@ -170,10 +170,6 @@ function rustMessages(): Record<string, string> {
   // `voicevox.rs` の時間切れの2文は、載せないと**弱い段**（「実装のどこかに在る」）でしか
   // 守られず、**表と実装のどちらかだけ書き換えても気づけない**（#263 の再発）。
   const vv = readFileSync(join(process.cwd(), "src-tauri/src/voicevox.rs"), "utf8");
-  // ⚠️ **文言を寄せた置き場も読む**（#1128 レビュー由来 ℹ️）＝`messages.rs` は
-  // 「文言は1か所」（§6）のために作った置き場なのに、**表と結ばれていなかった**＝
-  // 表と実装のどちらかだけ書き換えても機械では気づけない（#263 と同じ壊れ方）。
-  const msg = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
   const pickIn = (src: string, re: RegExp): string => {
     const m = re.exec(src);
     if (!m) throw new Error(`Rust 側の文言が見つかりません: ${re}`);
@@ -190,11 +186,35 @@ function rustMessages(): Record<string, string> {
     // ⚠️ **Rust 側に足した文も表と結ぶ**（α-7 再監査 ℹ️）＝走査は TS の文言だけなので、
     // ここへ登録しないと**表と実装のズレが機械では見えない**（#263 で足した文が漏れていた）。
     RESTORE_WRITE_FAILED: pick(/const RESTORE_WRITE_FAILED: &str =\s*"([^"]+)"/),
-    // 画面から「開く」を頼んだときの3つの断り（#1118）。
-    OPEN_NOT_ALLOWED: pickIn(msg, /const OPEN_NOT_ALLOWED: &str =\s*"([^"]+)"/),
-    OPEN_GONE: pickIn(msg, /const OPEN_GONE: &str =\s*"([^"]+)"/),
-    OPEN_FAILED: pickIn(msg, /const OPEN_FAILED: &str =\s*"([^"]+)"/),
+    // ⚠️ **文言を寄せた置き場は丸ごと読む**（#1129）＝下の `messagesModule()` を参照。
+    ...messagesModule(),
   };
+}
+
+/**
+ * `src-tauri/src/messages.rs` の定数を**丸ごと**拾う（#1129）。
+ *
+ * ⚠️ **手挙げをやめた**＝`messages.rs` は「文言は1か所」（§6）のために作った置き場なのに、
+ * ここへ**1本ずつ登録する**形だったので、**足しただけでは表と結ばれなかった**
+ *（16 本のうち 12 本が表に無い状態で、機械では見えなかった＝#263 と同じ壊れ方）。
+ * 丸ごと読めば、**足した瞬間に「表へ行を足せ」と言われる**。
+ *
+ * ⚠️ **2行に割れた形も拾う**＝`rustfmt` は長い定数を
+ * `pub const X: &str =\n    "…";` と改行するので、1行だけを見る正規表現だと**16 本中 10 本を
+ * 取りこぼす**（そしてその取りこぼしは「見つからない」ではなく「**黙って少ない**」になる）。
+ */
+export function messagesModule(): Record<string, string> {
+  const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
+  return messagesIn(src);
+}
+
+/** 拾い方そのもの（走査と自己検査が同じ道を通る）。 */
+export function messagesIn(src: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of src.matchAll(/pub const ([A-Z_][A-Z_0-9]*): &str =\s*"((?:[^"\\]|\\.)*)";/g)) {
+    out[m[1]!] = m[2]!;
+  }
+  return out;
 }
 
 
@@ -321,6 +341,33 @@ export function messageConstsOf(src: string): { name: string; literal: string | 
 /** 表は文末の「。」を落とす流儀（`EXPORT_OTHER_RUNNING` ほか既存行がすべてこの形）。 */
 const norm = (s: string): string => s.replace(/。$/, "").trim();
 
+describe("`messages.rs` を丸ごと拾う（#1129）", () => {
+  it("拾えた本数を実数で留める（黙って減らない）", () => {
+    // ⚠️ **下限にしない**＝PR #1130 で「下限だと拾い方を1段外しても緑」を実際に踏んだ。
+    // 増えたら、そのぶん表へ行を足してからこの数を直す。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(16);
+  });
+
+  it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
+    // ⚠️ **1行だけを見る形だと 16 本中 10 本を取りこぼす**＝しかもそれは「見つからない」ではなく
+    // 「**黙って少ない**」になる（表と結ばれていない定数が、静かに増える）。
+    expect(messagesIn('pub const A: &str = "あ。";')).toEqual({ A: "あ。" });
+    expect(messagesIn('pub const B: &str =\n    "い。";')).toEqual({ B: "い。" });
+    // 中に引用符を含む形（`\"`）も1本として拾う（途中で切れない）。
+    expect(messagesIn(String.raw`pub const C: &str = "「う」と\"え\"。";`).C).toBe(String.raw`「う」と\"え\"。`);
+  });
+
+  it("定数でないものは拾わない（誤検出は門番の信用を落とす）", () => {
+    expect(messagesIn('const PRIVATE: &str = "あ。";')).toEqual({});
+    expect(messagesIn('pub const N: usize = 3;')).toEqual({});
+    expect(messagesIn('pub const lower: &str = "あ。";')).toEqual({});
+  });
+
+  it("複数あっても全部拾う（最初の1つで止まらない）", () => {
+    expect(messagesIn('pub const A: &str = "あ。";\npub const B: &str = "い。";')).toEqual({ A: "あ。", B: "い。" });
+  });
+});
+
 describe("15 §6 の表と実装の一致（#855）", () => {
   it("表の文言と実装の文字列が一致する（片方だけ直したら落ちる）", () => {
     const rows = readErrorTable();
@@ -382,7 +429,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+14**＝関門へ寄せたときの**既定の文**（#1123／PR #1130）。走査（`uiMessageScan`）が
     //   `?? "…"` の形を**構造的に素通り**していたので、表に載っていなかった
     //（3件は #1123 より前からある＝`BrandKitSection` / `SaveStatusBadge` / `TimelineProjectScreen`）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(206);
+    // ⚠️ **+13**＝`messages.rs` の定数（#1129）。手挙げをやめて**丸ごと走査**へ変えたので、
+    //   これ以降は**足した瞬間にここが赤くなる**（登録漏れが起きない）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(219);
   });
 
 
@@ -626,7 +675,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // どれも `rustMessages()` へ登録したので、表と実装の食い違いは機械で見える。
     // ⚠️ **+14**＝関門へ寄せたときの既定の文（#1123／PR #1130）。こちらは TS 側の走査
     //（`uiMessageScan`）が文面で突き合わせる（`codeMessages()` への登録は無いので 84 は動かない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(203);
+    // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
+    //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(216);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
