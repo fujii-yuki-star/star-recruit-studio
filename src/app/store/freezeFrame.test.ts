@@ -105,6 +105,50 @@ describe('freezeSelectedClip（この瞬間で絵を止める）', () => {
     expect(useTimelineStore.getState().importError).toContain('別の時間をお試しください');
   });
 
+  // ⚠️ **止めた絵を選び直す**（#1136 レビュー由来 🟡）＝「分ける」と同じ規則。
+  // 案内（伸ばしたいときは引っぱる）の1手目が**止めた絵を選んでいること**なので、
+  // 選択が前半に残ると噛み合わない。
+  it('止めた絵を選び直す（分ける側と同じ規則）', async () => {
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    const cur = useTimelineStore.getState();
+    expect(cur.selectedClipIds).toEqual([cur.doc!.clips[1]!.id]);
+  });
+
+  // ⚠️ **1回の操作＝1つの取り消し**（ADR-0034 決定20・#1136 レビュー由来 🟡）＝
+  // 素材の追加と帯の差し替えを別々に積むと、戻す途中に**使っていない写真だけ素材に残る**
+  //（利用者が一度も作っていない状態）。
+  it('取り消し1回で、動画にも素材にも戻る', async () => {
+    await open(doc());
+    const before = useTimelineStore.getState().doc!;
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    useTimelineStore.getState().undo();
+    const cur = useTimelineStore.getState().doc!;
+    expect(cur.clips, '帯が戻っていない').toHaveLength(before.clips.length);
+    expect(cur.assets, '使っていない写真が素材に残っている').toHaveLength(before.assets.length);
+  });
+
+  // ⚠️ **切り出せなかったら、押した所へ返す**（#1136 レビュー由来 🟡）＝
+  // 取り込みの断りは「置く」の欄にしか出ないので、そこだけだと何も見えないまま終わる。
+  it('切り出しに失敗したら、押した所にも理由を出す', async () => {
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockRejectedValue('この動画からは切り出せませんでした。別の時間をお試しください。');
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.freezeFailed);
+  });
+
+  // ⚠️ **黙って何も起きないを作らない**＝取り込み中は理由を出す（#1136 レビュー由来 🟡）。
+  it('切り出し中に押したら、理由を出す', async () => {
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'], isImporting: true });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().importError, '黙って何も起きない').toBeTruthy();
+    expect(vi.mocked(assetFsMod.extractVideoFrame)).not.toHaveBeenCalled();
+  });
+
   it('1つだけ選んでいないときは何もしない', async () => {
     await open(doc());
     useTimelineStore.setState({ selectedClipIds: [] });

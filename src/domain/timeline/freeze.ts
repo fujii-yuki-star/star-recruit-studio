@@ -79,14 +79,26 @@ export function freezeFrameAt(
   stillAssetId: string,
   volumeAt: (points: readonly { timeSec: number; volume: number }[] | undefined, localSec: number) => number | undefined,
   opts: { templateOf?: (templateId: string) => Template | undefined } = {},
-): { ok: true; doc: TimelineProject } | { ok: false; reason: FreezeBlockedReason } {
+): { ok: true; doc: TimelineProject; newClipId: string } | { ok: false; reason: FreezeBlockedReason } {
   const issue = freezeFrameIssue(doc, clipId, atSec, opts);
   if (issue) return { ok: false, reason: issue };
   const split = splitClip(doc, clipId, atSec, volumeAt, opts);
   // ⚠️ **ここへは来ない想定**＝上で同じ関門を通している。それでも握りつぶさない（理由を返す）。
   if (!split.ok) return { ok: false, reason: split.reason };
   const clips = split.doc.clips.map((c) => (c.id === split.newClipId ? asStill(c, stillAssetId) : c));
-  return { ok: true, doc: { ...split.doc, clips } };
+  return { ok: true, doc: { ...split.doc, clips }, newClipId: split.newClipId };
+}
+
+/**
+ * **止めると元の音が止まるか**（#1136 レビュー由来 🟡）。
+ *
+ * ⚠️ **黙って捨てない**＝止めた絵は写真なので、その動画の**元の音は鳴らせない**。
+ * 他社の同じ操作は「絵だけ止まって音は流れ続ける」ので、**何も言わないと設定を黙って捨てたことになる**
+ *（ADR-0026①）。画面はこれを見て**押す前に知らせる**。
+ * ⚠️ **鳴らす設定のときだけ**＝既定（鳴らさない）なら失うものが無い。
+ */
+export function freezeStopsOriginalAudio(clip: TimelineClip): boolean {
+  return clip.useOriginalAudio === true;
 }
 
 /** 動画のクリップを、止めた絵（写真）のクリップに替える。 */

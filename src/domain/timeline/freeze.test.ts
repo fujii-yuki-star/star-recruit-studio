@@ -1,6 +1,6 @@
 // 再生位置で**絵を止める**（#356 ②・フリーズフレーム）。
 import { describe, expect, it } from 'vitest';
-import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec } from './freeze';
+import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
 import { SPLIT_BLOCKED } from './split';
 import { volumeAt } from './audio';
 import { ASSET_TYPE, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
@@ -105,6 +105,19 @@ describe('freezeSourceSec（どの瞬間を切り出すか）', () => {
 
   it('頭出しを持っていなくても 0 から数える', () => {
     expect(freezeSourceSec(video(), 4)).toBe(4);
+  });
+});
+
+// ⚠️ **他社の同じ操作は「絵だけ止まって音は流れ続ける」**＝何も言わないと、利用者が入れた
+// 「元の音を鳴らす」設定を黙って捨てたことになる（ADR-0026①・#1136 レビュー由来 🟡）。
+describe('freezeStopsOriginalAudio（止めると元の音が止まるか）', () => {
+  it('元の音を鳴らす設定なら、止まると知らせる', () => {
+    expect(freezeStopsOriginalAudio(video({ useOriginalAudio: true }))).toBe(true);
+  });
+
+  it('既定（鳴らさない）なら、失うものが無いので知らせない', () => {
+    expect(freezeStopsOriginalAudio(video({ useOriginalAudio: undefined }))).toBe(false);
+    expect(freezeStopsOriginalAudio(video({ useOriginalAudio: false }))).toBe(false);
   });
 });
 

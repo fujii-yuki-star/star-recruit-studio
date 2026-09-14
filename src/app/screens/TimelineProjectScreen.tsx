@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -155,7 +155,7 @@ import type { FreeElement } from "../../domain/project/types";
 import { freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
-import { freezeFrameIssue, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { freezeFrameIssue, freezeStopsOriginalAudio, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
@@ -2965,10 +2965,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const freezeExtra = (): { disabled?: boolean; hint?: string } => {
     if (!doc || !selected) return { disabled: true, hint: "絵を止める部品を選んでください" };
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
+    // ⚠️ **切り出し中は押す前に断る**（#1136 レビュー由来 🟡）＝黙って何も起きないと、
+    // 利用者は**必ずもう一度押す**（すぐ隣の素材の取り込みは押す前に断っている＝同じ画面で流儀を割らない）。
+    if (isImporting) return { disabled: true, hint: IMPORT_BUSY_MESSAGE };
+    // ⚠️ **ファイルが見つからない動画では押せない**（同レビュー 🟡・#1068/#1101 と同じ流儀）＝
+    // 文書の中身しか見ない関門は通ってしまい、**FFmpeg を起こしてから失敗する**＝
+    // この機能自身が掲げた「重い処理を始めてから断らない」に反する。
+    if (selected.assetId != null && missingAssetIds.includes(selected.assetId)) {
+      return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.freezeAssetMissing] };
+    }
     const issue = freezeFrameIssue(doc, selected.id, playheadSec, { templateOf });
     return issue ? { disabled: true, hint: editBlockedMessage[FREEZE_BLOCKED_REASON[issue]] } : {};
   };
   const freezeGuard = editGuard(freezeExtra());
+  /**
+   * **止めると元の音が止まる**ことを、押す前に知らせる（#1136 レビュー由来 🟡）。
+   *
+   * ⚠️ **他社の同じ操作は「絵だけ止まって音は流れ続ける」**＝何も言わないと、利用者が入れた
+   * 「元の音を鳴らす」設定を**黙って捨てた**ことになる（ADR-0026①）。
+   */
+  const freezeAudioNote = doc && selected && freezeStopsOriginalAudio(selected)
+    ? "（この部品の元の音は、止めたところから鳴らなくなります）"
+    : "";
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
       ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
@@ -3008,6 +3026,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             const g = freezeExtra();
             return g.disabled ? { disabled: true, disabledHint: g.hint } : {};
           })(),
+          ...(freezeAudioNote ? { hint: freezeAudioNote } : {}),
           onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
         },
         ...(menuClipTemplate
@@ -3950,9 +3969,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-secondary"
                 onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.selected); }}
                 {...freezeGuard}
-                title={freezeGuard.title ?? "再生位置から先を、その瞬間の絵で止めます"}
+                title={freezeGuard.title ?? `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}`}
               >
-                {FREEZE_FRAME_LABEL}
+                {isImporting ? "切り出しています…" : FREEZE_FRAME_LABEL}
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
               <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>

@@ -1237,25 +1237,52 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return;
     }
     const sourceSec = freezeSourceSec(clip, atSec);
-    // ⚠️ **取り込みの門と手順に乗る**（`runImport`）＝書き出し中・二重取り込み・文書の入れ替わりを
-    // ここで書き直さない（同じことをする操作は同じ断り方＝ADR-0026②）。
-    const stillAssetId = await runImport(
-      set, get, src.displayName,
-      (fileName) => extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName),
-      (reservedId) => newFrameAsset(src.displayName, sourceSec, [], reservedId),
-    );
-    if (stillAssetId == null) return; // 断りは `runImport` 側が出している
-    // ⚠️ **待っている間に文書が変わりうる**＝`freezeFrameAt` は先頭で同じ関門を通すので、
-    // 帯が動いた・消えた・列が固定された場合はここで理由が返る。
-    const cur = get().doc;
-    if (!cur || cur.projectId !== doc.projectId) return;
-    const r = freezeFrameAt(cur, clipId, atSec, stillAssetId, volumeAt, { templateOf });
-    if (!r.ok) {
-      const reason = FREEZE_BLOCKED_REASON[r.reason];
-      set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
-      return;
+    // ⚠️ **取り込みの門は共有する**（書き出し中・二重取り込み＝同じことをする操作は同じ断り方）。
+    // ⚠️ **取り込み中は理由を出す**（#1136 レビュー由来 🟡）＝黙って false を返すと、押しても
+    // 何も起きないので**必ずもう一度押される**（素材の取り込みボタンは押す前に断っている）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    // ⚠️ **`runImport` には乗せない**（同レビュー 🟡）＝あちらは素材の追加を**それだけで**履歴へ積むので、
+    // 1回の操作に取り消しが2回要る（ADR-0034 決定20＝1操作＝1つの取り消し）。しかも戻す途中に
+    // **使っていない写真だけ素材に残る**という、利用者が一度も作っていない状態ができる。
+    // ここは**素材の追加と帯の差し替えを1つの履歴に載せる**。
+    const assetId = reserveAssetId(doc.projectId, doc.assets.map((a) => a.assetId), createAssetId);
+    const { asset, fileName } = newFrameAsset(src.displayName, sourceSec, [], assetId);
+    set({ isImporting: true, importError: null });
+    try {
+      const relPath = await extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName);
+      // ⚠️ **待っている間に文書が変わりうる**＝別の動画を開いていたら、そちらへは何も書かない。
+      const cur = get().doc;
+      if (!cur || cur.projectId !== doc.projectId) return;
+      // ⚠️ **待っている間に書き出しが始まっていたら足さない**＝`commit` が断るので、
+      // 先にこちらで理由を出す（「終わってから」だけ出て切り出しが消えた、を作らない）。
+      if (isTimelineExportBusy(get().exportRun.phase)) {
+        set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+        return;
+      }
+      // ⚠️ **帯の側も見直す**＝`freezeFrameAt` は先頭で同じ関門を通すので、
+      // 帯が動いた・消えた・列が固定された場合はここで理由が返る。
+      const withAsset: TimelineProject = { ...cur, assets: [...cur.assets, { ...asset, filePath: relPath }] };
+      const r = freezeFrameAt(withAsset, clipId, atSec, assetId, volumeAt, { templateOf });
+      if (!r.ok) {
+        const reason = FREEZE_BLOCKED_REASON[r.reason];
+        set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+        return;
+      }
+      // ⚠️ **止めた絵を選び直す**（同レビュー 🟡）＝「分ける」と同じ規則。案内（伸ばしたいときは
+      // 引っぱる）の1手目が**止めた絵を選んでいること**なので、選択が前半に残ると噛み合わない。
+      commit(set, get, r.doc, { selectedClipIds: [r.newClipId] }, { outsideGroup: true });
+      const url = await assetDisplayUrl(doc.projectId, relPath);
+      if (url && get().doc?.projectId === doc.projectId) {
+        set({ assetSrcById: { ...get().assetSrcById, [assetId]: url } });
+      }
+    } catch (e) {
+      // ⚠️ **押した所へ返す**（同レビュー 🟡）＝`importError` は「置く」の欄にしか出ないので、
+      // 「選んだ部品」から押した人には**何も見えない**まま終わっていた。両方へ出す。
+      const message = importErrorMessage(e);
+      set({ importError: message, editBlocked: { reason: EDIT_BLOCKED.freezeFailed, at: blockTargetFor(EDIT_BLOCKED.freezeFailed, at) } });
+    } finally {
+      set({ isImporting: false });
     }
-    commit(set, get, r.doc, {}, { outsideGroup: true });
   },
   setClipBoxesFor: (updates) => {
     const doc = get().doc;
