@@ -14,7 +14,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { screenTextsIn } from "./uiTerms";
-import { HOME_SCREEN_LABEL } from "../app/uiLabels";
+import { BACK_TO_HOME_LABEL, HOME_SCREEN_LABEL } from "../app/uiLabels";
 
 /** 一覧の行き先名（定義元だけが直書きしてよい）。 */
 export const HOME_LIST_LABELS = [
@@ -57,6 +57,21 @@ function appScreens(): { path: string; texts: string[] }[] {
 }
 
 describe("戻る導線の文言（#1026・`06 §2` 規約3／8.7）", () => {
+  it("一覧への戻るは「◯◯へ戻る」の形をしている（定数そのものを留める）", () => {
+    // ⚠️ **消費側を数えるだけでは足りない**（#1141 レビュー由来 🟡）＝画面も検査も
+    // **同じ定数**を見ているので、定数の中身を「動画の一覧へ」に戻すと**全部が一緒に動いて緑**になる。
+    // 守られるのは「単一の参照元からズレていないか」だけで、**規約3 の形**は誰も見ていなかった。
+    // ⚠️ **言葉選びまでは縛らない**＝縛るのは形（「へ戻る」で終わる）と、行き先名が入っていること。
+    expect(
+      BACK_TO_HOME_LABEL.endsWith("へ戻る"),
+      "一覧への戻るが「◯◯へ戻る」の形ではありません（`06 §2` 規約3）",
+    ).toBe(true);
+    expect(
+      BACK_TO_HOME_LABEL.includes(HOME_SCREEN_LABEL),
+      "行き先の名前が入っていません（どこへ出るのか分からない）",
+    ).toBe(true);
+  });
+
   it("走査が空振りしていない（画面を拾えている）", () => {
     // ⚠️ **実数で留める**＝根を取り違えると「0 件だから緑」になる（`guards-blind-not-red`）。
     const files = appScreens();
