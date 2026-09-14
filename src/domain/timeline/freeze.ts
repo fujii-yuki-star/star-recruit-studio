@@ -24,9 +24,40 @@ import type { Template } from '../template/types';
 export const FREEZE_BLOCKED = {
   /** 直接置いた動画ではない（写真・文字・見た目パターン・音など）。 */
   notVideo: 'notVideo',
+  /**
+   * 切り出している間に**その帯が変わった**（#1136 レビュー由来 🟡）。
+   * そのまま貼ると**切れ目と止めた絵が別の瞬間**になる（素材ごと替わっていれば別の動画のコマ）。
+   */
+  changed: 'changed',
 } as const;
 
 export type FreezeBlockedReason = SplitBlockedReason | (typeof FREEZE_BLOCKED)[keyof typeof FREEZE_BLOCKED];
+
+/**
+ * **切り出す前の帯の姿**（待っている間に変わっていないかを見るための控え）。
+ *
+ * ⚠️ **切り出すのは待つ前の帯、分けるのは待った後の帯**（#1136 レビュー由来 🟡）＝
+ * 取り込み中でも編集は止まらない（押せなくなるのはボタンだけ）ので、待っている間に
+ * **動かす／左端を詰める／速さを変える／素材を選び直す**と、**切れ目と止めた絵が別の瞬間**になる。
+ * 素材を別の動画に差し替えられた場合は、**別の動画のコマ**が貼り付く。
+ * `freezeFrameIssue` は固定・帯の外・短すぎ・使い切りしか見ないので、ここは素通りする。
+ */
+export interface FreezeSnapshot {
+  assetId: string | null | undefined;
+  startSec: number;
+  sourceStartSec: number | undefined;
+  speed: number | undefined;
+}
+
+export function freezeSnapshotOf(clip: TimelineClip): FreezeSnapshot {
+  return { assetId: clip.assetId, startSec: clip.startSec, sourceStartSec: clip.sourceStartSec, speed: clip.speed };
+}
+
+/** 切り出す前と同じ姿か（違えば、止めた絵は別の瞬間になる）。 */
+export function sameFreezeSnapshot(a: FreezeSnapshot, b: FreezeSnapshot): boolean {
+  return a.assetId === b.assetId && a.startSec === b.startSec
+    && a.sourceStartSec === b.sourceStartSec && a.speed === b.speed;
+}
 
 /** 止める相手の探し方（画面と実行で同じものを通す）。 */
 export function freezeTargetOf(doc: TimelineProject, clipId: string): TimelineClip | undefined {
@@ -78,10 +109,15 @@ export function freezeFrameAt(
   atSec: number,
   stillAssetId: string,
   volumeAt: (points: readonly { timeSec: number; volume: number }[] | undefined, localSec: number) => number | undefined,
-  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+  opts: { templateOf?: (templateId: string) => Template | undefined; was?: FreezeSnapshot } = {},
 ): { ok: true; doc: TimelineProject; newClipId: string } | { ok: false; reason: FreezeBlockedReason } {
   const issue = freezeFrameIssue(doc, clipId, atSec, opts);
   if (issue) return { ok: false, reason: issue };
+  // ⚠️ **切り出す前と同じ姿か**（レビュー由来 🟡）＝違えば、止めた絵は別の瞬間（別の動画）になる。
+  const now = doc.clips.find((c) => c.id === clipId);
+  if (opts.was && now && !sameFreezeSnapshot(opts.was, freezeSnapshotOf(now))) {
+    return { ok: false, reason: FREEZE_BLOCKED.changed };
+  }
   const split = splitClip(doc, clipId, atSec, volumeAt, opts);
   // ⚠️ **ここへは来ない想定**＝上で同じ関門を通している。それでも握りつぶさない（理由を返す）。
   if (!split.ok) return { ok: false, reason: split.reason };
@@ -122,4 +158,5 @@ function asStill(clip: TimelineClip, stillAssetId: string): TimelineClip {
 export const FREEZE_BLOCKED_REASON: Record<FreezeBlockedReason, EditBlockedReason> = {
   ...SPLIT_BLOCKED_REASON,
   [FREEZE_BLOCKED.notVideo]: EDIT_BLOCKED.freezeNotVideo,
+  [FREEZE_BLOCKED.changed]: EDIT_BLOCKED.freezeChanged,
 };

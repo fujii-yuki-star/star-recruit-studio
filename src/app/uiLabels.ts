@@ -888,6 +888,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
   TIMELINE_EDIT_FREEZE_FAILED: "その瞬間の絵を切り出せませんでした。少し違う位置でもう一度お試しください",
   TIMELINE_EDIT_FREEZE_ASSET_MISSING: "この動画のファイルが見つかりません。知らせの「ファイルを選び直す」で入れ直してからお試しください",
+  TIMELINE_EDIT_FREEZE_CHANGED: "絵を止めている間に、その部品が変わりました。もう一度お試しください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
   // ⚠️ **「素材の画面で外す」とは案内しない**（#816-5・ADR-0034 決定5 に記録済み）＝素材の画面は

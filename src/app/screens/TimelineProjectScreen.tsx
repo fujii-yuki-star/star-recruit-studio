@@ -3971,7 +3971,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {...freezeGuard}
                 title={freezeGuard.title ?? `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}`}
               >
-                {isImporting ? "切り出しています…" : FREEZE_FRAME_LABEL}
+                {/* ⚠️ **押していないのに進行中と名乗らない**（#1136 レビュー由来 ℹ️）＝
+                    `isImporting` は素材の取り込みでも立つので、写真をドロップしている最中に
+                    このボタンが「切り出しています…」と名乗ってしまう。名前は動かさず、
+                    押せない理由（取り込み中）は `disabled` のヒントで伝える。 */}
+                {FREEZE_FRAME_LABEL}
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
               <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>

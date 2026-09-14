@@ -149,6 +149,77 @@ describe('freezeSelectedClip（この瞬間で絵を止める）', () => {
     expect(vi.mocked(assetFsMod.extractVideoFrame)).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **切り出すのは待つ前の帯、分けるのは待った後の帯**（#1136 レビュー由来 🟡）＝
+  // 取り込み中でも編集は止まらないので、待っている間に動かす・詰める・速さを変える・
+  // 素材を選び直すと、**切れ目と止めた絵が別の瞬間**になる（素材ごと替わっていれば別の動画のコマ）。
+  it('切り出している間に帯が変わったら、貼らずに断る', async () => {
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockImplementation(async () => {
+      // 待っている間に帯を動かす（画面では止められない操作）。
+      const cur = useTimelineStore.getState().doc!;
+      useTimelineStore.setState({ doc: { ...cur, clips: cur.clips.map((c) => ({ ...c, startSec: c.startSec + 3 })) } });
+      return 'assets/asset_002.png';
+    });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.freezeChanged);
+    expect(useTimelineStore.getState().doc!.clips, '別の瞬間の絵を貼っている').toHaveLength(1);
+  });
+
+  it('切り出している間に素材が替わったら、貼らずに断る（別の動画のコマになる）', async () => {
+    await open(doc({
+      assets: [
+        { assetId: 'asset_001', assetType: ASSET_TYPE.video, displayName: '素材', filePath: 'assets/asset_001.mp4' },
+        { assetId: 'asset_009', assetType: ASSET_TYPE.video, displayName: '別の素材', filePath: 'assets/asset_009.mp4' },
+      ],
+    }));
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockImplementation(async () => {
+      const cur = useTimelineStore.getState().doc!;
+      useTimelineStore.setState({ doc: { ...cur, clips: cur.clips.map((c) => ({ ...c, assetId: 'asset_009' })) } });
+      return 'assets/asset_002.png';
+    });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.freezeChanged);
+  });
+
+  // ⚠️ **見えていたコマで切り出す**（#1136 レビュー由来 ℹ️・ADR-0001）＝キャンバスはコマの格子に
+  // 落とした時刻を映しているので、生の再生位置で切ると見えていた絵とずれる。
+  it('切り出すのは「コマの格子に落とした時刻」（見えていた絵と合わせる）', async () => {
+    await open(doc()); // fps 30
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4.04); // 格子は 1/30＝4.0333…
+    const at = vi.mocked(assetFsMod.extractVideoFrame).mock.calls[0]![2];
+    expect(at, '生の再生位置で切り出している').not.toBe(4.04);
+    expect(at).toBeCloseTo(4 + 1 / 30, 5);
+  });
+
+  // ⚠️ **画面だけに門があると、store を直に叩く道で素通りする**（#1136 レビュー由来 ℹ️）。
+  it('ファイルが見つからない動画は、切り出す前に断る', async () => {
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'], missingAssetIds: ['asset_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.freezeAssetMissing);
+    expect(vi.mocked(assetFsMod.extractVideoFrame)).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **触っていない動画へは出さない**（#1136 レビュー由来 🟡・`runImport` と同じ形）＝
+  // 切り出し中にその動画を消すと別の動画を開けてしまうので、着地先を必ず確かめる。
+  it('切り出している間に別の動画を開いたら、そちらへは断りを出さない', async () => {
+    await open(doc());
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockImplementation(async () => {
+      // 待っている間に別の動画へ移る（一覧から消す→別を開く、と同じ着地）。
+      // ⚠️ **`openTimelineProject` は取り込み中を断る**ので、着地だけを模す。
+      useTimelineStore.setState({ doc: doc({ projectId: 'proj_20260914_999' }) });
+      throw 'この動画からは切り出せませんでした。別の時間をお試しください。';
+    });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(useTimelineStore.getState().doc!.projectId).toBe('proj_20260914_999');
+    expect(useTimelineStore.getState().editBlocked, '触っていない動画へ断りが出ている').toBeNull();
+    expect(useTimelineStore.getState().importError, '触っていない動画へ断りが出ている').toBeNull();
+  });
+
   it('1つだけ選んでいないときは何もしない', async () => {
     await open(doc());
     useTimelineStore.setState({ selectedClipIds: [] });
