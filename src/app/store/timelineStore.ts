@@ -86,6 +86,7 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { addMarker, removeMarker, setMarkerText } from "../../domain/timeline/markers";
 import { extractVideoFrame } from "../../infrastructure/assetFs";
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
@@ -493,6 +494,16 @@ export interface TimelineState {
    * `outsideGroup` なのは「非同期の着地を利用者のまとめ（文字入力中など）に混ぜない」ため。
    */
   freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
+  /**
+   * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
+   *
+   * ⚠️ **同じ時刻には重ねない**＝既にあればそれを指すだけ（増やさない）。
+   */
+  addMarkerAtPlayhead: () => void;
+  /** 目印のメモを書き換える（上限で切る＝開けない文書を作らない）。 */
+  setMarkerTextFor: (markerId: string, text: string) => void;
+  /** 目印を消す。 */
+  removeMarkerById: (markerId: string) => void;
   /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
   setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
@@ -1302,6 +1313,25 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **別の動画で走っている取り込みの鍵を外さない**（同上）。
       if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
     }
+  },
+  addMarkerAtPlayhead: () => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **コマの格子へ落とす**＝目印も再生位置を使うものなので、半端な位置に置かない
+    //（`ここで分ける`・`この瞬間で絵を止める` と同じ流儀＝ADR-0034 決定6）。
+    const r = addMarker(doc, frameTimeSec(doc, get().playheadSec));
+    // 同じ時刻に既にあれば `addMarker` は文書を変えない＝そのときは履歴にも積まない。
+    if (r.doc !== doc) commit(set, get, r.doc);
+  },
+  setMarkerTextFor: (markerId, text) => {
+    const doc = get().doc;
+    if (!doc) return;
+    commit(set, get, setMarkerText(doc, markerId, text));
+  },
+  removeMarkerById: (markerId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    commit(set, get, removeMarker(doc, markerId));
   },
   setClipBoxesFor: (updates) => {
     const doc = get().doc;

@@ -181,6 +181,23 @@ export interface ClipAnimation {
   keyframes: Keyframe[];
 }
 
+/**
+ * 時間の一点に置く**目印**（#356 ①）。
+ *
+ * ⚠️ **動画には出ない**＝描画にも書き出しにも現れない**作業用**のメモ。
+ * 「ここ直す」「ここに効果音」「この間を伸ばす」を編集しながら書き留めるためのもの。
+ * ⚠️ **トラックには属さない**＝時間だけを持つ（`timeSec` は**動画の頭からの秒**で、
+ * クリップの先頭からではない＝`Keyframe` とそこが違う）。
+ */
+export interface TimelineMarker {
+  /** `marker_NNN`（11 §2.1）。 */
+  id: string;
+  /** 動画の頭からの秒。 */
+  timeSec: number;
+  /** メモ（任意）。未指定＝位置だけの目印。 */
+  text?: string;
+}
+
 /** タイムライン形式の `project.json`（11 §7.6）。 */
 export interface TimelineProject {
   /** 場面形式とは**独立に進む**（別文書ゆえ・11 §1）。 */
@@ -205,6 +222,8 @@ export interface TimelineProject {
   /** 要素のグループ化（ADR-0022）。members はクリップ id／ネストでグループ id。 */
   groups?: Group[];
   animations?: ClipAnimation[];
+  /** 目印（#356 ①）。**動画には出ない**（作業用）。 */
+  markers?: TimelineMarker[];
 }
 
 /**
@@ -213,4 +232,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.10';
+export const TIMELINE_SCHEMA_VERSION = '1.11';

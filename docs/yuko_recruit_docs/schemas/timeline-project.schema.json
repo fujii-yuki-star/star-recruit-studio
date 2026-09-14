@@ -20,8 +20,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.10",
-      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。／1.2→1.3：クリップの切り抜き（crop）を追加（任意追加＝後方互換のマイナー・#634）。／1.3→1.4：素材の寄せ（cropAlign）を追加（任意追加＝後方互換のマイナー・#634）。／1.4→1.5：切り抜きの効かせ方（cropMode）を追加（任意追加＝後方互換のマイナー・#634）。／1.5→1.6：キーフレームのイージングに名前つきの追加と自由なカーブ（cubic-bezier）を許す（共有 $defs/Keyframe の拡張・任意追加＝後方互換のマイナー・#262）。／1.6→1.7：音量の変化（volumePoints）を追加（任意追加＝後方互換のマイナー・#512）。／1.7→1.8：動画の元の音（useOriginalAudio・originalAudioVolume）を追加（任意追加＝後方互換のマイナー・#512 段2）。／1.8→1.9：文字の体裁（letterSpacing・shadow）と、背景帯（background）を足す（⚠️ **shadow は共有 $defs の $ref**で、letterSpacing・background は**この形式への写し**＝α-6 出口監査 🟡で是正。写しは片方だけ足すと割れるので `validate-schemas` の `copySets`（形の一致検査）で固定してある＝letterSpacing は当初その群から漏れており `/canon-check` 🟡 で追加した。任意追加＝後方互換のマイナー・#264）。／1.9→1.10：音の自動処理（videoSettings.audioAuto）を追加（共有 $defs/VideoSettings の拡張・任意追加＝後方互換のマイナー・#257/#259）。"
+      "const": "1.11",
+      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。／1.2→1.3：クリップの切り抜き（crop）を追加（任意追加＝後方互換のマイナー・#634）。／1.3→1.4：素材の寄せ（cropAlign）を追加（任意追加＝後方互換のマイナー・#634）。／1.4→1.5：切り抜きの効かせ方（cropMode）を追加（任意追加＝後方互換のマイナー・#634）。／1.5→1.6：キーフレームのイージングに名前つきの追加と自由なカーブ（cubic-bezier）を許す（共有 $defs/Keyframe の拡張・任意追加＝後方互換のマイナー・#262）。／1.6→1.7：音量の変化（volumePoints）を追加（任意追加＝後方互換のマイナー・#512）。／1.7→1.8：動画の元の音（useOriginalAudio・originalAudioVolume）を追加（任意追加＝後方互換のマイナー・#512 段2）。／1.8→1.9：文字の体裁（letterSpacing・shadow）と、背景帯（background）を足す（⚠️ **shadow は共有 $defs の $ref**で、letterSpacing・background は**この形式への写し**＝α-6 出口監査 🟡で是正。写しは片方だけ足すと割れるので `validate-schemas` の `copySets`（形の一致検査）で固定してある＝letterSpacing は当初その群から漏れており `/canon-check` 🟡 で追加した。任意追加＝後方互換のマイナー・#264）。／1.9→1.10：音の自動処理（videoSettings.audioAuto）を追加（共有 $defs/VideoSettings の拡張・任意追加＝後方互換のマイナー・#257/#259）。／1.10→1.11：**目印（markers）**を追加（#356 ①）。時間の一点に印とメモを置くだけで、**動画には出ない**（作業用＝書き出しにも描画にも現れない）。任意追加＝後方互換のマイナー＝**無変換**。"
     },
     "format": {
       "const": "timeline",
@@ -88,6 +88,13 @@
       "items": {
         "$ref": "#/$defs/ClipAnimation"
       }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TimelineMarker"
+      },
+      "description": "目印（#356 ①）。作業用のメモで、**動画には出ない**（描画にも書き出しにも現れない）。"
     }
   },
   "$defs": {
@@ -528,6 +535,31 @@
         },
         "status": {
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/status"
+        }
+      }
+    },
+    "TimelineMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "時間の一点に置く目印（#356 ①）。「ここ直す」「ここに効果音」「この間を伸ばす」を編集しながら書き留めるためのもので、**動画には出ない**（描画にも書き出しにも現れない＝作業用）。トラックには属さない（時間だけを持つ）。",
+      "required": [
+        "id",
+        "timeSec"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^marker_[0-9]{3,}$"
+        },
+        "timeSec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "動画の頭からの秒（クリップの先頭からではない＝トラックに属さないため）。"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "メモ（任意）。未指定＝位置だけの目印。"
         }
       }
     },

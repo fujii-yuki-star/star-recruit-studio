@@ -40,6 +40,7 @@ import { assignableAssetsFor, emptySlotLayerIds } from "../../domain/template/sl
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
+import { TimelineMarkersSection } from "../components/TimelineMarkersSection";
 import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
@@ -404,7 +405,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, addMarkerAtPlayhead, setMarkerTextFor, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -3898,6 +3899,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
         </div>
+        {/* **目印**（#356 ①）＝時間軸のものなので、時間軸を見ている欄の中に置く
+            （`06 §2` 統一規約5＝同じ操作を2か所に置かない）。⚠️ **動画には出ない**。 */}
+        <TimelineMarkersSection
+          doc={doc}
+          playheadSec={playheadSec}
+          busy={busyGuard()}
+          onAdd={addMarkerAtPlayhead}
+          onJump={(sec) => setPlayhead(sec)}
+          onText={setMarkerTextFor}
+          onRemove={removeMarkerById}
+        />
       </div>
     ) },
     { id: PANEL_ID.selected, title: '選んだ部品', content: (
