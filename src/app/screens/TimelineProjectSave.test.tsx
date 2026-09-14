@@ -16,6 +16,7 @@ import { useProjectStore } from "../store/projectStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { TimelineProject } from "../../domain/timeline/types";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
 
 // ⚠️ **控えの処理はここでは切る**（α-7 出口監査 🟡の追補）＝このテストは保存の**着地の瞬間**を
 // 押さえているので、保存の手前に非同期の処理が増えると待ち合わせがずれる（機能の話ではない）。
@@ -93,12 +94,12 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     useTimelineStore.setState({ saveStatus: "error" });
     const onNavigate = vi.fn();
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByText("動画の一覧へ"));
+    fireEvent.click(screen.getByText(BACK_TO_HOME_LABEL));
     expect(onNavigate).not.toHaveBeenCalled(); // 押しただけでは戻らない
     expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
     expect(onNavigate).not.toHaveBeenCalled(); // 「やめる」なら残る＝保存し直しに戻れる
-    fireEvent.click(screen.getByText("動画の一覧へ"));
+    fireEvent.click(screen.getByText(BACK_TO_HOME_LABEL));
     fireEvent.click(screen.getByRole("button", { name: "保存しないで移る" }));
     expect(onNavigate).toHaveBeenCalledWith("home");
   });
@@ -262,7 +263,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     open();
     useTimelineStore.setState({ saveStatus: "error" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画の一覧へ"));
+    fireEvent.click(screen.getByText(BACK_TO_HOME_LABEL));
     expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
     act(() => useTimelineStore.setState({ saveStatus: "saved" }));
     expect(screen.queryByText(/このまま画面を移ると、その変更は失われます/)).not.toBeInTheDocument();
@@ -280,7 +281,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     act(() => { void useTimelineStore.getState().saveTimelineProject(); }); // 書き込み中にする
     expect(useTimelineStore.getState().saveStatus).toBe("saving");
-    fireEvent.click(screen.getByRole("button", { name: /動画の一覧へ/ }));
+    fireEvent.click(screen.getByRole("button", { name: BACK_TO_HOME_LABEL }));
     expect(onNavigate).not.toHaveBeenCalled(); // 書き終わるまで離れない
     // 実行中はラベルを変えて押せなくする（`06 §2` 統一規約4）。
     await waitFor(() => expect(screen.getByRole("button", { name: /保存しています/ })).toBeDisabled());
@@ -294,7 +295,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     const onNavigate = vi.fn();
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     act(() => { useTimelineStore.setState({ saveStatus: "idle" }); });
-    fireEvent.click(screen.getByRole("button", { name: /動画の一覧へ/ }));
+    fireEvent.click(screen.getByRole("button", { name: BACK_TO_HOME_LABEL }));
     await waitFor(() => expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument());
     expect(onNavigate).not.toHaveBeenCalled();
   });
@@ -322,7 +323,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     useTimelineStore.setState({ saveStatus: "saved" });
     const onNavigate = vi.fn();
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByText("動画の一覧へ"));
+    fireEvent.click(screen.getByText(BACK_TO_HOME_LABEL));
     expect(onNavigate).toHaveBeenCalledWith("home");
   });
 

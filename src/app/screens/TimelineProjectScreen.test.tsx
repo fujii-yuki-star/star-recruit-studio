@@ -21,6 +21,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -86,7 +87,7 @@ describe("TimelineProjectScreen", () => {
     useTimelineStore.setState({ loadError: "この動画を開けませんでした。一覧から選び直してください。" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("alert").textContent).toContain("一覧から選び直してください");
-    expect(screen.getByText("動画の一覧へ")).toBeInTheDocument();
+    expect(screen.getByText(BACK_TO_HOME_LABEL)).toBeInTheDocument();
   });
 
   it("開いている動画の名前と、置いてあるものを見せる", () => {

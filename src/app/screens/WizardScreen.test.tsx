@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { WizardScreen } from "./WizardScreen";
+import { stepsFor, wizardBackLabel } from "./wizardSteps";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
+import { VIDEO_KIND } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -154,3 +157,86 @@ describe("必須の欄は、押す前に分かる（#1026）", () => {
   });
 });
 
+
+// 戻るは**行き先名を言う**（`06 §2` 規約3・#1026）。
+//
+// ⚠️ **もとは「戻る」だけ**で、この画面の戻るは**段によって行き先が変わる**（1つ前の段／
+// いちばん最初は一覧）ので、押すまでどこへ出るのか分からなかった。
+describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+  });
+
+  it("いちばん最初の段では、一覧へ戻ると言う", () => {
+    render(<WizardScreen onNavigate={() => {}} />);
+    expect(screen.getByRole("button", { name: BACK_TO_HOME_LABEL })).toBeTruthy();
+  });
+
+  it("進んだ段では、1つ前の段の名前を言う", () => {
+    render(<WizardScreen onNavigate={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0 → step1
+    expect(screen.getByRole("button", { name: "動画の種類と目的へ戻る" })).toBeTruthy();
+  });
+
+  // ⚠️ **段を辿って画面で見る**（#1141 レビュー由来 🟡）＝もとは step0→1 の1遷移だけを見ていて、
+  // 残りは `wizardBackLabel(i, steps)` を **同じ配列自身**と突き合わせる自己同一性の検査だった。
+  // それだと `backName` の**取り違え**（「写真・動画」と「読み上げの声」が入れ替わる）が捕まらない。
+  it.each([
+    [VIDEO_KIND.recruit, ["動画の種類と目的", "会社情報", "写真・動画", "読み上げの声"]],
+    [VIDEO_KIND.general, ["動画の種類と目的", "発表の内容", "写真・動画", "読み上げの声"]],
+  ])("%s：段を進めるたびに、1つ前の段の名前へ変わる", (kind, names) => {
+    useProjectStore.setState((st) => ({ meta: { ...st.meta, videoKind: kind } }));
+    render(<WizardScreen onNavigate={() => {}} />);
+    // いちばん最初は一覧へ。
+    expect(screen.getByRole("button", { name: BACK_TO_HOME_LABEL })).toBeTruthy();
+    names.forEach((name, i) => {
+      fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+      // 2段目は必須（未入力だと次へで止められる）＝進むために埋める。
+      if (i === 0) {
+        const field = kind === VIDEO_KIND.general ? /テーマ・タイトル/ : /会社名/;
+        fireEvent.change(screen.getByLabelText(field), { target: { value: "テスト" } });
+      }
+      expect(
+        screen.getByRole("button", { name: `${name}へ戻る` }),
+        `${name} へ戻れません`,
+      ).toBeTruthy();
+    });
+  });
+
+  it("段が1つしか無くても、戻るは行き止まりにならない", () => {
+    const one = [{ label: "ひとつだけ", backName: "ひとつ" }] as const;
+    expect(wizardBackLabel(0, one)).toBe(BACK_TO_HOME_LABEL);
+  });
+
+  it("どの段にも行き先の呼び名がある（名札だけ足して呼び名を忘れない）", () => {
+    for (const kind of [VIDEO_KIND.recruit, VIDEO_KIND.general]) {
+      const steps = stepsFor(kind);
+      for (const s of steps) {
+        expect(s.backName.length, `${s.label} に行き先の呼び名がありません`).toBeGreaterThan(0);
+        // ⚠️ **呼び名は名札から採る**（#1141 レビュー由来 🟡）＝画面に出ていない言い換えを
+        // 足さない（§2-3）。実際に最後の段だけ「動画案づくり」という、この画面のどこにも
+        // 出ていない語になっていた。
+        expect(
+          s.label.includes(s.backName),
+          `${s.label} の呼び名「${s.backName}」が名札に出てきません（新しい言い換えです）`,
+        ).toBe(true);
+        // ⚠️ **名札をそのまま使わない**＝「会社情報を入力へ戻る」は読めない。
+        // 語尾を並べて見ると次に足した動詞を取りこぼすので、**動詞の目印（を）**で見る。
+        expect(
+          s.backName.includes("を"),
+          `${s.label} の呼び名「${s.backName}」が動詞のままです`,
+        ).toBe(false);
+      }
+      // 段の数だけ戻るの文言が作れる（いちばん最初は一覧）。
+      expect(wizardBackLabel(0, steps)).toBe(BACK_TO_HOME_LABEL);
+      for (let i = 1; i < steps.length; i += 1) {
+        expect(wizardBackLabel(i, steps)).toBe(`${steps[i - 1]!.backName}へ戻る`);
+      }
+      // ⚠️ **範囲の外は一覧へ倒す**（#1141 レビュー由来 🟡）＝前の段が無いときは
+      // 行き止まりにせず一覧へ出す、という**意図**をここで固定する（副作用ではない）。
+      expect(wizardBackLabel(-1, steps)).toBe(BACK_TO_HOME_LABEL);
+      expect(wizardBackLabel(steps.length + 1, steps)).toBe(BACK_TO_HOME_LABEL);
+    }
+  });
+});

@@ -47,7 +47,7 @@ import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
-import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
+import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -2143,7 +2143,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("home")}>
           <ArrowLeftIcon size={16} />
-          動画の一覧へ
+          {BACK_TO_HOME_LABEL}
         </button>
       </div>
     );
@@ -5347,7 +5347,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             )}
             back={{
               // 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。
-              label: <><ArrowLeftIcon size={16} />{leaving ? "保存しています…" : "動画の一覧へ"}</>,
+              label: <><ArrowLeftIcon size={16} />{leaving ? "保存しています…" : BACK_TO_HOME_LABEL}</>,
               onClick: () => void leaveToHome(),
               disabled: exporting || leaving,
               title: exporting ? "書き出しが終わってから戻れます" : undefined,

@@ -107,18 +107,40 @@ export function bannedTermsIn(
   banned: readonly string[] = BANNED_IN_SCREENS,
 ): { word: string; text: string }[] {
   const out: { word: string; text: string }[] = [];
+  for (const s of screenTextsIn(text)) {
+    for (const word of banned) if (s.includes(word)) out.push({ word, text: s });
+  }
+  return out;
+}
+
+/**
+ * 本文から、**画面に出る日本語**だけを拾う（重複は畳む）。
+ *
+ * ⚠️ **拾い方を1か所に持つ**（`CLAUDE.md` §2-7・#1026）＝画面の文言を見る門番は
+ * 禁止語のほかにも増える（戻る導線の言い方など）。それぞれが**コメントの外し方**を
+ * 書き写すと、片方だけ緩めてももう片方は黙って通し続ける
+ *（同じ型を `oneJapaneseMatcherGuard` で踏んでいる）。
+ * ⚠️ **コメントは外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
+ */
+export function screenTextsIn(text: string): string[] {
   // ⚠️ **コメントを外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
   const code = dropDevLogs(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
   const seen = new Set<string>();
   const add = (raw: string): void => {
     const s = raw.trim();
-    if (!s || !hasJapanese(s) || seen.has(s)) return;
+    if (!s || !hasJapanese(s)) return;
     seen.add(s);
-    for (const word of banned) if (s.includes(word)) out.push({ word, text: s });
   };
   // ① 文字列リテラル（属性・変数・関数の引数）。
   for (const m of code.matchAll(/(['"])((?:[^'"\\\r\n]|\\.)+)\1/g)) add(m[2]!);
   // ② JSX のテキスト（タグとタグの間）。`{...}` の式は中身を見ない（識別子が混じるだけ）。
   for (const m of code.matchAll(/>([^<>{}]+)</g)) add(m[1]!);
-  return out;
+  // ⚠️ **テンプレート文字列（バッククォート）は見ていない**（#1141 レビュー由来 ℹ️・既知の穴）。
+  // 同じ文言をバッククォートで書くと、この走査からも戻る導線の走査からも消える。
+  // ⚠️ **やってみて、やめた**＝素朴に対にすると**対を取り違える**（`\`` を含む文字列・正規表現の
+  // リテラルで対応が飛び、離れた2つが1つの塊として拾われる）。実際に試したら画面の文言として
+  // **128 件**の巨大な塊が上がった。`rustUserMessageGuard` が `'\"'` で同じ罠を踏んでいる。
+  // ⚠️ **確かめられない不具合に機械を足さない**＝半端な拾い方は、それ自体が次の種になる。
+  // 直すなら対応の取り方を共有の形（`rustSource.ts` の流儀）へ寄せてからにする＝**#1142**。
+  return [...seen];
 }
