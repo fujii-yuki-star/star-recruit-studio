@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { WizardScreen } from "./WizardScreen";
+import { stepsFor, wizardBackLabel } from "./wizardSteps";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
+import { VIDEO_KIND } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -154,3 +157,41 @@ describe("必須の欄は、押す前に分かる（#1026）", () => {
   });
 });
 
+
+// 戻るは**行き先名を言う**（`06 §2` 規約3・#1026）。
+//
+// ⚠️ **もとは「戻る」だけ**で、この画面の戻るは**段によって行き先が変わる**（1つ前の段／
+// いちばん最初は一覧）ので、押すまでどこへ出るのか分からなかった。
+describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+  });
+
+  it("いちばん最初の段では、一覧へ戻ると言う", () => {
+    render(<WizardScreen onNavigate={() => {}} />);
+    expect(screen.getByRole("button", { name: BACK_TO_HOME_LABEL })).toBeTruthy();
+  });
+
+  it("進んだ段では、1つ前の段の名前を言う", () => {
+    render(<WizardScreen onNavigate={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0 → step1
+    expect(screen.getByRole("button", { name: "動画の種類と目的へ戻る" })).toBeTruthy();
+  });
+
+  it("どの段にも行き先の呼び名がある（名札だけ足して呼び名を忘れない）", () => {
+    for (const kind of [VIDEO_KIND.recruit, VIDEO_KIND.general]) {
+      const steps = stepsFor(kind);
+      for (const s of steps) {
+        expect(s.backName.length, `${s.label} に行き先の呼び名がありません`).toBeGreaterThan(0);
+        // ⚠️ **名札をそのまま使わない**＝「会社情報を入力へ戻る」は読めない。
+        expect(s.backName.endsWith("を入力"), `${s.label} の呼び名が動詞のままです`).toBe(false);
+      }
+      // 段の数だけ戻るの文言が作れる（いちばん最初は一覧）。
+      expect(wizardBackLabel(0, steps)).toBe(BACK_TO_HOME_LABEL);
+      for (let i = 1; i < steps.length; i += 1) {
+        expect(wizardBackLabel(i, steps)).toBe(`${steps[i - 1]!.backName}へ戻る`);
+      }
+    }
+  });
+});

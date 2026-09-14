@@ -107,18 +107,33 @@ export function bannedTermsIn(
   banned: readonly string[] = BANNED_IN_SCREENS,
 ): { word: string; text: string }[] {
   const out: { word: string; text: string }[] = [];
+  for (const s of screenTextsIn(text)) {
+    for (const word of banned) if (s.includes(word)) out.push({ word, text: s });
+  }
+  return out;
+}
+
+/**
+ * 本文から、**画面に出る日本語**だけを拾う（重複は畳む）。
+ *
+ * ⚠️ **拾い方を1か所に持つ**（`CLAUDE.md` §2-7・#1026）＝画面の文言を見る門番は
+ * 禁止語のほかにも増える（戻る導線の言い方など）。それぞれが**コメントの外し方**を
+ * 書き写すと、片方だけ緩めてももう片方は黙って通し続ける
+ *（同じ型を `oneJapaneseMatcherGuard` で踏んでいる）。
+ * ⚠️ **コメントは外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
+ */
+export function screenTextsIn(text: string): string[] {
   // ⚠️ **コメントを外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
   const code = dropDevLogs(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
   const seen = new Set<string>();
   const add = (raw: string): void => {
     const s = raw.trim();
-    if (!s || !hasJapanese(s) || seen.has(s)) return;
+    if (!s || !hasJapanese(s)) return;
     seen.add(s);
-    for (const word of banned) if (s.includes(word)) out.push({ word, text: s });
   };
   // ① 文字列リテラル（属性・変数・関数の引数）。
   for (const m of code.matchAll(/(['"])((?:[^'"\\\r\n]|\\.)+)\1/g)) add(m[2]!);
   // ② JSX のテキスト（タグとタグの間）。`{...}` の式は中身を見ない（識別子が混じるだけ）。
   for (const m of code.matchAll(/>([^<>{}]+)</g)) add(m[1]!);
-  return out;
+  return [...seen];
 }

@@ -14,6 +14,7 @@ import type { Scene } from "../../domain/project/types";
 import { SceneEditScreen } from "./SceneEditScreen";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { LooksEditScreen } from "./LooksEditScreen";
+import { BACK_TO_HOME_LABEL } from "../uiLabels";
 
 // #774：「取り消す／やり直す・保存の状態・一覧へ戻る」を**3画面で同じ場所**（見出しの行）に置く。
 //
@@ -96,7 +97,7 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(inHeader("取り消す")).toBe(true);
     expect(inHeader("やり直す")).toBe(true);
-    expect(inHeader("動画の一覧へ")).toBe(true);
+    expect(inHeader(BACK_TO_HOME_LABEL)).toBe(true);
   });
 
   it("見た目パターン編集：取り消す・やり直す・一覧へ戻るが見出しの行", () => {
@@ -210,7 +211,7 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     useProjectStore.setState({ templates: [] });
     const timeline = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(staysVisibleOnScroll("取り消す")).toBe(true);
-    expect(staysVisibleOnScroll("動画の一覧へ")).toBe(true);
+    expect(staysVisibleOnScroll(BACK_TO_HOME_LABEL)).toBe(true);
     timeline.unmount();
 
     useProjectStore.setState({
@@ -267,6 +268,6 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     useProjectStore.setState({ templates: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getAllByRole("button", { name: "取り消す" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "動画の一覧へ" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: BACK_TO_HOME_LABEL })).toHaveLength(1);
   });
 });

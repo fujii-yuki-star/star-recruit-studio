@@ -9,6 +9,7 @@ import {
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
 import { droppedRejectMessage } from "../uiLabels";
+import { stepsFor, wizardBackLabel } from "./wizardSteps";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -39,12 +40,6 @@ const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
   { id: ORIENTATION.landscape, label: "横型（16:9）", desc: "パソコン・テレビ・YouTube向け" },
   { id: ORIENTATION.portrait, label: "縦型（9:16）", desc: "スマホ・ショート動画向け" },
 ];
-
-// ステップ見出しは videoKind で2番目だけ変える（採用＝会社情報 / 一般＝発表の内容）。
-function stepsFor(videoKind: VideoKind): string[] {
-  const second = videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力";
-  return ["動画の種類と目的", second, "写真・動画を追加", "読み上げの声を設定", "ゆうこに動画案を作ってもらう"];
-}
 
 const yukoAdvice: Record<number, string[]> = {
   0: [
@@ -240,7 +235,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           <ExportLockBanner onNavigate={onNavigate} />
           {/* ステッパー */}
           <div className="stepper">
-            {steps.map((label, i) => (
+            {steps.map(({ label }, i) => (
               <div
                 key={label}
                 className={`step${i === step ? " active" : ""}${i < step ? " done" : ""}`}
@@ -782,9 +777,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
 
           {/* 操作ボタン */}
           <div className="row-between mt-lg">
+            {/* ⚠️ **行き先名を言う**（`06 §2` 規約3・#1026）＝段によって出る先が変わる。 */}
             <button className="btn btn-ghost" onClick={back}>
               <ArrowLeftIcon size={18} />
-              戻る
+              {wizardBackLabel(step, steps)}
             </button>
             <div className="row gap-sm">
               <button
