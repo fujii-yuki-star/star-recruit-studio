@@ -85,6 +85,9 @@ import { exportFailedMessage, exportBlockedMessage, resolveExportBlockedMessage,
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, isOwnCleanupPending, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
+import { freezeFrameAt, freezeFrameIssue, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { extractVideoFrame } from "../../infrastructure/assetFs";
+import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { userFacingMessage } from "../userFacingError";
 
@@ -481,6 +484,13 @@ export interface TimelineState {
    * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
    */
   splitSelectedClip: (atSec: number, at?: BlockTarget) => void;
+  /**
+   * 再生位置で**絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
+   *
+   * ⚠️ **取り消しは2回**＝写真が増えるのと、帯が替わるのは**別の出来事**（`runImport` は
+   * 非同期の着地をまとめに混ぜない＝`outsideGroup`）。1回戻すと動画に戻り、もう1回で写真も消える。
+   */
+  freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
   /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
   setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
@@ -1204,6 +1214,48 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
     // 空振りする（嘘の理由）。`explodeClip` と同じ形。
     commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
+  },
+  freezeSelectedClip: async (atSec, at = PANEL_ID.arrange) => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const clipId = selectedClipIds[0]!;
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    const templateOf = (id: string): Template | undefined => templateById.get(id);
+    // ⚠️ **押す前に断る**＝切り出し（重い処理）を始めてから「できません」と言わない（§2-5）。
+    const issue = freezeFrameIssue(doc, clipId, atSec, { templateOf });
+    if (issue) {
+      const reason = FREEZE_BLOCKED_REASON[issue];
+      set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+      return;
+    }
+    const clip = doc.clips.find((c) => c.id === clipId);
+    const src = doc.assets.find((a) => a.assetId === clip?.assetId);
+    // ⚠️ **関門を通ったのに素材が無い**＝`isDirectVideoClip` が見ているので普通は起きない。
+    // それでも握りつぶさずに理由を出す（黙って何も起きない、を作らない）。
+    if (!clip || !src) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
+      return;
+    }
+    const sourceSec = freezeSourceSec(clip, atSec);
+    // ⚠️ **取り込みの門と手順に乗る**（`runImport`）＝書き出し中・二重取り込み・文書の入れ替わりを
+    // ここで書き直さない（同じことをする操作は同じ断り方＝ADR-0026②）。
+    const stillAssetId = await runImport(
+      set, get, src.displayName,
+      (fileName) => extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName),
+      (reservedId) => newFrameAsset(src.displayName, sourceSec, [], reservedId),
+    );
+    if (stillAssetId == null) return; // 断りは `runImport` 側が出している
+    // ⚠️ **待っている間に文書が変わりうる**＝`freezeFrameAt` は先頭で同じ関門を通すので、
+    // 帯が動いた・消えた・列が固定された場合はここで理由が返る。
+    const cur = get().doc;
+    if (!cur || cur.projectId !== doc.projectId) return;
+    const r = freezeFrameAt(cur, clipId, atSec, stillAssetId, volumeAt, { templateOf });
+    if (!r.ok) {
+      const reason = FREEZE_BLOCKED_REASON[r.reason];
+      set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+      return;
+    }
+    commit(set, get, r.doc, {}, { outsideGroup: true });
   },
   setClipBoxesFor: (updates) => {
     const doc = get().doc;

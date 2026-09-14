@@ -809,6 +809,14 @@ export const ASSET_TOO_LARGE_PICK_SMALLER = "もっと小さいファイルを�
 export const LIBRARY_ADD_FAILED = "素材を置けませんでした。もう一度お試しください。";
 
 /**
+ * **この瞬間で絵を止める**（#356 ②＝フリーズフレーム）。
+ *
+ * ⚠️ **技術用語を出さない**（§2-3）＝「フリーズフレーム」「静止画」とは書かない。
+ * ⚠️ **ボタンと右クリックで同じ名前**＝同じことをする入口の名前を割らない（ADR-0026②）。
+ */
+export const FREEZE_FRAME_LABEL = "この瞬間で絵を止める";
+
+/**
  * AI の接続キーまわりの断り（#1131）。
  *
  * ⚠️ **「できなかった」と「確かめられなかった」を分ける**＝**保存は済んでいるのに
@@ -871,6 +879,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_NOT_PLAYABLE: "その部品には速さ・素材の使い始めがありません。音か動画の部品で変えてください",
   TIMELINE_EDIT_NO_ORIGINAL_AUDIO: "この動画には音が入っていないので、元の音は鳴らせません。音を付けるなら、音の列に音を置いてください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
+  TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
   // ⚠️ **「素材の画面で外す」とは案内しない**（#816-5・ADR-0034 決定5 に記録済み）＝素材の画面は
