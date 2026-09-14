@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { userFacingMessage } from "../userFacingError";
 import { apiKeyMessage } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
@@ -116,11 +116,34 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
     }
   }
 
-  // 起動時に接続キーの有無を確認（値は取得しない＝有無のみ）。
+  /** 接続キーを操作したか（済んだら、起動時の読み取りは採らない）。 */
+  const settled = useRef(false);
+
+  // 画面に入った時点で接続キーの有無を確認（値は取得しない＝有無のみ）。
+  //
+  // ⚠️ **確かめられなかったことを黙らない**（#1134 レビュー由来 🟡・§2-5）＝以前は
+  // `.catch(() => setAiConnected(false))` と**黙って「未接続」**にしていた。
+  // 保存直後の「接続キーは保存できましたが…設定を開き直してご確認ください」に従って開き直しても、
+  // 確認がまた失敗すれば**何も言わずに未接続**へ変わる＝直前の案内と食い違い、
+  // 利用者は確認できたのかどうかを**見分ける手段が無い**（案内が空手形になる）。
+  // ⚠️ **状態は「無い」側へ倒す**＝在ると偽って AI の機能を押させない（押しても進まない、を作らない）。
   useEffect(() => {
+    // ⚠️ **あとから来た起動時の結果で、操作の結果を上書きしない**（レビュー由来 ℹ️・
+    // `projectStore` の「丸ごと set で並行編集を巻き戻す」と同型）＝保存や削除が先に済んでいたら、
+    // 遅れて解決したこの読み取りは**採らない**。
+    // ⚠️ **外れたかどうか（`live`）だけでは足りない**＝画面に居るまま遅れて解決する筋がある。
+    // **操作が済んだか**（`settled`）で見る。`live` は外れたあとの set を避けるために別に持つ。
+    let live = true;
     void hasApiKey(GEMINI_PROVIDER)
-      .then(setAiConnected)
-      .catch(() => setAiConnected(false));
+      .then((has) => { if (live && !settled.current) setAiConnected(has); })
+      .catch((e: unknown) => {
+        if (!live || settled.current) return;
+        setAiConnected(false);
+        // ⚠️ **Rust が理由を返せるなら、それを出す**（#1131）＝`has_api_key` は
+        // アクセスできないときに `KEYRING_UNAVAILABLE` を返す（以前は `Ok(false)` に畳んでいた）。
+        setKeyError(userFacingMessage(e, "api-key-state") ?? apiKeyMessage.API_KEY_STATE_UNKNOWN);
+      });
+    return () => { live = false; };
   }, []);
 
   // ⚠️ **「できなかった」と「確かめられなかった」を分ける**（#1131・ADR-0026①）＝以前は
@@ -129,21 +152,29 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
   // `setKeyInput("")` が先にあったため、**入力欄だけ空**になって利用者は打ち直すことになり、
   // その打ち直しは（実際には保存済みなので）**丸ごと無駄**だった。
   async function onSaveKey() {
+    // ⚠️ **ここから先は、起動時の読み取りより新しい**（レビュー由来 ℹ️）。
+    settled.current = true;
     setKeyBusy(true);
     setKeyError("");
     try {
       await saveApiKey(GEMINI_PROVIDER, keyInput.trim());
     } catch (e) {
+      // ⚠️ **先に押せる状態へ戻す**（レビュー由来 ℹ️）＝この下で投げると「保存中…」のまま
+      // 二度と押せなくなる（`finally` の外へ出た経路なので、拾ってくれるものが無い）。
+      setKeyBusy(false);
       // ⚠️ **入力は消さない**＝打ち直させる以上、消してはいけない（§2-5）。
       setKeyError(userFacingMessage(e, "api-key-save") ?? apiKeyMessage.API_KEY_SAVE_FAILED);
-      setKeyBusy(false);
       return;
     }
     // ここから先は**保存は済んでいる**＝失敗したようには見せない。
     setKeyInput("");
     try {
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
-    } catch {
+    } catch (e) {
+      // ⚠️ **中身は捨てない**（レビュー由来 🟡）＝画面に出す文は「保存はできた」を守るために
+      // こちらのものを使うが、**理由は記録へ流す**（`troubleLogBridge` が運ぶ）。
+      // 以前は `catch { … }` で `e` を丸ごと落としており、**調べる材料が減る向き**に倒れていた。
+      console.error("[api-key-save] 状態を確かめられませんでした:", e);
       // ⚠️ **「在る」側へ倒す**＝保存できたのだから在る。黙って「未接続」に見せない。
       setAiConnected(true);
       setKeyError(apiKeyMessage.API_KEY_SAVED_UNVERIFIED);
@@ -155,19 +186,22 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
   // ⚠️ **双子の片方だけ直さない**（このリポジトリの不具合の多くはこの型）＝削除側も同じ形で、
   // 削除は成功したのに `hasApiKey` が投げると「接続を削除できませんでした」と出ていた。
   async function onClearKey() {
+    // ⚠️ **ここから先は、起動時の読み取りより新しい**（レビュー由来 ℹ️）。
+    settled.current = true;
     setKeyBusy(true);
     setKeyError("");
     try {
       await deleteApiKey(GEMINI_PROVIDER);
     } catch (e) {
-      setKeyError(userFacingMessage(e, "api-key-delete") ?? apiKeyMessage.API_KEY_DELETE_FAILED);
       setKeyBusy(false);
       setConfirmClearKey(false);
+      setKeyError(userFacingMessage(e, "api-key-delete") ?? apiKeyMessage.API_KEY_DELETE_FAILED);
       return;
     }
     try {
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
-    } catch {
+    } catch (e) {
+      console.error("[api-key-delete] 状態を確かめられませんでした:", e);
       // ⚠️ **「無い」側へ倒す**＝消せたのだから無い。
       setAiConnected(false);
       setKeyError(apiKeyMessage.API_KEY_DELETED_UNVERIFIED);
