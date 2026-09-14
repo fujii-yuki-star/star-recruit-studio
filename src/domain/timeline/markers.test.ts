@@ -1,7 +1,8 @@
 // 時間の一点に置く**目印**（#356 ①）。
 import { describe, expect, it } from 'vitest';
-import { addMarker, markerAt, markersInOrder, MARKER_TEXT_MAX, moveMarker, removeMarker, setMarkerText } from './markers';
+import { addMarker, markerAt, markerClock, markersInOrder, MARKER_TEXT_MAX, moveMarker, removeMarker, setMarkerText } from './markers';
 import { PROJECT_FORMAT, TRACK_KIND } from '../enums';
+import { addTrack, removeTrack } from './edit';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import type { TimelineProject } from './types';
@@ -116,6 +117,48 @@ describe('markersInOrder / markerAt', () => {
   it('1つも無くても落ちない', () => {
     expect(markersInOrder(doc())).toEqual([]);
     expect(markerAt(doc(), 0)).toBeUndefined();
+  });
+});
+
+// ⚠️ **書いた主張は検査する**（`CLAUDE.md §7`・#1138 レビュー由来 ℹ️）＝正典は
+// 「トラックには属さない＝列を消しても帯を動かしても**そこに残る**」と言っている。
+// いまは構造上そうなっているが、**検査が無いと将来 doc を組み立て直す変更で静かに落ちる**。
+describe('目印はトラックに属さない（#356 ①）', () => {
+  it('列を消しても残る', () => {
+    const r = addMarker(doc(), 4);
+    const after = removeTrack(setMarkerText(r.doc, r.markerId, 'ここ直す'), 'track_001');
+    expect(after.ok, '列を消せていない＝この検査が空振りしている').toBe(true);
+    if (!after.ok) return;
+    expect(after.doc.markers, '列を消したら目印まで消えた').toHaveLength(1);
+    expect(after.doc.markers![0]!.text).toBe('ここ直す');
+  });
+
+  it('列を足しても変わらない', () => {
+    const r = addMarker(doc(), 4);
+    expect(addTrack(r.doc, TRACK_KIND.visual).markers).toEqual(r.doc.markers);
+  });
+});
+
+describe('setMarkerText（空にしたら項目ごと落とす）', () => {
+  // ⚠️ **同じ状態に2通りの書き方を作らない**（§2-7・#1138 レビュー由来 ℹ️）＝正典は
+  // 「**未指定＝位置だけの目印**」と言っているので、空文字を残すと表現が2つになる。
+  it('メモを空にしたら、項目ごと落とす', () => {
+    const r = addMarker(doc(), 4);
+    const written = setMarkerText(r.doc, r.markerId, 'ここ直す');
+    const cleared = setMarkerText(written, r.markerId, '');
+    expect('text' in cleared.markers![0]!, '空文字が残っている').toBe(false);
+  });
+});
+
+describe('markerClock（時刻の表示）', () => {
+  // ⚠️ **秒で丸めない**＝同じ秒の目印が一覧で見分けられなくなる。
+  it('コマまで出す（同じ秒でも見分けられる）', () => {
+    expect(markerClock(3.1, 30)).not.toBe(markerClock(3.4, 30));
+    expect(markerClock(65, 30)).toMatch(/^1:05\./);
+  });
+
+  it('負の時刻でも落ちない（0 として出す）', () => {
+    expect(markerClock(-1, 30)).toBe('0:00.00');
   });
 });
 

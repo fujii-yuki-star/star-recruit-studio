@@ -420,6 +420,42 @@
   pointer-events: none;
 }
 
+/**
+ * 目印（#356 ①）＝**時間軸の上に立つ印**。
+ *
+ * ⚠️ **一覧だけにしない**（#1138 レビュー由来 🔴）＝業界の型ではマーカーは**時間軸の上に見える**もので、
+ * 一覧はその補助。印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
+ * ⚠️ **再生位置の線と同じ測り方**（列の名前の欄ぶん右から）＝2つがずれない。
+ * ⚠️ **役割が違うので見た目を分ける**＝再生位置は実線（いまの時刻）・吸着は点線（そこへ揃えた）・
+ * 目印は**上端の旗**（そこに覚えがある）。線で覆うと帯が読めなくなるので、旗だけにする。
+ */
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 4; /* 帯（1）・再生位置（3）より前面＝押せる。列の名前の欄（5）には隠れる */
+}
+.timeline-marker > button {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 2px 2px 6px 6px;
+  background: var(--color-accent);
+  cursor: pointer;
+}
+.timeline-marker > button:hover {
+  outline: 2px solid var(--color-text);
+}
+/** 選んでいる目印は太らせる（どれを直しているかが分かる）。 */
+.timeline-marker--current > button {
+  outline: 2px solid var(--color-text);
+}
+
 .timeline-playhead::before {
   content: "";
   position: absolute;

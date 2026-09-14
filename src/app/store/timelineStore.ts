@@ -86,7 +86,7 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
-import { addMarker, removeMarker, setMarkerText } from "../../domain/timeline/markers";
+import { addMarker, moveMarker, removeMarker, setMarkerText } from "../../domain/timeline/markers";
 import { extractVideoFrame } from "../../infrastructure/assetFs";
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
@@ -497,11 +497,21 @@ export interface TimelineState {
   /**
    * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
    *
-   * ⚠️ **同じ時刻には重ねない**＝既にあればそれを指すだけ（増やさない）。
+   * ⚠️ **同じ時刻には重ねない**＝既にあるときは**何もしない**（増やさない・履歴にも積まない）。
+   * その目印は**時間軸の上で太って見える**（再生位置と同じ時刻＝`timeline-marker--current`）ので、
+   * 押しても無反応には見えない（#1138 レビュー由来 🟡＝以前ここは「それを指す」と書いていたが、
+   * 指す実装は無かった＝**書いたのに無い**状態だった）。
    */
   addMarkerAtPlayhead: () => void;
   /** 目印のメモを書き換える（上限で切る＝開けない文書を作らない）。 */
   setMarkerTextFor: (markerId: string, text: string) => void;
+  /**
+   * 目印を**いまの再生位置へ動かす**（#1138 レビュー由来 🟡）。
+   *
+   * ⚠️ **置けるのに直せない、を作らない**（ADR-0034 決定4）＝掴む操作は発明せず、
+   * この画面に既にある道具（再生位置）で直せる形にする。
+   */
+  moveMarkerToPlayhead: (markerId: string) => void;
   /** 目印を消す。 */
   removeMarkerById: (markerId: string) => void;
   /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
@@ -1327,6 +1337,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     commit(set, get, setMarkerText(doc, markerId, text));
+  },
+  moveMarkerToPlayhead: (markerId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **置くときと同じ規則**＝コマの格子へ落とす（`frameTimeSec`・ADR-0023）。
+    const next = moveMarker(doc, markerId, frameTimeSec(doc, get().playheadSec));
+    // 重なる先へは動かさない＝`moveMarker` が文書を変えないので、履歴にも積まない。
+    if (next !== doc) commit(set, get, next);
   },
   removeMarkerById: (markerId) => {
     const doc = get().doc;

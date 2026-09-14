@@ -433,6 +433,12 @@ tlAccept.push(
   //（この検査を足した理由がそのまま当てはまる＝片方の双子だけ検証）。
   ['timeline: クレジットの見せ方を許容（1.28・videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'both', seconds: 3 } } })],
   ['timeline: 音の自動処理を許容（1.29・同上）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckBgm: true, duckDepth: 0.6, normalize: true, targetLufs: -16 } } })],
+  // ⚠️ **目印（1.11・#356 ①）**＝版を上げたら受け入れ／拒否の両方を固定する
+  //（`docs/ai_work_guides/schema_change.md`。受け入れだけだと、pattern を消しても
+  //  `additionalProperties` を外しても赤くならない＝#1138 レビュー由来 🟡）。
+  ['timeline: 目印を許容（1.11・#356 ①）', tlWith({ markers: [{ id: 'marker_001', timeSec: 3.5, text: 'ここ直す' }] })],
+  ['timeline: メモの無い目印も許容（位置だけの印）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0 }] })],
+  ['timeline: 目印が1つも無い（未指定）も許容', tlWith({})],
 );
 
 const tlReject = [
@@ -443,6 +449,11 @@ const tlReject = [
   ['timeline: クレジットの未知の見せ方は拒否（1.28・$ref 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'sometimes' } } })],
   ['timeline: クレジットの秒が範囲外(11)は拒否（1.28）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'head', seconds: 11 } } })],
   ['timeline: 音の下げ幅が範囲外(1.5)は拒否（1.29）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckDepth: 1.5 } } })],
+  // ⚠️ **目印の拒否条件（1.11・#356 ①）**＝id の形・0 以上・未知の項目・メモの上限。
+  ['timeline: 目印の id が桁不足(marker_1)は拒否（§2.1・3桁以上）', tlWith({ markers: [{ id: 'marker_1', timeSec: 0 }] })],
+  ['timeline: 目印の時刻が負(-1)は拒否（0 以上＝保存はできて次に開けない、を作らない）', tlWith({ markers: [{ id: 'marker_001', timeSec: -1 }] })],
+  ['timeline: 目印に未知の項目(color)は拒否（additionalProperties:false）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, color: 'red' }] })],
+  ['timeline: 目印のメモが上限超え(201字)は拒否（maxLength 200）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, text: 'あ'.repeat(201) }] })],
   ['timeline: 音の自動処理の未知フィールドは拒否（1.29・additionalProperties:false）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckWhatever: true } } })],
   ['timeline: 元の音の音量が範囲外(2.0)は拒否（値域は場面形式と共有＝$ref・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', originalAudioVolume: 2.0 })],
   ['timeline: 元の音を鳴らすかが真偽でないのは拒否（#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: 'yes' })],

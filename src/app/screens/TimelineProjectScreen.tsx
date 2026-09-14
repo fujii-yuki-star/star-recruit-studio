@@ -41,6 +41,7 @@ import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVi
 import type { VideoPlacement } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { TimelineMarkersSection } from "../components/TimelineMarkersSection";
+import { markerClock, markersInOrder, markerTimeEq } from "../../domain/timeline/markers";
 import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
@@ -405,7 +406,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, addMarkerAtPlayhead, setMarkerTextFor, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -2980,6 +2981,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   };
   const freezeGuard = editGuard(freezeExtra());
   /**
+   * 目印の押せる条件（#356 ①）。
+   *
+   * ⚠️ **再生中は断る**（#1138 レビュー由来 🟡・ADR-0032 決定21）＝目印も**再生位置を読む操作**で、
+   * 同じ画面の「ここで分ける」「この瞬間で絵を止める」「再生位置で長さをそろえる」は再生中に断っている。
+   * 断らないと `commit` が**押した瞬間に再生を止める**＝どちらの型でもない振る舞いになる。
+   * ⚠️ **業界の型では「見ながら置く」のが主用途**なので、ここは**正典を採った**＝
+   * 見ながら置けるようにするなら ADR-0032 決定21 の側を動かす話になる（利用者判断・`06 §12` に記録）。
+   */
+  const markerGuard: { disabled?: boolean; title?: string } = isPlaying
+    ? { disabled: true, title: editBlockedMessage[EDIT_BLOCKED.playing] }
+    : busyGuard();
+  /**
    * **止めると元の音が止まる**ことを、押す前に知らせる（#1136 レビュー由来 🟡）。
    *
    * ⚠️ **他社の同じ操作は「絵だけ止まって音は流れ続ける」**＝何も言わないと、利用者が入れた
@@ -3720,6 +3733,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     aria-hidden
                   />
                 )}
+                {/* **目印**（#356 ①・#1138 レビュー由来 🔴）＝時間軸の上に立つ印。
+                    ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
+                    印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
+                    再生位置の線と**同じ測り方**（列の名前の欄ぶん右から）＝ずれない。 */}
+                {markersInOrder(doc).map((m) => (
+                  <div
+                    key={m.id}
+                    className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
+                    style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * m.timeSec}px)` }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setPlayhead(m.timeSec); followPlayhead(); }}
+                      title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
+                      aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
+                    />
+                  </div>
+                ))}
                 {/* 吸着した先の**縦の点線**（#686 段階4・決定12）＝「なぜそこで止まったか」を見せる。
                     再生位置の線と同じ場所・同じ測り方（列の名前の欄ぶん右から）＝2本の線がずれない。 */}
                 {snapGuideSec != null && (
@@ -3904,10 +3935,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <TimelineMarkersSection
           doc={doc}
           playheadSec={playheadSec}
-          busy={busyGuard()}
+          busy={markerGuard}
+          textGroup={textGroup}
           onAdd={addMarkerAtPlayhead}
-          onJump={(sec) => setPlayhead(sec)}
+          // ⚠️ **見える所まで連れて行く**（#1138 レビュー由来 🟡）＝同じ画面の「先頭へ」や矢印は
+          // `followPlayhead()` を伴う。無いと、倍率を上げていて目印が画面外のとき**押しても何も変わらない**。
+          onJump={(sec) => { setPlayhead(sec); followPlayhead(); }}
           onText={setMarkerTextFor}
+          onMove={moveMarkerToPlayhead}
           onRemove={removeMarkerById}
         />
       </div>

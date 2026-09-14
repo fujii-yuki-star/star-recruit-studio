@@ -27,15 +27,18 @@ function doc(markers?: TimelineMarker[]): TimelineProject {
   };
 }
 
-const noop = { onAdd: vi.fn(), onJump: vi.fn(), onText: vi.fn(), onRemove: vi.fn() };
+/** 文字欄のまとめ（画面と同じ形＝この欄だけ別の流儀にしない）。 */
+const textGroup = { onFocus: vi.fn(), onBlur: vi.fn(), ref: vi.fn() };
+const noop = { onAdd: vi.fn(), onJump: vi.fn(), onText: vi.fn(), onMove: vi.fn(), onRemove: vi.fn(), textGroup };
 
 describe("目印の欄（#356 ①）", () => {
   // ⚠️ **動画には出ないことを、置く前に言う**＝押してから気づくことにしない（§2-5）。
   it("動画に出ないと書いてある（見出しにも、まだ無いときの案内にも）", () => {
     render(<TimelineMarkersSection doc={doc()} playheadSec={0} {...noop} />);
-    // 見出しと、まだ無いときの案内の**両方**で言う（片方だけだと読み飛ばされる）。
-    expect(screen.getAllByText(/動画には出ません/).length, '片方でしか言っていない').toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/目印（動画には出ません）/)).toBeTruthy();
+    // ⚠️ **見出しは併記**（#1138 レビュー由来 ℹ️）＝世の中の解説は「マーカー」なので、
+    // どちらの語からでも辿れるようにする。但し書きは案内の側で言う（節名の形を揃える）。
+    expect(screen.getByText(/マーカー（目印）/), '世の中の語から辿れない').toBeTruthy();
+    expect(screen.getByText(/動画には出ません/), '動画に出ないと言っていない').toBeTruthy();
   });
 
   it("まだ無いときは、何のために置くのかを出す（空の一覧を見せない）", () => {
@@ -65,15 +68,32 @@ describe("目印の欄（#356 ①）", () => {
     expect(buttons[0]!.textContent).toContain("0:02");
   });
 
-  // ⚠️ **離れたときに書き込む**＝打つたびに履歴へ積まない（取り消しが1文字ずつになる）。
-  it("メモは離れたときに書き込む（打つたびに積まない）", () => {
+  // ⚠️ **秒で丸めない**（#1138 レビュー由来 🟡）＝`3.1秒` と `3.4秒` が同じ表示だと、
+  // 一覧で**どちらがどちらか分からない**（重なりを防いでいるのはコマ単位の一致だけ）。
+  it("時刻はコマまで出す（同じ秒の目印を見分けられる）", () => {
+    const markers = [{ id: "marker_001", timeSec: 3.1 }, { id: "marker_002", timeSec: 3.4 }];
+    render(<TimelineMarkersSection doc={doc(markers)} playheadSec={0} {...noop} />);
+    const labels = screen.getAllByTitle("この目印の位置へ移ります").map((b) => b.textContent);
+    expect(new Set(labels).size, "2つの目印が同じ表示になっている").toBe(2);
+  });
+
+  // ⚠️ **打ったそばから書く**（#1138 レビュー由来 🔴）＝手元に貯めて `blur` で書き戻す形にすると、
+  // **欄が消えるとき `blur` が来ない**（欄を並べ替える・閉じる・画面を離れる）ので
+  // **打ちかけが黙って失われる**。履歴のまとめは `textGroup` が持つ（この画面の流儀に一本化）。
+  it("メモは打ったそばから書く（打ちかけを失わない）", () => {
     const onText = vi.fn();
     render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={0} {...noop} onText={onText} />);
-    const input = screen.getByPlaceholderText(/メモ/);
-    fireEvent.change(input, { target: { value: "ここ直す" } });
-    expect(onText, "打つたびに書き込んでいる").not.toHaveBeenCalled();
-    fireEvent.blur(input);
+    fireEvent.change(screen.getByPlaceholderText(/メモ/), { target: { value: "ここ直す" } });
     expect(onText).toHaveBeenCalledWith("marker_001", "ここ直す");
+  });
+
+  it("履歴のまとめは画面と同じ道具に任せる（この欄だけ別の流儀にしない）", () => {
+    render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={0} {...noop} />);
+    const input = screen.getByPlaceholderText(/メモ/);
+    fireEvent.focus(input);
+    expect(textGroup.onFocus, "まとめを開始していない").toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(textGroup.onBlur, "まとめを終了していない").toHaveBeenCalled();
   });
 
   // ⚠️ **上限は欄そのものにも持たせる**＝超える入力を打てないようにする（切られて驚かせない）。
@@ -98,8 +118,20 @@ describe("目印の欄（#356 ①）", () => {
     expect((screen.getByPlaceholderText(/メモ/) as HTMLInputElement).disabled).toBe(true);
   });
 
-  it("いまの再生位置を見せる（押す前にどこへ置くか分かる）", () => {
-    render(<TimelineMarkersSection doc={doc()} playheadSec={65} {...noop} />);
-    expect(screen.getByText(/いまの再生位置：1:05/)).toBeTruthy();
+  // ⚠️ **置けるのに直せない、を作らない**（ADR-0034 決定4・#1138 レビュー由来 🟡）。
+  it("再生位置へ動かせる", () => {
+    const onMove = vi.fn();
+    render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={9} {...noop} onMove={onMove} />);
+    fireEvent.click(screen.getByRole("button", { name: "ここへ動かす" }));
+    expect(onMove).toHaveBeenCalledWith("marker_001");
+  });
+
+  // ⚠️ **行が増えても帯を潰さない**（#1138 レビュー由来 🔴）＝この欄は縦に流れないので、
+  // 一覧が自前で流れないと**帯の取り分を一方的に削り**、超えた行は切れて到達できなくなる。
+  it("一覧は自前で縦に流れる（増えても下の行へ届く）", () => {
+    render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={0} {...noop} />);
+    const list = screen.getByRole("list");
+    expect(list.style.overflowY, "縦に流れない＝増えた行へ届かなくなる").toBe("auto");
+    expect(list.style.maxHeight, "高さの上限が無い＝帯を一方的に削る").toBeTruthy();
   });
 });

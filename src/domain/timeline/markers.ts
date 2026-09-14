@@ -13,8 +13,41 @@
 import { createMarkerId } from '../project/persistence';
 import type { TimelineMarker, TimelineProject } from './types';
 
-/** メモの長さの上限（schema と同じ＝写しではなく、ここが画面へ配る単一の参照元）。 */
+/**
+ * メモの長さの上限（`11 §4` 定数カタログ）。
+ *
+ * ⚠️ **schema の `maxLength` の写し**（#1138 レビュー由来 🟡）＝以前ここに「写しではない」と
+ * 書いていたが、参照も導出もしていない**ただの写し**だった（`CLAUDE.md §7`＝書いた主張は検査する）。
+ * ⚠️ **危ない向きのずれは門番が捕まえる**＝ここが schema より**大きく**なると
+ * 「保存はできて次に開けない」文書ができるが、`markers.test.ts` の
+ * 「長すぎるメモは切る（開けない文書を作らない）」が**切った長さちょうどで schema に通す**ので赤くなる。
+ */
 export const MARKER_TEXT_MAX = 200;
+
+/**
+ * 目印の時刻の表示（**コマまで出す**）。
+ *
+ * ⚠️ **秒で丸めない**（#1138 レビュー由来 🟡）＝画面の `clockLabel` は秒に丸めるので、
+ * `3.1秒` と `3.4秒` の目印が**どちらも「0:03」**になり、一覧で**見分けがつかない**
+ *（重なりを防いでいるのはコマ単位の一致だけなので、この状態は普通に作れる）。
+ * 業界の一覧もコマまで出す（`00:00:03:12`）。
+ */
+export function markerClock(timeSec: number, fps: number): string {
+  const total = Math.max(0, timeSec);
+  const mm = Math.floor(total / 60);
+  const ss = Math.floor(total % 60);
+  const ff = Math.round((total - Math.floor(total)) * fps);
+  return `${mm}:${String(ss).padStart(2, '0')}.${String(ff).padStart(2, '0')}`;
+}
+
+/**
+ * 同じ時刻とみなすか（丸めの差で「別の時刻」に化けさせない）。
+ *
+ * ⚠️ **完全一致で見ない**＝保存と再生位置はどちらもコマの格子へ落ちるが、浮動小数の差が残る。
+ */
+export function markerTimeEq(a: number, b: number): boolean {
+  return Math.abs(a - b) < 1e-6;
+}
 
 /** 目印を時刻順に並べる（同じ時刻なら足した順＝id 順）。 */
 export function markersInOrder(doc: TimelineProject): TimelineMarker[] {
@@ -50,7 +83,17 @@ export function addMarker(doc: TimelineProject, timeSec: number): { doc: Timelin
  * 断るのではなく収める（打っている最中に赤くしない）。
  */
 export function setMarkerText(doc: TimelineProject, markerId: string, text: string): TimelineProject {
-  const markers = (doc.markers ?? []).map((m) => (m.id === markerId ? { ...m, text: text.slice(0, MARKER_TEXT_MAX) } : m));
+  const markers = (doc.markers ?? []).map((m) => {
+    if (m.id !== markerId) return m;
+    const next = text.slice(0, MARKER_TEXT_MAX);
+    // ⚠️ **空なら項目ごと落とす**（#1138 レビュー由来 ℹ️）＝正典は「**未指定＝位置だけの目印**」と
+    // 言っているので、空文字を残すと**同じ状態に2通りの書き方**ができる（§2-7）。
+    if (next === '') {
+      const { text: _text, ...rest } = m;
+      return rest;
+    }
+    return { ...m, text: next };
+  });
   return { ...doc, markers };
 }
 
@@ -60,7 +103,11 @@ export function removeMarker(doc: TimelineProject, markerId: string): TimelinePr
 }
 
 /**
- * 目印を動かす（時刻を変える）。
+ * 目印を**再生位置へ動かす**（時刻を変える）。
+ *
+ * ⚠️ **置けるのに直せない、を作らない**（ADR-0034 決定4・#1138 レビュー由来 🟡）＝
+ * 業界では印はルーラー上で掴んで動かせる。ここでは**掴む操作を発明せず**、
+ * 「再生位置へ動かす」＝この画面に既にある道具（再生位置）で直せる形にする。
  *
  * ⚠️ **0 より前へは動かさない**＝schema が 0 以上しか許さないので、負にすると
  * **保存はできて次に開けない**。⚠️ **同じ時刻へは重ねない**（`addMarker` と同じ規則）。
