@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, apiKeyMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
@@ -87,6 +87,10 @@ function codeMessages(): Record<string, string> {
     ...alpha6Message,
     // α-7 で足したぶん（#960 レビュー）＝同じ穴を開け直さない。
     ...templateSaveMessage,
+    // ⚠️ **接続キーの断りも同じ扱い**（#1131）＝以前は画面へ直書きで、走査（その場に書いた文）
+    // だけが守っていた。定数へ出したら**完全一致の側へ載せる**（載せ忘れると、どちらの段でも
+    // 守られない「素通り」になる＝実際に `messages.rs` でそうなっていた＝#1129）。
+    ...apiKeyMessage,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -196,11 +200,11 @@ function rustMessages(): Record<string, string> {
  *
  * ⚠️ **手挙げをやめた**＝`messages.rs` は「文言は1か所」（§6）のために作った置き場なのに、
  * ここへ**1本ずつ登録する**形だったので、**足しただけでは表と結ばれなかった**
- *（16 本のうち **13 本**が表に無い状態で、機械では見えなかった＝#263 と同じ壊れ方）。
+ *（着手時は 16 本のうち **13 本**が表に無い状態で、機械では見えなかった＝#263 と同じ壊れ方）。
  * 丸ごと読めば、**足した瞬間に「表へ行を足せ」と言われる**。
  *
  * ⚠️ **2行に割れた形も拾う**＝`rustfmt` は長い定数を
- * `pub const X: &str =\n    "…";` と改行するので、1行だけを見る正規表現だと**16 本中 11 本を
+ * `pub const X: &str =\n    "…";` と改行するので、1行だけを見る正規表現だと**17 本中 12 本を
  * 取りこぼす**（そしてその取りこぼしは「見つからない」ではなく「**黙って少ない**」になる）。
  * ⚠️ **この数も検査で留める**（下の「1行の形と2行の形の数」）＝書いた主張を数えずに置かない。
  *
@@ -359,7 +363,7 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
   it("拾えた本数を実数で留める（黙って減らない）", () => {
     // ⚠️ **下限にしない**＝PR #1130 で「下限だと拾い方を1段外しても緑」を実際に踏んだ。
     // 増えたら、そのぶん表へ行を足してからこの数を直す。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(16);
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(17);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -368,9 +372,9 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
     const oneLine = [...src.matchAll(/pub const [A-Z_0-9]+: &str = "/g)].length;
     const all = Object.keys(messagesIn(src)).length;
-    expect(all, "定数の数が変わった").toBe(16);
+    expect(all, "定数の数が変わった").toBe(17);
     expect(oneLine, "1行で書かれた定数の数が変わった").toBe(5);
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(11);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(12);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -456,7 +460,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //（3件は #1123 より前からある＝`BrandKitSection` / `SaveStatusBadge` / `TimelineProjectScreen`）。
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。手挙げをやめて**丸ごと走査**へ変えたので、
     //   これ以降は**足した瞬間にここが赤くなる**（登録漏れが起きない）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(219);
+    // ⚠️ **+2**＝接続キーの「確かめられなかった」2文（#1131）。
+    // ⚠️ **+1**＝`KEYRING_UNAVAILABLE`（#1131）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(223);
   });
 
 
@@ -702,13 +708,17 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //（`uiMessageScan`）が文面で突き合わせる（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(216);
+    // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(220);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
       // ⚠️ **+2**＝見た目パターンの保存・削除の既定文（#1129 レビュー由来 🟡）。
       //   `projectStore` の直書きをやめて `templateSaveMessage` へ出したので、
       //   **その場に書いた文の走査**から**完全一致で守る側**へ移った（守りは強くなる）。
-    ).toBe(86);
+      // ⚠️ **+5**＝接続キーの5文（#1131）。2つは既定文（直書きから定数へ）、
+      //   3つは新設（「できたが確かめられなかった」2つ＋「入った時点で確かめられない」1つ
+      //   ＝案内の先で黙らないため＝#1134 レビュー由来）。
+    ).toBe(91);
   });
 });

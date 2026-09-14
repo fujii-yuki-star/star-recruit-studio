@@ -45,10 +45,8 @@ fn http_client() -> &'static reqwest::Client {
 
 /// keyring エントリ（service 固定・account=プロバイダ名）。
 fn key_entry(provider: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, provider).map_err(|_| {
-        "鍵の保管領域にアクセスできませんでした。アプリを再起動してから、もう一度お試しください。"
-            .to_string()
-    })
+    keyring::Entry::new(KEYRING_SERVICE, provider)
+        .map_err(|_| crate::messages::KEYRING_UNAVAILABLE.to_string())
 }
 
 /// APIキーを OS 資格情報ストアに保存する（平文ファイルには書かない）。
@@ -65,17 +63,30 @@ pub fn save_api_key(provider: String, api_key: String) -> Result<(), String> {
         .map_err(|_| "キーの保存に失敗しました。もう一度お試しください。".to_string())
 }
 
+/// 保管庫の読み取り結果を「在る／無い／確かめられない」へ振り分ける（**純粋関数**）。
+///
+/// ⚠️ **アクセスできないことを「無い」と言わない**（#1131）＝以前はここも `Ok(false)` に
+/// 畳んでいたので、**保存できた直後でも「未接続」**と出て、しかも理由が画面にも記録にも
+/// 残らなかった（黙って別の結果にしない＝ADR-0026④）。
+/// ⚠️ **鍵は出さない**という元の意図は保つ＝返すのは**確かめられなかった**という事実だけ。
+/// ⚠️ **切り出してあるのは検査が分岐を叩くため**（`opener::guard_produced` と同じ流儀）＝
+/// 本体は OS の保管庫を触るので、そのままでは単体で叩けない。
+fn has_from(read: Result<String, keyring::Error>) -> Result<bool, String> {
+    match read {
+        Ok(_) => Ok(true),
+        // **未登録**＝本当に「無い」。ここだけが `false`。
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(_) => Err(crate::messages::KEYRING_UNAVAILABLE.to_string()),
+    }
+}
+
 /// APIキーが保存済みかを返す（**値は返さない＝有無のみ**。鍵を JS に出さない）。
 #[tauri::command]
 pub fn has_api_key(provider: String) -> Result<bool, String> {
     if !is_supported_provider(&provider) {
         return Ok(false);
     }
-    match key_entry(&provider)?.get_password() {
-        Ok(_) => Ok(true),
-        // 未登録・アクセス不可はいずれも「未設定」扱い（安全側・鍵は出さない）。
-        Err(_) => Ok(false),
-    }
+    has_from(key_entry(&provider)?.get_password())
 }
 
 /// 保存済みAPIキーを削除する（未登録でも成功扱い）。
@@ -187,6 +198,31 @@ pub async fn ai_generate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **在る**＝読めたなら在る。
+    #[test]
+    fn 読めたなら在ると言う() {
+        assert_eq!(has_from(Ok("k".to_string())), Ok(true));
+    }
+
+    /// **無い**＝未登録だけが「無い」。
+    #[test]
+    fn 未登録なら無いと言う() {
+        assert_eq!(has_from(Err(keyring::Error::NoEntry)), Ok(false));
+    }
+
+    /// **確かめられない**＝アクセスできないことを「無い」に畳まない（#1131）。
+    ///
+    /// ⚠️ **畳むと、保存できた直後でも「未接続」**と出て、理由がどこにも残らない。
+    #[test]
+    fn 確かめられないなら無いと言わない() {
+        let err = keyring::Error::Invalid("service".to_string(), "空です".to_string());
+        assert_eq!(
+            has_from(Err(err)),
+            Err(crate::messages::KEYRING_UNAVAILABLE.to_string()),
+            "アクセスできないことを「無い」に畳んでいる"
+        );
+    }
 
     #[test]
     fn build_gemini_body_uses_json_mode_and_messages() {
