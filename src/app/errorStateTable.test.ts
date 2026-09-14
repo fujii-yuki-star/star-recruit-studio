@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, templateSaveMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, apiKeyMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
@@ -87,6 +87,10 @@ function codeMessages(): Record<string, string> {
     ...alpha6Message,
     // α-7 で足したぶん（#960 レビュー）＝同じ穴を開け直さない。
     ...templateSaveMessage,
+    // ⚠️ **接続キーの断りも同じ扱い**（#1131）＝以前は画面へ直書きで、走査（その場に書いた文）
+    // だけが守っていた。定数へ出したら**完全一致の側へ載せる**（載せ忘れると、どちらの段でも
+    // 守られない「素通り」になる＝実際に `messages.rs` でそうなっていた＝#1129）。
+    ...apiKeyMessage,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -456,7 +460,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //（3件は #1123 より前からある＝`BrandKitSection` / `SaveStatusBadge` / `TimelineProjectScreen`）。
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。手挙げをやめて**丸ごと走査**へ変えたので、
     //   これ以降は**足した瞬間にここが赤くなる**（登録漏れが起きない）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(219);
+    // ⚠️ **+2**＝接続キーの「確かめられなかった」2文（#1131）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(221);
   });
 
 
@@ -702,13 +707,16 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //（`uiMessageScan`）が文面で突き合わせる（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(216);
+    // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(218);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
       // ⚠️ **+2**＝見た目パターンの保存・削除の既定文（#1129 レビュー由来 🟡）。
       //   `projectStore` の直書きをやめて `templateSaveMessage` へ出したので、
       //   **その場に書いた文の走査**から**完全一致で守る側**へ移った（守りは強くなる）。
-    ).toBe(86);
+      // ⚠️ **+4**＝接続キーの4文（#1131）。うち2つは既定文（直書きから定数へ）、
+      //   2つは新設（「保存はできたが確かめられなかった」＝起きたことを言い分ける）。
+    ).toBe(90);
   });
 });

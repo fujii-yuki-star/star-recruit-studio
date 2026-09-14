@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { userFacingMessage } from "../userFacingError";
+import { apiKeyMessage } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -122,28 +123,54 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       .catch(() => setAiConnected(false));
   }, []);
 
+  // ⚠️ **「できなかった」と「確かめられなかった」を分ける**（#1131・ADR-0026①）＝以前は
+  // 保存と**状態の確認**を1つの `try` に入れていたので、**保存は成功したのに `hasApiKey` が
+  // 投げる**と「キーを保存できませんでした」と出た＝**起きたことと食い違う**。しかも
+  // `setKeyInput("")` が先にあったため、**入力欄だけ空**になって利用者は打ち直すことになり、
+  // その打ち直しは（実際には保存済みなので）**丸ごと無駄**だった。
   async function onSaveKey() {
     setKeyBusy(true);
     setKeyError("");
     try {
       await saveApiKey(GEMINI_PROVIDER, keyInput.trim());
-      setKeyInput("");
-      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(userFacingMessage(e, "api-key-save") ?? "キーを保存できませんでした。もう一度お試しください。");
+      // ⚠️ **入力は消さない**＝打ち直させる以上、消してはいけない（§2-5）。
+      setKeyError(userFacingMessage(e, "api-key-save") ?? apiKeyMessage.API_KEY_SAVE_FAILED);
+      setKeyBusy(false);
+      return;
+    }
+    // ここから先は**保存は済んでいる**＝失敗したようには見せない。
+    setKeyInput("");
+    try {
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch {
+      // ⚠️ **「在る」側へ倒す**＝保存できたのだから在る。黙って「未接続」に見せない。
+      setAiConnected(true);
+      setKeyError(apiKeyMessage.API_KEY_SAVED_UNVERIFIED);
     } finally {
       setKeyBusy(false);
     }
   }
 
+  // ⚠️ **双子の片方だけ直さない**（このリポジトリの不具合の多くはこの型）＝削除側も同じ形で、
+  // 削除は成功したのに `hasApiKey` が投げると「接続を削除できませんでした」と出ていた。
   async function onClearKey() {
     setKeyBusy(true);
     setKeyError("");
     try {
       await deleteApiKey(GEMINI_PROVIDER);
-      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(userFacingMessage(e, "api-key-delete") ?? "接続を削除できませんでした。もう一度お試しください。");
+      setKeyError(userFacingMessage(e, "api-key-delete") ?? apiKeyMessage.API_KEY_DELETE_FAILED);
+      setKeyBusy(false);
+      setConfirmClearKey(false);
+      return;
+    }
+    try {
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch {
+      // ⚠️ **「無い」側へ倒す**＝消せたのだから無い。
+      setAiConnected(false);
+      setKeyError(apiKeyMessage.API_KEY_DELETED_UNVERIFIED);
     } finally {
       setKeyBusy(false);
       setConfirmClearKey(false);
