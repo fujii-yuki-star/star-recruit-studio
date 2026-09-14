@@ -1679,6 +1679,34 @@ pub async fn extract_video_frame(
     })?
 }
 
+/// 前に切り出した絵の**残骸**を片づける（#1137）。
+///
+/// ⚠️ **`-y`（上書き）だけでは足りない**＝尺の外を指すと FFmpeg は**何も書かない**ので、
+/// 残骸があると「出来たか」の判定（`produced_frame`）が**前回の絵**を見て成功と誤判定する。
+/// ⚠️ **片づけられなければ断る**＝黙って進むと、また同じ誤判定に戻る（§2-5＝次の行動を出す）。
+/// ⚠️ **前提＝`out` の名前がその回に1つだけであること**（#1139 レビュー由来 ℹ️）。
+/// 採番は呼ぶ側の単一責務（`assetImport.ts` の `reserveAssetId`）が担保していて、
+/// **固定の名前で呼ぶ経路を1本足した瞬間に**、片づけ→起こす→数える の間に他が割り込める。
+fn clear_stale_frame(out: &std::path::Path) -> Result<(), String> {
+    if !out.exists() {
+        return Ok(());
+    }
+    fs::remove_file(out).map_err(|e| {
+        export_failure(
+            format!("frame stale remove: {e}"),
+            "前に切り出した写真を片づけられませんでした。アプリを開き直してから、もう一度お試しください。",
+        )
+    })
+}
+
+/// **本当に切り出せたか**（#1137）。
+///
+/// ⚠️ **あるだけでは数えない**＝作りかけの 0 バイトを「出来た」と読むと、
+/// 中身の無い写真が素材として増える。
+fn produced_frame(out: &std::path::Path) -> bool {
+    fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
+}
+
 fn extract_video_frame_impl(
     app: tauri::AppHandle,
     project_id: String,
@@ -1709,6 +1737,14 @@ fn extract_video_frame_impl(
             )
         })?;
     }
+    // ⚠️ **残骸を先に片づける**（#1137）＝`-y` は上書きだが、**尺の外を指すと FFmpeg は何も書かない**。
+    // 同じ名前のファイルが残っていると、下の `out.exists()` が**前回の絵**を見て**成功と誤判定**し、
+    // **まったく別のコマが「切り出した絵」として貼り付く**
+    //（設定した意味どおりに結果が出ない＝ADR-0026①／黙って別の結果にしない＝同④）。
+    // ⚠️ **踏む道は実在する**＝素材番号の予約は**アプリの起動ごとに消える**ので
+    //（`assetImport.ts` の `reservedByProject`）、番号が空いた状態で**起動し直す**と
+    // 同じ名前が再発行され、ディスクには前回の PNG が残っている。
+    clear_stale_frame(&out)?;
     let ffmpeg = resolve_ffmpeg(&app);
     let seek = frame_seek_args(at_sec);
     let mut args: Vec<String> = vec!["-y".into()];
@@ -1734,7 +1770,11 @@ fn extract_video_frame_impl(
         )
     })?;
     // ⚠️ **出来ていないのに成功にしない**＝尺の外を指すと FFmpeg は 0 個の絵で正常終了する。
-    if !out.exists() {
+    // ⚠️ **中身も見る**（#1137）＝作りかけの 0 バイトを「出来た」と数えない。
+    if !produced_frame(&out) {
+        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの写真を
+        // 利用者のフォルダへ置き去りにしない（この関数だけで閉じる＝書き出し側の流儀と揃える）。
+        let _ = fs::remove_file(&out);
         return Err(export_failure(
             format!("frame extract produced nothing at {at_sec}"),
             "その時間には映像がありませんでした。時間を少し戻してもう一度お試しください。",
@@ -7051,5 +7091,99 @@ mod staged_output_tests {
         }
         assert!(out.exists(), "成功した動画を後片づけで消さない");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **残骸を成功と読まない**（#1137）。
+    ///
+    /// ⚠️ **`-y` だけでは足りない**＝尺の外を指すと FFmpeg は**何も書かない**ので、
+    /// 同じ名前のファイルが残っていると**前回の絵**を「切り出せた」と読んでしまう。
+    #[test]
+    fn 残骸は先に片づける() {
+        let p = std::env::temp_dir().join(format!("stario-stale-{}.png", std::process::id()));
+        fs::write(&p, b"old").unwrap();
+        assert!(clear_stale_frame(&p).is_ok(), "片づけに失敗した");
+        assert!(!p.exists(), "残骸が残っている＝前回の絵を成功と読む");
+    }
+
+    /// 残骸が無いときは、何もしないで通す（毎回の空振りで断らない）。
+    #[test]
+    fn 残骸が無ければ何もしない() {
+        let p = std::env::temp_dir().join(format!("stario-nostale-{}.png", std::process::id()));
+        let _ = fs::remove_file(&p);
+        assert!(clear_stale_frame(&p).is_ok());
+    }
+
+    /// **あるだけでは数えない**＝作りかけの 0 バイトを「出来た」と読まない（#1137）。
+    #[test]
+    fn 中身の無い絵は出来ていないと数える() {
+        let p = std::env::temp_dir().join(format!("stario-empty-{}.png", std::process::id()));
+        fs::write(&p, b"").unwrap();
+        assert!(!produced_frame(&p), "0 バイトを出来たと数えている");
+        fs::write(&p, b"x").unwrap();
+        assert!(produced_frame(&p), "中身があるのに出来ていないと数えている");
+        let _ = fs::remove_file(&p);
+    }
+
+    /// 関数の**範囲だけ**を切り出す（#1139 レビュー由来 🟡）。
+    ///
+    /// ⚠️ **切らずに見ると、検査が自分の文字列に当たって恒真になる**＝末尾まで含めると
+    /// **この検査自身**が入るので、`contains("if !produced_frame(&out)")` は
+    /// **ここに書いた文字列**に当たって絶対に落ちない。実際に確かめた＝本体を
+    /// `if !out.is_file()` へ変えても**緑のまま**通った（0 バイトの守りを消しても気づけない）。
+    fn 本体の範囲(src: &str, name: &str, next: &str) -> String {
+        let at = src
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} が見つからない"));
+        let rest = &src[at..];
+        let end = rest
+            .find(next)
+            .unwrap_or_else(|| panic!("{name} の次に来るはずの {next} が見つからない"));
+        rest[..end].to_string()
+    }
+
+    /// **繋いだことを留める**（#1137）。
+    ///
+    /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、
+    /// `clear_stale_frame` も `produced_frame` も**単独の検査は緑のまま**通る。
+    /// 切り出しの本体は ffmpeg を起動するので検査から叩けないため、**ソースを読んで**
+    /// ①残骸を片づけてから ffmpeg を起こす ②「あるか」ではなく「出来たか」で見る、を留める。
+    #[test]
+    fn 切り出しの本体が二つを通っている() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        let body = 本体の範囲(SRC, "fn extract_video_frame_impl(", "fn frame_seek_args");
+        let clear = body
+            .find("clear_stale_frame(&out)?")
+            .expect("残骸を片づけていない");
+        let spawn = body
+            .find("let ffmpeg = resolve_ffmpeg(")
+            .expect("ffmpeg を起こす行が無い");
+        assert!(clear < spawn, "片づける前に ffmpeg を起こしている");
+        assert!(
+            body.contains("if !produced_frame(&out)"),
+            "「出来たか」で見ていない"
+        );
+        assert!(
+            !body.contains("!out.exists()"),
+            "「あるか」で成功を判定している＝前回の絵を成功と読む"
+        );
+        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの写真を
+        // 利用者のフォルダへ置き去りにしない。**判定より後ろ**に無ければ意味がない。
+        let judge = body
+            .find("if !produced_frame(&out)")
+            .expect("「出来たか」で見ていない");
+        let sweep = body
+            .find("let _ = fs::remove_file(&out);")
+            .expect("断ったのに 0 バイトの写真を置き去りにしている");
+        assert!(
+            judge < sweep,
+            "片づけが判定より前にある（出口の後始末になっていない）"
+        );
+    }
+
+    #[test]
+    fn 無いものは出来ていないと数える() {
+        let p = std::env::temp_dir().join(format!("stario-none-{}.png", std::process::id()));
+        let _ = fs::remove_file(&p);
+        assert!(!produced_frame(&p));
     }
 }
