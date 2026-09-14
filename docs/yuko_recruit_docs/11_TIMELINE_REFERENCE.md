@@ -16,7 +16,7 @@
 
 **場面（`parts`/`scenes`）を持たない別文書**。キャンバスは常に自由配置＝**FREE（空間の自由）× タイムライン（時間の自由）**。**AI はこの形式を生成しない**（AI の関与は場面形式まで＝ADR-0007 の単一パイプラインは場面側で不変）。
 
-schemaVersion ●（現行 `"1.10"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有＝`creditDisplay`〔ADR-0025・#359〕もそのまま効く。タイムライン形式は毎フレーム描くので判定は `creditTextAt`＝秒どおり） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
+schemaVersion ●（現行 `"1.11"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有＝`creditDisplay`〔ADR-0025・#359〕もそのまま効く。タイムライン形式は毎フレーム描くので判定は `creditTextAt`＝秒どおり） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`） / markers ○（`TimelineMarker[]`＝**目印**・#356 ①。時間の一点に印とメモを置くだけで、**動画には出ない**〔描画にも書き出しにも現れない＝作業用〕。⚠️ **トラックには属さない**＝時間だけを持つので、列を消しても帯を動かしても**そこに残る**〔目印は部品の属性ではなく「この時刻でこうしたい」という作業の覚え〕。⚠️ **`timeSec` は動画の頭からの秒**＝`Keyframe`〔クリップの先頭から〕とそこが違う）
 
 **Track**: id ●（`track_NNN`・§2.1） / kind ●（enum `visual`／`audio`＝置けるクリップの種別を決める） / name ○（未指定＝種別＋連番の自動名） / hidden ○（描画・書き出しから除外＝音声は無音） / locked ○（移動・トリムを禁止）。**配列の順＝重ね順（後ろほど手前）**・UI では上が手前に見せる。
 

@@ -169,6 +169,11 @@ export function createAnimationId(existingIds: readonly string[]): string {
   return nextNumberedId('anim', existingIds);
 }
 
+/** marker_NNN を発行する（§2.1・**タイムライン形式**の目印 id・project 内一意・#356 ①）。 */
+export function createMarkerId(existingIds: readonly string[]): string {
+  return nextNumberedId('marker', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,
