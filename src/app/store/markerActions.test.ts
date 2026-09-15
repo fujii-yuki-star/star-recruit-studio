@@ -72,11 +72,51 @@ describe('目印を置く（#1149 ①・ADR-0040）', () => {
   });
 
   // ⚠️ **再生中も置ける**（ADR-0040＝利用者判断）＝業界の型で主用途は「見ながら置く」。
+  //
+  // ⚠️ **「止めもしない」を必ず見る**（#1161 レビュー由来 🔴）＝もとはこの検査が
+  // `markers` の件数しか見ておらず、**名前が主張している側を一度も見ていない門番**だった。
+  // `commit` は無条件で `isPlaying: false` を書くので、**1つ置いた瞬間に止まって**いた
+  //＝「見ながら次々置く」が成り立たず、ADR-0040 が無効になっていた。
   it('再生中でも置ける（止めもしない）', async () => {
     await open(doc());
     useTimelineStore.setState({ isPlaying: true, playheadSec: 3 });
     useTimelineStore.getState().addMarkerAtPlayhead();
     expect(useTimelineStore.getState().doc!.markers, '再生中に置けていない').toHaveLength(1);
+    expect(useTimelineStore.getState().isPlaying, '置いた瞬間に再生が止まっている').toBe(true);
+  });
+
+  it('再生中に何度も置ける（次々置くのが主用途）', async () => {
+    await open(doc());
+    useTimelineStore.setState({ isPlaying: true, playheadSec: 3 });
+    useTimelineStore.getState().addMarkerAtPlayhead();
+    useTimelineStore.setState({ playheadSec: 5 });
+    useTimelineStore.getState().addMarkerAtPlayhead();
+    const st = useTimelineStore.getState();
+    expect(st.doc!.markers, '2つめが置けていない').toHaveLength(2);
+    expect(st.isPlaying, '途中で再生が止まっている').toBe(true);
+  });
+
+  // ⚠️ **再生中は「寄せ」だけでは印が点かない**（#1161 レビュー由来 🟡）＝時計が毎フレーム
+  // **生の秒**で上書きするので、格子に落ちた目印の時刻とは実質一致しない。
+  // 「どれが自分の置いた印か」は**選んだ相手**で示す。
+  it('置いた目印を、選んだ相手として覚える', async () => {
+    await open(doc());
+    useTimelineStore.setState({ isPlaying: true, playheadSec: 4.017 });
+    useTimelineStore.getState().addMarkerAtPlayhead();
+    const st = useTimelineStore.getState();
+    expect(st.selectedMarkerId, '置いた目印を覚えていない').toBe(st.doc!.markers![0]!.id);
+  });
+
+  // ⚠️ **消す・メモは止める**＝走らせながら消す・打つのは型として無いので、帯の削除と揃える
+  //（ADR-0040 決定3 の射程は「置く」「ここへ動かす」だけ）。
+  it('消す・メモは再生を止める（帯の削除と揃える）', async () => {
+    await open(doc({ markers: [{ id: 'marker_001', timeSec: 3 }] }));
+    useTimelineStore.setState({ isPlaying: true });
+    useTimelineStore.getState().setMarkerTextFor('marker_001', 'あ');
+    expect(useTimelineStore.getState().isPlaying, 'メモで止まっていない').toBe(false);
+    useTimelineStore.setState({ isPlaying: true });
+    useTimelineStore.getState().removeMarkerById('marker_001');
+    expect(useTimelineStore.getState().isPlaying, '消したのに止まっていない').toBe(false);
   });
 });
 
@@ -110,6 +150,43 @@ describe('目印を動かす（#1149 ①②）', () => {
     useTimelineStore.getState().moveMarkerToPlayhead('marker_001');
     expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
     expect(useTimelineStore.getState().doc!.markers!.find((m) => m.id === 'marker_001')!.timeSec).toBe(5);
+  });
+
+  // ⚠️ **動かす側も止めない・寄せる・覚える**（#1161 レビュー由来 🔴・ℹ️）＝
+  // 置く側だけ直していたので、動かした目印には「いまここ」が付かなかった。
+  it('動かしても再生は止まらず、動かした先へ寄せて、その目印を覚える', async () => {
+    await open(twoMarkers());
+    useTimelineStore.setState({ isPlaying: true, playheadSec: 5.017 });
+    useTimelineStore.getState().moveMarkerToPlayhead('marker_001');
+    const st = useTimelineStore.getState();
+    expect(st.isPlaying, '動かしたら再生が止まった').toBe(true);
+    const moved = st.doc!.markers!.find((m) => m.id === 'marker_001')!;
+    expect(st.playheadSec, '動かした先へ寄っていない').toBe(moved.timeSec);
+    expect(st.selectedMarkerId).toBe('marker_001');
+  });
+
+  // ⚠️ **前の操作の返事を残さない**（#1161 レビュー由来 ℹ️）＝空振り経路は `commit` を通らないので、
+  // 直前の断りが出たままだと**この操作への返事に見える**。
+  it('空振りでも、前の断りは消える', async () => {
+    await open(twoMarkers());
+    useTimelineStore.setState({ playheadSec: 7 });
+    useTimelineStore.getState().moveMarkerToPlayhead('marker_001'); // 断りが出る
+    expect(useTimelineStore.getState().editBlocked).not.toBeNull();
+    useTimelineStore.setState({ playheadSec: 3 });
+    useTimelineStore.getState().moveMarkerToPlayhead('marker_001'); // もうそこに居る＝空振り
+    expect(useTimelineStore.getState().editBlocked, '前の断りが残っている').toBeNull();
+  });
+
+  // ⚠️ **書き出し中は入口で断る**（#1161 レビュー由来 ℹ️）＝重なり判定が先だと、
+  // 書き出し中に「もう目印があります」という**見当違いの理由**が返る。
+  it('書き出し中は、書き出しの理由で断る（見当違いの理由を返さない）', async () => {
+    await open(twoMarkers());
+    useTimelineStore.setState({
+      playheadSec: 7,
+      exportRun: { phase: 'encoding', percent: 0, message: null, cancelling: false },
+    });
+    useTimelineStore.getState().moveMarkerToPlayhead('marker_001');
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.exporting);
   });
 
   it('同じメモを書き直しても履歴が積まれない', async () => {

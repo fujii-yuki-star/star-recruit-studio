@@ -320,6 +320,15 @@ export interface TimelineState {
   /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
   history: HistoryStacks<TimelineProject>;
   /**
+   * **最後に置いた／動かした目印**（#1161 レビュー由来 🟡）。時間軸の旗と一覧の枠が指す先。
+   *
+   * ⚠️ **再生位置の一致では足りない**＝再生中は時計が毎フレーム**生の秒**で上書きするので、
+   * 格子に落ちた目印の時刻とは実質一致しない（`markerTimeEq` の許容は `1e-6`）。
+   * 「置いたのにどれが自分の印か分からない」を、**選んだ相手を覚える**ことで解く（ADR-0040 決定2 の目的）。
+   * ⚠️ **文書には持たない**＝選択は画面の状態（ADR-0033 と同じ考え方）。保存も履歴も関係しない。
+   */
+  selectedMarkerId: string | null;
+  /**
    * 置けなかった理由と、**どの欄の話か**（#869・ADR-0034 決定10）。
    *
    * ⚠️ **理由と場所は1つで運ぶ**＝別々に持つと片方だけ更新され、**前の操作の場所に
@@ -941,6 +950,7 @@ function emptyState() {
     audioSrcByKey: {} as Record<string, string>,
     _audioTried: new Set<string>(),
     history: emptyHistory<TimelineProject>(),
+    selectedMarkerId: null,
     editBlocked: null as { reason: EditBlockedReason; at: BlockTarget } | null,
     voiceError: null as string | null,
     importError: null as string | null,
@@ -1351,18 +1361,32 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addMarkerAtPlayhead: () => {
     const doc = get().doc;
     if (!doc) return;
+    // ⚠️ **書き出し中は入口で断る**（#1161 レビュー由来 ℹ️）＝`commit` 任せだと、
+    // **同じ時刻に既にある**経路は `commit` を通らないので**断りだけ出ずに再生位置が動く**。
+    // ボタンは `busyGuard()` で塞がっているが、**キーで置く入口が増えた瞬間に踏む**（ADR-0040 の未解決論点）。
+    if (blockedByExport(set, get)) return;
     // ⚠️ **コマの格子へ落とす**＝目印も再生位置を使うものなので、半端な位置に置かない
     //（`ここで分ける`・`この瞬間で絵を止める` と同じ流儀＝ADR-0023）。
     const at = frameTimeSec(doc, get().playheadSec);
     const r = addMarker(doc, at);
     // 同じ時刻に既にあれば `addMarker` は文書を変えない＝そのときは履歴にも積まない。
-    if (r.doc !== doc) commit(set, get, r.doc);
+    // ⚠️ **再生を止めない**（#1161 レビュー由来 🔴・ADR-0040 決定3）＝`commit` は無条件で
+    // `isPlaying: false` を書くので、**渡さないと1つ置いた瞬間に止まる**＝「見ながら次々置く」が
+    // 成り立たない（決定21 の頃と体験が変わらない）。`extra` は後から展開されるので効く。
+    // ⚠️ **止めないのは「置く」「ここへ動かす」だけ**＝消す・メモは帯の削除と同じく止まる
+    //（走らせながら消す・打つのは型として無いので、揃える方を採る）。
+    if (r.doc !== doc) commit(set, get, r.doc, { isPlaying: get().isPlaying });
     // ⚠️ **置いた（既にあった）目印へ再生位置を寄せる**（#1149 ①・ADR-0040 決定2）＝
     // 再生位置は**生の秒**、目印は**格子に落ちた秒**なので、寄せないと `markerTimeEq` が
     // 一致せず「**いまここ**」の印が付かない＝置いた直後にどれが自分の印か分からない。
     // ⚠️ **二度押しが「無反応」にならないのもこれ**＝既にある目印が選ばれた状態になる
     //（ADR-0040＝断らずに「その目印を選ぶ」側へ倒す）。
-    set({ playheadSec: at });
+    // ⚠️ **`setPlayhead` を使わない**（#1161 レビュー由来）＝あちらは時計を測り直させるので、
+    // 押すたびに**わずかに巻き戻った時刻から測り直す**ことになり、押すほど絵が音に対して遅れる
+    //（音は 0.25 秒まで直しに行かない）。直に書けば寄せ幅は最大1コマで、音は跳ねない。
+    // ⚠️ **選んだ相手を覚える**（レビュー由来 🟡）＝再生中は次のフレームで生の秒に上書きされるので、
+    // 再生位置の一致だけに頼ると「いまここ」の印が点かない。
+    set({ playheadSec: at, selectedMarkerId: r.markerId, editBlocked: null });
   },
   setMarkerTextFor: (markerId, text) => {
     const doc = get().doc;
@@ -1372,6 +1396,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   moveMarkerToPlayhead: (markerId) => {
     const doc = get().doc;
     if (!doc) return;
+    // ⚠️ **書き出しの門を先に見る**（#1161 レビュー由来 ℹ️）＝重なり判定が先だと、
+    // 書き出し中に**「もう目印があります」という見当違いの理由**が返る。
+    if (blockedByExport(set, get)) return;
     // ⚠️ **置くときと同じ規則**＝コマの格子へ落とす（`frameTimeSec`・ADR-0023）。
     const at = frameTimeSec(doc, get().playheadSec);
     // ⚠️ **動かせないなら理由を出す**（#1149 ①）＝重なる先へは動かせないので、黙って返すと
@@ -1380,12 +1407,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const blocked = moveMarkerBlocked(doc, markerId, at);
     if (blocked) {
       const reason = EDIT_BLOCKED.markerExists;
-      set({ editBlocked: { reason, at: blockTargetFor(reason, PANEL_ID.arrange) } });
+      set({ editBlocked: { reason, at: blockTargetFor(reason, PANEL_ID.arrange) }, selectedMarkerId: markerId });
       return;
     }
     const next = moveMarker(doc, markerId, at);
     // もうそこに居るなら `moveMarker` が同じ文書を返す＝履歴にも積まない（#1149 ②）。
-    if (next !== doc) commit(set, get, next);
+    // ⚠️ **ここも再生を止めない**（上と同じ理由）。
+    if (next !== doc) commit(set, get, next, { isPlaying: get().isPlaying });
+    // ⚠️ **動かした先へも寄せる**（#1161 レビュー由来 ℹ️）＝置く側だけ寄せていたので、
+    // 「ここへ動かす」では**動かした目印に「いまここ」が付かない**（置く側で潰した問題が残っていた）。
+    // ⚠️ **空振りでも前の返事は消す**＝`commit` を通らない経路なので、直前の断りが出たままになり、
+    // **この操作への返事に見える**。
+    set({ playheadSec: at, selectedMarkerId: markerId, editBlocked: null });
   },
   removeMarkerById: (markerId) => {
     const doc = get().doc;
