@@ -86,8 +86,8 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
-import { addMarker, moveMarker, removeMarker, setMarkerText } from "../../domain/timeline/markers";
-import { extractVideoFrame } from "../../infrastructure/assetFs";
+import { addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
+import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/assetFs";
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { userFacingMessage } from "../userFacingError";
@@ -497,10 +497,12 @@ export interface TimelineState {
   /**
    * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
    *
-   * ⚠️ **同じ時刻には重ねない**＝既にあるときは**何もしない**（増やさない・履歴にも積まない）。
-   * その目印は**時間軸の上で太って見える**（再生位置と同じ時刻＝`timeline-marker--current`）ので、
-   * 押しても無反応には見えない（#1138 レビュー由来 🟡＝以前ここは「それを指す」と書いていたが、
-   * 指す実装は無かった＝**書いたのに無い**状態だった）。
+   * ⚠️ **同じ時刻には重ねない**＝既にあるときは増やさない（履歴にも積まない）。
+   * ⚠️ **ただし無反応にはしない**（#1149 ①・ADR-0040）＝置いた／既にあった目印の時刻へ
+   * **再生位置を寄せる**ので、その目印が「いまここ」の見た目（`timeline-marker--current`）になる。
+   * 寄せないと、再生位置は**生の秒**・目印は**格子に落ちた秒**なので一致せず、
+   * **置いた直後にどれが自分の印か分からない**。
+   * ⚠️ **再生中も置ける**（ADR-0040）＝「押した、その瞬間」が仕様そのものなのでずれようがない。
    */
   addMarkerAtPlayhead: () => void;
   /** 目印のメモを書き換える（上限で切る＝開けない文書を作らない）。 */
@@ -1300,13 +1302,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set({ isImporting: true, importError: null });
     try {
       const relPath = await extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName);
+      // ⚠️ **切り出した写真を置き去りにしない**（#1149 ④）＝ここから先の断りは
+      // **切り出しに成功したあと**なので、片づけないと `assets/` にファイルだけが残る
+      //（素材にも履歴にも載らないので、画面から片づける道が無い）。しかも `FREEZE_CHANGED` は
+      // 「待っている間に帯を触る」という**実在の筋**なので、断るたびに増える。
+      // ⚠️ Rust 側は自分が失敗したときの出口を塞いである（#1137）＝**TS 側の出口もそろえる**。
+      const sweep = (): void => { void deleteProjectFiles(doc.projectId, [relPath]); };
       // ⚠️ **待っている間に文書が変わりうる**＝別の動画を開いていたら、そちらへは何も書かない。
       const cur = get().doc;
-      if (!cur || cur.projectId !== doc.projectId) return;
+      if (!cur || cur.projectId !== doc.projectId) { sweep(); return; }
       // ⚠️ **待っている間に書き出しが始まっていたら足さない**＝`commit` が断るので、
       // 先にこちらで理由を出す（「終わってから」だけ出て切り出しが消えた、を作らない）。
       if (isTimelineExportBusy(get().exportRun.phase)) {
         set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+        sweep();
         return;
       }
       // ⚠️ **帯の側も見直す**＝`freezeFrameAt` は先頭で同じ関門を通すので、
@@ -1316,6 +1325,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (!r.ok) {
         const reason = FREEZE_BLOCKED_REASON[r.reason];
         set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+        sweep();
         return;
       }
       // ⚠️ **止めた絵を選び直す**（同レビュー 🟡）＝「分ける」と同じ規則。案内（伸ばしたいときは
@@ -1342,10 +1352,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     // ⚠️ **コマの格子へ落とす**＝目印も再生位置を使うものなので、半端な位置に置かない
-    //（`ここで分ける`・`この瞬間で絵を止める` と同じ流儀＝ADR-0034 決定6）。
-    const r = addMarker(doc, frameTimeSec(doc, get().playheadSec));
+    //（`ここで分ける`・`この瞬間で絵を止める` と同じ流儀＝ADR-0023）。
+    const at = frameTimeSec(doc, get().playheadSec);
+    const r = addMarker(doc, at);
     // 同じ時刻に既にあれば `addMarker` は文書を変えない＝そのときは履歴にも積まない。
     if (r.doc !== doc) commit(set, get, r.doc);
+    // ⚠️ **置いた（既にあった）目印へ再生位置を寄せる**（#1149 ①・ADR-0040 決定2）＝
+    // 再生位置は**生の秒**、目印は**格子に落ちた秒**なので、寄せないと `markerTimeEq` が
+    // 一致せず「**いまここ**」の印が付かない＝置いた直後にどれが自分の印か分からない。
+    // ⚠️ **二度押しが「無反応」にならないのもこれ**＝既にある目印が選ばれた状態になる
+    //（ADR-0040＝断らずに「その目印を選ぶ」側へ倒す）。
+    set({ playheadSec: at });
   },
   setMarkerTextFor: (markerId, text) => {
     const doc = get().doc;
@@ -1356,8 +1373,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     // ⚠️ **置くときと同じ規則**＝コマの格子へ落とす（`frameTimeSec`・ADR-0023）。
-    const next = moveMarker(doc, markerId, frameTimeSec(doc, get().playheadSec));
-    // 重なる先へは動かさない＝`moveMarker` が文書を変えないので、履歴にも積まない。
+    const at = frameTimeSec(doc, get().playheadSec);
+    // ⚠️ **動かせないなら理由を出す**（#1149 ①）＝重なる先へは動かせないので、黙って返すと
+    // **押しても無反応**になる。目印は押すと再生位置がそこへ跳ぶのが主導線なので、
+    // **跳んだ直後に「ここへ動かす」を押す**筋を普通に踏む（そこには必ず目印がいる）。
+    const blocked = moveMarkerBlocked(doc, markerId, at);
+    if (blocked) {
+      const reason = EDIT_BLOCKED.markerExists;
+      set({ editBlocked: { reason, at: blockTargetFor(reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const next = moveMarker(doc, markerId, at);
+    // もうそこに居るなら `moveMarker` が同じ文書を返す＝履歴にも積まない（#1149 ②）。
     if (next !== doc) commit(set, get, next);
   },
   removeMarkerById: (markerId) => {

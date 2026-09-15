@@ -83,23 +83,37 @@ export function addMarker(doc: TimelineProject, timeSec: number): { doc: Timelin
  * 断るのではなく収める（打っている最中に赤くしない）。
  */
 export function setMarkerText(doc: TimelineProject, markerId: string, text: string): TimelineProject {
+  let changed = false;
   const markers = (doc.markers ?? []).map((m) => {
     if (m.id !== markerId) return m;
     const next = text.slice(0, MARKER_TEXT_MAX);
     // ⚠️ **空なら項目ごと落とす**（#1138 レビュー由来 ℹ️）＝正典は「**未指定＝位置だけの目印**」と
     // 言っているので、空文字を残すと**同じ状態に2通りの書き方**ができる（§2-7）。
     if (next === '') {
+      if (m.text === undefined) return m;
+      changed = true;
       const { text: _text, ...rest } = m;
       return rest;
     }
+    if (m.text === next) return m;
+    changed = true;
     return { ...m, text: next };
   });
-  return { ...doc, markers };
+  // ⚠️ **変わらなければ同じ文書を返す**（#1149 ②・ADR-0020／ADR-0034 決定20）＝呼ぶ側は
+  // `if (next !== doc)` で空振りを弾く作りなので、ここで契約を破ると**何も変わらないのに履歴が積まれる**。
+  // `Ctrl+Z` を押しても画面が変わらず、押し続けると**取り消しでしか戻せない編集が押し出される**。
+  return changed ? { ...doc, markers } : doc;
 }
 
-/** 目印を消す。 */
+/**
+ * 目印を消す。
+ *
+ * ⚠️ **無ければ同じ文書を返す**（#1149 ②）＝`setMarkerText`／`moveMarker` と同じ契約。
+ * 片方だけ直す形をこの repo で繰り返しているので、**3つとも同じ規則**にしてある。
+ */
 export function removeMarker(doc: TimelineProject, markerId: string): TimelineProject {
-  return { ...doc, markers: (doc.markers ?? []).filter((m) => m.id !== markerId) };
+  const markers = (doc.markers ?? []).filter((m) => m.id !== markerId);
+  return markers.length === (doc.markers ?? []).length ? doc : { ...doc, markers };
 }
 
 /**
@@ -116,5 +130,24 @@ export function moveMarker(doc: TimelineProject, markerId: string, timeSec: numb
   const at = Math.max(0, timeSec);
   const clash = (doc.markers ?? []).find((m) => m.id !== markerId && m.timeSec === at);
   if (clash) return doc;
+  // ⚠️ **もうそこに居るなら同じ文書を返す**（#1149 ②）＝「置く → 一覧の時刻を押して再生位置を合わせる →
+  // 再生位置へ動かす」は普通に踏む筋で、ここで新しい文書を返すと**何も変わらないのに履歴が積まれる**。
+  const me = (doc.markers ?? []).find((m) => m.id === markerId);
+  if (!me || me.timeSec === at) return doc;
   return { ...doc, markers: (doc.markers ?? []).map((m) => (m.id === markerId ? { ...m, timeSec: at } : m)) };
+}
+
+/**
+ * その目印を**そこへ動かせるか**（`null`＝動かせる）。
+ *
+ * ⚠️ **押す前に断るために切り出す**（#1149 ①）＝動かせないのに**押せる見た目のまま無反応**だと、
+ * 「押しても何も起きない」を作る（§2-5）。呼ぶ側が理由を出せるよう、判定だけを外へ出す。
+ */
+export function moveMarkerBlocked(
+  doc: TimelineProject,
+  markerId: string,
+  timeSec: number,
+): 'markerExists' | null {
+  const at = Math.max(0, timeSec);
+  return (doc.markers ?? []).some((m) => m.id !== markerId && m.timeSec === at) ? 'markerExists' : null;
 }

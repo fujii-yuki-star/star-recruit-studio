@@ -227,3 +227,74 @@ describe('freezeSelectedClip（この瞬間で絵を止める）', () => {
     expect(vi.mocked(assetFsMod.extractVideoFrame)).not.toHaveBeenCalled();
   });
 });
+
+// 断った経路で、切り出した写真を**置き去りにしない**（#1149 ④）。
+//
+// ⚠️ **ここから先の断りは「切り出しに成功したあと」**＝片づけないと `assets/` にファイルだけが残り、
+// 素材にも履歴にも載らないので**画面から片づける道が無い**。しかも `FREEZE_CHANGED` は
+// 「待っている間に帯を触る」という**実在の筋**なので、断るたびに増える。
+// ⚠️ Rust 側は自分が失敗したときの出口を塞いである（#1137）＝**TS 側の出口もそろえる**。
+describe('断ったら、切り出した写真を片づける（#1149 ④）', () => {
+  const sweepSpy = (): ReturnType<typeof vi.spyOn> =>
+    vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(1);
+
+  it('待っている間に別の動画を開いていたら、片づけて何も書かない', async () => {
+    await open(doc());
+    const del = sweepSpy();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockReturnValue(
+      new Promise<string>((r) => { release = r; }),
+    );
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    const running = useTimelineStore.getState().freezeSelectedClip(4);
+    useTimelineStore.getState().closeTimelineProject(); // 別の動画へ移った
+    release('assets/asset_002.png');
+    await running;
+    expect(del).toHaveBeenCalledWith('proj_20260914_001', ['assets/asset_002.png']);
+  });
+
+  it('待っている間に書き出しが始まっていたら、片づけて断る', async () => {
+    await open(doc());
+    const del = sweepSpy();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockReturnValue(
+      new Promise<string>((r) => { release = r; }),
+    );
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    const running = useTimelineStore.getState().freezeSelectedClip(4);
+    useTimelineStore.setState({ exportRun: { phase: 'encoding', percent: 0, message: null, cancelling: false } });
+    release('assets/asset_002.png');
+    await running;
+    expect(del).toHaveBeenCalledWith('proj_20260914_001', ['assets/asset_002.png']);
+    expect(useTimelineStore.getState().doc?.assets).toHaveLength(1); // 素材は増えていない
+  });
+
+  it('待っている間に帯が変わっていたら、片づけて断る（実在の筋）', async () => {
+    await open(doc());
+    const del = sweepSpy();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'extractVideoFrame').mockReturnValue(
+      new Promise<string>((r) => { release = r; }),
+    );
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    const running = useTimelineStore.getState().freezeSelectedClip(4);
+    // 待っている間に帯を動かす＝切れ目と止めた絵が別の瞬間になるので断られる。
+    useTimelineStore.setState((st) => ({
+      doc: st.doc ? { ...st.doc, clips: st.doc.clips.map((c) => ({ ...c, startSec: 2 })) } : st.doc,
+    }));
+    release('assets/asset_002.png');
+    await running;
+    expect(del).toHaveBeenCalledWith('proj_20260914_001', ['assets/asset_002.png']);
+    expect(useTimelineStore.getState().doc?.assets).toHaveLength(1);
+  });
+
+  // ⚠️ **うまくいったときは片づけない**＝片づけると、いま貼った写真を消すことになる。
+  it('止められたときは片づけない', async () => {
+    await open(doc());
+    const del = sweepSpy();
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    await useTimelineStore.getState().freezeSelectedClip(4);
+    expect(del).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().doc?.assets).toHaveLength(2);
+  });
+});
