@@ -233,6 +233,31 @@ export function firstFrameBoundary(scene: Scene, lineDurations: Record<string, n
 }
 
 /**
+ * 場面の**先頭フレームを描くための入力**（`layoutScene` の第3引数にそのまま渡す）。
+ *
+ * ⚠️ **「同じ描画核を通す」だけでは足りない**（#1152・α 出口監査 🟡）＝場面カードの見本は
+ * `layoutScene(scene, template)` を**入力なし**で呼んでいたので、字幕は `scene.texts.subtitle` を描き、
+ * **掛け合い**（`scene.lines`）や**頭に間**がある場面では**動画に一度も出ない字幕**をカードだけが出していた
+ * （間なら `subtitleText: null` で消えるべき所に出る）。
+ * 大きい方のプレビューと書き出しは**先頭の正準セグメント**から渡している（ADR-0001）。
+ *
+ * ⚠️ **写して増やさない**＝同じ組み立てが `PreviewScreen`／`SceneEditScreen`／`buildExportScenes` に
+ * 既にある。ここへ寄せて、見本もその1つを呼ぶ（`CLAUDE.md` §6）。
+ */
+export function firstFrameLayoutOptions(
+  scene: Scene,
+  lineDurations: Record<string, number> = {},
+): { subtitleText: string | null | undefined; subtitleSegment: SceneSegmentSpec | undefined } {
+  const boundary = firstFrameBoundary(scene, lineDurations);
+  return {
+    // ⚠️ **`undefined` は「テンプレの既定に任せる」**＝`null`（間＝消す）と**別物**なので潰さない
+    //（潰すと、単独 narration の場面で字幕が消える／間で字幕が出る、のどちらかが起きる）。
+    subtitleText: boundary.subtitleText,
+    subtitleSegment: sceneSegmentSpecs(scene, lineDurations)[0],
+  };
+}
+
+/**
  * 場面の「最終フレーム」の実効状態（切替プレビュー A＝前場面の末尾フレーム用・#408 Part 2 レビュー P1）。
  * sceneSegmentSpecs の末尾セグメントに一致＝最終行が startSec===durationSec で 0 秒なら直前の生存行を採る（書き出しと同じ）。
  */

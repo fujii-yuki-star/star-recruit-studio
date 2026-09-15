@@ -16,6 +16,8 @@ import { useProjectStore } from "../store/projectStore";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
+import { firstFrameLayoutOptions } from "../../domain/project/lineTimeline";
+import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 
@@ -29,11 +31,22 @@ export const SceneThumb = memo(function SceneThumb({ scene, template }: { scene:
   // テンプレ既定素材（ADR-0021）は場面素材に無い id のフォールバック（`ScenePreview` と同じ順）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  // ⚠️ **先頭フレームの入力を渡す**（#1152・α 出口監査 🟡・ADR-0001）＝渡さないと字幕は
+  // `scene.texts.subtitle` を描くので、**掛け合い**や**頭に間**がある場面で
+  // **動画に一度も出ない字幕**を見本だけが出す（間なら消えるべき所に出る）。
+  // ⚠️ **大きい方のプレビュー・書き出しと同じ入力**＝組み立ては `firstFrameLayoutOptions` に1つ。
+  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   // ⚠️ **クレジットは出さない**＝小さすぎて読めないうえ、**出す/出さないは場面の位置で決まる**
   // （`sceneCreditVisibility`）ので、カードごとに出し分けると「なぜこの場面だけ」が読めない。
-  const svg = layoutToSvg(layoutScene(scene, template), {
+  const first = firstFrameLayoutOptions(scene, lineDurationsFromAudio(scene, narrationAudioById));
+  const svg = layoutToSvg(layoutScene(scene, template, {
+    // ⚠️ **`undefined` は載せない**＝「テンプレの既定に任せる」と「間（`null`＝消す）」は別物。
+    // 載せると `null` と同じ扱いになり、単独 narration の場面で字幕が消える（`ScenePreview` と同じ流儀）。
+    ...(first.subtitleText !== undefined ? { subtitleText: first.subtitleText } : {}),
+    ...(first.subtitleSegment ? { subtitleSegment: first.subtitleSegment } : {}),
+  }), {
     assetSrc,
     responsive: true,
     fontFamily: fontFamilyForId(resolveFontId(scene.fontId, fontId)),
