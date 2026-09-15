@@ -11,10 +11,23 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-/** 動画の絵と音を作る側（ここが目印を読んだら、動画に出る道ができる）。 */
-const VIDEO_DIRS = ["src/renderer"];
-/** 同じく、時間と音を組み立てる側（画面ではない）。 */
-const VIDEO_FILES = ["src/domain/timeline/export.ts", "src/domain/timeline/audio.ts"];
+/**
+ * 動画の絵と音を作る側（ここが目印を読んだら、動画に出る道ができる）。
+ *
+ * ⚠️ **`src/domain/timeline/**` を丸ごと見る**（#1153＝α 出口監査 🟡）＝以前は
+ * `export.ts`／`audio.ts` の**2つを手で並べて**いたが、**焼く側の実体はそこで尽きていない**。
+ * `timelineFramePlan` は尺を `playback.ts`（`timelineFrameCount`）に、焼くコマの置き場所を
+ * `video.ts`（`videoPlacementsOf`）に委ねているので、**そこに目印を読む一行を足すと
+ * 書き出した MP4 が変わるのに、門番は緑**だった。
+ * ⚠️ **手で並べる形に戻さない**＝次に焼く側の file が増えたとき、また射程の外になる。
+ */
+const VIDEO_DIRS = ["src/renderer", "src/domain/timeline"];
+
+/**
+ * ⚠️ **目印そのものを扱う file は、当然読んでよい**（誤検出は門番の信用を落とす）。
+ * ここに足すのは**「動画を作らない」ことが説明できる file だけ**＝迷ったら足さない。
+ */
+const ALLOWED = ["src/domain/timeline/markers.ts", "src/domain/timeline/types.ts"];
 
 /**
  * その本文が**目印を読んでいる**か（注記の中の言及は数えない）。
@@ -42,18 +55,32 @@ function filesUnder(dir: string, root: string): { path: string; src: string }[] 
 
 describe("目印は動画に出ない（#356 ①）", () => {
   const root = process.cwd();
-  const files = [
-    ...VIDEO_DIRS.flatMap((d) => filesUnder(join(root, d), root)),
-    ...VIDEO_FILES.map((f) => ({ path: f, src: readFileSync(join(root, f), "utf8") })),
-  ];
+  const files = VIDEO_DIRS.flatMap((d) => filesUnder(join(root, d), root))
+    .filter((f) => !ALLOWED.includes(f.path));
 
   it("走査が絵と音を作る側へ届いている（見えていないのに緑、を作らない）", () => {
     // ⚠️ **実数で留める**＝走査の根を間違えると 0 件でも緑になる（この型を何度も踏んだ）。
-    expect(files.length, "描く側の file が見つからない＝走査の根が違う").toBeGreaterThan(10);
-    expect(files.map((f) => f.path)).toContain("src/domain/timeline/export.ts");
-    expect(files.map((f) => f.path)).toContain("src/domain/timeline/audio.ts");
-    // ⚠️ **描く核も射程に入っていること**（`layoutTimelineAt` はここ）。
-    expect(files.map((f) => f.path)).toContain("src/renderer/timelineLayout.ts");
+    // ⚠️ **歩いた数も留める**（#1153）＝ただし**根の取り違えを実際に捕まえるのは下の名指し**で、
+    // ここは補助（変異チェックでこの1行だけを緩めても、名指しが赤くなる＝等価）。
+    // それでも置くのは、**名指しに挙げていない file が丸ごと消えた**ときの粗い網になるから。
+    expect(files.length, "描く側の file が見つからない＝走査の根が違う").toBeGreaterThan(30);
+    for (const must of [
+      "src/domain/timeline/export.ts",
+      "src/domain/timeline/audio.ts",
+      // ⚠️ **焼く側が委ねている先**（#1153）＝ここが射程の外だと、尺と置き場所に
+      // 目印を混ぜても門番は緑になる。
+      "src/domain/timeline/playback.ts",
+      "src/domain/timeline/video.ts",
+      // ⚠️ **描く核**（`layoutTimelineAt` はここ）。
+      "src/renderer/timelineLayout.ts",
+      // ⚠️ **入れ子の下も歩いていること**＝歩き方から再帰を外すと、上の名前は残るのに
+      // `src/renderer/export/**`（焼く側の本体）が丸ごと射程の外になる。
+      "src/renderer/export/rasterize.ts",
+    ]) {
+      expect(files.map((f) => f.path), `${must} が射程の外`).toContain(must);
+    }
+    // ⚠️ **目印そのものの file は外してある**＝外し忘れると、いつも赤くなって門番が捨てられる。
+    expect(files.map((f) => f.path)).not.toContain("src/domain/timeline/markers.ts");
   });
 
   it("描く側・焼く側は目印を読んでいない", () => {
@@ -71,6 +98,12 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("注記の中の言及では赤くしない（誤検出は門番の信用を落とす）", () => {
     expect(readsMarkers("// markers は動画に出ない")).toEqual([]);
     expect(readsMarkers(" * `markers` は作業用")).toEqual([]);
+  });
+
+  it("逃がす file は、名指しの一覧だけ（勝手に広がらない）", () => {
+    // ⚠️ **一覧を増やすのは「動画を作らない」と説明できる file だけ**＝
+    // 迷って足すと、そこが抜け道になる（門番の射程は狭める方向にしか壊れない）。
+    expect(ALLOWED).toEqual(["src/domain/timeline/markers.ts", "src/domain/timeline/types.ts"]);
   });
 
   it("似た名前を巻き込まない（語の切れ目で見る）", () => {
