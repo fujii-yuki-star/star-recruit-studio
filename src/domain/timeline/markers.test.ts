@@ -1,6 +1,6 @@
 // 時間の一点に置く**目印**（#356 ①）。
 import { describe, expect, it } from 'vitest';
-import { addMarker, markerAt, markerClock, markersInOrder, MARKER_TEXT_MAX, moveMarker, removeMarker, setMarkerText } from './markers';
+import { addMarker, markerAt, markerClock, markersInOrder, MARKER_TEXT_MAX, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from './markers';
 import { PROJECT_FORMAT, TRACK_KIND } from '../enums';
 import { addTrack, removeTrack } from './edit';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -23,6 +23,10 @@ function doc(over: Partial<TimelineProject> = {}): TimelineProject {
     ...over,
   };
 }
+
+/** 目印を持たせた文書（この file の検査はどれも「もう在る目印」から始まる）。 */
+const withMarkers = (markers: { id: string; timeSec: number; text?: string }[]): TimelineProject =>
+  doc({ markers });
 
 describe('addMarker（再生位置に目印を置く）', () => {
   it('置いた時刻の目印が増える', () => {
@@ -168,5 +172,72 @@ describe('removeMarker（目印を消す）', () => {
     const b = addMarker(a.doc, 2);
     const d = removeMarker(b.doc, a.markerId);
     expect(d.markers!.map((m) => m.id)).toEqual([b.markerId]);
+  });
+});
+
+// 変わらなければ**同じ文書を返す**（#1149 ②・ADR-0020／ADR-0034 決定20）。
+//
+// ⚠️ **呼ぶ側は `if (next !== doc)` で空振りを弾く作り**なので、ここで契約を破ると
+// **何も変わらないのに履歴が積まれる**＝`Ctrl+Z` を押しても画面が変わらず、押し続けると
+// `HISTORY_LIMIT`（50）を空振りだけで流し切って**取り消しでしか戻せない編集が押し出される**。
+// ⚠️ **3つとも同じ規則**＝片方だけ直す形をこの repo で繰り返しているので、まとめて検査する。
+describe('変わらなければ同じ文書を返す（#1149 ②）', () => {
+  const base = withMarkers([{ id: 'marker_001', timeSec: 3, text: 'あ' }, { id: 'marker_002', timeSec: 7 }]);
+
+  it('もうそこに居る目印を、そこへ動かしても積まない', () => {
+    expect(moveMarker(base, 'marker_001', 3)).toBe(base);
+  });
+
+  it('重なる先へ動かそうとしても積まない', () => {
+    expect(moveMarker(base, 'marker_001', 7)).toBe(base);
+  });
+
+  it('無い目印を消しても積まない', () => {
+    expect(removeMarker(base, 'marker_999')).toBe(base);
+  });
+
+  it('同じメモを書き直しても積まない', () => {
+    expect(setMarkerText(base, 'marker_001', 'あ')).toBe(base);
+  });
+
+  it('もともと空のメモを空にしても積まない', () => {
+    expect(setMarkerText(base, 'marker_002', '')).toBe(base);
+  });
+
+  it('上限で切った結果が同じでも積まない', () => {
+    const long = withMarkers([{ id: 'marker_001', timeSec: 3, text: 'あ'.repeat(MARKER_TEXT_MAX) }]);
+    expect(setMarkerText(long, 'marker_001', 'あ'.repeat(MARKER_TEXT_MAX + 50))).toBe(long);
+  });
+
+  // ⚠️ **変わるときは、ちゃんと新しい文書を返す**＝上を「常に `doc` を返す」で通せてしまわない。
+  it('本当に変わるときは新しい文書を返す', () => {
+    expect(moveMarker(base, 'marker_001', 5)).not.toBe(base);
+    expect(removeMarker(base, 'marker_001')).not.toBe(base);
+    expect(setMarkerText(base, 'marker_001', 'い')).not.toBe(base);
+    expect(setMarkerText(base, 'marker_001', '')).not.toBe(base);
+  });
+});
+
+// 動かせないときは、呼ぶ側が**理由を出せる**ようにする（#1149 ①）。
+describe('moveMarkerBlocked（押す前に断るための判定）', () => {
+  const base = withMarkers([{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 7 }]);
+
+  it('別の目印がいる時刻へは動かせない', () => {
+    expect(moveMarkerBlocked(base, 'marker_001', 7)).toBe('markerExists');
+  });
+
+  it('自分がいる時刻は「いる」と数えない（動かせる扱い）', () => {
+    expect(moveMarkerBlocked(base, 'marker_001', 3)).toBeNull();
+  });
+
+  it('誰もいない時刻は動かせる', () => {
+    expect(moveMarkerBlocked(base, 'marker_001', 5)).toBeNull();
+  });
+
+  // ⚠️ **0 より前は 0 とみなす**＝`moveMarker` が丸めるので、判定も同じ丸めを見ないと
+  // 「押せたのに動かない」ができる（判定と実行で規則が割れる）。
+  it('0 より前は 0 として見る（判定と実行で規則を割らない）', () => {
+    const atZero = withMarkers([{ id: 'marker_001', timeSec: 0 }, { id: 'marker_002', timeSec: 7 }]);
+    expect(moveMarkerBlocked(atZero, 'marker_002', -5)).toBe('markerExists');
   });
 });

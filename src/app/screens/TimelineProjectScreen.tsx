@@ -405,7 +405,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
+    doc, loadError, isLoading, playheadSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
@@ -2981,17 +2981,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   };
   const freezeGuard = editGuard(freezeExtra());
   /**
-   * 目印の押せる条件（#356 ①）。
+   * 目印の押せる条件（#356 ①・**ADR-0040**）。
    *
-   * ⚠️ **再生中は断る**（#1138 レビュー由来 🟡・ADR-0032 決定21）＝目印も**再生位置を読む操作**で、
-   * 同じ画面の「ここで分ける」「この瞬間で絵を止める」「再生位置で長さをそろえる」は再生中に断っている。
-   * 断らないと `commit` が**押した瞬間に再生を止める**＝どちらの型でもない振る舞いになる。
-   * ⚠️ **業界の型では「見ながら置く」のが主用途**なので、ここは**正典を採った**＝
-   * 見ながら置けるようにするなら ADR-0032 決定21 の側を動かす話になる（利用者判断・`06 §12` に記録）。
+   * ⚠️ **再生中も断らない**（ADR-0040・利用者判断 2026-09-14）＝業界の型でマーカーの主用途は
+   * 「**再生しながら見て（聴いて）、気になった所に印を置く**」こと。断ると用途が成り立たない。
+   * ADR-0032 決定21 が防ぎたいのは「**押したつもりの結果と、実際の結果がずれる**」ことで、
+   * 目印は**「押した、その瞬間」が仕様そのもの**なのでずれようがない
+   *（分ける・絵を止めるは**狙った絵**があるので、走っているとその絵と当たる場所がずれる＝断ったまま）。
+   * ⚠️ **再生も止めない**＝止めると「見ながら次々置く」ができない（ADR-0040 決定3）。
+   * ⚠️ **残るのは書き出し中・取り込み中だけ**＝そちらは文書を触らせない別の理由。
+   *
+   * ⚠️ **消す・メモが再生中に塞がっていたのも、これで解ける**（α 出口監査 🟡）＝
+   * この条件を節の**全部品**に配っているので、`isPlaying` を含めていた間は
+   * **再生位置を読まない「消す」「メモを書く」まで塞がって**いた。同じ画面の**帯の削除は
+   * 再生中でも押せる**ので、同じ「消す」が場所で割れていた（ADR-0026②）。
+   * ⚠️ **配り先は変えていない**＝残った書き出し中・取り込み中は**全部に当たるのが正しい**
+   *（文書を触らせない理由なので、消す・メモも同じく断る）。
    */
-  const markerGuard: { disabled?: boolean; title?: string } = isPlaying
-    ? { disabled: true, title: editBlockedMessage[EDIT_BLOCKED.playing] }
-    : busyGuard();
+  const markerGuard: { disabled?: boolean; title?: string } = busyGuard();
   /**
    * **止めると元の音が止まる**ことを、押す前に知らせる（#1136 レビュー由来 🟡）。
    *
@@ -3747,7 +3754,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {markersInOrder(doc).map((m) => (
                       <div
                         key={m.id}
-                        className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
+                        /* ⚠️ **選んだ相手か、再生位置と同じ時刻か**（#1161 レビュー由来 🟡）＝
+                           再生中は時計が毎フレーム**生の秒**で上書きするので、時刻の一致だけでは
+                           「置いたのにどれが自分の印か分からない」が残る。 */
+                        className={`timeline-marker${m.id === selectedMarkerId || markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
                         style={{ left: `${pxPerSec * m.timeSec}px` }}
                       >
                         <button
@@ -3972,6 +3982,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <TimelineMarkersSection
           doc={doc}
           playheadSec={playheadSec}
+          selectedMarkerId={selectedMarkerId}
+          // ⚠️ **全部品に配る**＝いまここに残るのは書き出し中・取り込み中だけで、
+          // どれも**文書を触らせない**理由だから（消す・メモも同じく断るのが正しい）。
           busy={markerGuard}
           textGroup={textGroup}
           onAdd={addMarkerAtPlayhead}

@@ -21,11 +21,19 @@ import type { TimelineProject } from "../../domain/timeline/types";
  * @param onMove その目印を**再生位置へ動かす**（置けるのに直せない、を作らない＝ADR-0034 決定4）。
  */
 export function TimelineMarkersSection({
-  doc, playheadSec, busy, textGroup, onAdd, onJump, onText, onMove, onRemove,
+  doc, playheadSec, selectedMarkerId, busy, textGroup, onAdd, onJump, onText, onMove, onRemove,
 }: {
   doc: TimelineProject;
   playheadSec: number;
-  /** 押せないとき（書き出し中・再生中など）＝理由つきで押せなくする。 */
+  /**
+   * **最後に置いた／動かした目印**（#1161 レビュー由来 🟡）。
+   *
+   * ⚠️ **再生位置の一致では足りない**＝再生中は時計が毎フレーム**生の秒**で上書きするので、
+   * 格子に落ちた目印の時刻とは実質一致しない。「どれが自分の置いた印か」を、
+   * 再生位置ではなく**選んだ相手**で示す。
+   */
+  selectedMarkerId?: string | null;
+  /** 押せないとき（書き出し中・取り込み中）＝理由つきで押せなくする。 */
   busy?: { disabled?: boolean; title?: string };
   /**
    * 文字欄の履歴のまとめ（#1138 レビュー由来 🔴）。
@@ -60,7 +68,9 @@ export function TimelineMarkersSection({
             <li
               key={m.id}
               className="row gap-sm"
-              style={{ alignItems: "center", ...(markerTimeEq(m.timeSec, playheadSec) ? { outline: "1px solid var(--color-accent)" } : {}) }}
+              // ⚠️ **選んだ相手か、再生位置と同じ時刻か**（#1161 レビュー由来 🟡）＝
+              // 止めているときは再生位置で分かるが、**再生中は生の秒なので一致しない**。
+              style={{ alignItems: "center", ...(m.id === selectedMarkerId || markerTimeEq(m.timeSec, playheadSec) ? { outline: "1px solid var(--color-accent)" } : {}) }}
             >
               {/* ⚠️ **辿れること**が目印の本体＝押したらそこへ行く（置くだけにしない）。 */}
               <button className="btn btn-ghost" onClick={() => onJump(m.timeSec)} title={MARKER_JUMP_TITLE}>

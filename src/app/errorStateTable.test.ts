@@ -462,7 +462,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   これ以降は**足した瞬間にここが赤くなる**（登録漏れが起きない）。
     // ⚠️ **+2**＝接続キーの「確かめられなかった」2文（#1131）。
     // ⚠️ **+1**＝`KEYRING_UNAVAILABLE`（#1131）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(227);
+    // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①＝目印を動かす先に別の目印がいるとき）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(228);
   });
 
 
@@ -709,7 +710,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(224);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(225);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -719,10 +720,12 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+5**＝接続キーの5文（#1131）。2つは既定文（直書きから定数へ）、
       //   3つは新設（「できたが確かめられなかった」2つ＋「入った時点で確かめられない」1つ
       //   ＝案内の先で黙らないため＝#1134 レビュー由来）。
-      // ⚠️ **+5**＝#356 ② の断り5つ（`FREEZE_NOT_VIDEO` / `FREEZE_FAILED` /
-      //   `FREEZE_ASSET_MISSING` / `FREEZE_CHANGED`。うち4つは #1136 レビュー由来）。
+      // ⚠️ **+4**＝#356 ② の断り4つ（`FREEZE_NOT_VIDEO` / `FREEZE_FAILED` /
+      //   `FREEZE_ASSET_MISSING` / `FREEZE_CHANGED`。うち3つは #1136 レビュー由来）。
+      //   ⚠️ **「+5」と書いて4つしか挙げていなかった**（α 出口監査の申し送り）＝実差分も 91→95 の +4。
       //   ⚠️ **1件ずつ確かめて数を直す**＝「+1」と書いたまま数だけ動かすと、次の人が
       //   1件しか確かめずに済ませる（実際にそう書いていた＝レビュー指摘）。
-    ).toBe(95);
+      // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①）。
+    ).toBe(96);
   });
 });
