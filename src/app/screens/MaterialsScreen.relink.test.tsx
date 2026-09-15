@@ -62,6 +62,24 @@ describe("MaterialsScreen 見つからない素材（#347）", () => {
     expect(screen.getByText("見つかりません")).toBeInTheDocument(); // 一覧の印
   });
 
+  /**
+   * ⚠️ **写真だけで確かめていた**（#1168 レビュー 🟡）＝この一覧の素材は全部 `image` なので、
+   * **動画のときだけ出る欄**（`CaptureFrameControls`＝「この瞬間を写真にする」）を一度も描いておらず、
+   * 上の「案内は1つ」は**その欄が同じ説明を増やしても緑のまま**だった（見えていないのに緑）。
+   * 実際に #1168 で知らせを1つ増やしてしまい、このテストは気づけなかった。
+   */
+  it("動画を選んでも案内は1つ（切り出しの欄が同じことを言わない）", () => {
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_003", assetType: "video", displayName: "会社紹介", filePath: "assets/asset_003.mp4" } as Asset],
+      missingAssetIds: ["asset_003"],
+    });
+    show();
+    fireEvent.click(screen.getByText("会社紹介"));
+    // 動画のときだけ出る欄が本当に描かれていること（描かれていなければ、この検査は何も見ていない）
+    expect(screen.getByRole("button", { name: /この瞬間を写真にする/ }), "切り出しの欄が出ていない").toBeInTheDocument();
+    expect(screen.getAllByRole("alert"), "同じ状態で知らせが2つ出ている").toHaveLength(1);
+  });
+
   // 見つからないときはボタンを目立たせる（探し当てた先で「これを押せばいい」が分かる）。
   it("見つからない素材を選ぶと、直すボタンが目立つ", () => {
     useProjectStore.setState({ missingAssetIds: ["asset_001"] });

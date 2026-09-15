@@ -38,18 +38,21 @@ describe("CaptureFrameControls", () => {
       expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toBeDisabled();
     });
 
-    it("押せない理由を見える場所に出す（次の行動つき）", () => {
+    // ⚠️ **知らせを増やさない**（#1168 レビュー 🟡）＝この画面は「状況はバナー、どれかは一覧の印、
+    // 直し方はボタン」と役割を分けている。ここにも同じ説明を出すと `alert` が2つになる。
+    it("押せない理由は `title` に出す（知らせを2つにしない）", () => {
       render(<CaptureFrameControls asset={video} />);
-      const notice = screen.getByRole("alert");
-      expect(notice.textContent).toContain("ファイルを選び直す");
-      expect(notice.textContent, "次の行動を言っていない").toContain("ください");
+      const btn = screen.getByRole("button", { name: /この瞬間を写真にする/ });
+      expect(btn).toHaveAttribute("title", expect.stringContaining("ファイルを選び直す") as unknown as string);
+      expect(screen.queryByRole("alert"), "この欄でも同じことを言っている").toBeNull();
     });
 
     it("見つかっている動画は止めない（誤検出で操作を殺さない）", () => {
       useProjectStore.setState({ missingAssetIds: ["asset_009"] } as never);
       render(<CaptureFrameControls asset={video} />);
-      expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toBeEnabled();
-      expect(screen.queryByRole("alert")).toBeNull();
+      const btn = screen.getByRole("button", { name: /この瞬間を写真にする/ });
+      expect(btn).toBeEnabled();
+      expect(btn).not.toHaveAttribute("title");
     });
   });
 

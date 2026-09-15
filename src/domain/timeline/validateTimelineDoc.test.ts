@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032・#627）の意味検証（11 §8 V22–V26）と、schema と TS 定数の照合。
+// タイムライン形式（ADR-0032・#627）の意味検証（11 §8 V22–V33）と、schema と TS 定数の照合。
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';

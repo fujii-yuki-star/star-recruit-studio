@@ -6,7 +6,7 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
-import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
+import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
@@ -55,21 +55,20 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
         // 呼び名は `RELINK_ASSET_LABEL` から取る（#1168）。別の名で呼ぶと、探す先が分からない。
         <p className="field-hint">この動画をここでは再生できません。その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直すと、表示できる場合があります。</p>
       )}
-      {/* ⚠️ **押せない理由は見える場所にも出す**（§2-5）＝止まっているボタンだけだと、
-          何が足りないのか分からない（次の行動＝「ファイルを選び直す」がこの画面の上にある）。 */}
-      {isMissing && (
-        <p className="notice notice-warn" role="alert">
-          {CAPTURE_FRAME_ASSET_MISSING_MESSAGE}
-        </p>
-      )}
+      {/* ⚠️ **知らせを増やさない**（#1168 レビュー 🟡・§6＝この画面の流儀）＝状況はバナー、
+          どれかは一覧の印、直し方はボタン、と役割が分かれている。ここにも同じ説明を出すと
+          **同じ状態で `alert` が2つ**になる（`MaterialsScreen.relink.test.tsx` が記録した形）。
+          押せない理由は `title` に出す＝タイムライン形式の「絵を止める」と同じ（`freezeExtra`）。 */}
       <div className="row mt">
         <button
           type="button"
           className="btn btn-secondary"
           disabled={busy || !src || isMissing}
-          title={isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : undefined}
+          title={isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : busy ? IMPORT_BUSY_MESSAGE : undefined}
           onClick={() => void onCapture()}
         >
+          {/* ⚠️ **押していないのに進行中と名乗る**（#1170）＝`isImporting` はアプリ全体の取り込みで立つ。
+              タイムライン形式は #1136 ℹ️ でこの形を採らないと決めている（ADR-0026②）。 */}
           {isImporting ? "切り出しています…" : "この瞬間を写真にする"}
         </button>
         <span className="text-sm text-muted">{formatTime(atSec)}</span>

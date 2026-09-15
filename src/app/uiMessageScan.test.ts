@@ -107,13 +107,24 @@ function resolveLabels(src: string, labels: ReadonlyMap<string, string>): string
  * ⚠️ **見るのは「1行・`"` 引用・`_LABEL` 終わり」だけ**＝`*_NOTE`／`*_TEXT` と名づけたり2行に折ると
  * 同じ穴が空く。**寄せ先は `*_LABEL` と名づける**こと（気づけはする＝実数の `FOUND_COUNT` が減って赤くなる）。
  * ⚠️ **差し戻しはどのファイルにも効く**ので、画面の中に**同名のローカル定数**を置くと、その画面に
- * 出ていない文を拾いうる（いまは `src/app`・`src/infrastructure` に衝突なし）。
+ * 出ていない文を拾いうる。**衝突が無いことは下の検査で留める**（#1168 レビュー ℹ️＝
+ * 「いまは衝突なし」と書くだけだと、次に衝突したとき `FOUND_COUNT` が動く理由が読めない）。
  */
 function labelConstants(): ReadonlyMap<string, string> {
   const src = readFileSync(join(process.cwd(), "src", "app", "uiLabels.ts"), "utf8");
   const map = new Map<string, string>();
   for (const m of src.matchAll(/^export const ([A-Z_][A-Z_0-9]*_LABEL) =\s*"([^"]+)";$/gm)) map.set(m[1]!, m[2]!);
   return map;
+}
+
+/**
+ * そのファイルが**自分で**持っている呼び名（`const X_LABEL = …`）の名前。
+ *
+ * ⚠️ **純粋関数として切り出す**＝歩く形のままだと、いま衝突が1つも無いので
+ * **拾い方をまるごと外しても緑**になる（`guidanceLiteralsIn` と同じ理由）。
+ */
+export function localLabelNames(text: string): string[] {
+  return [...text.matchAll(/^(?:export )?const ([A-Z_][A-Z_0-9]*_LABEL)\s*(?::[^=]+)?=/gm)].map((m) => m[1]!);
 }
 
 /**
@@ -213,6 +224,36 @@ describe("画面に直書きした断りも、表に載っている（#978）", 
     for (const [name, why] of Object.entries(NOT_IN_TABLE)) {
       expect(hasReason(why), `${name} を外した理由が書かれていない`).toBe(true);
     }
+  });
+
+  // ⚠️ **差し戻しの名前が、画面のローカル定数と衝突していない**（#1168 レビュー ℹ️）＝
+  //    `resolveLabels` は**どのファイルの** `{UPPER_SNAKE}` にも効くので、画面の中に同名の
+  //    `*_LABEL` を置くと、**その画面に出ていない文**を「拾った断り」として表へ要求しうる。
+  it("寄せた呼び名が、画面のローカル定数と衝突していない", () => {
+    const shared = new Set(labelConstants().keys());
+    const collisions: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) { walk(p); continue; }
+        if (!/\.tsx?$/.test(name) || name.includes(".test.")) continue;
+        if (p.endsWith(join("src", "app", "uiLabels.ts"))) continue; // 定義元
+        for (const n of localLabelNames(readFileSync(p, "utf8"))) if (shared.has(n)) collisions.push(`${name}: ${n}`);
+      }
+    };
+    walk(join(process.cwd(), "src", "app"));
+    walk(join(process.cwd(), "src", "infrastructure"));
+    expect(collisions, "`uiLabels` と同じ名前のローカル定数がある（差し戻しが別の文に効く）").toEqual([]);
+    expect(shared.size, "寄せた呼び名を1つも拾えていない").toBeGreaterThanOrEqual(1);
+  });
+
+  // ⚠️ **見つけられることも見る**（`guards-blind-not-red`）＝いま衝突が1つも無いので、
+  //    上の検査だけでは**拾い方をまるごと外しても緑**だった（実際に変異チェックで生き残った）。
+  it("衝突を見つけられる（拾い方そのものを見る）", () => {
+    expect(localLabelNames(`const RELINK_ASSET_LABEL = "別のもの";`)).toEqual(["RELINK_ASSET_LABEL"]);
+    expect(localLabelNames(`const DELETE_LABEL: string = "消す";`)).toEqual(["DELETE_LABEL"]);
+    // 呼び名でないものは拾わない（`*_MESSAGE` は差し戻しの対象外）
+    expect(localLabelNames(`const SOME_MESSAGE = "…ください";`)).toEqual([]);
   });
 
   it("外したまま実装から消えた行が残っていない（控えが腐らない）", () => {
