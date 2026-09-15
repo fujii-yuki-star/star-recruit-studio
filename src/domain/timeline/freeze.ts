@@ -11,8 +11,9 @@
 //
 // ⚠️ **相手は「直接置いた動画」だけ**＝見た目パターンの差し込み口に入れた動画は、止めると
 // **枠ごと写真に化ける**（文字も立ち絵も消える）＝押した結果と食い違う。断って理由を出す。
-import { advancedSourceStart } from './sourceTime';
-import { isDirectVideoClip } from './video';
+import { isDirectVideoClip, videoPlacementsOfClip, videoSourceSecAt } from './video';
+import { effectiveFps } from './playback';
+import { frameTimeSec } from './persistence';
 import { splitClip, splitClipIssue, SPLIT_BLOCKED_REASON } from './split';
 import type { SplitBlockedReason } from './split';
 import { EDIT_BLOCKED } from './edit';
@@ -85,12 +86,26 @@ export function freezeFrameIssue(
 }
 
 /**
- * 止めた絵にする**素材の時刻**（＝切り出す位置）。
+ * 止めた絵にする**素材の時刻**（＝切り出す位置）。`null` ＝その時刻に映っていない。
  *
- * ⚠️ **速さのぶんも進む**＝規則は `advancedSourceStart` に1つ（写すと片方だけ直る＝§6）。
+ * ⚠️ **プレビュー＝書き出しの正準をそのまま呼ぶ**（ADR-0001・#1147）＝
+ * `videoSourceSecAt` は**コマ番号から**素材の秒を導く。以前はここだけ
+ * `sourceStartSec + (t − startSec) × speed` と**秒の引き算で写して**いたが、
+ * `videoSourceSecAt` の説明が名指しで言うとおり、**置いた位置が格子（1/fps）に乗っていないと
+ * 別のコマになる**（実測で最大1.5コマ×速さ）。そして**置いた位置は格子に乗らない**＝
+ * 置くのも分けるのも生の秒（`edit.ts` に量子化は1か所も無い）。
+ * ⚠️ **速さの既定も正準へ**＝写していた側は `speed ?? 1`、正準は `effectiveSpeed`（`speed > 0` を見る）。
+ * ⚠️ **時刻もコマの格子へ落としてから渡す**（`frameTimeSec`）＝キャンバスが映しているのがその時刻。
  */
-export function freezeSourceSec(clip: TimelineClip, atSec: number): number {
-  return advancedSourceStart(clip, atSec - clip.startSec).sourceStartSec ?? 0;
+export function freezeSourceSec(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  atSec: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): number | null {
+  const place = videoPlacementsOfClip(doc, clip, opts).find((p) => p.clip.id === clip.id);
+  if (!place) return null;
+  return videoSourceSecAt(place, frameTimeSec(doc, atSec), effectiveFps(doc));
 }
 
 /**

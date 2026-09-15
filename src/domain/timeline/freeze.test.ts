@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
 import { SPLIT_BLOCKED } from './split';
 import { volumeAt } from './audio';
+import { videoPlacementsOfClip, videoSourceSecAt } from './video';
+import { effectiveFps } from './playback';
+import { frameTimeSec } from './persistence';
 import { ASSET_TYPE, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
@@ -94,17 +97,96 @@ describe('freezeFrameIssue（そこで止められるか）', () => {
 });
 
 describe('freezeSourceSec（どの瞬間を切り出すか）', () => {
+  /** その帯だけを置いた文書（`freezeSourceSec` は文書ごと受け取る＝正準を通すため）。 */
+  const withClip = (c: TimelineClip): TimelineProject => doc({ clips: [c] });
+
   it('帯の頭からの秒を、素材の時刻へ直す', () => {
-    expect(freezeSourceSec(video({ startSec: 2, sourceStartSec: 5 }), 6)).toBe(9); // 5 + (6-2)
+    const c = video({ startSec: 2, sourceStartSec: 5 });
+    expect(freezeSourceSec(withClip(c), c, 6)).toBe(9); // 5 + (6-2)
   });
 
   // ⚠️ **速さのぶんも進む**＝置いた長さ × 速度 ＝ 使う素材の長さ（`11 §7.6.3.2`）。
   it('速さのぶんも進む（2倍なら素材は倍だけ進んでいる）', () => {
-    expect(freezeSourceSec(video({ startSec: 0, sourceStartSec: 0, speed: 2 }), 3)).toBe(6);
+    const c = video({ startSec: 0, sourceStartSec: 0, speed: 2 });
+    expect(freezeSourceSec(withClip(c), c, 3)).toBe(6);
   });
 
   it('頭出しを持っていなくても 0 から数える', () => {
-    expect(freezeSourceSec(video(), 4)).toBe(4);
+    const c = video();
+    expect(freezeSourceSec(withClip(c), c, 4)).toBe(4);
+  });
+
+  // ⚠️ **ここが #1147 の本体**（α 出口監査 🔴2）。
+  //
+  // 以前はここだけ `sourceStartSec + (t − startSec) × speed` と**秒の引き算で写して**いた。
+  // プレビューと書き出しは `videoSourceSecAt` ＝**コマ番号から**導くので、
+  // **置いた位置が格子（1/fps）に乗っていないと別のコマ**になる（最大1.5コマ×速さ）。
+  // そして**置いた位置は格子に乗らない**＝置くのも分けるのも生の秒。
+  //
+  // ⚠️ **前の検査は `startSec: 2`（格子上）しか見ていなかった**ので、写しのままでも緑だった。
+  describe('置いた位置が格子に乗っていないとき（#1147）', () => {
+    /** 正準（プレビュー＝書き出し）が出す素材の秒。 */
+    const canonical = (d: TimelineProject, c: TimelineClip, atSec: number): number | null => {
+      const place = videoPlacementsOfClip(d, c).find((pl) => pl.clip.id === c.id);
+      return place ? videoSourceSecAt(place, frameTimeSec(d, atSec), effectiveFps(d)) : null;
+    };
+
+    const cases: { name: string; over: Partial<TimelineClip>; atSec: number }[] = [
+      { name: '端数のある開始', over: { startSec: 2.017, sourceStartSec: 5 }, atSec: 6 },
+      { name: '端数＋倍速', over: { startSec: 2.017, sourceStartSec: 5, speed: 2 }, atSec: 6 },
+      { name: '端数＋頭出しなし', over: { startSec: 0.49, sourceStartSec: 0 }, atSec: 3.2 },
+      { name: '半コマちょうど', over: { startSec: 1 / 60, sourceStartSec: 0 }, atSec: 5 },
+    ];
+    it.each(cases)('$name：プレビュー＝書き出しと同じ秒を返す', ({ over, atSec }) => {
+      const c = video(over);
+      const d = withClip(c);
+      expect(freezeSourceSec(d, c, atSec)).toBe(canonical(d, c, atSec));
+    });
+
+    // ⚠️ **写しのままなら本当に違う値になる**ことを、この検査自身で示す（等価な変異にしない）。
+    it('写しの式は、正準と違う値を出す（だから写してはいけない）', () => {
+      const c = video({ startSec: 2.017, sourceStartSec: 5, speed: 2 });
+      const d = withClip(c);
+      const 写し = (c.sourceStartSec ?? 0) + (6 - c.startSec) * (c.speed ?? 1);
+      expect(freezeSourceSec(d, c, 6)).not.toBe(写し);
+    });
+  });
+
+  // ⚠️ **速さの既定も正準へ**＝写していた側は `speed ?? 1`、正準は `effectiveSpeed`（`speed > 0` を見る）。
+  it('速さが 0 でも止まらない（正準の既定に揃える）', () => {
+    const c = video({ startSec: 0, sourceStartSec: 0, speed: 0 });
+    const d = withClip(c);
+    expect(freezeSourceSec(d, c, 4)).toBe(4);
+  });
+
+  it('映っていない相手は null（黙って 0 を返さない）', () => {
+    const c = video({ assetId: 'asset_002' }); // 写真＝動画の置き場所にならない
+    expect(freezeSourceSec(withClip(c), c, 4)).toBeNull();
+  });
+
+  // ⚠️ **格子へ落とすのは丸めだけではない**（#1147 の変異チェックで生き残った）＝
+  // `frameTimeSec` は**尺のちょうど末尾を1コマ手前へ寄せる**（半開区間なので、末尾ちょうどでは
+  // どの帯も外れて真っ白になる）。生の秒をそのまま渡すと、**いちばん最後で「映っていない」**になり、
+  // 止められなくなる。丸めだけを見る検査では、この違いが出ない。
+  it('尺のちょうど末尾でも止められる（末尾は1コマ手前へ寄る）', () => {
+    const c = video({ startSec: 0, durationSec: 10, sourceStartSec: 0 });
+    const d = withClip(c);
+    expect(freezeSourceSec(d, c, 10)).not.toBeNull();
+    expect(freezeSourceSec(d, c, 10)).toBeCloseTo(299 / 30, 6); // 30fps の最後のコマ
+  });
+
+  // ⚠️ **関門と出し口が食い違わない**（#1147 の変異チェックで生き残った）＝
+  // 呼び口は `freezeFrameIssue` を通してから `freezeSourceSec` を呼ぶので、
+  // **関門が通した帯で `null` が返ると「押せたのに何も起きない」**になる。
+  // いまは `isDirectVideoClip` を両方が見ているので起きないが、**片方だけ緩めたら破れる**。
+  it('関門が通した帯なら、素材の時刻は必ず出る', () => {
+    for (const over of [{}, { startSec: 2.017 }, { speed: 0 }, { sourceStartSec: 3 }]) {
+      const c = video(over);
+      const d = withClip(c);
+      const at = c.startSec + 1;
+      expect(freezeFrameIssue(d, c.id, at)).toBeNull();
+      expect(freezeSourceSec(d, c, at), `${JSON.stringify(over)} で映っていない`).not.toBeNull();
+    }
   });
 });
 
