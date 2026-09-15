@@ -7,8 +7,8 @@
 | 資料 | 範囲 | なぜ |
 |---|---|---|
 | `CLAUDE.md` | **§2-5**（自動で読み込み済み） | 「原因」でなく「次の行動」・**黙って別の結果にしない** |
-| [`15_ERROR_STATE_MODEL.md`](../yuko_recruit_docs/15_ERROR_STATE_MODEL.md) | **§5 分類**（324字）＋**§6 の規則**（全体で 16,823字＝表を外へ出した・#1090 案C） | コード語彙と規則の正典 |
-| [`errors/error-state-table.tsv`](../yuko_recruit_docs/errors/error-state-table.tsv) | **該当の1行だけ**（219 行・47,813字） | **文言の正典**（1行=1コード・タブ区切り） |
+| [`15_ERROR_STATE_MODEL.md`](../yuko_recruit_docs/15_ERROR_STATE_MODEL.md) | **§5 分類**（324字）＋**§6 の規則**（全体で 21,330字＝表を外へ出した・#1090 案C） | コード語彙と規則の正典 |
+| [`errors/error-state-table.tsv`](../yuko_recruit_docs/errors/error-state-table.tsv) | **該当の1行だけ**（228 行・50,186字） | **文言の正典**（1行=1コード・タブ区切り） |
 | [`06_UI_SPEC.md`](../yuko_recruit_docs/06_UI_SPEC.md) | **§3 用語置き換え**（2,297字） | 出してよい言葉 |
 
 表の行は `grep` で当てる（全文を開かない）。⚠️ **表の実体は `15` ではなく TSV**（#1090 案C）:
@@ -35,8 +35,10 @@ grep -n 'TIMELINE_EDIT_EXPORTING' docs/yuko_recruit_docs/errors/error-state-tabl
 
 - **表と実装のどちらかだけ直す**＝門番 `src/app/errorStateTable.test.ts` が突き合わせている
   （見ているのは「**2通りの読み取りが一致するか**」＝`readErrorTable().size === looseErrorRows().length`）。
-  ⚠️ **行数は機械で固定していない**（レビュー由来 🟡・2026-09-10）＝以前ここに「184 行」と書いてあったが、
-  実数は **186 行**で、しかも**その数はコードのどこにも無い**（`git grep 184 -- src/` は無関係な1件だけ）
+  ⚠️ **行数は門番が実数で留めている**（#1150・2026-09-15 に改めた）＝`src/app/errorStateTable.test.ts` が
+  データ行の数（いま 228）を固定し、`src/test/canonSizeGuard.test.ts` が**この資料に書いた数**と
+  突き合わせる。⚠️ **以前は「機械で固定していない」と書いてあった**（当時は本当だった）＝
+  **直したのに但し書きが残る**と、次に読む人が「どうせ誰も見ていない」と数を放置する
 - ⚠️ **その門番は向きが片方だけ**（#1111）＝見ているのは「**表にある行**が実装のどこかに在るか」で、**実装にしか無い文**は見ていない。Rust が返す文は `src/test/rustUserMessageGuard.test.ts` が別に見る（次の行動を示すか・実装用語が混じっていないか）
 - **断りの中身（`detail`）に表の行は作らない**＝`15 §6.0` の決め（#1111）。ただし §2-3／§2-5 は同じだけ効く
 - **画面に直接書く**＝文言は `src/app/uiLabels.ts` へ。門番＝`src/app/uiMessageScan.test.ts`
