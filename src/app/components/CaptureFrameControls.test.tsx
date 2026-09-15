@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CaptureFrameControls } from "./CaptureFrameControls";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE } from "../../domain/enums";
+import { IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 
 const video: Asset = {
@@ -43,7 +44,7 @@ describe("CaptureFrameControls", () => {
     it("押せない理由は `title` に出す（知らせを2つにしない）", () => {
       render(<CaptureFrameControls asset={video} />);
       const btn = screen.getByRole("button", { name: /この瞬間を写真にする/ });
-      expect(btn).toHaveAttribute("title", expect.stringContaining("ファイルを選び直す") as unknown as string);
+      expect(btn.getAttribute("title")).toContain("ファイルを選び直す");
       expect(screen.queryByRole("alert"), "この欄でも同じことを言っている").toBeNull();
     });
 
@@ -60,6 +61,38 @@ describe("CaptureFrameControls", () => {
   it("「フレーム」「抽出」を画面に出さない", () => {
     const { container } = render(<CaptureFrameControls asset={video} />);
     expect(container.textContent).not.toMatch(/フレーム|抽出|キャプチャ/);
+  });
+
+  // ⚠️ **足した枝は必ず検査する**（#1168 レビュー 🟡）＝`disabled` だけ見ていたので、
+  // 理由（`title`）を `undefined` に潰しても緑だった。
+  describe("取り込み中", () => {
+    beforeEach(() => useProjectStore.setState({ isImporting: true } as never));
+    // ⚠️ **後始末は `afterEach` に置く**＝検査の最後に書くと、途中で落ちた回に**次の検査へ漏れる**。
+    afterEach(() => useProjectStore.setState({ isImporting: false, missingAssetIds: [] } as never));
+
+    it("押せなくして、理由を添える", () => {
+      render(<CaptureFrameControls asset={video} />);
+      const btn = screen.getByRole("button", { name: /この瞬間を写真にする/ });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute("title", IMPORT_BUSY_MESSAGE);
+    });
+
+    // ⚠️ **押していないのに進行中と名乗らない**（#1170）＝`isImporting` はアプリ全体で立つので、
+    // 写真を落としただけでここが「切り出しています…」に変わり、`title` の「終わってから
+    // もう一度お試しください」と**逆のことを同時に言って**いた（ADR-0026②）。
+    // ⚠️ **両方成り立つときに出る文を留める**（#1168 レビュー 🟡）＝タイムライン形式の
+    // `freezeExtra` は取り込み中が先なので、こちらも先にする（同じ状況で出る文が形式で割れない）。
+    it("ファイルも見つからないときは、取り込み中のほうを言う（タイムライン形式と同じ順）", () => {
+      useProjectStore.setState({ missingAssetIds: ["asset_001"] } as never);
+      render(<CaptureFrameControls asset={video} />);
+      expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toHaveAttribute("title", IMPORT_BUSY_MESSAGE);
+    });
+
+    it("名前は変わらない（押していないのに進行中と名乗らない）", () => {
+      render(<CaptureFrameControls asset={video} />);
+      expect(screen.getByRole("button", { name: "この瞬間を写真にする" })).toBeInTheDocument();
+      expect(screen.queryByText(/切り出しています/), "押していないのに進行中と名乗っている").toBeNull();
+    });
   });
 
   it("動画を見ながら選べる（再生できる形で出す）", () => {
@@ -100,12 +133,6 @@ describe("CaptureFrameControls", () => {
     // ⚠️ **同じ操作は同じ名前で呼ぶ**（🟡25）＝素材画面の導線は「ファイルを選び直す」。
     expect(screen.getByText(/「ファイルを選び直す」から入れ直すと、表示できる場合があります/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "この瞬間を写真にする" })).toBeDisabled();
-  });
-
-  it("切り出している間は押せない（二重に走らせない）", () => {
-    useProjectStore.setState({ isImporting: true } as never);
-    render(<CaptureFrameControls asset={video} />);
-    expect(screen.getByRole("button", { name: "切り出しています…" })).toBeDisabled();
   });
 
   /** ⚠️ 書き出し中は**欄ごと出さない**（親の素材画面が持つ）＝ここに口を作らない（§9-2）。 */

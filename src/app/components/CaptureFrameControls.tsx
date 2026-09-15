@@ -25,6 +25,18 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
   // 使われない口を作らない（§9-2「将来のために設計しない」・PR #885 レビュー ℹ️）。
   const busy = isImporting;
 
+  /**
+   * 押せない理由（`null` なら押せる）。
+   *
+   * ⚠️ **押す前に断る**（#1168 レビュー 🟡）＝タイムライン形式の「絵を止める」（`freezeExtra`）と
+   * **同じ形**にする＝`disabled` と理由を1か所で決め、**理由の無い `disabled` を作らない**。
+   * ⚠️ **順番も合わせる**＝あちらは取り込み中が先（両方成り立つときに出る文が形式で割れない）。
+   * ⚠️ **見られない動画（`!src`）だけは理由を持たない**＝そのときは**下の案内が画面に出ている**ので、
+   * 同じことを `title` でも言うと「二度言う」側に倒れる（この画面の流儀・#1168 レビュー 🟡）。
+   */
+  const blocked: string | null =
+    busy ? IMPORT_BUSY_MESSAGE : isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : null;
+
   async function onCapture(): Promise<void> {
     setNotice("");
     // ⚠️ **いま見えている時間を切る**（欄の値ではなく動画の再生位置）＝見たものと違う絵が出てこない。
@@ -63,13 +75,15 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={busy || !src || isMissing}
-          title={isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : busy ? IMPORT_BUSY_MESSAGE : undefined}
+          disabled={blocked != null || !src}
+          title={blocked ?? undefined}
           onClick={() => void onCapture()}
         >
-          {/* ⚠️ **押していないのに進行中と名乗る**（#1170）＝`isImporting` はアプリ全体の取り込みで立つ。
-              タイムライン形式は #1136 ℹ️ でこの形を採らないと決めている（ADR-0026②）。 */}
-          {isImporting ? "切り出しています…" : "この瞬間を写真にする"}
+          {/* ⚠️ **押していないのに進行中と名乗らない**（#1170・#1168 レビュー 🟡）＝`isImporting` は
+              **アプリ全体**の取り込みで立つので、写真を落としただけでもここが「切り出しています…」に
+              変わっていた。しかも `title` は「終わってからもう一度お試しください」＝**同じボタンが
+              名前と説明で逆のことを言う**。タイムライン形式は #1136 ℹ️ でこの形を採らないと決めている。 */}
+          この瞬間を写真にする
         </button>
         <span className="text-sm text-muted">{formatTime(atSec)}</span>
       </div>

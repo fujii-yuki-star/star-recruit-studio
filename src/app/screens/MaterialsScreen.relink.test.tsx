@@ -77,7 +77,11 @@ describe("MaterialsScreen 見つからない素材（#347）", () => {
     fireEvent.click(screen.getByText("会社紹介"));
     // 動画のときだけ出る欄が本当に描かれていること（描かれていなければ、この検査は何も見ていない）
     expect(screen.getByRole("button", { name: /この瞬間を写真にする/ }), "切り出しの欄が出ていない").toBeInTheDocument();
-    expect(screen.getAllByRole("alert"), "同じ状態で知らせが2つ出ている").toHaveLength(1);
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts, "同じ状態で知らせが2つ出ている").toHaveLength(1);
+    // ⚠️ **どの知らせ1つかまで見る**（#1168 レビュー ℹ️）＝件数だけだと、バナーが消えて
+    // 切り出しの欄が知らせを持つ**入れ替わり**でも1件のまま緑になる。
+    expect(alerts[0]).toHaveTextContent("1つの素材のファイルが見つかりません");
   });
 
   // 見つからないときはボタンを目立たせる（探し当てた先で「これを押せばいい」が分かる）。

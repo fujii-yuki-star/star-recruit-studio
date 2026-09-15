@@ -839,7 +839,9 @@ export const FREEZE_FRAME_LENGTH_NOTE =
  * **置いた場所・切り出す範囲・動き・字幕の紐づけがそのまま残る**。取り込み直すと新しい素材になって全部失う。
  * ⚠️ **寄せてあるのは素材画面だけ**（#1168 レビュー 🟡）＝`{RELINK_ASSET_LABEL}` で呼んでいるのは
  * **バナー・ボタン・切り出し欄の案内の3か所**（`captureFrame.test.ts` が件数で留める）。
- * **タイムライン形式の5か所**（`TimelineProjectScreen` のボタン2つとその案内文2つ・`adapters` の断り）は
+ * **ほかの8か所**（`TimelineProjectScreen` のボタン2つとその案内文2つ・`adapters` の断り・
+ * **このファイルの `TIMELINE_EDIT_FREEZE_ASSET_MISSING`／`TIMELINE_EXPORT_VIDEO_FILE_MISSING`／
+ * `audioUnreadableMessage`**）は
  * **まだ写しのまま**なので、ここを改名しても向こうは旧名で残る＝**改名するなら向こうも同時に**（#1169）。
  * ⚠️ **ボタンだけ直しても足りない**＝案内文が旧名で残ると、探す先が画面の中で食い違う。
  * ⚠️ **寄せる理由**＝利用者は**画面の文字でボタンを探す**ので、片方だけ言い換えると行き先が消える。

@@ -124,7 +124,9 @@ function labelConstants(): ReadonlyMap<string, string> {
  * **拾い方をまるごと外しても緑**になる（`guidanceLiteralsIn` と同じ理由）。
  */
 export function localLabelNames(text: string): string[] {
-  return [...text.matchAll(/^(?:export )?const ([A-Z_][A-Z_0-9]*_LABEL)\s*(?::[^=]+)?=/gm)].map((m) => m[1]!);
+  // ⚠️ **字下げも見る**（#1168 レビュー ℹ️）＝行頭固定だと、**関数の中に書いた**ローカル定数を
+  //   1つも見ない（実在する＝`SceneEditScreen.tsx` の `ANIM_KIND_LABEL` はコンポーネントの中）。
+  return [...text.matchAll(/^[ \t]*(?:export )?const ([A-Z_][A-Z_0-9]*_LABEL)\s*(?::[^=]+)?=/gm)].map((m) => m[1]!);
 }
 
 /**
@@ -252,6 +254,8 @@ describe("画面に直書きした断りも、表に載っている（#978）", 
   it("衝突を見つけられる（拾い方そのものを見る）", () => {
     expect(localLabelNames(`const RELINK_ASSET_LABEL = "別のもの";`)).toEqual(["RELINK_ASSET_LABEL"]);
     expect(localLabelNames(`const DELETE_LABEL: string = "消す";`)).toEqual(["DELETE_LABEL"]);
+    // 関数の中に書いた（字下げした）ものも見る＝行頭固定だと丸ごと見落とす
+    expect(localLabelNames(`  const RELINK_ASSET_LABEL = "別のもの";`)).toEqual(["RELINK_ASSET_LABEL"]);
     // 呼び名でないものは拾わない（`*_MESSAGE` は差し戻しの対象外）
     expect(localLabelNames(`const SOME_MESSAGE = "…ください";`)).toEqual([]);
   });
