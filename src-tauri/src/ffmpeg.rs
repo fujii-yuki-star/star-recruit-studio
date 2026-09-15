@@ -6882,6 +6882,54 @@ mod tests {
 }
 
 #[cfg(test)]
+mod source_range {
+    //! ソースを読む検査が**自分の文字列に当たらない**ようにするための切り出し（#1139・#1146）。
+    //!
+    //! ⚠️ **切らずに見ると恒真になる**＝`include_str!("ffmpeg.rs")` はファイル全体（＝検査自身）を
+    //! 含むので、`contains("〜")` は**検査の `assert!` 行に書いた文字列**に当たって絶対に落ちない。
+    //! 実際に2回踏んだ＝#1139（`extract_video_frame_impl` の繋ぎ）と #1146（BGM の断り）。
+    //!
+    //! ⚠️ **1か所に置く**＝検査ごとに書き写すと、片方だけ切り忘れてまた恒真に戻る。
+
+    /// `start` から `end` の**手前まで**を返す。どちらかが無ければ落ちる（＝黙って全体を見ない）。
+    pub fn 範囲(src: &str, start: &str, end: &str) -> String {
+        let at = src
+            .find(start)
+            .unwrap_or_else(|| panic!("{start} が見つからない"));
+        let rest = &src[at..];
+        let to = rest
+            .find(end)
+            .unwrap_or_else(|| panic!("{start} の次に来るはずの {end} が見つからない"));
+        rest[..to].to_string()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::範囲;
+
+        #[test]
+        fn 始まりと終わりの間だけを返す() {
+            assert_eq!(範囲("aaSTARTxxENDbb", "START", "END"), "STARTxx");
+        }
+
+        /// ⚠️ **黙って全体を返さない**（#1146 の変異チェックで生き残った）＝
+        /// 見つからないときに `unwrap_or(len)` で倒すと、範囲が**ファイルの末尾まで**広がり、
+        /// 切り出した意味が消えて**また恒真に戻る**。落ちることそのものが守りなので、検査する。
+        #[test]
+        #[should_panic(expected = "見つからない")]
+        fn 始まりが無ければ落ちる() {
+            範囲("aaENDbb", "START", "END");
+        }
+
+        #[test]
+        #[should_panic(expected = "次に来るはずの")]
+        fn 終わりが無ければ落ちる() {
+            範囲("aaSTARTxx", "START", "END");
+        }
+    }
+}
+
+#[cfg(test)]
 mod bgm_mix_message_tests {
     /// ⚠️ **BGM を置いていない人に「BGMの合成に失敗」と言わない**（#1105・利用者の実機報告）。
     /// この段は `needs_audio_pass = has_bgm || normalize.is_some()` なので、
@@ -6891,15 +6939,30 @@ mod bgm_mix_message_tests {
     /// ここでは**ソースを読んで**、2つの枝が在ることと、どちらも次の行動を言っていることを見る。
     const SRC: &str = include_str!("ffmpeg.rs");
 
+    /// **音を合わせる段だけ**を切り出す（#1146）。
+    ///
+    /// ⚠️ **ファイル全体を見ていた**＝`SRC` には**この検査自身**が入るので、
+    /// `contains("BGMの合成に失敗しました。")` は**下の `assert!` 行に書いた文字列**に当たり、
+    /// **本番の枝もメッセージも記録も丸ごと消して緑のまま**だった（α 出口監査 🔴・反証で CONFIRMED）。
+    ///
+    /// ⚠️ **範囲の切り方に意味がある**＝始まりを `let bgm_start` にしたのは、その1行**手前**に
+    /// `emit_export_progress(..., if has_bgm { "bgm" } else { "loudness" }, ...)` があり、
+    /// そこにも `if has_bgm {` が出るため。範囲に入れると**検査を直さなくても本番の言い分け枝だけ
+    /// 消せば通る**という二重の穴が残る。
+    fn 音を合わせる段() -> String {
+        super::source_range::範囲(SRC, "let bgm_start = Instant::now();", "\"bgm mix: {} ms\"")
+    }
+
     #[test]
     fn bgm_mix_failure_has_two_branches() {
-        assert!(SRC.contains("if has_bgm {"), "状況で言い分けていない");
+        let body = 音を合わせる段();
+        assert!(body.contains("if has_bgm {"), "状況で言い分けていない");
         assert!(
-            SRC.contains("BGMの合成に失敗しました。"),
+            body.contains("BGMの合成に失敗しました。"),
             "BGM がある側の文が無い"
         );
         assert!(
-            SRC.contains("音量の調整に失敗しました。"),
+            body.contains("音量の調整に失敗しました。"),
             "音量をそろえるだけの側の文が無い"
         );
     }
@@ -6907,11 +6970,12 @@ mod bgm_mix_message_tests {
     /// ⚠️ **次の行動を言う**（`CLAUDE.md` §2-5）＝どちらの枝も「〜してください」で終わること。
     #[test]
     fn both_branches_tell_the_next_action() {
+        let body = 音を合わせる段();
         for msg in ["BGMの合成に失敗しました。", "音量の調整に失敗しました。"]
         {
-            let at = SRC.find(msg).expect("文が見つからない");
-            let line_end = SRC[at..].find('\n').map(|i| at + i).unwrap_or(SRC.len());
-            let line = &SRC[at..line_end];
+            let at = body.find(msg).expect("文が見つからない");
+            let line_end = body[at..].find('\n').map(|i| at + i).unwrap_or(body.len());
+            let line = &body[at..line_end];
             assert!(line.contains("ください"), "次の行動を言っていない: {line}");
         }
     }
@@ -6919,11 +6983,36 @@ mod bgm_mix_message_tests {
     /// ⚠️ **手がかりを捨てない**（#1105）＝ffmpeg が言ったことを記録に残していること。
     #[test]
     fn ffmpeg_stderr_is_recorded() {
+        let body = 音を合わせる段();
         assert!(
-            SRC.contains("bgm mix failed (has_bgm="),
+            body.contains("bgm mix failed (has_bgm="),
             "失敗の中身を記録していない"
         );
-        assert!(SRC.contains("bgm mix args:"), "渡した引数を記録していない");
+        assert!(body.contains("bgm mix args:"), "渡した引数を記録していない");
+    }
+
+    /// **切り出しが効いていること**そのものを留める（#1146）。
+    ///
+    /// ⚠️ **範囲が広がると、また恒真に戻る**＝この検査モジュールが範囲に入っていないことを見る。
+    /// 入っていれば「自分の `assert!` 行」に当たって、上の3つは何を消しても通るようになる。
+    #[test]
+    fn 切り出しに検査自身が入っていない() {
+        let body = 音を合わせる段();
+        assert!(
+            !body.contains("mod bgm_mix_message_tests"),
+            "範囲に検査自身が入っている＝上の検査は恒真になる"
+        );
+        assert!(
+            !body.contains("if has_bgm { \"bgm\" }"),
+            "進捗の言い分け（別用途の `if has_bgm {{`）が範囲に入っている"
+        );
+        // ⚠️ **短すぎ・長すぎの両方を見る**＝始まりだけ当たって終わりが遠いと、範囲は巨大になる。
+        // 行で数える（`len()` はバイト数なので、日本語のコメントが多いここでは意味が読めない）。
+        let lines = body.lines().count();
+        assert!(
+            (30..300).contains(&lines),
+            "切り出した範囲が想定の大きさでない: {lines} 行"
+        );
     }
 }
 
@@ -7124,23 +7213,6 @@ mod staged_output_tests {
         let _ = fs::remove_file(&p);
     }
 
-    /// 関数の**範囲だけ**を切り出す（#1139 レビュー由来 🟡）。
-    ///
-    /// ⚠️ **切らずに見ると、検査が自分の文字列に当たって恒真になる**＝末尾まで含めると
-    /// **この検査自身**が入るので、`contains("if !produced_frame(&out)")` は
-    /// **ここに書いた文字列**に当たって絶対に落ちない。実際に確かめた＝本体を
-    /// `if !out.is_file()` へ変えても**緑のまま**通った（0 バイトの守りを消しても気づけない）。
-    fn 本体の範囲(src: &str, name: &str, next: &str) -> String {
-        let at = src
-            .find(name)
-            .unwrap_or_else(|| panic!("{name} が見つからない"));
-        let rest = &src[at..];
-        let end = rest
-            .find(next)
-            .unwrap_or_else(|| panic!("{name} の次に来るはずの {next} が見つからない"));
-        rest[..end].to_string()
-    }
-
     /// **繋いだことを留める**（#1137）。
     ///
     /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、
@@ -7150,7 +7222,8 @@ mod staged_output_tests {
     #[test]
     fn 切り出しの本体が二つを通っている() {
         const SRC: &str = include_str!("ffmpeg.rs");
-        let body = 本体の範囲(SRC, "fn extract_video_frame_impl(", "fn frame_seek_args");
+        let body =
+            super::source_range::範囲(SRC, "fn extract_video_frame_impl(", "fn frame_seek_args");
         let clear = body
             .find("clear_stale_frame(&out)?")
             .expect("残骸を片づけていない");
