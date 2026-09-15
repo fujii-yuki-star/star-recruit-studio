@@ -81,14 +81,44 @@ export function conventionNumbers(six: string): string[] {
     .filter((n): n is string => n !== undefined);
 }
 
-/** 走査する所＝コード（`src/**`）と資料（`docs/**`）と `CLAUDE.md`。 */
+/**
+ * 走査する所＝コード（`src/**`・`src-tauri/src/**`）と資料（`docs/**`）と `CLAUDE.md`。
+ *
+ * ⚠️ **`.css` と `.rs` も歩く**（#1163 レビュー由来 🔴）＝最初は `.ts(x)` と `.md` だけだったので、
+ * `src/styles/theme.css` に**旧番号が残ったまま**だった。しかもそれは**空振りより質が悪い**＝
+ * 振り直したあとの「規約10」は**別の規約**なので、**開くと違うものが読める**。
+ * ⚠️ **「誰も見ていなかった」を直した門番が、同じ理由で見逃していた**＝走査の根は広く採る。
+ */
 function scanned(): { path: string; src: string }[] {
   const paths = [
-    ...walk("src", (n) => /\.tsx?$/.test(n)),
-    ...walk("docs", (n) => n.endsWith(".md")),
+    ...walk("src", (n) => /\.(tsx?|css)$/.test(n)),
+    ...walk("src-tauri/src", (n) => n.endsWith(".rs")),
+    // ⚠️ **`archive/` は歩かない**（#1163 レビュー由来 ℹ️）＝**その時点の記録**なので、
+    // 当時の番号のまま残すのが正しい（`#1090` 案D＝自分からは読みに行かない資料）。
+    // 走査に入れると、**歴史を書き換えないと緑にならない**。
+    ...walk("docs", (n) => n.endsWith(".md")).filter((p) => !p.includes("/archive/")),
     "CLAUDE.md",
   ];
   return paths.map((p) => ({ path: p, src: readFileSync(join(ROOT, p), "utf8") }));
+}
+
+/**
+ * `06 §2` 規約N の引用のうち、**実在しない N**（`file: 規約N` の形で返す）。
+ *
+ * ⚠️ **節の検査だけでは足りない**（#1163 レビュー由来 🟡）＝規約の番号は節ではないので、
+ * 節の一覧には出ない。**次に規約を並べ替えたら、また今回と同じ事故が起きて門番は緑**だった。
+ * ⚠️ **実際に反例が出た**＝`theme.css` の「規約10」は、振り直しのあと**別の規約**を指していた。
+ */
+export function badConventionRefs(
+  files: { path: string; src: string }[],
+  count: number,
+): string[] {
+  return files.flatMap(({ path, src }) =>
+    [...src.matchAll(/`06 §2` ?規約(\d+)/g)]
+      .map((m) => Number(m[1]))
+      .filter((n) => n < 1 || n > count)
+      .map((n) => `${path}: 規約${n}`),
+  );
 }
 
 const sectionsFor = (doc: string): Set<string> | undefined => {
@@ -101,6 +131,14 @@ describe("節を指す引用が、実在する所を指している（#1151）",
     expect(
       danglingRefs(scanned(), sectionsFor),
       "実在しない節を指しています。**番号を確かめて直してください**（`06 §2` の規約は「規約N」と書く＝#1151）",
+    ).toEqual([]);
+  });
+
+  it("`06 §2` 規約N の引用が、実在する規約を指している", () => {
+    const count = conventionNumbers(readFileSync(join(ROOT, CANON["06"]!), "utf8")).length;
+    expect(
+      badConventionRefs(scanned(), count),
+      "実在しない規約を指しています（並べ替えたら、指し先も直してください＝#1151）",
     ).toEqual([]);
   });
 
@@ -156,6 +194,17 @@ describe("節を指す引用が、実在する所を指している（#1151）",
     // ⚠️ **規約の連番は節ではない**＝`06 §2` 規約20 の「20」を節として探しに行かない。
     it("規約の連番を節として拾わない", () => {
       expect(sectionCitations("`06 §2` 規約20")).toEqual([{ doc: "06", section: "2" }]);
+    });
+
+    it("規約の引用の拾い方（範囲の外を見つけられる形）", () => {
+      // ⚠️ **綴りを割る**＝上の走査が**自分の検査データ**を拾わない（#1163 で実際に踏んだ）。
+      const ref = (n: string): string => ["`06 §2` 規", "約", n].join("");
+      expect(badConventionRefs([{ path: "a.ts", src: `${ref("5")} と ${ref("99")}` }], 23))
+        .toEqual(["a.ts: 規約99"]);
+      // ⚠️ **境目で切らない**＝ちょうど最後の番号は通す。
+      expect(badConventionRefs([{ path: "a.ts", src: ref("23") }], 23)).toEqual([]);
+      // ⚠️ **0 や負は無い**（書き間違い）。
+      expect(badConventionRefs([{ path: "a.ts", src: ref("0") }], 23)).toEqual(["a.ts: 規約0"]);
     });
 
     it("規約の番号の拾い方（小数と飛びを見つけられる形）", () => {
