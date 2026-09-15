@@ -259,11 +259,11 @@ describe("編集画面の共通ツールバーは見出しの行に在る（#774
     expect(save.closest(".panel-frame")).toBeNull(); // 欄の中に残っていない
     expect(badge.closest(".editor-toolbar")).toBe(save.closest(".editor-toolbar"));
     expect(save.closest(".editor-toolbar")).not.toBeNull();
-    // 保存は画面に1つだけ（`06 §2` 統一規約5）。
+    // 保存は画面に1つだけ（`06 §2` 規約5）。
     expect(screen.getAllByRole("button", { name: saveButtonLabel("error") })).toHaveLength(1);
   });
 
-  it("同じ操作を2か所に置かない（`06 §2` 統一規約5）", () => {
+  it("同じ操作を2か所に置かない（`06 §2` 規約5）", () => {
     useTimelineStore.setState({ doc: timelineDoc(), loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {} });
     useProjectStore.setState({ templates: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

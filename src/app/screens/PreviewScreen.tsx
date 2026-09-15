@@ -692,7 +692,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="col gap-sm mt-lg">
-            {/* 行き先は見わたす画面（そこから焼き出せる）。**呼び方は入口ごとに揃える**（#1026・`06 §8.7`）。 */}
+            {/* 行き先は見わたす画面（そこから焼き出せる）。**呼び方は入口ごとに揃える**（#1026・`06 §2` 規約11）。 */}
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
               {GO_TO_TIMELINE_VIEW_LABEL}
             </button>
