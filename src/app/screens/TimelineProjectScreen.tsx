@@ -3713,6 +3713,39 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); followPlayhead(); return; }
                     }}
                   >
+                    {/* **目印**（#356 ①・#1138 レビュー由来 🔴／#1148＝α 出口監査 🔴3）＝
+                        時間軸の上に立つ印。
+                        ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
+                        印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
+                        ⚠️ **目盛りの行の「中」に描く**（#1148）＝外（`.timeline-inner` 直下）に置くと、
+                        #1104 で目盛り行を貼り付けた（`z-index: 6`）ぶん**旗が帯の下に塗られ**、
+                        当たり判定も行が取るので**押すとシークになる**（印が実質消えていた）。
+                        中に置けば行の重なりに乗るので、**貼り付いても隠れない**。
+                        ⚠️ **列の名前の欄には隠れたまま**＝欄は同じ行の中で前面（`z-index: 5`）なので、
+                        横へ送っても旗が欄を突き抜けない（外に置いていたときと同じ約束）。
+                        ⚠️ **位置は目盛りの中の秒**＝枠が既に欄のぶん右から始まるので、足し算は要らない。 */}
+                    {markersInOrder(doc).map((m) => (
+                      <div
+                        key={m.id}
+                        className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
+                        style={{ left: `${pxPerSec * m.timeSec}px` }}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            // ⚠️ **シークに化けさせない**＝親（目盛り）が `click` でシークするので、
+                            // 止めないと「その位置へ移る」ではなく**押した場所へ移る**になる。
+                            e.stopPropagation();
+                            setPlayhead(m.timeSec);
+                            followPlayhead();
+                          }}
+                          // ⚠️ **掴む側にも渡さない**＝目盛りは `pointerdown` からドラッグを始める。
+                          onPointerDown={(e) => e.stopPropagation()}
+                          title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
+                          aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
+                        />
+                      </div>
+                    ))}
                     {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の
                         ツールチップ（`clipRangeTitle`）と見わたす画面が `m:ss` なのに、ここだけ「N秒」
                         だった。刻みは常に整数秒（`tickStepSec`）なので丸めで潰れることはない。 */}
@@ -3733,24 +3766,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     aria-hidden
                   />
                 )}
-                {/* **目印**（#356 ①・#1138 レビュー由来 🔴）＝時間軸の上に立つ印。
-                    ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
-                    印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
-                    再生位置の線と**同じ測り方**（列の名前の欄ぶん右から）＝ずれない。 */}
-                {markersInOrder(doc).map((m) => (
-                  <div
-                    key={m.id}
-                    className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
-                    style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * m.timeSec}px)` }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => { setPlayhead(m.timeSec); followPlayhead(); }}
-                      title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
-                      aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
-                    />
-                  </div>
-                ))}
                 {/* 吸着した先の**縦の点線**（#686 段階4・決定12）＝「なぜそこで止まったか」を見せる。
                     再生位置の線と同じ場所・同じ測り方（列の名前の欄ぶん右から）＝2本の線がずれない。 */}
                 {snapGuideSec != null && (

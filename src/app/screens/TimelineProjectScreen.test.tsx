@@ -4620,6 +4620,52 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     expect(screen.getByRole("button", { name: "表示を縮める" })).toBeDisabled();
   });
 
+  // ⚠️ **旗は目盛りの行の「中」にある**（#1148＝α 出口監査 🔴3）＝外（`.timeline-inner` 直下）に
+  // 置くと、#1104 で目盛り行を貼り付けた（`z-index: 6`）ぶん**旗が帯の下に塗られ**、当たり判定も
+  // 行が取るので**押すとシークになる**（#1138 で 🔴 と判定して直した状態に戻っていた）。
+  // ⚠️ **見た目（塗り順）は検査で見られない**ので、**置き場所（親子）と押した結果**で留める。
+  describe("目印の旗は目盛りの中にある（#1148）", () => {
+    const withMarker = (timeSec: number) => {
+      withClip(20);
+      useTimelineStore.setState((st) => ({
+        doc: st.doc ? { ...st.doc, markers: [{ id: "marker_001", timeSec }] } : st.doc,
+      }));
+    };
+
+    it("旗は目盛りの行の中に描かれる（外に出すと貼り付いた行の下に隠れる）", () => {
+      withMarker(4);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(
+        container.querySelector(".timeline-ruler .timeline-marker"),
+        "旗が目盛りの中にありません（外に出ると帯の下に塗られて押せなくなります）",
+      ).not.toBeNull();
+      // ⚠️ **外にも居ない**＝2か所に描くと、片方だけ直したときに気づけない。
+      expect(container.querySelectorAll(".timeline-marker")).toHaveLength(1);
+    });
+
+    // ⚠️ **掴む側にも渡さない**＝目盛りは `pointerdown` からドラッグを始める（再生中なら止める）。
+    // 渡してしまうと、旗を押しただけで**再生が止まり、掴んだ扱い**になる。
+    it("旗を押しても、目盛りを掴んだ扱いにならない（再生が止まらない）", () => {
+      withMarker(4);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      useTimelineStore.setState({ isPlaying: true });
+      const flag = container.querySelector(".timeline-marker > button") as HTMLElement;
+      fireEvent.pointerDown(flag, { button: 0, clientX: 300 });
+      expect(useTimelineStore.getState().isPlaying, "旗を押しただけで再生が止まっています").toBe(true);
+    });
+
+    it("旗を押すと、その目印の時刻へ移る（押した場所へのシークに化けない）", () => {
+      withMarker(4);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+      ruler.getBoundingClientRect = () => ({ left: 100, top: 0, width: 800, height: 24, right: 900, bottom: 24, x: 100, y: 0, toJSON: () => ({}) }) as DOMRect;
+      const flag = container.querySelector(".timeline-marker > button") as HTMLElement;
+      // ⚠️ **押す場所は目印の時刻と別**にする＝止め忘れると「押した場所（10秒）」へ跳ぶ。
+      fireEvent.click(flag, { clientX: 100 + 36 * 10 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(4, 5);
+    });
+  });
+
   it("目盛りを押すとその時刻へ再生位置が動く（列で受けると帯の選択と取り合う）", () => {
     withClip(20);
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
