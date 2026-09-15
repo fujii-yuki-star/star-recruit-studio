@@ -3722,6 +3722,61 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       </span>
                     ))}
                   </div>
+                  {/* **印の帯**（#1148／#1159 レビュー由来 🔴・ℹ️）＝目盛りの行の**中**、
+                      ただし `role="slider"` の**外**。
+                      ⚠️ **行の中に置く理由**＝外（`.timeline-inner` 直下）だと、#1104 で目盛り行を
+                      貼り付けた（`z-index: 6`）ぶん**下に塗られて見えず、当たり判定も行が取る**。
+                      行の中なら行の重なりに乗り、行の中では列の名前の欄（5）より下のままなので
+                      **横へ送っても欄を突き抜けない**。
+                      ⚠️ **目盛り（`role="slider"`）の中には置かない**＝ARIA では slider の子は
+                      **presentational** なので、中に入れたボタンの名前が**読み上げの木から落ちる**。
+                      ⚠️ **押せるのは中身だけ**＝帯自体は `pointer-events: none`。敷いた上から
+                      目盛りのシーク・スクラブがそのまま通る（塞いだら目盛りが使えなくなる）。 */}
+                  <div className="timeline-ruler-overlay">
+                    {/* **目印**（#356 ①・#1138 レビュー由来 🔴／#1148＝α 出口監査 🔴3）＝
+                        時間軸の上に立つ印。
+                        ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
+                        印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
+                        ⚠️ **目盛りの行の「中」に描く**（#1148）＝外（`.timeline-inner` 直下）に置くと、
+                        #1104 で目盛り行を貼り付けた（`z-index: 6`）ぶん**旗が帯の下に塗られ**、
+                        当たり判定も行が取るので**押すとシークになる**（印が実質消えていた）。
+                        中に置けば行の重なりに乗るので、**貼り付いても隠れない**。
+                        ⚠️ **列の名前の欄には隠れたまま**＝欄は同じ行の中で前面（`z-index: 5`）なので、
+                        横へ送っても旗が欄を突き抜けない（外に置いていたときと同じ約束）。
+                        ⚠️ **位置は目盛りの中の秒**＝枠が既に欄のぶん右から始まるので、足し算は要らない。 */}
+                    {markersInOrder(doc).map((m) => (
+                      <div
+                        key={m.id}
+                        className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
+                        style={{ left: `${pxPerSec * m.timeSec}px` }}
+                      >
+                        <button
+                          type="button"
+                          // ⚠️ **シークに化けない**＝旗は目盛り（`role="slider"`）の**外**にあるので、
+                          // 押しても目盛りの `click`（押した場所へシーク）や `pointerdown`（掴む）へは
+                          // 届かない。**中に戻すと化ける**ので、止めるのではなく**外に置くこと**で断つ
+                          //（#1159 レビュー由来）。検査が置き場所そのものを留めている。
+                          onClick={() => { setPlayhead(m.timeSec); followPlayhead(); }}
+                          title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
+                          aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
+                        />
+                      </div>
+                    ))}
+                    {/* **再生ヘッドの掴み手**（#1159 レビュー由来 🔴）＝三角は**線の一部ではなく
+                        目盛りの中の印**として描く。
+                        ⚠️ **線（`.timeline-playhead`）は外のまま**＝全レーンを縦に貫くのが役目なので、
+                        行の中へ入れると帯の上を走れなくなる。**上端の三角だけ**をここへ出す。
+                        ⚠️ **もとは線の `::before`** だったので、行の下に塗られて**掴める合図が
+                        画面から消えていた**（`cursor: ew-resize` だけが全幅に出ている状態）。
+                        ⚠️ **旗より上に描く**＝置いた直後に「いまの時刻」が印に隠れない。 */}
+                    {totalSec > 0 && (
+                      <div
+                        className="timeline-playhead-grip"
+                        style={{ left: `${pxPerSec * playheadSec}px` }}
+                        aria-hidden
+                      />
+                    )}
+                  </div>
                 </div>
                 {/* 再生位置の線（#686）＝**いま何が出ているか**を並びの上で見せる。読み取り専用の
                     見わたす画面と同じ CSS（`timeline-playhead`）＝2つの一覧で見え方が割れない。
@@ -3733,24 +3788,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     aria-hidden
                   />
                 )}
-                {/* **目印**（#356 ①・#1138 レビュー由来 🔴）＝時間軸の上に立つ印。
-                    ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
-                    印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
-                    再生位置の線と**同じ測り方**（列の名前の欄ぶん右から）＝ずれない。 */}
-                {markersInOrder(doc).map((m) => (
-                  <div
-                    key={m.id}
-                    className={`timeline-marker${markerTimeEq(m.timeSec, playheadSec) ? " timeline-marker--current" : ""}`}
-                    style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * m.timeSec}px)` }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => { setPlayhead(m.timeSec); followPlayhead(); }}
-                      title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
-                      aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
-                    />
-                  </div>
-                ))}
                 {/* 吸着した先の**縦の点線**（#686 段階4・決定12）＝「なぜそこで止まったか」を見せる。
                     再生位置の線と同じ場所・同じ測り方（列の名前の欄ぶん右から）＝2本の線がずれない。 */}
                 {snapGuideSec != null && (

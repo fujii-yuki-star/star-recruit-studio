@@ -316,3 +316,50 @@ describe("門番自身の検査（わざと壊した入力）", () => {
     expect(hardCodesPx("\n  min-width: 2px;\n", "width")).toBe(false);
   });
 });
+
+// 目盛りの中に敷いた**印の帯**（#1148／#1159）＝旗と再生ヘッドの掴み手を載せる。
+//
+// ⚠️ **jsdom は CSS を読まない**ので、描いて確かめられない。**書き方そのもの**を見る
+//（この file の流儀＝#1104 で「列名の字の大きさを CSS から読む」と同じ）。
+describe("印の帯は、目盛りを塞がず・はみ出さない（#1159）", () => {
+  const overlay = (): string => {
+    const body = ruleBody(css, ".timeline-ruler-overlay");
+    expect(body, "印の帯の規則がありません").not.toBeNull();
+    return body as string;
+  };
+
+  // ⚠️ **敷いても目盛りは使えたまま**＝塞ぐと、印を置いた辺りで**シークもスクラブもできなくなる**
+  // （目盛りの本来の役目を、印のために奪う）。
+  it("押したものは下の目盛りへ通す", () => {
+    expect(/pointer-events\s*:\s*none/.test(overlay()), "印の帯が目盛りを塞いでいます").toBe(true);
+  });
+
+  // ⚠️ **高さは目盛りと同じ値から採る**＝写すと片方だけ動いて、印の帯が**下の帯へはみ出し**、
+  // 帯の当たり判定を奪う（押しても選べない列ができる）。
+  it("高さは目盛りと同じ変数から採る（写さない）", () => {
+    const ruler = ruleBody(css, ".timeline-ruler");
+    expect(ruler, "目盛りの規則がありません").not.toBeNull();
+    for (const [name, body] of [["印の帯", overlay()], ["目盛り", ruler as string]] as const) {
+      expect(
+        /height\s*:\s*var\(--timeline-ruler-h\)/.test(body),
+        `${name}の高さが変数から採られていません（写すと片方だけ動きます）`,
+      ).toBe(true);
+    }
+    // ⚠️ **変数そのものは1か所で宣言する**＝2か所に書くと、どちらが効くか読めない。
+    expect((css.match(/--timeline-ruler-h\s*:/g) ?? []).length, "高さの変数が1か所ではありません").toBe(1);
+  });
+
+  // ⚠️ **掴み手は印より上**＝置いた直後に「いまの時刻」が印に隠れない（#1159 レビュー由来）。
+  it("掴み手は旗より上に描く", () => {
+    const grip = ruleBody(css, ".timeline-playhead-grip");
+    const flag = ruleBody(css, ".timeline-marker");
+    const z = (body: string | null, name: string): number => {
+      const m = /z-index\s*:\s*(\d+)/.exec(body ?? "");
+      expect(m, `${name}の段がありません`).not.toBeNull();
+      return Number(m?.[1]);
+    };
+    expect(z(grip, "掴み手")).toBeGreaterThan(z(flag, "旗"));
+    // ⚠️ **どちらも列の名前の欄（5）より下**＝横へ送ったとき欄を突き抜けない。
+    expect(z(grip, "掴み手")).toBeLessThan(5);
+  });
+});
