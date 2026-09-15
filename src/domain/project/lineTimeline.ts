@@ -233,6 +233,58 @@ export function firstFrameBoundary(scene: Scene, lineDurations: Record<string, n
 }
 
 /**
+ * 場面の**先頭フレームを描くための入力**（`layoutScene` の第3引数にそのまま渡す）。
+ *
+ * ⚠️ **「同じ描画核を通す」だけでは足りない**（#1152・α 出口監査 🟡）＝場面カードの見本は
+ * `layoutScene(scene, template)` を**入力なし**で呼んでいたので、字幕は `scene.texts.subtitle` を描き、
+ * **掛け合い**（`scene.lines`）や**頭に間**がある場面では**動画に一度も出ない字幕**をカードだけが出していた
+ * （間なら `subtitleText: null` で消えるべき所に出る）。
+ * 大きい方のプレビューと書き出しは**先頭の正準セグメント**から渡している（ADR-0001）。
+ *
+ * ⚠️ **写して増やさない**＝同じ組み立てが `PreviewScreen`／`SceneEditScreen`／`buildExportScenes` に
+ * 既にある。ここへ寄せて、見本もその1つを呼ぶ（`CLAUDE.md` §6）。
+ */
+export interface EdgeFrameInput {
+  /** ⚠️ **`undefined`（テンプレの既定に任せる）と `null`（間＝消す）は別物**なので潰さない。 */
+  subtitleText: string | null | undefined;
+  /** FREE 字幕の相手と、同時にしゃべる行（ADR-0029／ADR-0031）を解くための正準セグメント。 */
+  subtitleSegment: SceneSegmentSpec | undefined;
+  /** その瞬間に効いている行（クレジットの話者を決める）。 */
+  creditLine: NarrationLine | undefined;
+}
+
+function edgeFrameInput(scene: Scene, lineDurations: Record<string, number>, last: boolean): EdgeFrameInput {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  const boundary = last ? lastFrameBoundary(scene, lineDurations) : firstFrameBoundary(scene, lineDurations);
+  return {
+    subtitleText: boundary.subtitleText,
+    subtitleSegment: last ? specs[specs.length - 1] : specs[0],
+    creditLine: boundary.creditLine,
+  };
+}
+
+/**
+ * 場面の**先頭フレームを描くための入力**（`layoutScene` の第3引数へ渡す）。
+ *
+ * ⚠️ **幾何（動き）は含まない**＝ここが決めるのは**字幕まわりだけ**。`timeSec`／`animations` を
+ * 渡すかどうかは呼ぶ側の判断（停止中のプレビューは渡さない＝settled の姿を出す・ADR-0019）。
+ */
+export function firstFrameLayoutOptions(scene: Scene, lineDurations: Record<string, number> = {}): EdgeFrameInput {
+  return edgeFrameInput(scene, lineDurations, false);
+}
+
+/**
+ * 場面の**最終フレームを描くための入力**（切替プレビューの A＝前場面の末尾）。
+ *
+ * ⚠️ **対で持つ**（#1164 レビュー由来 🟡）＝切替プレビューは `subtitleText` だけ渡して
+ * `subtitleSegment` を渡していなかったので、**FREE 字幕が消える**／**同時にしゃべる行が片方しか出ない**
+ *（書き出しは両方出る＝ADR-0001 に反する）。先頭と同じ受け皿を通す。
+ */
+export function lastFrameLayoutOptions(scene: Scene, lineDurations: Record<string, number> = {}): EdgeFrameInput {
+  return edgeFrameInput(scene, lineDurations, true);
+}
+
+/**
  * 場面の「最終フレーム」の実効状態（切替プレビュー A＝前場面の末尾フレーム用・#408 Part 2 レビュー P1）。
  * sceneSegmentSpecs の末尾セグメントに一致＝最終行が startSec===durationSec で 0 秒なら直前の生存行を採る（書き出しと同じ）。
  */
