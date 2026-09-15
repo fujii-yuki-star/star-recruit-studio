@@ -2543,10 +2543,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ importError: "先に動画を取り込んでから、切り出したい時間を選んでください。" });
       return null;
     }
-    // ⚠️ **ファイルが見つからない動画は、押す前に断る**（#1155 ⑤・ADR-0026②）＝
-    // タイムライン形式の「絵を止める」は同じ門を持っている（`timelineStore.ts`）のに、
-    // こちらは**文書の中身しか見ていなかった**（`convertFileSrc` は実在を見ないので `src` は残り、
-    // ボタンも押せる）＝走らせてから Rust に断られる形だった。
+    // ⚠️ **ファイルが見つからない動画では、FFmpeg を起こさない**（#1155 ⑤・ADR-0026②）＝
+    // こちらは**文書の中身しか見ていなかった**（`convertFileSrc` は実在を見ないので `src` は残る）
+    // ＝走らせてから Rust に断られる形だった。
+    // ⚠️ **ここは最後の砦**（#1168 レビュー 🟡）＝**押す前の門は画面が持つ**（`CaptureFrameControls`
+    // がボタンを押せなくする＝タイムライン形式の「絵を止める」と同じ形・`06 §12`）。
+    // この段だけだと「押せるのに押したら断られる」で、`06 §12` の言う「押す前に断る」ではない。
     if (get().missingAssetIds.includes(videoAssetId)) {
       set({ importError: CAPTURE_FRAME_ASSET_MISSING_MESSAGE });
       return null;

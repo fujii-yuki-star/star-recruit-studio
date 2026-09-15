@@ -6,12 +6,17 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
-import { RELINK_ASSET_LABEL } from "../uiLabels";
+import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
   const captureVideoFrame = useProjectStore((s) => s.captureVideoFrame);
   const isImporting = useProjectStore((s) => s.isImporting);
+  // ⚠️ **ファイルが見つからない動画では押せなくする**（#1168 レビュー 🟡）＝`store` 側にも同じ門が
+  // あるが、あちらは**押したあと**に断る形なので、`06 §12` が言う「押す前に断る」になっていなかった
+  //（タイムライン形式の「絵を止める」は押せなくしている＝同じ概念を形式で割らない・ADR-0026②）。
+  // ⚠️ **`src` では代わりにならない**＝`convertFileSrc` は実在を見ないので、ファイルが無くても残る。
+  const isMissing = useProjectStore((s) => s.missingAssetIds.includes(asset.assetId));
   const videoRef = useRef<HTMLVideoElement>(null);
   const [atSec, setAtSec] = useState(0);
   const [notice, setNotice] = useState("");
@@ -50,8 +55,21 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
         // 呼び名は `RELINK_ASSET_LABEL` から取る（#1168）。別の名で呼ぶと、探す先が分からない。
         <p className="field-hint">この動画をここでは再生できません。その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直すと、表示できる場合があります。</p>
       )}
+      {/* ⚠️ **押せない理由は見える場所にも出す**（§2-5）＝止まっているボタンだけだと、
+          何が足りないのか分からない（次の行動＝「ファイルを選び直す」がこの画面の上にある）。 */}
+      {isMissing && (
+        <p className="notice notice-warn" role="alert">
+          {CAPTURE_FRAME_ASSET_MISSING_MESSAGE}
+        </p>
+      )}
       <div className="row mt">
-        <button type="button" className="btn btn-secondary" disabled={busy || !src} onClick={() => void onCapture()}>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={busy || !src || isMissing}
+          title={isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : undefined}
+          onClick={() => void onCapture()}
+        >
           {isImporting ? "切り出しています…" : "この瞬間を写真にする"}
         </button>
         <span className="text-sm text-muted">{formatTime(atSec)}</span>

@@ -27,6 +27,32 @@ beforeEach(() => {
 afterEach(() => useProjectStore.setState({ assetSrcById: {}, isImporting: false } as never));
 
 describe("CaptureFrameControls", () => {
+  // ⚠️ **押す前に断る**（#1168 レビュー 🟡）＝`store` 側にも同じ判定があるが、あちらは**押したあと**
+  // なので `06 §12` の言う「押す前」ではなかった（タイムライン形式の「絵を止める」は押せなくしている）。
+  describe("ファイルが見つからない動画", () => {
+    beforeEach(() => useProjectStore.setState({ missingAssetIds: ["asset_001"] } as never));
+    afterEach(() => useProjectStore.setState({ missingAssetIds: [] } as never));
+
+    it("ボタンを押せなくする（走らせてから断らない）", () => {
+      render(<CaptureFrameControls asset={video} />);
+      expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toBeDisabled();
+    });
+
+    it("押せない理由を見える場所に出す（次の行動つき）", () => {
+      render(<CaptureFrameControls asset={video} />);
+      const notice = screen.getByRole("alert");
+      expect(notice.textContent).toContain("ファイルを選び直す");
+      expect(notice.textContent, "次の行動を言っていない").toContain("ください");
+    });
+
+    it("見つかっている動画は止めない（誤検出で操作を殺さない）", () => {
+      useProjectStore.setState({ missingAssetIds: ["asset_009"] } as never);
+      render(<CaptureFrameControls asset={video} />);
+      expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toBeEnabled();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
   /** ⚠️ §2-3＝実装用語を画面に出さない。 */
   it("「フレーム」「抽出」を画面に出さない", () => {
     const { container } = render(<CaptureFrameControls asset={video} />);

@@ -86,7 +86,7 @@ function opts(over: Partial<BakeOptions> = {}): BakeOptions {
   };
 }
 
-/** 焼いた文書の共通の健全性＝スキーマ適合（V2）と意味検証の警告ゼロ（V22–V32。V24 の重なり禁止・V32 の id 一意を含む）。 */
+/** 焼いた文書の共通の健全性＝スキーマ適合（V2）と意味検証の警告ゼロ（V22–V33。V24 の重なり禁止・V32 の id 一意を含む）。 */
 function expectSound(doc: ReturnType<typeof bakeTimelineProject>['doc']): void {
   const ok = validateTimelineProject(doc);
   expect(validateTimelineProject.errors ?? []).toEqual([]);
