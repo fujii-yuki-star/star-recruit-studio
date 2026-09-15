@@ -4632,15 +4632,40 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
       }));
     };
 
-    it("旗は目盛りの行の中に描かれる（外に出すと貼り付いた行の下に隠れる）", () => {
+    it("旗は目盛りの行の中・目盛りそのものの外に描かれる", () => {
+      withMarker(4);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      // ⚠️ **行の中**＝外（`.timeline-inner` 直下）に出すと、貼り付いた行の下に塗られて押せなくなる。
+      expect(
+        container.querySelector(".timeline-row:first-child .timeline-marker"),
+        "旗が目盛りの行の中にありません（外に出ると帯の下に塗られて押せなくなります）",
+      ).not.toBeNull();
+      // ⚠️ **目盛りそのもの（`role="slider"`）の中ではない**＝ARIA では slider の子は
+      // presentational なので、中に入れると**旗の名前が読み上げの木から落ちる**
+      //（#1159 レビュー由来 ℹ️）。押した結果が目盛りへ渡らないのも、この置き場所のおかげ。
+      expect(
+        container.querySelector(".timeline-ruler .timeline-marker"),
+        "旗が目盛り（slider）の中にあります（読み上げから落ち、押すとシークに化けます）",
+      ).toBeNull();
+      // ⚠️ **2か所に描かない**＝片方だけ直したときに気づけない。
+      expect(container.querySelectorAll(".timeline-marker")).toHaveLength(1);
+    });
+
+    // ⚠️ **掴み手も同じ理由で消えていた**（#1159 レビュー由来 🔴）＝三角は線（`.timeline-playhead`）の
+    // `::before` だったので、貼り付いた目盛り行の下に塗られて**掴める合図が画面から消えていた**
+    //（`cursor: ew-resize` だけが全幅に出ている状態）。線は外のまま・三角だけ行の中へ。
+    it("再生ヘッドの掴み手は目盛りの行の中、線は外（全レーンを貫く）", () => {
       withMarker(4);
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       expect(
-        container.querySelector(".timeline-ruler .timeline-marker"),
-        "旗が目盛りの中にありません（外に出ると帯の下に塗られて押せなくなります）",
+        container.querySelector(".timeline-row:first-child .timeline-playhead-grip"),
+        "掴み手が目盛りの行の中にありません（帯の下に塗られて合図が消えます）",
       ).not.toBeNull();
-      // ⚠️ **外にも居ない**＝2か所に描くと、片方だけ直したときに気づけない。
-      expect(container.querySelectorAll(".timeline-marker")).toHaveLength(1);
+      expect(
+        container.querySelector(".timeline-row:first-child .timeline-playhead"),
+        "線まで行の中に入っています（全レーンを貫けなくなります）",
+      ).toBeNull();
+      expect(container.querySelector(".timeline-inner > .timeline-playhead")).not.toBeNull();
     });
 
     // ⚠️ **掴む側にも渡さない**＝目盛りは `pointerdown` からドラッグを始める（再生中なら止める）。

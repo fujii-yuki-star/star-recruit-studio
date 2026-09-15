@@ -3713,6 +3713,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); followPlayhead(); return; }
                     }}
                   >
+                    {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の
+                        ツールチップ（`clipRangeTitle`）と見わたす画面が `m:ss` なのに、ここだけ「N秒」
+                        だった。刻みは常に整数秒（`tickStepSec`）なので丸めで潰れることはない。 */}
+                    {ticks.map((t) => (
+                      <span key={t} className="timeline-tick" style={{ left: `${pxPerSec * t}px` }}>
+                        {clockLabel(t)}
+                      </span>
+                    ))}
+                  </div>
+                  {/* **印の帯**（#1148／#1159 レビュー由来 🔴・ℹ️）＝目盛りの行の**中**、
+                      ただし `role="slider"` の**外**。
+                      ⚠️ **行の中に置く理由**＝外（`.timeline-inner` 直下）だと、#1104 で目盛り行を
+                      貼り付けた（`z-index: 6`）ぶん**下に塗られて見えず、当たり判定も行が取る**。
+                      行の中なら行の重なりに乗り、行の中では列の名前の欄（5）より下のままなので
+                      **横へ送っても欄を突き抜けない**。
+                      ⚠️ **目盛り（`role="slider"`）の中には置かない**＝ARIA では slider の子は
+                      **presentational** なので、中に入れたボタンの名前が**読み上げの木から落ちる**。
+                      ⚠️ **押せるのは中身だけ**＝帯自体は `pointer-events: none`。敷いた上から
+                      目盛りのシーク・スクラブがそのまま通る（塞いだら目盛りが使えなくなる）。 */}
+                  <div className="timeline-ruler-overlay">
                     {/* **目印**（#356 ①・#1138 レビュー由来 🔴／#1148＝α 出口監査 🔴3）＝
                         時間軸の上に立つ印。
                         ⚠️ **一覧だけにしない**＝業界の型では印は時間軸の上に見えるもので、一覧は補助。
@@ -3732,28 +3752,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       >
                         <button
                           type="button"
-                          onClick={(e) => {
-                            // ⚠️ **シークに化けさせない**＝親（目盛り）が `click` でシークするので、
-                            // 止めないと「その位置へ移る」ではなく**押した場所へ移る**になる。
-                            e.stopPropagation();
-                            setPlayhead(m.timeSec);
-                            followPlayhead();
-                          }}
-                          // ⚠️ **掴む側にも渡さない**＝目盛りは `pointerdown` からドラッグを始める。
-                          onPointerDown={(e) => e.stopPropagation()}
+                          // ⚠️ **シークに化けない**＝旗は目盛り（`role="slider"`）の**外**にあるので、
+                          // 押しても目盛りの `click`（押した場所へシーク）や `pointerdown`（掴む）へは
+                          // 届かない。**中に戻すと化ける**ので、止めるのではなく**外に置くこと**で断つ
+                          //（#1159 レビュー由来）。検査が置き場所そのものを留めている。
+                          onClick={() => { setPlayhead(m.timeSec); followPlayhead(); }}
                           title={`${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}（押すとこの位置へ移ります）`}
                           aria-label={`目印 ${markerClock(m.timeSec, doc.videoSettings.fps)}${m.text ? `：${m.text}` : ""}`}
                         />
                       </div>
                     ))}
-                    {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の
-                        ツールチップ（`clipRangeTitle`）と見わたす画面が `m:ss` なのに、ここだけ「N秒」
-                        だった。刻みは常に整数秒（`tickStepSec`）なので丸めで潰れることはない。 */}
-                    {ticks.map((t) => (
-                      <span key={t} className="timeline-tick" style={{ left: `${pxPerSec * t}px` }}>
-                        {clockLabel(t)}
-                      </span>
-                    ))}
+                    {/* **再生ヘッドの掴み手**（#1159 レビュー由来 🔴）＝三角は**線の一部ではなく
+                        目盛りの中の印**として描く。
+                        ⚠️ **線（`.timeline-playhead`）は外のまま**＝全レーンを縦に貫くのが役目なので、
+                        行の中へ入れると帯の上を走れなくなる。**上端の三角だけ**をここへ出す。
+                        ⚠️ **もとは線の `::before`** だったので、行の下に塗られて**掴める合図が
+                        画面から消えていた**（`cursor: ew-resize` だけが全幅に出ている状態）。
+                        ⚠️ **旗より上に描く**＝置いた直後に「いまの時刻」が印に隠れない。 */}
+                    {totalSec > 0 && (
+                      <div
+                        className="timeline-playhead-grip"
+                        style={{ left: `${pxPerSec * playheadSec}px` }}
+                        aria-hidden
+                      />
+                    )}
                   </div>
                 </div>
                 {/* 再生位置の線（#686）＝**いま何が出ているか**を並びの上で見せる。読み取り専用の
