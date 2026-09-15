@@ -62,7 +62,7 @@ import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructu
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -2541,6 +2541,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **保存前のプロジェクトでは切り出せない**＝元の動画がまだフォルダに無い（§2-5＝次の行動を出す）。
     if (!src || src.assetType !== ASSET_TYPE.video || !projectId) {
       set({ importError: "先に動画を取り込んでから、切り出したい時間を選んでください。" });
+      return null;
+    }
+    // ⚠️ **ファイルが見つからない動画は、押す前に断る**（#1155 ⑤・ADR-0026②）＝
+    // タイムライン形式の「絵を止める」は同じ門を持っている（`timelineStore.ts`）のに、
+    // こちらは**文書の中身しか見ていなかった**（`convertFileSrc` は実在を見ないので `src` は残り、
+    // ボタンも押せる）＝走らせてから Rust に断られる形だった。
+    if (get().missingAssetIds.includes(videoAssetId)) {
+      set({ importError: CAPTURE_FRAME_ASSET_MISSING_MESSAGE });
       return null;
     }
     const { asset, fileName } = newFrameAsset(src.displayName, atSec, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));

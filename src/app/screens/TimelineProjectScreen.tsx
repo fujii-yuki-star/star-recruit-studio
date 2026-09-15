@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -3047,7 +3047,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             const g = freezeExtra();
             return g.disabled ? { disabled: true, disabledHint: g.hint } : {};
           })(),
-          ...(freezeAudioNote ? { hint: freezeAudioNote } : {}),
+          // ⚠️ **右クリックには添え書きが出せない**（#1155 ⑥ で判明・#1167 へ起票）＝
+          // `ContextMenu` は `disabledHint`（押せないときだけ）しか描かないので、
+          // ここに `hint` を渡しても**どこにも出ない**。以前あった
+          // `...(freezeAudioNote ? { hint: freezeAudioNote } : {})` は**死んだ受け渡し**で、
+          // 「元の音が止まる」の知らせが**この入口だけ届いていなかった**（ADR-0026①）。
+          // 渡すのをやめる＝出ているように見える書き方を残さない。
           onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
         },
         ...(menuClipTemplate
@@ -4066,7 +4071,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-secondary"
                 onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.selected); }}
                 {...freezeGuard}
-                title={freezeGuard.title ?? `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}`}
+                // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、
+                //   言わないと「思ったより短い」となった人の次の一歩が画面から読めない。
+                title={freezeGuard.title ?? `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}。${FREEZE_FRAME_LENGTH_NOTE}`}
               >
                 {/* ⚠️ **押していないのに進行中と名乗らない**（#1136 レビュー由来 ℹ️）＝
                     `isImporting` は素材の取り込みでも立つので、写真をドロップしている最中に

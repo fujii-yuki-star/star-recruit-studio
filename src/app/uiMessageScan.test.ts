@@ -143,7 +143,7 @@ const NOT_IN_TABLE: Record<string, string> = {
 // この走査（その場に書いた文）ではなく **`codeMessages()` の完全一致**（`errorStateTable`）が守る側へ移った。
 // ⚠️ **さらに -2**（#1131）＝接続キーの既定文を `uiLabels` の `apiKeyMessage` へ出した。
 // 走査（その場に書いた文）から**完全一致で守る側**（`errorStateTable` の `codeMessages`）へ移った。
-const FOUND_COUNT = 90;
+const FOUND_COUNT = 91;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

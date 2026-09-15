@@ -61,7 +61,11 @@ export function markersInOrder(doc: TimelineProject): TimelineMarker[] {
  * 押す前にこれを見て、あるなら**その目印を選ぶ**側へ倒す（増やさない）。
  */
 export function markerAt(doc: TimelineProject, timeSec: number): TimelineMarker | undefined {
-  return (doc.markers ?? []).find((m) => m.timeSec === timeSec);
+  // ⚠️ **同じ物差しで見る**（#1155 ②）＝`markerTimeEq` は「完全一致で見ない」と書いているのに、
+  // ここは `===` だった。**注記が本当なら**丸めの差で同じコマに2つ置けてしまい、
+  // この関数が防ぐと言っているもの（どちらを直しているか分からない）が作れる。
+  // **注記が偽なら**注記が嘘。安全側＝`markerTimeEq` へ寄せる。
+  return (doc.markers ?? []).find((m) => markerTimeEq(m.timeSec, timeSec));
 }
 
 /**
@@ -128,12 +132,13 @@ export function removeMarker(doc: TimelineProject, markerId: string): TimelinePr
  */
 export function moveMarker(doc: TimelineProject, markerId: string, timeSec: number): TimelineProject {
   const at = Math.max(0, timeSec);
-  const clash = (doc.markers ?? []).find((m) => m.id !== markerId && m.timeSec === at);
+  // ⚠️ **置くときと同じ物差し**（#1155 ②）＝片方だけ `===` だと、置けないのに動かせる（またはその逆）。
+  const clash = (doc.markers ?? []).find((m) => m.id !== markerId && markerTimeEq(m.timeSec, at));
   if (clash) return doc;
   // ⚠️ **もうそこに居るなら同じ文書を返す**（#1149 ②）＝「置く → 一覧の時刻を押して再生位置を合わせる →
   // 再生位置へ動かす」は普通に踏む筋で、ここで新しい文書を返すと**何も変わらないのに履歴が積まれる**。
   const me = (doc.markers ?? []).find((m) => m.id === markerId);
-  if (!me || me.timeSec === at) return doc;
+  if (!me || markerTimeEq(me.timeSec, at)) return doc;
   return { ...doc, markers: (doc.markers ?? []).map((m) => (m.id === markerId ? { ...m, timeSec: at } : m)) };
 }
 
@@ -149,5 +154,5 @@ export function moveMarkerBlocked(
   timeSec: number,
 ): 'markerExists' | null {
   const at = Math.max(0, timeSec);
-  return (doc.markers ?? []).some((m) => m.id !== markerId && m.timeSec === at) ? 'markerExists' : null;
+  return (doc.markers ?? []).some((m) => m.id !== markerId && markerTimeEq(m.timeSec, at)) ? 'markerExists' : null;
 }

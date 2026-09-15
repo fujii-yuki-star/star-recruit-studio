@@ -6,6 +6,7 @@ import { ASSET_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClipKind, TrackKind } from '../enums';
 import type { Warning } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
+import { markerTimeEq } from './markers';
 
 function warn(code: string, message: string, field: string, severity: Warning['severity'] = 'warning'): Warning {
   return { code, message, field, severity, autoFixed: false };
@@ -194,6 +195,20 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
         warnings.push(warn('TIMELINE_SUBTITLE_LINK_NOT_FOUND', '連動する読み上げが見つかりません。連動先を選び直すか、連動をやめてください', field));
       }
     }
+  }
+
+  // V33: 同じ時刻の目印が2つ以上無い（#356 ①・#1155 ③）。
+  // ⚠️ **schema では表せない**（配列をまたいだ一意）ので、ここで見る。
+  // ⚠️ **作る側は増やさない**（`addMarker`／`moveMarker` が同じ時刻を弾く）＝ここへ来るのは
+  // **外から持ち込んだ文書**。同じ時刻に2つあると、一覧でも時間軸でも重なって
+  // **どちらを直しているか分からない**（`06 §12` が防ぐと言っているもの）。
+  // ⚠️ **比べ方は `markerTimeEq`**＝置く側と同じ物差し（完全一致で見ない・#1155 ②）。
+  const seenMarkerTimes: number[] = [];
+  for (const m of doc.markers ?? []) {
+    if (seenMarkerTimes.some((t) => markerTimeEq(t, m.timeSec))) {
+      warnings.push(warn('TIMELINE_MARKER_DUPLICATE_TIME', '同じ時間に目印が2つあります。どちらかを少しずらすか、消してください', `markers.${m.id}`));
+    }
+    seenMarkerTimes.push(m.timeSec);
   }
 
   // V24: 同一トラック内の時間の重なり。重ねたいならトラックを足す。

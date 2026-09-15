@@ -13,8 +13,7 @@ import {
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
-  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE,
-} from "./uiLabels";
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -91,6 +90,10 @@ function codeMessages(): Record<string, string> {
     // だけが守っていた。定数へ出したら**完全一致の側へ載せる**（載せ忘れると、どちらの段でも
     // 守られない「素通り」になる＝実際に `messages.rs` でそうなっていた＝#1129）。
     ...apiKeyMessage,
+    // ⚠️ **場面形式の切り出しの断りも等値で守る**（#1155 ⑤）＝タイムライン形式の双子
+    // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
+    // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
+    CAPTURE_FRAME_ASSET_MISSING: CAPTURE_FRAME_ASSET_MISSING_MESSAGE,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -465,7 +468,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝接続キーの「確かめられなかった」2文（#1131）。
     // ⚠️ **+1**＝`KEYRING_UNAVAILABLE`（#1131）。
     // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①＝目印を動かす先に別の目印がいるとき）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(228);
+    // ⚠️ **+1**＝`TIMELINE_MARKER_DUPLICATE_TIME`（#1155 ③＝`11 §8` V33・読み込んだ文書の検証）。
+    // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(230);
   });
 
 
@@ -712,7 +717,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(225);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(227);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -728,6 +733,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       //   ⚠️ **1件ずつ確かめて数を直す**＝「+1」と書いたまま数だけ動かすと、次の人が
       //   1件しか確かめずに済ませる（実際にそう書いていた＝レビュー指摘）。
       // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①）。
-    ).toBe(96);
+      // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝タイムライン形式の双子と揃えた）。
+    ).toBe(97);
   });
 });

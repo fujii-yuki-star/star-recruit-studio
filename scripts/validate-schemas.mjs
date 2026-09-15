@@ -451,6 +451,9 @@ const tlReject = [
   ['timeline: 音の下げ幅が範囲外(1.5)は拒否（1.29）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckDepth: 1.5 } } })],
   // ⚠️ **目印の拒否条件（1.11・#356 ①）**＝id の形・0 以上・未知の項目・メモの上限。
   ['timeline: 目印の id が桁不足(marker_1)は拒否（§2.1・3桁以上）', tlWith({ markers: [{ id: 'marker_1', timeSec: 0 }] })],
+  // ⚠️ **必須も拒否側で留める**（#1155 ①）＝受け入れ側だけだと `required` を丸ごと消しても赤くならない。
+  ['timeline: 目印に時刻が無いのは拒否（required）', tlWith({ markers: [{ id: 'marker_001' }] })],
+  ['timeline: 目印に id が無いのは拒否（required）', tlWith({ markers: [{ timeSec: 0 }] })],
   ['timeline: 目印の時刻が負(-1)は拒否（0 以上＝保存はできて次に開けない、を作らない）', tlWith({ markers: [{ id: 'marker_001', timeSec: -1 }] })],
   ['timeline: 目印に未知の項目(color)は拒否（additionalProperties:false）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, color: 'red' }] })],
   ['timeline: 目印のメモが上限超え(201字)は拒否（maxLength 200）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, text: 'あ'.repeat(201) }] })],

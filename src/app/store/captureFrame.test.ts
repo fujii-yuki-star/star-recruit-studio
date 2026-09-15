@@ -105,3 +105,36 @@ describe('captureVideoFrame', () => {
     expect(useProjectStore.getState().isImporting).toBe(false);
   });
 });
+
+// ファイルが見つからない動画は、**押す前に断る**（#1155 ⑤・ADR-0026②）。
+//
+// ⚠️ **以前は文書の中身しか見ていなかった**＝`convertFileSrc` は実在を見ないので素材は残り、
+// ボタンも押せる＝**走らせてから Rust に断られる**形だった。タイムライン形式の「絵を止める」は
+// 同じ門を持っているので、**同じ概念を形式で割らない**。
+describe('ファイルが見つからない動画（#1155 ⑤）', () => {
+  it('押す前に断る（切り出しを走らせない）', async () => {
+    setup();
+    useProjectStore.setState({ missingAssetIds: ['asset_001'] } as never);
+    const id = await useProjectStore.getState().captureVideoFrame('asset_001', 30);
+    expect(id, '切り出せたことにしている').toBeNull();
+    expect(vi.mocked(extractVideoFrame), '走らせてから断っている').not.toHaveBeenCalled();
+  });
+
+  it('断りは次の行動を言う（この画面から辿れる先）', async () => {
+    setup();
+    useProjectStore.setState({ missingAssetIds: ['asset_001'] } as never);
+    await useProjectStore.getState().captureVideoFrame('asset_001', 30);
+    const msg = useProjectStore.getState().importError ?? '';
+    expect(msg).toContain('素材の一覧');
+    expect(msg, '次の行動を言っていない').toContain('ください');
+  });
+
+  // ⚠️ **見つかっている動画は止めない**（誤検出は操作を殺す）。
+  it('別の素材が見つからないだけなら、切り出せる', async () => {
+    setup();
+    useProjectStore.setState({ missingAssetIds: ['asset_999'] } as never);
+    const id = await useProjectStore.getState().captureVideoFrame('asset_001', 30);
+    expect(id).not.toBeNull();
+    expect(vi.mocked(extractVideoFrame)).toHaveBeenCalled();
+  });
+});

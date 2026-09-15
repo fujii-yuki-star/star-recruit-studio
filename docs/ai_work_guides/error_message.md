@@ -8,7 +8,7 @@
 |---|---|---|
 | `CLAUDE.md` | **§2-5**（自動で読み込み済み） | 「原因」でなく「次の行動」・**黙って別の結果にしない** |
 | [`15_ERROR_STATE_MODEL.md`](../yuko_recruit_docs/15_ERROR_STATE_MODEL.md) | **§5 分類**（324字）＋**§6 の規則**（全体で 21,330字＝表を外へ出した・#1090 案C） | コード語彙と規則の正典 |
-| [`errors/error-state-table.tsv`](../yuko_recruit_docs/errors/error-state-table.tsv) | **該当の1行だけ**（228 行・50,186字） | **文言の正典**（1行=1コード・タブ区切り） |
+| [`errors/error-state-table.tsv`](../yuko_recruit_docs/errors/error-state-table.tsv) | **該当の1行だけ**（230 行・50,186字） | **文言の正典**（1行=1コード・タブ区切り） |
 | [`06_UI_SPEC.md`](../yuko_recruit_docs/06_UI_SPEC.md) | **§3 用語置き換え**（2,297字） | 出してよい言葉 |
 
 表の行は `grep` で当てる（全文を開かない）。⚠️ **表の実体は `15` ではなく TSV**（#1090 案C）:
