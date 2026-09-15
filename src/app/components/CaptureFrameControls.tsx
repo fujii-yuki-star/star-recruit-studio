@@ -6,11 +6,17 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
+import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, CAPTURE_FRAME_LABEL, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
   const captureVideoFrame = useProjectStore((s) => s.captureVideoFrame);
   const isImporting = useProjectStore((s) => s.isImporting);
+  // ⚠️ **ファイルが見つからない動画では押せなくする**（#1168 レビュー 🟡）＝`store` 側にも同じ門が
+  // あるが、あちらは**押したあと**に断る形なので、`06 §12` が言う「押す前に断る」になっていなかった
+  //（タイムライン形式の「絵を止める」は押せなくしている＝同じ概念を形式で割らない・ADR-0026②）。
+  // ⚠️ **`src` では代わりにならない**＝`convertFileSrc` は実在を見ないので、ファイルが無くても残る。
+  const isMissing = useProjectStore((s) => s.missingAssetIds.includes(asset.assetId));
   const videoRef = useRef<HTMLVideoElement>(null);
   const [atSec, setAtSec] = useState(0);
   const [notice, setNotice] = useState("");
@@ -18,6 +24,19 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
   // ⚠️ **書き出し中の非表示は親（素材画面）が持つ**（欄ごと出さない）＝ここは取り込み中だけ見る。
   // 使われない口を作らない（§9-2「将来のために設計しない」・PR #885 レビュー ℹ️）。
   const busy = isImporting;
+
+  /**
+   * 押せない理由（`null` なら押せる）。
+   *
+   * ⚠️ **押す前に断る**（#1168 レビュー 🟡）＝タイムライン形式の「絵を止める」（`freezeExtra`）と
+   * **同じ形**にする＝**押せない理由はここ1か所で決める**（あちこちの条件に散らさない）。
+   * ⚠️ **順番も合わせる**＝あちらは取り込み中が先（両方成り立つときに出る文が形式で割れない）。
+   * ⚠️ **見られない動画（`!src`）はここに入れない**＝そのときの理由は**下の案内が画面に出して**おり、
+   * 同じことを `title` でも言うと「二度言う」側に倒れる（この画面の流儀・#1168 レビュー 🟡）。
+   * ＝押せなくする条件は `!src` を足した2つ、理由を持つのはこの1つ、という形。
+   */
+  const blocked: string | null =
+    busy ? IMPORT_BUSY_MESSAGE : isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : null;
 
   async function onCapture(): Promise<void> {
     setNotice("");
@@ -30,7 +49,7 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
 
   return (
     <div className="field">
-      <span className="field-label">この瞬間を写真にする</span>
+      <span className="field-label">{CAPTURE_FRAME_LABEL}</span>
       <p className="field-hint">
         動画を再生して、写真にしたいところで止めてください。止めたところが1枚の写真になります。
       </p>
@@ -46,12 +65,26 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
       ) : (
         // ⚠️ **見られないときも行き止まりにしない**（§2-5）＝理由と次の行動を出す。
         // ⚠️ **同じ操作は同じ名前で呼ぶ**（α-6 出口監査 🟡25・§2-3）＝同じ画面の導線は
-        // 「ファイルを選び直す」（`MaterialsScreen` の4か所で統一）。別の名で呼ぶと、探す先が分からない。
-        <p className="field-hint">この動画をここでは再生できません。その素材を選んで「ファイルを選び直す」から入れ直すと、表示できる場合があります。</p>
+        // 呼び名は `RELINK_ASSET_LABEL` から取る（#1168）。別の名で呼ぶと、探す先が分からない。
+        <p className="field-hint">この動画をここでは再生できません。その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直すと、表示できる場合があります。</p>
       )}
+      {/* ⚠️ **押す前の状態では知らせを増やさない**（#1168 レビュー 🟡・§6＝この画面の流儀）＝状況はバナー、
+          どれかは一覧の印、直し方はボタン、と役割が分かれている。ここにも同じ説明を出すと
+          **同じ状態で `alert` が2つ**になる（`MaterialsScreen.relink.test.tsx` が記録した形）。
+          押せない理由は `title` に出す＝タイムライン形式の「絵を止める」と同じ（`freezeExtra`）。 */}
       <div className="row mt">
-        <button type="button" className="btn btn-secondary" disabled={busy || !src} onClick={() => void onCapture()}>
-          {isImporting ? "切り出しています…" : "この瞬間を写真にする"}
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={blocked != null || !src}
+          title={blocked ?? undefined}
+          onClick={() => void onCapture()}
+        >
+          {/* ⚠️ **押していないのに進行中と名乗らない**（#1170・#1168 レビュー 🟡）＝`isImporting` は
+              **アプリ全体**の取り込みで立つので、写真を落としただけでもここが「切り出しています…」に
+              変わっていた。しかも `title` は「終わってからもう一度お試しください」＝**同じボタンが
+              名前と説明で逆のことを言う**。タイムライン形式は #1136 ℹ️ でこの形を採らないと決めている。 */}
+          {CAPTURE_FRAME_LABEL}
         </button>
         <span className="text-sm text-muted">{formatTime(atSec)}</span>
       </div>

@@ -218,6 +218,33 @@ describe('変わらなければ同じ文書を返す（#1149 ②）', () => {
   });
 });
 
+// 関門は**置く側と同じ物差し**で見る（#1155 ②）。
+//
+// ⚠️ **注記と実装が食い違っていた**＝`markerTimeEq` は「**完全一致で見ない**（丸めの差が残る）」と
+// 書いているのに、重ねないための関門は `===` だった。**注記が本当なら**丸めの差で同じコマに2つ置けて、
+// この関門が防ぐと言っているもの（どちらを直しているか分からない）が作れる。**注記が偽なら**注記が嘘。
+describe('関門は markerTimeEq で見る（#1155 ②）', () => {
+  // ⚠️ **丸めの差**＝格子へ落としても浮動小数の差は残る（`3` と `3 + 1e-9`）。
+  const nudged = 3 + 1e-9;
+
+  it('丸めの差しか無い時刻には置かない（増やさない）', () => {
+    const base = withMarkers([{ id: 'marker_001', timeSec: 3 }]);
+    expect(markerAt(base, nudged)?.id, '同じコマなのに別の時刻とみなしている').toBe('marker_001');
+    expect(addMarker(base, nudged).doc, '同じコマに2つ置けている').toBe(base);
+  });
+
+  it('丸めの差しか無い先へは動かさない', () => {
+    const base = withMarkers([{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 7 }]);
+    expect(moveMarker(base, 'marker_002', nudged), '同じコマへ重ねられている').toBe(base);
+  });
+
+  // ⚠️ **判定と実行で規則を割らない**＝押す前の判定だけ `===` だと「押せたのに動かない」。
+  it('押す前の判定も同じ物差し', () => {
+    const base = withMarkers([{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 7 }]);
+    expect(moveMarkerBlocked(base, 'marker_002', nudged)).toBe('markerExists');
+  });
+});
+
 // 動かせないときは、呼ぶ側が**理由を出せる**ようにする（#1149 ①）。
 describe('moveMarkerBlocked（押す前に断るための判定）', () => {
   const base = withMarkers([{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 7 }]);

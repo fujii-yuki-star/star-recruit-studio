@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032・#627）の意味検証（11 §8 V22–V26）と、schema と TS 定数の照合。
+// タイムライン形式（ADR-0032・#627）の意味検証（11 §8 V22–V33）と、schema と TS 定数の照合。
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -384,5 +384,49 @@ describe('V32 id の重複', () => {
   it('重なっていなければ何も言わない', () => {
     const w = validateTimelineDoc(doc({ clips: [clip({ id: 'clip_001' }), clip({ id: 'clip_002', startSec: 10 })] }));
     expect(w.map((x) => x.code)).not.toContain('TIMELINE_DUPLICATE_ID');
+  });
+});
+
+// V33：同じ時刻の目印が2つ以上無い（#356 ①・#1155 ③）。
+//
+// ⚠️ **schema では表せない**（配列をまたいだ一意）ので、ここで見る。
+// ⚠️ **作る側は増やさない**（`addMarker`／`moveMarker` が同じ時刻を弾く）＝ここへ来るのは
+// **外から持ち込んだ文書**。同じ時刻に2つあると、一覧でも時間軸でも重なって
+// **どちらを直しているか分からない**（`06 §12` が防ぐと言っているもの）。
+describe('V33 同じ時刻の目印', () => {
+  it('同じ時刻に2つあると知らせる', () => {
+    const w = validateTimelineDoc(doc({
+      markers: [{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 3 }],
+    }));
+    expect(w.map((x) => x.code)).toContain('TIMELINE_MARKER_DUPLICATE_TIME');
+  });
+
+  it('2つ目だけ知らせる（同じ所に同じ案内を何度も出さない）', () => {
+    const w = validateTimelineDoc(doc({
+      markers: [{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 3 }],
+    }));
+    const hits = w.filter((x) => x.code === 'TIMELINE_MARKER_DUPLICATE_TIME');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.field).toBe('markers.marker_002');
+  });
+
+  // ⚠️ **比べ方は置く側と同じ物差し**（`markerTimeEq`・#1155 ②）＝完全一致で見ると、
+  // 丸めの差が残る文書で「別の時刻」に化けて素通りする。
+  it('丸めの差しか無いものも同じ時刻とみなす（置く側と同じ物差し）', () => {
+    const w = validateTimelineDoc(doc({
+      markers: [{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 3 + 1e-9 }],
+    }));
+    expect(w.map((x) => x.code)).toContain('TIMELINE_MARKER_DUPLICATE_TIME');
+  });
+
+  it('違う時刻なら知らせない（誤検出は門番の信用を落とす）', () => {
+    const w = validateTimelineDoc(doc({
+      markers: [{ id: 'marker_001', timeSec: 3 }, { id: 'marker_002', timeSec: 3.5 }],
+    }));
+    expect(w.map((x) => x.code)).not.toContain('TIMELINE_MARKER_DUPLICATE_TIME');
+  });
+
+  it('目印が無い文書でも落ちない（未指定＝目印なし）', () => {
+    expect(() => validateTimelineDoc(doc({}))).not.toThrow();
   });
 });

@@ -40,7 +40,7 @@ description: 機能・リリース単位の出口監査を実行する司令塔�
 | subagent_type | 担当 |
 |---|---|
 | `canon-schema-reviewer` | 正典/schema 整合・直書き・依存方向 ＋（観点ファイルの指定があれば）機能スコープの docs ドリフト |
-| `correctness-reviewer` | 不変条件・データフロー・V22〜V30 |
+| `correctness-reviewer` | 不変条件・データフロー・`11 §8` の V項（**番号の範囲で書かない**＝V を足すたびに黙って担当外が生まれる） |
 | `tests-reviewer` | §7 テスト網羅・golden・**新規テストの変異チェック実施記録** |
 | `ui-terms-reviewer` | §2-3 技術用語・§2-5 文言 |
 | `ux-model-reviewer` | 操作モデル＝業界の型との差分（利用者が気づけない違和感の検出） |

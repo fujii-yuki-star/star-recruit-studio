@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V32）。純粋関数（副作用なし）。
+// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V33）。純粋関数（副作用なし）。
 // スキーマ適合（型/必須/enum/範囲＝V1,V2）は ajv 済み前提で、ここは schema で表せない
 // 相互参照・横断条件だけを見て Warning[] を返す。
 // エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。文言は §2-5「次の行動」を示す。
@@ -6,6 +6,7 @@ import { ASSET_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClipKind, TrackKind } from '../enums';
 import type { Warning } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
+import { markerTimeEq } from './markers';
 
 function warn(code: string, message: string, field: string, severity: Warning['severity'] = 'warning'): Warning {
   return { code, message, field, severity, autoFixed: false };
@@ -124,7 +125,8 @@ export function duplicateIdsIn(doc: TimelineProject): string[] {
  * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在／
  * V29 字幕の連動先の実在（ADR-0032 決定24）／V30 切り抜きで丸ごと隠れていないか（#634）。
  * V31 **同じ対象に動きは1本まで**（#717・読む側が1本しか見ない）／
- * V32 **id は文書の中で一意**（#811・読む側が id で引き当てるので、重なると別のものに効く）。
+ * V32 **id は文書の中で一意**（#811・読む側が id で引き当てるので、重なると別のものに効く）／
+ * V33 **同じ時刻に目印は1つ**（#1155 ③・重なると一覧でも時間軸でもどちらを直しているか分からない）。
  */
 export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const warnings: Warning[] = [];
@@ -194,6 +196,20 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
         warnings.push(warn('TIMELINE_SUBTITLE_LINK_NOT_FOUND', '連動する読み上げが見つかりません。連動先を選び直すか、連動をやめてください', field));
       }
     }
+  }
+
+  // V33: 同じ時刻の目印が2つ以上無い（#356 ①・#1155 ③）。
+  // ⚠️ **schema では表せない**（配列をまたいだ一意）ので、ここで見る。
+  // ⚠️ **作る側は増やさない**（`addMarker`／`moveMarker` が同じ時刻を弾く）＝ここへ来るのは
+  // **外から持ち込んだ文書**。同じ時刻に2つあると、一覧でも時間軸でも重なって
+  // **どちらを直しているか分からない**（`06 §12` が防ぐと言っているもの）。
+  // ⚠️ **比べ方は `markerTimeEq`**＝置く側と同じ物差し（完全一致で見ない・#1155 ②）。
+  const seenMarkerTimes: number[] = [];
+  for (const m of doc.markers ?? []) {
+    if (seenMarkerTimes.some((t) => markerTimeEq(t, m.timeSec))) {
+      warnings.push(warn('TIMELINE_MARKER_DUPLICATE_TIME', '同じ時間に目印が2つあります。どちらかを少しずらすか、消してください', `markers.${m.id}`));
+    }
+    seenMarkerTimes.push(m.timeSec);
   }
 
   // V24: 同一トラック内の時間の重なり。重ねたいならトラックを足す。

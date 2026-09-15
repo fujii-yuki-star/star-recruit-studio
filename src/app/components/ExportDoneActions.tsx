@@ -60,7 +60,16 @@ export function ExportDoneActions({ path, onBack }: { path: string | null; onBac
       <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
         <button
           className="btn btn-secondary"
-          onClick={() => { setFailed(null); void revealSavedFile(path).catch(() => setFailed({ kind: "builtin", which: "reveal" })); }}
+          // ⚠️ **理由を捨てない**（#1155 ④）＝隣の「動画を再生」は #1118 で関門へ通したのに、
+          // こちらだけ**中身を丸ごと捨てて**いた（同じ「開く」が場所で割れていた・ADR-0026②）。
+          // ⚠️ **`rawErrorDisplayGuard` はこの形を拾えない**＝関門の呼び出し数の側でしか見ていない。
+          onClick={() => {
+            setFailed(null);
+            void revealSavedFile(path).catch((e: unknown) => {
+              const reason = userFacingMessage(e, "reveal");
+              setFailed(reason ? { kind: "reason", text: reason } : { kind: "builtin", which: "reveal" });
+            });
+          }}
         >
           保存した場所を開く
         </button>

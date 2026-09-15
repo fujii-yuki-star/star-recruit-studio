@@ -30,7 +30,10 @@ interface Found {
  * 「拾い方を消しても、いまのコードには漏れが無いので緑」になる（実際に変異チェックで緑だった）。
  * ここを直接叩けば、**拾い方そのもの**を検査できる。
  */
-export function guidanceLiteralsIn(text: string): { name: string; text: string }[] {
+export function guidanceLiteralsIn(
+  text: string,
+  labels: ReadonlyMap<string, string> = new Map(),
+): { name: string; text: string }[] {
   const out: { name: string; text: string }[] = [];
   // ① 名前を付けた定数（`export const NAME = "…"`）。
   for (const m of text.matchAll(/^(?:export )?const ([A-Z_][A-Z_0-9]*)(?::[^=]+)? =\s*(['"])(.+?)\2;?$/gm)) {
@@ -58,7 +61,7 @@ export function guidanceLiteralsIn(text: string): { name: string; text: string }
   // **断りは必ず断りの器に入る**（`notice` / `form-error` / `role="alert"`）ので、そこを錠にする（実測 9 件）。
   // ⚠️ **コメントを先に落とす**＝複数行の説明の**続きの行**は `//` で始まらないので、
   // 落とさないとコメントの中の文を拾ってしまう（実測で 8 件混ざった）。
-  const body = stripComments(text);
+  const body = resolveLabels(stripComments(text), labels);
   for (const m of body.matchAll(
     /(?:className="[^"]*(?:notice|form-error)[^"]*"|role="alert")([\s\S]{0,900}?)(?=\n\s*(?:<\/div>|<\/p>|<\/ul>|<\/span>|\)\}))/g,
   )) {
@@ -79,6 +82,54 @@ export function guidanceLiteralsIn(text: string): { name: string; text: string }
 }
 
 /**
+ * 画面に埋めた**呼び名の定数**（`{RELINK_ASSET_LABEL}` など）を、その文字へ戻す。
+ *
+ * ⚠️ **戻さないと、寄せたとたんに見えなくなる**（#1168）＝③ は「行の中に `{` が無い」ことを
+ * 器の条件にしているので、**断りの中の言葉を1か所へ寄せる**（同じ呼び名で呼ぶ＝§6）だけで
+ * その行が**丸ごと走査の外**へ落ちる。実際に、素材画面の「ファイルを選び直す」を定数へ寄せた回に
+ * **素材画面のバナー1件**（`MaterialsScreen.tsx`）が黙って消えた
+ *（数を実数で留めていたので赤くなったが、下限のままなら気づけなかった）。
+ * ⚠️ **同じ回にもう1件減っていたのは別の原因**（#1168 レビュー 🟡＝当初「2件」と書いたのは誤り）＝
+ * 断りの定数を**組み立てる形**（テンプレート）にしたので ① が拾えなくなったもの。
+ * そちらは `errorStateTable` が**表と等値**で守る側なので、素の文字列へ戻して解決した。
+ * ⚠️ **戻すのは呼び名だけ**＝値の入る差し込み（`{missingAssetIds.length}`）は文が定まらないので、
+ * これまでどおり拾わない（表と等値で比べられない）。
+ */
+function resolveLabels(src: string, labels: ReadonlyMap<string, string>): string {
+  return src.replace(/\{([A-Z_][A-Z_0-9]*)\}/g, (whole, name: string) => labels.get(name) ?? whole);
+}
+
+/**
+ * `uiLabels.ts` の**呼び名**（UPPER_SNAKE の短い文字列）。
+ *
+ * ⚠️ **断りの文そのものは入れない**＝`*_MESSAGE` は `errorStateTable` が**表と等値**で守る側なので、
+ * ここで差し戻すと同じ文を二重に数える。ここが要るのは「画面の言葉を寄せた呼び名」だけ。
+ * ⚠️ **見るのは「1行・`"` 引用・`_LABEL` 終わり」だけ**＝`*_NOTE`／`*_TEXT` と名づけたり2行に折ると
+ * 同じ穴が空く。**寄せ先は `*_LABEL` と名づける**こと（気づけはする＝実数の `FOUND_COUNT` が減って赤くなる）。
+ * ⚠️ **差し戻しはどのファイルにも効く**ので、画面の中に**同名のローカル定数**を置くと、その画面に
+ * 出ていない文を拾いうる。**衝突が無いことは下の検査で留める**（#1168 レビュー ℹ️＝
+ * 「いまは衝突なし」と書くだけだと、次に衝突したとき `FOUND_COUNT` が動く理由が読めない）。
+ */
+function labelConstants(): ReadonlyMap<string, string> {
+  const src = readFileSync(join(process.cwd(), "src", "app", "uiLabels.ts"), "utf8");
+  const map = new Map<string, string>();
+  for (const m of src.matchAll(/^export const ([A-Z_][A-Z_0-9]*_LABEL) =\s*"([^"]+)";$/gm)) map.set(m[1]!, m[2]!);
+  return map;
+}
+
+/**
+ * そのファイルが**自分で**持っている呼び名（`const X_LABEL = …`）の名前。
+ *
+ * ⚠️ **純粋関数として切り出す**＝歩く形のままだと、いま衝突が1つも無いので
+ * **拾い方をまるごと外しても緑**になる（`guidanceLiteralsIn` と同じ理由）。
+ */
+export function localLabelNames(text: string): string[] {
+  // ⚠️ **字下げも見る**（#1168 レビュー ℹ️）＝行頭固定だと、**関数の中に書いた**ローカル定数を
+  //   1つも見ない（実在する＝`SceneEditScreen.tsx` の `ANIM_KIND_LABEL` はコンポーネントの中）。
+  return [...text.matchAll(/^[ \t]*(?:export )?const ([A-Z_][A-Z_0-9]*_LABEL)\s*(?::[^=]+)?=/gm)].map((m) => m[1]!);
+}
+
+/**
  * 説明（コメント）を落とす。JSX の中の説明・ブロックコメント・行コメントの3つ。
  *
  * ⚠️ **行コメントは続きの行が `//` で始まらない**ので、行単位で見るだけでは落としきれない。
@@ -94,6 +145,7 @@ function stripComments(src: string): string {
 /** `app`・`infrastructure` に**直に書かれた**断りを集める。 */
 function directGuidanceConstants(): Found[] {
   const out: Found[] = [];
+  const labels = labelConstants();
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name);
@@ -102,7 +154,7 @@ function directGuidanceConstants(): Found[] {
         continue;
       }
       if (!/\.tsx?$/.test(name) || name.includes(".test.")) continue;
-      for (const f of guidanceLiteralsIn(readFileSync(p, "utf8"))) out.push({ ...f, where: name });
+      for (const f of guidanceLiteralsIn(readFileSync(p, "utf8"), labels)) out.push({ ...f, where: name });
     }
   };
   walk(join(process.cwd(), "src", "app"));
@@ -143,7 +195,7 @@ const NOT_IN_TABLE: Record<string, string> = {
 // この走査（その場に書いた文）ではなく **`codeMessages()` の完全一致**（`errorStateTable`）が守る側へ移った。
 // ⚠️ **さらに -2**（#1131）＝接続キーの既定文を `uiLabels` の `apiKeyMessage` へ出した。
 // 走査（その場に書いた文）から**完全一致で守る側**（`errorStateTable` の `codeMessages`）へ移った。
-const FOUND_COUNT = 90;
+const FOUND_COUNT = 91;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();
@@ -174,6 +226,38 @@ describe("画面に直書きした断りも、表に載っている（#978）", 
     for (const [name, why] of Object.entries(NOT_IN_TABLE)) {
       expect(hasReason(why), `${name} を外した理由が書かれていない`).toBe(true);
     }
+  });
+
+  // ⚠️ **差し戻しの名前が、画面のローカル定数と衝突していない**（#1168 レビュー ℹ️）＝
+  //    `resolveLabels` は**どのファイルの** `{UPPER_SNAKE}` にも効くので、画面の中に同名の
+  //    `*_LABEL` を置くと、**その画面に出ていない文**を「拾った断り」として表へ要求しうる。
+  it("寄せた呼び名が、画面のローカル定数と衝突していない", () => {
+    const shared = new Set(labelConstants().keys());
+    const collisions: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) { walk(p); continue; }
+        if (!/\.tsx?$/.test(name) || name.includes(".test.")) continue;
+        if (p.endsWith(join("src", "app", "uiLabels.ts"))) continue; // 定義元
+        for (const n of localLabelNames(readFileSync(p, "utf8"))) if (shared.has(n)) collisions.push(`${name}: ${n}`);
+      }
+    };
+    walk(join(process.cwd(), "src", "app"));
+    walk(join(process.cwd(), "src", "infrastructure"));
+    expect(collisions, "`uiLabels` と同じ名前のローカル定数がある（差し戻しが別の文に効く）").toEqual([]);
+    expect(shared.size, "寄せた呼び名を1つも拾えていない").toBeGreaterThanOrEqual(1);
+  });
+
+  // ⚠️ **見つけられることも見る**（`guards-blind-not-red`）＝いま衝突が1つも無いので、
+  //    上の検査だけでは**拾い方をまるごと外しても緑**だった（実際に変異チェックで生き残った）。
+  it("衝突を見つけられる（拾い方そのものを見る）", () => {
+    expect(localLabelNames(`const RELINK_ASSET_LABEL = "別のもの";`)).toEqual(["RELINK_ASSET_LABEL"]);
+    expect(localLabelNames(`const DELETE_LABEL: string = "消す";`)).toEqual(["DELETE_LABEL"]);
+    // 関数の中に書いた（字下げした）ものも見る＝行頭固定だと丸ごと見落とす
+    expect(localLabelNames(`  const RELINK_ASSET_LABEL = "別のもの";`)).toEqual(["RELINK_ASSET_LABEL"]);
+    // 呼び名でないものは拾わない（`*_MESSAGE` は差し戻しの対象外）
+    expect(localLabelNames(`const SOME_MESSAGE = "…ください";`)).toEqual([]);
   });
 
   it("外したまま実装から消えた行が残っていない（控えが腐らない）", () => {
@@ -216,6 +300,29 @@ describe("断りの拾い方（#981 レビュー）", () => {
         <span>BGMを再生できませんでした。別のBGMを選ぶか、もう一度お試しください。</span>
       </div>`;
     expect(guidanceLiteralsIn(oneLine)).toHaveLength(1);
+  });
+
+  // ⚠️ **寄せた呼び名を戻せることを、拾い方の側で見る**（#1168）＝これが無いと、
+  //    「画面の言葉を1か所へ寄せる」たびに走査が黙って狭まる。
+  it("埋めた呼び名は、その文字へ戻してから拾う", () => {
+    const inNotice = `
+      <p className="notice notice-warn" role="alert">
+        その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直してください。
+      </p>`;
+    const labels = new Map([["RELINK_ASSET_LABEL", "ファイルを選び直す"]]);
+    expect(guidanceLiteralsIn(inNotice, labels).map((f) => f.text)).toEqual([
+      "その素材を選んで「ファイルを選び直す」から入れ直してください。",
+    ]);
+    // 呼び名を知らなければ、これまでどおり拾わない（差し込みの中身が定まらない）
+    expect(guidanceLiteralsIn(inNotice)).toEqual([]);
+  });
+
+  it("値の入る差し込みは戻さない（文が定まらないので拾わない）", () => {
+    const inNotice = `
+      <p className="notice notice-warn" role="alert">
+        {count}つの素材が見つかりません。選び直してください。
+      </p>`;
+    expect(guidanceLiteralsIn(inNotice, new Map([["RELINK_ASSET_LABEL", "ファイルを選び直す"]]))).toEqual([]);
   });
 
   it("断りの器の外にある文は拾わない（欄のヒント・手順の説明）", () => {

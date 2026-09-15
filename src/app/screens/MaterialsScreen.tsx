@@ -8,7 +8,7 @@ import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
-import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 import { PageHead, Switch } from "../components/ui";
 import { BrandKitLink } from "../components/BrandKitLink";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -186,7 +186,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         {missingAssetIds.length > 0 && (
           <div className="notice notice-warn mb" role="alert">
             {missingAssetIds.length}つの素材のファイルが見つかりません。動かしたか、消えている可能性があります。
-            その素材を選んで「ファイルを選び直す」から入れ直してください（置いた場所や設定はそのまま残ります）。
+            その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直してください（置いた場所や設定はそのまま残ります）。
           </div>
         )}
 
@@ -388,7 +388,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   onClick={() => void onRelink(selected.assetId)}
                 >
                   <UploadIcon size={16} />
-                  ファイルを選び直す
+                  {RELINK_ASSET_LABEL}
                 </button>
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>
                   置いた場所・切り出す範囲・字幕の結びつきはそのまま、中身のファイルだけを入れ替えます。

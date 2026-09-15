@@ -27,7 +27,15 @@ const VIDEO_DIRS = ["src/renderer", "src/domain/timeline"];
  * ⚠️ **目印そのものを扱う file は、当然読んでよい**（誤検出は門番の信用を落とす）。
  * ここに足すのは**「動画を作らない」ことが説明できる file だけ**＝迷ったら足さない。
  */
-const ALLOWED = ["src/domain/timeline/markers.ts", "src/domain/timeline/types.ts"];
+const ALLOWED = [
+  "src/domain/timeline/markers.ts",
+  "src/domain/timeline/types.ts",
+  // ⚠️ **検証は動画を作らない**（#1155 ③）＝`11 §8` V33（同じ時刻に2つ置かない）を見るために
+  // 目印を読むが、ここが返すのは**知らせ（`Warning`）だけ**で、絵にも音にも1バイトも入らない。
+  // ⚠️ **この file がこの門番に捕まったのは正しい**＝射程を広げた直後に、私が目印を読む一行を
+  // 足したので赤くなった。**説明できるから逃がす**のであって、赤いから逃がすのではない。
+  "src/domain/timeline/validateTimelineDoc.ts",
+];
 
 /**
  * その本文が**目印を読んでいる**か（注記の中の言及は数えない）。
@@ -103,7 +111,11 @@ describe("門番自身の検査（わざと壊した入力）", () => {
   it("逃がす file は、名指しの一覧だけ（勝手に広がらない）", () => {
     // ⚠️ **一覧を増やすのは「動画を作らない」と説明できる file だけ**＝
     // 迷って足すと、そこが抜け道になる（門番の射程は狭める方向にしか壊れない）。
-    expect(ALLOWED).toEqual(["src/domain/timeline/markers.ts", "src/domain/timeline/types.ts"]);
+    expect(ALLOWED).toEqual([
+      "src/domain/timeline/markers.ts",
+      "src/domain/timeline/types.ts",
+      "src/domain/timeline/validateTimelineDoc.ts",
+    ]);
   });
 
   it("似た名前を巻き込まない（語の切れ目で見る）", () => {
