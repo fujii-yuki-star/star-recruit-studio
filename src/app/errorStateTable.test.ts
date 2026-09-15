@@ -367,8 +367,10 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
-    // ⚠️ **注記に「16 本中 11 本」と書いた**＝書いたのに検査していない主張を残さない
+    // ⚠️ **注記（`15 §6.0`）に「17 本中 12 本」と書いた**＝書いたのに検査していない主張を残さない
     //（レビューで「10 本」という**実測と違う数**を書いていたのが見つかった）。
+    // ⚠️ **このコメントの数も古くなっていた**（#1162 レビュー由来 ℹ️）＝下の `expect` は 17/12 で
+    // 正しいのに、**コメントだけ 16/11 のまま**だった（`verify-claims-in-comments` の型）。
     const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
     const oneLine = [...src.matchAll(/pub const [A-Z_0-9]+: &str = "/g)].length;
     const all = Object.keys(messagesIn(src)).length;
@@ -378,7 +380,7 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
-    // ⚠️ **1行だけを見る形だと 16 本中 10 本を取りこぼす**＝しかもそれは「見つからない」ではなく
+    // ⚠️ **1行だけを見る形だと 17 本中 12 本を取りこぼす**＝しかもそれは「見つからない」ではなく
     // 「**黙って少ない**」になる（表と結ばれていない定数が、静かに増える）。
     expect(messagesIn('pub const A: &str = "あ。";')).toEqual({ A: "あ。" });
     expect(messagesIn('pub const B: &str =\n    "い。";')).toEqual({ B: "い。" });

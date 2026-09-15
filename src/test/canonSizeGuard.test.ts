@@ -43,9 +43,15 @@ function allDocsChars(): number {
   return sum(mdFiles(DOCS)) + chars("CLAUDE.md") + chars(`${DOCS}/errors/error-state-table.tsv`);
 }
 
-/** `errors/error-state-table.tsv` の行数（末尾の空行は数えない）。 */
-function tsvLines(): number {
-  return readFileSync(join(ROOT, DOCS, "errors/error-state-table.tsv"), "utf8").replace(/\n+$/, "").split("\n").length;
+/**
+ * `errors/error-state-table.tsv` の**データ行**の数（見出しと末尾の空行は数えない）。
+ *
+ * ⚠️ **単位を `errorStateTable.test.ts` とそろえる**（#1162 レビュー由来 🔴）＝あちらは `slice(1)` 済み。
+ * 見出しを数えると1つ多くなり、**「門番と同じ値にする」と正典に書いたのに、そのとおりにすると
+ * ここが赤くなる**（実際にそうなっていた）。過去の記録（188/189 行）もデータ行の数なので、単位が揃う。
+ */
+function tsvRows(): number {
+  return readFileSync(join(ROOT, DOCS, "errors/error-state-table.tsv"), "utf8").replace(/\n+$/, "").split("\n").length - 1;
 }
 
 /** `messages.rs` が持つ、画面へ返す文の定数の本数（`15 §6.0` が書いている）。 */
@@ -54,13 +60,19 @@ function rustMessageConsts(): number {
   return (src.match(/^pub const \w+: &str/gm) ?? []).length;
 }
 
-/** コードから `§7.6` を指している所の数（節番号を付け替えなかった理由として書いてある）。 */
+/**
+ * **本番のコード**から `§7.6` を指している所の数（節番号を付け替えなかった理由として書いてある）。
+ *
+ * ⚠️ **検査は数えない**（#1162 で踏んだ）＝数えると**この門番自身が数に入る**ので、
+ * `§7.6` に触れる検査を1つ足すたびに数が動く＝**自分で自分を赤くする**門番になっていた。
+ * 付け替えの事故になるのは**本番のコード**なので、そちらだけを数えるのが筋でもある。
+ */
 function sectionRefs(): number {
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       const p = join(dir, e.name);
-      if (e.isDirectory()) return walk(p);
-      return /\.tsx?$/.test(e.name) ? [p] : [];
+      if (e.isDirectory()) return e.name === "test" ? [] : walk(p);
+      return /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [p] : [];
     });
   return walk(join(ROOT, "src"))
     .map((p) => readFileSync(p, "utf8"))
@@ -94,6 +106,15 @@ export const SIZE_TOLERANCE = 0.1;
 export const EXACT_BELOW = 1000;
 
 /**
+ * 大きい数に許す**絶対のずれ**（字）。
+ *
+ * ⚠️ **割合だけでは緩すぎる**（#1162 レビュー由来 ℹ️）＝総量（約98万字）の1割は**9万字以上**で、
+ * 「資料ぜんぶ」が4万字ずれても緑だった。**読む量の見積り**として使う数なので、
+ * 割合と絶対の**両方**で締める。
+ */
+export const MAX_ABS_DRIFT = 20_000;
+
+/**
  * 実態から離れすぎた主張（`file: what 書いた値 → 実測` で返す）。
  *
  * ⚠️ **見つからない主張も返す**＝正規表現が当たらなくなったら、**数が消えた**か**書き方が変わった**。
@@ -106,7 +127,9 @@ export function sizeDrift(claims: readonly SizeClaim[], read: (f: string) => str
     const written = Number(m[1]!.replace(/,/g, ""));
     const actual = c.actual();
     const off = Math.abs(written - actual) / Math.max(actual, 1);
-    const bad = actual < EXACT_BELOW ? written !== actual : off > SIZE_TOLERANCE;
+    const bad = actual < EXACT_BELOW
+      ? written !== actual
+      : off > SIZE_TOLERANCE || Math.abs(written - actual) > MAX_ABS_DRIFT;
     return bad
       ? [`${c.file}: ${c.what} 書いた値 ${written.toLocaleString()} → 実測 ${actual.toLocaleString()}`]
       : [];
@@ -128,7 +151,7 @@ const CLAIMS: SizeClaim[] = [
   { file: "docs/ai_work_guides/README.md", what: "11_SCHEMA_REFERENCE.md", re: /\| `11_SCHEMA_REFERENCE\.md` \| \*\*([\d,]+)\*\*/, actual: () => chars(`${DOCS}/11_SCHEMA_REFERENCE.md`) },
   { file: "docs/ai_work_guides/README.md", what: "06_UI_SPEC.md", re: /\| `06_UI_SPEC\.md` \| ([\d,]+) \|/, actual: () => chars(`${DOCS}/06_UI_SPEC.md`) },
   { file: "docs/ai_work_guides/README.md", what: "15_ERROR_STATE_MODEL.md", re: /\| `15_ERROR_STATE_MODEL\.md` \| \*\*([\d,]+)\*\*/, actual: () => chars(`${DOCS}/15_ERROR_STATE_MODEL.md`) },
-  { file: "docs/ai_work_guides/README.md", what: "エラーの表の行数", re: /エラーの表・([\d,]+)行/, actual: tsvLines },
+  { file: "docs/ai_work_guides/README.md", what: "エラーの表の行数", re: /エラーの表・([\d,]+)行/, actual: tsvRows },
   { file: "docs/ai_work_guides/README.md", what: "エラーの表の大きさ", re: /エラーの表・[\d,]+行） \| ([\d,]+) \|/, actual: () => chars(`${DOCS}/errors/error-state-table.tsv`) },
   { file: "docs/ai_work_guides/README.md", what: "adr/ の本数", re: /`adr\/\*\.md`（([\d,]+)本）/, actual: () => mdFiles(`${DOCS}/adr`).length },
   { file: "docs/ai_work_guides/README.md", what: "adr/ の合計", re: /`adr\/\*\.md`（[\d,]+本） \| ([\d,]+) \|/, actual: () => sum(mdFiles(`${DOCS}/adr`)) },
@@ -136,7 +159,7 @@ const CLAIMS: SizeClaim[] = [
 
   // 切り出しの理由（`11` と、そこを指す2本のガイド）＝**同じ対象に3通りの数**があった所。
   { file: `${DOCS}/11_SCHEMA_REFERENCE.md`, what: "11_TIMELINE の大きさ", re: /本節だけで ([\d,]+)字/, actual: () => chars(`${DOCS}/11_TIMELINE_REFERENCE.md`) },
-  { file: `${DOCS}/11_SCHEMA_REFERENCE.md`, what: "§7.6 を指す記述の数", re: /コードだけで ([\d,]+) か所/, actual: sectionRefs },
+  { file: `${DOCS}/11_SCHEMA_REFERENCE.md`, what: "§7.6 を指す記述の数", re: /本番のコードだけで ([\d,]+) か所/, actual: sectionRefs },
   { file: "docs/ai_work_guides/README.md", what: "11_TIMELINE の大きさ", re: /\| `11 §7\.6` \| ([\d,]+) \|/, actual: () => chars(`${DOCS}/11_TIMELINE_REFERENCE.md`) },
   { file: "docs/ai_work_guides/schema_change.md", what: "11_TIMELINE の大きさ", re: /`11 §7\.6 TimelineProject` \*\*([\d,]+)\*\*/, actual: () => chars(`${DOCS}/11_TIMELINE_REFERENCE.md`) },
   { file: "docs/ai_work_guides/timeline_change.md", what: "11_TIMELINE の大きさ", re: /ファイル全体で ([\d,]+)字/, actual: () => chars(`${DOCS}/11_TIMELINE_REFERENCE.md`) },
@@ -144,7 +167,28 @@ const CLAIMS: SizeClaim[] = [
   // `15 §6.0` が書いている「Rust が画面へ返す文の定数の本数」＝**門番（`errorStateTable`）と
   // 同じ値**でなければならない。⚠️ **実際にずれていた**（実装 17・門番 17・正典だけ 16）。
   { file: `${DOCS}/15_ERROR_STATE_MODEL.md`, what: "messages.rs の定数の本数", re: /いまの ([\d,]+) 本はすべて/, actual: rustMessageConsts },
-  { file: `${DOCS}/15_ERROR_STATE_MODEL.md`, what: "エラーの表の行数", re: /\(errors\/error-state-table\.tsv\)\*\*（([\d,]+) 行）/, actual: tsvLines },
+  { file: `${DOCS}/15_ERROR_STATE_MODEL.md`, what: "エラーの表の行数", re: /\(errors\/error-state-table\.tsv\)\*\*（([\d,]+) 行）/, actual: tsvRows },
+
+  // ⚠️ **切り出し先にも同じ数の写しがあった**（#1162 レビュー由来 🔴）＝
+  // `11_SCHEMA` 側だけ直して、`11_TIMELINE` 側を見ていなかった＝**混ぜると片方だけずれる**の実例。
+  { file: `${DOCS}/11_TIMELINE_REFERENCE.md`, what: "§7.6 を指す記述の数", re: /本番のコードだけで ([\d,]+) か所/, actual: sectionRefs },
+  { file: `${DOCS}/11_TIMELINE_REFERENCE.md`, what: "自分の大きさ", re: /（([\d,]+)字）がここで/, actual: () => chars(`${DOCS}/11_TIMELINE_REFERENCE.md`) },
+
+  // ⚠️ **入口の「特に大きい節」表**（同じ file の中で自分と食い違っていた）。
+  { file: "docs/ai_work_guides/README.md", what: "エラーの表の大きさ（大きい節の表）", re: /\| `errors\/error-state-table\.tsv` \| ([\d,]+) \|/, actual: () => chars(`${DOCS}/errors/error-state-table.tsv`) },
+  { file: "docs/ai_work_guides/README.md", what: "エラーの表の行数（大きい節の表）", re: /エラーの表（([\d,]+)行・/, actual: tsvRows },
+
+  // ⚠️ **読む／読まないを実際に判断する現場のガイド**（ここだけ古かった）。
+  { file: "docs/ai_work_guides/error_message.md", what: "15 の大きさ", re: /全体で ([\d,]+)字＝表を外へ出した/, actual: () => chars(`${DOCS}/15_ERROR_STATE_MODEL.md`) },
+  { file: "docs/ai_work_guides/error_message.md", what: "エラーの表の行数", re: /\*\*該当の1行だけ\*\*（([\d,]+) 行/, actual: tsvRows },
+  { file: "docs/ai_work_guides/error_message.md", what: "エラーの表の大きさ", re: /\*\*該当の1行だけ\*\*（[\d,]+ 行・([\d,]+)字）/, actual: () => chars(`${DOCS}/errors/error-state-table.tsv`) },
+
+  // ファイル全体の数（`NOT_GUARDED` の「節ごとの大きさ」ではないので、隠れさせない）。
+  { file: "docs/ai_work_guides/adr_new.md", what: "adr/README.md の大きさ", re: /一覧と状態（([\d,]+)字）/, actual: () => chars(`${DOCS}/adr/README.md`) },
+  { file: "docs/ai_work_guides/renderer_change.md", what: "adr/0001 の大きさ", re: /全文（([\d,]+)字）/, actual: () => chars(`${DOCS}/adr/0001-rendering-parity.md`) },
+  { file: "docs/ai_work_guides/renderer_change.md", what: "05 の大きさ", re: /\*\*全文でよい（([\d,]+)字）\*\*/, actual: () => chars(`${DOCS}/05_RENDERING_SPEC.md`) },
+  { file: "docs/ai_work_guides/test_change.md", what: "14 の大きさ", re: /\*\*全文でよい（([\d,]+)字）\*\*/, actual: () => chars(`${DOCS}/14_TEST_STRATEGY.md`) },
+  { file: "docs/ai_work_guides/ai_transform.md", what: "12 の大きさ", re: /全体でも ([\d,]+)字/, actual: () => chars(`${DOCS}/12_AI_PROMPT_AND_MAPPING.md`) },
 
   // 総量（入口の「全部読むと、これだけ」）。
   { file: "docs/ai_work_guides/README.md", what: "資料ぜんぶ", re: /\| 資料ぜんぶ \| ([\d,]+)/, actual: allDocsChars },
@@ -173,14 +217,15 @@ describe("資料の大きさの記述が、実態とずれていない（#1150�
 
   // ⚠️ **走査が空振りしていない**＝主張を1つも拾えていなければ、何を壊しても緑になる。
   it("見ている主張の数が、記録と一致する", () => {
-    expect(CLAIMS.length, "見る主張が増減しました（増やしたらこの数も直す）").toBe(22);
+    expect(CLAIMS.length, "見る主張が増減しました（増やしたらこの数も直す）").toBe(34);
   });
 
   // ⚠️ **許すずれを実数で固定する**＝ここを緩めるだけで門番は黙るのに、
   //    相対で書いた検査は**一緒に緩んで気づけない**（`aiWorkGuideLinks` の `MAX_CHARS` と同じ理由）。
-  it("許すずれは1割・小さい数はぴったり", () => {
+  it("許すずれは1割・2万字・小さい数はぴったり", () => {
     expect(SIZE_TOLERANCE).toBe(0.1);
     expect(EXACT_BELOW).toBe(1000);
+    expect(MAX_ABS_DRIFT).toBe(20_000);
   });
 
   // ⚠️ **拾い方そのものを叩く**＝歩く形だけだと「いまの資料にずれが無いので緑」になる。
@@ -197,6 +242,13 @@ describe("資料の大きさの記述が、実態とずれていない（#1150�
 
     // ⚠️ **小さい数はぴったり**＝割合だと「17 本を 16 本」が 5.9% で通ってしまう
     //（実際にずれていたのがこの数＝捕まえたいものを捕まえられない設定だった）。
+    // ⚠️ **大きい数は割合と絶対の両方で締める**＝総量の1割は9万字以上で、
+    //    4万字ずれても緑だった（#1162 レビュー由来 ℹ️）。
+    it("割合の中でも、絶対のずれが大きければ見つける", () => {
+      expect(sizeDrift([claim(1_000_000)], () => "960,000字")).toHaveLength(1);
+      expect(sizeDrift([claim(1_000_000)], () => "990,000字")).toEqual([]);
+    });
+
     it("小さい数は1違っても見つける", () => {
       expect(sizeDrift([claim(17)], () => "16字")).toHaveLength(1);
       expect(sizeDrift([claim(17)], () => "17字")).toEqual([]);
