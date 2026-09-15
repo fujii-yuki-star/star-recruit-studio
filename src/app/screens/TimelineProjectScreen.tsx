@@ -375,9 +375,9 @@ export const LS_SNAP = "timeline.snap";
 export const SNAP_DEFAULT = true;
 
 /**
- * 吸着の添え書き（**画面に出す**・`06 §12.1`／`06 §9.3`）。
+ * 吸着の添え書き（**画面に出す**・`06 §12.1`／`06 §2` 規約20）。
  *
- * ⚠️ **ホバー（`title`）だけに置かない**（レビュー由来 🟡・2026-09-10）＝`06 §9.3` が名指しで
+ * ⚠️ **ホバー（`title`）だけに置かない**（レビュー由来 🟡・2026-09-10）＝`06 §2` 規約20 が名指しで
  * 禁じている（タッチでもキーボードでも読めない）。#1104 で高さを詰めるときに一度ホバーへ移したが、
  * **正典が「並びの欄の上に一文で置く」と決めている**ので、同じ行に短い一文として戻した。
  * ⚠️ **入れているときは「何に寄るか」を出す**＝寄せ先が画面から消えると、
@@ -485,7 +485,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
-  // **まとめて消すときの確認**（`06 §2` 統一規約1・ADR-0034 決定20）。**聞いた時点の相手を持つ**
+  // **まとめて消すときの確認**（`06 §2` 規約1・ADR-0034 決定20）。**聞いた時点の相手を持つ**
   // （#721 レビュー）＝この確認は覆いではなく知らせの段なので、出したまま帯を押したり `Ctrl+A` したりできる。
   // 数だけ持つと「3個消しますか」と聞いて1個だけ消える／全部消える、が起きる（`exploding` と同じ流儀）。
   // ⚠️ **消す相手と「どこから始めたか」を組で持つ**（#869 レビュー 🟡・`exploding` と同じ流儀）
@@ -1819,7 +1819,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   });
   /**
    * **消す（どの入口からでも同じ流れ）**（#721）。単体は**即時＋取り消し**、**まとめては確認**
-   * ＝`06 §2` 統一規約1／ADR-0034 決定20。ここを通さずに `removeSelectedClips` を直に呼ぶと、
+   * ＝`06 §2` 規約1／ADR-0034 決定20。ここを通さずに `removeSelectedClips` を直に呼ぶと、
    * まとめて消すのが確認なしになる（キーからも同じ道を使うので、片方だけ確認、も作らない）。
    * ⚠️ **early return より前**に置く（抜ける回と抜けない回でフックの数が変わらない＝下の土台と同じ理由）。
    */
@@ -3604,7 +3604,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   「`Ctrl` の説明」で**3行**を使っており、欄の中身（帯）が入る前に高さを食い潰していた
                   （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
                   ⚠️ **文章でお願いしない**（#1032）＝切替は残す（押せば切れる）。
-                  ⚠️ **`Ctrl` の案内をホバーだけにしない**（レビュー由来 🟡・`06 §9.3`）＝
+                  ⚠️ **`Ctrl` の案内をホバーだけにしない**（レビュー由来 🟡・`06 §2` 規約20）＝
                   一度そうしたが、`title` は**タッチでもキーボードでも読めない**うえ、
                   `06 §12.1` が「並びの欄の上に一文で置く」と明記していた。
                   **同じ行に、短い一文として置く**（行は増やさない・寄せ先も画面に残す）。 */}
@@ -3972,13 +3972,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
         {/* ⚠️ **列を足すのは「並び」の欄の中で**（#767・利用者要望）＝欄だけを見ていると列を足せず、
             欄の外を探しに行くことになっていた。**同じ操作を2か所に置かない**ので画面下部からは外す
-            （`06 §2` 統一規約5 の流儀）。 */}
+            （`06 §2` 規約5 の流儀）。 */}
         <div className="row gap-sm mt-md">
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
           <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
         </div>
         {/* **目印**（#356 ①）＝時間軸のものなので、時間軸を見ている欄の中に置く
-            （`06 §2` 統一規約5＝同じ操作を2か所に置かない）。⚠️ **動画には出ない**。 */}
+            （`06 §2` 規約5＝同じ操作を2か所に置かない）。⚠️ **動画には出ない**。 */}
         <TimelineMarkersSection
           doc={doc}
           playheadSec={playheadSec}
@@ -5366,7 +5366,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             // 自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定
             // （ADR-0032）なので、ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
             // ⚠️ 以前は**欄の下**だった（#774 で移設）＝欄が画面の高さを超えるとスクロールしないと見えず、
-            // 失敗したまま気づけなかった。同じものを2か所に置かない（`06 §2` 統一規約5）。
+            // 失敗したまま気づけなかった。同じものを2か所に置かない（`06 §2` 規約5）。
             status={saveStatus === "error" ? (
               // 失敗は**いつも見える所**で知らせ、その場に次の行動を置く（`15 §6` TIMELINE_SAVE_FAILED）。
               <span className="row gap-sm" role="alert" style={{ alignItems: "center" }}>
@@ -5547,7 +5547,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <ContextMenu x={clipMenu.x} y={clipMenu.y} items={clipMenuItems} onClose={() => setClipMenu(null)} />
       )}
       </div>
-      {/* ⚠️ **答えを求める確認は、流れていかない所へ出す**（#990・`06 §2` 統一規約10／#940）＝
+      {/* ⚠️ **答えを求める確認は、流れていかない所へ出す**（#990・`06 §2` 規約23／#940）＝
           この画面は全体が `.main-scroll` なので、素で置くと**下へ送ったとたん確認が視野の外**へ出る。
           出しっぱなしのまま押せない状態が続くので、利用者からは「固まった」ようにしか見えない（§2-5）。
           場面編集は同じ確認を重なりで出している（`06 §2-1`）ので、そちらへ揃える。 */}

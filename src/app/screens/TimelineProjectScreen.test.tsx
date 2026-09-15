@@ -232,7 +232,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     fireEvent.click(screen.getByRole("button", { name: "あと" }), { shiftKey: true });
     expect(screen.queryByText("後ろへ")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("選んだ2個を削除"));
-    // まとめて消すのは**確認を挟む**（`06 §2` 統一規約1・ADR-0034 決定20・#721）。
+    // まとめて消すのは**確認を挟む**（`06 §2` 規約1・ADR-0034 決定20・#721）。
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 押しただけでは消えない
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
     expect(useTimelineStore.getState().doc!.clips).toEqual([]);
@@ -7821,7 +7821,7 @@ describe("TimelineProjectScreen: 選んでいるのに掴めないとき（#996�
   });
 });
 
-// 答えを求める確認の置き場所（#990・`06 §2` 統一規約10／#940）。
+// 答えを求める確認の置き場所（#990・`06 §2` 規約23／#940）。
 describe("TimelineProjectScreen: 確認はスクロールで視界から出ない（#990）", () => {
   /**
    * スクロールしても消えないか（`NoticeZone.placement.test.tsx` と**同じ物差し**）。

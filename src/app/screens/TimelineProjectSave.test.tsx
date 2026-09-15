@@ -283,7 +283,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     expect(useTimelineStore.getState().saveStatus).toBe("saving");
     fireEvent.click(screen.getByRole("button", { name: BACK_TO_HOME_LABEL }));
     expect(onNavigate).not.toHaveBeenCalled(); // 書き終わるまで離れない
-    // 実行中はラベルを変えて押せなくする（`06 §2` 統一規約4）。
+    // 実行中はラベルを変えて押せなくする（`06 §2` 規約4）。
     await waitFor(() => expect(screen.getByRole("button", { name: /保存しています/ })).toBeDisabled());
     await act(async () => { release(); });
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("home"));
