@@ -35,7 +35,10 @@ export const SceneThumb = memo(function SceneThumb({ scene, template }: { scene:
   // `scene.texts.subtitle` を描くので、**掛け合い**や**頭に間**がある場面で
   // **動画に一度も出ない字幕**を見本だけが出す（間なら消えるべき所に出る）。
   // ⚠️ **大きい方のプレビュー・書き出しと同じ入力**＝組み立ては `firstFrameLayoutOptions` に1つ。
-  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
+  // ⚠️ **辞書を購読しない**（#1164 レビュー由来）＝購読すると**声を1本作るたびに全カードを描き直す**
+  // （包んだ意味が消える）。声ができると行の `status` が変わって `scene` も変わるので、
+  // カードはそちらで描き直される＝そのときに新しい長さを読めばよい（`PreviewScreen` と同じ流儀・#382）。
+  const narrationAudioById = useProjectStore.getState().narrationAudioById;
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   // ⚠️ **クレジットは出さない**＝小さすぎて読めないうえ、**出す/出さないは場面の位置で決まる**

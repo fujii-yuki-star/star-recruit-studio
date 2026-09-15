@@ -244,17 +244,44 @@ export function firstFrameBoundary(scene: Scene, lineDurations: Record<string, n
  * ⚠️ **写して増やさない**＝同じ組み立てが `PreviewScreen`／`SceneEditScreen`／`buildExportScenes` に
  * 既にある。ここへ寄せて、見本もその1つを呼ぶ（`CLAUDE.md` §6）。
  */
-export function firstFrameLayoutOptions(
-  scene: Scene,
-  lineDurations: Record<string, number> = {},
-): { subtitleText: string | null | undefined; subtitleSegment: SceneSegmentSpec | undefined } {
-  const boundary = firstFrameBoundary(scene, lineDurations);
+export interface EdgeFrameInput {
+  /** ⚠️ **`undefined`（テンプレの既定に任せる）と `null`（間＝消す）は別物**なので潰さない。 */
+  subtitleText: string | null | undefined;
+  /** FREE 字幕の相手と、同時にしゃべる行（ADR-0029／ADR-0031）を解くための正準セグメント。 */
+  subtitleSegment: SceneSegmentSpec | undefined;
+  /** その瞬間に効いている行（クレジットの話者を決める）。 */
+  creditLine: NarrationLine | undefined;
+}
+
+function edgeFrameInput(scene: Scene, lineDurations: Record<string, number>, last: boolean): EdgeFrameInput {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  const boundary = last ? lastFrameBoundary(scene, lineDurations) : firstFrameBoundary(scene, lineDurations);
   return {
-    // ⚠️ **`undefined` は「テンプレの既定に任せる」**＝`null`（間＝消す）と**別物**なので潰さない
-    //（潰すと、単独 narration の場面で字幕が消える／間で字幕が出る、のどちらかが起きる）。
     subtitleText: boundary.subtitleText,
-    subtitleSegment: sceneSegmentSpecs(scene, lineDurations)[0],
+    subtitleSegment: last ? specs[specs.length - 1] : specs[0],
+    creditLine: boundary.creditLine,
   };
+}
+
+/**
+ * 場面の**先頭フレームを描くための入力**（`layoutScene` の第3引数へ渡す）。
+ *
+ * ⚠️ **幾何（動き）は含まない**＝ここが決めるのは**字幕まわりだけ**。`timeSec`／`animations` を
+ * 渡すかどうかは呼ぶ側の判断（停止中のプレビューは渡さない＝settled の姿を出す・ADR-0019）。
+ */
+export function firstFrameLayoutOptions(scene: Scene, lineDurations: Record<string, number> = {}): EdgeFrameInput {
+  return edgeFrameInput(scene, lineDurations, false);
+}
+
+/**
+ * 場面の**最終フレームを描くための入力**（切替プレビューの A＝前場面の末尾）。
+ *
+ * ⚠️ **対で持つ**（#1164 レビュー由来 🟡）＝切替プレビューは `subtitleText` だけ渡して
+ * `subtitleSegment` を渡していなかったので、**FREE 字幕が消える**／**同時にしゃべる行が片方しか出ない**
+ *（書き出しは両方出る＝ADR-0001 に反する）。先頭と同じ受け皿を通す。
+ */
+export function lastFrameLayoutOptions(scene: Scene, lineDurations: Record<string, number> = {}): EdgeFrameInput {
+  return edgeFrameInput(scene, lineDurations, true);
 }
 
 /**

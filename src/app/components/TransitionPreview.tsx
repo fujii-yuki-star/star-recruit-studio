@@ -10,7 +10,7 @@ import type { Template } from "../../domain/template/types";
 import type { BoundaryTransition } from "../../domain/project/sceneTransitions";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
-import { firstFrameBoundary, lastFrameBoundary, type BoundaryFrame } from "../../domain/project/lineTimeline";
+import { firstFrameLayoutOptions, lastFrameLayoutOptions, type EdgeFrameInput } from "../../domain/project/lineTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
@@ -49,10 +49,16 @@ export function TransitionPreview({
   // 端フレームの字幕/クレジットは firstFrameBoundary/lastFrameBoundary（sceneSegmentSpecs 準拠）で解決＝
   // 0 秒行除外・頭の間・全 0 秒フォールバックまで書き出しと一致（#408 レビュー P1）。B（この場面）＝先頭フレーム
   // （場面編集の下地 ScenePreview と同値＝停止フラッシュなし）／A（前場面）＝最終フレーム。
-  const svgFor = (sc: Scene, tpl: Template, boundaryFrame: BoundaryFrame): string => {
-    const applyLineSub = boundaryFrame.subtitleText !== undefined;
-    const layoutOpts = applyLineSub ? { subtitleText: boundaryFrame.subtitleText } : undefined;
-    const creditText = boundaryFrame.creditLine ? creditForLine(boundaryFrame.creditLine, baseCredit) : baseCredit;
+  const svgFor = (sc: Scene, tpl: Template, edge: EdgeFrameInput): string => {
+    // ⚠️ **FREE 字幕と同時にしゃべる行の相手も渡す**（#1164 レビュー由来 🟡）＝以前は
+    // `subtitleText` だけ渡していたので、**FREE 字幕が消える**（`allLines` が空になる）／
+    // **同時にしゃべる行が片方しか出ない**（`parallelLineIds` が空）＝書き出しと食い違っていた。
+    // ⚠️ **`undefined`（テンプレの既定）は載せない**＝`null`（間＝消す）と別物。
+    const layoutOpts = {
+      ...(edge.subtitleText !== undefined ? { subtitleText: edge.subtitleText } : {}),
+      ...(edge.subtitleSegment ? { subtitleSegment: edge.subtitleSegment } : {}),
+    };
+    const creditText = edge.creditLine ? creditForLine(edge.creditLine, baseCredit) : baseCredit;
     // 見本の場面（動画の場面ではない）は index が無い＝従来どおり出す（ScenePreview と同じ規則）。
     const index = projectScenes.findIndex((s) => s.sceneId === sc.sceneId);
     const credit = index < 0 || creditVisible[index] ? creditText : undefined;
@@ -69,13 +75,13 @@ export function TransitionPreview({
       <div
         style={a}
         dangerouslySetInnerHTML={{
-          __html: svgFor(prevScene, prevTemplate, lastFrameBoundary(prevScene, lineDurationsFromAudio(prevScene, narrationAudioById))),
+          __html: svgFor(prevScene, prevTemplate, lastFrameLayoutOptions(prevScene, lineDurationsFromAudio(prevScene, narrationAudioById))),
         }}
       />
       <div
         style={b}
         dangerouslySetInnerHTML={{
-          __html: svgFor(scene, template, firstFrameBoundary(scene, lineDurationsFromAudio(scene, narrationAudioById))),
+          __html: svgFor(scene, template, firstFrameLayoutOptions(scene, lineDurationsFromAudio(scene, narrationAudioById))),
         }}
       />
     </div>

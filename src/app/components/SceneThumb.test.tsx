@@ -9,6 +9,8 @@ import { render } from "@testing-library/react";
 import { SceneThumb } from "./SceneThumb";
 import { useProjectStore } from "../store/projectStore";
 import { NARRATION_STATUS } from "../../domain/enums";
+import { lineAudioKey } from "../../domain/project/narrationLines";
+import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import type { NarrationLine, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 
@@ -75,8 +77,26 @@ describe("場面カードの見本（#1152）", () => {
     expect(out, "同時の行が見本に出ていない（先頭の正準セグメントを渡していない）").toContain("ふたりめ");
   });
 
-  it("声の長さを store から読む（大きい方と同じ入力）", () => {
-    // ⚠️ **読んでいることを留める**＝読まずに `{}` を渡すと、行の長さで先頭が決まる場面でずれる。
-    expect(Object.keys(useProjectStore.getState())).toContain("narrationAudioById");
+  // ⚠️ **配線そのものを留める**（#1164 レビュー由来 🟡）＝もとは「store にキーがある」ことしか
+  // 見ていなかったので、**第2引数を `{}` に書き換えても全部緑**だった（＝渡していることを
+  // 一度も確かめていない検査）。自動逐次（`startSec` を書かない掛け合い）＋実際の声で見る。
+  it("声の長さを読んで、先頭の行を出す（渡さないと最後の行が出る）", async () => {
+    const mock = new MockVoiceProvider();
+    const a = await mock.synthesize({ text: "ながいほうのこえです".repeat(4), voiceId: "v", speed: 1, pitch: 0, intonation: 1 });
+    const b = await mock.synthesize({ text: "みじかい", voiceId: "v", speed: 1, pitch: 0, intonation: 1 });
+    const lines: NarrationLine[] = [
+      { lineId: "line_001", text: "さいしょのぎょう", status: NARRATION_STATUS.generated },
+      { lineId: "line_002", text: "さいごのぎょう", status: NARRATION_STATUS.generated },
+    ];
+    const scene = sceneWith({ lines });
+    useProjectStore.setState({
+      narrationAudioById: {
+        [lineAudioKey(scene.sceneId, "line_001")]: a.audioDataUrl,
+        [lineAudioKey(scene.sceneId, "line_002")]: b.audioDataUrl,
+      },
+    });
+    const out = html(scene);
+    expect(out, "先頭の行が出ていない（声の長さを渡していない）").toContain("さいしょのぎょう");
+    expect(out, "最後の行が出ている＝長さを渡していない証拠").not.toContain("さいごのぎょう");
   });
 });
