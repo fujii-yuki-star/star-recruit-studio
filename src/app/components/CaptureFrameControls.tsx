@@ -6,6 +6,7 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
+import { RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
@@ -46,8 +47,8 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
       ) : (
         // ⚠️ **見られないときも行き止まりにしない**（§2-5）＝理由と次の行動を出す。
         // ⚠️ **同じ操作は同じ名前で呼ぶ**（α-6 出口監査 🟡25・§2-3）＝同じ画面の導線は
-        // 「ファイルを選び直す」（`MaterialsScreen` の4か所で統一）。別の名で呼ぶと、探す先が分からない。
-        <p className="field-hint">この動画をここでは再生できません。その素材を選んで「ファイルを選び直す」から入れ直すと、表示できる場合があります。</p>
+        // 呼び名は `RELINK_ASSET_LABEL` から取る（#1168）。別の名で呼ぶと、探す先が分からない。
+        <p className="field-hint">この動画をここでは再生できません。その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直すと、表示できる場合があります。</p>
       )}
       <div className="row mt">
         <button type="button" className="btn btn-secondary" disabled={busy || !src} onClick={() => void onCapture()}>
