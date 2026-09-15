@@ -1271,11 +1271,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // **見えていた絵と最大1コマ（×速さ）ずれる**。「止めたのに別の瞬間」を作らない。
     // ⚠️ **格子へ落とすのは `freezeSourceSec` の中**（#1147）＝プレビュー＝書き出しの正準
     // （`videoSourceSecAt`）をそのまま呼ぶので、丸め方も1か所にある。
-    const sourceSec = freezeSourceSec(doc, clip, atSec, { templateOf: templateOfNow });
+    const sourceSec = freezeSourceSec(doc, clip, atSec);
     // ⚠️ **映っていないなら切り出さない**＝正準が `null` を返すのは「その時刻にこの置き場所は無い」。
-    // ⚠️ **いまは起きない（変異チェックで生き残る＝等価）**＝関門（`freezeFrameIssue`）と正準
-    // （`videoPlacementsOfClip`）が**どちらも `isDirectVideoClip` を見ている**ので、関門が通した帯で
-    // `null` は返らない。それを `freeze.test.ts`「関門が通した帯なら、素材の時刻は必ず出る」で
+    // ⚠️ **いまは起きない（変異チェックで生き残る＝等価）**＝関門（`freezeFrameIssue`）が
+    // `isDirectVideoClip` を通した帯なら、`freezeSourceSec` は**直接置きの置き場所**を必ず1つ持つ。
+    // 時刻が区間の外へ落ちることも無い（関門が前後 0.1 秒＝`TIMELINE_MIN_CLIP_SEC` を要求するので、
+    // 半コマの丸めでは外へ出ない）。それを `freeze.test.ts`「関門が通した帯なら、素材の時刻は必ず出る」で
     // 固定してある＝**この枝を消しても観測できる違いが無い**。
     // ⚠️ **それでも残す**＝片方の条件だけ緩めた瞬間に「押せたのに何も起きない」になる側なので、
     // 黙って返るのではなく理由を出す形にしておく（§2-5）。

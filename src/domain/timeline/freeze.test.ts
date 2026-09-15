@@ -150,6 +150,16 @@ describe('freezeSourceSec（どの瞬間を切り出すか）', () => {
       const 写し = (c.sourceStartSec ?? 0) + (6 - c.startSec) * (c.speed ?? 1);
       expect(freezeSourceSec(d, c, 6)).not.toBe(写し);
     });
+
+    // ⚠️ **1件だけ実数で留める**（#1157 レビュー由来 ℹ️）＝上の突き合わせは**正準を呼んで比べる**
+    // 形なので、丸めの取り違えは捕まえるが**相手（置き場所）の取り違えは両方に同じだけ乗って**緑になる。
+    // 手で解いた値を1つ置いて、その穴を閉じる：
+    // `local = round(6×30) − round(2.017×30) = 180 − 61 = 119` → `5 + 119/30`
+    //（写しの式なら `5 + (6−2.017)×1 = 8.983`）。
+    it('手で解いた値と合う（正準を呼ばずに留める）', () => {
+      const c = video({ startSec: 2.017, sourceStartSec: 5 });
+      expect(freezeSourceSec(withClip(c), c, 6)).toBeCloseTo(5 + 119 / 30, 9);
+    });
   });
 
   // ⚠️ **速さの既定も正準へ**＝写していた側は `speed ?? 1`、正準は `effectiveSpeed`（`speed > 0` を見る）。
@@ -161,6 +171,20 @@ describe('freezeSourceSec（どの瞬間を切り出すか）', () => {
 
   it('映っていない相手は null（黙って 0 を返さない）', () => {
     const c = video({ assetId: 'asset_002' }); // 写真＝動画の置き場所にならない
+    expect(freezeSourceSec(withClip(c), c, 4)).toBeNull();
+  });
+
+  // ⚠️ **相手を取り違えない**（#1157 レビュー由来 🟡）＝見た目パターンの帯を渡しても、
+  // 差し込み口や立ち絵の置き場所を掴まない。
+  // ⚠️ **いまは構造で守られている**＝`freezeSourceSec` は `templateOf` を受け取らないので、
+  // 直接置きでない帯では `videoPlacementsOfClip` が見た目を解けず `[]` を返す。
+  // この検査が留めているのは**その構造**（`templateOf` を足したら、ここが意味を持ち始める）。
+  it('見た目パターンの帯は null（差し込み口の置き場所を掴まない）', () => {
+    const c: TimelineClip = {
+      id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080,
+      templateId: 'tpl_001', slotClips: { layer_slot: { startSec: 0, endSec: 5 } },
+    };
     expect(freezeSourceSec(withClip(c), c, 4)).toBeNull();
   });
 

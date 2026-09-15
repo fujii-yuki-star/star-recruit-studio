@@ -12,6 +12,7 @@
 // ⚠️ **相手は「直接置いた動画」だけ**＝見た目パターンの差し込み口に入れた動画は、止めると
 // **枠ごと写真に化ける**（文字も立ち絵も消える）＝押した結果と食い違う。断って理由を出す。
 import { isDirectVideoClip, videoPlacementsOfClip, videoSourceSecAt } from './video';
+import { ASSET_USE_KIND } from '../enums';
 import { effectiveFps } from './playback';
 import { frameTimeSec } from './persistence';
 import { splitClip, splitClipIssue, SPLIT_BLOCKED_REASON } from './split';
@@ -96,14 +97,24 @@ export function freezeFrameIssue(
  * 置くのも分けるのも生の秒（`edit.ts` に量子化は1か所も無い）。
  * ⚠️ **速さの既定も正準へ**＝写していた側は `speed ?? 1`、正準は `effectiveSpeed`（`speed > 0` を見る）。
  * ⚠️ **時刻もコマの格子へ落としてから渡す**（`frameTimeSec`）＝キャンバスが映しているのがその時刻。
+ * ⚠️ **相手は「直接置いた動画」だけ**（#1157 レビュー由来 🟡・ℹ️）＝最初は
+ * `p.clip.id === clip.id` で選んでいたが、`videoPlacementsOfClip` が返す置き場所は**どれも同じ帯**を
+ * 持つので**恒真**だった。見た目パターンの帯を渡すと、差し込み口や立ち絵の置き場所を掴みうる
+ *（＝止める相手が違う）。
+ *
+ * ⚠️ **根から断つ**＝**見た目パターンを引く道具（`templateOf`）を受け取らない**。
+ * `videoPlacementsOfClip` は直接置きなら入口で早期に返り、そうでなければ**見た目が解けないので `[]`**。
+ * つまりここへ届く置き場所は**直接置きの1つか、無いか**の2通りしかない。
+ * ⚠️ **だから下の `find` の条件は、いまは何を書いても同じ**（変異チェックで生き残る＝等価）。
+ * それでも**使い方で書く**のは、`templateOf` を足した瞬間に恒真へ戻る側だから
+ *（条件が「意図」を持っていれば、足した人がそこで気づく）。
  */
 export function freezeSourceSec(
   doc: TimelineProject,
   clip: TimelineClip,
   atSec: number,
-  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
 ): number | null {
-  const place = videoPlacementsOfClip(doc, clip, opts).find((p) => p.clip.id === clip.id);
+  const place = videoPlacementsOfClip(doc, clip).find((p) => p.use === ASSET_USE_KIND.direct);
   if (!place) return null;
   return videoSourceSecAt(place, frameTimeSec(doc, atSec), effectiveFps(doc));
 }
