@@ -5,7 +5,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CaptureFrameControls } from "./CaptureFrameControls";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE } from "../../domain/enums";
-import { IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { readFileSync } from "node:fs";
+import { CAPTURE_FRAME_LABEL, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 
 const video: Asset = {
@@ -22,6 +23,9 @@ beforeEach(() => {
   useProjectStore.setState({
     assetSrcById: { asset_001: "asset://v.mp4" },
     isImporting: false,
+    // ⚠️ **兄弟の後始末に頼らない**（#1168 レビュー ℹ️）＝ここで戻しておかないと、
+    //   検査の順番が変わったとき前の回の状態を引きずる。
+    missingAssetIds: [],
     captureVideoFrame: capture,
   } as never);
 });
@@ -39,7 +43,7 @@ describe("CaptureFrameControls", () => {
       expect(screen.getByRole("button", { name: /この瞬間を写真にする/ })).toBeDisabled();
     });
 
-    // ⚠️ **知らせを増やさない**（#1168 レビュー 🟡）＝この画面は「状況はバナー、どれかは一覧の印、
+    // ⚠️ **押す前の状態では知らせを増やさない**（#1168 レビュー 🟡）＝この画面は「状況はバナー、どれかは一覧の印、
     // 直し方はボタン」と役割を分けている。ここにも同じ説明を出すと `alert` が2つになる。
     it("押せない理由は `title` に出す（知らせを2つにしない）", () => {
       render(<CaptureFrameControls asset={video} />);
@@ -55,6 +59,15 @@ describe("CaptureFrameControls", () => {
       expect(btn).toBeEnabled();
       expect(btn).not.toHaveAttribute("title");
     });
+  });
+
+  // ⚠️ **「寄せた」は数えて出す**（§7）＝「定数を使っている」だけだと、2か所のうち1か所を
+  // 写しに戻しても緑になる（`RELINK_ASSET_LABEL` のときに実際に変異チェックで生き残った）。
+  it("呼び名は1か所から取る（見出しとボタンで写さない）", () => {
+    const src = readFileSync("src/app/components/CaptureFrameControls.tsx", "utf8");
+    const body = src.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+    expect(body.split("{CAPTURE_FRAME_LABEL}").length - 1, "見出しとボタンの2か所で呼んでいない").toBe(2);
+    expect(body.split(CAPTURE_FRAME_LABEL).length - 1, "呼び名の写しが残っている").toBe(0);
   });
 
   /** ⚠️ §2-3＝実装用語を画面に出さない。 */

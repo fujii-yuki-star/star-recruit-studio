@@ -6,7 +6,7 @@
 import { useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
-import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
+import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, CAPTURE_FRAME_LABEL, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
   const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
@@ -29,10 +29,11 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
    * 押せない理由（`null` なら押せる）。
    *
    * ⚠️ **押す前に断る**（#1168 レビュー 🟡）＝タイムライン形式の「絵を止める」（`freezeExtra`）と
-   * **同じ形**にする＝`disabled` と理由を1か所で決め、**理由の無い `disabled` を作らない**。
+   * **同じ形**にする＝**押せない理由はここ1か所で決める**（あちこちの条件に散らさない）。
    * ⚠️ **順番も合わせる**＝あちらは取り込み中が先（両方成り立つときに出る文が形式で割れない）。
-   * ⚠️ **見られない動画（`!src`）だけは理由を持たない**＝そのときは**下の案内が画面に出ている**ので、
+   * ⚠️ **見られない動画（`!src`）はここに入れない**＝そのときの理由は**下の案内が画面に出して**おり、
    * 同じことを `title` でも言うと「二度言う」側に倒れる（この画面の流儀・#1168 レビュー 🟡）。
+   * ＝押せなくする条件は `!src` を足した2つ、理由を持つのはこの1つ、という形。
    */
   const blocked: string | null =
     busy ? IMPORT_BUSY_MESSAGE : isMissing ? CAPTURE_FRAME_ASSET_MISSING_MESSAGE : null;
@@ -48,7 +49,7 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
 
   return (
     <div className="field">
-      <span className="field-label">この瞬間を写真にする</span>
+      <span className="field-label">{CAPTURE_FRAME_LABEL}</span>
       <p className="field-hint">
         動画を再生して、写真にしたいところで止めてください。止めたところが1枚の写真になります。
       </p>
@@ -67,7 +68,7 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
         // 呼び名は `RELINK_ASSET_LABEL` から取る（#1168）。別の名で呼ぶと、探す先が分からない。
         <p className="field-hint">この動画をここでは再生できません。その素材を選んで「{RELINK_ASSET_LABEL}」から入れ直すと、表示できる場合があります。</p>
       )}
-      {/* ⚠️ **知らせを増やさない**（#1168 レビュー 🟡・§6＝この画面の流儀）＝状況はバナー、
+      {/* ⚠️ **押す前の状態では知らせを増やさない**（#1168 レビュー 🟡・§6＝この画面の流儀）＝状況はバナー、
           どれかは一覧の印、直し方はボタン、と役割が分かれている。ここにも同じ説明を出すと
           **同じ状態で `alert` が2つ**になる（`MaterialsScreen.relink.test.tsx` が記録した形）。
           押せない理由は `title` に出す＝タイムライン形式の「絵を止める」と同じ（`freezeExtra`）。 */}
@@ -83,7 +84,7 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
               **アプリ全体**の取り込みで立つので、写真を落としただけでもここが「切り出しています…」に
               変わっていた。しかも `title` は「終わってからもう一度お試しください」＝**同じボタンが
               名前と説明で逆のことを言う**。タイムライン形式は #1136 ℹ️ でこの形を採らないと決めている。 */}
-          この瞬間を写真にする
+          {CAPTURE_FRAME_LABEL}
         </button>
         <span className="text-sm text-muted">{formatTime(atSec)}</span>
       </div>
