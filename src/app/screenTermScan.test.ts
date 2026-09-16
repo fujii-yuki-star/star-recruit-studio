@@ -13,7 +13,7 @@ import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 // ⚠️ **拾い方と禁止語は1か所**（`src/test/uiTerms.ts`）＝Rust が返す文を見る門番
 // （`src/test/rustUserMessageGuard.test.ts`）も同じものを使う（#1111）。
-import { bannedTermsIn, hasJapanese } from "../test/uiTerms";
+import { bannedTermsIn, hasJapanese, screenTextsIn } from "../test/uiTerms";
 
 /**
  * 1つのファイルから、画面に出る文字に混じった禁止語を拾う。
@@ -92,6 +92,16 @@ describe("画面に直書きした文字に、実装用語が混じっていな�
     const code = sample.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     const japanese = [...code.matchAll(/(['"])((?:[^'"\\\r\n]|\\.)+)\1/g)].filter((m) => hasJapanese(m[2]!));
     expect(japanese.length, "画面から日本語を1つも拾えていない＝走査が壊れている").toBeGreaterThanOrEqual(10);
+  });
+
+  // ⚠️ **下限では足りない**（#1142）＝拾い方を1段まるごと外しても、**見つかる数が減るだけ**で
+  //    「見つかったものは禁止語を含まない」は成り立つので緑のまま通る（同じ型を #1130 で踏んだ）。
+  //    増減したら、そのぶんの対応（新しい文言か、拾い方が狭まったか）を確かめてからこの数を直す。
+  // ⚠️ **テンプレート文字列を拾えるようになって +278**（#1142・167 file で 1907→2185）＝
+  //    それまでは同じ文言をバッククォートで書くと**この走査からも戻る導線の走査からも消えて**いた。
+  it("拾えた文言の数が変わっていない（実数で留める）", () => {
+    const n = screenFiles().reduce((acc, p) => acc + screenTextsIn(readFileSync(p, "utf8")).length, 0);
+    expect(n, "拾えた文言の数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(2185);
   });
 
   it("走査が画面の外枠まで届いている（`src/App.tsx` を見ている）", () => {
