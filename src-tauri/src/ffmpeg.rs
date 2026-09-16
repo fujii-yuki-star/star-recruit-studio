@@ -6939,8 +6939,10 @@ mod source_range {
     /// ⚠️ **厳密には「説明だけ」ではない**（#1171 レビュー由来 ℹ️）＝**文字列リテラルの中の
     /// `//`・`/*` も説明として落とす**（`"http://…"` を本体に書くと、その行の残りを食う）。
     /// いま走査している2つの本体には**1件も無いことを確かめてある**（あれば `Ok(` の数が動いて赤くなる）。
-    /// ⚠️ **閉じない `/*` に当たると、以降を丸ごと捨てる**（縮む方向）＝黙って緑にはならない
-    ///（本体の目印が見つからず `panic` するか、`Ok(` の数が 1→0 になって落ちる）。
+    /// ⚠️ **閉じない `/*` に当たると、以降を丸ごと捨てる**（縮む方向）。
+    /// ⚠️ **どちらも「必ず赤くなる」とは限らない**（#1171 レビュー由来 ℹ️＝ここを言い切っていた）＝
+    /// 巻き込んだ側に**目印か `Ok(`** があれば落ちるが、無ければ**黙って縮むだけ**＝網が弱くなる。
+    /// 本体に `"…//…"` を書いたら、ここを見直すこと。
     pub fn コメントを落とす(src: &str) -> String {
         let mut out = String::with_capacity(src.len());
         let mut 残り = src;
@@ -7351,12 +7353,6 @@ mod staged_output_tests {
         let _ = fs::remove_file(&p);
     }
 
-    /// **繋いだことを留める**（#1137）。
-    ///
-    /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、
-    /// `clear_stale_frame` も `produced_frame` も**単独の検査は緑のまま**通る。
-    /// 切り出しの本体は ffmpeg を起動するので検査から叩けないため、**ソースを読んで**
-    /// ①残骸を片づけてから ffmpeg を起こす ②「あるか」ではなく「出来たか」で見る、を留める。
     /// **残骸を成功と読まない**を、本体の中に留める（#1137・#1140）。
     ///
     /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、`clear_stale_frame` も
@@ -7366,16 +7362,18 @@ mod staged_output_tests {
     /// 片方にしか無い網が**両方向に**できていた（`!out.exists()` は切り出しだけ／`ran < judge` は
     /// 小さな絵だけ）。「片方だけ直す」を避けると書きながら、検査の側で同じことをしていた。
     fn 残骸を成功と読まない(body: &str, 誰: &str) {
-        let clear = body
-            .find("clear_stale_frame(&out)?")
-            .unwrap_or_else(|| panic!("{誰}：残骸を片づけていない"));
+        let clear = body.find("clear_stale_frame(&out)?").unwrap_or_else(|| {
+            panic!("{誰}：残骸を片づけていない（本番の綴りを変えたなら、この目印も直す）")
+        });
         let spawn = body
             .find("let ffmpeg = resolve_ffmpeg(")
-            .unwrap_or_else(|| panic!("{誰}：ffmpeg を起こす行が無い"));
+            .unwrap_or_else(|| {
+                panic!("{誰}：ffmpeg を起こす行が無い（本番の綴りを変えたなら、この目印も直す）")
+            });
         assert!(clear < spawn, "{誰}：片づける前に ffmpeg を起こしている");
-        let ran = body
-            .find("run(&ffmpeg, &args)")
-            .unwrap_or_else(|| panic!("{誰}：ffmpeg を走らせる行が無い"));
+        let ran = body.find("run(&ffmpeg, &args)").unwrap_or_else(|| {
+            panic!("{誰}：ffmpeg を走らせる行が無い（本番の綴りを変えたなら、この目印も直す）")
+        });
         let judge = body.find("if !produced_frame(&out)").unwrap_or_else(|| {
             panic!("{誰}：「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている")
         });
