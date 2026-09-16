@@ -206,6 +206,19 @@ export async function extractVideoFrame(
   relPath: string,
   atSec: number,
   outFileName: string,
+  grid?: { sourceStartSec: number; speed: number; fps: number; localFrame: number },
 ): Promise<string> {
-  return invoke<string>('extract_video_frame', { projectId, relPath, atSec, outFileName });
+  return invoke<string>('extract_video_frame', {
+    projectId,
+    relPath,
+    atSec,
+    outFileName,
+    // ⚠️ **渡せるときは秒でなく「何コマ目か」で頼む**（#1158）＝受け取った側が自分の丸め方で
+    // コマを選ぶと、素材と出力の格子が合わないときに**1コマ先**の絵になる（実測 18/64）。
+    // ⚠️ **`atSec` も一緒に送る**＝格子を渡せない呼び出し（素材画面の切り出し）は今までどおり秒で選ぶ。
+    sourceStartSec: grid?.sourceStartSec,
+    speed: grid?.speed,
+    fps: grid?.fps,
+    localFrame: grid?.localFrame,
+  });
 }

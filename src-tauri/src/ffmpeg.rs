@@ -1747,15 +1747,22 @@ fn extract_video_thumbnail_impl(
 /// 切り出した写真だけ解像度が落ちて動画に入る＝黙って劣化させない）。
 /// ⚠️ **ファイル名は呼ぶ側が決める**（`asset_NNN` の採番はドメイン側の責務・§4）。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn extract_video_frame(
     app: tauri::AppHandle,
     project_id: String,
     rel_path: String,
     at_sec: f64,
     out_file_name: String,
+    // ⚠️ **省略できる**（#1158）＝素材画面の切り出しは格子を持たないので、今までどおり秒で選ぶ。
+    source_start_sec: Option<f64>,
+    speed: Option<f64>,
+    fps: Option<u32>,
+    local_frame: Option<u32>,
 ) -> Result<String, String> {
+    let grid = FrameGrid::new(source_start_sec, speed, fps, local_frame);
     tauri::async_runtime::spawn_blocking(move || {
-        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name)
+        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name, grid)
     })
     .await
     .map_err(|e| {
@@ -1808,6 +1815,7 @@ fn extract_video_frame_impl(
     rel_path: String,
     at_sec: f64,
     out_file_name: String,
+    grid: Option<FrameGrid>,
 ) -> Result<String, String> {
     if !is_safe_frame_file_name(&out_file_name) {
         return Err(export_failure(
@@ -1841,23 +1849,10 @@ fn extract_video_frame_impl(
     // 同じ名前が再発行され、ディスクには前回の PNG が残っている。
     clear_stale_frame(&out)?;
     let ffmpeg = resolve_ffmpeg(&app);
-    let seek = frame_seek_args(at_sec);
-    let mut args: Vec<String> = vec!["-y".into()];
-    if let Some(coarse) = seek.coarse_sec {
-        args.push("-ss".into());
-        args.push(format!("{coarse}"));
-    }
-    args.push("-i".into());
-    args.push(input.to_string_lossy().into_owned());
-    if seek.fine_sec > 0.0 {
-        args.push("-ss".into());
-        args.push(format!("{}", seek.fine_sec));
-    }
-    args.extend([
-        "-frames:v".into(),
-        "1".into(),
-        out.to_string_lossy().into_owned(),
-    ]);
+    let args = match &grid {
+        Some(g) => frame_grid_args(&input, &out, g),
+        None => frame_seconds_args(&input, &out, at_sec),
+    };
     run(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("frame extract: {e}"),
@@ -1876,6 +1871,102 @@ fn extract_video_frame_impl(
         ));
     }
     Ok(rel_out)
+}
+
+/// 止め絵に取る**コマの居場所**を、書き出しと同じ言葉で持つ（#1158）。
+///
+/// ⚠️ **秒ではなく「何枚目か」で受ける**＝秒で受けると、ここが**自分の丸め方**でコマを選ぶ。
+/// 書き出し（`stage_clip_frames_impl`）は `-ss 並べ始める秒 -i … -vf setpts=PTS/速さ,fps=N` で
+/// 並べた **N 枚目**を焼くので、**同じ並べ方の同じ番号**を取れば、丸め方を合わせる必要が無くなる
+///（近似で書き写さない＝ADR-0001）。
+///
+/// ⚠️ **実測してから直した**＝素材 29.97fps・出力 24fps などで**ちょうど1コマ**ずれる
+///（64 通りのうち 18 通り）。「起きるかもしれない」ではなく、起きる。
+struct FrameGrid {
+    /// 素材の中で並べ始める秒（＝書き出しの `-ss`）。
+    source_start_sec: f64,
+    /// 速さ（`setpts=PTS/speed`）。
+    speed: f64,
+    /// 出力の fps（`fps=N`）。
+    fps: u32,
+    /// 並べたうちの**何枚目か**（0 始まり＝書き出しの `frame_%05d` の番号）。
+    local_frame: u32,
+}
+
+impl FrameGrid {
+    /// 4つ**そろって初めて**格子として使う（1つでも欠けたら秒で選ぶ道へ戻す）。
+    ///
+    /// ⚠️ **半端に受けない**＝欠けたぶんを既定値で埋めると、**書き出しと違う並べ方**を
+    /// 「合わせた」と名乗ることになる（黙って別の結果にしない＝ADR-0026④）。
+    fn new(
+        source_start_sec: Option<f64>,
+        speed: Option<f64>,
+        fps: Option<u32>,
+        local_frame: Option<u32>,
+    ) -> Option<Self> {
+        let (source_start_sec, speed, fps, local_frame) =
+            (source_start_sec?, speed?, fps?, local_frame?);
+        // ⚠️ **使えない値は格子として受けない**＝0 や負の速さ・0fps は割り算が壊れる。
+        if !source_start_sec.is_finite() || !speed.is_finite() || speed <= 0.0 || fps == 0 {
+            return None;
+        }
+        Some(Self {
+            source_start_sec: source_start_sec.max(0.0),
+            speed,
+            fps,
+            local_frame,
+        })
+    }
+}
+
+/// 書き出しと**同じ並べ方**で、`local_frame` 枚目を1枚だけ取る（#1158）。
+///
+/// ⚠️ **`setpts`/`fps` の綴りは書き出しと同じにする**＝違えば「同じ番号」が別のコマを指す。
+/// 違うのは**横幅を縮めない**ことだけ（止め絵は素材の大きさのまま持ちたい）。
+/// ⚠️ **`select` は `fps` の後ろ**＝並べ直したあとの番号でなければ、書き出しの番号と揃わない。
+fn frame_grid_args(input: &std::path::Path, out: &std::path::Path, g: &FrameGrid) -> Vec<String> {
+    let vf = format!(
+        "setpts=PTS/{},fps={},select='eq(n\\,{})'",
+        g.speed, g.fps, g.local_frame
+    );
+    vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{}", g.source_start_sec),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-vf".into(),
+        vf,
+        // ⚠️ **`-vsync 0` が要る**＝`select` で間引いたあと、既定の並べ直しが**空いた所を埋め直す**ので、
+        // 1枚目（＝間引く前の先頭）が出てしまう。
+        "-vsync".into(),
+        "0".into(),
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]
+}
+
+/// 秒で1枚取る（格子を渡せない呼び出し＝素材画面の切り出し）。今までどおりの並べ方。
+fn frame_seconds_args(input: &std::path::Path, out: &std::path::Path, at_sec: f64) -> Vec<String> {
+    let seek = frame_seek_args(at_sec);
+    let mut args: Vec<String> = vec!["-y".into()];
+    if let Some(coarse) = seek.coarse_sec {
+        args.push("-ss".into());
+        args.push(format!("{coarse}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if seek.fine_sec > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{}", seek.fine_sec));
+    }
+    args.extend([
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
+    args
 }
 
 /// 頭出しの引数（#349・PR #885 レビュー 🔴）。粗い頭出しと、そこからの端数に分ける。
@@ -7471,12 +7562,16 @@ mod staged_output_tests {
         // ⚠️ **終わりは本体の直後まで詰める**（#1171 レビュー由来 ℹ️）＝`fn frame_seek_args` までだと
         // 隣の `struct FrameSeek`・`is_safe_frame_file_name` が範囲に入り、**数を固定する網**が
         // 対象外の場所で赤くなる。
+        // ⚠️ **目印は本体の**次に来るもの**へ寄せる**（#1158）＝`/// 頭出しの引数` の手前に
+        // `FrameGrid` と2つの引数作りが入ったので、そのままだと範囲が 4,214 バイトまで膨れた
+        //（＝この網が実際に気づいた）。
         let body = super::source_range::コメントを落とす(&super::source_range::範囲(
             SRC,
             "fn extract_video_frame_impl(",
-            "/// 頭出しの引数",
+            "/// 止め絵に取る",
         ));
-        走査が膨れていない(&body, 3500, "切り出し");
+        // ⚠️ **本体は小さくなった**（#1158＝引数作りを2つの関数へ出した）ので、上限も詰める。
+        走査が膨れていない(&body, 2600, "切り出し");
         残骸を成功と読まない(&body, "切り出し");
     }
 
@@ -7511,6 +7606,62 @@ mod staged_output_tests {
     /// 切り出しと同じ道具（`produced_frame`）へ通すこと。
     /// ⚠️ **門が「あるか」だと、失敗した回の 0 バイトが永久に残る**＝そのファイルが消えるまで
     /// **作り直しにも行かない**（帯が空のまま固まる）。
+    #[test]
+    fn 格子は四つそろって初めて受ける() {
+        // ⚠️ **半端に受けない**＝欠けたぶんを既定値で埋めると、書き出しと違う並べ方を
+        // 「合わせた」と名乗ることになる（#1158）。
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(30), Some(5)).is_some());
+        assert!(FrameGrid::new(None, Some(1.0), Some(30), Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), None, Some(30), Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), None, Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(30), None).is_none());
+    }
+
+    #[test]
+    fn 割り算が壊れる値は格子として受けない() {
+        assert!(FrameGrid::new(Some(1.0), Some(0.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(-1.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(f64::NAN), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(f64::INFINITY), Some(1.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(0), Some(0)).is_none());
+        // ⚠️ **負の頭出しは 0 へ寄せる**（受けないのではなく寄せる＝FFmpeg が負を受け付けない）。
+        let g = FrameGrid::new(Some(-3.0), Some(1.0), Some(30), Some(0)).expect("寄せて受ける");
+        assert_eq!(g.source_start_sec, 0.0);
+    }
+
+    #[test]
+    fn 止め絵の並べ方が書き出しと同じ綴りになる() {
+        // ⚠️ **綴りが同じでなければ「同じ番号」が別のコマを指す**（#1158）。
+        // 実測＝この綴りにすると 64 通りすべてで書き出しと同じコマになる（直す前は 18 通りずれた）。
+        let args = frame_grid_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            &FrameGrid::new(Some(1.5), Some(2.0), Some(24), Some(7)).expect("格子"),
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("-ss 1.5"), "頭出しは並べ始める秒: {joined}");
+        assert!(
+            joined.contains("setpts=PTS/2,fps=24,select='eq(n\\,7)'"),
+            "書き出しと同じ並べ方＋その番号: {joined}"
+        );
+        // ⚠️ **並べ直しを止めないと、間引いた穴を埋めて1枚目が出る**。
+        assert!(joined.contains("-vsync 0"), "並べ直しを止める: {joined}");
+        // ⚠️ **横幅は縮めない**＝止め絵は素材の大きさのまま持つ（書き出しとの違いはここだけ）。
+        assert!(!joined.contains("scale="), "止め絵は縮めない: {joined}");
+    }
+
+    #[test]
+    fn 格子が無いときは今までどおり秒で取る() {
+        let args = frame_seconds_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            3.5,
+        );
+        let joined = args.join(" ");
+        assert!(!joined.contains("select="), "秒の道は間引かない: {joined}");
+        assert!(joined.contains("-frames:v 1"), "1枚だけ: {joined}");
+    }
+
     #[test]
     fn 帯の本体が残骸を成功と読まない() {
         const SRC: &str = include_str!("ffmpeg.rs");
