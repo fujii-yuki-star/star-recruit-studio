@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 動画の「その瞬間」を写真にする欄（#349）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CaptureFrameControls } from "./CaptureFrameControls";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -130,10 +130,34 @@ describe("CaptureFrameControls", () => {
   //    「止めたところ」を選んでも常に先頭のコマが切り出される。
   it("動画を見ながら選べる（代表フレームではなく本体を再生できる形で出す）", async () => {
     const { container } = render(<CaptureFrameControls asset={video} />);
-    await waitFor(() => expect(container.querySelector("video")).toHaveAttribute("src", BODY_URL));
+    await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
     const v = container.querySelector("video");
     expect(v).toHaveAttribute("controls");
+    // ⚠️ **取り直させる印（`?t=`）が付く**（#140）ので、前方一致で見る。
+    expect(v?.getAttribute("src") ?? "", "本体を再生していない").toContain(BODY_URL);
     expect(v?.getAttribute("src"), "代表フレーム（静止画）を再生させようとしている").not.toBe(THUMB_URL);
+  });
+
+  // ⚠️ **選び直しても `filePath` は変わらない**（PR #1175 レビュー 🔴）＝`assetId` を保ったまま
+  //    同じ名前へ上書きするので、`filePath` だけを見ていると**解き直しが走らない**。
+  //    そのまま**古い動画を見ながら止めた時刻**で、**新しい動画から**切り出すことになる。
+  it("ファイルを選び直したら、見ている動画も取り直す", async () => {
+    const { container } = render(<CaptureFrameControls asset={video} />);
+    await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
+    const before = container.querySelector("video")!.getAttribute("src");
+    // 選び直し＝代表フレームの URL だけが新しくなる（`filePath` は同じまま）。
+    await act(async () => {
+      useProjectStore.setState({ assetSrcById: { asset_001: `${THUMB_URL}?t=999` } } as never);
+    });
+    await waitFor(() => expect(container.querySelector("video")!.getAttribute("src"), "古い動画を見せたまま").not.toBe(before));
+  });
+
+  // ⚠️ **解いている間は断らない**（PR #1175 レビュー ℹ️）＝開いた瞬間は必ず未解決なので、
+  //    そのまま「再生できません」を出すと**毎回一瞬エラーが見える**（§2-5）。
+  it("読み込んでいる間は「再生できません」と言わない", () => {
+    render(<CaptureFrameControls asset={video} />);
+    expect(screen.queryByText(/ここでは再生できません/), "解く前から断っている").toBeNull();
+    expect(screen.getByText(/読み込んでいます/)).toBeInTheDocument();
   });
 
   // ⚠️ **素材そのものから引く**＝地図を増やさないので、差し替え・選び直しで古い URL が残らない。
