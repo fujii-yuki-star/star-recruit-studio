@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, normalizeDialogueTiming, sceneLines,
+  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, lineVoiceUsable, liveNarrationAudioKeys, normalizeDialogueTiming, sceneLines,
   sceneNeedsVoice, validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
@@ -187,6 +188,33 @@ describe('行ごと音声の補助（PR-C2）', () => {
     expect(dur.line_001).toBeGreaterThan(0);
     expect(dur.line_002).toBeGreaterThan(dur.line_001); // 長いセリフほど区間が長い
     expect(dur.line_003).toBeUndefined(); // 音声未生成の行は含めない（0＝自動逐次のまま）
+  });
+
+  // ⚠️ **プレビューと書き出しが同じ規則を見る**（#1165・ADR-0001）＝以前は、この規則が
+  //    `lineDurationsFromAudio` の中にだけあり、**書き出しは `status` を見ずに旧 WAV を焼いて**いた。
+  //    ＝プレビューは「声が無い」扱い・書き出しは「旧い声がある」扱い＝**直したはずの文章が
+  //    直る前の声で**出る（ADR-0026④）。
+  describe('lineVoiceUsable（その行の声を使ってよいか・#1165）', () => {
+    it('作り直した行は使う', () => {
+      expect(lineVoiceUsable({ status: NARRATION_STATUS.generated })).toBe(true);
+    });
+
+    it('本文を直して作り直していない行は使わない（旧い声で焼かない）', () => {
+      expect(lineVoiceUsable({ status: NARRATION_STATUS.none })).toBe(false);
+    });
+
+    it('状態が無い行も使わない（分からないものを「ある」扱いにしない）', () => {
+      expect(lineVoiceUsable({})).toBe(false);
+    });
+  });
+
+  // ⚠️ **規則は1か所**（§6）＝プレビューと書き出しの両方が同じ関数を見ていることを、
+  //    **呼び出し側の数**で留める（片方だけ書き戻す変異を止める）。
+  it('その規則を、プレビューと書き出しの両方が見ている', () => {
+    const 参照 = (p: string, 名: string): number =>
+      readFileSync(p, 'utf8').split(名).length - 1;
+    expect(参照('src/domain/project/narrationLines.ts', 'lineVoiceUsable('), 'プレビュー側が見ていない').toBeGreaterThanOrEqual(2);
+    expect(参照('src/app/screens/ExportScreen.tsx', 'lineVoiceUsable('), '書き出し側が見ていない').toBeGreaterThanOrEqual(1);
   });
 
   it('lineDurationsFromAudio：単一 narration（明示 lines 無し）は空を返す', () => {

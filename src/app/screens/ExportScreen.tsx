@@ -25,7 +25,7 @@ import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
-import { narrationAudioKey } from "../../domain/project/narrationLines";
+import { lineVoiceUsable, narrationAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
@@ -325,13 +325,22 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         snapScenes,
         templateById,
         resolveExportSrc,
-        (scene, lineId) => ({
-          // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
-          // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
-          // 場面が明示の行を持つかで決めるので、どちらの渡し方でも同じ答えになる。
-          audioBase64: snapNarration[narrationAudioKey(scene, lineId ?? "")],
-          narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
-        }),
+        (scene, lineId) => {
+          // ⚠️ **作り直していない行の声は使わない**（#1165・ADR-0001）＝本文を直すと `status` は
+          // `none` へ戻るが、取り消しのために**旧 WAV は同じ鍵に残る**（#390）。見ないと
+          // **プレビューは「声が無い」扱い・書き出しだけ旧い声**という食い違いになり、
+          // **直したはずの文章が、直る前の声で**焼かれる（ADR-0026④）。
+          // 規則は `lineVoiceUsable` に1つ＝プレビュー（`lineDurationsFromAudio`）と同じものを見る。
+          const line = lineId ? scene.lines?.find((l) => l.lineId === lineId) : undefined;
+          const usable = line == null || lineVoiceUsable(line);
+          return {
+            // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
+            // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
+            // 場面が明示の行を持つかで決めるので、どちらの渡し方でも同じ答えになる。
+            audioBase64: usable ? snapNarration[narrationAudioKey(scene, lineId ?? "")] : undefined,
+            narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
+          };
+        },
         (scene) => {
           const t = templateById.get(scene.templateId);
           return t
