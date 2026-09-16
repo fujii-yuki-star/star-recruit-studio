@@ -50,18 +50,21 @@ export const BANNED_IN_SCREENS = [
 ] as const;
 
 /**
- * 開発用の記録（`console.warn(…)` ほか）を**構造で**落とす。
+ * 開発用の記録（`console.warn(…)` ほか）が**どこからどこまでか**を返す（`[from, to)` の一覧）。
  *
  * ⚠️ **一覧で外さない**（#1026 レビュー由来・2026-09-10）＝走査を `src/app` 丸ごとへ広げたら、
  * `[timeline] 保存内容がスキーマに未適合:` のような**記録の文**で赤くなった。これは画面に出ない。
  * 「このファイルは対象外」と名前で外すと**次に足された記録が素通り**するので、**役目で外す**
  *（Rust 側で `tlog!` を外しているのと同じ流儀＝`src/test/rustUserMessageGuard.test.ts`）。
  * ⚠️ **括弧の釣り合いを数える**＝素朴に「次の `)` まで」だと、中の `format` 等で切れて続きを拾う。
+ * ⚠️ **渡すのは `scanTs` の `code`**（#1142）＝文字列の中身が空白になっているので、
+ * **文の中の `(` `)` で釣り合いが狂わない**（以前は生の本文を数えていたので、
+ * `console.warn("（）")` のような文で数がずれる形が残っていた）。座標は元のソースと同じ。
  */
-export function dropDevLogs(code: string): string {
-  let out = "";
-  let i = 0;
+export function devLogRanges(code: string): [number, number][] {
+  const out: [number, number][] = [];
   const heads = ["console.warn(", "console.error(", "console.log(", "console.info(", "console.debug("];
+  let i = 0;
   outer: while (i < code.length) {
     for (const h of heads) {
       if (code.startsWith(h, i)) {
@@ -74,16 +77,15 @@ export function dropDevLogs(code: string): string {
             if (depth === 0) break;
           }
         }
+        out.push([i, Math.min(j + 1, code.length)]);
         i = j + 1;
         continue outer;
       }
     }
-    out += code[i];
     i += 1;
   }
   return out;
 }
-
 /**
  * 画面に出る文字とみなす＝**日本語を含む**文字列。
  *
@@ -94,6 +96,7 @@ export function dropDevLogs(code: string): string {
  * **取り込んでから配り直す**（再輸出だけだと局所の名前が未定義になる＝実際に3件赤くなった）。
  */
 import { hasJapanese } from "../app/userFacingError";
+import { scanTs } from "./tsSource";
 export { hasJapanese };
 
 /**
@@ -117,30 +120,36 @@ export function bannedTermsIn(
  * 本文から、**画面に出る日本語**だけを拾う（重複は畳む）。
  *
  * ⚠️ **拾い方を1か所に持つ**（`CLAUDE.md` §2-7・#1026）＝画面の文言を見る門番は
- * 禁止語のほかにも増える（戻る導線の言い方など）。それぞれが**コメントの外し方**を
- * 書き写すと、片方だけ緩めてももう片方は黙って通し続ける
- *（同じ型を `oneJapaneseMatcherGuard` で踏んでいる）。
- * ⚠️ **コメントは外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
+ * 禁止語のほかにも増える（戻る導線の言い方など）。それぞれが**見分け方**を書き写すと、
+ * 片方だけ緩めてももう片方は黙って通し続ける（同じ型を `oneJapaneseMatcherGuard` で踏んでいる）。
+ * ⚠️ **見分けは `scanTs` に寄せる**（#1142）＝説明・文字列・テンプレート・正規表現の見分けは
+ * **TS を1回なぞる**側が持つ。ここは「拾った中から画面の文だけ選ぶ」に専念する。
+ * ⚠️ **テンプレート文字列も拾う**＝以前は `'` と `"` だけを見ていたので、**同じ文言を
+ * バッククォートで書くと禁止語の走査からも戻る導線の走査からも消えた**（#1141 で見つけた穴）。
+ * 素朴に対を取るとバッククォートの対応が飛んで**128 件の巨大な塊**になるので、対にせず頭からなぞる。
  */
 export function screenTextsIn(text: string): string[] {
-  // ⚠️ **コメントを外す**＝説明文には実装用語が出てよい（§2-3 が縛るのは表示だけ）。
-  const code = dropDevLogs(text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""));
+  const { code, literals } = scanTs(text);
+  const 記録 = devLogRanges(code);
   const seen = new Set<string>();
   const add = (raw: string): void => {
     const s = raw.trim();
     if (!s || !hasJapanese(s)) return;
     seen.add(s);
   };
-  // ① 文字列リテラル（属性・変数・関数の引数）。
-  for (const m of code.matchAll(/(['"])((?:[^'"\\\r\n]|\\.)+)\1/g)) add(m[2]!);
+  // ① 文字列・テンプレート（属性・変数・関数の引数）。
+  // ⚠️ **開発用の記録は落とす**＝`console.warn("…がスキーマに未適合")` は画面に出ない。
+  for (const l of literals) {
+    if (記録.some(([from, to]) => l.at >= from && l.at < to)) continue;
+    add(l.text);
+  }
   // ② JSX のテキスト（タグとタグの間）。`{...}` の式は中身を見ない（識別子が混じるだけ）。
-  for (const m of code.matchAll(/>([^<>{}]+)</g)) add(m[1]!);
-  // ⚠️ **テンプレート文字列（バッククォート）は見ていない**（#1141 レビュー由来 ℹ️・既知の穴）。
-  // 同じ文言をバッククォートで書くと、この走査からも戻る導線の走査からも消える。
-  // ⚠️ **やってみて、やめた**＝素朴に対にすると**対を取り違える**（`\`` を含む文字列・正規表現の
-  // リテラルで対応が飛び、離れた2つが1つの塊として拾われる）。実際に試したら画面の文言として
-  // **128 件**の巨大な塊が上がった。`rustUserMessageGuard` が `'\"'` で同じ罠を踏んでいる。
-  // ⚠️ **確かめられない不具合に機械を足さない**＝半端な拾い方は、それ自体が次の種になる。
-  // 直すなら対応の取り方を共有の形（`rustSource.ts` の流儀）へ寄せてからにする＝**#1142**。
+  // ⚠️ **`code` を見る**＝文字列の中身は空白になっているので、引用符の中の `>` `<` で切れない。
+  // ⚠️ **記録の除外はここにも掛ける**（#1174 レビュー由来 ℹ️）＝いまは `console.*` の中身が
+  // 空白になっているので日本語は残らないが、`devLogRanges` の射程を広げたときに**②だけ素通り**になる。
+  for (const m of code.matchAll(/>([^<>{}]+)</g)) {
+    if (記録.some(([from, to]) => m.index >= from && m.index < to)) continue;
+    add(m[1]!);
+  }
   return [...seen];
 }
