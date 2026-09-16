@@ -1438,7 +1438,10 @@ fn video_filmstrip_impl(
     );
     let out = resolve_project_file(&app, &project_id, &rel_out)?;
     // 既にあるなら作り直さない（同じ中身・同じコマ数なら結果は同じ）。
-    if out.is_file() {
+    // ⚠️ **「あるか」で見ない**（#1172）＝失敗した回の **0 バイトの残骸**を「あり」と読むと、
+    //   そのファイルが消えるまで**永久に空の帯**になる（作り直しにも行かない）。
+    //   見分けは切り出しと**同じ道具**（`produced_frame`＝中身があるか）を通す。
+    if produced_frame(&out) {
         return Ok(rel_out);
     }
     if let Some(dir) = out.parent() {
@@ -1461,9 +1464,12 @@ fn video_filmstrip_impl(
     args.extend(["-frames:v".to_string(), "1".to_string()]);
     args.push(out.to_string_lossy().into_owned());
     // ⚠️ **失敗しても空で返す**（波形と同じ）＝コマ列は無くても編集はできる。
+    // ⚠️ **出来たかまで見る**（#1172）＝`run` が成功しても**1枚も書かれない**ことがある
+    //   （尺の外を指した等）。見ずに返すと、次からは上の門が 0 バイトを「あり」と読む。
+    //   ⚠️ **帯の側は画面に文を出さない**ので、失敗は**空**で返して静かに諦める（切り出しと違う）。
     match run(&ffmpeg, &args) {
-        Ok(_) => Ok(rel_out),
-        Err(_) => Ok(String::new()),
+        Ok(_) if produced_frame(&out) => Ok(rel_out),
+        _ => Ok(String::new()),
     }
 }
 
@@ -7431,6 +7437,48 @@ mod staged_output_tests {
         ));
         走査が膨れていない(&body, 3000, "小さな絵");
         残骸を成功と読まない(&body, "小さな絵");
+    }
+
+    /// 帯（`video_filmstrip_impl`）の本体を読む（#1172）。
+    ///
+    /// ⚠️ **切り出し・小さな絵とは断り方が違う**＝帯は**画面に文を出さない**ので、失敗は
+    /// **空で返して静かに諦める**（`残骸を成功と読まない` の「断って片づける」形は当てはまらない）。
+    /// 揃えるのは**2つの判定**だけ＝**門**（作り直さないか）と**出来たか**の両方を、
+    /// 切り出しと同じ道具（`produced_frame`）へ通すこと。
+    /// ⚠️ **門が「あるか」だと、失敗した回の 0 バイトが永久に残る**＝そのファイルが消えるまで
+    /// **作り直しにも行かない**（帯が空のまま固まる）。
+    #[test]
+    fn 帯の本体が残骸を成功と読まない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+            SRC,
+            "fn video_filmstrip_impl(",
+            "/// `ffmpeg -i <file>` を実行し stderr を返す",
+        ));
+        assert!(
+            !body.contains("out.is_file()"),
+            "帯：門が「あるか」で見ている＝0 バイトの残骸を永久に「あり」と読む"
+        );
+        let ran = body.find("run(&ffmpeg, &args)").unwrap_or_else(|| {
+            panic!("帯：ffmpeg を走らせる行が無い（本番の綴りを変えたなら、この目印も直す）")
+        });
+        let judge = body
+            .find("Ok(_) if produced_frame(&out)")
+            .unwrap_or_else(|| {
+                panic!("帯：「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている")
+            });
+        assert!(ran < judge, "帯：走らせる前に出来たかを見ている");
+        // ⚠️ **門にも通っていること**＝上の `Ok(_) if …` だけだと、門が「あるか」に戻っても
+        //   `out.is_file()` を別の綴り（`out.exists()`）にすれば素通りする。
+        assert_eq!(
+            body.matches("produced_frame(&out)").count(),
+            2,
+            "帯：門と出来たかの両方を同じ道具へ通していない"
+        );
+        assert!(
+            !body.contains("out.exists()"),
+            "帯：門が「あるか」で見ている＝0 バイトの残骸を永久に「あり」と読む"
+        );
     }
 
     #[test]
