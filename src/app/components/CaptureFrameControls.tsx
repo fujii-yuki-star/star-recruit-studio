@@ -3,13 +3,51 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「フレーム」「抽出」は書かず「この瞬間を写真にする」と書く。
 // ⚠️ **見ながら選べる**＝時間を数字で入れさせず、動画を再生して止めたところを切り出す
 //（`#349` の「時刻指定はプレビュー付き」）。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import type { Asset } from "../../domain/project/types";
 import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, CAPTURE_FRAME_LABEL, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
-  const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
+  const projectId = useProjectStore((s) => s.meta.projectId);
+  /**
+   * **動画の本体**の URL（#1154）。
+   *
+   * ⚠️ **`assetSrcById` を使わない**＝場面形式のあの地図は、動画に**代表フレームの PNG**を入れる
+   * （絵として描く用・`projectStore` の読込と `applyEnrichment`）。PNG は `<video>` で再生できないので
+   * `currentTime` は **0 のまま**＝「止めたところ」を選んでも**常に先頭のコマ**が切り出されていた。
+   * `06 §4` は「止めた瞬間と同じ絵を出す」と書いており、正典の約束が実装されていなかった（ADR-0026①）。
+   * ⚠️ **解き方は同じ画面の作法に合わせる**＝`PreviewScreen` も実映像は
+   * `assetDisplayUrl(projectId, relPath)` でその場で解く（タイムライン形式は `videoSrcById` という
+   * 地図を持つが、こちらは**素材そのもの**から引けるので地図を増やさない＝古い URL が残る筋を作らない）。
+   * ⚠️ **URL を組むだけで本体は読まない**（`convertFileSrc`）＝ここで解いても大容量を抱えない。
+   */
+  // ⚠️ **差し替えの合図**（PR #1175 レビュー 🔴）＝**ファイルを選び直しても `filePath` は変わらない**
+  //（`relinkAssetByPath` は `assetId` を保ち、保存名は `newAssetFrom(_, _, assetId)` で決まる＝
+  // 同じ拡張子なら同じ名前へ上書きする）。`filePath` だけを見ていると**解き直しが走らず**、
+  // **古い動画を見ながら止めた時刻で、新しい動画から切り出す**ことになる（ADR-0026④）。
+  // 代表フレームの URL は選び直すたびに新しくなる（`?t=` 付き）ので、それを合図に使う。
+  const relinkStamp = useProjectStore((s) => s.assetSrcById[asset.assetId]);
+  /**
+   * 解いた結果。**`null` は「まだ解いていない」**＝解けたうえでの「無い」（`{ url: null }`）と分ける
+   * （PR #1175 レビュー ℹ️）。分けないと、開いた瞬間は必ず未解決なので
+   * **毎回一瞬「再生できません」が見える**（§2-5＝出すべきでないときに出さない）。
+   */
+  const [resolved, setResolved] = useState<{ url: string | null } | null>(null);
+  const src = resolved?.url ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const url = projectId && asset.filePath ? await assetDisplayUrl(projectId, asset.filePath) : null;
+      if (cancelled) return;
+      // ⚠️ **同じ名前へ上書きすると表示が古いまま**（#140）＝`asset://` の URL が変わらないので
+      // webview が前の動画を返す。ほかの経路（`relinkAssetByPath`・タイムライン形式）と同じく
+      // 取り直させる（保存データには入れない）。
+      setResolved({ url: url ? `${url}?t=${Date.now()}` : null });
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, asset.filePath, relinkStamp]);
   const captureVideoFrame = useProjectStore((s) => s.captureVideoFrame);
   const isImporting = useProjectStore((s) => s.isImporting);
   // ⚠️ **ファイルが見つからない動画では押せなくする**（#1168 レビュー 🟡）＝`store` 側にも同じ門が
@@ -53,7 +91,11 @@ export function CaptureFrameControls({ asset }: { asset: Asset }) {
       <p className="field-hint">
         動画を再生して、写真にしたいところで止めてください。止めたところが1枚の写真になります。
       </p>
-      {src ? (
+      {/* ⚠️ **解いている間は断らない**（PR #1175 レビュー ℹ️）＝解く前は必ず `null` なので、
+          開いた瞬間に「再生できません」が一瞬出ていた（§2-5＝出すべきでないときに出さない）。 */}
+      {resolved == null ? (
+        <p className="field-hint">動画を読み込んでいます…</p>
+      ) : src ? (
         <video
           ref={videoRef}
           src={src}
