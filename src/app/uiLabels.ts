@@ -845,15 +845,17 @@ export const FREEZE_FRAME_LENGTH_NOTE =
  *
  * ⚠️ **取り込み直すのとは違う**＝これは**同じ素材の中身だけ**入れ替える（`assetId` は変わらない）ので、
  * **置いた場所・切り出す範囲・動き・字幕の紐づけがそのまま残る**。取り込み直すと新しい素材になって全部失う。
- * ⚠️ **寄せてあるのは素材画面だけ**（#1168 レビュー 🟡）＝`{RELINK_ASSET_LABEL}` で呼んでいるのは
- * **バナー・ボタン・切り出し欄の案内の3か所**（`captureFrame.test.ts` が件数で留める）。
- * **ほかの8か所**（`TimelineProjectScreen` のボタン2つとその案内文2つ・`adapters` の断り・
- * **このファイルの `TIMELINE_EDIT_FREEZE_ASSET_MISSING`／`TIMELINE_EXPORT_VIDEO_FILE_MISSING`／
- * `audioUnreadableMessage`**）は
- * **まだ写しのまま**なので、ここを改名しても向こうは旧名で残る＝**改名するなら向こうも同時に**（#1169）。
+ * ⚠️ **寄せられるものは寄せ、寄せられないものは検査で留める**（#1169）＝
+ * **ボタンと、表に無い案内**（素材画面の3か所・`TimelineProjectScreen` のボタン2つと案内1つ・
+ * `adapters` の断り）は `RELINK_ASSET_LABEL` から呼ぶ。
+ * ⚠️ **断りの文は寄せられない**＝`15 §6` の表（`errors/error-state-table.tsv`）は断りを
+ * **一文と等値**で守っているので、`${…}` で組み立てると**表の文が実装のどこにも無い**ことになり
+ * 門番が落ちる。該当は `CAPTURE_FRAME_ASSET_MISSING_MESSAGE`／`TIMELINE_EDIT_FREEZE_ASSET_MISSING`／
+ * `TIMELINE_EXPORT_VIDEO_FILE_MISSING`／`audioUnreadableMessage`（取り込んだ素材の枝）と、
+ * タイムラインの「音が出せない素材があります…」の一文。
+ * ⚠️ **それらは `relinkLabel.test.ts` が留める**＝この定数を改名すると**赤くなり、直す先が名指しで出る**
+ *（写しが増えたときも、数で気づく）。
  * ⚠️ **ボタンだけ直しても足りない**＝案内文が旧名で残ると、探す先が画面の中で食い違う。
- * ⚠️ **数え直すと 9 に見える**＝下の `CAPTURE_FRAME_ASSET_MISSING_MESSAGE` にも同じ言葉があるが、
- * あれは `captureFrame.test.ts` が**この定数と一致すること**を留めている（改名すれば赤くなる）ので数に入れない。
  * ⚠️ **寄せる理由**＝利用者は**画面の文字でボタンを探す**ので、片方だけ言い換えると行き先が消える。
  * ⚠️ **寄せ先は `*_LABEL` と名づける**＝`uiMessageScan` の差し戻し（`labelConstants`）がその名前しか見ない。
  */
