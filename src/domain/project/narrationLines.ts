@@ -145,6 +145,34 @@ export function liveNarrationAudioKeys(scenes: Scene[]): Set<string> {
 }
 
 /**
+ * その行の声を**使ってよいか**（#1165）。
+ *
+ * ⚠️ **本文を直した行は「声が無い」扱い**＝`updateLine` で `status` は `none` へ戻るが、
+ * 取り消しのためにメモリ上の**旧 WAV は同じ鍵に残る**（#390）。`status` を見ないと、
+ * **直したはずの文章が、直る前の声で**出る（#392 レビューで決めた規則）。
+ * ⚠️ **プレビューと書き出しが同じ答えを出すための単一の参照元**（ADR-0001）＝以前は
+ * この規則が `lineDurationsFromAudio` の中にだけあり、**書き出しは見ていなかった**。
+ */
+export function lineVoiceUsable(line: { status?: string }): boolean {
+  return line.status === NARRATION_STATUS.generated;
+}
+
+/**
+ * その場面の（行の）声を**使ってよいか**（#1165）。掛け合いも単一 narration も**同じ答え**を出す。
+ *
+ * ⚠️ **単一 narration を素通りさせない**（PR #1178 レビュー 🔴）＝行を持たない場面は `lineId` 無しで
+ * 引かれるので、`scene.lines` だけを見ると**この場面が判定の外**へ落ちる。単一 narration の本文を
+ * 直したときも `narration.status` は `none` へ戻り、**旧 WAV は同じ鍵に残る**ので、掛け合いと
+ * **まったく同じ構造の不具合**になる（ADR-0026②＝掛け合いの有無で同じ概念を割らない）。
+ * `sceneLines` が両者を**実効1行**へそろえるので、それを通して1つの判定にする。
+ */
+export function sceneLineVoiceUsable(scene: Scene, lineId?: string): boolean {
+  const lines = sceneLines(scene);
+  const line = lineId ? lines.find((l) => l.lineId === lineId) : lines[0];
+  return line == null || lineVoiceUsable(line); // 知らない行は弾かない（呼び出し規約の外）
+}
+
+/**
  * 掛け合いの各行の音声長（lineId→秒）を、メモリ上の音声（narrationAudioById）から求める（#392・タイムライン表示）。
  * compileTimeline の lineDurationsFor に渡すと、自動逐次（startSec 未指定）の掛け合いが各行の実音声長で区間表示される
  * （未指定だと cursor が進まず最終行だけ全幅になる）。単一 narration（明示 lines 無し）は実効1行＝常に全幅ゆえ空でよい。
@@ -158,7 +186,7 @@ export function lineDurationsFromAudio(scene: Scene, audioById: Record<string, s
   const out: Record<string, number> = {};
   if (scene.lines && scene.lines.length > 0) {
     for (const line of scene.lines) {
-      if (line.status !== NARRATION_STATUS.generated) continue; // 編集で none に戻った行は旧キャッシュの尺を使わない
+      if (!lineVoiceUsable(line)) continue; // 編集で none に戻った行は旧キャッシュの尺を使わない（規則は1か所＝#1165）
       const audio = audioById[lineAudioKey(scene.sceneId, line.lineId)];
       if (!audio) continue;
       const d = wavDurationSec(audio);
