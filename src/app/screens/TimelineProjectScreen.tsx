@@ -3008,6 +3008,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const freezeAudioNote = doc && selected && freezeStopsOriginalAudio(selected)
     ? "（この部品の元の音は、止めたところから鳴らなくなります）"
     : "";
+  /**
+   * 「この瞬間で絵を止める」の**押す前の予告**（#1167）。
+   *
+   * ⚠️ **入口が2つある**（ボタンと右クリック）＝**同じ文を2か所に書かない**。以前は右クリック側へ
+   * 渡しても `ContextMenu` が描かず、**この入口だけ知らせが届いていなかった**（ADR-0026②）。
+   * ⚠️ **尺が伸びないことも言う**（#1155 ⑥）＝他社は伸びるので、言わないと
+   * 「思ったより短い」となった人の次の一歩が画面から読めない。
+   */
+  const freezePreviewHint = `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}。${FREEZE_FRAME_LENGTH_NOTE}`;
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
       ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
@@ -3047,12 +3056,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             const g = freezeExtra();
             return g.disabled ? { disabled: true, disabledHint: g.hint } : {};
           })(),
-          // ⚠️ **右クリックには添え書きが出せない**（#1155 ⑥ で判明・#1167 へ起票）＝
-          // `ContextMenu` は `disabledHint`（押せないときだけ）しか描かないので、
-          // ここに `hint` を渡しても**どこにも出ない**。以前あった
-          // `...(freezeAudioNote ? { hint: freezeAudioNote } : {})` は**死んだ受け渡し**で、
-          // 「元の音が止まる」の知らせが**この入口だけ届いていなかった**（ADR-0026①）。
-          // 渡すのをやめる＝出ているように見える書き方を残さない。
+          // ⚠️ **ボタンと同じ予告を出す**（#1167）＝以前は `ContextMenu` が `disabledHint`
+          // （押せないときだけ）しか描かなかったので、ここへ渡しても**どこにも出ない**
+          // **死んだ受け渡し**になり、「元の音が止まる」の知らせが**この入口だけ届いていなかった**
+          //（ADR-0026②）。`ContextMenuItem` に `hint` を足して、押せるときに出るようにした。
+          hint: freezePreviewHint,
           onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
         },
         ...(menuClipTemplate
@@ -4073,7 +4081,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {...freezeGuard}
                 // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、
                 //   言わないと「思ったより短い」となった人の次の一歩が画面から読めない。
-                title={freezeGuard.title ?? `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}。${FREEZE_FRAME_LENGTH_NOTE}`}
+                title={freezeGuard.title ?? freezePreviewHint}
               >
                 {/* ⚠️ **押していないのに進行中と名乗らない**（#1136 レビュー由来 ℹ️）＝
                     `isImporting` は素材の取り込みでも立つので、写真をドロップしている最中に
