@@ -47,7 +47,7 @@ import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
-import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL } from "../uiLabels";
+import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -5500,7 +5500,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <p>
             絵が出せない素材を使っている部品が{missingImageCount}個あります。そのままでは動画にその絵が出ません。
             {missingAssets.length > 0
-              ? "ファイルを選び直すと、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります。"
+              ? `${RELINK_ASSET_LABEL}と、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります。`
               // ⚠️ **選び直せないときは、そう言う**（§2-5＝できない手を名指ししない）。
               : "これは見た目パターンが持っている素材です。別の見た目パターンを選んでください。"}
           </p>
@@ -5513,7 +5513,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {...busyGuard({ disabled: isImporting, hint: isImporting ? "いま取り込んでいます" : undefined })}
                   onClick={() => void onRelink(a.assetId)}
                 >
-                  ファイルを選び直す
+                  {RELINK_ASSET_LABEL}
                 </button>
               </div>
             ))}
@@ -5524,6 +5524,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <div className="notice notice-warn" role="alert">
           {/* ⚠️ **絵の側と同じ手を出す**（#1050）＝番号を変えずファイルだけ差し替えるので、
               置いた場所・切り出す範囲・音量の変化はそのまま残る（取り込み直すと作り直しになる）。 */}
+          {/* ⚠️ **この文だけは呼び名を組み立てない**（#1169）＝`15 §6` の表（`errors/error-state-table.tsv`
+              の `TIMELINE_AUDIO_ASSET_MISSING`）が**この一文と等値**で守っており、`${…}` で割ると
+              **表の文が実装のどこにも無い**ことになって門番が落ちる。呼び名との一致は検査で留める
+              （`relinkLabel.test.ts`）＝改名したらそこが赤くなり、直す先が名指しで出る。 */}
           <p>音が出せない素材があります。ファイルを選び直すと、置いた場所・切り出す範囲・音量の変化はそのまま残ります。</p>
           <div className="col gap-sm">
             {missingAudioAssets.map((a) => (
@@ -5534,7 +5538,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {...busyGuard({ disabled: isImporting, hint: isImporting ? "いま取り込んでいます" : undefined })}
                   onClick={() => void onRelinkAudio(a.assetId)}
                 >
-                  ファイルを選び直す
+                  {RELINK_ASSET_LABEL}
                 </button>
               </div>
             ))}

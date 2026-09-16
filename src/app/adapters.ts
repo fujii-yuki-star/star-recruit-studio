@@ -18,7 +18,7 @@ import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/p
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
-import { formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
+import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -337,7 +337,8 @@ export function buildPrecheckItems(
       items.push({
         id: "missingAsset",
         label: "見つからない素材",
-        detail: `動画で使っている素材のファイルが見つかりません（${names}${more}）。素材の画面で「ファイルを選び直す」から入れ直してください。置いた場所や設定はそのまま使えます。`,
+        // ⚠️ **呼び名は1か所から取る**（#1169）＝画面のボタンと同じ言葉でないと、探す先が食い違う。
+        detail: `動画で使っている素材のファイルが見つかりません（${names}${more}）。素材の画面で「${RELINK_ASSET_LABEL}」から入れ直してください。置いた場所や設定はそのまま使えます。`,
         severity: "action",
       });
     }

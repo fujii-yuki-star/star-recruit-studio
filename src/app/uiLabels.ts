@@ -845,15 +845,20 @@ export const FREEZE_FRAME_LENGTH_NOTE =
  *
  * ⚠️ **取り込み直すのとは違う**＝これは**同じ素材の中身だけ**入れ替える（`assetId` は変わらない）ので、
  * **置いた場所・切り出す範囲・動き・字幕の紐づけがそのまま残る**。取り込み直すと新しい素材になって全部失う。
- * ⚠️ **寄せてあるのは素材画面だけ**（#1168 レビュー 🟡）＝`{RELINK_ASSET_LABEL}` で呼んでいるのは
- * **バナー・ボタン・切り出し欄の案内の3か所**（`captureFrame.test.ts` が件数で留める）。
- * **ほかの8か所**（`TimelineProjectScreen` のボタン2つとその案内文2つ・`adapters` の断り・
- * **このファイルの `TIMELINE_EDIT_FREEZE_ASSET_MISSING`／`TIMELINE_EXPORT_VIDEO_FILE_MISSING`／
- * `audioUnreadableMessage`**）は
- * **まだ写しのまま**なので、ここを改名しても向こうは旧名で残る＝**改名するなら向こうも同時に**（#1169）。
+ * ⚠️ **寄せられるものは寄せ、寄せられないものは検査で留める**（#1169）＝
+ * **ボタンと、表に無い案内**（素材画面の3か所・`TimelineProjectScreen` のボタン2つと案内1つ・
+ * `adapters` の断り）は `RELINK_ASSET_LABEL` から呼ぶ。
+ * ⚠️ **寄せられないのは2件だけ**（PR #1180 レビュー 🟡＝最初は「表と等値だから断りは全部寄せられない」と
+ * 束ねて書いていたが、**事実と違った**）。表の守り方は3種類あり、**ソースの書き方まで見るもの**だけが
+ * 組み立てを拒む：
+ * ① `CAPTURE_FRAME_ASSET_MISSING_MESSAGE`＝`messageConstsOf` が `export const *_MESSAGE` の
+ *    **ソースを読んで**引用符リテラルだけで出来ているかを見る（`${…}` を混ぜると赤）。
+ * ② タイムラインの「音が出せない素材があります…」＝表にしか無い文なので、**ソースに丸ごと在るか**で守られる。
+ * ③ `editBlockedMessage`／`exportBlockedMessage` の断りと `audioUnreadableMessage`＝
+ *    **評価後の文字列どうし**の等値（あるいは等値の対象外）なので**組み立ててよい** → 寄せてある。
+ * ⚠️ **①②は `relinkLabel.test.ts` が留める**＝この定数を改名すると**赤くなり、直す先が名指しで出る**
+ *（写しが増えたときも、数で気づく＝ただし見ているのは `uiLabels`・`adapters`・素材画面・タイムラインの4つ）。
  * ⚠️ **ボタンだけ直しても足りない**＝案内文が旧名で残ると、探す先が画面の中で食い違う。
- * ⚠️ **数え直すと 9 に見える**＝下の `CAPTURE_FRAME_ASSET_MISSING_MESSAGE` にも同じ言葉があるが、
- * あれは `captureFrame.test.ts` が**この定数と一致すること**を留めている（改名すれば赤くなる）ので数に入れない。
  * ⚠️ **寄せる理由**＝利用者は**画面の文字でボタンを探す**ので、片方だけ言い換えると行き先が消える。
  * ⚠️ **寄せ先は `*_LABEL` と名づける**＝`uiMessageScan` の差し戻し（`labelConstants`）がその名前しか見ない。
  */
@@ -969,7 +974,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
   TIMELINE_EDIT_FREEZE_FAILED: "その瞬間の絵を切り出せませんでした。少し違う位置でもう一度お試しください",
-  TIMELINE_EDIT_FREEZE_ASSET_MISSING: "この動画のファイルが見つかりません。知らせの「ファイルを選び直す」で入れ直してからお試しください",
+  TIMELINE_EDIT_FREEZE_ASSET_MISSING: `この動画のファイルが見つかりません。知らせの「${RELINK_ASSET_LABEL}」で入れ直してからお試しください`,
   TIMELINE_EDIT_FREEZE_CHANGED: "絵を止めている間に、その部品が変わりました。もう一度お試しください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
@@ -1092,7 +1097,7 @@ export const exportBlockedMessage: Record<
   // 切り抜き・動き・連動する字幕まで作り直しになる。知らせの側に「ファイルを選び直す」を出したので、
   // そちらを指す（§2-5＝実行できて、しかも失うものが少ない行動を出す）。
   TIMELINE_EXPORT_VIDEO_FILE_MISSING:
-    "この動画で使っている動画のファイルが見つかりません。編集画面の知らせから「ファイルを選び直す」で入れ直すと、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります",
+    `この動画で使っている動画のファイルが見つかりません。編集画面の知らせから「${RELINK_ASSET_LABEL}」で入れ直すと、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります`,
 };
 
 /**
@@ -1108,7 +1113,7 @@ export function audioUnreadableMessage(kind: AudioSourceKind): string {
     ? "その読み上げを選んで「声を作る」でもう一度作ってください"
     : kind === AUDIO_SOURCE_KIND.bundled
       ? "その部品を選んで「音」の「鳴らす音」で選び直してください"
-      : "その素材の「ファイルを選び直す」から入れ直すか、その部品を消してください";
+      : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
   return `${head}${how}`;
 }
 
