@@ -38,14 +38,28 @@ export interface TsScan {
  *
  * ⚠️ **見分けないと、割り算から「正規表現が始まった」ことになる**＝次の `/` までが
  * 丸ごと消え、その間の文字列が門番の外へ落ちる（Rust の `'"'` と同じ型）。
- * ⚠️ **判定は「直前の実のある文字」**＝識別子・数字・`)`・`]` の後ろなら**割り算**、
- * それ以外（`(` `,` `=` `:` `[` `!` `&` `|` `?` `{` `}` `;` や行頭）なら正規表現。
+ * ⚠️ **JSX を知らないと、広げたつもりで狭まる**（#1174 レビュー由来 🔴）＝
+ * `<Icon … />` の `/` と `</p>` の `/` を正規表現の始まりと読むと、**タグの後ろの画面の文が
+ * 丸ごと落ちる**。実測で 43 件（うち 28 件は実在の画面ラベル）が消えていた。
+ * ⚠️ **判定は3つ**＝①次が `>` なら自己終了タグ ②直前の実のある文字が `<` なら閉じタグ
+ * ③識別子・数字・`)`・`]` の後ろなら**割り算**（`return`／`typeof`／`case`／`in`／`of` は除く）。
  */
-function 正規表現の始まり(code: string, at: number): boolean {
+function 正規表現の始まり(code: string, src: string, at: number): boolean {
+  if (src[at + 1] === ">") return false; // `<Icon … />`＝自己終了タグ
   let k = at - 1;
   while (k >= 0 && /\s/.test(code[k]!)) k -= 1;
   if (k < 0) return true;
   const c = code[k]!;
+  if (c === "<") return false; // `</p>`＝閉じタグ
+  // ⚠️ **`}` の後ろは割り算・JSX の本文**（#1174 レビュー由来）＝この repo に実在する
+  //（`場面 {i} / {n}`・`<span>{title.length}/{MAX}</span>`）。正規表現と読むと、
+  //   `</span>` の `/` までを丸ごと落として**タグの対応が狂う**。
+  // ⚠️ **取りこぼす形**＝`if (x) {} /re/.test(y)` のように**ブロックの直後の正規表現**。
+  //   この repo に 0 件で、あっても落とすのは正規表現の中身だけ（画面の文ではない）。
+  if (c === "}") return false;
+  // ⚠️ **日本語の直後は正規表現ではない**（#1174）＝JSX の本文（`見出し/本文`・`場面 1/3`）にだけ
+  //   現れる形。TS の文法では、日本語の直後に正規表現が来ることはない。
+  if (c.charCodeAt(0) > 0x7f) return false;
   if (/[A-Za-z0-9_$)\]]/.test(c)) {
     // `return /…/` `typeof /…/` のように**語の後ろでも正規表現**になる綴りがある。
     const word = /[A-Za-z_$][A-Za-z0-9_$]*$/.exec(code.slice(0, k + 1))?.[0];
@@ -136,6 +150,21 @@ export function scanTs(src: string): TsScan {
             blank(s0, j);
             continue;
           }
+          // ⚠️ **中でも外と同じ見分けをする**（#1174 レビュー由来 🟡）＝以前は `/` を素通しに
+          // していたので、`${s.replace(/['\"]/g, "")}` で**対応が反転**し、後ろの本物の文言まで
+          // 巻き添えにした（この道具がいちばん断ちたかった形が、中だけ残っていた）。
+          if (src.slice(j, j + 2) === "/*") {
+            const s1 = j;
+            j += 2;
+            while (j < src.length && src.slice(j, j + 2) !== "*/") j += 1;
+            j = Math.min(j + 2, src.length);
+            blank(s1, j);
+            continue;
+          }
+          if (d === "/" && 正規表現の始まり(code, src, j)) {
+            j = 正規表現を読む(j);
+            continue;
+          }
           keep(j, j + 1);
           j += 1;
         }
@@ -147,6 +176,43 @@ export function scanTs(src: string): TsScan {
       j += 1;
     }
     literals.push({ text: かけら, at: から, kind: "template" });
+    return j;
+  };
+
+  /**
+   * 正規表現のリテラルを1つ読む（`/` の位置から）。次の位置を返す。
+   *
+   * ⚠️ **中の `` ` `` や引用符で対応を飛ばさないよう、丸ごと落とす**。
+   * ⚠️ **閉じていなければ落とさない**（#1174 レビュー由来 🔴）＝割り算だったということなので、
+   * `/` を本文として写して読み直す。以前はここで**行末まで落として**いて、
+   * 「落としすぎない側へ倒す」と書いたコメントと**実装が逆**だった。
+   */
+  const 正規表現を読む = (open: number): number => {
+    let j = open + 1;
+    let かっこ = false;
+    let 閉じた = false;
+    while (j < src.length) {
+      const d = src[j]!;
+      if (d === "\\") {
+        j += 2;
+        continue;
+      }
+      if (d === "\n") break;
+      if (d === "[") かっこ = true;
+      else if (d === "]") かっこ = false;
+      else if (d === "/" && !かっこ) {
+        j += 1;
+        閉じた = true;
+        break;
+      }
+      j += 1;
+    }
+    if (!閉じた) {
+      keep(open, open + 1);
+      return open + 1;
+    }
+    while (j < src.length && /[a-z]/.test(src[j]!)) j += 1; // 末尾の g・i・m・s・u・y
+    blank(open, j);
     return j;
   };
 
@@ -190,28 +256,8 @@ export function scanTs(src: string): TsScan {
       i = テンプレートを読む(i);
       continue;
     }
-    if (c === "/" && 正規表現の始まり(code, i)) {
-      // 正規表現のリテラル＝中の `` ` `` や引用符で対応を飛ばさないよう、丸ごと落とす。
-      const start = i;
-      i += 1;
-      let かっこ = false;
-      while (i < src.length) {
-        const d = src[i]!;
-        if (d === "\\") {
-          i += 2;
-          continue;
-        }
-        if (d === "\n") break; // 閉じていない＝割り算だった。落としすぎない側へ倒す
-        if (d === "[") かっこ = true;
-        else if (d === "]") かっこ = false;
-        else if (d === "/" && !かっこ) {
-          i += 1;
-          break;
-        }
-        i += 1;
-      }
-      while (i < src.length && /[a-z]/.test(src[i]!)) i += 1; // 末尾の g・i・m・s・u・y
-      blank(start, i);
+    if (c === "/" && 正規表現の始まり(code, src, i)) {
+      i = 正規表現を読む(i);
       continue;
     }
     keep(i, i + 1);

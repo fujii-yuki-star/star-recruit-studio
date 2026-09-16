@@ -145,6 +145,11 @@ export function screenTextsIn(text: string): string[] {
   }
   // ② JSX のテキスト（タグとタグの間）。`{...}` の式は中身を見ない（識別子が混じるだけ）。
   // ⚠️ **`code` を見る**＝文字列の中身は空白になっているので、引用符の中の `>` `<` で切れない。
-  for (const m of code.matchAll(/>([^<>{}]+)</g)) add(m[1]!);
+  // ⚠️ **記録の除外はここにも掛ける**（#1174 レビュー由来 ℹ️）＝いまは `console.*` の中身が
+  // 空白になっているので日本語は残らないが、`devLogRanges` の射程を広げたときに**②だけ素通り**になる。
+  for (const m of code.matchAll(/>([^<>{}]+)</g)) {
+    if (記録.some(([from, to]) => m.index >= from && m.index < to)) continue;
+    add(m[1]!);
+  }
   return [...seen];
 }
