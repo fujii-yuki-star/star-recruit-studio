@@ -149,9 +149,15 @@ pub async fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
         .await
         // ⚠️ **投げない**＝この口は元から `Result` を返さない（読めなければ「道具が無い」と答える）。
         // 走らせ損ねたときも同じ答えにする＝呼ぶ側の分岐を増やさない。
-        .unwrap_or(H264Capability {
-            capability: "toolMissing".into(),
-            encoder: None,
+        // ⚠️ **痕跡は残す**（PR #1179 レビュー由来）＝双子（`probe_video`／小さな絵）は join の失敗を
+        // `export_failure` 経由で記録するのに、ここだけ握りつぶすと**起きたときに気づく手掛かりが無い**
+        //（この PR が埋めている「片方だけ直った」の別の形になる）。利用者向けの答えは変えない。
+        .unwrap_or_else(|e| {
+            crate::tlog!("h264_capability", "join: {e}");
+            H264Capability {
+                capability: "toolMissing".into(),
+                encoder: None,
+            }
         })
 }
 
