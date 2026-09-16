@@ -3,13 +3,35 @@
 // ⚠️ **技術用語を出さない**（§2-3）＝「フレーム」「抽出」は書かず「この瞬間を写真にする」と書く。
 // ⚠️ **見ながら選べる**＝時間を数字で入れさせず、動画を再生して止めたところを切り出す
 //（`#349` の「時刻指定はプレビュー付き」）。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import type { Asset } from "../../domain/project/types";
 import { CAPTURE_FRAME_ASSET_MISSING_MESSAGE, CAPTURE_FRAME_LABEL, IMPORT_BUSY_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
 
 export function CaptureFrameControls({ asset }: { asset: Asset }) {
-  const src = useProjectStore((s) => s.assetSrcById[asset.assetId]);
+  const projectId = useProjectStore((s) => s.meta.projectId);
+  /**
+   * **動画の本体**の URL（#1154）。
+   *
+   * ⚠️ **`assetSrcById` を使わない**＝場面形式のあの地図は、動画に**代表フレームの PNG**を入れる
+   * （絵として描く用・`projectStore` の読込と `applyEnrichment`）。PNG は `<video>` で再生できないので
+   * `currentTime` は **0 のまま**＝「止めたところ」を選んでも**常に先頭のコマ**が切り出されていた。
+   * `06 §4` は「止めた瞬間と同じ絵を出す」と書いており、正典の約束が実装されていなかった（ADR-0026①）。
+   * ⚠️ **解き方は同じ画面の作法に合わせる**＝`PreviewScreen` も実映像は
+   * `assetDisplayUrl(projectId, relPath)` でその場で解く（タイムライン形式は `videoSrcById` という
+   * 地図を持つが、こちらは**素材そのもの**から引けるので地図を増やさない＝古い URL が残る筋を作らない）。
+   * ⚠️ **URL を組むだけで本体は読まない**（`convertFileSrc`）＝ここで解いても大容量を抱えない。
+   */
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const url = projectId && asset.filePath ? await assetDisplayUrl(projectId, asset.filePath) : null;
+      if (!cancelled) setSrc(url);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, asset.filePath]);
   const captureVideoFrame = useProjectStore((s) => s.captureVideoFrame);
   const isImporting = useProjectStore((s) => s.isImporting);
   // ⚠️ **ファイルが見つからない動画では押せなくする**（#1168 レビュー 🟡）＝`store` 側にも同じ門が
