@@ -19,6 +19,15 @@ export interface ContextMenuItem {
   /** いまはできない操作（押せなくする）。**理由を必ず添える**＝押せないのに理由が無い、を作らない（§2-5）。 */
   disabled?: boolean;
   disabledHint?: string;
+  /**
+   * **押した結果の予告**（#1167）。押せるときに `title` へ出す。
+   *
+   * ⚠️ **`disabledHint` と混ぜない**＝あちらは「**押せない理由**」、こちらは「押したら何が起きるか」。
+   * 1つにすると、押せるのに「〜すると使えます」と読める文が出る（逆のことを言う）。
+   * ⚠️ **これが無かったので、右クリックだけ知らせが届いていなかった**＝渡しても
+   * どこにも出ない**死んだ受け渡し**になり、**型でも気づけなかった**（余剰プロパティはスプレッドを通る）。
+   */
+  hint?: string;
   onSelect: () => void;
 }
 
@@ -115,7 +124,8 @@ export function ContextMenu({
               color: it.danger ? "var(--color-danger)" : undefined,
             }}
             disabled={it.disabled}
-            title={it.disabled ? it.disabledHint : undefined}
+            // 押せないときは理由、押せるときは結果の予告（#1167）。
+            title={it.disabled ? it.disabledHint : it.hint}
             onClick={() => {
               it.onSelect();
               onClose();

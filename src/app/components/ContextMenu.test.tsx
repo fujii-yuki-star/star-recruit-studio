@@ -54,4 +54,41 @@ describe("ContextMenu: いまはできない操作（/canon-check の指摘）",
     expect(item).toBeDisabled();
     expect(item).toHaveAttribute("title", "この列は固定されています。消すには固定を外してください");
   });
+
+  // ⚠️ **押せるときは「押したら何が起きるか」を出す**（#1167）＝以前は `disabledHint`（押せない理由）
+  //    しか描かなかったので、渡しても**どこにも出ない死んだ受け渡し**になっていた。
+  //    ⚠️ **型でも気づけなかった**（スプレッドの余剰プロパティは通る）ので、ここで留める。
+  it("押せるときは、押した結果の予告を添える", () => {
+    render(
+      <ContextMenu
+        x={10}
+        y={10}
+        items={[{ label: "この瞬間で絵を止める", hint: "再生位置から先を、その瞬間の絵で止めます", onSelect: vi.fn() }]}
+        onClose={vi.fn()}
+      />,
+    );
+    const item = screen.getByRole("menuitem", { name: "この瞬間で絵を止める" });
+    expect(item).toBeEnabled();
+    expect(item, "押せるのに予告が出ていない").toHaveAttribute("title", "再生位置から先を、その瞬間の絵で止めます");
+  });
+
+  // ⚠️ **2つを混ぜない**＝押せないときに「押したら〜します」と出ると、逆のことを言う。
+  it("押せないときは、予告ではなく理由を出す", () => {
+    render(
+      <ContextMenu
+        x={10}
+        y={10}
+        items={[{
+          label: "この瞬間で絵を止める",
+          disabled: true,
+          disabledHint: "1つだけ選ぶと使えます",
+          hint: "再生位置から先を、その瞬間の絵で止めます",
+          onSelect: vi.fn(),
+        }]}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("menuitem", { name: "この瞬間で絵を止める" }))
+      .toHaveAttribute("title", "1つだけ選ぶと使えます");
+  });
 });
