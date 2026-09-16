@@ -141,8 +141,21 @@ pub struct H264Capability {
 /// 書き出し前に H.264 エンコード能力を検知する（#120・ADR-0013）。
 /// `ffmpeg -encoders` を読み、標準方式（h264_mf）/予備/不可 を判定。ffmpeg 不在は "toolMissing"。
 /// UI（公開前チェック）が「次の行動」を事前提示するために使う（書き出し本体は export_video 内で再判定）。
+/// ⚠️ **ここも `spawn_blocking`**（#1173 の射程）＝公開前チェックを開いた瞬間に FFmpeg を
+/// 起こすので、同期のままだと**その間だけ画面が固まる**。
 #[tauri::command]
-pub fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
+pub async fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
+    tauri::async_runtime::spawn_blocking(move || detect_h264_capability_impl(app))
+        .await
+        // ⚠️ **投げない**＝この口は元から `Result` を返さない（読めなければ「道具が無い」と答える）。
+        // 走らせ損ねたときも同じ答えにする＝呼ぶ側の分岐を増やさない。
+        .unwrap_or(H264Capability {
+            capability: "toolMissing".into(),
+            encoder: None,
+        })
+}
+
+fn detect_h264_capability_impl(app: tauri::AppHandle) -> H264Capability {
     let ffmpeg = resolve_ffmpeg(&app);
     match run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]) {
         Ok(encoders) => H264Capability {
@@ -1580,8 +1593,26 @@ fn parse_resolution(stderr: &str) -> (Option<u32>, Option<u32>) {
 /// 動画素材のメタ情報（長さ・音声有無・解像度）を `ffmpeg -i` で取得する。
 /// 注: Err はフロント（assetFs.probeVideo）で catch → null される best-effort 取得＝
 /// ここで返すユーザー向け文言は画面に出ない（取得できなくても素材は保持される）。技術詳細は eprintln に残る。
+/// ⚠️ **こちらも `spawn_blocking` に載せる**（#1173 の射程＝**双子の片方だけ直さない**）＝
+/// 小さな絵と**同じ取り込みの中で続けて呼ばれる**（`probeAndThumbVideo`）ので、片方だけ
+/// 載せてもメインスレッドは塞がったまま。ここも FFmpeg を起こす（`ffmpeg -i`）。
 #[tauri::command]
-pub fn probe_video(
+pub async fn probe_video(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<VideoMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || probe_video_impl(app, project_id, rel_path))
+        .await
+        .map_err(|e| {
+            export_failure(
+                format!("probe join: {e}"),
+                "動画の情報を読めませんでした。もう一度お試しください。",
+            )
+        })?
+}
+
+fn probe_video_impl(
     app: tauri::AppHandle,
     project_id: String,
     rel_path: String,
@@ -1616,8 +1647,29 @@ fn thumbnail_rel_path(rel_path: &str) -> String {
 /// 動画の代表フレーム（先頭フレーム）を PNG で書き出し、その相対パスを返す（確認画面/一覧サムネ用）。
 /// 注: Err はフロント（assetFs.extractVideoThumbnail）で catch → null される best-effort 取得＝
 /// ここで返すユーザー向け文言は画面に出ない（サムネが無くてもアイコン表示にフォールバックする）。
+/// ⚠️ **双子と同じく `spawn_blocking` に載せる**（#1173・#375）＝ここだけ同期のままで、
+/// FFmpeg が終わるまで**メインスレッドを塞いで**いた。小さな絵は**取り込みのついで**に作られる
+/// ので（`assetImport.ts`）、利用者からは「取り込みが少し長い」にしか見えず気づきにくかった。
+/// 手本は `extract_video_frame`（切り出し）・`video_filmstrip`（帯）。
 #[tauri::command]
-pub fn extract_video_thumbnail(
+pub async fn extract_video_thumbnail(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_thumbnail_impl(app, project_id, rel_path)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("thumbnail join: {e}"),
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
+        )
+    })?
+}
+
+fn extract_video_thumbnail_impl(
     app: tauri::AppHandle,
     project_id: String,
     rel_path: String,
@@ -7433,7 +7485,9 @@ mod staged_output_tests {
         const SRC: &str = include_str!("ffmpeg.rs");
         let body = super::source_range::コメントを落とす(&super::source_range::範囲(
             SRC,
-            "pub fn extract_video_thumbnail(",
+            // ⚠️ **本体は `_impl` へ移った**（#1173＝双子と同じく `spawn_blocking` に載せた）。
+            // 包む側（`pub async fn`）には判定が無いので、目印を本体へ移す。
+            "fn extract_video_thumbnail_impl(",
             // ⚠️ **次の関数の説明文まで見ない**（#1140 レビュー由来 ℹ️）＝`範囲` は end の手前までなので、
             // `pub async fn` を終わりにすると**その上の doc コメント**が範囲に入り、そこに綴りを
             // 書いただけで落ちる（検査対象ですらない所で赤くなる）。
@@ -7482,6 +7536,52 @@ mod staged_output_tests {
         assert!(
             !body.contains("out.exists()"),
             "帯：門が「あるか」で見ている＝0 バイトの残骸を永久に「あり」と読む"
+        );
+    }
+
+    /// **FFmpeg を起こす口は、全部 `spawn_blocking` に載っている**（#1173・#375）。
+    ///
+    /// ⚠️ **1本ずつ直しても、また外れる**＝小さな絵だけが外れていたのは「双子を見ていない」から。
+    /// 決めた規則（メインスレッドを塞がない）を**機械に持たせる**＝新しい口を足したときに、
+    /// 載せ忘れるとここが赤くなる。
+    /// ⚠️ **見分けは「FFmpeg を起こすか」**（`resolve_ffmpeg`）＝口の名前では決めない。
+    #[test]
+    fn ffmpeg_を起こす口は塞がない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        // ⚠️ **検査自身を数えない**＝この検査の中にも `#[tauri::command]` と `resolve_ffmpeg(`
+        //   という**文字列**があるので、ファイル全体を割ると自分を違反として拾う（実際に拾った）。
+        let 本番 = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
+        let 本文 = super::source_range::コメントを落とす(本番);
+        let mut 見た = 0;
+        let mut 塞ぐ: Vec<String> = Vec::new();
+        for 断片 in 本文.split("#[tauri::command]").skip(1) {
+            // その口の本体＝次の `pub fn`／`pub async fn` の頭から、次の口まで。
+            let 頭 = 断片.lines().take(3).collect::<Vec<_>>().join(" ");
+            let 名 = 頭
+                .split("fn ")
+                .nth(1)
+                .and_then(|t| t.split('(').next())
+                .unwrap_or("?")
+                .trim()
+                .to_string();
+            if !断片.contains("resolve_ffmpeg(") {
+                continue; // FFmpeg を起こさない口（状態を読むだけ等）は対象外
+            }
+            見た += 1;
+            let 包んでいる = 頭.contains("pub async fn") && 断片.contains("spawn_blocking");
+            if !包んでいる {
+                塞ぐ.push(名);
+            }
+        }
+        // ⚠️ **見た数も留める**＝走査が壊れて 0 件になっても「違反なし」で緑になる
+        //（`guards-blind-not-red` の型）。
+        assert!(
+            見た >= 5,
+            "FFmpeg を起こす口を拾えていない（走査が壊れている）：{見た} 件"
+        );
+        assert!(
+            塞ぐ.is_empty(),
+            "メインスレッドを塞ぐ口が残っている（`spawn_blocking` に載せる）：{塞ぐ:?}"
         );
     }
 
