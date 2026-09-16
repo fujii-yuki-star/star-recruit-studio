@@ -6936,6 +6936,11 @@ mod source_range {
     /// **コードの綴りをそのまま引用する**（例＝「下の `out.exists()` が…」）ので、
     /// 落とさずに数えると**コードは正しいまま説明文だけで赤くなる**。
     /// ⚠️ **落とすのは説明だけ**＝並び（どちらが先か）は変わらないので、順序を見る検査にも安全。
+    /// ⚠️ **厳密には「説明だけ」ではない**（#1171 レビュー由来 ℹ️）＝**文字列リテラルの中の
+    /// `//`・`/*` も説明として落とす**（`"http://…"` を本体に書くと、その行の残りを食う）。
+    /// いま走査している2つの本体には**1件も無いことを確かめてある**（あれば `Ok(` の数が動いて赤くなる）。
+    /// ⚠️ **閉じない `/*` に当たると、以降を丸ごと捨てる**（縮む方向）＝黙って緑にはならない
+    ///（本体の目印が見つからず `panic` するか、`Ok(` の数が 1→0 になって落ちる）。
     pub fn コメントを落とす(src: &str) -> String {
         let mut out = String::with_capacity(src.len());
         let mut 残り = src;
@@ -7288,7 +7293,7 @@ mod staged_output_tests {
     fn 走査が膨れていない(body: &str, 上限: usize, 誰: &str) {
         assert!(
             body.len() < 上限,
-            "{誰}：走査が膨れている（{} 字）＝終わりの目印が動いた可能性",
+            "{誰}：走査が膨れている（{} バイト）＝終わりの目印が動いた可能性",
             body.len()
         );
     }
@@ -7311,7 +7316,7 @@ mod staged_output_tests {
         assert_eq!(
             body.matches("Ok(").count(),
             1,
-            "{誰}：成功を返す場所が増えた（最後の1つだけのはず）。             `if let Ok(`／`match` の腕もここに数えます＝成功返しを増やしていないなら、網の方を直してください"
+            "{誰}：成功を返す場所が増えた（最後の1つだけのはず）。`if let Ok(`／`match` の腕もここに数えます＝成功返しを増やしていないなら、網の方を直してください"
         );
     }
 
@@ -7352,56 +7357,71 @@ mod staged_output_tests {
     /// `clear_stale_frame` も `produced_frame` も**単独の検査は緑のまま**通る。
     /// 切り出しの本体は ffmpeg を起動するので検査から叩けないため、**ソースを読んで**
     /// ①残骸を片づけてから ffmpeg を起こす ②「あるか」ではなく「出来たか」で見る、を留める。
+    /// **残骸を成功と読まない**を、本体の中に留める（#1137・#1140）。
+    ///
+    /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、`clear_stale_frame` も
+    /// `produced_frame` も**単独の検査は緑のまま**通る。本体は ffmpeg を起動するので検査から
+    /// 叩けないため、**ソースを読んで**留める。
+    /// ⚠️ **網を1つにする**（#1171 レビュー由来 ℹ️）＝以前は2つの検査に書き写していたので、
+    /// 片方にしか無い網が**両方向に**できていた（`!out.exists()` は切り出しだけ／`ran < judge` は
+    /// 小さな絵だけ）。「片方だけ直す」を避けると書きながら、検査の側で同じことをしていた。
+    fn 残骸を成功と読まない(body: &str, 誰: &str) {
+        let clear = body
+            .find("clear_stale_frame(&out)?")
+            .unwrap_or_else(|| panic!("{誰}：残骸を片づけていない"));
+        let spawn = body
+            .find("let ffmpeg = resolve_ffmpeg(")
+            .unwrap_or_else(|| panic!("{誰}：ffmpeg を起こす行が無い"));
+        assert!(clear < spawn, "{誰}：片づける前に ffmpeg を起こしている");
+        let ran = body
+            .find("run(&ffmpeg, &args)")
+            .unwrap_or_else(|| panic!("{誰}：ffmpeg を走らせる行が無い"));
+        let judge = body.find("if !produced_frame(&out)").unwrap_or_else(|| {
+            panic!("{誰}：「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている")
+        });
+        assert!(ran < judge, "{誰}：走らせる前に出来たかを見ている");
+        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの絵を
+        // 利用者のフォルダへ置き去りにしない。**判定より後ろ**に無ければ意味がない。
+        let sweep = body
+            .find("let _ = fs::remove_file(&out);")
+            .unwrap_or_else(|| panic!("{誰}：断ったのに 0 バイトの絵を置き去りにしている"));
+        assert!(
+            judge < sweep,
+            "{誰}：片づけが判定より前にある（出口の後始末になっていない）"
+        );
+        // ⚠️ **判定を「あるか」へ戻す変異を名指しで捕まえる**＝下の構造の網と役目は重なるが、
+        // こちらは #1137 の形そのものを止める。
+        assert!(
+            !body.contains("!out.exists()"),
+            "{誰}：「あるか」で成功を判定している＝前回の絵を成功と読む"
+        );
+        早抜けの成功返しが無い(body, 誰);
+    }
+
+    /// 切り出し（`extract_video_frame_impl`）の本体を読む（#1137）。
     #[test]
-    fn 切り出しの本体が二つを通っている() {
+    fn 切り出しの本体が残骸を成功と読まない() {
         const SRC: &str = include_str!("ffmpeg.rs");
         // ⚠️ **終わりは本体の直後まで詰める**（#1171 レビュー由来 ℹ️）＝`fn frame_seek_args` までだと
         // 隣の `struct FrameSeek`・`is_safe_frame_file_name` が範囲に入り、**数を固定する網**が
-        // 対象外の場所で赤くなる（小さな絵の側で直したのと同じ型を、双子に残していた）。
+        // 対象外の場所で赤くなる。
         let body = super::source_range::コメントを落とす(&super::source_range::範囲(
             SRC,
             "fn extract_video_frame_impl(",
             "/// 頭出しの引数",
         ));
-        走査が膨れていない(&body, 2800, "切り出し");
-        let clear = body
-            .find("clear_stale_frame(&out)?")
-            .expect("残骸を片づけていない");
-        let spawn = body
-            .find("let ffmpeg = resolve_ffmpeg(")
-            .expect("ffmpeg を起こす行が無い");
-        assert!(clear < spawn, "片づける前に ffmpeg を起こしている");
-        assert!(
-            body.contains("if !produced_frame(&out)"),
-            "「出来たか」で見ていない"
-        );
-        assert!(
-            !body.contains("!out.exists()"),
-            "「あるか」で成功を判定している＝前回の絵を成功と読む"
-        );
-        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの写真を
-        // 利用者のフォルダへ置き去りにしない。**判定より後ろ**に無ければ意味がない。
-        let judge = body
-            .find("if !produced_frame(&out)")
-            .expect("「出来たか」で見ていない");
-        let sweep = body
-            .find("let _ = fs::remove_file(&out);")
-            .expect("断ったのに 0 バイトの写真を置き去りにしている");
-        assert!(
-            judge < sweep,
-            "片づけが判定より前にある（出口の後始末になっていない）"
-        );
-        早抜けの成功返しが無い(&body, "切り出し");
+        走査が膨れていない(&body, 3500, "切り出し");
+        残骸を成功と読まない(&body, "切り出し");
     }
 
-    /// **小さな絵も同じ二つを通っている**（#1140）。
+    /// 小さな絵（`extract_video_thumbnail`）の本体を読む（#1140）。
     ///
-    /// ⚠️ **#1137 で片方だけ直していた**＝規則は同じ（残骸を成功と読まない）なのに、
-    /// 隣に並んだ `extract_video_thumbnail` は素通りのままだった＝**双子の片方だけ直す**型。
+    /// ⚠️ **#1137 で片方だけ直していた**＝規則は同じなのに、隣に並んだこちらは素通りのままだった
+    /// ＝**双子の片方だけ直す**型。
     /// ⚠️ **小さな絵の名前は元の動画の名前から作る**（`thumbnail_rel_path`）ので、
     /// 素材番号が再発行された回には**前の動画の小さな絵**がディスクに残っている。
     #[test]
-    fn 小さな絵の本体が二つを通っている() {
+    fn 小さな絵の本体が残骸を成功と読まない() {
         const SRC: &str = include_str!("ffmpeg.rs");
         let body = super::source_range::コメントを落とす(&super::source_range::範囲(
             SRC,
@@ -7411,34 +7431,8 @@ mod staged_output_tests {
             // 書いただけで落ちる（検査対象ですらない所で赤くなる）。
             "/// 動画の**その瞬間**を静止画",
         ));
-        走査が膨れていない(&body, 2200, "小さな絵");
-        let clear = body
-            .find("clear_stale_frame(&out)?")
-            .expect("残骸を片づけていない");
-        let spawn = body
-            .find("let ffmpeg = resolve_ffmpeg(")
-            .expect("ffmpeg を起こす行が無い");
-        assert!(clear < spawn, "片づける前に ffmpeg を起こしている");
-        let judge = body
-            .find("if !produced_frame(&out)")
-            .expect("「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている");
-        let ran = body
-            .find("run(&ffmpeg, &args)")
-            .expect("ffmpeg を走らせる行が無い");
-        assert!(ran < judge, "走らせる前に出来たかを見ている");
-        let sweep = body
-            .find("let _ = fs::remove_file(&out);")
-            .expect("断ったのに 0 バイトの絵を置き去りにしている");
-        assert!(
-            judge < sweep,
-            "片づけが判定より前にある（出口の後始末になっていない）"
-        );
-        // ⚠️ **否定の一手も持つ**（#1140 レビュー由来）＝順序だけを見ていると、先頭に
-        // 「**あるなら作らない**」の早抜けを足す変異を捕まえられない（clear→run→judge→sweep の順は
-        // 保たれたまま、**前の動画の絵をそのまま返す**＝#1140 の再発そのもの）。
-        // ⚠️ **双子にも同じ網を掛けた**（上の `切り出しの本体が二つを通っている`）＝
-        // 「揃える」と書いて片方しか直さない、を繰り返さない。
-        早抜けの成功返しが無い(&body, "小さな絵");
+        走査が膨れていない(&body, 3000, "小さな絵");
+        残骸を成功と読まない(&body, "小さな絵");
     }
 
     #[test]
