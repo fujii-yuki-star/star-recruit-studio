@@ -1,8 +1,8 @@
 # ADR-0041: 外に持ち込む AI に、ソフトそのものを動かさせる（同梱 AI とは別枠）
 
-- 状態: Proposed
-- 日付: 2026-09-16
-- 関連: [ADR-0032](0032-timeline-project-format.md)（場面形式の凍結・タイムライン形式の新設）・[ADR-0007](0007-simple-detailed-ui.md)・[ADR-0001](0001-preview-export-parity.md)・[#1184](https://github.com/fujii-yuki-star/star-recruit-studio/issues/1184)
+- **状態**: Proposed
+- **日付**: 2026-09-16
+- **関連**: [ADR-0032](0032-timeline-project-format.md)（場面形式の凍結・タイムライン形式の新設）・[ADR-0007](0007-detailed-edit-mode.md)・[ADR-0001](0001-rendering-parity.md)・[#1184](https://github.com/fujii-yuki-star/star-recruit-studio/issues/1184)
 
 ## 背景
 
