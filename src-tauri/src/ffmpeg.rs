@@ -6930,9 +6930,80 @@ mod source_range {
         rest[..to].to_string()
     }
 
+    /// 説明（コメント）を落とす。
+    ///
+    /// ⚠️ **数を固定する網には要る**（#1171 レビュー由来 ℹ️）＝この repo の説明文は
+    /// **コードの綴りをそのまま引用する**（例＝「下の `out.exists()` が…」）ので、
+    /// 落とさずに数えると**コードは正しいまま説明文だけで赤くなる**。
+    /// ⚠️ **落とすのは説明だけ**＝並び（どちらが先か）は変わらないので、順序を見る検査にも安全。
+    pub fn コメントを落とす(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut 残り = src;
+        loop {
+            let 塊 = 残り.find("/*");
+            let 行 = 残り.find("//");
+            match (塊, 行) {
+                (None, None) => {
+                    out.push_str(残り);
+                    return out;
+                }
+                _ => {
+                    let (at, 終わり, 印) = match (塊, 行) {
+                        (Some(b), Some(l)) if b < l => (b, "*/", true),
+                        (Some(b), None) => (b, "*/", true),
+                        (_, Some(l)) => (
+                            l, "
+", false,
+                        ),
+                        (None, None) => unreachable!(),
+                    };
+                    out.push_str(&残り[..at]);
+                    out.push(' ');
+                    let 後 = &残り[at..];
+                    match 後.find(終わり) {
+                        Some(e) => {
+                            // 行コメントは改行そのものを残す（並びが潰れない）
+                            残り = if 印 {
+                                &後[e + 終わり.len()..]
+                            } else {
+                                &後[e..]
+                            };
+                        }
+                        None => return out,
+                    }
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::範囲;
+
+        /// ⚠️ **説明の中の綴りは数えない**（#1171 レビュー由来 ℹ️）＝この repo の説明文は
+        /// コードの綴りをそのまま引用するので、落とさないと**コードは正しいまま赤**になる。
+        #[test]
+        fn 説明を落とす() {
+            use super::コメントを落とす;
+            assert!(!コメントを落とす(
+                "let a = 1; // ここに Ok( と書く
+let b = 2;"
+            )
+            .contains("Ok("));
+            assert!(!コメントを落とす("/* Ok( */ let a = 1;").contains("Ok("));
+            // ⚠️ **中身は残す**＝落としすぎると、検査が何も見なくなる
+            assert!(コメントを落とす(
+                "// 説明
+return Ok(1);"
+            )
+            .contains("return Ok("));
+            // ⚠️ **並びは変えない**＝順序を見る検査（どちらが先か）にも使う
+            let 落ちた = コメントを落とす(
+                "first(); // 説明
+second();",
+            );
+            assert!(落ちた.find("first()") < 落ちた.find("second()"));
+        }
 
         #[test]
         fn 始まりと終わりの間だけを返す() {
@@ -7209,6 +7280,19 @@ mod staged_output_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// **走査が膨れていない**ことを実数で留める（#1171 レビュー由来 ℹ️）。
+    ///
+    /// ⚠️ **終わりの目印は検査自身にも書いてある**＝説明文を言い換えると `範囲` の終わりが
+    /// **検査の中の文字列**に当たり、範囲がファイルの末尾近くまで膨れる。`範囲` の「見つからなければ
+    /// 落ちる」はその形を止められない（見つかってしまうので）。**大きさで気づく**。
+    fn 走査が膨れていない(body: &str, 上限: usize, 誰: &str) {
+        assert!(
+            body.len() < 上限,
+            "{誰}：走査が膨れている（{} 字）＝終わりの目印が動いた可能性",
+            body.len()
+        );
+    }
+
     /// **早抜けの成功返しが無い**ことを留める（#1140 レビュー由来 🟡）。
     ///
     /// ⚠️ **綴りで禁じると、逃げ道がいくらでもある**＝`out.is_file()` を禁じても
@@ -7227,7 +7311,7 @@ mod staged_output_tests {
         assert_eq!(
             body.matches("Ok(").count(),
             1,
-            "{誰}：成功を返す場所が増えた（最後の1つだけのはず）"
+            "{誰}：成功を返す場所が増えた（最後の1つだけのはず）。             `if let Ok(`／`match` の腕もここに数えます＝成功返しを増やしていないなら、網の方を直してください"
         );
     }
 
@@ -7271,8 +7355,15 @@ mod staged_output_tests {
     #[test]
     fn 切り出しの本体が二つを通っている() {
         const SRC: &str = include_str!("ffmpeg.rs");
-        let body =
-            super::source_range::範囲(SRC, "fn extract_video_frame_impl(", "fn frame_seek_args");
+        // ⚠️ **終わりは本体の直後まで詰める**（#1171 レビュー由来 ℹ️）＝`fn frame_seek_args` までだと
+        // 隣の `struct FrameSeek`・`is_safe_frame_file_name` が範囲に入り、**数を固定する網**が
+        // 対象外の場所で赤くなる（小さな絵の側で直したのと同じ型を、双子に残していた）。
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+            SRC,
+            "fn extract_video_frame_impl(",
+            "/// 頭出しの引数",
+        ));
+        走査が膨れていない(&body, 2800, "切り出し");
         let clear = body
             .find("clear_stale_frame(&out)?")
             .expect("残骸を片づけていない");
@@ -7312,14 +7403,15 @@ mod staged_output_tests {
     #[test]
     fn 小さな絵の本体が二つを通っている() {
         const SRC: &str = include_str!("ffmpeg.rs");
-        let body = super::source_range::範囲(
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
             SRC,
             "pub fn extract_video_thumbnail(",
             // ⚠️ **次の関数の説明文まで見ない**（#1140 レビュー由来 ℹ️）＝`範囲` は end の手前までなので、
             // `pub async fn` を終わりにすると**その上の doc コメント**が範囲に入り、そこに綴りを
             // 書いただけで落ちる（検査対象ですらない所で赤くなる）。
             "/// 動画の**その瞬間**を静止画",
-        );
+        ));
+        走査が膨れていない(&body, 2200, "小さな絵");
         let clear = body
             .find("clear_stale_frame(&out)?")
             .expect("残骸を片づけていない");
