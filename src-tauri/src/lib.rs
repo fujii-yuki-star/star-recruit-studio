@@ -871,12 +871,57 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
     // 設定は `projects/**` と `user_assets/*` で**広さが違う**ので、両方 `true` にすると
     // **設定より広く許す**ことになる（`user_assets` は直下しか使わない設計＝#942）。
     for (dir, recursive) in [(projects_dir(app), true), (user_assets_dir(app), false)] {
-        let Ok(dir) = dir else { continue };
+        let dir = match dir {
+            Ok(d) => d,
+            Err(e) => {
+                crate::tlog!("asset_scope", "置き場を決められない: {e}");
+                continue;
+            }
+        };
         // ⚠️ **作るだけでは足りない**＝設定に書いた許可は**起動の組み立て時**に一度だけ広げられるので、
         // そのときフォルダが無いと、あとから作っても許可は増えない（開き直すまで 403）。
         // 実行時に許可を足す口（`allow_directory`）を通す。
-        let _ = fs::create_dir_all(&dir);
-        let _ = scope.allow_directory(&dir, recursive);
+        // ⚠️ **結果を捨てない**（#1182）＝以前は `let _ =` で握りつぶしており、**許可が足せていなくても
+        // 誰も気づけなかった**（写真が1枚も出ないのに知らせも出ない＝§2-5 の行き止まり）。
+        if let Err(e) = fs::create_dir_all(&dir) {
+            crate::tlog!("asset_scope", "置き場を作れない {:?}: {e}", dir);
+        }
+        if let Err(e) = scope.allow_directory(&dir, recursive) {
+            crate::tlog!("asset_scope", "許可を足せない {:?}: {e}", dir);
+        }
+    }
+    // ⚠️ **足したあとに、実際に通るかまで見る**（#1182）＝許可を「足した」ことと「効いている」ことは別。
+    // 判定は Tauri が要求の道を**正規化してから**照合するので、足した綴りのままでは当たらないことがある
+    //（実際に踏んだ＝**別の入れ物（MSIX）の中から起動すると `AppData\Roaming` が振り替えられ**、
+    // 正規化後の道が許可の綴りと別物になって**写真が1枚も出なかった**）。
+    // ⚠️ **通らないときだけ残す**＝毎回の記録は雑音になる。通らないときは**正規化後の道**も出す
+    //（振り替えが起きているかは、それを見ないと分からない）。
+    if let Ok(dir) = projects_dir(app) {
+        // ⚠️ **足したあとに、実際に通るかまで見る**（#945 の型）＝
+        // 許可を「足した」ことと「効いている」ことは別。通らなければ**写真が1枚も出ない**のに
+        // 画面には何も出ない（読み込み失敗はその絵を落とすだけ）ので、**記録に残す**。
+        // ⚠️ **通らないときだけ残す**＝毎回の記録は雑音になる。
+        // ⚠️ **これで拾えない壊れ方もある**＝別の入れ物（MSIX）の中から起動されると
+        // `AppData\Roaming` が振り替わるが、**置き場自身は振り替わらず下のファイルだけが振り替わる**
+        // ため、この見張りは真を返す（#1182 で実測）。それは**起動のさせ方の問題**なので
+        // ここでは見ず、確かめ方の側（`audits/` の実機手順）に書いてある。
+        if !scope.is_allowed(&dir) {
+            let canon = std::fs::canonicalize(&dir)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_else(|e| format!("(正規化できない: {e})"));
+            let patterns: Vec<String> = scope
+                .allowed_patterns()
+                .iter()
+                .map(|p| p.as_str().to_string())
+                .collect();
+            crate::tlog!(
+                "asset_scope",
+                "素材の置き場が許可に当たらない＝写真が出ません。道={:?} 正規化後={} 許可の綴り={:?}",
+                dir,
+                canon,
+                patterns
+            );
+        }
     }
 }
 
