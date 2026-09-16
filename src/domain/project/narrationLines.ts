@@ -158,6 +158,21 @@ export function lineVoiceUsable(line: { status?: string }): boolean {
 }
 
 /**
+ * その場面の（行の）声を**使ってよいか**（#1165）。掛け合いも単一 narration も**同じ答え**を出す。
+ *
+ * ⚠️ **単一 narration を素通りさせない**（PR #1178 レビュー 🔴）＝行を持たない場面は `lineId` 無しで
+ * 引かれるので、`scene.lines` だけを見ると**この場面が判定の外**へ落ちる。単一 narration の本文を
+ * 直したときも `narration.status` は `none` へ戻り、**旧 WAV は同じ鍵に残る**ので、掛け合いと
+ * **まったく同じ構造の不具合**になる（ADR-0026②＝掛け合いの有無で同じ概念を割らない）。
+ * `sceneLines` が両者を**実効1行**へそろえるので、それを通して1つの判定にする。
+ */
+export function sceneLineVoiceUsable(scene: Scene, lineId?: string): boolean {
+  const lines = sceneLines(scene);
+  const line = lineId ? lines.find((l) => l.lineId === lineId) : lines[0];
+  return line == null || lineVoiceUsable(line); // 知らない行は弾かない（呼び出し規約の外）
+}
+
+/**
  * 掛け合いの各行の音声長（lineId→秒）を、メモリ上の音声（narrationAudioById）から求める（#392・タイムライン表示）。
  * compileTimeline の lineDurationsFor に渡すと、自動逐次（startSec 未指定）の掛け合いが各行の実音声長で区間表示される
  * （未指定だと cursor が進まず最終行だけ全幅になる）。単一 narration（明示 lines 無し）は実効1行＝常に全幅ゆえ空でよい。

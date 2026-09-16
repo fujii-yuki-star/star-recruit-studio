@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, lineVoiceUsable, liveNarrationAudioKeys, normalizeDialogueTiming, sceneLines,
+  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, lineVoiceUsable, liveNarrationAudioKeys, sceneLineVoiceUsable, normalizeDialogueTiming, sceneLines,
   sceneNeedsVoice, validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
@@ -208,13 +208,41 @@ describe('行ごと音声の補助（PR-C2）', () => {
     });
   });
 
+  // ⚠️ **掛け合いの有無で割らない**（PR #1178 レビュー 🔴・ADR-0026②）＝行を持たない場面は
+  //    `lineId` 無しで引かれるので、`scene.lines` だけを見ると**素通り**する。
+  describe('sceneLineVoiceUsable（掛け合いも単一 narration も同じ答え・#1165）', () => {
+    const 掛け合い = (status: string) => sceneWith({
+      sceneId: 'scene_001',
+      lines: [{ lineId: 'line_001', text: 'あ', status } as NarrationLine],
+    });
+    const 単一 = (status: string) => sceneWith({ sceneId: 'scene_001', narration: { text: 'あ', status } as Narration });
+
+    it('掛け合い：作り直していない行は使わない', () => {
+      expect(sceneLineVoiceUsable(掛け合い(NARRATION_STATUS.none), 'line_001')).toBe(false);
+      expect(sceneLineVoiceUsable(掛け合い(NARRATION_STATUS.generated), 'line_001')).toBe(true);
+    });
+
+    // ⚠️ **ここが素通りしていた**＝`lineId` を渡さない呼び方（行を持たない場面）。
+    it('単一 narration：作り直していない場面も使わない（行を持たなくても同じ）', () => {
+      expect(sceneLineVoiceUsable(単一(NARRATION_STATUS.none)), '行を持たない場面が素通りしている').toBe(false);
+      expect(sceneLineVoiceUsable(単一(NARRATION_STATUS.generated))).toBe(true);
+    });
+
+    it('知らない行は弾かない（呼び出し規約の外を勝手に落とさない）', () => {
+      expect(sceneLineVoiceUsable(掛け合い(NARRATION_STATUS.none), 'line_999')).toBe(true);
+    });
+  });
+
   // ⚠️ **規則は1か所**（§6）＝プレビューと書き出しの両方が同じ関数を見ていることを、
   //    **呼び出し側の数**で留める（片方だけ書き戻す変異を止める）。
   it('その規則を、プレビューと書き出しの両方が見ている', () => {
     const 参照 = (p: string, 名: string): number =>
       readFileSync(p, 'utf8').split(名).length - 1;
     expect(参照('src/domain/project/narrationLines.ts', 'lineVoiceUsable('), 'プレビュー側が見ていない').toBeGreaterThanOrEqual(2);
-    expect(参照('src/app/screens/ExportScreen.tsx', 'lineVoiceUsable('), '書き出し側が見ていない').toBeGreaterThanOrEqual(1);
+    // ⚠️ **書き出しは行のそろえ方ごと domain を通す**＝画面側で `scene.lines` を見分け直すと、
+    //    行を持たない場面がまた素通りする（PR #1178 レビュー 🔴）。
+    expect(参照('src/app/screens/ExportScreen.tsx', 'sceneLineVoiceUsable('), '書き出し側が見ていない').toBeGreaterThanOrEqual(1);
+    expect(参照('src/app/screens/ExportScreen.tsx', 'scene.lines'), '画面側で行を見分け直している').toBe(0);
   });
 
   it('lineDurationsFromAudio：単一 narration（明示 lines 無し）は空を返す', () => {

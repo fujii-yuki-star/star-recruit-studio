@@ -25,7 +25,7 @@ import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
-import { lineVoiceUsable, narrationAudioKey } from "../../domain/project/narrationLines";
+import { narrationAudioKey, sceneLineVoiceUsable } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
@@ -331,8 +331,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           // **プレビューは「声が無い」扱い・書き出しだけ旧い声**という食い違いになり、
           // **直したはずの文章が、直る前の声で**焼かれる（ADR-0026④）。
           // 規則は `lineVoiceUsable` に1つ＝プレビュー（`lineDurationsFromAudio`）と同じものを見る。
-          const line = lineId ? scene.lines?.find((l) => l.lineId === lineId) : undefined;
-          const usable = line == null || lineVoiceUsable(line);
+          // ⚠️ **掛け合いも単一 narration も同じ判定**（#1165・PR #1178 レビュー 🔴）＝
+          // 規則も、行のそろえ方も domain に1つ（`sceneLineVoiceUsable`）。
+          const usable = sceneLineVoiceUsable(scene, lineId);
           return {
             // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
             // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
