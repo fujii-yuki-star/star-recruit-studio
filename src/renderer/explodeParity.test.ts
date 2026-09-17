@@ -589,7 +589,7 @@ describe('explodeTemplateClip（文書の形）', () => {
 
   it('バラした文書はスキーマに適合する（保存できない文書を作らない）', () => {
     // 描いた結果が同じでも、置けない持ち物が混ざっていると保存が黙って失敗する（自動保存は書かない）。
-    expect(validateTimelineProject(exploded(doc()))).toBe(true);
+    expect(validateTimelineProject(exploded(doc())), JSON.stringify(validateTimelineProject.errors)).toBe(true);
   });
 
   it('隠してある部品をバラしても表に出さない', () => {

@@ -1,6 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032）の型。正典は 11 §7.6 ＋ schemas/timeline-project.schema.json。
 // 場面（parts/scenes）を持たない**別の文書形式**で、キャンバスは常に自由配置＝FREE（空間の自由）×
 // タイムライン（時間の自由）。AI はこの形式を生成しない（AI の関与は場面形式まで）。
+import type { BlendMode, ColorAdjust } from '../template/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { CropAlignX, CropAlignY, CropMode, Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { FontId } from '../font/fontCatalog';
@@ -87,6 +88,15 @@ export interface TimelineClip extends ClipSpatial {
   startSec: number;
   /** 尺（>0）。 */
   durationSec: number;
+  /**
+   * **色の調整**（ADR-0044 ①）。⚠️ **クリップごと**＝中身すべてに同じだけ掛かる
+   *（見た目パターンの層ごとに違う調整が掛かると、同じ絵のつもりが崩れる）。
+   */
+  colorAdjust?: ColorAdjust;
+  /**
+   * **描画モード**（ADR-0044 ②）。⚠️ **合成の単位（決定19）より前**で混ざる。
+   */
+  blendMode?: BlendMode;
 
   /** kind='template'（テンプレを素材として置く・差し込み口が生きている）。 */
   templateId?: string;
@@ -232,4 +242,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.11';
+export const TIMELINE_SCHEMA_VERSION = '1.12';

@@ -35,6 +35,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { ranSameTests, totalTests } from "./mutateCounts.mjs";
 import process from "node:process";
 
 const TEMPLATE = {
@@ -88,7 +89,14 @@ const RECOVERY_PATH = join(tmpdir(), "stario-mutate-recovery.json");
 function writeRecovery(map) {
   try {
     mkdirSync(dirname(RECOVERY_PATH), { recursive: true });
-    writeFileSync(RECOVERY_PATH, JSON.stringify(Object.fromEntries(map), null, 2));
+    // ⚠️ **いま盤面に何が載っているかも一緒に残す**（2026-09-17 に自分で踏んだ）＝
+    // 控えには「戻す中身」しか無かったので、`--restore` は**そのあと手で直した分まで巻き戻す**。
+    // 実際、止まった回の控えが残っていたせいで、**別に直した説明文の位置が丸ごと消えた**。
+    const rec = {};
+    for (const [file, text] of map) {
+      rec[file] = { original: text, onDisk: existsSync(file) ? readFileSync(file, "utf8") : null };
+    }
+    writeFileSync(RECOVERY_PATH, JSON.stringify(rec, null, 2));
   } catch {
     /* 置けなくても、メモリの控えと `finally` は効く */
   }
@@ -102,13 +110,30 @@ function restoreFromDisk() {
   }
   const saved = JSON.parse(readFileSync(RECOVERY_PATH, "utf8"));
   const failed = [];
-  for (const [file, text] of Object.entries(saved)) {
+  const changed = [];
+  for (const [file, rec] of Object.entries(saved)) {
+    // 古い形（中身だけ）も受ける＝控えが残ったまま実行係だけ新しくなった場合。
+    const text = typeof rec === "string" ? rec : rec.original;
+    const onDisk = typeof rec === "string" ? null : rec.onDisk;
     try {
+      // ⚠️ **控えを取ったときから盤面が動いていたら、戻さない**＝戻すと**あとの作業が消える**。
+      if (onDisk != null && existsSync(file) && readFileSync(file, "utf8") !== onDisk) {
+        changed.push(file);
+        continue;
+      }
       writeFileSync(file, text);
       console.log(`  戻しました: ${file}`);
     } catch (e) {
       failed.push(`${file}（${e.message}）`);
     }
+  }
+  if (changed.length > 0) {
+    console.error("\n✖ 控えを取ったあとで中身が変わっているので、戻しませんでした:");
+    for (const f of changed) console.error(`   - ${f}`);
+    console.error("\n  そのままで良ければ控えを捨ててください:");
+    console.error(`    node scripts/mutate.mjs --drop-recovery`);
+    console.error("  戻したいときは、差分を見てから手で戻してください（git diff）。");
+    return 1;
   }
   if (failed.length > 0) {
     console.error("✖ 戻せなかったもの:");
@@ -122,6 +147,11 @@ function restoreFromDisk() {
 
 const arg = process.argv[2];
 if (arg === "--restore") process.exit(restoreFromDisk());
+if (arg === "--drop-recovery") {
+  rmSync(RECOVERY_PATH, { force: true });
+  console.log("控えを捨てました（戻していません）。");
+  process.exit(0);
+}
 
 if (!arg || arg === "--help" || arg === "-h") {
   console.log("使い方: node scripts/mutate.mjs <spec.json>   （雛形: --print-template）");
@@ -155,6 +185,7 @@ if (existsSync(RECOVERY_PATH)) {
 console.log(`◆ ベースライン: ${spec.tests.join(" ")}`);
 const base = runTests(spec.tests);
 console.log(`  ${base.line}`);
+const baseTotal = totalTests(base.line);
 if (!base.green) {
   console.error(base.out.split("\n").slice(-40).join("\n"));
   abort("ベースラインが赤いままです。**1つも変異させていません**（赤い状態で回すと、何を壊しても赤いので全部『捕まえた』に見えます）。");
@@ -235,6 +266,18 @@ try {
     writeFileSync(m.file, before.replace(m.find, () => m.replace));
     const r = runTests(spec.tests);
     writeFileSync(m.file, before); // 次の変異と混ざらないよう、1つずつ戻す
+    if (!ranSameTests(baseTotal, totalTests(r.line))) {
+      // ⚠️ **止める前に必ず戻す**＝`abort` は `process.exit` なので `finally` が走らない
+      //（控えが残ったままだと、次の回が「戻さずに終わっている」と言って動かなくなる）。
+      restoreAll();
+      console.error(r.out.split("\n").slice(-30).join("\n"));
+      abort(
+        `変異「${label}」で、検査が**ベースラインより少ししか回りませんでした**（${r.line}）。\n` +
+        "  これは振る舞いではなく**ファイルを壊した**合図です（構文エラーなど）。\n" +
+        "  赤いので『捕まえた』に見えますが、**その振る舞いは一度も試されていません**。\n" +
+        "  書き換えの範囲を直してください（例: `if` だけ置き換えて `else` が宙に浮いていないか）。",
+      );
+    }
     const mark = r.green ? "✖ 生き残り" : "✓ 捕まえた";
     console.log(`${mark}  [${i + 1}/${spec.mutants.length}] ${label}\n           ${r.line}`);
     if (r.green) survived.push(label);

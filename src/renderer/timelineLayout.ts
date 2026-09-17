@@ -461,6 +461,12 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         // 切り抜き（#634）＝**変形のあとの箱**を基準に切る（動かした先で切れる＝設定した意味どおり）。
         // 枠いっぱいに映す場合、切るのは**箱そのもの**（辺を隠すのではなく、はみ出しを収める）。
         ...(fill ? { clipRect: boxRect(clip.id, finalBox) } : cropRect ? { clipRect: cropRect } : {}),
+        // **色の調整・描画モード**（ADR-0044）＝**クリップが持つ**ものを、その中身すべてへ配る。
+        // ⚠️ **部品ごとではなくクリップごと**＝見た目パターンの中身（層が複数）でも**1つの見え方**になる
+        //（層ごとに違う調整が掛かると、同じ絵のつもりが崩れる）。
+        // ⚠️ **持っていなければ付けない**＝従来の出力を1バイトも変えない。
+        ...(clip.colorAdjust ? { colorAdjust: clip.colorAdjust } : {}),
+        ...(clip.blendMode && clip.blendMode !== 'normal' ? { blendMode: clip.blendMode } : {}),
       });
     }
   }

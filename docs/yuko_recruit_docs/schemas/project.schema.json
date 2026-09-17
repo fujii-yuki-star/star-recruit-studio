@@ -487,6 +487,22 @@
         }
       }
     },
+    "ColorAdjust": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "色の調整（ADR-0044 ①）。未指定＝調整なし（従来の出力は不変）。⚠️ **描くのは SVG の `<filter>`**＝プレビューと書き出しは同じ道（layoutToSvg→canvas→PNG）を通るので必ず一致する。⚠️ **`color-interpolation-filters=\"sRGB\"` を付けて描く**＝既定の linearRGB だと「明るさ 0.5」が画面上 187 になり、数字と見た目が合わない（実測）。",
+      "properties": {
+        "brightness": { "type": "number", "minimum": 0, "maximum": 4, "description": "明るさ（1＝そのまま・0＝黒）。" },
+        "contrast": { "type": "number", "minimum": 0, "maximum": 4, "description": "コントラスト（1＝そのまま）。" },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 4, "description": "彩度（1＝そのまま・0＝白黒）。" },
+        "temperature": { "type": "number", "minimum": -1, "maximum": 1, "description": "色温度（0＝そのまま・+1＝暖色寄り・−1＝寒色寄り）。" }
+      }
+    },
+    "BlendMode": {
+      "type": "string",
+      "enum": ["normal", "multiply", "screen", "overlay", "plus-lighter"],
+      "description": "描画モード（ADR-0044 ②）。未指定＝normal（従来の出力は不変）。⚠️ **混ぜるのは合成の単位（ADR-0032 決定19）より前**＝畳んだ後だとフェード中だけ混ざり方が変わる。⚠️ **この語彙を使うのはタイムライン形式だけ**（ADR-0044 追補1）＝場面形式は凍結（ADR-0032）なので持たせない。"
+    },
     "TextShadow": {
       "type": "object",
       "additionalProperties": false,

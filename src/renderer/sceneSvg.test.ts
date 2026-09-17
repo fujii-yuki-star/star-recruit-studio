@@ -262,3 +262,46 @@ describe('layoutToSvg：字幕帯の複数行は下端基準で上へ伸ばす�
     expect(bgRect(layoutToSvg(subtitleLayout({ anchorBottom: false }))).y).toBe(960);
   });
 });
+
+// 色の調整と描画モード（ADR-0044）。
+// ⚠️ **プレビューと書き出しは同じ道を通る**ので、ここが出す SVG がそのまま MP4 の絵になる。
+describe('色の調整と描画モード', () => {
+  const item = (over: Record<string, unknown>) => ({
+    id: 'i1', kind: 'fill' as const, zIndex: 1, x: 0, y: 0, w: 100, h: 50, color: '#ff0000', ...over,
+  });
+
+  // ⚠️ **素の値では何も足さない**＝従来の出力が1バイトも変わらないことを守る。
+  it('調整も描画モードも無ければ、包まない', () => {
+    const svg = layoutToSvg({ width: 100, height: 50, items: [item({})] } as never);
+    expect(svg).not.toContain('filter="url(#color-');
+    expect(svg).not.toContain('mix-blend-mode');
+  });
+
+  it('色の調整があれば、defs と filter を出す', () => {
+    const svg = layoutToSvg({ width: 100, height: 50, items: [item({ colorAdjust: { brightness: 1.5 } })] } as never);
+    expect(svg).toContain('<filter id="color-');
+    expect(svg).toContain('filter="url(#color-');
+    // ⚠️ **色空間の指定が消えると、数字と見た目が合わなくなる**（実測で 0.5→187）。
+    expect(svg).toContain('color-interpolation-filters="sRGB"');
+  });
+
+  it('描画モードがあれば、mix-blend-mode を出す', () => {
+    const svg = layoutToSvg({ width: 100, height: 50, items: [item({ blendMode: 'multiply' })] } as never);
+    expect(svg).toContain('mix-blend-mode:multiply');
+  });
+
+  // ⚠️ **`normal` は書かない**＝既定と同じなので、出力を無駄に変えない。
+  it('描画モードが normal なら、何も足さない', () => {
+    const svg = layoutToSvg({ width: 100, height: 50, items: [item({ blendMode: 'normal' })] } as never);
+    expect(svg).not.toContain('mix-blend-mode');
+  });
+
+  // ⚠️ **同じ調整は defs を共有する**（影と同じ）＝同じ id が何個も並ばない。
+  it('同じ調整の部品が2つあっても、defs は1つ', () => {
+    const svg = layoutToSvg({
+      width: 100, height: 50,
+      items: [item({ id: 'i1', colorAdjust: { brightness: 1.5 } }), item({ id: 'i2', colorAdjust: { brightness: 1.5 } })],
+    } as never);
+    expect(svg.split('<filter id="color-').length - 1, 'defs が畳まれていない').toBe(1);
+  });
+});

@@ -30,7 +30,7 @@ import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './type
 import type { Texts } from '../project/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import { defaultDurationForTemplate } from '../template/layerOps';
-import type { Template } from '../template/types';
+import type { BlendMode, Template } from '../template/types';
 import { canHaveBox, resolveClipBox } from './box';
 
 /** 置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。永続データではないので schema には持ち込まない。 */
@@ -892,6 +892,58 @@ export function setClipText(doc: TimelineProject, clipId: string, textKey: TextK
   if (text === '') delete texts[textKey];
   else texts[textKey] = text;
   return ok(withClip(doc, { ...clip, texts }));
+}
+
+/**
+ * 部品の**色の調整**を直す（ADR-0044 ①）。渡した項目だけ書き換える（残りはそのまま）。
+ *
+ * ⚠️ **素の値に戻ったら、まるごと落とす**＝`{brightness:1}` のような「何もしない調整」を残すと、
+ * **描く側が「調整あり」と見てフィルタを出す**（通すだけで絵がわずかに変わる）。
+ * 判定は描く側（`renderer/colorFilter.ts`）と**同じ規則**にそろえる。
+ */
+export function setClipColorAdjust(
+  doc: TimelineProject,
+  clipId: string,
+  patch: { brightness?: number; contrast?: number; saturation?: number; temperature?: number },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = { ...(clip.colorAdjust ?? {}), ...patch };
+  const neutral =
+    (next.brightness ?? 1) === 1 && (next.contrast ?? 1) === 1
+    && (next.saturation ?? 1) === 1 && (next.temperature ?? 0) === 0;
+  return ok({
+    ...doc,
+    clips: doc.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const copy = { ...c };
+      if (neutral) delete copy.colorAdjust;
+      else copy.colorAdjust = next;
+      return copy;
+    }),
+  });
+}
+
+/**
+ * 部品の**描画モード**を直す（ADR-0044 ②）。
+ *
+ * ⚠️ **`normal` はまるごと落とす**＝既定と同じものを書き残すと、出力（SVG）が無駄に変わる。
+ */
+export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: BlendMode): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  return ok({
+    ...doc,
+    clips: doc.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const copy = { ...c };
+      if (mode === 'normal') delete copy.blendMode;
+      else copy.blendMode = mode;
+      return copy;
+    }),
+  });
 }
 
 /**

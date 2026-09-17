@@ -1,3 +1,4 @@
+import { colorFilterDefs, colorFilterId, needsColorFilter } from './colorFilter';
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
@@ -198,12 +199,21 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
       ? item.opacity
       : undefined;
   const rotated = rot != null && rot !== 0;
-  if (!rotated && elemOpacity == null) return inner;
+  // **色の調整**（ADR-0044 ①）＝影と同じ流儀で `<defs>` を出し、`filter="url(#id)"` を載せる。
+  // ⚠️ **素の値なら出さない**＝通すだけで縁の扱いと色空間の往復で絵がわずかに変わる（従来の出力を変えない）。
+  const adjusted = needsColorFilter(item.colorAdjust);
+  // **描画モード**（ADR-0044 ②）＝`mix-blend-mode` を包む `<g>` に載せる。
+  // ⚠️ **ここ（合成の単位より内側）に載せるのが肝**＝畳んだ後に混ぜると**フェード中だけ混ざり方が変わる**。
+  const blend = item.blendMode != null && item.blendMode !== 'normal' ? item.blendMode : undefined;
+  if (!rotated && elemOpacity == null && !adjusted && blend == null) return inner;
   const cx = item.x + item.w / 2;
   const cy = item.y + item.h / 2;
   const transform = rotated ? ` transform="rotate(${rot} ${cx} ${cy})"` : '';
   const opacityAttr = elemOpacity != null ? ` opacity="${elemOpacity}"` : '';
-  return `<g${transform}${opacityAttr}>${inner}</g>`;
+  const filterAttr = adjusted && item.colorAdjust ? ` filter="url(#${colorFilterId(item.colorAdjust)})"` : '';
+  const blendAttr = blend ? ` style="mix-blend-mode:${blend}"` : '';
+  const defs = adjusted && item.colorAdjust ? colorFilterDefs(item.colorAdjust) : '';
+  return `${defs}<g${transform}${opacityAttr}${filterAttr}${blendAttr}>${inner}</g>`;
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。

@@ -16,7 +16,7 @@
 
 **場面（`parts`/`scenes`）を持たない別文書**。キャンバスは常に自由配置＝**FREE（空間の自由）× タイムライン（時間の自由）**。**AI はこの形式を生成しない**（AI の関与は場面形式まで＝ADR-0007 の単一パイプラインは場面側で不変）。
 
-schemaVersion ●（現行 `"1.11"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有＝`creditDisplay`〔ADR-0025・#359〕もそのまま効く。タイムライン形式は毎フレーム描くので判定は `creditTextAt`＝秒どおり） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`） / markers ○（`TimelineMarker[]`＝**目印**・#356 ①。時間の一点に印とメモを置くだけで、**動画には出ない**〔描画にも書き出しにも現れない＝作業用〕。⚠️ **トラックには属さない**＝時間だけを持つので、列を消しても帯を動かしても**そこに残る**〔目印は部品の属性ではなく「この時刻でこうしたい」という作業の覚え〕。⚠️ **`timeSec` は動画の頭からの秒**＝`Keyframe`〔クリップの先頭から〕とそこが違う）
+schemaVersion ●（現行 `"1.12"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有＝`creditDisplay`〔ADR-0025・#359〕もそのまま効く。タイムライン形式は毎フレーム描くので判定は `creditTextAt`＝秒どおり） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`） / markers ○（`TimelineMarker[]`＝**目印**・#356 ①。時間の一点に印とメモを置くだけで、**動画には出ない**〔描画にも書き出しにも現れない＝作業用〕。⚠️ **トラックには属さない**＝時間だけを持つので、列を消しても帯を動かしても**そこに残る**〔目印は部品の属性ではなく「この時刻でこうしたい」という作業の覚え〕。⚠️ **`timeSec` は動画の頭からの秒**＝`Keyframe`〔クリップの先頭から〕とそこが違う）
 
 **Track**: id ●（`track_NNN`・§2.1） / kind ●（enum `visual`／`audio`＝置けるクリップの種別を決める） / name ○（未指定＝種別＋連番の自動名） / hidden ○（描画・書き出しから除外＝音声は無音） / locked ○（移動・トリムを禁止）。**配列の順＝重ね順（後ろほど手前）**・UI では上が手前に見せる。
 
@@ -33,6 +33,16 @@ schemaVersion ●（現行 `"1.11"`・場面形式とは独立に進む） / for
   （キーフレームと同じ規則＝`§7.6.3.1`。落とさないと時刻ちょうどの値を再生と書き出しが別の点から採る）・
   **値域は入口で収める**（補間の前に収めるか後かで中間の値が変わるため）。**再生と書き出しがこの1つを共有する**。
   **書き出しも同じ点列**から式を組む（`volumeExpr`＝`§7.6.5`・ADR-0032 追補＝案A）。**置ける点の数には上限**がある（`§7.6.5`）。
+- **見え方**（ADR-0044・#1192・⚠️ **タイムライン形式だけの語彙**）: `colorAdjust` ○（`{brightness, contrast, saturation, temperature}`＝
+  **明るさ・コントラスト・鮮やかさ・色あい**。未指定＝調整なし）／`blendMode` ○（`normal`〔既定〕/`multiply`/`screen`/`overlay`/`plus-lighter`）。
+  - **持つのはクリップ**＝見た目パターンのように**中身が複数層**でも**1つの見え方**になる（層ごとに割れると同じ絵のつもりが崩れる）。
+  - **描くのは SVG**（`renderer/colorFilter.ts` の `<filter>`／`mix-blend-mode`）＝**プレビューと書き出しは同じ道**（ADR-0001）。
+    ⚠️ **`color-interpolation-filters="sRGB"` を必ず付ける**＝既定の linearRGB だと「明るさ 0.5」が画面上 **187** になる（実測）。
+  - **混ぜるのは合成の単位（ADR-0032 決定19）より前**＝畳んだ後だと**フェード中だけ混ざり方が変わる**。
+  - ⚠️ **素の値・`normal` は書き残さない**（`setClipColorAdjust`／`setClipBlendMode` が落とす）＝
+    「何もしない調整」が残ると**描く側が「調整あり」と見てフィルタを通す**（通すだけで絵がわずかに変わる）。
+  - ⚠️ **場面形式（`FreeElement`）には無い**＝場面形式は凍結（ADR-0032）で、書き出しは**層に割って FFmpeg が重ねる**ため
+    掛けても効かない（プレビューにだけ出る）。**欄を足さないことで塞いでいる**＝ADR-0044 追補1。
 - **切り抜きの効かせ方**（#634・タイムライン形式だけの語彙）: `cropMode` ○（`mask`＝既定＝箱の辺を隠す／`fill`＝**残った素材を枠いっぱいに映し直す**）。
   `fill` が効くのは **`kind:'slot'`（素材の差し込み口）で切り抜きがあり、素材の実寸が分かるとき**だけ。
   - **テンプレのクリップには効かせない**＝絵が複数入るので「どの素材を枠いっぱいにするか」が決まらない。

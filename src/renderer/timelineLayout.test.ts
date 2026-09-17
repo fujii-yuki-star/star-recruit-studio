@@ -463,6 +463,49 @@ describe('文字クリップの体裁が運ばれる（#264・#879）', () => {
   });
 });
 
+// 見え方（色の調整・描画モード）＝**クリップが持ち、中身すべてへ配る**（ADR-0044・#1192）。
+// ⚠️ **中身が複数層でも1つの見え方**＝層ごとに割れると、同じ絵のつもりが崩れる。
+describe('見え方がクリップから中身へ配られる（ADR-0044）', () => {
+  it('色の調整が、見た目パターンの中身すべてに載る', () => {
+    const c = templateClip('clip_001', { colorAdjust: { brightness: 1.4 } });
+    const d = doc({ clips: [c] });
+    const items = layoutTimelineAt(d, 1, opts).items.filter((i) => isItemOfClip(i.id, 'clip_001'));
+    expect(items.length).toBeGreaterThan(1); // 背景＋見出し＝2層以上
+    for (const i of items) expect(i.colorAdjust).toEqual({ brightness: 1.4 });
+  });
+
+  it('描いた絵にも出る（プレビュー＝書き出しの同じ道）', () => {
+    const d = doc({ clips: [templateClip('clip_001', { colorAdjust: { brightness: 1.4 } })] });
+    const svg = layoutToSvg(layoutTimelineAt(d, 1, opts));
+    expect(svg).toContain('color-interpolation-filters="sRGB"');
+    expect(svg).toContain('filter="url(#color-');
+  });
+
+  it('描画モードが中身に載り、絵にも出る', () => {
+    const d = doc({ clips: [templateClip('clip_001', { blendMode: 'multiply' })] });
+    const items = layoutTimelineAt(d, 1, opts).items.filter((i) => isItemOfClip(i.id, 'clip_001'));
+    for (const i of items) expect(i.blendMode).toBe('multiply');
+    expect(layoutToSvg(layoutTimelineAt(d, 1, opts))).toContain('mix-blend-mode:multiply');
+  });
+
+  // ⚠️ **既定は書き残さない**＝`normal` を配ると、**従来の出力に無駄な指定が混ざる**。
+  it('`normal` は配らない（従来の出力を変えない）', () => {
+    const d = doc({ clips: [templateClip('clip_001', { blendMode: 'normal' })] });
+    const items = layoutTimelineAt(d, 1, opts).items.filter((i) => isItemOfClip(i.id, 'clip_001'));
+    for (const i of items) expect(i.blendMode).toBeUndefined();
+    expect(layoutToSvg(layoutTimelineAt(d, 1, opts))).not.toContain('mix-blend-mode');
+  });
+
+  // ⚠️ **何も設定していないクリップの出力は1バイトも変わらない**（この機能の約束）。
+  it('設定が無ければ、包む `<g>` も増えない', () => {
+    const d = doc({ clips: [templateClip('clip_001')] });
+    const svg = layoutToSvg(layoutTimelineAt(d, 1, opts));
+    expect(svg).not.toContain('mix-blend-mode');
+    expect(svg).not.toContain('<filter');
+    expect(svg).not.toContain('<g>'); // 素の `<g>`（属性なし）＝意味のない包み
+  });
+});
+
 // 同じ時刻の字幕が重なっていることを知らせる（#1014）。
 // ⚠️ **位置は動かさない**＝手で置いた場所を奪わないので、**知らせる**のが筋（§2-5）。
 describe('overlappingSubtitleClips（#1014）', () => {
