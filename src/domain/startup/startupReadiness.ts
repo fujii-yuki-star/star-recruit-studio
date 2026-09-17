@@ -13,7 +13,6 @@
 //（止めると、頼んだ側は**直しようのない断り**を受け取る）。
 
 import type { Scene } from '../project/types';
-import { referencedAssetIds } from '../project/assetUsage';
 import { sceneNeedsVoice } from '../project/narrationLines';
 import { voiceClipNeedsVoice } from '../timeline/voice';
 import type { TimelineClip } from '../timeline/types';
@@ -25,8 +24,11 @@ export const STARTUP_NOT_READY = {
   /**
    * **使っている**のにファイルが見つからない素材がある（PR #1208 レビュー 🟡）。
    *
-   * ⚠️ **その場面が黙って抜けた動画になる**＝声の無音化と同じ「黙って別の結果」。
-   * ⚠️ **タイムライン形式は既に止まる**（`TIMELINE_EXPORT_ASSET_UNREADABLE`）ので、ここは場面形式のため。
+   * ⚠️ **いまここでは数えていません**（#1068）＝**両形式とも書き出しの画面／関門が断る**ようになったので、
+   * ここでも数えると**同じ状態に2つの断りが並び**、しかも**数え方が画面と違う**
+   *（画面は「テンプレの差し込み口に入っているか」で数える＝`sceneActiveAssetIds`）。
+   * ⚠️ **語彙は残します**＝将来「画面より先に断りたい」状態が出たときの受け皿
+   *（そのときは**画面と同じ判定**を呼ぶこと）。
    */
   assetMissing: 'STARTUP_ASSET_MISSING',
 } as const;
@@ -69,18 +71,3 @@ export function startupExportNotReady(input: {
   return null;
 }
 
-/**
- * **使っている**のにファイルが見つからない素材の数（場面形式）。
- *
- * ⚠️ **使っていないものは数えない**＝消えていても**動画は変わらない**ので、断ると行き止まりになる
- *（画面の公開前チェックと同じ絞り方）。
- */
-export function sceneMissingUsedAssets(
-  scenes: readonly Scene[],
-  assets: readonly { assetId: string }[],
-  missingAssetIds: readonly string[],
-  projectBgmAssetId?: string | null,
-): number {
-  const used = referencedAssetIds(scenes, projectBgmAssetId);
-  return assets.filter((a) => missingAssetIds.includes(a.assetId) && used.has(a.assetId)).length;
-}

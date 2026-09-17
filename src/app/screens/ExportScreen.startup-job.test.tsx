@@ -49,6 +49,22 @@ describe("起動のときに頼まれた書き出し（#1184）", () => {
     expect(saveDialog, "頼まれているのに保存先を聞いている").not.toHaveBeenCalled();
   });
 
+  // ⚠️ **頼まれた回は、ボタンを押さずに始まる**＝画面が無効にしている関門を通らない。
+  // 止めるのは **`startExport` の中の再確認**だけなので、ここが唯一の関門になる（#1068）。
+  it("使っている素材が見つからなければ、頼まれた回でも始めない", async () => {
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: ["asset_001"],
+      scenes: [{ ...scene("scene_001", 1), assetRefs: { mainVisual: "asset_001" } } as Scene],
+    });
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    expect(begin, "素材が見つからないのに書き出しを始めた").not.toHaveBeenCalled();
+  });
+
   // ⚠️ **1回きり**＝取り出したら消える。残すと、次に人が押した書き出しまで同じ所へ書く。
   it("頼まれた保存先は、取り出したら消える", async () => {
     const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);

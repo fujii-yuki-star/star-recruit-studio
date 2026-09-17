@@ -49,6 +49,43 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     useProjectStore.getState().setExportRun({ phase: "idle" });
   });
 
+  // ⚠️ **見つからない素材でも押させない**（#1068・実機で確かめた）＝押させると、
+  // **写真は黙って灰色の枠**になり、**動画は途中で失敗する**（保存先を選ばせた後に落とす）。
+  // ⚠️ **タイムライン形式は既に押す前に断っている**ので、揃える（ADR-0026②）。
+  it("使っている素材が見つからないと「動画を保存」を押せない", () => {
+    setup([scene({ assetRefs: { mainVisual: "asset_001" } })]);
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: ["asset_001"],
+    });
+    // ⚠️ **開いたときの調べ直しは差し替える**＝アプリの外では「調べられない＝空」になるので、
+    // そのままだと**この検査が用意した状態を消してしまう**（調べ直すこと自体は下の検査で固定する）。
+    vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByText(/動画を書き出せない項目があります/).textContent).toContain("見つからない素材");
+  });
+
+  // ⚠️ **開いたときに調べ直す**（PR #1209 レビュー 🟡）＝誰かが調べた結果を借りているだけだと、
+  // 画面を離れずに外でファイルを消された回に**古い結果のまま通してしまう**（フォントは毎回調べ直している）。
+  it("開いたときに、素材が実在するか調べ直す", () => {
+    setup([scene()]);
+    const refresh = vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(refresh, "開いても調べ直していない").toHaveBeenCalled();
+  });
+
+  // ⚠️ **調べていないときは止めない**＝嘘の「問題あり」を出さない（材料が無い＝項目を作らない）。
+  it("調べていない（材料が無い）ときは押せる", () => {
+    setup([scene({ assetRefs: { mainVisual: "asset_001" } })]);
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: [],
+    });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn().disabled).toBe(false);
+  });
+
   it("見た目が見つからない場面があると「動画を保存」を押せず、理由と次の行動を出す", () => {
     setup([scene({ templateId: "missing_tmpl" })]);
     render(<ExportScreen onNavigate={vi.fn()} />);

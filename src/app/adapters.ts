@@ -120,8 +120,15 @@ export function exportBlockingItems(
    * 「動画を保存」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
    */
   fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[]; userFontsUnreadable?: boolean },
+  /**
+   * 実体が見つからない素材の id（#1068）。⚠️ **ここへ通さないと直行導線ですり抜ける**
+   * （フォントで同じ穴を踏んだ＝PR #886 レビュー 🔴）。`undefined`＝まだ調べていない＝項目を出さない。
+   */
+  missingAssetIds?: readonly string[],
+  /** 動画全体の BGM の素材 id（使用中に数える）。 */
+  projectBgmAssetId?: string | null,
 ): PrecheckItem[] {
-  return buildPrecheckItems(scenes, assets, templates, overlayAnimations, undefined, undefined, fonts).filter(isExportBlocking);
+  return buildPrecheckItems(scenes, assets, templates, overlayAnimations, missingAssetIds, projectBgmAssetId, fonts).filter(isExportBlocking);
 }
 
 /**
@@ -340,6 +347,12 @@ export function buildPrecheckItems(
         // ⚠️ **呼び名は1か所から取る**（#1169）＝画面のボタンと同じ言葉でないと、探す先が食い違う。
         detail: `動画で使っている素材のファイルが見つかりません（${names}${more}）。素材の画面で「${RELINK_ASSET_LABEL}」から入れ直してください。置いた場所や設定はそのまま使えます。`,
         severity: "action",
+        // ⚠️ **押す前に止める**（#1068・実機で確かめた）＝止めないと、
+        // **写真は黙って灰色の枠**になり（見えていたものと違う動画が成功として出る＝ADR-0026④）、
+        // **動画は途中で失敗する**（保存先を選ばせた後に落とす＝`06 §12.1` に反する）。
+        // ⚠️ **タイムライン形式は既に押す前に断っている**（`TIMELINE_EXPORT_VIDEO_FILE_MISSING`）＝
+        // 揃えないと**形式で挙動が割れる**（ADR-0026②）。
+        blocksExport: true,
       });
     }
   }
