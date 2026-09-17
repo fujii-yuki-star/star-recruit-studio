@@ -73,6 +73,17 @@ describe('掛ける順（自分で書いた主張を検査する）', () => {
   //「明るさ→コントラスト→彩度→色温度の順で掛ける」と書いたのに、
   // **順番を入れ替える変異が生き残った**（＝検査していなかった）。
   // ⚠️ **順番は絵を変える**＝彩度を先に掛けると、持ち上げる前の色で彩度が決まる。
+  // ⚠️ **両方動かしたときの数まで見る**（PR #1201 レビュー 🔴）＝
+  // 片方だけ動かす検査は `b=1` か `c=1` で式が一致するので、**順番を逆にしても緑のまま**だった。
+  it('明るさ→コントラストの順で1本にまとまっている（両方動かす）', () => {
+    // v1 = 1.2·v ／ v2 = (v1 − 0.5)·1.5 + 0.5 = 1.8·v + 0.5·(1 − 1.5) = 1.8·v − 0.25
+    const body = colorFilterBody({ brightness: 1.2, contrast: 1.5 });
+    expect(body).toContain('slope="1.8"');
+    expect(body).toContain('intercept="-0.25"');
+    // ⚠️ 逆順（コントラスト→明るさ）だと intercept は −0.3 になる＝そちらではないことも押さえる。
+    expect(body).not.toContain('intercept="-0.3"');
+  });
+
   it('明るさ・コントラスト → 彩度 → 色温度 の並びで出る', () => {
     const body = colorFilterBody({ brightness: 1.2, contrast: 1.5, saturation: 0.5, temperature: 0.5 });
     const iTransfer = body.indexOf('<feComponentTransfer>');

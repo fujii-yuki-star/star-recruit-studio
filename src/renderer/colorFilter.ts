@@ -60,8 +60,12 @@ export function colorFilterBody(adjust: ColorAdjust): string {
   const parts: string[] = [];
   if (b !== 1 || c !== 1) {
     // 明るさ（slope=b）→ コントラスト（中心 0.5 を保って伸ばす）を1つの一次変換にまとめる。
+    //   v1 = b·v ／ v2 = (v1 − 0.5)·c + 0.5 = (b·c)·v + 0.5·(1 − c)
+    // ⚠️ **intercept に b を掛けない**（PR #1201 レビュー 🔴）＝掛けると
+    // `b·[(v − 0.5)·c + 0.5]` ＝**コントラスト→明るさ**の順になり、**書いてある順と逆**になる。
+    // 片方だけ動かすと式が一致するので、**両方動かす検査**でしか見つからない（実際、見つけたのはレビュー）。
     const slope = b * c;
-    const intercept = 0.5 * (1 - c) * b;
+    const intercept = 0.5 * (1 - c);
     const fn = (ch: string): string => `<feFunc${ch} type="linear" slope="${round(slope)}" intercept="${round(intercept)}"/>`;
     parts.push(`<feComponentTransfer>${fn('R')}${fn('G')}${fn('B')}</feComponentTransfer>`);
   }
