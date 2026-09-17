@@ -2,6 +2,7 @@
 // 音声(WAV)は <appData>/projects/<id>/voices/<sceneId>.wav に保管し、Narration.voicePath はプロジェクト相対（11 §7.4）。
 // Tauri 非検出時（ブラウザ開発）は永続化せず null を返す（表示用 data URL はメモリ内で別途保持される）。
 import { invoke } from '@tauri-apps/api/core';
+import { getVoicevoxUrl } from './appSettings';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -33,7 +34,9 @@ export async function readVoiceDataUrl(projectId: string, relPath: string): Prom
 export async function voicevoxReady(): Promise<boolean> {
   if (!isTauri()) return false;
   try {
-    return await invoke<boolean>('voicevox_ready', { baseUrl: null });
+    // ⚠️ **合成が使う接続先と同じものを見る**（PR #1208 レビュー 🟡）＝
+    // 上級者が接続先を設定していると、**同梱エンジンの用意**を見て「できた」と言ってしまう。
+    return await invoke<boolean>('voicevox_ready', { baseUrl: getVoicevoxUrl() || null });
   } catch {
     return false;
   }

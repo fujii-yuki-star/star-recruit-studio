@@ -16,7 +16,7 @@ import {
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
-import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE, STARTUP_VOICE_ENGINE_MESSAGE, STARTUP_VOICE_NOT_READY_MESSAGE } from "./hooks/useStartupJob";
+import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_ASSET_MISSING_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE, STARTUP_VOICE_ENGINE_MESSAGE, STARTUP_VOICE_NOT_READY_MESSAGE } from "./hooks/useStartupJob";
 import { makeVoicesDoneMessage } from "../domain/startup/startupMessages";
 import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
@@ -133,6 +133,7 @@ function codeMessages(): Record<string, string> {
     // **画面を読まない道の断り**が誰にも見張られない（穴を開けた当人が守りも書く）。
     STARTUP_VOICE_NOT_READY: STARTUP_VOICE_NOT_READY_MESSAGE,
     STARTUP_VOICE_ENGINE_NOT_READY: STARTUP_VOICE_ENGINE_MESSAGE,
+    STARTUP_ASSET_MISSING: STARTUP_ASSET_MISSING_MESSAGE,
     // ⚠️ **件数が入る文は差し込み口を渡して比べる**（上と同じ流儀）。
     STARTUP_MAKE_VOICES_LEFT: makeVoicesDoneMessage(" N " as unknown as number),
     PROJECT_NEWER_VERSION: PROJECT_NEWER_VERSION_MESSAGE,
@@ -491,7 +492,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
     // ⚠️ **+2**＝`STARTUP_VOICE_NOT_READY`／`STARTUP_MAKE_VOICES_LEFT`（#1204＝
     //   **画面を読まない道**〔起動の引数〕で、公開前チェックの「要対応」を誰も見ていなかった）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(245);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(246);
   });
 
 
@@ -739,7 +740,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
     // ⚠️ **+2**＝#1204（上と同じ2行）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(242);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(243);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -758,6 +759,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝タイムライン形式の双子と揃えた）。
       // ⚠️ **+7**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝引数4通り＋開いている／読めない／開けない。
     // ⚠️ **+2**＝#1204＝頼まれた回だけの断り2件。
-    ).toBe(107);
+    ).toBe(108);
   });
 });

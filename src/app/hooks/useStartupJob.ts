@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain/project/persistence";
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 import { isTimelineProjectDoc, resolveProjectFormat } from "../../domain/projectFormat";
-import { sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
+import { STARTUP_NOT_READY, sceneMissingUsedAssets, sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
 import { engineWaitPlan } from "../../domain/startup/engineWait";
 import { voicevoxReady } from "../../infrastructure/voiceFs";
 import { PROJECT_FORMAT } from "../../domain/enums";
@@ -40,6 +40,14 @@ export const STARTUP_OPEN_FAILED_MESSAGE =
  */
 export const STARTUP_VOICE_NOT_READY_MESSAGE =
   "読み上げの声がまだ作られていません。声を作ってから、もう一度お試しください。";
+
+/**
+ * 使っている素材が見つからないときの断り（PR #1208 レビュー 🟡・§2-5＝次の行動）。
+ *
+ * ⚠️ **止めないと、その場面が黙って抜けた動画になる**（声の無音化と同じ「黙って別の結果」）。
+ */
+export const STARTUP_ASSET_MISSING_MESSAGE =
+  "動画で使っている素材のファイルが見つかりません。素材を入れ直してから、もう一度お試しください。";
 
 /**
  * 声を作る用意ができなかったときの断り（#1204・§2-5＝次の行動）。
@@ -324,6 +332,10 @@ async function runExport(
       const opened = useTimelineStore.getState().doc;
       const notReady = startupExportNotReady({
         ungeneratedVoices: timelineUngeneratedVoices(opened?.clips ?? []),
+        // ⚠️ **タイムライン形式は、見つからない素材で既に止まる**
+        //（`TIMELINE_EXPORT_ASSET_UNREADABLE`／`TIMELINE_EXPORT_VIDEO_FILE_MISSING`）＝
+        // ここで二重に数えると、**同じ状態に2つの断りが並ぶ**（どちらに従えばよいか分からなくなる）。
+        missingUsedAssets: 0,
       });
       if (notReady) {
         setNotice(STARTUP_VOICE_NOT_READY_MESSAGE);
@@ -335,11 +347,25 @@ async function runExport(
       return;
     }
     await useProjectStore.getState().loadProject(projectId);
+    // ⚠️ **素材が実在するかは、開いたあとに調べる**（PR #1208 レビュー 🟡）＝
+    // 使っている素材が見つからないまま書き出すと、**その場面が黙って抜けた動画**になる。
+    await useProjectStore.getState().refreshMissingAssets();
+    const st = useProjectStore.getState();
     const sceneNotReady = startupExportNotReady({
-      ungeneratedVoices: sceneUngeneratedVoices(useProjectStore.getState().scenes),
+      ungeneratedVoices: sceneUngeneratedVoices(st.scenes),
+      missingUsedAssets: sceneMissingUsedAssets(
+        st.scenes,
+        st.assets,
+        st.missingAssetIds,
+        st.meta.bgmSettings?.assetId ?? null,
+      ),
     });
     if (sceneNotReady) {
-      setNotice(STARTUP_VOICE_NOT_READY_MESSAGE);
+      setNotice(
+        sceneNotReady === STARTUP_NOT_READY.assetMissing
+          ? STARTUP_ASSET_MISSING_MESSAGE
+          : STARTUP_VOICE_NOT_READY_MESSAGE,
+      );
       useStartupJobStore.getState().takePendingExport();
       await finishStartupJob(false, req.forwarded);
       return;

@@ -9,6 +9,7 @@ import type { Scene } from '../project/types';
 import type { TimelineClip } from '../timeline/types';
 import {
   STARTUP_NOT_READY,
+  sceneMissingUsedAssets,
   sceneUngeneratedVoices,
   startupExportNotReady,
   timelineUngeneratedVoices,
@@ -69,10 +70,38 @@ describe('場面形式：まだ作られていない読み上げ', () => {
 describe('頼まれた書き出しを断るか', () => {
   // ⚠️ **ここが `null` を返すと、無音の動画が「成功」で返る**（実機で踏んだ形）。
   it('作っていない声があれば断る', () => {
-    expect(startupExportNotReady({ ungeneratedVoices: 1 })).toBe(STARTUP_NOT_READY.voiceNotGenerated);
+    expect(startupExportNotReady({ ungeneratedVoices: 1, missingUsedAssets: 0 })).toBe(STARTUP_NOT_READY.voiceNotGenerated);
+  });
+
+  // ⚠️ **使っている素材が見つからなければ断る**（PR #1208 レビュー 🟡）＝
+  // 止めないと、**その場面が黙って抜けた動画**になる（声の無音化と同じ「黙って別の結果」）。
+  it('使っている素材が見つからなければ断る', () => {
+    expect(startupExportNotReady({ ungeneratedVoices: 0, missingUsedAssets: 1 })).toBe(STARTUP_NOT_READY.assetMissing);
   });
 
   it('無ければ始めてよい', () => {
-    expect(startupExportNotReady({ ungeneratedVoices: 0 })).toBeNull();
+    expect(startupExportNotReady({ ungeneratedVoices: 0, missingUsedAssets: 0 })).toBeNull();
+  });
+});
+
+describe('使っている素材が見つからない数（場面形式）', () => {
+  const sc = (assetId: string): Scene => scene({ assetRefs: { photo: assetId } as never });
+
+  it('使っている素材が消えていれば数える', () => {
+    expect(sceneMissingUsedAssets([sc('asset_001')], [{ assetId: 'asset_001' }], ['asset_001'])).toBe(1);
+  });
+
+  // ⚠️ **使っていないものは数えない**＝消えていても**動画は変わらない**ので、断ると行き止まりになる。
+  it('使っていない素材が消えていても数えない', () => {
+    expect(sceneMissingUsedAssets([sc('asset_001')], [{ assetId: 'asset_999' }], ['asset_999'])).toBe(0);
+  });
+
+  it('そろっていれば 0', () => {
+    expect(sceneMissingUsedAssets([sc('asset_001')], [{ assetId: 'asset_001' }], [])).toBe(0);
+  });
+
+  // ⚠️ **動画全体の BGM も「使っている」に数える**（画面の公開前チェックと同じ絞り方）。
+  it('動画全体の BGM も数える', () => {
+    expect(sceneMissingUsedAssets([sc('asset_001')], [{ assetId: 'asset_bgm' }], ['asset_bgm'], 'asset_bgm')).toBe(1);
   });
 });

@@ -198,7 +198,7 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+3**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝`useStartupJob.ts` の3つ
 //   （開いている／取り込む元が読めない／その動画を開けない）。いずれも表へ行を足してある。
 // ⚠️ **+1**＝`STARTUP_VOICE_NOT_READY_MESSAGE`（#1204＝頼まれた回だけの断り）。
-const FOUND_COUNT = 96;
+const FOUND_COUNT = 97;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();
