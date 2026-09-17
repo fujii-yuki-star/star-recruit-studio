@@ -104,6 +104,79 @@ describe('起動のときに頼まれた書き出し（#1184）', () => {
   });
 });
 
+// 区間に割って、そのまま流せる所は焼かない（#1203・ADR-0032 決定22 の再検討）。
+// ⚠️ **実測の出どころ**＝10分の動画に 75.7 分かかっていた（#1194）。同じ100カットを
+// FFmpeg に直接やらせると 80 秒＝**57倍**。
+describe('そのまま流せる区間は焼かない（#1203）', () => {
+  const vclip = (id: string, startSec: number, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec, durationSec: 2,
+       x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_mov_001', ...over }) as TimelineClip;
+  // ⚠️ **差し替えた「焼く側」は、渡された区間どおりの長さを返す**（#1203）＝
+  // 固定値を返す模型のままだと、**区間の割り方が壊れても検査が気づかない**
+  // （実際、最初はこの検査が模型の 5 秒を測って落ちた）。
+  beforeEach(() => {
+    vi.spyOn(framesMod, 'buildTimelineFrames').mockImplementation(async (_d, o) => {
+      const fps = 30;
+      const n = (o.window?.toFrame ?? 0) - (o.window?.fromFrame ?? 0);
+      return { framesDir: o.framesDirName ?? 'timeline_frames', fps, durationSec: n / fps };
+    });
+  });
+
+  const vdoc = (clips: TimelineClip[]): TimelineProject =>
+    doc({ clips, assets: [{ assetId: 'asset_mov_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+          videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, creditDisplay: { mode: 'hidden' } } });
+
+  it('動画だけの並びは、1枚も焼かずに実動画を流す', async () => {
+    await open(vdoc([vclip('clip_001', 0), vclip('clip_002', 2)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { framesDir?: string; video?: { clipRelPath: string } }[];
+    expect(scenes).toHaveLength(2);
+    expect(scenes.every((x) => x.video != null), '実動画で流していない').toBe(true);
+    expect(scenes.some((x) => x.framesDir != null), '焼いた区間が混ざっている').toBe(false);
+    expect(scenes[0].video?.clipRelPath).toBe('assets/v.mp4');
+  });
+
+  // ⚠️ **上に重ねる層を必ず渡す**（実機で見つけた）＝渡さないと Rust が
+  // 「`video without above png`」で断り、**書き出しが丸ごと失敗する**。
+  // 型の上では任意（場面形式は別の渡し方も使う）なので、**送り出す所で留める**。
+  it('実動画で流す区間には、下と上の層を必ず渡す', async () => {
+    await open(vdoc([vclip('clip_001', 0)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { video?: { belowPngBase64?: string; abovePngBase64?: string } }[];
+    for (const sc of scenes) {
+      if (!sc.video) continue;
+      expect(sc.video.belowPngBase64, '下の層が無い').toBeTruthy();
+      expect(sc.video.abovePngBase64, '上の層が無い（Rust が断る）').toBeTruthy();
+    }
+  });
+
+  // ⚠️ **音を二重に鳴らさない**＝動画の元の音は全体の音の並びで渡っている。
+  it('元の音は流さない（二重に鳴らさない）', async () => {
+    await open(vdoc([vclip('clip_001', 0, { useOriginalAudio: true })]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { video?: { useOriginalAudio: boolean } }[];
+    expect(scenes[0].video?.useOriginalAudio).toBe(false);
+  });
+
+  // ⚠️ **細工の付いた部品は焼く**＝FFmpeg が重ねる所では SVG の細工が消える（ADR-0044）。
+  it('色の調整が付いていたら、その区間は焼く', async () => {
+    await open(vdoc([vclip('clip_001', 0, { colorAdjust: { brightness: 1.4 } })]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { framesDir?: string; video?: unknown }[];
+    expect(scenes[0].video, '細工が付いているのに実動画で流した').toBeUndefined();
+    expect(scenes[0].framesDir).toBeTruthy();
+  });
+
+  // ⚠️ **つないだ長さが元と同じ**＝ここがずれると、出来上がりが伸び縮みする。
+  it('区間をつないだ長さが、元の尺と同じ', async () => {
+    await open(vdoc([vclip('clip_001', 0), vclip('clip_002', 2, { colorAdjust: { brightness: 1.2 } }), vclip('clip_003', 4)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { durationSec: number }[];
+    expect(scenes.reduce((a2, x) => a2 + x.durationSec, 0)).toBeCloseTo(6, 6);
+    expect(scenes.map((x) => x.durationSec)).toEqual([2, 2, 2]);
+  });
+});
+
 describe('exportTimelineVideo', () => {
   it('描いたフレームを書き出しへ渡し、保存できたと知らせる', async () => {
     await open(doc());
