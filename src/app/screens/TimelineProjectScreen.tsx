@@ -157,6 +157,7 @@ import type { FreeElement } from "../../domain/project/types";
 import { freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { deleteRangeIssue } from "../../domain/timeline/deleteRange";
+import type { BlendMode } from "../../domain/template/types";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameIssue, freezeStopsOriginalAudio, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
@@ -407,7 +408,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -2277,6 +2278,43 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {...editGuard()}
         onChange={(v) => setSelectedClipSourceStart(v)}
       />
+    </>
+  );
+  /**
+   * **色の調整と描画モード**の欄（ADR-0044・#1192）。
+   *
+   * ⚠️ **並びは掛ける順と同じ**＝明るさ→コントラスト→彩度→色温度。
+   * 描く側（`renderer/colorFilter.ts`）がこの順で掛けるので、**画面の並びを変えると結果と食い違う**。
+   * ⚠️ **1＝そのまま**＝「0 が既定」ではないので、そう読めるラベルにする。
+   */
+  const lookFields = selected && (
+    <>
+      <NumberField label="明るさ（1＝そのまま）" step={0.05} min={0} max={4}
+        value={selected.colorAdjust?.brightness ?? 1} {...editGuard()}
+        onChange={(v) => setSelectedColorAdjust({ brightness: v })} />
+      <NumberField label="コントラスト（1＝そのまま）" step={0.05} min={0} max={4}
+        value={selected.colorAdjust?.contrast ?? 1} {...editGuard()}
+        onChange={(v) => setSelectedColorAdjust({ contrast: v })} />
+      <NumberField label="鮮やかさ（1＝そのまま・0＝白黒）" step={0.05} min={0} max={4}
+        value={selected.colorAdjust?.saturation ?? 1} {...editGuard()}
+        onChange={(v) => setSelectedColorAdjust({ saturation: v })} />
+      <NumberField label="色あい（0＝そのまま・＋で暖色）" step={0.05} min={-1} max={1}
+        value={selected.colorAdjust?.temperature ?? 0} {...editGuard()}
+        onChange={(v) => setSelectedColorAdjust({ temperature: v })} />
+      <label className="field">
+        <span className="field-label text-sm">重ね方</span>
+        <select
+          className="input"
+          value={selected.blendMode ?? "normal"}
+          onChange={(e) => setSelectedBlendMode(e.target.value as BlendMode)}
+        >
+          <option value="normal">ふつう</option>
+          <option value="multiply">重ねて暗く</option>
+          <option value="screen">重ねて明るく</option>
+          <option value="overlay">コントラストを強める</option>
+          <option value="plus-lighter">光を足す</option>
+        </select>
+      </label>
     </>
   );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
@@ -4493,6 +4531,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </CollapsibleSection>
             )}
 
+            {/* **見え方**（ADR-0044・#1192）＝色の調整と重ね方。⚠️ **音の部品には出さない**（絵を持たない）。
+                ⚠️ **触っていなければ畳んだまま**＝既定の値の欄で場所を取らない。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
+              <CollapsibleSection
+                key={`look-${selected.id}`}
+                scope={SECTION_SCOPE.timeline}
+                storageKey="look"
+                title="見え方（色・重ね方）"
+                defaultOpen={selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")}
+              >
+                {lookFields}
+                <p className="text-muted">
+                  明るさ・コントラスト・鮮やかさは <strong>1 がそのまま</strong>、色あいは <strong>0 がそのまま</strong>です。
+                  重ね方は、下にあるものとどう混ざるかを決めます。
+                </p>
+              </CollapsibleSection>
+            )}
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
               <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>

@@ -23,6 +23,33 @@ export interface TextShadow {
   dy?: number;
 }
 
+/**
+ * 色の調整（ADR-0044 ①）。**未指定＝調整なし**（従来の出力は不変）。
+ *
+ * ⚠️ **両形式で同じ語彙**＝schema も共有の `$defs`（`ColorAdjust`）を指している（写しを作らない）。
+ * ⚠️ **掛ける順は 明るさ→コントラスト→彩度→色温度**＝入れ替えると同じ数字でも別の絵になるので、
+ * 画面の並びとこの順番を揃える（`renderer/colorFilter.ts`）。
+ */
+export interface ColorAdjust {
+  /** 明るさ（1＝そのまま・0＝黒）。 */
+  brightness?: number;
+  /** コントラスト（1＝そのまま）。 */
+  contrast?: number;
+  /** 彩度（1＝そのまま・0＝白黒）。 */
+  saturation?: number;
+  /** 色温度（0＝そのまま・+1＝暖色寄り・−1＝寒色寄り）。 */
+  temperature?: number;
+}
+
+/**
+ * 描画モード（ADR-0044 ②）。**未指定＝`normal`**（従来の出力は不変）。
+ *
+ * ⚠️ **混ぜるのは合成の単位（ADR-0032 決定19）より前**＝畳んだ後だと**フェード中だけ混ざり方が変わる**。
+ * ⚠️ **持てるのはタイムライン形式のクリップだけ**（ADR-0044 追補1）＝場面形式は凍結（ADR-0032）なので
+ * `FreeElement` には足していない。足すと**プレビューにだけ出て書き出しに出ない**（層に割って FFmpeg が重ねるため）。
+ */
+export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'plus-lighter';
+
 export interface LayerBackground {
   enabled?: boolean;
   color?: string;

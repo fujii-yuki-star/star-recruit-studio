@@ -6,7 +6,7 @@ import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
 import type { CropAlignX, CropAlignY } from '../domain/enums';
 import type { ElementAnimation, Scene } from '../domain/project/types';
-import type { Template, TextShadow } from '../domain/template/types';
+import type { ColorAdjust, BlendMode, Template, TextShadow } from '../domain/template/types';
 import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { textKeyOfLayer } from '../domain/template/layerOps';
@@ -45,6 +45,22 @@ interface ItemBase extends Rect {
    * 場面形式は設定しない（従来どおり切り抜き無し）＝この仕組みは出力に影響しない。
    */
   clipRect?: { id: string; x: number; y: number; w: number; h: number; rotation?: number };
+  /**
+   * **色の調整**（ADR-0044 ①）。未指定＝調整なし（**従来の出力は不変**）。
+   *
+   * ⚠️ **プレビューと書き出しは同じ道を通る**ので、ここで効かせれば必ず一致する（**場面の中では**）。
+   * ⚠️ **載せるのはタイムライン形式だけ**（ADR-0044 追補1）＝場面形式の書き出しは**層に割って FFmpeg が重ねる**ので、
+   * 動画に掛けても効かない（プレビューにだけ出る）。場面形式は凍結（ADR-0032）なので、そもそも持たせない。
+   */
+  colorAdjust?: ColorAdjust;
+  /**
+   * **描画モード**（ADR-0044 ②）。未指定＝`normal`（**従来の出力は不変**）。
+   *
+   * ⚠️ **混ぜるのは合成の単位（決定19）より前**＝`itemToSvg` が包む `<g>` に載せるので、
+   * 畳む前に混ざる（畳んだ後だと**フェード中だけ混ざり方が変わる**）。
+   * ⚠️ **載せるのはタイムライン形式だけ**（同 追補1）。
+   */
+  blendMode?: BlendMode;
 }
 
 export interface FillItem extends ItemBase {

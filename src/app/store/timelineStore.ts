@@ -36,7 +36,7 @@ import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
   moveClip, visualPlacementAt,
   setVisualClipContent,
-  moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
+  setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
   setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip, trimClips, trimTargetsAt,
@@ -91,6 +91,7 @@ import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/asse
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
+import type { BlendMode } from "../../domain/template/types";
 import { userFacingMessage } from "../userFacingError";
 
 /**
@@ -503,6 +504,14 @@ export interface TimelineState {
    * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
    */
   splitSelectedClip: (atSec: number, at?: BlockTarget) => void;
+  /**
+   * 選んでいる部品の**色の調整**を直す（ADR-0044 ①・#1192）。
+   *
+   * ⚠️ **部品ごと**＝見た目パターンの中身（層が複数）でも**1つの見え方**になる。
+   */
+  setSelectedColorAdjust: (patch: { brightness?: number; contrast?: number; saturation?: number; temperature?: number }) => void;
+  /** 選んでいる部品の**描画モード**を直す（ADR-0044 ②）。 */
+  setSelectedBlendMode: (mode: BlendMode) => void;
   /**
    * 作業範囲の**始まり／終わり**（#1193）。どちらも `null` ＝範囲を取っていない。
    *
@@ -1302,6 +1311,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editNotice: markersClampedMessage(r.clampedMarkerCount) });
     }
   },
+
+  setSelectedColorAdjust: (patch) =>
+    applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),
+  setSelectedBlendMode: (mode) => applyEdit(set, get, (d, id) => setClipBlendMode(d, id, mode)),
 
   splitSelectedClip: (atSec, at = PANEL_ID.arrange) => {
     const { doc, selectedClipIds } = get();

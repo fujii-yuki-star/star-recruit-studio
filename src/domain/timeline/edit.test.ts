@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND, NARRATION_STATUS } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import {
+import { setClipBlendMode, setClipColorAdjust,
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, clipPlacementIssue, duplicateClip, EDIT_BLOCKED, isFreeSpan, placedDurationSec, VISUAL_CLIP_DURATION_SEC,
   addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip, trimClips, trimTargetsAt,
 } from './edit';
@@ -1688,5 +1688,47 @@ describe('trimTargetsAt（実際に長さが変わる部品）', () => {
 
   it('見つからない id は数えない（ボタンの数が実際より多くならない）', () => {
     expect(trimTargetsAt(d, ['clip_999'], 5)).toEqual([]);
+  });
+});
+
+// 色の調整と重ね方（ADR-0044・#1192）。
+describe('見え方（色の調整・描画モード）', () => {
+  const d = () => doc({ clips: [clip('clip_001')] });
+  const clipOf = (r: ReturnType<typeof setClipColorAdjust>) => (r.ok ? r.doc.clips[0] : undefined);
+
+  it('渡した項目だけ書き換える（残りはそのまま）', () => {
+    const one = setClipColorAdjust(d(), 'clip_001', { brightness: 1.5 });
+    expect(clipOf(one)?.colorAdjust).toEqual({ brightness: 1.5 });
+    const two = setClipColorAdjust(one.ok ? one.doc : d(), 'clip_001', { saturation: 0.5 });
+    expect(clipOf(two)?.colorAdjust).toEqual({ brightness: 1.5, saturation: 0.5 });
+  });
+
+  // ⚠️ **素の値に戻ったら、まるごと落とす**＝残すと描く側が「調整あり」と見てフィルタを出す
+  //（通すだけで絵がわずかに変わる）。判定は描く側と同じ規則。
+  it('そのままの値に戻したら、調整ごと落とす', () => {
+    const on = setClipColorAdjust(d(), 'clip_001', { brightness: 1.5 });
+    const off = setClipColorAdjust(on.ok ? on.doc : d(), 'clip_001', { brightness: 1 });
+    expect(clipOf(off)?.colorAdjust, '何もしない調整が残っている').toBeUndefined();
+  });
+
+  // ⚠️ **`normal` は書き残さない**＝既定と同じものを書くと、出力（SVG）が無駄に変わる。
+  it('重ね方を「ふつう」に戻したら、書き残さない', () => {
+    const on = setClipBlendMode(d(), 'clip_001', 'multiply');
+    expect(on.ok && on.doc.clips[0]?.blendMode).toBe('multiply');
+    const off = setClipBlendMode(on.ok ? on.doc : d(), 'clip_001', 'normal');
+    expect(off.ok && off.doc.clips[0]?.blendMode, '既定を書き残している').toBeUndefined();
+  });
+
+  it('固定した列の部品は断る', () => {
+    const locked = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [clip('clip_001')],
+    });
+    expect(setClipColorAdjust(locked, 'clip_001', { brightness: 1.5 })).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    expect(setClipBlendMode(locked, 'clip_001', 'multiply')).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+  });
+
+  it('無い部品は断る', () => {
+    expect(setClipColorAdjust(d(), 'clip_999', { brightness: 1.5 })).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
   });
 });
