@@ -1,0 +1,401 @@
+//! 起動の引数を読む（ADR-0042・#1184）。
+//!
+//! ⚠️ **持ち込みの AI が使う「口」**＝待ち受け（ポート）は作らず、**起こすときの引数**で頼む。
+//! 誰に許すかは [ADR-0041]、口の形は [ADR-0042] にある。
+//!
+//! ⚠️ **ここは読むだけ**＝実際に取り込む・書き出すのは呼ぶ側。
+//! 読む所を純粋関数に切り出してあるのは、**引数の取り違えを検査で留める**ため
+//! （窓を起こさないと確かめられない形にすると、誰も確かめない）。
+
+use std::path::PathBuf;
+
+/// 起動のときに頼まれたこと。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum StartupRequest {
+    /// 何も頼まれていない（＝人が普通に起動した）。
+    #[default]
+    None,
+    /// フォルダから取り込む。
+    Import { folder: PathBuf },
+    /// その動画を書き出す。
+    Export { project_id: String, out: PathBuf },
+}
+
+/// 起動のときの頼まれごと一式。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Startup {
+    pub request: StartupRequest,
+    /// 終わったら閉じるか。
+    pub quit_when_done: bool,
+}
+
+/// 引数が読めなかった理由（ADR-0042＝**終了コード 2** で返す側）。
+///
+/// ⚠️ **理由を持つ**＝「読めなかった」だけだと、頼んだ側（AI）が**何を直せばよいか分からない**（§2-5）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupArgError {
+    /// 値が要る印なのに、後ろに値が無い。
+    MissingValue { flag: String },
+    /// 知らない印。
+    Unknown { flag: String },
+    /// `--export` に `--out` が無い（逆も同じ）。
+    IncompleteExport,
+    /// 取り込みと書き出しを同時に頼まれた。
+    Conflicting,
+}
+
+const IMPORT: &str = "--import";
+const EXPORT: &str = "--export";
+const OUT: &str = "--out";
+const QUIT: &str = "--quit-when-done";
+
+/// 引数を読む（**実行ファイル自身の名前は含めない**）。
+///
+/// ⚠️ **知らない印は黙って読み飛ばさない**＝打ち間違い（`--exprot`）を「何も頼まれていない」として
+/// 普通に起動すると、頼んだ側からは**成功したように見えて何も起きない**（§2-5 の行き止まり）。
+/// ⚠️ **Windows が足す印まで弾かないよう、対象は `--` で始まるものだけ**にする。
+pub fn parse_startup_args(args: &[String]) -> Result<Startup, StartupArgError> {
+    let mut import: Option<PathBuf> = None;
+    let mut export: Option<String> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut quit_when_done = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        // ⚠️ **印でないものは読み飛ばす**＝OS や起動の仕方によって余計なものが混ざりうる。
+        if !a.starts_with("--") {
+            i += 1;
+            continue;
+        }
+        let take_value = |flag: &str| -> Result<String, StartupArgError> {
+            args.get(i + 1)
+                .filter(|v| !v.starts_with("--"))
+                .cloned()
+                .ok_or_else(|| StartupArgError::MissingValue {
+                    flag: flag.to_string(),
+                })
+        };
+        match a {
+            IMPORT => {
+                import = Some(PathBuf::from(take_value(IMPORT)?));
+                i += 2;
+            }
+            EXPORT => {
+                export = Some(take_value(EXPORT)?);
+                i += 2;
+            }
+            OUT => {
+                out = Some(PathBuf::from(take_value(OUT)?));
+                i += 2;
+            }
+            QUIT => {
+                quit_when_done = true;
+                i += 1;
+            }
+            _ => {
+                return Err(StartupArgError::Unknown {
+                    flag: a.to_string(),
+                })
+            }
+        }
+    }
+
+    let request = match (import, export, out) {
+        (None, None, None) => StartupRequest::None,
+        (Some(folder), None, None) => StartupRequest::Import { folder },
+        (None, Some(project_id), Some(out)) => StartupRequest::Export { project_id, out },
+        // ⚠️ **片方だけは断る**＝`--export` だけだと保存先が無く、`--out` だけだと何を書き出すか無い。
+        (None, Some(_), None) | (None, None, Some(_)) => {
+            return Err(StartupArgError::IncompleteExport)
+        }
+        // ⚠️ **同時には受けない**＝どちらを先にするかを決めていない（決めていないものを推測で埋めない＝§9-2）。
+        _ => return Err(StartupArgError::Conflicting),
+    };
+    Ok(Startup {
+        request,
+        quit_when_done,
+    })
+}
+
+/// 画面へ渡す形（ADR-0042 ④＝**画面は自分が何を頼まれたかを知ってから**描き始める）。
+///
+/// ⚠️ **技術語を画面へ出さない**（§2-3）＝ここは**画面が分岐に使う値**であって、表示する文ではない。
+/// 出す文は画面の側が持つ。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupRequestDto {
+    /// `"none"` / `"import"` / `"export"`。
+    pub kind: &'static str,
+    /// 取り込むフォルダ（`kind="import"` のときだけ）。
+    pub folder: Option<String>,
+    /// 書き出す動画の id（`kind="export"` のときだけ）。
+    pub project_id: Option<String>,
+    /// 書き出し先（`kind="export"` のときだけ）。
+    pub out: Option<String>,
+    /// 終わったら閉じるか。
+    pub quit_when_done: bool,
+    /// 引数が読めなかったとき、**何が悪かったか**（画面が文にする＝§2-5）。
+    /// ⚠️ **`None` ＝読めた**。読めなかった回は `kind="none"` になるので、これが無いと
+    /// 「普通の起動」と見分けがつかない。
+    pub arg_error: Option<StartupArgErrorDto>,
+}
+
+/// 引数が読めなかった理由（画面へ渡す形）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupArgErrorDto {
+    /// `"missingValue"` / `"unknown"` / `"incompleteExport"` / `"conflicting"`。
+    pub kind: &'static str,
+    /// どの印か（分かるときだけ）。
+    pub flag: Option<String>,
+}
+
+impl From<&StartupArgError> for StartupArgErrorDto {
+    fn from(e: &StartupArgError) -> Self {
+        match e {
+            StartupArgError::MissingValue { flag } => Self {
+                kind: "missingValue",
+                flag: Some(flag.clone()),
+            },
+            StartupArgError::Unknown { flag } => Self {
+                kind: "unknown",
+                flag: Some(flag.clone()),
+            },
+            StartupArgError::IncompleteExport => Self {
+                kind: "incompleteExport",
+                flag: None,
+            },
+            StartupArgError::Conflicting => Self {
+                kind: "conflicting",
+                flag: None,
+            },
+        }
+    }
+}
+
+/// 起動のときに読んだものを、アプリが動いている間ずっと持っておく置き場。
+#[derive(Default)]
+pub struct StartupState {
+    pub startup: Startup,
+    pub arg_error: Option<StartupArgError>,
+}
+
+impl StartupState {
+    /// 実行ファイルの引数から作る（**自分の名前は落とす**）。
+    pub fn from_env() -> Self {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        Self::from_args(&args)
+    }
+
+    /// 読んだ結果を持つ（**読めなくても起動は止めない**＝画面が理由を出せるように持ち越す）。
+    ///
+    /// ⚠️ **ここで落とさない**＝引数が変でもアプリが開かないと、人は何が起きたか分からない（§2-5）。
+    pub fn from_args(args: &[String]) -> Self {
+        match parse_startup_args(args) {
+            Ok(startup) => Self {
+                startup,
+                arg_error: None,
+            },
+            Err(e) => Self {
+                startup: Startup::default(),
+                arg_error: Some(e),
+            },
+        }
+    }
+
+    /// 画面へ渡す形にする。
+    pub fn to_dto(&self) -> StartupRequestDto {
+        let (kind, folder, project_id, out) = match &self.startup.request {
+            StartupRequest::None => ("none", None, None, None),
+            StartupRequest::Import { folder } => (
+                "import",
+                Some(folder.to_string_lossy().into_owned()),
+                None,
+                None,
+            ),
+            StartupRequest::Export { project_id, out } => (
+                "export",
+                None,
+                Some(project_id.clone()),
+                Some(out.to_string_lossy().into_owned()),
+            ),
+        };
+        StartupRequestDto {
+            kind,
+            folder,
+            project_id,
+            out,
+            quit_when_done: self.startup.quit_when_done,
+            arg_error: self.arg_error.as_ref().map(StartupArgErrorDto::from),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn a(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn 何も渡されなければ_普通の起動() {
+        let s = parse_startup_args(&a(&[])).expect("読める");
+        assert_eq!(s.request, StartupRequest::None);
+        assert!(!s.quit_when_done);
+    }
+
+    #[test]
+    fn 取り込みと書き出しを読む() {
+        let s = parse_startup_args(&a(&["--import", "C:/x/proj_1"])).expect("読める");
+        assert_eq!(
+            s.request,
+            StartupRequest::Import {
+                folder: PathBuf::from("C:/x/proj_1")
+            }
+        );
+        let s = parse_startup_args(&a(&[
+            "--export",
+            "proj_20260916_001",
+            "--out",
+            "C:/out/a.mp4",
+            "--quit-when-done",
+        ]))
+        .expect("読める");
+        assert_eq!(
+            s.request,
+            StartupRequest::Export {
+                project_id: "proj_20260916_001".into(),
+                out: PathBuf::from("C:/out/a.mp4")
+            }
+        );
+        assert!(s.quit_when_done);
+    }
+
+    /// ⚠️ **並びを変えても同じ**＝頼む側（AI）が順番を覚えていなくてよい。
+    #[test]
+    fn 印の並びは問わない() {
+        let s = parse_startup_args(&a(&[
+            "--quit-when-done",
+            "--out",
+            "C:/out/a.mp4",
+            "--export",
+            "proj_1",
+        ]))
+        .expect("読める");
+        assert_eq!(
+            s.request,
+            StartupRequest::Export {
+                project_id: "proj_1".into(),
+                out: PathBuf::from("C:/out/a.mp4")
+            }
+        );
+    }
+
+    /// ⚠️ **打ち間違いを黙って飲まない**＝「何も頼まれていない」として普通に起動すると、
+    /// 頼んだ側からは**成功したように見えて何も起きない**（§2-5 の行き止まり）。
+    #[test]
+    fn 知らない印は断る() {
+        assert_eq!(
+            parse_startup_args(&a(&["--exprot", "proj_1"])),
+            Err(StartupArgError::Unknown {
+                flag: "--exprot".into()
+            })
+        );
+    }
+
+    /// ⚠️ **値が次の印に食われない**＝`--import --quit-when-done` を
+    /// 「フォルダ名が `--quit-when-done`」と読むと、**存在しない所を取り込みに行く**。
+    #[test]
+    fn 値が無ければ断る() {
+        for args in [
+            a(&["--import"]),
+            a(&["--import", "--quit-when-done"]),
+            a(&["--export", "proj_1", "--out"]),
+        ] {
+            assert!(
+                matches!(
+                    parse_startup_args(&args),
+                    Err(StartupArgError::MissingValue { .. })
+                ),
+                "args={args:?}"
+            );
+        }
+    }
+
+    /// ⚠️ **片方だけの書き出しは断る**＝保存先が無い／何を書き出すかが無い。
+    #[test]
+    fn 書き出しは二つそろって初めて受ける() {
+        assert_eq!(
+            parse_startup_args(&a(&["--export", "proj_1"])),
+            Err(StartupArgError::IncompleteExport)
+        );
+        assert_eq!(
+            parse_startup_args(&a(&["--out", "C:/out/a.mp4"])),
+            Err(StartupArgError::IncompleteExport)
+        );
+    }
+
+    /// ⚠️ **同時には受けない**＝どちらを先にするかを決めていない（決めていないものを推測で埋めない）。
+    #[test]
+    fn 取り込みと書き出しを同時には受けない() {
+        assert_eq!(
+            parse_startup_args(&a(&[
+                "--import", "C:/x", "--export", "proj_1", "--out", "C:/o.mp4"
+            ])),
+            Err(StartupArgError::Conflicting)
+        );
+    }
+
+    /// ⚠️ **読めなかったことを画面まで持ち越す**＝ここを落とすと、頼まれごとが `none` になるので
+    /// **「普通の起動」と見分けがつかない**＝頼んだ側には成功したように見えて何も起きない（§2-5）。
+    /// ⚠️ **変異チェックで生き残ったので足した**＝読む所（`parse_startup_args`）だけ検査していて、
+    /// **渡す所**（`to_dto`）を見ていなかった。
+    #[test]
+    fn 読めなかった理由が画面まで届く() {
+        let st = StartupState::from_args(&a(&["--exprot", "proj_1"]));
+        let dto = st.to_dto();
+        assert_eq!(dto.kind, "none", "読めなければ頼まれごとは無し");
+        let e = dto
+            .arg_error
+            .expect("理由が落ちている＝普通の起動と見分けがつかない");
+        assert_eq!(e.kind, "unknown");
+        assert_eq!(e.flag.as_deref(), Some("--exprot"));
+    }
+
+    /// ⚠️ **読めたときは理由を出さない**＝毎回「何か変です」が出ると、本当に変な回が埋もれる。
+    #[test]
+    fn 読めたときは理由を出さない() {
+        let dto = StartupState::from_args(&a(&["--import", "C:/x"])).to_dto();
+        assert_eq!(dto.kind, "import");
+        assert_eq!(dto.folder.as_deref(), Some("C:/x"));
+        assert!(dto.arg_error.is_none(), "読めたのに理由が付いている");
+    }
+
+    /// ⚠️ **書き出しの3つが、そのまま画面へ届く**＝どれか1つでも落ちると、別の動画を別の場所へ書く。
+    #[test]
+    fn 書き出しの頼まれごとが画面まで届く() {
+        let dto = StartupState::from_args(&a(&[
+            "--export",
+            "proj_20260916_001",
+            "--out",
+            "C:/out/a.mp4",
+            "--quit-when-done",
+        ]))
+        .to_dto();
+        assert_eq!(dto.kind, "export");
+        assert_eq!(dto.project_id.as_deref(), Some("proj_20260916_001"));
+        assert_eq!(dto.out.as_deref(), Some("C:/out/a.mp4"));
+        assert!(dto.quit_when_done);
+    }
+
+    /// ⚠️ **印でないものは読み飛ばす**＝起動の仕方によって余計なものが混ざりうる。
+    #[test]
+    fn 印でないものは読み飛ばす() {
+        let s = parse_startup_args(&a(&["ごみ", "--quit-when-done"])).expect("読める");
+        assert_eq!(s.request, StartupRequest::None);
+        assert!(s.quit_when_done);
+    }
+}

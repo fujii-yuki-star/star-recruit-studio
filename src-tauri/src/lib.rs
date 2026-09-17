@@ -10,6 +10,8 @@ mod ffmpeg;
 mod messages;
 mod opener;
 mod proc;
+mod project_import;
+mod startup;
 mod trouble_log;
 mod voicevox;
 mod voicevox_engine;
@@ -880,6 +882,91 @@ fn trouble_log_dir() -> Option<String> {
     trouble_log::dir().map(|p| p.to_string_lossy().to_string())
 }
 
+/// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。
+///
+/// ⚠️ **画面が聞きに来る形にする**＝起動の合図を投げつける形だと、**画面が受け取れる前に投げて**
+/// 取りこぼす（窓ができる順番は保証されない）。
+/// ⚠️ **読めなかったことも渡す**＝「普通の起動」と見分けがつかないと、頼んだ側には
+/// **成功したように見えて何も起きない**（§2-5 の行き止まり）。
+#[tauri::command]
+fn startup_request(
+    state: tauri::State<'_, crate::startup::StartupState>,
+) -> crate::startup::StartupRequestDto {
+    state.to_dto()
+}
+
+/// 取り込めなかったときの断り（§2-5＝次の行動）。⚠️ **生の道やエラーを画面へ出さない**（§2-3）。
+fn import_folder_message(e: &crate::project_import::ImportFolderError) -> String {
+    use crate::project_import::ImportFolderError as E;
+    match e {
+        E::NotFound => {
+            "そのフォルダが見つかりませんでした。場所を確かめて、もう一度お試しください。".into()
+        }
+        E::NotADirectory => {
+            "フォルダを指定してください。ファイルではなく、動画の入ったフォルダを選びます。".into()
+        }
+        E::NoProjectJson => {
+            "その中に動画のデータが見当たりませんでした。動画のフォルダごと指定してください。"
+                .into()
+        }
+        E::Io(_) => {
+            "動画を取り込めませんでした。空き容量とアクセス権を確かめて、もう一度お試しください。"
+                .into()
+        }
+    }
+}
+
+/// 取り込む元の `project.json` を読むだけ（ADR-0042 決定⑥）。
+///
+/// ⚠️ **検証は画面がする**（ADR-0041 条件1）＝正典の検証はドメイン側にあるので、
+/// ここは**中身を読んで渡すだけ**。読めた＝正しい、ではない。
+#[tauri::command]
+fn read_import_folder(folder: String) -> Result<String, String> {
+    let root = crate::project_import::resolve_import_source(std::path::Path::new(&folder))
+        .map_err(|e| import_folder_message(&e))?;
+    std::fs::read_to_string(root.join("project.json")).map_err(|_| {
+        import_folder_message(&crate::project_import::ImportFolderError::Io(String::new()))
+    })
+}
+
+/// 取り込んだ結果（写した数・落とした数）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportFolderReport {
+    copied: usize,
+    /// ⚠️ **落としたものは黙って消さない**＝数を返し、画面が知らせる（§2-5）。
+    skipped: usize,
+}
+
+/// フォルダを `projects/<project_id>/` へ取り込む（ADR-0042 決定⑥）。
+///
+/// ⚠️ **番号を決めるのは画面**（採番の規則は `11.2`＝ドメインにある。ここで決めると写しになる）。
+/// ⚠️ **書き込む先は必ず持ち場の中**＝`project_id` は `is_safe_project_id` を通す。**ここが本当の守り**。
+#[tauri::command]
+fn import_project_folder(
+    app: tauri::AppHandle,
+    folder: String,
+    project_id: String,
+) -> Result<ImportFolderReport, String> {
+    if !is_safe_project_id(&project_id) {
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
+    }
+    let dst = projects_dir(&app)?.join(&project_id);
+    // ⚠️ **すでに在るなら断る**＝上書きすると、同じ番号の別の動画を黙って潰す（ADR-0026④）。
+    if dst.exists() {
+        return Err("その番号の動画がすでにあります。もう一度お試しください。".to_string());
+    }
+    let (copied, skipped) =
+        crate::project_import::copy_project_folder(std::path::Path::new(&folder), &dst).map_err(
+            |e| {
+                // ⚠️ **途中まで写したものを置き去りにしない**＝次の取り込みが「すでに在る」で止まる。
+                let _ = std::fs::remove_dir_all(&dst);
+                import_folder_message(&e)
+            },
+        )?;
+    Ok(ImportFolderReport { copied, skipped })
+}
+
 /// `assetProtocol.scope` に書いてあるフォルダを作っておく（#945・起動時に1回）。
 ///
 /// ⚠️ **失敗しても起動は止めない**＝作れないのは権限などの環境要因で、ここで落とすと
@@ -1235,6 +1322,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(voicevox_engine::EngineState::default())
+        // 起動のときの頼まれごと（ADR-0042）＝**窓を作る前に読む**。読めなくても止めない。
+        .manage(crate::startup::StartupState::from_env())
         .setup(|app| {
             // 画像を配れる場所（`assetProtocol.scope`）のフォルダを、**起動時に作っておく**（#945）。
             // ⚠️ **入れたばかりのアプリで、取り込んだ写真がどこにも映らなかった**＝許可は起動時に
@@ -1257,6 +1346,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            startup_request,
+            read_import_folder,
+            import_project_folder,
             save_project,
             project_backup_time,
             restore_project_backup,
