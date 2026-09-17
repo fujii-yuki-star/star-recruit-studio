@@ -1280,6 +1280,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const { doc, rangeInSec, rangeOutSec } = get();
     if (!doc) return;
     // ⚠️ **範囲を取っていなければ理由を出す**＝押しても何も起きない、を作らない（§2-5）。
+    // ⚠️ **答えは `deleteRangeIssue` と同じ**（変異チェックで等価と分かった）＝あちらも
+    // 幅ゼロを `notFound` で断る。**それでも残す**のは、型の上で `number` が要るのと、
+    // **ここで断る理由が「範囲を取っていない」だと読んで分かる**ため（規則が増えたわけではない）。
     if (rangeInSec == null || rangeOutSec == null) {
       set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
       return;
