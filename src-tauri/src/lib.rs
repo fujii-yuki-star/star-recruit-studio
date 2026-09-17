@@ -1443,7 +1443,11 @@ mod remove_file_tests {
             .filter(|l| l.contains("remove_file_unless_missing("))
             .filter(|l| !l.contains("fn remove_file_unless_missing("))
             .collect();
-        assert_eq!(calls.len(), 1, "呼ぶ所が増減した＝この検査を見直す: {calls:?}");
+        assert_eq!(
+            calls.len(),
+            1,
+            "呼ぶ所が増減した＝この検査を見直す: {calls:?}"
+        );
         for line in &calls {
             assert!(
                 line.contains("if let Some("),
@@ -1460,10 +1464,16 @@ mod remove_file_tests {
         std::fs::create_dir_all(&dir).expect("置き場");
         let f = dir.join("a.json");
         std::fs::write(&f, b"{}").expect("書ける");
-        assert!(remove_file_unless_missing(&f).is_none(), "消せたのに理由を返した");
+        assert!(
+            remove_file_unless_missing(&f).is_none(),
+            "消せたのに理由を返した"
+        );
         assert!(!f.exists(), "消えていない");
         // ⚠️ **2回目**＝もう無い。これは失敗ではない（刈り取りは重なって呼ばれうる）。
-        assert!(remove_file_unless_missing(&f).is_none(), "元から無いのを失敗にした");
+        assert!(
+            remove_file_unless_missing(&f).is_none(),
+            "元から無いのを失敗にした"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
