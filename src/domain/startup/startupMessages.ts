@@ -30,3 +30,13 @@ export function importDoneMessage(copied: number, skipped: number): string {
     ? `${base}${skipped} 個は取り込めなかったので、元のフォルダを確かめてください。`
     : base;
 }
+
+/**
+ * 声を作り終えたときの知らせ（#1204・§2-5＝残っていれば**次の行動**を出す）。
+ *
+ * ⚠️ **残りが 0 でないときは「できた」と言わない**＝途中で失敗した回を成功に見せない。
+ */
+export function makeVoicesDoneMessage(left: number): string {
+  if (left <= 0) return "読み上げの声を作りました。";
+  return `読み上げの声を${left}件、作れませんでした。文を確かめてから、もう一度お試しください。`;
+}

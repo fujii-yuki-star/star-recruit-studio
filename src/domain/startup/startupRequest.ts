@@ -18,7 +18,7 @@ export type StartupArgError = {
  * **閉じる頼みは持ち越さない**（仕事の持ち主が違う＝ADR-0042 決定③）。
  */
 export type StartupRequest = {
-  kind: 'none' | 'import' | 'export';
+  kind: 'none' | 'import' | 'export' | 'makeVoices';
   folder: string | null;
   projectId: string | null;
   out: string | null;

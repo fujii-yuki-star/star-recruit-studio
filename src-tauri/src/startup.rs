@@ -19,6 +19,11 @@ pub enum StartupRequest {
     Import { folder: PathBuf },
     /// その動画を書き出す。
     Export { project_id: String, out: PathBuf },
+    /// その動画の**読み上げの声を作る**（#1204）。
+    ///
+    /// ⚠️ **書き出しとは別の口にする**＝一度に両方やる形にすると、
+    /// 「声は出来たが書き出しは失敗した」ときに**どこまで進んだかが終了コードで表せない**。
+    MakeVoices { project_id: String },
 }
 
 /// 起動のときの頼まれごと一式。
@@ -49,6 +54,7 @@ pub enum StartupArgError {
 const IMPORT: &str = "--import";
 const EXPORT: &str = "--export";
 const OUT: &str = "--out";
+const MAKE_VOICES: &str = "--make-voices";
 const QUIT: &str = "--quit-when-done";
 
 /// 引数を読む（**実行ファイル自身の名前は含めない**）。
@@ -60,6 +66,7 @@ pub fn parse_startup_args(args: &[String]) -> Result<Startup, StartupArgError> {
     let mut import: Option<PathBuf> = None;
     let mut export: Option<String> = None;
     let mut out: Option<PathBuf> = None;
+    let mut make_voices: Option<String> = None;
     let mut quit_when_done = false;
 
     let mut i = 0;
@@ -91,6 +98,10 @@ pub fn parse_startup_args(args: &[String]) -> Result<Startup, StartupArgError> {
                 out = Some(PathBuf::from(take_value(OUT)?));
                 i += 2;
             }
+            MAKE_VOICES => {
+                make_voices = Some(take_value(MAKE_VOICES)?);
+                i += 2;
+            }
             QUIT => {
                 quit_when_done = true;
                 i += 1;
@@ -103,6 +114,18 @@ pub fn parse_startup_args(args: &[String]) -> Result<Startup, StartupArgError> {
         }
     }
 
+    // ⚠️ **声を作るは単独でのみ受ける**＝取り込みや書き出しと混ぜると、
+    // どこまで進んだかが**終了コード1つでは表せない**（ADR-0042 ④）。
+    if let Some(project_id) = make_voices {
+        if import.is_some() || export.is_some() || out.is_some() {
+            return Err(StartupArgError::Conflicting);
+        }
+        return Ok(Startup {
+            request: StartupRequest::MakeVoices { project_id },
+            quit_when_done,
+            forwarded: false,
+        });
+    }
     let request = match (import, export, out) {
         (None, None, None) => StartupRequest::None,
         (Some(folder), None, None) => StartupRequest::Import { folder },
@@ -128,7 +151,7 @@ pub fn parse_startup_args(args: &[String]) -> Result<Startup, StartupArgError> {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupRequestDto {
-    /// `"none"` / `"import"` / `"export"`。
+    /// `"none"` / `"import"` / `"export"` / `"makeVoices"`。
     pub kind: &'static str,
     /// 取り込むフォルダ（`kind="import"` のときだけ）。
     pub folder: Option<String>,
@@ -260,6 +283,9 @@ impl StartupState {
                 Some(project_id.clone()),
                 Some(out.to_string_lossy().into_owned()),
             ),
+            StartupRequest::MakeVoices { project_id } => {
+                ("makeVoices", None, Some(project_id.clone()), None)
+            }
         };
         StartupRequestDto {
             kind,
@@ -495,5 +521,79 @@ mod tests {
         let s = parse_startup_args(&a(&["ごみ", "--quit-when-done"])).expect("読める");
         assert_eq!(s.request, StartupRequest::None);
         assert!(s.quit_when_done);
+    }
+}
+
+#[cfg(test)]
+mod make_voices_tests {
+    use super::*;
+
+    fn a(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// ⚠️ **声を作る口**（#1204）＝これが無いと、外の AI は「作る→声→書き出す」の**真ん中を通れない**。
+    #[test]
+    fn make_voices_is_read() {
+        let s = parse_startup_args(&a(&["--make-voices", "proj_20260917_001"])).expect("読める");
+        assert_eq!(
+            s.request,
+            StartupRequest::MakeVoices {
+                project_id: "proj_20260917_001".to_string()
+            }
+        );
+    }
+
+    /// ⚠️ **値が要る**＝印だけでは何の動画か分からない。
+    #[test]
+    fn make_voices_needs_value() {
+        let e = parse_startup_args(&a(&["--make-voices"])).expect_err("断る");
+        assert!(matches!(e, StartupArgError::MissingValue { .. }));
+    }
+
+    /// ⚠️ **次の印を値として飲み込まない**。
+    #[test]
+    fn make_voices_does_not_eat_next_flag() {
+        let e = parse_startup_args(&a(&["--make-voices", "--quit-when-done"])).expect_err("断る");
+        assert!(matches!(e, StartupArgError::MissingValue { .. }));
+    }
+
+    /// ⚠️ **書き出しと混ぜない**＝どこまで進んだかが終了コード1つでは表せない。
+    #[test]
+    fn make_voices_conflicts_with_export() {
+        let e = parse_startup_args(&a(&[
+            "--make-voices",
+            "proj_1",
+            "--export",
+            "proj_1",
+            "--out",
+            "C:/x.mp4",
+        ]))
+        .expect_err("断る");
+        assert!(matches!(e, StartupArgError::Conflicting));
+    }
+
+    /// ⚠️ **取り込みとも混ぜない**。
+    #[test]
+    fn make_voices_conflicts_with_import() {
+        let e = parse_startup_args(&a(&["--make-voices", "proj_1", "--import", "C:/x"]))
+            .expect_err("断る");
+        assert!(matches!(e, StartupArgError::Conflicting));
+    }
+
+    /// ⚠️ **閉じる頼みは一緒に受ける**（終わったら閉じる＝AI が待てる）。
+    #[test]
+    fn make_voices_keeps_quit_when_done() {
+        let s = parse_startup_args(&a(&["--make-voices", "proj_1", "--quit-when-done"])).expect("読める");
+        assert!(s.quit_when_done);
+    }
+
+    /// ⚠️ **画面へ渡す形**＝種類と動画の番号が乗る。
+    #[test]
+    fn make_voices_dto() {
+        let dto = StartupState::from_args(&a(&["--make-voices", "proj_1"])).to_dto();
+        assert_eq!(dto.kind, "makeVoices");
+        assert_eq!(dto.project_id.as_deref(), Some("proj_1"));
+        assert_eq!(dto.out, None);
     }
 }

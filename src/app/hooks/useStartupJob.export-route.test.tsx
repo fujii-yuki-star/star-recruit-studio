@@ -59,6 +59,109 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
     expect(open, "タイムラインの道へ行っている").not.toHaveBeenCalled();
   });
 
+  // ⚠️ **声が作られていなければ断る**（#1204）＝止めないと、そのぶんが**無音のまま焼き込まれて**
+  // 「成功」で返る（実機で確認＝−91dB・終了コード 0）。
+  it('声がまだ作られていなければ、書き出さずに断る', async () => {
+    askFor('proj_20260917_001');
+    vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+      { projectId: 'proj_20260917_001', projectName: '声つき', updatedAt: '', format: 'timeline' },
+    ]);
+    vi.spyOn(useTimelineStore.getState(), 'openTimelineProject').mockImplementation(async () => {
+      useTimelineStore.setState({
+        doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002', startSec: 0, durationSec: 2,
+          voice: { text: 'これは読み上げです。', status: 'none' } }] } as never,
+      });
+    });
+    const navigate = vi.fn();
+    const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+    renderHook(() => useStartupJob(navigate));
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    expect(navigate, '書き出しの画面へ進んでしまっている').not.toHaveBeenCalled();
+    expect(useStartupJobStore.getState().pendingExportOut, '保存先が残っている').toBeNull();
+    expect(useStartupJobStore.getState().notice).toContain('声を作って');
+  });
+
+  // ⚠️ **場面形式でも同じように断る**（形式で挙動を割らない＝ADR-0026②）。
+  it('場面形式でも、声がまだなら断る', async () => {
+    askFor('proj_20260624_003');
+    vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+      { projectId: 'proj_20260624_003', projectName: '会社紹介', updatedAt: '' },
+    ]);
+    vi.spyOn(useProjectStore.getState(), 'loadProject').mockImplementation(async () => {
+      useProjectStore.setState({
+        scenes: [{ sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+          templateId: 't', durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+          texts: {}, narration: { text: 'あいさつ', status: 'none' }, warnings: [] }] as never,
+      });
+    });
+    const navigate = vi.fn();
+    const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+    renderHook(() => useStartupJob(navigate));
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    expect(navigate, '書き出しの画面へ進んでしまっている').not.toHaveBeenCalled();
+  });
+
+  it('声ができていれば、いままでどおり進む', async () => {
+    askFor('proj_20260917_001');
+    vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+      { projectId: 'proj_20260917_001', projectName: '声つき', updatedAt: '', format: 'timeline' },
+    ]);
+    vi.spyOn(useTimelineStore.getState(), 'openTimelineProject').mockImplementation(async () => {
+      useTimelineStore.setState({
+        doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002', startSec: 0, durationSec: 2,
+          voice: { text: 'これは読み上げです。', status: 'generated', voicePath: 'voices/a.wav' } }] } as never,
+      });
+    });
+    const navigate = vi.fn();
+    renderHook(() => useStartupJob(navigate));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('timeline-project'));
+  });
+
+  // 声を作る口（#1204・ADR-0042 追補2）＝これが無いと、外の AI は「作る→声→書き出す」の**真ん中を通れない**。
+  describe('声を作る（--make-voices）', () => {
+    const askVoices = (projectId: string): void => {
+      vi.spyOn(startupFs, 'startupRequest').mockResolvedValue({
+        kind: 'makeVoices', projectId, out: null, forwarded: false, argError: null,
+      } as never);
+    };
+
+    it('人が押したときと同じ「まとめて作る」を通し、できたら成功で返す', async () => {
+      askVoices('proj_20260917_001');
+      vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+        { projectId: 'proj_20260917_001', projectName: '声つき', updatedAt: '', format: 'timeline' },
+      ]);
+      vi.spyOn(useTimelineStore.getState(), 'openTimelineProject').mockImplementation(async () => {
+        useTimelineStore.setState({ doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002',
+          startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } }] } as never });
+      });
+      const gen = vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockImplementation(async () => {
+        useTimelineStore.setState({ doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002',
+          startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'generated', voicePath: 'v.wav' } }] } as never });
+      });
+      const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+      renderHook(() => useStartupJob(vi.fn()));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
+      expect(gen, 'まとめて作るを通っていない').toHaveBeenCalled();
+    });
+
+    // ⚠️ **残ったら「できた」と言わない**＝途中で失敗した回を成功に見せない。
+    it('作れなかったものが残っていれば、できなかったと返す', async () => {
+      askVoices('proj_20260917_001');
+      vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+        { projectId: 'proj_20260917_001', projectName: '声つき', updatedAt: '', format: 'timeline' },
+      ]);
+      vi.spyOn(useTimelineStore.getState(), 'openTimelineProject').mockImplementation(async () => {
+        useTimelineStore.setState({ doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002',
+          startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } }] } as never });
+      });
+      vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockResolvedValue(undefined);
+      const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+      renderHook(() => useStartupJob(vi.fn()));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+      expect(useStartupJobStore.getState().notice).toContain('1件');
+    });
+  });
+
   // ⚠️ **開けなかったら保存先も捨てる**＝残すと、次に人が押した書き出しが黙ってそこへ書く。
   it("開けなかったときは、頼まれた保存先を残さない", async () => {
     askFor("proj_20260917_001");
