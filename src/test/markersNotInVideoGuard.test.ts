@@ -35,6 +35,12 @@ const ALLOWED = [
   // ⚠️ **この file がこの門番に捕まったのは正しい**＝射程を広げた直後に、私が目印を読む一行を
   // 足したので赤くなった。**説明できるから逃がす**のであって、赤いから逃がすのではない。
   "src/domain/timeline/validateTimelineDoc.ts",
+  // ⚠️ **範囲を詰めるときは目印を動かす**（#1193）＝**絵にも音にも入れない**。
+  // 動かすのは「消した長さだけ前へ寄せる」だけで、**描く側も焼く側もここを通らない**。
+  // ⚠️ **逃がす理由は「動かす必要がある」こと**＝詰めると全体の尺が縮むので、動かさないと
+  // **既にある目印が全部、別の場面を指す**（ADR-0026④）。
+  // ⚠️ **赤いから逃がすのではない**＝ここが捕まえたのは正しい動き。説明できるから逃がす。
+  "src/domain/timeline/deleteRange.ts",
 ];
 
 /**
@@ -115,6 +121,8 @@ describe("門番自身の検査（わざと壊した入力）", () => {
       "src/domain/timeline/markers.ts",
       "src/domain/timeline/types.ts",
       "src/domain/timeline/validateTimelineDoc.ts",
+      // ⚠️ **範囲を詰めるときだけ目印を動かす**（#1193）＝絵にも音にも入らない。
+      "src/domain/timeline/deleteRange.ts",
     ]);
   });
 

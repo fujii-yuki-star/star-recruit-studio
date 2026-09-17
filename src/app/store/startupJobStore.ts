@@ -9,6 +9,16 @@ import { create } from "zustand";
  */
 export type StartupJobState = {
   /**
+   * 起動のときに**何か頼まれているか**が分かったか（PR #1197 レビュー 🔴）。
+   *
+   * ⚠️ **これが要る理由**＝`App` は起動時に「最後に開いていた動画」を自動で開く。
+   * 頼まれごとの読み取りは IPC の往復なので、**自動で開く方が後から勝つ**ことがある＝
+   * AI が `--export <B>` で起こしたのに**直前の A が書き出される**（しかも成功として返る）。
+   * ⚠️ **待たせるのは「分かるまで」だけ**＝頼まれていないと分かれば、すぐ自動で開く。
+   */
+  requestKnown: "unknown" | "none" | "job";
+  setRequestKnown: (v: "none" | "job") => void;
+  /**
    * 書き出し先（指定されていれば、**保存先を聞かずに**ここへ書く）。
    * ⚠️ **1回きり**＝走り始めたら消す。残すと、次に人が押した書き出しまで同じ所へ書く。
    */
@@ -23,6 +33,8 @@ export type StartupJobState = {
 };
 
 export const useStartupJobStore = create<StartupJobState>((set, get) => ({
+  requestKnown: "unknown",
+  setRequestKnown: (v) => set({ requestKnown: v }),
   pendingExportOut: null,
   forwarded: false,
   notice: null,

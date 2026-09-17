@@ -147,6 +147,21 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [starting, setStarting] = useState(false);
   /** 押した瞬間に**いまの値**で見るための控え（描画時のクロージャでは1回ぶん古い）。 */
   const startingRef = useRef(false);
+  // ⚠️ **どの出口でも、ちょうど1回だけ返す**（PR #1197 レビュー 🔴／🟡）＝返さないと、頼んだ側（AI）は
+  // **終わらない仕事を待ち続ける**し、`--quit-when-done` の回はアプリが閉じない（§2-5 の行き止まり）。
+  // ⚠️ **画面の側に置く**＝`startExport` の**中**に置くと、`try` に入る前に例外が飛んだ回を拾えない
+  //（同レビュー 🟡）。始めた側（下の `useEffect`）からも返せるようにする。
+  // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
+  const startupJobRef = useRef<{ out: string; forwarded: boolean } | null>(null);
+  const jobSettledRef = useRef(false);
+  const settleJob = (ok: boolean): void => {
+    const job = startupJobRef.current;
+    if (!job || jobSettledRef.current) return;
+    jobSettledRef.current = true;
+    void finishStartupJob(ok, job.forwarded).catch((err) =>
+      console.error("[startup] finish failed:", err),
+    );
+  };
   const markStarting = (on: boolean): void => { startingRef.current = on; setStarting(on); };
   // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
   // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
@@ -185,18 +200,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // ⚠️ **頼まれごとは、いちばん先に取り出す**（PR レビュー 🔴）＝以前は準備に入った後で取り出しており、
     // 手前の早期 return（走行中・使えない・場面ゼロ）で抜けると**保存先が残ったまま**になった。
     // そうなると、**後で人が押した書き出しが、保存先を聞かれないまま外から渡された道へ書く**。
-    const startupJob = useStartupJobStore.getState().takePendingExport();
-    // ⚠️ **どの出口でも、ちょうど1回だけ返す**（PR レビュー 🔴）＝返さないと、頼んだ側（AI）は
-    // **終わらない仕事を待ち続ける**し、`--quit-when-done` の回はアプリが閉じない（§2-5 の行き止まり）。
-    // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
-    let jobSettled = false;
-    const settleJob = (ok: boolean): void => {
-      if (!startupJob || jobSettled) return;
-      jobSettled = true;
-      void finishStartupJob(ok, startupJob.forwarded).catch((err) =>
-        console.error("[startup] finish failed:", err),
-      );
-    };
+    startupJobRef.current = useStartupJobStore.getState().takePendingExport();
+    jobSettledRef.current = false;
+    const startupJob = startupJobRef.current;
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
     // ⚠️ **いまの値で見る**（差分再監査 ℹ️）＝描画時のクロージャだと、`beginExport` の往復中
@@ -496,7 +502,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   useEffect(() => {
     if (pendingExportOut == null || startedForJobRef.current) return;
     startedForJobRef.current = true;
-    void startExport();
+    // ⚠️ **始めた側でも拾う**（同レビュー 🟡）＝`startExport` が**自分の `try` に入る前**に
+    // 例外で抜けた回は、中の `finally` を通らない。ここで返さないと永久に待たれる。
+    void startExport().catch((err) => {
+      console.error("[export] startExport threw:", err);
+      settleJob(false);
+    });
     // ⚠️ **`startExport` を依存に入れない**＝毎描画で作り直される関数なので、入れると回り続ける。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingExportOut]);

@@ -3,7 +3,7 @@ import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { reserveProjectId } from "../store/assetImport";
-import { saveProjectDoc } from "../../infrastructure/projectFs";
+import { deleteProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { importDoneMessage, startupArgErrorMessage } from "../../domain/startup/startupMessages";
 import {
   finishStartupJob,
@@ -94,6 +94,12 @@ export function useStartupJob(navigate: (next: ScreenId) => void): void {
 
     void (async () => {
       const req = await startupRequest().catch(() => null);
+      // ⚠️ **何か頼まれているかを、先に知らせる**（PR #1197 レビュー 🔴）＝`App` の
+      // 「最後に開いていた動画を自動で開く」と**どちらが勝つか**が往復の速さで決まっていた。
+      // 負けると、AI が指した動画ではなく**直前の動画が書き出される**（しかも成功として返る）。
+      useStartupJobStore.getState().setRequestKnown(
+        req && req.kind !== "none" ? "job" : "none",
+      );
       if (req) await run(req);
     })();
     // ⚠️ **受け口を作れなかったときも投げっぱなしにしない**＝アプリの外（Tauri）が居ない所では
@@ -157,7 +163,16 @@ async function runImport(
     // （`save_project` は `project_json` の `projectId` から保存先を決める）。書き換えないと、
     // **置いたのは新しい番号のフォルダなのに、読み書きは元の番号のフォルダ**になり、
     // 次の自動保存が**元の動画を黙って上書きする**（ADR-0026④）。
-    await saveProjectDoc(projectId, JSON.stringify({ ...(doc as object), projectId }));
+    try {
+      await saveProjectDoc(projectId, JSON.stringify({ ...(doc as object), projectId }));
+    } catch (e) {
+      // ⚠️ **書けなかったら、写したフォルダも片づける**（PR #1197 レビュー）＝
+      // このとき `projects/<新しい番号>/project.json` の中はまだ**元の番号**なので、残すと
+      // **フォルダ名と中の番号が食い違う幽霊**が一覧に出る（一覧は中の番号で作る）。
+      // ⚠️ **片づけに失敗しても、断りは出す**＝利用者に必要なのは「取り込めなかった」こと。
+      await deleteProjectDoc(projectId).catch(() => {});
+      throw e;
+    }
     if (isTimeline) {
       await useTimelineStore.getState().openTimelineProject(projectId);
       navigate("timeline-project");

@@ -137,16 +137,24 @@ function App() {
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
+  // ⚠️ **頼まれごとが分かるまで、自動では開かない**（PR #1197 レビュー 🔴・#1184）＝
+  // 起動の引数で別の動画を指されているのに自動で開くと、**どちらが勝つか**が IPC の往復の速さで決まり、
+  // 負けると **AI が指した動画ではなく直前の動画が書き出される**（エラーも出ず、成功として返る）。
+  // ⚠️ **待つのは「分かるまで」だけ**＝頼まれていないと分かれば、すぐ自動で開く（起動が遅くならない）。
+  const startupRequestKnown = useStartupJobStore((st) => st.requestKnown);
   useEffect(() => {
+    // ⚠️ **ここで待たない**（変異チェックで等価と分かった）＝最初は「分からない」ので
+    // 下の条件が偽になり、**自動では開かない**。待つ形にすると、見た目パターンと持ち込みフォントの
+    // 読み込みまで遅れる（それらは頼まれごとと関係が無い）。
     const last = getLastProjectId();
-    if (last) void loadProject(last).catch(() => {});
+    if (last && startupRequestKnown === "none") void loadProject(last).catch(() => {});
     void loadUserTemplates().catch(() => {});
     // ⚠️ **持ち込みフォントは起動時に1回そろえる**（α-6 出口監査 🟡11）＝`loadUserFonts` の入口が
     // 設定・公開前チェック・書き出しにしか無かったため、**場面編集・仕上がり確認・タイムライン編集では
     // プレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 のパリティが崩れる）。
     // 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
     void refreshUserFonts().catch(() => {});
-  }, [loadProject, loadUserTemplates, refreshUserFonts]);
+  }, [loadProject, loadUserTemplates, refreshUserFonts, startupRequestKnown]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
