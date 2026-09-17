@@ -2,10 +2,13 @@ import { useEffect } from "react";
 import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain/project/persistence";
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 import { isTimelineProjectDoc, resolveProjectFormat } from "../../domain/projectFormat";
+import { STARTUP_NOT_READY, sceneMissingUsedAssets, sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
+import { engineWaitPlan } from "../../domain/startup/engineWait";
+import { voicevoxReady } from "../../infrastructure/voiceFs";
 import { PROJECT_FORMAT } from "../../domain/enums";
 import { reserveProjectId } from "../store/assetImport";
 import { deleteProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
-import { importDoneMessage, startupArgErrorMessage } from "../../domain/startup/startupMessages";
+import { importDoneMessage, makeVoicesDoneMessage, startupArgErrorMessage } from "../../domain/startup/startupMessages";
 import {
   finishStartupJob,
   importProjectFolder,
@@ -28,6 +31,31 @@ export const STARTUP_BUSY_MESSAGE =
 /** その動画を開けなかったときの断り（§2-5＝次の行動）。 */
 export const STARTUP_OPEN_FAILED_MESSAGE =
   "その動画を開けませんでした。動画の番号を確かめて、もう一度お試しください。";
+
+/**
+ * 声がまだ作られていないときの断り（#1204・§2-5＝次の行動）。
+ *
+ * ⚠️ **止めないと、そのぶんが無音のまま焼き込まれて「成功」で返る**（実機で確認＝−91dB）。
+ * ⚠️ **人が押した回では止めない**＝画面が「要対応」として見せている（そちらの流儀は変えない）。
+ */
+export const STARTUP_VOICE_NOT_READY_MESSAGE =
+  "読み上げの声がまだ作られていません。声を作ってから、もう一度お試しください。";
+
+/**
+ * 使っている素材が見つからないときの断り（PR #1208 レビュー 🟡・§2-5＝次の行動）。
+ *
+ * ⚠️ **止めないと、その場面が黙って抜けた動画になる**（声の無音化と同じ「黙って別の結果」）。
+ */
+export const STARTUP_ASSET_MISSING_MESSAGE =
+  "動画で使っている素材のファイルが見つかりません。素材を入れ直してから、もう一度お試しください。";
+
+/**
+ * 声を作る用意ができなかったときの断り（#1204・§2-5＝次の行動）。
+ *
+ * ⚠️ **同梱エンジンは起動に数十秒かかる**＝待っても来ないときに、頼んだ側が次にできることを出す。
+ */
+export const STARTUP_VOICE_ENGINE_MESSAGE =
+  "声を作る用意が整いませんでした。しばらく待ってから、もう一度お試しください。";
 
 /** 取り込む元が読めなかったときの断り。 */
 export const STARTUP_IMPORT_UNREADABLE_MESSAGE =
@@ -90,6 +118,10 @@ export function useStartupJob(navigate: (next: ScreenId) => void): void {
       }
       if (req.kind === "export" && req.projectId && req.out) {
         await runExport(req, req.projectId, req.out, navigate, setNotice);
+        return;
+      }
+      if (req.kind === "makeVoices" && req.projectId) {
+        await runMakeVoices(req, req.projectId, navigate, setNotice);
       }
     };
 
@@ -191,6 +223,76 @@ async function runImport(
 }
 
 /**
+ * その動画の**読み上げの声を作る**（ADR-0042 追補2・#1204）。
+ *
+ * ⚠️ **人が押したときと同じ道を通す**（ADR-0007）＝画面の「まとめて作る」と同じ `generateAllVoices` /
+ * `generateAllNarrations` を呼ぶ。別の経路を作ると、**声の設定の解決（11 §6 継承）が二重になる**。
+ * ⚠️ **画面へ進んでから走らせる**＝走っている間の進み具合は画面が出す（ADR-0042 決定②＝窓は出す）。
+ * ⚠️ **終わったかどうかは「残りが 0 か」で見る**＝途中で失敗した回を「できた」で返さない。
+ */
+async function runMakeVoices(
+  req: StartupRequest,
+  projectId: string,
+  navigate: (next: ScreenId) => void,
+  setNotice: (m: string | null) => void,
+): Promise<void> {
+  try {
+    const summary = (await listProjectSummaries()).find((p) => p.projectId === projectId);
+    const isTimeline = resolveProjectFormat({ format: summary?.format }) === PROJECT_FORMAT.timeline;
+    if (isTimeline) {
+      await useTimelineStore.getState().openTimelineProject(projectId);
+      navigate("timeline-project");
+      if (!(await waitForVoiceEngine())) {
+        setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
+        await finishStartupJob(false, req.forwarded);
+        return;
+      }
+      await useTimelineStore.getState().generateAllVoices();
+      // ⚠️ **書き切ってから終わる**（実機で踏んだ）＝自動保存は画面の都合で少し待つ形なので、
+      // 仕事が終わってすぐ閉じる回では**一度も走らない**。音のファイルは出来ているのに、
+      // 文書は「まだ作っていない」のままになり、**次の書き出しが断られる**。
+      await useTimelineStore.getState().saveTimelineProject();
+      const left = timelineUngeneratedVoices(useTimelineStore.getState().doc?.clips ?? []);
+      setNotice(makeVoicesDoneMessage(left));
+      await finishStartupJob(left === 0, req.forwarded);
+      return;
+    }
+    await useProjectStore.getState().loadProject(projectId);
+    navigate("scene-edit");
+    if (!(await waitForVoiceEngine())) {
+      setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
+      await finishStartupJob(false, req.forwarded);
+      return;
+    }
+    await useProjectStore.getState().generateAllNarrations();
+    // ⚠️ **書き切ってから終わる**（上と同じ）。
+    await useProjectStore.getState().saveProject();
+    const left = sceneUngeneratedVoices(useProjectStore.getState().scenes);
+    setNotice(makeVoicesDoneMessage(left));
+    await finishStartupJob(left === 0, req.forwarded);
+  } catch (e) {
+    setNotice(loadErrorMessage(e, "startup-make-voices", STARTUP_OPEN_FAILED_MESSAGE));
+    await finishStartupJob(false, req.forwarded);
+  }
+}
+
+/**
+ * 声を作る用意ができるまで待つ（#1204）。**できたら `true`**。
+ *
+ * ⚠️ **実機で踏んだ**＝同梱エンジンは起動に数十秒かかるので、開いた直後に声を作ろうとすると落ちる
+ *（`--make-voices` が 5.7 秒で終了コード 1・声は1つも出来ていなかった）。
+ * ⚠️ **あきらめる形を持つ**＝持たないと、エンジンが来ないとき**頼んだ側が永久に待つ**。
+ */
+async function waitForVoiceEngine(): Promise<boolean> {
+  for (let attempt = 0; ; attempt += 1) {
+    if (await voicevoxReady()) return true;
+    const plan = engineWaitPlan(attempt);
+    if (plan.giveUp) return false;
+    await new Promise((resolve) => setTimeout(resolve, plan.waitMs));
+  }
+}
+
+/**
  * 断りの文を決める。
  *
  * ⚠️ **生の断りをそのまま出さない**（#1123）＝関門（`userFacingMessage`）を通す。
@@ -226,10 +328,48 @@ async function runExport(
     useStartupJobStore.getState().setPendingExport(out, req.forwarded);
     if (isTimeline) {
       await useTimelineStore.getState().openTimelineProject(projectId);
+      // ⚠️ **開いてから見る**＝文書の中身（声が作られているか）は、開かないと分からない。
+      const opened = useTimelineStore.getState().doc;
+      const notReady = startupExportNotReady({
+        ungeneratedVoices: timelineUngeneratedVoices(opened?.clips ?? []),
+        // ⚠️ **タイムライン形式は、見つからない素材で既に止まる**
+        //（`TIMELINE_EXPORT_ASSET_UNREADABLE`／`TIMELINE_EXPORT_VIDEO_FILE_MISSING`）＝
+        // ここで二重に数えると、**同じ状態に2つの断りが並ぶ**（どちらに従えばよいか分からなくなる）。
+        missingUsedAssets: 0,
+      });
+      if (notReady) {
+        setNotice(STARTUP_VOICE_NOT_READY_MESSAGE);
+        useStartupJobStore.getState().takePendingExport();
+        await finishStartupJob(false, req.forwarded);
+        return;
+      }
       navigate("timeline-project");
       return;
     }
     await useProjectStore.getState().loadProject(projectId);
+    // ⚠️ **素材が実在するかは、開いたあとに調べる**（PR #1208 レビュー 🟡）＝
+    // 使っている素材が見つからないまま書き出すと、**その場面が黙って抜けた動画**になる。
+    await useProjectStore.getState().refreshMissingAssets();
+    const st = useProjectStore.getState();
+    const sceneNotReady = startupExportNotReady({
+      ungeneratedVoices: sceneUngeneratedVoices(st.scenes),
+      missingUsedAssets: sceneMissingUsedAssets(
+        st.scenes,
+        st.assets,
+        st.missingAssetIds,
+        st.meta.bgmSettings?.assetId ?? null,
+      ),
+    });
+    if (sceneNotReady) {
+      setNotice(
+        sceneNotReady === STARTUP_NOT_READY.assetMissing
+          ? STARTUP_ASSET_MISSING_MESSAGE
+          : STARTUP_VOICE_NOT_READY_MESSAGE,
+      );
+      useStartupJobStore.getState().takePendingExport();
+      await finishStartupJob(false, req.forwarded);
+      return;
+    }
     navigate("export");
   } catch (e) {
     // ⚠️ **開けなかったら、頼まれた保存先も捨てる**＝残すと、**次に人が押した書き出し**が

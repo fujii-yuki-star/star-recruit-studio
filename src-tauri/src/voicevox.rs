@@ -97,6 +97,29 @@ impl VoiceStyle {
     }
 }
 
+/// 声を作る用意ができているか（#1204）。**繋がれば `true`**。
+///
+/// ⚠️ **なぜ要るか**＝同梱エンジンは起動に数十秒かかる。人が押す回は待っている間に画面を見ているが、
+/// **起動の引数で走る回**（ADR-0042）は**開いた直後に走る**ので、用意ができる前に声を作ろうとして落ちる
+///（実機で確認＝`--make-voices` が 5.7 秒で終了コード 1）。
+/// ⚠️ **待つのは呼ぶ側**＝ここは「いま繋がるか」だけを返す（待ち方は画面側の事情）。
+#[tauri::command]
+pub async fn voicevox_ready(
+    base_url: Option<String>,
+    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+) -> Result<bool, String> {
+    let base = base_url
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| engine.base_url())
+        .unwrap_or_else(voicevox_base);
+    Ok(http_client()
+        .get(format!("{base}/version"))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false))
+}
+
 /// テキストを VOICEVOX で音声合成し、WAV の data URL を返す。
 #[tauri::command]
 pub async fn synthesize_voice(

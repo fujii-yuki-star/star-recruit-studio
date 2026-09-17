@@ -1467,6 +1467,7 @@ pub fn run() {
             assets::import_template_asset,
             assets::load_template_assets,
             assets::delete_template_asset,
+            voicevox::voicevox_ready,
             voicevox::synthesize_voice,
             ai::save_api_key,
             ai::has_api_key,
