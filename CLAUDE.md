@@ -13,7 +13,7 @@
 | 製品・要件 | `docs/yuko_recruit_docs/01`〜`10` | 解説・背景（example混在） |
 | **データ規範** | `docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md`（タイムライン形式の `§7.6` は `11_TIMELINE_REFERENCE.md` へ切り出し・**節番号は据え置き**） ＋ `docs/yuko_recruit_docs/schemas/*.schema.json` | **正典** |
 | **AI規範** | `docs/yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md` | **正典**（⚠️ **同梱の生成**が相手） |
-| **外の AI の規範** | [`18_EXTERNAL_AGENT_CONTRACT.md`](docs/yuko_recruit_docs/18_EXTERNAL_AGENT_CONTRACT.md) | **正典**（⚠️ **利用者が持ち込む AI**＝ADR-0041/0042。`12` とは相手が違う） |
+| **外の AI の規範** | [`18_EXTERNAL_AGENT_CONTRACT.md`](docs/yuko_recruit_docs/18_EXTERNAL_AGENT_CONTRACT.md) | **正典**（⚠️ **利用者が持ち込む AI**＝ADR-0041/0042。`12` とは相手が違う。⚠️ **`schemas`／`11` が上**＝あれらを「外の AI が使う順番」で並べ直したものなので、食い違ったら**こちらを直す**） |
 | AI開発規約 | `CLAUDE.md`（本ファイル） | **正典** |
 
 **矛盾したときの優先順位：`schemas/*.schema.json` ＝ `11` ＝ `12` ＝ `CLAUDE.md` ＞ `01`〜`10`。**
