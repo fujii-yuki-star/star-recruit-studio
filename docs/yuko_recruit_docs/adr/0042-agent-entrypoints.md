@@ -1,7 +1,7 @@
 # ADR-0042: 持ち込みの AI が使う「口」＝起動の引数で、取り込みと書き出しまで通す
 
-- **状態**: Proposed
-- **日付**: 2026-09-17
+- **状態**: Accepted
+- **日付**: 2026-09-17（**Accepted** 2026-09-17・実装が入ったのを見て利用者が承認）
 - **関連**: [`ADR-0041`](0041-external-agent-operability.md)（誰に許すか）／[`ADR-0001`](0001-rendering-parity.md)／[`ADR-0007`](0007-detailed-edit-mode.md)／[`ADR-0024`](0024-non-destructive-editing-model.md)／[#1184](https://github.com/fujii-yuki-star/star-recruit-studio/issues/1184)
 
 ## 背景
