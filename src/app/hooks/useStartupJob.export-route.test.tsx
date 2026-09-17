@@ -146,13 +146,34 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
         useTimelineStore.setState({ doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002',
           startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'generated', voicePath: 'v.wav' } }] } as never });
       });
+      // ⚠️ **書き切ってから終わる**（実機で踏んだ）＝自動保存は画面の都合で少し待つ形なので、
+      // すぐ閉じる回では一度も走らず、**音は出来たのに文書は「まだ」のまま**になった。
+      const save = vi.spyOn(useTimelineStore.getState(), 'saveTimelineProject').mockResolvedValue(undefined);
       const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
       renderHook(() => useStartupJob(vi.fn()));
       await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
+      expect(save, '書き切らずに終わった').toHaveBeenCalled();
       expect(gen, 'まとめて作るを通っていない').toHaveBeenCalled();
       // ⚠️ **その回の仕事を走り切らせる**＝知らせが出るまで待たないと、**次のテストへ漏れる**
       //（実際に漏れて、次のテストの『作ろうとしていない』が false になった）。
       await waitFor(() => expect(useStartupJobStore.getState().notice).not.toBeNull());
+    });
+
+    // ⚠️ **場面形式でも書き切ってから終わる**（形式で挙動を割らない＝ADR-0026②）。
+    it('場面形式でも、書き切ってから終わる', async () => {
+      askVoices('proj_20260624_003');
+      vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+        { projectId: 'proj_20260624_003', projectName: '会社紹介', updatedAt: '' },
+      ]);
+      vi.spyOn(useProjectStore.getState(), 'loadProject').mockResolvedValue(undefined as never);
+      vi.spyOn(useProjectStore.getState(), 'generateAllNarrations').mockImplementation(async () => {
+        useProjectStore.setState({ scenes: [] as never });
+      });
+      const save = vi.spyOn(useProjectStore.getState(), 'saveProject').mockResolvedValue(undefined);
+      const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+      renderHook(() => useStartupJob(vi.fn()));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
+      expect(save, '書き切らずに終わった').toHaveBeenCalled();
     });
 
     // ⚠️ **残ったら「できた」と言わない**＝途中で失敗した回を成功に見せない。

@@ -240,6 +240,10 @@ async function runMakeVoices(
         return;
       }
       await useTimelineStore.getState().generateAllVoices();
+      // ⚠️ **書き切ってから終わる**（実機で踏んだ）＝自動保存は画面の都合で少し待つ形なので、
+      // 仕事が終わってすぐ閉じる回では**一度も走らない**。音のファイルは出来ているのに、
+      // 文書は「まだ作っていない」のままになり、**次の書き出しが断られる**。
+      await useTimelineStore.getState().saveTimelineProject();
       const left = timelineUngeneratedVoices(useTimelineStore.getState().doc?.clips ?? []);
       setNotice(makeVoicesDoneMessage(left));
       await finishStartupJob(left === 0, req.forwarded);
@@ -253,6 +257,8 @@ async function runMakeVoices(
       return;
     }
     await useProjectStore.getState().generateAllNarrations();
+    // ⚠️ **書き切ってから終わる**（上と同じ）。
+    await useProjectStore.getState().saveProject();
     const left = sceneUngeneratedVoices(useProjectStore.getState().scenes);
     setNotice(makeVoicesDoneMessage(left));
     await finishStartupJob(left === 0, req.forwarded);
