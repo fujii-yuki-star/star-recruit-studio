@@ -28,4 +28,5 @@ reqwest = { version = "0.12", features = ["json"] }
 # APIキーは OS 資格情報ストアに保存（§13§7）。MVP は Windows 優先（CLAUDE.md §3）＝Windows 資格情報マネージャ。
 # 他OS対応時は target 別 feature（apple-native / sync-secret-service 等）を追加する。
 keyring = { version = "3", features = ["windows-native"] }
+tauri-plugin-single-instance = "2.4.4"
 

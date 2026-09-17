@@ -15,6 +15,8 @@ import {
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
+import { startupArgErrorMessage } from "../domain/startup/startupMessages";
+import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE } from "./hooks/useStartupJob";
 import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
@@ -116,6 +118,16 @@ function codeMessages(): Record<string, string> {
     TIMELINE_SUBTITLE_OVERLAP: subtitleOverlapMessage(" N " as unknown as number),
     // ⚠️ **画面のローカル定数のままにしない**（PR #1056 レビュー 🟡）＝ここへ載せないと
     // **弱い段**（実装のどこかに在るか）でしか守られず、片方だけ書き換えても気づけない。
+    // ⚠️ **起動のときに頼まれた仕事の断りも等値で守る**（ADR-0042・#1184）＝画面や hook に直書きで
+    // 残すと、**弱い段（実装のどこかに在るか）でしか見られない**＝表と実装のどちらを書き換えても気づけない。
+    // ⚠️ **印の綴りが入る文は差し込み口を渡して比べる**（`USER_FONT_MISSING` と同じ流儀）。
+    STARTUP_ARG_UNKNOWN: startupArgErrorMessage({ kind: "unknown", flag: " 〔印〕 " }),
+    STARTUP_ARG_MISSING_VALUE: startupArgErrorMessage({ kind: "missingValue", flag: " 〔印〕 " }),
+    STARTUP_ARG_INCOMPLETE_EXPORT: startupArgErrorMessage({ kind: "incompleteExport", flag: null }),
+    STARTUP_ARG_CONFLICTING: startupArgErrorMessage({ kind: "conflicting", flag: null }),
+    STARTUP_JOB_BUSY: STARTUP_BUSY_MESSAGE,
+    STARTUP_IMPORT_UNREADABLE: STARTUP_IMPORT_UNREADABLE_MESSAGE,
+    STARTUP_OPEN_FAILED: STARTUP_OPEN_FAILED_MESSAGE,
     PROJECT_NEWER_VERSION: PROJECT_NEWER_VERSION_MESSAGE,
     PROJECT_OPEN_FAILED: PROJECT_OPEN_FAILED_MESSAGE,
     PROJECT_DELETE_FAILED: PROJECT_DELETE_FAILED_MESSAGE,
@@ -470,7 +482,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①＝目印を動かす先に別の目印がいるとき）。
     // ⚠️ **+1**＝`TIMELINE_MARKER_DUPLICATE_TIME`（#1155 ③＝`11 §8` V33・読み込んだ文書の検証）。
     // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(230);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(242);
   });
 
 
@@ -717,7 +729,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+13**＝`messages.rs` の定数（#1129）。`rustMessages()` が丸ごと読むので、
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(227);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(239);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -734,6 +746,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       //   1件しか確かめずに済ませる（実際にそう書いていた＝レビュー指摘）。
       // ⚠️ **+1**＝`TIMELINE_EDIT_MARKER_EXISTS`（#1149 ①）。
       // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝タイムライン形式の双子と揃えた）。
-    ).toBe(97);
+      // ⚠️ **+7**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝引数4通り＋開いている／読めない／開けない。
+    ).toBe(104);
   });
 });
