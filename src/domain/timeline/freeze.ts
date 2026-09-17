@@ -11,7 +11,7 @@
 //
 // ⚠️ **相手は「直接置いた動画」だけ**＝見た目パターンの差し込み口に入れた動画は、止めると
 // **枠ごと写真に化ける**（文字も立ち絵も消える）＝押した結果と食い違う。断って理由を出す。
-import { isDirectVideoClip, videoPlacementsOfClip, videoSourceSecAt } from './video';
+import { isDirectVideoClip, videoPlacementsOfClip, videoSourceFrameAt, videoSourceSecAt } from './video';
 import { ASSET_USE_KIND } from '../enums';
 import { effectiveFps } from './playback';
 import { frameTimeSec } from './persistence';
@@ -117,6 +117,23 @@ export function freezeSourceSec(
   const place = videoPlacementsOfClip(doc, clip).find((p) => p.use === ASSET_USE_KIND.direct);
   if (!place) return null;
   return videoSourceSecAt(place, frameTimeSec(doc, atSec), effectiveFps(doc));
+}
+
+/**
+ * 止める瞬間のコマを、**書き出しが使う言葉**（並べ始める秒・速さ・fps・何枚目か）で返す（#1158）。
+ *
+ * ⚠️ **相手の選び方は `freezeSourceSec` と同じ**＝直接置いた動画だけ（見た目パターンの帯は掴まない）。
+ * ⚠️ **秒を渡さない**＝切り出す側が自分の丸め方でコマを選ぶと、素材と出力の格子が合わないときに
+ * **1コマ先**の絵になる（実測 18/64・全部ちょうど1コマ）。`videoSourceFrameAt` の ⚠️ に理由がある。
+ */
+export function freezeSourceFrame(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  atSec: number,
+): { sourceStartSec: number; speed: number; fps: number; localFrame: number } | null {
+  const place = videoPlacementsOfClip(doc, clip).find((p) => p.use === ASSET_USE_KIND.direct);
+  if (!place) return null;
+  return videoSourceFrameAt(place, frameTimeSec(doc, atSec), effectiveFps(doc));
 }
 
 /**

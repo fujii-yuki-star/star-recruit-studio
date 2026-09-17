@@ -5,7 +5,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import type { VideoPlacement } from './video';
 import type { Template } from '../template/types';
-import { isDrawnClip, canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import { isDrawnClip, canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceFrameAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -239,6 +239,44 @@ describe('焼き出す区間（videoStagePlan）', () => {
 
   // ⚠️ **焼ける枚数はここで決めない**（レビュー 🟡）＝実際に焼くのは Rust（`stage_clip_frames`）で、
   // その戻り値（`stagedCount`）が正。ここで別の式を持つと、後でそれを頭打ちに使ったとき**末尾が早く止まる**。
+});
+
+// 止め絵の切り出しへ渡す「コマの居場所」（#1158）。
+// ⚠️ **秒ではなくこの4つを渡す**＝秒だと受け取った側が自分の丸め方でコマを選び、素材と出力の格子が
+// 合わないとき**1コマ先**になる（FFmpeg で実測＝64 通り中 18 通り・全部ちょうど1コマ）。
+describe('コマの居場所（書き出しと同じ言葉）', () => {
+  const p10 = place(slot({ startSec: 0, durationSec: 10 }));
+
+  it('秒で出した答えと、同じコマを指す', () => {
+    // ⚠️ **2つの出口が割れないこと**＝`videoSourceSecAt` はこの関数から導いている。
+    for (const [t, fps] of [[0, 30], [1, 30], [2.5, 24], [7.4, 24]] as const) {
+      const g = videoSourceFrameAt(p10, t, fps);
+      expect(g).not.toBeNull();
+      expect(videoSourceSecAt(p10, t, fps)).toBeCloseTo(
+        g!.sourceStartSec + (g!.localFrame / g!.fps) * g!.speed,
+      );
+    }
+  });
+
+  it('置き場所の頭出しと速さと fps を、そのまま連れていく', () => {
+    // ⚠️ **書き出しはこの3つで並べる**（`-ss sourceStartSec` ＋ `setpts=PTS/speed,fps=N`）ので、
+    // 1つでも書き換わると「同じ番号」が別のコマを指す。
+    const fast: VideoPlacement = { ...p10, sourceStartSec: 1.5, speed: 2 };
+    const g = videoSourceFrameAt(fast, 1, 24);
+    expect(g).toEqual({ sourceStartSec: 1.5, speed: 2, fps: 24, localFrame: 24 });
+  });
+
+  it('映っていないところでは、コマの居場所も出さない', () => {
+    const later = place(slot({ startSec: 5, durationSec: 2 }));
+    expect(videoSourceFrameAt(later, 1, 30)).toBeNull();
+  });
+
+  it('使える長さの頭打ちも、同じところで効く', () => {
+    // ⚠️ **秒の側だけ頭打ちが効く形にしない**＝切り出しはコマ番号で頼むので、
+    // ここが頭打ちを忘れると**「ここまで」の先のコマ**を切り出す。
+    const short: VideoPlacement = { ...p10, durationSec: 3 };
+    expect(videoSourceFrameAt(short, 9, 30)?.localFrame).toBe(90);
+  });
 });
 
 // 差し込み口の「ここまで」（`endSec`）で使える長さが部品の尺より短いとき（#512 段3 レビュー 🔴）。

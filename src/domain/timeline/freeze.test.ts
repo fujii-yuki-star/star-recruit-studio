@@ -1,6 +1,6 @@
 // 再生位置で**絵を止める**（#356 ②・フリーズフレーム）。
 import { describe, expect, it } from 'vitest';
-import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
+import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceFrame, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
 import { SPLIT_BLOCKED } from './split';
 import { volumeAt } from './audio';
 import { videoPlacementsOfClip, videoSourceSecAt } from './video';
@@ -93,6 +93,52 @@ describe('freezeFrameIssue（そこで止められるか）', () => {
 
   it('見つからないものは止められない', () => {
     expect(freezeFrameIssue(doc({ clips: [video()] }), 'clip_999', 4)).toBe(SPLIT_BLOCKED.notFound);
+  });
+});
+
+// 切り出しへ渡す「コマの居場所」（#1158）。
+// ⚠️ **秒ではなくこの4つで頼む**＝秒だと切り出す側が自分の丸め方でコマを選び、素材と出力の格子が
+// 合わないとき**見えていたコマの1つ先**になる（FFmpeg で実測＝64 通り中 18 通り）。
+describe('freezeSourceFrame（どのコマを切り出すか）', () => {
+  const withClip = (c: TimelineClip): TimelineProject => doc({ clips: [c] });
+
+  it('秒で出した答えと、同じコマを指す', () => {
+    // ⚠️ **2つの出口が割れないこと**＝同じ瞬間を、秒でもコマ番号でも同じ所に置く。
+    const c = video({ startSec: 2, sourceStartSec: 5 });
+    const d = withClip(c);
+    const g = freezeSourceFrame(d, c, 6);
+    expect(g).not.toBeNull();
+    expect(freezeSourceSec(d, c, 6)).toBeCloseTo(
+      g!.sourceStartSec + (g!.localFrame / g!.fps) * g!.speed,
+    );
+  });
+
+  it('頭出しと速さを、書き出しと同じ言葉で連れていく', () => {
+    // ⚠️ **書き出しはこの3つで並べる**（`-ss sourceStartSec` ＋ `setpts=PTS/speed,fps=N`）。
+    const c = video({ startSec: 0, sourceStartSec: 1.5, speed: 2 });
+    const g = freezeSourceFrame(withClip(c), c, 1);
+    expect(g?.sourceStartSec).toBe(1.5);
+    expect(g?.speed).toBe(2);
+    expect(g?.fps).toBe(effectiveFps(withClip(c)));
+  });
+
+  // ⚠️ **見えていたコマを切り出す**（#1136・ADR-0001）＝キャンバスが映しているのは
+  // **格子へ落とした時刻**（`frameTimeSec`＝**切り捨て**）なので、生の再生位置のまま
+  // コマ番号（`Math.round`）へ直すと**1コマ先**を指す。
+  // ⚠️ **端数は半コマより大きく取る**＝切り捨てと四捨五入が割れるのはそこだけで、
+  // 半コマ未満の端数で試すと**落としていなくても緑**になる（変異チェックで生き残った）。
+  it('見えていたコマを指す（再生位置を格子へ落としてから数える）', () => {
+    const c = video({ startSec: 0, sourceStartSec: 0 });
+    // 2.02 秒 × 30fps ＝ 60.6 コマ。落とすと 60、落とさないと 61。
+    expect(freezeSourceFrame(withClip(c), c, 2.02)?.localFrame).toBe(60);
+  });
+
+  it('相手は直接置いた動画だけ（秒の側と同じ選び方）', () => {
+    // ⚠️ **選び方を写さない**＝秒の側が `null` を返す場面では、こちらも出さない。
+    const c = video({ startSec: 5, durationSec: 2 });
+    const d = withClip(c);
+    expect(freezeSourceSec(d, c, 1)).toBeNull();
+    expect(freezeSourceFrame(d, c, 1)).toBeNull();
   });
 });
 

@@ -85,7 +85,7 @@ import { exportFailedMessage, exportBlockedMessage, resolveExportBlockedMessage,
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, isOwnCleanupPending, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
-import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceFrame, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
 import { addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
 import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/assetFs";
 import { newFrameAsset } from "../../domain/asset/assetFile";
@@ -1284,6 +1284,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // ⚠️ **格子へ落とすのは `freezeSourceSec` の中**（#1147）＝プレビュー＝書き出しの正準
     // （`videoSourceSecAt`）をそのまま呼ぶので、丸め方も1か所にある。
     const sourceSec = freezeSourceSec(doc, clip, atSec);
+    // ⚠️ **切り出しには「何コマ目か」で頼む**（#1158）＝秒だけ渡すと、切り出す側が**自分の丸め方**で
+    // コマを選ぶので、素材と出力の格子が合わないとき（29.97 の素材を 24fps で出す等）に
+    // **見えていたコマの1つ先**になる（実測 18/64・全部ちょうど1コマ）。
+    // ⚠️ **`sourceSec` は捨てない**＝写真の名前（何秒の絵か）に使うので、表示の言葉としては要る。
+    const grid = freezeSourceFrame(doc, clip, atSec);
     // ⚠️ **映っていないなら切り出さない**＝正準が `null` を返すのは「その時刻にこの置き場所は無い」。
     // ⚠️ **いまは起きない（変異チェックで生き残る＝等価）**＝関門（`freezeFrameIssue`）が
     // `isDirectVideoClip` を通した帯なら、`freezeSourceSec` は**直接置きの置き場所**を必ず1つ持つ。
@@ -1311,7 +1316,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const { asset, fileName } = newFrameAsset(src.displayName, sourceSec, [], assetId);
     set({ isImporting: true, importError: null });
     try {
-      const relPath = await extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName);
+      const relPath = await extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName, grid ?? undefined);
       // ⚠️ **切り出した写真を置き去りにしない**（#1149 ④）＝ここから先の断りは
       // **切り出しに成功したあと**なので、片づけないと `assets/` にファイルだけが残る
       //（素材にも履歴にも載らないので、画面から片づける道が無い）。しかも `FREEZE_CHANGED` は

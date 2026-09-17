@@ -370,9 +370,28 @@ export function videoHoldsLastFrameAt(p: VideoPlacement, timeSec: number): boole
  * 「何コマ目か」を先に決め、そのコマが指す素材の秒へ直す（トリム＋速さはこの1回だけ掛ける）。
  */
 export function videoSourceSecAt(p: VideoPlacement, timeSec: number, fps: number): number | null {
+  const grid = videoSourceFrameAt(p, timeSec, fps);
+  if (grid == null) return null;
+  return grid.sourceStartSec + (grid.localFrame / grid.fps) * grid.speed;
+}
+
+/**
+ * その時刻に映すべきコマを、**書き出しが使う言葉**（並べ始める秒・速さ・fps・何枚目か）で返す。
+ *
+ * ⚠️ **秒ではなくこの4つを渡す**（#1158）＝秒を渡すと、受け取った側が**自分の丸め方**でコマを選ぶ。
+ * 実測すると、素材 29.97fps／出力 24fps などで**1コマずれる**（64 通り中 18 通り・全部ちょうど1コマ）。
+ * 書き出しは `-ss 並べ始める秒 -i … -vf setpts=PTS/速さ,fps=N` で並べた **N 枚目**を焼くので、
+ * 止め絵の切り出しも**同じ並べ方の N 枚目**を取れば、丸め方を合わせる必要がそもそも無くなる
+ *（近似で書き写さない＝ADR-0001）。
+ */
+export function videoSourceFrameAt(
+  p: VideoPlacement,
+  timeSec: number,
+  fps: number,
+): { sourceStartSec: number; speed: number; fps: number; localFrame: number } | null {
   const local = stagedFrameIndexAt(p, Math.round(timeSec * fps), fps);
   if (local == null) return null;
-  return p.sourceStartSec + (local / fps) * p.speed;
+  return { sourceStartSec: p.sourceStartSec, speed: p.speed, fps, localFrame: local };
 }
 
 /**

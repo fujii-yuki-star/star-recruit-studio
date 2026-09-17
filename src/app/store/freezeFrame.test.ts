@@ -71,6 +71,17 @@ describe('freezeSelectedClip（この瞬間で絵を止める）', () => {
     await useTimelineStore.getState().freezeSelectedClip(6);
     // 5 + (6-2)*2 = 13
     expect(vi.mocked(assetFsMod.extractVideoFrame).mock.calls[0]![2]).toBe(13);
+    // ⚠️ **「何コマ目か」も一緒に渡す**（#1158）＝秒だけ渡すと、切り出す側が**自分の丸め方**で
+    // コマを選ぶので、素材と出力の格子が合わないとき**見えていたコマの1つ先**になる
+    //（FFmpeg で実測＝64 通り中 18 通り・全部ちょうど1コマ）。
+    // ⚠️ **渡していることを呼び出し側で留める**＝渡し忘れても純粋関数の検査は緑のままなので、
+    // ここが落ちなければ**直したつもりで何も変わっていない**に気づけない。
+    expect(vi.mocked(assetFsMod.extractVideoFrame).mock.calls[0]![4]).toEqual({
+      sourceStartSec: 5,
+      speed: 2,
+      fps: 30,
+      localFrame: 120, // (6-2) 秒 × 30fps
+    });
   });
 
   // ⚠️ **重い処理を始めてから断らない**（§2-5）。
