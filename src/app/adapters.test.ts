@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
 import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
-import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
+import { buildPrecheckItems, exportBlockingItems, sceneToDraftRow } from "./adapters";
 import { subtitleOverflowMessage } from "./uiLabels";
 
 const freeTemplate: Template = {
@@ -1007,5 +1007,55 @@ describe("buildPrecheckItems 端に寄った文字（#265 の任意項目）", (
     // 横型 1920×1080 の目安は四辺5%＝x:96..1824 / y:54..1026。
     expect(find(at(96, 54))).toBeUndefined();   // ぴったり内側
     expect(find(at(95, 54))).toBeDefined();     // 1px 外
+  });
+});
+
+// 見つからない素材は**押す前に止める**（#1068・実機で確かめた）。
+//
+// ⚠️ **止めないと**＝写真は**黙って灰色の枠**になり（見えていたものと違う動画が成功として出る）、
+// 動画は**途中で失敗する**（保存先を選ばせた後に落とす）。
+// ⚠️ **タイムライン形式は既に押す前に断っている**（`TIMELINE_EXPORT_VIDEO_FILE_MISSING`）＝揃える（ADR-0026②）。
+describe("見つからない素材は押す前に止める（#1068）", () => {
+  // ⚠️ **差し込み口のあるテンプレを使う**＝画面は「テンプレの差し込み口に入っているか」で
+  // 使用中を数える（`sceneActiveAssetIds`）ので、口の無いテンプレだと**使っていない扱い**になる
+  //（最初この取り違えで検査が落ちた＝**実装ではなく検査の作り方**が違っていた）。
+  const slotTemplate: Template = {
+    ...freeTemplate,
+    templateId: "photo_slot_v1",
+    category: "photo_intro",
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "photo", type: "slot", slotType: "photo", x: 0, y: 0, w: 1920, h: 1080, zIndex: 1 },
+    ],
+  } as Template;
+  const usedScene = (): Scene => ({
+    ...freeScene(undefined),
+    sceneType: "photo_intro",
+    templateId: "photo_slot_v1",
+    assetRefs: { photo: "asset_001" },
+  }) as Scene;
+
+  it("使っている素材が見つからなければ、書き出しを止める", () => {
+    const blocking = exportBlockingItems([usedScene()], assets, [slotTemplate], undefined, undefined, ["asset_001"]);
+    expect(blocking.map((i) => i.id)).toContain("missingAsset");
+  });
+
+  // ⚠️ **材料を通さないと、項目そのものが作られない**＝直行導線ですり抜ける
+  //（フォントで同じ穴を踏んだ＝PR #886 レビュー 🔴）。**通したときに止まる**ことを対で押さえる。
+  it("⚠️ 調べていない（材料を渡していない）ときは止めない", () => {
+    const blocking = exportBlockingItems([usedScene()], assets, [slotTemplate]);
+    expect(blocking.map((i) => i.id)).not.toContain("missingAsset");
+  });
+
+  // ⚠️ **使っていない素材では止めない**＝消えていても動画は変わらないので、行き止まりを作らない。
+  it("使っていない素材が見つからなくても、止めない", () => {
+    const blocking = exportBlockingItems([freeScene(undefined)], assets, [freeTemplate], undefined, undefined, ["asset_001"]);
+    expect(blocking.map((i) => i.id)).not.toContain("missingAsset");
+  });
+
+  // ⚠️ **動画全体の BGM も「使っている」に数える**（#348 レビュー由来の絞り方を、止める側でも保つ）。
+  it("動画全体の BGM が見つからなくても止める", () => {
+    const blocking = exportBlockingItems([freeScene(undefined)], assets, [freeTemplate], undefined, undefined, ["asset_001"], "asset_001");
+    expect(blocking.map((i) => i.id)).toContain("missingAsset");
   });
 });

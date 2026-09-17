@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain/project/persistence";
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 import { isTimelineProjectDoc, resolveProjectFormat } from "../../domain/projectFormat";
-import { STARTUP_NOT_READY, sceneMissingUsedAssets, sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
+import { STARTUP_NOT_READY, sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
 import { engineWaitPlan } from "../../domain/startup/engineWait";
 import { voicevoxReady } from "../../infrastructure/voiceFs";
 import { PROJECT_FORMAT } from "../../domain/enums";
@@ -347,18 +347,15 @@ async function runExport(
       return;
     }
     await useProjectStore.getState().loadProject(projectId);
-    // ⚠️ **素材が実在するかは、開いたあとに調べる**（PR #1208 レビュー 🟡）＝
-    // 使っている素材が見つからないまま書き出すと、**その場面が黙って抜けた動画**になる。
+    // ⚠️ **素材が実在するかは、開いたあとに調べる**（PR #1208 レビュー 🟡・#1068）＝
+    // 調べておかないと、書き出しの画面の関門（`exportBlockingItems`）が**項目そのものを作れない**。
+    // ⚠️ **ここでは数えない**＝**見つからない素材は書き出しの画面が断る**ようになったので（#1068）、
+    // ここでも数えると**同じ状態に2つの断りが並ぶ**うえ、**数え方が画面と違う**
+    //（画面は「テンプレの差し込み口に入っているか」＝`sceneActiveAssetIds` で数える）。
     await useProjectStore.getState().refreshMissingAssets();
-    const st = useProjectStore.getState();
     const sceneNotReady = startupExportNotReady({
-      ungeneratedVoices: sceneUngeneratedVoices(st.scenes),
-      missingUsedAssets: sceneMissingUsedAssets(
-        st.scenes,
-        st.assets,
-        st.missingAssetIds,
-        st.meta.bgmSettings?.assetId ?? null,
-      ),
+      ungeneratedVoices: sceneUngeneratedVoices(useProjectStore.getState().scenes),
+      missingUsedAssets: 0,
     });
     if (sceneNotReady) {
       setNotice(

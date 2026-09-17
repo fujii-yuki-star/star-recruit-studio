@@ -59,6 +59,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const saveProject = useProjectStore((s) => s.saveProject);
   const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   const assets = useProjectStore((s) => s.assets);
+  // ⚠️ **見つからない素材は押す前に断る材料**（#1068）＝画面が開いた時点の結果を見る
+  //（調べていないときは空＝項目そのものを出さない＝嘘の「問題なし」を出さない）。
+  const missingAssetIds = useProjectStore((s) => s.missingAssetIds);
+  const projectBgmAssetId = useProjectStore((s) => s.meta.bgmSettings?.assetId ?? null);
   const templates = useProjectStore((s) => s.templates);
   const overlayAnimations = useProjectStore((s) => s.meta.timelineOverlay?.animations);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
@@ -105,8 +109,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // この画面へ直行したときに「見つからない文字の形」が**項目そのものとして作られず**、
   // 別の字体に化けた動画がそのまま書き出せてしまう（§2-5・ADR-0026②）。
   const blockingItems = useMemo(
-    () => exportBlockingItems(scenes, assets, templates, overlayAnimations, fontsForBlocking),
-    [scenes, assets, templates, overlayAnimations, fontsForBlocking],
+    // ⚠️ **見つからない素材の材料もここへ通す**（#1068）＝通さないと、サイドバーから
+    // この画面へ直行したときに**項目そのものが作られず**、素材の抜けた動画が書き出せてしまう
+    //（フォントで同じ穴を踏んだ＝PR #886 レビュー 🔴）。
+    () => exportBlockingItems(scenes, assets, templates, overlayAnimations, fontsForBlocking, missingAssetIds, projectBgmAssetId),
+    [scenes, assets, templates, overlayAnimations, fontsForBlocking, missingAssetIds, projectBgmAssetId],
   );
   const blockedMessage = blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "export") : null;
   // この端末で書き出せない（h264 不可）ときも公開前チェックと同じく止める＝直行経路だけ押せてしまうのを防ぐ（ADR-0026②）。
@@ -264,6 +271,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations,
         // ⚠️ 押した瞬間の再確認でも同じ材料を見る（`null`＝まだ調べていない＝項目を出さない）。
         { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
+        // ⚠️ **押した瞬間の再確認でも、見つからない素材の材料を見る**（#1068）。
+        st.missingAssetIds,
+        st.meta.bgmSettings?.assetId ?? null,
       );
       if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;
