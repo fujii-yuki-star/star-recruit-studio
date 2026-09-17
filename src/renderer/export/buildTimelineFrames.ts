@@ -57,6 +57,15 @@ export interface BuildTimelineFramesOptions {
     speed: number;
     fps: number;
   }) => Promise<number>;
+  /**
+   * **この区間だけ描く**（#1203）。未指定＝動画まるごと（いままでどおり）。
+   *
+   * ⚠️ **コマの番号は動画の頭から数えたまま**にする＝区間ごとに 0 から数え直すと、
+   * 動画のコマの選び方（`videoFrameIndexAt`）が**区間の頭からになってずれる**。
+   */
+  window?: { fromFrame: number; toFrame: number };
+  /** コマの置き場の名前（#1203＝区間ごとに分ける）。未指定＝`timeline_frames`。 */
+  framesDirName?: string;
   /** 焼き出したコマを1枚読む（data URL）。`stageVideo` と対で渡す。 */
   readVideoFrame?: (dirName: string, frameIndex: number) => Promise<string>;
 }
@@ -94,7 +103,11 @@ export async function buildTimelineFrames(
     if (opts.shouldCancel?.()) throw new ExportCancelledError();
   };
   const framesBase64: string[] = [];
-  const framesDir = opts.stageFrame ? TIMELINE_FRAMES_DIR : undefined;
+  const framesDir = opts.stageFrame ? (opts.framesDirName ?? TIMELINE_FRAMES_DIR) : undefined;
+  // **描く範囲**（#1203）＝区間の指定が無ければ、いままでどおり動画まるごと。
+  const fromFrame = Math.max(0, opts.window?.fromFrame ?? 0);
+  const toFrame = Math.min(plan.frameCount, opts.window?.toFrame ?? plan.frameCount);
+  const windowCount = Math.max(0, toFrame - fromFrame);
 
   // **動画は先にコマへ焼き出す**（#512 段1）＝1フレームずつ切り出すと同じ素材を何度も開くことになる。
   // 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
@@ -102,6 +115,11 @@ export async function buildTimelineFrames(
   if (opts.stageVideo && opts.readVideoFrame) {
     for (const placement of videoPlacementsOf(doc, opts.templateOf)) {
       bail();
+      // ⚠️ **描く区間に出てこない動画は、コマへ焼き出さない**（#1203）＝
+      // 焼き出しは素材1本ぶん丸ごと走るので、出てこない部品まで焼くと**いちばん高い費用**を無駄に払う。
+      const clipFrom = Math.round(placement.clip.startSec * plan.fps);
+      const clipTo = Math.round((placement.clip.startSec + placement.clip.durationSec) * plan.fps);
+      if (clipTo <= fromFrame || clipFrom >= toFrame) continue;
       const spec = videoStagePlan(placement);
       const dirName = videoFramesDirOf(placement.clip.id, placement.layerId);
       const count = await opts.stageVideo({
@@ -117,7 +135,7 @@ export async function buildTimelineFrames(
     }
   }
 
-  for (let f = 0; f < plan.frameCount; f += 1) {
+  for (let f = fromFrame; f < toFrame; f += 1) {
     bail();
     const timeSec = frameTimeAt(f, plan.fps);
     const creditText = creditTextAt(doc, timeSec, opts.fallbackCredit);
@@ -151,14 +169,16 @@ export async function buildTimelineFrames(
       opts.outputSize?.width ?? layout.width,
       opts.outputSize?.height ?? layout.height,
     );
-    if (framesDir && opts.stageFrame) await opts.stageFrame(framesDir, f, dataUrl);
+    // ⚠️ **置き場の中では 0 から並べる**＝`image2` は連番で読むので、
+    // 区間の頭が 5400 番だからといって 5400 から置くと、1枚も見つからない。
+    if (framesDir && opts.stageFrame) await opts.stageFrame(framesDir, f - fromFrame, dataUrl);
     else framesBase64.push(dataUrl);
     // 4枚おき＋最後＝進捗が動きつつ通知で埋もれない（場面形式のフレームループと同じ間引き）。
-    if (f % 4 === 0 || f === plan.frameCount - 1) opts.onProgress?.(f + 1, plan.frameCount);
+    if (f % 4 === 0 || f === toFrame - 1) opts.onProgress?.(f - fromFrame + 1, windowCount);
   }
   return {
     ...(framesDir ? { framesDir } : { framesBase64 }),
     fps: plan.fps,
-    durationSec: plan.durationSec,
+    durationSec: windowCount / plan.fps,
   };
 }

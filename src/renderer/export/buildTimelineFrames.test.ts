@@ -68,6 +68,60 @@ beforeEach(() => {
   vi.mocked(svgToPngDataUrl).mockClear();
 });
 
+// 区間だけ描く（#1203）。⚠️ **ここが狂うと、出来上がりが伸び縮みするか、1枚も見つからない**。
+describe('区間だけ描く（#1203）', () => {
+  const slot = (id: string, startSec: number, durationSec: number): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec, durationSec,
+       x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_001' }) as unknown as TimelineClip;
+
+  it('指した区間の枚数だけ描く', async () => {
+    const d = doc({ clips: [textClip('clip_001', { durationSec: 4 })] });
+    const r = await buildTimelineFrames(d, { ...baseOpts, window: { fromFrame: 30, toFrame: 60 } });
+    expect(vi.mocked(svgToPngDataUrl).mock.calls).toHaveLength(30);
+    expect(r.durationSec).toBeCloseTo(1, 6);
+  });
+
+  // ⚠️ **置き場の中では 0 から並べる**＝`image2` は連番で読むので、
+  // 区間の頭の番号のまま置くと**1枚も見つからない**（真っ黒な区間が出る）。
+  it('置き場の中の番号は 0 から始まる', async () => {
+    const staged: number[] = [];
+    await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 4 })] }), {
+      ...baseOpts,
+      window: { fromFrame: 30, toFrame: 33 },
+      stageFrame: async (_dir, index) => { staged.push(index); },
+    });
+    expect(staged).toEqual([0, 1, 2]);
+  });
+
+  it('置き場の名前を指せる（区間ごとに分ける）', async () => {
+    const dirs: string[] = [];
+    await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 4 })] }), {
+      ...baseOpts,
+      window: { fromFrame: 0, toFrame: 2 },
+      framesDirName: 'timeline_frames_7',
+      stageFrame: async (dir) => { dirs.push(dir); },
+    });
+    expect([...new Set(dirs)]).toEqual(['timeline_frames_7']);
+  });
+
+  // ⚠️ **区間に出てこない動画は焼き出さない**＝焼き出しは素材1本ぶん丸ごと走るので、
+  // ここが漏れると**いちばん高い費用**を無駄に払う（#1194 で 100 本ぶん払っていた）。
+  it('区間に出てこない動画は、コマへ焼き出さない', async () => {
+    const asked: string[] = [];
+    const d = doc({
+      clips: [slot('clip_001', 0, 2), slot('clip_002', 2, 2)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 0, toFrame: 60 },
+      stageVideo: async (v) => { asked.push(v.clipId); return 60; },
+      readVideoFrame: async () => 'data:image/png;base64,X',
+    });
+    expect(asked, '区間の外の動画まで焼き出した').toEqual(['clip_001']);
+  });
+});
+
 describe('buildTimelineFrames', () => {
   it('置いた写真が実際に絵として焼かれる（#716＝解いた src が SVG まで届く）', async () => {
     // 立ち絵を落として動画から消えた（#716 レビュー）のと同型＝**運ぶ経路のどこかが切れると絵だけ消える**。

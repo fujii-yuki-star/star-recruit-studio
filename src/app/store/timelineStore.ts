@@ -63,7 +63,7 @@ import type { NarrationStatus } from "../../domain/enums";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds, timelineVideoRelPaths } from "../../domain/timeline/export";
-import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
+import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import type { LayerBackground, TextShadow } from "../../domain/template/types";
@@ -2375,7 +2375,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       await clearExportFramesStage();
       // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
       await loadExportFonts();
-      const frames = await buildTimelineFrames(doc, {
+      const parts = await buildTimelineParts(doc, {
         templateOf,
         assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
         // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
@@ -2407,6 +2407,29 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       set({ exportRun: { ...get().exportRun, phase: P.encoding } });
+      // 区間を書き出しの入力へ写す（#1203）。⚠️ **音は渡さない**（`useOriginalAudio: false`）＝
+      // 動画の元の音は**下の `bgmRuns`** で渡っているので、ここでも鳴らすと**二重に鳴る**。
+      const scenes = parts.map((p) => {
+        if (!p.video) return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir };
+        const asset = doc.assets.find((x) => x.assetId === p.video!.assetId);
+        return {
+          fps: p.fps,
+          durationSec: p.durationSec,
+          video: {
+            belowPngBase64: p.video.belowPngBase64,
+            clipRelPath: asset?.filePath ?? '',
+            slotX: p.video.slotX,
+            slotY: p.video.slotY,
+            slotW: p.video.slotW,
+            slotH: p.video.slotH,
+            fit: p.video.fit,
+            clipStartSec: p.video.clipStartSec,
+            clipEndSec: p.video.clipEndSec,
+            useOriginalAudio: false,
+            speed: p.video.speed,
+          },
+        };
+      });
       const { runs: bgmRuns, duckMerged } = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
       // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
       const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
@@ -2414,7 +2437,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 文字列をそのまま使うと、Rust が拡張子を補った（`ffmpeg.rs` の `set_extension("mp4")`）ときに
       // **覚えた場所と開く場所が食い違う**＝「この場所は開けませんでした」になる（保存先の表示もずれる）。
       const report = await exportVideo(
-        [frames],
+        scenes,
         doc.projectName || "movie",
         bgmRuns,
         doc.projectId,
