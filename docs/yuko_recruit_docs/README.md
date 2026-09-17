@@ -28,6 +28,7 @@
 | 15 | `15_ERROR_STATE_MODEL.md` | **【正典】** 状態遷移・部分失敗・排他・エラーコード語彙（Warning.code） |
 | 16 | `16_GLOSSARY.md` | 用語集（ユーザー語⇄内部語、ドメイン用語、enum索引） |
 | 17 | `17_YUKO_CHARACTER_SPEC.md` | ゆうこ素材仕様（形式・命名・表情セット。作画/権利/声は事業判断） |
+| 18 | `18_EXTERNAL_AGENT_CONTRACT.md` | **外の AI が「すたりお」を動かすときの約束**（利用者が持ち込む Claude・Codex 等が相手＝ADR-0041/0042。⚠️ **同梱の生成が相手の `12` とは別物**） |
 | — | `schemas/*.schema.json` | **【正典】** project / template / ai-video-plan のJSON Schema実体 |
 | — | `../../CLAUDE.md` | AI開発規約（全AIエージェント共通の行動規範・資料の地図） |
 | — | `adr/` | アーキテクチャ決定記録（ADR）。重要な設計判断の根拠 |
