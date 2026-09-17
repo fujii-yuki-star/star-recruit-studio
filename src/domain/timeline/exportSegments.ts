@@ -47,8 +47,14 @@ export function clipIsPassThroughVideo(
   return true;
 }
 
-/** 絵に出る部品か（隠した列・隠した部品・音の部品は絵に出ない）。 */
-function isVisualClip(doc: TimelineProject, clip: TimelineClip): boolean {
+/**
+ * 絵に出る部品か（隠した列・隠した部品・音の部品は絵に出ない）。
+ *
+ * ⚠️ **`domain/timeline/clipKind.ts` の `isVisualClip` とは別物**（PR #1207 レビュー ℹ️）＝
+ * あちらは**種別**（絵か音か）、こちらは**いま絵に出るか**（隠れていないか）。
+ * 同じ名前だと、読む人が「同じもの」と思って**片方の条件を落とす**。
+ */
+function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
   if (clip.hidden) return false;
   const track = doc.tracks.find((t) => t.id === clip.trackId);
   if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
@@ -80,7 +86,7 @@ export function planTimelineExportSegments(doc: TimelineProject): TimelineExport
   }
   const hasAnimation = (clipId: string): boolean => animated.has(clipId);
 
-  const visual = doc.clips.filter((c) => isVisualClip(doc, c));
+  const visual = doc.clips.filter((c) => isDrawnClip(doc, c));
   // 区間の境目＝部品の出入り（コマの格子に丸める）。
   const cuts = new Set<number>([0, plan.frameCount]);
   const toFrame = (sec: number): number =>
