@@ -127,3 +127,25 @@ describe('作業範囲を消す', () => {
     expect(useTimelineStore.getState().editNotice, '寄せていないのに知らせている').toBeNull();
   });
 });
+
+describe('詰めないときの断り（PR #1199 レビュー 🟡5）', () => {
+  // ⚠️ **押しても何も起きない、を作らない**＝部品が1つも掛かっていない範囲は、
+  // 「詰める」なら空白を詰める意味があるが、「詰めない」なら**することが無い**。
+  it('部品が無い範囲を、詰めずに消そうとしたら断る', async () => {
+    await open(doc({ clips: [text({ id: 'clip_002', startSec: 8, durationSec: 2 })] }));
+    useTimelineStore.getState().setRangeEdge('in', 4);
+    useTimelineStore.getState().setRangeEdge('out', 6);
+    useTimelineStore.getState().deleteRangeInTimeline(false);
+    expect(useTimelineStore.getState().editBlocked?.reason, '何も無いのに消せている').toBe(EDIT_BLOCKED.notFound);
+  });
+
+  // ⚠️ **詰めるときは断らない**＝空白そのものを詰めるのが目的。
+  it('部品が無い範囲でも、詰めるなら通る', async () => {
+    await open(doc({ clips: [text({ id: 'clip_002', startSec: 8, durationSec: 2 })] }));
+    useTimelineStore.getState().setRangeEdge('in', 4);
+    useTimelineStore.getState().setRangeEdge('out', 6);
+    useTimelineStore.getState().deleteRangeInTimeline(true);
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+    expect(at('clip_002')?.startSec, '詰まっていない').toBe(6);
+  });
+});

@@ -69,6 +69,24 @@ export function activatesOnSpace(target: EventTarget | null): boolean {
  * 文字入力は `isTextEntryTarget` の担当（そちらが先に弾く）。
  */
 const ARROW_INPUT_TYPES = new Set(["range", "radio", "number", "date", "time", "month", "week", "datetime-local"]);
+/**
+ * **文字キーで自分の中を探す相手か**（#1193・PR #1199 レビュー 🟡）。
+ *
+ * ⚠️ **`<select>` は文字キーで選択肢へ飛ぶ**（ブラウザの標準機能）＝`I`／`O` のような
+ * 1文字の割り当てを画面が奪うと、**選択肢へ飛べなくなる**（`usesArrowKeys` が矢印で同じ理由で
+ * 除いているのと同じ話）。この画面は選ぶ欄が多いので、素通りさせない。
+ * ⚠️ **`combobox` などの役割も同じ**＝中身を文字で絞る作りが普通。
+ */
+const TYPE_AHEAD_ROLES = new Set(["listbox", "combobox", "menu", "menuitem", "tree", "treeitem"]);
+
+export function usesTypeAhead(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null;
+  if (!t || typeof t.tagName !== "string") return false;
+  if (t.tagName === "SELECT") return true;
+  const role = t.getAttribute?.("role");
+  return role != null && TYPE_AHEAD_ROLES.has(role);
+}
+
 const ARROW_ROLES = new Set(["slider", "spinbutton", "radio", "listbox", "option", "menu", "menuitem", "tab", "tablist", "tree", "treeitem", "combobox"]);
 
 export function usesArrowKeys(target: EventTarget | null): boolean {

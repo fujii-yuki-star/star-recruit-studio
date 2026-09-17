@@ -26,7 +26,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
+import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -833,12 +833,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // **`I`／`O`＝作業範囲の始まり／終わり**（#1193・業界の型）。
       // ⚠️ **文字を打っている最中は奪わない**＝入口の `shouldIgnoreShortcut` が入力欄を除いているので、
       // ここまで来た時点で「画面のキー」として受けてよい（`Space`・`Delete` と同じ扱い）。
-      if (e.key === "i" || e.key === "I") {
+      // ⚠️ **文字で中を探す相手からは奪わない**（PR #1199 レビュー 🟡）＝`<select>` は
+      // **文字キーで選択肢へ飛ぶ**（ブラウザの標準機能）。この画面は選ぶ欄が多いので、
+      // `I`／`O` を一律で奪うと**「Inter」「Open…」へ飛べなくなる**（矢印キーを `usesArrowKeys` で
+      // 譲っているのと同じ理由）。
+      if ((e.key === "i" || e.key === "I") && !usesTypeAhead(e.target)) {
         e.preventDefault();
         rangeEdgeRef.current("in");
         return;
       }
-      if (e.key === "o" || e.key === "O") {
+      if ((e.key === "o" || e.key === "O") && !usesTypeAhead(e.target)) {
         e.preventDefault();
         rangeEdgeRef.current("out");
         return;
@@ -1973,7 +1977,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
     // ⚠️ **キーとボタンで同じ入口**（ADR-0034 決定19）＝押せる条件も断り文もボタン側が決める。
     deleteRangeRef.current = () => {
-      const extra = rangeExtra();
+      const extra = rangeExtra(true); // キーは「詰める」側
       if (extra.disabled) {
         // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝黙って何もしないと、押した返事が無い。
         setEditBlocked(EDIT_BLOCKED.notFound, PANEL_ID.arrange);
@@ -3002,21 +3006,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **範囲を取っていないときの文は、ここで作る**＝ドメインは `notFound` としか言えない
    *（「対象が見つからない」は**選び直しても直らない**案内になる＝§2-5）。
    */
-  const rangeExtra = (): { disabled?: boolean; hint?: string } => {
+  const rangeExtra = (closeGap: boolean): { disabled?: boolean; hint?: string } => {
     if (!doc) return { disabled: true };
     if (rangeInSec == null || rangeOutSec == null) {
       return { disabled: true, hint: "先に「ここから（範囲）」と「ここまで（範囲）」で範囲を決めてください" };
     }
+    // ⚠️ **幅ゼロもここで断る**（PR #1199 レビュー 🟡）＝`I` と `O` を同じ所で押すと起きる。
+    // 抜けるとドメインの `notFound`（「その部品は見つかりませんでした。選び直してください」）が
+    // そのまま出て、**「部品」という無関係な言葉が漏れ、次の行動も示さない**（§2-5）。
+    if (rangeInSec === rangeOutSec) {
+      return { disabled: true, hint: "作業範囲の幅がありません。「ここまで（範囲）」を別の位置で置き直してください" };
+    }
     // ⚠️ **再生中は断る**（「分ける」と同じ＝走っている位置で確定させない・ADR-0032 決定21）。
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
+    // ⚠️ **押すボタンと同じ条件で見る**（自分で見つけた・PR #1199）＝最初は両方とも `closeGap: true` で
+    // 見ていたが、**詰めるかどうかで断る条件が違う**（詰めるときは**空白そのものを詰める**のが目的なので、
+    // 部品が1つも掛かっていなくても断らない）。同じ判定を使い回すと、「範囲を削除」（詰めない）が
+    // **押せるのに押した先で断られる**＝この節の趣旨と正反対になる。
     const issue = deleteRangeIssue(doc, {
       startSec: Math.min(rangeInSec, rangeOutSec),
       endSec: Math.max(rangeInSec, rangeOutSec),
-      closeGap: true,
+      closeGap,
     });
     return issue ? { disabled: true, hint: editBlockedMessage[issue] } : {};
   };
-  const rangeGuard = editGuard(rangeExtra());
+  const rangeCloseGuard = editGuard(rangeExtra(true));
+  const rangeDeleteGuard = editGuard(rangeExtra(false));
   /**
    * **この瞬間で絵を止める**（#356 ②）＝押せる条件は「分ける」と同じ入口を通す。
    *
@@ -4143,16 +4158,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button
                 className="btn btn-secondary"
                 onClick={() => deleteRangeInTimeline(true, PANEL_ID.selected)}
-                {...rangeGuard}
-                title={rangeGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
+                {...rangeCloseGuard}
+                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
               >
                 範囲を削除して詰める
               </button>
               <button
                 className="btn btn-secondary"
                 onClick={() => deleteRangeInTimeline(false, PANEL_ID.selected)}
-                {...rangeGuard}
-                title={rangeGuard.title ?? "作業範囲を削除します（詰めません）"}
+                {...rangeDeleteGuard}
+                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
               >
                 範囲を削除
               </button>
