@@ -17,7 +17,7 @@
 | 資料 | 範囲 |
 |---|---|
 | [`adr/0000-template.md`](../yuko_recruit_docs/adr/0000-template.md) | 全文（雛形） |
-| [`adr/README.md`](../yuko_recruit_docs/adr/README.md) | 一覧と状態（7,437字） |
+| [`adr/README.md`](../yuko_recruit_docs/adr/README.md) | 一覧と状態（7,786字） |
 | 関係する既存 ADR | `adr/README.md` の一覧から当てる |
 
 ## 書くときの決まり
