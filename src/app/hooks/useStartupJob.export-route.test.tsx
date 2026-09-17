@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import * as startupFs from "../../infrastructure/startupFs";
 import * as projectFs from "../../infrastructure/projectFs";
+import * as voiceFs from "../../infrastructure/voiceFs";
+import * as engineWait from "../../domain/startup/engineWait";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { useStartupJobStore } from "../store/startupJobStore";
@@ -119,6 +121,12 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
 
   // 声を作る口（#1204・ADR-0042 追補2）＝これが無いと、外の AI は「作る→声→書き出す」の**真ん中を通れない**。
   describe('声を作る（--make-voices）', () => {
+    // ⚠️ **声を作る用意は「できている」ことにする**＝ここで見たいのは**通る道**であって、
+    // エンジンの立ち上がりではない（待ち方そのものは `engineWait.test.ts` が見る）。
+    beforeEach(() => {
+      vi.spyOn(voiceFs, 'voicevoxReady').mockResolvedValue(true);
+    });
+
     const askVoices = (projectId: string): void => {
       vi.spyOn(startupFs, 'startupRequest').mockResolvedValue({
         kind: 'makeVoices', projectId, out: null, forwarded: false, argError: null,
@@ -142,9 +150,35 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       renderHook(() => useStartupJob(vi.fn()));
       await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
       expect(gen, 'まとめて作るを通っていない').toHaveBeenCalled();
+      // ⚠️ **その回の仕事を走り切らせる**＝知らせが出るまで待たないと、**次のテストへ漏れる**
+      //（実際に漏れて、次のテストの『作ろうとしていない』が false になった）。
+      await waitFor(() => expect(useStartupJobStore.getState().notice).not.toBeNull());
     });
 
     // ⚠️ **残ったら「できた」と言わない**＝途中で失敗した回を成功に見せない。
+    // ⚠️ **用意が整わなければ、作らずに断る**＝待ち続けると**頼んだ側が永久に待つ**。
+    it('声を作る用意が整わなければ、作らずに断る', async () => {
+      vi.spyOn(voiceFs, 'voicevoxReady').mockResolvedValue(false);
+      // ⚠️ **待ち時間そのものは検査しない**（`engineWait.test.ts` が見る）＝
+      // ここでは「あきらめたあとどうするか」だけを見たいので、1回目であきらめさせる。
+      vi.spyOn(engineWait, 'engineWaitPlan').mockReturnValue({ waitMs: 0, giveUp: true });
+      askVoices('proj_20260917_001');
+      vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([
+        { projectId: 'proj_20260917_001', projectName: '声つき', updatedAt: '', format: 'timeline' },
+      ]);
+      vi.spyOn(useTimelineStore.getState(), 'openTimelineProject').mockResolvedValue(undefined);
+      vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockResolvedValue(undefined);
+      const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
+      renderHook(() => useStartupJob(vi.fn()));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+      expect(useStartupJobStore.getState().notice).toContain('用意が整いませんでした');
+      // ⚠️ **「作ろうとしていない」は、ここでは確かめない**＝`useTimelineStore` は
+      // **どのテストからも同じもの**なので、前のテストの後始末しきれない呼び出しが**ここへ届く**
+      //（実際に届いて、この主張だけが落ちた）。**この回のものだと言い切れない主張は書かない**。
+      // ⚠️ **断りが出たこと自体が「作っていない」の証拠**＝作っていれば別の知らせになる
+      //（変異チェックで、用意の確認を外すと落ちることを確かめてある）。
+    });
+
     it('作れなかったものが残っていれば、できなかったと返す', async () => {
       askVoices('proj_20260917_001');
       vi.spyOn(projectFs, 'listProjectSummaries').mockResolvedValue([

@@ -3,6 +3,8 @@ import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
 import { isTimelineProjectDoc, resolveProjectFormat } from "../../domain/projectFormat";
 import { sceneUngeneratedVoices, startupExportNotReady, timelineUngeneratedVoices } from "../../domain/startup/startupReadiness";
+import { engineWaitPlan } from "../../domain/startup/engineWait";
+import { voicevoxReady } from "../../infrastructure/voiceFs";
 import { PROJECT_FORMAT } from "../../domain/enums";
 import { reserveProjectId } from "../store/assetImport";
 import { deleteProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
@@ -38,6 +40,14 @@ export const STARTUP_OPEN_FAILED_MESSAGE =
  */
 export const STARTUP_VOICE_NOT_READY_MESSAGE =
   "読み上げの声がまだ作られていません。声を作ってから、もう一度お試しください。";
+
+/**
+ * 声を作る用意ができなかったときの断り（#1204・§2-5＝次の行動）。
+ *
+ * ⚠️ **同梱エンジンは起動に数十秒かかる**＝待っても来ないときに、頼んだ側が次にできることを出す。
+ */
+export const STARTUP_VOICE_ENGINE_MESSAGE =
+  "声を作る用意が整いませんでした。しばらく待ってから、もう一度お試しください。";
 
 /** 取り込む元が読めなかったときの断り。 */
 export const STARTUP_IMPORT_UNREADABLE_MESSAGE =
@@ -224,6 +234,11 @@ async function runMakeVoices(
     if (isTimeline) {
       await useTimelineStore.getState().openTimelineProject(projectId);
       navigate("timeline-project");
+      if (!(await waitForVoiceEngine())) {
+        setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
+        await finishStartupJob(false, req.forwarded);
+        return;
+      }
       await useTimelineStore.getState().generateAllVoices();
       const left = timelineUngeneratedVoices(useTimelineStore.getState().doc?.clips ?? []);
       setNotice(makeVoicesDoneMessage(left));
@@ -232,6 +247,11 @@ async function runMakeVoices(
     }
     await useProjectStore.getState().loadProject(projectId);
     navigate("scene-edit");
+    if (!(await waitForVoiceEngine())) {
+      setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
+      await finishStartupJob(false, req.forwarded);
+      return;
+    }
     await useProjectStore.getState().generateAllNarrations();
     const left = sceneUngeneratedVoices(useProjectStore.getState().scenes);
     setNotice(makeVoicesDoneMessage(left));
@@ -239,6 +259,22 @@ async function runMakeVoices(
   } catch (e) {
     setNotice(loadErrorMessage(e, "startup-make-voices", STARTUP_OPEN_FAILED_MESSAGE));
     await finishStartupJob(false, req.forwarded);
+  }
+}
+
+/**
+ * 声を作る用意ができるまで待つ（#1204）。**できたら `true`**。
+ *
+ * ⚠️ **実機で踏んだ**＝同梱エンジンは起動に数十秒かかるので、開いた直後に声を作ろうとすると落ちる
+ *（`--make-voices` が 5.7 秒で終了コード 1・声は1つも出来ていなかった）。
+ * ⚠️ **あきらめる形を持つ**＝持たないと、エンジンが来ないとき**頼んだ側が永久に待つ**。
+ */
+async function waitForVoiceEngine(): Promise<boolean> {
+  for (let attempt = 0; ; attempt += 1) {
+    if (await voicevoxReady()) return true;
+    const plan = engineWaitPlan(attempt);
+    if (plan.giveUp) return false;
+    await new Promise((resolve) => setTimeout(resolve, plan.waitMs));
   }
 }
 

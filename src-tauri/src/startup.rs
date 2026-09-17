@@ -584,7 +584,8 @@ mod make_voices_tests {
     /// ⚠️ **閉じる頼みは一緒に受ける**（終わったら閉じる＝AI が待てる）。
     #[test]
     fn make_voices_keeps_quit_when_done() {
-        let s = parse_startup_args(&a(&["--make-voices", "proj_1", "--quit-when-done"])).expect("読める");
+        let s = parse_startup_args(&a(&["--make-voices", "proj_1", "--quit-when-done"]))
+            .expect("読める");
         assert!(s.quit_when_done);
     }
 

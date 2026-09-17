@@ -26,3 +26,15 @@ export async function readVoiceDataUrl(projectId: string, relPath: string): Prom
     return null;
   }
 }
+
+/**
+ * 声を作る用意ができているか（#1204）。⚠️ **アプリの外（ブラウザ開発）では常に false**。
+ */
+export async function voicevoxReady(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    return await invoke<boolean>('voicevox_ready', { baseUrl: null });
+  } catch {
+    return false;
+  }
+}
