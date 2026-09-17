@@ -2417,6 +2417,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
           durationSec: p.durationSec,
           video: {
             belowPngBase64: p.video.belowPngBase64,
+            abovePngBase64: p.video.abovePngBase64,
             clipRelPath: asset?.filePath ?? '',
             slotX: p.video.slotX,
             slotY: p.video.slotY,

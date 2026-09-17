@@ -136,6 +136,20 @@ describe('そのまま流せる区間は焼かない（#1203）', () => {
     expect(scenes[0].video?.clipRelPath).toBe('assets/v.mp4');
   });
 
+  // ⚠️ **上に重ねる層を必ず渡す**（実機で見つけた）＝渡さないと Rust が
+  // 「`video without above png`」で断り、**書き出しが丸ごと失敗する**。
+  // 型の上では任意（場面形式は別の渡し方も使う）なので、**送り出す所で留める**。
+  it('実動画で流す区間には、下と上の層を必ず渡す', async () => {
+    await open(vdoc([vclip('clip_001', 0)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { video?: { belowPngBase64?: string; abovePngBase64?: string } }[];
+    for (const sc of scenes) {
+      if (!sc.video) continue;
+      expect(sc.video.belowPngBase64, '下の層が無い').toBeTruthy();
+      expect(sc.video.abovePngBase64, '上の層が無い（Rust が断る）').toBeTruthy();
+    }
+  });
+
   // ⚠️ **音を二重に鳴らさない**＝動画の元の音は全体の音の並びで渡っている。
   it('元の音は流さない（二重に鳴らさない）', async () => {
     await open(vdoc([vclip('clip_001', 0, { useOriginalAudio: true })]));

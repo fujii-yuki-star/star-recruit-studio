@@ -16,7 +16,7 @@ import { planTimelineExportSegments } from '../../domain/timeline/exportSegments
 import type { TimelineExportSegment } from '../../domain/timeline/exportSegments';
 import type { TimelineProject } from '../../domain/timeline/types';
 import { isItemOfClip, layoutTimelineAt } from '../timelineLayout';
-import { layoutToSvg } from '../sceneSvg';
+import { splitVideoSceneSvg } from './videoSceneSplit';
 import { svgToPngDataUrl } from './rasterize';
 import { buildTimelineFrames, TIMELINE_FRAMES_DIR } from './buildTimelineFrames';
 import type { BuildTimelineFramesOptions } from './buildTimelineFrames';
@@ -33,6 +33,8 @@ export interface TimelineExportPart {
     assetId: string;
     /** 下に敷く静止画（背景など＝この区間では動かない）。 */
     belowPngBase64: string;
+    /** 上に重ねる静止画（透過＝いまの条件では中身が無い）。⚠️ **渡さないと Rust が断る**。 */
+    abovePngBase64: string;
     slotX: number;
     slotY: number;
     slotW: number;
@@ -73,17 +75,15 @@ export async function buildVideoPart(
   const image = own.length === 1 && own[0].kind === 'image' ? own[0] : undefined;
   if (!image) return undefined;
   const item = image;
-  // 下に敷く絵＝**その部品だけを外した**同じ描き方（背景や余白がそのまま出る）。
-  const below = { ...layout, items: layout.items.filter((i) => !isItemOfClip(i.id, seg.clipId)) };
-  const belowSvg = layoutToSvg(below, {
-    assetSrc: opts.assetSrc,
-    ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
-  });
-  const belowPngBase64 = await svgToPngDataUrl(
-    belowSvg,
-    opts.outputSize?.width ?? layout.width,
-    opts.outputSize?.height ?? layout.height,
-  );
+  // ⚠️ **分け方は場面形式と同じ部品を使う**（`splitVideoSceneSvg`）＝手で書き直すと、
+  // 「下は不透明・上は透過」「境目はその絵の重ね順」といった決まりが**2か所に分かれて**ずれる。
+  // ⚠️ **上の層も必ず出す**＝渡さないと Rust が断る（実機で `scene 2 video without above png`）。
+  const split = splitVideoSceneSvg(layout, item.id, opts.assetSrc, undefined, opts.fontFamily, undefined);
+  if (!split) return undefined;
+  const width = opts.outputSize?.width ?? layout.width;
+  const height = opts.outputSize?.height ?? layout.height;
+  const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
+  const abovePngBase64 = await svgToPngDataUrl(split.aboveSvg, width, height);
   const speed = clip.speed ?? 1;
   // 素材のどこを使うか＝**この区間ぶんだけ**（区間はクリップの途中で切れることがある）。
   const intoClipSec = seg.startSec - clip.startSec;
@@ -95,10 +95,11 @@ export async function buildVideoPart(
       clipId: clip.id,
       assetId: clip.assetId,
       belowPngBase64,
-      slotX: item.x,
-      slotY: item.y,
-      slotW: item.w,
-      slotH: item.h,
+      abovePngBase64,
+      slotX: split.slot.x,
+      slotY: split.slot.y,
+      slotW: split.slot.w,
+      slotH: split.slot.h,
       fit: item.fit,
       clipStartSec,
       clipEndSec: clipStartSec + (seg.endSec - seg.startSec) * speed,

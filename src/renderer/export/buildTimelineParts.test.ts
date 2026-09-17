@@ -60,7 +60,25 @@ describe('実動画をそのまま流す区間の組み立て', () => {
     const part = await buildVideoPart(d, { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
     expect(part?.video?.clipId).toBe('clip_001');
     expect(part?.durationSec).toBe(2);
-    expect(vi.mocked(svgToPngDataUrl).mock.calls, '下に敷く絵は1枚だけ').toHaveLength(1);
+    // ⚠️ **上の層も必ず出す**＝渡さないと Rust が断る（実機で見つけた＝`video without above png`）。
+    expect(part?.video?.abovePngBase64, '上の層を出していない').toBeTruthy();
+    expect(vi.mocked(svgToPngDataUrl).mock.calls, '焼くのは下と上の2枚だけ').toHaveLength(2);
+  });
+
+  // ⚠️ **下と上を取り違えない**＝取り違えると、**不透明な背景が動画の上に載って**動画が隠れる。
+  it('下は不透明（背景あり）・上は透過（背景なし）', async () => {
+    const part = await buildVideoPart(doc([slot('clip_001', 0)]), { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    // 差し替えた焼き係は `png:<svg>` を返すので、中身をそのまま見られる。
+    expect(part?.video?.belowPngBase64, '下の層に背景が無い').toContain('<rect');
+    expect(part?.video?.abovePngBase64, '上の層に背景が入っている（動画が隠れる）').not.toContain('<rect');
+  });
+
+  // ⚠️ **置き場所は分け方の結果から採る**＝取らないと、**画面の左上に寄った動画**が出る。
+  it('動画の置き場所は、実際に描いた矩形と同じ', async () => {
+    const d = doc([slot('clip_001', 0, { x: 120, y: 60, w: 800, h: 450 })]);
+    const part = await buildVideoPart(d, { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect({ x: part?.video?.slotX, y: part?.video?.slotY, w: part?.video?.slotW, h: part?.video?.slotH })
+      .toEqual({ x: 120, y: 60, w: 800, h: 450 });
   });
 
   // ⚠️ **下に敷く絵から、その部品は外す**＝外さないと**動画が二重に写る**
