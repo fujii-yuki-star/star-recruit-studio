@@ -134,6 +134,26 @@ describe('実動画をそのまま流す区間の組み立て', () => {
     expect(part).toBeUndefined();
   });
 
+  // ⚠️ **グループに付いた静的な回転**（PR #1207 レビュー 🔴）＝キーフレームではないので
+  // 「動きがあるか」では捕まらない。**描いた結果**（`item.rotation`）を見て弾く。
+  // ⚠️ これは場面形式から焼き出すと実際に起きる（FREE 場面のグループが変形ごと写る）。
+  it('グループごと回してあるときは組まない（プレビューだけ回るのを防ぐ）', async () => {
+    const d = doc([slot('clip_001', 0)], {
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 30, scale: 1 } }],
+    } as Partial<TimelineProject>);
+    const part = await buildVideoPart(d, { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect(part, '回っているのに実動画で流した').toBeUndefined();
+  });
+
+  // ⚠️ **グループの拡大は倒せる**＝矩形へ畳み込まれるので、渡せる（回転と違う）。
+  it('グループごと拡大してあるときは組める（矩形に畳み込まれる）', async () => {
+    const d = doc([slot('clip_001', 0, { x: 400, y: 200, w: 800, h: 450 })], {
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    } as Partial<TimelineProject>);
+    const part = await buildVideoPart(d, { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect(part?.video?.slotW, '縮めた大きさが渡っていない').toBe(400);
+  });
+
   it('その部品が見つからなければ組まない', async () => {
     const part = await buildVideoPart(doc([slot('clip_001', 0)]), { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_404' }, baseOpts);
     expect(part).toBeUndefined();
@@ -141,6 +161,25 @@ describe('実動画をそのまま流す区間の組み立て', () => {
 });
 
 describe('区間を順に組み立てる', () => {
+  // ⚠️ **倒した区間は1枚も焼かない**ので、コマごとの見張りに一度も入らない＝
+  // 区間ごとに中止を見ないと、**残り全部を焼き終わるまで**中止が効かない。
+  it('中止は、倒した区間が続いても効く', async () => {
+    const d = doc([slot('clip_001', 0), slot('clip_002', 2), slot('clip_003', 4)]);
+    let seen = 0;
+    await expect(buildTimelineParts(d, {
+      ...baseOpts,
+      shouldCancel: () => { seen += 1; return seen > 2; },
+    })).rejects.toThrow();
+  });
+
+  // ⚠️ **1枚も焼かない回でも進み具合を出す**＝出さないと 0% のまま止まって見える。
+  it('1枚も焼かない回でも、進み具合が動く', async () => {
+    const seen: number[] = [];
+    const d = doc([slot('clip_001', 0), slot('clip_002', 2)]);
+    await buildTimelineParts(d, { ...baseOpts, onProgress: (done) => seen.push(done) });
+    expect(seen, '進み具合が一度も動いていない').toEqual([1, 2]);
+  });
+
   it('動画だけの並びは、1枚も焼かない', async () => {
     const parts = await buildTimelineParts(doc([slot('clip_001', 0), slot('clip_002', 2)]), baseOpts);
     expect(parts).toHaveLength(2);
