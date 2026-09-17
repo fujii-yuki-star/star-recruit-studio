@@ -165,6 +165,20 @@ fn take_restore_point(app: tauri::AppHandle, project_id: String, at_ms: u64) -> 
 }
 
 /// 指定の復元ポイントを消す（古いぶんの片づけ＝残す数は呼び出し側が決める）。
+/// ファイルを消す。**「既に無い」だけを飲み**、それ以外の理由は返す（#1188）。
+///
+/// ⚠️ **`let _ =` で捨てない**＝以前はここが `let _ = fs::remove_file(&path)` で、コメントは
+/// 「既に無いのは失敗ではない」と**1つの理由だけ**を想定していたのに、実際は**理由を問わず**
+/// 握りつぶしていた（権限で消せない・ほかのソフトが掴んでいる、も同じく黙る）。
+/// ⚠️ **戻り値で返す**＝記録するか断るかは**呼ぶ側の判断**。ここは「消えたか／消えないならなぜか」だけを答える。
+fn remove_file_unless_missing(path: &std::path::Path) -> Option<std::io::Error> {
+    match fs::remove_file(path) {
+        Ok(()) => None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => Some(e),
+    }
+}
+
 #[tauri::command]
 fn drop_restore_point(
     app: tauri::AppHandle,
@@ -179,7 +193,14 @@ fn drop_restore_point(
         return Err(crate::messages::RESTORE_POINT_UNUSABLE.to_string());
     }
     let path = restore_dir(&app, &project_id)?.join(&name);
-    let _ = fs::remove_file(&path); // 既に無いのは失敗ではない
+    if let Some(e) = remove_file_unless_missing(&path) {
+        crate::tlog!("restore_point", "戻り先を消せない {:?}: {e}", path);
+    }
+    // ⚠️ **それでも断らない**（#1188 の調べで分かったこと）＝この口を呼ぶのは**自動の刈り取り**だけで、
+    // 利用者が「これを消す」と押す道は無い（`restorePointKeeper.ts` の2か所・どちらも失敗を飲む設計で、
+    // 理由も書いてある）。ここで `Err` を返すと、呼ぶ側の `try` が**次の世代を作る所まで巻き込んで**
+    // 抜けるので、**消せないせいで新しい世代が残らなくなる**＝消し残りより重い。
+    // ⚠️ **画面に出す道ができたら、ここも見直す**＝そのときは「消せませんでした」を返す側が正しい（§2-5）。
     Ok(())
 }
 
@@ -1397,6 +1418,70 @@ mod library_id_tests {
         for (v, want) in cases {
             assert_eq!(is_known_asset_type(v), *want, "{v}");
         }
+    }
+}
+
+#[cfg(test)]
+mod remove_file_tests {
+    use super::remove_file_unless_missing;
+
+    /// **理由を受け取ったのに捨てていない**ことを、構造で留める（#1188）。
+    ///
+    /// ⚠️ **振る舞いの検査では捕まらない**＝呼ぶ側が `let _ =` に戻しても、
+    /// `remove_file_unless_missing` 自体の検査は緑のまま（記録は書き出しの外にあるので見えない）。
+    /// 実際に**変異チェックで生き残った**ので、ここで押さえる。
+    /// ⚠️ **綴りではなく形で禁じる**＝呼ぶ所は**必ず理由を受け取る形**（`if let Some(…) =`）である、
+    /// とする。記録するか断るかは呼ぶ側の判断なので、そこまでは縛らない。
+    #[test]
+    fn 消せない理由を受け取らずに呼んでいる所が無い() {
+        const SRC: &str = include_str!("lib.rs");
+        // ⚠️ **検査自身を数えない**＝下の `use super::…` や、この文字列も当たってしまう。
+        let body = SRC.split("#[cfg(test)]").next().expect("本体");
+        // ⚠️ **行で見る**＝バイト位置で前を切ると、日本語のコメントの途中で切れて落ちる（実際に踏んだ）。
+        let calls: Vec<&str> = body
+            .lines()
+            .filter(|l| l.contains("remove_file_unless_missing("))
+            .filter(|l| !l.contains("fn remove_file_unless_missing("))
+            .collect();
+        assert_eq!(calls.len(), 1, "呼ぶ所が増減した＝この検査を見直す: {calls:?}");
+        for line in &calls {
+            assert!(
+                line.contains("if let Some("),
+                "理由を受け取らずに呼んでいる（`let _ =` に戻っていないか）: {line:?}"
+            );
+        }
+    }
+
+    /// 控えの後始末（#1188）。⚠️ **「既に無い」だけを飲む**＝以前は `let _ =` で
+    /// **理由を問わず**捨てていたので、権限で消せない場合も同じく黙っていた。
+    #[test]
+    fn 消せたときも_元から無いときも_黙って通る() {
+        let dir = std::env::temp_dir().join(format!("stario_rm_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("置き場");
+        let f = dir.join("a.json");
+        std::fs::write(&f, b"{}").expect("書ける");
+        assert!(remove_file_unless_missing(&f).is_none(), "消せたのに理由を返した");
+        assert!(!f.exists(), "消えていない");
+        // ⚠️ **2回目**＝もう無い。これは失敗ではない（刈り取りは重なって呼ばれうる）。
+        assert!(remove_file_unless_missing(&f).is_none(), "元から無いのを失敗にした");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ⚠️ **「無い」以外は黙らない**＝ここが返さないと、呼ぶ側は記録すらできない
+    /// （利用者には消せたように見える＝§2-5 の行き止まり）。
+    #[test]
+    fn 無い以外の理由は返す() {
+        let dir = std::env::temp_dir().join(format!("stario_rm_dir_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("置き場");
+        // ⚠️ **ファイルの代わりにフォルダを渡す**＝権限の細工をせずに「無い以外の失敗」を作れる。
+        let e = remove_file_unless_missing(&dir);
+        assert!(e.is_some(), "フォルダを消せないのに、黙って通した");
+        assert_ne!(
+            e.expect("理由").kind(),
+            std::io::ErrorKind::NotFound,
+            "「無い」ではない理由のはず"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
