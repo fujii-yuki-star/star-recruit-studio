@@ -899,7 +899,27 @@ fn finish_startup_job(
     if forwarded || !state.startup.quit_when_done {
         return;
     }
-    app.exit(state.exit_code(ok));
+    let code = state.exit_code(ok);
+    // ⚠️ **`app.exit(code)` を使わない**（実機で確認・2026-09-17）＝
+    // `tauri-runtime-wry 2.11` の `request_exit` は `ControlFlow::Exit`（**0 固定**）を使っており、
+    // コードを運ぶ `ExitWithCode` を使っていない＝**失敗しても 0 が返る**。
+    // それでは頼んだ側（AI）が成否を判定できず、ADR-0042 決定④ が成立しない。
+    // ⚠️ **自分で落とす前に、後片づけを必ず通す**＝`RunEvent::ExitRequested` は走らないので、
+    // 通さないと同梱 ENGINE が居残り（#149）、書き出し中なら `ffmpeg.exe` が孤児になる（#380）。
+    shutdown_side_processes(&app);
+    app.cleanup_before_exit();
+    std::process::exit(code);
+}
+
+/// アプリを閉じる前の後片づけ（**終了の道が2つあるので、1か所に置く**）。
+///
+/// ⚠️ **書き写さない**＝片方だけ直すと、**その道で閉じたときだけ居残りが出る**
+/// （見つかるのは「なぜか ENGINE が残る」という形なので、結び付けにくい）。
+fn shutdown_side_processes(app: &tauri::AppHandle) {
+    // 同梱 ENGINE を確実に終了（ゾンビ化防止・#149）。
+    app.state::<voicevox_engine::EngineState>().shutdown();
+    // 書き出し中に閉じても ffmpeg.exe を残さない（orphan 化防止・#380）。
+    ffmpeg::cancel_running_export();
 }
 
 /// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。
@@ -1456,13 +1476,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // アプリ終了時に同梱 ENGINE を確実に終了（ゾンビ化防止・#149）。
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                app_handle
-                    .state::<voicevox_engine::EngineState>()
-                    .shutdown();
-                // 書き出し中に閉じても ffmpeg.exe を残さない（orphan 化防止・#380）。
-                ffmpeg::cancel_running_export();
+                shutdown_side_processes(app_handle);
             }
         });
 }

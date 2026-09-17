@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { createProjectId, parseProjectDoc, ProjectLoadError } from "../../domain/project/persistence";
 import { parseTimelineProjectDoc } from "../../domain/timeline/persistence";
-import { isTimelineProjectDoc } from "../../domain/projectFormat";
+import { isTimelineProjectDoc, resolveProjectFormat } from "../../domain/projectFormat";
+import { PROJECT_FORMAT } from "../../domain/enums";
 import { reserveProjectId } from "../store/assetImport";
 import { deleteProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { importDoneMessage, startupArgErrorMessage } from "../../domain/startup/startupMessages";
@@ -215,10 +216,25 @@ async function runExport(
   setNotice: (m: string | null) => void,
 ): Promise<void> {
   try {
-    await useProjectStore.getState().loadProject(projectId);
+    // ⚠️ **どちらの形式かで開く先が変わる**（実機で発覚・2026-09-17）＝
+    // 場面形式の道しか無かったので、**タイムライン形式の動画は3秒で何もせず終わって「成功」を返していた**。
+    // ⚠️ **ここが塞がっていると ADR-0041 の枠②が成立しない**＝外の AI にタイムラインを書かせると決めたのに、
+    // 書いたものを書き出す口が無い。判定は一覧の `format`（`resolveProjectFormat` を通した値）を使う
+    // ＝開いてから「形式が違う」と断らない（取り込みと同じ流儀）。
+    const summary = (await listProjectSummaries()).find((p) => p.projectId === projectId);
+    const isTimeline = resolveProjectFormat({ format: summary?.format }) === PROJECT_FORMAT.timeline;
     useStartupJobStore.getState().setPendingExport(out, req.forwarded);
+    if (isTimeline) {
+      await useTimelineStore.getState().openTimelineProject(projectId);
+      navigate("timeline-project");
+      return;
+    }
+    await useProjectStore.getState().loadProject(projectId);
     navigate("export");
   } catch (e) {
+    // ⚠️ **開けなかったら、頼まれた保存先も捨てる**＝残すと、**次に人が押した書き出し**が
+    // 黙ってその保存先へ書く（`takePendingExport` は「1回きり」だが、取り出す前に失敗している）。
+    useStartupJobStore.getState().takePendingExport();
     setNotice(loadErrorMessage(e, "startup-export", STARTUP_OPEN_FAILED_MESSAGE));
     await finishStartupJob(false, req.forwarded);
   }

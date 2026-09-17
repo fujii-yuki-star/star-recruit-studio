@@ -7,6 +7,7 @@ vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async
 import { exportFailedMessage } from '../uiLabels';
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
 import { EXPORT_CLEANUP_PENDING_MESSAGE, useExportLockStore } from './exportLock';
+import { useStartupJobStore } from './startupJobStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as dialogMod from '../../infrastructure/dialog';
@@ -66,6 +67,41 @@ beforeEach(() => {
   vi.spyOn(framesMod, 'buildTimelineFrames').mockResolvedValue({ framesDir: 'timeline_frames', fps: 30, durationSec: 5 });
   vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/out/movie.mp4');
   vi.spyOn(fontsMod, 'loadExportFonts').mockResolvedValue(undefined);
+});
+
+// 起動のときに頼まれた書き出し（ADR-0042 決定⑤・#1184）。
+// ⚠️ **実機で見つかった穴**（2026-09-17）＝タイムライン形式には頼まれごとの道が無く、
+// `--export <タイムライン形式>` は**3秒で何もせず「成功」を返して**いた。
+describe('起動のときに頼まれた書き出し（#1184）', () => {
+  beforeEach(() => {
+    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, notice: null });
+  });
+
+  it('保存先を渡されていたら、保存先を聞かずにそこへ書く', async () => {
+    const ask = vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/人が選んだ.mp4');
+    vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: 'C:/頼まれた.mp4' } as never);
+    useStartupJobStore.getState().setPendingExport('C:/頼まれた.mp4', false);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(ask, '頼まれているのに保存先を聞いている').not.toHaveBeenCalled();
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[4]).toBe('C:/頼まれた.mp4');
+  });
+
+  // ⚠️ **1回きり**＝取り出したら消える。残すと、次に人が押した書き出しまで同じ所へ書く。
+  it('頼まれた保存先は、取り出したら消える', async () => {
+    useStartupJobStore.getState().setPendingExport('C:/頼まれた.mp4', false);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useStartupJobStore.getState().pendingExportOut, '次の書き出しまで同じ所へ書く').toBeNull();
+  });
+
+  // ⚠️ **頼まれていない回は、いつもどおり聞く**（置き換えが漏れ出さない）。
+  it('頼まれていなければ、いままでどおり保存先を聞く', async () => {
+    const ask = vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/人が選んだ.mp4');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(ask).toHaveBeenCalled();
+  });
 });
 
 describe('exportTimelineVideo', () => {

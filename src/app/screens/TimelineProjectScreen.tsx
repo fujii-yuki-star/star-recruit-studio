@@ -59,6 +59,8 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
+import { useStartupJobStore } from "../store/startupJobStore";
+import { finishStartupJob } from "../../infrastructure/startupFs";
 import { creditTextAt } from "../../domain/timeline/credit";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
@@ -461,6 +463,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
     };
   }, [saveStatus, historyDepth, saveTimelineProject]);
+  // ⚠️ **頼まれた書き出しは、人が押さなくても始める**（ADR-0042・#1184・実機で発覚 2026-09-17）＝
+  // タイムライン形式にはこの道が無く、**3秒で何もせず「成功」を返して**いた。
+  // ⚠️ **1回だけ**＝`startedForJobRef` で押さえる（保存先は `exportTimelineVideo` の中で取り出され消えるが、
+  // 画面の作り直しと競うので、**始めたこと自体**を覚える）。
+  // ⚠️ **締めは「終わった姿」で決める**＝書き出しは抜け道が多い（断る門・中止・失敗）ので、
+  // 出口ごとに締めを書き足すと**書き漏らした出口で永久に待たれる**（場面形式で実際に10か所あった）。
+  // 待ってから `exportRun.phase` を1回だけ見る形にすれば、**出口が増えても漏れない**。
+  const pendingExportOut = useStartupJobStore((st) => st.pendingExportOut);
+  const startupForwarded = useStartupJobStore((st) => st.forwarded);
+  const startedForJobRef = useRef(false);
+  useEffect(() => {
+    if (pendingExportOut == null || startedForJobRef.current || doc == null) return;
+    startedForJobRef.current = true;
+    void (async () => {
+      await refreshUserFonts().catch(() => {});
+      await exportTimelineVideo({ templates, templateAssetSrcById });
+      const phase = useTimelineStore.getState().exportRun.phase;
+      await finishStartupJob(phase === EXPORT_RUN_PHASE.done, startupForwarded);
+    })().catch(async (e) => {
+      // ⚠️ **始めた側でも拾う**＝ここで返さないと、頼んだ側（AI）は永久に待つ。
+      console.error("[timeline-export] 頼まれた書き出しが落ちた:", e);
+      await finishStartupJob(false, startupForwarded).catch(() => {});
+    });
+    // ⚠️ **走らせる関数を依存に入れない**＝毎描画で作り直されるので、入れると回り続ける。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExportOut, doc == null]);
   // **画面を離れるときは、待っている保存を書き切る**（#693）。自動保存のタイマはこの画面のものなので、
   // 書くより前に離れると上の後始末でタイマごと消え、直前の編集が**無言で**失われていた（サイドバーからの
   // 移動も同じ）。場面形式は自動保存が常時ある層に載っていてこの穴が無い＝形式で挙動を割らない（ADR-0026②）。
