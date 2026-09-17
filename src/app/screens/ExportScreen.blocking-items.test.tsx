@@ -58,9 +58,21 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
       assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
       missingAssetIds: ["asset_001"],
     });
+    // ⚠️ **開いたときの調べ直しは差し替える**＝アプリの外では「調べられない＝空」になるので、
+    // そのままだと**この検査が用意した状態を消してしまう**（調べ直すこと自体は下の検査で固定する）。
+    vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(saveBtn().disabled).toBe(true);
     expect(screen.getByText(/動画を書き出せない項目があります/).textContent).toContain("見つからない素材");
+  });
+
+  // ⚠️ **開いたときに調べ直す**（PR #1209 レビュー 🟡）＝誰かが調べた結果を借りているだけだと、
+  // 画面を離れずに外でファイルを消された回に**古い結果のまま通してしまう**（フォントは毎回調べ直している）。
+  it("開いたときに、素材が実在するか調べ直す", () => {
+    setup([scene()]);
+    const refresh = vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(refresh, "開いても調べ直していない").toHaveBeenCalled();
   });
 
   // ⚠️ **調べていないときは止めない**＝嘘の「問題あり」を出さない（材料が無い＝項目を作らない）。

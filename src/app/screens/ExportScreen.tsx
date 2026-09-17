@@ -95,6 +95,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const userFontsUnreadable = useProjectStore((s) => s.userFontsUnreadable);
   const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
+  // ⚠️ **素材も同じように調べ直す**（PR #1209 レビュー 🟡）＝フォントだけ毎回調べ直していて、
+  // **素材は誰かが調べた結果を借りている**だけだった。画面を離れずに外でファイルを消された回や、
+  // 公開前チェック・素材の画面を通らずにここへ来た回は、**古い結果のまま止めずに通してしまう**。
+  const refreshMissingAssets = useProjectStore((s) => s.refreshMissingAssets);
+  useEffect(() => { void refreshMissingAssets(); }, [refreshMissingAssets]);
   const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const fontsForBlocking = useMemo(
     // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
