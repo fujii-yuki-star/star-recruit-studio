@@ -163,3 +163,13 @@ export function moveMarkerBlocked(
   const at = Math.max(0, timeSec);
   return (doc.markers ?? []).some((m) => m.id !== markerId && markerTimeEq(m.timeSec, at)) ? 'markerExists' : null;
 }
+
+/**
+ * 範囲を詰めたときに、**消した所にいた目印を切れ目へ寄せた**ことの知らせ（#1193・§2-5）。
+ *
+ * ⚠️ **黙って捨てない／黙って動かさない**＝利用者が書いた覚えなので、**寄せたことは言う**。
+ * ⚠️ **1つでも言う**＝「1つくらいなら黙っていてよい」は、その1つが大事だった回に効かない。
+ */
+export function markersClampedMessage(count: number): string {
+  return `消した範囲にあった目印 ${count} 個を、切れ目の位置へ寄せました。`;
+}

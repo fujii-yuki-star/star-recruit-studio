@@ -86,10 +86,11 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceFrame, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
-import { addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
+import { markersClampedMessage, addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
 import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/assetFs";
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
+import { deleteRange } from "../../domain/timeline/deleteRange";
 import { userFacingMessage } from "../userFacingError";
 
 /**
@@ -339,6 +340,14 @@ export interface TimelineState {
   editBlocked: { reason: EditBlockedReason; at: BlockTarget } | null;
   /** 声を作れなかったときの案内（§2-5）。次に作り始めたら消す。 */
   voiceError: string | null;
+  /**
+   * 編集の結果、**黙って変えたくないこと**を知らせる（#1193）。
+   *
+   * ⚠️ **断り（`editBlocked`）とは別**＝あちらは「できなかった」、こちらは「**できたが、こう変えた**」。
+   * いまの用途＝範囲を詰めたときに、**消した所にいた目印を切れ目へ寄せた**こと。
+   * ⚠️ **黙って捨てない**＝利用者が書いた覚えを勝手に消さないので、寄せて**数を知らせる**。
+   */
+  editNotice: string | null;
   /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
   importError: string | null;
   /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
@@ -494,6 +503,24 @@ export interface TimelineState {
    * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
    */
   splitSelectedClip: (atSec: number, at?: BlockTarget) => void;
+  /**
+   * 作業範囲の**始まり／終わり**（#1193）。どちらも `null` ＝範囲を取っていない。
+   *
+   * ⚠️ **文書に持たない**＝この作業だけの都合なので `project.json` へは入れない（ADR-0033 と同じ考え方）。
+   */
+  rangeInSec: number | null;
+  rangeOutSec: number | null;
+  /** いまの再生位置を、作業範囲の始まり／終わりにする。 */
+  setRangeEdge: (edge: "in" | "out", sec: number) => void;
+  /** 作業範囲を外す。 */
+  clearRange: () => void;
+  /**
+   * 作業範囲を**消す**（`closeGap` を立てると、空いた所を詰める＝#1193）。
+   *
+   * ⚠️ **1操作＝1つの取り消し**（ADR-0034 決定20）＝消すのと詰めるのを別々に積まない。
+   * ⚠️ **押しのけモードではない**（ADR-0034 決定11 はそのまま）＝押したときだけ動く。
+   */
+  deleteRangeInTimeline: (closeGap: boolean, at?: BlockTarget) => void;
   /**
    * 再生位置で**絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
    *
@@ -772,7 +799,8 @@ export const EXPORT_OWNER = "timeline" as const;
  * 選び直したときに落とす「直前の操作の返事」（#701 レビュー）。前の部品で出た理由が残っていると、
  * **いま選んでいる部品の返事**に見える（`06 §12.1`＝その場の返事）。落とす先を1か所にして取りこぼさない。
  */
-const CLEARED_NOTICES = { editBlocked: null, voiceError: null } as const;
+// ⚠️ **`editNotice` も一緒に消す**＝別の操作へ移ったのに前の知らせが残ると、何の話か分からなくなる。
+const CLEARED_NOTICES = { editBlocked: null, voiceError: null, editNotice: null } as const;
 
 /**
  * 進行中の保存の1回ぶん（#693）。**同時に2本走らせない**ための見張り。書き込みは上書き（truncate）なので、
@@ -941,6 +969,10 @@ function emptyState() {
     loadFailure: null,
     isLoading: false,
     playheadSec: 0,
+    editNotice: null as string | null,
+    // 作業範囲（#1193）＝取っていない状態から始める。
+    rangeInSec: null as number | null,
+    rangeOutSec: null as number | null,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1237,6 +1269,37 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setClipBoxFor: (clipId, patch) =>
     applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch), PANEL_ID.preview),
   setClipTextFor: (clipId, text) => applyEditTo(set, get, clipId, (d, id) => setVisualClipContent(d, id, { text })),
+  setRangeEdge: (edge, sec) => {
+    // ⚠️ **始まりと終わりが逆さまになっても直さない**＝勝手に入れ替えると、
+    // 「押した所と違う所が範囲になった」に見える。**断るのは消すとき**（`deleteRangeIssue`）。
+    set(edge === "in" ? { rangeInSec: sec } : { rangeOutSec: sec });
+  },
+  clearRange: () => set({ rangeInSec: null, rangeOutSec: null }),
+
+  deleteRangeInTimeline: (closeGap, at = PANEL_ID.arrange) => {
+    const { doc, rangeInSec, rangeOutSec } = get();
+    if (!doc) return;
+    // ⚠️ **範囲を取っていなければ理由を出す**＝押しても何も起きない、を作らない（§2-5）。
+    if (rangeInSec == null || rangeOutSec == null) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
+      return;
+    }
+    const startSec = Math.min(rangeInSec, rangeOutSec);
+    const endSec = Math.max(rangeInSec, rangeOutSec);
+    const r = deleteRange(doc, { startSec, endSec, closeGap }, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
+      return;
+    }
+    // ⚠️ **消した後は選択と範囲を空にする**＝消えたものを選んだまま・取ったままにしない。
+    // ⚠️ **1回の `commit`**＝消すのと詰めるのが**1つの取り消し**になる（ADR-0034 決定20）。
+    commit(set, get, r.doc, { selectedClipIds: [], rangeInSec: null, rangeOutSec: null });
+    // ⚠️ **寄せた目印があれば知らせる**＝黙って変えない（§2-5）。
+    if (r.clampedMarkerCount > 0) {
+      set({ editNotice: markersClampedMessage(r.clampedMarkerCount) });
+    }
+  },
+
   splitSelectedClip: (atSec, at = PANEL_ID.arrange) => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length !== 1) return;
