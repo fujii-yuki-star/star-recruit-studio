@@ -37,6 +37,9 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, exportLoc
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { userFacingMessage } from "../userFacingError";
+// 起動のときに頼まれた書き出し（ADR-0042 決定⑤・#1184）＝保存先を聞く所**だけ**を置き換える。
+import { useStartupJobStore } from "../store/startupJobStore";
+import { finishStartupJob } from "../../infrastructure/startupFs";
 
 // 画面タイトルは1か所（空状態と通常の両分岐で共有＝片方だけ直して drift しない・§6）。
 const EXPORT_TITLE = "動画を書き出す";
@@ -179,18 +182,35 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   async function startExport() {
+    // ⚠️ **頼まれごとは、いちばん先に取り出す**（PR レビュー 🔴）＝以前は準備に入った後で取り出しており、
+    // 手前の早期 return（走行中・使えない・場面ゼロ）で抜けると**保存先が残ったまま**になった。
+    // そうなると、**後で人が押した書き出しが、保存先を聞かれないまま外から渡された道へ書く**。
+    const startupJob = useStartupJobStore.getState().takePendingExport();
+    // ⚠️ **どの出口でも、ちょうど1回だけ返す**（PR レビュー 🔴）＝返さないと、頼んだ側（AI）は
+    // **終わらない仕事を待ち続ける**し、`--quit-when-done` の回はアプリが閉じない（§2-5 の行き止まり）。
+    // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
+    let jobSettled = false;
+    const settleJob = (ok: boolean): void => {
+      if (!startupJob || jobSettled) return;
+      jobSettled = true;
+      void finishStartupJob(ok, startupJob.forwarded).catch((err) =>
+        console.error("[startup] finish failed:", err),
+      );
+    };
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
     // ⚠️ **いまの値で見る**（差分再監査 ℹ️）＝描画時のクロージャだと、`beginExport` の往復中
     // （走行中の表示になる前）に押し直された回を素通りし、**始まっている回の表示を潰す**。
-    if (busy || startingRef.current) return;
+    if (busy || startingRef.current) { settleJob(false); return; }
     if (!canExport()) {
       setPhase("unsupported");
+      settleJob(false);
       return;
     }
     if (scenes.length === 0) {
       setMessage("書き出す場面がありません。先に「新しい動画を作る」で動画案を作成してください。");
       setPhase("error");
+      settleJob(false);
       return;
     }
     // ⚠️ **押した瞬間に「始まった」と分かるようにする**（#993 ①⑥）＝ここから下には
@@ -200,17 +220,21 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // ⚠️ **保存先を選んでいる間も走行中に数える**（`06 §12.1`＝二重に始めない）。
     // タイムライン形式は先に `preparing` を立てている＝そちらへ揃える（ADR-0026②）。
     setPhase(EXPORT_RUN_PHASE.preparing);
+    // ⚠️ **起動のときに書き出し先を頼まれていたら、保存先は聞かない**（ADR-0042 決定⑤・#1184）＝
+    // 置き換えるのは**ここ1か所だけ**。ほかは人が押したときと**同じ道**を通る
+    // （別の書き出し経路を作らない＝ADR-0007。公開前チェックの判定もそのまま効く）。
     // 先に保存先を選んでもらう（キャンセルしたら何もせず元の画面のまま）。
     let outputPath: string;
     try {
-      const picked = await showSaveVideoDialog(fileName.trim() || "export");
+      const picked = startupJob?.out ?? (await showSaveVideoDialog(fileName.trim() || "export"));
       // ⚠️ **やめたら走行中を降ろす**＝立てたまま返ると、押せないまま固まる。
-      if (!picked) { setPhase(EXPORT_RUN_PHASE.idle); return; }
+      if (!picked) { setPhase(EXPORT_RUN_PHASE.idle); settleJob(false); return; }
       outputPath = picked;
     } catch (e) {
       setMessage("保存先を選べませんでした。もう一度お試しください。");
       setPhase("error");
       console.error("[export] save dialog failed:", e);
+      settleJob(false);
       return;
     }
     setMessage("");
@@ -239,7 +263,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       return null;
     };
     const blockedBefore = startBlockedMessage();
-    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
+    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); settleJob(false); return; }
     // ⚠️ **自分の後片づけ待ちは押させない**（#843）＝書き出しの終わり（成功・中止・失敗）は片づけより
     // **先**に立つので、この窓ではボタンが戻っているのに `acquire` が失敗する。走っている「ほかの動画」は
     // 無いので、断り文も別のものにする（主語が実態と違う案内を出さない）。
@@ -248,7 +272,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // 名乗る前のここ1回だけで見る。
     // ⚠️ **その時点の持ち主で見る**＝描いた後に相手が取ることがあるので、閉じ込めた値では遅い。
     const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy || startingRef.current);
-    if (lockedNow) { setMessage(lockedNow); setPhase("error"); return; }
+    if (lockedNow) { setMessage(lockedNow); setPhase("error"); settleJob(false); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
     // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝取れないまま進むと、共有の一時置き場を片づける後始末が
     // **相手のフレームを消す**（`11 §7.6.5`）。
@@ -264,6 +288,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
       setMessage(mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE);
       setPhase("error");
+      settleJob(false);
       return;
     }
     // end-to-end 計測（#376 レビュー P2）：利用者の待ち時間全体は「レンダリング段（フレーム焼き/準備＝TS）＋
@@ -285,7 +310,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
       //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
       const blockedAfter = startBlockedMessage();
-      if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
+      if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; } // 返しは下の finally（名乗った後はそこを必ず通る）
       setProgress({ done: 0, total: scenes.length });
       setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
       setPhase("rendering");
@@ -426,6 +451,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。
       console.info(`[export] end-to-end (render→save): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("done");
+      // ⚠️ **頼まれた仕事だったら、終わったことを返す**（ADR-0042 ④）＝
+      // 閉じるかどうかは Rust が決める（`--quit-when-done` を読んだのは向こう＝判断を2か所に置かない）。
+      settleJob(true);
     } catch (e) {
       // ユーザーが中止した場合は、エラーではなく「中止しました」で終える（走行中 ffmpeg は kill 済み・§2-5・#380）。
       // 準備ループが投げる ExportCancelledError も同様に中止扱い（cancelling が読めない稀な競合への保険）。
@@ -440,6 +468,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         setPhase("error");
         console.error("[export] failed:", e);
       }
+      // ⚠️ **中止も「できなかった」**＝人が止めた回を「できた」で返さない。
+      settleJob(false);
     } finally {
       // ⚠️ **片づけに入る前に降ろす**＝ここから先は本当に「後片づけ中」なので、断りが出るのが正しい。
       markStarting(false);
@@ -451,8 +481,25 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
       await clearExportFramesStage().catch(() => {});
       useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
+      // ⚠️ **取りこぼしをここで拾う**＝`try` の中の早期 return（`blockedAfter` 等）は
+      // 成功でも失敗でもないまま抜ける。**返さないのがいちばん悪い**ので「できなかった」で返す。
+      settleJob(false);
     }
   }
+
+  // ⚠️ **頼まれた書き出しは、人が押さなくても始める**（ADR-0042・#1184）＝
+  // ここが無いと「保存先は渡したのに、誰も押さないので終わらない」になる。
+  // ⚠️ **1回だけ**＝`startedForJobRef` で押さえる（`startExport` の中で保存先は取り出され消えるが、
+  // 画面の作り直しと競うので、**始めたこと自体**を覚える）。
+  const pendingExportOut = useStartupJobStore((st) => st.pendingExportOut);
+  const startedForJobRef = useRef(false);
+  useEffect(() => {
+    if (pendingExportOut == null || startedForJobRef.current) return;
+    startedForJobRef.current = true;
+    void startExport();
+    // ⚠️ **`startExport` を依存に入れない**＝毎描画で作り直される関数なので、入れると回り続ける。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExportOut]);
 
   // バーの % と1行の説明は共有の純粋関数（他画面の「書き出し中」バナーと同じ数字・説明を出す＝§2-7/ADR-0026②）。
   const percent = exportOverallPercent({ phase, progress, encode });

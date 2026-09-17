@@ -882,6 +882,26 @@ fn trouble_log_dir() -> Option<String> {
     trouble_log::dir().map(|p| p.to_string_lossy().to_string())
 }
 
+/// 頼まれごとが終わったことを受け取り、**閉じるかどうかを決める**（ADR-0042 ④⑤）。
+///
+/// ⚠️ **閉じる判断はここに置く**（画面に置かない）＝`--quit-when-done` を読んだのは Rust なので、
+/// 判断を2か所に置かない。
+/// ⚠️ **後から渡された頼まれごとでは絶対に閉じない**（決定③）＝利用者が開いて使っているアプリを、
+/// 外から来た `--quit-when-done` が閉じてよいわけがない（**仕事の持ち主が違う**）。
+/// ⚠️ **終了コードで返す**＝`0` できた／`1` できなかった（頼んだ側＝AI が判定できる）。
+#[tauri::command]
+fn finish_startup_job(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::startup::StartupState>,
+    ok: bool,
+    forwarded: bool,
+) {
+    if forwarded || !state.startup.quit_when_done {
+        return;
+    }
+    app.exit(state.exit_code(ok));
+}
+
 /// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。
 ///
 /// ⚠️ **画面が聞きに来る形にする**＝起動の合図を投げつける形だと、**画面が受け取れる前に投げて**
@@ -1319,6 +1339,17 @@ fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // ⚠️ **いちばん先に載せる**（プラグインの決まり）＝2つ目の起動を止め、引数だけをこちらへ渡す。
+        // ⚠️ **2つ動かさない理由**（ADR-0042 決定③）＝**書き出しは `project.json` を保存する**（#256）ので、
+        // 2つ動くと**後から保存した方が勝つ**＝利用者の編集が黙って消える。
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::Emitter;
+            // ⚠️ **渡すだけ**＝受けるかどうか（未保存の編集があれば断る）は画面が決める。
+            let dto = crate::startup::forwarded_dto(argv.get(1..).unwrap_or(&[]));
+            if let Err(e) = app.emit("startup-request-forwarded", dto) {
+                crate::tlog!("startup", "渡された頼まれごとを画面へ伝えられない: {e}");
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(voicevox_engine::EngineState::default())
@@ -1347,6 +1378,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             startup_request,
+            finish_startup_job,
             read_import_folder,
             import_project_folder,
             save_project,

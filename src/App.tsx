@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { useStartupJob } from "./app/hooks/useStartupJob";
+import { useStartupJobStore } from "./app/store/startupJobStore";
 import { HOME_SCREEN_LABEL } from "./app/uiLabels";
 import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
@@ -115,6 +117,9 @@ function App() {
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(navigate);
+  // 起動のときに頼まれた仕事（取り込み・書き出し）を進める（ADR-0042・#1184）。
+  useStartupJob(navigate);
+  const startupNotice = useStartupJobStore((st) => st.notice);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
   // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
@@ -198,6 +203,18 @@ function App() {
 
   return (
     <div className="app">
+      {/* 起動のときに頼まれた仕事の知らせ（ADR-0042・#1184）＝うまくいった／断った、を**画面に出す**。
+          ⚠️ **記録だけにしない**＝頼んだのが AI でも、**画面を見るのは人**。黙って終わると、
+          「起動したのに何も起きない」になる（§2-5 の行き止まり）。
+          ⚠️ **自分で消せる**＝作業のじゃまになったら閉じられる（出しっぱなしにしない）。 */}
+      {startupNotice && (
+        <div className="startup-notice" role="status">
+          <span>{startupNotice}</span>
+          <button type="button" onClick={() => useStartupJobStore.getState().setNotice(null)} aria-label="この知らせを閉じる">
+            閉じる
+          </button>
+        </div>
+      )}
       {/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
           ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠している間は細い取っ手をいつも出す。
           `<button>` なので `Tab` で辿り着けて押せる（掴む操作しか無い戻り方を作らない）。 */}

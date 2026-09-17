@@ -1463,3 +1463,21 @@ button.badge {
   pointer-events: none;
   z-index: 5;
 }
+
+/* 起動のときに頼まれた仕事の知らせ（ADR-0042・#1184）。
+   ⚠️ **いちばん上に出す**＝どの画面へ移っても見える（頼まれごとは画面をまたいで進む）。
+   ⚠️ **色は変数から取る**＝ダークモードでも読める（ADR-0039＝暗くするのは外枠だけ）。 */
+.startup-notice {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 60;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
