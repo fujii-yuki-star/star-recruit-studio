@@ -59,6 +59,7 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
+import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
 import { useStartupJobStore } from "../store/startupJobStore";
 import { finishStartupJob } from "../../infrastructure/startupFs";
 import { creditTextAt } from "../../domain/timeline/credit";
@@ -479,8 +480,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     void (async () => {
       await refreshUserFonts().catch(() => {});
       await exportTimelineVideo({ templates, templateAssetSrcById });
-      const phase = useTimelineStore.getState().exportRun.phase;
-      await finishStartupJob(phase === EXPORT_RUN_PHASE.done, startupForwarded);
+      // ⚠️ **走らずに弾かれた回を「できた」にしない**（PR #1202 レビュー）＝
+      // 門前払いされると保存先は**消えない**ので、それを見分けに使う（判定は `domain` に1つ）。
+      const left = useStartupJobStore.getState().pendingExportOut != null;
+      const ok = startupExportSucceeded(useTimelineStore.getState().exportRun.phase, left);
+      // ⚠️ **走らなかったぶんの保存先は捨てる**＝残すと、次に人が押した書き出しが黙ってそこへ書く。
+      useStartupJobStore.getState().takePendingExport();
+      await finishStartupJob(ok, startupForwarded);
     })().catch(async (e) => {
       // ⚠️ **始めた側でも拾う**＝ここで返さないと、頼んだ側（AI）は永久に待つ。
       console.error("[timeline-export] 頼まれた書き出しが落ちた:", e);
