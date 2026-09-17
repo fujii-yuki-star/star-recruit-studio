@@ -195,7 +195,9 @@ const NOT_IN_TABLE: Record<string, string> = {
 // この走査（その場に書いた文）ではなく **`codeMessages()` の完全一致**（`errorStateTable`）が守る側へ移った。
 // ⚠️ **さらに -2**（#1131）＝接続キーの既定文を `uiLabels` の `apiKeyMessage` へ出した。
 // 走査（その場に書いた文）から**完全一致で守る側**（`errorStateTable` の `codeMessages`）へ移った。
-const FOUND_COUNT = 91;
+// ⚠️ **+3**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝`useStartupJob.ts` の3つ
+//   （開いている／取り込む元が読めない／その動画を開けない）。いずれも表へ行を足してある。
+const FOUND_COUNT = 94;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

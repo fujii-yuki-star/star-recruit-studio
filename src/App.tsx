@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { useStartupJob } from "./app/hooks/useStartupJob";
+import { useStartupJobStore } from "./app/store/startupJobStore";
 import { HOME_SCREEN_LABEL } from "./app/uiLabels";
 import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
@@ -115,6 +117,9 @@ function App() {
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(navigate);
+  // 起動のときに頼まれた仕事（取り込み・書き出し）を進める（ADR-0042・#1184）。
+  useStartupJob(navigate);
+  const startupNotice = useStartupJobStore((st) => st.notice);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
   // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
@@ -132,16 +137,24 @@ function App() {
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
+  // ⚠️ **頼まれごとが分かるまで、自動では開かない**（PR #1197 レビュー 🔴・#1184）＝
+  // 起動の引数で別の動画を指されているのに自動で開くと、**どちらが勝つか**が IPC の往復の速さで決まり、
+  // 負けると **AI が指した動画ではなく直前の動画が書き出される**（エラーも出ず、成功として返る）。
+  // ⚠️ **待つのは「分かるまで」だけ**＝頼まれていないと分かれば、すぐ自動で開く（起動が遅くならない）。
+  const startupRequestKnown = useStartupJobStore((st) => st.requestKnown);
   useEffect(() => {
+    // ⚠️ **ここで待たない**（変異チェックで等価と分かった）＝最初は「分からない」ので
+    // 下の条件が偽になり、**自動では開かない**。待つ形にすると、見た目パターンと持ち込みフォントの
+    // 読み込みまで遅れる（それらは頼まれごとと関係が無い）。
     const last = getLastProjectId();
-    if (last) void loadProject(last).catch(() => {});
+    if (last && startupRequestKnown === "none") void loadProject(last).catch(() => {});
     void loadUserTemplates().catch(() => {});
     // ⚠️ **持ち込みフォントは起動時に1回そろえる**（α-6 出口監査 🟡11）＝`loadUserFonts` の入口が
     // 設定・公開前チェック・書き出しにしか無かったため、**場面編集・仕上がり確認・タイムライン編集では
     // プレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 のパリティが崩れる）。
     // 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
     void refreshUserFonts().catch(() => {});
-  }, [loadProject, loadUserTemplates, refreshUserFonts]);
+  }, [loadProject, loadUserTemplates, refreshUserFonts, startupRequestKnown]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
@@ -198,6 +211,18 @@ function App() {
 
   return (
     <div className="app">
+      {/* 起動のときに頼まれた仕事の知らせ（ADR-0042・#1184）＝うまくいった／断った、を**画面に出す**。
+          ⚠️ **記録だけにしない**＝頼んだのが AI でも、**画面を見るのは人**。黙って終わると、
+          「起動したのに何も起きない」になる（§2-5 の行き止まり）。
+          ⚠️ **自分で消せる**＝作業のじゃまになったら閉じられる（出しっぱなしにしない）。 */}
+      {startupNotice && (
+        <div className="startup-notice" role="status">
+          <span>{startupNotice}</span>
+          <button type="button" onClick={() => useStartupJobStore.getState().setNotice(null)} aria-label="この知らせを閉じる">
+            閉じる
+          </button>
+        </div>
+      )}
       {/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
           ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠している間は細い取っ手をいつも出す。
           `<button>` なので `Tab` で辿り着けて押せる（掴む操作しか無い戻り方を作らない）。 */}
