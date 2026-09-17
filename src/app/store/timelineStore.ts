@@ -75,6 +75,7 @@ import type { ExportRunPhase } from "../../domain/export/exportProgress";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
+import { useStartupJobStore } from "./startupJobStore";
 import {
   beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress,
   readExportFrame, stageClipFrames, stageExportFrame,
@@ -2343,7 +2344,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         return;
       }
       // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
-      const outputPath = await showSaveVideoDialog(doc.projectName || "movie");
+      // ⚠️ **起動のときに書き出し先を頼まれていたら、保存先は聞かない**（ADR-0042 決定⑤・#1184）＝
+      // 置き換えるのは**ここ1か所だけ**。ほかは人が押したときと**同じ道**を通る（別の書き出し経路を作らない
+      // ＝ADR-0007。断る門も進捗も後片づけもそのまま効く）。場面形式の `ExportScreen` と同じ形。
+      const startupOut = useStartupJobStore.getState().takePendingExport();
+      const outputPath = startupOut?.out ?? (await showSaveVideoDialog(doc.projectName || "movie"));
       if (!outputPath) {
         set({ exportRun: IDLE_EXPORT });
         return;
