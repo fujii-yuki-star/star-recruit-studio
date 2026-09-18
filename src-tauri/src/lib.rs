@@ -6,6 +6,7 @@ use tauri::Manager;
 
 mod ai;
 mod assets;
+mod disk;
 mod ffmpeg;
 mod messages;
 mod opener;
@@ -256,6 +257,54 @@ fn restore_project_text(
     // ⚠️ **生のエラーをそのまま出さない**（α-7 出口監査 🟡）＝画面は Rust の文字列を優先して出すので、
     // `os error 3` のような**英語の技術詳細**が利用者に見える（§2-3）。次の行動つきの文へ包む。
     write_json_atomic(&target, &text).map_err(|_| RESTORE_WRITE_FAILED.to_string())
+}
+
+/// 書き出しが使う**2か所の空き**（バイト）。⚠️ **1か所だけ見ない**（#1211）＝
+/// 一時ファイル（アプリの置き場）と保存先は**別のドライブになりうる**ので、
+/// 片方だけ見ると「空いているのに断る」「足りないのに通す」の両方が起きる。
+///
+/// ⚠️ **同じドライブなら同じ数字が返る**＝呼ぶ側は**足し合わせずに、それぞれと比べる**こと
+/// （同じドライブで足すと二重に数える）。判定は `domain/export/diskPlan.ts`。
+#[tauri::command]
+fn export_free_space(
+    app: tauri::AppHandle,
+    // 保存先のファイルのパス（まだ無くてよい）。`None`＝まだ選んでいない。
+    out_path: Option<String>,
+) -> Result<ExportFreeSpace, String> {
+    use tauri::Manager;
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {e}"))?;
+    let stage = crate::disk::free_space_bytes(&base.join("exports"))?;
+    let out = match out_path.as_deref() {
+        Some(p) if !p.is_empty() => {
+            let path = std::path::Path::new(p);
+            // 保存先は**ファイル**なので、入れ物のほうを見る。
+            let dir = path.parent().unwrap_or(path);
+            Some(crate::disk::free_space_bytes(dir)?)
+        }
+        _ => None,
+    };
+    Ok(ExportFreeSpace {
+        stage_free_bytes: stage,
+        out_free_bytes: out,
+        same_drive: out.is_some() && out == Some(stage),
+    })
+}
+
+/// 書き出しが使う空き（画面へ渡す形）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportFreeSpace {
+    /// 一時ファイルの置き場（アプリのデータフォルダ）の空き。
+    stage_free_bytes: u64,
+    /// 保存先の空き（まだ選んでいなければ `None`）。
+    out_free_bytes: Option<u64>,
+    /// ⚠️ **同じドライブか**＝真なら、一時と出来上がりの**合計**で足りるかを見る必要がある。
+    /// 偽なら**別々に**見る。⚠️ **数字が同じでも別ドライブでたまたま一致することはある**ので、
+    /// これは**目安**として渡し、判定の主は呼ぶ側に置く。
+    same_drive: bool,
 }
 
 /// 前に保存できていたところが**いつのものか**（無ければ `None`・1970年からの秒）。
@@ -1417,6 +1466,7 @@ pub fn run() {
             import_project_folder,
             save_project,
             project_backup_time,
+            export_free_space,
             restore_project_backup,
             list_restore_points,
             take_restore_point,

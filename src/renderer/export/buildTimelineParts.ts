@@ -12,7 +12,7 @@
 
 import type { Fit } from '../../domain/enums';
 import { timelineFramePlan } from '../../domain/timeline/export';
-import { planTimelineExportSegments } from '../../domain/timeline/exportSegments';
+import { bakeFrameTotal, planTimelineExportSegments } from '../../domain/timeline/exportSegments';
 import type { TimelineExportSegment } from '../../domain/timeline/exportSegments';
 import type { TimelineProject } from '../../domain/timeline/types';
 import { isItemOfClip, layoutTimelineAt } from '../timelineLayout';
@@ -143,9 +143,8 @@ export async function buildTimelineParts(
   const parts: TimelineExportPart[] = [];
   // ⚠️ **進み具合は「全部で何枚焼くか」で数える**＝区間ごとに 0 から数え直すと、
   // バーが**区間の数だけ行ったり来たり**する（倒せた区間は1枚も焼かないので、なおさら飛ぶ）。
-  const bakeTotal = segments
-    .filter((s) => s.kind === 'frames')
-    .reduce((a2, s) => a2 + Math.round((s.endSec - s.startSec) * plan.fps), 0);
+  // ⚠️ **数え方は domain の1つを通す**（#1211）＝空きの見張りと同じ数を見る。
+  const bakeTotal = bakeFrameTotal(segments, plan.fps);
   let baked = 0;
 
   // ⚠️ **1枚も焼かない回でも進み具合を出す**（同レビュー ℹ️）＝出さないと**0% のまま止まって見える**。
