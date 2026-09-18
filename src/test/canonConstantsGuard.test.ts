@@ -83,6 +83,43 @@ describe('正典の数表と、実装の定数が同じ（#1205・ADR-0045）', 
     ).toBe(VIDEO_HARD_MAX_SEC);
   });
 
+  // ⚠️ **版の一覧が置いていかれない**（PR #1220 レビュー 🟡）＝
+  // `PROJECT_SCHEMA_VERSION` の docstring は**版ごとの理由を並べた唯一の一覧**（`11 §1` もそう書いている）。
+  // ⚠️ **値そのものは守られても、一覧の完全性を見るものが無かった**＝
+  // 次のバンプで気づかれないまま**2版ぶん抜ける**（レビューで実際に1版ぶん抜けていた）。
+  it('版を上げたら、理由の一覧にもその版が載っている', () => {
+    const src = readFileSync('src/domain/project/persistence.ts', 'utf8');
+    const now = src.match(/export const PROJECT_SCHEMA_VERSION = '([\d.]+)';/)?.[1];
+    expect(now, '現行版を読み取れない').toBeTruthy();
+    // ⚠️ **版のすぐ後ろの区切りまで見る**＝`→1.30` だけで見ると `→1.300` や `→1.30x` にも当たる
+    // （変異チェックで実際に素通りした）。一覧はどの項目も `→版：` の形で書かれている。
+    expect(
+      src.includes(`→${now}：`),
+      `\`PROJECT_SCHEMA_VERSION\` の説明に「→${now}：」の項目が無い（上げた理由を1行足すこと）`,
+    ).toBe(true);
+  });
+
+  // ⚠️ **タイムライン形式も同じ**＝共有 `$defs` を変えたら両方を上げる（`11 §1`）。
+  it('タイムライン形式の版も、schema と実装で同じ', () => {
+    const code = readFileSync('src/domain/timeline/types.ts', 'utf8');
+    const impl = code.match(/export const TIMELINE_SCHEMA_VERSION = '([\d.]+)';/)?.[1];
+    const schema = JSON.parse(readFileSync('docs/yuko_recruit_docs/schemas/timeline-project.schema.json', 'utf8')) as {
+      properties: { schemaVersion: { const: string } };
+    };
+    expect(impl, 'timeline の版を読み取れない').toBeTruthy();
+    expect(schema.properties.schemaVersion.const, 'schema と実装で版がずれている').toBe(impl);
+  });
+
+  // ⚠️ **場面形式も同じ**。
+  it('場面形式の版も、schema と実装で同じ', () => {
+    const code = readFileSync('src/domain/project/persistence.ts', 'utf8');
+    const impl = code.match(/export const PROJECT_SCHEMA_VERSION = '([\d.]+)';/)?.[1];
+    const schema = JSON.parse(readFileSync(SCHEMA, 'utf8')) as {
+      properties: { schemaVersion: { const: string } };
+    };
+    expect(schema.properties.schemaVersion.const, 'schema と実装で版がずれている').toBe(impl);
+  });
+
   // ⚠️ **AI へ渡す希望尺の上限も schema にある**＝こちらは据え置き（ADR-0045）だが、同じ形でずれうる。
   it('AI へ渡す希望尺の上限も、schema の制約と同じ', () => {
     const schema = JSON.parse(readFileSync(SCHEMA, 'utf8')) as {
