@@ -5,6 +5,16 @@ import { listen } from '@tauri-apps/api/event';
 import type { Fit } from '../domain/enums';
 import type { ExportCapability } from '../domain/export/exportCapability';
 import type { ExportProgressEvent } from '../domain/export/exportProgress';
+import {
+  canEstimateDisk,
+  diskFloorMessage,
+  diskFloorShortfall,
+  diskIsShort,
+  diskShortMessage,
+  diskShortfall,
+  remainingBakeBytes,
+  shouldCheckDisk,
+} from '../domain/export/diskPlan';
 
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
@@ -192,6 +202,111 @@ export async function cancelExport(): Promise<void> {
  */
 export async function stageExportFrame(dirName: string, frameIndex: number, dataBase64: string): Promise<void> {
   await invoke('stage_export_frame', { dirName, frameIndex, dataBase64 });
+  await accountStagedFrame(dataBase64);
+}
+
+/**
+ * 空きが足りなくなったので止めた（#1211）。⚠️ **文はそのまま利用者に出す**（§2-5 を通した文）。
+ */
+export class ExportDiskShortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExportDiskShortError';
+  }
+}
+
+/** いま見張っている書き出し（`null`＝見張っていない）。 */
+let diskWatch: {
+  /** 焼く総コマ数（`null`＝先に分からない＝**底で止めるだけ**）。 */
+  totalFrames: number | null;
+  /** 出来上がりの見込み（バイト・分からなければ 0）。 */
+  outBytesGuess: number;
+  outPath: string | null;
+  bakedFrames: number;
+  bakedBytes: number;
+} | null = null;
+
+/**
+ * 空きの見張りを始める（#1211）。**書き出しを始める直前に呼ぶ**。
+ *
+ * ⚠️ **`totalFrames` を渡せるなら渡す**＝渡すと「このままでは足りない」を**数十コマで**判じられる。
+ * 渡せないときは `null`＝**底（`DISK_FLOOR_BYTES`）を割ったら止める**だけになる
+ *（使い切って後片づけもできなくなるのを防ぐ、最後の砦）。
+ */
+export function beginExportDiskWatch(opts: {
+  totalFrames: number | null;
+  outBytesGuess?: number;
+  outPath?: string | null;
+}): void {
+  diskWatch = {
+    totalFrames: opts.totalFrames,
+    outBytesGuess: opts.outBytesGuess ?? 0,
+    outPath: opts.outPath ?? null,
+    bakedFrames: 0,
+    bakedBytes: 0,
+  };
+}
+
+/** 見張りを終える（⚠️ **どの出口でも呼ぶ**＝残すと次の書き出しが前回の数を引き継ぐ）。 */
+export function endExportDiskWatch(): void {
+  diskWatch = null;
+}
+
+/** 書き出しが使う2か所の空き（#1211）。 */
+export async function exportFreeSpace(outPath: string | null): Promise<{
+  stageFreeBytes: number;
+  outFreeBytes: number | null;
+  sameDrive: boolean;
+}> {
+  return invoke('export_free_space', { outPath });
+}
+
+/** data URL / 生 base64 のどちらでも、**中身のバイト数**を見積もる。 */
+function base64Bytes(dataBase64: string): number {
+  const comma = dataBase64.indexOf(',');
+  const body = comma >= 0 ? dataBase64.slice(comma + 1) : dataBase64;
+  const pad = body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((body.length * 3) / 4) - pad);
+}
+
+/**
+ * 焼いた1枚を数え、区切りの回に空きを見る。**足りなければ投げる**（#1211）。
+ *
+ * ⚠️ **投げて止める**＝止めないと、**12分以上待たされてから容量が尽き、数十GBが残る**
+ *（#1205 の調査で実際に踏んだ形）。
+ * ⚠️ **空きを調べられなかったら止めない**＝調べられないこと自体を理由に**書き出しを断らない**
+ *（Windows 以外・権限など。断ると「直しようのない断り」になる＝§2-5）。
+ */
+async function accountStagedFrame(dataBase64: string): Promise<void> {
+  const w = diskWatch;
+  if (!w) return;
+  w.bakedFrames += 1;
+  w.bakedBytes += base64Bytes(dataBase64);
+  if (!shouldCheckDisk(w.bakedFrames)) return;
+  let free: { stageFreeBytes: number; outFreeBytes: number | null; sameDrive: boolean };
+  try {
+    free = await exportFreeSpace(w.outPath);
+  } catch {
+    return;
+  }
+  if (w.totalFrames != null && canEstimateDisk(w.bakedFrames)) {
+    const short = diskShortfall({
+      needStageBytes: remainingBakeBytes({
+        bakedFrames: w.bakedFrames,
+        bakedBytes: w.bakedBytes,
+        totalFrames: w.totalFrames,
+      }),
+      needOutBytes: w.outBytesGuess,
+      stageFreeBytes: free.stageFreeBytes,
+      outFreeBytes: free.outFreeBytes,
+      sameDrive: free.sameDrive,
+    });
+    if (diskIsShort(short)) throw new ExportDiskShortError(diskShortMessage(short));
+    return;
+  }
+  // 見積もれないときは**底で止める**だけ。
+  const floor = diskFloorShortfall(free.stageFreeBytes);
+  if (diskIsShort(floor)) throw new ExportDiskShortError(diskFloorMessage(free.stageFreeBytes));
 }
 
 /** フレームのステージングを空にする（書き出しの前後で呼ぶ）。非存在は成功扱い（Rust 側）。 */

@@ -272,6 +272,13 @@ const ASSEMBLED_AT_RUNTIME: Record<string, string> = {
   TIMELINE_OVERLAY_RETIRED: "退役の断り＝画面の文と表の要約を分けている（#635）",
   IMPORT_CANCELLED: "入った件数を差し込む（0件のときは件数を言わない＝#1024 ③）",
   DROP_REJECTED: "件数と、通らなかったファイル名を差し込む（#1026 ②）",
+  // ⚠️ **足りない量が連続の値**（#1211）＝「約 3.2GB」の数は入力の大きさで決まり、` N ` のような
+  // 目印に落とせない（`" N "` 方式は件数＝整数だから使えている）。しかも**どこが足りないか**で
+  // 3通りに分かれる（作る場所／保存先／両方）。
+  // ⚠️ **弱い段へ落ちるぶんは、別の検査で補っている**＝`domain/export/diskPlan.test.ts` が
+  // 「やれること3つが並ぶ」「技術用語を出さない」「切り上げる」を留め、
+  // `app/userFacingError.test.ts` が「関門を通る文である」（句点を落とすと静かに潰れる）を留めている。
+  EXPORT_DISK_FULL: "足りない量（連続の値）と、どこが足りないか（作る場所／保存先／両方）で文が変わる（#1211）",
 };
 
 /**
@@ -492,7 +499,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
     // ⚠️ **+2**＝`STARTUP_VOICE_NOT_READY`／`STARTUP_MAKE_VOICES_LEFT`（#1204＝
     //   **画面を読まない道**〔起動の引数〕で、公開前チェックの「要対応」を誰も見ていなかった）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(246);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(247);
   });
 
 
@@ -740,7 +747,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
     // ⚠️ **+2**＝#1204（上と同じ2行）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(243);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(244);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
