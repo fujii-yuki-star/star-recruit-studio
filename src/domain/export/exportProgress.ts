@@ -10,7 +10,7 @@
  */
 export type ExportPhase = 'encode' | 'join' | 'bgm' | 'loudness';
 
-/** Rust から届く進捗イベント（"export_progress"）。step/total は encode のみ有効（他は 0）。 */
+/** Rust から届く進捗イベント（"export_progress"）。step/total は **encode と join** で有効（bgm/loudness は 0）。 */
 export interface ExportProgressEvent {
   phase: ExportPhase;
   step: number;
