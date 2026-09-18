@@ -24,6 +24,15 @@ import { useStartupJobStore } from "../store/startupJobStore";
 import { useTimelineStore } from "../store/timelineStore";
 import type { ScreenId } from "../data/mockData";
 
+/**
+ * **いま画面に出ている断りの文**（#1212）。
+ *
+ * ⚠️ **同じ文を2か所に持たない**（§6）＝断りはどれも直前に `setNotice(...)` で画面へ出している。
+ * その**同じ値**をそのまま頼んだ側へも渡すので、**片方だけ古くなる**ことが起きない。
+ * ⚠️ **`ok` のときも渡してよい**＝Rust 側は「断ったときだけ」出す（判断を2か所に置かない）。
+ */
+const noticeNow = (): string | null => useStartupJobStore.getState().notice;
+
 /** すでに動画を開いているときの断り（§2-5＝次の行動）。 */
 export const STARTUP_BUSY_MESSAGE =
   "いま動画を開いています。閉じてから、もう一度お試しください。";
@@ -97,7 +106,7 @@ export function useStartupJob(navigate: (next: ScreenId) => void): void {
 
     const refuse = (message: string, req: StartupRequest): void => {
       setNotice(message);
-      void finishStartupJob(false, req.forwarded);
+      void finishStartupJob(false, req.forwarded, noticeNow());
     };
 
     const run = async (req: StartupRequest): Promise<void> => {
@@ -178,7 +187,7 @@ async function runImport(
       doc = JSON.parse(text);
     } catch {
       setNotice(STARTUP_IMPORT_UNREADABLE_MESSAGE);
-      await finishStartupJob(false, req.forwarded);
+      await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }
     const isTimeline = typeof doc === "object" && doc !== null && isTimelineProjectDoc(doc);
@@ -189,7 +198,7 @@ async function runImport(
       // ⚠️ **理由を保つ**（PR レビュー 🟡）＝「新しい版で作られているため開けません」等が
       // 「読めませんでした」に化けると、**従っても直らない案内**になる（§2-5）。
       setNotice(loadErrorMessage(e, "startup-import-validate", STARTUP_IMPORT_UNREADABLE_MESSAGE));
-      await finishStartupJob(false, req.forwarded);
+      await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }
     // ⚠️ **予約を通す**（PR レビュー 🟡・#992 ③）＝一覧は「まだ `project.json` を書いていない作りかけ」を
@@ -220,10 +229,10 @@ async function runImport(
     }
     // ⚠️ **開けてから言う**＝「取り込みました」を先に出すと、開けなかった回に嘘が残る。
     setNotice(importDoneMessage(copied, skipped));
-    await finishStartupJob(true, req.forwarded);
+    await finishStartupJob(true, req.forwarded, noticeNow());
   } catch (e) {
     setNotice(loadErrorMessage(e, "startup-import", STARTUP_IMPORT_UNREADABLE_MESSAGE));
-    await finishStartupJob(false, req.forwarded);
+    await finishStartupJob(false, req.forwarded, noticeNow());
   }
 }
 
@@ -249,7 +258,7 @@ async function runMakeVoices(
       navigate("timeline-project");
       if (!(await waitForVoiceEngine())) {
         setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
-        await finishStartupJob(false, req.forwarded);
+        await finishStartupJob(false, req.forwarded, noticeNow());
         return;
       }
       await useTimelineStore.getState().generateAllVoices();
@@ -259,14 +268,14 @@ async function runMakeVoices(
       await useTimelineStore.getState().saveTimelineProject();
       const left = timelineUngeneratedVoices(useTimelineStore.getState().doc?.clips ?? []);
       setNotice(makeVoicesDoneMessage(left));
-      await finishStartupJob(left === 0, req.forwarded);
+      await finishStartupJob(left === 0, req.forwarded, noticeNow());
       return;
     }
     await useProjectStore.getState().loadProject(projectId);
     navigate("scene-edit");
     if (!(await waitForVoiceEngine())) {
       setNotice(STARTUP_VOICE_ENGINE_MESSAGE);
-      await finishStartupJob(false, req.forwarded);
+      await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }
     await useProjectStore.getState().generateAllNarrations();
@@ -274,10 +283,10 @@ async function runMakeVoices(
     await useProjectStore.getState().saveProject();
     const left = sceneUngeneratedVoices(useProjectStore.getState().scenes);
     setNotice(makeVoicesDoneMessage(left));
-    await finishStartupJob(left === 0, req.forwarded);
+    await finishStartupJob(left === 0, req.forwarded, noticeNow());
   } catch (e) {
     setNotice(loadErrorMessage(e, "startup-make-voices", STARTUP_OPEN_FAILED_MESSAGE));
-    await finishStartupJob(false, req.forwarded);
+    await finishStartupJob(false, req.forwarded, noticeNow());
   }
 }
 
@@ -345,7 +354,7 @@ async function runExport(
       if (notReady) {
         setNotice(STARTUP_VOICE_NOT_READY_MESSAGE);
         useStartupJobStore.getState().takePendingExport();
-        await finishStartupJob(false, req.forwarded);
+        await finishStartupJob(false, req.forwarded, noticeNow());
         return;
       }
       navigate("timeline-project");
@@ -369,7 +378,7 @@ async function runExport(
           : STARTUP_VOICE_NOT_READY_MESSAGE,
       );
       useStartupJobStore.getState().takePendingExport();
-      await finishStartupJob(false, req.forwarded);
+      await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }
     navigate("export");
@@ -378,6 +387,6 @@ async function runExport(
     // 黙ってその保存先へ書く（`takePendingExport` は「1回きり」だが、取り出す前に失敗している）。
     useStartupJobStore.getState().takePendingExport();
     setNotice(loadErrorMessage(e, "startup-export", STARTUP_OPEN_FAILED_MESSAGE));
-    await finishStartupJob(false, req.forwarded);
+    await finishStartupJob(false, req.forwarded, noticeNow());
   }
 }

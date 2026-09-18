@@ -61,8 +61,28 @@ describe("起動のときに頼まれた書き出し（#1184）", () => {
     const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
     useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
     render(<ExportScreen onNavigate={vi.fn()} />);
-    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    // ⚠️ **理由まで渡している**ことを見る（#1212）＝数字だけで返ると、頼んだ側は**直しようがない**。
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(
+      false, false, expect.stringContaining('見つからない素材'),
+    ));
     expect(begin, "素材が見つからないのに書き出しを始めた").not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **前の回の文を、断りの理由として出さない**（PR #1217 レビュー 🟡）＝
+  // いちばん誤解を招くのは「**直前の成功の文が、失敗の理由として出る**」形。
+  // 文を出さずに抜ける枝（走行中・この端末では使えない）で実際に起きていた。
+  it("前の回の文が、断りの理由として出ない（走行中に頼まれた回）", async () => {
+    // 直前の回の「できた」を残したまま、走行中に頼まれごとが来る。
+    useProjectStore.getState().setExportRun({ phase: "rendering", message: "保存しました" });
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(finish).toHaveBeenCalled());
+    const [ok, , message] = finish.mock.calls[0];
+    expect(ok, "断りになっていない").toBe(false);
+    expect(message, "前の回の『保存しました』が理由として出ている").not.toBe("保存しました");
+    // ⚠️ **その枝の理由を出している**＝既定文に化けていたら、頼んだ側は「なぜ断られたか」が分からない。
+    expect(String(message), "走行中だと分かる文になっていない").toContain("別の書き出し");
   });
 
   // ⚠️ **1回きり**＝取り出したら消える。残すと、次に人が押した書き出しまで同じ所へ書く。

@@ -77,7 +77,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
     const navigate = vi.fn();
     const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
     renderHook(() => useStartupJob(navigate));
-    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false, expect.stringContaining('ください')));
     expect(navigate, '書き出しの画面へ進んでしまっている').not.toHaveBeenCalled();
     expect(useStartupJobStore.getState().pendingExportOut, '保存先が残っている').toBeNull();
     expect(useStartupJobStore.getState().notice).toContain('声を作って');
@@ -99,7 +99,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
     const navigate = vi.fn();
     const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
     renderHook(() => useStartupJob(navigate));
-    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false, expect.stringContaining('ください')));
     expect(navigate, '書き出しの画面へ進んでしまっている').not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       const save = vi.spyOn(useTimelineStore.getState(), 'saveTimelineProject').mockResolvedValue(undefined);
       const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
       renderHook(() => useStartupJob(vi.fn()));
-      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false, expect.anything()));
       expect(save, '書き切らずに終わった').toHaveBeenCalled();
       expect(gen, 'まとめて作るを通っていない').toHaveBeenCalled();
       // ⚠️ **その回の仕事を走り切らせる**＝知らせが出るまで待たないと、**次のテストへ漏れる**
@@ -172,7 +172,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       const save = vi.spyOn(useProjectStore.getState(), 'saveProject').mockResolvedValue(undefined);
       const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
       renderHook(() => useStartupJob(vi.fn()));
-      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(true, false, expect.anything()));
       expect(save, '書き切らずに終わった').toHaveBeenCalled();
     });
 
@@ -191,7 +191,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockResolvedValue(undefined);
       const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
       renderHook(() => useStartupJob(vi.fn()));
-      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false, expect.stringContaining('ください')));
       expect(useStartupJobStore.getState().notice).toContain('用意が整いませんでした');
       // ⚠️ **「作ろうとしていない」は、ここでは確かめない**＝`useTimelineStore` は
       // **どのテストからも同じもの**なので、前のテストの後始末しきれない呼び出しが**ここへ届く**
@@ -212,7 +212,7 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockResolvedValue(undefined);
       const finish = vi.spyOn(startupFs, 'finishStartupJob').mockResolvedValue(undefined);
       renderHook(() => useStartupJob(vi.fn()));
-      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+      await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false, expect.stringContaining('ください')));
       expect(useStartupJobStore.getState().notice).toContain('1件');
     });
   });

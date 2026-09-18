@@ -944,7 +944,21 @@ fn finish_startup_job(
     state: tauri::State<'_, crate::startup::StartupState>,
     ok: bool,
     forwarded: bool,
+    // 断りの文（`ok = false` のときだけ）。⚠️ **画面に出すのと同じ文**を受け取る。
+    message: Option<String>,
 ) {
+    // ⚠️ **断った理由を、頼んだ側へ届ける**（#1212）＝これが無いと、外の AI が受け取れるのは
+    // **数字だけ**になる。断る理由は4つあり（声がまだ・素材が見つからない・声の用意ができない・
+    // 取り込む元が読めない）、**どれも直し方が違う**のに、返るのは同じ `1` だった。
+    // ⚠️ **`18_EXTERNAL_AGENT_CONTRACT.md` は断りの文を契約として書いている**のに、
+    // 実行時には**画面にしか出ていなかった**＝資料を読んでいる相手にしか効かない契約になっていた。
+    // ⚠️ **標準エラーへ出す**＝標準出力は結果の受け渡しに使われうるので混ぜない。
+    // ⚠️ **渡された仕事（`forwarded`）でも出す**＝閉じないだけで、断ったことは伝わってよい。
+    if let Some(m) = message.as_deref() {
+        if !ok && !m.is_empty() {
+            eprintln!("{m}");
+        }
+    }
     if forwarded || !state.startup.quit_when_done {
         return;
     }
