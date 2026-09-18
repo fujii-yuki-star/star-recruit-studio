@@ -486,11 +486,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       const ok = startupExportSucceeded(useTimelineStore.getState().exportRun.phase, left);
       // ⚠️ **走らなかったぶんの保存先は捨てる**＝残すと、次に人が押した書き出しが黙ってそこへ書く。
       useStartupJobStore.getState().takePendingExport();
-      await finishStartupJob(ok, startupForwarded);
+      // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側が受け取れるのは**数字だけ**。
+      // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
+      await finishStartupJob(ok, startupForwarded, ok ? null : useTimelineStore.getState().exportRun.message);
     })().catch(async (e) => {
       // ⚠️ **始めた側でも拾う**＝ここで返さないと、頼んだ側（AI）は永久に待つ。
       console.error("[timeline-export] 頼まれた書き出しが落ちた:", e);
-      await finishStartupJob(false, startupForwarded).catch(() => {});
+      await finishStartupJob(false, startupForwarded, useTimelineStore.getState().exportRun.message).catch(() => {});
     });
     // ⚠️ **走らせる関数を依存に入れない**＝毎描画で作り直されるので、入れると回り続ける。
     // eslint-disable-next-line react-hooks/exhaustive-deps

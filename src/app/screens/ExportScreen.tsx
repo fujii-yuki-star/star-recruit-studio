@@ -170,7 +170,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const job = startupJobRef.current;
     if (!job || jobSettledRef.current) return;
     jobSettledRef.current = true;
-    void finishStartupJob(ok, job.forwarded).catch((err) =>
+    // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側（外の AI）が受け取れるのは**数字だけ**。
+    // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
+    const shown = useProjectStore.getState().exportRun.message;
+    void finishStartupJob(ok, job.forwarded, ok ? null : shown).catch((err) =>
       console.error("[startup] finish failed:", err),
     );
   };

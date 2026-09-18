@@ -61,7 +61,10 @@ describe("起動のときに頼まれた書き出し（#1184）", () => {
     const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
     useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
     render(<ExportScreen onNavigate={vi.fn()} />);
-    await waitFor(() => expect(finish).toHaveBeenCalledWith(false, false));
+    // ⚠️ **理由まで渡している**ことを見る（#1212）＝数字だけで返ると、頼んだ側は**直しようがない**。
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(
+      false, false, expect.stringContaining('見つからない素材'),
+    ));
     expect(begin, "素材が見つからないのに書き出しを始めた").not.toHaveBeenCalled();
   });
 
