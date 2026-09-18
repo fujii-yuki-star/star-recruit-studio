@@ -63,6 +63,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, 
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
 import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -1743,6 +1744,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   addScene: () => {
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
+    // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
+    // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
+    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    if (!canAddScenes(get().scenes.length)) {
+      set({ importError: sceneLimitMessage() });
+      return "";
+    }
     const s = get();
     // 追加場面の見た目は末尾（直前）の場面から引き継ぐ＝連続作成が自然で、先頭テンプレ（オープニング）固定にならない（#528）。
     // 場面が無ければ先頭テンプレ。末尾場面のテンプレがダングリング（削除済み等）でも先頭テンプレへ落ちる。
@@ -1826,6 +1834,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   duplicateScene: (sceneId) => {
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
+    // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
+    // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
+    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    if (!canAddScenes(get().scenes.length)) {
+      set({ importError: sceneLimitMessage() });
+      return "";
+    }
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
@@ -1837,6 +1852,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   splitScene: (sceneId, splitIndex) => {
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
+    // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
+    // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
+    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    if (!canAddScenes(get().scenes.length)) {
+      set({ importError: sceneLimitMessage() });
+      return "";
+    }
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
@@ -1848,6 +1870,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   splitSceneAtLine: (sceneId, lineIndex) => {
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
+    // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
+    // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
+    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    if (!canAddScenes(get().scenes.length)) {
+      set({ importError: sceneLimitMessage() });
+      return "";
+    }
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneLinesInList(s.scenes, s.parts, sceneId, lineIndex, newId);
