@@ -47,7 +47,7 @@ import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
-import { missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
+import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -136,6 +136,7 @@ import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
+import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import type { FontWeight, TextAlign } from "../../domain/enums";
 import { FontPicker } from "../components/FontPicker";
@@ -479,6 +480,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     startedForJobRef.current = true;
     void (async () => {
       await refreshUserFonts().catch(() => {});
+      // ⚠️ **始まった時点の文を控える**（#1217 レビュー 🟡）＝走らずに弾かれた回は文が変わらないので、
+      // これと見比べないと、**直前の成功の文が、失敗の理由として出る**（いちばん誤解を招く形）。
+      const before = useTimelineStore.getState().exportRun.message;
       await exportTimelineVideo({ templates, templateAssetSrcById });
       // ⚠️ **走らずに弾かれた回を「できた」にしない**（PR #1202 レビュー）＝
       // 門前払いされると保存先は**消えない**ので、それを見分けに使う（判定は `domain` に1つ）。
@@ -488,11 +492,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       useStartupJobStore.getState().takePendingExport();
       // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側が受け取れるのは**数字だけ**。
       // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
-      await finishStartupJob(ok, startupForwarded, ok ? null : useTimelineStore.getState().exportRun.message);
+      // ⚠️ **その回に出た文に限る**（同レビュー 🟡）＝同じなら「この回の文ではない」ので既定文へ倒す。
+      const reason = refusalReason(
+        useTimelineStore.getState().exportRun.message, before, exportFailedMessage.EXPORT_FAILED_TIMELINE,
+      );
+      await finishStartupJob(ok, startupForwarded, ok ? null : reason);
     })().catch(async (e) => {
       // ⚠️ **始めた側でも拾う**＝ここで返さないと、頼んだ側（AI）は永久に待つ。
       console.error("[timeline-export] 頼まれた書き出しが落ちた:", e);
-      await finishStartupJob(false, startupForwarded, useTimelineStore.getState().exportRun.message).catch(() => {});
+      await finishStartupJob(false, startupForwarded, refusalReason(
+        useTimelineStore.getState().exportRun.message, null, exportFailedMessage.EXPORT_FAILED_TIMELINE,
+      )).catch(() => {});
     });
     // ⚠️ **走らせる関数を依存に入れない**＝毎描画で作り直されるので、入れると回り続ける。
     // eslint-disable-next-line react-hooks/exhaustive-deps

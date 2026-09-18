@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { exportFailedMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
+import { refusalReason } from "../../domain/startup/refusalReason";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
@@ -166,16 +167,26 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
   const startupJobRef = useRef<{ out: string; forwarded: boolean } | null>(null);
   const jobSettledRef = useRef(false);
+  /** この回が始まった時点で画面に出ていた文（#1217 レビュー 🟡）。⚠️ **これと同じなら「この回の文ではない」**。 */
+  const messageAtStartRef = useRef<string>("");
   const settleJob = (ok: boolean): void => {
     const job = startupJobRef.current;
     if (!job || jobSettledRef.current) return;
     jobSettledRef.current = true;
     // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側（外の AI）が受け取れるのは**数字だけ**。
     // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
-    const shown = useProjectStore.getState().exportRun.message;
-    void finishStartupJob(ok, job.forwarded, ok ? null : shown).catch((err) =>
-      console.error("[startup] finish failed:", err),
+    // ⚠️ **ただし「その回に出た文」に限る**（#1217 レビュー 🟡）＝前の回の文が残っていると、
+    // **直前の成功の文が、失敗の理由として出る**（いちばん誤解を招く形）。
+    // 文を出さずに抜ける枝が将来また増えても、ここで受け止める＝**枝を数え上げない**。
+    // ⚠️ **決めるのは domain の1つ**（#1217 レビュー 🟡）＝画面の中に式で書いていたら、
+    // 2つの守り（枝が文を出す／その回の文か見る）が**互いを隠して**どちらも検査できていなかった。
+    const reason = refusalReason(
+      useProjectStore.getState().exportRun.message,
+      messageAtStartRef.current,
+      exportFailedMessage.EXPORT_FAILED_SCENE,
     );
+    void finishStartupJob(ok, job.forwarded, ok ? null : reason)
+      .catch((err) => console.error("[startup] finish failed:", err));
   };
   const markStarting = (on: boolean): void => { startingRef.current = on; setStarting(on); };
   // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
@@ -217,13 +228,22 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // そうなると、**後で人が押した書き出しが、保存先を聞かれないまま外から渡された道へ書く**。
     startupJobRef.current = useStartupJobStore.getState().takePendingExport();
     jobSettledRef.current = false;
+    // ⚠️ **始まった時点の文を控える**（#1217 レビュー 🟡）＝これと同じ文なら「この回の文ではない」。
+    messageAtStartRef.current = useProjectStore.getState().exportRun.message;
     const startupJob = startupJobRef.current;
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
     // ⚠️ **いまの値で見る**（差分再監査 ℹ️）＝描画時のクロージャだと、`beginExport` の往復中
     // （走行中の表示になる前）に押し直された回を素通りし、**始まっている回の表示を潰す**。
-    if (busy || startingRef.current) { settleJob(false); return; }
+    // ⚠️ **文を出してから返す**（#1217 レビュー 🟡）＝出さないと、頼んだ側には**前の回の文**が届く。
+    if (busy || startingRef.current) {
+      setMessage("いま別の書き出しが動いています。終わってから、もう一度お試しください。");
+      settleJob(false);
+      return;
+    }
     if (!canExport()) {
+      // ⚠️ **画面の文（下の `unsupported` の表示）と同じことを言う**＝出る場所で違う理由にしない。
+      setMessage("動画の書き出しは、デスクトップアプリでご利用いただけます。");
       setPhase("unsupported");
       settleJob(false);
       return;
