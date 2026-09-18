@@ -1495,7 +1495,6 @@ pub fn run() {
             ffmpeg::begin_export,
             ffmpeg::cancel_export,
             ffmpeg::stage_export_frame,
-            ffmpeg::staged_dir_bytes,
             ffmpeg::clear_export_frames_stage,
             ffmpeg::stage_clip_frames,
             ffmpeg::read_export_frame,

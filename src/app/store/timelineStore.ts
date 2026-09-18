@@ -2408,7 +2408,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
           );
           // ⚠️ **取り出した生のコマも見積もりへ入れる**（PR #1216 レビュー 🔴）＝入れないと、
           // **動画の上に動くものが乗る区間**（いちばん重い）の将来ぶんが丸ごと見えない。
-          await accountStagedVideo(v.dirName, staged);
+          await accountStagedVideo(staged);
           return staged;
         },
         readVideoFrame: (dirName, frameIndex) => readExportFrame(dirName, frameIndex),

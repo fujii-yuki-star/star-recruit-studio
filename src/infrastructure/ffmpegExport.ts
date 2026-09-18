@@ -264,12 +264,13 @@ export function beginExportDiskWatch(opts: {
  *（取り出しは1コマ目より前に起きる）ので、見積もりは立てられない。
  * ⚠️ **調べられなかったら止めない**＝調べられないこと自体で書き出しを断らない（§2-5）。
  */
-export async function accountStagedVideo(dirName: string, frameCount: number): Promise<void> {
+export async function accountStagedVideo(frameCount: number): Promise<void> {
   if (!diskWatch || frameCount <= 0) return;
   let free: { stageFreeBytes: number };
   try {
-    // ⚠️ **書かれた量そのものは要らない**＝空きの実測に既に入っている。呼ぶのは「いま足りているか」だけ。
-    void (await invoke<number>('staged_dir_bytes', { dirName }));
+    // ⚠️ **書かれた量は聞かない**＝空きの実測に既に入っている（PR #1216 レビュー 🟡）。
+    // 聞いていた名残りがあったが、**値を捨てているうえに同じ `try` に居た**＝そちらが失敗すると
+    // **本体の判定ごと飛ぶ**（見張りを、使っていない呼び出しのせいで無効にしていた）。
     free = await exportFreeSpace(null);
   } catch {
     return;
