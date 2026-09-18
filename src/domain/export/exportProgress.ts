@@ -10,7 +10,7 @@
  */
 export type ExportPhase = 'encode' | 'join' | 'bgm' | 'loudness';
 
-/** Rust から届く進捗イベント（"export_progress"）。step/total は encode のみ有効（他は 0）。 */
+/** Rust から届く進捗イベント（"export_progress"）。step/total は **encode と join** で有効（bgm/loudness は 0）。 */
 export interface ExportProgressEvent {
   phase: ExportPhase;
   step: number;
@@ -19,9 +19,16 @@ export interface ExportProgressEvent {
 
 // レンダリング段（場面フレーム焼き）が 0–80%、エンコード段（結合・BGM）が 80–100% を受け持つ（#391/#376）。
 const ENCODE_BASE = 80;
-// 各段の到達点（%）。encode は step/total で 80→92 を滑らかに、後段は段階的に上げる。100 は完了(done)時に別途。
-const ENCODE_SPAN = 12; // 80→92
-const JOIN_PCT = 94;
+// 各段の到達点（%）。encode は step/total で 80→90 を滑らかに、つなぐ段も step/total で 90→97。
+const ENCODE_SPAN = 10; // 80→90
+/** つなぐ段の始点（%）。 */
+const JOIN_BASE = 90;
+/**
+ * つなぐ段の幅（%）。⚠️ **点ではなく幅を持たせる**（#1214）＝
+ * 実測（80場面30分）で**つなぐ段が全体の48%・6.5分**を占めるのに、バーは**94%の一点**だった。
+ * 30分では**後半12分バーが動かず**、利用者は「壊れた」と判断して中止する。
+ */
+const JOIN_SPAN = 7; // 90→97
 const BGM_PCT = 98;
 
 /**
@@ -35,8 +42,12 @@ export function exportEncodePercent(e: ExportProgressEvent): number {
       const ratio = Math.min(1, Math.max(0, e.step / e.total));
       return ENCODE_BASE + Math.round(ratio * ENCODE_SPAN);
     }
-    case 'join':
-      return JOIN_PCT;
+    case 'join': {
+      // ⚠️ **総数が分からない回は始点のまま**＝分からないのに動かすと、**嘘の進み具合**になる。
+      if (e.total <= 0) return JOIN_BASE;
+      const ratio = Math.min(1, Math.max(0, e.step / e.total));
+      return JOIN_BASE + Math.round(ratio * JOIN_SPAN);
+    }
     case 'bgm':
     case 'loudness':
       return BGM_PCT; // 同じ段（音を作る）なので進み具合は同じ
@@ -49,7 +60,10 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
     case 'encode':
       return e.total > 1 ? `映像を作成しています（${Math.min(e.step, e.total)}/${e.total}）` : '映像を作成しています';
     case 'join':
-      return 'つなぎ合わせています';
+      // ⚠️ **数字を添える**（#1214）＝6.5分かかる段なので、文だけだと「止まった」に見える。
+      return e.total > 0
+        ? `つなぎ合わせています（${Math.min(e.step, e.total)}/${e.total}秒）`
+        : 'つなぎ合わせています';
     case 'bgm':
       return 'BGMを合わせています';
     case 'loudness':

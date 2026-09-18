@@ -2,18 +2,31 @@ import { describe, expect, it } from 'vitest';
 import { EXPORT_RUN_PHASE, EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, finishedExportNotice, hasExportPercent, isExportFinished, pastExportNotice } from './exportProgress';
 
 describe('exportEncodePercent（#376）', () => {
-  it('encode は step/total を 80→92 に按分する', () => {
+  it('encode は step/total を 80→90 に按分する', () => {
     expect(exportEncodePercent({ phase: 'encode', step: 0, total: 4 })).toBe(80);
-    expect(exportEncodePercent({ phase: 'encode', step: 2, total: 4 })).toBe(86);
-    expect(exportEncodePercent({ phase: 'encode', step: 4, total: 4 })).toBe(92);
+    expect(exportEncodePercent({ phase: 'encode', step: 2, total: 4 })).toBe(85);
+    expect(exportEncodePercent({ phase: 'encode', step: 4, total: 4 })).toBe(90);
+  });
+
+  // ⚠️ **つなぐ段も按分する**（#1214）＝以前は94%の一点で、実測6.5分のあいだ**まったく動かなかった**。
+  it('つなぐ段も step/total を 90→97 に按分する', () => {
+    expect(exportEncodePercent({ phase: 'join', step: 0, total: 600 })).toBe(90);
+    expect(exportEncodePercent({ phase: 'join', step: 300, total: 600 })).toBe(94);
+    expect(exportEncodePercent({ phase: 'join', step: 600, total: 600 })).toBe(97);
+  });
+
+  // ⚠️ **総数が分からない回は動かさない**＝分からないのに動かすと**嘘の進み具合**になる。
+  it('つなぐ段の total=0 は始点のまま（嘘の進み具合を出さない）', () => {
+    expect(exportEncodePercent({ phase: 'join', step: 0, total: 0 })).toBe(90);
   });
 
   it('encode の total=0（想定外）は基準 80% にフォールバック', () => {
     expect(exportEncodePercent({ phase: 'encode', step: 0, total: 0 })).toBe(80);
   });
 
-  it('step>total でも上限 92% を超えない（クランプ）', () => {
-    expect(exportEncodePercent({ phase: 'encode', step: 9, total: 4 })).toBe(92);
+  it('step>total でも上限を超えない（クランプ）', () => {
+    expect(exportEncodePercent({ phase: 'encode', step: 9, total: 4 })).toBe(90);
+    expect(exportEncodePercent({ phase: 'join', step: 900, total: 600 })).toBe(97);
   });
 
   it('後段は段階的に上がる（join<bgm・いずれも<100）', () => {
@@ -23,11 +36,21 @@ describe('exportEncodePercent（#376）', () => {
     expect(exportEncodePercent({ phase: 'loudness', step: 0, total: 0 })).toBe(bgm);
     expect(join).toBeLessThan(bgm);
     expect(bgm).toBeLessThan(100);
-    expect(join).toBeGreaterThanOrEqual(92);
+    expect(join).toBeGreaterThanOrEqual(90);
   });
 });
 
 describe('exportPhaseLabel（§2-3：技術用語を出さない）', () => {
+  // ⚠️ **つなぐ段は数字を添える**（#1214）＝実測6.5分かかる段なので、文だけだと「止まった」に見える。
+  it('つなぐ段は、どこまで進んだかを数字で添える', () => {
+    expect(exportPhaseLabel({ phase: 'join', step: 120, total: 600 })).toContain('120/600');
+  });
+
+  // ⚠️ **総数が分からない回は数字を出さない**＝出すと嘘になる。
+  it('総数が分からなければ、数字は添えない', () => {
+    expect(exportPhaseLabel({ phase: 'join', step: 0, total: 0 })).toBe('つなぎ合わせています');
+  });
+
   it('各段の文言（テロップ→字幕・非技術）', () => {
     expect(exportPhaseLabel({ phase: 'encode', step: 1, total: 1 })).toBe('映像を作成しています');
     expect(exportPhaseLabel({ phase: 'encode', step: 2, total: 4 })).toBe('映像を作成しています（2/4）');
@@ -59,7 +82,7 @@ describe('exportOverallPercent / exportProgressLabel（進捗の単一参照元�
 
   it('エンコード段は 80% から始まり、進捗イベントがあればその値', () => {
     expect(exportOverallPercent({ phase: 'encoding', progress: { done: 0, total: 0 } })).toBe(80);
-    expect(exportOverallPercent({ phase: 'encoding', progress: { done: 0, total: 0 }, encode: { phase: 'join', step: 0, total: 0 } })).toBe(94);
+    expect(exportOverallPercent({ phase: 'encoding', progress: { done: 0, total: 0 }, encode: { phase: 'join', step: 0, total: 0 } })).toBe(90);
   });
 
   it('完了は 100%、開始前・場面0は 0%（0除算にしない）', () => {
