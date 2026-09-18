@@ -2476,7 +2476,16 @@ fn encode_jobs(
         args.push("-nostats".to_string());
         // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
         let total_sec = (jobs.iter().map(|j| j.duration_sec()).sum::<f64>()
-            - scene_steps.iter().map(|s| if s.xfade.is_some() { s.duration_sec } else { 0.0 }).sum::<f64>())
+            - scene_steps
+                .iter()
+                .map(|s| {
+                    if s.xfade.is_some() {
+                        s.duration_sec
+                    } else {
+                        0.0
+                    }
+                })
+                .sum::<f64>())
         .max(0.0);
         let total = total_sec.round().max(1.0) as usize;
         let app_for_progress = progress.cloned();
