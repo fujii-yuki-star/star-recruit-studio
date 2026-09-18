@@ -1199,6 +1199,32 @@ pub fn cancel_export() {
 /// 走行中 Child を EXPORT_CHILD に登録し、キャンセル／アプリ終了から kill できるようにする。
 /// stdout/stderr は別スレッドで排出する（ffmpeg は stderr 出力が多く、未排出だとパイプ詰まりで停止し得る）。
 fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
+    run_export_inner(bin, args, None)
+}
+
+/**
+ * `run_export` の**進み具合つき**版（#1214）。
+ *
+ * ⚠️ **なぜ要るか**＝つなぐ段は**1回の FFmpeg 呼び出し**で全部の切り替えを処理するので、
+ * Rust 側に数えるループが無く、**進み具合を出せなかった**（実測で 6.5 分の沈黙）。
+ * 30分の動画では**後半12分バーが動かず**、利用者は「壊れた」と判断して中止する（#1214）。
+ *
+ * ⚠️ **それらしく動かすのではない**＝FFmpeg に `-progress` を渡して、
+ * **実際に書き終えた秒数**（`out_time_us`）を読む。
+ */
+fn run_export_progress(
+    bin: &Path,
+    args: &[String],
+    on_us: Box<dyn Fn(u64) + Send>,
+) -> Result<String, String> {
+    run_export_inner(bin, args, Some(on_us))
+}
+
+fn run_export_inner(
+    bin: &Path,
+    args: &[String],
+    on_us: Option<Box<dyn Fn(u64) + Send>>,
+) -> Result<String, String> {
     // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(EXPORT_CANCELLED_MARK.to_string());
@@ -1219,7 +1245,26 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
     let out_h = std::thread::spawn(move || {
         let mut s = String::new();
         if let Some(p) = out_pipe.as_mut() {
-            let _ = p.read_to_string(&mut s);
+            match on_us {
+                // ⚠️ **1行ずつ読む**（#1214）＝`read_to_string` は**終わるまで返らない**ので、
+                // 途中の進み具合が取れない。ここだけ行読みに変える（既定の道は元のまま）。
+                Some(cb) => {
+                    use std::io::BufRead;
+                    let reader = std::io::BufReader::new(p);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if let Some(v) = line.strip_prefix("out_time_us=") {
+                            if let Ok(us) = v.trim().parse::<u64>() {
+                                cb(us);
+                            }
+                        }
+                        s.push_str(&line);
+                        s.push(char::from(10)); // 改行
+                    }
+                }
+                None => {
+                    let _ = p.read_to_string(&mut s);
+                }
+            }
         }
         s
     });
@@ -2415,7 +2460,7 @@ fn encode_jobs(
             }
         }
         // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップに変わっただけ。
-        let args = xfade_chain_args(
+        let mut args = xfade_chain_args(
             &scene_files,
             &scene_steps,
             &output.to_string_lossy(),
@@ -2423,7 +2468,35 @@ fn encode_jobs(
             fps,
             bitrate,
         );
-        run_export(ffmpeg, &args).map_err(|e| {
+        // ⚠️ **進み具合は、引数を組む純粋関数の外で足す**（#1214）＝中に入れると
+        // `xfade_chain_args` の検査（引数の並びを固定しているもの）が**進み具合の都合で動く**。
+        // ⚠️ **`-nostats`** ＝既定の進捗行（標準エラー）は使わないので止める。
+        args.push("-progress".to_string());
+        args.push("pipe:1".to_string());
+        args.push("-nostats".to_string());
+        // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
+        let total_sec = (jobs.iter().map(|j| j.duration_sec()).sum::<f64>()
+            - scene_steps.iter().map(|s| if s.xfade.is_some() { s.duration_sec } else { 0.0 }).sum::<f64>())
+        .max(0.0);
+        let total = total_sec.round().max(1.0) as usize;
+        let app_for_progress = progress.cloned();
+        // ⚠️ **秒が変わったときだけ送る**＝FFmpeg は細かく出すので、そのまま流すと画面が忙しくなる。
+        let last = std::sync::Mutex::new(0usize);
+        run_export_progress(
+            ffmpeg,
+            &args,
+            Box::new(move |us| {
+                let sec = (us / 1_000_000) as usize;
+                if let Ok(mut l) = last.lock() {
+                    if sec == *l {
+                        return;
+                    }
+                    *l = sec;
+                }
+                emit_export_progress(app_for_progress.as_ref(), "join", sec.min(total), total);
+            }),
+        )
+        .map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
                 "場面の切り替え合成に失敗しました。もう一度お試しください。",
