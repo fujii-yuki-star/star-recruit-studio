@@ -29,4 +29,9 @@ reqwest = { version = "0.12", features = ["json"] }
 # 他OS対応時は target 別 feature（apple-native / sync-secret-service 等）を追加する。
 keyring = { version = "3", features = ["windows-native"] }
 tauri-plugin-single-instance = "2.4.4"
+# ディスクの空きを調べる（#1211）。⚠️ **新しい依存を増やしていない**＝すでに依存の木にある
+# `windows-sys` を、必要な機能だけ直に指しているだけ（`GetDiskFreeSpaceExW`）。
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

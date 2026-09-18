@@ -159,6 +159,19 @@ export function planTimelineExportSegments(
 }
 
 /**
+ * **焼く総コマ数**（倒せた区間は1枚も焼かないので含まない）。
+ *
+ * ⚠️ **数え方を2か所に持たない**（#1211）＝組み立てる側（進み具合の分母）と
+ * 空きの見張り（必要量の見込み）が**同じ数**を見る。別々に数えると、
+ * バーと断りが食い違う（どちらが正しいか読む人に分からない）。
+ */
+export function bakeFrameTotal(segments: readonly TimelineExportSegment[], fps: number): number {
+  return segments
+    .filter((s) => s.kind === 'frames')
+    .reduce((a, s) => a + Math.round((s.endSec - s.startSec) * fps), 0);
+}
+
+/**
  * 倒せた割合（0〜1）＝どれだけ焼かずに済むか。**画面に出す数ではなく、記録と検査のための値**。
  */
 export function passThroughRatio(segments: readonly TimelineExportSegment[]): number {

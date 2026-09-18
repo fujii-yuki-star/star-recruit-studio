@@ -63,6 +63,9 @@ import type { NarrationStatus } from "../../domain/enums";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds, timelineVideoRelPaths } from "../../domain/timeline/export";
+import { timelineFramePlan } from "../../domain/timeline/export";
+// ⚠️ **焼く総コマ数は domain の1つを通す**（#1211）＝組み立てる側の分母と同じ数を見る。
+import { bakeFrameTotal, planTimelineExportSegments } from "../../domain/timeline/exportSegments";
 import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
@@ -77,7 +80,9 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { useStartupJobStore } from "./startupJobStore";
 import {
-  beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress,
+  accountStagedVideo,
+  beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
+  endExportDiskWatch, exportVideo, listenExportProgress,
   readExportFrame, stageClipFrames, stageExportFrame,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
@@ -2375,6 +2380,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       await clearExportFramesStage();
       // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
       await loadExportFonts();
+      // ⚠️ **空きを見張る**（#1211）＝焼くコマ数は**割り方が既に知っている**ので渡せる。
+      // 渡すと「このままでは足りない」を**数十コマで**判じられる（いまは12分以上待たされてから尽きる）。
+      // ⚠️ **倒せた区間は1コマも焼かない**ので、そのぶんは数に入れない（決定22-2 追補1）。
+      beginExportDiskWatch({
+        totalFrames: bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps),
+        outPath: outputPath,
+      });
       const parts = await buildTimelineParts(doc, {
         templateOf,
         assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
@@ -2390,10 +2402,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         stageVideo: async (v) => {
           const asset = doc.assets.find((a) => a.assetId === v.assetId);
           if (!asset) return 0; // 素材が見つからない＝静止のまま（描画側の知らせが受け止める）
-          return stageClipFrames(
+          const staged = await stageClipFrames(
             doc.projectId, asset.filePath, v.sourceStartSec, v.durationSec, v.speed, v.fps,
             dimsForOrientation(doc.videoSettings.aspectRatio).width, v.dirName,
           );
+          // ⚠️ **取り出した生のコマも見積もりへ入れる**（PR #1216 レビュー 🔴）＝入れないと、
+          // **動画の上に動くものが乗る区間**（いちばん重い）の将来ぶんが丸ごと見えない。
+          await accountStagedVideo(staged);
+          return staged;
         },
         readVideoFrame: (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
         onProgress: (done, total) =>
@@ -2473,6 +2489,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
     } finally {
       unlisten?.();
+      // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが**前回の焼いた数**を
+      // 引き継いで、見積もりが狂う（少なく見積もって、足りないのに通す）。
+      endExportDiskWatch();
       // 一時ファイルは成功でも失敗でも片づける（次の書き出しに古いフレームを混ぜない）。
       // ⚠️ **掃除してから締めを返す**（#834-3）＝一時ファイルの置き場は**アプリで1つ**（ADR-0032 決定22）。
       // 先に返すと、次の書き出しが**この掃除の最中に**フレームを書き始め、掃除が**相手のフレームを消す**

@@ -19,7 +19,7 @@ import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { AudioAutoField } from "../components/AudioAutoField";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage, endExportDiskWatch, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
@@ -367,6 +367,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント）。
       // タイムライン形式と**同じ関数**を通す＝形式によって焼ける字体が割れない（§6・ADR-0026②）。
       await loadExportFonts();
+      // ⚠️ **空きを見張る**（#1211）＝止めないと、**何十分も待たされてから容量が尽き、
+      // 一時ファイルが数十GB残る**（#1205 の調査で実測）。
+      // ⚠️ **`totalFrames` は渡せない**＝場面形式は**焼く総コマ数を先に持っていない**
+      //（場面ごとに数える作りで、全体の合計がどこにも無い）。**底で止めるだけ**になる。
+      // 先に数えられるようにするのは #1211 の続き（そこまで行けば、数十コマで断れる）。
+      beginExportDiskWatch({ totalFrames: null, outPath: outputPath });
       const built = await buildExportScenes(
         snapScenes,
         templateById,
@@ -500,6 +506,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // ⚠️ **掃除してから締めを返す**（#834-3・タイムライン側と同じ順）＝一時ファイルの置き場は
       // **アプリで1つ**（ADR-0032 決定22）。先に返すと、次の書き出しが**この掃除の最中に**フレームを
       // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+      // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが前回の数を引き継ぐ。
+      endExportDiskWatch();
       await clearExportFramesStage().catch(() => {});
       useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
       // ⚠️ **取りこぼしをここで拾う**＝`try` の中の早期 return（`blockedAfter` 等）は

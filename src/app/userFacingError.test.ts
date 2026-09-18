@@ -3,7 +3,8 @@
 // ⚠️ **両端で正反対のことをしていた**＝一方は `.catch(() => …)` で**中身を全部捨て**、
 // もう一方は `e.message` を**無条件で出して**いた。この関門はその真ん中に置く。
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { userFacingMessage } from "./userFacingError";
+import { isUserFacingSentence, userFacingMessage } from "./userFacingError";
+import { diskFloorMessage, diskShortMessage } from "../domain/export/diskPlan";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -56,5 +57,20 @@ describe("画面に出してよい断りを見分ける", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     userFacingMessage("", "t");
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// ⚠️ **空きが足りない断りは、この関門を通らないと「もう一度お試しください」に潰れる**（#1211）＝
+// 潰れると、**何度やっても成功しない案内**になる（容量は増えないので）。
+// ⚠️ **文言を書き直すときにここが落ちる**のが狙い＝句点を落とすだけで、静かに潰れるようになる。
+describe("空きが足りない断りは、そのまま画面に出せる", () => {
+  it("見積もれたときの断り", () => {
+    const m = diskShortMessage({ stageShortBytes: 3 * 1024 ** 3, outShortBytes: 0 });
+    expect(isUserFacingSentence(m), `関門で落ちる文になっている: ${m}`).toBe(true);
+  });
+
+  it("底で止めたときの断り", () => {
+    const m = diskFloorMessage(1024 ** 3);
+    expect(isUserFacingSentence(m), `関門で落ちる文になっている: ${m}`).toBe(true);
   });
 });
