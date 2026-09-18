@@ -1212,18 +1212,14 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
  * ⚠️ **それらしく動かすのではない**＝FFmpeg に `-progress` を渡して、
  * **実際に書き終えた秒数**（`out_time_us`）を読む。
  */
-fn run_export_progress(
-    bin: &Path,
-    args: &[String],
-    on_us: Box<dyn Fn(u64) + Send>,
-) -> Result<String, String> {
+fn run_export_progress(bin: &Path, args: &[String], on_us: &dyn Fn(u64)) -> Result<String, String> {
     run_export_inner(bin, args, Some(on_us))
 }
 
 fn run_export_inner(
     bin: &Path,
     args: &[String],
-    on_us: Option<Box<dyn Fn(u64) + Send>>,
+    on_us: Option<&dyn Fn(u64)>,
 ) -> Result<String, String> {
     // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -1240,21 +1236,29 @@ fn run_export_inner(
         .spawn()
         .map_err(|e| e.to_string())?;
     // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
+    // ⚠️ **数だけを渡す口**（#1214）＝読む側のスレッドへ Tauri の持ち物を持ち込まないため。
+    let (tx, rx) = std::sync::mpsc::channel::<u64>();
+    let tx = on_us.is_some().then_some(tx);
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
     let out_h = std::thread::spawn(move || {
         let mut s = String::new();
         if let Some(p) = out_pipe.as_mut() {
-            match on_us {
+            match tx {
                 // ⚠️ **1行ずつ読む**（#1214）＝`read_to_string` は**終わるまで返らない**ので、
                 // 途中の進み具合が取れない。ここだけ行読みに変える（既定の道は元のまま）。
-                Some(cb) => {
+                //
+                // ⚠️ **このスレッドへ Tauri の持ち物を持ち込まない**（実機と CI で踏んだ）＝
+                // `AppHandle` を写して `Send` の箱へ入れると、**検査用の実行ファイルが起動しなくなる**
+                // （`STATUS_ENTRYPOINT_NOT_FOUND`＝WebView のDLLを要求するようになる）。
+                // **数だけを送り、送り先（画面へ知らせる所）は呼んだ側のスレッドで動かす。**
+                Some(tx) => {
                     use std::io::BufRead;
                     let reader = std::io::BufReader::new(p);
                     for line in reader.lines().map_while(Result::ok) {
                         if let Some(v) = line.strip_prefix("out_time_us=") {
                             if let Ok(us) = v.trim().parse::<u64>() {
-                                cb(us);
+                                let _ = tx.send(us);
                             }
                         }
                         s.push_str(&line);
@@ -1279,6 +1283,12 @@ fn run_export_inner(
 
     // try_wait をポーリングして完了を待つ。キャンセルされたらスロットが空になり（or フラグで自 kill）抜ける。
     let status = loop {
+        // ⚠️ **知らせるのはこのスレッド**＝読む側のスレッドからは数しか来ない。
+        if let Some(cb) = on_us {
+            while let Ok(us) = rx.try_recv() {
+                cb(us);
+            }
+        }
         if EXPORT_CANCELLED.load(Ordering::SeqCst) {
             if let Some(mut child) = lock_export_child().take() {
                 let _ = child.kill();
@@ -2488,24 +2498,18 @@ fn encode_jobs(
                 .sum::<f64>())
         .max(0.0);
         let total = total_sec.round().max(1.0) as usize;
-        let app_for_progress = progress.cloned();
         // ⚠️ **秒が変わったときだけ送る**＝FFmpeg は細かく出すので、そのまま流すと画面が忙しくなる。
-        let last = std::sync::Mutex::new(0usize);
-        run_export_progress(
-            ffmpeg,
-            &args,
-            Box::new(move |us| {
-                let sec = (us / 1_000_000) as usize;
-                if let Ok(mut l) = last.lock() {
-                    if sec == *l {
-                        return;
-                    }
-                    *l = sec;
-                }
-                emit_export_progress(app_for_progress.as_ref(), "join", sec.min(total), total);
-            }),
-        )
-        .map_err(|e| {
+        // ⚠️ **`progress` は借りたまま使う**（写してスレッドへ渡さない＝上の `run_export_inner` の注意）。
+        let last = std::cell::Cell::new(0usize);
+        let on_us = |us: u64| {
+            let sec = (us / 1_000_000) as usize;
+            if sec == last.get() {
+                return;
+            }
+            last.set(sec);
+            emit_export_progress(progress, "join", sec.min(total), total);
+        };
+        run_export_progress(ffmpeg, &args, &on_us).map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
                 "場面の切り替え合成に失敗しました。もう一度お試しください。",
