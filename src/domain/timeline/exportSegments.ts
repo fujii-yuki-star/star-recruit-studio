@@ -14,10 +14,10 @@
 // **その区間に生きている絵の部品が「動画1つだけ」**のときしか倒さない。
 // 広げるときは**パリティの検査を足してから**（各条件が1つずつ検査を持つ形にしてある）。
 
-import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { TIMELINE_CLIP_KIND } from '../enums';
 import { creditVisibleAt } from '../voice/creditDisplay';
 import { timelineFramePlan } from './export';
-import { videoPlacementsOf } from './video';
+import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -67,20 +67,6 @@ export function clipIsStaticOverlay(
   if (hasAnimation(clip.id)) return false;
   if ((clip.fadeInSec ?? 0) !== 0 || (clip.fadeOutSec ?? 0) !== 0) return false;
   if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
-  return true;
-}
-
-/**
- * 絵に出る部品か（隠した列・隠した部品・音の部品は絵に出ない）。
- *
- * ⚠️ **`domain/timeline/clipKind.ts` の `isVisualClip` とは別物**（PR #1207 レビュー ℹ️）＝
- * あちらは**種別**（絵か音か）、こちらは**いま絵に出るか**（隠れていないか）。
- * 同じ名前だと、読む人が「同じもの」と思って**片方の条件を落とす**。
- */
-function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
-  if (clip.hidden) return false;
-  const track = doc.tracks.find((t) => t.id === clip.trackId);
-  if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
   return true;
 }
 

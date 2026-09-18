@@ -216,6 +216,20 @@ describe('区間に割る', () => {
     expect(passThroughRatio(planTimelineExportSegments(d))).toBe(1);
   });
 
+  // ⚠️ **グループごと隠した部品も混ぜない**（PR #1210 レビュー 🟡）＝混ぜると、
+  // その部品に付いた動きやフェードのせいで**本来倒せる区間まで焼く方へ倒れる**（遅くなるだけで絵は正しい
+  // ＝**気づきにくい**）。判定は共有の `isDrawnClip`（`domain/timeline/video.ts`）を通すこと。
+  it('グループごと隠した部品も混ぜない', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      { id: 'clip_009', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0, durationSec: 6, text: 'あ', fadeInSec: 1 } as TimelineClip,
+    ], {
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+      groups: [{ id: 'group_001', members: ['clip_009'], hidden: true, transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+    } as Partial<TimelineProject>);
+    expect(passThroughRatio(planTimelineExportSegments(d)), '隠れている文字のフェードで焼く方へ倒れた').toBe(1);
+  });
+
   // ⚠️ **クレジットは上に載る**（ADR-0025）＝出ている間は静止1枚で足りない。
   it('クレジットが出ている間は焼く', () => {
     const d = doc([videoClip({ id: 'clip_001', startSec: 0, durationSec: 10 })], {
