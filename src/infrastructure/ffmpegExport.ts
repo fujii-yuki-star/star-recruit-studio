@@ -247,6 +247,37 @@ export function beginExportDiskWatch(opts: {
   };
 }
 
+/**
+ * 素材から**生のコマを取り出した直後**に、空きを見る（#1216 レビュー 🔴）。
+ *
+ * ⚠️ **なぜ「直後に見る」なのか**＝**動画の上に動くものが乗る区間**は倒せないので、素材の実コマを
+ * **区間のぶん丸ごと先に取り出して**から焼く。これは**一気に・まとまった量**が書かれる所で、
+ * 実測では **240KB/枚 × 3,620枚＝約840MB** が**1コマ目より前に**書かれていた（#1216）。
+ * 重ねた結果のPNGだけを見ていると、この消費が**見張りの外**にある。
+ *
+ * ⚠️ **予想せず、起きたことに反応する**＝「1枚あたり × 残り」で**将来ぶんを見込むと二重に数える**
+ *（取り出し済みのぶんは**もう空きが減っている**＝空きは実測で読むので）。上の実測の形では、
+ * 見込んでいたら**書き出せる動画を断って**いた。取り出しは一気に起きるので、
+ * **その直後に見れば取りこぼさない**。
+ *
+ * ⚠️ **ここでは底だけを見る**＝この時点では「焼く1コマの大きさ」の実績がまだ無い回がある
+ *（取り出しは1コマ目より前に起きる）ので、見積もりは立てられない。
+ * ⚠️ **調べられなかったら止めない**＝調べられないこと自体で書き出しを断らない（§2-5）。
+ */
+export async function accountStagedVideo(dirName: string, frameCount: number): Promise<void> {
+  if (!diskWatch || frameCount <= 0) return;
+  let free: { stageFreeBytes: number };
+  try {
+    // ⚠️ **書かれた量そのものは要らない**＝空きの実測に既に入っている。呼ぶのは「いま足りているか」だけ。
+    void (await invoke<number>('staged_dir_bytes', { dirName }));
+    free = await exportFreeSpace(null);
+  } catch {
+    return;
+  }
+  const floor = diskFloorShortfall(free.stageFreeBytes);
+  if (diskIsShort(floor)) throw new ExportDiskShortError(diskFloorMessage(free.stageFreeBytes));
+}
+
 /** 見張りを終える（⚠️ **どの出口でも呼ぶ**＝残すと次の書き出しが前回の数を引き継ぐ）。 */
 export function endExportDiskWatch(): void {
   diskWatch = null;

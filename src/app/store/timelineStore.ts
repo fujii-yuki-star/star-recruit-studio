@@ -80,6 +80,7 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { useStartupJobStore } from "./startupJobStore";
 import {
+  accountStagedVideo,
   beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
   endExportDiskWatch, exportVideo, listenExportProgress,
   readExportFrame, stageClipFrames, stageExportFrame,
@@ -2401,10 +2402,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         stageVideo: async (v) => {
           const asset = doc.assets.find((a) => a.assetId === v.assetId);
           if (!asset) return 0; // 素材が見つからない＝静止のまま（描画側の知らせが受け止める）
-          return stageClipFrames(
+          const staged = await stageClipFrames(
             doc.projectId, asset.filePath, v.sourceStartSec, v.durationSec, v.speed, v.fps,
             dimsForOrientation(doc.videoSettings.aspectRatio).width, v.dirName,
           );
+          // ⚠️ **取り出した生のコマも見積もりへ入れる**（PR #1216 レビュー 🔴）＝入れないと、
+          // **動画の上に動くものが乗る区間**（いちばん重い）の将来ぶんが丸ごと見えない。
+          await accountStagedVideo(v.dirName, staged);
+          return staged;
         },
         readVideoFrame: (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
         onProgress: (done, total) =>

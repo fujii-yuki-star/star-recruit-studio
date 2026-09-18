@@ -33,6 +33,17 @@ describe('これから焼くぶんの見積もり', () => {
     expect(n).toBeGreaterThan(70 * MB);
   });
 
+  // ⚠️ **素材から取り出す「生のコマ」は、ここで見込まない**（PR #1216 レビュー 🔴 への答え）＝
+  // 見込むと**二重に数える**。取り出しは区間の頭でまとめて起きるので、**取り出し済みのぶんは
+  // 既に空きが減っている**（空きは実測で読む）。実測（#1216・回した動画20本）では
+  // **取り出しは全部が1コマ目より前**に終わっており、見込んでいたら**書き出せる動画を断って**いた。
+  // ⚠️ **代わりに、取り出した直後に空きを見る**（`ffmpegExport.ts` の `accountStagedVideo`）。
+  it('見込むのは、重ねた結果のコマのぶんだけ（取り出した生のコマを足さない）', () => {
+    // 30コマで 30MB＝1コマ 1MB。残り 70コマ。⚠️ 生のコマを何枚取り出していても、この値は変わらない。
+    expect(remainingBakeBytes({ bakedFrames: 30, bakedBytes: 30 * MB, totalFrames: 100 }))
+      .toBe(Math.ceil(70 * MB * (1 + DISK_MARGIN_RATIO)));
+  });
+
   it('焼き終わっていれば 0（残りが無い）', () => {
     expect(remainingBakeBytes({ bakedFrames: 100, bakedBytes: 100 * MB, totalFrames: 100 })).toBe(0);
   });

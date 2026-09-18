@@ -2617,6 +2617,43 @@ fn stage_export_frame_impl(
     decode_b64_to_file(&data_base64, &path, "staged frame")
 }
 
+/// 置き場に**いま何バイト置いてあるか**（#1216 レビュー 🔴）。
+///
+/// ⚠️ **なぜ要るか**＝素材から取り出した**生のコマ**は `stage_clip_frames` が
+/// **焼く前に一気に**書き出すので、重ねた結果のPNGだけを数えていると、
+/// **いちばん重い場合（動画の上に動くものが乗る区間）の消費が丸ごと見えない**。
+/// ⚠️ **読めないものは 0 として数える**＝調べられないこと自体で書き出しを断らない（§2-5）。
+#[tauri::command]
+pub async fn staged_dir_bytes(app: tauri::AppHandle, dir_name: String) -> Result<u64, String> {
+    if !is_safe_stage_name(&dir_name) {
+        return Err(export_failure(
+            format!("unsafe stage name: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = export_frames_stage_dir(&app)?.join(&dir_name);
+        let mut total: u64 = 0;
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                if let Ok(m) = e.metadata() {
+                    if m.is_file() {
+                        total += m.len();
+                    }
+                }
+            }
+        }
+        Ok(total)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("staged dir bytes task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
 /// フレームのステージングを空にする（書き出しの前後で呼ぶ＝古いフレームを残さない）。非存在は成功扱い。
 /// 数百PNGのディレクトリ削除（ブロッキングI/O）をメインスレッドで走らせないよう専用スレッドへ退避（#375）。
 #[tauri::command]
