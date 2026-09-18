@@ -30,7 +30,10 @@ export const TRANSITION_DEFAULT_SEC = 0.5;
 export const PREVIEW_MIN_PLAY_SEC = 0.3;
 
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;
-export const VIDEO_HARD_MAX_SEC = 600;
+// 動画の長さの絶対天井（秒）。⚠️ **30分**（ADR-0045・2026-09-18 利用者判断）。
+// ⚠️ **ここだけ変えても足りない**＝`schemas/project.schema.json` の `maxDurationSec.maximum` と
+// `11 §4` の表が**同じ値**でなければならない（門番＝`src/test/canonConstantsGuard.test.ts`）。
+export const VIDEO_HARD_MAX_SEC = 1800;
 export const MAX_SCENES_PER_VIDEO = 80;
 export const DEFAULT_TARGET_DURATION_SEC = 60;
 
