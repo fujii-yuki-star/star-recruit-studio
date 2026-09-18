@@ -126,16 +126,69 @@ describe('区間に割る', () => {
     ]);
   });
 
-  it('文字が重なっている所は焼く（上に載るものは静止1枚では足りない）', () => {
+  // ⚠️ **動かない文字なら倒せる**（ADR-0032 決定22-2 追補・#1205）＝区間の中では顔ぶれが変わらないので、
+  // **上に重ねる静止画を1枚**焼けば足りる。⚠️ **実況系はほぼ常に字幕が出ている**ので、
+  // ここが倒せないと **30分で1.5時間・一時ファイル50GB超**（実測から計算）になる。
+  it('動かない文字が重なっていても倒す（上に1枚焼けば足りる）', () => {
     const d = doc([
       videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
       { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 2, durationSec: 2,
         x: 0, y: 0, w: 800, h: 100, text: 'あ' } as TimelineClip,
     ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }] });
-    const segs = planTimelineExportSegments(d);
-    expect(segs.map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'video', 'video']);
   });
 
+  // ⚠️ **動く文字は倒せない**＝1枚の静止画に写せない（キーフレーム）。
+  it('動く文字が重なっている所は焼く', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 2, durationSec: 2,
+        x: 0, y: 0, w: 800, h: 100, text: 'あ' } as TimelineClip,
+    ], {
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+      animations: [{ id: 'anim_001', targetId: 'clip_002', keyframes: [{ timeSec: 0, x: 0 }] }],
+    } as Partial<TimelineProject>);
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+  });
+
+  // ⚠️ **薄くなっていく文字も倒せない**＝フェードは時間で変わる。
+  it('フェードの付いた文字が重なっている所は焼く', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 2, durationSec: 2,
+        x: 0, y: 0, w: 800, h: 100, text: 'あ', fadeInSec: 0.5 } as TimelineClip,
+    ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }] });
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+  });
+
+  // ⚠️ **混ぜ方の付いた上乗せは倒せない**＝重ねるのは FFmpeg なので、**混ざり方が消える**（ADR-0044）。
+  it('混ぜ方の付いた文字が重なっている所は焼く', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 2, durationSec: 2,
+        x: 0, y: 0, w: 800, h: 100, text: 'あ', blendMode: 'screen' } as TimelineClip,
+    ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }] });
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+  });
+
+  // ⚠️ **上乗せが動画なら倒せない**＝中身が毎コマ変わるので、1枚の静止画に写せない
+  //（回した小窓の動画を重ねる形＝土台は1つに決まるが、上乗せは静止画にできない）。
+  it('回した動画が上に重なっている所は焼く（上乗せが動画）', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      videoClip({ id: 'clip_002', trackId: 'track_002', startSec: 2, durationSec: 2, rotation: 15 }),
+    ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }] });
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+  });
+
+  // ⚠️ **動画が2つ重なっていたら倒せない**＝土台が決まらない（層に割ることになる＝決定22 の理由①）。
+  it('動画が2つ重なっている所は焼く', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 6 }),
+      videoClip({ id: 'clip_002', trackId: 'track_002', startSec: 3, durationSec: 6 }),
+    ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }] });
+    expect(planTimelineExportSegments(d).map((s) => s.kind)).toEqual(['video', 'frames', 'video']);
+  });
   // ⚠️ **音の列は絵に出ない**＝倒せるかどうかに関係しない（関係させると、声を入れた瞬間に効かなくなる）。
   it('音の部品は区間の判定に混ぜない', () => {
     const d = doc([
