@@ -1199,6 +1199,28 @@ pub fn cancel_export() {
 /// 走行中 Child を EXPORT_CHILD に登録し、キャンセル／アプリ終了から kill できるようにする。
 /// stdout/stderr は別スレッドで排出する（ffmpeg は stderr 出力が多く、未排出だとパイプ詰まりで停止し得る）。
 fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
+    run_export_inner(bin, args, None)
+}
+
+/**
+ * `run_export` の**進み具合つき**版（#1214）。
+ *
+ * ⚠️ **なぜ要るか**＝つなぐ段は**1回の FFmpeg 呼び出し**で全部の切り替えを処理するので、
+ * Rust 側に数えるループが無く、**進み具合を出せなかった**（実測で 6.5 分の沈黙）。
+ * 30分の動画では**後半12分バーが動かず**、利用者は「壊れた」と判断して中止する（#1214）。
+ *
+ * ⚠️ **それらしく動かすのではない**＝FFmpeg に `-progress` を渡して、
+ * **実際に書き終えた秒数**（`out_time_us`）を読む。
+ */
+fn run_export_progress(bin: &Path, args: &[String], on_us: &dyn Fn(u64)) -> Result<String, String> {
+    run_export_inner(bin, args, Some(on_us))
+}
+
+fn run_export_inner(
+    bin: &Path,
+    args: &[String],
+    on_us: Option<&dyn Fn(u64)>,
+) -> Result<String, String> {
     // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(EXPORT_CANCELLED_MARK.to_string());
@@ -1214,12 +1236,37 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
         .spawn()
         .map_err(|e| e.to_string())?;
     // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
+    // ⚠️ **数だけを渡す口**（#1214）＝読む側のスレッドへ Tauri の持ち物を持ち込まないため。
+    let (tx, rx) = std::sync::mpsc::channel::<u64>();
+    let tx = on_us.is_some().then_some(tx);
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
     let out_h = std::thread::spawn(move || {
         let mut s = String::new();
         if let Some(p) = out_pipe.as_mut() {
-            let _ = p.read_to_string(&mut s);
+            match tx {
+                // ⚠️ **1行ずつ読む**（#1214）＝`read_to_string` は**終わるまで返らない**ので、
+                // 途中の進み具合が取れない。ここだけ行読みに変える（既定の道は元のまま）。
+                //
+                // ⚠️ **このスレッドへ Tauri の持ち物を持ち込まない**（実機と CI で踏んだ）＝
+                // `AppHandle` を写して `Send` の箱へ入れると、**検査用の実行ファイルが起動しなくなる**
+                // （`STATUS_ENTRYPOINT_NOT_FOUND`＝WebView のDLLを要求するようになる）。
+                // **数だけを送り、送り先（画面へ知らせる所）は呼んだ側のスレッドで動かす。**
+                Some(tx) => {
+                    use std::io::BufRead;
+                    let reader = std::io::BufReader::new(p);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if let Some(us) = parse_out_time_us(&line) {
+                            let _ = tx.send(us);
+                        }
+                        s.push_str(&line);
+                        s.push(char::from(10)); // 改行
+                    }
+                }
+                None => {
+                    let _ = p.read_to_string(&mut s);
+                }
+            }
         }
         s
     });
@@ -1234,6 +1281,12 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
 
     // try_wait をポーリングして完了を待つ。キャンセルされたらスロットが空になり（or フラグで自 kill）抜ける。
     let status = loop {
+        // ⚠️ **知らせるのはこのスレッド**＝読む側のスレッドからは数しか来ない。
+        if let Some(cb) = on_us {
+            while let Ok(us) = rx.try_recv() {
+                cb(us);
+            }
+        }
         if EXPORT_CANCELLED.load(Ordering::SeqCst) {
             if let Some(mut child) = lock_export_child().take() {
                 let _ = child.kill();
@@ -2149,6 +2202,36 @@ struct ExportProgressEvent {
     total: usize,
 }
 
+/// `-progress` の1行から「いま何秒目を書き終えたか」を読む（#1214）。**純粋関数**。
+///
+/// ⚠️ **`out_time_us` だけを見る**＝同じ出力に `out_time`（時分秒の文字列）も来るが、
+/// そちらは丸めや書式の揺れがある。マイクロ秒の整数1本に絞る。
+fn parse_out_time_us(line: &str) -> Option<u64> {
+    line.strip_prefix("out_time_us=")?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+/// つなぎ終わったときの尺（秒）＝場面の尺の合計から、切り替えで**重なるぶん**を引く（#1214・ADR-0009）。
+///
+/// ⚠️ **負にしない**＝切り替えが場面より長い壊れた文書でも、進み具合の分母が負になると
+/// 画面が跳ねる（データの検証は別の所の仕事なので、ここでは丸める）。
+fn join_total_sec(job_secs: &[f64], steps: &[JoinStep]) -> f64 {
+    let total: f64 = job_secs.iter().sum();
+    let overlap: f64 = steps
+        .iter()
+        .map(|s| {
+            if s.xfade.is_some() {
+                s.duration_sec
+            } else {
+                0.0
+            }
+        })
+        .sum();
+    (total - overlap).max(0.0)
+}
+
 /// 進捗イベントを emit（送れなくても書き出しは続行＝best-effort・#376）。app が None（テスト等）は何もしない。
 fn emit_export_progress(app: Option<&tauri::AppHandle>, phase: &str, step: usize, total: usize) {
     if let Some(app) = app {
@@ -2415,7 +2498,7 @@ fn encode_jobs(
             }
         }
         // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップに変わっただけ。
-        let args = xfade_chain_args(
+        let mut args = xfade_chain_args(
             &scene_files,
             &scene_steps,
             &output.to_string_lossy(),
@@ -2423,12 +2506,37 @@ fn encode_jobs(
             fps,
             bitrate,
         );
-        run_export(ffmpeg, &args).map_err(|e| {
+        // ⚠️ **進み具合は、引数を組む純粋関数の外で足す**（#1214）＝中に入れると
+        // `xfade_chain_args` の検査（引数の並びを固定しているもの）が**進み具合の都合で動く**。
+        // ⚠️ **`-nostats`** ＝既定の進捗行（標準エラー）は使わないので止める。
+        args.push("-progress".to_string());
+        args.push("pipe:1".to_string());
+        args.push("-nostats".to_string());
+        // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
+        let job_secs: Vec<f64> = jobs.iter().map(|j| j.duration_sec()).collect();
+        let total_sec = join_total_sec(&job_secs, &scene_steps);
+        let total = total_sec.round().max(1.0) as usize;
+        // ⚠️ **秒が変わったときだけ送る**＝FFmpeg は細かく出すので、そのまま流すと画面が忙しくなる。
+        // ⚠️ **`progress` は借りたまま使う**（写してスレッドへ渡さない＝上の `run_export_inner` の注意）。
+        let last = std::cell::Cell::new(0usize);
+        let on_us = |us: u64| {
+            let sec = (us / 1_000_000) as usize;
+            if sec == last.get() {
+                return;
+            }
+            last.set(sec);
+            emit_export_progress(progress, "join", sec.min(total), total);
+        };
+        run_export_progress(ffmpeg, &args, &on_us).map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
                 "場面の切り替え合成に失敗しました。もう一度お試しください。",
             )
         })?;
+        // ⚠️ **終わったら必ず上限まで届かせる**（PR #1219 レビュー）＝見積りの尺と FFmpeg が最後に出す
+        // 秒は**丸めで一致しない**ので、放っておくと**途中の%のまま次の段へ飛ぶ**。
+        // 映像を作る段は場面ごとに最後まで送っているので、こちらも同じ形に揃える。
+        emit_export_progress(progress, "join", total, total);
     } else {
         // 遷移なし：従来どおり concat demuxer の無劣化コピー（高速）。
         let mut list = String::new();
@@ -4413,6 +4521,73 @@ mod tests {
             "12000k",
         );
         assert!(!x.iter().any(|s| s == "-b:v"));
+    }
+
+    /// つなぐ段の進み具合（#1214）＝FFmpeg の `-progress` の行から秒を読む。
+    #[test]
+    fn 進み具合の行から秒を読む() {
+        assert_eq!(parse_out_time_us("out_time_us=1500000"), Some(1_500_000));
+        // ⚠️ **前後の空白は落とす**＝改行込みで届く。
+        assert_eq!(parse_out_time_us("out_time_us=42 "), Some(42));
+        // ⚠️ **似た名前の行を拾わない**＝`out_time`（時分秒の文字列）も同じ出力に来る。
+        assert_eq!(parse_out_time_us("out_time=00:00:01.500000"), None);
+        assert_eq!(parse_out_time_us("frame=123"), None);
+        // ⚠️ **数でない値は無視**＝`N/A` が来ることがある（ここで落ちると書き出しごと止まる）。
+        assert_eq!(parse_out_time_us("out_time_us=N/A"), None);
+    }
+
+    /// つなぎ終わった尺＝場面の合計から、切り替えで重なるぶんを引く（#1214・ADR-0009）。
+    #[test]
+    fn つなぎ終わった尺は重なるぶんを引く() {
+        let steps = [
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+        ];
+        // 15×3 ＝ 45 から、切り替え2回ぶん（1.0）を引く。
+        assert!((join_total_sec(&[15.0, 15.0, 15.0], &steps) - 44.0).abs() < 1e-9);
+    }
+
+    /// ⚠️ **切り替えの無い境目は引かない**（ハードカットは重ならない）。
+    #[test]
+    fn 切り替えの無い境目は引かない() {
+        let steps = [
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+        ];
+        assert!((join_total_sec(&[10.0, 10.0, 10.0], &steps) - 29.5).abs() < 1e-9);
+    }
+
+    /// ⚠️ **負にしない**＝分母が負だと進み具合が跳ねる（壊れた文書でも画面を壊さない）。
+    #[test]
+    fn つなぎ終わった尺は負にならない() {
+        let steps = [JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 100.0,
+            offset_sec: 0.0,
+        }];
+        assert_eq!(join_total_sec(&[1.0, 1.0], &steps), 0.0);
+    }
+
+    /// ⚠️ **境目が無い（場面1つ）なら、そのままの尺**。
+    #[test]
+    fn 境目が無ければそのままの尺() {
+        assert!((join_total_sec(&[12.5], &[]) - 12.5).abs() < 1e-9);
     }
 
     #[test]
