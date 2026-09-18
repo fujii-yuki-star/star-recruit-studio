@@ -22,6 +22,7 @@ import { PROJECT_NEWER_VERSION_MESSAGE } from "../domain/schemaVersionCompare";
 import { READING_DICT_UNREADABLE } from "../infrastructure/readingDictFs";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { PROJECT_SAVE_WOULD_BREAK, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "./uiLabels";
+import { sceneLimitMessage } from "../domain/project/sceneLimit";
 
 /**
  * 表の行に**見える**すべての行（ゆるい判定）。
@@ -82,6 +83,10 @@ function codeMessages(): Record<string, string> {
     // 文字列の継ぎ目（`+`）を落とすので、`Ctrl+Z` のような**本文に `+` を含む文**は
     // `CtrlZ` になって一致しない。等値の側へ載せれば、そもそも走査に頼らない。
     PROJECT_SAVE_WOULD_BREAK,
+    // ⚠️ **上限を差し込むだけ＝返す文は1通り**（#1213）なので、等値で守る
+    //（`ASSEMBLED_AT_RUNTIME` へ逃がさない＝逃がすと「実装のどこかに在る」の弱い段になり、
+    // しかも `${...}` を含む行は走査で一致しないので**誰にも見られなくなる**）。
+    SCENE_LIMIT_REACHED: sceneLimitMessage(),
     EXPORT_CLEANUP_PENDING: EXPORT_CLEANUP_PENDING_MESSAGE,
     EXPORT_OTHER_RUNNING: OTHER_EXPORT_RUNNING_MESSAGE,
     // α-6 で足したぶん（α-6 出口監査 🟡18）＝画面や `infrastructure` に直書きされていて
@@ -499,7 +504,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
     // ⚠️ **+2**＝`STARTUP_VOICE_NOT_READY`／`STARTUP_MAKE_VOICES_LEFT`（#1204＝
     //   **画面を読まない道**〔起動の引数〕で、公開前チェックの「要対応」を誰も見ていなかった）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(247);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(248);
   });
 
 
@@ -747,7 +752,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
     // ⚠️ **+2**＝#1204（上と同じ2行）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(244);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(245);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -766,6 +771,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝タイムライン形式の双子と揃えた）。
       // ⚠️ **+7**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝引数4通り＋開いている／読めない／開けない。
     // ⚠️ **+2**＝#1204＝頼まれた回だけの断り2件。
-    ).toBe(108);
+    ).toBe(109);
   });
 });
