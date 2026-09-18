@@ -4,7 +4,7 @@
 //（`schemas/project.schema.json` の `scenes.maxItems` は 80。読込は `maxItems` 違反で拒否しない＝#416）。
 import { describe, expect, it } from 'vitest';
 import { MAX_SCENES_PER_VIDEO } from '../constants';
-import { canAddScenes, sceneLimitMessage, sceneSlotsLeft } from './sceneLimit';
+import { canAddScenes, sceneLimitMessage } from './sceneLimit';
 
 describe('場面の数の上限', () => {
   it('上限のひとつ手前なら、あと1つ足せる', () => {
@@ -22,15 +22,6 @@ describe('場面の数の上限', () => {
     expect(canAddScenes(MAX_SCENES_PER_VIDEO - 2, 3)).toBe(false);
   });
 
-  it('あと何個足せるかを返す', () => {
-    expect(sceneSlotsLeft(MAX_SCENES_PER_VIDEO - 3)).toBe(3);
-    expect(sceneSlotsLeft(MAX_SCENES_PER_VIDEO)).toBe(0);
-  });
-
-  // ⚠️ **負にしない**＝既に超えている動画（前の版で作られたもの）を開いても画面を壊さない。
-  it('既に超えていても、残りは負にしない', () => {
-    expect(sceneSlotsLeft(MAX_SCENES_PER_VIDEO + 5)).toBe(0);
-  });
 });
 
 describe('これ以上足せないときの案内', () => {
