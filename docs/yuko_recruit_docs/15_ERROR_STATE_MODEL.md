@@ -253,7 +253,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 走査を直すと **93 種**見えるようになり、**さらに 6 件**の違反が出ました（合計 16 件を直した）。
 
 
-- **表の実体は [`errors/error-state-table.tsv`](errors/error-state-table.tsv)**（246 行）。ここ（`15 §6`）は**規則**を持つ。
+- **表の実体は [`errors/error-state-table.tsv`](errors/error-state-table.tsv)**（247 行）。ここ（`15 §6`）は**規則**を持つ。
   ⚠️ **行数は `src/app/errorStateTable.test.ts` が実数で留めている**（#1150）＝
   ここに書く数は**その門番と同じ値**にする（片方だけ動かさない）。
   ⚠️ **数えるのは見出しを除いたデータ行**（#1162 レビュー由来 🔴）＝門番は `slice(1)` 済みの数を見ている。
