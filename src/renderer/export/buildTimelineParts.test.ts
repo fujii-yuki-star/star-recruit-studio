@@ -196,6 +196,33 @@ describe('区間を順に組み立てる', () => {
     expect(parts[0].framesDir).toBeTruthy();
   });
 
+  // ⚠️ **見た目パターンの解決を割る側へ渡す**＝渡さないと、**差し込み口に動画が入った部品**を
+  // 「動かない上乗せ」と取り違え、**毎コマ変わる中身を静止画1枚に写した動画**が出る
+  //（プレビューでは動いているので、出るまで気づけない＝ADR-0026④）。
+  it('差し込み口に動画が入った部品が重なっていれば焼く', async () => {
+    const overlay = {
+      id: 'clip_009', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 2,
+      x: 0, y: 0, w: 960, h: 540, templateId: 'tmpl_v', assetRefs: { movie: 'asset_v2' },
+    } as unknown as TimelineClip;
+    const template = {
+      schemaVersion: '1.0', templateId: 'tmpl_v', name: 'v', category: 'photo_intro', aspectRatio: '16:9',
+      canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'movie', type: 'slot', slotType: 'video', x: 0, y: 0, w: 1920, h: 1080 }],
+    };
+    const d = doc([slot('clip_001', 0), overlay], {
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' },
+        { assetId: 'asset_v2', assetType: 'video', displayName: 'v2.mp4', filePath: 'assets/v2.mp4' },
+      ],
+    } as Partial<TimelineProject>);
+    const parts = await buildTimelineParts(d, {
+      ...baseOpts,
+      templateOf: (id) => (id === 'tmpl_v' ? (template as never) : undefined),
+      stageFrame: async () => {},
+    });
+    expect(parts.every((p) => p.video == null), '動画の上乗せを静止画に写した').toBe(true);
+  });
+
   it('つないだ長さが、元の尺と同じ', async () => {
     const d = doc([slot('clip_001', 0), slot('clip_002', 2, { rotation: 15 }), slot('clip_003', 4)]);
     const parts = await buildTimelineParts(d, { ...baseOpts, stageFrame: async () => {} });

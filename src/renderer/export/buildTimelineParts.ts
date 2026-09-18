@@ -137,7 +137,9 @@ export async function buildTimelineParts(
   opts: BuildTimelineFramesOptions,
 ): Promise<TimelineExportPart[]> {
   const plan = timelineFramePlan(doc);
-  const segments = planTimelineExportSegments(doc);
+  // ⚠️ **見た目パターンの解決を渡す**＝中に動画の差し込み口がある部品を
+  // 「動かない上乗せ」と取り違えないため（渡さないと、動く絵を静止画に写してしまう）。
+  const segments = planTimelineExportSegments(doc, opts.templateOf);
   const parts: TimelineExportPart[] = [];
   // ⚠️ **進み具合は「全部で何枚焼くか」で数える**＝区間ごとに 0 から数え直すと、
   // バーが**区間の数だけ行ったり来たり**する（倒せた区間は1枚も焼かないので、なおさら飛ぶ）。

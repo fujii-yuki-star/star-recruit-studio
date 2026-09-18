@@ -14,9 +14,11 @@
 // **その区間に生きている絵の部品が「動画1つだけ」**のときしか倒さない。
 // 広げるときは**パリティの検査を足してから**（各条件が1つずつ検査を持つ形にしてある）。
 
-import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { TIMELINE_CLIP_KIND } from '../enums';
 import { creditVisibleAt } from '../voice/creditDisplay';
 import { timelineFramePlan } from './export';
+import { isDrawnClip, videoPlacementsOf } from './video';
+import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 区間の割り方（`video`＝実動画をそのまま流す／`frames`＝いままでどおり全コマ焼く）。 */
@@ -48,16 +50,23 @@ export function clipIsPassThroughVideo(
 }
 
 /**
- * 絵に出る部品か（隠した列・隠した部品・音の部品は絵に出ない）。
+ * その区間で**上に重ねても時間で変わらない**部品か（ADR-0032 決定22-2 の「次に緩めるなら」）。
  *
- * ⚠️ **`domain/timeline/clipKind.ts` の `isVisualClip` とは別物**（PR #1207 レビュー ℹ️）＝
- * あちらは**種別**（絵か音か）、こちらは**いま絵に出るか**（隠れていないか）。
- * 同じ名前だと、読む人が「同じもの」と思って**片方の条件を落とす**。
+ * ⚠️ **区間の中では顔ぶれが変わらない**（境目は部品の出入りで割れている）ので、
+ * 「時間で変わらない」＝**その区間ぶん1枚の静止画で足りる**ということ。
+ * ⚠️ **動画は数えない**＝中身が毎コマ変わるので、静止画に写せない。
+ * ⚠️ **混ぜ方（描画モード）が付いていたら外す**＝重ねるのは FFmpeg なので、**混ざり方が消える**
+ * （色の調整は静止画へ焼き込まれるので構わない）。
  */
-function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
-  if (clip.hidden) return false;
-  const track = doc.tracks.find((t) => t.id === clip.trackId);
-  if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
+export function clipIsStaticOverlay(
+  clip: TimelineClip,
+  hasAnimation: (clipId: string) => boolean,
+  isVideoClip: (clipId: string) => boolean,
+): boolean {
+  if (isVideoClip(clip.id)) return false;
+  if (hasAnimation(clip.id)) return false;
+  if ((clip.fadeInSec ?? 0) !== 0 || (clip.fadeOutSec ?? 0) !== 0) return false;
+  if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
   return true;
 }
 
@@ -74,7 +83,11 @@ function liveAt(clip: TimelineClip, timeSec: number): boolean {
  * ⚠️ **クレジットが出ている間は倒さない**＝上に重ねる静止PNGは1枚なので、
  * 区間の途中でクレジットが出たり消えたりすると**別の絵**になる（ADR-0025）。
  */
-export function planTimelineExportSegments(doc: TimelineProject): TimelineExportSegment[] {
+export function planTimelineExportSegments(
+  doc: TimelineProject,
+  /** 見た目パターンの解決（中に動画の差し込み口があるかを見るのに要る）。 */
+  templateOf?: (templateId: string) => Template | undefined,
+): TimelineExportSegment[] {
   const plan = timelineFramePlan(doc);
   if (plan.frameCount <= 0) return [];
   const animated = new Set<string>();
@@ -86,6 +99,11 @@ export function planTimelineExportSegments(doc: TimelineProject): TimelineExport
   }
   const hasAnimation = (clipId: string): boolean => animated.has(clipId);
 
+  // **動画を映す部品**（直接置いた動画と、見た目パターンの中の差し込み口の両方）＝
+  // ⚠️ **判定は共有の関数を通す**（`videoPlacementsOf`）＝ここで書き写すと、
+  // 「動画なのに静止画として扱う」取りこぼしが出る。
+  const videoClipIds = new Set(videoPlacementsOf(doc, templateOf).map((p) => p.clip.id));
+  const isVideoClip = (clipId: string): boolean => videoClipIds.has(clipId);
   const visual = doc.clips.filter((c) => isDrawnClip(doc, c));
   // 区間の境目＝部品の出入り（コマの格子に丸める）。
   const cuts = new Set<number>([0, plan.frameCount]);
@@ -111,9 +129,18 @@ export function planTimelineExportSegments(doc: TimelineProject): TimelineExport
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, startSec) ||
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, (startSec + endSec) / 2) ||
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, Math.max(startSec, endSec - 1 / plan.fps));
-    const only = live.length === 1 ? live[0] : undefined;
-    if (only && !creditShows && clipIsPassThroughVideo(only, hasAnimation)) {
-      out.push({ kind: 'video', startSec, endSec, clipId: only.id });
+    // **土台になる動画**＝その区間で「そのまま流せる動画」は1つだけでなければならない。
+    const bases = live.filter((c) => isVideoClip(c.id) && clipIsPassThroughVideo(c, hasAnimation));
+    // ⚠️ **この「1つだけ」は、下の『残りが全部動かない上乗せ』と同じことを言っている**＝
+    // 土台が2つあれば、2つ目は**動画なので上乗せにはなれない**（`clipIsStaticOverlay` が弾く）。
+    // **早く落とすために残す**が、**これ単独を壊しても結果は変わらない**（変異が生き残るのはそのため）。
+    const base = bases.length === 1 ? bases[0] : undefined;
+    // ⚠️ **残りが全部「動かない上乗せ」なら倒せる**（決定22-2 の「次に緩めるなら」）＝
+    // 上下に敷く静止画を1枚ずつ焼けば、**実況系のように字幕が出ていても**実動画を流せる。
+    const restStatic = base != null
+      && live.every((c) => c.id === base.id || clipIsStaticOverlay(c, hasAnimation, isVideoClip));
+    if (base && restStatic && !creditShows) {
+      out.push({ kind: 'video', startSec, endSec, clipId: base.id });
     } else {
       out.push({ kind: 'frames', startSec, endSec });
     }
