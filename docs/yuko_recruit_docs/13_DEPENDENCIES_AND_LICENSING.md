@@ -83,7 +83,9 @@
 ### 決定（[`adr/0005`](adr/0005-voicevox-bundling.md)・§5）
 - ✅ エンジンを**同梱＋アプリ起動時に自動起動**（接続先設定はフォールバック）。同梱・再配布条件は確認済み（**ENGINE の組み込み再配布は許諾内**・根拠は [`adr/0005`](adr/0005-voicevox-bundling.md)「規約・ライセンスの根拠」＝#122）。
 - ✅ 既定キャラ＝**ずんだもん**（ナレーター用途・§5 / `adr/0003`）。**#177 で規約確認済みの VOICEVOX 標準キャラから選択可へ拡張**（選択キャラを「VOICEVOX:＜キャラ名＞」で常時クレジット・カタログ `domain/voice/voiceCatalog.ts` で統制・`adr/0003`「更新」）。
-- 残（実装・配布の詳細）: 同梱ビルド選定（CPU/GPU・サイズ）／プロセス管理（ポート競合・起動待ち・終了）／配布時の最終法務・バージョン固定（ADR-0005 未解決論点）＝**#149** で実装。
+- ~~残（実装・配布の詳細）: 同梱ビルド選定（CPU/GPU・サイズ）／プロセス管理（ポート競合・起動待ち・終了）~~
+  → ⚠️ **#149／#151 で実装＋packaged 検証済**（CPU 版 v0.25.2 に固定）。
+  **残るのは配布時の最終法務確認だけ**（ADR-0005 未解決論点）。
 
 ---
 
@@ -191,17 +193,17 @@
 - [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。**初期3種を同梱＋場面編集でフォント選択**（gen-interface-jp＝既定/本文・gen-interface-jp-display＝見出し・怪盗予告ゴシック＝演出・全 SIL OFL 1.1。`public/fonts/`＋各 OFL.txt 同梱・`videoSettings.fontId`＝schema 1.3）。残: フォント追加は段階的に。
 
 ### リリース前に残る確認（法務・公式規約）
-- [x] FFmpeg H.264：**Media Foundation（h264_mf）に決定**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。**BtbN `win64-lgpl` に h264_mf 実在＋アプリ書き出し成功を実機確認＝自前ビルド不要**（OpenH264 の初回Cisco取得/dlopen自前ビルドは不要に。OpenH264 はフォールバック）。残: 配布は lgpl-shared(動的リンク)＋ソース提供・使用バージョン pin。Windows N は #120 で事前検知＋導線を実装済（不在時は予備方式へフォールバック）。
+- [x] FFmpeg H.264：**Media Foundation（h264_mf）に決定**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。**BtbN `win64-lgpl` に h264_mf 実在＋アプリ書き出し成功を実機確認＝自前ビルド不要**（OpenH264 の初回Cisco取得/dlopen自前ビルドは不要に。OpenH264 はフォールバック）。→ ⚠️ **配布も決着**＝lgpl-shared（動的リンク）を pin 同梱・ソース提供は `FFmpeg_SOURCE.md`（#119）。Windows N は #120 で事前検知＋導線を実装済（不在時は予備方式へフォールバック）。残: **N/KN の実機確認**。
 - [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）／根拠を ADR-0005「規約・ライセンスの根拠」に記録済み（#122）**。同梱ビルド／プロセス管理・バージョン固定（ENGINE v0.25.2 CPU）は **#149/#151 で実装＋packaged 検証済**。
 - [x] エンドユーザー動画のクレジット表記運用 ＝ **#158 で全動画に常時クレジット焼き込み**（ADR-0003・`NARRATOR_CREDIT` 単一参照元）。手順案内でなく自動付与で担保。→ **[`adr/0025`](adr/0025-credit-display-modes.md)（α-6・#359）で表示方式を選べる**（既定=最初と最後・非表示可）＝**実装済**。非表示時は概要欄運用の補助（コピー導線）で担保、About クレジットは必須維持。
 - [x] 標準BGM ＝ **CC0 3曲を同梱＋書き出しで選択**（Summer Morning／Found New Hope／Limousine Cruise・すべて CC0・Open Music Academy・`public/bgm/`＋`bgmSettings.bundledBgmId`＝schema 1.4・権利台帳 §8.1・About にクレジット）。装飾アセットは当面なし（残: BGM 追加は段階的に）。
 - [~] **AVC/H.264 ライセンス**：主経路 MF（OS提供）では **Cisco クレジット不要**（OpenH264 を主経路にしないため＝[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。OpenH264 必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」は**フォールバック採用時のみ**（実装枠は #115 で用意済・既定非表示）。残: **完成 H.264 の MPEG-LA 許諾要否**（顧客動画・規格軸＝方式に依らず／無収益で低リスク・社内確認）。
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
-- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／同梱フォント Gen Interface JP・怪盗予告ゴシック(OFL 1.1)）。**フォントの OFL 本文は `public/fonts/` に同梱済**。**標準BGM（CC0・Open Music Academy・3曲）も表示済**。残: FFmpeg/VOICEVOX 等のライセンス本文の配布物同梱、装飾を採用時に追記。
+- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／同梱フォント Gen Interface JP・怪盗予告ゴシック(OFL 1.1)）。**フォントの OFL 本文は `public/fonts/` に同梱済**。**標準BGM（CC0・Open Music Academy・3曲）も表示済**。→ ⚠️ **ライセンス本文の同梱は済み**（2026-09-24・下の「次アクション」参照）。残: 装飾を採用時に追記。
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGは属性スタイル・React は CSSOM・テキストは `escapeXml` で実体参照化）＝#144）。**`'unsafe-eval'` は廃止済**（[#156](https://github.com/fujii-yuki-star/star-recruit-studio/issues/156)）：ajv のスキーマ検証を `scripts/compile-validators.mjs` で**事前コンパイル**（standalone・実行時 `new Function` なし＝dev/build/test の pre フックで生成）にしたため、`script-src 'self'`（eval 不可）のまま起動・全画面表示できる。#119 で白画面回避のため一時的に 'unsafe-eval' を許可していたのを撤廃＝最厳格に復帰。残: packaged で eval 無し起動の最終確認。
-- [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。残: FFmpeg/AI モデルのバージョン記録。
+- [x] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。→ ⚠️ **バージョン記録は3つとも済み**（2026-09-24・下の「次アクション」参照）。
 - [x] 書き出し時のクレジット＝**#153 で常時焼き込み**（renderer 共有＝`layoutToSvg` の `credit`／プレビューにも表示／文言は単一 `domain/voice/narratorCredit.ts`）。→ **[`adr/0025`](adr/0025-credit-display-modes.md)（α-6・#359）で表示方式を選べる**（常時/最初/最後/両方/非表示・既定=最初と最後）＝**実装済**。⚠️ ADR-0025 が書いていた「表示区間つき overlay 化（テロップ機構再利用）」は**採れなかった**＝その機構は #635 で外してある。場面形式は**場面ごとの判定**（`sceneCreditVisibility`＝静止の場面は1枚の絵なので途中で消せない・ずれる向きは「多め」に固定）、タイムライン形式は**毎フレームの判定**（`creditTextAt`）。**判定はプレビューと書き出しで共有**（ADR-0001）。掛け合い話者の集約＋非表示時のコピー導線も実装済。About クレジットは必須維持。
 - [~] エンドユーザーへの規約遵守の義務付け（VOICEVOX キャラ規約・クレジット）＝ **About 画面に明示**（公開・配布時に各提供元の規約／クレジットに従う旨・#149/#122）。残: **拘束力ある利用規約（初回同意フロー等）の仕組みは製品/法務判断**。
 
@@ -211,17 +213,23 @@
 
 ### 次アクション（リリースに向けた切り分け・2026-06-23 棚卸し／**2026-09-24 再棚卸し＝#1230**）
 
-> ⚠️ **いま本当に残っているのは、次の4つだけ**（2026-09-24 に全項目を実物と突き合わせた）。
+> ⚠️ **いま残っているのは、次の6つ**（2026-09-24 に全項目を実物と突き合わせた）。
 >
-> | 残っているもの | 誰が |
-> |---|---|
-> | 完成 H.264 の **MPEG-LA 許諾要否**（規格軸・無収益で低リスク） | 社内確認 |
-> | **拘束力ある利用規約（EULA）**＝初回同意フロー等 | 製品/法務 |
-> | VOICEVOX **同梱ビルドの配布時の最終確認**（CPU 版 0.25.2 で確定済） | 法務 |
-> | **Windows N/KN の実機確認**（検知と導線は #120 で実装済） | 実機 |
+> | 残っているもの | 誰が | 根拠 |
+> |---|---|---|
+> | 完成 H.264 の **MPEG-LA 許諾要否**（規格軸・無収益で低リスク） | 社内確認 | §9 |
+> | **拘束力ある利用規約（EULA）**＝初回同意フロー等 | 製品/法務 | §9 |
+> | VOICEVOX **ENGINE 同梱の配布時の最終確認**（CPU 版 0.25.2 で確定済） | 法務 | [`adr/0005`](adr/0005-voicevox-bundling.md) |
+> | ⚠️ **キャラ規約の商用配布前の最終確認**と、**キャラを増やすときの個別確認** | 法務 | [`adr/0003`](adr/0003-narration-voice.md) 未解決の論点・§5 |
+> | **Windows N/KN の実機確認**（検知と導線は #120 で実装済） | 実機 | §9 |
+> | **packaged で eval 無し起動の最終確認**（CSP から `'unsafe-eval'` は撤廃済） | 実機 | §9 |
 >
+> ⚠️ **キャラ規約（ADR-0003）と ENGINE の同梱（ADR-0005）は別件**＝前者は
+> **権利者（東北ずん子・ずんだもんプロジェクト）の規約**、後者は **VOICEVOX ソフトの再配布**の話。
+> 片方が済んでももう片方は残る（この2つを1行にまとめると、法務の漏れになる）。
 > ⚠️ **鍵の管理方針・社内 AI 利用ルール**（§7）は運用の話なので上の表には入れていない（`01 §19`）。
-> それ以外の「残:」は、下のとおり**すべて決着済み**（消さずに結末を書いてある）。
+> それ以外の「残:」は、**決着済み**か、**段階的に足していくもの**（フォント追加・BGM 追加・装飾）＝
+> ⚠️ **リリースの関門ではない**。決着したものは消さずに結末を書いてある。
 
 > 主要な技術・コアは実装＋packaged 実機検証まで完了（取込→実AI(Gemini)→たたき台→編集→プレビュー→**実音声 VOICEVOX 自動起動**→MP4／縦型9:16／大容量素材メモリ／本番CSP）。残りは「配布パッケージング」と「事業・法務」が中心。
 
@@ -233,9 +241,12 @@
 - ~~書き出し時 クレジット焼き込み＋設定の永続化（#153）~~ → **#153 実装済**（常時焼き込み・OFF 廃止のためトグル永続化は不要に）。
 - ~~配布物への **ライセンス本文同梱**~~ → ⚠️ **同梱済み**（2026-09-24 棚卸しで実ファイルを確認）：
   `src-tauri/resources/ffmpeg/LICENSE.txt`（FFmpeg LGPL）／
-  `src-tauri/resources/voicevox_engine/licenses.json` ＋ 同 `resources/engine_manifest_assets/` の利用規約（VOICEVOX）／
+  `src-tauri/resources/voicevox_engine/` の `licenses.json` と `resources/engine_manifest_assets/` にある利用規約（VOICEVOX）／
   `public/fonts/OFL-*.txt`（同梱フォント2件）／`public/bgm/CREDITS.txt`（BGM）。
   入手先 URL の表示は `AboutScreen` で実装済。⚠️ **フォントは Noto ではなく gen-interface-jp 系**（#161）。
+  ⚠️ **FFmpeg と VOICEVOX の同梱物は git 追跡外**（`src-tauri/resources/*/.gitignore`）＝
+  `src-tauri/resources/README.md` の手順で配置したときだけ手元にある。**配布物には必ず入る**
+  （`tauri.conf.json` の `bundle.resources` がディレクトリごと載せる）。クリーンな取得直後は見えない。
 - ~~Windows N/KN の h264_mf 不在の事前検知＋導線（#120）~~ → **#120 実装済**：公開前チェック（PrecheckScreen）で書き出し能力を事前検知し「次の行動」を提示。`detect_h264_capability`（Rust）→ `exportCapability`（標準方式／予備方式／不可／ツール不在）。同梱 libopenh264 へフォールバック＝N/KN でも予備方式で書き出し可（不可時のみ事前ブロック）。残: N/KN 実機確認。
 
 **事業・法務の判断/作業が必要（コードでは閉じない）**
