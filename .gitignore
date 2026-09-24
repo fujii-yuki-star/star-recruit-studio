@@ -39,4 +39,6 @@ src/domain/validation/generated/validators.js
 
 # 落ちた回の出力を残すための写し（#1007・CI が作る）
 vitest-report.json
+
+# チュートリアル撮影の出力（#1226・道具が作る）
 tutorial-out/

@@ -70,3 +70,21 @@ export async function evaluate(cdp, expression) {
   }
   return r.result.value;
 }
+
+/**
+ * **画面の言葉で要素を探す**式（完全一致 → 部分一致）。
+ *
+ * ⚠️ **写して増やさない**（PR #1234 レビュー 🟡）＝`uiProbe`（押す）と `tutorialRecord`（位置を採る）が
+ * **同じ探し方**を要る。別々に持つと、`[role=tab]` を足したときに**片方だけ黙って古くなる**
+ *（このファイル自身がその再発を避けると書いている型）。
+ * ⚠️ **見つけたら画面の真ん中へ寄せる**＝スクロールの外にあると、押せても**録画に写らない**。
+ */
+export const FIND_BY_TEXT = (text) => `(() => {
+  const want = ${JSON.stringify(text)};
+  const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];
+  const hit = all.find((el) => (el.textContent || "").trim() === want)
+    || all.find((el) => (el.textContent || "").includes(want));
+  if (!hit) return null;
+  hit.scrollIntoView({ block: "center" });
+  return hit;
+})()`;

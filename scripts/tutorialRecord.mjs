@@ -26,7 +26,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { FIND_BY_TEXT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { checkPlan, parseOutDir } from "./lib/plan.mjs";
 import { distinctFrames, sampleFrames } from "./lib/frames.mjs";
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
@@ -34,6 +35,9 @@ const FFMPEG = "src-tauri/resources/ffmpeg/bin/ffmpeg.exe";
 const PORT = 9222;
 /** 録画のコマ数。⚠️ 上げるほど重く、下げるとカーソルの動きが飛ぶ。 */
 const FPS = 15;
+/** 段ごとの検収で、押した前後どれだけを見るか（秒）と、そのコマ数。 */
+const STEP_WINDOW_SEC = 0.5;
+const STEP_SAMPLE_FPS = 8;
 
 /**
  * 窓の位置と大きさ（`GetWindowRect`）。
@@ -55,23 +59,36 @@ $r = New-Object R
   const out = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8" });
   if (out.status !== 0) throw new Error("アプリの窓が見つかりません（起動していない？）");
   const [x, y, w, h] = out.stdout.trim().split(/\s+/).map(Number);
+  // ⚠️ **読めたかを見る**（PR #1234 レビュー 🟡）＝崩れた出力をそのまま通すと
+  //   `-video_size NaNxNaN` で ffmpeg が即死し、**録画が無いまま先へ進む**。
+  if (![x, y, w, h].every(Number.isFinite)) throw new Error(`窓の位置を読めません: ${JSON.stringify(out.stdout)}`);
+  if (w <= 0 || h <= 0) throw new Error(`窓の大きさがおかしい: ${w}x${h}`);
   return { x, y, w: w - (w % 2), h: h - (h % 2) };
 }
 
-/** 押せる要素の**位置**（仮想カーソルの素）と、押す操作。 */
+/**
+ * 押せる要素の**位置**（仮想カーソルの素）。
+ *
+ * ⚠️ **探し方は共有**（`FIND_BY_TEXT`）＝ここは「探して**位置を採る**」だけを足す。
+ */
 const LOCATE = (text) => `(() => {
-  const want = ${JSON.stringify(text)};
-  const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];
-  const hit = all.find((el) => (el.textContent || "").trim() === want)
-    || all.find((el) => (el.textContent || "").includes(want));
+  const hit = ${FIND_BY_TEXT(text)};
   if (!hit) return null;
-  hit.scrollIntoView({ block: "center" });
   const r = hit.getBoundingClientRect();
   return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), label: (hit.textContent || "").trim() };
 })()`;
 
-/** いま画面に出ている見出し（撮れたことの目印として記録に残す）。 */
-const HEADING = `document.querySelector("h1,h2")?.textContent?.trim() ?? ""`;
+/**
+ * いま画面に出ている見出し（撮れたことの目印として記録に残す）。
+ *
+ * ⚠️ **本文の中だけを見る**（PR #1234 レビュー ℹ️）＝`document.querySelector("h1,h2")` は
+ * **DOM 順の先頭**を採るので、ページ題（`PageHead` の `h1`）がある画面では**区画の見出しではなくページ題**が返る。
+ * `expectHeading` を書いた段は落ちて気づけるが、**書かない段は静かに別物が記録される**。
+ */
+const HEADING = `(() => {
+  const root = document.querySelector("main") ?? document;
+  return root.querySelector("h1,h2")?.textContent?.trim() ?? "";
+})()`;
 
 /**
  * 画面の中身が、**録画のどこに写っているか**（カーソルを描くために要る）。
@@ -91,14 +108,16 @@ const VIEWPORT = `JSON.stringify({
 
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
-  const outDir = resolve(rest[rest.indexOf("--out") + 1] ?? "tutorial-out");
   if (!scriptPath) {
     console.error("使い方: node scripts/tutorialRecord.mjs <台本.json> --out <出力フォルダ>");
     process.exit(2);
   }
+  const outDir = resolve(parseOutDir(rest));
+  // ⚠️ **当たりは両方に置く**（同レビュー 🟡）＝アプリだけ見てあり、**FFmpeg は非対称**だった。
   if (!existsSync(APP)) throw new Error(`アプリがありません（先に build を）: ${APP}`);
+  if (!existsSync(FFMPEG)) throw new Error(`FFmpeg がありません: ${FFMPEG}`);
   mkdirSync(outDir, { recursive: true });
-  const plan = JSON.parse(readFileSync(scriptPath, "utf8"));
+  const plan = checkPlan(JSON.parse(readFileSync(scriptPath, "utf8")));
   const video = join(outDir, `${plan.name ?? "tutorial"}.mp4`);
   const logPath = join(outDir, `${plan.name ?? "tutorial"}.steps.json`);
 
@@ -134,8 +153,21 @@ async function main() {
     if (view.offsetX < 0 || view.offsetY < 0) {
       throw new Error(`中身が窓の外にあります（ずれ ${view.offsetX},${view.offsetY}）＝別の窓を測っていませんか`);
     }
+    // ⚠️ **拡大率が100%以外なら、その場で落とす**（PR #1234 レビュー 🟡）＝
+    //   `screenX` は **CSS px**、`GetWindowRect` と `gdigrab` は**物理 px**なので、
+    //   100% のときだけ単位が一致する。**掛ければよい、は推測**（どちらに掛けるかで結果が変わる）。
+    //   ここで断れば「ずれた教材」を作らずに済む（§2-5＝次の行動を出す）。
+    if (view.dpr !== 1) {
+      throw new Error(`画面の拡大率が ${Math.round(view.dpr * 100)}% です。100% にしてから撮ってください`);
+    }
+    // ⚠️ **副モニタ（負の座標）も断る**＝`gdigrab` の切り出しがずれる。
+    if (rect.x < 0 || rect.y < 0) {
+      throw new Error(`窓が主モニタの外にあります（${rect.x},${rect.y}）＝主モニタへ移してから撮ってください`);
+    }
 
     // ② 録画を始める（⚠️ **デスクトップから切り出す**・実カーソルは消す）
+    // ⚠️ **起動に失敗したら、その場で分かるようにする**（PR #1234 レビュー 🟡）＝
+    //   `error` を拾わないと未処理例外になり、**後片づけを通らずに落ちる**（口が開いたまま残る）。
     ff = spawn(FFMPEG, [
       "-hide_banner", "-loglevel", "error", "-y",
       "-f", "gdigrab", "-framerate", String(FPS), "-draw_mouse", "0",
@@ -143,6 +175,7 @@ async function main() {
       "-video_size", `${rect.w}x${rect.h}`, "-i", "desktop",
       "-c:v", "h264_mf", "-b:v", "8000k", "-pix_fmt", "yuv420p", video,
     ], { stdio: ["pipe", "ignore", "inherit"] });
+    ff.on("error", (e) => { throw new Error(`FFmpeg を起こせません: ${e.message}`); });
     const t0 = Date.now();
     await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
 
@@ -153,7 +186,6 @@ async function main() {
         await new Promise((r) => setTimeout(r, step.waitMs));
         continue;
       }
-      if (step.clickText == null) continue;
       const at = await evaluate(cdp, LOCATE(step.clickText));
       if (!at) throw new Error(`押せる要素がありません: ${step.clickText}`);
       const tSec = (Date.now() - t0) / 1000;
@@ -189,10 +221,26 @@ async function main() {
     // ⑤ ⚠️ **撮れたことを機械で確かめる**（ここを省くと嘘の教材ができる）
     const seen = sampleFrames(FFMPEG, video);
     const kinds = distinctFrames(seen);
+
+    // ⚠️ **段ごとに見る**（PR #1234 レビュー 🟡）＝録画ぜんたいで1回だけ数えると、
+    //   **どこか1回でも絵が変われば通る**＝段①だけ写って②③が凍った回も `✓` になる。
+    //   押した前後の窓を採り、**その段で絵が動いたか**を1段ずつ確かめる。
+    const 動かなかった = [];
+    for (const s of log) {
+      const from = Math.max(0, s.atSec - STEP_WINDOW_SEC);
+      const to = s.atSec + STEP_WINDOW_SEC;
+      const around = sampleFrames(FFMPEG, video, STEP_SAMPLE_FPS, from, to);
+      if (around.length < 2) { 動かなかった.push(`${s.atSec}s（コマが足りない）`); continue; }
+      if (distinctFrames(around) < 2) 動かなかった.push(`${s.atSec}s「${s.label}」`);
+    }
     writeFileSync(logPath, JSON.stringify({
       name: plan.name, video, totalSec, distinctFrames: kinds,
       // ⚠️ **カーソルを描く側（#1227）が使う**＝ここが無いと押した所と違う場所に印が出る。
       view, fps: FPS,
+      // ⚠️ **`atSec` は録り始めからの秒ではなく、`ffmpeg` を起こしてからの秒**（PR #1234 レビュー ℹ️）＝
+      // gdigrab の立ち上がり（数百 ms 規模）だけ**一律に早い**。#1227 のカーソルは**押す前に着く**向きにずれる。
+      // ⚠️ **補正していない**＝補正するなら、撮り始めに目印を出してその最初のコマで採り直す。
+      timeBaseNote: "atSec は ffmpeg 起動からの秒（録画の先頭より数百ms 早い・未補正）",
       steps: log,
     }, null, 2), "utf8");
 
@@ -206,7 +254,10 @@ async function main() {
     if (kinds < 2) {
       throw new Error("録画の絵が一度も変わっていません＝画面の更新を拾えていません（窓指定で撮っていませんか）");
     }
-    console.log("✓ 撮れました（絵が変わっていることは確かめました。中身は目で見てください）");
+    if (動かなかった.length > 0) {
+      throw new Error(`押したのに絵が動いていない段があります:\n  ${動かなかった.join("\n  ")}`);
+    }
+    console.log("✓ 撮れました（段ごとに絵が動いたことを確かめました。中身は目で見てください）");
   } finally {
     try { ff?.kill(); } catch { /* 既に終わっている */ }
     cdp?.close();

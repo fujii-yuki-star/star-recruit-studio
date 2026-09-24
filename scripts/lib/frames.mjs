@@ -43,6 +43,9 @@ export function sameFrame(a, b, tolerance = PIXEL_TOLERANCE, ratio = DIFF_RATIO)
  *
  * ⚠️ **連続で比べない**＝行ったり来たりする画面（開いて閉じる）で数が増えてしまう。
  * **今まで見た絵のどれとも違うとき**だけ数える。
+ * ⚠️ **並び順に依る**（PR #1234 レビュー ℹ️）＝`sameFrame` は推移律を満たさないので、
+ * 同じコマの集まりでも**並べ替えると数が変わりうる**。**目安であって指標ではない**
+ *（「2以上か」の判定に使うのはよいが、記録の数を後から再現できるとは思わないこと）。
  */
 export function distinctFrames(frames, tolerance = PIXEL_TOLERANCE, ratio = DIFF_RATIO) {
   const seen = [];
@@ -57,12 +60,29 @@ export function distinctFrames(frames, tolerance = PIXEL_TOLERANCE, ratio = DIFF
  *
  * ⚠️ **生の画素で受け取る**＝PNG を解く道具を足さずに済む（Node に無い）。
  */
-export function sampleFrames(ffmpeg, file, fps = 2) {
+export function sampleFrames(ffmpeg, file, fps = 2, from = null, to = null) {
+  const seek = from == null ? [] : ["-ss", String(from)];
+  const span = to == null ? [] : ["-to", String(to)];
   const r = spawnSync(ffmpeg, [
-    "-hide_banner", "-loglevel", "error", "-i", file,
-    "-vf", `fps=${fps},scale=${SAMPLE_W}:${SAMPLE_H}`,
+    "-hide_banner", "-loglevel", "error", "-i", file, ...seek, ...span,
+    // ⚠️ **箱平均で縮める**（PR #1234 レビュー ℹ️）＝既定の bicubic は**極端な縮小で元画素の大半を見ない**
+    //   ので、同じ絵でも値が揺れ、小さな変化はかえって消える。`area` なら面積に比例して効く。
+    "-vf", `fps=${fps},scale=${SAMPLE_W}:${SAMPLE_H}:flags=area`,
     "-pix_fmt", "gray", "-f", "rawvideo", "-",
   ], { maxBuffer: 1 << 28 });
+  return framesFromResult(r, file);
+}
+
+/**
+ * `spawnSync` の結果を、コマの並びにする。
+ *
+ * ⚠️ **取り出しの失敗を「コマ0枚」にしない**（PR #1234 レビュー 🟡）＝原因が消え、
+ * **録画そのものの失敗**として報告されてしまう（直す先を間違える）。
+ * ⚠️ **切り出してある理由**＝ここが判定なので、**ffmpeg を起こさずに検査できる**ようにする。
+ */
+export function framesFromResult(r, file = "(録画)") {
+  if (r.error) throw new Error(`コマを取り出せません（${file}）: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`コマを取り出せません（${file}）:\n${r.stderr ?? ""}`);
   const buf = r.stdout ?? Buffer.alloc(0);
   const size = SAMPLE_W * SAMPLE_H;
   const out = [];
