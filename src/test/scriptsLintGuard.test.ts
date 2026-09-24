@@ -11,7 +11,9 @@
 // ⚠️ **見るのは「当たっているか」だけ**＝どの規則をどう設定するかは `eslint.config.js` の仕事。
 import { describe, expect, it } from 'vitest';
 import { ESLint } from 'eslint';
+import ts from 'typescript';
 import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve, sep } from 'node:path';
 
 /** 解決された設定から、その規則の重大度を取り出す（`0/1/2` と `'off'/'warn'/'error'` の両方が来る）。 */
 export function severityOf(config: { rules?: Record<string, unknown> }, rule: string): string {
@@ -50,40 +52,78 @@ describe('scripts/** に lint が当たっている（#1235）', () => {
     expect(severityOf(config, 'no-undef'), '素の規則が復活している＝理由のない赤が出る').toBe('off');
     expect(severityOf(config, '@typescript-eslint/no-unused-vars'), 'TS 側の規則が当たっていない').toBe('error');
   });
+
+  // ⚠️ **`off` を見るだけでは、ブロックを消しても通る**（PR #1238 2回目 🟡）＝`off` は**既定値**。
+  //   `.ts` 向けブロックの仕事は「node のグローバルを足す」ことなので、**それを見る**。
+  it('道具の .ts に、node のグローバルが足されている', async () => {
+    const tool = await eslint.calculateConfigForFile('scripts/adr0001-spike.ts');
+    expect(tool.languageOptions?.globals?.process, 'node のグローバルが足されていない').toBeDefined();
+    // アプリ側には足さない（browser のまま）＝ブロックの `files` が広がっていないことの裏。
+    const app = await eslint.calculateConfigForFile('src/domain/enums.ts');
+    expect(app.languageOptions?.globals?.process, 'アプリ側まで node 扱いになっている').toBeUndefined();
+  });
+
+  // ⚠️ **見ている先が実在するか**（同 ℹ️）＝`calculateConfigForFile` は**無いパスでも設定を返す**ので、
+  //   ファイルが改名されても門番は緑のまま「当たっている」と言い続ける。
+  it('見ているファイルが実在する', () => {
+    for (const f of ['scripts/lib/frames.mjs', 'scripts/tutorialRecord.mjs', 'scripts/lib/cursor.test.mjs', 'scripts/adr0001-spike.ts']) {
+      expect(existsSync(f), `${f} が無い＝門番が見ている先が消えている`).toBe(true);
+    }
+  });
 });
 
 describe('scripts/** に型検査が当たっている（#1235）', () => {
-  const raw = existsSync('tsconfig.scripts.json') ? readFileSync('tsconfig.scripts.json', 'utf8') : '';
+  const CONFIG = 'tsconfig.scripts.json';
+
+  /**
+   * その tsconfig が**実際に見るファイルの一覧**。
+   *
+   * ⚠️ **JSON の字面を見ない**（PR #1238 2回目 🟡）＝`include` に glob が載っていることを見るだけだと、
+   * あとから `exclude` や `files` が足されて**対象が0件**になっても緑のまま。
+   * ⚠️ **`JSON.parse` も使わない**＝この repo は tsconfig に**コメントを書く流儀**（`tsconfig.json` を参照）で、
+   * 同じ書き方をした瞬間に**理由の分からない赤**になる。TypeScript 自身に読ませる。
+   */
+  const resolved = (() => {
+    const read = ts.readConfigFile(CONFIG, ts.sys.readFile);
+    expect(read.error, `${CONFIG} を読めない`).toBeUndefined();
+    return ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(resolve(CONFIG)));
+  })();
 
   it('道具向けの tsconfig がある', () => {
-    expect(raw, 'tsconfig.scripts.json が無い').not.toBe('');
+    expect(existsSync(CONFIG), `${CONFIG} が無い`).toBe(true);
+    expect(resolved.errors, '設定の読み取りで落ちている').toEqual([]);
   });
 
   // ⚠️ **`checkJs` が無いと、`.mjs` は置いてあるだけで一切見られない**（拡張子だけ拾って中身は素通り）。
   it('`allowJs` と `checkJs` が入っている', () => {
-    const config = JSON.parse(raw.replace(/^\uFEFF/, ''));
-    expect(config.compilerOptions.allowJs).toBe(true);
-    expect(config.compilerOptions.checkJs, 'checkJs が無い＝置いてあるだけで見ていない').toBe(true);
+    expect(resolved.options.allowJs).toBe(true);
+    expect(resolved.options.checkJs, 'checkJs が無い＝置いてあるだけで見ていない').toBe(true);
   });
 
-  it('`scripts/**` の .mjs と .ts の両方を見ている', () => {
-    const config = JSON.parse(raw.replace(/^\uFEFF/, ''));
-    expect(config.include).toContain('scripts/**/*.mjs');
-    expect(config.include, '.ts の道具がどの tsconfig にも入っていない').toContain('scripts/**/*.ts');
+  // ⚠️ **「実際に見るファイル」で数える**＝設定の書き方が変わっても、対象が消えれば赤くなる。
+  it('`scripts/**` の .mjs と .ts の両方を、実際に見ている', () => {
+    const inScripts = resolved.fileNames.filter((f) => f.includes('/scripts/') || f.includes(`${sep}scripts${sep}`));
+    const mjs = inScripts.filter((f) => f.endsWith('.mjs'));
+    const tsFiles = inScripts.filter((f) => f.endsWith('.ts'));
+    expect(mjs.length, '道具の .mjs を1つも見ていない').toBeGreaterThan(5);
+    expect(tsFiles.length, '.ts の道具がどの tsconfig にも入っていない').toBeGreaterThan(0);
   });
 
   // ⚠️ **呼ばれていなければ意味が無い**＝設定だけ置いて `typecheck` から外れている状態を防ぐ。
   it('`npm run typecheck` から呼ばれている', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-    expect(pkg.scripts.typecheck, 'tsconfig.scripts.json が typecheck から呼ばれていない')
-      .toContain('tsconfig.scripts.json');
+    expect(pkg.scripts.typecheck, `${CONFIG} が typecheck から呼ばれていない`).toContain(CONFIG);
   });
 
   // ⚠️ **推移的な依存に乗らない**＝`@types/node` は `vite`/`vitest` の peer 経由で入っていた。
-  //   それらが外れた回に `error TS2688` で **`typecheck` が丸ごと落ちる**。
-  it('`@types/node` を自分で宣言している', () => {
+  //   欠けた回に `error TS2688` で **`typecheck` が丸ごと落ちる**。
+  // ⚠️ **動かす版に合わせる**（PR #1238 2回目 🟡）＝CI は Node 22。型だけ新しいと、
+  //   **その版に無い API を書いても緑**になり、実行時に落ちる（緑の意味が薄まる）。
+  it('`@types/node` を、動かす版（Node 22）に合わせて宣言している', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-    expect(pkg.devDependencies['@types/node'], '推移的な依存に乗っている').toBeTruthy();
+    const want = pkg.devDependencies['@types/node'];
+    expect(want, '推移的な依存に乗っている').toBeTruthy();
+    expect(want, `CI の Node と食い違っている: ${want}`).toMatch(/^\^?22\./);
   });
 });
 
