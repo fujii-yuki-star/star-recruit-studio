@@ -56,6 +56,38 @@ export function firstStatusWord(line: string): string | null {
 }
 
 /**
+ * **同じファイルの中で状態が2つ**になっている ADR（状態行は Accepted なのに、見出しが「決定（Proposed）」）。
+ *
+ * ⚠️ **読む人は本文のほうを信じる**（#1232）＝一覧と本文の食い違い（下の `adrStatusMismatch`）は
+ * 見ていたが、**同じファイルの中の食い違い**は誰も見ていなかった。実測で**4本**あった
+ *（0018 / 0019 / 0027 / 0045）。WARN **一度やった以上、次も起きる**＝ADR-0046 を Accepted にしたときも
+ * 見出しを直し忘れている（PR #1224 で修正）。
+ *
+ * ⚠️ **括弧の中は読まない**＝状態行は `**一部 Superseded by …**／もとは Accepted（…）` のように
+ * 経緯を続けて書く流儀なので、**先頭の語**だけでは 0018 のような「もとは Accepted」を拾えない。
+ * かといって行ぜんたいで `Accepted` を探すと、**0023 が誤検出**する（「ADR-0032 の **Accepted** 化に
+ * 伴い」＝**別の ADR の話**が括弧の中にある。実際にこの門番が最初そう出した）。
+ * → **括弧書き（…）を落としてから**、この ADR 自身の状態として `Accepted` が出るかを見る。
+ * ⚠️ **Accepted が出てこない ADR**（0023＝もとから Proposed のまま Superseded、0024＝Proposed）は
+ * 「決定（Proposed）」のままで**正しい**ので拾わない＝**誤検出しない**ことを優先する。
+ *
+ * @param bodies `[ファイル名, 本文]` の一覧（`0000-template.md` は呼ぶ側で外す）
+ */
+export function adrHeadingDrift(bodies: readonly (readonly [string, string])[]): string[] {
+  const out: string[] = [];
+  for (const [name, body] of bodies) {
+    const lines = body.split('\n');
+    const statusLine = lines.find((l) => l.startsWith('- **状態**'));
+    // 括弧の中（経緯・別の ADR の話）を落としてから見る。
+    const own = statusLine?.replace(/（[^（）]*）/g, '') ?? '';
+    if (!own.includes('Accepted')) continue;
+    const heading = lines.find((l) => /^##\s*決定/.test(l));
+    if (heading && /Proposed|提案/.test(heading)) out.push(`${name}: ${heading.trim()}`);
+  }
+  return out;
+}
+
+/**
  * **ADR 本文の状態**と **`adr/README.md` の状態欄**が食い違っている番号（`CLAUDE.md §11`）。
  *
  * ⚠️ **正典は「2点を同時に直す」と決めているのに、機械は見ていなかった**（レビュー由来 ℹ️・2026-09-10）
@@ -265,6 +297,20 @@ describe('正典の索引（二重管理へ戻らない）', () => {
     ).toEqual([]);
   });
 
+  // ⚠️ **同じファイルの中で状態を2つにしない**（#1232）＝一覧との食い違いは上で見ているが、
+  // **本文の見出し**が「決定（Proposed）」のまま残ると、読む人は**本文のほうを信じる**。
+  it('Accepted の ADR の見出しが「決定（Proposed）」のままでない', () => {
+    const bodies = adrFiles
+      .filter((f) => /^\d{4}-.*\.md$/.test(f) && f !== '0000-template.md')
+      .map((f) => [f, readFileSync(`${ADR_DIR}/${f}`, 'utf8')] as const);
+    // ⚠️ **走査が空でないことを見る**＝対象を1本も拾えなくなっても「食い違いゼロ」で緑になる。
+    expect(bodies.length, 'ADR を1本も見ていない').toBeGreaterThan(20);
+    expect(
+      adrHeadingDrift(bodies),
+      'Accepted なら見出しは `## 決定` です（`adr-new` スキル＝Proposed のときだけ括弧書き）',
+    ).toEqual([]);
+  });
+
   // ⚠️ **3点目を作らない**（`CLAUDE.md §11`）＝実装の説明に状態を書き写すと、状態を動かした
   // 瞬間に嘘になる（実際に `appSettings.ts` がそうなっていた＝レビュー由来 🔴）。
   it('実装が ADR の状態を書き写していない', () => {
@@ -300,6 +346,42 @@ describe('正典の索引（二重管理へ戻らない）', () => {
 
 // ⚠️ **門番自身の検査**＝いまの資料が正しい間は、規則を壊しても上の検査は緑のまま。
 describe('門番自身の検査（わざと壊した入力を通す）', () => {
+  // ⚠️ **見出しのドリフト**（#1232）＝「拾う」と「拾わない」の両方を固定する。
+  it('Accepted なのに見出しが Proposed なら見つける', () => {
+    const drift = '- **状態**: Accepted（2026-01-01）\n\n## 決定（Proposed）\n';
+    expect(adrHeadingDrift([['0001-a.md', drift]]), '同じファイルの中の食い違いを見ていない').toHaveLength(1);
+    // 直したあとは通す（正しい形を落とさない）。
+    expect(adrHeadingDrift([['0001-a.md', '- **状態**: Accepted\n\n## 決定\n']])).toEqual([]);
+  });
+
+  // ⚠️ **日本語の括弧書きも拾う**＝実際に 0045 がこの形だった。
+  it('「決定（提案）」も見つける', () => {
+    expect(adrHeadingDrift([['0045-a.md', '- **状態**: Accepted\n\n## 決定（提案）\n']])).toHaveLength(1);
+  });
+
+  // ⚠️ **経緯つきの状態行でも拾う**＝0018 は「**一部 Superseded**／もとは Accepted」で、
+  //   先頭の語だけを見る書き方だと**拾えなかった**（実際に取りこぼしていた）。
+  it('「もとは Accepted」の形でも見つける', () => {
+    const body = '- **状態**: **一部 Superseded by 0032**／もとは Accepted（2026-07-01）\n\n## 決定（Proposed）\n';
+    expect(adrHeadingDrift([['0018-a.md', body]]), '経緯つきの状態行を取りこぼしている').toHaveLength(1);
+  });
+
+  // ⚠️ **括弧の中の「Accepted」で誤検出しない**（実際にこの門番が最初そう出した）＝
+  //   0023 の状態行には「ADR-0032 の **Accepted** 化に伴い」という**別の ADR の話**が入っている。
+  //   ⚠️ 検体を簡略化していたせいで、最初の自己検査はこの形を**通していた**（実物の形で叩く）。
+  it('括弧の中の「Accepted」では拾わない（別の ADR の話）', () => {
+    const real = readFileSync(`${ADR_DIR}/0023-integrated-timeline-editing.md`, 'utf8');
+    expect(real, '検体が実物でなくなっている').toContain('Accepted 化に伴い');
+    expect(adrHeadingDrift([['0023-integrated-timeline-editing.md', real]]), '括弧の中を読んでいる').toEqual([]);
+  });
+
+  // ⚠️ **誤検出しない**＝Accepted が一度も出てこない ADR は、括弧書きのままで正しい。
+  it('Proposed のままの ADR は拾わない（誤検出しない）', () => {
+    expect(adrHeadingDrift([['0024-a.md', '- **状態**: Proposed（2026-07-02）\n\n## 決定（Proposed）\n']])).toEqual([]);
+    const sup = '- **状態**: **一部 Superseded by 0032**／もとは Proposed（2026-07-02）\n\n## 決定（Proposed）\n';
+    expect(adrHeadingDrift([['0023-a.md', sup]])).toEqual([]);
+  });
+
   it('状態が片方だけ動いたら見つける（2点同時の規則）', () => {
     const readme = '| 番号 | 題 | 状態 |\n|---|---|---|\n| [0001](0001-a.md) | あ | **Accepted**（…） |\n';
     // 揃っている＝通す。
