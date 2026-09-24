@@ -73,6 +73,22 @@ const LOCATE = (text) => `(() => {
 /** いま画面に出ている見出し（撮れたことの目印として記録に残す）。 */
 const HEADING = `document.querySelector("h1,h2")?.textContent?.trim() ?? ""`;
 
+/**
+ * 画面の中身が、**録画のどこに写っているか**（カーソルを描くために要る）。
+ *
+ * ⚠️ **押した座標は「画面の中」の座標**＝録画は**窓の枠ごと**切り出しているので、
+ * **題字の帯と枠のぶんずれる**。ここを持たないと、#1227 が**押した所とは違う場所に印を描く**
+ *（＝**黙って別の場所を教える**＝教材として致命的）。
+ * ⚠️ **推測しない**＝`screenX`（画面の中身の左上が、デスクトップのどこか）を実測し、
+ * 窓の原点との差を採る。実測例＝窓 (182,182) / 中身 (190,213) → ずれ (8,31)。
+ * ⚠️ **画面の拡大率も掛ける**＝125% 等の設定では CSS の1px が録画の1画素ではない。
+ */
+const VIEWPORT = `JSON.stringify({
+  screenX: window.screenX, screenY: window.screenY,
+  width: window.innerWidth, height: window.innerHeight,
+  dpr: window.devicePixelRatio,
+})`;
+
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
   const outDir = resolve(rest[rest.indexOf("--out") + 1] ?? "tutorial-out");
@@ -105,7 +121,19 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1500)); // 初回描画を待つ
 
     const rect = windowRect();
-    console.log(`窓: ${rect.w}x${rect.h} @ (${rect.x},${rect.y})`);
+    const vp = JSON.parse(await evaluate(cdp, VIEWPORT));
+    // ⚠️ **ずれは実測から採る**（推測しない）＝窓の原点と、画面の中身の原点の差。
+    const view = {
+      offsetX: vp.screenX - rect.x,
+      offsetY: vp.screenY - rect.y,
+      dpr: vp.dpr,
+      width: vp.width,
+      height: vp.height,
+    };
+    console.log(`窓: ${rect.w}x${rect.h} @ (${rect.x},${rect.y}) / 中身のずれ: (${view.offsetX},${view.offsetY}) 拡大率 ${view.dpr}`);
+    if (view.offsetX < 0 || view.offsetY < 0) {
+      throw new Error(`中身が窓の外にあります（ずれ ${view.offsetX},${view.offsetY}）＝別の窓を測っていませんか`);
+    }
 
     // ② 録画を始める（⚠️ **デスクトップから切り出す**・実カーソルは消す）
     ff = spawn(FFMPEG, [
@@ -161,7 +189,12 @@ async function main() {
     // ⑤ ⚠️ **撮れたことを機械で確かめる**（ここを省くと嘘の教材ができる）
     const seen = sampleFrames(FFMPEG, video);
     const kinds = distinctFrames(seen);
-    writeFileSync(logPath, JSON.stringify({ name: plan.name, video, totalSec, distinctFrames: kinds, steps: log }, null, 2), "utf8");
+    writeFileSync(logPath, JSON.stringify({
+      name: plan.name, video, totalSec, distinctFrames: kinds,
+      // ⚠️ **カーソルを描く側（#1227）が使う**＝ここが無いと押した所と違う場所に印が出る。
+      view, fps: FPS,
+      steps: log,
+    }, null, 2), "utf8");
 
     console.log(`\n録画: ${video}（${totalSec.toFixed(1)}秒）`);
     console.log(`記録: ${logPath}`);
