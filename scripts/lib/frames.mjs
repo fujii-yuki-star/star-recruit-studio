@@ -69,3 +69,23 @@ export function sampleFrames(ffmpeg, file, fps = 2) {
   for (let i = 0; i + size <= buf.length; i += size) out.push(buf.subarray(i, i + size));
   return out;
 }
+
+/**
+ * 2つのコマで**変わった所の中心**（縮めた座標系）。変わっていなければ `null`。
+ *
+ * ⚠️ **焼いたものが、押した所に出ているかを確かめるために使う**（#1227）＝
+ * 「描いたつもり」で**別の場所に出ている**のを捕まえる唯一の手。
+ */
+export function changedCenter(before, after, width, tolerance = 24) {
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let i = 0; i < before.length; i += 1) {
+    if (Math.abs(before[i] - after[i]) > tolerance) {
+      sx += i % width;
+      sy += Math.floor(i / width);
+      n += 1;
+    }
+  }
+  return n === 0 ? null : { x: sx / n, y: sy / n, count: n };
+}
