@@ -43,3 +43,22 @@ node scripts/mutate.mjs <spec.json>          # 実行
 ## 終わったら
 
 `npm run check:frontend`（Rust を触ったら `check:rust` と `check:rust:test` も＝**fmt/clippy を省かない**）。
+
+⚠️ **`scripts/**` も同じ網に入っています**（#1235・2026-09-24）＝道具の `.mjs` は以前
+**lint も型検査も掛かっておらず**、`const out = [];` を落としても `eslint` が通りました。
+いまは `eslint .` に規則が当たり、`npm run typecheck` が `tsconfig.scripts.json`（`checkJs`）も見ます。
+⚠️ **どこまで見てもらえるかは限られています**（すべて実測・PR #1238）。
+
+| 壊し方 | `eslint` | `tsc` |
+|---|---|---|
+| 未定義の変数を触る（`const out = [];` 落とし＝#1235 の実害） | ✅ | ✅ |
+| **使う側**の名前の打ち間違い（`markVerdit(...)`） | ✅ | ✅ |
+| **取り込む側**の名前の打ち間違い（`import { readFileSynk }`） | ❌ | ✅ |
+| Node の API に無い欄を渡す（`encodings`） | ❌ | ✅ |
+| **引数の数が足りない** | ❌ | ❌ |
+| **`undefined` かもしれない値を触る** | ❌ | ❌（`strict` を入れていない） |
+
+⚠️ **引数の数**は、**関数そのものに型を書いたとき**だけ見てもらえます
+（`@param` の塊、または `/** @type {(a: number) => void} */` を**関数に**付ける形）。
+**引数に付けるインラインの形**（`function f(/** @type {number} */ a)`）では**復活しません**。
+そこは**検査と変異チェックで留める**。
