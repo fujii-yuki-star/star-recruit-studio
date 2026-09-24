@@ -61,11 +61,20 @@ export function cursorPixels() {
  *
  * ⚠️ **ここを間違えると、押した所とは違う場所に印が出る**＝「黙って別の場所を教える」
  *（ADR-0026④）。録画は**窓の枠ごと**なので、題字の帯と枠のぶんずれる。
- * ⚠️ **拡大率を掛ける**＝125% 等の設定では CSS の1px が録画の1画素ではない。
+ *
+ * ⚠️ **拡大率は掛けない**（PR #1237 レビュー 🟡）＝以前は `x * dpr` と書いていたが、**式として誤り**だった。
+ * `view.offsetX` は `screenX - windowX`＝**CSS px と物理 px の引き算**なので、`dpr !== 1` では
+ * **`offsetX` 自体が壊れている**。その上に掛け算を足しても直らない。
+ * ⚠️ **だから 100% 以外は断る**（`tutorialRecord` と同じ）＝#1226 で決めた扱いに揃える。
+ * 「掛ければよい」は**誰も確かめていない推測**で、検査に固定すると**嘘が仕様になる**（§9-2）。
  */
 export function toVideoPoint(view, x, y) {
-  return { x: Math.round(view.offsetX + x * view.dpr), y: Math.round(view.offsetY + y * view.dpr) };
+  return { x: Math.round(view.offsetX + x), y: Math.round(view.offsetY + y) };
 }
+
+/** 拡大率が 100% でないときの断り（録る側と焼く側で**同じ文**にする）。 */
+export const SCALE_NOT_100_MESSAGE = (dpr) =>
+  `画面の拡大率が ${Math.round(dpr * 100)}% です。100% にしてから撮ってください`;
 
 /** 押した瞬間の印（輪）の外径。 */
 export const RIPPLE_SIZE = 56;
@@ -94,6 +103,50 @@ export function ripplePixels(size = RIPPLE_SIZE, thickness = 3) {
     }
   }
   return px;
+}
+
+/**
+ * 塗られた画素の**重心**（絵の左上からの位置）。
+ *
+ * ⚠️ **検査の期待値をここから作る**（PR #1237 レビュー 🟡）＝以前は「押した点」を期待値にしていたが、
+ * **輪が左右対称で重心が押した点そのもの**なので、**カーソルが1画素も描かれていなくても合格**していた。
+ * さらに座標の対応（`view` のずれ）を**丸ごと落としても合格**した＝この道具が防ぐと言っている当のものを
+ * 通していた。**焼く絵から重心を出して期待値にする**と、カーソル本体もずれも検査に入る。
+ */
+export function artCentroid(px, w, h) {
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (px[(y * w + x) * 4 + 3] > 0) { sx += x; sy += y; n += 1; }
+    }
+  }
+  return n === 0 ? null : { x: sx / n, y: sy / n, count: n };
+}
+
+/**
+ * 押した瞬間に**焼かれる絵ぜんたいの重心**（録画の中の位置）。
+ *
+ * ⚠️ **カーソルは先端が押した点**、**輪は中心が押した点**＝置き方が違うので、
+ * それぞれの原点から重心を足して、画素数で重みを付ける。
+ */
+export function expectedMarkCenter(at) {
+  const cur = artCentroid(cursorPixels(), CURSOR_W, CURSOR_H);
+  const rip = artCentroid(ripplePixels(), RIPPLE_SIZE, RIPPLE_SIZE);
+  const half = RIPPLE_SIZE / 2;
+  const total = cur.count + rip.count;
+  return {
+    x: (cur.count * (at.x + cur.x) + rip.count * (at.x - half + rip.x)) / total,
+    y: (cur.count * (at.y + cur.y) + rip.count * (at.y - half + rip.y)) / total,
+    count: total,
+  };
+}
+
+/** カーソルだけが出ているときの重心（輪が消えたあと＝**カーソル本体を検査するため**）。 */
+export function expectedCursorCenter(at) {
+  const cur = artCentroid(cursorPixels(), CURSOR_W, CURSOR_H);
+  return { x: at.x + cur.x, y: at.y + cur.y, count: cur.count };
 }
 
 /**
@@ -137,4 +190,28 @@ export function cursorAt(path, t) {
   }
   const last = path[path.length - 1];
   return { x: last.x, y: last.y };
+}
+
+/**
+ * その時刻の位置を表す**式**（`overlay` と検査で**同じ木**から出す）。
+ *
+ * ⚠️ **写して増やさない**（PR #1237 レビュー 🟡）＝以前は `tutorialCursor.mjs` が
+ * ffmpeg 用の式を**別に組み立てて**おり、`cursorAt` と**同じ意味を2つの言語で二重に書いた**形だった
+ *（端の扱いまで別々＝`Math.max(0.001, span)` と `span <= 0 ? 1 : …`）。しかも**焼いた後の検査が
+ * カーソル本体を見ていなかった**ので、この式は**どの網にも掛かっていなかった**。
+ * ⚠️ **1つの木から2つの書き方を出す**＝`ffmpeg` と `js` で**ずれようがない**。`js` 側は検査が叩く。
+ */
+export function positionExpr(path, axis, dialect = "ffmpeg") {
+  const lt = (a, b) => (dialect === "js" ? `(${a} < ${b})` : `lt(${a},${b})`);
+  const iff = (c, t, f) => (dialect === "js" ? `(${c} ? ${t} : ${f})` : `if(${c},${t},${f})`);
+  if (path.length === 0) return "0";
+  let expr = `${path[path.length - 1][axis]}`;
+  for (let i = path.length - 1; i >= 1; i -= 1) {
+    const a = path[i - 1];
+    const b = path[i];
+    const span = Math.max(0.001, b.atSec - a.atSec);
+    const lerp = `(${a[axis]}+(${b[axis]}-${a[axis]})*(t-${a.atSec})/${span})`;
+    expr = iff(lt("t", `${b.atSec}`), iff(lt("t", `${a.atSec}`), `${a[axis]}`, lerp), expr);
+  }
+  return expr;
 }

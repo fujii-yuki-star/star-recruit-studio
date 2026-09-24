@@ -28,13 +28,29 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { FIND_BY_TEXT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
 import { checkPlan, parseOutDir } from "./lib/plan.mjs";
-import { distinctFrames, sampleFrames } from "./lib/frames.mjs";
+import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
+import { SCALE_NOT_100_MESSAGE } from "./lib/cursor.mjs";
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
-const FFMPEG = "src-tauri/resources/ffmpeg/bin/ffmpeg.exe";
 const PORT = 9222;
 /** 録画のコマ数。⚠️ 上げるほど重く、下げるとカーソルの動きが飛ぶ。 */
 const FPS = 15;
+/**
+ * 撮り始めに出す**目印**の長さと、それを見に行く時刻（秒）。
+ *
+ * ⚠️ **長めに出す**＝`atSec` は ffmpeg を起こしてからの秒で、**録画の先頭は数百 ms 遅れる**
+ *（`timeBaseNote`）。短いと、その遅れのぶんで**目印の外**を見てしまう。
+ */
+const FLASH_SEC = 1.2;
+const FLASH_SAMPLE_AFTER = 0.4;
+/** 測った中身の位置が、計算した `view` からどれだけ離れてよいか（画素）。 */
+const VIEW_ORIGIN_SLACK = 2;
+/** 測った中身の大きさの許容（下は**縦スクロールバーのぶん**だけ小さく出る）。 */
+const VIEW_SIZE_SHRINK = 24;
+const VIEW_SIZE_GROW = 2;
+/** 目印が写っていると認めるのに要る、変わった画素の割合。 */
+const FLASH_MIN_RATIO = 0.6;
+
 /** 段ごとの検収で、押した前後どれだけを見るか（秒）と、そのコマ数。 */
 const STEP_WINDOW_SEC = 0.5;
 const STEP_SAMPLE_FPS = 8;
@@ -106,6 +122,81 @@ const VIEWPORT = `JSON.stringify({
   dpr: window.devicePixelRatio,
 })`;
 
+/**
+ * 画面いっぱいの**目印**（`view` が本当に合っているかを、録画から**測る**ための的）。
+ *
+ * ⚠️ **計算した値で描いて、同じ値で検査しても意味がない**（PR #1237 レビュー 🟡）＝
+ * `view` が丸ごと間違っていても**辻褄が合う**（実測で `✓` が出た）。**録画そのものを測る**。
+ * ⚠️ **押せないようにする**（`pointer-events:none`）＝台本の操作に混ざらない。
+ */
+const FLASH_ON = `(() => {
+  const d = document.createElement("div");
+  d.id = "__stario_flash";
+  d.style.cssText = "position:fixed;inset:0;background:#ff00ff;z-index:2147483647;pointer-events:none";
+  document.body.appendChild(d);
+  return "ok";
+})()`;
+const FLASH_OFF = `(() => { const d = document.getElementById("__stario_flash"); if (d) d.remove(); return "ok"; })()`;
+
+/** 録画から**原寸の白黒のコマ**を1枚（⚠️ 縮めない＝数画素のずれを測るため）。 */
+function fullFrameAt(file, atSec, w, h) {
+  const r = spawnSync(FFMPEG, [
+    "-hide_banner", "-loglevel", "error", "-i", file, "-ss", String(atSec),
+    "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-",
+  ], { maxBuffer: 1 << 28 });
+  const frames = framesFromResult(r, file, w * h);
+  if (frames.length === 0) throw new Error(`${file} の ${atSec}s のコマを取り出せません`);
+  return frames[0];
+}
+
+/**
+ * **計算した `view` が、録画の実物と合っているか**を測って確かめる。
+ *
+ * ⚠️ **ここが #1227 の土台**＝ここが狂うと、仮想カーソルは**押した所とは違う場所**に出る。
+ * そして #1227 側の検査は**同じ `view` から期待値を作る**ので、**気づけない**（実測）。
+ */
+function checkViewAgainstVideo(video, flashAtSec, rect, view) {
+  const before = fullFrameAt(video, 0.1, rect.w, rect.h);
+  const during = fullFrameAt(video, flashAtSec + FLASH_SAMPLE_AFTER, rect.w, rect.h);
+  const b = changedBounds(before, during, rect.w);
+  const least = view.width * view.height * FLASH_MIN_RATIO;
+  if (!b || b.count < least) {
+    throw new Error(`撮り始めの目印が録画に写っていません（変わった画素 ${b?.count ?? 0} / 要 ${Math.round(least)}）＝録画の始まりが遅すぎませんか`);
+  }
+  const ずれ = [];
+  if (Math.abs(b.x - view.offsetX) > VIEW_ORIGIN_SLACK) ずれ.push(`左 ${b.x}（計算では ${view.offsetX}）`);
+  if (Math.abs(b.y - view.offsetY) > VIEW_ORIGIN_SLACK) ずれ.push(`上 ${b.y}（計算では ${view.offsetY}）`);
+  if (b.w < view.width - VIEW_SIZE_SHRINK || b.w > view.width + VIEW_SIZE_GROW) ずれ.push(`幅 ${b.w}（計算では ${view.width}）`);
+  if (b.h < view.height - VIEW_SIZE_SHRINK || b.h > view.height + VIEW_SIZE_GROW) ずれ.push(`高さ ${b.h}（計算では ${view.height}）`);
+  if (ずれ.length > 0) {
+    throw new Error([
+      "画面の中身が、録画の思った所に写っていません:",
+      ...ずれ.map((z) => `  ${z}`),
+      "  ＝このまま撮るとカーソルが違う場所に出ます。窓を動かさずに撮り直してください",
+      "  （起動直後に窓の大きさが変わると、測った値が古くなって起きます）",
+    ].join(`
+`));
+  }
+  console.log(`✓ 中身の位置を録画で実測: (${b.x},${b.y}) ${b.w}x${b.h}（計算と一致）`);
+}
+
+/**
+ * **大きさが動かなくなった**窓の矩形。
+ *
+ * ⚠️ **1回読んで済ませない**＝起動直後は窓がまだ動く。古い値で撮ると、録画の切り出しと
+ * 画面の中身がずれ、**カーソルが違う場所に出る**（`checkViewAgainstVideo` が捕まえた実例）。
+ */
+async function stableWindowRect(tries = 12, waitMs = 300) {
+  let last = windowRect();
+  for (let i = 0; i < tries; i += 1) {
+    await new Promise((r) => setTimeout(r, waitMs));
+    const now = windowRect();
+    if (now.x === last.x && now.y === last.y && now.w === last.w && now.h === last.h) return now;
+    last = now;
+  }
+  throw new Error("窓の大きさが落ち着きません＝動かしている最中ではありませんか（手を離してから撮ってください）");
+}
+
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
   if (!scriptPath) {
@@ -139,7 +230,10 @@ async function main() {
     await cdp.send("Runtime.enable");
     await new Promise((r) => setTimeout(r, 1500)); // 初回描画を待つ
 
-    const rect = windowRect();
+    // ⚠️ **窓が落ち着いてから測る**（実測で踏んだ）＝起動直後はまだ大きさが動いており、
+    //   そこで測ると `view` が**古い値**になる。実際に、中身の高さが 33 画素ずれた録画ができた
+    //   （下の実測が捕まえた）。**同じ値が2回続く**まで待つ。
+    const rect = await stableWindowRect();
     const vp = JSON.parse(await evaluate(cdp, VIEWPORT));
     // ⚠️ **ずれは実測から採る**（推測しない）＝窓の原点と、画面の中身の原点の差。
     const view = {
@@ -157,9 +251,9 @@ async function main() {
     //   `screenX` は **CSS px**、`GetWindowRect` と `gdigrab` は**物理 px**なので、
     //   100% のときだけ単位が一致する。**掛ければよい、は推測**（どちらに掛けるかで結果が変わる）。
     //   ここで断れば「ずれた教材」を作らずに済む（§2-5＝次の行動を出す）。
-    if (view.dpr !== 1) {
-      throw new Error(`画面の拡大率が ${Math.round(view.dpr * 100)}% です。100% にしてから撮ってください`);
-    }
+    //   ⚠️ **文は焼く側と共有する**（PR #1237 レビュー 🟡）＝断り方が2つに割れると、
+    //   片方だけ直したときに「録る側は断るのに焼く側は通す」が起きる。
+    if (view.dpr !== 1) throw new Error(SCALE_NOT_100_MESSAGE(view.dpr));
     // ⚠️ **副モニタ（負の座標）も断る**＝`gdigrab` の切り出しがずれる。
     if (rect.x < 0 || rect.y < 0) {
       throw new Error(`窓が主モニタの外にあります（${rect.x},${rect.y}）＝主モニタへ移してから撮ってください`);
@@ -178,6 +272,15 @@ async function main() {
     ff.on("error", (e) => { throw new Error(`FFmpeg を起こせません: ${e.message}`); });
     const t0 = Date.now();
     await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
+
+    // ②'⚠️ **中身が録画のどこに写っているかを、測る**（PR #1237 レビュー 🟡）＝
+    //   `view` は引き算で出した値なので、**それで描いて、それで検査する**限り
+    //   間違いに気づけない（実測で通ってしまった）。画面いっぱいの目印を焼き付けて、後で測る。
+    const flashAtSec = (Date.now() - t0) / 1000;
+    await evaluate(cdp, FLASH_ON);
+    await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
+    await evaluate(cdp, FLASH_OFF);
+    await new Promise((r) => setTimeout(r, 300)); // 目印が消えたコマを台本に混ぜない
 
     // ③ 台本を走らせ、**押した時刻と座標**を残す（仮想カーソルの素＝#1227）
     const log = [];
@@ -219,6 +322,7 @@ async function main() {
     const totalSec = (Date.now() - t0) / 1000;
 
     // ⑤ ⚠️ **撮れたことを機械で確かめる**（ここを省くと嘘の教材ができる）
+    checkViewAgainstVideo(video, flashAtSec, rect, view);
     const seen = sampleFrames(FFMPEG, video);
     const kinds = distinctFrames(seen);
 
@@ -236,7 +340,7 @@ async function main() {
     writeFileSync(logPath, JSON.stringify({
       name: plan.name, video, totalSec, distinctFrames: kinds,
       // ⚠️ **カーソルを描く側（#1227）が使う**＝ここが無いと押した所と違う場所に印が出る。
-      view, fps: FPS,
+      view, fps: FPS, flashAtSec,
       // ⚠️ **`atSec` は録り始めからの秒ではなく、`ffmpeg` を起こしてからの秒**（PR #1234 レビュー ℹ️）＝
       // gdigrab の立ち上がり（数百 ms 規模）だけ**一律に早い**。#1227 のカーソルは**押す前に着く**向きにずれる。
       // ⚠️ **補正していない**＝補正するなら、撮り始めに目印を出してその最初のコマで採り直す。

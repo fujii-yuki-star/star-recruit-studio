@@ -1,6 +1,10 @@
 // 仮想カーソルの絵と動き（#1227・ADR-0046 ③）。**純粋関数を直接叩く**。
 import { describe, expect, it } from "vitest";
-import { CURSOR_H, CURSOR_W, cursorAt, cursorPath, cursorPixels, ripplePixels, toVideoPoint } from "./cursor.mjs";
+import {
+  CURSOR_H, CURSOR_W, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE,
+  artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
+  positionExpr, ripplePixels, toVideoPoint,
+} from "./cursor.mjs";
 
 /** その画素の不透明度。 */
 const alphaAt = (px, x, y) => px[(y * CURSOR_W + x) * 4 + 3];
@@ -53,9 +57,89 @@ describe("画面の中の座標 → 録画の中の位置", () => {
     expect(toVideoPoint(view, 0, 0), "ずれを足していない").toEqual({ x: 8, y: 31 });
   });
 
-  // ⚠️ **拡大率を掛ける**＝125% の設定では CSS の1px が録画の1画素ではない。
-  it("拡大率を掛ける", () => {
-    expect(toVideoPoint({ offsetX: 10, offsetY: 40, dpr: 1.25 }, 100, 200)).toEqual({ x: 135, y: 290 });
+  // ⚠️ **拡大率は掛けない**（PR #1237 レビュー 🟡）＝`offsetX` 自体が
+  //   「CSS px − 物理 px」なので、`dpr !== 1` では**掛けても直らない**。撮る側・焼く側とも**断る**。
+  it("拡大率は掛けない（掛け算で誤魔化さない）", () => {
+    expect(toVideoPoint({ offsetX: 10, offsetY: 40, dpr: 1.25 }, 100, 200), "掛け算で辻褄を合わせている").toEqual({ x: 110, y: 240 });
+  });
+
+  // ⚠️ **断り文は「次の行動」を出す**（§2-5）＝原因だけ言って終わらない。
+  it("100% でないときの断りは、何をすればよいかを言う", () => {
+    const m = SCALE_NOT_100_MESSAGE(1.25);
+    expect(m).toContain("125%");
+    expect(m, "次の行動が無い").toContain("100% にしてから");
+  });
+});
+
+// ⚠️ **焼いた結果の検査は、この重心を期待値にする**（PR #1237 レビュー 🟡）＝
+// 「押した点」を期待値にしていた頃は、**輪が左右対称**なので**カーソルが1画素も無くても通った**。
+describe("焼く絵の重心（検査の期待値）", () => {
+  it("塗られていなければ null（空の絵を期待値にしない）", () => {
+    expect(artCentroid(new Uint8Array(4 * 4 * 4), 4, 4)).toBeNull();
+  });
+
+  it("塗られた所の真ん中と、その数を返す", () => {
+    const px = new Uint8Array(4 * 4 * 4);
+    for (const [x, y] of [[1, 2], [3, 2]]) px[(y * 4 + x) * 4 + 3] = 255;
+    expect(artCentroid(px, 4, 4)).toEqual({ x: 2, y: 2, count: 2 });
+  });
+
+  // ⚠️ **輪の重心は押した点そのもの**＝だからこれ**だけ**を見ていては検査にならない（上の理由）。
+  it("輪だけなら、中心は押した点", () => {
+    const rip = artCentroid(ripplePixels(), RIPPLE_SIZE, RIPPLE_SIZE);
+    expect(rip.x).toBeCloseTo(RIPPLE_SIZE / 2 - 0.5, 1);
+    expect(rip.y).toBeCloseTo(RIPPLE_SIZE / 2 - 0.5, 1);
+  });
+
+  // ⚠️ **カーソルは右下に広がる**（先端が (0,0)）＝重心は押した点より右下になる。
+  it("カーソルだけの重心は、押した点の右下", () => {
+    const c = expectedCursorCenter({ x: 100, y: 200 });
+    expect(c.x, "押した点と同じ＝カーソルの形を見ていない").toBeGreaterThan(100);
+    expect(c.y).toBeGreaterThan(200);
+    expect(c.count).toBeGreaterThan(50);
+  });
+
+  // ⚠️ **押した瞬間の期待値は、輪とカーソルの重み付き**＝カーソルのぶんだけ押した点からずれる。
+  it("押した瞬間の重心は、輪だけの位置から、カーソルのぶんずれる", () => {
+    const m = expectedMarkCenter({ x: 100, y: 200 });
+    expect(m.x, "カーソルを数えていない（輪だけを見ている）").toBeGreaterThan(100);
+    expect(m.count).toBe(
+      artCentroid(cursorPixels(), CURSOR_W, CURSOR_H).count + artCentroid(ripplePixels(), RIPPLE_SIZE, RIPPLE_SIZE).count,
+    );
+  });
+});
+
+// ⚠️ **同じ意味を2つの言語で二重に書かない**（PR #1237 レビュー 🟡）＝`overlay` へ渡す式と
+// `cursorAt` は**同じ動き**でなければならないのに、以前は**別々に組み立てていた**（端の扱いまで別）。
+describe("位置の式（`overlay` と `cursorAt` が同じ木から出る）", () => {
+  const path = cursorPath([{ atSec: 2, x: 100, y: 200 }, { atSec: 5, x: 400, y: 300 }]);
+  /** `js` 版の式を、その場で評価できる関数にする。 */
+  const asFn = (axis) => new Function("t", `return ${positionExpr(path, axis, "js")};`);
+
+  it("`cursorAt` と同じ位置を返す（ずれたら焼いた絵と検査が食い違う）", () => {
+    const fx = asFn("x");
+    const fy = asFn("y");
+    for (let t = 0; t <= 6; t += 0.1) {
+      const want = cursorAt(path, t);
+      // ⚠️ 丸めのぶんだけ許す（`cursorAt` は整数に丸め、式は丸めない）。
+      expect(Math.abs(fx(t) - want.x), `${t.toFixed(1)}s で x がずれている`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(fy(t) - want.y), `${t.toFixed(1)}s で y がずれている`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("ffmpeg 版は ffmpeg の書き方（JS の三項演算子を出さない）", () => {
+    const e = positionExpr(path, "x");
+    expect(e).toContain("if(lt(t,");
+    expect(e, "JS の書き方が混ざっている＝ffmpeg が式を読めない").not.toContain("?");
+  });
+
+  it("枝の数は、どちらの書き方でも同じ", () => {
+    const count = (s, re) => (s.match(re) ?? []).length;
+    expect(count(positionExpr(path, "x"), /if\(/g)).toBe(count(positionExpr(path, "x", "js"), /\?/g));
+  });
+
+  it("押す場所が無ければ 0（式が空にならない）", () => {
+    expect(positionExpr([], "x")).toBe("0");
   });
 });
 

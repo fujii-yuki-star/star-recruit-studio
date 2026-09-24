@@ -15,6 +15,14 @@
 
 import { spawnSync } from "node:child_process";
 
+/**
+ * 同梱の FFmpeg（**撮る側・焼く側で同じもの**を使う）。
+ *
+ * ⚠️ **写して増やさない**（PR #1237 レビュー 🟡）＝`tutorialRecord.mjs` と `tutorialCursor.mjs` が
+ * **同じ文字列を別々に持って**いた。片方だけ直すと、**違うビルドの ffmpeg で撮って焼く**ことになる。
+ */
+export const FFMPEG = "src-tauri/resources/ffmpeg/bin/ffmpeg.exe";
+
 /** 比べる大きさ。⚠️ 小さくするほど符号化の粗が消え、大きくするほど小さな変化を拾う。 */
 export const SAMPLE_W = 32;
 export const SAMPLE_H = 18;
@@ -80,14 +88,50 @@ export function sampleFrames(ffmpeg, file, fps = 2, from = null, to = null) {
  * **録画そのものの失敗**として報告されてしまう（直す先を間違える）。
  * ⚠️ **切り出してある理由**＝ここが判定なので、**ffmpeg を起こさずに検査できる**ようにする。
  */
-export function framesFromResult(r, file = "(録画)") {
+export function framesFromResult(r, file = "(録画)", size = SAMPLE_W * SAMPLE_H) {
   if (r.error) throw new Error(`コマを取り出せません（${file}）: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`コマを取り出せません（${file}）:\n${r.stderr ?? ""}`);
   const buf = r.stdout ?? Buffer.alloc(0);
-  const size = SAMPLE_W * SAMPLE_H;
   const out = [];
   for (let i = 0; i + size <= buf.length; i += size) out.push(buf.subarray(i, i + size));
   return out;
+}
+
+/** 「変わった」と見なす明るさの差。⚠️ `PIXEL_TOLERANCE` より粗い＝**はっきり描かれた所だけ**拾う。 */
+export const CHANGE_TOLERANCE = 24;
+
+/**
+ * 2つのコマで**広く変わった矩形**（行・列ごとに見る）。無ければ `null`。
+ *
+ * ⚠️ **何のためにあるか**＝**画面の中身が録画のどこに写っているか**を、**測って**確かめる
+ *（#1227・PR #1237 レビュー 🟡）。`view` のずれは `screenX - windowX` の**引き算で出した値**なので、
+ * それを使って描き、それを使って検査する限り、**間違っていても辻褄が合ってしまう**
+ *（実測＝ずれを丸ごと落としても検査は `✓` を出した）。**独立した物差し**がここ。
+ * ⚠️ **中心ではなく矩形**＝目印は画面いっぱいに出すので、**四隅の位置**が要る。
+ * ⚠️ **行・列の「何割変わったか」で見る**＝1画素の外れ値で矩形が広がらない。
+ */
+export function changedBounds(before, after, width, tolerance = CHANGE_TOLERANCE, fill = 0.5) {
+  if (before.length !== after.length) throw new Error(`比べるコマの大きさが違います: ${before.length} と ${after.length}`);
+  const height = before.length / width;
+  const rows = new Array(height).fill(0);
+  const cols = new Array(width).fill(0);
+  let count = 0;
+  for (let i = 0; i < before.length; i += 1) {
+    if (Math.abs(before[i] - after[i]) > tolerance) {
+      rows[Math.floor(i / width)] += 1;
+      cols[i % width] += 1;
+      count += 1;
+    }
+  }
+  const span = (arr, full) => {
+    const hit = arr.map((n) => n >= full * fill);
+    const from = hit.indexOf(true);
+    return from < 0 ? null : { from, to: hit.lastIndexOf(true) };
+  };
+  const ys = span(rows, width);
+  const xs = span(cols, height);
+  if (!ys || !xs) return null;
+  return { x: xs.from, y: ys.from, w: xs.to - xs.from + 1, h: ys.to - ys.from + 1, count };
 }
 
 /**
@@ -96,7 +140,11 @@ export function framesFromResult(r, file = "(録画)") {
  * ⚠️ **焼いたものが、押した所に出ているかを確かめるために使う**（#1227）＝
  * 「描いたつもり」で**別の場所に出ている**のを捕まえる唯一の手。
  */
-export function changedCenter(before, after, width, tolerance = 24) {
+export function changedCenter(before, after, width, tolerance = CHANGE_TOLERANCE) {
+  // ⚠️ **長さが違えば見ない**（PR #1237 レビュー ℹ️）＝姉妹の `sameFrame` は見ているのに、ここは
+  //   見ていなかった。短いと `before[i] - undefined` が `NaN` になり、**黙って数え落とす**
+  //  （最悪 `null`＝「何も描かれていない」と誤報する）。
+  if (before.length !== after.length) throw new Error(`比べるコマの大きさが違います: ${before.length} と ${after.length}`);
   let sx = 0;
   let sy = 0;
   let n = 0;
