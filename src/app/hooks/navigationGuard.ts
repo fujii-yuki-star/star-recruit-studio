@@ -26,6 +26,20 @@ const guards = new Set<NavigationGuard>();
 /**
  * 離れる前に聞きたい間だけ名乗る。`guard` が `null` のときは名乗らない
  * （＝聞く必要が無くなったら外す。外し忘れると、関係ない画面から出られなくなる）。
+ *
+ * ⚠️ **名乗りが効くのは「描き終えて effect が流れたあと」**（#1007・2026-09-25 に実測で確定）。
+ *
+ * 下の実装は `latest.current` を **effect の中**で更新する（描画中に ref を触らないため）。
+ * つまり**状態が変わって画面に出た瞬間は、まだ古い値**のことがある。
+ * 利用者の操作は commit のあとに起きるので**実務上アプリでは踏まない**（React は同じコミットの
+ * passive effect を次の入力処理より前に流す）が、**検査では実際に踏む**：
+ * `await screen.findByText(...)` は **DOM が変わった時点**で返るので、その直後に `canNavigate` を
+ * 見ると**通れてしまう**ことがある（実測＝`HomeScreen.restore` の1件が**80回中2回**）。
+ *
+ * ⚠️ **検査では `waitFor` で「条件そのもの」を待つこと**＝
+ * `await waitFor(() => expect(canNavigate(to)).toBe(false))`。
+ * `await act(async () => {})` で流し切る書き方もあるが、**間欠な失敗は変異チェック1回では
+ * 等価判定できない**（実際に #1007 で「等価」と誤判定した記録がある）。
  */
 export function useNavigationGuard(guard: NavigationGuard | null): void {
   // **中身は毎回いちばん新しいものを見る**（関門の関数は描画のたびに作り直されるので、

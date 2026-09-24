@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import * as projectFs from "../../infrastructure/projectFs";
@@ -116,16 +116,21 @@ describe("前の状態に戻す（#263 段階2）", () => {
     await openPanel();
     fireEvent.click(await screen.findByText("ここへ戻す"));
     await screen.findByText("あとで開く");
-    // ⚠️ **残っている effect を流し切ってから見る**（#1007）。通し実行でだけまれに落ちたので入れた。
-    // ⚠️ **見立ては裏取れていない**＝当初は「`findByText` は DOM の変化で返るので、
-    // `useEffect` で名乗る前に見ている」と考えたが、**その仕組みは再現しなかった**：
-    // ① act の外で状態を変えて `findByText` した直後を見る実験では、effect は**既に走っていた**
-    //（RTL の `waitFor` は `asyncAct` に包まれていて、抜けるときに effect を流し切る）。
-    // ② この1行を**外す変異を 1703 件規模の通し実行でかけても、緑のままだった**（生き残り）。
-    // つまりこの1行は**いま見えている範囲では等価**で、揺れの原因は**まだ分かっていない**。
-    // 残してあるのは安い保険としてで、**「これで直った」とは書かない**（次に踏んだ人が偽の説明を引き継がないため）。
-    await act(async () => {});
-    expect(canNavigate("settings" as ScreenId), "知らせが出ているのに、サイドバーから移れてしまう").toBe(false);
+    // ⚠️ **「文字が出た」と「関門が名乗った」の間には隙間がある**（#1007・2026-09-25 に実測で確定）。
+    // `useNavigationGuard` は `latest.current` を **effect の中**で更新するので、`findByText` が
+    // 返った時点ではまだ `null` のことがある＝その瞬間に見ると**通れてしまう**。
+    //
+    // ⚠️ **かつて「この見立ては再現しなかった」と書いていたが、それは誤りだった**。
+    // 否定の根拠は「`await act(async () => {})` を外す変異が通し実行で生き残った」だったが、
+    // **この失敗は間欠**（実測＝この1ファイルを80回まわして**2回**）なので、
+    // **変異を1回流して緑でも「等価」とは言えない**。生き残り＝等価が成り立つのは、
+    // 検査が決定的なときだけ。**間欠な検査では、確率的に見逃しているだけ**。
+    //
+    // ⚠️ **だから「流し切る」ではなく「条件そのものを待つ」**＝ `waitFor` なら、
+    // 名乗るまで待ち、**いつまでも名乗らなければ最後は落ちる**（関門を外す変異は今も捕まる）。
+    await waitFor(
+      () => expect(canNavigate("settings" as ScreenId), "知らせが出ているのに、サイドバーから移れてしまう").toBe(false),
+    );
     fireEvent.click(screen.getByText("あとで開く"));
     await waitFor(() => expect(canNavigate("settings" as ScreenId)).toBe(true));
   });
