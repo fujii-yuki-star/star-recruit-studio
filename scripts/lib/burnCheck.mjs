@@ -29,9 +29,18 @@ export const CHECK_H = 100;
  * 「2」という見た目ほど厳しくはない（**ここを下げるなら `CHECK_W/H` を上げる**のが筋）。
  */
 export const AWAY_LIMIT = 2;
-/** 変わった画素の数が、想定の何倍まで／何分の1まで許されるか。 */
+/**
+ * 変わった画素の数の、許される幅（想定に対する倍率）。
+ *
+ * ⚠️ **下限は「想定の何割」で見る**（PR #1237 3回目 🟡）＝以前は `count * 6 < 想定` と書いており、
+ * カーソルだけの想定が **5.35 画素**なので **`count < 0.89`＝0 のときしか鳴らなかった**
+ *（0 は「何も描かれていない」で既に捕まる）。**鳴りえない門**を、前回の指摘と同じ型で作っていた。
+ * ⚠️ **下限の値は実測から**＝明るい画面で 8〜9、暗い画面で 6〜7（想定 5.35）。4割なら落ちない。
+ */
 export const COUNT_HIGH = 3;
-export const COUNT_LOW = 6;
+export const COUNT_LOW = 0.4;
+/** 想定が小さいときの下限（⚠️ **1画素を「描けている」と認めない**）。 */
+export const COUNT_LOW_FLOOR = 2;
 
 /**
  * 録画の画素の位置 → **縮めた検査の格子**の位置。
@@ -58,19 +67,22 @@ export function expectedCheckCount(want, size, checkW = CHECK_W, checkH = CHECK_
  * ②カーソルが**数画素しか描かれていない**回を、どちらも通してしまう（実測で後者は `!center` にならない）。
  */
 export function markVerdict(center, want, size, opts = {}) {
-  const { checkW = CHECK_W, checkH = CHECK_H, away: awayLimit = AWAY_LIMIT, high = COUNT_HIGH, low = COUNT_LOW } = opts;
+  const {
+    checkW = CHECK_W, checkH = CHECK_H, away: awayLimit = AWAY_LIMIT,
+    high = COUNT_HIGH, low = COUNT_LOW, floor = COUNT_LOW_FLOOR,
+  } = opts;
   if (!center) return "何も描かれていません＝焼く指定（式や絵）を見直してください";
   const at = toCheckPoint(want, size, checkW, checkH);
   const away = Math.hypot(center.x - at.x, center.y - at.y);
   if (away > awayLimit) {
     return `描かれた所が想定とずれています（縮めた絵で ${away.toFixed(2)} 画素）＝カーソルの絵か道筋か式を見直してください`;
   }
-  const want数 = expectedCheckCount(want, size, checkW, checkH);
-  if (center.count > Math.max(4, want数 * high)) {
-    return `変わった所が広すぎます（${center.count} 画素・想定 ${want数.toFixed(1)}）＝別の変化が混ざっています。押したあとが落ち着くまで待ってから見てください`;
+  const wantCount = expectedCheckCount(want, size, checkW, checkH);
+  if (center.count > Math.max(4, wantCount * high)) {
+    return `変わった所が広すぎます（${center.count} 画素・想定 ${wantCount.toFixed(1)}）＝別の変化が混ざっています。押したあとが落ち着くまで待ってから見てください`;
   }
-  if (center.count * low < want数) {
-    return `描かれた所が薄すぎます（${center.count} 画素・想定 ${want数.toFixed(1)}）＝カーソルが欠けていないか見てください`;
+  if (center.count < Math.min(wantCount, Math.max(floor, wantCount * low))) {
+    return `描かれた所が薄すぎます（${center.count} 画素・想定 ${wantCount.toFixed(1)}）＝カーソルが欠けていないか見てください`;
   }
   return null;
 }

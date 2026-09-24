@@ -190,7 +190,12 @@ function checkViewAgainstVideo(video, flashAtSec, rect, view) {
     ].join(`
 `));
   }
-  console.log(`✓ 中身の位置を録画で実測: (${b.x},${b.y}) ${b.w}x${b.h}（計算と一致）`);
+  // ⚠️ **「一致」と言い切らない**（PR #1237 3回目 🟡）＝`viewVerdict` は許容の内側を通すので、
+  //   数画素のずれがあっても「一致」と出てしまう（実際に **高さ −7** の回を「一致」と印字した。
+  //   気づいたのは人が数字を読んだからで、**機械は鳴っていない**）。**ずれを数で出す**。
+  const off = `${b.x - view.offsetX >= 0 ? "+" : ""}${b.x - view.offsetX},${b.y - view.offsetY >= 0 ? "+" : ""}${b.y - view.offsetY}`;
+  const sizeOff = `${b.w - view.width >= 0 ? "+" : ""}${b.w - view.width},${b.h - view.height >= 0 ? "+" : ""}${b.h - view.height}`;
+  console.log(`✓ 中身の位置を録画で実測: (${b.x},${b.y}) ${b.w}x${b.h} / 計算とのずれ 位置 ${off} 大きさ ${sizeOff}（許容の内側）`);
 }
 
 /**
@@ -284,7 +289,7 @@ async function main() {
     //   ⚠️ **文は焼く側と共有する**（PR #1237 レビュー 🟡）＝断り方が2つに割れると、
     //   片方だけ直したときに「録る側は断るのに焼く側は通す」が起きる。
     if (view.dpr !== 1) throw new Error(SCALE_NOT_100_MESSAGE(view.dpr));
-    // ⚠️ **画面からoutsideていたら断る**（PR #1237 再レビュー で見つけた実例）＝
+    // ⚠️ **画面からはみ出していたら断る**（PR #1237 再レビュー で見つけた実例）＝
     //   副モニタ（負の座標）だけでなく、**タスクバーの下に潜っている**のも同じ害
     //  （そこにタスクバーが写り、アプリの下端が教材から消える。実測で 7 画素欠けた）。
     const area = workArea();
@@ -294,8 +299,9 @@ async function main() {
     if (rect.x + rect.w > area.x + area.w) outside.push(`右に ${rect.x + rect.w - area.x - area.w}`);
     if (rect.y + rect.h > area.y + area.h) outside.push(`下に ${rect.y + rect.h - area.y - area.h}`);
     if (outside.length > 0) {
-      throw new Error(`窓が画面の使える範囲からoutsideています（${outside.join(" / ")} 画素）`
-        + `＝outsideた所にはタスクバーや別の画面が写ります。窓を収まる位置へ移してから撮ってください`);
+      throw new Error(`窓が画面の使える範囲からはみ出しています（${outside.join(" / ")} 画素）`
+        + "＝はみ出した所にはタスクバーや別の画面が写ります。"
+        + "窓を主モニタの、タスクバーに掛からない位置へ移してから撮ってください");
     }
 
     // ② 録画を始める（⚠️ **デスクトップから切り出す**・実カーソルは消す）
@@ -309,8 +315,26 @@ async function main() {
       "-c:v", "h264_mf", "-b:v", "8000k", "-pix_fmt", "yuv420p", video,
     ], { stdio: ["pipe", "ignore", "inherit"] });
     ff.on("error", (e) => { throw new Error(`FFmpeg を起こせません: ${e.message}`); });
+    // ⚠️ **途中で死んだことに気づけるようにする**（実機で踏んだ）＝`error` は**起こせなかったとき**
+    //   しか鳴らない。**起きたあとに落ちた**回は誰も見ておらず、台本を最後まで走らせたうえで
+    //   `ff.on("exit")` を待ち続けて**永遠に止まった**（実際に2回、数分待っても返らなかった）。
+    //   ⚠️ **止まるのが最悪**＝何が起きたか分からず、録れていないことにも気づけない。
+    let ffExit = null;
+    ff.on("exit", (code) => { ffExit = code ?? -1; });
     const t0 = Date.now();
     await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
+    /** 録画が生きているか（死んでいたら**その場で**理由つきで止める）。 */
+    const checkStillRecording = (when) => {
+      if (ffExit === null) return;
+      throw new Error([
+        `録画が${when}止まりました（FFmpeg の終了コード ${ffExit}）。次のどれかです:`,
+        "  ・画面がロックされている／リモート接続が切れている（`gdigrab` は撮れません。ロックを解いてから撮ってください）",
+        "  ・書き込み先が使えない（別のソフトが同じファイルを開いていませんか）",
+        "  上に FFmpeg のメッセージが出ています。",
+      ].join(`
+`));
+    };
+    checkStillRecording("始まってすぐに");
 
     // ②'⚠️ **中身が録画のどこに写っているかを、測る**（PR #1237 レビュー 🟡）＝
     //   `view` は引き算で出した値なので、**それで描いて、それで検査する**限り
@@ -322,6 +346,8 @@ async function main() {
     await new Promise((r) => setTimeout(r, AFTER_FLASH_SEC * 1000));
     /** ⚠️ **焼く側はここから先だけを使う**＝目印を配る素材に載せない。 */
     const usableFromSec = Number((flashAtSec + FLASH_SEC + 0.3).toFixed(3));
+    // ⚠️ **台本を走らせる前に、もう一度見る**＝ここで死んでいると、以降の数十秒が丸ごと無駄になる。
+    checkStillRecording("目印を出している間に");
 
     // ③ 台本を走らせ、**押した時刻と座標**を残す（仮想カーソルの素＝#1227）
     const log = [];
@@ -357,14 +383,19 @@ async function main() {
     }
 
     // ④ 録画を終える
+    checkStillRecording("台本を走らせている間に");
     ff.stdin.write("q");
-    await new Promise((r) => ff.on("exit", r));
+    // ⚠️ **既に終わっていたら待たない**＝`exit` は一度しか鳴らないので、鳴った後に待つと**永遠に返らない**。
+    if (ffExit === null) await new Promise((r) => ff.on("exit", r));
     ff = null;
     const totalSec = (Date.now() - t0) / 1000;
 
     // ⑤ ⚠️ **撮れたことを機械で確かめる**（ここを省くと嘘の教材ができる）
     checkViewAgainstVideo(video, flashAtSec, rect, view);
-    const seen = sampleFrames(FFMPEG, video);
+    // ⚠️ **目印より後ろだけを数える**（PR #1237 3回目 🟡）＝撮り始めの目印は**画面いっぱいが変わる**ので、
+    //   先頭から数えると `distinctFrames` が必ず 2 以上になり、**この門が鳴らなくなっていた**
+    //  （＝「窓指定で撮ると全コマ同じ絵」という、いちばん守りたい形が素通りする）。
+    const seen = sampleFrames(FFMPEG, video, 2, usableFromSec);
     const kinds = distinctFrames(seen);
 
     // ⚠️ **段ごとに見る**（PR #1234 レビュー 🟡）＝録画ぜんたいで1回だけ数えると、

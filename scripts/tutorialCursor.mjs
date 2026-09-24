@@ -48,7 +48,13 @@ function main() {
   // ① ⚠️ **撮り始めの目印を切り落とす**（PR #1237 再レビュー 🟡）＝`tutorialRecord` は
   //   `view` を実測するために**画面いっぱいの目印**を焼き付ける。切らないと**配る素材の頭に
   //   全画面のマゼンタが載る**（記録に切る場所は書いてあるのに、**読む者が一人も居なかった**）。
-  const trimSec = log.usableFromSec ?? 0;
+  // ⚠️ **コマ境界へ丸めてから切る**（PR #1237 3回目 🟡）＝`trim` は秒ではなく**コマ**で切るので、
+  //   端数のまま渡すと**焼いた側の t=0 が `trimSec + δ`**（δ は最大 1/fps）になり、
+  //   検査の2つの時間軸（元＝`atSec + trimSec` / 焼き後＝`atSec`）が**1コマずれる**ことがある。
+  //   止まっている所は無害だが、**押した瞬間は画面が遷移中**なので、そのずれが丸ごと
+  //   「変わった所」に乗って「広すぎます」の誤検出になる。
+  const fps = log.fps;
+  const trimSec = fps > 0 ? Math.ceil((log.usableFromSec ?? 0) * fps) / fps : (log.usableFromSec ?? 0);
   const totalSec = log.totalSec - trimSec;
   if (totalSec <= 0) throw new Error(`目印を切ると何も残りません（全体 ${log.totalSec}s / 切る ${trimSec}s）＝録り直してください`);
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURSOR_H, CURSOR_W, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE,
   artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
-  positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint,
+  positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
 } from "./cursor.mjs";
 
 /** その画素の不透明度。 */
@@ -250,8 +250,8 @@ describe("カーソルだけが止まっている時刻", () => {
     const points = script(3, 1.5);
     const stills = stillTimes(cursorPath(points), points, 12);
     for (const t of stills) {
-      const 輪の中 = points.some((p) => p.atSec <= t && t <= p.atSec + RIPPLE_SEC);
-      expect(輪の中, `${t}s は輪が出ている`).toBe(false);
+      const inRipple = points.some((p) => p.atSec <= t && t <= p.atSec + RIPPLE_SEC);
+      expect(inRipple, `${t}s は輪が出ている`).toBe(false);
     }
   });
 
@@ -284,10 +284,29 @@ describe("カーソルだけが止まっている時刻", () => {
   });
 
   // ⚠️ **詰めた台本では痩せる**＝「0個か否か」ではなく**押下ごとに見られているか**を数える理由。
-  it("間隔を詰めると、見られない押下が出る（痩せ方が分かる）", () => {
-    const points = script(3, 0.6);
-    const stills = stillTimes(cursorPath(points), points, 10);
+  //   ⚠️ 道筋を**手で組んで**渡す（`cursorPath` は近すぎる間隔を入口で断るようになったため）。
+  it("押下が輪の中に埋もれると、その押下は見られない", () => {
+    const points = [{ atSec: 3, x: 100, y: 200 }, { atSec: 3.3, x: 150, y: 200 }];
+    const path = [
+      { atSec: 2.2, x: 20, y: 110 }, { atSec: 2.75, x: 100, y: 200 }, { atSec: 3, x: 100, y: 200, click: true },
+      { atSec: 3.05, x: 100, y: 200 }, { atSec: 3.3, x: 150, y: 200, click: true },
+    ];
+    const stills = stillTimes(path, points, 10);
     const seen = points.filter((p) => stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec));
     expect(seen.length, "詰めても全部見えているなら、窓の取り方が甘い").toBeLessThan(points.length);
+  });
+});
+
+// ⚠️ **原因の所で断る**（PR #1237 3回目 ℹ️）＝近すぎると `atSec` が前後して、
+// 位置の式も `cursorAt` も意味を失う。焼いた後に落ちても、理由が読めない。
+describe("押す間隔が近すぎるとき", () => {
+  it("道筋を作る所で断る（次の行動つき）", () => {
+    const points = [{ atSec: 3, x: 1, y: 2 }, { atSec: 3.5, x: 3, y: 4 }];
+    expect(() => cursorPath(points), "前後する道筋を黙って作っている").toThrow(/間隔が近すぎます/);
+    expect(() => cursorPath(points)).toThrow(/0\.85s 以上あけて/);
+  });
+
+  it("足りていれば通す（境目で正しい台本を落とさない）", () => {
+    expect(() => cursorPath([{ atSec: 3, x: 1, y: 2 }, { atSec: 3 + TRAVEL_SEC + SETTLE_SEC, x: 3, y: 4 }])).not.toThrow();
   });
 });

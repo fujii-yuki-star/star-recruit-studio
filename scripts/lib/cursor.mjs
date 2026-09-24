@@ -177,6 +177,16 @@ export const SETTLE_SEC = 0.25;
  */
 export function cursorPath(points, { travelSec = TRAVEL_SEC, settleSec = SETTLE_SEC } = {}) {
   if (points.length === 0) return [];
+  // ⚠️ **押す間隔が近すぎたら、原因の所で断る**（PR #1237 3回目 ℹ️）＝間隔が
+  //   `travelSec + settleSec` より短いと、**次の点の動き出しが前の点の押下より前**に来て
+  //   `atSec` が前後する（`positionExpr` の入れ子も `cursorAt` の走査も意味を失う）。
+  //   焼いた後に「カーソル本体を見られなかった」として落ちてはいたが、**理由が読めなかった**。
+  for (let i = 1; i < points.length; i += 1) {
+    const gap = points[i].atSec - points[i - 1].atSec;
+    if (gap < travelSec + settleSec) {
+      throw new Error(`押す間隔が近すぎます（${gap.toFixed(2)}s）＝${(travelSec + settleSec).toFixed(2)}s 以上あけてください`);
+    }
+  }
   const path = [];
   let from = { x: Math.max(0, points[0].x - 120), y: Math.max(0, points[0].y - 90) };
   for (const p of points) {

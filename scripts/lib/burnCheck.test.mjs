@@ -7,6 +7,7 @@ import {
   AWAY_LIMIT, CHECK_H, CHECK_W, VIEW_HEIGHT_SHRINK, VIEW_ORIGIN_SLACK, VIEW_WIDTH_SHRINK,
   expectedCheckCount, markVerdict, toCheckPoint, viewVerdict,
 } from "./burnCheck.mjs";
+import { expectedCursorCenter } from "./cursor.mjs";
 
 const size = { w: 1296, h: 838 };
 
@@ -33,8 +34,8 @@ describe("録画の画素 → 縮めた格子", () => {
 describe("焼いた印の判定", () => {
   const want = { x: 400, y: 300, count: 1200 };
   const at = toCheckPoint(want, size);
-  const 想定数 = expectedCheckCount(want, size);
-  const ok = { x: at.x, y: at.y, count: 想定数 };
+  const expectedCount = expectedCheckCount(want, size);
+  const ok = { x: at.x, y: at.y, count: expectedCount };
 
   it("合っていれば null（正しく焼けた回を落とさない）", () => {
     expect(markVerdict(ok, want, size)).toBeNull();
@@ -49,23 +50,47 @@ describe("焼いた印の判定", () => {
 
   // ⚠️ **ここが締まっていないと、この道具は何も守らない**（前は 6 で、ずれを通していた）。
   it("許容より離れていれば落とす", () => {
-    const off = { x: at.x + AWAY_LIMIT + 0.01, y: at.y, count: 想定数 };
+    const off = { x: at.x + AWAY_LIMIT + 0.01, y: at.y, count: expectedCount };
     expect(markVerdict(off, want, size), "許容を超えたのに通している").toMatch(/ずれています/);
   });
 
   it("許容の内側なら通す（境目でがたつかない）", () => {
-    const near = { x: at.x + AWAY_LIMIT - 0.01, y: at.y, count: 想定数 };
+    const near = { x: at.x + AWAY_LIMIT - 0.01, y: at.y, count: expectedCount };
     expect(markVerdict(near, want, size)).toBeNull();
   });
 
   // ⚠️ **広すぎる**＝画面そのものの変化が混ざっている＝重心の値に意味が無い。
   it("変わった所が広すぎれば落とす（別の変化が混ざっている）", () => {
-    expect(markVerdict({ ...ok, count: 想定数 * 10 }, want, size)).toMatch(/広すぎます/);
+    expect(markVerdict({ ...ok, count: expectedCount * 10 }, want, size)).toMatch(/広すぎます/);
   });
 
   // ⚠️ **薄すぎる**＝カーソルが数画素しか描かれていなくても、重心さえ合えば通ってしまう。
-  it("変わった所が薄すぎれば落とす（欠けていても重心は合う）", () => {
-    expect(markVerdict({ ...ok, count: 想定数 / 100 }, want, size), "欠けたまま通している").toMatch(/薄すぎます/);
+  // ⚠️ **整数の画素数で見る**（PR #1237 3回目 🟡）＝`changedCenter` は整数しか返さないのに、
+  //   以前の検査は `想定 / 100 = 0.18` という**到達しない値**で緑にしていた。しかも当時の式
+  //   （`count * 6 < 想定`）は**0 のときしか鳴らず**、0 は上の `!center` で既に捕まっていた
+  //   ＝**鳴りえない門**を、前回指摘された型のまま作っていた。
+  it("変わった所が薄すぎれば落とす（実際に返りうる整数で見る）", () => {
+    expect(Number.isInteger(2)).toBe(true);
+    expect(markVerdict({ ...ok, count: 2 }, want, size), "欠けたまま通している").toMatch(/薄すぎます/);
+  });
+
+  // ⚠️ **実測の値で見る**＝本物のカーソルの絵から想定を出し、実際に出た数（明 8〜9／暗 6〜7）が
+  //   通ることを確かめる。下限を締めすぎると**正しく焼けた回を落とす**。
+  // ⚠️ **カーソルだけの想定は 5 画素そこそこ**＝ここで「想定の何倍」ではなく「何割」で見ないと、
+  //   門が**0 のときしか鳴らない**（そして 0 は上の `!center` で既に捕まっている）。
+  it("カーソルだけの想定でも、欠けていれば落とす（門が 0 でしか鳴らない式にしない）", () => {
+    const cur = expectedCursorCenter({ x: 400, y: 300 });
+    const at = toCheckPoint(cur, size);
+    expect(expectedCheckCount(cur, size), "想定が大きすぎて、この検査が効かない").toBeLessThan(8);
+    expect(markVerdict({ x: at.x, y: at.y, count: 2 }, cur, size), "2 画素しか描けていないのに通している").toMatch(/薄すぎます/);
+  });
+
+  it("実機で出た画素数は通す（明 8〜9 / 暗 6〜7）", () => {
+    const cur = expectedCursorCenter({ x: 400, y: 300 });
+    const at = toCheckPoint(cur, size);
+    for (const count of [6, 7, 8, 9]) {
+      expect(markVerdict({ x: at.x, y: at.y, count }, cur, size), `${count} 画素で落ちる`).toBeNull();
+    }
   });
 
   it("小さな絵でも、数の下限で落としきらない", () => {
