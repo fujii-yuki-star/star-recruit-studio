@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { existsSync, writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { FIND_BY_TEXT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
 
 const BROWSERS = [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -37,14 +37,14 @@ function findBrowser() {
   return hit;
 }
 
-/** 文字で要素を押す（画面の言葉で書けるようにする＝選び方を知らなくても台本が書ける）。 */
+/**
+ * 文字で要素を押す（画面の言葉で書けるようにする＝選び方を知らなくても台本が書ける）。
+ *
+ * ⚠️ **探し方は共有**（`FIND_BY_TEXT`）＝ここは「探して**押す**」だけを足す。
+ */
 const CLICK_BY_TEXT = (text) => `(() => {
-  const want = ${JSON.stringify(text)};
-  const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];
-  const hit = all.find((el) => (el.textContent || "").trim() === want)
-    || all.find((el) => (el.textContent || "").includes(want));
-  if (!hit) return { ok: false, reason: "見つかりません: " + want };
-  hit.scrollIntoView({ block: "center" });
+  const hit = ${FIND_BY_TEXT(text)};
+  if (!hit) return { ok: false, reason: "見つかりません: " + ${JSON.stringify(text)} };
   hit.click();
   return { ok: true };
 })()`;

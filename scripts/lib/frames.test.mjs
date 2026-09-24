@@ -4,13 +4,16 @@
 // 判定（`sameFrame`／`distinctFrames`）を切り出してあるので、**ここを直接叩く**
 //（`CLAUDE.md` §7＝拾い方を純粋関数に切り出す）。
 import { describe, expect, it } from "vitest";
-import { DIFF_RATIO, PIXEL_TOLERANCE, distinctFrames, sameFrame } from "./frames.mjs";
+import { DIFF_RATIO, PIXEL_TOLERANCE, SAMPLE_H, SAMPLE_W, distinctFrames, framesFromResult, sameFrame } from "./frames.mjs";
+
+/** ⚠️ **実物と同じ大きさで測る**（PR #1234 レビュー ℹ️）＝直書きだと、定数を変えても検査は緑のまま。 */
+const N = SAMPLE_W * SAMPLE_H;
 
 /** 一様な明るさのコマ。 */
-const flat = (v, n = 576) => Uint8Array.from({ length: n }, () => v);
+const flat = (v, n = N) => Uint8Array.from({ length: n }, () => v);
 
 /** `n` 画素だけ `delta` ずらしたコマ（符号化の粗を真似る）。 */
-const noisy = (v, count, delta, n = 576) =>
+const noisy = (v, count, delta, n = N) =>
   Uint8Array.from({ length: n }, (_, i) => (i < count ? v + delta : v));
 
 describe("同じ絵かどうか", () => {
@@ -21,7 +24,7 @@ describe("同じ絵かどうか", () => {
   // ⚠️ **完全一致で見ない**＝h264 は不可逆なので、同じ画面でも1画素ずつ僅かに違う。
   //   完全一致で数えたら、静止画5秒の録画が「違う絵5枚」になった（実測）。
   it("符号化の粗（わずかな差）は同じ絵と見る", () => {
-    expect(sameFrame(flat(100), noisy(100, 576, PIXEL_TOLERANCE - 1))).toBe(true);
+    expect(sameFrame(flat(100), noisy(100, N, PIXEL_TOLERANCE - 1))).toBe(true);
   });
 
   it("はっきり違えば別の絵", () => {
@@ -30,12 +33,12 @@ describe("同じ絵かどうか", () => {
 
   // ⚠️ **割合で見る**＝画面の隅が少し光る程度で「別の絵」にすると、静止画でも数が増える。
   it("ごく一部だけ違うのは同じ絵と見る", () => {
-    const few = Math.floor(576 * (DIFF_RATIO / 2));
+    const few = Math.floor(N * (DIFF_RATIO / 2));
     expect(sameFrame(flat(100), noisy(100, few, 80)), "隅の小さな変化で別物にしている").toBe(true);
   });
 
   it("広く違えば別の絵", () => {
-    const many = Math.ceil(576 * (DIFF_RATIO * 4));
+    const many = Math.ceil(N * (DIFF_RATIO * 4));
     expect(sameFrame(flat(100), noisy(100, many, 80))).toBe(false);
   });
 
@@ -61,5 +64,24 @@ describe("違う絵が何枚あるか", () => {
 
   it("1枚も無ければ0（録れていない）", () => {
     expect(distinctFrames([])).toBe(0);
+  });
+});
+
+// ⚠️ **取り出しの失敗を「コマ0枚」にしない**＝原因が消え、**録画そのものの失敗**として報告される。
+describe("取り出した結果の受け取り", () => {
+  it("うまくいけば、コマに割る", () => {
+    expect(framesFromResult({ status: 0, stdout: Buffer.alloc(N * 3) }).length).toBe(3);
+  });
+
+  it("端数は捨てる（途中で切れたコマを混ぜない）", () => {
+    expect(framesFromResult({ status: 0, stdout: Buffer.alloc(N * 2 + 5) }).length).toBe(2);
+  });
+
+  it("失敗したら落とす（コマ0枚にしない）", () => {
+    expect(() => framesFromResult({ status: 1, stderr: "こわれた" }, "a.mp4")).toThrow(/こわれた/);
+  });
+
+  it("起こせなかったときも落とす", () => {
+    expect(() => framesFromResult({ error: new Error("見つかりません") })).toThrow(/見つかりません/);
   });
 });
