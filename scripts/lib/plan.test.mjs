@@ -1,6 +1,6 @@
 // 撮影の引数と台本の読み取り（#1226・PR #1234 レビュー 🟡）。
 import { describe, expect, it } from "vitest";
-import { checkPlan, parseOutDir } from "./plan.mjs";
+import { checkRecordLog, checkPlan, parseOutDir } from "./plan.mjs";
 
 describe("出力先の読み取り", () => {
   it("`--out` があればそれを使う", () => {
@@ -56,5 +56,46 @@ describe("台本の読み取り", () => {
 
   it("`waitMs` が数でなければ断る", () => {
     expect(() => checkPlan({ steps: [{ waitMs: "500" }] })).toThrow(/数ではありません/);
+  });
+});
+
+// ⚠️ **録る側にだけ門番があった**（PR #1237 再レビュー ℹ️）＝記録は素通しで、欠けていると
+// ffmpeg のエラー文で落ちて**原因が読めない**（`totalSec` が無いと `NaN` の比較が全部 false）。
+describe("録った記録の受け取り", () => {
+  const view = { offsetX: 8, offsetY: 31, dpr: 1, width: 1280, height: 800 };
+  const ok = () => ({ video: "a.mp4", view: { ...view }, totalSec: 10, steps: [{ atSec: 3, x: 100, y: 200 }] });
+
+  it("揃っていれば、そのまま返す", () => {
+    expect(checkRecordLog(ok()).totalSec).toBe(10);
+  });
+
+  it("欠けている所を名指しで言う", () => {
+    for (const key of ["video", "view", "totalSec", "steps"]) {
+      const log = ok();
+      delete log[key];
+      expect(() => checkRecordLog(log), `${key} が無くても通る`).toThrow(new RegExp(key));
+    }
+  });
+
+  it("秒になっていなければ落とす（`-t undefined` にしない）", () => {
+    expect(() => checkRecordLog({ ...ok(), totalSec: "10" })).toThrow(/totalSec/);
+    expect(() => checkRecordLog({ ...ok(), totalSec: 0 })).toThrow(/totalSec/);
+  });
+
+  it("画面の対応が数でなければ落とす", () => {
+    expect(() => checkRecordLog({ ...ok(), view: { ...view, offsetY: null } })).toThrow(/view\.offsetY/);
+  });
+
+  it("押した段が空なら落とす（焼いても何も出ない）", () => {
+    expect(() => checkRecordLog({ ...ok(), steps: [] })).toThrow(/1つもありません/);
+  });
+
+  it("段の座標が数でなければ落とす", () => {
+    expect(() => checkRecordLog({ ...ok(), steps: [{ atSec: 3, x: 100 }] })).toThrow(/`y`/);
+  });
+
+  // ⚠️ **録画の外を指す段**＝焼いてもそこにコマが無い（取り出しで落ちて原因が読めない）。
+  it("録画の外を指す段は落とす", () => {
+    expect(() => checkRecordLog({ ...ok(), steps: [{ atSec: 99, x: 1, y: 2 }] })).toThrow(/録画の外/);
   });
 });

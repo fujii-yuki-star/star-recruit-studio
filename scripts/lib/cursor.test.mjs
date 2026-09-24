@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURSOR_H, CURSOR_W, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE,
   artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
-  positionExpr, ripplePixels, toVideoPoint,
+  positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint,
 } from "./cursor.mjs";
 
 /** その画素の不透明度。 */
@@ -217,5 +217,77 @@ describe("カーソルの動き", () => {
   it("押す場所が無ければ、何も出さない", () => {
     expect(cursorPath([])).toEqual([]);
     expect(cursorAt([], 1)).toBeNull();
+  });
+});
+
+// ⚠️ **カーソル本体を見る時刻**（#1227・PR #1237 再レビュー 🟡）。
+// 輪だけ見ていると**カーソルが1画素も描かれていなくても通る**ので、ここが検査の目になる。
+describe("カーソルだけが止まっている時刻", () => {
+  /** 押す間隔 `gap` で `n` 回押す台本。 */
+  const script = (n, gap, first = 3) =>
+    Array.from({ length: n }, (_, i) => ({ atSec: first + i * gap, x: 100 + i * 50, y: 200 }));
+
+  it("押下ごとに、押す直前の溜めを1つ見る", () => {
+    const points = script(3, 1.5);
+    const stills = stillTimes(cursorPath(points), points, 12);
+    for (const p of points) {
+      expect(stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec), `${p.atSec}s の押下を見ていない`).toBe(true);
+    }
+  });
+
+  // ⚠️ **窓の途中から輪が出る形も断る**＝`cursorPath` の作りでは起きないが、この関数は
+  //   道筋と押下を別々に受け取るので、**呼び方しだいで起きる**。起きたら重心に輪が混ざる。
+  //   ⚠️ この枝を試さないと、**門を外しても検査が緑のまま**だった（変異が生き残った）。
+  it("止まっている窓の途中で押される形も、選ばない", () => {
+    const path = [{ atSec: 0, x: 100, y: 200 }, { atSec: 10, x: 100, y: 200 }];
+    const stills = stillTimes(path, [{ atSec: 5, x: 100, y: 200 }], 12);
+    // 0〜10 の窓は**途中で押される**ので捨てる（最後の点より後ろの窓は残ってよい）。
+    expect(stills.filter((t) => t < 10), "輪をまたぐ窓を選んでいる").toEqual([]);
+  });
+
+  // ⚠️ **輪の出ている間は選ばない**＝カーソルだけを見たいのに、輪が混ざると重心がずれる。
+  it("輪が出ている時刻は選ばない", () => {
+    const points = script(3, 1.5);
+    const stills = stillTimes(cursorPath(points), points, 12);
+    for (const t of stills) {
+      const 輪の中 = points.some((p) => p.atSec <= t && t <= p.atSec + RIPPLE_SEC);
+      expect(輪の中, `${t}s は輪が出ている`).toBe(false);
+    }
+  });
+
+  // ⚠️ **動いている最中は選ばない**＝コマの取り出しが 1/15 秒ずれるだけで 30 画素動く
+  //   （実測で 22 画素ずれて落ちた）。選ぶのは、同じ位置が続いている区間だけ。
+  it("動いている最中は選ばない", () => {
+    const points = script(2, 2);
+    const path = cursorPath(points);
+    for (const t of stillTimes(path, points, 10)) {
+      const a = cursorAt(path, t - 0.05);
+      const b = cursorAt(path, t + 0.05);
+      expect({ ...a }, `${t}s は動いている`).toEqual({ ...b });
+    }
+  });
+
+  // ⚠️ **録画の終わりをまたがない**＝`totalSec` は ffmpeg を起こしてからの秒で、
+  //   **実尺はそれより数百 ms 短い**。またぐと「コマを取り出せません」で落ちる。
+  // ⚠️ **最後の押下を終わり際に置いて測る**＝余裕のある台本だと、安全代を外しても
+  //   同じ結果になってしまい、**この振る舞いを一度も試していない**ことになる（変異が生き残った）。
+  it("録画の終わり際は選ばない（実尺は totalSec より短い）", () => {
+    const points = script(2, 1.5);
+    const totalSec = points[points.length - 1].atSec + 1;
+    for (const t of stillTimes(cursorPath(points), points, totalSec)) {
+      expect(t, "終わり際を選んでいる").toBeLessThanOrEqual(totalSec - TAIL_GUARD_SEC);
+    }
+  });
+
+  it("押す場所が無ければ、何も選ばない", () => {
+    expect(stillTimes([], [], 10)).toEqual([]);
+  });
+
+  // ⚠️ **詰めた台本では痩せる**＝「0個か否か」ではなく**押下ごとに見られているか**を数える理由。
+  it("間隔を詰めると、見られない押下が出る（痩せ方が分かる）", () => {
+    const points = script(3, 0.6);
+    const stills = stillTimes(cursorPath(points), points, 10);
+    const seen = points.filter((p) => stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec));
+    expect(seen.length, "詰めても全部見えているなら、窓の取り方が甘い").toBeLessThan(points.length);
   });
 });

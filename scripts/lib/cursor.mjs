@@ -78,6 +78,8 @@ export const SCALE_NOT_100_MESSAGE = (dpr) =>
 
 /** 押した瞬間の印（輪）の外径。 */
 export const RIPPLE_SIZE = 56;
+/** 押した瞬間の印が出ている長さ（秒）。⚠️ **絵と一緒に置く**＝焼く側と検査側で同じ値を使う。 */
+export const RIPPLE_SEC = 0.45;
 
 /**
  * 押した瞬間の**輪**の画素（RGBA・`RIPPLE_SIZE` 四方）。
@@ -110,8 +112,12 @@ export function ripplePixels(size = RIPPLE_SIZE, thickness = 3) {
  *
  * ⚠️ **検査の期待値をここから作る**（PR #1237 レビュー 🟡）＝以前は「押した点」を期待値にしていたが、
  * **輪が左右対称で重心が押した点そのもの**なので、**カーソルが1画素も描かれていなくても合格**していた。
- * さらに座標の対応（`view` のずれ）を**丸ごと落としても合格**した＝この道具が防ぐと言っている当のものを
- * 通していた。**焼く絵から重心を出して期待値にする**と、カーソル本体もずれも検査に入る。
+ * 重心を期待値にすると、**カーソル本体**が検査に入る。
+ *
+ * ⚠️ **`view` のずれは、これでは**依然として**見えない**（PR #1237 再レビュー 🔴）＝
+ * 期待値も焼く位置も**同じ `view`** から出るので、両方が同じだけずれて辻褄が合う
+ *（実測＝ずれを丸ごと落としても `✓` が出た）。**そちらは `tutorialRecord.mjs` が録画から実測して見る**
+ *（`checkViewAgainstVideo`）。層の分け方は ADR-0046 の表にある。
  */
 export function artCentroid(px, w, h) {
   let sx = 0;
@@ -150,13 +156,26 @@ export function expectedCursorCenter(at) {
 }
 
 /**
+ * 録画の終わりに残す安全代（秒）。
+ *
+ * ⚠️ **`totalSec` を信じきらない**＝これは **ffmpeg を起こしてからの秒**で、録画の実尺は
+ * **数百 ms 短い**（`timeBaseNote`）。引かないと末尾の標本が**録画の外**に出て、
+ * 不具合が無いのに「コマを取り出せません」で落ちる。
+ */
+export const TAIL_GUARD_SEC = 0.6;
+
+/** 押す場所まで動く時間と、着いてから押すまでの溜め（秒）。⚠️ **検査もこの値を使う**（直書きしない）。 */
+export const TRAVEL_SEC = 0.6;
+export const SETTLE_SEC = 0.25;
+
+/**
  * カーソルが**いつ・どこに居るか**（押した記録から作る）。
  *
  * ⚠️ **押す前に少し溜める**＝着いてすぐ押すと、見ている人が「どこを押したか」を追えない。
  * `travelSec` かけて動き、`settleSec` 止まってから押す。
  * ⚠️ **最初の位置は、最初に押す所の少し左上**＝画面の外から入ってこない（どこから来たか分からない）。
  */
-export function cursorPath(points, { travelSec = 0.6, settleSec = 0.25 } = {}) {
+export function cursorPath(points, { travelSec = TRAVEL_SEC, settleSec = SETTLE_SEC } = {}) {
   if (points.length === 0) return [];
   const path = [];
   let from = { x: Math.max(0, points[0].x - 120), y: Math.max(0, points[0].y - 90) };
@@ -199,7 +218,9 @@ export function cursorAt(path, t) {
  * ffmpeg 用の式を**別に組み立てて**おり、`cursorAt` と**同じ意味を2つの言語で二重に書いた**形だった
  *（端の扱いまで別々＝`Math.max(0.001, span)` と `span <= 0 ? 1 : …`）。しかも**焼いた後の検査が
  * カーソル本体を見ていなかった**ので、この式は**どの網にも掛かっていなかった**。
- * ⚠️ **1つの木から2つの書き方を出す**＝`ffmpeg` と `js` で**ずれようがない**。`js` 側は検査が叩く。
+ * ⚠️ **枝の形を共有し、方言の差は2つの関数（`lt`／`iff`）に閉じる**（PR #1237 再レビュー ℹ️）＝
+ * 「ずれようがない」とまでは言えない（共有されるのは木の形と `lerp` の文字列で、方言そのものは別）。
+ * それでも**位置の決め方は1か所**になるので、`js` 側を評価して `cursorAt` と突き合わせられる。
  */
 export function positionExpr(path, axis, dialect = "ffmpeg") {
   const lt = (a, b) => (dialect === "js" ? `(${a} < ${b})` : `lt(${a},${b})`);
@@ -214,4 +235,42 @@ export function positionExpr(path, axis, dialect = "ffmpeg") {
     expr = iff(lt("t", `${b.atSec}`), iff(lt("t", `${a.atSec}`), `${a[axis]}`, lerp), expr);
   }
   return expr;
+}
+
+/**
+ * **輪が出ていない**あいだで、**カーソルが止まっている**時刻（カーソル本体だけを見るため）。
+ *
+ * ⚠️ **「押した後」とは限らない**（PR #1237 再レビュー 🟡）＝実測すると、選ばれる時刻の多くは
+ * **押す直前**（着いてから押すまでの溜め）。名前と説明を「輪が消えたあと」にすると読む人が誤解する。
+ * ⚠️ **止まっている所を選ぶ**＝動いている最中は、コマの取り出しが 1/15 秒ずれるだけで
+ * 30 画素ほど動く（実測で 22 画素ずれて落ちた）。そこを見ると**正しく焼けていても落ちる**。
+ * ⚠️ **並びの形（3つ組）に頼らない**＝`cursorPath` の作り方が変わっても効くよう、
+ * **同じ位置が続く区間**として拾う。
+ * ⚠️ **終わりに安全代（`TAIL_GUARD_SEC`）を引く**（同レビュー 🟡）＝`totalSec` は **ffmpeg を起こしてからの秒**で、
+ * **録画の実尺はそれより数百 ms 短い**（`timeBaseNote`）。引かないと、末尾の標本が
+ * **録画の外**に出て「コマを取り出せません」で落ちる回がある。
+ */
+export function stillTimes(path, points, totalSec, { least = 0.15, after = 0.2, tailGuard = TAIL_GUARD_SEC } = {}) {
+  const spans = [];
+  for (let i = 1; i < path.length; i += 1) {
+    const a = path[i - 1];
+    const b = path[i];
+    if (a.x === b.x && a.y === b.y && b.atSec > a.atSec) spans.push([a.atSec, b.atSec]);
+  }
+  const last = path[path.length - 1];
+  if (last) spans.push([last.atSec, totalSec]);
+
+  const out = [];
+  for (const [from, to] of spans) {
+    let s0 = from;
+    for (const p of points) {
+      if (p.atSec <= s0 && s0 < p.atSec + RIPPLE_SEC) s0 = p.atSec + RIPPLE_SEC + after;
+    }
+    const s1 = Math.min(to, totalSec - tailGuard);
+    if (!(s1 - s0 >= least)) continue;
+    // 輪の出ている区間と重なる窓は捨てる（カーソルだけを見たいので）
+    if (points.some((p) => s0 < p.atSec + RIPPLE_SEC && p.atSec < s1)) continue;
+    out.push(Number(((s0 + s1) / 2).toFixed(3)));
+  }
+  return out;
 }
