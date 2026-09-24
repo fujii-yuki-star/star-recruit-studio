@@ -35,3 +35,44 @@ export function checkPlan(plan) {
   });
   return plan;
 }
+
+/**
+ * 録った**記録**を確かめる（焼く側の入口）。
+ *
+ * ⚠️ **録る側にだけ門番があった**（PR #1237 再レビュー ℹ️）＝台本は `checkPlan` が見るのに、
+ * **記録は素通し**だった。`totalSec` が無いだけで `-t undefined` になり、`stillTimes` の中では
+ * `NaN` の比較が**すべて false** になって窓が捨てられず、**ffmpeg のエラー文**で落ちる
+ *＝原因が読めない（この道具が潰そうとしている「黙って別のことをする」と同じ型）。
+ */
+export function checkRecordLog(log) {
+  if (log == null || typeof log !== "object") throw new Error("記録が読めません（JSON ではありません）");
+  for (const key of ["video", "view", "totalSec", "fps", "steps"]) {
+    if (log[key] == null) throw new Error(`記録に \`${key}\` がありません＝#1226 の新しい版で録り直してください`);
+  }
+  if (!Number.isFinite(log.totalSec) || log.totalSec <= 0) {
+    throw new Error(`記録の \`totalSec\` が秒になっていません: ${JSON.stringify(log.totalSec)}`);
+  }
+  // ⚠️ **コマ数も要る**＝焼く側が**コマ境界へ丸めて**切るのに使う（端数のまま切ると時間軸が1コマずれる）。
+  if (!Number.isFinite(log.fps) || log.fps <= 0) {
+    throw new Error(`記録の \`fps\` がコマ数になっていません: ${JSON.stringify(log.fps)}`);
+  }
+  for (const key of ["offsetX", "offsetY", "dpr", "width", "height"]) {
+    if (!Number.isFinite(log.view[key])) throw new Error(`記録の \`view.${key}\` が数ではありません＝録り直してください`);
+  }
+  // ⚠️ **隣の欄も見る**（PR #1237 3回目 🟡）＝`usableFromSec` は任意（#1226 の旧記録には無い）だが、
+  //   **壊れて入っている**と `totalSec - NaN` が `NaN` になり、`totalSec <= 0` は
+  //   **NaN 比較なので false** で素通りする＝この関数を作った当の理由（上の説明）と同じ穴。
+  if (log.usableFromSec != null) {
+    if (!Number.isFinite(log.usableFromSec) || log.usableFromSec < 0 || log.usableFromSec >= log.totalSec) {
+      throw new Error(`記録の \`usableFromSec\` が秒になっていません: ${JSON.stringify(log.usableFromSec)}＝録り直してください`);
+    }
+  }
+  if (!Array.isArray(log.steps) || log.steps.length === 0) throw new Error("記録に押した段が1つもありません");
+  log.steps.forEach((step, i) => {
+    for (const key of ["atSec", "x", "y"]) {
+      if (!Number.isFinite(step?.[key])) throw new Error(`${i + 1} 段目の \`${key}\` が数ではありません: ${JSON.stringify(step)}`);
+    }
+    if (step.atSec > log.totalSec) throw new Error(`${i + 1} 段目が録画の外にあります（${step.atSec}s / 全体 ${log.totalSec}s）`);
+  });
+  return log;
+}

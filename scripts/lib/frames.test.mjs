@@ -4,7 +4,7 @@
 // 判定（`sameFrame`／`distinctFrames`）を切り出してあるので、**ここを直接叩く**
 //（`CLAUDE.md` §7＝拾い方を純粋関数に切り出す）。
 import { describe, expect, it } from "vitest";
-import { DIFF_RATIO, PIXEL_TOLERANCE, SAMPLE_H, SAMPLE_W, distinctFrames, framesFromResult, sameFrame } from "./frames.mjs";
+import { CHANGE_TOLERANCE, DIFF_RATIO, PIXEL_TOLERANCE, SAMPLE_H, SAMPLE_W, changedBounds, changedCenter, distinctFrames, framesFromResult, sameFrame } from "./frames.mjs";
 
 /** ⚠️ **実物と同じ大きさで測る**（PR #1234 レビュー ℹ️）＝直書きだと、定数を変えても検査は緑のまま。 */
 const N = SAMPLE_W * SAMPLE_H;
@@ -83,5 +83,87 @@ describe("取り出した結果の受け取り", () => {
 
   it("起こせなかったときも落とす", () => {
     expect(() => framesFromResult({ error: new Error("見つかりません") })).toThrow(/見つかりません/);
+  });
+
+  // ⚠️ **コマの大きさは渡せる**（#1227）＝焼いた結果を見るときは細かく（160×100）取り出す。
+  //   ここが固定だと、**別の大きさで割って**まるで違う絵を比べることになる（気づけない）。
+  it("コマの大きさを渡せる（決め打ちで割らない）", () => {
+    expect(framesFromResult({ status: 0, stdout: Buffer.alloc(100 * 2) }, "a.mp4", 100).length).toBe(2);
+  });
+});
+
+// ⚠️ **焼いたものが押した所に出ているか**を確かめる唯一の手（#1227）。
+describe("変わった所の中心", () => {
+  const W = 8;
+  const H = 8;
+  const base = () => new Uint8Array(W * H).fill(0);
+
+  it("変わっていなければ null（描かれていないことに気づける）", () => {
+    expect(changedCenter(base(), base(), W)).toBeNull();
+  });
+
+  it("1点だけ変われば、その点", () => {
+    const after = base();
+    after[3 * W + 5] = 255;
+    expect(changedCenter(base(), after, W)).toMatchObject({ x: 5, y: 3, count: 1 });
+  });
+
+  it("かたまりなら、その真ん中", () => {
+    const after = base();
+    for (const [x, y] of [[4, 4], [5, 4], [4, 5], [5, 5]]) after[y * W + x] = 255;
+    expect(changedCenter(base(), after, W)).toMatchObject({ x: 4.5, y: 4.5, count: 4 });
+  });
+
+  // ⚠️ **わずかな差は数えない**＝符号化の粗で中心が引っぱられる。
+  it("わずかな差は数えない", () => {
+    const after = base();
+    after[0] = 10;
+    expect(changedCenter(base(), after, W, CHANGE_TOLERANCE)).toBeNull();
+  });
+
+  // ⚠️ **長さ違いを黙って通さない**（PR #1237 レビュー ℹ️）＝短いと `NaN` 比較になって
+  //   数え落とし、最悪「何も描かれていない」と**誤報**する（直す先を間違える）。
+  it("長さが違えば落とす（黙って数え落とさない）", () => {
+    expect(() => changedCenter(base(), new Uint8Array(4), W)).toThrow(/大きさが違います/);
+  });
+});
+
+// ⚠️ **独立した物差し**（PR #1237 レビュー 🟡）＝`view` は引き算で出した値なので、
+// **それで描いて、それで検査する**限り、丸ごと間違っていても `✓` が出る（実測）。
+// 画面いっぱいの目印を焼いて、**録画そのものから中身の矩形を測る**のがこれ。
+describe("広く変わった矩形", () => {
+  const W = 10;
+  const H = 8;
+  const base = () => new Uint8Array(W * H).fill(0);
+  /** (x,y) から w×h を塗ったコマ。 */
+  const box = (x0, y0, w, h) => {
+    const a = base();
+    for (let y = y0; y < y0 + h; y += 1) for (let x = x0; x < x0 + w; x += 1) a[y * W + x] = 255;
+    return a;
+  };
+
+  it("塗った矩形の位置と大きさを返す", () => {
+    expect(changedBounds(base(), box(2, 3, 5, 4), W)).toMatchObject({ x: 2, y: 3, w: 5, h: 4 });
+  });
+
+  it("変わっていなければ null", () => {
+    expect(changedBounds(base(), base(), W)).toBeNull();
+  });
+
+  // ⚠️ **1画素の外れ値で矩形を広げない**＝行・列の「何割変わったか」で見る。
+  it("ぽつんと1画素だけ違っても、矩形は広がらない", () => {
+    const a = box(2, 3, 5, 4);
+    a[0] = 255;
+    expect(changedBounds(base(), a, W), "外れ値に引きずられている").toMatchObject({ x: 2, y: 3, w: 5, h: 4 });
+  });
+
+  // ⚠️ **わずかな差は数えない**＝符号化の粗で矩形が画面いっぱいに広がる。
+  it("わずかな差は数えない", () => {
+    const a = base().map(() => 10);
+    expect(changedBounds(base(), a, W)).toBeNull();
+  });
+
+  it("長さが違えば落とす（黙って測らない）", () => {
+    expect(() => changedBounds(base(), new Uint8Array(4), W)).toThrow(/大きさが違います/);
   });
 });

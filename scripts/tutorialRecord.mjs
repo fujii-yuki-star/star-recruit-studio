@@ -28,13 +28,33 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { FIND_BY_TEXT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
 import { checkPlan, parseOutDir } from "./lib/plan.mjs";
-import { distinctFrames, sampleFrames } from "./lib/frames.mjs";
+import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
+import { viewVerdict } from "./lib/burnCheck.mjs";
+import { SCALE_NOT_100_MESSAGE } from "./lib/cursor.mjs";
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
-const FFMPEG = "src-tauri/resources/ffmpeg/bin/ffmpeg.exe";
 const PORT = 9222;
 /** 録画のコマ数。⚠️ 上げるほど重く、下げるとカーソルの動きが飛ぶ。 */
 const FPS = 15;
+/**
+ * 撮り始めに出す**目印**の長さと、それを見に行く時刻（秒）。
+ *
+ * ⚠️ **長めに出す**＝`atSec` は ffmpeg を起こしてからの秒で、**録画の先頭は数百 ms 遅れる**
+ *（`timeBaseNote`）。短いと、その遅れのぶんで**目印の外**を見てしまう。
+ */
+const FLASH_SEC = 1.2;
+const FLASH_SAMPLE_AFTER = 0.4;
+/**
+ * 目印を消してから台本を始めるまでの間（秒）。
+ *
+ * ⚠️ **短くしない**（PR #1237 再レビュー 🟡）＝焼く側は**目印の終わりまでを切り落とす**ので、
+ * ここが短いと**カーソルが動き始める時刻が切り口より前**になり、
+ * 最初のカーソルが**いきなり画面の途中から現れる**（`tutorialCursor` が断る）。
+ */
+const AFTER_FLASH_SEC = 1.5;
+/** 目印が写っていると認めるのに要る、変わった画素の割合。 */
+const FLASH_MIN_RATIO = 0.6;
+
 /** 段ごとの検収で、押した前後どれだけを見るか（秒）と、そのコマ数。 */
 const STEP_WINDOW_SEC = 0.5;
 const STEP_SAMPLE_FPS = 8;
@@ -106,6 +126,112 @@ const VIEWPORT = `JSON.stringify({
   dpr: window.devicePixelRatio,
 })`;
 
+/**
+ * 画面いっぱいの**目印**（`view` が本当に合っているかを、録画から**測る**ための的）。
+ *
+ * ⚠️ **計算した値で描いて、同じ値で検査しても意味がない**（PR #1237 レビュー 🟡）＝
+ * `view` が丸ごと間違っていても**辻褄が合う**（実測で `✓` が出た）。**録画そのものを測る**。
+ * ⚠️ **押せないようにする**（`pointer-events:none`）＝台本の操作に混ざらない。
+ * ⚠️ **色は明暗どちらのテーマからも遠いものを選ぶ**（PR #1237 再レビュー ℹ️）＝比べるのは
+ * **白黒に落とした明るさ**なので、`#ff00ff` の明るさ（約 105）に近い**中間の灰**が画面の端にあると、
+ * その行・列が「変わっていない」と読まれて**矩形が数画素欠ける**。この製品の明（250）・暗（42）とは
+ * 十分離れている。**テーマの色を変えたらここも見直す**。
+ */
+const FLASH_ON = `(() => {
+  const d = document.createElement("div");
+  d.id = "__stario_flash";
+  d.style.cssText = "position:fixed;inset:0;background:#ff00ff;z-index:2147483647;pointer-events:none";
+  document.body.appendChild(d);
+  return "ok";
+})()`;
+const FLASH_OFF = `(() => { const d = document.getElementById("__stario_flash"); if (d) d.remove(); return "ok"; })()`;
+
+/** 録画から**原寸の白黒のコマ**を1枚（⚠️ 縮めない＝数画素のずれを測るため）。 */
+function fullFrameAt(file, atSec, w, h) {
+  const r = spawnSync(FFMPEG, [
+    "-hide_banner", "-loglevel", "error", "-i", file, "-ss", String(atSec),
+    "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-",
+  ], { maxBuffer: 1 << 28 });
+  const frames = framesFromResult(r, file, w * h);
+  if (frames.length === 0) throw new Error(`${file} の ${atSec}s のコマを取り出せません`);
+  return frames[0];
+}
+
+/**
+ * **計算した `view` が、録画の実物と合っているか**を測って確かめる。
+ *
+ * ⚠️ **ここが #1227 の土台**＝ここが狂うと、仮想カーソルは**押した所とは違う場所**に出る。
+ * そして #1227 側の検査は**同じ `view` から期待値を作る**ので、**気づけない**（実測）。
+ */
+function checkViewAgainstVideo(video, flashAtSec, rect, view) {
+  const before = fullFrameAt(video, 0.1, rect.w, rect.h);
+  const during = fullFrameAt(video, flashAtSec + FLASH_SAMPLE_AFTER, rect.w, rect.h);
+  const b = changedBounds(before, during, rect.w);
+  const least = view.width * view.height * FLASH_MIN_RATIO;
+  if (!b || b.count < least) {
+    // ⚠️ **原因を1つに決めつけない**（PR #1237 再レビュー 🟡）＝この分岐は
+    //   「録画の始まりが遅い」以外に「**目印を出せなかった**」「**画面と目印が同系色**」でも通る。
+    //   1つだけ挙げると**直す先を間違えさせる**（§2-5 は「次の行動」を求めている）。
+    throw new Error([
+      `撮り始めの目印が録画に写っていません（変わった画素 ${b?.count ?? 0} / 要 ${Math.round(least)}）。次のどれかです:`,
+      "  ・録画の始まりが遅い（`-framerate` を上げるか、録り始めの待ちを延ばす）",
+      "  ・目印を出せていない（アプリが別の画面を出していないか）",
+      "  ・画面と目印が同系色（目印の色を変える）",
+    ].join(`
+`));
+  }
+  const gaps = viewVerdict(b, view);
+  if (gaps.length > 0) {
+    throw new Error([
+      "画面の中身が、録画の思った所に写っていません:",
+      ...gaps.map((z) => `  ${z}`),
+      "  ＝このまま撮るとカーソルが違う場所に出ます。窓を動かさずに撮り直してください",
+      "  （起動直後に窓の大きさが変わると、測った値が古くなって起きます）",
+    ].join(`
+`));
+  }
+  // ⚠️ **「一致」と言い切らない**（PR #1237 3回目 🟡）＝`viewVerdict` は許容の内側を通すので、
+  //   数画素のずれがあっても「一致」と出てしまう（実際に **高さ −7** の回を「一致」と印字した。
+  //   気づいたのは人が数字を読んだからで、**機械は鳴っていない**）。**ずれを数で出す**。
+  const off = `${b.x - view.offsetX >= 0 ? "+" : ""}${b.x - view.offsetX},${b.y - view.offsetY >= 0 ? "+" : ""}${b.y - view.offsetY}`;
+  const sizeOff = `${b.w - view.width >= 0 ? "+" : ""}${b.w - view.width},${b.h - view.height >= 0 ? "+" : ""}${b.h - view.height}`;
+  console.log(`✓ 中身の位置を録画で実測: (${b.x},${b.y}) ${b.w}x${b.h} / 計算とのずれ 位置 ${off} 大きさ ${sizeOff}（許容の内側）`);
+}
+
+/**
+ * 画面の**使える範囲**（タスクバーを除いた所）。
+ *
+ * ⚠️ **なぜ要るか**（PR #1237 再レビュー で見つけた実例）＝窓の下端がタスクバーの下に潜っていると、
+ * デスクトップを切り出す撮り方では**そこにタスクバーが写る**（窓の中身は写らない）。
+ * 実測＝中身の高さが 800 のはずが **793** と出た（＝アプリの下 7 画素が教材に写っていなかった）。
+ * **エラーは出ない**ので、測らなければ気づけない。
+ */
+function workArea() {
+  const out = spawnSync("powershell", ["-NoProfile", "-Command",
+    "Add-Type -AssemblyName System.Windows.Forms; $w=[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; '{0} {1} {2} {3}' -f $w.X,$w.Y,$w.Width,$w.Height",
+  ], { encoding: "utf8" });
+  const [x, y, w, h] = (out.stdout ?? "").trim().split(/\s+/).map(Number);
+  if (![x, y, w, h].every(Number.isFinite)) throw new Error(`画面の使える範囲を読めません: ${JSON.stringify(out.stdout)}`);
+  return { x, y, w, h };
+}
+
+/**
+ * **大きさが動かなくなった**窓の矩形。
+ *
+ * ⚠️ **1回読んで済ませない**＝起動直後は窓がまだ動く。古い値で撮ると、録画の切り出しと
+ * 画面の中身がずれ、**カーソルが違う場所に出る**（`checkViewAgainstVideo` が捕まえた実例）。
+ */
+async function stableWindowRect(tries = 12, waitMs = 300) {
+  let last = windowRect();
+  for (let i = 0; i < tries; i += 1) {
+    await new Promise((r) => setTimeout(r, waitMs));
+    const now = windowRect();
+    if (now.x === last.x && now.y === last.y && now.w === last.w && now.h === last.h) return now;
+    last = now;
+  }
+  throw new Error("窓の大きさが落ち着きません＝動かしている最中ではありませんか（手を離してから撮ってください）");
+}
+
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
   if (!scriptPath) {
@@ -139,7 +265,10 @@ async function main() {
     await cdp.send("Runtime.enable");
     await new Promise((r) => setTimeout(r, 1500)); // 初回描画を待つ
 
-    const rect = windowRect();
+    // ⚠️ **窓が落ち着いてから測る**（実測で踏んだ）＝起動直後はまだ大きさが動いており、
+    //   そこで測ると `view` が**古い値**になる。実際に、中身の高さが 33 画素ずれた録画ができた
+    //   （下の実測が捕まえた）。**同じ値が2回続く**まで待つ。
+    const rect = await stableWindowRect();
     const vp = JSON.parse(await evaluate(cdp, VIEWPORT));
     // ⚠️ **ずれは実測から採る**（推測しない）＝窓の原点と、画面の中身の原点の差。
     const view = {
@@ -157,12 +286,22 @@ async function main() {
     //   `screenX` は **CSS px**、`GetWindowRect` と `gdigrab` は**物理 px**なので、
     //   100% のときだけ単位が一致する。**掛ければよい、は推測**（どちらに掛けるかで結果が変わる）。
     //   ここで断れば「ずれた教材」を作らずに済む（§2-5＝次の行動を出す）。
-    if (view.dpr !== 1) {
-      throw new Error(`画面の拡大率が ${Math.round(view.dpr * 100)}% です。100% にしてから撮ってください`);
-    }
-    // ⚠️ **副モニタ（負の座標）も断る**＝`gdigrab` の切り出しがずれる。
-    if (rect.x < 0 || rect.y < 0) {
-      throw new Error(`窓が主モニタの外にあります（${rect.x},${rect.y}）＝主モニタへ移してから撮ってください`);
+    //   ⚠️ **文は焼く側と共有する**（PR #1237 レビュー 🟡）＝断り方が2つに割れると、
+    //   片方だけ直したときに「録る側は断るのに焼く側は通す」が起きる。
+    if (view.dpr !== 1) throw new Error(SCALE_NOT_100_MESSAGE(view.dpr));
+    // ⚠️ **画面からはみ出していたら断る**（PR #1237 再レビュー で見つけた実例）＝
+    //   副モニタ（負の座標）だけでなく、**タスクバーの下に潜っている**のも同じ害
+    //  （そこにタスクバーが写り、アプリの下端が教材から消える。実測で 7 画素欠けた）。
+    const area = workArea();
+    const outside = [];
+    if (rect.x < area.x) outside.push(`左に ${area.x - rect.x}`);
+    if (rect.y < area.y) outside.push(`上に ${area.y - rect.y}`);
+    if (rect.x + rect.w > area.x + area.w) outside.push(`右に ${rect.x + rect.w - area.x - area.w}`);
+    if (rect.y + rect.h > area.y + area.h) outside.push(`下に ${rect.y + rect.h - area.y - area.h}`);
+    if (outside.length > 0) {
+      throw new Error(`窓が画面の使える範囲からはみ出しています（${outside.join(" / ")} 画素）`
+        + "＝はみ出した所にはタスクバーや別の画面が写ります。"
+        + "窓を主モニタの、タスクバーに掛からない位置へ移してから撮ってください");
     }
 
     // ② 録画を始める（⚠️ **デスクトップから切り出す**・実カーソルは消す）
@@ -175,9 +314,46 @@ async function main() {
       "-video_size", `${rect.w}x${rect.h}`, "-i", "desktop",
       "-c:v", "h264_mf", "-b:v", "8000k", "-pix_fmt", "yuv420p", video,
     ], { stdio: ["pipe", "ignore", "inherit"] });
-    ff.on("error", (e) => { throw new Error(`FFmpeg を起こせません: ${e.message}`); });
+    // ⚠️ **リスナの中で投げない**（PR #1237 4回目 ℹ️）＝投げても **uncaughtException** になるだけで、
+    //   下の `finally` を通らない＝**アプリとデバッグの口が開いたまま残る**。
+    //   直前のコメントが「拾えば後片づけを通る」と言っていたのに、**実装はそうなっていなかった**。
+    //   受け取るのは箱に入れるだけにして、**本流の `checkStillRecording` から投げる**。
+    let ffError = null;
+    ff.on("error", (e) => { ffError = e; });
+    // ⚠️ **途中で死んだことに気づけるようにする**（実機で踏んだ）＝`error` は**起こせなかったとき**
+    //   しか鳴らない。**起きたあとに落ちた**回は誰も見ておらず、台本を最後まで走らせたうえで
+    //   `ff.on("exit")` を待ち続けて**永遠に止まった**（実際に2回、数分待っても返らなかった）。
+    //   ⚠️ **止まるのが最悪**＝何が起きたか分からず、録れていないことにも気づけない。
+    let ffExit = null;
+    ff.on("exit", (code) => { ffExit = code ?? -1; });
     const t0 = Date.now();
     await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
+    /** 録画が生きているか（死んでいたら**その場で**理由つきで止める）。 */
+    const checkStillRecording = (when) => {
+      if (ffError) throw new Error(`FFmpeg を起こせません（${when}）: ${ffError.message}`);
+      if (ffExit === null) return;
+      throw new Error([
+        `録画が${when}止まりました（FFmpeg の終了コード ${ffExit}）。次のどれかです:`,
+        "  ・画面がロックされている／リモート接続が切れている（`gdigrab` は撮れません。ロックを解いてから撮ってください）",
+        "  ・書き込み先が使えない（別のソフトが同じファイルを開いていませんか）",
+        "  上に FFmpeg のメッセージが出ています。",
+      ].join(`
+`));
+    };
+    checkStillRecording("始まってすぐに");
+
+    // ②'⚠️ **中身が録画のどこに写っているかを、測る**（PR #1237 レビュー 🟡）＝
+    //   `view` は引き算で出した値なので、**それで描いて、それで検査する**限り
+    //   間違いに気づけない（実測で通ってしまった）。画面いっぱいの目印を焼き付けて、後で測る。
+    const flashAtSec = (Date.now() - t0) / 1000;
+    await evaluate(cdp, FLASH_ON);
+    await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
+    await evaluate(cdp, FLASH_OFF);
+    await new Promise((r) => setTimeout(r, AFTER_FLASH_SEC * 1000));
+    /** ⚠️ **焼く側はここから先だけを使う**＝目印を配る素材に載せない。 */
+    const usableFromSec = Number((flashAtSec + FLASH_SEC + 0.3).toFixed(3));
+    // ⚠️ **台本を走らせる前に、もう一度見る**＝ここで死んでいると、以降の数十秒が丸ごと無駄になる。
+    checkStillRecording("目印を出している間に");
 
     // ③ 台本を走らせ、**押した時刻と座標**を残す（仮想カーソルの素＝#1227）
     const log = [];
@@ -210,33 +386,42 @@ async function main() {
         headingAfter,
       });
       console.log(`${tSec.toFixed(1)}s 「${at.label}」(${at.x},${at.y}) → ${headingAfter}`);
+      // ⚠️ **段ごとに見る**（PR #1237 4回目 ℹ️）＝台本は分単位で走るので、ここで死ぬと
+      //   **残り全部を無駄に走らせてから**落ちる（実機で踏んだ画面ロックは、まさにここで起きる）。
+      checkStillRecording(`${log.length} 段目のあとに`);
     }
 
     // ④ 録画を終える
+    checkStillRecording("台本を走らせている間に");
     ff.stdin.write("q");
-    await new Promise((r) => ff.on("exit", r));
+    // ⚠️ **既に終わっていたら待たない**＝`exit` は一度しか鳴らないので、鳴った後に待つと**永遠に返らない**。
+    if (ffExit === null) await new Promise((r) => ff.on("exit", r));
     ff = null;
     const totalSec = (Date.now() - t0) / 1000;
 
     // ⑤ ⚠️ **撮れたことを機械で確かめる**（ここを省くと嘘の教材ができる）
-    const seen = sampleFrames(FFMPEG, video);
+    checkViewAgainstVideo(video, flashAtSec, rect, view);
+    // ⚠️ **目印より後ろだけを数える**（PR #1237 3回目 🟡）＝撮り始めの目印は**画面いっぱいが変わる**ので、
+    //   先頭から数えると `distinctFrames` が必ず 2 以上になり、**この門が鳴らなくなっていた**
+    //  （＝「窓指定で撮ると全コマ同じ絵」という、いちばん守りたい形が素通りする）。
+    const seen = sampleFrames(FFMPEG, video, 2, usableFromSec);
     const kinds = distinctFrames(seen);
 
     // ⚠️ **段ごとに見る**（PR #1234 レビュー 🟡）＝録画ぜんたいで1回だけ数えると、
     //   **どこか1回でも絵が変われば通る**＝段①だけ写って②③が凍った回も `✓` になる。
     //   押した前後の窓を採り、**その段で絵が動いたか**を1段ずつ確かめる。
-    const 動かなかった = [];
+    const frozenSteps = [];
     for (const s of log) {
       const from = Math.max(0, s.atSec - STEP_WINDOW_SEC);
       const to = s.atSec + STEP_WINDOW_SEC;
       const around = sampleFrames(FFMPEG, video, STEP_SAMPLE_FPS, from, to);
-      if (around.length < 2) { 動かなかった.push(`${s.atSec}s（コマが足りない）`); continue; }
-      if (distinctFrames(around) < 2) 動かなかった.push(`${s.atSec}s「${s.label}」`);
+      if (around.length < 2) { frozenSteps.push(`${s.atSec}s（コマが足りない）`); continue; }
+      if (distinctFrames(around) < 2) frozenSteps.push(`${s.atSec}s「${s.label}」`);
     }
     writeFileSync(logPath, JSON.stringify({
       name: plan.name, video, totalSec, distinctFrames: kinds,
       // ⚠️ **カーソルを描く側（#1227）が使う**＝ここが無いと押した所と違う場所に印が出る。
-      view, fps: FPS,
+      view, fps: FPS, flashAtSec, usableFromSec,
       // ⚠️ **`atSec` は録り始めからの秒ではなく、`ffmpeg` を起こしてからの秒**（PR #1234 レビュー ℹ️）＝
       // gdigrab の立ち上がり（数百 ms 規模）だけ**一律に早い**。#1227 のカーソルは**押す前に着く**向きにずれる。
       // ⚠️ **補正していない**＝補正するなら、撮り始めに目印を出してその最初のコマで採り直す。
@@ -254,8 +439,8 @@ async function main() {
     if (kinds < 2) {
       throw new Error("録画の絵が一度も変わっていません＝画面の更新を拾えていません（窓指定で撮っていませんか）");
     }
-    if (動かなかった.length > 0) {
-      throw new Error(`押したのに絵が動いていない段があります:\n  ${動かなかった.join("\n  ")}`);
+    if (frozenSteps.length > 0) {
+      throw new Error(`押したのに絵が動いていない段があります:\n  ${frozenSteps.join("\n  ")}`);
     }
     console.log("✓ 撮れました（段ごとに絵が動いたことを確かめました。中身は目で見てください）");
   } finally {
