@@ -4,7 +4,7 @@
 // 判定（`sameFrame`／`distinctFrames`）を切り出してあるので、**ここを直接叩く**
 //（`CLAUDE.md` §7＝拾い方を純粋関数に切り出す）。
 import { describe, expect, it } from "vitest";
-import { DIFF_RATIO, PIXEL_TOLERANCE, SAMPLE_H, SAMPLE_W, distinctFrames, framesFromResult, sameFrame } from "./frames.mjs";
+import { DIFF_RATIO, PIXEL_TOLERANCE, SAMPLE_H, SAMPLE_W, changedCenter, distinctFrames, framesFromResult, sameFrame } from "./frames.mjs";
 
 /** ⚠️ **実物と同じ大きさで測る**（PR #1234 レビュー ℹ️）＝直書きだと、定数を変えても検査は緑のまま。 */
 const N = SAMPLE_W * SAMPLE_H;
@@ -83,5 +83,35 @@ describe("取り出した結果の受け取り", () => {
 
   it("起こせなかったときも落とす", () => {
     expect(() => framesFromResult({ error: new Error("見つかりません") })).toThrow(/見つかりません/);
+  });
+});
+
+// ⚠️ **焼いたものが押した所に出ているか**を確かめる唯一の手（#1227）。
+describe("変わった所の中心", () => {
+  const W = 8;
+  const H = 8;
+  const base = () => new Uint8Array(W * H).fill(0);
+
+  it("変わっていなければ null（描かれていないことに気づける）", () => {
+    expect(changedCenter(base(), base(), W)).toBeNull();
+  });
+
+  it("1点だけ変われば、その点", () => {
+    const after = base();
+    after[3 * W + 5] = 255;
+    expect(changedCenter(base(), after, W)).toMatchObject({ x: 5, y: 3, count: 1 });
+  });
+
+  it("かたまりなら、その真ん中", () => {
+    const after = base();
+    for (const [x, y] of [[4, 4], [5, 4], [4, 5], [5, 5]]) after[y * W + x] = 255;
+    expect(changedCenter(base(), after, W)).toMatchObject({ x: 4.5, y: 4.5, count: 4 });
+  });
+
+  // ⚠️ **わずかな差は数えない**＝符号化の粗で中心が引っぱられる。
+  it("わずかな差は数えない", () => {
+    const after = base();
+    after[0] = 10;
+    expect(changedCenter(base(), after, W, 24)).toBeNull();
   });
 });
