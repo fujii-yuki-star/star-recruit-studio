@@ -29,7 +29,8 @@
     "check:ffmpeg-dist": "node scripts/check-ffmpeg-dist.mjs",
     "check:voicevox-copy": "node scripts/check-voicevox-copy.mjs",
     "review": "npm run check:frontend && npm run build && npm run check:rust && npm run check:rust:fmt && npm run check:rust:clippy && npm run check:rust:test",
-    "hooks:install": "git config --local core.hooksPath .githooks"
+    "hooks:install": "git config --local core.hooksPath .githooks",
+    "tutorial:record": "node scripts/tutorialRecord.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
