@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "mutate": "node scripts/mutate.mjs",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "validate:schemas": "node scripts/validate-schemas.mjs",
     "validators:build": "node scripts/compile-validators.mjs",
     "predev": "npm run validators:build && npm run check:voicevox-copy",

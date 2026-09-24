@@ -63,6 +63,9 @@ function runTests(tests) {
   const line =
     out
       .split("\n")
+      // ⚠️ 色付けの制御文字（ESC）を落とすのが目的なので、**制御文字そのものを書くのが正しい**。
+      //   別の書き方（`String.fromCharCode(27)` 等）は読めなくなるだけ（#1235）。
+      // eslint-disable-next-line no-control-regex
       .map((l) => l.replace(/\u001b\[[0-9;]*m/g, ""))
       .find((l) => /^\s*Tests\s/.test(l))
       ?.trim() ?? "(件数の行が取れなかった)";

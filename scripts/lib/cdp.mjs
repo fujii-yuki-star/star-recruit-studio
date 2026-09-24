@@ -35,7 +35,9 @@ export function connect(wsUrl) {
   let nextId = 1;
   const ready = new Promise((resolve, reject) => {
     ws.addEventListener("open", () => resolve());
-    ws.addEventListener("error", (e) => reject(new Error(`WebSocket: ${e.message ?? "失敗"}`)));
+    // ⚠️ `message` は**実際に入っている**（Node 22 の `WebSocket` は `ErrorEvent` を渡す＝実測で
+    //   「Received network error or non-101 status code.」が取れた）。型の上では `Event` なので注記する。
+    ws.addEventListener("error", (e) => reject(new Error(`WebSocket: ${/** @type {{ message?: string }} */ (e).message ?? "失敗"}`)));
   });
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);

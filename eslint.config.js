@@ -32,10 +32,33 @@ export default tseslint.config(
   },
 
   // Node で動かすスクリプト・設定ファイル（node グローバル）
+  //
+  // ⚠️ **規則を当てる**（#1235）＝ここは以前 `globals` を足すだけで **規則がゼロ**だった。
+  // そのせいで `scripts/lib/frames.mjs` から `const out = [];` を落としたとき、
+  // **未定義の変数を触る状態のまま `npx eslint scripts/` が通った**（PR #1234 の作業中に実際に起きた）。
+  // `no-undef` があれば**その場で赤くなる**種類の壊し方だったので、`recommended` を当てる。
   {
     files: ['scripts/**/*.{ts,mjs,js}', '*.config.{js,ts}'],
+    extends: [js.configs.recommended],
     languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
       globals: globals.node,
+    },
+    rules: {
+      // アプリ本体と同じ扱い（日本語のコメント・文言に全角スペースが入る）
+      'no-irregular-whitespace': ['error', { skipStrings: true, skipComments: true, skipTemplates: true, skipJSXText: true }],
+      // ⚠️ `ignoreRestSiblings`＝`const { format, ...rest } = x` で**わざと外す**書き方を通す
+      //   （`validate-schemas.mjs` が「その欄を欠いた検体」を作るのに使っている＝未使用ではなく意図）。
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true }],
+    },
+  },
+
+  // 検査（vitest のグローバルを使う）
+  {
+    files: ['scripts/**/*.test.mjs'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.vitest },
     },
   },
 );

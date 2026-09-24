@@ -41,7 +41,8 @@ const cases = [
 ];
 
 let ok = true;
-for (const [name, validate, path] of cases) {
+// ⚠️ 名前・検証器・道のりの3つ組。型の上では要素ごとに別の型なので、束ねると合併になる（注記で解く）。
+for (const [name, validate, path] of /** @type {[string, import("ajv").ValidateFunction, string][]} */ (cases)) {
   const valid = validate(load(path));
   if (valid) {
     console.log(`PASS  schema    ${name}`);

@@ -43,3 +43,9 @@ node scripts/mutate.mjs <spec.json>          # 実行
 ## 終わったら
 
 `npm run check:frontend`（Rust を触ったら `check:rust` と `check:rust:test` も＝**fmt/clippy を省かない**）。
+
+⚠️ **`scripts/**` も同じ網に入っています**（#1235・2026-09-24）＝道具の `.mjs` は以前
+**lint も型検査も掛かっておらず**、`const out = [];` を落としても `eslint` が通りました。
+いまは `eslint .` に規則が当たり、`npm run typecheck` が `tsconfig.scripts.json`（`checkJs`）も見ます。
+⚠️ **`.mjs` では引数の数は見てもらえません**（JSDoc が無いと TypeScript は JS の引数を任意扱いにする）。
+そこは**検査と変異チェックで留める**。
