@@ -152,7 +152,7 @@
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
 | `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |
-| `MAX_SCENES_PER_VIDEO` | `80` | **場面の数の上限**。⚠️ **手で足す道では本当の上限**（足す・複製・分ける×2＝`projectStore` の関門・#1213）／**AI 生成では異常検知の警告どまり**（V10・切り詰めはしない）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `scenes.maxItems`（門番＝`src/test/canonConstantsGuard.test.ts`） |
+| `MAX_SCENES_PER_VIDEO` | `80` | **場面の数の上限**。⚠️ **どの道でも本当の上限**（#1222）＝手で足す道（足す・複製・分ける×2）も、**AI の動画案を取り込むとき**も `projectStore` の同じ関門（`canAddScenes`）を通る。⚠️ **AI の道だけ「警告どまり」だった**（#1213 の時点）＝**同じ定数なのに道で強さが違う**状態を #1222 で解消した。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `scenes.maxItems`（門番＝`src/test/canonConstantsGuard.test.ts`） |
 | `FPS` | `30` | 既定フレームレート |
 | `WIDTH` × `HEIGHT` | `1920` × `1080` | 既定解像度 |
 | `NARRATION_VOLUME` | `1.0` | ナレーション既定音量 |
@@ -401,7 +401,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V7 | `durationSec` が範囲内（手編集＝`>0`／AI 生成＝目安 `[3, テンプレ上限 or 15]`・#553） | clamp（§9） |
 | V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等）。**掛け合い（`lines`/`narrationLines`）があるときは各行が対象**（単一 `narration` はその1行）＝生成時（`transformPlan`）と公開前チェック（`sceneLines`）で**同じ対象**を見る（#569・ADR-0026②）。閾値の継承順はテンプレ `aiHint` → 既定定数で両者共通（#568） | 警告＋短縮提案 |
 | V9 | 合計尺 ≤ `videoSettings.maxDurationSec` | 警告 |
-| V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知）。⚠️ **ここは切り詰めない**＝AI が81以上を返しても場面は減らさない（黙って中身を捨てない）。⚠️ **手で足す道は本当に断る**（#1213）ので、**同じ定数で強さが違う**ことに注意 |
+| V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知）。⚠️ **ここは切り詰めない**＝AI が81以上を返しても場面は減らさない（黙って中身を捨てない）。⚠️ **断るのは取り込む側**（#1222）＝`projectStore` が `canAddScenes` で**反映せずに断る**（`AI_SCENE_LIMIT_EXCEEDED`）。この検証は**変換の記録**として警告を残すだけで、止める役ではない。⚠️ **先に AI へ伝えてある**＝プロンプトに「場面は80個まで」（`12 §5`／`§5b`）。ここは守られなかったときの受け皿 |
 | V11 | `part.sceneIds` と `scenes[].partId` の整合 | 致命: 再構築 |
 | V12 | `scene.freeLayout[]`（slot）の `assetId`（非null時）が実在素材か | 警告（`ASSET_NOT_FOUND`） |
 | V13 | `scene.freeLayout[]` の `w>0` かつ `h>0` | 警告（`FREE_ELEMENT_INVALID_SIZE`） |

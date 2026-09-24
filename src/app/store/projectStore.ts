@@ -63,7 +63,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, 
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
-import { canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
+import { aiSceneLimitMessage, canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
 import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -966,6 +966,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         orientation: meta.videoSettings.aspectRatio,
       });
       if (get()._generationSeq !== seq) return; // 変換中にキャンセルされ得るので反映直前にも再確認（#402）
+      // ⚠️ **上限を超えた動画案は取り込まない**（#1222）＝手で足す道は #1213 で塞いだのに、
+      // **AI の道だけ**が残っていた（`transformPlan` は警告を積むだけで場面を減らさない）。
+      // ⚠️ **切り詰めない**＝AI が書いた場面を黙って捨てることになる（ADR-0026④）。
+      // ⚠️ **ここで止める**＝`set` より前。入れてから断ると、#1213 が塞いだのと**同じ状態**
+      //（上限を超えた動画が保存できて、外へ渡したときだけ弾かれる）を自分で作ることになる。
+      // ⚠️ **たたき台の入力は消さない**＝「作り直す」が1手で押せる（ウィザードの内容は残る）。
+      if (!canAddScenes(0, scenes.length)) {
+        set({ status: "error", aiError: aiSceneLimitMessage(scenes.length) });
+        return;
+      }
       set({ status: "ready", parts, scenes, warnings, draftFromAi: true }); // AI 生成直後＝たたき台のAI作成文言を出す（#467）
       // 動画案ができたら未生成のセリフ音声をバックグラウンドで自動生成（非ブロッキング・#176）。
       // 仕上がり確認へ着いた時点で成功分は鳴る。失敗場面は per-scene の「声を作り直す」で作り直せる。

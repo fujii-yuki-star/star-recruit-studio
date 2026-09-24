@@ -4,7 +4,7 @@
 //（`schemas/project.schema.json` の `scenes.maxItems` は 80。読込は `maxItems` 違反で拒否しない＝#416）。
 import { describe, expect, it } from 'vitest';
 import { MAX_SCENES_PER_VIDEO } from '../constants';
-import { canAddScenes, sceneLimitMessage } from './sceneLimit';
+import { aiSceneLimitMessage, canAddScenes, sceneLimitMessage } from './sceneLimit';
 
 describe('場面の数の上限', () => {
   it('上限のひとつ手前なら、あと1つ足せる', () => {
@@ -22,6 +22,42 @@ describe('場面の数の上限', () => {
     expect(canAddScenes(MAX_SCENES_PER_VIDEO - 2, 3)).toBe(false);
   });
 
+});
+
+describe('AI の動画案が上限を超えたときの断り（#1222）', () => {
+  // ⚠️ **実際の数を出す**＝「多すぎます」だけだと、どれくらい減らせばよいか分からない。
+  it('いくつだったかを出す', () => {
+    expect(aiSceneLimitMessage(93)).toContain('93');
+    expect(aiSceneLimitMessage(81)).toContain('81');
+  });
+
+  it('上限の数も出す（いくつまでか分かる）', () => {
+    expect(aiSceneLimitMessage(93)).toContain(String(MAX_SCENES_PER_VIDEO));
+  });
+
+  // ⚠️ **取り込んでいないことを言う**＝言わないと「入ったが警告が出た」と読める
+  //（実際に入れてしまうと、#1213 が塞いだのと同じ状態を作る）。
+  it('取り込んでいないことを言う', () => {
+    expect(aiSceneLimitMessage(93)).toContain('取り込んでいません');
+  });
+
+  // ⚠️ **次の行動が「消す」ではない**＝まだ1つも取り込んでいないので、消す対象が無い。
+  it('次の行動は「減らして作り直す」（消す、ではない）', () => {
+    const m = aiSceneLimitMessage(93);
+    expect(m).toContain('作り直');
+    expect(m, 'この道では消す対象が無い').not.toContain('要らない場面を消す');
+  });
+
+  // ⚠️ **同じ内容で頼み直すとまた超える**＝何度押しても直らない行動を勧めない（§2-5）。
+  it('「もう一度お試しください」とは言わない', () => {
+    expect(aiSceneLimitMessage(93)).not.toContain('もう一度お試しください');
+  });
+
+  // ⚠️ **技術用語を出さない**（§2-3）。
+  it('技術用語を出さない', () => {
+    const m = aiSceneLimitMessage(93);
+    for (const word of ['スキーマ', 'schema', 'maxItems', 'AI', 'プラン']) expect(m).not.toContain(word);
+  });
 });
 
 describe('これ以上足せないときの案内', () => {

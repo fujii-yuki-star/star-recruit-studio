@@ -2,7 +2,7 @@
 // 正典: 12_AI_PROMPT_AND_MAPPING §5（システムプロンプト確定版）/ §6（ユーザーメッセージテンプレート）。
 // MVP はテキストのみ（素材サムネイルは添付しない＝12§4 更新・ADR-0010 P3 へ繰り延べ）。
 // 出力契約（JSON モード／schema 指定）と検証（ajv→transformVideoPlan）は別モジュールが担う。
-import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
+import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import { assetSentText, selectAssetsForSend } from './assetSendText';
@@ -37,6 +37,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プラ
 - texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限（maxDuration）があれば従う。
 - 全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で ${MAX_SCENES_PER_VIDEO} 個までにする。超えそうなら1場面を長くして数を減らす（場面を増やして細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。
 - yukoPoseTag は場面に合う表情タグ（例：smile, guide, bow）を「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - 素材に人物・社外秘が含まれそうな場合は reviewNotes に確認を促す一文を入れる。`;
@@ -61,6 +62,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT_GENERAL = `あなたは社内向け・一�
 - 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で ${MAX_SCENES_PER_VIDEO} 個までにする。超えそうなら1場面を長くして数を減らす（場面を増やして細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
 - yukoPoseTag は場面に合う表情タグを「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - purpose は一般の種別（${GENERAL_PURPOSES.join(' / ')}）に沿った内容にする。`;

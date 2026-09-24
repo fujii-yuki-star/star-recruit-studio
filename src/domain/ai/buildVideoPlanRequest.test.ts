@@ -1,3 +1,4 @@
+import { MAX_SCENES_PER_VIDEO } from '../constants';
 import { describe, expect, it } from 'vitest';
 import { AI_ASSET_SEND_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
@@ -57,6 +58,22 @@ function fullInput(): GenerateVideoPlanInput {
     yukoPoseTags: ['smile', 'guide', 'bow'],
   };
 }
+
+// ⚠️ **断る前に、先に伝えておく**（#1222）＝上限を超えた動画案は取り込まずに断るので、
+// **AI が知らないまま作ると、呼び出し1回ぶんが無駄になる**。プロンプトに書いておくのが第1段で、
+// 断りはその受け皿（第2段）。⚠️ **採用向けと一般向けの両方**＝片方だけだと、
+// その用途のときだけ無駄打ちが起きる（**同じ規則を用途で割らない**）。
+describe('場面の数の上限を、AI へ先に伝える（#1222）', () => {
+  it.each([
+    ['採用向け', VIDEO_PLAN_SYSTEM_PROMPT],
+    ['一般・社内発表向け', VIDEO_PLAN_SYSTEM_PROMPT_GENERAL],
+  ])('%s のプロンプトに上限が書いてある', (_name, prompt) => {
+    expect(prompt, '上限の数が書かれていない').toContain(String(MAX_SCENES_PER_VIDEO));
+    expect(prompt, '「場面の数の上限」として書かれていない').toContain(`場面は全部で ${MAX_SCENES_PER_VIDEO} 個まで`);
+    // ⚠️ **超えそうなときの逃げ道も書く**＝「80まで」だけだと、AI は**内容を削って**辻褄を合わせる。
+    expect(prompt, '超えそうなときにどうするかが無い').toContain('1場面を長くして数を減らす');
+  });
+});
 
 describe('buildVideoPlanMessages', () => {
   it('システムプロンプトは 12§5 の確定版を返す', () => {
