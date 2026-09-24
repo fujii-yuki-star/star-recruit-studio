@@ -314,7 +314,12 @@ async function main() {
       "-video_size", `${rect.w}x${rect.h}`, "-i", "desktop",
       "-c:v", "h264_mf", "-b:v", "8000k", "-pix_fmt", "yuv420p", video,
     ], { stdio: ["pipe", "ignore", "inherit"] });
-    ff.on("error", (e) => { throw new Error(`FFmpeg を起こせません: ${e.message}`); });
+    // ⚠️ **リスナの中で投げない**（PR #1237 4回目 ℹ️）＝投げても **uncaughtException** になるだけで、
+    //   下の `finally` を通らない＝**アプリとデバッグの口が開いたまま残る**。
+    //   直前のコメントが「拾えば後片づけを通る」と言っていたのに、**実装はそうなっていなかった**。
+    //   受け取るのは箱に入れるだけにして、**本流の `checkStillRecording` から投げる**。
+    let ffError = null;
+    ff.on("error", (e) => { ffError = e; });
     // ⚠️ **途中で死んだことに気づけるようにする**（実機で踏んだ）＝`error` は**起こせなかったとき**
     //   しか鳴らない。**起きたあとに落ちた**回は誰も見ておらず、台本を最後まで走らせたうえで
     //   `ff.on("exit")` を待ち続けて**永遠に止まった**（実際に2回、数分待っても返らなかった）。
@@ -325,6 +330,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
     /** 録画が生きているか（死んでいたら**その場で**理由つきで止める）。 */
     const checkStillRecording = (when) => {
+      if (ffError) throw new Error(`FFmpeg を起こせません（${when}）: ${ffError.message}`);
       if (ffExit === null) return;
       throw new Error([
         `録画が${when}止まりました（FFmpeg の終了コード ${ffExit}）。次のどれかです:`,
@@ -380,6 +386,9 @@ async function main() {
         headingAfter,
       });
       console.log(`${tSec.toFixed(1)}s 「${at.label}」(${at.x},${at.y}) → ${headingAfter}`);
+      // ⚠️ **段ごとに見る**（PR #1237 4回目 ℹ️）＝台本は分単位で走るので、ここで死ぬと
+      //   **残り全部を無駄に走らせてから**落ちる（実機で踏んだ画面ロックは、まさにここで起きる）。
+      checkStillRecording(`${log.length} 段目のあとに`);
     }
 
     // ④ 録画を終える

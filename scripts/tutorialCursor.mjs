@@ -16,7 +16,7 @@ import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CURSOR_H, CURSOR_W, RIPPLE_SEC, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE, SETTLE_SEC, TRAVEL_SEC,
+  CURSOR_H, CURSOR_W, RIPPLE_SEC, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE, SETTLE_SEC, TAIL_GUARD_SEC, TRAVEL_SEC,
   cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter, positionExpr, ripplePixels,
   stillTimes, toVideoPoint,
 } from "./lib/cursor.mjs";
@@ -53,6 +53,9 @@ function main() {
   //   検査の2つの時間軸（元＝`atSec + trimSec` / 焼き後＝`atSec`）が**1コマずれる**ことがある。
   //   止まっている所は無害だが、**押した瞬間は画面が遷移中**なので、そのずれが丸ごと
   //   「変わった所」に乗って「広すぎます」の誤検出になる。
+  // ⚠️ **これは録画がコマ等間隔（CFR）である前提**＝`gdigrab` はそう録る（実測＝`time_base 1/15360`・
+  //   各コマの時刻が `k/15` ちょうど）。等間隔でなくなれば 1 コマずれが戻るが、その回は
+  //   「広すぎます」で自分から落ちる（黙って通ることはない）。
   const fps = log.fps;
   const trimSec = fps > 0 ? Math.ceil((log.usableFromSec ?? 0) * fps) / fps : (log.usableFromSec ?? 0);
   const totalSec = log.totalSec - trimSec;
@@ -132,12 +135,17 @@ function main() {
   for (const t of stills) checkAt(t, expectedCursorCenter(cursorAt(path, t)), "カーソルだけ");
 
   // ⚠️ **「1つでもあれば良い」にしない**（PR #1237 再レビュー 🟡）＝最初の溜めの窓は必ず残るので
-  //   「0個なら止める」は**鳴りえない門**だった。本当に起きる劣化は**押下ごとの検査が静かに痩せる**こと
-  //  （台本を詰めると、3回押しても標本が1個になる）。**押下ごとに1つ**を要る。
+  //   「0個なら止める」は**鳴りえない門**だった。**押下ごとに1つ**を要る。
+  // ⚠️ **いま鳴りうるのは「録画の終わり際」だけ**（同 4回目 🟡）＝押す間隔が詰まった形は
+  //   `cursorPath` が**入口で断る**ようになったので、ここまで来ない。**原因を取り違えさせない**よう、
+  //   終わり際かどうかで文を分ける（「間隔を広げて」と言われても、終わり際の押下は直らない）。
   const unchecked = points.filter((p) => !stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec));
-  if (unchecked.length > 0) {
-    bad.push(`カーソル本体を見られなかった押下が ${unchecked.length} 件あります（${unchecked.map((p) => `${p.atSec}s`).join(" ")}）`
-      + `＝押す間隔を ${(TRAVEL_SEC + SETTLE_SEC + RIPPLE_SEC).toFixed(2)} 秒より広げてください`);
+  for (const p of unchecked) {
+    const nearEnd = p.atSec > totalSec - TAIL_GUARD_SEC - SETTLE_SEC;
+    bad.push(`${p.atSec}s の押下でカーソル本体を見られませんでした：`
+      + (nearEnd
+        ? `録画の終わり（${totalSec.toFixed(2)}s）に近すぎます＝台本の最後に待ち（\`waitMs\`）を足してから録り直してください`
+        : `止まっている時刻を採れませんでした＝押す間隔を ${(TRAVEL_SEC + SETTLE_SEC + RIPPLE_SEC).toFixed(2)} 秒より広げてください`));
   }
 
   if (bad.length > 0) throw new Error(`押した所に印が出ていません:\n  ${bad.join("\n  ")}`);
