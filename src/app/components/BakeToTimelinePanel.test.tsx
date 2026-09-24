@@ -192,7 +192,10 @@ describe("BakeToTimelinePanel：作っている間と、作ったあと（#992�
     fireEvent.click(screen.getByText("作る内容を確かめる"));
     fireEvent.click(await screen.findByText("この内容で作る"));
     await screen.findByText("作成中…");
-    expect(canNavigate("home" as never), "作っている最中に離れられる").toBe(false);
+    // ⚠️ **関門は effect で名乗るので、文字が出た瞬間はまだ間に合っていないことがある**（#1007）。
+    //   `HomeScreen.restore` で**同じ形が実際に落ちた**（80回中2回）。ここでは 40回まわして
+    //   **落ちなかったが、仕組みは同じ**なので同じ書き方に揃える（0/40 は安全の証拠にならない）。
+    await waitFor(() => expect(canNavigate("home" as never), "作っている最中に離れられる").toBe(false));
     expect(await screen.findByText(BAKE_LEAVE_BLOCKED_MESSAGE)).toBeInTheDocument();
     // 終われば、また離れられる（塞ぎっぱなしにしない）。
     finish({ projectId: "proj_20260728_001", notes: [] });
