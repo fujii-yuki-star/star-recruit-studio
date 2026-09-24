@@ -103,14 +103,27 @@ export function adrHeadingDrift(bodies: readonly (readonly [string, string])[]):
     //   **`## 決定の判断軸` が先に当たって本物を一度も見ない** ADR が **8本**あった（雛形もそう＝
     //   これから起こす ADR は**全部この穴に落ちる**）。判断軸は決定ではないので外し、**残り全部**を見る。
     const headings = lines.filter((l) => /^##\s*決定/.test(l) && !l.includes('判断軸'));
-    if (headings.length === 0) continue;
-    const tentative = headings.find((h) => /Proposed|提案/.test(h));
+    // ⚠️ **黙って走査から落とさない**（PR #1239 2回目 🟡）＝`continue` だと、見出しが
+    //   `## 結論` などに改題された ADR が**一件も赤を出さずに**対象外になる。読んだ本数（46）を
+    //   留めても、**見た本数**は留まっていなかった。**見つからないこと自体を報せる**。
+    if (headings.length === 0) {
+      out.push(`${name}: 決定の見出しが見つかりません（「## 決定」から改題されていませんか）`);
+      continue;
+    }
+    // ⚠️ **仮の印**＝この repo で実際に使われている書き方（`（Proposed）`／`（提案）`）に、
+    //   起案中に使われうる語を足す。`案` は入れない＝`（A案を採る）` のような**確定した見出し**に
+    //   当たってしまうため（誤検出しない側に倒す）。
+    const 仮か = (h: string) => /Proposed|提案|暫定|Draft/.test(h);
+    const tentative = headings.find(仮か);
     if (own.includes('Accepted')) {
       if (tentative) out.push(`${name}: 状態は Accepted なのに「${tentative.trim()}」`);
-    } else if (own.includes('Proposed') && !tentative) {
+    } else if (own.includes('Proposed') && !headings.every(仮か)) {
+      // ⚠️ **「どれか1本でも仮なら緑」にしない**（同 ℹ️）＝決定の見出しが2本ある ADR
+      //   （0012 / 0019 / 0029 が実在）では、片方だけ仮だと**もう片方が確定に見えたまま**通る。
       // ⚠️ **逆向きも見る**（同レビュー 🟡）＝`Proposed` なのに括弧書きが無いと、本文が
       //   **確定したように読める**（実際に 0016 がそうだった）。#1232 と同じ害が鏡像で起きる。
-      out.push(`${name}: 状態は Proposed なのに「${headings[0].trim()}」（確定に見える）`);
+      const 確定に見える = headings.find((h) => !仮か(h)) ?? headings[0];
+      out.push(`${name}: 状態は Proposed なのに「${確定に見える.trim()}」（確定に見える）`);
     }
   }
   return out;
@@ -418,11 +431,29 @@ describe('門番自身の検査（わざと壊した入力を通す）', () => {
     expect(adrHeadingDrift([['0024-a.md', '- **状態**: Proposed\n\n## 決定（Proposed）\n']])).toEqual([]);
   });
 
-  // ⚠️ **判断軸しか無い ADR を、括弧書きの抜けと読まない**＝`## 決定の判断軸` は決定の見出しでは
-  //   ないので、外さずに数えると **Proposed の ADR を誤検出**する（決定の見出しがまだ無い起案中の形）。
-  it('「決定の判断軸」しか無い Proposed の ADR は拾わない', () => {
+  // ⚠️ **見出しが見つからないことを、黙って通さない**（PR #1239 2回目 🟡）＝
+  //   改題されると**一件も赤を出さずに**走査から落ちる（読んだ本数だけでは留まらない）。
+  it('決定の見出しが見つからなければ報せる', () => {
+    const body = '- **状態**: Accepted\n\n## 結論\n\nあれこれ\n';
+    expect(adrHeadingDrift([['0099-a.md', body]]), '黙って走査から落としている').toHaveLength(1);
+  });
+
+  // ⚠️ **決定の見出しが2本ある ADR**（0012 / 0019 / 0029 が実在）＝片方だけ仮だと、
+  //   もう片方が**確定に見えたまま**通ってしまう。
+  it('Proposed なら、決定の見出しは全部が仮であること', () => {
+    const body = '- **状態**: Proposed\n\n## 決定（Proposed）\n\n## 決定事項\n';
+    expect(adrHeadingDrift([['0099-b.md', body]]), '片方が確定に見えるまま通している').toHaveLength(1);
+    const ok = '- **状態**: Proposed\n\n## 決定（Proposed）\n\n## 決定事項（暫定）\n';
+    expect(adrHeadingDrift([['0099-c.md', ok]])).toEqual([]);
+  });
+
+  // ⚠️ **判断軸は決定の見出しではない**＝外さずに数えると「確定に見える」と誤って報せる。
+  //   正しくは「**決定の見出しが見つからない**」＝どちらも1件だが、**言うことが違う**ので文で見る。
+  it('「決定の判断軸」しか無ければ、見出しが無いと報せる（確定に見える、ではない）', () => {
     const body = '- **状態**: Proposed（Draft）\n\n## 決定の判断軸\n\nあとで書く\n';
-    expect(adrHeadingDrift([['0099-a.md', body]]), '判断軸を決定の見出しと読んでいる').toEqual([]);
+    const found = adrHeadingDrift([['0099-a.md', body]]);
+    expect(found).toHaveLength(1);
+    expect(found[0], '判断軸を決定の見出しと読んでいる').toContain('決定の見出しが見つかりません');
   });
 
   // ⚠️ **入れ子の括弧でも崩れない**（いまの ADR には無いが、無いことに頼らない）。
