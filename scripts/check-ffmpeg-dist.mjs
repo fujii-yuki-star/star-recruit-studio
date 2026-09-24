@@ -2,10 +2,11 @@
 // 配布ビルド前に `npm run check:ffmpeg-dist` で実行。同梱 FFmpeg が pin 済み構成を満たすか機械判定する。
 // ※ 同梱バイナリは大容量で git 追跡外（CI 不在）のため、本スクリプトは CI ではなく配布ビルド環境で実行する。
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const BIN = join("src-tauri", "resources", "ffmpeg", "bin", "ffmpeg.exe");
+const LICENSE = join("src-tauri", "resources", "ffmpeg", "LICENSE.txt");
 const PINNED_VERSION = "n8.1.2"; // FFmpeg_SOURCE.md の pin と一致させる
 
 let failures = 0;
@@ -65,9 +66,24 @@ if (/--disable-libx264\b/.test(buildconf) && /--enable-shared\b/.test(buildconf)
   fail("配布版が想定の LGPL shared 構成でない（dev の ffmpeg-static 混入の疑い）");
 }
 
-// 参考: libopenh264 が含まれる場合は第三者ライセンス記録が必要（FFmpeg_SOURCE.md に記載済み・通常経路では未使用）
+// 5) ライセンス本文が同梱されている（LGPL の義務）
+//    ⚠️ **ここを見ていなかった**（PR #1240 レビュー 🟡）＝同梱物は git 追跡外で手で置くので、
+//    `bin` だけ置いて `LICENSE.txt` を忘れても、この検査は緑のままだった（`bundle.resources` は
+//    ディレクトリを丸ごと載せるだけで、**中身が揃っているかは見ない**）。
+if (existsSync(LICENSE)) ok(`ライセンス本文が同梱されている（${LICENSE}）`);
+else fail(`ライセンス本文が同梱されていません: ${LICENSE}（FFmpeg_SOURCE.md の手順で配置してください）`);
+
+// 6) libopenh264 を含むなら、その告知も配布物に要る（BSD-2-Clause）
+//    ⚠️ **「FFmpeg_SOURCE.md に記録済み」では足りない**（同レビュー 🟡）＝この資料は
+//    `bundle.resources` に入らないので**配布物には行かない**。告知は同梱フォルダの中に要る。
+//    ⚠️ **フォールバックは実在する**＝`-h encoder=libopenh264` で使えることを確認済み。
 if (/\blibopenh264\b/.test(encoders)) {
-  console.log("ℹ libopenh264 を含む → 第三者ライセンス（BSD-2-Clause）は FFmpeg_SOURCE.md に記録済み。通常経路では h264_mf 優先で未使用。");
+  const hasNotice = existsSync(LICENSE) && /openh264/i.test(readFileSync(LICENSE, "utf8"));
+  if (hasNotice) ok("libopenh264 の告知（BSD-2-Clause）が同梱のライセンス本文にある");
+  else {
+    console.warn("⚠ libopenh264 を含むのに、同梱のライセンス本文に告知（BSD-2-Clause）がありません。");
+    console.warn("  → 13 §9 の表「同梱物のライセンス告知の補完」を見てください。");
+  }
 }
 
 if (failures > 0) {

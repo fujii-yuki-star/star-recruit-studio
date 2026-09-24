@@ -1,6 +1,6 @@
 # 13. 依存・ライセンス・配布仕様
 
-> ⚠️ **本書は 2026-06-10 時点の調査に基づく整理であり、法的助言ではない。** 各ライセンス・規約は変更されうるため、**配布（特に商用）前に最新の公式規約と、必要に応じて専門家の確認**を行うこと。確認すべき項目は §9 のチェックリストに集約する。
+> ⚠️ **本書は 2026-06-10 時点の調査に基づく整理であり、法的助言ではない。** 各ライセンス・規約は変更されうるため、**配布（特に商用）前に最新の公式規約と、必要に応じて専門家の確認**を行うこと。確認すべき項目は §9 のチェックリストに集約する（**個別の関門は §9 の表に7つ**）。
 > 本書は Phase 0（技術検証）の前提を確定するための資料（`02_MVP_ROADMAP.md`・レビュー論点⑦）。
 
 > ⚠️ **解消したら、消さずに「結末」を書く**（#1230・2026-09-24 棚卸し）＝
@@ -24,11 +24,11 @@
 
 | 依存 | 用途 | ライセンス（執筆時点の理解） | 配布上の要点 | 状態 |
 |---|---|---|---|---|
-| FFmpeg | 動画合成・エンコード | LGPL 2.1+（`--enable-gpl` 不使用時）。GPL部分を使うと全体GPL | LGPLビルド＋動的リンク＋ソース提供。H.264特許は別途 | §3 / **決定済み・同梱済み**（`win64-lgpl-shared` を pin・`FFmpeg_SOURCE.md`・#119／残るは MPEG-LA 許諾要否＝§9） |
+| FFmpeg | 動画合成・エンコード | ⚠️ **同梱しているのは LGPL v3**（pin が `--enable-version3`）。FFmpeg 自体は LGPL 2.1+／`--enable-gpl` を使うと全体 GPL | LGPLビルド＋動的リンク＋ソース提供。H.264特許は別途 | §3 / **決定済み・同梱済み**（`win64-lgpl-shared` を pin・`FFmpeg_SOURCE.md`・#119／残るは MPEG-LA 許諾要否＝§9） |
 | VOICEVOX | ゆうこの声（音声合成） | ソフト本体規約＋**各キャラ規約は別**（キャラ規約優先） | **「VOICEVOX:ずんだもん」クレジット必須** | §4 / **確認済み・同梱済み**（根拠は ADR-0005＝#122／ENGINE v0.25.2 同梱＝#149・#151／残るは配布時の最終確認＝§9） |
 | ずんだもん（音源） | 既定の声 | 東北ずん子・ずんだもんプロジェクト（SSS LLC.）規約 | 商用可・クレジットで利用可。⚠️ **「別キャラの声として使う」論点は消えた**（`adr/0003`＝**ナレーター音声**として用い、ゆうこの固有の声とは称さない） | §5 / **解消済み**（残るは常時クレジット＝実装済み） |
 | 日本語フォント | テキスト・字幕描画 | 同梱・埋め込み可のものを選定（例：SIL OFL系） | アプリ同梱＋ライセンス表記 | §6 / **選定済み・同梱済み**（初期3種・全 SIL OFL 1.1・#161／追加は段階的） |
-| 外部AI API | 動画構成案生成 | 各社規約（OpenAI/Claude/Gemini） | APIキーはユーザー管理。鍵をAI本文に載せない | §7 |
+| 外部AI API | 動画構成案生成 | 各社規約（OpenAI/Claude/Gemini） | APIキーはユーザー管理。鍵をAI本文に載せない | §7 / **鍵は OS キーチェーン保管を実装済**（ADR-0010）／残るのは**運用ルール**（`01 §19`） |
 | 標準BGM | 同梱BGM | 再配布・商用利用が可能なもののみ（CC0） | 出所とライセンスの記録 | §8.1（**実装済**・CC0 3曲） |
 | 標準装飾アセット | パネル・帯等 | 同上 | 同上 | §8 / **「当面なし」と決定**（採用するときに権利台帳へ足す） |
 | ゆうこ素材 | マスコット立ち絵 | 自社が商用利用＋アプリ同梱の権利を保有 | 権利の明確化 | §8 / **自社保有で権利クリア**（`17_YUKO_CHARACTER_SPEC.md`） |
@@ -41,6 +41,11 @@
 - FFmpeg は **LGPL 2.1+**。ただし `--enable-gpl` / `--enable-nonfree` を付けると **GPL/非フリー** 扱いになり、アプリ全体に強い義務が及ぶ。
 - LGPL遵守の定石：**`--enable-gpl` を付けずにビルド**、FFmpegライブラリは**動的リンク**、配布バイナリに対応する**FFmpegのソースを提供**（同梱 or 入手手段の明示）。
 - **H.264 はFFmpegのライセンスとは別に特許**の論点がある。H.264エンコード/配布には特許ライセンス（MPEG-LA系）が関係しうる。Cisco の **OpenH264**（`--enable-libopenh264`）は Cisco が実行時取得分の特許料を負担する方式で、LGPLビルドと両立し商用回避策になりうる。
+
+> ⚠️ **同梱している pin は LGPL v3**（`--enable-version3`・2026-09-24 に実物で確認）＝
+> `FFmpeg_SOURCE.md` の buildconf と、同梱の `src-tauri/resources/ffmpeg/LICENSE.txt`（LGPLv3 本文）、
+> `AboutScreen` の表示（「LGPL v3」）が一致している。**この資料が「LGPL 2.1+」と書いていたのは誤り**
+> （PR #1240 レビュー 🔴）。LGPL 2.1 と v3 は義務が別物なので、以後は**同梱物は v3**として扱う。
 
 ### 決定（[`adr/0002`](adr/0002-ffmpeg-codec.md)・Accepted）
 
@@ -185,6 +190,9 @@
 ## 9. 確認・決定チェックリスト
 
 > 凡例: `[x]` 実装済/決定済 ・ `[~]` 部分実装（残タスクあり）・ `[ ]` 未実装/未確定。
+>
+> ⚠️ **`[x]` でも「最終確認」が残ることがある**（決定は済んだが、法務・実機の確認が残る形）。
+> **いま残っているものの正本は、下の「次アクション」の表**（`[x]/[~]` の見た目では数えない）。
 
 ### 決定済み（2026-06-10）
 - [x] H.264 ＝ **Media Foundation（h264_mf）主経路**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・実機検証済／自前ビルド不要）。OpenH264 はフォールバック。残: 完成H.264のMPEG-LA許諾要否（無収益で低リスク・社内確認）
@@ -194,13 +202,13 @@
 
 ### リリース前に残る確認（法務・公式規約）
 - [x] FFmpeg H.264：**Media Foundation（h264_mf）に決定**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。**BtbN `win64-lgpl` に h264_mf 実在＋アプリ書き出し成功を実機確認＝自前ビルド不要**（OpenH264 の初回Cisco取得/dlopen自前ビルドは不要に。OpenH264 はフォールバック）。→ ⚠️ **配布も決着**＝lgpl-shared（動的リンク）を pin 同梱・ソース提供は `FFmpeg_SOURCE.md`（#119）。Windows N は #120 で事前検知＋導線を実装済（不在時は予備方式へフォールバック）。残: **N/KN の実機確認**。
-- [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）／根拠を ADR-0005「規約・ライセンスの根拠」に記録済み（#122）**。同梱ビルド／プロセス管理・バージョン固定（ENGINE v0.25.2 CPU）は **#149/#151 で実装＋packaged 検証済**。
+- [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）／根拠を ADR-0005「規約・ライセンスの根拠」に記録済み（#122）**。同梱ビルド／プロセス管理・バージョン固定（ENGINE v0.25.2 CPU）は **#149/#151 で実装＋packaged 検証済**。残: **配布時の最終法務確認**（[`adr/0005`](adr/0005-voicevox-bundling.md)・§9 の表 3行目）。
 - [x] エンドユーザー動画のクレジット表記運用 ＝ **#158 で全動画に常時クレジット焼き込み**（ADR-0003・`NARRATOR_CREDIT` 単一参照元）。手順案内でなく自動付与で担保。→ **[`adr/0025`](adr/0025-credit-display-modes.md)（α-6・#359）で表示方式を選べる**（既定=最初と最後・非表示可）＝**実装済**。非表示時は概要欄運用の補助（コピー導線）で担保、About クレジットは必須維持。
 - [x] 標準BGM ＝ **CC0 3曲を同梱＋書き出しで選択**（Summer Morning／Found New Hope／Limousine Cruise・すべて CC0・Open Music Academy・`public/bgm/`＋`bgmSettings.bundledBgmId`＝schema 1.4・権利台帳 §8.1・About にクレジット）。装飾アセットは当面なし（残: BGM 追加は段階的に）。
 - [~] **AVC/H.264 ライセンス**：主経路 MF（OS提供）では **Cisco クレジット不要**（OpenH264 を主経路にしないため＝[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。OpenH264 必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」は**フォールバック採用時のみ**（実装枠は #115 で用意済・既定非表示）。残: **完成 H.264 の MPEG-LA 許諾要否**（顧客動画・規格軸＝方式に依らず／無収益で低リスク・社内確認）。
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
-- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／同梱フォント Gen Interface JP・怪盗予告ゴシック(OFL 1.1)）。**フォントの OFL 本文は `public/fonts/` に同梱済**。**標準BGM（CC0・Open Music Academy・3曲）も表示済**。→ ⚠️ **ライセンス本文の同梱は済み**（2026-09-24・下の「次アクション」参照）。残: 装飾を採用時に追記。
+- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(**LGPL v3**・**ソース入手先URL をクリック可能で表示**＝PR#113)／同梱フォント Gen Interface JP・怪盗予告ゴシック(OFL 1.1)）。**フォントの OFL 本文は `public/fonts/` に同梱済**。**標準BGM（CC0・Open Music Academy・3曲）も表示済**。→ ⚠️ **ライセンス本文の同梱は済み**（2026-09-24・下の「次アクション」参照）。残: 装飾を採用時に追記。
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGは属性スタイル・React は CSSOM・テキストは `escapeXml` で実体参照化）＝#144）。**`'unsafe-eval'` は廃止済**（[#156](https://github.com/fujii-yuki-star/star-recruit-studio/issues/156)）：ajv のスキーマ検証を `scripts/compile-validators.mjs` で**事前コンパイル**（standalone・実行時 `new Function` なし＝dev/build/test の pre フックで生成）にしたため、`script-src 'self'`（eval 不可）のまま起動・全画面表示できる。#119 で白画面回避のため一時的に 'unsafe-eval' を許可していたのを撤廃＝最厳格に復帰。残: packaged で eval 無し起動の最終確認。
 - [x] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。→ ⚠️ **バージョン記録は3つとも済み**（2026-09-24・下の「次アクション」参照）。
@@ -213,7 +221,9 @@
 
 ### 次アクション（リリースに向けた切り分け・2026-06-23 棚卸し／**2026-09-24 再棚卸し＝#1230**）
 
-> ⚠️ **いま残っているのは、次の6つ**（2026-09-24 に全項目を実物と突き合わせた）。
+> ⚠️ **いま残っているのは、次の7つ**（2026-09-24 に全項目を実物と突き合わせた）。
+> ⚠️ **1回目の棚卸しで「4つだけ」と書いて外した**（ADR-0003 の法務を落としていた）ので、
+> **この数を引用するときは、必ず下の表そのものを見ること**。
 >
 > | 残っているもの | 誰が | 根拠 |
 > |---|---|---|
@@ -223,6 +233,7 @@
 > | ⚠️ **キャラ規約の商用配布前の最終確認**と、**キャラを増やすときの個別確認** | 法務 | [`adr/0003`](adr/0003-narration-voice.md) 未解決の論点・§5 |
 > | **Windows N/KN の実機確認**（検知と導線は #120 で実装済） | 実機 | §9 |
 > | **packaged で eval 無し起動の最終確認**（CSP から `'unsafe-eval'` は撤廃済） | 実機 | §9 |
+> | ⚠️ **同梱物のライセンス告知の補完**＝**GPLv3 本文**（LGPLv3 が取り込む）と **OpenH264 の BSD-2-Clause 告知** | 配布作業 | §9・`FFmpeg_SOURCE.md` |
 >
 > ⚠️ **キャラ規約（ADR-0003）と ENGINE の同梱（ADR-0005）は別件**＝前者は
 > **権利者（東北ずん子・ずんだもんプロジェクト）の規約**、後者は **VOICEVOX ソフトの再配布**の話。
@@ -239,11 +250,16 @@
   **VOICEVOX ENGINE**＝v0.25.2 CPU（`src-tauri/resources/README.md`）／
   **AI モデル**＝`DEFAULT_AI_MODEL = 'gemini-2.5-flash'`（`src/infrastructure/appSettings.ts`・設定で変更可）。
 - ~~書き出し時 クレジット焼き込み＋設定の永続化（#153）~~ → **#153 実装済**（常時焼き込み・OFF 廃止のためトグル永続化は不要に）。
-- ~~配布物への **ライセンス本文同梱**~~ → ⚠️ **同梱済み**（2026-09-24 棚卸しで実ファイルを確認）：
+- 配布物への **ライセンス本文同梱** → ⚠️ **主要なものは同梱済み。ただし2件足りない**（2026-09-24 に実物で確認）：
   `src-tauri/resources/ffmpeg/LICENSE.txt`（FFmpeg LGPL）／
   `src-tauri/resources/voicevox_engine/` の `licenses.json` と `resources/engine_manifest_assets/` にある利用規約（VOICEVOX）／
-  `public/fonts/OFL-*.txt`（同梱フォント2件）／`public/bgm/CREDITS.txt`（BGM）。
+  `public/fonts/OFL-*.txt`（**OFL 本文2件が3書体をカバー**）／`public/bgm/CREDITS.txt`（BGM）。
   入手先 URL の表示は `AboutScreen` で実装済。⚠️ **フォントは Noto ではなく gen-interface-jp 系**（#161）。
+  ⚠️ **足りないもの2件**（PR #1240 レビュー 🟡・**表の7行目**に起こした）：
+  ①同梱の `LICENSE.txt` は **LGPLv3 単体**で、その本文が取り込むと言っている **GPLv3 本文が入っていない**。
+  ②同梱ビルドは `--enable-libopenh264`（**実際に `libopenh264` が使える**＝`-h encoder=libopenh264` で確認）
+  なのに、**BSD-2-Clause の告知が配布物に入っていない**（`FFmpeg_SOURCE.md` に記録はあるが、
+  このファイルは `bundle.resources` に含まれない＝**配布物には行かない**）。
   ⚠️ **FFmpeg と VOICEVOX の同梱物は git 追跡外**（`src-tauri/resources/*/.gitignore`）＝
   `src-tauri/resources/README.md` の手順で配置したときだけ手元にある。**配布物には必ず入る**
   （`tauri.conf.json` の `bundle.resources` がディレクトリごと載せる）。クリーンな取得直後は見えない。
@@ -266,6 +282,9 @@
 ---
 
 ## 10. 参考（2026-06-10 取得・要再確認）
+
+> ⚠️ **ここの「要再確認」は、§9 の表の「キャラ規約の商用配布前の最終確認」で回収**（7つめではない）。
+> ⚠️ **掃討の grep は `要.*確認` で組む**＝「要確認」だけだと**「要再確認」が引っかからない**（#1230 で実際に漏れた）。
 
 - VOICEVOX ソフトウェア利用規約: https://voicevox.hiroshiba.jp/term/
 - 東北ずん子・ずんだもんプロジェクト ガイドライン: https://zunko.jp/guideline.html ／ 音源規約: https://zunko.jp/con_ongen_kiyaku.html
