@@ -10,6 +10,7 @@ import { sampleTemplates } from '../../infrastructure/sampleData';
 import { parseTemplatePack } from '../../infrastructure/templateFs';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
+import { MAX_SCENES_PER_VIDEO } from '../../domain/constants';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -1153,6 +1154,70 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     await useProjectStore.getState().generateAllNarrations();
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('none');
     expect(useProjectStore.getState().isGeneratingNarration).toBe(false); // 一括生成にも入らない
+  });
+
+  // ⚠️ **AI の道だけ上限を素通りしていた**（#1222）＝手で足す道は #1213 で塞いだのに、
+  // `transformPlan` は81個以上でも**警告を積むだけ**で場面を減らさないので、
+  // **AI 経由なら80を超えた動画が作れて**いた（保存も読込もできて、外へ渡したときだけ弾かれる）。
+  describe('AI の動画案が場面の上限を超えたとき（#1222）', () => {
+    /**
+     * 場面を n 個持つ動画案（`ai-video-plan` の形＝場面はパートの中にある）。
+     *
+     * ⚠️ **見た目パターンは実在の ID を使う**＝架空の ID だと変換の側で先に落ちて、
+     * **上限の関門を一度も通らないのに「断れた」ように見える**（検査が嘘になる）。
+     */
+    const planWith = (n: number) => ({
+      schemaVersion: '1.0',
+      videoPlan: { title: 'テスト', purpose: 'new_graduate', targetAudience: '新卒', targetDurationSec: 60 },
+      parts: [
+        {
+          partTitle: '本編',
+          summary: 'まとめ',
+          targetDurationSec: n * 5,
+          scenes: Array.from({ length: n }, () => ({
+            sceneTitle: 'ごあいさつ',
+            sceneType: 'opening',
+            templateId: 'opening_yuko_right_v1',
+            durationSec: 5,
+            yukoPoseTag: 'smile',
+            texts: { title: 'ようこそ' },
+            narrationText: 'こんにちは。',
+          })),
+        },
+      ],
+    });
+    const 生成させる = (n: number) =>
+      vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockResolvedValue(planWith(n) as never);
+
+    beforeEach(() => useProjectStore.setState({ templates: [...sampleTemplates] }));
+    afterEach(() => vi.restoreAllMocks());
+
+    it('取り込まずに断る（いまの中身を置き換えない）', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO + 1);
+      const 元 = [scene('scene_001', 1)];
+      useProjectStore.setState({ scenes: 元, status: 'idle' });
+      await useProjectStore.getState().generate();
+      expect(useProjectStore.getState().status, '取り込んでしまっている').toBe('error');
+      expect(useProjectStore.getState().scenes, 'いまの中身を置き換えた').toEqual(元);
+    });
+
+    it('断りに、いくつだったかと次の行動を出す', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO + 13);
+      useProjectStore.setState({ scenes: [], status: 'idle' });
+      await useProjectStore.getState().generate();
+      const m = useProjectStore.getState().aiError ?? '';
+      expect(m, 'いくつだったかを言っていない').toContain(String(MAX_SCENES_PER_VIDEO + 13));
+      expect(m, '次の行動を言っていない').toContain('作り直');
+    });
+
+    // ⚠️ **境目**＝ちょうど上限は通す（誤検出で正常な動画案を捨てない）。
+    it('ちょうど上限なら取り込む', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO);
+      useProjectStore.setState({ scenes: [], status: 'idle' });
+      await useProjectStore.getState().generate();
+      expect(useProjectStore.getState().status, '正常な動画案を断っている').toBe('ready');
+      expect(useProjectStore.getState().scenes).toHaveLength(MAX_SCENES_PER_VIDEO);
+    });
   });
 
   it('generate（動画案生成）は書き出し中 no-op（生成を始めない）', async () => {

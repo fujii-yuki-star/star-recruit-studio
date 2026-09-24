@@ -107,6 +107,7 @@ interface AiProvider {
 - texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。
 - 全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で 80 個までにする。超えそうなら内容をまとめて場面の数を減らす（細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。
 - yukoPoseTag は場面に合う表情タグ（例：smile, guide, bow）を「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - 素材に人物・社外秘が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
@@ -138,6 +139,7 @@ interface AiProvider {
 - 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で 80 個までにする。超えそうなら内容をまとめて場面の数を減らす（細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
 - yukoPoseTag は場面に合う表情タグを「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - purpose は一般の種別（general_announcement / report / product_intro / general_other）に沿った内容にする。
@@ -371,7 +373,7 @@ interface AiProvider {
 ### 8.6 後処理
 
 - `Part.sceneIds` と `Scene.partId` の整合を再構築（V11）。
-- 合計尺 > `videoSettings.maxDurationSec` → 警告（V9）。シーン数 > 80 → 警告（V10）。
+- 合計尺 > `videoSettings.maxDurationSec` → 警告（V9）。シーン数 > 80 → 警告（V10）。⚠️ **断るのは取り込む側**（#1222）＝`projectStore` が反映せずに断る（`AI_SCENE_LIMIT_EXCEEDED`）。この警告は**変換の記録**であって、止める役ではない。⚠️ **先に伝えてある**＝`§5`／`§5b` のプロンプトに「場面は全部で80個まで」。
 - すべての補正・警告は該当 `Scene.warnings[]`（必要に応じプロジェクト単位）へ記録し、UIには件数＋「対応内容」を非技術語で提示（`01 §6.7`）。
 
 ---
