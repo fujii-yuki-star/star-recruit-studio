@@ -7,6 +7,8 @@
 //
 // ⚠️ **依存を増やさない**＝Node 22 の組み込み `WebSocket` で DevTools プロトコルを直に叩く。
 // Playwright 等は入れない（ブラウザの再ダウンロードが要るため）。
+// ⚠️ **配線は共有**（#1226）＝`scripts/lib/cdp.mjs`。**packaged のアプリを録る道具**（`tutorialRecord.mjs`）が
+// 同じものを要るので、写さずに1か所へ置いた。
 //
 // 使い方:
 //   node tools/uiProbe.mjs <url> <台本.json> [--shot 出力.png] [--width 1920] [--height 1040]
@@ -21,6 +23,7 @@ import { spawn } from "node:child_process";
 import { existsSync, writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
 
 const BROWSERS = [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -32,66 +35,6 @@ function findBrowser() {
   const hit = BROWSERS.find((p) => existsSync(p));
   if (!hit) throw new Error("Chrome も Edge も見つかりません（このPCで実 UI を測れません）");
   return hit;
-}
-
-/** DevTools が起きるまで待つ（起動直後は繋がらない）。 */
-async function waitForTarget(port, timeoutMs = 20000) {
-  const until = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-      const list = await res.json();
-      const page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
-      if (page) return page.webSocketDebuggerUrl;
-    } catch {
-      // まだ起きていない
-    }
-    if (Date.now() > until) throw new Error("DevTools に繋がりません");
-    await new Promise((r) => setTimeout(r, 250));
-  }
-}
-
-/** CDP の呼び出しを1本の口にまとめる（id の対応づけを1か所に置く）。 */
-function connect(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  const waiting = new Map();
-  let nextId = 1;
-  const ready = new Promise((resolve, reject) => {
-    ws.addEventListener("open", () => resolve());
-    ws.addEventListener("error", (e) => reject(new Error(`WebSocket: ${e.message ?? "失敗"}`)));
-  });
-  ws.addEventListener("message", (ev) => {
-    const msg = JSON.parse(ev.data);
-    const pending = waiting.get(msg.id);
-    if (!pending) return;
-    waiting.delete(msg.id);
-    if (msg.error) pending.reject(new Error(`${msg.error.message}`));
-    else pending.resolve(msg.result);
-  });
-  const send = (method, params = {}) =>
-    new Promise((resolve, reject) => {
-      const id = nextId++;
-      waiting.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ id, method, params }));
-    });
-  return { ready, send, close: () => ws.close() };
-}
-
-/** ページの中で式を評価して、値をそのまま返す。 */
-async function evaluate(cdp, expression) {
-  const r = await cdp.send("Runtime.evaluate", {
-    expression,
-    returnByValue: true,
-    awaitPromise: true,
-  });
-  if (r.exceptionDetails) {
-    // ⚠️ **中身まで出す**＝`text` は "Uncaught" だけのことがあり、それだけでは直せない（実際に踏んだ）。
-    const d = r.exceptionDetails;
-    const detail = d.exception?.description ?? d.exception?.value ?? d.text ?? "（詳細なし）";
-    const at = d.lineNumber != null ? `（${d.lineNumber}行目 ${d.columnNumber ?? "?"}列）` : "";
-    throw new Error(`ページの中で失敗${at}: ${detail}`);
-  }
-  return r.result.value;
 }
 
 /** 文字で要素を押す（画面の言葉で書けるようにする＝選び方を知らなくても台本が書ける）。 */

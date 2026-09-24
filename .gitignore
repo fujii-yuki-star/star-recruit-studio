@@ -39,3 +39,4 @@ src/domain/validation/generated/validators.js
 
 # 落ちた回の出力を残すための写し（#1007・CI が作る）
 vitest-report.json
+tutorial-out/
