@@ -57,7 +57,7 @@
 **(3) ファイルの大きさは中身で10倍変わる。** 実写を流し続ける30分＝**約2.3GB**／写真と文字の紹介動画30分＝**約220MB**。
 ⚠️ **「30分＝2.3GB」は上限側の数字**で、採用・会社紹介のような普通の作り方なら220MB 程度です。
 
-## 決定（提案）
+## 決定
 
 **`VIDEO_HARD_MAX_SEC` を 600 → 1800 にする**（`project.schema.json` の `maxDurationSec.maximum` も同時に）。
 
@@ -117,7 +117,7 @@ schema も分岐させることになります。**「同じ動画の長さ」�
    「1080 のまま小さくする」を足すかどうかの話です。
 3. **⑤ 場面数80**（#1213）を、**本当の上限にする**か**上げる**か。
 
-## 実装（決まったら）
+## 実装（land 済み）
 
 1. `src/domain/constants.ts` — `VIDEO_HARD_MAX_SEC = 1800`
 2. `docs/yuko_recruit_docs/schemas/project.schema.json` — `maxDurationSec.maximum` を `1800` へ
