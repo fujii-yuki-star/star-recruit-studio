@@ -27,7 +27,9 @@ export default tseslint.config(
       // 日本語UIでは全角スペース等を文字列/JSXテキストに使うため、それらは許可（コード中の不可視文字は検出）
       'no-irregular-whitespace': ['error', { skipStrings: true, skipComments: true, skipTemplates: true, skipJSXText: true }],
       // `_` 接頭辞の引数・変数は未使用を許容（意図的に使わない引数の慣習）
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+      // ⚠️ `ignoreRestSiblings`＝options を明示すると既定（true）が消えるので書く（PR #1238 レビュー ℹ️）。
+      //   これが無いと、同じ `const { keep, ...rest } = x` が **`.mjs` では通り `.ts` では赤**になる。
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true }],
     },
   },
 
@@ -37,8 +39,12 @@ export default tseslint.config(
   // そのせいで `scripts/lib/frames.mjs` から `const out = [];` を落としたとき、
   // **未定義の変数を触る状態のまま `npx eslint scripts/` が通った**（PR #1234 の作業中に実際に起きた）。
   // `no-undef` があれば**その場で赤くなる**種類の壊し方だったので、`recommended` を当てる。
+  // ⚠️ **`.ts` はここに入れない**（PR #1238 レビュー 🟡）＝素の `no-undef` / `no-unused-vars` は
+  //   `tseslint` が TS 向けに**意図的に切っている**（型で見るため）。ここで当て直すと
+  //   `NodeJS.Timeout` や enum のメンバ、型の引数名が**理由なく赤**になる（実測で3件出た）。
+  //   `.ts` の規則は上のブロック（`**/*.{ts,tsx}`）で既に当たっている。
   {
-    files: ['scripts/**/*.{ts,mjs,js}', '*.config.{js,ts}'],
+    files: ['scripts/**/*.{mjs,js}', '*.config.js'],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 2022,
@@ -54,11 +60,11 @@ export default tseslint.config(
     },
   },
 
-  // 検査（vitest のグローバルを使う）
+  // `.ts` の道具・設定（node のグローバルだけを足す。規則は上の TS 向けブロックが当てる）
   {
-    files: ['scripts/**/*.test.mjs'],
+    files: ['scripts/**/*.ts', '*.config.ts'],
     languageOptions: {
-      globals: { ...globals.node, ...globals.vitest },
+      globals: globals.node,
     },
   },
 );

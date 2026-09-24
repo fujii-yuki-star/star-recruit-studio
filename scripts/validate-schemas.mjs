@@ -31,6 +31,10 @@ const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')))
 const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
+// ⚠️ **宣言の側に書く**（PR #1238 レビュー 🟡）＝使う所で `/** @type {...} */ (cases)` と
+//   **言い切る**書き方（型アサーション）は、**検査されない**。実測＝2要素や4要素を混ぜても緑になり、
+//   `path` が `undefined` のまま実行時に落ちた。ここに書けば、同じ壊し方で `TS2322` が出る。
+/** @type {[string, import("ajv").ValidateFunction, string][]} */
 const cases = [
   ['project.sample.json', vProject, fx('project.sample.json')],
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
@@ -41,8 +45,7 @@ const cases = [
 ];
 
 let ok = true;
-// ⚠️ 名前・検証器・道のりの3つ組。型の上では要素ごとに別の型なので、束ねると合併になる（注記で解く）。
-for (const [name, validate, path] of /** @type {[string, import("ajv").ValidateFunction, string][]} */ (cases)) {
+for (const [name, validate, path] of cases) {
   const valid = validate(load(path));
   if (valid) {
     console.log(`PASS  schema    ${name}`);
