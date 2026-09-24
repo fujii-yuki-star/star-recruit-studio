@@ -21,6 +21,13 @@
 import { MAX_SCENES_PER_VIDEO } from '../constants';
 
 /**
+ * 上限による断りの**目印**（文と見分けの単一の参照元）。
+ *
+ * ⚠️ **次の行動はここだけ**＝伝える内容を減らして作り直す。**尺を短くとは言わない**（変えられない）。
+ */
+const AI_SCENE_LIMIT_MARK = '伝える内容（章立てや要点）を減らしてから、作り直してください。';
+
+/**
  * その数だけ足せるか。
  *
  * ⚠️ **「1つ足す」以外も通す**＝分けると1つ増え、複製でも1つ増える。**入口ごとに数えない**。
@@ -50,7 +57,21 @@ export function sceneLimitMessage(): string {
  *（93 と 81 では削る量がまるで違う）。
  * ⚠️ **「もう一度お試しください」とは言わない**＝同じ内容で頼み直しても**また超える**
  *（§2-5＝何度押しても直らない行動を勧めない）。
+ * ⚠️ **「動画の長さを短く」とは言わない**（PR #1223 レビュー 🟡）＝**利用者には変えられない**。
+ * AI へ渡す尺は `DEFAULT_TARGET_DURATION_SEC` の固定で、**尺を変える欄はどの画面にも無い**
+ *（`06 §12.1`＝案内の中で名指しするものは、その画面に実在すること）。
  */
 export function aiSceneLimitMessage(count: number): string {
-  return `動画案の場面が${count}個になりました。${MAX_SCENES_PER_VIDEO}個までなので、この案は取り込んでいません。伝える内容を減らすか、動画の長さを短くしてから作り直してください。`;
+  return `動画案の場面が${count}個になりました。${MAX_SCENES_PER_VIDEO}個までなので、この案は取り込んでいません。${AI_SCENE_LIMIT_MARK}`;
+}
+
+/**
+ * その断りが**上限による断り**か（画面が次の行動を変えるために使う）。
+ *
+ * ⚠️ **見分けを1か所に持つ**（PR #1223 レビュー 🟡）＝`aiError` は文字列1本なので、
+ * 種類を**別のフィールドで持つと6か所（設定・クリア）を揃え続ける**ことになる（このリポジトリが
+ * 繰り返している「双子の片方だけ直す」型）。**文と見分けを同じ目印から作れば、ずれようがない**。
+ */
+export function isAiSceneLimitMessage(message: string | null | undefined): boolean {
+  return message != null && message.includes(AI_SCENE_LIMIT_MARK);
 }

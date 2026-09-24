@@ -71,7 +71,11 @@ describe('場面の数の上限を、AI へ先に伝える（#1222）', () => {
     expect(prompt, '上限の数が書かれていない').toContain(String(MAX_SCENES_PER_VIDEO));
     expect(prompt, '「場面の数の上限」として書かれていない').toContain(`場面は全部で ${MAX_SCENES_PER_VIDEO} 個まで`);
     // ⚠️ **超えそうなときの逃げ道も書く**＝「80まで」だけだと、AI は**内容を削って**辻褄を合わせる。
-    expect(prompt, '超えそうなときにどうするかが無い').toContain('1場面を長くして数を減らす');
+    expect(prompt, '超えそうなときにどうするかが無い').toContain('内容をまとめて場面の数を減らす');
+    // ⚠️ **「1場面を長くする」とは言わない**（PR #1223 レビュー 🟡）＝同じプロンプトの
+    //   「durationSec は 3〜15 秒」と矛盾し、従われても `transformPlan` が clamp して戻す
+    //  （`DURATION_CLAMPED`）＝**実行できない逃げ道**になる。
+    expect(prompt, '守れない逃げ道を書いている').not.toContain('1場面を長くして');
   });
 });
 

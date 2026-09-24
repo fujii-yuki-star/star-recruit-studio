@@ -1,8 +1,9 @@
+import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { LoadingView, ErrorView } from "../components/states";
-import { GENERATE_FAILED_TITLE, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
@@ -37,24 +38,32 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   }, [status]);
 
   if (status === "error") {
+    // ⚠️ **見分けは domain の目印から**（#1222）＝断りの文と同じ1か所から作るので、ずれない。
+    const 上限で断った = isAiSceneLimitMessage(aiError);
     return (
       <div className="main-scroll">
         {/* 見出し・説明・2択のラベルは空状態（NoScenesState）と共有する＝この画面を離れても言葉が変わらない（§6・#590）。 */}
         <ErrorView
-          title={GENERATE_FAILED_TITLE}
+          title={上限で断った ? GENERATE_TOO_LONG_TITLE : GENERATE_FAILED_TITLE}
           message={generateFailedMessage(aiError)}
           // 正典 `12_AI_PROMPT_AND_MAPPING §9.3③`「前回 ai/latest_result.json から復元」は **post-α・未実装として正典で追跡中**の
           // ため導線を出さない（GH issue でなく正典が追跡元＝復元しない導線で誤誘導しないため。現状 UI は ①再試行 / ②手動のみ）。
+          // ⚠️ **同じ入力での再送を出さない**（PR #1223 レビュー 🟡）＝上限で断ったときの
+          //   「もう一度試す」は `reset(); generate()`＝**同じ内容をそのまま送り直す**ので、**また超える**。
+          //   断りの文が「もう一度お試しください」を避けているのに、**ボタンがそれを打ち消して**いた（§2-5）。
+          // ⚠️ **行き先は入力**＝文が指示する次の行動（伝える内容を減らす）に、画面から到達できるようにする。
           actions={[
-            {
-              label: RETRY_GENERATE_LABEL,
-              primary: true,
-              onClick: () => {
-                setProgress(8);
-                reset();
-                void generate();
-              },
-            },
+            上限で断った
+              ? { label: EDIT_WIZARD_INPUT_LABEL, primary: true, onClick: () => onNavigate("wizard") }
+              : {
+                  label: RETRY_GENERATE_LABEL,
+                  primary: true,
+                  onClick: () => {
+                    setProgress(8);
+                    reset();
+                    void generate();
+                  },
+                },
             // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
             { label: START_MANUAL_LABEL, onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}

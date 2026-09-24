@@ -1756,7 +1756,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
     // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
-    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    // ⚠️ **足す道は5つある**（足す・複製・分ける×2・**AI の動画案を取り込む**＝#1222）
+    //    ＝**入口ごとに数えない**で同じ関門（`canAddScenes`）を通す。断りの文だけ道によって違う。
     if (!canAddScenes(get().scenes.length)) {
       set({ importError: sceneLimitMessage() });
       return "";
@@ -1846,7 +1847,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
     // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
-    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    // ⚠️ **足す道は5つある**（足す・複製・分ける×2・**AI の動画案を取り込む**＝#1222）
+    //    ＝**入口ごとに数えない**で同じ関門（`canAddScenes`）を通す。断りの文だけ道によって違う。
     if (!canAddScenes(get().scenes.length)) {
       set({ importError: sceneLimitMessage() });
       return "";
@@ -1864,7 +1866,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
     // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
-    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    // ⚠️ **足す道は5つある**（足す・複製・分ける×2・**AI の動画案を取り込む**＝#1222）
+    //    ＝**入口ごとに数えない**で同じ関門（`canAddScenes`）を通す。断りの文だけ道によって違う。
     if (!canAddScenes(get().scenes.length)) {
       set({ importError: sceneLimitMessage() });
       return "";
@@ -1882,7 +1885,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     // ⚠️ **正典の上限（場面は80まで）を、画面でも守る**（#1213）＝守らないと、
     // **保存も読込もできるのに、外へ渡したときだけ弾かれる動画**ができる（`scenes.maxItems`）。
-    // ⚠️ **足す道は4つある**（足す・複製・分ける×2）＝**入口ごとに数えない**で同じ関門を通す。
+    // ⚠️ **足す道は5つある**（足す・複製・分ける×2・**AI の動画案を取り込む**＝#1222）
+    //    ＝**入口ごとに数えない**で同じ関門（`canAddScenes`）を通す。断りの文だけ道によって違う。
     if (!canAddScenes(get().scenes.length)) {
       set({ importError: sceneLimitMessage() });
       return "";

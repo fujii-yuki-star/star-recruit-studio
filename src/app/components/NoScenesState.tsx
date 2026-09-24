@@ -3,8 +3,9 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL } from "../uiLabels";
+import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL } from "../uiLabels";
 import { hasWizardBrief } from "../newProjectGuard";
+import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
 
 /**
  * 「場面がまだ1つも無い」ときの表示（#590）。**公開前チェック／仕上がり確認／書き出し／たたき台**が共有する。
@@ -51,7 +52,13 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       // 生成中画面の2択（#393 P1）と同じ＝どの画面から見ても復帰の仕方が変わらない。ラベルも共有する（§6）。
       // 再試行は生成中画面へ送る（そこが作成の進捗・中止の持ち主）。
       <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-        <button className="btn btn-primary" onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>
+        {/* ⚠️ **上限で断ったときは再送を出さない**（PR #1223 レビュー 🟡）＝同じ入力を送り直すと
+            **また超える**。生成中画面と**同じ見分け・同じ行き先**にする（ADR-0026②）。 */}
+        {isAiSceneLimitMessage(aiError) ? (
+          <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>{EDIT_WIZARD_INPUT_LABEL}</button>
+        ) : (
+          <button className="btn btn-primary" onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>
+        )}
         <button className="btn btn-secondary" onClick={() => { startManualEdit(); onNavigate("draft"); }}>
           {START_MANUAL_LABEL}
         </button>
