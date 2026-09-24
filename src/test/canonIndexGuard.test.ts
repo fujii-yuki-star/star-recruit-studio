@@ -56,6 +56,25 @@ export function firstStatusWord(line: string): string | null {
 }
 
 /**
+ * 状態行から**括弧書き（…）を落とす**（経緯・別の ADR の話が入るため）。
+ *
+ * ⚠️ **入れ子でも崩れないよう、変わらなくなるまで回す**（PR #1239 レビュー ℹ️）＝
+ * 一度だけの置換だと `（A（B）C）` が `（AC）` になって外側が残る。いまの ADR に入れ子は無いが、
+ * **無いことに頼らない**。
+ * ⚠️ **半角の括弧は落とさない**＝落とすと Markdown のリンク `[x](y.md)` まで消えて、
+ * かえって読み違える。全角の括弧だけを、この repo の書き方の約束として扱う。
+ */
+export function stripParens(line: string): string {
+  let out = line;
+  for (let i = 0; i < 10; i += 1) {
+    const next = out.replace(/（[^（）]*）/g, '');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/**
  * **同じファイルの中で状態が2つ**になっている ADR（状態行は Accepted なのに、見出しが「決定（Proposed）」）。
  *
  * ⚠️ **読む人は本文のほうを信じる**（#1232）＝一覧と本文の食い違い（下の `adrStatusMismatch`）は
@@ -78,11 +97,21 @@ export function adrHeadingDrift(bodies: readonly (readonly [string, string])[]):
   for (const [name, body] of bodies) {
     const lines = body.split('\n');
     const statusLine = lines.find((l) => l.startsWith('- **状態**'));
-    // 括弧の中（経緯・別の ADR の話）を落としてから見る。
-    const own = statusLine?.replace(/（[^（）]*）/g, '') ?? '';
-    if (!own.includes('Accepted')) continue;
-    const heading = lines.find((l) => /^##\s*決定/.test(l));
-    if (heading && /Proposed|提案/.test(heading)) out.push(`${name}: ${heading.trim()}`);
+    if (!statusLine) continue; // 状態行そのものの欠落は `adrStatusMismatch` が見る
+    const own = stripParens(statusLine);
+    // ⚠️ **決定の見出しは1本とは限らない**（PR #1239 レビュー 🟡）＝`find` で先頭だけを見ていたら、
+    //   **`## 決定の判断軸` が先に当たって本物を一度も見ない** ADR が **8本**あった（雛形もそう＝
+    //   これから起こす ADR は**全部この穴に落ちる**）。判断軸は決定ではないので外し、**残り全部**を見る。
+    const headings = lines.filter((l) => /^##\s*決定/.test(l) && !l.includes('判断軸'));
+    if (headings.length === 0) continue;
+    const tentative = headings.find((h) => /Proposed|提案/.test(h));
+    if (own.includes('Accepted')) {
+      if (tentative) out.push(`${name}: 状態は Accepted なのに「${tentative.trim()}」`);
+    } else if (own.includes('Proposed') && !tentative) {
+      // ⚠️ **逆向きも見る**（同レビュー 🟡）＝`Proposed` なのに括弧書きが無いと、本文が
+      //   **確定したように読める**（実際に 0016 がそうだった）。#1232 と同じ害が鏡像で起きる。
+      out.push(`${name}: 状態は Proposed なのに「${headings[0].trim()}」（確定に見える）`);
+    }
   }
   return out;
 }
@@ -298,16 +327,19 @@ describe('正典の索引（二重管理へ戻らない）', () => {
   });
 
   // ⚠️ **同じファイルの中で状態を2つにしない**（#1232）＝一覧との食い違いは上で見ているが、
-  // **本文の見出し**が「決定（Proposed）」のまま残ると、読む人は**本文のほうを信じる**。
-  it('Accepted の ADR の見出しが「決定（Proposed）」のままでない', () => {
+  // **本文の見出し**と状態が食い違うと、読む人は**本文のほうを信じる**。両向きとも見る
+  //（Accepted なのに「決定（Proposed）」／Proposed なのに括弧書きが無く確定に見える）。
+  it('本文の見出しと状態が、同じファイルの中で食い違っていない', () => {
     const bodies = adrFiles
       .filter((f) => /^\d{4}-.*\.md$/.test(f) && f !== '0000-template.md')
       .map((f) => [f, readFileSync(`${ADR_DIR}/${f}`, 'utf8')] as const);
     // ⚠️ **走査が空でないことを見る**＝対象を1本も拾えなくなっても「食い違いゼロ」で緑になる。
-    expect(bodies.length, 'ADR を1本も見ていない').toBeGreaterThan(20);
+    // ⚠️ **実数で留める**（PR #1239 レビュー ℹ️）＝「20より多い」だと、フィルタが半分を
+    //   落としても緑のまま。ADR を1本足したらここも直す（それが「見ている数」の宣言になる）。
+    expect(bodies.length, 'ADR の本数が変わりました。数を直してから、走査が欠けていないか見てください').toBe(46);
     expect(
       adrHeadingDrift(bodies),
-      'Accepted なら見出しは `## 決定` です（`adr-new` スキル＝Proposed のときだけ括弧書き）',
+      '見出しの括弧書きは状態に合わせてください（`adr-new` スキル＝Proposed のときだけ「決定（Proposed）」）',
     ).toEqual([]);
   });
 
@@ -364,6 +396,39 @@ describe('門番自身の検査（わざと壊した入力を通す）', () => {
   it('「もとは Accepted」の形でも見つける', () => {
     const body = '- **状態**: **一部 Superseded by 0032**／もとは Accepted（2026-07-01）\n\n## 決定（Proposed）\n';
     expect(adrHeadingDrift([['0018-a.md', body]]), '経緯つきの状態行を取りこぼしている').toHaveLength(1);
+  });
+
+  // ⚠️ **「決定の判断軸」が先に来る実物で叩く**（PR #1239 レビュー 🟡）＝
+  //   合成した検体（見出し1本だけ）では、この形を**一度も通していなかった**。8本＋雛形がこの形。
+  it('「決定の判断軸」が先にあっても、本物の見出しを見る', () => {
+    const real = readFileSync(`${ADR_DIR}/0001-rendering-parity.md`, 'utf8');
+    expect(real, '検体が実物でなくなっている').toContain('## 決定の判断軸');
+    // そのままなら通る。
+    expect(adrHeadingDrift([['0001-rendering-parity.md', real]])).toEqual([]);
+    // 本物の見出しだけを Proposed に戻すと、捕まえる。
+    const drifted = real.replace(/^## 決定$/m, '## 決定（Proposed）');
+    expect(drifted, '差し替えが当たっていない').not.toBe(real);
+    expect(adrHeadingDrift([['0001-rendering-parity.md', drifted]]), '判断軸に隠れて本物を見ていない').toHaveLength(1);
+  });
+
+  // ⚠️ **逆向き（Proposed なのに括弧書きが無い）も見る**＝実際に 0016 がそうだった。
+  it('Proposed なのに確定のように見える見出しを見つける', () => {
+    const body = '- **状態**: Proposed（Draft・2026-06-26）\n\n## 決定\n';
+    expect(adrHeadingDrift([['0016-a.md', body]]), '鏡像のドリフトを見ていない').toHaveLength(1);
+    expect(adrHeadingDrift([['0024-a.md', '- **状態**: Proposed\n\n## 決定（Proposed）\n']])).toEqual([]);
+  });
+
+  // ⚠️ **判断軸しか無い ADR を、括弧書きの抜けと読まない**＝`## 決定の判断軸` は決定の見出しでは
+  //   ないので、外さずに数えると **Proposed の ADR を誤検出**する（決定の見出しがまだ無い起案中の形）。
+  it('「決定の判断軸」しか無い Proposed の ADR は拾わない', () => {
+    const body = '- **状態**: Proposed（Draft）\n\n## 決定の判断軸\n\nあとで書く\n';
+    expect(adrHeadingDrift([['0099-a.md', body]]), '判断軸を決定の見出しと読んでいる').toEqual([]);
+  });
+
+  // ⚠️ **入れ子の括弧でも崩れない**（いまの ADR には無いが、無いことに頼らない）。
+  it('括弧落としは入れ子でも残さない', () => {
+    expect(stripParens('- **状態**: Superseded（A（B）C）／もとは Proposed')).toBe('- **状態**: Superseded／もとは Proposed');
+    expect(stripParens('- **状態**: Accepted（2026-01-01）')).toBe('- **状態**: Accepted');
   });
 
   // ⚠️ **括弧の中の「Accepted」で誤検出しない**（実際にこの門番が最初そう出した）＝

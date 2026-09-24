@@ -117,7 +117,7 @@ schema も分岐させることになります。**「同じ動画の長さ」�
    「1080 のまま小さくする」を足すかどうかの話です。
 3. **⑤ 場面数80**（#1213）を、**本当の上限にする**か**上げる**か。
 
-## 実装（決まったら）
+## 実装（land 済み）
 
 1. `src/domain/constants.ts` — `VIDEO_HARD_MAX_SEC = 1800`
 2. `docs/yuko_recruit_docs/schemas/project.schema.json` — `maxDurationSec.maximum` を `1800` へ
