@@ -5,7 +5,7 @@
 | 資料 | 範囲 | なぜ |
 |---|---|---|
 | `CLAUDE.md` | **§7**（自動で読み込み済み） | 必ず書く対象・DoD・**変異チェックの3つの門** |
-| [`14_TEST_STRATEGY.md`](../yuko_recruit_docs/14_TEST_STRATEGY.md) | **全文でよい（5,680字）** | 階層・決定論性・golden・fixtures |
+| [`14_TEST_STRATEGY.md`](../yuko_recruit_docs/14_TEST_STRATEGY.md) | **全文でよい（6,426字）** | 階層・決定論性・golden・fixtures |
 
 ## 必要なら読む
 

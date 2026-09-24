@@ -31,7 +31,8 @@ const guards = new Set<NavigationGuard>();
  *
  * 下の実装は `latest.current` を **effect の中**で更新する（描画中に ref を触らないため）。
  * つまり**状態が変わって画面に出た瞬間は、まだ古い値**のことがある。
- * 利用者の操作は commit のあとに起きるので**アプリでは問題にならない**が、**検査では問題になる**：
+ * 利用者の操作は commit のあとに起きるので**実務上アプリでは踏まない**（React は同じコミットの
+ * passive effect を次の入力処理より前に流す）が、**検査では実際に踏む**：
  * `await screen.findByText(...)` は **DOM が変わった時点**で返るので、その直後に `canNavigate` を
  * 見ると**通れてしまう**ことがある（実測＝`HomeScreen.restore` の1件が**80回中2回**）。
  *
