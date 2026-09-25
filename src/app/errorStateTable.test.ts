@@ -401,7 +401,9 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
   it("拾えた本数を実数で留める（黙って減らない）", () => {
     // ⚠️ **下限にしない**＝PR #1130 で「下限だと拾い方を1段外しても緑」を実際に踏んだ。
     // 増えたら、そのぶん表へ行を足してからこの数を直す。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(17);
+    // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
+    //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(23);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -412,8 +414,11 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     const src = readFileSync(join(process.cwd(), "src-tauri/src/messages.rs"), "utf8");
     const oneLine = [...src.matchAll(/pub const [A-Z_0-9]+: &str = "/g)].length;
     const all = Object.keys(messagesIn(src)).length;
-    expect(all, "定数の数が変わった").toBe(17);
-    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(5);
+    // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
+    //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
+    expect(all, "定数の数が変わった").toBe(23);
+    // ⚠️ **+6**（#1244）＝足した6つは、いずれも1行で書いている（文が長いので折り返さない）。
+    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(11);
     expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(12);
   });
 
@@ -507,7 +512,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝場面形式の切り出しも押す前に断る）。
     // ⚠️ **+2**＝`STARTUP_VOICE_NOT_READY`／`STARTUP_MAKE_VOICES_LEFT`（#1204＝
     //   **画面を読まない道**〔起動の引数〕で、公開前チェックの「要対応」を誰も見ていなかった）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(249);
+    // ⚠️ **+6**（#1244）＝断りを次の行動ごとに6行へ分けた（うち1行は、以前は表に無かった既定の文）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(255);
   });
 
 
@@ -755,7 +761,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   文面のズレも機械で見える（`codeMessages()` への登録は無いので 84 は動かない）。
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
     // ⚠️ **+2**＝#1204（上と同じ2行）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(246);
+    // ⚠️ **+6**（#1244）＝上と同じ6行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(252);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

@@ -2,6 +2,7 @@ import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { onAiBusyWait } from "../../infrastructure/aiClient";
 import { LoadingView, ErrorView } from "../components/states";
 import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
 
@@ -20,10 +21,31 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const reset = useProjectStore((s) => s.reset);
   const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const [progress, setProgress] = useState(8);
+  /**
+   * 混み合っていて待ち直している回数（0＝待っていない）。
+   *
+   * ⚠️ **待っていることを言う**（#1244・利用者の指摘 2026-09-25）＝混雑のときは裏で最長 30 秒ほど
+   * 待ち直すので、黙っていると**固まったように見える**（しかも以前は待ち直さずに落ちていた）。
+   */
+  const [busyWait, setBusyWait] = useState(0);
 
   useEffect(() => {
     void generate();
   }, [generate]);
+
+  // ⚠️ **外す**＝画面を離れたあとに知らせが届いて、消えた画面へ書き込まない。
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let alive = true;
+    void onAiBusyWait((e) => setBusyWait(e.attempt)).then((off) => {
+      if (alive) stop = off;
+      else off();
+    });
+    return () => {
+      alive = false;
+      if (stop) stop();
+    };
+  }, []);
 
   // ⚠️ **できるまでは「わからない」と見せる**（#993 ②）＝以前は 180ms ごとに +6 して
   // **2.5秒で 90% まで行き、そこで止まって**いた。AI は最長60秒待つので、実際の相手だと
@@ -81,7 +103,9 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
         message={
           ready
             ? "内容を確認して、自由に修正できます。"
-            : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
+            : busyWait > 0
+              ? "いま混み合っているので、少し待ってからもう一度お願いしています。このままお待ちください。"
+              : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
         }
         progress={status === "ready" ? progress : "indeterminate"}
         onCancel={
