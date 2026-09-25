@@ -804,7 +804,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           </div>
         </div>
 
-        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} />
+        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} pose="guide" />
       </div>
     </div>
   );

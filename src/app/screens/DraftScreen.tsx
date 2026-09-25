@@ -437,6 +437,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
         </div>
 
         <YukoPanel
+          pose="cheer"
           messages={[
             `動画のたたき台ができました！全部で${rows.length}つの場面で構成しています。`,
             "セリフや素材は、表の右の操作ボタンから直せます。",

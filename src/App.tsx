@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useStartupJob } from "./app/hooks/useStartupJob";
 import { useStartupJobStore } from "./app/store/startupJobStore";
-import { HOME_SCREEN_LABEL } from "./app/uiLabels";
+import { SCREEN_TITLES } from "./app/screenTitles";
 import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
 import "./styles/fonts.css";
@@ -36,28 +36,8 @@ import { LooksScreen } from "./app/screens/LooksScreen";
 import { LooksEditScreen } from "./app/screens/LooksEditScreen";
 import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
+import { HelpScreen } from "./app/screens/HelpScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
-
-const titles: Record<ScreenId, string> = {
-  home: HOME_SCREEN_LABEL, // サイドバー先頭「動画」＝一覧（現ホーム統合・#399 B案）。名前と画面を一致させる。
-  // ⚠️ **「プロジェクト」から改名**（#1026・利用者判断 2026-09-10）＝同じ場所を左の帯と
-  // タイムライン画面の右上で**2つの言葉で呼んでいた**（実機で確認）。画面には出さない語にした。
-  wizard: "新しい動画を作る",
-  confirm: "動画案を作る前の確認",
-  generating: "動画案を作成中",
-  draft: "動画のたたき台を確認",
-  "scene-edit": "場面編集",
-  preview: "仕上がり確認",
-  timeline: "見わたすタイムライン", // 正典（`06 §12`）の呼び名。「タイムライン編集」と見分けがつく（#1032）
-  "timeline-project": "タイムライン編集",
-  precheck: "公開前チェック",
-  export: "動画を書き出す",
-  looks: "見た目パターンを管理",
-  "looks-edit": "見た目パターンを編集",
-  materials: "素材を管理",
-  settings: "設定",
-  about: "このアプリについて",
-};
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
@@ -195,6 +175,8 @@ function App() {
         return <MaterialsScreen onNavigate={navigate} />;
       case "settings":
         return <SettingsScreen onNavigate={navigate} />;
+      case "help":
+        return <HelpScreen />;
       case "about":
         return <AboutScreen />;
       default:
@@ -248,7 +230,7 @@ function App() {
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">
-            <div className="topbar-title">{titles[screen]}</div>
+            <div className="topbar-title">{SCREEN_TITLES[screen]}</div>
             <div className="topbar-actions">
               <SaveStatusBadge />
               {/* ウィザードはヘッダ保存を出さない（#401）。ヘッダ保存は applyForm を呼ばず入力を取りこぼす「保存トラップ」

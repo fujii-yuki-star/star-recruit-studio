@@ -883,6 +883,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
         </div>
 
         <YukoPanel
+          pose="smile"
           messages={[
             "こんにちは、ゆうこです。今日も動画づくりをお手伝いします。",
             "まずは「新しい動画を作る」から始めてみましょう。伝えたい内容と写真があれば大丈夫です。",

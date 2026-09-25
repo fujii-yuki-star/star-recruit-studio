@@ -68,20 +68,14 @@ export function HelpIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
-export function MailIcon({ size = 20, className, style }: IconProps) {
+// ⚠️ **「ヘルプ」と「このアプリについて」で同じ絵を出していた**（#1229）＝左の帯に同じ形が2つ並び、
+// どちらがどちらか押すまで分からなかった。使い方は「?」、アプリの情報は「i」に分ける。
+export function InfoIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="m3 7 9 6 9-6" />
-    </svg>
-  );
-}
-
-export function BellIcon({ size = 20, className, style }: IconProps) {
-  return (
-    <svg {...base(size, className, style)}>
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
     </svg>
   );
 }
