@@ -8,10 +8,11 @@ import {
   LayoutIcon,
   SettingsIcon,
   HelpIcon,
-  MailIcon,
-  BellIcon,
+  InfoIcon,
   ChevronRightIcon,
 } from "./icons";
+import { yukoImage } from "../data/yukoImages";
+import { SCREEN_TITLES } from "../screenTitles";
 
 interface SidebarProps {
   current: ScreenId;
@@ -53,8 +54,11 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
   return (
     <aside className="sidebar" id="app-sidebar">
       <div className="sidebar-brand">
-        {/* ロゴマークはナレーター「ゆうこ」の頭文字＝マスコット表示。製品名（すたりお）とは別物なので据え置く（ADR-0011）。 */}
-        <div className="sidebar-brand-mark">ゆ</div>
+        {/* ロゴマークはナレーター「ゆうこ」＝マスコット表示。製品名（すたりお）とは別物なので据え置く（ADR-0011）。
+            ⚠️ **文字の「ゆ」から立ち絵へ**（#1228）＝素材が無い間の仮置きだった。 */}
+        <div className="sidebar-brand-mark">
+          <img className="sidebar-brand-img" src={yukoImage("smile")} alt="" />
+        </div>
         <div className="sidebar-brand-text">
           <span className="sidebar-brand-title">すたりお</span>
           <span className="sidebar-brand-sub">動画づくり支援ソフト</span>
@@ -122,10 +126,16 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
             </button>
           );
         })}
-        <button className="nav-item" disabled title="準備中です">
+        {/* 使い方（#1229・ADR-0046 ①）。
+            ⚠️ **「準備中」で置いていた**＝押せない項目が帯に3つ並び、**使い方を伝える手段が無かった**。
+            ⚠️ **名前は画面と同じものを引く**＝ここで書き写すと、画面名を変えたとき帯だけ古くなる（#1026 の再来）。 */}
+        <button
+          className={`nav-item${isActive("help") ? " active" : ""}`}
+          onClick={() => onNavigate("help")}
+          aria-current={isActive("help") ? "page" : undefined}
+        >
           <HelpIcon size={20} className="nav-icon" />
-          ヘルプ
-          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
+          {SCREEN_TITLES.help}
         </button>
       </nav>
 
@@ -135,18 +145,8 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
           onClick={() => onNavigate("about")}
           aria-current={current === "about" ? "page" : undefined}
         >
-          <HelpIcon size={18} className="nav-icon" />
-          このアプリについて
-        </button>
-        <button className="nav-item" disabled title="準備中です">
-          <MailIcon size={18} className="nav-icon" />
-          お問い合わせ
-          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
-        </button>
-        <button className="nav-item" disabled title="準備中です">
-          <BellIcon size={18} className="nav-icon" />
-          お知らせ
-          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
+          <InfoIcon size={18} className="nav-icon" />
+          {SCREEN_TITLES.about}
         </button>
       </div>
     </aside>

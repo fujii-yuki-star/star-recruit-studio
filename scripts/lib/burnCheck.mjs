@@ -87,36 +87,55 @@ export function markVerdict(center, want, size, opts = {}) {
   return null;
 }
 
-/** 測った中身の位置が、計算した `view` からどれだけ離れてよいか（画素）。 */
-export const VIEW_ORIGIN_SLACK = 2;
 /**
- * 測った中身の**幅／高さ**の許容（下向きだけ）。
+ * 横と縦で出した倍率が、どれだけ食い違ってよいか（割合）。
  *
- * ⚠️ **スクロールバーのぶんだけ小さく出る**＝目印は `position:fixed` なので、
- * 縦のスクロールバーがあれば**幅**が、横のスクロールバーがあれば**高さ**がその幅ぶん縮む
- *（Windows の既定でおよそ 15〜17 画素）。**それ以上の食い違いは本物**。
- * ⚠️ **幅の根拠を高さに使い回さない**（PR #1237 再レビュー 🟡）＝以前は幅に 24、高さにも同じ 24 を
- * 当てていた。24 の出どころは**縦**スクロールバーの話なので、高さ側は根拠のない緩みだった。
- * ⚠️ **「窓がタスクバーの下に潜って下端が欠ける」はここで見ない**＝それは撮る前に
- * `workArea()` で断る（緩めて通すのではなく、**原因の所で止める**）。
+ * ⚠️ **スクロールバーのぶんだけ、片側が小さく出る**＝縦のバーがあれば幅が、
+ * 横のバーがあれば高さが縮む（Windows の既定でおよそ 15〜17 物理画素）。
  */
-export const VIEW_WIDTH_SHRINK = 20;
-export const VIEW_HEIGHT_SHRINK = 20;
-export const VIEW_SIZE_GROW = 2;
+export const SCALE_AXIS_SLACK = 0.04;
 
 /**
- * **録画から測った中身の矩形**が、計算した `view` と合っているか。合っていれば空、違えば理由の並び。
+ * **録画から測った中身の矩形**が、1つの倍率で筋が通っているか。通っていれば空、違えば理由の並び。
  *
- * ⚠️ **これが `view` を見る唯一の目**＝計算した値で描いて同じ値で検査しても、間違いは見えない。
+ * ⚠️ **これが `view` を作る唯一の根拠**（#1228）＝以前は `screenX - windowX` の引き算で
+ * 原点を出し、**拡大率 100% 以外は断って**いた。いまは**測った矩形をそのまま正本にする**ので、
+ * 突き合わせる「計算値」はもう無い。代わりに**測り違いを見つける**のがこの関数の仕事。
+ *
+ * @param bounds 録画から測った中身の矩形（物理 px）
+ * @param page   ページが言っている大きさ（CSS px）と拡大率
  */
-export function viewVerdict(bounds, view, opts = {}) {
-  const {
-    origin = VIEW_ORIGIN_SLACK, wShrink = VIEW_WIDTH_SHRINK, hShrink = VIEW_HEIGHT_SHRINK, grow = VIEW_SIZE_GROW,
-  } = opts;
+export function scaleVerdict(bounds, page) {
   const out = [];
-  if (Math.abs(bounds.x - view.offsetX) > origin) out.push(`左 ${bounds.x}（計算では ${view.offsetX}）`);
-  if (Math.abs(bounds.y - view.offsetY) > origin) out.push(`上 ${bounds.y}（計算では ${view.offsetY}）`);
-  if (bounds.w < view.width - wShrink || bounds.w > view.width + grow) out.push(`幅 ${bounds.w}（計算では ${view.width}）`);
-  if (bounds.h < view.height - hShrink || bounds.h > view.height + grow) out.push(`高さ ${bounds.h}（計算では ${view.height}）`);
+  if (!(bounds.w > 0 && bounds.h > 0)) {
+    out.push("中身の矩形が空です");
+    return out;
+  }
+  const sx = bounds.w / page.width;
+  const sy = bounds.h / page.height;
+  // ⚠️ **大きいほうを採る**＝スクロールバーは縮める方向にしか効かない。
+  const scale = Math.max(sx, sy);
+  if (Math.abs(sx - sy) / scale > SCALE_AXIS_SLACK) {
+    out.push(`横と縦で倍率が違います（横 ${sx.toFixed(3)} / 縦 ${sy.toFixed(3)}）＝別のものを測っている疑い`);
+  }
+  // ⚠️ **`devicePixelRatio` とは突き合わせない**（#1228・2026-09-25 に実測）＝
+  //   外部ディスプレイでは**実際は 1.5 倍なのに `devicePixelRatio` が 1 と答えた**
+  //  （同じ機械のノート側は 1.5 と答える）。**測った値のほうが正しい**ので、
+  //   拡大率を根拠にすると**正しい回を落とす**。見るのは「横と縦で筋が通っているか」だけにする。
   return out;
+}
+
+/** 測った矩形から、焼く側が使う対応（`view`）を作る。 */
+export function viewFromBounds(bounds, page) {
+  const scale = Math.max(bounds.w / page.width, bounds.h / page.height);
+  return {
+    offsetX: bounds.x,
+    offsetY: bounds.y,
+    width: bounds.w,
+    height: bounds.h,
+    scale: Number(scale.toFixed(4)),
+    cssWidth: page.width,
+    cssHeight: page.height,
+    dpr: page.dpr,
+  };
 }

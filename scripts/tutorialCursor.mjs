@@ -16,7 +16,7 @@ import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CURSOR_H, CURSOR_W, RIPPLE_SEC, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE, SETTLE_SEC, TAIL_GUARD_SEC, TRAVEL_SEC,
+  CURSOR_H, CURSOR_W, RIPPLE_SEC, RIPPLE_SIZE, SETTLE_SEC, TAIL_GUARD_SEC, TRAVEL_SEC, VIEW_NOT_MEASURED_MESSAGE,
   cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter, positionExpr, ripplePixels,
   stillTimes, toVideoPoint,
 } from "./lib/cursor.mjs";
@@ -38,7 +38,10 @@ function main() {
   const log = checkRecordLog(JSON.parse(readFileSync(logPath, "utf8")));
   // ⚠️ **焼く側でも断る**（PR #1237 レビュー 🟡）＝断っているのが**録る側だけ**だと、
   //   古い記録や手で書いた記録を渡して**門を迂回**できる。文は録る側と共有する。
-  if (log.view.dpr !== 1) throw new Error(SCALE_NOT_100_MESSAGE(log.view.dpr));
+  // ⚠️ **見るのは「測れているか」**（#1228）＝拡大率そのものは断る理由にしない。
+  if (!(log.view.scale > 0) || !Number.isFinite(log.view.offsetX) || !Number.isFinite(log.view.offsetY)) {
+    throw new Error(VIEW_NOT_MEASURED_MESSAGE);
+  }
   if (!existsSync(log.video)) throw new Error(`録画がありません: ${log.video}`);
   // ⚠️ **当たりは両方に置く**（#1234 で `tutorialRecord` に入れたのと同じ形に揃える）。
   if (!existsSync(FFMPEG)) throw new Error(`FFmpeg がありません: ${FFMPEG}`);
@@ -58,11 +61,21 @@ function main() {
   //   「広すぎます」で自分から落ちる（黙って通ることはない）。
   const fps = log.fps;
   const trimSec = fps > 0 ? Math.ceil((log.usableFromSec ?? 0) * fps) / fps : (log.usableFromSec ?? 0);
-  const totalSec = log.totalSec - trimSec;
+  // ⚠️ **終わりの目印も切る**（利用者の指摘）＝録る側が**撮り終わりにも目印を出す**ように
+  //   なったので、切らないと**動画の最後に一面のピンクが残る**。
+  const endSec = log.usableToSec != null && log.usableToSec > trimSec ? log.usableToSec : log.totalSec;
+  const totalSec = endSec - trimSec;
   if (totalSec <= 0) throw new Error(`目印を切ると何も残りません（全体 ${log.totalSec}s / 切る ${trimSec}s）＝録り直してください`);
 
-  // ② 押した所を、録画の中の位置へ直す（時刻は**切ったぶん**だけ前へ寄せる）
-  const points = log.steps.map((s) => ({ atSec: Number((s.atSec - trimSec).toFixed(3)), ...toVideoPoint(log.view, s.x, s.y) }));
+  // ② ⚠️ **題字バーを落として、中身だけにする**（利用者の指摘）＝
+  //   「すたりお」「最小化・最大化・×」は教材に要らない。中身の矩形は**目印で実測済み**なので、
+  //   そこだけを切り出す。押した所の座標も、切った原点ぶんだけ寄せる。
+  const view = log.view;
+  const frame = { x: view.offsetX, y: view.offsetY, w: view.width - (view.width % 2), h: view.height - (view.height % 2) };
+  const points = log.steps.map((s) => {
+    const at = toVideoPoint(view, s.x, s.y);
+    return { atSec: Number((s.atSec - trimSec).toFixed(3)), x: at.x - frame.x, y: at.y - frame.y };
+  });
   const path = cursorPath(points);
   if (path.length === 0) throw new Error("押した記録が1つもありません");
   // ⚠️ **切った所より前から動き始めていないか**＝カーソルが**いきなり画面の途中から現れる**。
@@ -89,7 +102,7 @@ function main() {
   // ⚠️ **位置の式は `lib` から採る**（PR #1237 レビュー 🟡）＝ここで組み立てていた頃は、
   //   `cursorAt` と**同じ意味を2つの言語で二重に書いた**形になっていた（端の扱いまで別々）。
   const filter =
-    `[0:v]trim=start=${trimSec},setpts=PTS-STARTPTS[base];` +
+    `[0:v]trim=start=${trimSec}:end=${endSec},setpts=PTS-STARTPTS,crop=${frame.w}:${frame.h}:${frame.x}:${frame.y}[base];` +
     `[base][2:v]overlay=eof_action=repeat:x='${rippleX}${hide}':y='${rippleY}${hide}'[marked];` +
     `[marked][1:v]overlay=eof_action=repeat:x='${positionExpr(path, "x")}':y='${positionExpr(path, "y")}'`;
   // ⚠️ **式はファイルで渡す**（PR #1237 レビュー 🟡）＝1段で約500字伸びるので、引数に載せると
@@ -110,14 +123,16 @@ function main() {
   //   `r.error` を見ないと「焼けませんでした:」だけが出て、原因が消える。
   if (r.error) throw new Error(`FFmpeg を起こせません: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`焼けませんでした:\n${r.stderr ?? ""}`);
-  console.log(`焼きました: ${out}（頭 ${trimSec.toFixed(2)}s の目印は切りました）`);
+  console.log(`焼きました: ${out}（頭 ${trimSec.toFixed(2)}s と終わりの目印を切り、題字バーも落として ${frame.w}x${frame.h} にしました）`);
 
   // ⑤ ⚠️ **押した所に出ているかを機械で確かめる**（ここを省くと、黙って別の場所を教える）
-  const size = videoSize(log.video);
+  // ⚠️ **比べる相手も同じ所を切る**＝焼いた側は中身だけになったので、
+  //   元の録画も同じ矩形を切らないと、**まるで違う絵を比べる**ことになる。
+  const size = { w: frame.w, h: frame.h };
   const bad = [];
   /** 焼く絵の**重心**（`want`）と、実際に変わった所を比べる（時刻は**切った後**の時間軸）。 */
   const checkAt = (atSec, want, what) => {
-    const before = frameAt(log.video, atSec + trimSec);
+    const before = frameAt(log.video, atSec + trimSec, frame);
     const after = frameAt(out, atSec);
     const why = markVerdict(changedCenter(before, after, CHECK_W), want, size);
     if (why) bad.push(`${atSec.toFixed(2)}s ${what}：${why}`);
@@ -160,10 +175,11 @@ function main() {
  * ⚠️ **箱平均で縮める**＝`frames.mjs` と同じ理由。既定の bicubic は極端な縮小で元画素の大半を見ないので、
  * **3画素幅の細い輪**が消えうる（ここは 1296→160 の約8倍）。
  */
-function frameAt(file, atSec) {
+function frameAt(file, atSec, crop = null) {
+  const cut = crop == null ? "" : `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},`;
   const r = spawnSync(FFMPEG, [
     "-hide_banner", "-loglevel", "error", "-i", file, "-ss", String(atSec),
-    "-frames:v", "1", "-vf", `scale=${CHECK_W}:${CHECK_H}:flags=area`, "-pix_fmt", "gray", "-f", "rawvideo", "-",
+    "-frames:v", "1", "-vf", `${cut}scale=${CHECK_W}:${CHECK_H}:flags=area`, "-pix_fmt", "gray", "-f", "rawvideo", "-",
   ], { maxBuffer: 1 << 24 });
   // ⚠️ **取り出しの失敗を黙って `null` にしない**（#1234 で `framesFromResult` に入れたのと同じ）。
   const frames = framesFromResult(r, file, CHECK_W * CHECK_H);
@@ -171,14 +187,5 @@ function frameAt(file, atSec) {
   return frames[0];
 }
 
-/**
- * 録画の実寸（⚠️ **推測しない**＝窓の枠の厚みは環境で変わる。読み取る）。
- */
-function videoSize(file) {
-  const r = spawnSync(FFMPEG, ["-hide_banner", "-i", file], { encoding: "utf8" });
-  const m = /, (\d+)x(\d+)[ ,]/.exec(`${r.stdout ?? ""}${r.stderr ?? ""}`);
-  if (!m) throw new Error(`録画の大きさを読めません: ${file}`);
-  return { w: Number(m[1]), h: Number(m[2]) };
-}
 
 main();

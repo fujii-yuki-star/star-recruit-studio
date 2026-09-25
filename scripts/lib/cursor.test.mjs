@@ -1,7 +1,7 @@
 // 仮想カーソルの絵と動き（#1227・ADR-0046 ③）。**純粋関数を直接叩く**。
 import { describe, expect, it } from "vitest";
 import {
-  CURSOR_H, CURSOR_W, RIPPLE_SIZE, SCALE_NOT_100_MESSAGE,
+  CURSOR_H, CURSOR_W, RIPPLE_SIZE, VIEW_NOT_MEASURED_MESSAGE,
   artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
   positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
 } from "./cursor.mjs";
@@ -57,17 +57,20 @@ describe("画面の中の座標 → 録画の中の位置", () => {
     expect(toVideoPoint(view, 0, 0), "ずれを足していない").toEqual({ x: 8, y: 31 });
   });
 
-  // ⚠️ **拡大率は掛けない**（PR #1237 レビュー 🟡）＝`offsetX` 自体が
-  //   「CSS px − 物理 px」なので、`dpr !== 1` では**掛けても直らない**。撮る側・焼く側とも**断る**。
-  it("拡大率は掛けない（掛け算で誤魔化さない）", () => {
-    expect(toVideoPoint({ offsetX: 10, offsetY: 40, dpr: 1.25 }, 100, 200), "掛け算で辻褄を合わせている").toEqual({ x: 110, y: 240 });
+  // ⚠️ **倍率を掛ける**（#1228）＝ただし「推測した拡大率」ではなく、**録画から実測した倍率**。
+  //   以前は掛け算を落として「100% 以外は断る」にしていたが、利用者の実機は **150%** だった。
+  it("実測した倍率を掛ける", () => {
+    expect(toVideoPoint({ offsetX: 10, offsetY: 45, scale: 1.5 }, 100, 200)).toEqual({ x: 160, y: 345 });
+  });
+
+  it("倍率が無ければ等倍として扱う（古い記録を壊さない）", () => {
+    expect(toVideoPoint({ offsetX: 10, offsetY: 40 }, 100, 200)).toEqual({ x: 110, y: 240 });
   });
 
   // ⚠️ **断り文は「次の行動」を出す**（§2-5）＝原因だけ言って終わらない。
-  it("100% でないときの断りは、何をすればよいかを言う", () => {
-    const m = SCALE_NOT_100_MESSAGE(1.25);
-    expect(m).toContain("125%");
-    expect(m, "次の行動が無い").toContain("100% にしてから");
+  it("測れていないときの断りは、何をすればよいかを言う", () => {
+    expect(VIEW_NOT_MEASURED_MESSAGE).toContain("scale");
+    expect(VIEW_NOT_MEASURED_MESSAGE, "次の行動が無い").toContain("録り直して");
   });
 });
 

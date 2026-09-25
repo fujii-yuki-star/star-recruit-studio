@@ -18,6 +18,7 @@ export type ScreenId =
   | "looks-edit"
   | "materials"
   | "settings"
+  | "help"
   | "about";
 
 // 読み上げの声（ナレーション）の作成状態

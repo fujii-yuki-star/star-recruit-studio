@@ -4,8 +4,8 @@
 // **いちばん効かせたい判定が変異チェックに掛かっていなかった**。切り出したのでここで叩く。
 import { describe, expect, it } from "vitest";
 import {
-  AWAY_LIMIT, CHECK_H, CHECK_W, VIEW_HEIGHT_SHRINK, VIEW_ORIGIN_SLACK, VIEW_WIDTH_SHRINK,
-  expectedCheckCount, markVerdict, toCheckPoint, viewVerdict,
+  AWAY_LIMIT, CHECK_H, CHECK_W,
+  expectedCheckCount, markVerdict, scaleVerdict, toCheckPoint, viewFromBounds,
 } from "./burnCheck.mjs";
 import { expectedCursorCenter } from "./cursor.mjs";
 
@@ -100,40 +100,60 @@ describe("焼いた印の判定", () => {
   });
 });
 
-// ⚠️ **`view` を見る唯一の目**＝計算した値で描いて同じ値で検査しても、間違いは見えない。
-describe("録画から測った中身の矩形と、計算した view の突き合わせ", () => {
-  const view = { offsetX: 8, offsetY: 31, width: 1280, height: 800 };
-  const exact = { x: 8, y: 31, w: 1280, h: 800 };
+// ⚠️ **`view` は「測った矩形」から作る**（#1228）＝以前は `screenX - windowX` の引き算で
+// 出して**拡大率 100% 以外は断って**いた。いまは実測なので**どの拡大率でも撮れる**。
+// ここで見るのは「測り違いを見つけられるか」。
+describe("測った矩形から対応を作る", () => {
+  const page100 = { width: 1280, height: 800, dpr: 1 };
+  const page150 = { width: 863, height: 524, dpr: 1.5 };
 
-  it("一致していれば、何も言わない", () => {
-    expect(viewVerdict(exact, view)).toEqual([]);
+  it("等倍：原点と大きさをそのまま採り、倍率 1 を出す", () => {
+    expect(viewFromBounds({ x: 8, y: 31, w: 1280, h: 800 }, page100))
+      .toMatchObject({ offsetX: 8, offsetY: 31, width: 1280, height: 800, scale: 1 });
   });
 
-  // ⚠️ **これが実際に捕まえた形**＝起動直後の窓の動きで、高さが 33 画素古かった。
-  it("高さが 33 画素ずれていれば言う（実際に捕まえた形）", () => {
-    expect(viewVerdict({ ...exact, h: 767 }, view).join(" ")).toContain("高さ 767");
+  // ⚠️ **利用者の実機がこれだった**（150%）＝ここが通らないと撮れない。
+  it("150%：測った矩形から 1.5 を出す", () => {
+    const v = viewFromBounds({ x: 10, y: 45, w: 1295, h: 786 }, page150);
+    expect(v.scale).toBeCloseTo(1.5, 2);
+    expect(v).toMatchObject({ offsetX: 10, offsetY: 45 });
   });
 
-  it("位置が少しでもずれていれば言う", () => {
-    expect(viewVerdict({ ...exact, x: 8 + VIEW_ORIGIN_SLACK + 1 }, view).join(" ")).toContain("左 ");
-    expect(viewVerdict({ ...exact, y: 31 - VIEW_ORIGIN_SLACK - 1 }, view).join(" ")).toContain("上 ");
+  // ⚠️ **スクロールバーは縮める方向にしか効かない**＝大きいほうの倍率を採る。
+  it("片側が縮んでいても、大きいほうの倍率を採る", () => {
+    const v = viewFromBounds({ x: 0, y: 0, w: 1280 - 17, h: 800 }, page100);
+    expect(v.scale, "縮んだ側から倍率を採っている").toBeCloseTo(1, 3);
+  });
+});
+
+describe("測り違いを見つける", () => {
+  const page = { width: 1280, height: 800, dpr: 1 };
+
+  it("筋が通っていれば、何も言わない", () => {
+    expect(scaleVerdict({ x: 8, y: 31, w: 1280, h: 800 }, page)).toEqual([]);
   });
 
-  // ⚠️ **縦スクロールバーのぶんは許す**＝`position:fixed` は縦の帯の内側までしか広がらない。
-  it("幅は、縦スクロールバーのぶんだけ小さくても通す", () => {
-    expect(viewVerdict({ ...exact, w: 1280 - VIEW_WIDTH_SHRINK + 1 }, view)).toEqual([]);
+  it("空なら言う", () => {
+    expect(scaleVerdict({ x: 0, y: 0, w: 0, h: 0 }, page)).toHaveLength(1);
   });
 
-  // ⚠️ **許容はスクロールバーぶんまで**＝それを超える緩みを入れると、**実際に起きた取り違え**
-  //   （高さ 33 画素）が黙って通る。幅・高さとも、Windows のスクロールバー（15〜17 画素）が上限。
-  it("許容はスクロールバーぶんまで（それ以上は緩めない）", () => {
-    expect(VIEW_WIDTH_SHRINK, "幅の許容が広すぎる").toBeLessThanOrEqual(20);
-    expect(VIEW_HEIGHT_SHRINK, "高さの許容が広すぎる").toBeLessThanOrEqual(20);
-    expect(viewVerdict({ ...exact, h: 800 - VIEW_HEIGHT_SHRINK - 1 }, view).join(" ")).toContain("高さ ");
-    expect(viewVerdict({ ...exact, w: 1280 - VIEW_WIDTH_SHRINK - 1 }, view).join(" ")).toContain("幅 ");
+  // ⚠️ **横と縦で倍率が違う**＝別の窓や別の帯を測っている疑い。
+  it("横と縦で倍率が食い違えば言う", () => {
+    expect(scaleVerdict({ x: 0, y: 0, w: 1280, h: 500 }, page).join(" ")).toContain("横と縦で倍率が違います");
   });
 
-  it("大きすぎるのも言う（別のものを測っている）", () => {
-    expect(viewVerdict({ ...exact, w: 1400 }, view).join(" ")).toContain("幅 1400");
+  it("スクロールバーぶんの食い違いは通す（正しい回を落とさない）", () => {
+    expect(scaleVerdict({ x: 0, y: 0, w: 1280 - 17, h: 800 }, page)).toEqual([]);
+  });
+
+  // ⚠️ **`devicePixelRatio` とは突き合わせない**（2026-09-25 に実測）＝外部ディスプレイでは
+  //   **実際は 1.5 倍なのに `devicePixelRatio` が 1 と答えた**（同じ機械のノート側は 1.5）。
+  //   突き合わせると**正しい回を落とす**ので、見るのは横と縦の筋だけ。
+  it("拡大率と食い違っても、横と縦の筋が通っていれば通す", () => {
+    expect(scaleVerdict({ x: 0, y: 0, w: 2880, h: 1800 }, { width: 1920, height: 1200, dpr: 1 }), "拡大率を根拠にしている").toEqual([]);
+  });
+
+  it("150% の実機の値は通す", () => {
+    expect(scaleVerdict({ x: 10, y: 45, w: 1295, h: 786 }, { width: 863, height: 524, dpr: 1.5 })).toEqual([]);
   });
 });

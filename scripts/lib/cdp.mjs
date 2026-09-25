@@ -81,6 +81,23 @@ export async function evaluate(cdp, expression) {
  *（このファイル自身がその再発を避けると書いている型）。
  * ⚠️ **見つけたら画面の真ん中へ寄せる**＝スクロールの外にあると、押せても**録画に写らない**。
  */
+/**
+ * **入力欄**を、ラベル（`aria-label` / `placeholder`）で探す（#1228）。
+ *
+ * ⚠️ **文字で探せない**＝入力欄は中身が空なので `FIND_BY_TEXT` では当たらない。
+ * 教材では「実際に打っている所」を見せたいので、ここが要る。
+ */
+export const FIND_FIELD = (label) => `(() => {
+  const want = ${JSON.stringify(label)};
+  const all = [...document.querySelectorAll("input, textarea, [contenteditable=true]")]
+    .filter((el) => el.offsetParent !== null);
+  const name = (el) => (el.getAttribute("aria-label") || el.placeholder || "").trim();
+  const hit = all.find((el) => name(el) === want) || all.find((el) => name(el).includes(want));
+  if (!hit) return null;
+  hit.scrollIntoView({ block: "center" });
+  return hit;
+})()`;
+
 export const FIND_BY_TEXT = (text) => `(() => {
   const want = ${JSON.stringify(text)};
   const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];

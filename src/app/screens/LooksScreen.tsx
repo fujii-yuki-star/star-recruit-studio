@@ -4,7 +4,7 @@ import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL } from "../uiLabels";
+import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, ORIENTATION_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -32,11 +32,8 @@ const categoryLabel: Record<SceneCategory, string> = {
   free: "自由配置",
 };
 
-// 向き（Orientation）のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
-const orientationLabel: Record<Orientation, string> = {
-  "16:9": "横型（16:9）",
-  "9:16": "縦型（9:16）",
-};
+// 向き（Orientation）のユーザー向けラベル。文言は `uiLabels` に1つ（#1243 レビュー 🟡＝3か所に写していた）。
+const orientationLabel = ORIENTATION_LABEL;
 
 // FREE（自由配置）で「置けるもの」のラベル。FREE はテンプレ層でなく freeLayout に内容を持つため、
 // レイヤー種別ではなく配置できる要素（素材/文字/図形）を示す（ADR-0008・#5）。

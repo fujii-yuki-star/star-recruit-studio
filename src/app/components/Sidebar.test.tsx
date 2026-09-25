@@ -30,6 +30,12 @@ const setup = (over: {
   return { onNavigate, onCollapse };
 };
 
+// `setup` は container を返さないので、帯まるごとを見る検査のためだけに1つ用意する。
+const render2 = () =>
+  render(
+    <Sidebar current="home" onNavigate={vi.fn()} currentProjects={[]} onCollapse={vi.fn()} />,
+  );
+
 // 「今の動画」ボタン（2行構成）を取得。ラベル「今の動画」の最寄り button。
 const currentVideoButton = (): HTMLElement | null => screen.queryByText("今の動画")?.closest("button") ?? null;
 
@@ -113,5 +119,35 @@ describe("Sidebar: 開いている形式のぶんだけ並べる（#1006）", ()
     setup({ current: "draft", currentProjects: both });
     expect(screen.getByText("採用2026").closest("button")!.className).toContain("active");
     expect(screen.getByText("焼いた動画").closest("button")!.className).not.toContain("active");
+  });
+});
+
+// 帯の掃除（#1229・利用者判断 2026-09-25）。
+// ⚠️ **「準備中」は3つ並んでいた**（ヘルプ・お問い合わせ・お知らせ）＝押せない項目が並ぶだけで、
+// **使い方を伝える手段がどこにも無かった**。お問い合わせ・お知らせは入れる予定が無いので廃止し、
+// ヘルプは中身（使い方）を入れて押せるようにした。
+describe("Sidebar: 準備中の項目を残さない（#1229）", () => {
+  it("「使い方」は押せて、使い方の画面へ行く", () => {
+    const { onNavigate } = setup();
+    fireEvent.click(screen.getByText("使い方").closest("button")!);
+    expect(onNavigate).toHaveBeenCalledWith("help");
+  });
+
+  it("使い方の画面にいる間は印が付く", () => {
+    setup({ current: "help" });
+    expect(screen.getByText("使い方").closest("button")!.className).toContain("active");
+  });
+
+  it("お問い合わせ・お知らせは出さない", () => {
+    setup();
+    expect(screen.queryByText("お問い合わせ")).toBeNull();
+    expect(screen.queryByText("お知らせ")).toBeNull();
+  });
+
+  // ⚠️ **1つずつ数え上げない**＝項目を足したときに漏れる。**帯まるごと**で見る（§7「画面まるごとで見る検査」）。
+  it("帯のどこにも「準備中」を出さない", () => {
+    const { container } = render2();
+    expect(container.textContent).not.toContain("準備中");
+    expect(container.querySelectorAll("button[disabled]").length).toBe(0);
   });
 });

@@ -8,7 +8,7 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
-import { droppedRejectMessage } from "../uiLabels";
+import { droppedRejectMessage, ORIENTATION_LABEL, VIDEO_KIND_LABEL } from "../uiLabels";
 import { stepsFor, wizardBackLabel } from "./wizardSteps";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
@@ -31,14 +31,14 @@ interface WizardProps {
 
 // 動画の種類（ADR-0011）。表示名は正典 06§3。目的の選択肢はこの種類で切り替わる。
 const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
-  { id: VIDEO_KIND.recruit, label: "採用動画", desc: "会社・仕事の魅力を求職者に伝える" },
-  { id: VIDEO_KIND.general, label: "一般動画・社内発表", desc: "社内発表・報告・製品紹介など" },
+  { id: VIDEO_KIND.recruit, label: VIDEO_KIND_LABEL[VIDEO_KIND.recruit], desc: "会社・仕事の魅力を求職者に伝える" },
+  { id: VIDEO_KIND.general, label: VIDEO_KIND_LABEL[VIDEO_KIND.general], desc: "社内発表・報告・製品紹介など" },
 ];
 
 // 画面の向き（ADR-0012）。横型＝従来、縦型＝スマホ向け。寸法は videoSettings.aspectRatio から導出（§2-7）。
 const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
-  { id: ORIENTATION.landscape, label: "横型（16:9）", desc: "パソコン・テレビ・YouTube向け" },
-  { id: ORIENTATION.portrait, label: "縦型（9:16）", desc: "スマホ・ショート動画向け" },
+  { id: ORIENTATION.landscape, label: ORIENTATION_LABEL[ORIENTATION.landscape], desc: "パソコン・テレビ・YouTube向け" },
+  { id: ORIENTATION.portrait, label: ORIENTATION_LABEL[ORIENTATION.portrait], desc: "スマホ・ショート動画向け" },
 ];
 
 const yukoAdvice: Record<number, string[]> = {
@@ -804,7 +804,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           </div>
         </div>
 
-        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} />
+        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} pose="guide" />
       </div>
     </div>
   );

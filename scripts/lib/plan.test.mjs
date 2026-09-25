@@ -62,7 +62,7 @@ describe("台本の読み取り", () => {
 // ⚠️ **録る側にだけ門番があった**（PR #1237 再レビュー ℹ️）＝記録は素通しで、欠けていると
 // ffmpeg のエラー文で落ちて**原因が読めない**（`totalSec` が無いと `NaN` の比較が全部 false）。
 describe("録った記録の受け取り", () => {
-  const view = { offsetX: 8, offsetY: 31, dpr: 1, width: 1280, height: 800 };
+  const view = { offsetX: 8, offsetY: 31, scale: 1, width: 1280, height: 800 };
   const ok = () => ({ video: "a.mp4", view: { ...view }, totalSec: 10, fps: 15, steps: [{ atSec: 3, x: 100, y: 200 }] });
 
   it("揃っていれば、そのまま返す", () => {

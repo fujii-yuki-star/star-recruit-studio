@@ -257,6 +257,15 @@ button {
   font-weight: 700;
   font-size: 18px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* ⚠️ 小さい枠なので、余白を切って顔が大きく出るようにする（#1228）。 */
+.sidebar-brand-img {
+  width: 132%;
+  height: 132%;
+  object-fit: contain;
+  object-position: center 18%;
 }
 
 .sidebar-brand-text {
@@ -637,10 +646,11 @@ input[type="range"] {
   overflow: hidden;
 }
 
-.yuko-avatar-face {
-  font-size: 13px;
-  color: var(--color-primary);
-  font-weight: 700;
+/* ⚠️ 立ち絵は正方形（1254x1254）なので、丸い枠に収める（切れないよう contain）＝#1228。 */
+.yuko-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .yuko-name {

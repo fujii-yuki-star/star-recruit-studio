@@ -3,7 +3,7 @@ import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "..
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND } from "../domain/enums";
-import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind, Orientation, VideoKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
@@ -1637,3 +1637,22 @@ export const TROUBLE_LOG_OPEN = "記録の場所を開く";
 /** 開けなかったとき（§2-5＝次の行動を示す）。 */
 export const TROUBLE_LOG_OPEN_FAILED =
   "記録の場所を開けませんでした。もう一度お試しください。";
+
+/**
+ * 画面の形（`Orientation`）の表示名（§2-3＝技術語を出さない）。
+ *
+ * ⚠️ **3か所に書き写していた**（PR #1243 レビュー 🟡）＝新しい動画を作る画面・たたき台・
+ * 見た目パターンの一覧で別々に持っていた。片方だけ言い換えると**同じものを2つの言葉で呼ぶ**
+ *（「プロジェクト」と「動画」で実際に起きた＝#1026）。
+ * ⚠️ **全値必須**（`Record<Orientation, …>`）＝向きを足したときに漏れが型で落ちる。
+ */
+export const ORIENTATION_LABEL: Record<Orientation, string> = {
+  "16:9": "横型（16:9）",
+  "9:16": "縦型（9:16）",
+};
+
+/** 動画の種類（`VideoKind`）の表示名（ADR-0011・`06 §3`）。全値必須。 */
+export const VIDEO_KIND_LABEL: Record<VideoKind, string> = {
+  recruit: "採用動画",
+  general: "一般動画・社内発表",
+};

@@ -1,4 +1,8 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ORIENTATION, VIDEO_KIND } from "../domain/enums";
+import { ORIENTATION_LABEL, VIDEO_KIND_LABEL } from "./uiLabels";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
@@ -503,5 +507,56 @@ describe('sceneTemplateProblemMessage', () => {
 
   it('合っていない・候補なし・別の種類も無い＝作る先を出す（読み込めてはいる）', () => {
     expect(sceneTemplateProblemMessage(false, 0, { otherKind: false, anyLoaded: true })).toBe('今の見た目は動画の向き・場面に合っていません。この向き・場面に合う見た目パターンがまだありません。「見た目パターン」の画面で作れます。');
+  });
+});
+
+// 画面の形・動画の種類の名前を、**もう一度あちこちへ写させない**（PR #1243 レビュー 🟡）。
+//
+// ⚠️ **3か所に写っていた**＝新しい動画を作る画面・たたき台・見た目パターンの一覧。案内（`data/helpGuide.ts`）を
+// 書くときに4か所目を作りかけ、しかも**すでに1つずれていた**（案内「採用」≠画面「採用動画」）。
+// ⚠️ **呼び出し側を数え上げる形にしない**＝項目を足したときに漏れる。**`src/app` をまるごと歩いて**、
+// この文言の生の文字列が `uiLabels.ts` の外に無いことを見る（§7「画面まるごとで見る検査」）。
+describe("画面の形・動画の種類の名前は1か所（#1243）", () => {
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.tsx?$/.test(name) && !name.includes(".test.")) out.push(full);
+    }
+    return out;
+  };
+
+  it("生の文字列は uiLabels.ts にしか無い", () => {
+    const words = [
+      ORIENTATION_LABEL[ORIENTATION.landscape],
+      ORIENTATION_LABEL[ORIENTATION.portrait],
+      VIDEO_KIND_LABEL[VIDEO_KIND.recruit],
+      VIDEO_KIND_LABEL[VIDEO_KIND.general],
+    ];
+    const elsewhere: string[] = [];
+    for (const file of walk(join(process.cwd(), "src", "app"))) {
+      if (file.endsWith(`${sep}uiLabels.ts`)) continue;
+      const text = readFileSync(file, "utf8");
+      for (const w of words) {
+        // ⚠️ **引用符ごと見る**＝コメントや文章の中でこの語に触れるのは構わない。禁じたいのは**文字列リテラル**。
+        if (text.includes(`"${w}"`) || text.includes(`\`${w}\``)) elsewhere.push(`${file}: ${w}`);
+      }
+    }
+    expect(elsewhere, "この名前は uiLabels.ts の外に書かない（引いて使う）").toEqual([]);
+  });
+
+  // ⚠️ **定義元で値を留める**（変異チェックで露見）＝「写しが無い」だけを見ていたので、
+  // **`uiLabels.ts` の名前そのものを書き換えても何も鳴らなかった**（画面に出る言葉が黙って変わる）。
+  // 直書きを許すのは定義元だけ、という形にして、ここで実際の文字を1回だけ突き合わせる。
+  it("名前そのものを留める（変えるならここも直す）", () => {
+    expect(ORIENTATION_LABEL).toEqual({ "16:9": "横型（16:9）", "9:16": "縦型（9:16）" });
+    expect(VIDEO_KIND_LABEL).toEqual({ recruit: "採用動画", general: "一般動画・社内発表" });
+  });
+
+  it("歩けている（検査が空振りしていない）", () => {
+    // ⚠️ **走査そのものを試す**＝歩く所が0件でも上の検査は緑になる（このリポジトリで実際に起きた型）。
+    const files = walk(join(process.cwd(), "src", "app"));
+    expect(files.length).toBeGreaterThan(100);
+    expect(files.some((f) => f.endsWith(`${sep}WizardScreen.tsx`))).toBe(true);
   });
 });

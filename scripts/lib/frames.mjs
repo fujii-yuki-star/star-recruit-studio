@@ -68,14 +68,17 @@ export function distinctFrames(frames, tolerance = PIXEL_TOLERANCE, ratio = DIFF
  *
  * ⚠️ **生の画素で受け取る**＝PNG を解く道具を足さずに済む（Node に無い）。
  */
-export function sampleFrames(ffmpeg, file, fps = 2, from = null, to = null) {
+export function sampleFrames(ffmpeg, file, fps = 2, from = null, to = null, crop = null) {
   const seek = from == null ? [] : ["-ss", String(from)];
   const span = to == null ? [] : ["-to", String(to)];
+  // ⚠️ **押した所の周りだけを見られるようにする**（#1228・実測）＝全画面を 32x18 まで縮めると、
+  //   **選択の強調だけ**の変化（カードを選んだ等）は消えてしまい、「絵が動いていない」と誤って出る。
+  const cut = crop == null ? "" : `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},`;
   const r = spawnSync(ffmpeg, [
     "-hide_banner", "-loglevel", "error", "-i", file, ...seek, ...span,
     // ⚠️ **箱平均で縮める**（PR #1234 レビュー ℹ️）＝既定の bicubic は**極端な縮小で元画素の大半を見ない**
     //   ので、同じ絵でも値が揺れ、小さな変化はかえって消える。`area` なら面積に比例して効く。
-    "-vf", `fps=${fps},scale=${SAMPLE_W}:${SAMPLE_H}:flags=area`,
+    "-vf", `fps=${fps},${cut}scale=${SAMPLE_W}:${SAMPLE_H}:flags=area`,
     "-pix_fmt", "gray", "-f", "rawvideo", "-",
   ], { maxBuffer: 1 << 28 });
   return framesFromResult(r, file);
