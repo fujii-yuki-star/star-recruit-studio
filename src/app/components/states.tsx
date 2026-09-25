@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import type { DraftWarning, VoiceStatus } from "../data/mockData";
 import { CheckIcon, FolderIcon, SparkleIcon } from "./icons";
+import { yukoImage } from "../data/yukoImages";
 
 // 生成中などのローディング表示
 export function LoadingView({
@@ -25,7 +26,7 @@ export function LoadingView({
   return (
     <div className="card text-center" style={{ maxWidth: 520, margin: "var(--gap-xl) auto" }}>
       <div className="yuko-avatar" aria-hidden="true" style={{ margin: "0 auto var(--gap)" }}>
-        <span className="yuko-avatar-face">ゆうこ</span>
+        <img className="yuko-avatar-img" src={yukoImage("think")} alt="" />
       </div>
       <h2 className="section-title">{title}</h2>
       {message && <p className="page-desc text-pretty">{message}</p>}

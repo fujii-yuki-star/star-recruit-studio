@@ -530,6 +530,16 @@ button {
   border-radius: var(--radius);
 }
 
+/* 小さいボタン（ADR-0047・#1245）。
+   ⚠️ **12か所で使われていたのに、この規則が無かった**＝「ここは小さいボタン」と読めるコードが
+   普通の 41px を出していた（ドリフトではなく、最初から効いていなかった）。
+   ⚠️ **見た目＝当たり判定**（ADR-0047 決定3）＝見た目だけ縮めて当たり判定を残すと、
+   見えない当たり判定が隣と重なる。 */
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
 .btn-block {
   width: 100%;
 }
@@ -542,6 +552,19 @@ button {
 /* ===== フォーム ===== */
 .field {
   margin-bottom: var(--gap);
+}
+/* チェックと文字を1行に並べる。⚠️ 使われているのに規則が無かった（#1246）。 */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  cursor: pointer;
+}
+/* 見出しと欄を1行に並べる（縦に積まない欄）。⚠️ 同上。 */
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
 }
 
 .field-label {
@@ -805,6 +828,22 @@ button.badge {
 .mb {
   margin-bottom: var(--gap);
 }
+/* ⚠️ 下の4つは**使われているのに規則が無かった**（#1246 の門番で判明）＝
+   書いた人は効かせたつもりで、実際には何も起きていなかった。 */
+.mb-sm {
+  margin-bottom: var(--gap-sm);
+}
+.mt-md {
+  margin-top: var(--gap);
+}
+.gap-xs {
+  gap: 4px;
+}
+.list-reset {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .grow {
   flex: 1;
 }
@@ -813,6 +852,24 @@ button.badge {
 }
 .text-faint {
   color: var(--color-text-faint);
+}
+/* 注意の色（`--color-warn` が単一の参照元＝#413）。⚠️ 使われているのに規則が無かった（#1246）。 */
+.text-warn {
+  color: var(--color-warn);
+}
+/* 断りの文（赤）。⚠️ **8か所で使われているのに規則が無かった**＝
+   エラーの文が本文と同じ色で出ていた（読み飛ばされる）。 */
+.form-error {
+  color: var(--color-danger);
+  font-size: 13px;
+}
+/* 読みやすい折り返し。⚠️ `text-pretty` は21か所・`text-balance` は2か所で使われていたのに
+   規則が無かった＝どちらも効いていなかった。見出しは行の長さを揃え、本文は末尾の孤立を避ける。 */
+.text-pretty {
+  text-wrap: pretty;
+}
+.text-balance {
+  text-wrap: balance;
 }
 .text-sm {
   font-size: 13px;
