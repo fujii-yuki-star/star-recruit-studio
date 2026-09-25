@@ -43,8 +43,8 @@ const FPS = 15;
  * ⚠️ **長めに出す**＝`atSec` は ffmpeg を起こしてからの秒で、**録画の先頭は数百 ms 遅れる**
  *（`timeBaseNote`）。短いと、その遅れのぶんで**目印の外**を見てしまう。
  */
-const FLASH_SEC = 1.2;
-const FLASH_SAMPLE_AFTER = 0.4;
+const FLASH_SEC = 1.6;
+const FLASH_SAMPLE_AFTER = 0.8;
 /**
  * 目印を消してから台本を始めるまでの間（秒）。
  *
@@ -55,6 +55,20 @@ const FLASH_SAMPLE_AFTER = 0.4;
 const AFTER_FLASH_SEC = 1.5;
 /** 目印が写っていると認めるのに要る、変わった画素の割合。 */
 const FLASH_MIN_RATIO = 0.6;
+
+/**
+ * 押す相手・打つ欄が出てくるのを待つ上限（ミリ秒）。
+ *
+ * ⚠️ **長すぎない**＝出ないものを待ち続けると、失敗が「止まった」に見える（原因が分からない）。
+ */
+const LOCATE_WAIT_MS = 12_000;
+
+/**
+ * 押す前に「位置が動いていないか」を見直すまでの間（ミリ秒）。
+ *
+ * ⚠️ **短くしない**＝畳んだ欄が開く動きより短いと、動いている途中の座標で落ち着いたと判断する。
+ */
+const LOCATE_SETTLE_MS = 350;
 
 /** 段ごとの検収で、押した前後どれだけを見るか（秒）と、そのコマ数。 */
 const STEP_WINDOW_SEC = 0.5;
@@ -423,6 +437,32 @@ const RESET_TO_HOME = `(async () => {
   return find("新しい動画を作る") ? "home" : "stuck";
 })()`;
 
+/**
+ * 押す相手（または打つ欄）を探す。**見つからなければ、出てくるまで少しだけ待つ**。
+ *
+ * @returns 見つかった位置。{@link LOCATE_WAIT_MS} 待っても出なければ `null`。
+ */
+async function locateWithWait(cdp, step, isTyping) {
+  const where = () => evaluate(cdp, isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
+  const until = Date.now() + LOCATE_WAIT_MS;
+  for (;;) {
+    const at = await where();
+    if (at) {
+      // ⚠️ **位置が落ち着くまで待つ**（#1228・タイムライン編集で踏んだ）＝探した直後にその座標へ
+      //   押しているので、**畳んだ欄が開く途中**のように配置が動いていると**別の物を押す**。
+      //   実際、素材のタグで絞る操作が効かないまま次へ進み、**違う素材を取り込んでいた**
+      //  （押せてはいるので誰も落ちず、映像だけが間違っている＝いちばん質の悪い失敗）。
+      await new Promise((r) => setTimeout(r, LOCATE_SETTLE_MS));
+      const again = await where();
+      if (again && again.x === at.x && again.y === at.y) return again;
+      if (Date.now() > until) return again ?? at;
+      continue;
+    }
+    if (Date.now() > until) return null;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
   if (!scriptPath) {
@@ -603,11 +643,16 @@ async function main() {
         continue;
       }
       const isTyping = step.fieldLabel != null;
-      const at = await evaluate(cdp, isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
+      // ⚠️ **出るまで待つ**（#1228・タイムライン編集で2回踏んだ）＝その場に無ければ即座に諦めていたので、
+      //   **取り込みのように終わる時刻が読めない操作の直後**は、台本の `afterMs` を当てずっぽうで
+      //   伸ばすしかなかった（伸ばしても足りない日があり、伸ばした分だけ映像が間延びする）。
+      //   人も「出てくるまで待って押す」ので、**出たらすぐ押す・出なければ諦める**にする。
+      // ⚠️ **待つのは「無いとき」だけ**＝在れば1回目で見つかるので、映像は間延びしない。
+      const at = await locateWithWait(cdp, step, isTyping);
       if (!at) {
         throw new Error(isTyping
-          ? `入力欄がありません: ${step.fieldLabel}（画面が違うか、ラベルが変わっていませんか）`
-          : `押せる要素がありません: ${step.clickText}`);
+          ? `入力欄が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.fieldLabel}（画面が違うか、ラベルが変わっていませんか）`
+          : `押せる要素が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.clickText}`);
       }
       const tSec = (Date.now() - t0) / 1000;
       // ⚠️ **本物の入力を送る**＝JS の `.click()` ではなく、人が押したのと同じ道を通す。
@@ -619,6 +664,15 @@ async function main() {
       // ⚠️ **1文字ずつ打つ**（#1228・利用者の要望）＝まとめて入れると「打っている所」が
       //   映らず、教材として何が起きたのか分からない。人が打つ速さに近づける。
       if (isTyping) {
+        // ⚠️ **先に中身を選ぶ**（#1228・タイムライン編集で踏んだ）＝空の欄しか想定していなかったので、
+        //   既に値の入っている欄（長さ「5」など）に打つと **「53」のように足されて**、
+        //   打てたかの確かめ（下の `VALUE_OF`）で落ちていた。**人が打ち替えるときと同じ**に、選んでから打つ。
+        // ⚠️ **本物のキーとして送る**＝`el.select()` は数値の欄で使えないことがある（選択の口が制限されている）。
+        for (const type of ["rawKeyDown", "keyUp"]) {
+          await cdp.send("Input.dispatchKeyEvent", {
+            type, modifiers: 2, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+          });
+        }
         for (const ch of [...step.type]) {
           await cdp.send("Input.insertText", { text: ch });
           await new Promise((r) => setTimeout(r, step.typeMs ?? 70));
@@ -628,6 +682,17 @@ async function main() {
         const got = await evaluate(cdp, VALUE_OF(step.fieldLabel));
         if (got !== step.type) {
           throw new Error(`「${step.fieldLabel}」に打てていません（入っているのは ${JSON.stringify(got)}）`);
+        }
+        // ⚠️ **打っただけでは決まらない欄がある**（#1228・タイムライン編集で踏んだ）＝
+        //   長さ・開始の欄は **Enter で確定**する作りで、打ちっぱなしだと**画面の帯が変わらないまま**
+        //   次の段へ進む（教材としては「入力しても何も起きない」映像になる）。
+        if (step.enter) {
+          for (const type of ["rawKeyDown", "keyUp"]) {
+            await cdp.send("Input.dispatchKeyEvent", {
+              type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+            });
+          }
+          await new Promise((r) => setTimeout(r, 500));
         }
       }
       await new Promise((r) => setTimeout(r, step.afterMs ?? 1200));

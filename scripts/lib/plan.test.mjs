@@ -119,3 +119,21 @@ describe("録った記録の受け取り", () => {
     expect(() => checkRecordLog({ ...ok(), steps: [{ atSec: 99, x: 1, y: 2 }] })).toThrow(/録画の外/);
   });
 });
+
+// 確定のキー（#1228・タイムライン編集で踏んだ）。
+// ⚠️ **長さ・開始の欄は Enter で決まる**＝打ちっぱなしだと帯が変わらないまま次へ進み、
+// 「入力しても何も起きない」映像ができる。押す段に書いても効かないので、そこは断る。
+describe("台本：確定のキー", () => {
+  it("打つ段になら書ける", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "長さ（秒）", type: "8", enter: true }] })).not.toThrow();
+  });
+
+  it("押す段に書いたら断る（効かないのに書けてしまう、を作らない）", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "再生", enter: true }] }))
+      .toThrow(/打つ段/);
+  });
+
+  it("書かなくてもよい（これまでの台本がそのまま通る）", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "題名", type: "あ" }] })).not.toThrow();
+  });
+});

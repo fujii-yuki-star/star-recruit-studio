@@ -36,6 +36,11 @@ export function checkPlan(plan) {
     if (step.type != null && step.fieldLabel == null) {
       throw new Error(`${i + 1} 段目に \`fieldLabel\`（どの欄に打つか）がありません: ${JSON.stringify(step)}`);
     }
+    // ⚠️ **確定のキーは打つ段にしか意味が無い**（#1228）＝押す段に書いても何も起きないので、
+    //   気づかないまま「確定したつもり」の台本になる。
+    if (step.enter != null && step.fieldLabel == null) {
+      throw new Error(`${i + 1} 段目の \`enter\` は打つ段（\`fieldLabel\`）にだけ書けます: ${JSON.stringify(step)}`);
+    }
     if (step.waitMs != null && !Number.isFinite(step.waitMs)) {
       throw new Error(`${i + 1} 段目の \`waitMs\` が数ではありません: ${JSON.stringify(step.waitMs)}`);
     }
