@@ -8,8 +8,18 @@ const VOICEVOX_SPEAKER_KEY = 'app.voicevoxSpeaker';
 const AI_MODEL_KEY = 'app.aiModel';
 const PANEL_LAYOUT_KEY = 'app.panelLayout';
 
-/** 動画案生成に使う Gemini モデルID（現行の無料枠で使える既定）。設定で変更可＝ADR-0010 未解決#1。 */
-export const DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+/**
+ * 動画案生成に使う Gemini モデルID。設定で変更可＝ADR-0010 未解決#1。
+ *
+ * ⚠️ **`gemini-2.5-flash` は使えなくなった**（2026-09-25・実機で踏んだ）＝Google が新規の利用者に
+ * 提供しなくなり、要求が `404` で返る。本文にそのまま
+ *「This model models/gemini-2.5-flash is no longer available to new users.
+ *  Please update your code to use models/gemini-3.8-flash」と書かれていた。
+ * ⚠️ **差し替え先が実在することは実測した**＝入れ替えたら `404` が消え、**そのモデル自身からの
+ * `503`（"This model is currently experiencing high demand"）**に変わった＝名前は解決している。
+ * ⚠️ **画面には出さない**＝ここはモデルIDという実装の言葉なので、出すのは設定の「上級者向け」だけ（§2-3）。
+ */
+export const DEFAULT_AI_MODEL = 'gemini-3.8-flash';
 
 function read(key: string): string | null {
   return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
