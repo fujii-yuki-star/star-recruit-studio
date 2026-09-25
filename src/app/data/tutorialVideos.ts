@@ -35,3 +35,41 @@ export const TUTORIAL_VIDEOS: readonly TutorialVideo[] = [];
 export function tutorialVideoSrc(video: TutorialVideo): string {
   return `/${TUTORIAL_VIDEO_DIR}/${video.file}`;
 }
+
+/** 目録と置き場所の食い違い（`catalogMismatch` の答え）。**そろっていれば4つとも空**。 */
+export interface CatalogMismatch {
+  /** 目録にあるのに、置いていないファイル。押しても黙って何も出ない。 */
+  missing: string[];
+  /** 置いてあるのに、目録に無いファイル。配るのに誰も見られない。 */
+  unlisted: string[];
+  /** 重なっている名札。 */
+  duplicateIds: string[];
+  /** 重なっているファイル名。 */
+  duplicateFiles: string[];
+}
+
+/**
+ * 目録と、実際に置いてあるファイルを突き合わせる。
+ *
+ * ⚠️ **突き合わせ方を関数に出した**（PR #1243 レビュー 🟡）＝検査の中に直接書いていたが、
+ * **目録がまだ空**なので「0件どうしの比較」にしかならず、**比較の仕組み自体が一度も動いていなかった**
+ *（`.sort()` を外そうが `Set` を長さ比較に変えようが緑のまま＝このリポジトリで繰り返している
+ *「見えていないのに緑」）。関数にして**作った値で直接叩く**ことで、目録が空の間も仕組みを試せる。
+ *
+ * @param catalog 目録（`TUTORIAL_VIDEOS`）。
+ * @param files 置き場所にあるファイル名（`.` で始まるものは置き場所を git に残すための印なので、呼ぶ側で外す）。
+ */
+export function catalogMismatch(
+  catalog: readonly Pick<TutorialVideo, "id" | "file">[],
+  files: readonly string[],
+): CatalogMismatch {
+  const listed = new Set(catalog.map((v) => v.file));
+  const there = new Set(files);
+  const dup = <T>(xs: readonly T[]): T[] => xs.filter((x, i) => xs.indexOf(x) !== i);
+  return {
+    missing: catalog.map((v) => v.file).filter((f) => !there.has(f)).sort(),
+    unlisted: files.filter((f) => !listed.has(f)).sort(),
+    duplicateIds: [...new Set(dup(catalog.map((v) => v.id)))].sort(),
+    duplicateFiles: [...new Set(dup(catalog.map((v) => v.file)))].sort(),
+  };
+}

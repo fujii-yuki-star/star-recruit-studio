@@ -7,7 +7,7 @@ import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -28,9 +28,9 @@ import {
   VideoIcon,
 } from "../components/icons";
 
-// 向きの表示名（§2-3：技術語を出さない）。
+// 向きの表示名（§2-3：技術語を出さない）。文言は `uiLabels` に1つ（#1243 レビュー 🟡＝3か所に写していた）。
 function orientationLabel(o: Orientation): string {
-  return o === ORIENTATION.portrait ? "縦型（9:16）" : "横型（16:9）";
+  return ORIENTATION_LABEL[o];
 }
 
 interface DraftProps {

@@ -6,6 +6,10 @@
 // ⚠️ **画面を足したら案内にも行が要る**＝下の3つの表で `ScreenId` をすべて覆う（「使い方」自身を除く）。
 // 覆えていなければ門番（`helpGuide.test.ts`）が落とす＝**案内に載らない画面**が静かに増えない。
 import type { ScreenId } from "./mockData";
+// ⚠️ **選択肢の名前を書き写さない**（PR #1243 レビュー 🟡）＝案内に写した「採用」が、
+// 画面の「採用動画」と**すでにずれていた**。画面名（`SCREEN_TITLES`）と同じ考え方で、文言を引く。
+import { ORIENTATION_LABEL, VIDEO_KIND_LABEL } from "../uiLabels";
+import { ORIENTATION, VIDEO_KIND } from "../../domain/enums";
 
 /** 案内1行ぶん。見出しは `screen` から引くので、ここには**説明だけ**を書く。 */
 export interface HelpStep {
@@ -26,18 +30,21 @@ export const HELP_FLOW: readonly HelpStep[] = [
     screen: "wizard",
     summary: "用途と画面の形を選び、伝えたいことと素材を渡します。",
     detail: [
-      "「採用」と「一般動画・社内発表」から選びます。選んだ用途に合わせて、聞かれることと動画案の組み立て方が変わります。",
-      "画面の形は「横型（16:9）」と「縦型（9:16）」から選びます。会議室のテレビやパソコンで見せるなら横型、スマホで見せるなら縦型です。",
+      `「${VIDEO_KIND_LABEL[VIDEO_KIND.recruit]}」と「${VIDEO_KIND_LABEL[VIDEO_KIND.general]}」から選びます。`
+        + "選んだ用途に合わせて、聞かれることと動画案の組み立て方が変わります。",
+      `画面の形は「${ORIENTATION_LABEL[ORIENTATION.landscape]}」と「${ORIENTATION_LABEL[ORIENTATION.portrait]}」から選びます。`
+        + "会議室のテレビやパソコンで見せるなら横型、スマホで見せるなら縦型です。",
       "伝えたいことを書き、使いたい写真や動画を入れます。",
     ],
   },
   {
     screen: "confirm",
-    summary: "外へ送る内容を、送る前に見せます。",
+    summary: "動画案を作る前に、内容をそのまま見せます。",
     detail: [
-      "動画案を作るときは、書いた内容を外のサービスへ送ります。送る前に必ずこの画面を通ります。",
-      "元の動画ファイルそのものは送りません（代表の1コマだけを送ります）。",
-      "送りたくないときは、この画面で止められます。",
+      "外のAIを使う設定のときは、ここで見せた内容が外へ送られます。送る前に必ずこの画面を通ります。",
+      "外のAIを使っていないときは、何も外へ送りません。その場合もこの画面で内容を確かめられます。",
+      "写真や動画のファイルそのものは送りません。送るのは書いた内容と、素材につけた名前・説明・タグの文字だけです。",
+      "やめたいときは、この画面で止められます。",
     ],
   },
   {
@@ -174,7 +181,9 @@ export const HELP_TIPS: readonly { title: string; body: string }[] = [
   },
   {
     title: "操作を取り消せます",
-    body: "Ctrl と Z で1つ戻せます。やり直すときは Ctrl と Y、または Ctrl と Shift と Z です。",
+    body:
+      "Ctrl+Z で1つ戻せます。やり直すときは Ctrl+Y、または Ctrl+Shift+Z です。"
+      + "効くのは、動画のたたき台・場面編集・見た目パターンの編集・タイムライン編集の4つです。",
   },
   {
     title: "左のメニューは畳めます",

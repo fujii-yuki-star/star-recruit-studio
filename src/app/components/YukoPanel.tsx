@@ -1,10 +1,17 @@
-import { yukoImage } from "../data/yukoImages";
+import { yukoImage, type BundledYukoPose } from "../data/yukoImages";
 
 interface YukoPanelProps {
   title?: string;
   messages: string[];
-  /** 出す顔（`17 §3` の poseTag）。無い tag なら既定の顔になる。 */
-  pose?: string;
+  /**
+   * 出す顔。
+   *
+   * ⚠️ **同梱ぶんの型に縛る**（PR #1243 レビュー ℹ️）＝`string` にしていたので、
+   * 呼び側の綴り違いが**型で落ちず、黙って既定の顔になる**（押しても何も起きないのと同じ質の壊れ方）。
+   * この欄はアプリの案内板なので、**素材の自由な `poseTag`（`11 §3.5`）は流れてこない**
+   *（流す必要が出たら、そのときに広げる）。
+   */
+  pose?: BundledYukoPose;
 }
 
 /**
