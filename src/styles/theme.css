@@ -837,7 +837,7 @@ button.badge {
   margin-top: var(--gap);
 }
 .gap-xs {
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 .list-reset {
   list-style: none;
@@ -1547,4 +1547,50 @@ button.badge {
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border);
   font-size: 14px;
+}
+
+/* ===== 詰めた表示（ADR-0047・#1247） =====
+   編集画面の主役は「並び」で、周りの道具立てがその面積を削ってはいけない。
+   ⚠️ **触る所は変えない**＝押す物・並び順・言葉・場所は据え置き。変えるのは**大きさと余白**だけ。
+   ⚠️ **見た目＝当たり判定**（決定3・利用者判断）＝見た目だけ縮めると、見えない当たり判定が隣と重なる。
+   ⚠️ **寸法はここ（トークン）で決める**＝画面ごとに数字を書かない。クラス名だけで大きさを約束しない
+   （`btn-sm` が12か所で使われていたのに規則が無かった＝#1245）。
+   ⚠️ **列（`--timeline-lane-h`）は触らない**＝#1104 で実機から決めた 28px。太いのは操作と余白のほう。 */
+.dense {
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap: 10px;
+  --gap-lg: 12px;
+  --gap-xl: 20px;
+}
+.dense .card {
+  padding: var(--gap-lg);
+}
+.dense .btn {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.dense .btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.dense .btn-lg {
+  padding: 8px 18px;
+  font-size: 14px;
+}
+.dense .btn-icon {
+  padding: 5px;
+}
+.dense .section-title {
+  font-size: 14px;
+}
+.dense .field {
+  margin-bottom: var(--gap-sm);
+}
+.dense .input,
+.dense .textarea,
+.dense .select,
+.dense select {
+  padding: 4px 8px;
+  font-size: 13px;
 }

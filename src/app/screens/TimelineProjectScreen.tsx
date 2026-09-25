@@ -5583,9 +5583,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   return (
     <>
-      <div className="main-scroll main-scroll--fixed">
+      <div className="main-scroll main-scroll--fixed dense">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
+      {/* ⚠️ **`dense` はこの画面だけ**（ADR-0047）＝操作と余白を詰めて、本体（並び）へ面積を渡す。
+          触る所（押す物・場所・言葉）は変えない。効き目を見てから他の編集画面へ広げる。 */}
       <PageHead
         title={doc.projectName}
         // 見出しごと貼り付ける（#774）＝この画面の見出しはスクロールする側の中にあるので、

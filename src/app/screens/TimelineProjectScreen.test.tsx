@@ -4475,6 +4475,10 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(container.querySelector(".panel-layout--fill"), "器が高さの決め打ちに戻っている").not.toBeNull();
     // 知らせは自分の中でスクロールする（消すと「注意 N件」から寄れる先が無くなる）。
     expect(container.querySelector(".timeline-notices")).not.toBeNull();
+    // ⚠️ **詰めた表示（ADR-0047・#1247）**＝この印が外れると、操作と余白が元の大きさに戻り、
+    // 本体（並び）に渡していた面積が黙って消える。実測では、印の有無で
+    // **ボタン高 41→29px・欄の余白 24→12px・画面に収まらず隠れている量 1139→690px** と変わる。
+    expect(container.querySelector(".main-scroll--fixed.dense"), "詰めた表示の印が外れている").not.toBeNull();
   });
 
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {

@@ -60,7 +60,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **増減したら中身を確かめてから数を直す**（数だけ合わせない）。
     // ⚠️ **170 であって 172 ではない**＝組み立ての断片2つ（`panel-drop-line--` / `timeline-clip--`）を
     //   落としたぶん。走査を書く前の下調べでは 172 と出ていたので、数だけ写すと合わない。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(170);
+    // ⚠️ **+1**（#1247）＝タイムライン編集に `dense`（詰めた表示）を1つ足した。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(171);
   });
 });
 
