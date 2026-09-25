@@ -8,7 +8,7 @@
 /** 出力先（`--out`）。⚠️ **知らない印は断る**＝黙って別の所へ書かない。 */
 export function parseOutDir(rest, fallback = "tutorial-out") {
   const at = rest.indexOf("--out");
-  const known = new Set(["--out"]);
+  const known = new Set(["--out", "--attach"]);
   const stray = rest.filter((a, i) => a.startsWith("--") && !known.has(a) && !(at >= 0 && i === at + 1));
   if (stray.length > 0) throw new Error(`知らない印です: ${stray.join(" ")}`);
   if (at >= 0 && rest[at + 1] == null) throw new Error("`--out` のあとに出力フォルダがありません");
@@ -26,8 +26,15 @@ export function checkPlan(plan) {
   if (plan.steps.length === 0) throw new Error("台本に段が1つもありません");
   plan.steps.forEach((step, i) => {
     if (step == null || typeof step !== "object") throw new Error(`${i + 1} 段目が空です`);
-    if (step.waitMs == null && step.clickText == null) {
-      throw new Error(`${i + 1} 段目に \`clickText\` も \`waitMs\` もありません: ${JSON.stringify(step)}`);
+    if (step.waitMs == null && step.clickText == null && step.fieldLabel == null) {
+      throw new Error(`${i + 1} 段目に \`clickText\` も \`fieldLabel\` も \`waitMs\` もありません: ${JSON.stringify(step)}`);
+    }
+    // ⚠️ **打つ段は、打つ先と中身の両方が要る**（#1228）＝どちらかだけだと**黙って何も打たない**。
+    if (step.fieldLabel != null && typeof step.type !== "string") {
+      throw new Error(`${i + 1} 段目に \`type\`（打つ文字）がありません: ${JSON.stringify(step)}`);
+    }
+    if (step.type != null && step.fieldLabel == null) {
+      throw new Error(`${i + 1} 段目に \`fieldLabel\`（どの欄に打つか）がありません: ${JSON.stringify(step)}`);
     }
     if (step.waitMs != null && !Number.isFinite(step.waitMs)) {
       throw new Error(`${i + 1} 段目の \`waitMs\` が数ではありません: ${JSON.stringify(step.waitMs)}`);
@@ -56,7 +63,7 @@ export function checkRecordLog(log) {
   if (!Number.isFinite(log.fps) || log.fps <= 0) {
     throw new Error(`記録の \`fps\` がコマ数になっていません: ${JSON.stringify(log.fps)}`);
   }
-  for (const key of ["offsetX", "offsetY", "dpr", "width", "height"]) {
+  for (const key of ["offsetX", "offsetY", "scale", "width", "height"]) {
     if (!Number.isFinite(log.view[key])) throw new Error(`記録の \`view.${key}\` が数ではありません＝録り直してください`);
   }
   // ⚠️ **隣の欄も見る**（PR #1237 3回目 🟡）＝`usableFromSec` は任意（#1226 の旧記録には無い）だが、
