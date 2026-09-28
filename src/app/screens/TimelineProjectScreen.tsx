@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
@@ -1604,6 +1604,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return doc.clips.filter((c) => {
       if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
       if (c.assetId && relinkable.has(c.assetId)) return false;
+      // ⚠️ **まだ文が無い読み上げは、こちらで数えない**（2026-09-28 の実機レビュー）＝
+      //   置いた直後は文も声も無いので、**一度も作っていないのに「もう一度作ってください」**と出た。
+      //   しかも「読み上げる文が入っていません。文を入力してください」（`TIMELINE_VOICE_TEXT_EMPTY`）と
+      //   並ぶので、**同じ1つの部品に別々の次の行動が2つ**出ていた（上の ⚠️ で畳んだのと同じ形）。
+      //   文が無いうちは**文を入れるのが先**なので、そちらの知らせに任せる。
+      if (c.kind === TIMELINE_CLIP_KIND.voice && (c.voice?.text ?? "").trim().length === 0) return false;
       const key = audioSourceKeyOfClip(c);
       return !key || !audioSrcByKey[key];
     }).length;
@@ -2944,7 +2950,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     spec: { bundledBgmId?: BundledBgmId; assetId?: string },
     at?: { trackId: string; startSec: number },
   ): void => {
-    addAudioClip({ ...spec, trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec });
+    // ⚠️ **押したときは、映像と同じで次の空き時刻へずれる**（2026-09-28 の実機レビュー）＝
+    //   以前は再生位置をそのまま渡していたので、**そこが塞がっていると断られた**
+    //  （映像・文字・図形は `firstFreeStart` でずれるのに、音だけ「ずらすか、列を足して重ねてください」）。
+    //   押す側からは同じ操作なので、結果が種類で変わる理由が読めない（ADR-0026②）。
+    // ⚠️ **運んで置いたときはずらさない**（ADR-0034 決定10）＝利用者が場所を指したら、そこへ置くか断る。
+    const found = at ?? (doc
+      ? audioPlacementAt(doc, audioTrackId, playheadSec, placedDurationSec({ kind: TIMELINE_CLIP_KIND.audio, ...spec }))
+      : null);
+    addAudioClip({ ...spec, trackId: found?.trackId ?? audioTrackId, startSec: found?.startSec ?? playheadSec });
+  };
+
+  /** 読み上げを押して置くときの置き先（音と同じ規則＝種類で割らない）。 */
+  const voicePlacement = (): { trackId: string; startSec: number } => {
+    const found = doc
+      ? audioPlacementAt(doc, audioTrackId, playheadSec, placedDurationSec({ kind: TIMELINE_CLIP_KIND.voice }))
+      : null;
+    return { trackId: found?.trackId ?? audioTrackId, startSec: found?.startSec ?? playheadSec };
   };
 
   /** キーボードで実行したときだけ走らせる（指の経路は `onEnd` で完結・`isKeyboardActivation`）。 */
@@ -5562,7 +5584,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {...busyGuard({ disabled: isPlaying, hint: playingHint })}
                     onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
                       addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
-                    onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
+                    onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", ...voicePlacement() }))}
                     {...placeHintProps(audioTrackId, { kind: TIMELINE_CLIP_KIND.voice })}
                   >
                     読み上げを置く

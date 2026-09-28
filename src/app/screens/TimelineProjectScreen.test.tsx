@@ -628,6 +628,33 @@ describe("TimelineProjectScreen: 音（#630 後半）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
   });
+
+  // ⚠️ **置いた直後に「もう一度作ってください」と言わない**（2026-09-28 の実機レビュー）＝
+  //   読み上げを置いた瞬間は文も声も無いので、**一度も作っていないのに**そう言われた。
+  //   しかも「読み上げる文が入っていません。文を入力してください」と並び、
+  //   **同じ1つの部品に別々の次の行動が2つ**出ていた（§2-5・ADR-0026②）。
+  it("文がまだ無い読み上げでは、音が見つからないとは言わない（文を入れるのが先）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "", status: "none" } },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
+
+  // ⚠️ **空白だけも「文が無い」**＝声を作っても無音になる（`TIMELINE_VOICE_TEXT_EMPTY` と同じ物差し）。
+  it("空白だけの読み上げでも同じ", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "   ", status: "none" } },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
 });
 
 describe("TimelineProjectScreen: 書き出し（#631）", () => {

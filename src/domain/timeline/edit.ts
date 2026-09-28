@@ -302,6 +302,33 @@ export function visualPlacementAt(
   };
 }
 
+/**
+ * 音（BGM・読み上げ）の置き先（2026-09-28 の実機レビュー）。
+ *
+ * ⚠️ **映像と同じ規則にする**（ADR-0026②＝同じ概念を、画面や種類で割らない）＝
+ * 以前は音だけ**再生位置をそのまま**渡していたので、その場所が塞がっていると**断られた**
+ *（映像・文字・図形は `firstFreeStart` で**次の空き時刻へずれる**のに）。
+ * 実機で確かめた＝同じ「置く」を押して、**映像は置けて、音は「ずらすか、列を足して重ねてください」**。
+ * 押す側からは同じ操作なので、結果が種類で変わる理由が読めない。
+ *
+ * ⚠️ **列をまたいでは探さない**＝映像側と同じ（#722 案A）。選んだ列が置けないときだけ手前へ落とす。
+ *
+ * @param fromSec ここから後ろで空きを探す（ふつうは再生位置）。
+ * @param durationSec 置くものの長さ（BGM と読み上げで違う）。
+ * @returns 置き先。置ける列が1本も無ければ `null`。
+ */
+export function audioPlacementAt(
+  doc: TimelineProject,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+  durationSec: number,
+): { trackId: string; startSec: number } | null {
+  const placeable = placeableAudioTracks(doc);
+  if (placeable.length === 0) return null;
+  const track = placeable.find((t) => t.id === preferredTrackId) ?? placeable[0];
+  return { trackId: track.id, startSec: firstFreeStart(doc.clips, track.id, fromSec, durationSec) };
+}
+
 /** 置き先として成り立つか（列の実在・種別の一致・固定・隠し・重なり）を1か所で見る。 */
 function placementIssue(
   doc: TimelineProject,
