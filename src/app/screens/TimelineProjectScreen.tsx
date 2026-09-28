@@ -2872,7 +2872,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       setPlaceHint(at); // 置ける列が無ければ null＝帯を出さない（押しても置けない）
       return;
     }
-    // ほかの種類は時刻をずらさない（塞がっていれば置かずに断る）＝再生位置がそのまま置き先。
+    // ⚠️ **音・読み上げも、押した結果と同じ計算を通す**（レビュー 🟡・2026-09-28）＝
+    //   置く側（`placeAudio` / `voicePlacement`）を `audioPlacementAt` へ寄せたのに、ここだけ
+    //   再生位置のままだった＝**再生位置が塞がっているときだけ帯が嘘**（重なった所に出て、
+    //   押すと次の空きへ入る）。#1096 で絵の部品について塞いだ穴の、音での再発。
+    if (spec.kind === TIMELINE_CLIP_KIND.audio || spec.kind === TIMELINE_CLIP_KIND.voice) {
+      const durationSec = placedDurationSec(spec);
+      const at = audioPlacementAt(doc, trackId, playheadSec, durationSec);
+      // ⚠️ **置ける列が無ければ帯を出さない**。ただし**いまの画面からは到達しない**（変異チェックで
+      //   生き残ったので確かめた）＝音・読み上げの一覧は `voiceTracks.length === 0`（＝
+      //   `placeableAudioTracks` が空）のとき**一覧そのものを出さない**ので、手を伸ばす相手が無い。
+      //   ⚠️ **それでも書く**＝一覧の出し分けが変わった日に、ここが**黙って空の列 id で帯を出す**側に
+      //   倒れないため（守りは、到達しないうちに書いておくほうが安い）。
+      setPlaceHint(at ? { ...at, durationSec } : null);
+      return;
+    }
+    // 見た目パターンは時刻をずらさない（塞がっていれば置かずに断る）＝再生位置がそのまま置き先。
+    // ⚠️ **ずらさない理由**＝見た目パターンは**列の下敷き**（画面いっぱいの絵）なので、
+    //   後ろの空き時刻へ勝手に動かすと「いま見ている絵に敷く」という狙いから外れる（`11 §7.6` 追補）。
     if (!trackId) { setPlaceHint(null); return; }
     setPlaceHint({ trackId, startSec: playheadSec, durationSec: placedDurationSec(spec) });
   };
@@ -5698,7 +5715,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       {/* ⚠️ **`dense` はこの画面だけ**（ADR-0047）＝操作と余白を詰めて、本体（並び）へ面積を渡す。
-          触る所（押す物・場所・言葉）は変えない。効き目を見てから他の編集画面へ広げる。 */}
+          触る所（押す物・場所・言葉）は変えない。効き目を見てから他の編集画面へ広げる。
+          ⚠️ **付くのは編集の面だけ**（レビュー ℹ️・2026-09-28）＝下の**答えを求める確認**（`DeleteConfirm`）は
+          この `div` の外に出す作りなので**詰まらない**。これは意図どおり＝**押し間違えたくない所は詰めない**
+          （消す・バラすは戻しにくい）。右クリックのメニューは面の中なので詰まる。 */}
       <PageHead
         title={doc.projectName}
         // 見出しごと貼り付ける（#774）＝この画面の見出しはスクロールする側の中にあるので、

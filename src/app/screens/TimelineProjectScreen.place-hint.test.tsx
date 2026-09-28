@@ -129,6 +129,38 @@ describe("押す前に置き先を見せる（#1032）", () => {
     expect(els[els.length - 1]!.style.left, "見せた帯と、実際に置かれた場所が違う").toBe(band);
   });
 
+  // ⚠️ **音も、塞がっていたらずれる**（レビュー 🟡・2026-09-28）＝置く側を「次の空きへ」に
+  //    変えたのに帯だけ再生位置のままだったので、**塞がっているときだけ帯が嘘**になっていた
+  //   （#1096 で絵について塞いだ穴の、音での再発）。**列だけ見る検査では捕まらない**。
+  it("音は、塞がっていたら次の空きへずれる＝帯もそこに出る", () => {
+    useProjectStore.setState({ templates: [] });
+    useTimelineStore.setState({
+      doc: {
+        ...doc(),
+        clips: [
+          ...doc().clips,
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 7,
+            bundledBgmId: "summer-morning" },
+        ],
+      } as unknown as TimelineProject,
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {}, editBlocked: null,
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openTab("音");
+    const item = screen.getAllByRole("button").find((b) => /前向き/.test(b.textContent ?? ""))!;
+    fireEvent.mouseEnter(item);
+    const band = hints(container)[0]!.style.left;
+    expect(parseFloat(band), "塞がっている再生位置にそのまま帯を出している").toBeGreaterThan(0);
+    fireEvent.click(item);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== "clip_001" && c.id !== "clip_002");
+    expect(placed?.startSec, "塞がった再生位置にそのまま置かれた").toBe(7);
+    // ⚠️ **置いた帯を名前で拾う**＝「いちばん最後の帯」は列の描き順に依るので、別の列の帯を掴みうる。
+    const placedEl = [...container.querySelectorAll(".timeline-clip")]
+      .find((el) => /前向き/.test(el.textContent ?? "")) as HTMLElement | undefined;
+    expect(placedEl, "置いた音の帯が見つからない").toBeTruthy();
+    expect(placedEl!.style.left, "見せた帯と、実際に置かれた場所が違う").toBe(band);
+  });
+
   // ⚠️ **音は音の列へ**＝置く先は種別で変わるので、絵の列に出すと嘘になる。
   it("読み上げは音の列に出る（絵の列ではない）", () => {
     const { container } = setup();

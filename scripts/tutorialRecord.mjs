@@ -165,6 +165,21 @@ const VALUE_OF = (label) => `(() => {
 })()`;
 
 /**
+ * いま画面に出ている**文字ぜんたい**の指紋（押した前後で比べる）。
+ *
+ * ⚠️ **32x18 の絵では見えない変化がある**（実機で踏んだ）＝「再生」を押した直後の 1 秒は、
+ * 動くのが**再生位置の線と秒の表示だけ**なので、縮めたコマ比べでは「動いていない」に見える。
+ * アプリ自身の文字は、その**押下が効いたことの、絵より強い証拠**。
+ * ⚠️ **正規化しない**（実機で踏んだ）＝この式は**文字列として画面へ送る**ので、
+ * テンプレート文字列の中に正規表現を書くと、タブや改行の書き方（円記号＋t など）が
+ * **その場で本物のタブ・改行になり**、送った先で
+ * `SyntaxError: Invalid regular expression: missing /` になる。`trim()` で足りる。
+ * ⚠️ **これは抜け道ではない**＝窓が覆われた・録画が凍ったといった「映像が死んでいる」側は、
+ * 録画ぜんたいの絵の種類（`distinctFrames`）と**撮り始め・撮り終わりの目印の矩形**が見ている。
+ */
+const TEXT_SIG = `(document.body.innerText || "").trim()`;
+
+/**
  * いま画面に出ている見出し（撮れたことの目印として記録に残す）。
  *
  * ⚠️ **本文の中だけを見る**（PR #1234 レビュー ℹ️）＝`document.querySelector("h1,h2")` は
@@ -714,6 +729,7 @@ async function main() {
           + "＝欄の外にあるか、別のものが覆っています。前の段で欄を開く・広げるようにしてください");
       }
       const tSec = (Date.now() - t0) / 1000;
+      const textBefore = await evaluate(cdp, TEXT_SIG);
       // ⚠️ **本物の入力を送る**＝JS の `.click()` ではなく、人が押したのと同じ道を通す。
       for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
         await cdp.send("Input.dispatchMouseEvent", {
@@ -755,6 +771,7 @@ async function main() {
         }
       }
       await new Promise((r) => setTimeout(r, step.afterMs ?? 1200));
+      const textAfter = await evaluate(cdp, TEXT_SIG);
       const headingAfter = await evaluate(cdp, HEADING);
       // ⚠️ **書いた主張を、その場で検査する**（`CLAUDE.md` §7）＝台本が「こうなるはず」と
       //   書いた段だけを見る。**全段に「画面が変わったか」を課さない**＝同じ画面の中の選択
@@ -766,6 +783,8 @@ async function main() {
         atSec: Number(tSec.toFixed(2)),
         x: at.x, y: at.y, label: at.label,
         typed: isTyping ? step.type : null,
+        // ⚠️ **押下が効いたかの、もう一つの証拠**（上の `TEXT_SIG` の注記）。
+        textChanged: textAfter !== textBefore,
         say: step.say ?? null,
         headingAfter,
       });
@@ -830,6 +849,10 @@ async function main() {
       //   縮める比較では**見えない**（実際に「動いていない」と誤って出た）。
       //   打つ段は**入った文字そのもの**を打った直後に照合してあるので、そちらのほうが強い証拠。
       if (s.typed != null) continue;
+      // ⚠️ **文字が変わった段は、絵で見ない**（実機で踏んだ）＝「再生」を押した直後の 1 秒は
+      //   動くのが**再生位置の線と秒の表示だけ**で、32x18 まで縮めたコマ比べでは見えない。
+      //   アプリ自身の文字が変わっていることのほうが、押下が効いた証拠として強い。
+      if (s.textChanged) continue;
       const from = Math.max(0, s.atSec - STEP_WINDOW_SEC);
       const to = s.atSec + STEP_WINDOW_SEC;
       // ⚠️ **押した所の周りを見る**（#1228・実測）＝全画面だと、カードを選んだだけの
