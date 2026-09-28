@@ -62,7 +62,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     //   落としたぶん。走査を書く前の下調べでは 172 と出ていたので、数だけ写すと合わない。
     // ⚠️ **+1**（#1247）＝タイムライン編集に `dense`（詰めた表示）を1つ足した。
     // ⚠️ **+1**（2026-09-28）＝列の名前をその場で書き換える欄（`timeline-row-name`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(172);
+    // ⚠️ **-1**（2026-09-28）＝「列を足す」を帯の下から道具立ての行へ移したとき、
+    //   その囲い（`row gap-sm mt-md`）ごと消えた。`mt-md` はここでしか使っていなかった。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(171);
   });
 });
 

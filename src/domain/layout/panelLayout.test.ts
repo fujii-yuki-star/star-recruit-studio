@@ -5,6 +5,7 @@ import {
   DEFAULT_REGION_SIZES,
   DROP_SIDE,
   dropSideAt,
+  MAX_BOTTOM_REGION_RATIO,
   MAX_REGION_RATIO,
   MAX_SIDE_TOTAL_RATIO,
   MIN_PANEL_RATIO,
@@ -329,7 +330,22 @@ describe('外枠の大きさ（決定2・段階2 で追加）', () => {
   it('下限と上限で押さえる（潰れた領域・画面を食い尽くす領域を作らない）', () => {
     const got = normalizeRegionSizes({ left: 0.01, right: 0.9, bottom: 0.9 });
     expect(got.left).toBe(MIN_REGION_RATIO);
-    expect(got.bottom).toBe(MAX_REGION_RATIO);
+    expect(got.right).toBe(MAX_REGION_RATIO);
+    // ⚠️ **下だけ上限が違う**（利用者判断 2026-09-28）＝列は本数だけ縦に伸びるので、0.5 では
+    //   **何本足しても見えるのは8本まで**だった（実測＝9本・13本・19本のいずれでも8本）。
+    //   左右は「中央が潰れない」ために 0.5 のまま（`MAX_SIDE_TOTAL_RATIO` が合計も抑える）。
+    expect(got.bottom).toBe(MAX_BOTTOM_REGION_RATIO);
+    expect(MAX_BOTTOM_REGION_RATIO, '下の上限が左右より狭い（広げた意味が無い）')
+      .toBeGreaterThan(MAX_REGION_RATIO);
+  });
+
+  it('下の欄も、下限では押さえる（掴めない欄を作らない）', () => {
+    expect(normalizeRegionSizes({ bottom: 0.01 }).bottom).toBe(MIN_REGION_RATIO);
+  });
+
+  // ⚠️ **上を潰しすぎない**＝上には仕上がり確認がある。下が上限でも、上に3割は残る。
+  it('下を上限まで広げても、上に3割以上は残る', () => {
+    expect(1 - MAX_BOTTOM_REGION_RATIO).toBeGreaterThanOrEqual(0.3);
   });
 
   it('左右を合わせても中央が残る（両方を広げても画面を食い尽くさない）', () => {

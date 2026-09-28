@@ -3821,6 +3821,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 label="吸着"
               />
               <span className="text-sm text-muted">{snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}</span>
+              {/* ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、
+                  その2つのボタンのぶんだけ**帯の入る高さを削っていた**。道具立ては1行に畳む
+                  （#1104 で「表示倍率」「吸着」を1行にしたのと同じ理由）。
+                  ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、
+                  欄だけを見ていて列を足せない、に戻る。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
             </div>
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
@@ -4208,13 +4216,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </div>
         )}
-        {/* ⚠️ **列を足すのは「並び」の欄の中で**（#767・利用者要望）＝欄だけを見ていると列を足せず、
-            欄の外を探しに行くことになっていた。**同じ操作を2か所に置かない**ので画面下部からは外す
-            （`06 §2` 規約5 の流儀）。 */}
-        <div className="row gap-sm mt-md">
-          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
-          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
-        </div>
         {/* **目印**（#356 ①）＝時間軸のものなので、時間軸を見ている欄の中に置く
             （`06 §2` 規約5＝同じ操作を2か所に置かない）。⚠️ **動画には出ない**。 */}
         <TimelineMarkersSection

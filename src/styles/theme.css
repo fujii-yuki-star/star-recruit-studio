@@ -833,9 +833,6 @@ button.badge {
 .mb-sm {
   margin-bottom: var(--gap-sm);
 }
-.mt-md {
-  margin-top: var(--gap);
-}
 .gap-xs {
   gap: var(--gap-xs);
 }

@@ -8088,3 +8088,34 @@ describe("TimelineProjectScreen: 塞がっているときの置き方（#1252）
     expect(d.clips[1]!.startSec, "後ろへ並んでいない").toBe(5);
   });
 });
+
+// 列を足すボタンの置き場所（利用者要望 2026-09-28）。
+// ⚠️ **帯の下に置くと、その2つのぶんだけ帯の入る高さが減る**＝道具立ては1行に畳む
+//（#1104 で「表示倍率」「吸着」を1行にしたのと同じ理由）。
+// ⚠️ **「並び」の欄の中には残す**（#767）＝欄の外へ出すと、欄だけ見ていて列を足せない、に戻る。
+describe("TimelineProjectScreen: 列を足すボタンの置き場所", () => {
+  it("道具立ての行（表示倍率・吸着と同じ行）にある", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const toolbar = container.querySelector(".timeline-toolbar");
+    expect(toolbar, "道具立ての行が無い").not.toBeNull();
+    expect(toolbar!.textContent).toContain("表示倍率");
+    expect(toolbar!.textContent, "「映像の列を足す」が同じ行に無い").toContain("映像の列を足す");
+    expect(toolbar!.textContent, "「音の列を足す」が同じ行に無い").toContain("音の列を足す");
+  });
+
+  it("「並び」の欄の中にある（欄の外へ出さない・#767）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "映像の列を足す" });
+    expect(btn.closest(".timeline-panel"), "「並び」の欄の外に出ている").not.toBeNull();
+  });
+
+  it("押せば列が増える（置き場所を変えても効く）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByRole("button", { name: "音の列を足す" }));
+    expect(useTimelineStore.getState().doc!.tracks.length).toBe(before + 1);
+  });
+});
