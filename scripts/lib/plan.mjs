@@ -8,7 +8,8 @@
 /** 出力先（`--out`）。⚠️ **知らない印は断る**＝黙って別の所へ書かない。 */
 export function parseOutDir(rest, fallback = "tutorial-out") {
   const at = rest.indexOf("--out");
-  const known = new Set(["--out", "--attach"]);
+  // ⚠️ **印は1か所で決める**＝走らせる側で増やしても、ここが知らなければ断られる（実際に踏んだ）。
+  const known = new Set(["--out", "--attach", "--下見"]);
   const stray = rest.filter((a, i) => a.startsWith("--") && !known.has(a) && !(at >= 0 && i === at + 1));
   if (stray.length > 0) throw new Error(`知らない印です: ${stray.join(" ")}`);
   if (at >= 0 && rest[at + 1] == null) throw new Error("`--out` のあとに出力フォルダがありません");

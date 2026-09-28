@@ -31,6 +31,7 @@ import { checkPlan, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
 import { toVideoPoint } from "./lib/cursor.mjs";
+import { gdigrabArea } from "./lib/capture.mjs";
 
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
@@ -114,19 +115,47 @@ $r = New-Object R
  *
  * ⚠️ **探し方は共有**（`FIND_BY_TEXT`）＝ここは「探して**位置を採る**」だけを足す。
  */
+/**
+ * 探した相手を**画面の中へ入れる**（欄の中でスクロールしているときのため）。
+ *
+ * ⚠️ **実機で踏んだ**（2026-09-28 の下見）＝「よく使う素材」を開いた直後、「この動画で使う」は
+ * **欄の外（下）に在った**。座標は画面全体で採るので、そのまま押すと**別の欄の上の点**を叩く。
+ * 誰も落ちず、取り込めていないまま次の段へ進む（＝いちばん質の悪い失敗）。
+ * ⚠️ **`nearest`**＝見えていれば動かさない（見えているものを毎回中央へ寄せると、映像が揺れる）。
+ */
+const SCROLL_INTO_VIEW = `hit.scrollIntoView({ block: "nearest", inline: "nearest" });`;
+
+/**
+ * その点を押したら、本当にその相手に当たるか。
+ *
+ * ⚠️ **「在る」と「押せる」は別**（同上）＝欄からはみ出していたり、別のものが覆っていたりすると、
+ * 座標の上に居るのは**別の要素**になる。当たらないことが分かるように連れて帰る（押す前に断る）。
+ */
+const REACHABLE_AT = `(() => {
+  const top = document.elementFromPoint(x, y);
+  const hits = top != null && (top === hit || hit.contains(top) || top.contains(hit));
+  return { reachable: hits, topLabel: hits ? null : (top?.textContent || top?.tagName || "（何も無い）").trim().slice(0, 30) };
+})()`;
+
 const LOCATE = (text) => `(() => {
   const hit = ${FIND_BY_TEXT(text)};
   if (!hit) return null;
+  ${SCROLL_INTO_VIEW}
   const r = hit.getBoundingClientRect();
-  return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), label: (hit.textContent || "").trim() };
+  const x = Math.round(r.x + r.width / 2);
+  const y = Math.round(r.y + r.height / 2);
+  return { x, y, label: (hit.textContent || "").trim(), ...${REACHABLE_AT} };
 })()`;
 
 /** 入力欄の位置（`FIND_FIELD` で探す）。押してから打つので、押せる場所として同じ形で返す。 */
 const LOCATE_FIELD = (label) => `(() => {
-  const el = ${FIND_FIELD(label)};
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), label: ${JSON.stringify(label)} };
+  const hit = ${FIND_FIELD(label)};
+  if (!hit) return null;
+  ${SCROLL_INTO_VIEW}
+  const r = hit.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+  return { x, y, label: ${JSON.stringify(label)}, ...${REACHABLE_AT} };
 })()`;
 
 /** その入力欄にいま入っている文字（打てたかの確かめに使う）。 */
@@ -265,20 +294,22 @@ function workArea() {
 }
 
 /**
- * 仮想デスクトップの左上（`gdigrab` の `-offset_x/-offset_y` の原点）。
+ * 仮想デスクトップ（すべての画面を合わせた範囲）。左上と大きさ。
  *
- * ⚠️ **(0,0) とは限らない**＝画面を左や上に並べると**負の座標**になる。
+ * ⚠️ **左上は (0,0) とは限らない**＝画面を左や上に並べると**負の座標**になる。
  * 外部ディスプレイへ窓を移すと、まさにここを踏む。
+ * ⚠️ **撮る位置は、この左上を引かずにそのまま渡す**（`gdigrabArea` の注記＝実測）。
+ * ここで読むのは**はみ出しを撮る前に断る**ため。
  */
-function virtualOrigin() {
+function virtualScreen() {
   const ps = [
     "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class Vs { [DllImport(\"user32.dll\")] public static extern int GetSystemMetrics(int i); }'",
-    "'{0} {1}' -f [Vs]::GetSystemMetrics(76),[Vs]::GetSystemMetrics(77)",
+    "'{0} {1} {2} {3}' -f [Vs]::GetSystemMetrics(76),[Vs]::GetSystemMetrics(77),[Vs]::GetSystemMetrics(78),[Vs]::GetSystemMetrics(79)",
   ].join("; ");
   const out = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8", windowsHide: true });
-  const [x, y] = (out.stdout ?? "").trim().split(/\s+/).map(Number);
-  if (![x, y].every(Number.isFinite)) throw new Error(`仮想デスクトップの原点を読めません: ${JSON.stringify(out.stdout)}`);
-  return { x, y };
+  const [x, y, w, h] = (out.stdout ?? "").trim().split(/\s+/).map(Number);
+  if (![x, y, w, h].every(Number.isFinite)) throw new Error(`画面ぜんたいの範囲を読めません: ${JSON.stringify(out.stdout)}`);
+  return { x, y, w, h };
 }
 
 /**
@@ -466,16 +497,20 @@ async function locateWithWait(cdp, step, isTyping) {
 async function main() {
   const [scriptPath, ...rest] = process.argv.slice(2);
   if (!scriptPath) {
-    console.error("使い方: node scripts/tutorialRecord.mjs <台本.json> --out <出力フォルダ>");
+    console.error("使い方: node scripts/tutorialRecord.mjs <台本.json> --out <出力フォルダ> [--attach] [--下見]");
     process.exit(2);
   }
   const outDir = resolve(parseOutDir(rest));
   // ⚠️ **すでに開いているアプリを使う**（#1228）＝利用者が**外部ディスプレイへ置いた窓**を
   //   そのまま撮るため。既定（印なし）は今までどおり、殺してから起こす。
   const attach = rest.includes("--attach");
+  // ⚠️ **撮らずに通すだけ**（#1228・撮影前の下見）＝台本どおりに**操作だけ**を通し、
+  //   「押せる所が在るか・打てるか・画面が進むか」を確かめる。**画面がロックされていても走る**
+  //   （`gdigrab` は撮れないが、操作は画面の中身へ直に送るため）。撮った絵の検査（⑤）はしない。
+  const dry = rest.includes("--下見");
   // ⚠️ **当たりは両方に置く**（同レビュー 🟡）＝アプリだけ見てあり、**FFmpeg は非対称**だった。
   if (!existsSync(APP)) throw new Error(`アプリがありません（先に build を）: ${APP}`);
-  if (!existsSync(FFMPEG)) throw new Error(`FFmpeg がありません: ${FFMPEG}`);
+  if (!dry && !existsSync(FFMPEG)) throw new Error(`FFmpeg がありません: ${FFMPEG}`);
   mkdirSync(outDir, { recursive: true });
   const plan = checkPlan(JSON.parse(readFileSync(scriptPath, "utf8")));
   const video = join(outDir, `${plan.name ?? "tutorial"}.mp4`);
@@ -522,7 +557,7 @@ async function main() {
     //   タスクバーや別の画面が写る（＝教材に別のものが混ざる）。撮影の道具なので、
     //   **収まる位置と大きさへ寄せてから撮る**のが筋（毎回同じ画角になる利点もある）。
     const area = workArea();
-    const origin = virtualOrigin();
+    const screen = virtualScreen();
     const fitted = attach ? null : fitIntoWorkArea(rect, area);
     if (attach) {
       // ⚠️ **収まらないときだけ、窓のほうを合わせる**（#1228）＝最大化した窓は
@@ -569,16 +604,27 @@ async function main() {
     }
     console.log("✓ ホーム画面から始めます");
 
+    // ⚠️ **畳んだ・開いたの記憶を消してから始める**（2026-09-28 の下見で踏んだ）＝節の開閉は
+    //   利用者ごとに覚える（`<scope>.sectionOpen`・ADR-0033 の流儀）。台本は「押して開く」と
+    //   書いてあるので、**前の回に開いたままだと、同じ押下が閉じる**＝以降の段が全部ずれる。
+    //   ⚠️ **消すのは開閉の記憶だけ**＝欄の配置（利用者が撮影用に並べたもの）には触らない。
+    const cleared = await evaluate(cdp, `(() => {
+      const keys = Object.keys(localStorage).filter((k) => k.endsWith(".sectionOpen"));
+      for (const k of keys) localStorage.removeItem(k);
+      return keys.join(" ");
+    })()`);
+    if (cleared) console.log(`✓ 節の開閉の記憶を消しました（${cleared}）＝台本の「押して開く」が効くように`);
+
     // ② 録画を始める（⚠️ **デスクトップから切り出す**・実カーソルは消す）
     // ⚠️ **起動に失敗したら、その場で分かるようにする**（PR #1234 レビュー 🟡）＝
     //   `error` を拾わないと未処理例外になり、**後片づけを通らずに落ちる**（口が開いたまま残る）。
-    ff = spawn(FFMPEG, [
+    ff = dry ? null : spawn(FFMPEG, [
       "-hide_banner", "-loglevel", "error", "-y",
       "-f", "gdigrab", "-framerate", String(FPS), "-draw_mouse", "0",
-      // ⚠️ **仮想デスクトップの左上ぶんを引く**（#1228）＝`-offset_x/-offset_y` の原点は
-      //   (0,0) とは限らない（画面を左や上に並べると負になる）。外部ディスプレイで踏む。
-      "-offset_x", String(rect.x - origin.x), "-offset_y", String(rect.y - origin.y),
-      "-video_size", `${rect.w}x${rect.h}`, "-i", "desktop",
+      // ⚠️ **切り出す位置は絶対座標のまま**（`scripts/lib/capture.mjs` に理由と実測）＝
+      //   以前ここで原点ぶんを引いており、**画面を左に並べた環境で録画が即終了**していた。
+      ...gdigrabArea(rect, screen),
+      "-i", "desktop",
       "-c:v", "h264_mf", "-b:v", "8000k", "-pix_fmt", "yuv420p", video,
     ], {
       stdio: ["pipe", "ignore", "inherit"],
@@ -592,17 +638,20 @@ async function main() {
     //   受け取るのは箱に入れるだけにして、**本流の `checkStillRecording` から投げる**。
     let ffError = null;
     let warnedBack = false;
-    ff.on("error", (e) => { ffError = e; });
+    ff?.on("error", (e) => { ffError = e; });
     // ⚠️ **途中で死んだことに気づけるようにする**（実機で踏んだ）＝`error` は**起こせなかったとき**
     //   しか鳴らない。**起きたあとに落ちた**回は誰も見ておらず、台本を最後まで走らせたうえで
     //   `ff.on("exit")` を待ち続けて**永遠に止まった**（実際に2回、数分待っても返らなかった）。
     //   ⚠️ **止まるのが最悪**＝何が起きたか分からず、録れていないことにも気づけない。
     let ffExit = null;
-    ff.on("exit", (code) => { ffExit = code ?? -1; });
+    ff?.on("exit", (code) => { ffExit = code ?? -1; });
     const t0 = Date.now();
-    await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
+    if (!dry) await new Promise((r) => setTimeout(r, 1200)); // 録り始めの安定待ち
     /** 録画が生きているか（死んでいたら**その場で**理由つきで止める）。 */
     const checkStillRecording = (when) => {
+      // ⚠️ **下見のときは何も見ない**＝録っていないので「止まった」も「覆われた」も意味がない
+      //   （画面がロックされていても操作は通せる＝下見の存在理由）。
+      if (dry) return;
       if (ffError) throw new Error(`FFmpeg を起こせません（${when}）: ${ffError.message}`);
       // ⚠️ **前面を奪われていないか**＝奪われたまま撮り続けると、**他人の画面が入る**。
       const fg = isForeground();
@@ -626,10 +675,12 @@ async function main() {
     //   `view` は引き算で出した値なので、**それで描いて、それで検査する**限り
     //   間違いに気づけない（実測で通ってしまった）。画面いっぱいの目印を焼き付けて、後で測る。
     const flashAtSec = (Date.now() - t0) / 1000;
-    await evaluate(cdp, FLASH_ON);
-    await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
-    await evaluate(cdp, FLASH_OFF);
-    await new Promise((r) => setTimeout(r, AFTER_FLASH_SEC * 1000));
+    if (!dry) {
+      await evaluate(cdp, FLASH_ON);
+      await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
+      await evaluate(cdp, FLASH_OFF);
+      await new Promise((r) => setTimeout(r, AFTER_FLASH_SEC * 1000));
+    }
     /** ⚠️ **焼く側はここから先だけを使う**＝目印を配る素材に載せない。 */
     const usableFromSec = Number((flashAtSec + FLASH_SEC + 0.3).toFixed(3));
     // ⚠️ **台本を走らせる前に、もう一度見る**＝ここで死んでいると、以降の数十秒が丸ごと無駄になる。
@@ -653,6 +704,14 @@ async function main() {
         throw new Error(isTyping
           ? `入力欄が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.fieldLabel}（画面が違うか、ラベルが変わっていませんか）`
           : `押せる要素が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.clickText}`);
+      }
+      // ⚠️ **当たらないなら押さない**（2026-09-28 の下見で踏んだ）＝欄の外に在るものを
+      //   座標で叩くと、**別の欄の上の点**を押す。押せてはいるので誰も落ちず、
+      //   取り込めていないまま次の段へ進む。**押す前に断る**。
+      if (at.reachable === false) {
+        throw new Error(`「${step.clickText ?? step.fieldLabel}」は在りますが、その場所を押しても届きません`
+          + `（(${at.x},${at.y}) に居るのは「${at.topLabel}」）`
+          + "＝欄の外にあるか、別のものが覆っています。前の段で欄を開く・広げるようにしてください");
       }
       const tSec = (Date.now() - t0) / 1000;
       // ⚠️ **本物の入力を送る**＝JS の `.click()` ではなく、人が押したのと同じ道を通す。
@@ -720,10 +779,22 @@ async function main() {
     // ④' ⚠️ **撮り終わりにも目印を出す**（#1228）＝途中で別の窓が
     //   アプリを覆っていたら、ここで矩形が変わる（＝覆われたまま撮った回を捕まえる）。
     const endFlashAtSec = (Date.now() - t0) / 1000;
-    await evaluate(cdp, FLASH_ON);
-    await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
-    await evaluate(cdp, FLASH_OFF);
-    await new Promise((r) => setTimeout(r, 400));
+    if (!dry) {
+      await evaluate(cdp, FLASH_ON);
+      await new Promise((r) => setTimeout(r, FLASH_SEC * 1000));
+      await evaluate(cdp, FLASH_OFF);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    // ⚠️ **下見はここで終わり**＝撮っていないので、撮れた絵の検査（⑤）は**できない**。
+    //   「通せたか」だけを言う（ここで `✓ 撮れました` と言わないのが肝＝嘘の合格を作らない）。
+    if (dry) {
+      console.log(`
+下見: ${log.length} 段を通しました（${((Date.now() - t0) / 1000).toFixed(1)}秒・録画なし）`);
+      console.log("✓ 台本どおりに操作できました（絵が動いたかは撮ってから確かめます）");
+      ok = true;
+      return;
+    }
 
     // ④ 録画を終える
     checkStillRecording("台本を走らせている間に");
