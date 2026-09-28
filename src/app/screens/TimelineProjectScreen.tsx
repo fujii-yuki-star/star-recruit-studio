@@ -13,7 +13,7 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
@@ -21,7 +21,7 @@ import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
-import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
+import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -177,6 +177,15 @@ const AUTOSAVE_DELAY_MS = 800;
 
 /** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
 const NUDGE_SEC = 0.5;
+
+/**
+ * 再生位置のつまみが縮んでよい下限（px）。
+ *
+ * ⚠️ **0 にしない**＝操作の行は「再生・先頭へ・つまみ・時刻・大きさ・書き出す」を並べるので、
+ * 欄を狭めると**いちばん伸び縮みするつまみだけが潰れる**（実機で 10px＝掴めない状態を測った）。
+ * 80px は、つまみの丸（16px）を端から端まで運べる最小の幅として置いた。
+ */
+export const PLAYHEAD_SLIDER_MIN_PX = 80;
 
 /**
  * その層の**手の移り先**（#818・ドリルイン）。`null`＝入れない層（下地・立ち絵など欄が無いもの）。
@@ -414,7 +423,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
+    isPlaying, play, pause, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
@@ -937,6 +946,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, selectClips, overlayOpen, setEditBlocked]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
+  // 書き出す大きさの選択肢（#1255）＝場面形式と**同じ関数**から出す（数字を別々に書かない・§2-7）。
+  const exportFullDims = exportDimsForOrientation(doc?.videoSettings.aspectRatio ?? ORIENTATION.landscape, false);
+  const exportHdDims = exportDimsForOrientation(doc?.videoSettings.aspectRatio ?? ORIENTATION.landscape, true);
 
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
@@ -3624,12 +3636,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {/* ⚠️ **再生位置は操作の行に置く**（利用者要望 2026-09-28）＝以前はこの欄のいちばん下、
               クレジットと文字の形の設定より**さらに後ろ**にあり、**欄の中をスクロールしないと届かなかった**。
               いちばんよく触るものが、いちばん遠い所にあった。⚠️ **見た目は変えていない**（同じ `range`）。 */}
+          {/* ⚠️ **つまみが潰れない下限を持たせる**（実機で測った＝欄が狭いとき**幅 10px** まで縮み、
+              掴めなかった）。⚠️ **名前は読み上げ用に残す**（`aria-label`）＝**見える文字は置かない**：
+              置くと約60px を食い、その分つまみが潰れる（同じ 316px の欄で、文字を外すと 10px→80px）。
+              すぐ右に「0.0 秒 / 全体 10.0 秒」が出ているので、何の目盛りかは読み取れる
+              （ADR-0034＝業界の型。動画編集ソフトの再生バーに見出しは付かない）。 */}
           <label className="row gap-sm grow" style={{ alignItems: "center", minWidth: 0 }}>
-            <span className="text-sm text-muted" style={{ flexShrink: 0 }}>再生位置</span>
             <input
               className="grow"
-              style={{ minWidth: 0 }}
+              style={{ minWidth: PLAYHEAD_SLIDER_MIN_PX }}
               type="range"
+              aria-label="再生位置"
               min={0}
               max={Math.max(totalSec, 0.1)}
               step={0.1}
@@ -3650,6 +3667,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <span className="text-sm text-muted" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
             {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
           </span>
+          {/* ⚠️ **書き出す大きさは、書き出すボタンの隣に**（#1255・利用者判断 2026-09-28）＝
+              場面形式には在るのに、こちらだけ**常に 1920×1080** だった（同じ「動画を書き出す」なのに
+              形式でできることが違う・ADR-0026②）。⚠️ **言い方も場面形式と同じ**にする（`06 §3`）。
+              ⚠️ **欄の奥に沈めない**＝再生位置で踏んだのと同じ失敗をしない。 */}
+          {/* ⚠️ **大きさと書き出しは1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
+              **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。選んでから押す一続きの
+              操作なので、組ごと折り返す（`flexShrink: 0`・`flexWrap: nowrap`）。
+              ⚠️ **この包みに `row` を付けない**＝「書き出しと同じ行に再生位置がある」を見る検査が
+              `closest(".row")` で操作の行を探すので、内側に `row` を作ると**包みのほうが先に当たる**。 */}
+          <span style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)", flexShrink: 0, flexWrap: "nowrap" }}>
+          {!exporting && (
+            <label className="row gap-sm" style={{ alignItems: "center", flexShrink: 0, flexWrap: "nowrap" }}>
+              <span className="text-sm text-muted">大きさ</span>
+              <select
+                className="select"
+                style={{ width: "auto" }}
+                value={exportHd ? "hd" : "fullhd"}
+                onChange={(e) => setExportHd(e.target.value === "hd")}
+                aria-label="書き出す大きさ"
+              >
+                <option value="fullhd">きれい（{exportFullDims.width}×{exportFullDims.height}）</option>
+                <option value="hd">軽い（{exportHdDims.width}×{exportHdDims.height}）</option>
+              </select>
+            </label>
+          )}
           {exporting ? (
             <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
               {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
@@ -3675,6 +3717,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               動画を書き出す
             </button>
           )}
+          </span>
         </div>
         {exportBlocked && exportBlocked.source === EXPORT_BLOCK_SOURCE.situation && !exporting && (
           // 無効にしたボタンの `title` はホバーで出ないことがあるので、**知らせの段にも出す**（#719 レビュー）。

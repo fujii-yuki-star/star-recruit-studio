@@ -177,6 +177,36 @@ describe('そのまま流せる区間は焼かない（#1203）', () => {
   });
 });
 
+// 書き出す大きさ（#1255・利用者判断 2026-09-28）。
+// ⚠️ **画面で選べるだけでは足りない**＝選んだ値が**描く側まで届いているか**を見る。
+//   口（`outputSize`）は前から在り、タイムライン側だけ渡していなかった＝**常に 1920×1080** だった。
+describe('書き出す大きさが描く側まで届く（#1255）', () => {
+  /** `buildTimelineFrames` が受け取った `outputSize` を取り出す。 */
+  const receivedSize = (): unknown =>
+    (vi.mocked(framesMod.buildTimelineFrames).mock.calls[0]?.[1] as { outputSize?: unknown } | undefined)?.outputSize;
+
+  it('既定（きれい）では 1920×1080 を渡す', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('「軽い」を選ぶと 1280×720 を渡す', async () => {
+    await open(doc());
+    useTimelineStore.getState().setExportHd(true);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1280, height: 720 });
+  });
+
+  // ⚠️ **縦型でも向きに沿う**＝短辺を 720 に揃える（`exportDimsForOrientation`）。
+  it('縦型の「軽い」は 720×1280', async () => {
+    await open({ ...doc(), videoSettings: { ...doc().videoSettings, aspectRatio: '9:16' } });
+    useTimelineStore.getState().setExportHd(true);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 720, height: 1280 });
+  });
+});
+
 describe('exportTimelineVideo', () => {
   it('描いたフレームを書き出しへ渡し、保存できたと知らせる', async () => {
     await open(doc());

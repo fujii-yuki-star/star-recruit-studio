@@ -1,7 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { dimsForOrientation } from "../../domain/constants";
+import { dimsForOrientation, exportDimsForOrientation } from "../../domain/constants";
 import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
@@ -754,6 +754,14 @@ export interface TimelineState {
    * ＝見えているものがそのまま出る（ADR-0001）。
    */
   exportTimelineVideo: (deps: TimelineDrawDeps) => Promise<void>;
+  /**
+   * 書き出す大きさ（#1255・利用者判断 2026-09-28）。`true`＝軽い（短辺 720）。
+   *
+   * ⚠️ **場面形式と同じ選択肢**（ADR-0026②＝同じ概念を形式で割らない）＝あちらは「きれい／軽い」の
+   * 2つ。⚠️ **`project.schema` には入れない**（ADR-0033 の流儀＝書き出しの好みは文書の中身ではない）。
+   */
+  exportHd: boolean;
+  setExportHd: (hd: boolean) => void;
   /** 書き出しを止める（押した時点までの一時ファイルは片づける）。 */
   cancelTimelineExport: () => void;
   /** 完了・失敗の知らせを閉じる。 */
@@ -1000,6 +1008,8 @@ function emptyState() {
     missingAssetIds: [] as string[],
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
+  // 書き出す大きさ（#1255）。⚠️ **既定は「きれい」**＝場面形式の既定（`fullhd`）と同じ。
+  exportHd: false,
     audioSrcByKey: {} as Record<string, string>,
     _audioTried: new Set<string>(),
     history: emptyHistory<TimelineProject>(),
@@ -2428,6 +2438,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         assetSizeOf: (id) => assetSizes[id],
         // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
         fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
+        // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
+        //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
+        outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, get().exportHd),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
         stageFrame: stageExportFrame,
         // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
@@ -2543,6 +2557,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
+  setExportHd: (hd) => set({ exportHd: hd }),
   cancelTimelineExport: () => {
     const run = get().exportRun;
     if (!isTimelineExportBusy(run.phase)) return;

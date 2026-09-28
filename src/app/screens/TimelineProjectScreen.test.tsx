@@ -8018,6 +8018,35 @@ describe("TimelineProjectScreen: 再生位置の置き場所", () => {
       expect(getComputedStyle(el).display, "再生位置（かその親）が隠れている").not.toBe("none");
     }
   });
+
+  // ⚠️ **同じ行に在る**だけでは足りない（実機で踏んだ）＝欄が狭いと、いちばん伸び縮みする
+  // つまみ**だけ**が潰れて **10px**（＝掴めない）になっていた。**下限を持っていること**を見る。
+  // ⚠️ **数は定数から取らない**＝定数を 0 にする変異が「定数どおり」で通ってしまう。
+  it("再生位置のつまみは、狭い欄でも掴める幅を保つ", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider, "再生位置のつまみが無い").not.toBeNull();
+    expect(Number.parseInt(slider.style.minWidth, 10) || 0, "つまみが潰れる（下限が無い）").toBeGreaterThanOrEqual(60);
+    // 見える文字を外したので、**読み上げ用の名前**が唯一の手がかりになる。
+    expect(slider.getAttribute("aria-label"), "再生位置の名前が無い").toBe("再生位置");
+  });
+
+  // ⚠️ **「大きさ」と「書き出す」は1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
+  // **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。
+  // ⚠️ **折り返しそのものは jsdom では測れない**（画面の配置を計算しない）＝**組になっていること**
+  // （同じ包みの中に居て、その包みが**間で折り返さない**）までを見る。実寸は実機で測った。
+  it("「大きさ」と「動画を書き出す」は、間で折り返さない1組になっている", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const size = screen.getByLabelText("書き出す大きさ");
+    const exportBtn = screen.getByRole("button", { name: "動画を書き出す" });
+    const wrap = exportBtn.parentElement!;
+    expect(wrap.contains(size), "大きさと書き出しが別の包みに居る").toBe(true);
+    expect(wrap.style.flexWrap, "組の中で折り返す（書き出しだけが落ちる）").toBe("nowrap");
+    expect(wrap.style.flexShrink, "組が縮む").toBe("0");
+    expect(wrap.parentElement, "組が操作の行の直下に無い").toBe(exportBtn.closest(".row"));
+  });
 });
 
 // 塞がっているときの置き方（利用者判断 2026-09-28・#1252）。
@@ -8117,5 +8146,52 @@ describe("TimelineProjectScreen: 列を足すボタンの置き場所", () => {
     const before = useTimelineStore.getState().doc!.tracks.length;
     fireEvent.click(screen.getByRole("button", { name: "音の列を足す" }));
     expect(useTimelineStore.getState().doc!.tracks.length).toBe(before + 1);
+  });
+});
+
+// 書き出す大きさ（#1255・利用者判断 2026-09-28）。
+// ⚠️ **場面形式には在るのに、こちらだけ常に 1920×1080 だった**＝同じ「動画を書き出す」なのに
+// 形式でできることが違う（ADR-0026②）。口（`outputSize`）は前から在り、渡していなかっただけ。
+describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
+  it("書き出すボタンと同じ行で選べる（欄の奥に沈めない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
+    const row = screen.getByRole("button", { name: "動画を書き出す" }).closest(".row");
+    expect(row!.contains(sel), "書き出すボタンと違う行にある").toBe(true);
+    // ⚠️ **目に見える名前も要る**（変異チェックで露見）＝`aria-label` だけだと、
+    //   画面の「大きさ」が消えても通る＝目で見る人には**名前の無い欄**になる。
+    expect(sel.closest("label")?.textContent, "目に見える名前が無い").toContain("大きさ");
+  });
+
+  // ⚠️ **言い方は場面形式と同じ**（`06 §3`＝同じものを別の語で呼ばない）。
+  it("選択肢は「きれい」「軽い」で、寸法も出る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
+    const texts = [...sel.options].map((o) => o.text);
+    expect(texts).toEqual(["きれい（1920×1080）", "軽い（1280×720）"]);
+  });
+
+  it("既定は「きれい」（場面形式の既定と同じ）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).value).toBe("fullhd");
+    expect(useTimelineStore.getState().exportHd).toBe(false);
+  });
+
+  it("選ぶと覚える", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("書き出す大きさ"), { target: { value: "hd" } });
+    expect(useTimelineStore.getState().exportHd).toBe(true);
+  });
+
+  // ⚠️ **縦型でも同じ関数から出す**＝数字を画面に書かない（§2-7）。
+  it("縦型では縦型の寸法が出る", () => {
+    open({ videoSettings: { ...doc().videoSettings, aspectRatio: "9:16" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const texts = [...(screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).options].map((o) => o.text);
+    expect(texts).toEqual(["きれい（1080×1920）", "軽い（720×1280）"]);
   });
 });
