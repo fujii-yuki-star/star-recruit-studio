@@ -1584,6 +1584,16 @@ button.badge {
 .dense .section-title {
   font-size: 14px;
 }
+.dense .topbar {
+  height: 44px;
+  padding: 0 var(--gap-lg);
+}
+.dense .page-head {
+  margin-bottom: var(--gap);
+}
+.dense .page-title {
+  font-size: 19px;
+}
 .dense .field {
   margin-bottom: var(--gap-sm);
 }

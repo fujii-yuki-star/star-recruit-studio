@@ -88,3 +88,14 @@ describe("LooksEditScreen: 欄の配置（ADR-0033 段階4 後半）", () => {
     }
   });
 });
+
+// 詰めた表示（ADR-0047・#1247）。
+// ⚠️ **印が外れると、操作と余白が黙って元の大きさへ戻る**（画面は普通に動くので誰も気づかない）。
+// 実測（同じ窓・同じ瞬間に印を付け外し）＝ボタン高 39→29px
+describe("LooksEditScreen：詰めた表示の印（ADR-0047）", () => {
+  it("編集している画面に印が付いている", () => {
+    
+    const { container } = render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".dense"), "詰めた表示の印が外れている").not.toBeNull();
+  });
+});

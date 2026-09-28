@@ -1007,7 +1007,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   ];
 
   return (
-    <div className="main-scroll">
+    // ⚠️ **`dense` は編集画面に共通**（ADR-0047・#1247）。⚠️ **空の枝（上の早い `return`）には付けない**
+    //   ＝あちらは「一覧から選んでください」の文だけで、詰める本体が無い（読みにくくなるだけ）。
+    <div className="main-scroll dense">
       <ExportLockBanner onNavigate={onNavigate} />
       {/* ヘッダ：タイトル・共通ツールバー（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ）。
           ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝この画面は元からここに在ったので、

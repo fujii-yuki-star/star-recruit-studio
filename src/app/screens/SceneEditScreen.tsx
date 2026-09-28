@@ -3279,7 +3279,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   ];
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    // ⚠️ **`dense` は編集画面に共通**（ADR-0047・#1247）＝操作と余白だけを詰め、本体へ面積を渡す。
+    //   触る所（押す物・場所・言葉）は変えない。寸法は `theme.css` のトークンで決める（画面で数字を書かない）。
+    <div className="dense" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
       <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
       <ExportLock onNavigate={onNavigate}>
