@@ -2,7 +2,7 @@
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
-import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TRACK_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind, Orientation, VideoKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
@@ -11,6 +11,7 @@ import type { Layer } from "../domain/template/types";
 import type { EditBlockedReason } from "../domain/timeline/edit";
 import { TIMELINE_EXPORT_BLOCK, volumePointsTooManyHasSplittable } from "../domain/timeline/export";
 import { AUDIO_SOURCE_KIND } from "../domain/timeline/audio";
+import { bgmById } from "../domain/bgm/bgmCatalog";
 import type { AudioSourceKind } from "../domain/timeline/audio";
 import type { TimelineExportBlockCode } from "../domain/timeline/export";
 import type { TimelineProject } from "../domain/timeline/types";
@@ -519,7 +520,14 @@ export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?
   const track = tracks.find((t) => t.id === trackId);
   if (!track) return "";
   if (track.name) return track.name;
-  const order = tracks.filter((t) => t.kind === track.kind).findIndex((t) => t.id === trackId) + 1;
+  const same = tracks.filter((t) => t.kind === track.kind);
+  const i = same.findIndex((t) => t.id === trackId);
+  // ⚠️ **番号は「画面の上から」数える**（#1249・実機で踏んだ）。
+  //   並びは**配列の後ろほど手前**（`11 §7.6`）で、画面は手前を上に出す。
+  //   映像は上へ積むので**配列の順＝番号の順**でよいが、**音は下へ積む**ので配列の順は逆さになる。
+  //   そのまま配列の順で数えると、**音を足したときに元の列の番号が付け替わる**
+  //  （実機で `音1` が `音2` に化けた＝自分の付けたはずの名前が動く）。
+  const order = track.kind === TRACK_KIND.audio ? same.length - i : i + 1;
   return `${trackKindLabel[track.kind]}${order}`;
 }
 
@@ -551,11 +559,36 @@ const clipKindLabel: Record<TimelineClipKind, string> = {
   voice: "読み上げ",
 };
 
-export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string } }): string {
+/**
+ * 帯に出す名前。
+ *
+ * ⚠️ **素材の名前を出す**（#1250）＝以前は素材のクリップが**どれも「素材」**になり、
+ * 並びを見ても**どちらがどれか分からなかった**（素材の一覧では「ゆうこ（笑顔）」と名前を付けて
+ * 管理しているのに、置いた途端に消えていた）。文字のクリップは中身が出るので、
+ * **写真・動画・音だけが潰れて**いた。
+ * ⚠️ **クリップへ焼き込まない**（§2-7）＝素材の名前を変えたときに**帯だけ古い名前**になる。
+ * **描くときに引く**＝そのために `assets` を受ける。
+ *
+ * @param clip 帯の中身。`name` が付いていればそれが最優先（利用者が付けた名前）。
+ * @param assets その動画が持っている素材（省略すると素材の名前は出ない＝置く前の見本などで使う）。
+ */
+export function clipLabel(
+  clip: {
+    kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string };
+    assetId?: string | null; bundledBgmId?: string | null;
+  },
+  assets?: readonly { assetId: string; displayName: string }[],
+): string {
   if (clip.name) return clip.name;
   // 文字が入っているものは中身を見せたほうが見分けやすい（長いものは切る＝列の幅を壊さない）。
   const body = clip.voice?.text ?? clip.text;
-  return body ? body.slice(0, 12) : clipKindLabel[clip.kind];
+  if (body) return body.slice(0, 12);
+  // 同梱BGM は素材を持たないので、曲の名前で見分ける。
+  const bgm = bgmById(clip.bundledBgmId);
+  if (bgm) return bgm.label;
+  const asset = clip.assetId ? assets?.find((a) => a.assetId === clip.assetId) : undefined;
+  if (asset?.displayName) return asset.displayName.slice(0, 20);
+  return clipKindLabel[clip.kind];
 }
 
 /**

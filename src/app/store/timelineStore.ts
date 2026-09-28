@@ -33,7 +33,7 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, renameTrack,
   moveClip, visualPlacementAt,
   setVisualClipContent,
   setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
@@ -719,6 +719,11 @@ export interface TimelineState {
   updateVideoSettings: (patch: Partial<TimelineProject["videoSettings"]>) => void;
   addTrack: (kind: TrackKind) => void;
   removeTrack: (trackId: string) => void;
+  /**
+   * 列に名前を付ける（利用者要望 2026-09-28）＝「映像1／音1」の自動名だけだと、
+   * 列が増えたときに**どれが何の列か**分からない。空にすると自動名へ戻る。
+   */
+  renameTrack: (trackId: string, name: string) => void;
   /**
    * 列を**中身ごと**複製する（#767）。空の列だけ増やすなら「列を足す」と同じなので、
    * 中の部品も一緒に運ぶ（置けない事情は domain が理由で返す＝黙って別の結果にしない）。
@@ -1578,10 +1583,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addVisualClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
+    // ⚠️ **素材の形のまま置く**ために実寸を渡す（2026-09-28 の実機レビュー）＝渡さないと
+    //   画面いっぱいの箱になり、正方形・縦長の素材が切り取られる（ゆうこの立ち絵で頭と足が切れた）。
+    // ⚠️ **測る前に置かれることがある**＝そのときは `undefined` のまま渡し、domain が切らない側へ倒す。
+    const assetSize = input.assetId ? get().assetSizes[input.assetId] : undefined;
     // **指された場所へ置く**（ドラッグ）＝探さない・寄せない。置けなければ理由を出して終わり
     // （ADR-0034 決定10＝利用者が位置を指したときは勝手に別の場所へ動かさない）。
     if (input.at) {
-      const r = addVisualClip(doc, { ...input, trackId: input.at.trackId, startSec: input.at.startSec });
+      const r = addVisualClip(doc, { ...input, assetSize, trackId: input.at.trackId, startSec: input.at.startSec });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];
         // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
@@ -1607,7 +1616,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
-    const r = addVisualClip(doc, { ...input, trackId: at.trackId, startSec: at.startSec });
+    const r = addVisualClip(doc, { ...input, assetSize, trackId: at.trackId, startSec: at.startSec });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;
@@ -2150,6 +2159,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addTrack: (kind) => {
     const doc = get().doc;
     if (doc) commit(set, get, addTrack(doc, kind));
+  },
+  renameTrack: (trackId, name) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = renameTrack(doc, trackId, name);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
   },
   duplicateTrack: (trackId) => {
     const doc = get().doc;

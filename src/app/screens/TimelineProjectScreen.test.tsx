@@ -238,11 +238,15 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     expect(useTimelineStore.getState().doc!.clips).toEqual([]);
   });
 
-  it("列を足せる", () => {
+  it("列を足せる。⚠️ **音は映像より下へ入る**（#1249）", () => {
     twoClips();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("音の列を足す"));
-    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.kind)).toEqual(["visual", "visual", "audio"]);
+    // ⚠️ **配列の後ろほど手前**（`11 §7.6`）で、画面は**手前を上**に出す＝画面の順は配列の逆。
+    //   以前は種類に関わらず末尾へ足していたので、音が**映像より上**に乗っていた（#1249）。
+    //   読む人が毎回逆さにしなくてよいように、**画面で見える順**で確かめる。
+    const 画面の順 = [...useTimelineStore.getState().doc!.tracks].reverse().map((t) => t.kind);
+    expect(画面の順).toEqual(["visual", "visual", "audio"]);
   });
 });
 
@@ -1715,7 +1719,9 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(trackRowLabel("映像1"));
     const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
-    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
+    // ⚠️ **+「名前を変える」**（利用者要望 2026-09-28）＝自動名（映像1／音1）だけだと、列が増えたときに
+    //   どれが何の列か分からない。2回押しでも変えられるが、**見つけられる道**としてメニューにも置く。
+    expect(labels).toEqual(["名前を変える", "手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
   });
 
   it("固定した列では、言い方が「固定を外す」に変わる（#1106）", () => {
@@ -1725,7 +1731,8 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(trackRowLabel("映像1"));
     const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
-    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定を外す", "削除"]);
+    // ⚠️ **固定中でも名前は変えられる**＝固定が守るのは帯の位置と長さで、呼び名はそれに当たらない。
+    expect(labels).toEqual(["名前を変える", "手前へ", "奥へ", "複製", "動画に出さない", "固定を外す", "削除"]);
   });
 
   it("メニューから操作でき、選ぶと閉じる", () => {
@@ -7898,5 +7905,82 @@ describe("TimelineProjectScreen: 音が出せない素材（#1050）", () => {
     withBgm({ "asset:asset_009": "data:audio/mp3;base64,X" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("音が出せない素材"))).toBe(false);
+  });
+});
+
+// 列に名前を付ける（利用者要望 2026-09-28）。自動名（映像1／音1）だけだと、列が増えたときに
+// **どれが何の列か**分からない。
+describe("TimelineProjectScreen: 列に名前を付ける", () => {
+  it("2回押すと欄になり、打って Enter で名前が付く", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "ゆうこの立ち絵" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("ゆうこの立ち絵");
+    expect(trackRowLabel("ゆうこの立ち絵")).toBeTruthy();
+  });
+
+  // ⚠️ **見つけられる道を残す**（ADR-0034 決定19）＝2回押しだけだと気づけない。
+  it("メニューからも開ける", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(trackRowLabel("映像1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "名前を変える" }));
+    expect(screen.getByLabelText("映像1の名前")).toBeTruthy();
+  });
+
+  // ⚠️ **消す道を残す**＝空にすると自動の名前へ戻る。空文字のまま残すと**見出しが消える**。
+  it("空にすると自動の名前へ戻る", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, name: "前の名前" }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("前の名前"));
+    const field = screen.getByLabelText("前の名前の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBeUndefined();
+    expect(trackRowLabel("映像1")).toBeTruthy();
+  });
+
+  // ⚠️ **やめる道を残す**＝`Escape` は書き換えずに閉じる。
+  it("Escape でやめられる（書き換わらない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "捨てる名前" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBeUndefined();
+  });
+
+  // ⚠️ **固定した列でも名前は変えられる**＝固定が守るのは帯の位置と長さで、呼び名はそれに当たらない。
+  it("固定した列でも名前を変えられる", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "固定した列" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("固定した列");
+  });
+});
+
+// 再生位置は操作の行にある（利用者要望 2026-09-28）。
+// ⚠️ **以前は欄のいちばん下**（クレジットと文字の形の設定より後ろ）にあり、**スクロールしないと届かなかった**。
+describe("TimelineProjectScreen: 再生位置の置き場所", () => {
+  it("「動画を書き出す」と同じ行にある（別の欄の奥に沈んでいない）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const slider = container.querySelector('input[type="range"]');
+    expect(slider, "再生位置のつまみが無い").not.toBeNull();
+    const row = screen.getByRole("button", { name: "動画を書き出す" }).closest(".row");
+    expect(row, "書き出しボタンが操作の行に無い").not.toBeNull();
+    expect(row!.contains(slider!), "再生位置が書き出しと同じ行に無い（欄の奥に沈んでいる）").toBe(true);
+    expect(row!.textContent, "同じ行に「再生」が無い").toContain("再生");
+    // ⚠️ **在るだけでは足りない**（変異チェックで露見）＝行の中に置いたまま隠しても通ってしまう。
+    for (let el: HTMLElement | null = slider as HTMLElement; el && el !== row; el = el.parentElement) {
+      expect(getComputedStyle(el).display, "再生位置（かその親）が隠れている").not.toBe("none");
+    }
   });
 });

@@ -19,9 +19,13 @@ describe('createEmptyTimelineProject（完全新規・#635）', () => {
 
   it('最初から映像と音の列を1本ずつ持つ（置く前に「列を足す」から始めさせない）', () => {
     const doc = createEmptyTimelineProject(input);
-    expect(doc.tracks.map((t) => t.kind)).toEqual([TRACK_KIND.visual, TRACK_KIND.audio]);
-    // 列の id は編集操作と同じ採番規則（新規だけ別の付け方にしない）。
-    expect(doc.tracks.map((t) => t.id)).toEqual(['track_001', 'track_002']);
+    // ⚠️ **音は奥（配列の先頭）**（#1249）＝配列の後ろほど手前で、画面は手前を上に出すので、
+    //   画面では**映像が上・音が下**になる（業界の型・ADR-0034 決定1）。
+    expect(doc.tracks.map((t) => t.kind)).toEqual([TRACK_KIND.audio, TRACK_KIND.visual]);
+    expect([...doc.tracks].reverse().map((t) => t.kind), '画面の上から').toEqual([TRACK_KIND.visual, TRACK_KIND.audio]);
+    // 列の id は編集操作と同じ採番規則（新規だけ別の付け方にしない）。⚠️ **採番は作った順**なので、
+    // 先に作る映像が `track_001`（並びの位置とは別の話）。
+    expect(doc.tracks.map((t) => t.id)).toEqual(['track_002', 'track_001']);
   });
 
   it('中身は空＝尺は0で、書き出しは理由をつけて止まる（空のまま成功させない）', () => {

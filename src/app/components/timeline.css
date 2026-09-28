@@ -582,3 +582,19 @@
   stroke: none;
   opacity: 0.7;
 }
+
+/* 列の名前をその場で書き換える欄（利用者要望 2026-09-28）。
+   ⚠️ **行の高さを変えない**＝この行の高さは帯（`--timeline-lane-h`）が決めている。
+   共通の `.input` を使うと上下の余白で行が伸びるので、ここだけ持つ（`.timeline-row-menu` と同じ理由）。 */
+.timeline-row-name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text);
+  background: var(--color-surface);
+}

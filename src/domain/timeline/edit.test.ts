@@ -403,9 +403,17 @@ describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
 });
 
 describe('トラック（列）', () => {
-  it('足した列はいちばん手前（配列の末尾）に入る', () => {
-    const next = addTrack(doc(), TRACK_KIND.audio);
-    expect(next.tracks[next.tracks.length - 1]).toMatchObject({ id: 'track_004', kind: TRACK_KIND.audio });
+  // ⚠️ **この `doc()` は列が混ざっている**（`[映像, 映像, 音]`＝音が手前）＝#1249 より前の並び。
+  //   規則は「**いまある並びは組み替えない**」なので、ここで見るのは**同じ種類の隣へ入る**ことだけ。
+  //   向きそのもの（映像は上・音は下）は `insertTrack.test.ts` が、揃った並びで確かめる。
+  it('足した列は、同じ種類のまとまりの隣に入る（混ざった並びは組み替えない）', () => {
+    expect(addTrack(doc(), TRACK_KIND.visual).tracks.map((t) => t.kind))
+      .toEqual([TRACK_KIND.visual, TRACK_KIND.visual, TRACK_KIND.visual, TRACK_KIND.audio]);
+    expect(addTrack(doc(), TRACK_KIND.audio).tracks.map((t) => t.kind))
+      .toEqual([TRACK_KIND.visual, TRACK_KIND.visual, TRACK_KIND.audio, TRACK_KIND.audio]);
+    // 元の3つの**相対の並びが変わっていない**（新しいものを除くと元どおり）。
+    const after = addTrack(doc(), TRACK_KIND.audio).tracks.filter((t) => t.id !== 'track_004');
+    expect(after.map((t) => t.id)).toEqual(['track_001', 'track_002', 'track_003']);
   });
 
   it('消すと、その列のクリップも一緒に消える（数は事前に分かる）', () => {
