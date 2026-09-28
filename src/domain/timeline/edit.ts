@@ -303,6 +303,45 @@ export function visualPlacementAt(
 }
 
 /**
+ * 押して置いたとき、**実際にどこへ入るか**（#1252）。
+ *
+ * ⚠️ **1か所に置く**（#1096 が塞いだ穴の再発防止）＝**押す前に見せる帯**と**押した結果**が
+ * 別々の計算になると、そのときだけ帯が嘘になる。両方ここを通す。
+ *
+ * @returns `newTrack` が `true` のとき、`trackId` は**いま手前にある列**で、実際はその**さらに手前へ
+ *   1本足して**そこへ入る（時刻は `startSec` のとおり）。置ける列が無ければ `null`。
+ */
+export function visualPlacementFor(
+  doc: TimelineProject,
+  kind: TimelineClipKind,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+): { trackId: string; startSec: number; durationSec: number; newTrack: boolean } | null {
+  const at = visualPlacementAt(doc, preferredTrackId, fromSec);
+  if (!at) return null;
+  // 塞がっていない／重ねない種類＝そのまま。
+  if (!overlaysWhenBusy(kind) || at.startSec === fromSec) return { ...at, newTrack: false };
+  return { ...at, startSec: fromSec, newTrack: true };
+}
+
+/**
+ * 置き先が塞がっていたとき、**手前に列を足して重ねる**種類か（利用者判断 2026-09-28・#1252）。
+ *
+ * ⚠️ **同じ「置く」でも、人のつもりが種類で違う**＝写真・動画を続けて置くのは**紙芝居**なので
+ * 後ろへ並ぶのが正しい。文字・図形を置くのは**その絵に載せたい**のでほぼ必ず重ねたい。
+ * アプリには「どちらのつもりか」が分からないので、**種類で決める**。
+ *
+ * ⚠️ **#722 案A を捨てるわけではない**＝あの決定は「**奥の列へは置かない**（手前の全画面の部品の裏に
+ * 入って見えなくなる）」で、いまも守る。足すのは**手前**なので裏に入らない。
+ * 当時は「手前に列を作る」という3つ目の道が検討されていなかった。
+ *
+ * ⚠️ **塞がっていないときは何も足さない**＝空いていればそのまま置く（列は増えない）。
+ */
+export function overlaysWhenBusy(kind: TimelineClipKind): boolean {
+  return kind === TIMELINE_CLIP_KIND.text || kind === TIMELINE_CLIP_KIND.shape;
+}
+
+/**
  * 音（BGM・読み上げ）の置き先（2026-09-28 の実機レビュー）。
  *
  * ⚠️ **映像と同じ規則にする**（ADR-0026②＝同じ概念を、画面や種類で割らない）＝

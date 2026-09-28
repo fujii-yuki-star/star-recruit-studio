@@ -2473,8 +2473,11 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     expect(lastClip().trackId).toBe(select.value);
 
     // 選び直すと、その列へ入る。
+    // ⚠️ **塞がらない所で確かめる**（#1252）＝文字・図形は塞がっていると**手前に列を足して重ねる**ので、
+    //   同じ時刻へ2回続けて置くと「選んだ列へ入ったか」が見えない。再生位置を空いている所へ移す。
     const other = [...select.options].map((o) => o.value).find((v) => v !== select.value)!;
     fireEvent.change(select, { target: { value: other } });
+    useTimelineStore.setState({ playheadSec: 30 });
     fireEvent.click(within(place).getByRole("button", { name: "図形を置く" }));
     expect(lastClip().trackId).toBe(other);
   });
@@ -2744,15 +2747,19 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
   });
 
-  it("続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {
+  // ⚠️ **素材で確かめる**（#1252）＝写真・動画は**紙芝居**として後ろへ並ぶのが正しい。
+  //   文字・図形は塞がっていると**手前に列を足して重ねる**ので、別の検査（「塞がっているときの置き方」）で見る。
+  it("素材を続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 同じ再生位置＝塞がっている
+    const 置く = () => fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
+    置く();
+    置く(); // 同じ再生位置＝塞がっている
     const clips = useTimelineStore.getState().doc!.clips;
     expect(clips).toHaveLength(2);
     // 1つ目の終わりから続けて置く（重ねない・黙って何もしない、もしない）。
     expect(clips[1].startSec).toBe(clips[0].startSec + clips[0].durationSec);
+    expect(clips[1].trackId, "列が増えている（紙芝居にならない）").toBe(clips[0].trackId);
     expect(useTimelineStore.getState().editBlocked).toBeNull();
   });
 
@@ -3254,6 +3261,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
 
   it("間の空きを飛び越さない（いちばん後ろの部品の終わりへ飛ばさない・#684 レビュー）", () => {
     // [0,3) と [10,15)。5秒ぶんは [3,10) の空きに収まるので、そこへ置く（15 ではない）。
+    // ⚠️ **素材で確かめる**（#1252）＝文字は塞がっていると手前へ重ねるので、この規則を通らない。
     withAsset({
       clips: [
         { id: "clip_001", trackId: "track_001", kind: TIMELINE_CLIP_KIND.text, startSec: 0, durationSec: 3, text: "あ" },
@@ -3261,7 +3269,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       ],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
     const clips = useTimelineStore.getState().doc!.clips;
     expect(clips).toHaveLength(3);
     expect(clips[2]).toMatchObject({ startSec: 3, durationSec: 5 });
@@ -8009,5 +8017,74 @@ describe("TimelineProjectScreen: 再生位置の置き場所", () => {
     for (let el: HTMLElement | null = slider as HTMLElement; el && el !== row; el = el.parentElement) {
       expect(getComputedStyle(el).display, "再生位置（かその親）が隠れている").not.toBe("none");
     }
+  });
+});
+
+// 塞がっているときの置き方（利用者判断 2026-09-28・#1252）。
+// ⚠️ **同じ「置く」でも、人のつもりが種類で違う**＝写真を続けて置くのは紙芝居、文字を置くのは重ねたい。
+// アプリには分からないので**種類で決める**。⚠️ #722 案A（奥へ置かない＝裏に隠さない）は守る＝足すのは手前。
+describe("TimelineProjectScreen: 塞がっているときの置き方（#1252）", () => {
+  const busyVisual = () => open({
+    tracks: [{ id: "track_002", kind: TRACK_KIND.audio }, { id: "track_001", kind: TRACK_KIND.visual }],
+    clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100 }],
+  });
+  it("文字は、塞がっていたら手前に列を足して**重なる**（後ろへ並ばない）", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByText("文字を置く"));
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "列が足されていない").toBe(before + 1);
+    const text = d.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.text)!;
+    expect(text.startSec, "後ろへずれている（重なっていない）").toBe(0);
+    expect(text.trackId, "同じ列に置かれている").not.toBe("track_001");
+    // ⚠️ **足すのは手前**＝裏に隠れない（配列の後ろほど手前・`11 §7.6`）。
+    expect(d.tracks.findIndex((t) => t.id === text.trackId))
+      .toBeGreaterThan(d.tracks.findIndex((t) => t.id === "track_001"));
+  });
+
+  it("図形も同じ", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("図形を置く"));
+    const d = useTimelineStore.getState().doc!;
+    const added = d.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.shape);
+    expect(added.length).toBe(2);
+    expect(added[1]!.startSec, "後ろへずれている").toBe(0);
+  });
+
+  // ⚠️ **空いていれば列を足さない**＝押すたびに列が増える、を作らない。
+  it("空いているときは列を足さない", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }], clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("文字を置く"));
+    expect(useTimelineStore.getState().doc!.tracks.length, "列が増えている").toBe(1);
+  });
+
+  // ⚠️ **1回の取り消しで両方戻る**＝列だけが残らない。
+  it("取り消すと、足した列も一緒に戻る", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByText("文字を置く"));
+    useTimelineStore.getState().undo();
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "列だけが残った").toBe(before);
+    expect(d.clips.some((c) => c.kind === TIMELINE_CLIP_KIND.text)).toBe(false);
+  });
+
+  // ⚠️ **写真は後ろへ並んだまま**＝紙芝居が作れる（上の「素材を続けて置くと…」が本体）。
+  it("写真は塞がっていても列を足さない（紙芝居のまま）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }, { id: "track_001", kind: TRACK_KIND.visual }],
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_001", x: 0, y: 0, w: 100, h: 100 }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "写真なのに列が足された").toBe(before);
+    expect(d.clips[1]!.startSec, "後ろへ並んでいない").toBe(5);
   });
 });

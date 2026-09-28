@@ -34,7 +34,8 @@ import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, renameTrack,
-  moveClip, visualPlacementAt,
+  visualPlacementFor,
+  moveClip,
   setVisualClipContent,
   setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
@@ -57,7 +58,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { NarrationStatus } from "../../domain/enums";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -1611,12 +1612,29 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
     // 列選びと時刻の規則は `visualPlacementAt`（domain）に1つだけ置く＝**押す前に見せる帯**（#1096）と
     // 押した結果が別々の計算にならない。置ける列が無ければ理由を出す（押しても何も起きない、を作らない・§2-5）。
-    const at = visualPlacementAt(doc, input.trackId, get().playheadSec);
+    const playheadSec = get().playheadSec;
+    const at = visualPlacementFor(doc, input.kind, input.trackId, playheadSec);
     if (!at) {
       set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
-    const r = addVisualClip(doc, { ...input, assetSize, trackId: at.trackId, startSec: at.startSec });
+    // ⚠️ **文字・図形は、塞がっていたら手前に列を足して重ねる**（利用者判断 2026-09-28・#1252）＝
+    //   写真に文字を載せるのは動画づくりでいちばんよくやる操作なのに、押すと**写真の後ろ**に並んでいた
+    //  （重ねるには「列を足す」を先に押すと知っている必要があり、画面にはどこにも書いていなかった）。
+    // ⚠️ **写真・動画は後ろへ並べたまま**＝続けて置くのは紙芝居なので、そちらが正しい。
+    //   種類で分ける理由は `overlaysWhenBusy` に1つだけ書く。
+    // ⚠️ **足すのは手前**なので #722 案A（奥へ置かない＝裏に隠さない）は守られる。
+    // ⚠️ **1回の取り消しで両方戻る**＝列と部品を同じ `commit` で確定する（列だけ残らない）。
+    let working = doc;
+    let target = at;
+    if (at.newTrack) {
+      const withTrack = addTrack(doc, TRACK_KIND.visual);
+      const added = withTrack.tracks.find((t) => !doc.tracks.some((o) => o.id === t.id));
+      const retry = added ? visualPlacementFor(withTrack, input.kind, added.id, playheadSec) : null;
+      // ⚠️ **足しても置けないなら足さない**＝空の列だけが増える、を作らない。
+      if (retry && retry.startSec === playheadSec) { working = withTrack; target = retry; }
+    }
+    const r = addVisualClip(working, { ...input, assetSize, trackId: target.trackId, startSec: target.startSec });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;

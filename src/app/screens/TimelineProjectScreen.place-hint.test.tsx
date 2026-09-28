@@ -95,18 +95,37 @@ describe("押す前に置き先を見せる（#1032）", () => {
 
   // ⚠️ **押した結果と同じ場所を見せる**（#1096 レビュー 🔴）＝絵の部品は再生位置が塞がっていれば
   //    **次の空きへずれて**置かれる。再生位置をそのまま帯にすると、そのときだけ帯が嘘になる。
-  it("再生位置が塞がっているときは、実際に置かれる先へ帯を出す", () => {
+  it("文字は、塞がっていても再生位置へ重なる＝帯もそこに出る（#1252）", () => {
     const { container } = setup(0); // [0,5) に文字がある＝0 秒は塞がっている
     fireEvent.mouseEnter(screen.getByRole("button", { name: "文字を置く" }));
     const band = hints(container)[0]!.style.left;
-    expect(parseFloat(band), "塞がっている再生位置にそのまま帯を出している").toBeGreaterThan(0);
-    // 押して、置かれた部品の帯と**同じ位置**であることを確かめる（別々の計算になっていない）。
+    // ⚠️ **手前に列を足して重なる**ので、時刻は再生位置のまま（後ろへずれない）。
+    expect(parseFloat(band), "後ろへずれた帯を出している").toBe(0);
     fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
     const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== "clip_001");
-    expect(placed?.startSec, "塞がった再生位置にそのまま置かれた").toBe(5);
+    expect(placed?.startSec, "重ならずに後ろへ置かれた").toBe(0);
     // 置いた部品は最後に足される＝いちばん後ろの帯がそれ。見せた帯と同じ左端であること。
     const els = [...container.querySelectorAll(".timeline-clip")] as HTMLElement[];
     expect(els.length, "置いた部品が描かれていない").toBe(2);
+    expect(els[els.length - 1]!.style.left, "見せた帯と、実際に置かれた場所が違う").toBe(band);
+  });
+
+  // ⚠️ **写真は後ろへずれる**（紙芝居）＝#1096 が守りたかった「帯が嘘になる」場面はこちら。
+  it("写真は、塞がっていたら次の空きへずれる＝帯もそこに出る", () => {
+    useProjectStore.setState({ templates: [] });
+    useTimelineStore.setState({
+      doc: { ...doc(), assets: [{ assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" }] } as unknown as TimelineProject,
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {}, editBlocked: null,
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const 写真 = screen.getByRole("button", { name: "会社の外観" });
+    fireEvent.mouseEnter(写真);
+    const band = hints(container)[0]!.style.left;
+    expect(parseFloat(band), "塞がっている再生位置にそのまま帯を出している").toBeGreaterThan(0);
+    fireEvent.click(写真);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== "clip_001");
+    expect(placed?.startSec, "塞がった再生位置にそのまま置かれた").toBe(5);
+    const els = [...container.querySelectorAll(".timeline-clip")] as HTMLElement[];
     expect(els[els.length - 1]!.style.left, "見せた帯と、実際に置かれた場所が違う").toBe(band);
   });
 

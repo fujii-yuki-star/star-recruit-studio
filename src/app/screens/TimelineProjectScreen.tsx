@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
@@ -2853,7 +2853,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const showPlaceHint = (trackId: string | undefined, spec: ClipPlacement | null): void => {
     if (!spec || exporting || isPlaying || !doc) { setPlaceHint(null); return; }
     if (spec.kind === TIMELINE_CLIP_KIND.text || spec.kind === TIMELINE_CLIP_KIND.shape || spec.kind === TIMELINE_CLIP_KIND.slot) {
-      const at = visualPlacementAt(doc, trackId, playheadSec);
+      // ⚠️ **押した結果と同じ計算を通す**（#1096・#1252）＝別々に書くと、そのときだけ帯が嘘になる。
+      //   ⚠️ **重ねるときは行が1つ違う**＝実際は**この列のさらに手前**へ列を足してそこへ入る。
+      //   行そのものはまだ無いので描けないが、**時刻（帯の左端と幅）は実際の置き先どおり**。
+      const at = visualPlacementFor(doc, spec.kind, trackId, playheadSec);
       setPlaceHint(at); // 置ける列が無ければ null＝帯を出さない（押しても置けない）
       return;
     }
