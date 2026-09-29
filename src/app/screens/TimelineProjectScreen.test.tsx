@@ -8025,6 +8025,37 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 「置く」欄の素材タブは、素材の一覧を上へ寄せる（ADR-0048・#1256 b4）。
+// ⚠️ 以前は取り込み・棚・説明・置く列・文字/図形が縦に積まれ、既定の配置でボタン14個のうち5個しか見えなかった。
+describe("TimelineProjectScreen: 「置く」欄を詰める（#1256 b4）", () => {
+  const place = () => document.querySelector('[data-panel-id="place"]') as HTMLElement;
+  const before = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+  it("取り込み・文字を置く・図形を置くが1つの行にある", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const text = within(place()).getByRole("button", { name: "文字を置く" });
+    const row = text.closest(".row")!;
+    expect(row.contains(within(place()).getByRole("button", { name: "図形を置く" }))).toBe(true);
+    expect(row.textContent, "取り込みが同じ行に無い").toContain("写真・動画・音楽を取り込む");
+  });
+
+  it("「よく使う素材から取り込む」は、置く列と素材の一覧より後ろ", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lib = within(place()).getByText("よく使う素材から取り込む");
+    const select = within(place()).getByLabelText("置く列");
+    expect(before(select, lib), "棚が置く列より前にある").toBe(true);
+    expect(before(within(place()).getByText(/写真がまだありません/), lib), "棚が素材の一覧より前にある").toBe(true);
+  });
+
+  it("置く列の名前は「置く列」だけ（説明を名前に混ぜない）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(within(place()).getByRole("combobox", { name: "置く列" })).toBeTruthy();
+  });
+});
+
 // 帯の操作は「並び」の道具の行にある（ADR-0048・#1256 b5）。
 // ⚠️ **以前は「選んだ部品」欄の上段に13個**並び、欄の中身 976px のうち見えるのは約39%だった。
 describe("TimelineProjectScreen: 帯の操作の行（#1256 b5）", () => {

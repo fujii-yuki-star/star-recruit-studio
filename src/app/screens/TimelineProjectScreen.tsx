@@ -5504,9 +5504,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </div>
         {placeTab === PANEL_ID.place && (
           <>
-            {/* **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。
-                ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
-            <div className="row gap-sm mb-sm">
+            {/* ⚠️ **素材の一覧を上へ寄せる**（ADR-0048・#1256 b4）＝以前は取り込み・棚・説明・置く列・文字/図形が
+                縦に積まれ、**既定の配置でボタン14個のうち5個しか見えず、素材の一覧は欄の外**だった。
+                型（Filmora・CapCut）はタブのすぐ下に素材が並ぶ。**置く操作は1行・置く先と説明を1行**にまとめ、
+                使う頻度の低い「よく使う素材から取り込む」は一覧の**下**へ回した。
+                ⚠️ **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。 */}
+            <div className="row gap-sm mb-sm" style={{ flexWrap: "wrap" }}>
               <AssetImportButton
                 store={useTimelineStore}
                 disabledReason={exporting ? exportingHint : null}
@@ -5514,44 +5517,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 withAudio
                 label="写真・動画・音楽を取り込む"
               />
-            </div>
-            {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
-                棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
-            <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
-              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} onNavigate={onNavigate} />
-            </CollapsibleSection>
-            {importError && (
-              <div className="notice notice-warn row-between mb-sm" role="alert">
-                <span>{importError}</span>
-                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
-              </div>
-            )}
-            {placeableTracks.length === 0 ? (
-              <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
-            ) : (
-              <>
-                {/* ⚠️ **3文を1〜2行に詰める**（#1104・実機の指摘 2026-09-10「文を縦に3つ並べるのでは
-                    なく、1~2行に圧縮する」）＝欄が縦に狭いので、説明が3行あると入口そのものが押し出される。
-                    ⚠️ **意味は落とさない**＝どこへ入るかは押す前に帯で見せてある（#1096）ので、
-                    文は「押したら」「運んだら」の2つだけに絞る。 */}
-                <p className="text-muted text-sm">
-                  {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
-                  つかんで運べば落とした所へ。
-                </p>
-                {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
-                    ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
-                    既定は「いちばん手前の置ける列」＝欄に出ている列が実際に置く列（表示と結果を割らない）。 */}
-                <label className="field">
-                  <span>置く列</span>
-                  <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
-                    {placeableTracks.map((t) => (
-                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="row gap-sm">
-                  {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
-                      掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
+              {placeableTracks.length > 0 && (
+                <>
                   <button
                     className="btn btn-secondary grabbable"
                     {...busyGuard({ disabled: isPlaying, hint: playingHint })}
@@ -5572,8 +5539,35 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     図形を置く
                   </button>
+                </>
+              )}
+            </div>
+            {importError && (
+              <div className="notice notice-warn row-between mb-sm" role="alert">
+                <span>{importError}</span>
+                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
+            {placeableTracks.length === 0 ? (
+              <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
+            ) : (
+              <>
+                {/* **どこへ入るかを見せる**（#771(b)）＝置く列と、押したとき／運んだときの行き先を1行に。 */}
+                <div className="row gap-sm mb-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                  {/* ⚠️ **名前は「置く列」だけ**＝説明まで label に入れると、選ぶ欄の名前が長い文になる。 */}
+                  <label className="row gap-sm" style={{ alignItems: "center" }}>
+                    <span className="text-sm">置く列</span>
+                    <select className="select" style={{ width: "auto" }} value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                      {placeableTracks.map((t) => (
+                        <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="text-muted text-sm">
+                    {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
+                    つかんで運べば落とした所へ。
+                  </span>
                 </div>
-                {/* ⚠️ **1行に詰める**（#1104・実機の指摘）＝3文だと欄の高さを食う。 */}
                 {visualAssets.length === 0 ? (
                   <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
@@ -5594,6 +5588,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 )}
               </>
             )}
+            {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
+                棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
+            <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
+              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} onNavigate={onNavigate} />
+            </CollapsibleSection>
           </>
         )}
         {placeTab === PANEL_ID.templates && (
