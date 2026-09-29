@@ -36,7 +36,7 @@ describe('pasteClips（#1265）', () => {
     const r = pasteClips(d, [d.clips[0], d.clips[1]], 10); // 2つ目が 11秒の帯と重なる
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.reason).toBe(EDIT_BLOCKED.overlap);
+    expect(r.reason).toBe(EDIT_BLOCKED.pasteOverlap);
   });
 
   it('固定・隠した列へは貼らない（新しく作る側の規則）', () => {
@@ -45,11 +45,12 @@ describe('pasteClips（#1265）', () => {
     expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.locked);
   });
 
-  it('写した後に消えた列・素材は断る', () => {
+  // 断りは「写し直す」＝`notFound`（選び直して）では、写しが古いままで進めない（#1271 レビュー）。
+  it('写した後に消えた列・素材は、写し直す断りで返す', () => {
     const gone = text('clip_x', 'track_404', 0);
-    expect(pasteClips(doc(), [gone], 10).ok).toBe(false);
+    expect(pasteClips(doc(), [gone], 10)).toEqual({ ok: false, reason: EDIT_BLOCKED.pasteSourceGone });
     const slot = { id: 'clip_s', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 1, h: 1, assetId: 'asset_404' } as TimelineClip;
-    expect(pasteClips(doc(), [slot], 10).ok).toBe(false);
+    expect(pasteClips(doc(), [slot], 10)).toEqual({ ok: false, reason: EDIT_BLOCKED.pasteSourceGone });
   });
 
   // 複製と同じ規則（`freshClipCopy` を共有）＝読み上げの作成済みの音声は引き継がない。

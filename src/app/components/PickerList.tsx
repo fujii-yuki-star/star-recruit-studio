@@ -5,7 +5,7 @@
 // 既定 5 件**にする。多いときは**絞り込み**を出して、目当てのものへ数文字で辿り着けるようにする。
 //
 // 「しまう」だけにしないのが要点＝スクロールと絞り込みで**全部に手が届く**（隠れて選べないものを作らない）。
-import { useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useId, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { isKeyboardActivation } from "../hooks/usePointerDrag";
 
 export interface PickerItem {
@@ -17,6 +17,12 @@ export interface PickerItem {
   thumb?: ReactNode;
   /** 小さな印（#1264・例「使用中」）。名前の横に出す。 */
   badge?: string;
+  /**
+   * 印の意味（#1271 レビュー）＝説明（`title`）と読み上げ（`aria-describedby`）に使う。無ければ印そのもの。
+   * ⚠️ **読み上げは名前に混ぜず説明で届ける**＝印は `aria-hidden` なので、ここが無いと見えない人に届かない
+   * （`title` は読み上げでの扱いが不安定）。
+   */
+  badgeDescription?: string;
 }
 
 /** 一度に見せる数の既定。これを超えたら絞り込みを出し、残りは欄の中のスクロールで辿る。 */
@@ -64,6 +70,7 @@ export function PickerList({
   onHover?: (id: string | null) => void;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
+  const idBase = useId();
   const needle = query.trim().toLowerCase();
   const shown = useMemo(
     () => (needle === "" ? items : items.filter((i) => i.label.toLowerCase().includes(needle))),
@@ -92,14 +99,17 @@ export function PickerList({
           className={layout === "grid" ? "picker-grid" : undefined}
           style={{ maxHeight: layout === "grid" ? GRID_MAX_H : maxVisible * ROW_H, overflowY: "auto" }}
         >
-          {shown.map((it) => (
+          {shown.map((it) => {
+            const badgeText = it.badge ? (it.badgeDescription ?? it.badge) : undefined;
+            return (
             <button
               key={it.id}
               // 掴めるものは**手を出す前に分かる**ようにする（欄の見出し・帯と同じ流儀・#684 レビュー）。
               className={`btn btn-secondary${onGrab ? " grabbable" : ""}${layout === "grid" ? " picker-tile" : ""}`}
               style={layout === "grid" ? undefined : { display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
               disabled={disabled}
-              title={disabled ? disabledHint : [it.note, it.badge].filter(Boolean).join("・") || undefined}
+              title={disabled ? disabledHint : [it.note, badgeText].filter(Boolean).join("・") || undefined}
+              aria-describedby={badgeText ? `${idBase}-badge-${it.id}` : undefined}
               onPointerDown={onGrab && !disabled ? (e) => onGrab(e, it.id) : undefined}
               onMouseEnter={onHover && !disabled ? () => onHover(it.id) : undefined}
               onMouseLeave={onHover ? () => onHover(null) : undefined}
@@ -113,8 +123,10 @@ export function PickerList({
               {layout === "grid" ? <span className="picker-tile-label">{it.label}</span> : it.label}
               {/* ⚠️ **印は名前に混ぜない**（`aria-hidden`）＝ボタンの名前は素材の名前のまま。印の中身は説明（`title`）で言う。 */}
               {it.badge && <span className="badge picker-badge" aria-hidden="true">{it.badge}</span>}
+              {badgeText && <span id={`${idBase}-badge-${it.id}`} hidden>{badgeText}</span>}
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
       {/* 絞り込みで見えている数を出す＝**隠れているものがある**ことが分かる（探し方も添える）。 */}

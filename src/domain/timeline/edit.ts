@@ -37,6 +37,16 @@ import { canHaveBox, resolveClipBox } from './box';
 export const EDIT_BLOCKED = {
   /** 同じ列で時間が重なる（11 §8 V24）。重ねたいなら列を足す。 */
   overlap: 'TIMELINE_EDIT_OVERLAP',
+  /**
+   * **貼る先が重なる**（#1265・#1271 レビュー）。`overlap` と分けるのは次の行動が違うから＝貼るときに
+   * 動かせるのは部品ではなく**再生位置**（「ずらす」と言うと、何をずらすのか分からない）。
+   */
+  pasteOverlap: 'TIMELINE_EDIT_PASTE_OVERLAP',
+  /**
+   * **写したあとで、その素材か列が無くなった**（#1265・#1271 レビュー）。`notFound`（「その部品は…選び直して」）
+   * だと、選び直しても写しは古いままなので進めない＝**写し直す**ことを言う。
+   */
+  pasteSourceGone: 'TIMELINE_EDIT_PASTE_SOURCE_GONE',
   /** 音の部品を映像の列へ（逆も）＝置いても鳴らない/映らない（V23）。 */
   trackKind: 'TIMELINE_EDIT_TRACK_KIND',
   /** 列が固定されている（`track.locked`）。 */
@@ -1010,10 +1020,10 @@ export function pasteClips(
   const pastedIds: string[] = [];
   for (const clip of [...source].sort((a, b) => a.startSec - b.startSec)) {
     const trackIssue = trackPlacementIssue(working, clip.trackId, trackKindForClip(clip.kind));
-    if (trackIssue) return no(trackIssue);
-    if (clip.assetId != null && !working.assets.some((a) => a.assetId === clip.assetId)) return no(EDIT_BLOCKED.notFound);
+    if (trackIssue) return no(trackIssue === EDIT_BLOCKED.notFound ? EDIT_BLOCKED.pasteSourceGone : trackIssue);
+    if (clip.assetId != null && !working.assets.some((a) => a.assetId === clip.assetId)) return no(EDIT_BLOCKED.pasteSourceGone);
     const startSec = Math.max(0, clip.startSec + offset);
-    if (!isFreeSpan(working.clips, clip.trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.overlap);
+    if (!isFreeSpan(working.clips, clip.trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.pasteOverlap);
     const next = freshClipCopy(working, clip, createClipId(working.clips.map((c) => c.id)), startSec);
     working = { ...working, clips: [...working.clips, next] };
     pastedIds.push(next.id);

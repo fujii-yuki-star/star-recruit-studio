@@ -84,7 +84,7 @@ import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/ap
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
-import { ASSET_IN_USE_LABEL } from "../uiLabels";
+import { ASSET_IN_USE_DESCRIPTION, ASSET_IN_USE_LABEL } from "../uiLabels";
 import { timelineEditKind } from "../../domain/timeline/editKind";
 import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
@@ -2321,29 +2321,42 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **少し動かすまでは始めない**（掴む作法は共有の `usePointerDrag`）＝押して離しただけなら、今までどおり選択を解く。
    * ⚠️ **囲み終えた直後の `click` では解かない**（`skipNextClick`）＝離した所は何もない所なので、放っておくと
    *   囲んだそばから選択が消える。`Escape` でやめると、囲む前の選択へ戻す。
+   * ⚠️ **見えている帯だけを当てる**（`visibleRectOf`・#1271 レビュー）＝横に送って列名の欄の下へ潜った帯や、
+   *   並びの窓の外の帯は選ばない（見えている範囲と選ばれる範囲を割らない＝ADR-0026 ①）。
+   * ⚠️ **始点は並びに貼り付ける**＝端で送る（帯を運ぶときと同じ `autoScroll`）と、始点も並びと一緒に動く。
+   *   画面の座標のまま持つと、送った分だけ始点がずれて、囲んだ覚えのない帯が選ばれる。
    */
   const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0 || e.target !== e.currentTarget || exporting) return;
-    const x0 = e.clientX;
-    const y0 = e.clientY;
+    const sc = scrollRef.current;
+    const x0 = e.clientX + (sc?.scrollLeft ?? 0);
+    const y0 = e.clientY + (sc?.scrollTop ?? 0);
     const before = useTimelineStore.getState().selectedClipIds;
     const base = e.shiftKey ? before : [];
+    const show = (ev: PointerEvent): void => {
+      const ax = x0 - (sc?.scrollLeft ?? 0);
+      const ay = y0 - (sc?.scrollTop ?? 0);
+      const r = { left: Math.min(ax, ev.clientX), top: Math.min(ay, ev.clientY), right: Math.max(ax, ev.clientX), bottom: Math.max(ay, ev.clientY) };
+      setMarquee(r);
+      const hits = [...document.querySelectorAll<HTMLElement>(".timeline-clip[data-clip-id]")]
+        .filter((el) => { const v = visibleRectOf(el); return v != null && intersectRects(r, v) != null; })
+        .map((el) => el.dataset.clipId!);
+      const next = [...new Set([...base, ...hits])];
+      if (next.length === 0) clearSelection();
+      else selectClips(next);
+    };
     beginDrag(e, {
       onMove: (ev) => {
-        const r = { left: Math.min(x0, ev.clientX), top: Math.min(y0, ev.clientY), right: Math.max(x0, ev.clientX), bottom: Math.max(y0, ev.clientY) };
-        setMarquee(r);
-        const hits = [...document.querySelectorAll<HTMLElement>(".timeline-clip[data-clip-id]")]
-          .filter((el) => intersectRects(r, el.getBoundingClientRect()) != null)
-          .map((el) => el.dataset.clipId!);
-        const next = [...new Set([...base, ...hits])];
-        if (next.length === 0) clearSelection();
-        else selectClips(next);
+        show(ev);
+        autoScroll.track(scrollRef.current, ev, show);
       },
       onEnd: (_ev, started) => {
+        autoScroll.stop();
         setMarquee(null);
         if (started) skipNextClick();
       },
       onCancel: () => {
+        autoScroll.stop();
         setMarquee(null);
         if (before.length === 0) clearSelection();
         else selectClips([...before]);
@@ -5898,6 +5911,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       label: a.displayName,
                       thumb: assetSrcById[a.assetId] ? <img src={assetSrcById[a.assetId]} alt="" loading="lazy" /> : null,
                       badge: usedImageAssetIds.has(a.assetId) ? ASSET_IN_USE_LABEL : undefined,
+                      badgeDescription: ASSET_IN_USE_DESCRIPTION,
                     }))}
                     disabled={isPlaying || exporting}
                     disabledHint={exporting ? exportingHint : playingHint}

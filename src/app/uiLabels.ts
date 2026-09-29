@@ -1006,6 +1006,8 @@ export function importErrorMessage(e: unknown): string {
  */
 export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
+  TIMELINE_EDIT_PASTE_OVERLAP: "貼る場所に先に置いてある部品があります。再生位置を空いている所へ動かしてから貼ってください",
+  TIMELINE_EDIT_PASTE_SOURCE_GONE: "写した部品の素材か列が、もうありません。部品を選び直して、写し直してください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
   TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
   TIMELINE_EDIT_LOCKED_SELECTION: "固定された列の部品が選ばれています。固定を外すか、選び直してください",
@@ -1721,3 +1723,5 @@ export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
 
 /** 「置く」欄で、もう動画に置いてある素材の印（#1264）。 */
 export const ASSET_IN_USE_LABEL = "使用中";
+/** 上の印の意味（説明・読み上げ用）＝印だけだと「何に使っているか」が分からない（#1271 レビュー）。 */
+export const ASSET_IN_USE_DESCRIPTION = "この素材は動画に置いてあります";

@@ -8144,6 +8144,35 @@ describe("TimelineProjectScreen: 囲んで選ぶ（#1265）", () => {
     expect(container.querySelector(".timeline-marquee")).toBeNull();
   });
 
+  it("見えていない帯は選ばない（並びの窓の外へ送られた帯）", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container, lane } = setup();
+    // 並びの窓（横に送る枠）を 0〜260 に切る＝三（300〜350）は窓の外。
+    const sv = container.querySelector(".timeline-scroll") as HTMLElement;
+    sv.style.overflow = "auto";
+    stub(sv, 0, 0, 260, 600);
+    down(lane, 90, 90);
+    move(400, 140); // 囲み自体は三まで届く
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+  });
+
+  it("囲んでいる間に並びが送られたら、始点も一緒に動く", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container, lane } = setup();
+    const sv = container.querySelector(".timeline-scroll") as HTMLElement;
+    down(lane, 240, 90); // 二（200〜250）の上から始める
+    // 100px 送られた＝帯も始点も画面上で 100px 左へ動く。
+    Object.defineProperty(sv, "scrollLeft", { configurable: true, value: 100 });
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_001"]')!, 0, 100, 50, 30);
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_002"]')!, 100, 100, 50, 30);
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_003"]')!, 200, 100, 50, 30);
+    move(260, 140); // 始点は 140 へ動いている＝二の右端（150）より右は三（200〜）だけ
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_002", "clip_003"]);
+    expect((container.querySelector(".timeline-marquee") as HTMLElement).style.left).toBe("140px");
+  });
+
   it("帯の上から押したときは囲まない（帯をつかむ操作のまま）", () => {
     three();
     useTimelineStore.setState({ selectedClipIds: [] });
@@ -8184,8 +8213,13 @@ describe("TimelineProjectScreen: 素材の絵と使用中の印（#1264）", () 
     expect(used.closest(".picker-grid"), "絵で並べていない").not.toBeNull();
     expect(used.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAA");
     expect(used.querySelector(".picker-badge")?.textContent).toBe("使用中");
-    expect(used.title).toContain("使用中");
+    // 印は名前に混ぜず、意味を説明で届ける（見えない人にも・#1271 レビュー）。
+    expect(used.title).toBe("この素材は動画に置いてあります");
+    expect(used).toHaveAccessibleDescription("この素材は動画に置いてあります");
+    // ⚠️ 説明の計算は `title` へ落ちるので、上だけでは読み上げに結んだことを確かめられない＝結び先を直接見る。
+    expect(document.getElementById(used.getAttribute("aria-describedby") ?? "")?.textContent).toBe("この素材は動画に置いてあります");
     expect(unused.querySelector(".picker-badge"), "使っていない素材に印が付いた").toBeNull();
+    expect(unused).not.toHaveAccessibleDescription("この素材は動画に置いてあります");
   });
 });
 
