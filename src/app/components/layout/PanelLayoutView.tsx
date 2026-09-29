@@ -127,6 +127,9 @@ export function PanelLayoutView({
   const findDrop = (panelId: PanelId, x: number, y: number): { panelId: PanelId; side: DropSide } | null => {
     for (const [id, el] of frameRefs.current) {
       if (id === panelId) continue;
+      // ⚠️ **広げている間は、隠れた欄を落とし先にしない**（#1259 レビュー 🟡）＝隠した欄も箱は残るので、
+      //   見えない欄の上で離すと**何が起きたか分からないまま配置が変わった**（落とし線も見えない）。
+      if (activeMax != null && id !== activeMax) continue;
       const box = el.getBoundingClientRect();
       if (x < box.left || x > box.left + box.width || y < box.top || y > box.top + box.height) continue;
       return { panelId: id, side: dropSideAt(box, x, y) };

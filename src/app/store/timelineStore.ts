@@ -1289,7 +1289,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const ids = trimTargetsAt(doc, get().selectedClipIds, sec);
     if (ids.length === 0) {
-      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.selected) } });
+      // 着地先は「並び」（#1259 レビュー 🟡）＝ボタンは帯の操作の行（並びの欄）へ移った。
+      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.arrange) } });
       return;
     }
     const r = trimClips(doc, ids, edge, sec, { templateOf: templateOfNow });

@@ -8137,6 +8137,18 @@ describe("TimelineProjectScreen: 帯の操作の行（#1256 b5）", () => {
     }
   });
 
+  // ⚠️ **長さをそろえるも「選んでください」**（#1259 レビュー 🟡）＝以前は「選んだ部品が再生位置にかかっていません」
+  //   が出ていた（選んでいない人には事実と違う）。
+  it("何も選んでいないとき、長さをそろえるは「選んでください」と言う", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここから始める", "ここで終わる"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, name).toBe("長さをそろえる部品を、並びかキャンバスで選んでください");
+    }
+  });
+
   it("まとめて選んでいるときは「1つだけ」と言う（選んでいる人に「選んで」と言わない）", () => {
     open({ clips });
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
@@ -8308,6 +8320,21 @@ describe("TimelineProjectScreen: 列の見出しの出す／固定（静かな�
     expect(again.container.querySelector(".timeline-toolbar")!.textContent).toContain("出さない列 1・固定 1");
   });
 
+  // ⚠️ **変えた状態は、乗せても・触る画面でも濃いまま**（#1259 レビュー 🟡＝詳細度の事故）。
+  it("CSS：変えた状態の規則は、乗せたときの規則より強く・後ろにある／触る画面の規則は変えた状態を除く", () => {
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    /** 詳細度（id は使っていないので、クラス・疑似クラスの数と要素の数だけ）。 */
+    const spec = (sel: string) => (sel.match(/[.:][a-zA-Z-]+/g) ?? []).filter((t) => t !== ":not").length;
+    const hoverSel = ".timeline-row-label:hover .timeline-row-toggle";
+    const hoverAt = css.indexOf(hoverSel + ",");
+    const onSels = css.slice(css.indexOf("\n.timeline-row-toggle--on,"), css.indexOf("{", css.indexOf("\n.timeline-row-toggle--on,"))).split(",").map((x) => x.trim());
+    const onAt = css.indexOf("\n.timeline-row-toggle--on,");
+    expect(hoverAt, "乗せたときの規則が見つからない").toBeGreaterThan(0);
+    expect(onAt, "変えた状態の規則が、乗せたときの規則より前にある（後ろが勝てない）").toBeGreaterThan(hoverAt);
+    expect(Math.max(...onSels.map(spec)), "変えた状態の規則が、乗せたときの規則より弱い").toBeGreaterThanOrEqual(spec(hoverSel));
+    expect(css, "触る画面の規則が、変えた状態まで薄くする").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle:not\(\.timeline-row-toggle--on\)/);
+  });
+
   // ⚠️ jsdom は `:hover` を計算しないので、**CSS の約束**を見る（実際の見え方は preview_start で確かめた）。
   it("CSS：普段は見せず押せない・乗せる／キーで入ると出る・変えた状態は常に出る・触る画面では常に出る", () => {
     const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -8318,10 +8345,10 @@ describe("TimelineProjectScreen: 列の見出しの出す／固定（静かな�
     expect(idle, "焦点が入らなくなる").not.toMatch(/visibility:\s*hidden/);
     const reveal = rule(".timeline-row-label:hover .timeline-row-toggle,\n.timeline-row-label:focus-within .timeline-row-toggle");
     expect(reveal, "乗せても／キーで入っても出ない").toMatch(/pointer-events:\s*auto/);
-    const on = rule(".timeline-row-toggle--on");
+    const on = rule(".timeline-row-label .timeline-row-toggle.timeline-row-toggle--on");
     expect(on).toMatch(/opacity:\s*1/);
     expect(on).toMatch(/pointer-events:\s*auto/);
-    expect(css, "触る画面で出す道が無い").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle\s*\{[^}]*pointer-events:\s*auto/);
+    expect(css, "触る画面で出す道が無い").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle:not\(\.timeline-row-toggle--on\)\s*\{[^}]*pointer-events:\s*auto/);
     expect(rule(".timeline-lane--locked .timeline-clip"), "帯の上に斜線が無い（帯で埋まった固定の列が固定に見えない）").toMatch(/repeating-linear-gradient/);
   });
 });
