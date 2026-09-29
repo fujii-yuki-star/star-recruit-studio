@@ -788,16 +788,22 @@ export function renameTrack(doc: TimelineProject, trackId: string, name: string)
   if (!track) return blocked(EDIT_BLOCKED.notFound);
   const trimmed = name.trim();
   const next: Track = { ...track };
-  if (trimmed) next.name = trimmed.slice(0, TRACK_NAME_MAX);
+  // ⚠️ **保存する値は切らない**（#1255 レビュー 🟡）＝長さの上限は**正典（schema）に無い**ので、
+  //   domain で切ると「正典に無い制約」を保存データへ足すことになる（§9-2）。
+  //   長さを抑えるのは**入力欄**（`TRACK_NAME_MAX`＝`maxLength`）の仕事。外から書かれた長い名前も、
+  //   そのまま残す（見出しに入らないぶんは画面側が省略して出す）。
+  if (trimmed) next.name = trimmed;
   else delete next.name;
   return ok({ ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? next : t)) });
 }
 
 /**
- * 列の名前の長さの上限。
+ * 列の名前を**入力するとき**の長さの上限（入力欄の `maxLength`）。
  *
  * ⚠️ **列の見出しの幅は決まっている**（`TIMELINE_LABEL_W_PX`＝124px）ので、長い名前は**入らない**。
- * 入らないぶんは画面側が省略して出すが、**際限なく持たせない**（保存する値としても意味が無い）。
+ * ⚠️ **保存する値の制約ではない**（#1255 レビュー 🟡）＝schema の `Track.name` に長さの上限は無い。
+ * ここで持つのは「入力欄で打てる長さ」だけで、`renameTrack` は切らない。
+ * 保存値として縛るなら、schema に `maxLength` を足して版を上げ、`11 §7.6` に書くこと。
  */
 export const TRACK_NAME_MAX = 24;
 
