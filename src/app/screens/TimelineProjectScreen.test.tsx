@@ -8240,6 +8240,31 @@ describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {
   });
 });
 
+// 書き出しは見出しの行にある（ADR-0048・#1256＝CapCut・Clipchamp などは右上に置く）。
+// ⚠️ 以前は仕上がり確認の欄の中（再生の行）にあり、大きさの選択と書き出すボタンのぶん絵が小さくなっていた。
+describe("TimelineProjectScreen: 書き出しの置き場所（#1256）", () => {
+  it("「動画を書き出す」と大きさは見出しの行にあり、1組のまま（仕上がり確認の欄には無い）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const bar = container.querySelector(".editor-toolbar") as HTMLElement;
+    const btn = screen.getByRole("button", { name: "動画を書き出す" });
+    const size = screen.getByLabelText("書き出す大きさ");
+    expect(bar.contains(btn), "書き出すボタンが見出しの行に無い").toBe(true);
+    expect(btn.parentElement!.contains(size), "大きさと書き出すボタンが1組になっていない（#1255）").toBe(true);
+    const preview = container.querySelector('[data-panel-id="preview"]') as HTMLElement;
+    expect(preview.contains(btn), "仕上がり確認の欄に残っている").toBe(false);
+  });
+
+  it("書き出している間の進み具合も見出しの行に出す", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 42, message: null, cancelling: false } });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const bar = container.querySelector(".editor-toolbar") as HTMLElement;
+    expect(within(bar).getByText(/動画を書き出しています（42%）/)).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "書き出しを中止" })).toBeTruthy();
+  });
+});
+
 // 仕上がり確認の絵は欄に収まり、「再生」の行は押し出されない（#1257）。
 // ⚠️ **既定の配置で「再生」が欄の外へ押し出されていた**（1920×1009 の実測＝欄の本文 284px に絵 418px）。
 // jsdom は大きさを計算しないので、**構造（絵の置き場と操作の置き場を分ける）と CSS の約束**を見る。
@@ -8282,15 +8307,16 @@ describe("TimelineProjectScreen: 仕上がり確認の絵は欄に収まる（#1
 // 再生位置は操作の行にある（利用者要望 2026-09-28）。
 // ⚠️ **以前は欄のいちばん下**（クレジットと文字の形の設定より後ろ）にあり、**スクロールしないと届かなかった**。
 describe("TimelineProjectScreen: 再生位置の置き場所", () => {
-  it("「動画を書き出す」と同じ行にある（別の欄の奥に沈んでいない）", () => {
+  // ⚠️ **書き出しは見出しの行へ移した**（ADR-0048・#1256）＝以前はこの検査が「書き出しと同じ行」を見ていた。
+  // 守りたいのは**再生位置が「再生」の行にある（欄の奥に沈まない）**ことなので、そちらを見る。
+  it("「再生」と同じ行にある（別の欄の奥に沈んでいない）", () => {
     open();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const slider = container.querySelector('input[type="range"]');
     expect(slider, "再生位置のつまみが無い").not.toBeNull();
-    const row = screen.getByRole("button", { name: "動画を書き出す" }).closest(".row");
-    expect(row, "書き出しボタンが操作の行に無い").not.toBeNull();
-    expect(row!.contains(slider!), "再生位置が書き出しと同じ行に無い（欄の奥に沈んでいる）").toBe(true);
-    expect(row!.textContent, "同じ行に「再生」が無い").toContain("再生");
+    const row = screen.getByRole("button", { name: "再生" }).closest(".row");
+    expect(row, "「再生」が操作の行に無い").not.toBeNull();
+    expect(row!.contains(slider!), "再生位置が「再生」と同じ行に無い（欄の奥に沈んでいる）").toBe(true);
     // ⚠️ **在るだけでは足りない**（変異チェックで露見）＝行の中に置いたまま隠しても通ってしまう。
     for (let el: HTMLElement | null = slider as HTMLElement; el && el !== row; el = el.parentElement) {
       expect(getComputedStyle(el).display, "再生位置（かその親）が隠れている").not.toBe("none");

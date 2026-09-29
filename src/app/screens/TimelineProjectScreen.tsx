@@ -3726,57 +3726,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <span className="text-sm text-muted" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
             {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
           </span>
-          {/* ⚠️ **書き出す大きさは、書き出すボタンの隣に**（#1255・利用者判断 2026-09-28）＝
-              場面形式には在るのに、こちらだけ**常に 1920×1080** だった（同じ「動画を書き出す」なのに
-              形式でできることが違う・ADR-0026②）。⚠️ **言い方も場面形式と同じ**にする（`06 §3`）。
-              ⚠️ **欄の奥に沈めない**＝再生位置で踏んだのと同じ失敗をしない。 */}
-          {/* ⚠️ **大きさと書き出しは1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
-              **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。選んでから押す一続きの
-              操作なので、組ごと折り返す（`flexShrink: 0`・`flexWrap: nowrap`）。
-              ⚠️ **この包みに `row` を付けない**＝「書き出しと同じ行に再生位置がある」を見る検査が
-              `closest(".row")` で操作の行を探すので、内側に `row` を作ると**包みのほうが先に当たる**。 */}
-          <span style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)", flexShrink: 0, flexWrap: "nowrap" }}>
-          {!exporting && (
-            <label className="row gap-sm" style={{ alignItems: "center", flexShrink: 0, flexWrap: "nowrap" }}>
-              <span className="text-sm text-muted">大きさ</span>
-              <select
-                className="select"
-                style={{ width: "auto" }}
-                value={exportHd ? "hd" : "fullhd"}
-                onChange={(e) => setExportHd(e.target.value === "hd")}
-                aria-label="書き出す大きさ"
-              >
-                <option value="fullhd">きれい（{exportFullDims.width}×{exportFullDims.height}）</option>
-                <option value="hd">軽い（{exportHdDims.width}×{exportHdDims.height}）</option>
-              </select>
-            </label>
-          )}
-          {exporting ? (
-            <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
-              {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                // **答えを求める確認は閉じてから始める**（#703 レビュー）。開いたまま走らせると、答えたのに
-                // 断られる＝取り返しのつかなさを聞いた意味が無くなる（黙って何もしない、も作らない）。
-                setExploding(null);
-                setRemovingTrackId(null);
-                // ⚠️ **始める直前に持ち込みフォントを取り直す**（上の ⚠️）＝門（`USER_FONT_MISSING`）が
-                // 見る一覧を最新にしてから走らせる。取り直せなくても書き出しは始める（`userFontsUnreadable`
-                // が「調べられなかった」を持つので、門はそちらで断る）。
-                void refreshUserFonts()
-                  .catch(() => {})
-                  .then(() => exportTimelineVideo({ templates, templateAssetSrcById }));
-              }}
-              disabled={exportBlocked != null || isPlaying}
-              title={exportBlocked?.message ?? playingHint}
-            >
-              動画を書き出す
-            </button>
-          )}
-          </span>
+
         </div>
         {exportBlocked && exportBlocked.source === EXPORT_BLOCK_SOURCE.situation && !exporting && (
           // 無効にしたボタンの `title` はホバーで出ないことがあるので、**知らせの段にも出す**（#719 レビュー）。
@@ -3790,12 +3740,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <li key={b.code}>{doc && resolveExportBlockedMessage(b.code, doc, b.clipIds)}</li>
             ))}
           </ul>
-        )}
-        {exporting && exportRun.phase !== EXPORT_RUN_PHASE.preparing && (
-          <div className="field" aria-live="polite">
-            <progress value={exportRun.percent} max={100} />
-            <span>動画を書き出しています（{exportRun.percent}%）。そのままお待ちください。</span>
-          </div>
         )}
         {exportRun.message && (
           <p className={exportRun.phase === EXPORT_RUN_PHASE.done ? "notice" : "notice notice-warn"} role="status">
@@ -5841,6 +5785,67 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     <span className="badge badge-yellow">注意 {noticeCount}件</span>
                   </button>
+                )}
+                {/* ⚠️ **書き出しは見出しの行へ**（ADR-0048・#1256＝CapCut・Clipchamp などは右上に「書き出す」を置く）＝
+                    以前は仕上がり確認の欄の中（再生の行）にあり、**大きさの選択と書き出すボタンのぶん絵が小さくなっていた**。
+                    ⚠️ **大きさと書き出しは1組のまま**（#1255・利用者判断 2026-09-28「書き出すボタンの隣に」）。
+                    ⚠️ **いつも見える所**＝見出しの行は貼り付いている（`sticky`）ので、欄の奥に沈まない。 */}
+                {/* ⚠️ **書き出す大きさは、書き出すボタンの隣に**（#1255・利用者判断 2026-09-28）＝
+                    場面形式には在るのに、こちらだけ**常に 1920×1080** だった（同じ「動画を書き出す」なのに
+                    形式でできることが違う・ADR-0026②）。⚠️ **言い方も場面形式と同じ**にする（`06 §3`）。
+                    ⚠️ **欄の奥に沈めない**＝再生位置で踏んだのと同じ失敗をしない。 */}
+                {/* ⚠️ **大きさと書き出しは1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
+                    **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。選んでから押す一続きの
+                    操作なので、組ごと折り返す（`flexShrink: 0`・`flexWrap: nowrap`）。
+                    ⚠️ **1組のまま折り返す**＝見出しの行が狭いときも、大きさとボタンの間では割れない。 */}
+                <span style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)", flexShrink: 0, flexWrap: "nowrap" }}>
+                {!exporting && (
+                  <label className="row gap-sm" style={{ alignItems: "center", flexShrink: 0, flexWrap: "nowrap" }}>
+                    <span className="text-sm text-muted">大きさ</span>
+                    <select
+                      className="select"
+                      style={{ width: "auto" }}
+                      value={exportHd ? "hd" : "fullhd"}
+                      onChange={(e) => setExportHd(e.target.value === "hd")}
+                      aria-label="書き出す大きさ"
+                    >
+                      <option value="fullhd">きれい（{exportFullDims.width}×{exportFullDims.height}）</option>
+                      <option value="hd">軽い（{exportHdDims.width}×{exportHdDims.height}）</option>
+                    </select>
+                  </label>
+                )}
+                {exporting ? (
+                  <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
+                    {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      // **答えを求める確認は閉じてから始める**（#703 レビュー）。開いたまま走らせると、答えたのに
+                      // 断られる＝取り返しのつかなさを聞いた意味が無くなる（黙って何もしない、も作らない）。
+                      setExploding(null);
+                      setRemovingTrackId(null);
+                      // ⚠️ **始める直前に持ち込みフォントを取り直す**（上の ⚠️）＝門（`USER_FONT_MISSING`）が
+                      // 見る一覧を最新にしてから走らせる。取り直せなくても書き出しは始める（`userFontsUnreadable`
+                      // が「調べられなかった」を持つので、門はそちらで断る）。
+                      void refreshUserFonts()
+                        .catch(() => {})
+                        .then(() => exportTimelineVideo({ templates, templateAssetSrcById }));
+                    }}
+                    disabled={exportBlocked != null || isPlaying}
+                    title={exportBlocked?.message ?? playingHint}
+                  >
+                    動画を書き出す
+                  </button>
+                )}
+                </span>
+                {/* 書き出している間の進み具合も見出しの行に（押した所で結果が見える＝ボタンの隣）。 */}
+                {exporting && exportRun.phase !== EXPORT_RUN_PHASE.preparing && (
+                  <span className="row gap-sm text-sm" style={{ alignItems: "center", flexWrap: "nowrap" }} aria-live="polite">
+                    <progress value={exportRun.percent} max={100} style={{ width: 96 }} />
+                    <span>動画を書き出しています（{exportRun.percent}%）</span>
+                  </span>
                 )}
               </>
             )}
