@@ -6581,7 +6581,8 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(canvasEls(container).ov!.children[0] as HTMLElement);
-    const dup = screen.getByText("複製").closest("button") as HTMLButtonElement;
+    // ⚠️ **メニューの項目を名指しする**（#1256 b5）＝帯の操作の行にも「複製」が並ぶようになった。
+    const dup = screen.getByRole("menuitem", { name: "複製" }) as HTMLButtonElement;
     expect(dup).toBeDisabled();
     expect(dup.getAttribute("title")).toContain("1つだけ選ぶと使えます");
   });
@@ -8021,6 +8022,69 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
     fireEvent.change(field, { target: { value: "固定した列" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("固定した列");
+  });
+});
+
+// 帯の操作は「並び」の道具の行にある（ADR-0048・#1256 b5）。
+// ⚠️ **以前は「選んだ部品」欄の上段に13個**並び、欄の中身 976px のうち見えるのは約39%だった。
+describe("TimelineProjectScreen: 帯の操作の行（#1256 b5）", () => {
+  const MOVED = ["ここで分ける", "ここから始める", "ここで終わる", "複製", "削除", "ここから（範囲）", "ここまで（範囲）", "範囲を削除して詰める", "範囲を削除"];
+  const clips = [
+    { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+    { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 4, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "い" },
+  ] as TimelineProject["clips"];
+  const tools = () => screen.getByRole("toolbar", { name: "帯の操作" });
+
+  it("「並び」の欄にあり、動かした操作が全部そろっている", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(tools().closest(".timeline-panel"), "「並び」の欄の外にある").not.toBeNull();
+    for (const name of MOVED) expect(within(tools()).getByRole("button", { name }), name).toBeTruthy();
+  });
+
+  it("「選んだ部品」の欄には、位置を少しずつ動かす3つだけが残る", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const panel = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
+    for (const name of MOVED) expect(within(panel).queryByRole("button", { name }), `${name} が残っている`).toBeNull();
+    for (const name of ["前へ", "後ろへ", "再生位置へ"]) expect(within(panel).getByRole("button", { name }), name).toBeTruthy();
+  });
+
+  it("押すと効く（置き場所を変えても同じ入口）", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    fireEvent.click(within(tools()).getByRole("button", { name: "ここで分ける" }));
+    expect(useTimelineStore.getState().doc!.clips.length).toBe(3);
+  });
+
+  // ⚠️ **選ぶ前から見えている**＝押せない理由を言わないと、押せないボタンが並んでいるだけになる（§2-5）。
+  it("何も選んでいないときは、押せなくして理由を出す", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここで分ける", "複製", "削除"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, `${name} に理由が無い`).toMatch(/選んで/);
+    }
+  });
+
+  it("まとめて選んでいるときは「1つだけ」と言う（選んでいる人に「選んで」と言わない）", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここで分ける", "複製"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, name).toBe("1つだけ選ぶと使えます");
+    }
+    // 削除はまとめて消せる（1つに限らない）＝名前は右クリックのメニューと同じく数を言う。
+    expect((within(tools()).getByRole("button", { name: "選んだ2個を削除" }) as HTMLButtonElement).disabled).toBe(false);
+    // 長さをそろえるも、変わる数を押す前に出す（#1005）。
+    expect(within(tools()).getByRole("button", { name: /ここから始める（\d+個）/ })).toBeTruthy();
   });
 });
 

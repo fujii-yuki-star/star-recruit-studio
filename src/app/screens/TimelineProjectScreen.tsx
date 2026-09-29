@@ -419,6 +419,16 @@ const loadLaneHeight = (): TimelineLaneHeight =>
 const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
 /** 列の高さの言い方（画面に出す＝§2-3）。 */
 const LANE_HEIGHT_LABEL: Record<TimelineLaneHeight, string> = { compact: "細い", normal: "ふつう", tall: "太い" };
+/** 1つの部品にだけ効く操作を、まとめて選んでいるときの説明（右クリックのメニューと同じ言い方＝ADR-0026②）。 */
+const SINGLE_CLIP_ONLY_HINT = "1つだけ選ぶと使えます";
+/**
+ * 何も選んでいないときの説明（ADR-0048・#1256 b5）＝帯の操作の行は**選ぶ前から見えている**ので、
+ * 押せない理由を言わないと「押せないボタン」が並んでいるだけになる（§2-5）。
+ */
+const NOTHING_SELECTED_HINT = {
+  duplicate: "複製する部品を、並びかキャンバスで選んでください",
+  remove: "削除する部品を、並びかキャンバスで選んでください",
+} as const;
 
 /**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
@@ -3131,6 +3141,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 実際に分けるときの規則が同じもの（押せるのに何も起きない、を作らない）。
    */
   const splitExtra = (): { disabled?: boolean; hint?: string } => {
+    // ⚠️ **まとめて選んでいるときは「1つだけ」と言う**（#1256 b5）＝帯の操作の行は選び方に関わらず見えているので、
+    // 2つ選んでいるのに「選んでください」と言うと、選んでいる人には次の一歩が読めない（§2-5）。
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "分ける部品を選んでください" };
     // ⚠️ **再生中もここで断る**（#750 レビュー）＝ボタン・`Ctrl+K` は断るのに右クリックだけ通ると、
     // **走っている再生位置で分割が確定**する（同じ操作の結果が毎回変わる・ADR-0032 決定21）。
@@ -3183,6 +3196,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * （`freezeFrameIssue`）を先頭で通すので、押す前と押した後で条件が割れない。
    */
   const freezeExtra = (): { disabled?: boolean; hint?: string } => {
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "絵を止める部品を選んでください" };
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
     // ⚠️ **切り出し中は押す前に断る**（#1136 レビュー由来 🟡）＝黙って何も起きないと、
@@ -3237,7 +3251,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const freezePreviewHint = `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}。${FREEZE_FRAME_LENGTH_NOTE}`;
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
-      ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
+      ? { disabled: true, disabledHint: SINGLE_CLIP_ONLY_HINT }
       : editGuard().disabled
         ? { disabled: true, disabledHint: editGuard().title }
         : {};
@@ -3936,6 +3950,97 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {MARKER_ADD_LABEL}
               </button>
             </div>
+            {/* **帯の操作の行**（ADR-0048・#1256 b5）＝分ける・絵を止める・再生位置でそろえる・複製・削除・作業範囲。
+                ⚠️ **業界の型**＝CapCut・Premiere などは、帯を編集する道具を**タイムラインのすぐ上**に置く
+                （以前は「選んだ部品」欄の上段に13個並べており、欄の中身 976px のうち見えるのは約39%だった）。
+                ⚠️ **押せる条件・断り文は以前と同じ入口**（`splitGuard` 等）＝置き場所だけを変えた。
+                何も選んでいないときは**押せなくして理由を出す**（押しても何も起きない、を作らない）。 */}
+            <div className="timeline-toolbar timeline-edit-tools" role="toolbar" aria-label="帯の操作">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.arrange)}
+                {...splitGuard}
+                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
+              >
+                ここで分ける
+              </button>
+              {/* ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、言わないと
+                  「思ったより短い」となった人の次の一歩が画面から読めない。 */}
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
+                {...freezeGuard}
+                title={freezeGuard.title ?? freezePreviewHint}
+              >
+                {FREEZE_FRAME_LABEL}
+              </button>
+              {/* ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
+                  **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。 */}
+              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
+                ここから始める{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
+                ここで終わる{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={duplicateSelectedClip}
+                {...editGuard(
+                  selectedClipIds.length > 1
+                    ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
+                    : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
+                )}
+              >
+                {DUPLICATE_LABEL}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => requestRemoveSelected(PANEL_ID.arrange)}
+                {...(removeGuard ?? {})}
+                title={removeGuard?.title ?? (selectedClipIds.length === 0
+                  ? NOTHING_SELECTED_HINT.remove
+                  : selectedClipIds.length > 1
+                    ? `選んだ${selectedClipIds.length}個をまとめて削除します（Delete）`
+                    : "選んだ部品を削除します（Delete）")}
+              >
+                {/* まとめて選んでいるときは数を言う＝右クリックのメニューと同じ言い方（ADR-0026②）。 */}
+                {selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL}
+              </button>
+              {/* **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
+                  ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
+                  ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
+                  ⚠️ **キーだけにしない**（同 決定19）＝ボタンからも同じ入口を通る。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("in", playheadSec)} title="ここを作業範囲の始まりにします（I）">
+                ここから（範囲）
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("out", playheadSec)} title="ここを作業範囲の終わりにします（O）">
+                ここまで（範囲）
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => deleteRangeInTimeline(true, PANEL_ID.arrange)}
+                {...rangeCloseGuard}
+                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
+              >
+                範囲を削除して詰める
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => deleteRangeInTimeline(false, PANEL_ID.arrange)}
+                {...rangeDeleteGuard}
+                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
+              >
+                範囲を削除
+              </button>
+              {/* ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
+                  消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。 */}
+              {(rangeInSec != null || rangeOutSec != null) && (
+                <button className="btn btn-ghost btn-sm" onClick={clearRange} title="作業範囲をやめます">
+                  範囲をやめる
+                </button>
+              )}
+            </div>
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
@@ -4388,81 +4493,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 再生位置へ
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
-                ここから始める
-              </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
-                ここで終わる
-              </button>
-              {/* **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
-                  ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
-                  ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
-                  ⚠️ **キーだけにしない**（同 決定19）＝ボタンからも同じ入口を通る。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => setRangeEdge("in", playheadSec)}
-                title="ここを作業範囲の始まりにします（I）"
-              >
-                ここから（範囲）
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => setRangeEdge("out", playheadSec)}
-                title="ここを作業範囲の終わりにします（O）"
-              >
-                ここまで（範囲）
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => deleteRangeInTimeline(true, PANEL_ID.selected)}
-                {...rangeCloseGuard}
-                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
-              >
-                範囲を削除して詰める
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => deleteRangeInTimeline(false, PANEL_ID.selected)}
-                {...rangeDeleteGuard}
-                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
-              >
-                範囲を削除
-              </button>
-              {/* ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
-                  消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。 */}
-              {(rangeInSec != null || rangeOutSec != null) && (
-                <button className="btn btn-secondary" onClick={clearRange} title="作業範囲をやめます">
-                  範囲をやめる
-                </button>
-              )}
-              {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.selected)}
-                {...splitGuard}
-                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
-              >
-                ここで分ける
-              </button>
-              {/* **この瞬間で絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
-                  ⚠️ **時間は増やさない**（ADR-0034 決定11＝押しのけは採らない）＝止めた絵は
-                  その部品の残り時間ぶん続く。伸ばしたいときは、いつもどおり帯を引っぱる。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.selected); }}
-                {...freezeGuard}
-                // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、
-                //   言わないと「思ったより短い」となった人の次の一歩が画面から読めない。
-                title={freezeGuard.title ?? freezePreviewHint}
-              >
-                {/* ⚠️ **押していないのに進行中と名乗らない**（#1136 レビュー由来 ℹ️）＝
-                    `isImporting` は素材の取り込みでも立つので、写真をドロップしている最中に
-                    このボタンが「切り出しています…」と名乗ってしまう。名前は動かさず、
-                    押せない理由（取り込み中）は `disabled` のヒントで伝える。 */}
-                {FREEZE_FRAME_LABEL}
-              </button>
-              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
-              <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
+              {/* ⚠️ **帯を分ける・消す・範囲の操作は「並び」の道具の行へ移した**（ADR-0048・#1256 b5）＝
+                  ここには**位置を少しずつ動かす3つ**だけを残す（下の「開始・長さ」の欄と同じ話＝位置の微調整）。
+                  以前はこの欄の上段に13個並び、**中身 976px のうち見えるのは約39%**だった。 */}
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -5447,29 +5480,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <p className="text-muted">
             {selectedClipIds.length > 1
-              ? "1つだけ選ぶと、中身や位置を変えられます（長さをそろえる・まとめて削除は、このままできます）。"
+              ? "1つだけ選ぶと、中身や位置を変えられます（長さをそろえる・まとめて削除は、並びの上の行でできます）。"
               : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
           </p>
         )}
-        {/* ⚠️ **長さは複数でもそろえられる**（#1005＝実機の指摘）＝動かすのと消すのは複数に効くのに、
-            長さだけ入口が消えていた（同じ選択で操作が割れる）。
-            ⚠️ **再生位置にかかっている部品だけ**が相手＝かかっていない部品をそろえると
-            **置いた場所が動く**（トリムのつもりが移動になる）。
-            ⚠️ **何個が変わるかを押す前に出す**＝選んだ数をそのまま出すと、
-            かかっていない帯が混ざったとき**押したのに数が合わない**（数え方は domain と共有する）。 */}
-        {selectedClipIds.length > 1 && (
-          <div className="row gap-sm mt">
-            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
-              ここから始める（{trimTargetCount}個）
-            </button>
-            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
-              ここで終わる（{trimTargetCount}個）
-            </button>
-          </div>
-        )}
-        {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
-        )}
+        {/* ⚠️ **まとめての「長さをそろえる」「削除」は「並び」の上の帯の操作の行へ**（ADR-0048・#1256 b5）＝
+            1つのときと同じ場所で押せる（選んだ数で置き場所が変わる、を作らない）。数はそこに出す（#1005）。 */}
       </>
     ) },
     // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4つの欄に分けており（#684）、
