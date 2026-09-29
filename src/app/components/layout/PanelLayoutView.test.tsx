@@ -393,6 +393,17 @@ describe("PanelLayoutView: 欄を広げる", () => {
     expect(container.querySelector(".panel-layout")!.classList.contains("panel-layout--maximized")).toBe(false);
   });
 
+  // ⚠️ **広げている間は、隠れた欄を落とし先にしない**（#1259 レビュー 🟡）＝隠した欄も箱は残るので、
+  //   見えない欄の上で離すと、何が起きたか分からないまま配置が変わった。
+  it("広げている間は、隠れた欄の上で離しても配置を変えない", () => {
+    const onChange = vi.fn();
+    render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "あの欄を広げる" }));
+    stubBoxes({ a: { left: 0, top: 0, width: 400, height: 300 }, b: { left: 0, top: 0, width: 400, height: 300 } });
+    drag(frame("a").querySelector(".panel-frame-head h3") as HTMLElement, { x: 200, y: 150 });
+    expect(onChange, "隠れた欄が落とし先になった").not.toHaveBeenCalled();
+  });
+
   it("CSS：広げた欄は器いっぱいに重ね、ほかの欄は隠すだけ（外さない）", () => {
     const theme = readFileSync(join(__dirname, "../../../styles/theme.css"), "utf8");
     const max = ruleBody(theme, ".panel-frame--maximized") ?? "";

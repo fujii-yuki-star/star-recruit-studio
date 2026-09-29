@@ -436,6 +436,7 @@ const SINGLE_CLIP_ONLY_HINT = "1つだけ選ぶと使えます";
 const NOTHING_SELECTED_HINT = {
   duplicate: "複製する部品を、並びかキャンバスで選んでください",
   remove: "削除する部品を、並びかキャンバスで選んでください",
+  trim: "長さをそろえる部品を、並びかキャンバスで選んでください",
 } as const;
 
 /**
@@ -2340,7 +2341,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const trimAtPlayheadGuard = busyGuard({
     disabled: trimTargetsHaveLocked || isPlaying || trimTargetCount === 0,
-    hint: trimTargetsHaveLocked
+    // ⚠️ **何も選んでいないときは「選んでください」**（#1259 レビュー 🟡）＝帯の操作の行は選ぶ前から見えている。
+    //   「選んだ部品が再生位置にかかっていません」は、選んでいない人には事実と違い、次の一歩も読めない（§2-5）。
+    hint: selectedClipIds.length === 0
+      ? NOTHING_SELECTED_HINT.trim
+      : trimTargetsHaveLocked
       // ⚠️ **言い分けも「そろえる帯の数」で見る**＝domain（`trimClips`）が同じ数で決めるので、
       // 選択数で決めると**説明と実際の断り文が食い違う**。
       ? editBlockedMessage[trimTargetCount > 1 ? EDIT_BLOCKED.lockedSelection : EDIT_BLOCKED.locked]

@@ -245,7 +245,10 @@
   opacity: 1;
   color: var(--color-text);
 }
-.timeline-row-toggle--on {
+.timeline-row-toggle--on,
+.timeline-row-label .timeline-row-toggle.timeline-row-toggle--on {
+  /* ⚠️ **見出しに乗せたときの規則（0,3,0）より強く・後ろに置く**（#1259 レビュー 🟡）＝以前は
+     `.timeline-row-toggle--on`（0,1,0）だけで、乗せると 1→0.5 に薄くなり「変えた状態は常に濃く」が破れていた。 */
   opacity: 1;
   pointer-events: auto;
   color: var(--color-warn);
@@ -258,7 +261,8 @@
   cursor: not-allowed;
 }
 @media (hover: none) {
-  .timeline-row-toggle {
+  /* ⚠️ **変えた状態は除く**＝同じ強さで後ろにあると、触る画面では ON まで薄くなる（#1259 レビュー 🟡）。 */
+  .timeline-row-toggle:not(.timeline-row-toggle--on) {
     opacity: 0.5;
     pointer-events: auto;
   }
