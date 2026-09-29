@@ -75,7 +75,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+5**（ADR-0049）＝窓の外からの落とし先の見せ方（時刻の線・新しい列の行とその文・並びの外の案内）。
     // ⚠️ **+2**（#1261）＝仕上がり確認の絵の置き場の入れ物（`preview-fit-shell`）と、浮かせた道具（`preview-view-tools`）。
     // ⚠️ **+1**（#1268）＝右クリックのメニューの近道のキー（`context-menu-key`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(188);
+    // ⚠️ **+1**（#1266）＝帯の音量の線（`timeline-clip-volume`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(189);
   });
 });
 

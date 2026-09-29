@@ -108,6 +108,30 @@ export function volumeAt(points: readonly VolumePoint[] | undefined, localSec: n
   return last.volume;
 }
 
+/**
+ * その部品の、先頭から `localSec` 秒の**実際の音量**（基準 × フェード）。
+ * ⚠️ **鳴らす側と、帯に線を描く側（#1266）が同じこの関数を通る**＝線と聞こえ方がずれない（ADR-0001 の考え方）。
+ */
+export function clipGainAt(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
+  return fadedVolume(clip, doc, localSec);
+}
+
+/**
+ * 帯に描く**音量の線**の点（#1266）＝先頭からの秒と音量。`clipGainAt` を折れ目（フェードの境・音量の点）と
+ * 等間隔の点で拾う（フェードと音量の変化が重なる所は直線にならないので、間も拾う）。
+ */
+export function clipVolumeEnvelope(clip: TimelineClip, doc: TimelineProject, samples = 24): { t: number; gain: number }[] {
+  const d = clip.durationSec;
+  if (!(d > 0)) return [];
+  const { fadeInSec, fadeOutSec } = clipFadeSec(clip);
+  const ts = new Set<number>([0, d]);
+  for (let i = 1; i < samples; i += 1) ts.add((d * i) / samples);
+  if (fadeInSec > 0 && fadeInSec < d) ts.add(fadeInSec);
+  if (fadeOutSec > 0 && fadeOutSec < d) ts.add(d - fadeOutSec);
+  for (const p of normalizedVolumePoints(clip.volumePoints)) if (p.timeSec > 0 && p.timeSec < d) ts.add(p.timeSec);
+  return [...ts].sort((a, b) => a - b).map((t) => ({ t, gain: clipGainAt(clip, doc, t) }));
+}
+
 function fadedVolume(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
   // 基準は「音量の変化」があればそちら（#512）＝フェードはその上に掛ける（形は変えない）。
   const base = volumeAt(clip.volumePoints, localSec) ?? clipBaseVolume(clip, doc);

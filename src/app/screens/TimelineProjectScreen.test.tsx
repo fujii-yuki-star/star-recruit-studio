@@ -8025,6 +8025,33 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 帯の上の音量の線（#1266）＝音の部品だけ・幅のある帯だけ・見るだけ。
+describe("TimelineProjectScreen: 帯の音量の線（#1266）", () => {
+  const withAudio = (durationSec: number, extra: Record<string, unknown> = {}) => open({
+    tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+    clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec, bundledBgmId: BGM_CATALOG[0].id, ...extra },
+    ] as TimelineProject["clips"],
+  });
+
+  it("音の帯に線を描き、フェードの始まりは下端（無音）から", () => {
+    withAudio(5, { fadeInSec: 1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lines = container.querySelectorAll('[data-testid="clip-volume-line"]');
+    expect(lines.length, "音の帯にだけ描く").toBe(1);
+    const first = lines[0].querySelector("polyline")!.getAttribute("points")!.split(" ")[0];
+    expect(first, "先頭がフェードの無音から始まっていない").toBe("0.00,100.00");
+    expect(lines[0].getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("細い帯には描かない（潰れて読めない）", () => {
+    withAudio(1); // 段の既定 36 px/秒 → 36px（60px 未満）
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector('[data-testid="clip-volume-line"]')).toBeNull();
+  });
+});
+
 // 繰り返し再生（#1267）＝「再生」の行の切り替え。
 describe("TimelineProjectScreen: 繰り返し再生の切り替え（#1267）", () => {
   it("押すと入・切が切り替わり、作業範囲があるかで説明が変わる", () => {

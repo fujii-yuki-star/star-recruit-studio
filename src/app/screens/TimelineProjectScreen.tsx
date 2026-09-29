@@ -22,7 +22,7 @@ import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, cli
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
-import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
@@ -4586,6 +4586,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                                 「どこで何が鳴っているか」が帯からは分からない。
                                 ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
                             {clipAnalysis(c)}
+                            {/* **音量の線**（#1266）＝どこで音が下がる／上がるか（フェード・音量の変化）を帯の上で見せる。
+                                ⚠️ **鳴らす側と同じ関数**（`clipGainAt`）で拾う＝線と聞こえ方がずれない。まずは見るだけ。
+                                細い帯には描かない（波形と同じ閾値＝潰れて読めない）。 */}
+                            {isAudioClip(c) && pxPerSec * c.durationSec >= CLIP_ANALYSIS_MIN_W_PX && (() => {
+                              const pts = clipVolumeEnvelope(c, doc);
+                              if (pts.length < 2) return null;
+                              const d = c.durationSec;
+                              const points = pts.map((p) => `${((p.t / d) * 100).toFixed(2)},${((1 - Math.min(p.gain, VOLUME_MAX) / VOLUME_MAX) * 100).toFixed(2)}`).join(" ");
+                              return (
+                                <svg className="timeline-clip-volume" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" data-testid="clip-volume-line">
+                                  <polyline points={points} vectorEffect="non-scaling-stroke" />
+                                </svg>
+                              );
+                            })()}
                             {/* **長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる
                                 （印が先に切れると、幅があるのに読めない）。読み上げ名には混ぜない（`aria-hidden`）。 */}
                             {pxPerSec * c.durationSec >= CLIP_BADGE_MIN_W_PX && (

@@ -95,6 +95,22 @@
   pointer-events: none;
 }
 
+/* **音量の線**（#1266）＝帯の全面に重ねる（上端＝最大の音量・下端＝無音）。押す当たりは取らない。 */
+.timeline-clip-volume {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.timeline-clip-volume polyline {
+  fill: none;
+  stroke: var(--color-warn);
+  stroke-width: 1.5;
+  opacity: 0.9;
+}
+
 /* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
 .timeline-toolbar-sep {
   width: 1px;
