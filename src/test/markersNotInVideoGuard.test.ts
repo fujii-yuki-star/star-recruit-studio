@@ -41,6 +41,9 @@ const ALLOWED = [
   // **既にある目印が全部、別の場面を指す**（ADR-0026④）。
   // ⚠️ **赤いから逃がすのではない**＝ここが捕まえたのは正しい動き。説明できるから逃がす。
   "src/domain/timeline/deleteRange.ts",
+  // ⚠️ **取り消しの説明の種類を決めるだけ**（#1268）＝前後の文書を比べて「目印を変えた」と**名前を付ける**だけで、
+  //   返すのは種類の値。**描く側も焼く側もここを通らない**（使うのは取り消す／やり直すボタンの説明だけ）。
+  "src/domain/timeline/editKind.ts",
 ];
 
 /**
@@ -123,6 +126,8 @@ describe("門番自身の検査（わざと壊した入力）", () => {
       "src/domain/timeline/validateTimelineDoc.ts",
       // ⚠️ **範囲を詰めるときだけ目印を動かす**（#1193）＝絵にも音にも入らない。
       "src/domain/timeline/deleteRange.ts",
+      // ⚠️ **取り消しの説明の種類だけ**（#1268）＝絵にも音にも入らない。
+      "src/domain/timeline/editKind.ts",
     ]);
   });
 

@@ -8025,6 +8025,86 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 帯の上の音量の線（#1266）＝音の部品だけ・幅のある帯だけ・見るだけ。
+describe("TimelineProjectScreen: 帯の音量の線（#1266）", () => {
+  const withAudio = (durationSec: number, extra: Record<string, unknown> = {}) => open({
+    tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+    clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec, bundledBgmId: BGM_CATALOG[0].id, ...extra },
+    ] as TimelineProject["clips"],
+  });
+
+  it("音の帯に線を描き、フェードの始まりは下端（無音）から", () => {
+    withAudio(5, { fadeInSec: 1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lines = container.querySelectorAll('[data-testid="clip-volume-line"]');
+    expect(lines.length, "音の帯にだけ描く").toBe(1);
+    const first = lines[0].querySelector("polyline")!.getAttribute("points")!.split(" ")[0];
+    expect(first, "先頭がフェードの無音から始まっていない").toBe("0.00,100.00");
+    expect(lines[0].getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("細い帯には描かない（潰れて読めない）", () => {
+    withAudio(1); // 段の既定 36 px/秒 → 36px（60px 未満）
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector('[data-testid="clip-volume-line"]')).toBeNull();
+  });
+});
+
+// 繰り返し再生（#1267）＝「再生」の行の切り替え。
+describe("TimelineProjectScreen: 繰り返し再生の切り替え（#1267）", () => {
+  it("押すと入・切が切り替わり、作業範囲があるかで説明が変わる", () => {
+    open();
+    useTimelineStore.setState({ loopPlayback: false, rangeInSec: null, rangeOutSec: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const b = () => screen.getByRole("button", { name: /繰り返し：/ });
+    expect(b().getAttribute("aria-pressed")).toBe("false");
+    expect(b().title).toContain("全体を繰り返し");
+    fireEvent.click(b());
+    expect(useTimelineStore.getState().loopPlayback).toBe(true);
+    expect(b().getAttribute("aria-pressed")).toBe("true");
+    act(() => useTimelineStore.setState({ rangeInSec: 1, rangeOutSec: 3 }));
+    expect(b().title).toContain("作業範囲（I〜O）を繰り返し");
+    act(() => useTimelineStore.setState({ loopPlayback: false }));
+  });
+});
+
+// 取り消す／やり直すの説明に中身を出す（#1268）＝ボタンの名前は「取り消す」のまま。
+describe("TimelineProjectScreen: 取り消す／やり直すの中身（#1268）", () => {
+  it("置いたあとは「取り消す：部品を置く」、取り消したあとは「やり直す：部品を置く」", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    expect(screen.getByRole("button", { name: "取り消す" }).title).toBe("取り消す：部品を置く（Ctrl+Z）");
+    fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
+    expect(screen.getByRole("button", { name: "やり直す" }).title).toBe("やり直す：部品を置く（Ctrl+Y）");
+  });
+
+  it("取り消すものが無いときは、中身を言わない", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "取り消す" }).title).toBe("取り消す（Ctrl+Z）");
+  });
+});
+
+// 右クリックのメニューに近道のキーを出す（#1268）＝一覧（`timelineShortcuts.ts`）と同じ値。
+describe("TimelineProjectScreen: メニューの近道のキー（#1268）", () => {
+  it("帯のメニューの「ここで分ける」「削除」にキーが出る（名前は変えず、読み上げにはキーとして伝える）", async () => {
+    const { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } = await import("../timelineShortcuts");
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(container.querySelector(".timeline-clip")!);
+    const split = screen.getByRole("menuitem", { name: "ここで分ける" });
+    const del = screen.getByRole("menuitem", { name: "削除" });
+    expect(split.querySelector(".context-menu-key")?.textContent).toBe(SHORTCUT_KEYS.split);
+    expect(del.querySelector(".context-menu-key")?.textContent).toBe(SHORTCUT_KEYS.remove);
+    expect(split.getAttribute("aria-keyshortcuts")).toBe("Control+K");
+    // 一覧にも同じ値が載っている（片方だけ変えると食い違う）。
+    expect(TIMELINE_SHORTCUTS.map((x) => x.keys)).toEqual(expect.arrayContaining([SHORTCUT_KEYS.split, SHORTCUT_KEYS.remove]));
+  });
+});
+
 // 近道キーの一覧（ADR-0048・#1256 c6）＝見出しの行の「キー操作」と `?` キー。
 describe("TimelineProjectScreen: 近道キーの一覧（#1256 c6）", () => {
   const dialog = () => screen.queryByRole("dialog", { name: "キー操作の一覧" });

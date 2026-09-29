@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import type { TimelineEditKind } from "../domain/timeline/editKind";
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
@@ -1693,4 +1694,27 @@ export const ORIENTATION_LABEL: Record<Orientation, string> = {
 export const VIDEO_KIND_LABEL: Record<VideoKind, string> = {
   recruit: "採用動画",
   general: "一般動画・社内発表",
+};
+
+/**
+ * **取り消す／やり直すの中身の言い方**（#1268）＝種類は domain（`timelineEditKind`）が前後の文書から決める。
+ * ⚠️ **種類が増えたら、ここも増やす**（`Record` なので書き忘れは型で落ちる）。
+ */
+export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
+  place: "部品を置く",
+  duplicate: "部品を複製",
+  split: "部品を分ける",
+  remove: "部品を削除",
+  move: "部品を動かす",
+  resize: "長さを変える",
+  box: "位置・大きさを変える",
+  content: "中身を直す",
+  addTrack: "列を足す",
+  duplicateTrack: "列を複製",
+  removeTrack: "列を消す",
+  reorderTracks: "列の並びを変える",
+  track: "列の設定を変える",
+  marker: "目印を変える",
+  settings: "動画全体の設定を変える",
+  other: "編集",
 };

@@ -22,7 +22,7 @@ import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, cli
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
-import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
@@ -83,7 +83,9 @@ import { safeAreaRect } from "../../domain/preview/safeArea";
 import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/appFullscreen";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
-import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { timelineEditKind } from "../../domain/timeline/editKind";
+import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -463,7 +465,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
+    isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
@@ -920,6 +922,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [safeAreaOn] = useSafeAreaPref();
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * 取り消す／やり直すの中身（#1268）。⚠️ **文書が変わったときだけ比べる**（#1270 レビュー 🟡）＝描くたびに比べると、
+   * 再生中（毎秒30回描く）に部品の数だけ無駄な比較が走る。再生中は文書が変わらないので、ここは走らない。
+   */
+  const undoRedoLabels = useMemo(() => {
+    if (!doc) return { undo: undefined, redo: undefined };
+    const past = history.past[history.past.length - 1];
+    const next = history.future[history.future.length - 1];
+    return {
+      undo: past ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(past, doc)] : undefined,
+      redo: next ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(doc, next)] : undefined,
+    };
+  }, [doc, history]);
   /**
    * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
    * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
@@ -3422,6 +3437,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         },
         {
           label: "ここで分ける",
+          shortcut: SHORTCUT_KEYS.split,
           ...singleClipMenuGuard,
           ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
           onSelect: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
@@ -3457,6 +3473,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           : []),
         {
           label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
+          shortcut: SHORTCUT_KEYS.remove,
           danger: true,
           ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
           onSelect: () => requestRemoveSelected(PANEL_ID.arrange),
@@ -3884,6 +3901,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </button>
           <button className="btn btn-ghost" onClick={() => { setPlayhead(0); followPlayhead(); }} disabled={playheadSec === 0}>
             先頭へ
+          </button>
+          {/* **繰り返し再生**（#1267）＝作業範囲（I／O）があればその間、無ければ全体を繰り返す（Premiere の型）。 */}
+          <button
+            className="btn btn-ghost"
+            aria-pressed={loopPlayback}
+            title={rangeInSec != null && rangeOutSec != null
+              ? "作業範囲（I〜O）を繰り返し再生します"
+              : "全体を繰り返し再生します（I／O で作業範囲を決めると、その間だけ）"}
+            onClick={() => setLoopPlayback(!loopPlayback)}
+          >
+            {loopPlayback ? "繰り返し：入" : "繰り返し：切"}
           </button>
           {/* ⚠️ **再生位置は操作の行に置く**（利用者要望 2026-09-28）＝以前はこの欄のいちばん下、
               クレジットと文字の形の設定より**さらに後ろ**にあり、**欄の中をスクロールしないと届かなかった**。
@@ -4571,6 +4599,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                                 「どこで何が鳴っているか」が帯からは分からない。
                                 ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
                             {clipAnalysis(c)}
+                            {/* **音量の線**（#1266）＝どこで音が下がる／上がるか（フェード・音量の変化）を帯の上で見せる。
+                                ⚠️ **鳴らす側と同じ関数**（`clipGainAt`）で拾う＝線と聞こえ方がずれない。まずは見るだけ。
+                                細い帯には描かない（波形と同じ閾値＝潰れて読めない）。 */}
+                            {isAudioClip(c) && pxPerSec * c.durationSec >= CLIP_ANALYSIS_MIN_W_PX && (() => {
+                              const pts = clipVolumeEnvelope(c, doc);
+                              if (pts.length < 2) return null;
+                              const d = c.durationSec;
+                              const points = pts.map((p) => `${((p.t / d) * 100).toFixed(2)},${((1 - Math.min(p.gain, VOLUME_MAX) / VOLUME_MAX) * 100).toFixed(2)}`).join(" ");
+                              return (
+                                <svg className="timeline-clip-volume" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" data-testid="clip-volume-line">
+                                  <polyline points={points} vectorEffect="non-scaling-stroke" />
+                                </svg>
+                              );
+                            })()}
                             {/* **長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる
                                 （印が先に切れると、幅があるのに読めない）。読み上げ名には混ぜない（`aria-hidden`）。 */}
                             {pxPerSec * c.durationSec >= CLIP_BADGE_MIN_W_PX && (
@@ -6011,7 +6053,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         sticky
         actions={(
           <EditorToolbar
-            undo={{ canUndo: history.past.length > 0, canRedo: history.future.length > 0, onUndo: undo, onRedo: redo, disabled: exporting }}
+            undo={{
+              canUndo: history.past.length > 0,
+              canRedo: history.future.length > 0,
+              onUndo: undo,
+              onRedo: redo,
+              disabled: exporting,
+              // **何を取り消すか**（#1268）＝直前の文書と今の文書を比べて名前を付ける（入口ごとに名前を渡さない）。
+              undoLabel: undoRedoLabels.undo,
+              redoLabel: undoRedoLabels.redo,
+            }}
             // 自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定
             // （ADR-0032）なので、ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
             // ⚠️ 以前は**欄の下**だった（#774 で移設）＝欄が画面の高さを超えるとスクロールしないと見えず、

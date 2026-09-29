@@ -15,13 +15,21 @@ export interface Shortcut {
   codes: readonly string[];
 }
 
+/**
+ * **メニューにも出すキー**（#1268）＝右クリックのメニューと一覧が**同じ値**を見る（書き分けると食い違う）。
+ */
+export const SHORTCUT_KEYS = {
+  split: "Ctrl+K",
+  remove: "Delete",
+} as const;
+
 export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
   { keys: "Space", action: "再生／停止", codes: [" "] },
   { keys: "← →", action: "1コマ戻る／進む（Shift で1秒）。キャンバスで部品を選んでいるときは、その部品を少し動かす", codes: ["arrowleft", "arrowright"] },
   { keys: "↑ ↓", action: "キャンバスで選んだ部品を少し動かす（Shift で大きく）", codes: ["arrowup", "arrowdown"] },
   { keys: "Home／End", action: "先頭へ／最後へ（目盛りを押したあと）", codes: ["home", "end"] },
-  { keys: "Ctrl+K", action: "選んだ部品を再生位置で分ける", codes: ["k"] },
-  { keys: "Delete", action: "選んだ部品を削除", codes: ["delete"] },
+  { keys: SHORTCUT_KEYS.split, action: "選んだ部品を再生位置で分ける", codes: ["k"] },
+  { keys: SHORTCUT_KEYS.remove, action: "選んだ部品を削除", codes: ["delete"] },
   { keys: "I／O", action: "作業範囲の始まり／終わりを再生位置に置く", codes: ["i", "o"] },
   { keys: "Shift+Delete（Shift+Backspace）", action: "作業範囲を削除して、空いた所を詰める", codes: ["backspace"] },
   { keys: "M", action: "再生位置に目印を置く（動画には出ません）", codes: ["m"] },

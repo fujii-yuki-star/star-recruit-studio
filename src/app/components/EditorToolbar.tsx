@@ -33,6 +33,9 @@ export interface EditorToolbarProps {
     onRedo: () => void;
     /** 押せない状況（書き出し中・保存中など）。 */
     disabled?: boolean;
+    /** 何を取り消すか／やり直すか（#1268・説明に出す）。無ければ出さない。 */
+    undoLabel?: string;
+    redoLabel?: string;
   };
   /** 保存の状態。画面によって出し方が違う（自動保存の文言／未保存の印）ので受け取るだけ。 */
   status?: ReactNode;
@@ -57,6 +60,8 @@ export function EditorToolbar({ undo, status, back, extra }: EditorToolbarProps)
         onUndo={undo.onUndo}
         onRedo={undo.onRedo}
         disabled={undo.disabled}
+        undoLabel={undo.undoLabel}
+        redoLabel={undo.redoLabel}
       />
       {status}
       {extra}

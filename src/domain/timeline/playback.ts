@@ -94,6 +94,27 @@ export function playbackTick(fromSec: number, elapsedSec: number, totalSec: numb
 }
 
 /**
+ * **繰り返し再生の区間**（#1267）。`null`＝繰り返さない。
+ *
+ * - 作業範囲（I／O）が**幅を持って尺の中にある**ならその間、無ければ**全体**（Premiere の In〜Out の繰り返しの型）。
+ * - I と O は逆に置かれてもよい（小さい方が始まり）。尺を越えた O は尺で切る。
+ */
+export function loopSpan(
+  loopOn: boolean,
+  rangeInSec: number | null,
+  rangeOutSec: number | null,
+  totalSec: number,
+): { startSec: number; endSec: number } | null {
+  if (!loopOn || totalSec <= 0) return null;
+  if (rangeInSec != null && rangeOutSec != null) {
+    const startSec = Math.max(0, Math.min(rangeInSec, rangeOutSec));
+    const endSec = Math.min(totalSec, Math.max(rangeInSec, rangeOutSec));
+    if (endSec > startSec) return { startSec, endSec };
+  }
+  return { startSec: 0, endSec: totalSec };
+}
+
+/**
  * 再生を始められるか。**終端にいるときは先頭へ戻してから始める**（押しても動かない、を作らない）。
  * 戻り値は「再生の開始位置」。何も置いていない動画では 0（呼び出し側が再生させない）。
  */
