@@ -154,6 +154,31 @@ describe('実動画をそのまま流す区間の組み立て', () => {
     expect(part?.video?.slotW, '縮めた大きさが渡っていない').toBe(400);
   });
 
+  // ⚠️ **「軽い（720）」で書き出すと、動画の枠も 720 の座標になる**（#1255 レビュー 🔴）＝
+  // 以前は下敷き・上敷きだけ 1280×720 で焼き、枠は 1920×1080 のままだった
+  //（全画面の動画が 1.5 倍の大きさで、はみ出して重なっていた＝プレビューと違う絵が黙って出る）。
+  it('軽い（1280×720）で書き出すと、動画の枠も縮む', async () => {
+    const part = await buildVideoPart(doc([slot('clip_001', 0)]), { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' },
+      { ...baseOpts, outputSize: { width: 1280, height: 720 } });
+    expect(part?.video, '倒せなくなっている').toBeDefined();
+    expect({ x: part?.video?.slotX, y: part?.video?.slotY, w: part?.video?.slotW, h: part?.video?.slotH },
+      '枠が出力の大きさへ縮んでいない').toEqual({ x: 0, y: 0, w: 1280, h: 720 });
+  });
+
+  it('大きさを指定しなければ、枠は元のまま', async () => {
+    const part = await buildVideoPart(doc([slot('clip_001', 0, { x: 400, y: 200, w: 800, h: 450 })]),
+      { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect({ x: part?.video?.slotX, y: part?.video?.slotY, w: part?.video?.slotW, h: part?.video?.slotH })
+      .toEqual({ x: 400, y: 200, w: 800, h: 450 });
+  });
+
+  // ⚠️ **左へはみ出した動画は焼く方へ倒す**＝そのまま渡すと Rust（u32）で受け取りに失敗し、書き出しごと止まる。
+  it('画面の左へはみ出した動画は組まない（焼く方へ倒す）', async () => {
+    const part = await buildVideoPart(doc([slot('clip_001', 0, { x: -200, y: 0, w: 1920, h: 1080 })]),
+      { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect(part, 'はみ出した枠をそのまま渡している').toBeUndefined();
+  });
+
   it('その部品が見つからなければ組まない', async () => {
     const part = await buildVideoPart(doc([slot('clip_001', 0)]), { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_404' }, baseOpts);
     expect(part).toBeUndefined();

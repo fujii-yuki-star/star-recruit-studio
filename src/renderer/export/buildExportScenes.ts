@@ -18,7 +18,7 @@ import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
-import { splitVideoSceneSvgMulti } from './videoSceneSplit';
+import { slotRectToOutput, splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
 import { afterAnimNeverPlaysForSlots } from './videoSlotPlacement';
 
@@ -285,18 +285,14 @@ export async function buildExportScenes(
       const ch = template.canvas.height;
       const width = opts.outputSize?.width ?? cw;
       const height = opts.outputSize?.height ?? ch;
-      const rx = width / cw;
-      const ry = height / ch;
       if (videoSlots.length > 0 && splitM) {
         // 各動画レイヤーの矩形（出力解像度へスケール）＋クリップ設定を zIndex 順（下→上）に組む（#431）。
         const slotById = new Map(videoSlots.map((v) => [v.slotLayerId, v] as const));
         const layers = splitM.slots.map((s) => {
           const info = slotById.get(s.layerId)!; // slots は videoSlots の id から解決＝必ず存在
           return {
-            slotX: Math.round(s.rect.x * rx),
-            slotY: Math.round(s.rect.y * ry),
-            slotW: Math.round(s.rect.w * rx),
-            slotH: Math.round(s.rect.h * ry),
+            // ⚠️ **枠の写し方はタイムライン形式と同じ関数**（#1255 レビュー 🔴＝片方だけずれていた）。
+            ...slotRectToOutput(s.rect, { width: cw, height: ch }, { width, height }),
             clipRelPath: info.clipRelPath,
             fit: info.fit,
             clipStartSec: info.clipStartSec,
@@ -522,10 +518,7 @@ export async function buildExportScenes(
                 // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない・アニメ対象のみ効く）。settled はその続きから。
                 const playedW = Math.max(0, W - effectiveStartDelay(s.layerId));
                 return {
-                  slotX: Math.round(s.rect.x * rx),
-                  slotY: Math.round(s.rect.y * ry),
-                  slotW: Math.round(s.rect.w * rx),
-                  slotH: Math.round(s.rect.h * ry),
+                  ...slotRectToOutput(s.rect, { width: cw, height: ch }, { width, height }),
                   clipRelPath: info.clipRelPath,
                   fit: info.fit,
                   // 実フレーム時は窓で [clipStart,+(W−d)*speed) を再生済み＝settled はその続きから（連続再生・#444）。
