@@ -28,6 +28,11 @@ export interface ContextMenuItem {
    * どこにも出ない**死んだ受け渡し**になり、**型でも気づけなかった**（余剰プロパティはスプレッドを通る）。
    */
   hint?: string;
+  /**
+   * **近道のキー**（#1268）＝右端に小さく出す（他社のメニューの型）。一覧（`timelineShortcuts.ts`）と同じ値を渡す。
+   * ⚠️ 見える文字は読み上げ名に混ぜない（`aria-hidden`）＝名前は `label` のまま。キーは `aria-keyshortcuts` で伝える。
+   */
+  shortcut?: string;
   onSelect: () => void;
 }
 
@@ -116,6 +121,8 @@ export function ContextMenu({
           <button
             key={it.label}
             role="menuitem"
+            // 読み上げには `Control+K` の形で伝える（見える文字は `Ctrl+K`）。
+            aria-keyshortcuts={it.shortcut?.replace(/Ctrl/g, "Control")}
             className="btn btn-ghost text-sm"
             style={{
               display: "block",
@@ -132,6 +139,7 @@ export function ContextMenu({
             }}
           >
             {it.label}
+            {it.shortcut && <span className="context-menu-key" aria-hidden="true">{it.shortcut}</span>}
           </button>
         ))}
       </div>

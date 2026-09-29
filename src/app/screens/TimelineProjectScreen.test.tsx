@@ -8025,6 +8025,23 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 右クリックのメニューに近道のキーを出す（#1268）＝一覧（`timelineShortcuts.ts`）と同じ値。
+describe("TimelineProjectScreen: メニューの近道のキー（#1268）", () => {
+  it("帯のメニューの「ここで分ける」「削除」にキーが出る（名前は変えず、読み上げにはキーとして伝える）", async () => {
+    const { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } = await import("../timelineShortcuts");
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(container.querySelector(".timeline-clip")!);
+    const split = screen.getByRole("menuitem", { name: "ここで分ける" });
+    const del = screen.getByRole("menuitem", { name: "削除" });
+    expect(split.querySelector(".context-menu-key")?.textContent).toBe(SHORTCUT_KEYS.split);
+    expect(del.querySelector(".context-menu-key")?.textContent).toBe(SHORTCUT_KEYS.remove);
+    expect(split.getAttribute("aria-keyshortcuts")).toBe("Control+K");
+    // 一覧にも同じ値が載っている（片方だけ変えると食い違う）。
+    expect(TIMELINE_SHORTCUTS.map((x) => x.keys)).toEqual(expect.arrayContaining([SHORTCUT_KEYS.split, SHORTCUT_KEYS.remove]));
+  });
+});
+
 // 近道キーの一覧（ADR-0048・#1256 c6）＝見出しの行の「キー操作」と `?` キー。
 describe("TimelineProjectScreen: 近道キーの一覧（#1256 c6）", () => {
   const dialog = () => screen.queryByRole("dialog", { name: "キー操作の一覧" });

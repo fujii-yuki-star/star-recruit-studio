@@ -83,7 +83,7 @@ import { safeAreaRect } from "../../domain/preview/safeArea";
 import { setAppFullscreen } from "../../infrastructure/appFullscreen";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
-import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -3404,6 +3404,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         },
         {
           label: "ここで分ける",
+          shortcut: SHORTCUT_KEYS.split,
           ...singleClipMenuGuard,
           ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
           onSelect: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
@@ -3439,6 +3440,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           : []),
         {
           label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
+          shortcut: SHORTCUT_KEYS.remove,
           danger: true,
           ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
           onSelect: () => requestRemoveSelected(PANEL_ID.arrange),
