@@ -177,3 +177,33 @@ export function setPanelLayout(screenId: PanelScreenId, layout: PanelLayout): vo
 export function clearPanelLayout(screenId: PanelScreenId): void {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(`${PANEL_LAYOUT_KEY}.${screenId}`);
 }
+
+/** 仕上がり確認を出す別窓の、前回の位置と大きさ（ADR-0050 決定7）。 */
+const PREVIEW_WINDOW_RECT_KEY = 'timeline.previewWindow.rect';
+
+/**
+ * 別窓の前回の位置と大きさ（論理座標）。読めない・壊れているときは `null`＝既定の置き方へ落ちる。
+ * ⚠️ **画面に入っているかはここでは見ない**（`pickPreviewWindowRect` が画面の一覧と突き合わせる）。
+ */
+export function getPreviewWindowRect(): { x: number; y: number; w: number; h: number } | null {
+  const raw = read(PREVIEW_WINDOW_RECT_KEY);
+  if (!raw) return null;
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (typeof v !== 'object' || v == null) return null;
+    const r = v as Record<string, unknown>;
+    const nums = [r.x, r.y, r.w, r.h];
+    if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+    return { x: r.x as number, y: r.y as number, w: r.w as number, h: r.h as number };
+  } catch {
+    return null;
+  }
+}
+
+export function setPreviewWindowRect(rect: { x: number; y: number; w: number; h: number }): void {
+  try {
+    write(PREVIEW_WINDOW_RECT_KEY, JSON.stringify(rect));
+  } catch {
+    // 覚えられなくても窓は使える（次に開いたとき既定の位置になるだけ）。
+  }
+}

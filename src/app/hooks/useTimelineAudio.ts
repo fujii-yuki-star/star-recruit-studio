@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
+import { keepsPlayingWhileHidden } from "./playbackPulse";
 
 /** 頭出しをやり直す閾値（秒）。これ未満のズレは直さない＝毎フレーム `currentTime` を触って音が途切れるのを防ぐ。 */
 const RESYNC_THRESHOLD_SEC = 0.25;
@@ -18,7 +19,7 @@ const RESYNC_THRESHOLD_SEC = 0.25;
  * - **鳴らせなかったものは覚えて再試行しない**＝毎フレーム要素を作り直さない（30個/秒 になる）。
  * - 止めたら・画面を離れたら・画面が隠れたら**全部止める**（鳴りっぱなしにしない）。
  */
-export function useTimelineAudio(): void {
+export function useTimelineAudio(enabled = true): void {
   const isPlaying = useTimelineStore((s) => s.isPlaying);
   const playheadSec = useTimelineStore((s) => s.playheadSec);
   const doc = useTimelineStore((s) => s.doc);
@@ -44,8 +45,8 @@ export function useTimelineAudio(): void {
    * ⚠️ **鳴らす直前ではなく、文書が変わったとき**に読む（鳴らす瞬間に読みに行くと頭が欠ける＝`§7.6.2.2`）。
    */
   useEffect(() => {
-    if (doc) void useTimelineStore.getState().ensureAudioSrcs();
-  }, [doc]);
+    if (enabled && doc) void useTimelineStore.getState().ensureAudioSrcs();
+  }, [enabled, doc]);
 
   useEffect(() => {
     const playing = playingRef.current;
@@ -56,7 +57,8 @@ export function useTimelineAudio(): void {
       playing.clear();
       vols.clear();
     };
-    if (!isPlaying || !doc) {
+    // ⚠️ **仕上がり確認の別窓では鳴らさない**（ADR-0050 決定2）＝音は本体だけ（二重に鳴らさない）。
+    if (!enabled || !isPlaying || !doc) {
       stopAll();
       return;
     }
@@ -106,16 +108,20 @@ export function useTimelineAudio(): void {
         vol.setVolume(cue.volume);
       }
     }
-  }, [isPlaying, playheadSec, doc, audioSrcByKey]);
+  }, [enabled, isPlaying, playheadSec, doc, audioSrcByKey]);
 
   // 画面が隠れたら止める＝時計（rAF）が止まって位置が進まない間、音だけ実時間で進み続けるのを防ぐ。
   useEffect(() => {
+    // ⚠️ **別窓では見ない**（別窓の見え方は本体へ知らせ、本体が決める）。**別窓が見えている間の本体も止めない**＝
+    //   別窓で見ている間に本体を最小化しても止まらない（時計は別窓の合図で進む・`playbackPulse`）。
+    //   別窓も隠れていれば止める（合図が来ず、時計は止まるのに音だけ進む）。
     const onHidden = (): void => {
+      if (!enabled || keepsPlayingWhileHidden()) return;
       if (document.visibilityState === "hidden") useTimelineStore.getState().pause();
     };
     document.addEventListener("visibilitychange", onHidden);
     return () => document.removeEventListener("visibilitychange", onHidden);
-  }, []);
+  }, [enabled]);
 
   // 画面を離れたら全部止める（鳴らしっぱなしにしない）。音量の経路と AudioContext も畳む
   // （開きっぱなしにすると端末の音声資源を掴んだままになる＝場面形式と同じ後始末）。

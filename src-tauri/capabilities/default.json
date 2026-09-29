@@ -10,6 +10,9 @@
     "opener:allow-reveal-item-in-dir",
     "dialog:allow-save",
     "dialog:allow-open",
-    "core:window:allow-set-fullscreen"
+    "core:window:allow-set-fullscreen",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-focus",
+    "core:window:allow-close"
   ]
 }

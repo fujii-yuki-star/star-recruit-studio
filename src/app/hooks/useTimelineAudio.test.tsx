@@ -114,3 +114,28 @@ describe("useTimelineAudio の音量（#724）", () => {
     expect(ctx.close).toHaveBeenCalled();
   });
 });
+
+// 仕上がり確認の別窓（ADR-0050 決定2）＝音は本体だけ。別窓で二重に鳴らさない・音の読み込みも頼まない。
+describe("useTimelineAudio を使わない（別窓）", () => {
+  it("再生中でも鳴らさず、音の読み込みも頼まない", () => {
+    const { ctx } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const made = stubAudio();
+    const ensureAudioSrcs = vi.fn(async () => {});
+    useTimelineStore.setState({ ensureAudioSrcs });
+    play(0.5);
+    renderHook(() => useTimelineAudio(false));
+    expect(made).toHaveLength(0);
+    expect(ensureAudioSrcs).not.toHaveBeenCalled();
+  });
+
+  it("別窓が隠れても、本体の再生を止めない", () => {
+    const pause = vi.fn();
+    useTimelineStore.setState({ pause });
+    renderHook(() => useTimelineAudio(false));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    expect(pause).not.toHaveBeenCalled();
+  });
+});

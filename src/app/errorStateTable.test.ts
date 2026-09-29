@@ -13,7 +13,7 @@ import {
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
-  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE } from "./uiLabels";
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE } from "./uiLabels";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
 import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_ASSET_MISSING_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE, STARTUP_VOICE_ENGINE_MESSAGE, STARTUP_VOICE_NOT_READY_MESSAGE } from "./hooks/useStartupJob";
@@ -105,6 +105,9 @@ function codeMessages(): Record<string, string> {
     // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
     // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
     CAPTURE_FRAME_ASSET_MISSING: CAPTURE_FRAME_ASSET_MISSING_MESSAGE,
+    // 仕上がり確認の別窓（ADR-0050・#1274 レビュー）。
+    PREVIEW_WINDOW_OPEN_FAILED: PREVIEW_WINDOW_OPEN_FAILED_MESSAGE,
+    PREVIEW_WINDOW_NOT_CONNECTED: PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -517,7 +520,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+6**（#1244）＝断りを次の行動ごとに6行へ分けた（うち1行は、以前は表に無かった既定の文）。
     // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー＝
     //   貼るときの断りを、重ねる・探すの断りから分けた＝次の行動が「再生位置を動かす」「写し直す」で違う）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(258);
+    // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー＝別窓で黙らない）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(260);
   });
 
 
@@ -767,7 +771,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝#1204（上と同じ2行）。
     // ⚠️ **+6**（#1244）＝上と同じ6行。
     // ⚠️ **+2**（#1271 レビュー）＝上と同じ2行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(255);
+    // ⚠️ **+2**（ADR-0050・#1274 レビュー）＝上と同じ2行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(257);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -787,6 +792,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+7**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝引数4通り＋開いている／読めない／開けない。
     // ⚠️ **+2**＝#1204＝頼まれた回だけの断り2件。
       // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー・`editBlockedMessage` 経由）。
-    ).toBe(112);
+      // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー・`codeMessages()` へ直に載せた）。
+    ).toBe(114);
   });
 });

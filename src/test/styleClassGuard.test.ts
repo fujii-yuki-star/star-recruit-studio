@@ -77,7 +77,10 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1268）＝右クリックのメニューの近道のキー（`context-menu-key`）。
     // ⚠️ **+1**（#1266）＝帯の音量の線（`timeline-clip-volume`）。
     // ⚠️ **+3**（#1264）＝素材を絵で並べる（`picker-tile-thumb`・`picker-tile-label`・`picker-badge`。格子と枠は式の中で組み立てる）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(194);
+    // ⚠️ **+1**（#1265）＝囲んで選ぶ矩形（`timeline-marquee`）。
+    // ⚠️ **+1**（#1272）＝窓の外から運んでいる間の「置けない」（`file-drop-hint--blocked`）。
+    // ⚠️ **+4**（ADR-0050・#1263）＝仕上がり確認の別窓（`preview-window`・`preview-window-wait`）と、別窓の本文に使う欄の器（`panel-frame-body`・`panel-frame-body--fill`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(198);
   });
 });
 
