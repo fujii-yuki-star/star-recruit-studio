@@ -258,7 +258,7 @@
 - ~~FFmpeg/AI モデルの **バージョン記録**~~ → ⚠️ **3つとも記録済み**（2026-09-24 棚卸しで確認）：
   **FFmpeg**＝`FFmpeg_SOURCE.md`（`n8.1.2` の pin・SHA-256・buildconf・入手 URL）／
   **VOICEVOX ENGINE**＝v0.25.2 CPU（`src-tauri/resources/README.md`）／
-  **AI モデル**＝`DEFAULT_AI_MODEL = 'gemini-2.5-flash'`（`src/infrastructure/appSettings.ts`・設定で変更可）。
+  **AI モデル**＝`DEFAULT_AI_MODEL`（**名前の正は `src/infrastructure/appSettings.ts` に1つ**・設定の「上級者向け」で変更可）。⚠️ **ここに具体名を書かない**＝提供元の都合で使えなくなると、**資料だけが古い名前を指し続ける**（実際に `gemini-2.5-flash` が新規利用者に提供されなくなり、ここだけ古い名前が残っていた＝#1244・#1255 レビュー）。
 - ~~書き出し時 クレジット焼き込み＋設定の永続化（#153）~~ → **#153 実装済**（常時焼き込み・OFF 廃止のためトグル永続化は不要に）。
 - 配布物への **ライセンス本文同梱** → ⚠️ **主要なものは同梱済み。ただし2件足りない**（2026-09-24 に実物で確認）：
   `src-tauri/resources/ffmpeg/LICENSE.txt`（FFmpeg LGPL）／

@@ -39,7 +39,7 @@ import { saveProjectThumbnail } from "../../infrastructure/projectFs";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
-import { willSendExternally } from "../../infrastructure/aiClient";
+import { cancelAiGenerate, willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
@@ -991,6 +991,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   cancelGeneration: () => {
     // in-flight の generate の結果適用を無効化し（世代を進める）、既存の下書きがあれば残す（ready）・
     // 無ければ未生成（idle）へ戻す。GeneratingScreen の「キャンセル」から呼ぶ（#402）。
+    // ⚠️ **Rust 側の送り直しも止める**（#1255 レビュー 🟡）＝結果を捨てるだけだと、混み合っているとき
+    //   **止めたあとも同じ中身が最大3回、外へ送られ続けた**（§2-6）。待たずに投げる（止める操作を遅らせない）。
+    void cancelAiGenerate();
     set((s) => ({
       _generationSeq: s._generationSeq + 1,
       status: s.scenes.length > 0 ? "ready" : "idle",

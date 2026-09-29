@@ -21,6 +21,23 @@ export function aiGenerate(
   return invoke<string>('ai_generate', { provider, model, system, user });
 }
 
+/**
+ * 走っている動画案づくりを止める（#1255 レビュー 🟡）。
+ *
+ * ⚠️ **画面の結果を捨てるだけでは足りない**＝混み合っているとき Rust は待って自分で送り直すので、
+ * 画面で止めても**同じ中身（会社情報・代表フレーム）が最大3回、外へ送られ続けていた**（§2-6）。
+ * ⚠️ **いま送っている最中の1回は取り消せない**（相手に届いたもの）＝止められるのは「次に送る」ぶん。
+ * ⚠️ **Tauri の外では何もしない**＝相手がいない。失敗しても投げない（止める操作そのものは止めない）。
+ */
+export async function cancelAiGenerate(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('cancel_ai_generate');
+  } catch {
+    // 止める合図が届かなくても、画面側は結果を捨てる（下の世代）ので、画面は壊れない。
+  }
+}
+
 /** APIキーを OS 資格情報ストアへ保存する。非Tauri（ブラウザ開発）では何もしない。 */
 export function saveApiKey(provider: string, apiKey: string): Promise<void> {
   if (!isTauri()) return Promise.resolve();
@@ -62,7 +79,8 @@ export interface AiBusyWait {
 /**
  * 混み合っていて待ち直すことを受け取る（#1244）。
  *
- * ⚠️ **黙って待たない**＝相手が混んでいると最長で 30 秒ほど待つ。何も出さないと**固まったように見える**
+ * ⚠️ **黙って待たない**＝相手が混んでいると、待つだけで合計 33 秒（3回）。⚠️ **1回の要求にも最大 60 秒かかりうる**ので、
+ *  最悪では数分になる（#1255 レビュー ℹ️＝以前「最長 30 秒ほど」と書いていたのは待ちだけの数で、言い分が実際より強かった）。何も出さないと**固まったように見える**
  *（この画面はもともと「わからない区間は流れるバー」で見せているが、**待ちの理由までは伝わらない**）。
  */
 export async function onAiBusyWait(handler: (e: AiBusyWait) => void): Promise<() => void> {

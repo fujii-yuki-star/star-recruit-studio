@@ -1536,6 +1536,7 @@ pub fn run() {
             ai::save_api_key,
             ai::has_api_key,
             ai::delete_api_key,
+            ai::cancel_ai_generate,
             ai::ai_generate
         ])
         .build(tauri::generate_context!())

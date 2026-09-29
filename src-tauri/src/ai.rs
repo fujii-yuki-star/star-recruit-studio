@@ -3,6 +3,7 @@
 // - API 呼び出しは Rust 内で行い、鍵を JS（フロント）に渡さない。鍵を URL・エラー本文・ログに載せない。
 // - MVP は Gemini（無料枠・ADR-0010）。OpenAI は P2（is_supported_provider で弾く）。
 // - 出力契約: JSON モード（responseMimeType=application/json）で構成JSONを要求し、受信後にフロントで ajv 検証する（二重防御）。
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use tauri::Emitter;
 
@@ -36,6 +37,35 @@ fn is_supported_provider(provider: &str) -> bool {
 /// ⚠️ **待ち続けない**＝合計 33 秒で諦める。黙って何分も止まるほうが、断られるより悪い。
 /// ⚠️ **だんだん長くする**＝混雑が晴れるのに要る時間は読めないので、短い間隔で潰し合わない。
 const BUSY_WAIT_MS: [u64; 3] = [3_000, 10_000, 20_000];
+
+/// いま走っている動画案づくりの**世代**（#1255 レビュー 🟡）。
+///
+/// ⚠️ **なぜ要るか**＝混み合っているときは待って自分で送り直す（最大3回）が、以前は
+/// **画面で「キャンセル」を押しても、Rust 側の送り直しは止まらなかった**＝止めたあとも
+/// **同じ中身（会社情報・代表フレーム）が最大3回、外へ送られ続けた**（§2-6＝外への送信は利用者が承知した範囲に限る）。
+/// ⚠️ **旗（真偽）ではなく世代にする**＝止めた直後に作り直すと、旗を下ろした瞬間に**古い回の待ちが生き返る**。
+/// 世代なら、**新しい回が始まった時点で古い回は自分が古いと分かる**。
+static AI_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// 混み合っているときの**次の待ち**（ミリ秒・純粋）。`None`＝もう待たない（諦めて断る）。
+///
+/// ⚠️ **判断を1か所に置く**（#1255 レビュー）＝以前は非同期のループの中に
+/// 「何回で諦めるか」「何回目に何秒待つか」が埋まっていて、**検査できなかった**。
+pub fn next_busy_wait(kind: AiFailure, attempt: usize) -> Option<u64> {
+    if !should_wait_and_retry(kind) {
+        return None;
+    }
+    BUSY_WAIT_MS.get(attempt).copied()
+}
+
+/// 走っている動画案づくりを止める（#1255 レビュー 🟡）。
+///
+/// ⚠️ **世代を進めるだけ**＝走っている回は、次に送る前・待っている間に「自分が古い」と気づいて抜ける。
+/// **いま送っている最中の1回**は止められない（相手に届いたものは取り消せない）が、**次は送らない**。
+#[tauri::command]
+pub fn cancel_ai_generate() {
+    AI_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
 
 /// AI 呼び出しが失敗した**種類**。
 ///
@@ -248,8 +278,16 @@ pub async fn ai_generate(
     //  （実機で連続 8 回失敗を観測）。混雑は相手側の一時的な事情なので、押し直させる理由が無い。
     // ⚠️ **粘るのは混雑だけ**＝`should_wait_and_retry`。使いすぎ・接続先が無い・鍵違いで粘っても意味が無い。
     // ⚠️ **黙って待たない**＝待っている間は画面へ知らせる（`ai-busy-wait`）。無言で 30 秒止まるのは故障に見える。
+    // ⚠️ **この回の世代を取る**＝止められたか（`cancel_ai_generate`）・後から別の回が始まったかを、
+    //   送る前と待っている間に見る。
+    let my_gen = AI_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let superseded = || AI_GENERATION.load(Ordering::SeqCst) != my_gen;
     let mut attempt: usize = 0;
     let res = loop {
+        // ⚠️ **送る前に見る**＝止められた回は、もう外へ送らない（§2-6）。
+        if superseded() {
+            return Err(crate::messages::AI_CANCELLED.to_string());
+        }
         let sent = http_client()
             .post(gemini_endpoint(&model))
             .header("x-goog-api-key", &api_key)
@@ -270,10 +308,9 @@ pub async fn ai_generate(
         let body_text = sent.text().await.unwrap_or_default();
         let head: String = body_text.chars().take(500).collect();
         crate::tlog!("ai", "Gemini API エラー: status={status} body={head}");
-        if !should_wait_and_retry(kind) || attempt >= BUSY_WAIT_MS.len() {
+        let Some(wait_ms) = next_busy_wait(kind, attempt) else {
             return Err(failure_message(kind).to_string());
-        }
-        let wait_ms = BUSY_WAIT_MS[attempt];
+        };
         attempt += 1;
         let _ = app.emit(
             "ai-busy-wait",
@@ -283,7 +320,17 @@ pub async fn ai_generate(
                 wait_ms,
             },
         );
-        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        // ⚠️ **待っている間も見る**＝最長 20 秒の待ちのあいだに止められても、すぐ抜ける。
+        //   一気に眠ると、止めてから最大 20 秒、画面の外で送り直しの準備が続く。
+        let mut waited: u64 = 0;
+        while waited < wait_ms {
+            if superseded() {
+                return Err(crate::messages::AI_CANCELLED.to_string());
+            }
+            let step = (wait_ms - waited).min(200);
+            tokio::time::sleep(std::time::Duration::from_millis(step)).await;
+            waited += step;
+        }
     };
     let json: serde_json::Value = res
         .json()
@@ -405,6 +452,51 @@ mod tests {
                 "待ちが長くなっていない: {BUSY_WAIT_MS:?}"
             );
         }
+    }
+
+    /// 混み合っているときは、決まった回数だけ・決まった順に待つ（#1255 レビュー）。
+    #[test]
+    fn 混み合っているときは決まった回数だけ待つ() {
+        for (i, want) in BUSY_WAIT_MS.iter().enumerate() {
+            assert_eq!(
+                next_busy_wait(AiFailure::Busy, i),
+                Some(*want),
+                "{i}回目の待ちが違う"
+            );
+        }
+        // ⚠️ **回数を使い切ったら、もう待たない**＝ここが崩れると、いつまでも送り直す。
+        assert_eq!(next_busy_wait(AiFailure::Busy, BUSY_WAIT_MS.len()), None);
+    }
+
+    /// ⚠️ **混み合っている以外では、1回目から待たない**（粘っても直らない／上限を削るだけ）。
+    #[test]
+    fn 混み合っている以外では待たない() {
+        for kind in [
+            AiFailure::Overused,
+            AiFailure::ModelMissing,
+            AiFailure::KeyRejected,
+            AiFailure::Rejected,
+            AiFailure::Unknown,
+        ] {
+            assert_eq!(next_busy_wait(kind, 0), None, "{kind:?} で待ち直している");
+        }
+    }
+
+    /// ⚠️ **止めたら、走っている回は自分が古いと分かる**（#1255 レビュー 🟡＝止めたあとも外へ送り続けていた）。
+    #[test]
+    fn 止めると走っている回は古くなる() {
+        let mine = AI_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        assert_eq!(
+            AI_GENERATION.load(Ordering::SeqCst),
+            mine,
+            "始めた直後から古い"
+        );
+        cancel_ai_generate();
+        assert_ne!(
+            AI_GENERATION.load(Ordering::SeqCst),
+            mine,
+            "止めたのに古くならない"
+        );
     }
 
     #[test]
