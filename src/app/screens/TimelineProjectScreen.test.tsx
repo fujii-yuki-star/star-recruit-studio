@@ -8261,7 +8261,7 @@ describe("TimelineProjectScreen: 帯の長さと速さの印（#1256 b6）", () 
 
   it("速さを変えた帯には速さも出す", () => {
     open({
-      assets: [{ assetId: "asset_001", type: "audio", fileName: "a.mp3", displayName: "音", localPath: "assets/a.mp3", durationSec: 20 }] as TimelineProject["assets"],
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "音", filePath: "assets/a.mp3" }],
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
       clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 6, assetId: "asset_001", speed: 2 }] as TimelineProject["clips"],
     });

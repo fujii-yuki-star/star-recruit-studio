@@ -579,7 +579,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   }
 
   return (
-    <div className="main-scroll">
+    // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
+    // （実測 1274/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
+    <div className="main-scroll dense">
       <PageHead title={EXPORT_TITLE} desc={EXPORT_DESC} />
 
       <div
