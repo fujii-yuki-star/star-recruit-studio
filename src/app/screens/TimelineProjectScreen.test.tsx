@@ -8026,6 +8026,49 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 写す・貼る（#1265）＝Ctrl+C／Ctrl+V。
+describe("TimelineProjectScreen: 写す・貼る（#1265）", () => {
+  it("Ctrl+C で写し、再生位置を動かして Ctrl+V で貼る（貼ったものが選ばれ、取り消し1回で消える）", () => {
+    // 尺を伸ばす長い部品を別の列に置く（再生位置は尺より先へ動かせない＝元の後ろに空きが要る）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }, { id: "track_003", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_009", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 20, x: 0, y: 0, w: 100, h: 50, text: "長い" },
+      ] as TimelineProject["clips"],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null, history: { past: [], future: [] } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+    act(() => useTimelineStore.getState().setPlayhead(6));
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+    const s = useTimelineStore.getState();
+    const pasted = s.doc!.clips.filter((c) => s.selectedClipIds.includes(c.id));
+    expect(pasted).toHaveLength(1);
+    expect(pasted[0].id).not.toBe("clip_001");
+    expect(pasted[0].startSec).toBeCloseTo(6, 5);
+    act(() => useTimelineStore.getState().undo());
+    expect(useTimelineStore.getState().doc!.clips.some((c) => c.id === pasted[0].id), "取り消しで消えない").toBe(false);
+  });
+
+  it("写したあとで元を直しても、写した時点の中身を貼る", () => {
+    open();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+    act(() => useTimelineStore.getState().setClipTextFor("clip_001", "直した"));
+    expect((useTimelineStore.getState().clipClipboard![0] as { text?: string }).text).toBe("こんにちは");
+  });
+
+  it("文字を打っている欄では奪わない", () => {
+    open({ markers: [{ id: "marker_001", timeSec: 1 }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(screen.getByPlaceholderText(/メモ/), { key: "c", ctrlKey: true });
+    expect(useTimelineStore.getState().clipClipboard).toBeNull();
+  });
+});
+
 // 「置く」欄の素材を絵で並べ、使っている素材に印（#1264）。
 describe("TimelineProjectScreen: 素材の絵と使用中の印（#1264）", () => {
   it("素材は絵つきで並び、置いてある素材にだけ「使用中」が付く（名前は変えない）", () => {

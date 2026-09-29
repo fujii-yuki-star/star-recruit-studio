@@ -980,6 +980,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // **`Ctrl+K`＝ここで分ける**（決定18）。押せる条件も断り文もボタンと同じ入口が決める
       // ＝キーだけ通って理由が出ない、を作らない。
       // ⚠️ **修飾キーを弾く行より前**に置く（後ろだと届かない＝実際にそこへ置いて動かなかった）。
+      // **`Ctrl+C`／`Ctrl+V`＝写す／貼る**（#1265・業界の型）。⚠️ 文字を打っている所は入口の
+      // `shouldIgnoreShortcut` が外している（欄の中の写し貼りは奪わない）。
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "c") {
+        if (useTimelineStore.getState().selectedClipIds.length === 0) return; // 選んでいなければ既定の写しに任せる
+        e.preventDefault();
+        useTimelineStore.getState().copySelectedClips();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "v") {
+        if (!useTimelineStore.getState().clipClipboard) return;
+        e.preventDefault();
+        useTimelineStore.getState().pasteClipsAtPlayhead();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         splitRef.current();

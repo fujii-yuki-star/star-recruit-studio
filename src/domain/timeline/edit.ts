@@ -964,7 +964,15 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   const trackIssue = trackPlacementIssue(doc, clip.trackId, trackKindForClip(clip.kind));
   if (trackIssue) return blocked(trackIssue);
   if (!isFreeSpan(doc.clips, clip.trackId, startSec, clip.durationSec)) return blocked(EDIT_BLOCKED.overlap);
-  const next: TimelineClip = { ...clip, id: createClipId(doc.clips.map((c) => c.id)), startSec };
+  const next = freshClipCopy(doc, clip, createClipId(doc.clips.map((c) => c.id)), startSec);
+  return ok({ ...doc, clips: [...doc.clips, next] });
+}
+
+/**
+ * 部品の**新しい写し**（複製・貼り付けが共有＝#1265・同じ規則を2か所に書かない）。
+ */
+function freshClipCopy(doc: TimelineProject, clip: TimelineClip, id: string, startSec: number): TimelineClip {
+  const next: TimelineClip = { ...clip, id, startSec };
   // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
   // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
   if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
@@ -978,7 +986,39 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
     if (baked) next.text = baked;
     delete next.voiceClipId;
   }
-  return ok({ ...doc, clips: [...doc.clips, next] });
+  return next;
+}
+
+/**
+ * **写しておいた部品を貼る**（#1265・Ctrl+V）。いちばん早い部品の始まりを `atSec` に合わせ、**互いの時間の
+ * 隔たりと列はそのまま**（Premiere・Clipchamp の貼り付けの型）。
+ *
+ * - 規則は**複製と同じ**（`freshClipCopy`＝読み上げの音声は引き継がない・連動は焼き付けて外す／
+ *   新しく作る側なので**固定・隠した列は断る**／**重なる所には置かない**＝押しのけない・ADR-0034 決定11）。
+ * - **全か無か**（決定15）＝1つでも置けなければ何も貼らない（理由を返す）。
+ * - 写した後に消えた列・素材は断る（`notFound`）。
+ */
+export function pasteClips(
+  doc: TimelineProject,
+  source: readonly TimelineClip[],
+  atSec: number,
+): { ok: true; doc: TimelineProject; pastedIds: string[] } | { ok: false; reason: EditBlockedReason } {
+  const no = (reason: EditBlockedReason) => ({ ok: false as const, reason });
+  if (source.length === 0) return no(EDIT_BLOCKED.notFound);
+  const offset = Math.max(0, atSec) - Math.min(...source.map((c) => c.startSec));
+  let working = doc;
+  const pastedIds: string[] = [];
+  for (const clip of [...source].sort((a, b) => a.startSec - b.startSec)) {
+    const trackIssue = trackPlacementIssue(working, clip.trackId, trackKindForClip(clip.kind));
+    if (trackIssue) return no(trackIssue);
+    if (clip.assetId != null && !working.assets.some((a) => a.assetId === clip.assetId)) return no(EDIT_BLOCKED.notFound);
+    const startSec = Math.max(0, clip.startSec + offset);
+    if (!isFreeSpan(working.clips, clip.trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.overlap);
+    const next = freshClipCopy(working, clip, createClipId(working.clips.map((c) => c.id)), startSec);
+    working = { ...working, clips: [...working.clips, next] };
+    pastedIds.push(next.id);
+  }
+  return { ok: true, doc: working, pastedIds };
 }
 
 /**
