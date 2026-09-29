@@ -54,7 +54,7 @@ describe('pasteClips（#1265）', () => {
 
   // 複製と同じ規則（`freshClipCopy` を共有）＝読み上げの作成済みの音声は引き継がない。
   it('読み上げは作成済みの音声を引き継がない', () => {
-    const voice = { id: 'clip_v', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 2, voice: { text: 'あ', status: NARRATION_STATUS.done, voicePath: 'voice/a.wav' } } as TimelineClip;
+    const voice = { id: 'clip_v', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 2, voice: { text: 'あ', status: NARRATION_STATUS.generated, voicePath: 'voice/a.wav' } } as TimelineClip;
     const d = doc({ clips: [voice] });
     const r = pasteClips(d, [voice], 5);
     expect(r.ok).toBe(true);

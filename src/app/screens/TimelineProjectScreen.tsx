@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, menuAnchorFrom, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
 import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
-import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
+import { canvasPointAt, clampToVisible, intersectRects, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { isOwnCleanupPending, useExportLockStore } from "../store/exportLock";
@@ -921,6 +921,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [bigView]);
   // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
   const [safeAreaOn] = useSafeAreaPref();
+  /** 並びで囲んで選んでいる矩形（#1265・画面の座標）。`null`＝囲んでいない。 */
+  const [marquee, setMarquee] = useState<{ left: number; top: number; right: number; bottom: number } | null>(null);
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -2314,6 +2316,40 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
   const beginDrag = usePointerDrag();
+  /**
+   * **並びの何もない所から囲んで選ぶ**（#1265・Clipchamp・Premiere の型）。囲みに触れた帯を選ぶ。`Shift` で足す。
+   * ⚠️ **少し動かすまでは始めない**（掴む作法は共有の `usePointerDrag`）＝押して離しただけなら、今までどおり選択を解く。
+   * ⚠️ **囲み終えた直後の `click` では解かない**（`skipNextClick`）＝離した所は何もない所なので、放っておくと
+   *   囲んだそばから選択が消える。`Escape` でやめると、囲む前の選択へ戻す。
+   */
+  const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0 || e.target !== e.currentTarget || exporting) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const before = useTimelineStore.getState().selectedClipIds;
+    const base = e.shiftKey ? before : [];
+    beginDrag(e, {
+      onMove: (ev) => {
+        const r = { left: Math.min(x0, ev.clientX), top: Math.min(y0, ev.clientY), right: Math.max(x0, ev.clientX), bottom: Math.max(y0, ev.clientY) };
+        setMarquee(r);
+        const hits = [...document.querySelectorAll<HTMLElement>(".timeline-clip[data-clip-id]")]
+          .filter((el) => intersectRects(r, el.getBoundingClientRect()) != null)
+          .map((el) => el.dataset.clipId!);
+        const next = [...new Set([...base, ...hits])];
+        if (next.length === 0) clearSelection();
+        else selectClips(next);
+      },
+      onEnd: (_ev, started) => {
+        setMarquee(null);
+        if (started) skipNextClick();
+      },
+      onCancel: () => {
+        setMarquee(null);
+        if (before.length === 0) clearSelection();
+        else selectClips([...before]);
+      },
+    });
+  };
   // 掴んだまま端まで来たら送る（#714-1）＝**置く側と帯側で同じ部品**（送り方を2つ作らない）。
   // 左の送る帯は**列の名前の欄の内側**から測る（欄の下に隠れると、どこへ入るか見ながら送れない）。
   const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
@@ -4559,6 +4595,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
                       className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? " drop-target" : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
+                      onPointerDown={beginMarquee}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
                       {/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻を線で見せる。 */}
@@ -4591,6 +4628,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <button
                             key={c.id}
                             type="button"
+                            data-clip-id={c.id}
                             className={[
                               "timeline-clip",
                               CLIP_KIND_CLASS[c.kind],
@@ -6061,6 +6099,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     <>
       <div className="main-scroll main-scroll--fixed dense">
       {/* **並びの外でファイルを運んでいるとき**（ADR-0049）＝離すと何が起きるかと、置きたいときの行き先を言う。 */}
+      {/* 囲んで選んでいる矩形（#1265）＝押す当たりは取らない。 */}
+      {marquee && (
+        <div
+          className="timeline-marquee"
+          aria-hidden="true"
+          style={{ left: marquee.left, top: marquee.top, width: marquee.right - marquee.left, height: marquee.bottom - marquee.top }}
+        />
+      )}
       {fileHover === FILE_DROP_IMPORT_ONLY && (
         <div className="file-drop-hint" role="status" data-testid="file-drop-hint">
           離すと素材に取り込みます。並びの列の上で離すと、その場所に置けます
