@@ -8002,6 +8002,36 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 列の高さを選べる（ADR-0048 決定3・#1256 c1）。既定は 28px（#1104 で実機から決めた値）。
+describe("TimelineProjectScreen: 列の高さ（#1256 c1）", () => {
+  const laneVar = (c: HTMLElement) => (c.querySelector(".timeline") as HTMLElement).style.getPropertyValue("--timeline-lane-h");
+
+  it("既定は 28px（ふつう）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("列の高さ") as HTMLSelectElement).value).toBe("normal");
+    expect(laneVar(container)).toBe("28px");
+  });
+
+  it("選ぶと列の高さが変わり、覚える（開き直しても同じ）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("列の高さ"), { target: { value: "tall" } });
+    expect(laneVar(first.container)).toBe("44px");
+    fireEvent.change(screen.getByLabelText("列の高さ"), { target: { value: "compact" } });
+    expect(laneVar(first.container)).toBe("20px");
+    first.unmount();
+    const second = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(laneVar(second.container), "覚えていない").toBe("20px");
+  });
+
+  it("道具立ての行にある", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.contains(screen.getByLabelText("列の高さ"))).toBe(true);
+  });
+});
+
 // 目印を置く入口は「並び」の道具立ての行と `M` キー（ADR-0048・#1256 b2）。
 // ⚠️ **以前は帯の下の節の中にあり、目印が0件でも節が 124px を取っていた**（並びの欄の本文の約27%）。
 describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {

@@ -56,7 +56,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_HEIGHTS, TIMELINE_LANE_HEIGHT_DEFAULT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_MIN_CLIP_SEC, type TimelineLaneHeight, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
@@ -166,7 +166,7 @@ import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/spli
 import { freezeFrameIssue, freezeStopsOriginalAudio, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
-import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
+import { getBooleanSetting, getChoiceSetting, setBooleanSetting, setChoiceSetting } from "../../infrastructure/appSettings";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -408,6 +408,17 @@ export const SNAP_OFF_HINT = "掴んだ場所へそのまま置けます";
 /** 覚えを読む（**配線ごと**検査で留めるため外へ出す＝鍵と既定を取り違えても気づける）。 */
 export const loadSnapEnabled = (): boolean => getBooleanSetting(LS_SNAP, SNAP_DEFAULT);
 const saveSnapEnabled = (on: boolean): void => setBooleanSetting(LS_SNAP, on);
+
+/**
+ * 列の高さの覚え（ADR-0048 決定3・#1256 c1）。**画面の好み**なので `localStorage`（`project.schema` には入れない）。
+ * ⚠️ **気軽に鍵を変えない**＝変えると利用者の覚えが消える。
+ */
+export const LS_LANE_HEIGHT = "timeline.laneHeight";
+export const loadLaneHeight = (): TimelineLaneHeight =>
+  getChoiceSetting(LS_LANE_HEIGHT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_LANE_HEIGHT_DEFAULT);
+const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
+/** 列の高さの言い方（画面に出す＝§2-3）。 */
+const LANE_HEIGHT_LABEL: Record<TimelineLaneHeight, string> = { compact: "細い", normal: "ふつう", tall: "太い" };
 
 /**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
@@ -974,6 +985,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
   const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
+  const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
   /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
   const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
   /**
@@ -3856,7 +3868,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             style={{
               ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px`,
               // 高さも**TS が単一の参照元**（#1104）＝行と帯と「⋮」が同じ数字から導かれる。
-              ["--timeline-lane-h" as string]: `${TIMELINE_LANE_H_PX}px`,
+              // ⚠️ **利用者が選べる**（ADR-0048 決定3・#1256 c1）＝既定は 28px（#1104）。
+              ["--timeline-lane-h" as string]: `${TIMELINE_LANE_HEIGHTS[laneHeight]}px`,
               ["--timeline-clip-inset" as string]: `${TIMELINE_CLIP_INSET_PX}px`,
               ["--clip-handle-w" as string]: `${CLIP_HANDLE_W_PX}px`,
               ["--clip-handle-hit-w" as string]: `${CLIP_HANDLE_HIT_W_PX}px`,
@@ -3897,6 +3910,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   一度そうしたが、`title` は**タッチでもキーボードでも読めない**うえ、
                   `06 §12.1` が「並びの欄の上に一文で置く」と明記していた。
                   **同じ行に、短い一文として置く**（行は増やさない・寄せ先も画面に残す）。 */}
+              {/* **列の高さ**（ADR-0048 決定3・#1256 c1）＝列が少なければ太く、多ければ細く。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <label className="row gap-sm" style={{ alignItems: "center", flexWrap: "nowrap" }}>
+                <span className="field-label text-sm" style={{ margin: 0 }}>列の高さ</span>
+                <select
+                  className="select"
+                  style={{ width: "auto" }}
+                  aria-label="列の高さ"
+                  value={laneHeight}
+                  onChange={(e) => {
+                    const next = e.target.value as TimelineLaneHeight;
+                    setLaneHeight(next);
+                    saveLaneHeight(next);
+                  }}
+                >
+                  {TIMELINE_LANE_HEIGHT_ORDER.map((h) => (
+                    <option key={h} value={h}>{LANE_HEIGHT_LABEL[h]}</option>
+                  ))}
+                </select>
+              </label>
               <span className="timeline-toolbar-sep" aria-hidden="true" />
               <span className="field-label text-sm" style={{ margin: 0 }}>吸着</span>
               <Switch

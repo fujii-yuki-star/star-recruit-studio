@@ -90,6 +90,21 @@ export const TIMELINE_LABEL_W_PX = 124;
 export const TIMELINE_LANE_H_PX = 28;
 
 /**
+ * **列の高さの選べる段**（ADR-0048 決定3・#1256 c1）＝利用者が「並び」の道具立ての行で選ぶ。
+ * 既定は `normal`＝`TIMELINE_LANE_H_PX`（#1104 で実機から決めた 28px）。
+ *
+ * ⚠️ **なぜ選べるようにしたか**＝列が少ない動画では帯を太くして読みやすく、多い動画では細くして
+ * 本数を稼ぐ（Kdenlive・Premiere・YMM4・AviUtl はどれも列の高さを変えられる）。
+ * ⚠️ **細いの下限は 20px**＝帯の中の文字（11px）と上下の余白・縁が収まる所まで。
+ */
+export const TIMELINE_LANE_HEIGHTS = { compact: 20, normal: TIMELINE_LANE_H_PX, tall: 44 } as const;
+export type TimelineLaneHeight = keyof typeof TIMELINE_LANE_HEIGHTS;
+/** 選べる段の並び（細い → 太い）。 */
+export const TIMELINE_LANE_HEIGHT_ORDER: readonly TimelineLaneHeight[] = ["compact", "normal", "tall"];
+/** 覚えが無いときの段。 */
+export const TIMELINE_LANE_HEIGHT_DEFAULT: TimelineLaneHeight = "normal";
+
+/**
  * 帯（クリップ）の上下の余白（px）。行の高さから上下ぶん引いたものが帯の高さになる。
  *
  * ⚠️ **行の高さと対で意味を持つ**＝`TIMELINE_LANE_H_PX` だけ変えると、帯が行に対して

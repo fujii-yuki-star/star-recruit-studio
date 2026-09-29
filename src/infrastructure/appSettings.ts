@@ -86,6 +86,27 @@ export function getBooleanSetting(key: string, fallback: boolean): boolean {
   }
 }
 
+/**
+ * **決まった選択肢のどれか**の画面の好み（ADR-0048・#1256 c1）。
+ * ⚠️ **選択肢に無い値・読めないときは既定へ倒す**（`getBooleanSetting` と同じ流儀＝起動できない状態を作らない）。
+ */
+export function getChoiceSetting<T extends string>(key: string, choices: readonly T[], fallback: T): T {
+  try {
+    const v = read(key);
+    return v != null && (choices as readonly string[]).includes(v) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setChoiceSetting(key: string, value: string): void {
+  try {
+    write(key, value);
+  } catch {
+    // 覚えられなくても、その場では効かせる（呼び出し側が正を持つ）。
+  }
+}
+
 export function setBooleanSetting(key: string, value: boolean): void {
   try {
     write(key, value ? '1' : '0');
