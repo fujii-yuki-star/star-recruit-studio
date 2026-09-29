@@ -7,11 +7,12 @@ import type { MainToPreviewMessage, PreviewToMainMessage } from "../../infrastru
 const toMain: PreviewToMainMessage[] = [];
 let fromMain: ((m: MainToPreviewMessage) => void) | null = null;
 const closeSelf = vi.fn(async () => {});
+let rectHandler: ((r: { x: number; y: number; w: number; h: number }) => void) | null = null;
 vi.mock("../../infrastructure/previewWindow", () => ({
   sendToMain: async (m: PreviewToMainMessage) => { toMain.push(m); },
   onMainMessage: async (h: (m: MainToPreviewMessage) => void) => { fromMain = h; return () => { if (fromMain === h) fromMain = null; }; },
   closeSelf: () => closeSelf(),
-  onOwnRectChange: async () => () => {},
+  onOwnRectChange: async (h: (r: { x: number; y: number; w: number; h: number }) => void) => { rectHandler = h; return () => {}; },
   isPreviewWindowContext: () => true,
   // 本体の側の入口（この窓では使わない）。
   openPreviewWindow: async () => false,
@@ -52,11 +53,15 @@ const doc: TimelineProject = {
 // ⚠️ この窓は store の操作を差し替える＝検査ごとに元へ戻す（次の検査へ持ち越さない）。
 const original = useTimelineStore.getState();
 const calls = () => toMain.filter((m): m is Extract<PreviewToMainMessage, { type: "call" }> => m.type === "call").map((m) => m.name);
-const patch = (values: Record<string, unknown>, cleared: string[] = []) => act(() => fromMain!({ type: "patch", values, cleared }));
+let patchSeq = 0;
+/** 本体からの写し（回の印は1つ・番号は通し・本体は別窓の命令をすべて実行し終えている）。 */
+const patch = (values: Record<string, unknown>, cleared: string[] = [], opts: { ack?: number; seq?: number; session?: string } = {}) =>
+  act(() => fromMain!({ type: "patch", values, cleared, session: opts.session ?? "s1", seq: opts.seq ?? ++patchSeq, ack: opts.ack ?? 1e9 }));
 
 beforeEach(() => {
   toMain.length = 0;
   fromMain = null;
+  patchSeq = 0;
   closeSelf.mockClear();
   localStorage.clear();
   useTimelineStore.setState(original, true);
@@ -159,6 +164,62 @@ describe("仕上がり確認の別窓（ADR-0050）＝別窓の側", () => {
     expect(calls()).toContain("selectClip");
     patch({ selectedClipIds: ["clip_001"] });
     expect(useTimelineStore.getState().selectedClipIds).toBe(local);
+  });
+
+  // ⚠️ 手元で先に当てた選択を、選ぶ命令より前の写しで巻き戻さない（#1274 レビュー）。
+  it("選んだ直後に届いた古い写しの選択は当てず、本体が選ぶ命令を実行した後の写しで揃う", async () => {
+    await mount();
+    patch({ doc, selectedClipIds: [] }, [], { ack: 0 });
+    act(() => useTimelineStore.getState().selectClip("clip_001"));
+    const sent = toMain.filter((m) => m.type === "call" && m.name === "selectClip").pop() as { seq: number };
+    // 本体がまだ選ぶ命令を実行していない写し（本体の古い選択が載っている）。
+    patch({ selectedClipIds: [], playheadSec: 1 }, [], { ack: sent.seq - 1 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    expect(useTimelineStore.getState().playheadSec, "選択以外の項目まで捨てた").toBe(1);
+    // 実行し終えた写し＝本体の選択に揃える。
+    patch({ selectedClipIds: ["clip_001", "x"] }, [], { ack: sent.seq });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "x"]);
+  });
+
+  it("届く順が入れ替わった古い写しは捨てる・本体が開き直したら受ける", async () => {
+    await mount();
+    patch({ doc, playheadSec: 3 }, [], { seq: 10 });
+    patch({ playheadSec: 1 }, [], { seq: 9 });
+    expect(useTimelineStore.getState().playheadSec).toBe(3);
+    patch({ playheadSec: 2 }, [], { seq: 1, session: "s2" });
+    expect(useTimelineStore.getState().playheadSec).toBe(2);
+  });
+
+  it("隠れた・見えたを本体へ知らせる（両方の窓が隠れたら本体が再生を止めるため）", async () => {
+    await mount();
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(toMain.filter((m) => m.type === "visibility")).toEqual([{ type: "visibility", hidden: true }, { type: "visibility", hidden: false }]);
+  });
+
+  it("つながらないまま待たせ続けない（8秒で次の行動を出す）", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"] });
+    try {
+      render(<PreviewWindowApp />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+      expect(screen.getByRole("status").textContent).toBe("本体の窓から読み込んでいます…");
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(screen.getByRole("status").textContent).toBe("本体の窓とつながりませんでした。この窓を閉じて、本体の「別の窓で見る」から開き直してください");
+      expect(toMain.filter((m) => m.type === "ready").length, "言い直しをやめた").toBeGreaterThan(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("位置を覚える待ちの間に閉じても、最後の位置は書く", async () => {
+    const { unmount } = render(<PreviewWindowApp />);
+    await act(async () => {});
+    await act(async () => {});
+    act(() => rectHandler!({ x: 10, y: 20, w: 800, h: 600 }));
+    unmount();
+    expect(JSON.parse(localStorage.getItem("timeline.previewWindow.rect") ?? "null")).toEqual({ x: 10, y: 20, w: 800, h: 600 });
   });
 
   // 音は本体だけ（ADR-0050 決定2）＝鳴らす設定の動画でも、別窓では音を消して映す（二重に鳴らさない）。

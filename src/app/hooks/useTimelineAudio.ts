@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
-import { isPreviewWindowOpen } from "./playbackPulse";
+import { keepsPlayingWhileHidden } from "./playbackPulse";
 
 /** 頭出しをやり直す閾値（秒）。これ未満のズレは直さない＝毎フレーム `currentTime` を触って音が途切れるのを防ぐ。 */
 const RESYNC_THRESHOLD_SEC = 0.25;
@@ -112,10 +112,11 @@ export function useTimelineAudio(enabled = true): void {
 
   // 画面が隠れたら止める＝時計（rAF）が止まって位置が進まない間、音だけ実時間で進み続けるのを防ぐ。
   useEffect(() => {
-    // ⚠️ **別窓では見ない**（別窓が隠れても本体の再生は止めない）。**別窓を開いている本体も見ない**＝
+    // ⚠️ **別窓では見ない**（別窓の見え方は本体へ知らせ、本体が決める）。**別窓が見えている間の本体も止めない**＝
     //   別窓で見ている間に本体を最小化しても止まらない（時計は別窓の合図で進む・`playbackPulse`）。
+    //   別窓も隠れていれば止める（合図が来ず、時計は止まるのに音だけ進む）。
     const onHidden = (): void => {
-      if (!enabled || isPreviewWindowOpen()) return;
+      if (!enabled || keepsPlayingWhileHidden()) return;
       if (document.visibilityState === "hidden") useTimelineStore.getState().pause();
     };
     document.addEventListener("visibilitychange", onHidden);

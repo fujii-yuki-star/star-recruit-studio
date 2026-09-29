@@ -21,18 +21,24 @@ const EVENT_TO_PREVIEW = 'stario://preview-mirror';
 const EVENT_TO_MAIN = 'stario://preview-command';
 const BROADCAST_NAME = 'stario-preview-window';
 
-/** 本体→別窓。`values` は変わった項目、`cleared` は値が `undefined` になった項目（JSON で落ちるため別に送る）。 */
+/**
+ * 本体→別窓。`values` は変わった項目、`cleared` は値が `undefined` になった項目（JSON で落ちるため別に送る）。
+ * `session`＝本体の回の印・`seq`＝通し番号（届く順が入れ替わっても古い写しを捨てる）・
+ * `ack`＝本体が実行し終えた別窓の命令の番号（別窓が先に当てた選択を古い写しで巻き戻さない）。
+ */
 export type MainToPreviewMessage =
-  | { type: 'patch'; values: Record<string, unknown>; cleared: string[] }
+  | { type: 'patch'; values: Record<string, unknown>; cleared: string[]; session: string; seq: number; ack: number }
   | { type: 'close' };
 /**
- * 別窓→本体。`ready`＝写しを全部ほしい／`call`＝store の操作をしてほしい／
- * `tick`＝再生中の描く合図（本体の窓が隠れて本体の合図が止まっても、本体の時計を進める）。
+ * 別窓→本体。`ready`＝写しを全部ほしい／`call`＝store の操作をしてほしい（`seq` は別窓の通し番号）／
+ * `tick`＝再生中の描く合図（本体の窓が隠れて本体の合図が止まっても、本体の時計を進める）／
+ * `visibility`＝別窓が隠れた・見えた（両方の窓が隠れたら本体は再生を止める）。
  */
 export type PreviewToMainMessage =
   | { type: 'ready' }
   | { type: 'tick' }
-  | { type: 'call'; name: string; args: unknown[] };
+  | { type: 'visibility'; hidden: boolean }
+  | { type: 'call'; name: string; args: unknown[]; seq: number };
 
 /** この画面が別窓として開かれたか。 */
 export function isPreviewWindowContext(): boolean {

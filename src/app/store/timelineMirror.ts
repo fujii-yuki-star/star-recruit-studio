@@ -34,6 +34,14 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * 本体が受けない操作か（ADR-0050 決定5）。一覧に加えて、**`_` で始まる操作は既定で受けない**
+ * （本体の中の段取り＝別窓から呼ぶ道が要らない。一覧へ入れ忘れても素通しにしない・#1274 レビュー）。
+ */
+export function isDeniedAction(name: string): boolean {
+  return PREVIEW_DENIED_ACTIONS.has(name) || name.startsWith("_");
+}
+
+/**
  * 別窓の**手元でも先に当てる**操作（ADR-0050 決定4）＝選ぶ操作だけ。
  * 画面には「選んだ直後に選択を読み直す」箇所があり（中へ入った印など）、本体の写しを待つと古い選択を読む。
  * 選ぶ操作は保存も時計も持たないので、手元で当てても持ち主は割れない。
@@ -155,7 +163,7 @@ export function previewProxies(state: StoreState, send: (call: PreviewCall) => v
   const out: StoreState = {};
   for (const [name, fn] of Object.entries(state)) {
     if (typeof fn !== "function") continue;
-    if (PREVIEW_DENIED_ACTIONS.has(name)) {
+    if (isDeniedAction(name)) {
       out[name] = () => undefined;
       continue;
     }
@@ -176,10 +184,29 @@ export function runPreviewCall(state: StoreState, call: unknown): boolean {
   if (typeof call !== "object" || call == null) return false;
   const { name, args } = call as { name?: unknown; args?: unknown };
   if (typeof name !== "string" || !Array.isArray(args)) return false;
-  if (PREVIEW_DENIED_ACTIONS.has(name)) return false;
+  if (isDeniedAction(name)) return false;
   if (!Object.prototype.hasOwnProperty.call(state, name)) return false;
   const fn = state[name];
   if (typeof fn !== "function") return false;
   (fn as (...a: unknown[]) => unknown)(...args);
   return true;
+}
+
+/**
+ * 届いた写しを当てるか（順序の入れ替わりを捨てる・#1274 レビュー）。写しには本体ごとの**回の印**（`session`）と
+ * **通し番号**（`seq`）が付く＝同じ回で番号が戻ったら古い写しなので捨てる。回が変わった（本体が開き直した）ら受ける。
+ */
+export function isNewerPatch(last: { session: string | null; seq: number }, msg: { session: string; seq: number }): boolean {
+  return msg.session !== last.session || msg.seq > last.seq;
+}
+
+/**
+ * 別窓が**手元で先に当てた選択**を、古い写しで巻き戻さない（ADR-0050 決定4・#1274 レビュー）。
+ * 写しには本体が**どの命令まで実行したか**（`ack`）が付く＝別窓が最後に選んだ命令（`pendingSelectSeq`）より前までしか
+ * 実行していない写しの選択は、別窓の選択より古いので当てない（その命令を実行した後の写しで揃う）。
+ */
+export function withoutStaleSelection(patch: MirrorPatch, ack: number, pendingSelectSeq: number): MirrorPatch {
+  if (ack >= pendingSelectSeq) return patch;
+  const { selectedClipIds: _drop, ...values } = patch.values;
+  return { values, cleared: patch.cleared.filter((k) => k !== "selectedClipIds") };
 }

@@ -23,10 +23,17 @@ export function setPreviewWindowOpen(open: boolean): void {
   previewOpen = open;
 }
 
+let previewHidden = false;
+
+/** 別窓が隠れているか（本体で使う・別窓からの知らせで変わる）。 */
+export function setPreviewWindowHidden(hidden: boolean): void {
+  previewHidden = hidden;
+}
+
 /**
- * 別窓が開いているか。⚠️ **本体が隠れても再生を止めない**ために使う＝別窓で見ているのに、
- * 本体が最小化されただけで止まると、別窓の意味が無くなる。
+ * **本体が隠れても再生を続けてよいか**＝別窓が開いていて、しかも見えているときだけ（時計は別窓の合図で進む）。
+ * ⚠️ 別窓も隠れている（両方とも最小化）と合図が来ない＝時計は止まるのに音だけ実時間で進む（#1274 レビュー）。
  */
-export function isPreviewWindowOpen(): boolean {
-  return previewOpen;
+export function keepsPlayingWhileHidden(): boolean {
+  return previewOpen && !previewHidden;
 }

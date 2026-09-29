@@ -3,13 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PREVIEW_DENIED_ACTIONS,
   PREVIEW_LOCAL_ACTIONS,
+  isDeniedAction,
   isMirroredKey,
+  isNewerPatch,
   mirrorPatch,
   mirrorUpdate,
   previewProxies,
   runPreviewCall,
   transferableArgs,
   transferablePatch,
+  withoutStaleSelection,
 } from "./timelineMirror";
 import { useTimelineStore } from "./timelineStore";
 
@@ -124,6 +127,36 @@ describe("命令（別窓→本体）", () => {
     expect(runPreviewCall(st, { name: "toString", args: [] })).toBe(false);
     expect(runPreviewCall(st, { name: "play" })).toBe(false);
     expect(runPreviewCall(st, null)).toBe(false);
+  });
+});
+
+describe("受けない操作の既定（#1274 レビュー）", () => {
+  it("`_` で始まる操作は、一覧に無くても受けない（別窓でも何もしない・本体も実行しない）", () => {
+    const _inner = vi.fn();
+    expect(isDeniedAction("_inner")).toBe(true);
+    expect(isDeniedAction("play")).toBe(false);
+    expect(runPreviewCall({ _inner }, { name: "_inner", args: [] })).toBe(false);
+    const sent: unknown[] = [];
+    (previewProxies({ _inner }, (c) => sent.push(c))._inner as () => void)();
+    expect(sent).toEqual([]);
+    expect(_inner).not.toHaveBeenCalled();
+  });
+});
+
+describe("写しの順序と、先に当てた選択（#1274 レビュー）", () => {
+  it("同じ回で番号が戻った写しは古いので捨てる・回が変われば受ける", () => {
+    expect(isNewerPatch({ session: "a", seq: 5 }, { session: "a", seq: 6 })).toBe(true);
+    expect(isNewerPatch({ session: "a", seq: 5 }, { session: "a", seq: 5 })).toBe(false);
+    expect(isNewerPatch({ session: "a", seq: 5 }, { session: "a", seq: 4 })).toBe(false);
+    expect(isNewerPatch({ session: "a", seq: 5 }, { session: "b", seq: 1 })).toBe(true);
+    expect(isNewerPatch({ session: null, seq: 0 }, { session: "a", seq: 1 })).toBe(true);
+  });
+
+  it("本体が選ぶ命令をまだ実行していない写しの選択は当てない（ほかの項目は当てる）", () => {
+    const p = { values: { selectedClipIds: ["old"], playheadSec: 2 }, cleared: ["selectedClipIds", "rangeInSec"] };
+    expect(withoutStaleSelection(p, 4, 5)).toEqual({ values: { playheadSec: 2 }, cleared: ["rangeInSec"] });
+    expect(withoutStaleSelection(p, 5, 5)).toBe(p);
+    expect(withoutStaleSelection(p, 6, 5)).toBe(p);
   });
 });
 

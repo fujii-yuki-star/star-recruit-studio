@@ -1737,3 +1737,9 @@ export const PREVIEW_WINDOW_WAITING_TEXT = {
   /** 本体に動画が開かれていない。 */
   noVideo: "本体の窓で動画を開くと、ここに仕上がりが出ます。この窓は閉じてかまいません",
 } as const;
+
+/** 仕上がり確認の別窓を開けなかった（ADR-0050・`15 §6` `PREVIEW_WINDOW_OPEN_FAILED`）。 */
+export const PREVIEW_WINDOW_OPEN_FAILED_MESSAGE = "別の窓を開けませんでした。もう一度押すか、「大きく見る」で今の窓の中で大きくしてください";
+
+/** 仕上がり確認の別窓が本体の窓とつながらない（ADR-0050・`15 §6` `PREVIEW_WINDOW_NOT_CONNECTED`）。 */
+export const PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE = "本体の窓とつながりませんでした。この窓を閉じて、本体の「別の窓で見る」から開き直してください";

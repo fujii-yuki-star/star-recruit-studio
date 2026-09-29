@@ -6384,13 +6384,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             対象が見つからない）と、**行き先の欄を閉じている**とき（出しても見えない＝§2-5）。
             置き方は欄のすぐ下＝下へ流すと、恒常の警告が出ているときに画面外へ落ちて
             **同じ操作を繰り返す**（§2-5・ADR-0026④）。上に積まない（編集の場所を狭めない）。 */}
-        {(voiceError || flashBlockedMessage || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
+        {(voiceError || flashBlockedMessage || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice || previewWindow.error) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
             {flashBlockedMessage && <p>{flashBlockedMessage}</p>}
             {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
             {drillBlockedNotice && <p>{drillBlockedNotice}</p>}
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
+            {/* 別の窓を開けなかった（ADR-0050）＝押しても何も起きない、を作らない（§2-5）。 */}
+            {previewWindow.error && <p>{previewWindow.error}</p>}
           </div>
         )}
       </div>

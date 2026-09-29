@@ -100,9 +100,9 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
 
   it("別窓の命令を本体の store で実行する（選ぶ・動かす）", async () => {
     await openPopout();
-    act(() => fromPreview!({ type: "call", name: "selectClip", args: ["clip_001"] }));
+    act(() => fromPreview!({ type: "call", name: "selectClip", args: ["clip_001"], seq: 1 }));
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
-    act(() => fromPreview!({ type: "call", name: "setClipBoxFor", args: ["clip_001", { x: 40 }] }));
+    act(() => fromPreview!({ type: "call", name: "setClipBoxFor", args: ["clip_001", { x: 40 }], seq: 2 }));
     expect((useTimelineStore.getState().doc!.clips[0] as { x: number }).x).toBe(40);
   });
 
@@ -112,8 +112,8 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
     useTimelineStore.setState({ saveTimelineProject: save, exportTimelineVideo: exportVideo });
     await openPopout();
     save.mockClear();
-    act(() => fromPreview!({ type: "call", name: "saveTimelineProject", args: [] }));
-    act(() => fromPreview!({ type: "call", name: "exportTimelineVideo", args: [{}] }));
+    act(() => fromPreview!({ type: "call", name: "saveTimelineProject", args: [], seq: 3 }));
+    act(() => fromPreview!({ type: "call", name: "exportTimelineVideo", args: [{}], seq: 4 }));
     expect(save).not.toHaveBeenCalled();
     expect(exportVideo).not.toHaveBeenCalled();
   });
@@ -121,9 +121,9 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
   // ⚠️ 掴んだまま別窓を閉じると「まとまりを閉じる」が来ない＝以後の編集が1つの取り消しに飲み込まれる。
   it("別窓が始めた取り消しのまとまりは、別窓が閉じたら本体が閉じる", async () => {
     await openPopout();
-    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [] }));
-    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [] }));
-    act(() => fromPreview!({ type: "call", name: "endHistoryGroup", args: [] }));
+    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [], seq: 5 }));
+    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [], seq: 6 }));
+    act(() => fromPreview!({ type: "call", name: "endHistoryGroup", args: [], seq: 7 }));
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
     act(() => closed!());
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
@@ -132,8 +132,8 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
   // ⚠️ 閉じるのは**別窓が始めた分だけ**＝本体で掴んでいる最中のまとまりまで閉じない。
   it("別窓が閉じても、本体が自分で始めたまとまりは閉じない", async () => {
     await openPopout();
-    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [] }));
-    act(() => fromPreview!({ type: "call", name: "endHistoryGroup", args: [] }));
+    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [], seq: 8 }));
+    act(() => fromPreview!({ type: "call", name: "endHistoryGroup", args: [], seq: 9 }));
     act(() => useTimelineStore.getState().beginHistoryGroup()); // 本体の操作
     act(() => closed!());
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
@@ -162,6 +162,63 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
     act(() => useTimelineStore.setState({ doc: null }));
     await act(async () => {});
     expect(closeWin).toHaveBeenCalled();
+  });
+
+  // 別窓は先に当てた選択を、本体が実行し終えた写しが来るまで守る＝写しに「どこまで実行したか」を添える（#1274 レビュー）。
+  it("命令を実行したら、中身が変わらなくても「どこまで実行したか」を写しで返す", async () => {
+    await openPopout();
+    act(() => fromPreview!({ type: "ready" }));
+    sent.length = 0;
+    // 何も変えない命令（store に無い名前＝捨てる）でも、番号は返す＝別窓が先に当てた選択の待ちを解く。
+    act(() => fromPreview!({ type: "call", name: "noSuchAction", args: [], seq: 7 }));
+    await frame();
+    expect(lastPatch()).toMatchObject({ ack: 7, values: {} });
+    const s1 = lastPatch().seq;
+    act(() => fromPreview!({ type: "call", name: "selectClip", args: ["clip_001"], seq: 8 }));
+    await frame();
+    expect(lastPatch()).toMatchObject({ ack: 8, values: { selectedClipIds: ["clip_001"] } });
+    expect(lastPatch().seq, "通し番号が進まない").toBeGreaterThan(s1);
+  });
+
+  it("別窓を読み込み直したら、別窓が始めたまとまりを閉じる", async () => {
+    await openPopout();
+    act(() => fromPreview!({ type: "call", name: "beginHistoryGroup", args: [], seq: 1 }));
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
+    act(() => fromPreview!({ type: "ready" }));
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  it("別窓を開けなかったら、次の行動を出す（押しても何も起きない、を作らない）", async () => {
+    openWin.mockImplementationOnce(async () => false);
+    await openPopout();
+    expect(screen.getByText("別の窓を開けませんでした。もう一度押すか、「大きく見る」で今の窓の中で大きくしてください")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "別の窓で見る", pressed: false })).toBeTruthy();
+  });
+
+  // 両方の窓が隠れると時計の合図が来ない＝時計は止まるのに音だけ進む（#1274 レビュー）。
+  it("本体も別窓も隠れたら、再生を止める（どちらかが見えていれば止めない）", async () => {
+    const pause = vi.fn();
+    useTimelineStore.setState({ pause, isPlaying: true });
+    await openPopout();
+    const mainHidden = (h: boolean) =>
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+    // 別窓が隠れても、本体が見えていれば止めない。
+    mainHidden(false);
+    act(() => fromPreview!({ type: "visibility", hidden: true }));
+    expect(pause).not.toHaveBeenCalled();
+    // 本体も隠れた＝止める。
+    mainHidden(true);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(pause).toHaveBeenCalledTimes(1);
+    // 別窓が見えている間に本体が隠れても止めない。
+    pause.mockClear();
+    act(() => fromPreview!({ type: "visibility", hidden: false }));
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(pause).not.toHaveBeenCalled();
+    // 本体が隠れたまま、別窓も隠れた＝止める。
+    act(() => fromPreview!({ type: "visibility", hidden: true }));
+    expect(pause).toHaveBeenCalledTimes(1);
+    mainHidden(false);
   });
 
   // 別窓で見ている間に本体を最小化しても、再生は止めない（時計は別窓の合図で進む）。
