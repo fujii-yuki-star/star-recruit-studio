@@ -96,6 +96,8 @@ export function placeDroppedAssets(doc: TimelineProject, input: FileDropPlacemen
  * - 種類の合う素材が1つも無い＝全部が新しい列へ行く（上の規則）＝ここでは断らない。
  * - 列の事情（固定・出さない）は `trackPlacementIssue`＝置く関数（`addVisualClip`／`addAudioClip`）と同じ。
  * - 重なりは**いちばん短い部品**（`TIMELINE_MIN_CLIP_SEC`）でも当たるか＝それで当たれば、どの長さでも当たる。
+ * ⚠️ **種類は取り込みと同じ関数で出す**（`detectAssetType`＝取り込みの `newAssetFrom` もこれを通る・#1273 レビュー）
+ *   ＝運んでいる間の種類と、取り込んだ後の種類がずれない。分からない拡張子は写真に倒れる（取り込みも同じ）。
  */
 export function fileDropHoverIssue(
   doc: TimelineProject,
