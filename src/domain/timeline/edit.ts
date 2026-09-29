@@ -6,7 +6,7 @@ import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
   TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
-import { ASSET_TYPE, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 // ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
 import { advancedSlotStarts, advancedSourceStart, usesUpSource } from './sourceTime';
@@ -300,6 +300,72 @@ export function visualPlacementAt(
     startSec: firstFreeStart(doc.clips, track.id, fromSec, VISUAL_CLIP_DURATION_SEC),
     durationSec: VISUAL_CLIP_DURATION_SEC,
   };
+}
+
+/**
+ * 押して置いたとき、**実際にどこへ入るか**（#1252）。
+ *
+ * ⚠️ **1か所に置く**（#1096 が塞いだ穴の再発防止）＝**押す前に見せる帯**と**押した結果**が
+ * 別々の計算になると、そのときだけ帯が嘘になる。両方ここを通す。
+ *
+ * @returns `newTrack` が `true` のとき、`trackId` は**いま手前にある列**で、実際はその**さらに手前へ
+ *   1本足して**そこへ入る（時刻は `startSec` のとおり）。置ける列が無ければ `null`。
+ */
+export function visualPlacementFor(
+  doc: TimelineProject,
+  kind: TimelineClipKind,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+): { trackId: string; startSec: number; durationSec: number; newTrack: boolean } | null {
+  const at = visualPlacementAt(doc, preferredTrackId, fromSec);
+  if (!at) return null;
+  // 塞がっていない／重ねない種類＝そのまま。
+  if (!overlaysWhenBusy(kind) || at.startSec === fromSec) return { ...at, newTrack: false };
+  return { ...at, startSec: fromSec, newTrack: true };
+}
+
+/**
+ * 置き先が塞がっていたとき、**手前に列を足して重ねる**種類か（利用者判断 2026-09-28・#1252）。
+ *
+ * ⚠️ **同じ「置く」でも、人のつもりが種類で違う**＝写真・動画を続けて置くのは**紙芝居**なので
+ * 後ろへ並ぶのが正しい。文字・図形を置くのは**その絵に載せたい**のでほぼ必ず重ねたい。
+ * アプリには「どちらのつもりか」が分からないので、**種類で決める**。
+ *
+ * ⚠️ **#722 案A を捨てるわけではない**＝あの決定は「**奥の列へは置かない**（手前の全画面の部品の裏に
+ * 入って見えなくなる）」で、いまも守る。足すのは**手前**なので裏に入らない。
+ * 当時は「手前に列を作る」という3つ目の道が検討されていなかった。
+ *
+ * ⚠️ **塞がっていないときは何も足さない**＝空いていればそのまま置く（列は増えない）。
+ */
+export function overlaysWhenBusy(kind: TimelineClipKind): boolean {
+  return kind === TIMELINE_CLIP_KIND.text || kind === TIMELINE_CLIP_KIND.shape;
+}
+
+/**
+ * 音（BGM・読み上げ）の置き先（2026-09-28 の実機レビュー）。
+ *
+ * ⚠️ **映像と同じ規則にする**（ADR-0026②＝同じ概念を、画面や種類で割らない）＝
+ * 以前は音だけ**再生位置をそのまま**渡していたので、その場所が塞がっていると**断られた**
+ *（映像・文字・図形は `firstFreeStart` で**次の空き時刻へずれる**のに）。
+ * 実機で確かめた＝同じ「置く」を押して、**映像は置けて、音は「ずらすか、列を足して重ねてください」**。
+ * 押す側からは同じ操作なので、結果が種類で変わる理由が読めない。
+ *
+ * ⚠️ **列をまたいでは探さない**＝映像側と同じ（#722 案A）。選んだ列が置けないときだけ手前へ落とす。
+ *
+ * @param fromSec ここから後ろで空きを探す（ふつうは再生位置）。
+ * @param durationSec 置くものの長さ（BGM と読み上げで違う）。
+ * @returns 置き先。置ける列が1本も無ければ `null`。
+ */
+export function audioPlacementAt(
+  doc: TimelineProject,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+  durationSec: number,
+): { trackId: string; startSec: number } | null {
+  const placeable = placeableAudioTracks(doc);
+  if (placeable.length === 0) return null;
+  const track = placeable.find((t) => t.id === preferredTrackId) ?? placeable[0];
+  return { trackId: track.id, startSec: firstFreeStart(doc.clips, track.id, fromSec, durationSec) };
 }
 
 /** 置き先として成り立つか（列の実在・種別の一致・固定・隠し・重なり）を1か所で見る。 */
@@ -632,12 +698,64 @@ export function removeClips(doc: TimelineProject, clipIds: readonly string[]): T
 }
 
 /**
- * 列を足す。**いちばん手前（配列の末尾）に足す**＝足した列がすぐ見える（重ね順は配列の並びだけ・11 §7.6）。
- * 音の列は重ね順に関係しないが、同じ規則で末尾に足す（並びの意味を種別で変えない）。
+ * 素材の形を保ったまま、画面に収まる大きさの箱を出す（2026-09-28）。
+ *
+ * ⚠️ **拡大はしない**＝画面より小さい素材を引き伸ばすと粗くなる。**収まるなら実寸のまま**。
+ * ⚠️ **偶数に丸めない**＝ここは画面の中の箱で、書き出しの格子（偶数幅）とは別の話。
+ *
+ * @param source 素材の実寸。
+ * @param canvas 画面の大きさ。
+ */
+export function containBox(source: { w: number; h: number }, canvas: { width: number; height: number }): { w: number; h: number } {
+  if (!(source.w > 0) || !(source.h > 0)) return { w: canvas.width, h: canvas.height };
+  const scale = Math.min(canvas.width / source.w, canvas.height / source.h, 1);
+  return {
+    w: Math.max(MIN_BOX_SIZE_PX, Math.round(source.w * scale)),
+    h: Math.max(MIN_BOX_SIZE_PX, Math.round(source.h * scale)),
+  };
+}
+
+/**
+ * 列を足す。**同じ種類のまとまりの中へ入れる**（#1249）＝映像は手前（画面の上）、音は奥（画面の下）。
+ * 重ね順は配列の並びだけで決まる（`11 §7.6`）ので、入れる場所がそのまま前後関係になる。
  */
 export function addTrack(doc: TimelineProject, kind: TrackKind): TimelineProject {
   const track: Track = { id: createTrackId(doc.tracks.map((t) => t.id)), kind };
-  return { ...doc, tracks: [...doc.tracks, track] };
+  return { ...doc, tracks: insertTrack(doc.tracks, track) };
+}
+
+/**
+ * 新しい列を**同じ種類のまとまりの中へ**入れる（#1249・ADR-0034 決定1＝業界の型）。
+ *
+ * ⚠️ **並びは重ね順そのもの**（`11 §7.6`＝配列の後ろほど手前／画面は手前を上に出す）。
+ * 以前は種類に関わらず**末尾へ足していた**ので、音を足すと**映像より手前（上）**に乗り、
+ * 映像と音が交互に並んだ（実測＝`音2, 映像3, 映像2, 音1, 映像1`）。
+ * ⚠️ **上下に意味があるのは映像だけ**＝音に重なりの順は無いので、音の列が映像のあいだに挟まると
+ * その行だけ意味を持たない。どの主要ソフトも**映像を上・音を下**にまとめている。
+ * ⚠️ **実害が出ていた**＝映像1 の帯を映像2 へ運ぶのに、あいだの音1 を飛び越して**2行ぶん**動かす必要があり、
+ * 1行ぶんだと音の列に落ちて（正しく）断られる＝利用者には「運べない」としか見えない。
+ *
+ * ⚠️ **いまある並びは組み替えない**＝開いた文書の列を黙って並べ替えない（§2-5・ADR-0026④）。
+ * **入れる場所を選ぶだけ**で、すでに混ざっている文書はそのまま（利用者が `手前へ`／`奥へ` で直せる）。
+ *
+ * @param tracks いまの並び（配列の後ろほど手前）。
+ * @param track 入れる列。
+ * @returns 入れたあとの並び。
+ */
+export function insertTrack(tracks: readonly Track[], track: Track): Track[] {
+  const out = [...tracks];
+  if (track.kind === TRACK_KIND.audio) {
+    // 音＝**いちばん奥（配列の先頭側）へ**。すでに音があるなら、その手前側の端ではなく**さらに奥**へ
+    // 置く＝あとから足した音ほど下に並ぶ（`音1` が上・`音2` がその下＝業界の型）。
+    const firstAudio = out.findIndex((t) => t.kind === TRACK_KIND.audio);
+    out.splice(firstAudio < 0 ? 0 : firstAudio, 0, track);
+    return out;
+  }
+  // 映像＝**いちばん手前（配列の末尾側）へ**。映像が1つも無ければ末尾でよい（音より手前＝上に出る）。
+  let lastVisual = -1;
+  out.forEach((t, i) => { if (t.kind !== TRACK_KIND.audio) lastVisual = i; });
+  out.splice(lastVisual < 0 ? out.length : lastVisual + 1, 0, track);
+  return out;
 }
 
 /**
@@ -653,6 +771,41 @@ export function removeTrack(doc: TimelineProject, trackId: string): EditResult {
   const withoutClips = removeClips(doc, ids);
   return ok({ ...withoutClips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) });
 }
+
+/**
+ * 列に名前を付ける（#1249 追加・利用者要望 2026-09-28）。
+ *
+ * ⚠️ **空にしたら自動の名前へ戻す**＝`name` を空文字で残すと、`trackLabel` が
+ * 「名前が付いている」と見て**空の見出し**を出す（どの列か分からなくなる）。**消す道は必ず残す**。
+ * ⚠️ **前後の空白は落とす**＝見えない文字だけの名前を作らせない（空白だけ＝消したのと同じに倒す）。
+ * ⚠️ **固定した列でも名前は変えられる**＝固定が守るのは**帯の位置と長さ**（`removeTrack`／`moveClip`）で、
+ * 呼び名はそれに当たらない（固定したまま整理したい、が普通にある）。
+ *
+ * @param name 新しい名前。空・空白だけなら自動の名前（種別＋連番）へ戻す。
+ */
+export function renameTrack(doc: TimelineProject, trackId: string, name: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  const trimmed = name.trim();
+  const next: Track = { ...track };
+  // ⚠️ **保存する値は切らない**（#1255 レビュー 🟡）＝長さの上限は**正典（schema）に無い**ので、
+  //   domain で切ると「正典に無い制約」を保存データへ足すことになる（§9-2）。
+  //   長さを抑えるのは**入力欄**（`TRACK_NAME_MAX`＝`maxLength`）の仕事。外から書かれた長い名前も、
+  //   そのまま残す（見出しに入らないぶんは画面側が省略して出す）。
+  if (trimmed) next.name = trimmed;
+  else delete next.name;
+  return ok({ ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? next : t)) });
+}
+
+/**
+ * 列の名前を**入力するとき**の長さの上限（入力欄の `maxLength`）。
+ *
+ * ⚠️ **列の見出しの幅は決まっている**（`TIMELINE_LABEL_W_PX`＝124px）ので、長い名前は**入らない**。
+ * ⚠️ **保存する値の制約ではない**（#1255 レビュー 🟡）＝schema の `Track.name` に長さの上限は無い。
+ * ここで持つのは「入力欄で打てる長さ」だけで、`renameTrack` は切らない。
+ * 保存値として縛るなら、schema に `maxLength` を足して版を上げ、`11 §7.6` に書くこと。
+ */
+export const TRACK_NAME_MAX = 24;
 
 /** その列に載っているクリップの数（列を消す前の確認に使う）。 */
 export function clipCountOnTrack(doc: TimelineProject, trackId: string): number {
@@ -1354,6 +1507,11 @@ export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacemen
 export function addVisualClip(
   doc: TimelineProject,
   input: VisualPlacement & {
+    /**
+     * 素材の実寸（分かっているとき）。⚠️ **分からないこともある**＝画面が測る前に置かれうるので、
+     * 無いときは切らない側（`fit:'contain'`）へ倒す。
+     */
+    assetSize?: { w: number; h: number };
     /** 箱の中心（未指定＝画面の真ん中）。キャンバスへ落としたときに使う。 */
     center?: { x: number; y: number };
   },
@@ -1365,8 +1523,18 @@ export function addVisualClip(
   const durationSec = placedDurationSec({ kind: input.kind, assetId: input.assetId });
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const ratio = PLACED_BOX_RATIO[input.kind];
-  const w = Math.round(canvas.width * ratio.w);
-  const h = Math.round(canvas.height * ratio.h);
+  // ⚠️ **写真は素材の形のまま置く**（2026-09-28 の実機レビュー）＝以前は種類に関わらず
+  //   **画面いっぱいの箱**にしていたので、正方形・縦長の素材は `fit:'cover'` で**切り取られた**
+  //  （この製品が同梱しているゆうこの立ち絵〔1254×1254〕を置くと、頭と足が切れる）。
+  // ⚠️ **当時の理由はもう無い**＝`PLACED_BOX_RATIO` のコメントは「大きさを直す手段がまだ無いので
+  //   余白つきに固定すると直せない」（#684 レビュー）と書いているが、いまは**幅・高さの欄**と
+  //   **掴む取っ手**で直せる。前提が消えたのに既定だけが残っていた。
+  // ⚠️ **実寸が分からないときは切らない側へ倒す**（下の `fit`）＝測る前に置かれることがあるため。
+  const box = input.kind === TIMELINE_CLIP_KIND.slot && input.assetSize
+    ? containBox(input.assetSize, canvas)
+    : { w: Math.round(canvas.width * ratio.w), h: Math.round(canvas.height * ratio.h) };
+  const w = box.w;
+  const h = box.h;
   const center = input.center ?? { x: canvas.width / 2, y: canvas.height / 2 };
   // **画面の外へは置かない**（落とした先が端でも、箱ごと見える位置へ収める）。
   const x = Math.round(Math.min(Math.max(0, center.x - w / 2), Math.max(0, canvas.width - w)));
@@ -1378,7 +1546,14 @@ export function addVisualClip(
     startSec,
     durationSec,
     x, y, w, h,
-    ...(input.kind === TIMELINE_CLIP_KIND.slot ? { assetId: input.assetId } : {}),
+    ...(input.kind === TIMELINE_CLIP_KIND.slot
+      ? {
+        assetId: input.assetId,
+        // ⚠️ **実寸が分かっているときは箱が素材と同じ形**なので、`cover` でも切れない（既定のまま）。
+        //   分からないときだけ**切らない側**（`contain`）へ倒す＝置いた瞬間に中身が欠ける、を作らない。
+        ...(input.assetSize ? {} : { fit: FIT.contain }),
+      }
+      : {}),
     // 置いた直後から**見えて・直せる**ように、初期値を入れておく（#684）。
     // **文字は空にしない**＝空文字は描かれず「置いたのに見えない」になる。既定は場面形式の「文字を足す」と同じ
     // （同じ物を足すのに形式で見た目が違う、を作らない・ADR-0026②）。大きさは画面の広さに合わせて伸ばす。

@@ -3,7 +3,20 @@
 // - API 呼び出しは Rust 内で行い、鍵を JS（フロント）に渡さない。鍵を URL・エラー本文・ログに載せない。
 // - MVP は Gemini（無料枠・ADR-0010）。OpenAI は P2（is_supported_provider で弾く）。
 // - 出力契約: JSON モード（responseMimeType=application/json）で構成JSONを要求し、受信後にフロントで ajv 検証する（二重防御）。
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use tauri::Emitter;
+
+/// 混み合っていて待ち直すことを画面へ知らせる（無言で止まらないため）。
+#[derive(Clone, serde::Serialize)]
+pub struct AiBusyWaitEvent {
+    /// 何回目の待ち直しか（1 から）。
+    pub attempt: u32,
+    /// 待ち直す上限。
+    pub total: u32,
+    /// 今回待つ長さ（ミリ秒）。
+    pub wait_ms: u64,
+}
 
 /// keyring のサービス名（資格情報マネージャ上の識別子）。account にはプロバイダ名を使う。
 const KEYRING_SERVICE: &str = "star-recruit-studio:ai";
@@ -17,6 +30,99 @@ const AI_REQUEST_TIMEOUT_SECS: u64 = 60;
 /// 対応プロバイダ（MVP は gemini のみ。openai は P2 で有効化）。
 fn is_supported_provider(provider: &str) -> bool {
     provider == "gemini"
+}
+
+/// 混み合っているときに待ち直す間隔（ミリ秒）。**要素数＝待ち直す回数**。
+///
+/// ⚠️ **待ち続けない**＝合計 33 秒で諦める。黙って何分も止まるほうが、断られるより悪い。
+/// ⚠️ **だんだん長くする**＝混雑が晴れるのに要る時間は読めないので、短い間隔で潰し合わない。
+const BUSY_WAIT_MS: [u64; 3] = [3_000, 10_000, 20_000];
+
+/// いま走っている動画案づくりの**世代**（#1255 レビュー 🟡）。
+///
+/// ⚠️ **なぜ要るか**＝混み合っているときは待って自分で送り直す（最大3回）が、以前は
+/// **画面で「キャンセル」を押しても、Rust 側の送り直しは止まらなかった**＝止めたあとも
+/// **同じ中身（会社情報・代表フレーム）が最大3回、外へ送られ続けた**（§2-6＝外への送信は利用者が承知した範囲に限る）。
+/// ⚠️ **旗（真偽）ではなく世代にする**＝止めた直後に作り直すと、旗を下ろした瞬間に**古い回の待ちが生き返る**。
+/// 世代なら、**新しい回が始まった時点で古い回は自分が古いと分かる**。
+static AI_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// 混み合っているときの**次の待ち**（ミリ秒・純粋）。`None`＝もう待たない（諦めて断る）。
+///
+/// ⚠️ **判断を1か所に置く**（#1255 レビュー）＝以前は非同期のループの中に
+/// 「何回で諦めるか」「何回目に何秒待つか」が埋まっていて、**検査できなかった**。
+pub fn next_busy_wait(kind: AiFailure, attempt: usize) -> Option<u64> {
+    if !should_wait_and_retry(kind) {
+        return None;
+    }
+    BUSY_WAIT_MS.get(attempt).copied()
+}
+
+/// 走っている動画案づくりを止める（#1255 レビュー 🟡）。
+///
+/// ⚠️ **世代を進めるだけ**＝走っている回は、次に送る前・待っている間に「自分が古い」と気づいて抜ける。
+/// **いま送っている最中の1回**は止められない（相手に届いたものは取り消せない）が、**次は送らない**。
+#[tauri::command]
+pub fn cancel_ai_generate() {
+    AI_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// AI 呼び出しが失敗した**種類**。
+///
+/// ⚠️ **分ける理由は「次の行動が違う」から**（§2-5・利用者の指摘 2026-09-25）＝
+/// これまでは何が起きても「時間をおいて、もう一度お試しください」の1文だった。
+/// ところが**待っても直らない失敗**（提供が終わったモデルを指している・鍵が違う）が実在し、
+/// 実際に**動画案づくりが全滅していたのに、画面は待てば直ると言い続けていた**（#1244）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiFailure {
+    /// 混み合っている（相手側の一時的な事情）。**待ち直せば通ることがある**。
+    Busy,
+    /// 使いすぎ（回数の上限）。待てば戻るが、**待ち直しても同じ**なので自動では粘らない。
+    Overused,
+    /// 指している接続先が無い。**待っても直らない**＝設定を見直す。
+    ModelMissing,
+    /// 鍵が受け付けられない。**待っても直らない**＝鍵を登録し直す。
+    KeyRejected,
+    /// 送った内容が受け付けられない。**待っても直らない**＝内容を変える。
+    Rejected,
+    /// それ以外。
+    Unknown,
+}
+
+/// 応答の番号から失敗の種類を決める（純粋・検査対象）。
+pub fn classify_failure(status: u16) -> AiFailure {
+    match status {
+        503 => AiFailure::Busy,
+        429 => AiFailure::Overused,
+        404 => AiFailure::ModelMissing,
+        401 | 403 => AiFailure::KeyRejected,
+        400 => AiFailure::Rejected,
+        _ => AiFailure::Unknown,
+    }
+}
+
+/// 待ち直してよい失敗か（純粋・検査対象）。
+///
+/// ⚠️ **粘るのは「混み合っている」だけ**＝使いすぎ（429）で粘ると**上限をさらに削る**し、
+/// 待っても直らない種類で粘ると、利用者を意味なく待たせるだけになる。
+pub fn should_wait_and_retry(kind: AiFailure) -> bool {
+    matches!(kind, AiFailure::Busy)
+}
+
+/// 利用者に出す文（§2-3＝実装の言葉を出さない／§2-5＝次の行動を示す・純粋・検査対象）。
+pub fn failure_message(kind: AiFailure) -> &'static str {
+    // ⚠️ **文言は `messages.rs` に1つ**（§6）＝門番（`errorStateTable` / `rustUserMessageGuard`）が
+    //   そこを見る作りなので、ここに直書きすると正典との突き合わせから外れる。
+    match kind {
+        // ⚠️ **ここへ来るのは待ち直しても駄目だったとき**＝「もう一度」だけでは同じことをさせるので、
+        //   何回か試したことを伝えたうえで、間を置くよう促す。
+        AiFailure::Busy => crate::messages::AI_BUSY,
+        AiFailure::Overused => crate::messages::AI_OVERUSED,
+        AiFailure::ModelMissing => crate::messages::AI_MODEL_MISSING,
+        AiFailure::KeyRejected => crate::messages::AI_KEY_REJECTED,
+        AiFailure::Rejected => crate::messages::AI_REJECTED,
+        AiFailure::Unknown => crate::messages::AI_REQUEST_FAILED,
+    }
 }
 
 /// モデル名が URL パスへ安全に埋め込めるか（英数字・ハイフン・ドットのみ）。
@@ -149,6 +255,7 @@ fn extract_gemini_text(resp: &serde_json::Value) -> Result<String, String> {
 /// 応答の検証（ajv）・内部変換はフロント（domain）側で行う（§2-2）。
 #[tauri::command]
 pub async fn ai_generate(
+    app: tauri::AppHandle,
     provider: String,
     model: String,
     system: String,
@@ -166,28 +273,65 @@ pub async fn ai_generate(
     })?;
 
     let body = build_gemini_body(&system, &user);
-    let res = http_client()
-        .post(gemini_endpoint(&model))
-        .header("x-goog-api-key", &api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| {
-            "AI に接続できませんでした。ネットワークを確認して、もう一度お試しください。"
-                .to_string()
-        })?;
-
-    if !res.status().is_success() {
+    // ⚠️ **混み合っているときだけ、待って自分でもう一度送る**（利用者の指摘 2026-09-25・ADR-0010 P3）＝
+    //   以前は1回で諦めていたので、相手が混んでいるだけの日は**何度押しても失敗し続けた**
+    //  （実機で連続 8 回失敗を観測）。混雑は相手側の一時的な事情なので、押し直させる理由が無い。
+    // ⚠️ **粘るのは混雑だけ**＝`should_wait_and_retry`。使いすぎ・接続先が無い・鍵違いで粘っても意味が無い。
+    // ⚠️ **黙って待たない**＝待っている間は画面へ知らせる（`ai-busy-wait`）。無言で 30 秒止まるのは故障に見える。
+    // ⚠️ **この回の世代を取る**＝止められたか（`cancel_ai_generate`）・後から別の回が始まったかを、
+    //   送る前と待っている間に見る。
+    let my_gen = AI_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let superseded = || AI_GENERATION.load(Ordering::SeqCst) != my_gen;
+    let mut attempt: usize = 0;
+    let res = loop {
+        // ⚠️ **送る前に見る**＝止められた回は、もう外へ送らない（§2-6）。
+        if superseded() {
+            return Err(crate::messages::AI_CANCELLED.to_string());
+        }
+        let sent = http_client()
+            .post(gemini_endpoint(&model))
+            .header("x-goog-api-key", &api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| {
+                "AI に接続できませんでした。ネットワークを確認して、もう一度お試しください。"
+                    .to_string()
+            })?;
+        if sent.status().is_success() {
+            break sent;
+        }
         // 診断用：原因（400/404/429 等とメッセージ）特定のため、ステータスと Gemini のエラー本文を stderr に出す。
         // 本文＝Gemini のエラー説明で、鍵や送信内容は含まれない（鍵はリクエストヘッダのみ）。UI には出さない（§2-3）。
-        let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        let head: String = body.chars().take(500).collect();
+        let status = sent.status();
+        let kind = classify_failure(status.as_u16());
+        let body_text = sent.text().await.unwrap_or_default();
+        let head: String = body_text.chars().take(500).collect();
         crate::tlog!("ai", "Gemini API エラー: status={status} body={head}");
-        return Err(
-            "AI への要求が失敗しました。時間をおいて、もう一度お試しください。".to_string(),
+        let Some(wait_ms) = next_busy_wait(kind, attempt) else {
+            return Err(failure_message(kind).to_string());
+        };
+        attempt += 1;
+        let _ = app.emit(
+            "ai-busy-wait",
+            AiBusyWaitEvent {
+                attempt: attempt as u32,
+                total: BUSY_WAIT_MS.len() as u32,
+                wait_ms,
+            },
         );
-    }
+        // ⚠️ **待っている間も見る**＝最長 20 秒の待ちのあいだに止められても、すぐ抜ける。
+        //   一気に眠ると、止めてから最大 20 秒、画面の外で送り直しの準備が続く。
+        let mut waited: u64 = 0;
+        while waited < wait_ms {
+            if superseded() {
+                return Err(crate::messages::AI_CANCELLED.to_string());
+            }
+            let step = (wait_ms - waited).min(200);
+            tokio::time::sleep(std::time::Duration::from_millis(step)).await;
+            waited += step;
+        }
+    };
     let json: serde_json::Value = res
         .json()
         .await
@@ -221,6 +365,137 @@ mod tests {
             has_from(Err(err)),
             Err(crate::messages::KEYRING_UNAVAILABLE.to_string()),
             "アクセスできないことを「無い」に畳んでいる"
+        );
+    }
+
+    /// **待っても直らない失敗を、待てば直ると言わない**（#1244・利用者の指摘 2026-09-25）。
+    ///
+    /// ⚠️ **実際に踏んだ**＝提供が終わったモデルを指していたのに、画面は
+    /// 「時間をおいて、もう一度お試しください」と言い続け、**動画案づくりが全滅していることに誰も気づけなかった**。
+    #[test]
+    fn 待っても直らない失敗は待てとは言わない() {
+        for status in [404u16, 401, 403, 400] {
+            let kind = classify_failure(status);
+            assert!(
+                !should_wait_and_retry(kind),
+                "status={status} で自動の待ち直しに入っている"
+            );
+            let msg = failure_message(kind);
+            assert!(
+                !msg.contains("時間をおいて"),
+                "status={status} の文が「時間をおいて」と言っている（待っても直らない）: {msg}"
+            );
+        }
+    }
+
+    /// **待てば直る失敗だけ、自分で待ち直す**。
+    #[test]
+    fn 混み合っているときだけ待ち直す() {
+        assert!(should_wait_and_retry(classify_failure(503)));
+        // ⚠️ **使いすぎでは粘らない**＝上限をさらに削るだけ。
+        assert!(!should_wait_and_retry(classify_failure(429)));
+        assert!(!should_wait_and_retry(classify_failure(500)));
+    }
+
+    /// 番号 → 種類の対応（見分けそのもの）。
+    #[test]
+    fn 応答の番号から失敗の種類を決める() {
+        assert_eq!(classify_failure(503), AiFailure::Busy);
+        assert_eq!(classify_failure(429), AiFailure::Overused);
+        assert_eq!(classify_failure(404), AiFailure::ModelMissing);
+        assert_eq!(classify_failure(401), AiFailure::KeyRejected);
+        assert_eq!(classify_failure(403), AiFailure::KeyRejected);
+        assert_eq!(classify_failure(400), AiFailure::Rejected);
+        assert_eq!(classify_failure(418), AiFailure::Unknown);
+    }
+
+    /// **どの文も「次の行動」を持つ**（§2-5）。
+    ///
+    /// ⚠️ **1つずつ書き並べない**＝種類を足したときに書き漏らす。**全部を回す**。
+    #[test]
+    fn どの失敗にも次の行動がある() {
+        let all = [
+            AiFailure::Busy,
+            AiFailure::Overused,
+            AiFailure::ModelMissing,
+            AiFailure::KeyRejected,
+            AiFailure::Rejected,
+            AiFailure::Unknown,
+        ];
+        for kind in all {
+            let msg = failure_message(kind);
+            assert!(!msg.is_empty(), "{kind:?} の文が空");
+            assert!(
+                msg.contains("ください"),
+                "{kind:?} の文が次の行動を示していない: {msg}"
+            );
+        }
+        // ⚠️ **同じ文を使い回していないか**＝使い回すと、分けた意味が無い（見分けても届かない）。
+        let msgs: Vec<&str> = all.iter().map(|k| failure_message(*k)).collect();
+        let mut uniq = msgs.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), msgs.len(), "同じ文を2つ以上の種類で使っている");
+    }
+
+    /// **待ち続けない**＝合計の待ちに上限がある（黙って何分も止まらない）。
+    #[test]
+    fn 待ち直しは有限で_だんだん長くなる() {
+        let total: u64 = BUSY_WAIT_MS.iter().sum();
+        assert!(
+            (5_000..=60_000).contains(&total),
+            "待ちの合計が極端（{total}ms）"
+        );
+        for pair in BUSY_WAIT_MS.windows(2) {
+            assert!(
+                pair[1] > pair[0],
+                "待ちが長くなっていない: {BUSY_WAIT_MS:?}"
+            );
+        }
+    }
+
+    /// 混み合っているときは、決まった回数だけ・決まった順に待つ（#1255 レビュー）。
+    #[test]
+    fn 混み合っているときは決まった回数だけ待つ() {
+        for (i, want) in BUSY_WAIT_MS.iter().enumerate() {
+            assert_eq!(
+                next_busy_wait(AiFailure::Busy, i),
+                Some(*want),
+                "{i}回目の待ちが違う"
+            );
+        }
+        // ⚠️ **回数を使い切ったら、もう待たない**＝ここが崩れると、いつまでも送り直す。
+        assert_eq!(next_busy_wait(AiFailure::Busy, BUSY_WAIT_MS.len()), None);
+    }
+
+    /// ⚠️ **混み合っている以外では、1回目から待たない**（粘っても直らない／上限を削るだけ）。
+    #[test]
+    fn 混み合っている以外では待たない() {
+        for kind in [
+            AiFailure::Overused,
+            AiFailure::ModelMissing,
+            AiFailure::KeyRejected,
+            AiFailure::Rejected,
+            AiFailure::Unknown,
+        ] {
+            assert_eq!(next_busy_wait(kind, 0), None, "{kind:?} で待ち直している");
+        }
+    }
+
+    /// ⚠️ **止めたら、走っている回は自分が古いと分かる**（#1255 レビュー 🟡＝止めたあとも外へ送り続けていた）。
+    #[test]
+    fn 止めると走っている回は古くなる() {
+        let mine = AI_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        assert_eq!(
+            AI_GENERATION.load(Ordering::SeqCst),
+            mine,
+            "始めた直後から古い"
+        );
+        cancel_ai_generate();
+        assert_ne!(
+            AI_GENERATION.load(Ordering::SeqCst),
+            mine,
+            "止めたのに古くならない"
         );
     }
 

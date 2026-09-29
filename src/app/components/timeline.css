@@ -35,6 +35,27 @@
   flex-wrap: wrap;
 }
 
+/* **帯の操作の行**（ADR-0048・#1256 b5）＝見え方の道具（倍率・列の高さ・吸着）の行と**種類が違う**ので、
+   細い線で分ける（同じ行に混ぜると、どれが帯を変えるボタンか読み取れない）。 */
+.timeline-edit-tools {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--gap-xs);
+}
+
+/* **帯の長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる。 */
+.timeline-clip-badge {
+  float: right;
+  margin-left: var(--gap-xs);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  position: relative;
+}
+/* 選んだ帯は右端に「⋮」と取っ手が出る＝その下に潜らないよう空ける。 */
+.timeline-clip--selected .timeline-clip-badge {
+  margin-right: calc(var(--clip-menu-w) + var(--clip-handle-w));
+}
+
 /* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
 .timeline-toolbar-sep {
   width: 1px;
@@ -175,6 +196,98 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/*
+ * **出す／固定の切り替え**（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」）。
+ * - 普段は**見せない・押せない**（`opacity: 0` ＋ `pointer-events: none`）＝見えない当たり判定を作らない（ADR-0047 決定3）。
+ *   ⚠️ `visibility: hidden` にしない＝焦点が入らず、キーで辿れなくなる（`:focus-within` で出す道が消える）。
+ * - 見出しに乗せた／キーで入ったときは薄く出す。乗せているアイコンは濃く。
+ * - **変えた状態（出さない・固定）は常に濃く出す**＝今の状態がいつも読める。
+ * - 名前の上に**重ねる**（右端から）＝出たり消えたりで行がずれない。かぶる所は見出しの地の色でぼかす。
+ * - マウスの無い画面（触って使う）は、乗せる操作が無いので常に薄く出す（＝A案の姿）。
+ */
+.timeline-row-label {
+  --row-toggles-right: 18px; /* 「⋮」のぶん */
+}
+.timeline-row-toggles {
+  position: absolute;
+  right: var(--row-toggles-right);
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 12px;
+  background: linear-gradient(to right, transparent, var(--color-surface-alt) 12px);
+  pointer-events: none;
+}
+.timeline-row-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.timeline-row-label:hover .timeline-row-toggle,
+.timeline-row-label:focus-within .timeline-row-toggle {
+  opacity: 0.5;
+  pointer-events: auto;
+}
+.timeline-row-label .timeline-row-toggle:hover,
+.timeline-row-label .timeline-row-toggle:focus-visible {
+  opacity: 1;
+  color: var(--color-text);
+}
+.timeline-row-toggle--on,
+.timeline-row-label .timeline-row-toggle.timeline-row-toggle--on {
+  /* ⚠️ **見出しに乗せたときの規則（0,3,0）より強く・後ろに置く**（#1259 レビュー 🟡）＝以前は
+     `.timeline-row-toggle--on`（0,1,0）だけで、乗せると 1→0.5 に薄くなり「変えた状態は常に濃く」が破れていた。 */
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--color-warn);
+}
+/* 変えた状態が1つも無い列では、ぼかしの地も出さない（名前を削らない）。 */
+.timeline-row-label:not(:hover):not(:focus-within) .timeline-row-toggles:not(:has(.timeline-row-toggle--on)) {
+  background: none;
+}
+.timeline-row-toggle:disabled {
+  cursor: not-allowed;
+}
+@media (hover: none) {
+  /* ⚠️ **変えた状態は除く**＝同じ強さで後ろにあると、触る画面では ON まで薄くなる（#1259 レビュー 🟡）。 */
+  .timeline-row-toggle:not(.timeline-row-toggle--on) {
+    opacity: 0.5;
+    pointer-events: auto;
+  }
+}
+/* 出さない列は帯を薄く／固定した列は斜線（見出しを見なくても列の状態が分かる）。 */
+.timeline-lane--hidden .timeline-clip {
+  opacity: 0.4;
+}
+.timeline-lane--locked {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    var(--color-border) 6px 7px
+  );
+}
+/* ⚠️ **帯の上にも斜線**（実装後の評価で見つけた）＝帯は不透明なので、列の地にだけ引くと
+   **帯で埋まった固定の列は、固定していないように見えた**（Premiere も帯の上に斜線を出す）。 */
+.timeline-lane--locked .timeline-clip {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    var(--color-border-strong) 6px 7px
+  );
+}
+
 .timeline-row-label .sub {
   flex: 0 0 auto;
   font-size: 10px;
@@ -581,4 +694,20 @@
   fill: currentColor;
   stroke: none;
   opacity: 0.7;
+}
+
+/* 列の名前をその場で書き換える欄（利用者要望 2026-09-28）。
+   ⚠️ **行の高さを変えない**＝この行の高さは帯（`--timeline-lane-h`）が決めている。
+   共通の `.input` を使うと上下の余白で行が伸びるので、ここだけ持つ（`.timeline-row-menu` と同じ理由）。 */
+.timeline-row-name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text);
+  background: var(--color-surface);
 }

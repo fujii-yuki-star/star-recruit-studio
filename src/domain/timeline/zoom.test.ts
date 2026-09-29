@@ -4,13 +4,40 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 
 describe('fitZoomIndex（開いた直後は全体表示・決定13）', () => {
   it('全体が収まる段のうち**いちばん大きい**ものを選ぶ（ぎりぎり全部見える所から始める）', () => {
-    // 幅 640px・尺 10秒 → 64px/秒 まで入る。段は [16,24,36,54,80,120] なので 54。
+    // 幅 640px・尺 10秒 → 64px/秒 まで入る。上の段は …,36,54,80,120 なので 54。
     expect(ZOOM_LEVELS[fitZoomIndex(10, 640)]).toBe(54);
   });
 
-  it('どの段でも収まらない長い動画は、いちばん小さい段（それ以上は広げられない）', () => {
-    expect(fitZoomIndex(600, 640)).toBe(0);
-    expect(ZOOM_LEVELS[0]).toBe(16);
+  it('どの段でも収まらないときは、いちばん小さい段（それ以上は広げられない）', () => {
+    expect(fitZoomIndex(1800, 300)).toBe(0);
+    expect(ZOOM_LEVELS[0]).toBe(0.25);
+  });
+
+  // ⚠️ **長い動画でも全体が収まる**（#1258）＝以前は 16px/秒が最小で、**約94秒を超えると
+  // 「全体を表示」しても収まらなかった**（30分＝28,800px＝画面の約19枚ぶん）。決定13 と食い違っていた。
+  it('上限の30分でも、ふつうの窓に全体が収まる（決定13「開いた直後は全体表示」）', () => {
+    // 1920 の窓で並びの幅はおよそ 1376px（名前の欄を引いた後）。
+    const px = ZOOM_LEVELS[fitZoomIndex(1800, 1376)];
+    expect(1800 * px, '30分が窓に収まらない').toBeLessThanOrEqual(1376);
+    // ぎりぎりまで使う＝窓の半分以下にしか広がらない、を作らない（刻みが粗すぎない）。
+    expect(1800 * px, '全体表示が窓の半分も使わない').toBeGreaterThanOrEqual(1376 / 2);
+  });
+
+  it('狭い窓（約450px）でも30分が収まる', () => {
+    expect(1800 * ZOOM_LEVELS[fitZoomIndex(1800, 450)]).toBeLessThanOrEqual(450);
+  });
+
+  // 段を下へ足しても、**何も置いていないときの倍率は変えない**（番号で持つと黙って変わる）。
+  it('既定の段は 36px/秒', () => {
+    expect(ZOOM_LEVELS[DEFAULT_ZOOM_INDEX]).toBe(36);
+  });
+
+  it('どの長さでも、全体表示は窓の 1/2 以上を使う（段の刻みが粗すぎない）', () => {
+    for (const sec of [30, 95, 180, 600, 1200, 1800]) {
+      const px = ZOOM_LEVELS[fitZoomIndex(sec, 1376)];
+      if (px === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]) continue; // 短い動画は最大の段で頭打ち
+      expect(sec * px, `${sec}秒`).toBeGreaterThanOrEqual(1376 / 2);
+    }
   });
 
   it('尺が 0／幅が測れないときは既定の段（目盛りが潰れない）', () => {
@@ -69,7 +96,7 @@ describe('tickStepSec（目盛りは倍率で決める・#686 レビュー）', 
   });
 
   it('時計として読める刻みだけを使う（3秒や7秒を出さない）', () => {
-    for (const px of ZOOM_LEVELS) expect([1, 2, 5, 10, 15, 30, 60]).toContain(tickStepSec(px));
+    for (const px of ZOOM_LEVELS) expect([1, 2, 5, 10, 15, 30, 60, 120, 300]).toContain(tickStepSec(px));
   });
 
   it('どの段でも目盛りの間隔が読める幅に収まる（潰れない・消えない）', () => {

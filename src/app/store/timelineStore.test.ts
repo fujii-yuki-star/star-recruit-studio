@@ -980,17 +980,45 @@ describe('置く先の探し方（#722）', () => {
       ...over,
     });
 
+  // ⚠️ **#722 の芯は「奥へ逃がさない」**（裏に隠れる部品を作らない）＝その主張は種類を問わず守る。
+  //   置き方は種類で分かれた（#1252）ので、**どちらの道でも奥へ行かないこと**を1つの検査で見る。
   it('手前の列が塞がっていても、奥の列へは逃がさない（裏に隠れる部品を作らない）', () => {
+    for (const kind of [TIMELINE_CLIP_KIND.text, TIMELINE_CLIP_KIND.shape, TIMELINE_CLIP_KIND.slot] as const) {
+      useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
+      useTimelineStore.getState().addVisualClip(kind === TIMELINE_CLIP_KIND.slot ? { kind, assetId: 'asset_001' } : { kind });
+      const d = useTimelineStore.getState().doc!;
+      const placed = d.clips.find((c) => c.id !== 'clip_001')!;
+      // 配列の後ろほど手前（`11 §7.6`）＝塞がっている `track_002` より**手前か同じ**であること。
+      expect(d.tracks.findIndex((t) => t.id === placed.trackId), `${kind} が奥の列へ逃げた`)
+        .toBeGreaterThanOrEqual(d.tracks.findIndex((t) => t.id === 'track_002'));
+    }
+  });
+
+  // ⚠️ **写真は後ろへずれる**（紙芝居）＝#722 案A のまま。
+  it('写真は、塞がっていたら次の空き時刻へずれる（同じ列のまま）', () => {
     useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
-    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_001' });
     const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== 'clip_001')!;
-    expect(placed.trackId).toBe('track_002'); // 手前の列
+    expect(placed.trackId).toBe('track_002'); // 手前の列のまま
     expect(placed.startSec).toBe(5); // まるごと収まる最初の空き（再生位置 0 は塞がっている）
+  });
+
+  // ⚠️ **文字は手前に列を足して重なる**（#1252・利用者判断 2026-09-28）。
+  it('文字は、塞がっていたら手前に列を足して重なる（時刻はそのまま）', () => {
+    useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, '列が足されていない').toBe(before + 1);
+    const placed = d.clips.find((c) => c.id !== 'clip_001')!;
+    expect(placed.startSec, '後ろへずれている').toBe(0);
+    expect(d.tracks.findIndex((t) => t.id === placed.trackId), '足した列が手前でない')
+      .toBeGreaterThan(d.tracks.findIndex((t) => t.id === 'track_002'));
   });
 
   it('置いた所へ再生位置も移る（押したのに何も現れない、を作らない）', () => {
     useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
-    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_001' });
     expect(useTimelineStore.getState().playheadSec).toBe(5);
   });
 

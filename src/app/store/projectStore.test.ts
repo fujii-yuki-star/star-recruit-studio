@@ -1383,6 +1383,16 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     expect(useProjectStore.getState().status).toBe('idle'); // 下書きなし＝未生成へ
   });
 
+  // ⚠️ **止めたら、外への送り直しも止める**（#1255 レビュー 🟡・§2-6）＝以前は画面の結果を捨てるだけで、
+  // 混み合っているとき Rust は待って自分で送り直していた＝**止めたあとも同じ中身が最大3回、外へ送られ続けた**。
+  it('キャンセルすると、外への送り直しも止める', () => {
+    const stop = vi.spyOn(aiClient, 'cancelAiGenerate').mockResolvedValue(undefined);
+    useProjectStore.setState({ scenes: [], status: 'generating' });
+    useProjectStore.getState().cancelGeneration();
+    expect(stop, 'キャンセルしたのに、送り直しを止めていない').toHaveBeenCalledTimes(1);
+    stop.mockRestore();
+  });
+
   it('生成中にキャンセルすると、裏で完走しても場面を置き換えない（#402）', async () => {
     const existing = [scene('scene_001', 1)];
     useProjectStore.setState({ scenes: existing, parts: [], status: 'idle', _generationSeq: 0 });

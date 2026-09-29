@@ -48,7 +48,12 @@ export const TRANSITION_MIN_TAIL_SEC = 1 / FPS;
  * タイムラインの表示倍率の段（px/秒・#686）。**場面形式の見わたす画面と同じ型**（ADR-0034 決定13）
  * ＝同じ概念を画面ごとに別の刻みにしない。ここを単一の参照元にして両画面が読む（§2-7）。
  */
-export const TIMELINE_ZOOM_LEVELS = [16, 24, 36, 54, 80, 120] as const;
+//
+// ⚠️ **下へ 0.25px/秒まで伸ばした**（#1258）＝以前は 16 が最小で、**約94秒より長い動画は「全体を表示」
+// しても収まらなかった**（30分＝28,800px＝画面の約19枚ぶん）。決定13「開いた直後は全体表示」を
+// 長い動画でも守るため、**30分（上限・ADR-0045）が狭い窓（約450px）にも収まる**所まで段を足した。
+// 刻みはおおむね 1.5 倍（上の段と同じ比）＝全体表示で**窓の 2/3 以上**を使う。
+export const TIMELINE_ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 36, 54, 80, 120] as const;
 
 /**
  * タイムラインの「列の名前」の欄の幅（px・#686）。**両方のタイムライン画面が同じ値を見る**
@@ -83,6 +88,21 @@ export const TIMELINE_LABEL_W_PX = 124;
  * **この1行で 40 → 28** にした（余白は 4 → 2）。行内の文字の高さは CSS がこの2つから導く。
  */
 export const TIMELINE_LANE_H_PX = 28;
+
+/**
+ * **列の高さの選べる段**（ADR-0048 決定3・#1256 c1）＝利用者が「並び」の道具立ての行で選ぶ。
+ * 既定は `normal`＝`TIMELINE_LANE_H_PX`（#1104 で実機から決めた 28px）。
+ *
+ * ⚠️ **なぜ選べるようにしたか**＝列が少ない動画では帯を太くして読みやすく、多い動画では細くして
+ * 本数を稼ぐ（Kdenlive・Premiere・YMM4・AviUtl はどれも列の高さを変えられる）。
+ * ⚠️ **細いの下限は 20px**＝帯の中の文字（11px）と上下の余白・縁が収まる所まで。
+ */
+export const TIMELINE_LANE_HEIGHTS = { compact: 20, normal: TIMELINE_LANE_H_PX, tall: 44 } as const;
+export type TimelineLaneHeight = keyof typeof TIMELINE_LANE_HEIGHTS;
+/** 選べる段の並び（細い → 太い）。 */
+export const TIMELINE_LANE_HEIGHT_ORDER: readonly TimelineLaneHeight[] = ["compact", "normal", "tall"];
+/** 覚えが無いときの段。 */
+export const TIMELINE_LANE_HEIGHT_DEFAULT: TimelineLaneHeight = "normal";
 
 /**
  * 帯（クリップ）の上下の余白（px）。行の高さから上下ぶん引いたものが帯の高さになる。

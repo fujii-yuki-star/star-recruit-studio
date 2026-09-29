@@ -1,0 +1,35 @@
+// タイムライン編集の**近道キーの一覧**（ADR-0048・#1256 c6）。
+//
+// ⚠️ **画面の外に知識を逃がす**＝キーで済む操作が一覧で分かれば、ボタンを減らせる（Shotcut は一覧を公開している）。
+// ⚠️ **一覧と実装を食い違わせない**＝`key` は**画面が見ている `e.key` の値そのもの**を書く。
+// 門番（`timelineShortcuts.test.ts`）が、画面の受け口にある値が**全部この一覧にある**ことを見る
+//（キーを足したのに一覧に書き忘れる、を止める）。
+
+/** 近道キー1つ。 */
+export interface Shortcut {
+  /** 画面に出すキーの書き方。 */
+  keys: string;
+  /** 何が起きるか（利用者の言葉＝§2-3）。 */
+  action: string;
+  /** 画面が見ている `e.key` の値（小文字に揃えて比べる）。修飾キー（Ctrl・Shift）は含めない。 */
+  codes: readonly string[];
+}
+
+export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
+  { keys: "Space", action: "再生／停止", codes: [" "] },
+  { keys: "← →", action: "1コマ戻る／進む（Shift で1秒）。キャンバスで部品を選んでいるときは、その部品を少し動かす", codes: ["arrowleft", "arrowright"] },
+  { keys: "↑ ↓", action: "キャンバスで選んだ部品を少し動かす（Shift で大きく）", codes: ["arrowup", "arrowdown"] },
+  { keys: "Home／End", action: "先頭へ／最後へ（目盛りを押したあと）", codes: ["home", "end"] },
+  { keys: "Ctrl+K", action: "選んだ部品を再生位置で分ける", codes: ["k"] },
+  { keys: "Delete", action: "選んだ部品を削除", codes: ["delete"] },
+  { keys: "I／O", action: "作業範囲の始まり／終わりを再生位置に置く", codes: ["i", "o"] },
+  { keys: "Shift+Delete（Shift+Backspace）", action: "作業範囲を削除して、空いた所を詰める", codes: ["backspace"] },
+  { keys: "M", action: "再生位置に目印を置く（動画には出ません）", codes: ["m"] },
+  { keys: "Ctrl+A", action: "すべての部品を選ぶ", codes: ["a"] },
+  { keys: "Esc", action: "選んでいるのをやめる（開いているメニューがあれば、先にそれを閉じる）", codes: ["escape"] },
+  { keys: "Ctrl+Z／Ctrl+Y", action: "取り消す／やり直す", codes: ["z", "y"] },
+  { keys: "Ctrl＋ホイール", action: "並びの表示倍率を変える（マウスの位置を中心に）", codes: [] },
+  { keys: "Ctrl を押しながら運ぶ", action: "吸着を一時的に切る", codes: [] },
+  { keys: "`", action: "指している欄を広げる／元に戻す", codes: ["`"] },
+  { keys: "?", action: "この一覧を開く", codes: ["?"] },
+];

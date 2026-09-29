@@ -3493,6 +3493,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 

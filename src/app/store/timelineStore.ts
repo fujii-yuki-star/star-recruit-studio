@@ -1,7 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { dimsForOrientation } from "../../domain/constants";
+import { dimsForOrientation, exportDimsForOrientation } from "../../domain/constants";
 import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
@@ -33,8 +33,9 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
-  moveClip, visualPlacementAt,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, renameTrack,
+  visualPlacementFor,
+  moveClip,
   setVisualClipContent,
   setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
@@ -57,7 +58,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { NarrationStatus } from "../../domain/enums";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -720,6 +721,11 @@ export interface TimelineState {
   addTrack: (kind: TrackKind) => void;
   removeTrack: (trackId: string) => void;
   /**
+   * 列に名前を付ける（利用者要望 2026-09-28）＝「映像1／音1」の自動名だけだと、
+   * 列が増えたときに**どれが何の列か**分からない。空にすると自動名へ戻る。
+   */
+  renameTrack: (trackId: string, name: string) => void;
+  /**
    * 列を**中身ごと**複製する（#767）。空の列だけ増やすなら「列を足す」と同じなので、
    * 中の部品も一緒に運ぶ（置けない事情は domain が理由で返す＝黙って別の結果にしない）。
    */
@@ -748,6 +754,14 @@ export interface TimelineState {
    * ＝見えているものがそのまま出る（ADR-0001）。
    */
   exportTimelineVideo: (deps: TimelineDrawDeps) => Promise<void>;
+  /**
+   * 書き出す大きさ（#1255・利用者判断 2026-09-28）。`true`＝軽い（短辺 720）。
+   *
+   * ⚠️ **場面形式と同じ選択肢**（ADR-0026②＝同じ概念を形式で割らない）＝あちらは「きれい／軽い」の
+   * 2つ。⚠️ **`project.schema` には入れない**（ADR-0033 の流儀＝書き出しの好みは文書の中身ではない）。
+   */
+  exportHd: boolean;
+  setExportHd: (hd: boolean) => void;
   /** 書き出しを止める（押した時点までの一時ファイルは片づける）。 */
   cancelTimelineExport: () => void;
   /** 完了・失敗の知らせを閉じる。 */
@@ -994,6 +1008,8 @@ function emptyState() {
     missingAssetIds: [] as string[],
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
+  // 書き出す大きさ（#1255）。⚠️ **既定は「きれい」**＝場面形式の既定（`fullhd`）と同じ。
+  exportHd: false,
     audioSrcByKey: {} as Record<string, string>,
     _audioTried: new Set<string>(),
     history: emptyHistory<TimelineProject>(),
@@ -1261,7 +1277,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const ids = trimTargetsAt(doc, get().selectedClipIds, sec);
     if (ids.length === 0) {
-      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.selected) } });
+      // 着地先は「並び」（#1259 レビュー 🟡）＝ボタンは帯の操作の行（並びの欄）へ移った。
+      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.arrange) } });
       return;
     }
     const r = trimClips(doc, ids, edge, sec, { templateOf: templateOfNow });
@@ -1578,10 +1595,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addVisualClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
+    // ⚠️ **素材の形のまま置く**ために実寸を渡す（2026-09-28 の実機レビュー）＝渡さないと
+    //   画面いっぱいの箱になり、正方形・縦長の素材が切り取られる（ゆうこの立ち絵で頭と足が切れた）。
+    // ⚠️ **測る前に置かれることがある**＝そのときは `undefined` のまま渡し、domain が切らない側へ倒す。
+    const assetSize = input.assetId ? get().assetSizes[input.assetId] : undefined;
     // **指された場所へ置く**（ドラッグ）＝探さない・寄せない。置けなければ理由を出して終わり
     // （ADR-0034 決定10＝利用者が位置を指したときは勝手に別の場所へ動かさない）。
     if (input.at) {
-      const r = addVisualClip(doc, { ...input, trackId: input.at.trackId, startSec: input.at.startSec });
+      const r = addVisualClip(doc, { ...input, assetSize, trackId: input.at.trackId, startSec: input.at.startSec });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];
         // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
@@ -1602,12 +1623,29 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
     // 列選びと時刻の規則は `visualPlacementAt`（domain）に1つだけ置く＝**押す前に見せる帯**（#1096）と
     // 押した結果が別々の計算にならない。置ける列が無ければ理由を出す（押しても何も起きない、を作らない・§2-5）。
-    const at = visualPlacementAt(doc, input.trackId, get().playheadSec);
+    const playheadSec = get().playheadSec;
+    const at = visualPlacementFor(doc, input.kind, input.trackId, playheadSec);
     if (!at) {
       set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
-    const r = addVisualClip(doc, { ...input, trackId: at.trackId, startSec: at.startSec });
+    // ⚠️ **文字・図形は、塞がっていたら手前に列を足して重ねる**（利用者判断 2026-09-28・#1252）＝
+    //   写真に文字を載せるのは動画づくりでいちばんよくやる操作なのに、押すと**写真の後ろ**に並んでいた
+    //  （重ねるには「列を足す」を先に押すと知っている必要があり、画面にはどこにも書いていなかった）。
+    // ⚠️ **写真・動画は後ろへ並べたまま**＝続けて置くのは紙芝居なので、そちらが正しい。
+    //   種類で分ける理由は `overlaysWhenBusy` に1つだけ書く。
+    // ⚠️ **足すのは手前**なので #722 案A（奥へ置かない＝裏に隠さない）は守られる。
+    // ⚠️ **1回の取り消しで両方戻る**＝列と部品を同じ `commit` で確定する（列だけ残らない）。
+    let working = doc;
+    let target = at;
+    if (at.newTrack) {
+      const withTrack = addTrack(doc, TRACK_KIND.visual);
+      const added = withTrack.tracks.find((t) => !doc.tracks.some((o) => o.id === t.id));
+      const retry = added ? visualPlacementFor(withTrack, input.kind, added.id, playheadSec) : null;
+      // ⚠️ **足しても置けないなら足さない**＝空の列だけが増える、を作らない。
+      if (retry && retry.startSec === playheadSec) { working = withTrack; target = retry; }
+    }
+    const r = addVisualClip(working, { ...input, assetSize, trackId: target.trackId, startSec: target.startSec });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;
@@ -2151,6 +2189,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (doc) commit(set, get, addTrack(doc, kind));
   },
+  renameTrack: (trackId, name) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = renameTrack(doc, trackId, name);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
+  },
   duplicateTrack: (trackId) => {
     const doc = get().doc;
     if (!doc) return;
@@ -2394,6 +2439,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         assetSizeOf: (id) => assetSizes[id],
         // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
         fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
+        // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
+        //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
+        outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, get().exportHd),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
         stageFrame: stageExportFrame,
         // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
@@ -2509,6 +2558,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
+  setExportHd: (hd) => set({ exportHd: hd }),
   cancelTimelineExport: () => {
     const run = get().exportRun;
     if (!isTimelineExportBusy(run.phase)) return;

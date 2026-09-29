@@ -3,7 +3,7 @@
 //
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { menuAnchorFrom, usePointerDrag } from "../../hooks/usePointerDrag";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ContextMenu } from "../ContextMenu";
@@ -49,6 +49,18 @@ const REGION_LABEL: Record<PanelRegion, string> = {
   bottom: "下",
 };
 
+/** 欄を広げる／戻すの言い方（ボタン・メニュー・読み上げで同じ言葉を使う）。 */
+const MAXIMIZE_LABEL = { maximize: "広げる", restore: "元に戻す" } as const;
+/** 指している欄を広げるキー（Premiere の型＝数字の1の左）。 */
+const MAXIMIZE_KEY = "`";
+
+/** その欄が配置のどこかにあるか（閉じた欄は広げない）。 */
+function inLayout(layout: PanelLayout, id: PanelId): boolean {
+  const walk = (n: PanelNode | null | undefined): boolean =>
+    n != null && (isSplit(n) ? n.children.some(walk) : n.panelId === id);
+  return PANEL_REGIONS.some((r) => walk(layout.nodes[r]));
+}
+
 /** 境界をつかむ帯の太さ（px）。細すぎると掴めない・太すぎると中身を食う。 */
 const DIVIDER_PX = 6;
 
@@ -82,11 +94,42 @@ export function PanelLayoutView({
   // つかんでいる欄と、いま指している落とし先（線で示す）。
   const [dragging, setDragging] = useState<PanelId | null>(null);
   const [dropAt, setDropAt] = useState<{ panelId: PanelId; side: DropSide } | null>(null);
+  /**
+   * **一時的に広げている欄**（ADR-0048 決定5・#1256 b3）＝その欄だけを配置の器いっぱいに出す。
+   * ⚠️ **記憶しない**（配置＝ADR-0033 の記憶とは別の一時状態）＝開き直したら元の配置で始まる。
+   * ⚠️ **ほかの欄は外さずに隠す**（`visibility: hidden`）＝外すと中身の状態が消える
+   *（仕上がり確認で鳴っている音が止まる・並びのスクロール位置が戻る）。
+   */
+  const [maximized, setMaximized] = useState<PanelId | null>(null);
+  // 指している欄（`` ` `` キーで広げる相手＝Premiere と同じ型）。
+  const hoveredRef = useRef<PanelId | null>(null);
+  // 広げた欄が配置から消えたら（閉じた・既定に戻した）元に戻す＝見えない欄を広げたまま残さない。
+  const shownIds = new Set(panels.map((p) => p.id));
+  const activeMax = maximized != null && shownIds.has(maximized) && inLayout(layout, maximized) ? maximized : null;
+  const toggleMaximize = (id: PanelId): void => setMaximized((cur) => (cur === id ? null : id));
+
+  // `` ` ``（数字の1の左）で、指している欄を広げる／戻す（Premiere の型）。文字を打っている所では奪わない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== MAXIMIZE_KEY || e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const id = hoveredRef.current;
+      if (id == null) return;
+      e.preventDefault();
+      toggleMaximize(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /** 指している位置から落とし先を探す（自分自身の上は落とし先にしない＝何も起きない操作を見せない）。 */
   const findDrop = (panelId: PanelId, x: number, y: number): { panelId: PanelId; side: DropSide } | null => {
     for (const [id, el] of frameRefs.current) {
       if (id === panelId) continue;
+      // ⚠️ **広げている間は、隠れた欄を落とし先にしない**（#1259 レビュー 🟡）＝隠した欄も箱は残るので、
+      //   見えない欄の上で離すと**何が起きたか分からないまま配置が変わった**（落とし線も見えない）。
+      if (activeMax != null && id !== activeMax) continue;
       const box = el.getBoundingClientRect();
       if (x < box.left || x > box.left + box.width || y < box.top || y > box.top + box.height) continue;
       return { panelId: id, side: dropSideAt(box, x, y) };
@@ -124,6 +167,7 @@ export function PanelLayoutView({
   };
 
   const menuItems = (panelId: PanelId): ContextMenuItem[] => [
+    { label: activeMax === panelId ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize, onSelect: () => toggleMaximize(panelId) },
     // 並べ替えはドラッグとメニューの両方（決定12）＝ドラッグが使えないときの逃げ道。
     stepItem(panelId, DROP_SIDE.top, "上へ"),
     stepItem(panelId, DROP_SIDE.bottom, "下へ"),
@@ -193,9 +237,11 @@ export function PanelLayoutView({
       const drop = dropAt?.panelId === spec.id ? dropAt.side : null;
       return (
         <section
-          className={`panel-frame${dragging === spec.id ? " panel-frame--dragging" : ""}`}
+          className={`panel-frame${dragging === spec.id ? " panel-frame--dragging" : ""}${activeMax === spec.id ? " panel-frame--maximized" : ""}`}
           key={spec.id}
           data-panel-id={spec.id}
+          onPointerEnter={() => { hoveredRef.current = spec.id; }}
+          onPointerLeave={() => { if (hoveredRef.current === spec.id) hoveredRef.current = null; }}
           ref={(el) => {
             if (el) frameRefs.current.set(spec.id, el);
             else frameRefs.current.delete(spec.id);
@@ -215,8 +261,23 @@ export function PanelLayoutView({
               e.preventDefault();
               setMenu({ panelId: spec.id, x: e.clientX, y: e.clientY });
             }}
+            // 見出しを二度押しで広げる／戻す（見出しを掴んで動かす操作とは別＝動かさずに2回押したとき）。
+            onDoubleClick={(e) => {
+              if ((e.target as HTMLElement).closest("button")) return;
+              toggleMaximize(spec.id);
+            }}
           >
             <h3>{spec.title}</h3>
+            <span className="panel-frame-head-actions">
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-label={`${spec.title}の欄を${activeMax === spec.id ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize}`}
+              aria-pressed={activeMax === spec.id}
+              title={`${activeMax === spec.id ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize}（見出しの二度押し・欄を指して ${MAXIMIZE_KEY} キーでも）`}
+              onClick={() => toggleMaximize(spec.id)}
+            >
+              {activeMax === spec.id ? "⤡" : "⤢"}
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               aria-label={`${spec.title}の欄の操作`}
@@ -227,6 +288,7 @@ export function PanelLayoutView({
             >
               ⋮
             </button>
+            </span>
           </header>
           <div className={`${PANEL_BODY_CLASS}${spec.fillBody ? ` ${PANEL_BODY_CLASS}--fill` : ""}`}>{spec.content}</div>
         </section>
@@ -274,7 +336,11 @@ export function PanelLayoutView({
     ? `minmax(0, ${1 - bottom}fr) auto minmax(0, ${bottom}fr)`
     : "minmax(0, 1fr)";
   return (
-    <div className={`panel-layout${fill ? " panel-layout--fill" : ""}`} ref={rootRef} style={{ gridTemplateRows: rows }}>
+    <div
+      className={`panel-layout${fill ? " panel-layout--fill" : ""}${activeMax ? " panel-layout--maximized" : ""}`}
+      ref={rootRef}
+      style={{ gridTemplateRows: rows }}
+    >
       <div className="panel-layout-main">
         {hasLeft && (
           <>

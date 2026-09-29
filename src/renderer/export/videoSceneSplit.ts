@@ -9,8 +9,57 @@ export interface VideoSceneSplit {
   belowSvg: string;
   /** 動画より上のレイヤー（透過）。 */
   aboveSvg: string;
-  /** 動画スロットの矩形（FFmpeg のスケール/配置に使う）。 */
+  /**
+   * 動画スロットの矩形（FFmpeg のスケール/配置に使う）。
+   *
+   * ⚠️ **配置の座標（キャンバス基準＝1920×1080 等）のまま**＝FFmpeg へ渡す前に
+   * **必ず `slotRectToOutput` で出力の大きさへ写す**こと。
+   */
   slot: Rect;
+}
+
+/** FFmpeg へ渡す動画の枠（出力の大きさの座標・整数）。 */
+export interface OutputSlotRect {
+  slotX: number;
+  slotY: number;
+  slotW: number;
+  slotH: number;
+}
+
+/**
+ * 配置の座標の矩形を、**出力の大きさの座標**へ写す（#1255 レビュー 🔴）。**純粋関数**。
+ *
+ * ⚠️ **なぜ1か所に置くか**＝下敷き・上敷きの PNG は出力の大きさで焼くので、
+ * 動画の枠だけ配置の座標のままだと**動画だけが違う大きさ・違う位置**に重なる（黙って別の絵＝ADR-0026④）。
+ * 実際に、場面形式は縮めていたのにタイムライン形式は縮めておらず、「軽い（720）」で
+ * **全画面の動画が 1920×1080 の枠のまま 1280×720 の絵に載っていた**。
+ * **2か所に書き写すと、また片方だけずれる**ので、両形式ともここを通す。
+ *
+ * ⚠️ **整数に丸める**＝FFmpeg 側（Rust）は `u32` で受ける。
+ */
+export function slotRectToOutput(
+  rect: Rect,
+  canvas: { width: number; height: number },
+  output: { width: number; height: number },
+): OutputSlotRect {
+  const rx = output.width / canvas.width;
+  const ry = output.height / canvas.height;
+  return {
+    slotX: Math.round(rect.x * rx),
+    slotY: Math.round(rect.y * ry),
+    slotW: Math.round(rect.w * rx),
+    slotH: Math.round(rect.h * ry),
+  };
+}
+
+/**
+ * その枠を FFmpeg にそのまま渡せるか（**負の座標や大きさ0は渡せない**）。
+ *
+ * ⚠️ **Rust は `u32` で受ける**＝画面の左や上へはみ出した配置（負の座標）は**受け取りに失敗して
+ * 書き出しごと止まる**。渡せない枠は、呼ぶ側で**焼く方へ倒す**こと（絵は正しく出る・遅くなるだけ）。
+ */
+export function isPassableSlot(r: OutputSlotRect): boolean {
+  return r.slotX >= 0 && r.slotY >= 0 && r.slotW > 0 && r.slotH > 0;
 }
 
 /**

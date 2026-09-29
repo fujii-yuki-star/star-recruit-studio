@@ -8,7 +8,8 @@
 /** 出力先（`--out`）。⚠️ **知らない印は断る**＝黙って別の所へ書かない。 */
 export function parseOutDir(rest, fallback = "tutorial-out") {
   const at = rest.indexOf("--out");
-  const known = new Set(["--out", "--attach"]);
+  // ⚠️ **印は1か所で決める**＝走らせる側で増やしても、ここが知らなければ断られる（実際に踏んだ）。
+  const known = new Set(["--out", "--attach", "--下見"]);
   const stray = rest.filter((a, i) => a.startsWith("--") && !known.has(a) && !(at >= 0 && i === at + 1));
   if (stray.length > 0) throw new Error(`知らない印です: ${stray.join(" ")}`);
   if (at >= 0 && rest[at + 1] == null) throw new Error("`--out` のあとに出力フォルダがありません");
@@ -35,6 +36,11 @@ export function checkPlan(plan) {
     }
     if (step.type != null && step.fieldLabel == null) {
       throw new Error(`${i + 1} 段目に \`fieldLabel\`（どの欄に打つか）がありません: ${JSON.stringify(step)}`);
+    }
+    // ⚠️ **確定のキーは打つ段にしか意味が無い**（#1228）＝押す段に書いても何も起きないので、
+    //   気づかないまま「確定したつもり」の台本になる。
+    if (step.enter != null && step.fieldLabel == null) {
+      throw new Error(`${i + 1} 段目の \`enter\` は打つ段（\`fieldLabel\`）にだけ書けます: ${JSON.stringify(step)}`);
     }
     if (step.waitMs != null && !Number.isFinite(step.waitMs)) {
       throw new Error(`${i + 1} 段目の \`waitMs\` が数ではありません: ${JSON.stringify(step.waitMs)}`);

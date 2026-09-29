@@ -327,10 +327,10 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
                 placeholder={DEFAULT_AI_MODEL}
               />
               <p className="field-hint">
-                通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
+                通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況が変わったときだけ、提供元が案内する名前に変えてください。
               </p>
             </div>
-            <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
+            <p className="field-hint mt">※ いまつなげられるのは Gemini だけです。</p>
           </CollapsibleSection>
 
           <hr className="divider" />

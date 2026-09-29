@@ -1243,7 +1243,7 @@ src/
 現時点で未決の項目は以下。
 
 - ~~正式プロダクト名~~ → **すたりお（stario）に決定**（§1.1・ADR-0011）
-- ~~使用する外部AI APIの第一候補~~ → ⚠️ **Gemini**（`DEFAULT_AI_MODEL = 'gemini-2.5-flash'`・設定で変更可＝ADR-0010／`13 §7`）
+- ~~使用する外部AI APIの第一候補~~ → ⚠️ **Gemini**（使うモデルは `DEFAULT_AI_MODEL`＝名前の正は `src/infrastructure/appSettings.ts`・設定で変更可＝ADR-0010／`13 §7`。⚠️ 具体名はここに書かない＝提供が終わると資料だけ古くなる・#1244）
 - ~~標準BGMの入手元・ライセンス~~ → ⚠️ **CC0 3曲を同梱**（Open Music Academy・権利台帳は `13 §8.1`）
 - ゆうこ素材の最終数・表情差分
 - VOICEVOX以外の音声合成対応範囲

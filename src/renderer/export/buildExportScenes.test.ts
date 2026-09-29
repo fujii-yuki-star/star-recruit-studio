@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../layout', async (orig) => ({ ...(await orig<typeof import('../layout')>()), layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
-vi.mock('./videoSceneSplit', () => ({
+// ⚠️ **枠の写し方（純粋関数）は本物を使う**（#1255 レビュー 🔴）＝ここを偽物にすると、
+// 場面形式とタイムライン形式が**同じ計算を通っているか**を、この検査が確かめられなくなる。
+vi.mock('./videoSceneSplit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./videoSceneSplit')>()),
   splitVideoSceneSvgMulti: vi.fn(() => ({
     belowSvg: '<below/>',
     midSvgs: [],

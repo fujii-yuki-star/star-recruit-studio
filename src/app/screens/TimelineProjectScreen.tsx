@@ -13,20 +13,20 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, visualPlacementAt, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
-import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
+import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
+import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, renameFieldKeys, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -56,7 +56,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_HEIGHTS, TIMELINE_LANE_HEIGHT_DEFAULT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_MIN_CLIP_SEC, type TimelineLaneHeight, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
@@ -74,6 +74,8 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
+import { ShortcutList } from "../components/ShortcutList";
+import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -84,7 +86,7 @@ import { PickerList } from "../components/PickerList";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout, TIMELINE_BOTTOM_DEFAULT_RATIO } from "../../domain/layout/panelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion } from "../../domain/layout/panelLayout";
 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -126,9 +128,9 @@ type DragPlace = {
   } | null;
 };
 
-import { ArrowLeftIcon } from "../components/icons";
+import { ArrowLeftIcon, EyeIcon, EyeOffIcon, LockIcon, VolumeIcon, VolumeMuteIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
-import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, type BlockTarget, type PlaceTabId } from "../timelinePanels";
+import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
 import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
@@ -166,7 +168,7 @@ import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/spli
 import { freezeFrameIssue, freezeStopsOriginalAudio, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
 // バラすは**押す前に空撃ちして理由を引く**（純粋関数＝実際に走るものと同じ判定を見る）。
 import { explodeTemplateClip } from "../../domain/timeline/explode";
-import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
+import { getBooleanSetting, getChoiceSetting, setBooleanSetting, setChoiceSetting } from "../../infrastructure/appSettings";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -177,6 +179,15 @@ const AUTOSAVE_DELAY_MS = 800;
 
 /** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
 const NUDGE_SEC = 0.5;
+
+/**
+ * 再生位置のつまみが縮んでよい下限（px）。
+ *
+ * ⚠️ **0 にしない**＝操作の行は「再生・先頭へ・つまみ・時刻・大きさ・書き出す」を並べるので、
+ * 欄を狭めると**いちばん伸び縮みするつまみだけが潰れる**（実機で 10px＝掴めない状態を測った）。
+ * 80px は、つまみの丸（16px）を端から端まで運べる最小の幅として置いた。
+ */
+export const PLAYHEAD_SLIDER_MIN_PX = 80;
 
 /**
  * その層の**手の移り先**（#818・ドリルイン）。`null`＝入れない層（下地・立ち絵など欄が無いもの）。
@@ -229,6 +240,12 @@ const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_HIT_W_PX * 2 + CLIP_MENU_W_PX + 16;
  * 取っ手を出す幅（`CLIP_HANDLES_MIN_W_PX`）より少し広く取る＝取っ手で隠れる幅では敷く意味が無い。
  */
 const CLIP_ANALYSIS_MIN_W_PX = 60;
+/**
+ * 帯の右端に**長さ（と速さ）**を出す最小の幅（px・ADR-0048・#1256 b6）。
+ * ⚠️ **名前を潰してまで出さない**＝名前が読めることが先。名前の数文字と「5.0秒」が並ぶ幅から出す。
+ * 他社（Premiere・Final Cut）も帯の中に長さ・効果の印を出す＝ホバーしなくても帯1本から読める。
+ */
+const CLIP_BADGE_MIN_W_PX = 110;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
@@ -401,6 +418,28 @@ export const loadSnapEnabled = (): boolean => getBooleanSetting(LS_SNAP, SNAP_DE
 const saveSnapEnabled = (on: boolean): void => setBooleanSetting(LS_SNAP, on);
 
 /**
+ * 列の高さの覚え（ADR-0048 決定3・#1256 c1）。**画面の好み**なので `localStorage`（`project.schema` には入れない）。
+ * ⚠️ **気軽に鍵を変えない**＝変えると利用者の覚えが消える。
+ */
+const LS_LANE_HEIGHT = "timeline.laneHeight";
+const loadLaneHeight = (): TimelineLaneHeight =>
+  getChoiceSetting(LS_LANE_HEIGHT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_LANE_HEIGHT_DEFAULT);
+const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
+/** 列の高さの言い方（画面に出す＝§2-3）。 */
+const LANE_HEIGHT_LABEL: Record<TimelineLaneHeight, string> = { compact: "細い", normal: "ふつう", tall: "太い" };
+/** 1つの部品にだけ効く操作を、まとめて選んでいるときの説明（右クリックのメニューと同じ言い方＝ADR-0026②）。 */
+const SINGLE_CLIP_ONLY_HINT = "1つだけ選ぶと使えます";
+/**
+ * 何も選んでいないときの説明（ADR-0048・#1256 b5）＝帯の操作の行は**選ぶ前から見えている**ので、
+ * 押せない理由を言わないと「押せないボタン」が並んでいるだけになる（§2-5）。
+ */
+const NOTHING_SELECTED_HINT = {
+  duplicate: "複製する部品を、並びかキャンバスで選んでください",
+  remove: "削除する部品を、並びかキャンバスで選んでください",
+  trim: "長さをそろえる部品を、並びかキャンバスで選んでください",
+} as const;
+
+/**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
  *
  * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
@@ -413,8 +452,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const {
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
-    addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
+    addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
+    isPlaying, play, pause, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
@@ -767,27 +806,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
-  const defaultLayout = useMemo(() => {
-    const l = emptyLayout();
-    l.nodes.center = { panelId: PANEL_ID.preview };
-    l.nodes.right = { panelId: PANEL_ID.selected };
-    l.nodes.bottom = { panelId: PANEL_ID.arrange };
-    // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4分割しており（#684）、
-    // 左の幅 0.28 を四等分するので**1欄の中身の高さが 70〜80px**しかなく、
-    // 3手順①の入口（素材の一覧・見た目の一覧）が**既定の配置で視界に入らなかった**。
-    // 型（CapCut / Canva / YMM4）も「置く」は1欄＋タブ（#683 の調査）。
-    l.nodes.left = { panelId: PANEL_ID.place };
-    // ⚠️ **「並び」は主戦場なので既定を上限まで広げる**（#1104・実機の指摘②③）＝
-    // 既定の 0.28 では、1080px の画面で器（当時は 76vh）の 28%＝約 230px しか無く、
-    // 目盛りを引くと**列が約3本しか見えなかった**（「とても実用的ではない」）。
-    // 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
-    // ⚠️ **既定は「上限いっぱい」という意図を名前で持つ**（レビュー由来 ℹ️）＝
-    // `MAX_REGION_RATIO` を直に使うと、上限を変えたときにこの画面の既定まで黙って動く。
-    // ⚠️ **覚えた配置がある人には効かない**（ADR-0033＝利用者が動かしたときだけ覚える）＝
-    // 実機で見るときは「配置を既定に戻す」を1回押してもらう。
-    l.regionSizes = { ...l.regionSizes, bottom: TIMELINE_BOTTOM_DEFAULT_RATIO };
-    return l;
-  }, []);
+  // 既定の配置は「並びを広く」の型と同じもの（`timelineDefaultLayout`＝1か所で決める・ADR-0048 決定4）。
+  const defaultLayout = useMemo(timelineDefaultLayout, []);
+  const layoutPresets = useMemo(timelineLayoutPresets, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
   // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
   const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed } =
@@ -818,6 +839,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ **キーとボタンで同じ入口を通す**（ADR-0034 決定19）＝キーだけ理由が出ない、を作らない。
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
+  const markerAddRef = useRef<() => void>(() => {});
+  /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
+  const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
    * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
    * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
@@ -894,6 +918,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         rangeEdgeRef.current("out");
         return;
       }
+      // **`M`＝いまの位置に目印を置く**（ADR-0048・ADR-0040 の未解決を閉じる＝業界の型）。
+      // ⚠️ **断るのは置く側**（`addMarkerAtPlayhead` が書き出し中を入口で断り、理由を出す）＝
+      // キーだけ黙る、を作らない。⚠️ **再生中も置ける**（ADR-0040 決定3＝見ながら次々置く）。
+      if ((e.key === "m" || e.key === "M") && !usesTypeAhead(e.target)) {
+        e.preventDefault();
+        markerAddRef.current();
+        return;
+      }
+      // **`?`＝近道キーの一覧**（ADR-0048・#1256 c6＝多くの編集ソフト・ウェブの道具と同じ）。
+      // 画面の真ん中あたりに出す（キーで開いたときは押したボタンが無い）。
+      if (e.key === "?" && !usesTypeAhead(e.target)) {
+        e.preventDefault();
+        setShortcutsAt({ x: Math.round(window.innerWidth / 2 - 240), y: 80 });
+        return;
+      }
       if (e.key === " ") {
         // **押した要素が `Space` で反応するなら、そちらに譲る**（消すボタンを押したら消えたうえに再生が
         // 始まる、を作らない）。一律で奪うと画面じゅうのボタンがキーボードで押せなくなる。
@@ -937,6 +976,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, selectClips, overlayOpen, setEditBlocked]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
+  // 書き出す大きさの選択肢（#1255）＝場面形式と**同じ関数**から出す（数字を別々に書かない・§2-7）。
+  const exportFullDims = exportDimsForOrientation(doc?.videoSettings.aspectRatio ?? ORIENTATION.landscape, false);
+  const exportHdDims = exportDimsForOrientation(doc?.videoSettings.aspectRatio ?? ORIENTATION.landscape, true);
 
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
@@ -953,6 +995,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
   const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
+  const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
+  /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
+  const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
   /**
    * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
    *
@@ -1602,6 +1647,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return doc.clips.filter((c) => {
       if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
       if (c.assetId && relinkable.has(c.assetId)) return false;
+      // ⚠️ **まだ文が無い読み上げは、こちらで数えない**（2026-09-28 の実機レビュー）＝
+      //   置いた直後は文も声も無いので、**一度も作っていないのに「もう一度作ってください」**と出た。
+      //   しかも「読み上げる文が入っていません。文を入力してください」（`TIMELINE_VOICE_TEXT_EMPTY`）と
+      //   並ぶので、**同じ1つの部品に別々の次の行動が2つ**出ていた（上の ⚠️ で畳んだのと同じ形）。
+      //   文が無いうちは**文を入れるのが先**なので、そちらの知らせに任せる。
+      if (c.kind === TIMELINE_CLIP_KIND.voice && (c.voice?.text ?? "").trim().length === 0) return false;
       const key = audioSourceKeyOfClip(c);
       return !key || !audioSrcByKey[key];
     }).length;
@@ -2033,6 +2084,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       deleteRangeInTimeline(true, PANEL_ID.arrange);
     };
     rangeEdgeRef.current = (edge) => setRangeEdge(edge, useTimelineStore.getState().playheadSec);
+    markerAddRef.current = addMarkerAtPlayhead;
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
       if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
@@ -2289,7 +2341,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const trimAtPlayheadGuard = busyGuard({
     disabled: trimTargetsHaveLocked || isPlaying || trimTargetCount === 0,
-    hint: trimTargetsHaveLocked
+    // ⚠️ **何も選んでいないときは「選んでください」**（#1259 レビュー 🟡）＝帯の操作の行は選ぶ前から見えている。
+    //   「選んだ部品が再生位置にかかっていません」は、選んでいない人には事実と違い、次の一歩も読めない（§2-5）。
+    hint: selectedClipIds.length === 0
+      ? NOTHING_SELECTED_HINT.trim
+      : trimTargetsHaveLocked
       // ⚠️ **言い分けも「そろえる帯の数」で見る**＝domain（`trimClips`）が同じ数で決めるので、
       // 選択数で決めると**説明と実際の断り文が食い違う**。
       ? editBlockedMessage[trimTargetCount > 1 ? EDIT_BLOCKED.lockedSelection : EDIT_BLOCKED.locked]
@@ -2845,11 +2901,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const showPlaceHint = (trackId: string | undefined, spec: ClipPlacement | null): void => {
     if (!spec || exporting || isPlaying || !doc) { setPlaceHint(null); return; }
     if (spec.kind === TIMELINE_CLIP_KIND.text || spec.kind === TIMELINE_CLIP_KIND.shape || spec.kind === TIMELINE_CLIP_KIND.slot) {
-      const at = visualPlacementAt(doc, trackId, playheadSec);
+      // ⚠️ **押した結果と同じ計算を通す**（#1096・#1252）＝別々に書くと、そのときだけ帯が嘘になる。
+      //   ⚠️ **重ねるときは行が1つ違う**＝実際は**この列のさらに手前**へ列を足してそこへ入る。
+      //   行そのものはまだ無いので描けないが、**時刻（帯の左端と幅）は実際の置き先どおり**。
+      const at = visualPlacementFor(doc, spec.kind, trackId, playheadSec);
       setPlaceHint(at); // 置ける列が無ければ null＝帯を出さない（押しても置けない）
       return;
     }
-    // ほかの種類は時刻をずらさない（塞がっていれば置かずに断る）＝再生位置がそのまま置き先。
+    // ⚠️ **音・読み上げも、押した結果と同じ計算を通す**（レビュー 🟡・2026-09-28）＝
+    //   置く側（`placeAudio` / `voicePlacement`）を `audioPlacementAt` へ寄せたのに、ここだけ
+    //   再生位置のままだった＝**再生位置が塞がっているときだけ帯が嘘**（重なった所に出て、
+    //   押すと次の空きへ入る）。#1096 で絵の部品について塞いだ穴の、音での再発。
+    if (spec.kind === TIMELINE_CLIP_KIND.audio || spec.kind === TIMELINE_CLIP_KIND.voice) {
+      const durationSec = placedDurationSec(spec);
+      const at = audioPlacementAt(doc, trackId, playheadSec, durationSec);
+      // ⚠️ **置ける列が無ければ帯を出さない**。ただし**いまの画面からは到達しない**（変異チェックで
+      //   生き残ったので確かめた）＝音・読み上げの一覧は `voiceTracks.length === 0`（＝
+      //   `placeableAudioTracks` が空）のとき**一覧そのものを出さない**ので、手を伸ばす相手が無い。
+      //   ⚠️ **それでも書く**＝一覧の出し分けが変わった日に、ここが**黙って空の列 id で帯を出す**側に
+      //   倒れないため（守りは、到達しないうちに書いておくほうが安い）。
+      setPlaceHint(at ? { ...at, durationSec } : null);
+      return;
+    }
+    // 見た目パターンは時刻をずらさない（塞がっていれば置かずに断る）＝再生位置がそのまま置き先。
+    // ⚠️ **ずらさない理由**＝見た目パターンは**列の下敷き**（画面いっぱいの絵）なので、
+    //   後ろの空き時刻へ勝手に動かすと「いま見ている絵に敷く」という狙いから外れる（`11 §7.6` 追補）。
     if (!trackId) { setPlaceHint(null); return; }
     setPlaceHint({ trackId, startSec: playheadSec, durationSec: placedDurationSec(spec) });
   };
@@ -2942,7 +3018,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     spec: { bundledBgmId?: BundledBgmId; assetId?: string },
     at?: { trackId: string; startSec: number },
   ): void => {
-    addAudioClip({ ...spec, trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec });
+    // ⚠️ **押したときは、映像と同じで次の空き時刻へずれる**（2026-09-28 の実機レビュー）＝
+    //   以前は再生位置をそのまま渡していたので、**そこが塞がっていると断られた**
+    //  （映像・文字・図形は `firstFreeStart` でずれるのに、音だけ「ずらすか、列を足して重ねてください」）。
+    //   押す側からは同じ操作なので、結果が種類で変わる理由が読めない（ADR-0026②）。
+    // ⚠️ **運んで置いたときはずらさない**（ADR-0034 決定10）＝利用者が場所を指したら、そこへ置くか断る。
+    const found = at ?? (doc
+      ? audioPlacementAt(doc, audioTrackId, playheadSec, placedDurationSec({ kind: TIMELINE_CLIP_KIND.audio, ...spec }))
+      : null);
+    addAudioClip({ ...spec, trackId: found?.trackId ?? audioTrackId, startSec: found?.startSec ?? playheadSec });
+  };
+
+  /** 読み上げを押して置くときの置き先（音と同じ規則＝種類で割らない）。 */
+  const voicePlacement = (): { trackId: string; startSec: number } => {
+    const found = doc
+      ? audioPlacementAt(doc, audioTrackId, playheadSec, placedDurationSec({ kind: TIMELINE_CLIP_KIND.voice }))
+      : null;
+    return { trackId: found?.trackId ?? audioTrackId, startSec: found?.startSec ?? playheadSec };
   };
 
   /** キーボードで実行したときだけ走らせる（指の経路は `onEnd` で完結・`isKeyboardActivation`）。 */
@@ -3071,6 +3163,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 実際に分けるときの規則が同じもの（押せるのに何も起きない、を作らない）。
    */
   const splitExtra = (): { disabled?: boolean; hint?: string } => {
+    // ⚠️ **まとめて選んでいるときは「1つだけ」と言う**（#1256 b5）＝帯の操作の行は選び方に関わらず見えているので、
+    // 2つ選んでいるのに「選んでください」と言うと、選んでいる人には次の一歩が読めない（§2-5）。
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "分ける部品を選んでください" };
     // ⚠️ **再生中もここで断る**（#750 レビュー）＝ボタン・`Ctrl+K` は断るのに右クリックだけ通ると、
     // **走っている再生位置で分割が確定**する（同じ操作の結果が毎回変わる・ADR-0032 決定21）。
@@ -3123,6 +3218,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * （`freezeFrameIssue`）を先頭で通すので、押す前と押した後で条件が割れない。
    */
   const freezeExtra = (): { disabled?: boolean; hint?: string } => {
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "絵を止める部品を選んでください" };
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
     // ⚠️ **切り出し中は押す前に断る**（#1136 レビュー由来 🟡）＝黙って何も起きないと、
@@ -3177,7 +3273,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const freezePreviewHint = `再生位置から先を、その瞬間の絵で止めます${freezeAudioNote}。${FREEZE_FRAME_LENGTH_NOTE}`;
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
-      ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
+      ? { disabled: true, disabledHint: SINGLE_CLIP_ONLY_HINT }
       : editGuard().disabled
         ? { disabled: true, disabledHint: editGuard().title }
         : {};
@@ -3246,8 +3342,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const menuTrack = trackMenu ? doc?.tracks.find((t) => t.id === trackMenu.trackId) : undefined;
   // 列の操作も編集＝**書き出し中は押す前に断る**（#703 レビュー）。項目ごとに書かず、組み立てで一括して配る。
   const trackMenuGuard = exporting ? { disabled: true, disabledHint: exportingHint } : {};
+  /** 出さない列・固定した列の数（道具の行に出す・ADR-0048）。 */
+  // ⚠️ **フックにしない**＝ここは `if (!doc)` の早い `return` より後（呼ぶ順が描くたびに変わる）。数えるだけなので軽い。
+  const flaggedTracks = (() => {
+    const tracks = doc.tracks;
+    const hidden = tracks.filter((t) => t.hidden).length;
+    const locked = tracks.filter((t) => t.locked).length;
+    const parts = [hidden > 0 ? `出さない列 ${hidden}` : "", locked > 0 ? `固定 ${locked}` : ""].filter(Boolean);
+    return { count: hidden + locked, label: parts.join("・"), firstId: tracks.find((t) => t.hidden || t.locked)?.id };
+  })();
   const trackMenuItems: ContextMenuItem[] = menuTrack
     ? [
+        // ⚠️ **見つけられる道を残す**（ADR-0034 決定19）＝2回押しだけだと気づけない。
+        { label: "名前を変える", ...trackMenuGuard, onSelect: () => setRenamingTrackId(menuTrack.id) },
         { label: "手前へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "front") },
         { label: "奥へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "back") },
         // **中身ごと複製する**（#767・利用者決定）＝空の列だけ増やすなら「列を足す」と同じ。
@@ -3412,8 +3519,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
   const panels: PanelSpec[] = [
-    { id: PANEL_ID.preview, title: '仕上がり確認', content: (
+    // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
+    // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
+    //（1920×1009 の実測＝欄の本文 284px に絵 418px・「再生」は欄の下端より 142px 下）。
+    // 高さの側からも縛る＝`.preview-fit` が残りの高さを受け持ち、絵はその中に**縦横とも収まる**大きさにする。
+    { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, content: (
       <>
+        <div
+          className="preview-fit"
+          data-testid="preview-fit"
+          style={{ ["--stage-ratio" as string]: `${canvasDims.width / canvasDims.height}` }}
+        >
         <div className="preview-stage-wrap">
           {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
               入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
@@ -3581,6 +3697,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             />
           )}
         </div>
+        </div>
+        {/* 絵の下＝操作と設定。**ここだけが流れる**（絵は縮むだけ・流れない）＝設定を開いても
+            絵の下の「再生」の行は押し出されず、あふれた分はこの中でスクロールする。 */}
+        <div className="preview-below" data-testid="preview-below">
         <div className="row gap-sm">
           <button
             className="btn btn-primary"
@@ -3592,31 +3712,41 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button className="btn btn-ghost" onClick={() => { setPlayhead(0); followPlayhead(); }} disabled={playheadSec === 0}>
             先頭へ
           </button>
-          {exporting ? (
-            <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
-              {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                // **答えを求める確認は閉じてから始める**（#703 レビュー）。開いたまま走らせると、答えたのに
-                // 断られる＝取り返しのつかなさを聞いた意味が無くなる（黙って何もしない、も作らない）。
-                setExploding(null);
-                setRemovingTrackId(null);
-                // ⚠️ **始める直前に持ち込みフォントを取り直す**（上の ⚠️）＝門（`USER_FONT_MISSING`）が
-                // 見る一覧を最新にしてから走らせる。取り直せなくても書き出しは始める（`userFontsUnreadable`
-                // が「調べられなかった」を持つので、門はそちらで断る）。
-                void refreshUserFonts()
-                  .catch(() => {})
-                  .then(() => exportTimelineVideo({ templates, templateAssetSrcById }));
-              }}
-              disabled={exportBlocked != null || isPlaying}
-              title={exportBlocked?.message ?? playingHint}
-            >
-              動画を書き出す
-            </button>
-          )}
+          {/* ⚠️ **再生位置は操作の行に置く**（利用者要望 2026-09-28）＝以前はこの欄のいちばん下、
+              クレジットと文字の形の設定より**さらに後ろ**にあり、**欄の中をスクロールしないと届かなかった**。
+              いちばんよく触るものが、いちばん遠い所にあった。⚠️ **見た目は変えていない**（同じ `range`）。 */}
+          {/* ⚠️ **つまみが潰れない下限を持たせる**（実機で測った＝欄が狭いとき**幅 10px** まで縮み、
+              掴めなかった）。⚠️ **名前は読み上げ用に残す**（`aria-label`）＝**見える文字は置かない**：
+              置くと約60px を食い、その分つまみが潰れる（同じ 316px の欄で、文字を外すと 10px→80px）。
+              すぐ右に「0.0 秒 / 全体 10.0 秒」が出ているので、何の目盛りかは読み取れる
+              （ADR-0034＝業界の型。動画編集ソフトの再生バーに見出しは付かない）。 */}
+          <label className="row gap-sm grow" style={{ alignItems: "center", minWidth: 0 }}>
+            <input
+              className="grow"
+              style={{ minWidth: PLAYHEAD_SLIDER_MIN_PX }}
+              type="range"
+              aria-label="再生位置"
+              min={0}
+              max={Math.max(totalSec, 0.1)}
+              step={0.1}
+              value={playheadSec}
+              /* ⚠️ **掴んだら再生を止める**（#844-6・ADR-0032 決定21 追補の対象拡大＝利用者判断 2026-08-25）＝
+                 目盛りと同じ扱いにする。止めないと、握っている間つまみが**指と再生位置の間で往復**する
+                 （`_advancePlayhead` が毎フレーム書き戻し、`step` の丸めに収まらない分だけ跳ねる）＝
+                 「掴めるのに言うことを聞かない」。掴む入口はここ1か所（`onPointerDown`）＝押すだけ・
+                 キーで動かすぶんは**止めない**（`onChange` は触らない）＝`11 §7.6.2.1`「再生中に位置を
+                 動かしたら時計を測り直す」の再生継続シークはそのまま。 */
+              /* ⚠️ **左ボタンだけ**（差分再監査 ℹ️）＝掴む作法の単一の参照元（`usePointerDrag`）に揃える。
+                 この画面は帯・列で「右クリックでも開けます」と案内しているので、右クリックで
+                 **メニューは出ず再生だけ止まる**は到達する。目盛り側（下）も同じ関門を持つ。 */
+              onPointerDown={(e) => { if (e.button === 0 && useTimelineStore.getState().isPlaying) pause(); }}
+              onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
+            />
+          </label>
+          <span className="text-sm text-muted" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+            {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
+          </span>
+
         </div>
         {exportBlocked && exportBlocked.source === EXPORT_BLOCK_SOURCE.situation && !exporting && (
           // 無効にしたボタンの `title` はホバーで出ないことがあるので、**知らせの段にも出す**（#719 レビュー）。
@@ -3630,12 +3760,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <li key={b.code}>{doc && resolveExportBlockedMessage(b.code, doc, b.clipIds)}</li>
             ))}
           </ul>
-        )}
-        {exporting && exportRun.phase !== EXPORT_RUN_PHASE.preparing && (
-          <div className="field" aria-live="polite">
-            <progress value={exportRun.percent} max={100} />
-            <span>動画を書き出しています（{exportRun.percent}%）。そのままお待ちください。</span>
-          </div>
         )}
         {exportRun.message && (
           <p className={exportRun.phase === EXPORT_RUN_PHASE.done ? "notice" : "notice notice-warn"} role="status">
@@ -3692,30 +3816,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </details>
         )}
-        <label className="field">
-          <span>再生位置</span>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(totalSec, 0.1)}
-            step={0.1}
-            value={playheadSec}
-            /* ⚠️ **掴んだら再生を止める**（#844-6・ADR-0032 決定21 追補の対象拡大＝利用者判断 2026-08-25）＝
-               目盛りと同じ扱いにする。止めないと、握っている間つまみが**指と再生位置の間で往復**する
-               （`_advancePlayhead` が毎フレーム書き戻し、`step` の丸めに収まらない分だけ跳ねる）＝
-               「掴めるのに言うことを聞かない」。掴む入口はここ1か所（`onPointerDown`）＝押すだけ・
-               キーで動かすぶんは**止めない**（`onChange` は触らない）＝`11 §7.6.2.1`「再生中に位置を
-               動かしたら時計を測り直す」の再生継続シークはそのまま。 */
-            /* ⚠️ **左ボタンだけ**（差分再監査 ℹ️）＝掴む作法の単一の参照元（`usePointerDrag`）に揃える。
-               この画面は帯・列で「右クリックでも開けます」と案内しているので、右クリックで
-               **メニューは出ず再生だけ止まる**は到達する。目盛り側（下）も同じ関門を持つ。 */
-            onPointerDown={(e) => { if (e.button === 0 && useTimelineStore.getState().isPlaying) pause(); }}
-            onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
-          />
-        </label>
-        <p className="text-muted">
-          {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
-        </p>
+        </div>
       </>
     ) },
     { id: PANEL_ID.arrange, title: '並び', fillBody: true, content: (
@@ -3738,7 +3839,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             style={{
               ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px`,
               // 高さも**TS が単一の参照元**（#1104）＝行と帯と「⋮」が同じ数字から導かれる。
-              ["--timeline-lane-h" as string]: `${TIMELINE_LANE_H_PX}px`,
+              // ⚠️ **利用者が選べる**（ADR-0048 決定3・#1256 c1）＝既定は 28px（#1104）。
+              ["--timeline-lane-h" as string]: `${TIMELINE_LANE_HEIGHTS[laneHeight]}px`,
               ["--timeline-clip-inset" as string]: `${TIMELINE_CLIP_INSET_PX}px`,
               ["--clip-handle-w" as string]: `${CLIP_HANDLE_W_PX}px`,
               ["--clip-handle-hit-w" as string]: `${CLIP_HANDLE_HIT_W_PX}px`,
@@ -3779,6 +3881,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   一度そうしたが、`title` は**タッチでもキーボードでも読めない**うえ、
                   `06 §12.1` が「並びの欄の上に一文で置く」と明記していた。
                   **同じ行に、短い一文として置く**（行は増やさない・寄せ先も画面に残す）。 */}
+              {/* **列の高さ**（ADR-0048 決定3・#1256 c1）＝列が少なければ太く、多ければ細く。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <label className="row gap-sm" style={{ alignItems: "center", flexWrap: "nowrap" }}>
+                <span className="field-label text-sm" style={{ margin: 0 }}>列の高さ</span>
+                <select
+                  className="select"
+                  style={{ width: "auto" }}
+                  aria-label="列の高さ"
+                  value={laneHeight}
+                  onChange={(e) => {
+                    const next = e.target.value as TimelineLaneHeight;
+                    setLaneHeight(next);
+                    saveLaneHeight(next);
+                  }}
+                >
+                  {TIMELINE_LANE_HEIGHT_ORDER.map((h) => (
+                    <option key={h} value={h}>{LANE_HEIGHT_LABEL[h]}</option>
+                  ))}
+                </select>
+              </label>
               <span className="timeline-toolbar-sep" aria-hidden="true" />
               <span className="field-label text-sm" style={{ margin: 0 }}>吸着</span>
               <Switch
@@ -3787,6 +3909,126 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 label="吸着"
               />
               <span className="text-sm text-muted">{snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}</span>
+              {/* ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、
+                  その2つのボタンのぶんだけ**帯の入る高さを削っていた**。道具立ては1行に畳む
+                  （#1104 で「表示倍率」「吸着」を1行にしたのと同じ理由）。
+                  ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、
+                  欄だけを見ていて列を足せない、に戻る。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
+              {/* ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
+                  **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。
+                  節は目印があるときだけ出す（一覧を辿る・メモを書く道具）。`M` キーでも置ける（業界の型）。 */}
+              {/* **出さない列・固定した列があることを数で言う**（ADR-0048）＝列が多くて見出しが画面の外に
+                  あっても気づける。押すと最初のその列へ送る。 */}
+              {flaggedTracks.count > 0 && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  title="その列まで移ります"
+                  onClick={() => {
+                    const el = document.querySelector(`[data-track-id="${flaggedTracks.firstId}"]`);
+                    el?.scrollIntoView({ block: "nearest" });
+                  }}
+                >
+                  <span className="badge badge-yellow">{flaggedTracks.label}</span>
+                </button>
+              )}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={addMarkerAtPlayhead} title={markerGuard.title ?? MARKER_ADD_TITLE} {...(markerGuard.disabled ? { disabled: true } : {})}>
+                {MARKER_ADD_LABEL}
+              </button>
+            </div>
+            {/* **帯の操作の行**（ADR-0048・#1256 b5）＝分ける・絵を止める・再生位置でそろえる・複製・削除・作業範囲。
+                ⚠️ **業界の型**＝CapCut・Premiere などは、帯を編集する道具を**タイムラインのすぐ上**に置く
+                （以前は「選んだ部品」欄の上段に13個並べており、欄の中身 976px のうち見えるのは約39%だった）。
+                ⚠️ **押せる条件・断り文は以前と同じ入口**（`splitGuard` 等）＝置き場所だけを変えた。
+                何も選んでいないときは**押せなくして理由を出す**（押しても何も起きない、を作らない）。 */}
+            <div className="timeline-toolbar timeline-edit-tools" role="toolbar" aria-label="帯の操作">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.arrange)}
+                {...splitGuard}
+                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
+              >
+                ここで分ける
+              </button>
+              {/* ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、言わないと
+                  「思ったより短い」となった人の次の一歩が画面から読めない。 */}
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
+                {...freezeGuard}
+                title={freezeGuard.title ?? freezePreviewHint}
+              >
+                {FREEZE_FRAME_LABEL}
+              </button>
+              {/* ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
+                  **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。 */}
+              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
+                ここから始める{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
+                ここで終わる{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={duplicateSelectedClip}
+                {...editGuard(
+                  selectedClipIds.length > 1
+                    ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
+                    : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
+                )}
+              >
+                {DUPLICATE_LABEL}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => requestRemoveSelected(PANEL_ID.arrange)}
+                {...(removeGuard ?? {})}
+                title={removeGuard?.title ?? (selectedClipIds.length === 0
+                  ? NOTHING_SELECTED_HINT.remove
+                  : selectedClipIds.length > 1
+                    ? `選んだ${selectedClipIds.length}個をまとめて削除します（Delete）`
+                    : "選んだ部品を削除します（Delete）")}
+              >
+                {/* まとめて選んでいるときは数を言う＝右クリックのメニューと同じ言い方（ADR-0026②）。 */}
+                {selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL}
+              </button>
+              {/* **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
+                  ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
+                  ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
+                  ⚠️ **キーだけにしない**（同 決定19）＝ボタンからも同じ入口を通る。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("in", playheadSec)} title="ここを作業範囲の始まりにします（I）">
+                ここから（範囲）
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("out", playheadSec)} title="ここを作業範囲の終わりにします（O）">
+                ここまで（範囲）
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => deleteRangeInTimeline(true, PANEL_ID.arrange)}
+                {...rangeCloseGuard}
+                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
+              >
+                範囲を削除して詰める
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => deleteRangeInTimeline(false, PANEL_ID.arrange)}
+                {...rangeDeleteGuard}
+                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
+              >
+                範囲を削除
+              </button>
+              {/* ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
+                  消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。 */}
+              {(rangeInSec != null || rangeOutSec != null) && (
+                <button className="btn btn-ghost btn-sm" onClick={clearRange} title="作業範囲をやめます">
+                  範囲をやめる
+                </button>
+              )}
             </div>
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
@@ -4003,12 +4245,80 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         **ドラッグ専用にしない**（決定19）＝「⋮」の「手前へ／奥へ」は残す。 */}
                     <div
                       className={`timeline-row-label${exporting ? "" : " grabbable"}`}
+                      data-track-id={track.id}
                       onContextMenu={(e) => openTrackMenu(e, track.id)}
                       onPointerDown={(e) => beginTrackDrag(e, track.id)}
                     >
-                      <span>{trackLabel(doc.tracks, track.id)}</span>
-                      {track.hidden && <span className="sub">出さない</span>}
-                      {track.locked && <span className="sub">固定中</span>}
+                      {renamingTrackId === track.id ? (
+                        // ⚠️ **その場で書き換える**（利用者要望 2026-09-28）＝名前のためだけに別の画面を開かない。
+                        // ⚠️ **掴んで並べ替える面の上に載っている**ので、押した先が親へ行かないように止める。
+                        <input
+                          className="timeline-row-name"
+                          autoFocus
+                          defaultValue={track.name ?? ""}
+                          maxLength={TRACK_NAME_MAX}
+                          placeholder={trackLabel(doc.tracks, track.id)}
+                          aria-label={`${trackLabel(doc.tracks, track.id)}の名前`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => { renameTrack(track.id, e.currentTarget.value); setRenamingTrackId(null); }}
+                          onKeyDown={(e) => {
+                            // ⚠️ **この画面のキー（Delete・Space・矢印）へ流さない**＝名前を打っている最中に
+                            // 帯が消える／再生が始まる、を作らない。
+                            e.stopPropagation();
+                            // ⚠️ **自分で `Enter`／`Escape` を見ない**（#989 の門番が捕まえた）＝日本語を打つと
+                            // **変換を確定する `Enter`** で名前が決まって欄が閉じる。共有の道具が変換中を外す。
+                            // ⚠️ **やめる道を残す**＝`Escape` は書き換えずに閉じる（`blur` より先に印を落とす）。
+                            const value = e.currentTarget.value;
+                            renameFieldKeys({
+                              commit: () => { renameTrack(track.id, value); setRenamingTrackId(null); },
+                              cancel: () => setRenamingTrackId(null),
+                            })(e);
+                          }}
+                        />
+                      ) : (
+                        // ⚠️ **2回押しで名前を変える**（業界の型）＝メニューからも開けるので、
+                        // 「掴んで並べ替える」と取り合いにならない（押し下げでは何も始めない）。
+                        // ⚠️ **名前の全体を `title` で読める**（ADR-0048）＝右端に出す印が名前の終わりにかぶるので、
+                        // 長い名前は途中で切れる。
+                        <span title={trackLabel(doc.tracks, track.id)} onDoubleClick={() => { if (!exporting) setRenamingTrackId(track.id); }}>
+                          {trackLabel(doc.tracks, track.id)}
+                        </span>
+                      )}
+                      {/* **出す／固定の切り替え**（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」）。
+                          ⚠️ **普段は見せない**（以前「隠す・固定・消すの常時表示は邪魔」＝利用者指摘 2026-08-03）＝
+                          見出しに乗せた／キーで入ったときだけ薄く出る。**変えた状態は常に濃く出す**（今の状態が分かる）。
+                          ⚠️ **名前の幅を食わない**＝名前の上に重ね、かぶる所はぼかす（出たり消えたりで行がずれない）。
+                          ⚠️ **見えないときは押せない**（`pointer-events`）＝見えない当たり判定を作らない（ADR-0047 決定3）。
+                          ⚠️ **動きはメニューと同じ入口**（`setTrackFlag`）＝取り消せる・書き出し中は押せない。 */}
+                      <span className="timeline-row-toggles">
+                        <button
+                          type="button"
+                          className={`timeline-row-toggle${track.hidden ? " timeline-row-toggle--on" : ""}`}
+                          aria-pressed={!!track.hidden}
+                          aria-label={`${trackLabel(doc.tracks, track.id)}を${track.hidden ? "動画に出す" : "動画に出さない"}`}
+                          title={exporting ? exportingHint : track.hidden ? "動画に出していません（押すと出す）" : "動画に出しています（押すと出さない）"}
+                          disabled={exporting}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setTrackFlag(track.id, "hidden", !track.hidden)}
+                        >
+                          {track.kind === TRACK_KIND.audio
+                            ? (track.hidden ? <VolumeMuteIcon size={14} /> : <VolumeIcon size={14} />)
+                            : (track.hidden ? <EyeOffIcon size={14} /> : <EyeIcon size={14} />)}
+                        </button>
+                        <button
+                          type="button"
+                          className={`timeline-row-toggle${track.locked ? " timeline-row-toggle--on" : ""}`}
+                          aria-pressed={!!track.locked}
+                          aria-label={track.locked ? `${trackLabel(doc.tracks, track.id)}の固定を外す` : `${trackLabel(doc.tracks, track.id)}を固定する`}
+                          title={exporting ? exportingHint : track.locked ? "固定しています（押すと外す）" : "固定していません（押すと固定）"}
+                          disabled={exporting}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setTrackFlag(track.id, "locked", !track.locked)}
+                        >
+                          <LockIcon size={14} />
+                        </button>
+                      </span>
                       <button
                         // ⚠️ **共通のボタンの見た目を使わない**（#1104）＝上下の余白で**行が伸びる**。
                         // 名前の横に置くので、行の高さは帯が決める。
@@ -4028,7 +4338,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <div
                       // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
-                      className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+                      // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
+                      className={`timeline-track timeline-lane${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
@@ -4073,7 +4384,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             onPointerDown={(e) => beginClipDrag(e, c.id, "move")}
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
-                            title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
+                            title={clipRangeTitle(clipLabel(c, doc.assets), c.startSec, clipEndSec(c))}
                             onClick={(e) => { if (consumeSkipClick(e)) return; selectClip(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
@@ -4083,7 +4394,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                                 「どこで何が鳴っているか」が帯からは分からない。
                                 ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
                             {clipAnalysis(c)}
-                            {clipLabel(c)}
+                            {/* **長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる
+                                （印が先に切れると、幅があるのに読めない）。読み上げ名には混ぜない（`aria-hidden`）。 */}
+                            {pxPerSec * c.durationSec >= CLIP_BADGE_MIN_W_PX && (
+                              <span className="timeline-clip-badge" aria-hidden="true">
+                                {c.speed != null && c.speed !== 1 ? `×${c.speed} ` : ""}{c.durationSec.toFixed(1)}秒
+                              </span>
+                            )}
+                            {clipLabel(c, doc.assets)}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (
                               <>
@@ -4121,7 +4439,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                                 wideEnoughForHandles(c) ? " - var(--clip-handle-hit-w)" : ""
                               })`,
                             }}
-                            aria-label={`${clipLabel(c)}の操作`}
+                            aria-label={`${clipLabel(c, doc.assets)}の操作`}
                             title="この部品の操作（右クリックでも開けます）"
                             onClick={(e) => {
                               // ⚠️ **右クリックと同じ入口を通す**（#1015 レビュー 補足）＝
@@ -4141,13 +4459,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </div>
         )}
-        {/* ⚠️ **列を足すのは「並び」の欄の中で**（#767・利用者要望）＝欄だけを見ていると列を足せず、
-            欄の外を探しに行くことになっていた。**同じ操作を2か所に置かない**ので画面下部からは外す
-            （`06 §2` 規約5 の流儀）。 */}
-        <div className="row gap-sm mt-md">
-          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
-          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
-        </div>
         {/* **目印**（#356 ①）＝時間軸のものなので、時間軸を見ている欄の中に置く
             （`06 §2` 規約5＝同じ操作を2か所に置かない）。⚠️ **動画には出ない**。 */}
         <TimelineMarkersSection
@@ -4158,7 +4469,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // どれも**文書を触らせない**理由だから（消す・メモも同じく断るのが正しい）。
           busy={markerGuard}
           textGroup={textGroup}
-          onAdd={addMarkerAtPlayhead}
           // ⚠️ **見える所まで連れて行く**（#1138 レビュー由来 🟡）＝同じ画面の「先頭へ」や矢印は
           // `followPlayhead()` を伴う。無いと、倍率を上げていて目印が画面外のとき**押しても何も変わらない**。
           onJump={(sec) => { setPlayhead(sec); followPlayhead(); }}
@@ -4173,7 +4483,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {selected ? (
           <>
             <p className="text-muted">
-              {clipLabel(selected)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
+              {clipLabel(selected, doc.assets)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
             </p>
             {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
@@ -4215,81 +4525,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 再生位置へ
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
-                ここから始める
-              </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
-                ここで終わる
-              </button>
-              {/* **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
-                  ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
-                  ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
-                  ⚠️ **キーだけにしない**（同 決定19）＝ボタンからも同じ入口を通る。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => setRangeEdge("in", playheadSec)}
-                title="ここを作業範囲の始まりにします（I）"
-              >
-                ここから（範囲）
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => setRangeEdge("out", playheadSec)}
-                title="ここを作業範囲の終わりにします（O）"
-              >
-                ここまで（範囲）
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => deleteRangeInTimeline(true, PANEL_ID.selected)}
-                {...rangeCloseGuard}
-                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
-              >
-                範囲を削除して詰める
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => deleteRangeInTimeline(false, PANEL_ID.selected)}
-                {...rangeDeleteGuard}
-                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
-              >
-                範囲を削除
-              </button>
-              {/* ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
-                  消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。 */}
-              {(rangeInSec != null || rangeOutSec != null) && (
-                <button className="btn btn-secondary" onClick={clearRange} title="作業範囲をやめます">
-                  範囲をやめる
-                </button>
-              )}
-              {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.selected)}
-                {...splitGuard}
-                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
-              >
-                ここで分ける
-              </button>
-              {/* **この瞬間で絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
-                  ⚠️ **時間は増やさない**（ADR-0034 決定11＝押しのけは採らない）＝止めた絵は
-                  その部品の残り時間ぶん続く。伸ばしたいときは、いつもどおり帯を引っぱる。 */}
-              <button
-                className="btn btn-secondary"
-                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.selected); }}
-                {...freezeGuard}
-                // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、
-                //   言わないと「思ったより短い」となった人の次の一歩が画面から読めない。
-                title={freezeGuard.title ?? freezePreviewHint}
-              >
-                {/* ⚠️ **押していないのに進行中と名乗らない**（#1136 レビュー由来 ℹ️）＝
-                    `isImporting` は素材の取り込みでも立つので、写真をドロップしている最中に
-                    このボタンが「切り出しています…」と名乗ってしまう。名前は動かさず、
-                    押せない理由（取り込み中）は `disabled` のヒントで伝える。 */}
-                {FREEZE_FRAME_LABEL}
-              </button>
-              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
-              <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
+              {/* ⚠️ **帯を分ける・消す・範囲の操作は「並び」の道具の行へ移した**（ADR-0048・#1256 b5）＝
+                  ここには**位置を少しずつ動かす3つ**だけを残す（下の「開始・長さ」の欄と同じ話＝位置の微調整）。
+                  以前はこの欄の上段に13個並び、**中身 976px のうち見えるのは約39%**だった。 */}
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -5077,7 +5315,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     >
                       <option value="">連動しない</option>
                       {voiceClips.map((v) => (
-                        <option key={v.id} value={v.id}>{clipLabel(v)}</option>
+                        <option key={v.id} value={v.id}>{clipLabel(v, doc.assets)}</option>
                       ))}
                     </select>
                   </label>
@@ -5274,29 +5512,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <p className="text-muted">
             {selectedClipIds.length > 1
-              ? "1つだけ選ぶと、中身や位置を変えられます（長さをそろえる・まとめて削除は、このままできます）。"
+              ? "1つだけ選ぶと、中身や位置を変えられます（長さをそろえる・まとめて削除は、並びの上の行でできます）。"
               : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
           </p>
         )}
-        {/* ⚠️ **長さは複数でもそろえられる**（#1005＝実機の指摘）＝動かすのと消すのは複数に効くのに、
-            長さだけ入口が消えていた（同じ選択で操作が割れる）。
-            ⚠️ **再生位置にかかっている部品だけ**が相手＝かかっていない部品をそろえると
-            **置いた場所が動く**（トリムのつもりが移動になる）。
-            ⚠️ **何個が変わるかを押す前に出す**＝選んだ数をそのまま出すと、
-            かかっていない帯が混ざったとき**押したのに数が合わない**（数え方は domain と共有する）。 */}
-        {selectedClipIds.length > 1 && (
-          <div className="row gap-sm mt">
-            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
-              ここから始める（{trimTargetCount}個）
-            </button>
-            <button className="btn btn-secondary" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
-              ここで終わる（{trimTargetCount}個）
-            </button>
-          </div>
-        )}
-        {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
-        )}
+        {/* ⚠️ **まとめての「長さをそろえる」「削除」は「並び」の上の帯の操作の行へ**（ADR-0048・#1256 b5）＝
+            1つのときと同じ場所で押せる（選んだ数で置き場所が変わる、を作らない）。数はそこに出す（#1005）。 */}
       </>
     ) },
     // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4つの欄に分けており（#684）、
@@ -5315,9 +5536,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </div>
         {placeTab === PANEL_ID.place && (
           <>
-            {/* **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。
-                ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
-            <div className="row gap-sm mb-sm">
+            {/* ⚠️ **素材の一覧を上へ寄せる**（ADR-0048・#1256 b4）＝以前は取り込み・棚・説明・置く列・文字/図形が
+                縦に積まれ、**既定の配置でボタン14個のうち5個しか見えず、素材の一覧は欄の外**だった。
+                型（Filmora・CapCut）はタブのすぐ下に素材が並ぶ。**置く操作は1行・置く先と説明を1行**にまとめ、
+                使う頻度の低い「よく使う素材から取り込む」は一覧の**下**へ回した。
+                ⚠️ **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。 */}
+            <div className="row gap-sm mb-sm" style={{ flexWrap: "wrap" }}>
               <AssetImportButton
                 store={useTimelineStore}
                 disabledReason={exporting ? exportingHint : null}
@@ -5325,44 +5549,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 withAudio
                 label="写真・動画・音楽を取り込む"
               />
-            </div>
-            {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
-                棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
-            <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
-              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} onNavigate={onNavigate} />
-            </CollapsibleSection>
-            {importError && (
-              <div className="notice notice-warn row-between mb-sm" role="alert">
-                <span>{importError}</span>
-                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
-              </div>
-            )}
-            {placeableTracks.length === 0 ? (
-              <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
-            ) : (
-              <>
-                {/* ⚠️ **3文を1〜2行に詰める**（#1104・実機の指摘 2026-09-10「文を縦に3つ並べるのでは
-                    なく、1~2行に圧縮する」）＝欄が縦に狭いので、説明が3行あると入口そのものが押し出される。
-                    ⚠️ **意味は落とさない**＝どこへ入るかは押す前に帯で見せてある（#1096）ので、
-                    文は「押したら」「運んだら」の2つだけに絞る。 */}
-                <p className="text-muted text-sm">
-                  {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
-                  つかんで運べば落とした所へ。
-                </p>
-                {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
-                    ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
-                    既定は「いちばん手前の置ける列」＝欄に出ている列が実際に置く列（表示と結果を割らない）。 */}
-                <label className="field">
-                  <span>置く列</span>
-                  <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
-                    {placeableTracks.map((t) => (
-                      <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="row gap-sm">
-                  {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
-                      掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
+              {placeableTracks.length > 0 && (
+                <>
                   <button
                     className="btn btn-secondary grabbable"
                     {...busyGuard({ disabled: isPlaying, hint: playingHint })}
@@ -5383,8 +5571,35 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     図形を置く
                   </button>
+                </>
+              )}
+            </div>
+            {importError && (
+              <div className="notice notice-warn row-between mb-sm" role="alert">
+                <span>{importError}</span>
+                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
+            {placeableTracks.length === 0 ? (
+              <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
+            ) : (
+              <>
+                {/* **どこへ入るかを見せる**（#771(b)）＝置く列と、押したとき／運んだときの行き先を1行に。 */}
+                <div className="row gap-sm mb-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                  {/* ⚠️ **名前は「置く列」だけ**＝説明まで label に入れると、選ぶ欄の名前が長い文になる。 */}
+                  <label className="row gap-sm" style={{ alignItems: "center" }}>
+                    <span className="text-sm">置く列</span>
+                    <select className="select" style={{ width: "auto" }} value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                      {placeableTracks.map((t) => (
+                        <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="text-muted text-sm">
+                    {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
+                    つかんで運べば落とした所へ。
+                  </span>
                 </div>
-                {/* ⚠️ **1行に詰める**（#1104・実機の指摘）＝3文だと欄の高さを食う。 */}
                 {visualAssets.length === 0 ? (
                   <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
@@ -5405,6 +5620,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 )}
               </>
             )}
+            {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
+                棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}
+            <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="assetLibrary" title="よく使う素材から取り込む" defaultOpen={false}>
+              <AssetLibraryPanel target={PROJECT_FORMAT.timeline} onNavigate={onNavigate} />
+            </CollapsibleSection>
           </>
         )}
         {placeTab === PANEL_ID.templates && (
@@ -5520,7 +5740,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {...busyGuard({ disabled: isPlaying, hint: playingHint })}
                     onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
                       addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
-                    onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
+                    onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", ...voicePlacement() }))}
                     {...placeHintProps(audioTrackId, { kind: TIMELINE_CLIP_KIND.voice })}
                   >
                     読み上げを置く
@@ -5583,9 +5803,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   return (
     <>
-      <div className="main-scroll main-scroll--fixed">
+      <div className="main-scroll main-scroll--fixed dense">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
+      {/* ⚠️ **`dense` はこの画面だけ**（ADR-0047）＝操作と余白を詰めて、本体（並び）へ面積を渡す。
+          触る所（押す物・場所・言葉）は変えない。効き目を見てから他の編集画面へ広げる。
+          ⚠️ **付くのは編集の面だけ**（レビュー ℹ️・2026-09-28）＝下の**答えを求める確認**（`DeleteConfirm`）は
+          この `div` の外に出す作りなので**詰まらない**。これは意図どおり＝**押し間違えたくない所は詰めない**
+          （消す・バラすは戻しにくい）。右クリックのメニューは面の中なので詰まる。 */}
       <PageHead
         title={doc.projectName}
         // 見出しごと貼り付ける（#774）＝この画面の見出しはスクロールする側の中にあるので、
@@ -5611,7 +5836,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             extra={(
               <>
                 {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
-                <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} />
+                <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} presets={layoutPresets} />
+                {/* **近道キーの一覧**（ADR-0048・#1256 c6）＝`?` キーでも開く。 */}
+                <button
+                  className="btn btn-ghost text-sm"
+                  title="キーで使える操作の一覧（? キーでも開きます）"
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setShortcutsAt({ x: r.left, y: r.bottom });
+                  }}
+                >
+                  キー操作
+                </button>
+                {shortcutsAt && (
+                  <ShortcutList x={shortcutsAt.x} y={shortcutsAt.y} shortcuts={TIMELINE_SHORTCUTS} onClose={() => setShortcutsAt(null)} />
+                )}
                 {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器の下にあり、
                     編集している間は画面外だった（見えていない知らせは無いのと同じ）。
                     中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}
@@ -5623,6 +5862,67 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     <span className="badge badge-yellow">注意 {noticeCount}件</span>
                   </button>
+                )}
+                {/* ⚠️ **書き出しは見出しの行へ**（ADR-0048・#1256＝CapCut・Clipchamp などは右上に「書き出す」を置く）＝
+                    以前は仕上がり確認の欄の中（再生の行）にあり、**大きさの選択と書き出すボタンのぶん絵が小さくなっていた**。
+                    ⚠️ **大きさと書き出しは1組のまま**（#1255・利用者判断 2026-09-28「書き出すボタンの隣に」）。
+                    ⚠️ **いつも見える所**＝見出しの行は貼り付いている（`sticky`）ので、欄の奥に沈まない。 */}
+                {/* ⚠️ **書き出す大きさは、書き出すボタンの隣に**（#1255・利用者判断 2026-09-28）＝
+                    場面形式には在るのに、こちらだけ**常に 1920×1080** だった（同じ「動画を書き出す」なのに
+                    形式でできることが違う・ADR-0026②）。⚠️ **言い方も場面形式と同じ**にする（`06 §3`）。
+                    ⚠️ **欄の奥に沈めない**＝再生位置で踏んだのと同じ失敗をしない。 */}
+                {/* ⚠️ **大きさと書き出しは1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
+                    **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。選んでから押す一続きの
+                    操作なので、組ごと折り返す（`flexShrink: 0`・`flexWrap: nowrap`）。
+                    ⚠️ **1組のまま折り返す**＝見出しの行が狭いときも、大きさとボタンの間では割れない。 */}
+                <span style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)", flexShrink: 0, flexWrap: "nowrap" }}>
+                {!exporting && (
+                  <label className="row gap-sm" style={{ alignItems: "center", flexShrink: 0, flexWrap: "nowrap" }}>
+                    <span className="text-sm text-muted">大きさ</span>
+                    <select
+                      className="select"
+                      style={{ width: "auto" }}
+                      value={exportHd ? "hd" : "fullhd"}
+                      onChange={(e) => setExportHd(e.target.value === "hd")}
+                      aria-label="書き出す大きさ"
+                    >
+                      <option value="fullhd">きれい（{exportFullDims.width}×{exportFullDims.height}）</option>
+                      <option value="hd">軽い（{exportHdDims.width}×{exportHdDims.height}）</option>
+                    </select>
+                  </label>
+                )}
+                {exporting ? (
+                  <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
+                    {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      // **答えを求める確認は閉じてから始める**（#703 レビュー）。開いたまま走らせると、答えたのに
+                      // 断られる＝取り返しのつかなさを聞いた意味が無くなる（黙って何もしない、も作らない）。
+                      setExploding(null);
+                      setRemovingTrackId(null);
+                      // ⚠️ **始める直前に持ち込みフォントを取り直す**（上の ⚠️）＝門（`USER_FONT_MISSING`）が
+                      // 見る一覧を最新にしてから走らせる。取り直せなくても書き出しは始める（`userFontsUnreadable`
+                      // が「調べられなかった」を持つので、門はそちらで断る）。
+                      void refreshUserFonts()
+                        .catch(() => {})
+                        .then(() => exportTimelineVideo({ templates, templateAssetSrcById }));
+                    }}
+                    disabled={exportBlocked != null || isPlaying}
+                    title={exportBlocked?.message ?? playingHint}
+                  >
+                    動画を書き出す
+                  </button>
+                )}
+                </span>
+                {/* 書き出している間の進み具合も見出しの行に（押した所で結果が見える＝ボタンの隣）。 */}
+                {exporting && exportRun.phase !== EXPORT_RUN_PHASE.preparing && (
+                  <span className="row gap-sm text-sm" style={{ alignItems: "center", flexWrap: "nowrap" }} aria-live="polite">
+                    <progress value={exportRun.percent} max={100} style={{ width: 96 }} />
+                    <span>動画を書き出しています（{exportRun.percent}%）</span>
+                  </span>
                 )}
               </>
             )}

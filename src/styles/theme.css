@@ -530,6 +530,16 @@ button {
   border-radius: var(--radius);
 }
 
+/* 小さいボタン（ADR-0047・#1245）。
+   ⚠️ **12か所で使われていたのに、この規則が無かった**＝「ここは小さいボタン」と読めるコードが
+   普通の 41px を出していた（ドリフトではなく、最初から効いていなかった）。
+   ⚠️ **見た目＝当たり判定**（ADR-0047 決定3）＝見た目だけ縮めて当たり判定を残すと、
+   見えない当たり判定が隣と重なる。 */
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
 .btn-block {
   width: 100%;
 }
@@ -542,6 +552,19 @@ button {
 /* ===== フォーム ===== */
 .field {
   margin-bottom: var(--gap);
+}
+/* チェックと文字を1行に並べる。⚠️ 使われているのに規則が無かった（#1246）。 */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  cursor: pointer;
+}
+/* 見出しと欄を1行に並べる（縦に積まない欄）。⚠️ 同上。 */
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
 }
 
 .field-label {
@@ -805,6 +828,19 @@ button.badge {
 .mb {
   margin-bottom: var(--gap);
 }
+/* ⚠️ 下の4つは**使われているのに規則が無かった**（#1246 の門番で判明）＝
+   書いた人は効かせたつもりで、実際には何も起きていなかった。 */
+.mb-sm {
+  margin-bottom: var(--gap-sm);
+}
+.gap-xs {
+  gap: var(--gap-xs);
+}
+.list-reset {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .grow {
   flex: 1;
 }
@@ -813,6 +849,24 @@ button.badge {
 }
 .text-faint {
   color: var(--color-text-faint);
+}
+/* 注意の色（`--color-warn` が単一の参照元＝#413）。⚠️ 使われているのに規則が無かった（#1246）。 */
+.text-warn {
+  color: var(--color-warn);
+}
+/* 断りの文（赤）。⚠️ **8か所で使われているのに規則が無かった**＝
+   エラーの文が本文と同じ色で出ていた（読み飛ばされる）。 */
+.form-error {
+  color: var(--color-danger);
+  font-size: 13px;
+}
+/* 読みやすい折り返し。⚠️ `text-pretty` は21か所・`text-balance` は2か所で使われていたのに
+   規則が無かった＝どちらも効いていなかった。見出しは行の長さを揃え、本文は末尾の孤立を避ける。 */
+.text-pretty {
+  text-wrap: pretty;
+}
+.text-balance {
+  text-wrap: balance;
 }
 .text-sm {
   font-size: 13px;
@@ -880,6 +934,36 @@ button.badge {
  */
 .preview-stage-wrap {
   position: relative;
+}
+
+/**
+ * 仕上がり確認の**絵の置き場**（#1257・タイムライン編集）。欄の残りの高さを受け持ち、
+ * 絵（`.preview-stage-wrap`）を**縦横とも収まる**大きさにして真ん中へ置く。
+ * ⚠️ 絵の大きさを**幅だけ**で決めると、欄が横長のとき絵が欄の高さを越え、下の「再生」が押し出される。
+ * ⚠️ 絵の入れ物（wrap）に**実際の大きさを持たせる**＝操作レイヤ（`inset: 0`）の基準なので、
+ * 絵より大きい箱にすると掴む位置が実際とずれる。比は画面が `--stage-ratio`（幅÷高さ）で流し込む。
+ */
+.preview-fit {
+  flex: 1 1 0;
+  min-height: 96px;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-fit > .preview-stage-wrap {
+  width: min(100cqw, calc(100cqh * var(--stage-ratio, 1.7778)));
+  flex: 0 0 auto;
+}
+/* 絵の下（操作と設定）。中身の高さを取り、欄を越えた分はここだけで流す（絵は流さない）。 */
+.preview-below {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-sm);
 }
 
 .preview-stage-label {
@@ -1359,6 +1443,34 @@ button.badge {
 
 /* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
 .panel-frame { position: relative; }
+/* 見出しの右のボタン（広げる・⋮）。 */
+.panel-frame-head-actions { display: flex; align-items: center; gap: 2px; }
+/* **一時的に広げた欄**（ADR-0048 決定5）＝配置の器いっぱいに重ねて出す。
+   ⚠️ **ほかの欄は外さずに隠す**（`visibility`）＝外すと中身の状態（鳴っている音・スクロール位置）が消える。
+   ⚠️ 器（`.panel-layout`）が基準＝間の箱は位置を持たないので、広げた欄は器に対して置かれる。 */
+/* 近道キーの一覧（ADR-0048・#1256 c6）＝メニューと同じ浮いた面。色は明暗どちらでも読めるよう色の言葉から取る。 */
+.shortcut-list {
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 12px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: 80vh;
+  overflow: auto;
+}
+.shortcut-list-table { border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.shortcut-list-table th { text-align: left; white-space: nowrap; padding: 3px 12px 3px 0; font-weight: normal; vertical-align: top; }
+.shortcut-list-table td { padding: 3px 0; }
+.panel-layout--maximized { position: relative; }
+.panel-layout--maximized .panel-frame:not(.panel-frame--maximized),
+.panel-layout--maximized .panel-divider { visibility: hidden; }
+.panel-frame--maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
 .panel-frame--dragging { opacity: var(--drag-source-opacity); }
 .panel-frame-head {
   cursor: grab;
@@ -1490,4 +1602,60 @@ button.badge {
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border);
   font-size: 14px;
+}
+
+/* ===== 詰めた表示（ADR-0047・#1247） =====
+   編集画面の主役は「並び」で、周りの道具立てがその面積を削ってはいけない。
+   ⚠️ ~~触る所は変えない~~ → ADR-0048 で外した（UI/UX を優先＝理由を添えれば押す物・場所も変えてよい）。
+   ⚠️ **見た目＝当たり判定**（決定3・利用者判断）＝見た目だけ縮めると、見えない当たり判定が隣と重なる。
+   ⚠️ **寸法はここ（トークン）で決める**＝画面ごとに数字を書かない。クラス名だけで大きさを約束しない
+   （`btn-sm` が12か所で使われていたのに規則が無かった＝#1245）。
+   ⚠️ **列（`--timeline-lane-h`）はここで決めない**＝利用者が「列の高さ」で選ぶ（ADR-0048 決定3・既定 28px）。 */
+.dense {
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap: 10px;
+  --gap-lg: 12px;
+  --gap-xl: 20px;
+}
+.dense .card {
+  padding: var(--gap-lg);
+}
+.dense .btn {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.dense .btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.dense .btn-lg {
+  padding: 8px 18px;
+  font-size: 14px;
+}
+.dense .btn-icon {
+  padding: 5px;
+}
+.dense .section-title {
+  font-size: 14px;
+}
+.dense .topbar {
+  height: 44px;
+  padding: 0 var(--gap-lg);
+}
+.dense .page-head {
+  margin-bottom: var(--gap);
+}
+.dense .page-title {
+  font-size: 19px;
+}
+.dense .field {
+  margin-bottom: var(--gap-sm);
+}
+.dense .input,
+.dense .textarea,
+.dense .select,
+.dense select {
+  padding: 4px 8px;
+  font-size: 13px;
 }

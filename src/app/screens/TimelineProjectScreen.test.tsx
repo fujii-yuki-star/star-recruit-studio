@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ZOOM_LEVELS } from "../../domain/timeline/zoom";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
@@ -238,11 +239,15 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     expect(useTimelineStore.getState().doc!.clips).toEqual([]);
   });
 
-  it("列を足せる", () => {
+  it("列を足せる。⚠️ **音は映像より下へ入る**（#1249）", () => {
     twoClips();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("音の列を足す"));
-    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.kind)).toEqual(["visual", "visual", "audio"]);
+    // ⚠️ **配列の後ろほど手前**（`11 §7.6`）で、画面は**手前を上**に出す＝画面の順は配列の逆。
+    //   以前は種類に関わらず末尾へ足していたので、音が**映像より上**に乗っていた（#1249）。
+    //   読む人が毎回逆さにしなくてよいように、**画面で見える順**で確かめる。
+    const 画面の順 = [...useTimelineStore.getState().doc!.tracks].reverse().map((t) => t.kind);
+    expect(画面の順).toEqual(["visual", "visual", "audio"]);
   });
 });
 
@@ -621,6 +626,33 @@ describe("TimelineProjectScreen: 音（#630 後半）", () => {
       ],
     });
     useTimelineStore.setState({ audioSrcByKey: { "voice:voices/a.wav": "data:audio/wav;base64,QQ==" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
+
+  // ⚠️ **置いた直後に「もう一度作ってください」と言わない**（2026-09-28 の実機レビュー）＝
+  //   読み上げを置いた瞬間は文も声も無いので、**一度も作っていないのに**そう言われた。
+  //   しかも「読み上げる文が入っていません。文を入力してください」と並び、
+  //   **同じ1つの部品に別々の次の行動が2つ**出ていた（§2-5・ADR-0026②）。
+  it("文がまだ無い読み上げでは、音が見つからないとは言わない（文を入れるのが先）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "", status: "none" } },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
+
+  // ⚠️ **空白だけも「文が無い」**＝声を作っても無音になる（`TIMELINE_VOICE_TEXT_EMPTY` と同じ物差し）。
+  it("空白だけの読み上げでも同じ", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "   ", status: "none" } },
+      ],
+    });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
   });
@@ -1715,7 +1747,9 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(trackRowLabel("映像1"));
     const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
-    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
+    // ⚠️ **+「名前を変える」**（利用者要望 2026-09-28）＝自動名（映像1／音1）だけだと、列が増えたときに
+    //   どれが何の列か分からない。2回押しでも変えられるが、**見つけられる道**としてメニューにも置く。
+    expect(labels).toEqual(["名前を変える", "手前へ", "奥へ", "複製", "動画に出さない", "固定する", "削除"]);
   });
 
   it("固定した列では、言い方が「固定を外す」に変わる（#1106）", () => {
@@ -1725,7 +1759,8 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(trackRowLabel("映像1"));
     const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
-    expect(labels).toEqual(["手前へ", "奥へ", "複製", "動画に出さない", "固定を外す", "削除"]);
+    // ⚠️ **固定中でも名前は変えられる**＝固定が守るのは帯の位置と長さで、呼び名はそれに当たらない。
+    expect(labels).toEqual(["名前を変える", "手前へ", "奥へ", "複製", "動画に出さない", "固定を外す", "削除"]);
   });
 
   it("メニューから操作でき、選ぶと閉じる", () => {
@@ -1788,6 +1823,28 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
     first.unmount();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByRole("heading", { name: "置く" })).not.toBeInTheDocument();
+  });
+
+  // 配置の型（ADR-0048 決定4・#1256 c3）＝選ぶと**いまの配置**になり、覚える（型そのものは覚えない）。
+  it("欄のメニューから配置の型を選ぶと、その配置になり覚える", () => {
+    open();
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置の型：並びと仕上がりだけ" }));
+    expect(document.querySelector('[data-panel-id="place"]'), "置く欄が閉じていない").toBeNull();
+    expect(document.querySelector('[data-panel-id="arrange"]')).not.toBeNull();
+    first.unmount(); // 離れるときに覚える
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(document.querySelector('[data-panel-id="place"]'), "選んだ型を覚えていない").toBeNull();
+  });
+
+  it("欄のメニューに3つの型が並ぶ", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPanelMenu();
+    for (const name of ["並びを広く（既定）", "仕上がりを大きく", "並びと仕上がりだけ"]) {
+      expect(screen.getByRole("menuitem", { name: `配置の型：${name}` })).toBeTruthy();
+    }
   });
 
   it("「配置を既定に戻す」で戻る（組み替えたあとの逃げ道）", () => {
@@ -2439,8 +2496,11 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     expect(lastClip().trackId).toBe(select.value);
 
     // 選び直すと、その列へ入る。
+    // ⚠️ **塞がらない所で確かめる**（#1252）＝文字・図形は塞がっていると**手前に列を足して重ねる**ので、
+    //   同じ時刻へ2回続けて置くと「選んだ列へ入ったか」が見えない。再生位置を空いている所へ移す。
     const other = [...select.options].map((o) => o.value).find((v) => v !== select.value)!;
     fireEvent.change(select, { target: { value: other } });
+    useTimelineStore.setState({ playheadSec: 30 });
     fireEvent.click(within(place).getByRole("button", { name: "図形を置く" }));
     expect(lastClip().trackId).toBe(other);
   });
@@ -2710,15 +2770,19 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(screen.getByRole("button", { name: /写真・動画・音楽を取り込む/ })).toBeInTheDocument();
   });
 
-  it("続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {
+  // ⚠️ **素材で確かめる**（#1252）＝写真・動画は**紙芝居**として後ろへ並ぶのが正しい。
+  //   文字・図形は塞がっていると**手前に列を足して重ねる**ので、別の検査（「塞がっているときの置き方」）で見る。
+  it("素材を続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 同じ再生位置＝塞がっている
+    const 置く = () => fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
+    置く();
+    置く(); // 同じ再生位置＝塞がっている
     const clips = useTimelineStore.getState().doc!.clips;
     expect(clips).toHaveLength(2);
     // 1つ目の終わりから続けて置く（重ねない・黙って何もしない、もしない）。
     expect(clips[1].startSec).toBe(clips[0].startSec + clips[0].durationSec);
+    expect(clips[1].trackId, "列が増えている（紙芝居にならない）").toBe(clips[0].trackId);
     expect(useTimelineStore.getState().editBlocked).toBeNull();
   });
 
@@ -3220,6 +3284,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
 
   it("間の空きを飛び越さない（いちばん後ろの部品の終わりへ飛ばさない・#684 レビュー）", () => {
     // [0,3) と [10,15)。5秒ぶんは [3,10) の空きに収まるので、そこへ置く（15 ではない）。
+    // ⚠️ **素材で確かめる**（#1252）＝文字は塞がっていると手前へ重ねるので、この規則を通らない。
     withAsset({
       clips: [
         { id: "clip_001", trackId: "track_001", kind: TIMELINE_CLIP_KIND.text, startSec: 0, durationSec: 3, text: "あ" },
@@ -3227,7 +3292,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       ],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
     const clips = useTimelineStore.getState().doc!.clips;
     expect(clips).toHaveLength(3);
     expect(clips[2]).toMatchObject({ startSec: 3, durationSec: 5 });
@@ -4475,6 +4540,10 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(container.querySelector(".panel-layout--fill"), "器が高さの決め打ちに戻っている").not.toBeNull();
     // 知らせは自分の中でスクロールする（消すと「注意 N件」から寄れる先が無くなる）。
     expect(container.querySelector(".timeline-notices")).not.toBeNull();
+    // ⚠️ **詰めた表示（ADR-0047・#1247）**＝この印が外れると、操作と余白が元の大きさに戻り、
+    // 本体（並び）に渡していた面積が黙って消える。実測では、印の有無で
+    // **ボタン高 41→29px・欄の余白 24→12px・画面に収まらず隠れている量 1139→690px** と変わる。
+    expect(container.querySelector(".main-scroll--fixed.dense"), "詰めた表示の印が外れている").not.toBeNull();
   });
 
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
@@ -4616,7 +4685,7 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     for (let i = 0; i < 5; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
     expect(screen.getByRole("button", { name: "表示を広げる" })).toBeDisabled();
-    for (let i = 0; i < 10; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" }));
+    for (let i = 0; i < ZOOM_LEVELS.length; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" })); // 段の数だけ（#1258 で下へ足した）
     expect(screen.getByRole("button", { name: "表示を縮める" })).toBeDisabled();
   });
 
@@ -6512,7 +6581,8 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(canvasEls(container).ov!.children[0] as HTMLElement);
-    const dup = screen.getByText("複製").closest("button") as HTMLButtonElement;
+    // ⚠️ **メニューの項目を名指しする**（#1256 b5）＝帯の操作の行にも「複製」が並ぶようになった。
+    const dup = screen.getByRole("menuitem", { name: "複製" }) as HTMLButtonElement;
     expect(dup).toBeDisabled();
     expect(dup.getAttribute("title")).toContain("1つだけ選ぶと使えます");
   });
@@ -7894,5 +7964,682 @@ describe("TimelineProjectScreen: 音が出せない素材（#1050）", () => {
     withBgm({ "asset:asset_009": "data:audio/mp3;base64,X" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("音が出せない素材"))).toBe(false);
+  });
+});
+
+// 列に名前を付ける（利用者要望 2026-09-28）。自動名（映像1／音1）だけだと、列が増えたときに
+// **どれが何の列か**分からない。
+describe("TimelineProjectScreen: 列に名前を付ける", () => {
+  it("2回押すと欄になり、打って Enter で名前が付く", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "ゆうこの立ち絵" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("ゆうこの立ち絵");
+    expect(trackRowLabel("ゆうこの立ち絵")).toBeTruthy();
+  });
+
+  // ⚠️ **見つけられる道を残す**（ADR-0034 決定19）＝2回押しだけだと気づけない。
+  it("メニューからも開ける", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(trackRowLabel("映像1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "名前を変える" }));
+    expect(screen.getByLabelText("映像1の名前")).toBeTruthy();
+  });
+
+  // ⚠️ **消す道を残す**＝空にすると自動の名前へ戻る。空文字のまま残すと**見出しが消える**。
+  it("空にすると自動の名前へ戻る", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, name: "前の名前" }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("前の名前"));
+    const field = screen.getByLabelText("前の名前の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBeUndefined();
+    expect(trackRowLabel("映像1")).toBeTruthy();
+  });
+
+  // ⚠️ **やめる道を残す**＝`Escape` は書き換えずに閉じる。
+  it("Escape でやめられる（書き換わらない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "捨てる名前" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBeUndefined();
+  });
+
+  // ⚠️ **固定した列でも名前は変えられる**＝固定が守るのは帯の位置と長さで、呼び名はそれに当たらない。
+  it("固定した列でも名前を変えられる", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(trackRowLabel("映像1"));
+    const field = screen.getByLabelText("映像1の名前") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "固定した列" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("固定した列");
+  });
+});
+
+// 近道キーの一覧（ADR-0048・#1256 c6）＝見出しの行の「キー操作」と `?` キー。
+describe("TimelineProjectScreen: 近道キーの一覧（#1256 c6）", () => {
+  const dialog = () => screen.queryByRole("dialog", { name: "キー操作の一覧" });
+
+  it("見出しの行の「キー操作」で開き、閉じられる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "キー操作" }));
+    expect(dialog()).not.toBeNull();
+    expect(within(dialog()!).getByText("Ctrl+K")).toBeTruthy();
+    expect(within(dialog()!).getByText(/再生位置で分ける/)).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "閉じる" }));
+    expect(dialog()).toBeNull();
+  });
+
+  it("`?` キーで開き、`Escape` で閉じる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
+    expect(dialog()).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(dialog()).toBeNull();
+  });
+
+  // ⚠️ **読んでいる最中に画面のキーが効かない**＝一覧を開いたまま `M` を押して目印が増える、を作らない。
+  it("開いている間は、画面の近道キーが効かない", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
+    fireEvent.keyDown(window, { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers ?? []).toEqual([]);
+  });
+});
+
+// 「置く」欄の素材タブは、素材の一覧を上へ寄せる（ADR-0048・#1256 b4）。
+// ⚠️ 以前は取り込み・棚・説明・置く列・文字/図形が縦に積まれ、既定の配置でボタン14個のうち5個しか見えなかった。
+describe("TimelineProjectScreen: 「置く」欄を詰める（#1256 b4）", () => {
+  const place = () => document.querySelector('[data-panel-id="place"]') as HTMLElement;
+  const before = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+  it("取り込み・文字を置く・図形を置くが1つの行にある", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const text = within(place()).getByRole("button", { name: "文字を置く" });
+    const row = text.closest(".row")!;
+    expect(row.contains(within(place()).getByRole("button", { name: "図形を置く" }))).toBe(true);
+    expect(row.textContent, "取り込みが同じ行に無い").toContain("写真・動画・音楽を取り込む");
+  });
+
+  it("「よく使う素材から取り込む」は、置く列と素材の一覧より後ろ", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lib = within(place()).getByText("よく使う素材から取り込む");
+    const select = within(place()).getByLabelText("置く列");
+    expect(before(select, lib), "棚が置く列より前にある").toBe(true);
+    expect(before(within(place()).getByText(/写真がまだありません/), lib), "棚が素材の一覧より前にある").toBe(true);
+  });
+
+  it("置く列の名前は「置く列」だけ（説明を名前に混ぜない）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(within(place()).getByRole("combobox", { name: "置く列" })).toBeTruthy();
+  });
+});
+
+// 帯の操作は「並び」の道具の行にある（ADR-0048・#1256 b5）。
+// ⚠️ **以前は「選んだ部品」欄の上段に13個**並び、欄の中身 976px のうち見えるのは約39%だった。
+describe("TimelineProjectScreen: 帯の操作の行（#1256 b5）", () => {
+  const MOVED = ["ここで分ける", "ここから始める", "ここで終わる", "複製", "削除", "ここから（範囲）", "ここまで（範囲）", "範囲を削除して詰める", "範囲を削除"];
+  const clips = [
+    { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+    { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 4, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "い" },
+  ] as TimelineProject["clips"];
+  const tools = () => screen.getByRole("toolbar", { name: "帯の操作" });
+
+  it("「並び」の欄にあり、動かした操作が全部そろっている", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(tools().closest(".timeline-panel"), "「並び」の欄の外にある").not.toBeNull();
+    for (const name of MOVED) expect(within(tools()).getByRole("button", { name }), name).toBeTruthy();
+  });
+
+  it("「選んだ部品」の欄には、位置を少しずつ動かす3つだけが残る", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const panel = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
+    for (const name of MOVED) expect(within(panel).queryByRole("button", { name }), `${name} が残っている`).toBeNull();
+    for (const name of ["前へ", "後ろへ", "再生位置へ"]) expect(within(panel).getByRole("button", { name }), name).toBeTruthy();
+  });
+
+  it("押すと効く（置き場所を変えても同じ入口）", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    fireEvent.click(within(tools()).getByRole("button", { name: "ここで分ける" }));
+    expect(useTimelineStore.getState().doc!.clips.length).toBe(3);
+  });
+
+  // ⚠️ **選ぶ前から見えている**＝押せない理由を言わないと、押せないボタンが並んでいるだけになる（§2-5）。
+  it("何も選んでいないときは、押せなくして理由を出す", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここで分ける", "複製", "削除"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, `${name} に理由が無い`).toMatch(/選んで/);
+    }
+  });
+
+  // ⚠️ **長さをそろえるも「選んでください」**（#1259 レビュー 🟡）＝以前は「選んだ部品が再生位置にかかっていません」
+  //   が出ていた（選んでいない人には事実と違う）。
+  it("何も選んでいないとき、長さをそろえるは「選んでください」と言う", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここから始める", "ここで終わる"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, name).toBe("長さをそろえる部品を、並びかキャンバスで選んでください");
+    }
+  });
+
+  it("まとめて選んでいるときは「1つだけ」と言う（選んでいる人に「選んで」と言わない）", () => {
+    open({ clips });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const name of ["ここで分ける", "複製"]) {
+      const b = within(tools()).getByRole("button", { name }) as HTMLButtonElement;
+      expect(b.disabled, `${name} が押せる`).toBe(true);
+      expect(b.title, name).toBe("1つだけ選ぶと使えます");
+    }
+    // 削除はまとめて消せる（1つに限らない）＝名前は右クリックのメニューと同じく数を言う。
+    expect((within(tools()).getByRole("button", { name: "選んだ2個を削除" }) as HTMLButtonElement).disabled).toBe(false);
+    // 長さをそろえるも、変わる数を押す前に出す（#1005）。
+    expect(within(tools()).getByRole("button", { name: /ここから始める（\d+個）/ })).toBeTruthy();
+  });
+});
+
+// 列の高さを選べる（ADR-0048 決定3・#1256 c1）。既定は 28px（#1104 で実機から決めた値）。
+describe("TimelineProjectScreen: 列の高さ（#1256 c1）", () => {
+  const laneVar = (c: HTMLElement) => (c.querySelector(".timeline") as HTMLElement).style.getPropertyValue("--timeline-lane-h");
+
+  it("既定は 28px（ふつう）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("列の高さ") as HTMLSelectElement).value).toBe("normal");
+    expect(laneVar(container)).toBe("28px");
+  });
+
+  it("選ぶと列の高さが変わり、覚える（開き直しても同じ）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("列の高さ"), { target: { value: "tall" } });
+    expect(laneVar(first.container)).toBe("44px");
+    fireEvent.change(screen.getByLabelText("列の高さ"), { target: { value: "compact" } });
+    expect(laneVar(first.container)).toBe("20px");
+    first.unmount();
+    const second = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(laneVar(second.container), "覚えていない").toBe("20px");
+  });
+
+  it("道具立ての行にある", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.contains(screen.getByLabelText("列の高さ"))).toBe(true);
+  });
+});
+
+// 目印を置く入口は「並び」の道具立ての行と `M` キー（ADR-0048・#1256 b2）。
+// ⚠️ **以前は帯の下の節の中にあり、目印が0件でも節が 124px を取っていた**（並びの欄の本文の約27%）。
+describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {
+  const addButton = () => screen.getByRole("button", { name: "目印を置く" });
+
+  it("道具立ての行にあり、動画に出ないことを押す前に言う", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.contains(addButton()), "道具立ての行に無い").toBe(true);
+    expect(addButton().title, "動画に出ないと言っていない").toContain("動画には出ません");
+    expect(addButton().title, "キーで置けることを言っていない").toContain("M キー");
+  });
+
+  it("目印が無いときは、目印の節を出さない（帯の入る高さを削らない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/マーカー（目印）/)).toBeNull();
+  });
+
+  it("押すと、いまの位置に置かれ、目印の節が出る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    fireEvent.click(addButton());
+    expect(useTimelineStore.getState().doc?.markers?.map((m) => m.timeSec)).toEqual([2]);
+    expect(screen.getByText(/マーカー（目印）/)).toBeTruthy();
+  });
+
+  it("`M` キーでも置ける（業界の型）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(3));
+    fireEvent.keyDown(window, { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.map((m) => m.timeSec)).toEqual([3]);
+  });
+
+  it("文字を打っている所では `M` を奪わない", () => {
+    open({ markers: [{ id: "marker_001", timeSec: 1 }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(5));
+    fireEvent.keyDown(screen.getByPlaceholderText(/メモ/), { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.length).toBe(1);
+    // ⚠️ **選ぶ欄も文字で中を探す**（ブラウザの標準機能）＝`I`／`O` と同じく奪わない。
+    fireEvent.keyDown(screen.getByLabelText("書き出す大きさ"), { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.length, "選ぶ欄でキーを奪った").toBe(1);
+  });
+
+  it("書き出し中は理由つきで押せない", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 42, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(addButton()).toBeDisabled();
+    expect(addButton().title).not.toBe("");
+    expect(addButton().title).not.toContain("動画には出ません");
+  });
+});
+
+// 列の見出しの「出す／固定」（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」・利用者判断 2026-09-29）。
+// 普段は見せず、見出しに乗せた／キーで入ったときに出す。**変えた状態は常に出す**（今の状態が分かる）。
+describe("TimelineProjectScreen: 列の見出しの出す／固定（静かな常設）", () => {
+  const tracks2 = [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }];
+  const clips1 = [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }] as TimelineProject["clips"];
+  /** その列の帯の並ぶ箱（見出しのすぐ隣）。 */
+  const lane = (c: HTMLElement, id: string) => c.querySelector(`.timeline-row-label[data-track-id="${id}"]`)!.nextElementSibling as HTMLElement;
+
+  it("押すと出さない／出すが切り替わり、状態を名前と押された印で言う", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const eye = screen.getByRole("button", { name: "映像1を動画に出さない" });
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(eye);
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBe(true);
+    const back = screen.getByRole("button", { name: "映像1を動画に出す" });
+    expect(back.getAttribute("aria-pressed")).toBe("true");
+    expect(back.className, "変えた状態を常に出す印が無い").toContain("timeline-row-toggle--on");
+    // 列そのものの見た目でも示す（帯が薄くなる）。
+    expect(lane(container, "track_001").className).toContain("timeline-lane--hidden");
+    fireEvent.click(back);
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBeFalsy();
+  });
+
+  it("固定も同じく切り替わり、列に斜線の印が付く", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "映像1を固定する" }));
+    expect(useTimelineStore.getState().doc!.tracks[0].locked).toBe(true);
+    expect(screen.getByRole("button", { name: "映像1の固定を外す" }).className).toContain("timeline-row-toggle--on");
+    expect(lane(container, "track_001").className).toContain("timeline-lane--locked");
+  });
+
+  it("メニューと同じ入口＝取り消せる", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "映像1を動画に出さない" }));
+    act(() => useTimelineStore.getState().undo());
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBeFalsy();
+  });
+
+  it("文字の印（出さない・固定中）はもう出さない＝アイコンの形で言う", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true, locked: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const label = container.querySelector('.timeline-row-label[data-track-id="track_001"]') as HTMLElement;
+    expect(label.textContent).not.toContain("出さない");
+    expect(label.textContent).not.toContain("固定中");
+  });
+
+  it("書き出し中は押せず、理由を言う", () => {
+    open({ tracks: tracks2 });
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const eye = screen.getByRole("button", { name: "映像1を動画に出さない" }) as HTMLButtonElement;
+    expect(eye.disabled).toBe(true);
+    expect(eye.title).not.toBe("");
+  });
+
+  it("出さない列・固定した列があるときだけ、道具の行に数を出す", () => {
+    open({ tracks: tracks2 });
+    const { container, unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.textContent).not.toMatch(/出さない列/);
+    unmount();
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }, { id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
+    const again = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(again.container.querySelector(".timeline-toolbar")!.textContent).toContain("出さない列 1・固定 1");
+  });
+
+  // ⚠️ **変えた状態は、乗せても・触る画面でも濃いまま**（#1259 レビュー 🟡＝詳細度の事故）。
+  it("CSS：変えた状態の規則は、乗せたときの規則より強く・後ろにある／触る画面の規則は変えた状態を除く", () => {
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    /** 詳細度（id は使っていないので、クラス・疑似クラスの数と要素の数だけ）。 */
+    const spec = (sel: string) => (sel.match(/[.:][a-zA-Z-]+/g) ?? []).filter((t) => t !== ":not").length;
+    const hoverSel = ".timeline-row-label:hover .timeline-row-toggle";
+    const hoverAt = css.indexOf(hoverSel + ",");
+    const onSels = css.slice(css.indexOf("\n.timeline-row-toggle--on,"), css.indexOf("{", css.indexOf("\n.timeline-row-toggle--on,"))).split(",").map((x) => x.trim());
+    const onAt = css.indexOf("\n.timeline-row-toggle--on,");
+    expect(hoverAt, "乗せたときの規則が見つからない").toBeGreaterThan(0);
+    expect(onAt, "変えた状態の規則が、乗せたときの規則より前にある（後ろが勝てない）").toBeGreaterThan(hoverAt);
+    expect(Math.max(...onSels.map(spec)), "変えた状態の規則が、乗せたときの規則より弱い").toBeGreaterThanOrEqual(spec(hoverSel));
+    expect(css, "触る画面の規則が、変えた状態まで薄くする").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle:not\(\.timeline-row-toggle--on\)/);
+  });
+
+  // ⚠️ jsdom は `:hover` を計算しないので、**CSS の約束**を見る（実際の見え方は preview_start で確かめた）。
+  it("CSS：普段は見せず押せない・乗せる／キーで入ると出る・変えた状態は常に出る・触る画面では常に出る", () => {
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = (sel: string) => { const i = css.indexOf(`\n${sel} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
+    const idle = rule(".timeline-row-toggle");
+    expect(idle).toMatch(/opacity:\s*0;/);
+    expect(idle, "見えないのに押せる（見えない当たり判定）").toMatch(/pointer-events:\s*none/);
+    expect(idle, "焦点が入らなくなる").not.toMatch(/visibility:\s*hidden/);
+    const reveal = rule(".timeline-row-label:hover .timeline-row-toggle,\n.timeline-row-label:focus-within .timeline-row-toggle");
+    expect(reveal, "乗せても／キーで入っても出ない").toMatch(/pointer-events:\s*auto/);
+    const on = rule(".timeline-row-label .timeline-row-toggle.timeline-row-toggle--on");
+    expect(on).toMatch(/opacity:\s*1/);
+    expect(on).toMatch(/pointer-events:\s*auto/);
+    expect(css, "触る画面で出す道が無い").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle:not\(\.timeline-row-toggle--on\)\s*\{[^}]*pointer-events:\s*auto/);
+    expect(rule(".timeline-lane--locked .timeline-clip"), "帯の上に斜線が無い（帯で埋まった固定の列が固定に見えない）").toMatch(/repeating-linear-gradient/);
+  });
+});
+
+// 帯の中に長さと速さの印を出す（ADR-0048・#1256 b6）＝ホバーしなくても帯1本から読める。
+describe("TimelineProjectScreen: 帯の長さと速さの印（#1256 b6）", () => {
+  /** 帯（並んだ順）の印。帯の名前は中身で変わるので、並びの順で取る。 */
+  const badgeAt = (c: HTMLElement, i: number) => c.querySelectorAll(".timeline-clip")[i]?.querySelector(".timeline-clip-badge") ?? null;
+
+  it("幅のある帯には長さを出し、読み上げ名には混ぜない", () => {
+    // 段の既定 36 px/秒 → 5秒は 180px（出す）・2秒は 72px（出さない）。
+    open({ clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 6, durationSec: 2, x: 0, y: 0, w: 10, h: 10 },
+    ] as TimelineProject["clips"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelectorAll(".timeline-clip").length).toBe(2);
+    const wide = badgeAt(container, 0);
+    expect(wide?.textContent).toBe("5.0秒");
+    expect(wide?.getAttribute("aria-hidden"), "読み上げ名に混ざる").toBe("true");
+    expect(badgeAt(container, 1), "細い帯にまで出して名前を潰している").toBeNull();
+  });
+
+  it("速さを変えた帯には速さも出す", () => {
+    open({
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "音", filePath: "assets/a.mp3" }],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 6, assetId: "asset_001", speed: 2 }] as TimelineProject["clips"],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const badge = container.querySelector(".timeline-clip-badge");
+    expect(badge?.textContent).toBe("×2 6.0秒");
+  });
+});
+
+// 書き出しは見出しの行にある（ADR-0048・#1256＝CapCut・Clipchamp などは右上に置く）。
+// ⚠️ 以前は仕上がり確認の欄の中（再生の行）にあり、大きさの選択と書き出すボタンのぶん絵が小さくなっていた。
+describe("TimelineProjectScreen: 書き出しの置き場所（#1256）", () => {
+  it("「動画を書き出す」と大きさは見出しの行にあり、1組のまま（仕上がり確認の欄には無い）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const bar = container.querySelector(".editor-toolbar") as HTMLElement;
+    const btn = screen.getByRole("button", { name: "動画を書き出す" });
+    const size = screen.getByLabelText("書き出す大きさ");
+    expect(bar.contains(btn), "書き出すボタンが見出しの行に無い").toBe(true);
+    expect(btn.parentElement!.contains(size), "大きさと書き出すボタンが1組になっていない（#1255）").toBe(true);
+    const preview = container.querySelector('[data-panel-id="preview"]') as HTMLElement;
+    expect(preview.contains(btn), "仕上がり確認の欄に残っている").toBe(false);
+  });
+
+  it("書き出している間の進み具合も見出しの行に出す", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 42, message: null, cancelling: false } });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const bar = container.querySelector(".editor-toolbar") as HTMLElement;
+    expect(within(bar).getByText(/動画を書き出しています（42%）/)).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "書き出しを中止" })).toBeTruthy();
+  });
+});
+
+// 仕上がり確認の絵は欄に収まり、「再生」の行は押し出されない（#1257）。
+// ⚠️ **既定の配置で「再生」が欄の外へ押し出されていた**（1920×1009 の実測＝欄の本文 284px に絵 418px）。
+// jsdom は大きさを計算しないので、**構造（絵の置き場と操作の置き場を分ける）と CSS の約束**を見る。
+// 実寸は `preview_start` で測った（直した後＝欄 284px の中に絵 110px・「再生」は y=220 で欄の中）。
+describe("TimelineProjectScreen: 仕上がり確認の絵は欄に収まる（#1257）", () => {
+  const cssOf = (f: string) => readFileSync(resolve(__dirname, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 規則の中身（`選択子 {` から最初の `}` まで）。**完全一致の選択子**で探す＝別の規則を拾わない。
+  const ruleOf = (css: string, sel: string): string => {
+    const i = css.indexOf(`\n${sel} {`);
+    return i < 0 ? "" : css.slice(i, css.indexOf("}", i));
+  };
+
+  it("絵は「絵の置き場」に、「再生」は「操作の置き場」にある（別の箱）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const fit = screen.getByTestId("preview-fit");
+    const below = screen.getByTestId("preview-below");
+    expect(fit.querySelector(".preview-stage"), "絵が絵の置き場に無い").not.toBeNull();
+    expect(below.contains(screen.getByRole("button", { name: "再生" })), "「再生」が操作の置き場に無い").toBe(true);
+    expect(fit.contains(below), "操作の置き場が絵の置き場の中にある（絵と一緒に押し出される）").toBe(false);
+    // 欄は**中身に高さを配らせる**器（`fillBody`）＝そうでないと絵の置き場が残りの高さを受け取れない。
+    expect(fit.parentElement?.className, "欄が高さを配らない（絵が欄に収まらない）").toMatch(/panel-frame-body--fill/);
+    // 比は動画の向きから流し込む（縦型で枠と絵がずれない）。
+    expect(fit.style.getPropertyValue("--stage-ratio")).toBe(String(1920 / 1080));
+  });
+
+  it("CSS：絵は高さの側からも縛られ、操作の置き場だけが流れる", () => {
+    const css = cssOf("../../styles/theme.css");
+    const fit = ruleOf(css, ".preview-fit");
+    expect(fit, "絵の置き場の規則が無い").toMatch(/flex:\s*1 1 0/);
+    expect(fit, "高さを測れない（cqh が効かない）").toMatch(/container-type:\s*size/);
+    const wrap = ruleOf(css, ".preview-fit > .preview-stage-wrap");
+    expect(wrap, "絵の幅が高さから縛られていない（横長の欄で絵が欄を越える）").toMatch(/width:\s*min\(100cqw,\s*calc\(100cqh\s*\*\s*var\(--stage-ratio/);
+    const below = ruleOf(css, ".preview-below");
+    expect(below, "操作の置き場が流れない（設定を開くと欄を越える）").toMatch(/overflow:\s*auto/);
+    expect(below, "操作の置き場が縮まない").toMatch(/min-height:\s*0/);
+  });
+});
+
+// 再生位置は操作の行にある（利用者要望 2026-09-28）。
+// ⚠️ **以前は欄のいちばん下**（クレジットと文字の形の設定より後ろ）にあり、**スクロールしないと届かなかった**。
+describe("TimelineProjectScreen: 再生位置の置き場所", () => {
+  // ⚠️ **書き出しは見出しの行へ移した**（ADR-0048・#1256）＝以前はこの検査が「書き出しと同じ行」を見ていた。
+  // 守りたいのは**再生位置が「再生」の行にある（欄の奥に沈まない）**ことなので、そちらを見る。
+  it("「再生」と同じ行にある（別の欄の奥に沈んでいない）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const slider = container.querySelector('input[type="range"]');
+    expect(slider, "再生位置のつまみが無い").not.toBeNull();
+    const row = screen.getByRole("button", { name: "再生" }).closest(".row");
+    expect(row, "「再生」が操作の行に無い").not.toBeNull();
+    expect(row!.contains(slider!), "再生位置が「再生」と同じ行に無い（欄の奥に沈んでいる）").toBe(true);
+    // ⚠️ **在るだけでは足りない**（変異チェックで露見）＝行の中に置いたまま隠しても通ってしまう。
+    for (let el: HTMLElement | null = slider as HTMLElement; el && el !== row; el = el.parentElement) {
+      expect(getComputedStyle(el).display, "再生位置（かその親）が隠れている").not.toBe("none");
+    }
+  });
+
+  // ⚠️ **同じ行に在る**だけでは足りない（実機で踏んだ）＝欄が狭いと、いちばん伸び縮みする
+  // つまみ**だけ**が潰れて **10px**（＝掴めない）になっていた。**下限を持っていること**を見る。
+  // ⚠️ **数は定数から取らない**＝定数を 0 にする変異が「定数どおり」で通ってしまう。
+  it("再生位置のつまみは、狭い欄でも掴める幅を保つ", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider, "再生位置のつまみが無い").not.toBeNull();
+    expect(Number.parseInt(slider.style.minWidth, 10) || 0, "つまみが潰れる（下限が無い）").toBeGreaterThanOrEqual(60);
+    // 見える文字を外したので、**読み上げ用の名前**が唯一の手がかりになる。
+    expect(slider.getAttribute("aria-label"), "再生位置の名前が無い").toBe("再生位置");
+  });
+
+  // ⚠️ **「大きさ」と「書き出す」は1組**（実機で踏んだ）＝別々に置いたら、欄が狭いときに
+  // **その間で折り返して、書き出しボタンだけが次の行へ落ちた**。
+  // ⚠️ **折り返しそのものは jsdom では測れない**（画面の配置を計算しない）＝**組になっていること**
+  // （同じ包みの中に居て、その包みが**間で折り返さない**）までを見る。実寸は実機で測った。
+  it("「大きさ」と「動画を書き出す」は、間で折り返さない1組になっている", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const size = screen.getByLabelText("書き出す大きさ");
+    const exportBtn = screen.getByRole("button", { name: "動画を書き出す" });
+    const wrap = exportBtn.parentElement!;
+    expect(wrap.contains(size), "大きさと書き出しが別の包みに居る").toBe(true);
+    expect(wrap.style.flexWrap, "組の中で折り返す（書き出しだけが落ちる）").toBe("nowrap");
+    expect(wrap.style.flexShrink, "組が縮む").toBe("0");
+    expect(wrap.parentElement, "組が操作の行の直下に無い").toBe(exportBtn.closest(".row"));
+  });
+});
+
+// 塞がっているときの置き方（利用者判断 2026-09-28・#1252）。
+// ⚠️ **同じ「置く」でも、人のつもりが種類で違う**＝写真を続けて置くのは紙芝居、文字を置くのは重ねたい。
+// アプリには分からないので**種類で決める**。⚠️ #722 案A（奥へ置かない＝裏に隠さない）は守る＝足すのは手前。
+describe("TimelineProjectScreen: 塞がっているときの置き方（#1252）", () => {
+  const busyVisual = () => open({
+    tracks: [{ id: "track_002", kind: TRACK_KIND.audio }, { id: "track_001", kind: TRACK_KIND.visual }],
+    clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100 }],
+  });
+  it("文字は、塞がっていたら手前に列を足して**重なる**（後ろへ並ばない）", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByText("文字を置く"));
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "列が足されていない").toBe(before + 1);
+    const text = d.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.text)!;
+    expect(text.startSec, "後ろへずれている（重なっていない）").toBe(0);
+    expect(text.trackId, "同じ列に置かれている").not.toBe("track_001");
+    // ⚠️ **足すのは手前**＝裏に隠れない（配列の後ろほど手前・`11 §7.6`）。
+    expect(d.tracks.findIndex((t) => t.id === text.trackId))
+      .toBeGreaterThan(d.tracks.findIndex((t) => t.id === "track_001"));
+  });
+
+  it("図形も同じ", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("図形を置く"));
+    const d = useTimelineStore.getState().doc!;
+    const added = d.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.shape);
+    expect(added.length).toBe(2);
+    expect(added[1]!.startSec, "後ろへずれている").toBe(0);
+  });
+
+  // ⚠️ **空いていれば列を足さない**＝押すたびに列が増える、を作らない。
+  it("空いているときは列を足さない", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }], clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("文字を置く"));
+    expect(useTimelineStore.getState().doc!.tracks.length, "列が増えている").toBe(1);
+  });
+
+  // ⚠️ **1回の取り消しで両方戻る**＝列だけが残らない。
+  it("取り消すと、足した列も一緒に戻る", () => {
+    busyVisual();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByText("文字を置く"));
+    useTimelineStore.getState().undo();
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "列だけが残った").toBe(before);
+    expect(d.clips.some((c) => c.kind === TIMELINE_CLIP_KIND.text)).toBe(false);
+  });
+
+  // ⚠️ **写真は後ろへ並んだまま**＝紙芝居が作れる（上の「素材を続けて置くと…」が本体）。
+  it("写真は塞がっていても列を足さない（紙芝居のまま）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }, { id: "track_001", kind: TRACK_KIND.visual }],
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_001", x: 0, y: 0, w: 100, h: 100 }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getAllByRole("button", { name: "会社の外観" })[0]!);
+    const d = useTimelineStore.getState().doc!;
+    expect(d.tracks.length, "写真なのに列が足された").toBe(before);
+    expect(d.clips[1]!.startSec, "後ろへ並んでいない").toBe(5);
+  });
+});
+
+// 列を足すボタンの置き場所（利用者要望 2026-09-28）。
+// ⚠️ **帯の下に置くと、その2つのぶんだけ帯の入る高さが減る**＝道具立ては1行に畳む
+//（#1104 で「表示倍率」「吸着」を1行にしたのと同じ理由）。
+// ⚠️ **「並び」の欄の中には残す**（#767）＝欄の外へ出すと、欄だけ見ていて列を足せない、に戻る。
+describe("TimelineProjectScreen: 列を足すボタンの置き場所", () => {
+  it("道具立ての行（表示倍率・吸着と同じ行）にある", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const toolbar = container.querySelector(".timeline-toolbar");
+    expect(toolbar, "道具立ての行が無い").not.toBeNull();
+    expect(toolbar!.textContent).toContain("表示倍率");
+    expect(toolbar!.textContent, "「映像の列を足す」が同じ行に無い").toContain("映像の列を足す");
+    expect(toolbar!.textContent, "「音の列を足す」が同じ行に無い").toContain("音の列を足す");
+  });
+
+  it("「並び」の欄の中にある（欄の外へ出さない・#767）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "映像の列を足す" });
+    expect(btn.closest(".timeline-panel"), "「並び」の欄の外に出ている").not.toBeNull();
+  });
+
+  it("押せば列が増える（置き場所を変えても効く）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().doc!.tracks.length;
+    fireEvent.click(screen.getByRole("button", { name: "音の列を足す" }));
+    expect(useTimelineStore.getState().doc!.tracks.length).toBe(before + 1);
+  });
+});
+
+// 書き出す大きさ（#1255・利用者判断 2026-09-28）。
+// ⚠️ **場面形式には在るのに、こちらだけ常に 1920×1080 だった**＝同じ「動画を書き出す」なのに
+// 形式でできることが違う（ADR-0026②）。口（`outputSize`）は前から在り、渡していなかっただけ。
+describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
+  it("書き出すボタンと同じ行で選べる（欄の奥に沈めない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
+    const row = screen.getByRole("button", { name: "動画を書き出す" }).closest(".row");
+    expect(row!.contains(sel), "書き出すボタンと違う行にある").toBe(true);
+    // ⚠️ **目に見える名前も要る**（変異チェックで露見）＝`aria-label` だけだと、
+    //   画面の「大きさ」が消えても通る＝目で見る人には**名前の無い欄**になる。
+    expect(sel.closest("label")?.textContent, "目に見える名前が無い").toContain("大きさ");
+  });
+
+  // ⚠️ **言い方は場面形式と同じ**（`06 §3`＝同じものを別の語で呼ばない）。
+  it("選択肢は「きれい」「軽い」で、寸法も出る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
+    const texts = [...sel.options].map((o) => o.text);
+    expect(texts).toEqual(["きれい（1920×1080）", "軽い（1280×720）"]);
+  });
+
+  it("既定は「きれい」（場面形式の既定と同じ）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).value).toBe("fullhd");
+    expect(useTimelineStore.getState().exportHd).toBe(false);
+  });
+
+  it("選ぶと覚える", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("書き出す大きさ"), { target: { value: "hd" } });
+    expect(useTimelineStore.getState().exportHd).toBe(true);
+  });
+
+  // ⚠️ **縦型でも同じ関数から出す**＝数字を画面に書かない（§2-7）。
+  it("縦型では縦型の寸法が出る", () => {
+    open({ videoSettings: { ...doc().videoSettings, aspectRatio: "9:16" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const texts = [...(screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).options].map((o) => o.text);
+    expect(texts).toEqual(["きれい（1080×1920）", "軽い（720×1280）"]);
   });
 });

@@ -10,7 +10,7 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "./app/store/proje
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { ChevronRightIcon } from "./app/components/icons";
-import { useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
+import { SIDEBAR_EDITOR_SCREENS, useEditorSidebarCollapsed, useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
 import { useAppearance } from "./app/hooks/useAppearance";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
@@ -106,7 +106,12 @@ function App() {
   // OS の明暗が変わったら追いつく（「OS に合わせる」を選んだ人は開き直しを強いられない）。
   useAppearance();
   // 左の帯を畳んでいるか（#1103）。画面の好みなので覚える（`localStorage`・ADR-0033）。
-  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
+  const [outsideCollapsed, setOutsideCollapsed] = useSidebarCollapsed();
+  // 編集画面では**別に覚え、畳んだ状態で始める**（ADR-0048・#1256 b1）＝作業場を最大にする。
+  const [editorCollapsed, setEditorCollapsed] = useEditorSidebarCollapsed();
+  const inEditor = SIDEBAR_EDITOR_SCREENS.has(screen);
+  const sidebarCollapsed = inEditor ? editorCollapsed : outsideCollapsed;
+  const setSidebarCollapsed = inEditor ? setEditorCollapsed : setOutsideCollapsed;
   // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。
   // 有効にするのは「取り消す/やり直す」UI がある画面だけ（UNDO_REDO_SCREENS＝たたき台/場面編集/タイムライン編集）。
   // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、

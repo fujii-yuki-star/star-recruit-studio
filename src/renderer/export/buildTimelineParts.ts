@@ -16,7 +16,7 @@ import { bakeFrameTotal, planTimelineExportSegments } from '../../domain/timelin
 import type { TimelineExportSegment } from '../../domain/timeline/exportSegments';
 import type { TimelineProject } from '../../domain/timeline/types';
 import { isItemOfClip, layoutTimelineAt } from '../timelineLayout';
-import { splitVideoSceneSvg } from './videoSceneSplit';
+import { isPassableSlot, slotRectToOutput, splitVideoSceneSvg } from './videoSceneSplit';
 import { svgToPngDataUrl } from './rasterize';
 import { buildTimelineFrames, TIMELINE_FRAMES_DIR } from './buildTimelineFrames';
 import { ExportCancelledError } from './buildExportScenes';
@@ -101,6 +101,12 @@ export async function buildVideoPart(
   if (!split) return undefined;
   const width = opts.outputSize?.width ?? layout.width;
   const height = opts.outputSize?.height ?? layout.height;
+  // ⚠️ **動画の枠も、下敷き・上敷きと同じ大きさの座標へ写す**（#1255 レビュー 🔴）＝
+  // 写さないと「軽い（720）」で**動画だけが 1.5 倍・ずれた位置**に重なる（場面形式と同じ関数を通す）。
+  const rect = slotRectToOutput(split.slot, layout, { width, height });
+  // ⚠️ **渡せない枠（画面の左や上へはみ出した配置）は焼く方へ倒す**＝Rust は `u32` で受けるので、
+  // 負の座標は受け取りに失敗して書き出しごと止まる。焼けば絵は正しく出る（遅くなるだけ）。
+  if (!isPassableSlot(rect)) return undefined;
   const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
   const abovePngBase64 = await svgToPngDataUrl(split.aboveSvg, width, height);
   const speed = clip.speed ?? 1;
@@ -115,10 +121,7 @@ export async function buildVideoPart(
       assetId: clip.assetId,
       belowPngBase64,
       abovePngBase64,
-      slotX: split.slot.x,
-      slotY: split.slot.y,
-      slotW: split.slot.w,
-      slotH: split.slot.h,
+      ...rect,
       fit: item.fit,
       clipStartSec,
       clipEndSec: clipStartSec + (seg.endSec - seg.startSec) * speed,

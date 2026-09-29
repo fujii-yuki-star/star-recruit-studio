@@ -77,6 +77,19 @@ export const MIN_PANEL_RATIO = 0.1;
  */
 export const MIN_REGION_RATIO = 0.12;
 export const MAX_REGION_RATIO = 0.5;
+
+/**
+ * **下の欄だけ**の上限（利用者判断 2026-09-28）。
+ *
+ * ⚠️ **左右とは別の数**＝左右は「中央が潰れない」ために 0.5 のままでよい（`MAX_SIDE_TOTAL_RATIO`
+ * が合計も抑える）。上下は事情が違う＝タイムライン編集の**列は本数だけ縦に伸びる**ので、
+ * 0.5 だと**何本足しても8本までしか見えなかった**（実測＝9本・13本・19本のいずれでも見えるのは8本）。
+ * ⚠️ **上を潰しすぎない**＝上には**仕上がり確認**があり、小さくすると仕上がりが見えない。
+ * 0.65 は「見える列が約11本に増え、上は3割ほど小さくなる」を利用者が選んだ値。
+ * ⚠️ **既定は変えない**（`DEFAULT_REGION_SIZES.bottom`＝0.28）＝いきなり広がる画面にはしない。
+ * 広げるのは**タイムライン編集だけ**（`TIMELINE_BOTTOM_DEFAULT_RATIO`）。
+ */
+export const MAX_BOTTOM_REGION_RATIO = 0.65;
 /** 左右を合わせて画面のどれだけまで使えるか（残りが中央の最低幅になる）。 */
 export const MAX_SIDE_TOTAL_RATIO = 0.75;
 
@@ -86,13 +99,15 @@ export const DEFAULT_REGION_SIZES: RegionSizes = { left: 0.28, right: 0.24, bott
 /**
  * **タイムライン編集の「並び」の既定**（#1104・実機の指摘②③）＝下段を上限いっぱいで始める。
  *
- * ⚠️ **上限（`MAX_REGION_RATIO`）を既定として使い回さない**（レビュー由来 ℹ️）＝
- * 使い回すと、**上限を変えたときにこの画面の既定まで黙って動く**（意味の違う2つが同じ値を指す）。
- * いまは同じ値だが、**「上限いっぱいにしたい」という意図**を名前で宣言しておく。
+ * ⚠️ **上限を既定として使い回さない**（レビュー由来 ℹ️）＝使い回すと、**上限を変えたときに
+ * この画面の既定まで黙って動く**（意味の違う2つが同じ値を指す）。いまは同じ値だが、
+ * **「上限いっぱいにしたい」という意図**を名前で宣言しておく。
  * ⚠️ **なぜ上限まで広げるか**＝既定の 0.28 では列が約3本しか見えず「とても実用的ではない」（利用者）。
  * 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
+ * ⚠️ **上限そのものを 0.5 → 0.65 へ上げた**（利用者判断 2026-09-28・`MAX_BOTTOM_REGION_RATIO`）＝
+ * 0.5 だと**何本足しても見えるのは8本まで**だった（実測＝9本・13本・19本のいずれでも8本）。
  */
-export const TIMELINE_BOTTOM_DEFAULT_RATIO = MAX_REGION_RATIO;
+export const TIMELINE_BOTTOM_DEFAULT_RATIO = MAX_BOTTOM_REGION_RATIO;
 
 export function isSplit(node: PanelNode): node is PanelSplit {
   return typeof node === 'object' && node != null && 'children' in node;
@@ -125,7 +140,10 @@ export function normalizeRegionSizes(sizes: Partial<RegionSizes> | undefined): R
     Number.isFinite(v) ? Math.min(MAX_REGION_RATIO, Math.max(MIN_REGION_RATIO, v as number)) : fallback;
   let left = one(sizes?.left, DEFAULT_REGION_SIZES.left);
   let right = one(sizes?.right, DEFAULT_REGION_SIZES.right);
-  const bottom = one(sizes?.bottom, DEFAULT_REGION_SIZES.bottom);
+  // ⚠️ **下だけ上限が違う**（上の ⚠️）＝`one` は左右用なので、下は自分で挟む。
+  const bottom = Number.isFinite(sizes?.bottom)
+    ? Math.min(MAX_BOTTOM_REGION_RATIO, Math.max(MIN_REGION_RATIO, sizes?.bottom as number))
+    : DEFAULT_REGION_SIZES.bottom;
   // 左右が広すぎるときは、**比を保ったまま**縮める（片方だけ削ると掴んだ側が動かないように見える）。
   const total = left + right;
   if (total > MAX_SIDE_TOTAL_RATIO) {

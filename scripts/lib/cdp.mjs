@@ -87,11 +87,26 @@ export async function evaluate(cdp, expression) {
  * ⚠️ **文字で探せない**＝入力欄は中身が空なので `FIND_BY_TEXT` では当たらない。
  * 教材では「実際に打っている所」を見せたいので、ここが要る。
  */
+/**
+ * 名前で欄を探す。
+ *
+ * ⚠️ **見出しの文字からも探す**（#1228・タイムライン編集で踏んだ）＝`aria-label` と
+ * プレースホルダしか見ていなかったので、**`<label>開始（秒）</label>` の付いた数値欄が1つも見つからなかった**
+ *（タイムライン編集の位置・長さはこの形）。画面で人が見ているのは**見出しの文字**なので、そこも見る。
+ * ⚠️ **見えているものだけ**＝畳まれた欄を掴むと、押しても動かない映像になる。
+ */
 export const FIND_FIELD = (label) => `(() => {
   const want = ${JSON.stringify(label)};
   const all = [...document.querySelectorAll("input, textarea, [contenteditable=true]")]
     .filter((el) => el.offsetParent !== null);
-  const name = (el) => (el.getAttribute("aria-label") || el.placeholder || "").trim();
+  // その欄に付いている見出しの文字（for 属性と、包んでいる label の両方を見る）。
+  const labelled = (el) => {
+    const byFor = el.id ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null;
+    const wrap = el.closest("label");
+    return [byFor, wrap].filter(Boolean).map((l) => (l.textContent || "").trim()).join(" ");
+  };
+  const name = (el) => [(el.getAttribute("aria-label") || ""), (el.placeholder || ""), labelled(el)]
+    .map((s) => s.trim()).filter(Boolean).join(" / ");
   const hit = all.find((el) => name(el) === want) || all.find((el) => name(el).includes(want));
   if (!hit) return null;
   hit.scrollIntoView({ block: "center" });

@@ -489,7 +489,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   }
 
   return (
-    <div className="main-scroll">
+    // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
+    // （実測 1452/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
+    <div className="main-scroll dense">
       <PageHead
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"

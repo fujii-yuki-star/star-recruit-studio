@@ -2,7 +2,7 @@
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
-import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TRACK_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind, Orientation, VideoKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
@@ -11,6 +11,7 @@ import type { Layer } from "../domain/template/types";
 import type { EditBlockedReason } from "../domain/timeline/edit";
 import { TIMELINE_EXPORT_BLOCK, volumePointsTooManyHasSplittable } from "../domain/timeline/export";
 import { AUDIO_SOURCE_KIND } from "../domain/timeline/audio";
+import { bgmById } from "../domain/bgm/bgmCatalog";
 import type { AudioSourceKind } from "../domain/timeline/audio";
 import type { TimelineExportBlockCode } from "../domain/timeline/export";
 import type { TimelineProject } from "../domain/timeline/types";
@@ -519,7 +520,16 @@ export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?
   const track = tracks.find((t) => t.id === trackId);
   if (!track) return "";
   if (track.name) return track.name;
-  const order = tracks.filter((t) => t.kind === track.kind).findIndex((t) => t.id === trackId) + 1;
+  const same = tracks.filter((t) => t.kind === track.kind);
+  const i = same.findIndex((t) => t.id === trackId);
+  // ⚠️ **番号は、列を足しても動かない向きに数える**（#1249・実機で踏んだ）。
+  //   並びは**配列の後ろほど手前**（`11 §7.6`）で、画面は手前を上に出す＝表示は配列の逆さ。
+  //   映像は**足すほど手前（画面の上）へ積む**ので、`映像1` は映像の中の**いちばん下**＝配列の順で数えられる。
+  //   音は**足すほど下へ積む**ので、`音1` は音の中の**いちばん上**＝配列の順とは逆に数える。
+  //   ⚠️ **これは業界の型と同じ**（ADR-0034）＝映像は V1 が下・音は A1 が上。
+  //   逆に「画面の上から」で揃えると、**音を足したときに元の列の番号が付け替わる**
+  //  （実機で `音1` が `音2` に化けた＝自分の付けたはずの名前が動く）。
+  const order = track.kind === TRACK_KIND.audio ? same.length - i : i + 1;
   return `${trackKindLabel[track.kind]}${order}`;
 }
 
@@ -551,11 +561,36 @@ const clipKindLabel: Record<TimelineClipKind, string> = {
   voice: "読み上げ",
 };
 
-export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string } }): string {
+/**
+ * 帯に出す名前。
+ *
+ * ⚠️ **素材の名前を出す**（#1250）＝以前は素材のクリップが**どれも「素材」**になり、
+ * 並びを見ても**どちらがどれか分からなかった**（素材の一覧では「ゆうこ（笑顔）」と名前を付けて
+ * 管理しているのに、置いた途端に消えていた）。文字のクリップは中身が出るので、
+ * **写真・動画・音だけが潰れて**いた。
+ * ⚠️ **クリップへ焼き込まない**（§2-7）＝素材の名前を変えたときに**帯だけ古い名前**になる。
+ * **描くときに引く**＝そのために `assets` を受ける。
+ *
+ * @param clip 帯の中身。`name` が付いていればそれが最優先（利用者が付けた名前）。
+ * @param assets その動画が持っている素材（省略すると素材の名前は出ない＝置く前の見本などで使う）。
+ */
+export function clipLabel(
+  clip: {
+    kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string };
+    assetId?: string | null; bundledBgmId?: string | null;
+  },
+  assets?: readonly { assetId: string; displayName: string }[],
+): string {
   if (clip.name) return clip.name;
   // 文字が入っているものは中身を見せたほうが見分けやすい（長いものは切る＝列の幅を壊さない）。
   const body = clip.voice?.text ?? clip.text;
-  return body ? body.slice(0, 12) : clipKindLabel[clip.kind];
+  if (body) return body.slice(0, 12);
+  // 同梱BGM は素材を持たないので、曲の名前で見分ける。
+  const bgm = bgmById(clip.bundledBgmId);
+  if (bgm) return bgm.label;
+  const asset = clip.assetId ? assets?.find((a) => a.assetId === clip.assetId) : undefined;
+  if (asset?.displayName) return asset.displayName.slice(0, 20);
+  return clipKindLabel[clip.kind];
 }
 
 /**
@@ -908,9 +943,12 @@ export const CAPTURE_FRAME_ASSET_MISSING_MESSAGE =
  * 形が違う。説明の側（まだ無いときの案内）で言う。呼び方の最終判断は利用者。
  */
 export const MARKER_SECTION_TITLE = "マーカー（目印）";
-export const MARKER_ADD_LABEL = "いまの位置に目印を置く";
-export const MARKER_EMPTY_HINT =
-  "まだ目印はありません。直したい所・音を入れたい所に置いておくと、あとで辿れます（動画には出ません）。";
+// ⚠️ **置くボタンは「並び」の道具立ての行へ**（ADR-0048・#1256 b2）＝以前は目印の節の中にあり、
+// **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。短い名前にし、説明は `title` と
+// 近道キーの一覧に回す（行を増やさない＝#1104 で道具立てを1行に畳んだのと同じ理由）。
+export const MARKER_ADD_LABEL = "目印を置く";
+export const MARKER_ADD_TITLE =
+  "いまの再生位置に目印を置きます（M キーでも）。直したい所・音を入れたい所に置いておくと、あとで辿れます（動画には出ません）。";
 export const MARKER_JUMP_TITLE = "この目印の位置へ移ります";
 export const MARKER_TEXT_PLACEHOLDER = "メモ（例：ここ直す／ここに効果音）";
 export const MARKER_MOVE_LABEL = "ここへ動かす";
