@@ -30,6 +30,9 @@ function scene(id: string, order: number): Scene {
 
 /** サイドバー内に限定してボタンを押す（場面編集など本文にも「素材」等が出るため、ナビと取り違えない）。 */
 function clickSidebar(container: HTMLElement, label: string) {
+  // 編集画面では**畳んだ状態で始まる**（ADR-0048・#1256 b1）＝利用者と同じく、まず出してから押す。
+  const reveal = container.querySelector('button[aria-label="メニューを出す"]') as HTMLElement | null;
+  if (reveal) fireEvent.click(reveal);
   const sidebar = container.querySelector(".sidebar") as HTMLElement;
   fireEvent.click(within(sidebar).getByText(label).closest("button")!);
 }

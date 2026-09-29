@@ -10,10 +10,15 @@
 // **名前が付いていること**を見る（これが `Tab` で辿り着けて `Enter` で押せることの土台）。
 // 実際に指で辿れるかは実機で見る。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
 import { useProjectStore } from "./app/store/projectStore";
-import { resetSidebarCollapsedTo } from "./app/hooks/useSidebarCollapsed";
+import {
+  SIDEBAR_COLLAPSED_IN_EDITOR_DEFAULT,
+  resetEditorSidebarCollapsedTo,
+  resetSidebarCollapsedTo,
+} from "./app/hooks/useSidebarCollapsed";
+import { sampleTemplates } from "./infrastructure/sampleData";
 
 const LS_KEY = "shell.sidebarCollapsed";
 
@@ -23,6 +28,8 @@ beforeEach(() => {
   // ⚠️ **`localStorage.clear()` だけでは足りない**＝この場の正はモジュールの変数なので、
   // 消してもテストをまたいで残る。
   resetSidebarCollapsedTo(false);
+  // ⚠️ **既定は定数から入れ直す**＝`true` と書くと、既定を `false` に戻す変異が生き残る。
+  resetEditorSidebarCollapsedTo(SIDEBAR_COLLAPSED_IN_EDITOR_DEFAULT);
 });
 
 /** 左の帯そのもの（畳むと DOM から消える＝(b) 完全に隠す）。 */
@@ -107,4 +114,62 @@ describe("左の帯を畳む（#1103）", () => {
       spy.mockRestore();
     }
   });
+});
+
+// 編集画面では**畳んだ状態で始める**（ADR-0048・#1256 b1）＝作業場を最大にする。
+// ⚠️ **覚えは編集画面の外と別**＝一覧で出したら編集画面でも出たまま、を作らない。
+describe("左の帯：編集画面では畳んで始める（#1256 b1）", () => {
+  const EDITOR_KEY = "shell.sidebarCollapsedInEditor";
+  beforeEach(() => {
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [{
+        sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "photo_intro",
+        templateId: "photo_left_text_right_yuko_v1", durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: "yuko" }, texts: {}, narration: { text: "", status: "none" }, warnings: [],
+      }],
+      status: "ready",
+      saveStatus: "saved",
+    });
+  });
+  /** 一覧（帯が出ている所）から場面編集へ入る。 */
+  const enterSceneEdit = (container: HTMLElement): void => {
+    fireEvent.click(within(container.querySelector(".sidebar") as HTMLElement).getByText("今の動画").closest("button")!);
+    fireEvent.click(within(container).getByText("この内容で確認・編集する").closest("button")!);
+    expect(within(container).getByText("台本表へ戻る")).toBeInTheDocument();
+  };
+
+  it("編集画面に入ると畳まれ、戻す取っ手が出る（外では出ていた）", () => {
+    const { container } = render(<App />);
+    expect(sidebar(), "編集画面の外で畳まれている").not.toBeNull();
+    enterSceneEdit(container);
+    expect(sidebar(), "編集画面で帯が出たまま").toBeNull();
+    expect(revealButton()).toBeInTheDocument();
+  });
+
+  it("編集画面で出したら、それを編集画面の覚えにだけ書く（外の覚えは変えない）", () => {
+    const { container } = render(<App />);
+    enterSceneEdit(container);
+    fireEvent.click(revealButton());
+    expect(sidebar()).not.toBeNull();
+    expect(localStorage.getItem(EDITOR_KEY)).toBe("0");
+    expect(localStorage.getItem(LS_KEY), "外の覚えまで書き換えた").toBeNull();
+  });
+
+  it("外で畳んでも、編集画面の覚えは変わらない（別々に覚える）", () => {
+    const { container } = render(<App />);
+    enterSceneEdit(container);
+    fireEvent.click(revealButton()); // 編集画面では出す
+    fireEvent.click(within(container.querySelector(".sidebar") as HTMLElement).getByText("素材").closest("button")!);
+    fireEvent.click(collapseButton()); // 外では畳む
+    expect(localStorage.getItem(LS_KEY)).toBe("1");
+    expect(localStorage.getItem(EDITOR_KEY), "外で畳んだら編集画面の覚えも変わった").toBe("0");
+  });
+});
+
+it("編集画面に数えるのは、場面編集・タイムライン編集・見た目パターン編集の3つ", async () => {
+  const { SIDEBAR_EDITOR_SCREENS } = await import("./app/hooks/useSidebarCollapsed");
+  expect([...SIDEBAR_EDITOR_SCREENS].sort()).toEqual(["looks-edit", "scene-edit", "timeline-project"]);
 });
