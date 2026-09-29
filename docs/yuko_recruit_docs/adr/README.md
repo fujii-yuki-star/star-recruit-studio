@@ -56,6 +56,7 @@
 | [0047](0047-editing-ui-density.md) | 編集画面の密度（操作の大きさと余白） | **Accepted**／一部 Superseded（0048＝決定4・6） |
 | [0048](0048-ux-first-editor-density.md) | 編集画面は UI/UX を優先する（「触る所は変えない」「列は触らない」を外す） | **Accepted** |
 | [0049](0049-os-file-drop-to-timeline.md) | 窓の外から落としたファイルを、並びへそのまま置く | **Accepted** |
+| [0050](0050-preview-popout-window.md) | 仕上がり確認だけを別の窓に出し、そこで直接直せるようにする | **Accepted** |
 
 ## 状態の意味
 
