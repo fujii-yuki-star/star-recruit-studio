@@ -3201,7 +3201,8 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("button", { name: "文字を置く" })).toHaveClass("grabbable");
-    expect(screen.getByText("会社の外観")).toHaveClass("grabbable");
+    // 素材は絵で並ぶ（#1264）＝名前は枠の中の文字なので、掴む枠（ボタン）を見る。
+    expect(screen.getByText("会社の外観").closest("button")).toHaveClass("grabbable");
   });
 
   it("落とし先の外では、置けない色にしない（赤の意味を薄めない）", () => {
@@ -8022,6 +8023,29 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
     fireEvent.change(field, { target: { value: "固定した列" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("固定した列");
+  });
+});
+
+// 「置く」欄の素材を絵で並べ、使っている素材に印（#1264）。
+describe("TimelineProjectScreen: 素材の絵と使用中の印（#1264）", () => {
+  it("素材は絵つきで並び、置いてある素材にだけ「使用中」が付く（名前は変えない）", () => {
+    open({
+      assets: [
+        { assetId: "asset_001", assetType: "image", displayName: "社屋", filePath: "assets/a.png" },
+        { assetId: "asset_002", assetType: "image", displayName: "集合写真", filePath: "assets/b.png" },
+      ],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, assetId: "asset_001" }] as TimelineProject["clips"],
+    });
+    useTimelineStore.setState({ assetSrcById: { asset_001: "data:image/png;base64,AAA", asset_002: "data:image/png;base64,BBB" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const place = document.querySelector('[data-panel-id="place"]') as HTMLElement;
+    const used = within(place).getByRole("button", { name: "社屋" });
+    const unused = within(place).getByRole("button", { name: "集合写真" });
+    expect(used.closest(".picker-grid"), "絵で並べていない").not.toBeNull();
+    expect(used.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAA");
+    expect(used.querySelector(".picker-badge")?.textContent).toBe("使用中");
+    expect(used.title).toContain("使用中");
+    expect(unused.querySelector(".picker-badge"), "使っていない素材に印が付いた").toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@
 // 既定 5 件**にする。多いときは**絞り込み**を出して、目当てのものへ数文字で辿り着けるようにする。
 //
 // 「しまう」だけにしないのが要点＝スクロールと絞り込みで**全部に手が届く**（隠れて選べないものを作らない）。
-import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { isKeyboardActivation } from "../hooks/usePointerDrag";
 
 export interface PickerItem {
@@ -13,12 +13,18 @@ export interface PickerItem {
   label: string;
   /** 補足（ボタンの説明として出す。一覧には出さない＝行を太らせない）。 */
   note?: string;
+  /** 絵（#1264・`layout="grid"` のとき名前の上に出す）。 */
+  thumb?: ReactNode;
+  /** 小さな印（#1264・例「使用中」）。名前の横に出す。 */
+  badge?: string;
 }
 
 /** 一度に見せる数の既定。これを超えたら絞り込みを出し、残りは欄の中のスクロールで辿る。 */
 const DEFAULT_MAX_VISIBLE = 5;
 /** 1行の高さの目安（px）。スクロールする高さを「◯件ぶん」で決めるために使う。 */
 const ROW_H = 40;
+/** 絵を並べるときの高さの上限（px）＝2段半ほど見せ、残りは欄の中のスクロールで辿る。 */
+const GRID_MAX_H = 260;
 
 export function PickerList({
   items,
@@ -29,7 +35,13 @@ export function PickerList({
   searchLabel = "絞り込み",
   maxVisible = DEFAULT_MAX_VISIBLE,
   onHover,
+  layout = "list",
 }: {
+  /**
+   * 並べ方（#1264）。`grid`＝絵を並べる（Final Cut Pro・CapCut・Clipchamp の素材の並び）。
+   * ⚠️ **名前は残す**＝絵だけだと似た写真を見分けられない・読み上げに名前が要る。既定は従来の `list`。
+   */
+  layout?: "list" | "grid";
   items: PickerItem[];
   onPick: (id: string) => void;
   disabled?: boolean;
@@ -76,15 +88,18 @@ export function PickerList({
         // §2-5＝次の行動。「0件」で終わらせない。
         <p className="text-muted">見つかりませんでした。別の言葉でお試しください。</p>
       ) : (
-        <div style={{ maxHeight: maxVisible * ROW_H, overflowY: "auto" }}>
+        <div
+          className={layout === "grid" ? "picker-grid" : undefined}
+          style={{ maxHeight: layout === "grid" ? GRID_MAX_H : maxVisible * ROW_H, overflowY: "auto" }}
+        >
           {shown.map((it) => (
             <button
               key={it.id}
               // 掴めるものは**手を出す前に分かる**ようにする（欄の見出し・帯と同じ流儀・#684 レビュー）。
-              className={`btn btn-secondary${onGrab ? " grabbable" : ""}`}
-              style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
+              className={`btn btn-secondary${onGrab ? " grabbable" : ""}${layout === "grid" ? " picker-tile" : ""}`}
+              style={layout === "grid" ? undefined : { display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
               disabled={disabled}
-              title={disabled ? disabledHint : it.note}
+              title={disabled ? disabledHint : [it.note, it.badge].filter(Boolean).join("・") || undefined}
               onPointerDown={onGrab && !disabled ? (e) => onGrab(e, it.id) : undefined}
               onMouseEnter={onHover && !disabled ? () => onHover(it.id) : undefined}
               onMouseLeave={onHover ? () => onHover(null) : undefined}
@@ -94,7 +109,10 @@ export function PickerList({
               // （拾わないと二重に実行する・#684 レビュー）。掴めない一覧はこれまでどおり全部拾う。
               onClick={(e) => { if (!onGrab || isKeyboardActivation(e)) onPick(it.id); }}
             >
-              {it.label}
+              {layout === "grid" && <span className="picker-tile-thumb" aria-hidden="true">{it.thumb}</span>}
+              {layout === "grid" ? <span className="picker-tile-label">{it.label}</span> : it.label}
+              {/* ⚠️ **印は名前に混ぜない**（`aria-hidden`）＝ボタンの名前は素材の名前のまま。印の中身は説明（`title`）で言う。 */}
+              {it.badge && <span className="badge picker-badge" aria-hidden="true">{it.badge}</span>}
             </button>
           ))}
         </div>

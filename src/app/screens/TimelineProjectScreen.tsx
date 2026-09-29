@@ -84,6 +84,7 @@ import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/ap
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { ASSET_IN_USE_LABEL } from "../uiLabels";
 import { timelineEditKind } from "../../domain/timeline/editKind";
 import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
@@ -1421,6 +1422,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ **動画も出す**（#512・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
   // 外していたが、**直接置いた動画は映り（段1）、元の音も鳴る（段2）**ようになったので理由が消えた。
   const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType)) ?? [];
+  /** 部品が絵として使っている素材（#1264・「使用中」の印）。 */
+  const usedImageAssetIds = useMemo(() => new Set((doc?.clips ?? []).flatMap((c) => clipImageAssetIds(c))), [doc?.clips]);
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
   // 以前はここだけ絞り込みを手書きし、しかも並びを**戻していなかった**ので、映像は手前・音は奥、と
@@ -5833,7 +5836,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
                   <PickerList
-                    items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
+                    // **絵で並べる・使っている素材に印**（#1264）＝名前だけの文字のボタンでは、写真が増えると
+                    // どれがどれか分からなかった（Final Cut Pro・CapCut・Clipchamp は絵で並べる）。
+                    // 絵は表示用の src（動画は代表フレーム）・印は**部品が絵として使っているか**（`clipImageAssetIds`＝
+                    // 直接置き・差し込み口・立ち絵の3つ＝書き出しが数えるのと同じ単一の参照元）。
+                    layout="grid"
+                    items={visualAssets.map((a) => ({
+                      id: a.assetId,
+                      label: a.displayName,
+                      thumb: assetSrcById[a.assetId] ? <img src={assetSrcById[a.assetId]} alt="" loading="lazy" /> : null,
+                      badge: usedImageAssetIds.has(a.assetId) ? ASSET_IN_USE_LABEL : undefined,
+                    }))}
                     disabled={isPlaying || exporting}
                     disabledHint={exporting ? exportingHint : playingHint}
                     searchLabel="素材の絞り込み"

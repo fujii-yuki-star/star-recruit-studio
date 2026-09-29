@@ -1718,3 +1718,6 @@ export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
   settings: "動画全体の設定を変える",
   other: "編集",
 };
+
+/** 「置く」欄で、もう動画に置いてある素材の印（#1264）。 */
+export const ASSET_IN_USE_LABEL = "使用中";
