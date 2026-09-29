@@ -28,12 +28,12 @@ import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import { frameTimeSec, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, effectiveFps, loopSpan, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
-import type { TimelineProject } from "../../domain/timeline/types";
+import type { TimelineClip, TimelineProject } from "../../domain/timeline/types";
 import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, renameTrack,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, pasteClips, renameTrack,
   visualPlacementFor,
   moveClip,
   setVisualClipContent,
@@ -470,6 +470,14 @@ export interface TimelineState {
    * **繰り返し再生**（#1267）＝作業範囲（I／O）があればその間、無ければ全体を繰り返す。画面の状態（文書には持たない）。
    */
   loopPlayback: boolean;
+  /**
+   * **写しておいた部品**（#1265・Ctrl+C）。文書には持たない・保存しない（画面の状態）。`null`＝まだ写していない。
+   */
+  clipClipboard: TimelineClip[] | null;
+  /** 選んでいる部品を写す（Ctrl+C）。 */
+  copySelectedClips: () => void;
+  /** 写しておいた部品を再生位置へ貼る（Ctrl+V）＝複製と同じ規則・全か無か。 */
+  pasteClipsAtPlayhead: () => void;
   setLoopPlayback: (on: boolean) => void;
   /** 繰り返しの終わりまで来たとき、始まりへ戻す（時計を測り直す＝音・動画もそこから合わせ直す）。 */
   _loopTo: (sec: number) => void;
@@ -1049,6 +1057,7 @@ function emptyState() {
     isPlaying: false,
     seekNonce: 0,
     loopPlayback: false,
+    clipClipboard: null as TimelineClip[] | null,
     exportRun: IDLE_EXPORT,
   };
 }
@@ -2315,6 +2324,25 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   },
   pause: () => set({ isPlaying: false }),
   setLoopPlayback: (on) => set({ loopPlayback: on }),
+  copySelectedClips: () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length === 0) return;
+    const picked = doc.clips.filter((c) => selectedClipIds.includes(c.id));
+    // ⚠️ **写した時点の中身を貼る**（他社の型）＝部品の書き換えは**常に新しい部品を作る**（その場で書き換えない）ので、
+    //   ここで持った部品はあとで元を直しても変わらない（写し取り直す必要が無い＝変異チェックで等価と確かめた）。
+    set({ clipClipboard: picked });
+  },
+  pasteClipsAtPlayhead: () => {
+    const { doc, clipClipboard } = get();
+    if (!doc || !clipClipboard || clipClipboard.length === 0) return;
+    const r = pasteClips(doc, clipClipboard, frameTimeSec(doc, get().playheadSec));
+    if (!r.ok) {
+      // キーボードだけの操作＝押せない見た目を持たないので画面全体の知らせへ（`blockTargetFor` の表）。
+      set({ editBlocked: { reason: r.reason, at: BLOCK_GLOBAL } });
+      return;
+    }
+    commit(set, get, r.doc, { selectedClipIds: r.pastedIds });
+  },
   _loopTo: (sec) => {
     if (!get().isPlaying) return;
     set({ playheadSec: sec, seekNonce: get().seekNonce + 1 });

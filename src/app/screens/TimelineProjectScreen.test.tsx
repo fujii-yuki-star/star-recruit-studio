@@ -3201,7 +3201,8 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("button", { name: "文字を置く" })).toHaveClass("grabbable");
-    expect(screen.getByText("会社の外観")).toHaveClass("grabbable");
+    // 素材は絵で並ぶ（#1264）＝名前は枠の中の文字なので、掴む枠（ボタン）を見る。
+    expect(screen.getByText("会社の外観").closest("button")).toHaveClass("grabbable");
   });
 
   it("落とし先の外では、置けない色にしない（赤の意味を薄めない）", () => {
@@ -8022,6 +8023,203 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
     fireEvent.change(field, { target: { value: "固定した列" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.name).toBe("固定した列");
+  });
+});
+
+// 写す・貼る（#1265）＝Ctrl+C／Ctrl+V。
+describe("TimelineProjectScreen: 写す・貼る（#1265）", () => {
+  it("Ctrl+C で写し、再生位置を動かして Ctrl+V で貼る（貼ったものが選ばれ、取り消し1回で消える）", () => {
+    // 尺を伸ばす長い部品を別の列に置く（再生位置は尺より先へ動かせない＝元の後ろに空きが要る）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }, { id: "track_003", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "こんにちは" },
+        { id: "clip_009", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 20, x: 0, y: 0, w: 100, h: 50, text: "長い" },
+      ] as TimelineProject["clips"],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null, history: { past: [], future: [] } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+    act(() => useTimelineStore.getState().setPlayhead(6));
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+    const s = useTimelineStore.getState();
+    const pasted = s.doc!.clips.filter((c) => s.selectedClipIds.includes(c.id));
+    expect(pasted).toHaveLength(1);
+    expect(pasted[0].id).not.toBe("clip_001");
+    expect(pasted[0].startSec).toBeCloseTo(6, 5);
+    act(() => useTimelineStore.getState().undo());
+    expect(useTimelineStore.getState().doc!.clips.some((c) => c.id === pasted[0].id), "取り消しで消えない").toBe(false);
+  });
+
+  it("写したあとで元を直しても、写した時点の中身を貼る", () => {
+    open();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+    act(() => useTimelineStore.getState().setClipTextFor("clip_001", "直した"));
+    expect((useTimelineStore.getState().clipClipboard![0] as { text?: string }).text).toBe("こんにちは");
+  });
+
+  it("文字を打っている欄では奪わない", () => {
+    open({ markers: [{ id: "marker_001", timeSec: 1 }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], clipClipboard: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(screen.getByPlaceholderText(/メモ/), { key: "c", ctrlKey: true });
+    expect(useTimelineStore.getState().clipClipboard).toBeNull();
+  });
+});
+
+// 並びの何もない所から囲んで選ぶ（#1265 後半）。
+describe("TimelineProjectScreen: 囲んで選ぶ（#1265）", () => {
+  // jsdom は大きさを持たないので、帯の箱だけ与える（重なりの判定＝`intersectRects` は純粋関数）。
+  const stub = (el: Element, left: number, top: number, width: number, height: number) => {
+    (el as HTMLElement).getBoundingClientRect = () =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  };
+  const three = (): void => open({
+    tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+    clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "一" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "二" },
+      { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "三" },
+    ] as TimelineProject["clips"],
+  });
+  const setup = () => {
+    const r = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const band = (id: string) => r.container.querySelector(`.timeline-clip[data-clip-id="${id}"]`)!;
+    stub(band("clip_001"), 100, 100, 50, 30);
+    stub(band("clip_002"), 200, 100, 50, 30);
+    stub(band("clip_003"), 300, 100, 50, 30);
+    const lane = band("clip_001").closest(".timeline-lane")!;
+    return { ...r, lane };
+  };
+  const down = (el: Element, x: number, y: number, extra: object = {}) =>
+    fireEvent.pointerDown(el, { pointerId: 1, button: 0, buttons: 1, clientX: x, clientY: y, ...extra });
+  const move = (x: number, y: number) => fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: x, clientY: y });
+  const up = (x: number, y: number) => fireEvent.pointerUp(window, { pointerId: 1, clientX: x, clientY: y });
+
+  it("何もない所から囲むと、触れた帯だけを選び、離した直後の click では解かない", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container, lane } = setup();
+    down(lane, 90, 90);
+    move(260, 140); // 一・二に触れ、三には届かない
+    expect(container.querySelector(".timeline-marquee"), "囲みの矩形が見えない").not.toBeNull();
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+    up(260, 140);
+    fireEvent.click(lane, { detail: 1 }); // 指で押した click（`detail: 0` はキーの扱い）
+    expect(useTimelineStore.getState().selectedClipIds, "離した直後の click で解けた").toEqual(["clip_001", "clip_002"]);
+    expect(container.querySelector(".timeline-marquee"), "離しても矩形が残る").toBeNull();
+  });
+
+  it("縮めると選びから外れる（囲みの中だけを選ぶ）", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { lane } = setup();
+    down(lane, 90, 90);
+    move(260, 140);
+    move(160, 140);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    move(95, 95); // 何にも触れない
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+  });
+
+  it("Shift で囲むと今の選びに足す", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: ["clip_003"] });
+    const { lane } = setup();
+    down(lane, 90, 90, { shiftKey: true });
+    move(160, 140);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_003", "clip_001"]);
+  });
+
+  it("Escape でやめると、囲む前の選びへ戻す", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: ["clip_003"] });
+    const { container, lane } = setup();
+    down(lane, 90, 90);
+    move(260, 140);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_003"]);
+    expect(container.querySelector(".timeline-marquee")).toBeNull();
+  });
+
+  it("見えていない帯は選ばない（並びの窓の外へ送られた帯）", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container, lane } = setup();
+    // 並びの窓（横に送る枠）を 0〜260 に切る＝三（300〜350）は窓の外。
+    const sv = container.querySelector(".timeline-scroll") as HTMLElement;
+    sv.style.overflow = "auto";
+    stub(sv, 0, 0, 260, 600);
+    down(lane, 90, 90);
+    move(400, 140); // 囲み自体は三まで届く
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+  });
+
+  it("囲んでいる間に並びが送られたら、始点も一緒に動く", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container, lane } = setup();
+    const sv = container.querySelector(".timeline-scroll") as HTMLElement;
+    down(lane, 240, 90); // 二（200〜250）の上から始める
+    // 100px 送られた＝帯も始点も画面上で 100px 左へ動く。
+    Object.defineProperty(sv, "scrollLeft", { configurable: true, value: 100 });
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_001"]')!, 0, 100, 50, 30);
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_002"]')!, 100, 100, 50, 30);
+    stub(container.querySelector('.timeline-clip[data-clip-id="clip_003"]')!, 200, 100, 50, 30);
+    move(260, 140); // 始点は 140 へ動いている＝二の右端（150）より右は三（200〜）だけ
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_002", "clip_003"]);
+    expect((container.querySelector(".timeline-marquee") as HTMLElement).style.left).toBe("140px");
+  });
+
+  it("帯の上から押したときは囲まない（帯をつかむ操作のまま）", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: [] });
+    const { container } = setup();
+    const band = container.querySelector('.timeline-clip[data-clip-id="clip_003"]')!;
+    down(band, 310, 110);
+    move(90, 90);
+    expect(container.querySelector(".timeline-marquee")).toBeNull();
+    up(90, 90);
+  });
+
+  it("動かさずに押して離しただけなら、今までどおり選びを解く", () => {
+    three();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { lane } = setup();
+    down(lane, 90, 90);
+    up(90, 90);
+    fireEvent.click(lane, { detail: 1 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+  });
+});
+
+// 「置く」欄の素材を絵で並べ、使っている素材に印（#1264）。
+describe("TimelineProjectScreen: 素材の絵と使用中の印（#1264）", () => {
+  it("素材は絵つきで並び、置いてある素材にだけ「使用中」が付く（名前は変えない）", () => {
+    open({
+      assets: [
+        { assetId: "asset_001", assetType: "image", displayName: "社屋", filePath: "assets/a.png" },
+        { assetId: "asset_002", assetType: "image", displayName: "集合写真", filePath: "assets/b.png" },
+      ],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, assetId: "asset_001" }] as TimelineProject["clips"],
+    });
+    useTimelineStore.setState({ assetSrcById: { asset_001: "data:image/png;base64,AAA", asset_002: "data:image/png;base64,BBB" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const place = document.querySelector('[data-panel-id="place"]') as HTMLElement;
+    const used = within(place).getByRole("button", { name: "社屋" });
+    const unused = within(place).getByRole("button", { name: "集合写真" });
+    expect(used.closest(".picker-grid"), "絵で並べていない").not.toBeNull();
+    expect(used.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAA");
+    expect(used.querySelector(".picker-badge")?.textContent).toBe("使用中");
+    // 印は名前に混ぜず、意味を説明で届ける（見えない人にも・#1271 レビュー）。
+    expect(used.title).toBe("この素材は動画に置いてあります");
+    expect(used).toHaveAccessibleDescription("この素材は動画に置いてあります");
+    // ⚠️ 説明の計算は `title` へ落ちるので、上だけでは読み上げに結んだことを確かめられない＝結び先を直接見る。
+    expect(document.getElementById(used.getAttribute("aria-describedby") ?? "")?.textContent).toBe("この素材は動画に置いてあります");
+    expect(unused.querySelector(".picker-badge"), "使っていない素材に印が付いた").toBeNull();
+    expect(unused).not.toHaveAccessibleDescription("この素材は動画に置いてあります");
   });
 });
 

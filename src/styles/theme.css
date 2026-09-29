@@ -1478,6 +1478,50 @@ button.badge {
 /* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
 .panel-frame { position: relative; }
 /* 見出しの右のボタン（広げる・⋮）。 */
+/* **素材を絵で並べる**（#1264）＝欄の幅に合わせて列の数が変わる。名前は1行で省略、印は右上。 */
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--gap-sm);
+}
+.picker-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  height: auto;
+  text-align: left;
+  min-width: 0;
+}
+.picker-tile-thumb {
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+.picker-tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.picker-tile-label {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-badge {
+  font-size: 10px;
+}
+.picker-tile .picker-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
 /* 右クリックのメニューの近道のキー（#1268）＝右端に小さく・薄く。 */
 .context-menu-key {
   float: right;

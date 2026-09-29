@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, menuAnchorFrom, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
 import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
-import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
+import { canvasPointAt, clampToVisible, intersectRects, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { isOwnCleanupPending, useExportLockStore } from "../store/exportLock";
@@ -84,6 +84,7 @@ import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/ap
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { ASSET_IN_USE_DESCRIPTION, ASSET_IN_USE_LABEL } from "../uiLabels";
 import { timelineEditKind } from "../../domain/timeline/editKind";
 import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
@@ -920,6 +921,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [bigView]);
   // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
   const [safeAreaOn] = useSafeAreaPref();
+  /** 並びで囲んで選んでいる矩形（#1265・画面の座標）。`null`＝囲んでいない。 */
+  const [marquee, setMarquee] = useState<{ left: number; top: number; right: number; bottom: number } | null>(null);
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -979,6 +982,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // **`Ctrl+K`＝ここで分ける**（決定18）。押せる条件も断り文もボタンと同じ入口が決める
       // ＝キーだけ通って理由が出ない、を作らない。
       // ⚠️ **修飾キーを弾く行より前**に置く（後ろだと届かない＝実際にそこへ置いて動かなかった）。
+      // **`Ctrl+C`／`Ctrl+V`＝写す／貼る**（#1265・業界の型）。⚠️ 文字を打っている所は入口の
+      // `shouldIgnoreShortcut` が外している（欄の中の写し貼りは奪わない）。
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "c") {
+        if (useTimelineStore.getState().selectedClipIds.length === 0) return; // 選んでいなければ既定の写しに任せる
+        e.preventDefault();
+        useTimelineStore.getState().copySelectedClips();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "v") {
+        if (!useTimelineStore.getState().clipClipboard) return;
+        e.preventDefault();
+        useTimelineStore.getState().pasteClipsAtPlayhead();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         splitRef.current();
@@ -1421,6 +1438,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ **動画も出す**（#512・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
   // 外していたが、**直接置いた動画は映り（段1）、元の音も鳴る（段2）**ようになったので理由が消えた。
   const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType)) ?? [];
+  /** 部品が絵として使っている素材（#1264・「使用中」の印）。 */
+  const usedImageAssetIds = useMemo(() => new Set((doc?.clips ?? []).flatMap((c) => clipImageAssetIds(c))), [doc?.clips]);
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
   // 以前はここだけ絞り込みを手書きし、しかも並びを**戻していなかった**ので、映像は手前・音は奥、と
@@ -2297,6 +2316,53 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
   const beginDrag = usePointerDrag();
+  /**
+   * **並びの何もない所から囲んで選ぶ**（#1265・Clipchamp・Premiere の型）。囲みに触れた帯を選ぶ。`Shift` で足す。
+   * ⚠️ **少し動かすまでは始めない**（掴む作法は共有の `usePointerDrag`）＝押して離しただけなら、今までどおり選択を解く。
+   * ⚠️ **囲み終えた直後の `click` では解かない**（`skipNextClick`）＝離した所は何もない所なので、放っておくと
+   *   囲んだそばから選択が消える。`Escape` でやめると、囲む前の選択へ戻す。
+   * ⚠️ **見えている帯だけを当てる**（`visibleRectOf`・#1271 レビュー）＝横に送って列名の欄の下へ潜った帯や、
+   *   並びの窓の外の帯は選ばない（見えている範囲と選ばれる範囲を割らない＝ADR-0026 ①）。
+   * ⚠️ **始点は並びに貼り付ける**＝端で送る（帯を運ぶときと同じ `autoScroll`）と、始点も並びと一緒に動く。
+   *   画面の座標のまま持つと、送った分だけ始点がずれて、囲んだ覚えのない帯が選ばれる。
+   */
+  const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0 || e.target !== e.currentTarget || exporting) return;
+    const sc = scrollRef.current;
+    const x0 = e.clientX + (sc?.scrollLeft ?? 0);
+    const y0 = e.clientY + (sc?.scrollTop ?? 0);
+    const before = useTimelineStore.getState().selectedClipIds;
+    const base = e.shiftKey ? before : [];
+    const show = (ev: PointerEvent): void => {
+      const ax = x0 - (sc?.scrollLeft ?? 0);
+      const ay = y0 - (sc?.scrollTop ?? 0);
+      const r = { left: Math.min(ax, ev.clientX), top: Math.min(ay, ev.clientY), right: Math.max(ax, ev.clientX), bottom: Math.max(ay, ev.clientY) };
+      setMarquee(r);
+      const hits = [...document.querySelectorAll<HTMLElement>(".timeline-clip[data-clip-id]")]
+        .filter((el) => { const v = visibleRectOf(el); return v != null && intersectRects(r, v) != null; })
+        .map((el) => el.dataset.clipId!);
+      const next = [...new Set([...base, ...hits])];
+      if (next.length === 0) clearSelection();
+      else selectClips(next);
+    };
+    beginDrag(e, {
+      onMove: (ev) => {
+        show(ev);
+        autoScroll.track(scrollRef.current, ev, show);
+      },
+      onEnd: (_ev, started) => {
+        autoScroll.stop();
+        setMarquee(null);
+        if (started) skipNextClick();
+      },
+      onCancel: () => {
+        autoScroll.stop();
+        setMarquee(null);
+        if (before.length === 0) clearSelection();
+        else selectClips([...before]);
+      },
+    });
+  };
   // 掴んだまま端まで来たら送る（#714-1）＝**置く側と帯側で同じ部品**（送り方を2つ作らない）。
   // 左の送る帯は**列の名前の欄の内側**から測る（欄の下に隠れると、どこへ入るか見ながら送れない）。
   const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
@@ -4542,6 +4608,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
                       className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? " drop-target" : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
+                      onPointerDown={beginMarquee}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
                       {/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻を線で見せる。 */}
@@ -4574,6 +4641,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <button
                             key={c.id}
                             type="button"
+                            data-clip-id={c.id}
                             className={[
                               "timeline-clip",
                               CLIP_KIND_CLASS[c.kind],
@@ -5833,7 +5901,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <p className="field-hint">写真がまだありません。上の「写真・動画・音楽を取り込む」で足せます（文字と図形はいま置けます）。</p>
                 ) : (
                   <PickerList
-                    items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
+                    // **絵で並べる・使っている素材に印**（#1264）＝名前だけの文字のボタンでは、写真が増えると
+                    // どれがどれか分からなかった（Final Cut Pro・CapCut・Clipchamp は絵で並べる）。
+                    // 絵は表示用の src（動画は代表フレーム）・印は**部品が絵として使っているか**（`clipImageAssetIds`＝
+                    // 直接置き・差し込み口・立ち絵の3つ＝書き出しが数えるのと同じ単一の参照元）。
+                    layout="grid"
+                    items={visualAssets.map((a) => ({
+                      id: a.assetId,
+                      label: a.displayName,
+                      thumb: assetSrcById[a.assetId] ? <img src={assetSrcById[a.assetId]} alt="" loading="lazy" /> : null,
+                      badge: usedImageAssetIds.has(a.assetId) ? ASSET_IN_USE_LABEL : undefined,
+                      badgeDescription: ASSET_IN_USE_DESCRIPTION,
+                    }))}
                     disabled={isPlaying || exporting}
                     disabledHint={exporting ? exportingHint : playingHint}
                     searchLabel="素材の絞り込み"
@@ -6034,6 +6113,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     <>
       <div className="main-scroll main-scroll--fixed dense">
       {/* **並びの外でファイルを運んでいるとき**（ADR-0049）＝離すと何が起きるかと、置きたいときの行き先を言う。 */}
+      {/* 囲んで選んでいる矩形（#1265）＝押す当たりは取らない。 */}
+      {marquee && (
+        <div
+          className="timeline-marquee"
+          aria-hidden="true"
+          style={{ left: marquee.left, top: marquee.top, width: marquee.right - marquee.left, height: marquee.bottom - marquee.top }}
+        />
+      )}
       {fileHover === FILE_DROP_IMPORT_ONLY && (
         <div className="file-drop-hint" role="status" data-testid="file-drop-hint">
           離すと素材に取り込みます。並びの列の上で離すと、その場所に置けます

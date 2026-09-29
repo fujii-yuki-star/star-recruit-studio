@@ -50,3 +50,23 @@ describe("PickerList", () => {
     expect(btn).toHaveAttribute("title", "再生を止めてから使えます");
   });
 });
+
+// 絵で並べる（#1264）。既定は従来の一覧のまま（ほかの呼び出しを変えない）。
+describe("PickerList：絵で並べる（#1264）", () => {
+  it("既定は一覧（絵も印の場所も出さない）", () => {
+    const { container } = render(<PickerList items={[{ id: "a", label: "あ", thumb: <img alt="" /> }]} onPick={vi.fn()} />);
+    expect(container.querySelector(".picker-grid")).toBeNull();
+    expect(container.querySelector(".picker-tile-thumb")).toBeNull();
+  });
+
+  it("grid では絵を名前の上に出し、印は名前に混ぜない", () => {
+    const { container } = render(
+      <PickerList layout="grid" items={[{ id: "a", label: "あ", thumb: <img alt="" src="x.png" />, badge: "使用中" }]} onPick={vi.fn()} />,
+    );
+    const b = screen.getByRole("button", { name: "あ" });
+    expect(container.querySelector(".picker-grid")).not.toBeNull();
+    expect(b.querySelector(".picker-tile-thumb img")).not.toBeNull();
+    expect(b.querySelector(".picker-badge")?.getAttribute("aria-hidden")).toBe("true");
+    expect(b.title).toBe("使用中");
+  });
+});

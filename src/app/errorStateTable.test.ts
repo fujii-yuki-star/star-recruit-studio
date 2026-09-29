@@ -515,7 +515,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝`STARTUP_VOICE_NOT_READY`／`STARTUP_MAKE_VOICES_LEFT`（#1204＝
     //   **画面を読まない道**〔起動の引数〕で、公開前チェックの「要対応」を誰も見ていなかった）。
     // ⚠️ **+6**（#1244）＝断りを次の行動ごとに6行へ分けた（うち1行は、以前は表に無かった既定の文）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(256);
+    // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー＝
+    //   貼るときの断りを、重ねる・探すの断りから分けた＝次の行動が「再生位置を動かす」「写し直す」で違う）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(258);
   });
 
 
@@ -764,7 +766,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝`API_KEY_SAVED_UNVERIFIED` / `API_KEY_DELETED_UNVERIFIED`（#1131）。
     // ⚠️ **+2**＝#1204（上と同じ2行）。
     // ⚠️ **+6**（#1244）＝上と同じ6行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(253);
+    // ⚠️ **+2**（#1271 レビュー）＝上と同じ2行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(255);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -783,6 +786,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**＝`CAPTURE_FRAME_ASSET_MISSING`（#1155 ⑤＝タイムライン形式の双子と揃えた）。
       // ⚠️ **+7**＝起動のときに頼まれた仕事の断り（ADR-0042・#1184）＝引数4通り＋開いている／読めない／開けない。
     // ⚠️ **+2**＝#1204＝頼まれた回だけの断り2件。
-    ).toBe(110);
+      // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー・`editBlockedMessage` 経由）。
+    ).toBe(112);
   });
 });
