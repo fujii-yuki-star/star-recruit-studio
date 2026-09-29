@@ -84,6 +84,8 @@ import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/ap
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
+import { timelineEditKind } from "../../domain/timeline/editKind";
+import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -6013,7 +6015,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         sticky
         actions={(
           <EditorToolbar
-            undo={{ canUndo: history.past.length > 0, canRedo: history.future.length > 0, onUndo: undo, onRedo: redo, disabled: exporting }}
+            undo={{
+              canUndo: history.past.length > 0,
+              canRedo: history.future.length > 0,
+              onUndo: undo,
+              onRedo: redo,
+              disabled: exporting,
+              // **何を取り消すか**（#1268）＝直前の文書と今の文書を比べて名前を付ける（入口ごとに名前を渡さない）。
+              undoLabel: history.past.length > 0 ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(history.past[history.past.length - 1], doc)] : undefined,
+              redoLabel: history.future.length > 0 ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(doc, history.future[history.future.length - 1])] : undefined,
+            }}
             // 自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定
             // （ADR-0032）なので、ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
             // ⚠️ 以前は**欄の下**だった（#774 で移設）＝欄が画面の高さを超えるとスクロールしないと見えず、

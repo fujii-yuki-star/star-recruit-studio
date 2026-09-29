@@ -8025,6 +8025,24 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 取り消す／やり直すの説明に中身を出す（#1268）＝ボタンの名前は「取り消す」のまま。
+describe("TimelineProjectScreen: 取り消す／やり直すの中身（#1268）", () => {
+  it("置いたあとは「取り消す：部品を置く」、取り消したあとは「やり直す：部品を置く」", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    expect(screen.getByRole("button", { name: "取り消す" }).title).toBe("取り消す：部品を置く（Ctrl+Z）");
+    fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
+    expect(screen.getByRole("button", { name: "やり直す" }).title).toBe("やり直す：部品を置く（Ctrl+Y）");
+  });
+
+  it("取り消すものが無いときは、中身を言わない", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "取り消す" }).title).toBe("取り消す（Ctrl+Z）");
+  });
+});
+
 // 右クリックのメニューに近道のキーを出す（#1268）＝一覧（`timelineShortcuts.ts`）と同じ値。
 describe("TimelineProjectScreen: メニューの近道のキー（#1268）", () => {
   it("帯のメニューの「ここで分ける」「削除」にキーが出る（名前は変えず、読み上げにはキーとして伝える）", async () => {

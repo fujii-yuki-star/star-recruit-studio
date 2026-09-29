@@ -74,7 +74,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     //   `--on` と列の `timeline-lane--hidden`／`--locked` は式の中で組み立てるので数えられない。
     // ⚠️ **+5**（ADR-0049）＝窓の外からの落とし先の見せ方（時刻の線・新しい列の行とその文・並びの外の案内）。
     // ⚠️ **+2**（#1261）＝仕上がり確認の絵の置き場の入れ物（`preview-fit-shell`）と、浮かせた道具（`preview-view-tools`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(187);
+    // ⚠️ **+1**（#1268）＝右クリックのメニューの近道のキー（`context-menu-key`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(188);
   });
 });
 
