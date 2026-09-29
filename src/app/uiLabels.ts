@@ -1725,3 +1725,15 @@ export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
 export const ASSET_IN_USE_LABEL = "使用中";
 /** 上の印の意味（説明・読み上げ用）＝印だけだと「何に使っているか」が分からない（#1271 レビュー）。 */
 export const ASSET_IN_USE_DESCRIPTION = "この素材は動画に置いてあります";
+
+/** 仕上がり確認の別窓（ADR-0050）の題（窓の枠に出る）。 */
+export const previewWindowTitle = (projectName: string | null): string =>
+  projectName ? `仕上がり確認 — ${projectName}` : "仕上がり確認";
+
+/** 仕上がり確認の別窓で、まだ絵が無いときの案内（ADR-0050）。 */
+export const PREVIEW_WINDOW_WAITING_TEXT = {
+  /** 本体から写しが届く前。 */
+  connecting: "本体の窓から読み込んでいます…",
+  /** 本体に動画が開かれていない。 */
+  noVideo: "本体の窓で動画を開くと、ここに仕上がりが出ます。この窓は閉じてかまいません",
+} as const;

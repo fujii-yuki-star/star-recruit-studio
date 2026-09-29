@@ -936,6 +936,27 @@ button.badge {
   position: relative;
 }
 
+/* **仕上がり確認の別窓**（ADR-0050）＝窓いっぱいに仕上がり確認の欄の中身だけを出す。
+   本文は欄の本文（`.panel-frame-body--fill`）と同じ詰め方＝絵は残りの高さに収まり、「再生」の行は常に見える。 */
+.preview-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.preview-window-wait {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-bg);
+  color: var(--color-text-muted, var(--color-text));
+  text-align: center;
+}
+
 /**
  * 仕上がり確認の**絵の置き場**（#1257・タイムライン編集）。欄の残りの高さを受け持ち、
  * 絵（`.preview-stage-wrap`）を**縦横とも収まる**大きさにして真ん中へ置く。

@@ -85,9 +85,11 @@ import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/
 import { safeAreaRect } from "../../domain/preview/safeArea";
 import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/appFullscreen";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
+import { closeSelf } from "../../infrastructure/previewWindow";
+import { usePreviewWindowHost } from "../hooks/usePreviewWindowHost";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
-import { ASSET_IN_USE_DESCRIPTION, ASSET_IN_USE_LABEL } from "../uiLabels";
+import { ASSET_IN_USE_DESCRIPTION, ASSET_IN_USE_LABEL, previewWindowTitle } from "../uiLabels";
 import { timelineEditKind } from "../../domain/timeline/editKind";
 import { TIMELINE_EDIT_KIND_LABEL } from "../uiLabels";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
@@ -186,6 +188,11 @@ import { getBooleanSetting, getChoiceSetting, setBooleanSetting, setChoiceSettin
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
+  /**
+   * `previewWindow`＝**仕上がり確認の別窓**として描く（ADR-0050）。仕上がり確認の欄だけを窓いっぱいに出し、
+   * 時計・音・欄の配置の保存は持たない（本体が持つ）。操作は store 経由で本体へ送られる（`PreviewWindowApp`）。
+   */
+  presentation?: "main" | "previewWindow";
 }
 
 /** 編集してから自動保存するまでの待ち（ms）。連続操作のたびに書かないための間。 */
@@ -462,7 +469,8 @@ const NOTHING_SELECTED_HINT = {
  * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
-export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
+export function TimelineProjectScreen({ onNavigate, presentation = "main" }: TimelineProjectScreenProps) {
+  const inPreviewWindow = presentation === "previewWindow";
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
   const {
@@ -483,9 +491,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
-  useTimelinePlayback();
+  // ⚠️ **別窓では持たない**（ADR-0050 決定2）＝時計と音は本体だけ（二重に進める・二重に鳴らすを作らない）。
+  useTimelinePlayback(!inPreviewWindow);
   // 音は「その瞬間に鳴っているもの」を時刻から決めて鳴らす（絵と同じ時刻を見る＝ずれない）。
-  useTimelineAudio();
+  useTimelineAudio(!inPreviewWindow);
+  // **仕上がり確認の別窓**（ADR-0050）＝本体の側で開き・写しを送り・命令を受ける（別窓の中では何もしない）。
+  const previewWindow = usePreviewWindowHost(!inPreviewWindow, previewWindowTitle(doc?.projectName ?? null));
 
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
@@ -828,7 +839,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
   // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
   const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed } =
-    usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS);
+    usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS, { persist: !inPreviewWindow });
 
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   // **聞いた時点の相手を組で持つ**（#701 レビュー）。id だけだと、確認の表示条件が「いま選んでいる部品」に
@@ -3770,6 +3781,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           >
             {bigView ? "元に戻す" : "大きく見る"}
           </button>
+          {/* **別の窓で見る**（ADR-0050・#1263）＝2画面目で大きく見ながら、そのまま直接動かす。押し直しで閉じる（1手で戻る）。 */}
+          {inPreviewWindow ? (
+            <button className="btn btn-ghost btn-sm" title="この窓を閉じます（本体の窓はそのまま使えます）" onClick={() => void closeSelf()}>
+              この窓を閉じる
+            </button>
+          ) : (
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-pressed={previewWindow.open}
+              title={previewWindow.open ? "別の窓を閉じます" : "仕上がり確認を別の窓に出します。2画面目で大きく見ながら、そのまま直接動かせます"}
+              onClick={() => (previewWindow.open ? previewWindow.close() : previewWindow.show())}
+            >
+              別の窓で見る
+            </button>
+          )}
         </div>
         <div
           ref={fitRef}
@@ -3785,7 +3811,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
               入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
               `dangerouslySetInnerHTML` を使うので、中に子を足せない。見えない・触れない姿で流す。 */}
-          {videoHeldAudible.map((v) => (
+          {/* ⚠️ **別窓では鳴らさない**（ADR-0050 決定2）＝音は本体だけ。 */}
+          {!inPreviewWindow && videoHeldAudible.map((v) => (
             <TimelineSlotVideo
               // ⚠️ **鍵も置き場所ごと**（レビュー 🟡）＝部品 id だと差し込み口が2つある部品で重なり、
               // 取り違えて片方しか鳴らない（書き出しには2本入るので食い違う）。
@@ -3838,7 +3865,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           sourceSec={v.sourceSec}
                           speed={v.speed}
                           playing={isPlaying && !v.pastUsableLength}
-                          audioVolume={v.audioVolume}
+                          // ⚠️ **別窓では音を消して映す**（ADR-0050 決定2）＝音は本体だけ（`undefined`＝消音）。
+                          audioVolume={inPreviewWindow ? undefined : v.audioVolume}
                           onUnplayable={() =>
                             setUnplayableVideoIds((prev) =>
                               // ⚠️ **置き場所の素材**を覚える（レビュー 🟡）＝差し込み口では部品に
@@ -6122,6 +6150,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         }
       : p,
   );
+
+  // **仕上がり確認の別窓**（ADR-0050）＝仕上がり確認の欄だけを窓いっぱいに出す。欄の枠・見出しの行・並びは出さない
+  // （同じ部品を使うので、掴む・直す・中へ入る・キー操作は本体と同じ）。その場の返事は窓の下に出す。
+  if (inPreviewWindow) {
+    const previewPanel = shownPanels.find((p) => p.id === PANEL_ID.preview);
+    return (
+      <div className="preview-window dense" data-testid="preview-window">
+        {/* 欄の本文と同じ器（`fillBody` の欄）＝絵の収め方と「再生」の行の出し方を本体と割らない。 */}
+        <div className="panel-frame-body panel-frame-body--fill">{previewPanel?.content}</div>
+        {(voiceError || flashBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
+          <div className="notice notice-warn timeline-flash" role="alert">
+            {voiceError && <p>{voiceError}</p>}
+            {flashBlockedMessage && <p>{flashBlockedMessage}</p>}
+            {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
+            {drillBlockedNotice && <p>{drillBlockedNotice}</p>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
