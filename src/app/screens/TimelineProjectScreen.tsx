@@ -240,6 +240,12 @@ const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_HIT_W_PX * 2 + CLIP_MENU_W_PX + 16;
  * 取っ手を出す幅（`CLIP_HANDLES_MIN_W_PX`）より少し広く取る＝取っ手で隠れる幅では敷く意味が無い。
  */
 const CLIP_ANALYSIS_MIN_W_PX = 60;
+/**
+ * 帯の右端に**長さ（と速さ）**を出す最小の幅（px・ADR-0048・#1256 b6）。
+ * ⚠️ **名前を潰してまで出さない**＝名前が読めることが先。名前の数文字と「5.0秒」が並ぶ幅から出す。
+ * 他社（Premiere・Final Cut）も帯の中に長さ・効果の印を出す＝ホバーしなくても帯1本から読める。
+ */
+const CLIP_BADGE_MIN_W_PX = 110;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
@@ -4324,6 +4330,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                                 「どこで何が鳴っているか」が帯からは分からない。
                                 ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
                             {clipAnalysis(c)}
+                            {/* **長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる
+                                （印が先に切れると、幅があるのに読めない）。読み上げ名には混ぜない（`aria-hidden`）。 */}
+                            {pxPerSec * c.durationSec >= CLIP_BADGE_MIN_W_PX && (
+                              <span className="timeline-clip-badge" aria-hidden="true">
+                                {c.speed != null && c.speed !== 1 ? `×${c.speed} ` : ""}{c.durationSec.toFixed(1)}秒
+                              </span>
+                            )}
                             {clipLabel(c, doc.assets)}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (

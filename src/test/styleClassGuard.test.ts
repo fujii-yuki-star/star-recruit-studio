@@ -69,7 +69,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     //   広げた印（`panel-frame--maximized` 等）は式の中で組み立てるので、この走査には数えられない。
     // ⚠️ **+1**（#1256 b5）＝帯の操作の行（`timeline-edit-tools`）。
     // ⚠️ **+2**（#1256 c6）＝近道キーの一覧（`shortcut-list`・`shortcut-list-table`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(177);
+    // ⚠️ **+1**（#1256 b6）＝帯の長さと速さの印（`timeline-clip-badge`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(178);
   });
 });
 

@@ -8240,6 +8240,37 @@ describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {
   });
 });
 
+// 帯の中に長さと速さの印を出す（ADR-0048・#1256 b6）＝ホバーしなくても帯1本から読める。
+describe("TimelineProjectScreen: 帯の長さと速さの印（#1256 b6）", () => {
+  /** 帯（並んだ順）の印。帯の名前は中身で変わるので、並びの順で取る。 */
+  const badgeAt = (c: HTMLElement, i: number) => c.querySelectorAll(".timeline-clip")[i]?.querySelector(".timeline-clip-badge") ?? null;
+
+  it("幅のある帯には長さを出し、読み上げ名には混ぜない", () => {
+    // 段の既定 36 px/秒 → 5秒は 180px（出す）・2秒は 72px（出さない）。
+    open({ clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 6, durationSec: 2, x: 0, y: 0, w: 10, h: 10 },
+    ] as TimelineProject["clips"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelectorAll(".timeline-clip").length).toBe(2);
+    const wide = badgeAt(container, 0);
+    expect(wide?.textContent).toBe("5.0秒");
+    expect(wide?.getAttribute("aria-hidden"), "読み上げ名に混ざる").toBe("true");
+    expect(badgeAt(container, 1), "細い帯にまで出して名前を潰している").toBeNull();
+  });
+
+  it("速さを変えた帯には速さも出す", () => {
+    open({
+      assets: [{ assetId: "asset_001", type: "audio", fileName: "a.mp3", displayName: "音", localPath: "assets/a.mp3", durationSec: 20 }] as TimelineProject["assets"],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 6, assetId: "asset_001", speed: 2 }] as TimelineProject["clips"],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const badge = container.querySelector(".timeline-clip-badge");
+    expect(badge?.textContent).toBe("×2 6.0秒");
+  });
+});
+
 // 書き出しは見出しの行にある（ADR-0048・#1256＝CapCut・Clipchamp などは右上に置く）。
 // ⚠️ 以前は仕上がり確認の欄の中（再生の行）にあり、大きさの選択と書き出すボタンのぶん絵が小さくなっていた。
 describe("TimelineProjectScreen: 書き出しの置き場所（#1256）", () => {

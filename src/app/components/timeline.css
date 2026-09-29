@@ -42,6 +42,20 @@
   padding-top: var(--gap-xs);
 }
 
+/* **帯の長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる。 */
+.timeline-clip-badge {
+  float: right;
+  margin-left: var(--gap-xs);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  position: relative;
+}
+/* 選んだ帯は右端に「⋮」と取っ手が出る＝その下に潜らないよう空ける。 */
+.timeline-clip--selected .timeline-clip-badge {
+  margin-right: calc(var(--clip-menu-w) + var(--clip-handle-w));
+}
+
 /* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
 .timeline-toolbar-sep {
   width: 1px;
