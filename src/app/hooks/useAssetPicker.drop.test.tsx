@@ -51,6 +51,14 @@ describe("窓へ落としたときの受け口（#1026 ②）", () => {
     expect(onPick).toHaveBeenCalledWith(["C:/a.png"]);
   });
 
+  // 入った瞬間（`enter`）にも名前が来る（#1272）＝取り込むのは離したときだけ。
+  it("枠の上に入っただけでは取り込まない", async () => {
+    const onPick = vi.fn();
+    setup({ onPick });
+    await fire({ kind: "enter", paths: ["C:/a.png"], position: { x: 50, y: 40 } });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
   it("枠の外に落ちたものは受けない（別の欄に落としたのに取り込まない）", async () => {
     const onPick = vi.fn();
     setup({ onPick });

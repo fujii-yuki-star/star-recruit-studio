@@ -123,3 +123,50 @@ describe("窓の外から落としたファイル（ADR-0049）", () => {
     expect(r.container.querySelector(".timeline-file-drop-line")).toBeNull();
   });
 });
+
+// 離す前に「置けない」を見せる（#1272）＝名前が来るのは入った瞬間（enter）だけ。
+describe("窓の外から運んでいる間の「置けない」（#1272）", () => {
+  const enter = (x: number, y: number, paths: string[]) => fire({ kind: "enter", paths, position: { x, y } });
+  const lane = (c: HTMLElement) => c.querySelector('.timeline-row-label[data-track-id="track_001"]')!.nextElementSibling!;
+
+  it("入った瞬間は取り込まない（離したときだけ）", async () => {
+    await setup();
+    enter(380, 420, ["C:/写真/a.png"]);
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it("部品の上（必ず重なる）では、離す前に置けない色と理由を出す", async () => {
+    const r = await setup();
+    // 左端 200 から 1秒＝236px＝clip_001（0〜2秒）の上。
+    enter(236, 420, ["C:/写真/a.png"]);
+    expect(lane(r.container).classList.contains("drop-target--blocked")).toBe(true);
+    expect(screen.getByTestId("file-drop-hint").textContent).toBe("その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください");
+    // 空いている所へ動かせば消える（名前は enter で覚えたまま）。
+    over(380, 420);
+    expect(lane(r.container).classList.contains("drop-target--blocked")).toBe(false);
+    expect(lane(r.container).classList.contains("drop-target")).toBe(true);
+    expect(screen.queryByTestId("file-drop-hint")).toBeNull();
+  });
+
+  it("種類の合わない素材だけなら断らない（新しい列へ行く）", async () => {
+    const r = await setup();
+    enter(236, 420, ["C:/音/a.mp3"]);
+    expect(lane(r.container).classList.contains("drop-target--blocked")).toBe(false);
+  });
+
+  it("固定した列では、空いている時刻でも置けない", async () => {
+    useTimelineStore.setState({ doc: { ...doc, tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] } });
+    const r = await setup();
+    enter(380, 420, ["C:/写真/a.png"]);
+    expect(lane(r.container).classList.contains("drop-target--blocked")).toBe(true);
+    expect(screen.getByTestId("file-drop-hint").textContent).toBe("この列は固定されています。動かすには固定を外してください");
+  });
+
+  it("出ていったら種類を忘れる（次に入るまで断らない）", async () => {
+    const r = await setup();
+    enter(236, 420, ["C:/写真/a.png"]);
+    fire({ kind: "leave", paths: [], position: null });
+    over(236, 420); // 名前の無い通過＝種類が分からない＝断らない
+    expect(lane(r.container).classList.contains("drop-target--blocked")).toBe(false);
+  });
+});

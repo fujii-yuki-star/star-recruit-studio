@@ -77,7 +77,7 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1268）＝右クリックのメニューの近道のキー（`context-menu-key`）。
     // ⚠️ **+1**（#1266）＝帯の音量の線（`timeline-clip-volume`）。
     // ⚠️ **+3**（#1264）＝素材を絵で並べる（`picker-tile-thumb`・`picker-tile-label`・`picker-badge`。格子と枠は式の中で組み立てる）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(193);
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(194);
   });
 });
 

@@ -21,6 +21,9 @@ import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
+import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
+import { detectAssetType } from "../../domain/asset/assetFile";
+import type { AssetType } from "../../domain/enums";
 import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
@@ -856,8 +859,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /**
    * **窓の外からファイルを運んでいる最中**の行き先（ADR-0049）。`null`＝運んでいない。
    * 列（`trackId`）・列の無い所（`trackId: null`＝新しい列）・`FILE_DROP_IMPORT_ONLY`（並びの外＝取り込むだけ）。
+   * `issue`＝**離しても必ず断られる**理由（#1272・`fileDropHoverIssue`）。`null`＝置けそう。
    */
-  const [fileHover, setFileHover] = useState<{ trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(null);
+  const [fileHover, setFileHover] = useState<{ trackId: string | null; startSec: number; issue: EditBlockedReason | null } | typeof FILE_DROP_IMPORT_ONLY | null>(null);
+  /** 運んでいるファイルの種類（#1272）＝名前が来るのは入った瞬間（`enter`）だけなので、ここに覚えておく。 */
+  const fileDragTypesRef = useRef<AssetType[]>([]);
   /** 落とした点から行き先を決める手（描くたびに最新の配置・倍率を見る）。 */
   const fileDropTargetRef = useRef<(x: number, y: number) => { trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(() => null);
   /**
@@ -1111,11 +1117,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     let un: (() => void) | null = null;
     let cancelled = false;
     void onWindowFileDrop((e) => {
-      if (e.kind === "leave") { setFileHover(null); return; }
+      if (e.kind === "leave") { fileDragTypesRef.current = []; setFileHover(null); return; }
+      if (e.kind === "enter") fileDragTypesRef.current = e.paths.map(detectAssetType);
       if (!e.position) return;
       const p = cssPointOf(e.position, window.devicePixelRatio || 1);
       const target = fileDropTargetRef.current(p.x, p.y);
-      if (e.kind === "over") { setFileHover(target); return; }
+      if (e.kind === "over" || e.kind === "enter") {
+        // **離す前に「置けない」を見せる**（#1272）＝必ず断られる時だけ（置く関数と逆向きに食い違わない）。
+        const doc = useTimelineStore.getState().doc;
+        setFileHover(target == null || target === FILE_DROP_IMPORT_ONLY ? target
+          : { ...target, issue: doc ? fileDropHoverIssue(doc, { ...target, assetTypes: fileDragTypesRef.current }) : null });
+        return;
+      }
+      fileDragTypesRef.current = [];
       setFileHover(null);
       if (target == null || e.paths.length === 0) return;
       void placeDroppedFiles(e.paths, target === FILE_DROP_IMPORT_ONLY ? null : target);
@@ -4606,7 +4620,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
-                      className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? " drop-target" : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+                      className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? (fileHover.issue ? " drop-target--blocked" : " drop-target") : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onPointerDown={beginMarquee}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
@@ -6120,6 +6134,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           aria-hidden="true"
           style={{ left: marquee.left, top: marquee.top, width: marquee.right - marquee.left, height: marquee.bottom - marquee.top }}
         />
+      )}
+      {/* 離しても置けない所を通っている（#1272）＝理由と次の行動を、離す前に出す。 */}
+      {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.issue && (
+        <div className="file-drop-hint file-drop-hint--blocked" role="status" data-testid="file-drop-hint">
+          {editBlockedMessage[fileHover.issue]}
+        </div>
       )}
       {fileHover === FILE_DROP_IMPORT_ONLY && (
         <div className="file-drop-hint" role="status" data-testid="file-drop-hint">

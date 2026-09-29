@@ -1,6 +1,6 @@
 // 窓の外から落としたファイルを並びへ置く（ADR-0049）。
 import { describe, expect, it } from 'vitest';
-import { placeDroppedAssets, trackKindForAssetType } from './fileDropPlacement';
+import { fileDropHoverIssue, placeDroppedAssets, trackKindForAssetType } from './fileDropPlacement';
 import { ASSET_TYPE, PROJECT_FORMAT, TRACK_KIND } from '../enums';
 import { EDIT_BLOCKED } from './edit';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -107,5 +107,52 @@ describe('placeDroppedAssets（窓の外から落とした素材を置く・ADR-
     expect(trackKindForAssetType(ASSET_TYPE.bgm)).toBe(TRACK_KIND.audio);
     expect(trackKindForAssetType(ASSET_TYPE.voice)).toBe(TRACK_KIND.audio);
     for (const t of [ASSET_TYPE.image, ASSET_TYPE.video, ASSET_TYPE.logo, ASSET_TYPE.yuko]) expect(trackKindForAssetType(t)).toBe(TRACK_KIND.visual);
+  });
+});
+
+// 運んでいる間の「置けない」（#1272）＝必ず断られる時だけ。
+describe('fileDropHoverIssue（運んでいる間の置けない・#1272）', () => {
+  const on = (over: Partial<TimelineProject>) => doc(over);
+  const clip = { id: 'clip_001', kind: 'text', trackId: 'track_001', startSec: 2, durationSec: 2, x: 0, y: 0, w: 1, h: 1, text: 'x' };
+  const img = [ASSET_TYPE.image];
+
+  it('部品の上は重なり・部品の終わりちょうどからは置ける（端が接するのは可）', () => {
+    const d = on({ clips: [clip] as TimelineProject['clips'] });
+    expect(fileDropHoverIssue(d, { trackId: 'track_001', startSec: 3, assetTypes: img })).toBe(EDIT_BLOCKED.overlap);
+    expect(fileDropHoverIssue(d, { trackId: 'track_001', startSec: 4, assetTypes: img })).toBeNull();
+  });
+
+  it('固定・出さない列は、空いていても置けない', () => {
+    expect(fileDropHoverIssue(on({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] }), { trackId: 'track_001', startSec: 0, assetTypes: img }))
+      .toBe(EDIT_BLOCKED.locked);
+    expect(fileDropHoverIssue(on({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }] }), { trackId: 'track_001', startSec: 0, assetTypes: img }))
+      .toBe(EDIT_BLOCKED.hiddenTrack);
+  });
+
+  it('種類の合う素材が無ければ断らない（全部が新しい列へ行く）・列の無い所も断らない', () => {
+    const d = on({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }], clips: [clip] as TimelineProject['clips'] });
+    expect(fileDropHoverIssue(d, { trackId: 'track_001', startSec: 3, assetTypes: [ASSET_TYPE.bgm] })).toBeNull();
+    expect(fileDropHoverIssue(d, { trackId: null, startSec: 3, assetTypes: img })).toBeNull();
+    expect(fileDropHoverIssue(d, { trackId: 'track_001', startSec: 3, assetTypes: [] }), '種類が分からないのに断った').toBeNull();
+  });
+
+  it('混ざっていれば、合う素材のぶんで断る', () => {
+    const d = on({ clips: [clip] as TimelineProject['clips'] });
+    expect(fileDropHoverIssue(d, { trackId: 'track_001', startSec: 3, assetTypes: [ASSET_TYPE.bgm, ASSET_TYPE.image] })).toBe(EDIT_BLOCKED.overlap);
+  });
+
+  // ⚠️ **断る色なのに置けてしまう**を作らない＝断ると言った所では、実際に置く関数も同じ理由で断る。
+  it('断ると言った所では、置く関数も同じ理由で断る', () => {
+    const cases: { d: TimelineProject; startSec: number; assetId: string; type: typeof ASSET_TYPE.image | typeof ASSET_TYPE.bgm; trackId: string }[] = [
+      { d: on({ clips: [clip] as TimelineProject['clips'] }), startSec: 3, assetId: 'asset_001', type: ASSET_TYPE.image, trackId: 'track_001' },
+      { d: on({ clips: [clip] as TimelineProject['clips'] }), startSec: 2, assetId: 'asset_001', type: ASSET_TYPE.image, trackId: 'track_001' },
+      { d: on({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio, locked: true }] }), startSec: 0, assetId: 'asset_003', type: ASSET_TYPE.bgm, trackId: 'track_002' },
+    ];
+    for (const c of cases) {
+      const hover = fileDropHoverIssue(c.d, { trackId: c.trackId, startSec: c.startSec, assetTypes: [c.type] });
+      expect(hover).not.toBeNull();
+      const placed = placeDroppedAssets(c.d, { assetIds: [c.assetId], trackId: c.trackId, startSec: c.startSec });
+      expect(placed).toEqual({ ok: false, reason: hover });
+    }
   });
 });

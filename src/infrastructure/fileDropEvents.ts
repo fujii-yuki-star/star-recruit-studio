@@ -9,9 +9,12 @@
 import { isTauri } from './assetFs';
 
 export interface FileDropEvent {
-  /** 落とした（`drop`）／枠の上を通っている（`over`）／出ていった（`leave`）。 */
-  kind: 'drop' | 'over' | 'leave';
-  /** 落とされた絶対パス（`drop` のときだけ中身がある）。 */
+  /**
+   * 窓へ入った（`enter`）／落とした（`drop`）／枠の上を通っている（`over`）／出ていった（`leave`）。
+   * `enter` は**運んでいるファイルの名前**が分かる唯一の時点（#1272＝離す前に種類だけ見る）。
+   */
+  kind: 'enter' | 'drop' | 'over' | 'leave';
+  /** 絶対パス（`enter` と `drop` のときだけ中身がある）。 */
   paths: string[];
   /** 窓の中の**物理**座標（`leave` では無い）。CSS の点へ直すのは `cssPointOf`。 */
   position: { x: number; y: number } | null;
@@ -38,7 +41,8 @@ async function subscribe(handler: (e: FileDropEvent) => void): Promise<() => voi
   const { getCurrentWebview } = await import('@tauri-apps/api/webview');
   const un = await getCurrentWebview().onDragDropEvent((event) => {
     const p = event.payload;
-    if (p.type === 'drop') handler({ kind: 'drop', paths: [...p.paths], position: p.position });
+    if (p.type === 'enter') handler({ kind: 'enter', paths: [...p.paths], position: p.position });
+    else if (p.type === 'drop') handler({ kind: 'drop', paths: [...p.paths], position: p.position });
     else if (p.type === 'over') handler({ kind: 'over', paths: [], position: p.position });
     else if (p.type === 'leave') handler({ kind: 'leave', paths: [], position: null });
     // 上以外（将来 Tauri が種類を増やしたとき）は**何もしない**＝知らない出来事で取り込みを始めない。
