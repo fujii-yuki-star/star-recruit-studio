@@ -5,7 +5,8 @@
 // 「種類の合わない列へ落としたときの行き先」だけ。
 import { ASSET_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { AssetType, TrackKind } from '../enums';
-import { addAudioClip, addTrack, addVisualClip, EDIT_BLOCKED } from './edit';
+import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { addAudioClip, addTrack, addVisualClip, EDIT_BLOCKED, isFreeSpan, trackPlacementIssue } from './edit';
 import type { EditBlockedReason } from './edit';
 import type { TimelineProject } from './types';
 
@@ -84,4 +85,28 @@ export function placeDroppedAssets(doc: TimelineProject, input: FileDropPlacemen
     cursor.set(trackId, placed.startSec + placed.durationSec);
   }
   return { ok: true, doc: working, placedIds };
+}
+
+/**
+ * **窓の外から運んでいる間**に「ここには置けない」と分かるか（#1272・ADR-0049 の残り）。`null`＝置けそう。
+ *
+ * ⚠️ **運んでいる間は素材がまだ無い**＝分かるのはファイル名から出した**種類だけ**（長さも絵もまだ）。
+ * だから**必ず断られる時だけ**断りを返す（「置けそうに見えたのに断られる」は残りうるが、
+ * 「断られる色なのに置けてしまう」は作らない＝`placeDroppedAssets` と逆向きに食い違わない）：
+ * - 種類の合う素材が1つも無い＝全部が新しい列へ行く（上の規則）＝ここでは断らない。
+ * - 列の事情（固定・出さない）は `trackPlacementIssue`＝置く関数（`addVisualClip`／`addAudioClip`）と同じ。
+ * - 重なりは**いちばん短い部品**（`TIMELINE_MIN_CLIP_SEC`）でも当たるか＝それで当たれば、どの長さでも当たる。
+ */
+export function fileDropHoverIssue(
+  doc: TimelineProject,
+  input: { trackId: string | null; startSec: number; assetTypes: readonly AssetType[] },
+): EditBlockedReason | null {
+  if (input.trackId == null) return null;
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return null;
+  if (!input.assetTypes.some((t) => trackKindForAssetType(t) === track.kind)) return null;
+  const trackIssue = trackPlacementIssue(doc, track.id, track.kind);
+  if (trackIssue) return trackIssue;
+  if (!isFreeSpan(doc.clips, track.id, Math.max(0, input.startSec), TIMELINE_MIN_CLIP_SEC)) return EDIT_BLOCKED.overlap;
+  return null;
 }

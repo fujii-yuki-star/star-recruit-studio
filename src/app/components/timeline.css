@@ -94,6 +94,10 @@
   font-size: 13px;
   pointer-events: none;
 }
+/* 離しても置けない所を通っているとき（#1272）＝枠の色を、置けない帯（`drop-target--blocked`）に揃える。 */
+.file-drop-hint--blocked {
+  border-color: var(--color-danger);
+}
 
 /* **音量の線**（#1266）＝帯の全面に重ねる（上端＝最大の音量・下端＝無音）。押す当たりは取らない。 */
 .timeline-clip-volume {

@@ -117,7 +117,8 @@ export function useAssetPicker({ onPick, disabled = false, withAudio = false, ac
       if (e.kind === "leave") { setDropOver(false); return; }
       if (!e.position) return;
       const over = isPointInRect(cssPointOf(e.position, window.devicePixelRatio || 1), zone.getBoundingClientRect());
-      if (e.kind === "over") { setDropOver(over && !liveRef.current.blocked); return; }
+      // ⚠️ **入った（`enter`）は通っているのと同じ**＝取り込みを始めるのは離した（`drop`）ときだけ（#1272）。
+      if (e.kind === "over" || e.kind === "enter") { setDropOver(over && !liveRef.current.blocked); return; }
       setDropOver(false);
       // 取り込み中・書き出し中は受けない（押せないボタンと同じ扱い＝黙って始めない）。
       if (!over || liveRef.current.blocked) return;
