@@ -65,7 +65,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **-1**（2026-09-28）＝「列を足す」を帯の下から道具立ての行へ移したとき、
     //   その囲い（`row gap-sm mt-md`）ごと消えた。`mt-md` はここでしか使っていなかった。
     // ⚠️ **+2**（#1257）＝仕上がり確認を「絵の置き場」（`preview-fit`）と「操作の置き場」（`preview-below`）に分けた。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(173);
+    // ⚠️ **+1**（ADR-0048 決定5）＝欄の見出しの右のボタンの囲い（`panel-frame-head-actions`）。
+    //   広げた印（`panel-frame--maximized` 等）は式の中で組み立てるので、この走査には数えられない。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(174);
   });
 });
 

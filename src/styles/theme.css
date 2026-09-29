@@ -1443,6 +1443,19 @@ button.badge {
 
 /* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
 .panel-frame { position: relative; }
+/* 見出しの右のボタン（広げる・⋮）。 */
+.panel-frame-head-actions { display: flex; align-items: center; gap: 2px; }
+/* **一時的に広げた欄**（ADR-0048 決定5）＝配置の器いっぱいに重ねて出す。
+   ⚠️ **ほかの欄は外さずに隠す**（`visibility`）＝外すと中身の状態（鳴っている音・スクロール位置）が消える。
+   ⚠️ 器（`.panel-layout`）が基準＝間の箱は位置を持たないので、広げた欄は器に対して置かれる。 */
+.panel-layout--maximized { position: relative; }
+.panel-layout--maximized .panel-frame:not(.panel-frame--maximized),
+.panel-layout--maximized .panel-divider { visibility: hidden; }
+.panel-frame--maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
 .panel-frame--dragging { opacity: var(--drag-source-opacity); }
 .panel-frame-head {
   cursor: grab;

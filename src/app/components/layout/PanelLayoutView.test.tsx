@@ -321,3 +321,85 @@ describe("欄が縮めること（#1104・実機で発覚）", () => {
     expect(rows, "割合を % で書いている").not.toContain("%");
   });
 });
+
+// 欄を一時的に広げる（ADR-0048 決定5・#1256 b3）。Premiere の `` ` ``・VEGAS の Ctrl+F11 と同じ型。
+// ⚠️ **記憶しない一時状態**＝配置（ADR-0033 の記憶）を書き換えない。
+describe("PanelLayoutView: 欄を広げる", () => {
+  const frame = (id: string): HTMLElement => document.querySelector(`[data-panel-id="${id}"]`) as HTMLElement;
+  const isMax = (id: string): boolean => frame(id).classList.contains("panel-frame--maximized");
+
+  it("見出しのボタンで広げ、もう一度で戻す（配置は書き換えない）", () => {
+    const onChange = vi.fn();
+    const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "あの欄を広げる" }));
+    expect(isMax("a")).toBe(true);
+    expect(isMax("b")).toBe(false);
+    expect(container.querySelector(".panel-layout")!.classList.contains("panel-layout--maximized")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "あの欄を元に戻す" }));
+    expect(isMax("a")).toBe(false);
+    expect(container.querySelector(".panel-layout")!.classList.contains("panel-layout--maximized")).toBe(false);
+    expect(onChange, "広げただけで配置を書き換えた（記憶してしまう）").not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **ほかの欄は外さない**＝外すと中身の状態が消える（仕上がり確認で鳴っている音が止まる）。
+  it("広げている間も、ほかの欄の中身は残っている（隠すだけ）", () => {
+    render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あの欄を広げる" }));
+    expect(screen.getByText("いの中身")).toBeTruthy();
+  });
+
+  it("見出しの二度押しでも広げる／戻す", () => {
+    render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+    fireEvent.doubleClick(frame("b").querySelector(".panel-frame-head h3")!);
+    expect(isMax("b")).toBe(true);
+    fireEvent.doubleClick(frame("b").querySelector(".panel-frame-head h3")!);
+    expect(isMax("b")).toBe(false);
+  });
+
+  it("指している欄を `` ` `` キーで広げる（文字を打っている所では奪わない）", () => {
+    render(
+      <PanelLayoutView
+        layout={sideBySide()}
+        panels={[panels[0], { id: "b", title: "い", content: <input aria-label="入力" /> }]}
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "`" });
+    expect(isMax("a") || isMax("b"), "どこも指していないのに広がった").toBe(false);
+    fireEvent.pointerEnter(frame("a"));
+    fireEvent.keyDown(window, { key: "`" });
+    expect(isMax("a")).toBe(true);
+    fireEvent.keyDown(window, { key: "`" });
+    expect(isMax("a")).toBe(false);
+    fireEvent.pointerEnter(frame("b"));
+    fireEvent.keyDown(screen.getByLabelText("入力"), { key: "`" });
+    expect(isMax("b"), "文字を打っている所でキーを奪った").toBe(false);
+  });
+
+  it("欄のメニューからも広げられる", () => {
+    render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "いの欄の操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "広げる" }));
+    expect(isMax("b")).toBe(true);
+  });
+
+  // 広げた欄が配置から消えたら（閉じた・既定に戻した）元に戻す＝見えない欄を広げたまま残さない。
+  it("広げた欄が配置から消えたら、広げた状態を解く", () => {
+    const { rerender, container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あの欄を広げる" }));
+    const only = emptyLayout();
+    only.nodes.center = { panelId: "b" };
+    rerender(<PanelLayoutView layout={only} panels={panels} onChange={vi.fn()} />);
+    expect(container.querySelector(".panel-layout")!.classList.contains("panel-layout--maximized")).toBe(false);
+  });
+
+  it("CSS：広げた欄は器いっぱいに重ね、ほかの欄は隠すだけ（外さない）", () => {
+    const theme = readFileSync(join(__dirname, "../../../styles/theme.css"), "utf8");
+    const max = ruleBody(theme, ".panel-frame--maximized") ?? "";
+    expect(max).toMatch(/position:\s*absolute/);
+    expect(max).toMatch(/inset:\s*0/);
+    expect(ruleBody(theme, ".panel-layout--maximized") ?? "", "器が基準にならない").toMatch(/position:\s*relative/);
+    const hide = ruleBody(theme, ".panel-layout--maximized .panel-frame:not(.panel-frame--maximized),\n.panel-layout--maximized .panel-divider") ?? "";
+    expect(hide, "ほかの欄を外している／隠していない").toMatch(/visibility:\s*hidden/);
+  });
+});
