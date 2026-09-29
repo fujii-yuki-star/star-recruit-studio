@@ -3470,8 +3470,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
   const panels: PanelSpec[] = [
-    { id: PANEL_ID.preview, title: '仕上がり確認', content: (
+    // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
+    // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
+    //（1920×1009 の実測＝欄の本文 284px に絵 418px・「再生」は欄の下端より 142px 下）。
+    // 高さの側からも縛る＝`.preview-fit` が残りの高さを受け持ち、絵はその中に**縦横とも収まる**大きさにする。
+    { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, content: (
       <>
+        <div
+          className="preview-fit"
+          data-testid="preview-fit"
+          style={{ ["--stage-ratio" as string]: `${canvasDims.width / canvasDims.height}` }}
+        >
         <div className="preview-stage-wrap">
           {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
               入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
@@ -3639,6 +3648,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             />
           )}
         </div>
+        </div>
+        {/* 絵の下＝操作と設定。**ここだけが流れる**（絵は縮むだけ・流れない）＝設定を開いても
+            絵の下の「再生」の行は押し出されず、あふれた分はこの中でスクロールする。 */}
+        <div className="preview-below" data-testid="preview-below">
         <div className="row gap-sm">
           <button
             className="btn btn-primary"
@@ -3810,6 +3823,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </details>
         )}
+        </div>
       </>
     ) },
     { id: PANEL_ID.arrange, title: '並び', fillBody: true, content: (

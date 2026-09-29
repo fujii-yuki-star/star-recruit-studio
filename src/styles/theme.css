@@ -936,6 +936,36 @@ button.badge {
   position: relative;
 }
 
+/**
+ * 仕上がり確認の**絵の置き場**（#1257・タイムライン編集）。欄の残りの高さを受け持ち、
+ * 絵（`.preview-stage-wrap`）を**縦横とも収まる**大きさにして真ん中へ置く。
+ * ⚠️ 絵の大きさを**幅だけ**で決めると、欄が横長のとき絵が欄の高さを越え、下の「再生」が押し出される。
+ * ⚠️ 絵の入れ物（wrap）に**実際の大きさを持たせる**＝操作レイヤ（`inset: 0`）の基準なので、
+ * 絵より大きい箱にすると掴む位置が実際とずれる。比は画面が `--stage-ratio`（幅÷高さ）で流し込む。
+ */
+.preview-fit {
+  flex: 1 1 0;
+  min-height: 96px;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-fit > .preview-stage-wrap {
+  width: min(100cqw, calc(100cqh * var(--stage-ratio, 1.7778)));
+  flex: 0 0 auto;
+}
+/* 絵の下（操作と設定）。中身の高さを取り、欄を越えた分はここだけで流す（絵は流さない）。 */
+.preview-below {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-sm);
+}
+
 .preview-stage-label {
   font-size: 13px;
 }

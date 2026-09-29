@@ -8001,6 +8001,45 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 仕上がり確認の絵は欄に収まり、「再生」の行は押し出されない（#1257）。
+// ⚠️ **既定の配置で「再生」が欄の外へ押し出されていた**（1920×1009 の実測＝欄の本文 284px に絵 418px）。
+// jsdom は大きさを計算しないので、**構造（絵の置き場と操作の置き場を分ける）と CSS の約束**を見る。
+// 実寸は `preview_start` で測った（直した後＝欄 284px の中に絵 110px・「再生」は y=220 で欄の中）。
+describe("TimelineProjectScreen: 仕上がり確認の絵は欄に収まる（#1257）", () => {
+  const cssOf = (f: string) => readFileSync(resolve(__dirname, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 規則の中身（`選択子 {` から最初の `}` まで）。**完全一致の選択子**で探す＝別の規則を拾わない。
+  const ruleOf = (css: string, sel: string): string => {
+    const i = css.indexOf(`\n${sel} {`);
+    return i < 0 ? "" : css.slice(i, css.indexOf("}", i));
+  };
+
+  it("絵は「絵の置き場」に、「再生」は「操作の置き場」にある（別の箱）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const fit = screen.getByTestId("preview-fit");
+    const below = screen.getByTestId("preview-below");
+    expect(fit.querySelector(".preview-stage"), "絵が絵の置き場に無い").not.toBeNull();
+    expect(below.contains(screen.getByRole("button", { name: "再生" })), "「再生」が操作の置き場に無い").toBe(true);
+    expect(fit.contains(below), "操作の置き場が絵の置き場の中にある（絵と一緒に押し出される）").toBe(false);
+    // 欄は**中身に高さを配らせる**器（`fillBody`）＝そうでないと絵の置き場が残りの高さを受け取れない。
+    expect(fit.parentElement?.className, "欄が高さを配らない（絵が欄に収まらない）").toMatch(/panel-frame-body--fill/);
+    // 比は動画の向きから流し込む（縦型で枠と絵がずれない）。
+    expect(fit.style.getPropertyValue("--stage-ratio")).toBe(String(1920 / 1080));
+  });
+
+  it("CSS：絵は高さの側からも縛られ、操作の置き場だけが流れる", () => {
+    const css = cssOf("../../styles/theme.css");
+    const fit = ruleOf(css, ".preview-fit");
+    expect(fit, "絵の置き場の規則が無い").toMatch(/flex:\s*1 1 0/);
+    expect(fit, "高さを測れない（cqh が効かない）").toMatch(/container-type:\s*size/);
+    const wrap = ruleOf(css, ".preview-fit > .preview-stage-wrap");
+    expect(wrap, "絵の幅が高さから縛られていない（横長の欄で絵が欄を越える）").toMatch(/width:\s*min\(100cqw,\s*calc\(100cqh\s*\*\s*var\(--stage-ratio/);
+    const below = ruleOf(css, ".preview-below");
+    expect(below, "操作の置き場が流れない（設定を開くと欄を越える）").toMatch(/overflow:\s*auto/);
+    expect(below, "操作の置き場が縮まない").toMatch(/min-height:\s*0/);
+  });
+});
+
 // 再生位置は操作の行にある（利用者要望 2026-09-28）。
 // ⚠️ **以前は欄のいちばん下**（クレジットと文字の形の設定より後ろ）にあり、**スクロールしないと届かなかった**。
 describe("TimelineProjectScreen: 再生位置の置き場所", () => {
