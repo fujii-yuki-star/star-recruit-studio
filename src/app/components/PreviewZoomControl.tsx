@@ -12,7 +12,13 @@ export function PreviewZoomControl({
   zoom,
   fitPercent,
   onChange,
+  subject = "",
 }: {
+  /**
+   * 何の表示か（読み上げ・ボタンの名前の頭に付ける・#1261）。**同じ画面に別の倍率がある**ときに使う
+   *（タイムライン編集は並びにも「表示を広げる」があり、名前だけでは区別できなかった）。既定は無し。
+   */
+  subject?: string;
   zoom: PreviewZoom;
   /** フィット時の実寸%（`ScenePreview` の `onFitPercent` で受けた値）。 */
   fitPercent: number;
@@ -25,7 +31,7 @@ export function PreviewZoomControl({
     <div className="row gap-sm" style={{ alignItems: "center" }}>
       <button
         className="btn btn-ghost btn-icon text-sm"
-        aria-label="表示を縮める"
+        aria-label={`${subject}表示を縮める`}
         disabled={!canOut}
         // ⚠️ **押せないときは理由を出す**（§2-5）＝押せるのに何も起きない／押せない理由が無い、を作らない。
         title={canOut ? "表示を縮める" : "これ以上は縮められません"}
@@ -40,7 +46,7 @@ export function PreviewZoomControl({
       </span>
       <button
         className="btn btn-ghost btn-icon text-sm"
-        aria-label="表示を広げる"
+        aria-label={`${subject}表示を広げる`}
         disabled={!canIn}
         title={canIn ? "表示を広げる" : "これ以上は広げられません"}
         onClick={() => onChange(stepZoom(zoom, "in", fitPercent))}
@@ -51,6 +57,7 @@ export function PreviewZoomControl({
         className="btn btn-ghost text-sm"
         // ⚠️ **戻す先は「全体」**＝倍率の数字ではなく**領域に合わせる**状態へ戻す
         //（100% に戻すと、狭い領域では画面からはみ出したままになる）。
+        aria-label={`${subject}全体表示`}
         disabled={zoom === "fit"}
         title={zoom === "fit" ? "いま全体が見えています" : "領域に合わせて全体を見る"}
         onClick={() => onChange("fit")}

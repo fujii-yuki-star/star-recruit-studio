@@ -75,6 +75,11 @@ import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { ShortcutList } from "../components/ShortcutList";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
+import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
+import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
+import { safeAreaRect } from "../../domain/preview/safeArea";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
@@ -851,6 +856,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [fileHover, setFileHover] = useState<{ trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(null);
   /** 落とした点から行き先を決める手（描くたびに最新の配置・倍率を見る）。 */
   const fileDropTargetRef = useRef<(x: number, y: number) => { trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(() => null);
+  /**
+   * 仕上がり確認の**表示倍率**（#1261）＝場面編集と同じ部品・同じ段（`PreviewZoomControl`）。
+   * ⚠️ **箱の実寸を変える**（`transform` にしない）＝キャンバスの操作の層は箱の実寸から縮尺を導くので、
+   * 実寸が変われば掴む位置もそのまま合う（`zoomedBox` の説明と同じ理由）。
+   */
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  /** 絵の置き場（`.preview-fit`）の実寸＝「欄に合わせる」ときの絵の大きさを出すのに使う。 */
+  const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
+  const fitObserverRef = useRef<ResizeObserver | null>(null);
+  const fitRef = useCallback((el: HTMLDivElement | null) => {
+    fitObserverRef.current?.disconnect();
+    fitObserverRef.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      // ⚠️ **整数に丸める**＝小数の揺れで描き直しが続かないように。
+      const w = Math.round(entry.contentRect.width);
+      const h = Math.round(entry.contentRect.height);
+      setFitBox((cur) => (cur && cur.w === w && cur.h === h ? cur : { w, h }));
+    });
+    ro.observe(el);
+    fitObserverRef.current = ro;
+  }, []);
+  // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
+  const [safeAreaOn] = useSafeAreaPref();
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -3568,6 +3597,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
+  // 仕上がり確認の「欄に合わせる」ときの絵の実寸と、拡大したときの箱（#1261）。
+  const stageRatio = canvasDims.width / canvasDims.height;
+  const fitStageW = fitBox ? Math.min(fitBox.w, fitBox.h * stageRatio) : 0;
+  const previewFitPct = fitPercentOf(fitStageW, canvasDims.width);
+  const previewZoomed = previewZoom !== "fit" && fitStageW > 0
+    ? zoomedBox({ width: fitStageW, height: fitStageW / stageRatio }, previewZoom, previewFitPct)
+    : null;
+
   const panels: PanelSpec[] = [
     // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
     // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
@@ -3575,12 +3612,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 高さの側からも縛る＝`.preview-fit` が残りの高さを受け持ち、絵はその中に**縦横とも収まる**大きさにする。
     { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, content: (
       <>
+        {/* ⚠️ **倍率と端の目安は、絵の置き場の上に浮かせる**（#1261）＝「再生」の行に置いたら、倍率の%表示の幅が
+            変わるたびに行の折り返しが変わり → 絵の置き場の高さが変わり → %が変わる、の**繰り返しで画面が固まった**（実測）。
+            浮かせれば置き場の大きさに関わらない。部品は場面編集と**同じもの**（ADR-0026②）。 */}
+        <div className="preview-fit-shell">
+        <div className="preview-view-tools" data-testid="preview-view-tools">
+          {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
+          <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+          <SafeAreaToggle />
+        </div>
         <div
-          className="preview-fit"
+          ref={fitRef}
+          className={`preview-fit${previewZoomed ? " preview-fit--zoomed" : ""}`}
           data-testid="preview-fit"
           style={{ ["--stage-ratio" as string]: `${canvasDims.width / canvasDims.height}` }}
         >
-        <div className="preview-stage-wrap">
+        <div
+          className="preview-stage-wrap"
+          // 拡大しているときは箱の実寸を決める（欄より大きければ、絵の置き場の中で流れる）。
+          style={previewZoomed ? { width: previewZoomed.width, height: previewZoomed.height } : undefined}
+        >
           {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
               入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
               `dangerouslySetInnerHTML` を使うので、中に子を足せない。見えない・触れない姿で流す。 */}
@@ -3667,6 +3718,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {/* ⚠️ **入った所に印を出す**（#818 レビュー 🔴・ADR-0026②＝場面編集のドリルインと同じ型）＝
               印が無いと ①二度押しできること自体が発見できない ②どの層に入ったのか読めない
               ③抜けたかどうかも読めない。**当たり判定と同じ矩形**を使う＝見た目と当て先がずれない。 */}
+          {/* **端の目安**（#1261・場面編集の #265 と同じ線）＝編集の補助。書き出しには焼かない。
+              割合で置く＝倍率を変えても一緒に伸びる。 */}
+          {safeAreaOn && (() => {
+            const r = safeAreaRect(canvasDims, doc.videoSettings.aspectRatio);
+            return (
+              <div
+                aria-hidden="true"
+                className="safe-area-guide"
+                data-testid="timeline-safe-area"
+                style={{
+                  left: `${(r.x / canvasDims.width) * 100}%`,
+                  top: `${(r.y / canvasDims.height) * 100}%`,
+                  width: `${(r.w / canvasDims.width) * 100}%`,
+                  height: `${(r.h / canvasDims.height) * 100}%`,
+                }}
+              />
+            );
+          })()}
           {!isPlaying && !exporting && drilledRect && (
             <div
               className="timeline-drilled-part"
@@ -3746,6 +3815,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               }}
             />
           )}
+        </div>
         </div>
         </div>
         {/* 絵の下＝操作と設定。**ここだけが流れる**（絵は縮むだけ・流れない）＝設定を開いても
