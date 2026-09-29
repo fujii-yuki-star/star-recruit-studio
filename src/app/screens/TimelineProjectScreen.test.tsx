@@ -8240,6 +8240,92 @@ describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {
   });
 });
 
+// 列の見出しの「出す／固定」（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」・利用者判断 2026-09-29）。
+// 普段は見せず、見出しに乗せた／キーで入ったときに出す。**変えた状態は常に出す**（今の状態が分かる）。
+describe("TimelineProjectScreen: 列の見出しの出す／固定（静かな常設）", () => {
+  const tracks2 = [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }];
+  const clips1 = [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }] as TimelineProject["clips"];
+  /** その列の帯の並ぶ箱（見出しのすぐ隣）。 */
+  const lane = (c: HTMLElement, id: string) => c.querySelector(`.timeline-row-label[data-track-id="${id}"]`)!.nextElementSibling as HTMLElement;
+
+  it("押すと出さない／出すが切り替わり、状態を名前と押された印で言う", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const eye = screen.getByRole("button", { name: "映像1を動画に出さない" });
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(eye);
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBe(true);
+    const back = screen.getByRole("button", { name: "映像1を動画に出す" });
+    expect(back.getAttribute("aria-pressed")).toBe("true");
+    expect(back.className, "変えた状態を常に出す印が無い").toContain("timeline-row-toggle--on");
+    // 列そのものの見た目でも示す（帯が薄くなる）。
+    expect(lane(container, "track_001").className).toContain("timeline-lane--hidden");
+    fireEvent.click(back);
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBeFalsy();
+  });
+
+  it("固定も同じく切り替わり、列に斜線の印が付く", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "映像1を固定する" }));
+    expect(useTimelineStore.getState().doc!.tracks[0].locked).toBe(true);
+    expect(screen.getByRole("button", { name: "映像1の固定を外す" }).className).toContain("timeline-row-toggle--on");
+    expect(lane(container, "track_001").className).toContain("timeline-lane--locked");
+  });
+
+  it("メニューと同じ入口＝取り消せる", () => {
+    open({ tracks: tracks2, clips: clips1 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "映像1を動画に出さない" }));
+    act(() => useTimelineStore.getState().undo());
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBeFalsy();
+  });
+
+  it("文字の印（出さない・固定中）はもう出さない＝アイコンの形で言う", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true, locked: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const label = container.querySelector('.timeline-row-label[data-track-id="track_001"]') as HTMLElement;
+    expect(label.textContent).not.toContain("出さない");
+    expect(label.textContent).not.toContain("固定中");
+  });
+
+  it("書き出し中は押せず、理由を言う", () => {
+    open({ tracks: tracks2 });
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const eye = screen.getByRole("button", { name: "映像1を動画に出さない" }) as HTMLButtonElement;
+    expect(eye.disabled).toBe(true);
+    expect(eye.title).not.toBe("");
+  });
+
+  it("出さない列・固定した列があるときだけ、道具の行に数を出す", () => {
+    open({ tracks: tracks2 });
+    const { container, unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.textContent).not.toMatch(/出さない列/);
+    unmount();
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }, { id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
+    const again = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(again.container.querySelector(".timeline-toolbar")!.textContent).toContain("出さない列 1・固定 1");
+  });
+
+  // ⚠️ jsdom は `:hover` を計算しないので、**CSS の約束**を見る（実際の見え方は preview_start で確かめた）。
+  it("CSS：普段は見せず押せない・乗せる／キーで入ると出る・変えた状態は常に出る・触る画面では常に出る", () => {
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = (sel: string) => { const i = css.indexOf(`\n${sel} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
+    const idle = rule(".timeline-row-toggle");
+    expect(idle).toMatch(/opacity:\s*0;/);
+    expect(idle, "見えないのに押せる（見えない当たり判定）").toMatch(/pointer-events:\s*none/);
+    expect(idle, "焦点が入らなくなる").not.toMatch(/visibility:\s*hidden/);
+    const reveal = rule(".timeline-row-label:hover .timeline-row-toggle,\n.timeline-row-label:focus-within .timeline-row-toggle");
+    expect(reveal, "乗せても／キーで入っても出ない").toMatch(/pointer-events:\s*auto/);
+    const on = rule(".timeline-row-toggle--on");
+    expect(on).toMatch(/opacity:\s*1/);
+    expect(on).toMatch(/pointer-events:\s*auto/);
+    expect(css, "触る画面で出す道が無い").toMatch(/@media \(hover: none\)\s*\{\s*\.timeline-row-toggle\s*\{[^}]*pointer-events:\s*auto/);
+    expect(rule(".timeline-lane--locked .timeline-clip"), "帯の上に斜線が無い（帯で埋まった固定の列が固定に見えない）").toMatch(/repeating-linear-gradient/);
+  });
+});
+
 // 帯の中に長さと速さの印を出す（ADR-0048・#1256 b6）＝ホバーしなくても帯1本から読める。
 describe("TimelineProjectScreen: 帯の長さと速さの印（#1256 b6）", () => {
   /** 帯（並んだ順）の印。帯の名前は中身で変わるので、並びの順で取る。 */

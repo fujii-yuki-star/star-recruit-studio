@@ -70,7 +70,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1256 b5）＝帯の操作の行（`timeline-edit-tools`）。
     // ⚠️ **+2**（#1256 c6）＝近道キーの一覧（`shortcut-list`・`shortcut-list-table`）。
     // ⚠️ **+1**（#1256 b6）＝帯の長さと速さの印（`timeline-clip-badge`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(178);
+    // ⚠️ **+2**（ADR-0033 決定9 の改訂）＝列の見出しの出す／固定（`timeline-row-toggles`・`timeline-row-toggle`）。
+    //   `--on` と列の `timeline-lane--hidden`／`--locked` は式の中で組み立てるので数えられない。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(180);
   });
 });
 

@@ -257,3 +257,33 @@ export function FilmIcon({ size = 20, className, style }: IconProps) {
     </svg>
   );
 }
+
+// 目＝その列を動画に出している（列の見出し・ADR-0048）。
+export function EyeIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+// 目に斜線＝その列を動画に出さない（形でも示す。色差だけに頼らない）。
+export function EyeOffIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.2 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.2-1.6" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+// 鍵＝その列を固定している／固定できる。
+export function LockIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}

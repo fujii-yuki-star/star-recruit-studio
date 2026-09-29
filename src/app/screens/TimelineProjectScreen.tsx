@@ -128,7 +128,7 @@ type DragPlace = {
   } | null;
 };
 
-import { ArrowLeftIcon } from "../components/icons";
+import { ArrowLeftIcon, EyeIcon, EyeOffIcon, LockIcon, VolumeIcon, VolumeMuteIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
 import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
@@ -3337,6 +3337,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const menuTrack = trackMenu ? doc?.tracks.find((t) => t.id === trackMenu.trackId) : undefined;
   // 列の操作も編集＝**書き出し中は押す前に断る**（#703 レビュー）。項目ごとに書かず、組み立てで一括して配る。
   const trackMenuGuard = exporting ? { disabled: true, disabledHint: exportingHint } : {};
+  /** 出さない列・固定した列の数（道具の行に出す・ADR-0048）。 */
+  // ⚠️ **フックにしない**＝ここは `if (!doc)` の早い `return` より後（呼ぶ順が描くたびに変わる）。数えるだけなので軽い。
+  const flaggedTracks = (() => {
+    const tracks = doc.tracks;
+    const hidden = tracks.filter((t) => t.hidden).length;
+    const locked = tracks.filter((t) => t.locked).length;
+    const parts = [hidden > 0 ? `出さない列 ${hidden}` : "", locked > 0 ? `固定 ${locked}` : ""].filter(Boolean);
+    return { count: hidden + locked, label: parts.join("・"), firstId: tracks.find((t) => t.hidden || t.locked)?.id };
+  })();
   const trackMenuItems: ContextMenuItem[] = menuTrack
     ? [
         // ⚠️ **見つけられる道を残す**（ADR-0034 決定19）＝2回押しだけだと気づけない。
@@ -3906,6 +3915,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               {/* ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
                   **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。
                   節は目印があるときだけ出す（一覧を辿る・メモを書く道具）。`M` キーでも置ける（業界の型）。 */}
+              {/* **出さない列・固定した列があることを数で言う**（ADR-0048）＝列が多くて見出しが画面の外に
+                  あっても気づける。押すと最初のその列へ送る。 */}
+              {flaggedTracks.count > 0 && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  title="その列まで移ります"
+                  onClick={() => {
+                    const el = document.querySelector(`[data-track-id="${flaggedTracks.firstId}"]`);
+                    el?.scrollIntoView({ block: "nearest" });
+                  }}
+                >
+                  <span className="badge badge-yellow">{flaggedTracks.label}</span>
+                </button>
+              )}
               <span className="timeline-toolbar-sep" aria-hidden="true" />
               <button className="btn btn-ghost btn-sm" onClick={addMarkerAtPlayhead} title={markerGuard.title ?? MARKER_ADD_TITLE} {...(markerGuard.disabled ? { disabled: true } : {})}>
                 {MARKER_ADD_LABEL}
@@ -4217,6 +4240,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         **ドラッグ専用にしない**（決定19）＝「⋮」の「手前へ／奥へ」は残す。 */}
                     <div
                       className={`timeline-row-label${exporting ? "" : " grabbable"}`}
+                      data-track-id={track.id}
                       onContextMenu={(e) => openTrackMenu(e, track.id)}
                       onPointerDown={(e) => beginTrackDrag(e, track.id)}
                     >
@@ -4250,12 +4274,46 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ) : (
                         // ⚠️ **2回押しで名前を変える**（業界の型）＝メニューからも開けるので、
                         // 「掴んで並べ替える」と取り合いにならない（押し下げでは何も始めない）。
-                        <span onDoubleClick={() => { if (!exporting) setRenamingTrackId(track.id); }}>
+                        // ⚠️ **名前の全体を `title` で読める**（ADR-0048）＝右端に出す印が名前の終わりにかぶるので、
+                        // 長い名前は途中で切れる。
+                        <span title={trackLabel(doc.tracks, track.id)} onDoubleClick={() => { if (!exporting) setRenamingTrackId(track.id); }}>
                           {trackLabel(doc.tracks, track.id)}
                         </span>
                       )}
-                      {track.hidden && <span className="sub">出さない</span>}
-                      {track.locked && <span className="sub">固定中</span>}
+                      {/* **出す／固定の切り替え**（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」）。
+                          ⚠️ **普段は見せない**（以前「隠す・固定・消すの常時表示は邪魔」＝利用者指摘 2026-08-03）＝
+                          見出しに乗せた／キーで入ったときだけ薄く出る。**変えた状態は常に濃く出す**（今の状態が分かる）。
+                          ⚠️ **名前の幅を食わない**＝名前の上に重ね、かぶる所はぼかす（出たり消えたりで行がずれない）。
+                          ⚠️ **見えないときは押せない**（`pointer-events`）＝見えない当たり判定を作らない（ADR-0047 決定3）。
+                          ⚠️ **動きはメニューと同じ入口**（`setTrackFlag`）＝取り消せる・書き出し中は押せない。 */}
+                      <span className="timeline-row-toggles">
+                        <button
+                          type="button"
+                          className={`timeline-row-toggle${track.hidden ? " timeline-row-toggle--on" : ""}`}
+                          aria-pressed={!!track.hidden}
+                          aria-label={`${trackLabel(doc.tracks, track.id)}を${track.hidden ? "動画に出す" : "動画に出さない"}`}
+                          title={exporting ? exportingHint : track.hidden ? "動画に出していません（押すと出す）" : "動画に出しています（押すと出さない）"}
+                          disabled={exporting}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setTrackFlag(track.id, "hidden", !track.hidden)}
+                        >
+                          {track.kind === TRACK_KIND.audio
+                            ? (track.hidden ? <VolumeMuteIcon size={14} /> : <VolumeIcon size={14} />)
+                            : (track.hidden ? <EyeOffIcon size={14} /> : <EyeIcon size={14} />)}
+                        </button>
+                        <button
+                          type="button"
+                          className={`timeline-row-toggle${track.locked ? " timeline-row-toggle--on" : ""}`}
+                          aria-pressed={!!track.locked}
+                          aria-label={track.locked ? `${trackLabel(doc.tracks, track.id)}の固定を外す` : `${trackLabel(doc.tracks, track.id)}を固定する`}
+                          title={exporting ? exportingHint : track.locked ? "固定しています（押すと外す）" : "固定していません（押すと固定）"}
+                          disabled={exporting}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setTrackFlag(track.id, "locked", !track.locked)}
+                        >
+                          <LockIcon size={14} />
+                        </button>
+                      </span>
                       <button
                         // ⚠️ **共通のボタンの見た目を使わない**（#1104）＝上下の余白で**行が伸びる**。
                         // 名前の横に置くので、行の高さは帯が決める。
@@ -4275,7 +4333,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <div
                       // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
-                      className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+                      // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
+                      className={`timeline-track timeline-lane${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
