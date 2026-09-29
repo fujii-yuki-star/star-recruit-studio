@@ -27,7 +27,7 @@ import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
 import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, renameFieldKeys, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
-import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
+import { hasEscapeOwner, useEscapeOwner, useEscapeReceiver } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
@@ -80,6 +80,7 @@ import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
 import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
 import { safeAreaRect } from "../../domain/preview/safeArea";
+import { setAppFullscreen } from "../../infrastructure/appFullscreen";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
@@ -878,6 +879,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ro.observe(el);
     fitObserverRef.current = ro;
   }, []);
+  /**
+   * **広げている欄**（ADR-0048 決定5）を画面が持つ＝「大きく見る」（#1262）が仕上がり確認を広げるため。
+   * ⚠️ **記憶しない**のは同じ（画面の状態・開き直せば元の配置）。
+   */
+  const [maximizedPanel, setMaximizedPanel] = useState<string | null>(null);
+  /**
+   * **大きく見る**（#1262）＝仕上がり確認を欄いっぱいに広げ、**アプリの窓も全画面**にする。
+   * 同じ窓の中なので、キャンバスで掴んで動かす・文字を直すはそのまま効く（別窓＝#1263 の第一段）。
+   */
+  const [bigView, setBigView] = useState(false);
+  const enterBigView = (): void => {
+    setMaximizedPanel(PANEL_ID.preview);
+    setBigView(true);
+    void setAppFullscreen(true);
+  };
+  const exitBigView = (): void => {
+    setMaximizedPanel(null);
+    setBigView(false);
+    void setAppFullscreen(false);
+  };
+  // `Escape` で戻る（全画面の型）。⚠️ 名簿に預ける＝手前にメニュー等があればそちらが先に閉じる。
+  useEscapeReceiver(bigView, () => { exitBigView(); return true; });
+  // ⚠️ **画面を離れたら全画面を解く**＝一覧へ戻っても窓が全画面のまま、を作らない。
+  const bigViewRef = useRef(bigView);
+  bigViewRef.current = bigView;
+  useEffect(() => () => { if (bigViewRef.current) void setAppFullscreen(false); }, []);
   // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
   const [safeAreaOn] = useSafeAreaPref();
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
@@ -3620,6 +3647,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
           <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
           <SafeAreaToggle />
+          <button
+            className="btn btn-ghost btn-sm"
+            aria-pressed={bigView}
+            title={bigView ? "元の大きさに戻します（Esc でも）" : "仕上がり確認を画面いっぱいに広げます（Esc で戻ります）。そのまま直接動かせます"}
+            onClick={() => (bigView ? exitBigView() : enterBigView())}
+          >
+            {bigView ? "元に戻す" : "大きく見る"}
+          </button>
         </div>
         <div
           ref={fitRef}
@@ -6090,7 +6125,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           `76vh` の決め打ちだと上の見出しと足して画面をはみ出し、画面の残りいっぱいにすると
           下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
       <div className="timeline-flash-zone">
-        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} fill />
+        <PanelLayoutView
+          layout={panelLayout}
+          panels={shownPanels}
+          onChange={changeLayout}
+          fill
+          maximized={maximizedPanel}
+          // ⚠️ **ほかの道で広げ方が変わったら「大きく見る」も解く**＝仕上がり確認以外を広げた・戻したのに
+          //   窓だけ全画面のまま、を作らない。
+          onMaximizedChange={(next) => {
+            setMaximizedPanel(next);
+            if (bigView && next !== PANEL_ID.preview) { setBigView(false); void setAppFullscreen(false); }
+          }}
+        />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。

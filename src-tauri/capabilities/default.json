@@ -9,6 +9,7 @@
     "opener:default",
     "opener:allow-reveal-item-in-dir",
     "dialog:allow-save",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-set-fullscreen"
   ]
 }

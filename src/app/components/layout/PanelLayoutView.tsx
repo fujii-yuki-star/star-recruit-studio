@@ -76,12 +76,20 @@ export function PanelLayoutView({
   panels,
   onChange,
   fill,
+  maximized: maximizedProp,
+  onMaximizedChange,
 }: {
   layout: PanelLayout;
   panels: readonly PanelSpec[];
   onChange: (next: PanelLayout) => void;
   /** 器の高さいっぱいに広げる（スクロールしない器に入れるとき）。既定は画面に対する高さ。 */
   fill?: boolean;
+  /**
+   * **広げている欄を外から持つ**（#1262＝「大きく見る」が仕上がり確認を広げる）。未指定＝この部品が自分で持つ。
+   * ⚠️ 渡すときは `onMaximizedChange` も渡す（見出しのボタン・キー・メニューからの切り替えを受ける）。
+   */
+  maximized?: PanelId | null;
+  onMaximizedChange?: (next: PanelId | null) => void;
 }): React.ReactElement {
   const byId = new Map(panels.map((p) => [p.id, p]));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -100,13 +108,26 @@ export function PanelLayoutView({
    * ⚠️ **ほかの欄は外さずに隠す**（`visibility: hidden`）＝外すと中身の状態が消える
    *（仕上がり確認で鳴っている音が止まる・並びのスクロール位置が戻る）。
    */
-  const [maximized, setMaximized] = useState<PanelId | null>(null);
+  const [maximizedOwn, setMaximizedOwn] = useState<PanelId | null>(null);
+  const maximized = maximizedProp !== undefined ? maximizedProp : maximizedOwn;
+  // ⚠️ **いまの値は ref でも持つ**＝キーの受け口は一度だけ張るので、閉じ込めた値が古くなる。
+  const setMaximized = (next: PanelId | null): void => {
+    if (onMaximizedChange) onMaximizedChange(next);
+    else setMaximizedOwn(next);
+  };
+  const maximizedRef = useRef(maximized);
+  const setMaximizedRef = useRef(setMaximized);
+  // 描くたびに最新へ（描いている最中に ref を書かない＝React の約束）。
+  useEffect(() => {
+    maximizedRef.current = maximized;
+    setMaximizedRef.current = setMaximized;
+  });
   // 指している欄（`` ` `` キーで広げる相手＝Premiere と同じ型）。
   const hoveredRef = useRef<PanelId | null>(null);
   // 広げた欄が配置から消えたら（閉じた・既定に戻した）元に戻す＝見えない欄を広げたまま残さない。
   const shownIds = new Set(panels.map((p) => p.id));
   const activeMax = maximized != null && shownIds.has(maximized) && inLayout(layout, maximized) ? maximized : null;
-  const toggleMaximize = (id: PanelId): void => setMaximized((cur) => (cur === id ? null : id));
+  const toggleMaximize = (id: PanelId): void => setMaximizedRef.current(maximizedRef.current === id ? null : id);
 
   // `` ` ``（数字の1の左）で、指している欄を広げる／戻す（Premiere の型）。文字を打っている所では奪わない。
   useEffect(() => {
