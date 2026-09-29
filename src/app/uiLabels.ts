@@ -1702,13 +1702,17 @@ export const VIDEO_KIND_LABEL: Record<VideoKind, string> = {
  */
 export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
   place: "部品を置く",
+  duplicate: "部品を複製",
+  split: "部品を分ける",
   remove: "部品を削除",
   move: "部品を動かす",
   resize: "長さを変える",
   box: "位置・大きさを変える",
   content: "中身を直す",
   addTrack: "列を足す",
+  duplicateTrack: "列を複製",
   removeTrack: "列を消す",
+  reorderTracks: "列の並びを変える",
   track: "列の設定を変える",
   marker: "目印を変える",
   settings: "動画全体の設定を変える",

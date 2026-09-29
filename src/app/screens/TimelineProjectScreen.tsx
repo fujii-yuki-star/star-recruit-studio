@@ -923,6 +923,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
+   * 取り消す／やり直すの中身（#1268）。⚠️ **文書が変わったときだけ比べる**（#1270 レビュー 🟡）＝描くたびに比べると、
+   * 再生中（毎秒30回描く）に部品の数だけ無駄な比較が走る。再生中は文書が変わらないので、ここは走らない。
+   */
+  const undoRedoLabels = useMemo(() => {
+    if (!doc) return { undo: undefined, redo: undefined };
+    const past = history.past[history.past.length - 1];
+    const next = history.future[history.future.length - 1];
+    return {
+      undo: past ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(past, doc)] : undefined,
+      redo: next ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(doc, next)] : undefined,
+    };
+  }, [doc, history]);
+  /**
    * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
    * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
    */
@@ -6047,8 +6060,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               onRedo: redo,
               disabled: exporting,
               // **何を取り消すか**（#1268）＝直前の文書と今の文書を比べて名前を付ける（入口ごとに名前を渡さない）。
-              undoLabel: history.past.length > 0 ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(history.past[history.past.length - 1], doc)] : undefined,
-              redoLabel: history.future.length > 0 ? TIMELINE_EDIT_KIND_LABEL[timelineEditKind(doc, history.future[history.future.length - 1])] : undefined,
+              undoLabel: undoRedoLabels.undo,
+              redoLabel: undoRedoLabels.redo,
             }}
             // 自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定
             // （ADR-0032）なので、ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。

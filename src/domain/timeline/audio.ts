@@ -110,7 +110,9 @@ export function volumeAt(points: readonly VolumePoint[] | undefined, localSec: n
 
 /**
  * その部品の、先頭から `localSec` 秒の**実際の音量**（基準 × フェード）。
- * ⚠️ **鳴らす側と、帯に線を描く側（#1266）が同じこの関数を通る**＝線と聞こえ方がずれない（ADR-0001 の考え方）。
+ * ⚠️ **鳴らす側（`audioCuesAt`）と、帯に線を描く側（#1266）が同じこの関数を通る**＝線と聞こえ方がずれない。
+ * ⚠️ **書き出しの「声の間は BGM を自動で下げる」は入っていない**（#1270 レビュー 🟡）＝あれは書き出しの時に
+ *   掛ける倍率（`clipVolumePointsForExport`）で、再生でも鳴らしていない。線は**再生で聞こえる音量**を描く。
  */
 export function clipGainAt(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
   return fadedVolume(clip, doc, localSec);
@@ -166,7 +168,7 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
       clipId: clip.id,
       // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
       offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
-      volume: fadedVolume(clip, doc, localSec),
+      volume: clipGainAt(clip, doc, localSec),
       speed,
     });
   }
