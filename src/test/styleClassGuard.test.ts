@@ -64,7 +64,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（2026-09-28）＝列の名前をその場で書き換える欄（`timeline-row-name`）。
     // ⚠️ **-1**（2026-09-28）＝「列を足す」を帯の下から道具立ての行へ移したとき、
     //   その囲い（`row gap-sm mt-md`）ごと消えた。`mt-md` はここでしか使っていなかった。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(171);
+    // ⚠️ **+2**（#1257）＝仕上がり確認を「絵の置き場」（`preview-fit`）と「操作の置き場」（`preview-below`）に分けた。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(173);
   });
 });
 
