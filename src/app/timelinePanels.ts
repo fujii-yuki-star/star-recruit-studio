@@ -1,4 +1,6 @@
 // タイムライン編集の欄（ADR-0033＝ドッキング配置）の名前。
+import { TIMELINE_BOTTOM_DEFAULT_RATIO, emptyLayout } from "../domain/layout/panelLayout";
+import type { PanelLayout } from "../domain/layout/panelLayout";
 //
 // ⚠️ **画面と store の両方が同じ名前を見る**（#869）＝置けなかった理由を**操作した欄の中**に
 // 返す（ADR-0034 決定10）ために、store は「どの欄の話か」を持つ。画面の中に閉じたままだと
@@ -114,3 +116,57 @@ const ALWAYS_GLOBAL = new Set<string>([
 export function blockTargetFor(reason: string, at: BlockTarget): BlockTarget {
   return ALWAYS_GLOBAL.has(reason) ? BLOCK_GLOBAL : at;
 }
+
+/** 配置の型（ADR-0048 決定4・#1256 c3）。 */
+export interface LayoutPreset {
+  id: string;
+  /** 欄のメニューに出す名前（§2-3）。 */
+  label: string;
+  layout: PanelLayout;
+}
+
+/**
+ * **タイムライン編集の既定の配置**＝「並びを広く」の型と同じもの（**1か所で決める**＝既定と型が食い違わない）。
+ *
+ * ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）＝以前は4分割しており（#684）、
+ * 1欄の中身の高さが 70〜80px しかなく、入口（素材の一覧・見た目の一覧）が既定の配置で視界に入らなかった。
+ * ⚠️ **「並び」は主戦場なので既定を上限まで広げる**（#1104・`TIMELINE_BOTTOM_DEFAULT_RATIO`）。
+ * ⚠️ **覚えた配置がある人には効かない**（ADR-0033＝利用者が動かしたときだけ覚える）。
+ */
+export function timelineDefaultLayout(): PanelLayout {
+  const l = emptyLayout();
+  l.nodes.center = { panelId: PANEL_ID.preview };
+  l.nodes.right = { panelId: PANEL_ID.selected };
+  l.nodes.bottom = { panelId: PANEL_ID.arrange };
+  l.nodes.left = { panelId: PANEL_ID.place };
+  l.regionSizes = { ...l.regionSizes, bottom: TIMELINE_BOTTOM_DEFAULT_RATIO };
+  return l;
+}
+
+/**
+ * **配置の型**（ADR-0048 決定4・#1256 c3）＝作業に合わせて面積の配り方を一発で切り替える。
+ * Filmora・Shotcut・Kdenlive・YMM4 はどれも作業ごとの配置の型を持つ。
+ *
+ * ⚠️ **型そのものは覚えない**＝選ぶと**いまの配置**になり、それを覚える（ADR-0033 決定4＝画面ごとに1つ）。
+ * ⚠️ **欄を消さない型は無い**＝「並びと仕上がりだけ」は閉じるだけ（欄のメニューの「〈欄〉を表示する」で戻る）。
+ */
+export function timelineLayoutPresets(): LayoutPreset[] {
+  const bigPreview = timelineDefaultLayout();
+  bigPreview.regionSizes = { left: TIMELINE_PRESET_SIDE_RATIO, right: TIMELINE_PRESET_SIDE_RATIO, bottom: TIMELINE_PRESET_PREVIEW_BOTTOM_RATIO };
+  const focus = emptyLayout();
+  focus.nodes.center = { panelId: PANEL_ID.preview };
+  focus.nodes.bottom = { panelId: PANEL_ID.arrange };
+  focus.regionSizes = { ...focus.regionSizes, bottom: TIMELINE_PRESET_FOCUS_BOTTOM_RATIO };
+  return [
+    { id: "arrange", label: "並びを広く（既定）", layout: timelineDefaultLayout() },
+    { id: "preview", label: "仕上がりを大きく", layout: bigPreview },
+    { id: "focus", label: "並びと仕上がりだけ", layout: focus },
+  ];
+}
+
+/** 「仕上がりを大きく」の下の欄（並び）＝上に 6 割を残す。 */
+const TIMELINE_PRESET_PREVIEW_BOTTOM_RATIO = 0.4;
+/** 「仕上がりを大きく」の左右の欄＝仕上がり確認の幅を稼ぐため細めにする。 */
+const TIMELINE_PRESET_SIDE_RATIO = 0.2;
+/** 「並びと仕上がりだけ」の下の欄＝上下を半々より少し並び寄りに。 */
+const TIMELINE_PRESET_FOCUS_BOTTOM_RATIO = 0.55;

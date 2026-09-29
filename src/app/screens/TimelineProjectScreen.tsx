@@ -84,7 +84,7 @@ import { PickerList } from "../components/PickerList";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
-import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout, TIMELINE_BOTTOM_DEFAULT_RATIO } from "../../domain/layout/panelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion } from "../../domain/layout/panelLayout";
 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
@@ -128,7 +128,7 @@ type DragPlace = {
 
 import { ArrowLeftIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
-import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, type BlockTarget, type PlaceTabId } from "../timelinePanels";
+import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
 import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
@@ -413,8 +413,8 @@ const saveSnapEnabled = (on: boolean): void => setBooleanSetting(LS_SNAP, on);
  * 列の高さの覚え（ADR-0048 決定3・#1256 c1）。**画面の好み**なので `localStorage`（`project.schema` には入れない）。
  * ⚠️ **気軽に鍵を変えない**＝変えると利用者の覚えが消える。
  */
-export const LS_LANE_HEIGHT = "timeline.laneHeight";
-export const loadLaneHeight = (): TimelineLaneHeight =>
+const LS_LANE_HEIGHT = "timeline.laneHeight";
+const loadLaneHeight = (): TimelineLaneHeight =>
   getChoiceSetting(LS_LANE_HEIGHT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_LANE_HEIGHT_DEFAULT);
 const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
 /** 列の高さの言い方（画面に出す＝§2-3）。 */
@@ -787,27 +787,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
-  const defaultLayout = useMemo(() => {
-    const l = emptyLayout();
-    l.nodes.center = { panelId: PANEL_ID.preview };
-    l.nodes.right = { panelId: PANEL_ID.selected };
-    l.nodes.bottom = { panelId: PANEL_ID.arrange };
-    // ⚠️ **置くものは1つの欄にタブでまとめる**（#1031）。以前は4分割しており（#684）、
-    // 左の幅 0.28 を四等分するので**1欄の中身の高さが 70〜80px**しかなく、
-    // 3手順①の入口（素材の一覧・見た目の一覧）が**既定の配置で視界に入らなかった**。
-    // 型（CapCut / Canva / YMM4）も「置く」は1欄＋タブ（#683 の調査）。
-    l.nodes.left = { panelId: PANEL_ID.place };
-    // ⚠️ **「並び」は主戦場なので既定を上限まで広げる**（#1104・実機の指摘②③）＝
-    // 既定の 0.28 では、1080px の画面で器（当時は 76vh）の 28%＝約 230px しか無く、
-    // 目盛りを引くと**列が約3本しか見えなかった**（「とても実用的ではない」）。
-    // 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
-    // ⚠️ **既定は「上限いっぱい」という意図を名前で持つ**（レビュー由来 ℹ️）＝
-    // `MAX_REGION_RATIO` を直に使うと、上限を変えたときにこの画面の既定まで黙って動く。
-    // ⚠️ **覚えた配置がある人には効かない**（ADR-0033＝利用者が動かしたときだけ覚える）＝
-    // 実機で見るときは「配置を既定に戻す」を1回押してもらう。
-    l.regionSizes = { ...l.regionSizes, bottom: TIMELINE_BOTTOM_DEFAULT_RATIO };
-    return l;
-  }, []);
+  // 既定の配置は「並びを広く」の型と同じもの（`timelineDefaultLayout`＝1か所で決める・ADR-0048 決定4）。
+  const defaultLayout = useMemo(timelineDefaultLayout, []);
+  const layoutPresets = useMemo(timelineLayoutPresets, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
   // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
   const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed } =
@@ -5807,7 +5789,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             extra={(
               <>
                 {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
-                <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} />
+                <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} presets={layoutPresets} />
                 {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器の下にあり、
                     編集している間は画面外だった（見えていない知らせは無いのと同じ）。
                     中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}

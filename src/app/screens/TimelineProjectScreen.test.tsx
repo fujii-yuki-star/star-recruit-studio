@@ -1825,6 +1825,28 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
     expect(screen.queryByRole("heading", { name: "置く" })).not.toBeInTheDocument();
   });
 
+  // 配置の型（ADR-0048 決定4・#1256 c3）＝選ぶと**いまの配置**になり、覚える（型そのものは覚えない）。
+  it("欄のメニューから配置の型を選ぶと、その配置になり覚える", () => {
+    open();
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置の型：並びと仕上がりだけ" }));
+    expect(document.querySelector('[data-panel-id="place"]'), "置く欄が閉じていない").toBeNull();
+    expect(document.querySelector('[data-panel-id="arrange"]')).not.toBeNull();
+    first.unmount(); // 離れるときに覚える
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(document.querySelector('[data-panel-id="place"]'), "選んだ型を覚えていない").toBeNull();
+  });
+
+  it("欄のメニューに3つの型が並ぶ", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openPanelMenu();
+    for (const name of ["並びを広く（既定）", "仕上がりを大きく", "並びと仕上がりだけ"]) {
+      expect(screen.getByRole("menuitem", { name: `配置の型：${name}` })).toBeTruthy();
+    }
+  });
+
   it("「配置を既定に戻す」で戻る（組み替えたあとの逃げ道）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

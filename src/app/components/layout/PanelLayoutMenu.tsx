@@ -18,6 +18,8 @@ import type { PanelId, PanelLayout } from "../../../domain/layout/panelLayout";
 export const PANEL_MENU_LABEL = "欄";
 /** 配置を戻す（3画面で同じ言葉＝1か所に置く）。 */
 export const PANEL_RESET_LABEL = "配置を既定に戻す";
+/** 配置の型の頭に付ける言葉（ADR-0048 決定4）。 */
+export const PANEL_PRESET_PREFIX = "配置の型：";
 
 export function PanelLayoutMenu({
   layout,
@@ -25,12 +27,18 @@ export function PanelLayoutMenu({
   closed,
   onChange,
   onReset,
+  presets = [],
 }: {
   layout: PanelLayout;
   panels: readonly { id: PanelId; title: string }[];
   closed: readonly PanelId[];
   onChange: (next: PanelLayout) => void;
   onReset: () => void;
+  /**
+   * **配置の型**（ADR-0048 決定4・#1256 c3）＝選ぶと**いまの配置**になり、それを覚える（型そのものは覚えない）。
+   * 無い画面は出さない。
+   */
+  presets?: readonly { id: string; label: string; layout: PanelLayout }[];
 }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const items = [
@@ -38,13 +46,14 @@ export function PanelLayoutMenu({
       label: `「${panels.find((p) => p.id === id)?.title ?? id}」を表示する`,
       onSelect: () => onChange(addPanelToRegion(layout, id, PANEL_REGION.left)),
     })),
+    ...presets.map((p) => ({ label: `${PANEL_PRESET_PREFIX}${p.label}`, onSelect: () => onChange(p.layout) })),
     { label: PANEL_RESET_LABEL, onSelect: onReset },
   ];
   return (
     <>
       <button
         className="btn btn-ghost text-sm"
-        title="閉じた欄を戻す・配置を既定に戻す"
+        title={presets.length > 0 ? "閉じた欄を戻す・配置の型を選ぶ・配置を既定に戻す" : "閉じた欄を戻す・配置を既定に戻す"}
         onClick={(e) => {
           // 押したボタンの真下に出す（右クリックメニューと同じ部品なので位置は渡す側が決める）。
           const r = e.currentTarget.getBoundingClientRect();
