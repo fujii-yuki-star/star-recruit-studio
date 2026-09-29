@@ -950,7 +950,14 @@ button.badge {
   min-height: 96px;
   display: flex;
 }
+/* ⚠️ **余白は素通し・押せる物だけ受ける**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白が
+   キャンバスの掴む・二度押しの当たりを取っていた。 */
+.preview-view-tools button,
+.preview-view-tools label {
+  pointer-events: auto;
+}
 .preview-view-tools {
+  pointer-events: none;
   position: absolute;
   top: 2px;
   right: 2px;

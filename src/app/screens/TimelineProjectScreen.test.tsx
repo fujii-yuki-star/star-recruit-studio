@@ -8431,6 +8431,9 @@ describe("TimelineProjectScreen: 仕上がり確認の表示倍率と端の目�
     const rule = (sel: string) => { const i = css.indexOf(`\n${sel} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
     expect(rule(".preview-view-tools"), "道具が流れに入っている").toMatch(/position:\s*absolute/);
     expect(rule(".preview-fit-shell"), "浮かせる基準が無い").toMatch(/position:\s*relative/);
+    // ⚠️ **余白は素通し**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白がキャンバスの掴む当たりを取らない。
+    expect(rule(".preview-view-tools"), "余白が当たりを取る").toMatch(/pointer-events:\s*none/);
+    expect(css, "押せる物まで素通しにしている").toMatch(/\.preview-view-tools button\s*,\s*\.preview-view-tools label\s*\{\s*pointer-events:\s*auto/);
   });
 
   it("端の目安を出すと、動画の端から割合で線を引く（横は四辺 5%）", () => {
