@@ -80,7 +80,7 @@ import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
 import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
 import { safeAreaRect } from "../../domain/preview/safeArea";
-import { setAppFullscreen } from "../../infrastructure/appFullscreen";
+import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/appFullscreen";
 import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
 import { cssPointOf } from "../../domain/asset/fileDrop";
 import { SHORTCUT_KEYS, TIMELINE_SHORTCUTS } from "../timelineShortcuts";
@@ -903,8 +903,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   useEscapeReceiver(bigView, () => { exitBigView(); return true; });
   // ⚠️ **画面を離れたら全画面を解く**＝一覧へ戻っても窓が全画面のまま、を作らない。
   const bigViewRef = useRef(bigView);
-  bigViewRef.current = bigView;
+  useEffect(() => { bigViewRef.current = bigView; }, [bigView]);
   useEffect(() => () => { if (bigViewRef.current) void setAppFullscreen(false); }, []);
+  // ⚠️ **窓の全画面が外から解けたら、こちらも戻す**（#1269 レビュー 🟡）＝ブラウザの Esc・OS の操作で全画面が
+  //   外れても「大きく見る」のままになり、「元に戻す」でしか戻れなかった。
+  useEffect(() => {
+    if (!bigView) return;
+    let un: (() => void) | null = null;
+    let cancelled = false;
+    void onAppFullscreenChange((on) => {
+      if (!on) { setMaximizedPanel(null); setBigView(false); }
+    }).then((f) => { if (cancelled) f(); else un = f; });
+    return () => { cancelled = true; un?.(); };
+  }, [bigView]);
   // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
   const [safeAreaOn] = useSafeAreaPref();
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
@@ -2909,9 +2920,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ **仕上がり確認の上は取り込むだけ**＝他社でも窓の外からの落とし先ではない（調査・ADR-0049）。
   // ⚠️ **説明は `//` で書く**＝ここは宣言ではなく代入なので、`/** */` だと次の `laneAt` の説明を奪う（門番）。
   fileDropTargetRef.current = (x, y) => {
+    // ⚠️ **隠れた欄は当たりにしない**（#1269 レビュー 🔴）＝欄を広げている間、ほかの欄は `visibility: hidden` で
+    //   箱が残る。矩形だけで当てると、**広げた仕上がり確認の上に落としたのに、その真下の見えない列へ置かれた**。
+    const hiddenByMaximize = (el: Element): boolean =>
+      maximizedPanel != null && el.closest(".panel-frame")?.getAttribute("data-panel-id") !== maximizedPanel;
     for (const zone of document.querySelectorAll("[data-file-drop-zone]")) {
+      if (hiddenByMaximize(zone)) continue;
       if (pointInRect(zone.getBoundingClientRect(), x, y)) return null;
     }
+    // 並び以外の欄を広げているときは、並びへは置けない（見えていない）＝取り込むだけ。
+    if (maximizedPanel != null && maximizedPanel !== PANEL_ID.arrange) return FILE_DROP_IMPORT_ONLY;
     const lane = laneAt(x, y);
     if (lane) return lane;
     // 列の無い所（いちばん下の列より下・並びの箱の中）＝新しい列。時刻は列の横の位置から。

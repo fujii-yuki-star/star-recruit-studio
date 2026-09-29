@@ -1949,7 +1949,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   placeDroppedFiles: async (paths, at) => {
     const before = new Set((get().doc?.assets ?? []).map((a) => a.assetId));
-    const sorted = [...paths].sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
+    // ⚠️ **ファイル名で並べる**（#1269 レビュー 🟡＝ADR-0049「ファイル名の順」）＝パス全体で比べると、
+    //   別のフォルダから同時に落としたときフォルダ名が先に効く。同じ名前は全体のパスで決着を付ける。
+    const nameOf = (p: string): string => p.split(/[\\/]/).pop() ?? p;
+    const sorted = [...paths].sort((a, b) =>
+      nameOf(a).localeCompare(nameOf(b), "ja", { numeric: true }) || a.localeCompare(b, "ja", { numeric: true }));
     await get().addAssets(sorted);
     if (!at) return;
     const doc = get().doc;

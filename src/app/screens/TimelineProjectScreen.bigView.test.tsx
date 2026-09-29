@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const fullscreen = vi.fn(async (_on: boolean) => true);
-vi.mock("../../infrastructure/appFullscreen", () => ({ setAppFullscreen: (on: boolean) => fullscreen(on) }));
+let fsHandler: ((on: boolean) => void) | null = null;
+vi.mock("../../infrastructure/appFullscreen", () => ({
+  setAppFullscreen: (on: boolean) => fullscreen(on),
+  onAppFullscreenChange: async (h: (on: boolean) => void) => { fsHandler = h; return () => { fsHandler = null; }; },
+}));
 
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
@@ -59,6 +63,18 @@ describe("仕上がり確認を大きく見る（#1262）", () => {
     fireEvent.click(screen.getByRole("button", { name: "大きく見る" }));
     fireEvent.click(screen.getByRole("button", { name: "仕上がり確認の欄を元に戻す" }));
     expect(fullscreen).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("button", { name: "大きく見る" })).toBeTruthy();
+  });
+
+  // ⚠️ **窓の全画面が外から解けたら、こちらも戻す**（#1269 レビュー 🟡）。
+  it("ブラウザ・OS の操作で全画面が外れたら、大きく見るも戻る", async () => {
+    const { act } = await import("@testing-library/react");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "大きく見る" }));
+    await act(async () => {});
+    expect(fsHandler, "全画面の変化を聞いていない").not.toBeNull();
+    act(() => fsHandler!(false));
+    expect(previewFrame().className).not.toContain("panel-frame--maximized");
     expect(screen.getByRole("button", { name: "大きく見る" })).toBeTruthy();
   });
 

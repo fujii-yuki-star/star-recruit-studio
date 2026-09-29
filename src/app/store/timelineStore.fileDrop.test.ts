@@ -57,6 +57,13 @@ describe("placeDroppedFiles（ADR-0049）", () => {
     expect(useTimelineStore.getState().selectedClipIds, "置いたものが選ばれていない").toEqual(clips.map((c) => c.id));
   });
 
+  // ⚠️ **フォルダではなくファイル名の順**（#1269 レビュー 🟡）＝Windows の区切り（\）も見る。
+  it("別のフォルダから同時に落としても、ファイル名の順（数字は数として）", async () => {
+    // ⚠️ `String.raw`＝区切りの `\` をそのまま渡す（エスケープに化けさせない）。
+    await useTimelineStore.getState().placeDroppedFiles([String.raw`C:\z\a10.png`, String.raw`C:\a\b.png`, String.raw`C:\m\a2.png`], null);
+    expect(imported).toEqual([String.raw`C:\m\a2.png`, String.raw`C:\z\a10.png`, String.raw`C:\a\b.png`]);
+  });
+
   // ⚠️ **1回の取り消しで全部戻る**（列を足した分も）。素材は取り消しの対象外（ADR-0020）。
   it("取り消し1回で、置いた部品と足した列が全部戻る", async () => {
     await useTimelineStore.getState().placeDroppedFiles(["C:/x/a.png", "C:/x/c.mp3"], { trackId: "track_001", startSec: 0 });

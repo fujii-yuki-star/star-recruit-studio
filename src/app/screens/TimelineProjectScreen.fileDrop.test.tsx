@@ -93,6 +93,23 @@ describe("窓の外から落としたファイル（ADR-0049）", () => {
     expect(place).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **欄を広げている間、隠れた列へ置かない**（#1269 レビュー 🔴）＝隠した欄も箱は残る。
+  it("仕上がり確認を広げている間は、列の位置へ落としても取り込むだけ（見えない列へ置かない）", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: "仕上がり確認の欄を広げる" }));
+    drop(380, 420);
+    expect(place).toHaveBeenCalledWith(["C:/写真/b.png", "C:/写真/a.png"], null);
+  });
+
+  it("並びを広げているときは、列へ置ける", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: "並びの欄を広げる" }));
+    drop(380, 420);
+    expect(place.mock.calls[0][1]).toMatchObject({ trackId: "track_001" });
+  });
+
   it("運んでいる間に行き先を見せる（列＝線／列の無い所＝新しい列の行／外＝取り込むだけの案内）", async () => {
     const r = await setup();
     over(380, 420);
