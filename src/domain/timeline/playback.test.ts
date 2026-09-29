@@ -153,3 +153,23 @@ describe('フレーム数と最後のフレーム（#724）', () => {
     expect(frameTimeSec(d, 999)).toBeCloseTo(62 / 60, 10);
   });
 });
+
+// 繰り返し再生の区間（#1267）。
+import { loopSpan } from './playback';
+describe('loopSpan（#1267）', () => {
+  it('繰り返さないときは null', () => {
+    expect(loopSpan(false, 1, 3, 10)).toBeNull();
+  });
+  it('作業範囲があればその間（逆に置いても小さい方が始まり）', () => {
+    expect(loopSpan(true, 1, 3, 10)).toEqual({ startSec: 1, endSec: 3 });
+    expect(loopSpan(true, 3, 1, 10)).toEqual({ startSec: 1, endSec: 3 });
+  });
+  it('作業範囲が無い・幅が無いときは全体', () => {
+    expect(loopSpan(true, null, null, 10)).toEqual({ startSec: 0, endSec: 10 });
+    expect(loopSpan(true, 2, 2, 10)).toEqual({ startSec: 0, endSec: 10 });
+  });
+  it('尺を越えた終わりは尺で切る・尺が無ければ null', () => {
+    expect(loopSpan(true, 8, 20, 10)).toEqual({ startSec: 8, endSec: 10 });
+    expect(loopSpan(true, null, null, 0)).toBeNull();
+  });
+});

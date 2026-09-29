@@ -465,7 +465,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
+    isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
@@ -3888,6 +3888,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </button>
           <button className="btn btn-ghost" onClick={() => { setPlayhead(0); followPlayhead(); }} disabled={playheadSec === 0}>
             先頭へ
+          </button>
+          {/* **繰り返し再生**（#1267）＝作業範囲（I／O）があればその間、無ければ全体を繰り返す（Premiere の型）。 */}
+          <button
+            className="btn btn-ghost"
+            aria-pressed={loopPlayback}
+            title={rangeInSec != null && rangeOutSec != null
+              ? "作業範囲（I〜O）を繰り返し再生します"
+              : "全体を繰り返し再生します（I／O で作業範囲を決めると、その間だけ）"}
+            onClick={() => setLoopPlayback(!loopPlayback)}
+          >
+            {loopPlayback ? "繰り返し：入" : "繰り返し：切"}
           </button>
           {/* ⚠️ **再生位置は操作の行に置く**（利用者要望 2026-09-28）＝以前はこの欄のいちばん下、
               クレジットと文字の形の設定より**さらに後ろ**にあり、**欄の中をスクロールしないと届かなかった**。

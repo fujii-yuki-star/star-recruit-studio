@@ -8025,6 +8025,24 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 繰り返し再生（#1267）＝「再生」の行の切り替え。
+describe("TimelineProjectScreen: 繰り返し再生の切り替え（#1267）", () => {
+  it("押すと入・切が切り替わり、作業範囲があるかで説明が変わる", () => {
+    open();
+    useTimelineStore.setState({ loopPlayback: false, rangeInSec: null, rangeOutSec: null });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const b = () => screen.getByRole("button", { name: /繰り返し：/ });
+    expect(b().getAttribute("aria-pressed")).toBe("false");
+    expect(b().title).toContain("全体を繰り返し");
+    fireEvent.click(b());
+    expect(useTimelineStore.getState().loopPlayback).toBe(true);
+    expect(b().getAttribute("aria-pressed")).toBe("true");
+    act(() => useTimelineStore.setState({ rangeInSec: 1, rangeOutSec: 3 }));
+    expect(b().title).toContain("作業範囲（I〜O）を繰り返し");
+    act(() => useTimelineStore.setState({ loopPlayback: false }));
+  });
+});
+
 // 取り消す／やり直すの説明に中身を出す（#1268）＝ボタンの名前は「取り消す」のまま。
 describe("TimelineProjectScreen: 取り消す／やり直すの中身（#1268）", () => {
   it("置いたあとは「取り消す：部品を置く」、取り消したあとは「やり直す：部品を置く」", () => {

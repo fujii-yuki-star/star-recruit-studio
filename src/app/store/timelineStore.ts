@@ -27,7 +27,7 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import { frameTimeSec, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
-import { clampTimelinePlayheadSec, effectiveFps, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
+import { clampTimelinePlayheadSec, effectiveFps, loopSpan, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -466,6 +466,13 @@ export interface TimelineState {
    * `playheadSec` を effect の依存にすると effect 自身が更新して回り続けるため、これを依存にする。
    */
   seekNonce: number;
+  /**
+   * **繰り返し再生**（#1267）＝作業範囲（I／O）があればその間、無ければ全体を繰り返す。画面の状態（文書には持たない）。
+   */
+  loopPlayback: boolean;
+  setLoopPlayback: (on: boolean) => void;
+  /** 繰り返しの終わりまで来たとき、始まりへ戻す（時計を測り直す＝音・動画もそこから合わせ直す）。 */
+  _loopTo: (sec: number) => void;
 
   /**
    * **完全新規のタイムラインプロジェクトを作って開く**（ADR-0032 決定7/15・#635）。
@@ -1041,6 +1048,7 @@ function emptyState() {
     saveStatus: "saved" as TimelineState["saveStatus"],
     isPlaying: false,
     seekNonce: 0,
+    loopPlayback: false,
     exportRun: IDLE_EXPORT,
   };
 }
@@ -2299,9 +2307,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (isTimelineExportBusy(get().exportRun.phase)) return;
     const total = timelineDurationSec(doc);
     if (total <= 0) return; // 何も置いていない動画では始めない（押しても動かない状態を作らない）
-    set({ isPlaying: true, playheadSec: playbackStartSec(get().playheadSec, total), seekNonce: get().seekNonce + 1 });
+    // **繰り返すときは区間の中から始める**（#1267）＝区間の外にいたら始まりへ（外から始めると区間まで待たされる）。
+    const span = loopSpan(get().loopPlayback, get().rangeInSec, get().rangeOutSec, total);
+    const cur = get().playheadSec;
+    const start = span && (cur < span.startSec || cur >= span.endSec) ? span.startSec : playbackStartSec(cur, total);
+    set({ isPlaying: true, playheadSec: start, seekNonce: get().seekNonce + 1 });
   },
   pause: () => set({ isPlaying: false }),
+  setLoopPlayback: (on) => set({ loopPlayback: on }),
+  _loopTo: (sec) => {
+    if (!get().isPlaying) return;
+    set({ playheadSec: sec, seekNonce: get().seekNonce + 1 });
+  },
   _advancePlayhead: (sec) => {
     // ⚠️ **止めた後に残ったフレームで書き戻さない**（#833 レビュー ℹ️）＝`pause()` は `isPlaying` を
     // 倒すだけで、時計（rAF）は**画面側の後始末が走るまで**回っている。この入口は「再生の時計だけが

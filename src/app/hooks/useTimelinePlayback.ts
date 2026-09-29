@@ -1,7 +1,7 @@
 // タイムラインの連続再生（ADR-0032・#630）。**時計だけ**をここが持ち、見せる時刻の決め方は
 // domain の純粋関数（`playbackTick`）に委ねる＝再生で見た絵と書き出したフレームがずれない（ADR-0001）。
 import { useEffect, useRef } from "react";
-import { effectiveFps, playbackTick } from "../../domain/timeline/playback";
+import { effectiveFps, loopSpan, playbackTick } from "../../domain/timeline/playback";
 import { timelineDurationSec } from "../../domain/timeline/persistence";
 import { useTimelineStore } from "../store/timelineStore";
 
@@ -31,9 +31,13 @@ export function useTimelinePlayback(): void {
       const from = startedAt.current;
       if (!from) return;
       const { sec, ended } = playbackTick(from.sec, (performance.now() - from.wallMs) / 1000, total, effectiveFps(doc));
+      // **繰り返し**（#1267）＝区間の終わりまで来たら始まりへ戻す（時計の測り直しは `_loopTo` が世代番号で起こす）。
+      const st = useTimelineStore.getState();
+      const span = loopSpan(st.loopPlayback, st.rangeInSec, st.rangeOutSec, total);
+      if (span && (sec >= span.endSec || ended)) { st._loopTo(span.startSec); return; }
       // **`setPlayhead` ではなく専用の入口**を使う（世代番号を上げると毎フレーム測り直しになる）。
-      useTimelineStore.getState()._advancePlayhead(sec);
-      if (ended) useTimelineStore.getState().pause();
+      st._advancePlayhead(sec);
+      if (ended) st.pause();
       else raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
