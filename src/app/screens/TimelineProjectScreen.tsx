@@ -75,6 +75,8 @@ import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { ShortcutList } from "../components/ShortcutList";
+import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
+import { cssPointOf } from "../../domain/asset/fileDrop";
 import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
@@ -427,6 +429,8 @@ const loadLaneHeight = (): TimelineLaneHeight =>
 const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
 /** 列の高さの言い方（画面に出す＝§2-3）。 */
 const LANE_HEIGHT_LABEL: Record<TimelineLaneHeight, string> = { compact: "細い", normal: "ふつう", tall: "太い" };
+/** 窓の外から運んでいるファイルが、並びの外にある（離すと取り込むだけ・ADR-0049）。 */
+const FILE_DROP_IMPORT_ONLY = "importOnly" as const;
 /** 1つの部品にだけ効く操作を、まとめて選んでいるときの説明（右クリックのメニューと同じ言い方＝ADR-0026②）。 */
 const SINGLE_CLIP_ONLY_HINT = "1つだけ選ぶと使えます";
 /**
@@ -839,6 +843,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
   const markerAddRef = useRef<() => void>(() => {});
+  /**
+   * **窓の外からファイルを運んでいる最中**の行き先（ADR-0049）。`null`＝運んでいない。
+   * 列（`trackId`）・列の無い所（`trackId: null`＝新しい列）・`FILE_DROP_IMPORT_ONLY`（並びの外＝取り込むだけ）。
+   */
+  const [fileHover, setFileHover] = useState<{ trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(null);
+  /** 落とした点から行き先を決める手（描くたびに最新の配置・倍率を見る）。 */
+  const fileDropTargetRef = useRef<(x: number, y: number) => { trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(() => null);
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -994,6 +1005,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
   const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
+  // **窓の外から落としたファイル**（ADR-0049）＝並びの列へ落とせば取り込んで置く・それ以外は取り込むだけ。
+  const placeDroppedFiles = useTimelineStore((s) => s.placeDroppedFiles);
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    let cancelled = false;
+    void onWindowFileDrop((e) => {
+      if (e.kind === "leave") { setFileHover(null); return; }
+      if (!e.position) return;
+      const p = cssPointOf(e.position, window.devicePixelRatio || 1);
+      const target = fileDropTargetRef.current(p.x, p.y);
+      if (e.kind === "over") { setFileHover(target); return; }
+      setFileHover(null);
+      if (target == null || e.paths.length === 0) return;
+      void placeDroppedFiles(e.paths, target === FILE_DROP_IMPORT_ONLY ? null : target);
+    }).then((f) => {
+      if (cancelled) f();
+      else un = f;
+    });
+    return () => { cancelled = true; un?.(); };
+  }, [placeDroppedFiles]);
   const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
   /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
   const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
@@ -2812,6 +2843,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **見えている分だけ**を落とし先にする（スクロールで欄の外へ出ている列へ落とさない）。
    * 時刻は**列そのものの左端**から測る（切った矩形の左端は列の 0 秒ではない）。
    */
+  // 窓の外から落とした点の行き先（ADR-0049）。
+  // ⚠️ **取り込みの枠（`data-file-drop-zone`）の上は `null`**＝枠が自分で受ける（二重に取り込まない）。
+  // ⚠️ **仕上がり確認の上は取り込むだけ**＝他社でも窓の外からの落とし先ではない（調査・ADR-0049）。
+  // ⚠️ **説明は `//` で書く**＝ここは宣言ではなく代入なので、`/** */` だと次の `laneAt` の説明を奪う（門番）。
+  fileDropTargetRef.current = (x, y) => {
+    for (const zone of document.querySelectorAll("[data-file-drop-zone]")) {
+      if (pointInRect(zone.getBoundingClientRect(), x, y)) return null;
+    }
+    const lane = laneAt(x, y);
+    if (lane) return lane;
+    // 列の無い所（いちばん下の列より下・並びの箱の中）＝新しい列。時刻は列の横の位置から。
+    const box = scrollRef.current ? visibleRectOf(scrollRef.current) : null;
+    const lanes = [...laneRefs.current.values()].map((el) => el.getBoundingClientRect());
+    if (box && pointInRect(box, x, y) && lanes.length > 0 && y > Math.max(...lanes.map((r) => r.bottom))) {
+      return { trackId: null, startSec: laneTimeAt(lanes[0], pxPerSec, Math.max(x, lanes[0].left)) };
+    }
+    return FILE_DROP_IMPORT_ONLY;
+  };
+
   const laneAt = (x: number, y: number): { trackId: string; startSec: number } | null => {
     for (const [trackId, el] of laneRefs.current) {
       if (!pointInRect(visibleRectOf(el) ?? { left: 0, top: 0, right: -1, bottom: -1 }, x, y)) continue;
@@ -4334,10 +4384,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
-                      className={`timeline-track timeline-lane${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+                      className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? " drop-target" : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
+                      {/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻を線で見せる。 */}
+                      {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id && (
+                        <span className="timeline-file-drop-line" style={{ left: `${pxPerSec * fileHover.startSec}px` }} aria-hidden="true" />
+                      )}
                       {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
                           「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}
                       {drag?.drop?.at?.trackId === track.id && (
@@ -4450,6 +4504,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </div>
                   </div>
                 ))}
+                {/* **列の無い所へ落とそうとしている**（ADR-0049）＝新しい列を作って置くことを、離す前に見せる。 */}
+                {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId == null && (
+                  <div className="timeline-row" data-testid="file-drop-newrow">
+                    <div className="timeline-row-label" />
+                    <div className="timeline-track timeline-lane timeline-file-drop-lane drop-target" style={{ width: laneWidthPx }}>
+                      <span className="timeline-file-drop-line" style={{ left: `${pxPerSec * fileHover.startSec}px` }} />
+                      <span className="text-sm text-muted timeline-file-drop-newrow-text">離すと新しい列を作って、ここに置きます</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -5799,6 +5863,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   return (
     <>
       <div className="main-scroll main-scroll--fixed dense">
+      {/* **並びの外でファイルを運んでいるとき**（ADR-0049）＝離すと何が起きるかと、置きたいときの行き先を言う。 */}
+      {fileHover === FILE_DROP_IMPORT_ONLY && (
+        <div className="file-drop-hint" role="status" data-testid="file-drop-hint">
+          離すと素材に取り込みます。並びの列の上で離すと、その場所に置けます
+        </div>
+      )}
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       {/* ⚠️ **`dense` はこの画面だけ**（ADR-0047）＝操作と余白を詰めて、本体（並び）へ面積を渡す。

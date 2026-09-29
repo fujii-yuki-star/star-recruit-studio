@@ -72,7 +72,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1256 b6）＝帯の長さと速さの印（`timeline-clip-badge`）。
     // ⚠️ **+2**（ADR-0033 決定9 の改訂）＝列の見出しの出す／固定（`timeline-row-toggles`・`timeline-row-toggle`）。
     //   `--on` と列の `timeline-lane--hidden`／`--locked` は式の中で組み立てるので数えられない。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(180);
+    // ⚠️ **+5**（ADR-0049）＝窓の外からの落とし先の見せ方（時刻の線・新しい列の行とその文・並びの外の案内）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(185);
   });
 });
 

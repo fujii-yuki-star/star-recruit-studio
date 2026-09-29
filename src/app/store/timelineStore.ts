@@ -27,7 +27,7 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import { frameTimeSec, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
-import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
+import { clampTimelinePlayheadSec, effectiveFps, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -43,6 +43,7 @@ import {
   setVoiceText, trimClip, trimClips, trimTargetsAt,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
+import { placeDroppedAssets } from "../../domain/timeline/fileDropPlacement";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 // ⚠️ **欄の名前は画面と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../timelinePanels";
@@ -397,6 +398,17 @@ export interface TimelineState {
    * ⚠️ **必ず `await` で1件ずつ**＝番号は文書の素材一覧を見て採るので、並行に走らせると同じ番号を2つ採る。
    */
   addAssets: (items: File[] | string[]) => Promise<void>;
+  /**
+   * **窓の外から落としたファイル**を取り込み、**落とした場所に置く**（ADR-0049）。
+   *
+   * `at`＝落とした列（`trackId: null`＝列の無い所＝新しい列）と時刻。`null`＝**取り込むだけ**
+   *（並びの外に落とした）。置けなかったときも**取り込みは済んでいる**（素材は一覧に残る）。
+   * ⚠️ **置き方は1件ずつアプリの中から運んだときと同じ関数**（`placeDroppedAssets` が委ねる）。
+   * ⚠️ **並べる順はファイル名の順**（エクスプローラーの既定の並びと同じ向き）。
+   * ⚠️ **1回の取り消しで全部戻る**（置いた部品と足した列を同じ `commit` で確定）。取り込んだ素材は
+   * 取り消しの対象外（ADR-0020＝素材は履歴に載らない）。
+   */
+  placeDroppedFiles: (paths: string[], at: { trackId: string | null; startSec: number } | null) => Promise<void>;
   /**
    * 素材のまとめて取り込みを**中止する**（#1024 ③／PR #1034 レビュー 🔴）。
    *
@@ -1932,6 +1944,33 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       },
       items,
     );
+  },
+
+  placeDroppedFiles: async (paths, at) => {
+    const before = new Set((get().doc?.assets ?? []).map((a) => a.assetId));
+    const sorted = [...paths].sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
+    await get().addAssets(sorted);
+    if (!at) return;
+    const doc = get().doc;
+    if (!doc) return;
+    // 取り込めたものだけを、取り込んだ順に（失敗した分は `importError` が案内済み）。
+    const added = doc.assets.filter((a) => !before.has(a.assetId)).map((a) => a.assetId);
+    if (added.length === 0) return;
+    const sizes = get().assetSizes;
+    const r = placeDroppedAssets(doc, {
+      assetIds: added,
+      trackId: at.trackId,
+      // ⚠️ **コマの格子へ落とすだけ**（`frameTimeSec` は使わない）＝あちらは再生位置用で**動画の尺で頭打ち**にする
+      //   ので、空の動画や尺より先へ落とすと**0秒や末尾へ吸い寄せられた**（検査で見つけた）。
+      startSec: Math.max(0, quantizeToFrameSec(at.startSec, effectiveFps(doc))),
+      assetSizeOf: (id) => sizes[id],
+    });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const first = r.doc.clips.find((c) => c.id === r.placedIds[0]);
+    commit(set, get, r.doc, { selectedClipIds: r.placedIds, ...(first ? { playheadSec: first.startSec } : {}) });
   },
 
   addVoiceClip: (input) => {

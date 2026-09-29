@@ -136,6 +136,9 @@ export function useAssetPicker({ onPick, disabled = false, withAudio = false, ac
     /** `<label>` に付ける（クリック・キーボード・ファイル選択・落とし込み）。 */
     labelProps: {
       ref: (el: HTMLElement | null) => { zoneRef.current = el; },
+      // ⚠️ **ここは自分で受ける枠**（ADR-0049）＝画面の「窓のどこへ落としても受ける」受け口は、
+      // この印の上では手を出さない（同じファイルを二重に取り込まない）。
+      "data-file-drop-zone": "",
       role: "button" as const,
       tabIndex: 0,
       "aria-disabled": blocked,

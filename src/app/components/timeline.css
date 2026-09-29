@@ -56,6 +56,45 @@
   margin-right: calc(var(--clip-menu-w) + var(--clip-handle-w));
 }
 
+/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻の線と、列の無い所の「新しい列」の行。 */
+.timeline-file-drop-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-primary);
+  pointer-events: none;
+  z-index: 4;
+}
+.timeline-file-drop-lane {
+  position: relative;
+  border: 1px dashed var(--color-primary);
+}
+.timeline-file-drop-newrow-text {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+/* 並びの外で運んでいるとき（離すと取り込むだけ）。画面の下に浮かせて出す。 */
+.file-drop-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  border: 1px solid var(--color-primary);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 /* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
 .timeline-toolbar-sep {
   width: 1px;
