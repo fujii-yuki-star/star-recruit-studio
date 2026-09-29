@@ -943,9 +943,12 @@ export const CAPTURE_FRAME_ASSET_MISSING_MESSAGE =
  * 形が違う。説明の側（まだ無いときの案内）で言う。呼び方の最終判断は利用者。
  */
 export const MARKER_SECTION_TITLE = "マーカー（目印）";
-export const MARKER_ADD_LABEL = "いまの位置に目印を置く";
-export const MARKER_EMPTY_HINT =
-  "まだ目印はありません。直したい所・音を入れたい所に置いておくと、あとで辿れます（動画には出ません）。";
+// ⚠️ **置くボタンは「並び」の道具立ての行へ**（ADR-0048・#1256 b2）＝以前は目印の節の中にあり、
+// **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。短い名前にし、説明は `title` と
+// 近道キーの一覧に回す（行を増やさない＝#1104 で道具立てを1行に畳んだのと同じ理由）。
+export const MARKER_ADD_LABEL = "目印を置く";
+export const MARKER_ADD_TITLE =
+  "いまの再生位置に目印を置きます（M キーでも）。直したい所・音を入れたい所に置いておくと、あとで辿れます（動画には出ません）。";
 export const MARKER_JUMP_TITLE = "この目印の位置へ移ります";
 export const MARKER_TEXT_PLACEHOLDER = "メモ（例：ここ直す／ここに効果音）";
 export const MARKER_MOVE_LABEL = "ここへ動かす";

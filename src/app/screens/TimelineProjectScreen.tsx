@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -827,6 +827,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ **キーとボタンで同じ入口を通す**（ADR-0034 決定19）＝キーだけ理由が出ない、を作らない。
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
+  const markerAddRef = useRef<() => void>(() => {});
   /**
    * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
    * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
@@ -901,6 +902,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if ((e.key === "o" || e.key === "O") && !usesTypeAhead(e.target)) {
         e.preventDefault();
         rangeEdgeRef.current("out");
+        return;
+      }
+      // **`M`＝いまの位置に目印を置く**（ADR-0048・ADR-0040 の未解決を閉じる＝業界の型）。
+      // ⚠️ **断るのは置く側**（`addMarkerAtPlayhead` が書き出し中を入口で断り、理由を出す）＝
+      // キーだけ黙る、を作らない。⚠️ **再生中も置ける**（ADR-0040 決定3＝見ながら次々置く）。
+      if ((e.key === "m" || e.key === "M") && !usesTypeAhead(e.target)) {
+        e.preventDefault();
+        markerAddRef.current();
         return;
       }
       if (e.key === " ") {
@@ -2053,6 +2062,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       deleteRangeInTimeline(true, PANEL_ID.arrange);
     };
     rangeEdgeRef.current = (edge) => setRangeEdge(edge, useTimelineStore.getState().playheadSec);
+    markerAddRef.current = addMarkerAtPlayhead;
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
       if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
@@ -3903,6 +3913,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <span className="timeline-toolbar-sep" aria-hidden="true" />
               <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
               <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
+              {/* ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
+                  **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。
+                  節は目印があるときだけ出す（一覧を辿る・メモを書く道具）。`M` キーでも置ける（業界の型）。 */}
+              <span className="timeline-toolbar-sep" aria-hidden="true" />
+              <button className="btn btn-ghost btn-sm" onClick={addMarkerAtPlayhead} title={markerGuard.title ?? MARKER_ADD_TITLE} {...(markerGuard.disabled ? { disabled: true } : {})}>
+                {MARKER_ADD_LABEL}
+              </button>
             </div>
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
@@ -4300,7 +4317,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // どれも**文書を触らせない**理由だから（消す・メモも同じく断るのが正しい）。
           busy={markerGuard}
           textGroup={textGroup}
-          onAdd={addMarkerAtPlayhead}
           // ⚠️ **見える所まで連れて行く**（#1138 レビュー由来 🟡）＝同じ画面の「先頭へ」や矢印は
           // `followPlayhead()` を伴う。無いと、倍率を上げていて目印が画面外のとき**押しても何も変わらない**。
           onJump={(sec) => { setPlayhead(sec); followPlayhead(); }}

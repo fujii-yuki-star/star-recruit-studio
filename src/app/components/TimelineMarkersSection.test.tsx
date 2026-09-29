@@ -29,28 +29,21 @@ function doc(markers?: TimelineMarker[]): TimelineProject {
 
 /** 文字欄のまとめ（画面と同じ形＝この欄だけ別の流儀にしない）。 */
 const textGroup = { onFocus: vi.fn(), onBlur: vi.fn(), ref: vi.fn() };
-const noop = { onAdd: vi.fn(), onJump: vi.fn(), onText: vi.fn(), onMove: vi.fn(), onRemove: vi.fn(), textGroup };
+const noop = { onJump: vi.fn(), onText: vi.fn(), onMove: vi.fn(), onRemove: vi.fn(), textGroup };
 
 describe("目印の欄（#356 ①）", () => {
-  // ⚠️ **動画には出ないことを、置く前に言う**＝押してから気づくことにしない（§2-5）。
-  it("動画に出ないと書いてある（見出しにも、まだ無いときの案内にも）", () => {
-    render(<TimelineMarkersSection doc={doc()} playheadSec={0} {...noop} />);
+  it("見出しは世の中の語と併記する", () => {
+    render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={0} {...noop} />);
     // ⚠️ **見出しは併記**（#1138 レビュー由来 ℹ️）＝世の中の解説は「マーカー」なので、
-    // どちらの語からでも辿れるようにする。但し書きは案内の側で言う（節名の形を揃える）。
+    // どちらの語からでも辿れるようにする。「動画には出ません」は置くボタンの側で言う（画面の検査で見る）。
     expect(screen.getByText(/マーカー（目印）/), '世の中の語から辿れない').toBeTruthy();
-    expect(screen.getByText(/動画には出ません/), '動画に出ないと言っていない').toBeTruthy();
   });
 
-  it("まだ無いときは、何のために置くのかを出す（空の一覧を見せない）", () => {
-    render(<TimelineMarkersSection doc={doc()} playheadSec={0} {...noop} />);
-    expect(screen.getByText(/まだ目印はありません/)).toBeTruthy();
-  });
-
-  it("置くボタンで、いまの位置に置く", () => {
-    const onAdd = vi.fn();
-    render(<TimelineMarkersSection doc={doc()} playheadSec={4} {...noop} onAdd={onAdd} />);
-    fireEvent.click(screen.getByRole("button", { name: "いまの位置に目印を置く" }));
-    expect(onAdd).toHaveBeenCalled();
+  // ⚠️ **目印が無いときは何も出さない**（ADR-0048・#1256 b2）＝以前は空でも節が 124px を取り、
+  // 帯の入る高さを削っていた。置く入口は「並び」の道具立ての行と `M` キー。
+  it("目印が無いときは何も出さない（節ごと出さない）", () => {
+    const { container } = render(<TimelineMarkersSection doc={doc()} playheadSec={0} {...noop} />);
+    expect(container.innerHTML).toBe("");
   });
 
   // ⚠️ **辿れることが本体**＝置くだけにしない。
@@ -112,9 +105,9 @@ describe("目印の欄（#356 ①）", () => {
   // ⚠️ **押せない理由を出す**（§2-5）＝書き出し中などに黙って効かないボタンを置かない。
   it("編集できないときは、理由つきで押せない", () => {
     render(<TimelineMarkersSection doc={doc([{ id: "marker_001", timeSec: 3 }])} playheadSec={0} {...noop} busy={{ disabled: true, title: "いま書き出しています" }} />);
-    const add = screen.getByRole("button", { name: "いまの位置に目印を置く" }) as HTMLButtonElement;
-    expect(add.disabled).toBe(true);
-    expect(add.title).toBe("いま書き出しています");
+    const del = screen.getByRole("button", { name: "削除" }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    expect(del.title).toBe("いま書き出しています");
     expect((screen.getByPlaceholderText(/メモ/) as HTMLInputElement).disabled).toBe(true);
   });
 

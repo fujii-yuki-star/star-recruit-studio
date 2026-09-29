@@ -9,19 +9,22 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { SECTION_SCOPE } from "./sectionOpen";
 import { markerClock, markersInOrder, markerTimeEq, MARKER_TEXT_MAX } from "../../domain/timeline/markers";
 import {
-  DELETE_LABEL, MARKER_ADD_LABEL, MARKER_EMPTY_HINT, MARKER_JUMP_TITLE,
+  DELETE_LABEL, MARKER_JUMP_TITLE,
   MARKER_MOVE_LABEL, MARKER_MOVE_TITLE, MARKER_SECTION_TITLE, MARKER_TEXT_PLACEHOLDER,
 } from "../uiLabels";
 import type { TimelineProject } from "../../domain/timeline/types";
 
 /**
- * 目印の一覧と、置く・辿る・書く・動かす・消す。
+ * 目印の一覧と、辿る・書く・動かす・消す。
+ *
+ * ⚠️ **置く入口はここに無い**（ADR-0048・#1256 b2）＝「並び」の道具立ての行のボタンと `M` キー。
+ * ⚠️ **目印が無いときは何も出さない**＝以前は空でも節が 124px を取り、帯の入る高さを削っていた。
  *
  * @param onJump その時刻へ再生位置を移す（**見える所まで連れて行く**のは呼ぶ側の責任＝`followPlayhead`）。
  * @param onMove その目印を**再生位置へ動かす**（置けるのに直せない、を作らない＝ADR-0034 決定4）。
  */
 export function TimelineMarkersSection({
-  doc, playheadSec, selectedMarkerId, busy, textGroup, onAdd, onJump, onText, onMove, onRemove,
+  doc, playheadSec, selectedMarkerId, busy, textGroup, onJump, onText, onMove, onRemove,
 }: {
   doc: TimelineProject;
   playheadSec: number;
@@ -47,7 +50,6 @@ export function TimelineMarkersSection({
     onBlur: () => void;
     ref: (el: Element | null) => void;
   };
-  onAdd: () => void;
   onJump: (timeSec: number) => void;
   onText: (markerId: string, text: string) => void;
   onMove: (markerId: string) => void;
@@ -55,14 +57,11 @@ export function TimelineMarkersSection({
 }) {
   const markers = markersInOrder(doc);
   const fps = doc.videoSettings.fps;
+  if (markers.length === 0) return null;
   return (
     <CollapsibleSection scope={SECTION_SCOPE.timeline} title={MARKER_SECTION_TITLE} storageKey="markers">
-      <button className="btn btn-secondary" onClick={onAdd} {...(busy ?? {})}>{MARKER_ADD_LABEL}</button>
-      {markers.length === 0 ? (
-        <p className="text-muted">{MARKER_EMPTY_HINT}</p>
-      ) : (
-        // ⚠️ **自前で縦に流す**（#1138 レビュー由来 🔴）＝この欄は縦に流れないので、行が増えると
-        // **帯の取り分を一方的に削り**、欄の高さを超えた行は**切れて到達できなくなる**（#1104 と同じ形）。
+        {/* ⚠️ **自前で縦に流す**（#1138 レビュー由来 🔴）＝この欄は縦に流れないので、行が増えると
+            **帯の取り分を一方的に削り**、欄の高さを超えた行は**切れて到達できなくなる**（#1104 と同じ形）。 */}
         <ul className="list-reset" style={{ maxHeight: "12rem", overflowY: "auto" }}>
           {markers.map((m) => (
             <li
@@ -96,7 +95,6 @@ export function TimelineMarkersSection({
             </li>
           ))}
         </ul>
-      )}
     </CollapsibleSection>
   );
 }

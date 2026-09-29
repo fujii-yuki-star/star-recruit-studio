@@ -8002,6 +8002,63 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 目印を置く入口は「並び」の道具立ての行と `M` キー（ADR-0048・#1256 b2）。
+// ⚠️ **以前は帯の下の節の中にあり、目印が0件でも節が 124px を取っていた**（並びの欄の本文の約27%）。
+describe("TimelineProjectScreen: 目印を置く入口（#1256 b2）", () => {
+  const addButton = () => screen.getByRole("button", { name: "目印を置く" });
+
+  it("道具立ての行にあり、動画に出ないことを押す前に言う", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-toolbar")!.contains(addButton()), "道具立ての行に無い").toBe(true);
+    expect(addButton().title, "動画に出ないと言っていない").toContain("動画には出ません");
+    expect(addButton().title, "キーで置けることを言っていない").toContain("M キー");
+  });
+
+  it("目印が無いときは、目印の節を出さない（帯の入る高さを削らない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/マーカー（目印）/)).toBeNull();
+  });
+
+  it("押すと、いまの位置に置かれ、目印の節が出る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    fireEvent.click(addButton());
+    expect(useTimelineStore.getState().doc?.markers?.map((m) => m.timeSec)).toEqual([2]);
+    expect(screen.getByText(/マーカー（目印）/)).toBeTruthy();
+  });
+
+  it("`M` キーでも置ける（業界の型）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(3));
+    fireEvent.keyDown(window, { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.map((m) => m.timeSec)).toEqual([3]);
+  });
+
+  it("文字を打っている所では `M` を奪わない", () => {
+    open({ markers: [{ id: "marker_001", timeSec: 1 }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(5));
+    fireEvent.keyDown(screen.getByPlaceholderText(/メモ/), { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.length).toBe(1);
+    // ⚠️ **選ぶ欄も文字で中を探す**（ブラウザの標準機能）＝`I`／`O` と同じく奪わない。
+    fireEvent.keyDown(screen.getByLabelText("書き出す大きさ"), { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers?.length, "選ぶ欄でキーを奪った").toBe(1);
+  });
+
+  it("書き出し中は理由つきで押せない", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 42, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(addButton()).toBeDisabled();
+    expect(addButton().title).not.toBe("");
+    expect(addButton().title).not.toContain("動画には出ません");
+  });
+});
+
 // 仕上がり確認の絵は欄に収まり、「再生」の行は押し出されない（#1257）。
 // ⚠️ **既定の配置で「再生」が欄の外へ押し出されていた**（1920×1009 の実測＝欄の本文 284px に絵 418px）。
 // jsdom は大きさを計算しないので、**構造（絵の置き場と操作の置き場を分ける）と CSS の約束**を見る。
