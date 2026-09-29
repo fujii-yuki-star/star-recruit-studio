@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ZOOM_LEVELS } from "../../domain/timeline/zoom";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
@@ -4662,7 +4663,7 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     for (let i = 0; i < 5; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
     expect(screen.getByRole("button", { name: "表示を広げる" })).toBeDisabled();
-    for (let i = 0; i < 10; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" }));
+    for (let i = 0; i < ZOOM_LEVELS.length; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" })); // 段の数だけ（#1258 で下へ足した）
     expect(screen.getByRole("button", { name: "表示を縮める" })).toBeDisabled();
   });
 

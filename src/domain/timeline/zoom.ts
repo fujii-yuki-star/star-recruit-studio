@@ -11,7 +11,9 @@ export const ZOOM_LEVELS = TIMELINE_ZOOM_LEVELS;
  * **全体が収まる段**を選ぶ（開いた直後の既定・決定13「開いた直後は全体表示」）。
  *
  * 収まる段のうち**いちばん大きい**もの＝ぎりぎり全部見える所から始める。どの段でも収まらない
- * （長い動画）ときは**いちばん小さい段**（それ以上は広げられない＝横スクロールで見る）。
+ * ときは**いちばん小さい段**（それ以上は広げられない＝横スクロールで見る）。
+ * ⚠️ 段は 0.25px/秒まであるので、**上限の30分でも約450px の窓に収まる**（#1258）＝ここへ落ちるのは
+ * それより狭い窓だけ。以前は 16px/秒が最小で、**約94秒を超えると必ずここへ落ちていた**。
  * 尺が 0（何も置いていない）は既定の段＝目盛りが潰れない。
  */
 export function fitZoomIndex(totalSec: number, viewportPx: number): number {
@@ -22,8 +24,11 @@ export function fitZoomIndex(totalSec: number, viewportPx: number): number {
   return 0;
 }
 
-/** 何も置いていないときの段（`fitZoomIndex` が尺を測れないときの受け皿）。 */
-export const DEFAULT_ZOOM_INDEX = 2;
+/**
+ * 何も置いていないときの段（`fitZoomIndex` が尺を測れないときの受け皿）＝36px/秒。
+ * ⚠️ **位置ではなく値で決める**（#1258）＝段を下へ足したとき、番号で持つと既定が黙って別の倍率になる。
+ */
+export const DEFAULT_ZOOM_INDEX: number = ZOOM_LEVELS.indexOf(36);
 
 /** 段を1つ動かす（範囲外へは出ない＝押せるのに何も起きない、を作らない側の材料）。 */
 export function stepZoomIndex(index: number, delta: number): number {
@@ -65,7 +70,10 @@ export function tickStepSec(pxPerSec: number): number {
   return TICK_STEPS_SEC[TICK_STEPS_SEC.length - 1];
 }
 
-/** 目盛りの刻みの候補（秒）。時計として読める値だけ＝3秒や7秒のような半端を出さない。 */
-const TICK_STEPS_SEC = [1, 2, 5, 10, 15, 30, 60] as const;
+/**
+ * 目盛りの刻みの候補（秒）。時計として読める値だけ＝3秒や7秒のような半端を出さない。
+ * ⚠️ **2分・5分を足した**（#1258）＝段を 0.25px/秒まで伸ばしたので、60秒刻みでは文字が重なる。
+ */
+const TICK_STEPS_SEC = [1, 2, 5, 10, 15, 30, 60, 120, 300] as const;
 /** 目盛りの文字が重ならない最小の間隔（px）。 */
 const TICK_MIN_GAP_PX = 40;
