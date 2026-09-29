@@ -74,6 +74,8 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
+import { ShortcutList } from "../components/ShortcutList";
+import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -831,6 +833,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
   const markerAddRef = useRef<() => void>(() => {});
+  /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
+  const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
    * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
    * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
@@ -913,6 +917,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if ((e.key === "m" || e.key === "M") && !usesTypeAhead(e.target)) {
         e.preventDefault();
         markerAddRef.current();
+        return;
+      }
+      // **`?`＝近道キーの一覧**（ADR-0048・#1256 c6＝多くの編集ソフト・ウェブの道具と同じ）。
+      // 画面の真ん中あたりに出す（キーで開いたときは押したボタンが無い）。
+      if (e.key === "?" && !usesTypeAhead(e.target)) {
+        e.preventDefault();
+        setShortcutsAt({ x: Math.round(window.innerWidth / 2 - 240), y: 80 });
         return;
       }
       if (e.key === " ") {
@@ -5805,6 +5816,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <>
                 {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
                 <PanelLayoutMenu layout={panelLayout} panels={shownPanels} closed={closed} onChange={changeLayout} onReset={resetLayout} presets={layoutPresets} />
+                {/* **近道キーの一覧**（ADR-0048・#1256 c6）＝`?` キーでも開く。 */}
+                <button
+                  className="btn btn-ghost text-sm"
+                  title="キーで使える操作の一覧（? キーでも開きます）"
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setShortcutsAt({ x: r.left, y: r.bottom });
+                  }}
+                >
+                  キー操作
+                </button>
+                {shortcutsAt && (
+                  <ShortcutList x={shortcutsAt.x} y={shortcutsAt.y} shortcuts={TIMELINE_SHORTCUTS} onClose={() => setShortcutsAt(null)} />
+                )}
                 {/* ⚠️ **注意の件数をいつも見える所へ**（#1032）＝知らせは帯の器の下にあり、
                     編集している間は画面外だった（見えていない知らせは無いのと同じ）。
                     中身は上へ出さない（編集の場所を上から狭めない）＝数だけ出して、押すとそこへ寄る。 */}

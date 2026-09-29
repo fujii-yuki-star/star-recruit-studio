@@ -1448,6 +1448,21 @@ button.badge {
 /* **一時的に広げた欄**（ADR-0048 決定5）＝配置の器いっぱいに重ねて出す。
    ⚠️ **ほかの欄は外さずに隠す**（`visibility`）＝外すと中身の状態（鳴っている音・スクロール位置）が消える。
    ⚠️ 器（`.panel-layout`）が基準＝間の箱は位置を持たないので、広げた欄は器に対して置かれる。 */
+/* 近道キーの一覧（ADR-0048・#1256 c6）＝メニューと同じ浮いた面。色は明暗どちらでも読めるよう色の言葉から取る。 */
+.shortcut-list {
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 12px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: 80vh;
+  overflow: auto;
+}
+.shortcut-list-table { border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.shortcut-list-table th { text-align: left; white-space: nowrap; padding: 3px 12px 3px 0; font-weight: normal; vertical-align: top; }
+.shortcut-list-table td { padding: 3px 0; }
 .panel-layout--maximized { position: relative; }
 .panel-layout--maximized .panel-frame:not(.panel-frame--maximized),
 .panel-layout--maximized .panel-divider { visibility: hidden; }

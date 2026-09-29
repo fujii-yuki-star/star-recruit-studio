@@ -68,7 +68,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（ADR-0048 決定5）＝欄の見出しの右のボタンの囲い（`panel-frame-head-actions`）。
     //   広げた印（`panel-frame--maximized` 等）は式の中で組み立てるので、この走査には数えられない。
     // ⚠️ **+1**（#1256 b5）＝帯の操作の行（`timeline-edit-tools`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(175);
+    // ⚠️ **+2**（#1256 c6）＝近道キーの一覧（`shortcut-list`・`shortcut-list-table`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(177);
   });
 });
 

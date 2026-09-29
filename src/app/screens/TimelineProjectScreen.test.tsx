@@ -8025,6 +8025,40 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
   });
 });
 
+// 近道キーの一覧（ADR-0048・#1256 c6）＝見出しの行の「キー操作」と `?` キー。
+describe("TimelineProjectScreen: 近道キーの一覧（#1256 c6）", () => {
+  const dialog = () => screen.queryByRole("dialog", { name: "キー操作の一覧" });
+
+  it("見出しの行の「キー操作」で開き、閉じられる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "キー操作" }));
+    expect(dialog()).not.toBeNull();
+    expect(within(dialog()!).getByText("Ctrl+K")).toBeTruthy();
+    expect(within(dialog()!).getByText(/再生位置で分ける/)).toBeTruthy();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "閉じる" }));
+    expect(dialog()).toBeNull();
+  });
+
+  it("`?` キーで開き、`Escape` で閉じる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
+    expect(dialog()).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(dialog()).toBeNull();
+  });
+
+  // ⚠️ **読んでいる最中に画面のキーが効かない**＝一覧を開いたまま `M` を押して目印が増える、を作らない。
+  it("開いている間は、画面の近道キーが効かない", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
+    fireEvent.keyDown(window, { key: "m" });
+    expect(useTimelineStore.getState().doc?.markers ?? []).toEqual([]);
+  });
+});
+
 // 「置く」欄の素材タブは、素材の一覧を上へ寄せる（ADR-0048・#1256 b4）。
 // ⚠️ 以前は取り込み・棚・説明・置く列・文字/図形が縦に積まれ、既定の配置でボタン14個のうち5個しか見えなかった。
 describe("TimelineProjectScreen: 「置く」欄を詰める（#1256 b4）", () => {

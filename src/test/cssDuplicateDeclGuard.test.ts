@@ -103,7 +103,9 @@ export function declarationCount(css: string): number {
 const MIN_DECLARATIONS: Record<string, number> = {
   "timeline.css": 255,
   "fonts.css": 20,
-  "theme.css": 809,
+  // ⚠️ **809 → 900**（2026-09-29・実態 907）＝ADR-0048 の一連（欄を広げる・仕上がり確認の置き場・近道キーの一覧）
+  //   までに1割を超えて増えたので、下限を上げ直した（下げて無効化しないための見直し）。
+  "theme.css": 900,
 };
 
 describe("注記が規則を呑み込んでいない（#1104）", () => {
