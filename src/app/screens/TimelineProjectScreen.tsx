@@ -27,7 +27,7 @@ import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
 import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, renameFieldKeys, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
-import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
+import { hasEscapeOwner, useEscapeOwner, useEscapeReceiver } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
@@ -75,6 +75,14 @@ import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { ShortcutList } from "../components/ShortcutList";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
+import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
+import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
+import { safeAreaRect } from "../../domain/preview/safeArea";
+import { onAppFullscreenChange, setAppFullscreen } from "../../infrastructure/appFullscreen";
+import { onWindowFileDrop } from "../../infrastructure/fileDropEvents";
+import { cssPointOf } from "../../domain/asset/fileDrop";
 import { TIMELINE_SHORTCUTS } from "../timelineShortcuts";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
@@ -427,6 +435,8 @@ const loadLaneHeight = (): TimelineLaneHeight =>
 const saveLaneHeight = (h: TimelineLaneHeight): void => setChoiceSetting(LS_LANE_HEIGHT, h);
 /** 列の高さの言い方（画面に出す＝§2-3）。 */
 const LANE_HEIGHT_LABEL: Record<TimelineLaneHeight, string> = { compact: "細い", normal: "ふつう", tall: "太い" };
+/** 窓の外から運んでいるファイルが、並びの外にある（離すと取り込むだけ・ADR-0049）。 */
+const FILE_DROP_IMPORT_ONLY = "importOnly" as const;
 /** 1つの部品にだけ効く操作を、まとめて選んでいるときの説明（右クリックのメニューと同じ言い方＝ADR-0026②）。 */
 const SINGLE_CLIP_ONLY_HINT = "1つだけ選ぶと使えます";
 /**
@@ -840,6 +850,74 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
   const markerAddRef = useRef<() => void>(() => {});
+  /**
+   * **窓の外からファイルを運んでいる最中**の行き先（ADR-0049）。`null`＝運んでいない。
+   * 列（`trackId`）・列の無い所（`trackId: null`＝新しい列）・`FILE_DROP_IMPORT_ONLY`（並びの外＝取り込むだけ）。
+   */
+  const [fileHover, setFileHover] = useState<{ trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(null);
+  /** 落とした点から行き先を決める手（描くたびに最新の配置・倍率を見る）。 */
+  const fileDropTargetRef = useRef<(x: number, y: number) => { trackId: string | null; startSec: number } | typeof FILE_DROP_IMPORT_ONLY | null>(() => null);
+  /**
+   * 仕上がり確認の**表示倍率**（#1261）＝場面編集と同じ部品・同じ段（`PreviewZoomControl`）。
+   * ⚠️ **箱の実寸を変える**（`transform` にしない）＝キャンバスの操作の層は箱の実寸から縮尺を導くので、
+   * 実寸が変われば掴む位置もそのまま合う（`zoomedBox` の説明と同じ理由）。
+   */
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  /** 絵の置き場（`.preview-fit`）の実寸＝「欄に合わせる」ときの絵の大きさを出すのに使う。 */
+  const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
+  const fitObserverRef = useRef<ResizeObserver | null>(null);
+  const fitRef = useCallback((el: HTMLDivElement | null) => {
+    fitObserverRef.current?.disconnect();
+    fitObserverRef.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      // ⚠️ **整数に丸める**＝小数の揺れで描き直しが続かないように。
+      const w = Math.round(entry.contentRect.width);
+      const h = Math.round(entry.contentRect.height);
+      setFitBox((cur) => (cur && cur.w === w && cur.h === h ? cur : { w, h }));
+    });
+    ro.observe(el);
+    fitObserverRef.current = ro;
+  }, []);
+  /**
+   * **広げている欄**（ADR-0048 決定5）を画面が持つ＝「大きく見る」（#1262）が仕上がり確認を広げるため。
+   * ⚠️ **記憶しない**のは同じ（画面の状態・開き直せば元の配置）。
+   */
+  const [maximizedPanel, setMaximizedPanel] = useState<string | null>(null);
+  /**
+   * **大きく見る**（#1262）＝仕上がり確認を欄いっぱいに広げ、**アプリの窓も全画面**にする。
+   * 同じ窓の中なので、キャンバスで掴んで動かす・文字を直すはそのまま効く（別窓＝#1263 の第一段）。
+   */
+  const [bigView, setBigView] = useState(false);
+  const enterBigView = (): void => {
+    setMaximizedPanel(PANEL_ID.preview);
+    setBigView(true);
+    void setAppFullscreen(true);
+  };
+  const exitBigView = (): void => {
+    setMaximizedPanel(null);
+    setBigView(false);
+    void setAppFullscreen(false);
+  };
+  // `Escape` で戻る（全画面の型）。⚠️ 名簿に預ける＝手前にメニュー等があればそちらが先に閉じる。
+  useEscapeReceiver(bigView, () => { exitBigView(); return true; });
+  // ⚠️ **画面を離れたら全画面を解く**＝一覧へ戻っても窓が全画面のまま、を作らない。
+  const bigViewRef = useRef(bigView);
+  useEffect(() => { bigViewRef.current = bigView; }, [bigView]);
+  useEffect(() => () => { if (bigViewRef.current) void setAppFullscreen(false); }, []);
+  // ⚠️ **窓の全画面が外から解けたら、こちらも戻す**（#1269 レビュー 🟡）＝ブラウザの Esc・OS の操作で全画面が
+  //   外れても「大きく見る」のままになり、「元に戻す」でしか戻れなかった。
+  useEffect(() => {
+    if (!bigView) return;
+    let un: (() => void) | null = null;
+    let cancelled = false;
+    void onAppFullscreenChange((on) => {
+      if (!on) { setMaximizedPanel(null); setBigView(false); }
+    }).then((f) => { if (cancelled) f(); else un = f; });
+    return () => { cancelled = true; un?.(); };
+  }, [bigView]);
+  // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
+  const [safeAreaOn] = useSafeAreaPref();
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
   const [shortcutsAt, setShortcutsAt] = useState<{ x: number; y: number } | null>(null);
   /**
@@ -995,6 +1073,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * `Ctrl` （押している間だけ切れる）は**補助として残す**（ADR-0034 決定）。
    */
   const [snapEnabled, setSnapEnabled] = useState(loadSnapEnabled);
+  // **窓の外から落としたファイル**（ADR-0049）＝並びの列へ落とせば取り込んで置く・それ以外は取り込むだけ。
+  const placeDroppedFiles = useTimelineStore((s) => s.placeDroppedFiles);
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    let cancelled = false;
+    void onWindowFileDrop((e) => {
+      if (e.kind === "leave") { setFileHover(null); return; }
+      if (!e.position) return;
+      const p = cssPointOf(e.position, window.devicePixelRatio || 1);
+      const target = fileDropTargetRef.current(p.x, p.y);
+      if (e.kind === "over") { setFileHover(target); return; }
+      setFileHover(null);
+      if (target == null || e.paths.length === 0) return;
+      void placeDroppedFiles(e.paths, target === FILE_DROP_IMPORT_ONLY ? null : target);
+    }).then((f) => {
+      if (cancelled) f();
+      else un = f;
+    });
+    return () => { cancelled = true; un?.(); };
+  }, [placeDroppedFiles]);
   const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
   /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
   const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
@@ -2817,6 +2915,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **見えている分だけ**を落とし先にする（スクロールで欄の外へ出ている列へ落とさない）。
    * 時刻は**列そのものの左端**から測る（切った矩形の左端は列の 0 秒ではない）。
    */
+  // 窓の外から落とした点の行き先（ADR-0049）。
+  // ⚠️ **取り込みの枠（`data-file-drop-zone`）の上は `null`**＝枠が自分で受ける（二重に取り込まない）。
+  // ⚠️ **仕上がり確認の上は取り込むだけ**＝他社でも窓の外からの落とし先ではない（調査・ADR-0049）。
+  // ⚠️ **説明は `//` で書く**＝ここは宣言ではなく代入なので、`/** */` だと次の `laneAt` の説明を奪う（門番）。
+  fileDropTargetRef.current = (x, y) => {
+    // ⚠️ **隠れた欄は当たりにしない**（#1269 レビュー 🔴）＝欄を広げている間、ほかの欄は `visibility: hidden` で
+    //   箱が残る。矩形だけで当てると、**広げた仕上がり確認の上に落としたのに、その真下の見えない列へ置かれた**。
+    const hiddenByMaximize = (el: Element): boolean =>
+      maximizedPanel != null && el.closest(".panel-frame")?.getAttribute("data-panel-id") !== maximizedPanel;
+    for (const zone of document.querySelectorAll("[data-file-drop-zone]")) {
+      if (hiddenByMaximize(zone)) continue;
+      if (pointInRect(zone.getBoundingClientRect(), x, y)) return null;
+    }
+    // 並び以外の欄を広げているときは、並びへは置けない（見えていない）＝取り込むだけ。
+    if (maximizedPanel != null && maximizedPanel !== PANEL_ID.arrange) return FILE_DROP_IMPORT_ONLY;
+    const lane = laneAt(x, y);
+    if (lane) return lane;
+    // 列の無い所（いちばん下の列より下・並びの箱の中）＝新しい列。時刻は列の横の位置から。
+    const box = scrollRef.current ? visibleRectOf(scrollRef.current) : null;
+    const lanes = [...laneRefs.current.values()].map((el) => el.getBoundingClientRect());
+    if (box && pointInRect(box, x, y) && lanes.length > 0 && y > Math.max(...lanes.map((r) => r.bottom))) {
+      return { trackId: null, startSec: laneTimeAt(lanes[0], pxPerSec, Math.max(x, lanes[0].left)) };
+    }
+    return FILE_DROP_IMPORT_ONLY;
+  };
+
   const laneAt = (x: number, y: number): { trackId: string; startSec: number } | null => {
     for (const [trackId, el] of laneRefs.current) {
       if (!pointInRect(visibleRectOf(el) ?? { left: 0, top: 0, right: -1, bottom: -1 }, x, y)) continue;
@@ -3518,6 +3642,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
+  // 仕上がり確認の「欄に合わせる」ときの絵の実寸と、拡大したときの箱（#1261）。
+  const stageRatio = canvasDims.width / canvasDims.height;
+  const fitStageW = fitBox ? Math.min(fitBox.w, fitBox.h * stageRatio) : 0;
+  const previewFitPct = fitPercentOf(fitStageW, canvasDims.width);
+  const previewZoomed = previewZoom !== "fit" && fitStageW > 0
+    ? zoomedBox({ width: fitStageW, height: fitStageW / stageRatio }, previewZoom, previewFitPct)
+    : null;
+
   const panels: PanelSpec[] = [
     // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
     // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
@@ -3525,12 +3657,34 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 高さの側からも縛る＝`.preview-fit` が残りの高さを受け持ち、絵はその中に**縦横とも収まる**大きさにする。
     { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, content: (
       <>
+        {/* ⚠️ **倍率と端の目安は、絵の置き場の上に浮かせる**（#1261）＝「再生」の行に置いたら、倍率の%表示の幅が
+            変わるたびに行の折り返しが変わり → 絵の置き場の高さが変わり → %が変わる、の**繰り返しで画面が固まった**（実測）。
+            浮かせれば置き場の大きさに関わらない。部品は場面編集と**同じもの**（ADR-0026②）。 */}
+        <div className="preview-fit-shell">
+        <div className="preview-view-tools" data-testid="preview-view-tools">
+          {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
+          <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+          <SafeAreaToggle />
+          <button
+            className="btn btn-ghost btn-sm"
+            aria-pressed={bigView}
+            title={bigView ? "元の大きさに戻します（Esc でも）" : "仕上がり確認を画面いっぱいに広げます（Esc で戻ります）。そのまま直接動かせます"}
+            onClick={() => (bigView ? exitBigView() : enterBigView())}
+          >
+            {bigView ? "元に戻す" : "大きく見る"}
+          </button>
+        </div>
         <div
-          className="preview-fit"
+          ref={fitRef}
+          className={`preview-fit${previewZoomed ? " preview-fit--zoomed" : ""}`}
           data-testid="preview-fit"
           style={{ ["--stage-ratio" as string]: `${canvasDims.width / canvasDims.height}` }}
         >
-        <div className="preview-stage-wrap">
+        <div
+          className="preview-stage-wrap"
+          // 拡大しているときは箱の実寸を決める（欄より大きければ、絵の置き場の中で流れる）。
+          style={previewZoomed ? { width: previewZoomed.width, height: previewZoomed.height } : undefined}
+        >
           {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
               入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
               `dangerouslySetInnerHTML` を使うので、中に子を足せない。見えない・触れない姿で流す。 */}
@@ -3617,6 +3771,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           {/* ⚠️ **入った所に印を出す**（#818 レビュー 🔴・ADR-0026②＝場面編集のドリルインと同じ型）＝
               印が無いと ①二度押しできること自体が発見できない ②どの層に入ったのか読めない
               ③抜けたかどうかも読めない。**当たり判定と同じ矩形**を使う＝見た目と当て先がずれない。 */}
+          {/* **端の目安**（#1261・場面編集の #265 と同じ線）＝編集の補助。書き出しには焼かない。
+              割合で置く＝倍率を変えても一緒に伸びる。 */}
+          {safeAreaOn && (() => {
+            const r = safeAreaRect(canvasDims, doc.videoSettings.aspectRatio);
+            return (
+              <div
+                aria-hidden="true"
+                className="safe-area-guide"
+                data-testid="timeline-safe-area"
+                style={{
+                  left: `${(r.x / canvasDims.width) * 100}%`,
+                  top: `${(r.y / canvasDims.height) * 100}%`,
+                  width: `${(r.w / canvasDims.width) * 100}%`,
+                  height: `${(r.h / canvasDims.height) * 100}%`,
+                }}
+              />
+            );
+          })()}
           {!isPlaying && !exporting && drilledRect && (
             <div
               className="timeline-drilled-part"
@@ -3696,6 +3868,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               }}
             />
           )}
+        </div>
         </div>
         </div>
         {/* 絵の下＝操作と設定。**ここだけが流れる**（絵は縮むだけ・流れない）＝設定を開いても
@@ -4339,10 +4512,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       // 出さない列は帯を薄く・固定した列は斜線（ADR-0048）＝見出しを見なくても列の状態が分かる。
-                      className={`timeline-track timeline-lane${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+                      className={`timeline-track timeline-lane${fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id ? " drop-target" : ""}${track.hidden ? " timeline-lane--hidden" : ""}${track.locked ? " timeline-lane--locked" : ""}${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
+                      {/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻を線で見せる。 */}
+                      {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId === track.id && (
+                        <span className="timeline-file-drop-line" style={{ left: `${pxPerSec * fileHover.startSec}px` }} aria-hidden="true" />
+                      )}
                       {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
                           「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}
                       {drag?.drop?.at?.trackId === track.id && (
@@ -4455,6 +4632,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </div>
                   </div>
                 ))}
+                {/* **列の無い所へ落とそうとしている**（ADR-0049）＝新しい列を作って置くことを、離す前に見せる。 */}
+                {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId == null && (
+                  <div className="timeline-row" data-testid="file-drop-newrow">
+                    <div className="timeline-row-label" />
+                    <div className="timeline-track timeline-lane timeline-file-drop-lane drop-target" style={{ width: laneWidthPx }}>
+                      <span className="timeline-file-drop-line" style={{ left: `${pxPerSec * fileHover.startSec}px` }} />
+                      <span className="text-sm text-muted timeline-file-drop-newrow-text">離すと新しい列を作って、ここに置きます</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -5804,6 +5991,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   return (
     <>
       <div className="main-scroll main-scroll--fixed dense">
+      {/* **並びの外でファイルを運んでいるとき**（ADR-0049）＝離すと何が起きるかと、置きたいときの行き先を言う。 */}
+      {fileHover === FILE_DROP_IMPORT_ONLY && (
+        <div className="file-drop-hint" role="status" data-testid="file-drop-hint">
+          離すと素材に取り込みます。並びの列の上で離すと、その場所に置けます
+        </div>
+      )}
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
       {/* ⚠️ **`dense` はこの画面だけ**（ADR-0047）＝操作と余白を詰めて、本体（並び）へ面積を渡す。
@@ -5950,7 +6143,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           `76vh` の決め打ちだと上の見出しと足して画面をはみ出し、画面の残りいっぱいにすると
           下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
       <div className="timeline-flash-zone">
-        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} fill />
+        <PanelLayoutView
+          layout={panelLayout}
+          panels={shownPanels}
+          onChange={changeLayout}
+          fill
+          maximized={maximizedPanel}
+          // ⚠️ **ほかの道で広げ方が変わったら「大きく見る」も解く**＝仕上がり確認以外を広げた・戻したのに
+          //   窓だけ全画面のまま、を作らない。
+          onMaximizedChange={(next) => {
+            setMaximizedPanel(next);
+            if (bigView && next !== PANEL_ID.preview) { setBigView(false); void setAppFullscreen(false); }
+          }}
+        />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。

@@ -404,6 +404,21 @@ describe("PanelLayoutView: 欄を広げる", () => {
     expect(onChange, "隠れた欄が落とし先になった").not.toHaveBeenCalled();
   });
 
+  // **外から持つ**（#1262＝「大きく見る」が仕上がり確認を広げる）。
+  it("広げている欄を外から渡せ、見出しのボタンは外へ知らせる（自分では持たない）", () => {
+    const onMax = vi.fn();
+    const { rerender } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} maximized="b" onMaximizedChange={onMax} />);
+    expect(frame("b").classList.contains("panel-frame--maximized")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "いの欄を元に戻す" }));
+    expect(onMax).toHaveBeenLastCalledWith(null);
+    expect(frame("b").classList.contains("panel-frame--maximized"), "外が戻す前に自分で戻した").toBe(true);
+    rerender(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} maximized={null} onMaximizedChange={onMax} />);
+    expect(frame("b").classList.contains("panel-frame--maximized")).toBe(false);
+    fireEvent.pointerEnter(frame("a"));
+    fireEvent.keyDown(window, { key: "`" });
+    expect(onMax, "キーの道が外へ知らせない").toHaveBeenLastCalledWith("a");
+  });
+
   it("CSS：広げた欄は器いっぱいに重ね、ほかの欄は隠すだけ（外さない）", () => {
     const theme = readFileSync(join(__dirname, "../../../styles/theme.css"), "utf8");
     const max = ruleBody(theme, ".panel-frame--maximized") ?? "";

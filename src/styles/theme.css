@@ -943,6 +943,33 @@ button.badge {
  * ⚠️ 絵の入れ物（wrap）に**実際の大きさを持たせる**＝操作レイヤ（`inset: 0`）の基準なので、
  * 絵より大きい箱にすると掴む位置が実際とずれる。比は画面が `--stage-ratio`（幅÷高さ）で流し込む。
  */
+/* 絵の置き場と、その上に浮かせる道具（倍率・端の目安・#1261）の入れ物。置き場の大きさは入れ物が決める。 */
+.preview-fit-shell {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 96px;
+  display: flex;
+}
+/* ⚠️ **余白は素通し・押せる物だけ受ける**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白が
+   キャンバスの掴む・二度押しの当たりを取っていた。 */
+.preview-view-tools button,
+.preview-view-tools label {
+  pointer-events: auto;
+}
+.preview-view-tools {
+  pointer-events: none;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
+  font-size: 12px;
+}
 .preview-fit {
   flex: 1 1 0;
   min-height: 96px;
@@ -954,6 +981,13 @@ button.badge {
 .preview-fit > .preview-stage-wrap {
   width: min(100cqw, calc(100cqh * var(--stage-ratio, 1.7778)));
   flex: 0 0 auto;
+}
+/* 拡大しているとき（#1261）＝箱が置き場より大きくなるので、置き場の中で流す（左上から）。
+   ⚠️ 幅は画面が実寸で決める（`min(100cqw, …)` の規則より強い `style`）。 */
+.preview-fit--zoomed {
+  overflow: auto;
+  justify-content: flex-start;
+  align-items: flex-start;
 }
 /* 絵の下（操作と設定）。中身の高さを取り、欄を越えた分はここだけで流す（絵は流さない）。 */
 .preview-below {

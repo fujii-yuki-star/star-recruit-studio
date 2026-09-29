@@ -8409,6 +8409,58 @@ describe("TimelineProjectScreen: 書き出しの置き場所（#1256）", () => 
   });
 });
 
+// 仕上がり確認の表示倍率と端の目安（#1261）＝場面編集と同じ部品。
+describe("TimelineProjectScreen: 仕上がり確認の表示倍率と端の目安（#1261）", () => {
+  /** jsdom には ResizeObserver が無いので、絵の置き場の大きさを渡す代役を置く。 */
+  const withResizeObserver = (w: number, h: number) => {
+    class RO { cb: ResizeObserverCallback; constructor(cb: ResizeObserverCallback) { this.cb = cb; }
+      observe() { this.cb([{ contentRect: { width: w, height: h } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      disconnect() {} unobserve() {} }
+    vi.stubGlobal("ResizeObserver", RO);
+  };
+
+  it("倍率と端の目安は、絵の置き場の上に浮かせる（再生の行に置かない＝行の折り返しで固まらない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const tools = screen.getByTestId("preview-view-tools");
+    expect(within(tools).getByText("端の目安を出す")).toBeTruthy();
+    expect(within(tools).getByRole("button", { name: "仕上がりの表示を広げる" })).toBeTruthy();
+    expect(screen.getByTestId("preview-below").contains(tools), "再生の行（絵の下）に置いている").toBe(false);
+    // ⚠️ **浮かせる＝流れに入れない**（CSS の約束）＝流れに入ると、%表示の幅の変化で置き場の大きさが変わり、また%が変わる。
+    const css = readFileSync(resolve(__dirname, "../../styles/theme.css"), "utf8");
+    const rule = (sel: string) => { const i = css.indexOf(`\n${sel} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
+    expect(rule(".preview-view-tools"), "道具が流れに入っている").toMatch(/position:\s*absolute/);
+    expect(rule(".preview-fit-shell"), "浮かせる基準が無い").toMatch(/position:\s*relative/);
+    // ⚠️ **余白は素通し**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白がキャンバスの掴む当たりを取らない。
+    expect(rule(".preview-view-tools"), "余白が当たりを取る").toMatch(/pointer-events:\s*none/);
+    expect(css, "押せる物まで素通しにしている").toMatch(/\.preview-view-tools button\s*,\s*\.preview-view-tools label\s*\{\s*pointer-events:\s*auto/);
+  });
+
+  it("端の目安を出すと、動画の端から割合で線を引く（横は四辺 5%）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByTestId("timeline-safe-area")).toBeNull();
+    fireEvent.click(within(screen.getByTestId("preview-view-tools")).getByRole("checkbox"));
+    const g = screen.getByTestId("timeline-safe-area");
+    expect([g.style.left, g.style.top, g.style.width, g.style.height]).toEqual(["5%", "5%", "90%", "90%"]);
+    fireEvent.click(within(screen.getByTestId("preview-view-tools")).getByRole("checkbox")); // 次の検査へ持ち越さない
+  });
+
+  // ⚠️ **箱の実寸を変える**＝操作の層は実寸から縮尺を導くので、掴む位置が合う（`transform` にしない）。
+  it("広げると絵の箱の実寸が大きくなり、置き場の中で流れる", () => {
+    withResizeObserver(800, 300); // 置き場 800×300 → 欄に合わせた絵は 533×300（16:9）
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const wrap = () => screen.getByTestId("preview-fit").querySelector(".preview-stage-wrap") as HTMLElement;
+    expect(wrap().style.width, "欄に合わせているのに実寸を決めている").toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "仕上がりの表示を広げる" }));
+    expect(screen.getByTestId("preview-fit").className).toContain("preview-fit--zoomed");
+    expect(Number.parseFloat(wrap().style.width), "広げても絵の箱が大きくならない").toBeGreaterThan(533);
+    expect(wrap().style.transform, "transform で拡大している（掴む位置がずれる）").toBe("");
+    vi.unstubAllGlobals();
+  });
+});
+
 // 仕上がり確認の絵は欄に収まり、「再生」の行は押し出されない（#1257）。
 // ⚠️ **既定の配置で「再生」が欄の外へ押し出されていた**（1920×1009 の実測＝欄の本文 284px に絵 418px）。
 // jsdom は大きさを計算しないので、**構造（絵の置き場と操作の置き場を分ける）と CSS の約束**を見る。
@@ -8430,7 +8482,8 @@ describe("TimelineProjectScreen: 仕上がり確認の絵は欄に収まる（#1
     expect(below.contains(screen.getByRole("button", { name: "再生" })), "「再生」が操作の置き場に無い").toBe(true);
     expect(fit.contains(below), "操作の置き場が絵の置き場の中にある（絵と一緒に押し出される）").toBe(false);
     // 欄は**中身に高さを配らせる**器（`fillBody`）＝そうでないと絵の置き場が残りの高さを受け取れない。
-    expect(fit.parentElement?.className, "欄が高さを配らない（絵が欄に収まらない）").toMatch(/panel-frame-body--fill/);
+    // ⚠️ 置き場は入れ物（`.preview-fit-shell`＝#1261 の浮かせた道具の基準）の中＝その入れ物が欄の直下。
+    expect(fit.parentElement?.parentElement?.className, "欄が高さを配らない（絵が欄に収まらない）").toMatch(/panel-frame-body--fill/);
     // 比は動画の向きから流し込む（縦型で枠と絵がずれない）。
     expect(fit.style.getPropertyValue("--stage-ratio")).toBe(String(1920 / 1080));
   });
