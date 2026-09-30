@@ -40,7 +40,7 @@ import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { LocalVideoPlanProvider } from "../../infrastructure/aiProviders/localVideoPlanProvider";
-import { cancelAiGenerate, willSendExternally } from "../../infrastructure/aiClient";
+import { cancelAiGenerate, isTauri, willSendExternally } from "../../infrastructure/aiClient";
 import { AI_ENGINE, getAiEngine, getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
@@ -769,16 +769,12 @@ function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, n
 //   鍵が無ければ**次の行動で断る**（黙ってこのパソコンの中や Mock へ落とさない）。
 // - それ以外（既定）＝**このパソコンの中で作る**。失敗しても外へは送らない（利用者が Gemini を選ぶまで）。
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
-  if (!isTauriRuntime()) return new MockAiProvider().generateVideoPlan(input);
+  if (!isTauri()) return new MockAiProvider().generateVideoPlan(input);
   if (getAiEngine() === AI_ENGINE.gemini) {
     if (await willSendExternally()) return new GeminiProvider(getAiModel()).generateVideoPlan(input);
     throw new Error(AI_GEMINI_KEY_MISSING_MESSAGE);
   }
   return new LocalVideoPlanProvider().generateVideoPlan(input);
-}
-/** アプリ（Tauri）の中で動いているか。 */
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

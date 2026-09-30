@@ -41,6 +41,39 @@ struct Inner {
     last_used: Option<Instant>,
     /// この回の起動のあいだ、モデルの SHA-256 を確かめ済みか（1.3GB を毎回は読まない＝決定14）。
     verified: bool,
+    /// いま走っている生成の数（#1286 レビュー 🟡）＝1つでも走っている間は「しばらく使っていない」で止めない。
+    in_flight: u32,
+}
+
+/// 「しばらく使っていない」で止めてよいか（純粋関数）。**生成が走っている間は止めない**
+/// （長い生成の終わり際に止めると、利用者には「準備ができませんでした」と誤って見える＝#1286 レビュー 🟡）。
+pub fn should_stop_idle(
+    last_used: Option<Instant>,
+    in_flight: u32,
+    now: Instant,
+    idle: Duration,
+) -> bool {
+    in_flight == 0 && last_used.is_some_and(|t| now.saturating_duration_since(t) >= idle)
+}
+
+/// 生成が走っている間を数える（落としたときに必ず数を戻す＝やめた・失敗した道でも漏らさない）。
+struct InFlight<'a>(&'a LocalLlmState);
+impl<'a> InFlight<'a> {
+    fn begin(state: &'a LocalLlmState) -> Self {
+        if let Ok(mut g) = state.inner.lock() {
+            g.in_flight += 1;
+            g.last_used = Some(Instant::now());
+        }
+        InFlight(state)
+    }
+}
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut g) = self.0.inner.lock() {
+            g.in_flight = g.in_flight.saturating_sub(1);
+            g.last_used = Some(Instant::now());
+        }
+    }
 }
 
 /// 起動したローカル実行の状態（Tauri の管理状態）。
@@ -64,7 +97,8 @@ impl LocalLlmState {
         }
     }
 
-    /// 動いていれば接続先を返す（途中で止まっていたら片付けて None）。
+    /// 動いていて**応えることを確かめ済み**なら接続先を返す（途中で止まっていたら片付けて None）。
+    /// 起動を待っている間は子プロセスだけがあり接続先は None＝None を返す（待つのは `starting`）。
     fn running_base_url(&self) -> Option<String> {
         let mut g = self.inner.lock().ok()?;
         let alive = match g.child.as_mut() {
@@ -79,10 +113,10 @@ impl LocalLlmState {
         g.base_url.clone()
     }
 
-    fn touch(&self) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.last_used = Some(Instant::now());
-        }
+    /// 起動を待っている子プロセスが止まったか（待ちの途中で見る）。
+    fn starting_child_exited(&self) -> Option<std::process::ExitStatus> {
+        let mut g = self.inner.lock().ok()?;
+        g.child.as_mut().and_then(|c| c.try_wait().ok().flatten())
     }
 }
 
@@ -170,12 +204,9 @@ fn ensure_idle_watcher(app: &AppHandle) {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let state = app.state::<LocalLlmState>();
-            let idle = state
-                .inner
-                .lock()
-                .ok()
-                .and_then(|g| g.last_used)
-                .is_some_and(|t| t.elapsed() >= IDLE_STOP);
+            let idle = state.inner.lock().ok().is_some_and(|g| {
+                should_stop_idle(g.last_used, g.in_flight, Instant::now(), IDLE_STOP)
+            });
             if idle {
                 crate::tlog!("local_llm", "しばらく使われなかったので止めます");
                 state.shutdown();
@@ -185,7 +216,15 @@ fn ensure_idle_watcher(app: &AppHandle) {
 }
 
 /// 動いていなければ起動し、応えるまで待つ。接続先（`http://127.0.0.1:PORT`）を返す。失敗は画面に出す文。
-async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String, String> {
+///
+/// ⚠️ **起動した瞬間から状態に持つ**（#1286 レビュー 🔴）＝応えるまで（最大 120 秒）ローカル変数のままだと、
+///   その間にアプリを閉じたとき `shutdown` が見つけられず、約 2.3GB を握ったまま残る。接続先は応えるまで None。
+/// ⚠️ **起動の途中でも「やめる」を見る**（#1286 レビュー 🔴）＝照合（1.3GB を読む）と応答待ちの間も止められる。
+async fn ensure_started(
+    app: &AppHandle,
+    state: &LocalLlmState,
+    gen: u64,
+) -> Result<String, String> {
     if let Some(url) = state.running_base_url() {
         return Ok(url);
     }
@@ -215,6 +254,9 @@ async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String
             return Err(LOCAL_AI_BROKEN.to_string());
         }
     }
+    if crate::ai::is_superseded(gen) {
+        return Err(AI_CANCELLED.to_string());
+    }
     let verified = state.inner.lock().map(|g| g.verified).unwrap_or(false);
     if !verified {
         let m = model.clone();
@@ -235,6 +277,11 @@ async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String
             g.verified = true;
         }
     }
+    if crate::ai::is_superseded(gen) {
+        return Err(AI_CANCELLED.to_string());
+    }
+    // ⚠️ 空き番号を選んでから llama-server が使うまでに、ほかのプログラムに取られうる（同梱の VOICEVOX ENGINE と
+    //   同じ既知の制約）。取られたら起動に失敗し `LOCAL_AI_START_FAILED`＝もう一度押せば別の番号で起動する。
     let Some(port) = pick_free_port() else {
         return Err(LOCAL_AI_START_FAILED.to_string());
     };
@@ -255,16 +302,26 @@ async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String
     if let Some(parent) = exe.parent() {
         cmd.current_dir(parent);
     }
-    let mut child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         crate::tlog!("local_llm", "起動できません: {e}");
         LOCAL_AI_START_FAILED.to_string()
     })?;
+    if let Ok(mut g) = state.inner.lock() {
+        g.child = Some(child);
+        g.base_url = None;
+    }
     let base_url = format!("http://127.0.0.1:{port}");
     let started = Instant::now();
     loop {
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Some(status) = state.starting_child_exited() {
             crate::tlog!("local_llm", "起動の途中で止まりました: {status}");
+            state.shutdown();
             return Err(LOCAL_AI_START_FAILED.to_string());
+        }
+        if crate::ai::is_superseded(gen) {
+            crate::tlog!("local_llm", "起動の途中でやめました");
+            state.shutdown();
+            return Err(AI_CANCELLED.to_string());
         }
         let ok = http_client()
             .get(format!("{base_url}/health"))
@@ -278,8 +335,7 @@ async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String
         }
         if started.elapsed() >= START_TIMEOUT {
             crate::tlog!("local_llm", "応えるまでに時間がかかりすぎました");
-            let _ = child.kill();
-            let _ = child.wait();
+            state.shutdown();
             return Err(LOCAL_AI_START_FAILED.to_string());
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -290,7 +346,6 @@ async fn ensure_started(app: &AppHandle, state: &LocalLlmState) -> Result<String
         started.elapsed().as_secs_f32()
     );
     if let Ok(mut g) = state.inner.lock() {
-        g.child = Some(child);
         g.base_url = Some(base_url.clone());
         g.last_used = Some(Instant::now());
     }
@@ -344,17 +399,25 @@ pub async fn local_ai_generate(
     let gen = crate::ai::begin_generation();
     let schema: serde_json::Value = serde_json::from_str(&schema)
         .map_err(|_| crate::messages::AI_REQUEST_FAILED.to_string())?;
-    let base = ensure_started(&app, &state).await?;
+    // 起動の前から「走っている」と数える＝起動し終えてから数え始めるまでの間に、見張りが止める道を作らない。
+    let _in_flight = InFlight::begin(&state);
+    let base = ensure_started(&app, &state, gen).await?;
     if crate::ai::is_superseded(gen) {
         return Err(AI_CANCELLED.to_string());
     }
-    state.touch();
     let body = build_request_body(&system, &user, schema);
     let started = Instant::now();
-    let request = http_client()
-        .post(format!("{base}/v1/chat/completions"))
-        .json(&body)
-        .send();
+    // 送って、本文を読み終えるまでを1つにする＝本文の読み取りも「やめる」と時間切れの対象にする（#1286 レビュー 🟡）。
+    let request = async {
+        let resp = http_client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status();
+        let json: serde_json::Value = resp.json().await?;
+        Ok::<_, reqwest::Error>((status, json))
+    };
     // やめる操作を見ながら待つ＝やめたら接続を切る（相手は生成を止める）。
     let cancelled = async {
         loop {
@@ -364,24 +427,20 @@ pub async fn local_ai_generate(
             }
         }
     };
-    let resp = tokio::select! {
+    let result = tokio::select! {
         r = request => r,
         _ = cancelled => return Err(AI_CANCELLED.to_string()),
     };
-    state.touch();
-    let resp = resp.map_err(|e| {
+    let (status, json) = result.map_err(|e| {
         crate::tlog!("local_llm", "生成に失敗しました: {e}");
         if e.is_timeout() {
             LOCAL_AI_TIMEOUT.to_string()
+        } else if e.is_decode() {
+            crate::messages::AI_REQUEST_FAILED.to_string()
         } else {
             LOCAL_AI_START_FAILED.to_string()
         }
     })?;
-    let status = resp.status();
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|_| crate::messages::AI_REQUEST_FAILED.to_string())?;
     if !status.is_success() {
         crate::tlog!(
             "local_llm",
@@ -451,6 +510,26 @@ mod tests {
             "object"
         );
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[test]
+    fn idle_stop_waits_for_running_generations() {
+        let now = Instant::now();
+        let idle = Duration::from_secs(600);
+        let old = now.checked_sub(Duration::from_secs(601));
+        // 使われてから 600 秒を過ぎ、走っている生成が無い＝止める。
+        assert!(should_stop_idle(old, 0, now, idle));
+        // 走っている生成があれば、どれだけ前でも止めない。
+        assert!(!should_stop_idle(old, 1, now, idle));
+        // まだ 600 秒たっていない＝止めない。
+        assert!(!should_stop_idle(
+            now.checked_sub(Duration::from_secs(599)),
+            0,
+            now,
+            idle
+        ));
+        // 一度も使っていない＝止める理由が無い。
+        assert!(!should_stop_idle(None, 0, now, idle));
     }
 
     #[test]
