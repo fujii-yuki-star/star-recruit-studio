@@ -477,6 +477,24 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               />
             </div>
 
+            {/* 同梱の AI が取り込み時に写真を読んで付けた説明（ADR-0052 決定4・12 §4b）。利用者が直せる＝直した値は AI が上書きしない。
+                送信前確認の「AI解析」と同じ名前で呼ぶ（Gemini を選んだときはこれも送られる）。 */}
+            {(selected.assetType === ASSET_TYPE.image || selected.assetType === ASSET_TYPE.video) && (
+              <div className="field">
+                <label className="field-label" htmlFor="mat-ai-desc">AI解析</label>
+                <textarea
+                  id="mat-ai-desc"
+                  className="textarea"
+                  value={selected.aiDescription ?? ""}
+                  placeholder="取り込むと、このパソコンの中のAIが写真や動画の内容を書きます"
+                  onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, aiDescription: e.target.value }))}
+                />
+                <p className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  動画案を作るときの手がかりになります。直した内容は、AIが上書きしません。
+                </p>
+              </div>
+            )}
+
             <div className="field">
               <label className="field-label">タグ</label>
               <div className="chip-input-row">
