@@ -90,7 +90,7 @@ writeFileSync(join(outDir, 'SHA256SUMS.txt'), `${sums.join('\n')}\n`);
 writeFileSync(
   join(outDir, 'はじめにお読みください.txt'),
   // 先頭に BOM＝古いメモ帳でも文字化けしない。
-  '﻿' +
+  '\uFEFF' +
   [
     'すたりおのインストール',
     '',
