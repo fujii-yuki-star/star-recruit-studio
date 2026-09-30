@@ -53,6 +53,8 @@ async function chat(system: string, user: string, schema: unknown): Promise<{ co
     response_format: { type: 'json_schema', json_schema: { name: 'ai_video_plan', schema } },
     chat_template_kwargs: { enable_thinking: false },
     temperature: 0.2,
+    // アプリ（Rust の `MAX_OUTPUT_TOKENS`）と同じ上限＝止まらない回で5分待って落ちない（ADR-0052 追補6）。
+    max_tokens: 3072,
   };
   const r = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const json = (await r.json()) as { choices?: { message?: { content?: string } }[]; timings?: Record<string, number> };
