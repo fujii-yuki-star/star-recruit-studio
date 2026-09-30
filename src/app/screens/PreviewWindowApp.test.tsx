@@ -125,6 +125,10 @@ describe("仕上がり確認の別窓（ADR-0050）＝別窓の側", () => {
     patch({ doc });
     const tools = screen.getByTestId("preview-view-tools");
     expect(tools.closest(".preview-window-bar")).not.toBeNull();
+    // 閉じるは左端に固定（狭い窓で道具がはみ出しても切れない・#1275 レビュー）。
+    const close = screen.getByRole("button", { name: "この窓を閉じる" });
+    expect(close.parentElement!.firstElementChild).toBe(close);
+    expect(tools.contains(close), "閉じるが道具の中（はみ出すと切れる）").toBe(false);
     expect(document.querySelector(".panel-frame-body")!.contains(tools)).toBe(false);
   });
 

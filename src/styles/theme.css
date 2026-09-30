@@ -984,7 +984,9 @@ button.badge {
 /* 別窓の上端の行（本体の欄の見出しの行と同じ役）。 */
 .preview-window-bar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: var(--gap-sm);
+  justify-content: space-between;
   padding: 4px 8px;
   border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   overflow: hidden;

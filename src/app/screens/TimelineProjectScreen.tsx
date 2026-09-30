@@ -3775,12 +3775,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       >
         {bigView ? "元に戻す" : "大きく見る"}
       </button>
-      {/* **別の窓で見る**（ADR-0050・#1263）＝2画面目で大きく見ながら、そのまま直接動かす。押し直しで閉じる（1手で戻る）。 */}
-      {inPreviewWindow ? (
-        <button className="btn btn-ghost btn-sm" title="この窓を閉じます（本体の窓はそのまま使えます）" onClick={() => void closeSelf()}>
-          この窓を閉じる
-        </button>
-      ) : (
+      {/* **別の窓で見る**（ADR-0050・#1263）＝2画面目で大きく見ながら、そのまま直接動かす。押し直しで閉じる（1手で戻る）。
+          別窓では出さない（別窓の閉じ方は窓の上端の行の左端＝切れない所に置く）。 */}
+      {!inPreviewWindow && (
         <button
           className="btn btn-ghost btn-sm"
           aria-pressed={previewWindow.open}
@@ -6162,7 +6159,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     return (
       <div className="preview-window dense" data-testid="preview-window">
         {/* 見え方の道具は窓の上端の行（本体の見出しの行と同じ役）＝絵の上に重ねない。 */}
-        <div className="preview-window-bar">{previewViewTools}</div>
+        {/* ⚠️ **閉じるは左端に固定**（#1275 レビュー）＝狭い窓で道具がはみ出しても、閉じる手が切れない。 */}
+        <div className="preview-window-bar">
+          <button className="btn btn-ghost btn-sm" title="この窓を閉じます（本体の窓はそのまま使えます）" onClick={() => void closeSelf()}>
+            この窓を閉じる
+          </button>
+          {previewViewTools}
+        </div>
         {/* 欄の本文と同じ器（`fillBody` の欄）＝絵の収め方と「再生」の行の出し方を本体と割らない。 */}
         <div className="panel-frame-body panel-frame-body--fill">{previewPanel?.content}</div>
         {(voiceError || flashBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (

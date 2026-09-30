@@ -16,8 +16,8 @@ import {
   SPLIT_DIR,
   addPanelToRegion,
   dropPanelBeside,
+  dockZoneBoxes,
   dropSideAt,
-  emptyRegions,
   flexRegionOf,
   isSplit,
   movePanelStep,
@@ -124,6 +124,11 @@ export function PanelLayoutView({
   const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
   /** 掴んでいる間に出す、空いた領域の帯（掴み始めた時に測る＝描いている最中に箱を測らない）。 */
   const [zones, setZones] = useState<{ region: PanelRegion; box: Box }[]>([]);
+  const zonesRef = useRef<{ region: PanelRegion; box: Box }[]>([]);
+  const putZones = (next: { region: PanelRegion; box: Box }[]): void => {
+    zonesRef.current = next;
+    setZones(next);
+  };
   // 領域の箱（空いた真ん中の落とし先を、左右の境目に置くのに使う）。
   const regionRefs = useRef(new Map<PanelRegion, HTMLElement>());
   /**
@@ -169,43 +174,28 @@ export function PanelLayoutView({
   }, []);
 
   /**
-   * **空いた領域への落とし先**（器の中の矩形・実機指摘 2026-09-30）＝外周の端（左・右・下）と、空いた真ん中。
-   * ⚠️ 空いた領域だけ（`emptyRegions`）＝空でない領域は、その中の欄の辺へ落とせる。
+   * **空いた領域への落とし先**（器の中の矩形・実機指摘 2026-09-30）。置き場所の規則は domain（`dockZoneBoxes`＝重ならない・はみ出さない）。
    * ⚠️ 広げている間は出さない（隠れた欄の周りへ落とすと、何が起きたか見えない）。
+   * ⚠️ **掴み始めに1回だけ測る**（#1275 レビュー）＝見えている帯と当たる帯を同じ値にする（`zonesRef`）。
    */
-  const dockZones = (): { region: PanelRegion; box: Box }[] => {
+  const measureDockZones = (): { region: PanelRegion; box: Box }[] => {
     const root = rootRef.current?.getBoundingClientRect();
     if (!root || activeMax != null) return [];
-    const w = root.width;
-    const h = root.height;
-    const hasMainNow = flexRegionOf(layout.nodes) != null;
-    const mainH = layout.nodes.bottom && hasMainNow ? h * (1 - layout.regionSizes.bottom) : h;
-    const out: { region: PanelRegion; box: Box }[] = [];
-    for (const region of emptyRegions(layout)) {
-      if (region === PANEL_REGION.left) out.push({ region, box: { left: 0, top: 0, width: DOCK_ZONE_PX, height: mainH } });
-      if (region === PANEL_REGION.right) out.push({ region, box: { left: w - DOCK_ZONE_PX, top: 0, width: DOCK_ZONE_PX, height: mainH } });
-      if (region === PANEL_REGION.bottom) out.push({ region, box: { left: 0, top: h - DOCK_ZONE_PX, width: w, height: DOCK_ZONE_PX } });
-      if (region === PANEL_REGION.center) {
-        // 真ん中は**左右の境目**に（無ければ上の段の真ん中＝上の段が空なら上の端）。
-        const leftBox = regionRefs.current.get(PANEL_REGION.left)?.getBoundingClientRect();
-        const rightBox = regionRefs.current.get(PANEL_REGION.right)?.getBoundingClientRect();
-        const cx = leftBox ? leftBox.right - root.left : rightBox ? rightBox.left - root.left : w / 2;
-        out.push(hasMainNow
-          ? { region, box: { left: cx - DOCK_ZONE_PX / 2, top: 0, width: DOCK_ZONE_PX, height: mainH } }
-          : { region, box: { left: 0, top: 0, width: w, height: DOCK_ZONE_PX } });
-      }
-    }
-    return out;
+    // 左右の境目＝左の領域の右端（真ん中の帯は、左右の両方に欄があるときだけそこに出る）。
+    const leftBox = regionRefs.current.get(PANEL_REGION.left)?.getBoundingClientRect();
+    const centerX = leftBox ? leftBox.right - root.left : null;
+    return dockZoneBoxes(layout, { width: root.width, height: root.height }, centerX, DOCK_ZONE_PX);
   };
 
   /** 指している位置から落とし先を探す（自分自身の上は落とし先にしない＝何も起きない操作を見せない）。 */
   const findDrop = (panelId: PanelId, x: number, y: number): DropTarget | null => {
     // 空いた領域の帯が先＝欄の端に重なって置かれるので、帯の上ではそちらを採る（帯は目に見えている）。
+    // ⚠️ 帯は掴み始めに測った値（`zonesRef`）＝見えている帯と当たる帯をずらさない。
     const root = rootRef.current?.getBoundingClientRect();
     if (root) {
       const rx = x - root.left;
       const ry = y - root.top;
-      const zone = dockZones().find(({ box }) => rx >= box.left && rx <= box.left + box.width && ry >= box.top && ry <= box.top + box.height);
+      const zone = zonesRef.current.find(({ box }) => rx >= box.left && rx <= box.left + box.width && ry >= box.top && ry <= box.top + box.height);
       if (zone) return { kind: "region", region: zone.region };
     }
     for (const [id, el] of frameRefs.current) {
@@ -226,7 +216,7 @@ export function PanelLayoutView({
    */
   const beginPanelDrag = (e: ReactPointerEvent, panelId: PanelId): void => {
     beginDrag(e, {
-      onStart: () => { setDragging(panelId); setZones(dockZones()); },
+      onStart: () => { setDragging(panelId); putZones(measureDockZones()); },
       onMove: (ev) => {
         setDragPoint({ x: ev.clientX, y: ev.clientY });
         setDropAt(findDrop(panelId, ev.clientX, ev.clientY));
@@ -236,13 +226,13 @@ export function PanelLayoutView({
         setDragging(null);
         setDropAt(null);
         setDragPoint(null);
-        setZones([]);
+        putZones([]);
         if (!target) return;
         onChange(target.kind === "panel"
           ? dropPanelBeside(layout, panelId, target.panelId, target.side)
           : addPanelToRegion(layout, panelId, target.region));
       },
-      onCancel: () => { setDragging(null); setDropAt(null); setDragPoint(null); setZones([]); },
+      onCancel: () => { setDragging(null); setDropAt(null); setDragPoint(null); putZones([]); },
     });
   };
 

@@ -11,8 +11,11 @@ export interface WindowRect {
   h: number;
 }
 
-/** 別窓の最小の大きさ＝これより小さいと絵も操作の行も収まらない。 */
-export const PREVIEW_WINDOW_MIN_W = 480;
+/**
+ * 別窓の最小の大きさ＝これより小さいと絵も操作の行も収まらない。
+ * ⚠️ 幅は**上端の行の道具が1行に収まる**大きさ（#1275 レビュー＝480 では右側が切れた）。
+ */
+export const PREVIEW_WINDOW_MIN_W = 640;
 export const PREVIEW_WINDOW_MIN_H = 320;
 /** 画面1枚のときの既定の大きさの上限（本体の横に並べて置く大きさ）。 */
 const SINGLE_SCREEN_MAX_W = 1280;
