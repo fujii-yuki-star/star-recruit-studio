@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
-import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from './videoPlanInput';
+import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience, templatesForAssets, visualAssetCount } from './videoPlanInput';
 
 function template(over: Partial<Template> = {}): Template {
   return {
@@ -116,5 +116,29 @@ describe('resolveTargetAudience（ADR-0011 #12）', () => {
   it('どちらも未設定・空なら空文字', () => {
     expect(resolveTargetAudience({})).toBe('');
     expect(resolveTargetAudience({ generalBrief: { title: 'x' }, companyInfo: { companyName: 'x' } })).toBe('');
+  });
+});
+
+// 写真・動画が無いときは差し込み口のある見た目を見せない（ADR-0052 追補5＝利用者判断 C・12 §8.9）。
+describe('templatesForAssets / visualAssetCount', () => {
+  const summary = (id: string, requiredSlots: string[] | undefined) => ({ templateId: id, category: 'message', hasYuko: true, requiredSlots });
+  const list = [summary('photo', ['mainVisual']), summary('text', []), summary('unknown', undefined)];
+  const a = (assetType: string) => ({ assetId: assetType, assetType, displayName: 'x', filePath: 'x' }) as Asset;
+
+  it('写真・動画だけを数える（ゆうこ・ロゴ・BGM は数えない）', () => {
+    expect(visualAssetCount([a('image'), a('video'), a('yuko'), a('logo'), a('bgm')])).toBe(2);
+  });
+
+  it('写真・動画が無ければ、差し込み口のある見た目を外す', () => {
+    expect(templatesForAssets(list, [a('yuko'), a('logo')]).map((t) => t.templateId)).toEqual(['text', 'unknown']);
+  });
+
+  it('写真か動画が1件でもあれば、そのまま', () => {
+    expect(templatesForAssets(list, [a('video')])).toBe(list);
+  });
+
+  it('外すと1つも残らないなら外さない（AI が何も選べない、を作らない）', () => {
+    const onlyPhoto = [summary('photo', ['mainVisual'])];
+    expect(templatesForAssets(onlyPhoto, [])).toBe(onlyPhoto);
   });
 });

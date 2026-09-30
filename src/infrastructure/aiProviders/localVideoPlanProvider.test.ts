@@ -126,6 +126,18 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     expect(plan.parts[0].scenes[0].narrationText).toBe('です。');
   });
 
+  it('写真・動画が無ければ、差し込み口のある見た目を見せない（整える段も同じ一覧）', async () => {
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
+    const templates = [
+      { templateId: 'opening_yuko_right_v1', category: 'opening', hasYuko: true, requiredSlots: [] },
+      { templateId: 'photo_left_text_right_yuko_v1', category: 'photo_intro', hasYuko: true, requiredSlots: ['mainVisual'] },
+    ];
+    await new LocalVideoPlanProvider().generateVideoPlan({ ...input(), templates, assets: [] });
+    const [, user] = localAiGenerateMock.mock.calls[0];
+    expect(user).toContain('templateId=opening_yuko_right_v1');
+    expect(user).not.toContain('templateId=photo_left_text_right_yuko_v1');
+  });
+
   it('生成の失敗は、Rust が返した「次の行動」の文をそのまま伝える', async () => {
     localAiGenerateMock.mockRejectedValue(new Error('このパソコンで動画案を作る部品が見つかりませんでした。アプリを入れ直してください。'));
     await expect(new LocalVideoPlanProvider().generateVideoPlan(input())).rejects.toThrow('部品が見つかりませんでした');

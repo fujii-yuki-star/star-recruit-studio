@@ -5,7 +5,7 @@
 // 使い方: 先に llama-server を起動しておき（例: -m <GGUF> --host 127.0.0.1 --port 18081 -c 8192）、
 //   npx tsx scripts/local-llm/eval-real-prompt.ts http://127.0.0.1:18081 [出力フォルダ] [baseline|stage1]
 // `baseline`＝**段階1の前**（差し込みの印を使わない指示文・整えない・割り当てない）／`stage1`＝段階1まで（見せたいものを
-// 書かせない・割り当てない）／省略＝今のアプリと同じ（段階2の割り当てまで）。前後を比べる基準に使う。
+// 書かせない・割り当てない）／省略（`current`）＝今のアプリと同じ（見た目の絞り込み・段階2の割り当てまで）。前後を比べる基準に使う。
 // 結果は `docs/yuko_recruit_docs/local-llm-build.md` の「点数」に段階ごとに記録する（前後を比べる）。
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ import { refineVideoPlan } from '../../src/domain/ai/refineVideoPlan';
 import type { ShortenText } from '../../src/domain/ai/refineVideoPlan';
 import { buildShortenMessages, parseShortenResponse } from '../../src/domain/ai/shortenTextRequest';
 import type { AiVideoPlan } from '../../src/domain/ai/types';
-import { buildTemplateSummaries } from '../../src/domain/ai/videoPlanInput';
+import { buildTemplateSummaries, templatesForAssets } from '../../src/domain/ai/videoPlanInput';
 import { sampleTemplates, sampleAssets } from '../../src/infrastructure/sampleData';
 import type { GenerateVideoPlanInput } from '../../src/domain/ai/aiProvider';
 import { scorePlan, scoreScenes } from './planScore';
@@ -111,6 +111,8 @@ function cases(orientation: '16:9' | '9:16'): { name: string; input: GenerateVid
 
 const summary: Record<string, unknown>[] = [];
 for (const c of cases('16:9')) {
+  // 今のアプリと同じく、写真・動画が無ければ差し込み口のある見た目を見せない（12 §8.9）。
+  if (stage2) c.input = { ...c.input, templates: templatesForAssets(c.input.templates, c.input.assets) };
   const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline, askVisualWish: stage2 });
   const t0 = Date.now();
   const res = await chat(system, user, aiVideoPlanSchema);
