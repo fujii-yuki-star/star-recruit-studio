@@ -521,3 +521,26 @@ export function dropSideAt(box: DropBox, clientX: number, clientY: number): Drop
   if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? DROP_SIDE.left : DROP_SIDE.right;
   return dy < 0 ? DROP_SIDE.top : DROP_SIDE.bottom;
 }
+
+/**
+ * 上の段で**残りの幅を全部使う領域**（閉じた欄の場所を空けたままにしない＝実機指摘 2026-09-30）。
+ *
+ * 既定は真ん中（左右は決まった割合）。**真ん中が空なら右**、右も無ければ左が残りを使う＝閉じた真ん中の
+ * 場所に何も無い帯が残らない。上の段がすべて空なら `null`（下の欄が全体を使う）。
+ * ⚠️ 割合を持つ領域（左・右）のうち**残りを使う側の割合は使わない**（覚えた値は消さない＝真ん中を戻せば元の幅）。
+ */
+export function flexRegionOf(nodes: PanelLayout['nodes']): PanelRegion | null {
+  if (nodes.center) return PANEL_REGION.center;
+  if (nodes.right) return PANEL_REGION.right;
+  if (nodes.left) return PANEL_REGION.left;
+  return null;
+}
+
+/**
+ * ドラッグで欄を落とせる**空いた領域**（外周の落とし先・実機指摘 2026-09-30）。
+ * 空でない領域には、その中の欄の辺へ落とせる（`dropPanelBeside`）ので出さない＝同じ所に2つの落とし先を重ねない。
+ * ⚠️ 掴んでいる欄が1つで占める領域は出さない＝そこへ落としても何も変わらない（何も起きない落とし先を見せない）。
+ */
+export function emptyRegions(layout: PanelLayout): PanelRegion[] {
+  return PANEL_REGIONS.filter((r) => layout.nodes[r] == null);
+}

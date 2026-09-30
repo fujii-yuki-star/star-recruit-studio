@@ -120,6 +120,14 @@ describe("仕上がり確認の別窓（ADR-0050）＝別窓の側", () => {
     expect(calls()).toContain("undo");
   });
 
+  it("見え方の道具は窓の上端の行にある（絵の上に重ねない）", async () => {
+    await mount();
+    patch({ doc });
+    const tools = screen.getByTestId("preview-view-tools");
+    expect(tools.closest(".preview-window-bar")).not.toBeNull();
+    expect(document.querySelector(".panel-frame-body")!.contains(tools)).toBe(false);
+  });
+
   it("「この窓を閉じる」で自分を閉じる", async () => {
     await mount();
     patch({ doc });

@@ -5,6 +5,8 @@ import {
   DEFAULT_REGION_SIZES,
   DROP_SIDE,
   dropSideAt,
+  emptyRegions,
+  flexRegionOf,
   MAX_BOTTOM_REGION_RATIO,
   MAX_REGION_RATIO,
   MAX_SIDE_TOTAL_RATIO,
@@ -413,5 +415,30 @@ describe('落とし直しと境目（/canon-check の指摘）', () => {
     expect(dropSideAt(box, 75, 25)).toBe(DROP_SIDE.top); // 右上
     expect(dropSideAt(box, 25, 75)).toBe(DROP_SIDE.bottom); // 左下
     expect(dropSideAt(box, 75, 75)).toBe(DROP_SIDE.bottom); // 右下
+  });
+});
+
+// 閉じた欄の場所を空けたままにしない・空いた領域へ落とせる（実機指摘 2026-09-30）。
+describe('flexRegionOf／emptyRegions', () => {
+  const leaf = (panelId: string) => ({ panelId });
+  it('残りの幅を使うのは真ん中→右→左の順（上の段が空なら無い）', () => {
+    const l = emptyLayout();
+    expect(flexRegionOf(l.nodes)).toBeNull();
+    l.nodes.left = leaf('a');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.left);
+    l.nodes.right = leaf('b');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.right);
+    l.nodes.center = leaf('c');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.center);
+    l.nodes.bottom = leaf('d');
+    l.nodes.left = null; l.nodes.center = null; l.nodes.right = null;
+    expect(flexRegionOf(l.nodes), '下だけなのに上の段を残す').toBeNull();
+  });
+
+  it('空いた領域だけを落とし先にする', () => {
+    const l = emptyLayout();
+    l.nodes.left = leaf('a');
+    l.nodes.bottom = leaf('b');
+    expect(emptyRegions(l)).toEqual([PANEL_REGION.center, PANEL_REGION.right]);
   });
 });

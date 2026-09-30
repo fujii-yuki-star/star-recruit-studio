@@ -8697,21 +8697,24 @@ describe("TimelineProjectScreen: 仕上がり確認の表示倍率と端の目�
     vi.stubGlobal("ResizeObserver", RO);
   };
 
-  it("倍率と端の目安は、絵の置き場の上に浮かせる（再生の行に置かない＝行の折り返しで固まらない）", () => {
+  // ⚠️ **絵の上に重ねない**（実機指摘 2026-09-30＝絵と被って押し間違える）＝欄の見出しの行に置く。
+  //   **再生の行にも置かない**（#1261＝%表示の幅→行の折り返し→絵の置き場の大きさ→%、の繰り返しで固まった）。
+  it("見え方の道具は、仕上がり確認の欄の見出しの行にある（絵の上にも再生の行にも置かない）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const tools = screen.getByTestId("preview-view-tools");
     expect(within(tools).getByText("端の目安を出す")).toBeTruthy();
     expect(within(tools).getByRole("button", { name: "仕上がりの表示を広げる" })).toBeTruthy();
-    expect(screen.getByTestId("preview-below").contains(tools), "再生の行（絵の下）に置いている").toBe(false);
-    // ⚠️ **浮かせる＝流れに入れない**（CSS の約束）＝流れに入ると、%表示の幅の変化で置き場の大きさが変わり、また%が変わる。
+    expect(within(tools).getByRole("button", { name: "大きく見る" })).toBeTruthy();
+    expect(within(tools).getByRole("button", { name: "別の窓で見る" })).toBeTruthy();
+    const frame = document.querySelector('[data-panel-id="preview"]') as HTMLElement;
+    expect(frame.querySelector(".panel-frame-head")!.contains(tools), "見出しの行に無い").toBe(true);
+    expect(frame.querySelector(".panel-frame-body")!.contains(tools), "欄の中身（絵の上）に重ねている").toBe(false);
+    // 流れの中に置く＝重ねる指定を残さない。
     const css = readFileSync(resolve(__dirname, "../../styles/theme.css"), "utf8");
     const rule = (sel: string) => { const i = css.indexOf(`\n${sel} {`); return i < 0 ? "" : css.slice(i, css.indexOf("}", i)); };
-    expect(rule(".preview-view-tools"), "道具が流れに入っている").toMatch(/position:\s*absolute/);
-    expect(rule(".preview-fit-shell"), "浮かせる基準が無い").toMatch(/position:\s*relative/);
-    // ⚠️ **余白は素通し**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白がキャンバスの掴む当たりを取らない。
-    expect(rule(".preview-view-tools"), "余白が当たりを取る").toMatch(/pointer-events:\s*none/);
-    expect(css, "押せる物まで素通しにしている").toMatch(/\.preview-view-tools button\s*,\s*\.preview-view-tools label\s*\{\s*pointer-events:\s*auto/);
+    expect(rule(".preview-view-tools"), "規則が見つからない（下の検査が空振りする）").not.toBe("");
+    expect(rule(".preview-view-tools"), "道具を重ねている").not.toMatch(/position:\s*absolute/);
   });
 
   it("端の目安を出すと、動画の端から割合で線を引く（横は四辺 5%）", () => {
