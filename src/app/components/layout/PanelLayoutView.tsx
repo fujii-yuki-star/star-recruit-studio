@@ -122,6 +122,8 @@ export function PanelLayoutView({
   const [dropAt, setDropAt] = useState<DropTarget | null>(null);
   /** 掴んでいる間の指の位置（掴んでいる欄の名前札を指の先に出す）。 */
   const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
+  /** 掴んでいる間に出す、空いた領域の帯（掴み始めた時に測る＝描いている最中に箱を測らない）。 */
+  const [zones, setZones] = useState<{ region: PanelRegion; box: Box }[]>([]);
   // 領域の箱（空いた真ん中の落とし先を、左右の境目に置くのに使う）。
   const regionRefs = useRef(new Map<PanelRegion, HTMLElement>());
   /**
@@ -224,7 +226,7 @@ export function PanelLayoutView({
    */
   const beginPanelDrag = (e: ReactPointerEvent, panelId: PanelId): void => {
     beginDrag(e, {
-      onStart: () => setDragging(panelId),
+      onStart: () => { setDragging(panelId); setZones(dockZones()); },
       onMove: (ev) => {
         setDragPoint({ x: ev.clientX, y: ev.clientY });
         setDropAt(findDrop(panelId, ev.clientX, ev.clientY));
@@ -234,12 +236,13 @@ export function PanelLayoutView({
         setDragging(null);
         setDropAt(null);
         setDragPoint(null);
+        setZones([]);
         if (!target) return;
         onChange(target.kind === "panel"
           ? dropPanelBeside(layout, panelId, target.panelId, target.side)
           : addPanelToRegion(layout, panelId, target.region));
       },
-      onCancel: () => { setDragging(null); setDropAt(null); setDragPoint(null); },
+      onCancel: () => { setDragging(null); setDropAt(null); setDragPoint(null); setZones([]); },
     });
   };
 
@@ -414,10 +417,6 @@ export function PanelLayoutView({
   const hasBottom = layout.nodes.bottom != null;
   /** 上の段に居る領域（左→真ん中→右の順）。 */
   const mainRegions = ([PANEL_REGION.left, PANEL_REGION.center, PANEL_REGION.right] as const).filter((r) => layout.nodes[r] != null);
-  const regionRef = (region: PanelRegion) => (el: HTMLDivElement | null): void => {
-    if (el) regionRefs.current.set(region, el);
-    else regionRefs.current.delete(region);
-  };
 
   // 下の欄があるときの子は「本体・境界・下の欄」の**3つ**。境界ぶんの行を書かないと、境界が下の欄の行を取り、
   // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
@@ -434,8 +433,6 @@ export function PanelLayoutView({
     ? `minmax(0, ${1 - bottom}fr) auto minmax(0, ${bottom}fr)`
     : "minmax(0, 1fr)";
 
-  // 掴んでいる間だけ、空いた領域の落とし先を出す。
-  const zones = dragging ? dockZones() : [];
   const draggingTitle = dragging ? byId.get(dragging)?.title : undefined;
   return (
     <div
@@ -465,7 +462,10 @@ export function PanelLayoutView({
                   />
                 )}
                 <div
-                  ref={regionRef(region)}
+                  ref={(el) => {
+                    if (el) regionRefs.current.set(region, el);
+                    else regionRefs.current.delete(region);
+                  }}
                   className={`panel-layout-region${region === flex ? " panel-layout-region--flex" : ""}`}
                   data-region={region}
                   style={fixedWidth}
@@ -480,7 +480,14 @@ export function PanelLayoutView({
       {hasBottom && (
         <>
           {hasMain && <Divider onPointerDown={(e) => beginRegionDrag(e, PANEL_REGION.bottom)} label="下の欄の高さ" />}
-          <div className="panel-layout-region" ref={regionRef(PANEL_REGION.bottom)} data-region={PANEL_REGION.bottom}>{regionNode(PANEL_REGION.bottom)}</div>
+          <div
+            className="panel-layout-region"
+            ref={(el) => {
+              if (el) regionRefs.current.set(PANEL_REGION.bottom, el);
+              else regionRefs.current.delete(PANEL_REGION.bottom);
+            }}
+            data-region={PANEL_REGION.bottom}
+          >{regionNode(PANEL_REGION.bottom)}</div>
         </>
       )}
       {/* **空いた領域への落とし先**（実機指摘 2026-09-30）＝外周の端と空いた真ん中。掴んでいる間だけ出し、指している所は濃くする。 */}
