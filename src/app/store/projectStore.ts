@@ -769,6 +769,14 @@ function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, n
 // - **Gemini を選んでいる**＝鍵があれば Gemini（外へ送る＝送信前確認は同じ判定 `willSendExternally` が出す）。
 //   鍵が無ければ**次の行動で断る**（黙ってこのパソコンの中や Mock へ落とさない）。
 // - それ以外（既定）＝**このパソコンの中で作る**。失敗しても外へは送らない（利用者が Gemini を選ぶまで）。
+/**
+ * 動画案を**このパソコンの中**で作る道か（下の `generateVideoPlan` と同じ分かれ方）。
+ * 素材の割り当てをソフトがするのはこの道だけ（12 §8.8・ADR-0052 決定3「Gemini の経路は当面そのまま」）。
+ */
+function usesLocalAi(): boolean {
+  return isTauri() && getAiEngine() !== AI_ENGINE.gemini;
+}
+
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
   if (!isTauri()) return new MockAiProvider().generateVideoPlan(input);
   if (getAiEngine() === AI_ENGINE.gemini) {
@@ -978,6 +986,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 送信前確認（ConfirmScreen）の表示と AI へ渡す内容を一致させるため get() の実データを使う（§2-6）。
       const { meta, assets, templates } = get();
       const { companyInfo, purpose } = meta;
+      const localPath = usesLocalAi();
       const plan = await generateVideoPlan({
         videoKind: meta.videoKind,
         companyInfo,
@@ -999,6 +1008,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets,
         // プロジェクトの向き（縦/横）に一致するテンプレへ補正する（ADR-0012・B4）。
         orientation: meta.videoSettings.aspectRatio,
+        // 空いている差し込み口へ素材を当てる（同梱の AI の道だけ・12 §8.8）。⚠️ 生成を始めた時点の道で決める。
+        autoAssignAssets: localPath,
       });
       if (get()._generationSeq !== seq) return; // 変換中にキャンセルされ得るので反映直前にも再確認（#402）
       // ⚠️ **上限を超えた動画案は取り込まない**（#1222）＝手で足す道は #1213 で塞いだのに、

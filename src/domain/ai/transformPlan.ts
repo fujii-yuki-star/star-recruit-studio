@@ -20,6 +20,8 @@ import type {
 import type { Template } from '../template/types';
 import { standardTemplateForScene } from '../template/templateSelection';
 import { speakerForCharacter } from '../voice/voiceCatalog';
+import { assignAssets } from './assignAssets';
+import type { AssignTarget } from './assignAssets';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
 import type { AiNarrationLine, AiVideoPlan } from './types';
@@ -31,6 +33,11 @@ export interface TransformContext {
   orientation: Orientation;
   /** 省略時は part_001 / scene_001 からの連番。 */
   idFactory?: IdFactory;
+  /**
+   * 空いている差し込み口へ素材をソフトが当てる（§8.8・ADR-0052 決定2・5）。**同梱の AI の経路だけ** true
+   * （Gemini の経路は当面そのまま＝ADR-0052 決定3）。
+   */
+  autoAssignAssets?: boolean;
 }
 
 export interface TransformResult {
@@ -163,6 +170,7 @@ function checkLengths(
  */
 export const TRANSFORM_WARNING = {
   REQUIRED_SLOT_EMPTY: 'この場面に入れる写真・動画がまだ選ばれていません。表の「素材を変更」から選んでください',
+  ASSET_AUTO_ASSIGNED: '写真・動画を自動で選びました。場面に合っているか確かめ、違えば表の「素材を変更」から選び直してください',
   NARRATION_TOO_LONG: 'セリフが長いので読みづらくなります。表の「セリフを直す」から短くしてください',
   SUBTITLE_TOO_LONG: '字幕が長いので読みづらくなります。表の「セリフを直す」から短くしてください',
 } as const;
@@ -181,6 +189,8 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
   const parts: Part[] = [];
   const scenes: Scene[] = [];
   const allWarnings: Warning[] = [];
+  // 差し込み口の検査（V6）は、素材の割り当て（§8.8）の後に全場面まとめて行う＝割り当てで埋まった口を「空」と言わない。
+  const pending: { scene: Scene; template: Template | undefined; query: string[] }[] = [];
 
   for (const aiPart of plan.parts) {
     const partId = idFactory.nextPartId();
@@ -252,16 +262,6 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         }
       }
 
-      // 必須スロット未設定チェック（V6）
-      if (template) {
-        for (const layer of template.layers) {
-          const bearsAsset = layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.logo;
-          if (bearsAsset && layer.required && !assetRefs[layer.id]) {
-            w.push(warn('REQUIRED_SLOT_EMPTY', TRANSFORM_WARNING.REQUIRED_SLOT_EMPTY, `assetRefs.${layer.id}`, 'warning', false));
-          }
-        }
-      }
-
       // ゆうこ（12 §8.3）
       const character = resolveCharacter(template, aiScene.yukoPoseTag ?? null, yukoAssets, w);
 
@@ -312,10 +312,39 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
 
       scenes.push(scene);
       part.sceneIds.push(sceneId);
-      allWarnings.push(...w);
+      pending.push({
+        scene,
+        template,
+        query: [aiScene.notes ?? '', aiScene.sceneTitle ?? '', ...Object.values(texts).map((v) => v ?? ''), narrationText, ...(aiScene.narrationLines ?? []).map((l) => l.text)],
+      });
     }
 
     parts.push(part);
+  }
+
+  // 素材の割り当て（§8.8・同梱の AI の経路だけ）。自信の低い割り当てには印を付ける（成功のふりをしない＝決定5）。
+  if (ctx.autoAssignAssets) {
+    const targets: AssignTarget[] = pending.map((p) => ({ template: p.template, assetRefs: p.scene.assetRefs, query: p.query }));
+    for (const a of assignAssets(targets, ctx.assets)) {
+      const { scene } = pending[a.sceneIndex];
+      scene.assetRefs[a.slotId] = a.assetId;
+      if (a.lowConfidence) {
+        scene.warnings.push(warn('ASSET_AUTO_ASSIGNED', TRANSFORM_WARNING.ASSET_AUTO_ASSIGNED, `assetRefs.${a.slotId}`, 'info', true));
+      }
+    }
+  }
+
+  // 必須スロット未設定チェック（V6）＝割り当ての後に見る。
+  for (const { scene, template } of pending) {
+    if (template) {
+      for (const layer of template.layers) {
+        const bearsAsset = layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.logo;
+        if (bearsAsset && layer.required && !scene.assetRefs[layer.id]) {
+          scene.warnings.push(warn('REQUIRED_SLOT_EMPTY', TRANSFORM_WARNING.REQUIRED_SLOT_EMPTY, `assetRefs.${layer.id}`, 'warning', false));
+        }
+      }
+    }
+    allWarnings.push(...scene.warnings);
   }
 
   // 全体チェック（V9 / V10）

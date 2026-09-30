@@ -5,6 +5,35 @@ import { findOverlongTexts, repairTruncatedName } from '../../src/domain/ai/refi
 import type { AiScene, AiVideoPlan } from '../../src/domain/ai/types';
 import { ASSET_TYPE } from '../../src/domain/enums';
 import type { Asset } from '../../src/domain/project/types';
+import type { TransformResult } from '../../src/domain/ai/transformPlan';
+
+/** 変換した後（場面）の点数＝素材の割り当て（段階2・12 §8.8）を見る。 */
+export interface SceneScore {
+  /** 写真・動画のうち、どこかの場面に当たった割合（渡していなければ null）。 */
+  assetUseRate: number | null;
+  /** 自動で当てて「自信が低い」印が付いた数。 */
+  lowConfidence: number;
+  /** 「まだ選ばれていません」（必須の差し込み口が空）の数。 */
+  requiredEmpty: number;
+  /** 同じ素材が2つ以上の場面に当たった数。 */
+  duplicated: number;
+}
+
+export function scoreScenes(result: TransformResult, assets: Asset[]): SceneScore {
+  const visual = new Set(assets
+    .filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video)
+    .map((a) => a.assetId));
+  const counts = new Map<string, number>();
+  for (const s of result.scenes) {
+    for (const v of Object.values(s.assetRefs)) if (typeof v === 'string' && visual.has(v)) counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  return {
+    assetUseRate: visual.size > 0 ? Number((counts.size / visual.size).toFixed(3)) : null,
+    lowConfidence: result.warnings.filter((w) => w.code === 'ASSET_AUTO_ASSIGNED').length,
+    requiredEmpty: result.warnings.filter((w) => w.code === 'REQUIRED_SLOT_EMPTY').length,
+    duplicated: [...counts.values()].filter((n) => n > 1).length,
+  };
+}
 
 export interface PlanScore {
   scenes: number;

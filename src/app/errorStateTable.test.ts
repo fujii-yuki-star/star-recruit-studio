@@ -528,7 +528,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     //   貼るときの断りを、重ねる・探すの断りから分けた＝次の行動が「再生位置を動かす」「写し直す」で違う）。
     // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー＝別窓で黙らない）。
     // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(265);
+    // ⚠️ **+1**（ADR-0052 決定5）＝写真・動画を自動で選んだ印（ASSET_AUTO_ASSIGNED）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(266);
   });
 
 
@@ -780,7 +781,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（#1271 レビュー）＝上と同じ2行。
     // ⚠️ **+2**（ADR-0050・#1274 レビュー）＝上と同じ2行。
     // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(262);
+    // ⚠️ **+1**（ADR-0052 決定5）＝上と同じ1行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(263);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

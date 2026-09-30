@@ -137,7 +137,16 @@ export interface VideoPlanMessageOptions {
    * 採用で、入力にその値があるときだけ効く。印の置き換えは `refineVideoPlan.insertProperNouns`。
    */
   properNounPlaceholders?: boolean;
+  /**
+   * 場面ごとに**見せたい写真・動画を言葉で** `notes` に書かせる（ADR-0052 決定1・2＝割り当てはソフトが決める・12 §8.8）。
+   * 素材が1つでもあるときだけ効く。
+   */
+  askVisualWish?: boolean;
 }
+
+/** 見せたいものを書かせる指示（出力フォーマットの末尾に足す行）。 */
+export const VISUAL_WISH_RULE =
+  '各シーンの notes に、その場面で見せたい写真・動画の中身を短く書く（例「倉庫で働く人の写真」）。assetRefs は素材がはっきり合うときだけ入れ、迷ったら省略する（ソフトが notes と素材の説明を見て選ぶ）。';
 
 /** 差し込みの印の指示（出力フォーマットの末尾に足す行）。値の無い印は指示しない。 */
 function placeholderRules(input: GenerateVideoPlanInput): string[] {
@@ -210,6 +219,7 @@ export function buildVideoPlanUserMessage(
   const isGeneral = input.videoKind === VIDEO_KIND.general;
   // 差し込みの印は採用だけ（一般は会社情報を使わない＝§6b）。
   const placeholders = options.properNounPlaceholders && !isGeneral ? placeholderRules(input) : [];
+  const localRules = [...placeholders, ...(options.askVisualWish && input.assets.length > 0 ? [VISUAL_WISH_RULE] : [])];
   const head = isGeneral ? generalHead(input) : recruitHead(input);
   const templates = input.templates.map(templateBlock).join('\n');
   const assets = selection.sent.map(assetBlock).join('\n');
@@ -248,7 +258,7 @@ export function buildVideoPlanUserMessage(
     '各シーンの sceneType は、選んだ templateId の category と同じ値にする（利用可能な見た目パターンに無い sceneType は使わない）。利用可能な見た目だけで表現できる構成にする。',
     'enum 項目（videoPlan.purpose・各シーンの sceneType・yukoPoseTag 等）は、上の一覧や出力例に示した値だけを使い、別の語を作らない。yukoPoseTag のように null 可の項目は該当が無ければ null にする。',
     '各フィールドの型は出力例と同じにする（文字列の項目を配列やオブジェクトにしない。targetAudience・tone・title・narrationText・各 texts などは単一の文字列）。',
-    ...placeholders,
+    ...localRules,
     `次の例と**同じキー名・同じ入れ子構造・同じ型**で出力し、値だけ今回の${exampleSubject}・素材・見た目パターンに合わせて作る：`,
     shownExample,
   ].join('\n');

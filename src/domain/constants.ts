@@ -22,6 +22,8 @@ export const NARRATION_SCENE_PADDING_SEC = 1;
 export const ASSET_DESCRIPTION_MAX_LENGTH = 60;
 export const ASSET_AI_TAGS_MAX = 5;
 export const ASSET_AI_TAG_MAX_LENGTH = 12;
+// 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
+export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
 export const PROJECT_NAME_MAX_LENGTH = 80;

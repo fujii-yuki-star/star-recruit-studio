@@ -39,7 +39,7 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
     await new LocalVideoPlanProvider().generateVideoPlan(input());
     const [system, user, schema] = localAiGenerateMock.mock.calls[0];
-    const expected = buildVideoPlanMessages(input(), { properNounPlaceholders: true });
+    const expected = buildVideoPlanMessages(input(), { properNounPlaceholders: true, askVisualWish: true });
     expect(system).toBe(expected.system);
     expect(user).toBe(expected.user);
     expect(JSON.parse(schema)).toEqual(aiVideoPlanSchema);

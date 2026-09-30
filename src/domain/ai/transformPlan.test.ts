@@ -5,7 +5,7 @@ import type { AiScene, AiVideoPlan } from './types';
 import type { Orientation } from '../enums';
 import { AI_SCENE_MIN_DURATION_SEC, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from '../constants';
 import { createSequentialIdFactory } from './idFactory';
-import { transformVideoPlan } from './transformPlan';
+import { TRANSFORM_WARNING, transformVideoPlan } from './transformPlan';
 import type { TransformContext } from './transformPlan';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
 import { SAMPLE_VIDEO_PLAN } from '../../infrastructure/aiProviders/sampleVideoPlan';
@@ -358,5 +358,42 @@ describe('長さの助言が掛け合いの各行も見る（#569・ADR-0026②�
     // 字幕未指定で text が両上限を超える＝「行を短くする」と「短い字幕を明示する」の2つの助言が要る。
     const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: overNarration }] });
     expect(codes(plan).filter((c) => c === 'TEXT_OVERFLOW')).toHaveLength(2);
+  });
+});
+
+// 写真・動画の割り当て（§8.8・ADR-0052 決定2・5）＝同梱の AI の道だけ。空いている口を埋めてから V6 を見る。
+describe('素材の割り当て（同梱の AI の道だけ・§8.8）', () => {
+  const photoScene = (notes: string, assetRefs?: AiScene['assetRefs']) =>
+    singleScenePlan({ sceneType: 'photo_intro', templateId: 'photo_left_text_right_yuko_v1', notes, assetRefs, texts: { title: '職場' } });
+
+  it('空いている口に見せたいものに合う素材を当て、「まだ選ばれていません」を出さない', () => {
+    const r = transformVideoPlan(photoScene('オフィス写真を見せる'), { ...baseCtx(), autoAssignAssets: true });
+    expect(r.scenes[0].assetRefs.mainVisual).toBe('asset_office_001');
+    expect(r.warnings.map((w) => w.code)).not.toContain('REQUIRED_SLOT_EMPTY');
+    expect(r.warnings.map((w) => w.code)).not.toContain('ASSET_AUTO_ASSIGNED'); // 合っている＝印なし
+  });
+
+  it('合うものが無くても当て、自信が低い印を付ける（成功のふりをしない）', () => {
+    const r = transformVideoPlan(photoScene('歴史をふり返る'), { ...baseCtx(), autoAssignAssets: true });
+    expect(r.scenes[0].assetRefs.mainVisual).toMatch(/^asset_(entrance|office)_001$/);
+    const w = r.scenes[0].warnings.find((x) => x.code === 'ASSET_AUTO_ASSIGNED');
+    expect(w).toMatchObject({ field: 'assetRefs.mainVisual', severity: 'info', autoFixed: true, message: TRANSFORM_WARNING.ASSET_AUTO_ASSIGNED });
+    expect(r.warnings).toContainEqual(w);
+  });
+
+  it('AI が当てた素材は動かさない', () => {
+    const r = transformVideoPlan(photoScene('オフィス', { mainVisual: 'asset_entrance_001' }), { ...baseCtx(), autoAssignAssets: true });
+    expect(r.scenes[0].assetRefs.mainVisual).toBe('asset_entrance_001');
+  });
+
+  it('選ばなければ今と同じ（Gemini の道は割り当てない＝「まだ選ばれていません」が出る）', () => {
+    const r = transformVideoPlan(photoScene('オフィス写真'), baseCtx());
+    expect(r.scenes[0].assetRefs.mainVisual).toBeUndefined();
+    expect(r.warnings.map((w) => w.code)).toContain('REQUIRED_SLOT_EMPTY');
+  });
+
+  it('素材が無ければ当てられず、「まだ選ばれていません」が出る', () => {
+    const r = transformVideoPlan(photoScene('オフィス'), { ...baseCtx(), assets: [], autoAssignAssets: true });
+    expect(r.warnings.map((w) => w.code)).toContain('REQUIRED_SLOT_EMPTY');
   });
 });

@@ -49,7 +49,7 @@ export class LocalVideoPlanProvider implements AiProvider {
     const run = ++latestRun;
     const cancelEpoch = currentAiCancelEpoch();
     const isStale = () => run !== latestRun || currentAiCancelEpoch() !== cancelEpoch;
-    const { system, user } = buildVideoPlanMessages(input, { properNounPlaceholders: true });
+    const { system, user } = buildVideoPlanMessages(input, { properNounPlaceholders: true, askVisualWish: true });
     let raw: string;
     try {
       raw = await localAiGenerate(system, user, SCHEMA_TEXT);
