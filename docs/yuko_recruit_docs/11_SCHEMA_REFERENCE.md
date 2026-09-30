@@ -154,6 +154,7 @@
 | `ASSET_DESCRIPTION_MAX_LENGTH` | `60` | **同梱の AI が写真に付ける説明**（`asset.aiDescription`）の字数の上限＝ADR-0052 決定4・`12 §4b`。動画案の指示文に素材ごとに載るので短く |
 | `ASSET_AI_TAGS_MAX` | `5` | 同上で付けるタグの数の上限 |
 | `ASSET_AI_TAG_MAX_LENGTH` | `12` | 同上のタグ1つの字数の上限 |
+| `ASSET_MATCH_MIN_SCORE` | `0.2` | **写真・動画を場面へソフトが当てる**とき（`12 §8.8`）、これ未満の言葉の重なり（0〜1）は「自信が低い」＝印（`ASSET_AUTO_ASSIGNED`）を付ける |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
 | `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |

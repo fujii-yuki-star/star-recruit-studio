@@ -6,6 +6,7 @@ import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import {
   FEW_SHOT_COMPANY_NAME,
+  VISUAL_WISH_RULE,
   VIDEO_PLAN_SYSTEM_PROMPT,
   VIDEO_PLAN_SYSTEM_PROMPT_GENERAL,
   buildVideoPlanMessages,
@@ -415,5 +416,21 @@ describe('差し込みの印（同梱の AI だけ・ADR-0052 段階1）', () =>
 
   it('例の fixture に置き換える会社名が本当に書いてある（fixture を直したら気づく）', () => {
     expect(JSON.stringify(aiVideoPlanExample)).toContain(FEW_SHOT_COMPANY_NAME);
+  });
+});
+
+// 見せたいものを言葉で書かせる（ADR-0052 決定1・2・12 §8.8）＝同梱の AI だけ・素材があるときだけ。
+describe('見せたいものを notes に書かせる（同梱の AI だけ）', () => {
+  it('素材があれば指示を足す', () => {
+    expect(buildVideoPlanMessages(fullInput(), { askVisualWish: true }).user).toContain(VISUAL_WISH_RULE);
+  });
+  it('素材が無ければ足さない（当てる物が無い）', () => {
+    expect(buildVideoPlanMessages({ ...fullInput(), assets: [] }, { askVisualWish: true }).user).not.toContain(VISUAL_WISH_RULE);
+  });
+  it('選ばなければ足さない（Gemini の経路は変えない）', () => {
+    expect(buildVideoPlanMessages(fullInput()).user).not.toContain(VISUAL_WISH_RULE);
+  });
+  it('一般の動画にも足す（見せたいものは用途によらない）', () => {
+    expect(buildVideoPlanMessages({ ...generalInput(), assets: fullInput().assets }, { askVisualWish: true }).user).toContain(VISUAL_WISH_RULE);
   });
 });

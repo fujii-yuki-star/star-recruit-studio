@@ -3,8 +3,9 @@
 // **ソフトで整える前と後**（`refineVideoPlan`・言い直しも同じ llama-server に頼む）を同じ物差し（`planScore.ts`）で点数にする。
 //
 // 使い方: 先に llama-server を起動しておき（例: -m <GGUF> --host 127.0.0.1 --port 18081 -c 8192）、
-//   npx tsx scripts/local-llm/eval-real-prompt.ts http://127.0.0.1:18081 [出力フォルダ] [baseline]
-// `baseline` を付けると**段階1の前**（差し込みの印を使わない指示文・整えない）で測る＝前後を比べる基準。
+//   npx tsx scripts/local-llm/eval-real-prompt.ts http://127.0.0.1:18081 [出力フォルダ] [baseline|stage1]
+// `baseline`＝**段階1の前**（差し込みの印を使わない指示文・整えない・割り当てない）／`stage1`＝段階1まで（見せたいものを
+// 書かせない・割り当てない）／省略＝今のアプリと同じ（段階2の割り当てまで）。前後を比べる基準に使う。
 // 結果は `docs/yuko_recruit_docs/local-llm-build.md` の「点数」に段階ごとに記録する（前後を比べる）。
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,7 +21,9 @@ import type { AiVideoPlan } from '../../src/domain/ai/types';
 import { buildTemplateSummaries } from '../../src/domain/ai/videoPlanInput';
 import { sampleTemplates, sampleAssets } from '../../src/infrastructure/sampleData';
 import type { GenerateVideoPlanInput } from '../../src/domain/ai/aiProvider';
-import { scorePlan } from './planScore';
+import { scorePlan, scoreScenes } from './planScore';
+import { transformVideoPlan } from '../../src/domain/ai/transformPlan';
+import type { Asset } from '../../src/domain/project/types';
 
 // アプリと同じ手順（フェンス除去→JSON→`sanitizeAiVideoPlan`→正典 schema で ajv）。⚠️ 事前コンパイル済みの検証関数
 // （`generated/validators.js`）は束ねる前提の形で、Node で直に動かすと読み込めないので、同じ schema をここで組み立てる。
@@ -38,7 +41,9 @@ function parseAndValidateVideoPlan(raw: string): { valid: true; plan: AiVideoPla
 
 const base = process.argv[2] ?? 'http://127.0.0.1:18081';
 const outDir = process.argv[3];
-const baseline = process.argv[4] === 'baseline';
+const mode = process.argv[4] ?? 'current';
+const baseline = mode === 'baseline';
+const stage2 = mode === 'current';
 if (outDir) mkdirSync(outDir, { recursive: true });
 
 /** アプリの `local_ai_generate` と同じ本文で1回頼む（Rust の `build_request_body` と同じ形）。 */
@@ -69,21 +74,44 @@ const general = {
   keyPoints: ['申請は月末までに', '領収書は写真で出せる', '承認は上長ひとり'], targetAudience: '全社員',
 };
 
+/**
+ * 説明の付いた写真（段階2＝取り込み時に同梱の AI が付けた形）。見本の素材（`sampleAssets`）は説明が無いので、
+ * 採用・一般それぞれに**説明つきの写真**を足す（立ち絵・ロゴ・BGM は見本のまま）。
+ */
+const photo = (id: string, aiDescription: string, tags: string[]): Asset =>
+  ({ assetId: id, assetType: 'image', displayName: `IMG_${id}`, filePath: `assets/${id}.jpg`, aiDescription, tags }) as Asset;
+const others = sampleAssets.filter((a) => a.assetType !== 'image' && a.assetType !== 'video');
+const recruitAssets: Asset[] = [
+  photo('p01', '倉庫で段ボールを運ぶ若い社員', ['倉庫', '作業', '社員']),
+  photo('p02', 'トラックの前で笑顔を見せる運転手', ['トラック', 'ドライバー', '笑顔']),
+  photo('p03', '明るい事務所で話し合う社員たち', ['事務所', '会議', '社員']),
+  photo('p04', '研修で先輩が後輩に教えている様子', ['研修', '教育']),
+  photo('p05', '会社の建物の外観', ['外観', '建物']),
+  ...others,
+];
+const generalAssets: Asset[] = [
+  photo('g01', 'スマートフォンで領収書を撮影する手元', ['領収書', 'スマホ']),
+  photo('g02', '会議室で説明を聞く社員たち', ['会議', '説明']),
+  photo('g03', 'パソコンの画面に表示された申請の一覧', ['画面', '申請']),
+  photo('g04', 'カレンダーの月末に丸が付いている', ['カレンダー', '月末']),
+  ...others,
+];
+
 /** お題の表（ADR-0052 決定7＝採用・一般 × 素材あり・なし × 尺）。 */
 function cases(orientation: '16:9' | '9:16'): { name: string; input: GenerateVideoPlanInput }[] {
   const templates = buildTemplateSummaries(sampleTemplates, orientation);
   const common = { templates, yukoPoseTags: ['smile', 'guide'] };
   return [
-    { name: '採用・素材あり・60秒', input: { ...common, videoKind: 'recruit', companyInfo: recruit, purpose: 'company_intro', targetDurationSec: 60, assets: sampleAssets } },
+    { name: '採用・素材あり・60秒', input: { ...common, videoKind: 'recruit', companyInfo: recruit, purpose: 'company_intro', targetDurationSec: 60, assets: recruitAssets } },
     { name: '採用・素材なし・30秒', input: { ...common, videoKind: 'recruit', companyInfo: recruit, purpose: 'company_intro', targetDurationSec: 30, assets: [] } },
-    { name: '一般・素材あり・60秒', input: { ...common, videoKind: 'general', generalBrief: general, purpose: 'general_announcement', targetDurationSec: 60, targetAudience: general.targetAudience, assets: sampleAssets } },
+    { name: '一般・素材あり・60秒', input: { ...common, videoKind: 'general', generalBrief: general, purpose: 'general_announcement', targetDurationSec: 60, targetAudience: general.targetAudience, assets: generalAssets } },
     { name: '一般・素材なし・30秒', input: { ...common, videoKind: 'general', generalBrief: general, purpose: 'general_announcement', targetDurationSec: 30, targetAudience: general.targetAudience, assets: [] } },
   ] as { name: string; input: GenerateVideoPlanInput }[];
 }
 
 const summary: Record<string, unknown>[] = [];
 for (const c of cases('16:9')) {
-  const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline });
+  const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline, askVisualWish: stage2 });
   const t0 = Date.now();
   const res = await chat(system, user, aiVideoPlanSchema);
   const genMs = Date.now() - t0;
@@ -96,8 +124,13 @@ for (const c of cases('16:9')) {
     case: c.name, genMs, valid: result.valid,
     promptTokens: res.timings?.prompt_n, genTokens: res.timings?.predicted_n, genPerSec: res.timings?.predicted_per_second,
   };
+  const transformed = (plan: AiVideoPlan, autoAssignAssets: boolean) => scoreScenes(
+    transformVideoPlan(plan, { templates: sampleTemplates, assets: c.input.assets, orientation: '16:9', autoAssignAssets }),
+    c.input.assets,
+  );
   if (result.valid) {
     row.before = scorePlan(result.plan, scoreCtx);
+    row.beforeScenes = transformed(result.plan, false);
   }
   if (result.valid && !baseline) {
     const t1 = Date.now();
@@ -109,6 +142,7 @@ for (const c of cases('16:9')) {
     row.report = refined.report;
     row.validAfter = validatePlan(refined.plan).valid;
     row.after = scorePlan(refined.plan, scoreCtx);
+    row.afterScenes = transformed(refined.plan, stage2);
     if (outDir) writeFileSync(join(outDir, `${c.name}.after.json`), JSON.stringify(refined.plan, null, 2));
   }
   if ('errors' in result) row.errors = result.errors;

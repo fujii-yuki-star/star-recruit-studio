@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { TemplateSummary } from '../../src/domain/ai/aiProvider';
 import type { AiScene, AiVideoPlan } from '../../src/domain/ai/types';
 import type { Asset } from '../../src/domain/project/types';
-import { scorePlan, subtitleOverlap } from './planScore';
+import { scorePlan, scoreScenes, subtitleOverlap } from './planScore';
 
 const templates: TemplateSummary[] = [
   { templateId: 't1', category: 'message', hasYuko: true, maxNarrationLength: 10, maxSubtitleLength: 5 },
@@ -60,5 +60,18 @@ describe('subtitleOverlap', () => {
     expect(subtitleOverlap('若手が多い。', '若手が多いです')).toBe(1);
     expect(subtitleOverlap('求める人物像', '若手が多いです')).toBe(0);
     expect(subtitleOverlap('あ', 'あ')).toBeNull();
+  });
+});
+
+describe('scoreScenes（変換した後＝素材の割り当て）', () => {
+  const w = (code: string) => ({ code, message: '', field: '', severity: 'info' as const, autoFixed: true });
+  it('写真・動画の使用率・自信が低い印・空の必須の口・重なりを数える', () => {
+    const result = {
+      parts: [],
+      scenes: [{ assetRefs: { a: 'img', b: 'yuko' } }, { assetRefs: { a: 'img', c: null } }, { assetRefs: {} }],
+      warnings: [w('ASSET_AUTO_ASSIGNED'), w('REQUIRED_SLOT_EMPTY'), w('REQUIRED_SLOT_EMPTY'), w('DURATION_CLAMPED')],
+    } as unknown as Parameters<typeof scoreScenes>[0];
+    expect(scoreScenes(result, assets)).toEqual({ assetUseRate: 0.5, lowConfidence: 1, requiredEmpty: 2, duplicated: 1 });
+    expect(scoreScenes(result, [assets[2]]).assetUseRate).toBeNull();
   });
 });
