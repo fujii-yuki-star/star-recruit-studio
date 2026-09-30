@@ -5,11 +5,14 @@ import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import {
+  FEW_SHOT_COMPANY_NAME,
   VIDEO_PLAN_SYSTEM_PROMPT,
   VIDEO_PLAN_SYSTEM_PROMPT_GENERAL,
   buildVideoPlanMessages,
   buildVideoPlanUserMessage,
 } from './buildVideoPlanRequest';
+import { COMPANY_NAME_PLACEHOLDER, RECRUIT_URL_PLACEHOLDER } from './refineVideoPlan';
+import aiVideoPlanExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
 
 const templates: TemplateSummary[] = [
   {
@@ -368,5 +371,49 @@ describe('利用可能な素材の上限（12§6・#585）', () => {
     const sentCount = (user.match(/assetId=a\d+/g) ?? []).length;
     expect(sentCount).toBe(AI_ASSET_SEND_MAX); // プロンプトに載るのは上限まで
     expect(user).toContain(`assetId=a${AI_ASSET_SEND_MAX + 1}`); // 説明のある素材は残る
+  });
+});
+
+// 固有名詞はソフトが差し込む（ADR-0052 決定2・12 §8.7）＝同梱の AI にだけ「印で書く」と伝える。
+describe('差し込みの印（同梱の AI だけ・ADR-0052 段階1）', () => {
+  const on = { properNounPlaceholders: true };
+
+  it('印で書く指示を足し、例の会社名も印にする（例の名前を書き写させない）', () => {
+    const user = buildVideoPlanMessages(fullInput(), on).user;
+    expect(user).toContain(`会社名は文字で書き写さず、どこでも必ず ${COMPANY_NAME_PLACEHOLDER} と書く`);
+    expect(user).toContain(`texts.url に ${RECRUIT_URL_PLACEHOLDER} と書く`);
+    const example = user.slice(user.indexOf('"schemaVersion"'));
+    expect(example).not.toContain(FEW_SHOT_COMPANY_NAME);
+    expect(example).toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('会社情報の欄には本物の会社名を出したまま（AI が中身を考えられるように）', () => {
+    expect(buildVideoPlanMessages(fullInput(), on).user).toContain('会社名: 株式会社ゆうこ');
+  });
+
+  it('入力に値の無い印は指示しない', () => {
+    const input = fullInput();
+    input.companyInfo = { ...input.companyInfo!, recruitUrl: '' };
+    const user = buildVideoPlanMessages(input, on).user;
+    expect(user).not.toContain(RECRUIT_URL_PLACEHOLDER);
+    expect(user).toContain(COMPANY_NAME_PLACEHOLDER);
+    input.companyInfo = { ...input.companyInfo, companyName: ' ' };
+    const none = buildVideoPlanMessages(input, on).user;
+    expect(none).not.toContain(COMPANY_NAME_PLACEHOLDER);
+    expect(none).toContain(FEW_SHOT_COMPANY_NAME); // 印を使わないなら例もそのまま
+  });
+
+  it('一般の動画には足さない（会社情報を使わない）', () => {
+    const user = buildVideoPlanMessages({ ...generalInput(), companyInfo: fullInput().companyInfo }, on).user;
+    expect(user).not.toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('選ばなければ今と同じ（Gemini の経路は変えない）', () => {
+    expect(buildVideoPlanMessages(fullInput()).user).toBe(buildVideoPlanUserMessage(fullInput()));
+    expect(buildVideoPlanMessages(fullInput()).user).not.toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('例の fixture に置き換える会社名が本当に書いてある（fixture を直したら気づく）', () => {
+    expect(JSON.stringify(aiVideoPlanExample)).toContain(FEW_SHOT_COMPANY_NAME);
   });
 });
