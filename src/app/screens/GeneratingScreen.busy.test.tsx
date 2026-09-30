@@ -12,6 +12,7 @@ vi.mock("../../infrastructure/aiClient", () => ({
     bus.handler = h;
     return Promise.resolve(() => { bus.offCalls += 1; bus.handler = null; });
   },
+  onLocalAiProgress: () => Promise.resolve(() => {}),
 }));
 vi.mock("../store/projectStore", () => ({
   useProjectStore: (sel: (s: Record<string, unknown>) => unknown) =>

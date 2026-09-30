@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 同梱するモデル（`docs/yuko_recruit_docs/local-llm-build.md` の出力表と同じ値＝版を変えたら両方直す）。
 pub const MODEL_FILE: &str = "stario-qwen3.5-2b-q4_k_m.gguf";
@@ -497,13 +497,84 @@ fn request_body(
     })
 }
 
-/// 出力が上限で止まったか（`finish_reason` が `length`）。
-pub fn stopped_by_length(resp: &serde_json::Value) -> bool {
-    resp.get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("finish_reason"))
-        .and_then(|r| r.as_str())
-        == Some("length")
+/// 少しずつ届く応答（`stream: true`＝SSE の `data: {...}` 行）を組み立てる（純粋・ADR-0052 決定6「進み具合を見せる」）。
+/// ⚠️ **行の途中で切れて届く**（日本語の1字の途中で切れることもある）＝改行までをバイトのまま持ち越してから読む。
+#[derive(Default)]
+pub struct StreamAcc {
+    pub content: String,
+    pub finish_reason: Option<String>,
+    pub timings: Option<serde_json::Value>,
+    pub done: bool,
+    /// 途中で llama-server が返した失敗（`data: {"error": ...}`）。黙って捨てない。
+    pub error: Option<String>,
+    pending: Vec<u8>,
+}
+
+impl StreamAcc {
+    /// 届いた断片を足す。
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.pending.extend_from_slice(chunk);
+        while let Some(i) = self.pending.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=i).collect();
+            let text = String::from_utf8_lossy(&line);
+            self.line(text.trim_end_matches(['\r', '\n']));
+        }
+    }
+
+    fn line(&mut self, line: &str) {
+        let Some(data) = line.strip_prefix("data:") else {
+            return;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            self.done = true;
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+            return;
+        };
+        if let Some(e) = v.get("error") {
+            self.error = Some(e.to_string());
+            return;
+        }
+        if let Some(c) = v
+            .pointer("/choices/0/delta/content")
+            .and_then(|c| c.as_str())
+        {
+            self.content.push_str(c);
+        }
+        if let Some(r) = v
+            .pointer("/choices/0/finish_reason")
+            .and_then(|r| r.as_str())
+        {
+            self.finish_reason = Some(r.to_string());
+        }
+        if let Some(t) = v.get("timings") {
+            self.timings = Some(t.clone());
+        }
+    }
+
+    /// 書き始めた場面の数（出力の形は正典の schema で縛っている＝場面ごとに `"sceneType"` が1つ）。
+    pub fn scenes(&self) -> usize {
+        self.content.matches("\"sceneType\"").count()
+    }
+
+    /// 出力が上限（`MAX_OUTPUT_TOKENS`）で止まったか。
+    pub fn stopped_by_length(&self) -> bool {
+        self.finish_reason.as_deref() == Some("length")
+    }
+
+    /// 最後まで届いたか（終わりの印 `[DONE]` か終わりの理由がある・途中の失敗が無い）。
+    /// ⚠️ 接続が切れた・途中で失敗した回は、途中までの中身を返さない（読めない、ではなく失敗として扱う）。
+    pub fn finished(&self) -> bool {
+        self.error.is_none() && (self.done || self.finish_reason.is_some())
+    }
+}
+
+/// 進み具合の知らせ（画面が「3 場面目を書いています」を出す）。
+#[derive(Clone, serde::Serialize)]
+struct LocalAiProgress {
+    scenes: u32,
 }
 
 /// 読める写真の種類（拡張子 → data URL の種類）。**写真以外のファイルは読まない**（任意のファイルを読む口にしない）。
@@ -551,18 +622,36 @@ pub async fn local_ai_generate(
     if crate::ai::is_superseded(gen) {
         return Err(AI_CANCELLED.to_string());
     }
-    let body = build_request_body(&system, &user, schema);
+    let mut body = build_request_body(&system, &user, schema);
+    // 少しずつ受け取る＝書き終えた場面の数を画面へ知らせる（ADR-0052 決定6）。
+    body["stream"] = serde_json::json!(true);
     let started = Instant::now();
     // 送って、本文を読み終えるまでを1つにする＝本文の読み取りも「やめる」と時間切れの対象にする（#1286 レビュー 🟡）。
     let request = async {
-        let resp = http_client()
+        let mut resp = http_client()
             .post(format!("{base}/v1/chat/completions"))
             .json(&body)
             .send()
             .await?;
         let status = resp.status();
-        let json: serde_json::Value = resp.json().await?;
-        Ok::<_, reqwest::Error>((status, json))
+        if !status.is_success() {
+            let text = resp.text().await?;
+            return Ok::<_, reqwest::Error>((status, None, text));
+        }
+        let mut acc = StreamAcc::default();
+        let mut told = 0usize;
+        while let Some(chunk) = resp.chunk().await? {
+            acc.push(&chunk);
+            let n = acc.scenes();
+            if n > told {
+                told = n;
+                let _ = app.emit("local-ai-progress", LocalAiProgress { scenes: n as u32 });
+            }
+            if acc.done {
+                break;
+            }
+        }
+        Ok((status, Some(acc), String::new()))
     };
     // やめる操作を見ながら待つ＝やめたら接続を切る（相手は生成を止める）。
     let cancelled = async {
@@ -577,7 +666,7 @@ pub async fn local_ai_generate(
         r = request => r,
         _ = cancelled => return Err(AI_CANCELLED.to_string()),
     };
-    let (status, json) = result.map_err(|e| {
+    let (status, acc, error_body) = result.map_err(|e| {
         crate::tlog!("local_llm", "生成に失敗しました: {e}");
         if e.is_timeout() {
             LOCAL_AI_TIMEOUT.to_string()
@@ -587,30 +676,44 @@ pub async fn local_ai_generate(
             LOCAL_AI_START_FAILED.to_string()
         }
     })?;
-    if !status.is_success() {
+    let Some(acc) = acc.filter(|_| status.is_success()) else {
         crate::tlog!(
             "local_llm",
             "生成が断られました: status={status} body={}",
-            json.to_string().chars().take(500).collect::<String>()
+            error_body.chars().take(500).collect::<String>()
         );
         return Err(crate::messages::AI_REQUEST_FAILED.to_string());
-    }
+    };
     crate::tlog!(
         "local_llm",
         "生成しました（{:.1} 秒・{}）",
         started.elapsed().as_secs_f32(),
-        json.get("timings")
+        acc.timings
+            .as_ref()
             .map(|t| t.to_string())
             .unwrap_or_default()
     );
-    if stopped_by_length(&json) {
+    if !acc.finished() {
+        crate::tlog!(
+            "local_llm",
+            "生成の途中で止まりました: {}",
+            acc.error
+                .as_deref()
+                .unwrap_or("終わりの印がないまま接続が切れた")
+        );
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    }
+    if acc.stopped_by_length() {
         crate::tlog!(
             "local_llm",
             "出力が上限（{MAX_OUTPUT_TOKENS} トークン）で止まりました"
         );
         return Err(LOCAL_AI_TOO_LONG.to_string());
     }
-    extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
+    if acc.content.is_empty() {
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    }
+    Ok(acc.content)
 }
 
 /// 先に起動しておく（ADR-0052 決定6「入力画面を開いたら裏で準備を始める」・#1293）。
@@ -841,14 +944,62 @@ mod tests {
     }
 
     #[test]
-    fn stopped_by_length_reads_finish_reason() {
-        assert!(stopped_by_length(
-            &serde_json::json!({"choices": [{"finish_reason": "length"}]})
-        ));
-        assert!(!stopped_by_length(
-            &serde_json::json!({"choices": [{"finish_reason": "stop"}]})
-        ));
-        assert!(!stopped_by_length(&serde_json::json!({})));
+    fn stream_acc_joins_deltas_across_split_chunks() {
+        let mut acc = StreamAcc::default();
+        let a =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sceneType\\\": \\\"場面\"}}]}\n";
+        let bytes = a.as_bytes();
+        // 日本語の1字の途中で切って届ける。
+        let cut = a.find("場").unwrap() + 1;
+        acc.push(&bytes[..cut]);
+        assert_eq!(acc.content, "");
+        acc.push(&bytes[cut..]);
+        assert_eq!(acc.content, "{\"sceneType\": \"場面");
+        assert_eq!(acc.scenes(), 1);
+        acc.push(b"\r\n: keep-alive\n\n");
+        acc.push(b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"timings\":{\"predicted_n\":3}}\n");
+        assert_eq!(acc.finish_reason.as_deref(), Some("stop"));
+        assert!(!acc.stopped_by_length());
+        assert_eq!(acc.timings.as_ref().unwrap()["predicted_n"], 3);
+        assert!(!acc.done);
+        acc.push(b"data: [DONE]\n");
+        assert!(acc.done);
+    }
+
+    #[test]
+    fn stream_acc_reports_length_stop_and_counts_scenes() {
+        let mut acc = StreamAcc::default();
+        // llama-server（b11269）の最初の断片＝役割だけで中身は null・終わりの理由も null（実物から写した形）。
+        acc.push(b"data: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null}}]}
+
+");
+        assert_eq!(acc.content, "");
+        assert_eq!(acc.finish_reason, None);
+        for _ in 0..3 {
+            acc.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"\\\"sceneType\\\"\"}}]}\n");
+        }
+        acc.push(b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n");
+        assert_eq!(acc.scenes(), 3);
+        assert!(acc.stopped_by_length());
+        // data: で始まらない行・読めない行は無視する。
+        acc.push(b"event: x\ndata: {broken\n");
+        assert_eq!(acc.scenes(), 3);
+        assert!(acc.finished());
+    }
+
+    #[test]
+    fn stream_acc_is_not_finished_when_cut_or_failed() {
+        let mut acc = StreamAcc::default();
+        acc.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"{\"}}]}\n");
+        // 終わりの印も理由も無いまま切れた。
+        assert!(!acc.finished());
+        acc.push(b"data: [DONE]\n");
+        assert!(acc.finished());
+        let mut failed = StreamAcc::default();
+        failed.push(b"data: {\"error\":{\"code\":500,\"message\":\"x\"}}\n");
+        failed.push(b"data: [DONE]\n");
+        assert!(failed.error.is_some());
+        assert!(!failed.finished());
     }
 
     #[test]
