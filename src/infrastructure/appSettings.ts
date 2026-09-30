@@ -144,6 +144,21 @@ export function setAiModel(model: string): void {
 }
 
 /**
+ * 動画案を作る AI の選び方（ADR-0051 決定15）＝**このパソコンの中で作る（既定）**か、Gemini（外部の AI）か。
+ * ⚠️ 既定はパソコンの中＝外へ送るのは、利用者が Gemini を選んだときだけ（`willSendExternally`）。
+ */
+export const AI_ENGINE = { local: 'local', gemini: 'gemini' } as const;
+export type AiEngine = (typeof AI_ENGINE)[keyof typeof AI_ENGINE];
+const AI_ENGINE_KEY = 'app.aiEngine';
+const AI_ENGINES: readonly AiEngine[] = [AI_ENGINE.local, AI_ENGINE.gemini];
+export function getAiEngine(): AiEngine {
+  return getChoiceSetting(AI_ENGINE_KEY, AI_ENGINES, AI_ENGINE.local);
+}
+export function setAiEngine(engine: AiEngine): void {
+  setChoiceSetting(AI_ENGINE_KEY, engine);
+}
+
+/**
  * 編集画面の欄の配置（ADR-0033 決定4/5）。**画面ごとに1つ**＝タイムライン編集と場面編集は別に覚える
  * （置いてある欄の顔ぶれが違うため）。**動画ごとには持たない**＝どの動画を開いても同じ配置。
  * **プロジェクトの JSON には入れない**（画面の見た目の好みは動画の中身ではない）。

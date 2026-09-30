@@ -3,6 +3,7 @@
 // 非Tauri（ブラウザ開発）では鍵 API は使えないため has は false を返す。
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { AI_ENGINE, getAiEngine } from './appSettings';
 
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -51,13 +52,32 @@ export function hasApiKey(provider: string): Promise<boolean> {
 }
 
 /**
- * この端末の構成でAI生成が「外部送信」になるか（実 Gemini＝端末外へ送信あり／Mock＝送信なし）。
+ * この端末の構成でAI生成が「外部送信」になるか（実 Gemini＝端末外へ送信あり／このパソコンの中・Mock＝送信なし）。
  * §2-6（外部送信は事前確認必須）のガードと、プロバイダ選択（store の generateVideoPlan）が共有する単一の判定。
- * Tauri かつ鍵ありのときだけ true。非Tauri・鍵未設定は Mock 経路＝送信なし。
+ * **Tauri で、Gemini を選び（ADR-0051 決定15）、鍵があるときだけ** true。既定（このパソコンの中で作る）は送らない。
  */
 export function willSendExternally(provider: string = GEMINI_PROVIDER): Promise<boolean> {
   if (!isTauri()) return Promise.resolve(false);
+  if (getAiEngine() !== AI_ENGINE.gemini) return Promise.resolve(false);
   return hasApiKey(provider);
+}
+
+/**
+ * このパソコンの中で動画案を作る（ADR-0051）。`schema` は正典の `ai-video-plan.schema.json`（出力の形を縛る）。
+ * 応答は JSON の文字列＝検証は呼ぶ側（`parseAndValidateVideoPlan`）が行う（§2-2）。失敗は画面に出す文（Rust の `messages.rs`）。
+ */
+export function localAiGenerate(system: string, user: string, schema: string): Promise<string> {
+  return invoke<string>('local_ai_generate', { system, user, schema });
+}
+
+/** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
+export async function localAiAvailable(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    return await invoke<boolean>('local_ai_available');
+  } catch {
+    return false;
+  }
 }
 
 /** 保存済みAPIキーを削除する。非Tauri（ブラウザ開発）では何もしない。 */

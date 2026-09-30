@@ -33,6 +33,8 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
   beforeEach(() => {
     // 開閉は覚えるので、前の検査の記憶を持ち越さない。
     try { window.localStorage.clear(); } catch { /* 保存できない環境では既定のまま */ }
+    // Gemini の欄を見る検査＝Gemini を選んだ状態から（ADR-0051 決定15＝既定はこのパソコンの中）。
+    try { window.localStorage.setItem("app.aiEngine", "gemini"); } catch { /* 保存できない環境 */ }
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -88,6 +90,8 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
 describe("設定：どこまで効くかで分ける（#1032）", () => {
   beforeEach(() => {
     try { window.localStorage.clear(); } catch { /* 保存できない環境では既定のまま */ }
+    // Gemini の欄を見る検査＝Gemini を選んだ状態から（ADR-0051 決定15＝既定はこのパソコンの中）。
+    try { window.localStorage.setItem("app.aiEngine", "gemini"); } catch { /* 保存できない環境 */ }
   });
   afterEach(() => vi.restoreAllMocks());
 

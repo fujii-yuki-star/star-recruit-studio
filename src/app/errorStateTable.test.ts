@@ -13,7 +13,8 @@ import {
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
-  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE } from "./uiLabels";
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE } from "./uiLabels";
+import { AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
 import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_ASSET_MISSING_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE, STARTUP_VOICE_ENGINE_MESSAGE, STARTUP_VOICE_NOT_READY_MESSAGE } from "./hooks/useStartupJob";
@@ -108,6 +109,9 @@ function codeMessages(): Record<string, string> {
     // 仕上がり確認の別窓（ADR-0050・#1274 レビュー）。
     PREVIEW_WINDOW_OPEN_FAILED: PREVIEW_WINDOW_OPEN_FAILED_MESSAGE,
     PREVIEW_WINDOW_NOT_CONNECTED: PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE,
+    // このパソコンの中で動画案を作る（ADR-0051）。
+    AI_GEMINI_KEY_MISSING: AI_GEMINI_KEY_MISSING_MESSAGE,
+    AI_RESPONSE_UNREADABLE: AI_PLAN_UNREADABLE_MESSAGE,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -406,7 +410,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // 増えたら、そのぶん表へ行を足してからこの数を直す。
     // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(24);
+    // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(28);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -419,10 +424,11 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     const all = Object.keys(messagesIn(src)).length;
     // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
-    expect(all, "定数の数が変わった").toBe(24);
+    // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）＝どれも1行。
+    expect(all, "定数の数が変わった").toBe(28);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
-    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(9);
+    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(13);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
     expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(15);
   });
@@ -521,7 +527,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー＝
     //   貼るときの断りを、重ねる・探すの断りから分けた＝次の行動が「再生位置を動かす」「写し直す」で違う）。
     // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー＝別窓で黙らない）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(260);
+    // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(265);
   });
 
 
@@ -772,7 +779,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+6**（#1244）＝上と同じ6行。
     // ⚠️ **+2**（#1271 レビュー）＝上と同じ2行。
     // ⚠️ **+2**（ADR-0050・#1274 レビュー）＝上と同じ2行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(257);
+    // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(262);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -793,6 +801,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝#1204＝頼まれた回だけの断り2件。
       // ⚠️ **+2**＝`TIMELINE_EDIT_PASTE_OVERLAP`／`TIMELINE_EDIT_PASTE_SOURCE_GONE`（#1271 レビュー・`editBlockedMessage` 経由）。
       // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー・`codeMessages()` へ直に載せた）。
-    ).toBe(114);
+      // ⚠️ **+2**＝`AI_GEMINI_KEY_MISSING`／`AI_RESPONSE_UNREADABLE`（ADR-0051・`codeMessages()` へ直に載せた＝後者は以前は直書きで弱い段だった）。
+    ).toBe(116);
   });
 });

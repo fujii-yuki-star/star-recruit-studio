@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 // 接続キー保存（ネットワーク）中は「保存中…」＋ボタン無効になること（#410 sub4）。
@@ -14,6 +14,8 @@ import { SettingsScreen } from "./SettingsScreen";
 
 describe("SettingsScreen 接続キー保存の busy 表示（#410 sub4）", () => {
   afterEach(() => vi.restoreAllMocks());
+  // Gemini の欄を見る検査＝Gemini を選んだ状態から（ADR-0051 決定15＝既定はこのパソコンの中）。
+  beforeEach(() => { try { window.localStorage.setItem("app.aiEngine", "gemini"); } catch { /* 保存できない環境 */ } });
 
   it("保存中は「保存中…」＋ボタン無効", async () => {
     render(<SettingsScreen onNavigate={vi.fn()} />);

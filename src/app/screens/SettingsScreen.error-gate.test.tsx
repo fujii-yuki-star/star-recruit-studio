@@ -25,6 +25,8 @@ async function typeKeyAndSave(): Promise<void> {
 
 describe("接続キーの断りは、画面に出せる文だけ出す（#1123）", () => {
   afterEach(() => vi.restoreAllMocks());
+  // Gemini の欄を見る検査＝Gemini を選んだ状態から（ADR-0051 決定15＝既定はこのパソコンの中）。
+  beforeEach(() => { try { window.localStorage.setItem("app.aiEngine", "gemini"); } catch { /* 保存できない環境 */ } });
 
   it("整えた理由が返れば、その文を出す（丸めない）", async () => {
     vi.mocked(saveApiKey).mockRejectedValue(
@@ -51,6 +53,8 @@ describe("接続キーは、起きたことを言い分ける（#1131）", () =>
   // `vi.spyOn` のぶんしか戻らないので、`mockRejectedValue` が**次の検査の既定**として残り、
   // あとから足した人が**理由の分からない赤**を踏む。毎回そろえ直す。
   beforeEach(() => {
+    // Gemini の欄を見る検査＝Gemini を選んだ状態から（ADR-0051 決定15＝既定はこのパソコンの中）。
+    try { window.localStorage.setItem("app.aiEngine", "gemini"); } catch { /* 保存できない環境 */ }
     vi.mocked(hasApiKey).mockReset().mockResolvedValue(false);
     vi.mocked(saveApiKey).mockReset().mockResolvedValue(undefined);
     vi.mocked(deleteApiKey).mockReset().mockResolvedValue(undefined);

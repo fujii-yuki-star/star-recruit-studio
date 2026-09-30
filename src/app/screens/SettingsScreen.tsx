@@ -17,11 +17,12 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
-import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
+import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, isTauri, localAiAvailable, saveApiKey } from "../../infrastructure/aiClient";
 import {
-  DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
-  setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
+  AI_ENGINE, DEFAULT_AI_MODEL, getAiEngine, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
+  setAiEngine, setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
+import type { AiEngine } from "../../infrastructure/appSettings";
 import { VOICE_CATALOG, DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import {
@@ -40,6 +41,12 @@ import {
  * いま何が効いているのかが並びの先頭で分かる。
  */
 // ⚠️ **「OS」と書かない**（レビュー 🟡・§2-3）＝利用者は人事・非エンジニア。技術寄りの略語を画面に出さない。
+/** 動画案を作るAI の選び方（ADR-0051 決定15）。既定（このパソコンの中）を先頭に。 */
+const AI_ENGINE_CHOICES: [AiEngine, string][] = [
+  [AI_ENGINE.local, "このパソコンの中で作る"],
+  [AI_ENGINE.gemini, "Gemini を使う"],
+];
+
 export const APPEARANCE_CHOICES: [Appearance, string][] = [
   ["system", "パソコンの設定に合わせる"],
   ["light", "明るい"],
@@ -63,6 +70,20 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
   // 接続キーの削除も共通の確認へ（#410）。キーは復元できないため確認必須（即時削除だった）。
   const [confirmClearKey, setConfirmClearKey] = useState(false);
   const [aiModel, setAiModelState] = useState(() => getAiModel());
+  const [aiEngine, setAiEngineState] = useState<AiEngine>(() => getAiEngine());
+  /** このパソコンで作る部品が同梱されているか（`null`＝まだ分からない＝何も言わない）。 */
+  const [localAvailable, setLocalAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    // アプリの外（ブラウザでの開発）では問い合わせない＝「見つからない」と言わない。
+    if (!isTauri()) return;
+    let alive = true;
+    void localAiAvailable().then((ok) => { if (alive) setLocalAvailable(ok); });
+    return () => { alive = false; };
+  }, []);
+  function onChangeEngine(engine: AiEngine) {
+    setAiEngineState(engine);
+    setAiEngine(engine);
+  }
 
   function onChangeModel(value: string) {
     setAiModelState(value);
@@ -234,14 +255,29 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           </div>
         </div>
 
-        {/* 動画案を作るAI（接続キーの保存・削除） */}
+        {/* 動画案を作るAI（ADR-0051 決定15＝既定はこのパソコンの中・Gemini は選んだときだけ＝接続キーの保存・削除）。 */}
         <div className="card">
           <h2 className="section-title">動画案を作るAI</h2>
           <p className="page-desc text-pretty">
-            動画案づくりに Google の Gemini を使えます。お持ちの接続キーを、この端末の安全な保管領域に保存します（キーは画面には表示しません）。
+            動画案は、このパソコンの中で作ります（入力した内容は外へ送りません）。Google の Gemini（外部のAI）を使うこともできます。
           </p>
+          <div className="segment" role="group" aria-label="動画案を作るAI" style={{ display: "inline-flex" }}>
+            {AI_ENGINE_CHOICES.map(([id, label]) => (
+              <button key={id} className={aiEngine === id ? "active" : ""} aria-pressed={aiEngine === id} onClick={() => onChangeEngine(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <div className="toggle-row">
+          {aiEngine === AI_ENGINE.local ? (
+            <p className="field-hint mt" role="status">
+              {localAvailable === false
+                ? "このパソコンで動画案を作る部品が見つかりません。アプリを入れ直してください。"
+                : "初めて作るときは、準備に少し時間がかかります。"}
+            </p>
+          ) : (
+          <>
+          <div className="toggle-row mt">
             <div>
               <span className="field-label" style={{ margin: 0 }}>
                 接続の状態
@@ -249,7 +285,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               <p className="field-hint" style={{ marginTop: 2 }}>
                 {aiConnected
                   ? "接続済み。動画案づくりに使われます。"
-                  : "未接続のときは、お試し用の動画案で仕上がりを確認できます。"}
+                  : "未接続のときは動画案を作れません。キーを登録するか、「このパソコンの中で作る」を選んでください。"}
               </p>
             </div>
             <span className={`badge ${aiConnected ? "badge-teal" : "badge-gray"}`}>
@@ -337,6 +373,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           <p className="field-hint">
             動画案を作る前に、外部AIへ渡す情報の確認画面を必ず表示します。
           </p>
+          </>
+          )}
         </div>
 
         {/* ナレーターの声 */}
