@@ -39,8 +39,9 @@ import { saveProjectThumbnail } from "../../infrastructure/projectFs";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
+import { LocalVideoPlanProvider } from "../../infrastructure/aiProviders/localVideoPlanProvider";
 import { cancelAiGenerate, willSendExternally } from "../../infrastructure/aiClient";
-import { getAiModel } from "../../infrastructure/appSettings";
+import { AI_ENGINE, getAiEngine, getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
 import { keepRestorePoints, restoreToPoint } from "./restorePointKeeper";
@@ -62,7 +63,7 @@ import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructu
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE } from "../uiLabels";
 import { aiSceneLimitMessage, canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
 import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -762,14 +763,22 @@ function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, n
   return { ...meta, timelineOverlay: { ...meta.timelineOverlay, animations: [...anims, ...copies] } };
 }
 
-// AI 構成案プロバイダの選択：外部送信になる構成（Tauri かつ Gemini キーあり）なら実 Gemini、なければ Mock
-// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。判定は willSendExternally に一元化（§2-6/§2-7）。
-// 実 AI を試みて失敗したときは Mock に倒さずエラーを伝播する（黙って差し替えない）。
+// AI 構成案プロバイダの選択（ADR-0051 決定1・5・15＝ADR-0010 の「鍵が無ければ Mock」を改めた）。
+// - **Tauri の外（ブラウザでの開発）だけ Mock**＝アプリの中では使わない（生成に失敗したのに構成案が出たように見せない）。
+// - **Gemini を選んでいる**＝鍵があれば Gemini（外へ送る＝送信前確認は同じ判定 `willSendExternally` が出す）。
+//   鍵が無ければ**次の行動で断る**（黙ってこのパソコンの中や Mock へ落とさない）。
+// - それ以外（既定）＝**このパソコンの中で作る**。失敗しても外へは送らない（利用者が Gemini を選ぶまで）。
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
-  if (await willSendExternally()) {
-    return new GeminiProvider(getAiModel()).generateVideoPlan(input);
+  if (!isTauriRuntime()) return new MockAiProvider().generateVideoPlan(input);
+  if (getAiEngine() === AI_ENGINE.gemini) {
+    if (await willSendExternally()) return new GeminiProvider(getAiModel()).generateVideoPlan(input);
+    throw new Error(AI_GEMINI_KEY_MISSING_MESSAGE);
   }
-  return new MockAiProvider().generateVideoPlan(input);
+  return new LocalVideoPlanProvider().generateVideoPlan(input);
+}
+/** アプリ（Tauri）の中で動いているか。 */
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

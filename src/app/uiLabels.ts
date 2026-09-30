@@ -1743,3 +1743,6 @@ export const PREVIEW_WINDOW_OPEN_FAILED_MESSAGE = "別の窓を開けません�
 
 /** 仕上がり確認の別窓が本体の窓とつながらない（ADR-0050・`15 §6` `PREVIEW_WINDOW_NOT_CONNECTED`）。 */
 export const PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE = "本体の窓とつながりませんでした。この窓を閉じて、本体の「別の窓で見る」から開き直してください";
+
+/** Gemini を使う設定なのに接続キーが無い（ADR-0051 決定15・`15 §6` `AI_GEMINI_KEY_MISSING`）＝黙ってこのパソコンの中や見本へ落とさない。 */
+export const AI_GEMINI_KEY_MISSING_MESSAGE = "Gemini を使う設定になっていますが、接続キーが登録されていません。設定の「動画案を作るAI」でキーを登録するか、「このパソコンの中で作る」に戻してください。";

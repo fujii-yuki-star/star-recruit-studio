@@ -31,7 +31,9 @@ keyring = { version = "3", features = ["windows-native"] }
 tauri-plugin-single-instance = "2.4.4"
 # 混み合っているときに待ち直す（#1244）。⚠️ **新しい依存を増やしていない**＝`tauri` と `reqwest` が
 # すでに使っている非同期基盤を、必要な機能（時計）だけ直に指しているだけ。
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync", "macros"] }
+# 同梱のローカル LLM のモデルを照合する（ADR-0051 決定14）。
+sha2 = "0.10"
 # ディスクの空きを調べる（#1211）。⚠️ **新しい依存を増やしていない**＝すでに依存の木にある
 # `windows-sys` を、必要な機能だけ直に指しているだけ（`GetDiskFreeSpaceExW`）。
 

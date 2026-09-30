@@ -8,6 +8,7 @@ mod ai;
 mod assets;
 mod disk;
 mod ffmpeg;
+mod local_llm;
 mod messages;
 mod opener;
 mod proc;
@@ -983,6 +984,8 @@ fn shutdown_side_processes(app: &tauri::AppHandle) {
     app.state::<voicevox_engine::EngineState>().shutdown();
     // 書き出し中に閉じても ffmpeg.exe を残さない（orphan 化防止・#380）。
     ffmpeg::cancel_running_export();
+    // このパソコンの中で動画案を作る部品も止める（ADR-0051 決定13＝後始末は1か所）。
+    app.state::<local_llm::LocalLlmState>().shutdown();
 }
 
 /// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。
@@ -1436,6 +1439,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(voicevox_engine::EngineState::default())
+        .manage(local_llm::LocalLlmState::default())
         // 起動のときの頼まれごと（ADR-0042）＝**窓を作る前に読む**。読めなくても止めない。
         .manage(crate::startup::StartupState::from_env())
         .setup(|app| {
@@ -1537,7 +1541,9 @@ pub fn run() {
             ai::has_api_key,
             ai::delete_api_key,
             ai::cancel_ai_generate,
-            ai::ai_generate
+            ai::ai_generate,
+            local_llm::local_ai_available,
+            local_llm::local_ai_generate
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

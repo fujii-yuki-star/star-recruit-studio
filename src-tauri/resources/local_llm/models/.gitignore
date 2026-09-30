@@ -1,0 +1,4 @@
+# ローカル LLM の同梱物（ADR-0051・大容量）はコミットしない。scripts/local-llm/place-bundle.sh で置く。
+# この .gitignore だけ追跡してディレクトリを存在させる（tauri-build の resource path 検証を CI でも通す）。
+*
+!.gitignore

@@ -37,6 +37,8 @@ const ENTRY = 'proc.rs';
 const CALL_SITES: Record<string, number> = {
   'ffmpeg.rs': 4,
   'voicevox_engine.rs': 1,
+  // このパソコンの中で動画案を作る部品（ADR-0051 決定13＝VOICEVOX ENGINE と同じ型）。
+  'local_llm.rs': 1,
 };
 
 /** 外部プログラムを直に起こす書き方（空白を挟まれても拾う）。 */

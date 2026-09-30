@@ -47,6 +47,16 @@ const BUSY_WAIT_MS: [u64; 3] = [3_000, 10_000, 20_000];
 /// 世代なら、**新しい回が始まった時点で古い回は自分が古いと分かる**。
 static AI_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// 生成の回を1つ始める（やめる操作＝`cancel_ai_generate` と共有する・ADR-0051 決定13）。返す番号で `is_superseded` を見る。
+pub fn begin_generation() -> u64 {
+    AI_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// その回が、やめる操作か次の回に追い越されたか。
+pub fn is_superseded(gen: u64) -> bool {
+    AI_GENERATION.load(Ordering::SeqCst) != gen
+}
+
 /// 混み合っているときの**次の待ち**（ミリ秒・純粋）。`None`＝もう待たない（諦めて断る）。
 ///
 /// ⚠️ **判断を1か所に置く**（#1255 レビュー）＝以前は非同期のループの中に
