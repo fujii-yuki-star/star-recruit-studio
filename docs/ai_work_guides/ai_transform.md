@@ -15,6 +15,7 @@
 | 条件 | 読むもの |
 |---|---|
 | プロンプトや送信内容を変える | `12 §4`〜`12 §7`＋**`CLAUDE.md §2-6`（外部送信は事前確認・元動画は送らない）** |
+| 同梱の AI の質（尺・見た目の選択・写真の割り当て・固有名詞）を変える | [`adr/0052`](../yuko_recruit_docs/adr/0052-local-ai-plan-quality.md)（**AI は中身・ソフトは機械的に決められること**＝方向。見直しの導線つき）＋[`adr/0051`](../yuko_recruit_docs/adr/0051-local-llm-primary.md) |
 | Provider を足す | [`adr/0010`](../yuko_recruit_docs/adr/0010-real-ai-provider.md)＋`12 §2`・`§3` |
 | 用途（採用／一般）で分ける | [`adr/0011`](../yuko_recruit_docs/adr/0011-video-kinds-and-stario.md)＋`12 §5b` |
 | 出力に無い概念を足したくなった | **止まって確認**＝AI が触るのは場面形式まで（ADR-0032）。グループ・キーフレーム・タイムラインは AI 出力に無い（ADR-0007 単一パイプライン） |
