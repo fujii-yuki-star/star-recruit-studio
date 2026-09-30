@@ -92,7 +92,7 @@ for (const c of cases) {
   const row = {
     case: c.name, ms, valid: result.valid, scenes, durationSum, target: c.input.targetDurationSec, unknownTemplates, unknownAssets, scenesWithAssets, assetsGiven: c.input.assets.length,
     promptTokens: json.timings?.prompt_n, genTokens: json.timings?.predicted_n, genPerSec: json.timings?.predicted_per_second,
-    errors: result.valid ? undefined : result.errors,
+    errors: 'errors' in result ? result.errors : undefined,
   };
   summary.push(row);
   console.log(JSON.stringify(row));
