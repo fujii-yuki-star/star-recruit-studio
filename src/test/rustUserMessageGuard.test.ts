@@ -138,7 +138,8 @@ describe("Rust が画面へ返す文（#1111）", () => {
     //   この走査に拾われていた**＝`messages.rs` へ移しただけなので、**違う文**としては増えない。
     //   ここは Set（重複を畳む）で数えているので +6 ではなく +5 になる。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(115);
+    // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(116);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {

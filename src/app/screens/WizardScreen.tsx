@@ -14,6 +14,8 @@ import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { saveButtonLabel } from "../components/saveButtonLabel";
+import { prepareLocalAi } from "../../infrastructure/aiClient";
+import { AI_ENGINE, getAiEngine } from "../../infrastructure/appSettings";
 import {
   ArrowLeftIcon,
   SaveIcon,
@@ -115,6 +117,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     useProjectStore();
 
   const steps = stepsFor(videoKind);
+
+  // 入力を始めたら、このパソコンの中で動画案を作る部品を裏で起動しておく（ADR-0052 決定6・#1293）＝「作る」を押してからの
+  // 起動と照合の待ちを、入力している間に済ませる。待たない・失敗しても何も出さない（押したときに同じ起動をもう一度試す）。
+  useEffect(() => {
+    if (getAiEngine() === AI_ENGINE.local) void prepareLocalAi();
+  }, []);
 
   // 現在ステップを store に同期（離脱で消えないように・#401）。初回は store と同値ゆえ no-op。
   useEffect(() => {

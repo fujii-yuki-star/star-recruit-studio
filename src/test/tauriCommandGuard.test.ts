@@ -51,8 +51,8 @@ function registeredNames(): Set<string> {
 describe("画面側が呼ぶ Rust の口は、登録されている", () => {
   // ⚠️ **走査そのものを検査する**＝拾えていないのに緑、を防ぐ（門番が「見えていないのに緑」になる型）。
   it("両側とも拾えている（数を実数で留める）", () => {
-    // ⚠️ **+2**（ADR-0051）＝`local_ai_available`・`local_ai_generate`。**+1**（ADR-0052 決定4）＝`local_ai_describe_image`。
-    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(82);
+    // ⚠️ **+2**（ADR-0051）＝`local_ai_available`・`local_ai_generate`。**+1**（ADR-0052 決定4）＝`local_ai_describe_image`。**+1**（ADR-0052 決定6）＝`local_ai_prepare`。
+    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(83);
     expect(invokedNames().size, "画面側が呼ぶ口の数が変わった（足したら数も直す）").toBeGreaterThanOrEqual(70);
   });
 
