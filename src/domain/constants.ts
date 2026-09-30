@@ -18,6 +18,10 @@ export const SCENE_DEFAULT_DURATION_SEC = 8;
 export const NARRATION_CHARS_PER_SEC = 7.5;
 // 語りの前後に置く間（秒）。場面の切り替わりで声が詰まって聞こえないように。
 export const NARRATION_SCENE_PADDING_SEC = 1;
+// 同梱の AI が写真に付ける説明とタグの上限（ADR-0052 決定4・12 §4b）。説明は動画案の指示文に素材ごとに載るので短く。
+export const ASSET_DESCRIPTION_MAX_LENGTH = 60;
+export const ASSET_AI_TAGS_MAX = 5;
+export const ASSET_AI_TAG_MAX_LENGTH = 12;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
 export const PROJECT_NAME_MAX_LENGTH = 80;

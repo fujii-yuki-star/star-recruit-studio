@@ -10,6 +10,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  ASSET_AI_TAGS_MAX,
+  ASSET_AI_TAG_MAX_LENGTH,
+  ASSET_DESCRIPTION_MAX_LENGTH,
   AI_SCENE_MAX_DURATION_SEC,
   AI_SCENE_MIN_DURATION_SEC,
   BGM_VOLUME,
@@ -77,6 +80,9 @@ const PAIRS: readonly [string, number][] = [
   ['SEC_STEP', SEC_STEP],
   ['NARRATION_CHARS_PER_SEC', NARRATION_CHARS_PER_SEC],
   ['NARRATION_SCENE_PADDING_SEC', NARRATION_SCENE_PADDING_SEC],
+  ['ASSET_DESCRIPTION_MAX_LENGTH', ASSET_DESCRIPTION_MAX_LENGTH],
+  ['ASSET_AI_TAGS_MAX', ASSET_AI_TAGS_MAX],
+  ['ASSET_AI_TAG_MAX_LENGTH', ASSET_AI_TAG_MAX_LENGTH],
 ];
 
 describe('正典の数表と、実装の定数が同じ（#1205・ADR-0045）', () => {

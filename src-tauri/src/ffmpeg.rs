@@ -2609,7 +2609,7 @@ fn parse_fit(s: &str) -> Fit {
 }
 
 /// プロジェクト相対パスを絶対パスへ解決（パストラバーサル・絶対パスを拒否＝assets.rs と同方針）。
-fn resolve_project_file(
+pub(crate) fn resolve_project_file(
     app: &tauri::AppHandle,
     project_id: &str,
     rel_path: &str,

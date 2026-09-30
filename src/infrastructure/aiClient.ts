@@ -81,6 +81,16 @@ export function localAiGenerate(system: string, user: string, schema: string): P
   return invoke<string>('local_ai_generate', { system, user, schema });
 }
 
+/**
+ * このパソコンの中で写真を1枚読む（ADR-0052 決定4）。場所はプロジェクトの中の相対パス（Rust がプロジェクトの外へ出る道を断る）。
+ * ⚠️ 動画案づくりの「やめる」の世代には乗らない（取り込みの裏で読んでも、同時に作っている動画案を止めない）。
+ */
+export function localAiDescribeImage(
+  system: string, user: string, schema: string, projectId: string, relPath: string,
+): Promise<string> {
+  return invoke<string>('local_ai_describe_image', { system, user, schema, projectId, relPath });
+}
+
 /** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
 export async function localAiAvailable(): Promise<boolean> {
   if (!isTauri()) return false;
