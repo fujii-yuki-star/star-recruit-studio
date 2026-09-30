@@ -11,6 +11,7 @@ import { refineVideoPlan } from '../../domain/ai/refineVideoPlan';
 import type { ShortenText } from '../../domain/ai/refineVideoPlan';
 import { buildShortenMessages, parseShortenResponse } from '../../domain/ai/shortenTextRequest';
 import { VIDEO_KIND } from '../../domain/enums';
+import { templatesForAssets } from '../../domain/ai/videoPlanInput';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { currentAiCancelEpoch, localAiGenerate } from '../aiClient';
@@ -45,7 +46,9 @@ function createShortener(isStale: () => boolean): ShortenText {
 }
 
 export class LocalVideoPlanProvider implements AiProvider {
-  async generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
+  async generateVideoPlan(original: GenerateVideoPlanInput): Promise<AiVideoPlan> {
+    // 写真・動画が無ければ、差し込み口のある見た目を見せない（12 §8.9・ADR-0052 追補5）。整える段も同じ一覧を使う。
+    const input: GenerateVideoPlanInput = { ...original, templates: templatesForAssets(original.templates, original.assets) };
     const run = ++latestRun;
     const cancelEpoch = currentAiCancelEpoch();
     const isStale = () => run !== latestRun || currentAiCancelEpoch() !== cancelEpoch;

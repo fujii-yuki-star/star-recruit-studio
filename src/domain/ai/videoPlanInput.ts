@@ -33,6 +33,22 @@ export function buildTemplateSummaries(templates: Template[], orientation: Orien
   }));
 }
 
+/** 場面に当てられる素材（写真・動画）の数。 */
+export function visualAssetCount(assets: readonly Asset[]): number {
+  return assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video).length;
+}
+
+/**
+ * 写真・動画が1件も無いときは、**差し込み口のある見た目を AI に見せない**（ADR-0052 追補5＝利用者判断 C・12 §8.9）。
+ * 見せると AI が写真の場面を選び、差し込み口が空のまま残る（実測）。場面の種類を決めるのは AI のまま（決定1）＝
+ * 選べる種類をソフトが機械的に絞るだけ。⚠️ 絞ると1つも残らないなら絞らない（AI が何も選べない、を作らない）。
+ */
+export function templatesForAssets(templates: TemplateSummary[], assets: readonly Asset[]): TemplateSummary[] {
+  if (visualAssetCount(assets) > 0) return templates;
+  const noSlot = templates.filter((t) => (t.requiredSlots ?? []).length === 0);
+  return noSlot.length > 0 ? noSlot : templates;
+}
+
 /** yuko 素材の tags を重複なく集約する（12§4「利用可能なゆうこ表情タグ一覧」）。 */
 export function buildYukoPoseTags(assets: Asset[]): string[] {
   const tags = new Set<string>();
