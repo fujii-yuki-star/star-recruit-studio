@@ -40,7 +40,8 @@ import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { LocalVideoPlanProvider } from "../../infrastructure/aiProviders/localVideoPlanProvider";
-import { cancelAiGenerate, isTauri, willSendExternally } from "../../infrastructure/aiClient";
+import { cancelAiGenerate, isTauri, localAiAvailable, localAiDescribeImage, willSendExternally } from "../../infrastructure/aiClient";
+import { createAssetDescribeQueue } from "./assetDescribeQueue";
 import { AI_ENGINE, getAiEngine, getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
@@ -862,6 +863,35 @@ function assertBakeable(doc: TimelineProject): void {
   }
 }
 
+
+/**
+ * 取り込んだ写真を裏で1枚ずつ読んで説明を当てる（ADR-0052 決定4・12 §4b）。取り込みの `await` には入れない。
+ * ⚠️ **素材は取り消しの履歴に載らない**（ADR-0020）＝当てても履歴は増えない。未保存に戻すだけ（自動保存が拾う）。
+ */
+const assetDescriber = createAssetDescribeQueue({
+  // 呼ぶたびに引く（取り込みの口と同じく、差し替えて確かめられるように）。
+  available: () => localAiAvailable(),
+  describe: (system, user, schema, projectId, relPath) => localAiDescribeImage(system, user, schema, projectId, relPath),
+  current: (assetId) => {
+    const s = useProjectStore.getState();
+    const asset = s.assets.find((a) => a.assetId === assetId);
+    return asset && s.meta.projectId ? { projectId: s.meta.projectId, asset } : undefined;
+  },
+  apply: (assetId, update) =>
+    useProjectStore.setState((s) => {
+      let changed = false;
+      const assets = s.assets.map((a) => {
+        if (a.assetId !== assetId) return a;
+        const next = update(a);
+        if (!next) return a;
+        changed = true;
+        return next;
+      });
+      return changed ? { assets, saveStatus: "idle" as const } : {};
+    }),
+  blocked: () => isExportBusy(useProjectStore.getState().exportRun.phase),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+});
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
@@ -2435,6 +2465,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
         const enrich = await probeAndThumbVideo(projectId, relPath);
         if (stillOpen()) set(applyEnrichment(assetId, enrich));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(assetId, stillOpen);
       } else {
         // 画像は data URL で取り込み、取り込み後は表示用 src を asset:// に差し替える（data URL 常駐を解消・A3-2 レビュー）。
         const savedPath = await importAssetFile(projectId, fileName, dataUrl!);
@@ -2444,6 +2476,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 「ぼやける素材」の注意が**入れ方によって出たり出なかったり**する（ADR-0026②）。
         const size = savedPath ? await probeImageSize(projectId, savedPath) : null;
         if (size && stillOpen()) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(assetId, stillOpen);
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -2493,6 +2527,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
         const enrich = await probeAndThumbVideo(projectId, relPath);
         if (stillOpen()) set(applyEnrichment(assetId, enrich));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(assetId, stillOpen);
       } else {
         // 画像の表示用 src を取り込んだ実体から解決（Tauri は asset://）。書き出しの data URL は書き出し時に別途読む（A3-2/ADR-0004）。
         const url = await assetDisplayUrl(projectId, relPath);
@@ -2501,6 +2537,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 出ない**（判定の材料が無いので黙って素通り）。測れなくても取り込みは続ける。
         const size = await probeImageSize(projectId, relPath);
         if (size && stillOpen()) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(assetId, stillOpen);
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -2567,6 +2605,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (asset.assetType === ASSET_TYPE.video) {
         const enrich = await probeAndThumbVideo(projectId, relPath);
         if (stillOpen()) set(applyEnrichment(asset.assetId, enrich));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(asset.assetId, stillOpen);
       } else {
         const url = await assetDisplayUrl(projectId, relPath);
         if (url && stillOpen()) set((st) => ({ assetSrcById: { ...st.assetSrcById, [asset.assetId]: url } }));
@@ -2574,6 +2614,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // **ここから取り込んだ写真では一度も出ない**（取り込みの経路で挙動が割れる＝ADR-0026②）。
         const size = await probeImageSize(projectId, relPath);
         if (size && stillOpen()) set((st) => ({ assets: st.assets.map((a) => (a.assetId === asset.assetId ? { ...a, metadata: size } : a)) }));
+        // 裏で写真を読んで説明を当てる（ADR-0052 決定4・待たない）。動画は代表の1コマができてから積む。
+        assetDescriber.enqueue(asset.assetId, stillOpen);
       }
       return asset.assetId;
     } catch (e) {
@@ -2619,6 +2661,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ **切り出した絵も大きさを測る**（🟡10 と同じ＝取り込みの経路で挙動を割らない・ADR-0026②）。
       const size = await probeImageSize(projectId, relPath);
       if (size && stillOpen()) set((s) => ({ assets: s.assets.map((a) => (a.assetId === asset.assetId ? { ...a, metadata: size } : a)) }));
+      // 切り出した1コマも写真として読む（入れ方で説明の有無を割らない＝ADR-0026②・ADR-0052 決定4）。
+      assetDescriber.enqueue(asset.assetId, stillOpen);
       return asset.assetId;
     } catch (e) {
       if (stillOpen()) set({ importError: importErrorMessage(e) });
