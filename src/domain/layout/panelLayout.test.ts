@@ -482,6 +482,14 @@ describe('dockZoneBoxes（空いた領域の帯）', () => {
     expect(dockZoneBoxes(onlyLeft, size, 1000, Z).map((z) => z.region)).not.toContain(PANEL_REGION.center);
   });
 
+  it('境目が器の端に近くても、真ん中の帯は器の内側に収める', () => {
+    const l = emptyLayout();
+    l.nodes.left = { panelId: 'a' };
+    l.nodes.right = { panelId: 'b' };
+    expect(dockZoneBoxes(l, size, 5, Z).find((z) => z.region === PANEL_REGION.center)!.box.left).toBe(0);
+    expect(dockZoneBoxes(l, size, 995, Z).find((z) => z.region === PANEL_REGION.center)!.box.left).toBe(1000 - Z);
+  });
+
   it('上の段が空なら真ん中は上の端・左右の帯はその下から', () => {
     const l = emptyLayout();
     l.nodes.bottom = { panelId: 'a' };
