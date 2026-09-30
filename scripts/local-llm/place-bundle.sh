@@ -5,7 +5,7 @@
 #   scripts/local-llm/place-bundle.sh <作業フォルダ（build-model.sh と同じ）>
 #
 # ⚠️ 置くのは**照合が合ったものだけ**＝モデルの SHA-256 は `src-tauri/src/local_llm.rs` の `MODEL_SHA256`
-#   （＝`docs/yuko_recruit_docs/local-llm-build.md` の出力表）と一致しないと止める。
+#   （＝`docs/yuko_recruit_docs/local-llm-build.md` の出力表）と一致しないと止める。視覚の部品（`MMPROJ_SHA256`）も同じ。
 # ⚠️ 実行の部品は llama.cpp の配布物のうち、`llama-server.exe` と DLL だけを置く（ほかの道具は同梱しない）。
 set -euo pipefail
 
@@ -20,6 +20,13 @@ src_model="$WORK/out/$model_file"
 got=$(sha256sum "$src_model" | cut -d' ' -f1)
 [ "$got" = "$model_sha" ] || { echo "モデルの SHA-256 が合いません ($got != $model_sha)"; exit 1; }
 
+mmproj_file=$(grep -o 'MMPROJ_FILE: &str = "[^"]*"' src-tauri/src/local_llm.rs | sed 's/.*"\(.*\)"/\1/')
+mmproj_sha=$(grep -o 'MMPROJ_SHA256: &str = "[^"]*"' src-tauri/src/local_llm.rs | sed 's/.*"\(.*\)"/\1/')
+src_mmproj="$WORK/out/$mmproj_file"
+[ -f "$src_mmproj" ] || { echo "視覚の部品がありません: $src_mmproj（先に build-model.sh を動かす）"; exit 1; }
+got=$(sha256sum "$src_mmproj" | cut -d' ' -f1)
+[ "$got" = "$mmproj_sha" ] || { echo "視覚の部品の SHA-256 が合いません ($got != $mmproj_sha)"; exit 1; }
+
 runtime_src="$WORK/tools/llama-cpu"
 [ -f "$runtime_src/llama-server.exe" ] || { echo "実行の部品がありません: $runtime_src/llama-server.exe"; exit 1; }
 
@@ -28,4 +35,5 @@ find "$DEST/models" -mindepth 1 ! -name .gitignore -delete
 cp "$runtime_src/llama-server.exe" "$DEST/runtime/"
 cp "$runtime_src"/*.dll "$DEST/runtime/"
 cp "$src_model" "$DEST/models/"
-echo "placed: $(ls "$DEST/runtime" | wc -l) runtime files, $model_file ($(stat -c %s "$DEST/models/$model_file") B)"
+cp "$src_mmproj" "$DEST/models/"
+echo "placed: $(ls "$DEST/runtime" | wc -l) runtime files, $model_file ($(stat -c %s "$DEST/models/$model_file") B), $mmproj_file ($(stat -c %s "$DEST/models/$mmproj_file") B)"

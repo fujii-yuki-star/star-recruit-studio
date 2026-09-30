@@ -5,6 +5,7 @@
 // - **初めて生成するときに起動**（アプリの起動では起こさない）・空き番号・`127.0.0.1` だけ・窓を出さない。
 // - **しばらく使わなければ止める**・アプリ終了で必ず止める（`shutdown_side_processes`）。
 // - 出力の形は**フロントから渡された正典の schema** で縛る（schema の持ち主を1つに）。最後の検証はフロント（ajv）が行う。
+// - **写真も読める**（ADR-0052 決定4）＝視覚の部品（`mmproj`）が同梱されていれば一緒に読み込む。無くても動画案は作れる。
 use crate::messages::{
     AI_CANCELLED, LOCAL_AI_BROKEN, LOCAL_AI_MISSING, LOCAL_AI_START_FAILED, LOCAL_AI_TIMEOUT,
 };
@@ -22,6 +23,16 @@ use tauri::{AppHandle, Manager, State};
 pub const MODEL_FILE: &str = "stario-qwen3.5-2b-q4_k_m.gguf";
 pub const MODEL_SIZE: u64 = 1_312_164_800;
 pub const MODEL_SHA256: &str = "5405508fd56e0bace3ec4c2484eb4d0f606cbded87760cf3756896e234068b35";
+
+/// 同梱する視覚の部品（写真を読む・ADR-0052 決定4）。値は `local-llm-build.md` の出力表と同じ。
+pub const MMPROJ_FILE: &str = "stario-qwen3.5-2b-mmproj-q8_0.gguf";
+pub const MMPROJ_SIZE: u64 = 364_664_384;
+pub const MMPROJ_SHA256: &str = "526dbf85f350baf3a5107b1f14e629e94571c7cbab4277476fbdaaa8c4a31a64";
+/// 写真1枚に使うトークンの上限（最低検証機で約 10 秒／枚＝ADR-0052 の実測）。
+const IMAGE_MAX_TOKENS: u32 = 256;
+/// 読む写真のファイルの大きさの上限（丸ごと読んで data URL にするので、元＋約 1.33 倍が同時にメモリに載る）。
+/// 越えたら読まない（写真の説明が付かないだけ＝動画案づくりは今どおり）。
+pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
 /// 文脈の長さ（トークン）。見た目パターン・素材の一覧つきの指示文と、出力（数千トークン）が収まる大きさ。
 const CONTEXT_TOKENS: u32 = 8192;
@@ -43,6 +54,10 @@ struct Inner {
     verified: bool,
     /// いま走っている生成の数（#1286 レビュー 🟡）＝1つでも走っている間は「しばらく使っていない」で止めない。
     in_flight: u32,
+    /// この回の起動で視覚の部品を読み込んだか（写真を読めるか）。
+    vision: bool,
+    /// 視覚の部品の SHA-256 を確かめ済みか（モデルの `verified` と同じ＝365MB を起動のたびには読まない）。
+    vision_verified: bool,
 }
 
 /// 「しばらく使っていない」で止めてよいか（純粋関数）。**生成が走っている間は止めない**
@@ -120,21 +135,39 @@ impl LocalLlmState {
     }
 }
 
-/// 同梱物の場所（実行ファイル・モデル）。
-fn bundle_paths(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
+/// 同梱物の場所（実行ファイル・モデル・視覚の部品）。
+struct BundlePaths {
+    exe: PathBuf,
+    model: PathBuf,
+    mmproj: PathBuf,
+}
+
+fn bundle_paths(app: &AppHandle) -> Option<BundlePaths> {
     let dir = app.path().resource_dir().ok()?.join("local_llm");
     let exe = dir.join("runtime").join(if cfg!(windows) {
         "llama-server.exe"
     } else {
         "llama-server"
     });
-    let model = dir.join("models").join(MODEL_FILE);
-    Some((exe, model))
+    Some(BundlePaths {
+        exe,
+        model: dir.join("models").join(MODEL_FILE),
+        mmproj: dir.join("models").join(MMPROJ_FILE),
+    })
 }
 
-/// 同梱されているか（実行ファイルとモデルが両方ある）。
+/// 同梱されているか（実行ファイルとモデルが両方ある）。視覚の部品は無くても動画案は作れるので見ない。
 fn is_bundled(app: &AppHandle) -> bool {
-    bundle_paths(app).is_some_and(|(exe, model)| exe.is_file() && model.is_file())
+    bundle_paths(app).is_some_and(|b| b.exe.is_file() && b.model.is_file())
+}
+
+/// 視覚の部品を読み込むか（大きさ→照合の順）。
+/// 無い・壊れている＝**読み込まずに起動する**（動画案は作れる・写真を読む口だけが断る）。
+fn vision_usable(mmproj: &Path, verify_sha: bool) -> bool {
+    if check_model_size(mmproj, MMPROJ_SIZE) != ModelCheck::Ok {
+        return false;
+    }
+    !verify_sha || check_model_sha256(mmproj, MMPROJ_SHA256) == ModelCheck::Ok
 }
 
 /// モデルの照合の結果。
@@ -186,7 +219,10 @@ fn pick_free_port() -> Option<u16> {
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
+        // ⚠️ **プロキシを通さない**（§2-6）＝相手は必ず 127.0.0.1。既定だとパソコンのプロキシ設定に従い、
+        //   指示文や写真が社内プロキシへ出うる。
         reqwest::Client::builder()
+            .no_proxy()
             .timeout(GENERATE_TIMEOUT)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
@@ -220,19 +256,37 @@ fn ensure_idle_watcher(app: &AppHandle) {
 /// ⚠️ **起動した瞬間から状態に持つ**（#1286 レビュー 🔴）＝応えるまで（最大 120 秒）ローカル変数のままだと、
 ///   その間にアプリを閉じたとき `shutdown` が見つけられず、約 2.3GB を握ったまま残る。接続先は応えるまで None。
 /// ⚠️ **起動の途中でも「やめる」を見る**（#1286 レビュー 🔴）＝照合（1.3GB を読む）と応答待ちの間も止められる。
+/// やめる操作が押されるまで待つ（押されなければ終わらない＝`select!` の片側に置く）。
+async fn until_cancelled(cancelled: &(dyn Fn() -> bool + Sync)) {
+    loop {
+        tokio::time::sleep(CANCEL_POLL).await;
+        if cancelled() {
+            break;
+        }
+    }
+}
+
+/// `cancelled`＝やめる操作が押されたか（動画案づくりは世代で見る／写真を読む口は見ない＝`|| false`）。
 async fn ensure_started(
     app: &AppHandle,
     state: &LocalLlmState,
-    gen: u64,
+    cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<String, String> {
     if let Some(url) = state.running_base_url() {
         return Ok(url);
     }
-    let _guard = state.starting.lock().await;
+    // 起動を待つ間も「やめる」を見る（写真を読む口が起動している間に、動画案づくりが錠で待たされても止められる）。
+    let _guard = tokio::select! {
+        g = state.starting.lock() => g,
+        _ = until_cancelled(cancelled) => return Err(AI_CANCELLED.to_string()),
+    };
+    if cancelled() {
+        return Err(AI_CANCELLED.to_string());
+    }
     if let Some(url) = state.running_base_url() {
         return Ok(url);
     }
-    let Some((exe, model)) = bundle_paths(app) else {
+    let Some(BundlePaths { exe, model, mmproj }) = bundle_paths(app) else {
         return Err(LOCAL_AI_MISSING.to_string());
     };
     if !exe.is_file() {
@@ -254,7 +308,7 @@ async fn ensure_started(
             return Err(LOCAL_AI_BROKEN.to_string());
         }
     }
-    if crate::ai::is_superseded(gen) {
+    if cancelled() {
         return Err(AI_CANCELLED.to_string());
     }
     let verified = state.inner.lock().map(|g| g.verified).unwrap_or(false);
@@ -277,8 +331,33 @@ async fn ensure_started(
             g.verified = true;
         }
     }
-    if crate::ai::is_superseded(gen) {
+    if cancelled() {
         return Err(AI_CANCELLED.to_string());
+    }
+    // 視覚の部品（照合はモデルと同じく1度だけ＝大きさは毎回見る）。無い・壊れているなら読み込まずに起動する。
+    let mm = mmproj.clone();
+    let verify_sha = !state
+        .inner
+        .lock()
+        .map(|g| g.vision_verified)
+        .unwrap_or(false);
+    let vision = tauri::async_runtime::spawn_blocking(move || vision_usable(&mm, verify_sha))
+        .await
+        .unwrap_or(false);
+    if vision && verify_sha {
+        if let Ok(mut g) = state.inner.lock() {
+            g.vision_verified = true;
+        }
+    }
+    if cancelled() {
+        return Err(AI_CANCELLED.to_string());
+    }
+    if !vision {
+        crate::tlog!(
+            "local_llm",
+            "視覚の部品を使いません（無いか照合が合わない）: {}",
+            mmproj.display()
+        );
     }
     // ⚠️ 空き番号を選んでから llama-server が使うまでに、ほかのプログラムに取られうる（同梱の VOICEVOX ENGINE と
     //   同じ既知の制約）。取られたら起動に失敗し `LOCAL_AI_START_FAILED`＝もう一度押せば別の番号で起動する。
@@ -286,17 +365,20 @@ async fn ensure_started(
         return Err(LOCAL_AI_START_FAILED.to_string());
     };
     let mut cmd = no_window_command(&exe);
-    cmd.arg("-m")
-        .arg(&model)
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "-c",
-            &CONTEXT_TOKENS.to_string(),
-        ])
-        .stdin(Stdio::null())
+    cmd.arg("-m").arg(&model).args([
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+        "-c",
+        &CONTEXT_TOKENS.to_string(),
+    ]);
+    if vision {
+        cmd.arg("--mmproj")
+            .arg(&mmproj)
+            .args(["--image-max-tokens", &IMAGE_MAX_TOKENS.to_string()]);
+    }
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if let Some(parent) = exe.parent() {
@@ -318,7 +400,7 @@ async fn ensure_started(
             state.shutdown();
             return Err(LOCAL_AI_START_FAILED.to_string());
         }
-        if crate::ai::is_superseded(gen) {
+        if cancelled() {
             crate::tlog!("local_llm", "起動の途中でやめました");
             state.shutdown();
             return Err(AI_CANCELLED.to_string());
@@ -348,6 +430,7 @@ async fn ensure_started(
     if let Ok(mut g) = state.inner.lock() {
         g.base_url = Some(base_url.clone());
         g.last_used = Some(Instant::now());
+        g.vision = vision;
     }
     ensure_idle_watcher(app);
     Ok(base_url)
@@ -359,16 +442,52 @@ pub fn build_request_body(
     user: &str,
     schema: serde_json::Value,
 ) -> serde_json::Value {
+    request_body(system, serde_json::json!(user), schema)
+}
+
+/// 写真を1枚添えた本文（OpenAI 互換の `image_url`＝data URL）。写真は**このパソコンの中の llama-server にだけ**渡す。
+pub fn build_image_request_body(
+    system: &str,
+    user: &str,
+    image_data_url: &str,
+    schema: serde_json::Value,
+) -> serde_json::Value {
+    request_body(
+        system,
+        serde_json::json!([
+            { "type": "text", "text": user },
+            { "type": "image_url", "image_url": { "url": image_data_url } },
+        ]),
+        schema,
+    )
+}
+
+fn request_body(
+    system: &str,
+    user_content: serde_json::Value,
+    schema: serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": user },
+            { "role": "user", "content": user_content },
         ],
         "response_format": { "type": "json_schema", "json_schema": { "name": "ai_video_plan", "schema": schema } },
         // 考える段は切る＝待ち時間を延ばさず、出力は JSON だけにする。
         "chat_template_kwargs": { "enable_thinking": false },
         "temperature": 0.2,
     })
+}
+
+/// 読める写真の種類（拡張子 → data URL の種類）。**写真以外のファイルは読まない**（任意のファイルを読む口にしない）。
+pub fn image_mime(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        // ⚠️ webp は受けない＝llama.cpp の画像の読み込み（stb_image）が扱えない（毎回断られる）。
+        _ => None,
+    }
 }
 
 /// 応答から本文を取り出す。
@@ -401,7 +520,7 @@ pub async fn local_ai_generate(
         .map_err(|_| crate::messages::AI_REQUEST_FAILED.to_string())?;
     // 起動の前から「走っている」と数える＝起動し終えてから数え始めるまでの間に、見張りが止める道を作らない。
     let _in_flight = InFlight::begin(&state);
-    let base = ensure_started(&app, &state, gen).await?;
+    let base = ensure_started(&app, &state, &|| crate::ai::is_superseded(gen)).await?;
     if crate::ai::is_superseded(gen) {
         return Err(AI_CANCELLED.to_string());
     }
@@ -456,6 +575,96 @@ pub async fn local_ai_generate(
         json.get("timings")
             .map(|t| t.to_string())
             .unwrap_or_default()
+    );
+    extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
+}
+
+/// 写真を1枚読んで、説明とタグを返す（ADR-0052 決定4）。戻り値は応答の本文（JSON の文字列）。検証はフロントが行う。
+///
+/// ⚠️ **動画案づくりの「やめる」の世代に乗せない**＝取り込みの裏で写真を読んでいる最中に動画案を作ると、
+///   `begin_generation` を進めた側が相手を「やめた」扱いにして**動画案づくりが失敗する**。写真を読む口は世代を進めず、
+///   やめる操作も見ない（1枚 約 10 秒で終わる・時間の上限は生成と同じ）。
+/// ⚠️ **プロジェクトの中の写真だけ**読む＝場所は `resolve_project_file`（プロジェクトの外へ出る道を断る）で決め、
+///   **写真の種類の拡張子だけ**を受ける（任意のファイルを読む口にしない）。動画は呼び出し側が代表の1コマ（サムネイル）を渡す。
+#[tauri::command]
+pub async fn local_ai_describe_image(
+    app: AppHandle,
+    state: State<'_, LocalLlmState>,
+    system: String,
+    user: String,
+    schema: String,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let path = crate::ffmpeg::resolve_project_file(&app, &project_id, &rel_path)?;
+    let Some(mime) = image_mime(&path) else {
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    };
+    let schema: serde_json::Value = serde_json::from_str(&schema)
+        .map_err(|_| crate::messages::AI_REQUEST_FAILED.to_string())?;
+    let too_large = tokio::fs::metadata(&path)
+        .await
+        .map(|m| m.len() > IMAGE_MAX_BYTES)
+        .unwrap_or(false);
+    if too_large {
+        crate::tlog!(
+            "local_llm",
+            "写真が大きすぎるので読みません: {}",
+            path.display()
+        );
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        crate::tlog!("local_llm", "写真を読めません: {e}");
+        crate::messages::AI_REQUEST_FAILED.to_string()
+    })?;
+    use base64::Engine as _;
+    let data_url = format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    );
+    let _in_flight = InFlight::begin(&state);
+    let base = ensure_started(&app, &state, &|| false).await?;
+    let vision = state.inner.lock().map(|g| g.vision).unwrap_or(false);
+    if !vision {
+        return Err(LOCAL_AI_MISSING.to_string());
+    }
+    let body = build_image_request_body(&system, &user, &data_url, schema);
+    let started = Instant::now();
+    let resp = http_client()
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&body)
+        .send()
+        .await;
+    let (status, json) = match resp {
+        Ok(r) => {
+            let status = r.status();
+            match r.json::<serde_json::Value>().await {
+                Ok(j) => (status, j),
+                Err(e) => {
+                    crate::tlog!("local_llm", "写真の説明の応答を読めません: {e}");
+                    return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+                }
+            }
+        }
+        Err(e) => {
+            crate::tlog!("local_llm", "写真の説明に失敗しました: {e}");
+            return Err(if e.is_timeout() {
+                LOCAL_AI_TIMEOUT
+            } else {
+                LOCAL_AI_START_FAILED
+            }
+            .to_string());
+        }
+    };
+    if !status.is_success() {
+        crate::tlog!("local_llm", "写真の説明が断られました: status={status}");
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    }
+    crate::tlog!(
+        "local_llm",
+        "写真を説明しました（{:.1} 秒）",
+        started.elapsed().as_secs_f32()
     );
     extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
 }
@@ -530,6 +739,46 @@ mod tests {
         ));
         // 一度も使っていない＝止める理由が無い。
         assert!(!should_stop_idle(None, 0, now, idle));
+    }
+
+    #[test]
+    fn image_request_body_carries_text_and_image_in_user_content() {
+        let body = build_image_request_body(
+            "sys",
+            "usr",
+            "data:image/png;base64,AAAA",
+            serde_json::json!({"type": "object"}),
+        );
+        assert_eq!(body["messages"][0]["content"], "sys");
+        let user = &body["messages"][1]["content"];
+        assert_eq!(user[0]["type"], "text");
+        assert_eq!(user[0]["text"], "usr");
+        assert_eq!(user[1]["type"], "image_url");
+        assert_eq!(user[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["type"],
+            "object"
+        );
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[test]
+    fn image_mime_reads_only_photo_extensions() {
+        assert_eq!(image_mime(Path::new("a/b.JPG")), Some("image/jpeg"));
+        assert_eq!(image_mime(Path::new("a/b.jpeg")), Some("image/jpeg"));
+        assert_eq!(image_mime(Path::new("b.png")), Some("image/png"));
+        assert_eq!(image_mime(Path::new("b.webp")), None);
+        assert_eq!(image_mime(Path::new("b.mp4")), None);
+        assert_eq!(image_mime(Path::new("project.json")), None);
+        assert_eq!(image_mime(Path::new("noext")), None);
+    }
+
+    #[test]
+    fn vision_is_skipped_when_mmproj_missing_or_wrong_size() {
+        let p = temp_file("mmproj", b"abc");
+        assert!(!vision_usable(&p, false)); // 大きさが違う
+        assert!(!vision_usable(&p.with_extension("none"), false)); // 無い
+        let _ = std::fs::remove_file(p);
     }
 
     #[test]

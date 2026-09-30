@@ -1543,7 +1543,8 @@ pub fn run() {
             ai::cancel_ai_generate,
             ai::ai_generate,
             local_llm::local_ai_available,
-            local_llm::local_ai_generate
+            local_llm::local_ai_generate,
+            local_llm::local_ai_describe_image
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

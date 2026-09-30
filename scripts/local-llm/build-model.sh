@@ -9,6 +9,7 @@
 #   1. 公式の重みを Hugging Face から落とし、**配布元の SHA-256（LFS の oid）と照合**する（合わなければ止める）
 #   2. 変換・量子化の道具を**版を固定して**用意する（llama.cpp の公式リリースの ZIP は SHA-256 を照合・ソースは同じタグ）
 #   3. 重み → GGUF（BF16）→ Q4_K_M へ量子化し、できたファイルの SHA-256 を出す
+#   4. 同じ重みから**視覚の部品**（写真を読む `mmproj`・Q8_0）を変換し、SHA-256 を出す（ADR-0052 決定4）
 #
 # ⚠️ 版を変えるときは、ここの固定値と `docs/yuko_recruit_docs/local-llm-build.md` の記録を**一緒に**直す（再現できなくなる）。
 # ⚠️ 大きい＝2B の公式の重みは約 4.6GB・変換途中の BF16 は約 3.9GB（作業フォルダはリポジトリの外に置く）。
@@ -22,6 +23,7 @@ LLAMA_COMMIT="cee37ffea0a5749bce1704f0621b9ddd185b4858"
 LLAMA_ZIP="llama-${LLAMA_TAG}-bin-win-cpu-x64.zip"
 LLAMA_ZIP_SHA256="a15b798c282d70b169df4034e002fd2fad43437b2267503c1cffbbd8e4202a1c"
 QUANT="Q4_K_M"
+MMPROJ_TYPE="Q8_0"
 
 mkdir -p "$WORK"/{hf,tools,out,logs}
 cd "$WORK"
@@ -74,4 +76,7 @@ for repo in "${REPOS[@]}"; do
   ./venv/Scripts/python tools/llama.cpp-src/convert_hf_to_gguf.py "hf/${repo#*/}" --outtype bf16 --outfile "$bf16" > "logs/convert-${name}.log" 2>&1
   ./tools/llama-cpu/llama-quantize.exe "$bf16" "$q" "$QUANT" > "logs/quant-${name}.log" 2>&1
   echo "built $q $(stat -c %s "$q") $(sha256sum "$q" | cut -d' ' -f1)"
+  mm="out/stario-${name}-mmproj-$(echo "$MMPROJ_TYPE" | tr 'A-Z' 'a-z').gguf"
+  ./venv/Scripts/python tools/llama.cpp-src/convert_hf_to_gguf.py "hf/${repo#*/}" --mmproj --outtype "$(echo "$MMPROJ_TYPE" | tr 'A-Z' 'a-z')" --outfile "$mm" > "logs/convert-mmproj-${name}.log" 2>&1
+  echo "built $mm $(stat -c %s "$mm") $(sha256sum "$mm" | cut -d' ' -f1)"
 done
