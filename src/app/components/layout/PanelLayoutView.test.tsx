@@ -503,6 +503,18 @@ describe("PanelLayoutView: 欄を広げる", () => {
       expect(container.querySelector(".panel-dock-zone"), "離しても帯が残る").toBeNull();
     });
 
+    it("Escape でやめたら、帯も名前札も片付ける", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+      stubRoot(container);
+      grab("あ");
+      move(500, 300);
+      expect(container.querySelector(".panel-dock-zone")).not.toBeNull();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(container.querySelector(".panel-dock-zone"), "やめても帯が残る").toBeNull();
+      expect(container.querySelector(".drag-ghost"), "やめても名前札が残る").toBeNull();
+      up(500, 300);
+    });
+
     it("右端の帯で離すと、空いていた右の領域へ移す", () => {
       const onChange = vi.fn();
       const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
