@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "package:release": "node scripts/package-release.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "mutate": "node scripts/mutate.mjs",

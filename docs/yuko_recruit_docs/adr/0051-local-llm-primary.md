@@ -75,6 +75,11 @@
    - **(a) 書庫を MSI の外に分ける**（WiX の `MediaTemplate EmbedCab="no"`＝MSI と `.cab` 数個を同じフォルダで配る・Drive 配布ならフォルダごと zip）。
    - **(b) モデルだけ MSI の横に置き、インストーラが取り込む**（MSI は今のまま・インストールの手間は変わらない・作り込みが要る）。
    - **(c) 同梱物を減らす**（VOICEVOX のモデルの一部を外す等＝声の選択肢が減る）。
+   ✅ **決着（2026-09-30 利用者判断＝(a)）**：**書庫を MSI の外に分ける**。WiX の `MediaTemplate EmbedCab="no"` で書庫を複数に割り（1つ 2GB 未満）、
+   **MSI と書庫（`.cab`）を同じフォルダに置いて配る**（Drive へはフォルダごと zip）。書庫は MSI と**同じフォルダに無いと入れられない**＝配布手順とテスター案内で明記する。
+   Tauri は MSI だけを `bundle/msi/` へ写すので、書庫を集めて配る形に揃える手順を足す（`scripts/package-release.mjs`＝**MSI の Media 表が名指しする書庫だけ**を集める＝前の回の残りを混ぜない）。
+   ⚠️ **MSI の型（`src-tauri/wix/main.wxs`）は Tauri の CLI（tauri-cli-v2.11.2）の既定の写し**で、変えたのは `MediaTemplate` の1行だけ。
+   **Tauri の CLI を上げたら、元の型の差分を取り込む**（取り込み忘れると、新しい版のインストーラの直しが入らない）。
 
 ## 採らなかった案
 

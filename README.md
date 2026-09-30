@@ -8,7 +8,7 @@
 Phase 0（技術検証）。ドメインの検証・変換パイプライン、共有レンダラ（レイアウト→SVG）まで実装。詳細は `docs/yuko_recruit_docs/02_MVP_ROADMAP.md`。
 
 ## 技術スタック
-Tauri v2 / React 19 + TypeScript（Vite）/ Rust / FFmpeg(OpenH264) / VOICEVOX / AIプロバイダ抽象（初期 Mock）。詳細・ライセンスは `docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md`。
+Tauri v2 / React 19 + TypeScript（Vite）/ Rust / FFmpeg(OpenH264) / VOICEVOX / AI はこのパソコンの中で動くローカル LLM（llama.cpp＋自前で量子化した Qwen3.5・ADR-0051）が既定・Gemini は選んだときだけ。詳細・ライセンスは `docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md`。
 
 ## セットアップ / 開発
 ```bash
