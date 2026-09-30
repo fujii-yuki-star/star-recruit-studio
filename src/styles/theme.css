@@ -964,32 +964,32 @@ button.badge {
  * ⚠️ 絵の入れ物（wrap）に**実際の大きさを持たせる**＝操作レイヤ（`inset: 0`）の基準なので、
  * 絵より大きい箱にすると掴む位置が実際とずれる。比は画面が `--stage-ratio`（幅÷高さ）で流し込む。
  */
-/* 絵の置き場と、その上に浮かせる道具（倍率・端の目安・#1261）の入れ物。置き場の大きさは入れ物が決める。 */
+/* 絵の置き場の入れ物。置き場の大きさは入れ物が決める（欄の残りの高さを受け持つ）。 */
 .preview-fit-shell {
-  position: relative;
   flex: 1 1 0;
   min-height: 96px;
   display: flex;
 }
-/* ⚠️ **余白は素通し・押せる物だけ受ける**（#1269 レビュー 🟡）＝絵に重なったとき、道具の余白が
-   キャンバスの掴む・二度押しの当たりを取っていた。 */
-.preview-view-tools button,
-.preview-view-tools label {
-  pointer-events: auto;
-}
+/* 仕上がり確認の**見え方の道具**（倍率・端の目安・大きく見る・別の窓）。
+   ⚠️ **絵の上に重ねない**（実機指摘 2026-09-30＝絵と被って押し間違える）＝本体では欄の見出しの行
+   （`.panel-frame-head-tools`）、別窓では窓の上端の行（`.preview-window-bar`）に並べる。流れの中に置く。 */
 .preview-view-tools {
-  pointer-events: none;
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 6;
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
+  flex-wrap: nowrap;
+  white-space: nowrap;
   font-size: 12px;
+}
+/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。 */
+.preview-window-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  overflow: hidden;
 }
 .preview-fit {
   flex: 1 1 0;
@@ -1401,6 +1401,8 @@ button.badge {
 .panel-layout {
   display: grid;
   gap: 0;
+  /* 空いた領域への落とし先（`.panel-dock-zone`）の基準＝器に対して置く。 */
+  position: relative;
   /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
      `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
   height: 76vh;
@@ -1426,7 +1428,9 @@ button.badge {
   min-height: 0;
   overflow: hidden;
 }
-.panel-layout-region--center {
+/* **残りの幅を使う領域**（実機指摘 2026-09-30）＝既定は真ん中。真ん中を閉じたら右（無ければ左）が使う
+   ＝閉じた場所に何も無い帯を残さない（`flexRegionOf`）。 */
+.panel-layout-region--flex {
   flex: 1 1 0;
 }
 .panel-split {
@@ -1473,6 +1477,12 @@ button.badge {
 .panel-frame-head h3 {
   margin: 0;
   font-size: 0.95rem;
+  /* 見出しの道具（`.panel-frame-head-tools`）と並ぶので、狭いときは名前の側も縮む（折り返さない）。 */
+  flex: 0 1 auto;
+  min-width: 3em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .panel-frame-body {
   flex: 1 1 auto;
@@ -1550,7 +1560,20 @@ button.badge {
   opacity: 0.6;
   font-size: 11px;
 }
-.panel-frame-head-actions { display: flex; align-items: center; gap: 2px; }
+.panel-frame-head-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
+/* **見出しの行の道具**（実機指摘 2026-09-30）＝欄の中身の上に重ねない（重ねると絵と被って押し間違える）。
+   折り返さない＝見出しの高さが変わると中身の大きさが変わる（#1261 の繰り返しを作らない）。狭いときは道具の側が縮む。 */
+.panel-frame-head-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  font-size: 12px;
+  margin-right: 4px;
+}
 /* **一時的に広げた欄**（ADR-0048 決定5）＝配置の器いっぱいに重ねて出す。
    ⚠️ **ほかの欄は外さずに隠す**（`visibility`）＝外すと中身の状態（鳴っている音・スクロール位置）が消える。
    ⚠️ 器（`.panel-layout`）が基準＝間の箱は位置を持たないので、広げた欄は器に対して置かれる。 */
@@ -1585,16 +1608,37 @@ button.badge {
   touch-action: none;
 }
 .panel-frame-head:active { cursor: grabbing; }
+/* **入る半分を塗る**（実機指摘 2026-09-30＝線だけでは入る広さが読めない）。辺には線も残す＝どちら側かが一目で分かる。 */
 .panel-drop-line {
   position: absolute;
-  background: var(--drop-line-color);
+  background: color-mix(in srgb, var(--drop-line-color) 22%, transparent);
   z-index: 2;
   pointer-events: none;
 }
-.panel-drop-line--top { top: 0; left: 0; right: 0; height: var(--drop-line-w); }
-.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: var(--drop-line-w); }
-.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: var(--drop-line-w); }
-.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: var(--drop-line-w); }
+.panel-drop-line--top { top: 0; left: 0; right: 0; height: 50%; border-top: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: 50%; border-bottom: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: 50%; border-left: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: 50%; border-right: var(--drop-line-w) solid var(--drop-line-color); }
+/* **空いた領域への落とし先**（実機指摘 2026-09-30）＝掴んでいる間だけ外周の端（と空いた真ん中）に出す。
+   押す当たりは取らない（落とし先の判定は画面の側が矩形で行う）。 */
+.panel-dock-zone {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed color-mix(in srgb, var(--drop-line-color) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--drop-line-color) 10%, transparent);
+  color: var(--drop-line-color);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.panel-dock-zone--active {
+  border-style: solid;
+  background: color-mix(in srgb, var(--drop-line-color) 32%, transparent);
+}
 
 /* 操作したその場の返事（置けなかった理由など）。**欄の下に置いたまま常に見える**ようにする
    （ADR-0033＝上に積むと編集の場所が狭まる／下へ流すと画面外に落ちて気づけない）。 */

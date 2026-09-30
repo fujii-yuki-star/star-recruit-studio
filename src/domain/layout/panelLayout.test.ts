@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_REGION_SIZES,
   DROP_SIDE,
+  dockZoneBoxes,
   dropSideAt,
+  emptyRegions,
+  flexRegionOf,
   MAX_BOTTOM_REGION_RATIO,
   MAX_REGION_RATIO,
   MAX_SIDE_TOTAL_RATIO,
@@ -413,5 +416,97 @@ describe('落とし直しと境目（/canon-check の指摘）', () => {
     expect(dropSideAt(box, 75, 25)).toBe(DROP_SIDE.top); // 右上
     expect(dropSideAt(box, 25, 75)).toBe(DROP_SIDE.bottom); // 左下
     expect(dropSideAt(box, 75, 75)).toBe(DROP_SIDE.bottom); // 右下
+  });
+});
+
+// 閉じた欄の場所を空けたままにしない・空いた領域へ落とせる（実機指摘 2026-09-30）。
+describe('flexRegionOf／emptyRegions', () => {
+  const leaf = (panelId: string) => ({ panelId });
+  it('残りの幅を使うのは真ん中→右→左の順（上の段が空なら無い）', () => {
+    const l = emptyLayout();
+    expect(flexRegionOf(l.nodes)).toBeNull();
+    l.nodes.left = leaf('a');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.left);
+    l.nodes.right = leaf('b');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.right);
+    l.nodes.center = leaf('c');
+    expect(flexRegionOf(l.nodes)).toBe(PANEL_REGION.center);
+    l.nodes.bottom = leaf('d');
+    l.nodes.left = null; l.nodes.center = null; l.nodes.right = null;
+    expect(flexRegionOf(l.nodes), '下だけなのに上の段を残す').toBeNull();
+  });
+
+  it('空いた領域だけを落とし先にする', () => {
+    const l = emptyLayout();
+    l.nodes.left = leaf('a');
+    l.nodes.bottom = leaf('b');
+    expect(emptyRegions(l)).toEqual([PANEL_REGION.center, PANEL_REGION.right]);
+  });
+});
+
+// 空いた領域の帯の置き場所（#1275 レビュー 🔴＝片側だけのとき真ん中の帯が端の帯と重なり、器からはみ出していた）。
+describe('dockZoneBoxes（空いた領域の帯）', () => {
+  const size = { width: 1000, height: 800 };
+  const Z = 36;
+  const overlap = (a: { left: number; top: number; width: number; height: number }, b: typeof a) =>
+    a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
+
+  it('どの組み合わせでも、帯は器の内側に収まり、互いに重ならない', () => {
+    const regions = [PANEL_REGION.left, PANEL_REGION.center, PANEL_REGION.right, PANEL_REGION.bottom];
+    for (let mask = 0; mask < 16; mask++) {
+      const l = emptyLayout();
+      regions.forEach((r, i) => { if (mask & (1 << i)) l.nodes[r] = { panelId: r }; });
+      const zones = dockZoneBoxes(l, size, l.nodes.left ? 280 : null, Z);
+      for (const { region, box } of zones) {
+        expect(box.left >= 0 && box.top >= 0 && box.left + box.width <= size.width && box.top + box.height <= size.height, `${mask}:${region} がはみ出す`).toBe(true);
+        expect(box.width > 0 && box.height > 0, `${mask}:${region} が潰れている`).toBe(true);
+      }
+      for (let i = 0; i < zones.length; i++) for (let j = i + 1; j < zones.length; j++) {
+        expect(overlap(zones[i].box, zones[j].box), `${mask}: ${zones[i].region} と ${zones[j].region} が重なる`).toBe(false);
+      }
+      // 空いていない領域の帯は出さない。
+      for (const { region } of zones) expect(l.nodes[region], `${mask}: 空いていない ${region} に帯`).toBeNull();
+    }
+  });
+
+  it('真ん中の帯は、左右の両方に欄があるときだけ境目に出る（片側だけなら出さない）', () => {
+    const both = emptyLayout();
+    both.nodes.left = { panelId: 'a' };
+    both.nodes.right = { panelId: 'b' };
+    expect(dockZoneBoxes(both, size, 280, Z).find((z) => z.region === PANEL_REGION.center)?.box).toMatchObject({ left: 280 - Z / 2, width: Z });
+    const onlyRight = emptyLayout();
+    onlyRight.nodes.right = { panelId: 'b' };
+    expect(dockZoneBoxes(onlyRight, size, null, Z).map((z) => z.region)).not.toContain(PANEL_REGION.center);
+    const onlyLeft = emptyLayout();
+    onlyLeft.nodes.left = { panelId: 'a' };
+    expect(dockZoneBoxes(onlyLeft, size, 1000, Z).map((z) => z.region)).not.toContain(PANEL_REGION.center);
+  });
+
+  it('境目が器の端に近くても、真ん中の帯は器の内側に収める', () => {
+    const l = emptyLayout();
+    l.nodes.left = { panelId: 'a' };
+    l.nodes.right = { panelId: 'b' };
+    expect(dockZoneBoxes(l, size, 5, Z).find((z) => z.region === PANEL_REGION.center)!.box.left).toBe(0);
+    expect(dockZoneBoxes(l, size, 995, Z).find((z) => z.region === PANEL_REGION.center)!.box.left).toBe(1000 - Z);
+  });
+
+  it('上の段が空なら真ん中は上の端・左右の帯はその下から', () => {
+    const l = emptyLayout();
+    l.nodes.bottom = { panelId: 'a' };
+    const zones = dockZoneBoxes(l, size, null, Z);
+    expect(zones.find((z) => z.region === PANEL_REGION.center)!.box).toEqual({ left: 0, top: 0, width: 1000, height: Z });
+    expect(zones.find((z) => z.region === PANEL_REGION.left)!.box.top).toBe(Z);
+  });
+
+  it('下が空なら、左右の帯は下の帯の上で止まる', () => {
+    const l = emptyLayout();
+    l.nodes.center = { panelId: 'a' };
+    const zones = dockZoneBoxes(l, size, null, Z);
+    const left = zones.find((z) => z.region === PANEL_REGION.left)!.box;
+    expect(left.top + left.height).toBe(800 - Z);
+  });
+
+  it('大きさが分からなければ出さない', () => {
+    expect(dockZoneBoxes(emptyLayout(), { width: 0, height: 0 }, null, Z)).toEqual([]);
   });
 });

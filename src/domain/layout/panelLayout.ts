@@ -521,3 +521,73 @@ export function dropSideAt(box: DropBox, clientX: number, clientY: number): Drop
   if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? DROP_SIDE.left : DROP_SIDE.right;
   return dy < 0 ? DROP_SIDE.top : DROP_SIDE.bottom;
 }
+
+/**
+ * 上の段で**残りの幅を全部使う領域**（閉じた欄の場所を空けたままにしない＝実機指摘 2026-09-30）。
+ *
+ * 既定は真ん中（左右は決まった割合）。**真ん中が空なら右**、右も無ければ左が残りを使う＝閉じた真ん中の
+ * 場所に何も無い帯が残らない。上の段がすべて空なら `null`（下の欄が全体を使う）。
+ * ⚠️ 割合を持つ領域（左・右）のうち**残りを使う側の割合は使わない**（覚えた値は消さない＝真ん中を戻せば元の幅）。
+ */
+export function flexRegionOf(nodes: PanelLayout['nodes']): PanelRegion | null {
+  if (nodes.center) return PANEL_REGION.center;
+  if (nodes.right) return PANEL_REGION.right;
+  if (nodes.left) return PANEL_REGION.left;
+  return null;
+}
+
+/**
+ * ドラッグで欄を落とせる**空いた領域**（外周の落とし先・実機指摘 2026-09-30）。
+ * 空でない領域には、その中の欄の辺へ落とせる（`dropPanelBeside`）ので出さない＝同じ所に2つの落とし先を重ねない。
+ * （掴んでいる欄が1つで占める領域も空ではないので出ない＝そこへ落としても何も変わらない。）
+ */
+export function emptyRegions(layout: PanelLayout): PanelRegion[] {
+  return PANEL_REGIONS.filter((r) => layout.nodes[r] == null);
+}
+
+/** 器の中の矩形（器の左上から・px）。 */
+export interface ZoneBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 空いた領域への落とし先の帯の置き場所（実機指摘 2026-09-30・#1275 レビュー 🔴）。純粋関数。
+ *
+ * - 左・右＝外周の左右の端（上の段の高さ）。下＝外周の下の端。
+ * - 真ん中＝**左右の両方に欄があるときだけ**その境目（`centerX`）。上の段が空なら上の端。
+ *   ⚠️ 片側だけのときは出さない＝境目が器の端に来て、端の帯と重なる（重なった所では真ん中へ落とせない）。
+ * - ⚠️ **帯どうしは重ねない・器からはみ出さない**＝四隅で重なる分は、左右の帯の側を縮める。
+ */
+export function dockZoneBoxes(
+  layout: PanelLayout,
+  size: { width: number; height: number },
+  centerX: number | null,
+  zonePx: number,
+): { region: PanelRegion; box: ZoneBox }[] {
+  const { width: w, height: h } = size;
+  if (w <= 0 || h <= 0) return [];
+  const empty = new Set(emptyRegions(layout));
+  const hasMain = flexRegionOf(layout.nodes) != null;
+  const mainH = layout.nodes.bottom && hasMain ? h * (1 - layout.regionSizes.bottom) : h;
+  const topBand = empty.has(PANEL_REGION.center) && !hasMain;
+  const bottomBand = empty.has(PANEL_REGION.bottom);
+  // 左右の帯は、上下の帯と重ならない高さにする。
+  const sideTop = topBand ? zonePx : 0;
+  const sideBottom = Math.min(mainH, bottomBand ? h - zonePx : h);
+  const sideH = Math.max(0, sideBottom - sideTop);
+  const out: { region: PanelRegion; box: ZoneBox }[] = [];
+  if (empty.has(PANEL_REGION.left) && sideH > 0) out.push({ region: PANEL_REGION.left, box: { left: 0, top: sideTop, width: zonePx, height: sideH } });
+  if (empty.has(PANEL_REGION.center)) {
+    if (topBand) out.push({ region: PANEL_REGION.center, box: { left: 0, top: 0, width: w, height: zonePx } });
+    else if (layout.nodes.left && layout.nodes.right && centerX != null) {
+      const left = Math.min(Math.max(centerX - zonePx / 2, 0), w - zonePx);
+      out.push({ region: PANEL_REGION.center, box: { left, top: 0, width: zonePx, height: sideBottom } });
+    }
+  }
+  if (empty.has(PANEL_REGION.right) && sideH > 0) out.push({ region: PANEL_REGION.right, box: { left: w - zonePx, top: sideTop, width: zonePx, height: sideH } });
+  if (bottomBand) out.push({ region: PANEL_REGION.bottom, box: { left: 0, top: h - zonePx, width: w, height: zonePx } });
+  return out;
+}

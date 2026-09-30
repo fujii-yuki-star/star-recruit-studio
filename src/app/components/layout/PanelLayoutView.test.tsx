@@ -158,9 +158,8 @@ describe("PanelLayoutView", () => {
 
   it("領域の外枠も掴んで動かせる（左右の幅・下の高さ）", () => {
     const onChange = vi.fn();
-    const l = emptyLayout();
-    l.nodes.left = { panelId: "a" };
-    const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    // ⚠️ 真ん中にも欄を置く＝左だけだと左が全体を使い、境目そのものが無い（閉じた場所を空けない・実機指摘 2026-09-30）。
+    const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
     (container.firstElementChild as HTMLElement).getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: 1000, height: 800, right: 1000, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     const edge = screen.getByLabelText("左の欄の幅");
@@ -427,5 +426,185 @@ describe("PanelLayoutView: 欄を広げる", () => {
     expect(ruleBody(theme, ".panel-layout--maximized") ?? "", "器が基準にならない").toMatch(/position:\s*relative/);
     const hide = ruleBody(theme, ".panel-layout--maximized .panel-frame:not(.panel-frame--maximized),\n.panel-layout--maximized .panel-divider") ?? "";
     expect(hide, "ほかの欄を外している／隠していない").toMatch(/visibility:\s*hidden/);
+  });
+
+  // ── 閉じた欄の場所を空けたままにしない（実機指摘 2026-09-30＝特に真ん中）─────────────────
+  describe("閉じた領域の場所を詰める", () => {
+    const three = [...panels, { id: "c", title: "う", content: <p>うの中身</p> }];
+    const regionEl = (c: HTMLElement, r: string) => c.querySelector(`[data-region="${r}"]`) as HTMLElement | null;
+    const dividers = () => screen.queryAllByRole("separator").map((d) => d.getAttribute("aria-label"));
+
+    it("真ん中が空なら、右が残りを使う（左は覚えた幅・境目は1本で左の幅を動かす）", () => {
+      const l = emptyLayout();
+      l.nodes.left = { panelId: "a" };
+      l.nodes.right = { panelId: "b" };
+      const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={vi.fn()} />);
+      expect(regionEl(container, "center"), "空の真ん中を描いている").toBeNull();
+      expect(regionEl(container, "right")!.className).toContain("panel-layout-region--flex");
+      expect(regionEl(container, "right")!.style.width, "残りを使う側に幅を決めている").toBe("");
+      expect(regionEl(container, "left")!.style.width).toBe(`${l.regionSizes.left * 100}%`);
+      expect(dividers()).toEqual(["左の欄の幅"]);
+    });
+
+    it("右だけなら右が全体を使う（境目は出さない）", () => {
+      const l = emptyLayout();
+      l.nodes.right = { panelId: "b" };
+      const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={vi.fn()} />);
+      expect(regionEl(container, "right")!.className).toContain("panel-layout-region--flex");
+      expect(dividers()).toEqual([]);
+    });
+
+    it("左・真ん中・右がそろっていれば、真ん中が残りを使い、左右は覚えた幅", () => {
+      const l = emptyLayout();
+      l.nodes.left = { panelId: "a" };
+      l.nodes.center = { panelId: "b" };
+      l.nodes.right = { panelId: "c" };
+      const { container } = render(<PanelLayoutView layout={l} panels={three} onChange={vi.fn()} />);
+      expect(regionEl(container, "center")!.className).toContain("panel-layout-region--flex");
+      expect(regionEl(container, "right")!.style.width).toBe(`${l.regionSizes.right * 100}%`);
+      expect(dividers()).toEqual(["左の欄の幅", "右の欄の幅"]);
+    });
+
+    it("上の段が空なら、下の欄が全体を使う（下の境目も出さない）", () => {
+      const l = emptyLayout();
+      l.nodes.bottom = { panelId: "a" };
+      const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={vi.fn()} />);
+      expect(container.querySelector(".panel-layout-main"), "空の上の段を描いている").toBeNull();
+      expect((container.firstElementChild as HTMLElement).style.gridTemplateRows).toBe("minmax(0, 1fr)");
+      expect(dividers()).toEqual([]);
+    });
+
+    it("CSS：残りを使う印が幅を受け持つ（真ん中の印ではなく）", () => {
+      const css = readFileSync(join(__dirname, "../../../styles/theme.css"), "utf8");
+      expect(ruleBody(css, ".panel-layout-region--flex")).toMatch(/flex:\s*1 1 0/);
+      expect(ruleBody(css, ".panel-layout-region--center"), "真ん中の印が幅を持っている（真ん中を閉じても場所が残る）").toBeNull();
+    });
+  });
+
+  // ── 空いた領域へもドラッグで移せる（実機指摘 2026-09-30）──────────────────────────
+  describe("空いた領域への落とし先", () => {
+    const stubRoot = (c: HTMLElement) => {
+      (c.firstElementChild as HTMLElement).getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1000, height: 800, right: 1000, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    };
+    const grab = (title: string) => pointerDownAt(screen.getByRole("heading", { name: title }).parentElement!, 1000, { clientX: 500, clientY: 10 });
+    const move = (x: number, y: number) => fireEvent.pointerMove(window, { buttons: 1, clientX: x, clientY: y, pointerId: 1 });
+    const up = (x: number, y: number) => fireEvent.pointerUp(window, { clientX: x, clientY: y, pointerId: 1 });
+
+    it("掴んでいる間だけ、空いた領域の帯を外周に出す（空でない領域には出さない）", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+      stubRoot(container);
+      expect(container.querySelector(".panel-dock-zone")).toBeNull();
+      grab("い");
+      move(500, 300);
+      const zones = [...container.querySelectorAll("[data-dock-region]")].map((z) => z.getAttribute("data-dock-region")).sort();
+      expect(zones).toEqual(["bottom", "right"]);
+      up(500, 300);
+      expect(container.querySelector(".panel-dock-zone"), "離しても帯が残る").toBeNull();
+    });
+
+    it("Escape でやめたら、帯も名前札も片付ける", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+      stubRoot(container);
+      grab("あ");
+      move(500, 300);
+      expect(container.querySelector(".panel-dock-zone")).not.toBeNull();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(container.querySelector(".panel-dock-zone"), "やめても帯が残る").toBeNull();
+      expect(container.querySelector(".drag-ghost"), "やめても名前札が残る").toBeNull();
+      up(500, 300);
+    });
+
+    it("右端の帯で離すと、空いていた右の領域へ移す", () => {
+      const onChange = vi.fn();
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
+      stubRoot(container);
+      grab("あ");
+      move(990, 300);
+      expect(container.querySelector('[data-dock-region="right"]')!.className).toContain("panel-dock-zone--active");
+      up(990, 300);
+      const next = onChange.mock.calls[0][0] as PanelLayout;
+      expect(next.nodes.right).toEqual({ panelId: "a" });
+      expect(next.nodes.left).toBeNull();
+    });
+
+    it("下端の帯で離すと、空いていた下の領域へ移す", () => {
+      const onChange = vi.fn();
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
+      stubRoot(container);
+      grab("あ");
+      move(500, 790);
+      up(500, 790);
+      expect((onChange.mock.calls[0][0] as PanelLayout).nodes.bottom).toEqual({ panelId: "a" });
+    });
+
+    it("真ん中が空なら左右の境目に帯を出し、そこで離すと真ん中へ移す", () => {
+      const onChange = vi.fn();
+      const l = emptyLayout();
+      l.nodes.left = { panelId: "a" };
+      l.nodes.right = { panelId: "b" };
+      const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+      stubRoot(container);
+      (container.querySelector('[data-region="left"]') as HTMLElement).getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 280, height: 800, right: 280, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      grab("い");
+      move(282, 300);
+      expect(container.querySelector('[data-dock-region="center"]')!.className).toContain("panel-dock-zone--active");
+      up(282, 300);
+      expect((onChange.mock.calls[0][0] as PanelLayout).nodes.center).toEqual({ panelId: "b" });
+    });
+
+    it("欄を広げている間は、空いた領域の帯を出さない（隠れた欄の周りへ落とさない）", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} maximized="a" onMaximizedChange={vi.fn()} />);
+      stubRoot(container);
+      grab("あ");
+      move(990, 300);
+      expect(container.querySelector(".panel-dock-zone")).toBeNull();
+      up(990, 300);
+    });
+
+    it("掴んでいる欄の名前を指の先に出す", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+      stubRoot(container);
+      grab("あ");
+      move(400, 300);
+      const ghost = container.querySelector(".drag-ghost") as HTMLElement;
+      expect(ghost.textContent).toBe("あ");
+      expect([ghost.style.left, ghost.style.top]).toEqual(["400px", "300px"]);
+      up(400, 300);
+      expect(container.querySelector(".drag-ghost")).toBeNull();
+    });
+
+    it("CSS：欄の辺へ落とすときは、入る半分を塗る（線だけでは広さが読めない）", () => {
+      const css = readFileSync(join(__dirname, "../../../styles/theme.css"), "utf8");
+      expect(ruleBody(css, ".panel-drop-line--top")).toMatch(/height:\s*50%/);
+      expect(ruleBody(css, ".panel-drop-line--left")).toMatch(/width:\s*50%/);
+    });
+  });
+
+  // ── 見出しの行の道具（実機指摘 2026-09-30＝中身の上に重ねない）────────────────────
+  describe("見出しの道具", () => {
+    const withTools = [{ id: "a", title: "あ", content: <p>あの中身</p>, headerTools: <button>道具</button> }, panels[1]];
+
+    it("見出しの行に出る（中身の側には出さない）", () => {
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={withTools} onChange={vi.fn()} />);
+      const tool = screen.getByRole("button", { name: "道具" });
+      expect(tool.closest(".panel-frame-head")).not.toBeNull();
+      expect(container.querySelector('[data-panel-id="a"] .panel-frame-body')!.contains(tool)).toBe(false);
+    });
+
+    it("道具を押しても欄は動かし始めない・二度押しでも広げない", () => {
+      const onChange = vi.fn();
+      const onMax = vi.fn();
+      const { container } = render(<PanelLayoutView layout={sideBySide()} panels={withTools} onChange={onChange} maximized={null} onMaximizedChange={onMax} />);
+      stubBoxes({ a: { left: 0, top: 0, width: 100, height: 100 }, b: { left: 100, top: 0, width: 100, height: 100 } });
+      const toolsBox = container.querySelector(".panel-frame-head-tools") as HTMLElement;
+      pointerDownAt(toolsBox, 1000, { clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
+      fireEvent.pointerUp(window, { clientX: 150, clientY: 95, pointerId: 1 });
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.doubleClick(toolsBox);
+      expect(onMax).not.toHaveBeenCalled();
+    });
   });
 });

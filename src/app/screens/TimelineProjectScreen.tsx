@@ -3758,45 +3758,46 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     ? zoomedBox({ width: fitStageW, height: fitStageW / stageRatio }, previewZoom, previewFitPct)
     : null;
 
+  // 仕上がり確認の**見え方の道具**（倍率・端の目安・大きく見る・別の窓）。
+  // ⚠️ **絵の上に重ねない**（実機指摘 2026-09-30＝絵と被って押し間違える）＝本体では欄の**見出しの行**、
+  //   別窓では窓の上端の行に置く。どちらも絵の置き場の外で、高さが決まっている（#1261＝道具の幅が変わっても
+  //   絵の置き場の大きさは変わらない＝「％の幅→折り返し→絵の大きさ→％」の繰り返しを作らない）。
+  const previewViewTools = (
+    <span className="preview-view-tools" data-testid="preview-view-tools">
+      {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
+      <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+      <SafeAreaToggle />
+      <button
+        className="btn btn-ghost btn-sm"
+        aria-pressed={bigView}
+        title={bigView ? "元の大きさに戻します（Esc でも）" : "仕上がり確認を画面いっぱいに広げます（Esc で戻ります）。そのまま直接動かせます"}
+        onClick={() => (bigView ? exitBigView() : enterBigView())}
+      >
+        {bigView ? "元に戻す" : "大きく見る"}
+      </button>
+      {/* **別の窓で見る**（ADR-0050・#1263）＝2画面目で大きく見ながら、そのまま直接動かす。押し直しで閉じる（1手で戻る）。
+          別窓では出さない（別窓の閉じ方は窓の上端の行の左端＝切れない所に置く）。 */}
+      {!inPreviewWindow && (
+        <button
+          className="btn btn-ghost btn-sm"
+          aria-pressed={previewWindow.open}
+          title={previewWindow.open ? "別の窓を閉じます" : "仕上がり確認を別の窓に出します。2画面目で大きく見ながら、そのまま直接動かせます"}
+          onClick={() => (previewWindow.open ? previewWindow.close() : previewWindow.show())}
+        >
+          別の窓で見る
+        </button>
+      )}
+    </span>
+  );
   const panels: PanelSpec[] = [
     // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
     // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
     //（1920×1009 の実測＝欄の本文 284px に絵 418px・「再生」は欄の下端より 142px 下）。
     // 高さの側からも縛る＝`.preview-fit` が残りの高さを受け持ち、絵はその中に**縦横とも収まる**大きさにする。
-    { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, content: (
+    { id: PANEL_ID.preview, title: '仕上がり確認', fillBody: true, headerTools: inPreviewWindow ? undefined : previewViewTools, content: (
       <>
-        {/* ⚠️ **倍率と端の目安は、絵の置き場の上に浮かせる**（#1261）＝「再生」の行に置いたら、倍率の%表示の幅が
-            変わるたびに行の折り返しが変わり → 絵の置き場の高さが変わり → %が変わる、の**繰り返しで画面が固まった**（実測）。
-            浮かせれば置き場の大きさに関わらない。部品は場面編集と**同じもの**（ADR-0026②）。 */}
+        {/* 見え方の道具は欄の見出しの行（`previewViewTools`）＝絵の上に重ねない（実機指摘 2026-09-30）。 */}
         <div className="preview-fit-shell">
-        <div className="preview-view-tools" data-testid="preview-view-tools">
-          {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
-          <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
-          <SafeAreaToggle />
-          <button
-            className="btn btn-ghost btn-sm"
-            aria-pressed={bigView}
-            title={bigView ? "元の大きさに戻します（Esc でも）" : "仕上がり確認を画面いっぱいに広げます（Esc で戻ります）。そのまま直接動かせます"}
-            onClick={() => (bigView ? exitBigView() : enterBigView())}
-          >
-            {bigView ? "元に戻す" : "大きく見る"}
-          </button>
-          {/* **別の窓で見る**（ADR-0050・#1263）＝2画面目で大きく見ながら、そのまま直接動かす。押し直しで閉じる（1手で戻る）。 */}
-          {inPreviewWindow ? (
-            <button className="btn btn-ghost btn-sm" title="この窓を閉じます（本体の窓はそのまま使えます）" onClick={() => void closeSelf()}>
-              この窓を閉じる
-            </button>
-          ) : (
-            <button
-              className="btn btn-ghost btn-sm"
-              aria-pressed={previewWindow.open}
-              title={previewWindow.open ? "別の窓を閉じます" : "仕上がり確認を別の窓に出します。2画面目で大きく見ながら、そのまま直接動かせます"}
-              onClick={() => (previewWindow.open ? previewWindow.close() : previewWindow.show())}
-            >
-              別の窓で見る
-            </button>
-          )}
-        </div>
         <div
           ref={fitRef}
           className={`preview-fit${previewZoomed ? " preview-fit--zoomed" : ""}`}
@@ -6157,6 +6158,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const previewPanel = shownPanels.find((p) => p.id === PANEL_ID.preview);
     return (
       <div className="preview-window dense" data-testid="preview-window">
+        {/* 見え方の道具は窓の上端の行（本体の見出しの行と同じ役）＝絵の上に重ねない。 */}
+        {/* ⚠️ **閉じるは左端に固定**（#1275 レビュー）＝狭い窓で道具がはみ出しても、閉じる手が切れない。 */}
+        <div className="preview-window-bar">
+          <button className="btn btn-ghost btn-sm" title="この窓を閉じます（本体の窓はそのまま使えます）" onClick={() => void closeSelf()}>
+            この窓を閉じる
+          </button>
+          {previewViewTools}
+        </div>
         {/* 欄の本文と同じ器（`fillBody` の欄）＝絵の収め方と「再生」の行の出し方を本体と割らない。 */}
         <div className="panel-frame-body panel-frame-body--fill">{previewPanel?.content}</div>
         {(voiceError || flashBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (

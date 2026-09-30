@@ -5,6 +5,7 @@
 // ⚠️ **アプリの中とブラウザで入り口が違う**＝アプリの中は Tauri の窓とイベント、ブラウザ（開発時）は
 // `window.open` と `BroadcastChannel`（同じ作りで画面を確かめられるようにする）。
 import { isTauri } from './assetFs';
+import { PREVIEW_WINDOW_MIN_H, PREVIEW_WINDOW_MIN_W } from '../domain/layout/previewWindowRect';
 import type { WindowRect } from '../domain/layout/previewWindowRect';
 
 /** 別窓の名前（権限 `capabilities/preview.json` の `windows` と同じ）。 */
@@ -104,8 +105,8 @@ export async function openPreviewWindow(title: string, rect: WindowRect | null):
         title,
         parent: MAIN_WINDOW_LABEL,
         ...(rect ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.w), height: Math.round(rect.h) } : {}),
-        minWidth: 480,
-        minHeight: 320,
+        minWidth: PREVIEW_WINDOW_MIN_W,
+        minHeight: PREVIEW_WINDOW_MIN_H,
         focus: true,
       });
       // 消えたら知らせる＝×で閉じた・本体から閉じた、のどちらでも本体の印を戻す。
