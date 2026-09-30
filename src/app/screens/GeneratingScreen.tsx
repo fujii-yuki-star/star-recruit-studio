@@ -2,9 +2,9 @@ import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
-import { onAiBusyWait } from "../../infrastructure/aiClient";
+import { onAiBusyWait, onLocalAiProgress } from "../../infrastructure/aiClient";
 import { LoadingView, ErrorView } from "../components/states";
-import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, writingSceneMessage } from "../uiLabels";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
@@ -28,6 +28,11 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
    *（待つだけで合計 33 秒・1回の要求にも最大 60 秒かかりうる）ので、黙っていると**固まったように見える**（しかも以前は待ち直さずに落ちていた）。
    */
   const [busyWait, setBusyWait] = useState(0);
+  /**
+   * このパソコンの中で作っているとき、書き始めた場面の数（0＝まだ書き始めていない・ADR-0052 決定6・#1293）。
+   * ⚠️ **1分ほど何も変わらない画面にしない**＝実際に書いている場面の数を見せる（見込みの割合は出さない＝嘘をつかない）。
+   */
+  const [writingScene, setWritingScene] = useState(0);
 
   useEffect(() => {
     void generate();
@@ -38,6 +43,19 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
     let stop: (() => void) | null = null;
     let alive = true;
     void onAiBusyWait((e) => setBusyWait(e.attempt)).then((off) => {
+      if (alive) stop = off;
+      else off();
+    });
+    return () => {
+      alive = false;
+      if (stop) stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let alive = true;
+    void onLocalAiProgress((e) => setWritingScene(e.scenes)).then((off) => {
       if (alive) stop = off;
       else off();
     });
@@ -82,6 +100,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
                   primary: true,
                   onClick: () => {
                     setProgress(8);
+                    setWritingScene(0);
                     reset();
                     void generate();
                   },
@@ -105,7 +124,9 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             ? "内容を確認して、自由に修正できます。"
             : busyWait > 0
               ? "いま混み合っているので、少し待ってからもう一度お願いしています。このままお待ちください。"
-              : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
+              : writingScene > 0
+                ? writingSceneMessage(writingScene)
+                : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
         }
         progress={status === "ready" ? progress : "indeterminate"}
         onCancel={

@@ -104,6 +104,20 @@ export async function prepareLocalAi(): Promise<void> {
   }
 }
 
+/** このパソコンの中で動画案を作っている間の進み具合（書き始めた場面の数）。 */
+export interface LocalAiProgress {
+  scenes: number;
+}
+
+/**
+ * このパソコンの中で動画案を作っている間の知らせを受ける（ADR-0052 決定6・#1293）。戻り値は外す関数。
+ * Tauri の外では何も来ない（外す関数だけ返す）。
+ */
+export async function onLocalAiProgress(handler: (e: LocalAiProgress) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<LocalAiProgress>('local-ai-progress', (e) => handler(e.payload));
+}
+
 /** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
 export async function localAiAvailable(): Promise<boolean> {
   if (!isTauri()) return false;

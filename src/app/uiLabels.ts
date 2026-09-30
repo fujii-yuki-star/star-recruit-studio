@@ -1746,3 +1746,11 @@ export const PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE = "本体の窓とつながり
 
 /** Gemini を使う設定なのに接続キーが無い（ADR-0051 決定15・`15 §6` `AI_GEMINI_KEY_MISSING`）＝黙ってこのパソコンの中や見本へ落とさない。 */
 export const AI_GEMINI_KEY_MISSING_MESSAGE = "Gemini を使う設定になっていますが、接続キーが登録されていません。設定の「動画案を作るAI」でキーを登録するか、「このパソコンの中で作る」に戻してください。";
+
+/**
+ * 生成中に、このパソコンの中の AI が書いている場面の数を伝える文（ADR-0052 決定6・#1293）。
+ * ⚠️ **見込みの割合は出さない**＝何場面になるかは書き終わるまで分からない（嘘の % を出さない）。
+ */
+export function writingSceneMessage(n: number): string {
+  return `${n} 場面目を書いています。このままお待ちください。`;
+}
