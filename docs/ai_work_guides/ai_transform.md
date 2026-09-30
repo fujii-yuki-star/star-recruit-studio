@@ -6,7 +6,7 @@
 
 | 資料 | 範囲 | なぜ |
 |---|---|---|
-| [`12_AI_PROMPT_AND_MAPPING.md`](../yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md) | **§8 変換マッピング**・**§9 検証・補正・リカバリ**（正典・全体でも 15,881字） | 何をどう写すか／落とすかの規範 |
+| [`12_AI_PROMPT_AND_MAPPING.md`](../yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md) | **§8 変換マッピング**・**§9 検証・補正・リカバリ**（正典・全体でも 18,573字） | 何をどう写すか／落とすかの規範 |
 | [`docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json`](../yuko_recruit_docs/schemas/ai-video-plan.schema.json) | 全文（90行） | AI 出力の実体 |
 | [`11_SCHEMA_REFERENCE.md`](../yuko_recruit_docs/11_SCHEMA_REFERENCE.md) | **§2 ID採番**・**§9 自動補正ルール**（計 6,300字ほど） | `part_NNN`/`scene_NNN` の採番・clamp |
 
@@ -15,7 +15,7 @@
 | 条件 | 読むもの |
 |---|---|
 | プロンプトや送信内容を変える | `12 §4`〜`12 §7`＋**`CLAUDE.md §2-6`（外部送信は事前確認・元動画は送らない）** |
-| 同梱の AI の質（尺・見た目の選択・写真の割り当て・固有名詞）を変える | [`adr/0052`](../yuko_recruit_docs/adr/0052-local-ai-plan-quality.md)（**AI は中身・ソフトは機械的に決められること**＝方向。見直しの導線つき）＋[`adr/0051`](../yuko_recruit_docs/adr/0051-local-llm-primary.md) |
+| 同梱の AI の質（尺・見た目の選択・写真の割り当て・固有名詞）を変える | [`adr/0052`](../yuko_recruit_docs/adr/0052-local-ai-plan-quality.md)（**AI は中身・ソフトは機械的に決められること**＝方向。見直しの導線つき）＋[`adr/0051`](../yuko_recruit_docs/adr/0051-local-llm-primary.md)＋**`12 §8.7`**（ソフトで整える段の規則＝`refineVideoPlan.ts`）。点数は `scripts/local-llm/eval-real-prompt.ts` で前後を取り `local-llm-build.md` に記録 |
 | Provider を足す | [`adr/0010`](../yuko_recruit_docs/adr/0010-real-ai-provider.md)＋`12 §2`・`§3` |
 | 用途（採用／一般）で分ける | [`adr/0011`](../yuko_recruit_docs/adr/0011-video-kinds-and-stario.md)＋`12 §5b` |
 | 出力に無い概念を足したくなった | **止まって確認**＝AI が触るのは場面形式まで（ADR-0032）。グループ・キーフレーム・タイムラインは AI 出力に無い（ADR-0007 単一パイプライン） |

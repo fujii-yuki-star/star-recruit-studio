@@ -30,7 +30,18 @@ export function aiGenerate(
  * ⚠️ **いま送っている最中の1回は取り消せない**（相手に届いたもの）＝止められるのは「次に送る」ぶん。
  * ⚠️ **Tauri の外では何もしない**＝相手がいない。失敗しても投げない（止める操作そのものは止めない）。
  */
+let aiCancelEpoch = 0;
+
+/**
+ * 「やめる」が押された回数（この画面の中だけ）。⚠️ Rust の止める合図は**そのとき走っている1回**にしか効かないので、
+ * 1回の動画案づくりで AI を何度も呼ぶ側（同梱の AI の言い直し・ADR-0052）は、呼ぶ前にこれが変わっていないかを見る。
+ */
+export function currentAiCancelEpoch(): number {
+  return aiCancelEpoch;
+}
+
 export async function cancelAiGenerate(): Promise<void> {
+  aiCancelEpoch++;
   if (!isTauri()) return;
   try {
     await invoke('cancel_ai_generate');

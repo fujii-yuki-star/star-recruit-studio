@@ -149,6 +149,8 @@
 | `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
 | `AI_SCENE_MAX_DURATION_SEC` | `15` | **AI 生成の目安**（上限の既定・テンプレ `aiHint.maxDurationSec` で上書き可）。手編集の制約ではない（#553） |
 | `SCENE_DEFAULT_DURATION_SEC` | `8` | 既定シーン尺 |
+| `NARRATION_CHARS_PER_SEC` | `7.5` | **同梱の AI の動画案で場面の尺を語りから計算する**ときの読み上げの速さの見積もり（字/秒）＝ADR-0052 段階1・`12 §8.7`。早口の判定（`precheckExtras` の 9 字/秒）より遅めに置く＝計算した尺が早口の判定に掛からない。⚠️ 声ごとの速さ設定（`11.6`）とはまだつないでいない |
+| `NARRATION_SCENE_PADDING_SEC` | `1` | 同上の計算で語りの前後に置く間（秒） |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
 | `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |

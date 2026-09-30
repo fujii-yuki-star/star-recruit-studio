@@ -11,6 +11,13 @@ import type { Orientation, SceneCategory } from './enums';
 export const AI_SCENE_MIN_DURATION_SEC = 3;
 export const AI_SCENE_MAX_DURATION_SEC = 15;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
+// 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
+// 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は
+// 「早口すぎる」の判定で、こちらは**尺の見積もり**＝判定より遅めに見積もる＝計算した尺が早口の判定に掛からない）。
+// ⚠️ 声ごとの速さ設定（11.6）とはまだつないでいない（ADR-0052 未解決の論点）。
+export const NARRATION_CHARS_PER_SEC = 7.5;
+// 語りの前後に置く間（秒）。場面の切り替わりで声が詰まって聞こえないように。
+export const NARRATION_SCENE_PADDING_SEC = 1;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
 export const PROJECT_NAME_MAX_LENGTH = 80;
