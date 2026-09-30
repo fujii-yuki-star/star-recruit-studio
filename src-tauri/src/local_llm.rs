@@ -8,6 +8,7 @@
 // - **写真も読める**（ADR-0052 決定4）＝視覚の部品（`mmproj`）が同梱されていれば一緒に読み込む。無くても動画案は作れる。
 use crate::messages::{
     AI_CANCELLED, LOCAL_AI_BROKEN, LOCAL_AI_MISSING, LOCAL_AI_START_FAILED, LOCAL_AI_TIMEOUT,
+    LOCAL_AI_TOO_LONG,
 };
 use crate::proc::no_window_command;
 use sha2::{Digest, Sha256};
@@ -36,6 +37,9 @@ pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
 /// 文脈の長さ（トークン）。見た目パターン・素材の一覧つきの指示文と、出力（数千トークン）が収まる大きさ。
 const CONTEXT_TOKENS: u32 = 8192;
+/// 1回の出力の上限（トークン）＝ADR-0052 決定6・#1293。ふつうの動画案は 600〜1,100 トークン（最低検証機の実測）＝約3倍。
+/// ⚠️ **止まらずに出し続ける回がある**（実測で1回・文脈いっぱいまで）＝上限が無いと 600 秒の待ちの末に読めない、になる。
+pub const MAX_OUTPUT_TOKENS: u32 = 3072;
 /// 起動して応えるまで待つ上限（モデルの読み込みを含む）。
 const START_TIMEOUT: Duration = Duration::from_secs(120);
 /// 1回の生成の上限（最低検証機で CPU だけ＝約 20 トークン/秒）。
@@ -123,6 +127,9 @@ impl LocalLlmState {
         if !alive {
             g.child = None;
             g.base_url = None;
+            // 落ちた回の「最後に使った時刻」も消す（#1293 レビュー 🟡）＝残すと、次の起動の途中で見張りが
+            // 「しばらく使っていない」と判定して起動中の子を止める。
+            g.last_used = None;
             return None;
         }
         g.base_url.clone()
@@ -395,6 +402,16 @@ async fn ensure_started(
     let base_url = format!("http://127.0.0.1:{port}");
     let started = Instant::now();
     loop {
+        // 見張り・アプリ終了で止められた（子が片付けられた）＝待ち続けない（#1293 レビュー 🟡）。
+        if state
+            .inner
+            .lock()
+            .map(|g| g.child.is_none())
+            .unwrap_or(true)
+        {
+            crate::tlog!("local_llm", "起動の途中で止められました");
+            return Err(LOCAL_AI_START_FAILED.to_string());
+        }
         if let Some(status) = state.starting_child_exited() {
             crate::tlog!("local_llm", "起動の途中で止まりました: {status}");
             state.shutdown();
@@ -476,7 +493,17 @@ fn request_body(
         // 考える段は切る＝待ち時間を延ばさず、出力は JSON だけにする。
         "chat_template_kwargs": { "enable_thinking": false },
         "temperature": 0.2,
+        "max_tokens": MAX_OUTPUT_TOKENS,
     })
+}
+
+/// 出力が上限で止まったか（`finish_reason` が `length`）。
+pub fn stopped_by_length(resp: &serde_json::Value) -> bool {
+    resp.get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|r| r.as_str())
+        == Some("length")
 }
 
 /// 読める写真の種類（拡張子 → data URL の種類）。**写真以外のファイルは読まない**（任意のファイルを読む口にしない）。
@@ -576,7 +603,31 @@ pub async fn local_ai_generate(
             .map(|t| t.to_string())
             .unwrap_or_default()
     );
+    if stopped_by_length(&json) {
+        crate::tlog!(
+            "local_llm",
+            "出力が上限（{MAX_OUTPUT_TOKENS} トークン）で止まりました"
+        );
+        return Err(LOCAL_AI_TOO_LONG.to_string());
+    }
     extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
+}
+
+/// 先に起動しておく（ADR-0052 決定6「入力画面を開いたら裏で準備を始める」・#1293）。
+/// 起動と照合（初回は 1.3GB＋365MB を読む）を、利用者が入力している間に済ませる＝「作る」を押してからの待ちを減らす。
+/// ⚠️ **やめる操作の世代に乗せない**（写真を読む口と同じ）＝準備が動画案づくりを「やめた」扱いにしない。
+/// ⚠️ 失敗しても画面には出さない（押したときに同じ起動をもう一度試し、そこで次の行動を出す）。
+#[tauri::command]
+pub async fn local_ai_prepare(
+    app: AppHandle,
+    state: State<'_, LocalLlmState>,
+) -> Result<(), String> {
+    if !is_bundled(&app) {
+        return Ok(());
+    }
+    // 準備も「走っている」と数える（#1293 レビュー 🟡）＝起動の途中で見張りに止められない。
+    let _in_flight = InFlight::begin(&state);
+    ensure_started(&app, &state, &|| false).await.map(|_| ())
 }
 
 /// 写真を1枚読んで、説明とタグを返す（ADR-0052 決定4）。戻り値は応答の本文（JSON の文字列）。検証はフロントが行う。
@@ -779,6 +830,25 @@ mod tests {
         assert!(!vision_usable(&p, false)); // 大きさが違う
         assert!(!vision_usable(&p.with_extension("none"), false)); // 無い
         let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn request_body_caps_output_length() {
+        let body = build_request_body("s", "u", serde_json::json!({}));
+        assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
+        let img = build_image_request_body("s", "u", "data:,", serde_json::json!({}));
+        assert_eq!(img["max_tokens"], MAX_OUTPUT_TOKENS);
+    }
+
+    #[test]
+    fn stopped_by_length_reads_finish_reason() {
+        assert!(stopped_by_length(
+            &serde_json::json!({"choices": [{"finish_reason": "length"}]})
+        ));
+        assert!(!stopped_by_length(
+            &serde_json::json!({"choices": [{"finish_reason": "stop"}]})
+        ));
+        assert!(!stopped_by_length(&serde_json::json!({})));
     }
 
     #[test]

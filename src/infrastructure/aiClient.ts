@@ -91,6 +91,19 @@ export function localAiDescribeImage(
   return invoke<string>('local_ai_describe_image', { system, user, schema, projectId, relPath });
 }
 
+/**
+ * このパソコンの中で動画案を作る部品を先に起動しておく（ADR-0052 決定6・#1293）。待たない・失敗しても投げない
+ * （押したときに同じ起動をもう一度試し、そこで次の行動を出す）。Tauri の外では何もしない。
+ */
+export async function prepareLocalAi(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('local_ai_prepare');
+  } catch (e) {
+    console.warn('[ai] 先の準備に失敗しました（作るときにもう一度試します）:', e);
+  }
+}
+
 /** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
 export async function localAiAvailable(): Promise<boolean> {
   if (!isTauri()) return false;

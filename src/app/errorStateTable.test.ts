@@ -411,7 +411,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(28);
+    // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(29);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -425,10 +426,12 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+6**（#1244）＝動画案づくりの断りを**次の行動ごとに6つへ分けた**（混雑／使いすぎ／接続先が無い／鍵が通らない／内容が受け付けられない／それ以外）。
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）＝どれも1行。
-    expect(all, "定数の数が変わった").toBe(28);
+    // ⚠️ **+1**（ADR-0052 決定6＝LOCAL_AI_TOO_LONG・1行）。
+    expect(all, "定数の数が変わった").toBe(29);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
-    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(13);
+    // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
+    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(14);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
     expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(15);
   });
@@ -529,7 +532,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー＝別窓で黙らない）。
     // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
     // ⚠️ **+1**（ADR-0052 決定5）＝写真・動画を自動で選んだ印（ASSET_AUTO_ASSIGNED）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(266);
+    // ⚠️ **+1**（ADR-0052 決定6・#1293）＝出力が上限で止まった（LOCAL_AI_TOO_LONG）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(267);
   });
 
 
@@ -781,8 +785,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（#1271 レビュー）＝上と同じ2行。
     // ⚠️ **+2**（ADR-0050・#1274 レビュー）＝上と同じ2行。
     // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
-    // ⚠️ **+1**（ADR-0052 決定5）＝上と同じ1行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(263);
+    // ⚠️ **+1**（ADR-0052 決定5）＝上と同じ1行。**+1**（ADR-0052 決定6）＝上と同じ1行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(264);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
