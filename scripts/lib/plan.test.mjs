@@ -143,3 +143,30 @@ describe("台本：確定のキー", () => {
     expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "題名", type: "あ" }] })).not.toThrow();
   });
 });
+
+describe("選ぶ段（selectLabel＋option）", () => {
+  it("選ぶ欄と選択肢がそろっていれば通す", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "重ね方", option: "重ねて明るく" }] })).not.toThrow();
+  });
+  it("選択肢が無い・欄が無い選ぶ段は断る", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "重ね方" }] })).toThrow(/option/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "再生", option: "ふつう" }] })).toThrow(/selectLabel/);
+  });
+  it("nth は選ぶ段に 1 以上の整数でだけ書ける", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 2 }] })).not.toThrow();
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 0 }] })).toThrow(/nth/);
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 1.5 }] })).toThrow(/nth/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", nth: 2 }] })).toThrow(/nth/);
+  });
+
+  it("quietChange は理由の文が要る（true や空では外せない）", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: "目盛りの帯が少し伸びるだけ" }] })).not.toThrow();
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: true }] })).toThrow(/quietChange/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: " " }] })).toThrow(/quietChange/);
+  });
+
+  it("押す・打つ・選ぶを1段に混ぜたら断る", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "再生", selectLabel: "重ね方", option: "ふつう" }] })).toThrow(/1段に1つ/);
+    expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "長さ", type: "8", clickText: "再生" }] })).toThrow(/1段に1つ/);
+  });
+});

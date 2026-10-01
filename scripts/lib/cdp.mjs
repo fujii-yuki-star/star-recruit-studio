@@ -113,6 +113,51 @@ export const FIND_FIELD = (label) => `(() => {
   return hit;
 })()`;
 
+/**
+ * 名前で選択欄（`<select>`）を探す（タイムライン編集の上級の台本で要った＝動き方・重ね方・声）。
+ * 名前の作り方は `FIND_FIELD` と同じ（`aria-label`・`label[for]`・包んでいる `label`）。
+ * ⚠️ **見えているものだけ**＝畳まれた欄の選択を変えても、映像には何も写らない。
+ */
+export const FIND_SELECT = (label, nth = 1) => `(() => {
+  const want = ${JSON.stringify(label)};
+  const nth = ${JSON.stringify(nth)};
+  const all = [...document.querySelectorAll("select")].filter((el) => el.offsetParent !== null);
+  const labelled = (el) => {
+    const byFor = el.id ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null;
+    const wrap = el.closest("label");
+    // 包んでいる label の文字には選択肢の文字も混ざるので、選択肢を除いた文字で比べる。
+    const own = (l) => [...l.childNodes].filter((n) => n.nodeName !== "SELECT").map((n) => n.textContent || "").join("");
+    return [byFor, wrap].filter(Boolean).map((l) => own(l).trim()).join(" ");
+  };
+  const name = (el) => [(el.getAttribute("aria-label") || ""), labelled(el)]
+    .map((s) => s.trim()).filter(Boolean).join(" / ");
+  // 同じ名前の欄が並ぶとき（キーフレームの行ごとの「ここまでの動き方」）は、何番目かで選ぶ（1始まり）。
+  const exact = all.filter((el) => name(el) === want);
+  const hit = (exact.length > 0 ? exact : all.filter((el) => name(el).includes(want)))[nth - 1];
+  if (!hit) return null;
+  hit.scrollIntoView({ block: "center" });
+  return hit;
+})()`;
+
+/**
+ * 選択欄の選択肢を**見えている文字で**選ぶ。選べたら選んだ文字、選べなければ null を返す。
+ *
+ * ⚠️ **選択肢の一覧は開かない**＝OS の一覧は別の窓に出るので録画に写らず、開いたまま残ると次の段を塞ぐ。
+ *   人が選んだのと同じ結果になるよう、**React が受け取る道**（値の設定口＋`change`）で選ぶ。
+ * ⚠️ **完全一致だけ**＝選択肢は短い言葉が多く（「一定」「ふつう」）、部分一致だと別の選択肢を選ぶ。
+ */
+export const CHOOSE_OPTION = (label, option, nth = 1) => `(() => {
+  const el = ${FIND_SELECT(label, nth)};
+  if (!el) return null;
+  const want = ${JSON.stringify(option)};
+  const opt = [...el.options].find((o) => (o.textContent || "").trim() === want);
+  if (!opt) return null;
+  const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+  set.call(el, opt.value);
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return (el.options[el.selectedIndex]?.textContent || "").trim();
+})()`;
+
 export const FIND_BY_TEXT = (text) => `(() => {
   const want = ${JSON.stringify(text)};
   const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];

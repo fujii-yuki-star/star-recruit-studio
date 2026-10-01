@@ -27,8 +27,28 @@ export function checkPlan(plan) {
   if (plan.steps.length === 0) throw new Error("台本に段が1つもありません");
   plan.steps.forEach((step, i) => {
     if (step == null || typeof step !== "object") throw new Error(`${i + 1} 段目が空です`);
-    if (step.waitMs == null && step.clickText == null && step.fieldLabel == null) {
-      throw new Error(`${i + 1} 段目に \`clickText\` も \`fieldLabel\` も \`waitMs\` もありません: ${JSON.stringify(step)}`);
+    if (step.waitMs == null && step.clickText == null && step.fieldLabel == null && step.selectLabel == null) {
+      throw new Error(`${i + 1} 段目に \`clickText\` も \`fieldLabel\` も \`selectLabel\` も \`waitMs\` もありません: ${JSON.stringify(step)}`);
+    }
+    // ⚠️ **選ぶ段は、選ぶ欄と選択肢の両方が要る**＝どちらかだけだと黙って何も選ばない。
+    if (step.selectLabel != null && typeof step.option !== "string") {
+      throw new Error(`${i + 1} 段目に \`option\`（選ぶ選択肢の文字）がありません: ${JSON.stringify(step)}`);
+    }
+    if (step.option != null && step.selectLabel == null) {
+      throw new Error(`${i + 1} 段目に \`selectLabel\`（どの選択欄か）がありません: ${JSON.stringify(step)}`);
+    }
+    // 何番目の選択欄か（同じ名前が並ぶとき）。選ぶ段にだけ意味がある・1以上の整数。
+    if (step.nth != null && (step.selectLabel == null || !Number.isInteger(step.nth) || step.nth < 1)) {
+      throw new Error(`${i + 1} 段目の \`nth\` は選ぶ段（\`selectLabel\`）に 1 以上の整数で書きます: ${JSON.stringify(step)}`);
+    }
+    // 絵の変化が小さい段（撮った後の「絵が動いたか」の検査を外す）。⚠️ **理由の文を必須にする**＝
+    //   `true` だけで外せると、壊れた段を黙らせる近道になる。
+    if (step.quietChange != null && (typeof step.quietChange !== "string" || step.quietChange.trim() === "")) {
+      throw new Error(`${i + 1} 段目の \`quietChange\` には、絵の変化が小さい理由を文で書きます: ${JSON.stringify(step)}`);
+    }
+    // ⚠️ **1段に1つの操作**＝押す・打つ・選ぶを1段に混ぜると、どれが効いたか分からない。
+    if ([step.clickText, step.fieldLabel, step.selectLabel].filter((v) => v != null).length > 1) {
+      throw new Error(`${i + 1} 段目に押す・打つ・選ぶが2つ以上あります（1段に1つ）: ${JSON.stringify(step)}`);
     }
     // ⚠️ **打つ段は、打つ先と中身の両方が要る**（#1228）＝どちらかだけだと**黙って何も打たない**。
     if (step.fieldLabel != null && typeof step.type !== "string") {
