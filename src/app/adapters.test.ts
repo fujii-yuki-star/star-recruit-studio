@@ -856,7 +856,7 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
    * 両方出ることもあるので、混ぜずに別項目にする。
    */
   it("尺に対してセリフが多い場面を注意にする", () => {
-    const scene = sc({ durationSec: 2, narration: { text: "あ".repeat(60), status: "generated" } });
+    const scene = sc({ durationSec: 3, narration: { text: "あ".repeat(60), status: "generated" } });
     const items = buildPrecheckItems([scene], [], [photoTemplate]);
     expect(find(items, "tooFast")?.severity).toBe("warning");
     expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
@@ -869,8 +869,27 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     const long1 = sc({ sceneId: "scene_002", narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
     const long2 = sc({ sceneId: "scene_003", narration: { text: "い".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
     expect(find(buildPrecheckItems([ok, long1, long2], [], [photoTemplate]), "line")).toMatchObject({ severity: "warning", action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_002", assist: ASSIST_KIND.shorten });
+    // 掛け合いの場面は飛ばし、一人語りの該当場面へ（掛け合いにはセリフ欄の手伝いが無い）。
+    // ⚠️ 実物と同じ形＝掛け合いへ切り替えた時点の写しが `narration.text` に残っている（空の fixture だと字数の判定で先に落ちて、掛け合いの判定を素通りする）。
+    const dialogue = sc({ sceneId: "scene_004", narration: { text: "う".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "none" }, lines: [{ lineId: "line_001", text: "う".repeat(MAX_NARRATION_LEN_DEFAULT + 1) }] } as Partial<Scene>);
+    expect(find(buildPrecheckItems([ok, dialogue, long1], [], [photoTemplate]), "line")).toMatchObject({ sceneId: "scene_002", assist: ASSIST_KIND.shorten });
+    // 掛け合いしか無ければ寄るだけ（頼まない）。
+    const onlyDialogue = find(buildPrecheckItems([ok, dialogue], [], [photoTemplate]), "line");
+    expect(onlyDialogue).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_004" });
+    expect(onlyDialogue?.assist).toBeUndefined();
     // 長くなければボタンは出さない。
     expect(find(buildPrecheckItems([ok], [], [photoTemplate]), "line")?.action).toBeUndefined();
+  });
+
+  it("表示時間が短すぎて「尺に合わせる」で候補が作れない場面は、寄るだけ（頼まない）", () => {
+    // 1.5 秒＝読み切れる字数が 3 字＝頼めない（頼むと「いまの文のままで大丈夫」と逆のことを言う）。
+    const tiny = sc({ sceneId: "scene_001", durationSec: 1.5, narration: { text: "あ".repeat(30), status: "generated" } });
+    const item = find(buildPrecheckItems([tiny], [], [photoTemplate]), "tooFast");
+    expect(item).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_001" });
+    expect(item?.assist).toBeUndefined();
+    // 頼める場面が後ろにあれば、そちらへ。
+    const ok = sc({ sceneId: "scene_002", durationSec: 3, narration: { text: "い".repeat(40), status: "generated" } });
+    expect(find(buildPrecheckItems([tiny, ok], [], [photoTemplate]), "tooFast")).toMatchObject({ sceneId: "scene_002", assist: ASSIST_KIND.fitDuration });
   });
 
   it("ふつうの長さなら出さない", () => {

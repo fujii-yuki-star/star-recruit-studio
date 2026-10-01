@@ -1,7 +1,8 @@
-import { ASSIST_KIND } from "../domain/ai/assist";
-import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
+import { ASSIST_KIND, assistMaxLength } from "../domain/ai/assist";
+import type { AssistKind } from "../domain/ai/assist";
+import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
@@ -178,6 +179,20 @@ export function buildPrecheckItems(
 
   // 掛け合い・単一 narration を統一して見る（sceneNeedsVoice＝実効行の未生成・#403 P1）。scene.narration.status は直接見ない
   // ＝掛け合いは全行生成済みでも narration.status が更新されないため「要対応」に残り、「声を作成」が no-op に見えるバグを防ぐ。
+  /**
+   * 「セリフを直す」の行き先と、すぐ頼む AI 補助（ADR-0053 決定2）。
+   * ⚠️ 頼むのは**一人語りで、頼めば候補が作れる**最初の該当場面だけ＝掛け合いの場面にはセリフ欄の手伝いが無く、
+   *   表示時間が短すぎる場面は「尺に合わせる」の上限が短すぎて頼めない（頼むと「いまの文のままで大丈夫」と**逆のこと**を言う）。
+   *   そういう場面しか無ければ、最初の該当場面へ寄るだけ（頼まない）。
+   */
+  const fixNarration = (hit: { firstId?: string }, pred: (s: Scene) => boolean, kind: AssistKind): Pick<PrecheckItem, "action" | "sceneId" | "assist"> => {
+    const target = scenes.find((s) => pred(s) && (s.lines?.length ?? 0) === 0
+      && assistMaxLength(kind, s.narration.text, { maxNarrationLength: templateOf(s)?.aiHint?.maxNarrationLength, sceneDurationSec: s.durationSec }) !== null);
+    return target
+      ? { action: FIX_NARRATION_ACTION_LABEL, sceneId: target.sceneId, assist: kind }
+      : { action: FIX_NARRATION_ACTION_LABEL, sceneId: hit.firstId };
+  };
+
   const voice = offending(sceneNeedsVoice);
   items.push(
     voice.nums.length > 0
@@ -202,10 +217,11 @@ export function buildPrecheckItems(
   // セリフの長さは warning のまま、「セリフを直す」で最初の該当場面のセリフ欄へ寄り、AI 補助の「短く」をすぐ出す（ADR-0053 決定2）。
   // 掛け合いは本文が lines[].text 側にあるため、実効行（sceneLines）で各行の長さを見る（scene.narration.text 直参照は
   // 掛け合いで空＝未検出になる・ADR-0015）。単一 narration は sceneLines が1行に写すので従来と同一。
-  const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT)));
+  const lineTooLong = (s: Scene) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT));
+  const line = offending(lineTooLong);
   items.push(
     line.nums.length > 0
-      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning", action: FIX_NARRATION_ACTION_LABEL, sceneId: line.firstId, assist: ASSIST_KIND.shorten }
+      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning", ...fixNarration(line, lineTooLong, ASSIST_KIND.shorten) }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -299,10 +315,11 @@ export function buildPrecheckItems(
   // 短い場面に長いセリフを入れると、声は最後まで鳴るのに**場面が先に切り替わる**。
   // ⚠️ **同時に流す行はグループにまとめて渡す**（レビュー 🟡・ADR-0031）＝素朴に合算すると
   // 2人同時が**人数ぶん二重計上**される。窓の分け方は `lineTimeline` と同じ `groupIndices`。
-  const tooFast = offending((s) => {
+  const isTooFast = (s: Scene) => {
     const lines = sceneLines(s);
     return tooFastScenes(s, groupIndices(lines).map((g) => g.map((i) => lines[i].text)));
-  });
+  };
+  const tooFast = offending(isTooFast);
   if (tooFast.nums.length > 0) {
     items.push({
       id: "tooFast",
@@ -310,9 +327,7 @@ export function buildPrecheckItems(
       detail: `${fmtScenes(tooFast.nums)}は、表示する時間に対してセリフが多いです。表示時間を延ばすか、セリフを短くしてください。`,
       severity: "warning",
       // 最初の該当場面のセリフ欄へ寄り、AI 補助の「尺に合わせる」をすぐ出す（ADR-0053 決定2）。
-      action: FIX_NARRATION_ACTION_LABEL,
-      sceneId: tooFast.firstId,
-      assist: ASSIST_KIND.fitDuration,
+      ...fixNarration(tooFast, isTooFast, ASSIST_KIND.fitDuration),
     });
   }
 

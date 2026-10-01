@@ -1,6 +1,6 @@
-import type { AssistKind } from "../../domain/ai/assist";
 // 画面用のUIモデルとモックデータ。
 // 後から本物のデータ層（src/domain）に差し替えられるよう、UI専用の軽量な型で定義する。
+import type { AssistKind } from "../../domain/ai/assist";
 import { GENERAL_PURPOSES, PURPOSES, type Purpose } from "../../domain/enums";
 
 export type ScreenId =

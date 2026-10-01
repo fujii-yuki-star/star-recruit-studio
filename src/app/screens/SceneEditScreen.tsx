@@ -273,7 +273,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   //（別の場面へ移って戻っても頼み直さない）＝頼んだら `null` へ戻す。
   const [autoAssist, setAutoAssist] = useState(() => {
     const st = useProjectStore.getState();
-    return st.editingSceneAssist ? { sceneId: st.editingSceneId ?? "", kind: st.editingSceneAssist } : null;
+    // ⚠️ 掛け合いの場面では受けない＝セリフ欄の手伝いが無いので、印が残ったまま後で掛け合いを解くと**押してもいないのに頼む**。
+    const target = st.scenes.find((s) => s.sceneId === st.editingSceneId);
+    return st.editingSceneAssist && target && (target.lines?.length ?? 0) === 0 ? { sceneId: target.sceneId, kind: st.editingSceneAssist } : null;
   });
   // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
   // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。

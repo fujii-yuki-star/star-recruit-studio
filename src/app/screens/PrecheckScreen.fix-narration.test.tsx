@@ -81,6 +81,20 @@ describe("公開前チェックから AI 補助へ（ADR-0053 決定2）", () =>
     expect(useProjectStore.getState().scenes[1].narration.text).toBe("あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1));
   });
 
+  it("掛け合いの場面への印は受けず、消す（後で掛け合いを解いても勝手に頼まない）", async () => {
+    const dlg = { ...scene("scene_002", ""), lines: [{ lineId: "line_001", text: "え".repeat(MAX_NARRATION_LEN_DEFAULT + 1) }] } as Scene;
+    useProjectStore.setState({ scenes: [scene("scene_001", "短い。"), dlg], editingSceneId: "scene_002", editingSceneAssist: ASSIST_KIND.shorten });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    await flush();
+    expect(useProjectStore.getState().editingSceneAssist).toBeNull();
+    // 掛け合いを解いて一人語りに戻しても頼まない。
+    act(() => {
+      useProjectStore.setState((st) => ({ scenes: st.scenes.map((s) => (s.sceneId === "scene_002" ? { ...s, lines: undefined, narration: { text: "お".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "none" } } as Scene : s)) }));
+    });
+    await flush();
+    expect(ai.calls).toHaveLength(0);
+  });
+
   it("印が無ければ頼まない", async () => {
     useProjectStore.setState({ editingSceneId: "scene_002", editingSceneAssist: null });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
