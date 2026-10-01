@@ -884,6 +884,54 @@ pub async fn local_ai_describe_image(
     extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
 }
 
+/// 編集の途中の小さな手伝い（ADR-0053）＝セリフの言い直し・語りから字幕・見出しの候補。戻り値は応答の本文（JSON の文字列）。
+/// 候補の検証はフロントが行う（`assist.ts`）。
+///
+/// ⚠️ **動画案づくりの「やめる」の世代に乗せない**（写真を読む口と同じ）＝手伝いが動画案づくりを止めない・その逆も無い。
+/// ⚠️ 相手は同梱の llama-server だけ（127.0.0.1・合言葉つき・プロキシを通さない）＝外へは送らない（§2-6）。
+#[tauri::command]
+pub async fn local_ai_assist(
+    app: AppHandle,
+    state: State<'_, LocalLlmState>,
+    system: String,
+    user: String,
+    schema: String,
+) -> Result<String, String> {
+    let schema: serde_json::Value = serde_json::from_str(&schema)
+        .map_err(|_| crate::messages::AI_REQUEST_FAILED.to_string())?;
+    let _in_flight = InFlight::begin(&state);
+    let base = ensure_started(&app, &state, &|| false).await?;
+    let body = build_request_body(&system, &user, schema);
+    let resp = http_client()
+        .post(format!("{base}/v1/chat/completions"))
+        .bearer_auth(state.api_key())
+        .json(&body)
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
+            crate::tlog!("local_llm", "手伝いの要求に失敗しました: {e}");
+            return Err(if e.is_timeout() {
+                LOCAL_AI_TIMEOUT
+            } else {
+                LOCAL_AI_START_FAILED
+            }
+            .to_string());
+        }
+    };
+    let status = resp.status();
+    let json: serde_json::Value = resp.json().await.map_err(|e| {
+        crate::tlog!("local_llm", "手伝いの応答を読めません: {e}");
+        crate::messages::AI_REQUEST_FAILED.to_string()
+    })?;
+    if !status.is_success() {
+        crate::tlog!("local_llm", "手伝いが断られました: status={status}");
+        return Err(crate::messages::AI_REQUEST_FAILED.to_string());
+    }
+    extract_content(&json).ok_or_else(|| crate::messages::AI_REQUEST_FAILED.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

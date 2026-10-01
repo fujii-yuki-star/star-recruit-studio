@@ -1,6 +1,7 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
+import { ASSIST_KIND } from "../domain/ai/assist";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TRACK_KIND } from "../domain/enums";
@@ -1754,3 +1755,25 @@ export const AI_GEMINI_KEY_MISSING_MESSAGE = "Gemini を使う設定になって
 export function writingSceneMessage(n: number): string {
   return `${n} 場面目を書いています。このままお待ちください。`;
 }
+
+// ── 編集の途中の AI 補助（ADR-0053）──────────────────────────────────────────
+// ⚠️ 技術用語を出さない（「AI に頼む」「候補」「使う」）。失敗は次の行動つき（§2-5・`15 §6`）。
+export const AI_ASSIST_HEADING = "AI に頼む：";
+export const AI_ASSIST_THINKING = "考えています…";
+export const AI_ASSIST_USE_LABEL = "使う";
+export const AI_ASSIST_CLOSE_LABEL = "候補を閉じる";
+/** 候補を作れなかった（形が違う・どれも上限を越えた・呼び出しの失敗）。 */
+export const AI_ASSIST_FAILED_MESSAGE = "うまく候補を作れませんでした。もう一度押すか、自分で書き直してください。";
+/** 頼む必要が無い（もう表示時間に収まっている・文が短すぎる）。 */
+export const AI_ASSIST_NOT_NEEDED_MESSAGE = "いまの文のままで大丈夫です（もう収まっているか、これ以上短くできません）。";
+/** セリフ欄のボタン。 */
+export const AI_ASSIST_NARRATION_KINDS = [
+  { kind: ASSIST_KIND.shorten, label: "短く" },
+  { kind: ASSIST_KIND.polite, label: "丁寧に" },
+  { kind: ASSIST_KIND.soft, label: "やわらかく" },
+  { kind: ASSIST_KIND.fitDuration, label: "尺に合わせる" },
+] as const;
+/** 字幕欄のボタン。 */
+export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "語りから作る" }] as const;
+/** 見出し欄のボタン。 */
+export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;

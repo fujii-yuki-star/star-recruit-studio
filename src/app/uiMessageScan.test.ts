@@ -200,7 +200,8 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+1**＝`STARTUP_VOICE_NOT_READY_MESSAGE`（#1204＝頼まれた回だけの断り）。
 // ⚠️ **+2**＝仕上がり確認の別窓の断り（ADR-0050・#1274 レビュー）＝開けなかった／本体とつながらない。表へ行を足してある。
 // ⚠️ **+1**（ADR-0051）＝`AI_GEMINI_KEY_MISSING_MESSAGE`（Gemini を選んで鍵が無い）。表へ行を足してある。
-const FOUND_COUNT = 100;
+// ⚠️ **+1**（ADR-0053）＝`AI_ASSIST_FAILED_MESSAGE`（編集の途中の手伝いで候補を作れなかった）。表へ行を足してある。
+const FOUND_COUNT = 101;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

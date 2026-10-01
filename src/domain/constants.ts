@@ -22,6 +22,13 @@ export const NARRATION_SCENE_PADDING_SEC = 1;
 export const ASSET_DESCRIPTION_MAX_LENGTH = 60;
 export const ASSET_AI_TAGS_MAX = 5;
 export const ASSET_AI_TAG_MAX_LENGTH = 12;
+// 編集の途中の AI 補助（ADR-0053・12 §10）。候補の数・見出しの上限・字幕の目安・「短く」の割合・これより短い上限は頼まない。
+// 候補は多すぎると選ぶのが手間（2B は数を増やすほど似た候補が増える）。字幕は語りの要約なので見た目の上限より短く。
+export const ASSIST_CANDIDATES = 3;
+export const ASSIST_TITLE_MAX_LENGTH = 20;
+export const ASSIST_SUBTITLE_TARGET_LENGTH = 30;
+export const ASSIST_SHORTEN_RATIO = 0.7;
+export const ASSIST_MIN_LENGTH = 8;
 // 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
 export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
