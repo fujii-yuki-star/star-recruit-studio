@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/* global document, HTMLElement */
 // 選択欄（`<select>`）を名前で探し、見えている選択肢の文字で選ぶ式（タイムライン編集の上級の台本で要った）。
 // ⚠️ **式を本当に走らせて確かめる**＝文字列の形だけ見ると、選んだつもりで React に届かない形を見逃す。
 import { beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +10,8 @@ Object.defineProperty(HTMLElement.prototype, "offsetParent", { configurable: tru
 HTMLElement.prototype.scrollIntoView = () => {};
 // eslint-disable-next-line no-eval -- 画面へ送る式そのものを、送る先と同じく評価して確かめる
 const run = (expr) => (0, eval)(expr);
+/** 選択欄を id で（値を読むため型を付ける）。 */
+const sel = (id) => /** @type {HTMLSelectElement} */ (document.getElementById(id));
 
 beforeEach(() => {
   document.body.innerHTML = `
@@ -39,9 +42,9 @@ describe("選択欄を名前で探す", () => {
 
 describe("選択肢を見えている文字で選ぶ", () => {
   it("選んだ選択肢の文字を返し、change を送る（React が受け取る道）", () => {
-    const el = document.getElementById("ease");
+    const el = sel("ease");
     let changed = null;
-    el.addEventListener("change", (e) => { changed = e.target.value; });
+    el.addEventListener("change", () => { changed = el.value; });
     expect(run(CHOOSE_OPTION("ここまでの動き方", "ゆっくり終わる"))).toBe("ゆっくり終わる");
     expect(el.value).toBe("ease-out");
     expect(changed).toBe("ease-out");
@@ -49,14 +52,14 @@ describe("選択肢を見えている文字で選ぶ", () => {
 
   it("選択肢は完全一致だけ（「ゆっくり」で別の選択肢を選ばない）", () => {
     expect(run(CHOOSE_OPTION("ここまでの動き方", "ゆっくり"))).toBeNull();
-    expect(document.getElementById("ease").value).toBe("linear");
+    expect(sel("ease").value).toBe("linear");
   });
 
   it("同じ名前の欄が並ぶときは何番目かで選ぶ（無い番目は null）", () => {
     document.body.insertAdjacentHTML("beforeend", `<label for="ease2">ここまでの動き方</label><select id="ease2"><option value="linear">一定</option><option value="ease-out">ゆっくり終わる</option></select>`);
     expect(run(FIND_SELECT("ここまでの動き方", 2))?.id).toBe("ease2");
     expect(run(CHOOSE_OPTION("ここまでの動き方", "ゆっくり終わる", 2))).toBe("ゆっくり終わる");
-    expect(document.getElementById("ease").value).toBe("linear");
+    expect(sel("ease").value).toBe("linear");
     expect(run(FIND_SELECT("ここまでの動き方", 3))).toBeNull();
   });
 
