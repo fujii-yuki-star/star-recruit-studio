@@ -2,6 +2,11 @@
 // 呼び出し（llama-server）は infrastructure（`aiClient.localAiAssist`）、画面は `AiSuggest`。
 // ⚠️ 候補は**検証してから**見せる（§2-2）：空・字数の上限越え・元と同じ・重なりは落とす。会社名は印で渡して崩させない。
 import {
+  ASSIST_CANDIDATES,
+  ASSIST_MIN_LENGTH,
+  ASSIST_SHORTEN_RATIO,
+  ASSIST_SUBTITLE_TARGET_LENGTH,
+  ASSIST_TITLE_MAX_LENGTH,
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SUBTITLE_LEN_DEFAULT,
   NARRATION_CHARS_PER_SEC,
@@ -26,14 +31,6 @@ export const ASSIST_KIND = {
 } as const;
 export type AssistKind = (typeof ASSIST_KIND)[keyof typeof ASSIST_KIND];
 
-/** 候補の数（多すぎると選ぶのが手間・2B は数を増やすほど似た候補が増える）。 */
-export const ASSIST_CANDIDATES = 3;
-/** 見出しの字数の上限（画面の短い見出し）。 */
-export const ASSIST_TITLE_MAX_LENGTH = 20;
-/** 字幕の目安の上限（見た目の上限より短く＝字幕は語りの要約）。 */
-export const ASSIST_SUBTITLE_TARGET_LENGTH = 30;
-/** これより短い上限は頼まない（言い直しても意味が残らない）。 */
-const MIN_ASSIST_LENGTH = 8;
 
 export interface AssistLimits {
   /** 見た目パターンの語りの上限（無ければ既定）。 */
@@ -59,7 +56,7 @@ export function assistMaxLength(kind: AssistKind, text: string, limits: AssistLi
   const narration = limits.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT;
   let max: number;
   switch (kind) {
-    case ASSIST_KIND.shorten: max = Math.min(narration, Math.floor(text.length * 0.7)); break;
+    case ASSIST_KIND.shorten: max = Math.min(narration, Math.floor(text.length * ASSIST_SHORTEN_RATIO)); break;
     case ASSIST_KIND.polite:
     case ASSIST_KIND.soft: max = narration; break;
     case ASSIST_KIND.fitDuration: {
@@ -73,7 +70,7 @@ export function assistMaxLength(kind: AssistKind, text: string, limits: AssistLi
     case ASSIST_KIND.subtitle: max = Math.min(limits.maxSubtitleLength ?? MAX_SUBTITLE_LEN_DEFAULT, ASSIST_SUBTITLE_TARGET_LENGTH); break;
     case ASSIST_KIND.title: max = ASSIST_TITLE_MAX_LENGTH; break;
   }
-  return max >= MIN_ASSIST_LENGTH ? max : null;
+  return max >= ASSIST_MIN_LENGTH ? max : null;
 }
 
 const TASK: Record<AssistKind, (max: number, sec?: number) => string> = {
@@ -82,7 +79,7 @@ const TASK: Record<AssistKind, (max: number, sec?: number) => string> = {
   soft: (max) => `元の文を、話しかけるような、やわらかく親しみやすい言い方に言い直す（${max}字以内）。`,
   fitDuration: (max, sec) => `元の文を、読み上げで約${sec}秒に収まるよう、要点を残して${max}字以内に言い直す。`,
   subtitle: (max) => `この語りの要点を、画面の字幕として${max}字以内にまとめる（語りの言葉を使い、内容を足さない）。`,
-  title: (max) => `この語りの場面に付ける、画面の短い見出しを${max}字以内で考える（体言止めでよい）。`,
+  title: (max) => `この語りの場面に付ける、画面の短い見出しを${max}字以内で考える。文にしない（「〜は」「〜です」で書かない）。名詞で終わる短い言葉にする。`,
 };
 
 export interface AssistMessages {
@@ -126,7 +123,9 @@ export function buildAssistMessages(kind: AssistKind, text: string, max: number,
       properties: {
         candidates: {
           type: 'array', minItems: 1, maxItems: ASSIST_CANDIDATES,
-          items: { type: 'string', minLength: 1, maxLength: budget },
+          // ⚠️ **字数で縛らない**＝文法で縛ると上限の字で**途中で切られた文**が出る（実測＝「…届けてい」）。
+          //   形の上限は暴走よけの緩い値にし、字数は `parseAssistCandidates` で見る（越えた候補は落とす）。
+          items: { type: 'string', minLength: 1, maxLength: budget * 2 },
         },
       },
     },
@@ -134,8 +133,19 @@ export function buildAssistMessages(kind: AssistKind, text: string, max: number,
 }
 
 /**
+ * 上限を越えた候補を、上限の内側の**最後の文の終わり**（。！？）で切る。切れなければ（または短すぎれば）そのまま返す＝後で落ちる。
+ * ⚠️ 2B は字数の指示を守らないことが多い（実測で 18 件中 4 件が全部の候補で上限越え）。形で字数を縛ると**語の途中で切られる**ので、
+ *   こちらで**文の切れ目でだけ**切る（語の途中では切らない）。
+ */
+function cutAtSentenceEnd(text: string, max: number): string {
+  const head = text.slice(0, max);
+  const end = Math.max(head.lastIndexOf('。'), head.lastIndexOf('！'), head.lastIndexOf('？'), head.lastIndexOf('!'), head.lastIndexOf('?'));
+  return end + 1 >= ASSIST_MIN_LENGTH ? head.slice(0, end + 1) : text;
+}
+
+/**
  * AI の応答から候補を取り出す（検証つき）。印を会社名に戻し、崩れた会社名を直し、括弧（「」）の囲みを外す。
- * 落とすもの＝文字でない・空・上限越え（戻した後で見る）・元と同じ・重なり。最大 `ASSIST_CANDIDATES` 個。
+ * 上限越えは文の終わりで切れれば切る（`cutAtSentenceEnd`）。落とすもの＝文字でない・空・切っても上限越え（戻した後で見る）・元と同じ・重なり。最大 `ASSIST_CANDIDATES` 個。
  */
 export function parseAssistCandidates(raw: string, original: string, max: number, companyName?: string): string[] {
   let parsed: unknown;
@@ -150,9 +160,12 @@ export function parseAssistCandidates(raw: string, original: string, max: number
   const out: string[] = [];
   for (const c of list) {
     if (typeof c !== 'string') continue;
-    let v = c.trim().replace(/^「(.*)」$/s, '$1').trim();
+    // 改行は消す（見出しは1行の欄・セリフも1文で使う）。数字と和文の間の空白（「3 ヶ月」）も詰める。
+    let v = c.trim().replace(/^「(.*)」$/s, '$1').trim().replace(/\s*\n\s*/g, '')
+      .replace(/(\d) +(?=[\u3040-\u30ff\u4e00-\u9fff])/g, '$1').replace(/([\u3040-\u30ff\u4e00-\u9fff]) +(?=\d)/g, '$1');
     v = v.split(COMPANY_NAME_PLACEHOLDER).join(name);
     if (name) v = repairTruncatedName(v, name).text;
+    if (v.length > max) v = cutAtSentenceEnd(v, max);
     if (v.length === 0 || v.length > max || v === original.trim() || out.includes(v)) continue;
     out.push(v);
     if (out.length === ASSIST_CANDIDATES) break;

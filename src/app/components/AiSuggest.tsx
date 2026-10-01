@@ -41,7 +41,11 @@ export interface AiSuggestProps {
 export function AiSuggest({ kinds, source, current, limits, companyName, onPick }: AiSuggestProps) {
   const available = useLocalAiAvailable();
   const [busy, setBusy] = useState(false);
-  const [candidates, setCandidates] = useState<string[] | null>(null);
+  // 候補は**頼んだ時点の文**から作ったもの＝その後に文が変わったら出さない（古い文の候補で手直しを上書きしない）。
+  const [asked, setAsked] = useState<{ list: string[]; source: string; current: string; limitsKey: string } | null>(null);
+  const limitsKey = JSON.stringify(limits);
+  const candidates = asked && asked.source === source && asked.current === (current ?? source) && asked.limitsKey === limitsKey ? asked.list : null;
+  const setCandidates = (list: string[] | null) => setAsked(list ? { list, source, current: current ?? source, limitsKey } : null);
   const [note, setNote] = useState<string | null>(null);
 
   async function ask(kind: AssistKind) {

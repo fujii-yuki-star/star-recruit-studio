@@ -1,10 +1,10 @@
 // 編集の途中の AI 補助（ADR-0053）。
 import { describe, expect, it } from 'vitest';
-import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, NARRATION_CHARS_PER_SEC, NARRATION_SCENE_PADDING_SEC } from '../constants';
 import {
-  ASSIST_CANDIDATES, ASSIST_KIND, ASSIST_SUBTITLE_TARGET_LENGTH, ASSIST_TITLE_MAX_LENGTH,
-  assistMaxLength, buildAssistMessages, charsForDuration, parseAssistCandidates,
-} from './assist';
+  ASSIST_CANDIDATES, ASSIST_SUBTITLE_TARGET_LENGTH, ASSIST_TITLE_MAX_LENGTH,
+  MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, NARRATION_CHARS_PER_SEC, NARRATION_SCENE_PADDING_SEC,
+} from '../constants';
+import { ASSIST_KIND, assistMaxLength, buildAssistMessages, charsForDuration, parseAssistCandidates } from './assist';
 import { COMPANY_NAME_PLACEHOLDER } from './refineVideoPlan';
 
 const NAME = '株式会社サンプル物流';
@@ -48,7 +48,8 @@ describe('buildAssistMessages', () => {
     expect(m.user).toContain(`${COMPANY_NAME_PLACEHOLDER}は地域の配送`);
     expect(m.user).not.toContain(NAME);
     expect(m.budget).toBe(40 - (NAME.length - COMPANY_NAME_PLACEHOLDER.length));
-    expect((m.schema as { properties: { candidates: { items: { maxLength: number }; maxItems: number } } }).properties.candidates).toMatchObject({ maxItems: ASSIST_CANDIDATES, items: { maxLength: m.budget } });
+    // 形の上限は字数の上限より緩い（字数で縛ると途中で切られた文が出る＝実測）。
+    expect((m.schema as { properties: { candidates: { items: { maxLength: number }; maxItems: number } } }).properties.candidates).toMatchObject({ maxItems: ASSIST_CANDIDATES, items: { maxLength: m.budget * 2 } });
     expect(m.system).toContain(`${m.budget}字以内`);
   });
 
@@ -75,6 +76,24 @@ describe('parseAssistCandidates', () => {
     const out = parseAssistCandidates(raw(['', 'あ'.repeat(11), '元の文', 'いい文', 'いい文', 3, `${COMPANY_NAME_PLACEHOLDER}`]), ' 元の文 ', 10, NAME);
     expect(out).toEqual(['いい文', NAME]);
     expect(parseAssistCandidates(raw([`${COMPANY_NAME_PLACEHOLDER}だよ`]), 'x', 10, NAME)).toEqual([]); // 戻すと 12 字
+  });
+
+  it('改行を消し、数字と和文の間の空白を詰める', () => {
+    expect(parseAssistCandidates(raw(['入社後は\n 3 ヶ月の研修', '平均で 2割']), 'x', 30)).toEqual(['入社後は3ヶ月の研修', '平均で2割']);
+  });
+
+  it('見出しは文にしないよう伝える', () => {
+    expect(buildAssistMessages(ASSIST_KIND.title, 'x', 20).system).toContain('文にしない');
+  });
+
+  it('上限を越えた候補は、上限の内側の最後の文の終わりで切る（語の途中では切らない）', () => {
+    expect(parseAssistCandidates(raw(['入社後に研修を受けます。未経験でも安心です。']), 'x', 15)).toEqual(['入社後に研修を受けます。']);
+    expect(parseAssistCandidates(raw(['研修があります！安心です']), 'x', 10)).toEqual(['研修があります！']);
+    // 文の終わりが無い・切ると短すぎる（8 字未満）なら落とす。
+    expect(parseAssistCandidates(raw(['入社後に研修を受けて未経験でも安心']), 'x', 10)).toEqual([]);
+    expect(parseAssistCandidates(raw(['研修です。入社後に研修を受けて安心']), 'x', 10)).toEqual([]);
+    // 文の終わりがちょうど上限の字にあっても切れる。
+    expect(parseAssistCandidates(raw(['あいうえおかきくけ。こ']), 'x', 10)).toEqual(['あいうえおかきくけ。']);
   });
 
   it('上限ちょうどは通す（境目）', () => {

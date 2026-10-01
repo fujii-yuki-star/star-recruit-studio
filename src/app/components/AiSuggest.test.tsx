@@ -83,6 +83,42 @@ describe("AiSuggest", () => {
     expect((screen.getByRole("button", { name: "語りから作る" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("頼んだ後に元の文が変わったら、古い文から作った候補は出さない（手直しを上書きしない）", async () => {
+    ai.reply = JSON.stringify({ candidates: ["地域の配送を担っています。"] });
+    const onPick = vi.fn();
+    const { rerender } = render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={onPick} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "短く" }));
+    await flush();
+    expect(screen.getByText("地域の配送を担っています。")).toBeTruthy();
+    rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={`${LONG}手で直しました。`} limits={{}} onPick={onPick} />);
+    expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
+    expect(screen.queryByRole("button", { name: AI_ASSIST_USE_LABEL })).toBeNull();
+    // 見た目パターンが変わって上限が変わったときも同じ。
+    rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{ maxNarrationLength: 40 }} onPick={onPick} />);
+    expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
+    // 元に戻せば、同じ頼みの候補はまた見える（同じ文から作ったものなので）。
+    rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={onPick} />);
+    expect(screen.getByText("地域の配送を担っています。")).toBeTruthy();
+  });
+
+  it("候補は頼んだ時点の見出し・字幕と比べる（いまの欄の文が変わったら出さない）", async () => {
+    ai.reply = JSON.stringify({ candidates: ["配送で地域を支える"] });
+    const kinds = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
+    const { rerender } = render(<AiSuggest kinds={kinds} source={LONG} current="" limits={{}} onPick={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "候補を出す" }));
+    await flush();
+    expect(screen.getByText("配送で地域を支える")).toBeTruthy();
+    rerender(<AiSuggest kinds={kinds} source={LONG} current="自分で書いた見出し" limits={{}} onPick={vi.fn()} />);
+    expect(screen.queryByText("配送で地域を支える")).toBeNull();
+    // 欄の文はそのままでも、元にした語りが変わったら出さない（古い語りから作った見出し）。
+    rerender(<AiSuggest kinds={kinds} source={LONG} current="" limits={{}} onPick={vi.fn()} />);
+    expect(screen.getByText("配送で地域を支える")).toBeTruthy();
+    rerender(<AiSuggest kinds={kinds} source="語りを書き直しました。新しい内容です。" current="" limits={{}} onPick={vi.fn()} />);
+    expect(screen.queryByText("配送で地域を支える")).toBeNull();
+  });
+
   it("会社名は印にして渡し、候補では会社名に戻す", async () => {
     ai.reply = JSON.stringify({ candidates: ["{会社名}の配送の仕事です。"] });
     const onPick = vi.fn();

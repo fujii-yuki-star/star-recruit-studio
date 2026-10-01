@@ -465,12 +465,14 @@ interface AiProvider {
 | やわらかく（セリフ） | `soft` | 同上 | 話しかけるような、親しみやすい言い方 |
 | 尺に合わせる（セリフ） | `fitDuration` | 表示時間で読み切れる字数＝`(durationSec − NARRATION_SCENE_PADDING_SEC) × NARRATION_CHARS_PER_SEC`（`11 §4`） | 要点を残して、その字数以内に。**もう収まっていれば AI を呼ばない** |
 | 語りから作る（字幕） | `subtitle` | `maxSubtitleLength` と `ASSIST_SUBTITLE_TARGET_LENGTH`（30）の短い方 | 語りの要点を字幕に（内容を足さない） |
-| 候補を出す（見出し） | `title` | `ASSIST_TITLE_MAX_LENGTH`（20） | 場面の短い見出し（体言止めでよい） |
+| 候補を出す（見出し） | `title` | `ASSIST_TITLE_MAX_LENGTH`（20） | 場面の短い見出し（文にしない＝名詞で終わる） |
 
-- **上限が 8 字未満なら頼まない**（言い直しても意味が残らない）＝`AI_ASSIST_NOT_NEEDED`。
+- 割合・上限・数は `11 §4`（`ASSIST_*`）。**上限が `ASSIST_MIN_LENGTH`（8 字）未満なら頼まない**（言い直しても意味が残らない）＝`AI_ASSIST_NOT_NEEDED`。
+- **掛け合いの場面では字幕・見出しのボタンを出さない**（`narration.text` が行の編集に追従しないため＝ADR-0053）。セリフ欄そのものも掛け合いでは行ごとの欄になるので出ない。
+- **頼んだ時点の文と食い違った候補は出さない**（待つ間・見ている間に元の文や見た目パターンが変わったとき）。
 - 共通の指示：**元の文に無い事実（数字・制度・評価）を足さない**／会社名は `{会社名}` にして渡す（`§8.7` と同じ。戻すと伸びる分だけ短い上限を渡す）。
-- 出力の形＝`{"candidates": string[]}`（`maxItems`＝3・各 `maxLength`＝上限）。llama-server の文法で縛る。
-- 検証（`parseAssistCandidates`）：文字でない・空・**会社名を戻した後で**上限越え・元と同じ・重なりを落とす。括弧（「」）の囲みは外す・崩れた会社名は直す。**1つも残らなければ `AI_ASSIST_FAILED`**（場面は変えない）。
+- 出力の形＝`{"candidates": string[]}`（`maxItems`＝3）。llama-server の文法で縛る。⚠️ **字数は形で縛らない**（各 `maxLength` は上限の2倍＝暴走よけ）＝文法で字数を縛ると**上限の字で途中で切られた文**が出た（実測＝「…届けてい」）。字数は検証で見る。
+- 検証（`parseAssistCandidates`）：文字でない・空・**会社名を戻した後で**上限越え・元と同じ・重なりを落とす。括弧（「」）の囲みは外す・改行は消す・数字と和文の間の空白を詰める・崩れた会社名は直す。**1つも残らなければ `AI_ASSIST_FAILED`**（場面は変えない）。
 - 呼び出しは Rust の `local_ai_assist`＝動画案づくりの「やめる」の世代に**乗せない**（写真を読む口と同じ）。
 - 実装：`src/domain/ai/assist.ts`（純粋関数）・`src/app/components/AiSuggest.tsx`（画面）。
 

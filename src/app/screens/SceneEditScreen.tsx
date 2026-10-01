@@ -2184,7 +2184,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       />
                     )}
                     {/* 語りから字幕／見出しの候補（ADR-0053 決定3・4）。語りが無ければボタンは押せない。 */}
-                    {(key === TEXT_KEY.subtitle || key === TEXT_KEY.title) && (
+                    {/* ⚠️ 掛け合いの場面では出さない＝`narration.text` は行の編集に追従しないので、見えていない古い文から作ってしまう（ADR-0053 決定3・4）。 */}
+                    {(key === TEXT_KEY.subtitle || key === TEXT_KEY.title) && (selected.lines?.length ?? 0) === 0 && (
                       <AiSuggest
                         key={`${selected.sceneId}-${key}`}
                         kinds={key === TEXT_KEY.subtitle ? AI_ASSIST_SUBTITLE_KINDS : AI_ASSIST_TITLE_KINDS}
