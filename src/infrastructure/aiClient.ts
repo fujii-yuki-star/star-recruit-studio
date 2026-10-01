@@ -118,6 +118,14 @@ export async function onLocalAiProgress(handler: (e: LocalAiProgress) => void): 
   return listen<LocalAiProgress>('local-ai-progress', (e) => handler(e.payload));
 }
 
+/**
+ * このパソコンの中の AI に、編集の途中の小さな手伝いを頼む（ADR-0053）。応答の本文（JSON の文字列）を返す。
+ * 動画案づくりの「やめる」の世代には乗らない。
+ */
+export function localAiAssist(system: string, user: string, schema: string): Promise<string> {
+  return invoke<string>('local_ai_assist', { system, user, schema });
+}
+
 /** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
 export async function localAiAvailable(): Promise<boolean> {
   if (!isTauri()) return false;

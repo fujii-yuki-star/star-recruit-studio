@@ -69,7 +69,8 @@ import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
 import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
-import { FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
+import { AiSuggest } from "../components/AiSuggest";
+import { AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -244,6 +245,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
+  const companyName = useProjectStore((s) => s.meta.companyInfo?.companyName);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
   // 場面カードは横並び。端まで運んだら送る（#714 項目5）＝帯からはみ出したカードへも1回で運べる。
   const sceneStripRef = useRef<HTMLDivElement | null>(null);
@@ -2181,6 +2183,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
                       />
                     )}
+                    {/* 語りから字幕／見出しの候補（ADR-0053 決定3・4）。語りが無ければボタンは押せない。 */}
+                    {(key === TEXT_KEY.subtitle || key === TEXT_KEY.title) && (
+                      <AiSuggest
+                        key={`${selected.sceneId}-${key}`}
+                        kinds={key === TEXT_KEY.subtitle ? AI_ASSIST_SUBTITLE_KINDS : AI_ASSIST_TITLE_KINDS}
+                        source={selected.narration.text}
+                        current={selected.texts[key] ?? ""}
+                        limits={{ maxSubtitleLength: template?.aiHint?.maxSubtitleLength }}
+                        companyName={companyName}
+                        onPick={(t) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: t } }))}
+                      />
+                    )}
                     <div className="field" style={{ marginTop: 6 }}>
                       <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
                     </div>
@@ -3057,6 +3071,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     narration: { ...s.narration, text: e.target.value, status: NARRATION_STATUS.none },
                   }))
                 }
+              />
+              {/* セリフの言い直し（ADR-0053 決定1）。「使う」は手で書き換えたときと同じ＝声は作り直しが要る状態に戻す。 */}
+              <AiSuggest
+                key={selected.sceneId}
+                kinds={AI_ASSIST_NARRATION_KINDS}
+                source={selected.narration.text}
+                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec }}
+                companyName={companyName}
+                onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
               />
               <div className="row-between" style={{ marginTop: 6 }}>
                 <span className="text-sm text-muted">

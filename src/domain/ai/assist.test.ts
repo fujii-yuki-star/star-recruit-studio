@@ -1,0 +1,95 @@
+// 編集の途中の AI 補助（ADR-0053）。
+import { describe, expect, it } from 'vitest';
+import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, NARRATION_CHARS_PER_SEC, NARRATION_SCENE_PADDING_SEC } from '../constants';
+import {
+  ASSIST_CANDIDATES, ASSIST_KIND, ASSIST_SUBTITLE_TARGET_LENGTH, ASSIST_TITLE_MAX_LENGTH,
+  assistMaxLength, buildAssistMessages, charsForDuration, parseAssistCandidates,
+} from './assist';
+import { COMPANY_NAME_PLACEHOLDER } from './refineVideoPlan';
+
+const NAME = '株式会社サンプル物流';
+
+describe('assistMaxLength', () => {
+  it('短く＝今の文の7割（語りの上限も越えない）', () => {
+    expect(assistMaxLength(ASSIST_KIND.shorten, 'あ'.repeat(100), {})).toBe(70);
+    expect(assistMaxLength(ASSIST_KIND.shorten, 'あ'.repeat(300), { maxNarrationLength: 120 })).toBe(120);
+  });
+
+  it('丁寧に・やわらかく＝語りの上限（無ければ既定）', () => {
+    expect(assistMaxLength(ASSIST_KIND.polite, 'x'.repeat(20), { maxNarrationLength: 90 })).toBe(90);
+    expect(assistMaxLength(ASSIST_KIND.soft, 'x'.repeat(20), {})).toBe(MAX_NARRATION_LEN_DEFAULT);
+  });
+
+  it('尺に合わせる＝表示時間で読み切れる字数。もう収まっている・時間が無いなら頼まない', () => {
+    const fit = charsForDuration(6);
+    expect(fit).toBe(Math.floor((6 - NARRATION_SCENE_PADDING_SEC) * NARRATION_CHARS_PER_SEC));
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(fit + 1), { sceneDurationSec: 6 })).toBe(fit);
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(fit), { sceneDurationSec: 6 })).toBeNull();
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(100), {})).toBeNull();
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(200), { sceneDurationSec: 30, maxNarrationLength: 100 })).toBe(100);
+  });
+
+  it('字幕＝字幕の上限と目安の短い方／見出し＝見出しの上限', () => {
+    expect(assistMaxLength(ASSIST_KIND.subtitle, 'x', {})).toBe(Math.min(MAX_SUBTITLE_LEN_DEFAULT, ASSIST_SUBTITLE_TARGET_LENGTH));
+    expect(assistMaxLength(ASSIST_KIND.subtitle, 'x', { maxSubtitleLength: 20 })).toBe(20);
+    expect(assistMaxLength(ASSIST_KIND.title, 'x', {})).toBe(ASSIST_TITLE_MAX_LENGTH);
+  });
+
+  it('上限が短すぎるなら頼まない（境目は8字）', () => {
+    expect(assistMaxLength(ASSIST_KIND.shorten, 'あ'.repeat(11), {})).toBeNull(); // 7
+    expect(assistMaxLength(ASSIST_KIND.shorten, 'あ'.repeat(12), {})).toBe(8);
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(50), { sceneDurationSec: 2 })).toBeNull();
+  });
+});
+
+describe('buildAssistMessages', () => {
+  it('会社名は印にして渡し、印の分だけ短い上限を渡す', () => {
+    const m = buildAssistMessages(ASSIST_KIND.shorten, `${NAME}は地域の配送をしています。`, 40, { companyName: NAME });
+    expect(m.user).toContain(`${COMPANY_NAME_PLACEHOLDER}は地域の配送`);
+    expect(m.user).not.toContain(NAME);
+    expect(m.budget).toBe(40 - (NAME.length - COMPANY_NAME_PLACEHOLDER.length));
+    expect((m.schema as { properties: { candidates: { items: { maxLength: number }; maxItems: number } } }).properties.candidates).toMatchObject({ maxItems: ASSIST_CANDIDATES, items: { maxLength: m.budget } });
+    expect(m.system).toContain(`${m.budget}字以内`);
+  });
+
+  it('種類ごとに作業の言い方が違う・事実を足さないよう伝える', () => {
+    const kinds = Object.values(ASSIST_KIND);
+    const systems = kinds.map((k) => buildAssistMessages(k, 'x', 30, { sceneDurationSec: 5 }).system);
+    expect(new Set(systems).size).toBe(kinds.length);
+    for (const s of systems) expect(s).toContain('元の文に無い事実');
+    expect(buildAssistMessages(ASSIST_KIND.fitDuration, 'x', 30, { sceneDurationSec: 5 }).system).toContain('約5秒');
+    expect(buildAssistMessages(ASSIST_KIND.subtitle, 'x', 30).user.startsWith('# 語り')).toBe(true);
+    expect(buildAssistMessages(ASSIST_KIND.polite, 'x', 30).user.startsWith('# 元の文')).toBe(true);
+  });
+});
+
+describe('parseAssistCandidates', () => {
+  const raw = (c: unknown) => JSON.stringify({ candidates: c });
+
+  it('候補を取り出し、印を会社名に戻し、崩れた会社名を直し、括弧の囲みを外す', () => {
+    expect(parseAssistCandidates(raw([`${COMPANY_NAME_PLACEHOLDER}です`, '「株式会社サンプルの話」', ' 短い文 ']), '元', 30, NAME))
+      .toEqual([`${NAME}です`, `${NAME}の話`, '短い文']);
+  });
+
+  it('空・上限越え（戻した後）・元と同じ・重なり・文字でないものを落とす', () => {
+    const out = parseAssistCandidates(raw(['', 'あ'.repeat(11), '元の文', 'いい文', 'いい文', 3, `${COMPANY_NAME_PLACEHOLDER}`]), ' 元の文 ', 10, NAME);
+    expect(out).toEqual(['いい文', NAME]);
+    expect(parseAssistCandidates(raw([`${COMPANY_NAME_PLACEHOLDER}だよ`]), 'x', 10, NAME)).toEqual([]); // 戻すと 12 字
+  });
+
+  it('上限ちょうどは通す（境目）', () => {
+    expect(parseAssistCandidates(raw(['あ'.repeat(10)]), 'x', 10)).toEqual(['あ'.repeat(10)]);
+  });
+
+  it('多すぎる候補は先頭から上限の数まで', () => {
+    expect(parseAssistCandidates(raw(['a1', 'a2', 'a3', 'a4', 'a5']), 'x', 10)).toHaveLength(ASSIST_CANDIDATES);
+  });
+
+  it('形が違えば候補なし', () => {
+    for (const r of ['', 'x', 'null', '{"candidates":"a"}', '{}']) expect(parseAssistCandidates(r, 'x', 10)).toEqual([]);
+  });
+
+  it('会社名が無ければ印は空にする', () => {
+    expect(parseAssistCandidates(raw([`${COMPANY_NAME_PLACEHOLDER}へようこそ`]), 'x', 10)).toEqual(['へようこそ']);
+  });
+});
