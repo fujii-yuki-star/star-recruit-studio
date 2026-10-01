@@ -27,7 +27,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CHOOSE_OPTION, FIND_BY_TEXT, FIND_FIELD, FIND_SELECT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
-import { checkPlan, parseOutDir } from "./lib/plan.mjs";
+import { checkPlan, needsMotionCheck, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
 import { toVideoPoint } from "./lib/cursor.mjs";
@@ -875,14 +875,12 @@ async function main() {
       // ⚠️ **打つ段は絵で見ない**（#1228・実測）＝数文字の増加は、全画面を 32x18 まで
       //   縮める比較では**見えない**（実際に「動いていない」と誤って出た）。
       //   打つ段は**入った文字そのもの**を打った直後に照合してあるので、そちらのほうが強い証拠。
-      if (s.typed != null) continue;
+      if (!needsMotionCheck(s)) continue; // 打つ・選ぶ段／文字が変わった段／理由つきの小さい変化（`needsMotionCheck`）
       // ⚠️ **文字が変わった段は、絵で見ない**（実機で踏んだ）＝「再生」を押した直後の 1 秒は
       //   動くのが**再生位置の線と秒の表示だけ**で、32x18 まで縮めたコマ比べでは見えない。
       //   アプリ自身の文字が変わっていることのほうが、押下が効いた証拠として強い。
-      if (s.textChanged) continue;
       // ⚠️ **台本が理由つきで「変化が小さい」と書いた段だけ外す**（2026-10-01 実測）＝範囲の終わりを決めると
       //   目盛りの帯が少し伸びるだけで、縮めたコマ比べでは見えない。理由の無い除外は `checkPlan` が断る。
-      if (s.quiet) continue;
       const from = Math.max(0, s.atSec - STEP_WINDOW_SEC);
       const to = s.atSec + STEP_WINDOW_SEC;
       // ⚠️ **押した所の周りを見る**（#1228・実測）＝全画面だと、カードを選んだだけの

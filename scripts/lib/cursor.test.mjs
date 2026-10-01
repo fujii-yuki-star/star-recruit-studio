@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURSOR_H, CURSOR_W, RIPPLE_SIZE, VIEW_NOT_MEASURED_MESSAGE,
   artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
-  cursorWindows, positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
+  cursorFilterChain, cursorWindows, positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
 } from "./cursor.mjs";
 
 /** その画素の不透明度。 */
@@ -387,5 +387,29 @@ describe("ffmpeg 版の位置の式は、どの区間も if で選ぶ（t=NaN �
     top.push(cur);
     expect(top.length).toBeGreaterThan(2);
     for (const term of top) expect(term.startsWith("if("), term).toBe(true);
+  });
+});
+
+describe("カーソルを焼くフィルタの後半（窓ごとの overlay をつなぐ）", () => {
+  const pts = (n) => cursorPath(Array.from({ length: n }, (_, i) => ({ atSec: 2 + i * 2.3, x: i * 10, y: i * 5 })));
+  it("窓が1つなら split=1 で、出力の名前を付けない", () => {
+    const f = cursorFilterChain(pts(2));
+    expect(f.startsWith("[1:v]split=1[c0];[marked][c0]overlay=")).toBe(true);
+    expect(f).not.toMatch(/\[o0\]/);
+  });
+  it("窓が複数なら、split の本数＝窓の数で、前の出力を次の入力へつなぐ（最後だけ名前なし）", () => {
+    const n = cursorWindows(pts(30)).length;
+    const f = cursorFilterChain(pts(30));
+    expect(n).toBeGreaterThan(2);
+    expect(f.startsWith(`[1:v]split=${n}`)).toBe(true);
+    for (let i = 0; i < n - 1; i += 1) {
+      expect(f, `窓 ${i} の出力`).toContain(`[o${i}];`);
+      expect(f, `窓 ${i + 1} の入力`).toContain(`[o${i}][c${i + 1}]overlay=`);
+    }
+    expect(f).not.toContain(`[o${n - 1}]`);
+    expect(f.split(";").length).toBe(n + 1);
+  });
+  it("押した所が無ければ断る（split=0 を作らない）", () => {
+    expect(() => cursorFilterChain([])).toThrow(/押した記録/);
   });
 });

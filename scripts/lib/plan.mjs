@@ -109,3 +109,16 @@ export function checkRecordLog(log) {
   });
   return log;
 }
+
+/**
+ * 撮った後の「押したのに絵が動いていない」検査に掛ける段か（記録の1段から決める）。
+ * - 打つ段・選ぶ段（`typed` あり）は掛けない＝入った値をその場で照合してあるほうが強い証拠
+ * - 画面の文字が変わった段は掛けない＝再生の直後など、縮めたコマ比べでは見えない変化がある
+ * - 台本が理由つきで「変化が小さい」と書いた段（`quiet`）は掛けない＝理由の無い除外は `checkPlan` が断る
+ */
+export function needsMotionCheck(step) {
+  if (step.typed != null) return false;
+  if (step.textChanged) return false;
+  if (typeof step.quiet === "string" && step.quiet.trim() !== "") return false;
+  return true;
+}

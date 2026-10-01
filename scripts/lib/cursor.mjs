@@ -292,6 +292,24 @@ export function cursorWindows(path, perWindow = 8, dialect = "ffmpeg") {
 }
 
 /**
+ * カーソルを焼く**フィルタの後半**（`cursorWindows` の窓ごとの overlay をつなぐ）。
+ * `from` に流れてくる絵へ、入力 `cursor`（1コマの絵）を窓の数だけ分けて重ねる。最後の overlay は出力の名前を付けない
+ *（フィルタの終わり＝そのまま書き出される）。
+ * ⚠️ **押した所が1つも無ければ断る**＝`split=0` は ffmpeg が読めず、原因の分からない失敗になる。
+ */
+export function cursorFilterChain(path, from = "[marked]", cursor = "[1:v]") {
+  const wins = cursorWindows(path);
+  if (wins.length === 0) throw new Error("押した記録が1つもないので、カーソルを焼けません");
+  const split = `${cursor}split=${wins.length}${wins.map((_, i) => `[c${i}]`).join("")};`;
+  const chain = wins.map((w, i) => {
+    const src = i === 0 ? from : `[o${i - 1}]`;
+    const dst = i === wins.length - 1 ? "" : `[o${i}]`;
+    return `${src}[c${i}]overlay=eof_action=repeat:enable='${w.enable}':x='${w.x}':y='${w.y}'${dst}`;
+  }).join(";");
+  return split + chain;
+}
+
+/**
  * **輪が出ていない**あいだで、**カーソルが止まっている**時刻（カーソル本体だけを見るため）。
  *
  * ⚠️ **「押した後」とは限らない**（PR #1237 再レビュー 🟡）＝実測すると、選ばれる時刻の多くは
