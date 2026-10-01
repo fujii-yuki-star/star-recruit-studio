@@ -53,6 +53,9 @@ const CANCEL_POLL: Duration = Duration::from_millis(200);
 struct Inner {
     child: Option<Child>,
     base_url: Option<String>,
+    /// この回の起動の合言葉（`--api-key`）。起動ごとに作り直す＝同じパソコンのほかのプログラム（ウェブページを含む）が
+    /// 番号を当てても使えない。
+    api_key: Option<String>,
     last_used: Option<Instant>,
     /// この回の起動のあいだ、モデルの SHA-256 を確かめ済みか（1.3GB を毎回は読まない＝決定14）。
     verified: bool,
@@ -113,11 +116,21 @@ impl LocalLlmState {
             }
             g.base_url = None;
             g.last_used = None;
+            g.api_key = None;
         }
     }
 
     /// 動いていて**応えることを確かめ済み**なら接続先を返す（途中で止まっていたら片付けて None）。
     /// 起動を待っている間は子プロセスだけがあり接続先は None＝None を返す（待つのは `starting`）。
+    /// この回の起動の合言葉（起動していなければ空＝要求は断られる）。
+    fn api_key(&self) -> String {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| g.api_key.clone())
+            .unwrap_or_default()
+    }
+
     fn running_base_url(&self) -> Option<String> {
         let mut g = self.inner.lock().ok()?;
         let alive = match g.child.as_mut() {
@@ -127,6 +140,7 @@ impl LocalLlmState {
         if !alive {
             g.child = None;
             g.base_url = None;
+            g.api_key = None;
             // 落ちた回の「最後に使った時刻」も消す（#1293 レビュー 🟡）＝残すと、次の起動の途中で見張りが
             // 「しばらく使っていない」と判定して起動中の子を止める。
             g.last_used = None;
@@ -166,6 +180,55 @@ fn bundle_paths(app: &AppHandle) -> Option<BundlePaths> {
 /// 同梱されているか（実行ファイルとモデルが両方ある）。視覚の部品は無くても動画案は作れるので見ない。
 fn is_bundled(app: &AppHandle) -> bool {
     bundle_paths(app).is_some_and(|b| b.exe.is_file() && b.model.is_file())
+}
+
+/// 起動ごとの合言葉（32 桁の16進）。乱数の箱を使わず、標準の「起動ごとに種が変わる」ハッシュと時刻から作る
+/// （外から当てられないことだけが要る＝暗号の強さは要らない。相手は 127.0.0.1 だけ）。
+pub fn new_api_key() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    (0..2u64)
+        .map(|i| {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u64(i);
+            h.write_u128(now);
+            h.write_u32(std::process::id());
+            format!("{:016x}", h.finish())
+        })
+        .collect()
+}
+
+/// 起動の引数（純粋）。⚠️ **守りの3つ**（#1277 の確認・2026-10-01）：
+/// - `--api-key`＝合言葉が無い要求を断る（同じパソコンの悪意あるウェブページが番号を総当たりしても使えない）
+/// - `--no-slots`＝直前に処理した内容（指示文）を見せる口を閉じる（既定では開いている）
+/// - `--offline`＝ネットへ出ない（モデルや部品を取りに行かない）
+pub fn server_args(model: &Path, port: u16, mmproj: Option<&Path>, api_key: &str) -> Vec<String> {
+    let mut a = vec![
+        "-m".to_string(),
+        model.display().to_string(),
+        "--host".to_string(),
+        "127.0.0.1".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "-c".to_string(),
+        CONTEXT_TOKENS.to_string(),
+        "--api-key".to_string(),
+        api_key.to_string(),
+        "--no-slots".to_string(),
+        "--offline".to_string(),
+    ];
+    if let Some(mm) = mmproj {
+        a.extend([
+            "--mmproj".to_string(),
+            mm.display().to_string(),
+            "--image-max-tokens".to_string(),
+            IMAGE_MAX_TOKENS.to_string(),
+        ]);
+    }
+    a
 }
 
 /// 視覚の部品を読み込むか（大きさ→照合の順）。
@@ -371,20 +434,14 @@ async fn ensure_started(
     let Some(port) = pick_free_port() else {
         return Err(LOCAL_AI_START_FAILED.to_string());
     };
+    let key = new_api_key();
     let mut cmd = no_window_command(&exe);
-    cmd.arg("-m").arg(&model).args([
-        "--host",
-        "127.0.0.1",
-        "--port",
-        &port.to_string(),
-        "-c",
-        &CONTEXT_TOKENS.to_string(),
-    ]);
-    if vision {
-        cmd.arg("--mmproj")
-            .arg(&mmproj)
-            .args(["--image-max-tokens", &IMAGE_MAX_TOKENS.to_string()]);
-    }
+    cmd.args(server_args(
+        &model,
+        port,
+        vision.then_some(mmproj.as_path()),
+        &key,
+    ));
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -398,6 +455,7 @@ async fn ensure_started(
     if let Ok(mut g) = state.inner.lock() {
         g.child = Some(child);
         g.base_url = None;
+        g.api_key = Some(key.clone());
     }
     let base_url = format!("http://127.0.0.1:{port}");
     let started = Instant::now();
@@ -424,6 +482,7 @@ async fn ensure_started(
         }
         let ok = http_client()
             .get(format!("{base_url}/health"))
+            .bearer_auth(&key)
             .timeout(Duration::from_secs(2))
             .send()
             .await
@@ -630,6 +689,7 @@ pub async fn local_ai_generate(
     let request = async {
         let mut resp = http_client()
             .post(format!("{base}/v1/chat/completions"))
+            .bearer_auth(state.api_key())
             .json(&body)
             .send()
             .await?;
@@ -787,6 +847,7 @@ pub async fn local_ai_describe_image(
     let started = Instant::now();
     let resp = http_client()
         .post(format!("{base}/v1/chat/completions"))
+        .bearer_auth(state.api_key())
         .json(&body)
         .send()
         .await;
@@ -1000,6 +1061,30 @@ mod tests {
         failed.push(b"data: [DONE]\n");
         assert!(failed.error.is_some());
         assert!(!failed.finished());
+    }
+
+    #[test]
+    fn server_args_turn_on_the_three_guards() {
+        let a = server_args(Path::new("m.gguf"), 1234, None, "k");
+        let pos = |f: &str| a.iter().position(|x| x == f);
+        assert_eq!(a[pos("--api-key").unwrap() + 1], "k");
+        assert!(pos("--no-slots").is_some());
+        assert!(pos("--offline").is_some());
+        assert_eq!(a[pos("--host").unwrap() + 1], "127.0.0.1");
+        assert!(pos("--mmproj").is_none());
+        let v = server_args(Path::new("m.gguf"), 1234, Some(Path::new("p.gguf")), "k");
+        assert_eq!(
+            v[v.iter().position(|x| x == "--mmproj").unwrap() + 1],
+            "p.gguf"
+        );
+    }
+
+    #[test]
+    fn api_key_is_long_and_changes() {
+        let a = new_api_key();
+        assert_eq!(a.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, new_api_key());
     }
 
     #[test]
