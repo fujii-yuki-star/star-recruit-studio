@@ -239,18 +239,74 @@ export function cursorAt(path, t) {
  * それでも**位置の決め方は1か所**になるので、`js` 側を評価して `cursorAt` と突き合わせられる。
  */
 export function positionExpr(path, axis, dialect = "ffmpeg") {
+  // ⚠️ **入れ子にしない＝区間ごとの足し算にする**（2026-10-01 実測）＝段ごとに `if` を入れ子にしていたら、
+  //   51 段の台本で ffmpeg の式の読み取りが `Missing ')' or too many args` で落ちた（16 段までは通っていた）。
+  //   区間 [a, b) の印（0 か 1）× その区間の位置、を足し合わせる＝深さは段数によらず一定。
+  // ⚠️ **掛け算でなく `if` で選ぶ**（同日実測）＝ffmpeg は組み立て時に `t` を NaN にして一度評価するので、
+  //   `0*(…t…)` は NaN になり overlay が起こせない。`if` は選ばれた枝しか評価しない。
   const lt = (a, b) => (dialect === "js" ? `(${a} < ${b})` : `lt(${a},${b})`);
-  const iff = (c, t, f) => (dialect === "js" ? `(${c} ? ${t} : ${f})` : `if(${c},${t},${f})`);
+  const gte = (a, b) => (dialect === "js" ? `(${a} >= ${b})` : `gte(${a},${b})`);
+  const and = (a, b) => (dialect === "js" ? `(${a} && ${b})` : `(${a}*${b})`);
+  const iff = (c, v) => (dialect === "js" ? `(${c} ? ${v} : 0)` : `if(${c},${v},0)`);
   if (path.length === 0) return "0";
-  let expr = `${path[path.length - 1][axis]}`;
-  for (let i = path.length - 1; i >= 1; i -= 1) {
+  const first = path[0];
+  const last = path[path.length - 1];
+  const terms = [iff(lt("t", `${first.atSec}`), `${first[axis]}`)];
+  for (let i = 1; i < path.length; i += 1) {
     const a = path[i - 1];
     const b = path[i];
-    const span = Math.max(0.001, b.atSec - a.atSec);
-    const lerp = `(${a[axis]}+(${b[axis]}-${a[axis]})*(t-${a.atSec})/${span})`;
-    expr = iff(lt("t", `${b.atSec}`), iff(lt("t", `${a.atSec}`), `${a[axis]}`, lerp), expr);
+    if (!(b.atSec > a.atSec)) continue; // 同じ時刻の区間は空＝足さない
+    const lerp = `(${a[axis]}+(${b[axis]}-${a[axis]})*(t-${a.atSec})/${b.atSec - a.atSec})`;
+    terms.push(iff(and(gte("t", `${a.atSec}`), lt("t", `${b.atSec}`)), lerp));
   }
-  return expr;
+  terms.push(iff(gte("t", `${last.atSec}`), `${last[axis]}`));
+  return terms.join("+");
+}
+
+/**
+ * カーソルの道のりを**時間の窓**に分け、窓ごとに短い位置の式と「その窓だけ有効」の式を返す。
+ *
+ * ⚠️ **1本の式にしない**（2026-10-01 実測）＝51 段の台本では、位置の式が長すぎて ffmpeg が読めなかった
+ *   （入れ子でも足し算でも `Error when evaluating the expression`）。窓ごとに overlay を分け、
+ *   `enable` でその窓の間だけ効かせる。**どの時刻もちょうど1つの窓だけが有効**（検査で確かめる）。
+ * @returns {{ enable: string, x: string, y: string }[]}
+ */
+export function cursorWindows(path, perWindow = 8, dialect = "ffmpeg") {
+  if (path.length === 0) return [];
+  const lt = (a, b) => (dialect === "js" ? `(${a} < ${b})` : `lt(${a},${b})`);
+  const gte = (a, b) => (dialect === "js" ? `(${a} >= ${b})` : `gte(${a},${b})`);
+  const and = (a, b) => (dialect === "js" ? `(${a} && ${b})` : `(${a}*${b})`);
+  const out = [];
+  for (let start = 0; start < path.length - 1 || out.length === 0; start += perWindow) {
+    const end = Math.min(start + perWindow, path.length - 1);
+    const sub = path.slice(start, end + 1);
+    const isFirst = start === 0;
+    const isLast = end === path.length - 1;
+    const from = gte("t", `${path[start].atSec}`);
+    const to = lt("t", `${path[end].atSec}`);
+    const enable = isFirst && isLast ? (dialect === "js" ? "true" : "1") : isFirst ? to : isLast ? from : and(from, to);
+    out.push({ enable, x: positionExpr(sub, "x", dialect), y: positionExpr(sub, "y", dialect) });
+    if (isLast) break;
+  }
+  return out;
+}
+
+/**
+ * カーソルを焼く**フィルタの後半**（`cursorWindows` の窓ごとの overlay をつなぐ）。
+ * `from` に流れてくる絵へ、入力 `cursor`（1コマの絵）を窓の数だけ分けて重ねる。最後の overlay は出力の名前を付けない
+ *（フィルタの終わり＝そのまま書き出される）。
+ * ⚠️ **押した所が1つも無ければ断る**＝`split=0` は ffmpeg が読めず、原因の分からない失敗になる。
+ */
+export function cursorFilterChain(path, from = "[marked]", cursor = "[1:v]") {
+  const wins = cursorWindows(path);
+  if (wins.length === 0) throw new Error("押した記録が1つもないので、カーソルを焼けません");
+  const split = `${cursor}split=${wins.length}${wins.map((_, i) => `[c${i}]`).join("")};`;
+  const chain = wins.map((w, i) => {
+    const src = i === 0 ? from : `[o${i - 1}]`;
+    const dst = i === wins.length - 1 ? "" : `[o${i}]`;
+    return `${src}[c${i}]overlay=eof_action=repeat:enable='${w.enable}':x='${w.x}':y='${w.y}'${dst}`;
+  }).join(";");
+  return split + chain;
 }
 
 /**

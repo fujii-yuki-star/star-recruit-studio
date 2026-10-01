@@ -1,6 +1,6 @@
 // 撮影の引数と台本の読み取り（#1226・PR #1234 レビュー 🟡）。
 import { describe, expect, it } from "vitest";
-import { checkRecordLog, checkPlan, parseOutDir } from "./plan.mjs";
+import { checkRecordLog, checkPlan, needsMotionCheck, parseOutDir } from "./plan.mjs";
 
 describe("出力先の読み取り", () => {
   it("`--out` があればそれを使う", () => {
@@ -141,5 +141,49 @@ describe("台本：確定のキー", () => {
 
   it("書かなくてもよい（これまでの台本がそのまま通る）", () => {
     expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "題名", type: "あ" }] })).not.toThrow();
+  });
+});
+
+describe("選ぶ段（selectLabel＋option）", () => {
+  it("選ぶ欄と選択肢がそろっていれば通す", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "重ね方", option: "重ねて明るく" }] })).not.toThrow();
+  });
+  it("選択肢が無い・欄が無い選ぶ段は断る", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "重ね方" }] })).toThrow(/option/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "再生", option: "ふつう" }] })).toThrow(/selectLabel/);
+  });
+  it("nth は選ぶ段に 1 以上の整数でだけ書ける", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 2 }] })).not.toThrow();
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 0 }] })).toThrow(/nth/);
+    expect(() => checkPlan({ name: "x", steps: [{ selectLabel: "a", option: "b", nth: 1.5 }] })).toThrow(/nth/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", nth: 2 }] })).toThrow(/nth/);
+  });
+
+  it("quietChange は理由の文が要る（true や空では外せない）", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: "目盛りの帯が少し伸びるだけ" }] })).not.toThrow();
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: true }] })).toThrow(/quietChange/);
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "a", quietChange: " " }] })).toThrow(/quietChange/);
+  });
+
+  it("押す・打つ・選ぶを1段に混ぜたら断る", () => {
+    expect(() => checkPlan({ name: "x", steps: [{ clickText: "再生", selectLabel: "重ね方", option: "ふつう" }] })).toThrow(/1段に1つ/);
+    expect(() => checkPlan({ name: "x", steps: [{ fieldLabel: "長さ", type: "8", clickText: "再生" }] })).toThrow(/1段に1つ/);
+  });
+});
+
+describe("撮った後の「絵が動いたか」の検査に掛ける段", () => {
+  const base = { atSec: 1, x: 1, y: 1, label: "a", typed: null, textChanged: false, quiet: null };
+  it("押しただけで文字も変わらない段は掛ける", () => {
+    expect(needsMotionCheck(base)).toBe(true);
+  });
+  it("打つ・選ぶ段、文字が変わった段、理由つきで小さいと書いた段は掛けない", () => {
+    expect(needsMotionCheck({ ...base, typed: "8" })).toBe(false);
+    expect(needsMotionCheck({ ...base, typed: "ふつう" })).toBe(false);
+    expect(needsMotionCheck({ ...base, textChanged: true })).toBe(false);
+    expect(needsMotionCheck({ ...base, quiet: "目盛りの帯が少し伸びるだけ" })).toBe(false);
+  });
+  it("理由が空・文でない quiet では外さない", () => {
+    expect(needsMotionCheck({ ...base, quiet: " " })).toBe(true);
+    expect(needsMotionCheck({ ...base, quiet: true })).toBe(true);
   });
 });

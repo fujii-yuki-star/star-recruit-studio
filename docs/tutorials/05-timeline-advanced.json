@@ -1,0 +1,66 @@
+{
+  "name": "05-timeline-advanced",
+  "note": "上級者向け（社内・デモ用の天井実測）。列を重ねる・見え方・キーフレーム・分ける・範囲を詰めて消す・目印・読み上げと連動字幕。解説（2人の掛け合い）は録画の後で別に重ねるので、say は段の目印として短く書く。",
+  "steps": [
+    { "clickText": "タイムラインで作る", "say": "タイムラインで作る", "afterMs": 1500 },
+    { "clickText": "横向き（パソコン・テレビ向き）", "say": "横向き", "expectHeading": "新しいタイムライン", "afterMs": 2400 },
+
+    { "clickText": "よく使う素材から取り込む", "say": "よく使う素材を開く", "afterMs": 1600 },
+    { "fieldLabel": "名前やタグで探す", "type": "笑顔", "say": "笑顔で絞る", "afterMs": 1200 },
+    { "clickText": "この動画で使う", "say": "笑顔を取り込む", "afterMs": 2400 },
+    { "fieldLabel": "名前やタグで探す", "type": "案内", "say": "案内で絞る", "afterMs": 1200 },
+    { "clickText": "この動画で使う", "say": "案内を取り込む", "afterMs": 2400 },
+
+    { "clickText": "ゆうこ（笑顔）", "say": "土台を置く", "afterMs": 2000 },
+    { "fieldLabel": "長さ（秒）", "type": "10", "enter": true, "say": "土台を10秒に", "afterMs": 1800 },
+
+    { "clickText": "映像の列を足す", "say": "列を足す", "afterMs": 1500 },
+    { "clickText": "ゆうこ（案内）", "say": "上の列に重ねる", "afterMs": 2000 },
+    { "fieldLabel": "長さ（秒）", "type": "10", "enter": true, "say": "小窓も10秒に", "afterMs": 1500 },
+    { "fieldLabel": "幅", "type": "640", "enter": true, "say": "小窓の幅", "afterMs": 1200 },
+    { "fieldLabel": "高さ", "type": "360", "enter": true, "say": "小窓の高さ", "afterMs": 1200 },
+    { "fieldLabel": "横位置", "type": "1220", "enter": true, "say": "小窓の横位置", "afterMs": 1200 },
+    { "fieldLabel": "縦位置", "type": "60", "enter": true, "say": "小窓の縦位置", "afterMs": 1600 },
+
+    { "clickText": "見え方（色・重ね方）", "say": "見え方を開く", "afterMs": 1400 },
+    { "fieldLabel": "鮮やかさ", "type": "0", "enter": true, "say": "白黒にする", "afterMs": 1600 },
+    { "fieldLabel": "色あい", "type": "0.6", "enter": true, "say": "暖色に寄せる（白黒なので効かない＝ボケ）", "afterMs": 1600 },
+    { "fieldLabel": "鮮やかさ", "type": "1", "enter": true, "say": "色を戻す", "afterMs": 1600 },
+    { "selectLabel": "重ね方", "option": "重ねて明るく", "say": "重ね方を変える（幽霊っぽくなる）", "afterMs": 2000 },
+    { "selectLabel": "重ね方", "option": "ふつう", "say": "重ね方を戻す", "afterMs": 1600 },
+
+    { "clickText": "動き", "say": "動きを開く", "afterMs": 1400 },
+    { "fieldLabel": "横のずれ（px）", "type": "700", "say": "最初は右の外に", "afterMs": 900 },
+    { "fieldLabel": "濃さ（0", "type": "0", "say": "最初は透明", "afterMs": 900 },
+    { "clickText": "この位置に置く", "say": "1つめのキーフレーム", "afterMs": 1600 },
+    { "clickText": "再生", "say": "少し進める", "afterMs": 1500 },
+    { "clickText": "停止", "say": "止める", "afterMs": 1200 },
+    { "fieldLabel": "横のずれ（px）", "type": "0", "say": "定位置へ", "afterMs": 900 },
+    { "fieldLabel": "濃さ（0", "type": "1", "say": "くっきり", "afterMs": 900 },
+    { "clickText": "この位置に置く", "say": "2つめのキーフレーム", "afterMs": 1600 },
+    { "selectLabel": "ここまでの動き方", "nth": 2, "option": "ゆっくり終わる", "say": "動き方をゆっくり終わるに", "afterMs": 1600 },
+    { "clickText": "先頭へ", "say": "先頭へ", "afterMs": 900 },
+    { "clickText": "再生", "say": "動きを見る", "afterMs": 3200 },
+    { "clickText": "停止", "say": "止める", "afterMs": 1400 },
+
+    { "clickText": "ここで分ける", "say": "ここで分ける", "afterMs": 1800 },
+    { "clickText": "ここから（範囲）", "say": "範囲の始まり", "afterMs": 1200 },
+    { "clickText": "再生", "say": "少し進める", "afterMs": 1500 },
+    { "clickText": "停止", "say": "止める", "afterMs": 1000 },
+    { "clickText": "ここまで（範囲）", "say": "範囲の終わり", "quietChange": "範囲の終わりを決めると目盛りの帯が少し伸びるだけで、縮めたコマ比べでは見えない（次の段の削除で効いたことが分かる）", "afterMs": 1400 },
+    { "clickText": "範囲を削除して詰める", "say": "範囲を消して詰める", "afterMs": 2200 },
+    { "clickText": "目印を置く", "say": "目印を置く", "afterMs": 1400 },
+    { "fieldLabel": "メモ", "type": "ここで決めゼリフ", "say": "目印にメモ", "afterMs": 1600 },
+
+    { "clickText": "先頭へ", "say": "先頭へ", "afterMs": 900 },
+    { "clickText": "読み上げ", "say": "読み上げのタブ", "afterMs": 1200 },
+    { "clickText": "読み上げを置く", "say": "読み上げを置く", "afterMs": 1800 },
+    { "fieldLabel": "読み上げる文", "type": "上級者のみなさん、ようこそ。", "say": "読み上げる文", "afterMs": 1400 },
+    { "selectLabel": "声", "option": "春日部つむぎ（ノーマル）", "say": "声を選ぶ", "afterMs": 1400 },
+    { "clickText": "声を作る", "say": "声を作る", "afterMs": 9000 },
+    { "clickText": "この読み上げの字幕を置く", "say": "連動する字幕を置く", "afterMs": 2400 },
+
+    { "clickText": "再生", "say": "通して見る（最後まで流れて自然に止まる）", "afterMs": 1000 },
+    { "waitMs": 9500 }
+  ]
+}

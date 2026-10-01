@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CURSOR_H, CURSOR_W, RIPPLE_SEC, RIPPLE_SIZE, SETTLE_SEC, TAIL_GUARD_SEC, TRAVEL_SEC, VIEW_NOT_MEASURED_MESSAGE,
-  cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter, positionExpr, ripplePixels,
+  cursorAt, cursorPath, cursorPixels, expectedCursorCenter, cursorFilterChain, expectedMarkCenter, ripplePixels,
   stillTimes, toVideoPoint,
 } from "./lib/cursor.mjs";
 import { CHECK_H, CHECK_W, markVerdict } from "./lib/burnCheck.mjs";
@@ -104,7 +104,9 @@ function main() {
   const filter =
     `[0:v]trim=start=${trimSec}:end=${endSec},setpts=PTS-STARTPTS,crop=${frame.w}:${frame.h}:${frame.x}:${frame.y}[base];` +
     `[base][2:v]overlay=eof_action=repeat:x='${rippleX}${hide}':y='${rippleY}${hide}'[marked];` +
-    `[marked][1:v]overlay=eof_action=repeat:x='${positionExpr(path, "x")}':y='${positionExpr(path, "y")}'`;
+    // ⚠️ **カーソルは時間の窓ごとに overlay を分ける**（`cursorWindows` の説明＝1本の式では長すぎて読めない）。
+    //   同じ絵（入力 1）を窓の数だけ使うので、先に split で分けておく。
+    cursorFilterChain(path, "[marked]", "[1:v]");
   // ⚠️ **式はファイルで渡す**（PR #1237 レビュー 🟡）＝1段で約500字伸びるので、引数に載せると
   //   **60段あたりで Windows の上限（32,767字）に当たる**。当たり方が最悪で、コマンドが起動できず
   //   `r.error` になる（＝段数が増えたときだけ、理由の分からない失敗になる）。ファイルなら上限が消える。

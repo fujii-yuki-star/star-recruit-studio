@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURSOR_H, CURSOR_W, RIPPLE_SIZE, VIEW_NOT_MEASURED_MESSAGE,
   artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
-  positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
+  cursorFilterChain, cursorWindows, positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
 } from "./cursor.mjs";
 
 /** その画素の不透明度。 */
@@ -132,13 +132,27 @@ describe("位置の式（`overlay` と `cursorAt` が同じ木から出る）", 
 
   it("ffmpeg 版は ffmpeg の書き方（JS の三項演算子を出さない）", () => {
     const e = positionExpr(path, "x");
-    expect(e).toContain("if(lt(t,");
+    expect(e).toContain("lt(t,");
     expect(e, "JS の書き方が混ざっている＝ffmpeg が式を読めない").not.toContain("?");
   });
 
-  it("枝の数は、どちらの書き方でも同じ", () => {
-    const count = (s, re) => (s.match(re) ?? []).length;
-    expect(count(positionExpr(path, "x"), /if\(/g)).toBe(count(positionExpr(path, "x", "js"), /\?/g));
+  // ⚠️ **時刻が NaN でも数になる**（2026-10-01 実測）＝ffmpeg は組み立て時に t=NaN で一度評価する。
+  //   掛け算で区間を選ぶと 0*NaN=NaN になり、overlay が起こせなかった。
+  it("時刻が NaN のとき 0 を返す（NaN にならない）", () => {
+    expect(new Function("t", `return ${positionExpr(path, "x", "js")};`)(NaN)).toBe(0);
+  });
+
+  it("区間の数は、どちらの書き方でも同じ", () => {
+    expect(positionExpr(path, "x").split("+").length).toBe(positionExpr(path, "x", "js").split("+").length);
+  });
+
+  // ⚠️ **段数が増えても入れ子が深くならない**（2026-10-01 実測＝51 段で ffmpeg が式を読めなかった）。
+  it("段が多くても括弧の深さは一定（入れ子にしない）", () => {
+    const depth = (e) => { let d = 0; let m = 0; for (const c of e) { if (c === "(") m = Math.max(m, ++d); else if (c === ")") d -= 1; } return m; };
+    const many = cursorPath(Array.from({ length: 60 }, (_, i) => ({ atSec: 2 + i * 2, x: (i * 37) % 1900, y: (i * 53) % 1000 })));
+    expect(depth(positionExpr(many, "x"))).toBe(depth(positionExpr(path, "x")));
+    const f = new Function("t", `return ${positionExpr(many, "x", "js")};`);
+    for (let t = 0; t <= 130; t += 0.37) expect(Math.abs(f(t) - cursorAt(many, t).x)).toBeLessThanOrEqual(0.5);
   });
 
   it("押す場所が無ければ 0（式が空にならない）", () => {
@@ -311,5 +325,91 @@ describe("押す間隔が近すぎるとき", () => {
 
   it("足りていれば通す（境目で正しい台本を落とさない）", () => {
     expect(() => cursorPath([{ atSec: 3, x: 1, y: 2 }, { atSec: 3 + TRAVEL_SEC + SETTLE_SEC, x: 3, y: 4 }])).not.toThrow();
+  });
+});
+
+describe("カーソルを時間の窓に分ける（1本の式では長すぎて ffmpeg が読めない＝2026-10-01 実測）", () => {
+  const many = cursorPath(Array.from({ length: 51 }, (_, i) => ({ atSec: 1 + i * 2.3, x: (i * 37) % 1900, y: (i * 53) % 1000 })));
+  const fns = (wins) => wins.map((w) => ({
+    on: new Function("t", `return ${w.enable};`),
+    x: new Function("t", `return ${w.x};`),
+    y: new Function("t", `return ${w.y};`),
+  }));
+
+  it("どの時刻もちょうど1つの窓だけが有効で、その窓の位置は cursorAt と同じ", () => {
+    const wins = fns(cursorWindows(many, 8, "js"));
+    expect(wins.length).toBeGreaterThan(1);
+    const last = many[many.length - 1].atSec;
+    for (let t = 0; t <= last + 10; t += 0.13) {
+      const on = wins.filter((w) => w.on(t));
+      expect(on, `${t.toFixed(2)}s で有効な窓が ${on.length} 個`).toHaveLength(1);
+      const want = cursorAt(many, t);
+      expect(Math.abs(on[0].x(t) - want.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(on[0].y(t) - want.y)).toBeLessThanOrEqual(0.5);
+    }
+    // ⚠️ 窓の継ぎ目そのもの（押した時刻ちょうど）でも1つだけ。
+    for (const p of many) expect(wins.filter((w) => w.on(p.atSec)), `${p.atSec}s（継ぎ目）`).toHaveLength(1);
+  });
+
+  it("窓ごとの式は短い（段数が増えても伸びない）", () => {
+    const longest = Math.max(...cursorWindows(many).map((w) => w.x.length));
+    const fewer = Math.max(...cursorWindows(many.slice(0, 9)).map((w) => w.x.length));
+    // 時刻の桁が増える分だけは伸びる＝1.5 倍まで。1本の式（段数ぶん伸びる）よりずっと短い。
+    expect(longest).toBeLessThanOrEqual(fewer * 1.5);
+    expect(longest).toBeLessThan(positionExpr(many, "x").length / 3);
+  });
+
+  it("押した所が1つ・2つでも窓は1つで、いつも有効", () => {
+    for (const p of [many.slice(0, 1), many.slice(0, 2)]) {
+      const wins = fns(cursorWindows(p, 8, "js"));
+      expect(wins).toHaveLength(1);
+      expect(wins[0].on(0) && wins[0].on(999)).toBe(true);
+    }
+  });
+
+  it("ffmpeg 版は ffmpeg の書き方", () => {
+    const w = cursorWindows(many)[1];
+    expect(w.enable).toContain("gte(t,");
+    expect(w.enable).not.toContain("&&");
+  });
+});
+
+describe("ffmpeg 版の位置の式は、どの区間も if で選ぶ（t=NaN で評価されても NaN にならない＝同日実測）", () => {
+  it("区間の数だけ if がある（掛け算で選ぶと 0*NaN=NaN で overlay が起こせない）", () => {
+    const path = cursorPath([{ atSec: 2, x: 100, y: 200 }, { atSec: 5, x: 400, y: 300 }, { atSec: 9, x: 50, y: 60 }]);
+    const e = positionExpr(path, "x");
+    // 一番外側の「+」で区切った項が、すべて if( で始まる（括弧の中の + では区切らない）。
+    const top = []; let depth = 0; let cur = "";
+    for (const ch of e) {
+      if (ch === "(") depth += 1; else if (ch === ")") depth -= 1;
+      if (ch === "+" && depth === 0) { top.push(cur); cur = ""; } else cur += ch;
+    }
+    top.push(cur);
+    expect(top.length).toBeGreaterThan(2);
+    for (const term of top) expect(term.startsWith("if("), term).toBe(true);
+  });
+});
+
+describe("カーソルを焼くフィルタの後半（窓ごとの overlay をつなぐ）", () => {
+  const pts = (n) => cursorPath(Array.from({ length: n }, (_, i) => ({ atSec: 2 + i * 2.3, x: i * 10, y: i * 5 })));
+  it("窓が1つなら split=1 で、出力の名前を付けない", () => {
+    const f = cursorFilterChain(pts(2));
+    expect(f.startsWith("[1:v]split=1[c0];[marked][c0]overlay=")).toBe(true);
+    expect(f).not.toMatch(/\[o0\]/);
+  });
+  it("窓が複数なら、split の本数＝窓の数で、前の出力を次の入力へつなぐ（最後だけ名前なし）", () => {
+    const n = cursorWindows(pts(30)).length;
+    const f = cursorFilterChain(pts(30));
+    expect(n).toBeGreaterThan(2);
+    expect(f.startsWith(`[1:v]split=${n}`)).toBe(true);
+    for (let i = 0; i < n - 1; i += 1) {
+      expect(f, `窓 ${i} の出力`).toContain(`[o${i}];`);
+      expect(f, `窓 ${i + 1} の入力`).toContain(`[o${i}][c${i + 1}]overlay=`);
+    }
+    expect(f).not.toContain(`[o${n - 1}]`);
+    expect(f.split(";").length).toBe(n + 1);
+  });
+  it("押した所が無ければ断る（split=0 を作らない）", () => {
+    expect(() => cursorFilterChain([])).toThrow(/押した記録/);
   });
 });

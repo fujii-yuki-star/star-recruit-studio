@@ -26,8 +26,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { FIND_BY_TEXT, FIND_FIELD, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
-import { checkPlan, parseOutDir } from "./lib/plan.mjs";
+import { CHOOSE_OPTION, FIND_BY_TEXT, FIND_FIELD, FIND_SELECT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { checkPlan, needsMotionCheck, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
 import { toVideoPoint } from "./lib/cursor.mjs";
@@ -150,6 +150,17 @@ const LOCATE = (text) => `(() => {
 /** 入力欄の位置（`FIND_FIELD` で探す）。押してから打つので、押せる場所として同じ形で返す。 */
 const LOCATE_FIELD = (label) => `(() => {
   const hit = ${FIND_FIELD(label)};
+  if (!hit) return null;
+  ${SCROLL_INTO_VIEW}
+  const r = hit.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+  return { x, y, label: ${JSON.stringify(label)}, ...${REACHABLE_AT} };
+})()`;
+
+/** 選択欄の位置（`FIND_SELECT` で探す）。選ぶ前に仮想カーソルをそこへ動かすため、押せる場所と同じ形で返す。 */
+const LOCATE_SELECT = (label, nth) => `(() => {
+  const hit = ${FIND_SELECT(label, nth)};
   if (!hit) return null;
   ${SCROLL_INTO_VIEW}
   const r = hit.getBoundingClientRect();
@@ -489,7 +500,8 @@ const RESET_TO_HOME = `(async () => {
  * @returns 見つかった位置。{@link LOCATE_WAIT_MS} 待っても出なければ `null`。
  */
 async function locateWithWait(cdp, step, isTyping) {
-  const where = () => evaluate(cdp, isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
+  const where = () => evaluate(cdp, step.selectLabel != null ? LOCATE_SELECT(step.selectLabel, step.nth ?? 1)
+    : isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
   const until = Date.now() + LOCATE_WAIT_MS;
   for (;;) {
     const at = await where();
@@ -716,7 +728,9 @@ async function main() {
       // ⚠️ **待つのは「無いとき」だけ**＝在れば1回目で見つかるので、映像は間延びしない。
       const at = await locateWithWait(cdp, step, isTyping);
       if (!at) {
-        throw new Error(isTyping
+        throw new Error(step.selectLabel != null
+          ? `選択欄が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.selectLabel}（節が畳まれていませんか）`
+          : isTyping
           ? `入力欄が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.fieldLabel}（画面が違うか、ラベルが変わっていませんか）`
           : `押せる要素が ${Math.round(LOCATE_WAIT_MS / 1000)} 秒待っても出ません: ${step.clickText}`);
       }
@@ -724,14 +738,25 @@ async function main() {
       //   座標で叩くと、**別の欄の上の点**を押す。押せてはいるので誰も落ちず、
       //   取り込めていないまま次の段へ進む。**押す前に断る**。
       if (at.reachable === false) {
-        throw new Error(`「${step.clickText ?? step.fieldLabel}」は在りますが、その場所を押しても届きません`
+        throw new Error(`「${step.clickText ?? step.fieldLabel ?? step.selectLabel}」は在りますが、その場所を押しても届きません`
           + `（(${at.x},${at.y}) に居るのは「${at.topLabel}」）`
           + "＝欄の外にあるか、別のものが覆っています。前の段で欄を開く・広げるようにしてください");
       }
       const tSec = (Date.now() - t0) / 1000;
       const textBefore = await evaluate(cdp, TEXT_SIG);
+      // ⚠️ **選ぶ段は押さない**＝選択欄を押すと OS の一覧が別の窓に開き、録画に写らないまま次の段を塞ぐ。
+      //   カーソルだけ動かし、選ぶのは `CHOOSE_OPTION`（React が受け取る道）。選べたかはその場で確かめる。
+      const isSelect = step.selectLabel != null;
+      if (isSelect) {
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
+        await new Promise((r) => setTimeout(r, 300));
+        const chosen = await evaluate(cdp, CHOOSE_OPTION(step.selectLabel, step.option, step.nth ?? 1));
+        if (chosen !== step.option) {
+          throw new Error(`「${step.selectLabel}」で「${step.option}」を選べません（いま選ばれているのは ${JSON.stringify(chosen)}）＝選択肢の文字を確かめてください`);
+        }
+      }
       // ⚠️ **本物の入力を送る**＝JS の `.click()` ではなく、人が押したのと同じ道を通す。
-      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      for (const type of isSelect ? [] : ["mouseMoved", "mousePressed", "mouseReleased"]) {
         await cdp.send("Input.dispatchMouseEvent", {
           type, x: at.x, y: at.y, button: "left", clickCount: type === "mouseMoved" ? 0 : 1,
         });
@@ -782,9 +807,11 @@ async function main() {
       log.push({
         atSec: Number(tSec.toFixed(2)),
         x: at.x, y: at.y, label: at.label,
-        typed: isTyping ? step.type : null,
+        typed: isTyping ? step.type : isSelect ? step.option : null,
         // ⚠️ **押下が効いたかの、もう一つの証拠**（上の `TEXT_SIG` の注記）。
         textChanged: textAfter !== textBefore,
+        // 台本が「絵の変化が小さい」と理由つきで書いた段（下の絵の検査を外す）。
+        quiet: step.quietChange ?? null,
         say: step.say ?? null,
         headingAfter,
       });
@@ -848,11 +875,12 @@ async function main() {
       // ⚠️ **打つ段は絵で見ない**（#1228・実測）＝数文字の増加は、全画面を 32x18 まで
       //   縮める比較では**見えない**（実際に「動いていない」と誤って出た）。
       //   打つ段は**入った文字そのもの**を打った直後に照合してあるので、そちらのほうが強い証拠。
-      if (s.typed != null) continue;
+      if (!needsMotionCheck(s)) continue; // 打つ・選ぶ段／文字が変わった段／理由つきの小さい変化（`needsMotionCheck`）
       // ⚠️ **文字が変わった段は、絵で見ない**（実機で踏んだ）＝「再生」を押した直後の 1 秒は
       //   動くのが**再生位置の線と秒の表示だけ**で、32x18 まで縮めたコマ比べでは見えない。
       //   アプリ自身の文字が変わっていることのほうが、押下が効いた証拠として強い。
-      if (s.textChanged) continue;
+      // ⚠️ **台本が理由つきで「変化が小さい」と書いた段だけ外す**（2026-10-01 実測）＝範囲の終わりを決めると
+      //   目盛りの帯が少し伸びるだけで、縮めたコマ比べでは見えない。理由の無い除外は `checkPlan` が断る。
       const from = Math.max(0, s.atSec - STEP_WINDOW_SEC);
       const to = s.atSec + STEP_WINDOW_SEC;
       // ⚠️ **押した所の周りを見る**（#1228・実測）＝全画面だと、カードを選んだだけの
