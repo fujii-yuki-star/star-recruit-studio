@@ -60,6 +60,7 @@ function App() {
       // 遷移とは別に意味を持つので触らない。
       const st = useProjectStore.getState();
       st.setEditingSceneFocus(null);
+      st.setEditingSceneAssist(null); // すぐ頼む AI 補助の印（ADR-0053 決定2）も同じ＝残すと押してもいないのに頼む
       st.setSettingsFocus(null);
       return;
     }

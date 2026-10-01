@@ -36,9 +36,13 @@ export interface AiSuggestProps {
   companyName?: string;
   /** 候補を選んだとき（ここで初めて書き換える）。 */
   onPick: (text: string) => void;
+  /** 開いたらすぐ頼む作業（公開前チェックから来たとき・ADR-0053 決定2）。同梱の AI があるときだけ頼む。 */
+  autoKind?: AssistKind;
+  /** `autoKind` を頼んだとき（呼び出し側が一度きりの印を消す＝もう一度頼まない）。 */
+  onAutoAsked?: () => void;
 }
 
-export function AiSuggest({ kinds, source, current, limits, companyName, onPick }: AiSuggestProps) {
+export function AiSuggest({ kinds, source, current, limits, companyName, onPick, autoKind, onAutoAsked }: AiSuggestProps) {
   const available = useLocalAiAvailable();
   const [busy, setBusy] = useState(false);
   // 候補は**頼んだ時点の文**から作ったもの＝その後に文が変わったら出さない（古い文の候補で手直しを上書きしない）。
@@ -70,6 +74,16 @@ export function AiSuggest({ kinds, source, current, limits, companyName, onPick 
       setBusy(false);
     }
   }
+
+  // 公開前チェックから来たときは、同梱の AI があると分かった時点で1回だけ頼む（呼び出し側が印を消す）。
+  useEffect(() => {
+    if (!available || !autoKind) return;
+    onAutoAsked?.();
+    // 描画の外で頼む（効果の中で同期に状態を変えない）。
+    const kind = autoKind;
+    queueMicrotask(() => void ask(kind));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 頼むのは「使える」と「頼む種類」が揃った時点だけ（`ask` は毎回作り直される）
+  }, [available, autoKind]);
 
   if (!available) return null;
   return (

@@ -2,6 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import type { SceneEditFocus, SettingsFocus } from "../data/mockData";
+import type { AssistKind } from "../../domain/ai/assist";
 import type { TimelineProject } from "../../domain/timeline/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
@@ -471,6 +472,12 @@ interface ProjectState {
    */
   editingSceneFocus: SceneEditFocus | null;
   setEditingSceneFocus: (focus: SceneEditFocus | null) => void;
+  /**
+   * 場面編集を開いたら、セリフ欄で**すぐ頼む** AI 補助（ADR-0053 決定2・公開前チェックから）。
+   * 一度きり（`editingSceneFocus` と同じ流儀）＝受けたら `null` へ戻す。
+   */
+  editingSceneAssist: AssistKind | null;
+  setEditingSceneAssist: (kind: AssistKind | null) => void;
   /**
    * 設定画面を開いたとき寄る欄（#1032）。**寄ったら落とす**＝残すと、
    * あとでサイドバーから設定を開いたときにも**勝手にスクロールする**。
@@ -946,6 +953,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingTemplateId: null,
   editingSceneId: null,
   editingSceneFocus: null,
+  editingSceneAssist: null,
   settingsFocus: null,
   wizardStep: 0,
   confirmReturnTo: null,
@@ -2321,6 +2329,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
   setEditingSceneFocus: (focus) => set({ editingSceneFocus: focus }),
+  setEditingSceneAssist: (kind) => set({ editingSceneAssist: kind }),
   setSettingsFocus: (focus) => set({ settingsFocus: focus }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),

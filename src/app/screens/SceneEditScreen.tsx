@@ -269,6 +269,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 行き先でその欄に寄る仕掛けが無かった（＝押した言葉と着地がずれる）。
   // ⚠️ **初期化子で捕まえる**＝上の後始末（`null` へ戻す）より前に読む必要がある。
   const [focus] = useState(() => useProjectStore.getState().editingSceneFocus);
+  // 公開前チェックから来たとき、開いた場面のセリフ欄ですぐ頼む AI 補助（ADR-0053 決定2）。**その場面に1回だけ**
+  //（別の場面へ移って戻っても頼み直さない）＝頼んだら `null` へ戻す。
+  const [autoAssist, setAutoAssist] = useState(() => {
+    const st = useProjectStore.getState();
+    // ⚠️ 掛け合いの場面では受けない＝セリフ欄の手伝いが無いので、印が残ったまま後で掛け合いを解くと**押してもいないのに頼む**。
+    const target = st.scenes.find((s) => s.sceneId === st.editingSceneId);
+    return st.editingSceneAssist && target && (target.lines?.length ?? 0) === 0 ? { sceneId: target.sceneId, kind: st.editingSceneAssist } : null;
+  });
   // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
   // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。
   // sceneId を持つことで、場面を切り替えたら（sceneId 不一致で）自動的にドラフトが無効化される（effect 不要・別場面の値を見せない）。
@@ -439,6 +447,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   useEffect(() => {
     useProjectStore.getState().setEditingSceneId(null);
     useProjectStore.getState().setEditingSceneFocus(null);
+    useProjectStore.getState().setEditingSceneAssist(null);
   }, []);
 
 
@@ -3080,6 +3089,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 source={selected.narration.text}
                 limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec }}
                 companyName={companyName}
+                autoKind={autoAssist?.sceneId === selected.sceneId ? autoAssist.kind : undefined}
+                onAutoAsked={() => setAutoAssist(null)}
                 onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
               />
               <div className="row-between" style={{ marginTop: 6 }}>

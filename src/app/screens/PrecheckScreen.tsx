@@ -206,11 +206,16 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                           </button>
                         </span>
                       ) : (
-                        // その他（字幕を短く/動画を直す）は該当場面を指定してから場面編集へ（#400）。
+                        // その他（字幕を短く/動画を直す/セリフを直す）は該当場面を指定してから場面編集へ（#400）。
+                        // セリフを直すときはセリフ欄へ寄り、AI 補助の候補をすぐ出す（ADR-0053 決定2）。
                         <button
                           className="btn btn-ghost btn-icon text-sm"
                           onClick={() => {
                             if (item.sceneId) setEditingSceneId(item.sceneId);
+                            if (item.assist) {
+                              useProjectStore.getState().setEditingSceneFocus("narration");
+                              useProjectStore.getState().setEditingSceneAssist(item.assist);
+                            }
                             onNavigate("scene-edit");
                           }}
                         >

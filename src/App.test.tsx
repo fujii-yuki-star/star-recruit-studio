@@ -198,10 +198,12 @@ describe("App の遷移が離れる前の関門を通る（#719 統合）", () =
     try {
       useProjectStore.getState().setSettingsFocus("brandKit");
       useProjectStore.getState().setEditingSceneFocus("look");
+      useProjectStore.getState().setEditingSceneAssist("shorten"); // すぐ頼む AI 補助の印（ADR-0053 決定2）
       const { container } = render(<App />);
       clickSidebar(container, "素材");
       expect(useProjectStore.getState().settingsFocus, "寄る指定が残っている").toBeNull();
       expect(useProjectStore.getState().editingSceneFocus, "寄る指定が残っている").toBeNull();
+      expect(useProjectStore.getState().editingSceneAssist, "すぐ頼む印が残っている").toBeNull();
     } finally {
       release();
     }
