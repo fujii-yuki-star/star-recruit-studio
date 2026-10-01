@@ -5,7 +5,7 @@
 // **同じ概念は同じ挙動**（ADR-0026②）。ここは「その時刻に誰がしゃべっているか」だけを決め、
 // 文言そのものは `domain/voice/narratorCredit` が持つ（文言の散逸を防ぐ・§6）。
 import { TIMELINE_CLIP_KIND } from '../enums';
-import { creditVisibleAt } from '../voice/creditDisplay';
+import { creditListsAllVoices, creditVisibleAt, stackedCreditText } from '../voice/creditDisplay';
 import { creditForLine } from '../voice/narratorCredit';
 import { timelineFramePlan } from './export';
 import type { TimelineProject } from './types';
@@ -20,20 +20,34 @@ import { clipEndSec } from './validateTimelineDoc';
  * 表示しない（実際に合成した声とクレジットを一致させる）。
  */
 export function creditSpeakerAt(doc: TimelineProject, timeSec: number): number | null {
+  const live = audibleVoiceClips(doc).filter((c) => timeSec >= c.startSec && timeSec < clipEndSec(c));
+  return live[0]?.voice?.speaker ?? null;
+}
+
+/**
+ * 鳴る読み上げクリップ（始まる順）。**まだ作っていない読み上げ・隠した部品・隠した列は数えない**＝
+ * 鳴らない声のキャラを名乗らない（自己申告と実際を合わせる）。`creditSpeakerAt` と全員の一覧で共有する。
+ */
+function audibleVoiceClips(doc: TimelineProject) {
   const hiddenTrackIds = new Set(doc.tracks.filter((t) => t.hidden).map((t) => t.id));
-  const live = doc.clips
+  return doc.clips
     .filter(
       (c) =>
         c.kind === TIMELINE_CLIP_KIND.voice &&
-        // **まだ作っていない読み上げは数えない**＝鳴らない声のキャラを名乗らない（自己申告と実際を合わせる）。
         !!c.voice?.voicePath &&
         !c.hidden &&
-        !hiddenTrackIds.has(c.trackId) &&
-        timeSec >= c.startSec &&
-        timeSec < clipEndSec(c),
+        !hiddenTrackIds.has(c.trackId),
     )
     .sort((a, b) => a.startSec - b.startSec || a.id.localeCompare(b.id));
-  return live[0]?.voice?.speaker ?? null;
+}
+
+/**
+ * 動画で**鳴る声を全員**（最初に出てくる順・重なりなし）。鳴る声が1つも無ければ既定の声1件。
+ * 「最初」「最後」「最初と最後」のクレジットで縦に並べる（ADR-0025 追補・2026-10-01）。
+ */
+export function timelineVoiceCredits(doc: TimelineProject, fallbackCredit: string): string[] {
+  const list = [...new Set(audibleVoiceClips(doc).map((c) => creditForLine({ speaker: c.voice?.speaker ?? null }, fallbackCredit)))];
+  return list.length > 0 ? list : [fallbackCredit];
 }
 
 /**
@@ -55,5 +69,7 @@ export function creditTextAt(
   if (!creditVisibleAt(doc.videoSettings.creditDisplay, timelineFramePlan(doc).durationSec, timeSec)) {
     return undefined;
   }
+  // 「最初」「最後」「最初と最後」は使った声を全員、縦に（ADR-0025 追補）。「ずっと表示」は話している声。
+  if (creditListsAllVoices(doc.videoSettings.creditDisplay)) return stackedCreditText(timelineVoiceCredits(doc, fallbackCredit));
   return creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, fallbackCredit);
 }

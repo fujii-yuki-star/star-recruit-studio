@@ -1038,6 +1038,27 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
     ]);
   });
 
+  // ADR-0025 追補（利用者判断 2026-10-01）：既定（最初と最後）は、使った声を全員、縦に＝話している行に依らず同じ文。
+  //   「ずっと表示」は話している行のキャラ（従来どおり）。
+  it('「最初と最後」（既定）は、どの行でも使った声を全員、縦に並べて焼く／「ずっと表示」は話している行', async () => {
+    const lines = [
+      { lineId: 'line_001', text: 'a', startSec: 0, status: 'none', speaker: 8 },
+      { lineId: 'line_002', text: 'b', startSec: 4, status: 'none', speaker: 14 },
+    ];
+    const run = async (creditDisplay?: { mode: 'always' | 'both' }) => {
+      vi.mocked(splitVideoSceneSvgMulti).mockClear();
+      await buildExportScenes(
+        dialogueScene(lines as never), templateById, noAsset,
+        (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+        videoSlot, undefined, { credit: 'VOICEVOX:ずんだもん', ...(creditDisplay ? { creditDisplay } : {}) },
+      );
+      return vi.mocked(splitVideoSceneSvgMulti).mock.calls.map((c) => c[5]);
+    };
+    const all = 'VOICEVOX:春日部つむぎ\nVOICEVOX:冥鳴ひまり';
+    expect(await run()).toEqual([all, all, all]);
+    expect((await run({ mode: 'always' })).slice(1)).toEqual(['VOICEVOX:春日部つむぎ', 'VOICEVOX:冥鳴ひまり']);
+  });
+
   it('行ごとにクレジット（splitVideoSceneSvgMulti の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
     vi.mocked(splitVideoSceneSvgMulti).mockClear();
     await buildExportScenes(

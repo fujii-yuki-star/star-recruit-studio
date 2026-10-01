@@ -12,7 +12,7 @@ import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { firstFrameLayoutOptions, lastFrameLayoutOptions, type EdgeFrameInput } from "../../domain/project/lineTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
-import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditForSpeaker, sceneCreditText } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
@@ -58,7 +58,7 @@ export function TransitionPreview({
       ...(edge.subtitleText !== undefined ? { subtitleText: edge.subtitleText } : {}),
       ...(edge.subtitleSegment ? { subtitleSegment: edge.subtitleSegment } : {}),
     };
-    const creditText = edge.creditLine ? creditForLine(edge.creditLine, baseCredit) : baseCredit;
+    const creditText = sceneCreditText(creditDisplay, projectScenes, edge.creditLine, baseCredit);
     // 見本の場面（動画の場面ではない）は index が無い＝従来どおり出す（ScenePreview と同じ規則）。
     const index = projectScenes.findIndex((s) => s.sceneId === sc.sceneId);
     const credit = index < 0 || creditVisible[index] ? creditText : undefined;

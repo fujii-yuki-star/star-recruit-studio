@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CREDIT_MODE, CREDIT_SECONDS_MAX, CREDIT_SECONDS_MIN, creditClipboardText, creditVisibleAt,
-  DEFAULT_CREDIT_MODE, DEFAULT_CREDIT_SECONDS, resolveCreditDisplay,
+  creditListsAllVoices, DEFAULT_CREDIT_MODE, DEFAULT_CREDIT_SECONDS, resolveCreditDisplay, stackedCreditText,
 } from './creditDisplay';
 
 describe('resolveCreditDisplay（既定で埋める・#359）', () => {
@@ -86,5 +86,19 @@ describe('creditClipboardText（貼り付ける文）', () => {
 
   it('空なら空文字', () => {
     expect(creditClipboardText([])).toBe('');
+  });
+});
+
+describe('creditListsAllVoices / stackedCreditText（ADR-0025 追補・2026-10-01）', () => {
+  it('最初・最後・最初と最後（既定）は全員を並べる／ずっと表示・出さないは並べない', () => {
+    expect(creditListsAllVoices(undefined)).toBe(true);
+    expect(creditListsAllVoices({ mode: 'head' })).toBe(true);
+    expect(creditListsAllVoices({ mode: 'tail' })).toBe(true);
+    expect(creditListsAllVoices({ mode: 'both' })).toBe(true);
+    expect(creditListsAllVoices({ mode: 'always' })).toBe(false);
+    expect(creditListsAllVoices({ mode: 'hidden' })).toBe(false);
+  });
+  it('1行に1人・重なりなし・渡した順', () => {
+    expect(stackedCreditText(['B', 'A', 'B'])).toBe('B\nA');
   });
 });

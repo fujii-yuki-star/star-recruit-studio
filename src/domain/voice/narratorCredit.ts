@@ -2,6 +2,8 @@
 // コロンは半角＝VOICEVOX 規約が指定する基本形式「VOICEVOX:キャラクター名」に合わせる（13§4 / ADR-0003）。
 // 書き出し動画への焼き込み（renderer）と画面表示（About/Settings）で共有し、文言の散逸を防ぐ。
 // #177：単一キャラ固定をやめ、選択した speaker のキャラを動的にクレジットする（creditForSpeaker）。
+import { creditListsAllVoices, stackedCreditText } from './creditDisplay';
+import type { CreditDisplay } from './creditDisplay';
 import { characterForSpeaker, DEFAULT_SPEAKER } from './voiceCatalog';
 
 const CREDIT_PREFIX = 'VOICEVOX:';
@@ -35,15 +37,43 @@ export function usedVoiceCredits(
   scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
   defaultSpeaker: number | null | undefined,
 ): string[] {
-  const base = creditForSpeaker(defaultSpeaker);
+  return sceneVoiceCredits(scenes, creditForSpeaker(defaultSpeaker));
+}
+
+/**
+ * `usedVoiceCredits` の、既定の声を**文言で**受ける版（書き出しは文言しか持っていない＝`opts.credit`）。
+ * 並びは**場面と行の順に、最初に出てきた順**。
+ */
+export function sceneVoiceCredits(
+  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  baseCredit: string,
+): string[] {
   const set = new Set<string>();
   for (const sc of scenes) {
     if (sc.lines && sc.lines.length > 0) {
-      for (const l of sc.lines) set.add(creditForLine(l, base));
+      for (const l of sc.lines) set.add(creditForLine(l, baseCredit));
     } else {
-      set.add(base); // 単一 narration の場面は既定話者
+      set.add(baseCredit); // 単一 narration の場面は既定話者
     }
   }
-  if (set.size === 0) set.add(base);
+  if (set.size === 0) set.add(baseCredit);
   return Array.from(set);
+}
+
+/**
+ * **場面形式**で、その場面（その行）に焼くクレジットの文（ADR-0025 追補・2026-10-01）。
+ * - 「最初」「最後」「最初と最後」＝**使った声を全員、縦に**（`creditListsAllVoices`）
+ * - 「ずっと表示」＝話している行のキャラ（行が無ければ既定の声）＝従来どおり
+ *
+ * ⚠️ **プレビュー（場面・切り替え）と書き出しはこの1つを通す**（ADR-0001）＝4か所で組み立てていた頃は、
+ *   1か所だけ直すと「プレビューでは全員なのに動画は1人」になる形だった。
+ */
+export function sceneCreditText(
+  display: CreditDisplay | undefined,
+  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  line: { speaker?: number | null } | null | undefined,
+  baseCredit: string,
+): string {
+  if (creditListsAllVoices(display)) return stackedCreditText(sceneVoiceCredits(scenes, baseCredit));
+  return line ? creditForLine(line, baseCredit) : baseCredit;
 }

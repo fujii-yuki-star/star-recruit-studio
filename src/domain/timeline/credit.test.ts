@@ -1,7 +1,7 @@
 // クレジットに出す話者の決め方（ADR-0003・ADR-0026②・#631）。
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { creditSpeakerAt, creditTextAt } from './credit';
+import { creditSpeakerAt, creditTextAt, timelineVoiceCredits } from './credit';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 
@@ -121,7 +121,7 @@ describe('creditTextAt（プレビュー＝書き出しの呼び口）', () => {
     expect(creditTextAt(head, 4, 'VOICEVOX:ずんだもん')).toBeUndefined();
   });
 
-  it('設定していなければ従来どおり返す（既定＝最初と最後）', () => {
+  it('設定していなければ既定（最初と最後）で返す', () => {
     expect(creditTextAt(d, 0, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:ずんだもん');
   });
 
@@ -131,5 +131,47 @@ describe('creditTextAt（プレビュー＝書き出しの呼び口）', () => {
     expect(creditTextAt(always, 1, 'VOICEVOX:ずんだもん')).not.toBe('');
     // 誰もしゃべっていない時刻でも消さない（受け皿へ落ちる）。
     expect(creditTextAt(always, 12, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:ずんだもん');
+  });
+});
+
+// ADR-0025 追補（利用者判断 2026-10-01）：「最初」「最後」「最初と最後」は、使った声を全員、縦に。
+describe('timelineVoiceCredits と、最初と最後の全員表示', () => {
+  const two = doc({
+    clips: [
+      voiceClip('clip_001', { startSec: 0, durationSec: 2 }, 8),
+      voiceClip('clip_002', { startSec: 3, durationSec: 2 }, 14),
+      voiceClip('clip_003', { startSec: 6, durationSec: 2 }, 8),
+    ],
+  });
+
+  it('鳴る声を最初に出てくる順に、重なりなく', () => {
+    expect(timelineVoiceCredits(two, 'VOICEVOX:ずんだもん')).toEqual(['VOICEVOX:春日部つむぎ', 'VOICEVOX:冥鳴ひまり']);
+  });
+
+  it('鳴らない声（まだ作っていない・隠した部品・隠した列）は名乗らない', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }, { id: 'track_003', kind: TRACK_KIND.audio, hidden: true }],
+      clips: [
+        voiceClip('clip_001', {}, 8),
+        voiceClip('clip_002', { voice: { text: 'あ', status: 'none', speaker: 14 } }),
+        voiceClip('clip_003', { hidden: true }, 2),
+        voiceClip('clip_004', { trackId: 'track_003' }, 3),
+      ],
+    });
+    expect(timelineVoiceCredits(d, 'VOICEVOX:ずんだもん')).toEqual(['VOICEVOX:春日部つむぎ']);
+  });
+
+  it('鳴る声が無ければ受け皿の1件', () => {
+    expect(timelineVoiceCredits(doc(), 'VOICEVOX:ずんだもん')).toEqual(['VOICEVOX:ずんだもん']);
+  });
+
+  it('既定（最初と最後）は、話していない瞬間でも全員を縦に返す', () => {
+    expect(creditTextAt(two, 0, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:春日部つむぎ\nVOICEVOX:冥鳴ひまり');
+    expect(creditTextAt(two, 7.9, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:春日部つむぎ\nVOICEVOX:冥鳴ひまり');
+  });
+
+  it('「ずっと表示」は、そのとき話している声だけ（従来どおり）', () => {
+    const always = doc({ ...two, videoSettings: { ...two.videoSettings, creditDisplay: { mode: 'always' } } });
+    expect(creditTextAt(always, 3.5, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:冥鳴ひまり');
   });
 });

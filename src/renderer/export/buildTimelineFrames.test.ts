@@ -220,14 +220,29 @@ describe('buildTimelineFrames', () => {
     expect(new Set(r.framesBase64).size).toBeGreaterThan(1);
   });
 
-  it('しゃべっている声のキャラをクレジットに焼き込む（場面形式の掛け合いと同じ挙動）', async () => {
+  it('「ずっと表示」は、しゃべっている声のキャラをクレジットに焼き込む（場面形式の掛け合いと同じ挙動）', async () => {
+    const d = doc({
+      clips: [textClip('clip_001', { durationSec: 1 }), voiceClip('clip_002', 2, { startSec: 0.5, durationSec: 0.5 })],
+    });
+    d.videoSettings = { ...d.videoSettings, creditDisplay: { mode: 'always' } };
+    await buildTimelineFrames(d, baseOpts);
+    const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
+    expect(svgs[0]).toContain('VOICEVOX:ずんだもん'); // 誰もしゃべっていない＝既定の声
+    expect(svgs[20]).toContain('VOICEVOX:四国めたん'); // speaker=2＝四国めたん（既定のずんだもんと別のキャラ）
+  });
+
+  // ⚠️ **既定（最初と最後）は使った声を全員、縦に**（ADR-0025 追補・利用者判断 2026-10-01）＝
+  //   話していない瞬間でも、あとで話す声の名乗りが出る。焼いた絵に**全員の行が別々に**入っていることを見る。
+  it('「最初と最後」は、使った声を全員クレジットに縦に並べて焼き込む', async () => {
     const d = doc({
       clips: [textClip('clip_001', { durationSec: 1 }), voiceClip('clip_002', 2, { startSec: 0.5, durationSec: 0.5 })],
     });
     await buildTimelineFrames(d, baseOpts);
     const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
-    expect(svgs[0]).toContain('VOICEVOX:ずんだもん'); // 誰もしゃべっていない＝既定の声
-    expect(svgs[20]).toContain('VOICEVOX:四国めたん'); // speaker=2＝四国めたん（既定のずんだもんと別のキャラ）
+    for (const svg of [svgs[0], svgs[20]]) {
+      expect(svg).toContain('>VOICEVOX:四国めたん</text>');
+    }
+    expect(svgs[0]).not.toContain('VOICEVOX:ずんだもん'); // 鳴る声が四国めたんだけ＝既定の声は名乗らない
   });
 
   it('中止したらそこで止める（長い動画でも押した中止が効く）', async () => {
