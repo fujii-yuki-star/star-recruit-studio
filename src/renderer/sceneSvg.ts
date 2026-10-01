@@ -1,3 +1,4 @@
+import { CREDIT_LINE_SEPARATOR } from '../domain/voice/creditDisplay';
 import { colorFilterDefs, colorFilterId, needsColorFilter } from './colorFilter';
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
@@ -227,7 +228,8 @@ export function creditToSvg(width: number, height: number, text: string): string
   const padX = Math.round(fontSize * 0.6);
   const padY = Math.round(fontSize * 0.35);
   const lineH = Math.round(fontSize * 1.3);
-  const rows = text.split('\n').filter((r) => r.length > 0);
+  const rows = text.split(CREDIT_LINE_SEPARATOR).filter((r) => r.length > 0);
+  if (rows.length === 0) return ''; // 区切りだけ＝描くものが無い（枠の寸法を壊さない）
   const textW = Math.max(...rows.map((row) => [...row].reduce((w, ch) => w + charWidthEm(ch) * fontSize, 0)));
   const boxW = Math.round(textW + padX * 2);
   const boxH = Math.round(fontSize + lineH * (rows.length - 1) + padY * 2);

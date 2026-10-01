@@ -35,23 +35,24 @@ export function CreditDisplayField({
   value,
   onChange,
   /** 表記に載せる話者を数える材料（省略＝場面形式の場面を見る）。タイムライン形式は読み上げクリップ。 */
-  speakers,
+  credits: creditsProp,
 }: {
   disabled?: boolean;
   value?: CreditDisplay;
   onChange?: (patch: CreditDisplay) => void;
-  speakers?: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>;
+  /** 使った声の一覧（タイムライン形式＝動画に焼く一覧と同じ `timelineVoiceCredits`）。未指定＝場面形式の場面から数える。 */
+  credits?: readonly string[];
 }) {
   const sceneCreditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
   const setCreditDisplay = useProjectStore((s) => s.setCreditDisplay);
   const sceneScenes = useProjectStore((s) => s.scenes);
   const ownsValue = onChange != null;
   const creditDisplay = ownsValue ? value : sceneCreditDisplay;
-  const scenes = speakers ?? sceneScenes;
+
   const [copied, setCopied] = useState(false);
   const { mode, seconds } = resolveCreditDisplay(creditDisplay);
   const showSeconds = mode === CREDIT_MODE.head || mode === CREDIT_MODE.tail || mode === CREDIT_MODE.both;
-  const credits = usedVoiceCredits(scenes, getVoicevoxSpeaker());
+  const credits = creditsProp ?? usedVoiceCredits(sceneScenes, getVoicevoxSpeaker());
 
   return (
     <div className="field">

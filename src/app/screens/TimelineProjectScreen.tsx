@@ -65,7 +65,7 @@ import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
 import { useStartupJobStore } from "../store/startupJobStore";
 import { finishStartupJob } from "../../infrastructure/startupFs";
-import { creditTextAt } from "../../domain/timeline/credit";
+import { creditTextAt, timelineVoiceCredits } from "../../domain/timeline/credit";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -1494,10 +1494,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * クレジットに載せる話者（差分再監査 3巡目）。場面形式の「場面ごとのセリフ列」に当たるのは
    * **読み上げクリップ**なので、そこから数える（`creditSpeakerAt` と同じ材料）。
    */
-  const creditSpeakers = useMemo(
-    () => (doc?.clips ?? [])
-      .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice)
-      .map((c) => ({ lines: [{ speaker: c.voice?.speaker ?? null }] })),
+  const creditList = useMemo(
+    // ⚠️ **動画に焼く一覧と同じ関数**（PR レビュー 🟡）＝鳴らない読み上げ（作っていない・隠した）は数えない。
+    () => (doc ? timelineVoiceCredits(doc, creditForSpeaker(getVoicevoxSpeaker())) : []),
     [doc],
   );
   /**
@@ -4110,7 +4109,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               disabled={exporting}
               value={doc.videoSettings.creditDisplay}
               onChange={(patch) => updateVideoSettings({ creditDisplay: { ...doc.videoSettings.creditDisplay, ...patch } })}
-              speakers={creditSpeakers}
+              credits={creditList}
             />
             {/* ⚠️ **動画全体の文字の形もここで選ぶ**（差分再監査 3巡目 🟡）＝門の案内は「使っている文字で
                 別の文字の形を選び直してください」だが、動画全体の指定を選び直す入口が無いと

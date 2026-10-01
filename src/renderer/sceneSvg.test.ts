@@ -344,3 +344,9 @@ describe('creditToSvg（複数行）', () => {
     expect(box(creditToSvg(1920, 1080, 'VOICEVOX:春日部つむぎ\nVOICEVOX:ずんだもん'))!.w).toBe(longest.w);
   });
 });
+
+describe('creditToSvg（区切りだけ）', () => {
+  it('描く行が無ければ何も描かない（枠の寸法を壊さない）', () => {
+    expect(creditToSvg(1920, 1080, '\n')).toBe('');
+  });
+});

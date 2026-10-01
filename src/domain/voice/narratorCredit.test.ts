@@ -79,3 +79,19 @@ describe('sceneCreditText（場面形式のクレジットの文）', () => {
     expect(sceneVoiceCredits([], base)).toEqual([base]);
   });
 });
+
+describe('数える声は鳴る声だけ（文が空の行・場面は声が作られない＝PR レビュー 🟡）', () => {
+  const base = 'VOICEVOX:ずんだもん';
+  it('文が空の行は数えない／文が空の単一の場面（題字だけ）は既定の声を数えない', () => {
+    const scenes = [
+      { lines: null, narration: { text: '' } },
+      { lines: [{ speaker: 2, text: 'こんにちは' }, { speaker: 14, text: '  ' }] },
+    ];
+    expect(sceneVoiceCredits(scenes, base)).toEqual(['VOICEVOX:四国めたん']);
+    expect(sceneCreditText(undefined, scenes, null, base)).toBe('VOICEVOX:四国めたん');
+  });
+  it('文のある単一の場面は既定の声を数える・全部空なら既定の声1件（名乗りを消さない）', () => {
+    expect(sceneVoiceCredits([{ narration: { text: 'はい' } }], base)).toEqual([base]);
+    expect(sceneVoiceCredits([{ narration: { text: '' } }, { lines: [{ speaker: 8, text: '' }] }], base)).toEqual([base]);
+  });
+});

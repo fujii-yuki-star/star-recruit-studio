@@ -327,7 +327,7 @@ export async function buildExportScenes(
           let narrationVolume: number | undefined;
           for (let k = 0; k < specs.length; k += 1) {
             const spec = specs[k];
-            // クレジットは話者連動（静止画の掛け合いと同じ規則・#243 の併記は行ごと表示で置き換え）。
+            // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動・ADR-0025 追補）。
             const segLine = spec.lineId ? lines.find((l) => l.lineId === spec.lineId) : undefined;
             const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
             const segLayout =
@@ -627,7 +627,7 @@ export async function buildExportScenes(
         let segIndex = 0;
         for (const spec of specs) {
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
-          // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
+          // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動＝無ければ既定の声・ADR-0025 追補）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
           const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。

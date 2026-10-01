@@ -1,8 +1,8 @@
 // タイムライン形式（ADR-0032）のクレジット表示（#631）。純粋関数（副作用なし・§7 テスト対象）。
 //
-// VOICEVOX のクレジットは**動画に表示する**（ADR-0003・`13 §4`）。場面形式は掛け合いの行ごとに
-// 実際にしゃべっているキャラを出す（`creditForLine`）ので、タイムラインでも同じにする＝
-// **同じ概念は同じ挙動**（ADR-0026②）。ここは「その時刻に誰がしゃべっているか」だけを決め、
+// VOICEVOX のクレジットは**動画に表示する**（ADR-0003・`13 §4`）。文は見せ方で分かれる（ADR-0025 追補・2026-10-01）：
+// 「最初」「最後」「最初と最後」＝**鳴る声を全員、縦に**（`timelineVoiceCredits`）／「ずっと表示」＝**その時刻に
+// しゃべっている声**（`creditSpeakerAt`）。場面形式も同じ規則（`sceneCreditText`）＝**同じ概念は同じ挙動**（ADR-0026②）。
 // 文言そのものは `domain/voice/narratorCredit` が持つ（文言の散逸を防ぐ・§6）。
 import { TIMELINE_CLIP_KIND } from '../enums';
 import { creditListsAllVoices, creditVisibleAt, stackedCreditText } from '../voice/creditDisplay';

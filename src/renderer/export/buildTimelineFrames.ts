@@ -91,8 +91,9 @@ export interface TimelineFramesResult {
  * 全フレームを描いて PNG にする。**プレビューと同じ `layoutTimelineAt(doc, t)`** を通すので、
  * 見えているものがそのまま出る（ADR-0001）。
  *
- * クレジット（ADR-0003・`13 §4`）は**その時刻にしゃべっている声のキャラ**を焼き込む＝場面形式の
- * 掛け合い（`creditForLine`）と同じ挙動（ADR-0026②）。
+ * クレジット（ADR-0003・`13 §4`）の文は見せ方で分かれる（`creditTextAt`・ADR-0025 追補）＝
+ * 「最初」「最後」「最初と最後」は**鳴る声を全員、縦に**／「ずっと表示」は**その時刻にしゃべっている声**
+ *（場面形式の掛け合い `creditForLine` と同じ挙動＝ADR-0026②）。
  */
 export async function buildTimelineFrames(
   doc: TimelineProject,

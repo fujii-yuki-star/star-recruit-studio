@@ -107,8 +107,11 @@ export function creditListsAllVoices(display: CreditDisplay | undefined): boolea
  * 描く側（`creditToSvg`）は改行で行に分け、右下から上へ積む。
  */
 export function stackedCreditText(credits: readonly string[]): string {
-  return [...new Set(credits)].join('\n');
+  return [...new Set(credits)].join(CREDIT_LINE_SEPARATOR);
 }
+
+/** 並べたクレジットの行の区切り（並べる側 `stackedCreditText` と描く側 `creditToSvg` の約束＝1か所）。 */
+export const CREDIT_LINE_SEPARATOR = '\n';
 
 /**
  * 概要欄などへ貼り付ける文（#359・非表示のときの補助）。

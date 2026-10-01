@@ -27,6 +27,12 @@ export function creditForLine(line: { speaker?: number | null }, fallbackCredit:
     : fallbackCredit;
 }
 
+/** クレジットを数えるのに要る形（文が無い行・場面は声が作られないので数えない）。 */
+type CreditScene = {
+  lines?: { speaker?: number | null; text?: string }[] | null;
+  narration?: { text?: string } | null;
+};
+
 /**
  * プロジェクトで実際に使う VOICEVOX クレジットを重複なく集める（#251 About の全列挙・ADR-0025 クレジット集約で共有）。
  * 掛け合いの場面は行ごとの話者、単一 narration の場面は既定話者（defaultSpeaker）を採用する（実際に合成される声と一致）。
@@ -34,7 +40,7 @@ export function creditForLine(line: { speaker?: number | null }, fallbackCredit:
  * @param defaultSpeaker アプリ設定の選択話者（getVoicevoxSpeaker）。
  */
 export function usedVoiceCredits(
-  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  scenes: ReadonlyArray<CreditScene>,
   defaultSpeaker: number | null | undefined,
 ): string[] {
   return sceneVoiceCredits(scenes, creditForSpeaker(defaultSpeaker));
@@ -45,14 +51,18 @@ export function usedVoiceCredits(
  * 並びは**場面と行の順に、最初に出てきた順**。
  */
 export function sceneVoiceCredits(
-  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  scenes: ReadonlyArray<CreditScene>,
   baseCredit: string,
 ): string[] {
+  // ⚠️ **文が無いものは数えない**（PR レビュー 🟡・2026-10-01）＝声は文が空だと作られない（`projectStore` の生成が飛ばす）。
+  //   数えると、題字だけの場面の既定の声のように**鳴らない声の名乗りが動画に焼かれる**（タイムライン形式は鳴らない読み上げを数えない＝ADR-0026②）。
+  //   ⚠️ 文の欄を持たない呼び出し（形だけ渡す古い呼び出し）は従来どおり数える＝空文字列だけを外す。
+  const hasText = (t: string | undefined) => t === undefined || t.trim().length > 0;
   const set = new Set<string>();
   for (const sc of scenes) {
     if (sc.lines && sc.lines.length > 0) {
-      for (const l of sc.lines) set.add(creditForLine(l, baseCredit));
-    } else {
+      for (const l of sc.lines) if (hasText(l.text)) set.add(creditForLine(l, baseCredit));
+    } else if (hasText(sc.narration?.text)) {
       set.add(baseCredit); // 単一 narration の場面は既定話者
     }
   }
@@ -70,7 +80,7 @@ export function sceneVoiceCredits(
  */
 export function sceneCreditText(
   display: CreditDisplay | undefined,
-  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  scenes: ReadonlyArray<CreditScene>,
   line: { speaker?: number | null } | null | undefined,
   baseCredit: string,
 ): string {
