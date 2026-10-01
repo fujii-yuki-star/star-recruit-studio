@@ -5,7 +5,7 @@
 // 検証に通った案は、ソフトが機械的に決められること（固有名詞・見た目の選び直し・言い直し・尺）で整え、
 // **もう一度同じ検証を通してから**返す（ADR-0052 段階1・12 §8.7）。
 import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
-import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
+import { LOCAL_VIDEO_PLAN_OPTIONS, buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
 import { parseAndValidateVideoPlan, validateAiVideoPlan } from '../../domain/ai/validateVideoPlan';
 import { refineVideoPlan } from '../../domain/ai/refineVideoPlan';
 import type { ShortenText } from '../../domain/ai/refineVideoPlan';
@@ -52,7 +52,7 @@ export class LocalVideoPlanProvider implements AiProvider {
     const run = ++latestRun;
     const cancelEpoch = currentAiCancelEpoch();
     const isStale = () => run !== latestRun || currentAiCancelEpoch() !== cancelEpoch;
-    const { system, user } = buildVideoPlanMessages(input, { properNounPlaceholders: true, askVisualWish: true });
+    const { system, user } = buildVideoPlanMessages(input, LOCAL_VIDEO_PLAN_OPTIONS);
     let raw: string;
     try {
       raw = await localAiGenerate(system, user, SCHEMA_TEXT);

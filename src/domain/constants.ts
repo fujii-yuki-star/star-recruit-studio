@@ -219,7 +219,7 @@ export const GENERAL_TARGET_AUDIENCE_MAX_LEN = 100; // 対象視聴者
 export const GENERAL_LIST_ITEM_MAX_LEN = 100;    // agenda / keyPoints の1項目
 export const GENERAL_LIST_MAX_ITEMS = 20;        // agenda / keyPoints の要素数上限
 
-// 一般動画のトーン候補（toneSettings.tone へ保存する文言・一般ウィザードの選択肢）。ADR-0011 #12。
+// トーン候補（toneSettings.tone へ保存する文言・入力画面の選択肢）。ADR-0011 #12・2026-10-01 から採用でも選べる（ADR-0052 追補10）。
 export const TONE_PRESETS = ['親しみやすい', '丁寧・落ち着いた', 'フォーマル', '明るい・元気'] as const;
 // 既定トーン（未選択時・generate のフォールバック）。単一参照元（§2-7）＝二重定義を避ける。
 export const DEFAULT_TONE = TONE_PRESETS[0];
