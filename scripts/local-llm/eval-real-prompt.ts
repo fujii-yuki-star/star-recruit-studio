@@ -44,6 +44,8 @@ const outDir = process.argv[3];
 const mode = process.argv[4] ?? 'current';
 const baseline = mode === 'baseline';
 const stage2 = mode === 'current';
+// 口調（5番目）＝入力の「トーン」を指定して測る（ADR-0052 追補10）。
+const toneArg = process.argv[5];
 if (outDir) mkdirSync(outDir, { recursive: true });
 
 /** アプリの `local_ai_generate` と同じ本文で1回頼む（Rust の `build_request_body` と同じ形）。 */
@@ -115,6 +117,7 @@ const summary: Record<string, unknown>[] = [];
 for (const c of cases('16:9')) {
   // 今のアプリと同じく、写真・動画が無ければ差し込み口のある見た目を見せない（12 §8.9）。
   if (stage2) c.input = { ...c.input, templates: templatesForAssets(c.input.templates, c.input.assets) };
+  if (toneArg) c.input = { ...c.input, tone: toneArg };
   const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline, askVisualWish: stage2 });
   const t0 = Date.now();
   const res = await chat(system, user, aiVideoPlanSchema);

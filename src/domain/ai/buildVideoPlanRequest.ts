@@ -144,6 +144,12 @@ export interface VideoPlanMessageOptions {
   askVisualWish?: boolean;
 }
 
+/**
+ * 同梱の AI の経路で使う指示文の選択（アプリと学習材料で**同じものを使う**＝学習と本番で指示文を揃える・ADR-0052 段階4）。
+ * ⚠️ 変えたら学習材料も作り直す（`scripts/local-llm/training/build-dataset.ts` がこれを読む）。
+ */
+export const LOCAL_VIDEO_PLAN_OPTIONS: Readonly<VideoPlanMessageOptions> = { properNounPlaceholders: true, askVisualWish: true };
+
 /** 見せたいものを書かせる指示（出力フォーマットの末尾に足す行）。 */
 export const VISUAL_WISH_RULE =
   '各シーンの notes に、その場面で見せたい写真・動画の中身を短く書く（例「倉庫で働く人の写真」）。assetRefs は素材がはっきり合うときだけ入れ、迷ったら省略する（ソフトが notes と素材の説明を見て選ぶ）。';

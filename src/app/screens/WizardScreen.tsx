@@ -143,10 +143,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
         tone,
       });
     } else {
-      // recruit では tone を渡さない（将来の明示入力まで既存 toneSettings を維持）。対象視聴者は recruitTarget を使う。
+      // 対象視聴者は recruitTarget を使う。トーンは採用でも選べる（2026-10-01・ADR-0052 追補10）。
       applyProjectInfo({
         ...common,
         companyInfo: { companyName, industry, businessDescription, recruitTarget, jobType, strengths, desiredPerson },
+        tone,
       });
     }
   }
@@ -569,27 +570,29 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         <span>{targetAudience.length}/{GENERAL_TARGET_AUDIENCE_MAX_LEN}</span>
                       </div>
                     </div>
-                    <div className="field">
-                      <label className="field-label">トーン（話し方の雰囲気）</label>
-                      <div className="card-grid cols-2">
-                        {TONE_PRESETS.map((t) => (
-                          <button
-                            key={t}
-                            className="action-card"
-                            aria-pressed={tone === t}
-                            style={{
-                              borderColor: tone === t ? "var(--color-primary)" : undefined,
-                              background: tone === t ? "var(--color-primary-soft)" : undefined,
-                            }}
-                            onClick={() => setTone(t)}
-                          >
-                            <span className="action-card-title">{t}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                   </>
                 )}
+
+                {/* 話し方の雰囲気は採用・一般どちらでも選べる（2026-10-01 利用者判断＝口調で言い回しを変える・ADR-0052 追補10）。 */}
+                <div className="field">
+                  <label className="field-label">トーン（話し方の雰囲気）</label>
+                  <div className="card-grid cols-2">
+                    {TONE_PRESETS.map((t) => (
+                      <button
+                        key={t}
+                        className="action-card"
+                        aria-pressed={tone === t}
+                        style={{
+                          borderColor: tone === t ? "var(--color-primary)" : undefined,
+                          background: tone === t ? "var(--color-primary-soft)" : undefined,
+                        }}
+                        onClick={() => setTone(t)}
+                      >
+                        <span className="action-card-title">{t}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="field">
                   <label className="field-label" htmlFor="additionalNotes">

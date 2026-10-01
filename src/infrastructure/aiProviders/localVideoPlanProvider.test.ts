@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import validPlanFixture from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
 import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
-import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
+import { LOCAL_VIDEO_PLAN_OPTIONS, buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
 
 const { localAiGenerateMock, cancelEpoch } = vi.hoisted(() => ({ localAiGenerateMock: vi.fn(), cancelEpoch: { value: 0 } }));
 vi.mock('../aiClient', () => ({ localAiGenerate: localAiGenerateMock, currentAiCancelEpoch: () => cancelEpoch.value }));
@@ -40,6 +40,8 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     await new LocalVideoPlanProvider().generateVideoPlan(input());
     const [system, user, schema] = localAiGenerateMock.mock.calls[0];
     const expected = buildVideoPlanMessages(input(), { properNounPlaceholders: true, askVisualWish: true });
+    // 学習材料と同じ選択を使っている（ADR-0052 段階4）。
+    expect(LOCAL_VIDEO_PLAN_OPTIONS).toEqual({ properNounPlaceholders: true, askVisualWish: true });
     expect(system).toBe(expected.system);
     expect(user).toBe(expected.user);
     expect(JSON.parse(schema)).toEqual(aiVideoPlanSchema);
