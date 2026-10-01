@@ -116,6 +116,7 @@ impl LocalLlmState {
             }
             g.base_url = None;
             g.last_used = None;
+            g.api_key = None;
         }
     }
 
@@ -139,6 +140,7 @@ impl LocalLlmState {
         if !alive {
             g.child = None;
             g.base_url = None;
+            g.api_key = None;
             // 落ちた回の「最後に使った時刻」も消す（#1293 レビュー 🟡）＝残すと、次の起動の途中で見張りが
             // 「しばらく使っていない」と判定して起動中の子を止める。
             g.last_used = None;
