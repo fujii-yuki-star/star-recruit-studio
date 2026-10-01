@@ -18,7 +18,8 @@ import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
-import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditForSpeaker, sceneCreditText } from "../../domain/voice/narratorCredit";
+import { CREDIT_MODE } from "../../domain/voice/creditDisplay";
 import { sceneCreditVisibility } from "../../domain/project/sceneCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -249,9 +250,14 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
         ...(subtitleSegment ? { subtitleSegment } : {}),
       }
     : undefined;
-  // クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
+  // クレジットは選択話者のキャラを動的に（#177）。文は `sceneCreditText`＝「最初と最後」は使った声を全員、「ずっと表示」は話している行（ADR-0025 追補・書き出しと一致）。
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  const creditText = creditLine ? creditForLine(creditLine, baseCredit) : baseCredit;
+  // 文は書き出しと同じ共有関数（「最初と最後」は全員を縦に・「ずっと表示」は話している行＝ADR-0025 追補）。
+  // ⚠️ 見本の場面（見た目パターンの画面・index が無い）は動画の設定に従わせない＝従来どおり話している行か既定の声1行。
+  const isProjectScene = projectScenes.some((s) => s.sceneId === scene.sceneId);
+  const creditText = isProjectScene
+    ? sceneCreditText(creditDisplay, projectScenes, creditLine, baseCredit)
+    : sceneCreditText({ mode: CREDIT_MODE.always }, projectScenes, creditLine, baseCredit);
   // 出す/出さないは**書き出しと同じ共有関数**（`sceneCreditVisibility`・ADR-0001）。
   // 見た目パターンの画面が描く**見本の場面**はプロジェクトの場面ではない（index が無い）＝
   // そこは従来どおり出す（「出来上がり」ではなく見た目の見本なので、動画の設定に従わせる意味がない）。

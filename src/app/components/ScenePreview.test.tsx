@@ -373,6 +373,21 @@ describe("ScenePreview クレジットの見せ方（#359・PR#881）", () => {
     expect(render(<ScenePreview scene={scenes[0]} template={template} />).container.textContent).toContain("VOICEVOX");
   });
 
+  // ADR-0025 追補（2026-10-01）：「最初と最後」は使った声を全員、縦に（書き出しと同じ `sceneCreditText`）。
+  //   見本の場面（動画の場面ではない）は動画の設定に従わせない＝1行のまま。
+  it("「最初と最後」は使った声を全員並べる／見本の場面は1行のまま", () => {
+    const talk = (id: string, speaker: number): Scene =>
+      ({ ...mk(id, 8), lines: [{ lineId: "line_001", text: "あ", speaker, status: "none" }] }) as unknown as Scene;
+    const scenes = [talk("s1", 8), talk("s2", 14)];
+    setProject(scenes, { mode: "both", seconds: 3 });
+    const first = render(<ScenePreview scene={scenes[0]} template={template} />).container.textContent ?? "";
+    expect(first).toContain("VOICEVOX:春日部つむぎ");
+    expect(first).toContain("VOICEVOX:冥鳴ひまり");
+    const sample = render(<ScenePreview scene={talk("sample_not_in_project", 2)} template={template} />).container.textContent ?? "";
+    expect(sample).toContain("VOICEVOX:四国めたん");
+    expect(sample).not.toContain("冥鳴ひまり");
+  });
+
   it("見た目パターンの見本（動画の場面ではない）は従来どおり出す", () => {
     setProject([mk("s1", 8)], { mode: "hidden" });
     const sample = mk("sample_not_in_project", 8);

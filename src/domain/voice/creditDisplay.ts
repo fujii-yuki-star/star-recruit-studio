@@ -93,6 +93,27 @@ export function creditVisibleForScene(
 }
 
 /**
+ * 使った声を**全部並べて**出す見せ方か（ADR-0025 追補・利用者判断 2026-10-01）。
+ * 「最初」「最後」「最初と最後」＝**動画のはじめ・おわりの名乗り**なので、その瞬間に話している1人ではなく
+ * **使った声を全員**出す（話していない声の名乗りが漏れない）。「ずっと表示」は話している声だけ（従来どおり）。
+ */
+export function creditListsAllVoices(display: CreditDisplay | undefined): boolean {
+  const { mode } = resolveCreditDisplay(display);
+  return mode === CREDIT_MODE.head || mode === CREDIT_MODE.tail || mode === CREDIT_MODE.both;
+}
+
+/**
+ * 並べて出すクレジットの文（1行に1人・重なりなし・**渡した順**＝最初に出てきた順）。
+ * 描く側（`creditToSvg`）は改行で行に分け、右下から上へ積む。
+ */
+export function stackedCreditText(credits: readonly string[]): string {
+  return [...new Set(credits)].join(CREDIT_LINE_SEPARATOR);
+}
+
+/** 並べたクレジットの行の区切り（並べる側 `stackedCreditText` と描く側 `creditToSvg` の約束＝1か所）。 */
+export const CREDIT_LINE_SEPARATOR = '\n';
+
+/**
  * 概要欄などへ貼り付ける文（#359・非表示のときの補助）。
  *
  * ⚠️ **並びを決める**＝毎回同じ文になる（貼り直すたびに順が変わると差分が読めない）。

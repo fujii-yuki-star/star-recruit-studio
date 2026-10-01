@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { charWidthEm, layoutToSvg, wrapText } from './sceneSvg';
+import { charWidthEm, creditToSvg, layoutToSvg, wrapText } from './sceneSvg';
 import { fontFamilyForId } from '../domain/font/fontCatalog';
 import type { Fit } from '../domain/enums';
 import type { SceneLayout, TextItem } from './layout';
@@ -303,5 +303,50 @@ describe('色の調整と描画モード', () => {
       items: [item({ id: 'i1', colorAdjust: { brightness: 1.5 } }), item({ id: 'i2', colorAdjust: { brightness: 1.5 } })],
     } as never);
     expect(svg.split('<filter id="color-').length - 1, 'defs が畳まれていない').toBe(1);
+  });
+});
+
+// ADR-0025 追補（利用者判断 2026-10-01）：クレジットは改行で行に分け、右下から上へ積む（横に連ねない）。
+describe('creditToSvg（複数行）', () => {
+  const ys = (svg: string) => [...svg.matchAll(/<text x="\d+" y="(\d+)"/g)].map((m) => Number(m[1]));
+  const box = (svg: string) => {
+    const m = svg.match(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/);
+    return m ? { x: +m[1], y: +m[2], w: +m[3], h: +m[4] } : null;
+  };
+
+  it('1人なら1行（従来の位置と大きさ）', () => {
+    const svg = creditToSvg(1920, 1080, 'VOICEVOX:ずんだもん');
+    expect(ys(svg)).toHaveLength(1);
+    expect(svg).toContain('>VOICEVOX:ずんだもん</text>');
+  });
+
+  it('2人なら2行・下の行が下に・枠は右下で上へ伸びる（下端と右端は1行のときと同じ）', () => {
+    const one = box(creditToSvg(1920, 1080, 'VOICEVOX:春日部つむぎ'))!;
+    const svg = creditToSvg(1920, 1080, 'VOICEVOX:春日部つむぎ\nVOICEVOX:冥鳴ひまり');
+    const two = box(svg)!;
+    const [y1, y2] = ys(svg);
+    expect(y2).toBeGreaterThan(y1);
+    expect(svg).toContain('>VOICEVOX:春日部つむぎ</text>');
+    expect(svg).toContain('>VOICEVOX:冥鳴ひまり</text>');
+    expect(two.y + two.h).toBe(one.y + one.h);
+    expect(two.x + two.w).toBe(one.x + one.w);
+    expect(two.h).toBeGreaterThan(one.h);
+    // 横に連ねていない＝改行の文字を描かない
+    expect(svg).not.toMatch(/つむぎ\s*VOICEVOX/);
+  });
+
+  it('枠の幅は一番長い行に合わせる', () => {
+    // 短い行が先でも後でも、長い行（春日部つむぎ＝6字）の幅になる。
+    const longest = box(creditToSvg(1920, 1080, 'VOICEVOX:春日部つむぎ'))!;
+    const short = box(creditToSvg(1920, 1080, 'VOICEVOX:剣崎雌雄'))!;
+    expect(longest.w).toBeGreaterThan(short.w);
+    expect(box(creditToSvg(1920, 1080, 'VOICEVOX:ずんだもん\nVOICEVOX:春日部つむぎ'))!.w).toBe(longest.w);
+    expect(box(creditToSvg(1920, 1080, 'VOICEVOX:春日部つむぎ\nVOICEVOX:ずんだもん'))!.w).toBe(longest.w);
+  });
+});
+
+describe('creditToSvg（区切りだけ）', () => {
+  it('描く行が無ければ何も描かない（枠の寸法を壊さない）', () => {
+    expect(creditToSvg(1920, 1080, '\n')).toBe('');
   });
 });

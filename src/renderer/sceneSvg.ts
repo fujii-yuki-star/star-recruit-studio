@@ -1,3 +1,4 @@
+import { CREDIT_LINE_SEPARATOR } from '../domain/voice/creditDisplay';
 import { colorFilterDefs, colorFilterId, needsColorFilter } from './colorFilter';
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
@@ -219,14 +220,19 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。
 // フォントは固定（既定フォント）＝ユーザーのフォント選択の影響を受けない（権利表示なので演出フォントで崩さない）。
 // サイズ/位置は canvas 短辺基準＝viewBox 座標で描くので出力解像度（16:9/9:16）に比例スケールする。
-function creditToSvg(width: number, height: number, text: string): string {
+// ⚠️ **改行で行に分け、右下から上へ積む**（ADR-0025 追補・2026-10-01）＝「最初と最後」は使った声を全員出すので、
+//   横に連ねると長くなり読みにくい（利用者の指摘）。1行のときの位置と大きさは従来と同じ。
+export function creditToSvg(width: number, height: number, text: string): string {
   const fontSize = Math.round(Math.min(width, height) * 0.022);
   const margin = Math.round(fontSize * 0.7);
   const padX = Math.round(fontSize * 0.6);
   const padY = Math.round(fontSize * 0.35);
-  const textW = [...text].reduce((w, ch) => w + charWidthEm(ch) * fontSize, 0);
+  const lineH = Math.round(fontSize * 1.3);
+  const rows = text.split(CREDIT_LINE_SEPARATOR).filter((r) => r.length > 0);
+  if (rows.length === 0) return ''; // 区切りだけ＝描くものが無い（枠の寸法を壊さない）
+  const textW = Math.max(...rows.map((row) => [...row].reduce((w, ch) => w + charWidthEm(ch) * fontSize, 0)));
   const boxW = Math.round(textW + padX * 2);
-  const boxH = Math.round(fontSize + padY * 2);
+  const boxH = Math.round(fontSize + lineH * (rows.length - 1) + padY * 2);
   const boxX = width - margin - boxW;
   const boxY = height - margin - boxH;
   // テキストのベースライン：ピル内で概ね縦中央に来るよう実機調整した係数（Noto Sans JP のキャップ比相当）。
@@ -234,7 +240,8 @@ function creditToSvg(width: number, height: number, text: string): string {
   return [
     `<g>`,
     `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.45"/>`,
-    `<text x="${boxX + padX}" y="${baselineY}" font-family="${DEFAULT_FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
+    ...rows.map((row, i) =>
+      `<text x="${boxX + padX}" y="${baselineY + lineH * i}" font-family="${DEFAULT_FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(row)}</text>`),
     `</g>`,
   ].join('');
 }

@@ -118,4 +118,14 @@ describe("声の表記の出し方（#359）", () => {
     fireEvent.blur(input);
     expect(setCreditDisplay).not.toHaveBeenCalled(); // 空欄は 0 を書かず元の値へ戻る
   });
+
+  // ⚠️ **タイムライン形式は、動画に焼く一覧と同じものを貼る**（PR レビュー 🟡・ADR-0025 追補）＝渡された一覧を使い、場面から数え直さない。
+  it("一覧を渡されたら、出さないときの貼り付け用にその一覧を出す", () => {
+    useProjectStore.setState({ scenes: [{ sceneId: "s1", lines: [{ speaker: 2, text: "あ" }] } as never] });
+    render(<CreditDisplayField value={{ mode: CREDIT_MODE.hidden }} onChange={vi.fn()} credits={["VOICEVOX:冥鳴ひまり", "VOICEVOX:春日部つむぎ"]} />);
+    const pre = document.querySelector("pre")!;
+    expect(pre.textContent).toContain("VOICEVOX:冥鳴ひまり");
+    expect(pre.textContent).toContain("VOICEVOX:春日部つむぎ");
+    expect(pre.textContent).not.toContain("四国めたん");
+  });
 });

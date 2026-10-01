@@ -12,7 +12,7 @@ import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming
 import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
-import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
+import { NARRATOR_CREDIT, sceneCreditText } from '../../domain/voice/narratorCredit';
 import type { CreditDisplay } from '../../domain/voice/creditDisplay';
 import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
@@ -239,7 +239,8 @@ export async function buildExportScenes(
   // 重なりを引いた実尺）も含めて1か所にある。見た目が解決できない場面は下で throw する＝ここで
   // 数える場面と書き出される場面は一致する。
   const creditVisible = sceneCreditVisibility(scenes, opts.creditDisplay);
-  const creditFor = (index: number): string | undefined => (creditVisible[index] ? baseCredit : undefined);
+  // 文はプレビューと同じ共有関数（`sceneCreditText`）＝「最初と最後」は全員を縦に・「ずっと表示」は話している行（ADR-0025 追補）。
+  const creditFor = (index: number): string | undefined => (creditVisible[index] ? sceneCreditText(opts.creditDisplay, scenes, null, baseCredit) : undefined);
   const out: ExportSceneData[] = [];
   // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
   const bail = (): void => {
@@ -326,9 +327,9 @@ export async function buildExportScenes(
           let narrationVolume: number | undefined;
           for (let k = 0; k < specs.length; k += 1) {
             const spec = specs[k];
-            // クレジットは話者連動（静止画の掛け合いと同じ規則・#243 の併記は行ごと表示で置き換え）。
+            // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動・ADR-0025 追補）。
             const segLine = spec.lineId ? lines.find((l) => l.lineId === spec.lineId) : undefined;
-            const segCredit = credit != null && segLine ? creditForLine(segLine, credit) : credit;
+            const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
                 ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
@@ -626,9 +627,9 @@ export async function buildExportScenes(
         let segIndex = 0;
         for (const spec of specs) {
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
-          // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
+          // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動＝無ければ既定の声・ADR-0025 追補）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
-          const segCredit = credit != null && segLine ? creditForLine(segLine, credit) : credit;
+          const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
           const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
           // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。
