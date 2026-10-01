@@ -57,7 +57,13 @@ beforeEach(() => {
   localStorage.clear();
   useTimelineStore.setState({ doc, loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], isPlaying: false, _historyGroupDepth: 0 });
 });
-afterEach(() => setPlaybackPulse(null));
+/** 描く合図を止めた検査が、落ちても次の検査へ持ち越さない（#1296）。 */
+let rafStub: { mockRestore(): void } | null = null;
+afterEach(() => {
+  setPlaybackPulse(null);
+  rafStub?.mockRestore();
+  rafStub = null;
+});
 
 async function openPopout() {
   render(<TimelineProjectScreen onNavigate={vi.fn()} />);
@@ -198,6 +204,11 @@ describe("仕上がり確認の別窓（ADR-0050）＝本体の側", () => {
   // 両方の窓が隠れると時計の合図が来ない＝時計は止まるのに音だけ進む（#1274 レビュー）。
   it("本体も別窓も隠れたら、再生を止める（どちらかが見えていれば止めない）", async () => {
     const pause = vi.fn();
+    // ⚠️ **再生の時計を進めない**（#1296）＝ここで見たいのは「隠れたら止める」だけ。時計が進むと、全体実行の負荷で待ちが
+    //   文書の長さ（2秒）を超えたとき**再生が終わりまで進んで、再生の仕組み自身が止める**（`useTimelinePlayback` の `ended`）
+    //   ＝見たい止め方と区別できず、全体実行でだけ落ちていた。長い文書にすると、今度は止まらない時計が毎コマ描き直して遅くなる。
+    //   別窓の仕組みは描く合図（requestAnimationFrame）を使わない（`usePreviewWindowHost`）ので、止めても見たいものは変わらない。
+    rafStub = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
     useTimelineStore.setState({ pause, isPlaying: true });
     await openPopout();
     const mainHidden = (h: boolean) =>
