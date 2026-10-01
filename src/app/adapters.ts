@@ -1,3 +1,5 @@
+import { ASSIST_KIND } from "../domain/ai/assist";
+import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
@@ -197,13 +199,13 @@ export function buildPrecheckItems(
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
-  // セリフの長さ／自由配置は warning のみで action ボタンが無いため sceneId は持たせない（場面番号は内容に列挙する）。
+  // セリフの長さは warning のまま、「セリフを直す」で最初の該当場面のセリフ欄へ寄り、AI 補助の「短く」をすぐ出す（ADR-0053 決定2）。
   // 掛け合いは本文が lines[].text 側にあるため、実効行（sceneLines）で各行の長さを見る（scene.narration.text 直参照は
   // 掛け合いで空＝未検出になる・ADR-0015）。単一 narration は sceneLines が1行に写すので従来と同一。
   const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT)));
   items.push(
     line.nums.length > 0
-      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning" }
+      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning", action: FIX_NARRATION_ACTION_LABEL, sceneId: line.firstId, assist: ASSIST_KIND.shorten }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -307,6 +309,10 @@ export function buildPrecheckItems(
       label: "早口になる場面",
       detail: `${fmtScenes(tooFast.nums)}は、表示する時間に対してセリフが多いです。表示時間を延ばすか、セリフを短くしてください。`,
       severity: "warning",
+      // 最初の該当場面のセリフ欄へ寄り、AI 補助の「尺に合わせる」をすぐ出す（ADR-0053 決定2）。
+      action: FIX_NARRATION_ACTION_LABEL,
+      sceneId: tooFast.firstId,
+      assist: ASSIST_KIND.fitDuration,
     });
   }
 

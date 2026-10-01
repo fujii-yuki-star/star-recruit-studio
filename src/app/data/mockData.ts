@@ -1,3 +1,4 @@
+import type { AssistKind } from "../../domain/ai/assist";
 // 画面用のUIモデルとモックデータ。
 // 後から本物のデータ層（src/domain）に差し替えられるよう、UI専用の軽量な型で定義する。
 import { GENERAL_PURPOSES, PURPOSES, type Purpose } from "../../domain/enums";
@@ -270,6 +271,11 @@ export interface PrecheckItem {
   action?: string;
   /** action を押したときに開く対象場面（#400・editingSceneId 経由）。場面に紐づく項目のみ。未設定＝先頭場面。 */
   sceneId?: string;
+  /**
+   * action を押したとき、場面編集のセリフ欄で**すぐ候補を出す** AI 補助の種類（ADR-0053 決定2）。
+   * 同梱の AI が無ければ頼まない（セリフ欄へ寄るだけ）。
+   */
+  assist?: AssistKind;
   /**
    * この項目が残っていると**書き出しが必ず失敗する**か（#547 P2-5）。
    * 書き出し（`renderer/export/buildExportScenes`）が §2-5 エラーで停止する条件だけに付ける＝

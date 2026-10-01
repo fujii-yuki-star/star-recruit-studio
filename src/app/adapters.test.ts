@@ -3,7 +3,8 @@ import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/c
 import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, exportBlockingItems, sceneToDraftRow } from "./adapters";
-import { subtitleOverflowMessage } from "./uiLabels";
+import { FIX_NARRATION_ACTION_LABEL, subtitleOverflowMessage } from "./uiLabels";
+import { ASSIST_KIND } from "../domain/ai/assist";
 
 const freeTemplate: Template = {
   schemaVersion: "1.0",
@@ -859,6 +860,17 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     const items = buildPrecheckItems([scene], [], [photoTemplate]);
     expect(find(items, "tooFast")?.severity).toBe("warning");
     expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
+    // セリフ欄へ寄り「尺に合わせる」をすぐ出す（ADR-0053 決定2）。行き先は最初の該当場面。
+    expect(find(items, "tooFast")).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: scene.sceneId, assist: ASSIST_KIND.fitDuration });
+  });
+
+  it("セリフが長い場面は「セリフを直す」で最初の該当場面へ・「短く」をすぐ出す（ADR-0053 決定2）", () => {
+    const ok = sc({ sceneId: "scene_001", narration: { text: "短い。", status: "generated" } });
+    const long1 = sc({ sceneId: "scene_002", narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
+    const long2 = sc({ sceneId: "scene_003", narration: { text: "い".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
+    expect(find(buildPrecheckItems([ok, long1, long2], [], [photoTemplate]), "line")).toMatchObject({ severity: "warning", action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_002", assist: ASSIST_KIND.shorten });
+    // 長くなければボタンは出さない。
+    expect(find(buildPrecheckItems([ok], [], [photoTemplate]), "line")?.action).toBeUndefined();
   });
 
   it("ふつうの長さなら出さない", () => {

@@ -1775,5 +1775,7 @@ export const AI_ASSIST_NARRATION_KINDS = [
 ] as const;
 /** 字幕欄のボタン。 */
 export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "語りから作る" }] as const;
+/** 公開前チェックの「セリフの長さ」「早口になる場面」から、その場面のセリフ欄へ寄るボタン（ADR-0053 決定2）。 */
+export const FIX_NARRATION_ACTION_LABEL = "セリフを直す";
 /** 見出し欄のボタン。 */
 export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
