@@ -70,6 +70,7 @@ import { FontPicker } from "../components/FontPicker";
 import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
 import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
 import { AiSuggest } from "../components/AiSuggest";
+import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import { AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
@@ -3087,7 +3088,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 key={selected.sceneId}
                 kinds={AI_ASSIST_NARRATION_KINDS}
                 source={selected.narration.text}
-                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec }}
+                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec, voiceSpeed: resolveNarrationVoice(selected.narration, voiceSettings).speed }}
                 companyName={companyName}
                 autoKind={autoAssist?.sceneId === selected.sceneId ? autoAssist.kind : undefined}
                 onAutoAsked={() => setAutoAssist(null)}

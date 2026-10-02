@@ -9,10 +9,10 @@ import {
   ASSIST_TITLE_MAX_LENGTH,
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SUBTITLE_LEN_DEFAULT,
-  NARRATION_CHARS_PER_SEC,
   NARRATION_SCENE_PADDING_SEC,
 } from '../constants';
 import { COMPANY_NAME_PLACEHOLDER, repairTruncatedName } from './refineVideoPlan';
+import { narrationCharsPerSec } from '../voice/speechRate';
 
 /** 頼める作業の種類（画面のボタン1つ＝1種類）。 */
 export const ASSIST_KIND = {
@@ -39,11 +39,13 @@ export interface AssistLimits {
   maxSubtitleLength?: number;
   /** 場面の表示時間（秒）。「尺に合わせる」で使う。 */
   sceneDurationSec?: number;
+  /** その場面の声の速さ（解決済み・未指定＝1.0）。「尺に合わせる」の字数に効く（#1318）。 */
+  voiceSpeed?: number;
 }
 
-/** 読み上げで `sec` 秒に収まる字数（前後の間を引く）。 */
-export function charsForDuration(sec: number): number {
-  return Math.max(0, Math.floor((sec - NARRATION_SCENE_PADDING_SEC) * NARRATION_CHARS_PER_SEC));
+/** 読み上げで `sec` 秒に収まる字数（前後の間を引く）。`speed`＝声の速さ（未指定＝1.0・#1318）。 */
+export function charsForDuration(sec: number, speed?: number): number {
+  return Math.max(0, Math.floor((sec - NARRATION_SCENE_PADDING_SEC) * narrationCharsPerSec(speed)));
 }
 
 /**
@@ -63,7 +65,7 @@ export function assistMaxLength(kind: AssistKind, text: string, limits: AssistLi
       // 時間が無い・0 以下なら頼まない。⚠️ 外しても結果は同じ（NaN／0 字は下の最短の境目で null になる）＝変異チェックで等価。
       // 明示しておくのは、NaN が素通りする式に頼らないため。
       if (!(limits.sceneDurationSec && limits.sceneDurationSec > 0)) return null;
-      max = Math.min(narration, charsForDuration(limits.sceneDurationSec));
+      max = Math.min(narration, charsForDuration(limits.sceneDurationSec, limits.voiceSpeed));
       if (text.length <= max) return null;
       break;
     }

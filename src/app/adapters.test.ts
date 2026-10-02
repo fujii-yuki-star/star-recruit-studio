@@ -892,6 +892,32 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     expect(find(buildPrecheckItems([tiny, ok], [], [photoTemplate]), "tooFast")).toMatchObject({ sceneId: "scene_002", assist: ASSIST_KIND.fitDuration });
   });
 
+  // #1318：早口の判定と「セリフを直す」は、その場面で解決した声の速さで見る（場面編集の AI 補助と同じ）。
+  it("声が速ければ早口と言わない／遅ければ言う（声の速さで判定する）", () => {
+    const voice = (speed: number) => ({ defaultVoiceId: "voicevox_zundamon", speed });
+    const s1 = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(56), status: "generated" } }); // 9.3 字/秒
+    const tooFast = (speed?: number) => find(buildPrecheckItems([s1], [], [photoTemplate], undefined, undefined, undefined, undefined, speed == null ? undefined : voice(speed)), "tooFast");
+    expect(tooFast()).toBeDefined();
+    expect(tooFast(1.5)).toBeUndefined();
+    const s2 = sc({ sceneId: "scene_002", durationSec: 6, narration: { text: "あ".repeat(40), status: "generated" } }); // 6.7 字/秒
+    expect(find(buildPrecheckItems([s2], [], [photoTemplate], undefined, undefined, undefined, undefined, voice(0.6)), "tooFast")).toBeDefined();
+  });
+
+  it("「セリフを直す」で頼むかどうかも声の速さで決める（場面編集と逆のことを言わない）", () => {
+    // 6 秒・60 字＝10 字/秒：速さ 1.1 なら早口（目安 9.9 字/秒）で、尺に合わせる候補も作れる（上限 41 字）。
+    const s1 = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(60), status: "generated" } }); // 10 字/秒
+    const item = find(buildPrecheckItems([s1], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 1.1 }), "tooFast");
+    expect(item).toMatchObject({ sceneId: "scene_001", assist: ASSIST_KIND.fitDuration });
+    // 場面の声が速ければ場面の速さで（場面の速さは動画全体より優先＝11.6）
+    const fastScene = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(60), status: "generated", speed: 1.5 } });
+    expect(find(buildPrecheckItems([fastScene], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 1 }), "tooFast")).toBeUndefined();
+    // 遅い声（0.6）：35 字/6 秒は早口（目安 5.4 字/秒）。速さ 1.0 なら「もう収まっている」と判断してしまう長さでも、
+    // 遅い声では収まらない＝候補を頼める（場面編集も同じ速さで見るので、着いた先で「大丈夫」と逆のことを言わない）。
+    const slow = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(35), status: "generated" } });
+    expect(find(buildPrecheckItems([slow], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 0.6 }), "tooFast"))
+      .toMatchObject({ sceneId: "scene_001", assist: ASSIST_KIND.fitDuration });
+  });
+
   it("ふつうの長さなら出さない", () => {
     const scene = sc({ durationSec: 8, narration: { text: "こんにちは、よろしくお願いします。", status: "generated" } });
     expect(find(buildPrecheckItems([scene], [], [photoTemplate]), "tooFast")).toBeUndefined();

@@ -70,6 +70,18 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     expect(total).not.toBe(raw.parts.flatMap((p) => p.scenes).reduce((n, s) => n + s.durationSec, 0));
   });
 
+  // #1318：尺の見積もりに動画全体の声の速さを使う（速い声ほど読み切る下限が短い）。
+  it('声の速さ（voiceSpeed）を尺の配分に渡す', async () => {
+    const raw = structuredClone(validPlanFixture) as AiVideoPlan;
+    raw.parts[0].scenes[0].narrationText = 'あ'.repeat(60);
+    const sceneSec = async (voiceSpeed?: number) => {
+      localAiGenerateMock.mockResolvedValue(JSON.stringify(raw));
+      const plan = await new LocalVideoPlanProvider().generateVideoPlan({ ...input(), targetDurationSec: 3, voiceSpeed });
+      return plan.parts[0].scenes[0].durationSec;
+    };
+    expect(await sceneSec(0.7)).toBeGreaterThan(await sceneSec(1.5));
+  });
+
   it('上限を越えた文は言い直しを頼む（上限つきの形で縛る）', async () => {
     const raw = structuredClone(validPlanFixture) as AiVideoPlan;
     raw.parts[0].scenes[0].narrationText = 'あ'.repeat(200);

@@ -95,6 +95,26 @@ describe("公開前チェックから AI 補助へ（ADR-0053 決定2）", () =>
     expect(ai.calls).toHaveLength(0);
   });
 
+  // #1318：場面編集は、その場面の声の速さで「尺に合わせる」を決める（速い声ならもう収まっている＝頼まない）。
+  it("声が速ければ、尺に収まっているとして頼まない", async () => {
+    const text = "あ".repeat(40); // 6 秒＝速さ 1.0 では 37 字まで・1.2 なら 45 字まで
+    useProjectStore.setState((st) => ({
+      scenes: [scene("scene_001", "短い。"), scene("scene_002", text, 6)],
+      meta: { ...st.meta, voiceSettings: { ...st.meta.voiceSettings, speed: 1.2 } },
+      editingSceneId: "scene_002", editingSceneAssist: ASSIST_KIND.fitDuration,
+    }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    await flush();
+    expect(ai.calls).toHaveLength(0);
+    useProjectStore.setState((st) => ({ meta: { ...st.meta, voiceSettings: { ...st.meta.voiceSettings, speed: 1 } } }));
+    cleanup();
+    resetAiSuggestAvailabilityForTest();
+    useProjectStore.setState({ editingSceneId: "scene_002", editingSceneAssist: ASSIST_KIND.fitDuration });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    await flush();
+    expect(ai.calls).toHaveLength(1);
+  });
+
   it("印が無ければ頼まない", async () => {
     useProjectStore.setState({ editingSceneId: "scene_002", editingSceneAssist: null });
     render(<SceneEditScreen onNavigate={vi.fn()} />);

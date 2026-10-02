@@ -6,6 +6,7 @@
 //   4. 尺＝語りの文字数と読み上げの速さから計算し、目標の尺に配分する（11 §4 の範囲の中で）
 // ⚠️ **ai-video-plan の形は変えない**＝入出力とも同じ型。呼び出し側は整えた後にもう一度正典の検証を通す（§2-2）。
 // ⚠️ **場面を足さない・消さない・種類を変えない**＝話の流れは AI の判断（ADR-0052 決定1）。
+import { narrationCharsPerSec } from '../voice/speechRate';
 import {
   AI_SCENE_MAX_DURATION_SEC,
   AI_SCENE_MIN_DURATION_SEC,
@@ -48,6 +49,8 @@ export interface RefineContext {
   /** 利用者が決めた目標の尺（秒）。AI が書き換えた `videoPlan.targetDurationSec` ではなく入力の値を使う。 */
   targetDurationSec: number;
   properNouns: ProperNouns;
+  /** 動画全体の声の速さ（`voiceSettings.speed`・未指定＝1.0）。尺の見積もりに使う（#1318）。 */
+  voiceSpeed?: number;
 }
 
 /**
@@ -447,10 +450,13 @@ async function shortenOne(item: OverlongText, name: string, shorten: ShortenText
 // 4. 尺の配分
 // ---------------------------------------------------------------------------------------------
 
-/** 語りを読み上げるのに要る秒数（前後の間を含む）。掛け合いの行は順に読む（ai-video-plan に同時開始は無い）。 */
-export function speechSec(scene: AiScene): number {
+/**
+ * 語りを読み上げるのに要る秒数（前後の間を含む）。掛け合いの行は順に読む（ai-video-plan に同時開始は無い）。
+ * `charsPerSec`＝声の速さで決まる見積もり（`narrationCharsPerSec`・#1318）。省略＝速さ 1.0。
+ */
+export function speechSec(scene: AiScene, charsPerSec: number = NARRATION_CHARS_PER_SEC): number {
   const chars = narrationTexts(scene).reduce((n, t) => n + t.length, 0);
-  return chars / NARRATION_CHARS_PER_SEC + NARRATION_SCENE_PADDING_SEC;
+  return chars / charsPerSec + NARRATION_SCENE_PADDING_SEC;
 }
 
 /**
@@ -468,11 +474,13 @@ function ceilToStep(sec: number): number {
  * - 下限の合計が目標に足りなければ、余りを **AI が付けた尺の比**で上限まで配る（映像を長く見せたい場面の意図を残す）。
  * - 下限の合計が目標を越えるなら下限のまま（語りを切らない＝尺を越える。点数で見る）。
  */
-export function allocateDurations(plan: AiVideoPlan, templates: TemplateSummary[], targetSec: number): AiVideoPlan {
+export function allocateDurations(
+  plan: AiVideoPlan, templates: TemplateSummary[], targetSec: number, charsPerSec: number = NARRATION_CHARS_PER_SEC,
+): AiVideoPlan {
   const byId = new Map(templates.map((t) => [t.templateId, t] as const));
   const flat = plan.parts.flatMap((p) => p.scenes);
   const hi = flat.map((s) => byId.get(s.templateId)?.maxDurationSec ?? AI_SCENE_MAX_DURATION_SEC);
-  const lo = flat.map((s, i) => Math.min(hi[i], Math.max(AI_SCENE_MIN_DURATION_SEC, ceilToStep(speechSec(s)))));
+  const lo = flat.map((s, i) => Math.min(hi[i], Math.max(AI_SCENE_MIN_DURATION_SEC, ceilToStep(speechSec(s, charsPerSec)))));
   const d = [...lo];
   let extra = targetSec - lo.reduce((a, b) => a + b, 0);
   // 水を注ぐように配る：上限に達した場面を外しながら、残りを比で分ける（場面数ぶん回せば必ず終わる）。
@@ -530,5 +538,5 @@ export async function refineVideoPlan(
     current = setTextAt(current, item, shortened);
     report.shortened++;
   }
-  return { plan: allocateDurations(current, ctx.templates, ctx.targetDurationSec), report };
+  return { plan: allocateDurations(current, ctx.templates, ctx.targetDurationSec, narrationCharsPerSec(ctx.voiceSpeed)), report };
 }

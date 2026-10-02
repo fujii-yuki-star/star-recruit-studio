@@ -306,6 +306,26 @@ describe('allocateDurations（尺は語りから計算して目標に配分す�
     expect(speechSec(scene({ narrationText: null }))).toBeCloseTo(NARRATION_SCENE_PADDING_SEC);
   });
 
+  // #1318：見積もりは声の速さに合わせる（速い声ほど短く読み切る）。
+  it('声の速さで読み切る秒数が変わり、語りを読み切る下限もそれに従う', () => {
+    const sc = scene({ narrationText: 'あ'.repeat(75) });
+    expect(speechSec(sc, NARRATION_CHARS_PER_SEC * 1.5)).toBeCloseTo(75 / (NARRATION_CHARS_PER_SEC * 1.5) + NARRATION_SCENE_PADDING_SEC);
+    const long = 'あ'.repeat(60); // 上限（15 秒）に当たらない長さ
+    const slow = flat(allocateDurations(plan([scene({ templateId: 'unknown', narrationText: long, durationSec: 3 })]), TEMPLATES, 5, NARRATION_CHARS_PER_SEC * 0.8))[0].durationSec;
+    const fast = flat(allocateDurations(plan([scene({ templateId: 'unknown', narrationText: long, durationSec: 3 })]), TEMPLATES, 5, NARRATION_CHARS_PER_SEC * 1.5))[0].durationSec;
+    expect(slow).toBeGreaterThanOrEqual(60 / (NARRATION_CHARS_PER_SEC * 0.8) + NARRATION_SCENE_PADDING_SEC);
+    expect(fast).toBeLessThan(slow);
+  });
+
+  it('refineVideoPlan は声の速さ（voiceSpeed）を尺の見積もりに渡す', async () => {
+    const long = 'あ'.repeat(40);
+    const base = { templates: TEMPLATES, targetDurationSec: 3, properNouns: {} };
+    const d = async (voiceSpeed?: number) =>
+      flat((await refineVideoPlan(plan([scene({ templateId: 'unknown', narrationText: long, durationSec: 3 })]), { ...base, voiceSpeed })).plan)[0].durationSec;
+    expect(await d(0.7)).toBeGreaterThan(await d(undefined));
+    expect(await d(1.5)).toBeLessThan(await d(undefined));
+  });
+
   it('語りが短くても目標の尺まで配る（実測は60秒の目標で106秒）', () => {
     const p = plan([scene({ durationSec: 15 }), scene({ durationSec: 15 }), scene({ durationSec: 15 }), scene({ durationSec: 15 }), scene({ durationSec: 15 })]);
     expect(total(allocateDurations(p, TEMPLATES, 60))).toBeCloseTo(60, 5);

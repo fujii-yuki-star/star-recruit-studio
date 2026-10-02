@@ -98,6 +98,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     // `userFontIds` は古いまま残るので、渡すと「調べられません」と「N つ見つかりません」が
     // **同時に**出る（互いに矛盾する2つの断り）。
     { projectFontId: meta.videoSettings.fontId, userFontsUnreadable, ...(userFontIds && !userFontsUnreadable ? { availableUserFontIds: userFontIds } : {}) },
+    // 早口の判定と「セリフを直す」を声の速さに合わせる（#1318・場面編集の AI 補助と同じ解決）。
+    meta.voiceSettings,
   );
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;

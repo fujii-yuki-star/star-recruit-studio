@@ -1009,6 +1009,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         templates: buildTemplateSummaries(templates, meta.videoSettings.aspectRatio),
         assets,
         yukoPoseTags: buildYukoPoseTags(assets),
+        // 尺の見積もりを声の速さに合わせる（#1318）。AI へは送らない（ソフトが尺を決めるのに使うだけ）。
+        voiceSpeed: meta.voiceSettings.speed,
       });
       if (get()._generationSeq !== seq) return; // キャンセル/後発生成で置換された＝結果を破棄（#402）
       const { parts, scenes, warnings } = transformVideoPlan(plan, {

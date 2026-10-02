@@ -123,6 +123,15 @@ describe('blurryAssets（ぼやける素材・#346）', () => {
 });
 
 describe('tooFastScenes（早口になる場面・#346）', () => {
+  // #1318：目安は声の速さの倍率で上がる。速さが無い・0 以下・数でないときは 1.0。
+  it('声の速さの倍率で目安が上がる（無い・壊れた速さは 1.0）', () => {
+    const text = [['あ'.repeat(MAX_CHARS_PER_SEC * 2 + 1)]];
+    expect(tooFastScenes(scene(2), text, 1.2)).toBe(false);
+    for (const v of [undefined, 0, -1, Number.NaN]) expect(tooFastScenes(scene(2), text, v)).toBe(true);
+    // 速さ 1.0 なら収まる文は、壊れた速さでも早口と言わない（0 や負を受け入れると目安が 0 以下になり、何でも早口になる）。
+    for (const v of [0, -1, Number.NaN]) expect(tooFastScenes(scene(2), [['あ'.repeat(MAX_CHARS_PER_SEC)]], v)).toBe(false);
+  });
+
   const scene = (durationSec: number): Scene => ({ durationSec } as Scene);
 
   /**
