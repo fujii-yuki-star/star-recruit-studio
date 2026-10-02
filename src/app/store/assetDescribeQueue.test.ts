@@ -227,4 +227,38 @@ describe("createAssetDescribeQueue", () => {
     await queue.idle();
     expect(deps.describe).toHaveBeenCalledTimes(1);
   });
+
+  // #1317：写真を差し替えたら、この画面で一度読んだ素材でも読み直す（`retry`）。ふつうに積むと「試した」で飛ばす。
+  it("一度読んだ素材は、ふつうに積んでも読み直さず、retry なら読み直す", async () => {
+    const { state, deps, queue } = setup([photo("a1")]);
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+    state.assets = [photo("a1")]; // 差し替えで説明を外した状態
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+    queue.enqueue("a1", () => true, { retry: true });
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(2);
+    expect(state.assets[0].aiDescription).toBe("明るいオフィス");
+  });
+
+  // #1317 レビュー 🟡：読んでいる最中に写真を差し替えたら、その結果（前の写真の説明）は当てない。差し替えた側が積み直す。
+  it("読んでいる最中に差し替わった（invalidate）ら当てず、積み直せば新しい写真で当てる", async () => {
+    let release!: (v: string) => void;
+    const { state, deps, queue } = setup([photo("a1")], {
+      describe: vi.fn(() => new Promise<string>((r) => { release = r; })),
+    });
+    queue.enqueue("a1", () => true);
+    await vi.waitFor(() => expect(deps.describe).toHaveBeenCalledTimes(1));
+    queue.invalidate("a1"); // ここで写真が差し替わった
+    release(JSON.stringify({ description: "前の写真の説明", tags: [] }));
+    await queue.idle();
+    expect(state.assets[0].aiDescription).toBeUndefined();
+    (deps.describe as ReturnType<typeof vi.fn>).mockImplementation(async () => JSON.stringify({ description: "新しい写真の説明", tags: [] }));
+    queue.enqueue("a1", () => true, { retry: true });
+    await queue.idle();
+    expect(state.assets[0].aiDescription).toBe("新しい写真の説明");
+  });
 });

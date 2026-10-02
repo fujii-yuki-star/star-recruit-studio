@@ -36,7 +36,12 @@ const BLOCKED_POLL_MS = 1000;
 
 export interface AssetDescribeQueue {
   /** 読む素材を積む（待たない）。`stillOpen` は積んだ時点の動画を見る合図。 */
-  enqueue(assetId: string, stillOpen: () => boolean): void;
+  enqueue(assetId: string, stillOpen: () => boolean, opts?: { retry?: boolean }): void;
+  /**
+   * その素材のファイルが差し替わった（#1317 レビュー 🟡）＝読んでいる最中の結果は**前の写真**のものなので当てない。
+   * 拡張子が同じなら保存名も同じ（上書き）＝パスでは見分けられないので、差し替えの世代で見分ける。
+   */
+  invalidate(assetId: string): void;
   /** 積んだものが全部終わるまで待つ（検査用）。 */
   idle(): Promise<void>;
 }
@@ -44,6 +49,8 @@ export interface AssetDescribeQueue {
 export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribeQueue {
   const jobs: { assetId: string; stillOpen: () => boolean }[] = [];
   const tried = new Set<string>();
+  /** 素材ごとの差し替えの世代（`invalidate` で進む）。 */
+  const generation = new Map<string, number>();
   let availability: Promise<boolean> | null = null;
   let running: Promise<void> | null = null;
 
@@ -56,6 +63,7 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
     const relPath = describeTarget(cur.asset);
     if (!relPath) return;
     tried.add(key);
+    const gen = generation.get(assetId) ?? 0;
     // ⚠️ **書き出し中は読み始めない**（#1317 レビュー 🟡）＝読むのは重い（1枚 6〜8 秒・CPU を使い切る）ので、
     //   書き出しと取り合うと書き出しが遅れる。以前は「当てる」段だけを待たせていた。
     while (deps.blocked() && stillOpen()) await deps.sleep(BLOCKED_POLL_MS);
@@ -77,6 +85,8 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
     }
     while (deps.blocked() && stillOpen()) await deps.sleep(BLOCKED_POLL_MS);
     if (!stillOpen()) { tried.delete(key); return; }
+    // 読んでいる間に写真が差し替わったら、前の写真の説明なので当てない（差し替えた側が読み直しを積む）。
+    if ((generation.get(assetId) ?? 0) !== gen) { tried.delete(key); return; }
     deps.apply(assetId, (a) => applyAssetDescription(a, parsed));
   }
 
@@ -107,9 +117,17 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
   }
 
   return {
-    enqueue(assetId, stillOpen) {
+    enqueue(assetId, stillOpen, opts) {
+      // `retry`＝この画面を開いている間に一度読んだ素材でも読み直す（写真を差し替えた＝#1317）。
+      if (opts?.retry) {
+        const cur = deps.current(assetId);
+        if (cur) tried.delete(`${cur.projectId}/${assetId}`);
+      }
       jobs.push({ assetId, stillOpen });
       start();
+    },
+    invalidate(assetId) {
+      generation.set(assetId, (generation.get(assetId) ?? 0) + 1);
     },
     async idle() {
       while (running) await running;

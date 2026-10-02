@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetAssetIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as assetFsMod from '../../infrastructure/assetFs';
+import * as aiClientMod from '../../infrastructure/aiClient';
 import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
 import type { Asset, Scene } from '../../domain/project/types';
 
@@ -42,6 +43,54 @@ describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const relink = (p = 'D:/new/外観.mov') => useProjectStore.getState().relinkAssetByPath('asset_001', p);
+
+  // #1317（ADR-0052 追補13）：AI が付けた説明は、写真を差し替えたら外して読み直す。利用者が直した説明は残す。
+  it('AI が付けた説明は外して読み直す／利用者が直した説明は残す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const describeSpy = vi.spyOn(aiClientMod, 'localAiDescribeImage').mockResolvedValue(JSON.stringify({ description: '新しい外観', tags: [] }));
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '前の外観', aiDescriptionAuthor: 'ai' })] });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.jpg');
+    await relink('D:/new/外観.jpg');
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('新しい外観'));
+    expect(useProjectStore.getState().assets[0].aiDescriptionAuthor).toBe('ai');
+    expect(describeSpy.mock.calls.at(-1)?.slice(3)).toEqual(['proj_20260827_0001', 'assets/asset_001.jpg']);
+
+    describeSpy.mockClear();
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '自分で書いた', aiDescriptionAuthor: 'user' })] });
+    await relink('D:/new/外観2.jpg');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(useProjectStore.getState().assets[0].aiDescription).toBe('自分で書いた');
+    expect(describeSpy).not.toHaveBeenCalled();
+  });
+
+  // #1317 レビュー 🟡：差し替えの道は2つ＝「画像を変更する」（setAssetImage）も同じ扱い（AI の説明は外して読み直す）。
+  it('「画像を変更する」でも AI が付けた説明は外して読み直す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const describeSpy = vi.spyOn(aiClientMod, 'localAiDescribeImage').mockResolvedValue(JSON.stringify({ description: '変えた写真', tags: [] }));
+    vi.spyOn(assetFsMod, 'fileToDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    vi.spyOn(assetFsMod, 'importAssetFile').mockResolvedValue('assets/asset_001.png');
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '前の写真', aiDescriptionAuthor: 'ai' })] });
+    await useProjectStore.getState().setAssetImage('asset_001', { name: 'new.png', type: 'image/png' } as File);
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('変えた写真'));
+    expect(describeSpy).toHaveBeenCalled();
+  });
+
+  // #1317 レビュー 🟡：読んでいる最中にもう一度差し替えたら、前の写真の説明を新しい写真に付けない。
+  it('読んでいる最中にもう一度差し替えたら、前の写真の結果は当てず、新しい写真で読み直す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const releases: ((v: string) => void)[] = [];
+    vi.spyOn(aiClientMod, 'localAiDescribeImage').mockImplementation(() => new Promise<string>((r) => { releases.push(r); }));
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png' })] });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png'); // 拡張子が同じ＝保存名も同じ
+    await relink('D:/new/1.png');
+    await vi.waitFor(() => expect(releases).toHaveLength(1)); // 1枚目を読んでいる
+    await relink('D:/new/2.png'); // 読んでいる最中に、もう一度差し替える
+    releases[0](JSON.stringify({ description: '1枚目の説明', tags: [] }));
+    await vi.waitFor(() => expect(releases).toHaveLength(2)); // 2枚目を読み直す
+    expect(useProjectStore.getState().assets[0].aiDescription).toBeUndefined(); // 1枚目の結果は当てない
+    releases[1](JSON.stringify({ description: '2枚目の説明', tags: [] }));
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('2枚目の説明'));
+  });
 
   it('assetId は変わらず、名前もタグも残る（付け直させない）', async () => {
     await relink();

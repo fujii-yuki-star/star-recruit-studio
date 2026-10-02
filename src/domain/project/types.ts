@@ -1,5 +1,5 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
-import type {
+import type { AiDescriptionAuthor,
   AssetType, EasingSpec, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, VideoStartMode, WarningSeverity,
 } from '../enums';
@@ -136,6 +136,12 @@ export interface Asset {
   tags?: string[];
   description?: string;
   aiDescription?: string;
+  /**
+   * 「AI解析」を書いたのは誰か（#1317・schema 1.31）。`ai`＝同梱の AI が付けた／`user`＝利用者が直した（**空にした**も含む）。
+   * 未指定＝前の版の素材（誰が書いたか分からない＝説明があれば触らない・空なら AI が読む＝従来どおり）。
+   * ⚠️ `user` の説明は AI が二度と書き換えない／`ai` の説明は写真を差し替えたら読み直す。
+   */
+  aiDescriptionAuthor?: AiDescriptionAuthor;
   isPublicChecked?: boolean;
   /** yuko 素材のみ。poseTag 解決の既定（12 §8.3）。 */
   isDefaultYuko?: boolean;

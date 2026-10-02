@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.30" },
+    "schemaVersion": { "const": "1.31" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -247,6 +247,7 @@
         "tags": { "type": "array", "items": { "type": "string" } },
         "description": { "type": "string" },
         "aiDescription": { "type": "string" },
+        "aiDescriptionAuthor": { "enum": ["ai", "user"], "description": "「AI解析」を書いたのは誰か（#1317・1.31）。ai＝同梱の AI が付けた（写真を差し替えたら読み直す）／user＝利用者が直した（空にしたも含む＝AI は書き換えない）。未指定＝前の版の素材（説明があれば触らない）。" },
         "isPublicChecked": { "type": "boolean" },
         "isDefaultYuko": { "type": "boolean" },
         "clip": { "$ref": "#/$defs/Clip" },

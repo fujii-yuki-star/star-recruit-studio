@@ -198,6 +198,11 @@ const mustAccept = [
   // 場面ごとの上限/下限は持たない（#553）ので、0 より大きければ極端に短くても許容する。
   ['scene: durationSec 0.1（極短でも >0 なら許容・下限は持たない #553）', withScene({ durationSec: 0.1 })],
   ['scene: fontId=null（継承）を許容', withScene({ fontId: null })],
+  // 素材の「AI解析」の書き手（1.31・#1317）。
+  ['asset: aiDescriptionAuthor=ai／user を許容（1.31・#1317）', { ...withBrief({}), assets: [
+    { assetId: 'asset_001', assetType: 'image', displayName: 'a', filePath: 'assets/a.png', aiDescription: 'x', aiDescriptionAuthor: 'ai' },
+    { assetId: 'asset_002', assetType: 'image', displayName: 'b', filePath: 'assets/b.png', aiDescription: '', aiDescriptionAuthor: 'user' },
+  ] }],
   ['scene: fontId 既知（kaitou-yokoku-gothic）を許容', withScene({ fontId: 'kaitou-yokoku-gothic' })],
   ['scene: fontId 未指定（継承）を許容', withScene({})],
   ['freeLayout: 新図形(star)＋枠線(stroke)を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'star', fillColor: '#ff0000', opacity: 1, strokeColor: '#112233', strokeWidth: 3 }] })],
@@ -233,6 +238,9 @@ const mustAccept = [
   ['scene: slotClips（クリップ per-use 上書き・範囲/速度/元音声）を許容（1.19・ADR-0028）', withScene({ slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 }, sub: { speed: 0.5 } } })],
 ];
 const mustReject = [
+  ['asset: aiDescriptionAuthor の値は ai／user だけ（1.31・#1317）', { ...withBrief({}), assets: [
+    { assetId: 'asset_001', assetType: 'image', displayName: 'a', filePath: 'assets/a.png', aiDescriptionAuthor: 'gemini' },
+  ] }],
   // 形式の判別（ADR-0032・11 §1）。**場面形式は `format` を書かない**（不在＝場面形式）。`'scene'` は
   // 読込時の解決値であって永続化しない値で、書くとここで落ちる。#627 レビューで挙がった
   // 「後続で保存時に format:'scene' を明示すると壊れる」を、正典の記述ではなく CI で止めるための固定。
