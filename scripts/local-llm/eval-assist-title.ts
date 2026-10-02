@@ -1,4 +1,4 @@
-// 動画の題名の候補（#1316・ADR-0053 追補）を本物の llama-server で測る。アプリと同じ材料（`videoTitleSource`）と指示文。
+// 動画の名前の候補（#1316・ADR-0053 追補）を本物の llama-server で測る。アプリと同じ材料（`videoTitleSource`）と指示文。
 // 使い方: llama-server を起動しておき、npx tsx scripts/local-llm/eval-assist-title.ts http://127.0.0.1:18082 < /dev/null
 import { ASSIST_KIND, assistMaxLength, buildAssistMessages, parseAssistCandidates, videoTitleSource } from '../../src/domain/ai/assist';
 
