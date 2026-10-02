@@ -1,10 +1,10 @@
 // 編集の途中の AI 補助（ADR-0053）。
 import { describe, expect, it } from 'vitest';
 import {
-  ASSIST_CANDIDATES, ASSIST_SUBTITLE_TARGET_LENGTH, ASSIST_TITLE_MAX_LENGTH,
+  ASSIST_CANDIDATES, ASSIST_SUBTITLE_TARGET_LENGTH, ASSIST_TITLE_MAX_LENGTH, ASSIST_VIDEO_SUMMARY_MAX_LENGTH, ASSIST_VIDEO_TITLE_MAX_LENGTH,
   MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, NARRATION_CHARS_PER_SEC, NARRATION_SCENE_PADDING_SEC,
 } from '../constants';
-import { ASSIST_KIND, assistMaxLength, buildAssistMessages, charsForDuration, parseAssistCandidates } from './assist';
+import { ASSIST_KIND, assistMaxLength, buildAssistMessages, charsForDuration, parseAssistCandidates, sceneSpokenText, videoTitleSource } from './assist';
 import { COMPANY_NAME_PLACEHOLDER } from './refineVideoPlan';
 
 const NAME = '株式会社サンプル物流';
@@ -118,5 +118,48 @@ describe('parseAssistCandidates', () => {
 
   it('会社名が無ければ印は空にする', () => {
     expect(parseAssistCandidates(raw([`${COMPANY_NAME_PLACEHOLDER}へようこそ`]), 'x', 10)).toEqual(['へようこそ']);
+  });
+});
+
+// #1316：掛け合いの見出しと動画の題名の材料。
+describe('sceneSpokenText / videoTitleSource / 動画の題名', () => {
+  it('掛け合いは行をつなぐ（空の行は除く・narration の写しは使わない）／単独は narration', () => {
+    expect(sceneSpokenText({ narration: { text: '写し' }, lines: [{ text: ' 一つ目 ' }, { text: '' }, { text: '二つ目' }] })).toBe('一つ目\n二つ目');
+    expect(sceneSpokenText({ narration: { text: ' 単独 ' }, lines: [] })).toBe('単独');
+    expect(sceneSpokenText({ narration: null })).toBe('');
+  });
+
+  it('題名の材料＝主題＋各場面の語り（空は除く）を、上限の字数で切る', () => {
+    const src = videoTitleSource('株式会社サンプル', [{ narration: { text: 'はじめまして' } }, { narration: { text: '' } }, { lines: [{ text: 'よろしく' }] }]);
+    expect(src).toBe('テーマ：株式会社サンプル\nはじめまして\nよろしく');
+    expect(videoTitleSource(undefined, [{ narration: { text: 'あ' } }])).toBe('あ');
+    const long = videoTitleSource('x', Array.from({ length: 50 }, () => ({ narration: { text: 'い'.repeat(30) } })));
+    expect(long.length).toBe(ASSIST_VIDEO_SUMMARY_MAX_LENGTH);
+  });
+
+  it('動画の題名は専用の上限・見出しの作業・「動画の内容」として渡す', () => {
+    expect(assistMaxLength(ASSIST_KIND.videoTitle, 'x', {})).toBe(ASSIST_VIDEO_TITLE_MAX_LENGTH);
+    const m = buildAssistMessages(ASSIST_KIND.videoTitle, '主題：x', ASSIST_VIDEO_TITLE_MAX_LENGTH);
+    expect(m.user.startsWith('# 動画の内容')).toBe(true);
+    expect(m.system.startsWith('あなたは動画のタイトルを付ける編集者です。')).toBe(true); // 「整える」ではなく「名付ける」役割
+    expect(m.system).toContain('本文の文を書き写さない');
+    expect(m.system).toContain('文にしない');
+    expect(m.system).toContain('例：'); // 例なしだと本文の一文を書き写した（実測）
+    // ほかの作業は従来の役割のまま
+    expect(buildAssistMessages(ASSIST_KIND.title, 'x', 20).system.startsWith('あなたは動画のセリフ・字幕・見出しを整える編集者です。')).toBe(true);
+  });
+});
+
+// #1316 レビュー 🟡：要約の作業は、入力に会社名が何度出ても、差し引くのは1回分（出力に入るのはせいぜい1回）。
+describe('会社名が何度も出る材料での上限（要約の作業）', () => {
+  const NAME11 = '株式会社スターシステム'; // 11字＝印（5字）との差 6字
+  const src = videoTitleSource(NAME11, [{ narration: { text: `${NAME11}です。` } }, { narration: { text: `${NAME11}で働く。` } }, { narration: { text: `${NAME11}へ。` } }]);
+  it('動画の題名・見出し・字幕は1回分だけ差し引く（言い直しは回数ぶん）', () => {
+    const diff = NAME11.length - COMPANY_NAME_PLACEHOLDER.length;
+    for (const kind of [ASSIST_KIND.videoTitle, ASSIST_KIND.title, ASSIST_KIND.subtitle]) {
+      const m = buildAssistMessages(kind, src, 24, { companyName: NAME11 });
+      expect(m.budget, kind).toBe(24 - diff);
+    }
+    expect(buildAssistMessages(ASSIST_KIND.shorten, src, 60, { companyName: NAME11 }).budget).toBe(60 - 4 * diff);
   });
 });

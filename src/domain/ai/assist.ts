@@ -7,6 +7,8 @@ import {
   ASSIST_SHORTEN_RATIO,
   ASSIST_SUBTITLE_TARGET_LENGTH,
   ASSIST_TITLE_MAX_LENGTH,
+  ASSIST_VIDEO_SUMMARY_MAX_LENGTH,
+  ASSIST_VIDEO_TITLE_MAX_LENGTH,
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SUBTITLE_LEN_DEFAULT,
   NARRATION_SCENE_PADDING_SEC,
@@ -28,6 +30,8 @@ export const ASSIST_KIND = {
   subtitle: 'subtitle',
   /** 語りから見出しの候補を出す。 */
   title: 'title',
+  /** 動画の内容から、動画の題名の候補を出す（#1316）。 */
+  videoTitle: 'videoTitle',
 } as const;
 export type AssistKind = (typeof ASSIST_KIND)[keyof typeof ASSIST_KIND];
 
@@ -71,6 +75,7 @@ export function assistMaxLength(kind: AssistKind, text: string, limits: AssistLi
     }
     case ASSIST_KIND.subtitle: max = Math.min(limits.maxSubtitleLength ?? MAX_SUBTITLE_LEN_DEFAULT, ASSIST_SUBTITLE_TARGET_LENGTH); break;
     case ASSIST_KIND.title: max = ASSIST_TITLE_MAX_LENGTH; break;
+    case ASSIST_KIND.videoTitle: max = ASSIST_VIDEO_TITLE_MAX_LENGTH; break;
   }
   return max >= ASSIST_MIN_LENGTH ? max : null;
 }
@@ -82,7 +87,42 @@ const TASK: Record<AssistKind, (max: number, sec?: number) => string> = {
   fitDuration: (max, sec) => `元の文を、読み上げで約${sec}秒に収まるよう、要点を残して${max}字以内に言い直す。`,
   subtitle: (max) => `この語りの要点を、画面の字幕として${max}字以内にまとめる（語りの言葉を使い、内容を足さない）。`,
   title: (max) => `この語りの場面に付ける、画面の短い見出しを${max}字以内で考える。文にしない（「〜は」「〜です」で書かない）。名詞で終わる短い言葉にする。`,
+  // ⚠️ 例を見せる（実測 2026-10-02）＝例なしだと本文の一文を書き写した（「〜は…会社です」）。例は**中身と無関係な題材**にする（書き写させない）。
+  videoTitle: (max) => `動画の内容を読み、**動画全体を表す題名**を${max}字以内で付ける。本文の文を書き写さない。文にしない（「〜は」「〜です」「〜ます」で終わらない）。例：「はじめての店舗運営ガイド」「新しい勤怠のしくみ、ここが変わる」「チームで育てる品質の話」`,
 };
+
+/** 指示文の役割の行。動画の題名は「整える」ではなく「名付ける」作業なので役割を分ける（実測で題名らしさが上がった）。 */
+const EDITOR_ROLE = 'あなたは動画のセリフ・字幕・見出しを整える編集者です。';
+const VIDEO_TITLE_ROLE = 'あなたは動画のタイトルを付ける編集者です。';
+
+/** 指示文で元の文に付ける見出し（作業の元が何か＝言い直す文／語り／動画の内容）。 */
+const USER_HEADING: Record<AssistKind, string> = {
+  shorten: '# 元の文',
+  polite: '# 元の文',
+  soft: '# 元の文',
+  fitDuration: '# 元の文',
+  subtitle: '# 語り',
+  title: '# 語り',
+  videoTitle: '# 動画の内容',
+};
+
+/** 場面の語り（単独のセリフ、または掛け合いの行）。空の行は除く。 */
+export function sceneSpokenText(scene: { narration?: { text?: string } | null; lines?: { text?: string }[] | null }): string {
+  if (scene.lines && scene.lines.length > 0) return scene.lines.map((l) => l.text?.trim() ?? '').filter((t) => t.length > 0).join('\n');
+  return scene.narration?.text?.trim() ?? '';
+}
+
+/**
+ * 動画の題名を考える材料（#1316）＝主題（会社名・発表の題）と、場面の語りを頭から。
+ * 長い動画でも指示文を伸ばしすぎないよう `ASSIST_VIDEO_SUMMARY_MAX_LENGTH` 字で切る（頭のほうが主題を言っていることが多い）。
+ */
+export function videoTitleSource(
+  topic: string | undefined,
+  scenes: ReadonlyArray<{ narration?: { text?: string } | null; lines?: { text?: string }[] | null }>,
+): string {
+  const parts = [topic?.trim() ? `テーマ：${topic.trim()}` : '', ...scenes.map(sceneSpokenText)].filter((t) => t.length > 0);
+  return parts.join('\n').slice(0, ASSIST_VIDEO_SUMMARY_MAX_LENGTH);
+}
 
 export interface AssistMessages {
   system: string;
@@ -106,8 +146,13 @@ function guard(text: string, companyName: string): { text: string; count: number
 export function buildAssistMessages(kind: AssistKind, text: string, max: number, opts: { companyName?: string; sceneDurationSec?: number } = {}): AssistMessages {
   const name = opts.companyName?.trim() ?? '';
   const g = guard(text, name);
-  const budget = Math.max(1, max - g.count * Math.max(0, name.length - COMPANY_NAME_PLACEHOLDER.length));
-  const system = `あなたは動画のセリフ・字幕・見出しを整える編集者です。
+  // ⚠️ **要約の作業（字幕・見出し・題名）は、出力に会社名が入っても1回まで**＝入力に何度も出ても、差し引くのは1回分
+  //   （#1316 レビュー 🟡＝動画全体を材料にする題名で会社名が4回出て、上限が1字まで縮み、候補が全部落ちていた）。
+  //   言い直しは入力と出力で会社名の回数がほぼ同じなので、回数ぶん差し引く（従来どおり）。
+  const summarizing = kind === ASSIST_KIND.subtitle || kind === ASSIST_KIND.title || kind === ASSIST_KIND.videoTitle;
+  const nameCount = summarizing ? Math.min(g.count, 1) : g.count;
+  const budget = Math.max(1, max - nameCount * Math.max(0, name.length - COMPANY_NAME_PLACEHOLDER.length));
+  const system = `${kind === ASSIST_KIND.videoTitle ? VIDEO_TITLE_ROLE : EDITOR_ROLE}
 
 【厳守事項】
 - ${TASK[kind](budget, opts.sceneDurationSec)}
@@ -115,7 +160,7 @@ export function buildAssistMessages(kind: AssistKind, text: string, max: number,
 - ${COMPANY_NAME_PLACEHOLDER} はそのまま残す（言い換えない・消さない）。
 - 候補を${ASSIST_CANDIDATES}個、互いに違う言い方で書く。説明を付けない。
 - 出力は {"candidates": ["…", "…", "…"]} の JSON だけ。`;
-  const user = [kind === ASSIST_KIND.subtitle || kind === ASSIST_KIND.title ? '# 語り' : '# 元の文', g.text].join('\n');
+  const user = [USER_HEADING[kind], g.text].join('\n');
   return {
     system,
     user,

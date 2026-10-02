@@ -465,7 +465,9 @@ interface AiProvider {
 | やわらかく（セリフ） | `soft` | 同上 | 話しかけるような、親しみやすい言い方 |
 | 尺に合わせる（セリフ） | `fitDuration` | 表示時間で読み切れる字数＝`(durationSec − NARRATION_SCENE_PADDING_SEC) × NARRATION_CHARS_PER_SEC × その場面の声の速さ`（`11 §4`・#1318） | 要点を残して、その字数以内に。**もう収まっていれば AI を呼ばない** |
 | 語りから作る（字幕） | `subtitle` | `maxSubtitleLength` と `ASSIST_SUBTITLE_TARGET_LENGTH`（30）の短い方 | 語りの要点を字幕に（内容を足さない） |
-| 候補を出す（見出し） | `title` | `ASSIST_TITLE_MAX_LENGTH`（20） | 場面の短い見出し（文にしない＝名詞で終わる） |
+| 候補を出す（見出し） | `title` | `ASSIST_TITLE_MAX_LENGTH`（20） | 場面の短い見出し（文にしない＝名詞で終わる）。**掛け合いの場面も出す**＝元は行をつないだ語り（`sceneSpokenText`・#1316） |
+| 短く／丁寧に／やわらかく（**掛け合いの各行**） | `shorten`/`polite`/`soft` | 上と同じ | 行ごとに頼む（#1316）。「使う」でその行だけ書き換え、その行の声は作り直しが要る状態に戻る。行には表示時間が無いので「尺に合わせる」は出さない |
+| 題名の候補（**動画の名前**の横） | `videoTitle` | `ASSIST_VIDEO_TITLE_MAX_LENGTH`（24） | 主題（会社名／発表の題）と場面の語りを頭から（`videoTitleSource`・`ASSIST_VIDEO_SUMMARY_MAX_LENGTH` 字まで）を材料に、文にしない題名（#1316） |
 
 - 割合・上限・数は `11 §4`（`ASSIST_*`）。**上限が `ASSIST_MIN_LENGTH`（8 字）未満なら頼まない**（言い直しても意味が残らない）＝`AI_ASSIST_NOT_NEEDED`。
 - **掛け合いの場面では字幕・見出しのボタンを出さない**（`narration.text` が行の編集に追従しないため＝ADR-0053）。セリフ欄そのものも掛け合いでは行ごとの欄になるので出ない。

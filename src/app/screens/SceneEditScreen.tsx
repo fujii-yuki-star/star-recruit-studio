@@ -70,8 +70,9 @@ import { FontPicker } from "../components/FontPicker";
 import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
 import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
 import { AiSuggest } from "../components/AiSuggest";
+import { sceneSpokenText } from "../../domain/ai/assist";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
-import { AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
+import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -2195,11 +2196,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     )}
                     {/* 語りから字幕／見出しの候補（ADR-0053 決定3・4）。語りが無ければボタンは押せない。 */}
                     {/* ⚠️ 掛け合いの場面では出さない＝`narration.text` は行の編集に追従しないので、見えていない古い文から作ってしまう（ADR-0053 決定3・4）。 */}
-                    {(key === TEXT_KEY.subtitle || key === TEXT_KEY.title) && (selected.lines?.length ?? 0) === 0 && (
+                    {/* 見出しは掛け合いでも出す＝元は行をつないだ語り（`sceneSpokenText`・#1316）。字幕は単独のときだけ
+                        ＝掛け合いの字幕は行ごとに決まる（場面の字幕欄は使われない）ので、作っても画面に出ない。 */}
+                    {(key === TEXT_KEY.title || (key === TEXT_KEY.subtitle && (selected.lines?.length ?? 0) === 0)) && (
                       <AiSuggest
                         key={`${selected.sceneId}-${key}`}
                         kinds={key === TEXT_KEY.subtitle ? AI_ASSIST_SUBTITLE_KINDS : AI_ASSIST_TITLE_KINDS}
-                        source={selected.narration.text}
+                        source={sceneSpokenText(selected)}
                         current={selected.texts[key] ?? ""}
                         limits={{ maxSubtitleLength: template?.aiHint?.maxSubtitleLength }}
                         companyName={companyName}
@@ -2940,6 +2943,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           value={line.text}
                           {...textGroup}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
+                        />
+                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。 */}
+                        <AiSuggest
+                          key={`${selected.sceneId}-${line.lineId}`}
+                          kinds={AI_ASSIST_LINE_KINDS}
+                          source={line.text}
+                          limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength }}
+                          companyName={companyName}
+                          onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
                         />
                         <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
                           <span className="text-sm text-muted">声</span>
