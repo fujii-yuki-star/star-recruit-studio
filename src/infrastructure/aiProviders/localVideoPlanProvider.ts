@@ -75,6 +75,7 @@ export class LocalVideoPlanProvider implements AiProvider {
     const { plan: refined, report } = await refineVideoPlan(plan, {
       templates: input.templates,
       targetDurationSec: input.targetDurationSec,
+      voiceSpeed: input.voiceSpeed,
       properNouns: isGeneral ? {} : {
         companyName: input.companyInfo?.companyName,
         recruitUrl: input.companyInfo?.recruitUrl,

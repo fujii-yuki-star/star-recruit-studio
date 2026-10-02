@@ -29,6 +29,14 @@ describe('assistMaxLength', () => {
     expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(200), { sceneDurationSec: 30, maxNarrationLength: 100 })).toBe(100);
   });
 
+  it('尺に合わせる字数は声の速さに合わせる（#1318）', () => {
+    expect(charsForDuration(6, 1.2)).toBe(Math.floor((6 - NARRATION_SCENE_PADDING_SEC) * NARRATION_CHARS_PER_SEC * 1.2));
+    const text = 'あ'.repeat(40);
+    // 速さ 1.0 では 37 字に収める必要がある文でも、速い声ならもう収まっている（頼まない）。
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, text, { sceneDurationSec: 6 })).toBe(charsForDuration(6));
+    expect(assistMaxLength(ASSIST_KIND.fitDuration, text, { sceneDurationSec: 6, voiceSpeed: 1.2 })).toBeNull();
+  });
+
   it('字幕＝字幕の上限と目安の短い方／見出し＝見出しの上限', () => {
     expect(assistMaxLength(ASSIST_KIND.subtitle, 'x', {})).toBe(Math.min(MAX_SUBTITLE_LEN_DEFAULT, ASSIST_SUBTITLE_TARGET_LENGTH));
     expect(assistMaxLength(ASSIST_KIND.subtitle, 'x', { maxSubtitleLength: 20 })).toBe(20);

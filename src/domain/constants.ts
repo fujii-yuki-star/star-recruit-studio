@@ -14,7 +14,7 @@ export const SCENE_DEFAULT_DURATION_SEC = 8;
 // 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
 // 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は
 // 「早口すぎる」の判定で、こちらは**尺の見積もり**＝判定より遅めに見積もる＝計算した尺が早口の判定に掛からない）。
-// ⚠️ 声ごとの速さ設定（11.6）とはまだつないでいない（ADR-0052 未解決の論点）。
+// ⚠️ **速さ 1.0 のときの値**＝声の速さ設定（11.6）の倍率をかけて使う（`domain/voice/speechRate` の `narrationCharsPerSec`・#1318）。
 export const NARRATION_CHARS_PER_SEC = 7.5;
 // 語りの前後に置く間（秒）。場面の切り替わりで声が詰まって聞こえないように。
 export const NARRATION_SCENE_PADDING_SEC = 1;

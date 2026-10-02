@@ -1413,6 +1413,15 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     spy.mockRestore();
   });
 
+  // #1318：動画全体の声の速さを、尺の見積もりのために渡す（AI へは送らない＝入力の別の欄）。
+  it('generate は動画全体の声の速さを voiceSpeed として渡す', async () => {
+    useProjectStore.setState((st) => ({ scenes: [], parts: [], status: 'idle', _generationSeq: 0, meta: { ...st.meta, voiceSettings: { ...st.meta.voiceSettings, speed: 1.3 } } }));
+    const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan');
+    await useProjectStore.getState().generate();
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ voiceSpeed: 1.3 });
+    spy.mockRestore();
+  });
+
   it('キャンセル後に再度 generate すると正常に反映される（世代が現行なら破棄しない）', async () => {
     useProjectStore.setState({ scenes: [], parts: [], status: 'idle', _generationSeq: 0 });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan');
