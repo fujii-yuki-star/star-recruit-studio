@@ -182,4 +182,49 @@ describe("createAssetDescribeQueue", () => {
       expect(state.assets[1].aiDescription, `depth=${depth}`).toBe("明るいオフィス");
     }
   });
+
+  // #1317 レビュー 🟡：同じ動画を開き直したとき、前の版の仕事は捨てられる＝「試した」を消して新しい版で読み直す。
+  it("読んでいる間に開き直されて捨てた写真は、次に積んだとき読み直す", async () => {
+    let open = true;
+    const { state, deps, queue } = setup([photo("a1")], {
+      describe: vi.fn(async () => { open = false; return OK; }), // 読んでいる間に閉じられた（開き直し）
+    });
+    queue.enqueue("a1", () => open);
+    await queue.idle();
+    expect(state.assets[0].aiDescription).toBeUndefined();
+    (deps.describe as ReturnType<typeof vi.fn>).mockImplementation(async () => OK);
+    queue.enqueue("a1", () => true); // 新しい版で積み直す
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(2);
+    expect(state.assets[0].aiDescription).toBe("明るいオフィス");
+  });
+
+  it("書き出し中に積まれたら読み始めない（書き出しが終わってから読む）", async () => {
+    let busy = true;
+    const order: string[] = [];
+    const { deps, queue } = setup([photo("a1")], {
+      blocked: () => busy,
+      sleep: async () => { order.push("待つ"); busy = false; },
+      describe: vi.fn(async () => { order.push(busy ? "書き出し中に読んだ" : "読んだ"); return OK; }),
+    });
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["待つ", "読んだ"]);
+  });
+
+  it("書き出しを待つ間に閉じられたら読まず、次に積めば読む", async () => {
+    let open = true;
+    const { deps, queue } = setup([photo("a1")], {
+      blocked: () => open, // 閉じるまでずっと書き出し中
+      sleep: async () => { open = false; },
+    });
+    queue.enqueue("a1", () => open);
+    await queue.idle();
+    expect(deps.describe).not.toHaveBeenCalled();
+    // 同じ列で積み直す（閉じた後は書き出しも終わっている）。
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+  });
 });

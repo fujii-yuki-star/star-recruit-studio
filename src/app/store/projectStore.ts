@@ -1590,8 +1590,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 説明の無い写真・動画を裏で読む（#1317・ADR-0052 決定4）＝取り込み時に読み終える前に閉じた／前の版で取り込んだ素材も、
     // 開けば読まれる。積むのは**説明がまだ無いもの**だけ（`describeTarget`）＝利用者が書いた説明は上書きしない。
     // 同梱の AI が無ければ何もしない・書き出し中は当てるのを待つ・別の動画を開いたら捨てる（取り込みと同じ列）。
-    const stillOpen = sameDocGuard(get);
-    for (const a of get().assets) if (describeTarget(a)) assetDescriber.enqueue(a.assetId, stillOpen);
+    // ⚠️ **同梱の AI を選んでいるときだけ**（#1317 レビュー 🟡）＝開くだけで AI の部品を起こすので、Gemini を選んだ人が
+    //   起動（前回の動画の自動復元）のたびにモデルをメモリへ載せることになる。取り込み時は従来どおり読む。
+    //   ⚠️ 選んだ道だけを見る（使えるかは列が同梱の AI に聞く）＝画面の外（検査）でも同じ判断になる。
+    if (getAiEngine() !== AI_ENGINE.gemini) {
+      const stillOpen = sameDocGuard(get);
+      for (const a of get().assets) if (describeTarget(a)) assetDescriber.enqueue(a.assetId, stillOpen);
+    }
   },
   listProjects: () => listProjectSummaries(),
   restoreToRestorePoint: async (projectId, name) => {

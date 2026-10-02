@@ -56,6 +56,12 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
     const relPath = describeTarget(cur.asset);
     if (!relPath) return;
     tried.add(key);
+    // ⚠️ **書き出し中は読み始めない**（#1317 レビュー 🟡）＝読むのは重い（1枚 6〜8 秒・CPU を使い切る）ので、
+    //   書き出しと取り合うと書き出しが遅れる。以前は「当てる」段だけを待たせていた。
+    while (deps.blocked() && stillOpen()) await deps.sleep(BLOCKED_POLL_MS);
+    // ⚠️ **捨てたら「試した」も消す**（#1317 レビュー 🟡）＝同じ動画を開き直すと、前の版の仕事は捨てられるのに
+    //   新しい版の仕事は「試した」に当たって飛ばされ、その写真がずっと読まれなかった（キーは版を含まない）。
+    if (!stillOpen()) { tried.delete(key); return; }
     const m = buildDescribeAssetMessages(cur.asset);
     let raw: string;
     try {
@@ -70,7 +76,7 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
       return;
     }
     while (deps.blocked() && stillOpen()) await deps.sleep(BLOCKED_POLL_MS);
-    if (!stillOpen()) return;
+    if (!stillOpen()) { tried.delete(key); return; }
     deps.apply(assetId, (a) => applyAssetDescription(a, parsed));
   }
 
