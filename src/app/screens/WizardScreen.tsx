@@ -69,7 +69,7 @@ const yukoAdvice: Record<number, string[]> = {
 // 一般・社内発表のときの step1 アドバイス（会社情報ではなく発表内容）。
 const generalStep1Advice = [
   "動画のテーマと、話す順番（構成）を決めましょう。",
-  "伝えたい要点を箇条書きにすると、ゆうこが分かりやすくまとめます。",
+  "伝えたい要点を箇条書きにすると、AIが分かりやすくまとめます。",
 ];
 
 function adviceFor(step: number, videoKind: VideoKind): string[] {
@@ -566,7 +566,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         maxLength={GENERAL_TARGET_AUDIENCE_MAX_LEN}
                       />
                       <div className="row-between field-hint">
-                        <span>誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</span>
+                        <span>誰に向けた動画かを書くと、AIが言葉づかいを合わせます（任意）。</span>
                         <span>{targetAudience.length}/{GENERAL_TARGET_AUDIENCE_MAX_LEN}</span>
                       </div>
                     </div>
@@ -662,7 +662,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {materials.length > 0 ? (
                   <div className="col gap-sm mt">
                     <p className="field-hint">
-                      各素材に説明を付けると、ゆうこが使いどころを判断しやすくなります（任意）。
+                      各素材に説明を付けると、AIが使いどころを判断しやすくなります（任意）。
                     </p>
                     {materials.map((a) => (
                       <div key={a.assetId} className="row gap-sm" style={{ alignItems: "flex-start" }}>
@@ -769,7 +769,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 </div>
                 <h2 className="section-title">準備ができました</h2>
                 <p className="page-desc" style={{ maxWidth: 460, margin: "0 auto" }}>
-                  入力いただいた内容をもとに、ゆうこが動画のたたき台を作ります。
+                  入力いただいた内容をもとに、AIが動画のたたき台を作ります。
                   作ったあとは、自由に確認・修正できます。
                 </p>
                 <button
@@ -780,7 +780,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   }}
                 >
                   <SparkleIcon size={20} />
-                  ゆうこに動画案を作ってもらう
+                  AIに動画案を作ってもらう
                 </button>
               </div>
             )}

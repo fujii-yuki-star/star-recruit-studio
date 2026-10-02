@@ -6370,7 +6370,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByText(/固定された列の部品1個は動かしていません/)).toBeInTheDocument();
   });
 
-  // ⚠️ #788-1：キャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／まとまりの変形）。
+  // ⚠️ #788-1：キャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／グループの変形）。
   // 以前は除外の一言が常に「固定を外してください」で、**動き起因では従っても直らない**案内だった。
   it("動きが理由で外したときは、固定ではなく**動きの直し方**を案内する（#788-1）", () => {
     open({
@@ -6390,9 +6390,9 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByText(/固定を外してください/)).toBeNull(); // 従っても直らない案内は出さない
   });
 
-  // ⚠️ **まとまりの変形が理由のときも知らせる**（レビュー指摘＝一括経路で `group` を通すテストが無かった）。
+  // ⚠️ **グループの変形が理由のときも知らせる**（レビュー指摘＝一括経路で `group` を通すテストが無かった）。
   // 理由の並びからこの値が落ちると `join` が空文字になり、**知らせ自体が描かれない**まま一部だけ動く。
-  it("まとまりの変形が理由のときも、その言い方で知らせる（#788-1）", () => {
+  it("グループの変形が理由のときも、その言い方で知らせる（#788-1）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
       groups: [{ id: "group_001", members: ["clip_grp"], transform: { x: 300, y: 0, scale: 1, rotation: 0 } }],
@@ -6405,7 +6405,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const els = canvasEls(container).ov!.children;
     fireEvent.pointerDown(els[1] as HTMLElement, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
-    expect(screen.getByText(/まとまりの変形が効いている部品1個は動かしていません/)).toBeInTheDocument();
+    expect(screen.getByText(/グループの変形が効いている部品1個は動かしていません/)).toBeInTheDocument();
   });
 
   // ⚠️ **固定した列は「動き」より先**（レビュー指摘）＝両方が理由になりうるとき、動きを先に言うと
@@ -6497,7 +6497,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(clips.find((c) => c.id === "clip_moving")!.x).toBe(0);
   });
 
-  it("まとまりの変形で動いているときは、**動きとは別の言い方**で断る（#746 レビュー）", () => {
+  it("グループの変形で動いているときは、**動きとは別の言い方**で断る（#746 レビュー）", () => {
     // ⚠️ 「動き」の欄では外せないものを「動きで調整して」と案内すると、言われたとおりにしても直らない。
     open({
       groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 300, y: 0, scale: 1, rotation: 0 } }],
@@ -6505,7 +6505,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/まとまりの変形が効いている部品は/)).toBeInTheDocument();
+    expect(screen.getByText(/グループの変形が効いている部品は/)).toBeInTheDocument();
     expect(screen.queryByText(/「動き」で調整してください/)).toBeNull();
   });
 

@@ -275,7 +275,7 @@ describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）",
     expect(canvasHoldMessage("animation")).toContain("下の数値（または矢印キー）");
     expect(canvasHoldMessage("animation")).toContain("「動き」で調整してください");
     expect(canvasHoldMessage("group")).toContain("下の数値（または矢印キー）");
-    expect(canvasHoldMessage("group")).not.toContain("「動き」"); // まとまりの変形は「動き」では外せない
+    expect(canvasHoldMessage("group")).not.toContain("「動き」"); // グループの変形は「動き」では外せない
   });
 
   it("まとめては、その場面で本当に押せるもの（矢印キー）だけを示す", () => {

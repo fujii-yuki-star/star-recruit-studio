@@ -212,7 +212,7 @@ function generalHead(input: GenerateVideoPlanInput): string[] {
 /**
  * 12§6 のユーザーメッセージを入力から組み立てる（MVP＝テキストのみ・サムネイル添付なし）。
  * videoKind=general のときは §6b（テーマ／章立て／要点）に切り替え、補足・素材・見た目・表情タグ・出力契約は共通。
- * 送信前確認で利用者に提示する「外部AIへ送る内容」の実体でもある（§2-6）。
+ * 送信前確認で利用者に提示する「外部のAIへ送る内容」の実体でもある（§2-6）。
  */
 export function buildVideoPlanUserMessage(
   input: GenerateVideoPlanInput,

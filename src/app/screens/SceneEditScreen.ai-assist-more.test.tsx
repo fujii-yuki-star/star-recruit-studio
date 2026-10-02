@@ -71,8 +71,8 @@ describe("掛け合いの各行の言い直し（#1316）", () => {
     expect(l2.status).toBe(NARRATION_STATUS.none);
     expect(l1.text).toBe("私たちは地域の配送を担っています。毎日たくさん届けます。"); // ほかの行は触らない
     expect(l1.status).toBe(NARRATION_STATUS.generated);
-    // 行には表示時間が無いので「尺に合わせる」は出さない
-    expect(screen.queryAllByRole("button", { name: "尺に合わせる" })).toHaveLength(0);
+    // 行には表示時間が無いので「表示時間に収める」は出さない
+    expect(screen.queryAllByRole("button", { name: "表示時間に収める" })).toHaveLength(0);
   });
 });
 
@@ -86,11 +86,11 @@ describe("掛け合いの場面の見出し（#1316）", () => {
     expect(ai.calls[0].user).toContain("私たちは地域の配送を担っています");
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
     expect(ai.calls[0].user).not.toContain("古い写し");
-    expect(screen.queryByRole("button", { name: "語りから作る" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "セリフから作る" })).toBeNull();
   });
 });
 
-describe("動画の題名の候補（#1316）", () => {
+describe("動画の名前の候補（#1316）", () => {
   it("同梱の AI があればボタンを出し、主題と語りから頼み、「使う」で動画の名前を変える", async () => {
     ai.reply = JSON.stringify({ candidates: ["地域を走る配送のしごと"] });
     render(<ProjectNameField />);

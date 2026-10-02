@@ -62,7 +62,7 @@ describe("公開前チェックから AI 補助へ（ADR-0053 決定2）", () =>
     expect(st.editingSceneAssist).toBe(ASSIST_KIND.shorten);
   });
 
-  it("早口になる場面からは「尺に合わせる」を頼む印を置く", () => {
+  it("早口になる場面からは「表示時間に収める」を頼む印を置く", () => {
     useProjectStore.setState({ scenes: [scene("scene_001", "短い。"), scene("scene_002", "い".repeat(40), 3)] });
     render(<PrecheckScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: FIX_NARRATION_ACTION_LABEL }));
@@ -95,7 +95,7 @@ describe("公開前チェックから AI 補助へ（ADR-0053 決定2）", () =>
     expect(ai.calls).toHaveLength(0);
   });
 
-  // #1318：場面編集は、その場面の声の速さで「尺に合わせる」を決める（速い声ならもう収まっている＝頼まない）。
+  // #1318：場面編集は、その場面の声の速さで「表示時間に収める」を決める（速い声ならもう収まっている＝頼まない）。
   it("声が速ければ、尺に収まっているとして頼まない", async () => {
     const text = "あ".repeat(40); // 6 秒＝速さ 1.0 では 37 字まで・1.2 なら 45 字まで
     useProjectStore.setState((st) => ({

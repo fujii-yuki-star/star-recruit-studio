@@ -35,7 +35,7 @@ const setup = (scenes: Scene[]) => {
 };
 
 // ⚠️ **押した瞬間に文言が変わる**（#993 ①）＝保存先を選んでいる間も走行中に数えるので、
-// 「動画を保存」→「書き出し中…」。どちらでも同じボタンを掴めるようにする。
+// 「動画を書き出す」→「書き出し中…」。どちらでも同じボタンを掴めるようにする。
 const saveBtn = (): HTMLButtonElement =>
   screen.getByRole("button", { name: /動画を保存|書き出し中…/ }) as HTMLButtonElement;
 
@@ -52,7 +52,7 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
   // ⚠️ **見つからない素材でも押させない**（#1068・実機で確かめた）＝押させると、
   // **写真は黙って灰色の枠**になり、**動画は途中で失敗する**（保存先を選ばせた後に落とす）。
   // ⚠️ **タイムライン形式は既に押す前に断っている**ので、揃える（ADR-0026②）。
-  it("使っている素材が見つからないと「動画を保存」を押せない", () => {
+  it("使っている素材が見つからないと「動画を書き出す」を押せない", () => {
     setup([scene({ assetRefs: { mainVisual: "asset_001" } })]);
     useProjectStore.setState({
       assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
@@ -86,7 +86,7 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(saveBtn().disabled).toBe(false);
   });
 
-  it("見た目が見つからない場面があると「動画を保存」を押せず、理由と次の行動を出す", () => {
+  it("見た目が見つからない場面があると「動画を書き出す」を押せず、理由と次の行動を出す", () => {
     setup([scene({ templateId: "missing_tmpl" })]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(saveBtn().disabled).toBe(true);
@@ -100,7 +100,7 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
    * `exportBlockingItems` へ材料を渡していなかったので、**項目そのものが作られず**
    * 別の字体に化けた動画がそのまま書き出せていた（§2-5・ADR-0026②）。
    */
-  it("使っているフォントが見つからないと「動画を保存」を押せない（直行経路でも止まる）", async () => {
+  it("使っているフォントが見つからないと「動画を書き出す」を押せない（直行経路でも止まる）", async () => {
     setup([scene({ fontId: "user_font_001" } as never)]);
     // 「調べた結果、持っていない」＝空配列（`null` は「まだ調べていない」なので項目を出さない）。
     useProjectStore.setState({ userFontIds: [] } as never);
@@ -124,20 +124,20 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(screen.queryByText(/文字の形/)).toBeNull();
   });
 
-  it("問題が無ければ「動画を保存」は押せる（理由も出さない）", () => {
+  it("問題が無ければ「動画を書き出す」は押せる（理由も出さない）", () => {
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(saveBtn().disabled).toBe(false);
     expect(screen.queryByText(/動画を書き出せない項目があります/)).toBeNull();
   });
 
-  it("この端末で書き出せない場合も「動画を保存」を押せない（直行経路でも公開前チェックと同じ判定）", async () => {
+  it("この端末で書き出せない場合も「動画を書き出す」を押せない（直行経路でも公開前チェックと同じ判定）", async () => {
     vi.spyOn(ffmpeg, "detectH264Capability").mockResolvedValue("unavailable");
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     await waitFor(() => expect(saveBtn().disabled).toBe(true)); // 能力検知は非同期
     // 押せないだけでなく**正しい理由**が出る（§2-5＝原因＋次の行動）。文言は正典 EXPORT_CAPABILITY_NOTICE。
-    expect(screen.getByText(/この端末では動画を書き出せません/)).toBeTruthy();
+    expect(screen.getByText(/このパソコンでは動画を書き出せません/)).toBeTruthy();
     expect(screen.queryByText(/動画を書き出せない項目があります/)).toBeNull(); // 端末要因が優先＝項目側は出さない
   });
 

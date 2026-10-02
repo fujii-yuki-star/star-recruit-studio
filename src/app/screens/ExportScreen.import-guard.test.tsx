@@ -32,7 +32,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
   });
   afterEach(() => { vi.restoreAllMocks(); useProjectStore.setState({ isImporting: false, isTemplateMutating: false, status: "ready" }); });
 
-  it("取り込み中に「動画を保存」を押すと理由を出して止まり、beginExport を呼ばない", async () => {
+  it("取り込み中に「動画を書き出す」を押すと理由を出して止まり、beginExport を呼ばない", async () => {
     const saveDialog = vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
     const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
     useProjectStore.setState({ isImporting: true }); // 取り込みが進行中

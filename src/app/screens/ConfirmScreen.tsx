@@ -46,7 +46,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
    * 本当に外へ送るか（#995 ④）。
    *
    * ⚠️ **送らないのに「送信してよい内容か」と聞いていた**＝既定（Mock）では**何も送らない**のに、
-   * 「ゆうこに渡して」「送信してよい内容か、もう一度ご確認ください」が出ていた。
+   * 「AIに渡して」「送信してよい内容か、もう一度ご確認ください」が出ていた。
    * たたき台の「作り直す」は同じ判定（`willSendExternally`）で確認を飛ばすのに、
    * ウィザードの最終段は**常に**ここへ来る＝**同じ概念の挙動が経路で割れていた**（ADR-0026②）。
    *
@@ -90,14 +90,14 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
             </h1>
             <p className="page-desc text-pretty">
               {external
-                ? "下の情報をゆうこに渡して、動画のたたき台を作ります。内容を確認してください。"
+                ? "下の情報をAIに渡して、動画のたたき台を作ります。内容を確認してください。"
                 : "下の情報から、動画のたたき台を作ります。内容を確認してください。この内容が外へ送られることはありません。"}
             </p>
           </div>
 
           {/* 送信される情報 */}
           <div className="card card-tight mb">
-            <h2 className="field-label">ゆうこに渡す情報（文字のみ）</h2>
+            <h2 className="field-label">AIに渡す情報（文字のみ）</h2>
             <div className="col gap-sm mt">
               {isGeneral ? (
                 <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
@@ -198,11 +198,11 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               {external ? (
                 <>
                   写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
-                  説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+                  説明・タグなどの<strong>文字情報だけ</strong>をAIに渡します。
                 </>
               ) : (
                 <>
-                  この動画のたたき台は、<strong>この端末の中だけ</strong>で作ります。
+                  この動画のたたき台は、<strong>このパソコンの中だけ</strong>で作ります。
                   入力いただいた内容も素材も、外へ送られることはありません。
                 </>
               )}

@@ -256,7 +256,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
     // ⚠️ **押した瞬間に「始まった」と分かるようにする**（#993 ①⑥）＝ここから下には
     // **同期で重い処理**（`startBlockedMessage` は**全場面のレイアウト計算**を回る・2回走る）が
-    // 並んでいて、その間 UI は固まる。それまで文言は「動画を保存」、右の欄は
+    // 並んでいて、その間 UI は固まる。それまで文言は「動画を書き出す」、右の欄は
     // 「押すと進行状況が表示されます」＝**何も始まっていないように見える**（場面が多いほど長い）。
     // ⚠️ **保存先を選んでいる間も走行中に数える**（`06 §12.1`＝二重に始めない）。
     // タイムライン形式は先に `preparing` を立てている＝そちらへ揃える（ADR-0026②）。
@@ -607,7 +607,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               disabled={busy}
               onChange={(e) => setExportForm({ fileName: e.target.value })}
             />
-            <p className="field-hint">「動画を保存」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
+            <p className="field-hint">「動画を書き出す」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
           </div>
 
           <div className="field">
@@ -675,7 +675,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               公開前チェックへ戻る
             </button>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
-                「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
+                「動画を書き出す」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
               <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={exportDisabled}>
                 <FilmIcon size={20} />
@@ -706,7 +706,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {phase === "idle" && (
             <div className="text-center text-muted" style={{ padding: "var(--gap-lg) 0" }}>
               <FilmIcon size={32} className="text-faint" />
-              <p className="mt text-sm">「動画を保存」を押すと、ここに進行状況が表示されます。</p>
+              <p className="mt text-sm">「動画を書き出す」を押すと、ここに進行状況が表示されます。</p>
             </div>
           )}
 
@@ -810,7 +810,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {/* 中止は上の「前回の…」が同じ内容（中止した・やり直せる）を出すので、そのときは重ねない。 */}
           {phase === "cancelled" && !showsPastResult && (
             <div className="notice notice-info" role="status">
-              <span>書き出しを中止しました。もう一度「動画を保存」を押すと、やり直せます。</span>
+              <span>書き出しを中止しました。もう一度「動画を書き出す」を押すと、やり直せます。</span>
             </div>
           )}
 

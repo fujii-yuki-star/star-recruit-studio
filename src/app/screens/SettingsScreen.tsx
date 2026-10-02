@@ -261,6 +261,11 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           <p className="page-desc text-pretty">
             動画案は、このパソコンの中で作ります（入力した内容は外へ送りません）。Google の Gemini（外部のAI）を使うこともできます。
           </p>
+          {/* ⚠️ **編集の途中の手伝いはどちらを選んでも外へ送らない**（ADR-0053・UI/UX 監査 2026-10-02）＝書いていないと、
+              Gemini を選んだ人は「AIに頼む」も外へ送ると思う。 */}
+          <p className="field-hint">
+            場面編集の「AIに頼む」と写真の読み取りは、どちらを選んでもこのパソコンの中で動きます。
+          </p>
           <div className="segment" role="group" aria-label="動画案を作るAI" style={{ display: "inline-flex" }}>
             {AI_ENGINE_CHOICES.map(([id, label]) => (
               <button key={id} className={aiEngine === id ? "active" : ""} aria-pressed={aiEngine === id} onClick={() => onChangeEngine(id)}>
@@ -334,7 +339,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
                 </button>
               </div>
               <p className="field-hint">
-                キーはこの端末の安全な保管領域に保存し、画面・ファイル・送信内容には残しません。
+                キーはこのパソコンのパスワードと同じ守られた場所に保存し、画面・ファイル・送信内容には残しません。
               </p>
             </div>
           )}
@@ -371,7 +376,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
 
           <hr className="divider" />
           <p className="field-hint">
-            動画案を作る前に、外部AIへ渡す情報の確認画面を必ず表示します。
+            動画案を作る前に、外部のAIへ渡す情報の確認画面を必ず表示します。
           </p>
           </>
           )}
@@ -384,7 +389,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               必須のまま・変わるのは**動画に焼く側**だけ、という線で書き分ける。 */}
           <p className="page-desc text-pretty">
             ここで選んだ声は、これから作るものを含めてすべての動画に使われます。
-            選んだ声のクレジット（{creditForSpeaker(speaker)}）は「ソフトについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
+            選んだ声のクレジット（{creditForSpeaker(speaker)}）は「このアプリについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を書き出す」で選べます。
           </p>
 
           {/* 既定と違う接続先を入れてあるなら開いて出す（上の注記と同じ理由）。 */}
@@ -429,7 +434,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             {/* ⚠️ 出し方は選べるようになった（ADR-0025・#359）＝ここで「常時」と言い切ると事実と違う。
                 出し方の選択は書き出し画面（`CreditDisplayField`）にあるので、そこへ案内する。 */}
             <p className="field-hint">
-              選んだキャラクターの名前を、動画にクレジット表示します。出し方（最初と最後だけ・非表示など）は「動画を保存」で選べます。
+              選んだキャラクターの名前を、動画にクレジット表示します。出し方（最初と最後だけ・非表示など）は「動画を書き出す」で選べます。
             </p>
           </div>
 
