@@ -105,14 +105,12 @@ export function ContextMenu({
         ref={menuRef}
         onKeyDown={onMenuKey}
         role="menu"
+        className="popover-surface"
         style={{
           position: "fixed",
           ...fit,
           zIndex: 51,
-          background: "#fff",
-          border: "1px solid rgba(0,0,0,0.15)",
           borderRadius: 8,
-          boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
           padding: 4,
           minWidth: 140,
         }}

@@ -459,7 +459,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             ) : (
               <button
                 className="btn btn-ghost text-sm"
-                style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
+                style={{ color: "var(--color-danger-text)", alignSelf: "flex-start" }}
                 disabled={busyAction !== null}
                 onClick={() => setConfirmDelete(true)}
               >

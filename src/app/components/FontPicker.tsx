@@ -152,7 +152,7 @@ export function FontPicker({
               position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 31,
               margin: 0, padding: 4, listStyle: "none", maxHeight: 280, overflowY: "auto",
               background: "var(--color-surface, #fff)", border: "1px solid var(--color-border)",
-              borderRadius: "var(--radius)", boxShadow: "var(--shadow-md, 0 6px 18px rgba(0,0,0,.14))",
+              borderRadius: "var(--radius)", boxShadow: "var(--shadow-lg)",
             }}
           >
             {allowInherit && (

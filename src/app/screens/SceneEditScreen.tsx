@@ -1721,7 +1721,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
         )}
         {mode === VIDEO_START_MODE.afterAnim && !hasSettled && (
-          <p className="field-hint" style={{ margin: "4px 0 0", color: "var(--color-danger)" }}>
+          <p className="field-hint" style={{ margin: "4px 0 0", color: "var(--color-danger-text)" }}>
             アニメが場面の最後まで続くため、このままでは動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。
           </p>
         )}
@@ -2028,11 +2028,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <div
                       role="dialog"
                       aria-label={`${freeKindLabel[editPopoverEl.kind]}を編集`}
+                      className="popover-surface"
                       style={{
                         position: "fixed", left: editPopover.x, top: editPopover.y, zIndex: 61,
-                        width: 280, maxHeight: "70vh", overflow: "auto",
-                        background: "#fff", color: "#222", border: "1px solid rgba(0,0,0,0.15)",
-                        borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.2)", padding: 12,
+                        // 下にはみ出さない＝出した位置から画面の下端までに収める（1280×752 で 70vh だと約200px 切れた）。
+                        width: 280, maxHeight: `calc(100vh - ${editPopover.y}px - 8px)`, overflow: "auto",
+                        borderRadius: 10, padding: 12,
                       }}
                     >
                       <div className="row-between" style={{ marginBottom: 8 }}>
@@ -2324,7 +2325,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 options={lookOptions}
               />
               {mismatchedCurrent || unresolvedCurrent ? (
-                <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
+                <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger-text)" }}>
                   {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, lookAvailability)}
                 </p>
               ) : pickableOptions.length <= 1 ? (
@@ -2636,7 +2637,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             </button>
                             <button
                               className="btn btn-ghost btn-icon text-sm"
-                              style={{ color: "var(--color-danger)" }}
+                              style={{ color: "var(--color-danger-text)" }}
                               onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
                               aria-label="この配置を削除"
                             >
@@ -2804,7 +2805,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
                                 <button
                                   className="btn btn-ghost text-sm"
-                                  style={{ color: "var(--color-danger)" }}
+                                  style={{ color: "var(--color-danger-text)" }}
                                   onClick={() => setConfirmBulkDelete(true)}
                                 >
                                   選択をまとめて削除
@@ -3063,7 +3064,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </div>
                   )}
                   <div className="row-between" style={{ marginTop: 4 }}>
-                    <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+                    <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
                       {narrationPlayError ? "再生できませんでした。声を作り直してお試しください" : ""}
                     </span>
                     <button
@@ -3110,7 +3111,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <span className="text-sm text-muted">
                   音声：{narrationStatusText(selected.narration.status)}
                   {narrationPlayError && (
-                    <span style={{ color: "var(--color-danger)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
+                    <span style={{ color: "var(--color-danger-text)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
                   )}
                 </span>
                 <div className="row gap-sm">
@@ -3312,7 +3313,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             ) : (
               <button
                 className="btn btn-ghost btn-block mt"
-                style={{ color: "var(--color-danger)" }}
+                style={{ color: "var(--color-danger-text)" }}
                 disabled={!canDeleteScene}
                 title={deleteSceneHint}
                 onClick={() => setConfirmDelete(true)}
