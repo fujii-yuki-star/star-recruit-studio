@@ -146,7 +146,12 @@ function guard(text: string, companyName: string): { text: string; count: number
 export function buildAssistMessages(kind: AssistKind, text: string, max: number, opts: { companyName?: string; sceneDurationSec?: number } = {}): AssistMessages {
   const name = opts.companyName?.trim() ?? '';
   const g = guard(text, name);
-  const budget = Math.max(1, max - g.count * Math.max(0, name.length - COMPANY_NAME_PLACEHOLDER.length));
+  // ⚠️ **要約の作業（字幕・見出し・題名）は、出力に会社名が入っても1回まで**＝入力に何度も出ても、差し引くのは1回分
+  //   （#1316 レビュー 🟡＝動画全体を材料にする題名で会社名が4回出て、上限が1字まで縮み、候補が全部落ちていた）。
+  //   言い直しは入力と出力で会社名の回数がほぼ同じなので、回数ぶん差し引く（従来どおり）。
+  const summarizing = kind === ASSIST_KIND.subtitle || kind === ASSIST_KIND.title || kind === ASSIST_KIND.videoTitle;
+  const nameCount = summarizing ? Math.min(g.count, 1) : g.count;
+  const budget = Math.max(1, max - nameCount * Math.max(0, name.length - COMPANY_NAME_PLACEHOLDER.length));
   const system = `${kind === ASSIST_KIND.videoTitle ? VIDEO_TITLE_ROLE : EDITOR_ROLE}
 
 【厳守事項】

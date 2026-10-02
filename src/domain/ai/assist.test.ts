@@ -149,3 +149,17 @@ describe('sceneSpokenText / videoTitleSource / 動画の題名', () => {
     expect(buildAssistMessages(ASSIST_KIND.title, 'x', 20).system.startsWith('あなたは動画のセリフ・字幕・見出しを整える編集者です。')).toBe(true);
   });
 });
+
+// #1316 レビュー 🟡：要約の作業は、入力に会社名が何度出ても、差し引くのは1回分（出力に入るのはせいぜい1回）。
+describe('会社名が何度も出る材料での上限（要約の作業）', () => {
+  const NAME11 = '株式会社スターシステム'; // 11字＝印（5字）との差 6字
+  const src = videoTitleSource(NAME11, [{ narration: { text: `${NAME11}です。` } }, { narration: { text: `${NAME11}で働く。` } }, { narration: { text: `${NAME11}へ。` } }]);
+  it('動画の題名・見出し・字幕は1回分だけ差し引く（言い直しは回数ぶん）', () => {
+    const diff = NAME11.length - COMPANY_NAME_PLACEHOLDER.length;
+    for (const kind of [ASSIST_KIND.videoTitle, ASSIST_KIND.title, ASSIST_KIND.subtitle]) {
+      const m = buildAssistMessages(kind, src, 24, { companyName: NAME11 });
+      expect(m.budget, kind).toBe(24 - diff);
+    }
+    expect(buildAssistMessages(ASSIST_KIND.shorten, src, 60, { companyName: NAME11 }).budget).toBe(60 - 4 * diff);
+  });
+});

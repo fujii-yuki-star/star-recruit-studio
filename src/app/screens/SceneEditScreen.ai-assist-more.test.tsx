@@ -44,6 +44,7 @@ beforeEach(() => {
   ai.available = true;
   ai.calls = [];
   ai.reply = "";
+  useProjectStore.getState().setExportRun({ phase: "idle" });
   useProjectStore.getState().newProject();
   useProjectStore.setState((st) => ({
     status: "ready", templates: [TEMPLATE], scenes: [dialogue()],
@@ -103,6 +104,38 @@ describe("動画の題名の候補（#1316）", () => {
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
     fireEvent.click(within(document.body).getByRole("button", { name: AI_ASSIST_USE_LABEL }));
     expect(useProjectStore.getState().meta.projectName).toBe("地域を走る配送のしごと");
+  });
+
+  it("欄は Escape・外側のクリックで閉じ、書き出し中は出さない", async () => {
+    render(<div><ProjectNameField /><p>外側</p></div>);
+    await flush();
+    const open = async () => { fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_VIDEO_TITLE_LABEL })); await flush(); };
+    await open();
+    expect(screen.getByRole("button", { name: "候補を出す" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "候補を出す" })).toBeNull();
+    await open();
+    fireEvent.mouseDown(screen.getByText("外側"));
+    expect(screen.queryByRole("button", { name: "候補を出す" })).toBeNull();
+    await open();
+    act(() => { useProjectStore.setState((st) => ({ exportRun: { ...st.exportRun, phase: "rendering" } })); });
+    expect(screen.queryByRole("button", { name: "候補を出す" })).toBeNull();
+  });
+
+  it("一般の動画は発表の題をテーマにし、残っている会社名は使わない", async () => {
+    useProjectStore.setState((st) => ({ meta: { ...st.meta, videoKind: "general", generalBrief: { title: "業務改善の報告" }, companyInfo: { companyName: "株式会社サンプル物流" } } }) as never);
+    useProjectStore.setState((st) => ({ scenes: [{ ...st.scenes[0], lines: undefined, narration: { text: "株式会社サンプル物流の取り組みを報告します。", status: NARRATION_STATUS.none } } as Scene] }));
+    ai.reply = JSON.stringify({ candidates: ["改善のあゆみ"] });
+    render(<ProjectNameField />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_VIDEO_TITLE_LABEL }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "候補を出す" }));
+    await flush();
+    expect(ai.calls[0].user).toContain("テーマ：業務改善の報告");
+    // 語りに出てくる会社名も印にしない（一般の動画では会社名を扱わない＝そのまま渡す）
+    expect(ai.calls[0].user).toContain("株式会社サンプル物流の取り組み");
+    expect(ai.calls[0].user).not.toContain("{会社名}");
   });
 
   it("同梱の AI が無ければボタンを出さない（押しても何も起きない、を作らない）", async () => {

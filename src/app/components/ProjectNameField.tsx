@@ -1,6 +1,7 @@
 // 編集中のプロジェクト名を表示・変更する入力（#252）。ヘッダに置き、戻らずにその場で改名できる。
 // 確定は blur/Enter（1改名=1履歴＝store.setProjectName）。空・未変更は破棄して元の名前に戻す。技術用語なし（§2-3）。
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { VIDEO_KIND } from "../../domain/enums";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import { videoTitleSource } from "../../domain/ai/assist";
@@ -17,7 +18,18 @@ export function ProjectNameField() {
   const aiAvailable = useLocalAiAvailable(); // 無ければボタンごと出さない（押しても何も起きない、を作らない）
   const meta = useProjectStore((s) => s.meta);
   const scenes = useProjectStore((s) => s.scenes);
-  const topic = meta.companyInfo?.companyName || meta.generalBrief?.title;
+  // テーマ＝採用なら会社名・一般なら発表の題（一般の動画に残っている会社名を主題にしない）。
+  const topic = meta.videoKind === VIDEO_KIND.general ? meta.generalBrief?.title : meta.companyInfo?.companyName;
+  // 欄は Escape・外側のクリックで閉じる（浮いて重なる表示なので、閉じる手段がボタンだけだと邪魔になる）。
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!suggestOpen) return;
+    const onDown = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setSuggestOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSuggestOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [suggestOpen]);
 
   const commit = () => {
     if (draft != null) {
@@ -28,7 +40,7 @@ export function ProjectNameField() {
   };
 
   return (
-    <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
     <input
       className="input"
       value={draft ?? projectName}
@@ -56,14 +68,15 @@ export function ProjectNameField() {
     >
       {AI_ASSIST_VIDEO_TITLE_LABEL}
     </button>}
-    {aiAvailable && suggestOpen && (
+    {/* 書き出し中は出さない＝名前は変えられない（store が断る）ので、選んでも何も起きない欄を残さない。 */}
+    {aiAvailable && suggestOpen && !isExporting && (
       <div className="card" style={{ position: "absolute", top: "100%", left: 0, zIndex: 50, width: 420, padding: 8, marginTop: 4 }}>
         <AiSuggest
           kinds={AI_ASSIST_VIDEO_TITLE_KINDS}
           source={videoTitleSource(topic, scenes)}
           current={projectName}
           limits={{}}
-          companyName={meta.companyInfo?.companyName}
+          companyName={meta.videoKind === VIDEO_KIND.general ? undefined : meta.companyInfo?.companyName}
           onPick={(t) => { setProjectName(t); setSuggestOpen(false); }}
         />
       </div>
