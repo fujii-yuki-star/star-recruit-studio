@@ -1779,3 +1779,12 @@ export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "�
 export const FIX_NARRATION_ACTION_LABEL = "セリフを直す";
 /** 見出し欄のボタン。 */
 export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
+/** 掛け合いの各行のボタン（#1316）。行には表示時間が無いので「尺に合わせる」は出さない。 */
+export const AI_ASSIST_LINE_KINDS = [
+  { kind: ASSIST_KIND.shorten, label: "短く" },
+  { kind: ASSIST_KIND.polite, label: "丁寧に" },
+  { kind: ASSIST_KIND.soft, label: "やわらかく" },
+] as const;
+/** 動画の名前の横のボタン（#1316）。 */
+export const AI_ASSIST_VIDEO_TITLE_LABEL = "題名の候補";
+export const AI_ASSIST_VIDEO_TITLE_KINDS = [{ kind: ASSIST_KIND.videoTitle, label: "候補を出す" }] as const;

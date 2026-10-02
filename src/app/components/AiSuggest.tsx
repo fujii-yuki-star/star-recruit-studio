@@ -9,7 +9,7 @@ import { AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_THINK
 
 /** 同梱されているかは1回だけ問い合わせる（画面を開くたびに Rust へ聞かない）。 */
 let availability: Promise<boolean> | null = null;
-function useLocalAiAvailable(): boolean {
+export function useLocalAiAvailable(): boolean {
   const [ok, setOk] = useState(false);
   useEffect(() => {
     let alive = true;

@@ -156,6 +156,8 @@
 | `ASSIST_SUBTITLE_TARGET_LENGTH` | `30` | 同上の「語りから作る」（字幕）の字数の目安（見た目の `maxSubtitleLength` と短い方） |
 | `ASSIST_SHORTEN_RATIO` | `0.7` | 同上の「短く」の上限＝今の文の字数 × この割合 |
 | `ASSIST_MIN_LENGTH` | `8` | 同上で、上限がこれ未満なら頼まない（言い直しても意味が残らない） |
+| `ASSIST_VIDEO_TITLE_MAX_LENGTH` | `24` | 同上の「動画の題名の候補」の字数の上限（#1316） |
+| `ASSIST_VIDEO_SUMMARY_MAX_LENGTH` | `400` | 同上で、題名の材料（主題＋場面の語り）を AI に渡す字数の上限＝長い動画でも指示文を伸ばしすぎない |
 | `ASSET_DESCRIPTION_MAX_LENGTH` | `60` | **同梱の AI が写真に付ける説明**（`asset.aiDescription`）の字数の上限＝ADR-0052 決定4・`12 §4b`。動画案の指示文に素材ごとに載るので短く |
 | `ASSET_AI_TAGS_MAX` | `5` | 同上で付けるタグの数の上限 |
 | `ASSET_AI_TAG_MAX_LENGTH` | `12` | 同上のタグ1つの字数の上限 |

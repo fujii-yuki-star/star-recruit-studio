@@ -3,12 +3,21 @@
 import { useState } from "react";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import { videoTitleSource } from "../../domain/ai/assist";
+import { AiSuggest, useLocalAiAvailable } from "./AiSuggest";
+import { AI_ASSIST_VIDEO_TITLE_KINDS, AI_ASSIST_VIDEO_TITLE_LABEL } from "../uiLabels";
 
 export function ProjectNameField() {
   const projectName = useProjectStore((s) => s.meta.projectName);
   const setProjectName = useProjectStore((s) => s.setProjectName);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は改名を止める（#570 P2）
   const [draft, setDraft] = useState<string | null>(null); // null＝非編集（store の名前を表示）
+  // 題名の候補（#1316・ADR-0053）。材料＝主題（会社名／発表の題）と場面の語り。同梱の AI が無ければ AiSuggest は何も出さない。
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const aiAvailable = useLocalAiAvailable(); // 無ければボタンごと出さない（押しても何も起きない、を作らない）
+  const meta = useProjectStore((s) => s.meta);
+  const scenes = useProjectStore((s) => s.scenes);
+  const topic = meta.companyInfo?.companyName || meta.generalBrief?.title;
 
   const commit = () => {
     if (draft != null) {
@@ -19,6 +28,7 @@ export function ProjectNameField() {
   };
 
   return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
     <input
       className="input"
       value={draft ?? projectName}
@@ -37,5 +47,27 @@ export function ProjectNameField() {
       }}
       style={{ fontWeight: 600, maxWidth: 320, minWidth: 120 }}
     />
+    {aiAvailable && <button
+      className="btn btn-ghost btn-sm text-sm"
+      style={{ flexShrink: 0 }}
+      disabled={isExporting}
+      aria-expanded={suggestOpen}
+      onClick={() => setSuggestOpen((o) => !o)}
+    >
+      {AI_ASSIST_VIDEO_TITLE_LABEL}
+    </button>}
+    {aiAvailable && suggestOpen && (
+      <div className="card" style={{ position: "absolute", top: "100%", left: 0, zIndex: 50, width: 420, padding: 8, marginTop: 4 }}>
+        <AiSuggest
+          kinds={AI_ASSIST_VIDEO_TITLE_KINDS}
+          source={videoTitleSource(topic, scenes)}
+          current={projectName}
+          limits={{}}
+          companyName={meta.companyInfo?.companyName}
+          onPick={(t) => { setProjectName(t); setSuggestOpen(false); }}
+        />
+      </div>
+    )}
+    </span>
   );
 }
