@@ -797,6 +797,17 @@ async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideo
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
 
+/**
+ * 素材のファイルを差し替えた後の写真の説明（#1317）。差し替えの道は2つ（「ファイルを選び直す」＝`relinkAssetByPath`／
+ * 「画像を変更する」＝`setAssetImage`）＝**ここ1か所に寄せる**。読んでいる最中の結果は捨てさせ（前の写真の説明を当てない）、
+ * 説明が要る状態（AI の説明を外した・まだ無い）なら読み直しを積む。
+ */
+function describeAfterFileReplaced(assetId: string, stillOpen: () => boolean): void {
+  assetDescriber.invalidate(assetId);
+  const a = useProjectStore.getState().assets.find((x) => x.assetId === assetId);
+  if (a && describeTarget(a)) assetDescriber.enqueue(assetId, stillOpen, { retry: true });
+}
+
 // probeAndThumbVideo の結果を該当素材へ反映する set 更新関数を返す（addAsset/addAssetByPath 共通）。
 /**
  * **まだ同じ動画を開いているか**を確かめる合図を作る（#762 の照合を1か所に＝α-6 出口監査 🟡9/🟡21）。
@@ -2415,9 +2426,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const size = await probeImageSize(projectId, filePath);
         if (!stillOpen()) return;
         set((s) => ({
-          assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath, ...(size ? { metadata: size } : {}) } : a)),
+          // 写真を差し替えたら AI が付けた説明は外して読み直す（#1317・「ファイルを選び直す」と同じ扱い）。
+          assets: s.assets.map((a) => (a.assetId === assetId ? clearAiDescriptionOnReplace({ ...a, filePath, ...(size ? { metadata: size } : {}) }) : a)),
           assetSrcById: freshUrl ? { ...s.assetSrcById, [assetId]: freshUrl } : s.assetSrcById,
         }));
+        describeAfterFileReplaced(assetId, stillOpen);
       }
     } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
@@ -2813,7 +2826,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
         importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses, PROJECT_FORMAT.scene) : null,
       }));
-      if (relinked !== r.asset) assetDescriber.enqueue(assetId, stillOpen, { retry: true });
+      describeAfterFileReplaced(assetId, stillOpen);
     } catch (e) {
       if (stillOpen()) set({ importError: importErrorMessage(e) });
     } finally {

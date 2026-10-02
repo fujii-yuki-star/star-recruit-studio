@@ -63,6 +63,35 @@ describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
     expect(describeSpy).not.toHaveBeenCalled();
   });
 
+  // #1317 レビュー 🟡：差し替えの道は2つ＝「画像を変更する」（setAssetImage）も同じ扱い（AI の説明は外して読み直す）。
+  it('「画像を変更する」でも AI が付けた説明は外して読み直す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const describeSpy = vi.spyOn(aiClientMod, 'localAiDescribeImage').mockResolvedValue(JSON.stringify({ description: '変えた写真', tags: [] }));
+    vi.spyOn(assetFsMod, 'fileToDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    vi.spyOn(assetFsMod, 'importAssetFile').mockResolvedValue('assets/asset_001.png');
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '前の写真', aiDescriptionAuthor: 'ai' })] });
+    await useProjectStore.getState().setAssetImage('asset_001', { name: 'new.png', type: 'image/png' } as File);
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('変えた写真'));
+    expect(describeSpy).toHaveBeenCalled();
+  });
+
+  // #1317 レビュー 🟡：読んでいる最中にもう一度差し替えたら、前の写真の説明を新しい写真に付けない。
+  it('読んでいる最中にもう一度差し替えたら、前の写真の結果は当てず、新しい写真で読み直す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const releases: ((v: string) => void)[] = [];
+    vi.spyOn(aiClientMod, 'localAiDescribeImage').mockImplementation(() => new Promise<string>((r) => { releases.push(r); }));
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png' })] });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png'); // 拡張子が同じ＝保存名も同じ
+    await relink('D:/new/1.png');
+    await vi.waitFor(() => expect(releases).toHaveLength(1)); // 1枚目を読んでいる
+    await relink('D:/new/2.png'); // 読んでいる最中に、もう一度差し替える
+    releases[0](JSON.stringify({ description: '1枚目の説明', tags: [] }));
+    await vi.waitFor(() => expect(releases).toHaveLength(2)); // 2枚目を読み直す
+    expect(useProjectStore.getState().assets[0].aiDescription).toBeUndefined(); // 1枚目の結果は当てない
+    releases[1](JSON.stringify({ description: '2枚目の説明', tags: [] }));
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('2枚目の説明'));
+  });
+
   it('assetId は変わらず、名前もタグも残る（付け直させない）', async () => {
     await relink();
     const a = useProjectStore.getState().assets[0];
