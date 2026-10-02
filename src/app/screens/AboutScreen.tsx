@@ -28,13 +28,13 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   {
     name: "llama.cpp",
     role: "このパソコンの中で動く AI（動画案・写真の説明・編集の手伝い）",
-    license: `MIT（組み込みの部品：cpp-httplib・nlohmann/json〔MIT〕、BoringSSL・LLVM OpenMP〔Apache-2.0〕ほか）／全文は同梱フォルダ ${LOCAL_AI_LICENSE_DIR}`,
+    license: `MIT（中に組み込まれている部品のライセンスも含め、全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
     source: { label: "提供元", url: "https://github.com/ggml-org/llama.cpp" },
   },
   {
     name: "Qwen3.5-2B（Qwen Team, Alibaba Cloud）",
     role: "このパソコンの中で動く AI のモデル",
-    license: `Apache-2.0／公式の重みを、このソフト用に変換して軽くしたもの（改変の告知と全文は同梱フォルダ ${LOCAL_AI_LICENSE_DIR}）`,
+    license: `Apache-2.0／公式のモデルを、このソフト用に変換して軽くしたもの（変えた点の告知と全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
     source: { label: "提供元", url: "https://huggingface.co/Qwen/Qwen3.5-2B" },
   },
   {
