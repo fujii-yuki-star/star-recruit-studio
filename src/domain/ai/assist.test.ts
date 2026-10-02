@@ -20,7 +20,7 @@ describe('assistMaxLength', () => {
     expect(assistMaxLength(ASSIST_KIND.soft, 'x'.repeat(20), {})).toBe(MAX_NARRATION_LEN_DEFAULT);
   });
 
-  it('尺に合わせる＝表示時間で読み切れる字数。もう収まっている・時間が無いなら頼まない', () => {
+  it('表示時間に収める＝表示時間で読み切れる字数。もう収まっている・時間が無いなら頼まない', () => {
     const fit = charsForDuration(6);
     expect(fit).toBe(Math.floor((6 - NARRATION_SCENE_PADDING_SEC) * NARRATION_CHARS_PER_SEC));
     expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(fit + 1), { sceneDurationSec: 6 })).toBe(fit);
@@ -29,7 +29,7 @@ describe('assistMaxLength', () => {
     expect(assistMaxLength(ASSIST_KIND.fitDuration, 'あ'.repeat(200), { sceneDurationSec: 30, maxNarrationLength: 100 })).toBe(100);
   });
 
-  it('尺に合わせる字数は声の速さに合わせる（#1318）', () => {
+  it('表示時間に収める字数は声の速さに合わせる（#1318）', () => {
     expect(charsForDuration(6, 1.2)).toBe(Math.floor((6 - NARRATION_SCENE_PADDING_SEC) * NARRATION_CHARS_PER_SEC * 1.2));
     const text = 'あ'.repeat(40);
     // 速さ 1.0 では 37 字に収める必要がある文でも、速い声ならもう収まっている（頼まない）。

@@ -152,8 +152,8 @@ describe('isExportFinished / pastExportNotice（前回の結果・#547 P3-11）'
       expect(pastExportNotice(phase).startsWith('前回の書き出しは')).toBe(true);
     }
     // 保存済み＝そのあとの編集は入っていないので、保存し直せることまで言う（完了表示だけだと最新に見える）。
-    expect(pastExportNotice('done')).toContain('もう一度「動画を保存」');
-    expect(pastExportNotice('cancelled')).toContain('もう一度「動画を保存」');
+    expect(pastExportNotice('done')).toContain('もう一度「動画を書き出す」');
+    expect(pastExportNotice('cancelled')).toContain('もう一度「動画を書き出す」');
   });
 
   it('走行中・未実行には出さない（呼び出し側で phase を場合分けしない）', () => {

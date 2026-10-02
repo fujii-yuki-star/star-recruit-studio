@@ -860,7 +860,7 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     const items = buildPrecheckItems([scene], [], [photoTemplate]);
     expect(find(items, "tooFast")?.severity).toBe("warning");
     expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
-    // セリフ欄へ寄り「尺に合わせる」をすぐ出す（ADR-0053 決定2）。行き先は最初の該当場面。
+    // セリフ欄へ寄り「表示時間に収める」をすぐ出す（ADR-0053 決定2）。行き先は最初の該当場面。
     expect(find(items, "tooFast")).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: scene.sceneId, assist: ASSIST_KIND.fitDuration });
   });
 
@@ -881,7 +881,7 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     expect(find(buildPrecheckItems([ok], [], [photoTemplate]), "line")?.action).toBeUndefined();
   });
 
-  it("表示時間が短すぎて「尺に合わせる」で候補が作れない場面は、寄るだけ（頼まない）", () => {
+  it("表示時間が短すぎて「表示時間に収める」で候補が作れない場面は、寄るだけ（頼まない）", () => {
     // 1.5 秒＝読み切れる字数が 3 字＝頼めない（頼むと「いまの文のままで大丈夫」と逆のことを言う）。
     const tiny = sc({ sceneId: "scene_001", durationSec: 1.5, narration: { text: "あ".repeat(30), status: "generated" } });
     const item = find(buildPrecheckItems([tiny], [], [photoTemplate]), "tooFast");
@@ -904,7 +904,7 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
   });
 
   it("「セリフを直す」で頼むかどうかも声の速さで決める（場面編集と逆のことを言わない）", () => {
-    // 6 秒・60 字＝10 字/秒：速さ 1.1 なら早口（目安 9.9 字/秒）で、尺に合わせる候補も作れる（上限 41 字）。
+    // 6 秒・60 字＝10 字/秒：速さ 1.1 なら早口（目安 9.9 字/秒）で、表示時間に収める候補も作れる（上限 41 字）。
     const s1 = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(60), status: "generated" } }); // 10 字/秒
     const item = find(buildPrecheckItems([s1], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 1.1 }), "tooFast");
     expect(item).toMatchObject({ sceneId: "scene_001", assist: ASSIST_KIND.fitDuration });

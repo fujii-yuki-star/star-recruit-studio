@@ -61,7 +61,7 @@ describe("ExportScreen 失敗の知らせに次の行動を置く（#1032）", (
   });
 
   it("やり直す側は上のボタンと同じ条件で押せなくなる（片方だけ塞がれていない、を作らない）", () => {
-    // 書き出せない理由（見た目が見つからない場面）を作ると、上の「動画を保存」も
+    // 書き出せない理由（見た目が見つからない場面）を作ると、上の「動画を書き出す」も
     // 知らせの中の「もう一度書き出す」も**同時に**押せなくなる。
     useProjectStore.setState({ scenes: [scene({ templateId: "missing_tmpl" })] });
     render(<ExportScreen onNavigate={vi.fn()} />);

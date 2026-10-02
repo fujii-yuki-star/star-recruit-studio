@@ -104,7 +104,7 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 
 /**
  * この項目が残っていると**書き出しが必ず失敗する**か（#547 P2-5）。
- * 公開前チェックの主ボタンと書き出し画面の「動画を保存」が**同じ述語**を見るための単一の参照元。
+ * 公開前チェックの主ボタンと書き出し画面の「動画を書き出す」が**同じ述語**を見るための単一の参照元。
  * 片方だけ別の条件で止めると「片方からは出せるのに片方からは止まる」不整合になる（ADR-0026②）。
  * 立てる条件は書き出し側の停止条件（`renderer/export/buildExportScenes` の throw）と対で維持すること。
  */
@@ -121,7 +121,7 @@ export function exportBlockingItems(
   /**
    * 書き出しを止める判定に要る材料（#261）。⚠️ **`blocksExport` の項目が使う材料は、
    * ここにも通さないと直行導線ですり抜ける**（PR #886 レビュー 🔴）＝サイドバーから
-   * 「動画を保存」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
+   * 「動画を書き出す」へ直接入ると、公開前チェックを経由しないので項目そのものが作られない。
    */
   fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[]; userFontsUnreadable?: boolean },
   /**
@@ -189,7 +189,7 @@ export function buildPrecheckItems(
   /**
    * 「セリフを直す」の行き先と、すぐ頼む AI 補助（ADR-0053 決定2）。
    * ⚠️ 頼むのは**一人語りで、頼めば候補が作れる**最初の該当場面だけ＝掛け合いの場面にはセリフ欄の手伝いが無く、
-   *   表示時間が短すぎる場面は「尺に合わせる」の上限が短すぎて頼めない（頼むと「いまの文のままで大丈夫」と**逆のこと**を言う）。
+   *   表示時間が短すぎる場面は「表示時間に収める」の上限が短すぎて頼めない（頼むと「いまの文のままで大丈夫」と**逆のこと**を言う）。
    *   そういう場面しか無ければ、最初の該当場面へ寄るだけ（頼まない）。
    */
   const fixNarration = (hit: { firstId?: string }, pred: (s: Scene) => boolean, kind: AssistKind): Pick<PrecheckItem, "action" | "sceneId" | "assist"> => {
@@ -333,7 +333,7 @@ export function buildPrecheckItems(
       label: "早口になる場面",
       detail: `${fmtScenes(tooFast.nums)}は、表示する時間に対してセリフが多いです。表示時間を延ばすか、セリフを短くしてください。`,
       severity: "warning",
-      // 最初の該当場面のセリフ欄へ寄り、AI 補助の「尺に合わせる」をすぐ出す（ADR-0053 決定2）。
+      // 最初の該当場面のセリフ欄へ寄り、AI 補助の「表示時間に収める」をすぐ出す（ADR-0053 決定2）。
       ...fixNarration(tooFast, isTooFast, ASSIST_KIND.fitDuration),
     });
   }

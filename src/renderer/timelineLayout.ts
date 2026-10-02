@@ -180,9 +180,9 @@ export interface TimelineCanvasClip {
   clip: TimelineClip;
   /** 部品そのものの箱（動きを当てる前）。書き戻す先はこちら。 */
   box: Box;
-  /** まとまりの変形まで当てた箱（自身の動きはまだ）。 */
+  /** グループの変形まで当てた箱（自身の動きはまだ）。 */
   groupedBox: Box;
-  /** まとまりの変形 → 自身の動き まで当てた箱＝**いま描かれている場所**。 */
+  /** グループの変形 → 自身の動き まで当てた箱＝**いま描かれている場所**。 */
   finalBox: Box;
   /** その部品自身の動き（不透明度は箱に乗らないので、描画側がそのまま使う）。 */
   ownTr: InterpolatedTransform;
@@ -275,7 +275,7 @@ export function isItemOfClip(itemId: string, clipId: string): boolean {
  *
  * **ドリルイン**（ADR-0034 決定8＝二度押しで中へ入る）の当て先を出す。見た目パターンのクリップは
  * 枠そのもの（箱を持たない）なので、キャンバスには**中の層しか描かれていない**＝どの層を指したかは
- * 描いた結果から引くのが確実（テンプレの座標を画面で組み直すと、動き・まとまりの変形とずれる）。
+ * 描いた結果から引くのが確実（テンプレの座標を画面で組み直すと、動き・グループの変形とずれる）。
  *
  * - **手前から探す**（`items` は背面→前面の順）＝重なっていたら上のものを指す（見えているものが当たる）。
  * - **回した層は回転を戻して当てる**＝軸に沿った矩形で当てると、回した枠の外側を指しても当たる。
@@ -367,7 +367,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
   const { groups: effectiveGroups, opacity: groupOpacity } = effective;
 
   // 描くクリップ（隠したトラック・隠したグループのメンバーを除く）を**トラックの並び順**に集め、
-  // まとまりの変形と自身の動きを当てた箱まで出す。⚠️ **操作レイヤと同じ関数**（#746-4/5）＝
+  // グループの変形と自身の動きを当てた箱まで出す。⚠️ **操作レイヤと同じ関数**（#746-4/5）＝
   // 並び順・隠す条件・動きを当てた箱を2か所に書かない。
   const live = timelineCanvasClipsAt(doc, timeSec, effective);
 

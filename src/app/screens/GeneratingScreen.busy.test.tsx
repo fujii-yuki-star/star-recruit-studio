@@ -16,7 +16,7 @@ vi.mock("../../infrastructure/aiClient", () => ({
 }));
 vi.mock("../store/projectStore", () => ({
   useProjectStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({ status: "generating", aiError: null, generate: () => Promise.resolve(), cancelGeneration: () => {}, fail: () => {}, reset: () => {}, startManualEdit: () => {} }),
+    sel({ status: "generating", meta: { videoKind: "recruit" }, aiError: null, generate: () => Promise.resolve(), cancelGeneration: () => {}, fail: () => {}, reset: () => {}, startManualEdit: () => {} }),
 }));
 
 import { GeneratingScreen } from "./GeneratingScreen";

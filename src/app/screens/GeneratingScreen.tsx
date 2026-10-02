@@ -2,6 +2,7 @@ import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { VIDEO_KIND } from "../../domain/enums";
 import { onAiBusyWait, onLocalAiProgress } from "../../infrastructure/aiClient";
 import { LoadingView, ErrorView } from "../components/states";
 import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, writingSceneMessage } from "../uiLabels";
@@ -14,6 +15,8 @@ interface GeneratingProps {
 // マウント時に Mock AI → 検証/変換 を実行し、結果はストアに入る。進捗はUX用のアニメーション。
 export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const status = useProjectStore((s) => s.status);
+  // 一般（発表）の動画に「会社情報」と出さない（UI/UX 監査 2026-10-02）。
+  const isGeneral = useProjectStore((s) => s.meta.videoKind === VIDEO_KIND.general);
   const aiError = useProjectStore((s) => s.aiError);
   const generate = useProjectStore((s) => s.generate);
   const cancelGeneration = useProjectStore((s) => s.cancelGeneration);
@@ -118,7 +121,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   return (
     <div className="main-scroll">
       <LoadingView
-        title={ready ? "動画案ができました" : "ゆうこが動画案を作っています…"}
+        title={ready ? "動画案ができました" : "AIが動画案を作っています…"}
         message={
           ready
             ? "内容を確認して、自由に修正できます。"
@@ -126,7 +129,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
               ? "いま混み合っているので、少し待ってからもう一度お願いしています。このままお待ちください。"
               : writingScene > 0
                 ? writingSceneMessage(writingScene)
-                : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
+                : `${isGeneral ? "伝えたい内容" : "会社情報"}と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。`
         }
         progress={status === "ready" ? progress : "indeterminate"}
         onCancel={
