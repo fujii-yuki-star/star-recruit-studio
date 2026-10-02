@@ -6233,7 +6233,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             status={saveStatus === "error" ? (
               // 失敗は**いつも見える所**で知らせ、その場に次の行動を置く（`15 §6` TIMELINE_SAVE_FAILED）。
               <span className="row gap-sm" role="alert" style={{ alignItems: "center" }}>
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{TIMELINE_SAVE_FAILED_MESSAGE}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{TIMELINE_SAVE_FAILED_MESSAGE}</span>
                 <button className="btn btn-secondary btn-sm" onClick={() => void saveTimelineProject()}>保存し直す</button>
               </span>
             ) : (

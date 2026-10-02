@@ -25,7 +25,7 @@ export function SaveStatusBadge() {
     // なるものに「もう一度お試しください」と出すと、押しても変わらないボタンを押させ続けることになる。
     // 実際の保存ボタンは「保存に失敗（もう一度押す）」表示。バッジの案内も同じ行動を促す。
     return (
-      <span className="text-sm" role="alert" style={{ color: "var(--color-danger)" }}>
+      <span className="text-sm" role="alert" style={{ color: "var(--color-danger-text)" }}>
         {saveBlockedReason ?? "保存できませんでした（もう一度お試しください）"}
       </span>
     );

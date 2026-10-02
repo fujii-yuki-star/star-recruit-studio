@@ -345,7 +345,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                       文字は `<label>` 経由で読み上げられるが、**「必須」を専用に知らせる**読み上げ
                       ソフトはこちらを見る（片方だけだと、そのソフトでは必須と分からない）。 */}
                   <label className="field-label" htmlFor="companyName">
-                    会社名<span className="text-sm" style={{ color: "var(--color-danger)", marginLeft: 4 }}>（必須）</span>
+                    会社名<span className="text-sm" style={{ color: "var(--color-danger-text)", marginLeft: 4 }}>（必須）</span>
                   </label>
                   <input
                     id="companyName"
@@ -462,7 +462,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <div className="field">
                       {/* ⚠️ **必須は欄の側でも分かるようにする**（#1026・上と同じ理由）。 */}
                       <label className="field-label" htmlFor="title">
-                        テーマ・タイトル<span className="text-sm" style={{ color: "var(--color-danger)", marginLeft: 4 }}>（必須）</span>
+                        テーマ・タイトル<span className="text-sm" style={{ color: "var(--color-danger-text)", marginLeft: 4 }}>（必須）</span>
                       </label>
                       <input
                         id="title"

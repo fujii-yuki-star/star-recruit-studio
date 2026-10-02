@@ -126,14 +126,14 @@ export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {
   }
   if (status === "failed") {
     return (
-      <span className="badge" style={{ background: "var(--color-danger-soft)", color: "var(--color-danger)" }}>
+      <span className="badge badge-danger">
         {label}
       </span>
     );
   }
   if (status === "pending") {
     return (
-      <span className="badge" style={{ background: "var(--color-yellow)", color: "var(--color-warn)" }}>
+      <span className="badge badge-yellow">
         {label}
       </span>
     );
@@ -157,7 +157,7 @@ export function ErrorView({
         className="action-card-icon"
         style={{
           background: "var(--color-danger-soft)",
-          color: "var(--color-danger)",
+          color: "var(--color-danger-text)",
           margin: "0 auto var(--gap)",
           width: 56,
           height: 56,

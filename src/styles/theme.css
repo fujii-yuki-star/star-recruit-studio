@@ -21,26 +21,34 @@
   --color-primary: #1f9ea3;     /* 青緑 (メイン操作) */
   --color-primary-hover: #18888d;
   --color-primary-soft: #e3f4f4;
+  /* 主ボタン・選んだ段など「主操作色で塗った面に文字を載せる」ときの面と文字（UI/UX 監査 2026-10-02）。
+     ⚠️ --color-primary をそのまま塗ると白い文字が 3.2:1 しか取れない＝面だけ一段濃くする（選択枠などの線は --color-primary のまま）。 */
+  --color-primary-strong: #157579;
+  --color-primary-strong-hover: #12686b;
+  --color-on-primary: #ffffff;
   --color-primary-rgb: 31, 158, 163; /* #1f9ea3 のチャンネル値。半透明の選択面を合成する単一の参照元 (#547 P2-12)。
                                         選択ハイライトの塗りはこれで主操作色と同色相にする（選択枠 --color-primary と揃える）。 */
 
   --color-accent: #4aa3df;      /* 水色アクセント */
   --color-accent-soft: #e6f1fb;
+  --color-info: #2a6d9c;        /* お知らせ（.notice-info）の文字 */
 
   --color-yellow: #fbf3cf;      /* 淡い黄色 (ゆうこ/注目) */
   --color-yellow-strong: #f6e7a3;
-  --color-warn: #8a6d1a;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
+  --color-warn: #7a6014;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
 
   --color-text: #20323c;        /* 文字 (濃いめのスレート) */
   --color-text-muted: #5d7480;  /* 補助文字 */
-  --color-text-faint: #8aa0ab;
+  --color-text-faint: #617885;  /* 案内文に使う＝背景の上で 4.3:1 以上（以前の #8aa0ab は 2.6:1） */
 
   --color-border: #dde8ef;
   --color-border-strong: #c5d8e2;
 
   --color-danger: #d6685f;
   --color-danger-soft: #fbeae8;
+  --color-danger-text: #b4473e; /* 小さい危険の文字（--color-danger は白地で 3.5:1） */
   --color-success: #3fa46a;
+  --color-success-text: #2a7449; /* 小さい成功の文字（--color-success は淡い緑の上で 2.8:1） */
   --color-success-soft: #e6f5ec; /* 淡い緑の面。タイムラインの帯（図形）の色（#701） */
 
   /* 形状 */
@@ -52,6 +60,13 @@
   --shadow-sm: 0 1px 2px rgba(32, 80, 100, 0.06);
   --shadow: 0 4px 14px rgba(32, 80, 100, 0.08);
   --shadow-lg: 0 10px 30px rgba(32, 80, 100, 0.12);
+  /* 素材のサムネイル（写真・動画・音） */
+  --thumb-photo-bg: linear-gradient(135deg, #e6f1fb, #d5e8f5);
+  --thumb-photo-fg: #2f6a93;
+  --thumb-video-bg: linear-gradient(135deg, #e3f4f4, #cfeae9);
+  --thumb-video-fg: #1d6e72;
+  --thumb-audio-bg: linear-gradient(135deg, #fbf3cf, #f4e7a8);
+  --thumb-audio-fg: #6e5612;
 
   /* 余白の単位 */
   --gap-xs: 6px;
@@ -74,7 +89,7 @@
    （ADR-0001）。ここで上書きするのは器・帯・文字・枠の色だけで、キャンバスの中身には届かない。
 
    ⚠️ **暗い版はここ1か所**＝`@media (prefers-color-scheme: dark)` にも同じ値を書くと
-   **25 個のトークンを二重に持つ**ことになり、片方だけ直す事故が必ず起きる。
+   **暗い版のトークンを二重に持つ**ことになり、片方だけ直す事故が必ず起きる。
    「OS に合わせる」は JS が解いて `data-theme` に落とす（`useAppearance.ts`）。
 
    ⚠️ **純黒（#000）と純白（#fff）を本文に使わない**＝動機が「目がつらい」なので、
@@ -91,10 +106,14 @@
   --color-primary: #3fbcc0;
   --color-primary-hover: #56cdd1;
   --color-primary-soft: #1d3335;
+  --color-primary-strong: #3fbcc0;
+  --color-primary-strong-hover: #56cdd1;
+  --color-on-primary: #0f1a1c;  /* 明るい青緑の面には暗い文字（白は 2.3:1） */
   --color-primary-rgb: 63, 188, 192; /* 上の #3fbcc0 のチャンネル値（半透明の選択面を合成する参照元） */
 
   --color-accent: #6fb8ea;
   --color-accent-soft: #1c2a35;
+  --color-info: #8cc6ef;
 
   /* 注意の帯は「淡い黄色の面＋濃い文字」を**反転**する＝暗い面に淡い文字は読めない。 */
   --color-yellow: #3a3423;
@@ -103,20 +122,28 @@
 
   --color-text: #dbe4e8;        /* 純白にしない */
   --color-text-muted: #9db0b9;
-  --color-text-faint: #708590;
+  --color-text-faint: #8597a1;
 
   --color-border: #2c353a;
   --color-border-strong: #3d4a51;
 
   --color-danger: #e8837a;
   --color-danger-soft: #35211f;
+  --color-danger-text: #e8837a;
   --color-success: #5fbe86;
+  --color-success-text: #5fbe86;
   --color-success-soft: #1c2e24;
 
   /* 影は暗い面では**濃くしないと見えない**（明るい版の薄い青みでは消える）。 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
+  --thumb-photo-bg: linear-gradient(135deg, #1f2d38, #22343f);
+  --thumb-photo-fg: #8cc6ef;
+  --thumb-video-bg: linear-gradient(135deg, #1d3335, #20393a);
+  --thumb-video-fg: #7fd3d6;
+  --thumb-audio-bg: linear-gradient(135deg, #3a3423, #4d4429);
+  --thumb-audio-fg: #e8c86a;
 }
 
 * {
@@ -249,8 +276,8 @@ button {
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -490,11 +517,11 @@ button {
 }
 
 .btn-primary {
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
 }
 .btn-primary:hover {
-  background: var(--color-primary-hover);
+  background: var(--color-primary-strong-hover);
 }
 
 .btn-secondary {
@@ -517,7 +544,7 @@ button {
 
 .btn-danger {
   background: var(--color-surface);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 .btn-danger:hover {
@@ -600,7 +627,7 @@ button {
 .select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-soft);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.35);
 }
 
 .textarea {
@@ -710,11 +737,19 @@ input[type="range"] {
 
 .badge-blue {
   background: var(--color-accent-soft);
-  color: var(--color-accent);
+  color: var(--color-info);
 }
 .badge-teal {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-strong);
+}
+.badge-success {
+  background: var(--color-success-soft);
+  color: var(--color-success-text);
+}
+.badge-danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger-text);
 }
 .badge-yellow {
   background: var(--color-yellow);
@@ -745,7 +780,7 @@ button.badge {
 
 .notice-info {
   background: var(--color-accent-soft);
-  color: #2a6d9c;
+  color: var(--color-info);
 }
 .notice-warn {
   background: var(--color-yellow);
@@ -857,7 +892,7 @@ button.badge {
 /* 断りの文（赤）。⚠️ **8か所で使われているのに規則が無かった**＝
    エラーの文が本文と同じ色で出ていた（読み飛ばされる）。 */
 .form-error {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 13px;
 }
 /* 読みやすい折り返し。⚠️ `text-pretty` は21か所・`text-balance` は2か所で使われていたのに
@@ -897,16 +932,16 @@ button.badge {
 }
 
 .thumb-photo {
-  background: linear-gradient(135deg, #e6f1fb, #d5e8f5);
-  color: #4a86b0;
+  background: var(--thumb-photo-bg);
+  color: var(--thumb-photo-fg);
 }
 .thumb-video {
-  background: linear-gradient(135deg, #e3f4f4, #cfeae9);
-  color: #2a8a8e;
+  background: var(--thumb-video-bg);
+  color: var(--thumb-video-fg);
 }
 .thumb-audio {
-  background: linear-gradient(135deg, #fbf3cf, #f4e7a8);
-  color: var(--color-warn);
+  background: var(--thumb-audio-bg);
+  color: var(--thumb-audio-fg);
   aspect-ratio: auto;
   padding: 14px;
 }
@@ -1130,9 +1165,9 @@ button.badge {
 }
 
 .step.active .step-circle {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-strong);
+  color: var(--color-on-primary);
 }
 .step.done .step-circle {
   background: var(--color-primary-soft);
@@ -1557,8 +1592,15 @@ button.badge {
 .context-menu-key {
   float: right;
   margin-left: 16px;
-  opacity: 0.6;
+  color: var(--color-text-faint); /* 透明度で薄めると背景次第で 3:1 を割る＝薄い文字の色を使う */
   font-size: 11px;
+}
+/* 浮かぶ窓（右クリックのメニュー・自由配置の「〜を編集」）の面。暗い見た目でも面と文字が揃う（UI/UX 監査 2026-10-02）。 */
+.popover-surface {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-lg);
 }
 .panel-frame-head-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
 /* **見出しの行の道具**（実機指摘 2026-09-30）＝欄の中身の上に重ねない（重ねると絵と被って押し間違える）。
