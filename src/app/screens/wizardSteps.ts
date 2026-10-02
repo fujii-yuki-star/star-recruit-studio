@@ -33,7 +33,7 @@ export function stepsFor(videoKind: VideoKind): readonly WizardStep[] {
     second,
     { label: "写真・動画を追加", backName: "写真・動画" },
     { label: "読み上げの声を設定", backName: "読み上げの声" },
-    { label: "ゆうこに動画案を作ってもらう", backName: "動画案" },
+    { label: "AIに動画案を作ってもらう", backName: "動画案" },
   ];
 }
 

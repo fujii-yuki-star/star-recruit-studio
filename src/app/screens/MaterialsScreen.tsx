@@ -8,7 +8,9 @@ import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
-import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, RELINK_ASSET_LABEL } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
+import { useLocalAiAvailable } from "../components/AiSuggest";
+import { AI_ENGINE, getAiEngine } from "../../infrastructure/appSettings";
 import { PageHead, Switch } from "../components/ui";
 import { BrandKitLink } from "../components/BrandKitLink";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -57,6 +59,9 @@ const isVisual = (type: Asset["assetType"]) => VISUAL_TYPES.includes(type);
 
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
+  // 取り込んだ写真を同梱の AI が読むのは、同梱の AI があって Gemini を選んでいないときだけ（`projectStore` の読み取りと同じ条件）。
+  const localAi = useLocalAiAvailable();
+  const autoDescribe = localAi && getAiEngine() !== AI_ENGINE.gemini;
   const { assets, scenes, templates, meta, updateAsset, removeAsset, removeAssets, assetSrcById, setAssetImage, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
@@ -159,7 +164,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     <div className="main-scroll">
       <PageHead
         title="素材を管理"
-        desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
+        desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、AIが使いどころを判断しやすくなります。"
         actions={
           <AssetImportButton
             store={useProjectStore}
@@ -486,7 +491,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   id="mat-ai-desc"
                   className="textarea"
                   value={selected.aiDescription ?? ""}
-                  placeholder="取り込むと、このパソコンの中のAIが写真や動画の内容を書きます"
+                  placeholder={autoDescribe ? MATERIAL_AI_DESC_PLACEHOLDER_AUTO : MATERIAL_AI_DESC_PLACEHOLDER_MANUAL}
                   onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, aiDescription: e.target.value, aiDescriptionAuthor: AI_DESCRIPTION_AUTHOR.user }))}
                 />
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>

@@ -566,7 +566,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 伝えたいことを、動画でやさしく届けましょう
               </h1>
               <p className="page-desc text-pretty">
-                伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
+                伝えたい内容と写真・動画を入れると、AIが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
               <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
@@ -575,7 +575,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   新しい動画を作る
                 </button>
                 {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
-                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "AIを使わず、自分で場面を組み立てます"}>
                   白紙から作る
                 </button>
                 {/* タイムラインで作る（#635・ADR-0032 決定7/15）＝場面に区切らず、時間の流れの上に自分で
@@ -595,13 +595,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   重い選択なのに、押すまで分からなかった（向きだけは押した後に聞く）。 */}
               <dl className="text-sm text-muted mt" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", margin: 0 }}>
                 <dt style={{ fontWeight: 600 }}>新しい動画を作る</dt>
-                <dd style={{ margin: 0 }}>伝えたい内容と素材を入れると、ゆうこがたたき台を作ります。</dd>
+                <dd style={{ margin: 0 }}>伝えたい内容と素材を入れると、AIがたたき台を作ります。</dd>
                 <dt style={{ fontWeight: 600 }}>白紙から作る</dt>
-                <dd style={{ margin: 0 }}>ゆうこに頼まず、空の状態から自分で場面を組み立てます。</dd>
+                <dd style={{ margin: 0 }}>AIに頼まず、空の状態から自分で場面を組み立てます。</dd>
                 <dt style={{ fontWeight: 600 }}>タイムラインで作る</dt>
                 <dd style={{ margin: 0 }}>
                   場面に区切らず、時間の流れの上に素材を並べます。
-                  <strong>場面から作る動画とは別のもの</strong>で、ゆうこにたたき台を頼むことはできません。
+                  <strong>場面から作る動画とは別のもの</strong>で、AIにたたき台を頼むことはできません。
                 </dd>
               </dl>
               {/* 向きは作るときにしか選べない（あとから変える導線が無い）ので、押した瞬間に作らず先に聞く（#664）。 */}

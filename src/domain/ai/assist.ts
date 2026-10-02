@@ -30,7 +30,7 @@ export const ASSIST_KIND = {
   subtitle: 'subtitle',
   /** 語りから見出しの候補を出す。 */
   title: 'title',
-  /** 動画の内容から、動画の題名の候補を出す（#1316）。 */
+  /** 動画の内容から、動画の名前の候補を出す（#1316）。 */
   videoTitle: 'videoTitle',
 } as const;
 export type AssistKind = (typeof ASSIST_KIND)[keyof typeof ASSIST_KIND];
@@ -41,9 +41,9 @@ export interface AssistLimits {
   maxNarrationLength?: number;
   /** 見た目パターンの字幕の上限（無ければ既定）。 */
   maxSubtitleLength?: number;
-  /** 場面の表示時間（秒）。「尺に合わせる」で使う。 */
+  /** 場面の表示時間（秒）。「表示時間に収める」で使う。 */
   sceneDurationSec?: number;
-  /** その場面の声の速さ（解決済み・未指定＝1.0）。「尺に合わせる」の字数に効く（#1318）。 */
+  /** その場面の声の速さ（解決済み・未指定＝1.0）。「表示時間に収める」の字数に効く（#1318）。 */
   voiceSpeed?: number;
 }
 
@@ -55,7 +55,7 @@ export function charsForDuration(sec: number, speed?: number): number {
 /**
  * その作業の字数の上限。頼めない（上限が短すぎる）ときは null。
  * - 短く＝今の文の 7 割（語りの上限も越えない）／丁寧に・やわらかく＝語りの上限
- * - 尺に合わせる＝表示時間で読み切れる字数（語りの上限も越えない）。今の文がもう収まっていれば null（頼む意味が無い）
+ * - 表示時間に収める＝表示時間で読み切れる字数（語りの上限も越えない）。今の文がもう収まっていれば null（頼む意味が無い）
  * - 字幕＝字幕の上限と目安の短い方／見出し＝`ASSIST_TITLE_MAX_LENGTH`
  */
 export function assistMaxLength(kind: AssistKind, text: string, limits: AssistLimits): number | null {

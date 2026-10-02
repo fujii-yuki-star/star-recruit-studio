@@ -115,7 +115,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   // 残っていると書き出しが**必ず失敗する**項目（見た目欠け・動画配置不可・再生タイミング＝#547 P2-5）。
   // 「直せば良くなる」警告（字幕が長い・声が未作成）とは分け、主ボタンを止める根拠にする。
   // 止めないと、保存先を選ばせた後に §2-5 エラーで落ちる＝手戻りが大きい（ADR-0026④）。
-  // 書き出し画面の「動画を保存」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
+  // 書き出し画面の「動画を書き出す」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
   // 既に算出済みの items を絞るだけ＝重い buildPrecheckItems を二度走らせない。
   const blockingItems = items.filter(isExportBlocking);
   // 「まとめて標準にする」で直せる場面（store の一括適用と**同じ判定**＝押せるのに何も起きない、を作らない）。
@@ -279,7 +279,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           </button>
           {capabilityBlocked ? (
             <span className="text-sm" style={{ color: "var(--color-danger)" }}>
-              この端末では動画を保存できません。上の確認結果で問題の項目を解消してから、もう一度お試しください。
+              {capNotice?.detail}
             </span>
           ) : blockingItems.length > 0 ? (
             <span className="text-sm" style={{ color: "var(--color-danger)" }}>

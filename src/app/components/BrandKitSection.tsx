@@ -218,11 +218,11 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
         {/* ⚠️ **色を選ぶところの候補の先頭に出る**（決定4）＝既定の色は残る。 */}
         <p className="field-hint">ここに入れた色は、色を選ぶときにいちばん上に並びます。</p>
         <div className="chip-input-row">
-          {colors.map((c) => (
+          {colors.map((c, i) => (
             <span key={c} className="chip">
               <span style={{ width: 14, height: 14, borderRadius: 3, background: c, display: "inline-block" }} />
               {c}
-              <button type="button" aria-label={`${c} を外す`} {...unreadableGuard} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
+              <button type="button" className="btn btn-ghost btn-sm" aria-label={`${i + 1}番目の色を外す`} {...unreadableGuard} onClick={() => void updateBrandKit(removeBrandColor(brandKit, c))}>
                 ×
               </button>
             </span>

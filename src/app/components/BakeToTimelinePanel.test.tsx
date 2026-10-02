@@ -181,7 +181,7 @@ describe("BakeToTimelinePanel：作っている間と、作ったあと（#992�
   // ⚠️ **作った先で何ができなくなるかを言う**（#992 ⑥）。
   it("作った先では AI と場面編集が使えないことを伝える", async () => {
     await runBake();
-    expect(await screen.findByText(/ゆうこにたたき台を作ってもらうことと、場面ごとの編集はできません/)).toBeInTheDocument();
+    expect(await screen.findByText(/AIにたたき台を作ってもらうことと、場面ごとの編集はできません/)).toBeInTheDocument();
   });
 
   // ⚠️ **作っている間は離れさせない**＝離れると成否の受け皿ごと消える（#992 ②）。

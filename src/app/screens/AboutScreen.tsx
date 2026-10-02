@@ -33,7 +33,7 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   },
   {
     name: "Qwen3.5-2B（Qwen Team, Alibaba Cloud）",
-    role: "このパソコンの中で動く AI のモデル",
+    role: "このパソコンの中で動くAIのモデル",
     license: `Apache-2.0／公式のモデルを、このソフト用に変換して軽くしたもの（変えた点の告知と全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
     source: { label: "提供元", url: "https://huggingface.co/Qwen/Qwen3.5-2B" },
   },
@@ -150,7 +150,7 @@ export function AboutScreen() {
           {/* ⚠️ 動画側の出し方は選べる（ADR-0025・#359）＝「表示されます」と言い切ると事実と違う。
               この画面のクレジット一覧は必須のまま（ADR-0025）＝ここを条件つきにはしない。 */}
           <p className="field-hint mt">
-            作成・書き出しする動画には、利用規約に基づき使用した声（{usedCredits.join(" / ")}）のクレジットを表示できます（仕上がり確認にも同じ出し方で表示されます）。出し方は「動画を保存」で選べます。動画に出さない場合は、この表記を動画の説明欄などに記載してください。
+            作成・書き出しする動画には、利用規約に基づき使用した声（{usedCredits.join(" / ")}）のクレジットを表示できます（仕上がり確認にも同じ出し方で表示されます）。出し方は「動画を書き出す」で選べます。動画に出さない場合は、この表記を動画の説明欄などに記載してください。
           </p>
         </div>
       </div>

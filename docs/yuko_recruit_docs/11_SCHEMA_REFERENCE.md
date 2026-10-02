@@ -153,14 +153,14 @@
 | `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
 | `AI_SCENE_MAX_DURATION_SEC` | `15` | **AI 生成の目安**（上限の既定・テンプレ `aiHint.maxDurationSec` で上書き可）。手編集の制約ではない（#553） |
 | `SCENE_DEFAULT_DURATION_SEC` | `8` | 既定シーン尺 |
-| `NARRATION_CHARS_PER_SEC` | `7.5` | **同梱の AI の動画案で場面の尺を語りから計算する**ときの読み上げの速さの見積もり（字/秒）＝ADR-0052 段階1・`12 §8.7`。早口の判定（`precheckExtras` の 9 字/秒）より遅めに置く＝計算した尺が早口の判定に掛からない。**速さ 1.0（ふつう）のときの値**＝声の速さ設定（`11.6`）の倍率をかけて使う（`narrationCharsPerSec`・#1318）：同梱の AI の案は動画全体の速さ（`voiceSettings.speed`）、編集中の AI 補助の「尺に合わせる」はその場面で解決した速さ |
-| `NARRATION_SCENE_PADDING_SEC` | `1` | 同上の計算で語りの前後に置く間（秒）。⚠️ 上の速さと合わせて、編集の途中の AI 補助の「尺に合わせる」（`12 §10`・ADR-0053）でも使う |
+| `NARRATION_CHARS_PER_SEC` | `7.5` | **同梱の AI の動画案で場面の尺を語りから計算する**ときの読み上げの速さの見積もり（字/秒）＝ADR-0052 段階1・`12 §8.7`。早口の判定（`precheckExtras` の 9 字/秒）より遅めに置く＝計算した尺が早口の判定に掛からない。**速さ 1.0（ふつう）のときの値**＝声の速さ設定（`11.6`）の倍率をかけて使う（`narrationCharsPerSec`・#1318）：同梱の AI の案は動画全体の速さ（`voiceSettings.speed`）、編集中の AI 補助の「表示時間に収める」はその場面で解決した速さ |
+| `NARRATION_SCENE_PADDING_SEC` | `1` | 同上の計算で語りの前後に置く間（秒）。⚠️ 上の速さと合わせて、編集の途中の AI 補助の「表示時間に収める」（`12 §10`・ADR-0053）でも使う |
 | `ASSIST_CANDIDATES` | `3` | **編集の途中の AI 補助**（`12 §10`・ADR-0053）で出す候補の数の上限 |
 | `ASSIST_TITLE_MAX_LENGTH` | `20` | 同上の「見出しの候補」の字数の上限 |
-| `ASSIST_SUBTITLE_TARGET_LENGTH` | `30` | 同上の「語りから作る」（字幕）の字数の目安（見た目の `maxSubtitleLength` と短い方） |
+| `ASSIST_SUBTITLE_TARGET_LENGTH` | `30` | 同上の「セリフから作る」（字幕）の字数の目安（見た目の `maxSubtitleLength` と短い方） |
 | `ASSIST_SHORTEN_RATIO` | `0.7` | 同上の「短く」の上限＝今の文の字数 × この割合 |
 | `ASSIST_MIN_LENGTH` | `8` | 同上で、上限がこれ未満なら頼まない（言い直しても意味が残らない） |
-| `ASSIST_VIDEO_TITLE_MAX_LENGTH` | `24` | 同上の「動画の題名の候補」の字数の上限（#1316） |
+| `ASSIST_VIDEO_TITLE_MAX_LENGTH` | `24` | 同上の「動画の名前の候補」の字数の上限（#1316） |
 | `ASSIST_VIDEO_SUMMARY_MAX_LENGTH` | `400` | 同上で、題名の材料（主題＋場面の語り）を AI に渡す字数の上限＝長い動画でも指示文を伸ばしすぎない |
 | `ASSET_DESCRIPTION_MAX_LENGTH` | `60` | **同梱の AI が写真に付ける説明**（`asset.aiDescription`）の字数の上限＝ADR-0052 決定4・`12 §4b`。動画案の指示文に素材ごとに載るので短く |
 | `ASSET_AI_TAGS_MAX` | `5` | 同上で付けるタグの数の上限 |

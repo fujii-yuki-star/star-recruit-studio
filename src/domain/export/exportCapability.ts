@@ -23,19 +23,19 @@ export const EXPORT_CAPABILITY_NOTICE: Record<ExportCapability, ExportCapability
   mediaFoundation: {
     severity: 'ok',
     label: '動画の書き出し',
-    detail: 'この端末は標準の方式で動画を書き出せます。',
+    detail: 'このパソコンは標準の方式で動画を書き出せます。',
   },
   fallback: {
     severity: 'warning',
     label: '動画の書き出し',
     detail:
-      'この端末では標準の書き出し方式が使えないため、予備の方式で書き出します（このまま進められます）。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加すると、標準の方式が使えるようになります。',
+      'このパソコンでは標準の書き出し方式が使えないため、予備の方式で書き出します（このまま進められます）。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加すると、標準の方式が使えるようになります。',
   },
   unavailable: {
     severity: 'action',
     label: '動画の書き出し',
     detail:
-      'この端末では動画を書き出せません。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加してから、もう一度お試しください。解決しない場合はお問い合わせください。',
+      'このパソコンでは動画を書き出せません。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加してから、もう一度お試しください。解決しない場合はお問い合わせください。',
   },
   toolMissing: {
     severity: 'action',
