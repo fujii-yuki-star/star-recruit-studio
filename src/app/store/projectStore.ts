@@ -43,7 +43,7 @@ import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider"
 import { LocalVideoPlanProvider } from "../../infrastructure/aiProviders/localVideoPlanProvider";
 import { cancelAiGenerate, isTauri, localAiAvailable, localAiDescribeImage, willSendExternally } from "../../infrastructure/aiClient";
 import { createAssetDescribeQueue } from "./assetDescribeQueue";
-import { describeTarget } from "../../domain/ai/describeAssetRequest";
+import { clearAiDescriptionOnReplace, describeTarget } from "../../domain/ai/describeAssetRequest";
 import { AI_ENGINE, getAiEngine, getAiModel } from "../../infrastructure/appSettings";
 import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/templateFs";
@@ -2801,8 +2801,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // ⚠️ **収め直しは取り消せるようにする**（ADR-0020）＝`scenes` は履歴 slice なので、
       // 通さずに書き換えると**次の取り消しで収め直しだけが黙って消える**（古い範囲が復活する）。
       if (clamped.size > 0) get().pushHistory();
+      // 写真を差し替えたら、AI が付けた説明は外して読み直す（#1317）＝前の写真の説明が残らない。
+      const relinked = clearAiDescriptionOnReplace(r.asset);
       set((st) => ({
-        assets: st.assets.map((a) => (a.assetId === assetId ? r.asset : a)),
+        assets: st.assets.map((a) => (a.assetId === assetId ? relinked : a)),
         scenes: clamped.size > 0 ? st.scenes.map((sc) => clamped.get(sc.sceneId) ?? sc) : st.scenes,
         assetSrcById: freshUrl ? { ...st.assetSrcById, [assetId]: freshUrl } : st.assetSrcById,
         // 見つからなかった素材なら、その印を外す（直したのに警告が残らない）。
@@ -2811,6 +2813,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
         importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses, PROJECT_FORMAT.scene) : null,
       }));
+      if (relinked !== r.asset) assetDescriber.enqueue(assetId, stillOpen, { retry: true });
     } catch (e) {
       if (stillOpen()) set({ importError: importErrorMessage(e) });
     } finally {

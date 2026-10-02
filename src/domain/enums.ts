@@ -337,6 +337,11 @@ export const TRANSITION_DIRECTION = {
   down: 'down',
 } as const satisfies Record<string, TransitionDirection>;
 
+/** 素材の「AI解析」（`asset.aiDescription`）を書いたのは誰か（#1317・ADR-0052 追補13）。 */
+export const AI_DESCRIPTION_AUTHORS = ['ai', 'user'] as const;
+export type AiDescriptionAuthor = (typeof AI_DESCRIPTION_AUTHORS)[number];
+export const AI_DESCRIPTION_AUTHOR = { ai: 'ai', user: 'user' } as const satisfies Record<string, AiDescriptionAuthor>;
+
 export const NARRATION_STATUSES = ['none', 'pending', 'generated', 'failed'] as const;
 export type NarrationStatus = (typeof NARRATION_STATUSES)[number];
 

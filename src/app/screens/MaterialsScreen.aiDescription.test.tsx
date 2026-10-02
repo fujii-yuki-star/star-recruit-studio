@@ -25,6 +25,10 @@ describe("MaterialsScreen AI解析の欄", () => {
     expect(field.value).toBe("明るいオフィス");
     fireEvent.change(field, { target: { value: "若手が働くオフィス" } });
     expect(useProjectStore.getState().assets[0].aiDescription).toBe("若手が働くオフィス");
+    // 直したら「利用者が書いた」になる＝AI は二度と書き換えない（空にした場合も・#1317）。
+    expect(useProjectStore.getState().assets[0].aiDescriptionAuthor).toBe("user");
+    fireEvent.change(field, { target: { value: "" } });
+    expect(useProjectStore.getState().assets[0].aiDescriptionAuthor).toBe("user");
     expect(screen.getByText("動画案を作るときの手がかりになります。直した内容は、AIが上書きしません。")).toBeInTheDocument();
   });
 

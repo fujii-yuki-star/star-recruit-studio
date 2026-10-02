@@ -3,7 +3,7 @@
 // ⚠️ **このパソコンの中で読む**＝外部送信ではない（§2-6 に当たらない）。付けた説明は `asset.aiDescription`（既存の欄）
 //   に入り、Gemini を選んだときは送信前確認に「AI解析」として出る（12 §6・`assetSentText`）。
 import { ASSET_AI_TAGS_MAX, ASSET_AI_TAG_MAX_LENGTH, ASSET_DESCRIPTION_MAX_LENGTH } from '../constants';
-import { ASSET_TYPE } from '../enums';
+import { AI_DESCRIPTION_AUTHOR, ASSET_TYPE } from '../enums';
 import type { Asset } from '../project/types';
 
 export const DESCRIBE_ASSET_SYSTEM_PROMPT = `あなたは動画づくりのために写真の中身を短く書き留める係です。渡された写真に写っているもの・場所・人の様子・雰囲気を、動画のどの場面で使えるかが分かるように書きます。
@@ -81,6 +81,8 @@ export function parseAssetDescription(raw: string): AssetDescription | null {
  * - ゆうこ・ロゴ・BGM は読まない（場面に割り当てる写真・動画ではない）。
  */
 export function describeTarget(asset: Asset): string | null {
+  // 利用者が直した（空にしたも含む）説明は読まない＝AI が埋め直さない（#1317）。
+  if (asset.aiDescriptionAuthor === AI_DESCRIPTION_AUTHOR.user) return null;
   if (asset.aiDescription?.trim()) return null;
   if (asset.assetType === ASSET_TYPE.image) return asset.filePath;
   if (asset.assetType === ASSET_TYPE.video) return asset.thumbnailPath ?? null;
@@ -93,8 +95,21 @@ export function describeTarget(asset: Asset): string | null {
  * （利用者が付けたタグを増やしたり並べ替えたりしない）。当てるものが無ければ null。
  */
 export function applyAssetDescription(asset: Asset, result: AssetDescription): Asset | null {
+  if (asset.aiDescriptionAuthor === AI_DESCRIPTION_AUTHOR.user) return null;
   if (asset.aiDescription?.trim()) return null;
-  const next: Asset = { ...asset, aiDescription: result.description };
+  const next: Asset = { ...asset, aiDescription: result.description, aiDescriptionAuthor: AI_DESCRIPTION_AUTHOR.ai };
   if ((asset.tags ?? []).length === 0 && result.tags.length > 0) next.tags = result.tags;
+  return next;
+}
+
+/**
+ * 写真を差し替えたときの「AI解析」（#1317）。**AI が付けた説明だけ**を外して読み直させる（前の写真の説明が残らない）。
+ * 利用者が直した説明・誰が書いたか分からない説明（前の版）は触らない。タグは残す（誰が付けたか区別しない）。
+ */
+export function clearAiDescriptionOnReplace(asset: Asset): Asset {
+  if (asset.aiDescriptionAuthor !== AI_DESCRIPTION_AUTHOR.ai) return asset;
+  const next: Asset = { ...asset };
+  delete next.aiDescription;
+  delete next.aiDescriptionAuthor;
   return next;
 }

@@ -227,4 +227,20 @@ describe("createAssetDescribeQueue", () => {
     await queue.idle();
     expect(deps.describe).toHaveBeenCalledTimes(1);
   });
+
+  // #1317：写真を差し替えたら、この画面で一度読んだ素材でも読み直す（`retry`）。ふつうに積むと「試した」で飛ばす。
+  it("一度読んだ素材は、ふつうに積んでも読み直さず、retry なら読み直す", async () => {
+    const { state, deps, queue } = setup([photo("a1")]);
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+    state.assets = [photo("a1")]; // 差し替えで説明を外した状態
+    queue.enqueue("a1", () => true);
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(1);
+    queue.enqueue("a1", () => true, { retry: true });
+    await queue.idle();
+    expect(deps.describe).toHaveBeenCalledTimes(2);
+    expect(state.assets[0].aiDescription).toBe("明るいオフィス");
+  });
 });

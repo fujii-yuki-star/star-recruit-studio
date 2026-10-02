@@ -5,6 +5,7 @@ import type { Asset } from '../project/types';
 import {
   DESCRIBE_ASSET_SYSTEM_PROMPT,
   applyAssetDescription,
+  clearAiDescriptionOnReplace,
   buildDescribeAssetMessages,
   describeTarget,
   parseAssetDescription,
@@ -86,7 +87,7 @@ describe('applyAssetDescription（読んだ結果を当てる）', () => {
 
   it('説明を入れ、タグが無ければタグも付ける（元は壊さない）', () => {
     const a = asset({});
-    expect(applyAssetDescription(a, result)).toEqual({ ...a, aiDescription: '明るいオフィス', tags: ['オフィス'] });
+    expect(applyAssetDescription(a, result)).toEqual({ ...a, aiDescription: '明るいオフィス', aiDescriptionAuthor: 'ai', tags: ['オフィス'] });
     expect(a.aiDescription).toBeUndefined();
   });
 
@@ -100,5 +101,31 @@ describe('applyAssetDescription（読んだ結果を当てる）', () => {
 
   it('待っている間に説明が書かれていたら当てない', () => {
     expect(applyAssetDescription(asset({ aiDescription: '書いた' }), result)).toBeNull();
+  });
+});
+
+// #1317（ADR-0052 追補13）：「AI解析」を書いたのは誰か。利用者が直した説明は AI が書き換えない・AI の説明は差し替えで読み直す。
+describe('aiDescriptionAuthor（誰が書いたか）', () => {
+  const result = { description: '明るいオフィス', tags: ['オフィス'] };
+  it('利用者が直した説明は、空でも読まない・当てない', () => {
+    const cleared = asset({ aiDescription: '', aiDescriptionAuthor: 'user' });
+    expect(describeTarget(cleared)).toBeNull();
+    expect(applyAssetDescription(cleared, result)).toBeNull();
+  });
+  it('誰が書いたか分からない（前の版）なら従来どおり＝空なら読む・説明があれば触らない', () => {
+    expect(describeTarget(asset({ aiDescription: '' }))).not.toBeNull();
+    expect(describeTarget(asset({ aiDescription: '前からある説明' }))).toBeNull();
+  });
+  it('差し替えたら AI の説明だけ外す（利用者の説明・前の版の説明は残す・タグは残す）', () => {
+    const byAi = asset({ aiDescription: '前の写真の説明', aiDescriptionAuthor: 'ai', tags: ['前のタグ'] });
+    const out = clearAiDescriptionOnReplace(byAi);
+    expect(out.aiDescription).toBeUndefined();
+    expect(out.aiDescriptionAuthor).toBeUndefined();
+    expect(out.tags).toEqual(['前のタグ']);
+    expect(describeTarget(out)).not.toBeNull(); // 外したので読み直せる
+    const byUser = asset({ aiDescription: '自分で書いた', aiDescriptionAuthor: 'user' });
+    expect(clearAiDescriptionOnReplace(byUser)).toBe(byUser);
+    const legacy = asset({ aiDescription: '前の版の説明' });
+    expect(clearAiDescriptionOnReplace(legacy)).toBe(legacy);
   });
 });

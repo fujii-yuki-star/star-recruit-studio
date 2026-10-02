@@ -36,7 +36,7 @@ const BLOCKED_POLL_MS = 1000;
 
 export interface AssetDescribeQueue {
   /** 読む素材を積む（待たない）。`stillOpen` は積んだ時点の動画を見る合図。 */
-  enqueue(assetId: string, stillOpen: () => boolean): void;
+  enqueue(assetId: string, stillOpen: () => boolean, opts?: { retry?: boolean }): void;
   /** 積んだものが全部終わるまで待つ（検査用）。 */
   idle(): Promise<void>;
 }
@@ -107,7 +107,12 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
   }
 
   return {
-    enqueue(assetId, stillOpen) {
+    enqueue(assetId, stillOpen, opts) {
+      // `retry`＝この画面を開いている間に一度読んだ素材でも読み直す（写真を差し替えた＝#1317）。
+      if (opts?.retry) {
+        const cur = deps.current(assetId);
+        if (cur) tried.delete(`${cur.projectId}/${assetId}`);
+      }
       jobs.push({ assetId, stillOpen });
       start();
     },

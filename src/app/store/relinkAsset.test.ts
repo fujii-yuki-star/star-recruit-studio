@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetAssetIdReservations } from "./assetImport";
 import { useProjectStore } from './projectStore';
 import * as assetFsMod from '../../infrastructure/assetFs';
+import * as aiClientMod from '../../infrastructure/aiClient';
 import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
 import type { Asset, Scene } from '../../domain/project/types';
 
@@ -42,6 +43,25 @@ describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const relink = (p = 'D:/new/外観.mov') => useProjectStore.getState().relinkAssetByPath('asset_001', p);
+
+  // #1317（ADR-0052 追補13）：AI が付けた説明は、写真を差し替えたら外して読み直す。利用者が直した説明は残す。
+  it('AI が付けた説明は外して読み直す／利用者が直した説明は残す', async () => {
+    vi.spyOn(aiClientMod, 'localAiAvailable').mockResolvedValue(true);
+    const describeSpy = vi.spyOn(aiClientMod, 'localAiDescribeImage').mockResolvedValue(JSON.stringify({ description: '新しい外観', tags: [] }));
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '前の外観', aiDescriptionAuthor: 'ai' })] });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.jpg');
+    await relink('D:/new/外観.jpg');
+    await vi.waitFor(() => expect(useProjectStore.getState().assets[0].aiDescription).toBe('新しい外観'));
+    expect(useProjectStore.getState().assets[0].aiDescriptionAuthor).toBe('ai');
+    expect(describeSpy.mock.calls.at(-1)?.slice(3)).toEqual(['proj_20260827_0001', 'assets/asset_001.jpg']);
+
+    describeSpy.mockClear();
+    useProjectStore.setState({ assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png', aiDescription: '自分で書いた', aiDescriptionAuthor: 'user' })] });
+    await relink('D:/new/外観2.jpg');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(useProjectStore.getState().assets[0].aiDescription).toBe('自分で書いた');
+    expect(describeSpy).not.toHaveBeenCalled();
+  });
 
   it('assetId は変わらず、名前もタグも残る（付け直させない）', async () => {
     await relink();

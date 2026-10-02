@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import type { ScreenId } from "../data/mockData";
-import { ASSET_TYPE } from "../../domain/enums";
+import { AI_DESCRIPTION_AUTHOR, ASSET_TYPE } from "../../domain/enums";
 import { isListedMaterial } from "../../domain/asset/assetFile";
 import { pickPanelAsset } from "./materialsSelection";
 import { AssetThumb } from "../components/AssetThumb";
@@ -487,7 +487,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   className="textarea"
                   value={selected.aiDescription ?? ""}
                   placeholder="取り込むと、このパソコンの中のAIが写真や動画の内容を書きます"
-                  onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, aiDescription: e.target.value }))}
+                  onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, aiDescription: e.target.value, aiDescriptionAuthor: AI_DESCRIPTION_AUTHOR.user }))}
                 />
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>
                   動画案を作るときの手がかりになります。直した内容は、AIが上書きしません。
