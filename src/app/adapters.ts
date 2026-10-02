@@ -1,6 +1,7 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
 import { ASSIST_KIND, assistMaxLength } from "../domain/ai/assist";
+import { resolveNarrationVoice } from "../domain/voice/voiceProvider";
 import type { AssistKind } from "../domain/ai/assist";
 import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
@@ -22,7 +23,7 @@ import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
 import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
-import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
+import type { VoiceSettings, Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
 
@@ -165,8 +166,14 @@ export function buildPrecheckItems(
    * 調べられない場で嘘の「問題なし」を出さない（`missingAssetIds` と同じ流儀）。
    */
   fonts?: { projectFontId?: string | null; availableUserFontIds?: readonly string[]; userFontsUnreadable?: boolean },
+  /**
+   * 動画全体の声の設定（#1318）。早口の判定と「セリフを直す」の判断を、**その場面で解決した声の速さ**で行う
+   * （場面編集の AI 補助と同じ解決＝`resolveNarrationVoice`）。未指定＝速さ 1.0。
+   */
+  voiceSettings?: VoiceSettings,
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
+  const speedOf = (s: Scene): number | undefined => (voiceSettings ? resolveNarrationVoice(s.narration, voiceSettings).speed : undefined);
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
   // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
@@ -187,7 +194,7 @@ export function buildPrecheckItems(
    */
   const fixNarration = (hit: { firstId?: string }, pred: (s: Scene) => boolean, kind: AssistKind): Pick<PrecheckItem, "action" | "sceneId" | "assist"> => {
     const target = scenes.find((s) => pred(s) && (s.lines?.length ?? 0) === 0
-      && assistMaxLength(kind, s.narration.text, { maxNarrationLength: templateOf(s)?.aiHint?.maxNarrationLength, sceneDurationSec: s.durationSec }) !== null);
+      && assistMaxLength(kind, s.narration.text, { maxNarrationLength: templateOf(s)?.aiHint?.maxNarrationLength, sceneDurationSec: s.durationSec, voiceSpeed: speedOf(s) }) !== null);
     return target
       ? { action: FIX_NARRATION_ACTION_LABEL, sceneId: target.sceneId, assist: kind }
       : { action: FIX_NARRATION_ACTION_LABEL, sceneId: hit.firstId };
@@ -317,7 +324,7 @@ export function buildPrecheckItems(
   // 2人同時が**人数ぶん二重計上**される。窓の分け方は `lineTimeline` と同じ `groupIndices`。
   const isTooFast = (s: Scene) => {
     const lines = sceneLines(s);
-    return tooFastScenes(s, groupIndices(lines).map((g) => g.map((i) => lines[i].text)));
+    return tooFastScenes(s, groupIndices(lines).map((g) => g.map((i) => lines[i].text)), speedOf(s));
   };
   const tooFast = offending(isTooFast);
   if (tooFast.nums.length > 0) {

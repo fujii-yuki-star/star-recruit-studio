@@ -98,11 +98,17 @@ export function blurryAssets(
  */
 export const MAX_CHARS_PER_SEC = 9;
 
-export function tooFastScenes(scene: Scene, lineGroups: readonly (readonly string[])[]): boolean {
+/**
+ * `voiceSpeed`＝その場面で解決した声の速さ（`resolveNarrationVoice`・未指定＝1.0）。速い声は1秒に多く読めるので、
+ * 目安も同じ倍率で上げる（#1318）＝尺の見積もり（`narrationCharsPerSec`）との比を保つ（同じ速さの声で「計算した尺が
+ * 早口の判定に掛かる」を作らない）。⚠️ 掛け合いの行ごとの速さはここでは見ない（場面の速さで見る）。
+ */
+export function tooFastScenes(scene: Scene, lineGroups: readonly (readonly string[])[], voiceSpeed?: number): boolean {
   // ⚠️ **同時に流す行は足さない**（レビュー 🟡・ADR-0031）＝2人が**同じ窓**でしゃべるので、
   // 素朴に合算すると**人数ぶん二重計上**する（40字×2人／8秒＝実効5字/秒なのに早口と言う）。
   // 窓を占めるのは**そのグループでいちばん長い行**なので、グループごとに最大を採って足す。
   const chars = lineGroups.reduce((n, g) => n + Math.max(0, ...g.map((t) => t.length)), 0);
   if (chars === 0 || !(scene.durationSec > 0)) return false;
-  return chars / scene.durationSec > MAX_CHARS_PER_SEC;
+  const speed = voiceSpeed != null && Number.isFinite(voiceSpeed) && voiceSpeed > 0 ? voiceSpeed : 1;
+  return chars / scene.durationSec > MAX_CHARS_PER_SEC * speed;
 }
