@@ -8,6 +8,9 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../domain/bgm/bgmCatalog";
 
+/** 同梱のローカル AI のライセンス本文の置き場所（インストール先の中の相対パス・#1289）。 */
+export const LOCAL_AI_LICENSE_DIR = "local_llm/LICENSES";
+
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
 const credits: { name: string; role: string; license: string; credit?: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
   {
@@ -20,6 +23,19 @@ const credits: { name: string; role: string; license: string; credit?: string; s
     role: "動画の書き出し",
     license: "LGPL v3（ソースは下記の入手先をご参照ください）",
     source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
+  },
+  // このパソコンの中で動く AI（ADR-0051・#1289）。全文と改変（変換・軽量化）の告知は同梱フォルダ `local_llm/LICENSES` に置く。
+  {
+    name: "llama.cpp",
+    role: "このパソコンの中で動く AI（動画案・写真の説明・編集の手伝い）",
+    license: `MIT（組み込みの部品：cpp-httplib・nlohmann/json〔MIT〕、BoringSSL・LLVM OpenMP〔Apache-2.0〕ほか）／全文は同梱フォルダ ${LOCAL_AI_LICENSE_DIR}`,
+    source: { label: "提供元", url: "https://github.com/ggml-org/llama.cpp" },
+  },
+  {
+    name: "Qwen3.5-2B（Qwen Team, Alibaba Cloud）",
+    role: "このパソコンの中で動く AI のモデル",
+    license: `Apache-2.0／公式の重みを、このソフト用に変換して軽くしたもの（改変の告知と全文は同梱フォルダ ${LOCAL_AI_LICENSE_DIR}）`,
+    source: { label: "提供元", url: "https://huggingface.co/Qwen/Qwen3.5-2B" },
   },
   {
     name: "Gen Interface JP / Gen Interface JP Display",
