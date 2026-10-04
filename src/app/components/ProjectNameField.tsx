@@ -6,6 +6,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import { videoTitleSource } from "../../domain/ai/assist";
 import { AiSuggest, useLocalAiAvailable } from "./AiSuggest";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { AI_ASSIST_VIDEO_TITLE_KINDS, AI_ASSIST_VIDEO_TITLE_LABEL } from "../uiLabels";
 
 export function ProjectNameField() {
@@ -20,16 +21,21 @@ export function ProjectNameField() {
   const scenes = useProjectStore((s) => s.scenes);
   // テーマ＝採用なら会社名・一般なら発表の題（一般の動画に残っている会社名を主題にしない）。
   const topic = meta.videoKind === VIDEO_KIND.general ? meta.generalBrief?.title : meta.companyInfo?.companyName;
+  const titleSource = videoTitleSource(topic, scenes);
   // 欄は Escape・外側のクリックで閉じる（浮いて重なる表示なので、閉じる手段がボタンだけだと邪魔になる）。
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  // 閉じたら開いたボタンへ焦点を戻す（候補を選んで窓が消えると、焦点が画面の外へ落ちていた）。
+  const closeSuggest = () => { setSuggestOpen(false); toggleRef.current?.focus(); };
   useEffect(() => {
     if (!suggestOpen) return;
     const onDown = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setSuggestOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSuggestOpen(false); };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+    return () => { document.removeEventListener("mousedown", onDown); };
   }, [suggestOpen]);
+  // ⚠️ **Escape は名簿を通す**（UI/UX 監査 2026-10-02）＝`document` を直接見ていたので、1回の Escape で
+  //   下の受け手（キャンバスの選択解除など）も同時に動いていた。手前から1段ずつはがす。
+  useEscapeReceiver(suggestOpen, () => { closeSuggest(); return true; });
 
   const commit = () => {
     if (draft != null) {
@@ -60,6 +66,7 @@ export function ProjectNameField() {
       style={{ fontWeight: 600, maxWidth: 320, minWidth: 120 }}
     />
     {aiAvailable && <button
+      ref={toggleRef}
       className="btn btn-ghost btn-sm text-sm"
       style={{ flexShrink: 0 }}
       disabled={isExporting}
@@ -70,14 +77,22 @@ export function ProjectNameField() {
     </button>}
     {/* 書き出し中は出さない＝名前は変えられない（store が断る）ので、選んでも何も起きない欄を残さない。 */}
     {aiAvailable && suggestOpen && !isExporting && (
-      <div className="card" style={{ position: "absolute", top: "100%", left: 0, zIndex: 50, width: 420, padding: 8, marginTop: 4 }}>
+      // 狭い画面では幅を縮め、候補が長く折り返しても画面の下へ伸びきらない（UI/UX 監査 2026-10-02）。
+      <div
+        className="card"
+        role="dialog"
+        aria-label={AI_ASSIST_VIDEO_TITLE_LABEL}
+        style={{ position: "absolute", top: "100%", left: 0, zIndex: 50, width: "min(420px, calc(100vw - 32px))", maxHeight: "60vh", overflow: "auto", padding: 8, marginTop: 4 }}
+      >
         <AiSuggest
           kinds={AI_ASSIST_VIDEO_TITLE_KINDS}
-          source={videoTitleSource(topic, scenes)}
+          // 開いたらすぐ頼む（「名前の候補」→「候補を出す」の2回押しにしない）。材料が無いときは頼まない。
+          autoKind={titleSource.trim() ? AI_ASSIST_VIDEO_TITLE_KINDS[0].kind : undefined}
+          source={titleSource}
           current={projectName}
           limits={{}}
           companyName={meta.videoKind === VIDEO_KIND.general ? undefined : meta.companyInfo?.companyName}
-          onPick={(t) => { setProjectName(t); setSuggestOpen(false); }}
+          onPick={(t) => { setProjectName(t); closeSuggest(); }}
         />
       </div>
     )}

@@ -3,17 +3,24 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ASSIST_KIND } from "../../domain/ai/assist";
-import { AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_USE_LABEL } from "../uiLabels";
+import { AI_ASSIST_CANCEL_LABEL, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_NEED_SOURCE_HINT, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_STALE_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_USE_LABEL } from "../uiLabels";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** 表（`15 §6`）の `LOCAL_AI_BROKEN` の文＝Rust が返す文そのもの（書き写さない）。 */
+const LOCAL_AI_BROKEN_TEXT = readFileSync(join(process.cwd(), "docs", "yuko_recruit_docs", "errors", "error-state-table.tsv"), "utf8")
+  .split("\n").find((l) => l.startsWith("`LOCAL_AI_BROKEN`\t"))!.split("\t")[3];
 
 const ai = vi.hoisted(() => ({
   available: true,
-  reply: "" as string | Error,
+  reply: "" as string | Error | Promise<string>,
   calls: [] as { system: string; user: string; schema: string }[],
 }));
 vi.mock("../../infrastructure/aiClient", () => ({
   localAiAvailable: () => Promise.resolve(ai.available),
   localAiAssist: (system: string, user: string, schema: string) => {
     ai.calls.push({ system, user, schema });
+    if (ai.reply instanceof Promise) return ai.reply;
     return ai.reply instanceof Error ? Promise.reject(ai.reply) : Promise.resolve(ai.reply);
   },
 }));
@@ -48,7 +55,7 @@ describe("AiSuggest", () => {
     expect(ai.calls).toHaveLength(1);
     expect(screen.getByText("地域の配送を担っています。")).toBeTruthy();
     expect(onPick).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole("button", { name: AI_ASSIST_USE_LABEL })[1]);
+    fireEvent.click(screen.getAllByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) })[1]);
     expect(onPick).toHaveBeenCalledWith("暮らしを支える配送の仕事です。");
     expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
   });
@@ -93,7 +100,7 @@ describe("AiSuggest", () => {
     expect(screen.getByText("地域の配送を担っています。")).toBeTruthy();
     rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={`${LONG}手で直しました。`} limits={{}} onPick={onPick} />);
     expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
-    expect(screen.queryByRole("button", { name: AI_ASSIST_USE_LABEL })).toBeNull();
+    expect(screen.queryByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) })).toBeNull();
     // 見た目パターンが変わって上限が変わったときも同じ。
     rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{ maxNarrationLength: 40 }} onPick={onPick} />);
     expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
@@ -119,6 +126,64 @@ describe("AiSuggest", () => {
     expect(screen.queryByText("配送で地域を支える")).toBeNull();
   });
 
+  // ── UI/UX 監査 2026-10-02 ──
+  it("部品が無い・壊れていると返ったら「もう一度押す」と言わず、入れ直しを案内してボタンを押せなくする", async () => {
+    ai.reply = new Error(LOCAL_AI_BROKEN_TEXT);
+    render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "短く" }));
+    await flush();
+    expect(screen.getByText(AI_ASSIST_UNAVAILABLE_MESSAGE)).toBeTruthy();
+    expect(screen.queryByText(AI_ASSIST_FAILED_MESSAGE)).toBeNull();
+    expect((screen.getByRole("button", { name: "丁寧に" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("ほかの失敗は、これまでどおり「もう一度押す」で、ボタンは押せるまま", async () => {
+    ai.reply = new Error("通信に失敗しました。");
+    render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "短く" }));
+    await flush();
+    expect(screen.getByText(AI_ASSIST_FAILED_MESSAGE)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "丁寧に" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("考えている間は「やめる」で止められ、後から届いた返事は出さない", async () => {
+    let resolve!: (s: string) => void;
+    ai.reply = new Promise<string>((r) => { resolve = r; });
+    render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "短く" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_CANCEL_LABEL }));
+    expect((screen.getByRole("button", { name: "短く" }) as HTMLButtonElement).disabled).toBe(false);
+    resolve(JSON.stringify({ candidates: ["地域の配送を担っています。"] }));
+    await flush();
+    expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
+  });
+
+  it("考えている間に文が変わったら、黙って捨てずに一言出す", async () => {
+    let resolve!: (s: string) => void;
+    ai.reply = new Promise<string>((r) => { resolve = r; });
+    const { rerender } = render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={LONG} limits={{}} onPick={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "短く" }));
+    await flush();
+    rerender(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source={`${LONG}手で直しました。`} limits={{}} onPick={vi.fn()} />);
+    resolve(JSON.stringify({ candidates: ["地域の配送を担っています。"] }));
+    await flush();
+    expect(screen.getByText(AI_ASSIST_STALE_MESSAGE)).toBeTruthy();
+    expect(screen.queryByText("地域の配送を担っています。")).toBeNull();
+  });
+
+  it("元の文が空で押せないときは、理由を添える", async () => {
+    render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source="" limits={{}} onPick={vi.fn()} />);
+    await flush();
+    const b = screen.getByRole("button", { name: "短く" }) as HTMLButtonElement;
+    expect(b.disabled).toBe(true);
+    expect(b.title).toBe(AI_ASSIST_NEED_SOURCE_HINT);
+  });
+
   it("会社名は印にして渡し、候補では会社名に戻す", async () => {
     ai.reply = JSON.stringify({ candidates: ["{会社名}の配送の仕事です。"] });
     const onPick = vi.fn();
@@ -127,7 +192,7 @@ describe("AiSuggest", () => {
     fireEvent.click(screen.getByRole("button", { name: "やわらかく" }));
     await flush();
     expect(ai.calls[0].user).not.toContain("株式会社サンプル物流");
-    fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_USE_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) }));
     expect(onPick).toHaveBeenCalledWith("株式会社サンプル物流の配送の仕事です。");
   });
 });

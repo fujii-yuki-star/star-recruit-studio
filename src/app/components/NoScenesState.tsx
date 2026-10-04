@@ -3,9 +3,9 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL } from "../uiLabels";
+import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL, OPEN_AI_SETTINGS_LABEL } from "../uiLabels";
 import { hasWizardBrief } from "../newProjectGuard";
-import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
+import { generateRecovery } from "../../domain/ai/generateRecovery";
 
 /**
  * 「場面がまだ1つも無い」ときの表示（#590）。**公開前チェック／仕上がり確認／書き出し／たたき台**が共有する。
@@ -54,11 +54,16 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
         {/* ⚠️ **上限で断ったときは再送を出さない**（PR #1223 レビュー 🟡）＝同じ入力を送り直すと
             **また超える**。生成中画面と**同じ見分け・同じ行き先**にする（ADR-0026②）。 */}
-        {isAiSceneLimitMessage(aiError) ? (
-          <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>{EDIT_WIZARD_INPUT_LABEL}</button>
-        ) : (
-          <button className="btn btn-primary" onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>
-        )}
+        {/* 生成中画面と**同じ見分け**（`generateRecovery`）＝どの画面から見ても次の行動が変わらない。 */}
+        {(() => {
+          const recovery = generateRecovery(aiError);
+          if (recovery === "settings") return <button className="btn btn-primary" onClick={() => onNavigate("settings")}>{OPEN_AI_SETTINGS_LABEL}</button>;
+          const edit = <button className={`btn ${recovery === "retry" ? "btn-secondary" : "btn-primary"}`} onClick={() => onNavigate("wizard")}>{EDIT_WIZARD_INPUT_LABEL}</button>;
+          const retry = <button className={`btn ${recovery === "retry" ? "btn-primary" : "btn-secondary"}`} onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>;
+          if (recovery === "editInput") return edit;
+          if (recovery === "shortenInput") return <>{edit}{retry}</>;
+          return retry;
+        })()}
         <button className="btn btn-secondary" onClick={() => { startManualEdit(); onNavigate("draft"); }}>
           {START_MANUAL_LABEL}
         </button>

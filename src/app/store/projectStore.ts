@@ -2395,6 +2395,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 読み込み中に書き出しが始まっていたら、表示も上書きもせず戻る（開始チェックをすり抜けた残り窓・#570 P1）。
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG, isImporting: false }); return; }
     if (!stillOpen()) { set({ isImporting: false }); return; }
+    // 失敗したら元の絵へ戻すために控える（UI/UX 監査 2026-10-02）。
+    const prevSrc = get().assetSrcById[assetId];
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
@@ -2433,8 +2435,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         describeAfterFileReplaced(assetId, stillOpen);
       }
     } catch (e) {
-      // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
-      if (stillOpen()) set({ importError: importErrorMessage(e) });
+      // ⚠️ **表示を元の絵へ戻す**（UI/UX 監査 2026-10-02・ADR-0026③④）＝以前は新しい絵を写したまま知らせだけ出していた。
+      //   ファイルと `filePath` は前の絵のままなので、画面は新しい絵・書き出しと次に開いたときは前の絵＝**成功に見える失敗**だった。
+      if (stillOpen()) {
+        set((s) => {
+          const assetSrcById = { ...s.assetSrcById };
+          if (prevSrc === undefined) delete assetSrcById[assetId];
+          else assetSrcById[assetId] = prevSrc;
+          return { assetSrcById, importError: importErrorMessage(e) };
+        });
+      }
     } finally {
       set({ isImporting: false });
     }

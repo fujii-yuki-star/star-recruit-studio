@@ -44,6 +44,10 @@ pub const MAX_OUTPUT_TOKENS: u32 = 3072;
 const START_TIMEOUT: Duration = Duration::from_secs(120);
 /// 1回の生成の上限（最低検証機で CPU だけ＝約 20 トークン/秒）。
 const GENERATE_TIMEOUT: Duration = Duration::from_secs(600);
+/// 編集の途中の手伝い（候補2〜3個の短い文）の上限（UI/UX 監査 2026-10-02）。
+/// ⚠️ 以前は動画案と同じ 600 秒＝相手が固まると「考えています…」のまま最長約12分（起動の待ちを含む）押せなかった。
+/// 出力の上限（`MAX_OUTPUT_TOKENS`）を最低検証機の速さ（約 20 トークン/秒）で書き切っても 160 秒に収まる。
+const ASSIST_TIMEOUT: Duration = Duration::from_secs(180);
 /// 最後の生成からこれだけ使わなければ止める（メモリ約 2.3GB を返す）。
 const IDLE_STOP: Duration = Duration::from_secs(10 * 60);
 /// やめる操作を見る間隔。
@@ -905,6 +909,7 @@ pub async fn local_ai_assist(
     let resp = http_client()
         .post(format!("{base}/v1/chat/completions"))
         .bearer_auth(state.api_key())
+        .timeout(ASSIST_TIMEOUT)
         .json(&body)
         .send()
         .await;
