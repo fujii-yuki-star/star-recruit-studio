@@ -134,6 +134,6 @@ describe("起動のときに頼まれた書き出し（#1184）", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(begin, "頼まれていないのに始まっている").not.toHaveBeenCalled();
     expect(saveDialog).not.toHaveBeenCalled();
-    screen.getByText("動画を保存");
+    screen.getByRole("button", { name: "動画を書き出す" });
   });
 });

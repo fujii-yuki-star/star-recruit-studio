@@ -44,7 +44,7 @@ export function canAddScenes(current: number, adding = 1): boolean {
  * **タイムライン形式へ焼き出す**（場面の数に縛られない形へ移る＝ADR-0032）。
  */
 export function sceneLimitMessage(): string {
-  return `場面は${MAX_SCENES_PER_VIDEO}個までです。要らない場面を消すか、「時間で編集する形」に焼き出してからお試しください。`;
+  return `場面は${MAX_SCENES_PER_VIDEO}個までです。要らない場面を消すか、「タイムラインで編集する形にする」で移してから続けてください。`;
 }
 
 /**

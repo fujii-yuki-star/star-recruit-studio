@@ -564,9 +564,9 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (
           <div className="card">
-            <h2 className="section-title">動画保存の予備機能</h2>
+            <h2 className="section-title">動画の書き出しの予備機能</h2>
             <p className="page-desc text-pretty">
-              通常は Windows の標準機能で動画を保存します。以下は予備の保存方法が使えるかどうかの状態です。
+              通常は Windows の標準機能で動画を書き出します。以下は予備の書き出し方法が使えるかどうかの状態です。
             </p>
             <div className="row-between mt">
               <span className="text-muted">状態</span>

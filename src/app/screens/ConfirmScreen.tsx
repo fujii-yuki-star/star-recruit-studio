@@ -90,14 +90,14 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
             </h1>
             <p className="page-desc text-pretty">
               {external
-                ? "下の情報をAIに渡して、動画のたたき台を作ります。内容を確認してください。"
+                ? "下の情報を外部のAIに渡して、動画のたたき台を作ります。内容を確認してください。"
                 : "下の情報から、動画のたたき台を作ります。内容を確認してください。この内容が外へ送られることはありません。"}
             </p>
           </div>
 
           {/* 送信される情報 */}
           <div className="card card-tight mb">
-            <h2 className="field-label">AIに渡す情報（文字のみ）</h2>
+            <h2 className="field-label">{external ? "外部のAIに渡す情報（文字のみ）" : "AIに渡す情報（文字のみ）"}</h2>
             <div className="col gap-sm mt">
               {isGeneral ? (
                 <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
@@ -198,7 +198,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               {external ? (
                 <>
                   写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
-                  説明・タグなどの<strong>文字情報だけ</strong>をAIに渡します。
+                  説明・タグなどの<strong>文字情報だけ</strong>を外部のAIに渡します。
                 </>
               ) : (
                 <>

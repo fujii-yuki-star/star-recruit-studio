@@ -231,7 +231,7 @@ export const lookPatterns: LookPattern[] = [
     createdAt: "2026/04/01",
     updatedAt: "2026/05/12",
     elements: ["写真の表示場所", "説明文字", "ゆうこの立ち絵"],
-    description: "写真を大きく見せながら、ゆうこが説明する見た目です。",
+    description: "写真を大きく見せながら、ゆうこの立ち絵が説明する見た目です。",
   },
   {
     id: "l3",

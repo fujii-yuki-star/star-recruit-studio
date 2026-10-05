@@ -31,7 +31,10 @@ describe("送信前確認の言い方が、実際に送るかで変わる（#995
   it("外へ送るときは、送る前提で言い、個人情報の注意も出す", async () => {
     vi.spyOn(ai, "willSendExternally").mockResolvedValue(true);
     render(<ConfirmScreen onNavigate={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText(/AIに渡して/)).toBeInTheDocument());
+    // 外へ送る側は「外部のAI」と言う（06 §3・PR #1328 レビュー）＝説明・見出し・文字だけの注意の3か所。
+    await waitFor(() => expect(screen.getByText(/外部のAIに渡して/)).toBeInTheDocument());
+    expect(screen.getByText("外部のAIに渡す情報（文字のみ）")).toBeInTheDocument();
+    expect(screen.getByText(/を外部のAIに渡します/)).toBeInTheDocument();
     expect(screen.getByText(/送信してよい内容か/)).toBeInTheDocument();
   });
 
@@ -42,6 +45,7 @@ describe("送信前確認の言い方が、実際に送るかで変わる（#995
     await waitFor(() => expect(screen.getAllByText(/外へ送られることはありません/).length).toBeGreaterThan(0));
     expect(screen.queryByText(/AIに渡して/), "送らないのに「渡して」と言っている").toBeNull();
     expect(screen.queryByText(/送信してよい内容か/), "送らないのに送信の確認を出している").toBeNull();
+    expect(screen.queryByText(/外部のAI/), "送らないのに外部と言っている").toBeNull();
   });
 
   // ⚠️ **画面ぜんぶの言い方を見る**（PR #1027 レビュー 🔴）＝最初は説明文と個人情報の注意しか

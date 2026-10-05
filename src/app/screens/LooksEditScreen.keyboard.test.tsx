@@ -198,7 +198,7 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     render(<LooksEditScreen onNavigate={vi.fn()} />);
     selectMany(["layer_d", "layer_a"]); // ⚠️ **最後に選んだのが固定の層**（ここで押せなくなっていた）
     fireEvent.keyDown(window, { key: "Delete" });
-    expect(screen.getByText(/ロック中のまとまりに入っている分は残ります/)).toBeInTheDocument();
+    expect(screen.getByText(/ロック中のグループに入っている分は残ります/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("削除する"));
     expect(overlay().layers.map((l) => l.id)).toEqual(["layer_a", "layer_b"]); // 固定の a は残る・d だけ消える
   });
@@ -298,7 +298,7 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     expect(screen.getByText(/2件をまとめて削除しますか/)).toBeInTheDocument(); // 3件ではない・断られない
     // ⚠️ **事実と違う理由を出さない**（レビュー 🟡）＝ロックが1つも無いのに「ロック中の…」と言わない
     //（言われた利用者は、存在しないロックを探すことになる）。
-    expect(screen.queryByText(/ロック中のまとまりに入っている分は残ります/)).toBeNull();
+    expect(screen.queryByText(/ロック中のグループに入っている分は残ります/)).toBeNull();
     fireEvent.click(screen.getByText("削除する"));
     expect(overlay().layers.map((l) => l.id)).toEqual(["layer_c"]);
   });

@@ -1016,7 +1016,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
     "選んだ部品が、いま再生位置にかかっていません。再生位置を部品の上へ移すか、かかっている部品だけを選んでください",
   TIMELINE_EDIT_MARKER_EXISTS:
     "その時間には、もう別の目印があります。再生位置を1コマずらしてから、もう一度押してください",
-  TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とまとまりになっています。まとまりを外してから複製してください",
+  TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とグループになっています。グループを外してから複製してください",
   TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
   TIMELINE_EDIT_NOT_AUDIO: "その部品は音を持っていません。音の設定は、音や読み上げの部品で変えてください",
@@ -1089,7 +1089,7 @@ export const TIMELINE_VIDEO_AUDIO_UNKNOWN =
  * 黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。
  */
 export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
-  "まとまり全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+  "グループ全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
  * この画面（WebView）が**復号できない形式**の動画は、仕上がり確認で実映像にできない（#816-1）。

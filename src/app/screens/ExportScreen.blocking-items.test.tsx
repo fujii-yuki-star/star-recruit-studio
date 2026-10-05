@@ -37,7 +37,7 @@ const setup = (scenes: Scene[]) => {
 // ⚠️ **押した瞬間に文言が変わる**（#993 ①）＝保存先を選んでいる間も走行中に数えるので、
 // 「動画を書き出す」→「書き出し中…」。どちらでも同じボタンを掴めるようにする。
 const saveBtn = (): HTMLButtonElement =>
-  screen.getByRole("button", { name: /動画を保存|書き出し中…/ }) as HTMLButtonElement;
+  screen.getByRole("button", { name: /動画を書き出す|書き出し中…/ }) as HTMLButtonElement;
 
 describe("ExportScreen 書き出せない項目があるときは保存させない（#547 P2-5 後続）", () => {
   beforeEach(() => {
@@ -335,7 +335,7 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
     setup([]); // 場面ゼロ
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("まだ場面がありません")).toBeTruthy();
-    expect(screen.queryByText("動画を保存")).toBeNull(); // 押せば必ず失敗するボタンを出さない
+    expect(screen.queryByRole("button", { name: "動画を書き出す" })).toBeNull(); // 押せば必ず失敗するボタンを出さない
     expect(screen.queryByLabelText("ファイル名")).toBeNull(); // 入力させてから断る、をしない
     // 設定フォームが無いのに「設定を確認して」と促さない＝次の行動が空状態と食い違わない（§2-5）。
     expect(screen.queryByText(/設定を確認して/)).toBeNull();
@@ -356,6 +356,6 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("まだ場面がありません")).toBeNull();
-    expect(screen.getByText("動画を保存")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "動画を書き出す" })).toBeTruthy();
   });
 });

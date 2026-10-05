@@ -1379,8 +1379,8 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
       animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/「まとまり」にも動きが付いています（2か所）/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "まとまりの動きを外す" }));
+    expect(screen.getByText(/「グループ」にも動きが付いています（2か所）/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "グループの動きを外す" }));
     expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
   });
 });
@@ -2122,7 +2122,7 @@ describe("TimelineProjectScreen: 選んだ部品の欄を整える（#687）", (
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 「画面では動いているのに『動きは付いていません』と言わない」ための知らせ＝見えていないと意味がない。
     expect(section("動き").open).toBe(true);
-    expect(screen.getByText(/「まとまり」にも動きが付いています/)).toBeInTheDocument();
+    expect(screen.getByText(/「グループ」にも動きが付いています/)).toBeInTheDocument();
   });
 
   it("部品を切り替えたら節の既定を見直す（最初に選んだ部品のままにしない）", () => {
@@ -2154,7 +2154,7 @@ describe("TimelineProjectScreen: 選んだ部品の欄を整える（#687）", (
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(section("動き").open).toBe(false); // 畳んだ記憶どおり
-    const notice = screen.getByText(/「まとまり」にも動きが付いています/);
+    const notice = screen.getByText(/「グループ」にも動きが付いています/);
     expect(notice.closest("details")).toBeNull(); // どの節の中にも入っていない
     expect(container.contains(notice)).toBe(true);
   });
@@ -2601,7 +2601,7 @@ describe("TimelineProjectScreen: 固定の見方（#709 レビュー）", () => 
     // 選んでいるのは**固定していない列**の部品（選んだ部品だけを見ると押せてしまう）。
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "まとまりの動きを外す" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "グループの動きを外す" })).toBeDisabled();
   });
 });
 
@@ -2952,7 +2952,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:thumb_v" }, videoSrcById: { asset_v: "blob:body_v" }, selectedClipIds: ["clip_001"] }); });
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       expect(container.querySelector(".preview-stage video")).toBeNull(); // 実映像にしない
-      expect(screen.getByText(/まとまり全体を薄くしている間/)).toBeInTheDocument(); // 理由を出す
+      expect(screen.getByText(/グループ全体を薄くしている間/)).toBeInTheDocument(); // 理由を出す
     });
 
     // ⚠️ **回した部品を左右非対称に切り抜いているときも実映像を出さない**（`11 §7.6.4.1`）＝

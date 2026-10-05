@@ -41,7 +41,7 @@ describe("書き出しの断りは、画面に出せる文だけ出す（#1123�
   it("整えた理由が返れば、その文を出す（丸めない）", async () => {
     failExportWith("この動画は書き出せませんでした。素材を選び直してから、もう一度お試しください。");
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(await screen.findByText("動画を保存"));
+    fireEvent.click(await screen.findByRole("button", { name: "動画を書き出す" }));
     await waitFor(() => expect(document.body.textContent).toMatch(/素材を選び直してから/));
   });
 
@@ -49,7 +49,7 @@ describe("書き出しの断りは、画面に出せる文だけ出す（#1123�
     vi.spyOn(console, "error").mockImplementation(() => {});
     failExportWith("os error 3");
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(await screen.findByText("動画を保存"));
+    fireEvent.click(await screen.findByRole("button", { name: "動画を書き出す" }));
     await waitFor(() => expect(document.body.textContent).toMatch(/記録の場所を開く/));
     expect(document.body.textContent).not.toMatch(/os error/);
   });
@@ -58,7 +58,7 @@ describe("書き出しの断りは、画面に出せる文だけ出す（#1123�
     vi.spyOn(console, "error").mockImplementation(() => {});
     failExportWith(new Error("ffmpeg exited with code 1"));
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(await screen.findByText("動画を保存"));
+    fireEvent.click(await screen.findByRole("button", { name: "動画を書き出す" }));
     await waitFor(() => expect(document.body.textContent).toMatch(/記録の場所を開く/));
     expect(document.body.textContent).not.toMatch(/ffmpeg/);
   });

@@ -84,7 +84,9 @@ describe('これ以上足せないときの案内', () => {
   it('次の行動を示す', () => {
     const m = sceneLimitMessage();
     expect(m).toContain('消す');
-    expect(m).toContain('焼き出し');
+    // 移る道は実在するボタンの名前で言う（内部の言葉「焼き出し」は画面に出さない・PR #1328 レビュー）。
+    expect(m).toContain('「タイムラインで編集する形にする」');
+    expect(m).not.toContain('焼き出');
   });
 
   it('上限の数を出す（いくつまでか分かる）', () => {

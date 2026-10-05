@@ -37,7 +37,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
     useProjectStore.setState({ isImporting: true }); // 取り込みが進行中
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/取り込み中/)).toBeTruthy(); // 理由（次の行動）を表示
     expect(begin).not.toHaveBeenCalled(); // 書き出しは始めない（相互排他）
@@ -51,7 +51,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     const begin = vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
     // 開始時は取り込み中でない＝pre-beginExport チェックは通過する。
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(begin).toHaveBeenCalled()); // beginExport の待機に入った
     useProjectStore.setState({ isImporting: true }); // ここで取り込みが始まる（beginExport 窓）
     resolveBegin();
@@ -67,7 +67,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
       scenes: [{ ...scene("scene_001", 1), narration: { text: "", status: "none" }, lines: [{ lineId: "l1", text: "A", status: "pending" }] } as unknown as Scene],
     });
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/声を作成中/)).toBeTruthy(); // 理由（次の行動）
     expect(begin).not.toHaveBeenCalled(); // 生成中は書き出しを始めない
@@ -78,7 +78,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
     useProjectStore.setState({ status: "generating" }); // AI 動画案を生成中
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/動画案を作成中/)).toBeTruthy(); // 理由（次の行動）
     expect(begin).not.toHaveBeenCalled(); // スナップショットも作らない（beginExport 未実行）
@@ -89,7 +89,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     let resolveBegin: () => void = () => {};
     const begin = vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
     render(<ExportScreen onNavigate={vi.fn()} />); // 開始時は生成中でない＝pre チェック通過
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(begin).toHaveBeenCalled()); // beginExport の待機に入った
     // beginExport 窓で声作成が始まる（pending 行＝isNarrationGenerating が true に）。
     useProjectStore.setState({ scenes: [{ ...scene("scene_001", 1), narration: { text: "", status: "none" }, lines: [{ lineId: "l1", text: "A", status: "pending" }] } as unknown as Scene] });
@@ -103,7 +103,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
     useProjectStore.setState({ isTemplateMutating: true }); // 見た目の保存/削除が進行中（最初の await 前に立つ排他）
     render(<ExportScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/見た目パターンの変更中/)).toBeTruthy(); // 理由（次の行動）
     expect(begin).not.toHaveBeenCalled(); // スナップショットも作らない
@@ -114,7 +114,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     let resolveBegin: () => void = () => {};
     const begin = vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
     render(<ExportScreen onNavigate={vi.fn()} />); // 開始時は生成中でない＝pre チェック通過
-    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }).closest("button") as HTMLButtonElement);
     await waitFor(() => expect(begin).toHaveBeenCalled()); // beginExport の待機に入った
     useProjectStore.setState({ status: "generating" }); // beginExport 窓で動画案生成が始まる
     resolveBegin();

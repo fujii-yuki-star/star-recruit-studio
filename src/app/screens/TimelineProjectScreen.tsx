@@ -5319,7 +5319,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice
               && groupKeyframes.map((g) => (
               <div className="notice" key={g.groupId}>
-                <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
+                <p>この部品が入っている「グループ」にも動きが付いています（{g.keyframes.length}か所）。</p>
                 <button
                   className="btn btn-ghost btn-sm"
                   {...busyGuard({
@@ -5331,7 +5331,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   })}
                   onClick={() => clearKeyframesOf(g.groupId)}
                 >
-                  まとまりの動きを外す
+                  グループの動きを外す
                 </button>
               </div>
             ))}
