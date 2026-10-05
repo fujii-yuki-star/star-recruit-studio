@@ -285,7 +285,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
       setNotice(
         isListedMaterial(a.assetType)
           ? `「${a.displayName}」を${dest}へ取り込みました。素材の一覧に増えています。`
-          : `「${a.displayName}」を${dest}へ取り込みました。音は素材の一覧には並びません。「動画を保存」のBGMから選べます。`,
+          : `「${a.displayName}」を${dest}へ取り込みました。音は素材の一覧には並びません。「動画を書き出す」のBGMから選べます。`,
       );
     }
   }

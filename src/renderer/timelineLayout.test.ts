@@ -358,7 +358,7 @@ describe('layoutToSvg: 合成の単位はαの出どころで決まる（#631 �
 
 // ドリルインの当て先（#818・ADR-0034 決定8）。見た目パターンのクリップは**箱を持たない**ので、
 // キャンバスに描かれているのは中の層だけ＝どの層を指したかは**描いた結果**から引く
-//（テンプレの座標を画面で組み直すと、動き・まとまりの変形とずれる）。
+//（テンプレの座標を画面で組み直すと、動き・グループの変形とずれる）。
 describe('templatePartAt（見た目パターンの中の部分を指す）', () => {
   const item = (id: string, x: number, y: number, w: number, h: number, rotation?: number) =>
     ({ id, zIndex: 0, x, y, w, h, ...(rotation != null ? { rotation } : {}), kind: 'fill', color: '#fff' }) as never;

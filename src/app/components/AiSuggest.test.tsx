@@ -71,16 +71,16 @@ describe("AiSuggest", () => {
   it("頼む必要が無ければ AI を呼ばずにそう伝える（もう尺に収まっている）", async () => {
     render(<AiSuggest kinds={AI_ASSIST_NARRATION_KINDS} source="短い文です。" limits={{ sceneDurationSec: 10 }} onPick={vi.fn()} />);
     await flush();
-    fireEvent.click(screen.getByRole("button", { name: "尺に合わせる" }));
+    fireEvent.click(screen.getByRole("button", { name: "表示時間に収める" }));
     await flush();
     expect(ai.calls).toHaveLength(0);
     expect(screen.getByText(AI_ASSIST_NOT_NEEDED_MESSAGE)).toBeTruthy();
   });
 
   it("元の文が空ならボタンは押せない", async () => {
-    render(<AiSuggest kinds={[{ kind: ASSIST_KIND.subtitle, label: "語りから作る" }]} source="  " limits={{}} onPick={vi.fn()} />);
+    render(<AiSuggest kinds={[{ kind: ASSIST_KIND.subtitle, label: "セリフから作る" }]} source="  " limits={{}} onPick={vi.fn()} />);
     await flush();
-    expect((screen.getByRole("button", { name: "語りから作る" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "セリフから作る" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("頼んだ後に元の文が変わったら、古い文から作った候補は出さない（手直しを上書きしない）", async () => {

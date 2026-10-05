@@ -30,7 +30,7 @@ export const ASSIST_TITLE_MAX_LENGTH = 20;
 export const ASSIST_SUBTITLE_TARGET_LENGTH = 30;
 export const ASSIST_SHORTEN_RATIO = 0.7;
 export const ASSIST_MIN_LENGTH = 8;
-// 動画の題名の候補の字数の上限（#1316）と、題名の材料にする内容の字数の上限（長い動画でも指示文を伸ばしすぎない）。
+// 動画の名前の候補の字数の上限（#1316）と、題名の材料にする内容の字数の上限（長い動画でも指示文を伸ばしすぎない）。
 export const ASSIST_VIDEO_TITLE_MAX_LENGTH = 24;
 export const ASSIST_VIDEO_SUMMARY_MAX_LENGTH = 400;
 // 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。

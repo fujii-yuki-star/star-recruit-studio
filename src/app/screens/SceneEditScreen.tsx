@@ -2652,7 +2652,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
                         {topGroupOfMember(sceneGroups, el.id) != null && (
                           <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
-                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（まとまりで動かすにはグループを選び直してください）。
+                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（グループごと動かすには、グループを選び直してください）。
                           </p>
                         )}
                         <div className="row gap-sm" style={{ marginBottom: 4 }}>
@@ -3286,7 +3286,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 )}
               </div>
               <p className="field-hint">
-                動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
+                動画の収め方・使う範囲・元の音声は、「使用素材」で動画を選ぶと設定できます。声の大きさは「この場面だけ声の大きさ」で場面ごとに変えられます。
               </p>
             </div>
 

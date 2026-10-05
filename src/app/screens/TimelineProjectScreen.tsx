@@ -745,7 +745,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * 一緒に動かさなかったものを**理由別に**知らせる（#788-1）。
    *
    * ⚠️ 以前は数だけ受け取り、常に「固定された列の部品N個は…**固定を外してください**」と出していた。
-   * ところがキャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／まとまりの変形も
+   * ところがキャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／グループの変形も
    * 掴ませない＝#746-4）ので、動き起因のときは**従っても直らない案内**になっていた。
    * 単体選択のときは既に理由別に出していたので、その規準へ揃える（言い方は `canvasHoldMessage` に1か所）。
    */
@@ -2648,9 +2648,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   /**
    * キャンバスで掴めない理由（#746-4）。`null`＝掴める。
    *
-   * 枠は**描かれている場所**に出すので、そこを掴んだ量は**素の箱**へ書き戻る＝動き・まとまりの変形の
+   * 枠は**描かれている場所**に出すので、そこを掴んだ量は**素の箱**へ書き戻る＝動き・グループの変形の
    * ぶんだけ絵が飛ぶ。⚠️ **理由は原因ごとに分ける**＝「動き」で解けないものを「動きで調整して」と
-   * 案内すると、言われたとおりにしても直らない（まとまりの変形は動きの欄では外せない）。
+   * 案内すると、言われたとおりにしても直らない（グループの変形は動きの欄では外せない）。
    */
   const canvasHoldReason = (cc: TimelineCanvasClip): "animation" | "group" | null => {
     if (boxDiffers(cc.groupedBox, cc.finalBox)) return "animation";
@@ -5319,7 +5319,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice
               && groupKeyframes.map((g) => (
               <div className="notice" key={g.groupId}>
-                <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
+                <p>この部品が入っている「グループ」にも動きが付いています（{g.keyframes.length}か所）。</p>
                 <button
                   className="btn btn-ghost btn-sm"
                   {...busyGuard({
@@ -5331,7 +5331,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   })}
                   onClick={() => clearKeyframesOf(g.groupId)}
                 >
-                  まとまりの動きを外す
+                  グループの動きを外す
                 </button>
               </div>
             ))}

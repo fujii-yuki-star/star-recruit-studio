@@ -448,13 +448,13 @@ export const BACK_TO_HOME_LABEL = `${HOME_SCREEN_LABEL}の一覧へ戻る`;
  * 同じ問題を**種類を選ばない言い方**で解いているので、そちらへ揃える（分岐を増やさない）。
  *
  * ⚠️ **決定（2026-09-03）＝白紙にも入口を出す**（#1003 の案 (a)）。
- * 理由＝出さないと、白紙で始めた人は**ゆうこにたたき台を作ってもらう道が永久に無い**
+ * 理由＝出さないと、白紙で始めた人は**AIにたたき台を作ってもらう道が永久に無い**
  *（会社情報が無いと渡すものが無い）＝作り直すしかない行き止まり。
  * ⚠️ **#393「白紙はウィザードを通らない道」とは矛盾しない**＝あれは**始めるときに**
  * 通らなくてよい、という話で、**あとから入れる道を塞ぐ**という意味ではない。
  * 入口を置いても、通るかどうかは利用者が決める。
  */
-export const ADD_WIZARD_INPUT_LABEL = "内容を入れる（ゆうこに頼めるようになります）";
+export const ADD_WIZARD_INPUT_LABEL = "内容を入れる（AIに頼めるようになります）";
 
 /**
  * 入れた内容（会社情報・発表テーマ）を見直しにいく（#985）。
@@ -1016,7 +1016,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
     "選んだ部品が、いま再生位置にかかっていません。再生位置を部品の上へ移すか、かかっている部品だけを選んでください",
   TIMELINE_EDIT_MARKER_EXISTS:
     "その時間には、もう別の目印があります。再生位置を1コマずらしてから、もう一度押してください",
-  TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とまとまりになっています。まとまりを外してから複製してください",
+  TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とグループになっています。グループを外してから複製してください",
   TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
   TIMELINE_EDIT_NOT_AUDIO: "その部品は音を持っていません。音の設定は、音や読み上げの部品で変えてください",
@@ -1089,7 +1089,7 @@ export const TIMELINE_VIDEO_AUDIO_UNKNOWN =
  * 黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。
  */
 export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
-  "まとまり全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+  "グループ全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
  * この画面（WebView）が**復号できない形式**の動画は、仕上がり確認で実映像にできない（#816-1）。
@@ -1471,8 +1471,8 @@ export function canvasHoldMessage(reason: CanvasHoldReason, count?: number): str
         : `動きが効いている部品は${tail}${byNumbers}「動き」で調整してください。`;
     case "group":
       return many
-        ? `まとまりの変形が効いている部品${n}は${tail}${byNumbers}`
-        : `まとまりの変形が効いている部品は${tail}下の数値（または矢印キー）で変えてください。`;
+        ? `グループの変形が効いている部品${n}は${tail}${byNumbers}`
+        : `グループの変形が効いている部品は${tail}下の数値（または矢印キー）で変えてください。`;
   }
 }
 
@@ -1756,9 +1756,15 @@ export function writingSceneMessage(n: number): string {
   return `${n} 場面目を書いています。このままお待ちください。`;
 }
 
+// ── 素材の「AI解析」の欄（ADR-0052 決定4）───────────────────────────────────
+// ⚠️ **行われない約束を出さない**（UI/UX 監査 2026-10-02・ADR-0026④）＝以前は AI が無いときや Gemini を選んでいるときも
+// 「取り込むと、このパソコンの中のAIが…書きます」と出ていた（読み取りは同梱の AI を選んでいるときだけ走る）。
+export const MATERIAL_AI_DESC_PLACEHOLDER_AUTO = "取り込むと、このパソコンの中のAIが写真や動画の内容を書きます";
+export const MATERIAL_AI_DESC_PLACEHOLDER_MANUAL = "写真や動画に写っているものを書くと、動画案を作るときの手がかりになります";
+
 // ── 編集の途中の AI 補助（ADR-0053）──────────────────────────────────────────
-// ⚠️ 技術用語を出さない（「AI に頼む」「候補」「使う」）。失敗は次の行動つき（§2-5・`15 §6`）。
-export const AI_ASSIST_HEADING = "AI に頼む：";
+// ⚠️ 技術用語を出さない（「AIに頼む」「候補」「使う」）。失敗は次の行動つき（§2-5・`15 §6`）。
+export const AI_ASSIST_HEADING = "AIに頼む：";
 export const AI_ASSIST_THINKING = "考えています…";
 export const AI_ASSIST_USE_LABEL = "使う";
 export const AI_ASSIST_CLOSE_LABEL = "候補を閉じる";
@@ -1771,20 +1777,20 @@ export const AI_ASSIST_NARRATION_KINDS = [
   { kind: ASSIST_KIND.shorten, label: "短く" },
   { kind: ASSIST_KIND.polite, label: "丁寧に" },
   { kind: ASSIST_KIND.soft, label: "やわらかく" },
-  { kind: ASSIST_KIND.fitDuration, label: "尺に合わせる" },
+  { kind: ASSIST_KIND.fitDuration, label: "表示時間に収める" },
 ] as const;
 /** 字幕欄のボタン。 */
-export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "語りから作る" }] as const;
+export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "セリフから作る" }] as const;
 /** 公開前チェックの「セリフの長さ」「早口になる場面」から、その場面のセリフ欄へ寄るボタン（ADR-0053 決定2）。 */
 export const FIX_NARRATION_ACTION_LABEL = "セリフを直す";
 /** 見出し欄のボタン。 */
 export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
-/** 掛け合いの各行のボタン（#1316）。行には表示時間が無いので「尺に合わせる」は出さない。 */
+/** 掛け合いの各行のボタン（#1316）。行には表示時間が無いので「表示時間に収める」は出さない。 */
 export const AI_ASSIST_LINE_KINDS = [
   { kind: ASSIST_KIND.shorten, label: "短く" },
   { kind: ASSIST_KIND.polite, label: "丁寧に" },
   { kind: ASSIST_KIND.soft, label: "やわらかく" },
 ] as const;
 /** 動画の名前の横のボタン（#1316）。 */
-export const AI_ASSIST_VIDEO_TITLE_LABEL = "題名の候補";
+export const AI_ASSIST_VIDEO_TITLE_LABEL = "名前の候補";
 export const AI_ASSIST_VIDEO_TITLE_KINDS = [{ kind: ASSIST_KIND.videoTitle, label: "候補を出す" }] as const;

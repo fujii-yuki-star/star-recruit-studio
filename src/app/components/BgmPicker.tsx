@@ -22,7 +22,7 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
   const setBundledBgm = useProjectStore((s) => s.setBundledBgm);
   // ⚠️ **この動画にある音の素材から選べるようにする**（PR #910 レビュー 🟡）＝よく使う素材から
   // 取り込んだ音は `project.assets` に入るだけで、BGM にする導線が無かった（取り込みの案内は
-  // 「「動画を保存」のBGMから選べます」と言っているのに**選べない**＝§2-5）。
+  // 「「動画を書き出す」のBGMから選べます」と言っているのに**選べない**＝§2-5）。
   const setBgmAsset = useProjectStore((s) => s.setBgmAsset);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
   const bgmError = useProjectStore((s) => s.bgmError);

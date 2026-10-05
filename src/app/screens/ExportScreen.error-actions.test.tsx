@@ -3,7 +3,7 @@
 //
 // 他画面向けの終了通知（`ExportResultNotice`・#589）は行動ボタンを持っているのに、
 // **失敗を直に見ているこの画面だけが読むだけ**だった。直す入口（公開前チェック）も
-// やり直す入口（動画を保存）も**遠く上にしかない**（進行バー・保存先の欄を挟むので画面外になりうる）。
+// やり直す入口（動画を書き出す）も**遠く上にしかない**（進行バー・保存先の欄を挟むので画面外になりうる）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -61,12 +61,12 @@ describe("ExportScreen 失敗の知らせに次の行動を置く（#1032）", (
   });
 
   it("やり直す側は上のボタンと同じ条件で押せなくなる（片方だけ塞がれていない、を作らない）", () => {
-    // 書き出せない理由（見た目が見つからない場面）を作ると、上の「動画を保存」も
+    // 書き出せない理由（見た目が見つからない場面）を作ると、上の「動画を書き出す」も
     // 知らせの中の「もう一度書き出す」も**同時に**押せなくなる。
     useProjectStore.setState({ scenes: [scene({ templateId: "missing_tmpl" })] });
     render(<ExportScreen onNavigate={vi.fn()} />);
     failNow();
-    expect((screen.getByRole("button", { name: /動画を保存|書き出し中…/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /動画を書き出す|書き出し中…/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "もう一度書き出す" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

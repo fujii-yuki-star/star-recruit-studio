@@ -13,7 +13,7 @@ export function ProjectNameField() {
   const setProjectName = useProjectStore((s) => s.setProjectName);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は改名を止める（#570 P2）
   const [draft, setDraft] = useState<string | null>(null); // null＝非編集（store の名前を表示）
-  // 題名の候補（#1316・ADR-0053）。材料＝主題（会社名／発表の題）と場面の語り。同梱の AI が無ければ AiSuggest は何も出さない。
+  // 名前の候補（#1316・ADR-0053）。材料＝主題（会社名／発表の題）と場面の語り。同梱の AI が無ければ AiSuggest は何も出さない。
   const [suggestOpen, setSuggestOpen] = useState(false);
   const aiAvailable = useLocalAiAvailable(); // 無ければボタンごと出さない（押しても何も起きない、を作らない）
   const meta = useProjectStore((s) => s.meta);

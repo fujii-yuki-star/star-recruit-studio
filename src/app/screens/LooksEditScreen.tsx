@@ -843,7 +843,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                       ⚠️ 出すのは**本当にロックがあるときだけ**＝もう無い層で数が減っただけのときに
                       ロックの話をしない（探しても見つからない理由を出さない・§2-5）。 */}
                   {lockedLayerIdsIn(confirmBulkDeleteIds).length > 0
-                    && "（ロック中のまとまりに入っている分は残ります）"}
+                    && "（ロック中のグループに入っている分は残ります）"}
                 </>
               }
               onCancel={() => setConfirmBulkDeleteIds(null)}

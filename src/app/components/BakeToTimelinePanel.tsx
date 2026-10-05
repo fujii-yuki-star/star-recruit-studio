@@ -199,9 +199,9 @@ export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: Scre
         <div className="notice" role="status">
           <p>「{done.name}」を作りました。いまの動画はそのままです。</p>
           {/* ⚠️ **作った先で何ができなくなるかを言う**（#992 ⑥）＝戻れないことは伝わるが、
-              「そこでは AI（ゆうこ）も場面編集も使えない」はどこにも書かれていなかった。 */}
+              「そこでは AIも場面編集も使えない」はどこにも書かれていなかった。 */}
           <p className="text-sm text-muted">
-            作った先では、ゆうこにたたき台を作ってもらうことと、場面ごとの編集はできません。
+            作った先では、AIにたたき台を作ってもらうことと、場面ごとの編集はできません。
           </p>
           <div className="row gap-sm">
             {onNavigate && (
