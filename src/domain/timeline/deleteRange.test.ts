@@ -1,7 +1,7 @@
 // 範囲を削除して、必要なら間を詰める（#1193）。
 // ⚠️ **押しのけモードではない**＝ADR-0034 決定11 はそのまま（動かすたびに後ろが動く形は入れない）。
 import { describe, expect, it } from 'vitest';
-import { deleteRange, deleteRangeIssue } from './deleteRange';
+import { clipsInRangeCount, deleteRange, deleteRangeIssue } from './deleteRange';
 import { EDIT_BLOCKED } from './edit';
 import { volumeAt } from './audio';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
@@ -143,15 +143,36 @@ describe('間を詰める', () => {
   });
 });
 
+describe('範囲に掛かる部品の数（消す前の確認）', () => {
+  it('掛かっている部品だけ数える（端が接するだけのものは数えない）', () => {
+    const d = doc({ clips: [
+      text({ id: 'clip_001', startSec: 0, durationSec: 4 }), // 4 で接するだけ
+      text({ id: 'clip_002', startSec: 3, durationSec: 2 }), // 掛かる
+      text({ id: 'clip_003', startSec: 6, durationSec: 2 }), // 6 から＝接するだけ
+      text({ id: 'clip_004', trackId: 'track_002', startSec: 5, durationSec: 0.5 }), // 別の列でも掛かる
+    ] });
+    expect(clipsInRangeCount(d, { startSec: 4, endSec: 6, closeGap: true })).toBe(2);
+  });
+
+  it('列を選んで（詰めずに）消すときは、その列だけ数える', () => {
+    const d = doc({ clips: [text({ id: 'clip_002', startSec: 3, durationSec: 2 }), text({ id: 'clip_004', trackId: 'track_002', startSec: 5, durationSec: 0.5 })] });
+    expect(clipsInRangeCount(d, { startSec: 4, endSec: 6, closeGap: false, trackIds: ['track_002'] })).toBe(1);
+  });
+});
+
 describe('断り（押す前に見る）', () => {
   it('範囲が逆さま・幅ゼロなら断る', () => {
-    expect(deleteRangeIssue(doc(), { startSec: 6, endSec: 4, closeGap: false })).toBe(EDIT_BLOCKED.notFound);
-    expect(deleteRangeIssue(doc(), { startSec: 4, endSec: 4, closeGap: false })).toBe(EDIT_BLOCKED.notFound);
+    expect(deleteRangeIssue(doc(), { startSec: 6, endSec: 4, closeGap: false })).toBe(EDIT_BLOCKED.rangeEmpty);
+    expect(deleteRangeIssue(doc(), { startSec: 4, endSec: 4, closeGap: false })).toBe(EDIT_BLOCKED.rangeEmpty);
   });
 
   // ⚠️ **押しても何も起きない、を作らない**（§2-5）。
   it('何も掛かっていなければ断る（詰めないとき）', () => {
-    expect(deleteRangeIssue(doc(), { startSec: 4, endSec: 6, closeGap: false })).toBe(EDIT_BLOCKED.notFound);
+    expect(deleteRangeIssue(doc(), { startSec: 4, endSec: 6, closeGap: false })).toBe(EDIT_BLOCKED.rangeNoClips);
+  });
+
+  it('列が1本も無ければ、範囲の話として断る（「部品を選び直す」と言わない）', () => {
+    expect(deleteRangeIssue(doc({ tracks: [] }), { startSec: 4, endSec: 6, closeGap: true })).toBe(EDIT_BLOCKED.rangeNoClips);
   });
 
   it('固定された列が対象にあれば断る', () => {

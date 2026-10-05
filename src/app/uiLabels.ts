@@ -1061,6 +1061,11 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
   TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
   TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
+  TIMELINE_EDIT_RANGE_NOT_SET: "先に「ここから（範囲）」と「ここまで（範囲）」で範囲を決めてください",
+  TIMELINE_EDIT_RANGE_EMPTY: "作業範囲の幅がありません。「ここまで（範囲）」を別の位置で置き直してください",
+  TIMELINE_EDIT_RANGE_NO_CLIPS: "作業範囲に部品がありません。範囲を取り直すか、「範囲を削除して詰める」で空白を詰めてください",
+  TIMELINE_EDIT_SPLIT_NONE_SELECTED: "分ける部品を選んでください",
+  TIMELINE_EDIT_SINGLE_CLIP_ONLY: "1つだけ選ぶと使えます",
   TIMELINE_PLAY_EXPORTING: "いま動画を書き出しています。終わってから再生できます",
   TIMELINE_EDIT_UNSPLITTABLE: "読み上げと、それに合わせている字幕は分けられません（文と音がずれるため）。字幕だけ分けたいときは「連動する読み上げ」で連動をやめてください",
   TIMELINE_EDIT_SPLIT_OUTSIDE: "その位置では分けられません。再生位置を部品の中（両側が0.1秒以上残る所）へ動かしてください",
@@ -1782,6 +1787,25 @@ export const AI_ASSIST_UNAVAILABLE_MESSAGE = "このパソコンの中のAIが�
 export const AI_ASSIST_STALE_MESSAGE = "考えている間に文が変わったので、候補は出しませんでした。もう一度押すと、いまの文から作ります。";
 /** 元になる文が空でボタンを押せない理由。 */
 export const AI_ASSIST_NEED_SOURCE_HINT = "先に元になる文を入れると頼めます";
+/**
+ * 作業範囲を消す前の確認（UI/UX 監査 2026-10-02）＝どこからどこまでが・いくつ消えるかを見てから押す。
+ * ⚠️ 以前は**確認なしで全部の列を切って詰めていた**（同じ画面の「まとめて削除」は確認を出す＝規準が割れていた）。
+ */
+export function rangeDeleteConfirmMessage(from: string, to: string, count: number, closeGap: boolean): string {
+  const where = `作業範囲（${from}〜${to}）`;
+  if (closeGap) {
+    return count > 0
+      ? `${where}を削除して、後ろを詰めますか？${count}個の部品にかかります（すべての列が対象です）。`
+      : `${where}の空白を詰めますか？後ろの部品が前へ寄ります（すべての列が対象です）。`;
+  }
+  return `${where}を削除しますか？${count}個の部品にかかります（すべての列が対象です）。`;
+}
+/** 写す前の「貼る」の押せない理由。 */
+export const PASTE_NEEDS_COPY_HINT = "先に部品を「写す」と、再生位置に貼れます";
+/** 作業範囲を取っているときに見せる時刻。 */
+export function rangeLabel(from: string, to: string): string {
+  return `作業範囲：${from}〜${to}`;
+}
 /** 候補が出たことを知らせる（読み上げにも届くよう知らせの置き場に出す）。 */
 export function aiAssistCandidatesCount(n: number): string {
   return `候補が${n}つ出ました`;

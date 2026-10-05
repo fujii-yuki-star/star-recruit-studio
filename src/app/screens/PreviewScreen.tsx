@@ -23,7 +23,8 @@ import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { lineAdvanceWindowSec } from "./previewLineTiming";
 import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
-import { activatesOnSpace, shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { useSpaceFocusTracking, yieldsSpaceTo } from "../hooks/spaceFocus";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -236,6 +237,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   });
 
   // `Space` で再生⇄停止（#1032）。タイムライン編集には前からあるので、**同じキーの意味を画面で割らない**（ADR-0026②）。
+  useSpaceFocusTracking();
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== " ") return;
@@ -244,7 +246,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       if (e.ctrlKey || e.metaKey || e.altKey) return; // 修飾キー付きは OS/ブラウザのものを奪わない
       // **押した要素が `Space` で反応するなら、そちらに譲る**（「停止」を押したら止まったうえに
       // また再生が始まる、を作らない）。一律に奪うと画面じゅうのボタンがキーボードで押せなくなる。
-      if (activatesOnSpace(e.target)) return;
+      // ⚠️ **マウスで押したボタンには譲らない**（UI/UX 監査 2026-10-02・PR4a レビュー＝タイムライン編集と同じ判定）。
+      if (yieldsSpaceTo(e.target)) return;
       const p = playRef.current;
       // **場面が無いときは奪わない**＝押して何も起きない、を作らない（ボタンと同じ条件）。
       if (!p.playing && !p.canPlay) return;
