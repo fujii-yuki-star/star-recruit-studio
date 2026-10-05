@@ -7,8 +7,9 @@ import { pickPanelAsset } from "./materialsSelection";
 import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
+import { describingIn } from "../store/assetDescribeQueue";
 import { useTimelineStore } from "../store/timelineStore";
-import { IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
+import { DESCRIBING_LABEL, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { useLocalAiAvailable } from "../components/AiSuggest";
 import { AI_ENGINE, getAiEngine } from "../../infrastructure/appSettings";
 import { PageHead, Switch } from "../components/ui";
@@ -66,6 +67,9 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02＝裏で読んでいることが見えなかった）。
+  const describingKeys = useProjectStore((s) => s.describingKeys);
+  const describing = describingIn(describingKeys, meta.projectId); // ほかの動画の分を混ぜない（素材の番号は動画ごと）
   // ⚠️ **入れる先が無いときも押せない**（差分再監査 6巡目 🟡）＝棚からの取り込みだけ塞ぐと、
   // 同じ「取り込み」で断り方が2通りになる（ADR-0026②）。判定は共有の1つから採る。
   const projectOpen = useProjectStore(hasOpenProject);
@@ -324,6 +328,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div className="row gap-sm row-wrap" style={{ justifyContent: "center" }}>
                   {/* ⚠️ **どれが見つからないのか一覧で分かる**＝案内だけだと探し回ることになる。 */}
                   {missing.has(a.assetId) && <span className="badge badge-yellow">見つかりません</span>}
+                  {describing.has(a.assetId) && <span className="badge badge-gray">{DESCRIBING_LABEL}</span>}
                   {a.isPublicChecked ? (
                     <span className="badge badge-teal">
                       <CheckIcon size={12} /> 確認済み
@@ -486,7 +491,11 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 送信前確認の「AI解析」と同じ名前で呼ぶ（Gemini を選んだときはこれも送られる）。 */}
             {(selected.assetType === ASSET_TYPE.image || selected.assetType === ASSET_TYPE.video) && (
               <div className="field">
-                <label className="field-label" htmlFor="mat-ai-desc">AI解析</label>
+                <div className="row gap-sm" style={{ alignItems: "baseline" }}>
+                  <label className="field-label" htmlFor="mat-ai-desc">AI解析</label>
+                  {/* 欄の名前には混ぜない（読み上げの名前が読み終わるまで変わってしまう）。 */}
+                  {describing.has(selected.assetId) && <span className="text-sm text-faint" role="status">{DESCRIBING_LABEL}</span>}
+                </div>
                 <textarea
                   id="mat-ai-desc"
                   className="textarea"

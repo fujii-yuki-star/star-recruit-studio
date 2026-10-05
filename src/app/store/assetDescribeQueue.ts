@@ -29,6 +29,29 @@ export interface AssetDescribeDeps {
   blocked(): boolean;
   /** 待つ（検査で差し替える）。 */
   sleep(ms: number): Promise<void>;
+  /**
+   * **読む予定の素材**が変わった（UI/UX 監査 2026-10-02＝裏で読んでいることが画面のどこにも見えず、
+   * 読み終わる前に動画案を作ると、説明の無いまま作られることに気づけなかった）。
+   * ⚠️ 数えるのは**実際に読むもの**だけ（積んだ時点で説明が要る写真・動画）＝説明があるもの・音は数えない
+   * （1枚ずつ順に読むので、20枚の後ろに積んだ音が「読み取り中」に見え続けてしまう）。
+   */
+  onPending?(keys: readonly string[]): void;
+}
+
+/**
+ * 「読み取り中」の見分け（`onPending` が渡すもの）＝**動画の番号と素材の番号の組**。
+ * ⚠️ **素材の番号だけで見分けない**（PR #1342 レビュー 🟡）＝素材の番号は動画ごとに `asset_001` から振り直すので、
+ * 前の動画で読んでいる最中の `asset_001` が、新しく開いた動画の `asset_001` を「読み取り中」に見せていた。
+ */
+export function describingKey(projectId: string, assetId: string): string {
+  return `${projectId}/${assetId}`;
+}
+
+/** いま開いている動画の「読み取り中」の素材の番号（画面はこれで見る＝ほかの動画の分を混ぜない）。 */
+export function describingIn(keys: readonly string[], projectId: string | undefined): Set<string> {
+  if (!projectId) return new Set();
+  const prefix = describingKey(projectId, "");
+  return new Set(keys.filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)));
 }
 
 /** 書き出しが終わるのを待つ間隔。 */
@@ -47,7 +70,18 @@ export interface AssetDescribeQueue {
 }
 
 export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribeQueue {
-  const jobs: { assetId: string; stillOpen: () => boolean }[] = [];
+  const jobs: { assetId: string; stillOpen: () => boolean; counted: string | null }[] = [];
+  /** 読む予定の素材ごとの、積んである数（同じ素材を2回積むことがある＝差し替え）。見分けは `describingKey`。 */
+  const pending = new Map<string, number>();
+  const emit = (): void => deps.onPending?.([...pending.keys()]);
+  /** 数えた見分け（`describingKey`）で外す＝数えたときと同じ動画の分を外す。 */
+  const settle = (job: { counted: string | null }): void => {
+    if (!job.counted) return;
+    const n = (pending.get(job.counted) ?? 0) - 1;
+    if (n > 0) pending.set(job.counted, n);
+    else pending.delete(job.counted);
+    emit();
+  };
   const tried = new Set<string>();
   /** 素材ごとの差し替えの世代（`invalidate` で進む）。 */
   const generation = new Map<string, number>();
@@ -94,7 +128,8 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
     // 問い合わせの失敗（同期の例外も）は「使えない」＝裏の仕事で取り込みや画面を落とさない。
     availability ??= Promise.resolve().then(() => deps.available()).catch(() => false);
     if (!(await availability)) {
-      jobs.length = 0;
+      // 同梱の AI が無い＝どれも読まない。「読み取り中」を残さない。
+      for (const job of jobs.splice(0)) settle(job);
       return;
     }
     while (jobs.length > 0) {
@@ -103,6 +138,8 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
         await runOne(job.assetId, job.stillOpen);
       } catch (e) {
         console.warn("[ai] 写真の説明の途中で失敗しました（説明は付けません）:", job.assetId, e);
+      } finally {
+        settle(job);
       }
     }
   }
@@ -119,11 +156,17 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
   return {
     enqueue(assetId, stillOpen, opts) {
       // `retry`＝この画面を開いている間に一度読んだ素材でも読み直す（写真を差し替えた＝#1317）。
-      if (opts?.retry) {
-        const cur = deps.current(assetId);
-        if (cur) tried.delete(`${cur.projectId}/${assetId}`);
+      const cur = deps.current(assetId);
+      if (opts?.retry && cur) tried.delete(`${cur.projectId}/${assetId}`);
+      // 実際に読むものだけ数える（`runOne` が飛ばすものは数えない＝読まないのに「読み取り中」と言わない）。
+      const counted = cur && stillOpen() && !tried.has(`${cur.projectId}/${assetId}`) && describeTarget(cur.asset) !== null
+        ? describingKey(cur.projectId, assetId)
+        : null;
+      jobs.push({ assetId, stillOpen, counted });
+      if (counted) {
+        pending.set(counted, (pending.get(counted) ?? 0) + 1);
+        emit();
       }
-      jobs.push({ assetId, stillOpen });
       start();
     },
     invalidate(assetId) {

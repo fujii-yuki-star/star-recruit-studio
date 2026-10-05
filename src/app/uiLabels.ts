@@ -1848,3 +1848,16 @@ export function sceneEditTrailLabel(label: string, pos: number, total: number): 
 }
 export const TRAIL_PREV_LABEL = "前の場面";
 export const TRAIL_NEXT_LABEL = "次の場面";
+
+/** 同梱の AI が写真・動画をまだ読んでいる（UI/UX 監査 2026-10-02＝裏で読んでいることが見えなかった）。 */
+export const DESCRIBING_LABEL = "読み取り中…";
+/** 動画案を作る前に、まだ読み終わっていない写真・動画があるとき。 */
+export function describingRemainMessage(n: number): string {
+  return `写真・動画の読み取りが、あと ${n} 件あります。読み終わってから作ると、どの場面にどれを使うかが合いやすくなります。`;
+}
+/** 「読み終わってから作る」を選んで待っているとき。 */
+export function describingWaitingMessage(n: number): string {
+  return `読み終わったら、そのまま進みます（あと ${n} 件）。`;
+}
+export const WAIT_DESCRIBE_LABEL = "読み終わってから作る";
+export const MAKE_WITHOUT_WAIT_LABEL = "待たずに作る";

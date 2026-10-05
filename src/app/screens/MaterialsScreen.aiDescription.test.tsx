@@ -4,11 +4,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { describingKey } from "../store/assetDescribeQueue";
 import type { Asset } from "../../domain/project/types";
 import { MaterialsScreen } from "./MaterialsScreen";
 import { resetAiSuggestAvailabilityForTest } from "../components/AiSuggest";
 import { AI_ENGINE, setAiEngine } from "../../infrastructure/appSettings";
-import { MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL } from "../uiLabels";
+import { DESCRIBING_LABEL, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL } from "../uiLabels";
 
 const ai = vi.hoisted(() => ({ available: true }));
 vi.mock("../../infrastructure/aiClient", async (importOriginal) => ({
@@ -76,5 +77,24 @@ describe("MaterialsScreen AI解析の欄", () => {
     open("当社マーク");
     expect((screen.getByLabelText("名前") as HTMLInputElement).value).toBe("当社マーク");
     expect(screen.queryByLabelText("AI解析")).toBeNull();
+  });
+});
+
+// UI/UX 監査 2026-10-02：裏で読んでいることを見せる。
+describe("MaterialsScreen 読み取り中", () => {
+  beforeEach(() => {
+    useProjectStore.setState({ assets: [photo, clip, logo], scenes: [], parts: [], templates: [], assetSrcById: {}, meta: { ...useProjectStore.getState().meta, projectId: "p_now" }, describingKeys: [describingKey("p_now", "asset_002"), describingKey("p_before", "asset_001")] });
+  });
+
+  // ⚠️ **前の動画の同じ番号の素材**（asset_001）は数えない＝素材の番号は動画ごとに振り直す（PR #1342 レビュー 🟡）。
+  it("読んでいる素材の一覧の札と、開いた欄の横にだけ出す（欄の名前は変えない・ほかの動画の分は出さない）", () => {
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(1);
+    expect(screen.getByText(DESCRIBING_LABEL).closest("button")).toHaveTextContent("紹介動画");
+    fireEvent.click(screen.getAllByText("紹介動画")[0]);
+    expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(2);
+    expect(screen.getByLabelText("AI解析")).toBeTruthy();
+    fireEvent.click(screen.getAllByText("オフィス外観")[0]);
+    expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(1);
   });
 });
