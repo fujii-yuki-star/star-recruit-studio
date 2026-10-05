@@ -3353,10 +3353,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     <div className="dense" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
       <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
-      <ExportLock onNavigate={onNavigate}>
       {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る・段・進むを5画面で同じ形に。この画面はスクロールの外に置く（貼り付け不要）。
           ⚠️ **戻るは来た所へ**＝公開前チェックの「直す」から来たときは公開前チェックへ（UI/UX 監査 2026-10-02）。
-          ⚠️ 移る前に**いま編集中の場面を預ける**（#410 sub3）＝仕上がり確認から戻ると同じ場面が開く。 */}
+          ⚠️ 移る前に**いま編集中の場面を預ける**（#410 sub3）＝仕上がり確認から戻ると同じ場面が開く。
+          ⚠️ **書き出し中の止め（`ExportLock`）の外に置く**（PR #1347 レビュー）＝ほかの4画面と同じく、書き出し中も画面は移れる（止めるのは書き出しの画面だけ）。
+          ⚠️ 並びがあるとき（公開前チェックの「直す」から来た）の段「4」は戻ると同じ＝公開前チェックが覚えた戻り先に触らない。 */}
       <div style={{ padding: "var(--gap-sm) var(--gap) 0" }}>
         <FlowBar
           current="scene-edit"
@@ -3365,9 +3366,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             ? { label: BACK_TO_PRECHECK_LABEL, onClick: () => onNavigate("precheck") }
             : { label: "台本表へ戻る", onClick: () => onNavigate("draft") }}
           next={{ label: "仕上がり確認へ", onClick: () => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); } }}
-          onJump={(to) => { setEditingSceneId(selected?.sceneId ?? null); flowJump("scene-edit", to, onNavigate); }}
+          onJump={(to) => {
+            setEditingSceneId(selected?.sceneId ?? null);
+            if (to === "precheck" && trail) onNavigate("precheck");
+            else flowJump("scene-edit", to, onNavigate);
+          }}
         />
       </div>
+      <ExportLock onNavigate={onNavigate}>
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
         <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>

@@ -21,11 +21,12 @@ export const FLOW_STEPS: readonly { screen: FlowScreen; label: string }[] = [
 /**
  * 段を押したときの移り方（来た画面の覚え方を1か所に）。
  * ⚠️ 仕上がり確認と公開前チェックは「来た画面へ戻る」を持つ＝ここで覚えさせる（覚えない入口を作らない・#1026）。
- *   覚えられない入口（公開前チェック→仕上がり確認など）は消して置く＝前に覚えた別の画面へ戻らない。
  */
 export function flowJump(from: FlowScreen, to: FlowScreen, onNavigate: (s: ScreenId) => void): void {
   const st = useProjectStore.getState();
-  if (to === "preview") st.setPreviewReturnTo(from === "precheck" ? null : from);
-  if (to === "precheck") st.setPrecheckReturnTo(from === "preview" || from === "export" ? from : null);
+  // ⚠️ **どの段から来ても覚える**（PR #1347 レビュー 🟡）＝以前は覚えられない入口で戻り先を消していたので、
+  //   来ていない画面（既定の「仕上がり確認へ戻る」など）を指した（#1026 の型）。戻るの言い方は両画面の表が全段を持つ。
+  if (to === "preview") st.setPreviewReturnTo(from);
+  if (to === "precheck") st.setPrecheckReturnTo(from);
   onNavigate(to);
 }

@@ -69,13 +69,18 @@ describe("5画面とも、流れの帯が上にある", () => {
 });
 
 describe("段を押して移る（来た画面の覚え方は1か所）", () => {
-  it("たたき台から公開前チェックへ＝覚えられない入口なので戻り先を消して置く（前に覚えた別の画面へ戻らない）", () => {
+  // PR #1347 レビュー 🟡：以前は覚えられない入口で戻り先を消し、来ていない画面（既定の「仕上がり確認へ戻る」）を指した。
+  it("たたき台から公開前チェックへ＝戻るは「たたき台へ戻る」（来た所へ）", () => {
     useProjectStore.setState({ precheckReturnTo: "export" });
     const onNavigate = vi.fn();
     render(<DraftScreen onNavigate={onNavigate} />);
     fireEvent.click(screen.getByRole("button", { name: "4 公開前チェック" }));
     expect(onNavigate).toHaveBeenCalledWith("precheck");
-    expect(useProjectStore.getState().precheckReturnTo).toBeNull();
+    cleanup();
+    const back = vi.fn();
+    render(<PrecheckScreen onNavigate={back} />);
+    fireEvent.click(within(screen.getByTestId("flow-bar")).getByRole("button", { name: /たたき台へ戻る/ }));
+    expect(back).toHaveBeenCalledWith("draft");
   });
 
   it("仕上がり確認から公開前チェックへ＝戻り先は仕上がり確認", () => {
@@ -95,12 +100,22 @@ describe("段を押して移る（来た画面の覚え方は1か所）", () => 
     expect(useProjectStore.getState().editingSceneId).toBe("scene_002");
   });
 
-  it("公開前チェックから仕上がり確認へ＝覚えられない入口なので戻り先を消して置く", () => {
+  it("公開前チェックから仕上がり確認へ＝戻るは「公開前チェックへ戻る」", () => {
     useProjectStore.setState({ previewReturnTo: "export" });
-    const onNavigate = vi.fn();
-    render(<PrecheckScreen onNavigate={onNavigate} />);
+    render(<PrecheckScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "3 仕上がり確認" }));
-    expect(useProjectStore.getState().previewReturnTo).toBeNull();
+    cleanup();
+    render(<PreviewScreen onNavigate={vi.fn()} />);
+    expect(within(screen.getByTestId("flow-bar")).getByRole("button", { name: /公開前チェックへ戻る/ })).toBeInTheDocument();
+  });
+
+  it("場面編集（公開前チェックの「直す」から来た）の段「4」は戻ると同じ＝公開前チェックが覚えた戻り先に触らない", () => {
+    useProjectStore.setState({ sceneEditTrail: { label: "x", sceneIds: ["scene_001", "scene_002"] }, precheckReturnTo: "export" });
+    const onNavigate = vi.fn();
+    render(<SceneEditScreen onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByRole("button", { name: "4 公開前チェック" }));
+    expect(onNavigate).toHaveBeenCalledWith("precheck");
+    expect(useProjectStore.getState().precheckReturnTo).toBe("export");
   });
 });
 
@@ -110,7 +125,20 @@ describe("進めないときは理由を帯に出す", () => {
     render(<PrecheckScreen onNavigate={vi.fn()} />);
     const bar = screen.getByTestId("flow-bar");
     expect(within(bar).getByRole("button", { name: /このまま書き出す/ })).toBeDisabled();
-    expect(bar.querySelector(".flow-bar-reason")?.textContent ?? "").not.toBe("");
+    const reason = bar.querySelector(".flow-bar-reason")?.textContent ?? "";
+    expect(reason).not.toBe("");
+    // 段「5 書き出し」も同じ条件で止め、同じ理由を添える（別の道で抜けさせない・PR #1347 レビュー 🟡）。
+    const step5 = within(bar).getByRole("button", { name: "5 書き出し" });
+    expect(step5).toBeDisabled();
+    expect(step5.getAttribute("title")).toBe(reason);
+  });
+
+  it("書き出し中でも、書き出し以外の画面の帯は押せる（場面編集も同じ＝止めは書き出しの画面だけ）", () => {
+    useProjectStore.getState().setExportRun({ phase: "rendering" });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const bar = screen.getByTestId("flow-bar");
+    expect(bar.closest("[inert]")).toBeNull();
+    expect(within(bar).getByRole("button", { name: /台本表へ戻る/ })).not.toBeDisabled();
   });
 
   it("書き出し中は戻るも段も押せない（以前の戻ると同じ）", () => {
@@ -118,6 +146,9 @@ describe("進めないときは理由を帯に出す", () => {
     render(<ExportScreen onNavigate={vi.fn()} />);
     const bar = screen.getByTestId("flow-bar");
     expect(within(bar).getByRole("button", { name: /公開前チェックへ戻る/ })).toBeDisabled();
-    for (const b of within(bar).getAllByRole("button").filter((x) => x.classList.contains("flow-step"))) expect(b).toBeDisabled();
+    for (const b of within(bar).getAllByRole("button").filter((x) => x.classList.contains("flow-step"))) {
+      expect(b).toBeDisabled();
+      expect(b.getAttribute("title")).toBe("書き出しが終わるまでお待ちください"); // 押せない理由を添える
+    }
   });
 });

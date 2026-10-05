@@ -50,6 +50,8 @@ const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
   draft: "たたき台へ戻る",
   "scene-edit": "場面編集へ戻る",
   export: "書き出しへ戻る",
+  // 流れの帯の段から来たとき（ADR-0048 追補 2026-10-05）。
+  precheck: "公開前チェックへ戻る",
 };
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {

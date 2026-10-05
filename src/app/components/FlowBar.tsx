@@ -23,13 +23,19 @@ export interface FlowBarProps {
   };
   /** 段を押したとき。画面ごとの下ごしらえ（いまの場面を預ける等）があれば包んで渡す。 */
   onJump: (to: FlowScreen) => void;
-  /** 段を押せない（書き出し中など）。 */
+  /** 段を押せない（書き出し中など）。理由は `jumpDisabledReason`（押す前に見せる＝§2-5）。 */
   jumpDisabled?: boolean;
+  jumpDisabledReason?: string;
+  /**
+   * 段ごとに押せない理由（PR #1347 レビュー 🟡）＝進むが押せないのに、隣の段からは同じ先へ抜けられた
+   * （同じ帯に流儀が2つ）。進むと同じ条件をここにも渡す。
+   */
+  stepBlocked?: Partial<Record<FlowScreen, string | null | undefined>>;
   /** 貼り付けない（スクロールの外に置く画面＝場面編集）。 */
   sticky?: boolean;
 }
 
-export function FlowBar({ current, back, next, onJump, jumpDisabled = false, sticky = true }: FlowBarProps) {
+export function FlowBar({ current, back, next, onJump, jumpDisabled = false, jumpDisabledReason, stepBlocked, sticky = true }: FlowBarProps) {
   return (
     <div className={`flow-bar${sticky ? ` ${EDITOR_HEADER_CLASS}` : ""}`} data-testid="flow-bar">
       <div className="flow-bar-side">
@@ -44,10 +50,18 @@ export function FlowBar({ current, back, next, onJump, jumpDisabled = false, sti
         <ol>
           {FLOW_STEPS.map((s, i) => (
             <li key={s.screen}>
+              {/* 区切り（読み上げない）＝並んだボタンではなく順番だと見て分かるように（PR #1347 レビュー ℹ️）。 */}
+              {i > 0 && <span className="flow-step-sep" aria-hidden="true">›</span>}
               {s.screen === current ? (
                 <span className="flow-step flow-step--current" aria-current="step">{`${i + 1} ${s.label}`}</span>
               ) : (
-                <button type="button" className="flow-step" onClick={() => onJump(s.screen)} disabled={jumpDisabled}>
+                <button
+                  type="button"
+                  className="flow-step"
+                  onClick={() => onJump(s.screen)}
+                  disabled={jumpDisabled || !!stepBlocked?.[s.screen]}
+                  title={jumpDisabled ? jumpDisabledReason : stepBlocked?.[s.screen] ?? undefined}
+                >
                   {`${i + 1} ${s.label}`}
                 </button>
               )}

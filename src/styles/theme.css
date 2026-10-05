@@ -1876,6 +1876,14 @@ button.badge {
   padding: 0;
   list-style: none;
 }
+.flow-bar-steps li {
+  display: flex;
+  align-items: center;
+}
+.flow-step-sep {
+  color: var(--color-text-faint);
+  padding: 0 2px;
+}
 .flow-step {
   display: inline-block;
   padding: 2px 10px;

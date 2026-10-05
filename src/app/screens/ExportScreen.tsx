@@ -588,9 +588,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           （「動画を書き出す」はこの画面の操作そのもの＝流れの進むではない）。書き出している間は移らせない（以前の戻ると同じ）。 */}
       <FlowBar
         current="export"
-        back={{ label: "公開前チェックへ戻る", onClick: openPrecheck, disabled: busy }}
+        back={{ label: "公開前チェックへ戻る", onClick: openPrecheck, disabled: busy, title: busy ? "書き出しが終わるまでお待ちください" : undefined }}
         onJump={(to) => flowJump("export", to, onNavigate)}
         jumpDisabled={busy}
+        jumpDisabledReason="書き出しが終わるまでお待ちください"
       />
       <PageHead title={EXPORT_TITLE} desc={EXPORT_DESC} />
 

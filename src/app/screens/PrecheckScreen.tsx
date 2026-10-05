@@ -35,6 +35,9 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; badge: st
 const PRECHECK_BACK_LABEL: Partial<Record<ScreenId, string>> = {
   preview: "仕上がり確認へ戻る",
   export: "書き出しへ戻る",
+  // 流れの帯の段から来たとき（ADR-0048 追補 2026-10-05）。
+  draft: "たたき台へ戻る",
+  "scene-edit": "場面編集へ戻る",
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
@@ -147,6 +150,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         current="precheck"
         back={{ label: PRECHECK_BACK_LABEL[precheckBackTo] ?? "", onClick: () => onNavigate(precheckBackTo) }}
         next={{ label: "このまま書き出す", onClick: () => onNavigate("export"), disabled: exportBlocked, reason: exportBlockedReason }}
+        // 段「5 書き出し」も進むと同じ条件で止める（同じ先へ別の道で抜けさせない）。
+        stepBlocked={{ export: exportBlocked ? exportBlockedReason ?? "書き出す前に直す項目があります" : null }}
         onJump={(to) => flowJump("precheck", to, onNavigate)}
       />
       <PageHead
