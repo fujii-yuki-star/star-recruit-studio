@@ -99,7 +99,7 @@ describe('作業範囲を消す', () => {
   it('範囲を取っていなければ、理由を出す', async () => {
     await open(doc());
     useTimelineStore.getState().deleteRangeInTimeline(true);
-    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.notFound);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.rangeNotSet);
   });
 
   it('消したら、範囲は外れる', async () => {
@@ -136,7 +136,7 @@ describe('詰めないときの断り（PR #1199 レビュー 🟡5）', () => {
     useTimelineStore.getState().setRangeEdge('in', 4);
     useTimelineStore.getState().setRangeEdge('out', 6);
     useTimelineStore.getState().deleteRangeInTimeline(false);
-    expect(useTimelineStore.getState().editBlocked?.reason, '何も無いのに消せている').toBe(EDIT_BLOCKED.notFound);
+    expect(useTimelineStore.getState().editBlocked?.reason, '何も無いのに消せている').toBe(EDIT_BLOCKED.rangeNoClips);
   });
 
   // ⚠️ **詰めるときは断らない**＝空白そのものを詰めるのが目的。

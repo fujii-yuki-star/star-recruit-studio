@@ -540,7 +540,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0052 決定6・#1293）＝出力が上限で止まった（LOCAL_AI_TOO_LONG）。
     // ⚠️ **+2**（ADR-0053）＝編集の途中の手伝いで候補を作れなかった（AI_ASSIST_FAILED）／頼む必要が無い（AI_ASSIST_NOT_NEEDED）。
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(271);
+    // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(276);
   });
 
 
@@ -571,6 +572,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   const MESSAGE_FN_EXEMPT: Record<string, string> = {
     // ── 状況で締めが変わる（1つの行に対して複数の文）＝等値では守れない ──
     lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
+    rangeDeleteConfirmMessage: "断り・知らせではなく、消す前の確認の文（表の対象外＝まとめて削除の確認と同じ扱い）",
     hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
     volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
     audioUnreadableMessage: "音源の種類（読み上げ／同梱の曲／取り込んだ素材）で次の行動が変わる",
@@ -797,7 +799,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0052 決定5）＝上と同じ1行。**+1**（ADR-0052 決定6）＝上と同じ1行。
     // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED。
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(268);
+    // ⚠️ **+5**（PR4a）＝上と同じ5行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(273);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -821,6 +824,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+2**＝`AI_GEMINI_KEY_MISSING`／`AI_RESPONSE_UNREADABLE`（ADR-0051・`codeMessages()` へ直に載せた＝後者は以前は直書きで弱い段だった）。
       // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED（等値で守る）。
       // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE（等値で守る）。
-    ).toBe(120);
+      // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
+    ).toBe(125);
   });
 });

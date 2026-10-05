@@ -1345,7 +1345,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 幅ゼロを `notFound` で断る。**それでも残す**のは、型の上で `number` が要るのと、
     // **ここで断る理由が「範囲を取っていない」だと読んで分かる**ため（規則が増えたわけではない）。
     if (rangeInSec == null || rangeOutSec == null) {
-      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
+      set({ editBlocked: { reason: EDIT_BLOCKED.rangeNotSet, at: blockTargetFor(EDIT_BLOCKED.rangeNotSet, at) } });
       return;
     }
     const startSec = Math.min(rangeInSec, rangeOutSec);

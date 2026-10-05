@@ -226,6 +226,19 @@ export const EDIT_BLOCKED = {
    * **その項目を持たない部品に意味の無いデータを書かない**。
    */
   contentField: 'TIMELINE_EDIT_CONTENT_FIELD',
+  /**
+   * 作業範囲（ここから・ここまで）を取っていない（UI/UX 監査 2026-10-02）。⚠️ 以前はキーの道だけ `notFound`
+   * （「その部品は見つかりませんでした」）を出していた＝ボタンと断り文が割れ、次の行動も示さなかった。
+   */
+  rangeNotSet: 'TIMELINE_EDIT_RANGE_NOT_SET',
+  /** 作業範囲の幅がゼロ（ここからとここまでが同じ位置）。 */
+  rangeEmpty: 'TIMELINE_EDIT_RANGE_EMPTY',
+  /** 作業範囲に部品が1つも掛かっていない（詰めずに消すとき＝押しても何も起きない、を作らない）。 */
+  rangeNoClips: 'TIMELINE_EDIT_RANGE_NO_CLIPS',
+  /** 分ける部品を選んでいない（キーの道も同じ文＝UI/UX 監査 2026-10-02）。 */
+  splitNoneSelected: 'TIMELINE_EDIT_SPLIT_NONE_SELECTED',
+  /** 1つだけ選んだときに使える操作を、2つ以上選んで押した（キーの道も同じ文＝UI/UX 監査 2026-10-02）。 */
+  singleClipOnly: 'TIMELINE_EDIT_SINGLE_CLIP_ONLY',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];

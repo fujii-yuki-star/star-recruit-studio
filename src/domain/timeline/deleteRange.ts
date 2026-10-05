@@ -64,7 +64,9 @@ export function deleteRangeIssue(
   doc: TimelineProject,
   input: DeleteRangeInput,
 ): EditBlockedReason | null {
-  if (!(input.endSec > input.startSec)) return EDIT_BLOCKED.notFound;
+  // ⚠️ **理由は画面と同じコード**（UI/UX 監査 2026-10-02）＝以前は幅ゼロも何も掛かっていないも `notFound`
+  //（「その部品は見つかりませんでした。選び直してください」）だった＝範囲の話なのに部品を選び直させていた。
+  if (!(input.endSec > input.startSec)) return EDIT_BLOCKED.rangeEmpty;
   const scope = targetTrackIds(doc, input);
   if (scope.length === 0) return EDIT_BLOCKED.notFound;
   const locked = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
@@ -75,9 +77,17 @@ export function deleteRangeIssue(
   if (overlapping(doc, scope, input).length === 0 && !input.closeGap) {
     // ⚠️ **何も掛かっていなければ断る**＝押しても何も起きない、を作らない（§2-5）。
     // ⚠️ **詰めるときは断らない**＝**空白そのものを詰める**のが目的なので、部品が無いのが正常。
-    return EDIT_BLOCKED.notFound;
+    return EDIT_BLOCKED.rangeNoClips;
   }
   return null;
+}
+
+/**
+ * 範囲に掛かる部品の数（消す前の確認で出す＝どれだけ消えるかを見てから押す・UI/UX 監査 2026-10-02）。
+ * ⚠️ **数え方は実際に消す処理と同じ**（`overlapping`）＝確認で言った数と、実際に掛かる数がずれない。
+ */
+export function clipsInRangeCount(doc: TimelineProject, input: DeleteRangeInput): number {
+  return overlapping(doc, targetTrackIds(doc, input), input).length;
 }
 
 /** 対象の列（`trackIds` 省略／詰めるとき＝すべて）。 */

@@ -597,6 +597,26 @@
   pointer-events: none; /* 線でクリックを奪わない（シークはルーラーが受ける） */
 }
 /**
+ * 作業範囲の網掛け（UI/UX 監査 2026-10-02 🔴）＝目盛りから列まで**どこからどこまでか**を見せる（Premiere/Resolve の型）。
+ * 範囲を取っても画面に何も出ず、「範囲を削除して詰める」を見ずに押すことになっていた。
+ * 位置は再生位置の線と同じ測り方（列の名前の欄ぶん右から）＝線と網掛けがずれない。
+ * 帯（1）の上・再生位置の線（3）の下＝線が網掛けに隠れない。片方の端だけのときは線だけ（--edge）。
+ */
+.timeline-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border-left: 2px solid var(--color-primary);
+  border-right: 2px solid var(--color-primary);
+  z-index: 2;
+  pointer-events: none;
+}
+.timeline-range--edge {
+  background: none;
+  border-right: none;
+}
+/**
  * 吸着した先の線（#686 段階4・決定12）。**点線**にするのは再生位置の実線と**役割が違う**から
  * （あちらは「いまの時刻」・こちらは「そこへ揃えた」）＝同じ見た目にすると2本の意味が混ざる。
  * 掴んでいる間しか出ないので、頭のつまみ（`::before`）は持たない。
