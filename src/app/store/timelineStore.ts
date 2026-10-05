@@ -1341,9 +1341,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const { doc, rangeInSec, rangeOutSec } = get();
     if (!doc) return;
     // ⚠️ **範囲を取っていなければ理由を出す**＝押しても何も起きない、を作らない（§2-5）。
-    // ⚠️ **答えは `deleteRangeIssue` と同じ**（変異チェックで等価と分かった）＝あちらも
-    // 幅ゼロを `notFound` で断る。**それでも残す**のは、型の上で `number` が要るのと、
-    // **ここで断る理由が「範囲を取っていない」だと読んで分かる**ため（規則が増えたわけではない）。
+    // ⚠️ **範囲が無いのはここでしか言えない**＝`deleteRangeIssue` は数を受け取るので「取っていない」を知らない
+    // （幅ゼロ・部品が掛かっていないは、あちらが `rangeEmpty`／`rangeNoClips` で断る）。
+    // ⚠️ **再生中・書き出し中は見ない**＝押す前に画面の関門（`rangeExtra`）が見る（確認の「削除する」でももう一度見る）。
     if (rangeInSec == null || rangeOutSec == null) {
       set({ editBlocked: { reason: EDIT_BLOCKED.rangeNotSet, at: blockTargetFor(EDIT_BLOCKED.rangeNotSet, at) } });
       return;

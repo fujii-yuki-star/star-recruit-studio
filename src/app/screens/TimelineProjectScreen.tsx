@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -29,7 +29,8 @@ import { audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolume
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { usesTypeAhead, activatesOnSpace, NUDGE_GROUP_IDLE_MS, renameFieldKeys, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
+import { useSpaceFocusTracking, yieldsSpaceTo } from "../hooks/spaceFocus";
+import { usesTypeAhead, NUDGE_GROUP_IDLE_MS, renameFieldKeys, shouldIgnoreShortcut, usesArrowKeys, isComposingReact } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner, useEscapeReceiver } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -606,8 +607,6 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // ⚠️ **消す相手と「どこから始めたか」を組で持つ**（#869 レビュー 🟡・`exploding` と同じ流儀）
   //＝確認の後で断られたとき、返す欄が押したボタンと合う。
   const [confirmRemove, setConfirmRemove] = useState<{ ids: string[]; from: BlockTarget } | null>(null);
-  /** マウスで押した直後のボタン（`Space` をそのボタンへ譲らない＝再生に使う・UI/UX 監査 2026-10-02）。 */
-  const mousePressedRef = useRef<Element | null>(null);
   /** 作業範囲を消す前の確認（UI/UX 監査 2026-10-02＝確認なしで全部の列を切っていた）。 */
   const [confirmRange, setConfirmRange] = useState<{ closeGap: boolean } | null>(null);
   // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
@@ -857,8 +856,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // `Escape` で**背後の選択だけが解け**、そのまま「削除する」を押しても何も起きない（§2-5）。
   // `Space`・`Delete`・矢印もこの値で塞いでいるので、漏れると**答えを求めている最中に別の操作が通る**。
   const overlayOpen =
-    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null;
+    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null;
   useEscapeOwner(overlayOpen);
+  // 範囲が消えたら、範囲を消す確認も閉じる（見えないまま状態だけ残り、取り直したときに確認が出てくる、を作らない・PR4a レビュー）。
+  useEffect(() => {
+    if (confirmRange !== null && (rangeInSec == null || rangeOutSec == null)) setConfirmRange(null);
+  }, [confirmRange, rangeInSec, rangeOutSec]);
 
   // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
   /**
@@ -1068,11 +1071,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       if (e.key === " ") {
         // **押した要素が `Space` で反応するなら、そちらに譲る**（消すボタンを押したら消えたうえに再生が
         // 始まる、を作らない）。一律で奪うと画面じゅうのボタンがキーボードで押せなくなる。
-        // ⚠️ **ただしマウスで押した直後のボタンは譲らない**（UI/UX 監査 2026-10-02）＝「複製」「列を足す」などを
-        //   押してから `Space` で再生しようとすると、もう1つ複製される・列がもう1本増えていた（型では `Space` は
-        //   再生と停止だけ）。キーボードでたどり着いたボタン（`Tab` で焦点を移した）は、これまでどおり `Space` で押せる。
-        //   ⚠️ 焦点を外す（blur）案は #950 で採らなかった＝外し方を誤るとキーボードでボタンが押せなくなる。
-        if (activatesOnSpace(e.target) && !(e.target != null && e.target === mousePressedRef.current)) return;
+        // ⚠️ **ただしマウスで押したボタンには譲らない**（UI/UX 監査 2026-10-02・判定は `yieldsSpaceTo` に1つ＝仕上がり確認と共有）。
+        if (yieldsSpaceTo(e.target)) return;
         e.preventDefault(); // 既定の「画面を下へ送る」を止める
         if (playRef.current.playing) { playRef.current.pause(); return; } // 止めるのはいつでも通す
         if (playRef.current.total <= 0) return; // 置いていないときは再生できない（ボタンと同じ条件）
@@ -1111,23 +1111,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, selectClips, overlayOpen, setEditBlocked]);
-  // **マウスで押したボタンを覚える**（上の `Space` の扱い・UI/UX 監査 2026-10-02）。焦点がほかへ移ったら忘れる
-  // ＝`Tab` で戻ってきたボタンは「キーボードでたどり着いた」扱い（`Space` で押せる）。
-  useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      const t = e.target instanceof Element ? e.target.closest("button, [role='button'], summary, select, input") : null;
-      mousePressedRef.current = t;
-    };
-    const onFocus = (e: FocusEvent) => {
-      if (e.target !== mousePressedRef.current) mousePressedRef.current = null;
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("focusin", onFocus, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("focusin", onFocus, true);
-    };
-  }, []);
+  // **`Space` をボタンへ譲るかの見張り**（UI/UX 監査 2026-10-02・`spaceFocus.ts`）。
+  useSpaceFocusTracking();
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 書き出す大きさの選択肢（#1255）＝場面形式と**同じ関数**から出す（数字を別々に書かない・§2-7）。
   const exportFullDims = exportDimsForOrientation(doc?.videoSettings.aspectRatio ?? ORIENTATION.landscape, false);
@@ -2273,10 +2258,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
       if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
       if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, PANEL_ID.arrange); return; }
-      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing, PANEL_ID.arrange); return; } // 位置を使う操作＝再生中は断る（決定21）
-      // ⚠️ **ボタンと同じ理由**（UI/UX 監査 2026-10-02）＝以前は選んでいない・2つ以上でも「その部品は見つかりませんでした」だった。
-      if (selectedClipIds.length > 1) { setEditBlocked(EDIT_BLOCKED.singleClipOnly, PANEL_ID.arrange); return; }
-      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.splitNoneSelected, PANEL_ID.arrange); return; }
+      // ⚠️ **その先はボタンと同じ関門・同じ順**（UI/UX 監査 2026-10-02・PR4a レビュー）＝2つ以上→選んでいない→再生中。
+      //   以前は選んでいない・2つ以上でも「その部品は見つかりませんでした」で、順もボタンと違った。
+      { const extra = splitExtra(); if (extra.disabled) { setEditBlocked(extra.reason ?? EDIT_BLOCKED.notFound, PANEL_ID.arrange); return; } }
+      if (!doc || !selected) return; // ↑ で断っている（型のため）
       // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝渡さないと差し込み口の置き場所が
       // 1件も解けず、「素材を使い切った先」の判定が**差し込み口では必ず偽**になる。
       // ⚠️ ただし**このキーの道だけは、渡さなくても結果が変わらない**（この先の `splitSelectedClip` が
@@ -3444,11 +3429,16 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * **いま範囲を消せるか**（#1193）。`deleteRangeIssue` を見る＝押す前に断るのと、
    * 実際に消すときの規則が**同じもの**（押せるのに何も起きない、を作らない）。
    *
-   * ⚠️ **範囲を取っていないときの文は、ここで作る**＝ドメインは `notFound` としか言えない
+   * ⚠️ **断りはドメインと同じコード**（UI/UX 監査 2026-10-02）＝範囲を取っていない・幅が無い・部品が掛かっていないを
+   * それぞれのコードで言う（以前はドメインが `notFound` としか言えず、ここで文を作っていた）
    *（「対象が見つからない」は**選び直しても直らない**案内になる＝§2-5）。
    */
   const rangeExtra = (closeGap: boolean): { disabled?: boolean; hint?: string; reason?: EditBlockedReason } => {
     if (!doc) return { disabled: true };
+    // ⚠️ **書き出し中もここで断る**（PR4a レビュー 🔴）＝ボタンだけが `editGuard` で塞ぎ、キー（Shift+Delete）は
+    //   確認まで進んで「削除する」で**黙って何もしない**ことになっていた。範囲は選んだ部品に依らないので、
+    //   選択の固定は見ない（固定した列は `deleteRangeIssue` が対象の列ごとに見る）。
+    if (exporting) return blockedBy(EDIT_BLOCKED.exporting);
     if (rangeInSec == null || rangeOutSec == null) return blockedBy(EDIT_BLOCKED.rangeNotSet);
     // ⚠️ **幅ゼロもここで断る**（PR #1199 レビュー 🟡）＝`I` と `O` を同じ所で押すと起きる。
     // 抜けるとドメインの `notFound`（「その部品は見つかりませんでした。選び直してください」）が
@@ -3467,8 +3457,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     });
     return issue ? blockedBy(issue) : {};
   };
-  const rangeCloseGuard = editGuard(rangeExtra(true));
-  const rangeDeleteGuard = editGuard(rangeExtra(false));
+  // ⚠️ **選んだ部品の固定は見ない**（PR4a レビュー 🟡）＝範囲は選択に依らない（固定した部品を選んでいると、
+  //   関係の無い範囲の削除まで押せなくなっていた）。キーと同じ関門（`rangeExtra`）だけを見る。
+  const rangeCloseGuard = busyGuard(rangeExtra(true));
+  const rangeDeleteGuard = busyGuard(rangeExtra(false));
   /**
    * **この瞬間で絵を止める**（#356 ②）＝押せる条件は「分ける」と同じ入口を通す。
    *
@@ -3557,8 +3549,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           label: "再生位置に貼る",
           shortcut: SHORTCUT_KEYS.paste,
           ...(clipClipboard && clipClipboard.length > 0
-            ? editGuard().disabled ? { disabled: true, disabledHint: editGuard().title } : {}
-            : { disabled: true, disabledHint: "先に部品を「写す」と、再生位置に貼れます" }),
+            // ⚠️ **選んだ部品の固定は見ない**（PR4a レビュー 🟡）＝貼る先は写した部品の元の列（右クリックした帯とは
+            //   無関係）。キー（Ctrl+V）と同じ条件にする。
+            ? busyGuard().disabled ? { disabled: true, disabledHint: busyGuard().title } : {}
+            : { disabled: true, disabledHint: PASTE_NEEDS_COPY_HINT }),
           onSelect: pasteClipsAtPlayhead,
         },
         // ⚠️ **1つのときだけ**（#701 レビュー）＝複製は store が「選択がちょうど1件」でないと**何もせず
@@ -6624,9 +6618,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             onConfirm={() => {
               const { closeGap } = confirmRange;
               setConfirmRange(null);
-              // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝まとめて削除と同じ）。
-              // 範囲・固定・再生中の判定は**消す先**（`deleteRangeInTimeline`）が見る＝確認の間に変わっても理由が出る。
-              if (exporting) return;
+              // ⚠️ **押した時点で、押す前と同じ関門をもう一度通す**（PR4a レビュー＝確認を出している間に書き出し・再生が
+              //   始まった・範囲や列の固定が変わった）。消す先（`deleteRangeInTimeline`）は**再生中を見ない**ので、ここで
+              //   見ないと走っている最中に全部の列を切ってしまう。断るときは**黙らず**ボタンと同じ理由を出す。
+              const extra = rangeExtra(closeGap);
+              if (extra.disabled) {
+                setEditBlocked(extra.reason ?? EDIT_BLOCKED.notFound, PANEL_ID.arrange);
+                return;
+              }
               deleteRangeInTimeline(closeGap, PANEL_ID.arrange);
             }}
           />

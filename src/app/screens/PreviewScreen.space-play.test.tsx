@@ -8,6 +8,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
+import { resetSpaceFocusForTest } from "../hooks/spaceFocus";
 import { PreviewScreen } from "./PreviewScreen";
 
 const scene = (): Scene =>
@@ -25,6 +26,7 @@ function isPlaying(): boolean {
 
 describe("仕上がり確認：Space で再生⇄停止（#1032）", () => {
   beforeEach(() => {
+    resetSpaceFocusForTest();
     // 音は鳴らせないので play() は黙って解決させる（この検査の対象は再生状態の切り替え）。
     vi.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
     useProjectStore.getState().setExportRun({ phase: "idle" });
@@ -62,6 +64,15 @@ describe("仕上がり確認：Space で再生⇄停止（#1032）", () => {
     // 「音を消す」は Space で押せるボタン＝奪うと「消えたうえに再生が始まる」。
     fireEvent.keyDown(screen.getByRole("button", { name: "音を消す" }), { key: " " });
     expect(isPlaying()).toBe(false);
+  });
+
+  it("マウスで押したボタンには譲らない＝その後の Space は再生（タイムライン編集と同じ判定・UI/UX 監査 2026-10-02）", () => {
+    render(<PreviewScreen onNavigate={vi.fn()} />);
+    const mute = screen.getByRole("button", { name: "音を消す" });
+    fireEvent.pointerDown(mute);
+    mute.focus();
+    fireEvent.keyDown(mute, { key: " " });
+    expect(isPlaying(), "マウスで押した「音を消す」へ Space を譲っている").toBe(true);
   });
 
   it("修飾キー付きは奪わない（OS・ブラウザのものを取らない）", () => {

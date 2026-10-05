@@ -1798,8 +1798,10 @@ export function rangeDeleteConfirmMessage(from: string, to: string, count: numbe
       ? `${where}を削除して、後ろを詰めますか？${count}個の部品にかかります（すべての列が対象です）。`
       : `${where}の空白を詰めますか？後ろの部品が前へ寄ります（すべての列が対象です）。`;
   }
-  return `${where}を削除しますか？${count}個の部品にかかります。`;
+  return `${where}を削除しますか？${count}個の部品にかかります（すべての列が対象です）。`;
 }
+/** 写す前の「貼る」の押せない理由。 */
+export const PASTE_NEEDS_COPY_HINT = "先に部品を「写す」と、再生位置に貼れます";
 /** 作業範囲を取っているときに見せる時刻。 */
 export function rangeLabel(from: string, to: string): string {
   return `作業範囲：${from}〜${to}`;

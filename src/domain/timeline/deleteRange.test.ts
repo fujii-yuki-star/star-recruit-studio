@@ -171,6 +171,10 @@ describe('断り（押す前に見る）', () => {
     expect(deleteRangeIssue(doc(), { startSec: 4, endSec: 6, closeGap: false })).toBe(EDIT_BLOCKED.rangeNoClips);
   });
 
+  it('列が1本も無ければ、範囲の話として断る（「部品を選び直す」と言わない）', () => {
+    expect(deleteRangeIssue(doc({ tracks: [] }), { startSec: 4, endSec: 6, closeGap: true })).toBe(EDIT_BLOCKED.rangeNoClips);
+  });
+
   it('固定された列が対象にあれば断る', () => {
     const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }], clips: [text({ startSec: 0, durationSec: 10 })] });
     expect(deleteRangeIssue(d, { startSec: 4, endSec: 6, closeGap: false })).toBe(EDIT_BLOCKED.lockedSelection);

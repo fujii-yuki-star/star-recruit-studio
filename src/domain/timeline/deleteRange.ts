@@ -68,7 +68,8 @@ export function deleteRangeIssue(
   //（「その部品は見つかりませんでした。選び直してください」）だった＝範囲の話なのに部品を選び直させていた。
   if (!(input.endSec > input.startSec)) return EDIT_BLOCKED.rangeEmpty;
   const scope = targetTrackIds(doc, input);
-  if (scope.length === 0) return EDIT_BLOCKED.notFound;
+  // 列が1本も無い（範囲に掛かる部品が無いのと同じ）＝画面の範囲の話として言う（「部品を選び直す」と言わない）。
+  if (scope.length === 0) return EDIT_BLOCKED.rangeNoClips;
   const locked = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
   // ⚠️ **固定された列が対象にあれば断る**＝まとめて消す・まとめて動かすと同じ扱い。
   // ⚠️ **詰めるときは対象が全列になる**（`targetTrackIds`）ので、この1行で
