@@ -271,15 +271,13 @@ describe('editBlockedMessage（置けなかった理由の案内）', () => {
 describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）", () => {
   // ⚠️ **単体とまとめてで示す行き先が違う**＝まとめて（2つ以上選んでいる）ときは「位置・大きさ」の欄が
   // 画面から消えるので、数値や「動き」を案内すると**探しても見つからない**（§2-5 の行き止まり）。
-  it("単体は目の前にある行き先（下の数値・「動き」）を示す", () => {
-    expect(canvasHoldMessage("animation")).toContain("下の数値（または矢印キー）");
-    expect(canvasHoldMessage("animation")).toContain("「動き」で調整してください");
+  it("単体は目の前にある行き先（下の数値）を示す", () => {
     expect(canvasHoldMessage("group")).toContain("下の数値（または矢印キー）");
     expect(canvasHoldMessage("group")).not.toContain("「動き」"); // グループの変形は「動き」では外せない
   });
 
   it("まとめては、その場面で本当に押せるもの（矢印キー）だけを示す", () => {
-    for (const reason of ["animation", "group"] as const) {
+    for (const reason of ["group"] as const) {
       const m = canvasHoldMessage(reason, 2);
       expect(m).toContain("矢印キーで動かせます");
       expect(m).toContain("1つだけ選ぶと数値でも変えられます");
@@ -295,9 +293,9 @@ describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）",
   });
 
   it("個数はそのまま出る（1個に固定されない）", () => {
-    expect(canvasHoldMessage("animation", 1)).toContain("部品1個は");
-    expect(canvasHoldMessage("animation", 5)).toContain("部品5個は");
-    expect(canvasHoldMessage("animation")).not.toContain("個は"); // 単体は個数を言わない
+    expect(canvasHoldMessage("group", 1)).toContain("部品1個は");
+    expect(canvasHoldMessage("group", 5)).toContain("部品5個は");
+    expect(canvasHoldMessage("group")).not.toContain("個は"); // 単体は個数を言わない
   });
 });
 

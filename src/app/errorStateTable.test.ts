@@ -163,15 +163,13 @@ function codeMessages(): Record<string, string> {
     // **どれか1通りだけ書き換えても気づけない**（この関数はまさに「言い方が2か所にあると
     // 片方だけ直す」を畳むために作ったもの＝畳んだ先で同じ穴を開けない）。
     // ⚠️ **`ASSEMBLED_AT_RUNTIME` との線引き**（PR #1048 レビュー 🟡）＝**返す文が有限個に
-    // 打ち切れるか**で決める。ここは `reason` が3値の union・`count` は有無の2値なので**6通りで尽きる**
+    // 打ち切れるか**で決める。ここは `reason` が2値の union（動きは ADR-0054 で掴めるようになり退役）・`count` は有無の2値なので**4通りで尽きる**
     // ＝1つずつ書ける。件数や名前を差し込むだけの文（`userFontMissingMessage` 等）も、差し込み口を
     // ` N ` のような目印にすれば1通りに落ちるので等値で守れる。**候補の有無や状況で締めが変わる**もの
     //（`sceneTemplateProblemMessage`・`missingTemplateMessage` 等）は組み合わせが表の行と1対1にならない
     // ので、あちらへ理由つきで載せる。
     TIMELINE_CANVAS_HOLD_TRACK: canvasHoldMessage("track"),
     TIMELINE_CANVAS_HOLD_TRACK_MANY: canvasHoldMessage("track", " N " as unknown as number),
-    TIMELINE_CANVAS_HOLD_ANIMATION: canvasHoldMessage("animation"),
-    TIMELINE_CANVAS_HOLD_ANIMATION_MANY: canvasHoldMessage("animation", " N " as unknown as number),
     TIMELINE_CANVAS_HOLD_GROUP: canvasHoldMessage("group"),
     TIMELINE_CANVAS_HOLD_GROUP_MANY: canvasHoldMessage("group", " N " as unknown as number),
     // ⚠️ **走査の外にあった文言をまとめて載せる**（#1012 の3つ目）＝ここへ載せていない文言は
@@ -802,7 +800,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE。
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
     // ⚠️ **+2**（#1331）＝上と同じ2行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(275);
+    // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（読む表から外れる＝取り消し線の行は数えない）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(273);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -828,6 +827,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE（等値で守る）。
       // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
       // ⚠️ **+2**（#1331）＝素材の外へ伸ばせない断り2つ（同上）。
-    ).toBe(127);
+      // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（動きのある部品は掴めるようになった）。
+    ).toBe(125);
   });
 });
