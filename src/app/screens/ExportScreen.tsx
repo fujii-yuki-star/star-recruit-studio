@@ -685,15 +685,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   抑止は「**同じ文**が失敗表示に出ているとき」だけ＝二重に並べない。phase だけで抑止すると、無関係な失敗が
                   残っている間に blocker ができたとき「押せないのに理由が出ない」になる（レビュー指摘）。 */}
               {capabilityBlocked && capability ? (
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
               ) : blockedMessage && !(phase === "error" && message === blockedMessage) ? (
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{blockedMessage}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{blockedMessage}</span>
               ) : lockBlockedMessage ? (
                 /* ⚠️ **押せなくしたら、理由も出す**（#843 レビュー 🟡）＝押せないボタンは `onClick` が走らないので、
                    断り文を `startExport` の中だけに置くと**画面に一度も出ない**（`06 §12.1`＝押す前に見せて
                    押せなくする、の「見せて」が抜ける）。タイムライン形式は `exportBlocked.message` を
                    同じように出しているので、ここでも出して揃える（ADR-0026②）。 */
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{lockBlockedMessage}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{lockBlockedMessage}</span>
               ) : null}
             </div>
           </div>

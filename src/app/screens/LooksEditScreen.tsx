@@ -943,7 +943,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     </button>
                     <button
                       className="btn btn-ghost btn-icon text-sm"
-                      style={{ color: "var(--color-danger)" }}
+                      style={{ color: "var(--color-danger-text)" }}
                       disabled={draft.layers.length <= 1}
                       title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
                       onClick={() => onRemoveLayer(l.id)}
@@ -996,7 +996,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   onConfirm={() => void onDelete()}
                 />
               ) : (
-                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} disabled={isExporting} onClick={() => setConfirmDelete(true)}>
+                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger-text)", alignSelf: "flex-start" }} disabled={isExporting} onClick={() => setConfirmDelete(true)}>
                   この見た目パターンを削除
                 </button>
               )}

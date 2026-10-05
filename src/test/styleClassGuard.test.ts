@@ -83,7 +83,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+2**（実機指摘 2026-09-30）＝見出しの道具（`panel-frame-head-tools`）・空いた領域の帯（`panel-dock-zone`）・
     //   別窓の上端の行（`preview-window-bar`）の3つを足し、真ん中の印（`panel-layout-region--center`）を外した。
     //   条件で付ける断片（`--flex`・`--active`）は数えない（上の「組み立ての断片」と同じ）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(200);
+    // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝浮かぶ窓の面（`popover-surface`）と危険の札（`badge-danger`）。
+    //   公開前チェックの札（`badge-success` 等）は式の中で組み立てるので数えない。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(202);
   });
 });
 

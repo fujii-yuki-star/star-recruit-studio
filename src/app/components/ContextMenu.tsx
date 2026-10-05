@@ -105,14 +105,12 @@ export function ContextMenu({
         ref={menuRef}
         onKeyDown={onMenuKey}
         role="menu"
+        className="popover-surface"
         style={{
           position: "fixed",
           ...fit,
           zIndex: 51,
-          background: "#fff",
-          border: "1px solid rgba(0,0,0,0.15)",
           borderRadius: 8,
-          boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
           padding: 4,
           minWidth: 140,
         }}
@@ -128,7 +126,7 @@ export function ContextMenu({
               display: "block",
               width: "100%",
               textAlign: "left",
-              color: it.danger ? "var(--color-danger)" : undefined,
+              color: it.danger ? "var(--color-danger-text)" : undefined,
             }}
             disabled={it.disabled}
             // 押せないときは理由、押せるときは結果の予告（#1167）。

@@ -333,7 +333,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         ) : (
                           <button
                             className="btn btn-ghost btn-icon"
-                            style={{ color: "var(--color-danger)" }}
+                            style={{ color: "var(--color-danger-text)" }}
                             title="この場面を削除"
                             aria-label="この場面を削除"
                             onClick={() => setConfirmId(row.id)}

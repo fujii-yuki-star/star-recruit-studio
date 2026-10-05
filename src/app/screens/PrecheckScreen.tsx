@@ -18,10 +18,10 @@ interface PrecheckProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
-const severityStyle: Record<PrecheckItem["severity"], { label: string; color: string; bg: string }> = {
-  ok: { label: "問題なし", color: "var(--color-success)", bg: "var(--color-primary-soft)" },
-  warning: { label: "注意", color: "var(--color-warn)", bg: "var(--color-yellow)" },
-  action: { label: "要対応", color: "var(--color-danger)", bg: "var(--color-danger-soft)" },
+const severityStyle: Record<PrecheckItem["severity"], { label: string; badge: string }> = {
+  ok: { label: "問題なし", badge: "badge-success" },
+  warning: { label: "注意", badge: "badge-yellow" },
+  action: { label: "要対応", badge: "badge-danger" },
 };
 
 /**
@@ -135,7 +135,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
       {/* サマリ */}
       <div className="card-grid cols-3 mb">
         <div className="card text-center">
-          <div className="page-title" style={{ color: "var(--color-danger)" }}>{count("action")}</div>
+          <div className="page-title" style={{ color: "var(--color-danger-text)" }}>{count("action")}</div>
           <div className="text-muted text-sm">要対応</div>
         </div>
         <div className="card text-center">
@@ -165,7 +165,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
               return (
                 <tr key={item.id}>
                   <td>
-                    <span className="badge" style={{ background: s.bg, color: s.color }}>
+                    <span className={`badge ${s.badge}`}>
                       {item.severity === "ok" && <CheckIcon size={12} />}
                       {s.label}
                     </span>
@@ -278,11 +278,11 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
             <ChevronRightIcon size={18} />
           </button>
           {capabilityBlocked ? (
-            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+            <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
               この端末では動画を保存できません。上の確認結果で問題の項目を解消してから、もう一度お試しください。
             </span>
           ) : blockingItems.length > 0 ? (
-            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+            <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
               {exportBlockedMessage(blockingItems, "precheck")}
             </span>
           ) : null}

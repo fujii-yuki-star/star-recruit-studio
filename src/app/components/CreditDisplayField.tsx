@@ -98,7 +98,7 @@ export function CreditDisplayField({
 
       {/* ⚠️ **出さないときは「代わりにどうするか」を必ず出す**（`13 §4`＝規約は守る必要がある）。 */}
       {mode === CREDIT_MODE.hidden && (
-        <div className="notice notice-warn" style={{ marginTop: 8 }} role="alert">
+        <div className="notice notice-warn" style={{ marginTop: 8, flexDirection: "column" }} role="alert">
           <p style={{ margin: 0 }}>
             動画に声の表記が入りません。公開するときは、概要欄などに次の表記を入れてください。
           </p>
