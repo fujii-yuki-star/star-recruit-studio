@@ -41,7 +41,7 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
   it("「モデル」は畳んだ「上級者向け」の中にある（先頭で開きっぱなしにしない）", async () => {
     render(<SettingsScreen onNavigate={vi.fn()} />);
     await screen.findByText("接続の状態");
-    const fold = foldOf("モデル");
+    const fold = foldOf("使うAIの名前");
     expect(fold, "「モデル」が開閉に包まれていない").not.toBeNull();
     expect(fold?.open, "既定で開いている").toBe(false);
     expect(fold?.querySelector("summary")?.textContent).toBe("上級者向け");
@@ -61,7 +61,7 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
     window.localStorage.setItem("app.voicevoxUrl", "http://192.168.0.9:50021");
     render(<SettingsScreen onNavigate={vi.fn()} />);
     await screen.findByText("接続の状態");
-    expect(foldOf("モデル")?.open, "既定と違うモデルなのに畳んでいる").toBe(true);
+    expect(foldOf("使うAIの名前")?.open, "既定と違うモデルなのに畳んでいる").toBe(true);
     expect(foldOf("音声ソフトの接続先")?.open, "既定と違う接続先なのに畳んでいる").toBe(true);
   });
 
@@ -77,12 +77,12 @@ describe("設定：普段触らないものは畳む（#1032）", () => {
     const first = render(<SettingsScreen onNavigate={vi.fn()} />);
     await screen.findByText("接続の状態");
     // AI 側だけを開く（開閉はこの時点で覚えられる）。
-    openFold(foldOf("モデル"));
+    openFold(foldOf("使うAIの名前"));
     first.unmount();
     // 開き直したとき、AI 側は覚えていて、声側は**畳んだまま**。
     render(<SettingsScreen onNavigate={vi.fn()} />);
     await screen.findByText("接続の状態");
-    expect(foldOf("モデル")?.open, "開いたはずの側を覚えていない").toBe(true);
+    expect(foldOf("使うAIの名前")?.open, "開いたはずの側を覚えていない").toBe(true);
     expect(foldOf("音声ソフトの接続先")?.open, "触っていない側まで開いている（記憶を共有している）").toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import { ASSIST_KIND, assistMaxLength } from "../domain/ai/assist";
+import { ASSIST_KIND, assistMaxLength, sceneSpokenText } from "../domain/ai/assist";
 import { resolveNarrationVoice } from "../domain/voice/voiceProvider";
 import type { AssistKind } from "../domain/ai/assist";
 import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
@@ -202,6 +202,20 @@ export function buildPrecheckItems(
       : { action: FIX_NARRATION_ACTION_LABEL, sceneId: hit.firstId, sceneIds: hit.ids };
   };
 
+  /**
+   * 字幕の長さの「短くする」（UI/UX 監査 2026-10-02＝セリフの長さは AI に頼めるのに、字幕は場面を開くだけだった）。
+   * 「文字」の節へ寄り、**セリフから字幕を作る**（`ASSIST_KIND.subtitle`＝その見た目の字幕の上限に収めて作る）を1回だけ頼む。
+   * ⚠️ 頼めるのは**一人語りの場面でセリフがあるとき**だけ（場面編集の字幕の手伝いと同じ条件）＝そういう場面が無ければ寄るだけ。
+   */
+  const fixSubtitle = (hit: { firstId?: string; ids: string[] }): Pick<PrecheckItem, "sceneId" | "sceneIds" | "assist" | "focus"> => {
+    const target = scenes.find((s) => hit.ids.includes(s.sceneId) && (s.lines?.length ?? 0) === 0
+      && assistMaxLength(ASSIST_KIND.subtitle, sceneSpokenText(s), { maxSubtitleLength: templateOf(s)?.aiHint?.maxSubtitleLength }) !== null
+      && sceneSpokenText(s).trim() !== "");
+    return target
+      ? { sceneId: target.sceneId, sceneIds: hit.ids, assist: ASSIST_KIND.subtitle, focus: "text" }
+      : { sceneId: hit.firstId, sceneIds: hit.ids, focus: "text" };
+  };
+
   const voice = offending(sceneNeedsVoice);
   items.push(
     voice.nums.length > 0
@@ -219,7 +233,7 @@ export function buildPrecheckItems(
   const subtitle = offending((s) => sceneDisplayedSubtitleTexts(s, templateOf(s)).some((t) => t.length > subtitleMax(s)));
   items.push(
     subtitle.nums.length > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId, sceneIds: subtitle.ids }
+      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", ...fixSubtitle(subtitle) }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 

@@ -5,7 +5,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { MAX_NARRATION_LEN_DEFAULT } from "../../domain/constants";
+import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../../domain/constants";
+import { sampleTemplates } from "../../infrastructure/sampleData";
+import { saveSectionOpen, SECTION_SCOPE } from "../components/sectionOpen";
 import { ASSIST_KIND } from "../../domain/ai/assist";
 import type { Scene } from "../../domain/project/types";
 
@@ -128,5 +130,48 @@ describe("公開前チェックから AI 補助へ（ADR-0053 決定2）", () =>
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     await flush();
     expect(ai.calls).toHaveLength(0);
+  });
+});
+
+// UI/UX 監査 2026-10-02：字幕の長さも、セリフの長さと同じく AI に頼める（以前は場面を開くだけだった）。
+describe("公開前チェックの「字幕の長さ」から字幕の手伝いへ", () => {
+  const withSubtitle = (sceneId: string, subtitle: string, narration = "私たちは地域の配送を担っています。"): Scene =>
+    ({ ...scene(sceneId, narration), texts: { subtitle } }) as Scene;
+  const LONG = "う".repeat(MAX_SUBTITLE_LEN_DEFAULT + 5);
+
+  it("「短くする」で該当場面の「文字」の節へ寄り、セリフから字幕を作るを頼む印を置く", () => {
+    useProjectStore.setState({ scenes: [withSubtitle("scene_001", "短い"), withSubtitle("scene_002", LONG)], templates: sampleTemplates });
+    render(<PrecheckScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "短くする" }));
+    const st = useProjectStore.getState();
+    expect(st.editingSceneId).toBe("scene_002");
+    expect(st.editingSceneFocus).toBe("text");
+    expect(st.editingSceneAssist).toBe(ASSIST_KIND.subtitle);
+  });
+
+  it("セリフが無い場面しか無ければ、寄るだけ（頼まない）", () => {
+    useProjectStore.setState({ scenes: [withSubtitle("scene_001", LONG, "")], templates: sampleTemplates });
+    render(<PrecheckScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "短くする" }));
+    expect(useProjectStore.getState().editingSceneFocus).toBe("text");
+    expect(useProjectStore.getState().editingSceneAssist).toBeNull();
+  });
+
+  it("場面編集は字幕の欄で1回だけ頼み（セリフの欄では頼まない）、印を消す", async () => {
+    // 「文字」の節を閉じたことにしておく＝寄る指定で開くことまで見る（開いたままだと開く処理を通らなくても緑になる）。
+    saveSectionOpen(SECTION_SCOPE.sceneEdit, "文字", false);
+    useProjectStore.setState({
+      scenes: [withSubtitle("scene_001", "短い"), withSubtitle("scene_002", LONG)], templates: sampleTemplates,
+      editingSceneId: "scene_002", editingSceneFocus: "text", editingSceneAssist: ASSIST_KIND.subtitle,
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    await flush();
+    expect(ai.calls).toHaveLength(1);
+    expect(ai.calls[0]).toContain("字幕");
+    expect(ai.calls[0]).not.toContain("短く言い直す");
+    expect(useProjectStore.getState().editingSceneAssist).toBeNull();
+    // 「文字」の節が開いている（字幕の候補がその場に出る）。⚠️ 閉じた節の中身も DOM にはある＝開いているかは details で見る。
+    expect(screen.getByText("短くした候補です。").closest("details")?.open).toBe(true);
+    expect(useProjectStore.getState().scenes[1].texts.subtitle).toBe(LONG); // 「使う」までは変えない
   });
 });

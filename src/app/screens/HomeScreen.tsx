@@ -640,20 +640,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           </div>
 
-          {/* クイック操作 */}
-          <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : undefined}>
-              <div
-                className="action-card-icon"
-                style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
-              >
-                <PlusIcon size={24} />
-              </div>
-              <span className="action-card-title">新しい動画を作る</span>
-              <span className="action-card-desc">
-                5つのステップで、動画のたたき台を作ります。
-              </span>
-            </button>
+          {/* クイック操作。⚠️ **「新しい動画を作る」はここに置かない**（UI/UX 監査 2026-10-02）＝すぐ上の大きなボタンと
+              同じ操作が2つ並んでいた（どちらを押せばよいか迷う）。 */}
+          <div className="card-grid cols-2 mb">
 
             <button className="action-card" onClick={() => onNavigate("looks")}>
               <div

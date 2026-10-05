@@ -357,8 +357,9 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               開閉は描画の1回目だけで決める（入力中に畳んだり開いたりしない）。 */}
           <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="ai-advanced" defaultOpen={aiModel !== DEFAULT_AI_MODEL}>
             <div className="field">
+              {/* 「モデル」は技術語に近い（UI/UX 監査 2026-10-02）＝何を入れる欄かを言う。 */}
               <label className="field-label" htmlFor="aiModel">
-                モデル
+                使うAIの名前
               </label>
               <input
                 id="aiModel"
