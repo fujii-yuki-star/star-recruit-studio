@@ -1873,3 +1873,6 @@ export function motionKeyTitle(timeSec: number, locked: boolean): string {
 }
 /** 道筋と点を描いたときの一言（ADR-0054 決定4＝段階1の一言を置き換える）。 */
 export const MOTION_PATH_NOTE = "部品を動かすと動き全体がずれます。点を掴んで引くと、その時刻の位置だけ直せます。";
+
+/** 最後の1場面を消そうとしたときの理由（場面編集のカード・台本表の行で同じもの＝場面が0枚の動画は作れない）。 */
+export const LAST_SCENE_DELETE_HINT = "最後の1つは消せません";

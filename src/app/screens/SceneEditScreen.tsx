@@ -72,7 +72,7 @@ import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAss
 import { AiSuggest } from "../components/AiSuggest";
 import { ASSIST_KIND, sceneSpokenText } from "../../domain/ai/assist";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
-import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL } from "../uiLabels";
+import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL, LAST_SCENE_DELETE_HINT } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -344,7 +344,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
   const [previewFitPct, setPreviewFitPct] = useState(100);
 
-  const deleteSceneHint = canDeleteScene ? undefined : "最後の1つは消せません";
+  const deleteSceneHint = canDeleteScene ? undefined : LAST_SCENE_DELETE_HINT;
 
   /**
    * メニューから消すときの確認（#772 候補6・`06 §2-1`＝**破壊的な削除は確認を挟む**）。

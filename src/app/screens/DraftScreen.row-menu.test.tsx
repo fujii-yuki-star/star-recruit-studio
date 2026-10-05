@@ -2,7 +2,8 @@
 // 台本表の行の操作は「セリフ」と「⋮」だけ（UI/UX 監査 2026-10-02＝操作の列に7つ詰まっていた）。
 // ほかの操作は「⋮」と右クリックの同じメニューへ畳む。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { LAST_SCENE_DELETE_HINT } from "../uiLabels";
 import "@testing-library/jest-dom/vitest";
 import { useProjectStore } from "../store/projectStore";
 import { DraftScreen } from "./DraftScreen";
@@ -65,5 +66,22 @@ describe("台本表の行の操作", () => {
     const row = screen.getByText("一つ目").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: /削除する/ }));
     expect(order()).toEqual(["scene_002"]);
+  });
+
+  it("最後の1場面は消せない（場面編集のカードと同じ条件・同じ理由）", () => {
+    useProjectStore.setState({ scenes: [scene("scene_001", 1, "一つ目")], parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }] });
+    render(<DraftScreen onNavigate={vi.fn()} />);
+    openMenu(1);
+    const del = screen.getByRole("menuitem", { name: "この場面を削除" });
+    expect(del).toBeDisabled();
+    expect(del.getAttribute("title")).toBe(LAST_SCENE_DELETE_HINT);
+  });
+
+  it("開いている間に並びが変わったら出さない（取り消しなどで古いメニューが残らない）", () => {
+    render(<DraftScreen onNavigate={vi.fn()} />);
+    openMenu(1);
+    expect(screen.getByRole("menuitem", { name: "上へ移動" })).toBeInTheDocument();
+    act(() => useProjectStore.getState().moveScene("scene_001", "down"));
+    expect(screen.queryByRole("menuitem", { name: "上へ移動" })).toBeNull();
   });
 });

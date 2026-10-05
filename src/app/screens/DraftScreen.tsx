@@ -9,7 +9,7 @@ import { ContextMenu } from "../components/ContextMenu";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL, LAST_SCENE_DELETE_HINT } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -66,11 +66,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
   // 行の操作のメニュー（「⋮」と右クリックで同じもの・UI/UX 監査 2026-10-02）。
-  const [rowMenu, setRowMenu] = useState<{ sceneId: string; x: number; y: number } | null>(null);
+  // ⚠️ **開いた時点の場面の並びも控える**＝開いている間に並びが変わったら（取り消しの近道など）出さない。
+  //   行が消えてから取り消しで戻ったとき、古い位置でひとりでに開き直さない（PR #1345 レビュー ℹ️）。
+  const [rowMenu, setRowMenu] = useState<{ sceneId: string; x: number; y: number; scenes: unknown } | null>(null);
   // ⚠️ **キーで押したときはボタンの下へ**（`menuAnchorFrom`＝キーの click は座標を持たない・#989）。
   const openRowMenu = (e: React.MouseEvent<HTMLElement>, sceneId: string): void => {
     e.preventDefault();
-    setRowMenu({ sceneId, ...menuAnchorFrom(e) });
+    setRowMenu({ sceneId, ...menuAnchorFrom(e), scenes });
   };
   // 「作り直す」は手直し内容を丸ごと破棄して再生成する（Undo 不可＝generate は履歴を積まない）ので確認を挟む（#383）。
   const [confirmRegen, setConfirmRegen] = useState(false);
@@ -424,7 +426,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           ]}
         />
       </div>
-      {rowMenu && (() => {
+      {rowMenu && rowMenu.scenes === scenes && (() => {
         const i = rows.findIndex((r) => r.id === rowMenu.sceneId);
         if (i < 0) return null;
         const id = rowMenu.sceneId;
@@ -440,7 +442,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               { label: "素材を変更", onSelect: () => editScene(id, "assets") },
               { label: "見た目を変更", onSelect: () => editScene(id, "look") },
               // 消すのは行の中の共有の確認を通す（`DeleteConfirm`＝これまでと同じ二段）。
-              { label: "この場面を削除", danger: true, onSelect: () => setConfirmId(id) },
+              // ⚠️ **最後の1つは消させない**（場面編集のカードのメニューと同じ条件・同じ理由＝PR #1345 レビュー）。
+              { label: "この場面を削除", danger: true, disabled: rows.length <= 1, disabledHint: LAST_SCENE_DELETE_HINT, onSelect: () => setConfirmId(id) },
             ]}
           />
         );
