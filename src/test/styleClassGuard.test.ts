@@ -86,7 +86,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝浮かぶ窓の面（`popover-surface`）と危険の札（`badge-danger`）。
     //   公開前チェックの札（`badge-success` 等）は式の中で組み立てるので数えない。
     // ⚠️ **+1**（PR4a）＝作業範囲の網掛け（`timeline-range`）。片側だけの `--edge` は条件で付ける断片なので数えない。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(203);
+    // ⚠️ **+1**（PR4b）＝時刻を打つ欄（`clock-field`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(204);
   });
 });
 

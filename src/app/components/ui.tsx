@@ -32,11 +32,14 @@ interface SwitchProps {
   disabled?: boolean;
   /** 押せない理由（§2-5＝押せないのに理由が出ない、を作らない）。`editGuard()` をそのまま展開できる形。 */
   title?: string;
+  /** 見出しの `<label htmlFor>` から押せるようにする（見出しの文字を押しても切り替わる・UI/UX 監査 2026-10-02）。 */
+  id?: string;
 }
 
-export function Switch({ on, onChange, label, disabled = false, title }: SwitchProps) {
+export function Switch({ on, onChange, label, disabled = false, title, id }: SwitchProps) {
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={on}
