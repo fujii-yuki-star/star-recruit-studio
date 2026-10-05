@@ -1851,3 +1851,54 @@ button.badge {
   padding: 4px 8px;
   font-size: 13px;
 }
+
+/* ── 流れの帯（ADR-0048 追補・2026-10-05）＝戻る（左）・段（中）・進む（右）を5画面で同じ形に。
+   ⚠️ 両脇は同じ幅を取り合う＝段の表示が画面の真ん中から動かない（戻る／進むの文言の長さで揺れない）。 */
+.flow-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
+}
+.flow-bar-side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.flow-bar-side--end {
+  justify-content: flex-end;
+}
+.flow-bar-steps ol {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-step {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 13px; /* .text-sm と同じ */
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.flow-step:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+.flow-step--current {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 600;
+  cursor: default;
+}
+.flow-bar-reason {
+  color: var(--color-danger-text);
+  text-align: right;
+}

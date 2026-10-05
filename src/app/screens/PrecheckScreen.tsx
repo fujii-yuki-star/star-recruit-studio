@@ -7,10 +7,12 @@ import { useExportCapability } from "../hooks/useExportCapability";
 import { standardLookFixesForUnresolved } from "../../domain/template/templateSelection";
 import { standardLookButtonReason, standardLookResultMessage } from "../uiLabels";
 import { PageHead } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { ExportLockBanner } from "../components/ExportLockBanner";
-import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
+import { CheckIcon } from "../components/icons";
 import { NoScenesState } from "../components/NoScenesState";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 
@@ -133,8 +135,20 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const standardFixes = standardLookFixesForUnresolved(scenes, templates, meta.videoSettings.aspectRatio);
   const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
+  // 書き出せない理由（押す前に見せる＝§2-5）。流れの帯の「進む」の下に出す。
+  const exportBlockedReason = capabilityBlocked
+    ? capNotice?.detail
+    : blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "precheck") : null;
   return (
     <div className="main-scroll">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る（来た画面）と進む（書き出し）を上へそろえた。以前は表の下にあった。
+          ⚠️ **来た画面へ戻る**（#1026）＝入口は仕上がり確認と書き出しの2つ。 */}
+      <FlowBar
+        current="precheck"
+        back={{ label: PRECHECK_BACK_LABEL[precheckBackTo] ?? "", onClick: () => onNavigate(precheckBackTo) }}
+        next={{ label: "このまま書き出す", onClick: () => onNavigate("export"), disabled: exportBlocked, reason: exportBlockedReason }}
+        onJump={(to) => flowJump("precheck", to, onNavigate)}
+      />
       <PageHead
         title="公開前チェック"
         desc="動画を書き出す前に内容を点検しました。気になる項目は直してから進めましょう。"
@@ -260,35 +274,6 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
 
       {narrationNotice}
 
-      {/* 操作 */}
-      <div className="row-between mt-lg">
-        {/* ⚠️ **来た画面へ戻る**（#1026）＝入口は仕上がり確認と書き出しの2つなのに、
-            戻るは常に「場面編集へ戻る」で、**来ていない画面**を指していた（§2-5）。
-            仕上がり確認は前から入口を覚えている（`previewReturnTo`）ので、扱いが割れていた。 */}
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(precheckBackTo)}>
-          <ArrowLeftIcon size={16} />
-          {PRECHECK_BACK_LABEL[precheckBackTo]}
-        </button>
-        <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={() => onNavigate("export")}
-            disabled={exportBlocked}
-          >
-            このまま書き出す
-            <ChevronRightIcon size={18} />
-          </button>
-          {capabilityBlocked ? (
-            <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
-              {capNotice?.detail}
-            </span>
-          ) : blockingItems.length > 0 ? (
-            <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
-              {exportBlockedMessage(blockingItems, "precheck")}
-            </span>
-          ) : null}
-        </div>
-      </div>
     </div>
   );
 }

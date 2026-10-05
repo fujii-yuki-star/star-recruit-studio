@@ -3,9 +3,11 @@ import { exportFailedMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPOR
 import { refusalReason } from "../../domain/startup/refusalReason";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { NoScenesState } from "../components/NoScenesState";
 import { CreditDisplayField } from "../components/CreditDisplayField";
-import { ArrowLeftIcon, FilmIcon } from "../components/icons";
+import { FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { exportBlockedMessage, exportBlockingItems } from "../adapters";
@@ -582,6 +584,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
     // （実測 1274/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
     <div className="main-scroll dense">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻るを上へそろえた（以前は設定の下の左）。最後の段なので進むは無い
+          （「動画を書き出す」はこの画面の操作そのもの＝流れの進むではない）。書き出している間は移らせない（以前の戻ると同じ）。 */}
+      <FlowBar
+        current="export"
+        back={{ label: "公開前チェックへ戻る", onClick: openPrecheck, disabled: busy }}
+        onJump={(to) => flowJump("export", to, onNavigate)}
+        jumpDisabled={busy}
+      />
       <PageHead title={EXPORT_TITLE} desc={EXPORT_DESC} />
 
       <div
@@ -669,11 +679,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span>声を作成済みの場面には、その音声が入ります。</span>
           </div>
 
-          <div className="row-between mt-lg">
-            <button className="btn btn-ghost btn-icon" onClick={openPrecheck} disabled={busy}>
-              <ArrowLeftIcon size={16} />
-              公開前チェックへ戻る
-            </button>
+          <div className="row mt-lg" style={{ justifyContent: "flex-end" }}>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を書き出す」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
@@ -681,7 +687,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を書き出す"}
               </button>
-              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。左の「公開前チェックへ戻る」が直す導線。
+              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。上の「公開前チェックへ戻る」が直す導線。
                   抑止は「**同じ文**が失敗表示に出ているとき」だけ＝二重に並べない。phase だけで抑止すると、無関係な失敗が
                   残っている間に blocker ができたとき「押せないのに理由が出ない」になる（レビュー指摘）。 */}
               {capabilityBlocked && capability ? (

@@ -75,6 +75,8 @@ import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL, LAST_SCENE_DELETE_HINT } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { ColorPicker } from "../components/ColorPicker";
 import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
@@ -99,10 +101,8 @@ import {
   PlusIcon,
   SaveIcon,
   TrashIcon,
-  ChevronRightIcon,
   PlayIcon,
   StopIcon,
-  ArrowLeftIcon,
   PencilIcon,
 } from "../components/icons";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
@@ -3354,6 +3354,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
       <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
       <ExportLock onNavigate={onNavigate}>
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る・段・進むを5画面で同じ形に。この画面はスクロールの外に置く（貼り付け不要）。
+          ⚠️ **戻るは来た所へ**＝公開前チェックの「直す」から来たときは公開前チェックへ（UI/UX 監査 2026-10-02）。
+          ⚠️ 移る前に**いま編集中の場面を預ける**（#410 sub3）＝仕上がり確認から戻ると同じ場面が開く。 */}
+      <div style={{ padding: "var(--gap-sm) var(--gap) 0" }}>
+        <FlowBar
+          current="scene-edit"
+          sticky={false}
+          back={trail
+            ? { label: BACK_TO_PRECHECK_LABEL, onClick: () => onNavigate("precheck") }
+            : { label: "台本表へ戻る", onClick: () => onNavigate("draft") }}
+          next={{ label: "仕上がり確認へ", onClick: () => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); } }}
+          onJump={(to) => { setEditingSceneId(selected?.sceneId ?? null); flowJump("scene-edit", to, onNavigate); }}
+        />
+      </div>
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
         <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -3388,16 +3402,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </>
             )}
-            back={trail
-              ? { label: <><ArrowLeftIcon size={16} />{BACK_TO_PRECHECK_LABEL}</>, onClick: () => onNavigate("precheck") }
-              : { label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
+            // 戻る／進むは上の流れの帯へ（ADR-0048 追補 2026-10-05＝5画面で同じ場所）。
           />
-          {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
-              預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
-          <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
-            仕上がり確認へ
-            <ChevronRightIcon size={18} />
-          </button>
         </div>
       </div>
 
