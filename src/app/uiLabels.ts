@@ -1828,6 +1828,8 @@ export const AI_ASSIST_NARRATION_KINDS = [
 export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "セリフから作る" }] as const;
 /** 公開前チェックの「セリフの長さ」「早口になる場面」から、その場面のセリフ欄へ寄るボタン（ADR-0053 決定2）。 */
 export const FIX_NARRATION_ACTION_LABEL = "セリフを直す";
+/** 公開前チェックの「字幕の長さ」のボタン（使い方の案内も同じものを引く＝書き写さない）。 */
+export const SHORTEN_SUBTITLE_ACTION_LABEL = "短くする";
 /** 見出し欄のボタン。 */
 export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
 /** 掛け合いの各行のボタン（#1316）。行には表示時間が無いので「表示時間に収める」は出さない。 */

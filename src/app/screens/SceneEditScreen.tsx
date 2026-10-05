@@ -70,7 +70,7 @@ import { FontPicker } from "../components/FontPicker";
 import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
 import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
 import { AiSuggest } from "../components/AiSuggest";
-import { sceneSpokenText } from "../../domain/ai/assist";
+import { ASSIST_KIND, sceneSpokenText } from "../../domain/ai/assist";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
@@ -2412,7 +2412,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 source={selected.narration.text}
                 limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec, voiceSpeed: resolveNarrationVoice(selected.narration, voiceSettings).speed }}
                 companyName={companyName}
-                autoKind={autoAssist?.sceneId === selected.sceneId ? autoAssist.kind : undefined}
+                // ⚠️ 字幕の印はここでは受けない（字幕の欄の手伝いが受ける）＝受けるとセリフを字幕の長さで頼んでしまう。
+                autoKind={autoAssist?.sceneId === selected.sceneId && autoAssist.kind !== ASSIST_KIND.subtitle ? autoAssist.kind : undefined}
                 onAutoAsked={() => setAutoAssist(null)}
                 onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
               />
@@ -2497,7 +2498,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* ⚠️ **未解決のときは節ごと出さない**（差分再監査 10巡目 ℹ️）＝中身が空になるだけの入れ物が
                 残り、理由は節の外にある。「見つからない」の次の行動は外の断りが担う。 */}
             {!isFree && template != null && (
-              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字">
+              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字" forceOpen={focus === "text"} scrollOnForce>
               {/* ⚠️ **見つからない見た目について語らない**（差分再監査 9巡目 🟡・§2-5）＝この節は
                   未解決のときは出さない（上のゲート）ので、ここへ来る時点で見た目は解決している。 */}
               {sceneTextKeys.length === 0 && (
@@ -2546,6 +2547,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         current={selected.texts[key] ?? ""}
                         limits={{ maxSubtitleLength: template?.aiHint?.maxSubtitleLength }}
                         companyName={companyName}
+                        // 公開前チェックの「字幕の長さ」から来たら、字幕の欄で1回だけ頼む（UI/UX 監査 2026-10-02）。
+                        autoKind={key === TEXT_KEY.subtitle && autoAssist?.sceneId === selected.sceneId && autoAssist.kind === ASSIST_KIND.subtitle ? autoAssist.kind : undefined}
+                        onAutoAsked={() => setAutoAssist(null)}
                         onPick={(t) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: t } }))}
                       />
                     )}

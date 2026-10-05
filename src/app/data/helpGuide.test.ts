@@ -36,3 +36,29 @@ describe("使い方の案内（#1229）", () => {
     }
   });
 });
+
+// UI/UX 監査 2026-10-02：使い方が新しい AI の手伝いに触れていなかった。
+// ⚠️ **画面のボタンの名前と同じ言葉で案内する**（書き写さずに引いているかを、画面の文言そのもので確かめる）。
+describe("AI の手伝いの案内", () => {
+  const textOf = (steps: readonly { screen: string; detail: readonly string[] }[], screen: string): string =>
+    steps.filter((s) => s.screen === screen).flatMap((s) => s.detail).join("\n");
+  it("写真の読み取り・AIに頼む・名前の候補・公開前チェックからの手伝い・素材のAI解析・設定・動きの点に触れる", async () => {
+    const g = await import("./helpGuide");
+    const L = await import("../uiLabels");
+    const all = [...g.HELP_FLOW, ...g.HELP_TIMELINE, ...g.HELP_PLACES];
+    expect(textOf(all, "wizard")).toContain(L.DESCRIBING_LABEL);
+    expect(textOf(all, "wizard")).toContain(L.WAIT_DESCRIBE_LABEL);
+    expect(textOf(all, "scene-edit")).toContain(L.AI_ASSIST_VIDEO_TITLE_LABEL); // 名前の欄は場面編集にある
+    expect(textOf(all, "draft")).not.toContain(L.AI_ASSIST_VIDEO_TITLE_LABEL);
+    const sceneEdit = textOf(all, "scene-edit");
+    expect(sceneEdit).toContain(`「${L.AI_ASSIST_HEADING.replace(/：$/, "")}」`);
+    for (const k of L.AI_ASSIST_NARRATION_KINDS) expect(sceneEdit).toContain(`「${k.label}」`);
+    expect(sceneEdit).toContain(`「${L.AI_ASSIST_USE_LABEL}」`);
+    expect(textOf(all, "precheck")).toContain(L.FIX_NARRATION_ACTION_LABEL);
+    expect(textOf(all, "precheck")).toContain(L.TRAIL_NEXT_LABEL);
+    expect(textOf(all, "precheck")).toContain(L.SHORTEN_SUBTITLE_ACTION_LABEL);
+    expect(textOf(all, "materials")).toContain("AI解析");
+    expect(textOf(all, "settings")).toContain("このパソコンの中で動きます");
+    expect(textOf(all, "timeline-project")).toContain("点を引く");
+  });
+});

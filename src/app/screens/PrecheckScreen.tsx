@@ -115,10 +115,9 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const openScenes = (item: PrecheckItem): void => {
     if (item.sceneId) setEditingSceneId(item.sceneId);
     useProjectStore.getState().setSceneEditTrail({ label: item.label, sceneIds: item.sceneIds ?? (item.sceneId ? [item.sceneId] : []) });
-    if (item.assist) {
-      useProjectStore.getState().setEditingSceneFocus("narration");
-      useProjectStore.getState().setEditingSceneAssist(item.assist);
-    }
+    // ⚠️ **無い項目は消して置く**＝前に置いた印が残っていると、押してもいない手伝いを頼む・違う節へ寄る。
+    useProjectStore.getState().setEditingSceneFocus(item.focus ?? (item.assist ? "narration" : null));
+    useProjectStore.getState().setEditingSceneAssist(item.assist ?? null);
     onNavigate("scene-edit");
   };
   const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;

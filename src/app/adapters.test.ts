@@ -1125,7 +1125,7 @@ describe("公開前チェックの項目は、場面を指すなら並びも渡�
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("./adapters.ts", import.meta.url), "utf8");
     const lines = src.split(/\r?\n/).filter((l) => /\bsceneId: /.test(l) && !/^\s*(\/\/|\*)/.test(l));
-    expect(lines.length, "拾えた行の数が変わった（項目を足したら、並びを渡しているか見てから数を更新する）").toBe(13); // 見えていないのに緑、を防ぐ
+    expect(lines.length, "拾えた行の数が変わった（項目を足したら、並びを渡しているか見てから数を更新する）").toBe(14); // 見えていないのに緑、を防ぐ
     expect(lines.filter((l) => !/\bsceneIds: /.test(l))).toEqual([]);
   });
 });

@@ -279,6 +279,11 @@ export interface PrecheckItem {
    */
   assist?: AssistKind;
   /**
+   * action を押したとき、場面編集で**開いて寄る節**。未指定＝`assist` があればセリフ欄、無ければどこにも寄らない。
+   * 字幕の長さは「文字」の節（UI/UX 監査 2026-10-02＝以前は場面を開くだけで、字幕の欄を探させていた）。
+   */
+  focus?: SceneEditFocus;
+  /**
    * この項目が残っていると**書き出しが必ず失敗する**か（#547 P2-5）。
    * 書き出し（`renderer/export/buildExportScenes`）が §2-5 エラーで停止する条件だけに付ける＝
    * 「直せば出せる警告」（字幕が長い・声が未作成など）とは分けて、主ボタンを止める根拠にする。
@@ -338,7 +343,7 @@ export const generalPurposeOptions: PurposeOption[] = GENERAL_PURPOSES.map((id) 
  * ⚠️ **値は欄の記憶キーと合わせる**（`CollapsibleSection` の `storageKey`）＝
  * 別に決めると、名前が変わったとき**片方だけ直る**。
  */
-export type SceneEditFocus = "narration" | "assets" | "look";
+export type SceneEditFocus = "narration" | "assets" | "look" | "text";
 
 /**
  * 設定画面を開いたとき、どの欄へ寄るか（#1032）。

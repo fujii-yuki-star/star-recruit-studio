@@ -8,7 +8,12 @@
 import type { ScreenId } from "./mockData";
 // ⚠️ **選択肢の名前を書き写さない**（PR #1243 レビュー 🟡）＝案内に写した「採用」が、
 // 画面の「採用動画」と**すでにずれていた**。画面名（`SCREEN_TITLES`）と同じ考え方で、文言を引く。
-import { ORIENTATION_LABEL, VIDEO_KIND_LABEL } from "../uiLabels";
+import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, ORIENTATION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
+
+/** 「AIに頼む」の見出し（末尾の「：」を外して文中で使う）。⚠️ 書き写さない＝画面のボタンの名前と同じものを引く。 */
+const ASK_AI = AI_ASSIST_HEADING.replace(/：$/, "");
+/** 「短く」「丁寧に」…のボタン名を「」でつなぐ。 */
+const quoted = (kinds: readonly { label: string }[]): string => kinds.map((k) => `「${k.label}」`).join("");
 import { ORIENTATION, VIDEO_KIND } from "../../domain/enums";
 
 /** 案内1行ぶん。見出しは `screen` から引くので、ここには**説明だけ**を書く。 */
@@ -35,6 +40,9 @@ export const HELP_FLOW: readonly HelpStep[] = [
       `画面の形は「${ORIENTATION_LABEL[ORIENTATION.landscape]}」と「${ORIENTATION_LABEL[ORIENTATION.portrait]}」から選びます。`
         + "会議室のテレビやパソコンで見せるなら横型、スマホで見せるなら縦型です。",
       "伝えたいことを書き、使いたい写真や動画を入れます。",
+      // UI/UX 監査 2026-10-02＝使い方が新しい AI の手伝いに触れていなかった。
+      `写真や動画を入れると、このパソコンの中のAIが使えるときは、内容を読み取って説明を書きます（読んでいる間は「${DESCRIBING_LABEL}」と出ます）。`
+        + `読み終わる前に動画案を作るときは「${WAIT_DESCRIBE_LABEL}」を選ぶと、写真の使いどころが合いやすくなります。`,
     ],
   },
   {
@@ -68,6 +76,10 @@ export const HELP_FLOW: readonly HelpStep[] = [
       "見た目パターンの差し込み口に、写真・動画と文字を入れます。置く場所はパターンが決めるので、位置を毎回決める必要はありません。",
       "位置や大きさを自分で決めたいときは、自由配置の場面にします。",
       "声・音量・字幕も、この場面だけの設定にできます（触らなければ動画全体の設定を引き継ぎます）。",
+      `「${ASK_AI}」で、セリフの言い直し（${quoted(AI_ASSIST_NARRATION_KINDS)}）や、セリフから作る字幕・見出しの候補を出せます。`
+        + `候補は「${AI_ASSIST_USE_LABEL}」を押すまで場面に入りません。この手伝いは、いつもこのパソコンの中で動きます（外へは送りません）。`,
+      // ⚠️ 名前の欄は**場面編集の上の帯**にある（台本表には無い・PR #1344 レビュー）。
+      `上の帯の動画の名前の横にある「${AI_ASSIST_VIDEO_TITLE_LABEL}」で、AIに名前の候補を出してもらえます。`,
     ],
   },
   {
@@ -92,6 +104,8 @@ export const HELP_FLOW: readonly HelpStep[] = [
     detail: [
       "「読み上げの声」「字幕の長さ」「切れている文字」「見つからない素材」などを一覧で出します。",
       "「要対応」は直してから進みます。「注意」はそのままでも書き出せます。",
+      `「${FIX_NARRATION_ACTION_LABEL}」「${SHORTEN_SUBTITLE_ACTION_LABEL}」を押すと、その場面の直す欄を開きます。AIに頼める場面なら、候補をすぐ出します。`
+        + `ひっかかった場面が複数あるときは、場面編集の上の「${TRAIL_NEXT_LABEL}」で順に直せます。`,
     ],
   },
   {
@@ -118,6 +132,7 @@ export const HELP_TIMELINE: readonly HelpStep[] = [
       "見わたすタイムラインの「タイムラインで編集する形にする」から作る、別の動画です。元の動画はそのまま残ります（作った動画を元の形へ戻す操作はありません）。",
       "置く場所も時間も自由に決められます。見た目パターンは「枠」ではなく、置ける素材のひとつになります。",
       "動画案を作る機能は、こちらでは使いません（作り込みは手で行います）。",
+      "動きを付けた部品は、本体を動かすと動き全体がずれます。キャンバスに出る点を引くと、その時刻の位置だけ直せます。",
     ],
   },
 ];
@@ -138,6 +153,7 @@ export const HELP_PLACES: readonly HelpStep[] = [
     detail: [
       "取り込んだ素材は動画のフォルダにコピーされるので、あとで元のファイルを動かしても動画は壊れません。",
       "元のファイルが見つからなくなった素材は、ここでつなぎ直せます。",
+      "写真・動画の「AI解析」は、取り込むとこのパソコンの中のAIが書きます。自分で直した内容は、AIが上書きしません。",
     ],
   },
   {
@@ -163,6 +179,7 @@ export const HELP_PLACES: readonly HelpStep[] = [
     summary: "見た目・動画案の作り方・ナレーターの声を決めます。",
     detail: [
       "ナレーターの声と、この動画の読み上げ方をここで決めます。場面ごとに変えることもできます。",
+      "動画案を作るAIを選べます。場面編集の手伝いと写真の読み取りは、どちらを選んでもこのパソコンの中で動きます。",
       "画面の明るさは「パソコンの設定に合わせる」「明るい」「暗い」から選べます。",
     ],
   },
