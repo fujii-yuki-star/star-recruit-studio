@@ -2,7 +2,7 @@
 // 欄の中の節（アコーディオン）。**画面ごとに開閉を覚える**ことと、既定を将来変えられることを固定する（#687）。
 // 開閉は `details.open` で見る（jsdom は閉じた `<details>` の中身も DOM に残す）。`toggle` は**非同期**に
 // 発火する（HTML 仕様）＝保存もその後なので、画面を消す前に待つ（場面編集の既存テストと同じ流儀）。
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SECTION_SCOPE } from "./sectionOpen";
@@ -125,5 +125,30 @@ describe("CollapsibleSection（#687）", () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(localStorage.getItem("timeline.sectionOpen")).toBeNull(); // 保存されていない
     });
+  });
+});
+
+describe("ほかの画面から来たとき、その節まで送る（ADR-0048 追補 2026-10-05）", () => {
+  const scroll = vi.fn();
+  beforeEach(() => {
+    scroll.mockReset();
+    (HTMLElement.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scroll;
+  });
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it("scrollOnForce の節は、強制で開いたときに送る（来た時点でも・あとから強制されても）", () => {
+    const view = render(<CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" forceOpen={false} scrollOnForce><p>中身</p></CollapsibleSection>);
+    expect(scroll).not.toHaveBeenCalled();
+    view.rerender(<CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" forceOpen scrollOnForce><p>中身</p></CollapsibleSection>);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.instances[0]).toBe(section("使用素材"));
+  });
+
+  it("scrollOnForce が無ければ、強制で開いても送らない（同じ画面の操作で視線を飛ばさない）", () => {
+    render(<CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" forceOpen><p>中身</p></CollapsibleSection>);
+    expect(section("使用素材").open).toBe(true);
+    expect(scroll).not.toHaveBeenCalled();
   });
 });

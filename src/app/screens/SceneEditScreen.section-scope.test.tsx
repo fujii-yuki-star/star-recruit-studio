@@ -79,3 +79,18 @@ describe("場面編集：節の見出しと中身を合わせる（#1032）", ()
     expect(badges, "「動画全体」の印が無い").toContain("動画全体");
   });
 });
+
+describe("場面編集：セリフを先頭に（ADR-0048 追補 2026-10-05）", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("選択中の場面を編集する欄は「掛け合い・セリフ」から始まり、文字・見た目がその後に来る", () => {
+    const { container } = setup();
+    const titles = [...container.querySelectorAll(".accordion-summary")].map((el) => el.textContent ?? "");
+    const at = (t: string) => titles.indexOf(t);
+    expect(at("掛け合い・セリフ"), "セリフの節が無い").toBeGreaterThanOrEqual(0);
+    for (const later of ["文字", "見た目・フォント", "この場面のBGM", "使用素材"]) {
+      expect(at(later), `${later} の節が無い`).toBeGreaterThanOrEqual(0);
+      expect(at("掛け合い・セリフ"), `セリフが ${later} より後にある`).toBeLessThan(at(later));
+    }
+  });
+});
