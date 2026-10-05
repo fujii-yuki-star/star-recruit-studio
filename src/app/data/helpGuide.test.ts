@@ -48,13 +48,15 @@ describe("AI の手伝いの案内", () => {
     const all = [...g.HELP_FLOW, ...g.HELP_TIMELINE, ...g.HELP_PLACES];
     expect(textOf(all, "wizard")).toContain(L.DESCRIBING_LABEL);
     expect(textOf(all, "wizard")).toContain(L.WAIT_DESCRIBE_LABEL);
-    expect(textOf(all, "draft")).toContain(L.AI_ASSIST_VIDEO_TITLE_LABEL);
+    expect(textOf(all, "scene-edit")).toContain(L.AI_ASSIST_VIDEO_TITLE_LABEL); // 名前の欄は場面編集にある
+    expect(textOf(all, "draft")).not.toContain(L.AI_ASSIST_VIDEO_TITLE_LABEL);
     const sceneEdit = textOf(all, "scene-edit");
     expect(sceneEdit).toContain(`「${L.AI_ASSIST_HEADING.replace(/：$/, "")}」`);
     for (const k of L.AI_ASSIST_NARRATION_KINDS) expect(sceneEdit).toContain(`「${k.label}」`);
     expect(sceneEdit).toContain(`「${L.AI_ASSIST_USE_LABEL}」`);
     expect(textOf(all, "precheck")).toContain(L.FIX_NARRATION_ACTION_LABEL);
     expect(textOf(all, "precheck")).toContain(L.TRAIL_NEXT_LABEL);
+    expect(textOf(all, "precheck")).toContain(L.SHORTEN_SUBTITLE_ACTION_LABEL);
     expect(textOf(all, "materials")).toContain("AI解析");
     expect(textOf(all, "settings")).toContain("このパソコンの中で動きます");
     expect(textOf(all, "timeline-project")).toContain("点を引く");

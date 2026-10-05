@@ -8,7 +8,7 @@
 import type { ScreenId } from "./mockData";
 // ⚠️ **選択肢の名前を書き写さない**（PR #1243 レビュー 🟡）＝案内に写した「採用」が、
 // 画面の「採用動画」と**すでにずれていた**。画面名（`SCREEN_TITLES`）と同じ考え方で、文言を引く。
-import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, ORIENTATION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
+import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, ORIENTATION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
 
 /** 「AIに頼む」の見出し（末尾の「：」を外して文中で使う）。⚠️ 書き写さない＝画面のボタンの名前と同じものを引く。 */
 const ASK_AI = AI_ASSIST_HEADING.replace(/：$/, "");
@@ -41,7 +41,7 @@ export const HELP_FLOW: readonly HelpStep[] = [
         + "会議室のテレビやパソコンで見せるなら横型、スマホで見せるなら縦型です。",
       "伝えたいことを書き、使いたい写真や動画を入れます。",
       // UI/UX 監査 2026-10-02＝使い方が新しい AI の手伝いに触れていなかった。
-      `写真や動画を入れると、このパソコンの中のAIが内容を読み取って説明を書きます（読んでいる間は「${DESCRIBING_LABEL}」と出ます）。`
+      `写真や動画を入れると、このパソコンの中のAIが使えるときは、内容を読み取って説明を書きます（読んでいる間は「${DESCRIBING_LABEL}」と出ます）。`
         + `読み終わる前に動画案を作るときは「${WAIT_DESCRIBE_LABEL}」を選ぶと、写真の使いどころが合いやすくなります。`,
     ],
   },
@@ -67,7 +67,6 @@ export const HELP_FLOW: readonly HelpStep[] = [
       "場面の並び・読み上げる文・使う素材が一覧で出ます。",
       "気になる場面は、その場で文を書き直したり、並べ替えたり、作り直したりできます。",
       "1つの場面をじっくり直すときは、場面編集へ進みます。",
-      `動画の名前の横の「${AI_ASSIST_VIDEO_TITLE_LABEL}」で、AIに名前の候補を出してもらえます。`,
     ],
   },
   {
@@ -79,6 +78,8 @@ export const HELP_FLOW: readonly HelpStep[] = [
       "声・音量・字幕も、この場面だけの設定にできます（触らなければ動画全体の設定を引き継ぎます）。",
       `「${ASK_AI}」で、セリフの言い直し（${quoted(AI_ASSIST_NARRATION_KINDS)}）や、セリフから作る字幕・見出しの候補を出せます。`
         + `候補は「${AI_ASSIST_USE_LABEL}」を押すまで場面に入りません。この手伝いは、いつもこのパソコンの中で動きます（外へは送りません）。`,
+      // ⚠️ 名前の欄は**場面編集の上の帯**にある（台本表には無い・PR #1344 レビュー）。
+      `上の帯の動画の名前の横にある「${AI_ASSIST_VIDEO_TITLE_LABEL}」で、AIに名前の候補を出してもらえます。`,
     ],
   },
   {
@@ -103,7 +104,7 @@ export const HELP_FLOW: readonly HelpStep[] = [
     detail: [
       "「読み上げの声」「字幕の長さ」「切れている文字」「見つからない素材」などを一覧で出します。",
       "「要対応」は直してから進みます。「注意」はそのままでも書き出せます。",
-      `「${FIX_NARRATION_ACTION_LABEL}」「短くする」を押すと、その場面を開いてAIの候補をすぐ出します。`
+      `「${FIX_NARRATION_ACTION_LABEL}」「${SHORTEN_SUBTITLE_ACTION_LABEL}」を押すと、その場面の直す欄を開きます。AIに頼める場面なら、候補をすぐ出します。`
         + `ひっかかった場面が複数あるときは、場面編集の上の「${TRAIL_NEXT_LABEL}」で順に直せます。`,
     ],
   },

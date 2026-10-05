@@ -3,8 +3,9 @@
 import { ASSIST_KIND, assistMaxLength, sceneSpokenText } from "../domain/ai/assist";
 import { resolveNarrationVoice } from "../domain/voice/voiceProvider";
 import type { AssistKind } from "../domain/ai/assist";
-import { FIX_NARRATION_ACTION_LABEL } from "./uiLabels";
-import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
+import { FIX_NARRATION_ACTION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL } from "./uiLabels";
+import { ASSET_TYPE, FREE_CATEGORY, TEXT_KEY, type SceneCategory } from "../domain/enums";
+import { usedTextKeys } from "../domain/template/layerOps";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
@@ -208,9 +209,18 @@ export function buildPrecheckItems(
    * ⚠️ 頼めるのは**一人語りの場面でセリフがあるとき**だけ（場面編集の字幕の手伝いと同じ条件）＝そういう場面が無ければ寄るだけ。
    */
   const fixSubtitle = (hit: { firstId?: string; ids: string[] }): Pick<PrecheckItem, "sceneId" | "sceneIds" | "assist" | "focus"> => {
-    const target = scenes.find((s) => hit.ids.includes(s.sceneId) && (s.lines?.length ?? 0) === 0
-      && assistMaxLength(ASSIST_KIND.subtitle, sceneSpokenText(s), { maxSubtitleLength: templateOf(s)?.aiHint?.maxSubtitleLength }) !== null
-      && sceneSpokenText(s).trim() !== "");
+    // ⚠️ **字幕の欄の手伝いが実際に出る場面だけ**（PR #1344 レビュー 🟡）＝自由配置の場面は「文字」の節が無く、
+    //   字幕の層が `subtitle` 以外の欄を引く見た目でも字幕の欄の手伝いが無い。そこへ印を置くと**誰も受けずに残り**、
+    //   あとで通常の場面へ切り替えたときに押していない手伝いを頼む。**長いのが `texts.subtitle` そのもの**であることも見る
+    //   （別の欄が長いなら、字幕の欄を作り直しても直らない）。
+    const target = scenes.find((s) => {
+      const t = templateOf(s);
+      return hit.ids.includes(s.sceneId) && (s.lines?.length ?? 0) === 0
+        && t != null && t.category !== FREE_CATEGORY && usedTextKeys(t.layers).includes(TEXT_KEY.subtitle)
+        && (s.texts.subtitle ?? "").length > subtitleMax(s)
+        && sceneSpokenText(s).trim() !== ""
+        && assistMaxLength(ASSIST_KIND.subtitle, sceneSpokenText(s), { maxSubtitleLength: t.aiHint?.maxSubtitleLength }) !== null;
+    });
     return target
       ? { sceneId: target.sceneId, sceneIds: hit.ids, assist: ASSIST_KIND.subtitle, focus: "text" }
       : { sceneId: hit.firstId, sceneIds: hit.ids, focus: "text" };
@@ -233,7 +243,7 @@ export function buildPrecheckItems(
   const subtitle = offending((s) => sceneDisplayedSubtitleTexts(s, templateOf(s)).some((t) => t.length > subtitleMax(s)));
   items.push(
     subtitle.nums.length > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", ...fixSubtitle(subtitle) }
+      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: SHORTEN_SUBTITLE_ACTION_LABEL, ...fixSubtitle(subtitle) }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
