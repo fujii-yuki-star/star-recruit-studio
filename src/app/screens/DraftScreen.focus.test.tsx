@@ -30,17 +30,22 @@ beforeEach(() => {
 });
 
 describe("たたき台の行ボタンが、押した言葉の欄へ連れて行く（#995 ③）", () => {
+  // 「セリフ」は行のボタン、「素材を変更」「見た目を変更」は「⋮」のメニュー（UI/UX 監査 2026-10-02＝操作の列に7つ詰まっていた）。
   const press = (label: string) => {
     const onNavigate = vi.fn();
     render(<DraftScreen onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByRole("button", { name: label }));
+    if (label === "セリフ") fireEvent.click(screen.getByRole("button", { name: label }));
+    else {
+      fireEvent.click(screen.getByRole("button", { name: "1番目の場面の操作" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: label }));
+    }
     return onNavigate;
   };
 
   it.each([
     ["セリフ", "narration"],
-    ["素材", "assets"],
-    ["見た目", "look"],
+    ["素材を変更", "assets"],
+    ["見た目を変更", "look"],
   ])("「%s」を押すと、その欄を指して場面編集へ行く", (label, focus) => {
     const onNavigate = press(label);
     expect(onNavigate).toHaveBeenCalledWith("scene-edit");
@@ -52,7 +57,7 @@ describe("たたき台の行ボタンが、押した言葉の欄へ連れて行�
   it("3つが違う欄を指す（同じ場所へ行くだけ、を作らない）", () => {
     // ⚠️ **1回ずつ描き直す**＝同じ画面に残したまま続けて押すと、
     // 2つ目以降が**前の描画の要素**に当たって（同名のボタンが複数見つかって）読み取れない。
-    const seen = ["セリフ", "素材", "見た目"].map((label) => {
+    const seen = ["セリフ", "素材を変更", "見た目を変更"].map((label) => {
       cleanup();
       useProjectStore.setState({ editingSceneFocus: null });
       press(label);

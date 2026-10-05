@@ -4,6 +4,8 @@ import type { SceneEditFocus } from "../data/mockData";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { menuAnchorFrom } from "../hooks/usePointerDrag";
+import { ContextMenu } from "../components/ContextMenu";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
@@ -22,7 +24,6 @@ import {
   CheckIcon,
   SparkleIcon,
   PlusIcon,
-  TrashIcon,
   PlayIcon,
   PhotoIcon,
   VideoIcon,
@@ -56,7 +57,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     setEditingSceneFocus(focus ?? null);
     onNavigate("scene-edit");
   };
-  // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。↑/↓ も併存（下記・キーボード用）。
+  // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。キーで並べ替える道は「⋮」のメニューの「上へ移動／下へ移動」（キーボード用）。
   // 端まで運んだら送る（#714 項目5）＝画面の外にある行へも1回のドラッグで運べる。
   // ⚠️ 送る枠は**この画面のスクロールする器**（`.main-scroll`）＝頁ぜんぶが動く。
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +65,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 行の操作のメニュー（「⋮」と右クリックで同じもの・UI/UX 監査 2026-10-02）。
+  const [rowMenu, setRowMenu] = useState<{ sceneId: string; x: number; y: number } | null>(null);
+  // ⚠️ **キーで押したときはボタンの下へ**（`menuAnchorFrom`＝キーの click は座標を持たない・#989）。
+  const openRowMenu = (e: React.MouseEvent<HTMLElement>, sceneId: string): void => {
+    e.preventDefault();
+    setRowMenu({ sceneId, ...menuAnchorFrom(e) });
+  };
   // 「作り直す」は手直し内容を丸ごと破棄して再生成する（Undo 不可＝generate は履歴を積まない）ので確認を挟む（#383）。
   const [confirmRegen, setConfirmRegen] = useState(false);
   // 向き変更の結果メッセージ（§2-5：何が起きたか＋次の行動）。
@@ -224,7 +232,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <th style={{ minWidth: 240 }}>セリフ</th>
                   <th>見た目</th>
                   <th>音声</th>
-                  <th style={{ width: 210 }}>操作</th>
+                  <th style={{ width: 150 }}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -232,6 +240,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <tr
                     key={row.id}
                     {...dnd.dropProps(i)}
+                    onContextMenu={(e) => openRowMenu(e, row.id)}
                     style={{
                       opacity: dnd.draggingId === row.id ? "var(--drag-source-opacity)" : undefined,
                       // **落ちる場所を線で見せる**（#771(c)）＝行を塗ると「その前か後ろか」が読めない。
@@ -246,7 +255,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     <td className="table-num">
                       <span className="row gap-sm" style={{ alignItems: "center" }}>
                         {/* ドラッグの持ち手（装飾＝aria-hidden）。ネイティブ DnD はキー操作不可のため、アクセシブルな並び替えは
-                            右の ↑/↓ ボタンが担う（見せかけのボタンにしない・#398 レビュー）。 */}
+                            右の「⋮」のメニュー（上へ移動／下へ移動）が担う（見せかけのボタンにしない・#398 レビュー）。 */}
                         <span
                           {...dnd.handleProps(row.id, i)}
                           aria-hidden="true"
@@ -281,40 +290,19 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     </td>
                     <td>
                       <div className="row gap-sm row-wrap">
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="上へ移動"
-                          aria-label="上へ移動"
-                          disabled={i === 0}
-                          onClick={() => moveScene(row.id, "up")}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="下へ移動"
-                          aria-label="下へ移動"
-                          disabled={i === rows.length - 1}
-                          onClick={() => moveScene(row.id, "down")}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="この場面を複製"
-                          aria-label="この場面を複製"
-                          onClick={() => duplicateScene(row.id)}
-                        >
-                          複製
-                        </button>
+                        {/* 行に出すのは**いちばん使う「セリフ」と「⋮」だけ**（UI/UX 監査 2026-10-02＝操作の列に7つ詰まっていた）。
+                            ほかの操作（並べ替え・複製・素材・見た目・削除）は「⋮」と右クリックの同じメニューへ畳む＝タイムラインの列と同じ型。 */}
                         <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id, "narration")}>
                           セリフ
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => editScene(row.id, "assets")}>
-                          素材
-                        </button>
-                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => editScene(row.id, "look")}>
-                          見た目
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          aria-label={`${row.order}番目の場面の操作`}
+                          title="この場面の操作（右クリックでも開けます）"
+                          aria-haspopup="menu"
+                          onClick={(e) => openRowMenu(e, row.id)}
+                        >
+                          ⋮
                         </button>
                         {confirmId === row.id ? (
                           // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（`06 §2-1`）。
@@ -331,17 +319,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                               setConfirmId(null);
                             }}
                           />
-                        ) : (
-                          <button
-                            className="btn btn-ghost btn-icon"
-                            style={{ color: "var(--color-danger-text)" }}
-                            title="この場面を削除"
-                            aria-label="この場面を削除"
-                            onClick={() => setConfirmId(row.id)}
-                          >
-                            <TrashIcon size={14} />
-                          </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -446,6 +424,27 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           ]}
         />
       </div>
+      {rowMenu && (() => {
+        const i = rows.findIndex((r) => r.id === rowMenu.sceneId);
+        if (i < 0) return null;
+        const id = rowMenu.sceneId;
+        return (
+          <ContextMenu
+            x={rowMenu.x}
+            y={rowMenu.y}
+            onClose={() => setRowMenu(null)}
+            items={[
+              { label: "上へ移動", disabled: i === 0, disabledHint: "いちばん上の場面です", onSelect: () => moveScene(id, "up") },
+              { label: "下へ移動", disabled: i === rows.length - 1, disabledHint: "いちばん下の場面です", onSelect: () => moveScene(id, "down") },
+              { label: "この場面を複製", onSelect: () => duplicateScene(id) },
+              { label: "素材を変更", onSelect: () => editScene(id, "assets") },
+              { label: "見た目を変更", onSelect: () => editScene(id, "look") },
+              // 消すのは行の中の共有の確認を通す（`DeleteConfirm`＝これまでと同じ二段）。
+              { label: "この場面を削除", danger: true, onSelect: () => setConfirmId(id) },
+            ]}
+          />
+        );
+      })()}
     </div>
   );
 }
