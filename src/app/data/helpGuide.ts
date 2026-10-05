@@ -6,6 +6,7 @@
 // ⚠️ **画面を足したら案内にも行が要る**＝下の3つの表で `ScreenId` をすべて覆う（「使い方」自身を除く）。
 // 覆えていなければ門番（`helpGuide.test.ts`）が落とす＝**案内に載らない画面**が静かに増えない。
 import type { ScreenId } from "./mockData";
+import { FLOW_STEPS } from "../flowSteps";
 // ⚠️ **選択肢の名前を書き写さない**（PR #1243 レビュー 🟡）＝案内に写した「採用」が、
 // 画面の「採用動画」と**すでにずれていた**。画面名（`SCREEN_TITLES`）と同じ考え方で、文言を引く。
 import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, MATERIAL_AI_DESC_SHORT, MATERIAL_NOTE_SHORT, ORIENTATION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
@@ -202,6 +203,13 @@ export const HELP_TIPS: readonly { title: string; body: string }[] = [
     body:
       "Ctrl+Z で1つ戻せます。やり直すときは Ctrl+Y、または Ctrl+Shift+Z です。"
       + "効くのは、動画のたたき台・場面編集・見た目パターンの編集・タイムライン編集の4つです。",
+  },
+  {
+    // 流れの帯（ADR-0048 追補 2026-10-05）。段の名前は帯と同じものを引く（書き写さない）。
+    title: "いまどこにいるかは上の帯で分かります",
+    body:
+      `たたき台から書き出しまでの画面では、場面があるとき、上の帯に「${FLOW_STEPS.map((s) => s.label).join(" › ")}」が並び、いまの段が色付きで出ます。`
+      + "ほかの段を押すと、その画面へ移れます。戻る（左）と進む（右）も、この帯にあります。",
   },
   {
     title: "左のメニューは畳めます",

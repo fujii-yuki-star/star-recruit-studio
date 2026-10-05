@@ -6,6 +6,8 @@ import { PreviewZoomControl } from "../components/PreviewZoomControl";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead, Switch } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { NoScenesState } from "../components/NoScenesState";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
@@ -48,6 +50,8 @@ const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
   draft: "たたき台へ戻る",
   "scene-edit": "場面編集へ戻る",
   export: "書き出しへ戻る",
+  // 流れの帯の段から来たとき（ADR-0048 追補 2026-10-05）。
+  precheck: "公開前チェックへ戻る",
 };
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
@@ -495,19 +499,24 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
     // （実測 1452/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
     <div className="main-scroll dense">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る（来た画面）と進む（公開前チェック）を上へそろえた。
+          以前は戻るが上の左、進むが右の列の下にあった。 */}
+      <FlowBar
+        current="preview"
+        back={{ label: PREVIEW_BACK_LABEL[previewBackTo] ?? "", onClick: () => onNavigate(previewBackTo) }}
+        next={{ label: "公開前チェックへ進む", onClick: () => { setPrecheckReturnTo("preview"); onNavigate("precheck"); } }}
+        onJump={(to) => {
+          // 場面編集へ移るときは、いま見ている場面を開く（「場面を直す」と同じ）。
+          if (to === "scene-edit" && current) setEditingSceneId(current.sceneId);
+          flowJump("preview", to, onNavigate);
+        }}
+      />
       <PageHead
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
       <ExportLockBanner onNavigate={onNavigate} />
 
-      {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
-      <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
-          <ArrowLeftIcon size={16} />
-          {PREVIEW_BACK_LABEL[previewBackTo]}
-        </button>
-      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
@@ -710,10 +719,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               }}
             >
               場面を直す
-            </button>
-            <button className="btn btn-primary btn-block btn-lg" onClick={() => { setPrecheckReturnTo("preview"); onNavigate("precheck"); }}>
-              公開前チェックへ進む
-              <ChevronRightIcon size={18} />
             </button>
           </div>
         </div>

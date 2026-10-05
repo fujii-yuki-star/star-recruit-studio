@@ -6,10 +6,12 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { menuAnchorFrom } from "../hooks/usePointerDrag";
 import { ContextMenu } from "../components/ContextMenu";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { hasWizardBrief } from "../newProjectGuard";
-import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL, LAST_SCENE_DELETE_HINT } from "../uiLabels";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL, LAST_SCENE_DELETE_HINT, DRAFT_NEXT_LABEL } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -155,6 +157,12 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   return (
     <div className="main-scroll" ref={scrollRef}>
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝進むは上へ寄せた（以前は表の下の右）。最初の段なので戻るは無い。 */}
+      <FlowBar
+        current="draft"
+        next={{ label: DRAFT_NEXT_LABEL, onClick: () => onNavigate("scene-edit") }}
+        onJump={(to) => flowJump("draft", to, onNavigate)}
+      />
       <ExportLockBanner onNavigate={onNavigate} />
       {notice}
       <div className="content-with-yuko" inert={isExporting}>
@@ -407,13 +415,6 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <SparkleIcon size={18} />
               {status === "generating" ? "作成中…" : "作り直す"}
             </button>
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={() => onNavigate("scene-edit")}
-            >
-              <CheckIcon size={20} />
-              この内容で確認・編集する
-            </button>
           </div>
         </div>
 
@@ -422,7 +423,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           messages={[
             `動画のたたき台ができました！全部で${rows.length}つの場面で構成しています。`,
             "セリフや素材は、表の右の操作ボタンから直せます。",
-            "気になるところがなければ「この内容で確認・編集する」に進みましょう。",
+            `気になるところがなければ、上の「${DRAFT_NEXT_LABEL}」に進みましょう。`,
           ]}
         />
       </div>

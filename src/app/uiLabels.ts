@@ -1885,3 +1885,6 @@ export const LAST_SCENE_DELETE_HINT = "最後の1つは消せません";
 
 /** ウィザードの最後の段の声の選択の見出し（声の段は外した・ADR-0048 追補 2026-10-05）。 */
 export const WIZARD_VOICE_LABEL = "読み上げの声";
+
+/** たたき台の「進む」（流れの帯の右・ADR-0048 追補 2026-10-05）。ゆうこの案内も同じ文言を引く。 */
+export const DRAFT_NEXT_LABEL = "この内容で確認・編集する";

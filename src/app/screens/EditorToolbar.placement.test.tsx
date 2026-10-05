@@ -30,7 +30,8 @@ import { BACK_TO_HOME_LABEL } from "../uiLabels";
  */
 const inHeaderEl = (el: Element): boolean => {
   if (el.closest(".panel-frame") != null) return false; // 欄の中＝閉じたり動かしたりすると見失う
-  return el.closest(".page-head, .topbar") != null;
+  // 流れの帯（ADR-0048 追補 2026-10-05＝戻る／進むを5画面で上へそろえた）も見出しの行の1つ。
+  return el.closest(".page-head, .topbar, .flow-bar") != null;
 };
 const inHeader = (name: string): boolean => inHeaderEl(screen.getByRole("button", { name }));
 
