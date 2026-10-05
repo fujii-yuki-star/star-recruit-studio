@@ -9,7 +9,7 @@ import {
 import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 // ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
-import { advancedSlotStarts, advancedSourceStart, usesUpSource } from './sourceTime';
+import { advancedSlotStarts, advancedSourceStart, sourceLimitIssue, usesUpSource } from './sourceTime';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
@@ -204,6 +204,10 @@ export const EDIT_BLOCKED = {
    * 案内が「分けられません」になって**していない操作**を指す（§2-5）。
    */
   trimPastSource: 'TIMELINE_EDIT_TRIM_PAST_SOURCE',
+  /** 左端を伸ばして、素材の始まりより前を使おうとした（ADR-0034 追補 2026-10-05・#1331＝中身が右へずれていた）。 */
+  trimBeforeSource: 'TIMELINE_EDIT_TRIM_BEFORE_SOURCE',
+  /** 右端を伸ばして、素材の終わりより先を使おうとした（同上＝止め絵で伸びていた）。 */
+  trimPastSourceEnd: 'TIMELINE_EDIT_TRIM_PAST_SOURCE_END',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
@@ -443,9 +447,58 @@ export function trimClipIssue(
   clipId: string,
   edge: 'start' | 'end',
   sec: number,
+  // ⚠️ **確定（store）と同じ材料で見る**＝見た目パターンを渡さないと、差し込み口の動画の限界を見ない。
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
 ): EditBlockedReason | null {
-  const r = trimClip(doc, clipId, edge, sec);
+  const r = trimClip(doc, clipId, edge, sec, opts);
   return r.ok ? null : r.reason;
+}
+
+/**
+ * **端を引きすぎたら、限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝端を `target` へ動かすとき、
+ * 置けるならそのまま、置けないなら**今の端から `target` へ向かって置ける所まで**を返す（`stopped`）。
+ *
+ * ⚠️ **止まる理由を数え上げない**＝隣の帯・素材の限界（前後）・使い切り・固定…を個別に計算すると、
+ *   確定（`trimClip`）と食い違ったときに「止まって見えたのに離すと断られる」が起きる。**同じ関数で確かめながら**
+ *   境目を探す（二分探索）＝ゴーストと確定が同じ値を見る（決定10 の「見せたものを確定する」）。
+ * ⚠️ **隣の帯の端にはぴったり付ける**＝探索の誤差で 1 ミリ秒の隙間が残らないよう、境目のすぐ外にある端を候補に足す。
+ * ⚠️ **固定した列・連動している字幕は止めない**（そもそも動かせない＝今の端のまま `stopped`）。
+ * ⚠️ **前提＝置けるかは今の端から向かう先へ単調**（一度置けなくなったら、その先も置けない）。いまの門（重なり・素材の限界・
+ *   使い切り・最小の長さ）はどれもそう。「ある区間だけ置けない」門を `trimClip` に足すと、ここは**手前で止まる**（黙って
+ *   先へ飛ばない＝安全側）ので、その時は探し方を見直す（PR #1338 レビュー ℹ️）。
+ */
+export function trimStopSec(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'start' | 'end',
+  target: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): { sec: number; stopped: boolean } {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return { sec: target, stopped: false };
+  const valid = (s: number): boolean => trimClipIssue(doc, clipId, edge, s, opts) == null;
+  if (valid(target)) return { sec: target, stopped: false };
+  // ⚠️ 今の端が置けない（固定した列・連動している字幕）ときは、探しても1つも置けない＝今の端で止まる
+  //   （別に早めに返す枝は置かない＝変異チェックで等価と分かった）。
+  const cur = edge === 'start' ? clip.startSec : clip.startSec + clip.durationSec;
+  let lo = 0;
+  let hi = 1;
+  const span = Math.abs(target - cur);
+  for (let i = 0; i < 48 && (hi - lo) * span > 1e-6; i++) {
+    const mid = (lo + hi) / 2;
+    if (valid(cur + (target - cur) * mid)) lo = mid;
+    else hi = mid;
+  }
+  const found = cur + (target - cur) * lo;
+  // 境目の近くにある「隣の帯の端」へぴったり付ける（触れるだけなら重ならない＝置ける）。
+  // ⚠️ **前後どちらも見る**＝重なりの判定には許容の幅があり、探した境目が端の**わずかに先**に来ることがある
+  //   （5 秒の端に対して 5.000001 秒）。その分だけ重なった長さで確定しないよう、近い端があればそれを採る。
+  const near = doc.clips
+    .filter((c) => c.id !== clipId && c.trackId === clip.trackId)
+    .flatMap((c) => [c.startSec, c.startSec + c.durationSec])
+    .filter((x) => Math.abs(x - found) <= 1e-4 && valid(x))
+    .sort((x, y) => Math.abs(x - found) - Math.abs(y - found));
+  return { sec: near[0] ?? found, stopped: true };
 }
 
 /**
@@ -656,6 +709,10 @@ export function trimClip(
   // ⚠️ **「分ける」には前からあった門**＝こちらへ移植されておらず、`splitPastSource` は
   // 定義だけで未使用だった。**トリムのほうがドラッグで日常的に触る**ぶん起こりやすい。
   // 規則は `sourceTime.ts` に1つ（写すと片方だけ直る）。
+  // ⚠️ **素材の外へは伸ばさない**（ADR-0034 追補 2026-10-05・#1331）＝左は頭より前・右は終わりより先。
+  const outside = sourceLimitIssue(doc, clip, edge, span, opts.templateOf);
+  if (outside === 'before') return blocked(EDIT_BLOCKED.trimBeforeSource);
+  if (outside === 'after') return blocked(EDIT_BLOCKED.trimPastSourceEnd);
   if (headSec > 0 && usesUpSource(doc, clip, headSec, opts.templateOf)) {
     return blocked(EDIT_BLOCKED.trimPastSource);
   }

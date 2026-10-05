@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
@@ -60,7 +60,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_HEIGHTS, TIMELINE_LANE_HEIGHT_DEFAULT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_MIN_CLIP_SEC, type TimelineLaneHeight, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_HEIGHTS, TIMELINE_LANE_HEIGHT_DEFAULT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_MIN_CLIP_SEC, type TimelineLaneHeight, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
@@ -2296,6 +2296,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       groupIds?: readonly string[];
       shiftSec?: number;
       issue: EditBlockedReason | null;
+      /** 端が限界で止まっている（ADR-0034 追補 2026-10-05＝離すとそこで確定・端の色で示す）。 */
+      stopped?: boolean;
     } | null
   >(null);
 
@@ -2916,11 +2918,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         exceptId: clipId,
         off: snapOff(ev) || timeFixed,
       });
-    const at = (ev: PointerEvent): number => {
+    /** 指の下の時刻（0 秒で丸める前）。端が止まったかの見分けに使う（0 秒で止まったときも色を出す）。 */
+    const atRaw = (ev: PointerEvent): number => {
       if (timeFixed) return origin;
       const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
-      return Math.max(0, origin + (ev.clientX - startX + scrolled) / pxPerSec);
+      return origin + (ev.clientX - startX + scrolled) / pxPerSec;
     };
+    const at = (ev: PointerEvent): number => Math.max(0, atRaw(ev));
     // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
     // まとめて動かすときの**行き先ぜんぶ**（#686 段階4）。ゴーストの色と確定が**同じもの**を見る。
     // 掴んだ相手の動いた量を、選択ぶんへ同じだけ。**列が変わるのは掴んだ相手だけ**
@@ -2949,7 +2953,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       });
     const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
-      if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
+      if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
       // ⚠️ **まとめて動かすときは群ぜんぶで見る**（#686 段階4）。掴んだ相手だけを見ると、
       // **一緒に動く相手と重なる**判定になって赤くなるのに、離すと（正しく）置ける＝
       // 見えている色と結果が割れる（実機で踏んだ）。確定と同じ `moveClips` を通す。
@@ -2987,12 +2991,33 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         const show = (e2: PointerEvent): void => {
           const { sec: raw, guideSec } = applySnap(at(e2), e2);
           // 群ごと丸めたずれから、掴んだ相手の位置も出す（見せかけと確定が同じ値を見る）。
-          const shiftSec = groupIds ? shiftFor(raw) : undefined;
-          const sec = groupIds ? clip0.startSec + (shiftSec ?? 0) : raw;
+          // ⚠️ **群の丸めは運ぶときだけ**（PR #1338 レビュー 🟡）＝端を動かすときに確定するのは掴んだ帯だけ
+          //   （`trimClipById`）。群の床を掛けると、選んでいる別の帯が 0 秒にあるだけで**黙って左へ伸びなくなる**。
+          const grouped = mode === "move" && groupIds != null;
+          const shiftSec = grouped ? shiftFor(raw) : undefined;
+          let sec = grouped ? clip0.startSec + (shiftSec ?? 0) : raw;
+          // ⚠️ **端は限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝隣の帯・素材の限界・使い切りの手前で
+          //   止まり、離すとそこで確定する（以前は赤くなって元の長さに戻っていた＝他社に無い型）。止まる位置は
+          //   確定と同じ関数（`trimClip`）で確かめて探す＝止まって見えたのに離すと断られる、を作らない。
+          let stopped = false;
+          if (mode !== "move") {
+            const st = trimStopSec(useTimelineStore.getState().doc ?? doc0, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
+            sec = st.sec;
+            // ⚠️ **0 秒・最小の長さで止まったときも色を出す**（PR #1338 レビュー 🟡）＝そこは画面の丸め・端の編集の丸めで
+            //   止まるので `trimStopSec` は「置ける」と言う。**見せる端が指の下（吸着の後）と違えば止まっている**で見る
+            //   ＝同じ「止まる」の中で、色の有る限界と無い限界を混ぜない。
+            const shownEdge = mode === "trim-end" ? Math.max(sec, clip0.startSec + TIMELINE_MIN_CLIP_SEC) : Math.min(sec, clipEndSec(clip0) - TIMELINE_MIN_CLIP_SEC);
+            // 指の下の時刻＝0 秒より前を指していればその値（0 秒への吸着より先に見る）・吸着したならその先・それ以外は指の値。
+            const fingerSec = atRaw(e2);
+            const wanted = fingerSec < 0 ? fingerSec : guideSec != null ? raw : fingerSec;
+            stopped = st.stopped || Math.abs(shownEdge - wanted) > 1e-6;
+          }
           lastShownSec = sec;
           const trackId = trackAt(e2);
-          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId) });
-          setSnapGuideSec(guideSec);
+          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId), stopped });
+          // 止まった所が吸着の先と違うときは線を出さない（寄せた先ではなく、止まった所にいる）。
+          // 吸着の先とちょうど同じ所で止まったなら線も残す（同じ着地点で合図が指の距離によって変わる、を作らない）。
+          setSnapGuideSec(stopped && (guideSec == null || Math.abs(guideSec - sec) > 1e-6) ? null : guideSec);
         };
         show(ev);
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
@@ -4757,6 +4782,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                               grabbableClip(c) ? "timeline-clip--editable" : "",
                               clipDrag?.clipId === c.id ? "timeline-clip--dragging" : "",
                               clipDrag?.clipId === c.id && clipDrag.issue ? "drop-target--blocked" : "",
+                              // 端が限界で止まっていることは**その端の色**で示す（FCP・Resolve の型・文言は出さない＝決定10）。
+                              clipDrag?.clipId === c.id && clipDrag.stopped ? `timeline-clip--stopped-${clipDrag.mode === "trim-start" ? "start" : "end"}` : "",
                             ].filter(Boolean).join(" ")}
                             // 掴んでいる間は**その場で動かして見せる**（離すまで文書は変えない）。
                             style={dragStyleOf(c)}
@@ -4950,6 +4977,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 label="長さ（秒）"
                 value={selected.durationSec}
                 min={TIMELINE_MIN_CLIP_SEC}
+                // ⚠️ **上限も欄の作法で丸める**（PR #1338 レビュー 🟡）＝下限は丸めるのに上限（隣の帯・素材の終わり）だけ
+                //   断ると、1つの欄の中で扱いが逆になる。上限はドラッグと同じ `trimStopSec` で出す（端が止まる所と同じ）。
+                max={(() => {
+                  const st = trimStopSec(doc, selected.id, "end", selected.startSec + VIDEO_HARD_MAX_SEC, { templateOf });
+                  return st.stopped ? Math.max(TIMELINE_MIN_CLIP_SEC, st.sec - selected.startSec) : undefined;
+                })()}
                 step={frameStepSec}
                 {...editGuard()}
                 // 長さは**終わりの端を動かす**＝始まりは動かない（ボタンの「ここで終わる」と同じ入口）。

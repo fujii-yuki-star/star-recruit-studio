@@ -1050,6 +1050,8 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   // ⚠️ **「分ける」と原因は同じでも、次の行動が違う**（PR #1004 レビュー 🔴）＝
   // あちらは「分ける位置を変える」、こちらは「そこまで詰めない」。同じ文を使い回すと、
   // 案内が「分けられません」になって**していない操作**を指す（§2-5）。
+  TIMELINE_EDIT_TRIM_BEFORE_SOURCE: "素材の始まりより前には伸ばせません。前を長く見せたいときは、手前に別の部品を置いてください",
+  TIMELINE_EDIT_TRIM_PAST_SOURCE_END: "素材の終わりより先には伸ばせません。長く見せたいときは、速さを遅くするか「この瞬間で絵を止める」で続きを足してください",
   TIMELINE_EDIT_TRIM_PAST_SOURCE:
     "そこまで詰めると、動画を使い切った後から流れます。動画が流れている間（映像が止まる前）まででお試しください",
 

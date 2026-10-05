@@ -544,6 +544,23 @@
  * class 名しか見ないテストは緑のまま通るので、下に**重なり順を実際に解く**テストを置いた。
  * 枠の色を上書きするだけでなく**背景でも示す**＝選択の枠と競らない層を1つ増やす。
  */
+/**
+ * 端が限界で止まっている（ADR-0034 追補 2026-10-05）＝**その端だけ**危険色の太線（FCP・Resolve の「端が赤い」型）。
+ * 帯ぜんぶを赤くしない＝赤い帯は「離しても置けない」（決定10）で、こちらは**離せばそこで確定する**。
+ */
+.timeline-clip.timeline-clip--stopped-start {
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+.timeline-clip.timeline-clip--stopped-end {
+  box-shadow: inset -3px 0 0 var(--color-danger);
+}
+/* ⚠️ **端の取っ手そのものも赤くする**（PR #1338 レビュー 🟡）＝掴んだ帯は必ず選ばれているので、選択の外枠（outline）と
+   取っ手の `::after`（主色・半透明）が上に重なり、内側の影だけでは赤が 2px ほどしか見えない。取っ手を塗り替えて最前面で示す。 */
+.timeline-clip--stopped-start .timeline-clip-handle--left::after,
+.timeline-clip--stopped-end .timeline-clip-handle--right::after {
+  background: var(--color-danger);
+  opacity: 1;
+}
 .timeline-clip.drop-target--blocked {
   outline-color: var(--color-danger);
   background: var(--color-danger-soft);

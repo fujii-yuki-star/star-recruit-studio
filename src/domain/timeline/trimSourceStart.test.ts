@@ -183,7 +183,9 @@ describe('戻しても、開ける文書のままでいる（#988）', () => {
     expect(r.ok && validateTimelineProject(r.doc), '次に開けない文書になっている').toBe(true);
   });
 
-  it('差し込み口の使い始めも 0 で止まる', () => {
+  // ⚠️ **素材の始まりより前へは伸ばさない**（ADR-0034 追補 2026-10-05・#1331）＝以前は使い始めを 0 で止めて帯だけ
+  //   左へ動かしていた（中身が右へずれる）。いまは**素材の頭まで**は通し、その先は断る（ドラッグなら端がそこで止まる）。
+  it('差し込み口の使い始めは素材の頭まで戻せて、その先は断る（中身をずらさない）', () => {
     const template = {
       schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
       aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
@@ -198,8 +200,10 @@ describe('戻しても、開ける文書のままでいる（#988）', () => {
         slotClips: { main: { startSec: 1 } },
       } as TimelineClip],
     } as TimelineProject;
-    const r = trimClip(d, 'clip_001', 'start', 0, { templateOf: () => template });
-    expect(r.ok && (r.doc.clips[0].slotClips?.main?.startSec ?? 0)).toBeGreaterThanOrEqual(0);
+    const ok = trimClip(d, 'clip_001', 'start', 4, { templateOf: () => template }); // 使い始め 1秒ぶん＝ちょうど頭まで
+    expect(ok.ok && ok.doc.clips[0].slotClips?.main?.startSec).toBe(0);
+    const past = trimClip(d, 'clip_001', 'start', 0, { templateOf: () => template });
+    expect(past.ok ? null : past.reason).toBe(EDIT_BLOCKED.trimBeforeSource);
   });
 });
 

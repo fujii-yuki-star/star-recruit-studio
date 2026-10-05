@@ -5355,6 +5355,110 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(c.durationSec).toBeCloseTo(TIMELINE_MIN_CLIP_SEC, 5); // 確定も同じ
   });
 
+  // ⚠️ **端は限界で止めて確定する**（ADR-0034 追補 2026-10-05・利用者判断）＝以前は赤くなって元の長さに戻った。
+  it("右の端を隣の帯の先まで引くと、隣の端で止まり、離すとそこで確定する（元に戻さない）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const handle = container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    drag(handle, 36 * 4, { drop: false }); // 3秒 → 7秒へ（隣は 5秒から）
+    const el = container.querySelector(".timeline-clip") as HTMLElement;
+    expect(parseFloat(el.style.width), "見た目が隣の端で止まっていない").toBeCloseTo(36 * 5, 3);
+    expect(el.className, "止まった端の色が出ていない").toContain("timeline-clip--stopped-end");
+    expect(el.className, "止まっただけなのに置けない色にしている").not.toContain("drop-target--blocked");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 4, clientY: 0 });
+    const c = useTimelineStore.getState().doc!.clips[0];
+    expect(c.durationSec, "離したら元の長さに戻った").toBe(5);
+    expect(useTimelineStore.getState().editBlocked, "止まって確定したのに断りを出している").toBeNull();
+  });
+
+  it("左の端を隣の帯の手前まで引くと、隣の終わりで止まって確定する", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_002"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const handle = container.querySelectorAll(".timeline-clip-handle--left")[0] as HTMLElement;
+    drag(handle, -36 * 4, { drop: false }); // 5秒 → 1秒へ（前は 3秒まで）
+    const el = [...container.querySelectorAll(".timeline-clip")].find((x) => x.className.includes("timeline-clip--dragging")) as HTMLElement;
+    expect(el.className).toContain("timeline-clip--stopped-start");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: -36 * 4, clientY: 0 });
+    const c = useTimelineStore.getState().doc!.clips[1];
+    expect(c.startSec).toBe(3);
+    expect(c.startSec + c.durationSec).toBeCloseTo(8, 5);
+  });
+
+  it("見た目パターンの差し込み口の動画も、素材の始まりで止まる（画面が見た目パターンを渡している）", () => {
+    const tmpl = {
+      schemaVersion: "1.0", templateId: "tmpl_slot", name: "差し込み口", category: "photo_intro", aspectRatio: "16:9",
+      canvas: { width: 1920, height: 1080 }, layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
+    } as unknown as Template;
+    useProjectStore.setState({ templates: [tmpl] });
+    open({
+      assets: [{ assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "v.mp4", metadata: { durationSec: 6 } }] as never,
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 2, durationSec: 3, templateId: "tmpl_slot", assetRefs: { main: "asset_v" }, slotClips: { main: { startSec: 1 } } } as never],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const handle = container.querySelector(".timeline-clip-handle--left") as HTMLElement;
+    drag(handle, -36 * 2); // 2秒 → 0秒へ（枠の動画は使い始め 1秒＝1秒より前へは伸ばせない）
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(1, 4);
+    useProjectStore.setState({ templates: [] });
+  });
+
+  it("0 秒・最小の長さで止まったときも、止まった端の色を出す（同じ「止まる」で色の有無を割らない）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container, unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    drag(container.querySelector(".timeline-clip-handle--left") as HTMLElement, -36 * 2, { drop: false }); // 0秒より左へ
+    expect((container.querySelector(".timeline-clip") as HTMLElement).className).toContain("timeline-clip--stopped-start");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: -72, clientY: 0 });
+    unmount();
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const v2 = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    drag(v2.container.querySelector(".timeline-clip-handle--right") as HTMLElement, -36 * 5, { drop: false }); // 最小の長さより短く
+    expect((v2.container.querySelector(".timeline-clip") as HTMLElement).className).toContain("timeline-clip--stopped-end");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: -180, clientY: 0 });
+  });
+
+  it("「長さ（秒）」の欄の上限は、端が止まる所と同じ（下限と同じく欄の作法で丸める）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const field = screen.getByLabelText("長さ（秒）") as HTMLInputElement;
+    expect(field.max).toBe("5"); // 隣は 5秒から
+  });
+
+  it("止まった端は取っ手ごと赤く塗る（選択の外枠と半透明の取っ手に負けない）", () => {
+    const css = readFileSync(`${process.cwd()}/src/app/components/timeline.css`, "utf8");
+    const start = css.indexOf(".timeline-clip--stopped-start .timeline-clip-handle--left::after,");
+    expect(start, "止まった端の取っ手を塗る規則が無い").toBeGreaterThanOrEqual(0);
+    const rule = css.slice(start, css.indexOf("}", start));
+    expect(rule).toContain(".timeline-clip--stopped-end .timeline-clip-handle--right::after");
+    expect(rule).toContain("background: var(--color-danger);");
+    expect(rule).toContain("opacity: 1;");
+  });
+
+  it("まとめて選んでいても、端を動かすときは群の床を掛けない（選んだ別の帯が 0 秒にあっても左へ伸ばせる）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_002", "clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const handles = [...container.querySelectorAll(".timeline-clip-handle--left")] as HTMLElement[];
+    const h2 = handles.find((h) => h.closest(".timeline-clip")?.textContent?.includes("い"));
+    if (!h2) return; // まとめて選んでいるときに取っ手を出さない形なら対象外
+    drag(h2, -36 * 1); // 5秒 → 4秒（前の帯は 3秒まで）
+    expect(useTimelineStore.getState().doc!.clips[1].startSec).toBeCloseTo(4, 4);
+  });
+
+  it("限界に届かない所では止まった色を出さない", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const handle = container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    drag(handle, 36 * 1, { drop: false }); // 3秒 → 4秒（隣は 5秒から）
+    expect((container.querySelector(".timeline-clip") as HTMLElement).className).not.toContain("timeline-clip--stopped");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36, clientY: 0 });
+  });
+
   it("掴んでいる間に**列**が変わっても確定しない（変わり方で漏らさない）", () => {
     two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_003", kind: TRACK_KIND.visual }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
