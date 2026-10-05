@@ -57,7 +57,8 @@ describe("AI の手伝いの案内", () => {
     expect(textOf(all, "precheck")).toContain(L.FIX_NARRATION_ACTION_LABEL);
     expect(textOf(all, "precheck")).toContain(L.TRAIL_NEXT_LABEL);
     expect(textOf(all, "precheck")).toContain(L.SHORTEN_SUBTITLE_ACTION_LABEL);
-    expect(textOf(all, "materials")).toContain("AI解析");
+    expect(textOf(all, "materials")).toContain(L.MATERIAL_AI_DESC_SHORT);
+    expect(textOf(all, "materials")).toContain(L.MATERIAL_NOTE_SHORT);
     expect(textOf(all, "settings")).toContain("このパソコンの中で動きます");
     expect(textOf(all, "timeline-project")).toContain("点を引く");
   });

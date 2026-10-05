@@ -9,7 +9,7 @@ import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsag
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { describingIn } from "../store/assetDescribeQueue";
 import { useTimelineStore } from "../store/timelineStore";
-import { DESCRIBING_LABEL, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
+import { DESCRIBING_LABEL, MATERIAL_AI_DESC_LABEL, MATERIAL_NOTE_LABEL, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { useLocalAiAvailable } from "../components/AiSuggest";
 import { AI_ENGINE, getAiEngine } from "../../infrastructure/appSettings";
 import { PageHead, Switch } from "../components/ui";
@@ -477,7 +477,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </div>
 
             <div className="field">
-              <label className="field-label" htmlFor="mat-desc">説明</label>
+              <label className="field-label" htmlFor="mat-desc">{MATERIAL_NOTE_LABEL}</label>
               <textarea
                 id="mat-desc"
                 className="textarea"
@@ -488,11 +488,11 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </div>
 
             {/* 同梱の AI が取り込み時に写真を読んで付けた説明（ADR-0052 決定4・12 §4b）。利用者が直せる＝直した値は AI が上書きしない。
-                送信前確認の「AI解析」と同じ名前で呼ぶ（Gemini を選んだときはこれも送られる）。 */}
+                送信前確認と同じ名前で呼ぶ（Gemini を選んだときはこれも送られる）＝`MATERIAL_AI_DESC_*`。 */}
             {(selected.assetType === ASSET_TYPE.image || selected.assetType === ASSET_TYPE.video) && (
               <div className="field">
                 <div className="row gap-sm" style={{ alignItems: "baseline" }}>
-                  <label className="field-label" htmlFor="mat-ai-desc">AI解析</label>
+                  <label className="field-label" htmlFor="mat-ai-desc">{MATERIAL_AI_DESC_LABEL}</label>
                   {/* 欄の名前には混ぜない（読み上げの名前が読み終わるまで変わってしまう）。 */}
                   {describing.has(selected.assetId) && <span className="text-sm text-faint" role="status">{DESCRIBING_LABEL}</span>}
                 </div>

@@ -5,7 +5,7 @@ import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
 import { assetSentText, selectAssetsForSend } from "../../domain/ai/assetSendText";
-import { assetTypeLabel, omittedAssetsNote, REGENERATE_OVERWRITE_CONFIRM, sentAssetTextSummary } from "../uiLabels";
+import { assetTypeLabel, MATERIAL_AI_DESC_SHORT, MATERIAL_NOTE_SHORT, omittedAssetsNote, REGENERATE_OVERWRITE_CONFIRM, sentAssetTextSummary } from "../uiLabels";
 import { SparkleIcon, CheckIcon } from "../components/icons";
 
 interface ConfirmProps {
@@ -165,10 +165,10 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                         {assetTypeLabel[t.assetType]}：{t.name || "（名前なし）"}
                       </div>
                       {t.description && (
-                        <div className="text-sm" style={{ whiteSpace: "pre-wrap" }}>説明：{t.description}</div>
+                        <div className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{MATERIAL_NOTE_SHORT}：{t.description}</div>
                       )}
                       {t.aiDescription && (
-                        <div className="text-sm text-muted" style={{ whiteSpace: "pre-wrap" }}>AI解析：{t.aiDescription}</div>
+                        <div className="text-sm text-muted" style={{ whiteSpace: "pre-wrap" }}>{MATERIAL_AI_DESC_SHORT}：{t.aiDescription}</div>
                       )}
                       {t.tags.length > 0 && <div className="text-sm text-muted">タグ：{t.tags.join("、")}</div>}
                     </li>

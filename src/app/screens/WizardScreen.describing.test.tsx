@@ -10,6 +10,7 @@ import { useProjectStore } from "../store/projectStore";
 import { describingKey } from "../store/assetDescribeQueue";
 import { DESCRIBING_LABEL, MAKE_WITHOUT_WAIT_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
 import { WizardScreen } from "./WizardScreen";
+import { WIZARD_STEP } from "./wizardSteps";
 
 /** いま開いている動画の素材として「読み取り中」にする。 */
 const reading = (...ids: string[]): string[] => ids.map((id) => describingKey(useProjectStore.getState().meta.projectId!, id));
@@ -20,7 +21,7 @@ const photo = (id: string): Asset =>
 beforeEach(() => {
   useProjectStore.getState().setExportRun({ phase: "idle" });
   useProjectStore.getState().newProject();
-  useProjectStore.setState((st) => ({ meta: { ...st.meta, projectId: "p_now" }, assets: [photo("a1"), photo("a2"), photo("a3")], describingKeys: [], wizardStep: 4 }));
+  useProjectStore.setState((st) => ({ meta: { ...st.meta, projectId: "p_now" }, assets: [photo("a1"), photo("a2"), photo("a3")], describingKeys: [], wizardStep: WIZARD_STEP.ready }));
 });
 afterEach(() => cleanup());
 
@@ -80,7 +81,7 @@ describe("動画案を作る前の、読み取りの残り", () => {
 
 describe("素材の段の「読み取り中…」", () => {
   it("読んでいる素材の名前の横にだけ出す", () => {
-    useProjectStore.setState({ describingKeys: reading("a2"), wizardStep: 2 });
+    useProjectStore.setState({ describingKeys: reading("a2"), wizardStep: WIZARD_STEP.materials });
     render(<WizardScreen onNavigate={vi.fn()} />);
     expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(1);
     expect(screen.getByText(DESCRIBING_LABEL).parentElement).toHaveTextContent("a2.jpg");

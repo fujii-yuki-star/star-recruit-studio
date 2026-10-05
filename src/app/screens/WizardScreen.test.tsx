@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { WizardScreen } from "./WizardScreen";
-import { stepsFor, wizardBackLabel } from "./wizardSteps";
-import { BACK_TO_HOME_LABEL } from "../uiLabels";
+import { stepsFor, WIZARD_STEP, wizardBackLabel } from "./wizardSteps";
+import { VOICE_STYLE_PRESETS, matchVoiceStyleId } from "../../domain/voice/voiceStylePresets";
+import { BACK_TO_HOME_LABEL, WIZARD_VOICE_LABEL } from "../uiLabels";
 import { VIDEO_KIND } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
@@ -181,10 +182,10 @@ describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
 
   // ⚠️ **段を辿って画面で見る**（#1141 レビュー由来 🟡）＝もとは step0→1 の1遷移だけを見ていて、
   // 残りは `wizardBackLabel(i, steps)` を **同じ配列自身**と突き合わせる自己同一性の検査だった。
-  // それだと `backName` の**取り違え**（「写真・動画」と「読み上げの声」が入れ替わる）が捕まらない。
+  // それだと `backName` の**取り違え**（「会社情報」と「写真・動画」が入れ替わる）が捕まらない。声の段は外した（ADR-0048 追補 2026-10-05）。
   it.each([
-    [VIDEO_KIND.recruit, ["動画の種類と目的", "会社情報", "写真・動画", "読み上げの声"]],
-    [VIDEO_KIND.general, ["動画の種類と目的", "発表の内容", "写真・動画", "読み上げの声"]],
+    [VIDEO_KIND.recruit, ["動画の種類と目的", "会社情報", "写真・動画"]],
+    [VIDEO_KIND.general, ["動画の種類と目的", "発表の内容", "写真・動画"]],
   ])("%s：段を進めるたびに、1つ前の段の名前へ変わる", (kind, names) => {
     useProjectStore.setState((st) => ({ meta: { ...st.meta, videoKind: kind } }));
     render(<WizardScreen onNavigate={() => {}} />);
@@ -238,5 +239,29 @@ describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
       expect(wizardBackLabel(-1, steps)).toBe(BACK_TO_HOME_LABEL);
       expect(wizardBackLabel(steps.length + 1, steps)).toBe(BACK_TO_HOME_LABEL);
     }
+  });
+});
+
+// ADR-0048 追補（利用者判断 2026-10-05）：声の段を外し、最後の段で小さく選ぶ（たたき台を見るまでを短くする）。
+describe("声の段を外した", () => {
+  it("段は4つ・声は最後の段で選べ、選んだ声で動画案へ進む", () => {
+    expect(stepsFor(VIDEO_KIND.recruit).map((s) => s.label)).not.toContain("読み上げの声を設定");
+    expect(stepsFor(VIDEO_KIND.recruit)).toHaveLength(WIZARD_STEP.ready + 1);
+    useProjectStore.setState({ wizardStep: WIZARD_STEP.ready });
+    const onNavigate = vi.fn();
+    render(<WizardScreen onNavigate={onNavigate} />);
+    const group = screen.getByRole("group", { name: WIZARD_VOICE_LABEL });
+    const choice = within(group).getAllByRole("button")[1];
+    fireEvent.click(choice);
+    expect(choice.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /AIに動画案を作ってもらう/ }));
+    expect(onNavigate).toHaveBeenCalledWith("confirm");
+    expect(matchVoiceStyleId(useProjectStore.getState().meta.voiceSettings)).toBe(VOICE_STYLE_PRESETS[1].id);
+  });
+
+  it("前の版で覚えた「最後の段（声の段があったころの 4）」は、いまの最後の段で開く", () => {
+    useProjectStore.setState({ wizardStep: 4 });
+    render(<WizardScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "準備ができました" })).toBeTruthy();
   });
 });

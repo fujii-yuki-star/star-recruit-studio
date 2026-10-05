@@ -7,6 +7,13 @@ import { BACK_TO_HOME_LABEL } from "../uiLabels";
 import { VIDEO_KIND, type VideoKind } from "../../domain/enums";
 
 /**
+ * 段の番号（並びの位置）。⚠️ **数で書かない**＝段を抜き差ししたとき、数の直書きは黙って別の段を指す。
+ * ⚠️ **声の段は外した**（ADR-0048 追補・利用者判断 2026-10-05＝たたき台を見るまでが長かった）。声は既定のままでも作れ、
+ *   「準備ができました」で小さく選べる（あとから設定・場面ごとにも変えられる）。
+ */
+export const WIZARD_STEP = { kind: 0, brief: 1, materials: 2, ready: 3 } as const;
+
+/**
  * ウィザードの段（名札と、**戻り先としての呼び名**）。
  *
  * ⚠️ **2つの配列に割らない**（#1026）＝名札だけ足して呼び名を忘れると、
@@ -32,7 +39,6 @@ export function stepsFor(videoKind: VideoKind): readonly WizardStep[] {
     { label: "動画の種類と目的", backName: "動画の種類と目的" },
     second,
     { label: "写真・動画を追加", backName: "写真・動画" },
-    { label: "読み上げの声を設定", backName: "読み上げの声" },
     { label: "AIに動画案を作ってもらう", backName: "動画案" },
   ];
 }

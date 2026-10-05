@@ -8,7 +8,7 @@
 import type { ScreenId } from "./mockData";
 // ⚠️ **選択肢の名前を書き写さない**（PR #1243 レビュー 🟡）＝案内に写した「採用」が、
 // 画面の「採用動画」と**すでにずれていた**。画面名（`SCREEN_TITLES`）と同じ考え方で、文言を引く。
-import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, ORIENTATION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
+import { AI_ASSIST_HEADING, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, DESCRIBING_LABEL, FIX_NARRATION_ACTION_LABEL, MATERIAL_AI_DESC_SHORT, MATERIAL_NOTE_SHORT, ORIENTATION_LABEL, SHORTEN_SUBTITLE_ACTION_LABEL, TRAIL_NEXT_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
 
 /** 「AIに頼む」の見出し（末尾の「：」を外して文中で使う）。⚠️ 書き写さない＝画面のボタンの名前と同じものを引く。 */
 const ASK_AI = AI_ASSIST_HEADING.replace(/：$/, "");
@@ -153,7 +153,8 @@ export const HELP_PLACES: readonly HelpStep[] = [
     detail: [
       "取り込んだ素材は動画のフォルダにコピーされるので、あとで元のファイルを動かしても動画は壊れません。",
       "元のファイルが見つからなくなった素材は、ここでつなぎ直せます。",
-      "写真・動画の「AI解析」は、取り込むとこのパソコンの中のAIが書きます。自分で直した内容は、AIが上書きしません。",
+      `写真・動画の「${MATERIAL_AI_DESC_SHORT}」は、取り込むとこのパソコンの中のAIが書きます。自分で直した内容は、AIが上書きしません。`
+        + `気づいたことは「${MATERIAL_NOTE_SHORT}」に書けます（どちらも動画案を作るときの手がかりになります）。`,
     ],
   },
   {
