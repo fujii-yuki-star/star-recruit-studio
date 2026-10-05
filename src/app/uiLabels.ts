@@ -1460,7 +1460,12 @@ export function clipOutsidePlayheadMessage(
  * そこで数値や「動き」を案内すると、言われたとおりに探しても見つからない＝行き止まりになる。
  * まとめてのときに**実在するのは矢印キーだけ**（そちらは列の固定しか見ないので、動き・まとまりでは効く）。
  */
-export type CanvasHoldReason = "track" | "animation" | "group";
+export type CanvasHoldReason = "track" | "group";
+/**
+ * 動きを付けた部品を掴む・数値で動かすと**動き全体がずれる**（ADR-0054 段階1）＝業界の既定（その時刻だけ直す）に
+ * 慣れた人の取り違えを減らす一言。⚠️ 段階2（道筋と点）を入れたら「点を掴むとその時刻だけ直せます」に変える。
+ */
+export const ANIMATED_DRAG_NOTE = "動きを付けた部品は、動かすと動き全体がずれます（始まりも止まる位置も同じだけ）。その時刻の位置だけ直すときは「動き」で。";
 
 export function canvasHoldMessage(reason: CanvasHoldReason, count?: number): string {
   const many = count != null;
@@ -1475,10 +1480,6 @@ export function canvasHoldMessage(reason: CanvasHoldReason, count?: number): str
     // ⚠️ 固定した列では**矢印も効かない**ので、まとめてのときも矢印を案内しない。
     case "track":
       return `固定された列の部品${n}は${tail}動かすには固定を外してください。`;
-    case "animation":
-      return many
-        ? `動きが効いている部品${n}は${tail}${byNumbers}`
-        : `動きが効いている部品は${tail}${byNumbers}「動き」で調整してください。`;
     case "group":
       return many
         ? `グループの変形が効いている部品${n}は${tail}${byNumbers}`

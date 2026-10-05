@@ -189,6 +189,36 @@ export interface TimelineCanvasClip {
 }
 
 /**
+ * **描かれている場所での箱の変更を、素の箱の変更へ戻す**（ADR-0054 段階1）＝動きを付けた部品をキャンバスで掴んだとき。
+ *
+ * 枠は描かれている場所（`finalBox`）に出すので、掴んだ結果も描かれている場所で返ってくる。それを素の箱へそのまま
+ * 書くと動きのぶんだけ絵が飛ぶ（#746-4）。**自身の動き（中心まわりの拡縮 → 平行移動 → 回転の足し算＝
+ * `applyInterpolatedTransform`）を逆にたどる**と、掴んだ量がそのまま動き全体の平行移動になる
+ * （始まりも止まる位置も同じだけずれる＝矢印キー・数値欄と同じ）。
+ * ⚠️ **グループの変形は戻さない**＝グループの拡縮・回転の下では、素の箱の 1px が画面の 1px にならない。
+ *   そこは呼び出し側が掴ませない（`canvasHoldReason` の "group"）。
+ */
+export function baseBoxPatchFromShown(
+  cc: Pick<TimelineCanvasClip, 'box' | 'ownTr'>,
+  shown: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
+): { x?: number; y?: number; w?: number; h?: number; rotation?: number } {
+  const tr = cc.ownTr;
+  // ⚠️ 倍率が 0 以下になる瞬間（行き過ぎるイージングの途中）は割れないので 1 として扱う＝その瞬間に掴むと
+  //   素の箱へ書く値が少しずれる（描画は素の箱から描くので一致は崩れない＝操作の精度だけの割り切り・PR #1339 レビュー ℹ️）。
+  const s = tr.scale != null && tr.scale > 0 ? tr.scale : 1;
+  const out: { x?: number; y?: number; w?: number; h?: number; rotation?: number } = {};
+  const w = shown.w != null ? shown.w / s : cc.box.w;
+  const h = shown.h != null ? shown.h / s : cc.box.h;
+  if (shown.w != null) out.w = w;
+  if (shown.h != null) out.h = h;
+  // 中心まわりの拡縮で左上は (w×s − w)/2 だけ左上へ動き、その後に平行移動が足される＝その逆。
+  if (shown.x != null) out.x = shown.x - (tr.x ?? 0) + (w * s - w) / 2;
+  if (shown.y != null) out.y = shown.y - (tr.y ?? 0) + (h * s - h) / 2;
+  if (shown.rotation != null) out.rotation = shown.rotation - (tr.rotation ?? 0);
+  return out;
+}
+
+/**
  * その時刻の**実効のまとまり**（まとまりに付いた動きを transform へ前合成したもの）。
  * 不透明度は別途返す（描画だけが使う）。
  */

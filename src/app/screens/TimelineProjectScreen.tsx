@@ -148,7 +148,7 @@ type DragPlace = {
 import { ArrowLeftIcon, EyeIcon, EyeOffIcon, LockIcon, VolumeIcon, VolumeMuteIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
-import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, ANIMATED_DRAG_NOTE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -177,7 +177,7 @@ import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
-import { freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
+import { baseBoxPatchFromShown, freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { clipsInRangeCount, deleteRangeIssue } from "../../domain/timeline/deleteRange";
 import type { BlendMode } from "../../domain/template/types";
@@ -758,7 +758,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     noticedForRef.current = key;
     // 理由が混ざることもある（固定した列の部品と、動きの効いた部品を一緒に選んだ）。
     // **数えた理由をすべて出す**＝1つにまとめると、残りの部品が動かない訳が分からない。
-    const order: CanvasHoldReason[] = ["track", "animation", "group"];
+    const order: CanvasHoldReason[] = ["track", "group"];
     const counts = new Map<CanvasHoldReason, number>();
     for (const r of reasons) counts.set(r, (counts.get(r) ?? 0) + 1);
     setLockedSkipNotice(order.filter((r) => counts.has(r)).map((r) => canvasHoldMessage(r, counts.get(r))).join(" "));
@@ -2669,11 +2669,27 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * ぶんだけ絵が飛ぶ。⚠️ **理由は原因ごとに分ける**＝「動き」で解けないものを「動きで調整して」と
    * 案内すると、言われたとおりにしても直らない（グループの変形は動きの欄では外せない）。
    */
-  const canvasHoldReason = (cc: TimelineCanvasClip): "animation" | "group" | null => {
-    if (boxDiffers(cc.groupedBox, cc.finalBox)) return "animation";
+  const canvasHoldReason = (cc: TimelineCanvasClip): "group" | null => {
+    // ⚠️ **自身の動きだけなら掴める**（ADR-0054 段階1・利用者判断 2026-10-05）＝掴んだ量を素の箱へ逆にたどって
+    //   書く（`baseBoxPatchFromShown`）＝**動き全体の平行移動**（始まりも止まる位置も同じだけずれる・矢印キーと同じ）。
+    //   以前は「動きが効いている部品は掴めない」だった（時刻によって掴める・掴めないが割れてもいた）。
+    // ⚠️ **グループの変形は引き続き掴ませない**＝拡縮・回転の下では素の箱の 1px が画面の 1px にならない。
     if (boxDiffers(cc.box, cc.groupedBox)) return "group";
     return null;
   };
+  /**
+   * キャンバスでの箱の変更を**素の箱の変更へ戻す**（ADR-0054 段階1）＝描かれている場所で掴んだ結果を、
+   * 自身の動きを逆にたどって書く。動きの無い部品はそのまま（逆にたどっても同じ値）。
+   */
+  const toBaseBox = <T extends { x?: number; y?: number; w?: number; h?: number; rotation?: number }>(id: string, shown: T): T => {
+    const cc = canvasClips.find((x) => x.clip.id === id);
+    return cc ? (baseBoxPatchFromShown(cc, shown) as T) : shown;
+  };
+  /**
+   * 選んだ部品に**自身の動き**があるか（掴むと動き全体がずれることを一言添える・ADR-0054 決定4）。
+   * ⚠️ **その時刻のずれでは見ない**（PR #1339 レビュー ℹ️）＝ずれがちょうど 0 の時刻でも、掴めば動き全体がずれる。
+   */
+  const selectedHasOwnMotion = selected != null && (doc?.animations ?? []).some((a) => a.targetId === selected.id);
   /**
    * 一緒に動かさなかった部品の**理由**（#788-1）。キャンバスの `locked` を立てているのと**同じ材料**を
    * 見る＝判定を書き写さない（片方だけ直る割れを作らない）。
@@ -3999,11 +4015,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               // 空白を押したら解除（決定15＝選択モデルは1つ）。
               onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelection() : selectClip(id, additive))}
               onSelectMany={(ids: string[]) => selectClips(ids)}
-              onChange={(id: string, g: { x: number; y: number; w?: number; h?: number }) => setClipBoxById(id, g)}
-              onRotate={(id: string, rotation: number) => setClipBoxById(id, { rotation })}
+              // ⚠️ **描かれている場所で返ってくる**＝素の箱へ戻してから書く（ADR-0054 段階1＝動きを付けた部品も掴める）。
+              onChange={(id: string, g: { x: number; y: number; w?: number; h?: number }) => setClipBoxById(id, toBaseBox(id, g))}
+              onRotate={(id: string, rotation: number) => setClipBoxById(id, toBaseBox(id, { rotation }))}
               // ⚠️ **まとめては全か無か**（決定15）＝1件ずつ流すと固定した列の部品だけ黙って取り残される。
-              onMoveMany={(moves: { id: string; x: number; y: number }[]) => setClipBoxesFor(moves.map((m) => ({ id: m.id, patch: { x: m.x, y: m.y } })))}
-              onResizeMany={(geoms: { id: string; x: number; y: number; w: number; h: number }[]) => setClipBoxesFor(geoms.map((g) => ({ id: g.id, patch: { x: g.x, y: g.y, w: g.w, h: g.h } })))}
+              onMoveMany={(moves: { id: string; x: number; y: number }[]) => setClipBoxesFor(moves.map((m) => ({ id: m.id, patch: toBaseBox(m.id, { x: m.x, y: m.y }) })))}
+              onResizeMany={(geoms: { id: string; x: number; y: number; w: number; h: number }[]) => setClipBoxesFor(geoms.map((g) => ({ id: g.id, patch: toBaseBox(g.id, { x: g.x, y: g.y, w: g.w, h: g.h }) })))}
               // **1回のドラッグ＝1回の取り消し**（決定20）。動かすたびに履歴を積まない。
               onInteractionStart={beginHistoryGroup}
               onInteractionEnd={endHistoryGroup}
@@ -5003,6 +5020,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 {/* ⚠️ **掴めない理由をここで出す**（#746-4）＝キャンバスでは動きの効いている部品を掴ませない
                     （掴んだ量は下の数値へ書き戻るので、動きのぶんだけ絵が飛ぶ）。**触れる先を必ず示す**
                     ＝理由だけ出して行き止まりにしない（決定5）。 */}
+                {/* 動きを付けた部品を掴むと**動き全体がずれる**＝業界の既定（その時刻だけ直す）と違うので一言（ADR-0054 決定4）。 */}
+                {!selectedHoldReason && selectedHasOwnMotion && (
+                  <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>{ANIMATED_DRAG_NOTE}</p>
+                )}
                 {selectedHoldReason && (
                   <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
                     {/* ⚠️ 言い方は**まとめて動かしたときと同じ関数**から採る（#788-1）＝2か所に持つと片方だけ直る。 */}
