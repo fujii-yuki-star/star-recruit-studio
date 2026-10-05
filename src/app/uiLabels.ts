@@ -1768,6 +1768,12 @@ export function writingSceneMessage(n: number): string {
 }
 
 // ── 素材の「AI解析」の欄（ADR-0052 決定4）───────────────────────────────────
+// ⚠️ **欄の名前は役割で言う**（ADR-0048 追補・利用者判断 2026-10-05）＝「説明」と「AI解析」が並び、どちらに書けばよいか迷った。
+//   データの形（description／aiDescription）は変えない＝名前だけ。送信前確認と使い方も同じ名前を引く。
+export const MATERIAL_NOTE_LABEL = "あなたのメモ（任意）";
+export const MATERIAL_NOTE_SHORT = "あなたのメモ";
+export const MATERIAL_AI_DESC_LABEL = "AIが読み取った内容（直せます）";
+export const MATERIAL_AI_DESC_SHORT = "AIが読み取った内容";
 // ⚠️ **行われない約束を出さない**（UI/UX 監査 2026-10-02・ADR-0026④）＝以前は AI が無いときや Gemini を選んでいるときも
 // 「取り込むと、このパソコンの中のAIが…書きます」と出ていた（読み取りは同梱の AI を選んでいるときだけ走る）。
 export const MATERIAL_AI_DESC_PLACEHOLDER_AUTO = "取り込むと、このパソコンの中のAIが写真や動画の内容を書きます";
@@ -1876,3 +1882,6 @@ export const MOTION_PATH_NOTE = "部品を動かすと動き全体がずれま�
 
 /** 最後の1場面を消そうとしたときの理由（場面編集のカード・台本表の行で同じもの＝場面が0枚の動画は作れない）。 */
 export const LAST_SCENE_DELETE_HINT = "最後の1つは消せません";
+
+/** ウィザードの最後の段の声の選択の見出し（声の段は外した・ADR-0048 追補 2026-10-05）。 */
+export const WIZARD_VOICE_LABEL = "読み上げの声";

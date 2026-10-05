@@ -9,7 +9,7 @@ import type { Asset } from "../../domain/project/types";
 import { MaterialsScreen } from "./MaterialsScreen";
 import { resetAiSuggestAvailabilityForTest } from "../components/AiSuggest";
 import { AI_ENGINE, setAiEngine } from "../../infrastructure/appSettings";
-import { DESCRIBING_LABEL, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL } from "../uiLabels";
+import { DESCRIBING_LABEL, MATERIAL_AI_DESC_LABEL, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL } from "../uiLabels";
 
 const ai = vi.hoisted(() => ({ available: true }));
 vi.mock("../../infrastructure/aiClient", async (importOriginal) => ({
@@ -34,7 +34,7 @@ describe("MaterialsScreen AI解析の欄", () => {
   it("写真は AI が付けた説明を見せ、直すと素材に入る", () => {
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     open("オフィス外観");
-    const field = screen.getByLabelText("AI解析") as HTMLTextAreaElement;
+    const field = screen.getByLabelText(MATERIAL_AI_DESC_LABEL) as HTMLTextAreaElement;
     expect(field.value).toBe("明るいオフィス");
     fireEvent.change(field, { target: { value: "若手が働くオフィス" } });
     expect(useProjectStore.getState().assets[0].aiDescription).toBe("若手が働くオフィス");
@@ -48,7 +48,7 @@ describe("MaterialsScreen AI解析の欄", () => {
   it("動画にも出す（まだ無いときは、自動で書かれることを案内する）", async () => {
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     open("紹介動画");
-    const field = screen.getByLabelText("AI解析") as HTMLTextAreaElement;
+    const field = screen.getByLabelText(MATERIAL_AI_DESC_LABEL) as HTMLTextAreaElement;
     expect(field.value).toBe("");
     await waitFor(() => expect(field.placeholder).toBe(MATERIAL_AI_DESC_PLACEHOLDER_AUTO));
   });
@@ -58,7 +58,7 @@ describe("MaterialsScreen AI解析の欄", () => {
     ai.available = false;
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     open("紹介動画");
-    const field = screen.getByLabelText("AI解析") as HTMLTextAreaElement;
+    const field = screen.getByLabelText(MATERIAL_AI_DESC_LABEL) as HTMLTextAreaElement;
     await new Promise((r) => setTimeout(r, 0));
     expect(field.placeholder).toBe(MATERIAL_AI_DESC_PLACEHOLDER_MANUAL);
   });
@@ -67,7 +67,7 @@ describe("MaterialsScreen AI解析の欄", () => {
     setAiEngine(AI_ENGINE.gemini);
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     open("紹介動画");
-    const field = screen.getByLabelText("AI解析") as HTMLTextAreaElement;
+    const field = screen.getByLabelText(MATERIAL_AI_DESC_LABEL) as HTMLTextAreaElement;
     await new Promise((r) => setTimeout(r, 0));
     expect(field.placeholder).toBe(MATERIAL_AI_DESC_PLACEHOLDER_MANUAL);
   });
@@ -93,7 +93,7 @@ describe("MaterialsScreen 読み取り中", () => {
     expect(screen.getByText(DESCRIBING_LABEL).closest("button")).toHaveTextContent("紹介動画");
     fireEvent.click(screen.getAllByText("紹介動画")[0]);
     expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(2);
-    expect(screen.getByLabelText("AI解析")).toBeTruthy();
+    expect(screen.getByLabelText(MATERIAL_AI_DESC_LABEL)).toBeTruthy();
     fireEvent.click(screen.getAllByText("オフィス外観")[0]);
     expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(1);
   });

@@ -58,7 +58,10 @@ describe("ConfirmScreen 送る文字情報の確認（#547 P2-8・§2-6）", () 
     fireEvent.click(screen.getByRole("button", { name: "送る文字情報を確認する" }));
 
     expect(screen.getByText(/受付前で撮影/)).toBeTruthy(); // 説明
-    expect(screen.getByText(/人物1名/)).toBeTruthy();       // AI解析（これも送られる）
+    expect(screen.getByText(/人物1名/)).toBeTruthy();       // AIが読み取った内容（これも送られる）
+    // 素材の画面と同じ名前で呼ぶ（ADR-0048 追補・利用者判断 2026-10-05＝役割の分かる名前）。
+    expect(screen.getByText(/受付前で撮影/).textContent).toMatch(/^あなたのメモ：/);
+    expect(screen.getByText(/人物1名/).textContent).toMatch(/^AIが読み取った内容：/);
     expect(screen.getByText(/社員、受付/)).toBeTruthy();     // タグ
     expect(screen.getByText(/社屋\.jpg/)).toBeTruthy();      // 名前
   });
