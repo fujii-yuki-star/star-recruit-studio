@@ -29,6 +29,13 @@ export interface AssetDescribeDeps {
   blocked(): boolean;
   /** 待つ（検査で差し替える）。 */
   sleep(ms: number): Promise<void>;
+  /**
+   * **読む予定の素材**が変わった（UI/UX 監査 2026-10-02＝裏で読んでいることが画面のどこにも見えず、
+   * 読み終わる前に動画案を作ると、説明の無いまま作られることに気づけなかった）。
+   * ⚠️ 数えるのは**実際に読むもの**だけ（積んだ時点で説明が要る写真・動画）＝説明があるもの・音は数えない
+   * （1枚ずつ順に読むので、20枚の後ろに積んだ音が「読み取り中」に見え続けてしまう）。
+   */
+  onPending?(assetIds: readonly string[]): void;
 }
 
 /** 書き出しが終わるのを待つ間隔。 */
@@ -47,7 +54,17 @@ export interface AssetDescribeQueue {
 }
 
 export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribeQueue {
-  const jobs: { assetId: string; stillOpen: () => boolean }[] = [];
+  const jobs: { assetId: string; stillOpen: () => boolean; counted: boolean }[] = [];
+  /** 読む予定の素材ごとの、積んである数（同じ素材を2回積むことがある＝差し替え）。 */
+  const pending = new Map<string, number>();
+  const emit = (): void => deps.onPending?.([...pending.keys()]);
+  const settle = (job: { assetId: string; counted: boolean }): void => {
+    if (!job.counted) return;
+    const n = (pending.get(job.assetId) ?? 0) - 1;
+    if (n > 0) pending.set(job.assetId, n);
+    else pending.delete(job.assetId);
+    emit();
+  };
   const tried = new Set<string>();
   /** 素材ごとの差し替えの世代（`invalidate` で進む）。 */
   const generation = new Map<string, number>();
@@ -94,7 +111,8 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
     // 問い合わせの失敗（同期の例外も）は「使えない」＝裏の仕事で取り込みや画面を落とさない。
     availability ??= Promise.resolve().then(() => deps.available()).catch(() => false);
     if (!(await availability)) {
-      jobs.length = 0;
+      // 同梱の AI が無い＝どれも読まない。「読み取り中」を残さない。
+      for (const job of jobs.splice(0)) settle(job);
       return;
     }
     while (jobs.length > 0) {
@@ -103,6 +121,8 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
         await runOne(job.assetId, job.stillOpen);
       } catch (e) {
         console.warn("[ai] 写真の説明の途中で失敗しました（説明は付けません）:", job.assetId, e);
+      } finally {
+        settle(job);
       }
     }
   }
@@ -119,11 +139,15 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
   return {
     enqueue(assetId, stillOpen, opts) {
       // `retry`＝この画面を開いている間に一度読んだ素材でも読み直す（写真を差し替えた＝#1317）。
-      if (opts?.retry) {
-        const cur = deps.current(assetId);
-        if (cur) tried.delete(`${cur.projectId}/${assetId}`);
+      const cur = deps.current(assetId);
+      if (opts?.retry && cur) tried.delete(`${cur.projectId}/${assetId}`);
+      // 実際に読むものだけ数える（`runOne` が飛ばすものは数えない＝読まないのに「読み取り中」と言わない）。
+      const counted = !!cur && stillOpen() && !tried.has(`${cur.projectId}/${assetId}`) && describeTarget(cur.asset) !== null;
+      jobs.push({ assetId, stillOpen, counted });
+      if (counted) {
+        pending.set(assetId, (pending.get(assetId) ?? 0) + 1);
+        emit();
       }
-      jobs.push({ assetId, stillOpen });
       start();
     },
     invalidate(assetId) {

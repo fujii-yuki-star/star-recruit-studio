@@ -8,7 +8,7 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
-import { droppedRejectMessage, ORIENTATION_LABEL, VIDEO_KIND_LABEL } from "../uiLabels";
+import { DESCRIBING_LABEL, describingRemainMessage, describingWaitingMessage, droppedRejectMessage, MAKE_WITHOUT_WAIT_LABEL, ORIENTATION_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
 import { stepsFor, wizardBackLabel } from "./wizardSteps";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
@@ -113,7 +113,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, describingAssetIds, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
@@ -176,6 +176,24 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
+  // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02）。⚠️ **この動画の素材だけ**数える＝列には前の動画の分が残りうる。
+  const describing = new Set(describingAssetIds);
+  const describingCount = materials.filter((a) => describing.has(a.assetId)).length;
+  // 「読み終わってから作る」を選んで待っているか＝読み終わったら、そのまま次へ進む。
+  const [waitDescribe, setWaitDescribe] = useState(false);
+  const goConfirm = (): void => {
+    setWaitDescribe(false);
+    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
+    onNavigate("confirm");
+  };
+  const goConfirmRef = useRef(goConfirm);
+  useEffect(() => {
+    goConfirmRef.current = goConfirm;
+  });
+  // ⚠️ **段を離れたら待つのをやめる**（`back` で落とす）＝戻って入力を直している最中に、読み終わった瞬間勝手に進まない。
+  useEffect(() => {
+    if (waitDescribe && step === 4 && describingCount === 0) goConfirmRef.current();
+  }, [waitDescribe, step, describingCount]);
 
   // 素材の選び方（アプリ＝ネイティブの「開く」／ブラウザ＝隠し input）は共有する（#712）。
   // ここは見た目が「大きな枠」なので部品は使えないが、**分岐だけは1か所**（`useAssetPicker`）。
@@ -231,6 +249,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   }
   function back() {
     setFormError(null);
+    setWaitDescribe(false);
     if (step > 0) setStep(step - 1);
     else onNavigate("home");
   }
@@ -684,8 +703,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           )}
                         </div>
                         <div className="grow">
-                          <div className="text-sm" style={{ fontWeight: 600, marginBottom: 4 }}>
-                            {a.displayName}
+                          <div className="text-sm row gap-sm" style={{ fontWeight: 600, marginBottom: 4 }}>
+                            <span>{a.displayName}</span>
+                            {describing.has(a.assetId) && <span className="text-faint" style={{ fontWeight: 400 }}>{DESCRIBING_LABEL}</span>}
                           </div>
                           <input
                             className="input"
@@ -772,16 +792,31 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   入力いただいた内容をもとに、AIが動画のたたき台を作ります。
                   作ったあとは、自由に確認・修正できます。
                 </p>
-                <button
-                  className="btn btn-primary btn-lg mt-lg"
-                  onClick={() => {
-                    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
-                    onNavigate("confirm");
-                  }}
-                >
-                  <SparkleIcon size={20} />
-                  AIに動画案を作ってもらう
-                </button>
+                {describingCount === 0 ? (
+                  <button className="btn btn-primary btn-lg mt-lg" onClick={goConfirm}>
+                    <SparkleIcon size={20} />
+                    AIに動画案を作ってもらう
+                  </button>
+                ) : (
+                  // ⚠️ **まだ読んでいる写真があるなら、待つか待たないかを選ばせる**（UI/UX 監査 2026-10-02）＝
+                  //   以前は黙って作られ、写真の説明が無いぶん案の質が落ちても気づけなかった。待つ方を主にする。
+                  <div className="col gap-sm mt-lg" style={{ alignItems: "center" }} data-testid="wizard-describing">
+                    <p className="notice notice-info" style={{ maxWidth: 460, margin: 0 }} role="status">
+                      {waitDescribe ? describingWaitingMessage(describingCount) : describingRemainMessage(describingCount)}
+                    </p>
+                    <div className="row gap-sm" style={{ justifyContent: "center" }}>
+                      {!waitDescribe && (
+                        <button className="btn btn-primary btn-lg" onClick={() => setWaitDescribe(true)}>
+                          <SparkleIcon size={20} />
+                          {WAIT_DESCRIBE_LABEL}
+                        </button>
+                      )}
+                      <button className="btn btn-secondary btn-lg" onClick={goConfirm}>
+                        {MAKE_WITHOUT_WAIT_LABEL}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
