@@ -109,6 +109,20 @@ describe('relinkAssetByPath（ファイルだけ差し替える）', () => {
     expect(s.isImporting).toBe(false);
   });
 
+  it('元の絵がまだ写っていなかったなら、失敗したら新しい絵も消す（新しい絵だけが写ったまま残らない）', async () => {
+    vi.spyOn(assetFsMod, 'fileToDataUrl').mockResolvedValue('data:image/png;base64,NEW');
+    vi.spyOn(assetFsMod, 'importAssetFile').mockRejectedValue(new Error('disk full'));
+    useProjectStore.setState({
+      assets: [asset({ assetType: 'image', filePath: 'assets/asset_001.png' })],
+      assetSrcById: {},
+      importError: null,
+    });
+    await useProjectStore.getState().setAssetImage('asset_001', { name: 'new.png', type: 'image/png', size: 10 } as File);
+    const s = useProjectStore.getState();
+    expect('asset_001' in s.assetSrcById).toBe(false);
+    expect(s.importError).toBeTruthy();
+  });
+
   it('assetId は変わらず、名前もタグも残る（付け直させない）', async () => {
     await relink();
     const a = useProjectStore.getState().assets[0];

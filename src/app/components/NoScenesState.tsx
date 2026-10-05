@@ -57,9 +57,10 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
         {/* 生成中画面と**同じ見分け**（`generateRecovery`）＝どの画面から見ても次の行動が変わらない。 */}
         {(() => {
           const recovery = generateRecovery(aiError);
-          if (recovery === "settings") return <button className="btn btn-primary" onClick={() => onNavigate("settings")}>{OPEN_AI_SETTINGS_LABEL}</button>;
           const edit = <button className={`btn ${recovery === "retry" ? "btn-secondary" : "btn-primary"}`} onClick={() => onNavigate("wizard")}>{EDIT_WIZARD_INPUT_LABEL}</button>;
           const retry = <button className={`btn ${recovery === "retry" ? "btn-primary" : "btn-secondary"}`} onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>;
+          // 設定を直して戻ってきても失敗の文は残る＝再試行を控えめに残す（生成中画面と同じ・PR3 レビュー 🟡）。
+          if (recovery === "settings") return <><button className="btn btn-primary" onClick={() => onNavigate("settings")}>{OPEN_AI_SETTINGS_LABEL}</button>{retry}</>;
           if (recovery === "editInput") return edit;
           if (recovery === "shortenInput") return <>{edit}{retry}</>;
           return retry;

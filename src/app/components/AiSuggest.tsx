@@ -2,12 +2,12 @@
 // ⚠️ **勝手に書き換えない**＝「使う」を押すまで場面は変わらない（`onPick` が呼ばれて初めて書き換わる）。
 // ⚠️ **同梱されていなければ出さない**（ブラウザでの開発・部品が無い）＝押しても何も起きないボタンを作らない（§2-5）。
 import { useEffect, useRef, useState } from "react";
-import { generateRecovery } from "../../domain/ai/generateRecovery";
+import { isLocalAiUnavailableMessage } from "../../domain/ai/generateRecovery";
 import { userFacingMessage } from "../userFacingError";
 import { assistMaxLength, buildAssistMessages, parseAssistCandidates } from "../../domain/ai/assist";
 import type { AssistKind, AssistLimits } from "../../domain/ai/assist";
 import { localAiAssist, localAiAvailable } from "../../infrastructure/aiClient";
-import { AI_ASSIST_CANCEL_LABEL, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NEED_SOURCE_HINT, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_STALE_MESSAGE, AI_ASSIST_THINKING, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_USE_LABEL, AI_ASSIST_CLOSE_LABEL, AI_ASSIST_HEADING } from "../uiLabels";
+import { aiAssistCandidatesCount, AI_ASSIST_CANCEL_LABEL, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NEED_SOURCE_HINT, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_STALE_MESSAGE, AI_ASSIST_THINKING, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_USE_LABEL, AI_ASSIST_CLOSE_LABEL, AI_ASSIST_HEADING } from "../uiLabels";
 
 /** 同梱されているかは1回だけ問い合わせる（画面を開くたびに Rust へ聞かない）。 */
 let availability: Promise<boolean> | null = null;
@@ -87,8 +87,8 @@ export function AiSuggest({ kinds, source, current, limits, companyName, onPick,
     } catch (e) {
       if (id !== request.current) return;
       console.warn("[ai] 手伝いに失敗しました:", e);
-      // 部品が無い・壊れている（文が設定や入れ直しを名指しする）＝もう一度押しても直らない。
-      if (generateRecovery(userFacingMessage(e, "AiSuggest")) === "settings") {
+      // 部品が無い・壊れている（文が入れ直しを名指しする）＝もう一度押しても直らない。
+      if (isLocalAiUnavailableMessage(userFacingMessage(e, "AiSuggest"))) {
         setBroken(true);
         setNote(AI_ASSIST_UNAVAILABLE_MESSAGE);
       } else {
@@ -131,17 +131,17 @@ export function AiSuggest({ kinds, source, current, limits, companyName, onPick,
             {k.label}
           </button>
         ))}
-        {busy && (
-          <>
-            <span className="text-sm text-muted">{AI_ASSIST_THINKING}</span>
-            <button className="btn btn-ghost btn-sm text-sm" onClick={cancel}>{AI_ASSIST_CANCEL_LABEL}</button>
-          </>
-        )}
+        {busy && <button className="btn btn-ghost btn-sm text-sm" onClick={cancel}>{AI_ASSIST_CANCEL_LABEL}</button>}
       </div>
-      {/* 読み上げに届くよう、知らせの置き場は常に置いて中身だけ入れ替える（中身と同時に作ると拾われないことがある）。 */}
-      <p className="text-sm text-muted" role="status" aria-live="polite" style={{ margin: note ? "4px 0 0" : 0 }}>
-        {busy ? "" : note ?? (candidates ? `候補が${candidates.length}つ出ました` : "")}
-      </p>
+      {/* 読み上げに届くよう、知らせの置き場は常に置いて中身だけ入れ替える（中身と同時に作ると拾われないことがある）。
+          ⚠️ **考えている間もここで言う**（PR3 レビュー＝以前は空にしていて「考え中」が読み上げに届かなかった）。
+          ⚠️ **押せない理由も見える文で出す**（PR3 レビュー 🟡＝押せないボタンは焦点が来ないので、title だけでは読み上げにも指で触る操作にも届かない）。 */}
+      {(() => {
+        const text = busy
+          ? AI_ASSIST_THINKING
+          : note ?? (candidates ? aiAssistCandidatesCount(candidates.length) : source.trim().length === 0 ? AI_ASSIST_NEED_SOURCE_HINT : "");
+        return <p className="text-sm text-muted" role="status" aria-live="polite" style={{ margin: text ? "4px 0 0" : 0 }}>{text}</p>;
+      })()}
       {candidates && (
         <ul style={{ listStyle: "none", padding: 0, margin: "6px 0 0" }}>
           {candidates.map((c) => (

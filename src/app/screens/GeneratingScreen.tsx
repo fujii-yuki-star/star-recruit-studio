@@ -114,7 +114,9 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             ...(recovery === "editInput"
               ? [{ ...editInput, primary: true }]
               : recovery === "settings"
-                ? [{ label: OPEN_AI_SETTINGS_LABEL, primary: true, onClick: () => onNavigate("settings") }]
+                ? // ⚠️ **再試行も控えめに残す**（PR3 レビュー 🟡）＝設定でキーを登録・Gemini へ切り替えてから戻ってきても
+                  //   失敗の文は消えないので、再試行が無いと**やり直す道がどの画面にも無い**（以前はどの失敗でも出ていた）。
+                  [{ label: OPEN_AI_SETTINGS_LABEL, primary: true, onClick: () => onNavigate("settings") }, retry]
                 : recovery === "shortenInput"
                   ? [{ ...editInput, primary: true }, retry]
                   : [{ ...retry, primary: true }]),

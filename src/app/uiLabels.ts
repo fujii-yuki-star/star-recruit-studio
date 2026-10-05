@@ -1782,6 +1782,10 @@ export const AI_ASSIST_UNAVAILABLE_MESSAGE = "このパソコンの中のAIが�
 export const AI_ASSIST_STALE_MESSAGE = "考えている間に文が変わったので、候補は出しませんでした。もう一度押すと、いまの文から作ります。";
 /** 元になる文が空でボタンを押せない理由。 */
 export const AI_ASSIST_NEED_SOURCE_HINT = "先に元になる文を入れると頼めます";
+/** 候補が出たことを知らせる（読み上げにも届くよう知らせの置き場に出す）。 */
+export function aiAssistCandidatesCount(n: number): string {
+  return `候補が${n}つ出ました`;
+}
 /** 考えている途中でやめる（返事は捨てる）。 */
 export const AI_ASSIST_CANCEL_LABEL = "やめる";
 /** 頼む必要が無い（もう表示時間に収まっている・文が短すぎる）。 */

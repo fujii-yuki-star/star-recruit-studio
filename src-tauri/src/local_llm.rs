@@ -940,6 +940,13 @@ pub async fn local_ai_assist(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 手伝いの上限は動画案より短く、出力の上限を最低検証機の速さ（約 20 トークン/秒）で書き切れる長さ（PR3 レビュー 🟡＝コメントの主張を検査にする）。
+    #[test]
+    fn assist_timeout_is_shorter_than_generate_and_fits_max_output() {
+        assert!(ASSIST_TIMEOUT < GENERATE_TIMEOUT);
+        assert!(u64::from(MAX_OUTPUT_TOKENS) / 20 <= ASSIST_TIMEOUT.as_secs());
+    }
     use std::io::Write;
 
     /// 検査ごとに別の名前（並んで走る検査が互いのファイルを消さない）。
