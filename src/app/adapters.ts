@@ -178,10 +178,10 @@ export function buildPrecheckItems(
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
   // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
   const fmtScenes = formatSceneNumbers;
-  const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string } => {
+  const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string; ids: string[] } => {
     const hits: { id: string; n: number }[] = [];
     scenes.forEach((s, i) => { if (pred(s)) hits.push({ id: s.sceneId, n: i + 1 }); });
-    return { nums: hits.map((h) => h.n), firstId: hits[0]?.id };
+    return { nums: hits.map((h) => h.n), firstId: hits[0]?.id, ids: hits.map((h) => h.id) };
   };
 
   // 掛け合い・単一 narration を統一して見る（sceneNeedsVoice＝実効行の未生成・#403 P1）。scene.narration.status は直接見ない
@@ -192,18 +192,18 @@ export function buildPrecheckItems(
    *   表示時間が短すぎる場面は「表示時間に収める」の上限が短すぎて頼めない（頼むと「いまの文のままで大丈夫」と**逆のこと**を言う）。
    *   そういう場面しか無ければ、最初の該当場面へ寄るだけ（頼まない）。
    */
-  const fixNarration = (hit: { firstId?: string }, pred: (s: Scene) => boolean, kind: AssistKind): Pick<PrecheckItem, "action" | "sceneId" | "assist"> => {
+  const fixNarration = (hit: { firstId?: string; ids: string[] }, pred: (s: Scene) => boolean, kind: AssistKind): Pick<PrecheckItem, "action" | "sceneId" | "sceneIds" | "assist"> => {
     const target = scenes.find((s) => pred(s) && (s.lines?.length ?? 0) === 0
       && assistMaxLength(kind, s.narration.text, { maxNarrationLength: templateOf(s)?.aiHint?.maxNarrationLength, sceneDurationSec: s.durationSec, voiceSpeed: speedOf(s) }) !== null);
     return target
-      ? { action: FIX_NARRATION_ACTION_LABEL, sceneId: target.sceneId, assist: kind }
-      : { action: FIX_NARRATION_ACTION_LABEL, sceneId: hit.firstId };
+      ? { action: FIX_NARRATION_ACTION_LABEL, sceneId: target.sceneId, sceneIds: hit.ids, assist: kind }
+      : { action: FIX_NARRATION_ACTION_LABEL, sceneId: hit.firstId, sceneIds: hit.ids };
   };
 
   const voice = offending(sceneNeedsVoice);
   items.push(
     voice.nums.length > 0
-      ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId }
+      ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId, sceneIds: voice.ids }
       : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
@@ -217,7 +217,7 @@ export function buildPrecheckItems(
   const subtitle = offending((s) => sceneDisplayedSubtitleTexts(s, templateOf(s)).some((t) => t.length > subtitleMax(s)));
   items.push(
     subtitle.nums.length > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId }
+      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId, sceneIds: subtitle.ids }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
@@ -299,7 +299,7 @@ export function buildPrecheckItems(
       detail: `${fmtScenes(truncated.nums)}の文字が枠に入りきらず、末尾が「…」になります。短くするか、場面編集で文字を小さくしてください。`,
       severity: "action",
       action: "直す",
-      sceneId: truncated.firstId,
+      sceneId: truncated.firstId, sceneIds: truncated.ids,
     });
   }
 
@@ -453,7 +453,7 @@ export function buildPrecheckItems(
       detail: subtitleOverflowPrecheckDetail(fmtScenes(subtitleOverflow.nums), cause),
       severity: "action",
       action: "直す",
-      sceneId: subtitleOverflow.firstId,
+      sceneId: subtitleOverflow.firstId, sceneIds: subtitleOverflow.ids,
     });
   }
   const silentSubtitle = offending((s) => sceneSilentSubtitleCount(s, templateOf(s)) > 0);
@@ -464,7 +464,7 @@ export function buildPrecheckItems(
       detail: `${fmtScenes(silentSubtitle.nums)}に、いまは何も表示しない字幕があります。場面編集でその字幕を選ぶと、出ない理由と直し方が出ます。`,
       severity: "action",
       action: "直す",
-      sceneId: silentSubtitle.firstId,
+      sceneId: silentSubtitle.firstId, sceneIds: silentSubtitle.ids,
     });
   }
 
@@ -479,7 +479,7 @@ export function buildPrecheckItems(
       detail: `${fmtScenes(noTemplate.nums)}の見た目が見つかりません。場面編集で選び直すか、「まとめて標準にする」で標準の見た目に変えてください。`,
       severity: "action",
       action: "直す",
-      sceneId: noTemplate.firstId,
+      sceneId: noTemplate.firstId, sceneIds: noTemplate.ids,
       blocksExport: true, // 書き出しは templateUnresolvedError で停止する
     });
   }

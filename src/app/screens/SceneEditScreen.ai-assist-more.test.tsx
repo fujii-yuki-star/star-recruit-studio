@@ -59,10 +59,14 @@ describe("掛け合いの各行の言い直し（#1316）", () => {
     ai.reply = JSON.stringify({ candidates: ["先輩と一緒に覚えられます。"] });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     await flush();
-    const shortButtons = screen.getAllByRole("button", { name: "短く" });
-    expect(shortButtons.length).toBeGreaterThanOrEqual(2); // 行ごとにある
+    // ⚠️ **選んでいる行にだけ出す**（UI/UX 監査 2026-10-02）＝何も選んでいなければ1行目だけ。
+    expect(screen.getAllByRole("button", { name: "短く" })).toHaveLength(1);
     // ⚠️ **2行目**で頼む＝1行目だと「別の行を書き換える」取り違えが見えない（変異チェックで生き残った）。
-    fireEvent.click(shortButtons[1]);
+    fireEvent.focus(screen.getAllByPlaceholderText("セリフを入力")[1]);
+    await flush(); // 新しく出た補助は、使えるかを確かめてから押せる
+    const shortButtons = screen.getAllByRole("button", { name: "短く" });
+    expect(shortButtons).toHaveLength(1); // 焦点を移した行へ移る（増えない）
+    fireEvent.click(shortButtons[0]);
     await flush();
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) }));
