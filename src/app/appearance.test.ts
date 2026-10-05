@@ -38,7 +38,8 @@ export function declaredVars(body: string): string[] {
  * 影は**切り替える**（明るい版の薄い青みは暗い面では消える）。
  */
 export function switchesWithAppearance(name: string): boolean {
-  return name.startsWith("--color-") || name.startsWith("--shadow");
+  // サムネイルの色（`--thumb-*`・UI/UX 監査 2026-10-02）も見た目で切り替える＝両方に定義が要る。
+  return name.startsWith("--color-") || name.startsWith("--shadow") || name.startsWith("--thumb-");
 }
 
 describe("暗い見た目のトークン（ADR-0039）", () => {

@@ -126,7 +126,7 @@ export function ContextMenu({
               display: "block",
               width: "100%",
               textAlign: "left",
-              color: it.danger ? "var(--color-danger)" : undefined,
+              color: it.danger ? "var(--color-danger-text)" : undefined,
             }}
             disabled={it.disabled}
             // 押せないときは理由、押せるときは結果の予告（#1167）。

@@ -23,13 +23,14 @@ function tokensOf(selector: string): Map<string, string> {
 const light = tokensOf(":root");
 const dark = new Map([...light, ...tokensOf(':root[data-theme="dark"]')]);
 
-/** 色の値（`#rrggbb`）。グラデーションは最も濃い側＝**文字と比べて不利な側**（最後の色）を取る。 */
-function colorOf(tokens: Map<string, string>, name: string): string {
+/** 色の値（`#rrggbb`）。グラデーションは**含まれる色すべて**を返す＝比べるときは全部の組の最小を取る
+ *  （色の並べ順で「不利な側」が変わっても見落とさない・PR #1327 レビュー 🟡）。 */
+function colorsOf(tokens: Map<string, string>, name: string): string[] {
   const v = tokens.get(name);
   if (!v) throw new Error(`${name} が無い`);
   const hexes = v.match(/#[0-9a-fA-F]{6}\b/g);
   if (!hexes) throw new Error(`${name} は #rrggbb で書く（${v}）`);
-  return hexes[hexes.length - 1];
+  return hexes;
 }
 
 function luminance(hex: string): number {
@@ -43,15 +44,24 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
+/** 文字と背景のすべての色の組のうち、いちばん低いコントラスト比。 */
+function worstContrast(tokens: Map<string, string>, fg: string, bg: string): number {
+  return Math.min(...colorsOf(tokens, fg).flatMap((a) => colorsOf(tokens, bg).map((b) => contrast(a, b))));
+}
+
 /** 文字の色・背景の色・下限。下限は WCAG の本文の 4.5:1。 */
 const PAIRS: [fg: string, bg: string, min: number][] = [
   ["--color-text", "--color-surface", 4.5],
   ["--color-text-muted", "--color-surface", 4.5],
   ["--color-text-muted", "--color-bg", 4.5],
-  // 薄い文字は「本文より一段控えめ」が役目＝4.5 まで上げると補助文字と区別が無くなる。
-  // 案内文（12px）にも使われているので、**以前の 2.6:1 には戻さない**下限として 4.0 を置く。
+  ["--color-text-muted", "--color-surface-alt", 4.5],
+  // 薄い文字の下限は 4.0（案内文＝12px にも使う＝**以前の 2.6:1 には戻さない**）。⚠️ 明るい見た目では補助文字
+  // （muted）とほぼ同じ濃さになった（約 1.1:1）＝区別は濃さではなく大きさ・置き場所で付く（ADR-0039 追補）。
+  // 置かれる背景は面・地・淡い面・選択の淡い色（.badge・選択行）＝実際に載る背景をすべて見る（PR #1327 レビュー 🟡）。
   ["--color-text-faint", "--color-surface", 4.0],
   ["--color-text-faint", "--color-bg", 4.0],
+  ["--color-text-faint", "--color-surface-alt", 4.0],
+  ["--color-text-faint", "--color-primary-soft", 4.0],
   ["--color-on-primary", "--color-primary-strong", 4.5],
   ["--color-on-primary", "--color-primary-strong-hover", 4.5],
   ["--color-primary-strong", "--color-primary-soft", 4.5],
@@ -68,9 +78,21 @@ const PAIRS: [fg: string, bg: string, min: number][] = [
 describe("見た目の色の組み合わせは読める濃さ（UI/UX 監査 2026-10-02）", () => {
   for (const [theme, tokens] of [["明るい見た目", light], ["暗い見た目", dark]] as const) {
     it.each(PAIRS)(`${theme}：%s を %s の上に置いて %s:1 以上`, (fg, bg, min) => {
-      expect(contrast(colorOf(tokens, fg), colorOf(tokens, bg))).toBeGreaterThanOrEqual(min);
+      expect(worstContrast(tokens, fg, bg)).toBeGreaterThanOrEqual(min);
     });
   }
+
+  it("グラデーションは途中の色まで見て、いちばん読めない組で判定する（並べ順に頼らない）", () => {
+    // 今のトークンは端の色がたまたま不利な側なので、実物だけでは「端しか見ない」退行を捕まえられない＝作った値で叩く。
+    const t = new Map([["--fg", "#000000"], ["--bg", "linear-gradient(135deg, #ffffff, #101010, #fefefe)"]]);
+    expect(worstContrast(t, "--fg", "--bg")).toBeLessThan(1.5);
+  });
+
+  it("トークンを読めている（規則の途中で切れて空振りしない）", () => {
+    // ⚠️ 規則の切り出しは「改行＋}」で終わる＝入れ子を足すと途中で切れて数が減る。変わったら赤にする（実数で留める＝増やしたときは数を直し、走査が欠けていないか見る）。
+    expect(light.size).toBe(48);
+    expect(tokensOf(':root[data-theme="dark"]').size).toBe(37);
+  });
 
   it("組み合わせに使うトークンは、暗い見た目でも上書きされている（明るい色のまま暗い画面に出ない）", () => {
     const darkOwn = tokensOf(':root[data-theme="dark"]');
@@ -87,6 +109,10 @@ describe("見た目の色の組み合わせは読める濃さ（UI/UX 監査 202
     expect(rule(".btn-primary")).toContain("var(--color-on-primary)");
     expect(rule(".btn-primary")).toContain("var(--color-primary-strong)");
     expect(rule(".notice-info")).toContain("var(--color-info)");
+    // 右クリックのメニューの危険な項目（削除など）の小さい文字も直したので戻さない（PR #1327 レビュー 🟡）。
+    const menu = readFileSync(join(process.cwd(), "src", "app", "components", "ContextMenu.tsx"), "utf8");
+    expect(menu).toContain('"var(--color-danger-text)"');
+    expect(menu).not.toContain('"var(--color-danger)"');
     for (const k of ["photo", "video", "audio"]) {
       expect(rule(`.thumb-${k}`)).toContain(`var(--thumb-${k}-fg)`);
       expect(rule(`.thumb-${k}`)).toContain(`var(--thumb-${k}-bg)`);

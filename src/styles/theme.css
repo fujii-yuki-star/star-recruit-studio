@@ -38,8 +38,8 @@
   --color-warn: #7a6014;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
 
   --color-text: #20323c;        /* 文字 (濃いめのスレート) */
-  --color-text-muted: #5d7480;  /* 補助文字 */
-  --color-text-faint: #617885;  /* 案内文に使う＝背景の上で 4.3:1 以上（以前の #8aa0ab は 2.6:1） */
+  --color-text-muted: #5a717d;  /* 補助文字＝淡い面（surface-alt）の上でも 4.5:1 以上（#5d7480 は 4.49:1・PR #1327 レビュー） */
+  --color-text-faint: #617885;  /* 案内文に使う＝置かれる背景のどれの上でも 4.0:1 以上（以前の #8aa0ab は 2.6:1・門番 themeContrastGuard） */
 
   --color-border: #dde8ef;
   --color-border-strong: #c5d8e2;
