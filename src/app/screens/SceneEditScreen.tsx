@@ -72,7 +72,7 @@ import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAss
 import { AiSuggest } from "../components/AiSuggest";
 import { sceneSpokenText } from "../../domain/ai/assist";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
-import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL } from "../uiLabels";
+import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL } from "../uiLabels";
 import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -271,6 +271,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 行き先でその欄に寄る仕掛けが無かった（＝押した言葉と着地がずれる）。
   // ⚠️ **初期化子で捕まえる**＝上の後始末（`null` へ戻す）より前に読む必要がある。
   const [focus] = useState(() => useProjectStore.getState().editingSceneFocus);
+  /**
+   * 公開前チェックから来たときの**ひっかかっている場面の並び**（UI/UX 監査 2026-10-02）＝戻る先をチェックにし、
+   * 「次の場面へ（2/8）」で順に直せる。⚠️ 落とすのは画面の行き来の入口（`App` の `navigate`・`keepsSceneEditTrail`）＝仕上がり確認との往復だけ持ち越し、ほかへ出たら消える。
+   */
+  const [trail] = useState(() => useProjectStore.getState().sceneEditTrail);
+  /**
+   * 掛け合いで「AI に頼む」を出す行（UI/UX 監査 2026-10-02）＝以前は**行ごとに**「短く／丁寧に／やわらかく」が並び、縦に長くなっていた。
+   * **最後に焦点を入れた行だけ**に出す（ボタンを押すと焦点は外れるので、外れても消さない）。まだ選んでいなければ最初の行。
+   */
+  // ⚠️ **場面ごとに持つ**＝行の番号は場面ごとに振る（`line_001`…）ので、行だけで覚えると別の場面の同じ番号の行に出る（PR #1341 レビュー）。
+  const [activeLine, setActiveLine] = useState<{ sceneId: string; lineId: string } | null>(null);
   // 公開前チェックから来たとき、開いた場面のセリフ欄ですぐ頼む AI 補助（ADR-0053 決定2）。**その場面に1回だけ**
   //（別の場面へ移って戻っても頼み直さない）＝頼んだら `null` へ戻す。
   const [autoAssist, setAutoAssist] = useState(() => {
@@ -2239,17 +2250,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           placeholder="セリフを入力"
                           value={line.text}
                           {...textGroup}
+                          onFocusCapture={() => setActiveLine({ sceneId: selected.sceneId, lineId: line.lineId })}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
                         />
-                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。 */}
-                        <AiSuggest
+                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。
+                            ⚠️ **選んでいる行だけ**（UI/UX 監査 2026-10-02）。 */}
+                        {line.lineId === (activeLine?.sceneId === selected.sceneId && (selected.lines ?? []).some((l) => l.lineId === activeLine.lineId) ? activeLine.lineId : selected.lines?.[0]?.lineId) && <AiSuggest
                           key={`${selected.sceneId}-${line.lineId}`}
                           kinds={AI_ASSIST_LINE_KINDS}
                           source={line.text}
                           limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength }}
                           companyName={companyName}
                           onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
-                        />
+                        />}
                         <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
                           <span className="text-sm text-muted">声</span>
                           <select
@@ -3364,13 +3377,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <>
                 {/* 欄の出し入れも**見出しの行**へ（#1032）＝欄の下に置くと、編集している間は視界の外だった。 */}
                 <PanelLayoutMenu layout={panelLayout} panels={panels} closed={closedPanels} onChange={changeLayout} onReset={resetLayout} />
-                <button className="btn btn-primary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
+                {/* 保存は**控えめ**（UI/UX 監査 2026-10-02＝上の帯に主ボタンが2つあった。保存の状態は帯に出ている）。主は「仕上がり確認へ」。 */}
+                <button className="btn btn-secondary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
                   <SaveIcon size={18} />
                   {saveButtonLabel(saveStatus, saveBlockedReason)}
                 </button>
               </>
             )}
-            back={{ label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
+            back={trail
+              ? { label: <><ArrowLeftIcon size={16} />{BACK_TO_PRECHECK_LABEL}</>, onClick: () => onNavigate("precheck") }
+              : { label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
           />
           {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
               預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
@@ -3381,6 +3397,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         </div>
       </div>
 
+      {/* 公開前チェックの項目にひっかかっている場面を**順に直す帯**（UI/UX 監査 2026-10-02）＝以前は最初の1場面だけ開き、
+          残りは毎回チェックへ戻って入り直していた。2場面以上のときだけ出す。 */}
+      {trail && (() => {
+        // ⚠️ **いま在る場面だけ**で数える＝帯の上で場面を消すと、並びに居ない場面を指して「次へ」が空振りする。
+        const ids = trail.sceneIds.filter((id) => scenes.some((s) => s.sceneId === id));
+        if (ids.length < 2) return null;
+        const pos = ids.indexOf(selected?.sceneId ?? "");
+        return (
+          <div className="notice notice-info row gap-sm" style={{ margin: "var(--gap) var(--gap) 0", alignItems: "center", flexWrap: "wrap" }} data-testid="scene-edit-trail">
+            <span className="grow">{sceneEditTrailLabel(trail.label, pos + 1, ids.length)}</span>
+            <button className="btn btn-ghost btn-sm" disabled={pos <= 0} onClick={() => setSelectedId(ids[pos - 1])}>{TRAIL_PREV_LABEL}</button>
+            <button className="btn btn-secondary btn-sm" disabled={pos >= ids.length - 1} onClick={() => setSelectedId(ids[pos < 0 ? 0 : pos + 1])}>{TRAIL_NEXT_LABEL}</button>
+          </div>
+        );
+      })()}
       <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* 欄は器いっぱいに広げる。閉じた欄を戻す道は**見出しの行の「欄」メニュー**（#1032・決定6/8）。 */}
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />

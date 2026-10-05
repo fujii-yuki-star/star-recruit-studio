@@ -109,6 +109,18 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         ...baseItems,
       ]
     : baseItems;
+  // 項目の「直す」から場面編集へ（#400）。ひっかかっている場面の並びも預ける＝場面編集で「公開前チェックへ戻る」と
+  // 「次の場面」を出す（UI/UX 監査 2026-10-02＝以前は最初の1場面だけ開き、残りは毎回チェックへ戻って入り直していた）。
+  // セリフを直すときはセリフ欄へ寄り、AI 補助の候補をすぐ出す（ADR-0053 決定2）。
+  const openScenes = (item: PrecheckItem): void => {
+    if (item.sceneId) setEditingSceneId(item.sceneId);
+    useProjectStore.getState().setSceneEditTrail({ label: item.label, sceneIds: item.sceneIds ?? (item.sceneId ? [item.sceneId] : []) });
+    if (item.assist) {
+      useProjectStore.getState().setEditingSceneFocus("narration");
+      useProjectStore.getState().setEditingSceneAssist(item.assist);
+    }
+    onNavigate("scene-edit");
+  };
   const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;
   // 書き出し不可（unavailable/toolMissing）のときだけ事前にブロック。fallback は予備方式で書き出せるので進める。
   const capabilityBlocked = capability != null && blocksExport(capability);
@@ -188,10 +200,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         <span className="row gap-sm">
                           <button
                             className="btn btn-ghost btn-icon text-sm"
-                            onClick={() => {
-                              if (item.sceneId) setEditingSceneId(item.sceneId);
-                              onNavigate("scene-edit");
-                            }}
+                            onClick={() => openScenes(item)}
                           >
                             {item.action}
                           </button>
@@ -212,14 +221,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         // セリフを直すときはセリフ欄へ寄り、AI 補助の候補をすぐ出す（ADR-0053 決定2）。
                         <button
                           className="btn btn-ghost btn-icon text-sm"
-                          onClick={() => {
-                            if (item.sceneId) setEditingSceneId(item.sceneId);
-                            if (item.assist) {
-                              useProjectStore.getState().setEditingSceneFocus("narration");
-                              useProjectStore.getState().setEditingSceneAssist(item.assist);
-                            }
-                            onNavigate("scene-edit");
-                          }}
+                          onClick={() => openScenes(item)}
                         >
                           {item.action}
                         </button>

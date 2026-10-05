@@ -271,6 +271,8 @@ export interface PrecheckItem {
   action?: string;
   /** action を押したときに開く対象場面（#400・editingSceneId 経由）。場面に紐づく項目のみ。未設定＝先頭場面。 */
   sceneId?: string;
+  /** この項目にひっかかっている場面すべて（場面編集の「次の場面へ」・UI/UX 監査 2026-10-02）。 */
+  sceneIds?: string[];
   /**
    * action を押したとき、場面編集のセリフ欄で**すぐ候補を出す** AI 補助の種類（ADR-0053 決定2）。
    * 同梱の AI が無ければ頼まない（セリフ欄へ寄るだけ）。

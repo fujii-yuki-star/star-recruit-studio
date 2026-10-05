@@ -21,7 +21,7 @@ import { resetAiSuggestAvailabilityForTest } from "../components/AiSuggest";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { SceneEditScreen } from "./SceneEditScreen";
 import { sampleTemplates } from "../../infrastructure/sampleData";
-import { AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL } from "../uiLabels";
+import { AI_ASSIST_USE_LABEL, AI_ASSIST_VIDEO_TITLE_LABEL, TRAIL_NEXT_LABEL } from "../uiLabels";
 
 const TEMPLATE = sampleTemplates.find((t) => t.templateId === "photo_left_text_right_yuko_v1")!;
 const dialogue = (): Scene =>
@@ -49,7 +49,7 @@ beforeEach(() => {
   useProjectStore.setState((st) => ({
     status: "ready", templates: [TEMPLATE], scenes: [dialogue()],
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
-    editingSceneId: "scene_001", past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    editingSceneId: "scene_001", sceneEditTrail: null, past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
     meta: { ...st.meta, projectName: "無題の動画", companyInfo: { companyName: "株式会社サンプル物流" } },
   }));
 });
@@ -59,10 +59,14 @@ describe("掛け合いの各行の言い直し（#1316）", () => {
     ai.reply = JSON.stringify({ candidates: ["先輩と一緒に覚えられます。"] });
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     await flush();
-    const shortButtons = screen.getAllByRole("button", { name: "短く" });
-    expect(shortButtons.length).toBeGreaterThanOrEqual(2); // 行ごとにある
+    // ⚠️ **選んでいる行にだけ出す**（UI/UX 監査 2026-10-02）＝何も選んでいなければ1行目だけ。
+    expect(screen.getAllByRole("button", { name: "短く" })).toHaveLength(1);
     // ⚠️ **2行目**で頼む＝1行目だと「別の行を書き換える」取り違えが見えない（変異チェックで生き残った）。
-    fireEvent.click(shortButtons[1]);
+    fireEvent.focus(screen.getAllByPlaceholderText("セリフを入力")[1]);
+    await flush(); // 新しく出た補助は、使えるかを確かめてから押せる
+    const shortButtons = screen.getAllByRole("button", { name: "短く" });
+    expect(shortButtons).toHaveLength(1); // 焦点を移した行へ移る（増えない）
+    fireEvent.click(shortButtons[0]);
     await flush();
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) }));
@@ -73,6 +77,25 @@ describe("掛け合いの各行の言い直し（#1316）", () => {
     expect(l1.status).toBe(NARRATION_STATUS.generated);
     // 行には表示時間が無いので「表示時間に収める」は出さない
     expect(screen.queryAllByRole("button", { name: "表示時間に収める" })).toHaveLength(0);
+  });
+
+  it("選んだ行は場面ごと＝別の場面の同じ番号の行には出さない（その場面では1行目）", async () => {
+    const other = { ...dialogue(), sceneId: "scene_002", order: 2, lines: dialogue().lines!.map((l, i) => ({ ...l, text: i === 0 ? "別の場面の1行目です。" : "別の場面の2行目です。" })) } as Scene;
+    useProjectStore.setState((st) => ({ scenes: [...st.scenes, other], parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }] }));
+    ai.reply = JSON.stringify({ candidates: ["候補"] });
+    // 同じ画面のまま場面を移る（作り直すと覚えた行も消えるので、取り違えが見えない）＝公開前チェックの帯の「次の場面」で移る。
+    useProjectStore.getState().setSceneEditTrail({ label: "x", sceneIds: ["scene_001", "scene_002"] });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    await flush();
+    fireEvent.focus(screen.getAllByPlaceholderText("セリフを入力")[1]); // 1つ目の場面の2行目
+    fireEvent.click(screen.getByRole("button", { name: TRAIL_NEXT_LABEL }));
+    await flush();
+    expect(screen.getByDisplayValue("別の場面の1行目です。")).toBeInTheDocument();
+    // 「短く」は短い文だと AI を呼ばない（もう短い）ので、必ず頼む「丁寧に」で、どの行が渡るかを見る。
+    expect(screen.getAllByRole("button", { name: "丁寧に" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "丁寧に" }));
+    await flush();
+    expect(ai.calls[0].user).toContain("別の場面の1行目です");
   });
 });
 

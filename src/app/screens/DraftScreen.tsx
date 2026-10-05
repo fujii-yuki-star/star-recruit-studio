@@ -165,8 +165,9 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           </div>
 
           {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
+          {/* ⚠️ **お知らせの色**（UI/UX 監査 2026-10-02）＝警告の色だと、下に並ぶ本当の警告（自動補正・向き）が目立たなくなる。 */}
           {draftFromAi && (
-            <div className="notice notice-warn mb">
+            <div className="notice notice-info mb" data-testid="draft-ai-notice">
               <SparkleIcon size={18} />
               <span>
                 このたたき台はAIが作成したものです。必要に応じて自由に修正してください。

@@ -507,6 +507,14 @@ interface ProjectState {
    */
   precheckReturnTo: ScreenId | null;
   setPrecheckReturnTo: (screen: ScreenId | null) => void;
+  /**
+   * 公開前チェックから場面編集へ来たとき、**ひっかかっている場面の並びと項目名**（UI/UX 監査 2026-10-02）。
+   * ⚠️ 以前は場面編集の戻るが常に「台本表へ戻る」で、直したあとチェックへ戻るのに2回押し・**最初の1場面だけ**開いて
+   *   残りは毎回チェックから入り直していた。場面編集は**一度きりで受けて**（`editingSceneId` と同じ流儀）、戻る先と
+   *   「次の場面へ（2/8）」に使う。
+   */
+  sceneEditTrail: { label: string; sceneIds: string[] } | null;
+  setSceneEditTrail: (trail: { label: string; sceneIds: string[] } | null) => void;
   setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
@@ -971,6 +979,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   confirmReturnTo: null,
   previewReturnTo: null,
   precheckReturnTo: null,
+  sceneEditTrail: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   exportForm: IDLE_EXPORT_FORM,
@@ -2359,6 +2368,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
   setPrecheckReturnTo: (screen) => set({ precheckReturnTo: screen }),
+  setSceneEditTrail: (trail) => set({ sceneEditTrail: trail }),
   setExportRun: (patch) =>
     set((s) => {
       // 「終わったがまだ見ていない」は phase の遷移から自動で決める（#589）＝呼び出し側が立て忘れない。

@@ -19,7 +19,7 @@ import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
-import { currentProjectEntries, DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, keepsSceneEditTrail, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -62,8 +62,10 @@ function App() {
       st.setEditingSceneFocus(null);
       st.setEditingSceneAssist(null); // すぐ頼む AI 補助の印（ADR-0053 決定2）も同じ＝残すと押してもいないのに頼む
       st.setSettingsFocus(null);
+      st.setSceneEditTrail(null); // 直す場面の並びも同じ＝残すと押してもいない「公開前チェックへ戻る」が出る
       return;
     }
+    if (!keepsSceneEditTrail(next)) useProjectStore.getState().setSceneEditTrail(null);
     setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
     setScreen(next);
   }, []);

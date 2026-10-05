@@ -1839,3 +1839,12 @@ export const AI_ASSIST_LINE_KINDS = [
 /** 動画の名前の横のボタン（#1316）。 */
 export const AI_ASSIST_VIDEO_TITLE_LABEL = "名前の候補";
 export const AI_ASSIST_VIDEO_TITLE_KINDS = [{ kind: ASSIST_KIND.videoTitle, label: "候補を出す" }] as const;
+
+/** 公開前チェックから場面編集へ来たときの戻る（UI/UX 監査 2026-10-02＝以前は常に「台本表へ戻る」）。 */
+export const BACK_TO_PRECHECK_LABEL = "公開前チェックへ戻る";
+/** 公開前チェックの項目にひっかかっている場面を順に直す帯（例：「セリフの長さ」2/8 場面目）。 */
+export function sceneEditTrailLabel(label: string, pos: number, total: number): string {
+  return pos > 0 ? `公開前チェックの「${label}」：${pos}/${total} 場面目` : `公開前チェックの「${label}」：${total} 場面`;
+}
+export const TRAIL_PREV_LABEL = "前の場面";
+export const TRAIL_NEXT_LABEL = "次の場面";
