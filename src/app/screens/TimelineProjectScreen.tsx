@@ -2685,12 +2685,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const cc = canvasClips.find((x) => x.clip.id === id);
     return cc ? (baseBoxPatchFromShown(cc, shown) as T) : shown;
   };
-  /** 選んだ部品に**自身の動き**があるか（掴むと動き全体がずれることを一言添える・ADR-0054 決定4）。 */
-  const selectedHasOwnMotion = selectedOnCanvasClip() != null;
-  function selectedOnCanvasClip(): TimelineCanvasClip | null {
-    const cc = canvasClips.find((x) => x.clip.id === selected?.id);
-    return cc && boxDiffers(cc.groupedBox, cc.finalBox) ? cc : null;
-  }
+  /**
+   * 選んだ部品に**自身の動き**があるか（掴むと動き全体がずれることを一言添える・ADR-0054 決定4）。
+   * ⚠️ **その時刻のずれでは見ない**（PR #1339 レビュー ℹ️）＝ずれがちょうど 0 の時刻でも、掴めば動き全体がずれる。
+   */
+  const selectedHasOwnMotion = selected != null && (doc?.animations ?? []).some((a) => a.targetId === selected.id);
   /**
    * 一緒に動かさなかった部品の**理由**（#788-1）。キャンバスの `locked` を立てているのと**同じ材料**を
    * 見る＝判定を書き写さない（片方だけ直る割れを作らない）。

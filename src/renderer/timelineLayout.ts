@@ -203,6 +203,8 @@ export function baseBoxPatchFromShown(
   shown: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
 ): { x?: number; y?: number; w?: number; h?: number; rotation?: number } {
   const tr = cc.ownTr;
+  // ⚠️ 倍率が 0 以下になる瞬間（行き過ぎるイージングの途中）は割れないので 1 として扱う＝その瞬間に掴むと
+  //   素の箱へ書く値が少しずれる（描画は素の箱から描くので一致は崩れない＝操作の精度だけの割り切り・PR #1339 レビュー ℹ️）。
   const s = tr.scale != null && tr.scale > 0 ? tr.scale : 1;
   const out: { x?: number; y?: number; w?: number; h?: number; rotation?: number } = {};
   const w = shown.w != null ? shown.w / s : cc.box.w;
