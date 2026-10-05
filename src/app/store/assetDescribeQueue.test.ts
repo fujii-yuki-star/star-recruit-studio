@@ -1,7 +1,7 @@
 // 取り込んだ写真を裏で1枚ずつ読んで説明を当てる（ADR-0052 決定4・12 §4b）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Asset } from "../../domain/project/types";
-import { createAssetDescribeQueue } from "./assetDescribeQueue";
+import { createAssetDescribeQueue, describingIn } from "./assetDescribeQueue";
 import type { AssetDescribeDeps } from "./assetDescribeQueue";
 
 const OK = JSON.stringify({ description: "明るいオフィス", tags: ["オフィス"] });
@@ -270,9 +270,9 @@ describe("読む予定の素材を知らせる（onPending）", () => {
     const { queue } = setup([photo("a1"), photo("a2")], { onPending: (ids) => seen.push([...ids]) });
     queue.enqueue("a1", () => true);
     queue.enqueue("a2", () => true);
-    expect(seen[1]).toEqual(["a1", "a2"]);
+    expect(seen[1]).toEqual(["p1/a1", "p1/a2"]);
     await queue.idle();
-    expect(seen.at(-2)).toEqual(["a2"]); // a1 を読み終えた時点
+    expect(seen.at(-2)).toEqual(["p1/a2"]); // a1 を読み終えた時点
     expect(seen.at(-1)).toEqual([]);
   });
 
@@ -301,7 +301,7 @@ describe("読む予定の素材を知らせる（onPending）", () => {
     await queue.idle();
     state.assets = [photo("a1")];
     queue.enqueue("a1", () => true, { retry: true });
-    expect(seen[0]).toEqual(["a1"]);
+    expect(seen[0]).toEqual(["p1/a1"]);
     await queue.idle();
   });
 
@@ -345,7 +345,32 @@ describe("読む予定の素材を知らせる（onPending）", () => {
     expect(state.assets[0].aiDescription).toBe("明るいオフィス");
     // 1回目が終わった時点では、まだ外さない（空になるのは2回目が終わったときの1度だけ）。
     expect(seen.filter((ids) => ids.length === 0)).toHaveLength(1);
-    expect(seen.at(-2)).toEqual(["a1"]);
+    expect(seen.at(-2)).toEqual(["p1/a1"]);
+    expect(seen.at(-1)).toEqual([]);
+  });
+
+  // PR #1342 レビュー 🟡：素材の番号は動画ごとに振り直す＝前の動画で読んでいる asset_001 を、新しい動画の asset_001 と混ぜない。
+  it("動画の番号と組で知らせる（別の動画の同じ番号の素材と混ぜない）・画面は開いている動画の分だけ見る", async () => {
+    let release!: (v: string) => void;
+    const seen: string[][] = [];
+    const { state, queue } = setup([photo("asset_001")], {
+      describe: vi.fn(() => new Promise<string>((r) => { release = r; })),
+      onPending: (ids) => seen.push([...ids]),
+    });
+    let firstOpen = true;
+    queue.enqueue("asset_001", () => firstOpen);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    state.projectId = "p2"; // 読んでいる最中に、別の動画を開いた（前の動画の仕事は捨てられる＝sameDocGuard）
+    firstOpen = false;
+    queue.enqueue("asset_001", () => true);
+    expect(seen.at(-1)).toEqual(["p1/asset_001", "p2/asset_001"]);
+    expect([...describingIn(seen.at(-1)!, "p2")]).toEqual(["asset_001"]);
+    expect([...describingIn(["p1/asset_001"], "p2")]).toEqual([]);
+    expect([...describingIn(["p1/asset_001"], undefined)]).toEqual([]);
+    release(OK);
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual(["p2/asset_001"]));
+    release(OK);
+    await queue.idle();
     expect(seen.at(-1)).toEqual([]);
   });
 });

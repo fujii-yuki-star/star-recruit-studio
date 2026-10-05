@@ -35,7 +35,23 @@ export interface AssetDescribeDeps {
    * ⚠️ 数えるのは**実際に読むもの**だけ（積んだ時点で説明が要る写真・動画）＝説明があるもの・音は数えない
    * （1枚ずつ順に読むので、20枚の後ろに積んだ音が「読み取り中」に見え続けてしまう）。
    */
-  onPending?(assetIds: readonly string[]): void;
+  onPending?(keys: readonly string[]): void;
+}
+
+/**
+ * 「読み取り中」の見分け（`onPending` が渡すもの）＝**動画の番号と素材の番号の組**。
+ * ⚠️ **素材の番号だけで見分けない**（PR #1342 レビュー 🟡）＝素材の番号は動画ごとに `asset_001` から振り直すので、
+ * 前の動画で読んでいる最中の `asset_001` が、新しく開いた動画の `asset_001` を「読み取り中」に見せていた。
+ */
+export function describingKey(projectId: string, assetId: string): string {
+  return `${projectId}/${assetId}`;
+}
+
+/** いま開いている動画の「読み取り中」の素材の番号（画面はこれで見る＝ほかの動画の分を混ぜない）。 */
+export function describingIn(keys: readonly string[], projectId: string | undefined): Set<string> {
+  if (!projectId) return new Set();
+  const prefix = describingKey(projectId, "");
+  return new Set(keys.filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)));
 }
 
 /** 書き出しが終わるのを待つ間隔。 */
@@ -54,15 +70,16 @@ export interface AssetDescribeQueue {
 }
 
 export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribeQueue {
-  const jobs: { assetId: string; stillOpen: () => boolean; counted: boolean }[] = [];
-  /** 読む予定の素材ごとの、積んである数（同じ素材を2回積むことがある＝差し替え）。 */
+  const jobs: { assetId: string; stillOpen: () => boolean; counted: string | null }[] = [];
+  /** 読む予定の素材ごとの、積んである数（同じ素材を2回積むことがある＝差し替え）。見分けは `describingKey`。 */
   const pending = new Map<string, number>();
   const emit = (): void => deps.onPending?.([...pending.keys()]);
-  const settle = (job: { assetId: string; counted: boolean }): void => {
+  /** 数えた見分け（`describingKey`）で外す＝数えたときと同じ動画の分を外す。 */
+  const settle = (job: { counted: string | null }): void => {
     if (!job.counted) return;
-    const n = (pending.get(job.assetId) ?? 0) - 1;
-    if (n > 0) pending.set(job.assetId, n);
-    else pending.delete(job.assetId);
+    const n = (pending.get(job.counted) ?? 0) - 1;
+    if (n > 0) pending.set(job.counted, n);
+    else pending.delete(job.counted);
     emit();
   };
   const tried = new Set<string>();
@@ -142,10 +159,12 @@ export function createAssetDescribeQueue(deps: AssetDescribeDeps): AssetDescribe
       const cur = deps.current(assetId);
       if (opts?.retry && cur) tried.delete(`${cur.projectId}/${assetId}`);
       // 実際に読むものだけ数える（`runOne` が飛ばすものは数えない＝読まないのに「読み取り中」と言わない）。
-      const counted = !!cur && stillOpen() && !tried.has(`${cur.projectId}/${assetId}`) && describeTarget(cur.asset) !== null;
+      const counted = cur && stillOpen() && !tried.has(`${cur.projectId}/${assetId}`) && describeTarget(cur.asset) !== null
+        ? describingKey(cur.projectId, assetId)
+        : null;
       jobs.push({ assetId, stillOpen, counted });
       if (counted) {
-        pending.set(assetId, (pending.get(assetId) ?? 0) + 1);
+        pending.set(counted, (pending.get(counted) ?? 0) + 1);
         emit();
       }
       start();

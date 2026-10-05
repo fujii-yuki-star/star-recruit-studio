@@ -7,6 +7,7 @@ import { pickPanelAsset } from "./materialsSelection";
 import { AssetThumb } from "../components/AssetThumb";
 import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
+import { describingIn } from "../store/assetDescribeQueue";
 import { useTimelineStore } from "../store/timelineStore";
 import { DESCRIBING_LABEL, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, MATERIAL_AI_DESC_PLACEHOLDER_AUTO, MATERIAL_AI_DESC_PLACEHOLDER_MANUAL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { useLocalAiAvailable } from "../components/AiSuggest";
@@ -67,8 +68,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02＝裏で読んでいることが見えなかった）。
-  const describingIds = useProjectStore((s) => s.describingAssetIds);
-  const describing = new Set(describingIds);
+  const describingKeys = useProjectStore((s) => s.describingKeys);
+  const describing = describingIn(describingKeys, meta.projectId); // ほかの動画の分を混ぜない（素材の番号は動画ごと）
   // ⚠️ **入れる先が無いときも押せない**（差分再監査 6巡目 🟡）＝棚からの取り込みだけ塞ぐと、
   // 同じ「取り込み」で断り方が2通りになる（ADR-0026②）。判定は共有の1つから採る。
   const projectOpen = useProjectStore(hasOpenProject);

@@ -515,10 +515,10 @@ interface ProjectState {
    */
   sceneEditTrail: { label: string; sceneIds: string[] } | null;
   /**
-   * 同梱の AI が**これから読む**写真・動画（裏の列が知らせる・保存しない）。画面の「読み取り中…」と、
+   * 同梱の AI が**これから読む**写真・動画（裏の列が知らせる・保存しない）。見分けは `describingKey`（動画の番号と素材の番号の組）＝画面は `isDescribing` で見る。画面の「読み取り中…」と、
    * 動画案を作る前の「あと N 枚」に使う（UI/UX 監査 2026-10-02）。
    */
-  describingAssetIds: readonly string[];
+  describingKeys: readonly string[];
   setSceneEditTrail: (trail: { label: string; sceneIds: string[] } | null) => void;
   setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
@@ -931,7 +931,7 @@ const assetDescriber = createAssetDescribeQueue({
     }),
   blocked: () => isExportBusy(useProjectStore.getState().exportRun.phase),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  onPending: (ids) => useProjectStore.setState({ describingAssetIds: ids }),
+  onPending: (keys) => useProjectStore.setState({ describingKeys: keys }),
 });
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -986,7 +986,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   previewReturnTo: null,
   precheckReturnTo: null,
   sceneEditTrail: null,
-  describingAssetIds: [],
+  describingKeys: [],
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   exportForm: IDLE_EXPORT_FORM,

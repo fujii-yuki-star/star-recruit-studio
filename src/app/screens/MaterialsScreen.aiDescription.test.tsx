@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { describingKey } from "../store/assetDescribeQueue";
 import type { Asset } from "../../domain/project/types";
 import { MaterialsScreen } from "./MaterialsScreen";
 import { resetAiSuggestAvailabilityForTest } from "../components/AiSuggest";
@@ -82,10 +83,11 @@ describe("MaterialsScreen AI解析の欄", () => {
 // UI/UX 監査 2026-10-02：裏で読んでいることを見せる。
 describe("MaterialsScreen 読み取り中", () => {
   beforeEach(() => {
-    useProjectStore.setState({ assets: [photo, clip, logo], scenes: [], parts: [], templates: [], assetSrcById: {}, describingAssetIds: ["asset_002"] });
+    useProjectStore.setState({ assets: [photo, clip, logo], scenes: [], parts: [], templates: [], assetSrcById: {}, meta: { ...useProjectStore.getState().meta, projectId: "p_now" }, describingKeys: [describingKey("p_now", "asset_002"), describingKey("p_before", "asset_001")] });
   });
 
-  it("読んでいる素材の一覧の札と、開いた欄の横にだけ出す（欄の名前は変えない）", () => {
+  // ⚠️ **前の動画の同じ番号の素材**（asset_001）は数えない＝素材の番号は動画ごとに振り直す（PR #1342 レビュー 🟡）。
+  it("読んでいる素材の一覧の札と、開いた欄の横にだけ出す（欄の名前は変えない・ほかの動画の分は出さない）", () => {
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     expect(screen.getAllByText(DESCRIBING_LABEL)).toHaveLength(1);
     expect(screen.getByText(DESCRIBING_LABEL).closest("button")).toHaveTextContent("紹介動画");

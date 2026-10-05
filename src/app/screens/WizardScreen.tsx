@@ -8,6 +8,7 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
+import { describingIn } from "../store/assetDescribeQueue";
 import { DESCRIBING_LABEL, describingRemainMessage, describingWaitingMessage, droppedRejectMessage, MAKE_WITHOUT_WAIT_LABEL, ORIENTATION_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
 import { stepsFor, wizardBackLabel } from "./wizardSteps";
 import { useAssetPicker } from "../hooks/useAssetPicker";
@@ -113,7 +114,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, describingAssetIds, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, describingKeys, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
@@ -176,8 +177,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
-  // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02）。⚠️ **この動画の素材だけ**数える＝列には前の動画の分が残りうる。
-  const describing = new Set(describingAssetIds);
+  // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02）。⚠️ **この動画の素材だけ**数える＝列には前の動画の分が残りうる
+  //（素材の番号は動画ごとに振り直すので、番号だけでは見分けられない＝動画の番号で絞る）。
+  const projectId = useProjectStore((st) => st.meta.projectId);
+  const describing = describingIn(describingKeys, projectId);
   const describingCount = materials.filter((a) => describing.has(a.assetId)).length;
   // 「読み終わってから作る」を選んで待っているか＝読み終わったら、そのまま次へ進む。
   const [waitDescribe, setWaitDescribe] = useState(false);
