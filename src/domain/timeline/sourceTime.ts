@@ -111,3 +111,48 @@ export function usesUpSource(
     return advanced >= limit;
   });
 }
+
+/**
+ * 端を伸ばしたとき、**素材の外へ出るか**（ADR-0034 追補 2026-10-05・#1331）。
+ *
+ * - `'before'`＝左端を伸ばして、素材の**始まりより前**を使おうとした。⚠️ 以前は頭出しを 0 で止めるだけで帯の開始は
+ *   左へ動いた＝**中身が右へずれる**（それまで時刻 T に映っていた絵が後ろへ動く・ADR-0026④）。
+ * - `'after'`＝右端を伸ばして、素材の**終わり（実尺・切り出す終わり）より先**を使おうとした。⚠️ 以前は通って、
+ *   伸ばした先は**最後のコマで止まった絵**になっていた（他社の型＝素材の端で止まる）。
+ *   ⚠️ **伸ばすときだけ見る**＝速さを変えるなど別の道で既に素材より長い部品は、縮めるのは通す（止め絵の扱いは `11 §7.6.4` のまま）。
+ *
+ * 見るのは**置き場所ごとの実効値**（`videoPlacementsOfClip`＝直接置き・差し込み口・立ち絵）と、音の部品自身。
+ * 判る材料が無い（実尺も切り出す終わりも未指定）ときは**断らない**（`usesUpSource` と同じ＝分からないことを理由にしない）。
+ */
+export function sourceLimitIssue(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  edge: 'start' | 'end',
+  span: { startSec: number; durationSec: number },
+  templateOf: ((templateId: string) => Template | undefined) | undefined,
+): 'before' | 'after' | null {
+  type P = { sourceStartSec: number; speed: number; assetId: string | null; endSec?: number };
+  const places: P[] = videoPlacementsOfClip(doc, clip, { templateOf }).map((p) => ({
+    sourceStartSec: p.sourceStartSec,
+    speed: p.speed,
+    assetId: p.assetId,
+    endSec: p.layerId != null ? resolveSlotClip(clip.slotClips?.[p.layerId], doc.assets.find((a) => a.assetId === p.assetId)?.clip).endSec : undefined,
+  }));
+  // 音の部品は動画の置き場所に入らない＝自身の頭出し・速さで見る。
+  if (clip.kind === TIMELINE_CLIP_KIND.audio && clip.assetId != null) {
+    places.push({ sourceStartSec: clip.sourceStartSec ?? 0, speed: clip.speed != null && clip.speed > 0 ? clip.speed : 1, assetId: clip.assetId });
+  }
+  const EPS = 1e-6;
+  if (edge === 'start') {
+    const headSec = span.startSec - clip.startSec;
+    if (headSec < 0 && places.some((p) => p.sourceStartSec + headSec * p.speed < -EPS)) return 'before';
+    return null;
+  }
+  if (!(span.durationSec > clip.durationSec)) return null;
+  const past = places.some((p) => {
+    const sourceEnd = doc.assets.find((a) => a.assetId === p.assetId)?.metadata?.durationSec;
+    const limit = Math.min(p.endSec ?? Infinity, sourceEnd ?? Infinity);
+    return p.sourceStartSec + span.durationSec * p.speed > limit + EPS;
+  });
+  return past ? 'after' : null;
+}

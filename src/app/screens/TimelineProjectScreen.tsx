@@ -18,7 +18,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
@@ -2296,6 +2296,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       groupIds?: readonly string[];
       shiftSec?: number;
       issue: EditBlockedReason | null;
+      /** 端が限界で止まっている（ADR-0034 追補 2026-10-05＝離すとそこで確定・端の色で示す）。 */
+      stopped?: boolean;
     } | null
   >(null);
 
@@ -2949,7 +2951,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       });
     const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
-      if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
+      if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
       // ⚠️ **まとめて動かすときは群ぜんぶで見る**（#686 段階4）。掴んだ相手だけを見ると、
       // **一緒に動く相手と重なる**判定になって赤くなるのに、離すと（正しく）置ける＝
       // 見えている色と結果が割れる（実機で踏んだ）。確定と同じ `moveClips` を通す。
@@ -2988,11 +2990,21 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           const { sec: raw, guideSec } = applySnap(at(e2), e2);
           // 群ごと丸めたずれから、掴んだ相手の位置も出す（見せかけと確定が同じ値を見る）。
           const shiftSec = groupIds ? shiftFor(raw) : undefined;
-          const sec = groupIds ? clip0.startSec + (shiftSec ?? 0) : raw;
+          let sec = groupIds ? clip0.startSec + (shiftSec ?? 0) : raw;
+          // ⚠️ **端は限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝隣の帯・素材の限界・使い切りの手前で
+          //   止まり、離すとそこで確定する（以前は赤くなって元の長さに戻っていた＝他社に無い型）。止まる位置は
+          //   確定と同じ関数（`trimClip`）で確かめて探す＝止まって見えたのに離すと断られる、を作らない。
+          let stopped = false;
+          if (mode !== "move") {
+            const st = trimStopSec(useTimelineStore.getState().doc ?? doc0, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
+            sec = st.sec;
+            stopped = st.stopped;
+          }
           lastShownSec = sec;
           const trackId = trackAt(e2);
-          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId) });
-          setSnapGuideSec(guideSec);
+          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId), stopped });
+          // 止まっているときの吸着の線は出さない（寄せた先ではなく、止まった所にいる）。
+          setSnapGuideSec(stopped ? null : guideSec);
         };
         show(ev);
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
@@ -4757,6 +4769,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                               grabbableClip(c) ? "timeline-clip--editable" : "",
                               clipDrag?.clipId === c.id ? "timeline-clip--dragging" : "",
                               clipDrag?.clipId === c.id && clipDrag.issue ? "drop-target--blocked" : "",
+                              // 端が限界で止まっていることは**その端の色**で示す（FCP・Resolve の型・文言は出さない＝決定10）。
+                              clipDrag?.clipId === c.id && clipDrag.stopped ? `timeline-clip--stopped-${clipDrag.mode === "trim-start" ? "start" : "end"}` : "",
                             ].filter(Boolean).join(" ")}
                             // 掴んでいる間は**その場で動かして見せる**（離すまで文書は変えない）。
                             style={dragStyleOf(c)}

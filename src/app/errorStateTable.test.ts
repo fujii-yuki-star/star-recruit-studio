@@ -541,7 +541,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（ADR-0053）＝編集の途中の手伝いで候補を作れなかった（AI_ASSIST_FAILED）／頼む必要が無い（AI_ASSIST_NOT_NEEDED）。
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
     // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(276);
+    // ⚠️ **+2**（ADR-0034 追補 2026-10-05・#1331）＝TRIM_BEFORE_SOURCE／TRIM_PAST_SOURCE_END。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(278);
   });
 
 
@@ -800,7 +801,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED。
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE。
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(273);
+    // ⚠️ **+2**（#1331）＝上と同じ2行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(275);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -825,6 +827,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED（等値で守る）。
       // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE（等値で守る）。
       // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
-    ).toBe(125);
+      // ⚠️ **+2**（#1331）＝素材の外へ伸ばせない断り2つ（同上）。
+    ).toBe(127);
   });
 });
