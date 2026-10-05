@@ -5,10 +5,10 @@
 // **上下スクロールを減らす**ためのもの（#550・#687＝利用者要望）。
 //
 // 開閉は画面ごとに覚える（記憶の置き場は `sectionOpen.ts`）＝画面を往復しても開き直さなくてよい。
-import { useState, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { loadSectionOpen, saveSectionOpen, type SectionScope } from "./sectionOpen";
 
-export function CollapsibleSection({ scope, title, storageKey, defaultOpen = true, forceOpen, children }: {
+export function CollapsibleSection({ scope, title, storageKey, defaultOpen = true, forceOpen, scrollOnForce = false, children }: {
   /** どの画面の記憶か（画面ごとに分ける＝別画面の同名の節と混ざらない）。 */
   scope: SectionScope;
   title: string;
@@ -47,6 +47,12 @@ export function CollapsibleSection({ scope, title, storageKey, defaultOpen = tru
    * 中身がアンマウント→再マウントする）ので、そのちらつきが実際に起きうる場面はここ。
    */
   forceOpen?: boolean;
+  /**
+   * `forceOpen` で開いたとき、**その節まで送る**（ADR-0048 追補 2026-10-05）。ほかの画面（公開前チェック・素材の知らせ）から
+   * 「この節を直して」と来たとき、開いただけで欄の下の方にあると、来た人には何も起きていないように見える。
+   * ⚠️ 既定は送らない＝同じ画面の中の操作で開く節まで視線を飛ばさない（`06 §2` 規約23 の「押した場所から視線が飛ぶ」）。
+   */
+  scrollOnForce?: boolean;
   children: ReactNode;
 }) {
   const memoKey = storageKey ?? title;
@@ -61,6 +67,11 @@ export function CollapsibleSection({ scope, title, storageKey, defaultOpen = tru
     setLastForceOpen(forceOpen);
     if (forceOpen) setOpen(true); // 保存しない＝一時的に開くだけ（false に戻っても畳まない）
   }
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    // jsdom には `scrollIntoView` が無い＝有るときだけ呼ぶ。
+    if (forceOpen && scrollOnForce) ref.current?.scrollIntoView?.({ block: "start" });
+  }, [forceOpen, scrollOnForce]);
   const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
     const next = e.currentTarget.open;
     // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
@@ -71,7 +82,7 @@ export function CollapsibleSection({ scope, title, storageKey, defaultOpen = tru
     saveSectionOpen(scope, memoKey, next);
   };
   return (
-    <details className="accordion" open={open} onToggle={onToggle}>
+    <details ref={ref} className="accordion" open={open} onToggle={onToggle}>
       <summary className="accordion-summary">{title}</summary>
       <div className="accordion-body">{children}</div>
     </details>

@@ -2152,6 +2152,332 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     ) },
     { id: PANEL_ID.edit, title: '選択中の場面を編集', content: (
       <>
+            {/* **セリフを先頭に**（ADR-0048 追補 2026-10-05・利用者判断）＝いちばん直すことの多い欄。以前は5番目
+                （文字→見た目・フォント→BGM→使用素材→セリフ）。⚠️ 見出しは変えない＝開閉の記憶を引き継ぐ。 */}
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ" forceOpen={focus === "narration"} scrollOnForce>
+            <div className="field">
+              <div className="toggle-row">
+                <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
+                <Switch
+                  on={isDialogue}
+                  onChange={(on) => {
+                    // 掛け合いをやめる時に2つ目以降のセリフが消えるので、複数あるときはインライン確認を出す（誤操作防止）。
+                    if (!on && (selected.lines?.length ?? 0) > 1) { setConfirmDialogueOff(true); return; }
+                    patch(on ? promoteToLines : demoteFromLines);
+                  }}
+                  label="掛け合い（複数のセリフ）"
+                />
+              </div>
+              {confirmDialogueOff && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>掛け合いをやめると、2つ目以降のセリフは消えます。</span>
+                  {/* 確認は「やめる（左・ghost）／実行（右・danger）」で統一（#410 sub2）。キャンセル語も「やめる」へ。 */}
+                  <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDialogueOff(false)}>
+                      やめる
+                    </button>
+                    <button
+                      className="btn btn-danger text-sm"
+                      onClick={() => { patch(demoteFromLines); setConfirmDialogueOff(false); }}
+                    >
+                      掛け合いをやめる
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* 場面ごとの字幕ON/OFF（scene.subtitleEnabledDefault・#413）。単一ナレーションはこれが直接の制御、
+                  掛け合いは既定（各セリフの「字幕を表示する」で個別に上書き可＝line.subtitleEnabled ?? これ ?? true）。 */}
+              <div className="toggle-row" style={{ marginTop: 8 }}>
+                <span className="field-label" style={{ margin: 0 }}>{SCENE_SUBTITLE_TOGGLE_LABEL}</span>
+                <Switch
+                  on={selected.subtitleEnabledDefault ?? true}
+                  onChange={(on) => patch((s) => ({ ...s, subtitleEnabledDefault: on }))}
+                  label={SCENE_SUBTITLE_TOGGLE_LABEL}
+                />
+              </div>
+              {isDialogue && (
+                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「{LINE_SUBTITLE_TOGGLE_LABEL}」で個別に上書きできます。</p>
+              )}
+              {isDialogue ? (
+                <div className="col gap-sm" style={{ marginTop: 8 }}>
+                  {(selected.lines ?? []).map((line, i) => {
+                    const lineAudio = narrationAudioById[lineAudioKey(selected.sceneId, line.lineId)];
+                    const lastIdx = (selected.lines?.length ?? 1) - 1;
+                    return (
+                      <div key={line.lineId} className="card-tight col gap-sm">
+                        <div className="row-between">
+                          <span className="text-sm" style={{ fontWeight: 600 }}>セリフ {i + 1}</span>
+                          {/* 削除は確認してから（#410・即時削除だった）。行内が狭く notice が入らないため Draft 同様のインライン確認＝やめる左/削除する danger右で順序・色は揃える。 */}
+                          {confirmDeleteLineId === line.lineId ? (
+                            /* ⚠️ **共有の確認を通す**（#990・上と同じ理由）。行の中なので `inline`。 */
+                            <DeleteConfirm
+                              inline
+                              message="削除しますか？"
+                              onCancel={() => setConfirmDeleteLineId(null)}
+                              onConfirm={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
+                            />
+                          ) : (
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
+                              <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
+                              <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => setConfirmDeleteLineId(line.lineId)}>削除</button>
+                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行と尺0以下では不可（#553 で最小尺ガードは撤廃）。 */}
+                              <button
+                                className="btn btn-ghost btn-icon text-sm"
+                                title="この行から後ろを別の場面に分ける"
+                                disabled={i === 0 || selected.durationSec <= 0}
+                                onClick={() => splitSceneAtLine(selected.sceneId, i)}
+                              >
+                                分ける
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <textarea
+                          className="textarea"
+                          rows={2}
+                          placeholder="セリフを入力"
+                          value={line.text}
+                          {...textGroup}
+                          onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
+                        />
+                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。 */}
+                        <AiSuggest
+                          key={`${selected.sceneId}-${line.lineId}`}
+                          kinds={AI_ASSIST_LINE_KINDS}
+                          source={line.text}
+                          limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength }}
+                          companyName={companyName}
+                          onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
+                        />
+                        <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                          <span className="text-sm text-muted">声</span>
+                          <select
+                            className="select text-sm"
+                            value={line.speaker ?? ""}
+                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { speaker: e.target.value ? Number(e.target.value) : null }))}
+                          >
+                            <option value="">動画全体の声に合わせる</option>
+                            {VOICE_CATALOG.map((c) => (
+                              <optgroup key={c.character} label={c.character}>
+                                {c.styles.map((st) => (
+                                  <option key={st.speaker} value={st.speaker}>{c.character}（{st.label}）</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </div>
+                        <details>
+                          <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
+                          <LineVoiceParam
+                            label="話す速さ" range={SPEED_RANGE} value={line.speed} lowLabel="ゆっくり" highLabel="はやい"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { speed: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { speed: null }))}
+                          />
+                          <LineVoiceParam
+                            label="声の高さ" range={PITCH_RANGE} value={line.pitch} lowLabel="ひくい" highLabel="たかい"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { pitch: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { pitch: null }))}
+                          />
+                          <LineVoiceParam
+                            label="抑揚" range={INTONATION_RANGE} value={line.intonation} lowLabel="おだやか" highLabel="ゆたか"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { intonation: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { intonation: null }))}
+                          />
+                        </details>
+                        <div className="toggle-row">
+                          <span className="text-sm text-muted">{LINE_SUBTITLE_TOGGLE_LABEL}</span>
+                          <Switch
+                            on={line.subtitleEnabled ?? selected.subtitleEnabledDefault ?? true}
+                            onChange={(on) => patch((s) => updateLine(s, line.lineId, { subtitleEnabled: on }))}
+                            label={LINE_SUBTITLE_TOGGLE_LABEL}
+                          />
+                        </div>
+                        <input
+                          className="input text-sm"
+                          placeholder="字幕（未入力ならセリフをそのまま表示）"
+                          value={line.subtitleText ?? ""}
+                          onChange={(e) => patch((s) => updateLine(s, line.lineId, { subtitleText: e.target.value ? e.target.value : null }))}
+                        />
+                        {/* 前のセリフと同時に流す（並行・ADR-0031）。2人目以降だけ（先頭は同時にする相手がいない）。
+                            ONにすると前のセリフに合わせて始まり声が重なる＝startSec は使わないので隠す（意味の二重化を防ぐ）。 */}
+                        {i > 0 && (
+                          <div className="toggle-row">
+                            <span className="text-sm text-muted">前のセリフと同時に流す</span>
+                            <Switch
+                              on={line.startWithPrevious === true}
+                              onChange={(on) =>
+                                patch((s) =>
+                                  updateLine(s, line.lineId, on ? { startWithPrevious: true, startSec: undefined } : { startWithPrevious: undefined }),
+                                )
+                              }
+                              label="前のセリフと同時に流す"
+                            />
+                          </div>
+                        )}
+                        {line.startWithPrevious === true ? (
+                          <p className="field-hint" style={{ marginTop: 0 }}>前のセリフと同時に始まり、声が重なって流れます（開始は前のセリフに合わせます）。</p>
+                        ) : (
+                          <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                            <span className="text-sm text-muted">開始（場面の頭から）</span>
+                            {/* 共有 NumberField（#459）。空欄＝自動（クリア）、値ありは blur で [0, 場面尺] にクランプ（範囲外を残さない＝#411/V17）。 */}
+                            <NumberField
+                              value={line.startSec}
+                              min={0}
+                              max={selected.durationSec}
+                              step={SEC_STEP}
+                              placeholder="自動"
+                              title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
+                              inputClassName="input text-sm"
+                              inputStyle={{ width: 90 }}
+                              onChange={(v) => patch((s) => updateLine(s, line.lineId, { startSec: v }))}
+                              onClear={() => patch((s) => updateLine(s, line.lineId, { startSec: undefined }))}
+                            />
+                            <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
+                          </div>
+                        )}
+                        <div className="row-between">
+                          <span className="text-sm text-muted">音声：{narrationStatusText(line.status)}</span>
+                          {lineAudio && (
+                            <button
+                              className="btn btn-ghost btn-icon text-sm"
+                              onClick={() => { setNarrationPlayError(false); audioPreview.play(`line:${line.lineId}`, lineAudio, () => setNarrationPlayError(true)); }}
+                            >
+                              {/* 再生/停止は全画面で SVG アイコンに統一（Unicode グリフ「▶ ■」をやめる・#547 P3-1）。
+                                  仕上がり確認・切替/動き再生と同じ PlayIcon/StopIcon＋テキスト（間隔は .btn の gap）。 */}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? "停止" : "再生"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button className="btn btn-ghost text-sm" onClick={() => patch(addLine)}>＋ セリフを追加</button>
+                  {lineWarningMessages.length > 0 && (
+                    <div className="notice notice-warn" role="alert">
+                      {lineWarningMessages.map((m) => <div key={m} className="text-sm">{m}</div>)}
+                    </div>
+                  )}
+                  <div className="row-between" style={{ marginTop: 4 }}>
+                    <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
+                      {narrationPlayError ? "再生できませんでした。声を作り直してお試しください" : ""}
+                    </span>
+                    <button
+                      className="btn btn-secondary btn-icon text-sm"
+                      onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
+                      disabled={isGeneratingNarration || (selected.lines ?? []).every((l) => l.text.trim().length === 0)}
+                    >
+                      全部のセリフの声を作成
+                    </button>
+                  </div>
+                  {narrationError && (
+                    <div className="notice notice-warn" role="alert"><span>{narrationError}</span></div>
+                  )}
+                  <p className="field-hint">セリフごとに声（キャラクター）を変えて掛け合いにできます。字幕は経過に合わせて切り替わります。</p>
+                </div>
+              ) : (<>
+              <label className="field-label" htmlFor="line">セリフ</label>
+              <textarea
+                id="line"
+                className="textarea"
+                value={selected.narration.text}
+                {...textGroup}
+                ref={lineFieldRef}
+                onChange={(e) =>
+                  patch((s) => ({
+                    ...s,
+                    // セリフ変更で音声は作り直しが必要なので status をリセット（古い音声との不整合防止）。
+                    narration: { ...s.narration, text: e.target.value, status: NARRATION_STATUS.none },
+                  }))
+                }
+              />
+              {/* セリフの言い直し（ADR-0053 決定1）。「使う」は手で書き換えたときと同じ＝声は作り直しが要る状態に戻す。 */}
+              <AiSuggest
+                key={selected.sceneId}
+                kinds={AI_ASSIST_NARRATION_KINDS}
+                source={selected.narration.text}
+                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec, voiceSpeed: resolveNarrationVoice(selected.narration, voiceSettings).speed }}
+                companyName={companyName}
+                autoKind={autoAssist?.sceneId === selected.sceneId ? autoAssist.kind : undefined}
+                onAutoAsked={() => setAutoAssist(null)}
+                onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
+              />
+              <div className="row-between" style={{ marginTop: 6 }}>
+                <span className="text-sm text-muted">
+                  音声：{narrationStatusText(selected.narration.status)}
+                  {narrationPlayError && (
+                    <span style={{ color: "var(--color-danger-text)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
+                  )}
+                </span>
+                <div className="row gap-sm">
+                  {narrationAudioById[selected.sceneId] && (
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      onClick={() => {
+                        setNarrationPlayError(false);
+                        audioPreview.play("scene", narrationAudioById[selected.sceneId], () => setNarrationPlayError(true));
+                      }}
+                    >
+                      {/* 再生/停止は SVG アイコンに統一（#547 P3-1）。 */}
+                      {audioPreview.playingKey === "scene" ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                      {audioPreview.playingKey === "scene" ? "停止" : "再生"}
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-secondary btn-icon text-sm"
+                    onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
+                    disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0 || isGeneratingNarration}
+                  >
+                    {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
+                  </button>
+                </div>
+              </div>
+              <details>
+                <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
+                {/* この場面のナレーションの声を場面ごとに上書き。null=動画全体（設定画面）を継承。変更で status をリセット＝作り直し（#249）。 */}
+                <LineVoiceParam
+                  label="話す速さ" range={SPEED_RANGE} value={selected.narration.speed} lowLabel="ゆっくり" highLabel="はやい"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, speed: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, speed: null, status: NARRATION_STATUS.none } }))}
+                />
+                <LineVoiceParam
+                  label="声の高さ" range={PITCH_RANGE} value={selected.narration.pitch} lowLabel="ひくい" highLabel="たかい"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, pitch: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, pitch: null, status: NARRATION_STATUS.none } }))}
+                />
+                <LineVoiceParam
+                  label="抑揚" range={INTONATION_RANGE} value={selected.narration.intonation} lowLabel="おだやか" highLabel="ゆたか"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, intonation: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, intonation: null, status: NARRATION_STATUS.none } }))}
+                />
+              </details>
+              <div className="row gap-sm" style={{ marginTop: 6 }}>
+                <button
+                  className="btn btn-ghost btn-icon text-sm"
+                  title="カーソル位置でこの場面を2つに分ける"
+                  disabled={
+                    selected.narration.text.trim().length < 2 ||
+                    selected.durationSec <= 0
+                  }
+                  onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
+                >
+                  ここで2つに分ける
+                </button>
+              </div>
+              <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
+              {/* ⚠️ **印に紐づけない**（#755-3 レビュー）＝失敗しても前の声が残っていれば印は「作成済み」の
+                  ままにするので、`failed` を条件にすると**押しても何も起きなかったように見える**（無言の失敗）。
+                  掛け合い（上）とタイムライン編集も無条件で出す＝同じ操作の返事を場所で変えない（ADR-0026②）。 */}
+              {narrationError && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>{narrationError}</span>
+                </div>
+              )}
+              </>)}
+            </div>
+            </CollapsibleSection>
+
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
@@ -2292,7 +2618,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 ))}
               </div>
             )}
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false} forceOpen={focus === "look"}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false} forceOpen={focus === "look"} scrollOnForce>
             {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
             <div className="field">
               <label className="field-label" htmlFor="scene-kind">種類</label>
@@ -2452,6 +2778,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               title="使用素材"
               defaultOpen={hasEmptySlot}
               forceOpen={focus === "assets"}
+              scrollOnForce
             >
             <div className="field">
               {slotLayers.length === 0 ? (
@@ -2857,330 +3184,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               </CollapsibleSection>
             )}
-
-            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ" forceOpen={focus === "narration"}>
-            <div className="field">
-              <div className="toggle-row">
-                <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
-                <Switch
-                  on={isDialogue}
-                  onChange={(on) => {
-                    // 掛け合いをやめる時に2つ目以降のセリフが消えるので、複数あるときはインライン確認を出す（誤操作防止）。
-                    if (!on && (selected.lines?.length ?? 0) > 1) { setConfirmDialogueOff(true); return; }
-                    patch(on ? promoteToLines : demoteFromLines);
-                  }}
-                  label="掛け合い（複数のセリフ）"
-                />
-              </div>
-              {confirmDialogueOff && (
-                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
-                  <span>掛け合いをやめると、2つ目以降のセリフは消えます。</span>
-                  {/* 確認は「やめる（左・ghost）／実行（右・danger）」で統一（#410 sub2）。キャンセル語も「やめる」へ。 */}
-                  <div className="row gap-sm" style={{ marginTop: 6 }}>
-                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDialogueOff(false)}>
-                      やめる
-                    </button>
-                    <button
-                      className="btn btn-danger text-sm"
-                      onClick={() => { patch(demoteFromLines); setConfirmDialogueOff(false); }}
-                    >
-                      掛け合いをやめる
-                    </button>
-                  </div>
-                </div>
-              )}
-              {/* 場面ごとの字幕ON/OFF（scene.subtitleEnabledDefault・#413）。単一ナレーションはこれが直接の制御、
-                  掛け合いは既定（各セリフの「字幕を表示する」で個別に上書き可＝line.subtitleEnabled ?? これ ?? true）。 */}
-              <div className="toggle-row" style={{ marginTop: 8 }}>
-                <span className="field-label" style={{ margin: 0 }}>{SCENE_SUBTITLE_TOGGLE_LABEL}</span>
-                <Switch
-                  on={selected.subtitleEnabledDefault ?? true}
-                  onChange={(on) => patch((s) => ({ ...s, subtitleEnabledDefault: on }))}
-                  label={SCENE_SUBTITLE_TOGGLE_LABEL}
-                />
-              </div>
-              {isDialogue && (
-                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「{LINE_SUBTITLE_TOGGLE_LABEL}」で個別に上書きできます。</p>
-              )}
-              {isDialogue ? (
-                <div className="col gap-sm" style={{ marginTop: 8 }}>
-                  {(selected.lines ?? []).map((line, i) => {
-                    const lineAudio = narrationAudioById[lineAudioKey(selected.sceneId, line.lineId)];
-                    const lastIdx = (selected.lines?.length ?? 1) - 1;
-                    return (
-                      <div key={line.lineId} className="card-tight col gap-sm">
-                        <div className="row-between">
-                          <span className="text-sm" style={{ fontWeight: 600 }}>セリフ {i + 1}</span>
-                          {/* 削除は確認してから（#410・即時削除だった）。行内が狭く notice が入らないため Draft 同様のインライン確認＝やめる左/削除する danger右で順序・色は揃える。 */}
-                          {confirmDeleteLineId === line.lineId ? (
-                            /* ⚠️ **共有の確認を通す**（#990・上と同じ理由）。行の中なので `inline`。 */
-                            <DeleteConfirm
-                              inline
-                              message="削除しますか？"
-                              onCancel={() => setConfirmDeleteLineId(null)}
-                              onConfirm={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
-                            />
-                          ) : (
-                            <div className="row gap-sm">
-                              <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
-                              <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
-                              <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => setConfirmDeleteLineId(line.lineId)}>削除</button>
-                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行と尺0以下では不可（#553 で最小尺ガードは撤廃）。 */}
-                              <button
-                                className="btn btn-ghost btn-icon text-sm"
-                                title="この行から後ろを別の場面に分ける"
-                                disabled={i === 0 || selected.durationSec <= 0}
-                                onClick={() => splitSceneAtLine(selected.sceneId, i)}
-                              >
-                                分ける
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <textarea
-                          className="textarea"
-                          rows={2}
-                          placeholder="セリフを入力"
-                          value={line.text}
-                          {...textGroup}
-                          onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
-                        />
-                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。 */}
-                        <AiSuggest
-                          key={`${selected.sceneId}-${line.lineId}`}
-                          kinds={AI_ASSIST_LINE_KINDS}
-                          source={line.text}
-                          limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength }}
-                          companyName={companyName}
-                          onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
-                        />
-                        <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="text-sm text-muted">声</span>
-                          <select
-                            className="select text-sm"
-                            value={line.speaker ?? ""}
-                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { speaker: e.target.value ? Number(e.target.value) : null }))}
-                          >
-                            <option value="">動画全体の声に合わせる</option>
-                            {VOICE_CATALOG.map((c) => (
-                              <optgroup key={c.character} label={c.character}>
-                                {c.styles.map((st) => (
-                                  <option key={st.speaker} value={st.speaker}>{c.character}（{st.label}）</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        </div>
-                        <details>
-                          <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
-                          <LineVoiceParam
-                            label="話す速さ" range={SPEED_RANGE} value={line.speed} lowLabel="ゆっくり" highLabel="はやい"
-                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { speed: v }))}
-                            onReset={() => patch((s) => updateLine(s, line.lineId, { speed: null }))}
-                          />
-                          <LineVoiceParam
-                            label="声の高さ" range={PITCH_RANGE} value={line.pitch} lowLabel="ひくい" highLabel="たかい"
-                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { pitch: v }))}
-                            onReset={() => patch((s) => updateLine(s, line.lineId, { pitch: null }))}
-                          />
-                          <LineVoiceParam
-                            label="抑揚" range={INTONATION_RANGE} value={line.intonation} lowLabel="おだやか" highLabel="ゆたか"
-                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { intonation: v }))}
-                            onReset={() => patch((s) => updateLine(s, line.lineId, { intonation: null }))}
-                          />
-                        </details>
-                        <div className="toggle-row">
-                          <span className="text-sm text-muted">{LINE_SUBTITLE_TOGGLE_LABEL}</span>
-                          <Switch
-                            on={line.subtitleEnabled ?? selected.subtitleEnabledDefault ?? true}
-                            onChange={(on) => patch((s) => updateLine(s, line.lineId, { subtitleEnabled: on }))}
-                            label={LINE_SUBTITLE_TOGGLE_LABEL}
-                          />
-                        </div>
-                        <input
-                          className="input text-sm"
-                          placeholder="字幕（未入力ならセリフをそのまま表示）"
-                          value={line.subtitleText ?? ""}
-                          onChange={(e) => patch((s) => updateLine(s, line.lineId, { subtitleText: e.target.value ? e.target.value : null }))}
-                        />
-                        {/* 前のセリフと同時に流す（並行・ADR-0031）。2人目以降だけ（先頭は同時にする相手がいない）。
-                            ONにすると前のセリフに合わせて始まり声が重なる＝startSec は使わないので隠す（意味の二重化を防ぐ）。 */}
-                        {i > 0 && (
-                          <div className="toggle-row">
-                            <span className="text-sm text-muted">前のセリフと同時に流す</span>
-                            <Switch
-                              on={line.startWithPrevious === true}
-                              onChange={(on) =>
-                                patch((s) =>
-                                  updateLine(s, line.lineId, on ? { startWithPrevious: true, startSec: undefined } : { startWithPrevious: undefined }),
-                                )
-                              }
-                              label="前のセリフと同時に流す"
-                            />
-                          </div>
-                        )}
-                        {line.startWithPrevious === true ? (
-                          <p className="field-hint" style={{ marginTop: 0 }}>前のセリフと同時に始まり、声が重なって流れます（開始は前のセリフに合わせます）。</p>
-                        ) : (
-                          <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                            <span className="text-sm text-muted">開始（場面の頭から）</span>
-                            {/* 共有 NumberField（#459）。空欄＝自動（クリア）、値ありは blur で [0, 場面尺] にクランプ（範囲外を残さない＝#411/V17）。 */}
-                            <NumberField
-                              value={line.startSec}
-                              min={0}
-                              max={selected.durationSec}
-                              step={SEC_STEP}
-                              placeholder="自動"
-                              title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
-                              inputClassName="input text-sm"
-                              inputStyle={{ width: 90 }}
-                              onChange={(v) => patch((s) => updateLine(s, line.lineId, { startSec: v }))}
-                              onClear={() => patch((s) => updateLine(s, line.lineId, { startSec: undefined }))}
-                            />
-                            <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
-                          </div>
-                        )}
-                        <div className="row-between">
-                          <span className="text-sm text-muted">音声：{narrationStatusText(line.status)}</span>
-                          {lineAudio && (
-                            <button
-                              className="btn btn-ghost btn-icon text-sm"
-                              onClick={() => { setNarrationPlayError(false); audioPreview.play(`line:${line.lineId}`, lineAudio, () => setNarrationPlayError(true)); }}
-                            >
-                              {/* 再生/停止は全画面で SVG アイコンに統一（Unicode グリフ「▶ ■」をやめる・#547 P3-1）。
-                                  仕上がり確認・切替/動き再生と同じ PlayIcon/StopIcon＋テキスト（間隔は .btn の gap）。 */}
-                              {audioPreview.playingKey === `line:${line.lineId}` ? <StopIcon size={16} /> : <PlayIcon size={16} />}
-                              {audioPreview.playingKey === `line:${line.lineId}` ? "停止" : "再生"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <button className="btn btn-ghost text-sm" onClick={() => patch(addLine)}>＋ セリフを追加</button>
-                  {lineWarningMessages.length > 0 && (
-                    <div className="notice notice-warn" role="alert">
-                      {lineWarningMessages.map((m) => <div key={m} className="text-sm">{m}</div>)}
-                    </div>
-                  )}
-                  <div className="row-between" style={{ marginTop: 4 }}>
-                    <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
-                      {narrationPlayError ? "再生できませんでした。声を作り直してお試しください" : ""}
-                    </span>
-                    <button
-                      className="btn btn-secondary btn-icon text-sm"
-                      onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
-                      disabled={isGeneratingNarration || (selected.lines ?? []).every((l) => l.text.trim().length === 0)}
-                    >
-                      全部のセリフの声を作成
-                    </button>
-                  </div>
-                  {narrationError && (
-                    <div className="notice notice-warn" role="alert"><span>{narrationError}</span></div>
-                  )}
-                  <p className="field-hint">セリフごとに声（キャラクター）を変えて掛け合いにできます。字幕は経過に合わせて切り替わります。</p>
-                </div>
-              ) : (<>
-              <label className="field-label" htmlFor="line">セリフ</label>
-              <textarea
-                id="line"
-                className="textarea"
-                value={selected.narration.text}
-                {...textGroup}
-                ref={lineFieldRef}
-                onChange={(e) =>
-                  patch((s) => ({
-                    ...s,
-                    // セリフ変更で音声は作り直しが必要なので status をリセット（古い音声との不整合防止）。
-                    narration: { ...s.narration, text: e.target.value, status: NARRATION_STATUS.none },
-                  }))
-                }
-              />
-              {/* セリフの言い直し（ADR-0053 決定1）。「使う」は手で書き換えたときと同じ＝声は作り直しが要る状態に戻す。 */}
-              <AiSuggest
-                key={selected.sceneId}
-                kinds={AI_ASSIST_NARRATION_KINDS}
-                source={selected.narration.text}
-                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec, voiceSpeed: resolveNarrationVoice(selected.narration, voiceSettings).speed }}
-                companyName={companyName}
-                autoKind={autoAssist?.sceneId === selected.sceneId ? autoAssist.kind : undefined}
-                onAutoAsked={() => setAutoAssist(null)}
-                onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
-              />
-              <div className="row-between" style={{ marginTop: 6 }}>
-                <span className="text-sm text-muted">
-                  音声：{narrationStatusText(selected.narration.status)}
-                  {narrationPlayError && (
-                    <span style={{ color: "var(--color-danger-text)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
-                  )}
-                </span>
-                <div className="row gap-sm">
-                  {narrationAudioById[selected.sceneId] && (
-                    <button
-                      className="btn btn-ghost btn-icon text-sm"
-                      onClick={() => {
-                        setNarrationPlayError(false);
-                        audioPreview.play("scene", narrationAudioById[selected.sceneId], () => setNarrationPlayError(true));
-                      }}
-                    >
-                      {/* 再生/停止は SVG アイコンに統一（#547 P3-1）。 */}
-                      {audioPreview.playingKey === "scene" ? <StopIcon size={16} /> : <PlayIcon size={16} />}
-                      {audioPreview.playingKey === "scene" ? "停止" : "再生"}
-                    </button>
-                  )}
-                  <button
-                    className="btn btn-secondary btn-icon text-sm"
-                    onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
-                    disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0 || isGeneratingNarration}
-                  >
-                    {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
-                  </button>
-                </div>
-              </div>
-              <details>
-                <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
-                {/* この場面のナレーションの声を場面ごとに上書き。null=動画全体（設定画面）を継承。変更で status をリセット＝作り直し（#249）。 */}
-                <LineVoiceParam
-                  label="話す速さ" range={SPEED_RANGE} value={selected.narration.speed} lowLabel="ゆっくり" highLabel="はやい"
-                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, speed: v, status: NARRATION_STATUS.none } }))}
-                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, speed: null, status: NARRATION_STATUS.none } }))}
-                />
-                <LineVoiceParam
-                  label="声の高さ" range={PITCH_RANGE} value={selected.narration.pitch} lowLabel="ひくい" highLabel="たかい"
-                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, pitch: v, status: NARRATION_STATUS.none } }))}
-                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, pitch: null, status: NARRATION_STATUS.none } }))}
-                />
-                <LineVoiceParam
-                  label="抑揚" range={INTONATION_RANGE} value={selected.narration.intonation} lowLabel="おだやか" highLabel="ゆたか"
-                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, intonation: v, status: NARRATION_STATUS.none } }))}
-                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, intonation: null, status: NARRATION_STATUS.none } }))}
-                />
-              </details>
-              <div className="row gap-sm" style={{ marginTop: 6 }}>
-                <button
-                  className="btn btn-ghost btn-icon text-sm"
-                  title="カーソル位置でこの場面を2つに分ける"
-                  disabled={
-                    selected.narration.text.trim().length < 2 ||
-                    selected.durationSec <= 0
-                  }
-                  onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
-                >
-                  ここで2つに分ける
-                </button>
-              </div>
-              <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
-              {/* ⚠️ **印に紐づけない**（#755-3 レビュー）＝失敗しても前の声が残っていれば印は「作成済み」の
-                  ままにするので、`failed` を条件にすると**押しても何も起きなかったように見える**（無言の失敗）。
-                  掛け合い（上）とタイムライン編集も無条件で出す＝同じ操作の返事を場所で変えない（ADR-0026②）。 */}
-              {narrationError && (
-                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
-                  <span>{narrationError}</span>
-                </div>
-              )}
-              </>)}
-            </div>
-            </CollapsibleSection>
 
             {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
             {/* 既定は畳む。ただし「この場面で上書き設定済み」なら開く＝設定を見失わない（PR#286レビュー）。
