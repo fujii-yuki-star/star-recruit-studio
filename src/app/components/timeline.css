@@ -776,6 +776,45 @@
   z-index: 6;
 }
 
+/* ── 動きの道筋と点（ADR-0054 段階2）＝編集用の描き足し（書き出しには出ない）────────────
+   ⚠️ **点だけが指を受ける**＝線と余白は下の部品へ素通し（本体を掴む操作を塞がない）。
+   ⚠️ **取っ手より手前**＝点が部品の中心や角に重なっても、点は掴める（取っ手の z は 40 まで）。 */
+.motion-path {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 45;
+}
+.motion-path svg {
+  display: block;
+}
+.motion-path-line {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.motion-path-key {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  background: var(--color-surface);
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+}
+.motion-path-key--current {
+  background: var(--color-primary);
+}
+.motion-path-key--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* ── 帯に敷く絵（#332）＝音の波形／動画のコマ列 ─────────────────────────
    ⚠️ **文字より下に敷く**＝名前が読めなくならない。`pointer-events: none` で
    掴む・端をつまむ操作を邪魔しない（帯そのものが受け取る）。

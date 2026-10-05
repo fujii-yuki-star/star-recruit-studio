@@ -1861,3 +1861,13 @@ export function describingWaitingMessage(n: number): string {
 }
 export const WAIT_DESCRIBE_LABEL = "読み終わってから作る";
 export const MAKE_WITHOUT_WAIT_LABEL = "待たずに作る";
+
+/** 動きの点の説明（ADR-0054 段階2）。秒は小数第2位まで。 */
+export function motionKeyTitle(timeSec: number, locked: boolean): string {
+  const at = `${Math.round(timeSec * 100) / 100}秒`;
+  return locked
+    ? `動きの点（${at}）。列が固定されているので動かせません。固定を外すと直せます。`
+    : `動きの点（${at}）。引くと、この時刻の位置だけ直ります。`;
+}
+/** 道筋と点を描いたときの一言（ADR-0054 決定4＝段階1の一言を置き換える）。 */
+export const MOTION_PATH_NOTE = "部品を動かすと動き全体がずれます。点を掴んで引くと、その時刻の位置だけ直せます。";

@@ -22,7 +22,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
-import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL } from "../uiLabels";
+import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, MOTION_PATH_NOTE } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -6538,7 +6538,9 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const el = ov.children[0] as HTMLElement;
     expect(el.style.cursor).toBe("move");
     expect(screen.queryByText(/仕上がり確認の上では動かせません/)).toBeNull();
-    expect(screen.getByText(ANIMATED_DRAG_NOTE)).toBeInTheDocument(); // 業界の既定と違うことを一言
+    // 業界の既定と違うことを一言。位置の動きなので点が描かれる＝一言は段階2のもの（ADR-0054 決定4）。
+    expect(screen.getByText(MOTION_PATH_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(ANIMATED_DRAG_NOTE)).toBeNull();
     fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
     fireEvent.pointerMove(ov, { buttons: 1, pointerId: 1, clientX: 40, clientY: 0 });
     fireEvent.pointerUp(ov, { pointerId: 1, clientX: 40, clientY: 0 });
