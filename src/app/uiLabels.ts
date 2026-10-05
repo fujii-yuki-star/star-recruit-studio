@@ -474,6 +474,9 @@ export const EDIT_WIZARD_INPUT_LABEL = "入れた内容を見直す";
  */
 export const REGENERATE_OVERWRITE_CONFIRM =
   "今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？";
+/** 動画案づくりの失敗で、文が設定を名指ししているときの行き先（UI/UX 監査 2026-10-02＝送り直しても直らない失敗）。 */
+export const OPEN_AI_SETTINGS_LABEL = "設定を開く";
+
 /** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
 export function generateFailedMessage(reason?: string | null): string {
   return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
@@ -1770,6 +1773,21 @@ export const AI_ASSIST_USE_LABEL = "使う";
 export const AI_ASSIST_CLOSE_LABEL = "候補を閉じる";
 /** 候補を作れなかった（形が違う・どれも上限を越えた・呼び出しの失敗）。 */
 export const AI_ASSIST_FAILED_MESSAGE = "うまく候補を作れませんでした。もう一度押すか、自分で書き直してください。";
+/**
+ * 同梱の AI の部品が無い・壊れている（UI/UX 監査 2026-10-02）＝「もう一度押す」では直らない。
+ * ⚠️ 以前は何の失敗でも `AI_ASSIST_FAILED_MESSAGE`（もう一度押す）だった＝押し続けても直らない。
+ */
+export const AI_ASSIST_UNAVAILABLE_MESSAGE = "このパソコンの中のAIが使えません。アプリを入れ直してください。それまでは自分で書き直せます。";
+/** 頼んでいる間に元の文が変わった（古い文から作った候補は出さない＝手直しを上書きしない）。 */
+export const AI_ASSIST_STALE_MESSAGE = "考えている間に文が変わったので、候補は出しませんでした。もう一度押すと、いまの文から作ります。";
+/** 元になる文が空でボタンを押せない理由。 */
+export const AI_ASSIST_NEED_SOURCE_HINT = "先に元になる文を入れると頼めます";
+/** 候補が出たことを知らせる（読み上げにも届くよう知らせの置き場に出す）。 */
+export function aiAssistCandidatesCount(n: number): string {
+  return `候補が${n}つ出ました`;
+}
+/** 考えている途中でやめる（返事は捨てる）。 */
+export const AI_ASSIST_CANCEL_LABEL = "やめる";
 /** 頼む必要が無い（もう表示時間に収まっている・文が短すぎる）。 */
 export const AI_ASSIST_NOT_NEEDED_MESSAGE = "いまの文のままで大丈夫です（もう収まっているか、これ以上短くできません）。";
 /** セリフ欄のボタン。 */

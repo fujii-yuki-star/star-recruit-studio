@@ -13,7 +13,7 @@ import {
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
-  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE } from "./uiLabels";
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_STALE_MESSAGE } from "./uiLabels";
 import { AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
@@ -114,6 +114,8 @@ function codeMessages(): Record<string, string> {
     // 編集の途中の AI 補助（ADR-0053）。
     AI_ASSIST_FAILED: AI_ASSIST_FAILED_MESSAGE,
     AI_ASSIST_NOT_NEEDED: AI_ASSIST_NOT_NEEDED_MESSAGE,
+    AI_ASSIST_UNAVAILABLE: AI_ASSIST_UNAVAILABLE_MESSAGE,
+    AI_ASSIST_STALE: AI_ASSIST_STALE_MESSAGE,
     AI_RESPONSE_UNREADABLE: AI_PLAN_UNREADABLE_MESSAGE,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
@@ -537,7 +539,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0052 決定5）＝写真・動画を自動で選んだ印（ASSET_AUTO_ASSIGNED）。
     // ⚠️ **+1**（ADR-0052 決定6・#1293）＝出力が上限で止まった（LOCAL_AI_TOO_LONG）。
     // ⚠️ **+2**（ADR-0053）＝編集の途中の手伝いで候補を作れなかった（AI_ASSIST_FAILED）／頼む必要が無い（AI_ASSIST_NOT_NEEDED）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(269);
+    // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(271);
   });
 
 
@@ -793,7 +796,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（ADR-0051）＝このパソコンの中で作るときの断り4つ（LOCAL_AI_*）と、Gemini を選んで鍵が無い（AI_GEMINI_KEY_MISSING）。
     // ⚠️ **+1**（ADR-0052 決定5）＝上と同じ1行。**+1**（ADR-0052 決定6）＝上と同じ1行。
     // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(266);
+    // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(268);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -816,6 +820,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+2**＝`PREVIEW_WINDOW_OPEN_FAILED`／`PREVIEW_WINDOW_NOT_CONNECTED`（ADR-0050・#1274 レビュー・`codeMessages()` へ直に載せた）。
       // ⚠️ **+2**＝`AI_GEMINI_KEY_MISSING`／`AI_RESPONSE_UNREADABLE`（ADR-0051・`codeMessages()` へ直に載せた＝後者は以前は直書きで弱い段だった）。
       // ⚠️ **+2**（ADR-0053）＝AI_ASSIST_FAILED／AI_ASSIST_NOT_NEEDED（等値で守る）。
-    ).toBe(118);
+      // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝AI_ASSIST_UNAVAILABLE／AI_ASSIST_STALE（等値で守る）。
+    ).toBe(120);
   });
 });

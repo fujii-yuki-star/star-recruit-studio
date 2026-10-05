@@ -65,7 +65,7 @@ describe("掛け合いの各行の言い直し（#1316）", () => {
     fireEvent.click(shortButtons[1]);
     await flush();
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
-    fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_USE_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) }));
     const [l1, l2] = useProjectStore.getState().scenes[0].lines!;
     expect(l2.text).toBe("先輩と一緒に覚えられます。");
     expect(l2.status).toBe(NARRATION_STATUS.none);
@@ -97,12 +97,12 @@ describe("動画の名前の候補（#1316）", () => {
     await flush();
     fireEvent.click(screen.getByRole("button", { name: AI_ASSIST_VIDEO_TITLE_LABEL }));
     await flush();
-    fireEvent.click(screen.getByRole("button", { name: "候補を出す" }));
-    await flush();
+    // 開いたらすぐ頼む（UI/UX 監査 2026-10-02＝「名前の候補」→「候補を出す」の2回押しにしない）。
+    expect(ai.calls).toHaveLength(1);
     expect(ai.calls[0].user.startsWith("# 動画の内容")).toBe(true);
     expect(ai.calls[0].user).toContain("テーマ：{会社名}"); // 会社名は印で渡す
     expect(ai.calls[0].user).toContain("未経験の方も先輩と一緒に覚えられます");
-    fireEvent.click(within(document.body).getByRole("button", { name: AI_ASSIST_USE_LABEL }));
+    fireEvent.click(within(document.body).getByRole("button", { name: new RegExp(`」を${AI_ASSIST_USE_LABEL}$`) }));
     expect(useProjectStore.getState().meta.projectName).toBe("地域を走る配送のしごと");
   });
 
@@ -114,6 +114,8 @@ describe("動画の名前の候補（#1316）", () => {
     expect(screen.getByRole("button", { name: "候補を出す" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("button", { name: "候補を出す" })).toBeNull();
+    // 閉じたら開いたボタンへ焦点を戻す（焦点が画面の外へ落ちない）。
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: AI_ASSIST_VIDEO_TITLE_LABEL }));
     await open();
     fireEvent.mouseDown(screen.getByText("外側"));
     expect(screen.queryByRole("button", { name: "候補を出す" })).toBeNull();

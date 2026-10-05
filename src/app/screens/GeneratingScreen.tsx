@@ -1,11 +1,11 @@
-import { isAiSceneLimitMessage } from "../../domain/project/sceneLimit";
+import { generateRecovery } from "../../domain/ai/generateRecovery";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { VIDEO_KIND } from "../../domain/enums";
 import { onAiBusyWait, onLocalAiProgress } from "../../infrastructure/aiClient";
 import { LoadingView, ErrorView } from "../components/states";
-import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, writingSceneMessage } from "../uiLabels";
+import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, OPEN_AI_SETTINGS_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, writingSceneMessage } from "../uiLabels";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
@@ -82,7 +82,20 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
 
   if (status === "error") {
     // ⚠️ **見分けは domain の目印から**（#1222）＝断りの文と同じ1か所から作るので、ずれない。
-    const 上限で断った = isAiSceneLimitMessage(aiError);
+    const recovery = generateRecovery(aiError);
+    const 上限で断った = recovery === "editInput";
+    const retry = {
+      label: RETRY_GENERATE_LABEL,
+      onClick: () => {
+        setProgress(8);
+        setWritingScene(0);
+        // 前の回で混み合いを待っていても、やり直しの最初からその文を出さない。
+        setBusyWait(0);
+        reset();
+        void generate();
+      },
+    };
+    const editInput = { label: EDIT_WIZARD_INPUT_LABEL, onClick: () => onNavigate("wizard") };
     return (
       <div className="main-scroll">
         {/* 見出し・説明・2択のラベルは空状態（NoScenesState）と共有する＝この画面を離れても言葉が変わらない（§6・#590）。 */}
@@ -95,19 +108,18 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
           //   「もう一度試す」は `reset(); generate()`＝**同じ内容をそのまま送り直す**ので、**また超える**。
           //   断りの文が「もう一度お試しください」を避けているのに、**ボタンがそれを打ち消して**いた（§2-5）。
           // ⚠️ **行き先は入力**＝文が指示する次の行動（伝える内容を減らす）に、画面から到達できるようにする。
+          // ⚠️ **ボタンは文が名指しする行き先に従う**（UI/UX 監査 2026-10-02）＝部品が無い・壊れている・接続キーが無いのに
+          //   「もう一度試す」を主にすると、何度押しても同じ失敗になる。時間切れは「入力を短く」が先（再試行も残す）。
           actions={[
-            上限で断った
-              ? { label: EDIT_WIZARD_INPUT_LABEL, primary: true, onClick: () => onNavigate("wizard") }
-              : {
-                  label: RETRY_GENERATE_LABEL,
-                  primary: true,
-                  onClick: () => {
-                    setProgress(8);
-                    setWritingScene(0);
-                    reset();
-                    void generate();
-                  },
-                },
+            ...(recovery === "editInput"
+              ? [{ ...editInput, primary: true }]
+              : recovery === "settings"
+                ? // ⚠️ **再試行も控えめに残す**（PR3 レビュー 🟡）＝設定でキーを登録・Gemini へ切り替えてから戻ってきても
+                  //   失敗の文は消えないので、再試行が無いと**やり直す道がどの画面にも無い**（以前はどの失敗でも出ていた）。
+                  [{ label: OPEN_AI_SETTINGS_LABEL, primary: true, onClick: () => onNavigate("settings") }, retry]
+                : recovery === "shortenInput"
+                  ? [{ ...editInput, primary: true }, retry]
+                  : [{ ...retry, primary: true }]),
             // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
             { label: START_MANUAL_LABEL, onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}
