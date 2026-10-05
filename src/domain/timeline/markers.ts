@@ -52,14 +52,15 @@ export function markerClock(timeSec: number, fps: number): string {
 
 /**
  * 打ち込まれた時刻を秒へ（UI/UX 監査 2026-10-02＝再生位置を数値で打てるようにする）。
- * - `分:秒.コマ`（表示と同じ書き方・`markerClock` の逆）／`分:秒`
+ * - `分:秒.コマ`（表示と同じ書き方・`markerClock` の逆）／`分:秒:コマ`（Premiere・Resolve の書き方＝コマの区切りを
+ *   `:` にして小数点と取り違えない・PR #1340 レビュー）／`分:秒`
  * - `:` が無ければ**秒**（`12.5`＝12.5 秒）＝表示と違う書き方でも、ふつうに打てば通る
  * 読めなければ `null`（呼び出し側は打つ前の値へ戻す＝黙って別の時刻へ飛ばない）。コマが fps 以上なら読めない扱い。
  */
 export function parseClock(text: string, fps: number): number | null {
   const t = text.trim().replace(/：/g, ':').replace(/．/g, '.').replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
   if (t === '') return null;
-  const m = /^(\d+):(\d{1,2})(?:\.(\d{1,2}))?$/.exec(t);
+  const m = /^(\d+):(\d{1,2})(?:[.:](\d{1,2}))?$/.exec(t);
   if (m) {
     const mm = Number(m[1]);
     const ss = Number(m[2]);

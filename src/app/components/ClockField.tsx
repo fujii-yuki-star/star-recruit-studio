@@ -3,6 +3,7 @@
 // ⚠️ **読めなければ打つ前の値へ戻す**＝黙って別の時刻へ飛ばない。範囲の外は端へ寄せる（数値欄と同じ作法）。
 import { useState } from "react";
 import { markerClock, parseClock } from "../../domain/timeline/markers";
+import { isComposingReact } from "../hooks/keyboardShortcut";
 
 export function ClockField({ value, fps, max, onCommit, ariaLabel, title }: {
   value: number;
@@ -29,11 +30,13 @@ export function ClockField({ value, fps, max, onCommit, ariaLabel, title }: {
       value={shown}
       inputMode="decimal"
       spellCheck={false}
-      onFocus={(e) => e.currentTarget.select()}
+      // ⚠️ **焦点が入ったら表示を止める**（PR #1340 レビュー 🟡）＝再生中は時刻が毎フレーム描き直され、選んだ範囲が
+      //   外れてカーソルが末尾へ飛び、打った文字が動いている時刻の後ろへ付け足されていた。いまの値を下書きへ写して固定する。
+      onFocus={(e) => { setDraft(markerClock(value, fps)); e.currentTarget.select(); }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
+        if (isComposingReact(e)) return; // 変換中は奪わない（共有の判定＝古い WebView の keyCode 229 も見る）
         if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); }
         else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setDraft(null); e.currentTarget.blur(); }
       }}

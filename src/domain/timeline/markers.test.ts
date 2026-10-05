@@ -291,6 +291,10 @@ describe('parseClock（再生位置を打つ）', () => {
   });
 
   it('読めないもの・ありえないコマや秒は null（黙って別の時刻へ飛ばない）', () => {
-    for (const t of ['', 'abc', '1:60', '0:01.30', '-1', '1:2:3']) expect(parseClock(t, 30), t).toBeNull();
+    for (const t of ['', 'abc', '1:60', '0:01.30', '0:01:30', '-1', '1:2:3:4']) expect(parseClock(t, 30), t).toBeNull();
+  });
+
+  it('Premiere・Resolve の書き方（分:秒:コマ）も読む＝小数点と取り違えない', () => {
+    expect(parseClock('1:05:15', 30)).toBeCloseTo(65.5, 9);
   });
 });

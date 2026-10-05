@@ -4167,7 +4167,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               fps={clockFps}
               max={totalSec}
               ariaLabel="再生位置の時刻"
-              title="時刻を打つと、その位置へ移ります（分:秒.コマ、または秒）"
+              title="時刻を打つと、その位置へ移ります（例：1:05.15＝1分5秒15コマ／1:05:15 も同じ／65.5＝65.5秒）"
               onCommit={(sec) => { if (useTimelineStore.getState().isPlaying) pause(); setPlayhead(sec); followPlayhead(); }}
             />
             <span>/ 全体 {markerClock(totalSec, clockFps)}</span>
@@ -4569,8 +4569,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                       }
                       // Home/End で先頭・末尾へ。画面が横スクロールしてヘッドを見失わないよう既定を止める。
                       // 端へ跳んだら**見える範囲も追う**（#833-3・矢印と同じ＝`seekFrames` の中で追う）。
-                      if (e.key === "Home") { e.preventDefault(); setPlayhead(0); followPlayhead(); return; }
-                      if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); followPlayhead(); return; }
+                      // 画面全体の Home/End と**同じ入口**（`seekTo`）＝片方だけ直る、を作らない。
+                      if (e.key === "Home") { e.preventDefault(); playRef.current.seekTo(0); return; }
+                      if (e.key === "End") { e.preventDefault(); playRef.current.seekTo(totalSec); return; }
                     }}
                   >
                     {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の

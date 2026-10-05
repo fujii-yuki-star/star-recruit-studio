@@ -14,6 +14,14 @@ describe("ClockField", () => {
     expect(onCommit).toHaveBeenLastCalledWith(5);
   });
 
+  it("焦点が入ったら表示を止める（再生中に値が変わっても打てる）", () => {
+    const { rerender } = render(<ClockField value={1} fps={30} max={10} onCommit={vi.fn()} ariaLabel="時刻" />);
+    const f = screen.getByLabelText("時刻") as HTMLInputElement;
+    fireEvent.focus(f);
+    rerender(<ClockField value={2} fps={30} max={10} onCommit={vi.fn()} ariaLabel="時刻" />);
+    expect(f.value, "焦点がある間に表示が動いた").toBe("0:01.00");
+  });
+
   it("書き方どおりに見せる（分:秒.コマ）", () => {
     render(<ClockField value={65.5} fps={30} max={100} onCommit={vi.fn()} ariaLabel="時刻" />);
     expect((screen.getByLabelText("時刻") as HTMLInputElement).value).toBe("1:05.15");
