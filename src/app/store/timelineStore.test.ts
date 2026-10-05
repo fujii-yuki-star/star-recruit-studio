@@ -1370,3 +1370,50 @@ describe('消した動画を手放す（#755）', () => {
     expect(useTimelineStore.getState().doc).toBeNull();
   });
 });
+
+// ADR-0054 段階2（PR #1343 レビュー）：やめた引きは**なかったことにする**＝何も変わらない取り消しを残さない。
+describe("abandonHistoryGroup", () => {
+  const withDoc = () => {
+    useTimelineStore.setState({ doc: doc() as never, history: { past: [], future: [] }, _historyGroupDepth: 0, _historyGroupPending: false });
+    return useTimelineStore.getState();
+  };
+  it("自分で開いた1段のまとめ：書いた分を戻し、積んだ1件も外す", () => {
+    const st = withDoc();
+    if (!st.doc) return expect.fail("文書が開いていない");
+    const before = st.doc;
+    const pastLen = st.history.past.length;
+    st.beginHistoryGroup();
+    useTimelineStore.getState().updateVideoSettings({ targetDurationSec: before.videoSettings.targetDurationSec + 1 });
+    expect(useTimelineStore.getState().history.past.length).toBe(pastLen + 1);
+    useTimelineStore.getState().abandonHistoryGroup();
+    const after = useTimelineStore.getState();
+    expect(after.doc).toBe(before);
+    expect(after.history.past.length).toBe(pastLen);
+    expect(after._historyGroupDepth).toBe(0);
+  });
+  it("掴んだだけ（何も書いていない）なら閉じるだけ＝その前の編集まで巻き戻さない", () => {
+    const st = withDoc();
+    if (!st.doc) return expect.fail("文書が開いていない");
+    st.updateVideoSettings({ targetDurationSec: st.doc.videoSettings.targetDurationSec + 1 }); // まとめの外の編集（1件積む）
+    const before = useTimelineStore.getState().doc;
+    const pastLen = useTimelineStore.getState().history.past.length;
+    expect(pastLen).toBe(1);
+    st.beginHistoryGroup();
+    useTimelineStore.getState().abandonHistoryGroup();
+    expect(useTimelineStore.getState().doc).toBe(before);
+    expect(useTimelineStore.getState().history.past.length).toBe(pastLen);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+  it("外側にもまとめがあるなら閉じるだけ（外側の編集まで巻き戻さない）", () => {
+    const st = withDoc();
+    if (!st.doc) return expect.fail("文書が開いていない");
+    st.beginHistoryGroup();
+    useTimelineStore.getState().updateVideoSettings({ targetDurationSec: st.doc.videoSettings.targetDurationSec + 1 });
+    const edited = useTimelineStore.getState().doc;
+    useTimelineStore.getState().beginHistoryGroup();
+    useTimelineStore.getState().abandonHistoryGroup();
+    expect(useTimelineStore.getState().doc).toBe(edited);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
+    useTimelineStore.getState().endHistoryGroup();
+  });
+});

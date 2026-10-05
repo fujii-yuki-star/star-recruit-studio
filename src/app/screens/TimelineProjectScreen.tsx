@@ -149,7 +149,7 @@ type DragPlace = {
 import { ArrowLeftIcon, EyeIcon, EyeOffIcon, LockIcon, VolumeIcon, VolumeMuteIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
-import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, ANIMATED_DRAG_NOTE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, ANIMATED_DRAG_NOTE, MOTION_PATH_NOTE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -177,6 +177,8 @@ import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
+import { MotionPathOverlay } from "../components/MotionPathOverlay";
+import { keyPositionAfterDrag, motionPathOf } from "../../domain/timeline/motionPath";
 import type { FreeElement } from "../../domain/project/types";
 import { baseBoxPatchFromShown, freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
@@ -515,6 +517,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const voiceRunning = useTimelineStore((s) => s._voiceRun != null);
   const beginHistoryGroup = useTimelineStore((s) => s.beginHistoryGroup);
   const endHistoryGroup = useTimelineStore((s) => s.endHistoryGroup);
+  const abandonHistoryGroup = useTimelineStore((s) => s.abandonHistoryGroup);
 
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
@@ -1137,6 +1140,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const clockFps = doc ? Math.round(effectiveFps(doc)) : FPS;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
+  /**
+   * 動きの点を掴んだ時点のキーフレーム（ADR-0054 段階2）。引いている間は、これと合計の動きから毎回計算し直す＝足し込まない。
+   * ⚠️ 早い return より前に置く（フックの順番）。
+   */
+  const motionDragBase = useRef<Keyframe[] | null>(null);
   // 見た目パターンの解決は**絵を並べる側と、どの枠が動画を受けるか（#512 段3）の両方**が要る＝1つにする。
   const templateOf = useMemo(() => {
     const byId = new Map(templates.map((t) => [t.templateId, t]));
@@ -2724,6 +2732,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const selectedOnCanvas = canvasClips.find((cc) => cc.clip.id === selected?.id);
   const selectedHoldReason = selectedOnCanvas ? canvasHoldReason(selectedOnCanvas) : null;
   /**
+   * 選んだ部品の**動きの道筋と点**（ADR-0054 段階2）。出すのは本体を掴めるときだけ＝グループの変形の下では
+   * 点の 1px が画面の 1px にならない（段階1と同じ線引き）。位置を動かす動きが無ければ出さない。
+   * ⚠️ 線は**素の箱**から引く＝動きの位置のずれを足した中心が、描かれている部品の中心と一致する（`motionPathOf`）。
+   */
+  const selectedAnim = selected ? (doc?.animations ?? []).find((a) => a.targetId === selected.id) : undefined;
+  const motionPath = selectedOnCanvas && selectedHoldReason == null && selectedAnim && selected
+    ? motionPathOf(selectedOnCanvas.box, selectedAnim.keyframes, selected.durationSec)
+    : null;
+  /**
    * **中へ入れる層**（#818）＝いま描かれている見た目パターンの、**手の移り先がある**層だけ。
    * `<部品 id>` → `<層 id>` → その欄を当てる印。
    *
@@ -4031,6 +4048,35 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               }}
             />
           )}
+          {/* **動きの道筋と点**（ADR-0054 段階2）＝部品より手前に重ね（`z-index`＝取っ手より上）、**点だけ**が指を受ける（線と余白は下へ素通し）。
+              ⚠️ DOM では操作の層より**前**に置く＝操作の層は枠の最後の子として探される（検査も同じ）。
+              編集用の描き足し＝書き出しには出ない・再生中／書き出し中は出さない（ハンドルと同じ）。
+              点を引くと**その時刻の位置だけ**直る（`setSelectedKeyframeAt`＝「動き」の欄と同じ入口）。1回の引き＝1回の取り消し。 */}
+          {!isPlaying && !exporting && motionPath && selected && (
+            <MotionPathOverlay
+              key={selected.id}
+              path={motionPath}
+              canvasW={canvasDims.width}
+              canvasH={canvasDims.height}
+              currentSec={keyframeLocalSec}
+              disabled={isTargetLocked(doc, selected.id)}
+              onDragStart={() => {
+                motionDragBase.current = selectedAnim?.keyframes ?? null;
+                beginHistoryGroup();
+              }}
+              onDrag={(timeSec, dx, dy, axisMinPx) => {
+                const base = motionDragBase.current;
+                if (!base) return;
+                setSelectedKeyframeAt(timeSec, keyPositionAfterDrag(base, timeSec, dx, dy, axisMinPx));
+              }}
+              // やめたら**なかったことにする**（掴む前へ戻し、何も変わらない取り消しを残さない・PR #1343 レビュー）。
+              onDragEnd={(cancelled) => {
+                motionDragBase.current = null;
+                if (cancelled) abandonHistoryGroup();
+                else endHistoryGroup();
+              }}
+            />
+          )}
           {!isPlaying && !exporting && (canvasEls.length > 0 || drillTargets.size > 0) && (
             <FreeLayoutOverlay
               key={doc.projectId}
@@ -5064,8 +5110,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     （掴んだ量は下の数値へ書き戻るので、動きのぶんだけ絵が飛ぶ）。**触れる先を必ず示す**
                     ＝理由だけ出して行き止まりにしない（決定5）。 */}
                 {/* 動きを付けた部品を掴むと**動き全体がずれる**＝業界の既定（その時刻だけ直す）と違うので一言（ADR-0054 決定4）。 */}
+                {/* 点を描いたら一言を置き換える（決定4）＝その時刻だけ直す手が見えるようになったので、それを言う。 */}
                 {!selectedHoldReason && selectedHasOwnMotion && (
-                  <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>{ANIMATED_DRAG_NOTE}</p>
+                  <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>{motionPath ? MOTION_PATH_NOTE : ANIMATED_DRAG_NOTE}</p>
                 )}
                 {selectedHoldReason && (
                   <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
