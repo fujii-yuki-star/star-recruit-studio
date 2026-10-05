@@ -75,6 +75,7 @@ import type { LayoutItem } from "../../renderer/layout";
 import { PageHead } from "../components/ui";
 import { ExportDoneActions } from "../components/ExportDoneActions";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { ClockField } from "../components/ClockField";
 import { ContextMenu } from "../components/ContextMenu";
 import { EditorToolbar } from "../components/EditorToolbar";
 import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
@@ -868,7 +869,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * キー操作が見る**いまの値**（#721）。依存に足すと、再生位置が1フレーム進むたびに `keydown` を
    * 登録し直すことになる（毎フレームの付け外し）。閉じ込めた古い値を見ないよう、下の効果で入れ替える。
    */
-  const playRef = useRef({ playing: false, total: 0, exporting: false, fps: FPS, play, pause, seekFrames: (_frames: number) => {} });
+  const playRef = useRef({ playing: false, total: 0, exporting: false, fps: FPS, play, pause, seekFrames: (_frames: number) => {}, seekTo: (_sec: number) => {} });
   /** `Ctrl+K` の受け皿（毎レンダー最新にする＝`playRef`/`removeRef` と同じ形）。 */
   const splitRef = useRef<() => void>(() => {});
   // ⚠️ **キーとボタンで同じ入口を通す**（ADR-0034 決定19）＝キーだけ理由が出ない、を作らない。
@@ -1087,6 +1088,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         removeRef.current(); // 押せる条件・確認の有無はボタンと同じ入口が決める
         return;
       }
+      // **Home／End＝先頭へ／最後へ**（UI/UX 監査 2026-10-02）＝以前は目盛りに焦点があるときだけ効いたが、目盛りを
+      // マウスで押しても焦点は移らない（pointerdown の既定を止めている）ので、一覧の案内どおりにしても効かなかった。
+      // 型では画面のどこでも効く。⚠️ スライダー・選ぶ欄など Home/End を自分で使う要素には譲る（矢印と同じ見分け）。
+      if ((e.key === "Home" || e.key === "End") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (usesArrowKeys(e.target)) return;
+        const p = playRef.current;
+        if (p.total <= 0) return;
+        e.preventDefault();
+        p.seekTo(e.key === "Home" ? 0 : p.total);
+        return;
+      }
       const arrowX = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
       const arrowY = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
       if (arrowX !== 0 || arrowY !== 0) {
@@ -1121,6 +1133,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
   const frameStepSec = 1 / (doc ? effectiveFps(doc) : FPS);
+  /** 時刻を「分:秒.コマ」で見せる・打つときのコマ数（整数＝コマ番号が割り切れるように・書き出しの格子と同じ丸め）。 */
+  const clockFps = doc ? Math.round(effectiveFps(doc)) : FPS;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
   // 見た目パターンの解決は**絵を並べる側と、どの枠が動画を受けるか（#512 段3）の両方**が要る＝1つにする。
@@ -2200,6 +2214,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       // 動かしたら**見える範囲も追う**（#833-3）＝ここは矢印の2つの入口（画面のキー操作・目盛り自身）が
       // 共有する唯一の場所なので、送りもここに置けば片方だけ追わない、を作らない。
       seekFrames: (frames) => { if (!doc) return; setPlayhead(seekByFrames(doc, playheadSec, frames)); followPlayhead(); },
+      seekTo: (sec) => { setPlayhead(sec); followPlayhead(); },
     };
     removeRef.current = requestRemoveSelected;
     // ⚠️ **矢印は文脈で分かれる**（決定18・#752-9）＝キャンバスで箱を持つ部品を選んでいる間は
@@ -2928,10 +2943,18 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      */
     // ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
     // 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
+    // ⚠️ **まとめて運ぶときは群の両端で寄せ、群ぜんぶを吸着先から外す**（UI/UX 監査 2026-10-02）＝掴んだ帯の端だけで
+    //   寄せ、掴んだ帯だけ外していたので、一緒に動く帯の**動かす前の位置**へ吸い付き「動かない」と感じた。
+    const groupClips = mode === "move" && groupIds
+      ? groupIds.map((id) => doc0.clips.find((x) => x.id === id)).filter((c): c is TimelineClip => c != null)
+      : [];
+    const groupLead = groupClips.length > 0 ? Math.min(...groupClips.map((c) => c.startSec)) - clip0.startSec : 0;
+    const groupTail = groupClips.length > 0 ? Math.max(...groupClips.map((c) => clipEndSec(c))) - clip0.startSec : clipLen;
     const applySnap = (sec: number, ev: PointerEvent): { sec: number; guideSec: number | null } =>
-      // 運ぶときは開始と終わりの両方・端を縮めるときは**動かしている端だけ**を見る。
-      snapPlacement(sec, (t) => (mode === "move" ? [t, t + clipLen] : [t]), {
+      // 運ぶときは開始と終わりの両方（まとめてなら群の両端）・端を縮めるときは**動かしている端だけ**を見る。
+      snapPlacement(sec, (t) => (mode === "move" ? [t + groupLead, t + groupTail] : [t]), {
         exceptId: clipId,
+        exceptIds: mode === "move" ? groupIds ?? undefined : undefined,
         off: snapOff(ev) || timeFixed,
       });
     /** 指の下の時刻（0 秒で丸める前）。端が止まったかの見分けに使う（0 秒で止まったときも色を出す）。 */
@@ -3131,7 +3154,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const snapPlacement = (
     sec: number,
     edgesOf: (sec: number) => number[],
-    opts: { exceptId?: string; off?: boolean },
+    opts: { exceptId?: string; exceptIds?: readonly string[]; off?: boolean },
   ): { sec: number; guideSec: number | null } => {
     if (opts.off) return { sec, guideSec: null };
     const el = scrollRef.current;
@@ -3140,7 +3163,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const visible = visibleTimeRange({
       scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, labelPx: LANE_LABEL_PX, pxPerSec,
     });
-    const targets = timeSnapTargets({ clips: now.clips, exceptId: opts.exceptId, playheadSec, visible });
+    const targets = timeSnapTargets({
+      clips: now.clips, exceptId: opts.exceptId, exceptIds: opts.exceptIds, playheadSec, visible,
+      markerSecs: (now.markers ?? []).map((m) => m.timeSec),
+    });
     const r = snapTime({ edges: edgesOf(sec), targets, thresholdSec: SNAP_THRESHOLD_PX / pxPerSec });
     return { sec: Math.max(0, sec + r.deltaSec), guideSec: r.guide?.sec ?? null };
   };
@@ -4117,7 +4143,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               aria-label="再生位置"
               min={0}
               max={Math.max(totalSec, 0.1)}
-              step={0.1}
+              // 1コマ刻み（←→ の1コマ送りと同じ格子・UI/UX 監査 2026-10-02＝以前は 0.1 秒で、焦点があると矢印の刻みが割れた）。
+              step={frameStepSec}
               value={playheadSec}
               /* ⚠️ **掴んだら再生を止める**（#844-6・ADR-0032 決定21 追補の対象拡大＝利用者判断 2026-08-25）＝
                  目盛りと同じ扱いにする。止めないと、握っている間つまみが**指と再生位置の間で往復**する
@@ -4132,8 +4159,18 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
             />
           </label>
-          <span className="text-sm text-muted" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
-            {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
+          {/* 時刻は**コマまで**出し、**そのまま打ち込める**（UI/UX 監査 2026-10-02＝以前は 0.1 秒刻みの表示だけで、
+              ←→ で1コマ送っても3コマに1回しか変わらず、いまどのコマか読めなかった）。書き方は目印・一覧と同じ（markerClock）。 */}
+          <span className="row gap-xs text-sm text-muted" style={{ flexShrink: 0, whiteSpace: "nowrap", alignItems: "center" }}>
+            <ClockField
+              value={playheadSec}
+              fps={clockFps}
+              max={totalSec}
+              ariaLabel="再生位置の時刻"
+              title="時刻を打つと、その位置へ移ります（分:秒.コマ、または秒）"
+              onCommit={(sec) => { if (useTimelineStore.getState().isPlaying) pause(); setPlayhead(sec); followPlayhead(); }}
+            />
+            <span>/ 全体 {markerClock(totalSec, clockFps)}</span>
           </span>
 
         </div>
@@ -4243,6 +4280,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <button
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を縮める"
+                title="表示を縮める（Ctrl＋ホイールでも）"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
                 onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1))}
               >
@@ -4251,6 +4289,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <button
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を広げる"
+                title="表示を広げる（Ctrl＋ホイールでも）"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
                 onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1))}
               >
@@ -4291,8 +4330,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 </select>
               </label>
               <span className="timeline-toolbar-sep" aria-hidden="true" />
-              <span className="field-label text-sm" style={{ margin: 0 }}>吸着</span>
+              {/* ⚠️ **見出しの文字を押しても切り替わる**（UI/UX 監査 2026-10-02）＝以前は見出しが別の span で、押しても何も起きず、
+                  折り返すとスイッチと離れて「文字の無いスイッチ」に見えた。見出しを label にして結ぶ。 */}
+              <label htmlFor="timeline-snap-switch" className="field-label text-sm" style={{ margin: 0, cursor: "pointer" }}>吸着</label>
               <Switch
+                id="timeline-snap-switch"
                 on={snapEnabled}
                 onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
                 label="吸着"
@@ -4446,7 +4488,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     aria-valuemin={0}
                     aria-valuemax={totalSec}
                     aria-valuenow={playheadSec}
-                    aria-valuetext={`${playheadSec.toFixed(1)}秒`}
+                    aria-valuetext={markerClock(playheadSec, clockFps)}
                     onClick={(e) => {
                       // ⚠️ **掴んだ後の `click` は捨てる**（PR #827 レビュー 🟡）＝`pointerdown` の
                       // `preventDefault` は `click` を止めないので、`Escape` で掴む前へ戻しても
@@ -4930,7 +4972,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         {selected ? (
           <>
             <p className="text-muted">
-              {clipLabel(selected, doc.assets)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
+              {clipLabel(selected, doc.assets)}（{markerClock(selected.startSec, clockFps)}から{selected.durationSec.toFixed(1)}秒間）
             </p>
             {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
@@ -5293,7 +5335,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
               <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
                 <p className="text-muted">
-                  再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
+                  再生位置（{markerClock(playheadSec, clockFps)}）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
                 </p>
                 {!keyframeAtPlayhead.live ? (
@@ -5362,7 +5404,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   <ul className="notice">
                     {selectedKeyframes.map((k) => (
                       <li key={k.timeSec}>
-                        {(selectedOrigin + k.timeSec).toFixed(2)}秒：{keyframeSummary(k)}
+                        {markerClock(selectedOrigin + k.timeSec, clockFps)}：{keyframeSummary(k)}
                         {/* 動き方は「1つ前のキーフレームからここまで」に効く（#262）。 */}
                         <label className="field field-inline">
                           <span>ここまでの動き方</span>
@@ -5646,7 +5688,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {isAudioClip(selected) && (
               <CollapsibleSection key={`volumePoints-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
                 <p className="text-muted">
-                  再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
+                  再生位置（{markerClock(playheadSec, clockFps)}）にその時の音量を置きます。違う値を2か所に置くと、
                   その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。
                 </p>
                 {!volumePointAtPlayhead.live ? (
@@ -5703,7 +5745,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   <ul className="notice">
                     {selectedVolumePoints.map((p) => (
                       <li key={p.timeSec}>
-                        {(selected.startSec + p.timeSec).toFixed(2)}秒：音量 {p.volume}
+                        {markerClock(selected.startSec + p.timeSec, clockFps)}：音量 {p.volume}
                         <button
                           className="btn btn-ghost btn-sm"
                           onClick={() => { setPlayhead(selected.startSec + p.timeSec); followPlayhead(); }}

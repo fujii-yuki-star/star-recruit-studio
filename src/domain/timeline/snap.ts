@@ -32,6 +32,8 @@ export const TIME_SNAP_KIND = {
   playhead: 'playhead',
   /** 0秒（動画の先頭）。 */
   origin: 'origin',
+  /** 目印（UI/UX 監査 2026-10-02＝目印に合わせて置くのが主な使い道なのに、吸着先に入っていなかった）。 */
+  marker: 'marker',
 } as const;
 export type TimeSnapKind = (typeof TIME_SNAP_KIND)[keyof typeof TIME_SNAP_KIND];
 
@@ -87,6 +89,13 @@ export function timeSnapTargets(input: {
   clips: readonly { id: string; startSec: number; durationSec: number }[];
   /** 除く部品（動かしている本人）。**新しく置くときは無い**ので省略できる（#771(a)）。 */
   exceptId?: string;
+  /**
+   * まとめて運ぶときに除く部品（一緒に動いている帯ぜんぶ）。⚠️ 掴んだ1つだけ除くと、**一緒に動いている帯の
+   * 動かす前の端**が吸着先に残り、動かし始めに元の位置へ引き戻される（UI/UX 監査 2026-10-02）。
+   */
+  exceptIds?: readonly string[];
+  /** 目印の時刻（吸着先に入れる）。 */
+  markerSecs?: readonly number[];
   playheadSec: number;
   visible: { fromSec: number; toSec: number };
 }): TimeSnapTarget[] {
@@ -100,8 +109,10 @@ export function timeSnapTargets(input: {
   };
   push(input.playheadSec, TIME_SNAP_KIND.playhead);
   push(0, TIME_SNAP_KIND.origin);
+  for (const m of input.markerSecs ?? []) push(m, TIME_SNAP_KIND.marker);
+  const except = new Set([...(input.exceptIds ?? []), ...(input.exceptId != null ? [input.exceptId] : [])]);
   for (const c of input.clips) {
-    if (c.id === input.exceptId) continue;
+    if (except.has(c.id)) continue;
     push(c.startSec, TIME_SNAP_KIND.clipEdge);
     push(c.startSec + c.durationSec, TIME_SNAP_KIND.clipEdge);
   }

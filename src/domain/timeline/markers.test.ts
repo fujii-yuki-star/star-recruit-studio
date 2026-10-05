@@ -1,6 +1,6 @@
 // 時間の一点に置く**目印**（#356 ①）。
 import { describe, expect, it } from 'vitest';
-import { addMarker, markerAt, markerClock, markersInOrder, MARKER_TEXT_MAX, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from './markers';
+import { addMarker, markerAt, markerClock, markersInOrder, parseClock, MARKER_TEXT_MAX, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from './markers';
 import { PROJECT_FORMAT, TRACK_KIND } from '../enums';
 import { addTrack, removeTrack } from './edit';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -266,5 +266,31 @@ describe('moveMarkerBlocked（押す前に断るための判定）', () => {
   it('0 より前は 0 として見る（判定と実行で規則を割らない）', () => {
     const atZero = withMarkers([{ id: 'marker_001', timeSec: 0 }, { id: 'marker_002', timeSec: 7 }]);
     expect(moveMarkerBlocked(atZero, 'marker_002', -5)).toBe('markerExists');
+  });
+});
+
+describe('markerClock はコマで数える（UI/UX 監査 2026-10-02）', () => {
+  it('秒の端数を丸めて存在しないコマにしない（0.999 秒＠30fps は 0:01.00）', () => {
+    expect(markerClock(0.999, 30)).toBe('0:01.00');
+    expect(markerClock(59.99, 30)).toBe('1:00.00');
+    expect(markerClock(1 + 29 / 30, 30)).toBe('0:01.29');
+  });
+});
+
+describe('parseClock（再生位置を打つ）', () => {
+  it('表示と同じ書き方（分:秒.コマ）を読む＝markerClock の逆', () => {
+    for (const sec of [0, 1 + 15 / 30, 65 + 3 / 30, 600]) {
+      expect(parseClock(markerClock(sec, 30), 30)).toBeCloseTo(sec, 9);
+    }
+  });
+
+  it('分:秒・秒だけ・全角も読む', () => {
+    expect(parseClock('1:05', 30)).toBe(65);
+    expect(parseClock('12.5', 30)).toBe(12.5);
+    expect(parseClock('１：０５．１５', 30)).toBeCloseTo(65.5, 9);
+  });
+
+  it('読めないもの・ありえないコマや秒は null（黙って別の時刻へ飛ばない）', () => {
+    for (const t of ['', 'abc', '1:60', '0:01.30', '-1', '1:2:3']) expect(parseClock(t, 30), t).toBeNull();
   });
 });

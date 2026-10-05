@@ -144,3 +144,19 @@ describe('visibleTimeRange（見えている時間帯）', () => {
     expect(visibleTimeRange({ ...base, pxPerSec: 0 })).toEqual({ fromSec: 0, toSec: 0 });
   });
 });
+
+describe('timeSnapTargets：まとめて運ぶ・目印（UI/UX 監査 2026-10-02）', () => {
+  const clips = [
+    { id: 'a', startSec: 0, durationSec: 3 },
+    { id: 'b', startSec: 5, durationSec: 3 },
+    { id: 'c', startSec: 12, durationSec: 2 },
+  ];
+  it('一緒に動く帯はぜんぶ吸着先から外す', () => {
+    const t = timeSnapTargets({ clips, exceptIds: ['a', 'b'], playheadSec: 20, visible: { fromSec: 0, toSec: 30 } });
+    expect(t.filter((x) => x.kind === TIME_SNAP_KIND.clipEdge).map((x) => x.sec).sort((x, y) => x - y)).toEqual([12, 14]);
+  });
+  it('目印も吸着先（見えている範囲だけ）', () => {
+    const t = timeSnapTargets({ clips: [], markerSecs: [4, 40], playheadSec: 0, visible: { fromSec: 0, toSec: 30 } });
+    expect(t.filter((x) => x.kind === TIME_SNAP_KIND.marker).map((x) => x.sec)).toEqual([4]);
+  });
+});

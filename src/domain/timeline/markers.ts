@@ -40,11 +40,35 @@ export const MARKER_TEXT_MAX = 200;
  * 業界の一覧もコマまで出す（`00:00:03:12`）。
  */
 export function markerClock(timeSec: number, fps: number): string {
-  const total = Math.max(0, timeSec);
-  const mm = Math.floor(total / 60);
-  const ss = Math.floor(total % 60);
-  const ff = Math.round((total - Math.floor(total)) * fps);
+  // ⚠️ **コマの数で数えてから分ける**（UI/UX 監査 2026-10-02）＝秒の端数を丸めると 0.999 秒が「0:00.30」（30fps で
+  //   コマ番号 30＝存在しないコマ）になっていた。全体をコマに丸めてから 分・秒・コマへ割る。
+  const frames = Math.round(Math.max(0, timeSec) * fps);
+  const perMin = fps * 60;
+  const mm = Math.floor(frames / perMin);
+  const ss = Math.floor((frames % perMin) / fps);
+  const ff = frames % fps;
   return `${mm}:${String(ss).padStart(2, '0')}.${String(ff).padStart(2, '0')}`;
+}
+
+/**
+ * 打ち込まれた時刻を秒へ（UI/UX 監査 2026-10-02＝再生位置を数値で打てるようにする）。
+ * - `分:秒.コマ`（表示と同じ書き方・`markerClock` の逆）／`分:秒`
+ * - `:` が無ければ**秒**（`12.5`＝12.5 秒）＝表示と違う書き方でも、ふつうに打てば通る
+ * 読めなければ `null`（呼び出し側は打つ前の値へ戻す＝黙って別の時刻へ飛ばない）。コマが fps 以上なら読めない扱い。
+ */
+export function parseClock(text: string, fps: number): number | null {
+  const t = text.trim().replace(/：/g, ':').replace(/．/g, '.').replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
+  if (t === '') return null;
+  const m = /^(\d+):(\d{1,2})(?:\.(\d{1,2}))?$/.exec(t);
+  if (m) {
+    const mm = Number(m[1]);
+    const ss = Number(m[2]);
+    const ff = m[3] != null ? Number(m[3]) : 0;
+    if (ss >= 60 || ff >= fps) return null;
+    return mm * 60 + ss + ff / fps;
+  }
+  if (/^\d+(?:\.\d+)?$/.test(t)) return Number(t);
+  return null;
 }
 
 /**

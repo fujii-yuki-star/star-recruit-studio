@@ -125,7 +125,58 @@ describe("TimelineProjectScreen", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2.5" } });
     expect(useTimelineStore.getState().playheadSec).toBe(2.5);
-    expect(screen.getByText(/2\.5 秒 \/ 全体 5\.0 秒/)).toBeInTheDocument();
+    // 時刻はコマまで（分:秒.コマ・UI/UX 監査 2026-10-02）＝2.5 秒＠30fps は 2秒15コマ。
+    expect((screen.getByLabelText("再生位置の時刻") as HTMLInputElement).value).toBe("0:02.15");
+    expect(screen.getByText("/ 全体 0:05.00")).toBeInTheDocument();
+  });
+
+  it("Home／End は画面のどこでも先頭へ／最後へ（スライダーに焦点があるときはそちらに譲る）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    fireEvent.keyDown(window, { key: "End" });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(5, 5);
+    fireEvent.keyDown(window, { key: "Home" });
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+    act(() => useTimelineStore.getState().setPlayhead(2));
+    const slider = screen.getByLabelText("再生位置");
+    fireEvent.keyDown(slider, { key: "End" });
+    expect(useTimelineStore.getState().playheadSec, "スライダーの Home/End を奪った").toBe(2);
+  });
+
+  it("表示倍率の −／＋ は、マウスでも説明が出る（Ctrl＋ホイールの案内つき）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "表示を広げる" }).getAttribute("title")).toContain("Ctrl＋ホイール");
+    expect(screen.getByRole("button", { name: "表示を縮める" }).getAttribute("title")).toContain("Ctrl＋ホイール");
+  });
+
+  it("「吸着」の見出しの文字を押しても切り替わる", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sw = screen.getByRole("switch", { name: "吸着" });
+    const before = sw.getAttribute("aria-checked");
+    fireEvent.click(container.querySelector('label[for="timeline-snap-switch"]') as HTMLElement);
+    expect(sw.getAttribute("aria-checked")).not.toBe(before);
+  });
+
+  it("再生位置の時刻を打つと、その位置へ移る（読めなければ動かない・範囲の外は端へ）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const field = screen.getByLabelText("再生位置の時刻") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "0:03.15" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3.5, 9);
+    fireEvent.change(field, { target: { value: "なに" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().playheadSec, "読めない値で動いた").toBeCloseTo(3.5, 9);
+    expect(field.value, "読めない値が残っている").toBe("0:03.15");
+    fireEvent.change(field, { target: { value: "99" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(useTimelineStore.getState().playheadSec, "範囲の外へ出た").toBeLessThanOrEqual(5);
+    fireEvent.change(field, { target: { value: "1" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(field.value, "Escape で打つ前に戻らない").not.toBe("1");
   });
 
   it("何も置いていない動画でも壊れず、その旨を出す", () => {
@@ -1323,7 +1374,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     withClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     typeAndPlace("濃さ（0〜1）", "0.5");
-    expect(screen.getByText(/3.00秒：濃さ（0〜1） 0.5/)).toBeInTheDocument();
+    expect(screen.getByText("0:03.00：濃さ（0〜1） 0.5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "外す" }));
     expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
   });
@@ -1556,7 +1607,7 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 表示は動画の時刻（部品の開始 1 秒 ＋ 点の 2 秒）＝画面の目盛りと同じ物差し。
-    expect(screen.getByText(/3\.00秒：音量 0\.4/)).toBeInTheDocument();
+    expect(screen.getByText("0:03.00：音量 0.4")).toBeInTheDocument();
     fireEvent.click(screen.getByText("外す"));
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toBeUndefined();
   });
@@ -5447,6 +5498,41 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     if (!h2) return; // まとめて選んでいるときに取っ手を出さない形なら対象外
     drag(h2, -36 * 1); // 5秒 → 4秒（前の帯は 3秒まで）
     expect(useTimelineStore.getState().doc!.clips[1].startSec).toBeCloseTo(4, 4);
+  });
+
+  // ⚠️ UI/UX 監査 2026-10-02（PR4b）＝まとめて運ぶとき、一緒に動く帯の**動かす前の端**へ吸い付いていた。
+  it("まとめて運ぶとき、一緒に動く帯の元の位置へは吸い付かない", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 見えている幅を与える（jsdom は 0＝吸着先が1つも無く、どんな作りでも緑になる）。
+    Object.defineProperty(container.querySelector(".timeline-scroll")!, "clientWidth", { value: 900, configurable: true });
+    // 2.1 秒ぶん右へ＝「あ」の終わり（3→5.1）が「い」の**元の**始まり（5）のすぐそば。以前はそこへ吸い付いて 2.0 秒になった。
+    drag(band("あ"), 36 * 2.1);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(2.1, 2);
+  });
+
+  it("まとめて少しだけ運んでも、一緒に動く帯の元の端へ引き戻されない", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 1, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"], playheadSec: 20 });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    Object.defineProperty(container.querySelector(".timeline-scroll")!, "clientWidth", { value: 900, configurable: true });
+    // 0.15 秒だけ右へ＝群の終わり（9→9.15）が「い」の**元の**終わり（9）のすぐそば。外さないと 9 へ戻されて動かない。
+    drag(band("あ"), 36 * 0.15);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(1.15, 2);
+  });
+
+  it("目印へ吸い付く（目印に合わせて置くのが主な使い道）", () => {
+    two({ markers: [{ id: "marker_001", timeSec: 10 }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    Object.defineProperty(container.querySelector(".timeline-scroll")!, "clientWidth", { value: 900, configurable: true });
+    drag(band("い"), 36 * 4.9); // 5 → 9.9 秒（目印は 10 秒）
+    expect(useTimelineStore.getState().doc!.clips[1].startSec).toBeCloseTo(10, 5);
   });
 
   it("限界に届かない所では止まった色を出さない", () => {

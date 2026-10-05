@@ -29,7 +29,7 @@ export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
   { keys: "Space", action: "再生／停止", codes: [" "] },
   { keys: "← →", action: "1コマ戻る／進む（Shift で1秒）。キャンバスで部品を選んでいるときは、その部品を少し動かす", codes: ["arrowleft", "arrowright"] },
   { keys: "↑ ↓", action: "キャンバスで選んだ部品を少し動かす（Shift で大きく）", codes: ["arrowup", "arrowdown"] },
-  { keys: "Home／End", action: "先頭へ／最後へ（目盛りを押したあと）", codes: ["home", "end"] },
+  { keys: "Home／End", action: "先頭へ／最後へ", codes: ["home", "end"] },
   { keys: SHORTCUT_KEYS.split, action: "選んだ部品を再生位置で分ける", codes: ["k"] },
   { keys: SHORTCUT_KEYS.remove, action: "選んだ部品を削除", codes: ["delete"] },
   { keys: "I／O", action: "作業範囲の始まり／終わりを再生位置に置く", codes: ["i", "o"] },
