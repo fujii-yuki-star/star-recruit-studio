@@ -517,6 +517,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const voiceRunning = useTimelineStore((s) => s._voiceRun != null);
   const beginHistoryGroup = useTimelineStore((s) => s.beginHistoryGroup);
   const endHistoryGroup = useTimelineStore((s) => s.endHistoryGroup);
+  const abandonHistoryGroup = useTimelineStore((s) => s.abandonHistoryGroup);
 
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
@@ -4063,19 +4064,16 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 motionDragBase.current = selectedAnim?.keyframes ?? null;
                 beginHistoryGroup();
               }}
-              onDrag={(timeSec, dx, dy) => {
+              onDrag={(timeSec, dx, dy, axisMinPx) => {
                 const base = motionDragBase.current;
                 if (!base) return;
-                setSelectedKeyframeAt(timeSec, keyPositionAfterDrag(base, timeSec, dx, dy));
+                setSelectedKeyframeAt(timeSec, keyPositionAfterDrag(base, timeSec, dx, dy, axisMinPx));
               }}
-              // やめたら掴む前の値へ戻す（持っていなかった軸は外す＝`null`）。
-              onCancel={(timeSec) => {
-                const orig = motionDragBase.current?.find((k) => k.timeSec === timeSec);
-                if (orig) setSelectedKeyframeAt(timeSec, { x: orig.x ?? null, y: orig.y ?? null });
-              }}
-              onDragEnd={() => {
+              // やめたら**なかったことにする**（掴む前へ戻し、何も変わらない取り消しを残さない・PR #1343 レビュー）。
+              onDragEnd={(cancelled) => {
                 motionDragBase.current = null;
-                endHistoryGroup();
+                if (cancelled) abandonHistoryGroup();
+                else endHistoryGroup();
               }}
             />
           )}

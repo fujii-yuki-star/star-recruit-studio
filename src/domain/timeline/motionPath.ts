@@ -52,14 +52,14 @@ export function motionPathOf(box: ClipBox, keyframes: readonly Keyframe[], durat
   return { line, keys };
 }
 
-/** 掴んだ点を動かしたとき、軸を書き足すと見なす最小の動き（キャンバスの px）。 */
+/** 掴んだ点を動かしたとき、軸を書き足すと見なす最小の動き（キャンバスの px）の既定。画面からは `DRAG_START_PX` を倍率で直した値が来る。 */
 export const MOTION_KEY_AXIS_MIN_PX = 1;
 
 /**
  * 点を `dx`/`dy`（キャンバスの px）だけ動かしたときに、そのキーフレームへ書く位置（`setKeyframe` に渡す形）。
  *
  * - 値は「本来の位置からのずれ」なので、**元のずれに足す**だけ（時刻は変えない＝ADR-0054 決定2）。
- * - ⚠️ **そのキーが持っていない軸は、実際に動かしたときだけ書き足す**＝横へ引いただけで縦の値まで書くと、
+ * - ⚠️ **そのキーが持っていない軸は、実際に動かしたとき（`axisMinPx` 以上）だけ書き足す**＝横へ引いただけで縦の値まで書くと、
  *   縦の動きの区切りが1つ増え、その前後の**緩急（イージング）の付き方が変わる**（触っていない縦の動きが変わる）。
  *   書き足すときの元の値は、その時刻に実際に描かれているずれ（補間の値）＝掴んだ瞬間に点が飛ばない。
  * - ⚠️ **持っていない軸は、動かさなければ `null`（外す）を返す**＝掴んだまま一度引いて戻したとき、途中で書き足した
@@ -70,14 +70,15 @@ export function keyPositionAfterDrag(
   timeSec: number,
   dx: number,
   dy: number,
+  axisMinPx: number = MOTION_KEY_AXIS_MIN_PX,
 ): { x?: number | null; y?: number | null } {
   const key = keyframes.find((k) => k.timeSec === timeSec);
   if (!key) return {};
   const tr = interpolateKeyframes(keyframes, timeSec);
   const out: { x?: number | null; y?: number | null } = {};
   if (key.x != null) out.x = key.x + dx;
-  else out.x = Math.abs(dx) >= MOTION_KEY_AXIS_MIN_PX ? (tr.x ?? 0) + dx : null;
+  else out.x = Math.abs(dx) >= axisMinPx ? (tr.x ?? 0) + dx : null;
   if (key.y != null) out.y = key.y + dy;
-  else out.y = Math.abs(dy) >= MOTION_KEY_AXIS_MIN_PX ? (tr.y ?? 0) + dy : null;
+  else out.y = Math.abs(dy) >= axisMinPx ? (tr.y ?? 0) + dy : null;
   return out;
 }

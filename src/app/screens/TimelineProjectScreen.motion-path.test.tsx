@@ -128,11 +128,39 @@ describe("動きの道筋と点（ADR-0054 段階2）", () => {
     expect(anim().keyframes[0].x).toBe(0);
   });
 
+  it("押しただけでは掴まない（少し動かすまで＝帯・本体と同じ作法）", () => {
+    open();
+    sizeOverlay();
+    const k = keys()[1];
+    fireEvent.pointerDown(k, { button: 0, pointerId: 7, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(k, { pointerId: 7, clientX: 3, clientY: 1 }); // 4px 未満
+    expect(isPointerDragging()).toBe(false);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+    useTimelineStore.getState().beginHistoryGroup(); // ほかの誰かのまとめ（打ちかけの欄など）
+    fireEvent.pointerUp(k, { pointerId: 7 });
+    expect(anim().keyframes[1]).toEqual({ timeSec: 2, x: 960 });
+    expect(useTimelineStore.getState().history.past).toHaveLength(0);
+    // 開いていないまとめを締めない（ほかの誰かのまとめを閉じてしまう）。
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
+    useTimelineStore.getState().endHistoryGroup();
+  });
+
+  it("横へ引くときの縦の手ぶれ（画面で 4px 未満）では、持っていない縦を書き足さない", () => {
+    open();
+    sizeOverlay();
+    const k = keys()[1];
+    fireEvent.pointerDown(k, { button: 0, pointerId: 7, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(k, { pointerId: 7, clientX: 30, clientY: 3 }); // 縦 3px＝キャンバスで 6px
+    fireEvent.pointerUp(k, { pointerId: 7 });
+    expect(anim().keyframes[1]).toEqual({ timeSec: 2, x: 1020 });
+  });
+
   it("掴んでいる間は掴んでいる数に入る（その間 Ctrl+Z を通さない）・離せば外れる", () => {
     open();
     sizeOverlay();
     const k = keys()[0];
     fireEvent.pointerDown(k, { button: 0, pointerId: 7, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(k, { pointerId: 7, clientX: 10, clientY: 0 });
     expect(isPointerDragging()).toBe(true);
     fireEvent.pointerUp(k, { pointerId: 7 });
     expect(isPointerDragging()).toBe(false);
@@ -143,6 +171,7 @@ describe("動きの道筋と点（ADR-0054 段階2）", () => {
     sizeOverlay();
     const k = keys()[0];
     fireEvent.pointerDown(k, { button: 0, pointerId: 7, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(k, { pointerId: 7, clientX: 10, clientY: 0 });
     fireEvent.pointerUp(k, { pointerId: 8 });
     expect(isPointerDragging()).toBe(true);
     fireEvent.pointerUp(k, { pointerId: 7 });
@@ -161,6 +190,8 @@ describe("動きの道筋と点（ADR-0054 段階2）", () => {
     expect(isPointerDragging()).toBe(false);
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 外側の Escape（選びを外す）まで走らない
+    // やめた跡を取り消しに残さない（何も変わらない取り消しを1件積まない・PR #1343 レビュー ℹ️）。
+    expect(useTimelineStore.getState().history.past).toHaveLength(0);
   });
 
   it("指の取り上げ（pointercancel）でも元へ戻す", () => {
@@ -191,6 +222,7 @@ describe("動きの道筋と点（ADR-0054 段階2）", () => {
     sizeOverlay();
     const k = keys()[0];
     fireEvent.pointerDown(k, { button: 0, pointerId: 7, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(k, { pointerId: 7, clientX: 10, clientY: 0 });
     expect(useTimelineStore.getState()._historyGroupDepth).toBe(1);
     act(() => useTimelineStore.setState({ isPlaying: true })); // 再生を始めた＝点が消える（選びは変わらない）
     expect(screen.queryByTestId("motion-path")).toBeNull();

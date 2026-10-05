@@ -455,6 +455,13 @@ export interface TimelineState {
   endHistoryGroup: () => void;
   /** まとめを強制的に畳む（欄がフォーカス中に消えたときの保険＝`blur` が来ない）。 */
   resetHistoryGroup: () => void;
+  /**
+   * 掴んでいた1回ぶんを**なかったことにする**（`Escape` でやめた・ADR-0054 段階2）＝まとめの間に書いた文書を、まとめを開く前へ戻し、
+   * まとめが積んだ1件も外す（やめた跡＝何も変わらない取り消しを残さない・PR #1343 レビュー）。
+   * ⚠️ **自分で開いた1段のまとめにだけ使う**＝外側にもまとめがある（深さ 2 以上）ときは、閉じるだけ（戻さない＝外側の編集まで巻き戻さない）。
+   * ⚠️ 開く前の「やり直し」は戻らない（積んだ時点で捨てている＝`recordSnapshot`）。
+   */
+  abandonHistoryGroup: () => void;
   /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
   saveStatus: "idle" | "saving" | "saved" | "error";
   /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
@@ -1285,6 +1292,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
    */
   resetHistoryGroup: () =>
     set((s) => ({ _historyGroupDepth: 0, _historyGroupPending: false, _historyGroupGen: s._historyGroupGen + 1 })),
+  abandonHistoryGroup: () =>
+    set((s) => {
+      if (s._historyGroupDepth !== 1) return { _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) };
+      const closed = { _historyGroupDepth: 0, _historyGroupPending: false };
+      // まだ何も書いていない（掴んだだけ）＝戻すものも外すものも無い。
+      if (s._historyGroupPending) return closed;
+      const before = s.history.past[s.history.past.length - 1];
+      if (!before || !s.doc) return closed;
+      return {
+        ...closed,
+        doc: before,
+        history: { ...s.history, past: s.history.past.slice(0, -1) },
+        playheadSec: clampTimelinePlayheadSec(before, s.playheadSec),
+      };
+    }),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) =>
