@@ -554,6 +554,13 @@
 .timeline-clip.timeline-clip--stopped-end {
   box-shadow: inset -3px 0 0 var(--color-danger);
 }
+/* ⚠️ **端の取っ手そのものも赤くする**（PR #1338 レビュー 🟡）＝掴んだ帯は必ず選ばれているので、選択の外枠（outline）と
+   取っ手の `::after`（主色・半透明）が上に重なり、内側の影だけでは赤が 2px ほどしか見えない。取っ手を塗り替えて最前面で示す。 */
+.timeline-clip--stopped-start .timeline-clip-handle--left::after,
+.timeline-clip--stopped-end .timeline-clip-handle--right::after {
+  background: var(--color-danger);
+  opacity: 1;
+}
 .timeline-clip.drop-target--blocked {
   outline-color: var(--color-danger);
   background: var(--color-danger-soft);

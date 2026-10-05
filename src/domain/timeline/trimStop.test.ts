@@ -4,6 +4,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import { EDIT_BLOCKED, trimClip, trimStopSec } from './edit';
+import type { Template } from '../template/types';
 
 function doc(clips: TimelineClip[], over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -85,23 +86,32 @@ describe('素材の外へは伸ばさない（#1331）', () => {
     expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trimBeforeSource);
   });
 
-  it('音も同じ（右は実尺まで）', () => {
-    const r = trimClip(doc([audio()]), 'clip_a', 'end', 7);
-    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trimPastSourceEnd);
-    expect(trimClip(doc([audio()]), 'clip_a', 'end', 6).ok).toBe(true);
+  // ⚠️ **音は繰り返して鳴る**（`audioLoops`）＝素材の終わりが無い（PR #1338 レビュー 🔴）。
+  it('音は実尺を越えて伸ばせる（繰り返して鳴る）・始まりより前へは伸ばせない', () => {
+    expect(trimClip(doc([audio()]), 'clip_a', 'end', 20).ok).toBe(true);
+    const before = trimClip(doc([audio({ startSec: 2, sourceStartSec: 1 })]), 'clip_a', 'start', 0);
+    expect(before.ok ? null : before.reason).toBe(EDIT_BLOCKED.trimBeforeSource);
   });
 
-  it('既に素材より長い部品を縮めるのは通す（伸ばすときだけ見る）', () => {
-    const long = audio({ durationSec: 8 }); // 実尺 6秒より長い（速さの変更などで起きうる）
-    expect(trimClip(doc([long]), 'clip_a', 'end', 7).ok).toBe(true);
-    const r = trimClip(doc([long]), 'clip_a', 'end', 9);
+  it('既に素材より長い動画を縮めるのは通す（伸ばすときだけ見る）', () => {
+    const long = video({ startSec: 0, durationSec: 8 }); // 使い始め 1秒・実尺 6秒＝5秒より長い（速さの変更などで起きうる）
+    expect(trimClip(doc([long]), 'clip_v', 'end', 7).ok).toBe(true);
+    const r = trimClip(doc([long]), 'clip_v', 'end', 9);
     expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trimPastSourceEnd);
   });
 
-  it('速さを見て数える（2倍速なら 6秒の素材は 3秒ぶん）', () => {
-    const r = trimClip(doc([audio({ speed: 2, durationSec: 2 })]), 'clip_a', 'end', 3.5);
+  it('速さを見て数える（2倍速なら使い始め 1秒・実尺 6秒の素材は 2.5秒ぶん）', () => {
+    const fast = video({ startSec: 0, durationSec: 2, speed: 2 });
+    const r = trimClip(doc([fast]), 'clip_v', 'end', 3);
     expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trimPastSourceEnd);
-    expect(trimClip(doc([audio({ speed: 2, durationSec: 2 })]), 'clip_a', 'end', 3).ok).toBe(true);
+    expect(trimClip(doc([fast]), 'clip_v', 'end', 2.5).ok).toBe(true);
+  });
+
+  it('見た目パターンの枠の中の動画は、部品の右端を縛らない（枠の中で素材が尽きたら最後のコマで凍る）', () => {
+    const tmpl = { schemaVersion: '1.0', templateId: 'tmpl_slot', name: 'T', category: 'photo_intro', aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }] } as unknown as Template;
+    const t = { id: 'clip_t', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'tmpl_slot', assetRefs: { main: 'asset_v' }, slotClips: { main: { startSec: 1 } } } as TimelineClip;
+    expect(trimClip(doc([t]), 'clip_t', 'end', 20, { templateOf: () => tmpl }).ok).toBe(true);
   });
 
   it('実尺が分からない素材は断らない（分からないことを理由にしない）', () => {
