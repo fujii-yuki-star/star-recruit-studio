@@ -178,6 +178,8 @@ export function buildPrecheckItems(
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
   // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
   const fmtScenes = formatSceneNumbers;
+  // 場面番号（1始まり）から場面の並びへ（公開前チェックから場面を順に直す帯に使う・UI/UX 監査 2026-10-02）。
+  const idsOf = (nums: number[]): string[] => nums.map((n) => scenes[n - 1]?.sceneId).filter((id): id is string => !!id);
   const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string; ids: string[] } => {
     const hits: { id: string; n: number }[] = [];
     scenes.forEach((s, i) => { if (pred(s)) hits.push({ id: s.sceneId, n: i + 1 }); });
@@ -497,7 +499,7 @@ export function buildPrecheckItems(
       severity: "action",
       action: "直す",
       // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
-      sceneId: scenes[unplaceable[0] - 1]?.sceneId,
+      sceneId: scenes[unplaceable[0] - 1]?.sceneId, sceneIds: idsOf(unplaceable),
       blocksExport: true, // 書き出しは videoUnplaceableError で停止する
     });
   }
@@ -521,7 +523,7 @@ export function buildPrecheckItems(
       severity: "action",
       action: "直す",
       // 飛び先は**覆われている場面**＝そこで「表示時間を長くする」がすぐ押せる（もう一方の直し方は文言が示す）。
-      sceneId: scenes[swallowedByNext[0] - 1]?.sceneId,
+      sceneId: scenes[swallowedByNext[0] - 1]?.sceneId, sceneIds: idsOf(swallowedByNext),
     });
   }
   const swallowed = swallowedByOwnTransitionSceneNumbers(scenes);
@@ -535,7 +537,7 @@ export function buildPrecheckItems(
       // 「該当場面へ飛べる」が成立しない（レビュー指摘）。場面が動画から消える＝直すべき事象。
       severity: "action",
       action: "直す",
-      sceneId: scenes[swallowed[0] - 1]?.sceneId,
+      sceneId: scenes[swallowed[0] - 1]?.sceneId, sceneIds: idsOf(swallowed),
     });
   }
 
@@ -560,7 +562,7 @@ export function buildPrecheckItems(
       // 書き出しは止めない（`blocksExport` を付けない）＝「直せば良くなる」警告（`15 §…`）。
       severity: "action",
       action: "直す",
-      sceneId: scenes[shortenedOnly[0] - 1]?.sceneId,
+      sceneId: scenes[shortenedOnly[0] - 1]?.sceneId, sceneIds: idsOf(shortenedOnly),
     });
   }
 
@@ -580,7 +582,7 @@ export function buildPrecheckItems(
       detail: `${fmtScenes(afterAnimNoPlay)}は、アニメが場面の最後まで続くため「アニメの後」だと動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。`,
       severity: "action",
       action: "直す",
-      sceneId: scenes[afterAnimNoPlay[0] - 1]?.sceneId,
+      sceneId: scenes[afterAnimNoPlay[0] - 1]?.sceneId, sceneIds: idsOf(afterAnimNoPlay),
       blocksExport: true, // 書き出しは同一判定で停止する（buildExportScenes）
     });
   }

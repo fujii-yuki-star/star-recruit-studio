@@ -44,6 +44,18 @@ export function stickyProjectScreen(prev: ScreenId, current: ScreenId): ScreenId
 }
 
 /**
+ * 公開前チェックから預けた「直す場面の並び」（`sceneEditTrail`）を、この遷移で持ち越すか（UI/UX 監査 2026-10-02）。
+ *
+ * ⚠️ **場面編集と仕上がり確認の往復だけ持ち越す**＝場面編集から「仕上がり確認へ」で確かめて「場面編集へ戻る」と、
+ * 並びが消えて戻るが「台本表へ戻る」に変わり、帯も消えていた（PR #1341 レビュー 🟡）。
+ * ⚠️ **それ以外へ出たら落とす**＝残すと、あとで台本表から素直に場面編集を開いたときに、押してもいない
+ * 「公開前チェックへ戻る」と帯が出る。
+ */
+export function keepsSceneEditTrail(next: ScreenId): boolean {
+  return next === "scene-edit" || next === "preview";
+}
+
+/**
  * サイドバーの「今の動画」に出すもの（#987→#1006）。
  *
  * ⚠️ **2つの形式は同時に開いたままが正規の状態**＝一覧はタイムラインを開くとき

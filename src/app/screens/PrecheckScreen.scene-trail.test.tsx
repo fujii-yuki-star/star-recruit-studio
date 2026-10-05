@@ -30,7 +30,7 @@ beforeEach(() => {
     // 見た目が見つからない場面を **2番目と4番目**に置く＝先頭から順に並べただけでは位置が合わない。
     scenes: [scene("scene_001", 1, "FIRST"), scene("scene_002", 2, "SECOND", "missing_template"), scene("scene_003", 3, "THIRD"), scene("scene_004", 4, "FOURTH", "missing_template")],
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002", "scene_003", "scene_004"] }],
-    past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    sceneEditTrail: null, past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
   });
 });
 
@@ -73,11 +73,20 @@ describe("公開前チェックから来た場面編集（UI/UX 監査 2026-10-0
     expect(screen.queryByRole("button", { name: /台本表へ戻る/ })).toBeNull();
   });
 
-  it("並びは一度きり＝ほかの入口から開き直せば「台本表へ戻る」に戻り、帯も出ない", () => {
+  it("仕上がり確認を挟んでも並びは残る（戻ると同じ帯と戻る先）", () => {
     openFromPrecheck();
-    render(<SceneEditScreen onNavigate={vi.fn()} />);
-    expect(useProjectStore.getState().sceneEditTrail).toBeNull();
+    const onNavigate = vi.fn();
+    render(<SceneEditScreen onNavigate={onNavigate} />);
+    fireEvent.click(within(screen.getByTestId("scene-edit-trail")).getByRole("button", { name: TRAIL_NEXT_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: /仕上がり確認へ/ }));
+    expect(onNavigate).toHaveBeenCalledWith("preview");
     cleanup();
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByTestId("scene-edit-trail")).toHaveTextContent("2/2 場面目");
+    expect(screen.getByRole("button", { name: BACK_TO_PRECHECK_LABEL })).toBeInTheDocument();
+  });
+
+  it("並びが無ければ（ほかの入口）「台本表へ戻る」で、帯も出ない", () => {
     const onNavigate = vi.fn();
     render(<SceneEditScreen onNavigate={onNavigate} />);
     expect(screen.queryByTestId("scene-edit-trail")).toBeNull();

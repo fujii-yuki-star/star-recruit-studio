@@ -1116,3 +1116,16 @@ describe("見つからない素材は押す前に止める（#1068）", () => {
     expect(blocking.map((i) => i.id)).toContain("missingAsset");
   });
 });
+
+// 公開前チェックの「直す」から、ひっかかった場面を順に直す帯（UI/UX 監査 2026-10-02）。
+// ⚠️ **項目ごとに並びを渡し忘れると、その項目だけ帯が出ない**（PR #1341 レビュー＝5項目で渡し忘れていた）。
+// 項目ごとに場面を作って確かめると、次に足した項目が漏れても気づけないので、**書いてある所をまるごと見る**。
+describe("公開前チェックの項目は、場面を指すなら並びも渡す", () => {
+  it("adapters.ts で sceneId を渡す行は、同じ行で sceneIds も渡す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./adapters.ts", import.meta.url), "utf8");
+    const lines = src.split(/\r?\n/).filter((l) => /\bsceneId: /.test(l) && !/^\s*(\/\/|\*)/.test(l));
+    expect(lines.length, "拾えた行の数が変わった（項目を足したら、並びを渡しているか見てから数を更新する）").toBe(13); // 見えていないのに緑、を防ぐ
+    expect(lines.filter((l) => !/\bsceneIds: /.test(l))).toEqual([]);
+  });
+});

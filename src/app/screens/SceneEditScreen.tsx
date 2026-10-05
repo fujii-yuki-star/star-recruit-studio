@@ -273,14 +273,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [focus] = useState(() => useProjectStore.getState().editingSceneFocus);
   /**
    * 公開前チェックから来たときの**ひっかかっている場面の並び**（UI/UX 監査 2026-10-02）＝戻る先をチェックにし、
-   * 「次の場面へ（2/8）」で順に直せる。⚠️ 一度きりで受ける（下の後始末で消す）＝別の入口から来たときに残らない。
+   * 「次の場面へ（2/8）」で順に直せる。⚠️ 落とすのは画面の行き来の入口（`App` の `navigate`・`keepsSceneEditTrail`）＝仕上がり確認との往復だけ持ち越し、ほかへ出たら消える。
    */
   const [trail] = useState(() => useProjectStore.getState().sceneEditTrail);
   /**
    * 掛け合いで「AI に頼む」を出す行（UI/UX 監査 2026-10-02）＝以前は**行ごとに**「短く／丁寧に／やわらかく」が並び、縦に長くなっていた。
    * **最後に焦点を入れた行だけ**に出す（ボタンを押すと焦点は外れるので、外れても消さない）。まだ選んでいなければ最初の行。
    */
-  const [activeLineId, setActiveLineId] = useState<string | null>(null);
+  // ⚠️ **場面ごとに持つ**＝行の番号は場面ごとに振る（`line_001`…）ので、行だけで覚えると別の場面の同じ番号の行に出る（PR #1341 レビュー）。
+  const [activeLine, setActiveLine] = useState<{ sceneId: string; lineId: string } | null>(null);
   // 公開前チェックから来たとき、開いた場面のセリフ欄ですぐ頼む AI 補助（ADR-0053 決定2）。**その場面に1回だけ**
   //（別の場面へ移って戻っても頼み直さない）＝頼んだら `null` へ戻す。
   const [autoAssist, setAutoAssist] = useState(() => {
@@ -460,7 +461,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     useProjectStore.getState().setEditingSceneId(null);
     useProjectStore.getState().setEditingSceneFocus(null);
     useProjectStore.getState().setEditingSceneAssist(null);
-    useProjectStore.getState().setSceneEditTrail(null);
   }, []);
 
 
@@ -2250,12 +2250,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           placeholder="セリフを入力"
                           value={line.text}
                           {...textGroup}
-                          onFocusCapture={() => setActiveLineId(line.lineId)}
+                          onFocusCapture={() => setActiveLine({ sceneId: selected.sceneId, lineId: line.lineId })}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
                         />
                         {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。
                             ⚠️ **選んでいる行だけ**（UI/UX 監査 2026-10-02）。 */}
-                        {line.lineId === ((selected.lines ?? []).some((l) => l.lineId === activeLineId) ? activeLineId : selected.lines?.[0]?.lineId) && <AiSuggest
+                        {line.lineId === (activeLine?.sceneId === selected.sceneId && (selected.lines ?? []).some((l) => l.lineId === activeLine.lineId) ? activeLine.lineId : selected.lines?.[0]?.lineId) && <AiSuggest
                           key={`${selected.sceneId}-${line.lineId}`}
                           kinds={AI_ASSIST_LINE_KINDS}
                           source={line.text}

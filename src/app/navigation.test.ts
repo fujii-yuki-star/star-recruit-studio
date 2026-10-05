@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScreenId } from "./data/mockData";
-import { currentProjectEntries, DEFAULT_PROJECT_RETURN, isProjectScreen, PROJECT_SCREENS, stickyProjectScreen } from "./navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, isProjectScreen, keepsSceneEditTrail, PROJECT_SCREENS, stickyProjectScreen } from "./navigation";
 
 describe("isProjectScreen（工程画面の線引き・#399/#547 P3-7）", () => {
   it("工程画面（ウィザード〜書き出し）は true", () => {
@@ -163,5 +163,13 @@ describe("画面が、決め方を通っている（#987）", () => {
       "決め方の結果が、サイドバーへ渡す値になっていない（呼んでいるが捨てている）",
     ).toMatch(/const\s+currentProjects\s*=\s*currentProjectEntries\(/);
     expect(src, "タイムライン側の名前を渡していない").toMatch(/timelineName/);
+  });
+});
+
+describe("keepsSceneEditTrail（直す場面の並びを持ち越す遷移・UI/UX 監査 2026-10-02）", () => {
+  it("場面編集と仕上がり確認の往復だけ持ち越し、ほかは落とす", () => {
+    expect(keepsSceneEditTrail("scene-edit")).toBe(true);
+    expect(keepsSceneEditTrail("preview")).toBe(true);
+    for (const s of ["precheck", "draft", "materials", "home", "export", "timeline"] as const) expect(keepsSceneEditTrail(s), s).toBe(false);
   });
 });

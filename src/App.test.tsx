@@ -209,6 +209,26 @@ describe("App の遷移が離れる前の関門を通る（#719 統合）", () =
     }
   });
 
+  // 公開前チェックから預けた「直す場面の並び」（UI/UX 監査 2026-10-02）も同じ＝残すと押してもいない「公開前チェックへ戻る」が出る。
+  it("関門が断ったら、直す場面の並びも残さない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setSceneEditTrail({ label: "x", sceneIds: ["scene_001", "scene_002"] });
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().sceneEditTrail).toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  it("場面編集・仕上がり確認のほかへ出たら、直す場面の並びを落とす", () => {
+    useProjectStore.getState().setSceneEditTrail({ label: "x", sceneIds: ["scene_001", "scene_002"] });
+    const { container } = render(<App />);
+    clickSidebar(container, "素材");
+    expect(useProjectStore.getState().sceneEditTrail).toBeNull();
+  });
+
   // ⚠️ **落とすのは寄る先の指定だけ**＝「どの場面を編集中か」は遷移と別に意味を持つ。
   it("断られても、編集中の場面は忘れない", () => {
     const release = registerNavigationGuardForTest(() => false);
