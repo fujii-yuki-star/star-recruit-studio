@@ -2241,6 +2241,17 @@ fn join_total_sec(job_secs: &[f64], steps: &[JoinStep]) -> f64 {
 /// （45分・80場面の実測で 449秒→770秒）。1本あたり約100MB なので 24 本で約2.4GB に収まる。
 const MAX_JOIN_INPUTS: usize = 24;
 
+/// つなぐ途中の作り置き用に、音を**非圧縮（PCM）**へ差し替える（#1360・PR #1361 レビュー 🟡）。**純粋関数**。
+/// `-c:a aac` を `pcm_s16le` にし、AAC 用の指定（`-b:a` など）は持たない前提（`xfade_chain_args` は付けていない）。
+fn intermediate_audio_args(mut args: Vec<String>) -> Vec<String> {
+    if let Some(i) = args.iter().position(|a| a == "-c:a") {
+        if let Some(v) = args.get_mut(i + 1) {
+            *v = "pcm_s16le".to_string();
+        }
+    }
+    args
+}
+
 /// 塊1つ（場面 `[first, end)`）。`start_sec`＝出来上がりの中でこの塊が始まる位置、`steps`＝塊の中の境目（位置は塊の先頭から）。
 struct JoinChunk<'a> {
     first: usize,
@@ -2276,11 +2287,26 @@ fn plan_join_chunks<'a>(
         };
     }
     let size = (n as f64).sqrt().ceil() as usize;
+    // ⚠️ **塊の切れ目は「後ろの切り替えが塊の頭より前へ食い込まない」所だけ**（PR #1361 レビュー 🔴）＝
+    // 前側（`transitionTimeline`）は切り替えの長さを「それまでつないだ全体」で抑えているので、
+    // 入りがハードカットの短い場面を丸ごと覆って、その前の場面まで重なる切り替えが正当に来る。
+    // そこで切ると塊の中の位置が 0 以下になり、xfade に「1本目より長い重なり」を渡すことになる（未定義の動き）。
+    // 食い込むなら切れ目を後ろへずらす（ずらし切れなければ最後まで1つの塊）。
+    let cut_ok = |b: usize| -> bool {
+        let end = (b + size).min(n);
+        (b + 1..end).all(|g| {
+            let st = &steps[g - 1];
+            st.xfade.is_none() || st.offset_sec - starts[b] > 1e-6
+        })
+    };
     let mut chunks = Vec::new();
     let mut top = Vec::new();
     let mut a = 0usize;
     while a < n {
-        let b = (a + size).min(n);
+        let mut b = (a + size).min(n);
+        while b < n && !cut_ok(b) {
+            b += 1;
+        }
         let base = starts[a];
         let inner = (a + 1..b)
             .map(|g| {
@@ -2598,15 +2624,18 @@ fn encode_jobs(
                         files_lv2.push(scene_files[c.first].clone());
                         continue;
                     }
-                    let chunk_out = tmp_dir.join(format!("join_chunk_{k:03}.mp4"));
-                    let mut cargs = xfade_chain_args(
+                    // ⚠️ **塊の音は圧縮しない**（PR #1361 レビュー 🟡）＝AAC で作り直すと末尾に詰め物（最大約23ms）が付き、
+                    // 2段目の音のつなぎ（acrossfade は左の**実際の**終わりから始まる）で塊の数だけずれが積み上がる。
+                    // 非圧縮（PCM）なら長さが合う。入れ物は PCM を持てる mkv。
+                    let chunk_out = tmp_dir.join(format!("join_chunk_{k:03}.mkv"));
+                    let mut cargs = intermediate_audio_args(xfade_chain_args(
                         &scene_files[c.first..c.end],
                         &c.steps,
                         &chunk_out.to_string_lossy(),
                         codec,
                         fps,
                         bitrate,
-                    );
+                    ));
                     cargs.push("-progress".to_string());
                     cargs.push("pipe:1".to_string());
                     cargs.push("-nostats".to_string());
@@ -8163,6 +8192,95 @@ mod join_chunk_tests {
                 offset_sec: o,
             })
             .collect()
+    }
+
+    #[test]
+    fn intermediate_uses_uncompressed_audio() {
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 1.0,
+        }];
+        let args = super::intermediate_audio_args(super::xfade_chain_args(
+            &files,
+            &steps,
+            "c.mkv",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        ));
+        let i = args
+            .iter()
+            .position(|a| a == "-c:a")
+            .expect("音の指定がある");
+        assert_eq!(args[i + 1], "pcm_s16le");
+        assert!(!args.iter().any(|a| a == "aac"), "AAC が残っている");
+    }
+
+    /// ⚠️ **入りがハードカットの短い場面を、次の切り替えが丸ごと覆う**ところでは切らない（PR #1361 レビュー 🔴）＝
+    /// 切ると塊の中の位置が 0 以下になる。どの塊の中でも、切り替えの位置が塊の頭より後ろにあること。
+    #[test]
+    fn never_cut_where_a_transition_reaches_before_the_chunk() {
+        // 30 場面（6 本ずつ）。場面 6 の入りはハードカットで尺 0.3 秒、場面 7 へ 1.0 秒の切り替え（場面 5 まで食い込む）。
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        secs[6] = 0.3;
+        let mut raw = Vec::new();
+        let mut acc = secs[0];
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            if i == 6 {
+                raw.push((false, 0.0, 0.0));
+                acc += s;
+            } else {
+                let d = if i == 7 { 1.0 } else { 0.5 };
+                raw.push((true, d, acc - d));
+                acc += s - d;
+            }
+        }
+        let steps: Vec<JoinStep> = raw
+            .iter()
+            .map(|&(x, d, o)| JoinStep {
+                xfade: if x { Some("fade") } else { None },
+                duration_sec: d,
+                offset_sec: o,
+            })
+            .collect();
+        let (want_len, want_starts) = simulate(&secs, &steps);
+        let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+        assert!(
+            chunks.iter().all(|c| c.first != 6),
+            "食い込まれる場面の頭で切った"
+        );
+        let mut lens = Vec::new();
+        for c in &chunks {
+            for st in &c.steps {
+                if st.xfade.is_some() {
+                    assert!(st.offset_sec > 0.0, "塊の中の切り替えの位置が 0 以下");
+                }
+            }
+            let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+            for (k, s) in starts.iter().enumerate() {
+                assert!((c.start_sec + s - want_starts[c.first + k]).abs() < 1e-9);
+            }
+            lens.push(len);
+        }
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+    }
+
+    /// 1場面だけの塊（31 場面＝6 本ずつで最後が1本）も、長さと位置が変わらない（PR #1361 レビュー ℹ️）。
+    #[test]
+    fn single_scene_chunk_keeps_positions() {
+        let (secs, raw) = scenes(31, 20.0, &[]);
+        let steps = to_steps(&raw);
+        let (want_len, _) = simulate(&secs, &steps);
+        let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+        assert_eq!(chunks.last().map(|c| c.end - c.first), Some(1));
+        let lens: Vec<f64> = chunks
+            .iter()
+            .map(|c| simulate(&secs[c.first..c.end], &c.steps).0)
+            .collect();
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
     }
 
     #[test]
