@@ -31,6 +31,22 @@ export async function probeImageSize(projectId: string, relPath: string): Promis
 }
 
 /**
+ * 音の素材の**長さ**だけを測る（#1348＝効果音が仮の 10 秒の帯になり、くり返し鳴っていた）。
+ * ⚠️ **同じ probe で測れる**（FFmpeg の `-i` が音のファイルにも `Duration:` を出す）。名前が `probeVideo` なのは経緯だけ。
+ * ⚠️ **長さだけを返す**＝大きさ・音の有無は音の素材には意味が無い。測れなければ null（取り込みは続ける）。
+ */
+export async function probeAudioDuration(projectId: string, relPath: string): Promise<AssetMetadata | null> {
+  try {
+    const meta = await probeVideo(projectId, relPath);
+    const d = meta?.durationSec;
+    return d != null && Number.isFinite(d) && d > 0 ? { durationSec: d } : null;
+  } catch (e) {
+    console.warn("[asset] 音の長さの取得に失敗:", e);
+    return null;
+  }
+}
+
+/**
  * 取り込んだ動画の付加情報（メタ＝長さ/音声有無/解像度、代表フレーム＝サムネ）を取得する純IO。
  * store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立
  * ＝メタが取れなくても素材そのものは使える）。

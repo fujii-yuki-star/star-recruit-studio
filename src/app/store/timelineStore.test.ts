@@ -1417,3 +1417,66 @@ describe("abandonHistoryGroup", () => {
     useTimelineStore.getState().endHistoryGroup();
   });
 });
+
+// #1348（#1335 提案C）：効果音が仮の 10 秒の帯になり、くり返し鳴っていた＝音の素材の長さを測って帯の初めの長さにする。
+describe('音の素材の長さ（#1348）', () => {
+  const sfx = { assetId: 'asset_001', assetType: 'bgm' as const, displayName: 'ポン', filePath: 'assets/asset_001.wav' };
+  const open = async (over: Partial<TimelineProject> = {}) => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({
+      assets: [sfx], tracks: [{ id: 'track_001', kind: TRACK_KIND.audio }], clips: [], ...over,
+    })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+  };
+  const placed = () => useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.audio)!;
+
+  it('取り込むと長さを測って素材に書き、置くと帯がその長さになる（仮の 10 秒にしない）', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ durationSec: 0.4, hasAudio: true });
+    await open({ assets: [] });
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('saved');
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.wav');
+    await useTimelineStore.getState().addAssetByPath('C:/se/ポン.wav');
+    const a = useTimelineStore.getState().doc!.assets[0];
+    expect(a.assetType).toBe('bgm');
+    expect(a.metadata).toEqual({ durationSec: 0.4 }); // 長さだけ（大きさ・音の有無は持たない）
+    useTimelineStore.getState().addAudioClip({ assetId: a.assetId, trackId: 'track_001', startSec: 2 });
+    expect(placed().durationSec).toBe(0.4);
+  });
+
+  it('古い動画（素材に長さが無い）は開いたときに測り、文書は書き換えない', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ durationSec: 1.25, hasAudio: true });
+    await open();
+    // 開いただけで測る（呼び直さない＝開いた直後の1回が測る）。
+    await vi.waitFor(() => expect(useTimelineStore.getState().audioDurations).toEqual({ asset_001: 1.25 }));
+    expect(useTimelineStore.getState().doc!.assets[0].metadata).toBeUndefined();
+    useTimelineStore.getState().addAudioClip({ assetId: 'asset_001', trackId: 'track_001', startSec: 0 });
+    expect(placed().durationSec).toBe(1.25);
+  });
+
+  it('素材に長さがあれば測らない・測れなければ従来どおり仮の長さ', async () => {
+    const probe = vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue(null);
+    await open({ assets: [{ ...sfx, metadata: { durationSec: 2 } }, { ...sfx, assetId: 'asset_002', filePath: 'assets/asset_002.wav' }] });
+    await useTimelineStore.getState()._measureAudioDurations();
+    expect(probe.mock.calls.map((c) => c[1])).toEqual(['assets/asset_002.wav']);
+    useTimelineStore.getState().addAudioClip({ assetId: 'asset_002', trackId: 'track_001', startSec: 0 });
+    expect(placed().durationSec).toBe(10); // AUDIO_PLACEHOLDER_SEC
+  });
+
+  it('呼ぶ側が長さを渡したら、そちらが勝つ', async () => {
+    await open({ assets: [{ ...sfx, metadata: { durationSec: 2 } }] });
+    useTimelineStore.getState().addAudioClip({ assetId: 'asset_001', trackId: 'track_001', startSec: 0, durationSec: 5 });
+    expect(placed().durationSec).toBe(5);
+  });
+
+  it('測っている間に別の動画を開いたら書かない（素材の番号は動画ごと）', async () => {
+    let release: (v: { durationSec: number }) => void = () => {};
+    // 1つ目の動画の測りだけ止めておく（2つ目の動画の測りは測れない＝書くのは1つ目の結果だけ）。
+    vi.spyOn(assetFsMod, 'probeVideo').mockReturnValueOnce(new Promise((r) => { release = r; })).mockResolvedValue(null);
+    await open();
+    const p = useTimelineStore.getState()._measureAudioDurations();
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002', assets: [sfx], clips: [] })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    release({ durationSec: 9 });
+    await p;
+    expect(useTimelineStore.getState().audioDurations.asset_001).toBeUndefined();
+  });
+});
