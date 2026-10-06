@@ -94,6 +94,15 @@ describe("formatSubtitleFile", () => {
     }
   });
 
+  it("VTT は文の中の & < > を置き換え、読み直すと元に戻る（「<株>」が消えない）", () => {
+    const c = [{ startSec: 1, endSec: 2, text: "<株>A&B --> C" }];
+    const vtt = formatSubtitleFile(c, SUBTITLE_FILE_KIND.vtt);
+    expect(vtt).toContain("&lt;株&gt;A&amp;B --&gt; C");
+    expect(parseSubtitleFile(vtt).cues).toEqual(c);
+    // SRT は置き換えない（タグの約束が無い＝再生ソフトはそのまま出す）
+    expect(formatSubtitleFile(c, SUBTITLE_FILE_KIND.srt)).toContain("<株>A&B --> C");
+  });
+
   it("長さの無い・文の無い字幕は書かない", () => {
     expect(formatSubtitleFile([{ startSec: 1, endSec: 1, text: "x" }, { startSec: 1, endSec: 2, text: "  " }], SUBTITLE_FILE_KIND.vtt)).toBe("WEBVTT\n\n\n");
   });

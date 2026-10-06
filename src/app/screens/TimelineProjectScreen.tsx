@@ -6184,7 +6184,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <SubtitleFileExportButton
                 cuesOf={() => {
                   const d = useTimelineStore.getState().doc;
-                  return d ? subtitleCuesOf(d, templateOf) : [];
+                  return { cues: d ? subtitleCuesOf(d, templateOf) : [] };
                 }}
                 defaultName={doc.projectName}
                 disabledReason={null}

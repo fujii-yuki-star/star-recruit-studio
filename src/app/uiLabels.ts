@@ -1930,6 +1930,13 @@ export const subtitleFileMessage = {
 export function subtitleExportedMessage(count: number): string {
   return `字幕を ${count} 個、字幕ファイルに書き出しました。`;
 }
+/**
+ * 字幕ファイルに入れられなかった場面の知らせ（場面形式・自由配置の字幕ボックスが対象をセリフにしているもの）。
+ * ⚠️ **黙って抜かない**（ADR-0026④）＝焼き出しの知らせ（`BAKE_DIALOGUE_SUBTITLE_SKIPPED`）と同じ場面を指す。
+ */
+export function subtitleFileSkippedScenesMessage(sceneNumbers: number[]): string {
+  return `${formatSceneNumbers(sceneNumbers)}の字幕は、セリフに合わせて切り替わる字幕ボックスなので字幕ファイルに入れていません。字幕ボックスの対象を読み上げにすると入ります。`;
+}
 /** 字幕ファイルを並べたあとの知らせ（読めなかった・上限を越えた分は数を言う＝黙って捨てない）。 */
 export function subtitleImportedMessage(placed: number, unreadable: number, beyondLimit: number): string {
   const notes = [

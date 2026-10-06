@@ -8,8 +8,8 @@ import { saveSubtitleFile } from "../../infrastructure/subtitleFileFs";
 import { SUBTITLE_FILE_EXPORT_HINT, SUBTITLE_FILE_EXPORT_LABEL, subtitleExportedMessage, subtitleFileMessage } from "../uiLabels";
 
 export function SubtitleFileExportButton({ cuesOf, defaultName, disabledReason, onMessage, className = "btn btn-secondary" }: {
-  /** 押したときの字幕（押した時点の中身で取り出す）。 */
-  cuesOf: () => SubtitleCue[];
+  /** 押したときの字幕（押した時点の中身で取り出す）。`note`＝入れられなかったものの知らせ（結果に必ず添える）。 */
+  cuesOf: () => { cues: SubtitleCue[]; note?: string };
   /** 保存先の初期のファイル名（拡張子なし）。 */
   defaultName: string;
   /** 押せない理由（押せるなら null）。 */
@@ -26,12 +26,14 @@ export function SubtitleFileExportButton({ cuesOf, defaultName, disabledReason, 
       disabled={disabledReason != null || saving}
       title={disabledReason ?? SUBTITLE_FILE_EXPORT_HINT}
       onClick={async () => {
-        const cues = cuesOf();
-        if (cues.length === 0) { onMessage(subtitleFileMessage.SUBTITLE_FILE_NOTHING_TO_EXPORT, false); return; }
+        const { cues, note } = cuesOf();
+        // 断りの文は句点で終わらない（表 `15 §6` と等値）＝添えるときだけ句点で区切る。
+        const withNote = (m: string): string => (!note ? m : m.endsWith("。") ? `${m}${note}` : `${m}。${note}`);
+        if (cues.length === 0) { onMessage(withNote(subtitleFileMessage.SUBTITLE_FILE_NOTHING_TO_EXPORT), false); return; }
         setSaving(true);
         try {
           const r = await saveSubtitleFile(cues, defaultName.trim() || "export");
-          if (r.saved) onMessage(subtitleExportedMessage(r.count), true);
+          if (r.saved) onMessage(withNote(subtitleExportedMessage(r.count)), true);
         } catch {
           onMessage(subtitleFileMessage.SUBTITLE_FILE_SAVE_FAILED, false);
         } finally {

@@ -17,7 +17,7 @@ import { SUBTITLE_FILE_EXPORT_LABEL, subtitleExportedMessage, subtitleFileMessag
 const cues = [{ startSec: 1, endSec: 2.5, text: "こんにちは" }];
 afterEach(() => vi.clearAllMocks());
 
-function press(cuesOf = () => cues) {
+function press(cuesOf: () => { cues: typeof cues; note?: string } = () => ({ cues })) {
   const onMessage = vi.fn();
   render(<SubtitleFileExportButton cuesOf={cuesOf} defaultName="会社紹介" disabledReason={null} onMessage={onMessage} />);
   fireEvent.click(screen.getByRole("button", { name: SUBTITLE_FILE_EXPORT_LABEL }));
@@ -46,7 +46,7 @@ describe("SubtitleFileExportButton", () => {
   });
 
   it("書き出せる字幕が無ければ、保存先を聞かずに次の行動を言う", async () => {
-    const onMessage = press(() => []);
+    const onMessage = press(() => ({ cues: [] }));
     await waitFor(() => expect(onMessage).toHaveBeenCalledWith(subtitleFileMessage.SUBTITLE_FILE_NOTHING_TO_EXPORT, false));
     expect(showSaveSubtitleDialog).not.toHaveBeenCalled();
   });
@@ -63,5 +63,14 @@ describe("SubtitleFileExportButton", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(cancelled).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("入れられなかったものの知らせを、結果に必ず添える（書けたとき・何も無いとき）", async () => {
+    vi.mocked(showSaveSubtitleDialog).mockResolvedValueOnce("C:/out/字幕.srt");
+    const saved = press(() => ({ cues, note: "場面2は入れていません。" }));
+    await waitFor(() => expect(saved).toHaveBeenCalledWith(`${subtitleExportedMessage(1)}場面2は入れていません。`, true));
+    document.body.innerHTML = "";
+    const none = press(() => ({ cues: [], note: "場面2は入れていません。" }));
+    await waitFor(() => expect(none).toHaveBeenCalledWith(`${subtitleFileMessage.SUBTITLE_FILE_NOTHING_TO_EXPORT}。場面2は入れていません。`, false));
   });
 });

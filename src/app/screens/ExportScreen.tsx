@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFailedMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
+import { exportFailedMessage, subtitleFileSkippedScenesMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
@@ -22,7 +22,7 @@ import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { AudioAutoField } from "../components/AudioAutoField";
 import { SubtitleFileExportButton } from "../components/SubtitleFileExportButton";
-import { BAKE_RANGE_KIND } from "../../domain/timeline/bake";
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND } from "../../domain/timeline/bake";
 import { subtitleCuesOf } from "../../domain/timeline/subtitleCues";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage, endExportDiskWatch, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
@@ -651,8 +651,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               cuesOf={() => {
                 const st = useProjectStore.getState();
                 const templateById = new Map(st.templates.map((t) => [t.templateId, t]));
-                const { doc } = st._bake({ kind: BAKE_RANGE_KIND.whole }, st.meta.projectName);
-                return subtitleCuesOf(doc, (id) => templateById.get(id));
+                const { doc, notes } = st._bake({ kind: BAKE_RANGE_KIND.whole }, st.meta.projectName);
+                // ⚠️ **焼き出しが持っていけなかった字幕は黙って抜かない**（PR #1356 レビュー 🟡）＝自由配置の字幕ボックスが
+                //   セリフに追従する場面は、動画には出るのに字幕ファイルには入らない。その場面を知らせに添える。
+                const skipped = notes.find((n) => n.code === BAKE_NOTE_CODE.dialogueSubtitle);
+                return {
+                  cues: subtitleCuesOf(doc, (id) => templateById.get(id)),
+                  note: skipped ? subtitleFileSkippedScenesMessage(skipped.sceneNumbers) : undefined,
+                };
               }}
               defaultName={fileName}
               disabledReason={null}
