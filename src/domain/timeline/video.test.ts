@@ -5,7 +5,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import type { VideoPlacement } from './video';
 import type { Template } from '../template/types';
-import { isDrawnClip, canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceFrameAt, videoSourceSecAt, videoStagePlan } from './video';
+import { isDrawnClip, canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceFrameAt, videoSourceSecAt, videoStagePlan, videoStageWindow, videoFrameIndexInWindow } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -596,3 +596,61 @@ describe('isDrawnClip（描かれるか＝鳴るか・#816-6）', () => {
     expect(isDrawnClip(d(c), c)).toBe(false);
   });
 });
+
+// #352 の45分実測：頭と尻の数秒だけを焼くのに、素材1本ぶん丸ごと（しかも窓ごとに）取り出していた。
+// ⚠️ **範囲だけ焼いても、どのコマも同じ素材の時刻を指す**ことを、焼き出し（Rust `stage_clip_frames`）の
+//   数え方を写した模型で確かめる＝出力の n コマ目は `start + n/fps×speed`、枚数は `ceil(尺×fps)+1`（素材が尽きたらそこまで）。
+describe('描く範囲だけを焼き出す（videoStageWindow／videoFrameIndexInWindow）', () => {
+  const fps = 30;
+  const stage = (start: number, dur: number, speed: number, sourceLenSec: number) => {
+    const want = Math.ceil(Math.max(0, dur) * fps - 1e-9) + 1;
+    const available = Math.max(0, Math.floor(((sourceLenSec - start) / speed) * fps - 1e-9) + 1);
+    return { start, speed, count: Math.min(want, available) };
+  };
+  const timeOf = (st: { start: number; speed: number }, n: number) => st.start + (n / fps) * st.speed;
+
+  const cases: { name: string; clip: TimelineClip; sourceLenSec: number }[] = [
+    { name: '等速・頭から', clip: slot({ startSec: 0, durationSec: 20 }), sourceLenSec: 100 },
+    { name: '置いた位置の端数・素材の途中から・1.5倍速', clip: slot({ startSec: 0.517, durationSec: 12, sourceStartSec: 2.3, speed: 1.5 }), sourceLenSec: 100 },
+    { name: '素材が置いた長さより短い（最後のコマで止まる）', clip: slot({ startSec: 1, durationSec: 10, sourceStartSec: 1 }), sourceLenSec: 4 },
+    // 終わり×fps の端数が 0.5 未満（PR #1357 再レビュー 🔴）＝round で切ると最後の1コマを焼き漏らす
+    { name: '終わりの端数が 0.5 未満（始まりがずれている）', clip: slot({ startSec: 0.51, durationSec: 12 }), sourceLenSec: 100 },
+    { name: '終わりの端数が 0.5 未満（尺がずれている）', clip: slot({ startSec: 0, durationSec: 12.01 }), sourceLenSec: 100 },
+  ];
+  // 差し込み口の「ここまで」で使える長さが部品の尺より短い（PR #1357 レビュー 🔴）＝凍った所より後ろの範囲でも凍ったコマ
+  const capped: VideoPlacement = { ...place(slot({ startSec: 0, durationSec: 20 })), durationSec: 5 };
+  const windows = [[0, 91], [200, 260], [350, 400], [500, 600], [0, 900]];
+  const all: { name: string; p: VideoPlacement; sourceLenSec: number }[] = [
+    ...cases.map((c) => ({ name: c.name, p: place(c.clip), sourceLenSec: c.sourceLenSec })),
+    { name: '使える長さが部品の尺より短い（ここまで）', p: capped, sourceLenSec: 100 },
+  ];
+  for (const { name, p, sourceLenSec } of all) {
+    it(`${name}：範囲のどのコマも、丸ごと焼いたときと同じ素材の時刻`, () => {
+      const full = stage(p.sourceStartSec, p.durationSec, p.speed, sourceLenSec);
+      for (const [from, to] of windows) {
+        const w0 = videoStageWindow(p, from, to, fps);
+        if (!w0) continue;
+        // 書き出し（buildTimelineFrames）と同じ手当て＝範囲が素材の終わりより後ろで1枚も取れなければ丸ごと焼き直す
+        let win = w0;
+        let part = stage(win.sourceStartSec, win.durationSec, win.speed, sourceLenSec);
+        if (part.count === 0 && win.offset > 0) {
+          win = { ...videoStagePlan(p), offset: 0 };
+          part = stage(win.sourceStartSec, win.durationSec, win.speed, sourceLenSec);
+        }
+        if (win.offset > 0) expect(part.count, `${from}-${to} の枚数が範囲より多い`).toBeLessThanOrEqual(to - from + 1);
+        for (let f = from; f < to; f += 1) {
+          const a = videoFrameIndexAt(p, f, fps, full.count);
+          const b = videoFrameIndexInWindow(p, f, fps, win.offset, part.count);
+          expect(b == null, `f=${f} の映る・映らない`).toBe(a == null);
+          if (a != null && b != null) expect(timeOf(part, b)).toBeCloseTo(timeOf(full, a), 9);
+        }
+      }
+    });
+  }
+
+  it('範囲と重ならない部品は焼かない', () => {
+    expect(videoStageWindow(place(slot({ startSec: 10, durationSec: 5 })), 0, 91, fps)).toBeNull();
+    expect(videoStageWindow(place(slot({ startSec: 0, durationSec: 3 })), 90, 120, fps)).toBeNull();
+  });
+});
+

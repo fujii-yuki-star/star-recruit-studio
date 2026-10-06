@@ -15,7 +15,8 @@
 // 広げるときは**パリティの検査を足してから**（各条件が1つずつ検査を持つ形にしてある）。
 
 import { TIMELINE_CLIP_KIND } from '../enums';
-import { creditVisibleAt } from '../voice/creditDisplay';
+import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
+import type { CreditDisplay } from '../voice/creditDisplay';
 import { timelineFramePlan } from './export';
 import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
@@ -70,6 +71,24 @@ export function clipIsStaticOverlay(
   return true;
 }
 
+/**
+ * クレジットが**出る／消える**コマ（そのコマから見え方が変わる）。「ずっと表示」「非表示」は割らない（変わらない）。
+ * ⚠️ **見え方は `creditVisibleAt` に聞く**（境目の規則を書き写さない＝閉じた区間・尺が短いときは全部に出す、をそのまま守る）。
+ * 窓の端の近く（±2コマ）だけを調べる＝全コマは見ない。
+ */
+export function creditWindowCuts(display: CreditDisplay | undefined, totalSec: number, fps: number): number[] {
+  const { mode, seconds } = resolveCreditDisplay(display);
+  // 近道（変異チェックで等価と分かった）＝この2つは見え方が変わらないので、下の探索も何も見つけない。
+  if (mode === CREDIT_MODE.hidden || mode === CREDIT_MODE.always) return [];
+  const visible = (f: number): boolean => creditVisibleAt(display, totalSec, f / fps);
+  const out = new Set<number>();
+  for (const approx of [seconds * fps, (totalSec - seconds) * fps]) {
+    const base = Math.floor(approx);
+    for (let f = base - 2; f <= base + 2; f += 1) if (f > 0 && visible(f) !== visible(f - 1)) out.add(f);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 /** その時刻に生きているか（半開区間＝`clipIsLiveAt` と同じ規則）。 */
 function liveAt(clip: TimelineClip, timeSec: number): boolean {
   return timeSec >= clip.startSec && timeSec < clip.startSec + clip.durationSec;
@@ -80,7 +99,7 @@ function liveAt(clip: TimelineClip, timeSec: number): boolean {
  *
  * ⚠️ **境目はコマの格子に乗せる**＝乗せないと、区間をつないだ総コマ数が元と食い違う
  * （1コマ多い/少ない動画が出る）。
- * ⚠️ **クレジットが出ている間は倒さない**＝上に重ねる静止PNGは1枚なので、
+ * ⚠️ **クレジットが出ている間は倒さない**（窓の端でも割る＝出ている間だけ焼く・決定22-2 追補2）＝上に重ねる静止PNGは1枚なので、
  * 区間の途中でクレジットが出たり消えたりすると**別の絵**になる（ADR-0025）。
  */
 export function planTimelineExportSegments(
@@ -112,6 +131,13 @@ export function planTimelineExportSegments(
   for (const c of visual) {
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));
+  }
+  // ⚠️ **クレジットの出入りでも割る**（#352 の45分実測で分かった）＝割らないと、動画1本＋字幕1本の長い動画は
+  //   区間が1つになり、**頭の3秒にクレジットが出るだけで全区間を1コマずつ焼く**（45分で一時ファイルが 34GB を超えて
+  //   空き容量の見張りで止まった）。出ている窓だけを焼けば、残りはそのまま流せる。
+  //   窓は閉じた区間（`creditVisibleAt`）＝頭は「最後に出るコマの次」、尻は「最初に出るコマ」で割る。
+  for (const f of creditWindowCuts(doc.videoSettings.creditDisplay, plan.durationSec, plan.fps)) {
+    if (f > 0 && f < plan.frameCount) cuts.add(f);
   }
   const bounds = [...cuts].sort((a, b) => a - b);
 
