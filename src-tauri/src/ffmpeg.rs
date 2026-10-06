@@ -7953,3 +7953,24 @@ mod staged_output_tests {
         assert!(!produced_frame(&p));
     }
 }
+
+#[cfg(test)]
+mod tmp_cleanup_wiring_tests {
+    /// ⚠️ **書き出しの関数が作業フォルダの片づけ役を持っている**こと（#1358・PR #1359 レビュー ℹ️）＝
+    /// 片づけ役（`TmpDirCleanup`）だけを見る検査は、関数から宣言を消しても緑のまま。
+    /// 作業フォルダを作った直後〜場面の準備の前に、片づけ役を持つ行があることを、本番の範囲だけ切り出して見る。
+    const SRC: &str = include_str!("ffmpeg.rs");
+
+    #[test]
+    fn export_video_impl_holds_tmp_cleanup() {
+        let body = super::source_range::範囲(
+            SRC,
+            "fn export_video_impl(",
+            "let mut jobs: Vec<SceneJob>",
+        );
+        assert!(
+            body.contains("let _tmp_cleanup = TmpDirCleanup { path: tmp.clone() };"),
+            "書き出しの関数が作業フォルダの片づけ役を持っていない"
+        );
+    }
+}
