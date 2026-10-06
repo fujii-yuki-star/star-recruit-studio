@@ -11,7 +11,7 @@ vi.mock('./rasterize', () => ({
   svgToPngDataUrl: vi.fn(async (svg: string) => `png:${svg}`),
 }));
 
-const { buildTimelineFrames, TIMELINE_FRAMES_DIR } = await import('./buildTimelineFrames');
+const { buildTimelineFrames, TIMELINE_FRAMES_DIR, videoFramesDirOf } = await import('./buildTimelineFrames');
 const { svgToPngDataUrl } = await import('./rasterize');
 
 function textClip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -123,8 +123,8 @@ describe('区間だけ描く（#1203）', () => {
 
   // #352 の45分実測：頭と尻の数秒だけを焼くのに、素材1本ぶん丸ごと取り出していた（52分・空き容量が尽きた）。
   it('区間に重なるコマだけを焼き出し、焼いた1枚目から数えて読む', async () => {
-    const asked: { start: number; dur: number }[] = [];
-    const read: number[] = [];
+    const asked: { start: number; dur: number; dir: string }[] = [];
+    const read: string[] = [];
     const d = doc({
       clips: [slot('clip_001', 0, 600)],
       assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
@@ -132,11 +132,15 @@ describe('区間だけ描く（#1203）', () => {
     await buildTimelineFrames(d, {
       ...baseOpts,
       window: { fromFrame: 17910, toFrame: 17913 },
-      stageVideo: async (v) => { asked.push({ start: v.sourceStartSec, dur: v.durationSec }); return 4; },
-      readVideoFrame: async (_dir, i) => { read.push(i); return 'data:image/png;base64,X'; },
+      stageVideo: async (v) => { asked.push({ start: v.sourceStartSec, dur: v.durationSec, dir: v.dirName }); return 3; },
+      readVideoFrame: async (dir, i) => { read.push(`${dir}#${i}`); return 'data:image/png;base64,X'; },
     });
-    expect(asked).toEqual([{ start: 597, dur: 0.1 }]);
-    expect(read).toEqual([0, 1, 2]);
+    // 3コマ＝焼き出しは ceil(尺×fps)+1 枚なので、尺は「最後のコマまでの間」＝2/30 秒
+    expect(asked.map((a) => a.start)).toEqual([597]);
+    expect(asked[0].dur).toBeCloseTo(2 / 30, 9);
+    // 始まりの違う焼き出しは別のフォルダへ（前の範囲のコマを数えない）
+    expect(asked[0].dir).toBe(`${videoFramesDirOf('clip_001')}_f17910`);
+    expect(read).toEqual([0, 1, 2].map((i) => `${videoFramesDirOf('clip_001')}_f17910#${i}`));
   });
 
   it('区間が素材の終わりより後ろ（1枚も取れない）なら、丸ごと焼き直して止まったコマを読む', async () => {
@@ -149,12 +153,29 @@ describe('区間だけ描く（#1203）', () => {
     await buildTimelineFrames(d, {
       ...baseOpts,
       window: { fromFrame: 17910, toFrame: 17912 },
-      // 素材は 10 秒しかない＝範囲だけ頼むと 0 枚、丸ごと頼むと 301 枚
-      stageVideo: async (v) => { asked.push(v.sourceStartSec); return v.sourceStartSec > 10 ? 0 : 301; },
-      readVideoFrame: async (_dir, i) => { read.push(i); return 'data:image/png;base64,X'; },
+      // 素材は 10 秒しかない＝範囲だけ頼むと Rust は**失敗で返す**（0枚＝失敗）、丸ごと頼むと 301 枚
+      stageVideo: async (v) => {
+        asked.push(v.sourceStartSec);
+        if (v.sourceStartSec > 10) throw new Error('動画の変換に失敗しました');
+        return 301;
+      },
+      readVideoFrame: async (dir, i) => { read.push(i); expect(dir).toBe(videoFramesDirOf('clip_001')); return 'data:image/png;base64,X'; },
     });
     expect(asked).toEqual([597, 0]);
     expect(read).toEqual([300, 300]);
+  });
+
+  it('範囲の頭から焼いて失敗したら、そのまま失敗にする（握りつぶさない）', async () => {
+    const d = doc({
+      clips: [slot('clip_001', 0, 10)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await expect(buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 0, toFrame: 3 },
+      stageVideo: async () => { throw new Error('読めない'); },
+      readVideoFrame: async () => 'data:image/png;base64,X',
+    })).rejects.toThrow('読めない');
   });
 });
 

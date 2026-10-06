@@ -330,10 +330,13 @@ export function videoStageWindow(
   const from = Math.max(clipFrom, fromFrame);
   const to = Math.min(clipTo, toFrame);
   if (to <= from) return null;
-  const offset = from - clipFrom;
-  // 焼く長さは「範囲の最後のコマ」まで＝それ以上は要らない。使える長さ（`spec.durationSec`）も越えない。
-  const durationSec = Math.max(0, Math.min(spec.durationSec - offset / fps, (to - from) / fps));
-  return { sourceStartSec: spec.sourceStartSec + (offset / fps) * spec.speed, durationSec, speed: spec.speed, offset };
+  // ⚠️ **範囲は「焼いたコマの何番か」で決める**（PR #1357 レビュー 🔴）＝部品の何コマ目かで決めると、
+  //   使える長さ（差し込み口の「ここまで」）で凍った所より後ろの範囲で、凍ったコマでなく素材の先のコマを焼いてしまう。
+  //   読む側（`stagedFrameIndexAt`）と同じ上限で頭打ちにする。
+  const cap = stagedIndexCap(p, fps);
+  const lo = Math.min(from - clipFrom, cap);
+  const hi = Math.min(to - 1 - clipFrom, cap);
+  return { sourceStartSec: spec.sourceStartSec + (lo / fps) * spec.speed, durationSec: (hi - lo) / fps, speed: spec.speed, offset: lo };
 }
 
 /**
@@ -391,7 +394,12 @@ function stagedFrameIndexAt(p: VideoPlacement, frameIndex: number, fps: number):
   // 部品の尺より短いとき、書き出しは焼けた枚数で最後のコマに凍る。ここで同じだけ止めないと
   // **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export・ADR-0001）。
   // 上限は書き出しが焼く枚数と同じ数え方（Rust は `ceil(尺×fps)+1` 枚＝最後の番号は `ceil(尺×fps)`）。
-  return Math.min(local, Math.ceil(p.durationSec * fps));
+  return Math.min(local, stagedIndexCap(p, fps));
+}
+
+/** 焼いたコマの最後の番号（使える長さで凍る所）＝Rust は `ceil(尺×fps)+1` 枚。数え方を1か所に（`videoStageWindow` と共有）。 */
+function stagedIndexCap(p: VideoPlacement, fps: number): number {
+  return Math.ceil(p.durationSec * fps);
 }
 
 /**

@@ -614,10 +614,15 @@ describe('描く範囲だけを焼き出す（videoStageWindow／videoFrameIndex
     { name: '置いた位置の端数・素材の途中から・1.5倍速', clip: slot({ startSec: 0.517, durationSec: 12, sourceStartSec: 2.3, speed: 1.5 }), sourceLenSec: 100 },
     { name: '素材が置いた長さより短い（最後のコマで止まる）', clip: slot({ startSec: 1, durationSec: 10, sourceStartSec: 1 }), sourceLenSec: 4 },
   ];
+  // 差し込み口の「ここまで」で使える長さが部品の尺より短い（PR #1357 レビュー 🔴）＝凍った所より後ろの範囲でも凍ったコマ
+  const capped: VideoPlacement = { ...place(slot({ startSec: 0, durationSec: 20 })), durationSec: 5 };
   const windows = [[0, 91], [200, 260], [500, 600], [0, 900]];
-  for (const { name, clip, sourceLenSec } of cases) {
+  const all: { name: string; p: VideoPlacement; sourceLenSec: number }[] = [
+    ...cases.map((c) => ({ name: c.name, p: place(c.clip), sourceLenSec: c.sourceLenSec })),
+    { name: '使える長さが部品の尺より短い（ここまで）', p: capped, sourceLenSec: 100 },
+  ];
+  for (const { name, p, sourceLenSec } of all) {
     it(`${name}：範囲のどのコマも、丸ごと焼いたときと同じ素材の時刻`, () => {
-      const p = place(clip);
       const full = stage(p.sourceStartSec, p.durationSec, p.speed, sourceLenSec);
       for (const [from, to] of windows) {
         const w0 = videoStageWindow(p, from, to, fps);

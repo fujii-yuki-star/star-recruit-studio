@@ -120,8 +120,8 @@ export async function buildTimelineFrames(
       // 出てくる部品も**範囲の外のコマは焼かない**（頭の3秒のために45分ぶんを取り出していた）。
       const win = videoStageWindow(placement, fromFrame, toFrame, plan.fps);
       if (!win) continue;
-      const dirName = videoFramesDirOf(placement.clip.id, placement.layerId);
-      const stage = (w: { sourceStartSec: number; durationSec: number; speed: number }): Promise<number> =>
+      const baseDir = videoFramesDirOf(placement.clip.id, placement.layerId);
+      const stage = (w: { sourceStartSec: number; durationSec: number; speed: number }, dirName: string): Promise<number> =>
         opts.stageVideo!({
           clipId: placement.clip.id,
           assetId: placement.assetId,
@@ -131,13 +131,25 @@ export async function buildTimelineFrames(
           speed: w.speed,
           fps: plan.fps,
         });
-      let count = await stage(win);
+      // ⚠️ **始まりの違う焼き出しは別のフォルダへ**（PR #1357 レビュー 🔴）＝置き場は書き出しの頭で1回しか空にならず、
+      //   焼き出しは「あるだけ数える」ので、同じフォルダだと前の範囲のコマが残って数えられる（尻の窓に先頭の絵が出る）。
+      let dirName = win.offset > 0 ? `${baseDir}_f${win.offset}` : baseDir;
       let offset = win.offset;
-      // ⚠️ **範囲が素材の終わりより後ろ**（素材が置いた長さより短く、最後のコマで止まっている所）は1枚も取れない＝
-      //   そのときだけ丸ごと焼き直す（止まったコマ＝素材の最後のコマが要る。素材の長さはここでは分からない）。
+      let count: number;
+      try {
+        count = await stage(win, dirName);
+      } catch (e) {
+        // ⚠️ **範囲が素材の終わりより後ろ**（素材が置いた長さより短く、最後のコマで止まっている所）は1枚も取れず、
+        //   焼き出しは失敗で返す（Rust＝0枚は失敗・PR #1357 レビュー 🔴）。範囲の頭が0なら丸ごとと同じ＝そのまま失敗。
+        if (offset === 0) throw e;
+        count = 0;
+      }
       if (count === 0 && offset > 0) {
-        count = await stage(videoStagePlan(placement));
+        // そのときだけ丸ごと焼き直す（止まったコマ＝素材の最後のコマが要る。素材の長さはここでは分からない）。
+        // 本当に読めない素材なら、ここでも失敗して投げる（握りつぶさない）。
+        dirName = baseDir;
         offset = 0;
+        count = await stage(videoStagePlan(placement), dirName);
       }
       staged.push({ placement, dirName, count, offset });
     }
