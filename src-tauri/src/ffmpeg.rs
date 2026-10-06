@@ -2297,7 +2297,8 @@ fn plan_join_chunks<'a>(
     // - ⚠️ **窓の中だけでなく b より後ろ全部**と比べる＝切れ目をずらして塊が延びても必ず満たす（窓だけだと、延びたぶんを
     //   一度も比べない＝実際に反例があった）。後ろ側の最小値を先に作る。
     // - 余裕は1コマ（`min_gap_sec`）＝1回でつなぐとき前側が守っている「最低1コマ残る」と同じ。
-    // 満たさなければ切れ目を後ろへずらす（ずらし切れなければ最後まで1つの塊＝その文書だけ従来どおり1回でつなぐのと同じ）。
+    // 満たさなければ切れ目を後ろへずらす。⚠️ **最後の場面の頭はいつも切れる**（後ろが無い）ので塊は必ず2つ以上＝
+    // 全体が1つの塊になることは無い（PR #1361 再レビュー 🟡 は届かないと確かめた）。ずらし続けると前の塊が大きくなる＝記録に残す。
     let mut later_min = vec![f64::INFINITY; n + 1];
     for g in (1..n).rev() {
         later_min[g] = later_min[g + 1].min(starts[g]);
@@ -8339,7 +8340,7 @@ mod join_chunk_tests {
                 };
                 for g in c.first + 1..secs.len() {
                     assert!(
-                        want_starts[g] >= want_starts[c.first] + entry_d,
+                        want_starts[g] >= want_starts[c.first] + entry_d + 1.0 / 30.0 - 1e-9,
                         "塊の頭 {} の入りの切り替えに、場面 {} が食い込む",
                         c.first,
                         g
@@ -8413,6 +8414,19 @@ mod join_chunk_tests {
             .map(|c| simulate(&secs[c.first..c.end], &c.steps).0)
             .collect();
         assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+    }
+
+    /// ⚠️ 後ろの長い切り替えが頭近くまで食い込むと、切れ目は最後の場面の頭までずれる（塊は2つ・前の塊が大きい）。
+    /// それでも長さと位置は1回でつなぐときと同じ（同 🟡＝「全体が1つの塊」には届かない）。
+    #[test]
+    fn cut_shifts_to_the_last_scene_when_everything_overlaps() {
+        let n = 30;
+        let mut secs = vec![1.0; n];
+        let mut entries: Vec<Option<f64>> = vec![None; n];
+        secs[n - 1] = 40.0;
+        entries[n - 1] = Some(28.5); // 全体の頭近くまで食い込む
+        let steps = build(&secs, &entries);
+        assert_eq!(assert_sound(&secs, &steps), vec![0, n - 1]);
     }
 
     #[test]
