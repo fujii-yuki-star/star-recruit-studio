@@ -64,4 +64,23 @@ describe("動きのひな形（#1349）", () => {
     act(() => useTimelineStore.getState().undo());
     expect(useTimelineStore.getState().doc!.animations ?? []).toEqual([]);
   });
+
+  // PR #1353 レビュー 🟡：強調は再生位置から＝帯の外なら押せない（黙って帯の始まりへ寄せない）。
+  it("強調は再生位置が帯の外なら押せず、理由が出る（登場・退場は押せる）", () => {
+    const box = open(10); // 帯は 2〜6 秒
+    fireEvent.change(box.getByRole("combobox"), { target: { value: "emph-zoom" } });
+    const btn = box.getByRole("button", { name: "当てる" });
+    expect(btn).toBeDisabled();
+    expect(btn.getAttribute("title") ?? "").not.toBe("");
+    fireEvent.change(box.getByRole("combobox"), { target: { value: "in-fade" } });
+    expect(box.getByRole("button", { name: "当てる" })).not.toBeDisabled();
+  });
+
+  it("選んだ長さが帯に収まらないときは、押す前に実際の長さを言う", () => {
+    const box = open();
+    fireEvent.change(box.getByRole("combobox"), { target: { value: "in-fade" } });
+    fireEvent.change(box.getByRole("spinbutton"), { target: { value: "3" } });
+    fireEvent.blur(box.getByRole("spinbutton"));
+    expect(box.getByRole("status")).toHaveTextContent("この帯では 2 秒になります");
+  });
 });

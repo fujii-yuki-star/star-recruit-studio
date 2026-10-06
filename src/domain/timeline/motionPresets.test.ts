@@ -6,6 +6,7 @@ import { interpolateKeyframes } from "../project/keyframes";
 import { EDIT_BLOCKED } from "./edit";
 import {
   applyMotionPreset,
+  motionPresetEffectiveSec,
   EMPHASIS_BOUNCE_PX,
   EMPHASIS_SHAKE_PX,
   EMPHASIS_ZOOM_SCALE,
@@ -61,10 +62,22 @@ describe("motionPresetKeyframes", () => {
     expect(Math.min(...b.map((x) => x.y ?? 0))).toBe(-EMPHASIS_BOUNCE_PX);
   });
 
-  it("長さは 0.1〜5 秒、さらに帯の長さに収める（はみ出した点は効かない）", () => {
-    expect(motionPresetKeyframes({ place: "in", kind: "fade", durationSec: 99 }, { durationSec: 10 }).at(-1)!.timeSec).toBe(MOTION_PRESET_MAX_SEC);
-    expect(motionPresetKeyframes({ place: "in", kind: "fade", durationSec: 3 }, { durationSec: 1 }).at(-1)!.timeSec).toBe(1);
-    expect(motionPresetKeyframes({ place: "out", kind: "fade", durationSec: 3 }, { durationSec: 1 })[0].timeSec).toBe(0);
+  it("長さは 0.1〜5 秒・登場と退場は帯の半分まで（食い合わない）・強調は帯の長さまで", () => {
+    expect(motionPresetKeyframes({ place: "in", kind: "fade", durationSec: 99 }, { durationSec: 20 }).at(-1)!.timeSec).toBe(MOTION_PRESET_MAX_SEC);
+    expect(motionPresetKeyframes({ place: "in", kind: "fade", durationSec: 3 }, { durationSec: 1 }).at(-1)!.timeSec).toBe(0.5);
+    expect(motionPresetKeyframes({ place: "out", kind: "fade", durationSec: 3 }, { durationSec: 1 })[0].timeSec).toBe(0.5);
+    expect(motionPresetEffectiveSec({ place: "emphasis", kind: "zoom", durationSec: 3 }, 1)).toBe(1);
+    expect(motionPresetEffectiveSec({ place: "in", kind: "fade", durationSec: 0.6 }, 4)).toBe(0.6);
+  });
+
+  it("強調はいまの動きの上に足す（倍率は掛ける）・動き方は付けない", () => {
+    const base = [{ timeSec: 0, scale: 2 }, { timeSec: 4, scale: 2 }];
+    const z = motionPresetKeyframes({ place: "emphasis", kind: "zoom", durationSec: 1 }, clip, { atSec: 1, base });
+    expect(z.map((x) => x.scale)).toEqual([2, 2 * EMPHASIS_ZOOM_SCALE, 2]);
+    expect(z.every((x) => x.easing === undefined)).toBe(true);
+    const sh = motionPresetKeyframes({ place: "emphasis", kind: "shake", durationSec: 1 }, clip, { atSec: 0, base: [{ timeSec: 0, x: 100 }] });
+    expect(sh[0].x).toBe(100);
+    expect(sh.at(-1)!.x).toBe(100);
   });
 });
 
@@ -84,6 +97,28 @@ describe("applyMotionPreset", () => {
     const kfs = r.doc.animations![0].keyframes;
     expect(kfs.filter((k) => k.x != null).map((k) => [k.timeSec, k.x])).toEqual([[0, 100], [4, 300]]);
     expect(kfs.filter((k) => k.scale != null)).toHaveLength(3);
+  });
+
+  it("登場は当て直すと置き換わる＝長さを変えても古い点が残らない・種類を替えても前の項目が混ざらない・その側の外の動きは残す", () => {
+    let d = doc({ animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 2.5, rotation: 10 }, { timeSec: 3.2, rotation: 0 }] }] });
+    const apply = (p: Parameters<typeof applyMotionPreset>[2]) => { const r = applyMotionPreset(d, "clip_001", p); if (!r.ok) throw new Error("断られた"); d = r.doc; };
+    apply({ place: "in", kind: "fade", durationSec: 0.6 });
+    apply({ place: "in", kind: "fade", durationSec: 1 });
+    const op = (): number[] => d.animations![0].keyframes.filter((k) => k.opacity != null).map((k) => k.timeSec);
+    expect(op()).toEqual([0, 1]);
+    apply({ place: "in", kind: "pop", durationSec: 1 });
+    apply({ place: "in", kind: "fade", durationSec: 1 });
+    expect(d.animations![0].keyframes.some((k) => k.scale != null)).toBe(false);
+    // その側の外（帯の真ん中）の動きは残る
+    expect(d.animations![0].keyframes.filter((k) => k.rotation != null).map((k) => k.timeSec)).toEqual([2.5, 3.2]);
+  });
+
+  it("退場の置き換えは終わり側だけ（登場の点は残す）", () => {
+    let d = doc();
+    for (const p of [{ place: "in", kind: "fade", durationSec: 1 }, { place: "out", kind: "fade", durationSec: 1 }, { place: "out", kind: "fade", durationSec: 0.5 }] as const) {
+      const r = applyMotionPreset(d, "clip_001", p); if (!r.ok) throw new Error("断られた"); d = r.doc;
+    }
+    expect(d.animations![0].keyframes.map((k) => k.timeSec)).toEqual([0, 1, 3.5, 4]);
   });
 
   it("固定した列・見つからない部品は断る（文書を変えない）", () => {

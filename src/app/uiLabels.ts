@@ -1913,4 +1913,8 @@ export const MOTION_PRESET_OPTIONS: readonly { id: string; label: string; preset
   { id: "emph-shake", label: "強調：震える", preset: { place: "emphasis", kind: "shake" } },
   { id: "emph-bounce", label: "強調：はねる", preset: { place: "emphasis", kind: "bounce" } },
 ];
-export const MOTION_PRESET_HINT = "登場は帯の始まりから、退場は帯の終わりまで、強調は再生位置から当てます。いまある動きは消さずに重ねます（取り消しで戻せます）。";
+export const MOTION_PRESET_HINT = "登場は帯の始まりから、退場は帯の終わりまで、強調は再生位置から当てます。当て直すと、その側（始まり／終わりから帯の半分まで）の動きを置き換えます（真ん中の動きは残します）。帯の長さを変えたら当て直してください。取り消しで戻せます。";
+/** 選んだ長さが帯に収まらないとき（登場・退場は帯の半分まで・#1349）。 */
+export function motionPresetShortenedMessage(sec: number): string {
+  return `この帯では ${Math.round(sec * 100) / 100} 秒になります（登場・退場は帯の半分まで）。`;
+}
