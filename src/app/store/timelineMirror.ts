@@ -31,6 +31,8 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "resetHistoryGroup",
   // 引数が窓をまたげない（`File` は写せない）。窓の外からの落とし込みはパスで来る `placeDroppedFiles` を通る。
   "addAsset",
+  // 字幕ファイルのバイト列も窓をまたげない（ADR-0055）＝読み込むボタンは本体の窓の「置く」欄にだけある。
+  "importSubtitleFile",
 ]);
 
 /**

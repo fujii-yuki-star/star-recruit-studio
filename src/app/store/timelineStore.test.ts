@@ -11,7 +11,7 @@ import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { EDIT_BLOCKED } from '../../domain/timeline/edit';
 import { EXPORT_RUN_PHASE } from '../../domain/export/exportProgress';
-import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
+import { IMPORT_BUSY_MESSAGE, subtitleFileMessage } from '../uiLabels';
 import { MAX_INLINE_ASSET_BYTES } from '../../domain/constants';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -1503,5 +1503,33 @@ describe('音の素材の長さ（#1348）', () => {
     release({ durationSec: 9 });
     await p;
     expect(useTimelineStore.getState().audioDurations.asset_001).toBeUndefined();
+  });
+});
+
+// ADR-0055・#1351：字幕ファイルを読み込んで新しい列へ並べる。
+describe('importSubtitleFile', () => {
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const setDoc = () => useTimelineStore.setState({ doc: doc() as never, history: { past: [], future: [] }, importError: null, _historyGroupDepth: 0 });
+
+  it('並べて、並べた数を知らせる・取り消し1回で全部消える', () => {
+    setDoc();
+    useTimelineStore.getState().importSubtitleFile(enc('1\n00:00:01,000 --> 00:00:02,000\nあ\n\n2\n00:00:03,000 --> 00:00:04,000\nい\n\n3\nこわれた\n'));
+    const subs = useTimelineStore.getState().doc!.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle);
+    expect(subs).toHaveLength(2);
+    expect(useTimelineStore.getState().importError).toContain('字幕を 2 個');
+    expect(useTimelineStore.getState().importError).toContain('1 個は読めなかった');
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.clips.some((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)).toBe(false);
+  });
+
+  it('読めない・何も無いは断り、文書を変えない', () => {
+    setDoc();
+    const before = useTimelineStore.getState().doc;
+    useTimelineStore.getState().importSubtitleFile(new Uint8Array([0x80, 0xff, 0x80, 0xff, 0xfe]));
+    expect(useTimelineStore.getState().importError).toBe(subtitleFileMessage.SUBTITLE_FILE_UNREADABLE);
+    useTimelineStore.getState().importSubtitleFile(enc('ただの文章です\n'));
+    expect(useTimelineStore.getState().importError).toBe(subtitleFileMessage.SUBTITLE_FILE_EMPTY);
+    expect(useTimelineStore.getState().doc).toBe(before);
+    expect(useTimelineStore.getState().history.past).toHaveLength(0);
   });
 });

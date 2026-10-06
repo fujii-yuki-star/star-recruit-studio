@@ -178,6 +178,7 @@ import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { MotionPathOverlay } from "../components/MotionPathOverlay";
+import { SubtitleFileImportButton } from "../components/SubtitleFileImportButton";
 import { keyPositionAfterDrag, motionPathOf } from "../../domain/timeline/motionPath";
 import { MOTION_PRESET_DEFAULT_SEC, MOTION_PRESET_MAX_SEC, MOTION_PRESET_MIN_SEC, motionPresetEffectiveSec, type MotionPreset } from "../../domain/timeline/motionPresets";
 import type { FreeElement } from "../../domain/project/types";
@@ -6168,6 +6169,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 variant="secondary"
                 withAudio
                 label="写真・動画・音楽を取り込む"
+              />
+              {/* 字幕ファイル（ADR-0055）＝新しい列に並べる＝置ける列の有無に関係ない。 */}
+              <SubtitleFileImportButton
+                onBytes={(bytes) => useTimelineStore.getState().importSubtitleFile(bytes)}
+                disabledReason={(exporting ? exportingHint : isPlaying ? playingHint : null) ?? null}
               />
               {placeableTracks.length > 0 && (
                 <>

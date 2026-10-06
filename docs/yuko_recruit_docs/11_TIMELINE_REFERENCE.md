@@ -65,6 +65,7 @@ schemaVersion ●（現行 `"1.14"`・場面形式とは独立に進む） / for
   「トリミング位置をユーザー調整可能にする」がこれ）。**切り抜き（`crop`）とは別物**＝あちらは箱の辺を隠す。
 - **切り抜き**（#634・**タイムライン形式だけの語彙**）: crop ○（`{top,right,bottom,left}`＝**箱の各辺を「箱の大きさに対する割合」で隠す**・各辺 0〜1未満・同じ軸の合計も 1 未満＝`§8` V30）。**中身は動かない**（隠れるだけ）。`FreeElement` には足さない（場面形式は凍結＝ADR-0032）＝描画は `layoutTimelineAt` が `LayoutItem.clipRect` として渡す。
 - `kind='subtitle'`（**読み上げと連動**・ADR-0032 決定24・#633）: voiceClipId ○（連動先の読み上げクリップ id＝`clip_NNN`。**文言と時間が追従**・自分の `text` があればそちらが優先。解決と不変条件は §7.6.2.3／§8 V29）
+  - ⚠️ **連動しない字幕クリップもある**＝字幕ファイル（.srt／.vtt）から読み込んだ字幕（ADR-0055）は `voiceClipId` を持たず、自分の `text` だけで描く（新しい項目は足していない＝schema は変えない）。
 - 素材のトリム（非破壊・ADR-0024）: sourceStartSec ○（素材のどこから使うか） / speed ○（>0）。**`kind='template'` の `slotClips` とは別物**＝こちらは自分が持つ素材、あちらは枠の中の差し込み口ごと。
 - **動画の元の音**（#512 段2・`kind='slot'` に直接置いた動画）: useOriginalAudio ○（**未指定＝鳴らさない**＝既に作った動画の音が版上げで変わらない） / originalAudioVolume ○（未指定＝`ORIGINAL_AUDIO_VOLUME`）。⚠️ **差し込み口は3段の継承**（#512 段3b・ADR-0028）＝`slotClips[layerId]` → **素材既定 `asset.clip`** → 既定（`§6` null=継承）。素材側で「元の音を使う」にした動画を持ち込むと、指定しなくても鳴る＝**止めるときは明示的に `false` を書く**（キーを消すと継承へ戻る）。**素材に音が入っているときだけ有効**（`metadata.hasAudio === true`＝場面形式と同じ規準・ADR-0026②）。値域は場面形式の `$defs/Clip` と**共有**（`$ref`）＝同じ制約を2か所に書かない。解決は `placementOriginalAudio`（§7.6.2.2）＝**差し込み口は `slotClips` の同名フィールド**（`$ref` 共有）。**立ち絵の動画は静止画のまま**。
 - **kind 別の必須は domain 検証で担保**（`FreeElement` と同じ流儀＝§8）。ただし `voice` だけは schema の `if/then` でも必須にする（「空の声」は描画既定で補えないため）。
