@@ -1467,6 +1467,31 @@ describe('音の素材の長さ（#1348）', () => {
     expect(placed().durationSec).toBe(5);
   });
 
+  // PR #1352 レビュー 🟡：選び直しで長さが消える／前のファイルの長さが残る、を作らない。
+  it('選び直すと測り直し、開いたときに測った前の長さは捨てる', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ durationSec: 1.25, hasAudio: true });
+    await open();
+    await vi.waitFor(() => expect(useTimelineStore.getState().audioDurations.asset_001).toBe(1.25));
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('saved');
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.wav');
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ durationSec: 3, hasAudio: true });
+    await useTimelineStore.getState().relinkAssetByPath('asset_001', 'C:/se/新しいポン.wav');
+    expect(useTimelineStore.getState().doc!.assets[0].metadata).toEqual({ durationSec: 3 });
+    expect(useTimelineStore.getState().audioDurations.asset_001).toBeUndefined();
+    useTimelineStore.getState().addAudioClip({ assetId: 'asset_001', trackId: 'track_001', startSec: 0 });
+    expect(placed().durationSec).toBe(3);
+  });
+
+  it('閉じて同じ動画を開き直しても測る（閉じている間に打ち切られた前の測りに引きずられない）', async () => {
+    let release: (v: { durationSec: number }) => void = () => {};
+    vi.spyOn(assetFsMod, 'probeVideo').mockReturnValueOnce(new Promise((r) => { release = r; })).mockResolvedValue({ durationSec: 2, hasAudio: true });
+    await open();
+    useTimelineStore.getState().closeTimelineProject();
+    release({ durationSec: 9 }); // 閉じている間に返る＝前の測りはここで打ち切られる
+    await open();
+    await vi.waitFor(() => expect(useTimelineStore.getState().audioDurations.asset_001).toBe(2));
+  });
+
   it('測っている間に別の動画を開いたら書かない（素材の番号は動画ごと）', async () => {
     let release: (v: { durationSec: number }) => void = () => {};
     // 1つ目の動画の測りだけ止めておく（2つ目の動画の測りは測れない＝書くのは1つ目の結果だけ）。

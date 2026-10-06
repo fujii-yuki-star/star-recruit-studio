@@ -7,7 +7,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } 
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
-import { probeAndThumbVideo, probeAudioDuration, reserveAssetId } from "./assetImport";
+import { probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
@@ -1054,6 +1054,9 @@ async function measureAudioDurationsOf(
  */
 function emptyState() {
   resetAnalysisQueue();
+  // 音の長さの測りも手放す（#1348・PR #1352 レビュー 🟡）＝閉じて同じ動画を開き直したとき、閉じている間に打ち切られた
+  //   前の測りを「測っている最中」と見て、新しく開いた分が測られないまま残っていた。
+  audioMeasureRun = null;
   return {
     doc: null,
     loadError: null,
@@ -1877,7 +1880,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const { fileName, asset: shape } = newAssetFrom(srcPath, [], target.assetId);
       const savedPath = await importAssetByPath(doc.projectId, fileName, srcPath);
       const relPath = savedPath ?? shape.filePath;
-      const enrich = target.assetType === ASSET_TYPE.video ? await probeAndThumbVideo(doc.projectId, relPath) : null;
+      // 音は長さを測り直す（#1348・PR #1352 レビュー 🟡）＝測らないと選び直しで長さが消え、置くとまた仮の 10 秒になる。
+      const enrich: VideoEnrichment | null = target.assetType === ASSET_TYPE.video
+        ? await probeAndThumbVideo(doc.projectId, relPath)
+        : target.assetType === ASSET_TYPE.bgm
+          ? { metadata: (await probeAudioDuration(doc.projectId, relPath)) ?? undefined }
+          : null;
       // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
       // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
       const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(doc.projectId, relPath));
@@ -1900,6 +1908,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
         ...(r.clampedUses > 0 ? { importError: clipClampedMessage(r.clampedUses, PROJECT_FORMAT.timeline) } : { importError: null }),
         assetSrcById: freshUrl ? { ...get().assetSrcById, [assetId]: freshUrl } : get().assetSrcById,
+        // 開いたときに測った前のファイルの長さを捨てる（#1348＝別の長さの帯ができない・測り直しの対象から外れない）。
+        audioDurations: Object.fromEntries(Object.entries(get().audioDurations).filter(([k]) => k !== assetId)),
         // ⚠️ **コマ列・波形の下書きも捨てる**（PR レビュー 🟡）＝あれは**パス基準**のキャッシュ
         //（`${filePath}#範囲`）で、`ensureClipAnalysis` は「もうある」だけで打ち切るので、
         //   落とさないと**前のファイルの絵と波形が帯に残り続ける**（表示の URL だけ取り直しても足りない）。
