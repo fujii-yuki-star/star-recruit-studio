@@ -877,6 +877,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const playRef = useRef({ playing: false, total: 0, exporting: false, fps: FPS, play, pause, seekFrames: (_frames: number) => {}, seekTo: (_sec: number) => {} });
   /** `Ctrl+K` の受け皿（毎レンダー最新にする＝`playRef`/`removeRef` と同じ形）。 */
   const splitRef = useRef<() => void>(() => {});
+  /** `Ctrl+D`＝選んだ部品を複製（#1350）。ボタン・右クリックの「複製」と同じ入口・同じ断り。 */
+  const duplicateRef = useRef<() => void>(() => {});
   // ⚠️ **キーとボタンで同じ入口を通す**（ADR-0034 決定19）＝キーだけ理由が出ない、を作らない。
   const deleteRangeRef = useRef<() => void>(() => {});
   const rangeEdgeRef = useRef<(edge: "in" | "out") => void>(() => {});
@@ -1030,6 +1032,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         splitRef.current();
+        return;
+      }
+      // **`Ctrl+D`＝選んだ部品を複製**（#1350・業界の型）。選んでいなければ奪わない（既定の動きに任せる）。
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "d") {
+        if (useTimelineStore.getState().selectedClipIds.length === 0) return;
+        e.preventDefault();
+        duplicateRef.current();
         return;
       }
       // **`Shift+Delete`＝範囲を削除して詰める**（#1193）。⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝
@@ -2283,6 +2292,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     };
     rangeEdgeRef.current = (edge) => setRangeEdge(edge, useTimelineStore.getState().playheadSec);
     markerAddRef.current = addMarkerAtPlayhead;
+    duplicateRef.current = () => {
+      // 断る順は右クリックの「複製」（`duplicateMenuGuard`）と同じ＝2つ以上 → 書き出し中。その先（固定・隠した列・重なり）は
+      // store の複製（`duplicateClip`）が同じ理由で断る＝ここで書き写さない（キーだけ黙って何もしない、も作らない）。
+      if (selectedClipIds.length > 1) { setEditBlocked(EDIT_BLOCKED.singleClipOnly, PANEL_ID.arrange); return; }
+      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, PANEL_ID.arrange); return; }
+      duplicateSelectedClip();
+    };
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
       if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
@@ -3651,6 +3667,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         // 「選んだ部品」の欄と同じ（`editGuard`）＝同じ状態を画面の場所で別の言い方にしない（ADR-0026②）。
         {
           label: DUPLICATE_LABEL,
+          shortcut: SHORTCUT_KEYS.duplicate,
           ...duplicateMenuGuard,
           onSelect: duplicateSelectedClip,
         },
@@ -4458,11 +4475,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={duplicateSelectedClip}
-                {...editGuard(
+                // 押せるときの説明に近道キーを添える（分けるの「（Ctrl+K）」と同じ流儀・#1350 レビュー）。
+                {...((g) => ({ ...g, title: g.title ?? `選んだ部品を複製して、すぐ後ろに置きます（${SHORTCUT_KEYS.duplicate}）` }))(editGuard(
                   selectedClipIds.length > 1
                     ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
                     : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
-                )}
+                ))}
               >
                 {DUPLICATE_LABEL}
               </button>
