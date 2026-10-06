@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFailedMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
+import { exportFailedMessage, subtitleFileSkippedScenesMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
@@ -21,6 +21,9 @@ import { applyDuckingToMix, planBgmMix, resolveBgmExportRuns, resolveSpeechSpans
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import { AudioAutoField } from "../components/AudioAutoField";
+import { SubtitleFileExportButton } from "../components/SubtitleFileExportButton";
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND } from "../../domain/timeline/bake";
+import { subtitleCuesOf } from "../../domain/timeline/subtitleCues";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage, endExportDiskWatch, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
@@ -160,6 +163,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
    * 走行中の語彙（`isExportBusy`）は画面横断で編集の可否も決めるので広げず、**この画面の中だけ**で持つ。
    */
   const [starting, setStarting] = useState(false);
+  /** 字幕ファイルを書き出した結果の知らせ（ADR-0055・`ok`＝書けた）。 */
+  const [subtitleExportNotice, setSubtitleExportNotice] = useState<{ message: string; ok: boolean } | null>(null);
   /** 押した瞬間に**いまの値**で見るための控え（描画時のクロージャでは1回ぶん古い）。 */
   const startingRef = useRef(false);
   // ⚠️ **どの出口でも、ちょうど1回だけ返す**（PR #1197 レビュー 🔴／🟡）＝返さないと、頼んだ側（AI）は
@@ -638,6 +643,34 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
           <p className="field-hint">書き出した動画に反映されます。仕上がり確認でも同じ設定で表示されます。</p>
+          {/* 字幕ファイル（ADR-0055 決定4）＝**焼き出しを通して**タイムライン形式と同じ取り出し方で出す（規則を2つ書かない）。
+              ⚠️ 上の「字幕を入れる」とは別＝動画に字幕を焼き込まなくても、字幕だけを別のファイルで渡せる。 */}
+          <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
+            <SubtitleFileExportButton
+              className="btn btn-secondary text-sm"
+              cuesOf={() => {
+                const st = useProjectStore.getState();
+                const templateById = new Map(st.templates.map((t) => [t.templateId, t]));
+                const { doc, notes } = st._bake({ kind: BAKE_RANGE_KIND.whole }, st.meta.projectName);
+                // ⚠️ **焼き出しが持っていけなかった字幕は黙って抜かない**（PR #1356 レビュー 🟡）＝自由配置の字幕ボックスが
+                //   セリフに追従する場面は、動画には出るのに字幕ファイルには入らない。その場面を知らせに添える。
+                const skipped = notes.find((n) => n.code === BAKE_NOTE_CODE.dialogueSubtitle);
+                return {
+                  cues: subtitleCuesOf(doc, (id) => templateById.get(id)),
+                  note: skipped ? subtitleFileSkippedScenesMessage(skipped.sceneNumbers) : undefined,
+                };
+              }}
+              defaultName={fileName}
+              disabledReason={null}
+              onMessage={(message, ok) => setSubtitleExportNotice({ message, ok })}
+            />
+          </div>
+          {subtitleExportNotice && (
+            <div className={`notice ${subtitleExportNotice.ok ? "notice-info" : "notice-warn"} row-between mt`} role={subtitleExportNotice.ok ? "status" : "alert"}>
+              <span>{subtitleExportNotice.message}</span>
+              <button className="btn btn-ghost text-sm" onClick={() => setSubtitleExportNotice(null)}>閉じる</button>
+            </div>
+          )}
           <hr className="divider" />
           {/* 声の表記の出し方（ADR-0025・#359）。⚠️ **About 画面の表記は必須で不変**（`13 §4`）。 */}
           <CreditDisplayField disabled={busy} />

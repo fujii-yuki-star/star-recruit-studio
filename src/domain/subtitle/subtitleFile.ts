@@ -153,6 +153,8 @@ export function formatSubtitleTime(sec: number, kind: SubtitleFileKind): string 
   return `${pad(h)}:${pad(m)}:${pad(s)}${kind === SUBTITLE_FILE_KIND.srt ? ',' : '.'}${pad(f, 3)}`;
 }
 
+const escapeVtt = (t: string): string => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /**
  * 字幕ファイルの文字を組み立てる（ADR-0055 決定2＝SRT は BOM 付き・VTT は BOM なし）。
  * ⚠️ 空行は塊の区切りなので、文の中の空行は詰める（読み直したときに塊が割れない）。
@@ -163,9 +165,18 @@ export function formatSubtitleFile(cues: readonly SubtitleCue[], kind: SubtitleF
     .filter((c) => c.endSec > c.startSec && body(c.text) !== '')
     .map((c, i) => {
       const range = `${formatSubtitleTime(c.startSec, kind)} --> ${formatSubtitleTime(c.endSec, kind)}`;
-      return kind === SUBTITLE_FILE_KIND.srt ? `${i + 1}\n${range}\n${body(c.text)}` : `${range}\n${body(c.text)}`;
+      // ⚠️ VTT は `<…>` をタグ・`&` を文字参照として読む（PR #1356 レビュー）＝文の中の `&`・`<`・`>` は置き換える
+      //   （「<株>」が消える・`-->` が時刻の行に見えるのを防ぐ）。読み込み（`stripMarkup`）が戻すので往復で変わらない。
+      if (kind === SUBTITLE_FILE_KIND.vtt) return `${range}\n${escapeVtt(body(c.text))}`;
+      return `${i + 1}\n${range}\n${body(c.text)}`;
     });
   return kind === SUBTITLE_FILE_KIND.srt
     ? `${BOM}${parts.join('\n\n')}\n`
     : `WEBVTT\n\n${parts.join('\n\n')}\n`;
+}
+
+/** 保存先の拡張子から形式を決める（大文字小文字は問わない）。`.srt`／`.vtt` でなければ null。 */
+export function subtitleFileKindOfPath(path: string): SubtitleFileKind | null {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
+  return ext === SUBTITLE_FILE_KIND.srt || ext === SUBTITLE_FILE_KIND.vtt ? ext : null;
 }

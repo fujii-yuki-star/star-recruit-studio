@@ -8,6 +8,7 @@ import {
   parseSubtitleFile,
   parseSubtitleTime,
   SUBTITLE_FILE_KIND,
+  subtitleFileKindOfPath,
 } from "./subtitleFile";
 
 const SRT = `1
@@ -93,6 +94,15 @@ describe("formatSubtitleFile", () => {
     }
   });
 
+  it("VTT は文の中の & < > を置き換え、読み直すと元に戻る（「<株>」が消えない）", () => {
+    const c = [{ startSec: 1, endSec: 2, text: "<株>A&B --> C" }];
+    const vtt = formatSubtitleFile(c, SUBTITLE_FILE_KIND.vtt);
+    expect(vtt).toContain("&lt;株&gt;A&amp;B --&gt; C");
+    expect(parseSubtitleFile(vtt).cues).toEqual(c);
+    // SRT は置き換えない（タグの約束が無い＝再生ソフトはそのまま出す）
+    expect(formatSubtitleFile(c, SUBTITLE_FILE_KIND.srt)).toContain("<株>A&B --> C");
+  });
+
   it("長さの無い・文の無い字幕は書かない", () => {
     expect(formatSubtitleFile([{ startSec: 1, endSec: 1, text: "x" }, { startSec: 1, endSec: 2, text: "  " }], SUBTITLE_FILE_KIND.vtt)).toBe("WEBVTT\n\n\n");
   });
@@ -154,5 +164,14 @@ describe("文字コードの化けを成功にしない（PR #1355 レビュー�
     expect(hasGarbledChar("こんにちは ｱｲｳ")).toBe(false);
     for (const c of [0, 0x80, 0x9f, 0xfffd]) expect(hasGarbledChar("あ" + String.fromCharCode(c)), String(c)).toBe(true);
     expect(hasGarbledChar("あ" + String.fromCharCode(0xa0))).toBe(false);
+  });
+});
+
+describe("subtitleFileKindOfPath", () => {
+  it("拡張子で形式を決める（大文字も）・それ以外は null", () => {
+    expect(subtitleFileKindOfPath("C:/a/字幕.srt")).toBe(SUBTITLE_FILE_KIND.srt);
+    expect(subtitleFileKindOfPath("D:/b.c/字幕.VTT")).toBe(SUBTITLE_FILE_KIND.vtt);
+    expect(subtitleFileKindOfPath("C:/a/字幕.txt")).toBeNull();
+    expect(subtitleFileKindOfPath("C:/a.srt/字幕")).toBeNull();
   });
 });

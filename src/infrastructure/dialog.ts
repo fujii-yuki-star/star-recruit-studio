@@ -65,6 +65,20 @@ export async function showOpenLibraryAssetsDialog(): Promise<string[]> {
   return typeof picked === 'string' ? [picked] : [];
 }
 
+/**
+ * 字幕ファイルの保存先を選ぶ（ADR-0055 決定4）。キャンセル時は null。
+ * 形式は選んだファイルの拡張子で決まる（種類の選び分けを先頭の .srt にしておく＝Windows の再生ソフトで広く読める）。
+ */
+export async function showSaveSubtitleDialog(defaultName: string): Promise<string | null> {
+  return save({
+    defaultPath: `${defaultName}.srt`,
+    filters: [
+      { name: '字幕ファイル（.srt）', extensions: ['srt'] },
+      { name: '字幕ファイル（.vtt）', extensions: ['vtt'] },
+    ],
+  });
+}
+
 /** 読み方辞書の書き出し先を選ぶ（ADR-0037 決定8）。キャンセル時は null。 */
 export async function showSaveReadingDictDialog(defaultName: string): Promise<string | null> {
   return save({

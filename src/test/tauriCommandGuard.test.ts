@@ -53,7 +53,7 @@ describe("画面側が呼ぶ Rust の口は、登録されている", () => {
   it("両側とも拾えている（数を実数で留める）", () => {
     // ⚠️ **+2**（ADR-0051）＝`local_ai_available`・`local_ai_generate`。**+1**（ADR-0052 決定4）＝`local_ai_describe_image`。**+1**（ADR-0052 決定6）＝`local_ai_prepare`。
     // ⚠️ **+1**（ADR-0053）＝`local_ai_assist`（編集の途中の手伝い）。
-    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(84);
+    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(85);
     expect(invokedNames().size, "画面側が呼ぶ口の数が変わった（足したら数も直す）").toBeGreaterThanOrEqual(70);
   });
 
