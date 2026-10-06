@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { clipIsPassThroughVideo, passThroughRatio, planTimelineExportSegments } from './exportSegments';
+import { clipIsPassThroughVideo, creditWindowCuts, passThroughRatio, planTimelineExportSegments } from './exportSegments';
 
 const NO_ANIM = (): boolean => false;
 
@@ -231,13 +231,42 @@ describe('区間に割る', () => {
   });
 
   // ⚠️ **クレジットは上に載る**（ADR-0025）＝出ている間は静止1枚で足りない。
-  it('クレジットが出ている間は焼く', () => {
+  // ⚠️ **出ている窓だけを焼く**（#352 の45分実測）＝窓の端で割らないと、頭の3秒のために全区間を焼いていた。
+  it('クレジットが出ている間だけ焼く（窓の端で割る・最後に出るコマまで焼く）', () => {
     const d = doc([videoClip({ id: 'clip_001', startSec: 0, durationSec: 10 })], {
       videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600,
         creditDisplay: { mode: 'head', seconds: 3 } },
     } as Partial<TimelineProject>);
+    // 窓は閉じた区間＝3.000 秒のコマ（90）にも出る → 91 コマ目から流せる
+    expect(planTimelineExportSegments(d)).toEqual([
+      { kind: 'frames', startSec: 0, endSec: 91 / 30 },
+      { kind: 'video', startSec: 91 / 30, endSec: 10, clipId: 'clip_001' },
+    ]);
+  });
+
+  it('既定（最初と最後）でも、長い動画＋字幕は頭と尻の窓だけを焼く', () => {
+    const d = doc([
+      videoClip({ id: 'clip_001', startSec: 0, durationSec: 600 }),
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_002', startSec: 0, durationSec: 600,
+        x: 0, y: 900, w: 1600, h: 120, text: '字幕' } as TimelineClip,
+    ], {
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as Partial<TimelineProject>);
     const segs = planTimelineExportSegments(d);
-    expect(segs.every((s) => s.kind === 'frames'), '区間の頭でクレジットが出ているのに倒した').toBe(true);
+    expect(segs.map((s) => s.kind)).toEqual(['frames', 'video', 'frames']);
+    expect(segs[0].endSec).toBeCloseTo(91 / 30, 9);
+    expect(segs[2].startSec).toBeCloseTo(597, 9); // 尻の窓は 597 秒のコマから（閉じた区間）
+    expect(passThroughRatio(segs)).toBeGreaterThan(0.98);
+  });
+
+  it('ずっと表示・非表示は割らない（見え方が変わらない）', () => {
+    expect(creditWindowCuts({ mode: 'always' }, 600, 30)).toEqual([]);
+    expect(creditWindowCuts({ mode: 'hidden' }, 600, 30)).toEqual([]);
+    expect(creditWindowCuts({ mode: 'tail', seconds: 3 }, 600, 30)).toEqual([17910]);
+    expect(creditWindowCuts(undefined, 600, 30)).toEqual([91, 17910]);
+    // 尺が窓より短いときは全部に出る＝割らない
+    expect(creditWindowCuts({ mode: 'both', seconds: 3 }, 2, 30)).toEqual([]);
   });
 
   // ⚠️ **グループに付いた動きも見る**＝中の部品に直接付いていなくても動く。
