@@ -1934,4 +1934,4 @@ export function subtitleImportedMessage(placed: number, unreadable: number, beyo
 }
 /** 字幕ファイルの読み込み・書き出しのボタン。 */
 export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
-export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
+export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";

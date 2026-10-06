@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeSubtitleBytes,
+  hasGarbledChar,
   formatSubtitleFile,
   formatSubtitleTime,
   parseSubtitleFile,
@@ -111,5 +112,47 @@ describe("decodeSubtitleBytes", () => {
     expect(decodeSubtitleBytes(u16)).toBe("こん");
     const sjis = new Uint8Array([0x82, 0xb1, 0x82, 0xf1]); // 「こん」（Shift_JIS）
     expect(decodeSubtitleBytes(sjis)).toBe("こん");
+  });
+});
+
+// PR #1355 レビュー：空行で塊に割るやり方の取りこぼし・誤読と、文字コードの化けを成功にしない。
+describe("行ごとに読む（PR #1355 レビュー）", () => {
+  it("WEBVTT の直後に空行が無くても1件目を落とさない", () => {
+    const r = parseSubtitleFile("WEBVTT\n00:00:01.000 --> 00:00:02.000\n一件目\n\n00:00:03.000 --> 00:00:04.000\n二件目\n");
+    expect(r.cues.map((c) => c.text)).toEqual(["一件目", "二件目"]);
+    expect(r.unreadable).toBe(0);
+  });
+
+  it("空行の抜けた SRT＝次の番号と時刻を文として並べない", () => {
+    const r = parseSubtitleFile("1\n00:00:01,000 --> 00:00:02,000\n文1\n2\n00:00:03,000 --> 00:00:04,000\n文2\n");
+    expect(r.cues).toEqual([{ startSec: 1, endSec: 2, text: "文1" }, { startSec: 3, endSec: 4, text: "文2" }]);
+  });
+
+  it("NOTE の直後に空行が無くても、続く字幕を読む", () => {
+    const r = parseSubtitleFile("WEBVTT\n\nNOTE 注釈\n00:00:01.000 --> 00:00:02.000\n読める\n");
+    expect(r.cues.map((c) => c.text)).toEqual(["読める"]);
+  });
+
+  it("全角の数字・記号の時刻も読む", () => {
+    const r = parseSubtitleFile("１\n００：００：０１，０００　－－＞　００：００：０２，５００\n全角\n");
+    expect(r.cues).toEqual([{ startSec: 1, endSec: 2.5, text: "全角" }]);
+  });
+});
+
+describe("文字コードの化けを成功にしない（PR #1355 レビュー）", () => {
+  it("BOM の無い UTF-16（NUL を含む）は読めない扱い", () => {
+    const u16 = new Uint8Array([0x31, 0x00, 0x0a, 0x00]); // 「1\n」の UTF-16LE（BOM なし）
+    expect(decodeSubtitleBytes(u16)).toBeNull();
+  });
+
+  it("Shift_JIS で読んでも化けた（制御文字が出た）なら読めない扱い", () => {
+    expect(decodeSubtitleBytes(new Uint8Array([0x80, 0x41]))).toBeNull();
+  });
+
+  // Node の Shift_JIS は 0x80 で例外を投げるが、WebView2 は U+0080 として通す＝印の判定を直接見る。
+  it("化けの印＝NUL・C1 制御文字・置き換え文字（日本語や半角カナは化けではない）", () => {
+    expect(hasGarbledChar("こんにちは ｱｲｳ")).toBe(false);
+    for (const c of [0, 0x80, 0x9f, 0xfffd]) expect(hasGarbledChar("あ" + String.fromCharCode(c)), String(c)).toBe(true);
+    expect(hasGarbledChar("あ" + String.fromCharCode(0xa0))).toBe(false);
   });
 });

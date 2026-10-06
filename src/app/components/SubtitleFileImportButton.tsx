@@ -4,7 +4,7 @@
 //   （パスを Rust へ渡す道は要らない）。読んだバイト列を store へ渡し、文字コードの見分けと解析は domain が行う。
 // ⚠️ **同じファイルを続けて選べるように**、選んだあとは欄を空に戻す（同じ値だと change が来ない）。
 import { useRef } from "react";
-import { SUBTITLE_FILE_IMPORT_LABEL } from "../uiLabels";
+import { SUBTITLE_FILE_IMPORT_HINT, SUBTITLE_FILE_IMPORT_LABEL } from "../uiLabels";
 
 export function SubtitleFileImportButton({ onBytes, disabledReason }: {
   onBytes: (bytes: Uint8Array) => void;
@@ -18,7 +18,7 @@ export function SubtitleFileImportButton({ onBytes, disabledReason }: {
         type="button"
         className="btn btn-secondary"
         disabled={disabledReason != null}
-        title={disabledReason ?? "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます"}
+        title={disabledReason ?? SUBTITLE_FILE_IMPORT_HINT}
         onClick={() => inputRef.current?.click()}
       >
         {SUBTITLE_FILE_IMPORT_LABEL}
