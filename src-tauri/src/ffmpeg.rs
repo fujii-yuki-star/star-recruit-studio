@@ -3523,6 +3523,11 @@ fn export_video_impl(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
+    // ⚠️ **抜けるときに必ず消す**（成功・失敗・中止・途中の `?`・#1358）＝中間ファイル（場面ごとの動画・つないだ動画）は
+    // 書き出した動画と同じくらいの大きさ（45分で 7.2GB）。以前は**次に同じプロセス番号で書き出したとき**と、
+    // 起動時の掃除（24時間より古いもの・#420）でしか消えず、**丸1日、書き出しのたびに数GBずつ残って**いた。
+    // 書き出した動画そのものはここに置かない（保存先の隣に一時名で書く＝`StagedCleanup`）ので、消して困るものは無い。
+    let _tmp_cleanup = TmpDirCleanup { path: tmp.clone() };
 
     let mut jobs: Vec<SceneJob> = Vec::with_capacity(scenes.len());
     for (i, s) in scenes.iter().enumerate() {
@@ -4216,9 +4221,33 @@ impl Drop for StagedCleanup {
     }
 }
 
+/// 書き出しの作業フォルダを、抜けるときに丸ごと消す（#1358）。
+struct TmpDirCleanup {
+    path: PathBuf,
+}
+
+impl Drop for TmpDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 書き出しの作業フォルダは、抜けるときに中身ごと消える（#1358＝失敗でも成功でも残さない）。
+    #[test]
+    fn tmp_dir_cleanup_removes_folder_on_drop() {
+        let dir =
+            std::env::temp_dir().join(format!("stario_tmp_cleanup_test_{}", std::process::id()));
+        fs::create_dir_all(dir.join("sub")).expect("作れる");
+        fs::write(dir.join("sub").join("scene_000.mp4"), b"x").expect("書ける");
+        {
+            let _g = TmpDirCleanup { path: dir.clone() };
+        }
+        assert!(!dir.exists(), "抜けたのに作業フォルダが残った");
+    }
 
     /// 切り出した絵のファイル名の検査（#349・PR #885 レビュー 🟡）。
     ///
