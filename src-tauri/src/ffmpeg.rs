@@ -2271,6 +2271,7 @@ fn plan_join_chunks<'a>(
     scene_secs: &[f64],
     steps: &[JoinStep<'a>],
     max_inputs: usize,
+    min_gap_sec: f64,
 ) -> Option<(Vec<JoinChunk<'a>>, Vec<JoinStep<'a>>)> {
     let n = scene_secs.len();
     if n <= max_inputs || steps.len() + 1 != n {
@@ -2287,17 +2288,28 @@ fn plan_join_chunks<'a>(
         };
     }
     let size = (n as f64).sqrt().ceil() as usize;
-    // ⚠️ **塊の切れ目は「後ろの切り替えが塊の頭より前へ食い込まない」所だけ**（PR #1361 レビュー 🔴）＝
-    // 前側（`transitionTimeline`）は切り替えの長さを「それまでつないだ全体」で抑えているので、
-    // 入りがハードカットの短い場面を丸ごと覆って、その前の場面まで重なる切り替えが正当に来る。
-    // そこで切ると塊の中の位置が 0 以下になり、xfade に「1本目より長い重なり」を渡すことになる（未定義の動き）。
-    // 食い込むなら切れ目を後ろへずらす（ずらし切れなければ最後まで1つの塊）。
+    // ⚠️ **塊の切れ目 b は「b より後ろのどの場面も、b の入りの切り替えが終わってから始まる」所だけ**
+    // （PR #1361 レビュー 🔴×2・🟡）。
+    // - 前側（`transitionTimeline`）は切り替えの長さを「それまでつないだ全体」で抑えているので、入りがハードカットの
+    //   短い場面を丸ごと覆って、その前の場面まで重なる切り替えが正当に来る。そこで切ると塊の中の位置が 0 以下になる
+    //   （xfade に「1本目より長い重なり」を渡す＝未定義の動き）。
+    // - b の入りの切り替えの**最中**に次の切り替えが始まると、塊に分けたときに**重ねる順番**が変わる（絵も音も）。
+    // - ⚠️ **窓の中だけでなく b より後ろ全部**と比べる＝切れ目をずらして塊が延びても必ず満たす（窓だけだと、延びたぶんを
+    //   一度も比べない＝実際に反例があった）。後ろ側の最小値を先に作る。
+    // - 余裕は1コマ（`min_gap_sec`）＝1回でつなぐとき前側が守っている「最低1コマ残る」と同じ。
+    // 満たさなければ切れ目を後ろへずらす（ずらし切れなければ最後まで1つの塊＝その文書だけ従来どおり1回でつなぐのと同じ）。
+    let mut later_min = vec![f64::INFINITY; n + 1];
+    for g in (1..n).rev() {
+        later_min[g] = later_min[g + 1].min(starts[g]);
+    }
     let cut_ok = |b: usize| -> bool {
-        let end = (b + size).min(n);
-        (b + 1..end).all(|g| {
-            let st = &steps[g - 1];
-            st.xfade.is_none() || st.offset_sec - starts[b] > 1e-6
-        })
+        let entry = &steps[b - 1];
+        let entry_d = if entry.xfade.is_some() {
+            entry.duration_sec
+        } else {
+            0.0
+        };
+        later_min[b + 1] >= starts[b] + entry_d + min_gap_sec
     };
     let mut chunks = Vec::new();
     let mut top = Vec::new();
@@ -2613,13 +2625,28 @@ fn encode_jobs(
         // ⚠️ **場面が多いときは塊に分けてつなぐ**（#1360）＝1回で全部を入れると場面の数だけメモリを使う
         // （80 場面で ffmpeg 1本 7.8GB）。塊ごとにつないでから、塊どうしをつなぐ。
         // 進み具合は**前半＝塊をつなぐ・後半＝塊どうしをつなぐ**で、同じ「つなぐ」の段の中で送る。
-        let chunked = plan_join_chunks(&scene_secs, &scene_steps, MAX_JOIN_INPUTS);
+        let chunked = plan_join_chunks(
+            &scene_secs,
+            &scene_steps,
+            MAX_JOIN_INPUTS,
+            1.0 / fps.max(1) as f64,
+        );
         let (join_files, join_steps, done_before, span) = match &chunked {
             None => (scene_files.clone(), scene_steps, 0usize, total),
             Some((chunks, top)) => {
                 let half = total;
                 let mut files_lv2: Vec<String> = Vec::with_capacity(chunks.len());
                 for (k, c) in chunks.iter().enumerate() {
+                    // 切れ目をずらし切れず塊が大きくなった（＝その塊はメモリを多く使う）ことを記録に残す（PR #1361 再レビュー ℹ️）。
+                    if c.end - c.first > MAX_JOIN_INPUTS {
+                        crate::tlog!(
+                            "export",
+                            "join chunk {} has {} scenes (over {})",
+                            k,
+                            c.end - c.first,
+                            MAX_JOIN_INPUTS
+                        );
+                    }
                     if c.end - c.first == 1 {
                         files_lv2.push(scene_files[c.first].clone());
                         continue;
@@ -8247,7 +8274,8 @@ mod join_chunk_tests {
             })
             .collect();
         let (want_len, want_starts) = simulate(&secs, &steps);
-        let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+        let (chunks, top) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
         assert!(
             chunks.iter().all(|c| c.first != 6),
             "食い込まれる場面の頭で切った"
@@ -8268,13 +8296,117 @@ mod join_chunk_tests {
         assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
     }
 
+    /// 場面の尺と入り方（`Some(d)`＝切り替え・`None`＝ハードカット）から、前側と同じ規則（offset＝それまでの長さ−d）で境目を作る。
+    fn build(secs: &[f64], entries: &[Option<f64>]) -> Vec<JoinStep<'static>> {
+        let mut acc = secs[0];
+        let mut out = Vec::new();
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            match entries[i] {
+                Some(d) => {
+                    out.push(JoinStep {
+                        xfade: Some("fade"),
+                        duration_sec: d,
+                        offset_sec: acc - d,
+                    });
+                    acc += s - d;
+                }
+                None => {
+                    out.push(JoinStep {
+                        xfade: None,
+                        duration_sec: 0.0,
+                        offset_sec: 0.0,
+                    });
+                    acc += s;
+                }
+            }
+        }
+        out
+    }
+
+    /// 塊の頭 b では、後ろのどの場面も b の入りの切り替えが終わってから始まること＋長さと位置が1回でつなぐときと同じこと。
+    fn assert_sound(secs: &[f64], steps: &[JoinStep]) -> Vec<usize> {
+        let (want_len, want_starts) = simulate(secs, steps);
+        let (chunks, top) =
+            plan_join_chunks(secs, steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        let mut lens = Vec::new();
+        for c in &chunks {
+            if c.first > 0 {
+                let e = &steps[c.first - 1];
+                let entry_d = if e.xfade.is_some() {
+                    e.duration_sec
+                } else {
+                    0.0
+                };
+                for g in c.first + 1..secs.len() {
+                    assert!(
+                        want_starts[g] >= want_starts[c.first] + entry_d,
+                        "塊の頭 {} の入りの切り替えに、場面 {} が食い込む",
+                        c.first,
+                        g
+                    );
+                }
+            }
+            for st in &c.steps {
+                if st.xfade.is_some() {
+                    assert!(st.offset_sec > 0.0, "塊の中の切り替えの位置が 0 以下");
+                }
+            }
+            let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+            for (k, s) in starts.iter().enumerate() {
+                assert!((c.start_sec + s - want_starts[c.first + k]).abs() < 1e-9);
+            }
+            lens.push(len);
+        }
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+        chunks.iter().map(|c| c.first).collect()
+    }
+
+    /// ⚠️ 切れ目をずらして塊が延びたぶんも比べる（PR #1361 再レビュー 🔴 の反例そのまま）。
+    #[test]
+    fn shifted_cut_checks_the_whole_tail() {
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        let mut entries: Vec<Option<f64>> = vec![Some(0.5); n];
+        for i in 6..=11 {
+            secs[i] = 0.3;
+            entries[i] = None;
+        }
+        entries[12] = Some(3.0);
+        secs[13] = 0.3;
+        entries[13] = None;
+        entries[14] = Some(11.0);
+        let steps = build(&secs, &entries);
+        let firsts = assert_sound(&secs, &steps);
+        assert!(!firsts.contains(&12) && !firsts.contains(&13) && !firsts.contains(&14));
+    }
+
+    /// ⚠️ 塊の頭の入りの切り替えの**最中**に次の切り替えが始まる所では切らない（重ねる順番が変わる・同 🟡）。
+    #[test]
+    fn never_cut_inside_the_entry_transition() {
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        let mut entries: Vec<Option<f64>> = vec![Some(0.5); n];
+        secs[6] = 2.0;
+        entries[6] = Some(1.5);
+        secs[7] = 0.3;
+        entries[7] = None;
+        entries[8] = Some(2.0);
+        let steps = build(&secs, &entries);
+        let firsts = assert_sound(&secs, &steps);
+        assert!(
+            !firsts.contains(&6),
+            "入りの切り替えの最中に次が始まる場面の頭で切った"
+        );
+    }
+
     /// 1場面だけの塊（31 場面＝6 本ずつで最後が1本）も、長さと位置が変わらない（PR #1361 レビュー ℹ️）。
     #[test]
     fn single_scene_chunk_keeps_positions() {
         let (secs, raw) = scenes(31, 20.0, &[]);
         let steps = to_steps(&raw);
         let (want_len, _) = simulate(&secs, &steps);
-        let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+        let (chunks, top) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
         assert_eq!(chunks.last().map(|c| c.end - c.first), Some(1));
         let lens: Vec<f64> = chunks
             .iter()
@@ -8286,7 +8418,7 @@ mod join_chunk_tests {
     #[test]
     fn few_scenes_join_at_once() {
         let (secs, raw) = scenes(MAX_JOIN_INPUTS, 10.0, &[]);
-        assert!(plan_join_chunks(&secs, &to_steps(&raw), MAX_JOIN_INPUTS).is_none());
+        assert!(plan_join_chunks(&secs, &to_steps(&raw), MAX_JOIN_INPUTS, 1.0 / 30.0).is_none());
     }
 
     /// ⚠️ **塊に分けても、出来上がりの長さと、どの場面がどこから始まるかは1回でつなぐときと同じ**（#1360）。
@@ -8296,8 +8428,10 @@ mod join_chunk_tests {
             let (secs, raw) = scenes(80, 33.75, &hard);
             let steps = to_steps(&raw);
             let (want_len, want_starts) = simulate(&secs, &steps);
-            let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+            let (chunks, top) =
+                plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
             assert!(chunks.len() <= MAX_JOIN_INPUTS, "2段目の入力が多すぎる");
+            assert!(chunks.len() > 1, "ふつうの文書なのに分けなかった");
             assert!(
                 chunks.iter().all(|c| c.end - c.first <= MAX_JOIN_INPUTS),
                 "1段目の入力が多すぎる"
