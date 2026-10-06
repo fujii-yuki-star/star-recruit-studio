@@ -186,6 +186,7 @@ const NOT_IN_TABLE: Record<string, string> = {
     "外部送信の前に必ず通す確認の案内（§2-6）。状態ではなく手順",
   "（画面に直に書いた文）このたたき台はAIが作成…":
     "たたき台が AI の作ったものであることの知らせ。失敗ではない",
+  MOTION_PRESET_HINT: "動きのひな形の使い方の案内（#1349）。「当て直してください」を含むが、失敗ではなく手順",
   "（画面に直に書いた文）時間の流れを細かく作ると…":
     "`TIMELINE_OVERLAY_RETIRED` の**次の行動の文**（行は表にある）。知らせ本体と別の行に分かれているだけ",
 };
@@ -202,7 +203,8 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+1**（ADR-0051）＝`AI_GEMINI_KEY_MISSING_MESSAGE`（Gemini を選んで鍵が無い）。表へ行を足してある。
 // ⚠️ **+1**（ADR-0053）＝`AI_ASSIST_FAILED_MESSAGE`（編集の途中の手伝いで候補を作れなかった）。表へ行を足してある。
 // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝`AI_ASSIST_UNAVAILABLE_MESSAGE`／`AI_ASSIST_STALE_MESSAGE`。表へ行を足してある。
-const FOUND_COUNT = 103;
+// ⚠️ **+1**＝動きのひな形の案内（#1349・`MOTION_PRESET_HINT`＝「当て直してください」を含む案内）。表の外（NOT_IN_TABLE）。
+const FOUND_COUNT = 104;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

@@ -176,6 +176,6 @@ describe("操作の分類（門番）", () => {
   it("操作の数を実数で留める（足したら、送る／手元でも当てる／受けないを決めてから数を直す）", () => {
     // ⚠️ 既定は「送る」＝足した操作は分類を忘れても送られる。**寿命・外への出口・本体の時計**を足したときに
     //   受けない一覧へ入れ忘れると、別窓から保存・書き出しが走る。数が変わったらここで立ち止まる。
-    expect(storeActions().length).toBe(107); // abandonHistoryGroup（ADR-0054 段階2）＝送る（begin/endHistoryGroup と同じ）／_measureAudioDurations（#1348）＝受けない（`_` で始まる本体の段取り）
+    expect(storeActions().length).toBe(108); // abandonHistoryGroup（ADR-0054 段階2）＝送る（begin/endHistoryGroup と同じ）／_measureAudioDurations（#1348）＝受けない（`_` で始まる本体の段取り）／applySelectedMotionPreset（#1349）＝送る（ほかの動きの編集と同じ）
   });
 });
