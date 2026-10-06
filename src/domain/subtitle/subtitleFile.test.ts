@@ -8,6 +8,7 @@ import {
   parseSubtitleFile,
   parseSubtitleTime,
   SUBTITLE_FILE_KIND,
+  subtitleFileKindOfPath,
 } from "./subtitleFile";
 
 const SRT = `1
@@ -154,5 +155,14 @@ describe("文字コードの化けを成功にしない（PR #1355 レビュー�
     expect(hasGarbledChar("こんにちは ｱｲｳ")).toBe(false);
     for (const c of [0, 0x80, 0x9f, 0xfffd]) expect(hasGarbledChar("あ" + String.fromCharCode(c)), String(c)).toBe(true);
     expect(hasGarbledChar("あ" + String.fromCharCode(0xa0))).toBe(false);
+  });
+});
+
+describe("subtitleFileKindOfPath", () => {
+  it("拡張子で形式を決める（大文字も）・それ以外は null", () => {
+    expect(subtitleFileKindOfPath("C:/a/字幕.srt")).toBe(SUBTITLE_FILE_KIND.srt);
+    expect(subtitleFileKindOfPath("D:/b.c/字幕.VTT")).toBe(SUBTITLE_FILE_KIND.vtt);
+    expect(subtitleFileKindOfPath("C:/a/字幕.txt")).toBeNull();
+    expect(subtitleFileKindOfPath("C:/a.srt/字幕")).toBeNull();
   });
 });

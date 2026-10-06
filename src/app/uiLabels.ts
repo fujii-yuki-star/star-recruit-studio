@@ -1923,7 +1923,13 @@ export function motionPresetShortenedMessage(sec: number): string {
 export const subtitleFileMessage = {
   SUBTITLE_FILE_UNREADABLE: "この字幕ファイルは読めませんでした。字幕ファイル（.srt／.vtt）を選び直してください",
   SUBTITLE_FILE_EMPTY: "この字幕ファイルには、読める字幕がありませんでした。別の字幕ファイル（.srt／.vtt）を選んでください",
+  SUBTITLE_FILE_NOTHING_TO_EXPORT: "書き出せる字幕がありません。字幕を入れてから、もう一度押してください",
+  SUBTITLE_FILE_SAVE_FAILED: "字幕ファイルを保存できませんでした。別の保存先を選んで、もう一度押してください",
 } as const;
+/** 字幕ファイルを書き出したあとの知らせ。 */
+export function subtitleExportedMessage(count: number): string {
+  return `字幕を ${count} 個、字幕ファイルに書き出しました。`;
+}
 /** 字幕ファイルを並べたあとの知らせ（読めなかった・上限を越えた分は数を言う＝黙って捨てない）。 */
 export function subtitleImportedMessage(placed: number, unreadable: number, beyondLimit: number): string {
   const notes = [
@@ -1935,3 +1941,5 @@ export function subtitleImportedMessage(placed: number, unreadable: number, beyo
 /** 字幕ファイルの読み込み・書き出しのボタン。 */
 export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
 export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
+export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
+export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";

@@ -635,6 +635,30 @@ fn import_reading_dict(path: String) -> Result<String, String> {
     fs::read_to_string(&p).map_err(|e| e.to_string())
 }
 
+/// 字幕ファイルを、利用者が選んだ場所へ書き出す（ADR-0055 決定4・#1351）。
+///
+/// ⚠️ **汎用の「どこへでも書ける」口にしない**（`export_reading_dict` と同じ考え）＝拡張子は `.srt`／`.vtt` だけ。
+/// 中身（時刻と文字）は呼び出し側（domain の `formatSubtitleFile`）が組み立てる。
+#[tauri::command]
+fn write_subtitle_file(path: String, text: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !is_subtitle_path(&p) {
+        return Err("字幕ファイルは .srt か .vtt で保存してください。".to_string());
+    }
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&p, text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// 拡張子が `.srt`／`.vtt` か（大文字小文字は問わない）。
+fn is_subtitle_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("srt") || e.eq_ignore_ascii_case("vtt"))
+        .unwrap_or(false)
+}
+
 /// 拡張子が `.json` か（大文字小文字は問わない）。
 fn is_json_path(path: &std::path::Path) -> bool {
     path.extension()
@@ -1488,6 +1512,7 @@ pub fn run() {
             save_reading_dict,
             export_reading_dict,
             import_reading_dict,
+            write_subtitle_file,
             voicevox::voicevox_user_dict_list,
             voicevox::voicevox_user_dict_add,
             voicevox::voicevox_user_dict_update,
@@ -1555,6 +1580,34 @@ pub fn run() {
                 shutdown_side_processes(app_handle);
             }
         });
+}
+
+#[cfg(test)]
+mod subtitle_path_tests {
+    use super::{is_subtitle_path, write_subtitle_file};
+    use std::path::Path;
+
+    /// 字幕の書き込みの口は `.srt`／`.vtt` だけを受ける（ADR-0055 決定4＝任意のファイルを書ける口にしない）。
+    #[test]
+    fn accepts_only_subtitle_extensions() {
+        assert!(is_subtitle_path(Path::new("C:/a/b.srt")));
+        assert!(is_subtitle_path(Path::new("C:/a/b.VTT")));
+        assert!(!is_subtitle_path(Path::new("C:/a/b.json")));
+        assert!(!is_subtitle_path(Path::new("C:/a/b.srt.exe")));
+        assert!(!is_subtitle_path(Path::new("C:/a/srt")));
+    }
+
+    #[test]
+    fn writes_text_and_refuses_other_extensions() {
+        let dir = std::env::temp_dir().join(format!("stario_subtitle_test_{}", std::process::id()));
+        let ok = dir.join("字幕.srt");
+        write_subtitle_file(ok.to_string_lossy().into_owned(), "字幕".to_string()).expect("書ける");
+        assert_eq!(std::fs::read_to_string(&ok).expect("読める"), "字幕");
+        let ng = dir.join("x.bat");
+        assert!(write_subtitle_file(ng.to_string_lossy().into_owned(), "x".to_string()).is_err());
+        assert!(!ng.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

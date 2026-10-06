@@ -179,6 +179,8 @@ import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { MotionPathOverlay } from "../components/MotionPathOverlay";
 import { SubtitleFileImportButton } from "../components/SubtitleFileImportButton";
+import { SubtitleFileExportButton } from "../components/SubtitleFileExportButton";
+import { subtitleCuesOf } from "../../domain/timeline/subtitleCues";
 import { keyPositionAfterDrag, motionPathOf } from "../../domain/timeline/motionPath";
 import { MOTION_PRESET_DEFAULT_SEC, MOTION_PRESET_MAX_SEC, MOTION_PRESET_MIN_SEC, motionPresetEffectiveSec, type MotionPreset } from "../../domain/timeline/motionPresets";
 import type { FreeElement } from "../../domain/project/types";
@@ -718,6 +720,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const leaveToHome = useCallback(() => { void requestLeave("home"); }, [requestLeave]);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
+  /** 字幕ファイルを書き出した結果の知らせ（ADR-0055・`ok`＝書けた）。 */
+  const [subtitleExportNotice, setSubtitleExportNotice] = useState<{ message: string; ok: boolean } | null>(null);
   // 音・読み上げの置く先（見た目パターンと同じ流儀＝#724。空＝いちばん手前の置ける列）。
   const [placeAudioTrackId, setPlaceAudioTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
@@ -6175,6 +6179,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 onBytes={(bytes) => useTimelineStore.getState().importSubtitleFile(bytes)}
                 disabledReason={(exporting ? exportingHint : isPlaying ? playingHint : null) ?? null}
               />
+              {/* ⚠️ **読み込みと書き出しを並べる**（ADR-0055 追補）＝見出しの行（動画の書き出し）は詰まっていて
+                  折り返すと書き出すボタンが落ちる（#1255 で踏んだ）。字幕ファイルの出入りは1か所にまとめる。 */}
+              <SubtitleFileExportButton
+                cuesOf={() => {
+                  const d = useTimelineStore.getState().doc;
+                  return d ? subtitleCuesOf(d, templateOf) : [];
+                }}
+                defaultName={doc.projectName}
+                disabledReason={null}
+                onMessage={(message, ok) => setSubtitleExportNotice({ message, ok })}
+              />
               {placeableTracks.length > 0 && (
                 <>
                   <button
@@ -6204,6 +6219,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <div className="notice notice-warn row-between mb-sm" role="alert">
                 <span>{importError}</span>
                 <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
+            {subtitleExportNotice && (
+              <div className={`notice ${subtitleExportNotice.ok ? "notice-info" : "notice-warn"} row-between mb-sm`} role={subtitleExportNotice.ok ? "status" : "alert"}>
+                <span>{subtitleExportNotice.message}</span>
+                <button className="btn btn-ghost text-sm" onClick={() => setSubtitleExportNotice(null)}>閉じる</button>
               </div>
             )}
             {placeableTracks.length === 0 ? (

@@ -169,3 +169,9 @@ export function formatSubtitleFile(cues: readonly SubtitleCue[], kind: SubtitleF
     ? `${BOM}${parts.join('\n\n')}\n`
     : `WEBVTT\n\n${parts.join('\n\n')}\n`;
 }
+
+/** 保存先の拡張子から形式を決める（大文字小文字は問わない）。`.srt`／`.vtt` でなければ null。 */
+export function subtitleFileKindOfPath(path: string): SubtitleFileKind | null {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
+  return ext === SUBTITLE_FILE_KIND.srt || ext === SUBTITLE_FILE_KIND.vtt ? ext : null;
+}

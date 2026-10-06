@@ -542,7 +542,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
     // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
     // ⚠️ **+2**（ADR-0034 追補 2026-10-05・#1331）＝TRIM_BEFORE_SOURCE／TRIM_PAST_SOURCE_END。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(280);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(282);
   });
 
 
@@ -587,6 +587,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ── 断りでも状態でもない（進み具合の数を伝えるだけ）＝`15 §6` の表の対象外 ──
     writingSceneMessage: "生成中に書いている場面の数を伝える進み具合の文（ADR-0052 決定6）＝失敗・状態ではない",
     subtitleImportedMessage: "字幕ファイルを並べたあとの知らせ（並べた数・読めなかった数・上限を越えた数）＝失敗ではない（ADR-0055）",
+    subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
     motionPresetShortenedMessage: "選んだ長さが帯に収まらないとき、押す前に実際の長さを伝える案内（#1349）＝失敗・状態ではない",
     describingRemainMessage: "写真・動画の読み取りの残りの数を伝える進み具合の文（UI/UX 監査 2026-10-02）＝失敗・状態ではない",
     describingWaitingMessage: "読み終わるのを待っている間の残りの数（同上）＝失敗・状態ではない",
@@ -807,7 +808,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
     // ⚠️ **+2**（#1331）＝上と同じ2行。
     // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（読む表から外れる＝取り消し線の行は数えない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(275);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(277);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -834,6 +835,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
       // ⚠️ **+2**（#1331）＝素材の外へ伸ばせない断り2つ（同上）。
       // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（動きのある部品は掴めるようになった）。
-    ).toBe(127);
+    ).toBe(129);
   });
 });
