@@ -156,13 +156,46 @@ describe('区間だけ描く（#1203）', () => {
       // 素材は 10 秒しかない＝範囲だけ頼むと Rust は**失敗で返す**（0枚＝失敗）、丸ごと頼むと 301 枚
       stageVideo: async (v) => {
         asked.push(v.sourceStartSec);
-        if (v.sourceStartSec > 10) throw new Error('動画の変換に失敗しました');
+        // Rust の口の失敗は**文字**で返る（invoke の reject）
+        if (v.sourceStartSec > 10) throw '動画の変換に失敗しました';
         return 301;
       },
       readVideoFrame: async (dir, i) => { read.push(i); expect(dir).toBe(videoFramesDirOf('clip_001')); return 'data:image/png;base64,X'; },
     });
     expect(asked).toEqual([597, 0]);
     expect(read).toEqual([300, 300]);
+  });
+
+  it('こちら側の失敗（空き不足の見張りなど）は受けずに、そのまま止まる', async () => {
+    const asked: number[] = [];
+    const d = doc({
+      clips: [slot('clip_001', 0, 600)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await expect(buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 17910, toFrame: 17912 },
+      stageVideo: async (v) => { asked.push(v.sourceStartSec); throw new Error('空き容量が足りません'); },
+      readVideoFrame: async () => 'data:image/png;base64,X',
+    })).rejects.toThrow('空き容量が足りません');
+    expect(asked, '空き不足のあとに丸ごと焼き直した').toEqual([597]);
+  });
+
+  it('中止で失敗したら、丸ごと焼き直さずにそのまま止まる', async () => {
+    const asked: number[] = [];
+    let cancelled = false;
+    const d = doc({
+      clips: [slot('clip_001', 0, 600)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await expect(buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 17910, toFrame: 17912 },
+      shouldCancel: () => cancelled,
+      stageVideo: async (v) => { asked.push(v.sourceStartSec); cancelled = true; throw '止めた'; },
+      readVideoFrame: async () => 'data:image/png;base64,X',
+    })).rejects.toThrow();
+    expect(asked, '中止のあとに丸ごと焼き直した').toEqual([597]);
   });
 
   it('範囲の頭から焼いて失敗したら、そのまま失敗にする（握りつぶさない）', async () => {

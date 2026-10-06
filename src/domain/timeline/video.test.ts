@@ -613,10 +613,13 @@ describe('描く範囲だけを焼き出す（videoStageWindow／videoFrameIndex
     { name: '等速・頭から', clip: slot({ startSec: 0, durationSec: 20 }), sourceLenSec: 100 },
     { name: '置いた位置の端数・素材の途中から・1.5倍速', clip: slot({ startSec: 0.517, durationSec: 12, sourceStartSec: 2.3, speed: 1.5 }), sourceLenSec: 100 },
     { name: '素材が置いた長さより短い（最後のコマで止まる）', clip: slot({ startSec: 1, durationSec: 10, sourceStartSec: 1 }), sourceLenSec: 4 },
+    // 終わり×fps の端数が 0.5 未満（PR #1357 再レビュー 🔴）＝round で切ると最後の1コマを焼き漏らす
+    { name: '終わりの端数が 0.5 未満（始まりがずれている）', clip: slot({ startSec: 0.51, durationSec: 12 }), sourceLenSec: 100 },
+    { name: '終わりの端数が 0.5 未満（尺がずれている）', clip: slot({ startSec: 0, durationSec: 12.01 }), sourceLenSec: 100 },
   ];
   // 差し込み口の「ここまで」で使える長さが部品の尺より短い（PR #1357 レビュー 🔴）＝凍った所より後ろの範囲でも凍ったコマ
   const capped: VideoPlacement = { ...place(slot({ startSec: 0, durationSec: 20 })), durationSec: 5 };
-  const windows = [[0, 91], [200, 260], [500, 600], [0, 900]];
+  const windows = [[0, 91], [200, 260], [350, 400], [500, 600], [0, 900]];
   const all: { name: string; p: VideoPlacement; sourceLenSec: number }[] = [
     ...cases.map((c) => ({ name: c.name, p: place(c.clip), sourceLenSec: c.sourceLenSec })),
     { name: '使える長さが部品の尺より短い（ここまで）', p: capped, sourceLenSec: 100 },

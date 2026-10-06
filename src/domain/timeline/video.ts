@@ -326,9 +326,10 @@ export function videoStageWindow(
 ): { sourceStartSec: number; durationSec: number; speed: number; offset: number } | null {
   const spec = videoStagePlan(p);
   const clipFrom = Math.round(p.clip.startSec * fps);
-  const clipTo = Math.round((p.clip.startSec + p.clip.durationSec) * fps);
+  // ⚠️ **映るコマの範囲は、読む側（`stagedFrameIndexAt`）と同じ判定から出す**（PR #1357 再レビュー 🔴）＝
+  //   `round(終わり×fps)` で切ると、終わりの端数が 0.5 未満のときに最後の1コマを焼き漏らす（1つ前のコマで止まる）。
   const from = Math.max(clipFrom, fromFrame);
-  const to = Math.min(clipTo, toFrame);
+  const to = Math.min(liveFrameEnd(p, fps), toFrame);
   if (to <= from) return null;
   // ⚠️ **範囲は「焼いたコマの何番か」で決める**（PR #1357 レビュー 🔴）＝部品の何コマ目かで決めると、
   //   使える長さ（差し込み口の「ここまで」）で凍った所より後ろの範囲で、凍ったコマでなく素材の先のコマを焼いてしまう。
@@ -376,25 +377,43 @@ export function videoFrameIndexAt(
 }
 
 /**
+ * その出力フレームで部品が映っているか（半開区間＝`11 §7.6.4`＝終わりの瞬間はもう映らない＝描く側と同じ規則）。
+ * ⚠️ **区間は部品の尺**（隠れる・隠れないは部品の置き場所で決まる）＝素材が尽きても枠は出たまま。
+ * ⚠️ **焼く範囲（`liveFrameEnd`）と読む側（`stagedFrameIndexAt`）はこれ1つを見る**。
+ */
+function isLiveFrame(p: VideoPlacement, frameIndex: number, fps: number): boolean {
+  const t = frameIndex / fps;
+  return t >= p.clip.startSec && t < p.clip.startSec + p.clip.durationSec && frameIndex - Math.round(p.clip.startSec * fps) >= 0;
+}
+
+/**
  * その出力フレームが、その部品の**何コマ目**か（`null`＝映っていない）。
  * ⚠️ **プレビューと書き出しはここだけを見る**（#512 段1 レビュー 🔴）＝別々に時刻を出すとずれる。
  */
 function stagedFrameIndexAt(p: VideoPlacement, frameIndex: number, fps: number): number | null {
-  const t = frameIndex / fps;
-  // 生きている区間は半開（`11 §7.6.4`＝終わりの瞬間はもう映らない）＝描く側と同じ規則。
-  // ⚠️ **区間は部品の尺**（隠れる・隠れないは部品の置き場所で決まる）＝素材が尽きても枠は出たまま。
-  if (t < p.clip.startSec || t >= p.clip.startSec + p.clip.durationSec) return null;
+  if (!isLiveFrame(p, frameIndex, fps)) return null;
   // ⚠️ **コマ数の引き算で出す**（秒へ直して掛け戻さない）＝掛け算の誤差で1つ手前へ落ちない
   // （`11 §7.6.5` の「格子点をもう一度量子化しない」と同じ理由）。
   // ⚠️ **トリムと速さはここで掛けない**＝焼いたコマ自体が織り込み済み（`stage_clip_frames` が
   // `sourceStartSec` から `setpts=PTS/speed` で並べる）。二重に掛けると倍速が二乗になる。
   const local = frameIndex - Math.round(p.clip.startSec * fps);
-  if (local < 0) return null;
   // ⚠️ **使える長さで頭打ちにする**（レビュー 🔴）＝差し込み口の「ここまで」（`endSec`）で焼く長さが
   // 部品の尺より短いとき、書き出しは焼けた枚数で最後のコマに凍る。ここで同じだけ止めないと
   // **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export・ADR-0001）。
   // 上限は書き出しが焼く枚数と同じ数え方（Rust は `ceil(尺×fps)+1` 枚＝最後の番号は `ceil(尺×fps)`）。
   return Math.min(local, stagedIndexCap(p, fps));
+}
+
+/**
+ * その部品が**映る最後の出力フレームの次**（`[clipFrom, これ)` に映る）。⚠️ **判定は `stagedFrameIndexAt` と同じ**
+ * （`isLiveFrame`）＝`round(終わり×fps)` で切ると、端数が 0.5 未満のときに最後の1コマが範囲の外に落ちる。
+ * ⚠️ 伸ばすだけで足りる（変異チェックで確かめた）＝`round` の1つ手前は必ず映っている。始まりは `round(始まり×fps)` のまま
+ * （映らない1コマを余分に焼くことがあるだけで、読む側は `offset` を引くので結果は同じ）。
+ */
+function liveFrameEnd(p: VideoPlacement, fps: number): number {
+  let to = Math.round((p.clip.startSec + p.clip.durationSec) * fps);
+  while (isLiveFrame(p, to, fps)) to += 1;
+  return to;
 }
 
 /** 焼いたコマの最後の番号（使える長さで凍る所）＝Rust は `ceil(尺×fps)+1` 枚。数え方を1か所に（`videoStageWindow` と共有）。 */
