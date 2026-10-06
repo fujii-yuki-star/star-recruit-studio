@@ -9,7 +9,7 @@ import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, ty
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
+import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -33,7 +33,7 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, pasteClips, renameTrack,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack,
   visualPlacementFor,
   moveClip,
   setVisualClipContent,
@@ -50,6 +50,7 @@ import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../tim
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { clearKeyframes, keyframeTimeAt, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
 import { applyMotionPreset, type MotionPreset } from "../../domain/timeline/motionPresets";
+import { decodeSubtitleBytes, parseSubtitleFile } from "../../domain/subtitle/subtitleFile";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -640,6 +641,11 @@ export interface TimelineState {
    * 強調は再生位置から（部品の外なら部品の始まりから）。
    */
   applySelectedMotionPreset: (preset: MotionPreset) => void;
+  /**
+   * 字幕ファイル（.srt／.vtt）の字幕を**新しい列に並べる**（ADR-0055・#1351）＝1回の編集（取り消し1回で全部消える）。
+   * 結果は `importError` の欄で知らせる（読めない・何も無い・並べた数と、読めなかった／上限を越えた数）。
+   */
+  importSubtitleFile: (bytes: Uint8Array) => void;
   /** 指定した対象（まとまりなど）の動きをすべて外す（#634）。 */
   clearKeyframesOf: (targetId: string) => void;
   /** 選んでいる字幕自身の文を書き換える（空にすると連動先の読み上げ文に戻る・#633）。 */
@@ -1662,6 +1668,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedKeyframeAt: (timeSec, input) => applyEdit(set, get, (d, id) => setKeyframe(d, id, timeSec, input)),
   removeSelectedKeyframe: (timeSec) => applyEdit(set, get, (d, id) => removeKeyframe(d, id, timeSec)),
   clearSelectedKeyframes: () => applyEdit(set, get, (d, id) => clearKeyframes(d, id)),
+  importSubtitleFile: (bytes) => {
+    const doc = get().doc;
+    if (!doc) return;
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    const text = decodeSubtitleBytes(bytes);
+    if (text == null) { set({ importError: subtitleFileMessage.SUBTITLE_FILE_UNREADABLE }); return; }
+    const { cues, unreadable } = parseSubtitleFile(text);
+    if (cues.length === 0) { set({ importError: subtitleFileMessage.SUBTITLE_FILE_EMPTY }); return; }
+    const r = importSubtitleCues(doc, cues);
+    if (r.placed === 0) { set({ importError: subtitleImportedMessage(0, unreadable, r.beyondLimit) }); return; }
+    commit(set, get, r.doc, { importError: subtitleImportedMessage(r.placed, unreadable, r.beyondLimit) });
+  },
   applySelectedMotionPreset: (preset) =>
     applyEdit(set, get, (d, id) => applyMotionPreset(d, id, preset, { atSec: keyframeTimeAt(d, id, get().playheadSec) ?? 0 })),
   clearKeyframesOf: (targetId) => {

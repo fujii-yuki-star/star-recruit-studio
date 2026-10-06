@@ -4,7 +4,7 @@
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
-  TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
+  TIMELINE_MIN_CLIP_SEC, VIDEO_HARD_MAX_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
 import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
@@ -1465,6 +1465,54 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
     voiceClipId,
   };
   return ok({ ...doc, tracks, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **字幕ファイルの字幕を並べる**（ADR-0055 決定3・#1351）＝1回の編集（取り消し1回で全部消える）。
+ *
+ * - キューごとに**字幕クリップ**（自分の文を持つ・読み上げに連動しない）を作る。見た目は読み上げの字幕と**同じ既定**
+ *   （自由配置の字幕要素と同じ関数＝形式で見た目が割れない）。同じ時間に字幕があれば上へ積む（`stackedSubtitleY`）。
+ * - 置き場所は**新しい映像の列**（既存の部品と重ねない＝読み込んだまとまりが1つの列に揃う）。キューどうしが重なる分だけ列を足す。
+ * - 短すぎるキューは最小（`TIMELINE_MIN_CLIP_SEC`）まで伸ばす。動画の上限（`VIDEO_HARD_MAX_SEC`）を越えるキューは置かず、
+ *   **その数を返す**（呼ぶ側が言う＝黙って捨てない・§2-5）。
+ * - 置けるキューが1つも無ければ文書を変えない（`placed: 0`）。
+ */
+export function importSubtitleCues(
+  doc: TimelineProject,
+  cues: readonly { startSec: number; endSec: number; text: string }[],
+): { doc: TimelineProject; placed: number; beyondLimit: number } {
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
+  const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
+  void _elId; void _kind; void _z; void _src;
+  let cur = doc;
+  const newTracks: string[] = [];
+  let placed = 0;
+  let beyondLimit = 0;
+  for (const cue of cues) {
+    const startSec = Math.max(0, cue.startSec);
+    const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, cue.endSec - startSec);
+    if (startSec + durationSec > VIDEO_HARD_MAX_SEC) { beyondLimit += 1; continue; }
+    let trackId = newTracks.find((id) => isFreeSpan(cur.clips, id, startSec, durationSec));
+    if (!trackId) {
+      trackId = createTrackId(cur.tracks.map((t) => t.id));
+      newTracks.push(trackId);
+      cur = { ...cur, tracks: [...cur.tracks, { id: trackId, kind: TRACK_KIND.visual }] };
+    }
+    const clip: TimelineClip = {
+      ...spatial,
+      y: stackedSubtitleY(cur, startSec, durationSec, spatial.y ?? 0, spatial.h ?? 0, spatial.fontSize ?? 0),
+      id: createClipId(cur.clips.map((c) => c.id)),
+      kind: TIMELINE_CLIP_KIND.subtitle,
+      trackId,
+      startSec,
+      durationSec,
+      text: cue.text,
+    };
+    cur = { ...cur, clips: [...cur.clips, clip] };
+    placed += 1;
+  }
+  return { doc: placed > 0 ? cur : doc, placed, beyondLimit };
 }
 
 /** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */

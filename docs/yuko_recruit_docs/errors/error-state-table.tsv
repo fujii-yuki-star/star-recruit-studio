@@ -277,3 +277,5 @@ code	severity	auto	message	origin
 `STARTUP_IMPORT_NO_PROJECT`	error	—	その中に動画のデータが見当たりませんでした。動画のフォルダごと指定してください	`ADR-0042` 決定⑥・#1184（Rust `import_folder_message`）
 `STARTUP_IMPORT_IO`	error	—	動画を取り込めませんでした。空き容量とアクセス権を確かめて、もう一度お試しください	`ADR-0042` 決定⑥・#1184（Rust `import_folder_message`）。⚠️ **生の道やエラーを画面へ出さない**（§2-3）
 `STARTUP_IMPORT_ID_TAKEN`	error	—	その番号の動画がすでにあります。もう一度お試しください	`ADR-0042` 決定⑥・#1184。⚠️ **上書きしない**＝同じ番号の別の動画を黙って潰さない（ADR-0026④）
+`SUBTITLE_FILE_UNREADABLE`	warning	—	この字幕ファイルは読めませんでした。字幕ファイル（.srt／.vtt）を選び直してください	ADR-0055・#1351（タイムライン形式の「字幕ファイルを読み込む」で、文字コードが読めないとき＝UTF-8／UTF-16／Shift_JIS のどれでもない。文書は変えない）
+`SUBTITLE_FILE_EMPTY`	warning	—	この字幕ファイルには、読める字幕がありませんでした。別の字幕ファイル（.srt／.vtt）を選んでください	ADR-0055・#1351（読めたが、時刻の行と文を持つ字幕が1つも無いとき。文書は変えない。⚠️ 一部だけ読めなかったときはこの断りではなく、並べた数と読めなかった数を知らせる〔`subtitleImportedMessage`＝失敗ではない〕）

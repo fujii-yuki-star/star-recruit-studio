@@ -1918,3 +1918,20 @@ export const MOTION_PRESET_HINT = "登場は帯の始まりから、退場は帯
 export function motionPresetShortenedMessage(sec: number): string {
   return `この帯では ${Math.round(sec * 100) / 100} 秒になります（登場・退場は帯の半分まで）。`;
 }
+
+/** 字幕ファイルの読み込みの断り（ADR-0055・#1351）。表（`15 §6`）と等値で守る。 */
+export const subtitleFileMessage = {
+  SUBTITLE_FILE_UNREADABLE: "この字幕ファイルは読めませんでした。字幕ファイル（.srt／.vtt）を選び直してください",
+  SUBTITLE_FILE_EMPTY: "この字幕ファイルには、読める字幕がありませんでした。別の字幕ファイル（.srt／.vtt）を選んでください",
+} as const;
+/** 字幕ファイルを並べたあとの知らせ（読めなかった・上限を越えた分は数を言う＝黙って捨てない）。 */
+export function subtitleImportedMessage(placed: number, unreadable: number, beyondLimit: number): string {
+  const notes = [
+    ...(unreadable > 0 ? [`${unreadable} 個は読めなかったので並べていません`] : []),
+    ...(beyondLimit > 0 ? [`${beyondLimit} 個は動画の長さの上限を越えるので並べていません`] : []),
+  ];
+  return `字幕を ${placed} 個、新しい列に並べました。${notes.length > 0 ? `${notes.join("。")}。` : ""}取り消すと全部消えます。`;
+}
+/** 字幕ファイルの読み込み・書き出しのボタン。 */
+export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
+export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
