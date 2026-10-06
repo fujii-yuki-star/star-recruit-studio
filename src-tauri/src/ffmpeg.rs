@@ -2232,6 +2232,83 @@ fn join_total_sec(job_secs: &[f64], steps: &[JoinStep]) -> f64 {
     (total - overlap).max(0.0)
 }
 
+/// 切り替えでつなぐ段に、**一度に入れる場面の数の上限**（#1360）。
+///
+/// ⚠️ **場面の数だけメモリを使う**＝FFmpeg は入力を全部同時に開き、まだ使わない入力のコマも待ち行列に溜める。
+/// 実測で 80 本を1回でつなぐと ffmpeg 1本が **7.8GB**（1本あたり約100MB）。これを超えるときは
+/// 数本ずつの塊に分けてつなぎ、塊どうしをもう一度つなぐ（`plan_join_chunks`）。
+const MAX_JOIN_INPUTS: usize = 12;
+
+/// 塊1つ（場面 `[first, end)`）。`start_sec`＝出来上がりの中でこの塊が始まる位置、`steps`＝塊の中の境目（位置は塊の先頭から）。
+struct JoinChunk<'a> {
+    first: usize,
+    end: usize,
+    start_sec: f64,
+    steps: Vec<JoinStep<'a>>,
+}
+
+/// 塊に分けてつなぐ計画（#1360）。**純粋関数**。
+///
+/// - `scene_secs`＝場面ごとの尺、`steps`＝場面 i→i+1 の境目（`steps.len() == scene_secs.len()-1`）。
+/// - 場面の数が `max_inputs` 以下なら `None`（いままでどおり1回でつなぐ）。
+/// - 塊の大きさは `ceil(√n)`＝1段目も2段目も入力がほぼ同じ数になる（80 場面なら 9 本ずつ・2段目 9 本）。
+/// - ⚠️ **境目の位置（`offset_sec`）は「つないだ結果の先頭から」**＝塊の中では、塊の1本目が出力のどこから始まるかを引く。
+///   2段目は先頭から積み上げるので元の値のまま。⚠️ 出来上がりの長さ・切り替えの位置は1回でつなぐときと同じ。
+fn plan_join_chunks<'a>(
+    scene_secs: &[f64],
+    steps: &[JoinStep<'a>],
+    max_inputs: usize,
+) -> Option<(Vec<JoinChunk<'a>>, Vec<JoinStep<'a>>)> {
+    let n = scene_secs.len();
+    if n <= max_inputs || steps.len() + 1 != n {
+        return None;
+    }
+    // 場面 g が出力のどこから始まるか。切り替えなら境目の位置、ハードカットなら前の場面の終わり。
+    let mut starts = vec![0.0f64; n];
+    for g in 1..n {
+        let st = &steps[g - 1];
+        starts[g] = if st.xfade.is_some() {
+            st.offset_sec
+        } else {
+            starts[g - 1] + scene_secs[g - 1]
+        };
+    }
+    let size = (n as f64).sqrt().ceil() as usize;
+    let mut chunks = Vec::new();
+    let mut top = Vec::new();
+    let mut a = 0usize;
+    while a < n {
+        let b = (a + size).min(n);
+        let base = starts[a];
+        let inner = (a + 1..b)
+            .map(|g| {
+                let st = &steps[g - 1];
+                JoinStep {
+                    xfade: st.xfade,
+                    duration_sec: st.duration_sec,
+                    offset_sec: st.offset_sec - base,
+                }
+            })
+            .collect();
+        chunks.push(JoinChunk {
+            first: a,
+            end: b,
+            start_sec: base,
+            steps: inner,
+        });
+        if a > 0 {
+            let st = &steps[a - 1];
+            top.push(JoinStep {
+                xfade: st.xfade,
+                duration_sec: st.duration_sec,
+                offset_sec: st.offset_sec,
+            });
+        }
+        a = b;
+    }
+    Some((chunks, top))
+}
+
 /// 進捗イベントを emit（送れなくても書き出しは続行＝best-effort・#376）。app が None（テスト等）は何もしない。
 fn emit_export_progress(app: Option<&tauri::AppHandle>, phase: &str, step: usize, total: usize) {
     if let Some(app) = app {
@@ -2497,10 +2574,73 @@ fn encode_jobs(
                 });
             }
         }
-        // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップに変わっただけ。
+        // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
+        let job_secs: Vec<f64> = jobs.iter().map(|j| j.duration_sec()).collect();
+        let total_sec = join_total_sec(&job_secs, &scene_steps);
+        let total = total_sec.round().max(1.0) as usize;
+        let scene_secs: Vec<f64> = ranges
+            .iter()
+            .map(|&(a, b)| job_secs[a..b].iter().sum())
+            .collect();
+        // ⚠️ **場面が多いときは塊に分けてつなぐ**（#1360）＝1回で全部を入れると場面の数だけメモリを使う
+        // （80 場面で ffmpeg 1本 7.8GB）。塊ごとにつないでから、塊どうしをつなぐ。
+        // 進み具合は**前半＝塊をつなぐ・後半＝塊どうしをつなぐ**で、同じ「つなぐ」の段の中で送る。
+        let chunked = plan_join_chunks(&scene_secs, &scene_steps, MAX_JOIN_INPUTS);
+        let (join_files, join_steps, done_before, span) = match &chunked {
+            None => (scene_files.clone(), scene_steps, 0usize, total),
+            Some((chunks, top)) => {
+                let half = total;
+                let mut files_lv2: Vec<String> = Vec::with_capacity(chunks.len());
+                for (k, c) in chunks.iter().enumerate() {
+                    if c.end - c.first == 1 {
+                        files_lv2.push(scene_files[c.first].clone());
+                        continue;
+                    }
+                    let chunk_out = tmp_dir.join(format!("join_chunk_{k:03}.mp4"));
+                    let mut cargs = xfade_chain_args(
+                        &scene_files[c.first..c.end],
+                        &c.steps,
+                        &chunk_out.to_string_lossy(),
+                        codec,
+                        fps,
+                        bitrate,
+                    );
+                    cargs.push("-progress".to_string());
+                    cargs.push("pipe:1".to_string());
+                    cargs.push("-nostats".to_string());
+                    let base = c.start_sec;
+                    let last = std::cell::Cell::new(usize::MAX);
+                    let on_us = |us: u64| {
+                        let sec = (base + us as f64 / 1_000_000.0) as usize;
+                        if sec == last.get() {
+                            return;
+                        }
+                        last.set(sec);
+                        emit_export_progress(progress, "join", sec.min(half), half * 2);
+                    };
+                    run_export_progress(ffmpeg, &cargs, &on_us).map_err(|e| {
+                        export_failure(
+                            format!("xfade join chunk {k}: {e}"),
+                            "場面の切り替え合成に失敗しました。もう一度お試しください。",
+                        )
+                    })?;
+                    files_lv2.push(chunk_out.to_string_lossy().into_owned());
+                }
+                let top_steps: Vec<JoinStep> = top
+                    .iter()
+                    .map(|st| JoinStep {
+                        xfade: st.xfade,
+                        duration_sec: st.duration_sec,
+                        offset_sec: st.offset_sec,
+                    })
+                    .collect();
+                (files_lv2, top_steps, half, half)
+            }
+        };
+        // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップ（または塊）に変わっただけ。
         let mut args = xfade_chain_args(
-            &scene_files,
-            &scene_steps,
+            &join_files,
+            &join_steps,
             &output.to_string_lossy(),
             codec,
             fps,
@@ -2512,10 +2652,6 @@ fn encode_jobs(
         args.push("-progress".to_string());
         args.push("pipe:1".to_string());
         args.push("-nostats".to_string());
-        // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
-        let job_secs: Vec<f64> = jobs.iter().map(|j| j.duration_sec()).collect();
-        let total_sec = join_total_sec(&job_secs, &scene_steps);
-        let total = total_sec.round().max(1.0) as usize;
         // ⚠️ **秒が変わったときだけ送る**＝FFmpeg は細かく出すので、そのまま流すと画面が忙しくなる。
         // ⚠️ **`progress` は借りたまま使う**（写してスレッドへ渡さない＝上の `run_export_inner` の注意）。
         let last = std::cell::Cell::new(0usize);
@@ -2525,7 +2661,12 @@ fn encode_jobs(
                 return;
             }
             last.set(sec);
-            emit_export_progress(progress, "join", sec.min(total), total);
+            emit_export_progress(
+                progress,
+                "join",
+                done_before + sec.min(span),
+                done_before + span,
+            );
         };
         run_export_progress(ffmpeg, &args, &on_us).map_err(|e| {
             export_failure(
@@ -2536,7 +2677,7 @@ fn encode_jobs(
         // ⚠️ **終わったら必ず上限まで届かせる**（PR #1219 レビュー）＝見積りの尺と FFmpeg が最後に出す
         // 秒は**丸めで一致しない**ので、放っておくと**途中の%のまま次の段へ飛ぶ**。
         // 映像を作る段は場面ごとに最後まで送っているので、こちらも同じ形に揃える。
-        emit_export_progress(progress, "join", total, total);
+        emit_export_progress(progress, "join", done_before + span, done_before + span);
     } else {
         // 遷移なし：従来どおり concat demuxer の無劣化コピー（高速）。
         let mut list = String::new();
@@ -7972,5 +8113,93 @@ mod tmp_cleanup_wiring_tests {
             body.contains("let _tmp_cleanup = TmpDirCleanup { path: tmp.clone() };"),
             "書き出しの関数が作業フォルダの片づけ役を持っていない"
         );
+    }
+}
+
+#[cfg(test)]
+mod join_chunk_tests {
+    use super::{plan_join_chunks, JoinStep, MAX_JOIN_INPUTS};
+
+    /// つないだ結果の長さと、各入力が始まる位置（xfade＝`offset` から右が重なる・ハードカット＝後ろへ続く）。
+    fn simulate(lens: &[f64], steps: &[JoinStep]) -> (f64, Vec<f64>) {
+        let mut len = lens[0];
+        let mut starts = vec![0.0];
+        for (i, st) in steps.iter().enumerate() {
+            let s = if st.xfade.is_some() {
+                st.offset_sec
+            } else {
+                len
+            };
+            starts.push(s);
+            len = s + lens[i + 1];
+        }
+        (len, starts)
+    }
+
+    /// 場面の尺と境目（切り替えは 0.5 秒・`hard` の番号はハードカット）を、つなぐ側と同じ規則で作る。
+    fn scenes(n: usize, sec: f64, hard: &[usize]) -> (Vec<f64>, Vec<(bool, f64)>) {
+        let secs: Vec<f64> = (0..n).map(|i| sec + (i % 3) as f64 * 0.25).collect();
+        let mut acc = secs[0];
+        let mut out = Vec::new();
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            if hard.contains(&i) {
+                out.push((false, 0.0));
+                acc += s;
+            } else {
+                out.push((true, acc - 0.5));
+                acc += s - 0.5;
+            }
+        }
+        (secs, out)
+    }
+
+    fn to_steps(raw: &[(bool, f64)]) -> Vec<JoinStep<'static>> {
+        raw.iter()
+            .map(|&(x, o)| JoinStep {
+                xfade: if x { Some("fade") } else { None },
+                duration_sec: 0.5,
+                offset_sec: o,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn few_scenes_join_at_once() {
+        let (secs, raw) = scenes(MAX_JOIN_INPUTS, 10.0, &[]);
+        assert!(plan_join_chunks(&secs, &to_steps(&raw), MAX_JOIN_INPUTS).is_none());
+    }
+
+    /// ⚠️ **塊に分けても、出来上がりの長さと、どの場面がどこから始まるかは1回でつなぐときと同じ**（#1360）。
+    #[test]
+    fn chunked_join_keeps_length_and_positions() {
+        for hard in [vec![], vec![9usize, 10, 40, 79]] {
+            let (secs, raw) = scenes(80, 33.75, &hard);
+            let steps = to_steps(&raw);
+            let (want_len, want_starts) = simulate(&secs, &steps);
+            let (chunks, top) = plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS).expect("分ける");
+            assert!(chunks.len() <= MAX_JOIN_INPUTS, "2段目の入力が多すぎる");
+            assert!(
+                chunks.iter().all(|c| c.end - c.first <= MAX_JOIN_INPUTS),
+                "1段目の入力が多すぎる"
+            );
+            let mut chunk_lens = Vec::new();
+            for c in &chunks {
+                let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+                for (k, s) in starts.iter().enumerate() {
+                    let got = c.start_sec + s;
+                    assert!(
+                        (got - want_starts[c.first + k]).abs() < 1e-9,
+                        "場面 {} の始まりがずれた",
+                        c.first + k
+                    );
+                }
+                chunk_lens.push(len);
+            }
+            let (len, starts) = simulate(&chunk_lens, &top);
+            assert!((len - want_len).abs() < 1e-9, "出来上がりの長さが変わった");
+            for (c, s) in chunks.iter().zip(starts) {
+                assert!((s - c.start_sec).abs() < 1e-9, "塊の始まりがずれた");
+            }
+        }
     }
 }
