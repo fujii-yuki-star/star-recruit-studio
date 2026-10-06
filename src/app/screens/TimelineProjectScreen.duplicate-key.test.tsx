@@ -51,6 +51,15 @@ describe("Ctrl+D で複製（#1350）", () => {
     expect(clips()).toHaveLength(3);
     const added = clips().find((c) => c.id !== "clip_001" && c.id !== "clip_002")!;
     expect([added.trackId, added.startSec]).toEqual(["track_001", 2]);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([added.id]);
+  });
+
+  it("続けて押すと、続けて後ろへ複製できる（複製した方を選んでいるので重ならない）", () => {
+    open(["clip_001"]);
+    press();
+    press();
+    expect(clips().filter((c) => c.trackId === "track_001").map((c) => c.startSec).sort()).toEqual([0, 2, 4]);
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
   });
 
   it("2つ以上選んでいれば複製せず、右クリックと同じ理由を出す", () => {

@@ -4475,11 +4475,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={duplicateSelectedClip}
-                {...editGuard(
+                // 押せるときの説明に近道キーを添える（分けるの「（Ctrl+K）」と同じ流儀・#1350 レビュー）。
+                {...((g) => ({ ...g, title: g.title ?? `選んだ部品を複製して、すぐ後ろに置きます（${SHORTCUT_KEYS.duplicate}）` }))(editGuard(
                   selectedClipIds.length > 1
                     ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
                     : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
-                )}
+                ))}
               >
                 {DUPLICATE_LABEL}
               </button>

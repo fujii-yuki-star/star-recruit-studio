@@ -1630,7 +1630,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (r.ok) commit(set, get, r.doc);
     else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.preview) } });
   },
-  duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
+  duplicateSelectedClip: () => {
+    const before = new Set((get().doc?.clips ?? []).map((c) => c.id));
+    applyEdit(set, get, (doc, id) => duplicateClip(doc, id));
+    // **複製した方を選ぶ**（#1350 レビュー 🟡・業界の型）＝元を選んだままだと、続けて複製すると元のすぐ後ろ（いま置いた複製）に
+    //   重なって必ず断られる。断られたとき（増えていない）は選びを変えない。
+    const added = (get().doc?.clips ?? []).find((c) => !before.has(c.id));
+    if (added) set({ selectedClipIds: [added.id] });
+  },
 
   removeSelectedClips: (at) => get().removeClipsByIds(get().selectedClipIds, at),
 
