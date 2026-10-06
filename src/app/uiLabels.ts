@@ -1,5 +1,6 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import type { TimelineEditKind } from "../domain/timeline/editKind";
+import type { MotionPresetShape } from "../domain/timeline/motionPresets";
 import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
 import { ASSIST_KIND } from "../domain/ai/assist";
 import { ASSET_KIND } from "../domain/asset/assetFile";
@@ -1888,3 +1889,28 @@ export const WIZARD_VOICE_LABEL = "読み上げの声";
 
 /** たたき台の「進む」（流れの帯の右・ADR-0048 追補 2026-10-05）。ゆうこの案内も同じ文言を引く。 */
 export const DRAFT_NEXT_LABEL = "この内容で確認・編集する";
+
+/**
+ * タイムラインの動きのひな形（#1349）。登場は帯の始まり・退場は帯の終わり・強調は再生位置から当てる。
+ * ⚠️ 名前は場面形式の動きと同じ語（ふわっと・すべって・ぽんっと・くるっと）＝同じ動きを2つの言葉で呼ばない。
+ */
+export const MOTION_PRESET_OPTIONS: readonly { id: string; label: string; preset: MotionPresetShape }[] = [
+  { id: "in-fade", label: "登場：ふわっと", preset: { place: "in", kind: "fade" } },
+  { id: "in-slide-left", label: "登場：左からすべって", preset: { place: "in", kind: "slide", direction: "left" } },
+  { id: "in-slide-right", label: "登場：右からすべって", preset: { place: "in", kind: "slide", direction: "right" } },
+  { id: "in-slide-up", label: "登場：上からすべって", preset: { place: "in", kind: "slide", direction: "up" } },
+  { id: "in-slide-down", label: "登場：下からすべって", preset: { place: "in", kind: "slide", direction: "down" } },
+  { id: "in-pop", label: "登場：ぽんっと", preset: { place: "in", kind: "pop" } },
+  { id: "in-spin", label: "登場：くるっと", preset: { place: "in", kind: "spin" } },
+  { id: "out-fade", label: "退場：ふわっと", preset: { place: "out", kind: "fade" } },
+  { id: "out-slide-left", label: "退場：左へすべって", preset: { place: "out", kind: "slide", direction: "left" } },
+  { id: "out-slide-right", label: "退場：右へすべって", preset: { place: "out", kind: "slide", direction: "right" } },
+  { id: "out-slide-up", label: "退場：上へすべって", preset: { place: "out", kind: "slide", direction: "up" } },
+  { id: "out-slide-down", label: "退場：下へすべって", preset: { place: "out", kind: "slide", direction: "down" } },
+  { id: "out-pop", label: "退場：ぽんっと", preset: { place: "out", kind: "pop" } },
+  { id: "out-spin", label: "退場：くるっと", preset: { place: "out", kind: "spin" } },
+  { id: "emph-zoom", label: "強調：ズーム", preset: { place: "emphasis", kind: "zoom" } },
+  { id: "emph-shake", label: "強調：震える", preset: { place: "emphasis", kind: "shake" } },
+  { id: "emph-bounce", label: "強調：はねる", preset: { place: "emphasis", kind: "bounce" } },
+];
+export const MOTION_PRESET_HINT = "登場は帯の始まりから、退場は帯の終わりまで、強調は再生位置から当てます。いまある動きは消さずに重ねます（取り消しで戻せます）。";

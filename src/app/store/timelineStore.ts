@@ -48,7 +48,8 @@ import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 // ⚠️ **欄の名前は画面と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../timelinePanels";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
-import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
+import { clearKeyframes, keyframeTimeAt, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
+import { applyMotionPreset, type MotionPreset } from "../../domain/timeline/motionPresets";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -634,6 +635,11 @@ export interface TimelineState {
   removeSelectedKeyframe: (timeSec: number) => void;
   /** 選んでいる部品の動きをすべて外す（#634）。 */
   clearSelectedKeyframes: () => void;
+  /**
+   * 選んでいる部品に**動きのひな形**を当てる（#1349）＝キーフレームの列へ展開して重ねる・取り消し1回で戻る。
+   * 強調は再生位置から（部品の外なら部品の始まりから）。
+   */
+  applySelectedMotionPreset: (preset: MotionPreset) => void;
   /** 指定した対象（まとまりなど）の動きをすべて外す（#634）。 */
   clearKeyframesOf: (targetId: string) => void;
   /** 選んでいる字幕自身の文を書き換える（空にすると連動先の読み上げ文に戻る・#633）。 */
@@ -1649,6 +1655,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedKeyframeAt: (timeSec, input) => applyEdit(set, get, (d, id) => setKeyframe(d, id, timeSec, input)),
   removeSelectedKeyframe: (timeSec) => applyEdit(set, get, (d, id) => removeKeyframe(d, id, timeSec)),
   clearSelectedKeyframes: () => applyEdit(set, get, (d, id) => clearKeyframes(d, id)),
+  applySelectedMotionPreset: (preset) =>
+    applyEdit(set, get, (d, id) => applyMotionPreset(d, id, preset, { atSec: keyframeTimeAt(d, id, get().playheadSec) ?? 0 })),
   clearKeyframesOf: (targetId) => {
     const doc = get().doc;
     if (!doc) return;

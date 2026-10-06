@@ -149,7 +149,7 @@ type DragPlace = {
 import { ArrowLeftIcon, EyeIcon, EyeOffIcon, LockIcon, VolumeIcon, VolumeMuteIcon } from "../components/icons";
 // ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
 import { PANEL_ID, PANEL_IDS, PLACE_TABS, BLOCK_GLOBAL, isPlaceTab, panelOfTarget, timelineDefaultLayout, timelineLayoutPresets, type BlockTarget, type PlaceTabId } from "../timelinePanels";
-import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, ANIMATED_DRAG_NOTE, MOTION_PATH_NOTE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { subtitleOverlapMessage, DORMANT_FONT_HINT, clipOutsidePlayheadMessage, DUCK_MERGED_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE, ANIMATED_DRAG_NOTE, MOTION_PATH_NOTE, MOTION_PRESET_HINT, MOTION_PRESET_OPTIONS, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, placeAtPlayheadHint, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { editableTextKeys, templateSlotIds, usedTextKeys, textKeyOfLayer, withTextFontId } from "../../domain/template/layerOps";
 import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
@@ -179,6 +179,7 @@ import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { MotionPathOverlay } from "../components/MotionPathOverlay";
 import { keyPositionAfterDrag, motionPathOf } from "../../domain/timeline/motionPath";
+import { MOTION_PRESET_DEFAULT_SEC, MOTION_PRESET_MAX_SEC, MOTION_PRESET_MIN_SEC, type MotionPreset } from "../../domain/timeline/motionPresets";
 import type { FreeElement } from "../../domain/project/types";
 import { baseBoxPatchFromShown, freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapDisabled, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
@@ -485,7 +486,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
-    setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
+    setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
     setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
     setSelectedClipSlotAudio,
@@ -1146,6 +1147,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * ⚠️ 早い return より前に置く（フックの順番）。
    */
   const motionDragBase = useRef<Keyframe[] | null>(null);
+  // 動きのひな形の選び（#1349）＝画面の好み（文書には持たない）。
+  const [motionPresetId, setMotionPresetId] = useState<string>(MOTION_PRESET_OPTIONS[0].id);
+  const [motionPresetSec, setMotionPresetSec] = useState<number>(MOTION_PRESET_DEFAULT_SEC);
   // 見た目パターンの解決は**絵を並べる側と、どの枠が動画を受けるか（#512 段3）の両方**が要る＝1つにする。
   const templateOf = useMemo(() => {
     const byId = new Map(templates.map((t) => [t.templateId, t]));
@@ -5448,6 +5452,40 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     </div>
                   </>
                 )}
+                {/* 動きのひな形（#1349・#1335 提案D）＝キーフレームの列へ展開して重ねる。当てたあとは下の一覧・キャンバスの点で直せる。 */}
+                <div className="col gap-xs" data-testid="motion-presets">
+                  <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <label className="field">
+                      <span>動きのひな形</span>
+                      <select className="select" value={motionPresetId} {...editGuard()} onChange={(e) => setMotionPresetId(e.target.value)}>
+                        {MOTION_PRESET_OPTIONS.map((o) => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {/* ⚠️ 帯の「長さ（秒）」と同じ名前にしない＝同じ画面に同じ名前の欄が2つあると、どちらか読めない（読み上げも）。 */}
+                    <NumberField
+                      label="ひな形の長さ（秒）"
+                      step={0.1}
+                      min={MOTION_PRESET_MIN_SEC}
+                      max={MOTION_PRESET_MAX_SEC}
+                      value={motionPresetSec}
+                      {...editGuard()}
+                      onChange={(v) => setMotionPresetSec(v)}
+                    />
+                    <button
+                      className="btn btn-secondary"
+                      {...editGuard({ disabled: isPlaying, hint: playingHint ?? undefined })}
+                      onClick={() => {
+                        const o = MOTION_PRESET_OPTIONS.find((x) => x.id === motionPresetId);
+                        if (o) applySelectedMotionPreset({ ...o.preset, durationSec: motionPresetSec } as MotionPreset);
+                      }}
+                    >
+                      当てる
+                    </button>
+                  </div>
+                  <p className="field-hint">{MOTION_PRESET_HINT}</p>
+                </div>
                 {selectedKeyframes.length === 0 ? (
                   <p className="text-muted">まだ動きは付いていません。</p>
                 ) : (
