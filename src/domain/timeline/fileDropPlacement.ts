@@ -9,6 +9,7 @@ import { TIMELINE_MIN_CLIP_SEC } from '../constants';
 import { addAudioClip, addTrack, addVisualClip, EDIT_BLOCKED, isFreeSpan, trackPlacementIssue } from './edit';
 import type { EditBlockedReason } from './edit';
 import type { TimelineProject } from './types';
+import { audioAssetDurationSec } from './audio';
 
 /** 素材の種類 → 置く列の種類。**音は音の列、それ以外（写真・動画など）は映像の列**。 */
 export function trackKindForAssetType(t: AssetType): TrackKind {
@@ -72,7 +73,8 @@ export function placeDroppedAssets(doc: TimelineProject, input: FileDropPlacemen
     }
     const at = cursor.get(trackId) ?? startSec;
     const r = kind === TRACK_KIND.audio
-      ? addAudioClip(working, { assetId, trackId, startSec: at, durationSec: asset.metadata?.durationSec ?? undefined })
+      // 長さは他の入口と同じ関数で（#1348＝0以下・数でない値を捨てる規則を1か所に）。
+      ? addAudioClip(working, { assetId, trackId, startSec: at, durationSec: audioAssetDurationSec(asset) })
       : addVisualClip(working, {
         kind: TIMELINE_CLIP_KIND.slot, assetId, trackId, startSec: at, assetSize: input.assetSizeOf?.(assetId),
       });

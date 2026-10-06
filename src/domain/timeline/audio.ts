@@ -287,3 +287,20 @@ export function volumeExpr(points: readonly VolumePoint[] | undefined): string |
 function num(x: number): string {
   return String(Number(x.toPrecision(12)));
 }
+
+/**
+ * 音の素材の**実際の長さ**（秒・#1348）。分からなければ `undefined`（置くときは従来どおり仮の長さ＝`AUDIO_PLACEHOLDER_SEC`）。
+ *
+ * ⚠️ **効果音が 10 秒くり返し鳴った**（#1335 提案C）＝音は長さを測っておらず、置くと仮の 10 秒の帯になり、
+ *   音の帯は繰り返し扱い（`audioLoops`）なので 0.3 秒の効果音が 10 秒間鳴り続けた。
+ * 見るのは**素材に書いた長さ**（取り込み時に測る）→ 無ければ**開いたときに測った長さ**（保存しない＝古い動画の文書を書き換えない）。
+ * 0 以下・数でない値は無いものとする（置けない帯を作らない）。
+ */
+export function audioAssetDurationSec(
+  asset: { metadata?: { durationSec?: number | null } | null } | undefined,
+  measured?: number,
+): number | undefined {
+  const fromAsset = asset?.metadata?.durationSec;
+  const v = fromAsset != null && Number.isFinite(fromAsset) && fromAsset > 0 ? fromAsset : measured;
+  return v != null && Number.isFinite(v) && v > 0 ? v : undefined;
+}

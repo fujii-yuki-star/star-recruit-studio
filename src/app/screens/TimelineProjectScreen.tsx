@@ -25,7 +25,7 @@ import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
 import { detectAssetType } from "../../domain/asset/assetFile";
 import type { AssetType } from "../../domain/enums";
 import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
-import { audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
@@ -516,6 +516,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   /** 声を作る回が走っているか（#755）＝印は開き直しで消えるので、書き出しの締めはこちらを見る。 */
   const voiceRunning = useTimelineStore((s) => s._voiceRun != null);
   const beginHistoryGroup = useTimelineStore((s) => s.beginHistoryGroup);
+  const audioDurations = useTimelineStore((s) => s.audioDurations);
   const endHistoryGroup = useTimelineStore((s) => s.endHistoryGroup);
   const abandonHistoryGroup = useTimelineStore((s) => s.abandonHistoryGroup);
 
@@ -3327,7 +3328,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * ⚠️ **目録・素材に無いものは返さない**＝存在しない曲や写真を指す部品を作らない。
    * 出どころは**高々1つ**（`11 §8` V25）なので、ここで片方だけを持つ形にして渡す。
    */
-  const audioSourceOf = (id: string): { spec: { bundledBgmId?: BundledBgmId; assetId?: string }; label: string } | null => {
+  const audioSourceOf = (id: string): { spec: { bundledBgmId?: BundledBgmId; assetId?: string; durationSec?: number }; label: string } | null => {
     const sep = id.indexOf(":");
     const [kind, rest] = [id.slice(0, sep), id.slice(sep + 1)];
     if (kind === "bgm") {
@@ -3338,12 +3339,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     // ⚠️ 無いものは `null`＝**無言で終わる**が、一覧の項目と here の照合は**同じ描画の `doc`** から
     // 作っているので到達しない（押した瞬間に消えている素材、が作れない）。理由を出す道は
     // 置く関数側（`clipPlacementIssue` の `notFound`）に残っている。
-    return asset ? { spec: { assetId: asset.assetId }, label: asset.displayName } : null;
+    // 帯の初めの長さ＝素材の実際の長さ（#1348）。置く先の目安・押して置く・運んで置くの3つが同じ長さを見る。
+    return asset ? { spec: { assetId: asset.assetId, durationSec: audioAssetDurationSec(asset, audioDurations[asset.assetId]) }, label: asset.displayName } : null;
   };
 
   /** 音を置く（見た目パターンと同じく、押した／運んだのどちらもここを通る）。 */
   const placeAudio = (
-    spec: { bundledBgmId?: BundledBgmId; assetId?: string },
+    spec: { bundledBgmId?: BundledBgmId; assetId?: string; durationSec?: number },
     at?: { trackId: string; startSec: number },
   ): void => {
     // ⚠️ **押したときは、映像と同じで次の空き時刻へずれる**（2026-09-28 の実機レビュー）＝

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, audioSourcesOf } from './audio';
+import { audioAssetDurationSec, audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, audioSourcesOf } from './audio';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
   return { id, kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, ...over };
@@ -194,5 +194,19 @@ describe('audioSourceKey / audioLoops', () => {
   it('BGM は素材が短くても鳴り続ける（場面形式と同じ）／読み上げは繰り返さない', () => {
     expect(audioLoops(clip('clip_001'))).toBe(true);
     expect(audioLoops(voiceClip('clip_002'))).toBe(false);
+  });
+});
+
+describe("audioAssetDurationSec（#1348）", () => {
+  it("素材に書いた長さ → 開いたときに測った長さ → 分からない、の順", () => {
+    expect(audioAssetDurationSec({ metadata: { durationSec: 0.3 } }, 9)).toBe(0.3);
+    expect(audioAssetDurationSec({ metadata: { durationSec: null } }, 1.5)).toBe(1.5);
+    expect(audioAssetDurationSec({}, undefined)).toBeUndefined();
+    expect(audioAssetDurationSec(undefined, 2)).toBe(2);
+  });
+  it("0 以下・数でない値は無いものとする（置けない帯を作らない）", () => {
+    expect(audioAssetDurationSec({ metadata: { durationSec: 0 } }, 2)).toBe(2);
+    expect(audioAssetDurationSec({ metadata: { durationSec: Number.NaN } }, undefined)).toBeUndefined();
+    expect(audioAssetDurationSec({}, -1)).toBeUndefined();
   });
 });

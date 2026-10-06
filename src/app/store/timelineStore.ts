@@ -7,14 +7,14 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } 
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
-import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
+import { probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
-import { audioSourceKey, audioSourceKindOf, audioSourcesOf } from "../../domain/timeline/audio";
+import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { keepRestorePoints } from "./restorePointKeeper";
@@ -309,6 +309,13 @@ export interface TimelineState {
   assetSizes: Record<string, SourceSize>;
   /** 測った実寸を入れる（#634）。同じ値なら何もしない＝描き直しを増やさない。 */
   setAssetSize: (assetId: string, size: SourceSize) => void;
+  /**
+   * 音の素材の**長さ**（assetId → 秒・#1348）＝**開いたときに測ったぶん**（素材に長さが書いていない古い動画）。保存しない。
+   * 取り込んだ素材は `metadata.durationSec` に書くので、ここには入らない。読むのは `audioAssetDurationSec`。
+   */
+  audioDurations: Record<string, number>;
+  /** 長さの分からない音の素材を測る（開いた直後に1回・#1348）。文書は書き換えない。 */
+  _measureAudioDurations: () => Promise<void>;
   /**
    * 音源（**音源キー** → 再生できる URL）。**開いたときにまとめて用意する**＝鳴らす瞬間に読みに行くと
    * 頭が欠ける。キーはクリップ id ではなく**音源の中身**（`audioSourceKey`）なので、同じ曲を使う複数の
@@ -671,7 +678,7 @@ export interface TimelineState {
     shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
   }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
-  addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number }) => void;
+  addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number }) => void;
   /** 選んでいる音・動画の素材の再生速度（#634）。 */
   setSelectedClipSpeed: (speed: number) => void;
   /** 選んでいる素材のどこから使うか（#634）。 */
@@ -1013,6 +1020,27 @@ function runAnalysis(job: () => Promise<void>): void {
   pumpAnalysisQueue();
 }
 
+/** 音の長さを測っている最中の動画（同じ動画を2回測らない・#1348）。 */
+let audioMeasureRun: { projectId: string; promise: Promise<void> } | null = null;
+
+/**
+ * 長さの分からない音の素材を1つずつ測り、`audioDurations` に入れる（#1348）。文書は書き換えない
+ * （開いただけで未保存にしない＝古い動画の文書をそのまま保つ）。
+ */
+async function measureAudioDurationsOf(
+  doc: TimelineProject,
+  set: (p: Partial<TimelineState>) => void,
+  get: () => TimelineState,
+): Promise<void> {
+  const targets = doc.assets.filter((a) => a.assetType === ASSET_TYPE.bgm && audioAssetDurationSec(a, get().audioDurations[a.assetId]) == null);
+  for (const a of targets) {
+    const meta = await probeAudioDuration(doc.projectId, a.filePath);
+    // 待っている間に別の動画を開いていたら書かない（素材の番号は動画ごとに振り直す）。
+    if (get().doc?.projectId !== doc.projectId) return;
+    if (meta?.durationSec) set({ audioDurations: { ...get().audioDurations, [a.assetId]: meta.durationSec } });
+  }
+}
+
 /**
  * 開いていない状態。**文書を手放す入口はすべてここを通る**（開く・閉じる・読込失敗・手放す）。
  *
@@ -1026,6 +1054,9 @@ function runAnalysis(job: () => Promise<void>): void {
  */
 function emptyState() {
   resetAnalysisQueue();
+  // 音の長さの測りも手放す（#1348・PR #1352 レビュー 🟡）＝閉じて同じ動画を開き直したとき、閉じている間に打ち切られた
+  //   前の測りを「測っている最中」と見て、新しく開いた分が測られないまま残っていた。
+  audioMeasureRun = null;
   return {
     doc: null,
     loadError: null,
@@ -1042,6 +1073,7 @@ function emptyState() {
     missingAssetIds: [] as string[],
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
+    audioDurations: {} as Record<string, number>,
   // 書き出す大きさ（#1255）。⚠️ **既定は「きれい」**＝場面形式の既定（`fullhd`）と同じ。
   exportHd: false,
     audioSrcByKey: {} as Record<string, string>,
@@ -1190,7 +1222,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const audioEntries = await Promise.all(audioSourcesOf(doc).map((src) => loadAudioSrc(doc, src)));
       const audioSrcByKey: Record<string, string> = {};
       for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
-      set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
+      set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, audioDurations: {}, isLoading: false });
+      // 音の素材の長さ（#1348）＝古い動画は取り込み時に測っていないので、ここで測る（待たない・文書は書き換えない）。
+      void get()._measureAudioDurations();
       // ⚠️ **実在も調べる**（#1019 ⑤）＝表示用の URL は組むだけなので、これが無いと
       //   ファイルが動いた・消えた素材を**一度も知らせられない**（選び直す入口も出ない）。
       void get().refreshMissingAssets();
@@ -1709,7 +1743,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addAudioClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
-    const r = addAudioClip(doc, input);
+    // 帯の初めの長さ＝**素材の実際の長さ**（#1348＝分からないと仮の 10 秒になり、効果音がくり返し鳴っていた）。
+    const asset = input.assetId ? doc.assets.find((a) => a.assetId === input.assetId) : undefined;
+    const durationSec = input.durationSec ?? audioAssetDurationSec(asset, input.assetId ? get().audioDurations[input.assetId] : undefined);
+    const r = addAudioClip(doc, { ...input, durationSec });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.audio) } });
       return;
@@ -1744,6 +1781,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
   setSelectedClipCropAlign: (patch) => applyEdit(set, get, (d, id) => setClipCropAlign(d, id, patch)),
   setSelectedClipCropMode: (mode) => applyEdit(set, get, (d, id) => setClipCropMode(d, id, mode)),
+  _measureAudioDurations: () => {
+    const doc = get().doc;
+    if (!doc) return Promise.resolve();
+    // ⚠️ **同じ動画を2回測らない**＝開いた直後の1回と、呼び直し（検査・取り込み）が重なると FFmpeg が二重に起動する。
+    if (audioMeasureRun?.projectId === doc.projectId) return audioMeasureRun.promise;
+    const promise = measureAudioDurationsOf(doc, set, get).finally(() => {
+      if (audioMeasureRun?.promise === promise) audioMeasureRun = null;
+    });
+    audioMeasureRun = { projectId: doc.projectId, promise };
+    return promise;
+  },
   setAssetSize: (assetId, size) => {
     const cur = get().assetSizes[assetId];
     if (cur && cur.w === size.w && cur.h === size.h) return;
@@ -1832,7 +1880,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const { fileName, asset: shape } = newAssetFrom(srcPath, [], target.assetId);
       const savedPath = await importAssetByPath(doc.projectId, fileName, srcPath);
       const relPath = savedPath ?? shape.filePath;
-      const enrich = target.assetType === ASSET_TYPE.video ? await probeAndThumbVideo(doc.projectId, relPath) : null;
+      // 音は長さを測り直す（#1348・PR #1352 レビュー 🟡）＝測らないと選び直しで長さが消え、置くとまた仮の 10 秒になる。
+      const enrich: VideoEnrichment | null = target.assetType === ASSET_TYPE.video
+        ? await probeAndThumbVideo(doc.projectId, relPath)
+        : target.assetType === ASSET_TYPE.bgm
+          ? { metadata: (await probeAudioDuration(doc.projectId, relPath)) ?? undefined }
+          : null;
       // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
       // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
       const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(doc.projectId, relPath));
@@ -1855,6 +1908,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
         ...(r.clampedUses > 0 ? { importError: clipClampedMessage(r.clampedUses, PROJECT_FORMAT.timeline) } : { importError: null }),
         assetSrcById: freshUrl ? { ...get().assetSrcById, [assetId]: freshUrl } : get().assetSrcById,
+        // 開いたときに測った前のファイルの長さを捨てる（#1348＝別の長さの帯ができない・測り直しの対象から外れない）。
+        audioDurations: Object.fromEntries(Object.entries(get().audioDurations).filter(([k]) => k !== assetId)),
         // ⚠️ **コマ列・波形の下書きも捨てる**（PR レビュー 🟡）＝あれは**パス基準**のキャッシュ
         //（`${filePath}#範囲`）で、`ensureClipAnalysis` は「もうある」だけで打ち切るので、
         //   落とさないと**前のファイルの絵と波形が帯に残り続ける**（表示の URL だけ取り直しても足りない）。
@@ -2817,9 +2872,12 @@ async function runImport(
     const savedPath = await copy(fileName, asset.assetType);
     const relPath = savedPath ?? asset.filePath;
     // 動画は長さ・代表フレームまで揃える（取れなくても素材そのものは使える）。
+    // 音は長さだけ測る（#1348＝置いたときの帯の初めの長さ）。
     const enrich = asset.assetType === ASSET_TYPE.video
       ? await probeAndThumbVideo(doc.projectId, relPath)
-      : null;
+      : asset.assetType === ASSET_TYPE.bgm
+        ? { metadata: (await probeAudioDuration(doc.projectId, relPath)) ?? undefined }
+        : null;
     const src = enrich ? enrich.thumbUrl : (await assetDisplayUrl(doc.projectId, relPath)) ?? undefined;
     // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**。判定はここ1か所＝最後の await の後
     // （2か所に置くと、片方を消しても、もう片方が拾ってしまい**壊れていることに気づけない**）。
