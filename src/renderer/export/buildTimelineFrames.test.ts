@@ -120,6 +120,42 @@ describe('区間だけ描く（#1203）', () => {
     });
     expect(asked, '区間の外の動画まで焼き出した').toEqual(['clip_001']);
   });
+
+  // #352 の45分実測：頭と尻の数秒だけを焼くのに、素材1本ぶん丸ごと取り出していた（52分・空き容量が尽きた）。
+  it('区間に重なるコマだけを焼き出し、焼いた1枚目から数えて読む', async () => {
+    const asked: { start: number; dur: number }[] = [];
+    const read: number[] = [];
+    const d = doc({
+      clips: [slot('clip_001', 0, 600)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 17910, toFrame: 17913 },
+      stageVideo: async (v) => { asked.push({ start: v.sourceStartSec, dur: v.durationSec }); return 4; },
+      readVideoFrame: async (_dir, i) => { read.push(i); return 'data:image/png;base64,X'; },
+    });
+    expect(asked).toEqual([{ start: 597, dur: 0.1 }]);
+    expect(read).toEqual([0, 1, 2]);
+  });
+
+  it('区間が素材の終わりより後ろ（1枚も取れない）なら、丸ごと焼き直して止まったコマを読む', async () => {
+    const asked: number[] = [];
+    const read: number[] = [];
+    const d = doc({
+      clips: [slot('clip_001', 0, 600)],
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+    });
+    await buildTimelineFrames(d, {
+      ...baseOpts,
+      window: { fromFrame: 17910, toFrame: 17912 },
+      // 素材は 10 秒しかない＝範囲だけ頼むと 0 枚、丸ごと頼むと 301 枚
+      stageVideo: async (v) => { asked.push(v.sourceStartSec); return v.sourceStartSec > 10 ? 0 : 301; },
+      readVideoFrame: async (_dir, i) => { read.push(i); return 'data:image/png;base64,X'; },
+    });
+    expect(asked).toEqual([597, 0]);
+    expect(read).toEqual([300, 300]);
+  });
 });
 
 describe('buildTimelineFrames', () => {

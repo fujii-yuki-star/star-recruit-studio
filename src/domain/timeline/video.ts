@@ -311,6 +311,50 @@ export function videoStagePlan(
 }
 
 /**
+ * **描く範囲だけ**を焼き出すときの指定（#352 の45分実測）。`offset`＝焼いた1枚目が部品の何コマ目か。
+ *
+ * ⚠️ **素材1本ぶん丸ごと焼かない**＝長い動画の頭と尻の数秒だけを焼くのに、45分ぶんのコマを**2回**取り出していた
+ * （52分かかり、一時ファイルで空き容量が尽きた）。焼き出しは「出力の n コマ目＝`sourceStartSec + n/fps×speed`」
+ * （Rust `stage_clip_frames`）なので、始まりを `offset` コマぶん進めれば、同じコマの並びの途中から焼ける。
+ * ⚠️ **範囲と重ならないなら `null`**（焼かない）。
+ */
+export function videoStageWindow(
+  p: VideoPlacement,
+  fromFrame: number,
+  toFrame: number,
+  fps: number,
+): { sourceStartSec: number; durationSec: number; speed: number; offset: number } | null {
+  const spec = videoStagePlan(p);
+  const clipFrom = Math.round(p.clip.startSec * fps);
+  const clipTo = Math.round((p.clip.startSec + p.clip.durationSec) * fps);
+  const from = Math.max(clipFrom, fromFrame);
+  const to = Math.min(clipTo, toFrame);
+  if (to <= from) return null;
+  const offset = from - clipFrom;
+  // 焼く長さは「範囲の最後のコマ」まで＝それ以上は要らない。使える長さ（`spec.durationSec`）も越えない。
+  const durationSec = Math.max(0, Math.min(spec.durationSec - offset / fps, (to - from) / fps));
+  return { sourceStartSec: spec.sourceStartSec + (offset / fps) * spec.speed, durationSec, speed: spec.speed, offset };
+}
+
+/**
+ * `videoStageWindow` で焼いたコマのうち、出力フレーム `f` で読む番号（`null`＝映っていない）。
+ * ⚠️ **数え方は丸ごと焼いたときと同じ**（`videoFrameIndexAt`）＝そこから `offset` を引くだけ
+ * （使える長さでの頭打ちも同じ規則を通る）。
+ */
+export function videoFrameIndexInWindow(
+  p: VideoPlacement,
+  frameIndex: number,
+  fps: number,
+  offset: number,
+  stagedCount: number,
+): number | null {
+  if (stagedCount <= 0) return null;
+  const full = videoFrameIndexAt(p, frameIndex, fps, offset + stagedCount);
+  if (full == null) return null;
+  return Math.min(stagedCount - 1, Math.max(0, full - offset));
+}
+
+/**
  * 出力フレーム `f` で、その部品が出すコマの番号（`null`＝その時刻には映っていない）。
  *
  * ⚠️ **焼けた枚数で頭打ちにする**（`stagedCount`）＝素材が置いた長さより短いときに

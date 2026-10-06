@@ -5,7 +5,7 @@
 // 「どの時刻を何枚描くか」を `timelineFramePlan`/`frameTimeAt` に委ね、SVG→PNG→ステージングを回すだけ。
 import { frameTimeAt, timelineFramePlan } from '../../domain/timeline/export';
 import { isItemOfPlacement } from '../timelineLayout';
-import { videoPlacementsOf, videoFrameIndexAt, videoStagePlan } from '../../domain/timeline/video';
+import { videoPlacementsOf, videoFrameIndexInWindow, videoStagePlan, videoStageWindow } from '../../domain/timeline/video';
 import type { VideoPlacement } from '../../domain/timeline/video';
 import { creditTextAt } from '../../domain/timeline/credit';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -112,27 +112,34 @@ export async function buildTimelineFrames(
 
   // **動画は先にコマへ焼き出す**（#512 段1）＝1フレームずつ切り出すと同じ素材を何度も開くことになる。
   // 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
-  const staged: { placement: VideoPlacement; dirName: string; count: number }[] = [];
+  const staged: { placement: VideoPlacement; dirName: string; count: number; offset: number }[] = [];
   if (opts.stageVideo && opts.readVideoFrame) {
     for (const placement of videoPlacementsOf(doc, opts.templateOf)) {
       bail();
-      // ⚠️ **描く区間に出てこない動画は、コマへ焼き出さない**（#1203）＝
-      // 焼き出しは素材1本ぶん丸ごと走るので、出てこない部品まで焼くと**いちばん高い費用**を無駄に払う。
-      const clipFrom = Math.round(placement.clip.startSec * plan.fps);
-      const clipTo = Math.round((placement.clip.startSec + placement.clip.durationSec) * plan.fps);
-      if (clipTo <= fromFrame || clipFrom >= toFrame) continue;
-      const spec = videoStagePlan(placement);
+      // ⚠️ **描く範囲に重なるコマだけを焼き出す**（#1203・#352 の45分実測）＝出てこない部品は焼かない、に加えて、
+      // 出てくる部品も**範囲の外のコマは焼かない**（頭の3秒のために45分ぶんを取り出していた）。
+      const win = videoStageWindow(placement, fromFrame, toFrame, plan.fps);
+      if (!win) continue;
       const dirName = videoFramesDirOf(placement.clip.id, placement.layerId);
-      const count = await opts.stageVideo({
-        clipId: placement.clip.id,
-        assetId: placement.assetId,
-        dirName,
-        sourceStartSec: spec.sourceStartSec,
-        durationSec: spec.durationSec,
-        speed: spec.speed,
-        fps: plan.fps,
-      });
-      staged.push({ placement, dirName, count });
+      const stage = (w: { sourceStartSec: number; durationSec: number; speed: number }): Promise<number> =>
+        opts.stageVideo!({
+          clipId: placement.clip.id,
+          assetId: placement.assetId,
+          dirName,
+          sourceStartSec: w.sourceStartSec,
+          durationSec: w.durationSec,
+          speed: w.speed,
+          fps: plan.fps,
+        });
+      let count = await stage(win);
+      let offset = win.offset;
+      // ⚠️ **範囲が素材の終わりより後ろ**（素材が置いた長さより短く、最後のコマで止まっている所）は1枚も取れない＝
+      //   そのときだけ丸ごと焼き直す（止まったコマ＝素材の最後のコマが要る。素材の長さはここでは分からない）。
+      if (count === 0 && offset > 0) {
+        count = await stage(videoStagePlan(placement));
+        offset = 0;
+      }
+      staged.push({ placement, dirName, count, offset });
     }
   }
 
@@ -145,7 +152,7 @@ export async function buildTimelineFrames(
     // （素材 id で引くと、同じ動画を別の時刻に置いた2つが同じコマになる）。
     const frameSrc: { placement: VideoPlacement; src: string }[] = [];
     for (const s of staged) {
-      const idx = videoFrameIndexAt(s.placement, f, plan.fps, s.count);
+      const idx = videoFrameIndexInWindow(s.placement, f, plan.fps, s.offset, s.count);
       if (idx == null) continue;
       frameSrc.push({ placement: s.placement, src: await opts.readVideoFrame!(s.dirName, idx) });
     }
