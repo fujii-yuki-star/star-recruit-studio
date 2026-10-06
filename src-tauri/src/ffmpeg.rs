@@ -360,9 +360,31 @@ pub struct JoinStep<'a> {
 /// 場面MP4群を xfade/concat のフィルタチェーンで1本に再エンコード結合する引数（純粋・ADR-0009 T2）。
 /// `steps.len()` は `files.len()-1`（各境界）。映像は xfade/concat、音声は acrossfade/concat を同じ境界規則で連ねる。
 /// 全境界 none のときは呼ばない（その場合は concat_args の無劣化コピーを使う）。files は2本以上を前提。
+/// ⚠️ 本番は音を尺で切る `xfade_chain_args_trimmed` を使う（#1362）。こちらは切らない形＝引数の並びの検査用。
+/// ⚠️ 検査用の印（cfg の test）は付けない＝「本番の範囲＝最初の検査用の印の手前」で切る検査（FFmpeg を起こす口）の範囲が縮む。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn xfade_chain_args(
     files: &[String],
     steps: &[JoinStep],
+    out: &str,
+    codec: VideoCodec,
+    fps: u32,
+    bitrate: &str,
+) -> Vec<String> {
+    xfade_chain_args_trimmed(files, steps, None, out, codec, fps, bitrate)
+}
+
+/// `xfade_chain_args` に、入力ごとの**尺**（秒）を渡して、音を尺ぴったりに切ってからつなぐ形（#1362）。
+///
+/// ⚠️ **音は尺ぴったりにする**（足りなければ無音で埋め、長ければ切る＝`apad,atrim`）＝場面ファイルの音（AAC）は詰め物ぶん映像より少し長い。音の `acrossfade`／`concat` は
+/// **左の実際の終わり**から次を重ねるので、切らないと境目ごとに約16ms ずつ声が絵より遅れていく
+/// （30場面で終わりに約0.45秒・実測）。映像の `xfade` は決めた位置（offset）で移るのでずれない。
+/// `audio_secs`＝`None` なら切らない（従来どおり）。
+#[allow(clippy::too_many_arguments)]
+pub fn xfade_chain_args_trimmed(
+    files: &[String],
+    steps: &[JoinStep],
+    audio_secs: Option<&[f64]>,
     out: &str,
     codec: VideoCodec,
     fps: u32,
@@ -381,7 +403,12 @@ pub fn xfade_chain_args(
     // settb/asettb は実時刻(PTS)を保ったまま tb ラベルだけ統一するので、どの遷移順序でも一致する。
     for k in 0..files.len() {
         filters.push(format!("[{k}:v]settb=AVTB[nv{k}]"));
-        filters.push(format!("[{k}:a]asettb=AVTB[na{k}]"));
+        match audio_secs.and_then(|secs| secs.get(k)) {
+            Some(sec) => filters.push(format!(
+                "[{k}:a]apad,atrim=0:{sec},asetpts=PTS-STARTPTS,asettb=AVTB[na{k}]"
+            )),
+            None => filters.push(format!("[{k}:a]asettb=AVTB[na{k}]")),
+        }
     }
     // 映像チェーン：[nv0] を起点に、各境界で xfade（重ね）or concat（ハードカット）。
     let mut v_prev = "nv0".to_string();
@@ -404,8 +431,8 @@ pub fn xfade_chain_args(
     }
     // 音声チェーン：xfade の境界は acrossfade（同じ D で重ねる）、none は concat。
     // acrossfade はオフセット引数を取らず「入力1の終端を検出して自動でクロスフェード開始」する。
-    // これが映像 xfade の offset=acc−D と整合するのは、各場面 MP4 を scene_clip_args が -t {dur} で
-    // 尺ぴったりに揃えているため（音声＝映像と同尺）。
+    // これが映像 xfade の offset=acc−D と整合するのは、**`audio_secs` で音を尺に切ったときだけ**（#1362）＝
+    // 場面 MP4 の音（AAC）は詰め物ぶん映像より少し長く、切らないと境目ごとに声が遅れていく。
     let mut a_prev = "na0".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
@@ -2232,6 +2259,24 @@ fn join_total_sec(job_secs: &[f64], steps: &[JoinStep]) -> f64 {
     (total - overlap).max(0.0)
 }
 
+/// つなぐ入力ごとに、**音を切る長さ**（秒）を決める（#1362・PR #1363 レビュー 🟡）。**純粋関数**。
+///
+/// - 次の境目が**切り替え**＝決めた尺で切る（映像の `xfade` は決めた位置で移る＝音もそこに合わせる）。
+/// - 次の境目が**ハードカット**＝**コマにそろえた長さ**（`ceil(尺×fps)/fps`）で切る＝映像の `concat` は
+///   入力の実際の長さ（コマ単位で切り上がる）でつなぐので、音も同じだけ置かないと、ハードカットが続くたびに
+///   絵だけが最大1コマずつ遅れる。
+/// - 最後の入力は、後ろに何もつながないので決めた尺。
+fn join_audio_secs(secs: &[f64], steps: &[JoinStep], fps: u32) -> Vec<f64> {
+    let fps = fps.max(1) as f64;
+    secs.iter()
+        .enumerate()
+        .map(|(i, &sec)| match steps.get(i) {
+            Some(st) if st.xfade.is_none() => (sec * fps - 1e-9).ceil() / fps,
+            _ => sec,
+        })
+        .collect()
+}
+
 /// 切り替えでつなぐ段に、**一度に入れる場面の数の上限**（#1360）。
 ///
 /// ⚠️ **場面の数だけメモリを使う**＝FFmpeg は入力を全部同時に開き、まだ使わない入力のコマも待ち行列に溜める。
@@ -2257,6 +2302,8 @@ struct JoinChunk<'a> {
     first: usize,
     end: usize,
     start_sec: f64,
+    /// 塊をつないだときの長さ（秒）＝最後の場面の始まり＋その尺−塊の始まり（2段目で音を切る尺・#1362）。
+    len_sec: f64,
     steps: Vec<JoinStep<'a>>,
 }
 
@@ -2335,6 +2382,7 @@ fn plan_join_chunks<'a>(
             first: a,
             end: b,
             start_sec: base,
+            len_sec: starts[b - 1] + scene_secs[b - 1] - base,
             steps: inner,
         });
         if a > 0 {
@@ -2632,8 +2680,14 @@ fn encode_jobs(
             MAX_JOIN_INPUTS,
             1.0 / fps.max(1) as f64,
         );
-        let (join_files, join_steps, done_before, span) = match &chunked {
-            None => (scene_files.clone(), scene_steps, 0usize, total),
+        let (join_files, join_steps, join_secs, done_before, span) = match &chunked {
+            None => (
+                scene_files.clone(),
+                scene_steps,
+                scene_secs.clone(),
+                0usize,
+                total,
+            ),
             Some((chunks, top)) => {
                 let half = total;
                 let mut files_lv2: Vec<String> = Vec::with_capacity(chunks.len());
@@ -2656,9 +2710,10 @@ fn encode_jobs(
                     // 2段目の音のつなぎ（acrossfade は左の**実際の**終わりから始まる）で塊の数だけずれが積み上がる。
                     // 非圧縮（PCM）なら長さが合う。入れ物は PCM を持てる mkv。
                     let chunk_out = tmp_dir.join(format!("join_chunk_{k:03}.mkv"));
-                    let mut cargs = intermediate_audio_args(xfade_chain_args(
+                    let mut cargs = intermediate_audio_args(xfade_chain_args_trimmed(
                         &scene_files[c.first..c.end],
                         &c.steps,
+                        Some(&join_audio_secs(&scene_secs[c.first..c.end], &c.steps, fps)),
                         &chunk_out.to_string_lossy(),
                         codec,
                         fps,
@@ -2693,13 +2748,15 @@ fn encode_jobs(
                         offset_sec: st.offset_sec,
                     })
                     .collect();
-                (files_lv2, top_steps, half, half)
+                let lens: Vec<f64> = chunks.iter().map(|c| c.len_sec).collect();
+                (files_lv2, top_steps, lens, half, half)
             }
         };
         // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップ（または塊）に変わっただけ。
-        let mut args = xfade_chain_args(
+        let mut args = xfade_chain_args_trimmed(
             &join_files,
             &join_steps,
+            Some(&join_audio_secs(&join_secs, &join_steps, fps)),
             &output.to_string_lossy(),
             codec,
             fps,
@@ -8427,6 +8484,96 @@ mod join_chunk_tests {
         entries[n - 1] = Some(28.5); // 全体の頭近くまで食い込む
         let steps = build(&secs, &entries);
         assert_eq!(assert_sound(&secs, &steps), vec![0, n - 1]);
+    }
+
+    /// ⚠️ **音は入力ごとに尺で切ってからつなぐ**（#1362＝切らないと境目ごとに声が遅れていく）。
+    #[test]
+    fn trimmed_chain_cuts_each_audio_to_its_length() {
+        let files = vec![
+            "a.mp4".to_string(),
+            "b.mp4".to_string(),
+            "c.mp4".to_string(),
+        ];
+        let steps = vec![
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 3.5,
+            },
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        ];
+        let args = super::xfade_chain_args_trimmed(
+            &files,
+            &steps,
+            Some(&[4.0, 2.25, 3.0]),
+            "o.mp4",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        );
+        let fc = &args[args
+            .iter()
+            .position(|a| a == "-filter_complex")
+            .expect("ある")
+            + 1];
+        assert!(fc.contains("[0:a]apad,atrim=0:4,asetpts=PTS-STARTPTS,asettb=AVTB[na0]"));
+        assert!(fc.contains("[1:a]apad,atrim=0:2.25,asetpts=PTS-STARTPTS,asettb=AVTB[na1]"));
+        assert!(fc.contains("[2:a]apad,atrim=0:3,asetpts=PTS-STARTPTS,asettb=AVTB[na2]"));
+        // 映像は切らない（xfade は決めた位置で移る）
+        assert!(fc.contains("[0:v]settb=AVTB[nv0]"));
+        // 尺を渡さなければ従来どおり
+        let plain = super::xfade_chain_args(
+            &files,
+            &steps,
+            "o.mp4",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        );
+        assert!(!plain.iter().any(|a| a.contains("atrim")));
+    }
+
+    /// 塊の長さ（2段目で音を切る尺）は、塊をつないだ長さと同じ（#1362）。
+    #[test]
+    fn chunk_len_matches_joined_length() {
+        let (secs, raw) = scenes(80, 33.75, &[9, 40]);
+        let steps = to_steps(&raw);
+        let (chunks, _) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        for c in &chunks {
+            let (len, _) = simulate(&secs[c.first..c.end], &c.steps);
+            assert!((c.len_sec - len).abs() < 1e-9, "塊 {} の長さ", c.first);
+        }
+    }
+
+    /// 音を切る長さ：次が切り替えなら決めた尺、ハードカットならコマにそろえた長さ、最後は決めた尺（PR #1363 レビュー 🟡）。
+    #[test]
+    fn audio_secs_follow_how_the_video_joins() {
+        let steps = vec![
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 3.0,
+            },
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        ];
+        let got = super::join_audio_secs(&[3.51, 2.01, 4.01], &steps, 30);
+        assert!((got[0] - 3.51).abs() < 1e-9, "切り替えの前は決めた尺");
+        assert!(
+            (got[1] - 61.0 / 30.0).abs() < 1e-9,
+            "ハードカットの前はコマにそろえた長さ"
+        );
+        assert!((got[2] - 4.01).abs() < 1e-9, "最後は決めた尺");
+        // ちょうどコマに乗る尺は増やさない
+        assert!((super::join_audio_secs(&[2.0, 1.0], &steps[1..], 30)[0] - 2.0).abs() < 1e-9);
     }
 
     #[test]
