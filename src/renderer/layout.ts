@@ -7,10 +7,10 @@ import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from
 import type { CropAlignX, CropAlignY } from '../domain/enums';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { ColorAdjust, BlendMode, Template, TextShadow } from '../domain/template/types';
-import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
+import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle, scaleTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { textKeyOfLayer } from '../domain/template/layerOps';
-import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
+import { composeGroupGeometry, groupScaleOf, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import { groupElementIds } from '../domain/project/groupOps';
@@ -279,6 +279,32 @@ export function applyInterpolatedTransform(item: TransformableRect, tr: Interpol
   if (tr.opacity != null) item.opacity = tr.opacity;
 }
 
+/**
+ * 描くアイテムの**中身**を `k` 倍の大きさにする（#1371）。箱（x/y/w/h）は呼び出し側が変える。
+ *
+ * ⚠️ **大きさの変形は中身ごと**（業界の型）＝箱だけ縮めて字を据え置くと、縮んだ幅で折り返して「…」で切れた。
+ * 文字は `scaleTextStyle`（体裁の掛け方は domain に1つ）、図形は角丸と枠線の太さ。絵は箱に当てはめるので何もしない。
+ * **場面形式のキーフレーム**と**タイムライン形式の部品の変形**が呼ぶ＝掛け方を2か所に書かない（§6）。
+ */
+export function scaleItemContent(item: LayoutItem, k: number): void {
+  if (k === 1) return;
+  switch (item.kind) {
+    case 'text':
+      Object.assign(item, scaleTextStyle(item, k));
+      return;
+    case 'fill':
+      item.radius *= k;
+      if (item.strokeWidth != null) item.strokeWidth *= k;
+      return;
+    case 'image':
+      return;
+    default: {
+      const exhaustive: never = item;
+      return exhaustive;
+    }
+  }
+}
+
 /** シーンをテンプレに沿って配置解決する。 */
 export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptions): SceneLayout {
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
@@ -293,6 +319,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
     const base: ItemBase = { id: layer.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: effectiveLayerZ(layer) };
     if (cg.rotation) base.rotation = cg.rotation; // 0/未指定は付けない＝グループ未所属は従来どおり
+    // まとまりで縮めた分は**中身も縮める**（#1371）＝文字・角丸を箱と同じ倍率に。まとまり無しは 1＝従来どおり。
+    const contentScale = groupScaleOf(layer, cg);
 
     switch (layer.type) {
       case LAYER_TYPE.background: {
@@ -300,7 +328,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         if (assetId) {
           items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'background', label: '背景' });
         } else {
-          items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0 });
+          items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: (layer.radius ?? 0) * contentScale });
         }
         break;
       }
@@ -330,7 +358,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // layer.shapeType は rect/ellipse/line。FillItem(=FreeShapeType: rect/ellipse)へ転送し、ellipse のみ楕円・他は rect。
         const shapeType: FreeShapeType =
           layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect;
-        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
+        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR, opacity: layer.opacity ?? 1, radius: (layer.radius ?? 0) * contentScale, shapeType });
         break;
       }
       case LAYER_TYPE.text:
@@ -362,7 +390,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // 文字の体裁は場面別に上書きできる（#555・schema 1.24）。未指定はテンプレ層→既定を継承＝
         // 触ったものだけが固有値（フォント＝textFontIds と同型・§2-4 の対象は配置なので体裁は自由化してよい）。
         // 解決は共有 resolveTextStyle（場面編集の体裁欄と同じ関数＝欄の「テンプレに合わせる」表示と描画が一致）。
-        const style = resolveTextStyle(layer, textKey ? scene.textStyles?.[textKey] : undefined);
+        // まとまりで縮めた分はここで掛ける＝下の段積み（`stackedSubtitleBands`）も**縮めた字**で折り返す（#1371）。
+        const style = scaleTextStyle(resolveTextStyle(layer, textKey ? scene.textStyles?.[textKey] : undefined), contentScale);
         // fontSize は下の stackedSubtitleBands（同時字幕の段組み）にも渡るため、**上書き後の値**を使う
         // ＝上書きで文字が大きくなっても帯が重ならない（#533 P1 の実折返し行数計算と同じ値）。
         const fontSize = style.fontSize;
@@ -460,6 +489,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はグループ合成後の値（未所属＝el.rotation）。
       const cg = elGeom.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
       const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
+      // まとまりで縮めた分は**中身も縮める**（#1371）＝下で積んだアイテムへ後から掛ける。行数（`maxLines`）は
+      // 縮める前の箱と字で出す＝箱と字が同じ倍率なので同じ行数（後から掛けても折返しは変わらない）。
+      const pushedFrom = items.length;
       switch (el.kind) {
         case 'slot':
           items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
@@ -502,6 +534,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           break;
         }
       }
+      const contentScale = groupScaleOf(el, cg);
+      for (let i = pushedFrom; i < items.length; i++) scaleItemContent(items[i], contentScale);
     }
   }
 
@@ -518,7 +552,10 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     for (const item of items) {
       const anim = byTarget.get(item.id); // グループ対象（group_NNN）はここでは一致しない＝要素だけ処理
       if (!anim) continue;
-      applyInterpolatedTransform(item, interpolateKeyframes(anim.keyframes, opts.timeSec));
+      const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
+      applyInterpolatedTransform(item, tr);
+      // 大きさの動きは**中身ごと**（#1371）＝箱だけ縮めると字が「…」で切れる。
+      if (tr.scale != null) scaleItemContent(item, tr.scale);
     }
   }
   // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。

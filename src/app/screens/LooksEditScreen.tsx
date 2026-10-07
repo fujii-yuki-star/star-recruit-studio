@@ -29,7 +29,7 @@ import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
-import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, isTextLayer, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import { ColorPicker } from "../components/ColorPicker";
@@ -455,7 +455,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     const memberIds = groupElementIds(tplGroups, effectiveActiveGroupId);
     setDraft((d) => {
       if (!d) return d;
-      const r = ungroupGroup(d.groups ?? [], d.layers, effectiveActiveGroupId);
+      const r = ungroupGroup(d.groups ?? [], d.layers, effectiveActiveGroupId, isTextLayer);
       return { ...d, groups: r.groups, layers: r.elements };
     });
     setActiveGroupId(null);

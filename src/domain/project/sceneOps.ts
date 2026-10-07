@@ -6,10 +6,10 @@ import { DEFAULT_BACKGROUND_COLOR, quantizeSec, SHAPE_FILL_FALLBACK_COLOR } from
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { FreeElementKind, SceneCategory } from '../enums';
 import type { Template } from '../template/types';
-import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
+import { composeGroupGeometry, groupScaleOf, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
 import { templateSlotIds } from '../template/layerOps';
-import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields, scaleTextStyle } from '../template/textStyle';
 import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
@@ -187,6 +187,8 @@ export function freeLayoutFromPlacedContent(
       ...(cg.rotation ? { rotation: cg.rotation } : {}),
       zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
     };
+    // まとまりで縮めた分は中身も縮めて写す（#1371・描画＝`layoutScene` と同じ倍率）＝バラす前後で字の大きさが変わらない。
+    const contentScale = groupScaleOf(layer, cg);
     if (layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.logo) {
       const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材→テンプレ既定素材（描画と同じ解決）
       if (!assetId) {
@@ -201,7 +203,7 @@ export function freeLayoutFromPlacedContent(
             shapeType: FREE_SHAPE_TYPE.rect,
             fillColor: layer.fillColor ?? template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR,
             opacity: layer.opacity ?? 1,
-            radius: layer.radius ?? 0,
+            radius: (layer.radius ?? 0) * contentScale,
           });
         } else if (layer.type === LAYER_TYPE.slot) {
           elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: null, fit: scene.slotFits?.[layer.id] ?? layer.fit });
@@ -242,7 +244,7 @@ export function freeLayoutFromPlacedContent(
       // ここで項目を手で並べていたため、**新しい項目を足すたびに写し漏れ**が出た
       //（`letterSpacing`/`shadow` が漏れ、直したあとも `background` の場面別上書きが漏れた）。
       // 数え上げる場所を1つにすれば、`TextStyle` が増えてもここは無変更で済む。
-      const style = freeTextStyleFields(layer, scene.textStyles?.[textKey]);
+      const style = scaleTextStyle(freeTextStyleFields(layer, scene.textStyles?.[textKey]), contentScale);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
@@ -261,7 +263,7 @@ export function freeLayoutFromPlacedContent(
         shapeType: layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect,
         fillColor: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR,
         opacity: layer.opacity ?? 1,
-        radius: layer.radius ?? 0,
+        radius: (layer.radius ?? 0) * contentScale,
         // 枠線（`strokeColor`/`strokeWidth`）は**通常テンプレの図形では描かれない**（`layoutScene`）。
         // 写すと元の絵に無い線が出る＝バラす前後で見た目が変わる。持ち物ではなく**描かれるもの**を写す。
       });
@@ -271,7 +273,7 @@ export function freeLayoutFromPlacedContent(
       // 体裁は上の ⚠️ と同じ理由で `freeTextStyleFields` に任せる。
       // **どの文字を指すか**は1か所で解く（#1058・`textKeyOfLayer` は字幕層の未指定を `subtitle` と解く）。
       const subKey = textKeyOfLayer(layer);
-      const style = freeTextStyleFields(layer, subKey ? scene.textStyles?.[subKey] : undefined);
+      const style = scaleTextStyle(freeTextStyleFields(layer, subKey ? scene.textStyles?.[subKey] : undefined), contentScale);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,

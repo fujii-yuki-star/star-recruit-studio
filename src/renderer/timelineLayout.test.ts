@@ -6,6 +6,8 @@ import type { Template } from '../domain/template/types';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import { layoutScene } from './layout';
+import type { TextItem } from './layout';
+import { wrapText } from '../domain/text/textWrap';
 import { layoutToSvg } from './sceneSvg';
 import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, overlappingSubtitleClips, templatePartAt } from './timelineLayout';
 
@@ -666,5 +668,33 @@ describe('overlappingSubtitleClips（#1014）', () => {
     });
     // 3つの組み合わせ＝3組（同じ組を重ねて数えない）。
     expect(overlappingSubtitleClips(d, opts).length).toBe(3);
+  });
+});
+
+describe('layoutTimelineAt：大きさの変形は中身ごと（#1371）', () => {
+  // 作例の題字＝文字の部品に「ぽんっと」（0.3→1.12→1）。0.34 秒のコマで「漫才「キーフ…」」と切れていた。
+  it('自身の動きの大きさで、文字の大きさも縮む＝縮める前と同じ折り返し', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { w: 400, text: 'ああああ', fontSize: 100 })],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scale: 0.3 }] }],
+    });
+    const t = layoutTimelineAt(d, 0, opts).items.find((i) => i.kind === 'text') as TextItem;
+    expect(t.w).toBeCloseTo(120);
+    expect(t.fontSize).toBeCloseTo(30);
+    expect(wrapText(t.text, t.w, t.fontSize, t.maxLines)).toEqual(['ああああ']);
+  });
+
+  it('まとまりの静的な拡大でも中身ごと（テンプレの部品の文字）', () => {
+    const d = doc({
+      clips: [templateClip('clip_001')],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } }],
+    });
+    const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title')) as TextItem;
+    expect(title.fontSize).toBe(144);
+  });
+
+  it('変形が無ければ中身は変えない', () => {
+    const title = layoutTimelineAt(doc({ clips: [templateClip('clip_001')] }), 0, opts).items.find((i) => i.id.endsWith('/title')) as TextItem;
+    expect(title.fontSize).toBe(72);
   });
 });

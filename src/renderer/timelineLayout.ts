@@ -24,7 +24,7 @@ import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { rotatedBounds } from '../domain/preview/safeArea';
 import { drawnTextRect } from '../domain/text/subtitleBands';
-import { applyInterpolatedTransform, layoutScene } from './layout';
+import { applyInterpolatedTransform, layoutScene, scaleItemContent } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
 import { resolveClipBox } from '../domain/timeline/box';
@@ -107,7 +107,7 @@ function isIdentity(sim: Similarity): boolean {
   );
 }
 
-/** 相似変換を1アイテムへ適用する（中心を移し、大きさを掛け、角度を足す）。 */
+/** 相似変換を1アイテムへ適用する（中心を移し、大きさを掛け、角度を足す・中身の大きさも掛ける）。 */
 function applySimilarity(item: LayoutItem, sim: Similarity): void {
   if (isIdentity(sim)) return;
   const rad = (sim.rotationDeg * Math.PI) / 180;
@@ -122,6 +122,9 @@ function applySimilarity(item: LayoutItem, sim: Similarity): void {
   item.x = cx - item.w / 2;
   item.y = cy - item.h / 2;
   if (sim.rotationDeg !== 0) item.rotation = (item.rotation ?? 0) + sim.rotationDeg;
+  // 中身ごと縮める（#1371）＝箱だけ縮めて字を据え置くと、縮んだ幅で折り返して「…」で切れた。
+  // まとまりの静的な拡縮も、自身の動き・喋っている間の動きも、ここ1か所を通る。
+  scaleItemContent(item, sim.scale);
 }
 
 

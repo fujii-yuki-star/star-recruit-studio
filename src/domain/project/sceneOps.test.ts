@@ -735,6 +735,25 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(mv.x).not.toBe(100); // 生の座標のまま持ち込んでいない
   });
 
+  it('通常→FREE：まとまりで縮めた文字は、縮めた大きさで写す（描画と同じ字の大きさ・#1371）', () => {
+    const grouped: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('title', 'text', { textKey: 'title', x: 200, y: 900, w: 1500, h: 120, fontSize: 64, strokeWidth: 4, background: { enabled: true, radius: 12 } }),
+        layer('deco', 'shape', { x: 0, y: 0, w: 200, h: 200, radius: 40 }),
+      ],
+      groups: [{ id: 'group_001', members: ['title', 'deco'], transform: { x: 0, y: 0, scale: 0.5, rotation: 0 } }],
+    };
+    const sc = { ...richScene(), textStyles: undefined } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, grouped, { faithful: true });
+    const title = elements.find((e) => e.kind === 'text')!;
+    // 描画（layoutScene）で見える大きさと同じ＝バラす前後で字の大きさが変わらない。
+    const drawn = layoutScene(sc, grouped).items.find((i) => i.id === 'title') as TextItem;
+    expect(title).toMatchObject({ fontSize: 32, strokeWidth: 2, background: { radius: 6 } });
+    expect(title.fontSize).toBe(drawn.fontSize);
+    expect(elements.find((e) => e.kind === 'shape')).toMatchObject({ w: 100, radius: 20 });
+  });
+
   it('非破壊往復：通常→FREE で通常配置（assetRefs/slotFits）を休眠保持し、FREE→通常で復元（Option A・ADR-0030）', () => {
     const original = richScene();
     const toFree = switchSceneTemplate(original, 'free_v1', 'free', prevTemplate());
