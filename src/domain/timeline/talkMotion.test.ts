@@ -81,13 +81,14 @@ describe('talkMotionAt（ADR-0056）', () => {
 });
 
 describe('書き出しでは動く部品（ADR-0056 決定6）', () => {
-  it('喋っている間の動きを持つ動画の部品は、そのまま流さずに毎コマ焼く', () => {
+  // #1376：動くのは結んだ声が鳴っている間だけ＝その区間だけ毎コマ、残りはそのまま流す。
+  it('喋っている間の動きを持つ動画の部品は、声が鳴っている区間だけ毎コマ焼く', () => {
     const video = (talkMotion?: TalkMotion): TimelineClip =>
       ({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_001', ...(talkMotion ? { talkMotion } : {}) }) as TimelineClip;
     const assets = [{ assetId: 'asset_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }];
     const kinds = (c: TimelineClip) => planTimelineExportSegments(doc([c, voice('clip_002', 2, 3)], { assets } as Partial<TimelineProject>)).map((s) => s.kind);
     expect(kinds(video())).toEqual(['video']);
-    expect(kinds(video({ trackId: 'track_002', kind: 'bob' }))).toEqual(['frames']);
+    expect(kinds(video({ trackId: 'track_002', kind: 'bob' }))).toEqual(['video', 'frames', 'video']);
   });
 });
 

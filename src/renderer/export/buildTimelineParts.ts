@@ -22,7 +22,7 @@ import { buildTimelineFrames, TIMELINE_FRAMES_DIR } from './buildTimelineFrames'
 import { ExportCancelledError } from './buildExportScenes';
 import type { BuildTimelineFramesOptions } from './buildTimelineFrames';
 
-/** 書き出しへ渡す1区間。`frames`＝焼いたコマ列／`video`＝実動画をそのまま流す。 */
+/** 書き出しへ渡す1区間。`frames`＝焼いたコマ列（`still` は1コマだけ＝区間の長さまで止めて流す）／`video`＝実動画をそのまま流す。 */
 export interface TimelineExportPart {
   fps: number;
   durationSec: number;
@@ -171,6 +171,25 @@ export async function buildTimelineParts(
       }
     }
     const bakedBefore = baked;
+    if (seg.kind === 'still') {
+      // ⚠️ **何も時間で変わらない区間は1コマだけ描く**（ADR-0032 決定22-2 追補3・#1376）＝描くのは毎コマの区間と
+      // **同じ関数**（1コマぶん）。区間の長さは Rust が最後のコマを引き伸ばして満たす（`tpad=stop_mode=clone`）。
+      const fromFrame = Math.round(seg.startSec * plan.fps);
+      const one = await buildTimelineFrames(doc, {
+        ...opts,
+        onProgress: undefined,
+        framesDirName: framesDirForSegment(i),
+        window: { fromFrame, toFrame: fromFrame + 1 },
+      });
+      baked = bakedBefore + 1;
+      opts.onProgress?.(baked, bakeTotal);
+      parts.push({
+        fps: one.fps,
+        durationSec: seg.endSec - seg.startSec,
+        ...(one.framesDir ? { framesDir: one.framesDir } : {}),
+      });
+      continue;
+    }
     const frames = await buildTimelineFrames(doc, {
       ...opts,
       onProgress: (done) => {
