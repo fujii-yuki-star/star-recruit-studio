@@ -351,6 +351,23 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
     expect(planTimelineExportSegments(fade)).toEqual([{ kind: 'frames', startSec: 0, endSec: 3 }]);
   });
 
+  // ⚠️ 入れ子のグループの外側に付いた動きも中の部品まで届く（PR #1377 レビュー 🔴＝内側が配列の先にあると届かなかった）。
+  it('入れ子のグループの外側が動けば、中の部品の区間は毎コマ', () => {
+    const d = doc([text('clip_001', 0, 3), text('clip_002', 0, 3)], {
+      groups: [
+        { id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+        { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+      ],
+      animations: [{ id: 'anim_001', targetId: 'group_002', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 3, x: 100 }] }],
+    } as Partial<TimelineProject>);
+    expect(planTimelineExportSegments(d)).toEqual([{ kind: 'frames', startSec: 0, endSec: 3 }]);
+  });
+
+  it('足し算の端数でも、割り目は描く側と同じコマ', () => {
+    const d = doc([text('clip_001', 0, 1.1 + 2.2), text('clip_002', 1.1 + 2.2, 2)]);
+    expect(planTimelineExportSegments(d)[1].startSec).toBe(100 / 30);
+  });
+
   it('描画モードが付いた部品のある区間は、いまは毎コマ（狭く始める）', () => {
     const d = doc([text('clip_001', 0, 3, { blendMode: 'multiply' })]);
     expect(planTimelineExportSegments(d)).toEqual([{ kind: 'frames', startSec: 0, endSec: 3 }]);

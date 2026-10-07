@@ -313,6 +313,8 @@ describe('1コマで流す区間の中は、どのコマも同じ絵（#1376）'
     ({ id, kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec, durationSec, voice: { text: 'あ', status: 'none' } }) as TimelineClip;
   const cases: [string, TimelineProject][] = [
     ['端数の時刻で出入りする文字', doc([text('a', 0, 5.635), text('b', 5.635, 1.01), text('c', 1.017, 3.333)])],
+    // 足し算の端数（1.1+2.2＝3.3000000000000003）＝描く側と同じ式で割らないと、区間が丸ごと前の部品になる（PR #1377 レビュー 🔴）。
+    ['足し算の端数で出入りする文字', doc([text('a', 0, 1.1 + 2.2), text('b', 1.1 + 2.2, 2)])],
     ['喋っている間の動き（はねる・ゆらゆら）', doc([
       text('a', 0, 6, { talkMotion: { trackId: 'track_002', kind: 'bounce' } }),
       text('b', 0, 6, { talkMotion: { trackId: 'track_002', kind: 'bob' }, y: 200 }),

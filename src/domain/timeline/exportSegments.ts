@@ -17,7 +17,8 @@
 import { TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
-import { timelineFramePlan } from './export';
+import { groupElementIds } from '../project/groupOps';
+import { frameTimeAt, timelineFramePlan } from './export';
 import { talkMotionActiveRanges } from './talkMotion';
 import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
@@ -117,9 +118,13 @@ export function planTimelineExportSegments(
   const animated = new Set<string>();
   for (const a of doc.animations ?? []) if ((a.keyframes?.length ?? 0) > 0) animated.add(a.targetId);
   // ⚠️ **グループも見る**＝グループにキーフレームが付いていれば、中の部品も動く。
-  for (const g of doc.groups ?? []) {
+  // ⚠️ **入れ子は葉までたどる**（PR #1377 レビュー 🔴）＝描く側と同じ `groupElementIds` を通す。1段だけ・配列の順で
+  // 配ると、内側のグループが先に並ぶ（まとめたものをさらにまとめた普通の順）とき、外側の動きが中の部品へ届かず、
+  // 動いている所を1コマで流してしまう。
+  const groups = doc.groups ?? [];
+  for (const g of groups) {
     if (!animated.has(g.id)) continue;
-    for (const m of g.members ?? []) animated.add(m);
+    for (const m of groupElementIds(groups, g.id)) animated.add(m);
   }
   // 喋っている間の動き（ADR-0056）＝**動いている範囲だけ**動く部品（決定22-2 追補3・#1376）。
   // ⚠️ 範囲は描く側と同じ所（`talkMotion.ts`）で出す＝片方だけ条件が増えると、動く所を止めた絵で流す。
@@ -137,9 +142,16 @@ export function planTimelineExportSegments(
   // ⚠️ **割り目は「その時刻から映る最初のコマ」**（#1376）＝コマ f に映るのは `frameTimeAt(f)`（f/fps）が部品の
   // 範囲に入るとき（`clipIsLiveAt`）なので、境目は**切り上げ**。四捨五入だと 5.635 秒に始まる字幕の割り目が
   // 169 コマ目（5.633 秒＝まだ映らない）に来て、**1コマで流す区間を字幕の無い絵で描いて**しまった（作例の漫才で実際に起きた）。
-  // 毎コマ描く区間では1コマのずれで済んでいたので、表に出ていなかった。誤差（123/30*30 が 122.99…）は小さく見逃す。
-  const toFrame = (sec: number): number =>
-    Math.max(0, Math.min(plan.frameCount, Math.ceil(sec * plan.fps - 1e-6)));
+  // 毎コマ描く区間では1コマのずれで済んでいたので、表に出ていなかった。
+  // ⚠️ **描く側と同じ式で決める**（PR #1377 レビュー 🔴）＝「`frameTimeAt(f) >= sec` を満たす最小の f」。
+  // 掛け算・足し算の端数（1.1+2.2＝3.3000000000000003 → ×30＝99.00000000000001）を「見逃す幅」で丸めると、
+  // 描く側（`clipIsLiveAt`）と1コマ食い違い、1コマで流す区間の絵がまるごと前の部品になる。
+  const toFrame = (sec: number): number => {
+    let f = Math.ceil(sec * plan.fps);
+    while (f > 0 && frameTimeAt(f - 1, plan.fps) >= sec) f -= 1;
+    while (frameTimeAt(f, plan.fps) < sec) f += 1;
+    return Math.max(0, Math.min(plan.frameCount, f));
+  };
   for (const c of visual) {
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));
