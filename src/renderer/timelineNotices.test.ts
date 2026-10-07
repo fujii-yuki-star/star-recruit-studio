@@ -44,12 +44,20 @@ describe('timelineTruncatedTexts（#1366）', () => {
     expect(timelineTruncatedTexts(d, () => undefined)).toEqual(['とても長い読み上げの文がここに入ります']);
   });
 
-  // PR #1369 レビュー 🟡：大きさの動きは枠の幅だけを変える＝時刻によって切れたり切れなかったりする。
-  it('大きくなりながら出る文字は、小さいとき（始まり）に切れていれば挙げる', () => {
+  // #1371：大きさの動きは**字も同じ倍率で縮む**＝等倍で入る文字は、小さいときも切れない（挙げない）。
+  // （以前は枠の幅だけが縮んで始まりで「…」になり、PR #1369 はそれを挙げていた。）
+  it('大きくなりながら出る文字は、等倍で入るなら小さいときも切れない＝挙げない', () => {
     const d = doc([text('clip_001', 700, 110, '漫才キーフレ')], { // 等倍（600px）なら入る
       animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scale: 0.4 }, { timeSec: 1, scale: 1 }] }],
     } as Partial<TimelineProject>);
-    expect(timelineTruncatedTexts(d, () => undefined)).toEqual(['漫才キーフレ']);
+    expect(timelineTruncatedTexts(d, () => undefined)).toEqual([]);
+  });
+
+  it('大きさの動きがあっても、等倍で切れる文字は挙げる', () => {
+    const d = doc([text('clip_001', 400, 110, '漫才キーフレームの題字')], {
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scale: 0.4 }, { timeSec: 1, scale: 1 }] }],
+    } as Partial<TimelineProject>);
+    expect(timelineTruncatedTexts(d, () => undefined)).toEqual(['漫才キーフレームの題字']);
   });
 
   it('数は切れる部品ごと（同じ文の部品が2つ切れていれば2つ）', () => {

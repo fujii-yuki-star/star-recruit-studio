@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxHeightForLines, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor, linesForBoxHeight, resolveStrokeColor, resolveTextStyle, STROKE_COLOR_ON_DARK, STROKE_COLOR_ON_LIGHT } from './textStyle';
+import { boxHeightForLines, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor, linesForBoxHeight, resolveStrokeColor, resolveTextStyle, scaleTextStyle, DEFAULT_BAND_RADIUS, STROKE_COLOR_ON_DARK, STROKE_COLOR_ON_LIGHT } from './textStyle';
 import type { TextStyleSource } from './textStyle';
 
 // #555：場面の上書き（textStyles）→ テンプレ層 → 既定 の継承解決。描画（layoutScene）・場面編集の体裁欄・
@@ -155,5 +155,24 @@ describe('linesForBoxHeight / boxHeightForLines（行数と枠高の相互変換
   it('0/負の行数でも 1 行ぶんの高さを返す（潰れた枠を作らない）', () => {
     expect(boxHeightForLines(0, 40)).toBe(52);
     expect(boxHeightForLines(-2, 40)).toBe(52);
+  });
+});
+
+describe('scaleTextStyle（大きさの変形は中身ごと・#1371）', () => {
+  it('倍率 1 は同じものを返す（触らない）', () => {
+    const st = { fontSize: 40, strokeWidth: 2 };
+    expect(scaleTextStyle(st, 1)).toBe(st);
+  });
+  it('px で持つものだけ掛ける（字間・色は触らない）・元は変えない', () => {
+    const st = { fontSize: 40, strokeWidth: 2, letterSpacing: 0.1, color: '#ff0000', shadow: { enabled: true, blur: 4, dx: 1, dy: -2 }, background: { enabled: true, radius: 8 } };
+    const out = scaleTextStyle(st, 0.5);
+    expect(out).toEqual({ fontSize: 20, strokeWidth: 1, letterSpacing: 0.1, color: '#ff0000', shadow: { enabled: true, blur: 2, dx: 0.5, dy: -1 }, background: { enabled: true, radius: 4 } });
+    expect(st.fontSize).toBe(40);
+    expect(st.shadow.blur).toBe(4);
+  });
+  it('未指定の項目は足さない（帯の角丸だけは既定を掛けて入れる）', () => {
+    expect(scaleTextStyle({ fontSize: 40, shadow: { enabled: true } }, 2)).toEqual({ fontSize: 80, shadow: { enabled: true } });
+    const banded = { fontSize: 40, background: { enabled: true } };
+    expect(scaleTextStyle(banded, 0.5)).toEqual({ fontSize: 20, background: { enabled: true, radius: DEFAULT_BAND_RADIUS * 0.5 } });
   });
 });

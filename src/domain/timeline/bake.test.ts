@@ -884,6 +884,22 @@ describe('bakeTimelineProject: 掛け合い字幕の体裁（#633・#264）', ()
     expect(clip.background).toEqual({ enabled: true, color: '#ff0000', opacity: 0.9 });
   });
 
+  // ⚠️ 描画（layoutScene）はまとまりの倍率で字幕の字も縮める（#1371）＝焼いた字幕も同じ大きさでないと、焼く前と後で字が変わる。
+  it('まとまりで縮めた字幕は、縮めた字の大きさで焼く', () => {
+    const p = project({
+      scenes: [scene('scene_001', { lines: [{ lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none }] })],
+    });
+    const sub = NORMAL_TEMPLATE.layers.find((l) => l.id === 'subtitle')!;
+    const grouped: Template = {
+      ...NORMAL_TEMPLATE,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const { doc } = bakeTimelineProject(p, opts({ templateOf: (id) => (id === NORMAL_TEMPLATE.templateId ? grouped : templateOf(id)) }));
+    const clip = doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+    expect(clip.fontSize).toBe((sub.fontSize ?? 40) * 0.5);
+    expect(clip.w).toBe(sub.w * 0.5);
+  });
+
   it('上書きが無ければ体裁を足さない（従来の絵を変えない）', () => {
     const clip = subtitleClip(styled(undefined));
     expect(clip.letterSpacing).toBeUndefined();

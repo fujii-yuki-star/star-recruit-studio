@@ -136,6 +136,42 @@ export function freeTextStyleFields(
   };
 }
 
+/** 大きさを掛けられる文字の体裁（`scaleTextStyle` の対象）。 */
+type ScalableTextStyle = {
+  fontSize: number;
+  strokeWidth?: number;
+  shadow?: TextShadow;
+  background?: LayerBackground;
+};
+
+/**
+ * 文字の体裁を `k` 倍の大きさにする（#1371）。純粋関数・元は変えない。
+ *
+ * ⚠️ **大きさの変形は中身ごと**（業界の型）＝箱だけ縮めて字を据え置くと、縮んだ幅で折り返して「…」で切れる。
+ * 掛けるのは**画面の px で持つもの**だけ＝文字の大きさ・縁取りの太さ・影のぼかしとずらし・帯の角丸。
+ * 字間（em）と行間（倍率）は文字の大きさに付いてくるので掛けない（掛けると二重になる）。
+ * ⚠️ 帯の角丸が未指定のときは**既定の角丸を掛けた値**を入れる（未指定のままだと描く側が既定を
+ * 縮めずに使う＝小さい帯に大きい角丸が付く）。
+ */
+export function scaleTextStyle<T extends ScalableTextStyle>(st: T, k: number): T {
+  if (k === 1) return st;
+  const sh = st.shadow;
+  return {
+    ...st,
+    fontSize: st.fontSize * k,
+    ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth * k } : {}),
+    ...(sh != null
+      ? { shadow: {
+          ...sh,
+          ...(sh.blur != null ? { blur: sh.blur * k } : {}),
+          ...(sh.dx != null ? { dx: sh.dx * k } : {}),
+          ...(sh.dy != null ? { dy: sh.dy * k } : {}),
+        } }
+      : {}),
+    ...(st.background != null ? { background: { ...st.background, radius: (st.background.radius ?? DEFAULT_BAND_RADIUS) * k } } : {}),
+  };
+}
+
 /** `enabled` の影だけを返す（既定は黒・濃さ 0.5）。`enabled` でなければ `undefined`。 */
 export function enabledShadow(shadow: TextShadow | undefined): TextShadow | undefined {
   if (!shadow?.enabled) return undefined;

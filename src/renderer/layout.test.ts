@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, scaleItemContent, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from '../domain/text/textWrap';
 import { sampleTemplates } from '../infrastructure/sampleData';
@@ -929,5 +929,99 @@ describe('layoutScene：字幕層の textKey は未指定でも `subtitle`（#10
     } as unknown as Template;
     const texts = layoutScene(scene, t).items.filter((i): i is TextItem => i.kind === 'text');
     expect(texts, '文字層に既定の文言を足してしまった').toEqual([]);
+  });
+});
+
+describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
+  // 箱だけ縮めて字を据え置くと、縮んだ幅で折り返して「…」で切れた（作例の題字「漫才「キーフ…」」）。
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  };
+  const textEl = {
+    id: 'free_001', kind: 'text', x: 100, y: 100, w: 200, h: 60, text: 'ああああ',
+    strokeWidth: 4, strokeColor: '#000000', shadow: { enabled: true, blur: 6, dx: 2, dy: 8 },
+    background: { enabled: true, color: '#000000', opacity: 0.5, radius: 10 },
+  };
+  const shapeEl = { id: 'free_002', kind: 'shape', x: 400, y: 100, w: 100, h: 100, radius: 20, strokeWidth: 6, strokeColor: '#000000' };
+  const freeScene = {
+    ...scene, sceneType: 'free', templateId: 'free_v1', freeLayout: [textEl, shapeEl],
+  } as unknown as Scene;
+  const byId = (items: LayoutItem[], id: string): LayoutItem => items.find((i) => i.id === id)!;
+
+  it('動きの大きさ：文字の大きさ・縁取り・影・帯の角丸も同じ倍率（折り返しが変わらない＝「…」で切れない）', () => {
+    const pop = { id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, scale: 0.3 }] };
+    const el = byId(layoutScene(freeScene, freeTemplate, { timeSec: 0, animations: [pop] }).items, 'free_001') as TextItem;
+    expect(el.fontSize).toBeCloseTo(40 * 0.3);
+    expect(el.strokeWidth).toBeCloseTo(4 * 0.3);
+    expect(el.shadow).toMatchObject({ blur: expect.closeTo(1.8), dx: expect.closeTo(0.6), dy: expect.closeTo(2.4) });
+    expect(el.background?.radius).toBeCloseTo(3);
+    // 縮める前と同じ1行に収まる（箱と字が同じ倍率）。
+    expect(wrapText(el.text, el.w, el.fontSize, el.maxLines)).toEqual(['ああああ']);
+  });
+
+  it('動きの大きさ：図形の角丸と枠線の太さも同じ倍率', () => {
+    const pop = { id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, scale: 0.5 }] };
+    const el = byId(layoutScene(freeScene, freeTemplate, { timeSec: 0, animations: [pop] }).items, 'free_002') as FillItem;
+    expect(el).toMatchObject({ w: 50, radius: 10, strokeWidth: 3 });
+  });
+
+  it('まとまりの静的な縮小も中身ごと（文字・図形）＝行数は縮める前と同じ', () => {
+    const plain = layoutScene(freeScene, freeTemplate).items;
+    const grouped = { ...freeScene, groups: [{ id: 'group_001', members: ['free_001', 'free_002'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }] } as unknown as Scene;
+    const items = layoutScene(grouped, freeTemplate).items;
+    const t = byId(items, 'free_001') as TextItem;
+    expect(t).toMatchObject({ w: 100, fontSize: 20, strokeWidth: 2, maxLines: (byId(plain, 'free_001') as TextItem).maxLines });
+    expect(t.background?.radius).toBe(5);
+    expect(byId(items, 'free_002')).toMatchObject({ w: 50, radius: 10, strokeWidth: 3 });
+  });
+
+  it('まとまりの無い場面は中身を変えない（従来どおり）', () => {
+    const t = byId(layoutScene(freeScene, freeTemplate).items, 'free_001') as TextItem;
+    expect(t).toMatchObject({ fontSize: 40, strokeWidth: 4 });
+    expect(t.background?.radius).toBe(10);
+  });
+
+  it('テンプレのまとまりの縮小：文字・字幕の大きさと帯の角丸も縮む（まとまりに入っていない層は不変）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['title', 'subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const items = layoutScene(scene, grouped).items;
+    expect((byId(items, 'title') as TextItem).fontSize).toBe(36);
+    const sub = byId(items, 'subtitle') as TextItem;
+    expect(sub.fontSize).toBe(19);
+    expect(sub.background?.radius).toBe(8);
+    expect((byId(layoutScene(scene, openingTemplate).items, 'title') as TextItem).fontSize).toBe(72);
+  });
+
+  it('テンプレのまとまりの縮小：図形・背景の角丸も縮む', () => {
+    const t: Template = {
+      ...openingTemplate,
+      layers: [...openingTemplate.layers, { id: 'deco', type: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, radius: 40 }],
+      groups: [{ id: 'group_001', members: ['deco'], transform: { x: 0, y: 0, rotation: 0, scale: 0.25 } }],
+    };
+    expect(byId(layoutScene(scene, t).items, 'deco')).toMatchObject({ w: 50, radius: 10 });
+  });
+
+  it('テンプレのまとまりの縮小：素材の無い背景層（塗り）の角丸も縮む', () => {
+    const t: Template = {
+      ...openingTemplate,
+      layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 400, h: 400, zIndex: 0, radius: 40 }],
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const bare = { ...scene, assetRefs: {} } as Scene;
+    expect(byId(layoutScene(bare, t).items, 'background')).toMatchObject({ kind: 'fill', w: 200, radius: 20 });
+  });
+});
+
+describe('scaleItemContent（#1371 レビュー：負の倍率）', () => {
+  it('行き過ぎるイージングで倍率が負になっても、中身は 0 で止める（負の字の大きさを出さない）', () => {
+    const t: LayoutItem = { id: 't', kind: 'text', x: 0, y: 0, w: 100, h: 50, zIndex: 1, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, strokeWidth: 4 };
+    scaleItemContent(t, -0.5);
+    expect(t).toMatchObject({ fontSize: 0, strokeWidth: 0 });
+    const f: LayoutItem = { id: 'f', kind: 'fill', x: 0, y: 0, w: 100, h: 50, zIndex: 1, color: '#000000', opacity: 1, radius: 10 };
+    scaleItemContent(f, -2);
+    expect((f as FillItem).radius).toBe(0);
   });
 });

@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag,
   topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform,
+  isTextFreeElement,
+  isTextLayer,
+  scaleBakedContent,
 } from './groupOps';
 import type { Group } from '../group/types';
+import { DEFAULT_FONT_SIZE } from '../template/textStyle';
 import type { FreeElement } from './types';
 
 const grp = (id: string, members: string[], t = {}): Group => ({ id, members, transform: { ...IDENTITY_TRANSFORM, ...t } });
@@ -74,28 +78,66 @@ describe('ungroupGroup', () => {
   it('transform をメンバーへ焼き込み、グループを除去する', () => {
     const freeLayout = [shape('free_001', 100, 100), shape('free_002', 0, 0)];
     const groups = [grp('group_001', ['free_001'], { x: 50, y: -20 })];
-    const out = ungroupGroup(groups, freeLayout, 'group_001');
+    const out = ungroupGroup(groups, freeLayout, 'group_001', isTextFreeElement);
     expect(out.groups).toEqual([]); // グループ除去
     expect(out.elements[0]).toMatchObject({ id: 'free_001', x: 150, y: 80, w: 40, h: 20 }); // 100+50, 100-20
     expect(out.elements[1]).toMatchObject({ id: 'free_002', x: 0, y: 0 }); // 非メンバーは不変
   });
   it('存在しないグループは何もしない', () => {
     const freeLayout = [shape('free_001', 0, 0)];
-    const out = ungroupGroup([], freeLayout, 'group_999');
+    const out = ungroupGroup([], freeLayout, 'group_999', isTextFreeElement);
     expect(out.elements).toBe(freeLayout);
   });
   it('回転の焼き込み：合算が 360→0 に正規化される場合は rotation なし（要素30°＋グループ330°）', () => {
     const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
     const groups = [grp('group_001', ['free_001'], { rotation: 330 })];
-    const out = ungroupGroup(groups, freeLayout, 'group_001');
+    const out = ungroupGroup(groups, freeLayout, 'group_001', isTextFreeElement);
     expect(out.elements[0].rotation).toBeUndefined(); // 30+330=360 → 0 → 回転なし（el.rotation は残さない）
     expect(out.elements[0]).toMatchObject({ x: 100, y: 100 }); // 単一メンバーは中心不動
   });
   it('回転の焼き込み：合算が非0なら rotation に反映（要素30°＋グループ40°=70°）', () => {
     const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
     const groups = [grp('group_001', ['free_001'], { rotation: 40 })];
-    const out = ungroupGroup(groups, freeLayout, 'group_001');
+    const out = ungroupGroup(groups, freeLayout, 'group_001', isTextFreeElement);
     expect(out.elements[0].rotation).toBeCloseTo(70);
+  });
+});
+
+describe('ungroupGroup：まとまりの倍率を中身へ焼き込む（#1371）', () => {
+  // 描画（layoutScene）はまとまりの倍率で文字・角丸も縮める＝解除で箱だけ焼くと、解除した瞬間に字が大きくなる。
+  it('文字は大きさ・縁取り・影・帯の角丸を倍率で焼く（未指定の大きさは既定を掛ける）', () => {
+    const text: FreeElement = {
+      id: 'free_001', kind: 'text', x: 100, y: 100, w: 200, h: 100, text: 'あ',
+      strokeWidth: 4, shadow: { enabled: true, blur: 6, dx: 2, dy: 8 }, background: { enabled: true, radius: 10 },
+    };
+    const out = ungroupGroup([grp('group_001', ['free_001'], { scale: 0.5 })], [text], 'group_001', isTextFreeElement);
+    expect(out.elements[0]).toMatchObject({
+      w: 100, h: 50, fontSize: DEFAULT_FONT_SIZE * 0.5, strokeWidth: 2,
+      shadow: { blur: 3, dx: 1, dy: 4 }, background: { radius: 5 },
+    });
+  });
+  it('図形は角丸と枠線の太さを焼く（文字の大きさは付けない）', () => {
+    const sh: FreeElement = { ...shape('free_001', 0, 0, 100, 100), radius: 20, strokeWidth: 6 };
+    const out = ungroupGroup([grp('group_001', ['free_001'], { scale: 2 })], [sh], 'group_001', isTextFreeElement);
+    expect(out.elements[0]).toMatchObject({ w: 200, radius: 40, strokeWidth: 12 });
+    expect(out.elements[0].fontSize).toBeUndefined();
+  });
+  it('倍率 1 は中身に触らない（同じ参照の値のまま）', () => {
+    const text: FreeElement = { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'あ' };
+    const out = ungroupGroup([grp('group_001', ['free_001'], { x: 10 })], [text], 'group_001', isTextFreeElement);
+    expect(out.elements[0].fontSize).toBeUndefined(); // 既定のまま（勝手に固有値を書かない）
+  });
+  it('文字の見分け：FREE は kind、テンプレは type', () => {
+    expect(isTextFreeElement({ kind: 'text' })).toBe(true);
+    expect(isTextFreeElement({ kind: 'subtitle' })).toBe(true);
+    expect(isTextFreeElement({ kind: 'shape' })).toBe(false);
+    expect(isTextLayer({ type: 'text' })).toBe(true);
+    expect(isTextLayer({ type: 'subtitle' })).toBe(true);
+    expect(isTextLayer({ type: 'shape' })).toBe(false);
+  });
+  it('scaleBakedContent：文字でないものの未指定の角丸・太さは足さない', () => {
+    expect(scaleBakedContent({ fontSize: 30 }, 2, false)).toEqual({ fontSize: 30 });
+    expect(scaleBakedContent({ fontSize: 30 }, 2, true)).toEqual({ fontSize: 60 });
   });
 });
 
@@ -148,7 +190,7 @@ describe('汎用化：テンプレ Layer 風オブジェクト（rotation なし
   it('ungroupGroup：位置を焼き込み、回転は付かない（undefined）', () => {
     const layers = [lyr('background', 0, 0), lyr('title', 100, 100)];
     const groups = [grp('group_001', ['title'], { x: 50 })];
-    const out = ungroupGroup(groups, layers, 'group_001');
+    const out = ungroupGroup(groups, layers, 'group_001', () => false);
     const title = out.elements.find((l) => l.id === 'title') as { x: number; y: number; rotation?: number };
     expect(title).toMatchObject({ x: 150, y: 100 });
     expect(title.rotation).toBeUndefined(); // Layer は回転を持たない（群回転も非対応）

@@ -1,7 +1,10 @@
 // 要素のグループ化（ADR-0022）の編集 ops（FREE 要素 / テンプレ Layer 共用＝<T> で汎用化）。純粋関数（副作用なし）。
 // 呼び出し側（store/エディタ）が結果で groups と要素配列（FREE=scene.freeLayout / テンプレ=template.layers）を差し替える。
 // グループ操作は「グループ自身の transform を更新」する（メンバー座標は保持）。ungroup 時のみ transform をメンバーへ焼き込む。
-import { composeGroupGeometry } from '../group/compose';
+import { FREE_ELEMENT_KIND, LAYER_TYPE } from '../enums';
+import { composeGroupGeometry, groupScaleOf } from '../group/compose';
+import { DEFAULT_FONT_SIZE, scaleTextStyle } from '../template/textStyle';
+import type { LayerBackground, TextShadow } from '../template/types';
 import type { Group, GroupTransform } from '../group/types';
 import { createGroupId } from './persistence';
 import { normalizeDeg } from '../constants';
@@ -114,12 +117,42 @@ export function removeGroupWithMembers(
   return { elementIds, groups: next };
 }
 
+/** 焼き込みで大きさを掛ける中身（FREE 要素とテンプレ Layer で同じ名前）。 */
+type BakeableContent = { fontSize?: number; strokeWidth?: number; radius?: number; shadow?: TextShadow; background?: LayerBackground };
+
+/**
+ * まとまりの倍率を要素の**中身**へ焼き込む（#1371）。描画（`layoutScene`）はまとまりの倍率で文字・角丸も縮めるので、
+ * 解除で箱だけ焼くと**解除した瞬間に字の大きさが変わる**。文字は `scaleTextStyle`（掛け方は1か所）、
+ * それ以外は角丸と枠線の太さ。文字の大きさが未指定なら既定を掛けた値を入れる（未指定のままだと既定へ戻る）。
+ */
+export function scaleBakedContent<T extends BakeableContent>(el: T, k: number, isText: boolean): T {
+  if (k === 1) return el;
+  if (isText) return scaleTextStyle({ ...el, fontSize: el.fontSize ?? DEFAULT_FONT_SIZE }, k);
+  return {
+    ...el,
+    ...(el.radius != null ? { radius: el.radius * k } : {}),
+    ...(el.strokeWidth != null ? { strokeWidth: el.strokeWidth * k } : {}),
+  };
+}
+
+/** 文字の FREE 要素か（解除の焼き込みで文字の大きさを掛ける対象・#1371）。 */
+export function isTextFreeElement(el: { kind: string }): boolean {
+  return el.kind === FREE_ELEMENT_KIND.text || el.kind === FREE_ELEMENT_KIND.subtitle;
+}
+
+/** 文字のテンプレ層か（同上）。 */
+export function isTextLayer(layer: { type: string }): boolean {
+  return layer.type === LAYER_TYPE.text || layer.type === LAYER_TYPE.subtitle;
+}
+
 /**
  * グループを解除し、transform をメンバー（FREE 要素 / テンプレ Layer）へ焼き込む（ADR-0022・flat 前提）。
  * T で汎用化＝FREE と テンプレで共用。返り値の要素キーは `elements`。
+ * `isText`＝文字の要素か（FREE は `kind`、テンプレは `type` で見分けるので呼び出し側が渡す）。
+ * ⚠️ 倍率は**中身にも焼き込む**（#1371・`scaleBakedContent`）＝解除の前後で見た目が変わらない。
  */
-export function ungroupGroup<T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number }>(
-  groups: Group[], elements: T[], groupId: string,
+export function ungroupGroup<T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number } & BakeableContent>(
+  groups: Group[], elements: T[], groupId: string, isText: (el: T) => boolean,
 ): { groups: Group[]; elements: T[] } {
   const group = groups.find((g) => g.id === groupId);
   if (!group) return { groups, elements };
@@ -132,7 +165,8 @@ export function ungroupGroup<T extends { id: string; x: number; y: number; w: nu
     // 合成後の回転（要素＋グループ回転の合算）。0（=回転なし）は undefined にして明示（el.rotation を残すと 360→0 正規化でズレる）。
     // ※ テンプレ Layer は rotation を持たず群回転も非対応ゆえ常に 0→undefined（JSON では省略される）。
     const rot = normalizeDeg(g.rotation ?? 0);
-    return { ...el, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
+    const scaled = scaleBakedContent(el, groupScaleOf(el, g), isText(el));
+    return { ...scaled, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
   });
   return { groups: groups.filter((g) => g.id !== groupId), elements: elementsBaked };
 }

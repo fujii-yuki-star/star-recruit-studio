@@ -24,7 +24,7 @@ import {
 } from '../enums';
 import type { TextKey, TransitionDirection } from '../enums';
 import type { FontId } from '../font/fontCatalog';
-import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
+import { composeGroupGeometry, groupScaleOf, isHiddenByGroup } from '../group/compose';
 import { sceneActiveAssetIds } from '../project/assetUsage';
 import { groupBgmRuns } from '../project/compileTimeline';
 import { lineSegments, resolveLineSubtitle } from '../project/lineTimeline';
@@ -33,7 +33,7 @@ import { createAnimationId, createClipId, createGroupId, createTrackId } from '.
 import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
-import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields, scaleTextStyle } from '../template/textStyle';
 import { stackedSubtitleBands } from '../text/subtitleBands';
 import { wrapText } from '../text/textWrap';
 import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene, Texts } from '../project/types';
@@ -448,7 +448,8 @@ export function bakeLineSubtitles(
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
     // **どの文字を指すか**は1か所で解く（#1058＝字幕層の未指定は `subtitle`）。
     const layerTextKey = textKeyOfLayer(layer);
-    const style = freeTextStyleFields(layer, layerTextKey ? scene.textStyles?.[layerTextKey] : undefined);
+    // まとまりで縮めた分は中身も縮める（#1371・描画＝`layoutScene` と同じ倍率）＝段積みも縮めた字で折り返す。
+    const style = scaleTextStyle(freeTextStyleFields(layer, layerTextKey ? scene.textStyles?.[layerTextKey] : undefined), groupScaleOf(layer, cg));
     const maxLines = layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
     // 同時に流れる行は1つの窓を共有する＝窓ごとにまとめて段積みする（描画と同じ積み方）。
     const byWindow = new Map<string, typeof windows[number][]>();

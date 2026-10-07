@@ -24,7 +24,7 @@ import { perUseEntriesFor, prunePerUseMaps, withPerUseEntries } from "../../doma
 import type { PerUseEntries } from "../../domain/project/perUseMaps";
 import { animationsForElement, vanishedAnimationTargets } from "../../domain/project/animationOps";
 import type { ElementAnimation } from "../../domain/project/types";
-import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, isTextFreeElement, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { GroupList } from "../components/GroupList";
@@ -885,7 +885,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     // ⚠️ **解除でもまとまりは消える**＝その動きを落とさないと孤児になり、`group_NNN` の番号再利用で
     // **後から作った別のまとまりが勝手に動く**（#779）。`patchSceneWithCleanup` が前後の差から拾う。
     patchSceneWithCleanup((s) => {
-      const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId);
+      const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId, isTextFreeElement);
       return { ...s, groups: r.groups, freeLayout: r.elements };
     });
     setActiveGroupId(null);
