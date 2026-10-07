@@ -16,6 +16,7 @@ import * as framesMod from '../../renderer/export/buildTimelineFrames';
 import * as fontsMod from '../../renderer/export/loadExportFonts';
 import * as voiceFsMod from '../../infrastructure/voiceFs';
 import * as bgmMod from '../../infrastructure/bundledBgm';
+import { EXPORT_STANDARD_MAX_BITRATE_BPS } from '../../domain/constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import { volumeExpr } from '../../domain/timeline/audio';
@@ -193,15 +194,34 @@ describe('書き出す大きさが描く側まで届く（#1255）', () => {
 
   it('「軽い」を選ぶと 1280×720 を渡す', async () => {
     await open(doc());
-    useTimelineStore.getState().setExportHd(true);
+    useTimelineStore.getState().setExportSize('hd');
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(receivedSize()).toEqual({ width: 1280, height: 720 });
+  });
+
+  // #1218「ふつう」＝**大きさは 1080 のまま**、映像の上限だけを書き出しへ渡す（上限は既定・軽いでは渡さない）。
+  it('「ふつう」は 1920×1080 のまま、映像の上限を渡す', async () => {
+    await open(doc());
+    useTimelineStore.getState().setExportSize('standard');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1920, height: 1080 });
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBe(EXPORT_STANDARD_MAX_BITRATE_BPS);
+  });
+
+  it('「きれい」「軽い」は映像の上限を渡さない（従来どおり）', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBeUndefined();
+    vi.mocked(ffmpegMod.exportVideo).mockClear();
+    useTimelineStore.getState().setExportSize('hd');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBeUndefined();
   });
 
   // ⚠️ **縦型でも向きに沿う**＝短辺を 720 に揃える（`exportDimsForOrientation`）。
   it('縦型の「軽い」は 720×1280', async () => {
     await open({ ...doc(), videoSettings: { ...doc().videoSettings, aspectRatio: '9:16' } });
-    useTimelineStore.getState().setExportHd(true);
+    useTimelineStore.getState().setExportSize('hd');
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(receivedSize()).toEqual({ width: 720, height: 1280 });
   });
@@ -219,6 +239,8 @@ describe('exportTimelineVideo', () => {
       '/out/movie.mp4',
       // 全体の音量を整える（#259・ADR-0032 追補4）。新しい動画は既定で整える。
       -16,
+      // 映像の上限（#1218）＝既定の「きれい」では渡さない。
+      undefined,
     );
     const run = useTimelineStore.getState().exportRun;
     expect(run.phase).toBe('done');

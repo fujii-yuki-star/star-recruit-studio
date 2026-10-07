@@ -172,6 +172,35 @@ export function exportDimsForOrientation(
   return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) };
 }
 
+/**
+ * 書き出しの「動画サイズ」（#1218・利用者判断 2026-10-07＝3択・既定は「きれい」のまま）。
+ * 値は画面の選択欄の値そのもの（場面形式とタイムライン形式で同じ選択肢＝ADR-0026②）。
+ * ⚠️ **`project.schema` には入れない**（書き出しの好みは文書の中身ではない＝ADR-0033 の流儀）。
+ */
+export const EXPORT_SIZE = { full: 'fullhd', standard: 'standard', light: 'hd' } as const;
+export type ExportSize = (typeof EXPORT_SIZE)[keyof typeof EXPORT_SIZE];
+export const EXPORT_SIZES: readonly ExportSize[] = Object.values(EXPORT_SIZE);
+/**
+ * 「ふつう」の映像の上限（bps）＝**1080 のまま**ファイルを小さくする（#1218 の実測：30分で 2.4GB→約1.3GB・
+ * 焼いた字幕の読みやすさは変わらない＝文字は PNG で焼いてから重ねるので圧縮に強い）。
+ */
+export const EXPORT_STANDARD_MAX_BITRATE_BPS = 6_000_000;
+
+/** 選択欄の値が動画サイズか（知らない値を黙って別のサイズとして扱わない）。 */
+export function isExportSize(v: string): v is ExportSize {
+  return (EXPORT_SIZES as readonly string[]).includes(v);
+}
+
+/** そのサイズは解像度を下げるか（「軽い」＝短辺 `HD_SHORT`）。 */
+export function exportSizeIsLight(size: ExportSize): boolean {
+  return size === EXPORT_SIZE.light;
+}
+
+/** そのサイズの映像の上限（bps）。上限なし＝`undefined`（従来どおり）。 */
+export function exportSizeMaxBitrateBps(size: ExportSize): number | undefined {
+  return size === EXPORT_SIZE.standard ? EXPORT_STANDARD_MAX_BITRATE_BPS : undefined;
+}
+
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;

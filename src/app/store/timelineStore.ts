@@ -1,7 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { dimsForOrientation, exportDimsForOrientation } from "../../domain/constants";
+import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, type ExportSize } from "../../domain/constants";
 import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
@@ -810,13 +810,13 @@ export interface TimelineState {
    */
   exportTimelineVideo: (deps: TimelineDrawDeps) => Promise<void>;
   /**
-   * 書き出す大きさ（#1255・利用者判断 2026-09-28）。`true`＝軽い（短辺 720）。
+   * 書き出す大きさ（#1255・利用者判断 2026-09-28／#1218 で3択＝きれい・ふつう・軽い）。
    *
-   * ⚠️ **場面形式と同じ選択肢**（ADR-0026②＝同じ概念を形式で割らない）＝あちらは「きれい／軽い」の
-   * 2つ。⚠️ **`project.schema` には入れない**（ADR-0033 の流儀＝書き出しの好みは文書の中身ではない）。
+   * ⚠️ **場面形式と同じ選択肢**（ADR-0026②＝同じ概念を形式で割らない・`EXPORT_SIZE`）。
+   * ⚠️ **`project.schema` には入れない**（ADR-0033 の流儀＝書き出しの好みは文書の中身ではない）。
    */
-  exportHd: boolean;
-  setExportHd: (hd: boolean) => void;
+  exportSize: ExportSize;
+  setExportSize: (size: ExportSize) => void;
   /** 書き出しを止める（押した時点までの一時ファイルは片づける）。 */
   cancelTimelineExport: () => void;
   /** 完了・失敗の知らせを閉じる。 */
@@ -1089,7 +1089,7 @@ function emptyState() {
     assetSizes: {} as Record<string, SourceSize>,
     audioDurations: {} as Record<string, number>,
   // 書き出す大きさ（#1255）。⚠️ **既定は「きれい」**＝場面形式の既定（`fullhd`）と同じ。
-  exportHd: false,
+  exportSize: EXPORT_SIZE.full,
     audioSrcByKey: {} as Record<string, string>,
     _audioTried: new Set<string>(),
     history: emptyHistory<TimelineProject>(),
@@ -2646,7 +2646,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
         // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
         //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
-        outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, get().exportHd),
+        outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, exportSizeIsLight(get().exportSize)),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
         stageFrame: stageExportFrame,
         // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
@@ -2713,6 +2713,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         doc.projectId,
         outputPath,
         auto.normalize ? auto.targetLufs : undefined,
+        exportSizeMaxBitrateBps(get().exportSize),
       );
       // ⚠️ **保存先も持ち帰る**（#991）＝場面形式は保存先と「開く」導線を出すのに、
       // こちらは文だけだった（`06 §12.1` に導線を落とす理由は無い＝ADR-0026②）。
@@ -2762,7 +2763,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
-  setExportHd: (hd) => set({ exportHd: hd }),
+  setExportSize: (size) => set({ exportSize: size }),
   cancelTimelineExport: () => {
     const run = get().exportRun;
     if (!isTimelineExportBusy(run.phase)) return;

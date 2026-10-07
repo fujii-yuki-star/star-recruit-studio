@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  dimsForOrientation, exportDimsForOrientation, HD_SHORT, HEIGHT, PORTRAIT_HEIGHT, PORTRAIT_WIDTH, WIDTH,
+  dimsForOrientation, EXPORT_SIZE, EXPORT_SIZES, EXPORT_STANDARD_MAX_BITRATE_BPS, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, isExportSize, HD_SHORT, HEIGHT, PORTRAIT_HEIGHT, PORTRAIT_WIDTH, WIDTH,
 } from './constants';
 import { ORIENTATION } from './enums';
 
@@ -32,5 +32,23 @@ describe('exportDimsForOrientation（書き出し寸法・向き＋画質・B5�
     const port = exportDimsForOrientation(ORIENTATION.portrait, true);
     expect(Math.min(land.width, land.height)).toBe(HD_SHORT);
     expect(Math.min(port.width, port.height)).toBe(HD_SHORT);
+  });
+});
+
+describe('動画サイズの3択（#1218）', () => {
+  it('「ふつう」だけ映像の上限を持つ（きれい・軽いは従来どおり上限なし）', () => {
+    expect(exportSizeMaxBitrateBps(EXPORT_SIZE.standard)).toBe(EXPORT_STANDARD_MAX_BITRATE_BPS);
+    expect(exportSizeMaxBitrateBps(EXPORT_SIZE.full)).toBeUndefined();
+    expect(exportSizeMaxBitrateBps(EXPORT_SIZE.light)).toBeUndefined();
+  });
+  it('解像度を下げるのは「軽い」だけ（ふつうは 1080 のまま）', () => {
+    expect(exportSizeIsLight(EXPORT_SIZE.light)).toBe(true);
+    expect(exportSizeIsLight(EXPORT_SIZE.standard)).toBe(false);
+    expect(exportSizeIsLight(EXPORT_SIZE.full)).toBe(false);
+  });
+  it('知らない値は動画サイズとして受けない', () => {
+    expect(isExportSize('standard')).toBe(true);
+    expect(isExportSize('4k')).toBe(false);
+    expect(EXPORT_SIZES).toHaveLength(3);
   });
 });

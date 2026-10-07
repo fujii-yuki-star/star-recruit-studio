@@ -9150,21 +9150,23 @@ describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
     const texts = [...sel.options].map((o) => o.text);
-    expect(texts).toEqual(["きれい（1920×1080）", "軽い（1280×720）"]);
+    expect(texts).toEqual(["きれい（1920×1080）", "ふつう（1920×1080・ファイル小さめ）", "軽い（1280×720）"]);
   });
 
   it("既定は「きれい」（場面形式の既定と同じ）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect((screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).value).toBe("fullhd");
-    expect(useTimelineStore.getState().exportHd).toBe(false);
+    expect(useTimelineStore.getState().exportSize).toBe("fullhd");
   });
 
   it("選ぶと覚える", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("書き出す大きさ"), { target: { value: "hd" } });
-    expect(useTimelineStore.getState().exportHd).toBe(true);
+    expect(useTimelineStore.getState().exportSize).toBe("hd");
+    fireEvent.change(screen.getByLabelText("書き出す大きさ"), { target: { value: "standard" } });
+    expect(useTimelineStore.getState().exportSize).toBe("standard");
   });
 
   // ⚠️ **縦型でも同じ関数から出す**＝数字を画面に書かない（§2-7）。
@@ -9172,6 +9174,6 @@ describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
     open({ videoSettings: { ...doc().videoSettings, aspectRatio: "9:16" } });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const texts = [...(screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).options].map((o) => o.text);
-    expect(texts).toEqual(["きれい（1080×1920）", "軽い（720×1280）"]);
+    expect(texts).toEqual(["きれい（1080×1920）", "ふつう（1080×1920・ファイル小さめ）", "軽い（720×1280）"]);
   });
 });

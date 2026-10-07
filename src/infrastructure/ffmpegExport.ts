@@ -151,6 +151,8 @@ export async function exportVideo(
   outputPath?: string,
   /** 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。 */
   normalizeLufs?: number,
+  /** 映像の上限（bps・#1218「ふつう」）。未指定＝上限なし（従来どおり＝出力不変）。 */
+  maxBitrateBps?: number,
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
@@ -159,6 +161,7 @@ export async function exportVideo(
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
     normalizeLufs: normalizeLufs ?? null,
+    maxBitrateBps: maxBitrateBps ?? null,
   });
 }
 
