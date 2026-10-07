@@ -4,7 +4,8 @@
 // **ファイルの取り込みそのものは同じ**。ここへ置かないと、同じ IO の並びが2か所に増える（§2-7）。
 // 素材1つぶんの導出（採番・種別・表示名・保存先）は domain の `newAssetFrom`。
 import { assetDisplayUrl, extractVideoThumbnail, isTauri, probeVideo } from "../../infrastructure/assetFs";
-import type { AssetMetadata } from "../../domain/project/types";
+import { ASSET_TYPE } from "../../domain/enums";
+import type { Asset, AssetMetadata } from "../../domain/project/types";
 
 /** 取り込んだ動画の付加情報。**どれも欠けうる**（取れなかったぶんは付けないだけ）。 */
 export type VideoEnrichment = { metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string };
@@ -74,6 +75,54 @@ export async function probeAndThumbVideo(projectId: string, relPath: string): Pr
     console.warn("[asset] 動画サムネ生成で例外:", e);
   }
   return out;
+}
+
+/**
+ * 開いた文書の素材で、**取り込み時に付けるはずの情報が欠けているもの**を補う（#352 の検証で見つけた）。
+ *
+ * ⚠️ **フォルダからの取り込み（起動の引数・ADR-0042）と古い文書は、画面からの取り込みと違ってこれを持たない**
+ * ＝動画の長さ・音の有無・大きさ・代表フレーム、写真の大きさ。とくに**音の有無**が無いと、元の音を鳴らす設定が
+ * 書き出しで**黙って無音**になる（`findVideoSlot`・`placementOriginalAudio` は「音がある」と分かっている素材しか鳴らさない
+ * ＝§2-5・ADR-0026①）。両方の形式の「開く」がこの1つを通る（§2-7）。
+ * ⚠️ **取れなかったぶんは付けない**（開くのは止めない）。変わらない素材は**同じ物**を返す。
+ */
+export async function fillMissingAssetInfo(projectId: string, assets: readonly Asset[]): Promise<Asset[]> {
+  return Promise.all(
+    assets.map(async (a): Promise<Asset> => {
+      if (!a.filePath) return a;
+      if (a.assetType === ASSET_TYPE.video) {
+        const needMeta = a.metadata?.hasAudio == null || a.metadata?.durationSec == null;
+        const needThumb = !a.thumbnailPath;
+        let metadata: AssetMetadata | undefined;
+        if (needMeta) {
+          try {
+            metadata = (await probeVideo(projectId, a.filePath)) ?? undefined;
+          } catch (e) {
+            console.warn("[asset] 開くときの動画メタ取得で例外:", e);
+          }
+        }
+        let thumbnailPath: string | undefined;
+        if (needThumb) {
+          try {
+            thumbnailPath = (await extractVideoThumbnail(projectId, a.filePath)) ?? undefined;
+          } catch (e) {
+            console.warn("[asset] 開くときの動画サムネ生成で例外:", e);
+          }
+        }
+        if (!metadata && !thumbnailPath) return a;
+        return {
+          ...a,
+          ...(metadata ? { metadata: { ...a.metadata, ...metadata } } : {}),
+          ...(thumbnailPath ? { thumbnailPath } : {}),
+        };
+      }
+      if (a.assetType === ASSET_TYPE.image && (a.metadata?.width == null || a.metadata?.height == null)) {
+        const size = await probeImageSize(projectId, a.filePath);
+        return size ? { ...a, metadata: { ...a.metadata, ...size } } : a;
+      }
+      return a;
+    }),
+  );
 }
 
 // ── 素材番号の予約（#712 レビュー） ───────────────────────────────────────────

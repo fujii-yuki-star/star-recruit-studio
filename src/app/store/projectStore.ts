@@ -57,7 +57,7 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
@@ -65,7 +65,7 @@ import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { adoptPendingAssetIds, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
+import { adoptPendingAssetIds, fillMissingAssetInfo, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, clipClampedMessage, importErrorMessage, IMPORT_BUSY_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE } from "../uiLabels";
 import { aiSceneLimitMessage, canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
 import { runBulkImport } from "./bulkImport";
@@ -1517,20 +1517,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 旧・場面横断タイムラインの手編集（ADR-0032 決定11/12・#635）。**データは消さない**が動画には出さないので、
     // 開いた人に一言断る（黙って消えたように見せない・§2-5・`15 §6` TIMELINE_OVERLAY_RETIRED）。
     const hasRetiredTimelineEdits = (project.timelineOverlay?.clips?.length ?? 0) > 0;
+    // 取り込み時に付けるはずの情報（動画の長さ・音の有無・代表フレーム、写真の大きさ）が欠けた素材を補う
+    // （フォルダからの取り込み・古い文書＝#352 の検証で、元の音が黙って無音になるのを見つけた）。
+    // 補ったぶんは assets に入り、次の保存で残る。⚠️ 両方の形式が同じ関数を通す（`fillMissingAssetInfo`）。
+    const assets = await fillMissingAssetInfo(project.projectId, project.assets);
     // ディスクの素材を表示用 src に解決（Tauri は asset://・ブラウザは null）。filePath を持つもの・未配置のサンプル等は null でスキップ。並列実行（A3-2）。
-    type LoadedSrc = { assetId: string; url: string; thumbnailPath?: string };
+    type LoadedSrc = { assetId: string; url: string };
     const loaded = await Promise.all(
-      project.assets.map(async (a): Promise<LoadedSrc | null> => {
+      assets.map(async (a): Promise<LoadedSrc | null> => {
         if (a.assetType === ASSET_TYPE.video) {
-          // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む。
-          // 旧プロジェクト（サムネ未生成）の動画は読込時に生成する（本体は読み込まない＝後方互換）。
-          let thumbPath = a.thumbnailPath;
-          if (!thumbPath && a.filePath) {
-            thumbPath = (await extractVideoThumbnail(project.projectId, a.filePath)) ?? undefined;
-          }
-          if (!thumbPath) return null;
-          const url = await assetDisplayUrl(project.projectId, thumbPath);
-          return url ? { assetId: a.assetId, url, thumbnailPath: thumbPath } : null;
+          // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む（無ければ上で作った）。
+          if (!a.thumbnailPath) return null;
+          const url = await assetDisplayUrl(project.projectId, a.thumbnailPath);
+          return url ? { assetId: a.assetId, url } : null;
         }
         if (!a.filePath) return null;
         const url = await assetDisplayUrl(project.projectId, a.filePath);
@@ -1538,12 +1537,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }),
     );
     const assetSrcById: Record<string, string> = {};
-    // 読込時に解決した動画サムネのパス（再生成含む）は assets にも反映し、次回保存で永続化する。
-    const videoThumb: Record<string, string> = {};
     for (const entry of loaded) {
       if (!entry) continue;
       assetSrcById[entry.assetId] = entry.url;
-      if (entry.thumbnailPath) videoThumb[entry.assetId] = entry.thumbnailPath;
     }
     // 生成済みナレーション音声を data URL に復元（voicePath を持つもの。未配置は null でスキップ）。並列実行。
     // 単一 narration（従来・キーは sceneId）。掛け合い（明示 lines）の場面はここでは扱わず下で行ごとに復元する。
@@ -1584,9 +1580,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
       // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
       meta: projectHeaderFromProject(project),
-      assets: project.assets.map((a) =>
-        videoThumb[a.assetId] ? { ...a, thumbnailPath: videoThumb[a.assetId] } : a,
-      ),
+      assets,
       parts: project.parts,
       // 保存時に合成中だった場面は「準備中」のまま保存され得るが、その合成はアプリ終了で消えている＝**誰も作っていない
       // 準備中**が復元される。放置すると `isNarrationGenerating` が真のままで書き出しが止まり、しかも作成中では
