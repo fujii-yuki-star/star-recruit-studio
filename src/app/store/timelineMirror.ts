@@ -23,7 +23,7 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "exportTimelineVideo",
   "cancelTimelineExport",
   "dismissTimelineExport",
-  "setExportHd",
+  "setExportSize",
   // 本体の時計と内部の段取り（別窓は時計を回さない＝ADR-0050 決定2）
   "_advancePlayhead",
   "_loopTo",

@@ -6,7 +6,7 @@ import type { AssistKind } from "../../domain/ai/assist";
 import type { TimelineProject } from "../../domain/timeline/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, EXPORT_SIZE, type ExportSize, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, PROJECT_FORMAT, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
@@ -193,10 +193,11 @@ const IDLE_EXPORT_RUN: ExportRunState = {
  *  fileName=null は「プロジェクト名から既定」。永続 JSON ではないので schema 影響なし。 */
 export interface ExportFormState {
   fileName: string | null;
-  size: string;
+  /** 動画サイズ（#1218・3択）。 */
+  size: ExportSize;
   withSubtitle: boolean;
 }
-const IDLE_EXPORT_FORM: ExportFormState = { fileName: null, size: "fullhd", withSubtitle: true };
+const IDLE_EXPORT_FORM: ExportFormState = { fileName: null, size: EXPORT_SIZE.full, withSubtitle: true };
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */

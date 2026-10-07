@@ -52,6 +52,16 @@ fn target_bitrate_bps(width: u32, height: u32, fps: u32) -> u64 {
     (raw as u64).clamp(BITRATE_MIN_BPS, BITRATE_MAX_BPS)
 }
 
+/// 目標ビットレートに利用者が選んだ上限を掛ける（#1218「ふつう」＝1080 のままファイルを小さく）。
+/// 上限は**下げる方向にだけ**効く（元が上限より低ければそのまま）。下限（`BITRATE_MIN_BPS`）は割らない。
+/// ⚠️ 効くのは目標ビットレートを渡すエンコーダ（`h264_mf`）だけ＝予備の方式では大きさが変わらない（`quality_args`）。
+fn capped_bitrate_bps(target: u64, max: Option<u64>) -> u64 {
+    match max {
+        Some(m) => target.min(m.max(BITRATE_MIN_BPS)),
+        None => target,
+    }
+}
+
 /// bps を FFmpeg の `-b:v` 引数値（kbps 表記）へ整形する。
 fn bitrate_arg(bps: u64) -> String {
     format!("{}k", bps / 1000)
@@ -3546,6 +3556,7 @@ impl Drop for ExportInFlightGuard {
 /// 同期コマンドのままだとメインスレッド（UI イベントループ）を塞ぎ、ウィンドウが「応答なし」になる（#375）。
 /// async コマンド＋spawn_blocking でブロッキング専用スレッドへ退避し、UI を生かす。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_video(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
@@ -3555,6 +3566,8 @@ pub async fn export_video(
     output_path: Option<String>,
     // 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。
     normalize_lufs: Option<f64>,
+    // 映像の目標ビットレートの上限（bps・#1218「ふつう」）。未指定＝上限なし（従来どおり＝出力不変）。
+    max_bitrate_bps: Option<u64>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         export_video_impl(
@@ -3565,6 +3578,7 @@ pub async fn export_video(
             project_id,
             output_path,
             normalize_lufs,
+            max_bitrate_bps,
         )
     })
     .await
@@ -3739,6 +3753,7 @@ fn export_video_impl(
     project_id: Option<String>,
     output_path: Option<String>,
     normalize_lufs: Option<f64>,
+    max_bitrate_bps: Option<u64>,
 ) -> Result<ExportReport, String> {
     // すでに別の書き出しが走っていれば弾く（二重実行での作業ディレクトリ相互破壊を防ぐ・#379）。
     // 取得できたら以降の全経路で RAII ガードが解除を保証する。
@@ -4234,7 +4249,10 @@ fn export_video_impl(
             SceneJob::Frames(f) => read_png_size(f.first_frame.as_path()),
         })
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
-    let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
+    let bitrate = bitrate_arg(capped_bitrate_bps(
+        target_bitrate_bps(out_w, out_h, DEFAULT_FPS),
+        max_bitrate_bps,
+    ));
 
     // パス構成：場面結合 →（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
     // 旧・場面横断タイムラインのテロップ合成は #635 で退役（ADR-0032 決定11/12）＝この段そのものが無くなった。
@@ -4898,6 +4916,11 @@ mod tests {
         assert_eq!(target_bitrate_bps(3840, 2160, 60), 16_000_000); // 上限
         assert_eq!(target_bitrate_bps(1920, 1080, 0), BITRATE_MIN_BPS); // fps=0 → clamp下限
         assert_eq!(bitrate_arg(5_253_120), "5253k");
+        // #1218「ふつう」＝上限は下げる方向にだけ効き、下限は割らない。未指定は従来どおり。
+        assert_eq!(capped_bitrate_bps(11_819_520, Some(6_000_000)), 6_000_000);
+        assert_eq!(capped_bitrate_bps(5_253_120, Some(6_000_000)), 5_253_120);
+        assert_eq!(capped_bitrate_bps(11_819_520, None), 11_819_520);
+        assert_eq!(capped_bitrate_bps(11_819_520, Some(1_000)), BITRATE_MIN_BPS);
     }
 
     fn png_head(w: u32, h: u32) -> Vec<u8> {

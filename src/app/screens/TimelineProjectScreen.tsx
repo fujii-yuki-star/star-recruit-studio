@@ -26,7 +26,7 @@ import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edi
 import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
 import { detectAssetType } from "../../domain/asset/assetFile";
 import type { AssetType } from "../../domain/enums";
-import { dimsForOrientation, exportDimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
+import { dimsForOrientation, exportDimsForOrientation, isExportSize, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -160,6 +160,8 @@ import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
+import { ExportSizeOptions } from "../components/ExportSizeOptions";
+import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import type { FontWeight, TextAlign } from "../../domain/enums";
@@ -492,7 +494,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
+    isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
@@ -6679,12 +6681,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     <select
                       className="select"
                       style={{ width: "auto" }}
-                      value={exportHd ? "hd" : "fullhd"}
-                      onChange={(e) => setExportHd(e.target.value === "hd")}
+                      value={exportSize}
+                      onChange={(e) => { if (isExportSize(e.target.value)) setExportSize(e.target.value); }}
                       aria-label="書き出す大きさ"
+                      title={EXPORT_SIZE_HINT}
                     >
-                      <option value="fullhd">きれい（{exportFullDims.width}×{exportFullDims.height}）</option>
-                      <option value="hd">軽い（{exportHdDims.width}×{exportHdDims.height}）</option>
+                      <ExportSizeOptions full={exportFullDims} light={exportHdDims} />
                     </select>
                   </label>
                 )}

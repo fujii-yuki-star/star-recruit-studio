@@ -29,7 +29,9 @@ import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage, endExportDiskWatch, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
-import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
+import { BGM_CROSSFADE_SEC, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, isExportSize } from "../../domain/constants";
+import { ExportSizeOptions } from "../components/ExportSizeOptions";
+import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { narrationAudioKey, sceneLineVoiceUsable } from "../../domain/project/narrationLines";
@@ -91,7 +93,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 出力解像度（向き＋画質）。書き出し時に PNG をこの解像度で焼く。向きは videoSettings.aspectRatio から導出（ADR-0012）。
   const fullDims = exportDimsForOrientation(aspectRatio, false);
   const hdDims = exportDimsForOrientation(aspectRatio, true);
-  const outputSize = size === "hd" ? hdDims : fullDims;
+  const outputSize = exportSizeIsLight(size) ? hdDims : fullDims;
 
   // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
@@ -523,6 +525,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         pid || undefined,
         outputPath,
         auto.normalize ? auto.targetLufs : undefined,
+        exportSizeMaxBitrateBps(size),
       );
       setResultPath(report.outputPath);
       // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/bgm＝Rust eprintln 内訳）。
@@ -651,10 +654,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => setExportForm({ size: e.target.value })}>
-              <option value="fullhd">きれい（{fullDims.width}×{fullDims.height}）</option>
-              <option value="hd">軽い（{hdDims.width}×{hdDims.height}）</option>
+            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
+              <ExportSizeOptions full={fullDims} light={hdDims} />
             </select>
+            <p className="field-hint">{EXPORT_SIZE_HINT}</p>
           </div>
 
           <div className="toggle-row">

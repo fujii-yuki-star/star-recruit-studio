@@ -1,7 +1,7 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
-import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
+import { AI_ASSET_SEND_MAX, EXPORT_SIZE, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX, type ExportSize } from "../domain/constants";
 import { ASSIST_KIND } from "../domain/ai/assist";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
@@ -1975,3 +1975,17 @@ export const TALK_MOTION_CHOICES: readonly { value: TalkMotionKind; label: strin
 export const TALK_MOTION_HINT =
   "選んだ列の声が鳴っている間だけ動きます。セリフを足したり長さを変えたりしても付いてきます。手で付けた動きの上に足されます（口は動きません）。";
 
+/**
+ * 動画サイズの名前（#1218・利用者判断 2026-10-07＝3択）。**両形式で同じ**（ADR-0026②）。
+ * ⚠️ 画面に出すのは名前と縦横の大きさだけ（ビットレート等の技術用語は出さない＝§2-3）。
+ */
+export const EXPORT_SIZE_LABEL: Record<ExportSize, string> = {
+  [EXPORT_SIZE.full]: "きれい",
+  [EXPORT_SIZE.standard]: "ふつう",
+  [EXPORT_SIZE.light]: "軽い",
+};
+/** 「ふつう」の補足（選択肢の中に添える）。 */
+export const EXPORT_SIZE_STANDARD_NOTE = "ファイル小さめ";
+/** 動画サイズの欄の説明（場面形式の書き出し画面）。 */
+export const EXPORT_SIZE_HINT =
+  "「ふつう」は大きさは「きれい」と同じで、ファイルを小さくします。写真や映像の細かい所がわずかに粗くなることがあります（字幕の読みやすさは変わりません）。";
