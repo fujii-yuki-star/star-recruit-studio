@@ -4,3 +4,6 @@
 # 配置するビルド: FFmpeg_SOURCE.md の pin（tag/zip/SHA-256）に従い bin 一式＋LICENSE.txt を置く。
 *
 !.gitignore
+# ライセンス本文（中に含む部品の告知）は配布物の一部として追跡する（#1241）
+!LICENSES/
+!LICENSES/**

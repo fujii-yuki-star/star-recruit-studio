@@ -64,3 +64,12 @@
 > ⚠️ **本文と重なる記述が残っている**＝消すときは**本文と突き合わせてから**（この段は実装の履歴と追補を含む）。
 
 FFmpeg/コーデック: [`adr/0002`](0002-ffmpeg-codec.md) **Accepted** — FFmpeg は LGPLビルド＋動的リンク＋ソース提供。**H.264 エンコーダの選択は [`adr/0013`](0013-h264-via-media-foundation.md) で更新**。
+
+## 追補（2026-10-07・#1241）：OpenH264 は**同梱されている**（本文の「同梱しない・初回 Cisco 取得」は実装されなかった）
+
+- **事実**：配布している FFmpeg（BtbN `win64-lgpl-shared`・`FFmpeg_SOURCE.md` の pin）は `--enable-libopenh264` で組まれており、
+  OpenH264 は **`avcodec-*.dll` の中に組み込まれている**（別の `openh264.dll` は無い・`-h encoder=libopenh264` で使えることを確認）。
+  **Cisco が配布するバイナリではない**＝本文が前提にした「Cisco が特許料を負担する」カバレッジは**付かない**。
+- **いつ使われるか**：主経路は `h264_mf`（ADR-0013）。`h264_mf` が無い環境（Windows N/KN でメディア機能パックが無い）でだけ予備の方式として使われる（#120）。
+- **告知**：BSD-2-Clause の本文を `src-tauri/resources/ffmpeg/LICENSES/OpenH264-BSD-2-Clause.txt` に同梱（GPL v3 本文も同じ所）。About の FFmpeg の行がこのフォルダを示す。配布前の検査（`scripts/check-ffmpeg-dist.mjs`）と門番（`src/test/ffmpegLicenseGuard.test.ts`）が見る。
+- ⚠️ **法務の判断は残る**＝予備の方式で出る H.264 の特許の扱い（`13 §9`）。本文の「初回 Cisco 取得」に戻すか、`--disable-libopenh264` の自前ビルドで予備の方式を外すか、いまのままにするかは事業側が決める。

@@ -43,7 +43,7 @@
 
 - **配布用 LGPL ビルドでの `h264_mf` 実搭載＝確認済（自前ビルド不要）。** BtbN `win64-lgpl`（master-latest, static）で確認：`-buildconf` に `--disable-libx264`/`--disable-libx265`（GPL なし）、`-encoders` に `h264_mf`（"H264 via MediaFoundation"）が実在。さらに `FFMPEG_PATH` を当該ビルドへ向けたアプリ実書き出しも h264_mf 選択で良好画質に成功。
   - `--enable-mediafoundation` は buildconf に明示されない＝自動検出（`-encoders` の h264_mf 実在が正）。
-  - 同ビルドは `--enable-libopenh264`（BSD ソースを静的同梱）も持つが、`pick_codec` が h264_mf を優先するため **未使用**。これは Cisco 配布バイナリではない＝AVC 特許カバレッジは付かないが、使わないので無関係。
+  - 同ビルドは `--enable-libopenh264`（BSD ソースを静的同梱）も持つ。`pick_codec` が h264_mf を優先するため**通常の経路では未使用**。⚠️ **ただし `h264_mf` が無い環境（Windows N/KN でメディア機能パックが無い）では予備の方式として実際に使われる**（下の #120 のフォールバック）＝「使わないので無関係」は誤りだった（#1241・2026-10-07 訂正）。これは Cisco 配布バイナリではない＝**AVC 特許カバレッジは付かない**。その環境で出る H.264 をどう扱うかは法務判断（`13 §9`・#1241）。BSD-2-Clause の告知は `src-tauri/resources/ffmpeg/LICENSES/` に同梱した（#1241）。
 - アプリ UI「H.264動画保存機能」（旧 #115）→ PR#115 で「主経路=MF／予備=OpenH264」表示に読み替え済み（マージ済）。
 
 ## 未解決の論点（配布前に確認）

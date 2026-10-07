@@ -77,13 +77,20 @@ else fail(`ライセンス本文が同梱されていません: ${LICENSE}（FFm
 //    ⚠️ **「FFmpeg_SOURCE.md に記録済み」では足りない**（同レビュー 🟡）＝この資料は
 //    `bundle.resources` に入らないので**配布物には行かない**。告知は同梱フォルダの中に要る。
 //    ⚠️ **フォールバックは実在する**＝`-h encoder=libopenh264` で使えることを確認済み。
+//    ⚠️ **告知は追跡している `LICENSES/` に置く**（#1241）＝同梱物（bin・LICENSE.txt）は手で置くが、告知は git が持つ。
 if (/\blibopenh264\b/.test(encoders)) {
-  const hasNotice = existsSync(LICENSE) && /openh264/i.test(readFileSync(LICENSE, "utf8"));
-  if (hasNotice) ok("libopenh264 の告知（BSD-2-Clause）が同梱のライセンス本文にある");
-  else {
-    console.warn("⚠ libopenh264 を含むのに、同梱のライセンス本文に告知（BSD-2-Clause）がありません。");
-    console.warn("  → 13 §9 の表「同梱物のライセンス告知の補完」を見てください。");
-  }
+  const notice = join("src-tauri", "resources", "ffmpeg", "LICENSES", "OpenH264-BSD-2-Clause.txt");
+  const hasNotice = existsSync(notice) && /Cisco Systems/.test(readFileSync(notice, "utf8"));
+  if (hasNotice) ok(`libopenh264 の告知（BSD-2-Clause）が同梱されている（${notice}）`);
+  else fail(`libopenh264 を含むのに、告知（BSD-2-Clause）が同梱されていません: ${notice}`);
+}
+
+// 7) GPL v3 の本文（LGPL v3 は GPL v3 を取り込む＝本文もあわせて添える・#1241）
+{
+  const gpl = join("src-tauri", "resources", "ffmpeg", "LICENSES", "GPL-3.0.txt");
+  const hasGpl = existsSync(gpl) && /GNU GENERAL PUBLIC LICENSE\s+Version 3/.test(readFileSync(gpl, "utf8"));
+  if (hasGpl) ok(`GPL v3 の本文が同梱されている（${gpl}）`);
+  else fail(`GPL v3 の本文が同梱されていません: ${gpl}`);
 }
 
 if (failures > 0) {
