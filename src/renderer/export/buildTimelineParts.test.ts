@@ -270,3 +270,33 @@ describe('区間を順に組み立てる', () => {
     expect(dones[dones.length - 1]).toBe(120);
   });
 });
+
+// ADR-0032 決定22-2 追補3（#1376）：何も時間で変わらない区間は1コマだけ描き、区間の長さまで止めて流す。
+describe('何も時間で変わらない区間は1コマ（#1376）', () => {
+  const text = (id: string, startSec: number, durationSec: number): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec, durationSec, x: 0, y: 0, w: 300, h: 80, text: 'あ' }) as TimelineClip;
+
+  it('1コマだけ置き、長さは区間ぶん（区間ごとに別の置き場）', async () => {
+    const staged: { dir: string; index: number }[] = [];
+    const parts = await buildTimelineParts(doc([text('clip_001', 0, 3), text('clip_002', 3, 2)]), {
+      ...baseOpts,
+      stageFrame: async (dir, index) => { staged.push({ dir, index }); },
+    });
+    expect(parts).toEqual([
+      { fps: 30, durationSec: 3, framesDir: framesDirForSegment(0) },
+      { fps: 30, durationSec: 2, framesDir: framesDirForSegment(1) },
+    ]);
+    expect(staged).toEqual([{ dir: framesDirForSegment(0), index: 0 }, { dir: framesDirForSegment(1), index: 0 }]);
+  });
+
+  it('描くのは区間ごとに1回・進み具合は1コマずつ', async () => {
+    const seen: [number, number][] = [];
+    await buildTimelineParts(doc([text('clip_001', 0, 3), text('clip_002', 3, 2)]), {
+      ...baseOpts,
+      stageFrame: async () => {},
+      onProgress: (done, total) => seen.push([done, total]),
+    });
+    expect(seen).toEqual([[1, 2], [2, 2]]);
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(2);
+  });
+});

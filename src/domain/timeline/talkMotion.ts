@@ -27,6 +27,19 @@ export interface TalkMotionOffset {
 const NONE: TalkMotionOffset = { dy: 0, scale: 1 };
 
 /**
+ * その部品を動かす**声の部品**（結んだ音の列の、隠していない声）。結んでいない・列が無い・音の列でない・
+ * 隠した列なら空。⚠️ **動くのはこの声が鳴っている間だけ**＝描く側（`talkMotionAt`）と書き出しの区間の割り方
+ * （`planTimelineExportSegments`）が**同じ1つ**を見る（片方だけ条件が増えると、動く所を止めた絵で流してしまう）。
+ */
+export function talkMotionVoices(doc: TimelineProject, clip: TimelineClip): TimelineClip[] {
+  const tm = clip.talkMotion;
+  if (!tm) return [];
+  const track = doc.tracks.find((t) => t.id === tm.trackId);
+  if (!track || track.kind !== TRACK_KIND.audio || track.hidden) return [];
+  return doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && c.trackId === tm.trackId && !c.hidden);
+}
+
+/**
  * その時刻に、その部品へ足す「喋っている間の動き」。
  *
  * - 結んだ列が無い・音の列でない・隠してある＝動かない（黙って別の列を探さない）
@@ -37,10 +50,7 @@ const NONE: TalkMotionOffset = { dy: 0, scale: 1 };
 export function talkMotionAt(doc: TimelineProject, clip: TimelineClip, timeSec: number): TalkMotionOffset {
   const tm = clip.talkMotion;
   if (!tm) return NONE;
-  const track = doc.tracks.find((t) => t.id === tm.trackId);
-  if (!track || track.kind !== TRACK_KIND.audio || track.hidden) return NONE;
-  const voice = doc.clips
-    .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && c.trackId === tm.trackId && !c.hidden)
+  const voice = talkMotionVoices(doc, clip)
     .filter((c) => timeSec >= c.startSec && timeSec < c.startSec + c.durationSec)
     .sort((a, b) => a.startSec - b.startSec || a.id.localeCompare(b.id))[0];
   if (!voice) return NONE;

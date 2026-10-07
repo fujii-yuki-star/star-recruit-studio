@@ -18,13 +18,18 @@ import { TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
 import { timelineFramePlan } from './export';
+import { talkMotionVoices } from './talkMotion';
 import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
-/** 区間の割り方（`video`＝実動画をそのまま流す／`frames`＝いままでどおり全コマ焼く）。 */
+/**
+ * 区間の割り方（`video`＝実動画をそのまま流す／`still`＝1コマだけ描いて区間の長さまで止めて流す／
+ * `frames`＝いままでどおり全コマ焼く）。`still` は決定22-2 追補3（#1376）。
+ */
 export type TimelineExportSegment =
   | { kind: 'frames'; startSec: number; endSec: number }
+  | { kind: 'still'; startSec: number; endSec: number }
   | { kind: 'video'; startSec: number; endSec: number; clipId: string };
 
 /** その部品を「そのまま流せる動画」と見てよいか（絵に効く細工が1つでもあれば false）。 */
@@ -116,9 +121,10 @@ export function planTimelineExportSegments(
     if (!animated.has(g.id)) continue;
     for (const m of g.members ?? []) animated.add(m);
   }
-  // 喋っている間の動き（ADR-0056）を持つ部品も**動く部品**＝倒せない（毎コマ焼く）。
-  for (const c of doc.clips) if (c.talkMotion) animated.add(c.id);
-  const hasAnimation = (clipId: string): boolean => animated.has(clipId);
+  // 喋っている間の動き（ADR-0056）＝**結んだ声が鳴っている区間だけ**動く部品（決定22-2 追補3・#1376）。
+  // ⚠️ 声の集め方は描く側と同じ1つ（`talkMotionVoices`）＝片方だけ条件が増えると、動く所を止めた絵で流す。
+  const talkVoices = new Map<string, TimelineClip[]>();
+  for (const c of doc.clips) if (c.talkMotion) talkVoices.set(c.id, talkMotionVoices(doc, c));
 
   // **動画を映す部品**（直接置いた動画と、見た目パターンの中の差し込み口の両方）＝
   // ⚠️ **判定は共有の関数を通す**（`videoPlacementsOf`）＝ここで書き写すと、
@@ -133,6 +139,16 @@ export function planTimelineExportSegments(
   for (const c of visual) {
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));
+  }
+  // 喋っている間の動きを持つ部品が出ていれば、結んだ声の頭と終わりでも割る（追補3）。
+  // ⚠️ **外側へ丸める**（頭は切り捨て・終わりは切り上げ）＝内側へ丸めると、声の頭の1コマが「動かない区間」に
+  // 入って、はねる動きの出だしが消える。
+  const clampFrame = (f: number): number => Math.max(0, Math.min(plan.frameCount, f));
+  for (const voices of talkVoices.values()) {
+    for (const v of voices) {
+      cuts.add(clampFrame(Math.floor(v.startSec * plan.fps)));
+      cuts.add(clampFrame(Math.ceil((v.startSec + v.durationSec) * plan.fps)));
+    }
   }
   // ⚠️ **クレジットの出入りでも割る**（#352 の45分実測で分かった）＝割らないと、動画1本＋字幕1本の長い動画は
   //   区間が1つになり、**頭の3秒にクレジットが出るだけで全区間を1コマずつ焼く**（45分で一時ファイルが 34GB を超えて
@@ -153,6 +169,10 @@ export function planTimelineExportSegments(
     // 区間の**真ん中**で見る＝端は半開区間の境目なので、出入りの判定がぶれる。
     const midSec = (startSec + endSec) / 2;
     const live = visual.filter((c) => liveAt(c, midSec));
+    // その区間で動くか＝キーフレーム（グループの動きを含む）か、**この区間に結んだ声が重なる**喋っている間の動き。
+    const hasAnimation = (clipId: string): boolean =>
+      animated.has(clipId)
+      || (talkVoices.get(clipId) ?? []).some((v) => v.startSec < endSec && v.startSec + v.durationSec > startSec);
     const creditShows =
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, startSec) ||
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, (startSec + endSec) / 2) ||
@@ -169,6 +189,11 @@ export function planTimelineExportSegments(
       && live.every((c) => c.id === base.id || clipIsStaticOverlay(c, hasAnimation, isVideoClip));
     if (base && restStatic && !creditShows) {
       out.push({ kind: 'video', startSec, endSec, clipId: base.id });
+    } else if (!creditShows && live.every((c) => clipIsStaticOverlay(c, hasAnimation, isVideoClip))) {
+      // ⚠️ **何も時間で変わらない区間は1コマ**（追補3）＝描画モードなども構わない（1コマを全部 SVG で描く）。
+      // ⚠️ `clipIsStaticOverlay` は描画モードを弾くが、それは**FFmpeg が重ねる**`video` の上乗せのための条件。
+      //   ここで同じ関数を使うのは「狭く始める」ため（描画モード付きの区間はいままでどおり毎コマ）。
+      out.push({ kind: 'still', startSec, endSec });
     } else {
       out.push({ kind: 'frames', startSec, endSec });
     }
@@ -194,9 +219,11 @@ export function planTimelineExportSegments(
  * バーと断りが食い違う（どちらが正しいか読む人に分からない）。
  */
 export function bakeFrameTotal(segments: readonly TimelineExportSegment[], fps: number): number {
-  return segments
-    .filter((s) => s.kind === 'frames')
-    .reduce((a, s) => a + Math.round((s.endSec - s.startSec) * fps), 0);
+  // `still` は1コマだけ焼く（追補3）。
+  return segments.reduce(
+    (a, s) => a + (s.kind === 'frames' ? Math.round((s.endSec - s.startSec) * fps) : s.kind === 'still' ? 1 : 0),
+    0,
+  );
 }
 
 /**
