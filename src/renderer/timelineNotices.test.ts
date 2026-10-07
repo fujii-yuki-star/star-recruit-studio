@@ -43,4 +43,18 @@ describe('timelineTruncatedTexts（#1366）', () => {
     ], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_003', kind: TRACK_KIND.audio }] } as Partial<TimelineProject>);
     expect(timelineTruncatedTexts(d, () => undefined)).toEqual(['とても長い読み上げの文がここに入ります']);
   });
+
+  // PR #1369 レビュー 🟡：大きさの動きは枠の幅だけを変える＝時刻によって切れたり切れなかったりする。
+  it('大きくなりながら出る文字は、小さいとき（始まり）に切れていれば挙げる', () => {
+    const d = doc([text('clip_001', 700, 110, '漫才キーフレ')], { // 等倍（600px）なら入る
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scale: 0.4 }, { timeSec: 1, scale: 1 }] }],
+    } as Partial<TimelineProject>);
+    expect(timelineTruncatedTexts(d, () => undefined)).toEqual(['漫才キーフレ']);
+  });
+
+  it('数は切れる部品ごと（同じ文の部品が2つ切れていれば2つ）', () => {
+    const d = doc([text('clip_001', 400, 110, '同じ長い文字です'), { ...text('clip_002', 400, 110, '同じ長い文字です'), startSec: 5 } as TimelineClip]);
+    expect(timelineTruncatedTexts(d, () => undefined)).toHaveLength(2);
+  });
 });
+

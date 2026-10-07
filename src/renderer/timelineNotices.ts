@@ -9,23 +9,33 @@ import type { TimelineProject } from '../domain/timeline/types';
 import { isItemOfClip, layoutTimelineAt } from './timelineLayout';
 
 /**
- * 枠に入りきらず末尾が「…」になる文字（部品ごとに1つ・重複なし）。
+ * 枠に入りきらず末尾が「…」になる文字（**切れる部品ごとに1つ**＝同じ文の部品が2つ切れていれば2つ）。
  *
- * ⚠️ **部品の真ん中の時刻で見る**＝文字は部品の間変わらない（字幕も連動先の読み上げ文で一定）。
+ * ⚠️ **何か所かの時刻で見る**（PR #1369 レビュー 🟡）＝文字そのものは部品の間変わらないが、**大きさの動き**
+ * （部品やまとまりの拡縮）は枠の幅だけを変える（字の大きさはそのまま＝`applySimilarity`）ので、
+ * 時刻によって切れたり切れなかったりする。始まり・真ん中・終わりと、**部品自身のキーフレームの時刻**で見て、
+ * どこかで切れれば挙げる（まとまりの動きの時刻までは見ない＝見逃しうる）。
  * 隠した列・部品・まとまりは描かれないので数えない（`layoutTimelineAt` がそもそも出さない）。
  */
 export function timelineTruncatedTexts(
   doc: TimelineProject,
   templateOf: (templateId: string) => Template | undefined,
 ): string[] {
-  const out = new Set<string>();
+  const out: string[] = [];
+  const frame = 1 / doc.videoSettings.fps;
   for (const clip of doc.clips) {
     if (!isVisualClip(clip)) continue;
-    const at = clip.startSec + clip.durationSec / 2;
-    // その部品の絵だけを見る（読みやすさのため。外しても結果は同じ＝ほかの部品も自分の真ん中で見られ、
-    // 集合で重ねて数えないので＝変異チェックで等価と分かった）。
-    const items = layoutTimelineAt(doc, at, { templateOf }).items.filter((it) => isItemOfClip(it.id, clip.id));
-    for (const t of truncatedTexts(items)) out.add(t);
+    const end = clip.startSec + clip.durationSec;
+    const own = (doc.animations ?? []).find((a) => a.targetId === clip.id)?.keyframes ?? [];
+    const times = [clip.startSec, clip.startSec + clip.durationSec / 2, end - frame, ...own.map((k) => clip.startSec + k.timeSec)]
+      .filter((t) => t >= clip.startSec && t < end);
+    let found: string | undefined;
+    for (const at of times) {
+      const items = layoutTimelineAt(doc, at, { templateOf }).items.filter((it) => isItemOfClip(it.id, clip.id));
+      found = truncatedTexts(items)[0];
+      if (found != null) break;
+    }
+    if (found != null) out.push(found);
   }
-  return [...out];
+  return out;
 }

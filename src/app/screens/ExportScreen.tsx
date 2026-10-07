@@ -195,17 +195,24 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     );
     // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
     // 頼んだ側（外の AI）は絵を見るまで気づけない。**公開前チェックと同じ項目**（止めないもの）を1行ずつ渡す。
-    const st = useProjectStore.getState();
-    const notes = ok
-      ? startupExportNotes(
+    // ⚠️ **注意の計算で落ちても、返し損ねない**（PR #1369 レビュー 🟡）＝ここは「ちょうど1回だけ返す」出口なので、
+    // 例外で抜けると頼んだ側が永久に待つ。落ちたら注意なしで成功を返す。
+    let notes: string | null = null;
+    if (ok) {
+      try {
+        const st = useProjectStore.getState();
+        notes = startupExportNotes(
           exportNoteItems(buildPrecheckItems(
             st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations, st.missingAssetIds,
             st.meta.bgmSettings?.assetId ?? null,
             { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
             st.meta.voiceSettings,
           )),
-        )
-      : null;
+        );
+      } catch (e) {
+        console.error("[startup] 注意の計算に失敗（注意なしで返す）:", e);
+      }
+    }
     void finishStartupJob(ok, job.forwarded, ok ? notes : reason)
       .catch((err) => console.error("[startup] finish failed:", err));
   };

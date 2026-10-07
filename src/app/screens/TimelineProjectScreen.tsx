@@ -578,8 +578,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         useTimelineStore.getState().exportRun.message, before, exportFailedMessage.EXPORT_FAILED_TIMELINE,
       );
       // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
-      // 頼んだ側（外の AI）は絵を見るまで気づけない。画面の注意と同じ判定（`truncatedTexts`）で数える。
-      const truncated = ok ? timelineTruncatedTexts(useTimelineStore.getState().doc!, templateOf) : [];
+      // 頼んだ側（外の AI）は絵を見るまで気づけない。判定は**場面形式の公開前チェックと同じ関数**（`truncatedTexts`）。
+      // ⚠️ タイムライン形式の画面には、まだこの注意が無い（起動の引数の書き出しだけ）。
+      // ⚠️ **注意の計算で落ちても、できた書き出しを失敗にしない**（PR #1369 レビュー 🟡）＝注意なしで成功を返す。
+      let truncated: string[] = [];
+      if (ok) {
+        try {
+          truncated = timelineTruncatedTexts(useTimelineStore.getState().doc!, templateOf);
+        } catch (e) {
+          console.error("[timeline-export] 注意の計算に失敗（注意なしで返す）:", e);
+        }
+      }
       const notes = startupExportNotes(truncated.length > 0 ? [{ label: TRUNCATED_TEXT_LABEL, detail: timelineTruncatedTextDetail(truncated) }] : []);
       await finishStartupJob(ok, startupForwarded, ok ? notes : reason);
     })().catch(async (e) => {
