@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, scaleItemContent, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from '../domain/text/textWrap';
 import { sampleTemplates } from '../infrastructure/sampleData';
@@ -1012,5 +1012,16 @@ describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
     };
     const bare = { ...scene, assetRefs: {} } as Scene;
     expect(byId(layoutScene(bare, t).items, 'background')).toMatchObject({ kind: 'fill', w: 200, radius: 20 });
+  });
+});
+
+describe('scaleItemContent（#1371 レビュー：負の倍率）', () => {
+  it('行き過ぎるイージングで倍率が負になっても、中身は 0 で止める（負の字の大きさを出さない）', () => {
+    const t: LayoutItem = { id: 't', kind: 'text', x: 0, y: 0, w: 100, h: 50, zIndex: 1, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, strokeWidth: 4 };
+    scaleItemContent(t, -0.5);
+    expect(t).toMatchObject({ fontSize: 0, strokeWidth: 0 });
+    const f: LayoutItem = { id: 'f', kind: 'fill', x: 0, y: 0, w: 100, h: 50, zIndex: 1, color: '#000000', opacity: 1, radius: 10 };
+    scaleItemContent(f, -2);
+    expect((f as FillItem).radius).toBe(0);
   });
 });

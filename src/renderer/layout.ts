@@ -286,7 +286,10 @@ export function applyInterpolatedTransform(item: TransformableRect, tr: Interpol
  * 文字は `scaleTextStyle`（体裁の掛け方は domain に1つ）、図形は角丸と枠線の太さ。絵は箱に当てはめるので何もしない。
  * **場面形式のキーフレーム**と**タイムライン形式の部品の変形**が呼ぶ＝掛け方を2か所に書かない（§6）。
  */
-export function scaleItemContent(item: LayoutItem, k: number): void {
+export function scaleItemContent(item: LayoutItem, scale: number): void {
+  // ⚠️ 行き過ぎるイージングの途中では倍率が負になりうる（`bezier` の y は範囲外を許す）。箱は潰れているので
+  // 中身も 0 で止める＝負の字の大きさ（SVG では無効＝既定の大きさで描かれる）を出さない（#1371 レビュー）。
+  const k = Math.max(0, scale);
   if (k === 1) return;
   switch (item.kind) {
     case 'text':
