@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "package:release": "node scripts/package-release.mjs",
+    "prune:bundle": "node scripts/prune-bundle.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "mutate": "node scripts/mutate.mjs",

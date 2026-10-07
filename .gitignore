@@ -43,5 +43,7 @@ vitest-report.json
 # チュートリアル撮影の出力（#1226・道具が作る）
 tutorial-out/
 
+# 配布前に外した部品の置き場（scripts/prune-bundle.mjs・大容量・同梱されない）
+/src-tauri/pruned_resources/
 # 配布用に揃えたフォルダと zip（scripts/package-release.mjs・大容量）
 /release/
