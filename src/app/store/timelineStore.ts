@@ -7,7 +7,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } 
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
-import { probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
+import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
@@ -1205,7 +1205,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     releaseSaveGuard();
     set({ ...emptyState(), isLoading: true });
     try {
-      const doc = parseTimelineProjectDoc(await loadProjectDoc(projectId));
+      const parsed = parseTimelineProjectDoc(await loadProjectDoc(projectId));
+      // 取り込み時に付けるはずの情報が欠けた素材を補う（場面形式の読込と同じ関数・#352 の検証で見つけた）＝
+      // フォルダから取り込んだ動画は**音の有無**を持たず、元の音を鳴らす設定が書き出しで黙って無音になっていた。
+      // ⚠️ **開いた時点の文書に入れる**＝取り消しの履歴は開いた後から積むので、補ったことは取り消しに載らない。
+      const filledAssets = await fillMissingAssetInfo(parsed.projectId, parsed.assets);
+      const doc = filledAssets.every((a, i) => a === parsed.assets[i]) ? parsed : { ...parsed, assets: filledAssets };
       // 素材の表示用 src を解決する（動画は本体でなく代表フレーム＝場面形式の読込と同じ方針）。
       const entries = await Promise.all(
         doc.assets.map(async (a): Promise<[string, string] | null> => {
