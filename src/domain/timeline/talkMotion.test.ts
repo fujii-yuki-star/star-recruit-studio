@@ -1,7 +1,10 @@
 // 喋っている間の動き（ADR-0056・#1367）。
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { removeTrack, setClipTalkMotion } from './edit';
+import { EDIT_BLOCKED, pasteClips, removeTrack, setClipTalkMotion } from './edit';
+import { explodeTemplateClip } from './explode';
+import { validateTimelineDoc } from './validateTimelineDoc';
+import type { Template } from '../template/types';
 import { planTimelineExportSegments } from './exportSegments';
 import {
   talkMotionAt,
@@ -113,3 +116,49 @@ describe('付ける・外す（setClipTalkMotion）と列を消したときの�
     expect(other.doc.clips.find((c) => c.id === 'clip_001')?.talkMotion).toEqual({ trackId: 'track_002', kind: 'bounce' });
   });
 });
+
+// PR #1370 レビュー：バラす・検証・貼り付けで、結びを黙って失くさない／行き先の無い結びを持ち込まない。
+describe('バラす・検証・貼り付け（PR #1370 レビュー）', () => {
+  const template = {
+    schemaVersion: '1.0', templateId: 'tmpl_a', name: 'a', category: 'photo_intro', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: 'title', type: 'text', textKey: 'title', x: 0, y: 0, w: 800, h: 100 },
+      { id: 'sub', type: 'text', textKey: 'main', x: 0, y: 200, w: 800, h: 100 },
+    ],
+  } as unknown as Template;
+  const tpl = (talkMotion: TalkMotion): TimelineClip =>
+    ({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_a', trackId: 'track_001', startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, texts: { title: 'あ', main: 'い' }, talkMotion }) as TimelineClip;
+
+  it('はねる・ゆらゆらでバラすと、全部の部品へ結びを写す（同じ絵）', () => {
+    const r = explodeTemplateClip(doc([tpl({ trackId: 'track_002', kind: 'bounce' }), voice('clip_002', 2, 3)]), 'clip_001', template);
+    if (!r.ok) throw new Error('断られた');
+    const pieces = r.doc.clips.filter((c) => c.kind !== TIMELINE_CLIP_KIND.voice);
+    expect(pieces.length).toBeGreaterThan(1);
+    expect(pieces.every((c) => c.talkMotion?.trackId === 'track_002' && c.talkMotion.kind === 'bounce')).toBe(true);
+  });
+
+  it('ふくらむはバラさない（部品ごとの中心でふくらむ＝別の絵）', () => {
+    const r = explodeTemplateClip(doc([tpl({ trackId: 'track_002', kind: 'pulse' }), voice('clip_002', 2, 3)]), 'clip_001', template);
+    expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.explodeTalkPulse });
+  });
+
+  it('声の列が無い・音の列でない結びは検証が知らせる（黙って動かなくしない）', () => {
+    const codes = (tm: TalkMotion) => validateTimelineDoc(doc([portrait(tm)])).map((w) => w.code);
+    expect(codes({ trackId: 'track_009', kind: 'bob' })).toContain('TIMELINE_TALK_MOTION_TRACK_NOT_FOUND');
+    expect(codes({ trackId: 'track_001', kind: 'bob' })).toContain('TIMELINE_TALK_MOTION_TRACK_NOT_FOUND');
+    expect(codes({ trackId: 'track_002', kind: 'bob' })).not.toContain('TIMELINE_TALK_MOTION_TRACK_NOT_FOUND');
+  });
+
+  it('貼り付け先に声の列が無ければ、結びを持ち込まない（ある列なら残す）', () => {
+    const src = portrait({ trackId: 'track_002', kind: 'bob' });
+    const gone = doc([], { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }] } as Partial<TimelineProject>);
+    const r1 = pasteClips(gone, [src], 30);
+    if (!r1.ok) throw new Error('断られた');
+    expect(r1.doc.clips[0].talkMotion).toBeUndefined();
+    const r2 = pasteClips(doc([]), [src], 30);
+    if (!r2.ok) throw new Error('断られた');
+    expect(r2.doc.clips[0].talkMotion).toEqual({ trackId: 'track_002', kind: 'bob' });
+  });
+});
+

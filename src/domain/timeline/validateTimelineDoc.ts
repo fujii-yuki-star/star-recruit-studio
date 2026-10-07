@@ -196,6 +196,14 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
         warnings.push(warn('TIMELINE_SUBTITLE_LINK_NOT_FOUND', '連動する読み上げが見つかりません。連動先を選び直すか、連動をやめてください', field));
       }
     }
+
+    // 喋っている間の動き（ADR-0056）の声の列。無い／音の列でない＝**黙って動かなくしない**（外の AI が書いた文書でも気づける）。
+    if (clip.talkMotion != null) {
+      const t = trackById.get(clip.talkMotion.trackId);
+      if (!t || t.kind !== TRACK_KIND.audio) {
+        warnings.push(warn('TIMELINE_TALK_MOTION_TRACK_NOT_FOUND', '喋っている間に動く部品の、声の列が見つかりません。「喋っている間の動き」で声の列を選び直すか、「動かない」にしてください', field));
+      }
+    }
   }
 
   // V33: 同じ時刻の目印が2つ以上無い（#356 ①・#1155 ③）。

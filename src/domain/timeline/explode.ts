@@ -8,6 +8,7 @@
 // **戻せない**（ADR-0032 未解決6 の決着）＝バラした後の部品から元のテンプレは組み立て直せない
 // （どの部品がどの差し込み口だったかを持たないうえ、バラした後に自由に動かせる）。取り消し（Ctrl+Z）で
 // だけ戻る。だから**操作の前に断る**（`§2-5`＝画面が確認を出す）。
+import { TALK_MOTION_KIND } from '../enums';
 import { DEFAULT_BACKGROUND_COLOR, dimsForOrientation } from '../constants';
 import { FREE_ELEMENT_KIND, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { Group } from '../group/types';
@@ -95,6 +96,7 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // `fit:'cover'` の絵に効く（`timelineLayout` が `crop` の有無に関係なく見る）。写す先が
   // `FreeElement` に無いので、断らないと**はみ出す側が変わって別の絵**になる。
   if (clip.crop != null || clip.cropAlign != null) return { ok: false, reason: EDIT_BLOCKED.explodeCrop };
+  if (clip.talkMotion?.kind === TALK_MOTION_KIND.pulse) return { ok: false, reason: EDIT_BLOCKED.explodeTalkPulse };
 
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {
@@ -186,7 +188,10 @@ function buildExploded(
     }
     const id = createClipId(clipIds);
     clipIds.push(id);
-    newClips.push(clipFromElement(el, id, trackId, clip, useByElement.get(el.id)));
+    // 喋っている間の動き（ADR-0056）は全要素へ写す＝はねる・ゆらゆらは縦にずらすだけなので、全部が同じだけ
+    // 動けば元の部品と同じ絵（ふくらむは上で断っている）。
+    const piece = clipFromElement(el, id, trackId, clip, useByElement.get(el.id));
+    newClips.push(clip.talkMotion ? { ...piece, talkMotion: { ...clip.talkMotion } } : piece);
   });
 
   const tracks = [...doc.tracks];

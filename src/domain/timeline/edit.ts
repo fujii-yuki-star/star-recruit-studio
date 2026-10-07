@@ -142,6 +142,11 @@ export const EDIT_BLOCKED = {
    */
   explodeCrop: 'TIMELINE_EDIT_EXPLODE_CROP',
   /**
+   * 「ふくらむ」で喋る部品はバラせない（ADR-0056・PR #1370 レビュー 🔴）＝要素ごとに分けると、それぞれが
+   * **自分の中心で**ふくらむ（元は部品の箱の中心）＝別の絵になる。はねる・ゆらゆら（縦にずらすだけ）は全要素へ写せば同じ絵。
+   */
+  explodeTalkPulse: 'TIMELINE_EDIT_EXPLODE_TALK_PULSE',
+  /**
    * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
    * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
    * **その先まで流れる**（どちらも決定23「前後で絵が変わらない」に反する）。黙って別の結果に
@@ -1071,6 +1076,11 @@ function freshClipCopy(doc: TimelineProject, clip: TimelineClip, id: string, sta
   // ⚠️ **落とす前に、いま出ている文を焼き付ける**（#787）＝自分の文を持たない連動字幕をそのまま落とすと
   // **文も連動先も無い＝何も出ない帯**になる（黙って中身が消えたのと同じ・§2-5／ADR-0026④）。
   // 焼き付けたあとは普通の字幕なので、書き換えも消すこともできる。
+  // ⚠️ **行き先の無い「喋っている間の動き」は持ち込まない**（PR #1370 レビュー 🟡）＝写したあとで声の列が消えて
+  // いると、後から同じ番号で作った列の声で勝手に動き出す（`removeTrack` が外しているのと同じ経路）。
+  if (next.talkMotion && !doc.tracks.some((t) => t.id === next.talkMotion!.trackId && t.kind === TRACK_KIND.audio)) {
+    delete next.talkMotion;
+  }
   if (next.voiceClipId) {
     const baked = subtitleTextOf(doc, clip);
     if (baked) next.text = baked;
