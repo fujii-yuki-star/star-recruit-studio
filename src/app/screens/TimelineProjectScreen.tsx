@@ -399,6 +399,8 @@ const EASING_CHOICES: { value: string; label: string }[] = [
   { value: EASING.easeIn, label: 'ゆっくり始まる' },
   { value: EASING.easeOut, label: 'ゆっくり終わる' },
   { value: EASING.easeInOut, label: '両端ゆっくり' },
+  // 「止める」（#1365）＝前のキーの値のまま、このキーで一気に切り替わる（業界の「停止キーフレーム」）。
+  { value: EASING.hold, label: '止めて、ここで切り替え' },
   { value: CURVE_CHOICE, label: '自由なカーブ' },
 ];
 
@@ -5551,8 +5553,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                             ))}
                           </select>
                         </label>
-                        {/* 「両端ゆっくり」はカーブでは正確に表せない＝変える前に断る（ADR-0026④・§2-5）。 */}
-                        {k.easing === EASING.easeInOut && (
+                        {/* 「両端ゆっくり」「止めて、ここで切り替え」はカーブでは正確に表せない＝変える前に断る（ADR-0026④・§2-5）。 */}
+                        {(k.easing === EASING.easeInOut || k.easing === EASING.hold) && (
                           <p className="text-muted">
                             「自由なカーブ」にすると、この動き方は正確には表せないため動きが少し変わります。
                           </p>

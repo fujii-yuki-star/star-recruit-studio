@@ -98,3 +98,20 @@ describe('splitEasingCurve（動き方を切る・#753）', () => {
     }
   });
 });
+
+describe('「止める」（hold・#1365）', () => {
+  it('区間の途中は前のキーの値のまま、当キーで切り替わる', () => {
+    const kfs: Keyframe[] = [{ timeSec: 0, rotation: 360 }, { timeSec: 10, rotation: 0, easing: 'hold' }];
+    expect(interpolateKeyframes(kfs, 0).rotation).toBe(360);
+    expect(interpolateKeyframes(kfs, 5).rotation).toBe(360);
+    expect(interpolateKeyframes(kfs, 9.999).rotation).toBe(360);
+    expect(interpolateKeyframes(kfs, 10).rotation).toBe(0);
+  });
+
+  it('進み具合は端に着くまで0', () => {
+    expect(applyEasing(0, 'hold')).toBe(0);
+    expect(applyEasing(0.999, 'hold')).toBe(0);
+    expect(applyEasing(1, 'hold')).toBe(1);
+  });
+});
+

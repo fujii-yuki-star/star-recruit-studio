@@ -11,6 +11,7 @@
 // - **読み上げは切れない**（文と音がずれる）。**連動している字幕も切れない**（読み上げが時間を決める）。
 //
 // 全列いっせいのブレード分割は**入れない**（決定16）＝対象は「選んでいる1つ」だけ。
+import { EASING } from '../enums';
 import { createAnimationId, createClipId } from '../project/persistence';
 import {
   easingCurveOf,
@@ -168,7 +169,12 @@ function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): Easin
   // （場面形式の既定が「両端ゆっくり」）は、キーフレームちょうどの位置ですら分けられなかった。
   // しかも断り文言は「『動き』の欄に出ている秒数の位置で分けてください」＝**まさにその操作**を
   // 薦めており、従うとまた断られる堂々巡りになっていた（§2-5）。
-  if (crossings.length === 0) {
+  // ⚠️ **「止める」の区間は切っても形が変わらない**（#1365）＝前半も後半も前のキーの値のまま。
+  //   前半は値が一定なので境界にどの動き方を書いても同じ／後半は行き先が「止める」のまま（書き直さない）。
+  //   ＝曲線を切る対象から外す（「またぐ区間が無い」のと同じに扱う）。
+  //   ⚠️ 「止める」と曲線が**同じキーへ入る**ことは無い＝区間の動き方は入る側のキーが1つ持つ（同じキーなら同じ形）。
+  const curved = crossings.filter((c) => c.easing !== EASING.hold);
+  if (curved.length === 0) {
     const spec = carries ? keyframes[atCut].easing : undefined;
     // ⚠️ **直線は書かない**（レビュー ℹ️）＝未指定＝直線なので、書くと文書に余計な値が残る。
     // またぐ区間があるときの `isLinearCurve` 判定と揃える（「直線＝未指定」を片方だけ崩さない）。
@@ -187,7 +193,7 @@ function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): Easin
 
   let tail: BezierEasing['bezier'] | null = null;
   const tailTargets = new Set<number>();
-  for (const c of crossings) {
+  for (const c of curved) {
     const cut = splitEasingCurve(c.easing, c.frac);
     if (cut == null) return null; // 表せない形（`ease-in-out` 等）
     // ⚠️ **前半は必ず1つ**＝切れ目のキーフレームは分割で新しく作る**1つの入れ物**なので、そこへ

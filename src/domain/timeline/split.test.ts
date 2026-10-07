@@ -631,3 +631,31 @@ describe('分けたときに持ち越すもの（#750 レビュー）', () => {
     expect(splitClipIssue(linear, 'clip_001', 4)).toBeNull();
   });
 });
+
+// #1365＝「止めて、ここで切り替え」。区間の途中は前のキーの値のまま、当キーで切り替わる。
+describe('「止める」の区間を分ける（#1365）', () => {
+  it('止める区間の途中で切っても動きが変わらない（前半も後半も前の値のまま・当キーで切り替わる）', () => {
+    expectSameMotion([{ timeSec: 0, x: 0, rotation: 360 }, { timeSec: 10, x: 100, rotation: 0, easing: 'hold' }], 4, 10);
+  });
+
+  it('切れ目ちょうどのキーが「止める」なら、前半の終わりにそのまま持ち越す', () => {
+    const kfs: Keyframe[] = [{ timeSec: 0, x: 0 }, { timeSec: 4, x: 100, easing: 'hold' }, { timeSec: 10, x: 50, easing: 'ease-in' }];
+    expectSameMotion(kfs, 4, 10);
+    const { head } = cut(kfs, 4);
+    expect(head[head.length - 1].easing).toBe('hold');
+  });
+
+  it('止める区間と曲線の区間が別のキーへ入るなら、曲線だけ切って分けられる', () => {
+    const kfs: Keyframe[] = [
+      { timeSec: 0, x: 0, y: 0 },
+      { timeSec: 8, y: 80, easing: 'ease-in' },
+      { timeSec: 10, x: 100, easing: 'hold' },
+    ];
+    expectSameMotion(kfs, 4, 10);
+  });
+
+  it('同じキーへ入る区間は動き方が1つ＝x も y も止めるなら、そのまま分けられる', () => {
+    expectSameMotion([{ timeSec: 0, x: 0, y: 0 }, { timeSec: 10, x: 100, y: 100, easing: 'hold' }], 4, 10);
+  });
+});
+

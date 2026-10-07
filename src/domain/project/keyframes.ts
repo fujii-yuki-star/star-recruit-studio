@@ -42,6 +42,9 @@ export function applyEasing(t: number, easing: EasingSpec | undefined): number {
       return bezierEasing(easingCurveOf(easing) as BezierEasing['bezier'], t);
     case EASING.linear:
       return t;
+    case EASING.hold:
+      // 区間の途中は前のキーの値のまま（当KF ちょうどは呼ばれない＝補間は `timeSec < 当KF` の区間だけ）。
+      return t >= 1 ? 1 : 0;
     default: {
       // 値が増えたらここがコンパイルエラーになる＝黙って linear に落とさない（§2-7）。
       const exhaustive: never = easing;
