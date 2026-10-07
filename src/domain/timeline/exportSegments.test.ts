@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
+import { TALK_BOUNCE_END_SEC } from './talkMotion';
 import { bakeFrameTotal, clipIsPassThroughVideo, creditWindowCuts, passThroughRatio, planTimelineExportSegments } from './exportSegments';
 
 const NO_ANIM = (): boolean => false;
@@ -379,9 +380,9 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
     const tracks = [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }];
     const voice = (id: string, startSec: number, durationSec: number): TimelineClip =>
       ({ id, kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec, durationSec, voice: { text: 'あ', status: 'none' } }) as TimelineClip;
-    const talker = text('clip_001', 0, 4, { talkMotion: { trackId: 'track_002', kind: 'bounce' } });
+    const talker = text('clip_001', 0, 4, { talkMotion: { trackId: 'track_002', kind: 'bob' } });
 
-    it('声が鳴っている区間だけ毎コマ・割り目は外側へ丸める', () => {
+    it('ゆらゆらは声が鳴っている区間だけ毎コマ・割り目は外側へ丸める', () => {
       // 声は 1.01〜1.99 秒 → 割り目は 30 コマ目（1.0 秒・切り捨て）と 60 コマ目（2.0 秒・切り上げ）。
       const d = doc([talker, voice('clip_002', 1.01, 0.98)], { tracks } as Partial<TimelineProject>);
       expect(planTimelineExportSegments(d)).toEqual([
@@ -389,6 +390,25 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
         { kind: 'frames', startSec: 1, endSec: 2 },
         { kind: 'still', startSec: 2, endSec: 4 },
       ]);
+    });
+
+    // はねるは声の頭の TALK_BOUNCE_END_SEC 秒だけ動く＝声の残りは1コマ（作例の漫才はこれで縮む）。
+    it('はねるは声の頭だけ毎コマ', () => {
+      const bouncer = text('clip_001', 0, 4, { talkMotion: { trackId: 'track_002', kind: 'bounce' } });
+      const d = doc([bouncer, voice('clip_002', 1, 2)], { tracks } as Partial<TimelineProject>);
+      const endFrame = Math.ceil((1 + TALK_BOUNCE_END_SEC) * 30);
+      expect(planTimelineExportSegments(d)).toEqual([
+        { kind: 'still', startSec: 0, endSec: 1 },
+        { kind: 'frames', startSec: 1, endSec: endFrame / 30 },
+        { kind: 'still', startSec: endFrame / 30, endSec: 4 },
+      ]);
+    });
+
+    it('はねるでも声が短ければ声の終わりまで', () => {
+      const bouncer = text('clip_001', 0, 4, { talkMotion: { trackId: 'track_002', kind: 'bounce' } });
+      const d = doc([bouncer, voice('clip_002', 1, 0.1)], { tracks } as Partial<TimelineProject>);
+      const segs = planTimelineExportSegments(d);
+      expect(segs[1]).toEqual({ kind: 'frames', startSec: 1, endSec: 33 / 30 });
     });
 
     it('結んだ列を隠していれば動かない＝全部1コマ', () => {

@@ -40,6 +40,20 @@ export function talkMotionVoices(doc: TimelineProject, clip: TimelineClip): Time
 }
 
 /**
+ * その部品が**動いている時間の範囲**（秒・半開区間）。書き出しの区間の割り方が使う（#1376）。
+ * ⚠️ **はねるは声の頭の `TALK_BOUNCE_END_SEC` 秒だけ**動く（`talkMotionAt` の bounce と同じ）＝声の間ずっとと見ると、
+ * 止まっている所まで毎コマ描くことになる（作例の漫才で 72 秒に約8分のまま縮まなかった）。ゆらゆら・ふくらむは声の間ずっと。
+ */
+export function talkMotionActiveRanges(doc: TimelineProject, clip: TimelineClip): { startSec: number; endSec: number }[] {
+  const tm = clip.talkMotion;
+  if (!tm) return [];
+  return talkMotionVoices(doc, clip).map((v) => ({
+    startSec: v.startSec,
+    endSec: v.startSec + (tm.kind === TALK_MOTION_KIND.bounce ? Math.min(v.durationSec, TALK_BOUNCE_END_SEC) : v.durationSec),
+  }));
+}
+
+/**
  * その時刻に、その部品へ足す「喋っている間の動き」。
  *
  * - 結んだ列が無い・音の列でない・隠してある＝動かない（黙って別の列を探さない）

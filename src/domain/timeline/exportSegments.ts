@@ -18,7 +18,7 @@ import { TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
 import { timelineFramePlan } from './export';
-import { talkMotionVoices } from './talkMotion';
+import { talkMotionActiveRanges } from './talkMotion';
 import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
@@ -121,10 +121,10 @@ export function planTimelineExportSegments(
     if (!animated.has(g.id)) continue;
     for (const m of g.members ?? []) animated.add(m);
   }
-  // 喋っている間の動き（ADR-0056）＝**結んだ声が鳴っている区間だけ**動く部品（決定22-2 追補3・#1376）。
-  // ⚠️ 声の集め方は描く側と同じ1つ（`talkMotionVoices`）＝片方だけ条件が増えると、動く所を止めた絵で流す。
-  const talkVoices = new Map<string, TimelineClip[]>();
-  for (const c of doc.clips) if (c.talkMotion) talkVoices.set(c.id, talkMotionVoices(doc, c));
+  // 喋っている間の動き（ADR-0056）＝**動いている範囲だけ**動く部品（決定22-2 追補3・#1376）。
+  // ⚠️ 範囲は描く側と同じ所（`talkMotion.ts`）で出す＝片方だけ条件が増えると、動く所を止めた絵で流す。
+  const talkRanges = new Map<string, { startSec: number; endSec: number }[]>();
+  for (const c of doc.clips) if (c.talkMotion) talkRanges.set(c.id, talkMotionActiveRanges(doc, c));
 
   // **動画を映す部品**（直接置いた動画と、見た目パターンの中の差し込み口の両方）＝
   // ⚠️ **判定は共有の関数を通す**（`videoPlacementsOf`）＝ここで書き写すと、
@@ -140,14 +140,14 @@ export function planTimelineExportSegments(
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));
   }
-  // 喋っている間の動きを持つ部品が出ていれば、結んだ声の頭と終わりでも割る（追補3）。
+  // 喋っている間の動きを持つ部品は、動いている範囲の頭と終わりでも割る（追補3）。
   // ⚠️ **外側へ丸める**（頭は切り捨て・終わりは切り上げ）＝内側へ丸めると、声の頭の1コマが「動かない区間」に
   // 入って、はねる動きの出だしが消える。
   const clampFrame = (f: number): number => Math.max(0, Math.min(plan.frameCount, f));
-  for (const voices of talkVoices.values()) {
-    for (const v of voices) {
-      cuts.add(clampFrame(Math.floor(v.startSec * plan.fps)));
-      cuts.add(clampFrame(Math.ceil((v.startSec + v.durationSec) * plan.fps)));
+  for (const ranges of talkRanges.values()) {
+    for (const r of ranges) {
+      cuts.add(clampFrame(Math.floor(r.startSec * plan.fps)));
+      cuts.add(clampFrame(Math.ceil(r.endSec * plan.fps)));
     }
   }
   // ⚠️ **クレジットの出入りでも割る**（#352 の45分実測で分かった）＝割らないと、動画1本＋字幕1本の長い動画は
@@ -169,10 +169,10 @@ export function planTimelineExportSegments(
     // 区間の**真ん中**で見る＝端は半開区間の境目なので、出入りの判定がぶれる。
     const midSec = (startSec + endSec) / 2;
     const live = visual.filter((c) => liveAt(c, midSec));
-    // その区間で動くか＝キーフレーム（グループの動きを含む）か、**この区間に結んだ声が重なる**喋っている間の動き。
+    // その区間で動くか＝キーフレーム（グループの動きを含む）か、**動いている範囲がこの区間に重なる**喋っている間の動き。
     const hasAnimation = (clipId: string): boolean =>
       animated.has(clipId)
-      || (talkVoices.get(clipId) ?? []).some((v) => v.startSec < endSec && v.startSec + v.durationSec > startSec);
+      || (talkRanges.get(clipId) ?? []).some((r) => r.startSec < endSec && r.endSec > startSec);
     const creditShows =
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, startSec) ||
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, (startSec + endSec) / 2) ||
