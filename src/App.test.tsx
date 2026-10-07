@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
-import { act, fireEvent, render, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { useProjectStore } from "./app/store/projectStore";
 import { sampleTemplates } from "./infrastructure/sampleData";
+import * as fsMod from "./infrastructure/projectFs";
+import { TIMELINE_SCHEMA_VERSION } from "./domain/timeline/types";
 import type { Scene } from "./domain/project/types";
+import { registerNavigationGuardForTest } from "./app/hooks/navigationGuard";
 
 // #547 P3-7 レビュー：navigation.ts の単体テストと Sidebar の props テストの"接着"＝App 側の配線
 // （navigate が projectReturnTo を更新 → Sidebar の currentProjectTarget → 実クリック遷移）を統合で固定する。
@@ -27,6 +30,9 @@ function scene(id: string, order: number): Scene {
 
 /** サイドバー内に限定してボタンを押す（場面編集など本文にも「素材」等が出るため、ナビと取り違えない）。 */
 function clickSidebar(container: HTMLElement, label: string) {
+  // 編集画面では**畳んだ状態で始まる**（ADR-0048・#1256 b1）＝利用者と同じく、まず出してから押す。
+  const reveal = container.querySelector('button[aria-label="メニューを出す"]') as HTMLElement | null;
+  if (reveal) fireEvent.click(reveal);
   const sidebar = container.querySelector(".sidebar") as HTMLElement;
   fireEvent.click(within(sidebar).getByText(label).closest("button")!);
 }
@@ -125,5 +131,182 @@ describe("App 書き出しの終了通知の配線（#589 統合）", () => {
     // 他画面へ戻っても再掲しない（#547 P3-11 の「古い通知が残る」を作らない）。
     clickSidebar(container, "素材");
     expect(within(container).queryByText(/動画の書き出しが終わりました/)).toBeNull();
+  });
+});
+
+// ADR-0032：タイムライン編集は**別の文書**。共通トップバーの「保存」は場面形式（projectStore）を保存するので、
+// この画面には出さない（見ている文書と違うものが保存される／場面文書が無いと空のプロジェクトが新しく作られる）。
+describe("タイムライン編集の画面には場面形式の保存バーを出さない（#629 /canon-check 🔴）", () => {
+  const timelineDoc = {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: "timeline",
+    projectId: "proj_20260728_001",
+    projectName: "焼いた動画",
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+    assets: [],
+    tracks: [{ id: "track_001", kind: "visual" }],
+    clips: [],
+  };
+
+  it("一覧から開くと専用画面になり、共通トップバー（保存・保存状態）が出ない", async () => {
+    useProjectStore.setState({ templates: sampleTemplates, scenes: [], parts: [], assets: [] });
+    vi.spyOn(fsMod, "listProjectSummaries").mockResolvedValue([
+      { projectId: "proj_20260728_001", projectName: "焼いた動画", updatedAt: "2026-07-28T00:00:00.000Z", format: "timeline" },
+    ]);
+    vi.spyOn(fsMod, "loadProjectDoc").mockResolvedValue(JSON.stringify(timelineDoc));
+
+    const { container, findByText } = render(<App />);
+    expect(container.querySelector(".topbar")).not.toBeNull(); // 一覧では出ている
+    fireEvent.click(await findByText("焼いた動画"));
+    await waitFor(() => expect(container.querySelector(".topbar")).toBeNull());
+  });
+});
+
+// #719：離れる前の関門（`navigationGuard`）が **App の `navigate` に繋がっている**ことを固定する。
+// これが無いと、関門そのものの単体テストと画面側のテストが両方緑でも、**繋がっていなければ素通し**になる
+// （実際、サイドバーからの離脱がその状態だった）。
+describe("App の遷移が離れる前の関門を通る（#719 統合）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({ templates: sampleTemplates, status: "ready", saveStatus: "saved" });
+  });
+
+  it("関門が断ったら、サイドバーを押しても画面が変わらない", () => {
+    const seen: string[] = [];
+    // 「離れないでほしい」と名乗っている状態を作る（実際に名乗るのはタイムライン編集画面）。
+    const release = registerNavigationGuardForTest((to) => { seen.push(to); return false; });
+    try {
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(seen).toEqual(["materials"]); // 行き先は関門へ渡る
+      // 断られたので画面は変わらない（素材画面の見出しが出ていない）。
+      expect(container.textContent).not.toContain("素材を管理");
+    } finally {
+      release();
+    }
+  });
+
+  // ⚠️ **断られたら、行き先で寄る指定も落とす**（PR #1074 レビュー）。
+  // 導線はどれも「指定を置いてから遷移を頑む」形なので、断ると**指定だけが残る**。
+  // 残ると、あとでサイドバーから素直にその画面を開いたときに**勝手に寄る**。
+  it("関門が断ったら、行き先で寄る指定も残さない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setSettingsFocus("brandKit");
+      useProjectStore.getState().setEditingSceneFocus("look");
+      useProjectStore.getState().setEditingSceneAssist("shorten"); // すぐ頼む AI 補助の印（ADR-0053 決定2）
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().settingsFocus, "寄る指定が残っている").toBeNull();
+      expect(useProjectStore.getState().editingSceneFocus, "寄る指定が残っている").toBeNull();
+      expect(useProjectStore.getState().editingSceneAssist, "すぐ頼む印が残っている").toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  // 公開前チェックから預けた「直す場面の並び」（UI/UX 監査 2026-10-02）も同じ＝残すと押してもいない「公開前チェックへ戻る」が出る。
+  it("関門が断ったら、直す場面の並びも残さない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setSceneEditTrail({ label: "x", sceneIds: ["scene_001", "scene_002"] });
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().sceneEditTrail).toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  it("場面編集・仕上がり確認のほかへ出たら、直す場面の並びを落とす", () => {
+    useProjectStore.getState().setSceneEditTrail({ label: "x", sceneIds: ["scene_001", "scene_002"] });
+    const { container } = render(<App />);
+    clickSidebar(container, "素材");
+    expect(useProjectStore.getState().sceneEditTrail).toBeNull();
+  });
+
+  // ⚠️ **落とすのは寄る先の指定だけ**＝「どの場面を編集中か」は遷移と別に意味を持つ。
+  it("断られても、編集中の場面は忘れない", () => {
+    const release = registerNavigationGuardForTest(() => false);
+    try {
+      useProjectStore.getState().setEditingSceneId("scene_001");
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(useProjectStore.getState().editingSceneId).toBe("scene_001");
+    } finally {
+      release();
+    }
+  });
+
+  it("関門が許せば、これまでどおり移れる", () => {
+    const release = registerNavigationGuardForTest(() => true);
+    try {
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(container.textContent).toContain("素材を管理");
+    } finally {
+      release();
+    }
+  });
+});
+
+/**
+ * 持ち込みフォントは**起動時に1回そろえる**（α-6 出口監査 🟡11）。
+ *
+ * ⚠️ `loadUserFonts` の入口が設定・公開前チェック・書き出しにしか無く、**場面編集・仕上がり確認・
+ * タイムライン編集ではプレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 が崩れる）。
+ * 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
+ */
+describe("持ち込みフォントを起動時に読み込む（α-6 出口監査 🟡11）", () => {
+  it("App を開いた時点で refreshUserFonts が呼ばれる", async () => {
+    const refreshUserFonts = vi.fn(async () => {});
+    useProjectStore.setState({ refreshUserFonts } as never);
+    render(<App />);
+    await waitFor(() => expect(refreshUserFonts).toHaveBeenCalled());
+  });
+
+  /** ⚠️ **読めなくても画面は開く**（同梱の字体は使えるので行き止まりにしない）。 */
+  it("読み込みに失敗しても画面は出る", async () => {
+    const refreshUserFonts = vi.fn(async () => {
+      throw new Error("読めません");
+    });
+    useProjectStore.setState({ refreshUserFonts } as never);
+    const { container } = render(<App />);
+    await waitFor(() => expect(refreshUserFonts).toHaveBeenCalled());
+    expect(container.querySelector(".sidebar")).toBeTruthy();
+  });
+});
+
+// サイドバーの「今の動画」も同じ判定（`hasOpenProject`）から採る（差分再監査 6・7巡目 🟡）。
+//
+// ⚠️ **同じ問いを画面ごとに書き直さない**＝棚からの取り込み・「素材を追加」・会社の見た目の反映と
+// 同じ式。1つの条件だけで見ると、白紙から作った直後やウィザードの途中を取りこぼす。
+describe("App「今の動画」を出すかの判定", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({ templates: sampleTemplates, parts: [], scenes: [], saveStatus: "saved" });
+  });
+
+  it("何も開いていなければ出さない", () => {
+    const { container } = render(<App />);
+    expect(within(container).queryByText("今の動画")).toBeNull();
+  });
+
+  it("白紙から作った直後（番号なし・場面なし）でも出す", () => {
+    useProjectStore.setState({ status: "ready" });
+    const { container } = render(<App />);
+    expect(within(container).getByText("今の動画")).toBeInTheDocument();
+  });
+
+  it("ウィザードの途中（会社名だけ入れた状態）でも出す", () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ meta: { ...meta, companyInfo: { ...meta.companyInfo, companyName: "すたりお商事" } } } as never);
+    const { container } = render(<App />);
+    expect(within(container).getByText("今の動画")).toBeInTheDocument();
   });
 });

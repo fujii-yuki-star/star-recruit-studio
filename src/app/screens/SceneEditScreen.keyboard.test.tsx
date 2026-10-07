@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap } from "../../test/pointer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -68,6 +69,48 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     input.remove();
   });
 
+  // ⚠️ #788 レビュー 🔴：共有部品へ抜いたとき、旧実装の「`SELECT`／全 `INPUT` を除外」がいったん落ちた。
+  // この画面は要素を選ぶとセレクト（形・揃え・動き…）とスライダーが並ぶので、譲らないと
+  // **欄の値が変わらないまま部品だけ動く**／**欄を触っているつもりで部品が消える**。
+  it("セレクトやスライダーに焦点があるときは矢印を奪わない（欄の値が変わらず部品だけ動く、を作らない）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree001();
+    for (const make of [
+      () => document.createElement("select"),
+      () => Object.assign(document.createElement("input"), { type: "range" }),
+      () => Object.assign(document.createElement("input"), { type: "number" }),
+    ]) {
+      const node = make();
+      document.body.appendChild(node);
+      expect(fireEvent.keyDown(node, { key: "ArrowRight" })).toBe(true); // 奪わない
+      expect(el()?.x).toBe(100);
+      node.remove();
+    }
+  });
+
+  it("セレクトやチェックボックスに焦点があるときは Delete で部品を消さない", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree001();
+    for (const make of [
+      () => document.createElement("select"),
+      () => Object.assign(document.createElement("input"), { type: "checkbox" }),
+    ]) {
+      const node = make();
+      document.body.appendChild(node);
+      fireEvent.keyDown(node, { key: "Delete" });
+      expect(el()).toBeTruthy(); // 消えていない
+      node.remove();
+    }
+  });
+
+  // ⚠️ **変換中は奪わない**の配線（共通判定は単体試験済みだが、繋がっているかは未検証だった）。
+  it("日本語を変換している最中は矢印を奪わない", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree001();
+    fireEvent.keyDown(document.body, { key: "ArrowRight", isComposing: true });
+    expect(el()?.x).toBe(100);
+  });
+
   it("Delete で単一選択要素を削除する", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     selectFree001();
@@ -97,9 +140,7 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     const box = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
     // ダブルクリック（pointerdown×2）でドリルイン＝そのメンバーを個別選択。
-    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.pointerUp(box, { pointerId: 1 });
-    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    doubleTap(box, { clientX: 120, clientY: 120 });
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     expect(el()?.x).toBe(100); // 変形グループのメンバーは動かさない（詳細パネルで編集）
   });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import type { DraftWarning, VoiceStatus } from "../data/mockData";
 import { CheckIcon, FolderIcon, SparkleIcon } from "./icons";
+import { yukoImage } from "../data/yukoImages";
 
 // 生成中などのローディング表示
 export function LoadingView({
@@ -12,19 +13,31 @@ export function LoadingView({
 }: {
   title: string;
   message?: string;
-  progress?: number;
+  /**
+   * 進み具合（%）。**分かっているときだけ**渡す。
+   *
+   * ⚠️ **分からない区間に数字を当てない**（#993 ②）＝`"indeterminate"` を渡すと、
+   * 書き出しが「わからない区間」に使っているのと**同じ流れるバー**になる。
+   * 止まったバーは「固まった」に見え、動くバーは「進んでいる」と嘘をつく。どちらでもない見せ方。
+   */
+  progress?: number | "indeterminate";
   onCancel?: () => void;
 }) {
   return (
     <div className="card text-center" style={{ maxWidth: 520, margin: "var(--gap-xl) auto" }}>
       <div className="yuko-avatar" aria-hidden="true" style={{ margin: "0 auto var(--gap)" }}>
-        <span className="yuko-avatar-face">ゆうこ</span>
+        <img className="yuko-avatar-img" src={yukoImage("think")} alt="" />
       </div>
       <h2 className="section-title">{title}</h2>
       {message && <p className="page-desc text-pretty">{message}</p>}
-      {typeof progress === "number" && (
+      {progress != null && (
         <div className="progress mt" aria-hidden="true">
-          <div className="progress-fill" style={{ width: `${progress}%` }} />
+          {progress === "indeterminate" ? (
+            // 書き出しの「わからない区間」と**同じ見せ方**（#993 ②・ADR-0026②）。
+            <div className="progress-fill progress-fill--indeterminate" />
+          ) : (
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          )}
         </div>
       )}
       {onCancel && (
@@ -113,14 +126,14 @@ export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {
   }
   if (status === "failed") {
     return (
-      <span className="badge" style={{ background: "var(--color-danger-soft)", color: "var(--color-danger)" }}>
+      <span className="badge badge-danger">
         {label}
       </span>
     );
   }
   if (status === "pending") {
     return (
-      <span className="badge" style={{ background: "var(--color-yellow)", color: "var(--color-warn)" }}>
+      <span className="badge badge-yellow">
         {label}
       </span>
     );
@@ -144,7 +157,7 @@ export function ErrorView({
         className="action-card-icon"
         style={{
           background: "var(--color-danger-soft)",
-          color: "var(--color-danger)",
+          color: "var(--color-danger-text)",
           margin: "0 auto var(--gap)",
           width: 56,
           height: 56,

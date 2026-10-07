@@ -119,6 +119,18 @@ export function lineVoiceStem(sceneId: string, lineId: string): string {
 }
 
 /**
+ * その行の音声キー（`narrationAudioById` のキー）。**掛け合いは行ごと・単独は場面 id**。
+ *
+ * ⚠️ **この分岐を呼ぶ側に書かせない**（§2-7・PR #896 レビュー ℹ️）＝同じ規則が
+ * `liveNarrationAudioKeys`・`lineDurationsFromAudio`・書き出しの3か所に写っており、
+ * **単独読み上げだけ引けない**（`sceneId_line_001` を引いてしまう）事故が起きた。
+ * 単独読み上げの `lineId` は `sceneLines` が作る `line_001` だが、**保存されているキーは場面 id**。
+ */
+export function narrationAudioKey(scene: Scene, lineId: string): string {
+  return scene.lines && scene.lines.length > 0 ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId;
+}
+
+/**
  * 生存しているナレーション音声キー（narrationAudioById のキー）の集合（#390・メモリ効率）。
  * 掛け合い場面は行ごと（lineAudioKey）、単一 narration 場面は sceneId。掛け合い⇄単一の切替や場面/行の削除で
  * 孤児になった音声キャッシュ（narrationAudioById／dirty セット）を剪定するのに使う（保存時・削除時）。
@@ -126,13 +138,38 @@ export function lineVoiceStem(sceneId: string, lineId: string): string {
 export function liveNarrationAudioKeys(scenes: Scene[]): Set<string> {
   const keys = new Set<string>();
   for (const sc of scenes) {
-    if (sc.lines && sc.lines.length > 0) {
-      for (const l of sc.lines) keys.add(lineAudioKey(sc.sceneId, l.lineId));
-    } else {
-      keys.add(sc.sceneId);
-    }
+    // 規則は `narrationAudioKey` に1つ（写すと片方だけ直る）。
+    for (const l of sceneLines(sc)) keys.add(narrationAudioKey(sc, l.lineId));
   }
   return keys;
+}
+
+/**
+ * その行の声を**使ってよいか**（#1165）。
+ *
+ * ⚠️ **本文を直した行は「声が無い」扱い**＝`updateLine` で `status` は `none` へ戻るが、
+ * 取り消しのためにメモリ上の**旧 WAV は同じ鍵に残る**（#390）。`status` を見ないと、
+ * **直したはずの文章が、直る前の声で**出る（#392 レビューで決めた規則）。
+ * ⚠️ **プレビューと書き出しが同じ答えを出すための単一の参照元**（ADR-0001）＝以前は
+ * この規則が `lineDurationsFromAudio` の中にだけあり、**書き出しは見ていなかった**。
+ */
+export function lineVoiceUsable(line: { status?: string }): boolean {
+  return line.status === NARRATION_STATUS.generated;
+}
+
+/**
+ * その場面の（行の）声を**使ってよいか**（#1165）。掛け合いも単一 narration も**同じ答え**を出す。
+ *
+ * ⚠️ **単一 narration を素通りさせない**（PR #1178 レビュー 🔴）＝行を持たない場面は `lineId` 無しで
+ * 引かれるので、`scene.lines` だけを見ると**この場面が判定の外**へ落ちる。単一 narration の本文を
+ * 直したときも `narration.status` は `none` へ戻り、**旧 WAV は同じ鍵に残る**ので、掛け合いと
+ * **まったく同じ構造の不具合**になる（ADR-0026②＝掛け合いの有無で同じ概念を割らない）。
+ * `sceneLines` が両者を**実効1行**へそろえるので、それを通して1つの判定にする。
+ */
+export function sceneLineVoiceUsable(scene: Scene, lineId?: string): boolean {
+  const lines = sceneLines(scene);
+  const line = lineId ? lines.find((l) => l.lineId === lineId) : lines[0];
+  return line == null || lineVoiceUsable(line); // 知らない行は弾かない（呼び出し規約の外）
 }
 
 /**
@@ -149,7 +186,7 @@ export function lineDurationsFromAudio(scene: Scene, audioById: Record<string, s
   const out: Record<string, number> = {};
   if (scene.lines && scene.lines.length > 0) {
     for (const line of scene.lines) {
-      if (line.status !== NARRATION_STATUS.generated) continue; // 編集で none に戻った行は旧キャッシュの尺を使わない
+      if (!lineVoiceUsable(line)) continue; // 編集で none に戻った行は旧キャッシュの尺を使わない（規則は1か所＝#1165）
       const audio = audioById[lineAudioKey(scene.sceneId, line.lineId)];
       if (!audio) continue;
       const d = wavDurationSec(audio);

@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
+import { pick, pickerOf } from "../../test/thumbPicker";
 import { SceneEditScreen } from "./SceneEditScreen";
 
 // ADR-0030 Option A：FREE→通常の切替で**動画に出なくなる中身がある場合**に確認を出し、確定するまで切替えない
@@ -40,7 +41,12 @@ function setup(scene: Scene) {
 }
 
 const withSlot = () => freeScene({ freeLayout: [{ id: "free_001", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "a" }] } as Partial<Scene>);
-const picker = () => screen.getByLabelText("見た目パターン");
+// 見た目は名前の `<select>` から**見て選ぶ格子**へ変わった（#1031）。
+// ここのテストは id で書いてあるので、押すときだけ名前へ引き直す。
+const NAME_OF: Record<string, string> = { free_v1: "自由配置", photo_v1: "写真", open_v1: "オープニング" };
+const choose = (templateId: string) => pick(document.body, "見た目パターン", NAME_OF[templateId]!);
+/** いまピッカーが指している見た目の名前。 */
+const shown = () => pickerOf(document.body, "見た目パターン").textContent ?? "";
 const CONFIRM = /動画に出なくなります/;
 /** 確認中に中身を消して0件になったときの文言（確認自体は答えるまで残る＝PR #592 レビュー）。 */
 const CONFIRM_NONE = /出なくなる中身はありません/;
@@ -50,7 +56,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     setup(withSlot()); // 自由配置あり・通常配置（assetRefs）なし＝復元できない
     render(<SceneEditScreen onNavigate={vi.fn()} />);
 
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.getByText(CONFIRM)).toBeTruthy(); // 確認が出る
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1"); // まだ切替えない
 
@@ -58,7 +64,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     expect(screen.queryByText(CONFIRM)).toBeNull();
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1"); // 未変更
 
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     fireEvent.click(screen.getByText("通常の見た目に変える"));
     const s = useProjectStore.getState().scenes[0];
     expect(s.templateId).toBe("photo_v1"); // 確定で切替
@@ -73,7 +79,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
 
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.queryByText(CONFIRM)).toBeNull(); // 出なくなる中身が無いので確認は出ない
     const s = useProjectStore.getState().scenes[0];
     expect(s.templateId).toBe("photo_v1"); // 即切替
@@ -93,7 +99,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
 
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     // 何がいくつ出なくなるかを示す（「素材が消える」とだけ言って文字の消失に気づけない、を作らない）。
     const notice = screen.getByText(CONFIRM);
     expect(notice.textContent).toContain("素材1個");
@@ -123,16 +129,16 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
 
-    fireEvent.change(picker(), { target: { value: "open_v1" } });
+    choose("open_v1");
     expect(screen.getByText(CONFIRM)).toBeTruthy();
 
     // 隠れる中身が無い photo_v1 を選ぶ＝即適用される。古い確認を残すと、押したときに
     // **適用済みとは別のテンプレ**（open_v1）へ切り替わってしまう。
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.queryByText(CONFIRM)).toBeNull();
     expect(useProjectStore.getState().scenes[0].templateId).toBe("photo_v1");
     // ピッカーの表示も適用後のものになる（確認待ちが残ると、選んでいない open_v1 を指したままになる・#532）。
-    expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
+    expect(shown()).toContain(NAME_OF["photo_v1"]);
   });
 
   // 件数は毎レンダ数え直して**文言**へ反映するが、確認そのものは答えるまで消さない（ADR-0030 決定3・PR #592 レビュー）。
@@ -141,7 +147,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
   it("確認中に中身を消すと文言だけ変わり、足し直しても確認は蘇らない（ずっと同じ確認）", () => {
     setup(withSlot());
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.getByText(CONFIRM)).toBeTruthy();
 
     act(() => {
@@ -153,7 +159,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     expect(screen.queryByText(CONFIRM)).toBeNull();
     expect(screen.getByText(CONFIRM_NONE)).toBeTruthy();
     // 確認は消えていない＝選んだ先を指したまま・切替はまだ起きない（勝手に切り替えも取り下げもしない）。
-    expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
+    expect(shown()).toContain(NAME_OF["photo_v1"]);
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
 
     // 消した中身を足し直す（取り消しで戻したときと同じ）。ここで確認が湧き直すと、触ってもいないのに
@@ -164,13 +170,13 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
       }));
     });
     expect(screen.getByText(CONFIRM)).toBeTruthy();
-    expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
+    expect(shown()).toContain(NAME_OF["photo_v1"]);
 
     // 「やめる」でいつでも抜けられる＝選択表示も実際の見た目へ戻る。
     fireEvent.click(screen.getByText("やめる"));
     expect(screen.queryByText(CONFIRM)).toBeNull();
     expect(screen.queryByText(CONFIRM_NONE)).toBeNull();
-    expect((picker() as HTMLSelectElement).value).toBe("free_v1");
+    expect(shown()).toContain(NAME_OF["free_v1"]);
   });
 
   // 0件でも確認のボタンは残す＝「選んだのに切り替えられない」行き止まりを作らない（同じ値の選び直しでは
@@ -178,7 +184,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
   it("確認中に中身を消して0件になっても、そのまま切り替えられる", () => {
     setup(withSlot());
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     act(() => {
       useProjectStore.setState((st) => ({
         scenes: st.scenes.map((sc) => ({ ...sc, freeLayout: [] })),
@@ -193,13 +199,13 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
   it("確認中に今の見た目を選び直すと、確認は消える（元へ戻せる）", () => {
     setup(withSlot());
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.getByText(CONFIRM)).toBeTruthy();
 
     // いまの見た目（free_v1）を選び直す＝切替をやめた。確認が残ると選択表示が候補へ跳ね戻り、元へ戻せない。
-    fireEvent.change(picker(), { target: { value: "free_v1" } });
+    choose("free_v1");
     expect(screen.queryByText(CONFIRM)).toBeNull();
-    expect((picker() as HTMLSelectElement).value).toBe("free_v1");
+    expect(shown()).toContain(NAME_OF["free_v1"]);
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
   });
 
@@ -220,7 +226,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
 
     // 通常→FREE（休眠していた自由配置が戻る）→ 受け皿の無い通常テンプレを選んで確認を出す。
     fireEvent.change(screen.getByLabelText("種類"), { target: { value: "free" } });
-    fireEvent.change(picker(), { target: { value: "open_v1" } });
+    choose("open_v1");
     expect(screen.getByText(CONFIRM)).toBeTruthy();
 
     // 確認を開いたまま取り消す＝場面は通常テンプレへ戻り、自由配置は休眠に戻る。
@@ -237,7 +243,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
       assetRefs: { mainVisual: "asset_v" },
     } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    choose("photo_v1");
     expect(screen.getByText(CONFIRM).textContent).toContain("図形1個");
   });
 });

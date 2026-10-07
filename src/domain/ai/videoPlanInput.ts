@@ -2,7 +2,7 @@
 // - Template[] → AI へ渡すテンプレ要約（11§7.5 aiHint＋層構成）
 // - 利用可能なゆうこ表情タグ（yuko 素材の tags を集約）
 // プロンプト本文の組み立ては buildVideoPlanRequest.ts、検証は validateVideoPlan.ts が担う。
-import { ASSET_TYPE, FREE_CATEGORY, type Orientation } from '../enums';
+import { ASSET_TYPE, FREE_CATEGORY, LAYER_TYPE, type Orientation } from '../enums';
 import type { Asset, CompanyInfo, GeneralBrief } from '../project/types';
 import type { Template } from '../template/types';
 import { isUserTemplate } from '../template/userTemplate';
@@ -25,12 +25,28 @@ export function buildTemplateSummaries(templates: Template[], orientation: Orien
     templateId: t.templateId,
     category: t.category,
     useCase: t.aiHint?.useCase,
-    requiredSlots: t.layers.filter((l) => l.type === 'slot').map((l) => l.id),
-    hasYuko: t.layers.some((l) => l.type === 'character'),
+    requiredSlots: t.layers.filter((l) => l.type === LAYER_TYPE.slot).map((l) => l.id),
+    hasYuko: t.layers.some((l) => l.type === LAYER_TYPE.character),
     maxNarrationLength: t.aiHint?.maxNarrationLength,
     maxSubtitleLength: t.aiHint?.maxSubtitleLength,
     maxDurationSec: t.aiHint?.maxDurationSec,
   }));
+}
+
+/** 場面に当てられる素材（写真・動画）の数。 */
+export function visualAssetCount(assets: readonly Asset[]): number {
+  return assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video).length;
+}
+
+/**
+ * 写真・動画が1件も無いときは、**差し込み口のある見た目を AI に見せない**（ADR-0052 追補5＝利用者判断 C・12 §8.9）。
+ * 見せると AI が写真の場面を選び、差し込み口が空のまま残る（実測）。場面の種類を決めるのは AI のまま（決定1）＝
+ * 選べる種類をソフトが機械的に絞るだけ。⚠️ 絞ると1つも残らないなら絞らない（AI が何も選べない、を作らない）。
+ */
+export function templatesForAssets(templates: TemplateSummary[], assets: readonly Asset[]): TemplateSummary[] {
+  if (visualAssetCount(assets) > 0) return templates;
+  const noSlot = templates.filter((t) => (t.requiredSlots ?? []).length === 0);
+  return noSlot.length > 0 ? noSlot : templates;
 }
 
 /** yuko 素材の tags を重複なく集約する（12§4「利用可能なゆうこ表情タグ一覧」）。 */

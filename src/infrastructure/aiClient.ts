@@ -2,6 +2,8 @@
 // 鍵は Rust（keyring）内のみで扱い、ここでは**値を渡すだけ（保存）／受け取らない（has は有無のみ）**（§13§7・§2-6）。
 // 非Tauri（ブラウザ開発）では鍵 API は使えないため has は false を返す。
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { AI_ENGINE, getAiEngine } from './appSettings';
 
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -20,6 +22,34 @@ export function aiGenerate(
   return invoke<string>('ai_generate', { provider, model, system, user });
 }
 
+/**
+ * 走っている動画案づくりを止める（#1255 レビュー 🟡）。
+ *
+ * ⚠️ **画面の結果を捨てるだけでは足りない**＝混み合っているとき Rust は待って自分で送り直すので、
+ * 画面で止めても**同じ中身（会社情報・代表フレーム）が最大3回、外へ送られ続けていた**（§2-6）。
+ * ⚠️ **いま送っている最中の1回は取り消せない**（相手に届いたもの）＝止められるのは「次に送る」ぶん。
+ * ⚠️ **Tauri の外では何もしない**＝相手がいない。失敗しても投げない（止める操作そのものは止めない）。
+ */
+let aiCancelEpoch = 0;
+
+/**
+ * 「やめる」が押された回数（この画面の中だけ）。⚠️ Rust の止める合図は**そのとき走っている1回**にしか効かないので、
+ * 1回の動画案づくりで AI を何度も呼ぶ側（同梱の AI の言い直し・ADR-0052）は、呼ぶ前にこれが変わっていないかを見る。
+ */
+export function currentAiCancelEpoch(): number {
+  return aiCancelEpoch;
+}
+
+export async function cancelAiGenerate(): Promise<void> {
+  aiCancelEpoch++;
+  if (!isTauri()) return;
+  try {
+    await invoke('cancel_ai_generate');
+  } catch {
+    // 止める合図が届かなくても、画面側は結果を捨てる（下の世代）ので、画面は壊れない。
+  }
+}
+
 /** APIキーを OS 資格情報ストアへ保存する。非Tauri（ブラウザ開発）では何もしない。 */
 export function saveApiKey(provider: string, apiKey: string): Promise<void> {
   if (!isTauri()) return Promise.resolve();
@@ -33,17 +63,107 @@ export function hasApiKey(provider: string): Promise<boolean> {
 }
 
 /**
- * この端末の構成でAI生成が「外部送信」になるか（実 Gemini＝端末外へ送信あり／Mock＝送信なし）。
+ * この端末の構成でAI生成が「外部送信」になるか（実 Gemini＝端末外へ送信あり／このパソコンの中・Mock＝送信なし）。
  * §2-6（外部送信は事前確認必須）のガードと、プロバイダ選択（store の generateVideoPlan）が共有する単一の判定。
- * Tauri かつ鍵ありのときだけ true。非Tauri・鍵未設定は Mock 経路＝送信なし。
+ * **Tauri で、Gemini を選び（ADR-0051 決定15）、鍵があるときだけ** true。既定（このパソコンの中で作る）は送らない。
  */
 export function willSendExternally(provider: string = GEMINI_PROVIDER): Promise<boolean> {
   if (!isTauri()) return Promise.resolve(false);
+  if (getAiEngine() !== AI_ENGINE.gemini) return Promise.resolve(false);
   return hasApiKey(provider);
+}
+
+/**
+ * このパソコンの中で動画案を作る（ADR-0051）。`schema` は正典の `ai-video-plan.schema.json`（出力の形を縛る）。
+ * 応答は JSON の文字列＝検証は呼ぶ側（`parseAndValidateVideoPlan`）が行う（§2-2）。失敗は画面に出す文（Rust の `messages.rs`）。
+ */
+export function localAiGenerate(system: string, user: string, schema: string): Promise<string> {
+  return invoke<string>('local_ai_generate', { system, user, schema });
+}
+
+/**
+ * このパソコンの中で写真を1枚読む（ADR-0052 決定4）。場所はプロジェクトの中の相対パス（Rust がプロジェクトの外へ出る道を断る）。
+ * ⚠️ 動画案づくりの「やめる」の世代には乗らない（取り込みの裏で読んでも、同時に作っている動画案を止めない）。
+ */
+export function localAiDescribeImage(
+  system: string, user: string, schema: string, projectId: string, relPath: string,
+): Promise<string> {
+  return invoke<string>('local_ai_describe_image', { system, user, schema, projectId, relPath });
+}
+
+/**
+ * このパソコンの中で動画案を作る部品を先に起動しておく（ADR-0052 決定6・#1293）。待たない・失敗しても投げない
+ * （押したときに同じ起動をもう一度試し、そこで次の行動を出す）。Tauri の外では何もしない。
+ */
+export async function prepareLocalAi(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('local_ai_prepare');
+  } catch (e) {
+    console.warn('[ai] 先の準備に失敗しました（作るときにもう一度試します）:', e);
+  }
+}
+
+/** このパソコンの中で動画案を作っている間の進み具合（書き始めた場面の数）。 */
+export interface LocalAiProgress {
+  scenes: number;
+}
+
+/**
+ * このパソコンの中で動画案を作っている間の知らせを受ける（ADR-0052 決定6・#1293）。戻り値は外す関数。
+ * Tauri の外では何も来ない（外す関数だけ返す）。
+ */
+export async function onLocalAiProgress(handler: (e: LocalAiProgress) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<LocalAiProgress>('local-ai-progress', (e) => handler(e.payload));
+}
+
+/**
+ * このパソコンの中の AI に、編集の途中の小さな手伝いを頼む（ADR-0053）。応答の本文（JSON の文字列）を返す。
+ * 動画案づくりの「やめる」の世代には乗らない。
+ */
+export function localAiAssist(system: string, user: string, schema: string): Promise<string> {
+  return invoke<string>('local_ai_assist', { system, user, schema });
+}
+
+/** このパソコンの中で作る部品が同梱されているか。Tauri の外・問い合わせの失敗は false。 */
+export async function localAiAvailable(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    return await invoke<boolean>('local_ai_available');
+  } catch {
+    return false;
+  }
 }
 
 /** 保存済みAPIキーを削除する。非Tauri（ブラウザ開発）では何もしない。 */
 export function deleteApiKey(provider: string): Promise<void> {
   if (!isTauri()) return Promise.resolve();
   return invoke('delete_api_key', { provider });
+}
+
+/** 混み合っていて待ち直していることの知らせ（Rust が出す）。 */
+export interface AiBusyWait {
+  /** 何回目の待ち直しか（1 から）。 */
+  attempt: number;
+  /** 待ち直す上限。 */
+  total: number;
+  /** 今回待つ長さ（ミリ秒）。 */
+  wait_ms: number;
+}
+
+/**
+ * 混み合っていて待ち直すことを受け取る（#1244）。
+ *
+ * ⚠️ **黙って待たない**＝相手が混んでいると、待つだけで合計 33 秒（3回）。⚠️ **1回の要求にも最大 60 秒かかりうる**ので、
+ *  最悪では数分になる（#1255 レビュー ℹ️＝以前「最長 30 秒ほど」と書いていたのは待ちだけの数で、言い分が実際より強かった）。何も出さないと**固まったように見える**
+ *（この画面はもともと「わからない区間は流れるバー」で見せているが、**待ちの理由までは伝わらない**）。
+ */
+export async function onAiBusyWait(handler: (e: AiBusyWait) => void): Promise<() => void> {
+  // ⚠️ **Tauri の外では何もしない**＝知らせを出すのは Rust なので、ブラウザ開発や検査では相手がいない。
+  //   そのまま `listen` を呼ぶと**投げっぱなしの失敗**になり、**無関係な検査まで巻き込む**
+  //  （実際、この関数を足した回に `GeneratingScreen` を描く検査5本が道連れで赤くなった）。
+  //   `troubleLogFs` と同じ形にして、呼ぶ側は「外しに行く手」だけ受け取れるようにする。
+  if (!isTauri()) return () => {};
+  return listen<AiBusyWait>('ai-busy-wait', (e) => handler(e.payload));
 }

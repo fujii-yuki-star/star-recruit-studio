@@ -70,3 +70,13 @@
 - happy-dom への切替（スイート大型化で速度が問題化した場合のみ）。
 - 後続の UI（#175 見た目パーツ・#179 詳細編集モード等）への同方式の横展開。
 - Tauri/WebView 実機での E2E は本 ADR の対象外（ここではコンポーネント単体の対話に限定）。
+
+---
+
+## `CLAUDE.md §11` から移した要約・追補（2026-09-08）
+
+> ⚠️ **意味は変えずにそのまま移したもの**。以前は `CLAUDE.md §11` に各 ADR の要約が丸ごと置かれており、
+> **毎セッション全文が読まれる**ファイルの 83%（42,288字）を占め、ADR 本体との**二重管理**にもなっていた。
+> ⚠️ **本文と重なる記述が残っている**＝消すときは**本文と突き合わせてから**（この段は実装の履歴と追補を含む）。
+
+コンポーネント/対話テスト基盤: [`adr/0014`](0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。

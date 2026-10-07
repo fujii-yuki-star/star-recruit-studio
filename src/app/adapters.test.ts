@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
 import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
-import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
-import { subtitleOverflowMessage } from "./uiLabels";
+import { buildPrecheckItems, exportBlockingItems, exportNoteItems, sceneToDraftRow } from "./adapters";
+import { FIX_NARRATION_ACTION_LABEL, subtitleOverflowMessage } from "./uiLabels";
+import { ASSIST_KIND } from "../domain/ai/assist";
 
 const freeTemplate: Template = {
   schemaVersion: "1.0",
@@ -643,5 +644,500 @@ describe("buildPrecheckItems（はみ出しの説明を原因で出し分ける�
     // 場面編集は subtitleOverflowMessage、precheck は subtitleOverflowPrecheckDetail だが「次の行動」句は共有。
     expect(detail([mk("scene_001", 1, false)])).toContain(subtitleOverflowMessage(false).split("。")[1]);
     expect(detail([mk("scene_001", 1, true)])).toContain(subtitleOverflowMessage(true).split("。")[1]);
+  });
+});
+
+// 切り替えと表示時間（#727）。**短くなったことを黙らせない**（ADR-0026④・§2-5）。
+describe("buildPrecheckItems：切り替えが表示時間に収まらない（#727）", () => {
+  const sceneOf = (durationSec: number, fadeSec?: number): Scene => ({
+    ...freeScene(undefined),
+    sceneId: `scene_${durationSec}_${fadeSec ?? 0}`,
+    durationSec,
+    ...(fadeSec != null ? { transition: { in: "fade", durationSec: fadeSec } } : {}),
+  } as Scene);
+  const ids = (items: ReturnType<typeof buildPrecheckItems>) => items.map((i) => i.id);
+
+  // ⚠️ #740 レビュー＝②（次の場面の切り替えに覆われる）の**文言と飛び先**を見るテストが無かった。
+  // その場面自身は切り替えを持たないので、「切り替えを短く」だけ言うと飛んだ先が行き止まりになる。
+  it("次の場面の切り替えに覆われる形は、触る先（次の場面）まで示す（#740）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(4), sceneOf(6, 5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallowByNext");
+    const item = items.find((i) => i.id === "transitionSwallowByNext")!;
+    expect(item.detail).toContain("単独では映りません"); // 「動画に出ません」とは言わない（重なって見えている）
+    expect(item.detail).toContain("表示時間を長くする");
+    expect(item.detail).toContain("場面3の切り替えを短く"); // 触るのは次の場面
+    expect(item.sceneId).toBe("scene_4_0"); // 飛び先は覆われている場面（表示時間をすぐ伸ばせる）
+    // ①の項目（自分の切り替えが覆う）とは別物＝同じ場面に2つ出さない。
+    expect(ids(items)).not.toContain("transitionSwallow");
+  });
+
+  it("自分の切り替えが覆う形は従来どおり（原因が違えば案内も違う）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.3, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallow");
+    expect(ids(items)).not.toContain("transitionSwallowByNext");
+  });
+
+  it("両側の合計だけが尺を超える帯を知らせる（飲み込まれる警告では拾えない範囲）", () => {
+    // 0.8秒の場面に両側 0.5 秒＝合計 1.0 秒。切り替え単体は尺未満なので `transitionSwallow` は出ない。
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.8, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionShortened");
+    expect(ids(items)).not.toContain("transitionSwallow");
+    const item = items.find((i) => i.id === "transitionShortened")!;
+    expect(item.detail).toContain("短くしています");
+    expect(item.detail).toContain("表示時間を長くする"); // 次の行動（§2-5）
+  });
+
+  it("収まっているときは出さない（余計な警告を出さない）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(5, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).not.toContain("transitionShortened");
+  });
+
+  it("飲み込まれるだけのときは、こちらの警告を出さない（同じ話を2行並べない）", () => {
+    // 0.3秒の場面に 0.5 秒＝切り替えが尺以上＝`transitionSwallow` の担当。
+    // 予算（両側で分け合う上限）は握っていないので、こちらは黙る。
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.3, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallow");
+    expect(ids(items)).not.toContain("transitionShortened");
+  });
+
+  it("該当の場面へ飛べる（理由を出して終わりにしない）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.8, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    const item = items.find((i) => i.id === "transitionShortened")!;
+    // `warning` だと操作列が「—」になり `sceneId` が読まれない＝飛べない（隣の項目と同じ理由で `action`）。
+    expect(item.severity).toBe("action");
+    expect(item.sceneId).toBe("scene_0.8_0.5"); // 上限を握っている場面
+  });
+});
+
+describe("buildPrecheckItems 使っていない素材（#348 レビュー）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate, templateId: "photo_v1", category: "photo_intro",
+    layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  } as unknown as Template;
+  const usingScene = (refs: Record<string, string>): Scene =>
+    ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "photo_v1", assetRefs: refs });
+  const unusedDetail = (items: ReturnType<typeof buildPrecheckItems>) =>
+    items.find((i) => i.id === "unused")?.detail ?? "";
+
+  /**
+   * ⚠️ **鳴っている BGM を「使われていない」に数えない**（レビュー 🟡）＝BGM は場面ではなく
+   * `bgmSettings` から使われる。数えないと文言「動画には入らないので」が**嘘**になる。
+   */
+  it("動画全体のBGMは使用中に数える", () => {
+    const list: Asset[] = [
+      { assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "a.png" },
+      { assetId: "bgm_001", assetType: "bgm", displayName: "BGM", filePath: "b.mp3" },
+    ];
+    const scenes = [usingScene({ main: "asset_001" })];
+    expect(unusedDetail(buildPrecheckItems(scenes, list, [photoTemplate], undefined, undefined, "bgm_001")))
+      .toContain("すべての素材が使われています");
+    // 外したBGMは「使っていない」に出る（数えなくなったのではなく、指されているかで見る）
+    expect(unusedDetail(buildPrecheckItems(scenes, list, [photoTemplate], undefined, undefined, null)))
+      .toContain("1つあります");
+  });
+
+  it("場面ごとのBGMも使用中に数える", () => {
+    const list: Asset[] = [{ assetId: "bgm_002", assetType: "bgm", displayName: "BGM", filePath: "b.mp3" }];
+    const s = { ...usingScene({}), bgmSettings: { assetId: "bgm_002" } } as unknown as Scene;
+    expect(unusedDetail(buildPrecheckItems([s], list, [photoTemplate], undefined, undefined, null)))
+      .toContain("すべての素材が使われています");
+  });
+});
+
+describe("buildPrecheckItems 見つからない素材（#347）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate,
+    templateId: "photo_v1",
+    category: "photo_intro",
+    layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  };
+  const usingScene = (refs: Record<string, string>): Scene => ({
+    ...freeScene(undefined),
+    sceneType: "photo_intro",
+    templateId: "photo_v1",
+    assetRefs: refs,
+  });
+  const two: Asset[] = [
+    { assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" },
+    { assetId: "asset_002", assetType: "image", displayName: "写真B", filePath: "b.png" },
+  ];
+  const find = (items: ReturnType<typeof buildPrecheckItems>) => items.find((i) => i.id === "missingAsset");
+
+  /**
+   * ⚠️ **調べていないときは項目を出さない**（`undefined`）＝ブラウザやテストなど**調べられない場**で
+   * 「問題なし」と嘘をつかない（§2-5 の裏＝表示が事実と違う）。
+   */
+  it("調べていなければ項目を出さない", () => {
+    expect(find(buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate]))).toBeUndefined();
+  });
+
+  it("そろっていれば項目を出さない（問題なしの行で埋めない）", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, []);
+    expect(find(items)).toBeUndefined();
+  });
+
+  // ⚠️ **黙って抜けた動画を成功として出さない**（ADR-0026④）＝要対応にする。
+  it("使っている素材が見つからなければ要対応にし、名前を出す", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, ["asset_001"]);
+    const item = find(items);
+    expect(item?.severity).toBe("action");
+    expect(item?.detail).toContain("写真A");
+    expect(item?.detail).toContain("ファイルを選び直す"); // §2-5＝次の行動
+  });
+
+  /**
+   * ⚠️ **使っていない素材が消えていても要対応にしない**＝動画には入らないので実害が無い。
+   * 「使っていない素材」の警告（そのままでよい）と重さが違うので、混ぜない。
+   */
+  it("使っていない素材が見つからなくても要対応にしない", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, ["asset_002"]);
+    expect(find(items)).toBeUndefined();
+  });
+
+  it("複数のときは先頭3つの名前と「ほかNつ」を出す", () => {
+    const many: Asset[] = ["A", "B", "C", "D"].map((n, i) => ({
+      assetId: `asset_00${i + 1}`, assetType: "image", displayName: `写真${n}`, filePath: `${n}.png`,
+    }));
+    const scene = usingScene({ main: "asset_001", b: "asset_002", c: "asset_003", d: "asset_004" });
+    const tmpl: Template = {
+      ...photoTemplate,
+      layers: ["main", "b", "c", "d"].map((id, i) => ({ id, type: "slot", x: 0, y: 0, w: 100, h: 100, zIndex: i })),
+    } as Template;
+    const items = buildPrecheckItems([scene], many, [tmpl], undefined, many.map((a) => a.assetId));
+    expect(find(items)?.detail).toContain("写真A、写真B、写真C");
+    expect(find(items)?.detail).toContain("ほか1つ");
+  });
+});
+
+describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate, templateId: "photo_v1", category: "photo_intro",
+    layers: [
+      { id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 400, h: 100, fontSize: 40, maxLines: 2, zIndex: 1 },
+    ],
+  } as unknown as Template;
+  const sc = (over: Partial<Scene> = {}): Scene =>
+    ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "photo_v1", ...over });
+  const find = (items: ReturnType<typeof buildPrecheckItems>, id: string) => items.find((i) => i.id === id);
+
+  /**
+   * ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
+   * 「そう書いたのか」「切れたのか」が分からない。
+   */
+  it("枠に入りきらない文字を要対応にする", () => {
+    const ok = buildPrecheckItems([sc({ texts: { title: "短い題" } })], [], [photoTemplate]);
+    expect(find(ok, "truncatedText")).toBeUndefined();
+    const ng = buildPrecheckItems([sc({ texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(ng, "truncatedText")?.severity).toBe("action");
+    expect(find(ng, "truncatedText")?.detail).toContain("短くする"); // §2-5＝次の行動
+  });
+
+  // ⚠️ **見た目が解決できない場面は見ない**＝そちらは「場面の見た目」の項目が受け持つ（二度言わない）。
+  it("見た目が分からない場面は見ない", () => {
+    const items = buildPrecheckItems([sc({ templateId: "unknown", texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(items, "truncatedText")).toBeUndefined();
+  });
+
+  // ⚠️ **小さいこと自体は問題ではない**＝描かれる枠と比べる（ロゴのように小さく置く素材もある）。
+  it("引き伸ばしでぼやける素材を注意にする（そのままでも作れる）", () => {
+    const small: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "小さい写真", filePath: "a.png", metadata: { width: 320, height: 180 } }];
+    const items = buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], small, [photoTemplate]);
+    expect(find(items, "blurryAsset")?.severity).toBe("warning"); // 止めない
+  });
+
+  it("大きい素材なら出さない", () => {
+    const big: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "a.png", metadata: { width: 3840, height: 2160 } }];
+    expect(find(buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], big, [photoTemplate]), "blurryAsset")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **「セリフの長さ」とは別の項目**＝あちらは文字数そのもの、こちらは**尺に対して**多いか。
+   * 両方出ることもあるので、混ぜずに別項目にする。
+   */
+  it("尺に対してセリフが多い場面を注意にする", () => {
+    const scene = sc({ durationSec: 3, narration: { text: "あ".repeat(60), status: "generated" } });
+    const items = buildPrecheckItems([scene], [], [photoTemplate]);
+    expect(find(items, "tooFast")?.severity).toBe("warning");
+    expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
+    // セリフ欄へ寄り「表示時間に収める」をすぐ出す（ADR-0053 決定2）。行き先は最初の該当場面。
+    expect(find(items, "tooFast")).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: scene.sceneId, assist: ASSIST_KIND.fitDuration });
+  });
+
+  it("セリフが長い場面は「セリフを直す」で最初の該当場面へ・「短く」をすぐ出す（ADR-0053 決定2）", () => {
+    const ok = sc({ sceneId: "scene_001", narration: { text: "短い。", status: "generated" } });
+    const long1 = sc({ sceneId: "scene_002", narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
+    const long2 = sc({ sceneId: "scene_003", narration: { text: "い".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } });
+    expect(find(buildPrecheckItems([ok, long1, long2], [], [photoTemplate]), "line")).toMatchObject({ severity: "warning", action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_002", assist: ASSIST_KIND.shorten });
+    // 掛け合いの場面は飛ばし、一人語りの該当場面へ（掛け合いにはセリフ欄の手伝いが無い）。
+    // ⚠️ 実物と同じ形＝掛け合いへ切り替えた時点の写しが `narration.text` に残っている（空の fixture だと字数の判定で先に落ちて、掛け合いの判定を素通りする）。
+    const dialogue = sc({ sceneId: "scene_004", narration: { text: "う".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "none" }, lines: [{ lineId: "line_001", text: "う".repeat(MAX_NARRATION_LEN_DEFAULT + 1) }] } as Partial<Scene>);
+    expect(find(buildPrecheckItems([ok, dialogue, long1], [], [photoTemplate]), "line")).toMatchObject({ sceneId: "scene_002", assist: ASSIST_KIND.shorten });
+    // 掛け合いしか無ければ寄るだけ（頼まない）。
+    const onlyDialogue = find(buildPrecheckItems([ok, dialogue], [], [photoTemplate]), "line");
+    expect(onlyDialogue).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_004" });
+    expect(onlyDialogue?.assist).toBeUndefined();
+    // 長くなければボタンは出さない。
+    expect(find(buildPrecheckItems([ok], [], [photoTemplate]), "line")?.action).toBeUndefined();
+  });
+
+  it("表示時間が短すぎて「表示時間に収める」で候補が作れない場面は、寄るだけ（頼まない）", () => {
+    // 1.5 秒＝読み切れる字数が 3 字＝頼めない（頼むと「いまの文のままで大丈夫」と逆のことを言う）。
+    const tiny = sc({ sceneId: "scene_001", durationSec: 1.5, narration: { text: "あ".repeat(30), status: "generated" } });
+    const item = find(buildPrecheckItems([tiny], [], [photoTemplate]), "tooFast");
+    expect(item).toMatchObject({ action: FIX_NARRATION_ACTION_LABEL, sceneId: "scene_001" });
+    expect(item?.assist).toBeUndefined();
+    // 頼める場面が後ろにあれば、そちらへ。
+    const ok = sc({ sceneId: "scene_002", durationSec: 3, narration: { text: "い".repeat(40), status: "generated" } });
+    expect(find(buildPrecheckItems([tiny, ok], [], [photoTemplate]), "tooFast")).toMatchObject({ sceneId: "scene_002", assist: ASSIST_KIND.fitDuration });
+  });
+
+  // #1318：早口の判定と「セリフを直す」は、その場面で解決した声の速さで見る（場面編集の AI 補助と同じ）。
+  it("声が速ければ早口と言わない／遅ければ言う（声の速さで判定する）", () => {
+    const voice = (speed: number) => ({ defaultVoiceId: "voicevox_zundamon", speed });
+    const s1 = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(56), status: "generated" } }); // 9.3 字/秒
+    const tooFast = (speed?: number) => find(buildPrecheckItems([s1], [], [photoTemplate], undefined, undefined, undefined, undefined, speed == null ? undefined : voice(speed)), "tooFast");
+    expect(tooFast()).toBeDefined();
+    expect(tooFast(1.5)).toBeUndefined();
+    const s2 = sc({ sceneId: "scene_002", durationSec: 6, narration: { text: "あ".repeat(40), status: "generated" } }); // 6.7 字/秒
+    expect(find(buildPrecheckItems([s2], [], [photoTemplate], undefined, undefined, undefined, undefined, voice(0.6)), "tooFast")).toBeDefined();
+  });
+
+  it("「セリフを直す」で頼むかどうかも声の速さで決める（場面編集と逆のことを言わない）", () => {
+    // 6 秒・60 字＝10 字/秒：速さ 1.1 なら早口（目安 9.9 字/秒）で、表示時間に収める候補も作れる（上限 41 字）。
+    const s1 = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(60), status: "generated" } }); // 10 字/秒
+    const item = find(buildPrecheckItems([s1], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 1.1 }), "tooFast");
+    expect(item).toMatchObject({ sceneId: "scene_001", assist: ASSIST_KIND.fitDuration });
+    // 場面の声が速ければ場面の速さで（場面の速さは動画全体より優先＝11.6）
+    const fastScene = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(60), status: "generated", speed: 1.5 } });
+    expect(find(buildPrecheckItems([fastScene], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 1 }), "tooFast")).toBeUndefined();
+    // 遅い声（0.6）：35 字/6 秒は早口（目安 5.4 字/秒）。速さ 1.0 なら「もう収まっている」と判断してしまう長さでも、
+    // 遅い声では収まらない＝候補を頼める（場面編集も同じ速さで見るので、着いた先で「大丈夫」と逆のことを言わない）。
+    const slow = sc({ sceneId: "scene_001", durationSec: 6, narration: { text: "あ".repeat(35), status: "generated" } });
+    expect(find(buildPrecheckItems([slow], [], [photoTemplate], undefined, undefined, undefined, undefined, { defaultVoiceId: "voicevox_zundamon", speed: 0.6 }), "tooFast"))
+      .toMatchObject({ sceneId: "scene_001", assist: ASSIST_KIND.fitDuration });
+  });
+
+  it("ふつうの長さなら出さない", () => {
+    const scene = sc({ durationSec: 8, narration: { text: "こんにちは、よろしくお願いします。", status: "generated" } });
+    expect(find(buildPrecheckItems([scene], [], [photoTemplate]), "tooFast")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **掛け合いの場面では「実際に描かれる行の字幕」を見る**（レビュー 🔴・2エージェントが実測で指摘）＝
+   * `layoutScene` を opts なしで1回呼ぶと、行ごとの字幕が**一度も出てこず**、代わりに
+   * **動画に出ない静的字幕**（`texts.subtitle`）が載る。つまり**見落としと誤検出が同時**に起きる。
+   */
+  it("掛け合いは行の字幕を見る（休眠の静的字幕は見ない）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // ⚠️ **30字**にするのが肝＝60字（`MAX_SUBTITLE_LEN_DEFAULT`）を超えると「字幕の長さ」が先に
+    //    出て、こちらは重複として消される（＝dedupe が効いていて検査にならない）。
+    //    枠は 600px・40px・1行＝15字ぶんなので、30字なら**切り詰めだけ**が起きる。
+    const dialogue = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "あ".repeat(30), subtitleEnabled: true }],
+      texts: { subtitle: "短い" },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dialogue], [], [subTemplate]), "truncatedText")).toBeDefined();
+
+    // 休眠の静的字幕だけが長い＝動画には出ない → 出さない
+    const dormant = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "短い", subtitleEnabled: true }],
+      texts: { subtitle: "あ".repeat(30) },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dormant], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **同じ原因で2行出さない**（レビュー 🟡・`transitionShortened` の前例と同じ）＝
+   * 横型の標準テンプレは字幕の枠が広く、「字幕の長さ」で既に出ている場面は切り詰めも必ず重なる
+   *（原因も直し方も同じ）。
+   */
+  it("「字幕の長さ」で既に知らせた場面は、切れている文字を出さない", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // 60字超（「字幕の長さ」が出る）かつ枠に入りきらない（切り詰めも起きる）
+    const scene = sc({ texts: { subtitle: "あ".repeat(120) } });
+    const items = buildPrecheckItems([scene], [], [subTemplate]);
+    expect(find(items, "subtitle")?.severity).toBe("action");
+    expect(find(items, "truncatedText")).toBeUndefined(); // 2行にしない
+  });
+
+  /**
+   * ⚠️ **消すのは「字幕そのもの」だけ**（PR #877 再レビュー 🟡）＝場面ごと丸ごと飛ばしていたので、
+   * 同じ場面にある**別の文字**（見出し・会社名など）の切り詰めまで握りつぶしていた。
+   * そちらは字幕の長さとは**原因も直し方も別**なので、黙って消してはいけない（§2-5）。
+   */
+  it("「字幕の長さ」で知らせた場面でも、別の文字の切れは出す", () => {
+    const mixed: Template = {
+      ...photoTemplate,
+      layers: [
+        { id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 },
+        // 見出しの枠は 200px・40px・1行＝5字ぶん。20字入れると必ず切れる（字幕とは無関係）。
+        { id: "ttl", type: "text", textKey: "title", x: 0, y: 100, w: 200, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [mixed]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 字幕の長さは出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 見出しの切れも出る（握りつぶさない）
+  });
+
+  /**
+   * ⚠️ **自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）＝長い方の字幕で場面が
+   * 「伝えた」になっても、**別のボックスの切り詰め**（原因も直し方も別）まで消してはいけない（§2-5）。
+   * 除外の単位は「字幕アイテム全部」ではなく「**長さを超えている文言**」まで下ろす。
+   */
+  it("字幕が2つあり、長いのは片方だけなら、もう片方の切れは出す", () => {
+    const twoBoxes: Template = {
+      ...photoTemplate,
+      layers: [
+        // 長い方（60字超＝「字幕の長さ」が出る）。枠は広いので切り詰まらない。
+        { id: "subA", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 1800, h: 200, fontSize: 20, maxLines: 6, zIndex: 0 },
+        // 短いが枠が狭い方（切り詰まる）。長さは超えていないので除外の対象にしない。
+        { id: "subB", type: "subtitle", textKey: "caption", x: 0, y: 100, w: 120, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), caption: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [twoBoxes]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 長い方は「字幕の長さ」で出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 短い方の切れは握りつぶさない
+  });
+
+  it("「字幕の長さ」で知らせた場面で、切れているのが字幕だけなら出さない（重複を消す）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), title: "短い" } });
+    expect(find(buildPrecheckItems([scene], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
+  // ⚠️ **問題が無ければ項目を出さない**＝「問題なし」の行で埋めない（読む気を削がない）。
+  it("何も無ければ3つとも出さない", () => {
+    const items = buildPrecheckItems([sc({ texts: { title: "題" }, durationSec: 8 })], [], [photoTemplate]);
+    for (const id of ["truncatedText", "blurryAsset", "tooFast"]) expect(find(items, id)).toBeUndefined();
+  });
+});
+
+describe("buildPrecheckItems 端に寄った文字（#265 の任意項目）", () => {
+  const at = (x: number, y: number): Template => ({
+    ...freeTemplate, templateId: "edge_v1", category: "photo_intro",
+    layers: [{ id: "t", type: "text", textKey: "title", x, y, w: 400, h: 100, fontSize: 40, maxLines: 1, zIndex: 0 }],
+  } as unknown as Template);
+  const sc = (): Scene => ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "edge_v1", texts: { title: "題" } });
+  const find = (t: Template) => buildPrecheckItems([sc()], [], [t]).find((i) => i.id === "nearEdge");
+
+  /**
+   * ⚠️ **画面の「外」へ出るもの（`subtitleOverflow`）とは別**＝画面の中だが端に近い。
+   * テレビ・SNS で**切られる媒体でだけ**問題になるので**注意止まり**（書き出しは止めない）。
+   */
+  it("端に寄っていれば注意にする（止めない）", () => {
+    expect(find(at(10, 10))?.severity).toBe("warning");
+  });
+
+  it("中に収まっていれば出さない", () => {
+    expect(find(at(500, 400))).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **文字だけを見る**＝写真・背景は**端まで敷くのが普通**なので、見ると**全場面に注意が付く**
+   *（読まれない注意ができる）。切れて困るのは文字。
+   */
+  it("画面いっぱいの背景・写真には注意を出さない", () => {
+    const withBg: Template = {
+      ...freeTemplate, templateId: "edge_v1", category: "photo_intro",
+      layers: [
+        { id: "bg", type: "background", x: 0, y: 0, w: 1920, h: 1080, fillColor: "#112233", zIndex: 0 },
+        { id: "t", type: "text", textKey: "title", x: 500, y: 400, w: 400, h: 100, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    expect(find(withBg)).toBeUndefined(); // 背景は端まで敷いているが注意にしない
+  });
+
+  // ⚠️ **判定は編集画面の「端の目安」と同じ数字**＝線の内側なのに注意が出る／その逆、を作らない。
+  it("目安の線の内側なら出さない（同じ数字で見ている）", () => {
+    // 横型 1920×1080 の目安は四辺5%＝x:96..1824 / y:54..1026。
+    expect(find(at(96, 54))).toBeUndefined();   // ぴったり内側
+    expect(find(at(95, 54))).toBeDefined();     // 1px 外
+  });
+});
+
+// 見つからない素材は**押す前に止める**（#1068・実機で確かめた）。
+//
+// ⚠️ **止めないと**＝写真は**黙って灰色の枠**になり（見えていたものと違う動画が成功として出る）、
+// 動画は**途中で失敗する**（保存先を選ばせた後に落とす）。
+// ⚠️ **タイムライン形式は既に押す前に断っている**（`TIMELINE_EXPORT_VIDEO_FILE_MISSING`）＝揃える（ADR-0026②）。
+describe("見つからない素材は押す前に止める（#1068）", () => {
+  // ⚠️ **差し込み口のあるテンプレを使う**＝画面は「テンプレの差し込み口に入っているか」で
+  // 使用中を数える（`sceneActiveAssetIds`）ので、口の無いテンプレだと**使っていない扱い**になる
+  //（最初この取り違えで検査が落ちた＝**実装ではなく検査の作り方**が違っていた）。
+  const slotTemplate: Template = {
+    ...freeTemplate,
+    templateId: "photo_slot_v1",
+    category: "photo_intro",
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "photo", type: "slot", slotType: "photo", x: 0, y: 0, w: 1920, h: 1080, zIndex: 1 },
+    ],
+  } as Template;
+  const usedScene = (): Scene => ({
+    ...freeScene(undefined),
+    sceneType: "photo_intro",
+    templateId: "photo_slot_v1",
+    assetRefs: { photo: "asset_001" },
+  }) as Scene;
+
+  it("使っている素材が見つからなければ、書き出しを止める", () => {
+    const blocking = exportBlockingItems([usedScene()], assets, [slotTemplate], undefined, undefined, ["asset_001"]);
+    expect(blocking.map((i) => i.id)).toContain("missingAsset");
+  });
+
+  // ⚠️ **材料を通さないと、項目そのものが作られない**＝直行導線ですり抜ける
+  //（フォントで同じ穴を踏んだ＝PR #886 レビュー 🔴）。**通したときに止まる**ことを対で押さえる。
+  it("⚠️ 調べていない（材料を渡していない）ときは止めない", () => {
+    const blocking = exportBlockingItems([usedScene()], assets, [slotTemplate]);
+    expect(blocking.map((i) => i.id)).not.toContain("missingAsset");
+  });
+
+  // ⚠️ **使っていない素材では止めない**＝消えていても動画は変わらないので、行き止まりを作らない。
+  it("使っていない素材が見つからなくても、止めない", () => {
+    const blocking = exportBlockingItems([freeScene(undefined)], assets, [freeTemplate], undefined, undefined, ["asset_001"]);
+    expect(blocking.map((i) => i.id)).not.toContain("missingAsset");
+  });
+
+  // ⚠️ **動画全体の BGM も「使っている」に数える**（#348 レビュー由来の絞り方を、止める側でも保つ）。
+  it("動画全体の BGM が見つからなくても止める", () => {
+    const blocking = exportBlockingItems([freeScene(undefined)], assets, [freeTemplate], undefined, undefined, ["asset_001"], "asset_001");
+    expect(blocking.map((i) => i.id)).toContain("missingAsset");
+  });
+});
+
+// 公開前チェックの「直す」から、ひっかかった場面を順に直す帯（UI/UX 監査 2026-10-02）。
+// ⚠️ **項目ごとに並びを渡し忘れると、その項目だけ帯が出ない**（PR #1341 レビュー＝5項目で渡し忘れていた）。
+// 項目ごとに場面を作って確かめると、次に足した項目が漏れても気づけないので、**書いてある所をまるごと見る**。
+describe("公開前チェックの項目は、場面を指すなら並びも渡す", () => {
+  it("adapters.ts で sceneId を渡す行は、同じ行で sceneIds も渡す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./adapters.ts", import.meta.url), "utf8");
+    const lines = src.split(/\r?\n/).filter((l) => /\bsceneId: /.test(l) && !/^\s*(\/\/|\*)/.test(l));
+    expect(lines.length, "拾えた行の数が変わった（項目を足したら、並びを渡しているか見てから数を更新する）").toBe(14); // 見えていないのに緑、を防ぐ
+    expect(lines.filter((l) => !/\bsceneIds: /.test(l))).toEqual([]);
+  });
+});
+
+describe("exportNoteItems（起動の引数の書き出しで返す注意・#1366）", () => {
+  it("問題なし（ok）と書き出しを止めるものを除き、それ以外（要対応・注意）を残す", () => {
+    const items = [
+      { id: "a", label: "A", detail: "a", severity: "ok" },
+      { id: "b", label: "B", detail: "b", severity: "warning" },
+      { id: "c", label: "C", detail: "c", severity: "action" },
+      { id: "d", label: "D", detail: "d", severity: "action", blocksExport: true },
+    ] as Parameters<typeof exportNoteItems>[0];
+    expect(exportNoteItems(items).map((i) => i.id)).toEqual(["b", "c"]);
   });
 });

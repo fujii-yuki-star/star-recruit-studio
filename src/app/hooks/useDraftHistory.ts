@@ -19,6 +19,8 @@ interface DraftHistoryState<T> {
   groupDepth: number;
   /** グループ中でまだ「編集前」を記録していないか（遅延記録）。 */
   groupPending: boolean;
+  /** まとめの世代（畳むたびに+1・#817 レビュー）。 */
+  groupGen: number;
 }
 
 export interface DraftHistory<T> {
@@ -40,7 +42,16 @@ export interface DraftHistory<T> {
   endGroup: () => void;
   /** テキスト欄に spread：フォーカス中の連続入力を1履歴に。 */
   textGroup: { onFocus: () => void; onBlur: () => void };
+  /**
+   * まとめの**世代**（#817 レビュー 🔴）。取り消し・やり直しで畳むたびに1つ上がる。
+   * 持ち主（矢印のまとめ）は開いた時点の値を控え、**変わっていたら自分のまとめはもう無い**と判断する
+   *（見ないと、畳まれた後も開いているつもりで開き直さず**1押下＝1履歴**になり上限を流し切る）。
+   */
+  groupGen: number;
 }
+
+/** 取り消し・やり直しの後は、開いていたまとめを閉じた状態にする（#817-1）。 */
+const CLOSED_GROUP = { groupDepth: 0, groupPending: false } as const;
 
 /**
  * 画面ローカル下書きの取り消し/やり直し。
@@ -53,6 +64,7 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     history: emptyHistory<T>(),
     groupDepth: 0,
     groupPending: false,
+    groupGen: 0,
   }));
 
   const set = useCallback((next: T | ((cur: T) => T)) => {
@@ -69,17 +81,22 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     });
   }, []);
 
+  // ⚠️ **戻すときは開いているまとめを畳む**（#817-1）＝畳まないと、戻した**後**の編集が
+  // 「まとめの続き」とみなされて**履歴に積まれず**、`future` も捨てられない。実測＝矢印で動かす→
+  // 待ち時間の内に取り消す→もう一度動かす、で**その移動が取り消せず**、やり直しで**黙って消える**。
+  // 取り消しの前後で「まとめの続き」は成り立たない（戻した値はまとめを開いた時点のものではない）。
+  // タイムライン形式の `restore` と同じ扱い（同じ概念を同じ挙動に＝ADR-0026②）。
   const undo = useCallback(() => {
     setState((s) => {
       const r = undoSnapshot(s.history, s.value);
-      return r ? { ...s, value: r.restored, history: r.history } : s; // 戻せなければ何もしない
+      return r ? { ...s, ...CLOSED_GROUP, groupGen: s.groupGen + 1, value: r.restored, history: r.history } : s; // 戻せなければ何もしない
     });
   }, []);
 
   const redo = useCallback(() => {
     setState((s) => {
       const r = redoSnapshot(s.history, s.value);
-      return r ? { ...s, value: r.restored, history: r.history } : s; // やり直せなければ何もしない
+      return r ? { ...s, ...CLOSED_GROUP, groupGen: s.groupGen + 1, value: r.restored, history: r.history } : s; // やり直せなければ何もしない
     });
   }, []);
 
@@ -92,6 +109,24 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     setState((s) => ({ ...s, groupDepth: Math.max(0, s.groupDepth - 1) }));
   }, []);
 
+  /**
+   * ⚠️ **`blur` が来ない道は塞いでいない**（#847 で据え置いた・理由を残す）＝フォーカス中に欄が消えると
+   * `blur` は来ないので、まとめが開きっぱなしになる（実機の道＝ADR-0033 の欄の配置の組み替え）。
+   *
+   * `useHistoryGroup` 側は**後始末つき ref を欄へ配って寿命に縛った**が、この `textGroup` を使う
+   * `LooksEditScreen` は欄を**コンテナで委譲**して束ねており（`PanelLayoutView` の外側に1か所）、
+   * コンテナは組み替えでは unmount しない＝**同じ形では塞げない**。
+   *
+   * **据え置いた理由**＝ここの履歴は**この画面の中だけ**（`useState`）で、自動保存も無い＝
+   * `useHistoryGroup` 側のような**編集が保存されなくなる**実害には至らず、画面を離れれば消える。
+   * ⚠️ **ただし画面の中では軽くない**（差分再監査 ℹ️で訂正）＝固着すると `set` が
+   * `groupDepth>0 && !groupPending` で**以後1件も記録しない**ので、`Ctrl+Z` 1回が**組み替え以降の編集を
+   * まるごと**巻き戻す（`canUndo` は真のままで手がかりが無い）。やり直しで戻せるのは次の編集までで、
+   * その後は捨てられる。**「取り消しが1段大きくまとまる」ではない。**
+   * ⚠️ ただしこの画面は**取り消しが唯一の戻り道**なので、軽いのは実害の質であって、直さない約束ではない。
+   * 塞ぐなら (a) 同じ後始末つき `ref` を欄へ配る／(b) コンテナが開けた要素を控え、レンダーごとの効果で
+   * `!el.isConnected` なら畳む（組み替えの後は必ず1回レンダーが走る）。
+   */
   const textGroup = useMemo(() => ({ onFocus: beginGroup, onBlur: endGroup }), [beginGroup, endGroup]);
 
   return {
@@ -104,5 +139,6 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     beginGroup,
     endGroup,
     textGroup,
+    groupGen: state.groupGen,
   };
 }

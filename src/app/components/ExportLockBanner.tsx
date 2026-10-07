@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ArrowLeftIcon } from "./icons";
-import { exportOverallPercent, exportProgressLabel } from "../../domain/export/exportProgress";
+import { exportOverallPercent, exportProgressLabel, hasExportPercent } from "../../domain/export/exportProgress";
 
 /**
  * 書き出し中は文書（場面・音声・BGM 等）を編集できないことを示す共通バナー（#570 P1・15_ERROR_STATE_MODEL §4・ADR-0026④）。
@@ -19,6 +19,7 @@ import { exportOverallPercent, exportProgressLabel } from "../../domain/export/e
 export function ExportLockBanner({ onNavigate, detail }: { onNavigate: (screen: ScreenId) => void; detail?: string }) {
   // 表示する値だけを購読する（exportRun 全体を購読すると、1フレームごとの進捗更新でこのバナーを持つ画面が丸ごと再描画される）。
   const busy = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  const hasPercent = useProjectStore((s) => hasExportPercent(s.exportRun.phase));
   const percent = useProjectStore((s) => (isExportBusy(s.exportRun.phase) ? exportOverallPercent(s.exportRun) : 0));
   // 1文に括弧で差し込むので compact（句点で終わる完結文にしない＝文の中に文が入れ子にならない）。
   const label = useProjectStore((s) => (isExportBusy(s.exportRun.phase) ? exportProgressLabel(s.exportRun, { compact: true }) : ""));
@@ -26,7 +27,12 @@ export function ExportLockBanner({ onNavigate, detail }: { onNavigate: (screen: 
   return (
     <div className="notice notice-info mb row-between" role="status">
       <span>
-        動画を書き出し中です（{percent}%{label ? `・${label}` : ""}）。
+        {/* ⚠️ **言えない段に数を出さない**（#993 ①・PR #1025 レビュー 🟡）＝始めた段
+            （保存先を選んでもらう／場面ぜんぶの下ごしらえ）は**進み具合を持っていない**ので、
+            0% と出すと「止まっている」に見える。画面の進捗欄と**同じ判定**から出し分ける。 */}
+        {hasPercent
+          ? `動画を書き出し中です（${percent}%${label ? `・${label}` : ""}）。`
+          : "動画の書き出しを始めています。"}
         {/* 「〜できません」を必ず言う：`ExportLock` を使わない画面（ウィザード等）は入力欄が生きたままで、
             この文だけが「入れても保存されない」を伝える唯一の手段になる（§2-5・ADR-0026④）。
             兄弟の案内（EXPORT_BUSY_ASSET_MSG 等・standardLookButtonReason）とも同じ型にそろえる。 */}

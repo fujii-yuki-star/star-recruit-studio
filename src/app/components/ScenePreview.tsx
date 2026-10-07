@@ -4,15 +4,23 @@ import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import type { Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME } from "../../domain/constants";
+import { useMediaVolume } from "../hooks/useMediaVolume";
 import { isSubtitleItem, layoutScene } from "../../renderer/layout";
 import type { LayoutItem } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
+import { fitToObjectFit } from "./fitToObjectFit";
+import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
+import { safeAreaRect } from "../../domain/preview/safeArea";
+import { ORIENTATION } from "../../domain/enums";
+import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
-import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditForSpeaker, sceneCreditText } from "../../domain/voice/narratorCredit";
+import { CREDIT_MODE } from "../../domain/voice/creditDisplay";
+import { sceneCreditVisibility } from "../../domain/project/sceneCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
@@ -28,10 +36,6 @@ export interface VideoSlotPlayback {
   fit: Fit;
   useOriginalAudio: boolean;
   originalVolume?: number;
-}
-
-function fitToObjectFit(fit: Fit): "cover" | "contain" | "fill" {
-  return fit === "contain" ? "contain" : fit === "stretch" ? "fill" : "cover";
 }
 
 /**
@@ -57,7 +61,6 @@ function SlotVideo({
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   // >1.0 増幅用の Web Audio グラフ（volume>1 のときだけ張る）。null＝素の video.volume で足りる（≤1.0）。
-  const audioRef = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -100,51 +103,8 @@ function SlotVideo({
       safePause();
     };
   }, [src, clipStartSec, clipEndSec, speed, startDelaySec]);
-  // 元音声が 100% 超（最大 150%）のときは video.volume の上限(1.0)を超えられないため、Web Audio の GainNode で増幅して
-  // 書き出し（FFmpeg volume=1.5）と一致させる（#432 P2）。AudioContext が無い環境（jsdom/古ブラウザ）は video.volume に
-  // 1.0 クランプでフォールバック（≤1.0 は元から一致）。増幅の要否は場面内で不変（スロットの originalVolume）。
-  const needsAmp = volume > 1;
-  useEffect(() => {
-    const v = ref.current;
-    if (!v || !needsAmp || audioRef.current) return;
-    const AC =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return; // フォールバック（video.volume クランプ）
-    try {
-      const ctx = new AC();
-      const source = ctx.createMediaElementSource(v);
-      const gain = ctx.createGain();
-      source.connect(gain).connect(ctx.destination);
-      audioRef.current = { ctx, gain };
-      v.volume = 1; // 素の音量は最大＝最終音量は gain で作る
-    } catch { /* 生成失敗は video.volume フォールバック */ }
-    // 一度張ったグラフは **unmount まで畳まない**（下の cleanup effect で閉じる）。createMediaElementSource で
-    // 奪った要素の音声出力は仕様上 video.volume へ戻せないため、needsAmp が false に落ちても graph を維持し
-    // gain で音量を作り続ける（畳むと無音のまま復帰しない・レビュー P3・将来 ADR-0023 の同時表示対策）。
-  }, [needsAmp]);
-  // 要素の破棄（unmount）時にだけ AudioContext を閉じる。
-  useEffect(
-    () => () => {
-      void audioRef.current?.ctx.close().catch(() => {});
-      audioRef.current = null;
-    },
-    [],
-  );
-  // ミュート/音量の即時反映（再生を止めずに）。graph があれば gain（全音量を担当）、無ければ video.volume（1.0クランプ）。
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    const wa = audioRef.current;
-    if (wa) {
-      wa.gain.gain.value = muted ? 0 : Math.max(0, volume);
-      v.muted = false; // 音量は graph に一本化（要素側は素通し）
-      void wa.ctx.resume().catch(() => {});
-    } else {
-      v.muted = muted || volume <= 0;
-      v.volume = Math.min(1, Math.max(0, volume));
-    }
-  }, [muted, volume, needsAmp]);
+  // 音量（消音・100%超の増幅）は**タイムライン形式と共有**（#512 段2）＝同じ仕組みを2つ持たない。
+  useMediaVolume(ref, { volume, muted });
   return (
     <video
       ref={ref}
@@ -166,16 +126,40 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, showSafeArea, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /**
+   * 安全領域（セーフエリア）の枠を出すか（#265）。**編集を助けるためだけ**＝書き出しには焼かない。
+   * 省略＝利用者の記憶に従う。`false` を渡すと**記憶に関わらず出さない**（仕上がり確認など、
+   * 編集しない画面で線を出さないため）。`true` を渡しても記憶が「出さない」なら出さない。
+   */ showSafeArea?: boolean; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  // クレジットの見せ方（ADR-0025・#359）。**画面から渡してもらわず自分で読む**＝渡し忘れた画面だけ
+  // 「動画には入らないのに出ている」になる（PR #881 レビューで実際に3画面のうち2画面が漏れていた）。
+  const creditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
+  const projectScenes = useProjectStore((s) => s.scenes);
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
   // テンプレ向き（canvas）。未設定時は 16:9 を仮置き（プレースホルダ表示用）。
   const cw = template?.canvas.width ?? 16;
   const ch = template?.canvas.height ?? 9;
+  // 安全領域の枠（#265）。向きは**見た目パターンが持つもの**を見る（`aspectRatio`）＝
+  // 動画全体の設定ではなく、いま描いているキャンバスに合わせる（向き違いの見た目でもずれない）。
+  const safeRect = safeAreaRect({ width: cw, height: ch }, template?.aspectRatio ?? ORIENTATION.landscape);
+  // ⚠️ **記憶からも読む**（#265）＝画面ごとに渡し忘れると「場面編集では出るのに見た目パターン編集では
+  // 出ない」になる。明示の `showSafeArea` は**出さない側へ倒す上書き**（仕上がり確認では線を出さない）。
+  const [safeAreaPref] = useSafeAreaPref();
+  const drawSafeArea = showSafeArea !== false && safeAreaPref;
+
+  /**
+   * フィット時が実寸の何%か（#142）。**段を「いまの見え方」から数える**ために親へ返す
+   *（フィットが 63% のときに拡大したら 75% へ＝100% へ飛ばすと**縮んで見える**ことがある）。
+   */
+  const fitPct = fitPercentOf(fit?.width ?? 0, cw);
+  useEffect(() => {
+    onFitPercent?.(fitPct);
+  }, [fitPct, onFitPercent]);
 
   // プレビューを「使える領域」に収める（縦型でもスクロールせず全体が見えるように）。
   // 高さの基準＝直近のスクロール領域（場面編集の確認エリア等）の下端（無ければ viewport 下端）までの、プレビュー上端からの実利用高。
@@ -251,26 +235,40 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const creditLine = boundaryFrame ? boundaryFrame.creditLine : activeLine;
   const applyLineSub = subtitleOverride !== undefined;
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）＝再生位置の overlay テロップを段違いで重ねる（書き出しと同一 item＝パリティ）。
-  const hasTelops = !!(telops && telops.length > 0);
   // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
   const hasAnim = !!(animations && animations.length > 0);
   // FREE 字幕（ADR-0029）の対象解決用「その瞬間のセグメント」は**呼び出し側が sceneSegmentSpecs/segmentAt から作って渡す**
   // （PreviewScreen/SceneEditScreen）＝書き出しと同一の正準経路。activeLine から再構成しない（全ゼロ長行フォールバックで
   // 書き出し〔lineId なし＝allLines 非表示〕とズレるのを防ぐ・P1-2）。未指定は layout の場面全体1区間＝単独 narration が texts.subtitle を読む。
-  const layoutOpts = applyLineSub || hasTelops || hasAnim || subtitleSegment
+  const layoutOpts = applyLineSub || hasAnim || subtitleSegment
     ? {
         // 字幕上書き（間/OFF は null・行は text）。undefined（テンプレ既定）は applyLineSub=false で載せない。
         ...(applyLineSub ? { subtitleText: subtitleOverride } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
-        ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
         ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
         // FREE 字幕要素の対象解決（ADR-0029）＝呼び出し側が渡す正準セグメント。
         ...(subtitleSegment ? { subtitleSegment } : {}),
       }
     : undefined;
-  // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
+  // クレジットは選択話者のキャラを動的に（#177）。文は `sceneCreditText`＝「最初と最後」は使った声を全員、「ずっと表示」は話している行（ADR-0025 追補・書き出しと一致）。
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  const credit = creditLine ? creditForLine(creditLine, baseCredit) : baseCredit;
+  // 文は書き出しと同じ共有関数（「最初と最後」は全員を縦に・「ずっと表示」は話している行＝ADR-0025 追補）。
+  // ⚠️ 見本の場面（見た目パターンの画面・index が無い）は動画の設定に従わせない＝従来どおり話している行か既定の声1行。
+  const isProjectScene = projectScenes.some((s) => s.sceneId === scene.sceneId);
+  const creditText = isProjectScene
+    ? sceneCreditText(creditDisplay, projectScenes, creditLine, baseCredit)
+    : sceneCreditText({ mode: CREDIT_MODE.always }, projectScenes, creditLine, baseCredit);
+  // 出す/出さないは**書き出しと同じ共有関数**（`sceneCreditVisibility`・ADR-0001）。
+  // 見た目パターンの画面が描く**見本の場面**はプロジェクトの場面ではない（index が無い）＝
+  // そこは従来どおり出す（「出来上がり」ではなく見た目の見本なので、動画の設定に従わせる意味がない）。
+  // ⚠️ `useMemo` は使わない＝この上に「表示する場面がありません」の早期 return があるので、
+  // ここでフックを足すと条件付き呼び出しになる（hooks 規則）。場面数ぶんの一次走査で、
+  // 同じ描画で走る `layoutScene`＋SVG 組み立てに対して無視できる。
+  const creditIndex = projectScenes.findIndex((s) => s.sceneId === scene.sceneId);
+  const credit =
+    creditIndex < 0 || sceneCreditVisibility(projectScenes, creditDisplay)[creditIndex]
+      ? creditText
+      : undefined;
   const fontFamily = fontFamilyForId(resolveFontId(scene.fontId, fontId));
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
@@ -287,7 +285,7 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   // 「字幕を入れる」OFF（hideSubtitles）は、書き出しと同じ itemFilter＋同じ述語（isSubtitleItem）で字幕を消す
   // ＝プレビュー＝書き出しのパリティ（ADR-0026③・#547 P2-7）。静止・実映像再生の両経路に同じ filter を渡す。
   const subtitleFilter = hideSubtitles ? (it: LayoutItem) => !isSubtitleItem(it) : undefined;
-  const svg = layoutToSvg(layout, { assetSrc, responsive: true, credit, fontFamily, itemFilter: subtitleFilter });
+  const svg = layoutToSvg(layout, { assetSrc, responsive: true, ...(credit != null ? { credit } : {}), fontFamily, itemFilter: subtitleFilter });
 
   // 実映像再生（#432）：再生中かつ動画スロットのある場面のみ、下SVG / video要素 / 上SVG の3層に分けて実映像を流す。
   // 分割は書き出し（splitVideoSceneSvgMulti）と同型＝スロットは穴（透過）にして video 要素で埋める＝ADR-0001 パリティ。
@@ -358,16 +356,32 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   };
 
   return (
-    <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+    <div
+      ref={ref}
+      style={{
+        width: "100%",
+        display: "flex",
+        // ⚠️ **拡大したら送って見る**（#142）＝収まらない側をスクロールで見る。フィットのときは
+        // 中央寄せのまま（いままでの見え方を変えない）。
+        justifyContent: zoom === 'fit' ? "center" : "flex-start",
+        overflow: zoom === 'fit' ? undefined : "auto",
+      }}
+    >
       {/* fit 箱（プレビューの実寸＝canvas と同比）。操作オーバーレイ（children）はこの箱の子にして実寸と一致させる（#273）。 */}
       <div
         style={{
           position: "relative",
           // fit（JS 計測）があれば実寸。計測前/空振り時は fallbackWidthCss で「使える高さ×アスペクト比」に幅を絞り、
           // 縦型（9:16）でも箱高さ ≤ (100vh − 予備) に収める（従来の width:100% だと縦型が画面をはみ出していた）。
-          width: fit ? fit.width : fallbackWidthCss(cw, ch),
-          maxWidth: "100%",
-          height: fit?.height,
+          // ⚠️ **CSS の `transform: scale` ではなく実寸を変える**（#142）＝操作オーバーレイは
+          // `getBoundingClientRect()` から縮尺を導く（`scale = rect.width / canvas.width`）ので、
+          // **箱が実際に大きくなれば座標整合は自動で取れる**。`transform` だとレイアウトが
+          // 追従せず、**掴んだ場所と実際の位置がずれる**。
+          width: fit ? zoomedBox(fit, zoom, fitPct).width : fallbackWidthCss(cw, ch),
+          // ⚠️ **拡大時は「はみ出してよい」**＝`maxWidth:100%` のままだと**拡大しても縮められて
+          // 見た目が変わらない**（拡大の意味が消える）。外側が横スクロールで受ける。
+          maxWidth: zoom === 'fit' ? "100%" : undefined,
+          height: fit ? zoomedBox(fit, zoom, fitPct).height : undefined,
           flexShrink: 0,
           aspectRatio: `${cw} / ${ch}`,
         }}
@@ -379,6 +393,22 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
           </div>
         ) : (
           <div role="img" aria-label="場面の仕上がり" style={boxStyle} dangerouslySetInnerHTML={{ __html: svg }} />
+        )}
+        {/* ⚠️ **安全領域の枠**（#265）＝端で切られやすいところを見せる**編集の補助**。
+            書き出しには焼かない（`layoutScene` を通らない＝プレビュー＝書き出しの一致に関わらない）。
+            ⚠️ **箱の子にする**＝拡大しても一緒に伸びる（`fit` 箱の実寸に追従＝#142・#273 と同じ理由）。
+            ⚠️ **割合で置く**＝`canvas` の大きさに依らず同じ見え方（`safeAreaRect` と同じ数字を使う）。 */}
+        {drawSafeArea && (
+          <div
+            aria-hidden="true"
+            className="safe-area-guide"
+            style={{
+              left: `${(safeRect.x / cw) * 100}%`,
+              top: `${(safeRect.y / ch) * 100}%`,
+              width: `${(safeRect.w / cw) * 100}%`,
+              height: `${(safeRect.h / ch) * 100}%`,
+            }}
+          />
         )}
         {/* 操作オーバーレイ（FREE/テンプレ編集）。fit 箱の子＝縦型でもプレビュー実寸と一致し、ドラッグ追従・配置が正確（#273）。 */}
         {children}

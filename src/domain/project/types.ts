@@ -1,12 +1,16 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
-import type {
-  AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
+import type { AiDescriptionAuthor,
+  AssetType, EasingSpec, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, VideoStartMode, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { Group } from '../group/types';
-import type { LayerBackground } from '../template/types';
+// ⚠️ **文字の体裁の語彙は `template/types` に1つ**（§2-7）＝`Layer` と `FreeElement` が同じ形を持つ
+// （同じ概念は同じ制約）。片方に写すと、片方だけ制約が変わったときに気づけない。
+import type { LayerBackground, TextShadow } from '../template/types';
+import type { CreditDisplay } from '../voice/creditDisplay';
+import type { AudioAutoSettings } from '../voice/audioAuto';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -16,6 +20,21 @@ export interface VideoSettings {
   maxDurationSec: number;
   /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
   fontId?: FontId;
+  /**
+   * クレジット（VOICEVOX）の**動画側**の見せ方（ADR-0025・#359）。
+   * 未指定＝最初と最後・3秒（`resolveCreditDisplay` が埋める）。
+   * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで扱うのは動画に焼く側だけ。
+   */
+  creditDisplay?: CreditDisplay;
+  /**
+   * 音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4・schema 1.29 で追加・任意）。
+   *
+   * ⚠️ **ここに置くのは「書き出し時の処理」だから**＝`Scene` には足さない（凍結3 に触れない）。
+   * **場面ごとのダッキング設定は作らない**（追補4）ので、`BgmSettings` ではなくここに置く
+   *（`BgmSettings` は場面にも生えているため、そちらへ置くと場面ごとに設定できてしまう）。
+   * `videoSettings` は `timeline-project.schema.json` が `$ref` で共有＝**両形式に効く**。
+   */
+  audioAuto?: AudioAutoSettings;
 }
 
 export interface CompanyInfo {
@@ -117,6 +136,12 @@ export interface Asset {
   tags?: string[];
   description?: string;
   aiDescription?: string;
+  /**
+   * 「AI解析」を書いたのは誰か（#1317・schema 1.31）。`ai`＝同梱の AI が付けた／`user`＝利用者が直した（**空にした**も含む）。
+   * 未指定＝前の版の素材（誰が書いたか分からない＝説明があれば触らない・空なら AI が読む＝従来どおり）。
+   * ⚠️ `user` の説明は AI が二度と書き換えない／`ai` の説明は写真を差し替えたら読み直す。
+   */
+  aiDescriptionAuthor?: AiDescriptionAuthor;
   isPublicChecked?: boolean;
   /** yuko 素材のみ。poseTag 解決の既定（12 §8.3）。 */
   isDefaultYuko?: boolean;
@@ -259,6 +284,13 @@ export interface FreeElement {
   /** kind='text'/'subtitle' の背景帯（可読性の下地・#529）。enabled で描画。通常テンプレ字幕層の layer.background と同型・
    *  通常→FREE 化で移送（ADR-0030）。未指定/enabled:false＝背景帯なし。 */
   background?: LayerBackground;
+  /**
+   * 字間（em・#264）。**文字サイズに対する割合**＝サイズを変えても詰め具合が変わらない。
+   * 未指定＝0（従来の出力は不変）。負で詰める。
+   */
+  letterSpacing?: number;
+  /** 文字の影（#264）。未指定/`enabled:false`＝影なし（従来の出力は不変）。 */
+  shadow?: TextShadow;
   /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
   hidden?: boolean;
   /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
@@ -283,6 +315,12 @@ export interface TextStyleOverride {
   strokeColor?: string;
   /** 縁取りの太さ（canvas px・>=0）。0 で縁取りなし。 */
   strokeWidth?: number;
+  /** 字間（em・#264）。未指定＝テンプレ層を継承。 */
+  letterSpacing?: number;
+  /** 文字の影（#264）。未指定＝テンプレ層を継承。 */
+  shadow?: TextShadow;
+  /** 背景帯（#264 で文字にも一般化）。未指定＝テンプレ層を継承。 */
+  background?: LayerBackground;
 }
 
 export interface Scene {
@@ -353,8 +391,8 @@ export interface Keyframe {
   opacity?: number;
   /** 回転角（度）。 */
   rotation?: number;
-  /** 前KFからこのKFへ入るイージング（先頭KFでは無視）。未指定＝linear。 */
-  easing?: Easing;
+  /** 区間 [前KF, 当KF] のイージング（#262＝名前つき／自由なカーブ）。未指定＝`linear`。 */
+  easing?: EasingSpec;
 }
 
 /** 要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素／グループ id）を時間で補間する。timelineOverlay に格納＝AI/場面正準は不変。 */
@@ -369,7 +407,13 @@ export interface ElementAnimation {
   keyframes: Keyframe[];
 }
 
-/** 場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。 */
+/**
+ * 場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。
+ *
+ * **`clips` は非推奨**（#635・ADR-0032 決定11/12）＝時間軸の編集はタイムライン形式（別プロジェクト）へ移った。
+ * 描画・書き出しでは**読まない**が、保存済みデータを黙って消さないために型と schema には残す（新規に書かない）。
+ * **`animations`（場面の登場アニメ・ADR-0019）は現役**＝同じ入れ物にあるだけで、一緒に捨てない。
+ */
 export interface TimelineOverlay {
   clips?: OverlayClip[];
   /** 要素アニメーション（④・ADR-0019・任意）。未指定＝アニメ無し（静止）。 */

@@ -2,7 +2,7 @@
 // - 時刻 t は直接受けず、書き出しと同じ sceneSegmentSpecs から作る「その瞬間のセグメント」（SubtitleMoment）を受ける（P1-1）。
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
-import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import { FREE_CATEGORY, FREE_ELEMENT_KIND, LAYER_TYPE, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
 import type { TextKey } from '../enums';
 import { isHiddenByGroup } from '../group/compose';
 import { characterForSpeaker } from '../voice/voiceCatalog';
@@ -11,6 +11,7 @@ import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
 import type { Template } from '../template/types';
+import { textKeyOfLayer } from '../template/layerOps';
 
 /** 字幕解決の正準状態（プレビュー＝書き出しで共有・ADR-0029）。segment は sceneSegmentSpecs 由来の「その瞬間のセグメント」。 */
 export interface SubtitleMoment {
@@ -189,11 +190,12 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
   //     描画と一致＝layout.ts:325・#547 P2 レビュー）。
   const templateGroups = template?.groups ?? [];
   const visibleSubtitleLayers = (template?.layers ?? []).filter(
-    (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups),
+    (l) => l.type === LAYER_TYPE.subtitle && !isHiddenByGroup(l.id, templateGroups),
   );
   if (visibleSubtitleLayers.length > 0) {
     if (hasLines) out.push(...lineSubs(scene));
-    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, l.textKey));
+    // 字幕層の未指定は `subtitle`（#1058＝解き方は `textKeyOfLayer` に1か所）。
+    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, textKeyOfLayer(l) ?? undefined));
   }
   // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
   //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝除外。

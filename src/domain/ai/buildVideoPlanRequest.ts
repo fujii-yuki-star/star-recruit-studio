@@ -2,12 +2,13 @@
 // 正典: 12_AI_PROMPT_AND_MAPPING §5（システムプロンプト確定版）/ §6（ユーザーメッセージテンプレート）。
 // MVP はテキストのみ（素材サムネイルは添付しない＝12§4 更新・ADR-0010 P3 へ繰り延べ）。
 // 出力契約（JSON モード／schema 指定）と検証（ajv→transformVideoPlan）は別モジュールが担う。
-import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
+import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import { assetSentText, selectAssetsForSend } from './assetSendText';
 import type { AssetSendSelection } from './assetSendText';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
+import { COMPANY_NAME_PLACEHOLDER, RECRUIT_URL_PLACEHOLDER } from './refineVideoPlan';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
 // videoKind=general は §7b の発表・説明向けサンプルを使う（章立て→parts・要点→texts/narration の手本＝ADR-0011 #7）。
@@ -37,6 +38,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プラ
 - texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限（maxDuration）があれば従う。
 - 全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で ${MAX_SCENES_PER_VIDEO} 個までにする。超えそうなら内容をまとめて場面の数を減らす（細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。
 - yukoPoseTag は場面に合う表情タグ（例：smile, guide, bow）を「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - 素材に人物・社外秘が含まれそうな場合は reviewNotes に確認を促す一文を入れる。`;
@@ -61,6 +63,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT_GENERAL = `あなたは社内向け・一�
 - 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
+- 場面は全部で ${MAX_SCENES_PER_VIDEO} 個までにする。超えそうなら内容をまとめて場面の数を減らす（細切れにしない）。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
 - yukoPoseTag は場面に合う表情タグを「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - purpose は一般の種別（${GENERAL_PURPOSES.join(' / ')}）に沿った内容にする。`;
@@ -120,6 +123,50 @@ function assetBlock(a: Asset): string {
   ].join('\n');
 }
 
+/**
+ * few-shot の出力例（`fixtures/ai-video-plan.sample.json`）に書かれている会社名。
+ * 差し込みの印を使うとき、例の中のこの名前を印に置き換えて「印で書く」手本にする（12 §8.7）。
+ * ⚠️ fixture を直したらここも直す（門番＝`buildVideoPlanRequest.test.ts`）。
+ */
+export const FEW_SHOT_COMPANY_NAME = '株式会社サンプル';
+
+/** 指示文の組み立ての選択（同梱の AI だけが使う＝Gemini の経路は変えない・ADR-0052 決定3）。 */
+export interface VideoPlanMessageOptions {
+  /**
+   * 会社名・採用ページを**差し込みの印**で書かせる（ADR-0052 決定2「固有名詞はソフトが差し込む」・12 §8.7）。
+   * 採用で、入力にその値があるときだけ効く。印の置き換えは `refineVideoPlan.insertProperNouns`。
+   */
+  properNounPlaceholders?: boolean;
+  /**
+   * 場面ごとに**見せたい写真・動画を言葉で** `notes` に書かせる（ADR-0052 決定1・2＝割り当てはソフトが決める・12 §8.8）。
+   * 素材が1つでもあるときだけ効く。
+   */
+  askVisualWish?: boolean;
+}
+
+/**
+ * 同梱の AI の経路で使う指示文の選択（アプリと学習材料で**同じものを使う**＝学習と本番で指示文を揃える・ADR-0052 段階4）。
+ * ⚠️ 変えたら学習材料も作り直す（`scripts/local-llm/training/build-dataset.ts` がこれを読む）。
+ */
+export const LOCAL_VIDEO_PLAN_OPTIONS: Readonly<VideoPlanMessageOptions> = { properNounPlaceholders: true, askVisualWish: true };
+
+/** 見せたいものを書かせる指示（出力フォーマットの末尾に足す行）。 */
+export const VISUAL_WISH_RULE =
+  '各シーンの notes に、その場面で見せたい写真・動画の中身を短く書く（例「倉庫で働く人の写真」）。assetRefs は素材がはっきり合うときだけ入れ、迷ったら省略する（ソフトが notes と素材の説明を見て選ぶ）。';
+
+/** 差し込みの印の指示（出力フォーマットの末尾に足す行）。値の無い印は指示しない。 */
+function placeholderRules(input: GenerateVideoPlanInput): string[] {
+  const c = input.companyInfo;
+  const rules: string[] = [];
+  if (c?.companyName?.trim()) {
+    rules.push(`会社名は文字で書き写さず、どこでも必ず ${COMPANY_NAME_PLACEHOLDER} と書く（ソフトが正しい会社名に置き換える）。`);
+  }
+  if (c?.recruitUrl?.trim()) {
+    rules.push(`採用ページの URL は texts.url に ${RECRUIT_URL_PLACEHOLDER} と書く（ソフトが正しい URL に置き換える）。語りには URL を入れない。`);
+  }
+  return rules;
+}
+
 /** 12§6 の採用ヘッダ（会社情報＋動画の方針）。recruit のとき使う。 */
 function recruitHead(input: GenerateVideoPlanInput): string[] {
   const c = input.companyInfo;
@@ -165,7 +212,7 @@ function generalHead(input: GenerateVideoPlanInput): string[] {
 /**
  * 12§6 のユーザーメッセージを入力から組み立てる（MVP＝テキストのみ・サムネイル添付なし）。
  * videoKind=general のときは §6b（テーマ／章立て／要点）に切り替え、補足・素材・見た目・表情タグ・出力契約は共通。
- * 送信前確認で利用者に提示する「外部AIへ送る内容」の実体でもある（§2-6）。
+ * 送信前確認で利用者に提示する「外部のAIへ送る内容」の実体でもある（§2-6）。
  */
 export function buildVideoPlanUserMessage(
   input: GenerateVideoPlanInput,
@@ -173,8 +220,12 @@ export function buildVideoPlanUserMessage(
   // ＝**画面で見せた内容と実際に送る内容が必ず一致**する（§2-6・ADR-0026②）。上限以下なら全件・並びも元のまま。
   // 呼び出し側（buildVideoPlanMessages）が選定済みなら**それを渡して二重計算を避ける**。単体で呼ぶときは既定で計算する。
   selection: AssetSendSelection = selectAssetsForSend(input.assets),
+  options: VideoPlanMessageOptions = {},
 ): string {
   const isGeneral = input.videoKind === VIDEO_KIND.general;
+  // 差し込みの印は採用だけ（一般は会社情報を使わない＝§6b）。
+  const placeholders = options.properNounPlaceholders && !isGeneral ? placeholderRules(input) : [];
+  const localRules = [...placeholders, ...(options.askVisualWish && input.assets.length > 0 ? [VISUAL_WISH_RULE] : [])];
   const head = isGeneral ? generalHead(input) : recruitHead(input);
   const templates = input.templates.map(templateBlock).join('\n');
   const assets = selection.sent.map(assetBlock).join('\n');
@@ -182,6 +233,11 @@ export function buildVideoPlanUserMessage(
   const exampleSubject = isGeneral ? 'テーマ・構成・要点' : '会社情報';
   // few-shot 出力例も用途で切り替える（general は §7b の発表・説明サンプル＝ADR-0011 #7）。
   const example = isGeneral ? aiVideoPlanGeneralExample : aiVideoPlanExample;
+  // 印で書かせるときは、例の会社名も印にする＝例の名前（株式会社サンプル）を書き写させない。
+  const exampleText = JSON.stringify(example, null, 2);
+  const shownExample = placeholders.length > 0 && input.companyInfo?.companyName?.trim()
+    ? exampleText.split(FEW_SHOT_COMPANY_NAME).join(COMPANY_NAME_PLACEHOLDER)
+    : exampleText;
   return [
     ...head,
     '',
@@ -208,8 +264,9 @@ export function buildVideoPlanUserMessage(
     '各シーンの sceneType は、選んだ templateId の category と同じ値にする（利用可能な見た目パターンに無い sceneType は使わない）。利用可能な見た目だけで表現できる構成にする。',
     'enum 項目（videoPlan.purpose・各シーンの sceneType・yukoPoseTag 等）は、上の一覧や出力例に示した値だけを使い、別の語を作らない。yukoPoseTag のように null 可の項目は該当が無ければ null にする。',
     '各フィールドの型は出力例と同じにする（文字列の項目を配列やオブジェクトにしない。targetAudience・tone・title・narrationText・各 texts などは単一の文字列）。',
+    ...localRules,
     `次の例と**同じキー名・同じ入れ子構造・同じ型**で出力し、値だけ今回の${exampleSubject}・素材・見た目パターンに合わせて作る：`,
-    JSON.stringify(example, null, 2),
+    shownExample,
   ].join('\n');
 }
 
@@ -229,7 +286,9 @@ export interface VideoPlanMessages {
  * システムプロンプト＋ユーザーメッセージを組み立てる。
  * videoKind=general なら §5b/§6b（発表・説明）、それ以外は §5/§6（採用）を使う（ADR-0011）。
  */
-export function buildVideoPlanMessages(input: GenerateVideoPlanInput): VideoPlanMessages {
+export function buildVideoPlanMessages(
+  input: GenerateVideoPlanInput, options: VideoPlanMessageOptions = {},
+): VideoPlanMessages {
   const system =
     input.videoKind === VIDEO_KIND.general ? VIDEO_PLAN_SYSTEM_PROMPT_GENERAL : VIDEO_PLAN_SYSTEM_PROMPT;
   // 素材の選定は**ここで1回だけ**行い、本文と「送らなかった件数」の両方をこの結果から作る（#585 レビュー）。
@@ -238,7 +297,7 @@ export function buildVideoPlanMessages(input: GenerateVideoPlanInput): VideoPlan
   const selection = selectAssetsForSend(input.assets);
   return {
     system,
-    user: buildVideoPlanUserMessage(input, selection),
+    user: buildVideoPlanUserMessage(input, selection, options),
     omittedAssetCount: selection.omitted.length,
   };
 }

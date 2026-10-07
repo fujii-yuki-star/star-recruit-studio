@@ -1,0 +1,169 @@
+// @vitest-environment jsdom
+// 場面編集の欄の配置（ADR-0033 段階4）。**いままでの見え方を保ったまま**、組み替えられることを固定する。
+// #276（左の折りたたみ・右幅のドラッグ）でやっていたことを、配置の仕組みへ畳んだ。
+// #550（節の開閉）は**そのまま**＝あれは欄の中身の話で、配置とは別の層（ADR-0033 段階4）。
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useProjectStore } from "../store/projectStore";
+import type { Scene } from "../../domain/project/types";
+import type { Template } from "../../domain/template/types";
+import { SceneEditScreen } from "./SceneEditScreen";
+
+const template = {
+  schemaVersion: "1.0", templateId: "photo_intro_v1", name: "写真で始める", category: "photo_intro",
+  aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+  layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+} as unknown as Template;
+
+const scene = (): Scene =>
+  ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "photo_intro", templateId: "photo_intro_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "none" }, warnings: [],
+  }) as unknown as Scene;
+
+beforeEach(() => {
+  useProjectStore.setState({
+    templates: [template],
+    parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+    scenes: [scene()], assets: [], editingSceneId: "scene_001",
+    past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+  });
+  // 配置はアプリの設定に残る＝テスト間で持ち越さない。
+  localStorage.clear();
+});
+
+/** 欄の出し入れは**見出しの行のメニュー**の中（#1032）＝欄の下に並べると視界の外だった。 */
+const openPanelMenu = (): void => { fireEvent.click(screen.getByRole("button", { name: /^欄/ })); };
+
+describe("SceneEditScreen: 欄の配置（ADR-0033 段階4）", () => {
+  it("既定はいままでと同じ顔ぶれ（素材一覧・仕上がり確認・場面の並び・編集が同時に見える）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    for (const title of ["素材一覧", "仕上がり確認", "場面の並び", "選択中の場面を編集"]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    }
+  });
+
+  it("欄を閉じられて、戻す導線が出る（#276 の折りたたみを置き換える）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.queryByRole("heading", { name: "素材一覧" })).not.toBeInTheDocument();
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "「素材一覧」を表示する" }));
+    expect(screen.getByRole("heading", { name: "素材一覧" })).toBeInTheDocument();
+  });
+
+  // ⚠️ **閉じている欄があることを、開く前に言う**（#1032）＝メニューを開くまで気づけないと、
+  //    「欄が消えた」と思ったまま戻し方に辿り着けない（§2-5＝行き止まりを作らない）。
+  it("閉じている欄の数を、メニューを開く前に出す", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /^欄/ }).textContent, "閉じていないのに数が出ている").not.toMatch(/閉じている/);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.getByRole("button", { name: /^欄/ }).textContent, "閉じた欄があるのに数が出ていない").toMatch(/閉じている 1/);
+  });
+
+  it("配置は覚えていて、開き直しても同じ（#276 の幅の記憶を置き換える）", () => {
+    const first = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    first.unmount();
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("heading", { name: "素材一覧" })).not.toBeInTheDocument();
+  });
+
+  it("「配置を既定に戻す」で戻る", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
+    expect(screen.getByRole("heading", { name: "素材一覧" })).toBeInTheDocument();
+  });
+
+  it("境界を掴んで大きさを変えられる（#276 の右幅ドラッグを置き換える）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("左の欄の幅")).toBeInTheDocument();
+    expect(screen.getByLabelText("右の欄の幅")).toBeInTheDocument();
+  });
+
+  it("タイムライン編集とは別に覚える（画面ごとに1つ）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(localStorage.getItem("app.panelLayout.timeline")).toBeNull();
+  });
+});
+
+describe("SceneEditScreen: 触っていない画面は覚えない（#550 の教訓・/canon-check の指摘）", () => {
+  it("配置を触らずに開いているだけでは、既定を焼き付けない（あとで既定を良くしたときに届く）", () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+      // 保存は少し待ってから走る＝**その待ちを実際に越えても**書かれないことを見る。
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
+      unmount();
+      expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("「配置を既定に戻す」を押したら、覚えていたものも消える（次に開いても既定）", () => {
+    const first = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    openPanelMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "配置を既定に戻す" }));
+    first.unmount();
+    expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
+  });
+});
+
+describe("SceneEditScreen: 見出しを欄へ移したあとの並び（/canon-check の指摘）", () => {
+  it("3つの欄とも、右にある操作は右のまま（`space-between` の片方が空いたままにしない）", () => {
+    const { container } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    // 欄の見出しを欄の側（`PanelSpec.title`）へ移したので、中の `row-between` は子が1つになりうる。
+    // 子が1つだと `space-between` は左寄せになる＝右にあった操作が左へ動いてしまう。
+    const rows = Array.from(container.querySelectorAll(".row-between"));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.children.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+// ⚠️ **欄がフォーカス中に消えても、履歴のまとめが取り残されない**（#847・差分再監査 🟡）＝
+// `textGroup` は `blur` でしか閉じないが、**フォーカス中に欄が消えると `blur` は来ない**。実機で踏む道は
+// **欄の配置の組み替え**（掴む処理が `pointerdown` を `preventDefault` するのでフォーカスは欄に残ったまま、
+// 欄が別の親の下へ移る＝unmount）。閉じ損ねると**自動保存が止まり、以後の編集が履歴に1件も積まれない**。
+// ⚠️ フックの単体テストでは**画面の配線**（合成 ref `lineFieldRef` の渡し忘れ）を検知できないので、
+// タイムライン形式と**同じ形**をこちらにも置く（#847 のコミットは両形式を対象と書いていた）。
+describe("SceneEditScreen: 欄が消えても履歴のまとめが取り残されない（#847）", () => {
+  it("セリフ欄に手が入ったまま欄を閉じても、まとめは閉じる", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const line = screen.getByLabelText("セリフ") as HTMLTextAreaElement;
+    fireEvent.focus(line);
+    expect(useProjectStore.getState()._historyGroupDepth).toBeGreaterThan(0);
+    // **`blur()` を呼ばずに**欄を消す（配置の組み替えと同じ＝フォーカスは残ったまま unmount）。
+    fireEvent.click(screen.getByLabelText("選択中の場面を編集の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.queryByLabelText("セリフ")).toBeNull();
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // 閉じている＝自動保存が止まらない
+  });
+});
+
+// 詰めた表示（ADR-0047・#1247）。
+// ⚠️ **印が外れると、操作と余白が黙って元の大きさへ戻る**（画面は普通に動くので誰も気づかない）。
+// 実測（同じ窓・同じ瞬間に印を付け外し）＝上の帯 60→44px・ボタン高 37→29px・画面に収まらず隠れている量 1187→773px
+describe("SceneEditScreen：詰めた表示の印（ADR-0047）", () => {
+  it("編集している画面に印が付いている", () => {
+    
+    const { container } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".dense"), "詰めた表示の印が外れている").not.toBeNull();
+  });
+});

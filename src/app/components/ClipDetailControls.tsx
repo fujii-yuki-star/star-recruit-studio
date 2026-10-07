@@ -34,7 +34,9 @@ export function ClipDetailControls({
   const hasAudio = asset.metadata?.hasAudio === true;
   const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
   // ドラッグ中の連続変更（速度/音量スライダー）を1履歴に合成（#389・場面側は Undo 可＝ADR-0028 D5）。素材側は asset を
-  // 履歴に積まないので dragGroup は実質 no-op（無害）。
+  // 履歴に積まないので**履歴のまとめとしては**効かない。⚠️ **それでも外さないこと**（#830）＝`dragGroup` は
+  // 掴んでいる数にも入れており、**掴んでいる間の `Ctrl+Z` を止める**役目を持つ（外すと、掴んだまま取り消しが
+  // 通る穴がここだけ開く）。
   const { dragGroup } = useHistoryGroup();
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>

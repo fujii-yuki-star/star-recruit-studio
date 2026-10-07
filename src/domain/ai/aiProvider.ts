@@ -32,6 +32,8 @@ export interface GenerateVideoPlanInput {
   templates: TemplateSummary[];
   assets: Asset[];
   yukoPoseTags: string[];
+  /** 動画全体の声の速さ（`voiceSettings.speed`・未指定＝1.0）。同梱の AI の案で尺を見積もる（#1318）。AI へは送らない。 */
+  voiceSpeed?: number;
 }
 
 /**

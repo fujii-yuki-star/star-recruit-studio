@@ -3,7 +3,9 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL, OPEN_AI_SETTINGS_LABEL } from "../uiLabels";
+import { hasWizardBrief } from "../newProjectGuard";
+import { generateRecovery } from "../../domain/ai/generateRecovery";
 
 /**
  * 「場面がまだ1つも無い」ときの表示（#590）。**公開前チェック／仕上がり確認／書き出し／たたき台**が共有する。
@@ -30,6 +32,12 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
   const aiError = useProjectStore((s) => s.aiError);
   const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const canAddScene = onAddScene != null;
+  // ⚠️ **入力の続きへ戻れるようにする**（#985）＝ウィザードで「ここまで保存」した動画を開き直すと、
+  // 場面0の空状態で「場面を追加」しか出ず、**たたき台を作る道も、入れた会社情報を直す道も無かった**
+  //（ウィザードへ行く導線はアプリ全体で1本だけで、それは必ず `newProject()` で**中身を捨てる**）。
+  // ⚠️ **入力があるときだけ出す**＝何も入れていない動画に「続き」と言っても行き先が空。
+  const meta = useProjectStore((s) => s.meta);
+  const canResumeWizard = hasWizardBrief(meta);
 
   const toDraft = (
     <button className="btn btn-primary btn-icon" onClick={() => onNavigate("draft")}>
@@ -44,7 +52,19 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       // 生成中画面の2択（#393 P1）と同じ＝どの画面から見ても復帰の仕方が変わらない。ラベルも共有する（§6）。
       // 再試行は生成中画面へ送る（そこが作成の進捗・中止の持ち主）。
       <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-        <button className="btn btn-primary" onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>
+        {/* ⚠️ **上限で断ったときは再送を出さない**（PR #1223 レビュー 🟡）＝同じ入力を送り直すと
+            **また超える**。生成中画面と**同じ見分け・同じ行き先**にする（ADR-0026②）。 */}
+        {/* 生成中画面と**同じ見分け**（`generateRecovery`）＝どの画面から見ても次の行動が変わらない。 */}
+        {(() => {
+          const recovery = generateRecovery(aiError);
+          const edit = <button className={`btn ${recovery === "retry" ? "btn-secondary" : "btn-primary"}`} onClick={() => onNavigate("wizard")}>{EDIT_WIZARD_INPUT_LABEL}</button>;
+          const retry = <button className={`btn ${recovery === "retry" ? "btn-primary" : "btn-secondary"}`} onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>;
+          // 設定を直して戻ってきても失敗の文は残る＝再試行を控えめに残す（生成中画面と同じ・PR3 レビュー 🟡）。
+          if (recovery === "settings") return <><button className="btn btn-primary" onClick={() => onNavigate("settings")}>{OPEN_AI_SETTINGS_LABEL}</button>{retry}</>;
+          if (recovery === "editInput") return edit;
+          if (recovery === "shortenInput") return <>{edit}{retry}</>;
+          return retry;
+        })()}
         <button className="btn btn-secondary" onClick={() => { startManualEdit(); onNavigate("draft"); }}>
           {START_MANUAL_LABEL}
         </button>
@@ -55,10 +75,30 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
       // たたき台は自分自身なので送り先が無く、作りかけの動画案に場面を足させるのも避けたい＝待たせる（唯一ボタン無し）。
       canAddScene ? undefined : toDraft
     ) : canAddScene ? (
-      <button className="btn btn-primary" onClick={onAddScene}>
-        <PlusIcon size={18} />
-        場面を追加
-      </button>
+      // ⚠️ **入力の続きがあるときは、そちらを主にする**（#985）＝
+      // ウィザードの途中で保存した人が本当にやりたいのは「続きを入れてたたき台を作る」で、
+      // 手で場面を並べることではない。**手動の道も残す**（消さない）。
+      <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
+        {/* ⚠️ **白紙から作った動画にも出す**（#1003・決定 (a)）＝出さないと、白紙で始めた人は
+            **AIにたたき台を作ってもらう道が永久に無い**（会社情報が無いと渡すものが無い）。
+            ⚠️ **言い方は分ける**＝まだ何も入れていないのに「続き」と言うと、在りもしないものを指す。 */}
+        {/* ⚠️ **白紙のときは「場面を追加」を主のままにする**（PR #1028 レビュー 🟡）＝
+            決定 (a) の理由は「**通るかどうかは利用者が決める**」なので、道を出すことと
+            **そちらを勧めること**は別。白紙は「手で組み立てる道」（#393）なので、
+            主操作はそのまま置き、会社情報の入口は**控えめに**添える。
+            入力がある動画では、続きへ戻るのが主（#985 のまま）。 */}
+        <button
+          className={canResumeWizard ? "btn btn-primary btn-icon" : "btn btn-secondary btn-icon"}
+          onClick={() => onNavigate("wizard")}
+        >
+          {canResumeWizard ? RESUME_WIZARD_LABEL : ADD_WIZARD_INPUT_LABEL}
+          <ChevronRightIcon size={18} />
+        </button>
+        <button className={canResumeWizard ? "btn btn-secondary" : "btn btn-primary"} onClick={onAddScene}>
+          <PlusIcon size={18} />
+          場面を追加
+        </button>
+      </div>
     ) : (
       toDraft
     );

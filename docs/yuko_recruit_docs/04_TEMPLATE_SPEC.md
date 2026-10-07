@@ -1,8 +1,12 @@
 # テンプレート仕様書
 
+> ⚠️ **これは解説です**。見た目パターンの**形の正典は [`schemas/template.schema.json`](schemas/template.schema.json)** と [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md)。**食い違ったら正典が正しい**（`CLAUDE.md §0`）。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 目的
 
-本資料は、「ゆうこ採用ムービーメーカー」におけるテンプレート、すなわちユーザー向け表現でいう「見た目パターン」の仕様を定義する。
+本資料は、「すたりお（stario）」におけるテンプレート、すなわちユーザー向け表現でいう「見た目パターン」の仕様を定義する。
 
 テンプレートは、AIが生成した動画構成JSONを実際の画面レイアウトに変換するためのルールである。
 

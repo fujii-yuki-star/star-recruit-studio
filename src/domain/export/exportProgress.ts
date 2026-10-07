@@ -1,22 +1,34 @@
 // 書き出しの進捗イベント（#376）。Rust の export_video が phase ごとに emit し、ExportScreen が encoding 段のバーを
-// 実進捗（80→100%）で描く。純粋関数（副作用なし・§7 テスト対象）。UI 文言は非技術者向け（§2-3・「テロップ」→「字幕」）。
+// 実進捗（80→100%）で描く。純粋関数（副作用なし・§7 テスト対象）。UI 文言は非技術者向け（§2-3）。
 
-/** 書き出し中の段階。encode＝場面ごとエンコード（step/total 有効）／join＝結合／telop＝字幕合成／bgm＝BGM合成。 */
-export type ExportPhase = 'encode' | 'join' | 'telop' | 'bgm';
+/**
+ * 書き出し中の段階。encode＝場面ごとエンコード（step/total 有効）／join＝結合／bgm＝BGM合成／
+ * loudness＝音量をそろえるだけ（BGM 無し・#259）。
+ * ⚠️ **BGM が無いのに「BGMを合わせています」と出さない**（PR #896 レビュー ℹ️）＝
+ * 音を整えるだけでも同じ段を通るので、段を分けて事実どおりの文言にする（§2-5）。
+ * 旧・タイムラインのテロップ合成（`telop`）は #635 で退役＝**誰も emit しない段は持たない**（#663）。
+ */
+export type ExportPhase = 'encode' | 'join' | 'bgm' | 'loudness';
 
-/** Rust から届く進捗イベント（"export_progress"）。step/total は encode のみ有効（他は 0）。 */
+/** Rust から届く進捗イベント（"export_progress"）。step/total は **encode と join** で有効（bgm/loudness は 0）。 */
 export interface ExportProgressEvent {
   phase: ExportPhase;
   step: number;
   total: number;
 }
 
-// レンダリング段（場面フレーム焼き）が 0–80%、エンコード段（結合・字幕・BGM）が 80–100% を受け持つ（#391/#376）。
+// レンダリング段（場面フレーム焼き）が 0–80%、エンコード段（結合・BGM）が 80–100% を受け持つ（#391/#376）。
 const ENCODE_BASE = 80;
-// 各段の到達点（%）。encode は step/total で 80→92 を滑らかに、後段は段階的に上げる。100 は完了(done)時に別途。
-const ENCODE_SPAN = 12; // 80→92
-const JOIN_PCT = 94;
-const TELOP_PCT = 96;
+// 各段の到達点（%）。encode は step/total で 80→90 を滑らかに、つなぐ段も step/total で 90→97。
+const ENCODE_SPAN = 10; // 80→90
+/** つなぐ段の始点（%）。 */
+const JOIN_BASE = 90;
+/**
+ * つなぐ段の幅（%）。⚠️ **点ではなく幅を持たせる**（#1214）＝
+ * 実測（80場面30分）で**つなぐ段が全体の48%・6.5分**を占めるのに、バーは**94%の一点**だった。
+ * 30分では**後半12分バーが動かず**、利用者は「壊れた」と判断して中止する。
+ */
+const JOIN_SPAN = 7; // 90→97
 const BGM_PCT = 98;
 
 /**
@@ -30,12 +42,15 @@ export function exportEncodePercent(e: ExportProgressEvent): number {
       const ratio = Math.min(1, Math.max(0, e.step / e.total));
       return ENCODE_BASE + Math.round(ratio * ENCODE_SPAN);
     }
-    case 'join':
-      return JOIN_PCT;
-    case 'telop':
-      return TELOP_PCT;
+    case 'join': {
+      // ⚠️ **総数が分からない回は始点のまま**＝分からないのに動かすと、**嘘の進み具合**になる。
+      if (e.total <= 0) return JOIN_BASE;
+      const ratio = Math.min(1, Math.max(0, e.step / e.total));
+      return JOIN_BASE + Math.round(ratio * JOIN_SPAN);
+    }
     case 'bgm':
-      return BGM_PCT;
+    case 'loudness':
+      return BGM_PCT; // 同じ段（音を作る）なので進み具合は同じ
   }
 }
 
@@ -45,11 +60,14 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
     case 'encode':
       return e.total > 1 ? `映像を作成しています（${Math.min(e.step, e.total)}/${e.total}）` : '映像を作成しています';
     case 'join':
-      return 'つなぎ合わせています';
-    case 'telop':
-      return '字幕を重ねています';
+      // ⚠️ **数字を添える**（#1214）＝6.5分かかる段なので、文だけだと「止まった」に見える。
+      return e.total > 0
+        ? `つなぎ合わせています（${Math.min(e.step, e.total)}/${e.total}秒）`
+        : 'つなぎ合わせています';
     case 'bgm':
       return 'BGMを合わせています';
+    case 'loudness':
+      return '音量をそろえています';
   }
 }
 
@@ -58,8 +76,21 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
  * ここを**単一の参照元**にし、store の `ExportPhase` はこれを別名にする（§2-7）。`phase: string` にすると
  * 値を rename しても型エラーにならず、進捗が黙って 0% に落ちる（この差分が潰した「止まって見える」の再発）。
  */
-export const EXPORT_RUN_PHASES = ['idle', 'rendering', 'encoding', 'done', 'error', 'unsupported', 'cancelled'] as const;
-export type ExportRunPhase = (typeof EXPORT_RUN_PHASES)[number];
+export const EXPORT_RUN_PHASE = {
+  idle: 'idle',
+  /** 保存先を選んでもらっている（タイムライン形式・#631）。**ここも走行中に数える**＝ダイアログを
+   *  開いている間に押し直しても書き出しが二重に走らない。まだ何も描いていないので進捗は出さない。 */
+  preparing: 'preparing',
+  rendering: 'rendering',
+  encoding: 'encoding',
+  done: 'done',
+  error: 'error',
+  unsupported: 'unsupported',
+  cancelled: 'cancelled',
+} as const;
+
+export const EXPORT_RUN_PHASES = Object.values(EXPORT_RUN_PHASE);
+export type ExportRunPhase = (typeof EXPORT_RUN_PHASE)[keyof typeof EXPORT_RUN_PHASE];
 
 /** 書き出しの実行状態のうち、進捗の表示に要る分（`ExportRunState` の部分集合＝domain は store に依存しない）。 */
 export interface ExportProgressState {
@@ -106,13 +137,28 @@ export function exportProgressLabel(run: ExportProgressState, opts?: { compact?:
 }
 
 /**
- * 進捗バーに添える見出し（粗い状態）。`06_UI_SPEC §12` の「動画を書き出しています」に合わせる。
+ * 進捗バーに添える見出し（粗い状態）。`06_UI_SPEC §13` の「動画を書き出しています」に合わせる。
  * 段階の細かい説明は `exportProgressLabel` が受け持つ＝見出しと詳細で別の状態名を出さない（ADR-0026②）。
  */
 export function exportHeadingLabel(run: ExportProgressState): string {
   if (run.phase === 'done') return '保存しました';
   if (run.phase === 'rendering' || run.phase === 'encoding') return '動画を書き出しています';
+  // ⚠️ **始めた段にも言葉を出す**（#993 ①・PR #1025 レビュー 🟡）＝この段を作ったのに、
+  // 見出しは空・数字は 0% のままだった＝**「押した瞬間に始まったと分かる」と書きながら、
+  // 画面はほとんど何も言っていなかった**（言い分が実装より強い）。
+  if (run.phase === 'preparing') return '準備しています';
   return '';
+}
+
+/**
+ * 進み具合を**数で言えるか**（#993 ①）。
+ *
+ * ⚠️ **言えない段に数を出さない**＝`preparing` は保存先を選んでもらっている間と、
+ * 場面ぜんぶの下ごしらえ＝**どれだけ進んだかを持っていない**。0% と出すと「止まっている」に見え、
+ * 動かすと嘘になる。**わからない区間の見せ方**（流れるバー）へ倒す。
+ */
+export function hasExportPercent(phase: ExportRunPhase): boolean {
+  return phase !== 'preparing';
 }
 
 /**
@@ -131,7 +177,7 @@ export function isExportFinished(phase: ExportRunPhase): boolean {
  * 実行状態は次の書き出しまで残す（`15 §1` 実行時状態。書き出し中に画面を移っても進捗が見えるように＝#379/P2-1）。
  * そのため画面を離れて戻ると「100%・保存しました」「失敗しました」が**いま起きたことのように**出続け、
  * 直したはずの内容が既に書き出せている／たったいま失敗した、と誤読させる（ADR-0026④）。
- * 過去のことだと分かる言い方にし、そのうえで次の行動（もう一度「動画を保存」）を示す（§2-5）。
+ * 過去のことだと分かる言い方にし、そのうえで次の行動（もう一度「動画を書き出す」）を示す（§2-5）。
  *
  * 走行中・未実行（`idle`/`rendering`/`encoding`/`unsupported`）は空文字＝呼び出し側で phase を場合分けしない。
  */
@@ -139,12 +185,12 @@ export function pastExportNotice(phase: ExportRunPhase): string {
   switch (phase) {
     case 'done':
       // 「完了しています」で止めると、そのあとの編集も入っていると読める。保存し直せることまで言う。
-      return '前回の書き出しは完了しています。そのあとに動画を直したときは、もう一度「動画を保存」を押すと、いまの内容で保存し直せます。';
+      return '前回の書き出しは完了しています。そのあとに動画を直したときは、もう一度「動画を書き出す」を押すと、いまの内容で保存し直せます。';
     case 'error':
       // 失敗の中身（原因と次の行動）は書き出し画面がこの下に出す。ここは「いつのことか」だけを足す。
       return '前回の書き出しは失敗しました。';
     case 'cancelled':
-      return '前回の書き出しは中止しました。もう一度「動画を保存」を押すと、やり直せます。';
+      return '前回の書き出しは中止しました。もう一度「動画を書き出す」を押すと、やり直せます。';
     default:
       return '';
   }

@@ -8,6 +8,7 @@ import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvi
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { DEFAULT_AI_MODEL } from '../appSettings';
 import { GEMINI_PROVIDER, aiGenerate } from '../aiClient';
+import { AI_PLAN_UNREADABLE_MESSAGE } from './messages';
 
 /** ログ用に生応答を安全な長さへ切り詰める（含まれるのは AI の構成案＝鍵や送信元データではない。巨大化を防ぐ）。 */
 function headForLog(raw: string): string {
@@ -48,6 +49,6 @@ export class GeminiProvider implements AiProvider {
       応答先頭: headForLog(raw),
     });
     // throw 文言は §2-5 準拠の「次の行動」つき（store が status:"error" 時に表示し、利用者が手動で再試行）。
-    throw new Error('AIからの提案を読み取れませんでした。もう一度お試しください。');
+    throw new Error(AI_PLAN_UNREADABLE_MESSAGE);
   }
 }

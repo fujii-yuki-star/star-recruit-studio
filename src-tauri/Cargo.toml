@@ -1,6 +1,6 @@
 [package]
 name = "star-recruit-studio"
-version = "0.4.3"
+version = "0.5.0"
 description = "ゆうこ採用ムービーメーカー (working name: star-recruit-studio)"
 authors = ["Star System"]
 edition = "2021"
@@ -28,4 +28,15 @@ reqwest = { version = "0.12", features = ["json"] }
 # APIキーは OS 資格情報ストアに保存（§13§7）。MVP は Windows 優先（CLAUDE.md §3）＝Windows 資格情報マネージャ。
 # 他OS対応時は target 別 feature（apple-native / sync-secret-service 等）を追加する。
 keyring = { version = "3", features = ["windows-native"] }
+tauri-plugin-single-instance = "2.4.4"
+# 混み合っているときに待ち直す（#1244）。⚠️ **新しい依存を増やしていない**＝`tauri` と `reqwest` が
+# すでに使っている非同期基盤を、必要な機能（時計）だけ直に指しているだけ。
+tokio = { version = "1", features = ["time", "sync", "macros"] }
+# 同梱のローカル LLM のモデルを照合する（ADR-0051 決定14）。
+sha2 = "0.10"
+# ディスクの空きを調べる（#1211）。⚠️ **新しい依存を増やしていない**＝すでに依存の木にある
+# `windows-sys` を、必要な機能だけ直に指しているだけ（`GetDiskFreeSpaceExW`）。
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

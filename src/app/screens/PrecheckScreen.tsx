@@ -7,9 +7,12 @@ import { useExportCapability } from "../hooks/useExportCapability";
 import { standardLookFixesForUnresolved } from "../../domain/template/templateSelection";
 import { standardLookButtonReason, standardLookResultMessage } from "../uiLabels";
 import { PageHead } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { ExportLockBanner } from "../components/ExportLockBanner";
-import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
+import { CheckIcon } from "../components/icons";
 import { NoScenesState } from "../components/NoScenesState";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 
@@ -17,14 +20,34 @@ interface PrecheckProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
-const severityStyle: Record<PrecheckItem["severity"], { label: string; color: string; bg: string }> = {
-  ok: { label: "問題なし", color: "var(--color-success)", bg: "var(--color-primary-soft)" },
-  warning: { label: "注意", color: "var(--color-warn)", bg: "var(--color-yellow)" },
-  action: { label: "要対応", color: "var(--color-danger)", bg: "var(--color-danger-soft)" },
+const severityStyle: Record<PrecheckItem["severity"], { label: string; badge: string }> = {
+  ok: { label: "問題なし", badge: "badge-success" },
+  warning: { label: "注意", badge: "badge-yellow" },
+  action: { label: "要対応", badge: "badge-danger" },
+};
+
+/**
+ * 公開前チェックの「戻る」ラベル（来た画面ごと・#1026）。入口はこの2つ。
+ *
+ * ⚠️ **仕上がり確認と同じ形にする**（`PREVIEW_BACK_LABEL`）＝もとは常に「場面編集へ戻る」で、
+ * **来ていない画面**を指していた（§2-5＝次の行動が実際と違う）。
+ */
+const PRECHECK_BACK_LABEL: Partial<Record<ScreenId, string>> = {
+  preview: "仕上がり確認へ戻る",
+  export: "書き出しへ戻る",
+  // 流れの帯の段から来たとき（ADR-0048 追補 2026-10-05）。
+  draft: "たたき台へ戻る",
+  "scene-edit": "場面編集へ戻る",
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes } = useProjectStore();
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
+  // 来た画面（既知の入口以外・未設定は仕上がり確認＝順路の1つ手前）。
+  const precheckReturnTo = useProjectStore((s) => s.precheckReturnTo);
+  const precheckBackTo: ScreenId =
+    precheckReturnTo && PRECHECK_BACK_LABEL[precheckReturnTo] ? precheckReturnTo : "preview";
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, userFontsUnreadable, refreshUserFonts } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
   // 「まとめて標準にする」の結果（直した件数・入れ直しが要る場面）。この画面に取り消しの入口が無いため
@@ -42,18 +65,47 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     void autoGenerateIfSafe();
   }, [status, autoGenerateIfSafe]);
 
+  // ⚠️ **開くたびに調べ直す**（#347）＝素材はアプリの外で動かされるので、書き出す直前に確かめる。
+  useEffect(() => { void refreshMissingAssets(); }, [refreshMissingAssets]);
+  // 持ち込みフォント（#261）も同じ理由で開くたびに調べ直す＝アプリの外で消されうる。
+  useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
+
+  /**
+   * 声の一括生成に失敗したとき（VOICEVOX 未起動など）の「次の行動」（§2-5）。
+   *
+   * ⚠️ **枝の両方で描く**（PR #953 レビュー）＝この画面は場面ゼロと場面ありで `return` が分かれており、
+   * 以前は本編の枝にしか置いていなかったので、**場面ゼロのときだけ理由が消えて**いた（#952 と同じ型）。
+   */
+  const narrationNotice = narrationError ? (
+    <div className="notice notice-warn mt" role="alert">
+      <span>{narrationError}</span>
+    </div>
+  ) : null;
+
   // 場面ゼロは「全項目問題なし」に見えて書き出しに進めてしまう（押すと保存先選択後に失敗）＝空状態で止める（#403）。
   if (scenes.length === 0) {
     return (
       <div className="main-scroll">
         <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
         <ExportLockBanner onNavigate={onNavigate} />
+        {/* ⚠️ **場面ゼロの枝でも知らせを描く**（PR #953 レビュー）＝声の一括生成に失敗した理由は
+            この枝では握り潰されていた。たたき台と同じ形（#952）＝**枝がある画面は全部に置く**。 */}
+        {narrationNotice}
         <NoScenesState purpose="ここで公開前チェックができます" onNavigate={onNavigate} />
       </div>
     );
   }
 
-  const baseItems = buildPrecheckItems(scenes, assets, templates, meta.timelineOverlay?.animations);
+  const baseItems = buildPrecheckItems(
+    scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds, meta.bgmSettings?.assetId,
+    // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
+    // ⚠️ **読めなかったときは一覧を渡さない**（差分再監査）＝一度成功したあとに失敗すると
+    // `userFontIds` は古いまま残るので、渡すと「調べられません」と「N つ見つかりません」が
+    // **同時に**出る（互いに矛盾する2つの断り）。
+    { projectFontId: meta.videoSettings.fontId, userFontsUnreadable, ...(userFontIds && !userFontsUnreadable ? { availableUserFontIds: userFontIds } : {}) },
+    // 早口の判定と「セリフを直す」を声の速さに合わせる（#1318・場面編集の AI 補助と同じ解決）。
+    meta.voiceSettings,
+  );
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;
   const items: PrecheckItem[] = capNotice
@@ -62,30 +114,58 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         ...baseItems,
       ]
     : baseItems;
+  // 項目の「直す」から場面編集へ（#400）。ひっかかっている場面の並びも預ける＝場面編集で「公開前チェックへ戻る」と
+  // 「次の場面」を出す（UI/UX 監査 2026-10-02＝以前は最初の1場面だけ開き、残りは毎回チェックへ戻って入り直していた）。
+  // セリフを直すときはセリフ欄へ寄り、AI 補助の候補をすぐ出す（ADR-0053 決定2）。
+  const openScenes = (item: PrecheckItem): void => {
+    if (item.sceneId) setEditingSceneId(item.sceneId);
+    useProjectStore.getState().setSceneEditTrail({ label: item.label, sceneIds: item.sceneIds ?? (item.sceneId ? [item.sceneId] : []) });
+    // ⚠️ **無い項目は消して置く**＝前に置いた印が残っていると、押してもいない手伝いを頼む・違う節へ寄る。
+    useProjectStore.getState().setEditingSceneFocus(item.focus ?? (item.assist ? "narration" : null));
+    useProjectStore.getState().setEditingSceneAssist(item.assist ?? null);
+    onNavigate("scene-edit");
+  };
   const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;
   // 書き出し不可（unavailable/toolMissing）のときだけ事前にブロック。fallback は予備方式で書き出せるので進める。
   const capabilityBlocked = capability != null && blocksExport(capability);
   // 残っていると書き出しが**必ず失敗する**項目（見た目欠け・動画配置不可・再生タイミング＝#547 P2-5）。
   // 「直せば良くなる」警告（字幕が長い・声が未作成）とは分け、主ボタンを止める根拠にする。
   // 止めないと、保存先を選ばせた後に §2-5 エラーで落ちる＝手戻りが大きい（ADR-0026④）。
-  // 書き出し画面の「動画を保存」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
+  // 書き出し画面の「動画を書き出す」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
   // 既に算出済みの items を絞るだけ＝重い buildPrecheckItems を二度走らせない。
   const blockingItems = items.filter(isExportBlocking);
   // 「まとめて標準にする」で直せる場面（store の一括適用と**同じ判定**＝押せるのに何も起きない、を作らない）。
   const standardFixes = standardLookFixesForUnresolved(scenes, templates, meta.videoSettings.aspectRatio);
   const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
+  // 書き出せない理由（押す前に見せる＝§2-5）。流れの帯の「進む」の下に出す。
+  const exportBlockedReason = capabilityBlocked
+    ? capNotice?.detail
+    : blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "precheck") : null;
   return (
     <div className="main-scroll">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る（来た画面）と進む（書き出し）を上へそろえた。以前は表の下にあった。
+          ⚠️ **来た画面へ戻る**（#1026）＝入口は仕上がり確認と書き出しの2つ。 */}
+      <FlowBar
+        current="precheck"
+        back={{ label: PRECHECK_BACK_LABEL[precheckBackTo] ?? "", onClick: () => onNavigate(precheckBackTo) }}
+        next={{ label: "このまま書き出す", onClick: () => onNavigate("export"), disabled: exportBlocked, reason: exportBlockedReason }}
+        // 段「5 書き出し」も進むと同じ条件で止める（同じ先へ別の道で抜けさせない）。
+        stepBlocked={{ export: exportBlocked ? exportBlockedReason ?? "書き出す前に直す項目があります" : null }}
+        onJump={(to) => flowJump("precheck", to, onNavigate)}
+      />
       <PageHead
         title="公開前チェック"
         desc="動画を書き出す前に内容を点検しました。気になる項目は直してから進めましょう。"
       />
+      {/* ⚠️ **両方の枝に置く**（UI/UX レビュー①）＝場面ゼロの枝にだけ置いてあり、
+          **場面がある普通の状態で書き出し中に来ると、進捗も「書き出しへ戻る」導線も出なかった**。 */}
+      <ExportLockBanner onNavigate={onNavigate} />
 
       {/* サマリ */}
       <div className="card-grid cols-3 mb">
         <div className="card text-center">
-          <div className="page-title" style={{ color: "var(--color-danger)" }}>{count("action")}</div>
+          <div className="page-title" style={{ color: "var(--color-danger-text)" }}>{count("action")}</div>
           <div className="text-muted text-sm">要対応</div>
         </div>
         <div className="card text-center">
@@ -115,7 +195,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
               return (
                 <tr key={item.id}>
                   <td>
-                    <span className="badge" style={{ background: s.bg, color: s.color }}>
+                    <span className={`badge ${s.badge}`}>
                       {item.severity === "ok" && <CheckIcon size={12} />}
                       {s.label}
                     </span>
@@ -130,7 +210,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         // 「声を作成」はラベルどおりその場で一括生成する（従来は場面編集へ飛ぶだけだった＝#403）。
                         // 進捗・中止は他画面と同じ共通操作を使う（この画面だけ進捗が無かった＝#547 P2-6・ADR-0026②）。
                         <span className="col gap-xs" style={{ alignItems: "flex-start" }}>
-                          <BulkVoiceControls label={item.action} buttonClassName="btn btn-ghost btn-icon text-sm" />
+                          <BulkVoiceControls source={sceneBulkVoice} label={item.action} buttonClassName="btn btn-ghost btn-icon text-sm" />
                         </span>
                       ) : item.id === "sceneTemplate" ? (
                         // 見た目が見つからない場面（TEMPLATE_NOT_FOUND）。自動では置換しない方針なので、
@@ -138,10 +218,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         <span className="row gap-sm">
                           <button
                             className="btn btn-ghost btn-icon text-sm"
-                            onClick={() => {
-                              if (item.sceneId) setEditingSceneId(item.sceneId);
-                              onNavigate("scene-edit");
-                            }}
+                            onClick={() => openScenes(item)}
                           >
                             {item.action}
                           </button>
@@ -158,13 +235,11 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                           </button>
                         </span>
                       ) : (
-                        // その他（字幕を短く/動画を直す）は該当場面を指定してから場面編集へ（#400）。
+                        // その他（字幕を短く/動画を直す/セリフを直す）は該当場面を指定してから場面編集へ（#400）。
+                        // セリフを直すときはセリフ欄へ寄り、AI 補助の候補をすぐ出す（ADR-0053 決定2）。
                         <button
                           className="btn btn-ghost btn-icon text-sm"
-                          onClick={() => {
-                            if (item.sceneId) setEditingSceneId(item.sceneId);
-                            onNavigate("scene-edit");
-                          }}
+                          onClick={() => openScenes(item)}
                         >
                           {item.action}
                         </button>
@@ -202,39 +277,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         </div>
       )}
 
-      {/* 声の一括生成に失敗したとき（VOICEVOX 未起動など）は「次の行動」を示す（§2-5）。 */}
-      {narrationError && (
-        <div className="notice notice-warn mt" role="alert">
-          <span>{narrationError}</span>
-        </div>
-      )}
+      {narrationNotice}
 
-      {/* 操作 */}
-      <div className="row-between mt-lg">
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("scene-edit")}>
-          <ArrowLeftIcon size={16} />
-          場面編集へ戻る
-        </button>
-        <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={() => onNavigate("export")}
-            disabled={exportBlocked}
-          >
-            このまま書き出す
-            <ChevronRightIcon size={18} />
-          </button>
-          {capabilityBlocked ? (
-            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
-              この端末では動画を保存できません。上の確認結果で問題の項目を解消してから、もう一度お試しください。
-            </span>
-          ) : blockingItems.length > 0 ? (
-            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
-              {exportBlockedMessage(blockingItems, "precheck")}
-            </span>
-          ) : null}
-        </div>
-      </div>
     </div>
   );
 }

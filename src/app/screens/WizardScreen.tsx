@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, ORIENTATION, VIDEO_KIND, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
@@ -8,11 +8,15 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
-import { isTauri } from "../../infrastructure/assetFs";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
+import { describingIn } from "../store/assetDescribeQueue";
+import { WIZARD_VOICE_LABEL, DESCRIBING_LABEL, describingRemainMessage, describingWaitingMessage, droppedRejectMessage, MAKE_WITHOUT_WAIT_LABEL, ORIENTATION_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
+import { stepsFor, WIZARD_STEP, wizardBackLabel } from "./wizardSteps";
+import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { saveButtonLabel } from "../components/saveButtonLabel";
+import { prepareLocalAi } from "../../infrastructure/aiClient";
+import { AI_ENGINE, getAiEngine } from "../../infrastructure/appSettings";
 import {
   ArrowLeftIcon,
   SaveIcon,
@@ -30,60 +34,51 @@ interface WizardProps {
 
 // 動画の種類（ADR-0011）。表示名は正典 06§3。目的の選択肢はこの種類で切り替わる。
 const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
-  { id: VIDEO_KIND.recruit, label: "採用動画", desc: "会社・仕事の魅力を求職者に伝える" },
-  { id: VIDEO_KIND.general, label: "一般動画・社内発表", desc: "社内発表・報告・製品紹介など" },
+  { id: VIDEO_KIND.recruit, label: VIDEO_KIND_LABEL[VIDEO_KIND.recruit], desc: "会社・仕事の魅力を求職者に伝える" },
+  { id: VIDEO_KIND.general, label: VIDEO_KIND_LABEL[VIDEO_KIND.general], desc: "社内発表・報告・製品紹介など" },
 ];
 
 // 画面の向き（ADR-0012）。横型＝従来、縦型＝スマホ向け。寸法は videoSettings.aspectRatio から導出（§2-7）。
 const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
-  { id: ORIENTATION.landscape, label: "横型（16:9）", desc: "パソコン・テレビ・YouTube向け" },
-  { id: ORIENTATION.portrait, label: "縦型（9:16）", desc: "スマホ・ショート動画向け" },
+  { id: ORIENTATION.landscape, label: ORIENTATION_LABEL[ORIENTATION.landscape], desc: "パソコン・テレビ・YouTube向け" },
+  { id: ORIENTATION.portrait, label: ORIENTATION_LABEL[ORIENTATION.portrait], desc: "スマホ・ショート動画向け" },
 ];
 
-// ステップ見出しは videoKind で2番目だけ変える（採用＝会社情報 / 一般＝発表の内容）。
-function stepsFor(videoKind: VideoKind): string[] {
-  const second = videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力";
-  return ["動画の種類と目的", second, "写真・動画を追加", "読み上げの声を設定", "ゆうこに動画案を作ってもらう"];
-}
-
 const yukoAdvice: Record<number, string[]> = {
-  0: [
+  [WIZARD_STEP.kind]: [
     "まずは、動画の種類と目的を選びましょう。",
     "種類や目的に合わせて、わたしが構成のたたき台を考えます。",
   ],
-  1: [
+  [WIZARD_STEP.brief]: [
     "会社情報は、あとからでも直せます。分かるところだけ入れてくださいね。",
     "「アピールしたいこと」は、求職者に伝えたい魅力を短く書くのがおすすめです。",
   ],
-  2: [
+  [WIZARD_STEP.materials]: [
     "写真や動画があると、動画がぐっと魅力的になります。",
     "なくても大丈夫。あとから追加もできますよ。",
   ],
-  3: [
-    "読み上げの声の感じを選べます。落ち着いた声、明るい声などがあります。",
-    "あとで仕上がりを聞きながら調整もできます。",
-  ],
-  4: [
+  [WIZARD_STEP.ready]: [
     "準備ができたら、わたしが動画のたたき台を作ります。",
-    "できあがった内容は、自由に確認・修正できますよ。",
+    "読み上げの声の感じもここで選べます。あとで仕上がりを聞きながら調整もできますよ。",
   ],
 };
 
 // 一般・社内発表のときの step1 アドバイス（会社情報ではなく発表内容）。
 const generalStep1Advice = [
   "動画のテーマと、話す順番（構成）を決めましょう。",
-  "伝えたい要点を箇条書きにすると、ゆうこが分かりやすくまとめます。",
+  "伝えたい要点を箇条書きにすると、AIが分かりやすくまとめます。",
 ];
 
 function adviceFor(step: number, videoKind: VideoKind): string[] {
-  if (step === 1 && videoKind === VIDEO_KIND.general) return generalStep1Advice;
+  if (step === WIZARD_STEP.brief && videoKind === VIDEO_KIND.general) return generalStep1Advice;
   return yukoAdvice[step] ?? [];
 }
 
 export function WizardScreen({ onNavigate }: WizardProps) {
   // ステップは store に保持した値から開く（#401）：サイドバー離脱→復帰や confirm「キャンセル」で
   // step0 に戻らず直前のステップを再開する（新規/読込では 0）。
-  const [step, setStep] = useState(() => useProjectStore.getState().wizardStep);
+  // ⚠️ **前の版で覚えた段は収める**＝声の段を外したので、以前の「最後の段（4）」は無い段を指す。
+  const [step, setStep] = useState(() => Math.min(useProjectStore.getState().wizardStep, WIZARD_STEP.ready));
   // ウィザードは現在のプロジェクト(meta)を初期値にする＝「ここまで保存」後に開き直しても消えない
   // （未入力でも空文字で上書きしてしまう問題を避ける。applyProjectInfo は companyInfo を全置換するため）。
   const initialMeta = useProjectStore.getState().meta;
@@ -116,10 +111,16 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, removeAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, describingKeys, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
+
+  // 入力を始めたら、このパソコンの中で動画案を作る部品を裏で起動しておく（ADR-0052 決定6・#1293）＝「作る」を押してからの
+  // 起動と照合の待ちを、入力している間に済ませる。待たない・失敗しても何も出さない（押したときに同じ起動をもう一度試す）。
+  useEffect(() => {
+    if (getAiEngine() === AI_ENGINE.local) void prepareLocalAi();
+  }, []);
 
   // 現在ステップを store に同期（離脱で消えないように・#401）。初回は store と同値ゆえ no-op。
   useEffect(() => {
@@ -140,10 +141,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
         tone,
       });
     } else {
-      // recruit では tone を渡さない（将来の明示入力まで既存 toneSettings を維持）。対象視聴者は recruitTarget を使う。
+      // 対象視聴者は recruitTarget を使う。トーンは採用でも選べる（2026-10-01・ADR-0052 追補10）。
       applyProjectInfo({
         ...common,
         companyInfo: { companyName, industry, businessDescription, recruitTarget, jobType, strengths, desiredPerson },
+        tone,
       });
     }
   }
@@ -172,19 +174,41 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
+  // 同梱の AI がまだ読んでいる素材（UI/UX 監査 2026-10-02）。⚠️ **この動画の素材だけ**数える＝列には前の動画の分が残りうる
+  //（素材の番号は動画ごとに振り直すので、番号だけでは見分けられない＝動画の番号で絞る）。
+  const projectId = useProjectStore((st) => st.meta.projectId);
+  const describing = describingIn(describingKeys, projectId);
+  const describingCount = materials.filter((a) => describing.has(a.assetId)).length;
+  // 「読み終わってから作る」を選んで待っているか＝読み終わったら、そのまま次へ進む。
+  const [waitDescribe, setWaitDescribe] = useState(false);
+  const goConfirm = (): void => {
+    setWaitDescribe(false);
+    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
+    onNavigate("confirm");
+  };
+  const goConfirmRef = useRef(goConfirm);
+  useEffect(() => {
+    goConfirmRef.current = goConfirm;
+  });
+  // ⚠️ **段を離れたら待つのをやめる**（`back` で落とす）＝戻って入力を直している最中に、読み終わった瞬間勝手に進まない。
+  useEffect(() => {
+    if (waitDescribe && step === WIZARD_STEP.ready && describingCount === 0) goConfirmRef.current();
+  }, [waitDescribe, step, describingCount]);
 
-  function onUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void addAsset(file);
-    e.target.value = "";
-  }
-
-  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
-  async function onPickAsset() {
-    const path = await showOpenAssetDialog();
-    if (path) await addAssetByPath(path);
-  }
+  // 素材の選び方（アプリ＝ネイティブの「開く」／ブラウザ＝隠し input）は共有する（#712）。
+  // ここは見た目が「大きな枠」なので部品は使えないが、**分岐だけは1か所**（`useAssetPicker`）。
+  // ⚠️ **取り込み中は押せなくする**（#858 レビュー）＝ここだけ `disabled` を渡しておらず、
+  //    取り込み中に選び直すと**まとめて渡した分がそっくり落ちていた**（歩き回って戻ると
+  //    「開く」を出している最中の印〔`picking`〕も消えるので、押せてしまう）。
+  // ⚠️ **落とせるようにする**（#1026 ②）＝破線の枠とアップロードの絵なのに、落としても無反応だった
+  //    （初めての人が最初に試す操作）。通らなかったものは黙って捨てず、その場で知らせる。
+  const [dropReject, setDropReject] = useState<string[]>([]);
+  const assetPicker = useAssetPicker({
+    onPick: addAssets,
+    disabled: isImporting,
+    acceptsDrop: true,
+    onReject: setDropReject,
+  });
 
   // 箇条書き（強み・章立て・要点）共通の追加ロジック。
   function addItem(raw: string, list: string[], setList: (v: string[]) => void, clear: () => void) {
@@ -205,12 +229,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
 
   function next() {
     // 一般は発表内容ステップでテーマ未入力のまま進めない（schema は title 必須・§2-5 の「次の行動」を示す）。
-    if (step === 1 && videoKind === VIDEO_KIND.general && !title.trim()) {
+    if (step === WIZARD_STEP.brief && videoKind === VIDEO_KIND.general && !title.trim()) {
       setFormError("動画のテーマ・タイトルを入力してください。");
       return;
     }
     // 採用は会社情報ステップで会社名未入力のまま進めない（schema は companyName 必須・minLength 1・#414・§2-5）。
-    if (step === 1 && videoKind === VIDEO_KIND.recruit && !companyName.trim()) {
+    if (step === WIZARD_STEP.brief && videoKind === VIDEO_KIND.recruit && !companyName.trim()) {
       setFormError("会社名を入力してください。");
       return;
     }
@@ -225,6 +249,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   }
   function back() {
     setFormError(null);
+    setWaitDescribe(false);
     if (step > 0) setStep(step - 1);
     else onNavigate("home");
   }
@@ -238,7 +263,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           <ExportLockBanner onNavigate={onNavigate} />
           {/* ステッパー */}
           <div className="stepper">
-            {steps.map((label, i) => (
+            {steps.map(({ label }, i) => (
               <div
                 key={label}
                 className={`step${i === step ? " active" : ""}${i < step ? " done" : ""}`}
@@ -257,7 +282,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
 
           <div className="card">
             {/* ステップ1: 目的 */}
-            {step === 0 && (
+            {step === WIZARD_STEP.kind && (
               <>
                 <h2 className="section-title">どんな動画を作りますか？</h2>
                 {/* 動画の種類（採用/一般）。選ぶと下の「目的」の選択肢が切り替わる（ADR-0011）。 */}
@@ -321,7 +346,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             )}
 
             {/* ステップ2: 会社情報 */}
-            {step === 1 && (
+            {step === WIZARD_STEP.brief && (
               <>
                 <h2 className="section-title">
                   {videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力"}
@@ -332,12 +357,19 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {videoKind === VIDEO_KIND.recruit && (
                   <>
                 <div className="field">
+                  {/* ⚠️ **必須は欄の側でも分かるようにする**（#1026）＝未入力だと「次へ」で
+                      止められるのに、**押して初めて分かる**形だった（§2-5＝先に言う）。
+                      ⚠️ **色だけで伝えない**＝読み上げにも届くよう、文字（必須）で書く。
+                      ⚠️ **欄そのものにも印を付ける**（`aria-required`・PR #1035 レビュー ℹ️）＝
+                      文字は `<label>` 経由で読み上げられるが、**「必須」を専用に知らせる**読み上げ
+                      ソフトはこちらを見る（片方だけだと、そのソフトでは必須と分からない）。 */}
                   <label className="field-label" htmlFor="companyName">
-                    会社名
+                    会社名<span className="text-sm" style={{ color: "var(--color-danger-text)", marginLeft: 4 }}>（必須）</span>
                   </label>
                   <input
                     id="companyName"
                     className="input"
+                    aria-required="true"
                     value={companyName}
                     onChange={(e) => {
                       setCompanyName(e.target.value);
@@ -447,10 +479,14 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {videoKind === VIDEO_KIND.general && (
                   <>
                     <div className="field">
-                      <label className="field-label" htmlFor="title">テーマ・タイトル</label>
+                      {/* ⚠️ **必須は欄の側でも分かるようにする**（#1026・上と同じ理由）。 */}
+                      <label className="field-label" htmlFor="title">
+                        テーマ・タイトル<span className="text-sm" style={{ color: "var(--color-danger-text)", marginLeft: 4 }}>（必須）</span>
+                      </label>
                       <input
                         id="title"
                         className="input"
+                        aria-required="true"
                         value={title}
                         onChange={(e) => {
                           setTitle(e.target.value);
@@ -549,31 +585,33 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         maxLength={GENERAL_TARGET_AUDIENCE_MAX_LEN}
                       />
                       <div className="row-between field-hint">
-                        <span>誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</span>
+                        <span>誰に向けた動画かを書くと、AIが言葉づかいを合わせます（任意）。</span>
                         <span>{targetAudience.length}/{GENERAL_TARGET_AUDIENCE_MAX_LEN}</span>
-                      </div>
-                    </div>
-                    <div className="field">
-                      <label className="field-label">トーン（話し方の雰囲気）</label>
-                      <div className="card-grid cols-2">
-                        {TONE_PRESETS.map((t) => (
-                          <button
-                            key={t}
-                            className="action-card"
-                            aria-pressed={tone === t}
-                            style={{
-                              borderColor: tone === t ? "var(--color-primary)" : undefined,
-                              background: tone === t ? "var(--color-primary-soft)" : undefined,
-                            }}
-                            onClick={() => setTone(t)}
-                          >
-                            <span className="action-card-title">{t}</span>
-                          </button>
-                        ))}
                       </div>
                     </div>
                   </>
                 )}
+
+                {/* 話し方の雰囲気は採用・一般どちらでも選べる（2026-10-01 利用者判断＝口調で言い回しを変える・ADR-0052 追補10）。 */}
+                <div className="field">
+                  <label className="field-label">トーン（話し方の雰囲気）</label>
+                  <div className="card-grid cols-2">
+                    {TONE_PRESETS.map((t) => (
+                      <button
+                        key={t}
+                        className="action-card"
+                        aria-pressed={tone === t}
+                        style={{
+                          borderColor: tone === t ? "var(--color-primary)" : undefined,
+                          background: tone === t ? "var(--color-primary-soft)" : undefined,
+                        }}
+                        onClick={() => setTone(t)}
+                      >
+                        <span className="action-card-title">{t}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="field">
                   <label className="field-label" htmlFor="additionalNotes">
@@ -599,49 +637,41 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             )}
 
             {/* ステップ3: 写真・動画 */}
-            {step === 2 && (
+            {step === WIZARD_STEP.materials && (
               <>
                 <h2 className="section-title">写真・動画を追加</h2>
                 <p className="page-desc mb">
                   会社の写真や動画を追加すると、動画がより魅力的になります。
                 </p>
                 <label
+                  {...assetPicker.labelProps}
                   className="card-tight text-center"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    if (isTauri()) {
-                      e.preventDefault();
-                      void onPickAsset();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      if (isTauri()) {
-                        void onPickAsset();
-                      } else {
-                        e.currentTarget.querySelector("input")?.click();
-                      }
-                    }
-                  }}
                   style={{
-                    border: "2px dashed var(--color-border-strong)",
-                    background: "var(--color-surface-alt)",
+                    // 落とし込みが上に来たら**受けられることを見た目で言う**（枠だけでは伝わらない）。
+                    border: `2px dashed ${assetPicker.dropOver ? "var(--color-primary)" : "var(--color-border-strong)"}`,
+                    background: assetPicker.dropOver ? "var(--color-primary-weak, var(--color-surface-alt))" : "var(--color-surface-alt)",
                     padding: "var(--gap-xl)",
                     display: "block",
                     cursor: "pointer",
                   }}
                 >
                   <UploadIcon size={32} className="text-faint" />
-                  <p className="mt text-muted">ここから写真や動画を選んでください</p>
+                  {/* ⚠️ **落とせることを言う**＝見た目が落とし枠なのに文が「選んでください」だけだと、
+                      最初に試す操作（落とす）が案内されていない。 */}
+                  <p className="mt text-muted">ここに写真や動画を落とすか、下から選んでください</p>
                   <span className="btn btn-primary mt">
                     <UploadIcon size={18} />
                     写真・動画を選ぶ
                   </span>
-                  <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
+                  <input {...assetPicker.inputProps} />
                 </label>
 
+                {dropReject.length > 0 && (
+                  <div className="notice notice-warn row-between mt" role="alert">
+                    <span>{droppedRejectMessage(dropReject)}</span>
+                    <button className="btn btn-ghost text-sm" onClick={() => setDropReject([])}>閉じる</button>
+                  </div>
+                )}
                 {importError && (
                   <div className="notice notice-warn row-between mt" role="alert">
                     <span>{importError}</span>
@@ -651,7 +681,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 {materials.length > 0 ? (
                   <div className="col gap-sm mt">
                     <p className="field-hint">
-                      各素材に説明を付けると、ゆうこが使いどころを判断しやすくなります（任意）。
+                      各素材にメモを付けると、AIが使いどころを判断しやすくなります（任意）。
                     </p>
                     {materials.map((a) => (
                       <div key={a.assetId} className="row gap-sm" style={{ alignItems: "flex-start" }}>
@@ -673,8 +703,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           )}
                         </div>
                         <div className="grow">
-                          <div className="text-sm" style={{ fontWeight: 600, marginBottom: 4 }}>
-                            {a.displayName}
+                          <div className="text-sm row gap-sm" style={{ fontWeight: 600, marginBottom: 4 }}>
+                            <span>{a.displayName}</span>
+                            {describing.has(a.assetId) && <span className="text-faint" style={{ fontWeight: 400 }}>{DESCRIBING_LABEL}</span>}
                           </div>
                           <input
                             className="input"
@@ -682,7 +713,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                             onChange={(e) =>
                               updateAsset(a.assetId, (x) => ({ ...x, description: e.target.value }))
                             }
-                            placeholder="この素材の説明（例：オフィスの様子）"
+                            placeholder="この素材のメモ（例：オフィスの様子）"
                           />
                         </div>
                         {/* 間違えて選んだ素材を外せるようにする（#547 P3-8）。まだ場面はできていない（生成前）ので
@@ -709,40 +740,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               </>
             )}
 
-            {/* ステップ4: 読み上げの声 */}
-            {step === 3 && (
-              <>
-                <h2 className="section-title">読み上げの声を設定</h2>
-                <p className="page-desc mb">
-                  動画で話す「読み上げの声」の感じを選べます。
-                </p>
-                <div className="card-grid cols-3">
-                  {VOICE_STYLE_PRESETS.map((v) => (
-                    <button
-                      key={v.id}
-                      className="action-card"
-                      aria-pressed={voiceType === v.id}
-                      style={{
-                        borderColor:
-                          voiceType === v.id ? "var(--color-primary)" : undefined,
-                        background:
-                          voiceType === v.id ? "var(--color-primary-soft)" : undefined,
-                      }}
-                      onClick={() => setVoiceType(v.id)}
-                    >
-                      <span className="action-card-title">{v.label}</span>
-                      <span className="action-card-desc">{v.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="field-hint mt">
-                  話す速さや声の高さは、あとから設定画面でも調整できます。
-                </p>
-              </>
-            )}
-
-            {/* ステップ5: 動画案を作る */}
-            {step === 4 && (
+            {/* 最後の段: 動画案を作る（読み上げの声もここで選ぶ＝声の段は外した・ADR-0048 追補 2026-10-05） */}
+            {step === WIZARD_STEP.ready && (
               <div className="text-center" style={{ padding: "var(--gap-lg) 0" }}>
                 <div
                   className="action-card-icon"
@@ -758,28 +757,68 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 </div>
                 <h2 className="section-title">準備ができました</h2>
                 <p className="page-desc" style={{ maxWidth: 460, margin: "0 auto" }}>
-                  入力いただいた内容をもとに、ゆうこが動画のたたき台を作ります。
+                  入力いただいた内容をもとに、AIが動画のたたき台を作ります。
                   作ったあとは、自由に確認・修正できます。
                 </p>
-                <button
-                  className="btn btn-primary btn-lg mt-lg"
-                  onClick={() => {
-                    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
-                    onNavigate("confirm");
-                  }}
-                >
-                  <SparkleIcon size={20} />
-                  ゆうこに動画案を作ってもらう
-                </button>
+                {/* 読み上げの声（ADR-0048 追補 2026-10-05＝声の段を外し、ここで小さく選ぶ）。既定のままでも作れる。 */}
+                <div role="group" aria-labelledby="wizard-voice-label" style={{ maxWidth: 640, margin: "var(--gap-lg) auto 0", textAlign: "left" }}>
+                  <div id="wizard-voice-label" className="field-label">{WIZARD_VOICE_LABEL}</div>
+                  <div className="card-grid cols-3">
+                    {VOICE_STYLE_PRESETS.map((v) => (
+                      <button
+                        key={v.id}
+                        className="action-card"
+                        aria-pressed={voiceType === v.id}
+                        style={{
+                          borderColor:
+                            voiceType === v.id ? "var(--color-primary)" : undefined,
+                          background:
+                            voiceType === v.id ? "var(--color-primary-soft)" : undefined,
+                        }}
+                        onClick={() => setVoiceType(v.id)}
+                      >
+                        <span className="action-card-title">{v.label}</span>
+                        <span className="action-card-desc">{v.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="field-hint">話す速さや声の高さは、あとから設定画面や場面ごとにも変えられます。</p>
+                </div>
+                {describingCount === 0 ? (
+                  <button className="btn btn-primary btn-lg mt-lg" onClick={goConfirm}>
+                    <SparkleIcon size={20} />
+                    AIに動画案を作ってもらう
+                  </button>
+                ) : (
+                  // ⚠️ **まだ読んでいる写真があるなら、待つか待たないかを選ばせる**（UI/UX 監査 2026-10-02）＝
+                  //   以前は黙って作られ、写真の説明が無いぶん案の質が落ちても気づけなかった。待つ方を主にする。
+                  <div className="col gap-sm mt-lg" style={{ alignItems: "center" }} data-testid="wizard-describing">
+                    <p className="notice notice-info" style={{ maxWidth: 460, margin: 0 }} role="status">
+                      {waitDescribe ? describingWaitingMessage(describingCount) : describingRemainMessage(describingCount)}
+                    </p>
+                    <div className="row gap-sm" style={{ justifyContent: "center" }}>
+                      {!waitDescribe && (
+                        <button className="btn btn-primary btn-lg" onClick={() => setWaitDescribe(true)}>
+                          <SparkleIcon size={20} />
+                          {WAIT_DESCRIBE_LABEL}
+                        </button>
+                      )}
+                      <button className="btn btn-secondary btn-lg" onClick={goConfirm}>
+                        {MAKE_WITHOUT_WAIT_LABEL}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           {/* 操作ボタン */}
           <div className="row-between mt-lg">
+            {/* ⚠️ **行き先名を言う**（`06 §2` 規約3・#1026）＝段によって出る先が変わる。 */}
             <button className="btn btn-ghost" onClick={back}>
               <ArrowLeftIcon size={18} />
-              戻る
+              {wizardBackLabel(step, steps)}
             </button>
             <div className="row gap-sm">
               <button
@@ -791,7 +830,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 disabled={saveStatus === "saving"}
               >
                 <SaveIcon size={18} />
-                {saveButtonLabel(saveStatus)}
+                {saveButtonLabel(saveStatus, saveBlockedReason)}
               </button>
               {step < steps.length - 1 && (
                 <button className="btn btn-primary" onClick={next}>
@@ -803,7 +842,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           </div>
         </div>
 
-        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} />
+        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} pose="guide" />
       </div>
     </div>
   );

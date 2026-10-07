@@ -1,25 +1,35 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SyntheticEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
+import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { sceneTypeLabel } from "../adapters";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import type { PanelSpec } from "../components/layout/PanelLayoutView";
+import { usePanelLayout } from "../components/layout/usePanelLayout";
+import { PANEL_SCREEN, SPLIT_DIR, emptyLayout } from "../../domain/layout/panelLayout";
 import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
-import type { Layer } from "../../domain/template/types";
-import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
+import { editableTextKeys, usedTextKeys, withTextFontId } from "../../domain/template/layerOps";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReason, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { prunePerUseMaps } from "../../domain/project/perUseMaps";
-import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { perUseEntriesFor, prunePerUseMaps, withPerUseEntries } from "../../domain/project/perUseMaps";
+import type { PerUseEntries } from "../../domain/project/perUseMaps";
+import { animationsForElement, vanishedAnimationTargets } from "../../domain/project/animationOps";
+import type { ElementAnimation } from "../../domain/project/types";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, isTextFreeElement, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { GroupList } from "../components/GroupList";
-import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { EditorToolbar } from "../components/EditorToolbar";
+import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -31,7 +41,7 @@ import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
-import { subtitleOverflowsCanvas } from "../../renderer/layout";
+import { layoutScene, subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -39,45 +49,63 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
+import { TransitionTiles } from "../components/TransitionTiles";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
+import { KeyboardNudge } from "../components/KeyboardNudge";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { useEscapeReceiver } from "../hooks/escapeOwners";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
-import { isTauri } from "../../infrastructure/assetFs";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
+import { AssetImportButton } from "../components/AssetImportButton";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
+import { AssetThumb } from "../components/AssetThumb";
+import { SlotDropOverlay } from "../components/SlotDropOverlay";
+import { slotDropTargets, type SlotDropTarget } from "../components/slotDropTargets";
+import { usePointerDrag } from "../hooks/usePointerDrag";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
-import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
+import { ThumbPicker, type ThumbOption } from "../components/ThumbPicker";
+import { assignableAssetsFor, emptySlotLayerIds, isAssignableToLayer, slotForAsset } from "../../domain/template/slotAssign";
+import { AiSuggest } from "../components/AiSuggest";
+import { ASSIST_KIND, sceneSpokenText } from "../../domain/ai/assist";
+import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { AI_ASSIST_LINE_KINDS, AI_ASSIST_NARRATION_KINDS, AI_ASSIST_SUBTITLE_KINDS, AI_ASSIST_TITLE_KINDS, FONT_INHERIT_PROJECT_LABEL, FONT_INHERIT_SCENE_LABEL, freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, sceneTemplateProblemMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_PRECHECK_LABEL, sceneEditTrailLabel, TRAIL_PREV_LABEL, TRAIL_NEXT_LABEL, LAST_SCENE_DELETE_HINT } from "../uiLabels";
+import { isKnownFontId, fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { ColorPicker } from "../components/ColorPicker";
-import { DEFAULT_TEXT_COLOR, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
+import { DEFAULT_TEXT_COLOR, DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY, DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS, DEFAULT_LINE_HEIGHT, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, bandBackground, defaultStrokeColor, enabledShadow, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { SceneThumb } from "../components/SceneThumb";
+import { buildSampleScene } from "./looksShared";
+import { SECTION_SCOPE } from "../components/sectionOpen";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { ContextMenu } from "../components/ContextMenu";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
+import { textKeyOfLayer } from "../../domain/template/layerOps";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
   SearchIcon,
   PhotoIcon,
-  VideoIcon,
-  MusicIcon,
-  UploadIcon,
   PlusIcon,
   SaveIcon,
   TrashIcon,
-  ChevronRightIcon,
   PlayIcon,
   StopIcon,
-  ArrowLeftIcon,
   PencilIcon,
 } from "../components/icons";
+import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
 
 interface SceneEditProps {
   onNavigate: (screen: ScreenId) => void;
@@ -85,92 +113,31 @@ interface SceneEditProps {
 
 type AssetFilter = "all" | "image" | "video" | "bgm";
 
-// 場面編集パネルのレイアウト設定（#276）。左パネルは折りたたみ、右パネルは横幅をドラッグで調整（localStorage に保存）。
-const RIGHT_MIN_WIDTH = 260;
-const RIGHT_MAX_WIDTH = 560;
-const LEFT_WIDTH = 240;
-const LEFT_COLLAPSED_WIDTH = 44;
-const LS_RIGHT_WIDTH = "sceneEdit.rightWidth";
-const LS_LEFT_COLLAPSED = "sceneEdit.leftCollapsed";
-const LS_SECTION_OPEN = "sceneEdit.sectionOpen";
-function loadRightWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(LS_RIGHT_WIDTH));
-    return v >= RIGHT_MIN_WIDTH && v <= RIGHT_MAX_WIDTH ? v : 300;
-  } catch { return 300; }
-}
-function loadLeftCollapsed(): boolean {
-  try { return localStorage.getItem(LS_LEFT_COLLAPSED) === "1"; } catch { return false; }
-}
-
 /**
- * 節の開閉の記憶（#550 ③）。**場面をまたぐだけなら元から保たれる**（節は再マウントされない）が、
- * 台本表/仕上がり確認へ行って戻ると画面ごと作り直されて忘れる＝毎回開き直す手間になっていた。
- * 右パネルの幅・左パネルの折りたたみ（#276）と同じ「場面編集パネルのレイアウト設定」なので、同じく localStorage に置く。
- * キーは節の見出し（安定・少数）。壊れた値・保存不可（プライベートモード等）は既定へ倒す＝編集を止めない。
+ * この画面が持つ欄（ADR-0033 段階4）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
+ * **#276（左の折りたたみ・右幅のドラッグ）でやっていたことは、配置の仕組みそのものに置き換わった**
+ * ＝画面ごとの作り分けをやめる（§6）。**#550（節の開閉・既定の表示量）はそのまま**＝あれは欄の
+ * **中身**の話で、配置とは別の層（ADR-0033 段階4）。
  */
-type SectionOpenMap = Record<string, boolean>;
-function loadSectionOpen(): SectionOpenMap {
-  try {
-    const v: unknown = JSON.parse(localStorage.getItem(LS_SECTION_OPEN) ?? "{}");
-    if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
-    return Object.fromEntries(Object.entries(v).filter(([, b]) => typeof b === "boolean")) as SectionOpenMap;
-  } catch { return {}; }
-}
+const PANEL_ID = { assets: "assets", preview: "preview", scenes: "scenes", edit: "edit" } as const;
+const PANEL_IDS = Object.values(PANEL_ID);
 /**
- * 「選択した要素だけ編集」（#179）の記憶（#550 ②）。既定 ON。節の開閉（③）と同じ理由で覚える＝
- * 既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
+ * 「選択した要素だけ編集」（#179）の記憶（#550 ②）の**置き場**。既定 ON。
+ * 節の開閉（③）と同じ理由で覚える＝既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
+ *
+ * ⚠️ **気軽に変えない**＝変えると利用者の記憶がこの好みぶん消える。
  */
-const LS_FOCUS_FREE = "sceneEdit.focusSelectedFree";
-function loadFocusSelectedFree(): boolean {
-  try {
-    const v = localStorage.getItem(LS_FOCUS_FREE);
-    return v === null ? true : v === "1"; // 未設定＝既定 ON
-  } catch { return true; }
-}
-function saveFocusSelectedFree(on: boolean): void {
-  try { localStorage.setItem(LS_FOCUS_FREE, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
-}
+export const LS_FOCUS_FREE = "sceneEdit.focusSelectedFree";
+/** 覚えが無いときの姿＝**選択した要素だけ編集する**（#550 ②）。 */
+export const FOCUS_FREE_DEFAULT = true;
+// ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
+// 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
+// ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
+// ADR-0033「読めない/壊れている値は既定として扱う」と食い違っていたので、寄せて揃えた。
+/** 覚えを読む（**配線ごと**検査で留めるため外へ出す＝鍵と既定を取り違えても気づける）。 */
+export const loadFocusSelectedFree = (): boolean => getBooleanSetting(LS_FOCUS_FREE, FOCUS_FREE_DEFAULT);
+const saveFocusSelectedFree = (on: boolean): void => setBooleanSetting(LS_FOCUS_FREE, on);
 
-function saveSectionOpen(title: string, open: boolean): void {
-  try {
-    localStorage.setItem(LS_SECTION_OPEN, JSON.stringify({ ...loadSectionOpen(), [title]: open }));
-  } catch { /* 保存できなくても編集は続けられる（次回は既定で開く/畳む） */ }
-}
-
-// 場面編集の右欄の節を開閉できるアコーディオン（#276）。details/summary ベース。
-// 内部 state を持つので親（SceneEditScreen）の再描画でも開閉が保たれる（モジュール定義＝再マウントしない）。
-// さらに開閉を localStorage へ覚える（#550 ③）＝画面を往復しても開き直さなくてよい。
-function CollapsibleSection({ title, storageKey, defaultOpen = true, children }: {
-  title: string;
-  /**
-   * 記憶のキー（#550 レビュー P3）。既定は見出しそのもの。**見出しが状態で変わる節は必ず渡す**＝
-   * 例「〜の見た目（この場面だけ変更中）」（#555）は上書きの有無で見出しが変わるため、素で使うと記憶が
-   * 2キーに割れて「上書き中に開いた記憶」が非上書き時に引かれない（記憶が当てにならなくなる）。
-   */
-  storageKey?: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  const memoKey = storageKey ?? title;
-  // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む。
-  const [open, setOpen] = useState(() => loadSectionOpen()[memoKey] ?? defaultOpen);
-  const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
-    const next = e.currentTarget.open;
-    // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
-    // 素通しにすると「触ってもいない節の既定値」が保存され、**将来 既定を変えても既存利用者に届かなくなる**
-    // （記憶が既定を上書きし続ける）。利用者が実際に開閉したときだけ覚える。
-    if (next === open) return;
-    setOpen(next);
-    saveSectionOpen(memoKey, next);
-  };
-  return (
-    <details className="accordion" open={open} onToggle={onToggle}>
-      <summary className="accordion-summary">{title}</summary>
-      <div className="accordion-body">{children}</div>
-    </details>
-  );
-}
 
 // FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
 // 見分けやすさのため一覧/チップ/詳細見出しで共有する（グループ名＝#9 と同じ「オブジェクトに名前」UX）。
@@ -204,26 +171,6 @@ function freeStrokeSwatch(el: FreeElement): string {
 
 // キーボード微調整/削除の window 購読（#525-11）。SceneEditScreen は early return を持つため hooks を含む購読は子へ切り出す
 // （親 JSX 内で描画＝マウント時に一貫して hooks を呼ぶ・rules-of-hooks を満たす）。入力欄フォーカス中は無視。描画なし。
-function KeyboardNudge({ active, onArrow, onDelete }: {
-  active: boolean;
-  onArrow: (dx: number, dy: number) => void;
-  onDelete: () => void;
-}) {
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-      const d = keyboardNudgeDelta(e.key, e.shiftKey);
-      if (d) { e.preventDefault(); onArrow(d.dx, d.dy); return; }
-      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onDelete(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [active, onArrow, onDelete]);
-  return null;
-}
-
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
 // 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
 // 掛け合いの行ごとの声パラメータ（話す速さ/声の高さ/抑揚）。設定画面と同じ voiceParams スライダーを流用（#242）。
@@ -231,10 +178,12 @@ function KeyboardNudge({ active, onArrow, onDelete }: {
 function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, onReset }: { label: string; range: ParamRange; value: number | null | undefined; lowLabel: string; highLabel: string; onChange: (v: number) => void; onReset: () => void }) {
   const isSet = value != null;
   const { dragGroup } = useHistoryGroup(); // ドラッグ中の連続変更を1履歴に（#389）
+  // 見出しと滑りを結ぶ id（#1075）。行ごとに何個でも並ぶので、**重ならない id** を作る。
+  const fieldId = useId();
   return (
     <div className="field" style={{ margin: "8px 0 0" }}>
       <div className="row-between" style={{ alignItems: "center" }}>
-        <label className="field-label text-sm" style={{ margin: 0 }}>{label}</label>
+        <label className="field-label text-sm" style={{ margin: 0 }} htmlFor={fieldId}>{label}</label>
         {isSet ? (
           <button type="button" className="btn btn-ghost text-sm" style={{ padding: "0 6px", height: 22 }} onClick={onReset}>全体に合わせる</button>
         ) : (
@@ -242,6 +191,7 @@ function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, on
         )}
       </div>
       <input
+        id={fieldId}
         type="range"
         min={0}
         max={100}
@@ -258,21 +208,6 @@ function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, on
   );
 }
 
-// スロットのユーザー向けラベル（レイヤーid別。複数スロットでも区別できるよう id をキーにする）。
-const slotLabel: Record<string, string> = {
-  background: "背景",
-  mainVisual: "メイン素材",
-  logo: "ロゴ",
-};
-
-// スロットの表示名。未登録 id は layer.type から日本語化し、layer.id の生表示（技術用語漏れ §2-3）を防ぐ。
-function slotLabelFor(layer: Layer): string {
-  if (slotLabel[layer.id]) return slotLabel[layer.id];
-  if (layer.type === "background") return "背景";
-  if (layer.type === "logo") return "ロゴ";
-  return "素材";
-}
-
 const narrationStatusLabel: Record<string, string> = {
   none: "未作成",
   pending: "作成中…",
@@ -287,28 +222,19 @@ function narrationStatusText(status: string): string {
 
 // スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
 function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
-  return assets.filter((a) => {
-    if (layer.type === "logo") return a.assetType === ASSET_TYPE.logo || a.assetType === ASSET_TYPE.image;
-    if (layer.slotType === SLOT_TYPE.image) return a.assetType === ASSET_TYPE.image;
-    if (layer.slotType === SLOT_TYPE.video) return a.assetType === ASSET_TYPE.video;
-    // background / slot(image_or_video) / slotType未指定
-    return a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video;
-  });
-}
-
-function assetThumbClass(type: Asset["assetType"]): string {
-  if (type === ASSET_TYPE.video) return "thumb-video";
-  if (type === ASSET_TYPE.bgm) return "thumb-audio";
-  return "thumb-photo";
+  // 規則は domain に1つ（タイムライン編集と共有＝同じ枠を画面によって別扱いしない・#512 段3）。
+  return assignableAssetsFor(assets, layer);
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
   const {
-    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAsset, addAssetByPath, importError, clearImportError,
-    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
+    status, scenes, templates, assets, assetSrcById, autoGenerateIfSafe, updateScene, importError, clearImportError,
+    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus, saveBlockedReason,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
-    addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
+    addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements, addAnimationsForElement,
   } = useProjectStore();
   // 要素アニメーション（④・ADR-0019）：この場面の FREE 要素に付いた簡易アニメ（timelineOverlay.animations）。
   const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
@@ -321,8 +247,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
+  const companyName = useProjectStore((s) => s.meta.companyInfo?.companyName);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
-  const sceneDnd = useDragReorder(moveSceneToIndex);
+  // 場面カードは横並び。端まで運んだら送る（#714 項目5）＝帯からはみ出したカードへも1回で運べる。
+  const sceneStripRef = useRef<HTMLDivElement | null>(null);
+  const sceneDnd = useDragReorder(moveSceneToIndex, { axis: "x", scroller: () => sceneStripRef.current });
   // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown 開始＋window で終了（取りこぼし防止）。
   const { textGroup, dragGroup } = useHistoryGroup();
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
@@ -337,40 +266,108 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // タイムライン/公開前チェックの「場面を直す」）で残留値が誤採用される（#400 レビュー）。null/不在は先頭場面へ。
   // subscribe せず getState で読む＝破棄時の再描画を避ける（selectedId は state 保持されるので消えない）。
   const [selectedId, setSelectedId] = useState(() => useProjectStore.getState().editingSceneId ?? "");
+  // ⚠️ **どの欄から見せるかも一度きりで受ける**（#995 ③・`editingSceneId` と同じ流儀）＝
+  // たたき台の「セリフ」「素材」「見た目」は**3つとも同じ場所へ行く**だけで、
+  // 行き先でその欄に寄る仕掛けが無かった（＝押した言葉と着地がずれる）。
+  // ⚠️ **初期化子で捕まえる**＝上の後始末（`null` へ戻す）より前に読む必要がある。
+  const [focus] = useState(() => useProjectStore.getState().editingSceneFocus);
+  /**
+   * 公開前チェックから来たときの**ひっかかっている場面の並び**（UI/UX 監査 2026-10-02）＝戻る先をチェックにし、
+   * 「次の場面へ（2/8）」で順に直せる。⚠️ 落とすのは画面の行き来の入口（`App` の `navigate`・`keepsSceneEditTrail`）＝仕上がり確認との往復だけ持ち越し、ほかへ出たら消える。
+   */
+  const [trail] = useState(() => useProjectStore.getState().sceneEditTrail);
+  /**
+   * 掛け合いで「AI に頼む」を出す行（UI/UX 監査 2026-10-02）＝以前は**行ごとに**「短く／丁寧に／やわらかく」が並び、縦に長くなっていた。
+   * **最後に焦点を入れた行だけ**に出す（ボタンを押すと焦点は外れるので、外れても消さない）。まだ選んでいなければ最初の行。
+   */
+  // ⚠️ **場面ごとに持つ**＝行の番号は場面ごとに振る（`line_001`…）ので、行だけで覚えると別の場面の同じ番号の行に出る（PR #1341 レビュー）。
+  const [activeLine, setActiveLine] = useState<{ sceneId: string; lineId: string } | null>(null);
+  // 公開前チェックから来たとき、開いた場面のセリフ欄ですぐ頼む AI 補助（ADR-0053 決定2）。**その場面に1回だけ**
+  //（別の場面へ移って戻っても頼み直さない）＝頼んだら `null` へ戻す。
+  const [autoAssist, setAutoAssist] = useState(() => {
+    const st = useProjectStore.getState();
+    // ⚠️ 掛け合いの場面では受けない＝セリフ欄の手伝いが無いので、印が残ったまま後で掛け合いを解くと**押してもいないのに頼む**。
+    const target = st.scenes.find((s) => s.sceneId === st.editingSceneId);
+    return st.editingSceneAssist && target && (target.lines?.length ?? 0) === 0 ? { sceneId: target.sceneId, kind: st.editingSceneAssist } : null;
+  });
   // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
   // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。
   // sceneId を持つことで、場面を切り替えたら（sceneId 不一致で）自動的にドラフトが無効化される（effect 不要・別場面の値を見せない）。
   const [durationDraft, setDurationDraft] = useState<{ sceneId: string; value: string } | null>(null);
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
-  // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
-  const [leftCollapsed, setLeftCollapsed] = useState(loadLeftCollapsed);
-  const [rightWidth, setRightWidth] = useState(loadRightWidth);
-  const resizeRef = useRef<{ startX: number; startW: number; latest: number } | null>(null);
-  useEffect(() => { try { localStorage.setItem(LS_LEFT_COLLAPSED, leftCollapsed ? "1" : "0"); } catch { /* noop */ } }, [leftCollapsed]);
-  // 右幅はドラッグ終了時にだけ保存する（毎フレーム書き込みを避けるため effect 依存にはしない・下の onResizeEnd）。
-  // 右パネルの境界をドラッグして幅を変える（左へドラッグ＝広がる）。pointer capture で枠外まで追従。
-  const onResizeDown = (e: ReactPointerEvent) => {
-    e.preventDefault();
-    resizeRef.current = { startX: e.clientX, startW: rightWidth, latest: rightWidth };
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
-  };
-  const onResizeMove = (e: ReactPointerEvent) => {
-    if (!resizeRef.current) return;
-    const delta = resizeRef.current.startX - e.clientX;
-    const w = Math.min(RIGHT_MAX_WIDTH, Math.max(RIGHT_MIN_WIDTH, resizeRef.current.startW + delta));
-    resizeRef.current.latest = w; // 最新値を ref に保持（保存は終了時・closure の遅延に依存しない）
-    setRightWidth(w);
-  };
-  const onResizeEnd = () => {
-    const w = resizeRef.current?.latest;
-    resizeRef.current = null;
-    if (w == null) return; // ドラッグしていない/キャンセルでは保存しない
-    // 幅は終了時にだけ保存（ドラッグ中の毎フレーム localStorage 書き込み＝メインスレッド I/O を避ける・PR#285レビュー）。
-    try { localStorage.setItem(LS_RIGHT_WIDTH, String(w)); } catch { /* noop */ }
-  };
+  /**
+   * セリフ欄は**参照と履歴のまとめの両方**が ref を要る（#847）＝1つにまとめて渡す。
+   * ⚠️ **同一性を保つ**（`useCallback`）＝毎レンダー新しい関数だと、React が前の後始末を呼び直して
+   * **打っている最中にまとめが閉じる**（1文字ごとに1履歴＝上限を食い潰す）。`textGroup` は memo 済み。
+   */
+  const lineFieldRef = useCallback((el: HTMLTextAreaElement | null) => {
+    lineRef.current = el;
+    const closeGroup = textGroup.ref(el);
+    // ⚠️ **参照も後始末で外す**（#847 レビュー ℹ️）＝React は**後始末を返した ref を `null` で呼ばない**
+    // ので、外さないと**消えた欄を掴んだまま**になる。いまは分割ボタンと寿命が同じなので実害は無いが、
+    // 寿命が分かれた瞬間に**古いカーソル位置で場面が割れる**（黙って誤った分割＝§2-5）。
+    return () => { lineRef.current = null; closeGroup(); };
+  }, [textGroup]);
+  // 欄の配置（ADR-0033 段階4）。**既定はいままでの並びと同じ**（左＝素材／中央＝仕上がり確認と場面の並び／
+  // 右＝編集）＝配置を触っていない利用者には、これまでと同じ顔ぶれ・同じ並びが出る。
+  // 出し入れ（読み込み・整え・保存・既定へ戻す）は**共通のフック**が持つ＝画面ごとに書き写さない（§6）。
+  const defaultLayout = useMemo(() => {
+    const l = emptyLayout();
+    l.nodes.left = { panelId: PANEL_ID.assets };
+    l.nodes.center = {
+      dir: SPLIT_DIR.column,
+      sizes: [0.68, 0.32],
+      children: [{ panelId: PANEL_ID.preview }, { panelId: PANEL_ID.scenes }],
+    };
+    l.nodes.right = { panelId: PANEL_ID.edit };
+    return l;
+  }, []);
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+    usePanelLayout(PANEL_SCREEN.scene, defaultLayout, PANEL_IDS);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 場面カードの右クリックメニュー（#772 候補6）＝開いた位置と対象。 */
+  const [sceneMenu, setSceneMenu] = useState<{ sceneId: string; x: number; y: number } | null>(null);
+  /**
+   * **場面を消せるか**（#772 候補6・PR #868 レビュー 🔴）。
+   *
+   * ⚠️ **両方の経路がこの1つを見る**＝欄の側とメニューで**条件を別々に書いたら実際に割れた**
+   *（メニューにだけガードを入れ、コメントには「欄の側と同じ条件」と書いていたが**欄の側には
+   * 無かった**）。ADR-0026② を掲げた PR 自身が、その原則を破っていた。
+   * ⚠️ **最後の1つは消せない**＝`scenes: []` になると選択の解決（`scenes[0]`）が `undefined` になり、
+   * その後の参照で落ちる。
+   */
+  const canDeleteScene = scenes.length > 1;
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
+
+  const deleteSceneHint = canDeleteScene ? undefined : LAST_SCENE_DELETE_HINT;
+
+  /**
+   * メニューから消すときの確認（#772 候補6・`06 §2-1`＝**破壊的な削除は確認を挟む**）。
+   *
+   * ⚠️ **欄の側の `confirmDelete`（真偽値）を使い回さない**＝あちらは欄の中に出るので、
+   * その欄を閉じている／スクロールで見えていないときに**押した結果が見えない**（§2-5）。
+   * ここはメニューと同じ重なりに出す。id で持つのは `confirmDeleteGroupId` 等と同じ流儀
+   *（真偽値だと、確認を出したまま別の場面を選んだときに対象がずれる）。
+   */
+  const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
+  /**
+   * 差し込み口の**置き換えの確認**（#1030 ①）＝空きが無いときに黙って上書きしない（`06 §2` 規約1）。
+   * ⚠️ **早期 return より前**に置く（hooks の並びを揃える）。
+   */
+  const [confirmReplaceSlot, setConfirmReplaceSlot] = useState<
+    { asset: Asset; layerId: string; replacing: string } | null
+  >(null);
+  /**
+   * **掴んでプレビューの差し込み口へ落とす**（#1030 ②）ための道具。
+   * ⚠️ **早期 return より前**に置く（hooks の並びを揃える）。
+   */
+  const beginDrag = usePointerDrag();
+  const [dragging, setDragging] = useState<{ asset: Asset; at: { x: number; y: number }; over: string | null } | null>(null);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // FREE→通常テンプレへ戻すと素材が動画に出なくなる場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
@@ -416,7 +413,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setActiveGroupId(groupId);
   };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
-  const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
+  /**
+   * 写した要素と、その**中身**（#770）。per-use と動きは**写した場面**に紐づくので、貼るときに
+   * 元をたどれるよう一緒に控える（別の場面へ貼ることがある）。
+   */
+  const [freeClipboard, setFreeClipboard] = useState<{ el: FreeElement; perUse: PerUseEntries; animations: ElementAnimation[] } | null>(null);
   // インライン編集中の FREE テキスト要素 id（#549）。オーバーレイから通知され、ScenePreview の hideItemIds へ渡して
   // SVG 側の同じ文字を伏せる＝textarea と二重表示にしない（入力は即 store 反映＝SVG も毎打鍵更新されるため）。
   const [editingFreeId, setEditingFreeId] = useState<string | null>(null);
@@ -439,18 +440,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   }, [status, autoGenerateIfSafe]);
 
   // Escape で kind 別エディタのポップオーバーを閉じる。
-  useEffect(() => {
-    if (!editPopover) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setEditPopover(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editPopover]);
+  // ⚠️ **手前のものから1段ずつはがす**（`06 §12.1`・#714-4）＝この欄の中には色や書体の面が
+  // 入れ子で開き、それらは**撫でていなくても**開いている間ずっと受け持つ（`ColorPicker` は自分で名乗る）。
+  // 掴んでいる間も `usePointerDrag` が名乗るので、並べ替えの中止もこの1つで賄える。
+  // ⚠️ **順番は名簿が見る**（#989）＝以前は自分で窓を購読して `hasEscapeOwner()` を見ていたが、
+  // 名簿へ預ければ「手前から順に渡して、受け取った所で止める」が**自動で効く**。
+  // ⚠️ **名簿へ預ける**（#989）＝自分で窓を購読すると、**打っている最中・変換中の除外**を
+  // 自前で書くことになり、実際に**抜けていた**（このポップオーバーには日本語を打つ「文字」欄がある
+  // ＝変換中の `Escape`〔＝変換をやめる〕でポップオーバーごと閉じていた・`06 §12.1` 違反）。
+  // 預ければ、見送りと入力中の除外が `DeleteConfirm` と同じ1か所に寄る。
+  useEscapeReceiver(editPopover != null, () => {
+    setEditPopover(null);
+    return true;
+  });
 
   // 場面編集を開く「一度きりのペイロード」editingSceneId を消費後に破棄する（#400 レビュー）。
   // 初期化子（上）が捕捉した後にマウント直後で null へ戻す＝editingTemplateId が backToList で戻すのと同じ規律。
   // これで editingSceneId を set しない他導線は「未指定＝先頭場面」の決定的挙動に戻る。getState 経由で依存なし・1回のみ。
   useEffect(() => {
     useProjectStore.getState().setEditingSceneId(null);
+    useProjectStore.getState().setEditingSceneFocus(null);
+    useProjectStore.getState().setEditingSceneAssist(null);
   }, []);
 
 
@@ -459,6 +469,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // この場面で解決済みの CSS font-family（場面→動画全体→既定）。FREE テキストのインライン編集を実描画と同じ
   // 見た目にするためオーバーレイへ渡す（#549）。解決順は ScenePreview／sceneSvg と同じ（要素の fontId は要素側で優先）。
   const sceneFontFamily = fontFamilyForId(resolveFontId(selected?.fontId, fontId));
+  // ⚠️ **継承先の名前は実際の解決先を言う**（#925・ADR-0026①）＝この場面が自分の文字の形を
+  // 持っていれば、種別ごと・部品ごとの「継承」はそこへ合わせる（動画全体ではない）。
+  // 「動画全体に合わせる」と書いてあるのに動画全体の字体にならない、を作らない。
+  const inheritLabelHere = isKnownFontId(selected?.fontId) ? FONT_INHERIT_SCENE_LABEL : FONT_INHERIT_PROJECT_LABEL;
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
@@ -475,7 +489,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const prevTemplate = prevScene ? templates.find((t) => t.templateId === prevScene.templateId) : undefined;
   const transitionPreview = useSceneTransitionPreview(scenes, selectedIdx);
   // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
+  // ⚠️ **重ねて描ける条件まで見る**（#1095 レビュー）＝`transitionActive` は前場面の見た目が解決できるかを見ない。
+  // それだけで再生を始めると、前の場面の見た目が見つからない壊れた動画で**何も重ならないまま再生中**になる
+  // （オーバーレイも「停止」も出ない無言の状態＝ADR-0026④）。
   const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
+
+  /**
+   * 選んだらその場で切り替えを再生する（#1032）。
+   *
+   * ⚠️ **注釈を読ませない**＝以前は「※ 上の『切り替えを見る』で確認できます」と書いて、
+   * 利用者に**別のボタンを探させて**いた（#1031 §3 の「文章依存」3つの型の1つ）。
+   * ⚠️ **場面を切り替えたときは再生しない**＝選び直したときだけ。場面を選ぶたびに動き出すと、
+   * 一覧を見て回るだけで毎回何かが動く（**押していないのに動く**を作らない）。
+   * ⚠️ **効果が無いときは再生しない**（「なし」・最初の場面）＝押しても何も起きない再生をしない。
+   * ⚠️ **早期 return より前に置く**＝フックの順序を場面の有無で変えない。
+   */
+  const transitionKey = selected ? deriveTransitionSelectValue(selected.transition) : null;
+  // 再生の入口は毎レンダー入れ替える（依存に積むと毎回張り替えることになる＝`playRef` と同じ形）。
+  const previewRef = useRef({ transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition });
+  useEffect(() => {
+    previewRef.current = { transition: transitionPreview, motion: motionPreview, canPlay: canPlayTransition };
+  });
+  const lastTransition = useRef({ sceneId: selected?.sceneId, value: transitionKey });
+  useEffect(() => {
+    const prev = lastTransition.current;
+    lastTransition.current = { sceneId: selected?.sceneId, value: transitionKey };
+    if (prev.sceneId !== selected?.sceneId || prev.value === transitionKey) return;
+    // 押しても何も起きない再生を始めない（「なし」・最初の場面・前の場面の見た目が見つからない）。
+    if (!previewRef.current.canPlay) return;
+    previewRef.current.motion.stop(); // 排他：切替を見る間は動き再生を止める（ボタンと同じ扱い）
+    previewRef.current.transition.play();
+  }, [selected?.sceneId, transitionKey]);
+
   // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。
   // 「設定だけできて無効」を避けるため（#469・ADR-0026④）、この組み合わせでは動きUIを設定不可＋理由提示にする。
   const animBlockedByDialogueVideo = motionPreview.hasVideoSlot && !!(selected?.lines && selected.lines.length > 0);
@@ -486,28 +531,64 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     : { options: [], mismatchedCurrent: undefined };
   // 参照先テンプレが存在しない（グローバル削除等で見つからない）現行＝未解決。mismatchedCurrent（Template あり）とは別に扱う（#415 レビュー）。
   const unresolvedCurrent = !!selected && !template;
+  /**
+   * 見た目ピッカーのタイル（#1031）。
+   *
+   * ⚠️ **選べない候補も一覧から消さない**＝合っていない現行・見つからない現行を
+   * 落とすと、「いま何が選ばれているのか」が読めない空の欄になる（#415 P2 の挙動を引き継ぐ）。
+   */
+  const lookOptions: ThumbOption[] = [
+    ...(mismatchedCurrent
+      ? [{ value: mismatchedCurrent.templateId, label: mismatchedCurrent.name, disabled: true, note: PICKER_NOTE.lookMismatched }]
+      : []),
+    ...(unresolvedCurrent && selected
+      ? [{ value: selected.templateId, label: PICKER_MISSING_LABEL.look, disabled: true }]
+      : []),
+    ...pickableOptions.map((t) => ({
+      value: t.templateId,
+      label: t.name,
+      thumb: <SceneThumb scene={buildSampleScene(t, assets)} template={t} />,
+    })),
+  ];
+  /**
+   * 差し込み口の候補（#1031）。
+   *
+   * ⚠️ **いま指しているものが候補に無いときも一覧に残す**（見た目のピッカーと同じ形・
+   * PR #1085 レビュー）＝素材を消しても `assetRefs` は残る（`removeAssets` は場面を触らない）ので、
+   * 候補に無い id を指した状態になりうる。名前だけの一覧だった頃は**先頭（「なし」）が選ばれて見え**、
+   * 入っていないと言いながら実際は消えた素材を指していた（ADR-0026①）。
+   * ⚠️ **「無い」と「この口には入れられない」を言い分ける**＝同じ「出ない」でも次の行動が違う。
+   */
+  const slotOptions = (layer: Layer, assignedId: string | null | undefined): ThumbOption[] => {
+    const usable = assignableFor(layer, assets);
+    const stale = assignedId != null && assignedId !== "" && !usable.some((a) => a.assetId === assignedId);
+    const staleAsset = stale ? assets.find((a) => a.assetId === assignedId) : undefined;
+    return [
+      ...(stale
+        ? [{
+            value: assignedId,
+            label: staleAsset?.displayName ?? PICKER_MISSING_LABEL.asset,
+            note: staleAsset ? PICKER_NOTE.assetNotAssignable : undefined,
+            disabled: true,
+          }]
+        : []),
+      { value: "", label: "なし" },
+      ...usable.map((a) => ({
+        value: a.assetId,
+        label: a.displayName,
+        thumb: <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} />,
+      })),
+    ];
+  };
   // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
   const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
-    template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
+    template?.layers.filter((l) => l.type === LAYER_TYPE.background || l.type === LAYER_TYPE.slot || l.type === LAYER_TYPE.logo) ?? [];
   // 同じラベル（例「素材」）が複数あるスロットは連番で区別する（使用素材UIの区別性・実機FB）。
-  const slotLabels = (() => {
-    const total = new Map<string, number>();
-    for (const l of slotLayers) {
-      const key = slotLabelFor(l);
-      total.set(key, (total.get(key) ?? 0) + 1);
-    }
-    const seen = new Map<string, number>();
-    return slotLayers.map((l) => {
-      const base = slotLabelFor(l);
-      if ((total.get(base) ?? 0) <= 1) return base;
-      const n = (seen.get(base) ?? 0) + 1;
-      seen.set(base, n);
-      return `${base}${n}`;
-    });
-  })();
+  // 付け方はタイムライン編集と**共有**（`slotLabelsFor`）＝同じ差し込み口を画面によって別の名で呼ばない。
+  const slotLabels = slotLabelsFor(slotLayers);
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
@@ -532,15 +613,57 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+
+  /**
+   * 左欄の素材タイルから**差し込み口へ入れる**（#1030 ①）。
+   *
+   * ⚠️ **空きが無いときは黙って置き換えない**（§2-5・`06 §2` 規約1）＝いま入っている素材が
+   * 何の合図も無く消えるので、**先に何が入れ替わるかを見せて**から入れる。
+   * ⚠️ **どの差し込み口かは domain が決める**（`slotForAsset`）＝画面で決めると差し込み口の
+   * 候補と食い違う。
+   */
+  const assignSlot = (layerId: string, assetId: string): void =>
+    patch((sc) => ({ ...sc, assetRefs: { ...sc.assetRefs, [layerId]: assetId } }));
+  /**
+   * 素材の入っていない差し込み口があるか（#1030 ④＝節を開いた状態で出すかの判断）。
+   *
+   * ⚠️ **判定は domain に1つ**（`emptySlotLayerIds`）＝「差し込み口ぜんぶ」ではない。
+   * 空の `background` は**塗り**になり、空の `logo` は**何も置かれない**ので問題ではなく、
+   * 灰色の枠が焼き込まれるのは `slot` だけ（描く側＝`layoutScene` を読んで確かめた）。
+   */
+  const hasEmptySlot = template ? emptySlotLayerIds(template.layers, selected.assetRefs).length > 0 : false;
+  /**
+   * **掴んでプレビューの差し込み口へ落とす**（#1030 ②・ADR-0034 決定2＝二重導線）ときの落とし先。
+   * 箱は描く側（`layoutScene`）が返したものをそのまま使う＝**見えている枠と判定がずれない**。
+   *
+   * ⚠️ **押す道は残す**（#1030 ①）＝**ドラッグでしかできない操作は作らない**（決定19）。
+   * ⚠️ **作法は共有**（`usePointerDrag`）＝左ボタンだけ・少し動かすまで掴まない・
+   * `Escape` と `pointercancel` でやめられる、を画面ごとに書かない。
+   */
+  // ⚠️ **掴んでいる素材ごとに決める**（PR #1042 レビュー 🔴）＝入れられる口だけを出す。
+  //   入らない口の枠を出すと「落とせそうに見えて何も起きない」。判定は押す道と同じ関数。
+  const dropTargets: SlotDropTarget[] =
+    template && dragging ? slotDropTargets(layoutScene(selected, template), slotLayers, selected.assetRefs, dragging.asset) : [];
+  /**
+   * いま指の下にある差し込み口（`elementFromPoint`）。
+   * ⚠️ **枠の座標を自分で計算し直さない**＝拡大率（`previewZoom`）や縦型で
+   * **見えている枠と判定がずれる**。
+   */
+  const slotAt = (x: number, y: number): string | null => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-slot-drop]");
+    return el?.dataset.slotDrop ?? null;
+  };
+  const putAssetIntoSlot = (asset: Asset, target: { layerId: string; replacing: string | null }): void => {
+    if (target.replacing) {
+      setConfirmReplaceSlot({ asset, layerId: target.layerId, replacing: target.replacing });
+      return;
+    }
+    assignSlot(target.layerId, asset.assetId);
+  };
   // テキスト種別ごとのフォント上書き（#178）。null＝継承（その種別のキーを外す＝動画全体/場面に従う）。
+  // 置く／外すの規則は **domain に1つ**（`withTextFontId`）＝2画面3か所に写さない（差分再監査 9巡目 🟡）。
   const setSceneTextFont = (textKey: TextKey, id: FontId | null) =>
-    patch((s) => {
-      const next = { ...(s.textFontIds ?? {}) };
-      if (id) next[textKey] = id;
-      else delete next[textKey];
-      // 全種別を継承に戻したら空オブジェクトを残さず未設定へ（意味のない {} を永続化しない）。
-      return { ...s, textFontIds: Object.keys(next).length ? next : undefined };
-    });
+    patch((s) => ({ ...s, textFontIds: withTextFontId(s.textFontIds, textKey, id) }));
   // テキスト種別ごとの体裁上書き（#555）。undefined＝そのプロパティを継承（キーを外す）＝textFontIds と同じ流儀。
   // プロパティが全部消えたらその種別ごと、種別が全部消えたら textStyles ごと未設定へ（意味のない {} を永続化しない）。
   const setSceneTextStyle = (textKey: TextKey, patchStyle: Partial<TextStyleOverride>) =>
@@ -557,12 +680,50 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isFree = template?.category === FREE_CATEGORY;
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
+  // ⚠️ **休眠の種別ごとフォントも直せるようにする**（差分再監査 6巡目 🟡）＝見た目パターンを替えても
+  //`textFontIds` は残り、書き出しの門は**休眠のぶんも数えて断る**。欄が「いま使う種別」だけだと、
+  // 持ち込みフォントが手元から消えたとき**案内どおりに選び直す先が無い**（§2-5 の行き止まり）。
+  // ⚠️ **見た目パターンが未解決でも出す**（差分再監査 7巡目 ℹ️）＝`textFontIds` は種別のキーなので
+  // 見た目に依らず解ける。解決できたときだけ出すと、そこだけ「値が入っているのに欄が出ない」が残る。
+  // ⚠️ **絞るのは「実際に『文字』節へ出るキー」**（差分再監査 8巡目 🟡）＝あちらの節は自由配置では
+  // 描かれないので、`sceneTextKeys` で絞ると**文字層を持つ自由配置の見た目**（自作できる）で
+  // どちらにも出ないキーができる（門は種類を見ずに数えるので、そのまま行き止まりになる）。
+  const shownTextKeys = isFree ? [] : sceneTextKeys;
+  // ⚠️ **「欄を出すか」と「もう使っていないか」は別の問い**（差分再監査 9巡目 🟡）＝一緒にすると、
+  // **文字層を持つ自由配置の見た目**で「使っていない文字」と**嘘をつく**（`layoutScene` は種類で切らず
+  // その層を描き `textFontIds` を読む＝案内どおり戻すと**動画に出ている字体が変わる**）。しかも
+  // 指定が1つも無くても知らせが出る（片づける対象が無いのに片づけを勧める）。
+  /** ここに欄が要るキー＝門が数えるもののうち「文字」節に出ないもの。 */
+  const extraFontKeys = editableTextKeys(template?.layers ?? [], selected.textFontIds)
+    .filter((k) => !shownTextKeys.includes(k));
+  /**
+   * そのうち**もう描かれない**もの＝知らせ（片づけの勧め）の対象。値が入っているものだけ。
+   *
+   * ⚠️ **見た目が見つからないときは数えない**（差分再監査 10巡目 🟡）＝**調べていない ≠ 使っていない**
+   *（`missingAsset`／#347 と同じ流儀）。未解決だと `sceneTextKeys` が空になるので、そのままだと
+   * 全キーを「使っていない」と呼び、案内どおり戻すと**見た目が戻った時点で字体が黙って変わる**。
+   */
+  const dormantFontKeys = template == null ? [] : extraFontKeys
+    .filter((k) => !sceneTextKeys.includes(k) && selected.textFontIds?.[k] != null);
+  /** 休眠**ではない**ほう＝描かれる／見た目が見つからず調べられない。知らせを分けるための群。 */
+  const otherFontKeys = extraFontKeys.filter((k) => !dormantFontKeys.includes(k));
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
   // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
   // （#587）、配列位置で番号を振ると「上げただけなのに名前が入れ替わる」ことになる。
   const freeAutoIndexById = freeAutoIndexes(freeLayout);
   const freeName = (el: FreeElement): string => freeElementName(el, freeAutoIndexById.get(el.id) ?? 0);
+  // ⚠️ **自由配置の要素のフォントも同じ扱い**（差分再監査 8巡目 🟡）＝門は `freeLayout[].fontId` も
+  // **休眠のぶんまで数える**のに、直す欄は自由配置の場面にしか無い。通常テンプレへ切り替えた場面では
+  // 選び直す先が1つも無くなるので、種類に依らず出る所から直せるようにする。
+  // ⚠️ **こちらにも「調べていない ≠ 使っていない」を効かせる**（差分再監査 11巡目 🟡）＝`isFree` は
+  // 見た目が**見つからないとき false** になるので、素通しだと**全要素が休眠**に落ちる。消えた見た目が
+  // 自由配置なら要素は描かれるので、案内どおり戻すと**見た目が戻った時点で字体が黙って変わる**
+  //（`textFontIds` で直したのと同じ壊れ方＝兄弟経路に残っていた）。
+  const freeFontEls = freeLayout.filter((el) => typeof el.fontId === "string");
+  const dormantFreeFonts = template == null || isFree ? [] : freeFontEls;
+  /** 見た目が見つからず**使っているか調べられない**要素＝「使っていない」とは言わない群。 */
+  const unknownFreeFonts = template == null ? freeFontEls : [];
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
@@ -591,6 +752,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
   const sceneCategories = sceneCategoriesForOrientation(templates, aspectRatio);
+  /**
+   * 見た目の在庫＝**候補ゼロのときに実際にできる手**を決める材料（PR #921 レビュー 🔴）。
+   *
+   * ⚠️ **`> 0` で見る**＝候補ゼロなら**いまの種類はこの一覧に入らない**（この一覧は「この向きで
+   * 1つ以上ある種類」）ので、1つでもあれば**別の種類にある**ということ。`> 1` にすると、
+   * ちょうど1つのときに「種類を変えられない」と誤って案内する。
+   * ⚠️ **読み込めているかは別に見る**＝向きが違うだけでも候補ゼロになりうるので、
+   * 「読み込まれていません」と混ぜると**読み込めているのに嘘**になる。
+   */
+  const lookAvailability = { otherKind: sceneCategories.length > 0, anyLoaded: templates.length > 0 };
   // 「種類」を変えたら、その種類の先頭の見た目へ直接切り替える（同カテゴリ内の詳細は「見た目パターン」で選ぶ）。
   const switchSceneCategory = (category: SceneCategory) => {
     // いまの種類を選び直した＝切替をやめた、として確認も解く（`requestTemplateSwitch` 先頭と同じ挙動・ADR-0026②）。
@@ -642,14 +813,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     updateAnimation(anim.id, withEndOpacity(anim.keyframes, opacity));
     endHistoryGroup();
   };
+  /**
+   * **場面を書き換え、消えたものの動きを対で片づける**（#779）。要素・まとまりが消える経路は
+   * ここ1本に通す（単体削除／一括削除／まとまりごと削除／**まとまりの解除**／**メンバーが消えて
+   * 空になったまとまり**）。
+   *
+   * ⚠️ **呼び出し側に「何が消えるか」を書かせない**＝経路ごとに列挙すると必ずどれかが漏れる
+   *（#779 では解除と空になったまとまりの2経路が漏れ、`group_NNN` の番号再利用で
+   * **後から作った別のまとまりが勝手に動いた**）。更新の前後を突き合わせて消えたものを拾う。
+   *
+   * ⚠️ **`update` は純粋であること**＝消えるものを確定するために**patch の前に1度**適用する
+   *（updater の中で外の変数へ書くと、updater が再実行されたときに壊れる＝`deleteGroupWithMembers`
+   * が既に採っている流儀）。採番を伴う操作（足す・複製する）はここを通さない。
+   * 場面（scene）と動画全体（meta）の更新は履歴のまとめで1手にする（取り消し1回で両方戻る）。
+   *
+   * ⚠️ **場面そのものが消える経路はここではない**＝`removeScene`（store）が同じ履歴の1手で
+   * その場面の動きを落とす（`removeAnimationsForScene`）。ここは**場面の中**の話。
+   */
+  const patchSceneWithCleanup = (update: (s: Scene) => Scene) => {
+    // ⚠️ **前後差は「押した時点のストア」から採る**（レンダー時の写しではない）＝1つの操作で複数回
+    // 呼ぶと、2回目の写しが古くなり「最後のメンバーが消えて空になったまとまり」を取りこぼす
+    //（#779 と同じ型の穴を、呼び方の違いで作り直さない）。`patch` が当たる相手と同じものを見る。
+    const before = useProjectStore.getState().scenes.find((x) => x.sceneId === selected.sceneId) ?? selected;
+    const gone = vanishedAnimationTargets(before, update(before));
+    beginHistoryGroup();
+    patch(update);
+    if (gone.length > 0) removeAnimationsForElements(selected.sceneId, gone);
+    endHistoryGroup();
+  };
+
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
-    // 要素アニメ（④）と per-use マップ（ADR-0028 D6）も孤児にならないよう掃除する。scene（freeLayout/groups/
-    // per-use）＋meta（animations）の更新を履歴グループで1手にまとめる（Undo は1回で全部戻る）。
-    beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
-    removeAnimationsForElements(selected.sceneId, [id]);
-    endHistoryGroup();
+    // per-use マップ（ADR-0028 D6）も孤児にしない。**動きの掃除は `patchSceneWithCleanup` が持つ**
+    // ＝消えた要素だけでなく、**メンバーが消えて空になったまとまり**の動きも一緒に落ちる（#779）。
+    patchSceneWithCleanup((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
   };
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
@@ -660,11 +857,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    // 一括削除でも要素アニメ（④）と per-use マップ（ADR-0028 D6）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
-    beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
-    removeAnimationsForElements(selected.sceneId, ids);
-    endHistoryGroup();
+    // 一括削除でも per-use マップ（ADR-0028 D6）を孤児にしない。動きは `patchSceneWithCleanup` が持つ（#779）。
+    patchSceneWithCleanup((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
     setSelectedFreeIds([]);
     setEditPopover(null);
   };
@@ -688,8 +882,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (!activeGroupId) return;
     if (activeGroup?.locked) return; // ロック中は解除も抑止（UI disabled に加えた多重防御・#319 レビュー）
     const memberIds = groupElementIds(sceneGroups, activeGroupId);
-    patch((s) => {
-      const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId);
+    // ⚠️ **解除でもまとまりは消える**＝その動きを落とさないと孤児になり、`group_NNN` の番号再利用で
+    // **後から作った別のまとまりが勝手に動く**（#779）。`patchSceneWithCleanup` が前後の差から拾う。
+    patchSceneWithCleanup((s) => {
+      const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId, isTextFreeElement);
       return { ...s, groups: r.groups, freeLayout: r.elements };
     });
     setActiveGroupId(null);
@@ -699,11 +895,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 1手（履歴グループ）で落とす＝Undo 1回で丸ごと戻る。ロック中は解除/重ね順と揃えて抑止（多重防御・#319）。
   const deleteGroupWithMembers = (groupId: string) => {
     if (sceneGroups.find((g) => g.id === groupId)?.locked) return;
-    // 消す対象は現在の groups から先に決める（`ungroupActive` と同じ流儀）。updater の中で外の変数へ書くと
-    // updater が再実行されたときに壊れるため、ここで確定させてから patch/アニメ掃除の両方に渡す。
-    const { elementIds, groupIds } = removeGroupWithMembers(sceneGroups, groupId);
-    beginHistoryGroup();
-    patch((s) => ({
+    // 消す対象は現在の groups から先に決める。updater の中で外の変数へ書くと、updater が
+    // 再実行されたときに壊れるため、ここで確定させてから updater へ渡す。
+    const { elementIds } = removeGroupWithMembers(sceneGroups, groupId);
+    // 動きの掃除は `patchSceneWithCleanup` が持つ＝**要素もまとまりも**前後の差から拾う（#779）。
+    // 以前はここで `[...elementIds, ...groupIds]` を自分で並べていたが、**同じ列挙を経路ごとに書く形**が
+    // 解除と空になったまとまりの取りこぼしを生んでいた。
+    patchSceneWithCleanup((s) => ({
       ...s,
       freeLayout: removeFreeElements(s.freeLayout ?? [], elementIds),
       groups: removeGroupWithMembers(s.groups ?? [], groupId).groups,
@@ -711,9 +909,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       // free_NNN は歯抜けを再利用するので、残すと将来の別要素に憑依する（「設定していないのに効く」）。
       ...prunePerUseMaps(s, elementIds),
     }));
-    // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）ので、要素とグループの両方を掃除して孤児を残さない。
-    removeAnimationsForElements(selected.sceneId, [...elementIds, ...groupIds]);
-    endHistoryGroup();
     setActiveGroupId(null);
     setSelectedFreeIds([]);
   };
@@ -769,28 +964,54 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
   const duplicateFreeEl = (id: string) => {
+    // ⚠️ **中身ごと複製する**（#770）＝形だけ写すと、**動く要素を複製したのに動かない複製**ができる
+    // （動画の使う範囲・速度・再生の開始タイミング・収め方も既定へ戻る）。消す側（`removeFreeEl`）は
+    // per-use と動きを対で片づけているのに、複製側だけ欠けていた（ADR-0026②）。
+    // 場面（`freeLayout`／per-use）と動画全体（`animations`）の更新を**履歴のまとめで1手**に
+    // （取り消し1回で全部戻る＝消す側と同じ流儀）。
+    beginHistoryGroup();
     let newId: string | null = null;
     patch((s) => {
       const result = duplicateFreeElement(s.freeLayout ?? [], id);
       newId = result.newId;
-      return { ...s, freeLayout: result.freeLayout };
+      if (!result.newId) return s; // 元が見つからない＝変化なし
+      return { ...s, freeLayout: result.freeLayout, ...withPerUseEntries(s, result.newId, perUseEntriesFor(s, id)) };
     });
+    if (newId) addAnimationsForElement(selected.sceneId, newId, animationsForElement(timelineOverlay?.animations ?? [], selected.sceneId, id));
+    endHistoryGroup();
     if (newId) setSelectedFreeIds([newId]);
   };
   // コピー：選んだ要素をクリップボードへ（場面をまたいで貼れる・#207）。
   const copyFreeEl = (id: string) => {
     const el = (selected.freeLayout ?? []).find((e) => e.id === id);
-    if (el) setFreeClipboard(el);
+    // ⚠️ **写す時点で「中身」も一緒に控える**（#770）＝貼る先が別の場面のことがあるので、貼るときに
+    // 元をたどれない。控えないと、貼った複製だけ動かない・設定が落ちる。
+    if (el) setFreeClipboard({
+      el,
+      perUse: perUseEntriesFor(selected, id),
+      animations: animationsForElement(timelineOverlay?.animations ?? [], selected.sceneId, id),
+    });
   };
   // 貼り付け：クリップボードの要素を現在の場面へ（新 id 採番＝場面間も可）。貼付直後を選択。
   const pasteFreeEl = () => {
     if (!freeClipboard) return;
+    const clip = freeClipboard;
+    // ⚠️ **中身も一緒に貼る**（#770）＝形だけだと、貼った複製は動かず設定も既定へ戻る。
+    // 場面（`freeLayout`／per-use）と動画全体（`animations`）の更新を**履歴のまとめで1手**に。
+    beginHistoryGroup();
     let newId: string | null = null;
     patch((s) => {
-      const result = pasteFreeElement(s.freeLayout ?? [], freeClipboard);
+      const result = pasteFreeElement(s.freeLayout ?? [], clip.el);
       newId = result.newId;
-      return { ...s, freeLayout: result.freeLayout };
+      return { ...s, freeLayout: result.freeLayout, ...withPerUseEntries(s, result.newId, clip.perUse) };
     });
+    // 動きは**貼った場面**へ宛て直す（別の場面へ貼っても、その場面の要素として動く）。
+    // ⚠️ 貼り先が「掛け合い＋動画」の場面だと**場面ぐるみで静止**する（`sceneAnimationActive` の関門・#469）。
+    // それでも動きは**運ぶ**＝運ばないと、後で掛け合いか動画を外したときに**元だけ動いて複製は動かない**＝
+    // #770 の症状が戻る（ADR-0026②）。関門そのもの（動きが見えず消せない・「再生の開始」欄だけ出る）は
+    // この場面に元から在る穴で、複製とは別（貼っても元と同じ状態にしかならない）。
+    if (newId) addAnimationsForElement(selected.sceneId, newId, clip.animations);
+    endHistoryGroup();
     if (newId) setSelectedFreeIds([newId]);
   };
   const bringFreeElForward = (id: string) =>
@@ -833,13 +1054,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
 
   /**
-   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
-   *
-   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
-   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
-   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
-   */
-  /**
    * 体裁の色欄（#555 レビュー P2）。**項目ごとに継承へ戻せる**ようにする。
    *
    * 数値欄は空欄、太さは「見た目パターンに合わせる」で個別に継承へ戻せるのに、色は ColorPicker が常に色を返す
@@ -856,7 +1070,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     onClear: () => void,
   ) => (
     <div className="field" style={{ margin: 0 }}>
-      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+          `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+      <span className="field-label text-sm" style={{ display: "block", margin: "0 0 2px" }}>{label}</span>
       <span className="row gap-sm" style={{ alignItems: "center" }}>
         <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
         {isOverridden && (
@@ -873,8 +1089,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     </div>
   );
 
+  /**
+   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
+   *
+   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
+   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
+   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
+   */
   const renderTextStyleControls = (key: TextKey) => {
-    const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
+    // 字幕層の未指定は `subtitle`（#1058）＝直に見ると、欄はあるのに層が引けない。
+    const layer = template?.layers.find((l) => (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) && textKeyOfLayer(l) === key);
     if (!layer) return null;
     const ov = selected.textStyles?.[key];
     // 2つを使い分ける（#555 レビュー）：
@@ -887,8 +1111,35 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const effective = resolveTextStyle(layer, ov);
     const overridden = ov != null && Object.keys(ov).length > 0;
     const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
+    // 影・帯は**まるごと差し替え**なので、上書きの土台は「いまの上書き ?? 見た目パターンの設定」。
+    // 切にするときは**明示的に切と書く**（落とすと継承で帯が戻り「切れない」になる）。
+    // ⚠️ ただし**見た目パターンと同じ値になったら上書きごと落とす**（PR #913 レビュー 🟡）＝
+    // 入→切→入と往復すると**差分ゼロの上書き**が残り、①絵は同じなのに「この場面だけ変更中」と
+    // 出る（嘘の表示）②以後この場面だけ**見た目パターンの変更に追従しなくなる**（見た目パターンは
+    // 編集できる＝ADR-0017・種類を替えても `textStyles` は残る）。「触ったものだけ固有値」（#555）を保つ。
+    // ⚠️ 見た目パターンが元から付けていないものを切に戻すと、選んだ色や角丸は残らない（＝上書きが
+    // まるごと落ちる）。自由配置の同じ欄は値を覚えるが、**あちらは継承の無い持ち物**で、こちらは
+    // 「触ったものだけ固有値」の上書き＝**モデルが違うので流儀も違う**（ADR-0026② の同概念ではない）。
+    // この線引きは正典にも記録してある（`11 §5` の `textStyles` の行）＝次に同種の欄を作る人が
+    // 理由を見落とさないようにするため（コード内コメントだけに置かない）。
+    // ⚠️ **比べるのは「描かれる結果」**（差分再監査 5巡目 ℹ️）＝生の値で比べると、色を変えて
+    // 見た目パターンと同じ値へ戻したときに**絵は同じなのに上書きが残る**（「この場面だけ変更中」の
+    // 嘘＋以後この場面だけ追従しない）。判定は描画と同じ関数（`enabledShadow`/`bandBackground`）から
+    // 採る＝「どちらも描かれない」も同じ式で吸収できる（切のときの `{enabled:false}` と未指定）。
+    const sameDrawn = (a: object | undefined, b: object | undefined): boolean =>
+      JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const baseShadow = ov?.shadow ?? layer.shadow;
+    const putShadow = (v: TextShadow) =>
+      set({ shadow: sameDrawn(enabledShadow(v), enabledShadow(layer.shadow)) ? undefined : v });
+    const setShadow = (p: Partial<TextShadow>) => putShadow({ ...baseShadow, ...p, enabled: true });
+    const toggleShadow = (on: boolean) => putShadow({ ...baseShadow, enabled: on });
+    const baseBand = ov?.background ?? layer.background;
+    const putBand = (v: LayerBackground) =>
+      set({ background: sameDrawn(bandBackground(v), bandBackground(layer.background)) ? undefined : v });
+    const setBand = (p: Partial<LayerBackground>) => putBand({ ...baseBand, ...p, enabled: true });
+    const toggleBand = (on: boolean) => putBand({ ...baseBand, enabled: on });
     return (
-      <CollapsibleSection
+      <CollapsibleSection scope={SECTION_SCOPE.sceneEdit}
         title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`}
         storageKey={`textStyle:${key}`}
         defaultOpen={false}
@@ -934,9 +1185,65 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 見本は実描画の解決値（`effective`＝太さ>0 なら既定色入り）。太さ0で縁取りが無いときは「足したらこうなる」既定を出す。 */}
           {colorField("縁取りの色", effective.strokeColor ?? defaultStrokeColor(effective.color), ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
         </div>
-        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
+        {/* ⚠️ **影・字間・背景帯もここで直せる**（差分再監査 4巡目 🟡＋PR #913 レビュー 🟡・#264）＝
+            `TextStyle` は schema にあり `resolveTextStyle` が解いて描画も通るのに、**書き込む入口が
+            どこにも無かった**（到達不能な定義）。自由配置の文字と同じ顔ぶれにする（ADR-0026②）。
+            ⚠️ **影と帯は「まるごと差し替え」で解決される**（`ov?.shadow ?? layer.shadow`）＝
+            **入／切は実際に描かれている状態を出し**（上書きの有無ではない＝見た目パターン側で
+            付いている帯を「切」と偽らない）、**上書きを作るときは継承している設定を引き継ぐ**
+            （1項目だけ書くと残りが既定へ落ちて**黙って別の絵になる**＝§2-5）。 */}
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          <NumberField
+            label="字間"
+            value={ov?.letterSpacing ?? null}
+            min={LETTER_SPACING_MIN}
+            max={LETTER_SPACING_MAX}
+            step={0.05}
+            placeholder={String(inherited.letterSpacing ?? 0)}
+            onClear={() => set({ letterSpacing: undefined })}
+            onChange={(v) => set({ letterSpacing: v })}
+          />
+          <div className="toggle-row" style={{ flex: 1 }}>
+            {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: 0 }}>影を付ける</span>
+            <Switch on={effective.shadow != null} onChange={toggleShadow} label={`${textKeyLabel[key]}に影を付ける`} />
+          </div>
+        </div>
+        {effective.shadow != null && (
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</span>
+              <ColorPicker value={effective.shadow.color ?? DEFAULT_SHADOW_COLOR} onChange={(v) => setShadow({ color: v })} ariaLabel={`${textKeyLabel[key]}の影の色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            </div>
+            <NumberField label="濃さ(%)" value={opacityToPercent(effective.shadow.opacity ?? DEFAULT_SHADOW_OPACITY)} min={0} max={100} onChange={(v) => setShadow({ opacity: percentToOpacity(v) })} />
+            <NumberField label="ぼかし" value={effective.shadow.blur ?? 0} min={0} onChange={(v) => setShadow({ blur: v })} />
+            <NumberField label="横のずれ" value={effective.shadow.dx ?? 0} onChange={(v) => setShadow({ dx: v })} />
+            <NumberField label="縦のずれ" value={effective.shadow.dy ?? 0} onChange={(v) => setShadow({ dy: v })} />
+          </div>
+        )}
+        <div className="toggle-row" style={{ marginBottom: 6 }}>
+          {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+          <span className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</span>
+          <Switch on={effective.background != null} onChange={toggleBand} label={`${textKeyLabel[key]}に背景帯を付ける`} />
+        </div>
+        {effective.background != null && (
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
+              <ColorPicker value={effective.background.color} onChange={(v) => setBand({ color: v })} ariaLabel={`${textKeyLabel[key]}の背景色を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            </div>
+            <NumberField label="濃さ(%)" value={opacityToPercent(effective.background.opacity)} min={0} max={100} onChange={(v) => setBand({ opacity: percentToOpacity(v) })} />
+            <NumberField label="角丸" value={effective.background.radius} min={0} onChange={(v) => setBand({ radius: v })} />
+          </div>
+        )}
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。
+            ⚠️ **足した項目もここで戻す**（差分再監査 4巡目）＝落とすと「合わせる」を押しても残る。 */}
         {overridden && (
-          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
+          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined, letterSpacing: undefined, shadow: undefined, background: undefined })}>
             すべて見た目パターンに合わせる
           </button>
         )}
@@ -954,14 +1261,106 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       {el.background?.enabled && (
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
+            <ColorPicker value={el.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
           </div>
-          <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? 0.55)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
-          <NumberField label="角丸" value={el.background?.radius ?? 16} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
+          <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? DEFAULT_BAND_OPACITY)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
+          <NumberField label="角丸" value={el.background?.radius ?? DEFAULT_BAND_RADIUS} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
         </div>
       )}
     </div>
+  );
+
+  /**
+   * 文字の**体裁**（字間・影・帯）に手が入っているか（#1032）。
+   *
+   * ⚠️ **入っているときは開いて出す**＝畳んで出すと入れた設定を見失う
+   *（場面の BGM・「この場面だけ声の大きさ」と同じ流儀）。
+   */
+  const hasFreeTextDecoration = (el: FreeElement): boolean =>
+    el.letterSpacing != null || (el.shadow?.enabled ?? false) || (el.background?.enabled ?? false);
+
+  /**
+   * 文字の体裁を**畳んで出す**（#1032）。
+   *
+   * ⚠️ **通常の場面とタイムラインは既に畳んでいる**（「〜の見た目」「文字の体裁」）のに、
+   * 自由配置のカードだけ開きっぱなしだった＝**同じものを場所で別の出し方にしない**（ADR-0026②）。
+   * ⚠️ **`key` は付けるが、いまは等価**＝`CollapsibleSection` の注記は「選んだもので変わる
+   * `defaultOpen` を渡すときは `key` を付けよ」だが、**カード自体が `key={el.id}` で作り直される**ので
+   * 付けなくても見直される（変異チェックで生き残った＝同じ結果）。
+   * カードの作りを変えたときに黙って壊れないよう、注記の通りに付けておく。
+   */
+  const renderFreeTextLook = (el: FreeElement) => (
+    <CollapsibleSection
+      key={`freeTextLook-${el.id}`}
+      scope={SECTION_SCOPE.sceneEdit}
+      storageKey="freeTextLook"
+      title="文字の体裁"
+      defaultOpen={hasFreeTextDecoration(el)}
+    >
+      {renderFreeTextDecoration(el)}
+      {renderFreeBandBg(el)}
+    </CollapsibleSection>
+  );
+
+  /**
+   * 文字の**影と字間**（#264）。⚠️ **書き込む入口が1つも無かった**（差分再監査 2巡目）＝
+   * schema・解決（`resolveTextStyle`）・描画・焼き出しまで land しているのに、値を書ける画面が
+   * どこにも無く**利用者からは使えない**まま（🔴1 の持ち込みフォントと同じ形の3例目）。
+   * ⚠️ **既定値は `textStyle` から採る**（§2-7）＝画面の初期値と描画がずれない。
+   */
+  const renderFreeTextDecoration = (el: FreeElement) => (
+    <>
+      <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+        {/* ⚠️ **字間は「文字サイズに対する割合」**＝サイズを変えても詰め具合が変わらない（#264）。 */}
+        <NumberField
+          label="字間"
+          value={el.letterSpacing ?? 0}
+          min={LETTER_SPACING_MIN}
+          max={LETTER_SPACING_MAX}
+          step={0.05}
+          onChange={(v) => patchFreeEl(el.id, { letterSpacing: v })}
+        />
+      </div>
+      <div className="col gap-sm" style={{ marginTop: 4 }}>
+        <div className="toggle-row">
+          <label className="field-label text-sm" style={{ margin: 0 }}>影を付ける</label>
+          <Switch
+            on={el.shadow?.enabled ?? false}
+            onChange={(on) => patchFreeEl(el.id, { shadow: { ...el.shadow, enabled: on } })}
+            label="影を付ける"
+          />
+        </div>
+        {el.shadow?.enabled && (
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>影の色</span>
+              <ColorPicker
+                value={el.shadow?.color ?? DEFAULT_SHADOW_COLOR}
+                onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, color: v } })}
+                ariaLabel="影の色を選ぶ"
+                onDragStart={beginHistoryGroup}
+                onDragEnd={endHistoryGroup}
+              />
+            </div>
+            <NumberField
+              label="濃さ(%)"
+              value={opacityToPercent(el.shadow?.opacity ?? DEFAULT_SHADOW_OPACITY)}
+              min={0}
+              max={100}
+              onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, opacity: percentToOpacity(v) } })}
+            />
+            <NumberField label="ぼかし" value={el.shadow?.blur ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, blur: v } })} />
+            <NumberField label="横のずれ" value={el.shadow?.dx ?? 0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, dx: v } })} />
+            <NumberField label="縦のずれ" value={el.shadow?.dy ?? 0} onChange={(v) => patchFreeEl(el.id, { shadow: { ...el.shadow, dy: v } })} />
+          </div>
+        )}
+      </div>
+    </>
   );
 
   // FREE 要素の種別ごとの編集コントロール。右パネルのカードと、右クリック「編集」ポップオーバーで共用（DRY）。
@@ -1007,7 +1406,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -1019,12 +1420,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+            <FontPicker label="フォント" labelClassName="field-label text-sm" value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.left} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
@@ -1037,11 +1438,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          {renderFreeBandBg(el)}
+          {renderFreeTextLook(el)}
         </>
       );
     }
@@ -1052,17 +1455,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="field" style={{ flex: 1, margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
               <select className="select" value={el.shapeType ?? FREE_SHAPE_TYPE.rect} onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}>
-                <option value={FREE_SHAPE_TYPE.rect}>四角</option>
-                <option value={FREE_SHAPE_TYPE.rounded_rect}>角丸四角</option>
-                <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
-                <option value={FREE_SHAPE_TYPE.triangle}>三角</option>
-                <option value={FREE_SHAPE_TYPE.star}>星</option>
-                <option value={FREE_SHAPE_TYPE.arrow}>矢印</option>
-                <option value={FREE_SHAPE_TYPE.speech_bubble}>吹き出し</option>
+                {/* 形の名前は共有（#684）＝同じ形を画面によって別の名で呼ばない（§6）。 */}
+                {FREE_SHAPE_TYPES.map((t) => (
+                  <option key={t} value={t}>{freeShapeLabel[t]}</option>
+                ))}
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -1075,7 +1477,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
@@ -1133,7 +1537,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -1145,11 +1551,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
-            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+            <FontPicker label="フォント" labelClassName="field-label text-sm" value={el.fontId} // 継承へ戻すときは**キーごと落とす**（`null` を書くと同じ絵の文書が2通りできる・9巡目 ℹ️）。
+                        onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <NumberField label="行間" value={el.lineHeight ?? DEFAULT_LINE_HEIGHT} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
               <select className="select" value={el.textAlign ?? TEXT_ALIGN.center} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
@@ -1162,11 +1568,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
               <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          {renderFreeBandBg(el)}
+          {renderFreeTextLook(el)}
         </>
       );
     }
@@ -1193,7 +1601,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const desc = anim ? describeAnimation(anim.keyframes) : null;
     const kind = desc?.kind ?? null;
     const durationSec = desc?.durationSec ?? PRESET_DEFAULT_SEC;
-    const easing = desc?.easing ?? EASING.easeInOut;
+    // 自由なカーブ（#262）はタイムライン編集の機能。場面編集では**選び直させない**（黙って名前つきへ
+    // 丸めると、作った動きが操作しただけで変わる＝ADR-0026④）。
+    const curveEasing = desc && typeof desc.easing !== "string" ? desc.easing : null;
+    // ⚠️ **選択肢に無い名前つき**（ゆっくり始まる／終わる／止める＝タイムライン形式の語彙・#1365）も同じ扱い
+    // （PR #1368 レビュー 🟡）＝表示が先頭の「なめらか」に見えるのに、実際の動きは別のまま、を作らない。
+    const SCENE_EASINGS: readonly string[] = [EASING.easeInOut, EASING.linear];
+    const unlistedEasing: EasingSpec | null =
+      curveEasing ?? (desc && typeof desc.easing === "string" && !SCENE_EASINGS.includes(desc.easing) ? desc.easing : null);
+    // 選択肢に出す値（表せないものは表示だけ「なめらか」へ寄せ、欄は押せなくする）。
+    const easingChoice = unlistedEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
+    // **作り直すときに載せる値は元のまま**＝種類や秒を触っただけでカーブが名前つきへ化けない
+    // （黙って別の動きにしない・ADR-0026④）。カーブの編集はタイムライン編集で行う。
+    const easing: EasingSpec = unlistedEasing ?? easingChoice;
     const direction = desc?.direction ?? "left";
     // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
@@ -1230,10 +1650,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={SEC_STEP} onChange={(v) => apply({ durationSec: v })} />
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
-                <select className="select" value={easing} onChange={(e) => apply({ easing: e.target.value as Easing })}>
+                <select
+                  className="select"
+                  value={easingChoice}
+                  disabled={!!unlistedEasing}
+                  onChange={(e) => apply({ easing: e.target.value as Easing })}
+                >
                   <option value={EASING.easeInOut}>なめらか</option>
                   <option value={EASING.linear}>一定</option>
                 </select>
+                {unlistedEasing && (
+                  <p className="text-muted text-sm" style={{ margin: "2px 0 0" }}>
+                    {curveEasing ? "自由なカーブ" : "ここでは選べない動き方"}が設定されています。ここで選び直すと動きが変わるため、タイムライン編集で調整してください。
+                  </p>
+                )}
               </div>
               {kind === "slide" && (
                 <div className="field" style={{ margin: 0 }}>
@@ -1299,6 +1729,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               step={SEC_STEP}
               value={delaySec}
               onChange={(e) => setSpec({ mode: VIDEO_START_MODE.delay, delaySec: Number(e.target.value) })}
+              {...dragGroup}
               style={{ flex: 1 }}
               aria-label="再生を始めるまでの秒数"
             />
@@ -1306,7 +1737,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
         )}
         {mode === VIDEO_START_MODE.afterAnim && !hasSettled && (
-          <p className="field-hint" style={{ margin: "4px 0 0", color: "var(--color-danger)" }}>
+          <p className="field-hint" style={{ margin: "4px 0 0", color: "var(--color-danger-text)" }}>
             アニメが場面の最後まで続くため、このままでは動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。
           </p>
         )}
@@ -1367,81 +1798,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
-  function onUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void addAsset(file);
-    e.target.value = "";
-  }
 
-  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
-  async function onPickAsset() {
-    const path = await showOpenAssetDialog();
-    if (path) await addAssetByPath(path);
-  }
-
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
-      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
-      <ExportLock onNavigate={onNavigate}>
-      <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
-        {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
-        <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <ProjectNameField />
-          <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
-        </div>
-        <div className="topbar-actions">
-          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
-              以前はここだけ「準備中…」と表示していた。 */}
-          <BulkVoiceControls buttonClassName="btn btn-ghost" />
-          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
-            <ArrowLeftIcon size={16} />
-            台本表へ戻る
-          </button>
-          {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
-              預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
-          <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
-            仕上がり確認へ
-            <ChevronRightIcon size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden" }}>
-        <div
-          className="editor-grid"
-          style={{ position: "relative", gridTemplateColumns: `${leftCollapsed ? LEFT_COLLAPSED_WIDTH : LEFT_WIDTH}px 1fr ${rightWidth}px` }}
-        >
-          {/* 右パネルの幅をドラッグで変える境界ハンドル（#276・絶対配置でグリッド項目にはならない）。 */}
-          <div
-            onPointerDown={onResizeDown}
-            onPointerMove={onResizeMove}
-            onPointerUp={onResizeEnd}
-            onPointerCancel={onResizeEnd}
-            title="ドラッグで編集欄の幅を変える"
-            style={{
-              position: "absolute", top: 0, bottom: 0,
-              right: `calc(${rightWidth}px + (var(--gap) / 2) - 3px)`,
-              width: 6, cursor: "col-resize", background: "var(--color-border-strong)",
-              borderRadius: 3, opacity: 0.5, zIndex: 5, touchAction: "none",
-            }}
-          />
-          {/* 左: 素材一覧 */}
-          <div className="editor-col">
-            {/* 左パネルの折りたたみ（#276）：見出し＋トグル。畳むと本体は display:none（列幅も縮む）。 */}
-            <div className="row-between" style={{ alignItems: "center", marginBottom: leftCollapsed ? 0 : "var(--gap-sm)" }}>
-              {!leftCollapsed && <h2 className="field-label" style={{ margin: 0 }}>素材一覧</h2>}
-              <button
-                className="btn btn-ghost btn-icon text-sm"
-                title={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
-                aria-label={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
-                onClick={() => setLeftCollapsed((v) => !v)}
-              >
-                {leftCollapsed ? "▶" : "◀"}
-              </button>
-            </div>
-            <div style={{ display: leftCollapsed ? "none" : "contents" }}>
+  // 欄（ADR-0033 段階4）＝いまの3列をそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
+  const panels: PanelSpec[] = [
+    { id: PANEL_ID.assets, title: '素材一覧', content: (
+      <>
             <div
               className="row gap-sm"
               style={{
@@ -1473,49 +1834,93 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ))}
             </div>
 
+            {/* ⚠️ **押した場所の近くに出す**（#990・`06 §2` 規約1）＝一覧の上に置くので、
+                長い一覧を下までたどっていても確認が視界の外へ流れない。 */}
+            {confirmReplaceSlot && (
+              <DeleteConfirm
+                className="mb"
+                showIcon={false}
+                confirmLabel="入れ替える"
+                message={
+                  <>
+                    <strong>{assets.find((a) => a.assetId === confirmReplaceSlot.replacing)?.displayName ?? "いま入っている素材"}</strong>
+                    {"を "}
+                    <strong>{confirmReplaceSlot.asset.displayName}</strong>
+                    {" に入れ替えますか？（この場面の見た目には空いている場所がありません。取り消しで戻せます）"}
+                  </>
+                }
+                onCancel={() => setConfirmReplaceSlot(null)}
+                onConfirm={() => {
+                  assignSlot(confirmReplaceSlot.layerId, confirmReplaceSlot.asset.assetId);
+                  setConfirmReplaceSlot(null);
+                }}
+              />
+            )}
             <div className="col" style={{ gap: 2 }}>
-              {visibleAssets.map((a) => (
-                <div className="asset-tile" key={a.assetId}>
-                  <div className={`asset-tile-thumb thumb ${assetThumbClass(a.assetType)}`} style={{ aspectRatio: "auto" }}>
-                    {a.assetType === ASSET_TYPE.video ? (
-                      <VideoIcon size={16} />
-                    ) : a.assetType === ASSET_TYPE.bgm ? (
-                      <MusicIcon size={16} />
-                    ) : (
-                      <PhotoIcon size={16} />
-                    )}
-                  </div>
-                  <span className="text-sm">{a.displayName}</span>
-                </div>
-              ))}
+              {/* ⚠️ **押しても何も起きない一覧を作らない**（#1030 ①）＝ここは表示専用で、
+                  差し替えは右欄の**畳まれた**節の中の名前だけの一覧だけだった＝
+                  画面1面ぶんが「押せそうに見えて何も起きない」で埋まっていた（ADR-0034 決定5）。
+                  ⚠️ **どの差し込み口へ入れるかは domain に1つ**（`slotForAsset`）＝
+                  差し込み口の候補と同じ規則を通す（片方でだけ入る素材を作らない）。
+                  ⚠️ **絵で選べるようにする**（#1030 ③）＝種別アイコンだけだと、同じ種類の写真が
+                  並んだときに名前でしか区別できない。素材画面と**同じ部品**（`AssetThumb`）。 */}
+              {visibleAssets.map((a) => {
+                const target = template ? slotForAsset(a, slotLayers, selected.assetRefs) : null;
+                const why = !template
+                  ? "この場面の見た目パターンが見つかりません。場面編集で選び直してください。"
+                  : target
+                    ? undefined
+                    : `${a.displayName}を入れられる場所が、この場面の見た目にはありません。別の見た目を選ぶか、下の「使用素材」で確かめてください。`;
+                return (
+                  <button
+                    type="button"
+                    className="asset-tile"
+                    key={a.assetId}
+                    disabled={!target}
+                    title={why}
+                    style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: target ? "pointer" : "default", opacity: target ? 1 : 0.55 }}
+                    onClick={() => target && putAssetIntoSlot(a, target)}
+                    onPointerDown={(e) => {
+                      if (!target) return; // 入れられない素材は掴めない（押せないのと同じ扱い）
+                      beginDrag(e, {
+                        onStart: (ev) => setDragging({ asset: a, at: { x: ev.clientX, y: ev.clientY }, over: slotAt(ev.clientX, ev.clientY) }),
+                        onMove: (ev) => setDragging({ asset: a, at: { x: ev.clientX, y: ev.clientY }, over: slotAt(ev.clientX, ev.clientY) }),
+                        onEnd: (ev, started) => {
+                          setDragging(null);
+                          // 掴まずに離した＝押しただけ（`onClick` が受ける）。
+                          // ⚠️ **この行を外しても、いまは同じ結果になる**（変異チェックで生き残った）＝
+                          //   落とし先の目印は掴んでいる間しか描かれないので、`slotAt` が誰も返さない。
+                          //   それでも残すのは、**振る舞いを目印の寿命に頼らせない**ため（目印を常に
+                          //   描くように変えた瞬間、押しただけで落ちるようになる）。
+                          if (!started) return;
+                          const layerId = slotAt(ev.clientX, ev.clientY);
+                          // ⚠️ **差し込み口の外で離したら何もしない**＝寄せない（ADR-0034 決定10）。
+                          if (!layerId) return;
+                          // ⚠️ **落とし先は指した口**＝押したときの「空いている先頭」ではない。
+                          //   入れられない口へ落としたら何もしない（黙って別の口へ入れない）。
+                          // ⚠️ **入れられるかは domain の同じ関数で見る**（枠を出す側と同じ）。
+                          //   ⚠️ `dropTargets` は**見ない**＝あれは描いた時点の値で、掴み始めた
+                          //   描画では空（`dragging` がまだ null）＝いつも「落とせない」になる。
+                          const layer = slotLayers.find((l) => l.id === layerId);
+                          if (!layer || !isAssignableToLayer(a, layer)) return;
+                          putAssetIntoSlot(a, { layerId, replacing: selected.assetRefs[layerId] ?? null });
+                        },
+                        onCancel: () => setDragging(null),
+                      });
+                    }}
+                  >
+                    <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} size={16} box={28} />
+                    <span className="text-sm">{a.displayName}</span>
+                  </button>
+                );
+              })}
             </div>
 
-            <label
-              className="btn btn-secondary btn-block mt"
-              style={{ cursor: "pointer" }}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                if (isTauri()) {
-                  e.preventDefault();
-                  void onPickAsset();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  if (isTauri()) {
-                    void onPickAsset();
-                  } else {
-                    e.currentTarget.querySelector("input")?.click();
-                  }
-                }
-              }}
-            >
-              <UploadIcon size={16} />
-              素材を追加
-              <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
-            </label>
+            <AssetImportButton
+              store={useProjectStore}
+              variant="secondary"
+              className="btn-block mt"
+            />
 
             {importError && (
               <div className="notice notice-warn row-between mt" role="alert">
@@ -1523,14 +1928,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
               </div>
             )}
-            </div>
-          </div>
-
-          {/* 中央: 仕上がり確認 + 場面カード */}
-          <div className="col gap" style={{ overflow: "hidden" }}>
-            <div className="editor-col grow" style={{ overflow: "auto" }}>
+      </>
+    ) },
+    { id: PANEL_ID.preview, title: '仕上がり確認', content: (
+      <>
               <div className="row-between" style={{ alignItems: "center" }}>
-                <h2 className="field-label" style={{ margin: 0 }}>仕上がり確認</h2>
+                <span />
                 <div className="row gap-sm" style={{ alignItems: "center" }}>
                   {/* 前の場面からの「切り替え効果」を再生確認（#408 Part 2）。効果があり前場面が描けるときだけ出す。 */}
                   {canPlayTransition && (
@@ -1566,7 +1969,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
+              {/* 拡大縮小（#142）＝プレビューのすぐ上（操作する所の隣） */}
+              <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+              {/* 端で切られやすいところの目安（#265）。**編集する画面にだけ**置く＝仕上がり確認は
+                  「出来上がり」を見る場所なので線を出さない。 */}
+              <SafeAreaToggle />
+              <ScenePreview zoom={previewZoom} onFitPercent={setPreviewFitPct} scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
+                {/* **掴んだ間だけ落とし先を見せる**（#1030 ②）＝どこへ入るかを、離す前に分かるようにする。
+                    箱は描く側（`layoutScene`）が返したものをそのまま使う＝見えている枠と判定がずれない。 */}
+                {dragging && template && dropTargets.length > 0 && (
+                  <SlotDropOverlay
+                    targets={dropTargets}
+                    canvas={template.canvas}
+                    hoveredLayerId={dragging.over}
+                    labelOf={(id) => slotLabels[slotLayers.findIndex((l) => l.id === id)] ?? "素材"}
+                  />
+                )}
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
@@ -1626,11 +2044,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <div
                       role="dialog"
                       aria-label={`${freeKindLabel[editPopoverEl.kind]}を編集`}
+                      className="popover-surface"
                       style={{
                         position: "fixed", left: editPopover.x, top: editPopover.y, zIndex: 61,
-                        width: 280, maxHeight: "70vh", overflow: "auto",
-                        background: "#fff", color: "#222", border: "1px solid rgba(0,0,0,0.15)",
-                        borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.2)", padding: 12,
+                        // 下にはみ出さない＝出した位置から画面の下端までに収める（1280×752 で 70vh だと約200px 切れた）。
+                        width: 280, maxHeight: `calc(100vh - ${editPopover.y}px - 8px)`, overflow: "auto",
+                        borderRadius: 10, padding: 12,
                       }}
                     >
                       <div className="row-between" style={{ marginBottom: 8 }}>
@@ -1650,40 +2069,49 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <p className="text-sm text-muted mt">
                 選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。右側を直すとここに反映されます。
               </p>
-            </div>
-
-            {/* 下: 場面カード一覧 */}
-            <div className="editor-col" style={{ flexShrink: 0 }}>
+      </>
+    ) },
+    { id: PANEL_ID.scenes, title: '場面の並び', content: (
+      <>
               <div className="row-between mb">
-                <h2 className="field-label" style={{ margin: 0 }}>
-                  場面の並び
-                </h2>
+                <span />
                 <button className="btn btn-ghost btn-icon" onClick={() => selectScene(addScene())}>
                   <PlusIcon size={16} />
                   場面を追加
                 </button>
               </div>
-              <div className="scene-strip">
-                {scenes.map((s, i) => (
-                  <div key={s.sceneId} style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+              <div className="scene-strip" ref={sceneStripRef}>
+                {scenes.map((s, i) => {
+                  // 見た目を引くのは**1回だけ**（#1031）＝見本と名前で別々に引くと、
+                  // 片方だけ別の見た目を指す余地ができる。
+                  const sceneTemplate = templates.find((t) => t.templateId === s.templateId);
+                  return (
+                  <Fragment key={s.sceneId}>
+                    {/* **落ちる場所を線で見せる**（#771(c)）＝カードを囲むと「その前か後ろか」が読めない。
+                        線はすき間そのものなので、指したとおりの場所に入る。 */}
+                    {sceneDnd.draggingId && sceneDnd.overGap === i && <span className="drop-line" aria-hidden />}
+                  <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
                     <button
                       className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
                       onClick={() => selectScene(s.sceneId)}
                       {...sceneDnd.dropProps(i)}
-                      title="クリックで選択"
-                      style={{
-                        opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
-                        outline:
-                          sceneDnd.overIndex === i && sceneDnd.draggingId && sceneDnd.draggingId !== s.sceneId
-                            ? "2px solid var(--color-primary)"
-                            : undefined,
+                      /* ⚠️ **複製・削除は「そのカードの上」で出す**（#772 候補6）＝いまは別の欄の
+                          最下部にあり、**欄の外を探しに行く**ことになる（#768 が列で解いたのと同じ形）。
+                          右クリックしたカードを**選んでから**開く＝別のカードを右クリックしたのに
+                          選択中のカードが消える、を作らない。 */
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        selectScene(s.sceneId);
+                        setSceneMenu({ sceneId: s.sceneId, x: e.clientX, y: e.clientY });
                       }}
+                      title="クリックで選択（右クリックで複製・削除）"
+                      style={{ opacity: sceneDnd.draggingId === s.sceneId ? "var(--drag-source-opacity)" : undefined }}
                     >
                       {/* ドラッグの持ち手（⠿）。Pointer Events で並び替え（#398 再対応＝button 直掛けだと DnD が発火しなかった）。
                           キーボードでの並び替えは下の ←/→ が担う＝持ち手は aria-hidden の見た目。 */}
                       <div style={{ textAlign: "center", lineHeight: 1, marginBottom: 4 }}>
                         <span
-                          {...sceneDnd.handleProps(s.sceneId)}
+                          {...sceneDnd.handleProps(s.sceneId, i)}
                           aria-hidden="true"
                           title="つまんで並び替え"
                           style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-faint)" }}
@@ -1691,16 +2119,28 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           ⠿
                         </span>
                       </div>
-                      <div className="scene-card-thumb thumb thumb-photo">
-                        <PhotoIcon size={18} />
-                      </div>
+                      {/* ⚠️ **見て選べるようにする**（#1031）＝以前は全カードが**同じ写真の絵**で、
+                          中身は下の文字（種類・見た目の名前・セリフの先頭）でしか分からなかった。
+                          ⚠️ **見た目が引けない場面は写真の絵のまま**＝存在しない見た目について語らない（`06 §9`）。 */}
+                      {sceneTemplate ? (
+                        <SceneThumb scene={s} template={sceneTemplate} />
+                      ) : (
+                        <div
+                          className="scene-card-thumb thumb thumb-photo"
+                          // 見本と同じ形にする（PR #1084 レビュー）＝見た目が引けないときだけ
+                          // 16:9 の箱になると、縦型の動画で**カードの高さが揃わない**。
+                          style={{ aspectRatio: aspectRatio === "9:16" ? "9 / 16" : "16 / 9" }}
+                        >
+                          <PhotoIcon size={18} />
+                        </div>
+                      )}
                       <div className="text-sm">
                         <strong>
                           {s.order}. {sceneTypeLabel[s.sceneType]}
                         </strong>
                       </div>
                       <div className="text-faint" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
+                        {sceneTemplate?.name ?? ""}
                       </div>
                       {/* セリフ先頭を出して全カード同一アイコンでも中身で見分けられるようにする（#413）。カード幅は固定（theme.css）で
                           1行省略（全文は title）。セリフが無い場面も空の1行を確保し、カード高さ＝下の ←/→ の位置を揃える（#413 レビュー）。 */}
@@ -1718,620 +2158,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <button className="btn btn-ghost btn-icon text-sm" title="後ろへ" aria-label={`場面${s.order}を後ろへ移動`} disabled={i === scenes.length - 1} onClick={() => moveScene(s.sceneId, "down")}>→</button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 右: 選択中の場面を編集 */}
-          <div className="editor-col">
-            <div className="row-between" style={{ alignItems: "center" }}>
-              <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
-              {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
-              <div className="row gap-sm">
-                {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
-                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
-              </div>
-            </div>
-
-            {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
-            {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
-            {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
-            {!isFree && (
-              <CollapsibleSection title="文字">
-              {sceneTextKeys.length === 0 && (
-                <div>
-                  <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
-                  {/* 行き止まりにしない：文字を重ねる次の行動（テロップ＝タイムライン編集）を案内する（§2-5・#413）。 */}
-                  <p className="field-hint" style={{ marginTop: 4 }}>
-                    文字を重ねたいときは、タイムライン編集で「テロップ」を足せます。
-                  </p>
-                  <button className="btn btn-ghost text-sm" style={{ marginTop: 4 }} onClick={() => onNavigate("timeline-edit")}>
-                    タイムライン編集を開く
-                  </button>
-                </div>
-              )}
-              {sceneTextKeys.map((key) => {
-                // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
-                const multiline = key !== TEXT_KEY.title && key !== TEXT_KEY.url;
-                return (
-                  <div className="field" key={key}>
-                    <label className="field-label" htmlFor={`text-${key}`}>{textKeyLabel[key]}</label>
-                    {multiline ? (
-                      <textarea
-                        id={`text-${key}`}
-                        className="textarea"
-                        value={selected.texts[key] ?? ""}
-                        {...textGroup}
-                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
-                        style={{ minHeight: 60 }}
-                      />
-                    ) : (
-                      <input
-                        id={`text-${key}`}
-                        className="input"
-                        value={selected.texts[key] ?? ""}
-                        {...textGroup}
-                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
-                      />
-                    )}
-                    <div className="field" style={{ marginTop: 6 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
-                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
-                    </div>
-                    {renderTextStyleControls(key)}
-                  </div>
-                );
-              })}
-              {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
-                  掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
-              {subtitleOverflows && (
-                <div className="notice notice-warn" role="alert">
-                  <span className="text-sm">{subtitleOverflowMessage(hasSimultaneousLines(selected))}</span>
-                </div>
-              )}
-              </CollapsibleSection>
-            )}
-
-            {/* 二次的な節は既定で畳む（#550 ①）＝場面ごとに毎回いじる所ではない（種類/見た目/フォント/BGM は
-                だいたい最初に決めて以後は触らない）。一度開けば記憶される（③）ので、よく使う人の手間は増えない。 */}
-            <CollapsibleSection title="見た目・フォント" defaultOpen={false}>
-            {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
-            <div className="field">
-              <label className="field-label" htmlFor="scene-kind">種類</label>
-              <select
-                id="scene-kind"
-                className="select"
-                value={pendingCategory ?? selected.sceneType}
-                onChange={(e) => switchSceneCategory(e.target.value as SceneCategory)}
-              >
-                {/* 現在の種類が候補に無い（旧データ・向き不一致等）ときも選択値を保つ。 */}
-                {!sceneCategories.includes(selected.sceneType) && (
-                  <option value={selected.sceneType}>{sceneTypeLabel[selected.sceneType]}</option>
-                )}
-                {sceneCategories.map((c) => (
-                  <option key={c} value={c}>{sceneTypeLabel[c]}</option>
-                ))}
-              </select>
-              <p className="field-hint" style={{ marginTop: 4 }}>この場面の種類。変えると、その種類の見た目に切り替わります。</p>
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="look">見た目パターン</label>
-              <select
-                id="look"
-                className="select"
-                value={pendingActive ? pendingTemplateId : selected.templateId}
-                onChange={(e) => requestTemplateSwitch(e.target.value)}
-              >
-                {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
-                {mismatchedCurrent && (
-                  <option value={mismatchedCurrent.templateId} disabled>
-                    {mismatchedCurrent.name}（今の動画に合いません）
-                  </option>
-                )}
-                {/* 現行が見つからない（未解決）ときも選択不可の目印を出し、選択値が消えて空 select にならないようにする（#415 レビュー）。 */}
-                {unresolvedCurrent && selected && (
-                  <option value={selected.templateId} disabled>
-                    （今の見た目が見つかりません）
-                  </option>
-                )}
-                {pickableOptions.map((t) => (
-                  <option key={t.templateId} value={t.templateId}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              {mismatchedCurrent || unresolvedCurrent ? (
-                <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
-                  {unresolvedCurrent ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。"}
-                  {pickableOptions.length > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。"}
-                </p>
-              ) : pickableOptions.length <= 1 ? (
-                <p className="field-hint" style={{ marginTop: 4 }}>
-                  この向き・場面に合う見た目パターンは、今はこれだけです。
-                </p>
-              ) : null}
-              {/* FREE→通常で中身が動画に出なくなる場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。
-                  何がいくつ出なくなるかを示す＝「素材が消える」とだけ言って文字・図形の消失に気づけない、を作らない（#547 P2-9）。
-                  件数は**毎回いまの場面から数え直す**：確認中に自由配置の中身を消して0になったら文言も色も
-                  「出なくなる中身はありません」へ変える（言っていることと実際を食い違わせない・ADR-0026①）。
-                  ただし**確認そのものは答えるまで消さない**＝消して足し直しただけで確認が蘇るのを防ぐ（PR #592 レビュー）。 */}
-              {pendingActive && (
-                <div className={pendingLosesContent ? "notice notice-warn" : "notice notice-info"} role="alert" style={{ marginTop: 6 }}>
-                  <span>{freeSwitchConfirmMessage(pendingHidden)}</span>
-                  <div className="row gap-sm" style={{ marginTop: 6 }}>
-                    <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
-                    <button
-                      className={pendingLosesContent ? "btn btn-danger text-sm" : "btn btn-primary text-sm"}
-                      onClick={() => applyTemplateSwitch(pendingTemplateId)}
-                    >
-                      通常の見た目に変える
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field-label">フォント（動画全体）</label>
-              <FontPicker value={fontId} onChange={(id) => id && setFontId(id)} />
-              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
-            </div>
-
-            <div className="field">
-              <label className="field-label">この場面のフォント</label>
-              <FontPicker value={selected.fontId} onChange={(id) => patch((s) => ({ ...s, fontId: id }))} allowInherit />
-              <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
-            </div>
-
-            <div className="field">
-              <label className="field-label">この場面のBGM</label>
-              <select
-                className="select"
-                value={
-                  selected.bgmSettings === undefined
-                    ? ""
-                    : selected.bgmSettings.enabled === false
-                      ? "__off__"
-                      : selected.bgmSettings.bundledBgmId ?? ""
-                }
-                onChange={(e) => {
-                  const v = e.target.value;
-                  patch((s) => ({
-                    ...s,
-                    // 継承＝undefined（動画全体を使う）／無音＝enabled:false／曲＝この場面専用のBGM（音量・フェードは全体から引き継ぐ）。
-                    bgmSettings:
-                      v === ""
-                        ? undefined
-                        : v === "__off__"
-                          ? { enabled: false }
-                          : {
-                              enabled: true,
-                              bundledBgmId: v as BundledBgmId,
-                              volume: projectBgm?.volume ?? BGM_VOLUME,
-                              loop: projectBgm?.loop ?? true,
-                              fadeInSec: projectBgm?.fadeInSec,
-                              fadeOutSec: projectBgm?.fadeOutSec,
-                            },
-                  }));
-                }}
-              >
-                <option value="">動画全体に合わせる</option>
-                <option value="__off__">この場面は無音</option>
-                {BGM_CATALOG.map((b) => (
-                  <option key={b.id} value={b.id}>{b.label}</option>
-                ))}
-              </select>
-              <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ違うBGMや無音にできます（「動画全体に合わせる」で全体の設定を使います）。連続する同じ曲は途切れません。</p>
-            </div>
-            </CollapsibleSection>
-
-            <CollapsibleSection title="使用素材" defaultOpen={false}>
-            <div className="field">
-              {slotLayers.length === 0 ? (
-                <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
-              ) : (
-                slotLayers.map((layer, i) => {
-                  const assignedId = selected.assetRefs[layer.id];
-                  const assignedAsset = assignedId
-                    ? assets.find((a) => a.assetId === assignedId)
-                    : undefined;
-                  const isVideo = assignedAsset?.assetType === ASSET_TYPE.video;
-                  // 動画スロットのクリップ調整は場面側 per-use（scene.slotClips[layer.id]・Undo 可）へ。編集先の振り分けは sceneClipPatch。
-                  return (
-                    <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }}>{slotLabels[i]}</label>
-                      <select
-                        className="select"
-                        value={assignedId ?? ""}
-                        onChange={(e) =>
-                          patch((s) => ({
-                            ...s,
-                            assetRefs: { ...s.assetRefs, [layer.id]: e.target.value || null },
-                          }))
-                        }
-                      >
-                        <option value="">なし</option>
-                        {assignableFor(layer, assets).map((a) => (
-                          <option key={a.assetId} value={a.assetId}>
-                            {a.displayName}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* 収め方（fit）は画像/動画とも per-use＝scene.slotFits[layer.id]（layoutScene が読む・Undo 可・「見た目の既定に合わせる」で継承）＝#472 P1 で動画も統一。 */}
-                      {assignedAsset && (
-                        <div className="field" style={{ marginTop: 6 }}>
-                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
-                          <FitSelect
-                            inheritLabel="見た目の既定に合わせる"
-                            value={selected.slotFits?.[layer.id]}
-                            onChange={(fit) => patchSlotFit(layer.id, fit)}
-                          />
-                        </div>
-                      )}
-                      {/* 動画は使う範囲/速度/元音声も（per-use＝scene.slotClips・Undo 可）。fit は上の FitSelect（slotFits）で扱う。 */}
-                      {isVideo && assignedAsset && (
-                        <ClipDetailControls asset={assignedAsset} clip={resolveSlotClip(selected.slotClips?.[layer.id], assignedAsset.clip)} patchClip={sceneClipPatch(layer.id)} scope="scene" />
-                      )}
-                    </div>
+                  </Fragment>
                   );
-                })
-              )}
-            </div>
-            </CollapsibleSection>
-
-            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重ね順・削除）。Phase 4a-3b。 */}
-            {isFree && (
-              <CollapsibleSection title="自由配置">
-              <div className="field">
-                <p className="field-hint" style={{ marginTop: 0 }}>
-                  素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
-                </p>
-                <div className="row gap-sm" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.slot)}>
-                    <PlusIcon size={14} />素材
-                  </button>
-                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.text)}>
-                    <PlusIcon size={14} />文字
-                  </button>
-                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
-                    <PlusIcon size={14} />図形
-                  </button>
-                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.subtitle)}>
-                    <PlusIcon size={14} />字幕
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-icon text-sm"
-                    onClick={pasteFreeEl}
-                    disabled={!freeClipboard}
-                    title={freeClipboard
-                      ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
-                      : "先に配置を「コピー」すると貼り付けられます"}
-                  >
-                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.kind]}）` : "貼り付け"}
-                  </button>
-                </div>
-                <div className="field" style={{ marginBottom: 8 }}>
-                  <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>見た目パーツ</label>
-                  <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-                    {FREE_COMPONENTS.map((c) => (
-                      <button
-                        key={c.id}
-                        className="btn btn-secondary btn-icon text-sm"
-                        onClick={() => addFreeComponent(c.id)}
-                      >
-                        <PlusIcon size={14} />{c.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="toggle-row">
-                  <span className="field-label text-sm" style={{ margin: 0 }}>グリッドに合わせる</span>
-                  <Switch on={gridSnap} onChange={setGridSnap} label="グリッドに合わせる" />
-                </div>
-                <div className="toggle-row">
-                  <span className="field-label text-sm" style={{ margin: 0 }}>選択した要素だけ編集</span>
-                  <Switch on={focusSelectedFree} onChange={(v) => { setFocusSelectedFree(v); saveFocusSelectedFree(v); }} label="選択した要素だけ編集" />
-                </div>
-                {freeLayout.length === 0 ? (
-                  <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
-                ) : (
-                  <div className="col gap-sm">
-                    {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
-                    <div className="field" style={{ marginBottom: 4 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
-                      <div className="col" style={{ gap: 2 }}>
-                        {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse＝描画（layout の昇順・安定＝同 z は
-                            配列後方が手前）と同 z でも一致する。降順ソートだと同 z で前後が逆に出て↑↓が1段にならない（#547 P2-4）。 */}
-                        {[...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1)).reverse().map((el) => {
-                          const isSel = selectedFreeIds.includes(el.id);
-                          const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
-                          const autoName = `${freeKindLabel[el.kind]}${(freeAutoIndexById.get(el.id) ?? 0) + 1}`;
-                          return (
-                            <div
-                              key={el.id}
-                              className="row-between"
-                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
-                            >
-                              {renamingFreeId === el.id ? (
-                                <input
-                                  className="input text-sm"
-                                  style={{ flex: 1, minWidth: 0 }}
-                                  autoFocus
-                                  value={draftFreeName}
-                                  placeholder={autoName}
-                                  aria-label="要素名"
-                                  onChange={(e) => setDraftFreeName(e.target.value)}
-                                  onBlur={commitFreeRename}
-                                  onKeyDown={(e) => { if (e.key === "Enter") commitFreeRename(); else if (e.key === "Escape") setRenamingFreeId(null); }}
-                                />
-                              ) : (
-                                <button
-                                  className="btn btn-ghost text-sm"
-                                  style={{ flex: 1, textAlign: "left", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                                  onClick={(e) => selectFree(el.id, e.shiftKey)}
-                                  onDoubleClick={() => startRenameFree(el)}
-                                  title="クリックで選択・ダブルクリックで名前を変更（Shift＋クリックで複数選択）"
-                                >
-                                  {freeName(el)}{hint}{el.locked ? "（ロック）" : ""}
-                                </button>
-                              )}
-                              <div className="row" style={{ gap: 2 }}>
-                                {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
-                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}><PencilIcon size={14} /></button>
-                                {/* どの行の↑↓かを読み上げで区別できるよう名前を含める（テンプレ作成の一覧と同じ流儀・ADR-0026②）。 */}
-                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${freeName(el)}を前面へ`} onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${freeName(el)}を背面へ`} onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {/* グループ一覧（#525-9）：全グループを選択・再表示（隠したものを戻す）・改名できる。隠したグループを選び直せる導線。 */}
-                    <GroupList
-                      groups={sceneGroups}
-                      activeGroupId={effectiveActiveGroupId}
-                      onSelect={(id) => selectGroup(id)}
-                      onToggleHidden={toggleGroupHidden}
-                      onRename={renameGroup}
-                      onDelete={deleteGroupWithMembers}
-                      memberCount={(id) => groupElementIds(sceneGroups, id).length}
-                    />
-                    {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
-                    {effectiveActiveGroupId && (
-                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(var(--color-primary-rgb), 0.12)", borderRadius: 6 }}>
-                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
-                            **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
-                            「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが
-                            消えていない」サイレント失敗になる（#551 レビュー P2）。ロックされたら操作列（無効の削除ボタン）へ戻す。 */}
-                        {confirmDeleteGroupId === effectiveActiveGroupId && !activeGroup?.locked ? (
-                          <DeleteConfirm
-                            message={`このグループを中身ごと削除しますか？中の${groupElementIds(sceneGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
-                            onCancel={() => setConfirmDeleteGroupId(null)}
-                            onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
-                          />
-                        ) : (
-                        <div className="row-between">
-                          <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
-                          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                            <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
-                            <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
-                            <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
-                            <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                            <button className="btn btn-ghost text-sm" title="グループを解除して要素をばらす（要素は残る）" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
-                            {/* 「解除」（要素は残る）との違いが分かるよう、文言・説明で「中身ごと」を明示する（#551）。 */}
-                            <button className="btn btn-ghost text-sm" title="グループを中身ごと削除（中の要素も消えます）" disabled={!!activeGroup?.locked} onClick={() => setConfirmDeleteGroupId(effectiveActiveGroupId)}>削除</button>
-                          </div>
-                        </div>
-                        )}
-                        {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
-                            ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
-                        <fieldset
-                          disabled={!!activeGroup?.locked}
-                          style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup?.locked ? 0.5 : 1 }}
-                        >
-                          {/* 位置・大きさ・角度の数値入力（#554）。枠のドラッグでは届かない細かい値への逃げ道＝
-                              FREE 要素の幅/高さ欄と同じ役割。ロック中は上のボタン群と揃えて fieldset で無効化。 */}
-                          {activeGroup && (
-                            <GroupTransformFields
-                              transform={activeGroup.transform}
-                              onChange={(p) => transformGroup(effectiveActiveGroupId, p)}
-                            />
-                          )}
-                          {renderAnimationControls(effectiveActiveGroupId, 1)}
-                        </fieldset>
-                      </div>
-                    )}
-                    {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
-                    {selectedFreeIds.length >= 2 && (
-                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
-                        <div className="row-between">
-                          {confirmBulkDelete ? (
-                            <>
-                              <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
-                              <div className="row gap-sm">
-                                <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
-                                <button
-                                  className="btn btn-danger text-sm"
-                                  onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
-                                >
-                                  削除する
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
-                              <div className="row gap-sm">
-                                <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
-                                <button
-                                  className="btn btn-ghost text-sm"
-                                  style={{ color: "var(--color-danger)" }}
-                                  onClick={() => setConfirmBulkDelete(true)}
-                                >
-                                  選択をまとめて削除
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                        {/* グループ化（ADR-0022・#305）：選択をひとまとめにして一緒に動かせる。 */}
-                        {!confirmBulkDelete && (
-                          <div className="row gap-sm" style={{ alignItems: "center" }}>
-                            <button className="btn btn-ghost text-sm" onClick={groupSelected}>選択をグループ化</button>
-                          </div>
-                        )}
-                        {/* 整列・等間隔分布（#205）。選択した要素の外接矩形を基準にそろえる。等間隔は3件以上で有効。 */}
-                        {!confirmBulkDelete && (
-                          <div className="row gap-sm" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                            <span className="text-sm text-muted">左右:</span>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.left)}>左</button>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerX)}>中央</button>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.right)}>右</button>
-                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>上下:</span>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.top)}>上</button>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerY)}>中央</button>
-                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.bottom)}>下</button>
-                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>等間隔:</span>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              disabled={selectedFreeIds.length < 3}
-                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "横に等間隔で並べる"}
-                              onClick={() => distributeFree(FREE_DISTRIBUTE.horizontal)}
-                            >
-                              横
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              disabled={selectedFreeIds.length < 3}
-                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "縦に等間隔で並べる"}
-                              onClick={() => distributeFree(FREE_DISTRIBUTE.vertical)}
-                            >
-                              縦
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
-                    {focusSelectedFree && (
-                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-                        {freeLayout.map((el) => (
-                          <button
-                            key={el.id}
-                            className="btn btn-ghost text-sm"
-                            style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
-                            onClick={() => selectFree(el.id)}
-                            aria-pressed={el.id === selectedFreeId}
-                          >
-                            {freeName(el)}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {focusSelectedFree && !freeLayout.some((el) => el.id === selectedFreeId) && (
-                      <p className="text-sm text-muted">編集する要素を、上のボタンかプレビューで選んでください。</p>
-                    )}
-                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
-                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
-                    {(focusSelectedFree
-                      ? freeLayout.filter((el) => el.id === selectedFreeId)
-                      : freeLayout
-                    ).map((el) => (
-                      <div
-                        key={el.id}
-                        className="card-tight"
-                        onClick={(e) => {
-                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
-                          const tag = (e.target as HTMLElement).tagName;
-                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
-                          selectFree(el.id, e.shiftKey && !isField);
-                        }}
-                        style={{
-                          background: "var(--color-surface-alt)",
-                          outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
-                          opacity: el.hidden ? 0.6 : 1, // 非表示要素は淡色（重ね順パネルと一貫＝プレビューに出ていないと分かる）
-                        }}
-                      >
-                        <div className="row-between" style={{ marginBottom: 4 }}>
-                          <strong className="text-sm">{freeName(el)}{el.hidden ? "（非表示）" : ""}</strong>
-                          <div className="row gap-sm">
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); copyFreeEl(el.id); }}
-                              aria-label="この配置をコピー"
-                            >
-                              コピー
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
-                              aria-label="この配置を複製"
-                            >
-                              複製
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); bringFreeElForward(el.id); }}
-                              aria-label="前面へ移動"
-                            >
-                              前面
-                            </button>
-                            <button
-                              className="btn btn-ghost text-sm"
-                              onClick={(e) => { e.stopPropagation(); sendFreeElBackward(el.id); }}
-                              aria-label="背面へ移動"
-                            >
-                              背面
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-icon text-sm"
-                              style={{ color: "var(--color-danger)" }}
-                              onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
-                              aria-label="この配置を削除"
-                            >
-                              <TrashIcon size={14} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {renderFreeKindControls(el)}
-
-                        {/* グループのメンバー（ドリルイン選択・#525-5）は位置/大きさ/角度が「グループの中での値」＝画面の
-                            見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
-                        {topGroupOfMember(sceneGroups, el.id) != null && (
-                          <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
-                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（まとまりで動かすにはグループを選び直してください）。
-                          </p>
-                        )}
-                        <div className="row gap-sm" style={{ marginBottom: 4 }}>
-                          <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
-                          <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
-                        </div>
-                        <div className="row gap-sm">
-                          <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
-                          <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
-                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
-                          {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
-                              回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
-                          <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
-                        </div>
-
-                        {renderAnimationControls(el.id, el.opacity ?? 1)}
-                        {renderVideoStartControls(el.id)}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                })}
+                {/* 末尾の後ろへ落とすときの線（すき間は 0〜n＝カードの数だけ「間」がある）。 */}
+                {sceneDnd.draggingId && sceneDnd.overGap === scenes.length && <span className="drop-line" aria-hidden />}
               </div>
-              </CollapsibleSection>
-            )}
-
-            <CollapsibleSection title="掛け合い・セリフ">
+      </>
+    ) },
+    { id: PANEL_ID.edit, title: '選択中の場面を編集', content: (
+      <>
+            {/* **セリフを先頭に**（ADR-0048 追補 2026-10-05・利用者判断）＝いちばん直すことの多い欄。以前は5番目
+                （文字→見た目・フォント→BGM→使用素材→セリフ）。⚠️ 見出しは変えない＝開閉の記憶を引き継ぐ。 */}
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ" forceOpen={focus === "narration"} scrollOnForce>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
@@ -2386,16 +2225,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           <span className="text-sm" style={{ fontWeight: 600 }}>セリフ {i + 1}</span>
                           {/* 削除は確認してから（#410・即時削除だった）。行内が狭く notice が入らないため Draft 同様のインライン確認＝やめる左/削除する danger右で順序・色は揃える。 */}
                           {confirmDeleteLineId === line.lineId ? (
-                            <div className="row gap-sm">
-                              <span className="text-sm text-muted" style={{ alignSelf: "center" }}>削除しますか？</span>
-                              <button className="btn btn-ghost btn-icon text-sm" onClick={() => setConfirmDeleteLineId(null)}>やめる</button>
-                              <button
-                                className="btn btn-danger btn-icon text-sm"
-                                onClick={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
-                              >
-                                削除する
-                              </button>
-                            </div>
+                            /* ⚠️ **共有の確認を通す**（#990・上と同じ理由）。行の中なので `inline`。 */
+                            <DeleteConfirm
+                              inline
+                              message="削除しますか？"
+                              onCancel={() => setConfirmDeleteLineId(null)}
+                              onConfirm={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
+                            />
                           ) : (
                             <div className="row gap-sm">
                               <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
@@ -2419,8 +2255,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           placeholder="セリフを入力"
                           value={line.text}
                           {...textGroup}
+                          onFocusCapture={() => setActiveLine({ sceneId: selected.sceneId, lineId: line.lineId })}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
                         />
+                        {/* 行の言い直し（#1316）。「使う」は手で書き換えたときと同じ＝その行の声は作り直しが要る状態に戻る（`updateLine`）。
+                            ⚠️ **選んでいる行だけ**（UI/UX 監査 2026-10-02）。 */}
+                        {line.lineId === (activeLine?.sceneId === selected.sceneId && (selected.lines ?? []).some((l) => l.lineId === activeLine.lineId) ? activeLine.lineId : selected.lines?.[0]?.lineId) && <AiSuggest
+                          key={`${selected.sceneId}-${line.lineId}`}
+                          kinds={AI_ASSIST_LINE_KINDS}
+                          source={line.text}
+                          limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength }}
+                          companyName={companyName}
+                          onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
+                        />}
                         <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
                           <span className="text-sm text-muted">声</span>
                           <select
@@ -2531,7 +2378,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </div>
                   )}
                   <div className="row-between" style={{ marginTop: 4 }}>
-                    <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+                    <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>
                       {narrationPlayError ? "再生できませんでした。声を作り直してお試しください" : ""}
                     </span>
                     <button
@@ -2551,10 +2398,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label" htmlFor="line">セリフ</label>
               <textarea
                 id="line"
-                ref={lineRef}
                 className="textarea"
                 value={selected.narration.text}
                 {...textGroup}
+                ref={lineFieldRef}
                 onChange={(e) =>
                   patch((s) => ({
                     ...s,
@@ -2563,11 +2410,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   }))
                 }
               />
+              {/* セリフの言い直し（ADR-0053 決定1）。「使う」は手で書き換えたときと同じ＝声は作り直しが要る状態に戻す。 */}
+              <AiSuggest
+                key={selected.sceneId}
+                kinds={AI_ASSIST_NARRATION_KINDS}
+                source={selected.narration.text}
+                limits={{ maxNarrationLength: template?.aiHint?.maxNarrationLength, sceneDurationSec: selected.durationSec, voiceSpeed: resolveNarrationVoice(selected.narration, voiceSettings).speed }}
+                companyName={companyName}
+                // ⚠️ 字幕の印はここでは受けない（字幕の欄の手伝いが受ける）＝受けるとセリフを字幕の長さで頼んでしまう。
+                autoKind={autoAssist?.sceneId === selected.sceneId && autoAssist.kind !== ASSIST_KIND.subtitle ? autoAssist.kind : undefined}
+                onAutoAsked={() => setAutoAssist(null)}
+                onPick={(t) => patch((s) => ({ ...s, narration: { ...s.narration, text: t, status: NARRATION_STATUS.none } }))}
+              />
               <div className="row-between" style={{ marginTop: 6 }}>
                 <span className="text-sm text-muted">
                   音声：{narrationStatusText(selected.narration.status)}
                   {narrationPlayError && (
-                    <span style={{ color: "var(--color-danger)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
+                    <span style={{ color: "var(--color-danger-text)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
                   )}
                 </span>
                 <div className="row gap-sm">
@@ -2626,7 +2485,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </div>
               <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
-              {selected.narration.status === NARRATION_STATUS.failed && narrationError && (
+              {/* ⚠️ **印に紐づけない**（#755-3 レビュー）＝失敗しても前の声が残っていれば印は「作成済み」の
+                  ままにするので、`failed` を条件にすると**押しても何も起きなかったように見える**（無言の失敗）。
+                  掛け合い（上）とタイムライン編集も無条件で出す＝同じ操作の返事を場所で変えない（ADR-0026②）。 */}
+              {narrationError && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
                   <span>{narrationError}</span>
                 </div>
@@ -2635,10 +2497,720 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
+            {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
+            {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
+            {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
+            {/* ⚠️ **未解決のときは節ごと出さない**（差分再監査 10巡目 ℹ️）＝中身が空になるだけの入れ物が
+                残り、理由は節の外にある。「見つからない」の次の行動は外の断りが担う。 */}
+            {!isFree && template != null && (
+              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字" forceOpen={focus === "text"} scrollOnForce>
+              {/* ⚠️ **見つからない見た目について語らない**（差分再監査 9巡目 🟡・§2-5）＝この節は
+                  未解決のときは出さない（上のゲート）ので、ここへ来る時点で見た目は解決している。 */}
+              {sceneTextKeys.length === 0 && (
+                <div>
+                  <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
+                  {/* 行き止まりにしない：文字を重ねる次の行動を案内する（§2-5・#413。旧「タイムライン編集で
+                      テロップ」は #635 で無くなったので、いま在る行動＝自由配置へ差し替え）。 */}
+                  <p className="field-hint" style={{ marginTop: 4 }}>
+                    文字を重ねたいときは、種類を「自由配置」にすると好きな位置に文字を置けます。
+                  </p>
+                </div>
+              )}
+              {sceneTextKeys.map((key) => {
+                // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
+                const multiline = key !== TEXT_KEY.title && key !== TEXT_KEY.url;
+                return (
+                  <div className="field" key={key}>
+                    <label className="field-label" htmlFor={`text-${key}`}>{textKeyLabel[key]}</label>
+                    {multiline ? (
+                      <textarea
+                        id={`text-${key}`}
+                        className="textarea"
+                        value={selected.texts[key] ?? ""}
+                        {...textGroup}
+                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
+                        style={{ minHeight: 60 }}
+                      />
+                    ) : (
+                      <input
+                        id={`text-${key}`}
+                        className="input"
+                        value={selected.texts[key] ?? ""}
+                        {...textGroup}
+                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
+                      />
+                    )}
+                    {/* 語りから字幕／見出しの候補（ADR-0053 決定3・4）。語りが無ければボタンは押せない。 */}
+                    {/* ⚠️ 掛け合いの場面では出さない＝`narration.text` は行の編集に追従しないので、見えていない古い文から作ってしまう（ADR-0053 決定3・4）。 */}
+                    {/* 見出しは掛け合いでも出す＝元は行をつないだ語り（`sceneSpokenText`・#1316）。字幕は単独のときだけ
+                        ＝掛け合いの字幕は行ごとに決まる（場面の字幕欄は使われない）ので、作っても画面に出ない。 */}
+                    {(key === TEXT_KEY.title || (key === TEXT_KEY.subtitle && (selected.lines?.length ?? 0) === 0)) && (
+                      <AiSuggest
+                        key={`${selected.sceneId}-${key}`}
+                        kinds={key === TEXT_KEY.subtitle ? AI_ASSIST_SUBTITLE_KINDS : AI_ASSIST_TITLE_KINDS}
+                        source={sceneSpokenText(selected)}
+                        current={selected.texts[key] ?? ""}
+                        limits={{ maxSubtitleLength: template?.aiHint?.maxSubtitleLength }}
+                        companyName={companyName}
+                        // 公開前チェックの「字幕の長さ」から来たら、字幕の欄で1回だけ頼む（UI/UX 監査 2026-10-02）。
+                        autoKind={key === TEXT_KEY.subtitle && autoAssist?.sceneId === selected.sceneId && autoAssist.kind === ASSIST_KIND.subtitle ? autoAssist.kind : undefined}
+                        onAutoAsked={() => setAutoAssist(null)}
+                        onPick={(t) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: t } }))}
+                      />
+                    )}
+                    <div className="field" style={{ marginTop: 6 }}>
+                      <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                    </div>
+                    {renderTextStyleControls(key)}
+                  </div>
+                );
+              })}
+              {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
+                  掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
+              {subtitleOverflows && (
+                <div className="notice notice-warn" role="alert">
+                  <span className="text-sm">{subtitleOverflowMessage(hasSimultaneousLines(selected))}</span>
+                </div>
+              )}
+              </CollapsibleSection>
+            )}
+
+            {/* 二次的な節は既定で畳む（#550 ①）＝場面ごとに毎回いじる所ではない（種類/見た目/フォント/BGM は
+                だいたい最初に決めて以後は触らない）。一度開けば記憶される（③）ので、よく使う人の手間は増えない。 */}
+            {/* ⚠️ **知らせは節の中に埋めない**（差分再監査 8巡目 🟡・`CollapsibleSection` の明文規則）＝
+                畳んだ記憶は既定より優先されるので、一度畳むと**二度と出ない**。書き出しを止めている
+                唯一の回復操作がここにあるので、節の外に置く。
+                ⚠️ **種類に依らず出す**（7巡目 🟡）＝門は場面の種類を見ずに数えるのに、「文字」節
+                （通常テンプレだけ）の中にあると通常→自由配置へ切り替えた場面で選び直す先が無い。
+                ⚠️ **自由配置の要素のフォントも同じ**（8巡目 🟡）＝門は休眠のぶんまで数える。 */}
+            {/* ⚠️ **書き出しを止めている理由は節の外に出す**（差分再監査 9巡目 🟡）＝見た目が見つからない
+                場面は書き出しを止めるのに、理由も選び直す先も**既定で畳まれた節の中**にしかなかった
+                （畳んだ記憶は既定より優先されるので一度畳むと二度と出ない）。休眠フォントと同じ流儀。 */}
+            {unresolvedCurrent && (
+              <p className="notice notice-warn" role="alert">
+                {/* ⚠️ **文言は1か所から**（差分再監査 10巡目 🟡）＝節の中（見た目の選択欄の直下）と
+                    同じ関数から採る。直書きすると、候補ゼロのときに**片方だけが実行できない次の行動**
+                    （「選び直してください」）を出す＝同じ状態に断りが2通り並ぶ。 */}
+                {/* ⚠️ **行き先は「その節でできる手」を出したときだけ**（PR #921 レビュー 🟡）＝
+                    選び直す・種類を変える はどちらも「見た目・フォント」の節にあるが、
+                    作る・開き直す は**別の場所**なので、そこへ「下にあります」と続けると
+                    **同じ文がもう一度出るだけ**の案内になる（意味のない往復）。 */}
+                {sceneTemplateProblemMessage(true, pickableOptions.length, lookAvailability)}
+                {(pickableOptions.length > 0 || lookAvailability.otherKind) && "（下の「見た目・フォント」にあります）"}
+              </p>
+            )}
+            {(extraFontKeys.length > 0 || dormantFreeFonts.length > 0 || unknownFreeFonts.length > 0) && (
+              <div className="field">
+                {/* ⚠️ **描かれているものを「使っていない」と言わない**（差分再監査 9巡目 🟡）＝
+                    自由配置の見た目でも文字層は描かれる。知らせは**もう描かれないもの**にだけ出す。 */}
+                {/* ⚠️ **知らせと対象を1対1にする**（差分再監査 10巡目 🟡）＝1つの並びに混ぜると、
+                    「使わないなら戻せます」が**描かれている欄の上**に立ち、戻すと字体が変わる。
+                    ⚠️ **この群の中身は状態で変わる**（12巡目 ℹ️）＝見た目が解決できているときは
+                    **見た目パターンの文字層**（自由配置で置いた文字ではない）だけ、見つからないときは
+                    **自由配置の要素も**同じ群に入る（どちらも「使っていない」とは言えないため）。 */}
+                {(otherFontKeys.length > 0 || unknownFreeFonts.length > 0) && (
+                  <>
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      {template == null ? UNKNOWN_FONT_HINT : "この見た目パターンの文字は、ここでフォントだけ選べます。"}
+                    </p>
+                    {otherFontKeys.map((key) => (
+                      <div className="field" style={{ marginTop: 6 }} key={`other-${key}`}>
+                        <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                      </div>
+                    ))}
+                    {unknownFreeFonts.map((el) => (
+                      <div className="field" style={{ marginTop: 6 }} key={`unknown-free-${el.id}`}>
+                        <FontPicker label={`${freeName(el)}のフォント`} labelClassName="field-label text-sm" value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
+                      </div>
+                    ))}
+                  </>
+                )}
+                {(dormantFontKeys.length > 0 || dormantFreeFonts.length > 0) && (
+                  <p className="field-hint" style={{ marginTop: 0 }}>{DORMANT_FONT_HINT}</p>
+                )}
+                {dormantFontKeys.map((key) => (
+                  <div className="field" style={{ marginTop: 6 }} key={`dormant-${key}`}>
+                    <FontPicker label={`${textKeyLabel[key]}のフォント`} labelClassName="field-label text-sm" value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit inheritLabel={inheritLabelHere} />
+                  </div>
+                ))}
+                {dormantFreeFonts.map((el) => (
+                  <div className="field" style={{ marginTop: 6 }} key={`dormant-free-${el.id}`}>
+                    <FontPicker label={`${freeName(el)}のフォント`} labelClassName="field-label text-sm" value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id ?? undefined })} allowInherit inheritLabel={inheritLabelHere} />
+                  </div>
+                ))}
+              </div>
+            )}
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false} forceOpen={focus === "look"} scrollOnForce>
+            {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
+            <div className="field">
+              <label className="field-label" htmlFor="scene-kind">種類</label>
+              <select
+                id="scene-kind"
+                className="select"
+                value={pendingCategory ?? selected.sceneType}
+                onChange={(e) => switchSceneCategory(e.target.value as SceneCategory)}
+              >
+                {/* 現在の種類が候補に無い（旧データ・向き不一致等）ときも選択値を保つ。 */}
+                {!sceneCategories.includes(selected.sceneType) && (
+                  <option value={selected.sceneType}>{sceneTypeLabel[selected.sceneType]}</option>
+                )}
+                {sceneCategories.map((c) => (
+                  <option key={c} value={c}>{sceneTypeLabel[c]}</option>
+                ))}
+              </select>
+              <p className="field-hint" style={{ marginTop: 4 }}>この場面の種類。変えると、その種類の見た目に切り替わります。</p>
+            </div>
+            <div className="field">
+              {/* ⚠️ **見て選ぶ**（#1031）＝見た目は名前では想像がつかないので、候補を見本の絵つきで並べる。
+                  ⚠️ **見本は一覧画面と同じものを使う**（`buildSampleScene`）＝この場面の中身を
+                  候補ごとに**当て直して見せない**。切替は非破壊の移送（ADR-0030）で、差し込み口の
+                  対応付けも変わるので、ここだけで簡易に再現すると**実際に切り替えた結果と違う絵**を
+                  見せる（ADR-0026①）。 */}
+              <ThumbPicker
+                label="見た目パターン"
+                value={pendingActive ? pendingTemplateId : selected.templateId}
+                onChange={requestTemplateSwitch}
+                options={lookOptions}
+              />
+              {mismatchedCurrent || unresolvedCurrent ? (
+                <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger-text)" }}>
+                  {sceneTemplateProblemMessage(unresolvedCurrent, pickableOptions.length, lookAvailability)}
+                </p>
+              ) : pickableOptions.length <= 1 ? (
+                <p className="field-hint" style={{ marginTop: 4 }}>
+                  この向き・場面に合う見た目パターンは、今はこれだけです。
+                </p>
+              ) : null}
+              {/* FREE→通常で中身が動画に出なくなる場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。
+                  何がいくつ出なくなるかを示す＝「素材が消える」とだけ言って文字・図形の消失に気づけない、を作らない（#547 P2-9）。
+                  件数は**毎回いまの場面から数え直す**：確認中に自由配置の中身を消して0になったら文言も色も
+                  「出なくなる中身はありません」へ変える（言っていることと実際を食い違わせない・ADR-0026①）。
+                  ただし**確認そのものは答えるまで消さない**＝消して足し直しただけで確認が蘇るのを防ぐ（PR #592 レビュー）。 */}
+              {pendingActive && (
+                <div className={pendingLosesContent ? "notice notice-warn" : "notice notice-info"} role="alert" style={{ marginTop: 6 }}>
+                  <span>{freeSwitchConfirmMessage(pendingHidden)}</span>
+                  <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
+                    <button
+                      className={pendingLosesContent ? "btn btn-danger text-sm" : "btn btn-primary text-sm"}
+                      onClick={() => applyTemplateSwitch(pendingTemplateId)}
+                    >
+                      通常の見た目に変える
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="field">
+              {/* 継承へ戻すときは**キーごと落とす**（差分再監査 10巡目 ℹ️）＝自由配置の要素・タイムラインの
+                  部品と同じ流儀（`null` と未指定は解決が同じ＝11.6。2通りの文書を作らない）。 */}
+              <FontPicker
+                label="この場面のフォント"
+                value={selected.fontId}
+                onChange={(id) => patch((s) => {
+                  // ⚠️ **キーごと落とす**（PR #919 レビュー ℹ️）＝`updateScene` は素の差し替えなので、
+                  // `undefined` を書くと**値なしのキーがその場の文書に残る**（保存では消える＝2通りの形）。
+                  const next = { ...s };
+                  if (id) next.fontId = id; else delete next.fontId;
+                  return next;
+                })}
+                allowInherit
+              />
+              <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
+            </div>
+
+            {/* ⚠️ **この欄だけ場面の話ではない**（#1032）＝この節は「この場面」の欄が並ぶ中で、
+                ここだけ**全場面に効く**。印を付けて、この場面の欄の**後ろ**へ置く。 */}
+            <div className="field">
+              <FontPicker
+                label={<>フォント <span className="badge badge-gray">動画全体</span></>}
+                value={fontId}
+                onChange={(id) => id && setFontId(id)}
+              />
+              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
+            </div>
+            </CollapsibleSection>
+
+            {/* ⚠️ **節の見出しと中身を合わせる**（#1032）＝BGM は見た目でもフォントでもないのに
+                「見た目・フォント」の中に入っており、見出しからは探せなかった。
+                ⚠️ **入っているときは開いて出す**（「この場面だけ声の大きさ」と同じ流儀）＝
+                この場面だけ別の曲にしてあるのに畳んで出すと、入れた設定を見失う。
+                `key` を場面 id にするのは、この画面が場面切替で**再マウントしない**ため。 */}
+            <CollapsibleSection
+              scope={SECTION_SCOPE.sceneEdit}
+              key={`bgm-${selected.sceneId}`}
+              title="この場面のBGM"
+              storageKey="scene-bgm"
+              defaultOpen={selected.bgmSettings !== undefined}
+            >
+            <div className="field">
+              {/* ⚠️ **見出しと欄を結ぶ**（#1032）＝`htmlFor` が無く、読み上げでは何の欄か分からなかった
+                  （見た目には見出しが出ているので、目で見ている限り気づけない）。 */}
+              <label className="field-label" htmlFor="scene-bgm">鳴らす曲</label>
+              <select
+                id="scene-bgm"
+                className="select"
+                value={
+                  selected.bgmSettings === undefined
+                    ? ""
+                    : selected.bgmSettings.enabled === false
+                      ? "__off__"
+                      : selected.bgmSettings.bundledBgmId ?? ""
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  patch((s) => ({
+                    ...s,
+                    // 継承＝undefined（動画全体を使う）／無音＝enabled:false／曲＝この場面専用のBGM（音量・フェードは全体から引き継ぐ）。
+                    bgmSettings:
+                      v === ""
+                        ? undefined
+                        : v === "__off__"
+                          ? { enabled: false }
+                          : {
+                              enabled: true,
+                              bundledBgmId: v as BundledBgmId,
+                              volume: projectBgm?.volume ?? BGM_VOLUME,
+                              loop: projectBgm?.loop ?? true,
+                              fadeInSec: projectBgm?.fadeInSec,
+                              fadeOutSec: projectBgm?.fadeOutSec,
+                            },
+                  }));
+                }}
+              >
+                <option value="">動画全体に合わせる</option>
+                <option value="__off__">この場面は無音</option>
+                {BGM_CATALOG.map((b) => (
+                  <option key={b.id} value={b.id}>{b.label}</option>
+                ))}
+              </select>
+              <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ違うBGMや無音にできます（「動画全体に合わせる」で全体の設定を使います）。連続する同じ曲は途切れません。</p>
+            </div>
+            </CollapsibleSection>
+
+            {/* ⚠️ **入っていない差し込み口があるときは、開いた状態で出す**（#1030 ④）＝
+                「素材が入っていません」の警告は出るのに、直す欄は**畳まれた節の中**にあった
+                （`06 §2-5`＝次の行動が見えていない）。条件つきの `defaultOpen` は
+                「この場面だけ声の大きさ」が既に採っている流儀。`key` を場面 id にするのは、
+                この画面が場面切替で**再マウントしない**ため（切り替えるたびに見直す）。 */}
+            <CollapsibleSection
+              scope={SECTION_SCOPE.sceneEdit}
+              key={`assets-${selected.sceneId}`}
+              title="使用素材"
+              defaultOpen={hasEmptySlot}
+              forceOpen={focus === "assets"}
+              scrollOnForce
+            >
+            <div className="field">
+              {slotLayers.length === 0 ? (
+                <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
+              ) : (
+                slotLayers.map((layer, i) => {
+                  const assignedId = selected.assetRefs[layer.id];
+                  const assignedAsset = assignedId
+                    ? assets.find((a) => a.assetId === assignedId)
+                    : undefined;
+                  const isVideo = assignedAsset?.assetType === ASSET_TYPE.video;
+                  // 動画スロットのクリップ調整は場面側 per-use（scene.slotClips[layer.id]・Undo 可）へ。編集先の振り分けは sceneClipPatch。
+                  return (
+                    <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
+                      {/* ⚠️ **見て選ぶ**（#1031）＝名前だけの一覧だと、入れてみるまで何の絵か分からない
+                          （試し打ちになる）。見出しと欄を結ぶのもこの部品が担う（#1075＝差し込み口は
+                          何個でも並ぶので、外で id を作る形にすると**結び忘れた所だけ残る**）。 */}
+                      <ThumbPicker
+                        label={slotLabels[i]}
+                        labelClassName="field-label text-sm"
+                        value={assignedId ?? ""}
+                        onChange={(v) =>
+                          patch((s) => ({
+                            ...s,
+                            assetRefs: { ...s.assetRefs, [layer.id]: v || null },
+                          }))
+                        }
+                        options={slotOptions(layer, assignedId)}
+                      />
+
+                      {/* 収め方（fit）は画像/動画とも per-use＝scene.slotFits[layer.id]（layoutScene が読む・Undo 可・「見た目の既定に合わせる」で継承）＝#472 P1 で動画も統一。 */}
+                      {assignedAsset && (
+                        <div className="field" style={{ marginTop: 6 }}>
+                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
+                          <FitSelect
+                            inheritLabel="見た目の既定に合わせる"
+                            value={selected.slotFits?.[layer.id]}
+                            onChange={(fit) => patchSlotFit(layer.id, fit)}
+                          />
+                        </div>
+                      )}
+                      {/* 動画は使う範囲/速度/元音声も（per-use＝scene.slotClips・Undo 可）。fit は上の FitSelect（slotFits）で扱う。 */}
+                      {isVideo && assignedAsset && (
+                        <ClipDetailControls asset={assignedAsset} clip={resolveSlotClip(selected.slotClips?.[layer.id], assignedAsset.clip)} patchClip={sceneClipPatch(layer.id)} scope="scene" />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            </CollapsibleSection>
+
+            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重ね順・削除）。Phase 4a-3b。 */}
+            {isFree && (
+              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="自由配置">
+              <div className="field">
+                <p className="field-hint" style={{ marginTop: 0 }}>
+                  素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
+                </p>
+                <div className="row gap-sm" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.slot)}>
+                    <PlusIcon size={14} />素材
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.text)}>
+                    <PlusIcon size={14} />文字
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
+                    <PlusIcon size={14} />図形
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.subtitle)}>
+                    <PlusIcon size={14} />字幕
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon text-sm"
+                    onClick={pasteFreeEl}
+                    disabled={!freeClipboard}
+                    title={freeClipboard
+                      ? `「${freeKindLabel[freeClipboard.el.kind]}」を貼り付け（別の場面からでも貼れます）`
+                      : "先に配置を「コピー」すると貼り付けられます"}
+                  >
+                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.el.kind]}）` : "貼り付け"}
+                  </button>
+                </div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>見た目パーツ</label>
+                  <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                    {FREE_COMPONENTS.map((c) => (
+                      <button
+                        key={c.id}
+                        className="btn btn-secondary btn-icon text-sm"
+                        onClick={() => addFreeComponent(c.id)}
+                      >
+                        <PlusIcon size={14} />{c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="toggle-row">
+                  <span className="field-label text-sm" style={{ margin: 0 }}>グリッドに合わせる</span>
+                  <Switch on={gridSnap} onChange={setGridSnap} label="グリッドに合わせる" />
+                </div>
+                <div className="toggle-row">
+                  <span className="field-label text-sm" style={{ margin: 0 }}>選択した要素だけ編集</span>
+                  <Switch on={focusSelectedFree} onChange={(v) => { setFocusSelectedFree(v); saveFocusSelectedFree(v); }} label="選択した要素だけ編集" />
+                </div>
+                {freeLayout.length === 0 ? (
+                  <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
+                ) : (
+                  <div className="col gap-sm">
+                    {/* ⚠️ **選んでいるものを先に見せる**（#1032）＝以前は重ね順一覧・グループ・
+                        一括操作の**あと**にあり、選んだ直後に**下へ長くスクロール**しないと目的の欄に届かなかった
+                        （実測：要素 5 つでこの節だけ 3492px）。ADR-0033 の既定も「選んだ部品を同時に見られる」。 */}
+                    {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
+                    {focusSelectedFree && (
+                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                        {freeLayout.map((el) => (
+                          <button
+                            key={el.id}
+                            className="btn btn-ghost text-sm"
+                            style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
+                            onClick={() => selectFree(el.id)}
+                            aria-pressed={el.id === selectedFreeId}
+                          >
+                            {freeName(el)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {focusSelectedFree && !freeLayout.some((el) => el.id === selectedFreeId) && (
+                      <p className="text-sm text-muted">編集する要素を、上のボタンかプレビューで選んでください。</p>
+                    )}
+                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
+                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
+                    {(focusSelectedFree
+                      ? freeLayout.filter((el) => el.id === selectedFreeId)
+                      : freeLayout
+                    ).map((el) => (
+                      <div
+                        key={el.id}
+                        className="card-tight"
+                        onClick={(e) => {
+                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
+                          const tag = (e.target as HTMLElement).tagName;
+                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+                          selectFree(el.id, e.shiftKey && !isField);
+                        }}
+                        style={{
+                          background: "var(--color-surface-alt)",
+                          outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
+                          opacity: el.hidden ? 0.6 : 1, // 非表示要素は淡色（重ね順パネルと一貫＝プレビューに出ていないと分かる）
+                        }}
+                      >
+                        <div className="row-between" style={{ marginBottom: 4 }}>
+                          <strong className="text-sm">{freeName(el)}{el.hidden ? "（非表示）" : ""}</strong>
+                          <div className="row gap-sm">
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); copyFreeEl(el.id); }}
+                              aria-label="この配置をコピー"
+                            >
+                              コピー
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
+                              aria-label="この配置を複製"
+                            >
+                              複製
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); bringFreeElForward(el.id); }}
+                              aria-label="前面へ移動"
+                            >
+                              前面
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); sendFreeElBackward(el.id); }}
+                              aria-label="背面へ移動"
+                            >
+                              背面
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-icon text-sm"
+                              style={{ color: "var(--color-danger-text)" }}
+                              onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
+                              aria-label="この配置を削除"
+                            >
+                              <TrashIcon size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {renderFreeKindControls(el)}
+
+                        {/* グループのメンバー（ドリルイン選択・#525-5）は位置/大きさ/角度が「グループの中での値」＝画面の
+                            見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
+                        {topGroupOfMember(sceneGroups, el.id) != null && (
+                          <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
+                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（グループごと動かすには、グループを選び直してください）。
+                          </p>
+                        )}
+                        <div className="row gap-sm" style={{ marginBottom: 4 }}>
+                          <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
+                          <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
+                        </div>
+                        <div className="row gap-sm">
+                          {/* 下限は**両方の形式で同じ**（`MIN_BOX_SIZE_PX`）＝同じ概念を画面で別の下限にしない。 */}
+                          <NumberField label="幅" value={el.w} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { w: v })} />
+                          <NumberField label="高さ" value={el.h} min={MIN_BOX_SIZE_PX} onChange={(v) => patchFreeEl(el.id, { h: v })} />
+                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                          {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
+                              回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
+                          <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
+                        </div>
+
+                        {renderAnimationControls(el.id, el.opacity ?? 1)}
+                        {renderVideoStartControls(el.id)}
+                      </div>
+                    ))}
+                    {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
+                    <div className="field" style={{ marginBottom: 4 }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
+                      <div className="col" style={{ gap: 2 }}>
+                        {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse＝描画（layout の昇順・安定＝同 z は
+                            配列後方が手前）と同 z でも一致する。降順ソートだと同 z で前後が逆に出て↑↓が1段にならない（#547 P2-4）。 */}
+                        {[...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1)).reverse().map((el) => {
+                          const isSel = selectedFreeIds.includes(el.id);
+                          const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
+                          const autoName = `${freeKindLabel[el.kind]}${(freeAutoIndexById.get(el.id) ?? 0) + 1}`;
+                          return (
+                            <div
+                              key={el.id}
+                              className="row-between"
+                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
+                            >
+                              {renamingFreeId === el.id ? (
+                                <input
+                                  className="input text-sm"
+                                  style={{ flex: 1, minWidth: 0 }}
+                                  autoFocus
+                                  value={draftFreeName}
+                                  placeholder={autoName}
+                                  aria-label="要素名"
+                                  onChange={(e) => setDraftFreeName(e.target.value)}
+                                  onBlur={commitFreeRename}
+                                  // ⚠️ **変換中は奪わない**（#989）＝規則は `renameFieldKeys` に1つだけ。
+                                  onKeyDown={renameFieldKeys({ commit: commitFreeRename, cancel: () => setRenamingFreeId(null) })}
+                                />
+                              ) : (
+                                <button
+                                  className="btn btn-ghost text-sm"
+                                  style={{ flex: 1, textAlign: "left", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                                  onClick={(e) => selectFree(el.id, e.shiftKey)}
+                                  onDoubleClick={() => startRenameFree(el)}
+                                  title="クリックで選択・ダブルクリックで名前を変更（Shift＋クリックで複数選択）"
+                                >
+                                  {freeName(el)}{hint}{el.locked ? "（ロック）" : ""}
+                                </button>
+                              )}
+                              <div className="row" style={{ gap: 2 }}>
+                                {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}><PencilIcon size={14} /></button>
+                                {/* どの行の↑↓かを読み上げで区別できるよう名前を含める（テンプレ作成の一覧と同じ流儀・ADR-0026②）。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${freeName(el)}を前面へ`} onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${freeName(el)}を背面へ`} onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {/* グループ一覧（#525-9）：全グループを選択・再表示（隠したものを戻す）・改名できる。隠したグループを選び直せる導線。 */}
+                    <GroupList
+                      groups={sceneGroups}
+                      activeGroupId={effectiveActiveGroupId}
+                      onSelect={(id) => selectGroup(id)}
+                      onToggleHidden={toggleGroupHidden}
+                      onRename={renameGroup}
+                      onDelete={deleteGroupWithMembers}
+                      memberCount={(id) => groupElementIds(sceneGroups, id).length}
+                    />
+                    {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
+                    {effectiveActiveGroupId && (
+                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(var(--color-primary-rgb), 0.12)", borderRadius: 6 }}>
+                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
+                            **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
+                            「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが
+                            消えていない」サイレント失敗になる（#551 レビュー P2）。ロックされたら操作列（無効の削除ボタン）へ戻す。 */}
+                        {confirmDeleteGroupId === effectiveActiveGroupId && !activeGroup?.locked ? (
+                          <DeleteConfirm
+                            message={`このグループを中身ごと削除しますか？中の${groupElementIds(sceneGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
+                            onCancel={() => setConfirmDeleteGroupId(null)}
+                            onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
+                          />
+                        ) : (
+                        <div className="row-between">
+                          <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
+                          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+                            <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                            <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
+                            <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
+                            <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
+                            <button className="btn btn-ghost text-sm" title="グループを解除して要素をばらす（要素は残る）" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                            {/* 「解除」（要素は残る）との違いが分かるよう、文言・説明で「中身ごと」を明示する（#551）。 */}
+                            <button className="btn btn-ghost text-sm" title="グループを中身ごと削除（中の要素も消えます）" disabled={!!activeGroup?.locked} onClick={() => setConfirmDeleteGroupId(effectiveActiveGroupId)}>削除</button>
+                          </div>
+                        </div>
+                        )}
+                        {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
+                            ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
+                        <fieldset
+                          disabled={!!activeGroup?.locked}
+                          style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup?.locked ? 0.5 : 1 }}
+                        >
+                          {/* 位置・大きさ・角度の数値入力（#554）。枠のドラッグでは届かない細かい値への逃げ道＝
+                              FREE 要素の幅/高さ欄と同じ役割。ロック中は上のボタン群と揃えて fieldset で無効化。 */}
+                          {activeGroup && (
+                            <GroupTransformFields
+                              transform={activeGroup.transform}
+                              onChange={(p) => transformGroup(effectiveActiveGroupId, p)}
+                            />
+                          )}
+                          {renderAnimationControls(effectiveActiveGroupId, 1)}
+                        </fieldset>
+                      </div>
+                    )}
+                    {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
+                    {selectedFreeIds.length >= 2 && (
+                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
+                        <div className="row-between">
+                          {confirmBulkDelete ? (
+                            <>
+                              {/* ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                                  名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                                  行の中なので `inline`（箱にしない）＝並び・色は同じ。 */}
+                              <DeleteConfirm
+                                inline
+                                message={`${selectedFreeIds.length}件をまとめて削除しますか？`}
+                                onCancel={() => setConfirmBulkDelete(false)}
+                                onConfirm={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
+                              <div className="row gap-sm">
+                                <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
+                                <button
+                                  className="btn btn-ghost text-sm"
+                                  style={{ color: "var(--color-danger-text)" }}
+                                  onClick={() => setConfirmBulkDelete(true)}
+                                >
+                                  選択をまとめて削除
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {/* グループ化（ADR-0022・#305）：選択をひとまとめにして一緒に動かせる。 */}
+                        {!confirmBulkDelete && (
+                          <div className="row gap-sm" style={{ alignItems: "center" }}>
+                            <button className="btn btn-ghost text-sm" onClick={groupSelected}>選択をグループ化</button>
+                          </div>
+                        )}
+                        {/* 整列・等間隔分布（#205）。選択した要素の外接矩形を基準にそろえる。等間隔は3件以上で有効。 */}
+                        {!confirmBulkDelete && (
+                          <div className="row gap-sm" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                            <span className="text-sm text-muted">左右:</span>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.left)}>左</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerX)}>中央</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.right)}>右</button>
+                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>上下:</span>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.top)}>上</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerY)}>中央</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.bottom)}>下</button>
+                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>等間隔:</span>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              disabled={selectedFreeIds.length < 3}
+                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "横に等間隔で並べる"}
+                              onClick={() => distributeFree(FREE_DISTRIBUTE.horizontal)}
+                            >
+                              横
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              disabled={selectedFreeIds.length < 3}
+                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "縦に等間隔で並べる"}
+                              onClick={() => distributeFree(FREE_DISTRIBUTE.vertical)}
+                            >
+                              縦
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              </CollapsibleSection>
+            )}
+
             {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
             {/* 既定は畳む。ただし「この場面で上書き設定済み」なら開く＝設定を見失わない（PR#286レビュー）。
                 key を場面 id にして場面切替ごとに評価し直す（SceneEditScreen は場面切替で再マウントしないため）。 */}
-            <CollapsibleSection key={selected.sceneId} title="この場面だけ声の大きさ" defaultOpen={sceneNarrationVolume != null}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} key={selected.sceneId} title="この場面だけ声の大きさ" defaultOpen={sceneNarrationVolume != null}>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>この場面だけ声の大きさを変える</span>
@@ -2691,7 +3263,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </CollapsibleSection>
 
 
-            <CollapsibleSection title="表示時間" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="表示時間" defaultOpen={false}>
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>
               <input
@@ -2718,36 +3290,28 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 画面の切り替え（トランジション）は常時表示（「詳細編集」トグル撤廃・#278）。 */}
             <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
               <div className="field">
-                <label className="field-label" htmlFor="transition">画面の切り替え</label>
+                {/* ⚠️ **欄が無いときは見出しにしない**（#1075）＝最初の場面では選択欄を出さないので、
+                    `htmlFor` の指し先が**実在しない**（結んだつもりで結ばれていない）。 */}
                 {isFirstScene ? (
-                  <p className="field-hint" style={{ marginTop: 0 }}>
-                    最初の場面のため、前からの切り替えはありません。
-                  </p>
-                ) : (
                   <>
-                    <select
-                      id="transition"
-                      className="select"
-                      value={transitionValue}
-                      onChange={(e) => onTransitionChange(e.target.value)}
-                    >
-                      <option value={TRANSITION_TYPE.none}>なし</option>
-                      <option value={TRANSITION_TYPE.fade}>フェード</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.left}`}>スライド（左へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.right}`}>スライド（右へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.up}`}>スライド（上へ）</option>
-                      <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
-                    </select>
-                    <p className="field-hint">
-                      {transitionPreview.transitionActive
-                        ? "※ 上の「切り替えを見る」で、書き出しと同じ切り替わり方を確認できます。"
-                        : "※「なし」では切り替えません。効果を選ぶと、上の「切り替えを見る」で確認できます。"}
+                    <span className="field-label" style={{ display: "block" }}>画面の切り替え</span>
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      最初の場面のため、前からの切り替えはありません。
                     </p>
                   </>
+                ) : (
+                  /* ⚠️ **効果は絵で選ぶ**（#1032）＝名前だけの一覧だと、選んで再生してみるまで
+                     何が起きるか分からず、注釈（「※ 上の『切り替えを見る』で…」）で補っていた。
+                     選んだら**その場で再生する**ので、案内文も不要になった。 */
+                  <TransitionTiles
+                    label="画面の切り替え"
+                    value={transitionValue}
+                    onChange={onTransitionChange}
+                  />
                 )}
               </div>
               <p className="field-hint">
-                動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
+                動画の収め方・使う範囲・元の音声は、「使用素材」で動画を選ぶと設定できます。声の大きさは「この場面だけ声の大きさ」で場面ごとに変えられます。
               </p>
             </div>
 
@@ -2774,7 +3338,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             ) : (
               <button
                 className="btn btn-ghost btn-block mt"
-                style={{ color: "var(--color-danger)" }}
+                style={{ color: "var(--color-danger-text)" }}
+                disabled={!canDeleteScene}
+                title={deleteSceneHint}
                 onClick={() => setConfirmDelete(true)}
               >
                 <TrashIcon size={16} />
@@ -2782,20 +3348,137 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </button>
             )}
 
-            <div className="mt" style={{ textAlign: "center" }}>
-              <SaveStatusBadge />
-            </div>
-            <button
-              className="btn btn-primary btn-block"
-              onClick={() => void saveProject()}
-              disabled={saveStatus === "saving"}
-            >
-              <SaveIcon size={18} />
-              {saveButtonLabel(saveStatus)}
-            </button>
-          </div>
+      </>
+    ) },
+  ];
+
+  return (
+    // ⚠️ **`dense` は編集画面に共通**（ADR-0047・#1247）＝操作と余白だけを詰め、本体へ面積を渡す。
+    //   触る所（押す物・場所・言葉）は変えない。寸法は `theme.css` のトークンで決める（画面で数字を書かない）。
+    <div className="dense" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
+      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る・段・進むを5画面で同じ形に。この画面はスクロールの外に置く（貼り付け不要）。
+          ⚠️ **戻るは来た所へ**＝公開前チェックの「直す」から来たときは公開前チェックへ（UI/UX 監査 2026-10-02）。
+          ⚠️ 移る前に**いま編集中の場面を預ける**（#410 sub3）＝仕上がり確認から戻ると同じ場面が開く。
+          ⚠️ **書き出し中の止め（`ExportLock`）の外に置く**（PR #1347 レビュー）＝ほかの4画面と同じく、書き出し中も画面は移れる（止めるのは書き出しの画面だけ）。
+          ⚠️ 並びがあるとき（公開前チェックの「直す」から来た）の段「4」は戻ると同じ＝公開前チェックが覚えた戻り先に触らない。 */}
+      <div style={{ padding: "var(--gap-sm) var(--gap) 0" }}>
+        <FlowBar
+          current="scene-edit"
+          sticky={false}
+          back={trail
+            ? { label: BACK_TO_PRECHECK_LABEL, onClick: () => onNavigate("precheck") }
+            : { label: "台本表へ戻る", onClick: () => onNavigate("draft") }}
+          next={{ label: "仕上がり確認へ", onClick: () => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); } }}
+          onJump={(to) => {
+            setEditingSceneId(selected?.sceneId ?? null);
+            if (to === "precheck" && trail) onNavigate("precheck");
+            else flowJump("scene-edit", to, onNavigate);
+          }}
+        />
+      </div>
+      <ExportLock onNavigate={onNavigate}>
+      <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
+        {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
+        <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ProjectNameField />
+          <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
+        </div>
+        <div className="topbar-actions">
+          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
+              以前はここだけ「準備中…」と表示していた。 */}
+          <BulkVoiceControls source={sceneBulkVoice} buttonClassName="btn btn-ghost" />
+          {/* ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝以前は取り消すが「編集」の欄の中、
+              保存の状態が別の欄の下にあり、**欄を閉じたり配置を変えると見えなくなった**（ADR-0033 で
+              配置を動かせるようにしたので、欄の中に置くほど見失いやすい）。
+              書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも押せなくして誤認を防ぐ
+              （ADR-0026④・#547 P3-12）。 */}
+          <EditorToolbar
+            undo={{ canUndo, canRedo, onUndo: undo, onRedo: redo, disabled: isExporting }}
+            status={<SaveStatusBadge />}
+            // ⚠️ **保存も知らせと同じ行に置く**（#774 レビュー）＝知らせだけを上へ移し、保存ボタンを
+            // 「選択中の場面を編集」の欄に残すと、**欄を閉じた状態で保存に失敗したとき**
+            // 「もう一度お試しください」と言われるのに押せるものが画面から消える（この画面は共通トップバーの
+            // 保存を出さず・`saveProject` の入口もここだけ＝§2-5「次の行動」が行き止まりになる）。
+            // 他の2画面も知らせの隣に押せるものがある（見た目パターン編集＝保存／タイムライン＝保存し直す）＝ADR-0026②。
+            extra={(
+              <>
+                {/* 欄の出し入れも**見出しの行**へ（#1032）＝欄の下に置くと、編集している間は視界の外だった。 */}
+                <PanelLayoutMenu layout={panelLayout} panels={panels} closed={closedPanels} onChange={changeLayout} onReset={resetLayout} />
+                {/* 保存は**控えめ**（UI/UX 監査 2026-10-02＝上の帯に主ボタンが2つあった。保存の状態は帯に出ている）。主は「仕上がり確認へ」。 */}
+                <button className="btn btn-secondary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
+                  <SaveIcon size={18} />
+                  {saveButtonLabel(saveStatus, saveBlockedReason)}
+                </button>
+              </>
+            )}
+            // 戻る／進むは上の流れの帯へ（ADR-0048 追補 2026-10-05＝5画面で同じ場所）。
+          />
         </div>
       </div>
+
+      {/* 公開前チェックの項目にひっかかっている場面を**順に直す帯**（UI/UX 監査 2026-10-02）＝以前は最初の1場面だけ開き、
+          残りは毎回チェックへ戻って入り直していた。2場面以上のときだけ出す。 */}
+      {trail && (() => {
+        // ⚠️ **いま在る場面だけ**で数える＝帯の上で場面を消すと、並びに居ない場面を指して「次へ」が空振りする。
+        const ids = trail.sceneIds.filter((id) => scenes.some((s) => s.sceneId === id));
+        if (ids.length < 2) return null;
+        const pos = ids.indexOf(selected?.sceneId ?? "");
+        return (
+          <div className="notice notice-info row gap-sm" style={{ margin: "var(--gap) var(--gap) 0", alignItems: "center", flexWrap: "wrap" }} data-testid="scene-edit-trail">
+            <span className="grow">{sceneEditTrailLabel(trail.label, pos + 1, ids.length)}</span>
+            <button className="btn btn-ghost btn-sm" disabled={pos <= 0} onClick={() => setSelectedId(ids[pos - 1])}>{TRAIL_PREV_LABEL}</button>
+            <button className="btn btn-secondary btn-sm" disabled={pos >= ids.length - 1} onClick={() => setSelectedId(ids[pos < 0 ? 0 : pos + 1])}>{TRAIL_NEXT_LABEL}</button>
+          </div>
+        );
+      })()}
+      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* 欄は器いっぱいに広げる。閉じた欄を戻す道は**見出しの行の「欄」メニュー**（#1032・決定6/8）。 */}
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />
+      </div>
+            {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
+          ⚠️ 欄の最下部にある同じ操作は**残す**＝右クリックを知らない人の道を塞がない
+          （ADR-0034 決定18「ドラッグ専用の操作を作らない」の裏返し＝**メニュー専用にもしない**）。 */}
+      {sceneMenu && (
+        <ContextMenu
+          x={sceneMenu.x}
+          y={sceneMenu.y}
+          items={[
+            {
+              label: "この場面を複製",
+              onSelect: () => {
+                const id = duplicateScene(sceneMenu.sceneId);
+                if (id) selectScene(id);
+              },
+            },
+            {
+              label: "この場面を削除",
+              danger: true,
+              // ⚠️ **最後の1つは消させない**＝場面が0枚の動画は作れない（欄の側の確認と同じ条件）。
+              disabled: !canDeleteScene,
+              disabledHint: deleteSceneHint,
+              onSelect: () => setConfirmDeleteSceneId(sceneMenu.sceneId),
+            },
+          ]}
+          onClose={() => setSceneMenu(null)}
+        />
+      )}
+      {/* ⚠️ **確認はメニューと同じ重なりに出す**（`06 §2-1`）＝欄を閉じていても必ず見える。
+          並び・色・語（やめる／削除する）は共有部品が持つので画面ごとに割れない。 */}
+      {confirmDeleteSceneId && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+            message="この場面を削除しますか？"
+            onCancel={() => setConfirmDeleteSceneId(null)}
+            onConfirm={() => {
+              removeScene(confirmDeleteSceneId);
+              setConfirmDeleteSceneId(null);
+              selectScene(""); // 選択を外す＝消えた場面を指したままにしない
+            }}
+          />
+        </div>
+      )}
       </ExportLock>
     </div>
   );

@@ -756,3 +756,38 @@ describe('elementAtPoint（点に当たる最前面の要素・#548/#552）', ()
     expect(elementAtPoint([], { x: 0, y: 0 })).toBeNull();
   });
 });
+
+// ⚠️ **未指定はキーごと落とす**（差分再監査 10巡目）＝素の差し替えだと**値なしのキーが残り**、
+// 保存では消えるのにその場の文書には残る（同じ絵の文書が2通りできる）。
+describe('updateFreeElement の未指定', () => {
+  const el = (): FreeElement =>
+    ({ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'gen-interface-jp' }) as FreeElement;
+
+  it('未指定を書くとキーごと落ちる', () => {
+    const [next] = updateFreeElement([el()], 'free_001', { fontId: undefined });
+    expect('fontId' in next).toBe(false);
+  });
+
+  it('値を書けば入る（落とすのは未指定のときだけ）', () => {
+    const [next] = updateFreeElement([el()], 'free_001', { fontId: 'kaitou-yokoku-gothic' });
+    expect(next.fontId).toBe('kaitou-yokoku-gothic');
+  });
+
+  // ⚠️ `assetId: null`＝**差し込み口は空**（画面が明示的に書く・`createFreeElement` の既定）＝
+  // 落とすと「まだ決めていない」と区別が付かなくなる。タイムライン側とは流儀が違う。
+  it('null は残す（差し込み口が空、を明示している）', () => {
+    const [next] = updateFreeElement([el()], 'free_001', { assetId: null });
+    expect(next.assetId).toBeNull();
+  });
+
+  it('触っていないキーは残る', () => {
+    const [next] = updateFreeElement([el()], 'free_001', { fontId: undefined });
+    expect(next.text).toBe('あ');
+  });
+
+  it('別の要素は触らない', () => {
+    const other = { ...el(), id: 'free_002' };
+    const list = updateFreeElement([el(), other], 'free_001', { fontId: undefined });
+    expect(list[1].fontId).toBe('gen-interface-jp');
+  });
+});

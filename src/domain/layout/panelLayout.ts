@@ -1,0 +1,593 @@
+// 編集画面の「欄の配置」（ADR-0033 段階1）。純粋関数（副作用なし・§7 テスト対象）。
+//
+// **画面の見た目の好みであって、動画の中身ではない**＝プロジェクトの schema には入れない（ADR-0033 決定5）。
+// 保存はアプリの設定（`infrastructure/appSettings`）。ここが持つのは**形と整え方**だけで、
+// ドラッグの操作感や見た目は UI 側にある（`§4`）。
+//
+// 形（決定11）＝**領域の中は入れ子で分割**する。縦にも横にも積めるので、**置ける欄の数に上限が要らない**
+// （4つの領域に1つずつだと足りない、という利用者指摘への構造的な答え）。
+//
+//   配置 = { 左: ノード, 中央: ノード, 右: ノード, 下: ノード }
+//   ノード = 分かれ目（向き＋割合＋子）| 葉（欄id）
+//
+// **大きさは割合**（合計 1）で持つ＝ウィンドウの幅が変わっても崩れない。
+
+/** 欄を置ける領域（画面の外枠・決定1）。`as const` で値集合を1か所に持つ（§2-7）。 */
+export const PANEL_REGION = {
+  left: 'left',
+  center: 'center',
+  right: 'right',
+  bottom: 'bottom',
+} as const;
+export type PanelRegion = (typeof PANEL_REGION)[keyof typeof PANEL_REGION];
+export const PANEL_REGIONS: readonly PanelRegion[] = Object.values(PANEL_REGION);
+
+/** 分かれ目の向き。`row`＝左右に並べる／`column`＝上下に並べる。 */
+export const SPLIT_DIR = { row: 'row', column: 'column' } as const;
+export type SplitDir = (typeof SPLIT_DIR)[keyof typeof SPLIT_DIR];
+
+/**
+ * 配置を覚える画面（決定4＝**画面ごとに1つ**）。綴り違いで別のキーへ黙って逃げないよう値集合にする（§2-7）。
+ * 顔ぶれは ADR-0033 の段階（まずタイムライン編集・のちに場面編集と見た目パターン編集）に対応する。
+ */
+export const PANEL_SCREEN = { timeline: 'timeline', scene: 'scene', looks: 'looks' } as const;
+export type PanelScreenId = (typeof PANEL_SCREEN)[keyof typeof PANEL_SCREEN];
+
+/** 欄の識別子（画面が決める。ここでは中身を知らない）。 */
+export type PanelId = string;
+
+/** 葉＝欄そのもの。 */
+export interface PanelLeaf {
+  panelId: PanelId;
+}
+
+/** 分かれ目＝子を向きの順に並べ、`sizes`（割合・合計1）で分ける。 */
+export interface PanelSplit {
+  dir: SplitDir;
+  sizes: number[];
+  children: PanelNode[];
+}
+
+export type PanelNode = PanelLeaf | PanelSplit;
+
+/** 外枠の大きさ（画面に対する割合）。**中央は残り全部**なので持たない（合計の辻褄が合わなくならない）。 */
+export interface RegionSizes {
+  left: number;
+  right: number;
+  bottom: number;
+}
+
+/** 画面ぜんぶの配置。欄が1つも無い領域は `null`（枠を描かない）。 */
+export interface PanelLayout {
+  nodes: Record<PanelRegion, PanelNode | null>;
+  /** 外枠の大きさ（決定2＝領域の境界もドラッグで変える）。 */
+  regionSizes: RegionSizes;
+}
+
+/**
+ * 欄1つの最小の割合。0 にすると**掴めない欄**ができる（戻せない＝§2-5）。
+ * **正典（`11.4`）の定数ではない**（動画のデータに出てこない画面だけの下限）ので `domain/constants.ts` へは
+ * 置かず、使う側がここを参照する（単一の参照元・§2-7）。
+ */
+export const MIN_PANEL_RATIO = 0.1;
+
+/**
+ * 外枠の大きさの下限・上限（画面に対する割合）。**中央が潰れない**ように、左右の合計にも上限を置く。
+ * 正典（`11.4`）の定数ではない画面だけの値なので、ここを単一の参照元にする（§2-7）。
+ */
+export const MIN_REGION_RATIO = 0.12;
+export const MAX_REGION_RATIO = 0.5;
+
+/**
+ * **下の欄だけ**の上限（利用者判断 2026-09-28）。
+ *
+ * ⚠️ **左右とは別の数**＝左右は「中央が潰れない」ために 0.5 のままでよい（`MAX_SIDE_TOTAL_RATIO`
+ * が合計も抑える）。上下は事情が違う＝タイムライン編集の**列は本数だけ縦に伸びる**ので、
+ * 0.5 だと**何本足しても8本までしか見えなかった**（実測＝9本・13本・19本のいずれでも見えるのは8本）。
+ * ⚠️ **上を潰しすぎない**＝上には**仕上がり確認**があり、小さくすると仕上がりが見えない。
+ * 0.65 は「見える列が約11本に増え、上は3割ほど小さくなる」を利用者が選んだ値。
+ * ⚠️ **既定は変えない**（`DEFAULT_REGION_SIZES.bottom`＝0.28）＝いきなり広がる画面にはしない。
+ * 広げるのは**タイムライン編集だけ**（`TIMELINE_BOTTOM_DEFAULT_RATIO`）。
+ */
+export const MAX_BOTTOM_REGION_RATIO = 0.65;
+/** 左右を合わせて画面のどれだけまで使えるか（残りが中央の最低幅になる）。 */
+export const MAX_SIDE_TOTAL_RATIO = 0.75;
+
+/** 外枠の既定（左を少し広め・下は控えめ）。 */
+export const DEFAULT_REGION_SIZES: RegionSizes = { left: 0.28, right: 0.24, bottom: 0.28 };
+
+/**
+ * **タイムライン編集の「並び」の既定**（#1104・実機の指摘②③）＝下段を上限いっぱいで始める。
+ *
+ * ⚠️ **上限を既定として使い回さない**（レビュー由来 ℹ️）＝使い回すと、**上限を変えたときに
+ * この画面の既定まで黙って動く**（意味の違う2つが同じ値を指す）。いまは同じ値だが、
+ * **「上限いっぱいにしたい」という意図**を名前で宣言しておく。
+ * ⚠️ **なぜ上限まで広げるか**＝既定の 0.28 では列が約3本しか見えず「とても実用的ではない」（利用者）。
+ * 業界の型でも、タイムラインは窓の下半分ぶんを占める（ADR-0034）。
+ * ⚠️ **上限そのものを 0.5 → 0.65 へ上げた**（利用者判断 2026-09-28・`MAX_BOTTOM_REGION_RATIO`）＝
+ * 0.5 だと**何本足しても見えるのは8本まで**だった（実測＝9本・13本・19本のいずれでも8本）。
+ */
+export const TIMELINE_BOTTOM_DEFAULT_RATIO = MAX_BOTTOM_REGION_RATIO;
+
+export function isSplit(node: PanelNode): node is PanelSplit {
+  return typeof node === 'object' && node != null && 'children' in node;
+}
+
+/**
+ * 分かれ目を作る**唯一の入口**（子と割合を**対で**受ける）。子が1つなら分かれ目にしない・0 なら無い。
+ * 子と割合を別々に組み立てると、**子を落とした位置と割合を切る位置がずれる**（末尾から切ってしまう等）。
+ */
+function makeSplit(dir: SplitDir, pairs: readonly { node: PanelNode; size: number }[]): PanelNode | null {
+  if (pairs.length === 0) return null;
+  if (pairs.length === 1) return pairs[0].node;
+  return { dir, sizes: normalizeSizes(pairs.map((p) => p.size)), children: pairs.map((p) => p.node) };
+}
+
+/** 空の配置（どの領域にも何も置いていない）。 */
+export function emptyLayout(): PanelLayout {
+  return {
+    nodes: { left: null, center: null, right: null, bottom: null },
+    regionSizes: { ...DEFAULT_REGION_SIZES },
+  };
+}
+
+/**
+ * 外枠の大きさを**描ける値へ収める**。下限・上限で押さえ、**左右の合計**も抑える（中央が潰れない）。
+ * 壊れた値（NaN・負）は既定へ戻す＝設定のせいで画面が壊れない。
+ */
+export function normalizeRegionSizes(sizes: Partial<RegionSizes> | undefined): RegionSizes {
+  const one = (v: number | undefined, fallback: number): number =>
+    Number.isFinite(v) ? Math.min(MAX_REGION_RATIO, Math.max(MIN_REGION_RATIO, v as number)) : fallback;
+  let left = one(sizes?.left, DEFAULT_REGION_SIZES.left);
+  let right = one(sizes?.right, DEFAULT_REGION_SIZES.right);
+  // ⚠️ **下だけ上限が違う**（上の ⚠️）＝`one` は左右用なので、下は自分で挟む。
+  const bottom = Number.isFinite(sizes?.bottom)
+    ? Math.min(MAX_BOTTOM_REGION_RATIO, Math.max(MIN_REGION_RATIO, sizes?.bottom as number))
+    : DEFAULT_REGION_SIZES.bottom;
+  // 左右が広すぎるときは、**比を保ったまま**縮める（片方だけ削ると掴んだ側が動かないように見える）。
+  const total = left + right;
+  if (total > MAX_SIDE_TOTAL_RATIO) {
+    const scale = MAX_SIDE_TOTAL_RATIO / total;
+    left = Math.max(MIN_REGION_RATIO, left * scale);
+    right = Math.max(MIN_REGION_RATIO, right * scale);
+  }
+  return { left, right, bottom };
+}
+
+/** 外枠の境界をドラッグしたときの更新（決定2）。収まらない値は収める＝何も変わらなければ同じ参照。 */
+export function resizeRegion(layout: PanelLayout, region: keyof RegionSizes, ratio: number): PanelLayout {
+  const next = normalizeRegionSizes({ ...layout.regionSizes, [region]: ratio });
+  const same = (Object.keys(next) as (keyof RegionSizes)[]).every((k) => next[k] === layout.regionSizes[k]);
+  return same ? layout : { ...layout, regionSizes: next };
+}
+
+/** その配置に**いま置かれている**欄の id（前から順）。閉じている欄＝ここに出てこないもの。 */
+export function placedPanelIds(layout: PanelLayout): PanelId[] {
+  const out: PanelId[] = [];
+  const walk = (node: PanelNode | null): void => {
+    if (!node) return;
+    if (isSplit(node)) node.children.forEach(walk);
+    else out.push(node.panelId);
+  };
+  PANEL_REGIONS.forEach((r) => walk(layout.nodes[r]));
+  return out;
+}
+
+/**
+ * **いま閉じている欄**（画面が持っている欄のうち、配置に出てこないもの）。
+ * 「表示する欄」の一覧はここから作る＝**閉じたまま戻せない欄を作らない**（決定8）。
+ */
+export function closedPanelIds(layout: PanelLayout, knownPanelIds: readonly PanelId[]): PanelId[] {
+  const placed = new Set(placedPanelIds(layout));
+  return knownPanelIds.filter((id) => !placed.has(id));
+}
+
+/**
+ * 配置を**読める形へ整える**（保存から読んだもの・操作の結果の両方が通る）。
+ *
+ * - **知らない欄は落とす**（画面から消えた欄が残っても描けない）。
+ * - **同じ欄は1か所だけ**（2か所に出ると、片方を動かしたときに追えない）。
+ * - **子が1つの分かれ目は畳む**・**子が0の枝は消す**（空の器を残さない）。
+ * - **割合は数を合わせ、最小値で押し上げ、合計1へそろえる**（欄が潰れて掴めなくならない）。
+ */
+export function normalizeLayout(layout: PanelLayout, knownPanelIds: readonly PanelId[]): PanelLayout {
+  const known = new Set(knownPanelIds);
+  const seen = new Set<PanelId>();
+
+  const walk = (node: PanelNode | null): PanelNode | null => {
+    if (!node) return null;
+    if (!isSplit(node)) {
+      if (!known.has(node.panelId) || seen.has(node.panelId)) return null;
+      seen.add(node.panelId);
+      return { panelId: node.panelId };
+    }
+    // 残った子と**その割合を対で拾う**（落ちた子のぶんだけ割合もずらす＝幅の対応が崩れない）。
+    const kept: PanelNode[] = [];
+    const sizes: number[] = [];
+    node.children.forEach((child, i) => {
+      const c = walk(child);
+      if (c) {
+        kept.push(c);
+        sizes.push(node.sizes[i] ?? 1 / node.children.length);
+      }
+    });
+    // 向きが壊れた値でも必ず有効な向きにする（読み込んだ設定で描けなくならない）。
+    const dir = node.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
+    return makeSplit(dir, kept.map((n, i) => ({ node: n, size: sizes[i] })));
+  };
+
+  const next = emptyLayout();
+  next.regionSizes = normalizeRegionSizes(layout.regionSizes);
+  PANEL_REGIONS.forEach((r) => {
+    next.nodes[r] = walk(layout.nodes[r] ?? null);
+  });
+  return next;
+}
+
+/**
+ * 割合を**合計1**にそろえ、**最小値を下回らない**ようにする。
+ * 壊れた値（負・NaN・全部0）でも必ず有効な割合を返す＝読み込んだ設定で画面が壊れない。
+ */
+export function normalizeSizes(sizes: readonly number[]): number[] {
+  const n = sizes.length;
+  if (n === 0) return [];
+  const safe = sizes.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
+  const total = safe.reduce((a, b) => a + b, 0);
+  const even = 1 / n;
+  // 最小値 × 個数が 1 を超える（欄が多すぎる）ときは、等分にするしかない。
+  if (MIN_PANEL_RATIO * n >= 1) return safe.map(() => even);
+  const base = total > 0 ? safe.map((v) => v / total) : safe.map(() => even);
+  // 最小値へ押し上げたぶんは、余裕のある欄から比例して差し引く。
+  const lifted = base.map((v) => Math.max(MIN_PANEL_RATIO, v));
+  const over = lifted.reduce((a, b) => a + b, 0) - 1;
+  if (over <= 0) return spread(lifted);
+  const slack = lifted.map((v) => v - MIN_PANEL_RATIO);
+  const slackTotal = slack.reduce((a, b) => a + b, 0);
+  return spread(lifted.map((v, i) => (slackTotal > 0 ? v - (over * slack[i]) / slackTotal : v)));
+}
+
+/** 端数を最後の1つへ寄せて、合計をきっちり1にする（描くときに1pxの隙間を作らない）。 */
+function spread(sizes: number[]): number[] {
+  const total = sizes.reduce((a, b) => a + b, 0);
+  if (total === 0) return sizes;
+  const scaled = sizes.map((v) => v / total);
+  const sum = scaled.slice(0, -1).reduce((a, b) => a + b, 0);
+  return [...scaled.slice(0, -1), 1 - sum];
+}
+
+/** 欄を取り除いた配置（閉じる／移動の前半）。**空になった枝は畳む**。 */
+export function removePanel(layout: PanelLayout, panelId: PanelId): PanelLayout {
+  const next = emptyLayout();
+  next.regionSizes = { ...layout.regionSizes };
+  PANEL_REGIONS.forEach((r) => {
+    next.nodes[r] = removeFrom(layout.nodes[r] ?? null, panelId);
+  });
+  return next;
+}
+
+function removeFrom(node: PanelNode | null, panelId: PanelId): PanelNode | null {
+  if (!node) return null;
+  if (!isSplit(node)) return node.panelId === panelId ? null : node;
+  const kept: PanelNode[] = [];
+  const sizes: number[] = [];
+  node.children.forEach((child, i) => {
+    const c = removeFrom(child, panelId);
+    if (c) {
+      kept.push(c);
+      sizes.push(node.sizes[i] ?? 1 / node.children.length);
+    }
+  });
+  return makeSplit(node.dir, kept.map((n, i) => ({ node: n, size: sizes[i] })));
+}
+
+/**
+ * 欄を**領域の末尾へ**入れる（「表示する欄」から戻すとき・既定の組み立て）。
+ * すでにどこかにあれば**先に取り除く**＝同じ欄が2か所に出ない。
+ */
+export function addPanelToRegion(layout: PanelLayout, panelId: PanelId, region: PanelRegion): PanelLayout {
+  const base = removePanel(layout, panelId);
+  const current = base.nodes[region];
+  const leaf: PanelLeaf = { panelId };
+  const put = (node: PanelNode | null): PanelLayout => ({ ...base, nodes: { ...base.nodes, [region]: node } });
+  if (!current) return put(leaf);
+  // 領域の直下が縦並びならその末尾へ。そうでなければ縦に分ける（上下に積むのが既定）。
+  if (isSplit(current) && current.dir === SPLIT_DIR.column) {
+    const pairs = current.children.map((n, i) => ({ node: n, size: current.sizes[i] ?? 1 / current.children.length }));
+    return put(makeSplit(SPLIT_DIR.column, [...pairs, { node: leaf, size: 1 / (pairs.length + 1) }]));
+  }
+  // 直下が横並び（または葉）なら、それごと縦に分ける＝**中の並びは崩さない**。
+  return put(makeSplit(SPLIT_DIR.column, [{ node: current, size: 1 }, { node: leaf, size: 1 }]));
+}
+
+/** 落とせる場所（欄のどの辺に差すか）＝ドラッグの受け口。 */
+export const DROP_SIDE = { top: 'top', bottom: 'bottom', left: 'left', right: 'right' } as const;
+export type DropSide = (typeof DROP_SIDE)[keyof typeof DROP_SIDE];
+
+/**
+ * 欄を**別の欄の辺へ**差す（ドラッグの本体・決定11＝縦にも横にも積める）。
+ *
+ * - `left`/`right` は横並び、`top`/`bottom` は縦並びの分かれ目を作る。
+ * - **同じ向きの分かれ目の中なら、新しい分かれ目を作らずその並びへ挿す**（入れ子が無駄に深くならない）。
+ * - 自分自身の辺へ落としたときは**何も変えない**（同じ参照を返す＝履歴・保存を汚さない）。
+ */
+export function dropPanelBeside(
+  layout: PanelLayout,
+  panelId: PanelId,
+  targetPanelId: PanelId,
+  side: DropSide,
+): PanelLayout {
+  if (panelId === targetPanelId) return layout;
+  // **いま居る場所へ落とし直したときは何も変えない**＝見た目は変わらないのに、取り除いて挿し直すと
+  // 利用者が決めた割合が等分へ戻る（黙って別の結果にしない・§2-5）。
+  if (alreadyBeside(layout, panelId, targetPanelId, side)) return layout;
+  const base = removePanel(layout, panelId);
+  const dir = side === DROP_SIDE.left || side === DROP_SIDE.right ? SPLIT_DIR.row : SPLIT_DIR.column;
+  const before = side === DROP_SIDE.left || side === DROP_SIDE.top;
+  let done = false;
+
+  const walk = (node: PanelNode | null): PanelNode | null => {
+    if (!node || done) return node;
+    if (!isSplit(node)) {
+      if (node.panelId !== targetPanelId) return node;
+      done = true;
+      const pair = { node: { panelId } as PanelNode, size: 1 };
+      return makeSplit(dir, before ? [pair, { node, size: 1 }] : [{ node, size: 1 }, pair]);
+    }
+    // 同じ向きの並びの中に対象があるなら、その並びへ直接挿す（入れ子を増やさない）。
+    const idx = node.children.findIndex((c) => !isSplit(c) && c.panelId === targetPanelId);
+    if (idx >= 0 && node.dir === dir) {
+      done = true;
+      const at = before ? idx : idx + 1;
+      const pairs = node.children.map((n, i) => ({ node: n, size: node.sizes[i] ?? 1 / node.children.length }));
+      const inserted = [...pairs.slice(0, at), { node: { panelId } as PanelNode, size: 1 / (pairs.length + 1) }, ...pairs.slice(at)];
+      return makeSplit(node.dir, inserted);
+    }
+    // 子と割合は**対で**持ち直す（`slice` で末尾から切ると、落ちた子の位置とずれる）。
+    const pairs = node.children
+      .map((child, i) => ({ node: walk(child), size: node.sizes[i] ?? 1 / node.children.length }))
+      .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+    return makeSplit(node.dir, pairs);
+  };
+
+  const next = emptyLayout();
+  next.regionSizes = { ...base.regionSizes };
+  PANEL_REGIONS.forEach((r) => {
+    next.nodes[r] = walk(base.nodes[r] ?? null);
+  });
+  // 落とし先が見つからない（消された直後など）なら、何も変えない＝黙って別の場所へ置かない。
+  return done ? next : layout;
+}
+
+/** その欄が、指した辺のとおり**すでに隣にいる**か（同じ並びの中で、間に何も挟まっていない）。 */
+function alreadyBeside(layout: PanelLayout, panelId: PanelId, targetPanelId: PanelId, side: DropSide): boolean {
+  const dir = side === DROP_SIDE.left || side === DROP_SIDE.right ? SPLIT_DIR.row : SPLIT_DIR.column;
+  const before = side === DROP_SIDE.left || side === DROP_SIDE.top;
+  let found = false;
+  const walk = (node: PanelNode | null): void => {
+    if (!node || found || !isSplit(node)) return;
+    if (node.dir === dir) {
+      const me = node.children.findIndex((c) => !isSplit(c) && c.panelId === panelId);
+      const you = node.children.findIndex((c) => !isSplit(c) && c.panelId === targetPanelId);
+      if (me >= 0 && you >= 0 && me === (before ? you - 1 : you + 1)) {
+        found = true;
+        return;
+      }
+    }
+    node.children.forEach(walk);
+  };
+  PANEL_REGIONS.forEach((r) => walk(layout.nodes[r]));
+  return found;
+}
+
+/**
+ * 欄を**隣と入れ替える**（メニューの「上へ／下へ／左へ／右へ」・決定12＝ドラッグが使えないときの逃げ道）。
+ * その向きの並びに入っていない、または端にいるときは**何も変えない**（同じ参照）。
+ */
+export function movePanelStep(layout: PanelLayout, panelId: PanelId, side: DropSide): PanelLayout {
+  const dir = side === DROP_SIDE.left || side === DROP_SIDE.right ? SPLIT_DIR.row : SPLIT_DIR.column;
+  const back = side === DROP_SIDE.left || side === DROP_SIDE.top;
+  let done = false;
+
+  const walk = (node: PanelNode | null): PanelNode | null => {
+    if (!node || done) return node;
+    if (!isSplit(node)) return node;
+    const idx = node.children.findIndex((c) => !isSplit(c) && c.panelId === panelId);
+    if (idx >= 0 && node.dir === dir) {
+      const to = back ? idx - 1 : idx + 1;
+      if (to < 0 || to >= node.children.length) return node; // 端＝動かせない
+      done = true;
+      const children = [...node.children];
+      [children[idx], children[to]] = [children[to], children[idx]];
+      const sizes = children.map((_, i) => node.sizes[i] ?? 1 / children.length);
+      [sizes[idx], sizes[to]] = [sizes[to], sizes[idx]];
+      return makeSplit(node.dir, children.map((n, i) => ({ node: n, size: sizes[i] })));
+    }
+    const pairs = node.children
+      .map((child, i) => ({ node: walk(child), size: node.sizes[i] ?? 1 / node.children.length }))
+      .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+    return makeSplit(node.dir, pairs);
+  };
+
+  const next = emptyLayout();
+  next.regionSizes = { ...layout.regionSizes };
+  PANEL_REGIONS.forEach((r) => {
+    next.nodes[r] = walk(layout.nodes[r] ?? null);
+  });
+  return done ? next : layout;
+}
+
+/**
+ * 分かれ目の大きさを変える（境界のドラッグ）。`path`＝領域の根からの子の番号の並び。
+ * 割合は必ず整えるので、**最小より小さくは絞れない**（掴めない欄を作らない）。
+ * 見つからない・数が合わないときは**何も変えない**（同じ参照）。
+ */
+export function resizeSplit(
+  layout: PanelLayout,
+  region: PanelRegion,
+  path: readonly number[],
+  sizes: readonly number[],
+): PanelLayout {
+  let changed = false;
+  const walk = (node: PanelNode | null, depth: number): PanelNode | null => {
+    if (!node || !isSplit(node)) return node;
+    if (depth === path.length) {
+      if (sizes.length !== node.children.length) return node;
+      changed = true;
+      return makeSplit(node.dir, node.children.map((n, i) => ({ node: n, size: sizes[i] })));
+    }
+    const i = path[depth];
+    if (i < 0 || i >= node.children.length) return node;
+    const children = [...node.children];
+    const replaced = walk(children[i], depth + 1);
+    if (!replaced) return node;
+    children[i] = replaced;
+    // 差し替えでも `makeSplit` を通す＝分かれ目を作る道を1本に保つ（コメントの主張を実装で守る）。
+    return makeSplit(node.dir, children.map((n, k) => ({ node: n, size: node.sizes[k] ?? 1 / children.length })));
+  };
+  const next: PanelLayout = { ...layout, nodes: { ...layout.nodes, [region]: walk(layout.nodes[region] ?? null, 0) } };
+  return changed ? next : layout;
+}
+
+/**
+ * 保存から読んだ**素性の分からない値**を配置として受け取る。形が合わないところは**落とす**（例外にしない）。
+ *
+ * **これが無いと、壊れた設定で画面が開けなくなる**（`{"left":5}` や `sizes` の無い分かれ目で、
+ * 描く前に落ちる）。落ちる先が初期描画なので「配置を既定に戻す」にも辿り着けない＝**設定のせいで
+ * 二度と開けない**（§2-5・ADR-0033 判断軸3）。`normalizeLayout` は**形が整っている前提**の整え役なので、
+ * 入口はここで守る。
+ *
+ * 何も残らなければ `null`＝呼び出し側が既定を使う。
+ */
+export function parsePanelLayout(raw: unknown): PanelLayout | null {
+  if (!isRecord(raw)) return null;
+  // 古い形（領域がトップレベルに並ぶ）も読む＝版が上がっただけで配置を捨てない。
+  const rawNodes = isRecord(raw.nodes) ? raw.nodes : raw;
+  const next = emptyLayout();
+  next.regionSizes = normalizeRegionSizes(isRecord(raw.regionSizes) ? (raw.regionSizes as Partial<RegionSizes>) : undefined);
+  let parsedAny = false;
+  let brokenAny = false;
+  for (const region of PANEL_REGIONS) {
+    const node = parseNode(rawNodes[region]);
+    if (node) {
+      next.nodes[region] = node;
+      parsedAny = true;
+    } else if (rawNodes[region] != null) {
+      brokenAny = true; // 値はあるのに読めない＝壊れている（「閉じてある」ではない）
+    }
+  }
+  // **欄をすべて閉じた配置**は「まだ保存していない」と区別する＝しないと、開き直すたびに閉じた欄が黙って戻る。
+  // ただし**壊れた値が混ざっているとき**は「閉じてある」と読まない＝何も出ない画面にせず、既定へ落とす。
+  const closedOnPurpose = !brokenAny && PANEL_REGIONS.some((r) => r in rawNodes);
+  return parsedAny || closedOnPurpose ? next : null;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v != null && !Array.isArray(v);
+}
+
+function parseNode(raw: unknown): PanelNode | null {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.panelId === 'string') return raw.panelId === '' ? null : { panelId: raw.panelId };
+  if (!Array.isArray(raw.children)) return null;
+  // 割合が欠けている・数が合わないのは**壊れた値ではなく足りない値**として扱う（等分へ倒す）。
+  const sizes = Array.isArray(raw.sizes) ? raw.sizes : [];
+  const pairs = raw.children
+    .map((child, i) => ({ node: parseNode(child), size: typeof sizes[i] === 'number' ? (sizes[i] as number) : 0 }))
+    .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+  const dir = raw.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
+  return makeSplit(dir, pairs.map((p) => ({ node: p.node, size: p.size > 0 ? p.size : 1 / Math.max(1, pairs.length) })));
+}
+
+/** 落とす場所を決めるための箱（画面の座標・`getBoundingClientRect` と同じ形）。 */
+export interface DropBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 欄の上のどこを指しているかから、**どの辺に差すか**を決める（段階3＝見出しをつかむドラッグ）。
+ *
+ * 中心からの距離を**箱の大きさに対する割合**で縦横比べる＝横長の欄でも上下の辺が取れる（px で比べると
+ * 長い辺ばかりが選ばれる）。**同じ割合のときは上下を採る**（迷って何も起きない、を作らない）。
+ * 箱が潰れている（幅か高さが 0）ときも決まる（0 で割らない）。
+ */
+export function dropSideAt(box: DropBox, clientX: number, clientY: number): DropSide {
+  const w = box.width > 0 ? box.width : 1;
+  const h = box.height > 0 ? box.height : 1;
+  const dx = (clientX - (box.left + w / 2)) / w;
+  const dy = (clientY - (box.top + h / 2)) / h;
+  if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? DROP_SIDE.left : DROP_SIDE.right;
+  return dy < 0 ? DROP_SIDE.top : DROP_SIDE.bottom;
+}
+
+/**
+ * 上の段で**残りの幅を全部使う領域**（閉じた欄の場所を空けたままにしない＝実機指摘 2026-09-30）。
+ *
+ * 既定は真ん中（左右は決まった割合）。**真ん中が空なら右**、右も無ければ左が残りを使う＝閉じた真ん中の
+ * 場所に何も無い帯が残らない。上の段がすべて空なら `null`（下の欄が全体を使う）。
+ * ⚠️ 割合を持つ領域（左・右）のうち**残りを使う側の割合は使わない**（覚えた値は消さない＝真ん中を戻せば元の幅）。
+ */
+export function flexRegionOf(nodes: PanelLayout['nodes']): PanelRegion | null {
+  if (nodes.center) return PANEL_REGION.center;
+  if (nodes.right) return PANEL_REGION.right;
+  if (nodes.left) return PANEL_REGION.left;
+  return null;
+}
+
+/**
+ * ドラッグで欄を落とせる**空いた領域**（外周の落とし先・実機指摘 2026-09-30）。
+ * 空でない領域には、その中の欄の辺へ落とせる（`dropPanelBeside`）ので出さない＝同じ所に2つの落とし先を重ねない。
+ * （掴んでいる欄が1つで占める領域も空ではないので出ない＝そこへ落としても何も変わらない。）
+ */
+export function emptyRegions(layout: PanelLayout): PanelRegion[] {
+  return PANEL_REGIONS.filter((r) => layout.nodes[r] == null);
+}
+
+/** 器の中の矩形（器の左上から・px）。 */
+export interface ZoneBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 空いた領域への落とし先の帯の置き場所（実機指摘 2026-09-30・#1275 レビュー 🔴）。純粋関数。
+ *
+ * - 左・右＝外周の左右の端（上の段の高さ）。下＝外周の下の端。
+ * - 真ん中＝**左右の両方に欄があるときだけ**その境目（`centerX`）。上の段が空なら上の端。
+ *   ⚠️ 片側だけのときは出さない＝境目が器の端に来て、端の帯と重なる（重なった所では真ん中へ落とせない）。
+ * - ⚠️ **帯どうしは重ねない・器からはみ出さない**＝四隅で重なる分は、左右の帯の側を縮める。
+ */
+export function dockZoneBoxes(
+  layout: PanelLayout,
+  size: { width: number; height: number },
+  centerX: number | null,
+  zonePx: number,
+): { region: PanelRegion; box: ZoneBox }[] {
+  const { width: w, height: h } = size;
+  if (w <= 0 || h <= 0) return [];
+  const empty = new Set(emptyRegions(layout));
+  const hasMain = flexRegionOf(layout.nodes) != null;
+  const mainH = layout.nodes.bottom && hasMain ? h * (1 - layout.regionSizes.bottom) : h;
+  const topBand = empty.has(PANEL_REGION.center) && !hasMain;
+  const bottomBand = empty.has(PANEL_REGION.bottom);
+  // 左右の帯は、上下の帯と重ならない高さにする。
+  const sideTop = topBand ? zonePx : 0;
+  const sideBottom = Math.min(mainH, bottomBand ? h - zonePx : h);
+  const sideH = Math.max(0, sideBottom - sideTop);
+  const out: { region: PanelRegion; box: ZoneBox }[] = [];
+  if (empty.has(PANEL_REGION.left) && sideH > 0) out.push({ region: PANEL_REGION.left, box: { left: 0, top: sideTop, width: zonePx, height: sideH } });
+  if (empty.has(PANEL_REGION.center)) {
+    if (topBand) out.push({ region: PANEL_REGION.center, box: { left: 0, top: 0, width: w, height: zonePx } });
+    else if (layout.nodes.left && layout.nodes.right && centerX != null) {
+      const left = Math.min(Math.max(centerX - zonePx / 2, 0), w - zonePx);
+      out.push({ region: PANEL_REGION.center, box: { left, top: 0, width: zonePx, height: sideBottom } });
+    }
+  }
+  if (empty.has(PANEL_REGION.right) && sideH > 0) out.push({ region: PANEL_REGION.right, box: { left: w - zonePx, top: sideTop, width: zonePx, height: sideH } });
+  if (bottomBand) out.push({ region: PANEL_REGION.bottom, box: { left: 0, top: h - zonePx, width: w, height: zonePx } });
+  return out;
+}

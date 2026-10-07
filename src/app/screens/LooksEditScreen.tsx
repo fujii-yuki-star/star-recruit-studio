@@ -1,12 +1,18 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useMemo, useRef, useState, type ChangeEvent, useEffect } from "react";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import type { PanelSpec } from "../components/layout/PanelLayoutView";
+import { usePanelLayout } from "../components/layout/usePanelLayout";
+import { PANEL_SCREEN, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
-import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
-import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPES, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
+import { addLayer, DEFAULT_SLOT_TYPE, DEFAULT_TEXT_KEY_TEXT, textKeyOfLayer, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, deleteLookConfirmMessage } from "../uiLabels";
 import { effectiveLayerZ, moveLayerZ } from "../../domain/template/layerOrder";
+import { moveToIndexByZ } from "../../domain/zOrder";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
@@ -14,12 +20,16 @@ import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants
 import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor } from "../../domain/template/textStyle";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDraftHistory } from "../hooks/useDraftHistory";
-import { isTextEntryTarget, useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { isTextEntryTarget, NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { ExportLockBanner } from "../components/ExportLockBanner";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
-import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, isTextLayer, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import { ColorPicker } from "../components/ColorPicker";
@@ -28,11 +38,21 @@ import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
-import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar";
+import { PanelLayoutMenu } from "../components/layout/PanelLayoutMenu";
+import { KeyboardNudge } from "../components/KeyboardNudge";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
+// 帯の既定は描画と同じ出どころから採る（§2-7＝`bandBackground` が使う値）。
+import { DEFAULT_BAND_COLOR, DEFAULT_BAND_OPACITY, DEFAULT_BAND_RADIUS } from "../../domain/template/textStyle";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
+
+/**
+ * この画面が持つ欄（ADR-0033 段階4 後半）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
+ */
+const PANEL_ID = { preview: "preview", edit: "edit" } as const;
+const PANEL_IDS = Object.values(PANEL_ID);
 
 // 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
 const layerShapeLabel: Record<LayerShapeType, string> = { rect: "四角", ellipse: "丸", line: "線" };
@@ -71,20 +91,53 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const yukoPoseTags = buildYukoPoseTags(assets);
   // レイヤーごとの既定素材 file input（レイヤー単位で複数あるため id 単一の useRef でなく id→要素のマップ・#412）。
   const defaultAssetInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  // 矢印の連打を1回の取り消しへ畳むための控え（実体は下の `openNudgeGroup`）。
+  // ⚠️ **フックは早期 return より前**＝下のブロックへ置くと呼ぶ順が変わる（`react-hooks/rules-of-hooks`）。
+  const nudgeGroupOpenRef = useRef(false);
+  /** 開いた時点の世代（畳まれたかを見分ける・#817 レビュー）。 */
+  const nudgeGroupGenRef = useRef(0);
+  const nudgeGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 下書きは画面ローカル（store 履歴の対象外＝#547 P1-1）。そのため取り消し/やり直しも専用の局所履歴で用意する
   // （#547 P2-3）。これが無いと復旧手段が「破棄して戻る」だけになり、1回の誤ドラッグで全編集の破棄を迫られる。
   const {
     value: draft,
-    set: setDraft,
-    undo: undoDraft,
-    redo: redoDraft,
+    set: setDraftRaw,
+    undo: undoDraftRaw,
+    redo: redoDraftRaw,
     canUndo,
     canRedo,
     beginGroup,
     endGroup,
     textGroup,
+    groupGen,
   } = useDraftHistory<Template | null>(() => (editing ? cloneTemplate(editing) : null));
+  // 遅れて走るタイマから**いまの世代**を読む（クロージャに閉じ込めると古い値を見る）。
+  const groupGenRef = useRef(groupGen);
+  useEffect(() => { groupGenRef.current = groupGen; }, [groupGen]);
+  // 画面を離れるときは**待っているタイマを止める**（#834-3）＝残すと、離れた後に走って
+  // **消えた画面へ書き戻し**にいく（閉じる相手はもう居ない）。
+  // ⚠️ **タイムライン側と consequence が違う**＝あちらの履歴は store にあるので閉じ忘れると
+  // 以後の編集がひとつながりになるが、**この画面の履歴は `useDraftHistory`＝画面ローカル**なので、
+  // 離れた時点でまとめごと消える。だからここで要るのは**タイマの後始末だけ**（`endGroup` は呼ばない
+  // ＝呼ぶ相手がもう無い）。同じ形に見えて理由が違うので、揃えたつもりで `endGroup` を足さない。
+  // ⚠️ **早期 return より前に置く**＝この画面は下で「まだ選ばれていない」ときに別の画面を返すので、
+  // 後ろに置くとフックの数が回によって変わる（`react-hooks/rules-of-hooks`）。
+  useEffect(() => () => {
+    if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    nudgeGroupTimerRef.current = null;
+  }, []);
+  /**
+   * ⚠️ **下書きが変わったら、出しっぱなしの確認はやり直す**（レビュー 🟡）。
+   * 出したまま中身が変わると、①消す相手がいなくなった確認が残る ②**取り消しで層が戻ると
+   * 押していないのに確認が生き返る**。確認は「いまの中身」への問いなので、変わったら聞き直す
+   * （焼き出しの確認が範囲や名前の変更でやり直しになるのと同じ流儀＝`06 §12`）。
+   * 取り消し・やり直しも下書きを変える入口なので**同じ扱い**（`setDraft` だけ塞いでも漏れる）。
+   */
+  const closeDraftConfirms = (): void => { setConfirmBulkDeleteIds(null); setBulkDeleteRefused(false); };
+  const setDraft: typeof setDraftRaw = (next) => { closeDraftConfirms(); setDraftRaw(next); };
+  const undoDraft = (): void => { closeDraftConfirms(); undoDraftRaw(); };
+  const redoDraft = (): void => { closeDraftConfirms(); redoDraftRaw(); };
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
@@ -95,8 +148,31 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const [busyAction, setBusyAction] = useState<"save" | "delete" | "asset" | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // 欄の配置（ADR-0033 段階4 後半）。**既定はいままでの並びと同じ**（中央＝プレビュー／右＝編集）。
+  // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
+  const defaultLayout = useMemo(() => {
+    const l = emptyLayout();
+    l.nodes.center = { panelId: PANEL_ID.preview };
+    l.nodes.right = { panelId: PANEL_ID.edit };
+    return l;
+  }, []);
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+    usePanelLayout(PANEL_SCREEN.looks, defaultLayout, PANEL_IDS);
   // グループを中身ごと削除する確認（#551）。id で持つ＝選ぶグループが変わると確認が自動で解除される（#410 の流儀）。
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
+  /**
+   * まとめて消す確認（#802-4）。**boolean ではなく「確認した id」で持つ**（レビュー 🔴）＝
+   * boolean だと確認を出したまま別の層を選んだとき、**確認していないものを消す**。
+   * 同じ事故は隣の `confirmDeleteGroupId` で一度潰してある（そちらと同じ流儀）。
+   */
+  const [confirmBulkDeleteIds, setConfirmBulkDeleteIds] = useState<readonly string[] | null>(null);
+  /**
+   * まとめて消せないと断ったか（確認を出す前に断る＝押しても何も起きない、を作らない）。
+   * ⚠️ **理由の文を固めて持たない**＝毎回いまの選択から引き直すので、選び直したり層が増えて
+   * 消せるようになれば理由はひとりでに引っ込む（前の選択への断りが居座らない）。
+   */
+  const [bulkDeleteRefused, setBulkDeleteRefused] = useState(false);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
   // キーボード入口は全画面共通の判定（修飾キー・入力欄では奪わない）を共有し、実体だけ局所履歴に差し替える。
   // App の全体登録は UNDO_REDO_SCREENS で looks-edit を除外済み＝二重登録・二重 Undo にならない（#547 P1-1）。
@@ -110,10 +186,22 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     onNavigate("looks");
   }
 
+  // ⚠️ **フックは早期 return より前**（`rules-of-hooks`）＝下の「編集対象が無い」分岐を挟むと、
+  // 描画のたびに呼ぶ数が変わる。`onDropLayerAt` は下で宣言しているが、関数宣言は巻き上がるので参照できる。
+  const layerDnd = useDragReorder(onDropLayerAt);
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
+
+
   // 編集対象が無い（直接遷移／削除直後など）＝一覧へ戻す導線だけ出す。
   if (!editing || !draft) {
     return (
       <div className="main-scroll">
+        {/* ⚠️ **両方の枝に置く**（#984 レビュー ℹ️）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**（#953 と同じ型）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <div className="notice notice-warn" role="alert">
           <span>編集する見た目パターンが選ばれていません。一覧から選んでください。</span>
           <button className="btn btn-primary btn-icon" onClick={backToList}>一覧へ戻る</button>
@@ -140,11 +228,65 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft({ ...draft!, layers: removeLayer(draft!.layers, id), groups: removeMembersFromGroups(draft!.groups ?? [], [id]) });
     setSelectedLayerIds((cur) => cur.filter((x) => x !== id));
   }
+  /**
+   * その選択のうち**実際に消せる層**（レビュー ℹ️）。
+   * ⚠️ **いまの下書きに実在するものだけ**＝選択に残った古い id を数えると、件数が嘘になり
+   * 「最低1枚」の判定も過剰に効く（消せるはずの削除が黙って空振りする）。
+   */
+  function removableLayerIds(ids: readonly string[]): string[] {
+    return (draft?.layers ?? []).filter((l) => ids.includes(l.id) && !inLockedGroup(l.id)).map((l) => l.id);
+  }
+  /**
+   * その選択のうち**ロックのせいで消せない層**（レビュー 🟡）。
+   * ⚠️ `removableLayerIds` は「ロック中」と「もう無い」を**同じ条件で落とす**ので、件数の差だけを見て
+   * ロックの理由を出すと、取り消しで消えた id が残っているだけのときにも**事実と違う理由**が出る
+   *（消える結果は正しいのに、ロックされていないものを探させる＝§2-5）。理由はここから採る。
+   */
+  function lockedLayerIdsIn(ids: readonly string[]): string[] {
+    return (draft?.layers ?? []).filter((l) => ids.includes(l.id) && inLockedGroup(l.id)).map((l) => l.id);
+  }
+  /**
+   * まとめて消せない理由（`undefined`＝**出す理由が無い**＝消せるか、そもそも入口で押せない）。
+   * **グループ削除の断り方（`groupDeleteBlockedReason`）と同型**＝確認を出しておいて黙って
+   * 何も起きない、を作らない（§2-5）。可否そのものは `canBulkDelete` が持つ。
+   */
+  function bulkDeleteBlockedReason(ids: readonly string[]): string | undefined {
+    const removable = removableLayerIds(ids);
+    if (removable.length > 0 && (draft?.layers.length ?? 0) - removable.length < 1) {
+      return "この見た目パターンから全部が消えてしまうため削除できません（1つ残して選び直してください）";
+    }
+    return undefined; // ⚠️ 1つも消せない選択は**入口で押せなくする**（`canDeleteSelected`）＝到達しない文言を作らない
+  }
+  /** その選択でまとめて消せるか（＝`Delete` を渡してよいか）。 */
+  function canBulkDelete(ids: readonly string[]): boolean {
+    return removableLayerIds(ids).length > 0;
+  }
+  /**
+   * 選んでいる層を**まとめて消す**（#802-4）。場面編集の自由配置と同じ流儀＝
+   * 複数選んでいるときは**確認してから**まとめて消す（矢印は全部動くのに Delete だけ1枚、を作らない）。
+   *
+   * ⚠️ **最低1枚は残す**（`template.schema` の `layers.minItems:1`）＝全部選んで消そうとしても、
+   * 残せる枚数までにする…のではなく**何もしない**（どれが残るかを黙って決めない）。
+   * ⚠️ **固定したまとまりの層は消さない**（動かせないものは消せない＝ADR-0026②）。
+   */
+  function onRemoveLayers(ids: readonly string[]) {
+    if (!draft) return;
+    const removable = removableLayerIds(ids);
+    if (!canBulkDelete(ids) || bulkDeleteBlockedReason(ids)) return;
+    setDraft({
+      ...draft,
+      layers: removable.reduce((acc, id) => removeLayer(acc, id), draft.layers),
+      groups: removeMembersFromGroups(draft.groups ?? [], [...removable]),
+    });
+    setSelectedLayerIds((cur) => cur.filter((x) => !removable.includes(x)));
+  }
   // 一覧の行名（#547 P2-4）。同じ種別が複数あると「文字」が2行並んで見分けられないので、
   // テキスト層は差し込み先（見出し／本文…）を併記する。場面編集の FREE 一覧が名前＋中身で区別できるのと揃える。
   const layerRowName = (l: Layer): string => {
     const base = layerLabel[l.type];
-    const key = l.textKey ? textKeyLabel[l.textKey] : "";
+    // 字幕層の未指定は `subtitle`（#1058）＝直に見ると、名前に「（字幕）」が出ない。
+    const tk = textKeyOfLayer(l);
+    const key = tk ? textKeyLabel[tk] : "";
     return key && key !== base ? `${base}（${key}）` : base; // 「字幕（字幕）」のような重複は付けない
   };
 
@@ -158,13 +300,41 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     });
   }
 
+  /**
+   * 一覧の**すき間へ落とした**ときの並び替え（#772 候補3）。↑↓ ボタンと**同じ意味**になるよう
+   * `moveToIndexByZ`（＝1段の繰り返し）へ委ねる＝2つの導線で結果が割れない。
+   *
+   * ⚠️ **画面は「上＝手前」で見せている**（描画順の反転）ので、**渡す前に位置を裏返す**。
+   * ここを忘れると、上へ落としたのに背面へ行く（見えている並びと逆に動く）。
+   */
+  function onDropLayerAt(id: string, visualIndex: number) {
+    setDraft((d) => {
+      if (!d) return d;
+      // 表示は降順（上が手前）。昇順（奥→手前）での位置に直す。
+      const ascending = d.layers.length - 1 - visualIndex;
+      const layers = moveToIndexByZ(d.layers, id, ascending, effectiveLayerZ);
+      return layers === d.layers ? d : { ...d, layers }; // 変わらないなら下書きも据え置き＝空の取り消しを作らない
+    });
+  }
+
+  /** レイヤーを中身ごと複製する（#772 候補4）＝元のすぐ手前へ、少しずらして置く。 */
+  function onDuplicateLayer(id: string) {
+    setDraft((d) => {
+      if (!d) return d;
+      const layers = duplicateLayer(d.layers, id, d.canvas);
+      return layers === d.layers ? d : { ...d, layers };
+    });
+  }
+
   // 複数選択（#306）：Shift+クリックでトグル・マーキーで集合置換・一括移動。
   function selectLayer(id: string | null, additive?: boolean) {
+    setBulkDeleteRefused(false); // 選び直したら断りは下ろす（場面編集の確認フラグと同じ流儀）
     setActiveGroupId(null); // レイヤー選択はグループ選択を解除（排他）
     if (id == null) { setSelectedLayerIds([]); return; }
     setSelectedLayerIds((cur) => (additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
   }
   function selectLayerMany(ids: string[]) {
+    setBulkDeleteRefused(false);
     setActiveGroupId(null);
     setSelectedLayerIds(ids);
   }
@@ -180,12 +350,91 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   const activeGroup = tplGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
+
+  /**
+   * 矢印・`Delete` を**この画面が受け持つか**（レビュー指摘）。
+   * ⚠️ **選んでいないときは奪わない**（`06 §12.1`＝奪って何も起きない＝行き止まりを作らない）。
+   * ⚠️ **答えを求める確認が出ている間も奪わない**＝消すかどうかを聞いている最中にキーで別のものが動く、を作らない。
+   * 場面編集の `canvasKbdActive` と同じ規準（ADR-0026②）。
+   */
+  // ⚠️ **自分のまとめがまだ生きているかは「世代」で見る**（#817 レビュー 🔴）＝取り消しは持ち主の
+  // 都合と無関係に畳むので、自前の印だけを見ていると**畳まれた後も開いているつもり**で開き直さず、
+  // **1押下＝1履歴**になって上限を流し切る（この画面の履歴は**唯一の戻り道**＝押し出されると戻せない）。
+  // 遅れて走るタイマが別人のまとめを閉じるのも同じ理由で防ぐ。タイムライン形式と同じ形（ADR-0026②）。
+  const openNudgeGroup = (): void => {
+    if (!nudgeGroupOpenRef.current || nudgeGroupGenRef.current !== groupGen) {
+      nudgeGroupOpenRef.current = true;
+      beginGroup();
+      nudgeGroupGenRef.current = groupGen;
+    }
+    if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    const gen = nudgeGroupGenRef.current;
+    nudgeGroupTimerRef.current = setTimeout(() => {
+      nudgeGroupTimerRef.current = null;
+      nudgeGroupOpenRef.current = false;
+      if (gen === groupGenRef.current) endGroup(); // 自分のまとめが残っているときだけ閉じる
+    }, NUDGE_GROUP_IDLE_MS);
+  };
+  /** そのまとまりが固定されているか（入れ子の親も見る＝親を固定したら中身も動かさない）。 */
+  const inLockedGroup = (layerId: string): boolean => topGroupOfMember(tplGroups, layerId)?.locked === true;
+  /**
+   * 矢印キーで少しずつ動かす（#788-3）。**掴んで動かすのと同じ入口**（`onMoveLayers`／`transformGroup`）を
+   * 通す＝置ける条件をキーとドラッグで割らない。
+   * ⚠️ **まとまりを選んでいるときはまとまりごと**（場面編集の自由配置と同じ規準・ADR-0026②）。
+   * ⚠️ **固定したまとまりの中身は動かさない**（レビュー指摘）＝キャンバスのドラッグは固定なら選ぶだけで
+   * 止まるのに、キーだけ通ると「掴めないのにキーでは動く」になる（同じ理由で入口ごとに結果が変わる）。
+   * ⚠️ **押しっぱなしでも取り消しは1回ぶん**（`06 §12.1` 決定20＝タイムラインと同じ）＝1打鍵ごとに積むと、
+   * キーリピートで履歴の上限を数秒で流し切り、**この画面唯一の戻り道**（局所履歴）が消える。
+   */
+  const onCanvasNudge = (dx: number, dy: number): void => {
+    if (effectiveActiveGroupId != null && activeGroup) {
+      if (activeGroup.locked) return; // 固定＝ドラッグでも動かない
+      openNudgeGroup();
+      transformGroup(activeGroup.id, { x: activeGroup.transform.x + dx, y: activeGroup.transform.y + dy });
+      return;
+    }
+    const targets = draft.layers.filter((l) => selectedLayerIds.includes(l.id) && !inLockedGroup(l.id));
+    if (targets.length === 0) return;
+    openNudgeGroup();
+    onMoveLayers(targets.map((l) => ({ id: l.id, x: l.x + dx, y: l.y + dy })));
+  };
+  /**
+   * `Delete` で消す（#788-3）。**一覧の削除ボタンと同じ条件・同じ入口**＝最後の1枚は消さない
+   *（`template.schema` の `layers.minItems:1`）。消せないときは**渡さない**＝押しても何も起きない、を作らない。
+   */
+  // ⚠️ **枚数で規則を割らない**（レビュー 🟡・ADR-0026②）＝1枚でも複数でも同じ関数から採る。
+  // 単数だけ「実在するか」を見ていないと、取り消しで消えた層が選択に残ったとき `Delete` を奪って
+  // 何も起きず、しかも**空の取り消しが1つ積まれる**（この画面唯一の戻り道を食う）。
+  const canDeleteSelected = draft.layers.length > 1 && canBulkDelete(selectedLayerIds);
   // グループ削除の確認を出すか（#551 レビュー P2）。**削除できる状態のときだけ**出す＝確認を開いたまま
   // 別の場所でロック/レイヤー削除が起きたら確認を引っ込め、理由つきの無効ボタンへ戻す（サイレント失敗を作らない）。
   const showGroupDeleteConfirm =
     !!effectiveActiveGroupId &&
     confirmDeleteGroupId === effectiveActiveGroupId &&
     !groupDeleteBlockedReason(effectiveActiveGroupId);
+  // ⚠️ **確認が出ていないなら奪わない**（レビュー 🟡）＝門は「持っている状態」ではなく**見えているか**を見る。
+  // 状態だけ見ると、確認が引っ込んだのに id が残っている間**矢印も `Delete` も死に、理由は何も出ない**。
+  const showBulkDeleteConfirm =
+    confirmBulkDeleteIds != null
+    && canBulkDelete(confirmBulkDeleteIds)
+    && !bulkDeleteBlockedReason(confirmBulkDeleteIds);
+  const canvasKbdActive =
+    !isExporting
+    && busyAction === null
+    && !confirmDelete && !confirmDiscard && !showGroupDeleteConfirm && !showBulkDeleteConfirm
+    && (selectedLayerIds.length > 0 || (effectiveActiveGroupId != null && activeGroup?.locked !== true));
+  // ⚠️ **複数選んでいるならまとめて消す**（#802-4）＝矢印は選択ぜんぶ動くのに Delete だけ主の1枚、
+  // という割れを作らない（同じ部品・同じキーで挙動を割らない・ADR-0026②）。確認は場面編集と同じ流儀。
+  const onCanvasDelete = (): void => {
+    if (selectedLayerIds.length >= 2) {
+      // ⚠️ **消せないなら確認を出さない**（レビュー 🔴）＝出しておいて何も起きないのが一番わるい。
+      if (bulkDeleteBlockedReason(selectedLayerIds)) { setBulkDeleteRefused(true); return; }
+      setBulkDeleteRefused(false);
+      setConfirmBulkDeleteIds([...selectedLayerIds]);
+      return;
+    }
+    if (selectedLayerId) onRemoveLayer(selectedLayerId);
+  };
   // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
   const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
   function selectGroup(groupId: string | null) {
@@ -206,7 +455,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     const memberIds = groupElementIds(tplGroups, effectiveActiveGroupId);
     setDraft((d) => {
       if (!d) return d;
-      const r = ungroupGroup(d.groups ?? [], d.layers, effectiveActiveGroupId);
+      const r = ungroupGroup(d.groups ?? [], d.layers, effectiveActiveGroupId, isTextLayer);
       return { ...d, groups: r.groups, layers: r.elements };
     });
     setActiveGroupId(null);
@@ -361,19 +610,21 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   // 型別コントロール（#214 ④）：文字＝内容/大きさ/色/太さ、図形＝形/色、素材＝種類/収め方、立ち絵＝収め方/ポーズ 等。
   function renderLayerControls(l: Layer) {
-    if (l.type === "text" || l.type === "subtitle") {
+    if (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) {
       return (
         <>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
-            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+            <select className="select" value={textKeyOfLayer(l) ?? DEFAULT_TEXT_KEY_TEXT} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
               {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
             </select>
           </div>
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             {numField("文字の大きさ", l.fontSize ?? DEFAULT_FONT_SIZE, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                  `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+              <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
               <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -391,27 +642,32 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v }), 0, STROKE_WIDTH_MAX)}
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+                {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                    `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</span>
                 <ColorPicker value={l.strokeColor ?? defaultStrokeColor(l.color ?? DEFAULT_TEXT_COLOR)} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
               </div>
             )}
           </div>
           {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さ/角丸を編集できるよう開放（描画は既存の layer.background を使用）。
               角丸は FREE 帯 UI（SceneEditScreen）と揃える＝同概念「字幕の背景帯」を編集画面で同じ編集性に（ADR-0026 観点6・#544 P3）。 */}
-          {l.type === "subtitle" && (
+          {l.type === LAYER_TYPE.subtitle && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>
               <div className="toggle-row">
-                <label className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</label>
+                {/* ⚠️ **切替は自分で呼び名を持つ**（#1075）＝隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                <span className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</span>
                 <Switch on={l.background?.enabled ?? false} onChange={(on) => onUpdateLayer(l.id, { background: { ...l.background, enabled: on } })} label="字幕の背景帯を付ける" />
               </div>
               {l.background?.enabled && (
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
+                    {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                        `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+                    <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</span>
+                    <ColorPicker value={l.background?.color ?? DEFAULT_BAND_COLOR} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
                   </div>
-                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
-                  {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
+                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? DEFAULT_BAND_OPACITY), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
+                  {numField("角丸", l.background?.radius ?? DEFAULT_BAND_RADIUS, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
                 </div>
               )}
             </div>
@@ -419,7 +675,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
-    if (l.type === "shape") {
+    if (l.type === LAYER_TYPE.shape) {
       return (
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
@@ -429,19 +685,21 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</span>
             <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </div>
       );
     }
-    if (l.type === "slot") {
+    if (l.type === LAYER_TYPE.slot) {
       return (
         <>
           <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
-              <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+              <select className="select" value={l.slotType ?? DEFAULT_SLOT_TYPE} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
                 {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
               </select>
             </div>
@@ -456,18 +714,20 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
-    if (l.type === "background") {
+    if (l.type === LAYER_TYPE.background) {
       return (
         <>
           {renderDefaultAssetControl(l)}
           <div className="field" style={{ margin: "8px 0 0" }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
+            {/* ⚠️ **呼び名は部品が持つ**（#1075）＝色の見本はボタンなので包んでも結ばれず、
+                `ariaLabel` が名前を持っている。隣の見出しは**何も指していない**ので `<span>` にする。 */}
+            <span className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</span>
             <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </>
       );
     }
-    if (l.type === "logo" || l.type === "character") {
+    if (l.type === LAYER_TYPE.logo || l.type === LAYER_TYPE.character) {
       return (
         <>
           <div className="field" style={{ margin: 0 }}>
@@ -476,8 +736,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
             </select>
           </div>
-          {l.type === "logo" && renderDefaultAssetControl(l)}
-          {l.type === "character" && (
+          {l.type === LAYER_TYPE.logo && renderDefaultAssetControl(l)}
+          {l.type === LAYER_TYPE.character && (
             <div className="field" style={{ margin: "8px 0 0" }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>ポーズ（既定）</label>
               <select className="select" value={l.defaultPoseTag ?? ""} onChange={(e) => onUpdateLayer(l.id, { defaultPoseTag: e.target.value || undefined })}>
@@ -493,7 +753,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       );
     }
     // 装飾（decor）はテンプレからは内容非開放（ADR-0017）。選択時にパネルが空にならないよう理由を示す（位置・大きさは上の数値で調整可）。
-    if (l.type === "decor") {
+    if (l.type === LAYER_TYPE.decor) {
       return (
         <p className="field-hint" style={{ margin: 0 }}>装飾の見た目はここでは変更できません（位置・大きさは調整できます）。</p>
       );
@@ -501,53 +761,24 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     return null;
   }
 
-  return (
-    <div className="main-scroll">
-      <ExportLockBanner onNavigate={onNavigate} />
-      {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
-      <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
-          <span className="topbar-title">見た目パターンを編集</span>
-        </div>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          {/* 取り消す/やり直す（#547 P2-3）。見た目・語彙は共有コンポーネントで他画面と一致（ADR-0026②）。
-              対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
-              保存/削除の実行中は他の操作と揃えて止める。 */}
-          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undoDraft} onRedo={redoDraft} disabled={busyAction !== null} />
-          {dirty && <UnsavedMark />}
-          <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
-            {busyAction === "save" ? "保存中…" : "保存"}
-          </button>
-        </div>
-      </div>
-
-      {confirmDiscard && (
-        <div className="notice notice-warn mb" role="alert">
-          <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
-          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
-          <div className="row gap-sm">
-            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
-            <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
-          </div>
-        </div>
-      )}
-      {templateError && (
-        <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
-      )}
-
-      {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
-      {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
-          数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
-      <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--gap-lg)", alignItems: "start" }}
-        onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
-        onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
-      >
-        {/* 左：プレビュー＋レイヤー操作オーバーレイ（ドラッグ/リサイズ/吸着・③c） */}
-        <div className="card">
-          <h2 className="section-title">プレビュー</h2>
-          <ScenePreview scene={sampleScene} template={draft}>
+  // 欄（ADR-0033 段階4 後半）＝いまの2列をそのまま欄にする。**中身は変えない**。
+  const panels: PanelSpec[] = [
+    { id: PANEL_ID.preview, title: 'プレビュー', content: (
+      <>
+          {/* ⚠️ **キーでも動かせる／消せる**（#788-3・ADR-0034 決定19＝ドラッグ専用の操作を作らない）。
+              購読だけの部品で、場面編集の自由配置と**同じもの**を使う（入力欄・変換中の除外も共通）。
+              書き出し中は他の操作と揃えて止める。 */}
+          <KeyboardNudge
+            active={canvasKbdActive}
+            onArrow={onCanvasNudge}
+            onDelete={canDeleteSelected ? onCanvasDelete : undefined}
+          />
+          {/* 拡大縮小（#142）＝プレビューのすぐ上に置く（操作する所の隣） */}
+          <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+          {/* 端で切られやすいところの目安（#265）。**編集する画面にだけ**置く＝仕上がり確認は
+              「出来上がり」を見る場所なので線を出さない。 */}
+          <SafeAreaToggle />
+          <ScenePreview scene={sampleScene} template={draft} zoom={previewZoom} onFitPercent={setPreviewFitPct}>
             <TemplateLayerOverlay
               layers={draft.layers}
               canvasW={draft.canvas.width}
@@ -589,6 +820,34 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               message={`このグループを中身ごと削除しますか？中の${groupElementIds(tplGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
               onCancel={() => setConfirmDeleteGroupId(null)}
               onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
+            />
+          )}
+          {/* まとめて消せなかった理由（#802-4）＝確認を出す前に断る（押しても何も起きない、を作らない）。 */}
+          {bulkDeleteRefused && bulkDeleteBlockedReason(selectedLayerIds) && (
+            <p className="field-hint mt" role="alert">{bulkDeleteBlockedReason(selectedLayerIds)}</p>
+          )}
+          {/* まとめて消す確認（#802-4）＝`Delete` で複数選んでいるときに出す。場面編集の一括削除と同じ流儀。
+              ⚠️ **消すのは「確認した集合」**（`confirmBulkDeleteIds`）＝確認中に選び直しても、
+              確認していないものは消さない。⚠️ 消せなくなったら**確認を引っ込める**（隣のグループ削除と同型）。 */}
+          {showBulkDeleteConfirm && confirmBulkDeleteIds && (
+            /* ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                行の中なので `inline`（箱にしない）＝並び・色は同じ。 */
+            <DeleteConfirm
+              inline
+              className="mt"
+              message={
+                <>
+                  {removableLayerIds(confirmBulkDeleteIds).length}件をまとめて削除しますか？
+                  {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。
+                      ⚠️ 出すのは**本当にロックがあるときだけ**＝もう無い層で数が減っただけのときに
+                      ロックの話をしない（探しても見つからない理由を出さない・§2-5）。 */}
+                  {lockedLayerIdsIn(confirmBulkDeleteIds).length > 0
+                    && "（ロック中のグループに入っている分は残ります）"}
+                </>
+              }
+              onCancel={() => setConfirmBulkDeleteIds(null)}
+              onConfirm={() => { onRemoveLayers(confirmBulkDeleteIds); setConfirmBulkDeleteIds(null); }}
             />
           )}
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
@@ -635,45 +894,66 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               />
             </fieldset>
           )}
-        </div>
-
-        {/* 右：編集パネル */}
-        <div className="card col gap-sm">
+      </>
+    ) },
+    { id: PANEL_ID.edit, title: '見た目パターンの編集', content: (
+      // `col gap-sm` は装飾ではなく**間隔そのもの**（中の欄は `margin:0` で潰してあり、親の gap が間隔を作る）。
+      <div className="col gap-sm">
           {/* 名前 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
-            <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="lookName">名前</label>
+            <input id="lookName" className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </div>
 
           {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
+            {/* ⚠️ **一覧の見出しは `<label>` にしない**（#1075）＝層の行が並ぶ場所の見出しで、欄を指していない。 */}
+            <span className="field-label text-sm" style={{ display: "block", margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</span>
             <div className="col" style={{ gap: 2 }}>
               {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse する＝描画（renderer/layout の
                   昇順・安定ソート＝同 z は配列後方が手前）と同 z でも一致する。降順ソートだと同 z のとき前後が逆に出て、
                   ↑↓ が1段にならない（moveByZ 内部の昇順とも食い違う）。 */}
-              {[...draft.layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).reverse().map((l) => (
-                <div
-                  key={l.id}
-                  className="row-between"
-                  style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)" }}
-                >
-                  <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
-                    {layerRowName(l)}
-                  </button>
-                  <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${layerRowName(l)}を前面へ`} onClick={() => onMoveLayerZ(l.id, "up")}>↑</button>
-                  <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${layerRowName(l)}を背面へ`} onClick={() => onMoveLayerZ(l.id, "down")}>↓</button>
-                  <button
-                    className="btn btn-ghost btn-icon text-sm"
-                    style={{ color: "var(--color-danger)" }}
-                    disabled={draft.layers.length <= 1}
-                    title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
-                    onClick={() => onRemoveLayer(l.id)}
+              {[...draft.layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).reverse().map((l, i) => (
+                <Fragment key={l.id}>
+                  {/* 落とし先の線＝帯・場面カードと同じ見せ方（#772 候補3・すき間方式） */}
+                  {layerDnd.draggingId && layerDnd.overGap === i && <span className="drop-line" aria-hidden />}
+                  <div
+                    className="row-between"
+                    {...layerDnd.dropProps(i)}
+                    style={{
+                      padding: "2px 6px", borderRadius: 4,
+                      background: selectedLayerIds.includes(l.id) ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)",
+                      opacity: layerDnd.draggingId === l.id ? "var(--drag-source-opacity)" : undefined,
+                    }}
                   >
-                    削除
-                  </button>
-                </div>
+                    {/* ⚠️ **持ち手は見た目だけ**（`aria-hidden`）＝並べ替えの読み上げ経路は ↑↓ ボタンが担う（#398 レビュー）。 */}
+                    <span className="drag-handle" aria-hidden {...layerDnd.handleProps(l.id, i)}>⠿</span>
+                    <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
+                      {layerRowName(l)}
+                    </button>
+                    <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${layerRowName(l)}を前面へ`} onClick={() => onMoveLayerZ(l.id, "up")}>↑</button>
+                    <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${layerRowName(l)}を背面へ`} onClick={() => onMoveLayerZ(l.id, "down")}>↓</button>
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      title="この要素を複製"
+                      aria-label={`${layerRowName(l)}を複製`}
+                      onClick={() => onDuplicateLayer(l.id)}
+                    >
+                      {DUPLICATE_LABEL}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      style={{ color: "var(--color-danger-text)" }}
+                      disabled={draft.layers.length <= 1}
+                      title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
+                      onClick={() => onRemoveLayer(l.id)}
+                    >
+                      {DELETE_LABEL}
+                    </button>
+                  </div>
+                </Fragment>
               ))}
+              {layerDnd.draggingId && layerDnd.overGap === draft.layers.length && <span className="drop-line" aria-hidden />}
             </div>
             <div className="row gap-sm mt">
               <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>
@@ -694,7 +974,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
                   {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
                   {/* 表示は実効 z（一覧・描画と同じ基準）。zIndex 未指定でも「一覧で上なら大きい数」になり、↑↓ と値が食い違わない。 */}
-                  {numField(Z_ORDER_LABEL, effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }), 0)}
+                  {/* ⚠️ **整数に丸める**（#960 レビュー）＝重ね順は「1段」を表す語彙で schema も整数。
+                      `NumberField` は下限クランプしかしないので `2.5` を確定でき、保存の門（#959）が
+                      テンプレ**全体**の保存を止める。門は理由を欄まで絞れないので、入口で防ぐ。 */}
+                  {numField(Z_ORDER_LABEL, effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: Math.round(v) }), 0)}
                 </div>
               </div>
               {renderLayerControls(selectedLayer)}
@@ -713,13 +996,71 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   onConfirm={() => void onDelete()}
                 />
               ) : (
-                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} disabled={isExporting} onClick={() => setConfirmDelete(true)}>
+                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger-text)", alignSelf: "flex-start" }} disabled={isExporting} onClick={() => setConfirmDelete(true)}>
                   この見た目パターンを削除
                 </button>
               )}
             </>
           )}
+      </div>
+    ) },
+  ];
+
+  return (
+    // ⚠️ **`dense` は編集画面に共通**（ADR-0047・#1247）。⚠️ **空の枝（上の早い `return`）には付けない**
+    //   ＝あちらは「一覧から選んでください」の文だけで、詰める本体が無い（読みにくくなるだけ）。
+    <div className="main-scroll dense">
+      <ExportLockBanner onNavigate={onNavigate} />
+      {/* ヘッダ：タイトル・共通ツールバー（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ）。
+          ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝この画面は元からここに在ったので、
+          他の2画面をここへそろえた形。 */}
+      {/* 見出しの目印（`page-head`）は3画面で同じ＝共通ツールバーの居場所が「見出しの行」だと
+          コードからも読める（#774）。余白は元の見た目を保つため据え置き。
+          ⚠️ `EDITOR_HEADER_CLASS` で**貼り付ける**＝この見出しはスクロールする側（`.main-scroll`）の
+          中にあるので、印が無いと下へスクロールした時点でツールバーごと消える。 */}
+      <div className={`row-between page-head ${EDITOR_HEADER_CLASS}`} style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
+        <span className="topbar-title">見た目パターンを編集</span>
+        <EditorToolbar
+          // 対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
+          // 保存/削除の実行中は他の操作と揃えて止める。
+          undo={{ canUndo, canRedo, onUndo: undoDraft, onRedo: redoDraft, disabled: busyAction !== null }}
+          status={dirty ? <UnsavedMark /> : null}
+          extra={(
+            <>
+              {/* 欄の出し入れも**見出しの行**へ（#1032・3画面で同じ出し方）。 */}
+              <PanelLayoutMenu layout={panelLayout} panels={panels} closed={closedPanels} onChange={changeLayout} onReset={resetLayout} />
+              <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
+                {busyAction === "save" ? "保存中…" : "保存"}
+              </button>
+            </>
+          )}
+          back={{ label: <><ArrowLeftIcon size={16} />一覧へ戻る</>, onClick: onBack, disabled: busyAction !== null }}
+        />
+      </div>
+
+      {confirmDiscard && (
+        <div className="notice notice-warn mb" role="alert">
+          <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
+          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
+          <div className="row gap-sm">
+            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
+            <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
+          </div>
         </div>
+      )}
+      {templateError && (
+        <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
+      )}
+
+      {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
+          数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
+      {/* 本体は**欄**（ADR-0033）＝利用者が配置を組み替えられる。フォーカスの束ね（#547 P2-3）は
+          欄の外側に置く＝どの欄で入力しても1つの取り消しにまとまる。 */}
+      <div
+        onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
+        onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
+      >
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
       </div>
     </div>
   );

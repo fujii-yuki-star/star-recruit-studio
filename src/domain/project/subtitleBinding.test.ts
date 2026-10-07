@@ -320,10 +320,13 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
       const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S', caption: 'キャプション' } });
       expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual(['キャプション']); // caption を数え、texts.subtitle は数えない
     });
-    it('字幕層に textKey が無ければ静的字幕は空（描画も layer.textKey 無しは空・layout.ts:325 の else）', () => {
+    // ⚠️ **描く側と同じ解き方にした**（#1057/#1058）＝以前は「`layer.textKey` 無しは空」を
+    //    描画（`layout.ts`）に合わせて固定していたが、その描画のほうが `textKeyOfLayer`
+    //   （字幕層の未指定は `subtitle`）と食い違っていた。**数える側と描く側で解き方を割らない**。
+    it('字幕層に textKey が無くても `subtitle` として数える（描く側と同じ解き方）', () => {
       const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle' }] } as unknown as Template;
       const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
-      expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual([]);
+      expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual(['S']);
     });
     it('テンプレ未解決（undefined）は空', () => {
       expect(sceneDisplayedSubtitleTexts(sceneWith({ texts: { subtitle: 'S' } }), undefined)).toEqual([]);

@@ -180,6 +180,15 @@ export function composeGroupGeometry(
   return result;
 }
 
+/**
+ * まとまりの変形で、その要素が**何倍になったか**（#1371）。`composeGroupGeometry` の結果と元の箱から出す。
+ * まとまりの拡縮は縦横同じ倍率なので、幅の比で足りる。幅 0 の要素は 1（割れない）。
+ * ⚠️ 文字の大きさ・縁取り・角丸をこの倍率で掛ける＝**箱だけ縮めて字を据え置かない**（業界の型）。
+ */
+export function groupScaleOf(orig: { w: number }, composed: { w: number }): number {
+  return orig.w > 0 ? composed.w / orig.w : 1;
+}
+
 /** グループ chain 上に hidden なグループがあるか（描画抑止用）。循環ガード付き。 */
 export function isHiddenByGroup(memberId: string, groups: ReadonlyArray<Group>): boolean {
   if (groups.length === 0) return false;

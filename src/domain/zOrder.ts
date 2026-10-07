@@ -44,3 +44,38 @@ export function moveByZ<T extends { id: string; zIndex?: number }>(
   [next[ia], next[ib]] = [next[ib], next[ia]];
   return next;
 }
+
+/**
+ * 重ね順の中で、ある要素を**任意の位置へ**動かす（ドラッグでの並び替え・#772 候補3）。
+ *
+ * ⚠️ **`moveByZ`（1段）を繰り返すだけ**にする＝ドラッグと ↑↓ ボタンで**意味が割れない**。
+ * z を直接書き換える別実装を置くと、同じ z が3つ以上あるとき・種別ごとの既定 z（10刻み）を
+ * またぐときの扱いが2通りになり、**同じ操作なのに結果が違う**（`moveByZ` のコメントにある
+ * 「1段のつもりが数段動く」を、ドラッグ側だけがもう一度踏む）。
+ *
+ * `targetIndex` は**昇順（奥→手前）に並べたときの位置**。画面が「上＝手前」で見せているなら、
+ * 呼び出し側で反転してから渡す（並びの向きは画面の都合で、ここは持たない）。
+ */
+export function moveToIndexByZ<T extends { id: string; zIndex?: number }>(
+  items: T[],
+  id: string,
+  targetIndex: number,
+  zOf: (item: T) => number,
+): T[] {
+  const sorted = [...items].sort((a, b) => zOf(a) - zOf(b));
+  const from = sorted.findIndex((e) => e.id === id);
+  if (from < 0) return items;
+  // ⚠️ **範囲へ収めるのは繰り返しの回数を抑えるため**＝収めても収めなくても**結果は同じ**
+  //（端に着いた後の `moveByZ` は同じ配列を返すだけ）。つまり**変異チェックでは捕まらない行**なので、
+  // 「テストが守っている」とは書かない。収めないと、桁の大きい値を渡されたときに**無駄な繰り返し**が走る。
+  const to = Math.max(0, Math.min(sorted.length - 1, targetIndex));
+  if (to === from) return items; // 動かない＝同じ配列を返す（空の取り消しを積まない）
+  // 収めた後は**必ず届く**ので、途中で止まる分岐は要らない（置くと**到達しない行**になる＝
+  // 「端に着いた」というコメントが嘘になる。最初そう書いて変異チェックで気づいた）。
+  const direction = to > from ? 'up' : 'down';
+  let cur = items;
+  for (let step = 0; step < Math.abs(to - from); step += 1) {
+    cur = moveByZ(cur, id, direction, zOf);
+  }
+  return cur;
+}

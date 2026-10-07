@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap } from "../../test/pointer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -32,10 +33,8 @@ function renderOverlay(over: Partial<ComponentProps<typeof FreeLayoutOverlay>> =
 /** 実機の二度押し（互換 dblclick は来ない・#525-4）でインライン編集へ入る。 */
 function enterEdit() {
   const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
-  const opts = { button: 0, clientX: 10, clientY: 10, pointerId: 1 };
-  fireEvent.pointerDown(el, opts);
-  fireEvent.pointerUp(el, { pointerId: 1 });
-  fireEvent.pointerDown(el, opts);
+  // 二度押しは**時刻を固定して**送る＝間に入る再描画の速さで判定が変わらない（#645）。
+  doubleTap(el);
   return screen.getByRole("textbox") as HTMLTextAreaElement;
 }
 
@@ -93,6 +92,30 @@ describe("FreeLayoutOverlay インライン編集の見た目＝実描画に合�
     expect(ff).toContain("Kaitou Yokoku Gothic"); // 要素の fontId が勝つ
     expect(ff).toContain("sans-serif"); // fontFamilyForId＝実描画と同じフォールバック込み（cssFamilyForId の bare 名ではない）
     expect(ff).not.toContain("SceneFallbackFont");
+  });
+
+  /**
+   * ⚠️ **編集中だけ影・字間が消えるのを作らない**（#264・PR #879 再レビュー ℹ️）＝
+   * 帯・縁取りと同じ理由（実描画では同じ文字アイテムの中にあり、親が伏せると一緒に消える）。
+   */
+  it("字間・影も編集中に再現する（帯・縁取りと同じ理由）", () => {
+    const { spies } = renderOverlay({
+      freeLayout: [
+        { ...textEl, letterSpacing: 0.2, shadow: { enabled: true, color: "#112233", opacity: 0.4, blur: 4, dx: 2, dy: 3 } },
+      ] as never,
+    });
+    void spies;
+    const ta = enterEdit();
+    expect(ta.style.letterSpacing).toBe("0.2em"); // 字間は em＝拡大率に依らない
+    // 影は px なので拡大率（0.5）を掛ける。濃さは色へ畳む（CSS に不透明度の引数が無い）。
+    expect(ta.style.textShadow).toBe("1px 1.5px 2px rgba(17, 34, 51, 0.4)");
+  });
+
+  it("字間・影が無ければ付けない（従来の見た目を変えない）", () => {
+    renderOverlay();
+    const ta = enterEdit();
+    expect(ta.style.letterSpacing).toBe("");
+    expect(ta.style.textShadow).toBe("");
   });
 
   it("編集中の要素 id を親へ通知する（親が SVG 側を伏せて二重表示を防ぐ）", () => {

@@ -1,0 +1,2286 @@
+// タイムライン形式（ADR-0032）の編集操作（#629）。純粋関数（副作用なし・§7 テスト対象）。
+//
+// **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
+// 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
+import {
+  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
+  TIMELINE_MIN_CLIP_SEC, VIDEO_HARD_MAX_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
+  VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
+import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
+// ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
+import { advancedSlotStarts, advancedSourceStart, sourceLimitIssue, usesUpSource } from './sourceTime';
+import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
+import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
+import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { Group } from '../group/types';
+import type { SlotClipOverride } from '../project/types';
+import { isAudioClip } from './audio';
+import { clampVolume } from '../voice/audioMix';
+import { canUseOriginalAudio, isDirectVideoClip, videoPlacementsOfClip } from './video';
+import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
+import { applyClipEdge } from './clipEdge';
+import { createFreeElement } from '../project/freeLayoutOps';
+import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
+import { subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
+import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
+// ⚠️ **すき間の広さは場面形式と共有する**（#1009）＝別に決めると、同じ「2人目を上へ」が形式で違う間隔になる。
+import { SUBTITLE_STACK_GAP_EM } from '../text/subtitleBands';
+import type { ClipAnimation, TalkMotion, TimelineClip, TimelineProject, Track } from './types';
+import { TALK_MOTION_STRENGTH_MAX } from './talkMotion';
+import { isVisualClip } from './clipKind';
+import type { Texts } from '../project/types';
+import type { BundledBgmId } from '../bgm/bgmCatalog';
+import { defaultDurationForTemplate } from '../template/layerOps';
+import type { BlendMode, Template } from '../template/types';
+import { canHaveBox, resolveClipBox } from './box';
+
+/** 置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。永続データではないので schema には持ち込まない。 */
+export const EDIT_BLOCKED = {
+  /** 同じ列で時間が重なる（11 §8 V24）。重ねたいなら列を足す。 */
+  overlap: 'TIMELINE_EDIT_OVERLAP',
+  /**
+   * **貼る先が重なる**（#1265・#1271 レビュー）。`overlap` と分けるのは次の行動が違うから＝貼るときに
+   * 動かせるのは部品ではなく**再生位置**（「ずらす」と言うと、何をずらすのか分からない）。
+   */
+  pasteOverlap: 'TIMELINE_EDIT_PASTE_OVERLAP',
+  /**
+   * **写したあとで、その素材か列が無くなった**（#1265・#1271 レビュー）。`notFound`（「その部品は…選び直して」）
+   * だと、選び直しても写しは古いままなので進めない＝**写し直す**ことを言う。
+   */
+  pasteSourceGone: 'TIMELINE_EDIT_PASTE_SOURCE_GONE',
+  /** 音の部品を映像の列へ（逆も）＝置いても鳴らない/映らない（V23）。 */
+  trackKind: 'TIMELINE_EDIT_TRACK_KIND',
+  /** 列が固定されている（`track.locked`）。 */
+  locked: 'TIMELINE_EDIT_LOCKED',
+  /**
+   * **選んだものの中に**固定された列の部品がある（#752-3）。`locked` と分けるのは、次の行動が
+   * 違うから＝こちらは「固定を外す」だけでなく「選び直す」でも進める。まとめて消す・まとめて
+   * 動かすときに出る。
+   */
+  lockedSelection: 'TIMELINE_EDIT_LOCKED_SELECTION',
+  /**
+   * まとめて長さをそろえようとしたが、**その時刻をまたいでいる部品が1つも無い**（#1005）。
+   * ⚠️ **またいでいない部品を「そろえる」と、置いた場所が動く**（トリムのつもりが移動になる）ので
+   * 触らない。全部が対象外なら**押しても何も起きない**ことになるので、理由を出す（§2-5）。
+   */
+  trimNoneAtTime: 'TIMELINE_EDIT_TRIM_NONE_AT_TIME',
+  /**
+   * その時刻に**もう目印がある**（#1149 ①）。同じ時刻に2つ置くと、一覧でも時間軸でも重なって
+   * **どちらを直しているか分からなくなる**ので増やさない。
+   * ⚠️ **理由を出す**＝黙って何もしないと「押しても無反応」になる。目印は押すと再生位置が
+   * そこへ跳ぶのが主導線なので、**跳んだ直後に置こうとする**筋を普通に踏む。
+   * ⚠️ **置く側では出ない**＝あちらは「既にある目印を選ぶ」側へ倒すので断らない（ADR-0040）。
+   * 出るのは「**この目印を再生位置へ動かす**」で、動かす先に別の目印がいるとき。
+   */
+  markerExists: 'TIMELINE_EDIT_MARKER_EXISTS',
+  /**
+   * 列を複製しようとしたが、その列の部品が**ほかの列の部品とまとまりになっている**（#767）。
+   * まとまりは変形を持つので、片側だけ複製すると**複製した方だけ見た目が変わる**
+   *（複製をまとまりへ入れれば、今度は元の絵まで動く）。黙って違う絵を作らない（ADR-0026④）。
+   */
+  groupAcrossTracks: 'TIMELINE_EDIT_GROUP_ACROSS_TRACKS',
+  /** 対象が見つからない（消された直後の操作など）。 */
+  notFound: 'TIMELINE_EDIT_NOT_FOUND',
+  /**
+   * 音の設定（速さ・使い始め・音量・フェード）を**音を持たない部品**へ書こうとした（#724）。
+   * ⚠️ `notFound` で断らない＝「その部品は見つかりませんでした」は嘘になり、選び直しても直らない。
+   */
+  notAudio: 'TIMELINE_EDIT_NOT_AUDIO',
+  /**
+   * **速さ・素材の使い始め**を、その2つを持たない部品へ書こうとした（#1019 ⑦）。
+   * ⚠️ `notAudio` と分ける＝この2つは**動画にもある**（直接置いた動画は再生され、
+   * `videoPlacementsOfClip` が `sourceStartSec`／`speed` を読む）ので、
+   * 「音の部品で変えてください」だと**動画の部品を探せない**（従っても直らない）。
+   */
+  notPlayable: 'TIMELINE_EDIT_NOT_PLAYABLE',
+  /**
+   * 元の音（#512 段2）を、**動画ではない部品**か**音の入っていない動画**へ書こうとした。
+   * ⚠️ `notAudio` と分ける＝「音の部品で変えてください」は動画の話をしていないので、
+   * 従っても直らない（音の入っていないファイルを置き換える、が次の行動）。
+   */
+  noOriginalAudio: 'TIMELINE_EDIT_NO_ORIGINAL_AUDIO',
+  /**
+   * その部品は分けられない（#686 段階4・決定16）。読み上げは**文と音がずれる**／連動している
+   * 字幕は**時間を読み上げが決めている**ので、切ると持ち主のいない区間ができる。
+   */
+  unsplittable: 'TIMELINE_EDIT_UNSPLITTABLE',
+  /** 切れ目が帯の外／どちらかが短くなりすぎる（#686 段階4）。 */
+  splitOutside: 'TIMELINE_EDIT_SPLIT_OUTSIDE',
+  /**
+   * 再生中（ADR-0032 決定21）。**位置を使う操作**は再生ヘッドの値を掴むので、走っている最中は
+   * 同じ操作の結果が毎回変わる。ボタンは押せなくできるが、**キーには押せない見た目が無い**ので
+   * 理由をここから出す（§2-5）。
+   */
+  playing: 'TIMELINE_EDIT_PLAYING',
+  /**
+   * 書き出し中で**再生**できない（#752-6）。`exporting` と分けるのは、次の行動が「編集」ではなく
+   * 「再生」だから＝流用すると押せない理由が噛み合わない（§2-5）。
+   */
+  playExporting: 'TIMELINE_PLAY_EXPORTING',
+  /** その動き方は前後へ切り分けられない（#753＝表せない形。カーブそのものは焼けるようになった）。 */
+  curvedEasing: 'TIMELINE_EDIT_CURVED_EASING',
+  /**
+   * 書き出し中（#631）。書き出しは**始めた時点の文書**を焼くので、途中の編集は動画に入らない。
+   * 入らない編集を受け付けると「直したのに反映されていない動画」が成功として出る（ADR-0026①）。
+   */
+  exporting: 'TIMELINE_EDIT_EXPORTING',
+  /**
+   * 向き（横型/縦型）が動画と違う見た目パターン（#632）。置くと層の座標がそのままなので**画面から
+   * はみ出した絵**になり、検証にも書き出しにも引っかからないまま出てしまう。置く前に断る。
+   */
+  orientation: 'TIMELINE_EDIT_ORIENTATION',
+  /**
+   * 拡大・回転の動きが付いた部品を、中身が枠からはみ出した状態でバラそうとした（#632）。
+   * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
+   */
+  explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
+  /**
+   * 切り抜いてある部品はバラせない（差分再監査 4巡目・決定23）。
+   * ⚠️ **切り抜きは部品の箱ぜんぶを切る**ので、要素ごとに分けると**各要素が自分の箱で切られる**＝
+   * 別の絵になる。写せないものは**バラす前に断る**（バラすは取り消しでしか戻らない）。
+   */
+  explodeCrop: 'TIMELINE_EDIT_EXPLODE_CROP',
+  /**
+   * 「ふくらむ」で喋る部品はバラせない（ADR-0056・PR #1370 レビュー 🔴）＝要素ごとに分けると、それぞれが
+   * **自分の中心で**ふくらむ（元は部品の箱の中心）＝別の絵になる。はねる・ゆらゆら（縦にずらすだけ）は全要素へ写せば同じ絵。
+   */
+  explodeTalkPulse: 'TIMELINE_EDIT_EXPLODE_TALK_PULSE',
+  /**
+   * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
+   * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
+   * **その先まで流れる**（どちらも決定23「前後で絵が変わらない」に反する）。黙って別の結果に
+   * しないよう、動きが付いた部品（`explodeAnchor`）と同じ流儀で先に断る。
+   */
+  explodeTrimEnd: 'TIMELINE_EDIT_EXPLODE_TRIM_END',
+  /**
+   * 同上だが、「ここまで」が**その枠だけの設定**（`slotClips[layerId].endSec`）から来ている場合。
+   * ⚠️ **素材の画面では外せない**（解決は per-use が優先）＝同じ案内を出すと、従っても解除されない
+   * 行き止まりになる（ADR-0034 決定5・§2-5）。この枠の素材を入れ直せば落ちる（`setClipAssetRef`）。
+   */
+  explodeTrimEndPerUse: 'TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE',
+  /**
+   * **差し込み口でない層（背景など）に動画が入っている**部品はバラせない（#816-4）。
+   * ⚠️ その層の動画は**静止画として描かれる**（`videoPlacementsOfClip` は差し込み口の層しか
+   * 置き場所にしない）が、バラすと直接置きになり**実映像として動き出す**＝決定23「前後で絵が
+   * 変わらない」に反する（確認の文言も「動画の見た目は変わりません」と約束している）。
+   * 直接置きの語彙に「動かさない」が無いので、`explodeTrimEnd` と同じ流儀で先に断る。
+   */
+  explodeBackgroundVideo: 'TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO',
+  /**
+   * **素材を使い切った先**で分けようとした（#816 レビュー 🔴）。後半の頭出しがそこまで進むと、
+   * 切り出す終わりを追い越して**反転レンジ**になり、終端が「無し」へ正規化される＝
+   * **切り捨てたはずの先が流れ出す**（分ける前は最後のコマで凍っていた＝ADR-0026①）。
+   * 実尺を越える場合は書き出しが理由なく落ちるので、そちらも同じ門で止める。
+   */
+  splitPastSource: 'TIMELINE_EDIT_SPLIT_PAST_SOURCE',
+  /**
+   * **止める相手が動画でない**（#356 ②）。写真はもう止まっているし、文字・図形・音には
+   * 止める絵が無い。見た目パターンのクリップも対象外＝止めると**枠ごと写真に化ける**
+   *（文字も立ち絵も消える）＝押した結果と食い違う（ADR-0026①）。
+   */
+  freezeNotVideo: 'TIMELINE_EDIT_FREEZE_NOT_VIDEO',
+  /**
+   * 絵を止めようとしたが、**その瞬間を切り出せなかった**（#356 ②）。
+   *
+   * ⚠️ **押した所へ返すために要る**（#1136 レビュー由来 🟡）＝切り出しの失敗は取り込みの断り
+   * （`importError`）に入るが、その表示は「置く」の欄の中だけ＝「選んだ部品」から押した人には
+   * **何も見えない**まま終わる。詳しい理由はあちらに出し、押した欄にはこれを出す。
+   */
+  freezeFailed: 'TIMELINE_EDIT_FREEZE_FAILED',
+  /**
+   * 絵を止めようとしたが、**その動画のファイルが見つからない**（#356 ②）。
+   *
+   * ⚠️ **押す前に断る**（#1136 レビュー由来 🟡・#1068/#1101 と同じ流儀）＝文書の中身しか見ない
+   * 関門は通ってしまい、**FFmpeg を起こしてから失敗する**。直し方は知らせの「ファイルを選び直す」。
+   */
+  freezeAssetMissing: 'TIMELINE_EDIT_FREEZE_ASSET_MISSING',
+  /**
+   * 絵を止めている間に、**その帯が変わった**（#356 ②・#1136 レビュー由来）。
+   *
+   * ⚠️ **黙って貼らない**＝切り出すのは待つ前の帯、分けるのは待った後の帯なので、
+   * 待っている間に動かす・詰める・速さを変える・素材を選び直すと、**切れ目と止めた絵が
+   * 別の瞬間**になる（素材ごと替わっていれば**別の動画のコマ**）。ADR-0026④。
+   */
+  freezeChanged: 'TIMELINE_EDIT_FREEZE_CHANGED',
+  /**
+   * 左端をそこまで詰めると、**素材を使い切った先**から流れることになる（PR #1004 レビュー 🔴）。
+   *
+   * ⚠️ **「分ける」とは別の理由にする**＝同じ原因でも**次の行動が違う**
+   *（分けるは「位置を変える」／トリムは「そこまで詰めない」）。同じ文を使い回すと、
+   * 案内が「分けられません」になって**していない操作**を指す（§2-5）。
+   */
+  trimPastSource: 'TIMELINE_EDIT_TRIM_PAST_SOURCE',
+  /** 左端を伸ばして、素材の始まりより前を使おうとした（ADR-0034 追補 2026-10-05・#1331＝中身が右へずれていた）。 */
+  trimBeforeSource: 'TIMELINE_EDIT_TRIM_BEFORE_SOURCE',
+  /** 右端を伸ばして、素材の終わりより先を使おうとした（同上＝止め絵で伸びていた）。 */
+  trimPastSourceEnd: 'TIMELINE_EDIT_TRIM_PAST_SOURCE_END',
+  /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
+  linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
+  /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
+  linkedSubtitleTime: 'TIMELINE_EDIT_LINKED_SUBTITLE_TIME',
+  /**
+   * 音量の変化の点が上限（`VOLUME_POINTS_MAX`）に達している（#512）。**書き出せる範囲でしか置かせない**
+   * ＝置けたのに書き出しで断られる、を作らない（`11 §7.6.5`）。
+   */
+  volumePointsFull: 'TIMELINE_EDIT_VOLUME_POINTS_FULL',
+  /** 音量の変化を、鳴る音を持たない部品へ置こうとした（#512）。 */
+  volumePointsKind: 'TIMELINE_EDIT_VOLUME_POINTS_KIND',
+  /**
+   * 出さない設定の列へ置こうとした（#684）。置けても**動画に出ない部品**が黙って生まれる。
+   * 列の固定（`locked`）とは別＝「動かせない」ではなく「映らない」。
+   */
+  hiddenTrack: 'TIMELINE_EDIT_HIDDEN_TRACK',
+  /**
+   * その部品が持たない中身の項目を直そうとした（#684 レビュー）。**列の種別違い（V23）とは別**
+   * ＝「列に置き直してください」は無関係な案内になる（§2-5）。`volumePointsKind` と同じ流儀で、
+   * **その項目を持たない部品に意味の無いデータを書かない**。
+   */
+  contentField: 'TIMELINE_EDIT_CONTENT_FIELD',
+  /**
+   * 作業範囲（ここから・ここまで）を取っていない（UI/UX 監査 2026-10-02）。⚠️ 以前はキーの道だけ `notFound`
+   * （「その部品は見つかりませんでした」）を出していた＝ボタンと断り文が割れ、次の行動も示さなかった。
+   */
+  rangeNotSet: 'TIMELINE_EDIT_RANGE_NOT_SET',
+  /** 作業範囲の幅がゼロ（ここからとここまでが同じ位置）。 */
+  rangeEmpty: 'TIMELINE_EDIT_RANGE_EMPTY',
+  /** 作業範囲に部品が1つも掛かっていない（詰めずに消すとき＝押しても何も起きない、を作らない）。 */
+  rangeNoClips: 'TIMELINE_EDIT_RANGE_NO_CLIPS',
+  /** 分ける部品を選んでいない（キーの道も同じ文＝UI/UX 監査 2026-10-02）。 */
+  splitNoneSelected: 'TIMELINE_EDIT_SPLIT_NONE_SELECTED',
+  /** 1つだけ選んだときに使える操作を、2つ以上選んで押した（キーの道も同じ文＝UI/UX 監査 2026-10-02）。 */
+  singleClipOnly: 'TIMELINE_EDIT_SINGLE_CLIP_ONLY',
+} as const;
+
+export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
+
+/** 編集の結果。**置けないときは文書を返さない**＝呼び出し側が「変わらなかった」と取り違えない。 */
+export type EditResult = { ok: true; doc: TimelineProject } | { ok: false; reason: EditBlockedReason };
+
+const ok = (doc: TimelineProject): EditResult => ({ ok: true, doc });
+const blocked = (reason: EditBlockedReason): EditResult => ({ ok: false, reason });
+
+/**
+ * その列のその時間帯が空いているか（11 §8 V24）。**端が接するのは可**（前の終わり＝次の始まり）。
+ * 重なりの述語そのものは `spansOverlap`（検証と共有）＝半開区間の境界の扱いを2か所に書かない。
+ * `exceptClipId` は自分自身を数えないため（動かす当人と重なると判定しない）。
+ */
+export function isFreeSpan(
+  clips: readonly TimelineClip[],
+  trackId: string,
+  startSec: number,
+  durationSec: number,
+  exceptClipId?: string,
+): boolean {
+  return !clips.some(
+    (c) =>
+      c.trackId === trackId &&
+      c.id !== exceptClipId &&
+      spansOverlap(c.startSec, clipEndSec(c), startSec, startSec + durationSec),
+  );
+}
+
+/** 置いた部品の仮の長さ（#684）。**下限を割らない**＝置ける長さと探す長さを別々に書かない（§2-7）。 */
+export const VISUAL_CLIP_DURATION_SEC = Math.max(TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC);
+
+/**
+ * その列で、`fromSec` 以降に **`durationSec` がまるごと収まる最初の時刻**（#684 レビュー）。
+ *
+ * 「いちばん後ろの部品の終わり」ではない＝**間の空きを飛び越さない**。
+ * 例：`[0,3)` と `[10,15)` があるとき、5秒ぶんは `[3,10)` の空きに収まるので 3 を返す（15 ではない）。
+ * 置き場所をアプリが決める経路（ボタンで置く）で、見えている空きを使わずに最後尾へ飛ばさないための規則。
+ *
+ * **「空いている」の判定は `isFreeSpan` に委ねる**（ここで重なりを数え直さない）＝探した結果が
+ * 置ける条件（V24）と食い違わない。候補は **`fromSec` と、各部品の終わり**だけでよい
+ * （最初に収まる時刻は必ずそのどれか）。いちばん後ろの終わりは必ず空くので、答えは必ず返る。
+ */
+export function firstFreeStart(
+  clips: readonly TimelineClip[],
+  trackId: string,
+  fromSec: number,
+  durationSec: number,
+): number {
+  const candidates = [fromSec, ...clips
+    .filter((c) => c.trackId === trackId && clipEndSec(c) > fromSec)
+    .map((c) => clipEndSec(c))]
+    .sort((a, b) => a - b);
+  const found = candidates.find((t) => isFreeSpan(clips, trackId, t, durationSec));
+  // いちばん後ろの候補は必ず空くのでここは通らないが、通っても**空いている時刻**を返す
+  // （`fromSec` に落とすと塞がった時刻を返し、呼び出し側が置けずに終わる）。
+  return found ?? candidates[candidates.length - 1];
+}
+
+/**
+ * 絵の部品（文字・図形・素材）をボタンで置くときの**実際の置き先**（列と時刻）。#1096 レビュー 🔴。
+ *
+ * ⚠️ **押す前に見せる帯と、押した結果を同じ関数から採る**＝画面が `playheadSec` をそのまま帯の左端に
+ * していたので、**再生位置が塞がっているときだけ帯が嘘になっていた**（実際は次の空きへずれる）。
+ * 「手を伸ばすと本当の置き先が見える」（#1032）は、置く側と同じ規則を通して初めて成り立つ。
+ *
+ * 置ける列が1本も無ければ `null`（＝置けない。画面は帯を出さない・押した側は理由を出す）。
+ */
+export function visualPlacementAt(
+  doc: TimelineProject,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+): { trackId: string; startSec: number; durationSec: number } | null {
+  const placeable = placeableVisualTracks(doc);
+  if (placeable.length === 0) return null;
+  // 欄で選んだ列が置けないなら手前へ落とす（押した側と同じ＝選び直しを強いない）。
+  const track = placeable.find((t) => t.id === preferredTrackId) ?? placeable[0];
+  return {
+    trackId: track.id,
+    // **間の空きを飛び越さない**（#684 レビュー）。
+    startSec: firstFreeStart(doc.clips, track.id, fromSec, VISUAL_CLIP_DURATION_SEC),
+    durationSec: VISUAL_CLIP_DURATION_SEC,
+  };
+}
+
+/**
+ * 押して置いたとき、**実際にどこへ入るか**（#1252）。
+ *
+ * ⚠️ **1か所に置く**（#1096 が塞いだ穴の再発防止）＝**押す前に見せる帯**と**押した結果**が
+ * 別々の計算になると、そのときだけ帯が嘘になる。両方ここを通す。
+ *
+ * @returns `newTrack` が `true` のとき、`trackId` は**いま手前にある列**で、実際はその**さらに手前へ
+ *   1本足して**そこへ入る（時刻は `startSec` のとおり）。置ける列が無ければ `null`。
+ */
+export function visualPlacementFor(
+  doc: TimelineProject,
+  kind: TimelineClipKind,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+): { trackId: string; startSec: number; durationSec: number; newTrack: boolean } | null {
+  const at = visualPlacementAt(doc, preferredTrackId, fromSec);
+  if (!at) return null;
+  // 塞がっていない／重ねない種類＝そのまま。
+  if (!overlaysWhenBusy(kind) || at.startSec === fromSec) return { ...at, newTrack: false };
+  return { ...at, startSec: fromSec, newTrack: true };
+}
+
+/**
+ * 置き先が塞がっていたとき、**手前に列を足して重ねる**種類か（利用者判断 2026-09-28・#1252）。
+ *
+ * ⚠️ **同じ「置く」でも、人のつもりが種類で違う**＝写真・動画を続けて置くのは**紙芝居**なので
+ * 後ろへ並ぶのが正しい。文字・図形を置くのは**その絵に載せたい**のでほぼ必ず重ねたい。
+ * アプリには「どちらのつもりか」が分からないので、**種類で決める**。
+ *
+ * ⚠️ **#722 案A を捨てるわけではない**＝あの決定は「**奥の列へは置かない**（手前の全画面の部品の裏に
+ * 入って見えなくなる）」で、いまも守る。足すのは**手前**なので裏に入らない。
+ * 当時は「手前に列を作る」という3つ目の道が検討されていなかった。
+ *
+ * ⚠️ **塞がっていないときは何も足さない**＝空いていればそのまま置く（列は増えない）。
+ */
+export function overlaysWhenBusy(kind: TimelineClipKind): boolean {
+  return kind === TIMELINE_CLIP_KIND.text || kind === TIMELINE_CLIP_KIND.shape;
+}
+
+/**
+ * 音（BGM・読み上げ）の置き先（2026-09-28 の実機レビュー）。
+ *
+ * ⚠️ **映像と同じ規則にする**（ADR-0026②＝同じ概念を、画面や種類で割らない）＝
+ * 以前は音だけ**再生位置をそのまま**渡していたので、その場所が塞がっていると**断られた**
+ *（映像・文字・図形は `firstFreeStart` で**次の空き時刻へずれる**のに）。
+ * 実機で確かめた＝同じ「置く」を押して、**映像は置けて、音は「ずらすか、列を足して重ねてください」**。
+ * 押す側からは同じ操作なので、結果が種類で変わる理由が読めない。
+ *
+ * ⚠️ **列をまたいでは探さない**＝映像側と同じ（#722 案A）。選んだ列が置けないときだけ手前へ落とす。
+ *
+ * @param fromSec ここから後ろで空きを探す（ふつうは再生位置）。
+ * @param durationSec 置くものの長さ（BGM と読み上げで違う）。
+ * @returns 置き先。置ける列が1本も無ければ `null`。
+ */
+export function audioPlacementAt(
+  doc: TimelineProject,
+  preferredTrackId: string | undefined,
+  fromSec: number,
+  durationSec: number,
+): { trackId: string; startSec: number } | null {
+  const placeable = placeableAudioTracks(doc);
+  if (placeable.length === 0) return null;
+  const track = placeable.find((t) => t.id === preferredTrackId) ?? placeable[0];
+  return { trackId: track.id, startSec: firstFreeStart(doc.clips, track.id, fromSec, durationSec) };
+}
+
+/** 置き先として成り立つか（列の実在・種別の一致・固定・隠し・重なり）を1か所で見る。 */
+function placementIssue(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  trackId: string,
+  startSec: number,
+  durationSec: number,
+): EditBlockedReason | null {
+  // 列そのものの事情は **`trackPlacementIssue`**（置く側と同じ規則・#714-3）。
+  // ⚠️ ここに条件を書き写していたので**隠した列だけ抜けて**いた＝置くときは断るのに、
+  // 既にある帯は**隠した列へ黙って移せた**（動画に出ない部品を作らない、を置くときだけ守っていた）。
+  const issue = trackPlacementIssue(doc, trackId, trackKindForClip(clip.kind));
+  // ただし**隠した列は「新しく入れる」ときだけ**断る。もともとその列にある帯を動かす・縮めるのは通す
+  // ＝見えないものが増えるわけではないし、断ると**隠した列の中身が二度と動かせない**（行き止まり・決定5）。
+  if (issue && !(issue === EDIT_BLOCKED.hiddenTrack && trackId === clip.trackId)) return issue;
+  if (!isFreeSpan(doc.clips, trackId, startSec, durationSec, clip.id)) return EDIT_BLOCKED.overlap;
+  return null;
+}
+
+/** クリップを差し替えた文書（他は素通し）。 */
+function withClip(doc: TimelineProject, next: TimelineClip): TimelineProject {
+  return { ...doc, clips: doc.clips.map((c) => (c.id === next.id ? next : c)) };
+}
+
+/**
+ * **その場所へ動かせるか**（動かせないなら理由・`null`＝動かせる・#686）。
+ *
+ * ⚠️ **`moveClip` を実際に走らせて結果だけ見る**（判定を書き写さない）。
+ * 最初は同じ条件を並べ直していたが、`moveClip` だけが通る `withBoundSubtitles`
+ * （連動する字幕の置き場が無ければ全体を断る）が**こちらに無く**、読み上げの帯では
+ * **ゴーストが「置ける」色のまま離した瞬間に断られた**（#742→#686 レビュー）。
+ * 「同じ規則を見る」と書いても、2つ書けばいつか割れる。**走らせれば割れようがない**。
+ * 捨てる文書を1つ作るが、作るのは配列の浅い複製だけ（指を動かすたびに走らせても軽い）。
+ */
+export function moveClipIssue(
+  doc: TimelineProject,
+  clipId: string,
+  to: { trackId?: string; startSec?: number },
+): EditBlockedReason | null {
+  const r = moveClip(doc, clipId, to);
+  return r.ok ? null : r.reason;
+}
+
+/**
+ * **その端まで縮められるか**（縮められないなら理由・`null`＝できる・#686）。
+ * `moveClipIssue` と同じ理由で **`trimClip` を走らせて結果だけ見る**（上の ⚠️ を参照）。
+ */
+export function trimClipIssue(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'start' | 'end',
+  sec: number,
+  // ⚠️ **確定（store）と同じ材料で見る**＝見た目パターンを渡さないと、差し込み口の動画の限界を見ない。
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditBlockedReason | null {
+  const r = trimClip(doc, clipId, edge, sec, opts);
+  return r.ok ? null : r.reason;
+}
+
+/**
+ * **端を引きすぎたら、限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝端を `target` へ動かすとき、
+ * 置けるならそのまま、置けないなら**今の端から `target` へ向かって置ける所まで**を返す（`stopped`）。
+ *
+ * ⚠️ **止まる理由を数え上げない**＝隣の帯・素材の限界（前後）・使い切り・固定…を個別に計算すると、
+ *   確定（`trimClip`）と食い違ったときに「止まって見えたのに離すと断られる」が起きる。**同じ関数で確かめながら**
+ *   境目を探す（二分探索）＝ゴーストと確定が同じ値を見る（決定10 の「見せたものを確定する」）。
+ * ⚠️ **隣の帯の端にはぴったり付ける**＝探索の誤差で 1 ミリ秒の隙間が残らないよう、境目のすぐ外にある端を候補に足す。
+ * ⚠️ **固定した列・連動している字幕は止めない**（そもそも動かせない＝今の端のまま `stopped`）。
+ * ⚠️ **前提＝置けるかは今の端から向かう先へ単調**（一度置けなくなったら、その先も置けない）。いまの門（重なり・素材の限界・
+ *   使い切り・最小の長さ）はどれもそう。「ある区間だけ置けない」門を `trimClip` に足すと、ここは**手前で止まる**（黙って
+ *   先へ飛ばない＝安全側）ので、その時は探し方を見直す（PR #1338 レビュー ℹ️）。
+ */
+export function trimStopSec(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'start' | 'end',
+  target: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): { sec: number; stopped: boolean } {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return { sec: target, stopped: false };
+  const valid = (s: number): boolean => trimClipIssue(doc, clipId, edge, s, opts) == null;
+  if (valid(target)) return { sec: target, stopped: false };
+  // ⚠️ 今の端が置けない（固定した列・連動している字幕）ときは、探しても1つも置けない＝今の端で止まる
+  //   （別に早めに返す枝は置かない＝変異チェックで等価と分かった）。
+  const cur = edge === 'start' ? clip.startSec : clip.startSec + clip.durationSec;
+  let lo = 0;
+  let hi = 1;
+  const span = Math.abs(target - cur);
+  for (let i = 0; i < 48 && (hi - lo) * span > 1e-6; i++) {
+    const mid = (lo + hi) / 2;
+    if (valid(cur + (target - cur) * mid)) lo = mid;
+    else hi = mid;
+  }
+  const found = cur + (target - cur) * lo;
+  // 境目の近くにある「隣の帯の端」へぴったり付ける（触れるだけなら重ならない＝置ける）。
+  // ⚠️ **前後どちらも見る**＝重なりの判定には許容の幅があり、探した境目が端の**わずかに先**に来ることがある
+  //   （5 秒の端に対して 5.000001 秒）。その分だけ重なった長さで確定しないよう、近い端があればそれを採る。
+  const near = doc.clips
+    .filter((c) => c.id !== clipId && c.trackId === clip.trackId)
+    .flatMap((c) => [c.startSec, c.startSec + c.durationSec])
+    .filter((x) => Math.abs(x - found) <= 1e-4 && valid(x))
+    .sort((x, y) => Math.abs(x - found) - Math.abs(y - found));
+  return { sec: near[0] ?? found, stopped: true };
+}
+
+/**
+ * クリップを動かす（列を替える／時間をずらす）。**開始は 0 より前に出さない**（時間の外へ置かない）。
+ * 元の列が固定されているときも動かさない＝「固定」が見た目だけにならない（ADR-0026④）。
+ */
+export function moveClip(
+  doc: TimelineProject,
+  clipId: string,
+  to: { trackId?: string; startSec?: number },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 連動している字幕の**時間**は読み上げが決める。ここで動かせると「連動していると出ているのに
+  // 区間が合っていない」を作れてしまう（列の移動だけは許す）。
+  if (clip.voiceClipId != null && to.startSec != null && to.startSec !== clip.startSec) {
+    return blocked(EDIT_BLOCKED.linkedSubtitleTime);
+  }
+  const trackId = to.trackId ?? clip.trackId;
+  const startSec = Math.max(0, to.startSec ?? clip.startSec);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
+  if (trackId === clip.trackId && startSec === clip.startSec) return ok(doc);
+  const issue = placementIssue(doc, clip, trackId, startSec, clip.durationSec);
+  if (issue) return blocked(issue);
+  // 連動している字幕は**同じ区間になる**（ADR-0032 決定24）。動かすときとトリムするときで意味を変えない
+  // ＝「連動している＝区間が一致している」を保つ（ずれたまま連動していると表示される状態を作らない）。
+  return withBoundSubtitles(withClip(doc, { ...clip, trackId, startSec }), doc, clip, {
+    startSec,
+    durationSec: clip.durationSec,
+  });
+}
+
+/**
+ * **まとめて動かす**（#686 段階4・ADR-0034 決定15＝「1つでも置けなければ全体を断る」）。
+ *
+ * ⚠️ **全部動かした後の並びで見る**（1件ずつ `moveClip` を通さない）。順に適用すると、
+ * 入れ替え（A を B の場所へ・B を A の場所へ）が**途中で重なって**断られる＝まとめて動かせば
+ * 収まる形を、順番のせいで拒む。まず全部動かしてから、動かした帯だけを最後の並びで確かめる。
+ *
+ * ⚠️ **連動している字幕の時間は動かさない**（読み上げが決める）＝まとめて動かす対象からも外す。
+ * 外さずに断ると、選択に字幕が1つ混ざっただけで**全体が動かせなくなる**（決定15 の「全か無か」は
+ * *置けるかどうか*の話であって、そもそも時間を持たない相手まで巻き込む意味ではない）。
+ */
+export function moveClips(
+  doc: TimelineProject,
+  updates: readonly { id: string; startSec?: number; trackId?: string }[],
+): EditResult {
+  if (updates.length === 0) return ok(doc);
+  /** 動かす先（直接動かす帯＋連動で付いてくる字幕）。**1枚の地図にしてから**一度だけ確かめる。 */
+  const to = new Map<string, { startSec: number; trackId: string }>();
+  for (const u of updates) {
+    const clip = doc.clips.find((c) => c.id === u.id);
+    if (!clip) return blocked(EDIT_BLOCKED.notFound);
+    // ⚠️ **まとめて動かすときは「選んだ中に固定がある」と言う**（#773・ADR-0034 未解決7 の決着）。
+    // `locked`（「**この**列は固定されています」）だと、まとめて動かしている場面で**指す先が外れる**
+    // ＝どの列の話か分からない。次の行動も「固定を外す」だけでなく「選び直す」で進める。
+    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) {
+      return blocked(updates.length > 1 ? EDIT_BLOCKED.lockedSelection : EDIT_BLOCKED.locked);
+    }
+    // ⚠️ **連動している字幕は時間だけ据え置く**（読み上げが決める）。**列は動かせる**
+    // ＝単体で動かすとき（`moveClip`）は列だけ許すので、まとめたときだけ落とすと
+    // 選択の件数で同じ操作の意味が変わる（ADR-0026②）。
+    to.set(u.id, {
+      startSec: clip.voiceClipId != null ? clip.startSec : Math.max(0, u.startSec ?? clip.startSec),
+      trackId: u.trackId ?? clip.trackId,
+    });
+  }
+  // ⚠️ **連動で付いてくる字幕も同じ地図へ畳む**（#686 段階4・`/canon-check`）。
+  // ここを畳まずに後から1件ずつ当てると、**まだ動いていない別の字幕の旧位置**と衝突して
+  // 断られる＝「全部動かした後の並びで見る」が半分しか成立せず、**選択の順で結果が変わる**。
+  for (const [id, m] of [...to]) {
+    const clip = doc.clips.find((c) => c.id === id) as TimelineClip;
+    if (clip.kind !== TIMELINE_CLIP_KIND.voice) continue;
+    for (const sub of subtitlesBoundTo(doc, id)) {
+      // 字幕は**読み上げと同じ区間**へ。⚠️ **列は上書きしない**（#754 再レビュー 🔴）＝
+      // その字幕自身も選ばれていて**列を変えようとしている**とき、ここで元の列へ戻すと
+      // 「置ける色のまま離せるのに何も起きず、理由も出ない」になる（§2-5）。
+      // 時間は読み上げが決める／列は利用者が決める、を混ぜない。
+      to.set(sub.id, { startSec: m.startSec, trackId: to.get(sub.id)?.trackId ?? sub.trackId });
+    }
+  }
+  const nextClips = doc.clips.map((c) => {
+    const m = to.get(c.id);
+    // ⚠️ **変わらないなら同じものを返す**（作り直すと「何も変わらない」の判定が効かず、
+    // 空振りの取り消しを積む）。連動する字幕は長さも読み上げに合わせる。
+    if (!m) return c;
+    const durationSec = c.voiceClipId != null
+      ? (doc.clips.find((v) => v.id === c.voiceClipId)?.durationSec ?? c.durationSec)
+      : c.durationSec;
+    if (m.startSec === c.startSec && m.trackId === c.trackId && durationSec === c.durationSec) return c;
+    return { ...c, startSec: m.startSec, trackId: m.trackId, durationSec };
+  });
+  if (nextClips.every((c, i) => c === doc.clips[i])) return ok(doc);
+  const next: TimelineProject = { ...doc, clips: nextClips };
+  // **最後の並びで、動いた帯それぞれを確かめる**。列の事情も重なりも `placementIssue` が1か所で見る
+  // （⚠️ 隠した列の免除を書き写さない＝`placementIssue` の ⚠️ が記録している再発をしない）。
+  for (const [id] of to) {
+    const before = doc.clips.find((c) => c.id === id) as TimelineClip;
+    const after = nextClips.find((c) => c.id === id) as TimelineClip;
+    if (after === before) continue;
+    const issue = placementIssue(next, before, after.trackId, after.startSec, after.durationSec);
+    if (!issue) continue;
+    // 置けない理由は**字幕側**のもの＝連動のせいで置けないと分かる形にまとめる（`withBoundSubtitles` と同じ）。
+    return blocked(before.voiceClipId != null ? EDIT_BLOCKED.linkedSubtitle : issue);
+  }
+  return ok(next);
+}
+
+/**
+ * **その時刻で実際に長さが変わる部品**（`clipIds` のうち、再生位置が中にかかっているもの）。
+ *
+ * ⚠️ **かかっていないものは相手にしない**＝端をその時刻へ動かすと**置いた場所ごと動く**ので、
+ * 長さをそろえたつもりが**移動**になる（`06 §2`「黙って別の結果にしない」）。
+ * ⚠️ **画面と同じ数を数える**＝押す前に「何個が変わるか」を出すために、画面もこの関数を通す。
+ * 数え方を写すと、**ボタンに出る数と実際に変わる数がずれる**（このリポジトリで繰り返している型）。
+ */
+export function trimTargetsAt(doc: TimelineProject, clipIds: readonly string[], sec: number): string[] {
+  return clipIds.filter((id) => {
+    const c = doc.clips.find((x) => x.id === id);
+    return c != null && c.startSec < sec && sec < c.startSec + c.durationSec;
+  });
+}
+
+/**
+ * **選んだ帯すべての端を、同じ時刻へそろえる**（#1005＝実機の指摘）。
+ *
+ * ⚠️ **動かすのと消すのは複数に効くのに、長さだけ効かなかった**＝「選んだ部品」の欄が
+ * **1件のときしか出ない**ので、複数選ぶと長さを変える入口が消えていた（同じ選択で操作が割れる）。
+ *
+ * ⚠️ **1件ずつと同じことをするだけ**＝`trimClip` を並べて当てる（伸ばすのも縮めるのも同じ）。
+ * **ここでは「再生位置をまたいでいるか」で絞らない**＝**どれを相手にするかは押す側が決める**
+ *（再生位置のボタンは `trimTargetsAt` で絞ってから渡す＝`timelineStore.trimSelectedClipsAt`）。
+ * ここへ絞り込みを畳むと、**この関数は「再生位置でそろえる」専用**になり、
+ * 数値で端を決める道（`trimClip` を1件へ当てる「長さ（秒）」の欄）と規則が食い違う
+ *（伸ばす先は必ず帯の外なので、絞ると長くできない）。**当てる係と、選ぶ係を分ける。**
+ *
+ * ⚠️ **連動している字幕は外さない**＝`moveClips` は「混ざっただけで全体が動かせなくなる」を避けて
+ * 対象から外すが、こちらは `trimClip` が `linkedSubtitleTime` で**全体を断る**。
+ * 長さは**読み上げが決める**（`11 §7.6.2.3`「連動＝区間が一致している」）ので、
+ * 字幕だけ外して残りをそろえると、**字幕と読み上げの区間がずれた文書**ができる。
+ *
+ * ⚠️ **1つでも通らなければ全体を変えない**（`moveClips` と同じ流儀＝決定15）＝
+ * 途中まで当たった文書は捨てる。
+ */
+export function trimClips(
+  doc: TimelineProject,
+  clipIds: readonly string[],
+  edge: 'start' | 'end',
+  sec: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditResult {
+  if (clipIds.length === 0) return ok(doc);
+  if (clipIds.length === 1) return trimClip(doc, clipIds[0]!, edge, sec, opts);
+  // ⚠️ **固定した列は、まとめてのときも断る**（`moveClips` と同じ言い方＝どの列か言えないので）。
+  for (const id of clipIds) {
+    const clip = doc.clips.find((c) => c.id === id);
+    if (!clip) return blocked(EDIT_BLOCKED.notFound);
+    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.lockedSelection);
+  }
+  let next = doc;
+  for (const id of clipIds) {
+    const r = trimClip(next, id, edge, sec, opts);
+    // ⚠️ **1つでも置けないなら、まとめて断る**＝半分だけ変わった状態を残さない
+    //（取り消し1回で戻せない形にしない＝履歴は文書まるごとの写し）。
+    if (!r.ok) return r;
+    next = r.doc;
+  }
+  return next === doc ? ok(doc) : ok(next);
+}
+
+/**
+ * クリップの端を動かす（トリム）。`edge='start'` は開始を、`'end'` は終わりを動かす。
+ * **反対側の端は動かさない**＝片端を縮めるともう片端が付いてくる、を起こさない。
+ *
+ * クランプは **`applyClipEdge`（端の編集の単一の参照元・#561）へ委譲**する。自前で
+ * 「長さを引き算してから `Math.max`」と書くと、同じ入力を2度通したときに下限をわずかに割る
+ * （そこで潰した不具合を書き戻さない）。最小の長さは `TIMELINE_MIN_CLIP_SEC`（§2-7）。
+ */
+export function trimClip(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'start' | 'end',
+  sec: number,
+  // ⚠️ **見た目パターンの差し込み口を解くのに要る**（#988）＝渡さないと、
+  // 差し込み口に入れた動画だけ頭出しが進まず、**置き場所で挙動が割れる**。
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 連動している字幕の長さも読み上げが決める（上と同じ理由）。
+  if (clip.voiceClipId != null) return blocked(EDIT_BLOCKED.linkedSubtitleTime);
+  const span = applyClipEdge(clip, edge === 'start' ? 'trim-start' : 'trim-end', sec, 0, TIMELINE_MIN_CLIP_SEC);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
+  if (span.startSec === clip.startSec && span.durationSec === clip.durationSec) return ok(doc);
+  // ⚠️ **左端を詰めたら、素材の頭出しも進める**（#988）＝進めないと、
+  // **頭は切れず中身が右へずれ、代わりに末尾が落ちる**（他社の型と逆の結果）。
+  // しかも**「ここで分けて前半を消す」と結果が食い違う**（分けるほうは進めていた）＝
+  // 同じことをする2つの操作で、鳴る音・映る絵が違った。**規則は `sourceTime.ts` に1つ**。
+  // ⚠️ **戻したぶんも戻す**（負の値も通す）＝`> 0` に絞ると、
+  // **詰めて左へ戻しても頭出しが進んだまま**になり、行って来いで中身がずれ続ける
+  //（他社の型では戻すと素材も戻る）。自分で挙げた懸念を検査にしたら、実際にそうなっていた。
+  const headSec = edge === 'start' ? span.startSec - clip.startSec : 0;
+  // ⚠️ **素材を使い切った先までは詰めない**（PR #1004 レビュー 🔴）＝進めた頭出しが
+  // 切り出す終わり（`endSec`）や素材の実尺を追い越すと、`resolveSlotClip` が終端を「無し」へ
+  // 正規化して**切り捨てたはずの素材の続きが黙って流れ出す**（#816 と同じ形）。
+  // ⚠️ **「分ける」には前からあった門**＝こちらへ移植されておらず、`splitPastSource` は
+  // 定義だけで未使用だった。**トリムのほうがドラッグで日常的に触る**ぶん起こりやすい。
+  // 規則は `sourceTime.ts` に1つ（写すと片方だけ直る）。
+  // ⚠️ **素材の外へは伸ばさない**（ADR-0034 追補 2026-10-05・#1331）＝左は頭より前・右は終わりより先。
+  const outside = sourceLimitIssue(doc, clip, edge, span, opts.templateOf);
+  if (outside === 'before') return blocked(EDIT_BLOCKED.trimBeforeSource);
+  if (outside === 'after') return blocked(EDIT_BLOCKED.trimPastSourceEnd);
+  if (headSec > 0 && usesUpSource(doc, clip, headSec, opts.templateOf)) {
+    return blocked(EDIT_BLOCKED.trimPastSource);
+  }
+  const advanced =
+    headSec !== 0
+      ? { ...advancedSourceStart(clip, headSec), ...advancedSlotStarts(doc, clip, headSec, opts.templateOf) }
+      : {};
+  const next = { ...clip, ...span, ...advanced };
+  const issue = placementIssue(doc, next, next.trackId, next.startSec, next.durationSec);
+  if (issue) return blocked(issue);
+  // 連動している字幕も同じ区間になる（声を作り直して長さが変わるときも、この関数を通す約束＝#633 の残り）。
+  return withBoundSubtitles(withClip(doc, next), doc, clip, span);
+}
+
+/**
+ * グループのメンバーから消えた id を落とす（空になったグループも畳む＝中身の無い入れ物を残さない・V26）。
+ * 1段ぶんの除去は場面形式と同じ `removeMembersFromGroups` を使い、**入れ子は収束するまで繰り返す**
+ * （消えたグループを入れ子に持つ側からも落とす）。
+ */
+function pruneGroups(groups: readonly Group[], removed: ReadonlySet<string>): Group[] {
+  const next = removeMembersFromGroups([...groups], [...removed]);
+  const goneIds = new Set(groups.filter((g) => !next.some((n) => n.id === g.id)).map((g) => g.id));
+  return goneIds.size === 0 ? next : pruneGroups(next, goneIds);
+}
+
+/**
+ * 選んだ部品を消す（**固定した列のものが混ざっていたら断る**・#701 レビュー）。
+ *
+ * `removeClips` は列ごと消すとき（`removeTrack`）にも使う内部の道具で、そちらは列そのものを消すので
+ * 固定の判定を通してはいけない。**利用者が「消す」を押す入口はこちら**＝ほかの編集（動かす・複製する）が
+ * 固定列を断るのと同じ扱いにする（`Ctrl+A` で全部選んでから消す、で固定が意味を失わない）。
+ */
+export function removeSelectedClipsChecked(doc: TimelineProject, clipIds: readonly string[]): EditResult {
+  const lockedTrackIds = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
+  const targets = doc.clips.filter((c) => clipIds.includes(c.id));
+  if (targets.length === 0) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ 断る語彙は**画面と同じもの**（#752 レビュー）＝同じ述語（選んだ中に固定列のものが混ざる）に
+  // 2つの言い方を持たない。次の行動も「固定を外す」だけでなく「選び直す」で進める。
+  if (targets.some((c) => lockedTrackIds.has(c.trackId))) return blocked(EDIT_BLOCKED.lockedSelection);
+  return { ok: true, doc: removeClips(doc, clipIds) };
+}
+
+/**
+ * クリップを消す。**参照も一緒に片づける**＝グループのメンバーとキーフレームの対象から落とす
+ * （残すと「消したのに動きだけ残る」参照切れになる・11 §8 V26）。
+ */
+export function removeClips(doc: TimelineProject, clipIds: readonly string[]): TimelineProject {
+  const removed = new Set(clipIds);
+  const clips = doc.clips.filter((c) => !removed.has(c.id));
+  const groups = pruneGroups(doc.groups ?? [], removed);
+  // 落とすのは**今回消したもの**への参照と、**畳んだグループ**への参照だけ。元から参照切れだったものは
+  // 触らない（V26 は「描画で無視」＝掃除は `danglingTimelineRefs` を使う側の役割で、削除のついでにやらない）。
+  const goneGroupIds = new Set((doc.groups ?? []).filter((g) => !groups.some((n) => n.id === g.id)).map((g) => g.id));
+  const animations = (doc.animations ?? []).filter((a) => !removed.has(a.targetId) && !goneGroupIds.has(a.targetId));
+  // **条件付きスプレッドでは消せない**（`...doc` が元の groups/animations を残すので、
+  // 空になったときに古い値が生き残る）。無くなったキーは明示的に落とす。
+  const next: TimelineProject = { ...doc, clips };
+  if (groups.length > 0) next.groups = groups;
+  else delete next.groups;
+  if (animations.length > 0) next.animations = animations;
+  else delete next.animations;
+  return next;
+}
+
+/**
+ * 素材の形を保ったまま、画面に収まる大きさの箱を出す（2026-09-28）。
+ *
+ * ⚠️ **拡大はしない**＝画面より小さい素材を引き伸ばすと粗くなる。**収まるなら実寸のまま**。
+ * ⚠️ **偶数に丸めない**＝ここは画面の中の箱で、書き出しの格子（偶数幅）とは別の話。
+ *
+ * @param source 素材の実寸。
+ * @param canvas 画面の大きさ。
+ */
+export function containBox(source: { w: number; h: number }, canvas: { width: number; height: number }): { w: number; h: number } {
+  if (!(source.w > 0) || !(source.h > 0)) return { w: canvas.width, h: canvas.height };
+  const scale = Math.min(canvas.width / source.w, canvas.height / source.h, 1);
+  return {
+    w: Math.max(MIN_BOX_SIZE_PX, Math.round(source.w * scale)),
+    h: Math.max(MIN_BOX_SIZE_PX, Math.round(source.h * scale)),
+  };
+}
+
+/**
+ * 列を足す。**同じ種類のまとまりの中へ入れる**（#1249）＝映像は手前（画面の上）、音は奥（画面の下）。
+ * 重ね順は配列の並びだけで決まる（`11 §7.6`）ので、入れる場所がそのまま前後関係になる。
+ */
+export function addTrack(doc: TimelineProject, kind: TrackKind): TimelineProject {
+  const track: Track = { id: createTrackId(doc.tracks.map((t) => t.id)), kind };
+  return { ...doc, tracks: insertTrack(doc.tracks, track) };
+}
+
+/**
+ * 新しい列を**同じ種類のまとまりの中へ**入れる（#1249・ADR-0034 決定1＝業界の型）。
+ *
+ * ⚠️ **並びは重ね順そのもの**（`11 §7.6`＝配列の後ろほど手前／画面は手前を上に出す）。
+ * 以前は種類に関わらず**末尾へ足していた**ので、音を足すと**映像より手前（上）**に乗り、
+ * 映像と音が交互に並んだ（実測＝`音2, 映像3, 映像2, 音1, 映像1`）。
+ * ⚠️ **上下に意味があるのは映像だけ**＝音に重なりの順は無いので、音の列が映像のあいだに挟まると
+ * その行だけ意味を持たない。どの主要ソフトも**映像を上・音を下**にまとめている。
+ * ⚠️ **実害が出ていた**＝映像1 の帯を映像2 へ運ぶのに、あいだの音1 を飛び越して**2行ぶん**動かす必要があり、
+ * 1行ぶんだと音の列に落ちて（正しく）断られる＝利用者には「運べない」としか見えない。
+ *
+ * ⚠️ **いまある並びは組み替えない**＝開いた文書の列を黙って並べ替えない（§2-5・ADR-0026④）。
+ * **入れる場所を選ぶだけ**で、すでに混ざっている文書はそのまま（利用者が `手前へ`／`奥へ` で直せる）。
+ *
+ * @param tracks いまの並び（配列の後ろほど手前）。
+ * @param track 入れる列。
+ * @returns 入れたあとの並び。
+ */
+export function insertTrack(tracks: readonly Track[], track: Track): Track[] {
+  const out = [...tracks];
+  if (track.kind === TRACK_KIND.audio) {
+    // 音＝**いちばん奥（配列の先頭側）へ**。すでに音があるなら、その手前側の端ではなく**さらに奥**へ
+    // 置く＝あとから足した音ほど下に並ぶ（`音1` が上・`音2` がその下＝業界の型）。
+    const firstAudio = out.findIndex((t) => t.kind === TRACK_KIND.audio);
+    out.splice(firstAudio < 0 ? 0 : firstAudio, 0, track);
+    return out;
+  }
+  // 映像＝**いちばん手前（配列の末尾側）へ**。映像が1つも無ければ末尾でよい（音より手前＝上に出る）。
+  let lastVisual = -1;
+  out.forEach((t, i) => { if (t.kind !== TRACK_KIND.audio) lastVisual = i; });
+  out.splice(lastVisual < 0 ? out.length : lastVisual + 1, 0, track);
+  return out;
+}
+
+/**
+ * 列を消す。**その列に載っているクリップも一緒に消える**（行き場が無くなるため）。
+ * 何が消えるかは呼び出し側が数えて確認を出す＝黙って消さない（§2-5）。
+ * **固定した列は消せない**＝「動かせないのに消せる」という非対称を作らない（ADR-0026②）。
+ */
+export function removeTrack(doc: TimelineProject, trackId: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  const ids = doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id);
+  const withoutClips = removeClips(doc, ids);
+  // ⚠️ **その列の声で動いていた立ち絵の結びも外す**（ADR-0056）＝残すと、後から同じ番号で作った列で
+  // 勝手に動き出す（`track_NNN` の歯抜け再利用＝まとまりの動きの「憑依」と同じ経路）。
+  const clips = withoutClips.clips.map((c) => {
+    if (c.talkMotion?.trackId !== trackId) return c;
+    const next = { ...c };
+    delete next.talkMotion;
+    return next;
+  });
+  return ok({ ...withoutClips, clips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) });
+}
+
+/**
+ * 列に名前を付ける（#1249 追加・利用者要望 2026-09-28）。
+ *
+ * ⚠️ **空にしたら自動の名前へ戻す**＝`name` を空文字で残すと、`trackLabel` が
+ * 「名前が付いている」と見て**空の見出し**を出す（どの列か分からなくなる）。**消す道は必ず残す**。
+ * ⚠️ **前後の空白は落とす**＝見えない文字だけの名前を作らせない（空白だけ＝消したのと同じに倒す）。
+ * ⚠️ **固定した列でも名前は変えられる**＝固定が守るのは**帯の位置と長さ**（`removeTrack`／`moveClip`）で、
+ * 呼び名はそれに当たらない（固定したまま整理したい、が普通にある）。
+ *
+ * @param name 新しい名前。空・空白だけなら自動の名前（種別＋連番）へ戻す。
+ */
+export function renameTrack(doc: TimelineProject, trackId: string, name: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  const trimmed = name.trim();
+  const next: Track = { ...track };
+  // ⚠️ **保存する値は切らない**（#1255 レビュー 🟡）＝長さの上限は**正典（schema）に無い**ので、
+  //   domain で切ると「正典に無い制約」を保存データへ足すことになる（§9-2）。
+  //   長さを抑えるのは**入力欄**（`TRACK_NAME_MAX`＝`maxLength`）の仕事。外から書かれた長い名前も、
+  //   そのまま残す（見出しに入らないぶんは画面側が省略して出す）。
+  if (trimmed) next.name = trimmed;
+  else delete next.name;
+  return ok({ ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? next : t)) });
+}
+
+/**
+ * 列の名前を**入力するとき**の長さの上限（入力欄の `maxLength`）。
+ *
+ * ⚠️ **列の見出しの幅は決まっている**（`TIMELINE_LABEL_W_PX`＝124px）ので、長い名前は**入らない**。
+ * ⚠️ **保存する値の制約ではない**（#1255 レビュー 🟡）＝schema の `Track.name` に長さの上限は無い。
+ * ここで持つのは「入力欄で打てる長さ」だけで、`renameTrack` は切らない。
+ * 保存値として縛るなら、schema に `maxLength` を足して版を上げ、`11 §7.6` に書くこと。
+ */
+export const TRACK_NAME_MAX = 24;
+
+/** その列に載っているクリップの数（列を消す前の確認に使う）。 */
+export function clipCountOnTrack(doc: TimelineProject, trackId: string): number {
+  return doc.clips.filter((c) => c.trackId === trackId).length;
+}
+
+/**
+ * 列の重ね順を1つ動かす（`direction='front'` で手前＝配列の後ろへ）。端では何も起きない。
+ * **重ね順は配列の並びだけで決まる**（11 §7.6）ので、並べ替えがそのまま前後関係になる。
+ */
+export function moveTrackOrder(doc: TimelineProject, trackId: string, direction: 'front' | 'back'): EditResult {
+  const i = doc.tracks.findIndex((t) => t.id === trackId);
+  if (i < 0) return blocked(EDIT_BLOCKED.notFound);
+  const j = direction === 'front' ? i + 1 : i - 1;
+  if (j < 0 || j >= doc.tracks.length) return ok(doc); // 端では何も起きない（寄せない）
+  // ⚠️ **落とし先へ動かすのと同じ関数**を通す（#767）＝1段ずつと掴んで運ぶで規則を2つ持たない
+  //（固定した列を断るのも、この1か所で決まる）。
+  return moveTrackTo(doc, trackId, j);
+}
+
+/**
+ * 列を**中身ごと**複製して、元の**すぐ手前**へ入れる（#767・利用者決定）。
+ * 空の列だけ増やすなら「列を足す」と同じなので、**中の部品も一緒に**運ぶ。
+ *
+ * - 読み上げは**作成済みの音声を引き継がない**（部品ひとつの複製と**同じ規則**＝作成済みに見えるのに
+ *   別の部品の音声を指す、を作らない）
+ * - 連動している字幕は、**元の読み上げを指したまま**運ぶ（#787）。⚠️ 以前は「連動先も一緒に複製される
+ *   ときだけ結び直す」と書いていたが、**編集操作からはそういう文書を作れない**（`trackPlacementIssue` が
+ *   `trackKindForClip` で断る＝字幕は映像の列・読み上げは音の列）＝その分岐は一度も通らず、実際には**連動が必ず落ちて**
+ *   「文も連動先も無い＝何も出ない字幕」ができていた。元の読み上げは複製しても必ず残るので、指したままで
+ *   時間も文言も追従する。**別の列・同じ区間**なので重なり（V24）にも当たらない
+ *   （⚠️ 部品ひとつの複製は落とす＝あちらは**同じ列の直後**に置くので区間が合わず、必ず重なるため）
+ * - まとまり・動きは**複製した部品を指すように張り替える**（⚠️ こちらも列ごとの複製だけの規則＝
+ *   部品ひとつの複製は引き継がない。参照切れは作らない・11 §8 V26）
+ *
+ * ⚠️ **まとまりが列をまたぐときは断る**＝片側だけ複製すると、グループの変形が乗らない複製が
+ * **元と違う絵**になる（まとまりへ入れれば元の絵まで動く）。次の行動は「まとまりを外す」。
+ * 名前は引き継がない＝同じ名前の列が2つ並ぶと区別できない（自動名は種別ごとの連番）。
+ * ⚠️ **「出さない」は引き継ぐ**（`duplicateClip` は隠した列へ**新しく作る**のを断るが、こちらは
+ * その列そのものを写す操作＝行に「出さない」と出るので黙って増やしたことにならない）。
+ */
+export function duplicateTrack(doc: TimelineProject, trackId: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  const sources = doc.clips.filter((c) => c.trackId === trackId);
+  const sourceIds = new Set(sources.map((c) => c.id));
+  const groups = doc.groups ?? [];
+  // まとまりは「全部この列の中」か「1つも入っていない」かのどちらかでないと運べない。
+  // ⚠️ **葉の部品まで展開して数える**（レビュー）＝`members` には**入れ子のまとまり id** が入りうるので、
+  // そのまま数えると (a) 子だけ複製されて**親の変形が乗らない**（この関門が防ぐはずの絵の違い）
+  // (b) 列をまたいでいないのに「またいでいる」と断る、のどちらも起きる。
+  const leavesOf = (g: Group): string[] => groupElementIds(groups, g.id);
+  const partial = groups.filter((g) => {
+    const leaves = leavesOf(g);
+    const inside = leaves.filter((m) => sourceIds.has(m)).length;
+    return inside > 0 && inside < leaves.length;
+  });
+  if (partial.length > 0) return blocked(EDIT_BLOCKED.groupAcrossTracks);
+
+  // id は**全部まとめて**先に採る（1つずつ採ると、同じ番号を2度出す）。
+  const newTrack: Track = { ...track, id: createTrackId(doc.tracks.map((t) => t.id)) };
+  delete newTrack.name;
+  const clipIds = doc.clips.map((c) => c.id);
+  const idOf = new Map<string, string>();
+  for (const c of sources) idOf.set(c.id, createClipId([...clipIds, ...idOf.values()]));
+  const clips: TimelineClip[] = sources.map((c) => {
+    const next: TimelineClip = { ...c, id: idOf.get(c.id)!, trackId: newTrack.id };
+    if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
+    // 連動（`voiceClipId`）は**そのまま**＝元の読み上げを指し続ける（上記のとおり相手はこの列に居ない）。
+    return next;
+  });
+
+  // まとまり（この列で完結しているものだけ）を複製し、メンバーを複製した部品へ張り替える。
+  const groupIds = groups.map((g) => g.id);
+  const groupIdOf = new Map<string, string>();
+  const newGroups: Group[] = [];
+  for (const g of groups) {
+    if (!leavesOf(g).some((m) => sourceIds.has(m))) continue; // 葉で見る（入れ子の親も拾う）
+    groupIdOf.set(g.id, createGroupId([...groupIds, ...groupIdOf.values()]));
+  }
+  for (const g of groups) {
+    const id = groupIdOf.get(g.id);
+    if (!id) continue;
+    // メンバーは部品・入れ子のまとまりの**どちらも**複製先へ張り替える（参照切れを作らない・V26）。
+    newGroups.push({ ...g, id, members: g.members.map((m) => idOf.get(m) ?? groupIdOf.get(m) ?? m) });
+  }
+
+  // 動き（キーフレーム）も、複製した部品・まとまりを指すものだけ張り替えて足す。
+  const animations = doc.animations ?? [];
+  const animIds = animations.map((a) => a.id);
+  const newAnimations: ClipAnimation[] = [];
+  for (const a of animations) {
+    const target = idOf.get(a.targetId) ?? groupIdOf.get(a.targetId);
+    if (!target) continue;
+    newAnimations.push({
+      ...a,
+      id: createAnimationId([...animIds, ...newAnimations.map((n) => n.id)]),
+      targetId: target,
+    });
+  }
+
+  const i = doc.tracks.findIndex((t) => t.id === trackId);
+  const tracks = [...doc.tracks];
+  tracks.splice(i + 1, 0, newTrack); // 元の**すぐ手前**（配列の後ろほど手前・11 §7.6）
+  const next: TimelineProject = { ...doc, tracks, clips: [...doc.clips, ...clips] };
+  if (newGroups.length > 0) next.groups = [...groups, ...newGroups];
+  if (newAnimations.length > 0) next.animations = [...animations, ...newAnimations];
+  return ok(next);
+}
+
+/**
+ * 列を**指した位置へ**動かす（#767・掴んで並べ替える）。`toIndex` は**動かす前の並び**での落とし先。
+ * 端を越える指定は端で止める（寄せない・置けないを作らない＝並べ替えは必ずどこかへ着く）。
+ *
+ * ⚠️ **重ね順は配列の並びだけ**（11 §7.6）＝並べ替えると**絵の重なりがその場で変わる**。
+ * 1段ずつの「手前へ／奥へ」（`moveTrackOrder`）と**同じ関数**を通す（規則を2つ持たない）。
+ */
+export function moveTrackTo(doc: TimelineProject, trackId: string, toIndex: number): EditResult {
+  const from = doc.tracks.findIndex((t) => t.id === trackId);
+  if (from < 0) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **固定した列は並べ替えない**（レビュー）＝並べ替えは**重ね順＝絵そのもの**を変える操作。
+  // 「固定する」と言いながら絵が変わる、を作らない（消せないのと同じ扱い・ADR-0026②）。
+  if (doc.tracks[from].locked) return blocked(EDIT_BLOCKED.locked);
+  const to = Math.max(0, Math.min(doc.tracks.length - 1, toIndex));
+  if (to === from) return ok(doc); // 変わらないなら**同じ文書を返す**（空振りの取り消しを積まない）
+  const tracks = [...doc.tracks];
+  const [moved] = tracks.splice(from, 1);
+  tracks.splice(to, 0, moved);
+  return ok({ ...doc, tracks });
+}
+
+/** 列の表示/非表示・固定を切り替える（描画・書き出しから外す／移動とトリムを禁じる）。 */
+export function setTrackFlag(doc: TimelineProject, trackId: string, flag: 'hidden' | 'locked', value: boolean): TimelineProject {
+  // **何も変わらないなら同じ文書を返す**（#724）＝取り消しが空振りする履歴を積ませない。
+  // 兄弟（`setClipSpeed`／`setClipVolume`／`setClipAssetRef` …）は全部これを持っており、ここだけ抜けていた。
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track || (track[flag] ?? false) === value) return doc;
+  return {
+    ...doc,
+    tracks: doc.tracks.map((t) => (t.id === trackId ? { ...t, [flag]: value } : t)),
+  };
+}
+
+/**
+ * クリップを複製して、**同じ列の空いている直後**へ置く（空いていなければ置けない＝理由を返す）。
+ * 「置く」の最短経路（まず複製して動かす）として用意する。
+ */
+export function duplicateClip(doc: TimelineProject, clipId: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const startSec = clipEndSec(clip);
+  // 列の事情は `trackPlacementIssue`（**新しく作る側**なので隠しも断る・#744 レビュー）。
+  // ⚠️ 最初は `placementIssue` を通していたが、あれの隠し免除は「渡された行き先が元の列と同じ」だけを
+  // 見るので、**複製は必ず免除されて隠した列に増えて**いた＝自分で書いた「見えないものが増える
+  // わけではない」と矛盾する。**既にあるものを動かす・縮める＝通す／新しく作る＝断る**が規則。
+  const trackIssue = trackPlacementIssue(doc, clip.trackId, trackKindForClip(clip.kind));
+  if (trackIssue) return blocked(trackIssue);
+  if (!isFreeSpan(doc.clips, clip.trackId, startSec, clip.durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const next = freshClipCopy(doc, clip, createClipId(doc.clips.map((c) => c.id)), startSec);
+  return ok({ ...doc, clips: [...doc.clips, next] });
+}
+
+/**
+ * 部品の**新しい写し**（複製・貼り付けが共有＝#1265・同じ規則を2か所に書かない）。
+ */
+function freshClipCopy(doc: TimelineProject, clip: TimelineClip, id: string, startSec: number): TimelineClip {
+  const next: TimelineClip = { ...clip, id, startSec };
+  // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
+  // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
+  if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
+  // **連動は引き継がない**（読み上げと同じ区間になるので、複製した瞬間に必ず重なる＝以後その読み上げを
+  // 動かすたびに断られる）。連動したい場合は複製後に選び直す。
+  // ⚠️ **落とす前に、いま出ている文を焼き付ける**（#787）＝自分の文を持たない連動字幕をそのまま落とすと
+  // **文も連動先も無い＝何も出ない帯**になる（黙って中身が消えたのと同じ・§2-5／ADR-0026④）。
+  // 焼き付けたあとは普通の字幕なので、書き換えも消すこともできる。
+  // ⚠️ **行き先の無い「喋っている間の動き」は持ち込まない**（PR #1370 レビュー 🟡）＝写したあとで声の列が消えて
+  // いると、後から同じ番号で作った列の声で勝手に動き出す（`removeTrack` が外しているのと同じ経路）。
+  if (next.talkMotion && !doc.tracks.some((t) => t.id === next.talkMotion!.trackId && t.kind === TRACK_KIND.audio)) {
+    delete next.talkMotion;
+  }
+  if (next.voiceClipId) {
+    const baked = subtitleTextOf(doc, clip);
+    if (baked) next.text = baked;
+    delete next.voiceClipId;
+  }
+  return next;
+}
+
+/**
+ * **写しておいた部品を貼る**（#1265・Ctrl+V）。いちばん早い部品の始まりを `atSec` に合わせ、**互いの時間の
+ * 隔たりと列はそのまま**（Premiere・Clipchamp の貼り付けの型）。
+ *
+ * - 規則は**複製と同じ**（`freshClipCopy`＝読み上げの音声は引き継がない・連動は焼き付けて外す／
+ *   新しく作る側なので**固定・隠した列は断る**／**重なる所には置かない**＝押しのけない・ADR-0034 決定11）。
+ * - **全か無か**（決定15）＝1つでも置けなければ何も貼らない（理由を返す）。
+ * - 写した後に消えた列・素材は断る（`notFound`）。
+ */
+export function pasteClips(
+  doc: TimelineProject,
+  source: readonly TimelineClip[],
+  atSec: number,
+): { ok: true; doc: TimelineProject; pastedIds: string[] } | { ok: false; reason: EditBlockedReason } {
+  const no = (reason: EditBlockedReason) => ({ ok: false as const, reason });
+  if (source.length === 0) return no(EDIT_BLOCKED.notFound);
+  const offset = Math.max(0, atSec) - Math.min(...source.map((c) => c.startSec));
+  let working = doc;
+  const pastedIds: string[] = [];
+  for (const clip of [...source].sort((a, b) => a.startSec - b.startSec)) {
+    const trackIssue = trackPlacementIssue(working, clip.trackId, trackKindForClip(clip.kind));
+    if (trackIssue) return no(trackIssue === EDIT_BLOCKED.notFound ? EDIT_BLOCKED.pasteSourceGone : trackIssue);
+    if (clip.assetId != null && !working.assets.some((a) => a.assetId === clip.assetId)) return no(EDIT_BLOCKED.pasteSourceGone);
+    const startSec = Math.max(0, clip.startSec + offset);
+    if (!isFreeSpan(working.clips, clip.trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.pasteOverlap);
+    const next = freshClipCopy(working, clip, createClipId(working.clips.map((c) => c.id)), startSec);
+    working = { ...working, clips: [...working.clips, next] };
+    pastedIds.push(next.id);
+  }
+  return { ok: true, doc: working, pastedIds };
+}
+
+/**
+ * 見た目パターンのクリップの**差し込み口に素材を入れる／外す**（ADR-0032 決定5＝差し込み口は生きている）。
+ *
+ * 固定した列（`locked`）の部品は中身も変えない＝「動かせないのに中身は変えられる」という非対称を作らない
+ * （ADR-0026②・画面は欄自体を押せなくして理由を出す）。
+ *
+ * **「なし」はキーごと落とす**。`null` と未指定は解決が同じ（どちらもテンプレ既定素材へ落ちる＝`11 §5`）
+ * なので、`null` を残すと**絵は変わらないのに文書だけ変わる**＝取り消しが1段空振りする。
+ * （テンプレ既定素材を「なし」で消せないのは場面形式と同じ挙動＝ADR-0026②。）
+ */
+export function setClipAssetRef(
+  doc: TimelineProject,
+  clipId: string,
+  layerId: string,
+  assetId: string | null,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **差し込み口を持つのは見た目パターンの部品だけ**（#795）＝ここだけ種別を見ておらず、
+  // ほかの部品にも `assetRefs` を書けた。画面は種別で欄を出し分けているので**到達しない**が、
+  // **完全な死にデータではない**＝`clipImageAssetIds`（`domain/timeline/export.ts`）は種別を問わず
+  // `assetRefs` を読むので、万一書かれていれば**書き出しの関門がその素材の読めることを要求する**。
+  // 断り方は `contentField`（「この部品にはその項目がありません」＝差し込み口という項目が無い）。
+  // **種別 → 固定の順**は兄弟と揃える（#724）＝外しても直らない案内を先に出さない。
+  if (clip.kind !== TIMELINE_CLIP_KIND.template) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **入れる素材は文書にあるものだけ**（#724・利用者判断＝操作側で塞ぐ）。兄弟（`addVisualClip`／
+  // `setVisualClipContent`／`setClipAudioSource`）は全部これを持っており、ここだけ抜けていた＝
+  // 無い素材を指したまま保存でき、開き直すと**灰色の枠が焼き込まれる**（描画は知らせるが、
+  // そもそも作らせない方が早い）。⚠️ V25 を `assetRefs` まで広げるのは見送り（正典は動かさない）。
+  if (assetId != null && !doc.assets.some((a) => a.assetId === assetId)) return blocked(EDIT_BLOCKED.notFound);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない。
+  // 比べるのは**解決した値**（`null` と未指定は同じ意味）。
+  if ((clip.assetRefs?.[layerId] ?? null) === assetId) return ok(doc);
+  const assetRefs = { ...clip.assetRefs };
+  if (assetId === null) delete assetRefs[layerId];
+  else assetRefs[layerId] = assetId;
+  // ⚠️ **素材を差し替えたら、その枠の使い方は落とす**（#512 段3b・レビュー 🔴／`11 §7.6.2.2`）＝
+  // 残すと**別の動画を入れた瞬間に、頼んでいない音が鳴り出す**（切り出す範囲・速さも前の素材のまま）。
+  // 直接置き（`setVisualClipContent`）が同じ後始末をしている＝置き場所で流儀を割らない（ADR-0026②）。
+  const patched: TimelineClip = { ...clip, assetRefs };
+  if (clip.slotClips?.[layerId]) {
+    const slotClips = { ...clip.slotClips };
+    delete slotClips[layerId];
+    if (Object.keys(slotClips).length === 0) delete patched.slotClips;
+    else patched.slotClips = slotClips;
+  }
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 見た目パターンのクリップの**文字を書き換える**（差し込み口は生きている）。
+ * 空にしたときはキーごと落とす＝「空文字を入れた」と「入れていない」を別扱いにしない
+ * （場面形式の `texts` と同じ解決＝空は描かれない）。
+ */
+export function setClipText(doc: TimelineProject, clipId: string, textKey: TextKey, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.texts?.[textKey] ?? '') === text) return ok(doc);
+  const texts: Texts = { ...clip.texts };
+  if (text === '') delete texts[textKey];
+  else texts[textKey] = text;
+  return ok(withClip(doc, { ...clip, texts }));
+}
+
+/**
+ * 部品の**色の調整**を直す（ADR-0044 ①）。渡した項目だけ書き換える（残りはそのまま）。
+ *
+ * ⚠️ **素の値に戻ったら、まるごと落とす**＝`{brightness:1}` のような「何もしない調整」を残すと、
+ * **描く側が「調整あり」と見てフィルタを出す**（通すだけで絵がわずかに変わる）。
+ * 判定は描く側（`renderer/colorFilter.ts`）と**同じ規則**にそろえる。
+ */
+export function setClipColorAdjust(
+  doc: TimelineProject,
+  clipId: string,
+  patch: { brightness?: number; contrast?: number; saturation?: number; temperature?: number },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = { ...(clip.colorAdjust ?? {}), ...patch };
+  const neutral =
+    (next.brightness ?? 1) === 1 && (next.contrast ?? 1) === 1
+    && (next.saturation ?? 1) === 1 && (next.temperature ?? 0) === 0;
+  return ok({
+    ...doc,
+    clips: doc.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const copy = { ...c };
+      if (neutral) delete copy.colorAdjust;
+      else copy.colorAdjust = next;
+      return copy;
+    }),
+  });
+}
+
+/**
+ * 部品の**描画モード**を直す（ADR-0044 ②）。
+ *
+ * ⚠️ **`normal` はまるごと落とす**＝既定と同じものを書き残すと、出力（SVG）が無駄に変わる。
+ */
+export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: BlendMode): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  return ok({
+    ...doc,
+    clips: doc.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const copy = { ...c };
+      if (mode === 'normal') delete copy.blendMode;
+      else copy.blendMode = mode;
+      return copy;
+    }),
+  });
+}
+
+/**
+ * 見た目パターンを**素材として置く**（ADR-0032 決定6＝テンプレは「楽をするための素材」）。
+ * 置き先は指定の列の指定の時刻。空いていなければ置かない（寄せない・上書きしない＝理由を返す）。
+ *
+ * 長さは**テンプレを受け取って domain で決める**（`defaultDurationForTemplate`＝場面形式の「新しい場面」と
+ * 同じ関数）＝同じテンプレが形式や呼び出し口によって違う長さで出てこない（ADR-0026②）。
+ */
+export function addTemplateClip(
+  doc: TimelineProject,
+  input: { template: Pick<Template, 'templateId' | 'defaults' | 'aspectRatio'>; trackId: string; startSec: number },
+): EditResult {
+  // 置ける条件は `clipPlacementIssue`（#714）＝**押す前の見た目と同じ規則**を通る（向きの違い・列の
+  // 事情〔固定・非表示・種別〕・重なりを1か所で見る）。手書きで並べていた頃は `hidden` だけ抜けていた。
+  const spec = { kind: TIMELINE_CLIP_KIND.template, template: input.template } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = placedDurationSec(spec);
+  // **箱は持たない**＝未指定は画面いっぱい（`clipBox`）。焼き出し（`bake.ts`）も同じく持たないので、
+  // 見た目パターンのクリップの箱の持ち方が2通りにならない（向きを変えたときに片方だけ古い大きさで残る）。
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.template,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    templateId: input.template.templateId,
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * 連動している字幕クリップも一緒に動かす（ADR-0032 決定24）。読み上げ以外は何もしない。
+ *
+ * **置けないときは全体を断る**（字幕だけ置き去りにしない）＝「連動している」と言った以上、片方だけ
+ * 動いた結果を黙って作らない（§2-5・ADR-0026④）。理由は置けなかった字幕のもの。
+ */
+function withBoundSubtitles(
+  next: TimelineProject,
+  before: TimelineProject,
+  moved: TimelineClip,
+  span: { startSec: number; durationSec: number },
+): EditResult {
+  if (moved.kind !== TIMELINE_CLIP_KIND.voice) return ok(next);
+  let doc = next;
+  for (const sub of subtitlesBoundTo(before, moved.id)) {
+    if (span.startSec === sub.startSec && span.durationSec === sub.durationSec) continue;
+    const moving = { ...sub, ...span };
+    // 置けない理由は**字幕側**のもの。そのまま返すと「触ってもいない列が固定されています」に見えるので、
+    // 連動のせいで置けないと分かる理由にまとめる（§2-5＝次の行動へ導く）。
+    if (placementIssue(doc, moving, moving.trackId, moving.startSec, moving.durationSec)) {
+      return blocked(EDIT_BLOCKED.linkedSubtitle);
+    }
+    doc = withClip(doc, moving);
+  }
+  return ok(doc);
+}
+
+/**
+ * 字幕クリップの**連動先**を決める／やめる（ADR-0032 決定24）。`null` で連動をやめる。
+ *
+ * 連動を始めたら**その場で時間も合わせる**＝「連動する」と言ったのに位置がずれたまま、を作らない。
+ * 置けないときは断る（黙って別の場所に置かない）。
+ */
+export function setSubtitleVoiceLink(doc: TimelineProject, clipId: string, voiceClipId: string | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.subtitle) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (voiceClipId === null) {
+    if (clip.voiceClipId == null) return ok(doc);
+    const next = { ...clip };
+    delete next.voiceClipId;
+    return ok(withClip(doc, next));
+  }
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice || voice.kind !== TIMELINE_CLIP_KIND.voice) return blocked(EDIT_BLOCKED.notFound);
+  const moved = { ...clip, voiceClipId, startSec: voice.startSec, durationSec: voice.durationSec };
+  const issue = placementIssue(doc, moved, moved.trackId, moved.startSec, moved.durationSec);
+  return issue ? blocked(issue) : ok(withClip(doc, moved));
+}
+
+/**
+ * 喋っている間の動き（ADR-0056・#1367）を付ける／外す（`null`＝外す）。
+ *
+ * ⚠️ **映像の部品だけ**（動くのは絵）・**結ぶのは音の列だけ**（声の部品が置かれる列）＝ほかは断る（黙って別の列にしない）。
+ * ⚠️ 強さは 0 より大きく 5 まで（schema と同じ）＝外れた値は断る（丸めて保存しない）。
+ */
+export function setClipTalkMotion(doc: TimelineProject, clipId: string, talkMotion: TalkMotion | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || !isVisualClip(clip)) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (talkMotion === null) {
+    if (clip.talkMotion == null) return ok(doc);
+    const next = { ...clip };
+    delete next.talkMotion;
+    return ok(withClip(doc, next));
+  }
+  const track = doc.tracks.find((t) => t.id === talkMotion.trackId);
+  if (!track || track.kind !== TRACK_KIND.audio) return blocked(EDIT_BLOCKED.notFound);
+  const strength = talkMotion.strength;
+  if (strength != null && !(strength > 0 && strength <= TALK_MOTION_STRENGTH_MAX)) return blocked(EDIT_BLOCKED.notFound);
+  return ok(withClip(doc, { ...clip, talkMotion: { ...talkMotion } }));
+}
+
+/**
+ * 字幕クリップ自身の文（`text`）を書き換える（#633）。**空にすると連動先の読み上げ文に戻る**
+ * （`subtitleTextOf` の解決＝自分の文が優先）。空文字は持たない（未入力と別扱いにしない）。
+ */
+export function setSubtitleText(doc: TimelineProject, clipId: string, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.subtitle) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.text ?? '') === text) return ok(doc);
+  const next = { ...clip };
+  if (text === '') delete next.text;
+  else next.text = text;
+  return ok(withClip(doc, next));
+}
+
+/**
+ * **読み上げを置く**（ADR-0032 決定7＝タイムライン側でも声を作れる・#633）。
+ *
+ * 置いた時点では**まだ声を作っていない**（`status='none'`）ので、長さは仮の既定。声を作ると実際の尺へ
+ * 合わせ直す（`trimClip` を通す＝連動している字幕も一緒に動く）。
+ */
+export function addVoiceClip(
+  doc: TimelineProject,
+  input: { text: string; trackId: string; startSec: number; durationSec?: number },
+): EditResult {
+  // 置ける条件は `clipPlacementIssue`（#714）＝押す前の見た目と同じ規則（列の事情・重なり）。
+  const spec = { kind: TIMELINE_CLIP_KIND.voice, durationSec: input.durationSec } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = placedDurationSec(spec);
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.voice,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    voice: { text: input.text, status: NARRATION_STATUS.none },
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/** 読み上げクリップの文を書き換える。**声は作り直しになる**ので、作成済みの音声は外す（別の文の声を指さない）。 */
+export function setVoiceText(doc: TimelineProject, clipId: string, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (clip.voice.text === text) return ok(doc);
+  return ok(
+    withClip(doc, {
+      ...clip,
+      voice: { ...clip.voice, text, voicePath: null, status: NARRATION_STATUS.none },
+    }),
+  );
+}
+
+/** 読み上げクリップの話者を変える（`null`＝動画全体の声を継承）。文と同じく作成済みの音声は外す。 */
+export function setVoiceSpeaker(doc: TimelineProject, clipId: string, speaker: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.voice.speaker ?? null) === speaker) return ok(doc);
+  const voice = { ...clip.voice, voicePath: null, status: NARRATION_STATUS.none };
+  if (speaker === null) delete voice.speaker;
+  else voice.speaker = speaker;
+  return ok(withClip(doc, { ...clip, voice }));
+}
+
+/**
+ * **同じ時間に置いてある字幕の上**へ積んだ y（重なっていなければ既定のまま）。
+ *
+ * ⚠️ **同じ時間のものだけを見る**＝別の時間の字幕は画面に同時に出ないので、避ける相手ではない
+ *（避けると、1本ずつ置くたびに上へ上へと逃げて画面の外へ出る）。
+ * ⚠️ **上へ積む**＝場面形式と同じ向き（#530「2人目以降を上へ」）。下へ積むと画面の外が近い。
+ * ⚠️ **画面の外へは出さない**（0 で止める）＝出すと**置いたのに映らない**字幕が黙って生まれる。
+ * 止めた結果また重なることはあるが、**見えない**より**見えて重なっている**ほうが気づける。
+ *
+ * ⚠️ **見るのは「置くその瞬間」だけ**（#1010 レビュー 🔴＝実測で確認）＝置いた**後**に
+ * 読み上げをずらして時間が重なると、y は据え置きなので**また同じ場所に重なる**
+ *（`withBoundSubtitles` は連動する字幕の時間だけ合わせ、位置は触らない）。
+ * **これは承知のうえ**＝あとから位置を計算し直すと、利用者が**手で置いた場所を黙って動かす**
+ *（§2-5）。場面形式が重ならないのは、帯の位置を**保存せず描くたびに出している**からで、
+ * こちらは y が**利用者の編集できるデータ**だという違いによる。
+ * ⚠️ **ここは「重ならないことの保証」ではない**＝重なりを**知らせる**のが筋（#1014 で追う）。
+ *
+ * ⚠️ **箱の高さは、描かれる高さの上限とは限らない**（同レビュー）＝実際の描画は
+ * 折り返し行数＋余白（`SUBTITLE_BAND_PAD_EM`）で決まるので、箱を1行ぎりぎりまで詰めた字幕では
+ * すき間を食い込むことがある。既定の大きさでは収まる。
+ */
+function stackedSubtitleY(
+  doc: TimelineProject,
+  startSec: number,
+  durationSec: number,
+  baseY: number,
+  h: number,
+  fontSize: number,
+): number {
+  // すき間は**文字の大きさ**を基準にする（場面形式と同じ＝`stackedSubtitleBands`）。
+  const gap = Math.round(fontSize * SUBTITLE_STACK_GAP_EM);
+  let y = baseY;
+  // 重なりが解けるまで上へ。**回数を区切る**＝壊れたデータ（高さ0の字幕が大量）で回り続けない。
+  for (let i = 0; i < doc.clips.length + 1; i += 1) {
+    const hit = doc.clips.find(
+      (c) =>
+        c.kind === TIMELINE_CLIP_KIND.subtitle &&
+        spansOverlap(c.startSec, clipEndSec(c), startSec, startSec + durationSec) &&
+        boxesOverlapY(c.y ?? 0, c.h ?? 0, y, h),
+    );
+    if (!hit) break;
+    const next = (hit.y ?? 0) - gap - h;
+    if (next < 0) return 0; // 画面の外へは出さない
+    y = next;
+  }
+  return y;
+}
+
+/** 縦に重なっているか（半開＝上下が接しているだけなら重なっていない）。 */
+function boxesOverlapY(aY: number, aH: number, bY: number, bH: number): boolean {
+  return aY < bY + bH && bY < aY + aH;
+}
+
+/**
+ * **その読み上げの字幕を置く**（#633＝「声を作る → 字幕が連動して出る」の入口）。
+ *
+ * 置き場所は**同じ時間が空いている映像の列**を探し、無ければ**列を足す**（置けないと言って終わらせない）。
+ * 見た目の既定（画面下の字幕バー）は自由配置の字幕要素と**同じ関数**から採る＝形式で見た目が割れない。
+ */
+export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string): EditResult {
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice || voice.kind !== TIMELINE_CLIP_KIND.voice) return blocked(EDIT_BLOCKED.notFound);
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
+  const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
+  void _elId;
+  void _kind;
+  void _z;
+  void _src;
+
+  // 置ける映像の列を探す（同じ時間が空いていて固定されていないもの）。無ければ足す。
+  // **隠した列は選ばない**＝置けても動画に出ない字幕が黙って生まれる（自分で列を選ぶ操作と違い、
+  // 置き場所を任せているので気づけない）。該当が無ければ列を足す。
+  const free = doc.tracks.find(
+    (t) =>
+      t.kind === TRACK_KIND.visual &&
+      !t.locked &&
+      !t.hidden &&
+      isFreeSpan(doc.clips, t.id, voice.startSec, voice.durationSec),
+  );
+  const trackId = free?.id ?? createTrackId(doc.tracks.map((t) => t.id));
+  const tracks = free ? doc.tracks : [...doc.tracks, { id: trackId, kind: TRACK_KIND.visual }];
+  const clip: TimelineClip = {
+    ...spatial,
+    // ⚠️ **同じ時間に字幕があれば、その上へ積む**（#1009）＝既定の箱は位置が固定なので、
+    // 同時にしゃべる2人ぶんを置くと**まったく同じ場所に重なり**、下の字幕が読めなくなる。
+    // 場面形式は同じ状況（同時2ボイス・ADR-0031）で**2人目以降を上へ**置く（#530）＝
+    // 形式で挙動を割らない（ADR-0026②）。
+    y: stackedSubtitleY(doc, voice.startSec, voice.durationSec, spatial.y ?? 0, spatial.h ?? 0, spatial.fontSize ?? 0),
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.subtitle,
+    trackId,
+    startSec: voice.startSec,
+    durationSec: voice.durationSec,
+    voiceClipId,
+  };
+  return ok({ ...doc, tracks, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **字幕ファイルの字幕を並べる**（ADR-0055 決定3・#1351）＝1回の編集（取り消し1回で全部消える）。
+ *
+ * - キューごとに**字幕クリップ**（自分の文を持つ・読み上げに連動しない）を作る。見た目は読み上げの字幕と**同じ既定**
+ *   （自由配置の字幕要素と同じ関数＝形式で見た目が割れない）。同じ時間に字幕があれば上へ積む（`stackedSubtitleY`）。
+ * - 置き場所は**新しい映像の列**（既存の部品と重ねない＝読み込んだまとまりが1つの列に揃う）。キューどうしが重なる分だけ列を足す。
+ * - 短すぎるキューは最小（`TIMELINE_MIN_CLIP_SEC`）まで伸ばす。動画の上限（`VIDEO_HARD_MAX_SEC`）を越えるキューは置かず、
+ *   **その数を返す**（呼ぶ側が言う＝黙って捨てない・§2-5）。
+ * - 置けるキューが1つも無ければ文書を変えない（`placed: 0`）。
+ */
+export function importSubtitleCues(
+  doc: TimelineProject,
+  cues: readonly { startSec: number; endSec: number; text: string }[],
+): { doc: TimelineProject; placed: number; beyondLimit: number } {
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
+  const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
+  void _elId; void _kind; void _z; void _src;
+  let cur = doc;
+  const newTracks: string[] = [];
+  let placed = 0;
+  let beyondLimit = 0;
+  for (const cue of cues) {
+    const startSec = Math.max(0, cue.startSec);
+    const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, cue.endSec - startSec);
+    if (startSec + durationSec > VIDEO_HARD_MAX_SEC) { beyondLimit += 1; continue; }
+    let trackId = newTracks.find((id) => isFreeSpan(cur.clips, id, startSec, durationSec));
+    if (!trackId) {
+      trackId = createTrackId(cur.tracks.map((t) => t.id));
+      newTracks.push(trackId);
+      cur = { ...cur, tracks: [...cur.tracks, { id: trackId, kind: TRACK_KIND.visual }] };
+    }
+    const clip: TimelineClip = {
+      ...spatial,
+      y: stackedSubtitleY(cur, startSec, durationSec, spatial.y ?? 0, spatial.h ?? 0, spatial.fontSize ?? 0),
+      id: createClipId(cur.clips.map((c) => c.id)),
+      kind: TIMELINE_CLIP_KIND.subtitle,
+      trackId,
+      startSec,
+      durationSec,
+      text: cue.text,
+    };
+    cur = { ...cur, clips: [...cur.clips, clip] };
+    placed += 1;
+  }
+  return { doc: placed > 0 ? cur : doc, placed, beyondLimit };
+}
+
+/** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */
+export type VisualPlacement = {
+  kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+  trackId: string;
+  startSec: number;
+  /** kind='slot' のとき入れる素材。 */
+  assetId?: string;
+};
+
+/**
+ * **置こうとしている部品**（置く前の姿・#714）。「どこへ」（列・時刻）は**別に渡す**＝同じ部品を
+ * 別の場所へ何度も試せる（掴んで運んでいる間、指が動くたびに測り直す）。
+ *
+ * ⚠️ **置き方（ボタン／掴んで運ぶ）で分けない**＝同じ部品を同じ規則で見る（ADR-0026②）。
+ */
+export type ClipPlacement =
+  | { kind: VisualPlacement['kind']; assetId?: string }
+  | {
+      kind: typeof TIMELINE_CLIP_KIND.template;
+      template: Pick<Template, 'templateId' | 'defaults' | 'aspectRatio'>;
+    }
+  | { kind: typeof TIMELINE_CLIP_KIND.audio; bundledBgmId?: BundledBgmId; assetId?: string; durationSec?: number }
+  | { kind: typeof TIMELINE_CLIP_KIND.voice; durationSec?: number };
+
+/**
+ * **置いたときの長さ**（種類ごとの既定・#714）。
+ *
+ * ⚠️ **単一の参照元**＝運んでいる最中の枠の幅・重なりの判定・実際に置く関数が**同じ値**を見る
+ * （別々に持つと「枠は入るのに置くと断られる」が起きる）。
+ */
+export function placedDurationSec(spec: ClipPlacement): number {
+  switch (spec.kind) {
+    case TIMELINE_CLIP_KIND.template:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, defaultDurationForTemplate(spec.template));
+    case TIMELINE_CLIP_KIND.audio:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, spec.durationSec ?? AUDIO_PLACEHOLDER_SEC);
+    case TIMELINE_CLIP_KIND.voice:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, spec.durationSec ?? VOICE_PLACEHOLDER_SEC);
+    case TIMELINE_CLIP_KIND.slot:
+    case TIMELINE_CLIP_KIND.text:
+    case TIMELINE_CLIP_KIND.shape:
+      return VISUAL_CLIP_DURATION_SEC;
+    default: {
+      // 種類が増えたらここがコンパイルエラーになる＝**黙って絵の部品の長さで測らない**
+      // （ADR-0032 決定19 の流儀。長さがずれると枠の幅も重なりの判定も別物になる）。
+      const exhaustive: never = spec;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * **そこへ置けるか**（置けないなら理由・`null`＝置ける・#714）。
+ *
+ * ⚠️ **押す前の見た目と、実際に置く関数が同じ規則を通る**（`add*` はこれを呼ぶ）＝
+ * 「置けそうに見えたのに断られる」「断られる色なのに置けてしまう」を作らない。
+ *
+ * ⚠️ **列より先に見るのは向きだけ**（見た目パターンの向き違いは**どの列へ置いても直らない**ので、
+ * 「別の列へ置き直してください」を先に出さない）。素材の実在・音の出どころ（V25）は**列の後**＝
+ * 委譲前（`addAudioClip` ほか）の順をそのまま保っている（断る理由を変えない）。
+ */
+export function clipPlacementIssue(
+  doc: TimelineProject,
+  spec: ClipPlacement,
+  trackId: string,
+  startSec: number,
+): EditBlockedReason | null {
+  // 向きが違う見た目パターンは層の座標がそのまま使われる＝画面外へ出る（列を変えても直らない）。
+  if (spec.kind === TIMELINE_CLIP_KIND.template && spec.template.aspectRatio !== doc.videoSettings.aspectRatio) {
+    return EDIT_BLOCKED.orientation;
+  }
+  const trackIssue = trackPlacementIssue(doc, trackId, trackKindForClip(spec.kind));
+  if (trackIssue) return trackIssue;
+  if (spec.kind === TIMELINE_CLIP_KIND.audio) {
+    // 音の出どころは高々1つ（`11 §8` V25）＝どちらも／どちらも無しは置かない（黙って一方を選ばない）。
+    if ((spec.bundledBgmId == null) === (spec.assetId == null)) return EDIT_BLOCKED.notFound;
+  }
+  if (spec.kind === TIMELINE_CLIP_KIND.slot || spec.kind === TIMELINE_CLIP_KIND.audio) {
+    if (spec.assetId != null && !doc.assets.some((a) => a.assetId === spec.assetId)) return EDIT_BLOCKED.notFound;
+  }
+  // 素材の差し込み口は**素材がないと置けない**（空の枠を作らない）。
+  if (spec.kind === TIMELINE_CLIP_KIND.slot && spec.assetId == null) return EDIT_BLOCKED.notFound;
+  if (!isFreeSpan(doc.clips, trackId, Math.max(0, startSec), placedDurationSec(spec))) {
+    return EDIT_BLOCKED.overlap;
+  }
+  return null;
+}
+
+/**
+ * **その列が部品を受けられるか**（受けられないなら理由・`null`＝受けられる・#722）。
+ *
+ * 見るのは**列そのものの事情だけ**（実在する・固定していない・出す設定・種別が合う）。
+ * 時刻の重なりと素材の実在は**置く場所ごとの話**なので `visualPlacementIssue` の担当。
+ *
+ * ⚠️ **ここが「置ける列」の単一の参照元**（#722 レビュー）。同じ条件が
+ * `placeableVisualTracks`（候補を数える側）と `visualPlacementIssue`（1か所を断る側）に
+ * **別々に書かれていた**＝条件を1つ足すと片方だけ直す事故が起きる。両方をここから導く。
+ *
+ * **真偽値ではなく理由を返す**のは、`locked`／`hiddenTrack`／`trackKind` で**次の行動が違う**ため
+ * （固定を外す／表示に戻す／別の列へ置き直す＝§2-5）。ここを boolean に畳むと案内が痩せる。
+ */
+export function trackPlacementIssue(
+  doc: TimelineProject,
+  trackId: string,
+  wantKind: TrackKind,
+): EditBlockedReason | null {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return EDIT_BLOCKED.notFound;
+  if (track.locked) return EDIT_BLOCKED.locked;
+  if (track.hidden) return EDIT_BLOCKED.hiddenTrack;
+  if (track.kind !== wantKind) return EDIT_BLOCKED.trackKind;
+  return null;
+}
+
+/**
+ * **絵の部品を置ける列**を「手前が先」の順で返す（#722）。
+ *
+ * 条件は `trackPlacementIssue` から導く＝候補を数える側と1か所を断る側で規則が割れない。
+ *
+ * **順は手前から**（配列の末尾が手前＝`11 §7.6` の重ね順）。ボタンで置くときは**先頭を使う**ので、
+ * 新しく置いた部品が既にあるものの後ろに隠れない（`06 §12.1`「必ず仕上がり確認に現れる」）。
+ */
+export function placeableVisualTracks(doc: TimelineProject): Track[] {
+  return placeableTracksOfKind(doc, TRACK_KIND.visual);
+}
+
+/** **音の部品を置ける列**（#724）。映像側と**同じ規則・同じ向き**で返す（片方だけ奥から、を作らない）。 */
+export function placeableAudioTracks(doc: TimelineProject): Track[] {
+  return placeableTracksOfKind(doc, TRACK_KIND.audio);
+}
+
+function placeableTracksOfKind(doc: TimelineProject, kind: TrackKind): Track[] {
+  return doc.tracks.filter((t) => trackPlacementIssue(doc, t.id, kind) == null).reverse();
+}
+
+/**
+ * その場所へ置けるか（置けないなら理由・#684）。
+ *
+ * **ドラッグ中のゴーストと、実際に置く判定が同じものを見る**ための単一の参照元＝
+ * 「置けそうに見えたのに離したら断られる」「置けないはずの所へ置けた」を作らない（ADR-0034 決定10）。
+ * **出さない設定の列も断る**＝置けても動画に出ない部品が黙って生まれる（ボタンで置くときも避けている）。
+ */
+export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacement): EditBlockedReason | null {
+  // ⚠️ 規則そのものは `clipPlacementIssue` が持つ（#714）＝見た目パターン・音・読み上げと**同じ道**を通る。
+  // ここは「絵の部品の呼び方」を残すためだけの入口（呼び出し側が多いので名前は据え置き）。
+  return clipPlacementIssue(doc, { kind: input.kind, assetId: input.assetId }, input.trackId, input.startSec);
+}
+
+/**
+ * **絵のもの（写真・文字・図形）を置く**（#684・ADR-0034 段階1）。`addAudioClip` と同じ流儀＝
+ * 置けない場所は理由を返し、黙って別の場所へ寄せない。
+ *
+ * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
+ *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
+ * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
+ * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
+ */
+export function addVisualClip(
+  doc: TimelineProject,
+  input: VisualPlacement & {
+    /**
+     * 素材の実寸（分かっているとき）。⚠️ **分からないこともある**＝画面が測る前に置かれうるので、
+     * 無いときは切らない側（`fit:'contain'`）へ倒す。
+     */
+    assetSize?: { w: number; h: number };
+    /** 箱の中心（未指定＝画面の真ん中）。キャンバスへ落としたときに使う。 */
+    center?: { x: number; y: number };
+  },
+): EditResult {
+  const issue = visualPlacementIssue(doc, input);
+  if (issue) return blocked(issue);
+  const startSec = Math.max(0, input.startSec);
+  // 長さも**置く前の姿から採る**＝運んでいる最中の枠の幅・重なりの判定と同じ値（#714 レビュー ℹ️）。
+  const durationSec = placedDurationSec({ kind: input.kind, assetId: input.assetId });
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const ratio = PLACED_BOX_RATIO[input.kind];
+  // ⚠️ **写真は素材の形のまま置く**（2026-09-28 の実機レビュー）＝以前は種類に関わらず
+  //   **画面いっぱいの箱**にしていたので、正方形・縦長の素材は `fit:'cover'` で**切り取られた**
+  //  （この製品が同梱しているゆうこの立ち絵〔1254×1254〕を置くと、頭と足が切れる）。
+  // ⚠️ **当時の理由はもう無い**＝`PLACED_BOX_RATIO` のコメントは「大きさを直す手段がまだ無いので
+  //   余白つきに固定すると直せない」（#684 レビュー）と書いているが、いまは**幅・高さの欄**と
+  //   **掴む取っ手**で直せる。前提が消えたのに既定だけが残っていた。
+  // ⚠️ **実寸が分からないときは切らない側へ倒す**（下の `fit`）＝測る前に置かれることがあるため。
+  const box = input.kind === TIMELINE_CLIP_KIND.slot && input.assetSize
+    ? containBox(input.assetSize, canvas)
+    : { w: Math.round(canvas.width * ratio.w), h: Math.round(canvas.height * ratio.h) };
+  const w = box.w;
+  const h = box.h;
+  const center = input.center ?? { x: canvas.width / 2, y: canvas.height / 2 };
+  // **画面の外へは置かない**（落とした先が端でも、箱ごと見える位置へ収める）。
+  const x = Math.round(Math.min(Math.max(0, center.x - w / 2), Math.max(0, canvas.width - w)));
+  const y = Math.round(Math.min(Math.max(0, center.y - h / 2), Math.max(0, canvas.height - h)));
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: input.kind,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    x, y, w, h,
+    ...(input.kind === TIMELINE_CLIP_KIND.slot
+      ? {
+        assetId: input.assetId,
+        // ⚠️ **実寸が分かっているときは箱が素材と同じ形**なので、`cover` でも切れない（既定のまま）。
+        //   分からないときだけ**切らない側**（`contain`）へ倒す＝置いた瞬間に中身が欠ける、を作らない。
+        ...(input.assetSize ? {} : { fit: FIT.contain }),
+      }
+      : {}),
+    // 置いた直後から**見えて・直せる**ように、初期値を入れておく（#684）。
+    // **文字は空にしない**＝空文字は描かれず「置いたのに見えない」になる。既定は場面形式の「文字を足す」と同じ
+    // （同じ物を足すのに形式で見た目が違う、を作らない・ADR-0026②）。大きさは画面の広さに合わせて伸ばす。
+    ...(input.kind === TIMELINE_CLIP_KIND.text
+      ? {
+        text: DEFAULT_TEXT,
+        fontSize: Math.round(DEFAULT_TEXT_FONT_SIZE * (canvas.width / WIDTH)),
+        color: DEFAULT_TEXT_COLOR,
+      }
+      : {}),
+    // 図形の既定は**場面形式の「図形を足す」と同じ**（同じ物を足すのに別の色が出ない・ADR-0026②）。
+    ...(input.kind === TIMELINE_CLIP_KIND.shape
+      ? { shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 }
+      : {}),
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * 種類ごとに直せる項目（#684）。`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+ * **どの種類が何を持つか**はここが単一の参照元（型では縛れない）。
+ */
+const VISUAL_CONTENT_KEYS = {
+  [TIMELINE_CLIP_KIND.slot]: ['assetId', 'fit'],
+  // ⚠️ **影・字間も受ける**（差分再監査 3巡目・#264）＝ADR-0032 追補3 は「文字の体裁は**共有の語彙**」
+  // と決めており、描画（`layoutTimelineAt`→`layoutScene` の FREE 分岐）も焼き出しも通っているのに、
+  // **タイムライン側だけ書き込めない**と「同じ語彙なのに片方でしか編集できない項目」ができる。
+  // ⚠️ **#264 の語彙は3つそろえる**（差分再監査 4巡目 🟡・ADR-0032 追補3）＝影・字間だけ足すと、
+  // **背景帯だけ片方でしか編集できない**（描画・焼き出し・schema は通っているのに解除できない）。
+  // 行間（`lineHeight`）も場面形式の自由配置の文字では直せるので、同じ顔ぶれにする。
+  // ⚠️ **縁取りも受ける**（差分再監査 5巡目 🟡）＝描画は写す（`freeElementFromClip`）し「バラす」は
+  // 元の要素の値をそのまま持ち込むので、**縁取りのある見た目パターンをバラすと外せない縁取りが残る**
+  // （場面形式の自由配置の文字では外せる＝ADR-0026②）。
+  [TIMELINE_CLIP_KIND.text]: [
+    'text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign',
+    'letterSpacing', 'shadow', 'background', 'lineHeight', 'strokeColor', 'strokeWidth',
+  ],
+  // ⚠️ **字幕クリップも体裁を持つ**（🟡）＝`addLinkedSubtitleClip` が `createFreeElement` の体裁を
+  // 書き込み、描画も通る＝**効くのに選べない**。文言は連動先から採るので `text` は持たせない。
+  [TIMELINE_CLIP_KIND.subtitle]: [
+    'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign',
+    'letterSpacing', 'shadow', 'background', 'lineHeight', 'strokeColor', 'strokeWidth',
+  ],
+  [TIMELINE_CLIP_KIND.shape]: ['shapeType', 'fillColor'],
+  // ⚠️ **見た目パターンの部品も文字の形を持つ**（差分再監査 4巡目 🟡）＝焼き出しが `scene.fontId` を
+  // ここへ書き、描画（`sceneFromClip`）と書き出しの門（`usedTimelineUserFontIds`）が見る。
+  // 直せないと、門の案内どおりの操作が**この形式に存在しない**（§2-5 の行き止まり）。
+  // ⚠️ **差し込み口と文は別の口**（`setClipAssetRef`／`setClipText`）＝ここでは足さない。
+  // ⚠️ **種別ごとの文字の形も受ける**（差分再監査 5巡目 🟡）＝焼き出しが `scene.textFontIds` をここへ
+  // 書き、書き出しの門（`usedTimelineUserFontIds`）が数えるのに**直す操作がこの形式に無かった**＝
+  // 持ち込みフォントが手元から消えると、門の案内どおりに選び直す先が無く**書き出しが止まったまま
+  // 解除できない**（取り込み直しても墓標で番号が戻らない＝§2-5 の行き止まり）。
+  [TIMELINE_CLIP_KIND.template]: ['fontId', 'textFontIds'],
+  // ⚠️ **`TimelineClip` の項目名で縛る**（差分再監査 6巡目 ℹ️・§2-7）＝`as const` だけだと綴り違いが
+  // 通り、その項目は**画面から書けるのに黙って弾かれる**（「単一の参照元」という主張が嘘になる）。
+} as const satisfies Partial<Record<TimelineClipKind, readonly (keyof TimelineClip)[]>>;
+
+/**
+ * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
+ * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
+ *
+ * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は断る**。
+ */
+export function setVisualClipContent(
+  doc: TimelineProject,
+  clipId: string,
+  patch: Partial<Pick<TimelineClip,
+    'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'letterSpacing' | 'shadow'
+    | 'background' | 'lineHeight' | 'strokeColor' | 'strokeWidth' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'
+    | 'textFontIds'>>,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **その種類が持つ項目だけを受ける**（`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+  // 型では縛れない＝ここで断る）。音の部品に図形の色を書く、のような意味の無いデータを作らない
+  // （`11 §7.6.3.2` の「鳴る音を持たない部品には置けない」と同じ流儀）。
+  // **列の種別違い（V23）と混ぜない**＝「列に置き直してください」は項目違いには当たらない案内になる（§2-5）。
+  const allowed = VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS];
+  if (!allowed) return blocked(EDIT_BLOCKED.contentField);
+  if (!Object.keys(patch).every((k) => (allowed as readonly string[]).includes(k))) {
+    return blocked(EDIT_BLOCKED.contentField);
+  }
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (track?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 素材は**この動画が持っているものだけ**（存在しない素材を指させない）。
+  if (patch.assetId != null && !doc.assets.some((a) => a.assetId === patch.assetId)) {
+    return blocked(EDIT_BLOCKED.notFound);
+  }
+  // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
+  // ⚠️ 比べるのは**解決した値**（#731）＝`null` と未指定は解決が同じ（どちらも継承／「なし」）。
+  // 素の `===` だと `undefined === null` が false になり、**絵は変わらないのに文書だけ変わる**
+  // ＝取り消しが1段空振りする。`setClipAssetRef` が既にこの流儀（`11 §7.6.3`）。
+  // ⚠️ **中身のある値（影）は中身で比べる**（PR #912 レビュー ℹ️）＝`shadow` はオブジェクトなので
+  // `===` だと**同じ内容でも「変わった」**になり、空振りの取り消しが積まれる（上の主張が嘘になる）。
+  const sameValue = (a: unknown, b: unknown): boolean =>
+    (a ?? null) === (b ?? null)
+    || (typeof a === 'object' && typeof b === 'object' && JSON.stringify(a ?? null) === JSON.stringify(b ?? null));
+  const keys = Object.keys(patch) as (keyof typeof patch)[];
+  if (keys.every((k) => sameValue(clip[k], patch[k]))) return ok(doc);
+  const next = { ...clip, ...patch };
+  // **`null` はキーごと落とす**（同上）＝未指定との違いを文書に残さない。残すと、同じ絵の文書が
+  // 2通りできて「取り消しても見た目が変わらない」段が生まれる。
+  // ⚠️ **未指定も同じく落とす**（PR #914 レビュー ℹ️）＝`undefined` を書くと、キーだけが値なしで
+  // 残る（保存では消えるのに、その場の文書には残る＝同じ絵の文書が2通りできる）。`null` と同じ扱い。
+  for (const k of keys) if (patch[k] == null) delete next[k];
+  // ⚠️ **素材を差し替えたら、その素材ぶんの使い方はすべて落とす**（#512 段2／#816-3）＝残すと、
+  // 写真へ替えて欄が消えている間に設定だけ生き残り、**別の音入り動画を入れた瞬間に、頼んでいない
+  // 音が鳴り出す**。切り出す位置・速さも同じで、**頼んでいない位置から・頼んでいない速さ**で流れる
+  //（分ける・バラすで付くので、置いた覚えが無くても付いている。しかも直す欄が画面に無い）。
+  // 意味を失った設定は落とす（ADR-0027／#469 と同じ流儀）。
+  // ⚠️ **差し込み口（`setClipAssetRef`）と同じ範囲を落とす**＝あちらは `slotClips[layerId]` を丸ごと
+  // 落としており、こちらだけ音の2つに絞ると**同じ動画が置き場所で挙動を割る**（ADR-0026②）。
+  if (patch.assetId !== undefined && (clip.assetId ?? null) !== (patch.assetId ?? null)) {
+    delete next.useOriginalAudio;
+    delete next.originalAudioVolume;
+    delete next.sourceStartSec;
+    delete next.speed;
+  }
+  return ok(withClip(doc, next));
+}
+
+/**
+ * **音を置く**（#634）＝同梱BGM または持ち込んだ音の素材を音の列へ。
+ *
+ * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
+ * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
+ */
+export function addAudioClip(
+  doc: TimelineProject,
+  input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },
+): EditResult {
+  // 置ける条件は `clipPlacementIssue`（#714）＝押す前の見た目と同じ規則（列の事情・出どころが高々1つ
+  // 〔`11 §8` V25〕・素材の実在・重なり）。
+  const spec = {
+    kind: TIMELINE_CLIP_KIND.audio,
+    bundledBgmId: input.bundledBgmId,
+    assetId: input.assetId,
+    durationSec: input.durationSec,
+  } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = placedDurationSec(spec);
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.audio,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    ...(input.bundledBgmId != null ? { bundledBgmId: input.bundledBgmId } : { assetId: input.assetId }),
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **置いた部品の位置・大きさ・向きを決める**（#685・`11 §7.6.3`）。
+ *
+ * ⚠️ **触った時点で箱ぜんぶを書き込む**（渡された項目だけを足さない）。箱は**未指定＝画面いっぱい**
+ * なので、`x` だけ書くと幅は画面いっぱいのままで**そこから右へはみ出す**＝画面に出ている数値
+ * （解決した箱）と保存する値が食い違う。**見えている値を編集している**状態を保つ。
+ *
+ * 向きは schema が 0〜360 未満（`ROTATION_DEG_MAX`）しか受けないので、**回り込ませて**収める
+ * （はみ出した値で保存できない＝自動保存が黙って止まる、を作らない）。大きさは 0 より大きい。
+ */
+export function setClipBox(
+  doc: TimelineProject,
+  clipId: string,
+  canvas: { width: number; height: number },
+  patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンのクリップは枠そのもの＝
+  // 幾何を持たない・`11 §7.6.3`）。列の種別違い（V23）とは別の話なので `contentField` で断る。
+  if (!canHaveBox(clip.kind)) return blocked(EDIT_BLOCKED.contentField);
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (track?.locked) return blocked(EDIT_BLOCKED.locked);
+  const from = resolveClipBox(clip, canvas);
+  const rot = patch.rotation ?? from.rotation ?? 0;
+  const next = {
+    x: patch.x ?? from.x,
+    y: patch.y ?? from.y,
+    w: Math.max(MIN_BOX_SIZE_PX, patch.w ?? from.w),
+    h: Math.max(MIN_BOX_SIZE_PX, patch.h ?? from.h),
+    // 負の角も 360 以上も**回り込ませる**（共有の `normalizeDeg`）。
+    // ⚠️ **数値の欄は先に 0〜359 へ丸める**ので、いま到達するのは後半（#685 のキャンバス回転）だけ。
+    // それでもここで受けるのは、指で回すと 360 を跨ぐのが普通だから（保存できない値で止めない）。
+    rotation: normalizeDeg(rot),
+  };
+  // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
+  if (clip.x === next.x && clip.y === next.y && clip.w === next.w && clip.h === next.h
+    && (clip.rotation ?? 0) === next.rotation) return ok(doc);
+  return ok(withClip(doc, { ...clip, ...next }));
+}
+
+/**
+ * **まとめて箱を変える**（#685 レビュー）。ADR-0034 決定15 の「**1つでも置けなければ全体を断る**」。
+ *
+ * ⚠️ 1件ずつ `setClipBox` を呼ぶと、**固定した列の部品だけ黙って取り残される**（群の形が崩れる）。
+ * しかも理由は最後の1件ぶんしか残らない。**全部通るか、何もしないか**にする（`removeClipsByIds` と同じ流儀）。
+ */
+export function setClipBoxes(
+  doc: TimelineProject,
+  canvas: { width: number; height: number },
+  updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[],
+): EditResult {
+  let next = doc;
+  for (const u of updates) {
+    const r = setClipBox(next, u.id, canvas, u.patch);
+    if (!r.ok) return r; // 1つでも駄目なら**何もしない**（途中まで動いた文書を返さない）
+    next = r.doc;
+  }
+  return ok(next);
+}
+
+/**
+ * **速さ・素材の使い始め**を書ける部品か（#1019 ⑦）。書けないなら断る理由を返す。
+ *
+ * ⚠️ **2つの setter で同じ門を通す**＝写すと片方だけ開く（このリポジトリで繰り返している型）。
+ * ⚠️ **読み上げは断る**＝長さは声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると
+ * 尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24「連動している＝区間が一致している」）。
+ * 読み上げは音を持つので `contentField`（この項目が無い）が正しい（`notAudio` は自己矛盾＝PR #865）。
+ * ⚠️ **直接置いた動画は書ける**（#1019 ⑦・利用者判断は下記）＝`videoPlacementsOfClip` が既に
+ * この2つを**読んで**おり、`splitClip`／`explodeTemplateClip` は**書いて**いた。開かないと
+ * 「置いた覚えのない頭出し・速さが付いていて、見ることも直すこともできない」が残る（§2-5）。
+ * ⚠️ **断る順は「その部品には無いか」→「固定した列か」**（`§7.6.3`・#795）。
+ */
+function blockPlaybackEdit(doc: TimelineProject, clip: TimelineClip): EditBlockedReason | null {
+  const playable = clip.kind === TIMELINE_CLIP_KIND.audio || isDirectVideoClip(doc, clip);
+  if (!playable) {
+    // 音を持つ部品（読み上げ）なら「この項目が無い」／持たないなら「速さ・使い始めが無い」。
+    return isAudioClip(clip) ? EDIT_BLOCKED.contentField : EDIT_BLOCKED.notPlayable;
+  }
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return EDIT_BLOCKED.locked;
+  return null;
+}
+
+/**
+ * 音・動画の素材の**再生速度**（#634・`11 §7.6.5`）。1＝そのまま。
+ *
+ * **クリップの長さは変えない**＝速さは「置き場所ぶんの時間に、素材のどれだけを流すか」を決める
+ * （2倍速なら倍の長さぶんの素材が入る）。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）は
+ * どちらもこの値を読むので、聞いた音と書き出した音が一致する。
+ */
+export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const why = blockPlaybackEdit(doc, clip);
+  if (why) return blocked(why);
+  // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
+  const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
+  if ((clip.speed ?? 1) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 1) delete patched.speed; // 等速は持たない（既定と同じ値を書かない）
+  else patched.speed = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 素材の**どこから使うか**（秒・0＝頭から）。負にはしない（素材の外は読めない）。 */
+export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const why = blockPlaybackEdit(doc, clip);
+  if (why) return blocked(why);
+  const next = Math.max(0, sec);
+  if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 0) delete patched.sourceStartSec;
+  else patched.sourceStartSec = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **音の部品の音源を選び直す**（#695・#723）。同梱BGM か、持ち込んだ音の素材のどちらか。
+ *
+ * これが無いと、素材が見つからない部品に対して「音を選び直してください」と案内しながら**選び直す手段が
+ * 無い**＝行き止まり（ADR-0034 決定5）。読み上げは「声を作る」で作り直せるので非対称でもあった。
+ * 消して置き直す道はあるが、それだと**速さ・音量・フェード・音量の変化がすべて消える**。
+ *
+ * **音の出どころは高々1つ**（`§8` V25）＝入れ替えるときは**もう一方を必ず落とす**（両方持つ部品を作らない）。
+ * 素材は**この動画が持っているもの**だけ（存在しない参照を作らない）。
+ */
+export function setClipAudioSource(
+  doc: TimelineProject,
+  clipId: string,
+  source: { bundledBgmId: BundledBgmId } | { assetId: string },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **種別を先に見る**（#734 レビュー）＝そもそも音を持たない部品に対して「固定を外してください」と
+  // 返すと、外しても直らない案内になる（§2-5）。兄弟の `setVisualClipContent` も項目違いが先。
+  //
+  // ⚠️ **2段に分ける**（#795）＝以前は `kind !== audio` の1段で `contentField` を返しており、
+  // **文字の部品**に対して `setClipSpeed` は「その部品は**音を持っていません**」・こちらは
+  // 「この部品には**その項目がありません**」と、**同じ部品・同じ音の話で案内が割れていた**
+  //（ADR-0026②）。`15 §6` は `CONTENT_FIELD` を「**音はあるが**その項目が無い」と定めているので、
+  // 実装をその区別へ合わせる（正典のほうが次の行動を正しく指している＝§2-5）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  // 読み上げは音を持つが**音源は選べない**（文から作る）＝ここが本来の `contentField`。
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = { ...clip };
+  if ('bundledBgmId' in source) {
+    if (clip.bundledBgmId === source.bundledBgmId) return ok(doc); // 何も変わらない＝取り消しが空振りしない
+    next.bundledBgmId = source.bundledBgmId;
+    delete next.assetId; // V25＝両方は持たせない
+  } else {
+    if (!doc.assets.some((a) => a.assetId === source.assetId)) return blocked(EDIT_BLOCKED.notFound);
+    if (clip.assetId === source.assetId) return ok(doc);
+    next.assetId = source.assetId;
+    delete next.bundledBgmId;
+  }
+  return ok(withClip(doc, next));
+}
+
+/** 音量（0〜1.5・`null` で「動画全体に合わせる」＝継承へ戻す・`11 §6`）。 */
+export function setClipVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **音量とフェードは鳴る音を持つ部品すべて**（`11 §7.6.3.2`・#724）＝音と読み上げ。文字や図形へ書いても
+  // 誰も読まない値が文書に残るだけ（再生・書き出しは `isAudioClip` で選ぶ）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
+  if ((clip.volume ?? null) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.volume;
+  else patched.volume = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 動画の**元の音を鳴らすか**（#512 段2）。
+ *
+ * ⚠️ **置ける条件は `canUseOriginalAudio` の1つ**（画面が欄を出す条件と同じ）＝
+ * 「押せるのに断られる」「置けるのに欄が出ない」を作らない。
+ * ⚠️ **断る順は「元の音を持たない部品か」→「固定した列か」**（音の設定と同じ流儀・`11 §7.6.3.2`）。
+ * 鳴らさない（`false`）は**キーごと落とす**＝既定と同じ値を書かない（他の編集操作と同じ規則）。
+ */
+export function setClipUseOriginalAudio(doc: TimelineProject, clipId: string, use: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canUseOriginalAudio(doc, clip)) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.useOriginalAudio ?? false) === use) return ok(doc);
+  const patched = { ...clip };
+  if (use) patched.useOriginalAudio = true;
+  else delete patched.useOriginalAudio;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 元の音の**音量**（#512 段2・`null`＝標準へ戻す）。値域は音のクリップと同じ 0〜`VOLUME_MAX`。
+ * ⚠️ **鳴らす設定になっていなくても置ける**＝先に音量を決めてから鳴らす、という順でも困らない
+ *（鳴るかどうかは `placementOriginalAudio` が別に見る）。
+ */
+export function setClipOriginalAudioVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canUseOriginalAudio(doc, clip)) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
+  if ((clip.originalAudioVolume ?? null) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.originalAudioVolume;
+  else patched.originalAudioVolume = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 見た目パターンの**差し込み口ごと**の元の音（#512 段3b）。値は `slotClips[layerId]` へ置く
+ * ＝場面形式と同じ語彙（ADR-0028・`$ref` 共有）なので schema は変わらない。
+ *
+ * ⚠️ **素材の解決は「画面が欄を出す条件」と同じ述語を通す**（`/canon-check` 🔴）＝
+ * `videoPlacementsOfClip` の**置き場所**から採る。もとは `assetRefs[layerId]` だけを見ていたので、
+ * **立ち絵に入れた動画**（素材は `character.poseAssetId`・#809）では必ず `undefined` になり、
+ * 欄は出るのに押すと毎回「この動画には音が入っていないので、元の音は鳴らせません」＝**事実と違う理由**で
+ * 断られていた（§2-5／ADR-0026②＝差し込み口と立ち絵で同じ概念が別挙動）。**読む側だけ共有・書く側は別**を解消する。
+ * ⚠️ **見た目パターンが要る**＝どの枠が動画を受けるかは見た目が決めるので、渡されないと置き場所が
+ * 1つも作れない（＝断る）。呼ぶ側は `splitClip` と同じように渡すこと。
+ * ⚠️ **継承した値と同じなら書かない**＝素材既定（`asset.clip`）を覆すときだけ明示的に保存する。
+ * ⚠️ **空になった `slotClips` の項目も落とす**＝意味の無い空の入れ物を文書に残さない。
+ */
+export function setClipSlotAudio(
+  doc: TimelineProject,
+  clipId: string,
+  layerId: string,
+  patch: { useOriginalAudio?: boolean; originalAudioVolume?: number | null },
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const placement = videoPlacementsOfClip(doc, clip, { templateOf: opts.templateOf })
+    .find((pl) => pl.layerId === layerId);
+  const asset = placement != null ? doc.assets.find((a) => a.assetId === placement.assetId) : undefined;
+  if (asset?.assetType !== ASSET_TYPE.video) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (asset.metadata?.hasAudio !== true) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+
+  const cur: SlotClipOverride = clip.slotClips?.[layerId] ?? {};
+  const next: SlotClipOverride = { ...cur };
+  if (patch.useOriginalAudio !== undefined) {
+    // ⚠️ **素材既定を覆せるようにする**（レビュー 🔴）＝解決は `slotClips ?? asset.clip ?? 既定`（ADR-0028）
+    // なので、素材側が「鳴らす」のときに**キーを消すだけでは止められない**（消すと継承へ戻って鳴り続ける）。
+    // 継承した値と**違うときだけ書く**＝既定と同じ値は書かない、という他の操作と同じ規則を保ったまま
+    // 「明示的に鳴らさない」も表せる（schema は `boolean` なので `false` を保存できる）。
+    if (patch.useOriginalAudio === (asset.clip?.useOriginalAudio === true)) delete next.useOriginalAudio;
+    else next.useOriginalAudio = patch.useOriginalAudio;
+  }
+  if (patch.originalAudioVolume !== undefined) {
+    if (patch.originalAudioVolume == null) delete next.originalAudioVolume;
+    else next.originalAudioVolume = clampVolume(patch.originalAudioVolume);
+  }
+  if (JSON.stringify(next) === JSON.stringify(cur)) return ok(doc); // 何も変わらない＝空の取り消しを積まない
+
+  const slotClips = { ...(clip.slotClips ?? {}) };
+  if (Object.keys(next).length === 0) delete slotClips[layerId];
+  else slotClips[layerId] = next;
+  const patched = { ...clip };
+  if (Object.keys(slotClips).length === 0) delete patched.slotClips;
+  else patched.slotClips = slotClips;
+  return ok(withClip(doc, patched));
+}
+
+/** 前後のフェード（秒・0 で無し）。**尺の半分までに切り詰めるのは再生・書き出し側**（`clipFadeSec`）。 */
+export function setClipFade(doc: TimelineProject, clipId: string, edge: 'in' | 'out', sec: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **音量とフェードは鳴る音を持つ部品すべて**（`11 §7.6.3.2`・#724）＝音と読み上げ。文字や図形へ書いても
+  // 誰も読まない値が文書に残るだけ（再生・書き出しは `isAudioClip` で選ぶ）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const key = edge === 'in' ? 'fadeInSec' : 'fadeOutSec';
+  const next = Math.max(0, sec);
+  if ((clip[key] ?? 0) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 0) delete patched[key];
+  else patched[key] = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **切り抜き**（#634）＝クリップの箱の各辺を「箱の大きさに対する割合」で隠す。中身は動かない。
+ *
+ * 各辺は 0〜1 未満へ収め、**同じ軸の合計も 1 未満**に保つ（`11 §8` V30＝丸ごと消える設定を作らない。
+ * 足し合わせが 1 を超える指定は、**いま動かした側を優先して反対側を詰める**＝入力を黙って捨てない）。
+ * すべて 0 になったらキーごと落とす（既定と同じ値を書かない）。
+ */
+export function setClipCrop(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'top' | 'right' | 'bottom' | 'left',
+  value: number,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const current = clip.crop ?? {};
+  const next: NonNullable<TimelineClip['crop']> = { ...current };
+  const opposite = edge === 'top' ? 'bottom' : edge === 'bottom' ? 'top' : edge === 'left' ? 'right' : 'left';
+  const moved = Math.min(Math.max(0, value), CROP_MAX);
+  next[edge] = moved;
+  // 反対側と合わせて 1 を超えるなら、反対側を詰める（動かした側の指定は残す）。
+  const room = CROP_MAX - moved;
+  if ((next[opposite] ?? 0) > room) next[opposite] = Math.max(0, room);
+  for (const k of ['top', 'right', 'bottom', 'left'] as const) if (!next[k]) delete next[k];
+  const patched = { ...clip };
+  if (Object.keys(next).length === 0) delete patched.crop;
+  else patched.crop = next;
+  if (JSON.stringify(patched.crop ?? null) === JSON.stringify(clip.crop ?? null)) return ok(doc);
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **素材の寄せ**（#634・`05 §8`）＝`fit:'cover'` で枠に収まらない側をどこで切るか。
+ * `null` を渡した軸は「中央（既定）」へ戻す＝既定と同じ値を書かない。
+ */
+export function setClipCropAlign(
+  doc: TimelineProject,
+  clipId: string,
+  // **軸と値を1つの形で受ける**＝`{x:'top'}` のような食い違いが型で止まる（キャストが要らない）。
+  patch: { x: CropAlignX | null } | { y: CropAlignY | null },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next: NonNullable<TimelineClip['cropAlign']> = { ...clip.cropAlign };
+  if ('x' in patch) {
+    if (patch.x == null) delete next.x;
+    else next.x = patch.x;
+  } else if (patch.y == null) delete next.y;
+  else next.y = patch.y;
+  // 既定（中央）はキーごと落とす＝既定と同じ値を書かない（既定の正典は `domain/enums`）。
+  if (next.x === CROP_ALIGN_DEFAULT_X) delete next.x;
+  if (next.y === CROP_ALIGN_DEFAULT_Y) delete next.y;
+  const patched = { ...clip };
+  if (Object.keys(next).length === 0) delete patched.cropAlign;
+  else patched.cropAlign = next;
+  if (JSON.stringify(patched.cropAlign ?? null) === JSON.stringify(clip.cropAlign ?? null)) return ok(doc);
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **切り抜きの効かせ方**（#634）。`fill` で「残った素材を枠いっぱいに映し直す」。
+ * `null`／既定（`mask`）はキーごと落とす＝既定と同じ値を書かない。
+ */
+export function setClipCropMode(doc: TimelineProject, clipId: string, mode: CropMode | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = mode == null || mode === CROP_MODE_DEFAULT ? undefined : mode;
+  if ((clip.cropMode ?? undefined) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.cropMode;
+  else patched.cropMode = next;
+  return ok(withClip(doc, patched));
+}

@@ -5,6 +5,16 @@ import { listen } from '@tauri-apps/api/event';
 import type { Fit } from '../domain/enums';
 import type { ExportCapability } from '../domain/export/exportCapability';
 import type { ExportProgressEvent } from '../domain/export/exportProgress';
+import {
+  canEstimateDisk,
+  diskFloorMessage,
+  diskFloorShortfall,
+  diskIsShort,
+  diskShortMessage,
+  diskShortfall,
+  remainingBakeBytes,
+  shouldCheckDisk,
+} from '../domain/export/diskPlan';
 
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
@@ -83,24 +93,38 @@ export interface ExportSceneInput {
 
 /** 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)）。planBgmMix が配置(delaySec)・使う長さ(playSec)・前後フェードを算出済み。data URL 可・volume は §6 解決済み。 */
 export interface BgmRunInput {
+  /** 音源の中身（base64）。**`audioPath` を渡すときは空でよい**。 */
   audioBase64: string;
+  /**
+   * 音源のプロジェクト相対パス（#512 段2＝**動画の元の音**）。指定があれば中身より優先される。
+   * ⚠️ 動画を base64 にすると数百MBの文字列を作ることになるので、動画はパスで渡す
+   * （場面形式の動画スロットも `clipRelPath` を渡している＝同じ流儀）。
+   */
+  audioPath?: string;
   /** 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。 */
   fileExt: string;
   volume: number;
+  /**
+   * 音量の変化（#512）を `volume` フィルタの式にしたもの（`t`＝この音の先頭からの秒）。
+   * **未指定＝`volume` の一定値**（場面形式は指定しない＝従来の音のまま）。式は domain の
+   * `volumeExpr` が点列から組む＝**再生と同じ点列・同じ規則**（ADR-0032 追補＝案A）。
+   */
+  volumeExpr?: string;
   /** グローバル配置開始（秒）＝adelay。 */
   delaySec: number;
   /** ループ素材から使う長さ（秒）＝atrim。 */
   playSec: number;
   fadeInSec: number;
   fadeOutSec: number;
-}
-
-/** タイムラインのテロップ帯（ADR-0018）。透過PNG（出力解像度）を結合後の動画へ enable='between(t,S,E)' で重ねる。 */
-export interface TelopOverlayInput {
-  pngBase64: string;
-  /** 表示区間（グローバル秒＝xfade 重なり込みの実効時間軸・compileTimeline と一致）。 */
-  startSec: number;
-  endSec: number;
+  /**
+   * 素材が置き場所より短いとき繰り返すか。**未指定＝true（従来の BGM の挙動）**。
+   * タイムライン形式の読み上げは false を渡す（繰り返すと言葉が二重に鳴る・#631）。
+   */
+  loopSource?: boolean;
+  /** 素材のどこから使うか（秒）。未指定＝頭から（場面形式は指定しない）。 */
+  sourceStartSec?: number;
+  /** 再生速度（>0・未指定＝等速）。ピッチは維持する。 */
+  speed?: number;
 }
 
 /** 書き出し結果の要約。codec は使用エンコーダ（例: libx264 / libopenh264）。 */
@@ -125,7 +149,10 @@ export async function exportVideo(
   bgmRuns?: BgmRunInput[],
   projectId?: string,
   outputPath?: string,
-  telops?: TelopOverlayInput[],
+  /** 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。 */
+  normalizeLufs?: number,
+  /** 映像の上限（bps・#1218「ふつう」）。未指定＝上限なし（従来どおり＝出力不変）。 */
+  maxBitrateBps?: number,
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
@@ -133,11 +160,12 @@ export async function exportVideo(
     bgmRuns: bgmRuns && bgmRuns.length > 0 ? bgmRuns : null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
-    telops: telops && telops.length > 0 ? telops : null,
+    normalizeLufs: normalizeLufs ?? null,
+    maxBitrateBps: maxBitrateBps ?? null,
   });
 }
 
-/** 書き出しの進捗イベント（#376）を購読する。Rust の export_video が段階（映像/結合/字幕/BGM）ごとに emit する。
+/** 書き出しの進捗イベント（#376）を購読する。Rust の export_video が段階（映像/結合/BGM）ごとに emit する。
  *  戻り値は購読解除関数。Tauri 非検出時は no-op を返す（ブラウザ開発/テストで安全）。 */
 export async function listenExportProgress(cb: (e: ExportProgressEvent) => void): Promise<() => void> {
   if (!canExport()) return () => {};
@@ -177,6 +205,143 @@ export async function cancelExport(): Promise<void> {
  */
 export async function stageExportFrame(dirName: string, frameIndex: number, dataBase64: string): Promise<void> {
   await invoke('stage_export_frame', { dirName, frameIndex, dataBase64 });
+  await accountStagedFrame(dataBase64);
+}
+
+/**
+ * 空きが足りなくなったので止めた（#1211）。⚠️ **文はそのまま利用者に出す**（§2-5 を通した文）。
+ */
+export class ExportDiskShortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExportDiskShortError';
+  }
+}
+
+/** いま見張っている書き出し（`null`＝見張っていない）。 */
+let diskWatch: {
+  /** 焼く総コマ数（`null`＝先に分からない＝**底で止めるだけ**）。 */
+  totalFrames: number | null;
+  /** 出来上がりの見込み（バイト・分からなければ 0）。 */
+  outBytesGuess: number;
+  outPath: string | null;
+  bakedFrames: number;
+  bakedBytes: number;
+} | null = null;
+
+/**
+ * 空きの見張りを始める（#1211）。**書き出しを始める直前に呼ぶ**。
+ *
+ * ⚠️ **`totalFrames` を渡せるなら渡す**＝渡すと「このままでは足りない」を**数十コマで**判じられる。
+ * 渡せないときは `null`＝**底（`DISK_FLOOR_BYTES`）を割ったら止める**だけになる
+ *（使い切って後片づけもできなくなるのを防ぐ、最後の砦）。
+ */
+export function beginExportDiskWatch(opts: {
+  totalFrames: number | null;
+  outBytesGuess?: number;
+  outPath?: string | null;
+}): void {
+  diskWatch = {
+    totalFrames: opts.totalFrames,
+    outBytesGuess: opts.outBytesGuess ?? 0,
+    outPath: opts.outPath ?? null,
+    bakedFrames: 0,
+    bakedBytes: 0,
+  };
+}
+
+/**
+ * 素材から**生のコマを取り出した直後**に、空きを見る（#1216 レビュー 🔴）。
+ *
+ * ⚠️ **なぜ「直後に見る」なのか**＝**動画の上に動くものが乗る区間**は倒せないので、素材の実コマを
+ * **区間のぶん丸ごと先に取り出して**から焼く。これは**一気に・まとまった量**が書かれる所で、
+ * 実測では **240KB/枚 × 3,620枚＝約840MB** が**1コマ目より前に**書かれていた（#1216）。
+ * 重ねた結果のPNGだけを見ていると、この消費が**見張りの外**にある。
+ *
+ * ⚠️ **予想せず、起きたことに反応する**＝「1枚あたり × 残り」で**将来ぶんを見込むと二重に数える**
+ *（取り出し済みのぶんは**もう空きが減っている**＝空きは実測で読むので）。上の実測の形では、
+ * 見込んでいたら**書き出せる動画を断って**いた。取り出しは一気に起きるので、
+ * **その直後に見れば取りこぼさない**。
+ *
+ * ⚠️ **ここでは底だけを見る**＝この時点では「焼く1コマの大きさ」の実績がまだ無い回がある
+ *（取り出しは1コマ目より前に起きる）ので、見積もりは立てられない。
+ * ⚠️ **調べられなかったら止めない**＝調べられないこと自体で書き出しを断らない（§2-5）。
+ */
+export async function accountStagedVideo(frameCount: number): Promise<void> {
+  if (!diskWatch || frameCount <= 0) return;
+  let free: { stageFreeBytes: number };
+  try {
+    // ⚠️ **書かれた量は聞かない**＝空きの実測に既に入っている（PR #1216 レビュー 🟡）。
+    // 聞いていた名残りがあったが、**値を捨てているうえに同じ `try` に居た**＝そちらが失敗すると
+    // **本体の判定ごと飛ぶ**（見張りを、使っていない呼び出しのせいで無効にしていた）。
+    free = await exportFreeSpace(null);
+  } catch {
+    return;
+  }
+  const floor = diskFloorShortfall(free.stageFreeBytes);
+  if (diskIsShort(floor)) throw new ExportDiskShortError(diskFloorMessage(free.stageFreeBytes));
+}
+
+/** 見張りを終える（⚠️ **どの出口でも呼ぶ**＝残すと次の書き出しが前回の数を引き継ぐ）。 */
+export function endExportDiskWatch(): void {
+  diskWatch = null;
+}
+
+/** 書き出しが使う2か所の空き（#1211）。 */
+export async function exportFreeSpace(outPath: string | null): Promise<{
+  stageFreeBytes: number;
+  outFreeBytes: number | null;
+  sameDrive: boolean;
+}> {
+  return invoke('export_free_space', { outPath });
+}
+
+/** data URL / 生 base64 のどちらでも、**中身のバイト数**を見積もる。 */
+function base64Bytes(dataBase64: string): number {
+  const comma = dataBase64.indexOf(',');
+  const body = comma >= 0 ? dataBase64.slice(comma + 1) : dataBase64;
+  const pad = body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((body.length * 3) / 4) - pad);
+}
+
+/**
+ * 焼いた1枚を数え、区切りの回に空きを見る。**足りなければ投げる**（#1211）。
+ *
+ * ⚠️ **投げて止める**＝止めないと、**12分以上待たされてから容量が尽き、数十GBが残る**
+ *（#1205 の調査で実際に踏んだ形）。
+ * ⚠️ **空きを調べられなかったら止めない**＝調べられないこと自体を理由に**書き出しを断らない**
+ *（Windows 以外・権限など。断ると「直しようのない断り」になる＝§2-5）。
+ */
+async function accountStagedFrame(dataBase64: string): Promise<void> {
+  const w = diskWatch;
+  if (!w) return;
+  w.bakedFrames += 1;
+  w.bakedBytes += base64Bytes(dataBase64);
+  if (!shouldCheckDisk(w.bakedFrames)) return;
+  let free: { stageFreeBytes: number; outFreeBytes: number | null; sameDrive: boolean };
+  try {
+    free = await exportFreeSpace(w.outPath);
+  } catch {
+    return;
+  }
+  if (w.totalFrames != null && canEstimateDisk(w.bakedFrames)) {
+    const short = diskShortfall({
+      needStageBytes: remainingBakeBytes({
+        bakedFrames: w.bakedFrames,
+        bakedBytes: w.bakedBytes,
+        totalFrames: w.totalFrames,
+      }),
+      needOutBytes: w.outBytesGuess,
+      stageFreeBytes: free.stageFreeBytes,
+      outFreeBytes: free.outFreeBytes,
+      sameDrive: free.sameDrive,
+    });
+    if (diskIsShort(short)) throw new ExportDiskShortError(diskShortMessage(short));
+    return;
+  }
+  // 見積もれないときは**底で止める**だけ。
+  const floor = diskFloorShortfall(free.stageFreeBytes);
+  if (diskIsShort(floor)) throw new ExportDiskShortError(diskFloorMessage(free.stageFreeBytes));
 }
 
 /** フレームのステージングを空にする（書き出しの前後で呼ぶ）。非存在は成功扱い（Rust 側）。 */

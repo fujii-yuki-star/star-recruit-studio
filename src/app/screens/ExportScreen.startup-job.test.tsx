@@ -1,0 +1,139 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { useProjectStore } from "../store/projectStore";
+import { useStartupJobStore } from "../store/startupJobStore";
+import { sampleTemplates } from "../../infrastructure/sampleData";
+import * as ffmpeg from "../../infrastructure/ffmpegExport";
+import * as dialog from "../../infrastructure/dialog";
+import * as startupFs from "../../infrastructure/startupFs";
+import type { Scene } from "../../domain/project/types";
+import { ExportScreen } from "./ExportScreen";
+
+// 起動のときに頼まれた書き出し（ADR-0042 決定⑤・#1184）。
+// ⚠️ **ここが落ちなければ、「AI だけで書き出せる」は嘘になる**＝保存先を聞く所を置き換えたつもりで
+// 置き換わっていない／人が押さないと始まらない、を構造で捕まえる。
+const scene = (id: string, order: number): Scene => ({
+  sceneId: id, partId: "part_001", order, sceneType: "photo_intro",
+  templateId: "photo_left_text_right_yuko_v1", durationSec: 8, assetRefs: {},
+  character: { enabled: false, characterId: "yuko" }, texts: {},
+  narration: { text: "", status: "none" }, warnings: [],
+});
+
+describe("起動のときに頼まれた書き出し（#1184）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [scene("scene_001", 1)],
+      isImporting: false,
+      status: "ready",
+      saveStatus: "saved",
+    });
+    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, notice: null });
+    vi.spyOn(ffmpeg, "canExport").mockReturnValue(true);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, notice: null });
+  });
+
+  // ⚠️ **人が押さなくても始まる**＝ここが無いと「保存先は渡したのに誰も押さないので終わらない」。
+  it("保存先を渡されていたら、押されなくても始まり、保存先を聞かない", async () => {
+    const saveDialog = vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/人が選んだ.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(begin).toHaveBeenCalled());
+    expect(saveDialog, "頼まれているのに保存先を聞いている").not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **頼まれた回は、ボタンを押さずに始まる**＝画面が無効にしている関門を通らない。
+  // 止めるのは **`startExport` の中の再確認**だけなので、ここが唯一の関門になる（#1068）。
+  it("使っている素材が見つからなければ、頼まれた回でも始めない", async () => {
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: ["asset_001"],
+      scenes: [{ ...scene("scene_001", 1), assetRefs: { mainVisual: "asset_001" } } as Scene],
+    });
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    // ⚠️ **理由まで渡している**ことを見る（#1212）＝数字だけで返ると、頼んだ側は**直しようがない**。
+    await waitFor(() => expect(finish).toHaveBeenCalledWith(
+      false, false, expect.stringContaining('見つからない素材'),
+    ));
+    expect(begin, "素材が見つからないのに書き出しを始めた").not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **前の回の文を、断りの理由として出さない**（PR #1217 レビュー 🟡）＝
+  // いちばん誤解を招くのは「**直前の成功の文が、失敗の理由として出る**」形。
+  // 文を出さずに抜ける枝（走行中・この端末では使えない）で実際に起きていた。
+  it("前の回の文が、断りの理由として出ない（走行中に頼まれた回）", async () => {
+    // 直前の回の「できた」を残したまま、走行中に頼まれごとが来る。
+    useProjectStore.getState().setExportRun({ phase: "rendering", message: "保存しました" });
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(finish).toHaveBeenCalled());
+    const [ok, , message] = finish.mock.calls[0];
+    expect(ok, "断りになっていない").toBe(false);
+    expect(message, "前の回の『保存しました』が理由として出ている").not.toBe("保存しました");
+    // ⚠️ **その枝の理由を出している**＝既定文に化けていたら、頼んだ側は「なぜ断られたか」が分からない。
+    expect(String(message), "走行中だと分かる文になっていない").toContain("別の書き出し");
+  });
+
+  // ⚠️ **1回きり**＝取り出したら消える。残すと、次に人が押した書き出しまで同じ所へ書く。
+  it("頼まれた保存先は、取り出したら消える", async () => {
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(begin).toHaveBeenCalled());
+    expect(useStartupJobStore.getState().pendingExportOut, "次の書き出しまで同じ所へ書く").toBeNull();
+  });
+
+  // ⚠️ **失敗しても返す**＝返さないと、頼んだ側（AI）は**終わらない仕事を待ち続ける**。
+  it("できなかったときも、終わったことを返す", async () => {
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("だめ"));
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(finish).toHaveBeenCalled());
+    expect(finish.mock.calls[0]?.[0], "できなかったのに「できた」で返している").toBe(false);
+    // ⚠️ **返すのはちょうど1回**＝2回返すと、頼んだ側は**同じ仕事の結果を二重に受け取る**
+    // （`--quit-when-done` の回は、閉じた後にもう一度閉じようとする）。
+    expect(finish, "同じ仕事の結果を2回返している").toHaveBeenCalledTimes(1);
+  });
+
+  // ⚠️ **手前で断られた回も返す**（PR レビュー 🔴）＝返さないと、頼んだ側は終わらない仕事を待ち続ける。
+  // ⚠️ **さらに、保存先を残さない**＝残すと**次に人が押した書き出し**が、聞かれずにそこへ書く。
+  it("場面が無くて断られたら、返したうえで保存先も残さない", async () => {
+    const finish = vi.spyOn(startupFs, "finishStartupJob").mockResolvedValue(undefined);
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    useProjectStore.setState({ scenes: [], parts: [] });
+    useStartupJobStore.getState().setPendingExport("C:/頼まれた.mp4", false);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(finish).toHaveBeenCalled());
+    expect(finish.mock.calls[0]?.[0]).toBe(false);
+    expect(finish, "同じ仕事の結果を2回返している").toHaveBeenCalledTimes(1);
+    expect(begin, "断ったのに始めている").not.toHaveBeenCalled();
+    expect(
+      useStartupJobStore.getState().pendingExportOut,
+      "断った回の保存先が残っている＝次に人が押した書き出しがそこへ書く",
+    ).toBeNull();
+  });
+
+  // ⚠️ **人が押した回は、今までどおり保存先を聞く**（置き換えたのは頼まれた回だけ）。
+  it("頼まれていなければ、これまでどおり保存先を聞く", async () => {
+    const saveDialog = vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue(null);
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    // 何も頼まれていないので、勝手に始まらない。
+    await new Promise((r) => setTimeout(r, 20));
+    expect(begin, "頼まれていないのに始まっている").not.toHaveBeenCalled();
+    expect(saveDialog).not.toHaveBeenCalled();
+    screen.getByRole("button", { name: "動画を書き出す" });
+  });
+});

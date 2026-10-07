@@ -64,7 +64,7 @@ describe("HomeScreen 一覧取得の失敗表示と再試行（#547 P2-2）", ()
     useProjectStore.setState({ listProjects: list, renameProject: vi.fn(async () => {}) });
     render(<HomeScreen onNavigate={vi.fn()} />);
     fireEvent.click(await screen.findByLabelText("「旧タイトル」の名前を変更")); // 鉛筆で改名へ
-    fireEvent.change(screen.getByLabelText("プロジェクト名"), { target: { value: "新タイトル" } });
+    fireEvent.change(screen.getByLabelText("動画の名前"), { target: { value: "新タイトル" } });
     fireEvent.click(screen.getByText("保存"));
     expect(await screen.findByText("新タイトル")).toBeTruthy(); // 楽観更新で新しい名前が出る
     await waitFor(() => expect(screen.queryByText("旧タイトル")).toBeNull()); // 再取得失敗でも旧名に戻らない

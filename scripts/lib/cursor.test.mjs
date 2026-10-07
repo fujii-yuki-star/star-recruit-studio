@@ -1,0 +1,415 @@
+// 仮想カーソルの絵と動き（#1227・ADR-0046 ③）。**純粋関数を直接叩く**。
+import { describe, expect, it } from "vitest";
+import {
+  CURSOR_H, CURSOR_W, RIPPLE_SIZE, VIEW_NOT_MEASURED_MESSAGE,
+  artCentroid, cursorAt, cursorPath, cursorPixels, expectedCursorCenter, expectedMarkCenter,
+  cursorFilterChain, cursorWindows, positionExpr, ripplePixels, RIPPLE_SEC, SETTLE_SEC, stillTimes, TAIL_GUARD_SEC, toVideoPoint, TRAVEL_SEC,
+} from "./cursor.mjs";
+
+/** その画素の不透明度。 */
+const alphaAt = (px, x, y) => px[(y * CURSOR_W + x) * 4 + 3];
+
+describe("カーソルの絵", () => {
+  it("大きさぶんの画素がある", () => {
+    expect(cursorPixels().length).toBe(CURSOR_W * CURSOR_H * 4);
+  });
+
+  // ⚠️ **先端が (0,0)**＝押した位置に**先端**が来る。中心に置くと、
+  //   **押した所と指している所が半分ずれる**（教材として致命的）。
+  it("先端（0,0）が塗られている", () => {
+    expect(alphaAt(cursorPixels(), 0, 0), "先端が空＝押した所を指していない").toBeGreaterThan(0);
+  });
+
+  it("右下の隅は空いている（矢印であって四角ではない）", () => {
+    expect(alphaAt(cursorPixels(), CURSOR_W - 1, CURSOR_H - 1)).toBe(0);
+  });
+
+  // ⚠️ **暗い画面でも見える**＝この製品にはダークモードがある（ADR-0039）。
+  it("白い縁がある（暗い画面で消えない）", () => {
+    const px = cursorPixels();
+    let white = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] > 0 && px[i] > 200 && px[i + 1] > 200 && px[i + 2] > 200) white += 1;
+    }
+    expect(white, "縁が無い＝暗い画面で見えなくなる").toBeGreaterThan(20);
+  });
+
+  it("黒い本体がある（明るい画面で消えない）", () => {
+    const px = cursorPixels();
+    let dark = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] > 0 && px[i] < 60) dark += 1;
+    }
+    expect(dark).toBeGreaterThan(50);
+  });
+});
+
+// ⚠️ **ここを間違えると、押した所とは違う場所に印が出る**＝「黙って別の場所を教える」。
+// 実測＝窓 (182,182) / 画面の中身 (190,213) → ずれ (8,31)。
+describe("画面の中の座標 → 録画の中の位置", () => {
+  const view = { offsetX: 8, offsetY: 31, dpr: 1 };
+
+  it("題字の帯と枠のぶんずらす", () => {
+    expect(toVideoPoint(view, 419, 367)).toEqual({ x: 427, y: 398 });
+  });
+
+  it("左上でもずれを足す（0 のまま返さない）", () => {
+    expect(toVideoPoint(view, 0, 0), "ずれを足していない").toEqual({ x: 8, y: 31 });
+  });
+
+  // ⚠️ **倍率を掛ける**（#1228）＝ただし「推測した拡大率」ではなく、**録画から実測した倍率**。
+  //   以前は掛け算を落として「100% 以外は断る」にしていたが、利用者の実機は **150%** だった。
+  it("実測した倍率を掛ける", () => {
+    expect(toVideoPoint({ offsetX: 10, offsetY: 45, scale: 1.5 }, 100, 200)).toEqual({ x: 160, y: 345 });
+  });
+
+  it("倍率が無ければ等倍として扱う（古い記録を壊さない）", () => {
+    expect(toVideoPoint({ offsetX: 10, offsetY: 40 }, 100, 200)).toEqual({ x: 110, y: 240 });
+  });
+
+  // ⚠️ **断り文は「次の行動」を出す**（§2-5）＝原因だけ言って終わらない。
+  it("測れていないときの断りは、何をすればよいかを言う", () => {
+    expect(VIEW_NOT_MEASURED_MESSAGE).toContain("scale");
+    expect(VIEW_NOT_MEASURED_MESSAGE, "次の行動が無い").toContain("録り直して");
+  });
+});
+
+// ⚠️ **焼いた結果の検査は、この重心を期待値にする**（PR #1237 レビュー 🟡）＝
+// 「押した点」を期待値にしていた頃は、**輪が左右対称**なので**カーソルが1画素も無くても通った**。
+describe("焼く絵の重心（検査の期待値）", () => {
+  it("塗られていなければ null（空の絵を期待値にしない）", () => {
+    expect(artCentroid(new Uint8Array(4 * 4 * 4), 4, 4)).toBeNull();
+  });
+
+  it("塗られた所の真ん中と、その数を返す", () => {
+    const px = new Uint8Array(4 * 4 * 4);
+    for (const [x, y] of [[1, 2], [3, 2]]) px[(y * 4 + x) * 4 + 3] = 255;
+    expect(artCentroid(px, 4, 4)).toEqual({ x: 2, y: 2, count: 2 });
+  });
+
+  // ⚠️ **輪の重心は押した点そのもの**＝だからこれ**だけ**を見ていては検査にならない（上の理由）。
+  it("輪だけなら、中心は押した点", () => {
+    const rip = artCentroid(ripplePixels(), RIPPLE_SIZE, RIPPLE_SIZE);
+    expect(rip.x).toBeCloseTo(RIPPLE_SIZE / 2 - 0.5, 1);
+    expect(rip.y).toBeCloseTo(RIPPLE_SIZE / 2 - 0.5, 1);
+  });
+
+  // ⚠️ **カーソルは右下に広がる**（先端が (0,0)）＝重心は押した点より右下になる。
+  it("カーソルだけの重心は、押した点の右下", () => {
+    const c = expectedCursorCenter({ x: 100, y: 200 });
+    expect(c.x, "押した点と同じ＝カーソルの形を見ていない").toBeGreaterThan(100);
+    expect(c.y).toBeGreaterThan(200);
+    expect(c.count).toBeGreaterThan(50);
+  });
+
+  // ⚠️ **押した瞬間の期待値は、輪とカーソルの重み付き**＝カーソルのぶんだけ押した点からずれる。
+  it("押した瞬間の重心は、輪だけの位置から、カーソルのぶんずれる", () => {
+    const m = expectedMarkCenter({ x: 100, y: 200 });
+    expect(m.x, "カーソルを数えていない（輪だけを見ている）").toBeGreaterThan(100);
+    expect(m.count).toBe(
+      artCentroid(cursorPixels(), CURSOR_W, CURSOR_H).count + artCentroid(ripplePixels(), RIPPLE_SIZE, RIPPLE_SIZE).count,
+    );
+  });
+});
+
+// ⚠️ **同じ意味を2つの言語で二重に書かない**（PR #1237 レビュー 🟡）＝`overlay` へ渡す式と
+// `cursorAt` は**同じ動き**でなければならないのに、以前は**別々に組み立てていた**（端の扱いまで別）。
+describe("位置の式（`overlay` と `cursorAt` が同じ木から出る）", () => {
+  const path = cursorPath([{ atSec: 2, x: 100, y: 200 }, { atSec: 5, x: 400, y: 300 }]);
+  /** `js` 版の式を、その場で評価できる関数にする。 */
+  const asFn = (axis) => new Function("t", `return ${positionExpr(path, axis, "js")};`);
+
+  it("`cursorAt` と同じ位置を返す（ずれたら焼いた絵と検査が食い違う）", () => {
+    const fx = asFn("x");
+    const fy = asFn("y");
+    for (let t = 0; t <= 6; t += 0.1) {
+      const want = cursorAt(path, t);
+      // ⚠️ 丸めのぶんだけ許す（`cursorAt` は整数に丸め、式は丸めない）。
+      expect(Math.abs(fx(t) - want.x), `${t.toFixed(1)}s で x がずれている`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(fy(t) - want.y), `${t.toFixed(1)}s で y がずれている`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("ffmpeg 版は ffmpeg の書き方（JS の三項演算子を出さない）", () => {
+    const e = positionExpr(path, "x");
+    expect(e).toContain("lt(t,");
+    expect(e, "JS の書き方が混ざっている＝ffmpeg が式を読めない").not.toContain("?");
+  });
+
+  // ⚠️ **時刻が NaN でも数になる**（2026-10-01 実測）＝ffmpeg は組み立て時に t=NaN で一度評価する。
+  //   掛け算で区間を選ぶと 0*NaN=NaN になり、overlay が起こせなかった。
+  it("時刻が NaN のとき 0 を返す（NaN にならない）", () => {
+    expect(new Function("t", `return ${positionExpr(path, "x", "js")};`)(NaN)).toBe(0);
+  });
+
+  it("区間の数は、どちらの書き方でも同じ", () => {
+    expect(positionExpr(path, "x").split("+").length).toBe(positionExpr(path, "x", "js").split("+").length);
+  });
+
+  // ⚠️ **段数が増えても入れ子が深くならない**（2026-10-01 実測＝51 段で ffmpeg が式を読めなかった）。
+  it("段が多くても括弧の深さは一定（入れ子にしない）", () => {
+    const depth = (e) => { let d = 0; let m = 0; for (const c of e) { if (c === "(") m = Math.max(m, ++d); else if (c === ")") d -= 1; } return m; };
+    const many = cursorPath(Array.from({ length: 60 }, (_, i) => ({ atSec: 2 + i * 2, x: (i * 37) % 1900, y: (i * 53) % 1000 })));
+    expect(depth(positionExpr(many, "x"))).toBe(depth(positionExpr(path, "x")));
+    const f = new Function("t", `return ${positionExpr(many, "x", "js")};`);
+    for (let t = 0; t <= 130; t += 0.37) expect(Math.abs(f(t) - cursorAt(many, t).x)).toBeLessThanOrEqual(0.5);
+  });
+
+  it("押す場所が無ければ 0（式が空にならない）", () => {
+    expect(positionExpr([], "x")).toBe("0");
+  });
+});
+
+describe("押した瞬間の輪", () => {
+  const size = 56;
+  const alpha = (px, x, y) => px[(y * size + x) * 4 + 3];
+
+  // ⚠️ **中を塗らない**＝押した先のボタンが隠れると、何を押したのか分からない。
+  it("中は空いている", () => {
+    expect(alpha(ripplePixels(size), Math.floor(size / 2), Math.floor(size / 2))).toBe(0);
+  });
+
+  it("縁は塗られている（上下左右）", () => {
+    const px = ripplePixels(size);
+    const c = Math.floor(size / 2);
+    for (const [x, y] of [[c, 0], [c, size - 1], [0, c], [size - 1, c]]) {
+      expect(alpha(px, x, y), `(${x},${y}) が空`).toBeGreaterThan(0);
+    }
+  });
+
+  // ⚠️ **四角にしない**＝UI の選択枠に見える（焼いて見て分かった）。
+  it("角は空いている（四角ではなく輪）", () => {
+    const px = ripplePixels(size);
+    for (const [x, y] of [[0, 0], [size - 1, 0], [0, size - 1], [size - 1, size - 1]]) {
+      expect(alpha(px, x, y), `角 (${x},${y}) が塗られている＝四角になっている`).toBe(0);
+    }
+  });
+});
+
+describe("カーソルの動き", () => {
+  const points = [{ atSec: 2, x: 100, y: 200 }, { atSec: 5, x: 400, y: 300 }];
+
+  it("押す場所ごとに、動いて・止まって・押す", () => {
+    const path = cursorPath(points);
+    expect(path.filter((p) => p.click).length, "押した印が数と合わない").toBe(2);
+  });
+
+  // ⚠️ **押す前に止まる**＝着いてすぐ押すと、どこを押したか追えない。
+  it("押す少し前には、もう押す場所に着いている", () => {
+    const path = cursorPath(points, { travelSec: 0.6, settleSec: 0.25 });
+    const at = cursorAt(path, 2 - 0.1);
+    expect(at, "押す直前に別の場所に居る").toEqual({ x: 100, y: 200 });
+  });
+
+  it("押した瞬間は、その場所に居る", () => {
+    const path = cursorPath(points);
+    expect(cursorAt(path, 2)).toEqual({ x: 100, y: 200 });
+    expect(cursorAt(path, 5)).toEqual({ x: 400, y: 300 });
+  });
+
+  it("移動の途中は、まっすぐ等速", () => {
+    const path = cursorPath([{ atSec: 2, x: 100, y: 200 }], { travelSec: 1, settleSec: 0 });
+    // 1秒かけて (最初の位置) → (100,200)。その半分。
+    const start = cursorAt(path, 1);
+    const mid = cursorAt(path, 1.5);
+    expect(mid.x).toBe(Math.round((start.x + 100) / 2));
+    expect(mid.y).toBe(Math.round((start.y + 200) / 2));
+  });
+
+  // ⚠️ **画面の外から入ってこない**＝どこから来たのか分からない動きにしない。
+  it("最初の位置は、最初に押す場所の近く（画面の中）", () => {
+    const path = cursorPath([{ atSec: 2, x: 100, y: 200 }]);
+    expect(path[0].x).toBeGreaterThanOrEqual(0);
+    expect(path[0].y).toBeGreaterThanOrEqual(0);
+    expect(Math.hypot(path[0].x - 100, path[0].y - 200)).toBeLessThan(200);
+  });
+
+  // ⚠️ **端で止める**＝0 に落とすと**左上へ飛ぶ**。
+  it("始まる前と終わったあとは、端で止まる", () => {
+    const path = cursorPath(points);
+    expect(cursorAt(path, -10)).toEqual({ x: path[0].x, y: path[0].y });
+    expect(cursorAt(path, 999)).toEqual({ x: 400, y: 300 });
+  });
+
+  it("押す場所が無ければ、何も出さない", () => {
+    expect(cursorPath([])).toEqual([]);
+    expect(cursorAt([], 1)).toBeNull();
+  });
+});
+
+// ⚠️ **カーソル本体を見る時刻**（#1227・PR #1237 再レビュー 🟡）。
+// 輪だけ見ていると**カーソルが1画素も描かれていなくても通る**ので、ここが検査の目になる。
+describe("カーソルだけが止まっている時刻", () => {
+  /** 押す間隔 `gap` で `n` 回押す台本。 */
+  const script = (n, gap, first = 3) =>
+    Array.from({ length: n }, (_, i) => ({ atSec: first + i * gap, x: 100 + i * 50, y: 200 }));
+
+  it("押下ごとに、押す直前の溜めを1つ見る", () => {
+    const points = script(3, 1.5);
+    const stills = stillTimes(cursorPath(points), points, 12);
+    for (const p of points) {
+      expect(stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec), `${p.atSec}s の押下を見ていない`).toBe(true);
+    }
+  });
+
+  // ⚠️ **窓の途中から輪が出る形も断る**＝`cursorPath` の作りでは起きないが、この関数は
+  //   道筋と押下を別々に受け取るので、**呼び方しだいで起きる**。起きたら重心に輪が混ざる。
+  //   ⚠️ この枝を試さないと、**門を外しても検査が緑のまま**だった（変異が生き残った）。
+  it("止まっている窓の途中で押される形も、選ばない", () => {
+    const path = [{ atSec: 0, x: 100, y: 200 }, { atSec: 10, x: 100, y: 200 }];
+    const stills = stillTimes(path, [{ atSec: 5, x: 100, y: 200 }], 12);
+    // 0〜10 の窓は**途中で押される**ので捨てる（最後の点より後ろの窓は残ってよい）。
+    expect(stills.filter((t) => t < 10), "輪をまたぐ窓を選んでいる").toEqual([]);
+  });
+
+  // ⚠️ **輪の出ている間は選ばない**＝カーソルだけを見たいのに、輪が混ざると重心がずれる。
+  it("輪が出ている時刻は選ばない", () => {
+    const points = script(3, 1.5);
+    const stills = stillTimes(cursorPath(points), points, 12);
+    for (const t of stills) {
+      const inRipple = points.some((p) => p.atSec <= t && t <= p.atSec + RIPPLE_SEC);
+      expect(inRipple, `${t}s は輪が出ている`).toBe(false);
+    }
+  });
+
+  // ⚠️ **動いている最中は選ばない**＝コマの取り出しが 1/15 秒ずれるだけで 30 画素動く
+  //   （実測で 22 画素ずれて落ちた）。選ぶのは、同じ位置が続いている区間だけ。
+  it("動いている最中は選ばない", () => {
+    const points = script(2, 2);
+    const path = cursorPath(points);
+    for (const t of stillTimes(path, points, 10)) {
+      const a = cursorAt(path, t - 0.05);
+      const b = cursorAt(path, t + 0.05);
+      expect({ ...a }, `${t}s は動いている`).toEqual({ ...b });
+    }
+  });
+
+  // ⚠️ **録画の終わりをまたがない**＝`totalSec` は ffmpeg を起こしてからの秒で、
+  //   **実尺はそれより数百 ms 短い**。またぐと「コマを取り出せません」で落ちる。
+  // ⚠️ **最後の押下を終わり際に置いて測る**＝余裕のある台本だと、安全代を外しても
+  //   同じ結果になってしまい、**この振る舞いを一度も試していない**ことになる（変異が生き残った）。
+  it("録画の終わり際は選ばない（実尺は totalSec より短い）", () => {
+    const points = script(2, 1.5);
+    const totalSec = points[points.length - 1].atSec + 1;
+    for (const t of stillTimes(cursorPath(points), points, totalSec)) {
+      expect(t, "終わり際を選んでいる").toBeLessThanOrEqual(totalSec - TAIL_GUARD_SEC);
+    }
+  });
+
+  it("押す場所が無ければ、何も選ばない", () => {
+    expect(stillTimes([], [], 10)).toEqual([]);
+  });
+
+  // ⚠️ **詰めた台本では痩せる**＝「0個か否か」ではなく**押下ごとに見られているか**を数える理由。
+  //   ⚠️ 道筋を**手で組んで**渡す（`cursorPath` は近すぎる間隔を入口で断るようになったため）。
+  it("押下が輪の中に埋もれると、その押下は見られない", () => {
+    const points = [{ atSec: 3, x: 100, y: 200 }, { atSec: 3.3, x: 150, y: 200 }];
+    const path = [
+      { atSec: 2.2, x: 20, y: 110 }, { atSec: 2.75, x: 100, y: 200 }, { atSec: 3, x: 100, y: 200, click: true },
+      { atSec: 3.05, x: 100, y: 200 }, { atSec: 3.3, x: 150, y: 200, click: true },
+    ];
+    const stills = stillTimes(path, points, 10);
+    const seen = points.filter((p) => stills.some((t) => t >= p.atSec - SETTLE_SEC && t < p.atSec));
+    expect(seen.length, "詰めても全部見えているなら、窓の取り方が甘い").toBeLessThan(points.length);
+  });
+});
+
+// ⚠️ **原因の所で断る**（PR #1237 3回目 ℹ️）＝近すぎると `atSec` が前後して、
+// 位置の式も `cursorAt` も意味を失う。焼いた後に落ちても、理由が読めない。
+describe("押す間隔が近すぎるとき", () => {
+  it("道筋を作る所で断る（次の行動つき）", () => {
+    const points = [{ atSec: 3, x: 1, y: 2 }, { atSec: 3.5, x: 3, y: 4 }];
+    expect(() => cursorPath(points), "前後する道筋を黙って作っている").toThrow(/間隔が近すぎます/);
+    expect(() => cursorPath(points)).toThrow(/0\.85s 以上あけて/);
+  });
+
+  it("足りていれば通す（境目で正しい台本を落とさない）", () => {
+    expect(() => cursorPath([{ atSec: 3, x: 1, y: 2 }, { atSec: 3 + TRAVEL_SEC + SETTLE_SEC, x: 3, y: 4 }])).not.toThrow();
+  });
+});
+
+describe("カーソルを時間の窓に分ける（1本の式では長すぎて ffmpeg が読めない＝2026-10-01 実測）", () => {
+  const many = cursorPath(Array.from({ length: 51 }, (_, i) => ({ atSec: 1 + i * 2.3, x: (i * 37) % 1900, y: (i * 53) % 1000 })));
+  const fns = (wins) => wins.map((w) => ({
+    on: new Function("t", `return ${w.enable};`),
+    x: new Function("t", `return ${w.x};`),
+    y: new Function("t", `return ${w.y};`),
+  }));
+
+  it("どの時刻もちょうど1つの窓だけが有効で、その窓の位置は cursorAt と同じ", () => {
+    const wins = fns(cursorWindows(many, 8, "js"));
+    expect(wins.length).toBeGreaterThan(1);
+    const last = many[many.length - 1].atSec;
+    for (let t = 0; t <= last + 10; t += 0.13) {
+      const on = wins.filter((w) => w.on(t));
+      expect(on, `${t.toFixed(2)}s で有効な窓が ${on.length} 個`).toHaveLength(1);
+      const want = cursorAt(many, t);
+      expect(Math.abs(on[0].x(t) - want.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(on[0].y(t) - want.y)).toBeLessThanOrEqual(0.5);
+    }
+    // ⚠️ 窓の継ぎ目そのもの（押した時刻ちょうど）でも1つだけ。
+    for (const p of many) expect(wins.filter((w) => w.on(p.atSec)), `${p.atSec}s（継ぎ目）`).toHaveLength(1);
+  });
+
+  it("窓ごとの式は短い（段数が増えても伸びない）", () => {
+    const longest = Math.max(...cursorWindows(many).map((w) => w.x.length));
+    const fewer = Math.max(...cursorWindows(many.slice(0, 9)).map((w) => w.x.length));
+    // 時刻の桁が増える分だけは伸びる＝1.5 倍まで。1本の式（段数ぶん伸びる）よりずっと短い。
+    expect(longest).toBeLessThanOrEqual(fewer * 1.5);
+    expect(longest).toBeLessThan(positionExpr(many, "x").length / 3);
+  });
+
+  it("押した所が1つ・2つでも窓は1つで、いつも有効", () => {
+    for (const p of [many.slice(0, 1), many.slice(0, 2)]) {
+      const wins = fns(cursorWindows(p, 8, "js"));
+      expect(wins).toHaveLength(1);
+      expect(wins[0].on(0) && wins[0].on(999)).toBe(true);
+    }
+  });
+
+  it("ffmpeg 版は ffmpeg の書き方", () => {
+    const w = cursorWindows(many)[1];
+    expect(w.enable).toContain("gte(t,");
+    expect(w.enable).not.toContain("&&");
+  });
+});
+
+describe("ffmpeg 版の位置の式は、どの区間も if で選ぶ（t=NaN で評価されても NaN にならない＝同日実測）", () => {
+  it("区間の数だけ if がある（掛け算で選ぶと 0*NaN=NaN で overlay が起こせない）", () => {
+    const path = cursorPath([{ atSec: 2, x: 100, y: 200 }, { atSec: 5, x: 400, y: 300 }, { atSec: 9, x: 50, y: 60 }]);
+    const e = positionExpr(path, "x");
+    // 一番外側の「+」で区切った項が、すべて if( で始まる（括弧の中の + では区切らない）。
+    const top = []; let depth = 0; let cur = "";
+    for (const ch of e) {
+      if (ch === "(") depth += 1; else if (ch === ")") depth -= 1;
+      if (ch === "+" && depth === 0) { top.push(cur); cur = ""; } else cur += ch;
+    }
+    top.push(cur);
+    expect(top.length).toBeGreaterThan(2);
+    for (const term of top) expect(term.startsWith("if("), term).toBe(true);
+  });
+});
+
+describe("カーソルを焼くフィルタの後半（窓ごとの overlay をつなぐ）", () => {
+  const pts = (n) => cursorPath(Array.from({ length: n }, (_, i) => ({ atSec: 2 + i * 2.3, x: i * 10, y: i * 5 })));
+  it("窓が1つなら split=1 で、出力の名前を付けない", () => {
+    const f = cursorFilterChain(pts(2));
+    expect(f.startsWith("[1:v]split=1[c0];[marked][c0]overlay=")).toBe(true);
+    expect(f).not.toMatch(/\[o0\]/);
+  });
+  it("窓が複数なら、split の本数＝窓の数で、前の出力を次の入力へつなぐ（最後だけ名前なし）", () => {
+    const n = cursorWindows(pts(30)).length;
+    const f = cursorFilterChain(pts(30));
+    expect(n).toBeGreaterThan(2);
+    expect(f.startsWith(`[1:v]split=${n}`)).toBe(true);
+    for (let i = 0; i < n - 1; i += 1) {
+      expect(f, `窓 ${i} の出力`).toContain(`[o${i}];`);
+      expect(f, `窓 ${i + 1} の入力`).toContain(`[o${i}][c${i + 1}]overlay=`);
+    }
+    expect(f).not.toContain(`[o${n - 1}]`);
+    expect(f.split(";").length).toBe(n + 1);
+  });
+  it("押した所が無ければ断る（split=0 を作らない）", () => {
+    expect(() => cursorFilterChain([])).toThrow(/押した記録/);
+  });
+});

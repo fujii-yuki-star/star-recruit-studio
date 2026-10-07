@@ -1,11 +1,17 @@
 // project.json の保存/読込（Tauriコマンド境界）。domain は型と純粋ロジックのみ、I/Oはここに隔離（CLAUDE.md §4）。
 // Tauri 非検出時（ブラウザでの開発・プレビュー）は localStorage にフォールバックし、開発フローを止めない。
+import type { RestorePoint } from '../domain/project/restorePoints';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface ProjectSummary {
   projectId: string;
   projectName: string;
   updatedAt: string;
+  /**
+   * 文書形式（ADR-0032・11 §1）。**タイムライン形式のときだけ `'timeline'`**（場面形式は書かないので未設定）。
+   * 一覧が開く先を選ぶのに使う＝開いてから「形式が違う」と断らずに済む。判定は `resolveProjectFormat` を通す。
+   */
+  format?: string;
 }
 
 const LS_PREFIX = 'project:';
@@ -49,7 +55,7 @@ export async function saveProjectDoc(projectId: string, projectJson: string): Pr
 export async function loadProjectDoc(projectId: string): Promise<string> {
   if (isTauri()) return invoke<string>('load_project', { projectId });
   const text = localStorage.getItem(LS_PREFIX + projectId);
-  if (text === null) throw new Error('保存されたプロジェクトが見つかりません。');
+  if (text === null) throw new Error('保存された動画が見つかりません。');
   return text;
 }
 
@@ -68,6 +74,7 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
         projectId: v.projectId ?? key.slice(LS_PREFIX.length),
         projectName: v.projectName ?? '',
         updatedAt: v.updatedAt ?? '',
+        ...(typeof v.format === 'string' ? { format: v.format } : {}),
       });
     } catch {
       // 壊れたエントリは一覧から除外する
@@ -75,4 +82,76 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   }
   out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return out;
+}
+
+/**
+ * 一覧に出す小さな絵を保存する（#397）。`projects/<id>/preview.png`。
+ * ⚠️ **失敗しても保存そのものは止めない**（呼ぶ側が投げっぱなしにする）＝絵が無くても一覧は開ける。
+ */
+export async function saveProjectThumbnail(projectId: string, dataUrl: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('save_project_thumbnail', { projectId, dataUrl });
+}
+
+/**
+ * 前に保存できていたところが**いつのものか**（無ければ `null`・#263）。
+ *
+ * ⚠️ **いつのものかを返す**＝どれだけ巻き戻るかが分からないと、戻すかどうかを決められない。
+ * 非 Tauri は `null`（控えの仕組みはアプリ側にある）。
+ */
+export async function projectBackupTime(projectId: string): Promise<Date | null> {
+  if (!isTauri()) return null;
+  const secs = await invoke<number | null>('project_backup_time', { projectId });
+  return secs == null ? null : new Date(secs * 1000);
+}
+
+/**
+ * 前に保存できていたところへ戻す（利用者の明示操作・#263）。
+ *
+ * ⚠️ **黙って戻さない**（§2-5）＝開けなかったときに、利用者が選んで押したときだけ通る。
+ * 開けなかったほうも消さずに残る（`project.broken.json`）。
+ */
+export async function restoreProjectBackup(projectId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('restore_project_backup', { projectId });
+}
+
+/**
+ * 復元ポイントの一覧（#263 段階2）。非 Tauri は空。
+ *
+ * ⚠️ **時刻は名前に入っている**＝ファイルの更新時刻から採らない（コピーや同期で変わる）。
+ */
+export async function listRestorePoints(projectId: string): Promise<RestorePoint[]> {
+  if (!isTauri()) return [];
+  const rows = await invoke<[string, number][]>('list_restore_points', { projectId });
+  return rows.map(([name, savedAt]) => ({ name, savedAt }));
+}
+
+/** いまの内容を復元ポイントとして控える（作るかどうかは呼び出し側が決める）。 */
+export async function takeRestorePoint(projectId: string, atMs: number): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('take_restore_point', { projectId, atMs });
+}
+
+/** 古い復元ポイントを消す（残す数は呼び出し側が決める）。 */
+export async function dropRestorePoint(projectId: string, name: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('drop_restore_point', { projectId, name });
+}
+
+/** 復元ポイントの中身（戻す前に、いまの内容と見比べるため）。 */
+export async function readRestorePoint(projectId: string, name: string): Promise<string> {
+  if (!isTauri()) return '';
+  return await invoke<string>('read_restore_point', { projectId, name });
+}
+
+/**
+ * 戻した内容を書き込む（利用者の明示操作・#263 段階2）。
+ *
+ * ⚠️ **戻す前の状態も復元ポイントとして残る**＝「戻したけど、やっぱり戻す前がよかった」に戻れる。
+ * ⚠️ **時計はここで読む**＝呼ぶのは画面（描画中の `Date.now()` は再描画のたびに違う値になりうる）。
+ */
+export async function restoreProjectText(projectId: string, text: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('restore_project_text', { projectId, text, nowMs: Date.now() });
 }

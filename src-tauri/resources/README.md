@@ -39,3 +39,16 @@
 - 同梱版：`ffmpeg-n8.1.2-win64-lgpl-shared-8.1.zip`（tag `autobuild-2026-06-22-17-28`・SHA-256 は FFmpeg_SOURCE.md）。
 - 配置後 **`npm run check:ffmpeg-dist`** で LGPL+h264_mf 構成を自動検査 → `npm run tauri build` で packaged 実書き出しを確認。
 - 解決：配布版は**同梱を最優先**（`resolve_ffmpeg`）。`FFMPEG_PATH` は `tauri dev`／`FFMPEG_DIAGNOSTIC=1` 時のみ尊重（配布版が外部 FFmpeg で上書きされない）。
+
+---
+
+## ローカル LLM（ADR-0051・#1281〜#1283）
+
+このパソコンの中で動画案を作るために、**llama.cpp の `llama-server`** と、**公式の重みから自前で作ったモデル（GGUF）**を同梱する。
+
+### 要点
+- 配置先：**`src-tauri/resources/local_llm/runtime/`**（`llama-server.exe`＋DLL）と **`src-tauri/resources/local_llm/models/`**（`stario-qwen3.5-2b-q4_k_m.gguf`・約 1.3GB／写真を読む部品 `stario-qwen3.5-2b-mmproj-q8_0.gguf`・約 365MB）。大容量のため `.gitignore` 済み（ディレクトリのみ追跡）。
+- **ライセンスの告知**：`src-tauri/resources/local_llm/LICENSES/`（README＝由来・改変の告知・SHA-256／各部品の本文）は**追跡する**（配布物の一部・#1289）。モデルを作り直したら README の SHA-256 も直す（門番 `src/test/localAiLicenseGuard.test.ts` が突き合わせる）。
+- 作る：`scripts/local-llm/build-model.sh <作業フォルダ>`（公式の重みを SHA-256 で照合・llama.cpp b11269 を版固定）。記録は [`local-llm-build.md`](../../docs/yuko_recruit_docs/local-llm-build.md)。
+- 置く：`scripts/local-llm/place-bundle.sh <作業フォルダ>`（モデルの SHA-256 が `src-tauri/src/local_llm.rs` の `MODEL_SHA256` と合わないと置かない）。
+- 無いとき：アプリは「部品が見つかりません。入れ直してください」と断る（`LOCAL_AI_MISSING`）＝黙って外部の AI や見本へ落とさない。

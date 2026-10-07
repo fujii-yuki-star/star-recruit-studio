@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { dragEnd, dragOver, pointerDownAt } from "../../test/pointer";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import { LooksEditScreen } from "./LooksEditScreen";
@@ -125,5 +126,77 @@ describe("LooksEditScreen 重ね順・収め方の表記（#547 P2-11/P2-10）",
     fireEvent.click(screen.getByRole("button", { name: "メイン素材" })); // スロットのレイヤー行を選択
     // 収め方セレクトの選択肢が共有語（枠いっぱい…）になっている。
     expect(screen.getByRole("option", { name: fitLabel.cover })).toBeTruthy();
+  });
+});
+
+// #772 候補3/4：層一覧を「掴んで並べ替え」と「複製」に対応させる（帯・FREE 要素と同じ操作セットへ）。
+describe("LooksEditScreen 層の掴み替えと複製（#772）", () => {
+  beforeEach(() => {
+    useProjectStore.setState({ templates: [userTemplate, ...sampleTemplates], assets: [], editingTemplateId: "user_tmpl_001" });
+  });
+
+  const rowOrder = (): string[] =>
+    screen
+      .getAllByRole("button", { name: /を前面へ$/ })
+      .map((b) => (b.getAttribute("aria-label") ?? "").replace(/を前面へ$/, ""));
+
+  // ⚠️ **画面は「上＝手前」**（描画順の反転）＝渡す位置を裏返し忘れると、上へ落としたのに背面へ行く。
+  // domain（`moveToIndexByZ`）だけ緑でも、この反転を落とすと利用者には**逆に動いて見える**。
+  /**
+   * jsdom は実寸を持たないので、**全行に縦の帯を割り当てる**（1行 100px・上から順）。
+   * ⚠️ **落とし先の行だけ差し込むと足りない**＝すき間の判定は並び全体の位置関係を見るので、
+   * ほかの行が 0 サイズのままだと**幾何が潰れて 1つ手前のすき間に落ちる**（実際にそれで1段ずれた）。
+   */
+  const layoutRows = (rows: Element[]) => {
+    rows.forEach((el, i) => {
+      (el as HTMLElement).getBoundingClientRect = () =>
+        ({ left: 0, top: i * 100, width: 200, height: 100, right: 200, bottom: (i + 1) * 100, x: 0, y: i * 100, toJSON: () => undefined }) as DOMRect;
+    });
+  };
+
+  it("持ち手を掴んで別の位置へ落とすと、その位置へ入る（上＝手前のまま）", () => {
+    const { container } = render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(rowOrder()).toEqual(["ロゴ", "字幕", "ゆうこ", "文字（見出し）", "背景"]);
+    const handles = [...container.querySelectorAll(".drag-handle")];
+    expect(handles.length).toBe(5); // 全行に持ち手がある
+
+    // いちばん上（＝手前＝「ロゴ」）を掴み、いちばん下の行の**後ろ半分**＝末尾のすき間へ落とす。
+    const rows = [...container.querySelectorAll(".row-between")];
+    layoutRows(rows);
+    pointerDownAt(handles[0] as HTMLElement, 1000, { button: 0 });
+    dragOver(rows[4], { clientX: 100, clientY: 480 }); // いちばん下の行の**後ろ半分**＝末尾のすき間
+    dragEnd();
+
+    // ⚠️ **ここが捕まえるのは「反転しているか」**＝すき間の幾何（どのすき間に当たるか）は
+    // `useDragReorder` 側で既にテスト済みなので、そこへ依存した厳密な並びは書かない
+    //（jsdom の実寸差し込みに左右されて、直したい対象と無関係に落ちる）。
+    // **上＝手前**なので、下へ運んだら**奥へ動く＝行の位置は下がる**。反転を落とすと、
+    // 同じ操作で `ascending = toIndex` になり **いちばん手前のまま動かない**。
+    // ⚠️ **どのすき間に当たるかは幾何が決める**（ここでは下から2番目のすき間）。固定したいのは
+    // **向き**＝「上＝手前」なので下へ運べば**奥へ動く**。反転を落とすと `ascending = toIndex` になり、
+    // 同じ操作で**手前寄り（上から2番目）**に着く＝下の厳密な並びで区別できる。
+    // 「1つでも下がったか」では弱い（反転を落としても1段は下がるので素通りする＝実際に素通りした）。
+    expect(rowOrder()).toEqual(["字幕", "ゆうこ", "文字（見出し）", "ロゴ", "背景"]);
+  });
+
+  // ⚠️ **持ち手は読み上げに出さない**（`aria-hidden`）＝並べ替えの経路は ↑↓ ボタンが担う（#398 レビュー）。
+  it("持ち手は読み上げに出さない（並べ替えは ↑↓ が担う）", () => {
+    const { container } = render(<LooksEditScreen onNavigate={vi.fn()} />);
+    for (const h of container.querySelectorAll(".drag-handle")) {
+      expect(h.getAttribute("aria-hidden")).not.toBeNull();
+    }
+  });
+
+  it("複製すると1つ増え、元のすぐ手前に入る", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    const before = rowOrder();
+    fireEvent.click(screen.getByRole("button", { name: "文字（見出し）を複製" }));
+    const after = rowOrder();
+    expect(after.length).toBe(before.length + 1);
+    // ⚠️ **複製すると2行とも同じ名前**（種別＋紐づけが同じ）なので、`indexOf` では区別できない。
+    // 「同じ名前が**隣り合っている**」＝元のすぐ手前に入った、で見る。
+    const idx = after.flatMap((n, i) => (n === "文字（見出し）" ? [i] : []));
+    expect(idx).toHaveLength(2);
+    expect(idx[1] - idx[0]).toBe(1);
   });
 });

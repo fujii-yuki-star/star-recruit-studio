@@ -3,7 +3,7 @@ import type { SceneLayout } from '../layout';
 import { layoutScene } from '../layout';
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
-import { splitVideoSceneSvg, splitVideoSceneSvgMulti } from './videoSceneSplit';
+import { isPassableSlot, slotRectToOutput, splitVideoSceneSvg, splitVideoSceneSvgMulti } from './videoSceneSplit';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 
 // 背景(z0・色は backgroundColor とは別)・動画スロット(z10)・同z テキスト(z10)・タイトル(z30) の最小レイアウト。
@@ -18,6 +18,8 @@ function layout(): SceneLayout {
       { kind: 'image', id: 'slot', x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: 'asset_v', fit: 'cover', role: 'slot', label: 'メイン' },
       { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false },
       { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false },
+      // 立ち絵の絵（`role:'character'`）＝#809 で**ここも動画の置き場所になった**。
+      { kind: 'image', id: 'yuko', x: 1200, y: 200, w: 400, h: 800, zIndex: 20, assetId: 'asset_pose', fit: 'contain', role: 'character', label: 'ゆうこ' },
     ],
   };
 }
@@ -42,9 +44,20 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(r?.aboveSvg).toContain('タイトルです');
   });
 
-  it('常時クレジット（ADR-0003）は上レイヤーのみ＝下には付けない（二重化防止）', () => {
-    const r = splitVideoSceneSvg(layout(), 'slot');
+  it('クレジットは上レイヤーのみ＝下には付けない（二重化防止）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot', undefined, undefined, undefined, NARRATOR_CREDIT);
     expect(r?.aboveSvg).toContain(NARRATOR_CREDIT);
+    expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
+  });
+
+  /**
+   * ⚠️ **渡さなければ描かない**（PR #881 レビュー）。ADR-0003「常時表示」時代の名残で
+   * `NARRATOR_CREDIT` を既定にしていたため、呼ぶ側が ADR-0025 の「非表示」を選んで `undefined` を
+   * 渡しても**ここで復活して焼き込まれて**いた（動画スロットのある場面は必ずこの経路）。
+   */
+  it('クレジットを渡さなければどの層にも描かない（ADR-0025 の「非表示」が効く）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot');
+    expect(r?.aboveSvg).not.toContain(NARRATOR_CREDIT);
     expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
@@ -73,10 +86,21 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(noBg?.belowSvg).not.toContain('fill="#123456"');
   });
 
-  it('image/role=slot でない id（fill/text）や未知 id は null', () => {
+  // ⚠️ **役割では絞らない**（#809・α-6 出口監査 🔴1）＝当てるのは `kind==='image'` と id だけ。
+  // 役割で絞ると**立ち絵に入れた動画**（`role:'character'`）が必ず外れ、穴が開かないまま
+  // 実映像を重ねる＝プレビュー（静止）と書き出し（実映像）が割れる（ADR-0001）。
+  it('絵でない id（fill/text）や未知 id は null', () => {
     expect(splitVideoSceneSvg(layout(), 'bg')).toBeNull(); // fill
     expect(splitVideoSceneSvg(layout(), 'title')).toBeNull(); // text
     expect(splitVideoSceneSvg(layout(), 'nope')).toBeNull(); // 未知
+  });
+
+  it('立ち絵の絵（role=character）も穴を開ける対象になる', () => {
+    const r = splitVideoSceneSvg(layout(), 'yuko');
+    expect(r?.slot).toEqual({ x: 1200, y: 200, w: 400, h: 800 });
+    // 穴が開いている＝その絵は下にも上にも描かれない（実映像がそこへ入る）。
+    expect(r?.belowSvg).not.toContain('asset_pose');
+    expect(r?.aboveSvg).not.toContain('asset_pose');
   });
 });
 
@@ -105,7 +129,7 @@ describe('splitVideoSceneSvgMulti（#431 複数動画スロット・zIndex 帯�
   });
 
   it('下層=先頭スロット未満／中間層=スロット間／上層=末尾スロット以上（透過・クレジットは最上のみ）', () => {
-    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB']);
+    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB'], undefined, undefined, undefined, NARRATOR_CREDIT);
     // 下層: bg(z0)。中間テキスト(z20)・タイトル(z40) は含まない。
     expect(r?.belowSvg).toContain('fill="#123456"');
     expect(r?.belowSvg).not.toContain('中間テキスト');
@@ -131,6 +155,13 @@ describe('splitVideoSceneSvgMulti（#431 複数動画スロット・zIndex 帯�
     expect(r?.belowSvg).toContain('fill="#123456"'); // z0 下
     expect(r?.aboveSvg).toContain('タイトルです'); // z30 上
     expect(r?.aboveSvg).toContain('同じZ'); // z==slot は上（取りこぼし防止）
+  });
+
+  it('クレジットを渡さなければどの層にも描かない（ADR-0025 の「非表示」が効く）', () => {
+    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB']);
+    expect(r?.aboveSvg).not.toContain(NARRATOR_CREDIT);
+    expect(r?.midSvgs[0]).not.toContain(NARRATOR_CREDIT);
+    expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
   it('どれかのスロット id が無ければ null（誤 id/未解決）', () => {
@@ -164,5 +195,61 @@ describe('splitVideoSceneSvg × FREE freeLayout（Phase 4c）', () => {
     expect(r?.aboveSvg).toContain('前面テキスト'); // z9 > slot z5 → 上（透過）
     expect(r?.belowSvg).not.toContain('前面テキスト');
     expect(r?.belowSvg).toContain('fill="#101010"'); // 図形 z1 < slot → 下
+  });
+});
+
+// ⚠️ **動画の枠を出力の大きさへ写す**（#1255 レビュー 🔴）＝下敷き・上敷きは出力の大きさで焼くので、
+// 枠だけ配置の座標のままだと**動画だけが違う大きさ・違う位置**に重なる（「軽い（720）」で実際に起きていた）。
+describe('slotRectToOutput（動画の枠を出力の大きさへ）', () => {
+  const CANVAS = { width: 1920, height: 1080 };
+
+  it('同じ大きさなら、そのまま', () => {
+    expect(slotRectToOutput({ x: 80, y: 140, w: 1040, h: 800 }, CANVAS, CANVAS))
+      .toEqual({ slotX: 80, slotY: 140, slotW: 1040, slotH: 800 });
+  });
+
+  it('軽い（1280×720）なら 2/3 に縮める', () => {
+    expect(slotRectToOutput({ x: 0, y: 0, w: 1920, h: 1080 }, CANVAS, { width: 1280, height: 720 }))
+      .toEqual({ slotX: 0, slotY: 0, slotW: 1280, slotH: 720 });
+  });
+
+  // ⚠️ **縦と横を別々に縮める**＝縦型（1080×1920 → 720×1280）でも取り違えない。
+  it('縦型でも、縦と横をそれぞれの比で縮める', () => {
+    expect(slotRectToOutput({ x: 540, y: 960, w: 540, h: 960 }, { width: 1080, height: 1920 }, { width: 720, height: 1280 }))
+      .toEqual({ slotX: 360, slotY: 640, slotW: 360, slotH: 640 });
+  });
+
+  // ⚠️ **縦と横の比が違っても、それぞれで縮める**＝いまの書き出しは縦横同じ比（16:9→16:9）なので、
+  // 上の検査だけだと「横の比で縦も縮める」取り違えが**見分けられない**（変異チェックで素通りした）。
+  it('縦と横の比が違っても、それぞれの比で縮める', () => {
+    expect(slotRectToOutput({ x: 100, y: 100, w: 200, h: 200 }, CANVAS, { width: 960, height: 1080 }))
+      .toEqual({ slotX: 50, slotY: 100, slotW: 100, slotH: 200 });
+  });
+
+  // ⚠️ **整数に丸める**＝FFmpeg 側（Rust）は u32 で受ける。
+  it('整数に丸める', () => {
+    const r = slotRectToOutput({ x: 101, y: 101, w: 101, h: 101 }, CANVAS, { width: 1280, height: 720 });
+    expect(Number.isInteger(r.slotX) && Number.isInteger(r.slotW)).toBe(true);
+    expect(r).toEqual({ slotX: 67, slotY: 67, slotW: 67, slotH: 67 });
+  });
+});
+
+describe('isPassableSlot（FFmpeg にそのまま渡せる枠か）', () => {
+  it('画面の中の枠は渡せる', () => {
+    expect(isPassableSlot({ slotX: 0, slotY: 0, slotW: 1280, slotH: 720 })).toBe(true);
+  });
+
+  // ⚠️ **左や上へはみ出した配置は渡せない**＝Rust は u32 で受けるので、書き出しごと止まる。
+  it('左へはみ出した枠は渡せない', () => {
+    expect(isPassableSlot({ slotX: -1, slotY: 0, slotW: 100, slotH: 100 })).toBe(false);
+  });
+
+  it('上へはみ出した枠は渡せない', () => {
+    expect(isPassableSlot({ slotX: 0, slotY: -1, slotW: 100, slotH: 100 })).toBe(false);
+  });
+
+  it('大きさ 0 の枠は渡せない', () => {
+    expect(isPassableSlot({ slotX: 0, slotY: 0, slotW: 0, slotH: 100 })).toBe(false);
+    expect(isPassableSlot({ slotX: 0, slotY: 0, slotW: 100, slotH: 0 })).toBe(false);
   });
 });

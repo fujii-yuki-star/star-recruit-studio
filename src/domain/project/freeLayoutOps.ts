@@ -1,7 +1,7 @@
 // FREE テンプレ場面の自由配置（scene.freeLayout）への要素の追加・更新・削除（ADR-0008・Phase 4a-3b）。
 // 純粋関数（副作用なし）。store は updateScene 経由でこれらを呼び、結果の配列で freeLayout を差し替える。
 // ID 採番は createFreeElementId（§2.1・scene 内一意）に委譲する。
-import { DEFAULT_FIT, GEOM_MIN_SIZE } from '../constants';
+import { DEFAULT_FIT, GEOM_MIN_SIZE, normalizeDeg } from '../constants';
 import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../enums';
 import type { FreeElementKind } from '../enums';
 import { composeGroupGeometry } from '../group/compose';
@@ -18,11 +18,18 @@ const DEFAULT_SLOT_W = 800;
 const DEFAULT_SLOT_H = 540;
 const DEFAULT_TEXT_W = 800;
 const DEFAULT_TEXT_H = 160;
-const DEFAULT_TEXT_FONT_SIZE = 48;
+/** 文字を新しく足したときの大きさ（1920×1080 基準）。タイムライン形式の「文字を置く」（#684）も同じ値を使う。 */
+export const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_SHAPE_W = 600;
 const DEFAULT_SHAPE_H = 400;
-const DEFAULT_TEXT = 'テキスト';
-const DEFAULT_SHAPE_COLOR = '#cccccc';
+/** 文字を新しく足したときの文言。**空にしない**＝空文字は描かれず「置いたのに見えない」になる（#684）。 */
+export const DEFAULT_TEXT = 'テキスト';
+/**
+ * 図形を**新しく足したとき**の塗り。タイムライン形式の「図形を置く」（#684）も同じ値を使う
+ * ＝同じ物を足すのに形式で色が違う、を作らない（ADR-0026②）。
+ * ※未指定データを**描く**ときのフォールバック（`SHAPE_FILL_FALLBACK_COLOR`）とは別物。
+ */
+export const DEFAULT_SHAPE_COLOR = '#cccccc';
 // 字幕要素（ADR-0029）：画面下寄りの字幕バー。表示文言は subtitleSource（対象）から解決＝el.text は持たない。
 const DEFAULT_SUBTITLE_X = 240;
 const DEFAULT_SUBTITLE_Y = 900;
@@ -97,7 +104,20 @@ export function addFreeElement(
 export function updateFreeElement(
   freeLayout: FreeElement[], id: string, patch: Partial<Omit<FreeElement, 'id' | 'kind'>>,
 ): FreeElement[] {
-  return freeLayout.map((e) => (e.id === id ? { ...e, ...patch } : e));
+  return freeLayout.map((e) => {
+    if (e.id !== id) return e;
+    const next = { ...e, ...patch } as Record<string, unknown>;
+    // ⚠️ **未指定はキーごと落とす**（差分再監査 10巡目）＝素の spread だと**値なしのキーが残り**、
+    // 保存では消えるのにその場の文書には残る＝同じ絵の文書が2通りできる。「継承へ戻す」を
+    // `undefined` で表す入口（フォント）が増えたので、受け側でそろえる。
+    // ⚠️ **`null` は落とさない**（差分再監査 11巡目 🟡）＝タイムラインの `setVisualClipContent` は
+    // `null` も落とすので、**同じ流儀ではない**（写さない）。理由は「読み手が区別している」ではなく
+    // **書き手がそう書いている**＝`createFreeElement` は差し込み口に必ず `assetId: null` を置き、
+    // 画面も「なし」を `null` で書く。落とすと**保存される形が入口によって変わる**ので、
+    // 触っていない項目まで書き換えないこの関数の役目から外れる（読み手は `?? null` で解くため実害は無い）。
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k];
+    return next as unknown as FreeElement;
+  });
 }
 
 /** 指定 id の要素を取り除いた配列を返す。 */
@@ -302,13 +322,13 @@ export function rotationFromPointer(
   center: { x: number; y: number }, pointer: { x: number; y: number },
 ): number {
   const deg = (Math.atan2(pointer.y - center.y, pointer.x - center.x) * 180) / Math.PI + 90;
-  return (((Math.round(deg) % 360) + 360) % 360);
+  return normalizeDeg(Math.round(deg));
 }
 
 /** 角度を step 度きざみにスナップして 0≤r<360 に正規化（#279・Shift で 15° 吸着など）。step<=0 は正規化のみ。 */
 export function snapAngle(deg: number, step: number): number {
   const snapped = step > 0 ? Math.round(deg / step) * step : deg;
-  return (((snapped % 360) + 360) % 360);
+  return normalizeDeg(snapped);
 }
 
 /** 複数 id の要素をまとめて削除する（複数選択の一括削除）。空なら同一参照を返す。 */

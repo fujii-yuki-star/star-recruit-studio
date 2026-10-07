@@ -1,8 +1,12 @@
 # Codex向け実装指示書
 
+> ⚠️ **これは正典ではありません**（解説・背景）。型・必須・enum・制約の正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md) と [`schemas/`](schemas/)、AI 変換の正典は [`12_AI_PROMPT_AND_MAPPING.md`](12_AI_PROMPT_AND_MAPPING.md)。**食い違ったら正典が正しい**（`CLAUDE.md §0`）。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 前提
 
-あなたは「ゆうこ採用ムービーメーカー」というPC向け動画制作支援ソフトを実装します。
+あなたは「すたりお（stario）」というPC向け動画制作支援ソフトを実装します。
 
 主利用者は非技術者の採用担当者です。
 本ソフトは、AIが動画そのものを生成するのではなく、AIが動画構成JSONを生成し、ソフトがテンプレートに沿って画像・動画・テキスト・ゆうこ素材・音声・BGMを機械的に配置してMP4を生成する方式です。

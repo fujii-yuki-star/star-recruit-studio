@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.24" },
+    "schemaVersion": { "const": "1.32" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -50,6 +50,15 @@
     "properties": { "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] } }
   },
   "$defs": {
+    "FontId": {
+      "description": "フォントの id（同梱＋持ち込み・ADR-0038・#261）。同梱は3つ、持ち込みは user_font_NNN（appData/user_fonts に置き、プロジェクトには入れない＝アプリを再配布経路にしない・13 §6）。⚠️ enum ではなく pattern＝持ち込みは利用者ごとに増えるので値を数え上げられない。",
+      "type": "string",
+      "pattern": "^(gen-interface-jp|gen-interface-jp-display|kaitou-yokoku-gothic|user_font_[0-9]{3,})$"
+    },
+    "FontIdOrNull": {
+      "description": "フォントの id、または null（=継承）。",
+      "oneOf": [{ "$ref": "#/$defs/FontId" }, { "type": "null" }]
+    },
     "VideoSettings": {
       "type": "object",
       "additionalProperties": false,
@@ -58,8 +67,30 @@
         "aspectRatio": { "enum": ["16:9", "9:16"] },
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
-        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 1800 },
+        "fontId": { "$ref": "#/$defs/FontId" },
+        "creditDisplay": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "クレジット（VOICEVOX）の動画側の見せ方（ADR-0025・#359）。未指定＝最初と最後・3秒。About 画面のクレジットは必須で不変（13 §4）。",
+          "properties": {
+            "mode": { "enum": ["always", "head", "tail", "both", "hidden"] },
+            "seconds": { "type": "number", "minimum": 1, "maximum": 10 }
+          }
+        },
+        "audioAuto": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "音の自動処理（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4）。書き出し時の処理なので Scene には持たせない（場面ごとのダッキング設定は作らない）。未指定＝新規は既定で「する」／読み込んだ古い動画には読込時に「しない」を書き込む（既に作った動画の音を変えない）。",
+          "properties": {
+            "duckBgm": { "type": "boolean" },
+            "duckDepth": { "type": "number", "minimum": 0, "maximum": 1 },
+            "duckAttackSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "duckReleaseSec": { "type": "number", "minimum": 0, "maximum": 3 },
+            "normalize": { "type": "boolean" },
+            "targetLufs": { "type": "number", "minimum": -30, "maximum": -8 }
+          }
+        }
       }
     },
     "CompanyInfo": {
@@ -127,7 +158,12 @@
       "additionalProperties": false,
       "description": "場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。",
       "properties": {
-        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } },
+        "clips": {
+          "deprecated": true,
+          "description": "【非推奨・#635】旧・場面横断タイムラインの手編集（ADR-0018）。ADR-0032 決定11/12 で引き取り手が無くなり、描画・書き出しには使わない。保存済みデータを黙って消さないために形だけ残す（新規に書き込まないこと）。",
+          "type": "array",
+          "items": { "$ref": "#/$defs/OverlayClip" }
+        },
         "animations": { "type": "array", "items": { "$ref": "#/$defs/ElementAnimation" } }
       }
     },
@@ -155,7 +191,32 @@
         "scale": { "type": "number", "exclusiveMinimum": 0 },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "rotation": { "type": "number" },
-        "easing": { "enum": ["linear", "ease-in-out"] }
+        "easing": {
+          "description": "区間 [前KF, 当KF] のイージング（#262）。名前つきか、自由なカーブ（CSS の cubic-bezier と同じ制御点4つ）。未指定＝linear。",
+          "oneOf": [
+            { "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "hold"] },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bezier"],
+              "properties": {
+                "bezier": {
+                  "type": "array",
+                  "description": "x1,y1,x2,y2。x は 0〜1（時間が戻らない）・y は範囲外も可（行き過ぎて戻る動き）。",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": false,
+                  "prefixItems": [
+                    { "type": "number", "minimum": 0, "maximum": 1 },
+                    { "type": "number" },
+                    { "type": "number", "minimum": 0, "maximum": 1 },
+                    { "type": "number" }
+                  ]
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "OverlayClip": {
@@ -186,6 +247,7 @@
         "tags": { "type": "array", "items": { "type": "string" } },
         "description": { "type": "string" },
         "aiDescription": { "type": "string" },
+        "aiDescriptionAuthor": { "enum": ["ai", "user"], "description": "「AI解析」を書いたのは誰か（#1317・1.31）。ai＝同梱の AI が付けた（写真を差し替えたら読み直す）／user＝利用者が直した（空にしたも含む＝AI は書き換えない）。未指定＝前の版の素材（説明があれば触らない）。" },
         "isPublicChecked": { "type": "boolean" },
         "isDefaultYuko": { "type": "boolean" },
         "clip": { "$ref": "#/$defs/Clip" },
@@ -238,17 +300,17 @@
         "sceneType": { "$ref": "#/$defs/SceneCategory" },
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "exclusiveMinimum": 0 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "fontId": { "$ref": "#/$defs/FontIdOrNull" },
         "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
         "textFontIds": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "main": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "subtitle": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "caption": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "url": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+            "title": { "$ref": "#/$defs/FontId" },
+            "main": { "$ref": "#/$defs/FontId" },
+            "subtitle": { "$ref": "#/$defs/FontId" },
+            "caption": { "$ref": "#/$defs/FontId" },
+            "url": { "$ref": "#/$defs/FontId" }
           }
         },
         "textStyles": {
@@ -356,7 +418,7 @@
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
         "fontWeight": { "enum": ["normal", "bold"] },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "fontId": { "$ref": "#/$defs/FontIdOrNull" },
         "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 3 },
         "textAlign": { "enum": ["left", "center", "right"] },
         "shapeType": { "enum": ["rect", "ellipse", "rounded_rect", "triangle", "star", "arrow", "speech_bubble"] },
@@ -365,6 +427,8 @@
         "radius": { "type": "number", "minimum": 0 },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
         "strokeWidth": { "type": "number", "minimum": 0 },
+        "letterSpacing": { "type": "number", "minimum": -0.5, "maximum": 2, "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。" },
+        "shadow": { "$ref": "#/$defs/TextShadow" },
         "background": {
           "type": "object",
           "additionalProperties": false,
@@ -409,7 +473,48 @@
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "fontWeight": { "enum": ["normal", "bold"] },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 }
+        "strokeWidth": { "type": "number", "minimum": 0 },
+        "letterSpacing": { "type": "number", "minimum": -0.5, "maximum": 2, "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。" },
+        "shadow": { "$ref": "#/$defs/TextShadow" },
+        "background": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "radius": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "ColorAdjust": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "色の調整（ADR-0044 ①）。未指定＝調整なし（従来の出力は不変）。⚠️ **描くのは SVG の `<filter>`**＝プレビューと書き出しは同じ道（layoutToSvg→canvas→PNG）を通るので必ず一致する。⚠️ **`color-interpolation-filters=\"sRGB\"` を付けて描く**＝既定の linearRGB だと「明るさ 0.5」が画面上 187 になり、数字と見た目が合わない（実測）。",
+      "properties": {
+        "brightness": { "type": "number", "minimum": 0, "maximum": 4, "description": "明るさ（1＝そのまま・0＝黒）。" },
+        "contrast": { "type": "number", "minimum": 0, "maximum": 4, "description": "コントラスト（1＝そのまま）。" },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 4, "description": "彩度（1＝そのまま・0＝白黒）。" },
+        "temperature": { "type": "number", "minimum": -1, "maximum": 1, "description": "色温度（0＝そのまま・+1＝暖色寄り・−1＝寒色寄り）。" }
+      }
+    },
+    "BlendMode": {
+      "type": "string",
+      "enum": ["normal", "multiply", "screen", "overlay", "plus-lighter"],
+      "description": "描画モード（ADR-0044 ②）。未指定＝normal（従来の出力は不変）。⚠️ **混ぜるのは合成の単位（ADR-0032 決定19）より前**＝畳んだ後だとフェード中だけ混ざり方が変わる。⚠️ **この語彙を使うのはタイムライン形式だけ**（ADR-0044 追補1）＝場面形式は凍結（ADR-0032）なので持たせない。"
+    },
+    "TextShadow": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "文字の影（#264）。enabled のときだけ描く。未指定/false＝影なし（従来の出力は不変）。blur/dx/dy は canvas px。",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "blur": { "type": "number", "minimum": 0 },
+        "dx": { "type": "number" },
+        "dy": { "type": "number" }
       }
     },
     "AssetRefs": {

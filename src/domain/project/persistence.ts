@@ -8,15 +8,21 @@ import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
+import { OLD_PROJECT_AUDIO_AUTO } from '../voice/audioAuto';
 import { validateProject } from '../validation/generated/validators.js';
+import { isTimelineProjectDoc } from '../projectFormat';
 import { normalizeDialogueTiming } from './narrationLines';
+import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
+
+/** 音の自動処理（`videoSettings.audioAuto`）が入った版（#257/#259）。これより前の文書にだけ「しない」を書く。 */
+export const PROJECT_AUDIO_AUTO_SINCE = '1.29';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。1.14→1.15：timelineOverlay（場面横断タイムラインの上位編集・ADR-0018）を追加（任意・未指定=場面射影のみ・無変換）。1.15→1.16：scene.bgmSettings（場面ごとのBGM・ADR-0018 ③(7)）を追加（任意・未指定=プロジェクト既定を継承・無変換）。1.16→1.17：timelineOverlay.animations（要素アニメーション＝キーフレーム・ADR-0019 ④）を追加（任意・未指定=アニメ無し＝静止・無変換）。1.17→1.18：scene.slotVideoStart（動画スロット本体アニメの再生開始タイミング＝モード明示・ADR-0027・#444）を追加（任意・未指定=withAnim＝アニメと同時・無変換）。1.18→1.19：scene.slotClips（動画クリップ調整の per-use 上書き＝範囲/速度/元音声・ADR-0028・#472）を追加（任意・未上書きフィールドは asset.clip を継承・無変換）。1.19→1.20：FREE 自由配置の字幕要素（FreeElement.kind='subtitle'）＋対象 FreeElement.subtitleSource（読み上げ/全行/話者・ADR-0029）を追加（任意・未指定=後方互換〔単独→読み上げ・掛け合い→全行〕・無変換）。1.20→1.21：掛け合いの同時開始 NarrationLine.startWithPrevious（前のセリフと同時に開始＝並行音声・ADR-0031）を追加（任意・未指定=逐次・無変換）。1.21→1.22：FREE 要素の任意表示名 FreeElement.name（重ね順一覧/チップの見分け用・#525-12）を追加（任意・未指定=種類＋連番の自動名・無変換）。1.22→1.23：FREE の text/subtitle 要素の背景帯 FreeElement.background（可読性の下地・通常字幕層 layer.background と同型・#529）を追加（任意・未指定/enabled:false=背景帯なし・無変換）。1.23→1.24：文字の体裁の場面別上書き scene.textStyles（テキスト種別ごとの色/サイズ/太さ/縁取り・#555）を追加（任意・各プロパティ未指定=テンプレ層→既定を継承・配置はテンプレ駆動のまま・無変換）。 */
-export const PROJECT_SCHEMA_VERSION = '1.24';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。1.14→1.15：timelineOverlay（場面横断タイムラインの上位編集・ADR-0018）を追加（任意・未指定=場面射影のみ・無変換）。1.15→1.16：scene.bgmSettings（場面ごとのBGM・ADR-0018 ③(7)）を追加（任意・未指定=プロジェクト既定を継承・無変換）。1.16→1.17：timelineOverlay.animations（要素アニメーション＝キーフレーム・ADR-0019 ④）を追加（任意・未指定=アニメ無し＝静止・無変換）。1.17→1.18：scene.slotVideoStart（動画スロット本体アニメの再生開始タイミング＝モード明示・ADR-0027・#444）を追加（任意・未指定=withAnim＝アニメと同時・無変換）。1.18→1.19：scene.slotClips（動画クリップ調整の per-use 上書き＝範囲/速度/元音声・ADR-0028・#472）を追加（任意・未上書きフィールドは asset.clip を継承・無変換）。1.19→1.20：FREE 自由配置の字幕要素（FreeElement.kind='subtitle'）＋対象 FreeElement.subtitleSource（読み上げ/全行/話者・ADR-0029）を追加（任意・未指定=後方互換〔単独→読み上げ・掛け合い→全行〕・無変換）。1.20→1.21：掛け合いの同時開始 NarrationLine.startWithPrevious（前のセリフと同時に開始＝並行音声・ADR-0031）を追加（任意・未指定=逐次・無変換）。1.21→1.22：FREE 要素の任意表示名 FreeElement.name（重ね順一覧/チップの見分け用・#525-12）を追加（任意・未指定=種類＋連番の自動名・無変換）。1.22→1.23：FREE の text/subtitle 要素の背景帯 FreeElement.background（可読性の下地・通常字幕層 layer.background と同型・#529）を追加（任意・未指定/enabled:false=背景帯なし・無変換）。1.23→1.24：文字の体裁の場面別上書き scene.textStyles（テキスト種別ごとの色/サイズ/太さ/縁取り・#555）を追加（任意・各プロパティ未指定=テンプレ層→既定を継承・配置はテンプレ駆動のまま・無変換）。1.24→1.25：キーフレームの動き方 Keyframe.easing に名前つき ease-in/ease-out と自由なカーブ（cubic-bezier）を追加（値域の拡大だけ・無変換・#262）。1.25→1.26：フォントの id を enum から**形**（pattern）へ開き、持ち込みフォント `user_font_NNN` を許す（ADR-0038・#261。値域の拡大だけ＝**変換不要の後方互換マイナー**。フォントの実体は `appData/user_fonts` にあり `project.json` には入らない＝アプリを再配布経路にしない〔13 §6〕）。1.26→1.27：文字の影 shadow・字間 letterSpacing を追加し、背景帯 background を文字にも一般化（Layer/FreeElement/TextStyle の3つに同じ語彙・ADR-0032 追補3＝両形式に効く共有の語彙・#264）。いずれも任意追加＝**無変換**（未指定＝影なし・字間0・帯なし＝従来の出力は不変）。1.27→1.28：クレジットの見せ方 videoSettings.creditDisplay（常に/最初/最後/最初と最後/非表示＋秒数・ADR-0025・#359）を追加（任意・未指定＝最初と最後・3秒＝**無変換**。About 画面のクレジットは必須で不変＝13 §4）。1.28→1.29：音の自動処理 videoSettings.audioAuto（#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4）を追加（任意・**新規は既定で「する」／読み込んだ古い動画には明示的に「しない」を書き込む**＝既に作った動画の音を変えない）。1.29→1.30：**動画の長さの上限**（videoSettings.maxDurationSec の maximum）を **600→1800 秒（30分）**へ広げる（ADR-0045・2026-09-18 利用者判断・#1205。**値域の拡大だけ＝変換不要の後方互換マイナー**〔古い文書はそのまま読める〕。⚠️ **timeline-project も同時に 1.13 へ**＝maxDurationSec は共有 $defs/VideoSettings の一部で、$ref で共有しているため〔§1 の規則＝$ref で自動的に効くことは版を揃えない理由にならない〕）。1.30→1.31：素材の「AI解析」を書いたのは誰か Asset.aiDescriptionAuthor（ai/user・#1317）を追加（任意・未指定＝前の版の素材＝説明があれば触らない・**無変換**。⚠️ **timeline-project も同時に 1.14 へ**＝$defs/Asset を共有）。1.31→1.32：キーフレームの動き方 Keyframe.easing に**「止める」（`hold`）**を追加（#1365＝区間は前のキーの値のまま・当キーで切り替わる。値域の拡大だけ＝**無変換**。⚠️ **timeline-project も同時に 1.15 へ**＝$defs/Keyframe を共有）。 */
+export const PROJECT_SCHEMA_VERSION = '1.32';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -151,14 +157,24 @@ export function createGroupId(existingIds: readonly string[]): string {
   return nextNumberedId('group', existingIds);
 }
 
-/** ovclip_NNN を発行する（§2.1・overlay クリップ id・project 内一意・ADR-0018）。 */
-export function createOverlayClipId(existingIds: readonly string[]): string {
-  return nextNumberedId('ovclip', existingIds);
+/** clip_NNN を発行する（§2.1・**タイムライン形式**のクリップ id・project 内一意・ADR-0032）。場面形式の `ovclip_NNN` とは別物。 */
+export function createClipId(existingIds: readonly string[]): string {
+  return nextNumberedId('clip', existingIds);
+}
+
+/** track_NNN を発行する（§2.1・**タイムライン形式**のトラック id・project 内一意・ADR-0032）。 */
+export function createTrackId(existingIds: readonly string[]): string {
+  return nextNumberedId('track', existingIds);
 }
 
 /** anim_NNN を発行する（§2.1・要素アニメーション id・project 内一意・ADR-0019 ④）。 */
 export function createAnimationId(existingIds: readonly string[]): string {
   return nextNumberedId('anim', existingIds);
+}
+
+/** marker_NNN を発行する（§2.1・**タイムライン形式**の目印 id・project 内一意・#356 ①）。 */
+export function createMarkerId(existingIds: readonly string[]): string {
+  return nextNumberedId('marker', existingIds);
 }
 
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
@@ -216,8 +232,29 @@ export function isSupportedSchemaVersion(version: string): boolean {
   return version.startsWith('1.');
 }
 
+/**
+ * 読込失敗の理由（#263）。
+ *
+ * ⚠️ **文言だけでは分けられない**＝「前に保存できていたところから開く」を出してよいのは
+ * **中身が壊れている**ときだけ。新しい版・別の形式は壊れていないので、戻しても何も解決せず、
+ * **古い内容へ黙って巻き戻す**ことになる（§2-5）。
+ */
+export type ProjectLoadFailure =
+  /** 中身が壊れている（JSON にならない・形が違う）＝控えから戻せる見込みがある。 */
+  | 'broken'
+  /** アプリより新しい版・別の形式＝壊れていないので戻しても直らない。 */
+  | 'unsupported';
+
 /** 読込失敗（次の行動を示すユーザー向け文言を message に持つ）。 */
-export class ProjectLoadError extends Error {}
+export class ProjectLoadError extends Error {
+  constructor(
+    message: string,
+    /** 既定は `unsupported`＝**戻す導線を出さない側**（壊れていないものを巻き戻さない）。 */
+    readonly failure: ProjectLoadFailure = 'unsupported',
+  ) {
+    super(message);
+  }
+}
 
 /** 文字列(JSON) → Project。schemaVersion と最低限の構造を検証する。 */
 export function parseProjectDoc(text: string): Project {
@@ -225,24 +262,45 @@ export function parseProjectDoc(text: string): Project {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new ProjectLoadError('プロジェクトファイルを読み取れませんでした。別のプロジェクトを選んでください。');
+    throw new ProjectLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。', 'broken');
   }
   if (typeof raw !== 'object' || raw === null) {
-    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   const doc = raw as Record<string, unknown>;
+  // タイムライン編集の形式（ADR-0032）は**別の文書**なので、場面形式として読み込まない。
+  // 版の判定より先に見る＝版は形式ごとに独立に進むので、「新しい形式のため開けません（更新してください）」
+  // という**別の理由**の案内になってしまう（§2-5・15 §6 `PROJECT_FORMAT_UNSUPPORTED`）。
+  if (isTimelineProjectDoc(doc)) {
+    throw new ProjectLoadError('この動画はタイムラインで編集する形式です。場面の編集画面では開けません。一覧から別の動画を選んでください。');
+  }
   const version = doc.schemaVersion;
-  if (typeof version !== 'string' || !isSupportedSchemaVersion(version)) {
-    throw new ProjectLoadError('このプロジェクトは新しい形式のため開けません。アプリを更新してください。');
+  // ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（α-7 再監査 🟡）＝一緒にしていたので、
+  // `schemaVersion` が欠けた**壊れた**動画にも「アプリを更新してください」と出ていた＝
+  // **更新しても直らない次の行動**。しかも `broken` にならないので、#263 の**控えから戻す導線が出ない**
+  //（いちばん助けが要る場面でいちばん助けが出ない）。
+  if (typeof version !== 'string') {
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
+  }
+  if (!isSupportedSchemaVersion(version)) {
+    throw new ProjectLoadError('この動画は新しい版で作られているため開けません。アプリを更新してください。');
+  }
+  // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝上の関門は**メジャーしか見ない**ので、
+  // **同じメジャーの新しいマイナー**（1.26 等）はここまで通ってしまう。そのまま進むと
+  // `migrateProject` が版を**現行へ書き換え**（印が黙って下がる）、新しい語彙があれば ajv が落ちて
+  // 「この動画の内容が正しくありません。**別の動画を選んでください**」＝**嘘**になる
+  //（壊れておらず、アプリを更新すれば開ける。別のを選んでも解決しない・§2-5）。
+  if (isNewerSchemaVersion(version, PROJECT_SCHEMA_VERSION)) {
+    throw new ProjectLoadError(PROJECT_NEWER_VERSION_MESSAGE);
   }
   for (const key of ['projectId', 'projectName', 'purpose'] as const) {
     if (typeof doc[key] !== 'string') {
-      throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。');
+      throw new ProjectLoadError('この動画に必要な情報が欠けています。一覧から別の動画を選んでください。', 'broken');
     }
   }
   for (const key of ['assets', 'parts', 'scenes'] as const) {
     if (!Array.isArray(doc[key])) {
-      throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。');
+      throw new ProjectLoadError('この動画に必要な情報が欠けています。一覧から別の動画を選んでください。', 'broken');
     }
   }
   let migrated: Project;
@@ -251,7 +309,7 @@ export function parseProjectDoc(text: string): Project {
   } catch (e) {
     // 移行中の想定外エラー（防御しきれない型不正）も §2-5 文言で拒否する＝生 TypeError を UI へ出さない（#416 P1）。
     console.warn('[project] 移行中に想定外のエラー:', e);
-    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+    throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
   }
   // 移行後（現行版）を正典スキーマで検証する（11 §8 V2・#416）。旧版は migrate 済みなので現行スキーマで判定できる（後方互換）。
   // 読込拒否は「型不正・必須欠落」（構造破損）に限定する（受け入れ条件）。minLength/enum/範囲などの内容制約違反は
@@ -261,7 +319,7 @@ export function parseProjectDoc(text: string): Project {
   if (!check.valid) {
     console.warn('[project] 読込スキーマ検証に失敗:', check.errors);
     if (check.structural) {
-      throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+      throw new ProjectLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
     }
   }
   return migrated;
@@ -286,31 +344,35 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
   return { valid: false, errors: formatProjectErrors(), structural };
 }
 
-/** 読込時に旧バージョン(1.0〜1.16)を現行(1.17)へ移行する。
- *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
- *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
- *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
- *  1.3→1.4: bgmSettings.bundledBgmId を検証（未知の id は標準BGM未選択へ落とす・追加は任意フィールド）。
- *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす（場面ごとのフォント・追加は任意フィールド）。
- *  1.5→1.6: FREE 図形の種別追加（rounded_rect/triangle/star/arrow/speech_bubble）＋枠線（strokeColor/strokeWidth）。
- *          いずれも後方互換の任意追加のため、版番号の付け替え以外の変換は不要（#173）。
- *  1.6→1.7: テキストごとのフォント（FreeElement.fontId＋scene.textFontIds）。後方互換の任意追加＝変換不要（#178）。
- *  1.7→1.8: 掛け合い（scene.lines＝NarrationLine[]＋scene.subtitleEnabledDefault）。後方互換の任意追加＝変換不要（ADR-0015/#180）。
- *  1.8→1.9: FREE 要素の回転（FreeElement.rotation・度）。後方互換の任意追加＝変換不要（未指定=回転なし・#208）。
- *  1.9→1.10: FREE text の体裁（lineHeight＝行間・textAlign＝揃え）。後方互換の任意追加＝変換不要（未指定は既定＝行間1.3/左揃え・#209）。
- *  1.10→1.11: FREE 要素の hidden（非表示）/locked（ロック）。後方互換の任意追加＝変換不要（未指定＝表示・編集可・#210）。
- *  1.11→1.12: 掛け合いの行ごとの抑揚（NarrationLine.intonation）。後方互換の任意追加＝変換不要（未指定＝場面/動画の既定を継承・#242）。
- *  1.12→1.13: 場面ごと・スロット別の画像の収め方（scene.slotFits）。後方互換の任意追加＝変換不要（未指定＝テンプレ層の fit を使用・④）。
- *  1.13→1.14: 要素のグループ化（scene.groups）。後方互換の任意追加＝変換不要（未指定＝グループ無し・ADR-0022）。
- *  1.14→1.15: 場面横断タイムラインの上位編集（timelineOverlay）。後方互換の任意追加＝変換不要（未指定＝場面射影のみ・ADR-0018）。
- *  1.15→1.16: 場面ごとのBGM（scene.bgmSettings）。後方互換の任意追加＝変換不要（未指定＝プロジェクト既定を継承・ADR-0018 ③(7)）。
- *  1.16→1.17: 要素アニメーション（timelineOverlay.animations＝キーフレーム）。後方互換の任意追加＝変換不要（未指定＝アニメ無し・静止・ADR-0019 ④）。 */
 /** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** 読込時に旧バージョンを現行（`PROJECT_SCHEMA_VERSION`）へ移行する。
+ *
+ *  ⚠️ **版ごとの変更一覧はここに置かない**（ファイル冒頭の `PROJECT_SCHEMA_VERSION` の docstring が
+ *  単一の参照元）。同じ一覧を2か所に持ったので**実際にずれた**＝冒頭は最新なのに、ここは長らく
+ *  「1.0〜1.16 を 1.17 へ」のままだった（#513・**6版ぶん**開いていた）。**現行版の番号もここには書かない**
+ *  （3行離れた定数に書いてある）。
+ *
+ *  ここに書くのは**実際に変換が要る版だけ**。書いていない版は additive な任意追加で、
+ *  **版番号の付け替え以外の変換は不要**（読めなくならないので移行の手当ても要らない）。
+ *
+ *  1.0→1.1: companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
+ *  1.1→1.2: videoSettings.width/height を除去（寸法は aspectRatio から導出＝ADR-0012）。
+ *  1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォントへ）。
+ *  1.3→1.4: 未知の bgmSettings.bundledBgmId を標準BGM未選択へ落とす。
+ *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす。null は継承の明示なので保持。
+ *  1.28→1.29: 音の自動処理（`videoSettings.audioAuto`）に「しない」を書き込む
+ *             ＝**前の版の文書だけ**（既に作った動画の音を変えない・§2-5）。
+ *
+ *  ⚠️ 版に紐づかない正規化も1つある＝**同時開始**（ADR-0031）の休眠フラグ・`startWithPrevious`×`startSec`
+ *  の併存を読込時に解消する（実装が無視する状態を残さない・ADR-0026④）。版で分岐しないので上の一覧には無い。 */
 function migrateProject(project: Project): Project {
+  // ⚠️ **書き換える前の版を控える**（α-6 出口監査 🔴2）＝下の「前の版にだけ書き込む」判定に要る。
+  // `next.schemaVersion` は現行版へ潰れるので、そちらを見ると**新規の文書も旧版と同じ扱い**になる。
+  const from = project.schemaVersion;
   const next: Project = {
     ...project,
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -358,6 +420,24 @@ function migrateProject(project: Project): Project {
       }
       return sc;
     });
+  }
+  // 1.28→1.29: 音の自動処理（#257 ダッキング・#259 ノーマライズ）。
+  // ⚠️ **既に作った動画の音を変えない**（§2-5）＝新しい動画では既定で「する」だが、
+  // **前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて書き出し直した
+  // だけで BGM の鳴り方と全体の音量が変わり、**前に書き出した動画と別物**になる。
+  //
+  // ⚠️ **前の版の文書にだけ書く**（α-6 出口監査 🔴2）＝版を見ないと、`defaultVideoSettings()` が
+  // `audioAuto` を書かないぶん**現行版で作った動画も条件に当たり**、開き直すたびに「しない」が
+  // 焼き付く（既定で「する」だったものが黙って OFF に化ける＝§2-5）。タイムライン形式は
+  // `migrateTimelineProject` が現行版で早期 return しており、揃えないと形式で挙動が割れる
+  //（ADR-0026②）。
+  // 触るのは `videoSettings` がオブジェクトのときだけ（壊れた値は検証へ＝#416 P1）。
+  const vsAuto: unknown = next.videoSettings;
+  // ⚠️ **「前の版」は「音の自動処理が無かった版（1.29 より前）」**（PR #1368 レビュー 🔴）＝「現行と違う版」で
+  // 見ていたので、**版を上げるたびに**、1.29 以降で作られ未指定（＝既定で「する」）の動画まで「しない」に化けていた
+  // （1.30・1.31 に上げたときにも同じことが起きていた）。
+  if (typeof from === 'string' && isNewerSchemaVersion(PROJECT_AUDIO_AUTO_SINCE, from) && isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
+    next.videoSettings = { ...vsAuto, audioAuto: OLD_PROJECT_AUDIO_AUTO } as unknown as VideoSettings;
   }
   // 同時開始（ADR-0031）：先頭行の休眠フラグ・startWithPrevious×startSec の併存を読込時に正規化する
   // （実装が無視する状態を残さない・schema は併存を許すが読込で解消・ADR-0026④）。lines が配列の場面のみ触る

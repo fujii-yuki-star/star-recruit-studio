@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import * as ffmpeg from "../../infrastructure/ffmpegExport";
 import { sampleTemplates } from "../../infrastructure/sampleData";
@@ -67,8 +67,14 @@ describe("PrecheckScreen 書き出しを止める項目では主ボタンを押�
     vi.spyOn(ffmpeg, "detectH264Capability").mockResolvedValue("unavailable");
     setup([scene({ templateId: "missing_tmpl" })]); // 項目側の blocker も**同時に**成立させる
     render(<PrecheckScreen onNavigate={vi.fn()} />);
-    await waitFor(() => expect(cta().disabled).toBe(true)); // capability は非同期に届く
-    expect(screen.getByText(/この端末では動画を保存できません/)).toBeTruthy();
+    // ⚠️ 待つのは**端末側の文言そのもの**（#752 で発覚）。「押せない」だけを待つと、項目側の理由で
+    // 最初の描画から真なので**届く前に通り抜け**、混んでいるときだけ項目側の文言を読んで落ちる
+    //（待っている条件と確かめたいことが別物＝間違った理由で緑になるテスト）。
+    // ⚠️ 文は**書き出し画面と同じ**（UI/UX 監査 2026-10-02）＝以前は「上の確認結果で問題の項目を解消して」と言っていたが、
+    // 一覧の項目を直しても書き出せるようにはならない（パソコン側の事情）。一覧の行と下の理由の2か所に出る。
+    expect((await screen.findAllByText(/このパソコンでは動画を書き出せません/)).length).toBe(2);
+    expect(screen.queryByText(/問題の項目を解消してから/)).toBeNull();
+    expect(cta().disabled).toBe(true);
     expect(screen.queryByText(/動画を書き出せない項目があります/)).toBeNull(); // 二重に出さない
   });
 

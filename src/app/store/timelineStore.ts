@@ -1,0 +1,3135 @@
+// タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
+// （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
+import { create } from "zustand";
+import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, type ExportSize } from "../../domain/constants";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
+import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
+import { relinkTimelineAsset } from "../../domain/timeline/relink";
+import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
+import { createAssetId } from "../../domain/project/persistence";
+import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
+import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
+import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
+import { runBulkImport } from "./bulkImport";
+import type { Asset } from "../../domain/project/types";
+import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
+import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
+import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf } from "../../domain/timeline/audio";
+import type { AudioSource } from "../../domain/timeline/audio";
+import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
+import { keepRestorePoints } from "./restorePointKeeper";
+import { createProjectId } from "../../domain/project/persistence";
+import { useProjectStore } from "./projectStore";
+import { onProjectDeleted } from "./projectDeletion";
+import type { DeletionHandoff } from "./projectDeletion";
+import { createEmptyTimelineProject } from "../../domain/timeline/create";
+import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
+import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
+import type { AssetType } from "../../domain/enums";
+import { frameTimeSec, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
+import { clampTimelinePlayheadSec, effectiveFps, loopSpan, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
+import type { TalkMotion, TimelineClip, TimelineProject } from "../../domain/timeline/types";
+import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
+import type { FontId } from "../../domain/font/fontCatalog";
+import type { SourceSize } from "../../domain/timeline/cropFill";
+import {
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack,
+  visualPlacementFor,
+  moveClip,
+  setVisualClipContent,
+  setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
+  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
+  setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setVoiceSpeaker,
+  setVoiceText, trimClip, trimClips, trimTargetsAt,
+} from "../../domain/timeline/edit";
+import { EDIT_BLOCKED } from "../../domain/timeline/edit";
+import { placeDroppedAssets } from "../../domain/timeline/fileDropPlacement";
+import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
+// ⚠️ **欄の名前は画面と共有する**（#869）＝断りを「操作した欄の中」に返すため。
+import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../timelinePanels";
+import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
+import { clearKeyframes, keyframeTimeAt, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
+import { applyMotionPreset, type MotionPreset } from "../../domain/timeline/motionPresets";
+import { decodeSubtitleBytes, parseSubtitleFile } from "../../domain/subtitle/subtitleFile";
+import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
+import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
+import { sameSynthInput } from "../../domain/voice/voiceProvider";
+// ⚠️ **声の設定の解決は domain に1つ**（#977）＝戻すときの突き合わせでも同じ解決が要る。
+import { resolveTimelineVoice, voiceClipNeedsVoice } from "../../domain/timeline/voice";
+import { resolveAudioAuto } from "../../domain/voice/audioAuto";
+import type { VoiceProvider } from "../../domain/voice/voiceProvider";
+import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
+import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
+import { importVoiceFile } from "../../infrastructure/voiceFs";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
+import type { NarrationStatus } from "../../domain/enums";
+import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
+import { explodeTemplateClip } from "../../domain/timeline/explode";
+import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds, timelineVideoRelPaths } from "../../domain/timeline/export";
+import { timelineFramePlan } from "../../domain/timeline/export";
+// ⚠️ **焼く総コマ数は domain の1つを通す**（#1211）＝組み立てる側の分母と同じ数を見る。
+import { bakeFrameTotal, planTimelineExportSegments } from "../../domain/timeline/exportSegments";
+import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
+import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import type { LayerBackground, TextShadow } from "../../domain/template/types";
+import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
+import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
+import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
+import type { ExportRunPhase } from "../../domain/export/exportProgress";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
+import { showSaveVideoDialog } from "../../infrastructure/dialog";
+import { useStartupJobStore } from "./startupJobStore";
+import {
+  accountStagedVideo,
+  beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
+  endExportDiskWatch, exportVideo, listenExportProgress,
+  readExportFrame, stageClipFrames, stageExportFrame,
+} from "../../infrastructure/ffmpegExport";
+import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
+import type { Template } from "../../domain/template/types";
+import { exportFailedMessage, exportBlockedMessage, resolveExportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, isOwnCleanupPending, useExportLockStore } from "./exportLock";
+import type { HistoryStacks } from "../../domain/project/history";
+import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
+import { freezeFrameAt, freezeFrameIssue, freezeSnapshotOf, freezeSourceFrame, freezeSourceSec, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { markersClampedMessage, addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
+import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/assetFs";
+import { newFrameAsset } from "../../domain/asset/assetFile";
+import { volumeAt } from "../../domain/timeline/audio";
+import { deleteRange } from "../../domain/timeline/deleteRange";
+import type { BlendMode } from "../../domain/template/types";
+import { userFacingMessage } from "../userFacingError";
+
+/**
+ * 声を作ったあと**長さを合わせられなかった**ときに、断りをどこへ出すか（#1045）。
+ *
+ * ⚠️ **1つの物として渡す**＝真偽値を足す形にすると、呼び出し側が**渡し忘れても型が通る**。
+ * `"selected"`＝1件ずつ（相手＝いま選んでいる部品なので「選んだ部品」の欄へ）／
+ * `"collect"`＝まとめて（相手は選んでいない部品なので、名前を集めて最後にまとめて出す）。
+ */
+export type VoiceNoticeSink =
+  | { kind: "selected" }
+  | { kind: "collect"; notFitted: { label: string; reason: EditBlockedReason }[] };
+
+/** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
+const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
+
+// 声を作れなかったときの文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
+const VOICE_FAILED_MESSAGE = "声を作れませんでした。しばらくしてから、もう一度お試しください。";
+const VOICE_SAVE_FAILED_MESSAGE = "作った声を保存できませんでした。もう一度お試しください。";
+/**
+ * 前に作った声が**そのまま使える**ときだけ、それを添える（#755-3＝消えたと思わせない）。
+ *
+ * ⚠️ **条件は2つ**（`projectStore` の `joinVoiceFailure` と同じ・`11 §7.6.3`）＝**印を据え置いた**
+ * かつ**鳴らす材料がある**。印を `failed` にするのに「そのまま使えます」と言うと、**古い文の声を
+ * 使ってよい**と誤解させる。⚠️ ファイルの有無だけで判断していた（PR #791 レビュー 🔴）＝旧バグで
+ * 作られた文書（`failed` なのに `voicePath` が残っている）を開いて再試行すると、まさにそれが出ていた。
+ */
+const keptVoiceSuffix = (before: NarrationStatus, voicePath: string | null | undefined): string =>
+  (statusAfterVoiceFailure(before) === NARRATION_STATUS.generated && voicePath ? KEPT_PREVIOUS_VOICE_SUFFIX : "");
+const VOICE_EXPORTING_MESSAGE = "いま動画を書き出しています。終わってから声を作ってください。";
+const VOICE_DURATION_UNKNOWN_MESSAGE = "声の長さを測れませんでした。部品の長さは手で合わせてください。";
+
+// 書き出しの結果の文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
+const EXPORT_BUSY_OPEN_MESSAGE = "いま動画を書き出しています。終わってから、別の動画を開いてください。";
+// 取り込みの最中に文書を入れ替えると、着地したときには別の動画なので**取り込んだ素材が入らない**
+// （ファイルだけディスクに残る）。書き出し中と同じ形で、開く前に断る（#724・§2-5）。
+const IMPORTING_OPEN_MESSAGE = "いま素材を取り込んでいます。終わってから、別の動画を開いてください。";
+const IMPORTING_CREATE_MESSAGE = "いま素材を取り込んでいます。終わってから、新しい動画を作ってください。";
+const EXPORT_DONE_MESSAGE = "動画を保存しました。";
+const EXPORT_FAILED_MESSAGE = exportFailedMessage.EXPORT_FAILED_TIMELINE;
+const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
+const EXPORT_UNSUPPORTED_MESSAGE = "この環境では動画を書き出せません。アプリから起動し直してお試しください。";
+
+/**
+ * 理由の**出どころ**（#729 レビュー）。画面は理由を2か所に出す＝**中身の理由は一覧**（`timelineExportBlockers`
+ * を全件並べる）、**いまの事情は一段の知らせ**。どちらに属するかを画面側で数え上げ直すと
+ * （例：`exportBlockers.length === 0` で判定する）**この関数の判定順を推測する**ことになり、
+ * 順番を入れ替えた瞬間に黙って同じ文が二重に出る。**属性として返して、画面はそれに従う**。
+ */
+export const EXPORT_BLOCK_SOURCE = {
+  /** 文書の中身が理由＝**下の一覧にも同じ文が並ぶ**（画面は重ねて出さない）。 */
+  content: "content",
+  /** いま始められない事情（取り込み中・声の作成中・別形式の書き出し中・この端末では書き出せない）。 */
+  situation: "situation",
+} as const;
+export type ExportBlockSource = (typeof EXPORT_BLOCK_SOURCE)[keyof typeof EXPORT_BLOCK_SOURCE];
+
+/** 書き出しを始められない理由（`null`＝始められる）。`phase` は場面形式と同じ扱い分け（`11 §3.5`）。 */
+export type ExportStartBlock = {
+  message: string;
+  phase: typeof P.error | typeof P.unsupported;
+  source: ExportBlockSource;
+};
+
+/**
+ * 新しいタイムライン動画へ**会社の見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ *
+ * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
+ * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
+ * ⚠️ **入らなくても動画は作る**＝コピーは失敗しうる（置き場から消えている等）ので、
+ * 足せなければロゴ無しで作る（新規作成そのものは止めない＝場面形式と同じ）。
+ */
+async function withBrandLogo(
+  doc: TimelineProject,
+  logoLibraryAssetId: string | undefined,
+): Promise<{ doc: TimelineProject; added?: { assetId: string; relPath: string }; error?: string }> {
+  if (logoLibraryAssetId == null) return { doc };
+  try {
+    const list = await listLibraryAssets();
+    if (list == null) {
+      return { doc, error: "よく使う素材の一覧を読めませんでした。会社の見た目のロゴは入っていません。" };
+    }
+    const lib = list.find((a) => a.id === logoLibraryAssetId);
+    if (!lib) return { doc, error: "会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください。" };
+    const { asset, fileName } = assetFromLibrary(lib, doc.assets.map((a) => a.assetId));
+    const relPath = await copyLibraryAssetToProject(logoLibraryAssetId, doc.projectId, fileName);
+    return { doc: { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] }, added: { assetId: asset.assetId, relPath } };
+  } catch {
+    // ⚠️ **黙って落とさない**（差分再監査 3巡目 ℹ️・§2-5）＝場面形式は同じ状況で理由を出す。
+    return { doc, error: "会社の見た目のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
+  }
+}
+
+/**
+ * 書き出しの門へ渡してよい**持ち込みフォントの一覧**（`null`＝調べていない／読めなかった）。
+ *
+ * ⚠️ **場面形式の2画面と同じ規則**（`ExportScreen`／`PrecheckScreen`）＝ここだけ違うと、
+ * 同じ状況で**形式によって門の通り方が変わる**（ADR-0026②）。
+ * ⚠️ **export しているのは配線をテストで守るため**＝門そのもの（`exportStartBlock`）は入力を
+ * 直接受け取るので、ここを間違えても門のテストは緑のまま通る（実際に見落とした＝PR #909 レビュー 🟡）。
+ */
+export function knownUserFontIds(): Set<string> | null {
+  const s = useProjectStore.getState();
+  return s.userFontIds && !s.userFontsUnreadable ? new Set(s.userFontIds) : null;
+}
+
+/**
+ * **書き出しを始められるか**を1か所で見る（#718）。
+ *
+ * これまで store の開始チェックと画面のボタンで**条件が別々に書かれ**、画面は `timelineExportBlockers` と
+ * 再生中しか見ていなかった＝取り込み中・別形式の書き出し中・この端末では書き出せない・**声を作っている最中**は
+ * **押せてしまって、押してから断られていた**（#703 が場面編集で消した「押してから断る」の残り）。
+ *
+ * 特に**声を作っている最中**は実害が大きい＝合成が着地したときには書き出しが始まっていて `commit` が撥ねるので、
+ * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
+ * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
+ */
+export function exportStartBlock(input: {
+  doc: TimelineProject | null;
+  isImporting: boolean;
+  /** 声を作る回が走っているか（#755）。⚠️ **印ではなく回**＝印は開き直しで消える。 */
+  voiceRunning: boolean;
+  knownTemplateIds: Set<string>;
+  /**
+   * いま手元にある**持ち込みフォント**の id（α-6 差分再監査）。**`null`＝まだ調べていない**＝見ない
+   *（`missingAsset`／#347 と同じ流儀で、調べていないのに「見つからない」と断らない）。
+   */
+  availableUserFontIds: Set<string> | null;
+  /** 目録が**読めなかった**か（差分再監査 2巡目）＝「まだ調べていない」とは別に断る。 */
+  userFontsUnreadable: boolean;
+  otherExportRunning: boolean;
+  /** 直前の回の後片づけ待ちか（#843）＝`isOwnCleanupPending`。押せるのに押すと断られる、を作らない。 */
+  cleanupPending: boolean;
+  canExportHere: boolean;
+}): ExportStartBlock | null {
+  const S = EXPORT_BLOCK_SOURCE;
+  if (!input.doc) return null; // 開いていないときはボタン自体が無い
+  if (input.isImporting) return { message: EXPORT_BLOCKED_IMPORTING_MESSAGE, phase: P.error, source: S.situation };
+  // ⚠️ 見るのは**走っている回**（`voiceRunning`）＝印（`generatingVoiceClipId`）は開き直しで消えるので、
+  // それだけを見ると**合成が走ったまま書き出しを始められる**（`/canon-check`）。
+  if (input.voiceRunning) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
+  if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error, source: S.situation };
+  // ⚠️ **自分の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
+  // ボタンが戻っているのに `acquire` が失敗する。断り文は**別のもの**にする（走っている「ほかの動画」は無い）。
+  if (input.cleanupPending) return { message: EXPORT_CLEANUP_PENDING_MESSAGE, phase: P.error, source: S.situation };
+  const blockers = timelineExportBlockers(input.doc, {
+    knownTemplateIds: input.knownTemplateIds,
+    userFontsUnreadable: input.userFontsUnreadable,
+    ...(input.availableUserFontIds ? { availableUserFontIds: input.availableUserFontIds } : {}),
+  });
+  if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
+  // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
+  if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported, source: S.situation };
+  return null;
+}
+
+export interface TimelineState {
+  /** 開いている文書（未オープンは null）。 */
+  doc: TimelineProject | null;
+  /** 開けなかった理由（利用者向け文言）。 */
+  loadError: string | null;
+  /** どういう落ち方か（`broken`＝控えから戻す導線を出す側・#977）。 */
+  loadFailure: "broken" | "unsupported" | null;
+  /** 読み込み中（二重に開かない）。 */
+  isLoading: boolean;
+  /** 再生ヘッドの位置（秒）。 */
+  playheadSec: number;
+  /** 選んでいるクリップ（複数選択・#629）。 */
+  selectedClipIds: string[];
+  /** 素材の表示用 src（assetId → URL）。場面形式の `assetSrcById` と同じ役割。 */
+  assetSrcById: Record<string, string>;
+  /**
+   * **動画の本体**の URL（assetId → URL・#512 段1）。`assetSrcById` は動画に**代表フレーム**を入れる
+   * （絵として描く用）ので、実映像を流すにはこちらを使う。無い＝流せない＝静止のまま（穴を開けない）。
+   */
+  videoSrcById: Record<string, string>;
+  /**
+   * 帯に敷く絵（#332）＝音の波形／動画のコマ列。assetId → 中身。
+   *
+   * ⚠️ **文書に持たない**（作り直せるもの＝Issue の指定・既存の代表フレームと同じ扱い）。
+   * `null`＝作ろうとして作れなかった（もう一度たのまない＝同じ失敗を繰り返さない）。
+   */
+  analysisByPath: Record<string, AssetAnalysis | null>;
+  /**
+   * **ファイルが実際に見つからない素材**の番号（#1019 ⑤・場面形式の `missingAssetIds` と同じ材料）。
+   *
+   * ⚠️ **表示用の URL では分からない**＝`assetDisplayUrl` は URL を組むだけでディスクを見ないので、
+   * ファイルが動いた・消えた状態でも非 null。これで判定すると**選び直す入口が実機で一度も出ない**
+   * （`15 §6` `ASSET_FILE_MISSING`＝場面形式は Rust の実在確認で拾っている・ADR-0026②）。
+   * ⚠️ **調べられない場（ブラウザ）では空**＝「全部見つからない」は嘘になる（`missingAssetFiles`）。
+   */
+  missingAssetIds: string[];
+  /** 見つからない素材を調べ直す（開いたとき・選び直した後）。 */
+  refreshMissingAssets: () => Promise<void>;
+  /**
+   * 帯に敷く絵を**必要になったときだけ**作る（#332）。渡すのは部品そのもの。
+   *
+   * ⚠️ **同じものに2回たのまない**＝帯は再描画のたびに呼ばれるので、素通しにすると
+   * FFmpeg が何度も起動する。作った／作れなかった、のどちらも記録して打ち止めにする。
+   * ⚠️ **鍵はファイルの場所**＝素材の番号ではない（読み上げは素材を持たず、作成済みの音声を直に指す）。
+   */
+  ensureClipAnalysis: (clipId: string, barWidthPx: number) => void;
+  /**
+   * 素材の**実寸**（assetId → px・#634）。絵を測らないと分からないので**画面が測って入れる**。
+   * プレビューと書き出しが同じ値を見る＝同じ絵になる（ADR-0001）。測れていない素材は入らない。
+   */
+  assetSizes: Record<string, SourceSize>;
+  /** 測った実寸を入れる（#634）。同じ値なら何もしない＝描き直しを増やさない。 */
+  setAssetSize: (assetId: string, size: SourceSize) => void;
+  /**
+   * 音の素材の**長さ**（assetId → 秒・#1348）＝**開いたときに測ったぶん**（素材に長さが書いていない古い動画）。保存しない。
+   * 取り込んだ素材は `metadata.durationSec` に書くので、ここには入らない。読むのは `audioAssetDurationSec`。
+   */
+  audioDurations: Record<string, number>;
+  /** 長さの分からない音の素材を測る（開いた直後に1回・#1348）。文書は書き換えない。 */
+  _measureAudioDurations: () => Promise<void>;
+  /**
+   * 音源（**音源キー** → 再生できる URL）。**開いたときにまとめて用意する**＝鳴らす瞬間に読みに行くと
+   * 頭が欠ける。キーはクリップ id ではなく**音源の中身**（`audioSourceKey`）なので、同じ曲を使う複数の
+   * クリップで使い回せ、セッション中に増えたクリップ（複製）も読み直さずに鳴る。
+   * 読めなかったものは入らない（その部品は鳴らない）。
+   */
+  audioSrcByKey: Record<string, string>;
+  /**
+   * **まだ用意していない音源をそろえる**（#1061）＝置いた直後から鳴るようにする。
+   *
+   * ⚠️ **開いたときにまとめて読むだけでは足りない**＝取り込んだ素材を音の部品へ入れると、
+   * その音源は**まだ鍵が無い**（開き直すまで無音）。同じ形は動画で一度直している（#512 段1＝
+   * 「忘れると『開き直すと映るのに、取り込んだ直後は映らない』という入口ごとの割れになる」）。
+   * ⚠️ **読めなかったものは覚えて、二度とたのまない**（`§7.6.2.2`＝再試行しない）。
+   */
+  ensureAudioSrcs: () => Promise<void>;
+  /** 読もうとした音源キー（内部）＝読めなかったものを何度もたのまない。 */
+  _audioTried: Set<string>;
+  /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
+  history: HistoryStacks<TimelineProject>;
+  /**
+   * **最後に置いた／動かした目印**（#1161 レビュー由来 🟡）。時間軸の旗と一覧の枠が指す先。
+   *
+   * ⚠️ **再生位置の一致では足りない**＝再生中は時計が毎フレーム**生の秒**で上書きするので、
+   * 格子に落ちた目印の時刻とは実質一致しない（`markerTimeEq` の許容は `1e-6`）。
+   * 「置いたのにどれが自分の印か分からない」を、**選んだ相手を覚える**ことで解く（ADR-0040 決定2 の目的）。
+   * ⚠️ **文書には持たない**＝選択は画面の状態（ADR-0033 と同じ考え方）。保存も履歴も関係しない。
+   */
+  selectedMarkerId: string | null;
+  /**
+   * 置けなかった理由と、**どの欄の話か**（#869・ADR-0034 決定10）。
+   *
+   * ⚠️ **理由と場所は1つで運ぶ**＝別々に持つと片方だけ更新され、**前の操作の場所に
+   * 今の理由が出る**（押していない欄が赤くなる）。
+   * ⚠️ **場所は「操作」が決める**（理由ではない）＝同じ「重なっています」でも、置くボタンで
+   * 出たなら置く欄・帯を掴んで出たなら並びの欄が正しい。
+   */
+  editBlocked: { reason: EditBlockedReason; at: BlockTarget } | null;
+  /** 声を作れなかったときの案内（§2-5）。次に作り始めたら消す。 */
+  voiceError: string | null;
+  /**
+   * 編集の結果、**黙って変えたくないこと**を知らせる（#1193）。
+   *
+   * ⚠️ **断り（`editBlocked`）とは別**＝あちらは「できなかった」、こちらは「**できたが、こう変えた**」。
+   * いまの用途＝範囲を詰めたときに、**消した所にいた目印を切れ目へ寄せた**こと。
+   * ⚠️ **黙って捨てない**＝利用者が書いた覚えを勝手に消さないので、寄せて**数を知らせる**。
+   */
+  editNotice: string | null;
+  /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
+  importError: string | null;
+  /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
+  isImporting: boolean;
+  /**
+   * まとめて取り込んでいるときの進み具合（#858）。`null`＝出さない（1件だけ／取り込んでいない）。
+   * 文書には持たない（取り込み中だけの状態）。
+   */
+  importProgress: { done: number; total: number } | null;
+  /**
+   * 素材（写真・動画）をこの動画へ取り込む（#712）。**ファイルを取り込んでから一覧へ足す**
+   * ＝失敗した素材の行を残さない。取り消しできる（文書まるごとの履歴に載る）。
+   */
+  addAsset: (file: File) => Promise<void>;
+  /** ネイティブの「開く」で選んだパスから取り込む（バイトを JS に載せない・#712）。 */
+  addAssetByPath: (path: string) => Promise<void>;
+  /**
+   * 素材の**ファイルを選び直す**（#1019 ⑤）＝`assetId` は変えない。
+   *
+   * ⚠️ **場面形式には前からある**（`relinkAssetByPath`）のに、こちらには無く、案内は
+   * 「取り込み直すか置き直してください」＝**新しい番号になる**ので、
+   * **切り抜き・動き・連動する字幕まで作り直し**になっていた（`15 §6` `ASSET_FILE_MISSING` は
+   * 「置いた場所・切り出す範囲・キーフレーム・字幕の紐づけは**構造的に**残る」と、形式を限定せず書いている）。
+   */
+  relinkAssetByPath: (assetId: string, srcPath: string) => Promise<void>;
+  /**
+   * **よく使う素材**（ADR-0035）から、この動画へ**コピー**して取り込む（差分再監査 4巡目 🟡）。
+   *
+   * ⚠️ **棚の入口がタイムラインに無かった**＝「どの動画からでも取り込める」という棚の目的が
+   * **片方の形式で成立していない**（ADR-0026②）。場面形式の `importFromLibrary` と同じ流儀
+   *（参照ではなくコピー＝プロジェクトは自己完結・ADR-0024 決定6）。
+   * ⚠️ **成否を返す**（PR #913 レビュー 🔴）＝返さないと呼ぶ側が**失敗しても「取り込みました」**と出す。
+   */
+  importFromLibrary: (libraryAssetId: string) => Promise<boolean>;
+  /**
+   * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
+   *
+   * ⚠️ **失敗しても止めない**（§2-5）＝入った分は残し、入らなかったものを名前で示す。
+   * ⚠️ **必ず `await` で1件ずつ**＝番号は文書の素材一覧を見て採るので、並行に走らせると同じ番号を2つ採る。
+   */
+  addAssets: (items: File[] | string[]) => Promise<void>;
+  /**
+   * **窓の外から落としたファイル**を取り込み、**落とした場所に置く**（ADR-0049）。
+   *
+   * `at`＝落とした列（`trackId: null`＝列の無い所＝新しい列）と時刻。`null`＝**取り込むだけ**
+   *（並びの外に落とした）。置けなかったときも**取り込みは済んでいる**（素材は一覧に残る）。
+   * ⚠️ **置き方は1件ずつアプリの中から運んだときと同じ関数**（`placeDroppedAssets` が委ねる）。
+   * ⚠️ **並べる順はファイル名の順**（エクスプローラーの既定の並びと同じ向き）。
+   * ⚠️ **1回の取り消しで全部戻る**（置いた部品と足した列を同じ `commit` で確定）。取り込んだ素材は
+   * 取り消しの対象外（ADR-0020＝素材は履歴に載らない）。
+   */
+  placeDroppedFiles: (paths: string[], at: { trackId: string | null; startSec: number } | null) => Promise<void>;
+  /**
+   * 素材のまとめて取り込みを**中止する**（#1024 ③／PR #1034 レビュー 🔴）。
+   *
+   * ⚠️ **この形式にだけ無かった**＝画面の「取り込みを中止」は**場面形式の store** の中止を
+   * 呼んでおり、押しても**この画面の取り込みは止まらなかった**（世代番号を見ているのは
+   * それぞれの store 自身なので、別の store の番号を進めても何も起きない）。
+   * ⚠️ **いま運んでいる1件は止まらない**（IPC の往復は途中で切れない）＝**入ったものは残す**。
+   */
+  cancelAssetImport: () => void;
+  /** 取り込みの世代番号（内部）。中止で進める。 */
+  _importRunSeq: number;
+  /** 取り込みの案内を閉じる。 */
+  clearImportError: () => void;
+  /**
+   * いま声を作っている部品（`null`＝作っていない）。**文書には持たない**＝自動保存で「作成中」が
+   * 残ると、開き直しても作り直せない状態が固定される（履歴にも積まない）。
+   */
+  generatingVoiceClipId: string | null;
+  /**
+   * いま走っている「声を作る」回の番号（#755・内部）。**自分の回のときだけ**印を下ろす
+   * ＝前の回が着地して、**走っている今の回の印を横取りする**のを防ぐ（横取りされると
+   * 書き出しの締めが外れ、次の着地は `commit` に断られて作った声が消える）。
+   */
+  _voiceRun: number | null;
+  /**
+   * 連続入力を1つの取り消しにまとめている深さ（#708）。**保存しない**（画面の都合であって動画の中身ではない）。
+   * 場面形式の `_historyGroupDepth` と同じ仕組み＝同じ概念を同じ挙動にする（ADR-0026②）。
+   */
+  _historyGroupDepth: number;
+  /** グループ中でまだ「編集前」を記録していないか（**遅延記録**＝欄に入っただけでは履歴を消費しない）。 */
+  _historyGroupPending: boolean;
+  /**
+   * まとめの**世代**（#817 レビュー 🔴）。畳むたびに1つ上がる。
+   *
+   * ⚠️ **開いた側（持ち主）と、畳む側が別人になれる**ために要る＝取り消し・選び直しは持ち主の都合と
+   * 無関係に畳むので、持ち主が自前の「開いている」印だけを見ていると **(a)** 畳まれた後も「開いている」
+   * つもりで開き直さず**1押下＝1履歴**になり上限を流し切る **(b)** 遅れて走る後始末が**別人のまとめ**を
+   * 閉じる。持ち主はこの番号を控えておき、**変わっていたら自分のまとめはもう無い**と判断する。
+   */
+  _historyGroupGen: number;
+  /** 連続入力の開始（文字欄の focus・ドラッグの pointerdown）。 */
+  beginHistoryGroup: () => void;
+  /** 連続入力の終了（blur・pointerup）。**必ず呼ぶ**＝開きっぱなしだと以後の取り消しが積まれない。 */
+  endHistoryGroup: () => void;
+  /** まとめを強制的に畳む（欄がフォーカス中に消えたときの保険＝`blur` が来ない）。 */
+  resetHistoryGroup: () => void;
+  /**
+   * 掴んでいた1回ぶんを**なかったことにする**（`Escape` でやめた・ADR-0054 段階2）＝まとめの間に書いた文書を、まとめを開く前へ戻し、
+   * まとめが積んだ1件も外す（やめた跡＝何も変わらない取り消しを残さない・PR #1343 レビュー）。
+   * ⚠️ **自分で開いた1段のまとめにだけ使う**＝外側にもまとめがある（深さ 2 以上）ときは、閉じるだけ（戻さない＝外側の編集まで巻き戻さない）。
+   * ⚠️ 開く前の「やり直し」は戻らない（積んだ時点で捨てている＝`recordSnapshot`）。
+   */
+  abandonHistoryGroup: () => void;
+  /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
+  saveStatus: "idle" | "saving" | "saved" | "error";
+  /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
+  isPlaying: boolean;
+  /** 書き出しの進み具合（`06 §12.1`）。**この画面の中だけ**で持つ＝場面形式の書き出しと状態を混ぜない。 */
+  exportRun: TimelineExportRun;
+  /**
+   * 位置を外から動かした回数。**再生中のシークを時計へ伝える**ための世代番号で、
+   * `playheadSec` を effect の依存にすると effect 自身が更新して回り続けるため、これを依存にする。
+   */
+  seekNonce: number;
+  /**
+   * **繰り返し再生**（#1267）＝作業範囲（I／O）があればその間、無ければ全体を繰り返す。画面の状態（文書には持たない）。
+   */
+  loopPlayback: boolean;
+  /**
+   * **写しておいた部品**（#1265・Ctrl+C）。文書には持たない・保存しない（画面の状態）。`null`＝まだ写していない。
+   */
+  clipClipboard: TimelineClip[] | null;
+  /** 選んでいる部品を写す（Ctrl+C）。 */
+  copySelectedClips: () => void;
+  /** 写しておいた部品を再生位置へ貼る（Ctrl+V）＝複製と同じ規則・全か無か。 */
+  pasteClipsAtPlayhead: () => void;
+  setLoopPlayback: (on: boolean) => void;
+  /** 繰り返しの終わりまで来たとき、始まりへ戻す（時計を測り直す＝音・動画もそこから合わせ直す）。 */
+  _loopTo: (sec: number) => void;
+
+  /**
+   * **完全新規のタイムラインプロジェクトを作って開く**（ADR-0032 決定7/15・#635）。
+   * 作った id を返す（呼び出し側が画面を切り替える）。**未適合なら保存しない**＝開けない動画を一覧に作らない。
+   */
+  createTimelineProject: (projectName: string, aspectRatio?: Orientation) => Promise<string>;
+  openTimelineProject: (projectId: string) => Promise<void>;
+  closeTimelineProject: () => void;
+  /**
+   * 消された動画を手放す。**進行中の書き込みがあればその約束を返す**（#763-4）＝消す側が
+   * 着地を待てるようにする（手放しても、すでに発行済みの書き込みは止まらない）。
+   */
+  discardDeletedProject: (projectId: string) => DeletionHandoff;
+  setPlayhead: (sec: number) => void;
+  selectClip: (clipId: string, additive?: boolean) => void;
+  /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
+  selectClips: (clipIds: string[]) => void;
+  clearSelection: () => void;
+
+  /** 選んでいるクリップを動かす（列を替える／時間をずらす）。置けなければ何も変えず理由を持つ。 */
+  moveSelectedClip: (to: { trackId?: string; startSec?: number }) => void;
+  /** 選んでいるクリップの端を動かす（トリム）。数値の欄から呼ぶので**伸ばす向きも通る**。 */
+  trimSelectedClip: (edge: "start" | "end", sec: number) => void;
+  /**
+   * **再生位置で長さをそろえる**（#1005）＝選んだうち**その時刻をまたいでいる帯だけ**を相手にする。
+   * 選んだ数で挙動を割らない（1件でも同じ規則）。
+   */
+  trimSelectedClipsAt: (edge: "start" | "end", sec: number) => void;
+  /**
+   * **id で受ける**移動とトリム（#686 レビュー）。掴んで動かす経路は、掴んだ相手が `clipId` で決まる
+   * のに `moveSelectedClip` は選択に効くので、**掴んでいる間に選択が変わると別の帯が動く**
+   * （左ドラッグ中の右クリック・取り消しで対象が消える）。`explodeClip`／`removeClipsByIds` と同じ流儀。
+   */
+  moveClipById: (clipId: string, to: { trackId?: string; startSec?: number }) => void;
+  /** **まとめて動かす**（#686 段階4・1つでも置けなければ全体を断る＝決定15）。 */
+  moveClipsBy: (updates: readonly { id: string; startSec?: number; trackId?: string }[]) => void;
+  trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
+  /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
+  setEditBlocked: (reason: EditBlockedReason, at: BlockTarget) => void;
+  /** 置いた部品の位置・大きさ・向き（#685）。触った時点で箱ぜんぶを書き込む＝見えている値を編集する。 */
+  setSelectedClipBox: (patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
+  /**
+   * **id で受ける**箱の編集（#685 後半）。キャンバスは掴んだ相手が id で決まるので、選択に効かせると
+   * まとめて動かすときに別の部品が動く（`moveClipById` と同じ流儀）。
+   */
+  setClipBoxFor: (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
+  /**
+   * **id で受ける**文字の書き換え（#746-2）。キャンバスの二度押し編集は**押した相手が id で決まる**ので、
+   * 選択に効かせると（打っている最中に選択が変わったとき）**別の部品の文字が書き換わる**
+   *（`setClipBoxFor` と同じ流儀）。
+   */
+  setClipTextFor: (clipId: string, text: string) => void;
+  /**
+   * 選んだ帯を再生位置で分ける（#686 段階4・ADR-0034 決定16）。
+   * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
+   */
+  splitSelectedClip: (atSec: number, at?: BlockTarget) => void;
+  /**
+   * 選んでいる部品の**色の調整**を直す（ADR-0044 ①・#1192）。
+   *
+   * ⚠️ **部品ごと**＝見た目パターンの中身（層が複数）でも**1つの見え方**になる。
+   */
+  setSelectedColorAdjust: (patch: { brightness?: number; contrast?: number; saturation?: number; temperature?: number }) => void;
+  /** 選んでいる部品の**描画モード**を直す（ADR-0044 ②）。 */
+  setSelectedBlendMode: (mode: BlendMode) => void;
+  /**
+   * 作業範囲の**始まり／終わり**（#1193）。どちらも `null` ＝範囲を取っていない。
+   *
+   * ⚠️ **文書に持たない**＝この作業だけの都合なので `project.json` へは入れない（ADR-0033 と同じ考え方）。
+   */
+  rangeInSec: number | null;
+  rangeOutSec: number | null;
+  /** いまの再生位置を、作業範囲の始まり／終わりにする。 */
+  setRangeEdge: (edge: "in" | "out", sec: number) => void;
+  /** 作業範囲を外す。 */
+  clearRange: () => void;
+  /**
+   * 作業範囲を**消す**（`closeGap` を立てると、空いた所を詰める＝#1193）。
+   *
+   * ⚠️ **1操作＝1つの取り消し**（ADR-0034 決定20）＝消すのと詰めるのを別々に積まない。
+   * ⚠️ **押しのけモードではない**（ADR-0034 決定11 はそのまま）＝押したときだけ動く。
+   */
+  deleteRangeInTimeline: (closeGap: boolean, at?: BlockTarget) => void;
+  /**
+   * 再生位置で**絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
+   *
+   * ⚠️ **取り消しは1回**（#1136 レビュー由来 🟡）＝素材の追加と帯の差し替えを**1つの履歴に載せる**
+   *（ADR-0034 決定20＝1操作＝1つの取り消し）。別々に積むと、戻す途中に**使っていない写真だけ
+   * 素材に残る**＝利用者が一度も作っていない状態ができる。
+   * `outsideGroup` なのは「非同期の着地を利用者のまとめ（文字入力中など）に混ぜない」ため。
+   */
+  freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
+  /**
+   * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
+   *
+   * ⚠️ **同じ時刻には重ねない**＝既にあるときは増やさない（履歴にも積まない）。
+   * ⚠️ **ただし無反応にはしない**（#1149 ①・ADR-0040）＝置いた／既にあった目印の時刻へ
+   * **再生位置を寄せる**ので、その目印が「いまここ」の見た目（`timeline-marker--current`）になる。
+   * 寄せないと、再生位置は**生の秒**・目印は**格子に落ちた秒**なので一致せず、
+   * **置いた直後にどれが自分の印か分からない**。
+   * ⚠️ **再生中も置ける**（ADR-0040）＝「押した、その瞬間」が仕様そのものなのでずれようがない。
+   */
+  addMarkerAtPlayhead: () => void;
+  /** 目印のメモを書き換える（上限で切る＝開けない文書を作らない）。 */
+  setMarkerTextFor: (markerId: string, text: string) => void;
+  /**
+   * 目印を**いまの再生位置へ動かす**（#1138 レビュー由来 🟡）。
+   *
+   * ⚠️ **置けるのに直せない、を作らない**（ADR-0034 決定4）＝掴む操作は発明せず、
+   * この画面に既にある道具（再生位置）で直せる形にする。
+   */
+  moveMarkerToPlayhead: (markerId: string) => void;
+  /** 目印を消す。 */
+  removeMarkerById: (markerId: string) => void;
+  /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
+  setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
+  /** 選んでいるクリップを複製する（同じ列の直後）。 */
+  duplicateSelectedClip: () => void;
+  /** 選んでいるクリップを消す。 */
+  removeSelectedClips: (at?: BlockTarget) => void;
+  /**
+   * **id を名指しで消す**（#721 レビュー）。まとめて消すときの確認は「聞いた時点の相手」を持つので、
+   * 確認を出している間に選択が変わっても**聞いた数と消える数がずれない**（`exploding` が相手を組で
+   * 持つのと同じ流儀）。`removeSelectedClips` はこれに選択を渡すだけ＝規則は1つ。
+   */
+  removeClipsByIds: (clipIds: readonly string[], at?: BlockTarget) => void;
+  /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
+  setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
+  /**
+   * 選んでいる部品の、**指定した時刻**のキーフレームを置く／直す（#634・#262）。
+   * 時刻は**対象の先頭からの秒**で、**呼ぶ側が丸めてから渡す**（#702）＝再生位置から起点を引いた生の値だと
+   * `0.3-0.1=0.19999999999999998` のような端数になり、画面の照合（`keyframeTimeAt`）と食い違って
+   * 「置き直したのに1つ増える」が起きる。入口はこれ1つ（素通しの入口を作らない＝音量の変化と同じ形）。
+   */
+  setSelectedKeyframeAt: (timeSec: number, input: KeyframeInput) => void;
+  /** 選んでいる部品の、その時刻のキーフレームを外す（#634）。 */
+  removeSelectedKeyframe: (timeSec: number) => void;
+  /** 選んでいる部品の動きをすべて外す（#634）。 */
+  clearSelectedKeyframes: () => void;
+  /**
+   * 選んでいる部品に**動きのひな形**を当てる（#1349）＝キーフレームの列へ展開して重ねる・取り消し1回で戻る。
+   * 強調は再生位置から（部品の外なら部品の始まりから）。
+   */
+  applySelectedMotionPreset: (preset: MotionPreset) => void;
+  /**
+   * 字幕ファイル（.srt／.vtt）の字幕を**新しい列に並べる**（ADR-0055・#1351）＝1回の編集（取り消し1回で全部消える）。
+   * 結果は `importError` の欄で知らせる（読めない・何も無い・並べた数と、読めなかった／上限を越えた数）。
+   */
+  importSubtitleFile: (bytes: Uint8Array) => void;
+  /** 指定した対象（まとまりなど）の動きをすべて外す（#634）。 */
+  clearKeyframesOf: (targetId: string) => void;
+  /** 選んでいる字幕自身の文を書き換える（空にすると連動先の読み上げ文に戻る・#633）。 */
+  setSelectedSubtitleText: (text: string) => void;
+  /** 選んでいる映像の部品に「喋っている間の動き」を付ける／外す（`null`＝外す・ADR-0056）。 */
+  setSelectedClipTalkMotion: (talkMotion: TalkMotion | null) => void;
+  /** 選んでいる字幕の連動先（読み上げ）を決める／やめる（#633）。 */
+  setSelectedSubtitleVoiceLink: (voiceClipId: string | null) => void;
+  /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
+  setSelectedClipText: (textKey: TextKey, text: string) => void;
+  /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
+  explodeClip: (clipId: string, template: Template, at?: BlockTarget) => void;
+  /**
+   * **写真・文字・図形を置く**（#684）。置いたものは**そのまま選ぶ**＝続けて中身を直せる。
+   * 置ける列が無ければ理由を出す（黙って何もしない、を作らない）。
+   */
+  addVisualClip: (input: {
+    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+    assetId?: string;
+    center?: { x: number; y: number };
+    /**
+     * **利用者が置き場所を指したとき**（ドラッグで落とした・#684）。ここが入っていたら
+     * その列・その時刻へ置き、置けなければ**断る**（寄せない・別の列へ移さない＝ADR-0034 決定10）。
+     * 未指定＝アプリが決める（ボタン）＝空いている列と時刻を探す。
+     */
+    at?: { trackId: string; startSec: number };
+    /**
+     * **置く列だけを指したとき**（欄の「置く列」・#771(b)）。時刻はアプリが探す
+     *（＝ボタンの約束「塞がっているときは、その次に空いている時刻へ」を保つ）。
+     * 未指定＝いちばん手前の置ける列。`at` があるときは使わない（あちらが列も時刻も指している）。
+     */
+    trackId?: string;
+  }) => void;
+  /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
+  setSelectedVisualContent: (patch: {
+    text?: string; fontSize?: number; color?: string;
+    fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
+    /** 字間・影（#264 の共有の語彙＝両形式で触れる・差分再監査 3巡目）。 */
+    letterSpacing?: number; shadow?: TextShadow; background?: LayerBackground; lineHeight?: number;
+    /** 縁取り（差分再監査 5巡目＝バラした文字に残る縁取りを外せるようにする）。 */
+    strokeColor?: string; strokeWidth?: number;
+    /** 種別ごとの文字の形（見た目パターンの部品＝焼き出しが書き、書き出しの門が数える）。 */
+    textFontIds?: Partial<Record<TextKey, FontId>>;
+    shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
+  }) => void;
+  /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
+  addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number }) => void;
+  /** 選んでいる音・動画の素材の再生速度（#634）。 */
+  setSelectedClipSpeed: (speed: number) => void;
+  /** 選んでいる素材のどこから使うか（#634）。 */
+  setSelectedClipSourceStart: (sec: number) => void;
+  /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
+  setSelectedClipVolume: (volume: number | null) => void;
+  /** 動画の**元の音を鳴らすか**（#512 段2）。 */
+  setSelectedClipUseOriginalAudio: (use: boolean) => void;
+  /** 元の音の音量（`null`＝標準へ戻す）。 */
+  setSelectedClipOriginalAudioVolume: (volume: number | null) => void;
+  /** 見た目パターンの**差し込み口ごと**の元の音（#512 段3b）。 */
+  setSelectedClipSlotAudio: (layerId: string, patch: { useOriginalAudio?: boolean; originalAudioVolume?: number | null }) => void;
+  /**
+   * 選んでいる音の**音源を選び直す**（#695・#723）。素材が見つからないときの案内
+   * 「音を選び直してください」に対応する操作＝これが無いと行き止まり（ADR-0034 決定5）。
+   * 消して置き直すと速さ・音量・フェードが全部消えるので、差し替えの道を残す。
+   */
+  setSelectedClipAudioSource: (source: { bundledBgmId: BundledBgmId } | { assetId: string }) => void;
+  /** 選んでいる部品の切り抜きの効かせ方（#634）。 */
+  setSelectedClipCropMode: (mode: CropMode | null) => void;
+  /** 選んでいる部品の素材の寄せ（#634）。 */
+  setSelectedClipCropAlign: (patch: { x: CropAlignX | null } | { y: CropAlignY | null }) => void;
+  /** 選んでいる部品の切り抜き（#634）。 */
+  setSelectedClipCrop: (edge: "top" | "right" | "bottom" | "left", value: number) => void;
+  /** 選んでいる音の前後のフェード（#634）。 */
+  setSelectedClipFade: (edge: "in" | "out", sec: number) => void;
+  /**
+   * 選んでいる音の**音量の変化**（#512 段4）＝再生位置に点を置く／直す。時刻は部品の先頭からの秒で渡す
+   * （画面は再生位置から引く＝動きのキーフレームと同じ流儀）。
+   */
+  setSelectedVolumePoint: (timeSec: number, volume: number) => void;
+  /** 選んでいる音の音量の点を外す（#512 段4）。 */
+  removeSelectedVolumePoint: (timeSec: number) => void;
+  /** 選んでいる音の音量の変化をすべて外す（一定の音量へ戻る・#512 段4）。 */
+  clearSelectedVolumePoints: () => void;
+  /** 読み上げを置く（#633＝タイムライン側でも声を作れる）。 */
+  addVoiceClip: (input: { text: string; trackId: string; startSec: number }) => void;
+  /** 選んでいる読み上げの文を書き換える（作成済みの音声は外れる・#633）。 */
+  setSelectedVoiceText: (text: string) => void;
+  /** 選んでいる読み上げの話者を変える（`null`＝動画全体に合わせる・#633）。 */
+  setSelectedVoiceSpeaker: (speaker: number | null) => void;
+  /** 選んでいる読み上げの声を作る（VOICEVOX）。作れたら**長さを実際の尺へ合わせる**（#633）。 */
+  generateSelectedVoice: () => Promise<void>;
+  /**
+   * 1つの読み上げの声を作る（内部）。**選んだ1件**（`generateSelectedVoice`）と
+   * **まとめて作る**（`generateAllVoices`）が**同じ経路を通る**ための切り出し（#1019 ⑥）。
+   *
+   * ⚠️ **写して2つ持たない**＝この処理は「作っている間に文書や設定が変わったらその声は使わない」
+   * 「失敗しても作成済みの印を消さない」など、**細かい約束を10個以上**持っている。
+   * まとめて作る側に写すと、片方だけ直る（このリポジトリで繰り返している型）。
+   */
+  _generateVoiceFor: (clipId: string, notice: VoiceNoticeSink) => Promise<void>;
+  /**
+   * **声をまとめて作る**（#1019 ⑥）＝文があってまだ作っていない読み上げを、上から順に作る。
+   *
+   * ⚠️ **場面形式には既にある**（`generateAllNarrations`）のに、タイムライン形式は
+   * **選んだ読み上げ1件ずつ**しか無かった＝同じ動画を作るのに、形式で手間が違う（ADR-0026②）。
+   * ⚠️ **中止できる**（世代番号）＝書き出しと取り込みと同じ流儀。
+   */
+  generateAllVoices: () => Promise<void>;
+  /** まとめて作るのをやめる（`generateAllVoices` を次の1件へ進む前に降ろす）。 */
+  cancelVoiceGeneration: () => void;
+  /** まとめて作っている最中か。 */
+  isGeneratingVoices: boolean;
+  /** 直前のまとめて作るのを中止したか（案内の出し分けに使う）。始めると false へ戻す。 */
+  voicesCancelled: boolean;
+  /** まとめて作るの世代番号（内部）。中止・新規開始で進める。 */
+  _bulkVoiceRun: number;
+  /** 選んでいる読み上げに連動する字幕を置く（#633）。 */
+  addLinkedSubtitleClip: () => void;
+  /** 見た目パターンを素材として置く（#632）。 */
+  addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
+  /**
+   * この動画の**書き出しの設定**を直す（差分再監査 2巡目）。
+   *
+   * ⚠️ **入口が場面形式にしか無かった**＝音の自動処理は書き出しに効くのに設定できず、しかも
+   * 前の版の文書は読込時に「しない」を書き込まれるので**一度 OFF になると戻す手段が無かった**
+   *（§2-5 の行き止まり）。クレジットの見せ方・動画全体の文字の形も同じ（効くのに選べない）。
+   */
+  updateVideoSettings: (patch: Partial<TimelineProject["videoSettings"]>) => void;
+  addTrack: (kind: TrackKind) => void;
+  removeTrack: (trackId: string) => void;
+  /**
+   * 列に名前を付ける（利用者要望 2026-09-28）＝「映像1／音1」の自動名だけだと、
+   * 列が増えたときに**どれが何の列か**分からない。空にすると自動名へ戻る。
+   */
+  renameTrack: (trackId: string, name: string) => void;
+  /**
+   * 列を**中身ごと**複製する（#767）。空の列だけ増やすなら「列を足す」と同じなので、
+   * 中の部品も一緒に運ぶ（置けない事情は domain が理由で返す＝黙って別の結果にしない）。
+   */
+  duplicateTrack: (trackId: string) => void;
+  moveTrackOrder: (trackId: string, direction: "front" | "back") => void;
+  /** 列を**指した位置へ**動かす（#767・掴んで並べ替える）。`toIndex` は動かす前の並びでの落とし先。 */
+  moveTrackTo: (trackId: string, toIndex: number) => void;
+  setTrackFlag: (trackId: string, flag: "hidden" | "locked", value: boolean) => void;
+  undo: () => void;
+  redo: () => void;
+  /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
+  saveTimelineProject: () => Promise<void>;
+  /** 再生を始める（終端にいるときは先頭から）。何も置いていない動画では始めない。 */
+  play: () => void;
+  /** 再生を止める（位置はそのまま＝続きから再生できる）。 */
+  pause: () => void;
+  /**
+   * 時計が進めた位置を入れる（内部・`useTimelinePlayback` からのみ）。**`setPlayhead` と違い世代番号を
+   * 上げない**＝時計自身の更新で「外から動かされた」と誤認して測り直しループに入るのを防ぐ。
+   */
+  _advancePlayhead: (sec: number) => void;
+
+  /**
+   * 動画（MP4）を書き出す。保存先を選ぶところから、描く→仕上げるまで。
+   * **描くのに要るもの（見た目パターン・素材の src）は画面から受け取る**＝プレビューと同じ入力で描く
+   * ＝見えているものがそのまま出る（ADR-0001）。
+   */
+  exportTimelineVideo: (deps: TimelineDrawDeps) => Promise<void>;
+  /**
+   * 書き出す大きさ（#1255・利用者判断 2026-09-28／#1218 で3択＝きれい・ふつう・軽い）。
+   *
+   * ⚠️ **場面形式と同じ選択肢**（ADR-0026②＝同じ概念を形式で割らない・`EXPORT_SIZE`）。
+   * ⚠️ **`project.schema` には入れない**（ADR-0033 の流儀＝書き出しの好みは文書の中身ではない）。
+   */
+  exportSize: ExportSize;
+  setExportSize: (size: ExportSize) => void;
+  /** 書き出しを止める（押した時点までの一時ファイルは片づける）。 */
+  cancelTimelineExport: () => void;
+  /** 完了・失敗の知らせを閉じる。 */
+  dismissTimelineExport: () => void;
+}
+
+/** 描くのに要る入力（プレビューと共有＝別々に解決して食い違わせない）。 */
+export interface TimelineDrawDeps {
+  /** 置いてある見た目パターン（グローバル＝場面形式と同じ一覧）。 */
+  templates: Template[];
+  /** 見た目パターンが持つ既定素材の src（ADR-0021）。 */
+  templateAssetSrcById: Record<string, string>;
+}
+
+/** 書き出しの進み具合（画面が読む）。 */
+export interface TimelineExportRun {
+  phase: TimelineExportPhase;
+  /** 0〜100。描く段が 0〜80、仕上げが 80〜100（場面形式のバーと同じ配分＝同じ見え方）。 */
+  percent: number;
+  /** 結果や断りの案内（§2-5＝次の行動）。走行中は null。 */
+  message: string | null;
+  /** 中止を押したか（描くループが次のフレームで気づく）。 */
+  cancelling: boolean;
+  /**
+   * BGM を下げる区間を**つないだ**か（α-6 出口監査 🟡・ADR-0032 追補4）。
+   *
+   * ⚠️ **黙ってやらない**＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になるので、
+   * 設定した意味と違う音になる。場面形式は書き出しの完了時に知らせている（ADR-0026②）。
+   */
+  duckMerged?: boolean;
+  /**
+   * 保存したファイルの場所（終わったときだけ入る・#991）。
+   *
+   * ⚠️ **無いときは導線を出さない**＝場所が分からないのに「保存した場所を開く」を出すと、
+   * 押しても何も起きないボタンになる（§2-5）。
+   */
+  outPath?: string;
+}
+
+/**
+ * 書き出しの段。**場面形式と同じ値**（`EXPORT_RUN_PHASE`＝単一の参照元・§2-7）を使う＝
+ * 同じ概念を形式ごとに別の言葉で持たない（ADR-0026②）。
+ */
+export type TimelineExportPhase = ExportRunPhase;
+
+/** 走行中（押せない・二重に始めない）か。画面と store で同じ判定を使う（§6）。 */
+export function isTimelineExportBusy(phase: TimelineExportPhase): boolean {
+  return phase === P.preparing || phase === P.rendering || phase === P.encoding;
+}
+
+/** 声の合成（アプリ内は VOICEVOX・それ以外は Mock）。判定は場面形式（`projectStore`）と**同じ式**にする。 */
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
+
+const IDLE_EXPORT: TimelineExportRun = { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false };
+
+/** 段の値の短い別名（この file 内で何度も使う＝直書きしない・§2-7）。 */
+const P = EXPORT_RUN_PHASE;
+
+/** 書き出しの締めの持ち主（画面も同じものを見る＝#718）。 */
+export const EXPORT_OWNER = "timeline" as const;
+
+/**
+ * 選び直したときに落とす「直前の操作の返事」（#701 レビュー）。前の部品で出た理由が残っていると、
+ * **いま選んでいる部品の返事**に見える（`06 §12.1`＝その場の返事）。落とす先を1か所にして取りこぼさない。
+ */
+// ⚠️ **`editNotice` も一緒に消す**＝別の操作へ移ったのに前の知らせが残ると、何の話か分からなくなる。
+const CLEARED_NOTICES = { editBlocked: null, voiceError: null, editNotice: null } as const;
+
+/**
+ * 進行中の保存の1回ぶん（#693）。**同時に2本走らせない**ための見張り。書き込みは上書き（truncate）なので、
+ * 古い文書を持つ側が後着すると**ディスク上の変更が巻き戻る**。
+ *
+ * `again` を**この回ごとに持つ**理由＝走っている保存の「後にもう一度書く」印は、その回のものでなければ
+ * ならない。1つの変数を共有すると、動画を切り替えた前後で走る2回ぶんが互いの印を消し合う。
+ * （待たせるだけで「もう一度」を持たないと、保存中に足した変更が「保存しました」と言われたまま
+ * **一度も書かれない**＝呼んだ側は進行中の約束を受け取って保存できたと思う。）
+ */
+interface SaveRun {
+  promise: Promise<void>;
+  again: boolean;
+}
+/** いま走っている保存（`null`＝走っていない）。 */
+let currentSave: SaveRun | null = null;
+
+/**
+ * **開いている文書が入れ替わるときに見張りを手放す**（#693 レビュー）。前の動画の保存が返ってこないと、
+ * 次に開いた動画の保存が「進行中」と誤解されて**永久に書かれない**。
+ * 走っている書き込み自体は止められないが、
+ * - それが**次の動画の保存状態を書き換えない**ことは `doSaveTimelineProject`（`projectId` の照合）が、
+ * - それの**後始末が次の保存の見張りを外さない**ことは `currentSave === run` の照合が担保する。
+ */
+function releaseSaveGuard(): void {
+  currentSave = null;
+}
+
+/**
+ * **飛んでいる書き込み**（動画ごと・#763-4）。⚠️ `currentSave`（並走を防ぐ見張り）とは別に持つ＝
+ * あちらは文書を切り替えるたびに手放す（`releaseSaveGuard`）ので、**手放した後も走り続けている
+ * 書き込み**を誰も待てなくなる。消すときは「その動画の書き込みが着地したか」だけが要る。
+ *
+ * ⚠️ **1件だけ覚える形にしない**（#763-4 レビュー）＝この形式は文書を切り替えると**新しい書き込みを
+ * すぐ許す**（見張りを外すため）ので、**2つの動画の書き込みが同時に飛びうる**。1件だけだと
+ * 「A が飛んでいる最中に B の保存が始まる」で A を見失い、A を消すときに待てない
+ *（場面形式は `saveInFlight` が完全に直列なのでこの非対称が無い）。
+ */
+const inFlightWrites = new Map<string, Set<Promise<void>>>();
+
+/** 書き込みを「飛んでいる」に入れ、着地したら（成否を問わず）外す。 */
+function trackWrite(projectId: string, promise: Promise<void>): void {
+  const flying = inFlightWrites.get(projectId) ?? new Set<Promise<void>>();
+  flying.add(promise);
+  inFlightWrites.set(projectId, flying);
+  void promise.then(
+    () => { flying.delete(promise); if (flying.size === 0) inFlightWrites.delete(projectId); },
+    () => { flying.delete(promise); if (flying.size === 0) inFlightWrites.delete(projectId); },
+  );
+}
+
+/** その動画へ飛んでいる書き込みの**すべて**の着地（無ければ `undefined`）。 */
+function writesFor(projectId: string): Promise<void> | undefined {
+  const flying = inFlightWrites.get(projectId);
+  if (!flying || flying.size === 0) return undefined;
+  return Promise.all([...flying]).then(() => undefined);
+}
+
+/**
+ * 声を作る**回**の番号（#755）。⚠️ `emptyState` には入れない＝開き直しで 0 に戻ると、
+ * まだ走っている前の回と**同じ番号**になり、印を横取りする。store の生きている間ずっと増える。
+ */
+let voiceRunSeq = 0;
+
+// ── 帯に敷く絵（#332）の順番待ち ─────────────────────────────────
+// ⚠️ **`emptyState()` から呼ぶので、あちらより前に置く**＝後ろに置くと、store を組み上げる
+// 途中（`...emptyState()`）で**まだ初期化されていない**ものに触って落ちる（実際に踏んだ）。
+
+/**
+ * 帯に敷く絵を作るとき、**同時に走らせる数**（#332）。
+ *
+ * ⚠️ **一斉に立てない**＝帯が20本並んでいると FFmpeg が20本同時に立つ（書き出し中でも立つ）。
+ * CPU を取り合って、**いま焼いている動画まで遅くなる**。順番に流せば絵は同じで、
+ * 見え方も「手前から埋まる」だけ。
+ */
+const ANALYSIS_CONCURRENCY = 2;
+
+let analysisRunning = 0;
+/**
+ * いま書き出し中か（順番待ちから取り出すときに見る）。
+ *
+ * ⚠️ **store の外から見る**＝順番待ちはモジュールの持ち物で `get()` を持たないので、
+ * `useTimelineStore.getState()` を直に読む（走り出させないことが唯一の止め方なので、
+ * ここで見ないと止まらない）。
+ */
+function isExportBusyNow(): boolean {
+  try {
+    return isTimelineExportBusy(useTimelineStore.getState().exportRun.phase);
+  } catch {
+    return false; // まだ store が組み上がっていない（起動直後）＝止める理由が無い
+  }
+}
+const analysisQueue: (() => Promise<void>)[] = [];
+/** いまの世代（#332）。文書を手放したら上げる＝前の文書の仕事の結果を捨てる。 */
+let analysisGeneration = 0;
+/** いまの世代を読む（着地したときに「まだ同じ世代か」を見るため）。 */
+function currentAnalysisGeneration(): number { return analysisGeneration; }
+
+/**
+ * 順番待ちを空にする（#332・テスト用）。
+ *
+ * ⚠️ **順番待ちは**（素材番号の予約＝`resetAssetIdReservations` と同じく）**アプリ起動中ずっと残る**
+ *（画面をまたいで効かせるため）。テストは1本ずつが別の起動なので、毎回捨てる。
+ * 捨てないと、前のテストが止めたままの仕事で**次のテストのぶんが順番待ちで止まる**（実際に踏んだ）。
+ */
+export function resetAnalysisQueue(): void {
+  analysisQueue.length = 0;
+  // ⚠️ **世代を上げてから空きも戻す**（レビュー ℹ️）＝単に 0 へ戻すだけだと、走行中の仕事が後から
+  // `finally` で減らして**負になり、同時に走らせる数の上限が黙って上がる**。世代を見て
+  // 「前の世代の仕事は数を戻さない」ことにすれば、負にならずに空きだけ返せる。
+  analysisGeneration += 1;
+  analysisRunning = 0;
+}
+
+/**
+ * 待たせている仕事を動かす（#332）。
+ *
+ * ⚠️ **書き出しが終わったときに呼ぶ必要がある**（PR #876 レビュー 🟡）＝`ensureClipAnalysis` は
+ * 積んだ時点で印を付けるので、書き出し中に取り出しを止めたぶんは**次の描画でも二度と
+ * たのまれない**（呼ばないと永久に空の帯が残る）。
+ */
+export function pumpAnalysisQueue(): void {
+  // ⚠️ **取り出すときにも書き出し中を見る**（PR #876 レビュー 🟡）＝関門を積むときだけに
+  // 置くと、**積んだ後に書き出しが始まった**ぶんはそのまま走る（帯が多い文書を開いた直後に
+  // 書き出すと再現する）。`run`/`run_bytes` は `EXPORT_CHILD` に載らず中止でも殺せないので、
+  // 走り出させないことが唯一の止め方。⚠️ **捨てずに残す**＝書き出しが終わったら流す。
+  if (isExportBusyNow()) return;
+  while (analysisRunning < ANALYSIS_CONCURRENCY && analysisQueue.length > 0) {
+    const next = analysisQueue.shift();
+    if (!next) return;
+    analysisRunning += 1;
+    // 失敗しても順番待ちを止めない（絵が1つ出ないだけ）。
+    // 走り出した世代を控える＝捨てられた世代の仕事は**数を戻さない**（負にしない）。
+    // ⚠️ その副作用で、捨てた直後は**旧世代の残りと新世代**が一時的に上限を超えて並ぶことがある
+    //（走り終われば収まる＝自分で収束する）。負にして上限が黙って上がるよりは安全。
+    const born = analysisGeneration;
+    void next().catch(() => {}).finally(() => {
+      if (born === analysisGeneration) analysisRunning -= 1;
+      pumpAnalysisQueue();
+    });
+  }
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+function runAnalysis(job: () => Promise<void>): void {
+  analysisQueue.push(job);
+  pumpAnalysisQueue();
+}
+
+/** 音の長さを測っている最中の動画（同じ動画を2回測らない・#1348）。 */
+let audioMeasureRun: { projectId: string; promise: Promise<void> } | null = null;
+
+/**
+ * 長さの分からない音の素材を1つずつ測り、`audioDurations` に入れる（#1348）。文書は書き換えない
+ * （開いただけで未保存にしない＝古い動画の文書をそのまま保つ）。
+ */
+async function measureAudioDurationsOf(
+  doc: TimelineProject,
+  set: (p: Partial<TimelineState>) => void,
+  get: () => TimelineState,
+): Promise<void> {
+  const targets = doc.assets.filter((a) => a.assetType === ASSET_TYPE.bgm && audioAssetDurationSec(a, get().audioDurations[a.assetId]) == null);
+  for (const a of targets) {
+    const meta = await probeAudioDuration(doc.projectId, a.filePath);
+    // 待っている間に別の動画を開いていたら書かない（素材の番号は動画ごとに振り直す）。
+    if (get().doc?.projectId !== doc.projectId) return;
+    if (meta?.durationSec) set({ audioDurations: { ...get().audioDurations, [a.assetId]: meta.durationSec } });
+  }
+}
+
+/**
+ * 開いていない状態。**文書を手放す入口はすべてここを通る**（開く・閉じる・読込失敗・手放す）。
+ *
+ * ⚠️ **帯に敷く絵の順番待ちもここで捨てる**（PR #876 レビュー 🔴）＝以前は
+ * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
+ * そこを通らないので、**実機の主要な遷移で一度も走らなかった**。手放した文書のために FFmpeg が
+ * 走り続ける（着地しても捨てるだけの仕事に CPU を使う）。**呼び忘れを構造で防ぐ**ためここへ移す。
+ *
+ * ⚠️ **毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、将来その場書き換えが入ったときに
+ * 別の文書へ選択が漏れる（構造で防ぐ）。
+ */
+function emptyState() {
+  resetAnalysisQueue();
+  // 音の長さの測りも手放す（#1348・PR #1352 レビュー 🟡）＝閉じて同じ動画を開き直したとき、閉じている間に打ち切られた
+  //   前の測りを「測っている最中」と見て、新しく開いた分が測られないまま残っていた。
+  audioMeasureRun = null;
+  return {
+    doc: null,
+    loadError: null,
+    loadFailure: null,
+    isLoading: false,
+    playheadSec: 0,
+    editNotice: null as string | null,
+    // 作業範囲（#1193）＝取っていない状態から始める。
+    rangeInSec: null as number | null,
+    rangeOutSec: null as number | null,
+    selectedClipIds: [] as string[],
+    assetSrcById: {} as Record<string, string>,
+    analysisByPath: {} as Record<string, AssetAnalysis | null>,
+    missingAssetIds: [] as string[],
+    videoSrcById: {} as Record<string, string>,
+    assetSizes: {} as Record<string, SourceSize>,
+    audioDurations: {} as Record<string, number>,
+  // 書き出す大きさ（#1255）。⚠️ **既定は「きれい」**＝場面形式の既定（`fullhd`）と同じ。
+  exportSize: EXPORT_SIZE.full,
+    audioSrcByKey: {} as Record<string, string>,
+    _audioTried: new Set<string>(),
+    history: emptyHistory<TimelineProject>(),
+    selectedMarkerId: null,
+    editBlocked: null as { reason: EditBlockedReason; at: BlockTarget } | null,
+    voiceError: null as string | null,
+    importError: null as string | null,
+    isImporting: false,
+    importProgress: null as { done: number; total: number } | null,
+    _importRunSeq: 0,
+    generatingVoiceClipId: null as string | null,
+    isGeneratingVoices: false,
+    voicesCancelled: false,
+    _historyGroupDepth: 0,
+    _historyGroupPending: false,
+    _historyGroupGen: 0,
+    saveStatus: "saved" as TimelineState["saveStatus"],
+    isPlaying: false,
+    seekNonce: 0,
+    loopPlayback: false,
+    clipClipboard: null as TimelineClip[] | null,
+    exportRun: IDLE_EXPORT,
+  };
+}
+
+// ⚠️ **見た目パターンを渡す**（#988）＝差し込み口に入れた動画の頭出しを進めるのに要る
+// （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。分けるときと同じ。
+const templateOfNow = (id: string): Template | undefined =>
+  useProjectStore.getState().templates.find((t) => t.templateId === id);
+
+export const useTimelineStore = create<TimelineState>((set, get) => ({
+  ...emptyState(),
+  // ⚠️ **開き直しでも消さない**（`/canon-check`）＝`emptyState` に入れると、走っている合成が
+  // 見えなくなって**書き出しを始められる**。着地は `commit` に断られ、その直後の保存が
+  // **声の入っていない文書**を書く＝作った声が wav だけ残って消える。
+  _voiceRun: null,
+  _bulkVoiceRun: 0,
+
+  createTimelineProject: async (projectName, aspectRatio) => {
+    // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
+    // 断る理由は store 側に置く（画面ごとに条件を書き分けない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
+      throw new Error("timeline export busy");
+    }
+    // **取り込みの最中も作らない**（#724）＝着地したときには別の文書なので、取り込んだ素材は
+    // `projectId` 違いで黙って捨てられる（ファイルだけ残る）。書き出し中と同じ扱い。
+    if (get().isImporting) {
+      set({ exportRun: { ...get().exportRun, message: IMPORTING_CREATE_MESSAGE } });
+      throw new Error("timeline import busy");
+    }
+    // **採番の前に場面形式の保存を待つ**（`bakeToTimeline` と同じ流儀）。場面形式の id は保存時に初めて
+    // 発行されディスクへ現れるまで一覧に出ないので、待たないと**同じ番号を二重に発行**して
+    // 片方の project.json をもう片方が上書きしうる（11 §2.1）。
+    await useProjectStore.getState().saveProject();
+    const existing = await listProjectSummaries();
+    const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+    const now = new Date().toISOString();
+    const blank = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
+    // ⚠️ **会社の見た目を新しい動画へ**（ADR-0036 決定2・差分再監査 2巡目）＝場面形式は `newProject` が
+    // 通すのに、こちらは通らず**「タイムラインで作った動画にだけ効かない」**（ADR-0026②）。
+    // ⚠️ **キットは読み直してから使う**（設定直後でも効く＝場面形式と同じ流儀）。
+    await useProjectStore.getState().refreshBrandKit();
+    const kit = useProjectStore.getState().brandKit;
+    const withFont = isKnownFontId(kit.fontId)
+      ? { ...blank, videoSettings: { ...blank.videoSettings, fontId: kit.fontId } }
+      : blank;
+    // ⚠️ **ロゴも足す**（PR #911 レビュー 🟡）＝当初「置き場所を決められないから足さない」と書いたが
+    // **事実と違った**＝場面形式もタイムラインも、取り込みは**素材の一覧へ足すだけ**で置き場所は決めない
+    //（見た目パターンの差し込み口から選ぶ）。決定2 の「作成時にコピー」を両形式で同じにする。
+    // ⚠️ **入らなくても動画は作る**＝ロゴのコピーは失敗しうる（置き場から消えている等）。
+    // 場面形式も新規作成そのものは止めない（失敗は取り込みの理由として出る）。
+    const logo = await withBrandLogo(withFont, kit.logoLibraryAssetId);
+    const doc = logo.doc;
+    // 焼き出しと同じ流儀＝**未適合なら保存しない**（一覧に出るのに開けない動画を作らない・ADR-0026④）。
+    if (!validateTimelineProject(doc)) {
+      console.warn("[timeline] 新規作成した内容がスキーマに未適合:", validateTimelineProject.errors);
+      throw new Error("new timeline project failed schema validation");
+    }
+    await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+    releaseSaveGuard(); // 開くときと同じ＝前の動画の保存を引きずらない
+    // 保存できたものをそのまま開く（読み直さない＝ディスクと同じ内容を持っている）。
+    // **必ず `emptyState()` から作る**＝前に開いていた文書の取り消し履歴・選択・作成中の声を持ち越さない
+    // （持ち越すと「新しい動画で取り消す」が**別の動画の内容**を書き戻し、自動保存がそちらを上書きする）。
+    // ⚠️ **足したロゴの表示先も解く**（差分再監査 3巡目 🟡）＝解かないと**作った直後は
+    // キャンバスに何も映らないのに書き出すと映る**（書き出しは `filePath` からディスクを読む）。
+    // 開き直せば映るので気づきにくい。場面形式（`importFromLibrary`）は解いている（ADR-0026②）。
+    const logoSrc = logo.added ? await assetDisplayUrl(projectId, logo.added.relPath) : null;
+    set({
+      ...emptyState(),
+      doc,
+      saveStatus: "saved",
+      ...(logo.added && logoSrc ? { assetSrcById: { [logo.added.assetId]: logoSrc } } : {}),
+      // ⚠️ **入らなかったことは言う**（§2-5）＝動画は作るが、黙って無かったことにしない。
+      ...(logo.error ? { importError: logo.error } : {}),
+    });
+    return projectId;
+  },
+  openTimelineProject: async (projectId) => {
+    // 書き出し中に別の動画を開くと、描いている途中の素材・音が入れ替わる（＝混ざった MP4 が出る）。
+    // 開かずに理由を出す（§2-5）。画面側も一覧へ戻る導線を押せなくしているが、規則はここに置く。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
+      return;
+    }
+    // **取り込みの最中も開かない**（#724）＝理由は上と同じ（着地しても入らない素材を作らない）。
+    if (get().isImporting) {
+      set({ exportRun: { ...get().exportRun, message: IMPORTING_OPEN_MESSAGE } });
+      return;
+    }
+    if (get().isLoading) return;
+    // **ここが本番で文書が入れ替わる場所**（一覧からは `closeTimelineProject` を経由せず直接開く）。
+    releaseSaveGuard();
+    set({ ...emptyState(), isLoading: true });
+    try {
+      const parsed = parseTimelineProjectDoc(await loadProjectDoc(projectId));
+      // 取り込み時に付けるはずの情報が欠けた素材を補う（場面形式の読込と同じ関数・#352 の検証で見つけた）＝
+      // フォルダから取り込んだ動画は**音の有無**を持たず、元の音を鳴らす設定が書き出しで黙って無音になっていた。
+      // ⚠️ **開いた時点の文書に入れる**＝取り消しの履歴は開いた後から積むので、補ったことは取り消しに載らない。
+      const filledAssets = await fillMissingAssetInfo(parsed.projectId, parsed.assets);
+      const doc = filledAssets.every((a, i) => a === parsed.assets[i]) ? parsed : { ...parsed, assets: filledAssets };
+      // 素材の表示用 src を解決する（動画は本体でなく代表フレーム＝場面形式の読込と同じ方針）。
+      const entries = await Promise.all(
+        doc.assets.map(async (a): Promise<[string, string] | null> => {
+          const path = a.assetType === ASSET_TYPE.video ? a.thumbnailPath : a.filePath;
+          if (!path) return null;
+          const url = await assetDisplayUrl(doc.projectId, path);
+          return url ? [a.assetId, url] : null;
+        }),
+      );
+      const assetSrcById: Record<string, string> = {};
+      for (const e of entries) if (e) assetSrcById[e[0]] = e[1];
+      // ⚠️ **動画は本体の URL も要る**（#512 段1）＝上の `assetSrcById` は動画に**代表フレーム**を入れる
+      // （絵として描く用）。仕上がり確認で実映像を流すには本体を指す必要がある＝場面形式の
+      // `PreviewScreen`（`assetDisplayUrl(pid, clipRelPath)`）と同じ解き方。混ぜると
+      // **穴だけ開いて何も映らない**（分割で開けた穴に静止画の URL を置くことになる）。
+      const videoEntries = await Promise.all(
+        doc.assets
+          .filter((a) => a.assetType === ASSET_TYPE.video)
+          .map(async (a): Promise<[string, string] | null> => {
+            const url = await assetDisplayUrl(doc.projectId, a.filePath);
+            return url ? [a.assetId, url] : null;
+          }),
+      );
+      const videoSrcById: Record<string, string> = {};
+      for (const e of videoEntries) if (e) videoSrcById[e[0]] = e[1];
+      // 音源も**先に**用意する（鳴らす瞬間に読みに行くと頭が欠ける）。読めないものは黙って飛ばし、
+      // その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
+      const audioEntries = await Promise.all(audioSourcesOf(doc).map((src) => loadAudioSrc(doc, src)));
+      const audioSrcByKey: Record<string, string> = {};
+      for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
+      set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, audioDurations: {}, isLoading: false });
+      // 音の素材の長さ（#1348）＝古い動画は取り込み時に測っていないので、ここで測る（待たない・文書は書き換えない）。
+      void get()._measureAudioDurations();
+      // ⚠️ **実在も調べる**（#1019 ⑤）＝表示用の URL は組むだけなので、これが無いと
+      //   ファイルが動いた・消えた素材を**一度も知らせられない**（選び直す入口も出ない）。
+      void get().refreshMissingAssets();
+    } catch (e) {
+      // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
+      // ⚠️ **落ち方も持ち帰る**（#977）＝これまで理由の文字列だけを持っていたので、
+      // 画面は「壊れているのか・版が新しいのか」を見分けられず、**控えから戻す導線が出せなかった**
+      //（`save_project` の控えは両形式に効き、一覧にも行が出るのに、開いた先で控えの存在を言えない）。
+      set({
+        ...emptyState(),
+        loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE,
+        loadFailure: e instanceof TimelineLoadError ? e.failure : "unsupported",
+      });
+    }
+  },
+
+  /**
+   * **消された動画を手放す**（#755）。持ったままだと、非同期の着地（声の完成・素材の取り込み）が
+   * 保存して**フォルダごと作り直し、一覧へ復活する**（素材と声は消えているので開いても壊れている）。
+   *
+   * ⚠️ **走行中の印（`exportRun`）は残す**＝ここで初期化すると書き出し中の締めが外れ、
+   * 二重に始められる。書き出しの入力は始めた時点で退避済みなので、文書を手放しても走り切る。
+   */
+  discardDeletedProject: (projectId) => {
+    // ⚠️ **手放しても、すでに発行済みの書き込みは止まらない**（#763-4）＝その動画への書き込みが
+    // 走っていれば約束を返し、消す側に着地まで待たせる。待たないと、消した**後**に `save_project` が
+    // 着地して**フォルダごと作り直し**、素材と声だけ消えた動画が一覧へ戻る。
+    //
+    // ⚠️ **`currentSave` を見てはいけない**＝`releaseSaveGuard()` がそれを捨てるので、手放した後に
+    // 読むと必ず空になる（待ちが丸ごと空振りする）。**いま開いていない動画の書き込み**（別の動画へ
+    // 移った後も走っている）も待てるよう、手放しで消えない `inFlightWrites`（`writesFor`）を見る。
+    const pending = writesFor(projectId);
+    if (get().doc?.projectId !== projectId) return { pending }; // 開いてはいないが、書き込みは待たせる
+    releaseSaveGuard();
+    set({ ...emptyState(), exportRun: get().exportRun });
+    // 文書はもう手放しているので、この保存は最後の `set` を `stillOpen` で見送る（#693）。
+    // ⚠️ **戻す手も返す**（#763-4 レビュー🔴）＝消す前に手放すので、**消せなかったとき**に戻せないと、
+    // 一覧には動画が残るのにこの画面だけ空になる（場面形式では開き直しているのに、こちらだけ
+    // 取り残されていた＝同じ症状の片側だけ直した形）。
+    return {
+      pending,
+      // ⚠️ **待っている間に別の動画を開かれていたら戻さない**（#763-4 レビュー）＝消す側の待ちは
+      // このPRで意図的に長くしたので、その間に別の動画を開ける。無条件に開き直すと、
+      // **いま開いている方を黙って上書きする**（§2-5）。手放したまま（空）のときだけ戻す。
+      restore: () => (get().doc == null ? get().openTimelineProject(projectId) : undefined),
+    };
+  },
+
+  closeTimelineProject: () => {
+    // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    releaseSaveGuard();
+    // 順番待ちの片づけは `emptyState()` の中（手放す入口すべてが通る）。
+    set({ ...emptyState() });
+  },
+
+  // 再生ヘッドは [0, 尺] に収める＝ドラッグやキー操作で動画の外へ出ない（何も無い時刻を指さない）。
+  setPlayhead: (sec) => {
+    const doc = get().doc;
+    if (!doc || !Number.isFinite(sec)) return; // 壊れた入力で位置を失わない
+    // 再生中に位置を動かされたら、時計を測り直させる（そうしないと次のフレームで元へ戻る）。
+    set({ playheadSec: clampTimelinePlayheadSec(doc, sec), seekNonce: get().seekNonce + 1 });
+  },
+
+  // 選ぶのも「次の操作」＝**前の操作の返事は落とす**（#701 レビュー）。残すと、置けなかった理由や
+  // 声を作れなかった案内が**いま選んでいる部品の返事**に見える。
+  selectClip: (clipId, additive = false) =>
+    set((s) => {
+      if (!additive) return { ...CLEARED_NOTICES, selectedClipIds: [clipId] };
+      // 追加選択は「入っていれば外す」＝同じ操作で付け外しできる（複数選択の通例）。
+      return {
+        ...CLEARED_NOTICES,
+        selectedClipIds: s.selectedClipIds.includes(clipId)
+          ? s.selectedClipIds.filter((id) => id !== clipId)
+          : [...s.selectedClipIds, clipId],
+      };
+    }),
+
+  selectClips: (clipIds) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const exists = new Set(doc.clips.map((c) => c.id));
+    // **重複も落とす**＝「選んだN個」の数え方が呼び出し側の作り方で変わらない（不変条件を store で閉じる）。
+    set({ ...CLEARED_NOTICES, selectedClipIds: [...new Set(clipIds.filter((id) => exists.has(id)))] });
+  },
+  clearSelection: () => set({ ...CLEARED_NOTICES, selectedClipIds: [] }),
+
+  // 連続入力を1つの取り消しにまとめる（#708）。**開始では記録しない**＝欄に入っただけ・掴んだだけでは
+  // 履歴を消費しない。最初の実変更で1回だけ「編集前」を積む（場面形式と同じ遅延記録）。
+  beginHistoryGroup: () =>
+    set((s) => (s._historyGroupDepth === 0
+      ? { _historyGroupDepth: 1, _historyGroupPending: true }
+      : { _historyGroupDepth: s._historyGroupDepth + 1 })),
+  endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
+  /**
+   * まとめを**強制的に畳む**（#708 レビュー）。文字欄は `blur` で閉じるが、**フォーカス中に欄が消えると
+   * `blur` は来ない**（仕様）＝開きっぱなしになり、以後の取り消しが一切積まれなくなる。
+   * ドラッグ側が `window` で終了を拾っているのと同じ役割を、こちらは「欄が消えうる場面」で呼んで担う。
+   */
+  resetHistoryGroup: () =>
+    set((s) => ({ _historyGroupDepth: 0, _historyGroupPending: false, _historyGroupGen: s._historyGroupGen + 1 })),
+  abandonHistoryGroup: () =>
+    set((s) => {
+      if (s._historyGroupDepth !== 1) return { _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) };
+      const closed = { _historyGroupDepth: 0, _historyGroupPending: false };
+      // まだ何も書いていない（掴んだだけ）＝戻すものも外すものも無い。
+      if (s._historyGroupPending) return closed;
+      const before = s.history.past[s.history.past.length - 1];
+      if (!before || !s.doc) return closed;
+      return {
+        ...closed,
+        doc: before,
+        history: { ...s.history, past: s.history.past.slice(0, -1) },
+        playheadSec: clampTimelinePlayheadSec(before, s.playheadSec),
+      };
+    }),
+
+  moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
+  trimSelectedClip: (edge, sec) =>
+    applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec, { templateOf: templateOfNow })),
+  /**
+   * **再生位置で長さをそろえる**（#1005＝実機の指摘「帯を複数選択できるのに長さを一緒に調整できない」）。
+   *
+   * ⚠️ **相手はその時刻をまたいでいる帯だけ**＝またいでいない帯の端をその時刻へ動かすと、
+   * 遠くにある帯が**いちばん短い長さまで潰れる**（画面の外で起きるので気づけない）。
+   * 他社の型（Premiere の「再生ヘッドまでトリミング」等）も、またいでいる帯だけを相手にする。
+   * ⚠️ **選んだ数で挙動を割らない**（ADR-0026②）＝1件のときも同じ規則で通す。
+   * 伸ばす操作は数値の欄（「長さ（秒）」＝`trimSelectedClip`）が受け持つので、失われない。
+   * ⚠️ **1つも当てはまらないときの理由は、ボタンの説明として出る**（押せない見た目＋`title`）。
+   * ここで `editBlocked` も立てるのは**保険**＝いまの入口はボタン4か所だけだが、
+   * キーやメニューから呼ぶ道が増えたとき、**無言で何も起きない**を作らないため。
+   */
+  trimSelectedClipsAt: (edge, sec) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const ids = trimTargetsAt(doc, get().selectedClipIds, sec);
+    if (ids.length === 0) {
+      // 着地先は「並び」（#1259 レビュー 🟡）＝ボタンは帯の操作の行（並びの欄）へ移った。
+      set({ editBlocked: { reason: EDIT_BLOCKED.trimNoneAtTime, at: blockTargetFor(EDIT_BLOCKED.trimNoneAtTime, PANEL_ID.arrange) } });
+      return;
+    }
+    const r = trimClips(doc, ids, edge, sec, { templateOf: templateOfNow });
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
+  },
+  moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to), PANEL_ID.arrange),
+  moveClipsBy: (updates) => {
+    const doc = get().doc;
+    if (!doc || updates.length === 0) return;
+    const r = moveClips(doc, updates);
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+  },
+  trimClipById: (clipId, edge, sec) =>
+    applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec, { templateOf: templateOfNow }), PANEL_ID.arrange),
+  setEditBlocked: (reason, at) => set({ editBlocked: { reason, at: blockTargetFor(reason, at) } }),
+  setSelectedClipBox: (patch) =>
+    applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+  setClipBoxFor: (clipId, patch) =>
+    applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch), PANEL_ID.preview),
+  setClipTextFor: (clipId, text) => applyEditTo(set, get, clipId, (d, id) => setVisualClipContent(d, id, { text })),
+  setRangeEdge: (edge, sec) => {
+    // ⚠️ **始まりと終わりが逆さまになっても直さない**＝勝手に入れ替えると、
+    // 「押した所と違う所が範囲になった」に見える。**断るのは消すとき**（`deleteRangeIssue`）。
+    set(edge === "in" ? { rangeInSec: sec } : { rangeOutSec: sec });
+  },
+  clearRange: () => set({ rangeInSec: null, rangeOutSec: null }),
+
+  deleteRangeInTimeline: (closeGap, at = PANEL_ID.arrange) => {
+    const { doc, rangeInSec, rangeOutSec } = get();
+    if (!doc) return;
+    // ⚠️ **範囲を取っていなければ理由を出す**＝押しても何も起きない、を作らない（§2-5）。
+    // ⚠️ **範囲が無いのはここでしか言えない**＝`deleteRangeIssue` は数を受け取るので「取っていない」を知らない
+    // （幅ゼロ・部品が掛かっていないは、あちらが `rangeEmpty`／`rangeNoClips` で断る）。
+    // ⚠️ **再生中・書き出し中は見ない**＝押す前に画面の関門（`rangeExtra`）が見る（確認の「削除する」でももう一度見る）。
+    if (rangeInSec == null || rangeOutSec == null) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.rangeNotSet, at: blockTargetFor(EDIT_BLOCKED.rangeNotSet, at) } });
+      return;
+    }
+    const startSec = Math.min(rangeInSec, rangeOutSec);
+    const endSec = Math.max(rangeInSec, rangeOutSec);
+    const r = deleteRange(doc, { startSec, endSec, closeGap }, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
+      return;
+    }
+    // ⚠️ **消した後は選択と範囲を空にする**＝消えたものを選んだまま・取ったままにしない。
+    // ⚠️ **1回の `commit`**＝消すのと詰めるのが**1つの取り消し**になる（ADR-0034 決定20）。
+    commit(set, get, r.doc, { selectedClipIds: [], rangeInSec: null, rangeOutSec: null });
+    // ⚠️ **寄せた目印があれば知らせる**＝黙って変えない（§2-5）。
+    if (r.clampedMarkerCount > 0) {
+      set({ editNotice: markersClampedMessage(r.clampedMarkerCount) });
+    }
+  },
+
+  setSelectedColorAdjust: (patch) =>
+    applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),
+  setSelectedBlendMode: (mode) => applyEdit(set, get, (d, id) => setClipBlendMode(d, id, mode)),
+
+  splitSelectedClip: (atSec, at = PANEL_ID.arrange) => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    // ⚠️ **見た目パターンを渡す**（#816-2）＝差し込み口に入れた動画の頭出しを進めるのに要る
+    // （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt, { templateOf: (id) => templateById.get(id) });
+    if (!r.ok) { set({ editBlocked: { reason: SPLIT_BLOCKED_REASON[r.reason], at: blockTargetFor(SPLIT_BLOCKED_REASON[r.reason], at) } }); return; }
+    // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
+    // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
+    // 空振りする（嘘の理由）。`explodeClip` と同じ形。
+    commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
+  },
+  freezeSelectedClip: async (atSec, at = PANEL_ID.arrange) => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const clipId = selectedClipIds[0]!;
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    const templateOf = (id: string): Template | undefined => templateById.get(id);
+    // ⚠️ **押す前に断る**＝切り出し（重い処理）を始めてから「できません」と言わない（§2-5）。
+    const issue = freezeFrameIssue(doc, clipId, atSec, { templateOf });
+    if (issue) {
+      const reason = FREEZE_BLOCKED_REASON[issue];
+      set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+      return;
+    }
+    const clip = doc.clips.find((c) => c.id === clipId);
+    const src = doc.assets.find((a) => a.assetId === clip?.assetId);
+    // ⚠️ **関門を通ったのに素材が無い**＝`isDirectVideoClip` が見ているので普通は起きない。
+    // それでも握りつぶさずに理由を出す（黙って何も起きない、を作らない）。
+    if (!clip || !src) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
+      return;
+    }
+    // ⚠️ **ファイルが見つからない動画は、ここでも断る**（#1136 レビュー由来 ℹ️）＝
+    // 画面だけに門があると、store を直に叩く道（キー割り当てなど）で素通りする。
+    if (clip.assetId != null && get().missingAssetIds.includes(clip.assetId)) {
+      const reason = EDIT_BLOCKED.freezeAssetMissing;
+      set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+      return;
+    }
+    // ⚠️ **見えていたコマで切り出す**（#1136 レビュー由来 ℹ️・ADR-0001）＝キャンバスが映しているのは
+    // **コマの格子に落とした時刻**なので、生の再生位置で切ると
+    // **見えていた絵と最大1コマ（×速さ）ずれる**。「止めたのに別の瞬間」を作らない。
+    // ⚠️ **格子へ落とすのは `freezeSourceSec` の中**（#1147）＝プレビュー＝書き出しの正準
+    // （`videoSourceSecAt`）をそのまま呼ぶので、丸め方も1か所にある。
+    const sourceSec = freezeSourceSec(doc, clip, atSec);
+    // ⚠️ **切り出しには「何コマ目か」で頼む**（#1158）＝秒だけ渡すと、切り出す側が**自分の丸め方**で
+    // コマを選ぶので、素材と出力の格子が合わないとき（29.97 の素材を 24fps で出す等）に
+    // **見えていたコマの1つ先**になる（実測 18/64・全部ちょうど1コマ）。
+    // ⚠️ **`sourceSec` は捨てない**＝写真の名前（何秒の絵か）に使うので、表示の言葉としては要る。
+    const grid = freezeSourceFrame(doc, clip, atSec);
+    // ⚠️ **映っていないなら切り出さない**＝正準が `null` を返すのは「その時刻にこの置き場所は無い」。
+    // ⚠️ **いまは起きない（変異チェックで生き残る＝等価）**＝関門（`freezeFrameIssue`）が
+    // `isDirectVideoClip` を通した帯なら、`freezeSourceSec` は**直接置きの置き場所**を必ず1つ持つ。
+    // 時刻が区間の外へ落ちることも無い（関門が前後 0.1 秒＝`TIMELINE_MIN_CLIP_SEC` を要求するので、
+    // 半コマの丸めでは外へ出ない）。それを `freeze.test.ts`「関門が通した帯なら、素材の時刻は必ず出る」で
+    // 固定してある＝**この枝を消しても観測できる違いが無い**。
+    // ⚠️ **それでも残す**＝片方の条件だけ緩めた瞬間に「押せたのに何も起きない」になる側なので、
+    // 黙って返るのではなく理由を出す形にしておく（§2-5）。
+    if (sourceSec == null) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, at) } });
+      return;
+    }
+    // ⚠️ **切り出す前の姿を控える**（#1136 レビュー由来 🟡）＝取り込み中でも編集は止まらないので、
+    // 待っている間に動かす・詰める・速さを変える・素材を選び直すと**別の瞬間の絵**になる。
+    const was = freezeSnapshotOf(clip);
+    // ⚠️ **取り込みの門は共有する**（書き出し中・二重取り込み＝同じことをする操作は同じ断り方）。
+    // ⚠️ **取り込み中は理由を出す**（#1136 レビュー由来 🟡）＝黙って false を返すと、押しても
+    // 何も起きないので**必ずもう一度押される**（素材の取り込みボタンは押す前に断っている）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    // ⚠️ **`runImport` には乗せない**（同レビュー 🟡）＝あちらは素材の追加を**それだけで**履歴へ積むので、
+    // 1回の操作に取り消しが2回要る（ADR-0034 決定20＝1操作＝1つの取り消し）。しかも戻す途中に
+    // **使っていない写真だけ素材に残る**という、利用者が一度も作っていない状態ができる。
+    // ここは**素材の追加と帯の差し替えを1つの履歴に載せる**。
+    const assetId = reserveAssetId(doc.projectId, doc.assets.map((a) => a.assetId), createAssetId);
+    const { asset, fileName } = newFrameAsset(src.displayName, sourceSec, [], assetId);
+    set({ isImporting: true, importError: null });
+    try {
+      const relPath = await extractVideoFrame(doc.projectId, src.filePath, sourceSec, fileName, grid ?? undefined);
+      // ⚠️ **切り出した写真を置き去りにしない**（#1149 ④）＝ここから先の断りは
+      // **切り出しに成功したあと**なので、片づけないと `assets/` にファイルだけが残る
+      //（素材にも履歴にも載らないので、画面から片づける道が無い）。しかも `FREEZE_CHANGED` は
+      // 「待っている間に帯を触る」という**実在の筋**なので、断るたびに増える。
+      // ⚠️ Rust 側は自分が失敗したときの出口を塞いである（#1137）＝**TS 側の出口もそろえる**。
+      const sweep = (): void => { void deleteProjectFiles(doc.projectId, [relPath]); };
+      // ⚠️ **待っている間に文書が変わりうる**＝別の動画を開いていたら、そちらへは何も書かない。
+      const cur = get().doc;
+      if (!cur || cur.projectId !== doc.projectId) { sweep(); return; }
+      // ⚠️ **待っている間に書き出しが始まっていたら足さない**＝`commit` が断るので、
+      // 先にこちらで理由を出す（「終わってから」だけ出て切り出しが消えた、を作らない）。
+      if (isTimelineExportBusy(get().exportRun.phase)) {
+        set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+        sweep();
+        return;
+      }
+      // ⚠️ **帯の側も見直す**＝`freezeFrameAt` は先頭で同じ関門を通すので、
+      // 帯が動いた・消えた・列が固定された場合はここで理由が返る。
+      const withAsset: TimelineProject = { ...cur, assets: [...cur.assets, { ...asset, filePath: relPath }] };
+      const r = freezeFrameAt(withAsset, clipId, atSec, assetId, volumeAt, { templateOf, was });
+      if (!r.ok) {
+        const reason = FREEZE_BLOCKED_REASON[r.reason];
+        set({ editBlocked: { reason, at: blockTargetFor(reason, at) } });
+        sweep();
+        return;
+      }
+      // ⚠️ **止めた絵を選び直す**（同レビュー 🟡）＝「分ける」と同じ規則。案内（伸ばしたいときは
+      // 引っぱる）の1手目が**止めた絵を選んでいること**なので、選択が前半に残ると噛み合わない。
+      commit(set, get, r.doc, { selectedClipIds: [r.newClipId] }, { outsideGroup: true });
+      const url = await assetDisplayUrl(doc.projectId, relPath);
+      if (url && get().doc?.projectId === doc.projectId) {
+        set({ assetSrcById: { ...get().assetSrcById, [assetId]: url } });
+      }
+    } catch (e) {
+      // ⚠️ **触っていない動画へは出さない**（#1136 レビュー由来 🟡・`runImport` と同じ形）＝
+      // 切り出し中にその動画を消すと別の動画を開けてしまうので、着地先を必ず確かめる。
+      if (get().doc?.projectId !== doc.projectId) return;
+      // ⚠️ **押した所へ返す**（同レビュー 🟡）＝`importError` は「置く」の欄にしか出ないので、
+      // 「選んだ部品」から押した人には**何も見えない**まま終わっていた。両方へ出す。
+      const message = importErrorMessage(e);
+      set({ importError: message, editBlocked: { reason: EDIT_BLOCKED.freezeFailed, at: blockTargetFor(EDIT_BLOCKED.freezeFailed, at) } });
+    } finally {
+      // ⚠️ **別の動画で走っている取り込みの鍵を外さない**（同上）。
+      if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
+    }
+  },
+  addMarkerAtPlayhead: () => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **書き出し中は入口で断る**（#1161 レビュー由来 ℹ️）＝`commit` 任せだと、
+    // **同じ時刻に既にある**経路は `commit` を通らないので**断りだけ出ずに再生位置が動く**。
+    // ボタンは `busyGuard()` で塞がっているが、**キーで置く入口が増えた瞬間に踏む**（ADR-0040 の未解決論点）。
+    if (blockedByExport(set, get)) return;
+    // ⚠️ **コマの格子へ落とす**＝目印も再生位置を使うものなので、半端な位置に置かない
+    //（`ここで分ける`・`この瞬間で絵を止める` と同じ流儀＝ADR-0023）。
+    const at = frameTimeSec(doc, get().playheadSec);
+    const r = addMarker(doc, at);
+    // 同じ時刻に既にあれば `addMarker` は文書を変えない＝そのときは履歴にも積まない。
+    // ⚠️ **再生を止めない**（#1161 レビュー由来 🔴・ADR-0040 決定3）＝`commit` は無条件で
+    // `isPlaying: false` を書くので、**渡さないと1つ置いた瞬間に止まる**＝「見ながら次々置く」が
+    // 成り立たない（決定21 の頃と体験が変わらない）。`extra` は後から展開されるので効く。
+    // ⚠️ **止めないのは「置く」「ここへ動かす」だけ**＝消す・メモは帯の削除と同じく止まる
+    //（走らせながら消す・打つのは型として無いので、揃える方を採る）。
+    if (r.doc !== doc) commit(set, get, r.doc, { isPlaying: get().isPlaying });
+    // ⚠️ **置いた（既にあった）目印へ再生位置を寄せる**（#1149 ①・ADR-0040 決定2）＝
+    // 再生位置は**生の秒**、目印は**格子に落ちた秒**なので、寄せないと `markerTimeEq` が
+    // 一致せず「**いまここ**」の印が付かない＝置いた直後にどれが自分の印か分からない。
+    // ⚠️ **二度押しが「無反応」にならないのもこれ**＝既にある目印が選ばれた状態になる
+    //（ADR-0040＝断らずに「その目印を選ぶ」側へ倒す）。
+    // ⚠️ **`setPlayhead` を使わない**（#1161 レビュー由来）＝あちらは時計を測り直させるので、
+    // 押すたびに**わずかに巻き戻った時刻から測り直す**ことになり、押すほど絵が音に対して遅れる
+    //（音は 0.25 秒まで直しに行かない）。直に書けば寄せ幅は最大1コマで、音は跳ねない。
+    // ⚠️ **選んだ相手を覚える**（レビュー由来 🟡）＝再生中は次のフレームで生の秒に上書きされるので、
+    // 再生位置の一致だけに頼ると「いまここ」の印が点かない。
+    set({ playheadSec: at, selectedMarkerId: r.markerId, editBlocked: null });
+  },
+  setMarkerTextFor: (markerId, text) => {
+    const doc = get().doc;
+    if (!doc) return;
+    commit(set, get, setMarkerText(doc, markerId, text));
+  },
+  moveMarkerToPlayhead: (markerId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **書き出しの門を先に見る**（#1161 レビュー由来 ℹ️）＝重なり判定が先だと、
+    // 書き出し中に**「もう目印があります」という見当違いの理由**が返る。
+    if (blockedByExport(set, get)) return;
+    // ⚠️ **置くときと同じ規則**＝コマの格子へ落とす（`frameTimeSec`・ADR-0023）。
+    const at = frameTimeSec(doc, get().playheadSec);
+    // ⚠️ **動かせないなら理由を出す**（#1149 ①）＝重なる先へは動かせないので、黙って返すと
+    // **押しても無反応**になる。目印は押すと再生位置がそこへ跳ぶのが主導線なので、
+    // **跳んだ直後に「ここへ動かす」を押す**筋を普通に踏む（そこには必ず目印がいる）。
+    const blocked = moveMarkerBlocked(doc, markerId, at);
+    if (blocked) {
+      const reason = EDIT_BLOCKED.markerExists;
+      set({ editBlocked: { reason, at: blockTargetFor(reason, PANEL_ID.arrange) }, selectedMarkerId: markerId });
+      return;
+    }
+    const next = moveMarker(doc, markerId, at);
+    // もうそこに居るなら `moveMarker` が同じ文書を返す＝履歴にも積まない（#1149 ②）。
+    // ⚠️ **ここも再生を止めない**（上と同じ理由）。
+    if (next !== doc) commit(set, get, next, { isPlaying: get().isPlaying });
+    // ⚠️ **動かした先へも寄せる**（#1161 レビュー由来 ℹ️）＝置く側だけ寄せていたので、
+    // 「ここへ動かす」では**動かした目印に「いまここ」が付かない**（置く側で潰した問題が残っていた）。
+    // ⚠️ **空振りでも前の返事は消す**＝`commit` を通らない経路なので、直前の断りが出たままになり、
+    // **この操作への返事に見える**。
+    set({ playheadSec: at, selectedMarkerId: markerId, editBlocked: null });
+  },
+  removeMarkerById: (markerId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    commit(set, get, removeMarker(doc, markerId));
+  },
+  setClipBoxesFor: (updates) => {
+    const doc = get().doc;
+    if (!doc || updates.length === 0) return;
+    const r = setClipBoxes(doc, dimsForOrientation(doc.videoSettings.aspectRatio), updates);
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.preview) } });
+  },
+  duplicateSelectedClip: () => {
+    const before = new Set((get().doc?.clips ?? []).map((c) => c.id));
+    applyEdit(set, get, (doc, id) => duplicateClip(doc, id));
+    // **複製した方を選ぶ**（#1350 レビュー 🟡・業界の型）＝元を選んだままだと、続けて複製すると元のすぐ後ろ（いま置いた複製）に
+    //   重なって必ず断られる。断られたとき（増えていない）は選びを変えない。
+    const added = (get().doc?.clips ?? []).find((c) => !before.has(c.id));
+    if (added) set({ selectedClipIds: [added.id] });
+  },
+
+  removeSelectedClips: (at) => get().removeClipsByIds(get().selectedClipIds, at),
+
+  // ⚠️ **渡されなかったら帯**（#869 レビュー 🟡）＝消す入口は4つあり、どれか1つでも渡し忘れると
+  // **押していない欄に返事が出る**。安全側は「必ず見える所」＝帯（欄を閉じていても見える）。
+  removeClipsByIds: (clipIds, at = BLOCK_GLOBAL) => {
+    const doc = get().doc;
+    if (!doc || clipIds.length === 0) return;
+    // **固定した列の部品が混ざっていたら断る**（#701 レビュー）＝`Ctrl+A` で全部選んでから消せてしまうと、
+    // 固定が意味を失う。ほかの編集（動かす・複製する）が固定列を断るのと同じ扱い。
+    const checked = removeSelectedClipsChecked(doc, clipIds);
+    if (!checked.ok) {
+      set({ editBlocked: { reason: checked.reason, at: blockTargetFor(checked.reason, at) } });
+      return;
+    }
+    // 消した後は選択を空にする（消えたものを選んだままにしない）。
+    commit(set, get, checked.doc, { selectedClipIds: [] });
+  },
+
+  setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
+  setSelectedClipText: (textKey, text) => applyEdit(set, get, (d, id) => setClipText(d, id, textKey, text)),
+  setSelectedKeyframeAt: (timeSec, input) => applyEdit(set, get, (d, id) => setKeyframe(d, id, timeSec, input)),
+  removeSelectedKeyframe: (timeSec) => applyEdit(set, get, (d, id) => removeKeyframe(d, id, timeSec)),
+  clearSelectedKeyframes: () => applyEdit(set, get, (d, id) => clearKeyframes(d, id)),
+  importSubtitleFile: (bytes) => {
+    const doc = get().doc;
+    if (!doc) return;
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    const text = decodeSubtitleBytes(bytes);
+    if (text == null) { set({ importError: subtitleFileMessage.SUBTITLE_FILE_UNREADABLE }); return; }
+    const { cues, unreadable } = parseSubtitleFile(text);
+    if (cues.length === 0) { set({ importError: subtitleFileMessage.SUBTITLE_FILE_EMPTY }); return; }
+    const r = importSubtitleCues(doc, cues);
+    if (r.placed === 0) { set({ importError: subtitleImportedMessage(0, unreadable, r.beyondLimit) }); return; }
+    commit(set, get, r.doc, { importError: subtitleImportedMessage(r.placed, unreadable, r.beyondLimit) });
+  },
+  applySelectedMotionPreset: (preset) =>
+    applyEdit(set, get, (d, id) => applyMotionPreset(d, id, preset, { atSec: keyframeTimeAt(d, id, get().playheadSec) ?? 0 })),
+  clearKeyframesOf: (targetId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = clearKeyframes(doc, targetId);
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
+  },
+
+  setSelectedSubtitleText: (text) => applyEdit(set, get, (d, id) => setSubtitleText(d, id, text)),
+  setSelectedClipTalkMotion: (talkMotion) => applyEdit(set, get, (d, id) => setClipTalkMotion(d, id, talkMotion)),
+  setSelectedSubtitleVoiceLink: (voiceClipId) =>
+    applyEdit(set, get, (d, id) => setSubtitleVoiceLink(d, id, voiceClipId)),
+
+  explodeClip: (clipId, template, at = PANEL_ID.selected) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // **対象は確認したその部品**（選択ではなく id で受ける）＝確認を出したまま別の部品を選んでも、
+    // 戻せない操作が別の部品に効かない。
+    const r = explodeTemplateClip(doc, clipId, template);
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
+      return;
+    }
+    // バラした部品をまとめて選ぶ＝続けて動かせる（元の部品はもう無い）。
+    const before = new Set(doc.clips.map((c) => c.id));
+    commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
+  },
+
+  setSelectedVisualContent: (patch) => applyEdit(set, get, (d, id) => setVisualClipContent(d, id, patch)),
+  addVisualClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **素材の形のまま置く**ために実寸を渡す（2026-09-28 の実機レビュー）＝渡さないと
+    //   画面いっぱいの箱になり、正方形・縦長の素材が切り取られる（ゆうこの立ち絵で頭と足が切れた）。
+    // ⚠️ **測る前に置かれることがある**＝そのときは `undefined` のまま渡し、domain が切らない側へ倒す。
+    const assetSize = input.assetId ? get().assetSizes[input.assetId] : undefined;
+    // **指された場所へ置く**（ドラッグ）＝探さない・寄せない。置けなければ理由を出して終わり
+    // （ADR-0034 決定10＝利用者が位置を指したときは勝手に別の場所へ動かさない）。
+    if (input.at) {
+      const r = addVisualClip(doc, { ...input, assetSize, trackId: input.at.trackId, startSec: input.at.startSec });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
+      } else {
+        set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
+      }
+      return;
+    }
+    // 置き先は**いちばん手前の置ける列**（`11 §7.6.3`・#722）。**列をまたいでは探さない**＝
+    // 奥の列の再生位置が空いていてもそちらへは置かない。手前に全画面の部品があると**その裏に入って
+    // 見えない**からで、`06 §12.1` の「押して置いたときも必ず仕上がり確認に現れる」が守れなくなる
+    //（再生位置を移すだけでは足りない）。代わりに時刻は後ろへずれることがある＝利用者判断で
+    // 「見える」を優先した（#722・案A）。
+    // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
+    // 条件は `placeableVisualTracks` を見る。その中身は `trackPlacementIssue`（列そのものの事情の
+    // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
+    // 列選びと時刻の規則は `visualPlacementAt`（domain）に1つだけ置く＝**押す前に見せる帯**（#1096）と
+    // 押した結果が別々の計算にならない。置ける列が無ければ理由を出す（押しても何も起きない、を作らない・§2-5）。
+    const playheadSec = get().playheadSec;
+    const at = visualPlacementFor(doc, input.kind, input.trackId, playheadSec);
+    if (!at) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
+      return;
+    }
+    // ⚠️ **文字・図形は、塞がっていたら手前に列を足して重ねる**（利用者判断 2026-09-28・#1252）＝
+    //   写真に文字を載せるのは動画づくりでいちばんよくやる操作なのに、押すと**写真の後ろ**に並んでいた
+    //  （重ねるには「列を足す」を先に押すと知っている必要があり、画面にはどこにも書いていなかった）。
+    // ⚠️ **写真・動画は後ろへ並べたまま**＝続けて置くのは紙芝居なので、そちらが正しい。
+    //   種類で分ける理由は `overlaysWhenBusy` に1つだけ書く。
+    // ⚠️ **足すのは手前**なので #722 案A（奥へ置かない＝裏に隠さない）は守られる。
+    // ⚠️ **1回の取り消しで両方戻る**＝列と部品を同じ `commit` で確定する（列だけ残らない）。
+    let working = doc;
+    let target = at;
+    if (at.newTrack) {
+      const withTrack = addTrack(doc, TRACK_KIND.visual);
+      const added = withTrack.tracks.find((t) => !doc.tracks.some((o) => o.id === t.id));
+      const retry = added ? visualPlacementFor(withTrack, input.kind, added.id, playheadSec) : null;
+      // ⚠️ **足しても置けないなら足さない**＝空の列だけが増える、を作らない。
+      if (retry && retry.startSec === playheadSec) { working = withTrack; target = retry; }
+    }
+    const r = addVisualClip(working, { ...input, assetSize, trackId: target.trackId, startSec: target.startSec });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
+      return;
+    }
+    const placed = r.doc.clips[r.doc.clips.length - 1];
+    // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+    // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+    commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
+  },
+  addAudioClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // 帯の初めの長さ＝**素材の実際の長さ**（#1348＝分からないと仮の 10 秒になり、効果音がくり返し鳴っていた）。
+    const asset = input.assetId ? doc.assets.find((a) => a.assetId === input.assetId) : undefined;
+    const durationSec = input.durationSec ?? audioAssetDurationSec(asset, input.assetId ? get().audioDurations[input.assetId] : undefined);
+    const r = addAudioClip(doc, { ...input, durationSec });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.audio) } });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
+  },
+
+  setSelectedClipSpeed: (speed) => applyEdit(set, get, (d, id) => setClipSpeed(d, id, speed)),
+  setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
+  setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
+  setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
+  setSelectedClipOriginalAudioVolume: (volume) =>
+    applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
+  // ⚠️ **見た目パターンを渡す**（`/canon-check` 🔴・`splitClip` と同じ理由）＝どの枠が動画を受けるか、
+  // 立ち絵に動画が入っているかは**見た目が決める**。渡さないと置き場所が1つも作れず、欄は出るのに
+  // 押すと毎回断られる（しかも理由は「音が入っていない」＝事実と違う）。
+  setSelectedClipSlotAudio: (layerId, patch) => {
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch, { templateOf: (tid) => templateById.get(tid) }));
+  },
+  setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
+  setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
+  setSelectedVolumePoint: (timeSec, volume) =>
+    applyEdit(set, get, (d, id) => setVolumePoint(d, id, timeSec, volume)),
+  removeSelectedVolumePoint: (timeSec) => applyEdit(set, get, (d, id) => removeVolumePoint(d, id, timeSec)),
+  clearSelectedVolumePoints: () => applyEdit(set, get, (d, id) => clearVolumePoints(d, id)),
+  setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
+  setSelectedClipCropAlign: (patch) => applyEdit(set, get, (d, id) => setClipCropAlign(d, id, patch)),
+  setSelectedClipCropMode: (mode) => applyEdit(set, get, (d, id) => setClipCropMode(d, id, mode)),
+  _measureAudioDurations: () => {
+    const doc = get().doc;
+    if (!doc) return Promise.resolve();
+    // ⚠️ **同じ動画を2回測らない**＝開いた直後の1回と、呼び直し（検査・取り込み）が重なると FFmpeg が二重に起動する。
+    if (audioMeasureRun?.projectId === doc.projectId) return audioMeasureRun.promise;
+    const promise = measureAudioDurationsOf(doc, set, get).finally(() => {
+      if (audioMeasureRun?.promise === promise) audioMeasureRun = null;
+    });
+    audioMeasureRun = { projectId: doc.projectId, promise };
+    return promise;
+  },
+  setAssetSize: (assetId, size) => {
+    const cur = get().assetSizes[assetId];
+    if (cur && cur.w === size.w && cur.h === size.h) return;
+    set({ assetSizes: { ...get().assetSizes, [assetId]: size } });
+  },
+
+  clearImportError: () => set({ importError: null }),
+
+  // ⚠️ **走っているループを世代で降ろす**（場面形式・声の一括作成と同じ仕組み）。
+  // ⚠️ **いま運んでいる1件は止めない**＝入ったものは残す（§2-5＝途中まで入れた素材を黙って捨てない）。
+  cancelAssetImport: () => set((s) => ({ _importRunSeq: s._importRunSeq + 1 })),
+
+  addAsset: async (file) => {
+    // 順番は場面形式と同じ（開いているか→書き出し中→取り込み中→大きさ）＝同じ状況で同じ案内が出る（ADR-0026②）。
+    if (!canStartImport(set, get)) return;
+    // 大容量はメモリへ展開しない（#48・A3）。**アプリの中ではここへ来ない**＝取り込みボタンが
+    // ネイティブの「開く」へ回し、パスだけを受け取る経路（`addAssetByPath`）に上限は無い。
+    // 次の行動は場面形式と別（この画面に「写真・動画を選ぶ」は無い＝**実行できない案内**にしない・ADR-0034 決定5）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      set({ importError: assetTooLargeMessage(ASSET_TOO_LARGE_PICK_SMALLER) });
+      return;
+    }
+    await runImport(set, get, file.name, async (fileName, assetType) => {
+      if (assetType === ASSET_TYPE.video) {
+        // 動画は base64 を経由せず生バイトで取り込む（大容量でもメモリを食わない）。
+        return await importAssetBytes(get().doc!.projectId, fileName, new Uint8Array(await file.arrayBuffer()));
+      }
+      return await importAssetFile(get().doc!.projectId, fileName, await fileToDataUrl(file));
+    });
+  },
+
+  addAssetByPath: async (path) => {
+    await runImport(set, get, path, async (fileName) =>
+      await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+  ensureAudioSrcs: async () => {
+    const doc = get().doc;
+    if (!doc) return;
+    const have = get().audioSrcByKey;
+    const tried = get()._audioTried;
+    const missing = audioSourcesOf(doc).filter((src) => {
+      const key = audioSourceKey(src);
+      return !have[key] && !tried.has(key);
+    });
+    if (missing.length === 0) return;
+    // ⚠️ **先に印を付ける**＝読んでいる間に何度も呼ばれても、同じものを二重にたのまない。
+    for (const src of missing) tried.add(audioSourceKey(src));
+    const loaded = await Promise.all(missing.map((src) => loadAudioSrc(doc, src)));
+    // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**（取り込みと同じ判定位置）。
+    const now = get().doc;
+    if (!now || now.projectId !== doc.projectId) return;
+    const add = loaded.filter((e): e is [string, string] => e != null);
+    if (add.length === 0) return;
+    set({ audioSrcByKey: { ...get().audioSrcByKey, ...Object.fromEntries(add) } });
+  },
+  refreshMissingAssets: async () => {
+    const doc = get().doc;
+    if (!doc || doc.assets.length === 0) { set({ missingAssetIds: [] }); return; }
+    const missing = new Set(await missingAssetFiles(doc.projectId, doc.assets.map((a) => a.filePath)));
+    // ⚠️ **書き戻しは「いまの文書」で絞る**（`projectstore-async-clobber` と同じ流儀）＝調べている間に
+    //   別の動画を開いた／素材が消えたときに、**消したものが「見つかりません」で復活**しないようにする。
+    const now = get().doc;
+    if (!now || now.projectId !== doc.projectId) return;
+    set({ missingAssetIds: now.assets.filter((a) => missing.has(a.filePath)).map((a) => a.assetId) });
+  },
+  relinkAssetByPath: async (assetId, srcPath) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // 断り方は取り込みと同じ経路（同じ状況で同じ案内＝ADR-0026②）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    const target = doc.assets.find((a) => a.assetId === assetId);
+    if (!target) return;
+    // ⚠️ **種類の違うファイルへは差し替えない**（§2-5・ADR-0026④）＝写真↔動画で入れ替えると、
+    // 種類を変えれば**置いた差し込み口が受け付けなくなって黙って消え**、種類を変えなければ
+    // **写真として動画を描く**ことになり何も映らない。判定は場面形式と**同じ関数**。
+    if (changesAssetKind(target.assetType, srcPath)) {
+      set({ importError: assetTypeMismatchMessage(assetKindOf(target.assetType), PROJECT_FORMAT.timeline) });
+      return;
+    }
+    set({ isImporting: true, importError: null });
+    try {
+      // ⚠️ **保存名の導出は `newAssetFrom` に1つ**（§2-7・場面形式の再リンクと同じ＝ADR-0026②）。
+      //   ここへ写すと**取り込みと選び直しで保存名が黙ってずれる**＝古い拡張子のまま中身だけ差し替わり、
+      //   表示・書き出しの種類は**拡張子から決まる**ので「`.mp4` という名前の中身は MOV」ができる。
+      //   番号は採り直さない（`target.assetId`）＝**同じ素材のファイルを入れ替える**だけ。
+      const { fileName, asset: shape } = newAssetFrom(srcPath, [], target.assetId);
+      const savedPath = await importAssetByPath(doc.projectId, fileName, srcPath);
+      const relPath = savedPath ?? shape.filePath;
+      // 音は長さを測り直す（#1348・PR #1352 レビュー 🟡）＝測らないと選び直しで長さが消え、置くとまた仮の 10 秒になる。
+      const enrich: VideoEnrichment | null = target.assetType === ASSET_TYPE.video
+        ? await probeAndThumbVideo(doc.projectId, relPath)
+        : target.assetType === ASSET_TYPE.bgm
+          ? { metadata: (await probeAudioDuration(doc.projectId, relPath)) ?? undefined }
+          : null;
+      // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
+      // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
+      const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(doc.projectId, relPath));
+      const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : null;
+      // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**（取り込みと同じ判定位置）。
+      const cur = get().doc;
+      if (!cur || cur.projectId !== doc.projectId) return;
+      if (isTimelineExportBusy(get().exportRun.phase)) {
+        set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+        return;
+      }
+      const now = cur.assets.find((a) => a.assetId === assetId);
+      if (!now) return; // 待っている間に消されていたら何も書かない
+      const r = relinkTimelineAsset(now, cur.clips, templateOfNow, relPath, enrich?.metadata ?? null, enrich?.thumbnailPath ?? null);
+      commit(set, get, {
+        ...cur,
+        assets: cur.assets.map((a) => (a.assetId === assetId ? r.asset : a)),
+        clips: r.clips,
+      }, {
+        // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
+        ...(r.clampedUses > 0 ? { importError: clipClampedMessage(r.clampedUses, PROJECT_FORMAT.timeline) } : { importError: null }),
+        assetSrcById: freshUrl ? { ...get().assetSrcById, [assetId]: freshUrl } : get().assetSrcById,
+        // 開いたときに測った前のファイルの長さを捨てる（#1348＝別の長さの帯ができない・測り直しの対象から外れない）。
+        audioDurations: Object.fromEntries(Object.entries(get().audioDurations).filter(([k]) => k !== assetId)),
+        // ⚠️ **コマ列・波形の下書きも捨てる**（PR レビュー 🟡）＝あれは**パス基準**のキャッシュ
+        //（`${filePath}#範囲`）で、`ensureClipAnalysis` は「もうある」だけで打ち切るので、
+        //   落とさないと**前のファイルの絵と波形が帯に残り続ける**（表示の URL だけ取り直しても足りない）。
+        analysisByPath: withoutAnalysisOf(get().analysisByPath, [target.filePath, relPath]),
+      }, { outsideGroup: true });
+      if (target.assetType === ASSET_TYPE.video) {
+        const bodyUrl = await assetDisplayUrl(doc.projectId, relPath);
+        const after = get().doc;
+        if (bodyUrl && after && after.projectId === doc.projectId) {
+          set({ videoSrcById: { ...get().videoSrcById, [assetId]: `${bodyUrl}?t=${Date.now()}` } });
+        }
+      }
+      // ⚠️ **鳴らす側も読み直す**（#1050）＝音源の鍵は**素材の番号**なので、選び直しても鍵は変わらない
+      //   ＝読み直さないと**前の音が鳴り続ける**（絵の側で `?t=` を付けているのと同じ話）。
+      //   経路は開いたときと**同じ関数**（`loadAudioSrc`）＝入口ごとに読み方を作らない。
+      const nowDoc = get().doc;
+      if (nowDoc && nowDoc.projectId === doc.projectId) {
+        // ⚠️ **この素材のぶんだけ**読み直すのは**速さのため**（ぜんぶ読み直しても結果は同じ）＝
+        //   音の部品が多い動画で、選び直すたびに全部を読み直さない。
+        const uses = audioSourcesOf(nowDoc).filter((src) => src.assetId === assetId);
+        const loaded = await Promise.all(uses.map((src) => loadAudioSrc(nowDoc, src)));
+        const after2 = get().doc;
+        if (after2 && after2.projectId === doc.projectId && loaded.some(Boolean)) {
+          const next = { ...get().audioSrcByKey };
+          for (const e of loaded) if (e) next[e[0]] = e[1];
+          set({ audioSrcByKey: next });
+        }
+      }
+      void get().saveTimelineProject();
+      // 見つかるようになったぶんを消す（直したのに知らせが残る、を作らない）。
+      void get().refreshMissingAssets();
+    } catch (e) {
+      if (get().doc?.projectId === doc.projectId) set({ importError: importErrorMessage(e) });
+    } finally {
+      if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
+    }
+  },
+
+  importFromLibrary: async (libraryAssetId) => {
+    // ⚠️ **開いている動画は最初の await の前に控える**（差分再監査 5巡目 🟡）＝一覧を読んでいる間にも
+    // 別の動画を開けるので、控えないと**押した動画ではなく後から開いた動画へ入る**（場面形式は
+    // `sameDocGuard` で同じ窓を塞いでいる＝形式で守りを割らない）。
+    const started = get().doc?.projectId ?? null;
+    const list = await listLibraryAssets();
+    if (list == null) {
+      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
+      return false;
+    }
+    const lib = list.find((a) => a.id === libraryAssetId);
+    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return false; }
+    if (started == null || get().doc?.projectId !== started) return false;
+    // ⚠️ **棚の名前・種類・タグを引き継ぐ**（ADR-0035 決定3・差分再監査 5巡目 🔴）＝ファイル名から
+    // 作り直すと、棚のファイル名は `lib_asset_NNN.png` なので**機械の番号が素材名として画面に出る**うえ、
+    // 種類（ロゴ）とタグも黙って落ちる（場面形式は `assetFromLibrary` で3つとも持ち込む＝ADR-0026②）。
+    // 採番だけは**この形式の規則**（番号を使い回さない＝`reserveAssetId`）に従うので予約IDを渡す。
+    const added = await runImport(set, get, lib.fileName, async (fileName) =>
+      await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName),
+      (reservedId) => assetFromLibrary(lib, [], reservedId));
+    // ⚠️ **入ったかは「足した素材の番号が返ったか」で見る**（差分再監査 5巡目）＝件数の増減で見ると、
+    // 待っている間の取り消し・別経路の着地を拾って**成功を騙る／知らせが出ない**。
+    return added != null;
+  },
+
+  ensureClipAnalysis: (clipId, barWidthPx) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    // 出どころの決め方は domain に1つ（`clipAnalysisSource`）＝音の部品・読み上げ・映像の
+    // どれを見るかを画面と store で書き分けない。
+    const src = clipAnalysisSource(clip, (id) => doc.assets.find((a) => a.assetId === id));
+    if (!src) return;
+    // ⚠️ **書き出し中は測らない**（レビュー 🟡・ADR-0032 決定22「走行中は入力を固定」）＝
+    // `run`/`run_bytes` は `EXPORT_CHILD` に載らないので、**中止でもアプリ終了でも殺せない**
+    // FFmpeg が焼いている最中に増える（CPU を取り合う）。
+    // ⚠️ **印を付ける前に返す**＝後ろに置くと、書き出しが終わってもその部品だけ
+    // 「もう一度たのまない」規則で**永久に空**のままになる。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    // ⚠️ **一度たのんだら二度たのまない**（`null` も記録）＝帯は再描画のたびに呼ばれるので、
+    // 素通しにすると FFmpeg が何度も起動する。`in` で見る（`null` を「まだ」と読まない）。
+    if (src.key in get().analysisByPath) return;
+    // 走り出したことを先に印す（同じ帯が続けて呼んでも1回で済む）。
+    set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: null } }));
+    const projectId = doc.projectId;
+    const generation = currentAnalysisGeneration();
+    // ⚠️ **同時に走らせる数を絞る**（`ANALYSIS_CONCURRENCY`）＝帯が20本並んでいると
+    // FFmpeg が20本**同時に**立つ（書き出し中でも立つ）。CPU を取り合って、いま焼いている
+    // 動画まで遅くなる。順番に流せば絵は同じで、見え方も「手前から埋まる」だけ。
+    void runAnalysis(async () => {
+      const result: AssetAnalysis = src.kind === ANALYSIS_KIND.waveform
+        ? { peaks: await audioPeaks(projectId, src.relPath, waveformBuckets(barWidthPx), src.fromSec, src.lengthSec) }
+        : { stripUrl: (await videoFilmstrip(projectId, src.relPath, filmstripFrames(barWidthPx), src.fromSec, src.lengthSec)) ?? undefined };
+      // ⚠️ **待っている間に別の動画へ移っていたら書かない**（`runImport` と同じ流儀）＝
+      // 別の文書の同じ場所の素材に、前の文書の波形が付く。
+      const now = get().doc;
+      if (!now || now.projectId !== projectId) return;
+      // ⚠️ **手放した後の着地は捨てる**＝文書を閉じてから戻ってきた結果を書かない
+      // （同じ動画を開き直したときに、前の並べ方のままの絵が残る）。
+      if (generation !== currentAnalysisGeneration()) return;
+      // 何も取れなかったら `null` のまま（もう一度たのまない）。
+      if (!result.peaks?.length && !result.stripUrl) return;
+      set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: result } }));
+    });
+  },
+
+  addAssets: async (items) => {
+    // ⚠️ **入口で1回だけ断る**（§2-5）＝途中で `isImporting` に弾かれて**黙って落ちる**のを防ぐ
+    // （`canStartImport` は取り込み中を**黙って** false にする＝まとめて渡すと数件だけ消える）。
+    // 断り方は単発と同じ経路を通す＝同じ状況で同じ案内が出る（ADR-0026②）。
+    // ⚠️ **見る順番は `canStartImport` に置いたまま**にする＝手前で1つだけ先に見ると、
+    // 書き出し中かつ取り込み中のときに**書き出しの案内が出なくなる**（順番が黙って入れ替わる）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    if (items.length === 0) return;
+    // ⚠️ **回し方は共有**（PR #1034 レビュー 🔴）＝ここに写して持っていたせいで、
+    // 中止の仕組みが**場面形式にだけ**入り、この画面のボタンは効かなかった。
+    await runBulkImport(
+      {
+        isImporting: () => get().isImporting,
+        importError: () => get().importError,
+        setImportError: (message) => set({ importError: message }),
+        setProgress: (progress) => set({ importProgress: progress }),
+        runSeq: () => get()._importRunSeq,
+        importOne: async (item) => {
+          if (typeof item === "string") await get().addAssetByPath(item);
+          else await get().addAsset(item);
+        },
+      },
+      items,
+    );
+  },
+
+  placeDroppedFiles: async (paths, at) => {
+    const before = new Set((get().doc?.assets ?? []).map((a) => a.assetId));
+    // ⚠️ **ファイル名で並べる**（#1269 レビュー 🟡＝ADR-0049「ファイル名の順」）＝パス全体で比べると、
+    //   別のフォルダから同時に落としたときフォルダ名が先に効く。同じ名前は全体のパスで決着を付ける。
+    const nameOf = (p: string): string => p.split(/[\\/]/).pop() ?? p;
+    const sorted = [...paths].sort((a, b) =>
+      nameOf(a).localeCompare(nameOf(b), "ja", { numeric: true }) || a.localeCompare(b, "ja", { numeric: true }));
+    await get().addAssets(sorted);
+    if (!at) return;
+    const doc = get().doc;
+    if (!doc) return;
+    // 取り込めたものだけを、取り込んだ順に（失敗した分は `importError` が案内済み）。
+    const added = doc.assets.filter((a) => !before.has(a.assetId)).map((a) => a.assetId);
+    if (added.length === 0) return;
+    const sizes = get().assetSizes;
+    const r = placeDroppedAssets(doc, {
+      assetIds: added,
+      trackId: at.trackId,
+      // ⚠️ **コマの格子へ落とすだけ**（`frameTimeSec` は使わない）＝あちらは再生位置用で**動画の尺で頭打ち**にする
+      //   ので、空の動画や尺より先へ落とすと**0秒や末尾へ吸い寄せられた**（検査で見つけた）。
+      startSec: Math.max(0, quantizeToFrameSec(at.startSec, effectiveFps(doc))),
+      assetSizeOf: (id) => sizes[id],
+    });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const first = r.doc.clips.find((c) => c.id === r.placedIds[0]);
+    commit(set, get, r.doc, { selectedClipIds: r.placedIds, ...(first ? { playheadSec: first.startSec } : {}) });
+  },
+
+  addVoiceClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = addVoiceClip(doc, input);
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.voice) } });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
+  },
+
+  setSelectedVoiceText: (text) => applyEdit(set, get, (d, id) => setVoiceText(d, id, text)),
+  setSelectedVoiceSpeaker: (speaker) => applyEdit(set, get, (d, id) => setVoiceSpeaker(d, id, speaker)),
+
+  addLinkedSubtitleClip: () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const r = addLinkedSubtitleClip(doc, selectedClipIds[0]);
+    if (!r.ok) {
+      // 入口は「選んだ部品」欄の**その字幕を置く**ボタン（読み上げを置く欄ではない・実測）。
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+  },
+
+  generateSelectedVoice: async () => {
+    const { selectedClipIds } = get();
+    if (selectedClipIds.length !== 1) return;
+    await get()._generateVoiceFor(selectedClipIds[0], { kind: "selected" });
+  },
+
+  _generateVoiceFor: async (clipId, notice) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return;
+    if (clip.voice.text.trim().length === 0) return; // 空の文では鳴らない（V28 が案内済み）
+    if (get()._voiceRun != null) return; // 連打・再入で二重に作らない（開き直しても走っている回は続く）
+    // 書き出し中は始めない＝作れても文書へ入れられず（`commit` が断る）、作った声を捨てることになる。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ voiceError: VOICE_EXPORTING_MESSAGE });
+      return;
+    }
+    voiceRunSeq += 1;
+    const myRun = voiceRunSeq;
+    /** **作り始める前**の印。失敗したときに据え置いてよいか（＝いまの文の声が既にあるか）はこれで決まる。 */
+    const statusBefore = clip.voice.status;
+    /** 自分の回のときだけ印を下ろす（前の回が今の回の印を横取りしない・#755）。 */
+    const clearIfMine = (extra: Partial<TimelineState> = {}): void => {
+      set(get()._voiceRun === myRun ? { ...extra, generatingVoiceClipId: null, _voiceRun: null } : extra);
+    };
+    set({ voiceError: null, generatingVoiceClipId: clipId, _voiceRun: myRun });
+    // 合成に渡した設定。**完了時にこれと今の設定を比べる**＝作っている間に文・声・話し方を変えたら
+    // その結果は使わない（鳴っている声と表示が食い違う状態を作らない）。
+    const input = { text: clip.voice.text, ...resolveTimelineVoice(clip.voice, doc.voiceSettings) };
+    try {
+      const result = await voiceProvider.synthesize(input);
+      const voicePath = await importVoiceFile(doc.projectId, clipId, result.audioDataUrl);
+      // 作っている間に文書が入れ替わった／この部品が消えた／設定を変えた＝結果は捨てる。
+      const now = get().doc;
+      const current = now?.clips.find((c) => c.id === clipId);
+      if (
+        !now ||
+        now.projectId !== doc.projectId ||
+        !current?.voice ||
+        !sameSynthInput(input, { text: current.voice.text, ...resolveTimelineVoice(current.voice, now.voiceSettings) })
+      ) {
+        clearIfMine();
+        return;
+      }
+      if (!voicePath) {
+        // ⚠️ **作り始める前が「作成済み」なら印は据え置く**（#755-3）＝鳴る側は `voicePath` しか見ないので、
+        // `failed` を書くと「作れませんでした」と出ながら声は鳴る、が**文書に残る**。
+        setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
+        clearIfMine({ voiceError: `${VOICE_SAVE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, current.voice.voicePath)}` });
+        void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
+        return;
+      }
+      // **長さを実際の尺へ合わせる**（`trimClip` を通す＝連動している字幕も一緒に動く・ADR-0032 決定24）。
+      const withVoice = {
+        ...now,
+        clips: now.clips.map((c) =>
+          c.id === clipId && c.voice
+            ? { ...c, voice: { ...c.voice, voicePath, status: NARRATION_STATUS.generated } }
+            : c,
+        ),
+      };
+      const sized =
+        result.durationSec > 0 ? trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec) : null;
+      // 長さを合わせられない（置けない）ときは、**声はそのまま置いて**理由を出す＝作った声を捨てない。
+      // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
+      // ⚠️ **断りの出し先は呼び出し側が決める**（#1045）＝1件ずつなら相手は「選んだ部品」だが、
+      //   まとめて作ると**選んでいない部品**が相手になる＝欄を指すだけでは**どの部品の話か読めない**
+      //  （§2-5・ADR-0034 決定10「操作した所で返す」）。まとめて作る側は名前を集めて最後に出す。
+      // ⚠️ **出し先の振り分けは1か所・網羅で書く**（PR #1049 レビュー 🟡）＝独立した `if` を2つ置くと、
+      //   3つ目の出し先が増えたとき**どちらもコンパイルエラーにならずに素通り**する（片方だけ直せてしまう）。
+      const blocked = sized && !sized.ok ? sized.reason : null;
+      let editBlocked: { reason: EditBlockedReason; at: BlockTarget } | undefined;
+      if (blocked) {
+        switch (notice.kind) {
+          case "selected":
+            editBlocked = { reason: blocked, at: blockTargetFor(blocked, PANEL_ID.selected) };
+            break;
+          case "collect":
+            notice.notFitted.push({ label: clipLabel(current), reason: blocked });
+            break;
+          default: {
+            // 網羅（`never` チェック）＝`VoiceNoticeSink` に出し先が増えたら、ここが型で止める。
+            const _exhaustive: never = notice;
+            void _exhaustive;
+          }
+        }
+      }
+      commit(set, get, sized?.ok ? sized.doc : withVoice, {
+        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
+        ...(editBlocked ? { editBlocked } : {}),
+      }, { outsideGroup: true });
+      // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
+      clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
+      // ⚠️ **自分から保存する**（#751）。自動保存は**画面**が持っているので、作っている最中に
+      // 画面を離れると、着地したぶんを**誰も書かない**＝開き直すと作った声と合わせた長さが
+      // 黙って消える（音声ファイルだけ残る）。取り込み（`runImport`）が同じ穴を同じ形で塞いでいる。
+      void get().saveTimelineProject();
+    } catch (e) {
+      // ⚠️ **合成側が返した文言があればそれを出す**（PR #883 レビュー）＝この境界は「失敗を文字列で
+      // 投げる」慣習（Rust の `invoke` が拒否する形）で、読み方の反映に失敗したときの次の行動
+      //（`READING_DICT_SYNC_FAILED`）もここを通る。捨てると「しばらくしてから、もう一度」＝
+      // 何度やっても同じ理由で失敗する、効かない案内になる（§2-5）。場面形式は `joinVoiceFailure` が同じ形。
+      const failedMessage = userFacingMessage(e, "timeline-voice") ?? VOICE_FAILED_MESSAGE;
+      // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
+      const now = get().doc;
+      const failed = now?.clips.find((c) => c.id === clipId);
+      // ⚠️ **作っている間に入力が変わっていたら、印に触れない**（#801）＝この失敗は**古い入力のもの**。
+      // 触ると「作り始める前の印」を無検査で書き戻すことになり、
+      // ・文を書き換えた後に失敗＝**音声の無い「作成済み」**が文書に残る（鳴る側は `voicePath` しか
+      //   見ないので、その読み上げが**黙って欠けた動画**が「保存しました」で出る＝ADR-0026④）
+      // ・取り消しで作成済みへ戻した後に失敗＝**鳴るのに「作れませんでした」**（#755-3 の再発）
+      // 成功側（上）と場面形式の失敗側（`projectStore`）は同じ照合を持っており、ここだけ抜けていた。
+      const sameInput =
+        failed?.voice != null &&
+        now != null &&
+        sameSynthInput(input, { text: failed.voice.text, ...resolveTimelineVoice(failed.voice, now.voiceSettings) });
+      if (now && now.projectId === doc.projectId && failed && sameInput) {
+        // 上と同じ理由＝**作り始める前が「作成済み」なら作れなかったことにしない**（#755-3）。
+        setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
+        set({ voiceError: `${failedMessage}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
+        void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
+      }
+      clearIfMine();
+    }
+  },
+
+  generateAllVoices: async () => {
+    if (get().isGeneratingVoices) return; // 連打・再入で二重に回さない
+    // 書き出し中は始めない（1件ずつのときと同じ理由＝作れても文書へ入れられない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ voiceError: VOICE_EXPORTING_MESSAGE });
+      return;
+    }
+    const doc = get().doc;
+    if (!doc) return;
+    const runSeq = get()._bulkVoiceRun + 1;
+    set({ isGeneratingVoices: true, voicesCancelled: false, _bulkVoiceRun: runSeq });
+    try {
+      // ⚠️ **1件ずつ順に回す**（場面形式は3並列）＝こちらの1件ぶん（`_generateVoiceFor`）は
+      // `_voiceRun` という**1つしかない枠**で二重起動を防いでいるので、並列に投げると
+      // **2件目以降が黙って return する**（作ったつもりで作られていない＝いちばん質の悪い失敗）。
+      // 枠を増やす改修は、あの関数が持つ「作っている間に設定が変わったら使わない」等の
+      // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
+      // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
+      // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
+      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [] };
+      for (const id of doc.clips.filter(voiceClipNeedsVoice).map((c) => c.id)) {
+        // ⚠️ **中止されたら次の1件へ進まない**＝作った声はそのまま残す（取り消しではない）。
+        if (get()._bulkVoiceRun !== runSeq) break;
+        // ⚠️ **文書が入れ替わったら止める**＝別の動画の読み上げを作りにいかない。
+        if (get().doc?.projectId !== doc.projectId) break;
+        await get()._generateVoiceFor(id, notice);
+      }
+      // ⚠️ **自分の実行のときだけ出す**＝中止・文書切替の後に、もう関係ない動画へ案内を残さない。
+      // ⚠️ **1件ずつの失敗（声そのものが作れない）は `voiceError` に出ている**ので上書きしない。
+      // ⚠️ **文書の一致も見る**（PR #1049 レビュー 🔴）＝文書が入れ替わったときは `break` するだけで
+      //   世代番号は進まないので、世代だけ見ていると**別の動画へ前の動画の部品名が出る**。
+      if (
+        notice.notFitted.length > 0 &&
+        get()._bulkVoiceRun === runSeq &&
+        get().doc?.projectId === doc.projectId &&
+        !get().voiceError
+      ) {
+        // ⚠️ **理由ごとの次の行動を添える**（PR #1049 レビュー 🟡）＝合わせられない理由は重なりとは
+        //   限らない（列が固定されていることもある）ので、まとめの文に1つの締めを書くと**片方では
+        //   効かない案内**になる。理由の文はそれぞれが次の行動を持っているので、**出た理由のぶんだけ**添える。
+        const reasons = [...new Set(notice.notFitted.map((n) => n.reason))];
+        set({
+          voiceError: [
+            bulkVoiceNotFittedMessage(notice.notFitted.map((n) => n.label)),
+            ...reasons.map((r) => `${editBlockedMessage[r]}。`),
+          ].join(""),
+        });
+      }
+    } finally {
+      // 中止・文書切替で世代が進んでいたら、この実行はもう現行ではない＝後発が立てた状態を消さない。
+      if (get()._bulkVoiceRun === runSeq) set({ isGeneratingVoices: false });
+    }
+  },
+
+  // 中止に書き出し中のガードは置かない（場面形式と同じ理由＝止める側の操作は止められる方が正しい）。
+  cancelVoiceGeneration: () => {
+    if (!get().isGeneratingVoices) return;
+    set((s) => ({ _bulkVoiceRun: s._bulkVoiceRun + 1, isGeneratingVoices: false, voicesCancelled: true }));
+  },
+
+  addTemplateClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = addTemplateClip(doc, input);
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.templates) } });
+      return;
+    }
+    // 置いた部品をそのまま選ぶ（続けて中身を入れられる）。**id は増えたものを引き当てる**＝
+    // 「末尾に足す」という実装の都合に画面が寄りかからない。
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
+  },
+
+  updateVideoSettings: (patch) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **何も変わらないなら同じ文書を返す**（α-6 出口監査 🟡・ADR-0032 決定「空振りを積まない」）＝
+    // `commit` は同一参照で弾く設計なのに、ここが毎回作り直すので**必ず別参照**になり、
+    // 「文字の形を開いて、やはり同じものを選ぶ」だけで取り消しが1つ埋まり、**再生も止まる**。
+    const next = { ...doc.videoSettings, ...patch };
+    const same = (Object.keys(patch) as (keyof typeof patch)[])
+      .every((k) => JSON.stringify(next[k] ?? null) === JSON.stringify(doc.videoSettings[k] ?? null));
+    if (same) return;
+    commit(set, get, { ...doc, videoSettings: next });
+  },
+  addTrack: (kind) => {
+    const doc = get().doc;
+    if (doc) commit(set, get, addTrack(doc, kind));
+  },
+  renameTrack: (trackId, name) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = renameTrack(doc, trackId, name);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
+  },
+  duplicateTrack: (trackId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = duplicateTrack(doc, trackId);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
+  },
+  removeTrack: (trackId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = removeTrack(doc, trackId);
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    // 列と一緒に消えるクリップは選択からも外す（消えたものを選んだままにしない）。
+    const gone = new Set(doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id));
+    commit(set, get, r.doc, { selectedClipIds: get().selectedClipIds.filter((id) => !gone.has(id)) });
+  },
+  moveTrackTo: (trackId, toIndex) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = moveTrackTo(doc, trackId, toIndex);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
+  },
+  moveTrackOrder: (trackId, direction) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = moveTrackOrder(doc, trackId, direction);
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
+    commit(set, get, r.doc);
+  },
+  setTrackFlag: (trackId, flag, value) => {
+    const doc = get().doc;
+    if (doc) commit(set, get, setTrackFlag(doc, trackId, flag, value));
+  },
+
+  undo: () => {
+    const { doc, history } = get();
+    if (!doc || blockedByExport(set, get)) return;
+    const r = undoSnapshot(history, doc);
+    if (r) restore(set, get, r.restored, r.history);
+  },
+  redo: () => {
+    const { doc, history } = get();
+    if (!doc || blockedByExport(set, get)) return;
+    const r = redoSnapshot(history, doc);
+    if (r) restore(set, get, r.restored, r.history);
+  },
+
+  play: () => {
+    const doc = get().doc;
+    if (!doc) return;
+    // ⚠️ **書き出し中は始めない**（#752-6）。成果物は壊れないが、音が鳴り出す入口だけ開いていた
+    //（編集も声の作成も塞いであるのに再生だけ通る＝同じ「走っている間」で挙動が割れる・ADR-0026②）。
+    // 押せない見た目はボタン側が出す（キーは見た目を持たないので、ここでも止める）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    const total = timelineDurationSec(doc);
+    if (total <= 0) return; // 何も置いていない動画では始めない（押しても動かない状態を作らない）
+    // **繰り返すときは区間の中から始める**（#1267）＝区間の外にいたら始まりへ（外から始めると区間まで待たされる）。
+    const span = loopSpan(get().loopPlayback, get().rangeInSec, get().rangeOutSec, total);
+    const cur = get().playheadSec;
+    const start = span && (cur < span.startSec || cur >= span.endSec) ? span.startSec : playbackStartSec(cur, total);
+    set({ isPlaying: true, playheadSec: start, seekNonce: get().seekNonce + 1 });
+  },
+  pause: () => set({ isPlaying: false }),
+  setLoopPlayback: (on) => set({ loopPlayback: on }),
+  copySelectedClips: () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length === 0) return;
+    const picked = doc.clips.filter((c) => selectedClipIds.includes(c.id));
+    // ⚠️ **写した時点の中身を貼る**（他社の型）＝部品の書き換えは**常に新しい部品を作る**（その場で書き換えない）ので、
+    //   ここで持った部品はあとで元を直しても変わらない（写し取り直す必要が無い＝変異チェックで等価と確かめた）。
+    set({ clipClipboard: picked });
+  },
+  pasteClipsAtPlayhead: () => {
+    const { doc, clipClipboard } = get();
+    if (!doc || !clipClipboard || clipClipboard.length === 0) return;
+    const r = pasteClips(doc, clipClipboard, frameTimeSec(doc, get().playheadSec));
+    if (!r.ok) {
+      // キーボードだけの操作＝押せない見た目を持たないので画面全体の知らせへ（`blockTargetFor` の表）。
+      set({ editBlocked: { reason: r.reason, at: BLOCK_GLOBAL } });
+      return;
+    }
+    commit(set, get, r.doc, { selectedClipIds: r.pastedIds });
+  },
+  _loopTo: (sec) => {
+    if (!get().isPlaying) return;
+    set({ playheadSec: sec, seekNonce: get().seekNonce + 1 });
+  },
+  _advancePlayhead: (sec) => {
+    // ⚠️ **止めた後に残ったフレームで書き戻さない**（#833 レビュー ℹ️）＝`pause()` は `isPlaying` を
+    // 倒すだけで、時計（rAF）は**画面側の後始末が走るまで**回っている。この入口は「再生の時計だけが
+    // 使う」ものなので、ここで見れば1か所で閉じる。見ないと、掴んだ瞬間に止めて動かした位置を
+    // **次の1フレームが再生位置で上書き**しうる（目盛りを掴むと止まる＝#833-2 で通る道になった）。
+    if (!get().isPlaying) return;
+    const doc = get().doc;
+    if (doc) set({ playheadSec: clampTimelinePlayheadSec(doc, sec) });
+  },
+
+  // 保存の入口。**進行中の保存があればそれを待って戻る**（場面形式 `projectStore.saveProject` と同じ形）。
+  // 無いと、保存中の編集で張り直された自動保存タイマと「保存し直す」から**2本目が並走**し、
+  // 古い文書を持つ側が後着してディスク上の編集が巻き戻る（書き込みは truncate＝上書き）。
+  saveTimelineProject: async () => {
+    const running = currentSave;
+    if (running) {
+      running.again = true; // いま走っている保存には入らない内容なので、終わったらもう一度書く
+      return running.promise;
+    }
+    // 約束を入れる器を先に作る＝下の処理から**自分の回**を指せる（走っている途中で置き換わらない）。
+    const run: SaveRun = { promise: Promise.resolve(), again: false };
+    currentSave = run;
+    // どの動画への書き込みかを控える（消すときに着地を待たせる・#763-4）。
+    // ⚠️ ループの途中で文書が入れ替わると書く相手は変わるが、**待つ側に要るのは「着地したか」だけ**
+    // なので安全側（待ちすぎることはあっても、待たなさすぎることはない）。
+    const writingId = get().doc?.projectId ?? null;
+    run.promise = (async () => {
+      try {
+        do {
+          run.again = false;
+          await doSaveTimelineProject(set, get);
+        } while (run.again);
+      } finally {
+        // **自分が置いた見張りのときだけ外す**。動画を切り替えたあとは新しい保存が走っているので、
+        // 無条件に外すとその保存が「走っていない」ことにされ、次の依頼が**並走**する（＝上書きで
+        // 変更が巻き戻る・このPRが潰したはずの事故が同じ動画の中で再発する）。
+        if (currentSave === run) currentSave = null;
+      }
+    })();
+    if (writingId) trackWrite(writingId, run.promise);
+    return run.promise;
+  },
+
+  exportTimelineVideo: async (deps) => {
+    const doc = get().doc;
+    if (!doc || isTimelineExportBusy(get().exportRun.phase)) return;
+    // **始められない理由は1か所で見る**（`exportStartBlock`・#718）＝画面のボタンが押す前に出す理由と
+    // 同じものを、ここでも使う。条件を2か所に書くと、画面が塞いでいない理由で押してから断る（#703 の型）。
+    // 判定材料（読み込めている見た目）は描くときと**同じもの**を渡す＝断る条件と描く条件がずれない。
+    const blocked = exportStartBlock({
+      doc,
+      isImporting: get().isImporting,
+      voiceRunning: get()._voiceRun != null,
+      knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
+      // ⚠️ **調べたときだけ渡す**（`userFontIds` は `null`＝まだ調べていない）＝場面形式と同じ流儀。
+      // ⚠️ **「読めなかった」も見る**（PR #909 レビュー 🟡）＝一度成功したあとに読めなくなると
+      // 一覧は**古いまま残る**ので、見ないと「もう正しいとは限らない一覧」で門を通してしまう。
+      availableUserFontIds: knownUserFontIds(),
+      userFontsUnreadable: useProjectStore.getState().userFontsUnreadable,
+      otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
+      // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
+      cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),
+      canExportHere: canExport(),
+    });
+    if (blocked) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: blocked.phase, message: blocked.message } });
+      return;
+    }
+    // 保存先を先に決める（重い処理をしてから「やっぱりやめる」を選ばせない）。ここから走行中に数える
+    // ＝ダイアログを開いている間に続けて押しても、書き出しが二重に走らない。
+    set({ exportRun: { ...IDLE_EXPORT, phase: P.preparing } });
+    // ⚠️ **取れたかを見る**（#834 レビュー 🟡・場面形式 `ExportScreen` と同じ形＝ADR-0026②）＝
+    // 取れないまま進むと、**締めを持たないまま走る回**ができ、掃除が終わって締めが返った後は
+    // **場面形式が同時に取れてしまう**（共有の一時置き場を互いに消す＝`11 §7.6.5`・ADR-0032 決定22）。
+    // ⚠️ **いまは通常この分岐に入らない**（差分再監査 🟡）＝#843 で押す前の関門（上の `exportStartBlock`）に
+    // `cleanupPending` を足したので、直前の回の後片づけ中も**そこで捕まる**（以前は `otherExportRunning` が
+    // 自分を数えないため素通りしていた）。関門と `acquire` の間に `await` は無いので現状は到達しない。
+    // **将来ここへ待ちを挟む形にしたときの備え**として残す（消すと、そのとき黙って穴が開く）。
+    if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
+      // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
+      const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
+      const message = mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE;
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message } });
+      return; // 走行中のまま固まらせない（立てた `preparing` を戻す）
+    }
+    let unlisten: (() => void) | undefined;
+    try {
+      // 見た目パターンの解決は**代表フレームの要否**（どの枠が実フレームで描かれるか＝#512 段3）にも
+      // 要るので、絵を描く手前ではなく**ここで**用意する（同じ表を2度作らない）。
+      const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
+      const templateOf = (id: string) => templateById.get(id);
+      // **表示用の URL（`asset://`）は書き出しでは読めない**（#716）＝ここで data URL へ解き直す。
+      // 解き方は場面形式と共有（`createExportSrcResolver`）＝形式によって焼ける絵が割れない。
+      // 使っている素材だけをまとめて持つ（全フレームで同じ絵を引くので都度読み直さない）。
+      // ⚠️ **保存先を聞く前**にやる（#726 レビュー）＝ほかの断る理由と同じ順番で返す。ディスクを読むので
+      // `timelineExportBlockers`（同期）には入れられないが、**聞いてから断る**のは避ける。
+      // ⚠️ 走行中に数え始めた**後**でやる＝ここで待つ間に押し直されて二重に走るのを防ぐ。
+      const exportSrcById = await resolveExportSrcMap(
+        timelineImageAssetIds(doc, templateOf),
+        createExportSrcResolver({ projectId: doc.projectId, assets: doc.assets, templateAssetSrcById: deps.templateAssetSrcById }),
+      );
+      // 読めなかった素材があれば断る。そのまま焼くとその部品だけ灰色の枠になり、プレビューでは
+      // （開いた時点の表示先で）写真が出たままなので**見えていたものと違う動画**が成功として出る（ADR-0026④）。
+      if (timelineImageAssetIds(doc, templateOf).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
+        return;
+      }
+      // ⚠️ **実フレームで描く動画は、ファイルがあるかだけ見る**（#1068）＝上の「読めない素材」の門は
+      //   代表フレームが作れるかを見ており、実フレームで描く動画は**わざと外してある**
+      //  （`timelineImageAssetIds`＝混ぜると「描けるのに永久に書き出せない」を作る）。
+      //   無ければコマを焼く段（`stage_clip_frames`）で**必ず落ちる**ので、保存先を聞いて走り出してから
+      //   途中で止めない（`06 §12.1`「書き出せない理由は押す前に見せる」）。
+      //   ⚠️ **調べられないときは断らない**（`missingAssetFiles` は空を返す）＝嘘の警告を出さない。
+      const missingVideoFiles = await missingAssetFiles(doc.projectId, timelineVideoRelPaths(doc, templateOf));
+      if (missingVideoFiles.length > 0) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.videoFileMissing] } });
+        return;
+      }
+      // ⚠️ **音源をそろえてから見る**（#1061）＝置いた直後の音は、鳴らす側の画面が描かれていないと
+      //   **まだ読まれていない**。書き出しが**自分で確かめる**＝描画の巡り合わせで
+      //   「聞こえるのに書き出しには入らない」を作らない（もう用意してあるものは読み直さない）。
+      await get().ensureAudioSrcs();
+      // ⚠️ **音も絵と同じように断る**（#1064）＝読めない音源は混ぜる側が**黙って読み飛ばす**ので、
+      //   そのまま焼くと**その部分だけ無音になった動画**が「成功」として出る（ADR-0026④）。
+      //   ⚠️ **まだ作っていない読み上げは対象外**＝音源そのものを持たないので `audioSourcesOf` に
+      //   出てこない（直し方は「もう一度作る」＝画面の知らせが担う）。
+      //   ⚠️ **保存先を聞く前**にやる（絵の判定と同じ順＝聞いてから断らない）。
+      // ⚠️ **種類で次の行動が違う**（PR #1066 レビュー 🟡）＝読み上げ／同梱の曲／取り込んだ素材で
+      //   できることが違うので、**読めなかった最初のもの**の種類で言い分ける。
+      const unreadableAudio = audioSourcesOf(doc).find((src) => !get().audioSrcByKey[audioSourceKey(src)]);
+      if (unreadableAudio) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: audioUnreadableMessage(audioSourceKindOf(unreadableAudio)) } });
+        return;
+      }
+      // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
+      // ⚠️ **起動のときに書き出し先を頼まれていたら、保存先は聞かない**（ADR-0042 決定⑤・#1184）＝
+      // 置き換えるのは**ここ1か所だけ**。ほかは人が押したときと**同じ道**を通る（別の書き出し経路を作らない
+      // ＝ADR-0007。断る門も進捗も後片づけもそのまま効く）。場面形式の `ExportScreen` と同じ形。
+      const startupOut = useStartupJobStore.getState().takePendingExport();
+      const outputPath = startupOut?.out ?? (await showSaveVideoDialog(doc.projectName || "movie"));
+      if (!outputPath) {
+        set({ exportRun: IDLE_EXPORT });
+        return;
+      }
+      // ダイアログの間に中止を押していたら始めない（押した中止を黙って無かったことにしない）。
+      if (get().exportRun.cancelling) throw new ExportCancelledError();
+      // 再生したまま書き出すと、鳴っている音と作業が重なる。止めてから始める（ADR-0032 追補と同じ流儀）。
+      get().pause();
+      // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
+      // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
+      const { audioSrcByKey, assetSizes } = get();
+
+      set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
+      await beginExport();
+      unlisten = await listenExportProgress((ev) => {
+        set({
+          exportRun: {
+            ...get().exportRun,
+            phase: P.encoding,
+            percent: exportOverallPercent({ phase: P.encoding, progress: { done: 0, total: 0 }, encode: ev }),
+          },
+        });
+      });
+      await clearExportFramesStage();
+      // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
+      await loadExportFonts();
+      // ⚠️ **空きを見張る**（#1211）＝焼くコマ数は**割り方が既に知っている**ので渡せる。
+      // 渡すと「このままでは足りない」を**数十コマで**判じられる（いまは12分以上待たされてから尽きる）。
+      // ⚠️ **倒せた区間は1コマも焼かない**ので、そのぶんは数に入れない（決定22-2 追補1）。
+      beginExportDiskWatch({
+        totalFrames: bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps),
+        outPath: outputPath,
+      });
+      const parts = await buildTimelineParts(doc, {
+        templateOf,
+        assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+        // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
+        assetSizeOf: (id) => assetSizes[id],
+        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
+        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
+        // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
+        //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
+        outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, exportSizeIsLight(get().exportSize)),
+        fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
+        stageFrame: stageExportFrame,
+        // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
+        // ⚠️ 素材は**プロジェクトからの相対パス**で渡す（`stage_clip_frames` がそう解決する）。
+        // 動画の id が解けない・プロジェクト id が無いときは渡さない＝静止のまま（画面が先に断る）。
+        stageVideo: async (v) => {
+          const asset = doc.assets.find((a) => a.assetId === v.assetId);
+          if (!asset) return 0; // 素材が見つからない＝静止のまま（描画側の知らせが受け止める）
+          const staged = await stageClipFrames(
+            doc.projectId, asset.filePath, v.sourceStartSec, v.durationSec, v.speed, v.fps,
+            dimsForOrientation(doc.videoSettings.aspectRatio).width, v.dirName,
+          );
+          // ⚠️ **取り出した生のコマも見積もりへ入れる**（PR #1216 レビュー 🔴）＝入れないと、
+          // **動画の上に動くものが乗る区間**（いちばん重い）の将来ぶんが丸ごと見えない。
+          await accountStagedVideo(staged);
+          return staged;
+        },
+        readVideoFrame: (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
+        onProgress: (done, total) =>
+          set({
+            exportRun: {
+              ...get().exportRun,
+              percent: exportOverallPercent({ phase: P.rendering, progress: { done, total } }),
+            },
+          }),
+        shouldCancel: () => get().exportRun.cancelling,
+      });
+      if (get().exportRun.cancelling) throw new ExportCancelledError();
+      set({ exportRun: { ...get().exportRun, phase: P.encoding } });
+      // 区間を書き出しの入力へ写す（#1203）。⚠️ **音は渡さない**（`useOriginalAudio: false`）＝
+      // 動画の元の音は**下の `bgmRuns`** で渡っているので、ここでも鳴らすと**二重に鳴る**。
+      const scenes = parts.map((p) => {
+        if (!p.video) return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir };
+        const asset = doc.assets.find((x) => x.assetId === p.video!.assetId);
+        return {
+          fps: p.fps,
+          durationSec: p.durationSec,
+          video: {
+            belowPngBase64: p.video.belowPngBase64,
+            abovePngBase64: p.video.abovePngBase64,
+            clipRelPath: asset?.filePath ?? '',
+            slotX: p.video.slotX,
+            slotY: p.video.slotY,
+            slotW: p.video.slotW,
+            slotH: p.video.slotH,
+            fit: p.video.fit,
+            clipStartSec: p.video.clipStartSec,
+            clipEndSec: p.video.clipEndSec,
+            useOriginalAudio: false,
+            speed: p.video.speed,
+          },
+        };
+      });
+      const { runs: bgmRuns, duckMerged } = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
+      // 全体の音量を整える（#259・ADR-0032 追補4＝両形式に効く）。整えないときは渡さない（出力不変）。
+      const auto = resolveAudioAuto(doc.videoSettings.audioAuto);
+      // ⚠️ **保存先は Rust の戻り値から採る**（レビュー由来 ℹ️・#1118）＝ダイアログで選ばれた
+      // 文字列をそのまま使うと、Rust が拡張子を補った（`ffmpeg.rs` の `set_extension("mp4")`）ときに
+      // **覚えた場所と開く場所が食い違う**＝「この場所は開けませんでした」になる（保存先の表示もずれる）。
+      const report = await exportVideo(
+        scenes,
+        doc.projectName || "movie",
+        bgmRuns,
+        doc.projectId,
+        outputPath,
+        auto.normalize ? auto.targetLufs : undefined,
+        exportSizeMaxBitrateBps(get().exportSize),
+      );
+      // ⚠️ **保存先も持ち帰る**（#991）＝場面形式は保存先と「開く」導線を出すのに、
+      // こちらは文だけだった（`06 §12.1` に導線を落とす理由は無い＝ADR-0026②）。
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged, outPath: report.outputPath } });
+    } catch (e) {
+      const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
+      // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。
+      // Tauri のコマンドは**文字列で**失敗を返す（`Error` ではない）。#512 段1 でコマの焼き出しが本走行に
+      // 入り、「動画が見つかりませんでした。もう一度取り込んでください」等が新たに届くようになったのに、
+      // 常に「もう一度お試しください」へ潰すと**何度やっても成功しない案内**になる。
+      // ⚠️ **文字列で返ったものを、そのまま全部は出さない**（#1123）＝ここには
+      // `map_err(|e| e.to_string())`（56 か所）が返す**生の OS エラー**も文字列で届く。
+      // 関門（`userFacingMessage`）で**画面に出せる文か**を見る。
+      // ⚠️ **`Error` を型で外しているのではない**（PR #1130 レビュー由来）＝関門は `Error` の
+      // `message` も読む。中の失敗（`ffmpeg exited with code 1` 等）が出ないのは、その文が
+      // **日本語の文になっていない**からで、日本語＋句点の `Error` なら**通る**
+      //（焼き出しの断り＝`renderer/export/rasterize.ts`。だからあちらにも次の行動を持たせてある）。
+      // ここを「型で守れている」と読むと、次にそういう `Error` を足したときに気づけない。
+      // ⚠️ **既定文はこの行で与える**（正典が定めた書き方＝`15 §6`「受け側の関門」1）。
+      const detail = userFacingMessage(e, "export-timeline") ?? EXPORT_FAILED_MESSAGE;
+      set({
+        exportRun: {
+          ...IDLE_EXPORT,
+          phase: cancelled ? P.cancelled : P.error,
+          message: cancelled ? EXPORT_CANCELLED_MESSAGE : detail || EXPORT_FAILED_MESSAGE,
+        },
+      });
+    } finally {
+      unlisten?.();
+      // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが**前回の焼いた数**を
+      // 引き継いで、見積もりが狂う（少なく見積もって、足りないのに通す）。
+      endExportDiskWatch();
+      // 一時ファイルは成功でも失敗でも片づける（次の書き出しに古いフレームを混ぜない）。
+      // ⚠️ **掃除してから締めを返す**（#834-3）＝一時ファイルの置き場は**アプリで1つ**（ADR-0032 決定22）。
+      // 先に返すと、次の書き出しが**この掃除の最中に**フレームを書き始め、掃除が**相手のフレームを消す**
+      //（締めはまさにそれを防ぐために在る）。⚠️ **返すのは `finally` で**＝掃除が失敗しても締めは返す
+      // （返し損ねると、以後どの動画も書き出せなくなる＝行き止まり）。
+      try {
+        await clearExportFramesStage();
+      } finally {
+        useExportLockStore.getState().release(EXPORT_OWNER);
+        // ⚠️ **書き出しが終わったら、待たせていた帯の絵を流す**（#332・PR #876 レビュー 🟡）＝
+        // 順番待ちは書き出し中に取り出しを止めるので、ここで動かさないと**永久に空の帯**が残る
+        //（`ensureClipAnalysis` は既に印を付けているので、次の描画では二度とたのまれない）。
+        pumpAnalysisQueue();
+      }
+    }
+  },
+
+  setExportSize: (size) => set({ exportSize: size }),
+  cancelTimelineExport: () => {
+    const run = get().exportRun;
+    if (!isTimelineExportBusy(run.phase)) return;
+    set({ exportRun: { ...run, cancelling: true } });
+    void cancelExport();
+  },
+
+  dismissTimelineExport: () => {
+    // 走行中に出る知らせ（別の動画を開こうとした等）を閉じても、**走行中は解除しない**
+    // ＝閉じるボタンが「書き出し中の締め」を外す抜け道にならない（一覧へ戻る・二重起動が開く）。
+    const run = get().exportRun;
+    set({ exportRun: isTimelineExportBusy(run.phase) ? { ...run, message: null } : IDLE_EXPORT });
+  },
+}));
+
+/**
+ * 音の並べ方（domain）を、混ぜる側の入力へ写す。**音源は再生と同じもの**（`audioSrcByKey`）＝
+ * 聞いた音と書き出した音が一致する。読めなかった音源は置かない（その部品は鳴らない）。
+ */
+export function timelineBgmRunInputs(
+  doc: TimelineProject,
+  audioSrcByKey: Record<string, string>,
+  templateOf?: (templateId: string) => Template | undefined,
+): { runs: BgmRunInput[]; duckMerged: boolean } {
+  const runs: BgmRunInput[] = [];
+  // 見た目パターンは**差し込み口の元の音**（#512 段3b）を解くのに要る（渡さないと差し込み口は鳴らない）。
+  // ⚠️ **まとめたかどうかも運ぶ**（α-6 出口監査 🟡）＝知らせないと「セリフの間も BGM が下がったまま」を
+  // 黙って出すことになる（場面形式は書き出しの完了時に知らせている＝ADR-0026②）。
+  const built = timelineAudioRuns(doc, templateOf);
+  for (const run of built.runs) {
+    // ⚠️ **動画の元の音はパスで渡す**（#512 段2）＝中身（base64）は要らない。
+    // ここで `audioSrcByKey` を要求すると、動画を丸ごと文字列にしないと鳴らせなくなる。
+    const audioBase64 = run.assetPath ? "" : audioSrcByKey[run.sourceKey];
+    if (!run.assetPath && !audioBase64) continue;
+    runs.push({
+      audioBase64,
+      ...(run.assetPath ? { audioPath: run.assetPath } : {}),
+      fileExt: run.fileExt,
+      volume: run.volume,
+      // 音量の変化（#512）＝点が無い部品ではキーごと落とす（未指定＝一定値の `volume` で出る）。
+      ...(run.volumeExpr ? { volumeExpr: run.volumeExpr } : {}),
+      delaySec: run.delaySec,
+      playSec: run.playSec,
+      fadeInSec: run.fadeInSec,
+      fadeOutSec: run.fadeOutSec,
+      loopSource: run.loop,
+      sourceStartSec: run.sourceStartSec,
+      speed: run.speed,
+    });
+  }
+  return { runs, duckMerged: built.duckMerged };
+}
+
+
+/** 素材 id → プロジェクト相対のファイルパス（音の素材を読むのに使う）。 */
+function assetPathOf(doc: TimelineProject, assetId: string): string | undefined {
+  return doc.assets.find((a) => a.assetId === assetId)?.filePath;
+}
+
+/**
+ * 帯のコマ列・波形の下書きから、そのファイルのぶんを落とす（#1019 ⑤）。
+ *
+ * ⚠️ **鍵はパス**（`` `${filePath}#範囲` `` ＝`domain/asset/analysis.ts`）＝同じ名前へ入れ替えると
+ * 鍵が変わらず、`ensureClipAnalysis` は「もうある」で打ち切る＝**前のファイルの絵と波形が残る**。
+ */
+function withoutAnalysisOf<T>(byKey: Record<string, T>, relPaths: readonly string[]): Record<string, T> {
+  const heads = relPaths.map((p) => `${p}#`);
+  const keys = Object.keys(byKey).filter((k) => heads.some((h) => k.startsWith(h)));
+  if (keys.length === 0) return byKey; // 何も落とさないなら同じものを返す（無駄な再描画を起こさない）
+  const out = { ...byKey };
+  for (const k of keys) delete out[k];
+  return out;
+}
+
+/**
+ * 音源を**1件だけ**読む（#1050）。開いたときも、素材を選び直した後も**同じ道**を通す。
+ *
+ * ⚠️ **鍵は素材の番号**（`asset:asset_001`＝`audioSourceKey`）＝**ファイル名では無い**ので、
+ * 選び直しても鍵は変わらない＝**読み直さないと前の音が鳴り続ける**（絵の側の `?t=` と同じ話）。
+ * 読めないものは `null`＝その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
+ */
+async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[string, string] | null> {
+  const url = src.voicePath
+    ? await readVoiceDataUrl(doc.projectId, src.voicePath)
+    : src.bundledBgmId
+      ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
+      : src.assetId
+        ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
+        : null;
+  return url ? [audioSourceKey(src), url] : null;
+}
+
+type SetState = (partial: Partial<TimelineState>) => void;
+type GetState = () => TimelineState;
+
+/**
+ * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
+ * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。
+ */
+function canStartImport(
+  set: SetState,
+  get: GetState,
+  /**
+   * `noticeWhenImporting`＝取り込み中に断るとき**案内も出す**（#858・まとめて取り込む入口だけ）。
+   * 単発は黙って return でよい（1件が入らないだけ）が、まとめて渡すと**N件がそっくり消える**。
+   */
+  opts?: { noticeWhenImporting?: boolean },
+): boolean {
+  if (!get().doc) return false;
+  // 書き出しは**始めた時点の文書**を焼くので、増やしても動画に入らない（`commit` と同じ規準・§2-5）。
+  if (isTimelineExportBusy(get().exportRun.phase)) { set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } }); return false; }
+  if (get().isImporting) {
+    // 二重に取り込むと同じ番号の素材が2つできる。
+    if (opts?.noticeWhenImporting) set({ importError: IMPORT_BUSY_MESSAGE });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 素材の取り込み（#712）。**2つの入口（ファイル／パス）で同じ手順を踏む**ための1か所。
+ *
+ * 場面形式は「先に一覧へ足して、失敗したら戻す」（楽観追加＋ロールバック）だが、こちらは
+ * **取り込めてから足す**。理由＝この形式の取り消しは**文書まるごと**なので、楽観追加とロールバックが
+ * それぞれ履歴に積まれ、失敗しただけで取り消しが2つ増える（`setBgm` の「先に取り込み＝ゴースト防止」と同じ流儀）。
+ */
+async function runImport(
+  set: SetState,
+  get: GetState,
+  sourceName: string,
+  copy: (fileName: string, assetType: AssetType) => Promise<string | null>,
+  /**
+   * 素材の作り方の差し替え（棚から取り込むときは**棚の名前・種類・タグを引き継ぐ**＝ADR-0035 決定3）。
+   * 既定はファイル名から作る（アプリの外から取り込む経路）。
+   */
+  build?: (reservedId: string) => { asset: Asset; fileName: string },
+): Promise<string | null> {
+  const doc = get().doc;
+  if (!doc || !canStartImport(set, get)) return null;
+  // **番号は使い回さない**（`reserveAssetId`）＝取り消し・開き直しで文書から消えても、その番号のファイルは
+  // ディスクに残っている。空き番号を埋めると**同じ名前のファイルを上書きして前の写真が消える**。
+  const assetId = reserveAssetId(doc.projectId, doc.assets.map((a) => a.assetId), createAssetId);
+  const { asset, fileName } = build ? build(assetId) : newAssetFrom(sourceName, [], assetId);
+  set({ isImporting: true, importError: null });
+  try {
+    const savedPath = await copy(fileName, asset.assetType);
+    const relPath = savedPath ?? asset.filePath;
+    // 動画は長さ・代表フレームまで揃える（取れなくても素材そのものは使える）。
+    // 音は長さだけ測る（#1348＝置いたときの帯の初めの長さ）。
+    const enrich = asset.assetType === ASSET_TYPE.video
+      ? await probeAndThumbVideo(doc.projectId, relPath)
+      : asset.assetType === ASSET_TYPE.bgm
+        ? { metadata: (await probeAudioDuration(doc.projectId, relPath)) ?? undefined }
+        : null;
+    const src = enrich ? enrich.thumbUrl : (await assetDisplayUrl(doc.projectId, relPath)) ?? undefined;
+    // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**。判定はここ1か所＝最後の await の後
+    // （2か所に置くと、片方を消しても、もう片方が拾ってしまい**壊れていることに気づけない**）。
+    // 表示先だけ書くのも駄目（文書に無い素材の絵が残り、次に同じ番号が来たときそれが出る）。
+    const cur = get().doc;
+    if (!cur || cur.projectId !== doc.projectId) return null;
+    // 待っている間に書き出しが始まっていたら、`commit` は足さずに戻る。**そこで気づけるように**先に断る
+    // ＝「終わってから編集してください」だけ出して取り込みが消えた、を作らない（§2-5・#570 P1 と同じ流儀）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
+      return null;
+    }
+    const full: Asset = { ...asset, filePath: relPath, ...(enrich?.metadata ? { metadata: enrich.metadata } : {}), ...(enrich?.thumbnailPath ? { thumbnailPath: enrich.thumbnailPath } : {}) };
+    // **いまの文書へ足す**（取り込んでいる間の編集を巻き戻さない）。取り消しできる＝文書まるごとの履歴に載る。
+    // `outsideGroup`＝**非同期の着地は利用者のまとめに混ぜない**（文字を打っている最中に着地すると、
+    // その1回ぶんを食べて以後の入力が記録されない・声の完成と同じ流儀）。
+    commit(set, get, { ...cur, assets: [...cur.assets, full] }, {}, { outsideGroup: true });
+    if (src) set({ assetSrcById: { ...get().assetSrcById, [asset.assetId]: src } });
+    // ⚠️ **取り込んだ動画にも本体の URL を用意する**（#512 段1）＝読込時と同じ扱い。
+    // 忘れると「開き直すと映るのに、取り込んだ直後は映らない」という入口ごとの割れになる。
+    if (asset.assetType === ASSET_TYPE.video) {
+      const bodyUrl = await assetDisplayUrl(doc.projectId, relPath);
+      const now = get().doc;
+      if (bodyUrl && now && now.projectId === doc.projectId) {
+        set({ videoSrcById: { ...get().videoSrcById, [asset.assetId]: bodyUrl } });
+      }
+    }
+    // 自動保存は**画面**が持っているので、離れた後に着地したぶんは誰も書かない＝ここで自分から保存する。
+    void get().saveTimelineProject();
+    // 足せた番号を返す＝呼び出し側が**件数ではなく同一性**で成否を見られる（成功を騙らない）。
+    return asset.assetId;
+  } catch (e) {
+    // 足す前に断るので、戻すものは無い（一覧に幽霊を作らない）。触っていない動画へは出さない。
+    if (get().doc?.projectId === doc.projectId) set({ importError: importErrorMessage(e) });
+    return null;
+  } finally {
+    // 取り込みの鍵は**始めた動画のもの**＝別の動画を開いた後に外さない（そちらの取り込みを止めてしまう）。
+    if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
+  }
+}
+
+/**
+ * 変更を確定して履歴へ積む（ADR-0020 と同じ＝**適用前**の文書を past へ）。
+ * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない
+ * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
+ *
+ * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
+ *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
+ *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
+ */
+function commit(
+  set: SetState,
+  get: GetState,
+  next: TimelineProject,
+  extra: Partial<TimelineState> = {},
+  opts: { outsideGroup?: boolean } = {},
+): void {
+  // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
+  if (isTimelineExportBusy(get().exportRun.phase)) {
+    set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+    return;
+  }
+  const current = get().doc;
+  if (!current || next === current) {
+    set({ editBlocked: null, ...extra });
+    return;
+  }
+  // グループ中は**最初の実変更だけ**積む（1文字ごとに積むと、上限 50 を文字入力だけで食い潰し、
+  // それ以前の編集＝「バラす」などが取り消せなくなる・#708）。
+  const inGroup = get()._historyGroupDepth > 0 && !opts.outsideGroup;
+  const record = !inGroup || get()._historyGroupPending;
+  set({
+    doc: next,
+    history: record ? recordSnapshot(get().history, current) : get().history,
+    // まとめに参加した分だけ「記録済み」にする（参加していない完了で他人のまとめを消費しない）。
+    ...(inGroup ? { _historyGroupPending: false } : {}),
+    editBlocked: null,
+    saveStatus: "idle",
+    // 編集したら再生を止める＝「再生位置へ」のような操作が**動いている的**を狙うのを防ぐ（結果が毎回変わる）。
+    isPlaying: false,
+    // 尺が縮んだら位置を収める（消した部品より後ろに取り残さない）。
+    playheadSec: clampTimelinePlayheadSec(next, get().playheadSec),
+    ...extra,
+  });
+}
+
+/** 書き出し中は取り消し・やり直しも止める（`commit` と同じ理由＝焼く文書は始めた時点のもの）。 */
+function blockedByExport(set: SetState, get: GetState): boolean {
+  if (!isTimelineExportBusy(get().exportRun.phase)) return false;
+  set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+  return true;
+}
+
+/**
+ * 取り消し/やり直しで文書を差し替える。**消えたクリップを選んだままにしない**（戻した文書に無い
+ * 選択が残ると、次の操作が「変化ゼロ」の履歴を積む）。
+ */
+function restore(set: SetState, get: GetState, doc: TimelineProject, history: HistoryStacks<TimelineProject>): void {
+  const ids = new Set(doc.clips.map((c) => c.id));
+  set({
+    doc,
+    history,
+    // ⚠️ **開いているまとめを畳む**（#817-1）＝畳まないと、戻した**後**の編集が「まとめの続き」と
+    // みなされて**履歴に積まれず**（最初の1回しか記録しない）、`future` も捨てられない。
+    // 実測＝矢印で動かす→600ms 以内に `Ctrl+Z`→もう一度動かす、で**その移動が取り消せず**、
+    // やり直しを押すと**黙って消える**。取り消しの前後で「まとめの続き」は成り立たない
+    //（戻した文書はまとめを開いた時点のものではない）ので、ここで必ず切る。
+    // **世代も上げる**（レビュー 🔴）＝畳んだことを持ち主（矢印のまとめ等）へ伝える唯一の手段。
+    // 伝えないと、持ち主は「開いている」つもりのままで開き直さず**1押下＝1履歴**になり、
+    // 上限（50）を数秒で流し切って**取り消しでしか戻せない編集を押し出す**。
+    _historyGroupDepth: 0,
+    _historyGroupPending: false,
+    _historyGroupGen: get()._historyGroupGen + 1,
+    editBlocked: null,
+    saveStatus: "idle",
+    isPlaying: false, // 取り消し/やり直しも編集と同じ扱い（動いている的を狙わせない）
+    playheadSec: clampTimelinePlayheadSec(doc, get().playheadSec),
+    selectedClipIds: get().selectedClipIds.filter((id) => ids.has(id)),
+  });
+}
+
+/**
+ * 「選んでいる1つのクリップ」に対する編集を流す。**置けなかったら文書を変えず理由だけ持つ**
+ * （§2-5＝画面が「その場所には置けません」を出す）。複数選択中は対象が決まらないので何もしない。
+ */
+function applyEdit(
+  set: SetState,
+  get: GetState,
+  run: (doc: TimelineProject, clipId: string) => EditResult,
+  // ⚠️ **既定は「選んだ部品」の欄**（#869）＝`*Selected*` の入口は**すべて**この欄のボタン・
+  // 数値欄から呼ばれる（実測。動かす・端を詰める・箱を変えるも含む）。掴んで動かす経路は
+  // `*ById` の方（相手を id で指す）なので、そちらで掴んだ面を明示する。
+  at: BlockTarget = PANEL_ID.selected,
+): void {
+  const { selectedClipIds } = get();
+  if (selectedClipIds.length !== 1) return;
+  applyEditTo(set, get, selectedClipIds[0], run, at);
+}
+
+/** **相手を id で指す**編集（掴んで動かす経路。選択に依らない＝上と同じ後始末を通す）。 */
+function applyEditTo(
+  set: SetState,
+  get: GetState,
+  clipId: string,
+  run: (doc: TimelineProject, clipId: string) => EditResult,
+  at: BlockTarget = PANEL_ID.selected,
+): void {
+  const doc = get().doc;
+  if (!doc) return;
+  const r = run(doc, clipId);
+  if (r.ok) commit(set, get, r.doc);
+  // ⚠️ **例外の判定を通す**（α-6 出口監査 🟡17）＝`applyEditTo` は ~20 操作の集約点なのに
+  // `blockTargetFor` を通っておらず、**どの欄にも属さない理由**（書き出し中・再生中・見つからない）が
+  // 欄の中に落ちて、欄を閉じていると**押した返事が見えない**。`moveClipsBy` は帯へ倒すのに
+  // `moveClipById` は欄へ、という**同じ状況で出る場所が違う**形も同時に消える。
+  else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, at) } });
+}
+
+/** 読み上げクリップの状態だけを差し替える（履歴に積まない＝作成中/失敗は編集ではない）。 */
+function setVoiceStatus(set: SetState, get: GetState, clipId: string, status: NarrationStatus): void {
+  const doc = get().doc;
+  if (!doc) return;
+  set({
+    doc: {
+      ...doc,
+      clips: doc.clips.map((c) => (c.id === clipId && c.voice ? { ...c, voice: { ...c.voice, status } } : c)),
+    },
+    // **文書が変わったら未保存にする**（`commit` と同じ）。ここだけ立てないと、声を作れなかった印が
+    // 付いたのに画面は「保存しました」のままになり、自動保存も次の編集まで走らない。
+    saveStatus: "idle",
+  });
+}
+
+/**
+ * 実際の保存処理（**必ず `saveTimelineProject` 経由で呼ぶ**＝並走させない）。
+ * 適合しないものは書かない＝一覧に出るのに開けない動画を作らない（焼き出しと同じ判断・読込側は適合を要求する）。
+ */
+async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void> {
+  const doc = get().doc;
+  if (!doc) return;
+  set({ saveStatus: "saving" });
+  const next = withUpdatedAt(doc, new Date().toISOString());
+  // **書いている相手がまだ開いているか**。書き込みは時間がかかるので、その間に別の動画へ移れる。
+  // 移ったあとに前の動画の結果でいまの動画の保存状態を書き換えると、**触ってもいない動画に**
+  // 「保存できませんでした」が出たり、保存済みが未保存へ化けたりする（#693 レビュー・ADR-0026①）。
+  const stillOpen = () => get().doc?.projectId === doc.projectId;
+  if (!validateTimelineProject(next)) {
+    console.warn("[timeline] 保存内容がスキーマに未適合:", validateTimelineProject.errors);
+    if (stillOpen()) set({ saveStatus: "error" });
+    return;
+  }
+  try {
+    // ⚠️ **上書きの前に控える**（α-7 出口監査 🟡）＝場面形式にだけ入れていたので、
+    // タイムライン形式は**復元ポイントが一度も作られない**のに一覧の「前の状態に戻す」は出ており、
+    // 「編集して保存していくと増えていきます」＝**来ない次の行動**を案内していた。
+    // 規則は domain に1つ（`restorePoints.ts`）＝両形式が同じものを通る。
+    await keepRestorePoints(next.projectId, Date.now());
+    await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
+    if (!stillOpen()) return;
+    // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
+    set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
+  } catch {
+    if (stillOpen()) set({ saveStatus: "error" });
+  }
+}
+
+
+// 動画が消えたら、その文書を持っている間は手放す（#755）。**画面ではなく store で受ける**＝
+// 画面を離れていても効く（本番の導線は `closeTimelineProject` を通らない）。
+onProjectDeleted((projectId) => useTimelineStore.getState().discardDeletedProject(projectId));

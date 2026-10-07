@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
   isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError, validateProjectDoc,
 } from './persistence';
@@ -10,7 +10,7 @@ import type { Part, Scene } from './types';
 function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
   return {
     projectId: 'proj_20260612_001',
-    projectName: '無題のプロジェクト',
+    projectName: '無題の動画',
     purpose: 'new_graduate',
     createdAt: '2026-06-12T00:00:00.000Z',
     updatedAt: '2026-06-12T00:00:00.000Z',
@@ -140,19 +140,6 @@ describe('createGroupId (§2.1 group_{NNN}・scene/template 内一意・ADR-0022
   });
 });
 
-describe('createOverlayClipId (§2.1 ovclip_{NNN}・project 内一意・ADR-0018)', () => {
-  it('既存が無ければ ovclip_001', () => {
-    expect(createOverlayClipId([])).toBe('ovclip_001');
-  });
-  it('既存と衝突しない最小番号を採る（歯抜けを埋める）', () => {
-    expect(createOverlayClipId(['ovclip_001', 'ovclip_003'])).toBe('ovclip_002');
-  });
-  it('999 を超えると4桁になる（pattern ^ovclip_[0-9]{3,}$）', () => {
-    const existing = Array.from({ length: 999 }, (_, i) => `ovclip_${String(i + 1).padStart(3, '0')}`);
-    expect(createOverlayClipId(existing)).toBe('ovclip_1000');
-  });
-});
-
 describe('createLineId (§2.1 line_{NNN}・scene 内一意・ADR-0015)', () => {
   it('既存が無ければ line_001', () => {
     expect(createLineId([])).toBe('line_001');
@@ -217,6 +204,54 @@ describe('parseProjectDoc', () => {
     expect(back.projectId).toBe(p.projectId);
     expect(back.scenes).toEqual([]);
   });
+  // ⚠️ **アプリより新しいマイナー版は「壊れている」と言わない**（#793）＝`isSupportedSchemaVersion` は
+  // **メジャーしか見ない**ので、1.99 のような文書はここまで通る。以前はそのまま `migrateProject` が
+  // 版を**現行へ書き下げ**、新しい語彙があれば ajv が落ちて「この動画の内容が正しくありません。
+  // **別の動画を選んでください**」＝**嘘**（壊れておらず、別のを選んでも解決しない）。
+  // ⚠️ **メジャーが違う版は別の関門**（同じ「新しい版」でも文が違う）＝こちらは検査が無く、
+  //    語をそろえたときに**この1文だけ古い語のまま**残せてしまう（#1026）。
+  it('メジャーが違う版も「アプリを更新して」と案内する（語も「動画」でそろえる）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as Error).message).toContain('アプリを更新');
+      expect((e as Error).message, '1つを指すのに「プロジェクト」と呼んでいる').not.toContain('プロジェクト');
+    }
+  });
+
+  it('アプリより新しい版は「アプリを更新して」と案内する（壊れているとは言わない）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.99' };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as Error).message).toContain('アプリを更新');
+      expect((e as Error).message).not.toContain('正しくありません');
+      // ⚠️ **1つを指すときは「動画」**（#1026）＝同じ関数の中で語を混ぜない
+      //   （この行だけ「プロジェクト」のまま残っていた）。
+      expect((e as Error).message, '1つを指すのに「プロジェクト」と呼んでいる').not.toContain('プロジェクト');
+    }
+  });
+
+  // ⚠️ **本当に壊れた文書は今までどおり**（2方向を対で固定＝片方だけだと、全部を
+  // 「新しい版です」で流す実装でも緑になる）。
+  it('本当に壊れた文書は今までどおり「正しくありません」', () => {
+    // ⚠️ **ajv まで届く壊れ方**にする＝`projectId` の型違いは手前の必須確認が
+    // 「必須情報が欠けています」で先に拾うので、**この2方向の対比にならない**。
+    const doc = { ...assembleProject(header(), [], [], []), videoSettings: { aspectRatio: 'とても横長' } };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect((e as Error).message).toContain('正しくありません');
+      expect((e as Error).message).not.toContain('アプリを更新');
+    }
+  });
+
   it('掛け合い：scene.lines を持つ project が往復で保持される（1.8・ADR-0015）', () => {
     const scene = {
       sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl',
@@ -368,6 +403,59 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.22→1.23 へ昇格（任意追加＝変換不要）
     expect(back.scenes[0].freeLayout).toEqual(scene.freeLayout); // 背景帯を取りこぼさず保持（migrateProject のスプレッド保持）
   });
+  /**
+   * ⚠️ **既に作った動画の音を変えない**（#257/#259・ADR-0032 追補4）。新しい動画は既定で「する」だが、
+   * **前の版で作った動画には明示的に「しない」を書き込む**＝開いて書き出し直しただけで
+   * BGM の鳴り方と全体の音量が変わり、前に書き出した動画と別物になる、を作らない（§2-5）。
+   */
+  it('音の自動処理：前の版(1.25)には「しない」を書き込む（#257/#259）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.25' } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
+  it('音の自動処理：すでに設定があれば触らない（利用者が選んだ値を上書きしない）', () => {
+    const base = assembleProject(header(), [], [], []);
+    const doc = {
+      ...base,
+      schemaVersion: '1.25',
+      videoSettings: { ...base.videoSettings, audioAuto: { duckBgm: true, duckDepth: 0.3 } },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: true, duckDepth: 0.3 });
+  });
+
+  /**
+   * ⚠️ **現行版の文書には書き込まない**（α-6 出口監査 🔴2）。`defaultVideoSettings()` は
+   * `audioAuto` を書かないので、版を見ないと**新しく作った動画も「未設定」**として条件に当たり、
+   * 開き直すたびに「しない」が焼き付く＝**既定で「する」だったものが黙って OFF に化ける**（§2-5）。
+   * 未設定のまま返れば `resolveAudioAuto` が既定（両方する）へ解く。
+   */
+  it('音の自動処理：現行版の文書には書き込まない（新規の動画を黙って OFF にしない）', () => {
+    const doc = assembleProject(header(), [], [], []) as unknown as Record<string, unknown>;
+    expect(doc.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 前提＝新規は現行版
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toBeUndefined();
+  });
+
+  /** ⚠️ タイムライン形式（`migrateTimelineProject` の早期 return）と**同じ扱い**にする（ADR-0026②）。 */
+  it('音の自動処理：1つ前の版(1.28)には書き込む（境界）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.28' } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
+  // ⚠️ PR #1368 レビュー 🔴＝「現行と違う版」で見ていたので、**版を上げるたびに** 1.29 以降の動画が OFF に化けていた。
+  it('音の自動処理：入った版(1.29)以降の前の版(1.29〜1.31)には書き込まない（版を上げても既定のまま）', () => {
+    for (const v of ['1.29', '1.30', '1.31']) {
+      const doc = { ...assembleProject(header(), [], [], []), schemaVersion: v } as Record<string, unknown>;
+      const back = parseProjectDoc(JSON.stringify(doc));
+      expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+      expect(back.videoSettings.audioAuto, v).toBeUndefined();
+    }
+  });
+
   it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
     const textStyles = {
       title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },
@@ -519,6 +607,27 @@ describe('parseProjectDoc', () => {
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
   });
 
+  describe('タイムライン編集の形式は場面形式として読み込まない（ADR-0032・11 §1）', () => {
+    it('format=timeline は「形式が違う」と断る（版の話にすり替えない）', () => {
+      let err: unknown;
+      try {
+        parseProjectDoc(JSON.stringify({ format: 'timeline', schemaVersion: '1.1', projectId: 'proj_20260728_001' }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ProjectLoadError);
+      // 「アプリを更新してください」（版が新しい）ではなく、形式が違うことと次の行動を伝える（§2-5）。
+      expect((err as Error).message).toContain('タイムライン');
+      expect((err as Error).message).toContain('別の動画を選んでください');
+    });
+
+    it('format を持たない既存データは今までどおり読める（不在＝場面形式）', () => {
+      const doc = assembleProject(header(), [], [], []) as unknown as Record<string, unknown>;
+      expect('format' in doc).toBe(false);
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+  });
+
   // 読込時スキーマ検証（#416・11 §8 V2）。構造破損（型不正・必須欠落）は拒否、内容制約違反は読み込む（作りかけを弾かない）。
   describe('読込時スキーマ検証（#416）', () => {
     // 拒否は「ProjectLoadError かつ §2-5 文言」まで固定する（生 TypeError を UI に出さない・#416 P1/P2）。
@@ -530,7 +639,7 @@ describe('parseProjectDoc', () => {
         err = e;
       }
       expect(err).toBeInstanceOf(ProjectLoadError);
-      expect((err as Error).message).toContain('別のプロジェクトを選んでください');
+      expect((err as Error).message).toContain('別の動画を選んでください');
     };
 
     it('場面の型不正（durationSec が文字列）は読込拒否', () => {
@@ -583,5 +692,34 @@ describe('isSupportedSchemaVersion', () => {
     expect(isSupportedSchemaVersion('1.0')).toBe(true);
     expect(isSupportedSchemaVersion('1.5')).toBe(true);
     expect(isSupportedSchemaVersion('2.0')).toBe(false);
+  });
+});
+
+// ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（α-7 再監査 🟡）。
+// 一緒にしていたので、`schemaVersion` が欠けた壊れた動画にも「アプリを更新してください」＝
+// **更新しても直らない次の行動**が出て、しかも `broken` にならないので
+// **控えから戻す導線（#263）が出なかった**（いちばん助けが要る場面でいちばん助けが出ない）。
+describe('版が読めない壊れ方は broken（α-7 再監査 🟡）', () => {
+  it('schemaVersion が無いと broken（戻す導線が出る側）', () => {
+    try {
+      parseProjectDoc(JSON.stringify({ projectId: 'p', scenes: [] }));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as ProjectLoadError).failure).toBe('broken');
+      expect((e as ProjectLoadError).message).not.toMatch(/アプリを更新/);
+    }
+  });
+
+  it('版が文字列だが対応外なら unsupported（更新すれば開ける側）', () => {
+    try {
+      parseProjectDoc(JSON.stringify({ schemaVersion: '99.0', projectId: 'p', scenes: [] }));
+      throw new Error('落ちるはず');
+    } catch (e) {
+      expect((e as ProjectLoadError).failure).toBe('unsupported');
+      expect((e as ProjectLoadError).message).toMatch(/アプリを更新/);
+      // ⚠️ **版を「形式」と呼ばない**＝本当の形式違い（`PROJECT_FORMAT_UNSUPPORTED`）と語が衝突する。
+      expect((e as ProjectLoadError).message).not.toMatch(/形式/);
+    }
   });
 });

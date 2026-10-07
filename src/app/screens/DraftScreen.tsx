@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import type { SceneEditFocus } from "../data/mockData";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { menuAnchorFrom } from "../hooks/usePointerDrag";
+import { ContextMenu } from "../components/ContextMenu";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
+import { hasWizardBrief } from "../newProjectGuard";
+import { ADD_WIZARD_INPUT_LABEL, EDIT_WIZARD_INPUT_LABEL, ORIENTATION_LABEL, REGENERATE_OVERWRITE_CONFIRM, GO_TO_TIMELINE_VIEW_LABEL, LAST_SCENE_DELETE_HINT, DRAFT_NEXT_LABEL } from "../uiLabels";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { useSceneBulkVoice } from "../hooks/useBulkVoiceSource";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge } from "../components/states";
@@ -17,15 +26,14 @@ import {
   CheckIcon,
   SparkleIcon,
   PlusIcon,
-  TrashIcon,
   PlayIcon,
   PhotoIcon,
   VideoIcon,
 } from "../components/icons";
 
-// 向きの表示名（§2-3：技術語を出さない）。
+// 向きの表示名（§2-3：技術語を出さない）。文言は `uiLabels` に1つ（#1243 レビュー 🟡＝3か所に写していた）。
 function orientationLabel(o: Orientation): string {
-  return o === ORIENTATION.portrait ? "縦型（9:16）" : "横型（16:9）";
+  return ORIENTATION_LABEL[o];
 }
 
 interface DraftProps {
@@ -33,7 +41,9 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo } =
+  // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
+  const sceneBulkVoice = useSceneBulkVoice();
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setEditingSceneFocus, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo, importError, clearImportError } =
     useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
   // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
@@ -41,12 +51,31 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
-  const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
-  // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。↑/↓ も併存（下記・キーボード用）。
-  const dnd = useDragReorder(moveSceneToIndex);
+  // ⚠️ **押した言葉の欄から見せる**（#995 ③）＝「セリフ」「素材」「見た目」は
+  // **3つとも同じ場所へ行く**だけで、行き先でその欄に寄る仕掛けが無かった
+  //（＝押した言葉と着地がずれる）。`focus` を渡さなければ、いつもどおり（記憶した開閉のまま）。
+  const editScene = (sceneId: string, focus?: SceneEditFocus) => {
+    setEditingSceneId(sceneId);
+    setEditingSceneFocus(focus ?? null);
+    onNavigate("scene-edit");
+  };
+  // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。キーで並べ替える道は「⋮」のメニューの「上へ移動／下へ移動」（キーボード用）。
+  // 端まで運んだら送る（#714 項目5）＝画面の外にある行へも1回のドラッグで運べる。
+  // ⚠️ 送る枠は**この画面のスクロールする器**（`.main-scroll`）＝頁ぜんぶが動く。
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dnd = useDragReorder(moveSceneToIndex, { scroller: () => scrollRef.current });
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 行の操作のメニュー（「⋮」と右クリックで同じもの・UI/UX 監査 2026-10-02）。
+  // ⚠️ **開いた時点の場面の並びも控える**＝開いている間に並びが変わったら（取り消しの近道など）出さない。
+  //   行が消えてから取り消しで戻ったとき、古い位置でひとりでに開き直さない（PR #1345 レビュー ℹ️）。
+  const [rowMenu, setRowMenu] = useState<{ sceneId: string; x: number; y: number; scenes: unknown } | null>(null);
+  // ⚠️ **キーで押したときはボタンの下へ**（`menuAnchorFrom`＝キーの click は座標を持たない・#989）。
+  const openRowMenu = (e: React.MouseEvent<HTMLElement>, sceneId: string): void => {
+    e.preventDefault();
+    setRowMenu({ sceneId, ...menuAnchorFrom(e), scenes });
+  };
   // 「作り直す」は手直し内容を丸ごと破棄して再生成する（Undo 不可＝generate は履歴を積まない）ので確認を挟む（#383）。
   const [confirmRegen, setConfirmRegen] = useState(false);
   // 向き変更の結果メッセージ（§2-5：何が起きたか＋次の行動）。
@@ -91,6 +120,24 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     void autoGenerateIfSafe(); // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。実プロバイダは空状態のまま。
   }, [status, autoGenerateIfSafe]);
 
+  /**
+   * 画面ぜんぶに効く知らせ（#952）。
+   *
+   * ⚠️ **場面ゼロの枝でも描く**＝「白紙から作る」の着地先はこの画面で、そのときは**まだ場面が無い**ので
+   * 早い方の `return` が使われる。片方だけに置くと、**いちばん出したい場面**（新しい動画を作った直後）で
+   * 出ない（実際そう書いてテストに捕まった）。
+   * ⚠️ **この画面だけ描いていなかった**＝会社の見た目の文字の形が入らなかったこと（#929）は
+   * 新しい動画を作った直後に立つのに、描かないと**誰にも届かない**まま既定の字体で作り始めることになる
+   *（素材画面へ寄って初めて出る＝経路で届いたり届かなかったりする・ADR-0026②）。
+   * 他の4画面（素材・場面編集・タイムライン編集・ウィザード）は既に描いている。
+   * ⚠️ **閉じる道を付ける**＝立ちっぱなしにしない（他の画面と同じ流儀）。
+   */
+  const notice = importError ? (
+    <div className="notice notice-warn row-between mb" role="alert">
+      <span>{importError}</span>
+      <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+    </div>
+  ) : null;
   const rows = scenes.map((s) => sceneToDraftRow(s, parts, templates, assets));
   const draftWarnings = warningsToDraftWarnings(warnings);
 
@@ -102,21 +149,29 @@ export function DraftScreen({ onNavigate }: DraftProps) {
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
         <ExportLockBanner onNavigate={onNavigate} />
+        {notice}
         <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => addScene()} />
       </div>
     );
   }
 
   return (
-    <div className="main-scroll">
+    <div className="main-scroll" ref={scrollRef}>
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝進むは上へ寄せた（以前は表の下の右）。最初の段なので戻るは無い。 */}
+      <FlowBar
+        current="draft"
+        next={{ label: DRAFT_NEXT_LABEL, onClick: () => onNavigate("scene-edit") }}
+        onJump={(to) => flowJump("draft", to, onNavigate)}
+      />
       <ExportLockBanner onNavigate={onNavigate} />
+      {notice}
       <div className="content-with-yuko" inert={isExporting}>
         <div>
           <PageHead
             title="動画のたたき台を確認"
             desc={
               draftFromAi
-                ? "ゆうこが作った構成です。台本表を見ながら、自由に修正してください。"
+                ? "AIが作った構成です。台本表を見ながら、自由に修正してください。"
                 : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"
             }
           />
@@ -128,11 +183,12 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           </div>
 
           {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
+          {/* ⚠️ **お知らせの色**（UI/UX 監査 2026-10-02）＝警告の色だと、下に並ぶ本当の警告（自動補正・向き）が目立たなくなる。 */}
           {draftFromAi && (
-            <div className="notice notice-warn mb">
+            <div className="notice notice-info mb" data-testid="draft-ai-notice">
               <SparkleIcon size={18} />
               <span>
-                このたたき台はゆうこ（AI）が作成したものです。必要に応じて自由に修正してください。
+                このたたき台はAIが作成したものです。必要に応じて自由に修正してください。
               </span>
             </div>
           )}
@@ -156,7 +212,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。進捗・中止・
               「すべて作成済みなら隠す」の条件は共通操作へ集約（3画面で同じ見え方にする＝#547 P2-6・ADR-0026②）。
               専用の行なので行ごと共通操作に任せる＝隠れるときに空の行の余白を残さない。 */}
-          <BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
+          <BulkVoiceControls source={sceneBulkVoice} rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
           {/* 一括作成の完了通知（現在は進捗が消えるだけ＝#413）。全部できたら仕上がり確認へ誘導、一部失敗は次の行動を案内。 */}
           {voiceResult && !isGeneratingNarration &&
             (voiceResult.remaining === 0 ? (
@@ -186,7 +242,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <th style={{ minWidth: 240 }}>セリフ</th>
                   <th>見た目</th>
                   <th>音声</th>
-                  <th style={{ width: 210 }}>操作</th>
+                  <th style={{ width: 150 }}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -194,20 +250,24 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <tr
                     key={row.id}
                     {...dnd.dropProps(i)}
+                    onContextMenu={(e) => openRowMenu(e, row.id)}
                     style={{
-                      opacity: dnd.draggingId === row.id ? 0.4 : undefined,
-                      background:
-                        dnd.overIndex === i && dnd.draggingId && dnd.draggingId !== row.id
-                          ? "var(--color-primary-soft)"
+                      opacity: dnd.draggingId === row.id ? "var(--drag-source-opacity)" : undefined,
+                      // **落ちる場所を線で見せる**（#771(c)）＝行を塗ると「その前か後ろか」が読めない。
+                      // 表は枠を畳んでいる（`border-collapse: collapse`）ので、境目の線がそのまま「すき間」になる。
+                      borderTop: dnd.draggingId && dnd.overGap === i ? "var(--drop-line-w) solid var(--drop-line-color)" : undefined,
+                      borderBottom:
+                        dnd.draggingId && dnd.overGap === rows.length && i === rows.length - 1
+                          ? "var(--drop-line-w) solid var(--drop-line-color)"
                           : undefined,
                     }}
                   >
                     <td className="table-num">
                       <span className="row gap-sm" style={{ alignItems: "center" }}>
                         {/* ドラッグの持ち手（装飾＝aria-hidden）。ネイティブ DnD はキー操作不可のため、アクセシブルな並び替えは
-                            右の ↑/↓ ボタンが担う（見せかけのボタンにしない・#398 レビュー）。 */}
+                            右の「⋮」のメニュー（上へ移動／下へ移動）が担う（見せかけのボタンにしない・#398 レビュー）。 */}
                         <span
-                          {...dnd.handleProps(row.id)}
+                          {...dnd.handleProps(row.id, i)}
                           aria-hidden="true"
                           title="ドラッグして並び替え"
                           style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
@@ -240,68 +300,36 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     </td>
                     <td>
                       <div className="row gap-sm row-wrap">
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="上へ移動"
-                          aria-label="上へ移動"
-                          disabled={i === 0}
-                          onClick={() => moveScene(row.id, "up")}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="下へ移動"
-                          aria-label="下へ移動"
-                          disabled={i === rows.length - 1}
-                          onClick={() => moveScene(row.id, "down")}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="この場面を複製"
-                          aria-label="この場面を複製"
-                          onClick={() => duplicateScene(row.id)}
-                        >
-                          複製
-                        </button>
-                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id)}>
+                        {/* 行に出すのは**いちばん使う「セリフ」と「⋮」だけ**（UI/UX 監査 2026-10-02＝操作の列に7つ詰まっていた）。
+                            ほかの操作（並べ替え・複製・素材・見た目・削除）は「⋮」と右クリックの同じメニューへ畳む＝タイムラインの列と同じ型。 */}
+                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id, "narration")}>
                           セリフ
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => editScene(row.id)}>
-                          素材
-                        </button>
-                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => editScene(row.id)}>
-                          見た目
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          aria-label={`${row.order}番目の場面の操作`}
+                          title="この場面の操作（右クリックでも開けます）"
+                          aria-haspopup="menu"
+                          onClick={(e) => openRowMenu(e, row.id)}
+                        >
+                          ⋮
                         </button>
                         {confirmId === row.id ? (
-                          // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（やめる左・削除する=danger右＝#410）。
-                          <>
-                            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmId(null)}>
-                              やめる
-                            </button>
-                            <button
-                              className="btn btn-danger btn-icon"
-                              onClick={() => {
-                                removeScene(row.id);
-                                setConfirmId(null);
-                              }}
-                            >
-                              削除する
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            className="btn btn-ghost btn-icon"
-                            style={{ color: "var(--color-danger)" }}
-                            title="この場面を削除"
-                            aria-label="この場面を削除"
-                            onClick={() => setConfirmId(row.id)}
-                          >
-                            <TrashIcon size={14} />
-                          </button>
-                        )}
+                          // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（`06 §2-1`）。
+                          // ⚠️ **共有の確認を通す**（#990）＝手書きだと**焦点の移動も `Escape` も
+                          // 名簿への名乗りも無い**（#354／#963／#965 の直しが届かない）。
+                          // ⚠️ **ここは走査で見つけた5か所目**＝レビューが挙げた4か所には入っていなかった
+                          //（人の目では数えられないので、機械で見る＝`deleteConfirmScan.test.ts`）。
+                          <DeleteConfirm
+                            inline
+                            message=""
+                            onCancel={() => setConfirmId(null)}
+                            onConfirm={() => {
+                              removeScene(row.id);
+                              setConfirmId(null);
+                            }}
+                          />
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -320,12 +348,16 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <PlayIcon size={16} />
               途中まで仕上がり確認
             </button>
+            {/* 時間の流れを見わたす／タイムライン編集用に作り直す入口（#394 → #635 へ吸収・ADR-0032）。 */}
+            <button className="btn btn-ghost" onClick={() => onNavigate("timeline")}>
+              {GO_TO_TIMELINE_VIEW_LABEL}
+            </button>
           </div>
 
           {confirmRegen && (
             <div className="notice notice-warn mt-lg" role="alert">
               <span>
-                今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？
+                {REGENERATE_OVERWRITE_CONFIRM}
               </span>
               {/* 確認は「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
@@ -364,6 +396,17 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 主操作 */}
           <div className="row-between mt-lg">
+            {/* ⚠️ **入れた内容へ戻れるようにする**（#985）＝ウィザードは
+                「会社情報は、あとからでも直せます」と案内しているのに、**指す先がどこにも無かった**
+                （`06 §12.1`「案内の中で名指しするものは、その画面に実在すること」）。
+                ⚠️ **白紙から作った動画にも出す**（#1003・決定 (a)）＝出さないと、白紙で始めた人は
+                **AIにたたき台を作ってもらう道が永久に無い**（会社情報が無いと渡すものが無い）。
+                #393「白紙はウィザードを通らない道」は**始めるときの話**で、あとから入れる道を
+                塞ぐ意味ではない。⚠️ **言い方は分ける**＝まだ何も入れていないのに「見直す」と
+                言うと、在りもしないものを指す（`06 §12.1`）。 */}
+            <button className="btn btn-ghost" onClick={() => onNavigate("wizard")} disabled={status === "generating"}>
+              {hasWizardBrief(meta) ? EDIT_WIZARD_INPUT_LABEL : ADD_WIZARD_INPUT_LABEL}
+            </button>
             <button
               className="btn btn-secondary"
               onClick={() => setConfirmRegen(true)}
@@ -372,24 +415,40 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <SparkleIcon size={18} />
               {status === "generating" ? "作成中…" : "作り直す"}
             </button>
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={() => onNavigate("scene-edit")}
-            >
-              <CheckIcon size={20} />
-              この内容で確認・編集する
-            </button>
           </div>
         </div>
 
         <YukoPanel
+          pose="cheer"
           messages={[
             `動画のたたき台ができました！全部で${rows.length}つの場面で構成しています。`,
             "セリフや素材は、表の右の操作ボタンから直せます。",
-            "気になるところがなければ「この内容で確認・編集する」に進みましょう。",
+            `気になるところがなければ、上の「${DRAFT_NEXT_LABEL}」に進みましょう。`,
           ]}
         />
       </div>
+      {rowMenu && rowMenu.scenes === scenes && (() => {
+        const i = rows.findIndex((r) => r.id === rowMenu.sceneId);
+        if (i < 0) return null;
+        const id = rowMenu.sceneId;
+        return (
+          <ContextMenu
+            x={rowMenu.x}
+            y={rowMenu.y}
+            onClose={() => setRowMenu(null)}
+            items={[
+              { label: "上へ移動", disabled: i === 0, disabledHint: "いちばん上の場面です", onSelect: () => moveScene(id, "up") },
+              { label: "下へ移動", disabled: i === rows.length - 1, disabledHint: "いちばん下の場面です", onSelect: () => moveScene(id, "down") },
+              { label: "この場面を複製", onSelect: () => duplicateScene(id) },
+              { label: "素材を変更", onSelect: () => editScene(id, "assets") },
+              { label: "見た目を変更", onSelect: () => editScene(id, "look") },
+              // 消すのは行の中の共有の確認を通す（`DeleteConfirm`＝これまでと同じ二段）。
+              // ⚠️ **最後の1つは消させない**（場面編集のカードのメニューと同じ条件・同じ理由＝PR #1345 レビュー）。
+              { label: "この場面を削除", danger: true, disabled: rows.length <= 1, disabledHint: LAST_SCENE_DELETE_HINT, onSelect: () => setConfirmId(id) },
+            ]}
+          />
+        );
+      })()}
     </div>
   );
 }

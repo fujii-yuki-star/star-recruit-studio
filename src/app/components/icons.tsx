@@ -68,20 +68,14 @@ export function HelpIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
-export function MailIcon({ size = 20, className, style }: IconProps) {
+// ⚠️ **「ヘルプ」と「このアプリについて」で同じ絵を出していた**（#1229）＝左の帯に同じ形が2つ並び、
+// どちらがどちらか押すまで分からなかった。使い方は「?」、アプリの情報は「i」に分ける。
+export function InfoIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="m3 7 9 6 9-6" />
-    </svg>
-  );
-}
-
-export function BellIcon({ size = 20, className, style }: IconProps) {
-  return (
-    <svg {...base(size, className, style)}>
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
     </svg>
   );
 }
@@ -181,11 +175,31 @@ export function TrashIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
+/** 複製（#395）＝2枚重ねた紙。 */
+export function CopyIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a1 1 0 0 1 1-1h9" />
+    </svg>
+  );
+}
+
 export function SaveIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>
       <path d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
       <path d="M8 4v5h7M8 21v-6h8v6" />
+    </svg>
+  );
+}
+
+export function HistoryIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l3 2" />
     </svg>
   );
 }
@@ -240,6 +254,36 @@ export function FilmIcon({ size = 20, className, style }: IconProps) {
     <svg {...base(size, className, style)}>
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
+    </svg>
+  );
+}
+
+// 目＝その列を動画に出している（列の見出し・ADR-0048）。
+export function EyeIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+// 目に斜線＝その列を動画に出さない（形でも示す。色差だけに頼らない）。
+export function EyeOffIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.2 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.2-1.6" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+// 鍵＝その列を固定している／固定できる。
+export function LockIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
   );
 }

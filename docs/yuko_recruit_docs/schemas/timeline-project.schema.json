@@ -1,0 +1,612 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuko-recruit/schemas/timeline-project.schema.json",
+  "title": "TimelineProject",
+  "description": "タイムライン編集プロジェクト（ADR-0032）の規範スキーマ。ファイル名は project.json のままで、format='timeline' のときこちらで検証する（未指定/'scene' は project.schema.json）。場面という区切りを持たず、キャンバスは常に自由配置＝FREE（空間の自由）× タイムライン（時間の自由）。AI はこの形式を生成しない（関与は場面形式まで）。素材・見た目設定・グループ・キーフレームは project.schema.json の $defs を $ref で共有する（コピーしない＝CLAUDE.md §2-7）。詳細は 11_SCHEMA_REFERENCE.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "format",
+    "projectId",
+    "projectName",
+    "createdAt",
+    "updatedAt",
+    "videoSettings",
+    "voiceSettings",
+    "assets",
+    "tracks",
+    "clips"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.16",
+      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。／1.2→1.3：クリップの切り抜き（crop）を追加（任意追加＝後方互換のマイナー・#634）。／1.3→1.4：素材の寄せ（cropAlign）を追加（任意追加＝後方互換のマイナー・#634）。／1.4→1.5：切り抜きの効かせ方（cropMode）を追加（任意追加＝後方互換のマイナー・#634）。／1.5→1.6：キーフレームのイージングに名前つきの追加と自由なカーブ（cubic-bezier）を許す（共有 $defs/Keyframe の拡張・任意追加＝後方互換のマイナー・#262）。／1.6→1.7：音量の変化（volumePoints）を追加（任意追加＝後方互換のマイナー・#512）。／1.7→1.8：動画の元の音（useOriginalAudio・originalAudioVolume）を追加（任意追加＝後方互換のマイナー・#512 段2）。／1.8→1.9：文字の体裁（letterSpacing・shadow）と、背景帯（background）を足す（⚠️ **shadow は共有 $defs の $ref**で、letterSpacing・background は**この形式への写し**＝α-6 出口監査 🟡で是正。写しは片方だけ足すと割れるので `validate-schemas` の `copySets`（形の一致検査）で固定してある＝letterSpacing は当初その群から漏れており `/canon-check` 🟡 で追加した。任意追加＝後方互換のマイナー・#264）。／1.9→1.10：音の自動処理（videoSettings.audioAuto）を追加（共有 $defs/VideoSettings の拡張・任意追加＝後方互換のマイナー・#257/#259）。／1.10→1.11：**目印（markers）**を追加（#356 ①）。時間の一点に印とメモを置くだけで、**動画には出ない**（作業用＝書き出しにも描画にも現れない）。任意追加＝後方互換のマイナー＝**無変換**。／1.11→1.12：**色の調整（colorAdjust）と描画モード（blendMode）**を追加（ADR-0044・#1192）。⚠️ **定義は場面形式の共有 `$defs` を指す**（写すと片方だけ変わる）が、**持てるのはこの形式だけ**＝場面形式は凍結（ADR-0032）なので `FreeElement` には足していない（ADR-0044 追補1）。任意追加＝後方互換のマイナー＝**無変換**。／1.12→1.13：**動画の長さの上限**（共有 `$defs/VideoSettings` の `maxDurationSec.maximum`）を 600→1800 秒へ（ADR-0045・#1205・project 1.30 と同時）。値域の拡大だけ＝**無変換**。／1.13→1.14：**素材の「AI解析」を書いたのは誰か**（`aiDescriptionAuthor`＝ai/user）を共有の `$defs/Asset` に追加（#1317）＝場面形式 1.31 と同時。任意追加＝**無変換**。／1.14→1.15：キーフレームの動き方に**「止める」（`hold`）**を追加（#1365＝区間は前のキーの値のまま、当キーで切り替わる）＝共有の `$defs/Keyframe` の値域の拡大だけ・場面形式 1.32 と同時＝**無変換**。／1.15→1.16：**喋っている間の動き**（`TimelineClip.talkMotion`＝音の列・はねる／ゆらゆら／ふくらむ・強さ・ADR-0056・#1367）を追加（この形式だけ・任意追加＝**無変換**）。"
+    },
+    "format": {
+      "const": "timeline",
+      "description": "文書形式の判別。読み込み時にこの値でスキーマと編集画面を選ぶ。未指定＝場面形式（後方互換）。"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^proj_[0-9]{8}_[0-9]{3}$",
+      "description": "場面形式と同じ採番（プロジェクト一覧に同列で並ぶため）。形式の判別は format で行う。"
+    },
+    "projectName": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourceProjectId": {
+      "type": "string",
+      "pattern": "^proj_[0-9]{8}_[0-9]{3}$",
+      "description": "焼き出し元の場面形式プロジェクト（ADR-0032 決定16・片道）。完全新規のときは未指定。元を書き換えることはない（記録のみ）。"
+    },
+    "videoSettings": {
+      "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/VideoSettings"
+    },
+    "voiceSettings": {
+      "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/VoiceSettings",
+      "description": "タイムライン側でも声を作れる（ADR-0032 決定7）ため既定の声設定を持つ。"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Asset"
+      },
+      "description": "焼き出し時はコピーする（ADR-0024 (6) の自己完結を守る・ADR-0032 決定13）。"
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Track"
+      },
+      "description": "**配列の後ろほど手前**（既存の描画規則と同じ）。UI では上が手前に見せる。"
+    },
+    "clips": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TimelineClip"
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Group"
+      },
+      "description": "要素のグループ化（ADR-0022）。members はクリップ id／ネストでグループ id。"
+    },
+    "animations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ClipAnimation"
+      }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TimelineMarker"
+      },
+      "description": "目印（#356 ①）。作業用のメモで、**動画には出ない**（描画にも書き出しにも現れない）。"
+    }
+  },
+  "$defs": {
+    "Track": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "トラック。同一トラック内でクリップの時間は重ならない（重ねたいならトラックを足す＝重ね順がトラック順だけで一意に決まる）。",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^track_[0-9]{3,}$"
+        },
+        "kind": {
+          "enum": [
+            "visual",
+            "audio"
+          ],
+          "description": "visual＝映像・文字・図形・字幕／audio＝音声。置けるクリップの種別を決める。"
+        },
+        "name": {
+          "type": "string",
+          "description": "任意の表示名。未指定＝種別＋連番の自動名。"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "true で描画・書き出しから除外（音声は無音）。"
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "true でクリップの移動・トリム・削除と、中身の差し替えを禁止（11 §7.6.3）。"
+        }
+      }
+    },
+    "TimelineClip": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」。空間の語彙は FreeElement（ADR-0008）と同じものを使う＝描画（layoutScene の FREE 分岐）を共有できる。kind 別の必須フィールドは domain の検証で担保する（FreeElement と同じ流儀＝11 §8）。",
+      "required": [
+        "id",
+        "kind",
+        "trackId",
+        "startSec",
+        "durationSec"
+      ],
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "voice"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "voice"
+        ],
+        "description": "読み上げクリップは中身（読み上げ文・話者）が無いと声を作れないので、schema で必須にする（「空の声」を作らせない・#628）。"
+      },
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^clip_[0-9]{3,}$"
+        },
+        "kind": {
+          "enum": [
+            "slot",
+            "text",
+            "shape",
+            "subtitle",
+            "template",
+            "audio",
+            "voice"
+          ],
+          "description": "slot/text/shape/subtitle は FreeElement と同義。template＝テンプレを素材として置く（差し込み口が生きている・ADR-0032 決定5）。audio＝音（素材/同梱BGM）。voice＝読み上げ（タイムライン側でも声を作れる＝決定7。音の素材とは必須フィールドが別物なので種別を分ける）。"
+        },
+        "trackId": {
+          "type": "string",
+          "pattern": "^track_[0-9]{3,}$"
+        },
+        "startSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "h": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 360
+        },
+        "assetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fit": {
+          "enum": [
+            "cover",
+            "contain",
+            "stretch"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontWeight": {
+          "enum": [
+            "normal",
+            "bold"
+          ]
+        },
+        "fontId": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/FreeElement/properties/fontId",
+          "description": "同梱フォントの一覧は場面形式と同じ値を参照する（増減を1か所で管理・CLAUDE.md §2-7）。null＝動画全体に合わせる。"
+        },
+        "lineHeight": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "textAlign": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "shapeType": {
+          "enum": [
+            "rect",
+            "ellipse",
+            "rounded_rect",
+            "triangle",
+            "star",
+            "arrow",
+            "speech_bubble"
+          ]
+        },
+        "fillColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0
+        },
+        "strokeColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 0
+        },
+        "letterSpacing": {
+          "type": "number",
+          "minimum": -0.5,
+          "maximum": 2,
+          "description": "字間（em・#264）。文字サイズに対する割合＝サイズを変えても詰め具合が変わらない。未指定＝0（従来の出力は不変）。負で詰める。制約は場面形式（FreeElement）と同一。"
+        },
+        "shadow": {
+          "$ref": "project.schema.json#/$defs/TextShadow",
+          "description": "文字の影（#264）。⚠️ **共有の `$def` を指す**＝場面形式と同じ制約（写すと片方だけ変わる・α-6 出口監査 ℹ️11）。"
+        },
+        "background": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "文字・字幕の背景帯（可読性の下地）。未指定/enabled:false＝なし。",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "templateId": {
+          "type": "string",
+          "description": "kind='template' のとき必須。置いた見た目パターン。"
+        },
+        "assetRefs": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/AssetRefs"
+        },
+        "texts": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Texts"
+        },
+        "textStyles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "main": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "subtitle": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "caption": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "url": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            }
+          }
+        },
+        "slotFits": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "cover",
+              "contain",
+              "stretch"
+            ]
+          },
+          "description": "テンプレ層 id → 収め方の上書き（場面形式の scene.slotFits と同義）。"
+        },
+        "textFontIds": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Scene/properties/textFontIds",
+          "description": "kind='template': テキスト種別ごとのフォント上書き（場面形式の scene.textFontIds と同義）。枠全体のフォントは上の fontId。"
+        },
+        "character": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Character",
+          "description": "kind='template': 立ち絵の表示と表情（場面形式の scene.character と同義）。テンプレに character 層があるときだけ効く。"
+        },
+        "slotClips": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Scene/properties/slotClips",
+          "description": "kind='template': テンプレ層 id → 動画の使う範囲・速度・元音声の上書き（場面形式の scene.slotClips と同義・ADR-0028）。クリップ直下の sourceStartSec/speed は kind='slot'/'audio' が直接持つ素材のトリムで、こちらは枠の中の差し込み口ごとの上書き。"
+        },
+        "voiceClipId": {
+          "type": "string",
+          "pattern": "^clip_[0-9]{3,}$",
+          "description": "kind='subtitle' の連動先（読み上げクリップの id・ADR-0032 決定24）。指定すると文言と時間がその読み上げに追従する。未指定＝連動しない。"
+        },
+        "talkMotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trackId", "kind"],
+          "description": "映像の部品が、喋っている間に動く（ADR-0056・#1367）。trackId＝音の列（その列の声の部品が生きている間に動く）・kind＝bounce（はねる）／bob（ゆらゆら）／pulse（ふくらむ）・strength＝強さ（倍率・既定1）。キーフレームの上に足す。口パクではない。",
+          "properties": {
+            "trackId": { "type": "string", "pattern": "^track_[0-9]{3,}$" },
+            "kind": { "enum": ["bounce", "bob", "pulse"] },
+            "strength": { "type": "number", "exclusiveMinimum": 0, "maximum": 5 }
+          }
+        },
+        "voice": {
+          "$ref": "#/$defs/TimelineVoice",
+          "description": "kind='voice' のとき必須。読み上げの中身（上の if/then で強制）。"
+        },
+        "bundledBgmId": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/BgmSettings/properties/bundledBgmId",
+          "description": "kind='audio' で同梱BGMを鳴らすとき。assetId と排他。曲の一覧は場面形式と同じ値を参照する（増減を1か所で管理・CLAUDE.md §2-7）。"
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "fadeInSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fadeOutSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "speed": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "useOriginalAudio": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Clip/properties/useOriginalAudio",
+          "description": "動画の素材を置いたクリップで、その動画に入っている元の音を鳴らすか（#512 段2）。未指定＝鳴らさない。素材に音が入っていないときは指定しても鳴らない（場面形式と同じ規準）。"
+        },
+        "originalAudioVolume": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Clip/properties/originalAudioVolume",
+          "description": "元の音の音量（#512 段2）。未指定＝標準（ORIGINAL_AUDIO_VOLUME）。値域は場面形式と共有（$ref）。"
+        },
+        "sourceStartSec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "素材のどこから使うか（非破壊トリム・ADR-0024）。動画・音声クリップで有効。"
+        },
+        "crop": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "切り抜き（#634）。クリップの箱の各辺を「箱の大きさに対する割合」で隠す。中身は動かない（隠れるだけ）＝残った素材を枠いっぱいに映し直すのは `cropMode:'fill'`。同じ軸の合計は 1 未満（`11 §8` V30）。",
+          "properties": {
+            "top": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "right": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "bottom": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "left": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            }
+          }
+        },
+        "cropAlign": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "素材の寄せ（#634・05 §8）。`fit:'cover'` で枠に収まらない側をどこで切るか（既定＝中央）。`contain` では余白の寄せ。",
+          "properties": {
+            "x": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "y": {
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ]
+            }
+          }
+        },
+        "cropMode": {
+          "enum": [
+            "mask",
+            "fill"
+          ],
+          "description": "切り抜きの効かせ方（#634）。mask＝箱の辺を隠す（既定・中身は動かない）／fill＝残った素材を枠いっぱいに映し直す（`kind='slot'` のみ・素材の実寸が要る）。"
+        },
+        "volumePoints": {
+          "type": "array",
+          "minItems": 1,
+          "description": "音量の変化（#512）。クリップ先頭からの秒と音量の点列。未指定＝`volume` の一定値。フェード（fadeInSec/fadeOutSec）はこの上に掛かる。",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "timeSec",
+              "volume"
+            ],
+            "properties": {
+              "timeSec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "volume": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1.5
+              }
+            }
+          }
+        },
+        "colorAdjust": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/ColorAdjust",
+          "description": "色の調整（ADR-0044 ①）。⚠️ **共有の `$def` を指す**＝場面形式と同じ制約（写すと片方だけ変わる）。"
+        },
+        "blendMode": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/BlendMode",
+          "description": "描画モード（ADR-0044 ②）。⚠️ **共有の `$def` を指す**（定義の置き場が場面形式側なだけで、持てるのはこの形式だけ＝追補1）。"
+        }
+      }
+    },
+    "TimelineVoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "読み上げクリップ（kind='voice'）の中身。場面形式の NarrationLine から**時間の語彙を除いた**もの（startSec/startWithPrevious はクリップの startSec・トラックが担い、subtitleText/subtitleEnabled は字幕クリップが担う）。制約は NarrationLine の同名プロパティを $ref で共有する（増減を1か所で管理・CLAUDE.md §2-7）。**入れ子にしているのは、クリップ直下の text（表示する文字）・speed（素材の再生速度）と語が衝突するため**＝読み上げ文と話速は別概念（ADR-0026②）。",
+      "required": [
+        "text",
+        "status"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/text",
+          "description": "読み上げる（話す）文。画面に出す字幕は別の字幕クリップが持つ。"
+        },
+        "speaker": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speaker"
+        },
+        "speed": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speed"
+        },
+        "pitch": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/pitch"
+        },
+        "intonation": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/intonation"
+        },
+        "voicePath": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/voicePath"
+        },
+        "status": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/status"
+        }
+      }
+    },
+    "TimelineMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "時間の一点に置く目印（#356 ①）。「ここ直す」「ここに効果音」「この間を伸ばす」を編集しながら書き留めるためのもので、**動画には出ない**（描画にも書き出しにも現れない＝作業用）。トラックには属さない（時間だけを持つ）。",
+      "required": [
+        "id",
+        "timeSec"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^marker_[0-9]{3,}$"
+        },
+        "timeSec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "動画の頭からの秒（クリップの先頭からではない＝トラックに属さないため）。"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "メモ（任意）。未指定＝位置だけの目印。"
+        }
+      }
+    },
+    "ClipAnimation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "クリップ（またはグループ）のキーフレームアニメ。timeSec は**クリップの先頭からの秒**（場面形式の ElementAnimation は場面ローカル秒＝そこだけ違う）。",
+      "required": [
+        "id",
+        "targetId",
+        "keyframes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^anim_[0-9]{3,}$"
+        },
+        "targetId": {
+          "type": "string",
+          "description": "クリップ id（clip_NNN）またはグループ id（group_NNN）。"
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Keyframe"
+          }
+        }
+      }
+    }
+  }
+}

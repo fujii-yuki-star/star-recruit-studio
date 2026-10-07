@@ -5,7 +5,7 @@
 // MVP は1シーン1動画（最初に見つかったもの）。複数は ADR-0006 未解決#2。
 import { DEFAULT_FIT, SPEED_DEFAULT } from '../../domain/constants';
 import { clampSpeed, resolveSlotClip } from '../../domain/asset/clip';
-import { ASSET_TYPE, FREE_CATEGORY, FREE_ELEMENT_KIND, SLOT_TYPE, type Fit } from '../../domain/enums';
+import { ASSET_TYPE, FREE_CATEGORY, FREE_ELEMENT_KIND, LAYER_TYPE, SLOT_TYPE, type Fit } from '../../domain/enums';
 import type { Asset, Scene, SlotClipOverride } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -70,7 +70,7 @@ export function findVideoSlots(
   }
   // 通常テンプレ：slot 層 + assetRefs。
   for (const layer of template.layers) {
-    if (layer.type !== 'slot') continue;
+    if (layer.type !== LAYER_TYPE.slot) continue;
     // 正典 11 §3.4/§5: slotType='image' のスロットは動画を受け付けない（image_or_video / video のみ）。
     if (layer.slotType === SLOT_TYPE.image) continue;
     const assetId = scene.assetRefs[layer.id];

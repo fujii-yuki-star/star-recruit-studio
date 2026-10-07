@@ -1,8 +1,12 @@
 # MVP実装ロードマップ
 
+> ⚠️ **これは正典ではありません**（解説・背景）。型・必須・enum・制約の正典は [`11_SCHEMA_REFERENCE.md`](11_SCHEMA_REFERENCE.md) と [`schemas/`](schemas/)、AI 変換の正典は [`12_AI_PROMPT_AND_MAPPING.md`](12_AI_PROMPT_AND_MAPPING.md)。**食い違ったら正典が正しい**（`CLAUDE.md §0`）。
+
+> 作業前に読む資料は [`../ai_work_guides/README.md`](../ai_work_guides/README.md) から作業種別で選ぶ。
+
 ## 1. 目的
 
-本資料は、「ゆうこ採用ムービーメーカー」を実用MVPとして完成させるための開発順序、優先度、フェーズ分割を定義する。
+本資料は、「すたりお（stario）」を実用MVPとして完成させるための開発順序、優先度、フェーズ分割を定義する。
 
 MVPの目的は、採用担当者が写真・動画・会社情報を入力し、AIが生成した動画構成案をもとに、テンプレートに沿った採用動画をプレビューおよびMP4出力できる状態まで到達することである。
 

@@ -5,7 +5,7 @@ const invokeMock = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }));
 vi.mock('../appSettings', () => ({ getVoicevoxSpeaker: () => null, getVoicevoxUrl: () => '' }));
 
-import { VoicevoxProvider } from './voicevoxProvider';
+import { VoicevoxProvider, synthesizeWithAccent } from './voicevoxProvider';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 
 /** 指定秒数の最小 WAV data URL を作る（wavDurationSec = dataSize/byteRate になるよう組む）。 */
@@ -50,5 +50,30 @@ describe('VoicevoxProvider.synthesize（尺は実 WAV から測る・#547 P3-3�
     invokeMock.mockResolvedValue('data:audio/wav;base64,AAAA'); // 44バイト未満
     const { durationSec } = await new VoicevoxProvider().synthesize({ text: 'あ'.repeat(20), voiceId: 'voicevox_zundamon', speed: 1, pitch: 0, intonation: 1 });
     expect(durationSec).toBe(0); // 旧概算なら max(1, ...)=3.6 で 0 にならなかった＝実尺化の証拠
+  });
+});
+
+/**
+ * 読み方の聞き比べ（#350）で **Rust へ渡す形**を固定する。
+ *
+ * ⚠️ **話し方は3つで1組**（`style`）＝Rust 側は `VoiceStyle` で受け、スケールへの換算を
+ * 声の作成（`synthesize_voice`）と共有している。ここが `speed`/`pitch`/`intonation` の
+ * ばら渡しへ戻ると **受け取れずに落ちる**（型では検知できない境界なのでテストで留める）。
+ */
+describe('synthesizeWithAccent（Rust へ渡す形）', () => {
+  afterEach(() => invokeMock.mockReset());
+
+  it('話し方を style にまとめて渡す（ばらして渡さない）', async () => {
+    // この関数はアプリの中でだけ Rust を呼ぶ（外では作り物の声）ので、その判定を満たしておく。
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    invokeMock.mockResolvedValue('data:audio/wav;base64,AA==');
+    await synthesizeWithAccent('スタリオ', 1, { speed: 1.2, pitch: 0.3, intonation: 0.8, voiceId: 'voicevox_zundamon' });
+    const [cmd, args] = invokeMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cmd).toBe('voicevox_synthesize_with_accent');
+    expect(args.style).toEqual({ speed: 1.2, pitch: 0.3, intonation: 0.8 });
+    expect(args).not.toHaveProperty('speed');
+    expect(args.yomi).toBe('スタリオ');
+    expect(args.accentType).toBe(1);
+    delete (globalThis as { window?: unknown }).window;
   });
 });

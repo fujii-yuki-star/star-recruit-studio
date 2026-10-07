@@ -89,6 +89,88 @@ export async function assetDisplayUrl(projectId: string, relPath: string): Promi
   }
 }
 
+/**
+ * 音の波形の山（#332）。0.0〜1.0 を `buckets` 個返す（音が無い・読めないときは空）。
+ *
+ * ⚠️ **素材のバイトを JS に載せない**（ADR-0004・§2-1）＝Rust が PCM を受けて**山だけ**を返す。
+ * Web Audio の `decodeAudioData` は**ファイル丸ごとを JS のメモリへ展開する**ので採らない
+ *（`exceedsInlineAssetLimit` の趣旨に反する）。
+ */
+export async function audioPeaks(
+  projectId: string,
+  relPath: string,
+  buckets: number,
+  /** 素材のどこから測るか（秒）。 */
+  fromSec = 0,
+  /** 何秒ぶん測るか（`0`＝最後まで）。 */
+  lengthSec = 0,
+): Promise<number[]> {
+  if (!isTauri()) return [];
+  try {
+    return await invoke<number[]>('audio_peaks', { projectId, relPath, buckets, fromSec, lengthSec });
+  } catch (e) {
+    console.warn('[asset] audioPeaks 失敗:', e);
+    return [];
+  }
+}
+
+/**
+ * 動画のコマ列（#332）。**横に並べた PNG 1枚**を作り、表示用の URL を返す（作れなければ `null`）。
+ *
+ * ⚠️ **無くても編集はできる**＝失敗しても `null` を返すだけで、画面は止めない（§2-5＝求めることが無い）。
+ */
+export async function videoFilmstrip(
+  projectId: string,
+  relPath: string,
+  frames: number,
+  fromSec = 0,
+  lengthSec = 0,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const rel = await invoke<string>('video_filmstrip', { projectId, relPath, frames, fromSec, lengthSec });
+    return rel ? await assetDisplayUrl(projectId, rel) : null;
+  } catch (e) {
+    console.warn('[asset] videoFilmstrip 失敗:', e);
+    return null;
+  }
+}
+
+/**
+ * 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
+ *
+ * ⚠️ **消せなくても失敗にしない**＝素材はもう文書から外れており、残ったファイルは次の取り込みで
+ * 上書きされるだけの無害な余り。ここで利用者に何か求めても**やることが無い**（§2-5）。
+ * テンプレ素材の孤立掃除（ADR-0021・`#299`）と同じ流儀。
+ */
+export async function deleteProjectFiles(projectId: string, relPaths: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  try {
+    return await invoke<number>('delete_project_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] deleteProjectFiles 失敗:', e);
+    return 0;
+  }
+}
+
+/**
+ * 渡した素材のうち、**実体が見つからないもの**の相対パスを返す（#347）。
+ *
+ * ⚠️ **見つからないものだけ**を返す（全件の真偽表だと素材が増えるほど無駄が増える）。
+ * ⚠️ **アプリの外（ブラウザ）では空を返す**＝そこにはプロジェクトフォルダが無いので、
+ * 「全部見つからない」と言うと**嘘の警告**になる（§2-5＝実行しても直らない案内を出さない）。
+ * 調べられなかったときも空（黙って「壊れている」と言わない）。
+ */
+export async function missingAssetFiles(projectId: string, relPaths: string[]): Promise<string[]> {
+  if (!isTauri() || relPaths.length === 0) return [];
+  try {
+    return await invoke<string[]>('missing_asset_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] missingAssetFiles 失敗:', e);
+    return [];
+  }
+}
+
 /** 動画素材のメタ情報（長さ・音声有無・解像度）を取得する。Tauri 非検出 or 失敗時は null。 */
 export async function probeVideo(projectId: string, relPath: string): Promise<AssetMetadata | null> {
   if (!isTauri()) return null;
@@ -110,4 +192,33 @@ export async function extractVideoThumbnail(
   } catch {
     return null;
   }
+}
+
+/**
+ * 動画の**その瞬間**を静止画として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+ *
+ * ⚠️ **サムネ（`extractVideoThumbnail`）と違って失敗を握りつぶさない**＝あちらは
+ * 「無くても一覧が出る」best-effort だが、こちらは**利用者が押した操作**なので、
+ * できなかったら次の行動を出して知らせる（§2-5）。文言は Rust が返す。
+ */
+export async function extractVideoFrame(
+  projectId: string,
+  relPath: string,
+  atSec: number,
+  outFileName: string,
+  grid?: { sourceStartSec: number; speed: number; fps: number; localFrame: number },
+): Promise<string> {
+  return invoke<string>('extract_video_frame', {
+    projectId,
+    relPath,
+    atSec,
+    outFileName,
+    // ⚠️ **渡せるときは秒でなく「何コマ目か」で頼む**（#1158）＝受け取った側が自分の丸め方で
+    // コマを選ぶと、素材と出力の格子が合わないときに**1コマ先**の絵になる（実測 18/64）。
+    // ⚠️ **`atSec` も一緒に送る**＝格子を渡せない呼び出し（素材画面の切り出し）は今までどおり秒で選ぶ。
+    sourceStartSec: grid?.sourceStartSec,
+    speed: grid?.speed,
+    fps: grid?.fps,
+    localFrame: grid?.localFrame,
+  });
 }

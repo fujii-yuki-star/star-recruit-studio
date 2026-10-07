@@ -1,0 +1,159 @@
+// タイムライン形式（ADR-0032）の読込・尺の算出。純粋関数（I/O は infrastructure・§4）。
+// 場面形式の `project/persistence.ts` と同じ流儀で、読み込めない文書は**生のエラーを UI へ出さず**
+// 「次の行動」を示す文言で断る（§2-5・15 §6）。
+import { PROJECT_FORMAT } from '../enums';
+import { isTimelineProjectDoc } from '../projectFormat';
+import { validateTimelineProject } from '../validation/generated/validators.js';
+import { effectiveFps, lastFrameSec, quantizeToFrameSec } from './playback';
+import { clipEndSec } from './validateTimelineDoc';
+import type { TimelineProject } from './types';
+import { OLD_PROJECT_AUDIO_AUTO } from '../voice/audioAuto';
+import { TIMELINE_SCHEMA_VERSION } from './types';
+import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
+
+/** 音の自動処理（`videoSettings.audioAuto`）が入った版（#257/#259）。これより前の文書にだけ「しない」を書く。 */
+export const TIMELINE_AUDIO_AUTO_SINCE = '1.10';
+
+/**
+ * この版のアプリで開けるか（11 §1）。**場面形式と同じ流儀**＝メジャーが同じなら開き、
+ * 未対応メジャー（2.0 等）だけ断る。完全一致にすると、後方互換の追加（1.1→1.2 のような additive バンプ）
+ * だけで**焼き出し済みの文書がすべて開けなくなる**（ADR-0026②＝同じ概念は同じ挙動）。
+ */
+export function isSupportedTimelineSchemaVersion(version: string): boolean {
+  const major = TIMELINE_SCHEMA_VERSION.split('.')[0];
+  return version.startsWith(`${major}.`);
+}
+
+/**
+ * 旧版の文書を現行版へ引き上げる（11 §1「破壊的変更時はマイグレーションを用意」）。
+ *
+ * ⚠️ **版の一覧はここに置かない**（#513 の方針・α-6 出口監査 🟡）＝ここに写すと**必ずずれる**
+ *（実際、1.8→1.9〔#264〕が抜け、現行が 1.10 なのに「1.0→1.9」のままだった）。
+ * ⚠️ **「1か所」ではない**（`/canon-check` ℹ️で数え直した）＝一覧は
+ * `timeline-project.schema.json` の `schemaVersion.description` と `11 §1` の**2か所**にあり、
+ * `11` は資料としてすべての形式の版を並べる場所なので**これは重複ではなく役割の違い**。
+ * ⚠️ **場面形式とは置き場所が違う**＝あちらの一覧は `PROJECT_SCHEMA_VERSION` の docstring
+ *（`domain/project/persistence.ts`・`11 §1` が単一の参照元と明記）で、`project.schema.json` の
+ * `schemaVersion` は `const` だけを持つ。**どちらへ寄せるかは決めていない**（揃えるなら
+ * `TIMELINE_SCHEMA_VERSION` の docstring へ移す）＝いま形式間で非対称なことをここに記録しておく。
+ *
+ * **書くのは「実際に変換が要る版」だけ**＝下の 1.9→1.10（音の自動処理）のように、
+ * データを書き込む必要があるものを書く。**任意フィールドの追加や値域の拡大は版だけ上げれば適合する**
+ * ので、ここには現れない。
+ */
+export function migrateTimelineProject(doc: Record<string, unknown>): Record<string, unknown> {
+  if (doc.schemaVersion === TIMELINE_SCHEMA_VERSION) return doc;
+  const next: Record<string, unknown> = { ...doc, schemaVersion: TIMELINE_SCHEMA_VERSION };
+  // 1.9→1.10: 音の自動処理（#257 ダッキング・#259 ノーマライズ）。
+  // ⚠️ **既に作った動画の音を変えない**（§2-5・場面形式の 1.28→1.29 と同じ扱い）＝新しい動画では
+  // 既定で「する」だが、**前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて
+  // 書き出し直しただけで BGM の鳴り方と全体の音量が変わり、前に書き出した動画と別物になる。
+  // ⚠️ **`videoSettings` は場面形式と `$ref` 共有**なので、片方だけ直すと形式で挙動が割れる（ADR-0026②）。
+  // ⚠️ **「前の版」は「音の自動処理が無かった版（1.10 より前）」**（PR #1368 レビュー 🔴）＝現行と違う版を
+  // 全部「前の版」とみなすと、**版を上げるたびに** 1.10 以降で作られ未指定（＝既定で「する」）の動画まで
+  // 「しない」に化ける（1.11〜1.14 に上げたときにも起きていた）。
+  const vs = next.videoSettings;
+  const fromVersion = typeof doc.schemaVersion === 'string' ? doc.schemaVersion : '';
+  if (isNewerSchemaVersion(TIMELINE_AUDIO_AUTO_SINCE, fromVersion) && isAudioSettingsRecord(vs) && vs.audioAuto === undefined) {
+    next.videoSettings = { ...vs, audioAuto: OLD_PROJECT_AUDIO_AUTO };
+  }
+  return next;
+}
+
+function isAudioSettingsRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** 読込に失敗したことを UI へ伝える例外（場面形式の `ProjectLoadError` と同じ役割）。 */
+export class TimelineLoadError extends Error {
+  constructor(
+    message: string,
+    /**
+     * どういう落ち方か。**既定は `unsupported`＝控えから戻す導線を出さない側**
+     *（壊れていないものを巻き戻させない）。場面形式の `ProjectLoadError` と同じ語彙にそろえる（#977）。
+     */
+    readonly failure: 'broken' | 'unsupported' = 'unsupported',
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * 文字列(JSON) → タイムライン形式の文書。形式・版・スキーマ適合を確かめる。
+ *
+ * **場面形式のファイルをここへ渡さない**（呼び出し側が `resolveProjectFormat` で振り分ける前提だが、
+ * 取り違えても「形式が違う」と言えるように見る）。スキーマ適合は ajv（`11 §8` V1/V2）に委ねる。
+ * 相互参照の検証（V22–V33）は**ここでは見ない**＝`validateTimelineDoc` を画面が呼んで `Warning[]` を
+ * 出す（読込は止めない）。焼き出し側もスキーマ未適合なら保存しないので、開けない文書は作られない。
+ */
+export function parseTimelineProjectDoc(text: string): TimelineProject {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new TimelineLoadError('この動画のファイルを読み取れませんでした。一覧から別の動画を選んでください。', 'broken');
+  }
+  if (typeof raw !== 'object' || raw === null || !isTimelineProjectDoc(raw)) {
+    throw new TimelineLoadError('この動画はタイムラインで編集する形式ではありません。一覧から別の動画を選んでください。');
+  }
+  const doc = raw as Record<string, unknown>;
+  // ⚠️ **版が読めない壊れ方と、新しすぎる版を分ける**（#980 レビュー 🟡）＝
+  // **場面形式で直したものの双子**（α-7 再監査 🟡）を、こちらへ持ち込んでいた。
+  // 一緒にしていると、`schemaVersion` が欠けた**壊れた**動画にも「アプリを更新してください」＝
+  // **更新しても直らない次の行動**が出て、しかも `broken` にならないので
+  // **控えから戻す導線が出ない**（いちばん助けが要る場面でいちばん助けが出ない）。
+  if (typeof doc.schemaVersion !== 'string') {
+    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
+  }
+  if (!isSupportedTimelineSchemaVersion(doc.schemaVersion)) {
+    // **「バージョン」と言う**（「形式」は場面/タイムラインの別を指す確定語なので、すぐ上の行と同じ語を
+    // 別の意味で使わない＝#640 で場面形式側に入れた「版と形式のすり替えをしない」の裏返し・15 §6）。
+    throw new TimelineLoadError('この動画は対応していないバージョンで作成されています。アプリを更新してください。');
+  }
+  // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝`migrateTimelineProject` は版を
+  // **現行へ書き換えるだけ**なので、未来の版を通すと**版の印が黙って下がる**（1.9 の文書が 1.8 に）。
+  // しかも新しい語彙が入っていれば ajv が落ちて「この動画の内容が正しくありません」＝**嘘**になる
+  //（壊れておらず、アプリを更新すれば開ける・§2-5）。
+  if (isNewerSchemaVersion(doc.schemaVersion, TIMELINE_SCHEMA_VERSION)) {
+    throw new TimelineLoadError(PROJECT_NEWER_VERSION_MESSAGE);
+  }
+  // 版を現行へ引き上げてから検証する（ajv は現行版だけを通すので、上げずに渡すと旧版が必ず落ちる）。
+  const migrated = migrateTimelineProject(doc);
+  if (!validateTimelineProject(migrated)) {
+    console.warn('[timeline] 読み込んだ内容がスキーマに未適合:', validateTimelineProject.errors);
+    throw new TimelineLoadError('この動画の内容が正しくありません。一覧から別の動画を選んでください。', 'broken');
+  }
+  return migrated as unknown as TimelineProject;
+}
+
+/**
+ * 動画全体の尺（秒）＝**いちばん後ろまで伸びているクリップの終わり**。純粋関数。
+ * 場面形式のように「場面尺の合計」ではない＝置いていない時間（隙間）も尺に含まれ、
+ * 何も置いていなければ 0（再生ヘッドの上限・書き出しの長さの基準になる）。
+ */
+export function timelineDurationSec(doc: TimelineProject): number {
+  return doc.clips.reduce((max, c) => Math.max(max, clipEndSec(c)), 0);
+}
+
+/**
+ * その時刻の絵を描くための時刻（秒）。**尺のちょうど末尾は1フレーム手前へ寄せる**。
+ *
+ * クリップの生存区間は半開 `[start, start+duration)`（V24 と同じ）なので、末尾ちょうどではどのクリップも
+ * 外れて**画面が真っ白になる**。場面形式の再生ヘッド（`playhead.ts`）は区間を閉じて「最後のフレームで場面が
+ * 消えない」ようにしており、同じ概念が割れないよう**フレームへ量子化**して合わせる
+ * （秒＝正準・フレーム＝出力時の量子化＝ADR-0023）。
+ */
+export function frameTimeSec(doc: TimelineProject, playheadSec: number): number {
+  const fps = effectiveFps(doc);
+  if (!Number.isFinite(playheadSec)) return 0;
+  // **格子へ落としてから**最後のフレームで頭打ちにする＝見せる時刻が必ず `k/fps` になる
+  // （落とさずにクランプすると、尺が格子に乗っていないとき書き出しに存在しない時刻の絵を描く）。
+  // 頭打ちの位置は**書き出しと同じ導き方**（`lastFrameSec`・#724）＝`total − 1/fps` を自分で計算すると、
+  // 尺 × fps が整数でないときに**書き出しの最終フレームへ到達できない**（1.05秒・30fps で 1.0 止まり）。
+  return Math.min(Math.max(0, quantizeToFrameSec(playheadSec, fps)), lastFrameSec(doc));
+}
+
+/** 保存用に更新日時を差し替えた文書を返す（保存そのものは infrastructure）。 */
+export function withUpdatedAt(doc: TimelineProject, nowIso: string): TimelineProject {
+  return { ...doc, format: PROJECT_FORMAT.timeline, updatedAt: nowIso };
+}

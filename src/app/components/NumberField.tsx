@@ -19,6 +19,7 @@ export function NumberField({
   inputStyle,
   inputClassName = "input",
   title,
+  disabled = false,
 }: {
   /** ラベル。省略時は input だけを返す（「開始 〜 終了」のようなインライン配置用）。 */
   label?: string;
@@ -39,6 +40,11 @@ export function NumberField({
   inputStyle?: CSSProperties;
   inputClassName?: string;
   title?: string;
+  /**
+   * 押せなくするか（#706）。**理由は `title` で必ず添える**（押せないのに理由が出ない、を作らない・§2-5）。
+   * ここが無いと、呼ぶ側が `disabled` を渡しても**素通りして効かない**（スプレッドは余分な props を弾かない）。
+   */
+  disabled?: boolean;
 }) {
   const isEmpty = value == null;
   // draft=null は非編集中（value を表示）。編集中は自由入力文字列を保持する。
@@ -73,6 +79,7 @@ export function NumberField({
       step={step}
       placeholder={placeholder}
       title={title}
+      disabled={disabled}
       style={inputStyle}
       value={shown}
       onFocus={() => setDraft(isEmpty ? "" : String(value))}

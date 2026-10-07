@@ -12,12 +12,19 @@
 | Project | `schemas/project.schema.json` | `project.json`（Asset/Part/Scene を内包） | 内部・永続 |
 | Template | `schemas/template.schema.json` | 見た目パターン定義 | 内部・取込 |
 | AiVideoPlan | `schemas/ai-video-plan.schema.json` | **AI出力**（内部Sceneとは別物） | 受信・一時 |
+| TimelineProject | `schemas/timeline-project.schema.json` | **タイムライン編集プロジェクト**の `project.json`（場面を持たない別形式・ADR-0032） | 内部・永続 |
 
-- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。**project は ADR-0011 で `"1.1"`**（`videoKind`/`generalBrief` の追加・`additionalNotes` を companyInfo→トップレベルへ移動）、**ADR-0012 で `"1.2"`**（`videoSettings.width/height` を撤廃し `aspectRatio` を寸法の単一の真実に・`aspectRatio` に `9:16` を追加＝後方互換のマイナー）、**フォント選択で `"1.3"`**（`videoSettings.fontId`＝同梱フォントの id を追加・任意・後方互換のマイナー）、**標準BGM選択で `"1.4"`**（`bgmSettings.bundledBgmId`＝同梱BGMの id を追加・任意・後方互換のマイナー）、**場面ごとのフォントで `"1.5"`**（`scene.fontId`＝場面のフォントの id を追加・任意・null/未指定は動画全体を継承・後方互換のマイナー）、**FREE 図形の拡張で `"1.6"`**（freeLayout shape の `shapeType` に `rounded_rect`/`triangle`/`star`/`arrow`/`speech_bubble` を追加し `strokeColor`/`strokeWidth`＝枠線を追加・いずれも任意・後方互換のマイナー＝#173）、**テキストごとのフォントで `"1.7"`**（`FreeElement.fontId`＝FREE/パーツのテキスト要素ごと＋`scene.textFontIds`＝textKey 別のフォント上書きを追加・いずれも任意・後方互換のマイナー＝#178）、**掛け合いで `"1.8"`**（`scene.lines`＝NarrationLine[] のセリフ列＋`scene.subtitleEnabledDefault` を追加・いずれも任意・null/未指定は継承・`narration` 残置・後方互換のマイナー＝ADR-0015/#180）、**FREE 要素の回転で `"1.9"`**（`FreeElement.rotation`＝度・0以上360未満・任意・未指定=回転なし・後方互換のマイナー＝#208）、**FREE text の体裁で `"1.10"`**（`lineHeight`＝行間倍率0.5〜3＋`textAlign`＝揃え left/center/right を追加・縁取りは既存 `strokeColor`/`strokeWidth` を text にも適用・いずれも任意・後方互換のマイナー＝#209）、**FREE 要素の非表示/ロックで `"1.11"`**（`hidden`＝非表示・`locked`＝ロックを追加・いずれも任意・後方互換のマイナー＝レイヤー一覧・#210）、**掛け合いの行ごとの抑揚で `"1.12"`**（`NarrationLine.intonation`＝抑揚0.0〜2.0 を追加・任意・null/未指定は場面/動画の既定を継承・後方互換のマイナー＝#242）、**場面ごとの画像の収め方で `"1.13"`**（`scene.slotFits`＝スロット別の収め方上書き object を追加・任意・未指定はテンプレ層の `fit` を使用・後方互換のマイナー＝④）、**要素のグループ化で `"1.14"`**（`scene.groups`＝要素のグループ化（`Group[]`・自前 transform を持つ独立オブジェクト・ネスト可）を追加・任意・未指定＝グループ無し・後方互換のマイナー＝ADR-0022）、**場面横断タイムラインで `"1.15"`**（`timelineOverlay`＝場面横断タイムラインの上位編集〔場面アンカー＋絶対時間の `OverlayClip[]`。まず telop トラック〕を追加・任意・未指定＝場面射影のみ・後方互換のマイナー＝ADR-0018）、**場面ごとのBGMで `"1.16"`**（`scene.bgmSettings`＝場面のBGM設定〔`BgmSettings`〕を追加・任意・未指定＝プロジェクト既定〔`bgmSettings`〕を継承〔null=継承〕・`enabled:false` でこの場面は無音・後方互換のマイナー＝ADR-0018 ③(7)）、**要素アニメーション（キーフレーム）で `"1.17"`**（`timelineOverlay.animations`＝`ElementAnimation[]`〔場面内の1要素を時間で補間・FREE 要素／グループ id が対象・timelineOverlay 格納ゆえ AI/場面正準は不変〕を追加・任意・未指定＝アニメ無し＝静止・後方互換のマイナー＝ADR-0019 ④）、**動画スロット再生開始タイミングで `"1.18"`**（`scene.slotVideoStart`＝スロット別の再生開始モード〔`{ mode: withAnim/afterAnim/delay, delaySec? }`〕を追加・任意・未指定＝`withAnim`＝アニメと同時・スロット本体アニメ場面でのみ有効・後方互換のマイナー＝ADR-0027・#444）、**動画クリップ調整の per-use 上書きで `"1.19"`**（`scene.slotClips`＝スロット別のクリップ上書き〔`startSec`/`endSec`/`speed`/`useOriginalAudio`/`originalAudioVolume`。`fit` は除く＝`slotFits` が担う〕を追加・任意・未上書きフィールドは `asset.clip` を継承・後方互換のマイナー＝ADR-0028・#472）、**FREE 字幕要素で `"1.20"`**（`FreeElement.kind` に `subtitle`＝自由配置の字幕要素を追加し、`FreeElement.subtitleSource`＝字幕の対象〔`{kind:'narration'}`＝読み上げ `texts.subtitle`／`{kind:'allLines'}`＝掛け合いの全行／`{kind:'speaker', speaker}`＝特定の実効話者〕を追加・いずれも任意・**未指定＝後方互換**〔単独→読み上げ・掛け合い→全行へ無変換解決〕・後方互換のマイナー＝ADR-0029・#521）、**掛け合いの同時開始で `"1.21"`**（`NarrationLine.startWithPrevious`＝直前の行と**同時に**開始〔並行して重ねて流す・`true` の連続で N 人同時〕を追加・任意・未指定/`false`＝逐次〔従来どおり〕・`startSec` を保存しないので **V18〔重なり禁止〕に触れない**・後方互換のマイナー＝ADR-0031・#530）、**FREE 要素の任意表示名で `"1.22"`**（`FreeElement.name`＝重ね順一覧/選択チップの見分け用の任意表示名〔全 kind 共通。**テンプレの `Layer` に同等のフィールドは無い**＝テンプレ作成の一覧は種別名＋差し込み先で見分ける・#547 P2-4〕を追加・任意・**未指定＝種類＋連番の自動名にフォールバック**・後方互換のマイナー＝#525-12）、**FREE 字幕/文字の背景帯で `"1.23"`**（`FreeElement.background`＝FREE の text/subtitle 要素の背景帯〔可読性の下地・`{enabled?,color?,opacity?,radius?}`・通常字幕層 `layer.background` と同型〕を追加・任意・**未指定/`enabled:false`＝背景帯なし**・通常→FREE 化で移送〔ADR-0030〕・後方互換のマイナー＝#529）、**文字の体裁の場面別上書きで `"1.24"`**（`scene.textStyles`＝テキスト種別ごとの体裁上書き〔`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`・`$defs/TextStyle`・制約は Layer/FreeElement の同名プロパティと同一〕を追加・任意・**各プロパティ未指定＝テンプレ層→既定を継承**〔触ったものだけ固有値〕・**配置/座標はテンプレ駆動のまま**〔§2-4 の対象は配置＝体裁は対象外・`textFontIds` と同型の前例踏襲〕・AI は生成しない〔利用者編集専用〕・後方互換のマイナー＝#555）。template は `aspectRatio` に `9:16` を追加（enum 追加＝非破壊で `"1.0"` 据え置き）、さらに Layer に `strokeColor`/`strokeWidth`＝text/subtitle の縁取りを追加（任意・後方互換のマイナー＝#275。template はマイグレーション機構を持たず、非破壊の追加は版を上げない方針＝aspectRatio 9:16 と同じ。さらに `template.groups`＝要素のグループ化（ADR-0022）と Layer の `rotation`＝回転（0以上360未満・FreeElement と同仕様・#307）も任意追加で版据え置き）。ai-video-plan は **`narrationLines`（掛け合い・任意追加）を加えても後方互換ゆえ `"1.0"` 据え置き**（AI出力は transient で永続化/migration 不要・optional 追加のため版を上げない＝ADR-0015 PR-G/#180）。
-  - 移行: 既存 `"1.0"`〜`"1.6"` の project.json は読込時に `"1.7"` へ更新（`videoKind` 省略＝recruit 既定、`companyInfo.additionalNotes` をトップレベル `additionalNotes` へ移送、`videoSettings.width/height` を除去、`videoSettings.fontId` 未指定は既定フォントを補完、未知の `bgmSettings.bundledBgmId` は標準BGM未選択へ落とす、未知の `scene.fontId` は継承（未指定）へ落とす。`"1.5"`→`"1.6"` は FREE 図形種別・枠線の追加のみで版番号の付け替え以外の変換は不要＝#173。`"1.6"`→`"1.7"` はテキストごとのフォント追加のみで変換不要＝#178。`"1.7"`→`"1.8"` は掛け合い（`scene.lines`/`subtitleEnabledDefault`）の任意追加のみで変換不要＝ADR-0015/#180。`"1.8"`→`"1.9"` は FREE 要素の回転（`FreeElement.rotation`）の任意追加のみで変換不要＝#208。`"1.9"`→`"1.10"` は FREE text の体裁（`lineHeight`/`textAlign`）の任意追加のみで変換不要＝#209。`"1.10"`→`"1.11"` は FREE 要素の `hidden`/`locked` の任意追加のみで変換不要＝#210。`"1.11"`→`"1.12"` は `NarrationLine.intonation` の任意追加のみで変換不要＝#242。`"1.12"`→`"1.13"` は `scene.slotFits` の任意追加のみで変換不要＝④）。
+> TimelineProject の版：初期 `"1.0"`（#627）→ **`"1.1"`**（読み上げクリップ＝`kind:'voice'` ＋ `voice`、テンプレクリップの `textFontIds`/`character`/`slotClips` を追加＝いずれも任意追加・後方互換のマイナー・#628 模型）→ **`"1.2"`**（字幕クリップの `voiceClipId`＝連動する読み上げ・#633）→ **`"1.3"`**（`crop`＝切り抜き・#634）→ **`"1.4"`**（`cropAlign`＝素材の寄せ・#634）→ **`"1.5"`**（`cropMode`＝切り抜いた素材を枠いっぱいに映し直す・#634）→ **`"1.6"`**（`$defs/Keyframe.easing` の値域拡大＝自由なカーブ・#262。共有 `$defs` の拡張なので project 1.25 と同時）→ **`"1.7"`**（`volumePoints`＝音量の変化・#512）→ **`"1.8"`**（`useOriginalAudio`/`originalAudioVolume`＝動画の元の音・#512 段2）→ **`"1.9"`**（`letterSpacing`＝字間・`shadow`＝文字の影・`background` を `TextStyle` にも＝#264。**`shadow` は `$ref` 共有・`letterSpacing` と `background` は同じ形の写し**なので project **1.27** と同時に足した（α-6 出口監査 🟡で是正＝1.26 は #261 の持ち込みフォント。写しかどうかを取り違えていたのを `/canon-check` 🟡 で実態に合わせた＝写しは `validate-schemas` の**形の一致検査**で固定してある））→ **`"1.10"`**（`videoSettings.audioAuto`＝音の自動処理・#257/#259。**共有 `$defs/VideoSettings` の拡張なので project 1.29 と同時**。読込時に前の版の文書へ「しない」を書き込むのも場面形式と同じ）→ **`"1.11"`**（`markers`＝**目印**・#356 ①。時間の一点に印とメモを置くだけで、**動画には出ない**〔描画にも書き出しにも現れない＝作業用〕。⚠️ **この形式だけの語彙**＝場面形式には足さない〔ADR-0032 の凍結＝時間軸の道具はこちらに持つ〕ので、`project` の版は動かない）→ **`"1.12"`**（色の調整 `colorAdjust`・描画モード `blendMode`＝ADR-0044）→ **`"1.13"`**（動画の長さの上限 600→1800 秒＝共有 `$defs/VideoSettings`・ADR-0045・project 1.30 と同時）→ **`"1.14"`**（素材の「AI解析」の書き手 `aiDescriptionAuthor`＝共有 `$defs/Asset`・#1317・project 1.31 と同時）→ **`"1.15"`**（キーフレームの「止める」`hold`＝共有 `$defs/Keyframe`・#1365・project 1.32 と同時）→ **`"1.16"`**（喋っている間の動き `talkMotion`＝この形式だけ・ADR-0056・#1367）。**現行は `"1.16"`**（`§7.6` と一致）。いずれも**任意追加または値域の拡大だけ**＝変換不要の後方互換マイナーで、`migrateTimelineProject` は版だけ上げる。
+
+- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。**project は ADR-0011 で `"1.1"`**（`videoKind`/`generalBrief` の追加・`additionalNotes` を companyInfo→トップレベルへ移動）、**ADR-0012 で `"1.2"`**（`videoSettings.width/height` を撤廃し `aspectRatio` を寸法の単一の真実に・`aspectRatio` に `9:16` を追加＝後方互換のマイナー）、**フォント選択で `"1.3"`**（`videoSettings.fontId`＝同梱フォントの id を追加・任意・後方互換のマイナー）、**標準BGM選択で `"1.4"`**（`bgmSettings.bundledBgmId`＝同梱BGMの id を追加・任意・後方互換のマイナー）、**場面ごとのフォントで `"1.5"`**（`scene.fontId`＝場面のフォントの id を追加・任意・null/未指定は動画全体を継承・後方互換のマイナー）、**FREE 図形の拡張で `"1.6"`**（freeLayout shape の `shapeType` に `rounded_rect`/`triangle`/`star`/`arrow`/`speech_bubble` を追加し `strokeColor`/`strokeWidth`＝枠線を追加・いずれも任意・後方互換のマイナー＝#173）、**テキストごとのフォントで `"1.7"`**（`FreeElement.fontId`＝FREE/パーツのテキスト要素ごと＋`scene.textFontIds`＝textKey 別のフォント上書きを追加・いずれも任意・後方互換のマイナー＝#178）、**掛け合いで `"1.8"`**（`scene.lines`＝NarrationLine[] のセリフ列＋`scene.subtitleEnabledDefault` を追加・いずれも任意・null/未指定は継承・`narration` 残置・後方互換のマイナー＝ADR-0015/#180）、**FREE 要素の回転で `"1.9"`**（`FreeElement.rotation`＝度・0以上360未満・任意・未指定=回転なし・後方互換のマイナー＝#208）、**FREE text の体裁で `"1.10"`**（`lineHeight`＝行間倍率0.5〜3＋`textAlign`＝揃え left/center/right を追加・縁取りは既存 `strokeColor`/`strokeWidth` を text にも適用・いずれも任意・後方互換のマイナー＝#209）、**FREE 要素の非表示/ロックで `"1.11"`**（`hidden`＝非表示・`locked`＝ロックを追加・いずれも任意・後方互換のマイナー＝レイヤー一覧・#210）、**掛け合いの行ごとの抑揚で `"1.12"`**（`NarrationLine.intonation`＝抑揚0.0〜2.0 を追加・任意・null/未指定は場面/動画の既定を継承・後方互換のマイナー＝#242）、**場面ごとの画像の収め方で `"1.13"`**（`scene.slotFits`＝スロット別の収め方上書き object を追加・任意・未指定はテンプレ層の `fit` を使用・後方互換のマイナー＝④）、**要素のグループ化で `"1.14"`**（`scene.groups`＝要素のグループ化（`Group[]`・自前 transform を持つ独立オブジェクト・ネスト可）を追加・任意・未指定＝グループ無し・後方互換のマイナー＝ADR-0022）、**場面横断タイムラインで `"1.15"`**（`timelineOverlay`＝場面横断タイムラインの上位編集〔場面アンカー＋絶対時間の `OverlayClip[]`。まず telop トラック〕を追加・任意・未指定＝場面射影のみ・後方互換のマイナー＝ADR-0018）、**場面ごとのBGMで `"1.16"`**（`scene.bgmSettings`＝場面のBGM設定〔`BgmSettings`〕を追加・任意・未指定＝プロジェクト既定〔`bgmSettings`〕を継承〔null=継承〕・`enabled:false` でこの場面は無音・後方互換のマイナー＝ADR-0018 ③(7)）、**要素アニメーション（キーフレーム）で `"1.17"`**（`timelineOverlay.animations`＝`ElementAnimation[]`〔場面内の1要素を時間で補間・FREE 要素／グループ id が対象・timelineOverlay 格納ゆえ AI/場面正準は不変〕を追加・任意・未指定＝アニメ無し＝静止・後方互換のマイナー＝ADR-0019 ④）、**動画スロット再生開始タイミングで `"1.18"`**（`scene.slotVideoStart`＝スロット別の再生開始モード〔`{ mode: withAnim/afterAnim/delay, delaySec? }`〕を追加・任意・未指定＝`withAnim`＝アニメと同時・スロット本体アニメ場面でのみ有効・後方互換のマイナー＝ADR-0027・#444）、**動画クリップ調整の per-use 上書きで `"1.19"`**（`scene.slotClips`＝スロット別のクリップ上書き〔`startSec`/`endSec`/`speed`/`useOriginalAudio`/`originalAudioVolume`。`fit` は除く＝`slotFits` が担う〕を追加・任意・未上書きフィールドは `asset.clip` を継承・後方互換のマイナー＝ADR-0028・#472）、**FREE 字幕要素で `"1.20"`**（`FreeElement.kind` に `subtitle`＝自由配置の字幕要素を追加し、`FreeElement.subtitleSource`＝字幕の対象〔`{kind:'narration'}`＝読み上げ `texts.subtitle`／`{kind:'allLines'}`＝掛け合いの全行／`{kind:'speaker', speaker}`＝特定の実効話者〕を追加・いずれも任意・**未指定＝後方互換**〔単独→読み上げ・掛け合い→全行へ無変換解決〕・後方互換のマイナー＝ADR-0029・#521）、**掛け合いの同時開始で `"1.21"`**（`NarrationLine.startWithPrevious`＝直前の行と**同時に**開始〔並行して重ねて流す・`true` の連続で N 人同時〕を追加・任意・未指定/`false`＝逐次〔従来どおり〕・`startSec` を保存しないので **V18〔重なり禁止〕に触れない**・後方互換のマイナー＝ADR-0031・#530）、**FREE 要素の任意表示名で `"1.22"`**（`FreeElement.name`＝重ね順一覧/選択チップの見分け用の任意表示名〔全 kind 共通。**テンプレの `Layer` に同等のフィールドは無い**＝テンプレ作成の一覧は種別名＋差し込み先で見分ける・#547 P2-4〕を追加・任意・**未指定＝種類＋連番の自動名にフォールバック**・後方互換のマイナー＝#525-12）、**FREE 字幕/文字の背景帯で `"1.23"`**（`FreeElement.background`＝FREE の text/subtitle 要素の背景帯〔可読性の下地・`{enabled?,color?,opacity?,radius?}`・通常字幕層 `layer.background` と同型〕を追加・任意・**未指定/`enabled:false`＝背景帯なし**・通常→FREE 化で移送〔ADR-0030〕・後方互換のマイナー＝#529）、**文字の体裁の場面別上書きで `"1.24"`**（`scene.textStyles`＝テキスト種別ごとの体裁上書き〔`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`・`$defs/TextStyle`・制約は Layer/FreeElement の同名プロパティと同一〕を追加・任意・**各プロパティ未指定＝テンプレ層→既定を継承**〔触ったものだけ固有値〕・**配置/座標はテンプレ駆動のまま**〔§2-4 の対象は配置＝体裁は対象外・`textFontIds` と同型の前例踏襲〕・AI は生成しない〔利用者編集専用〕・後方互換のマイナー＝#555）、**キーフレームの動き方で `"1.25"`**（`$defs/Keyframe.easing` に名前つき `ease-in`/`ease-out` と**自由なカーブ**〔`{bezier:[x1,y1,x2,y2]}`＝CSS の `cubic-bezier`〕を追加＝**値域の拡大のみ**・任意・未指定＝`linear`・変換不要の後方互換マイナー＝#262。**共有 `$defs` の拡張なので `timeline-project` も同時に `"1.6"` へ**〔下記〕・**書き込むのはタイムライン形式だけ**で場面形式の画面は名前つき2値のまま＝ADR-0032 の凍結に触れない）、**持ち込みフォントで `"1.26"`**（フォントの id を**enum から形（pattern）へ開く**＝同梱3つに加えて `user_font_NNN` を許す・`$defs/FontId`・`$defs/FontIdOrNull` を新設して**8か所すべてが同じ定義を指す**〔`videoSettings.fontId`／`Scene.fontId`／`Scene.textFontIds` の5種別／`FreeElement.fontId`〕・**値域の拡大だけ＝変換不要の後方互換マイナー**＝ADR-0038・#261。⚠️ **フォントの実体は `appData/user_fonts/` にありプロジェクトには入らない**＝アプリが**再配布経路にならない**ようにする〔`13 §6`〕。素材〔ADR-0035〕がコピーするのは自己完結のためだが、フォントは**理由が逆でコピーしない**。⚠️ **焼き出しもフォントを運ばない**〔同じPCの中の操作〕。⚠️ **`timeline-project` も同時にバンプすべきだった**〔α-6 出口監査 🟡1 で判明＝当時は「`$ref` 共有なので追従不要」と書いていたが、**§1 の規則（共有 `$defs` を変えたら参照する全形式を同時にバンプ）に反する**。⚠️ **α-6 は未リリースで、timeline はその後 `"1.10"` まで上がっている**ので実データの問題は無い。追従していること自体は `validate-schemas` の `tlAccept` で固定した〕）、**文字の体裁の仕上げで `"1.27"`**（`FreeElement`／`$defs/TextStyle` に **`letterSpacing`＝字間**〔**em**＝文字サイズに対する割合。サイズを変えても詰め具合が変わらない。−0.5〜2・未指定＝0〕と **`shadow`＝文字の影**〔`$defs/TextShadow`＝`{enabled?,color?,opacity?,blur?,dx?,dy?}`・`enabled` のときだけ描く〕を追加し、**`background`＝背景帯を `TextStyle` にも**足して文字にも一般化・いずれも任意・**未指定＝影なし・字間0・帯なし＝従来の出力は不変**・後方互換のマイナー＝#264。⚠️ **ADR-0032 追補3 の「共有の語彙」**＝両形式に効く。⚠️ **`timeline-project.schema.json` は `$ref` と写しが混ざっている**ので**そちらにも同時に足す**（`shadow`・`fontId` は `$ref`／`letterSpacing`・`background`・`strokeWidth` は写し＝写しは片方だけになりやすい。写しの形は `validate-schemas` の `copySets` が突き合わせる。`validate-schemas` の must-accept/must-reject で両方に効いていることを固定した）。⚠️ **帯を文字にも描くようにしたので、「バラす」（`faithful`）も帯を写す**＝写さないと前後で絵が変わる〔ADR-0032 決定23〕）、**クレジットの見せ方で `"1.28"`**（`videoSettings.creditDisplay`＝`{mode?,seconds?}`〔`mode`＝`always`/`head`/`tail`/`both`/`hidden`・`seconds`＝1〜10〕を追加・任意・**未指定＝最初と最後・3秒**〔ADR-0025 の事業側決定＝ADR-0003「常時表示・OFF なし」を一部 supersede・`13 §4`〕・**変換不要の後方互換マイナー**＝ADR-0025・#359。⚠️ **About 画面のクレジットは必須で不変**（動画に焼く側だけが選べる）。⚠️ **`timeline-project` も同時にバンプすべきだった**〔α-6 出口監査 🟡1〕＝`videoSettings` は `$ref` 共有（`project.schema.json#/$defs/VideoSettings`）なので**足した瞬間に両形式へ効く**が、**効くからこそ版も揃える**のが §1 の規則（片方だけ上げると「開ける版」が形式ごとにずれる）。⚠️ **α-6 は未リリースで、timeline はその後 `"1.10"` まで上がっている**ので実データの問題は無い。⚠️ **`$ref` と写しの線引きに注意**＝共有しているのは**トップレベルの入れ物**（`videoSettings`／`voiceSettings`／`assets`／`groups`／`Keyframe` ほか `$defs`）で、**部品の形（`FreeElement` 相当）は写し**（#264 の `letterSpacing`/`shadow`/`background` はそちらなので両方に足した）。どちらかは `timeline-project.schema.json` を見て決める（推測しない）。⚠️ **判定はプレビューと書き出しで共有する**＝場面形式は `sceneCreditVisibility`・タイムライン形式は `creditTextAt`〔§7.1.1・`15 §3`〕）、**音の自動処理で `"1.29"`**（`videoSettings.audioAuto`＝`{duckBgm?,duckDepth?,duckAttackSec?,duckReleaseSec?,normalize?,targetLufs?}` を追加・任意・**新規は既定で「する」／読み込んだ古い動画には読込時に「しない」を書き込む**〔⚠️ **版で絞る**＝既定値を書かないので、版を見ないと現行版の文書も「しない」に化ける・α-6 出口監査 🔴2〕〔既に作った動画の音を変えない＝§2-5〕・ADR-0032 追補4・#257/#259。⚠️ **`Scene` には足さない**＝「書き出し時の処理」なので凍結3 に触れない。**場面ごとのダッキング設定は作らない**ので `BgmSettings` ではなく `videoSettings` に置く〔`BgmSettings` は場面にも生えているため〕。⚠️ **`VideoSettings` は共有 `$defs`** なので `timeline-project` も同時に `"1.10"` へ）、**動画の長さの上限で `"1.30"`**（`videoSettings.maxDurationSec` の上限を **600→1800 秒（30分）**へ広げる＝ADR-0045・2026-09-18 利用者判断・#1205。⚠️ **値域の拡大だけ＝変換不要の後方互換マイナー**〔古い文書はそのまま読める〕。⚠️ **`timeline-project` も同時に `"1.13"` へ**＝`maxDurationSec` は共有 `$defs/VideoSettings` の一部で、`timeline-project.schema.json` が `$ref` で共有している。**`$ref` で自動的に効くことは、版を揃えない理由にならない**〔§1 の規則。先例＝`$defs/Keyframe.easing` の値域拡大 1.24→1.25／1.5→1.6・`$defs/VideoSettings` の拡張 1.28→1.29／1.9→1.10〕。⚠️ **当初 ADR-0045 は「版を上げない」と書いていたが誤りで、レビューで正した**〔「変換不要」は**マイナーで済む**理由であって、上げない理由ではない〕）、**素材の「AI解析」の書き手で `"1.31"`**（`Asset.aiDescriptionAuthor`＝`ai`/`user`・#1317。任意追加＝**無変換**。⚠️ **`$defs/Asset` は timeline-project も共有**＝同時に `"1.14"` へ）、**キーフレームの「止める」で `"1.32"`**（`Keyframe.easing` に `hold`・#1365。値域の拡大だけ＝**無変換**。⚠️ **`$defs/Keyframe` は timeline-project も共有**＝同時に `"1.15"` へ）。template は `aspectRatio` に `9:16` を追加（enum 追加＝非破壊で `"1.0"` 据え置き）、さらに Layer に `strokeColor`/`strokeWidth`＝text/subtitle の縁取りを追加（任意・後方互換のマイナー＝#275。template はマイグレーション機構を持たず、非破壊の追加は版を上げない方針＝aspectRatio 9:16 と同じ。さらに `template.groups`＝要素のグループ化（ADR-0022）と Layer の `rotation`＝回転（0以上360未満・FreeElement と同仕様・#307）も任意追加で版据え置き）。ai-video-plan は **`narrationLines`（掛け合い・任意追加）を加えても後方互換ゆえ `"1.0"` 据え置き**（AI出力は transient で永続化/migration 不要・optional 追加のため版を上げない＝ADR-0015 PR-G/#180）。
+  - 移行: **実際に変換が要る版だけ**を挙げる（版番号の付け替えだけで済む追加はここに書かない＝**一覧の単一の参照元は `persistence.ts` の `PROJECT_SCHEMA_VERSION` の docstring**・#513）。⚠️ **以前ここに `"1.0"`〜`"1.6"` の一覧を写しており、6版ぶん置き去りになっていた**（α-6 出口監査 ℹ️9）。変換が要るのは＝`companyInfo.additionalNotes` をトップレベルへ移送（1.0→1.1）／`videoSettings.width/height` を除去（1.1→1.2）／`videoSettings.fontId` の補完（1.2→1.3）／未知の `bgmSettings.bundledBgmId` を標準BGM未選択へ（1.3→1.4）／未知の `scene.fontId` を継承へ（1.4→1.5）／**`videoSettings.audioAuto` に「しない」を書き込む（1.28→1.29・**1.29 より前の文書だけ**＝`PROJECT_AUDIO_AUTO_SINCE`。⚠️ 以前は「現行と違う版」で見ていたので、**版を上げるたびに** 1.29 以降の未指定の動画まで「しない」に化けていた＝PR #1368 レビュー。タイムライン形式は **1.10 より前**＝`TIMELINE_AUDIO_AUTO_SINCE`）**。ほかは任意追加か値域の拡大だけ。
+- **形式の判別（ADR-0032・#627）**: `project.json` の**トップレベル `format`** で決める。判定は **`format === "timeline"` か否か**の一点＝`"timeline"` ならタイムライン形式（`timeline-project.schema.json` で検証）、**それ以外（＝未指定）は場面形式**（`project.schema.json`）。**場面形式のファイルは `format` を書かない**（不在がそのまま「場面形式」を意味する＝既存データと同じ形。`project.schema` はトップレベル `additionalProperties:false` なので `format` を持つ場面形式ファイルは**検証を通らない**＝実装は書き込んではならない。CI の must-reject で固定）。`ProjectFormat` の `"scene"` は**読込時の解決値**（`resolveProjectFormat`）であって**永続化しない**。この非対称は意図的で、場面形式は ADR-0032 で凍結されており、情報量ゼロのフィールド追加のために `project.schema` を版上げしないため。`projectId` の採番は**両形式で共通**（`proj_YYYYMMDD_NNN`・一覧に同列で並ぶ）＝**id では判別しない**。timeline-project の `schemaVersion` は**場面形式とは独立に進む**（別文書＝初期 `"1.0"`。場面形式の 1.x バンプは timeline に波及しない、逆も同じ）。**ただし共有している `$defs` そのものを変えたときは、参照するすべての形式を同時にバンプする**（⚠️ **`$ref` で自動的に効くことは、版を揃えない理由にならない**＝α-6 で2回この取り違えをした〔#261・#359〕。**効くからこそ揃える**）（片方だけ上げると、同じ `$def` を指しているのに「開ける版」が形式ごとにずれる）。実例＝`$defs/Keyframe.easing` の拡張で **project `"1.25"` ＝ timeline `"1.6"`**（#262）。**`$defs/VideoSettings` の拡張で project `"1.29"` ＝ timeline `"1.10"`**（#257/#259）。**凍結側（場面形式）の版を上げてよい理由**＝共有 `$def` の値域が広がるだけで、場面形式の画面は新しい値を**書き込まない**（ADR-0032 の凍結は編集機能の話）。**素材・見た目設定・グループ・キーフレームは `project.schema.json` の `$defs` を `$ref` で共有する**（同梱フォント/同梱BGMの一覧も `$ref`＝増減を1か所で管理・`CLAUDE.md §2-7`）。**変換は片道**（場面→タイムラインへ焼き出して新規作成・元は残る）ゆえ、timeline→場面のマイグレーションは持たない。
 - **互換性方針**: マイナー（`1.x`）＝後方互換の追加のみ。メジャー（`2.0`）＝破壊的変更で、読込時にマイグレーション関数を通す。未知のメジャーは読込拒否しユーザー向けに告知。
 - **制約の是正（バンプ無し）**: schema の制約が**本書に文書化済みの契約と食い違っていた**場合、schema を本書へ合わせる修正は**版を上げない**（契約は元から本書のとおりで、追加でも破壊的変更でもない＝誤記の訂正）。条件＝①アプリの生成経路が新制約を既に満たす ②既存データが違反しても**読込は拒否されない**（範囲違反は非 structural＝`§8` V2・#416）こと。前例＝`scene.durationSec` を `minimum:0`→`exclusiveMinimum:0`（#586・`§7`）。①②が満たせない（既存データが読めなくなる/移行が要る）なら通常どおりメジャー＋マイグレーション。
+- **描き方の是正（バンプ無し）**: schema の形を変えず、**描き方の意味だけ**を直す場合（既にある動画の見た目が変わる）は版を上げない。ただし**利用者判断で見た目の変化を許したとき**に限り、ADR に影響を書く（前例＝#1371：大きさの変形を中身ごとに＝ADR-0019／0022 の追補）。既存の見た目を保つ必要があるときは、`audioAuto`（1.29）のように版で絞る。
 - 読込時、`schemaVersion` 不在 or 未対応なら検証エラー（`§8`）。
+- **条件付き必須（`if`/`then`/`else`・`allOf`）は一覧を固定する**（#961）: 「ある項目がこの値のときだけ別の項目が必須／禁止／値域が狭まる」という規則は、**作る側が schema を見ずに書ける**ので黙ってずれる（#959＝見た目パターン作成エディタが `slotType` を書かず、**保存はできるのに読み込みで却下され一覧から静かに消えた**）。テンプレの層は `requiredFieldsForLayerType` という**1つの表**があるので集合一致で守れるが（`layerOps.test.ts`）、**project / timeline は作る側が画面と domain の各所に散る**ので同じ形にできない。そこで `conditionalRequiredGuard.test.ts` が2つやる＝**①4つの schema を歩いて条件つきの規則を集め、控えとちょうど一致するかを見る**（増えた・消えた・条件が変わった、のどれでも赤くなる＝**増えたときに人が作る側を追う**）／**②規則を破った文書を組み立て、それを落とす検証関数へ通して落ちることを確かめる**。⚠️ **拾うのは `then` だけでなく `else` も**（`videoKind` は `then`＝general→`generalBrief` 必須と `else`＝general 以外→`companyInfo` 必須が**対で1つの規則**＝`then` だけ見ると `else` 側を消しても緑のまま通る）、さらに **`not.required`（排他）と `properties.<k>.enum`（値域の絞り込み）も拾う**（これらが変わるのも「条件が変わった」）。`dependentRequired`／`dependentSchemas`（同じ効果を持つ別の書き方）は**未使用であることを検査で固定**する（使い始めたときに黙って一覧から漏れない）。⚠️ **①は作る側までは追わない**（追えない）＝赤くなったら人が作る側を探し、必要なら守りを足してから控えへ足す。⚠️ **②は「門に置いてあること」を見ない**＝叩くのは検証の関数そのもので、保存の経路は通らない（置き場所の検査は `projectStore.test.ts`／`timelineStore.test.ts` が持つ＝控えの `gate` がその先を指す）。現在の規則は6つ（project 3・timeline 1・template 2）。⚠️ **`$ref` の先は追わない**（歩く関数の単純さを保つ）代わりに、**共有している定義に条件つきの規則が入った瞬間に赤くする**（`timeline-project` が `project` の `$defs` を指している節を解決して `if` が無いことを見る）＝入れてしまうと一覧には `project …` の1行としてしか出ず、**timeline 側の作る側を追う手がかりが出ない**。
+- **`project.json` の保存には「次に開けなくなる内容だけ」の門がある**（#974＝#416 の続き）: 読み込みは**型・必須の欠け**（`structural`）を拒否するので、それを書くと**保存はできたのに次に開けない**（#959 とまったく同じ形）。⚠️ **書かずに断る**＝書かなければ前に保存できていた内容がそのまま残るので、取り消して直せば続けられる（文言は `15 §6` `PROJECT_SAVE_WOULD_BREAK`＝**「もう一度」で直らないので、そう言わない**）。⚠️ **範囲違反（`structural` でない）は従来どおり警告だけ**＝読み込みは拒否しない（`§8` V2）ので、止めると**開ける動画を保存できなくする**ほうの害が出る。⚠️ **「いま不適合な文書を持っている利用者が保存できなくなる」は起きない**＝そういう文書は**そもそも開けない**（読み込みが拒否する）ので、保存の入口に来ない（#974 を起票した時点ではここを取り違えており、実装の前に確かめて分かった）。⚠️ **timeline とテンプレは前から止まる**＝3者の扱いがようやくそろった。
 
 ---
 
@@ -32,16 +39,26 @@
 | scene | `scene_{NNN}` | `scene_001` | プロジェクト内一意・3桁。作成順に採番（表示順は `order` が制御） |
 | freeLayout 要素 | `free_{NNN}` | `free_001` | **scene 内一意**・3桁（ADR-0008・FREE テンプレの自由配置要素） |
 | セリフ行 | `line_{NNN}` | `line_001` | **scene 内一意**・3桁以上（ADR-0015・掛け合いのセリフ列 `scene.lines`・#180） |
-| グループ | `group_{NNN}` | `group_001` | **scene/template 内一意**・3桁以上（ADR-0022・要素のグループ化 `scene.groups`/`template.groups`・空き番号を埋める gap-fill） |
-| overlay クリップ | `ovclip_{NNN}` | `ovclip_001` | **project 内一意**・3桁以上（ADR-0018・タイムラインの `timelineOverlay.clips`・gap-fill） |
+| グループ | `group_{NNN}` | `group_001` | **scene/template 内一意**・3桁以上（ADR-0022・要素のグループ化 `scene.groups`/`template.groups`・空き番号を埋める gap-fill）。**タイムライン形式（`doc.groups`）では文書内一意**＝場面の区切りが無いので範囲が広がる（`§8` V32・#811） |
+| overlay クリップ | `ovclip_{NNN}` | `ovclip_001` | 〜〜**新規に発行しない**（#635 で退役）〜〜 既存データに残っている id の形（ADR-0018・`timelineOverlay.clips`） |
+| トラック | `track_{NNN}` | `track_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。**配列の順が重ね順**（後ろほど手前）＝id の大小は重ね順と無関係 |
+| タイムラインのクリップ | `clip_{NNN}` | `clip_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。場面形式の `ovclip_NNN` とは**別物**（混在しない＝形式が違う） |
+| 目印 | `marker_{NNN}` | `marker_001` | **タイムライン形式のみ**（#356 ①）。**project 内一意**・3桁以上・gap-fill。⚠️ **番号は使い回してよい**＝素材と違い**ディスクに実体が無い**ので、使い回しても前の何かを潰さない |
+| アニメーション | `anim_{NNN}` | `anim_001` | **project 内一意**・3桁以上（ADR-0019 の `timelineOverlay.animations` ／ ADR-0032 の `animations`。両形式で同じ形式・gap-fill） |
 | asset | `asset_{NNN}` または `asset_{slug}_{NNN}` | `asset_office_001` | 一意。`^[a-z0-9_]+$` |
 | yuko asset | `yuko_{tag}_{NNN}` | `yuko_smile_001` | asset の一種（`assetType=yuko`） |
 | bgm asset | `bgm_{slug}_{NNN}` | `bgm_bright_001` | asset の一種（`assetType=bgm`） |
 | user template | `user_tmpl_{NNN}` | `user_tmpl_001` | **ユーザー作成テンプレの `templateId`**。**グローバル一意**（全プロジェクト横断）・3桁（999超は桁上がり）。`^[a-z0-9_]+$` 適合（`template.schema` 不変）。同梱テンプレは記述的id（`corp_title` 等）で名前空間が別＝接頭辞 `user_tmpl_` で判定（ADR-0017） |
 | テンプレ所有素材 | `tmpl_asset_{NNN}` | `tmpl_asset_001` | **テンプレが持つ既定素材の id**（ADR-0021）。**グローバル一意**（`user_templates/assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^tmpl_asset_[0-9]+$` 適合。`layer.assetId` から参照。**最大連番+1・番号再利用可**（テンプレ削除と同時に消える＝`user_tmpl_` の no-reuse とは別方針） |
+| ライブラリ素材 | `lib_asset_{NNN}` | `lib_asset_001` | **ユーザー素材ライブラリの素材 id**（ADR-0035）。**グローバル一意**（`user_assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^lib_asset_[0-9]{3,}$` 適合。⚠️ **`project.json` には現れない**＝取り込みは**コピー**で、プロジェクト側では `asset_NNN` を採番し直す（ADR-0024 決定6 の自己完結を守る＝`project.schema` 不変）。テンプレ所有素材（`tmpl_asset_`）とは**棚が別**（持ち主も寿命も違う） |
+| 持ち込みフォント | `user_font_{NNN}` | `user_font_001` | **利用者が取り込んだフォントの id**（ADR-0038・#261）。**グローバル一意**（`appData/user_fonts/`・全プロジェクトで共有）・3桁以上。⚠️ **gap-fill しない**（`scene`/`part` と別方針＝既存の最大＋1）。⚠️ **同じ規則が3か所にある**＝`USER_FONT_ID_RE`（domain）・`$defs/FontId` の pattern（schema）・`is_user_font_id`（Rust・パストラバーサル防止も兼ねる）。**片方だけ変えると保存できるのに読めない**ので、`USER_FONT_ID_SAMPLES` を使って両側のテストで突き合わせる。⚠️ **`project.json` には現れない**（`videoSettings.fontId` 等が値として持つだけ＝実体はアプリの外） |
 
 - ID は不変。リネーム時も ID は変えず `displayName` を変える。
 - AI出力JSON が参照する `assetId`/`templateId` は**既存のもののみ**有効（存在検証 §8）。
+- **`lib_asset_NNN` / `user_font_NNN` の採番も「最大連番+1・消した番号を使い回さない」**（`user_tmpl_NNN` と同じ理由）。⚠️ **採番の入力は「これまでに使った番号」**＝**一覧を渡してはならない**（一覧は**実体があるものだけ**を返すので、最大番号を外すと同じ番号が再発行され、その番号を指している動画が**黙って別の字体・別の素材**になる。フォントは id が解決してしまうため `USER_FONT_MISSING` も発火しない＝§2-5）。実装は目録に**墓標**（`removed: true`）を残し、`used_user_font_ids` / `used_library_asset_ids` が**外したものも含めて**返す（α-6 出口監査 🟡8）。
+- **採番の入力は「壊れた行の番号も拾う」**（差分再監査）＝目録の読みは形の合わない行を落とすので、そこから採ると**落ちた行の番号が再発行**され、墓標で塞いだ失敗が再現する。`used_*_ids` は**生のまま `id` だけ**を拾う（`raw_manifest_ids`）。
+- **目録の書き込みは不可分**（差分再監査）＝隣に書いてから名前を付け替える（`write_manifest_atomic`）。直に上書きすると、途中で止まったときに**半端な JSON や 0 バイト**が残る。
+- **目録（`fonts.json` / `library.json`）は「壊れた行だけ落とす」**＝丸ごと空にしない（α-6 出口監査 🟡19）。1行が壊れているだけで空にすると、次の書き込みが**棚を空で上書き**して覚え書きが全部消える。**配列ですら無いときは断る**（読めていないものを「空だった」と扱わない＝書き込みが走らないので壊れたファイルはそのまま残る）。
 - **`user_tmpl_NNN` の採番は scene/part と別方針**：scene/part は空き番号を埋める（gap-fill）が、ユーザーテンプレは**最大連番+1**（削除した番号を再利用しない）。別プロジェクトの `scene.templateId` 参照が後発の別テンプレに化けるのを防ぐため＝払い出し済み最大連番を永続層が保持（ADR-0017）。読込時に万一 ID 衝突があれば後勝ち＋ログ警告。
 
 ### 2.2 単位・型の規約
@@ -97,17 +114,22 @@
 
 `image` / `video` / `bgm` / `voice` / `yuko` / `decor` / `logo` / `qr`
 
+### 3.3b aiDescriptionAuthor（素材の「AI解析」を書いたのは誰か・#1317）
+
+`ai` / `user`
+
 ### 3.4 レンダリング系
 
 | enum | 値 |
 |---|---|
 | `layer.type` | `background` / `slot` / `text` / `subtitle` / `character` / `decor` / `shape` / `logo` |
-| `slotType` | `image_or_video` / `image` / `video` |
+| `slotType` | `image_or_video` / `image` / `video`（定数 `DEFAULT_SLOT_TYPE`＝`domain/template/layerOps.ts`・**`slot` 層では必須**〔`allOf`〕・欠落は読込時に `image_or_video` へ補正＝`§9`・#959） |
 | `fit` | `cover` / `contain` / `stretch` |
-| `textKey` | `title` / `main` / `subtitle` / `caption` / `url` |
+| `textKey` | `title` / `main` / `subtitle` / `caption` / `url`（定数 `DEFAULT_TEXT_KEY_TEXT`／`DEFAULT_TEXT_KEY_SUBTITLE`＝`domain/template/layerOps.ts`・**`text`/`subtitle` 層では必須**〔`allOf`〕・欠落は読込時に `text`→`title` / `subtitle`→`subtitle` へ補正＝`§9`・#959） |
 | `layer.shapeType`（テンプレ shape レイヤー＝`layer.type=shape`） | `rect` / `ellipse` / `line`（定数 `LAYER_SHAPE_TYPE`・未指定=`rect`） |
 | `transition`（MVP） | `none` / `fade` / `slide`（方向 `direction`: `left`/`right`/`up`/`down`）／（将来）`wipe` / `zoom`（ADR-0009） |
 | `videoStartMode`（動画スロット再生開始・ADR-0027） | `withAnim` / `afterAnim` / `delay`（定数 `VIDEO_START_MODE`・未指定=`withAnim`。`delay` のみ `delaySec`≥0 が必須） |
+| `creditMode`（クレジットの見せ方・ADR-0025） | `always` / `head` / `tail` / `both` / `hidden`（定数 `CREDIT_MODE`＝`domain/voice/creditDisplay.ts`・**未指定=`both`**＝最初と最後・`seconds` 未指定=3〔1〜10〕。`always`/`hidden` は `seconds` を見ない） |
 
 > **`shapeType` は2系統**：テンプレ Layer（上記・`rect`/`ellipse`/`line`＝定数 `LAYER_SHAPE_TYPE`）と、FREE 自由配置の `freeLayout` shape（`rect`/`ellipse`/`rounded_rect`/`triangle`/`star`/`arrow`/`speech_bubble`＝定数 `FREE_SHAPE_TYPE`・§7.4 freeLayout／schema 1.6）は**別系統**（テンプレは `line` を含み、FREE は装飾図形を含む）。実装はそれぞれの定数モジュール経由で参照（§2-7）。
 
@@ -116,7 +138,7 @@
 | enum | 値 |
 |---|---|
 | `narration.status`（音声生成） | `none` / `pending` / `generated` / `failed` |
-| `renderStatus` | `idle` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
+| `renderStatus` | `idle` / `preparing` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。`preparing` は保存先を選んでもらっている段（タイムライン形式・#631）＝**ここも走行中に数える**（ダイアログを開いている間に押し直しても二重に走らない）・まだ何も描いていないので進捗は出さない。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
 | `formality` | `casual` / `standard` / `formal` |
 | `voiceId` | `voicevox_zundamon`（既定）ほか。形式 `^[a-z0-9_]+$` |
 | `poseTag` | 自由文字列タグ（例 `smile` / `guide` / `bow` / `surprise` / `think` / `cheer`）。enum固定しない |
@@ -125,15 +147,30 @@
 
 ## 4. 定数カタログ（正典）
 
+> ⚠️ **ここに載るのは「意味の決めごと」**（尺・上限・採番・音量など、資料が言葉で説明している値）。**描画の既定値**（文字色・文字サイズ・行間・影/帯の既定など）は `src/domain/template/textStyle.ts` を単一の参照元とし、画面も描画もそこから採る（§2-7）＝二重管理にしないため、ここへは写さない。
+
 | 定数 | 値 | 用途 |
 |---|---:|---|
 | `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
 | `AI_SCENE_MAX_DURATION_SEC` | `15` | **AI 生成の目安**（上限の既定・テンプレ `aiHint.maxDurationSec` で上書き可）。手編集の制約ではない（#553） |
 | `SCENE_DEFAULT_DURATION_SEC` | `8` | 既定シーン尺 |
+| `NARRATION_CHARS_PER_SEC` | `7.5` | **同梱の AI の動画案で場面の尺を語りから計算する**ときの読み上げの速さの見積もり（字/秒）＝ADR-0052 段階1・`12 §8.7`。早口の判定（`precheckExtras` の 9 字/秒）より遅めに置く＝計算した尺が早口の判定に掛からない。**速さ 1.0（ふつう）のときの値**＝声の速さ設定（`11.6`）の倍率をかけて使う（`narrationCharsPerSec`・#1318）：同梱の AI の案は動画全体の速さ（`voiceSettings.speed`）、編集中の AI 補助の「表示時間に収める」はその場面で解決した速さ |
+| `NARRATION_SCENE_PADDING_SEC` | `1` | 同上の計算で語りの前後に置く間（秒）。⚠️ 上の速さと合わせて、編集の途中の AI 補助の「表示時間に収める」（`12 §10`・ADR-0053）でも使う |
+| `ASSIST_CANDIDATES` | `3` | **編集の途中の AI 補助**（`12 §10`・ADR-0053）で出す候補の数の上限 |
+| `ASSIST_TITLE_MAX_LENGTH` | `20` | 同上の「見出しの候補」の字数の上限 |
+| `ASSIST_SUBTITLE_TARGET_LENGTH` | `30` | 同上の「セリフから作る」（字幕）の字数の目安（見た目の `maxSubtitleLength` と短い方） |
+| `ASSIST_SHORTEN_RATIO` | `0.7` | 同上の「短く」の上限＝今の文の字数 × この割合 |
+| `ASSIST_MIN_LENGTH` | `8` | 同上で、上限がこれ未満なら頼まない（言い直しても意味が残らない） |
+| `ASSIST_VIDEO_TITLE_MAX_LENGTH` | `24` | 同上の「動画の名前の候補」の字数の上限（#1316） |
+| `ASSIST_VIDEO_SUMMARY_MAX_LENGTH` | `400` | 同上で、題名の材料（主題＋場面の語り）を AI に渡す字数の上限＝長い動画でも指示文を伸ばしすぎない |
+| `ASSET_DESCRIPTION_MAX_LENGTH` | `60` | **同梱の AI が写真に付ける説明**（`asset.aiDescription`）の字数の上限＝ADR-0052 決定4・`12 §4b`。動画案の指示文に素材ごとに載るので短く |
+| `ASSET_AI_TAGS_MAX` | `5` | 同上で付けるタグの数の上限 |
+| `ASSET_AI_TAG_MAX_LENGTH` | `12` | 同上のタグ1つの字数の上限 |
+| `ASSET_MATCH_MIN_SCORE` | `0.2` | **写真・動画を場面へソフトが当てる**とき（`12 §8.8`）、これ未満の言葉の重なり（0〜1）は「自信が低い」＝印（`ASSET_AUTO_ASSIGNED`）を付ける |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
-| `VIDEO_HARD_MAX_SEC` | `600` | 将来含むハード上限（10分） |
-| `MAX_SCENES_PER_VIDEO` | `80` | シーン数の異常検知上限 |
+| `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |
+| `MAX_SCENES_PER_VIDEO` | `80` | **場面の数の上限**。⚠️ **どの道でも本当の上限**（#1222）＝手で足す道（足す・複製・分ける×2）も、**AI の動画案を取り込むとき**も `projectStore` の同じ関門（`canAddScenes`）を通る。⚠️ **AI の道だけ「警告どまり」だった**（#1213 の時点）＝**同じ定数なのに道で強さが違う**状態を #1222 で解消した。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `scenes.maxItems`（門番＝`src/test/canonConstantsGuard.test.ts`） |
 | `FPS` | `30` | 既定フレームレート |
 | `WIDTH` × `HEIGHT` | `1920` × `1080` | 既定解像度 |
 | `NARRATION_VOLUME` | `1.0` | ナレーション既定音量 |
@@ -145,6 +182,7 @@
 | `STROKE_COLOR_ON_DARK` | `#ffffff` | 縁取り/枠線の既定色（**暗い下地**のとき）＝#275/#565 |
 | `STROKE_COLOR_ON_LIGHT` | `#000000` | 縁取り/枠線の既定色（**明るい下地**のとき）＝#565 |
 | `SHAPE_FILL_FALLBACK_COLOR` | `#ffffff` | 図形の `fillColor` 未指定時に**描く**色（新規作成の既定色とは別＝古いデータ向けの描画フォールバック） |
+| `DEFAULT_BACKGROUND_COLOR` | `#ffffff` | 見た目パターンが `defaults.backgroundColor` を持たないときの下地（描画と「バラす」で共有＝`domain/constants`） |
 
 **秒の格子（`SEC_STEP`・#561）**：**秒（実数）が正準**（ADR-0023）で、0.1 の格子は
 **入力欄の刻み・表示の丸め・場面分割の按分**にだけ使う（`quantizeSec` が単一の参照元＝欄の値と表示が食い違わない）。
@@ -174,6 +212,14 @@
 
 **規則**
 - **描画・実効使用の条件**: テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合に**含まれるキーだけ**が描かれ、「使用中の素材」に数えられる（`layoutScene` は層を辿って描く／`sceneActiveAssetIds`）。**保存データはこれを超えるキーを持ちうる**＝見た目を切り替えたとき差し込み先を失った割当は**休眠として残す**（ADR-0030 追補6・#547 P3-14。下の「切替時の保持」参照）。
+- ⚠️ **「素材が使われているか」には規則が2つあり、目的が違う**（#348）。**片方に寄せない**。
+
+  | 問い | 規則 | 使う場所 | 休眠は |
+  |---|---|---|---|
+  | **動画に出るか** | `sceneActiveAssetIds`（見た目の層でゲート） | 公開前チェックの「使っていない素材」・削除確認の「使用場面」・逆引き・焼き出し | **数えない**（出ないので） |
+  | **消してよいか** | `referencedAssetIds`（ゲートなし・BGM も含む） | まとめて消す（#348）の対象選び | **数える**（見た目を戻せば出る） |
+
+  **寄せると壊れる**＝前者へ寄せると**休眠の素材をファイルごと消させる**（`assets` は履歴の外＝ADR-0020/0028 で取り消せず、切替で戻したときに空欄になる＝上の「切替時の保持」の約束が破れる）。後者へ寄せると**動画に出ていない素材の警告が出なくなる**。前者は「そのままでよい」警告なので多少ずれても実害が無く、後者は**間違えると取り返しがつかない**ので安全側へ倒す、という非対称がそのまま規則の違いになっている。
 - 値が `null`/未指定: テンプレ既定素材（`layer.assetId`）があればそれを表示（ADR-0021・場面素材が優先・無ければテンプレ既定へ委譲）。無ければ レイヤー `required=false` → 非表示、`required=true` → 検証警告（§8）。
 - `slotType` と素材の `assetType` が不整合（例: `image` スロットに `video`）→ 補正/警告（§9）。
 - 旧 `01_REQUIREMENTS.md` 例の `type:"asset" + assetRole` 表記は本契約（typed layer + id一致）に置き換える。
@@ -240,17 +286,53 @@
 | assets | Asset[] | ● | §7.2 |
 | parts | Part[] | ● | §7.3 |
 | scenes | Scene[] | ● | §7.4 |
-| timelineOverlay | object | ○ | §7.1.4。場面横断タイムラインの上位編集（場面アンカー＋絶対時間の `OverlayClip[]`）。未設定＝場面射影のみ。**AI/簡易は無視**（schema 1.15・ADR-0018） |
+| timelineOverlay | object | ○ | §7.1.4。**`animations`（場面の登場アニメ・ADR-0019）だけが現役**。`clips` は**非推奨**＝ADR-0032 決定11/12 で引き取り手が無くなった（#635・schema 1.15・ADR-0018） |
 
 > **※ = 条件付き必須＋排他**（`videoKind` による。recruit→companyInfo 必須・generalBrief 禁止／general→generalBrief 必須・companyInfo 禁止＝`project.schema.json` の if/then/else ＋ `not`）。
 
-**7.1.1 videoSettings**: aspectRatio(enum `16:9`/`9:16`) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ● / fontId(enum＝同梱フォントの id ○・schema 1.3 追加・未指定は既定フォント＝`domain/font/fontCatalog`)（**寸法は保存しない**＝`aspectRatio` を単一の真実とし `dimsForOrientation` で導出。`16:9`→1920×1080 / `9:16`→1080×1920・ADR-0012。出力解像度の縮小は書き出し時の選択）
+**7.1.1 videoSettings**: aspectRatio(enum `16:9`/`9:16`) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ● / fontId(○・schema 1.3 追加／**1.26 で enum→pattern**＝同梱3つ＋持ち込み `user_font_NNN`〔ADR-0038・#261〕・未指定は既定フォント＝`domain/font/fontCatalog`。**`videoSettings` は null を許さない**〔動画全体は継承しない＝既定へ落とす〕。⚠️ **持ち込みフォントの CSS の家族名は id そのもの**＝描く側に目録を配らない〔配り忘れた所だけ別の字体になるのを防ぐ〕。⚠️ **見つからないフォントを使っている動画は書き出しを止める**〔公開前チェックの「見つからない文字の形」・黙って別の字体で出さない＝§2-5〕) / creditDisplay(object ○・schema 1.28 追加＝`{mode?,seconds?}`・**未指定＝`both`（最初と最後）・3秒**・ADR-0025/#359。**About 画面のクレジットは必須で不変**＝これは動画に焼く側だけの設定。**判定はプレビューと書き出しで共有**＝場面形式は `sceneCreditVisibility`〔場面ごと・時間軸は切り替えの重なりを引いた実尺〕、タイムライン形式は `creditTextAt`〔毎フレーム〕。`15 §3` も参照) / audioAuto(object ○・schema 1.29 追加＝音の自動処理〔#257 ダッキング／#259 ノーマライズ・ADR-0032 追補4〕。**新規は既定で「する」／読み込んだ古い動画には「しない」を書き込む**。⚠️ **プロジェクト単位**＝`Scene` には足さない〔凍結3〕・場面ごとのダッキング設定は作らない。**共有 `$defs` なので両形式に効く**。ダッキングは BGM の音量の式〔`volumeExpr`〕として渡し、ノーマライズは書き出しの最終段〔`loudnorm`＋`alimiter`〕で掛ける)（**寸法は保存しない**＝`aspectRatio` を単一の真実とし `dimsForOrientation` で導出。`16:9`→1920×1080 / `9:16`→1080×1920・ADR-0012。出力解像度の縮小は書き出し時の選択） ⚠️ **creditDisplay の文**（ADR-0025 追補・2026-10-01）＝「最初」「最後」「最初と最後」は**使った（鳴る）声を全員、縦に**・「ずっと表示」は話している声。判断は場面形式＝`sceneCreditText`／タイムライン形式＝`creditTextAt`（プレビューと書き出しが同じ関数を通る）。
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
 **7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・**1〜100字**） / agenda(string[]) ○（章立て・アジェンダ・**最大20件／各100字**） / keyPoints(string[]) ○（伝えたい要点・**最大20件／各100字**） / targetAudience ○（対象視聴者・**100字**。ADR-0011 #12 で追加）。**要素数・文字数の上限は ADR-0011 #4 で確定（任意項目の追加・上限付与ゆえ schemaVersion は 1.1 据え置き）。**
-**7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）: clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラックは後続。
-**animations（④・ADR-0019・schema 1.17・任意）**: `ElementAnimation[]`。**ElementAnimation**: id(`anim_NNN`・project 内一意) ● / sceneId(`scene_NNN`) ● / targetId(FREE 要素／グループ id) ● / keyframes(`Keyframe[]`・timeSec 昇順) ●。**Keyframe**: timeSec(場面ローカル秒・≥0) ● / x / y / scale(>0) / opacity(0〜1) / rotation / easing(`linear`/`ease-in-out`) ○。設定したプロパティのみ**独立に補間**・値は**絶対上書き**・区間外は端でクランプ。`layoutScene(scene, template, {timeSec, animations})` が補間して対象要素へ適用＝**preview/export 同一関数でフレーム単位パリティ**（ADR-0001/0019・per-frame）。AI/場面正準は不変（AI はアニメを生成しない・`12` 不変）。
-**テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telops` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
-**並行テロップ（③(8)）**：時間が重なるテロップは**段（row）**に自動割当して縦に積む（`assignTelopRows`＝貪欲な区間分割・最小段数）。段はプレビューと書き出しで一貫（同一 run 定義）＝重なっても潰れず全て読める。段は overlay データから導出＝**schema 変更なし**（保存しない）。
+**7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）
+
+> **`clips` は非推奨**（#635・ADR-0032 決定11/12）。時間軸の編集は**タイムライン形式**（別プロジェクト・§7.6）へ移り、
+> 場面形式に残すのは**読み取り専用の見わたす**タイムラインだけ（編集画面は廃止）。`compileTimeline` は
+> **もう合成しない**＝描画・書き出しに出ない。**保存済みデータは消さない**（schema/型に `deprecated` として残す・
+> 新規に書き込まない）。開いたときに一言断る＝`15 §6` `TIMELINE_OVERLAY_RETIRED`（黙って消えたように見せない）。
+> **同じ入れ物の `animations`（④・ADR-0019）は現役**＝一緒に捨てない（焼き出しもこれを持ち込む）。
+
+（以下は非推奨となった `clips` の記述）clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラックは後続。
+**animations（④・ADR-0019・schema 1.17・任意）**: `ElementAnimation[]`。**ElementAnimation**: id(`anim_NNN`・project 内一意) ● / sceneId(`scene_NNN`) ● / targetId(FREE 要素／グループ id) ● / keyframes(`Keyframe[]`・timeSec 昇順) ●。**Keyframe**: timeSec(場面ローカル秒・≥0) ● / x / y / scale(>0) / opacity(0〜1) / rotation / easing ○。設定したプロパティのみ**独立に補間**・値は**絶対上書き**・区間外は端でクランプ。`layoutScene(scene, template, {timeSec, animations})` が補間して対象要素へ適用＝**preview/export 同一関数でフレーム単位パリティ**（ADR-0001/0019・per-frame）。`scale` は**中身ごと**（文字の大きさ・縁取り・影・帯の角丸・図形の角丸と枠線も同じ倍率＝箱だけ縮めて字が「…」で切れない・#1371）。AI/場面正準は不変（AI はアニメを生成しない・`12` 不変）。
+**ライフサイクル**＝**対象が消えたら動きも落とす**（落とす道具は `removeAnimationsForTargets`／**何を落とすかの決定は `vanishedAnimationTargets`**〔前後差〕／画面からの呼び出しは `patchSceneWithCleanup` 1本＝下記）／対象が**複製されたら動きも複製する**（場面まるごと＝`duplicateSceneAnimations` は `sceneId` を差し替え、**要素ひとつ＝`animationsForElement`（取り出す）＋`retargetAnimations`（`sceneId`/`targetId` を宛て直して入れる）**・#770）。⚠️ 複製側を欠くと**動く要素を複製したのに動かない複製**ができる（ADR-0026②）。`animations` は `meta` 側、`freeLayout`/per-use は `scene` 側なので、**要素の複製は履歴のまとめで1手**にする（取り消し1回で両方戻る＝削除側と同じ流儀）。
+**消える経路は数えず「消えたもの」を見る**（#779）＝`vanishedAnimationTargets(before, after)` が更新の前後を突き合わせ、FREE 要素・まとまりのうち**居なくなった id** を挙げる。⚠️ **経路ごとに「何が消えるか」を書かない**＝単体削除／一括削除／まとまりごと削除／**まとまりの解除**／**メンバーが消えて空になったまとまり**と経路が多く、列挙すると必ずどれかが漏れる（#779 では後ろ2つが漏れ、`group_NNN` の**歯抜け再利用**〔`createGroupId`〕で**後から作った別のまとまりが勝手に動いた**＝`slotClips` の「憑依」と同じ経路・ADR-0028 D6）。前後の差なら入れ子が何段でもそのまま挙がる。
+**場面ごと消える軸は別**＝`removeScene` が `removeAnimationsForScene` でその場面のぶんを**同じ履歴の1手**で落とす（`vanishedAnimationTargets` は**場面の中**の話）。⚠️ `scene_NNN` も歯抜けの最小番号を再利用し（`createSceneId`）、新しい場面は**直前の見た目を引き継ぐ**（`addScene`）ので、残すと自由配置の要素 id まで揃い**置いた覚えのない動きで新しい場面の図形が動く**（#779）。
+
+**動き方（`Keyframe.easing`・#262・schema 1.25／timeline 1.6）**＝区間 [前KF, 当KF] に効く。
+**名前つき**（`linear`／`ease-in`／`ease-out`／`ease-in-out`／**`hold`**）か、**自由なカーブ**（`{ bezier: [x1,y1,x2,y2] }`
+＝CSS の `cubic-bezier` と同じ制御点）。未指定＝`linear`。**`x` は 0〜1**（時間が戻らない＝schema の制約・
+`keyframeEdit` が収める）・**`y` は範囲外も可**（行き過ぎて戻る動きを作れるので丸めない）。
+- 解くのは `applyEasing`（`domain/project/keyframes.ts`・純粋）＝`x` から媒介変数をニュートン法で求め、
+  収束しない形（始まりの傾きが 0 など）は二分法へ落とす＝**同じ入力なら必ず同じ値**（preview＝export）。
+- **`ease-in-out` は既存の式のまま**（区分的な2次式）＝**既に作った動画の動きを変えない**。3次ベジェでは
+  正確に表せないので `easingCurveOf` は `null` を返し、**近い値で黙って置き換えない**（画面が「動きが少し
+  変わる」と断ってから変える＝ADR-0026④）。`linear`/`ease-in`/`ease-out` は CSS と同じ制御点で**そのまま
+  置き換えられる**（`[0,0,1,1]`／`[0.42,0,1,1]`／`[0,0,0.58,1]`）。
+- **`hold`（止める・#1365・schema 1.32／timeline 1.15）**＝区間の途中は**前のキーの値のまま**、当キーで一気に切り替わる
+  （業界の「停止キーフレーム」）。カーブでは表せない（`easingCurveOf` が `null`＝画面は断ってから変える）。
+  ⚠️ **部品の分割は止めない**＝「止める」の区間は切っても形が変わらない（前半も後半も前の値のまま）ので、
+  曲線を切る対象から外す（`split.ts`）。切れ目ちょうどのキーが「止める」なら前半の終わりにそのまま持ち越す。
+- **編集できるのはタイムライン形式**（`setKeyframe` の `easing`）。場面形式の簡易プリセットは名前つきのみ＝
+  カーブが入っている動きは**選び直させない**（黙って丸めない・場面形式は凍結＝ADR-0032）。
+
+**プリセットと自由キーフレームの関係（#266）**＝場面形式の動きプリセットは**最初からキーフレーム列**
+（`animationPresets`・2KF）として保存されており、焼き出し（`bakeTimelineProject`）はそれを**そのまま**
+持ち込む。よって「プリセットを自由キーフレームへ変換する」段は**要らない**（変換前後で一致する、が
+構造的に成り立つ）。守り方は `bake.test.ts` の「プリセットの動きは、そのままのキーフレームとして
+持ち込まれ、タイムライン側で直せる」。
+**テロップの実描画・並行テロップ（③(8)）は #635 で撤去**（ADR-0032 決定11/12）。`renderer/layout.ts` の
+`overlayTelopItem`／`layoutScene` の `telops` オプション／`renderer/export/telopOverlays`／段の割り当て
+（`assignTelopRows`）／場面ローカルへの切り出し（`sceneLocalTelops`・`activeTelopsAt`）は**いずれも削除済み**
+＝この節が指していた単一参照元はもう無い。同じことはタイムライン形式（§7.6）の字幕クリップが担う。
 
 ### 7.2 Asset
 
@@ -265,6 +347,7 @@
 | tags | string[] | ○ | yuko の poseTag もここ |
 | description | string | ○ | ユーザー記入 |
 | aiDescription | string | ○ | AI解析結果 |
+| aiDescriptionAuthor | enum（§3.3b） | ○ | 「AI解析」を書いたのは誰か（#1317・1.31）。`ai`＝同梱の AI が付けた（写真を差し替えたら外して読み直す）／`user`＝利用者が直した（**空にした**も含む＝AI は書き換えない）。未指定＝前の版の素材（説明があれば触らない・空なら AI が読む） |
 | isPublicChecked | boolean | ○ | 既定 false |
 | isDefaultYuko | boolean | ○ | `yuko` のみ。poseTag解決の既定（§12.8） |
 | clip | object | ○ | `video` のみ: startSec / endSec / useOriginalAudio / originalAudioVolume / fit / speed（0.5–2.0・再生速度・既定1.0・尺は不変） |
@@ -283,9 +366,9 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | order | int | ● | ≥1 |
 | sceneType | enum | ● | §3.2 |
 | templateId | string | ● | 既存テンプレ参照 |
-| fontId | enum | ○ | 場面のフォント（同梱フォントの id・`domain/font/fontCatalog`）。null/未指定＝動画全体（`videoSettings.fontId`）を継承（1.5 追加） |
-| textFontIds | object | ○ | テキスト種別（textKey）ごとのフォント上書き（`{title?,main?,subtitle?,caption?,url?}`＝同梱フォントの id）。未設定の種別は `fontId`→動画全体→既定を継承（1.7 追加・#178） |
-| textStyles | object | ○ | テキスト種別（textKey）ごとの**体裁**上書き（`{title?,main?,subtitle?,caption?,url?}`＝各 `TextStyle`＝`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`）。**各プロパティ未指定＝テンプレ層（`layer.*`）→既定を継承**＝触ったものだけ固有値。**配置/座標は対象外**（テンプレ駆動＝§2-4）。AI は生成しない（1.24 追加・#555） |
+| fontId | string | ○ | 場面のフォント（**同梱＋持ち込み**〔`user_font_NNN`〕＝`$defs/FontIdOrNull`・ADR-0038 で enum から形へ開いた）。null/未指定＝動画全体（`videoSettings.fontId`）を継承（1.5 追加） |
+| textFontIds | object | ○ | テキスト種別（textKey）ごとのフォント上書き（`{title?,main?,subtitle?,caption?,url?}`＝**同梱＋持ち込み**のフォントの id）。未設定の種別は `fontId`→動画全体→既定を継承（1.7 追加・#178）。⚠️ **見た目パターンを替えても休眠のまま残る**（ADR-0030 追補6）＝書き出しの門は**休眠のぶんも数えて断る**ので、**直す欄も休眠のぶんまで出す**（場面編集は畳めない場所に断りつきで／タイムラインは見た目が未解決でも）。**数える側は狭めない**（消えたフォントを使っていることに変わりはない） |
+| textStyles | object | ○ | テキスト種別（textKey）ごとの**体裁**上書き（`{title?,main?,subtitle?,caption?,url?}`＝各 `TextStyle`＝`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`＋`letterSpacing?`/`shadow?`/`background?`〔1.27 追加・#264〕）。**各プロパティ未指定＝テンプレ層（`layer.*`）→既定を継承**＝触ったものだけ固有値。⚠️ **`shadow`/`background` はオブジェクト単位で解決する**（`ov?.shadow ?? layer.shadow`＝プロパティ単位では継承しない）＝1項目でも触ると残りの値も場面側に固定されるので、**書く側は継承している設定を引き継いでから1項目を変える**（引き継がないと色や角丸が既定へ落ちて黙って別の絵になる＝§2-5）。見た目パターンと同じ値・同じ「描かれない」に戻ったら**上書きごと落とす**（差分ゼロの上書きは「変更中」の嘘と追従切れを生む。判定は**描かれる結果**で行う〔`enabledShadow`/`bandBackground`〕＝生の値で比べると、色を戻しても上書きが残る）。⚠️ **この結果、見た目パターンが元から付けていない影・帯を「切」に戻すと、選んだ色や角丸は残らない**（上書きがまるごと落ちるため）。**自由配置の要素（`FreeElement`）は値を覚える**が、あちらは**継承の無い持ち物**で、こちらは「触ったものだけ固有値」の上書き＝**モデルが違うので流儀も違う**（ADR-0026② の「同概念」には当たらない・PR #913/#914 で決定）。⚠️ 同じ `textKey` の層が複数あるとき、上書きは**全層に効く**が体裁欄は**先頭の層を代表**として見せる（キーが `TextKey` である以上の既知の限界）。**配置/座標は対象外**（テンプレ駆動＝§2-4）。AI は生成しない（1.24 追加・#555） |
 | durationSec | number | ● | `> 0`（schema も `exclusiveMinimum:0` で一致＝#586 で矛盾解消。**場面ごとの上限/下限は持たない**・#553）。手編集の確定は §9 で `(0, VIDEO_HARD_MAX_SEC]` へ自動補正。AI 生成時のみ目安 `[AI_SCENE_MIN, テンプレ上限 or AI_SCENE_MAX]` へ寄せる |
 | assetRefs | object | ● | §5。値は既存 assetId or null |
 | character | object | ● | enabled / characterId / poseAssetId(既存 yuko asset or null) |
@@ -294,13 +377,13 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | audioMix | object | ○ | §6（全フィールド任意・null可） |
 | transition | object | ○ | in/out(enum) / durationSec（既定 `TRANSITION_DEFAULT_SEC`）/ direction(enum `left`/`right`/`up`/`down`・slide 用・ADR-0009) |
 | warnings | Warning[] | ● | 検証・補正の結果（空配列可） |
-| freeLayout | FreeElement[] | ○ | **有効なのは FREE テンプレの場面のみ**（描画/編集/事前確認/素材使用は `templateOf(scene).category===free` でゲート）。**通常テンプレへ切り替えても休眠データとして保持**し、FREE へ戻すと復元（`texts` 休眠と同じ・ADR-0030／#236）。通常→FREE 切替時は表示中の内容（スロット素材＋文字＋**体裁**〔`textStyles` 解決後の実効値＝#555〕）を旧テンプレ幾何ごと自動変換（seed）。**ただし文字/字幕の枠高だけは「同じ行数が入る高さ」へ広げる**＝通常は `maxLines`（既定2）で行数が決まるのに対し FREE は枠高から行数を導出するため、そのまま持ち込むと行が減って文字が切り詰められる（縮めはしない＝回転の中心が動かないように・#555 レビュー P1）。自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape/**subtitle**（字幕＝ADR-0029・1.20）・x/y/w/h は canvas基準で w>0/h>0。shape の `shapeType`＝rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble、枠線/縁取り `strokeColor`/`strokeWidth`（shape=枠線・text=文字の縁取り＝#209。**太さ>0 で色が未指定なら下地と反対の既定色**で描く＝§4・#565）は任意・1.6。text の `fontId`（同梱フォント・null/未指定＝場面/全体を継承）は任意・1.7。`rotation`＝回転角（度・0以上360未満・中心を軸に時計回り・未指定=回転なし・360=0は除外）は任意・1.9＝#208。text の `lineHeight`＝行間（倍率0.5〜3・未指定=1.3）＋`textAlign`＝揃え（left/center/right・未指定=left）は任意・1.10＝#209。`hidden`＝非表示（true で描画/操作対象から除外）・`locked`＝ロック（true で移動/拡縮を禁止）は任意・1.11＝#210。`name`＝任意の表示名（重ね順一覧/選択チップの見分け用・全 kind 共通・未指定=種類＋連番の自動名）は任意・1.22＝#525-12。`background`＝text/subtitle の背景帯（可読性の下地・`{enabled,color,opacity,radius}`・通常字幕層 `layer.background` と同型・未指定/`enabled:false`=なし・通常→FREE で移送）は任意・1.23＝#529） |
+| freeLayout | FreeElement[] | ○ | **有効なのは FREE テンプレの場面のみ**（描画/編集/事前確認/素材使用は `templateOf(scene).category===free` でゲート）。**通常テンプレへ切り替えても休眠データとして保持**し、FREE へ戻すと復元（`texts` 休眠と同じ・ADR-0030／#236）。通常→FREE 切替時は表示中の内容（スロット素材＋文字＋**体裁**〔`textStyles` 解決後の実効値＝#555〕）を旧テンプレ幾何ごと自動変換（seed）。**ただし文字/字幕の枠高だけは「同じ行数が入る高さ」へ広げる**＝通常は `maxLines`（既定2）で行数が決まるのに対し FREE は枠高から行数を導出するため、そのまま持ち込むと行が減って文字が切り詰められる（縮めはしない＝回転の中心が動かないように・#555 レビュー P1）。自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape/**subtitle**（字幕＝ADR-0029・1.20）・x/y/w/h は canvas基準で w>0/h>0。shape の `shapeType`＝rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble、枠線/縁取り `strokeColor`/`strokeWidth`（shape=枠線・text=文字の縁取り＝#209。**太さ>0 で色が未指定なら下地と反対の既定色**で描く＝§4・#565）は任意・1.6。text の `fontId`（**同梱＋持ち込み**〔`user_font_NNN`〕＝ADR-0038 で開いた・null/未指定＝場面/全体を継承）は任意・1.7。`rotation`＝回転角（度・0以上360未満・中心を軸に時計回り・未指定=回転なし・360=0は除外）は任意・1.9＝#208。text の `lineHeight`＝行間（倍率0.5〜3・未指定=1.3）＋`textAlign`＝揃え（left/center/right・未指定=left）は任意・1.10＝#209。`hidden`＝非表示（true で描画/操作対象から除外）・`locked`＝ロック（true で移動/拡縮を禁止）は任意・1.11＝#210。`name`＝任意の表示名（重ね順一覧/選択チップの見分け用・全 kind 共通・未指定=種類＋連番の自動名）は任意・1.22＝#525-12。`background`＝text/subtitle の背景帯（可読性の下地・`{enabled,color,opacity,radius}`・通常字幕層 `layer.background` と同型・未指定/`enabled:false`=なし・通常→FREE で移送）は任意・1.23＝#529） |
 | lines | NarrationLine[] | ○ | 掛け合い：時間順のセリフ列（§7.4b）。あれば実効タイムライン（`sceneLines()`）。未設定＝単一 `narration` を1行とみなす（1.8・ADR-0015・#180） |
 | subtitleEnabledDefault | bool | ○ | 場面の字幕既定 ON/OFF（行 `subtitleEnabled` 未指定時に継承・1.8） |
-| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝テンプレの `background`/`slot`/`logo` の layer.id、値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④）。**見た目切替で一致しなくなったキーは休眠として残る（§5 と同じ）** |
-| slotClips | object | ○ | 場面ごと・スロット別の**動画クリップ調整の per-use 上書き**（キー＝スロットの layer.id、値＝`{ startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }`）。`fit` は含めない（per-use は `slotFits`）。未上書きフィールドは `asset.clip`（素材既定）を**継承**（`slotClips ?? asset.clip ?? 既定`・null=継承 §6）。scenes に載るので**Undo 可**（ADR-0020）。同じ動画を場面ごと別範囲で使える（1.19・ADR-0028・#472） |
-| slotVideoStart | object | ○ | 動画スロット本体アニメの再生開始タイミング（キー＝スロットの layer.id、値＝`{ mode, delaySec? }`）。`mode`＝`withAnim`（アニメと同時・既定）/`afterAnim`（アニメの後）/`delay`（`delaySec`≥0 秒だけ遅らせて途中から）。**`mode=delay` は `delaySec` 必須**（schema if/then で強制＝「途中から」が黙って「同時」に落ちない）。`delaySec` は `mode=delay` のときのみ意味を持ち、**保存値は上限なし・描画で `[0, animEnd]` にクランプ**（UI のスライダー上限＝アニメ長で頭打ち＝保存値と実効値を一致させる）。**mode を `delay` 以外へ切り替えたら `delaySec` は落とす**（stale 値を残さない・アニメ削除時のエントリ破棄と同流儀）。**スロット本体がアニメ対象の場面でのみ効く**（`slotIsAnimated`）。未指定＝`withAnim`（1.18・ADR-0027・#444） |
-| groups | Group[] | ○ | 要素のグループ化（メンバー＝`freeLayout` 要素 id、ネストで group id も可。グループ自身の `transform` を持つ）。未設定＝グループ無し（1.14・ADR-0022） |
+| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝**スロットの layer.id、または FREE のスロット要素 id**〔`free_NNN`〕。テンプレ側は `background`/`slot`/`logo` の layer.id。値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④）。**見た目切替で一致しなくなったキーは休眠として残る（§5 と同じ）** |
+| slotClips | object | ○ | 場面ごと・スロット別の**動画クリップ調整の per-use 上書き**（キー＝**スロットの layer.id、または FREE のスロット要素 id**〔`free_NNN`〕、値＝`{ startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }`）。`fit` は含めない（per-use は `slotFits`）。未上書きフィールドは `asset.clip`（素材既定）を**継承**（`slotClips ?? asset.clip ?? 既定`・null=継承 §6）。scenes に載るので**Undo 可**（ADR-0020）。同じ動画を場面ごと別範囲で使える（1.19・ADR-0028・#472） |
+| slotVideoStart | object | ○ | 動画スロット本体アニメの再生開始タイミング（キー＝**スロットの layer.id、または FREE のスロット要素 id**〔`free_NNN`〕、値＝`{ mode, delaySec? }`）。`mode`＝`withAnim`（アニメと同時・既定）/`afterAnim`（アニメの後）/`delay`（`delaySec`≥0 秒だけ遅らせて途中から）。**`mode=delay` は `delaySec` 必須**（schema if/then で強制＝「途中から」が黙って「同時」に落ちない）。`delaySec` は `mode=delay` のときのみ意味を持ち、**保存値は上限なし・描画で `[0, animEnd]` にクランプ**（UI のスライダー上限＝アニメ長で頭打ち＝保存値と実効値を一致させる）。**mode を `delay` 以外へ切り替えたら `delaySec` は落とす**（stale 値を残さない・アニメ削除時のエントリ破棄と同流儀）。**スロット本体がアニメ対象の場面でのみ効く**（`slotIsAnimated`）。未指定＝`withAnim`（1.18・ADR-0027・#444） |
+| groups | Group[] | ○ | 要素のグループ化（メンバー＝`freeLayout` 要素 id、ネストで group id も可。グループ自身の `transform` を持つ）。未設定＝グループ無し（1.14・ADR-0022）。`transform.scale` は**中身ごと**（文字の大きさ・縁取り・影・帯の角丸・図形の角丸と枠線も同じ倍率＝#1371）。解除はその倍率を中身へ**焼き込む**（解除の前後で見た目が変わらない） |
 | bgmSettings | object | ○ | 場面ごとのBGM（`BgmSettings`）。未指定＝プロジェクト既定（`bgmSettings`）を継承（null=継承）。`enabled:false` でこの場面は無音。`compileTimeline` は実効BGM（場面 ?? プロジェクト）が同じソースの連続場面を1区間にまとめる（連続する同曲は途切れない）（1.16・ADR-0018 ③(7)） |
 
 **7.4b NarrationLine**（掛け合いのセリフ列 `scene.lines` の1行・1.8・ADR-0015・#180）: lineId ●（`line_NNN`・scene 内一意・§2.1） / text ●（読み上げ） / speaker ○（VOICEVOX 話者番号＝#177 `voiceCatalog`・null/未指定＝既定声を継承） / speed ○ / pitch ○ / intonation ○（抑揚0.0〜2.0・null/未指定＝場面/動画の既定を継承・1.12＝#242） / subtitleText ○（字幕文・未指定＝text を流用＝追加B） / subtitleEnabled ○（行の字幕 ON/OFF・未指定＝`subtitleEnabledDefault`→書き出し既定を継承） / startSec ○（簡易手動タイミング・未指定＝自動逐次） / startWithPrevious ○（直前の行と**同時に**開始＝並行・`true` の連続で N 人同時・未指定/`false`＝逐次・1.21＝ADR-0031・#530） / voicePath ○ / status(enum) ●。**行の声は数値 `speaker`（`Narration.voiceId`(文字列) の逆変換は持たない・ADR-0015）。**
@@ -309,7 +392,22 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 
 schemaVersion ● / templateId ● / name ● / description ○ / category(enum) ● / aspectRatio(enum `16:9`/`9:16`) ● / canvas{width,height} ● / aiHint{useCase, recommendedSceneTypes[], maxNarrationLength, maxSubtitleLength} ○ / defaults{durationSec, transitionIn, transitionOut, backgroundColor} ○ / layers(Layer[]) ●
 
----
+### 7.6 TimelineProject（タイムライン形式の `project.json`・ADR-0032・#627）
+
+> ⚠️ **本節は [`11_TIMELINE_REFERENCE.md`](11_TIMELINE_REFERENCE.md) へ切り出しました**（2026-09-08）。
+> **節番号は据え置き**＝`11 §7.6`・`11 §7.6.3.2` のような呼び方はそのまま使えます（指し先がそちらになるだけ）。
+> **正典であることは変わりません。**
+>
+> **切り出した理由**＝本節だけで 73,440字（`11` の 59.5%）あり、**場面形式の作業では一度も要らない**のに、
+> `11` を開くと必ず付いてきていた。**番号を付け替えなかった理由**＝`§7.6` を指す記述が本番のコードだけで 87 か所（検査を入れると 112）ある。
+
+| 小節 | 中身 |
+|---|---|
+| `11 §7.6.1` | 焼き出し（場面形式→タイムライン）の対応表（掛け合い字幕は `11 §7.6.1.1`） |
+| `11 §7.6.2` | 読込・尺・再生（音の同期 `11 §7.6.2.2`／字幕連動 `11 §7.6.2.3`／声を作る `11 §7.6.2.4`） |
+| `11 §7.6.3` | 編集操作（キーフレーム `11 §7.6.3.1`／音の部品 `11 §7.6.3.2`） |
+| `11 §7.6.4` | 1フレームの描き方（切り抜き `11 §7.6.4.1`） |
+| `11 §7.6.5` | 書き出し |
 
 ## 8. 検証ルール（コード化可能な形）
 
@@ -326,7 +424,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V7 | `durationSec` が範囲内（手編集＝`>0`／AI 生成＝目安 `[3, テンプレ上限 or 15]`・#553） | clamp（§9） |
 | V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等）。**掛け合い（`lines`/`narrationLines`）があるときは各行が対象**（単一 `narration` はその1行）＝生成時（`transformPlan`）と公開前チェック（`sceneLines`）で**同じ対象**を見る（#569・ADR-0026②）。閾値の継承順はテンプレ `aiHint` → 既定定数で両者共通（#568） | 警告＋短縮提案 |
 | V9 | 合計尺 ≤ `videoSettings.maxDurationSec` | 警告 |
-| V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知） |
+| V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知）。⚠️ **ここは切り詰めない**＝AI が81以上を返しても場面は減らさない（黙って中身を捨てない）。⚠️ **断るのは取り込む側**（#1222）＝`projectStore` が `canAddScenes` で**反映せずに断る**（`AI_SCENE_LIMIT_EXCEEDED`）。この検証は**変換の記録**として警告を残すだけで、止める役ではない。⚠️ **先に AI へ伝えてある**＝プロンプトに「場面は80個まで」（`12 §5`／`§5b`）。ここは守られなかったときの受け皿 |
 | V11 | `part.sceneIds` と `scenes[].partId` の整合 | 致命: 再構築 |
 | V12 | `scene.freeLayout[]`（slot）の `assetId`（非null時）が実在素材か | 警告（`ASSET_NOT_FOUND`） |
 | V13 | `scene.freeLayout[]` の `w>0` かつ `h>0` | 警告（`FREE_ELEMENT_INVALID_SIZE`） |
@@ -337,7 +435,21 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V18 | `scene.lines[]` を `startSec` 昇順・時間重複なし（`startWithPrevious` の行は**同時開始＝並行**ゆえ対象外＝`startSec` を持たない・ADR-0031） | 警告/補正（§9） |
 | V19 | `scene.lines[]` の `speaker` が `voiceCatalog` に実在 | 既定声へ補正＋警告（§9） |
 | V20 | `scene.groups[]`/`template.groups[]` の `members` が実在 id を参照（要素/レイヤー、ネストで group id） | 描画で無視（堅牢性）＋削除経路で除去（`removeMembersFromGroups`・ADR-0022 V_group・#308） |
-| V21 | `timelineOverlay.clips[]` の `anchorSceneId`（指定時）が実在 scene を参照 | 描画で無視（堅牢性・`compileTimeline` が合成時に skip・**V_overlay**・ADR-0018） |
+| V21 | 〜〜（#635 で用済み）〜〜 `timelineOverlay.clips[]` の `anchorSceneId` が実在 scene を参照 | **読まない**＝`compileTimeline` は `clips` を合成しなくなったので、参照切れかどうかを見る場面が無い（ADR-0032 決定11/12・非推奨フィールド） |
+| V22 | `clips[].trackId` が実在 track を参照 | 警告（`TIMELINE_TRACK_NOT_FOUND`）＝描画・書き出しから外れるので黙って消さない（§2-5） |
+| V23 | `clips[].kind` が track の `kind` と合う（`audio` は audio トラック・それ以外は visual トラック） | 警告（`TIMELINE_CLIP_TRACK_KIND`） |
+| V24 | **同一トラック内でクリップの時間が重ならない**（`[startSec, startSec+durationSec)` が互いに素・端が接するのは可） | 警告（`TIMELINE_CLIP_OVERLAP`）＝重ねたいならトラックを足す |
+| V25 | `clips[]` の `assetId`（非null時）が実在素材／**音の出どころ**（`assetId`／`bundledBgmId`／`kind='voice'`）が**高々1つ** | 警告（`ASSET_NOT_FOUND` / `TIMELINE_AUDIO_SOURCE_CONFLICT`） |
+| V26 | `groups[].members` ／ `animations[].targetId` が実在クリップ or グループを参照 | 描画で無視（堅牢性・V20 と同じ扱い） |
+| V27 | `clips[].character.poseAssetId`（非null時）が実在 yuko 素材（場面形式 V5 と同じ観点） | 警告（`ASSET_NOT_FOUND`・field は `clips.<id>.character`） |
+| V28 | `kind='voice'` の読み上げ文が空白だけでない／`voice` は読み上げクリップにだけ付く | 警告（`TIMELINE_VOICE_TEXT_EMPTY`＝info・`TIMELINE_VOICE_ON_NON_VOICE`） |
+| V29 | `clips[].voiceClipId`（字幕の連動先）が実在する**読み上げ**クリップを指す／連動先を持てるのは字幕だけ | 警告（`TIMELINE_SUBTITLE_LINK_NOT_FOUND` / `TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE`）＝字幕は自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに気づけない |
+| V30 | `clips[].crop` の同じ軸の合計が 1 未満（上下・左右それぞれ） | 警告（`TIMELINE_CROP_HIDES_ALL`）＝描画は **1px 残す**（丸ごと消えたことに気づけるようにする） |
+| V31 | **`animations[].targetId` は重複しない**（同じ対象に動きは1本まで・V26 と対） | 警告（`TIMELINE_ANIMATION_DUPLICATE`）＝読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して**1本しか見ない**ので、2本あると片方が黙って無視される（焼き出しが入場と退場を2本作り、切り替えがハードカットになっていた・#717） |
+| V32 | **id は入れ物ごとに文書内で一意**（`clips`/`tracks`/`groups`/`animations` のそれぞれで重ならない。入れ物をまたいだ衝突〔クリップ id ＝グループ id〕は接頭辞が違うので採番から起きない＝見ない） | 警告（`TIMELINE_DUPLICATE_ID`）＝読む側は id で引き当てるので、重なると**後勝ち／先勝ちが混ざって別のものに効く**（焼き出しでグループ id が重なり、片方の変形がもう片方のメンバーに掛かって要素が画面外へ飛んだ・#811）。動きも `targetId` が合流して1本に混ざる。**採番の穴は作る側で塞ぐのが本筋**だが、知らせる側もここで持つ。⚠️ **保存の門は schema だけでは足りない**＝配列をまたいだ id の一意は JSON Schema の語彙に無いので適合チェックを素通りする。判定は `duplicateIdsIn`（本ファイルから export）を**焼き出しの保存（`bakeToTimeline`）と共有**する |
+| V33 | `markers[]` に**同じ時刻の目印が2つ以上無い**（#356 ①・#1155 ③）。同じ時刻に2つあると、一覧でも時間軸でも重なって**どちらを直しているか分からない**。⚠️ **schema では表せない**（配列をまたいだ一意）ので、ここに置く。⚠️ **比べ方は `markerTimeEq`**（完全一致で見ない＝保存と再生位置はどちらもコマの格子へ落ちるが浮動小数の差が残る・#1155 ②） | 警告（`TIMELINE_MARKER_DUPLICATE_TIME`）＝作る側は `addMarker`／`moveMarker` が増やさないので、ここへ来るのは**外から持ち込んだ文書**。⚠️ **`TIMELINE_EDIT_MARKER_EXISTS` とは別物**＝あちらは**いま押した操作の断り**（置く／動かす）、こちらは**読み込んだ文書**の検証（開いた文書に既にある） |
+
+> V22–V33 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`/`group_NNN`）の**検査が V32**（#811 まで規則だけあって見ていなかった）＝**警告のみで再採番はしない**（読込・移行に再採番の経路は無い。場面形式の `LINE_ID_DUPLICATE` と同じ「案内のみ」）。壊れた文書を作らないのは採番側と保存の門の仕事。番号は §8 の続き。
 
 > V12–V15 は ADR-0008 §8。FREE テンプレ場面（`sceneType=free`）の `freeLayout` を対象とし、domain の純粋関数 `validateFreeLayout`（`src/domain/project/freeLayout.ts`）で実装。`free_NNN` 要素ごとに `Warning.field=freeLayout.<id>` を付す。V13 が不正なら矩形が確定しないため V14 はスキップ（二重警告を避ける）。
 > kind 別の構造的「必須」（`slot` の `fit` が assetId 非null時・`shape` の `shapeType`）は **Schema（`exclusiveMinimum`/enum）＋ renderer 既定（fit 未指定=cover・shapeType 未指定=rect）で担保＝V2 相当**とし、上記 domain 検証（意味検証）の対象外。`fit` は §2-3 の技術用語のため UI 警告に出さない。
@@ -353,10 +465,11 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | テンプレの `aspectRatio` がプロジェクトの向きと不一致 | 同 `category`・同 `orientation` のテンプレへ置換（無ければ警告・原状維持／ADR-0012・B4）。**取り込み時はマイ見た目を当て先にしない**（ADR-0017）／利用者が向きを変える操作ではマイ見た目も当て先にする |
 | 存在しない `assetId` | `null` にし、未使用素材から候補提示（警告） |
 | `durationSec <= 0` / NaN（**手編集の確定時**） | `SCENE_DEFAULT_DURATION_SEC`（8秒）へ＝壊れた入力の既定（0秒の場面は作らない・#553） |
-| `durationSec > VIDEO_HARD_MAX_SEC`（**手編集の確定時**） | `VIDEO_HARD_MAX_SEC`（600秒）へ＝1場面に効く唯一の硬い天井（#553） |
+| `durationSec > VIDEO_HARD_MAX_SEC`（**手編集の確定時**） | `VIDEO_HARD_MAX_SEC`（1800秒）へ＝1場面に効く唯一の硬い天井（#553） |
 | `durationSec < AI_SCENE_MIN_DURATION_SEC`（**AI 生成時のみ**） | `AI_SCENE_MIN_DURATION_SEC`（3秒）へ＝生成のペース配分の目安（手編集は縛らない・#553） |
 | `durationSec >` テンプレ上限（**AI 生成時のみ**） | テンプレ `aiHint.maxDurationSec`（無ければ `AI_SCENE_MAX_DURATION_SEC`=15秒）へ。**手編集は縛らない**（`VIDEO_HARD_MAX_SEC` で頭打ち・#553） |
 | テンプレ上限が生成の下限を下回る（`aiHint.maxDurationSec < AI_SCENE_MIN_DURATION_SEC`） | **上限を優先**（範囲は上限の1点へ潰れる）＝#607。下限は全テンプレ共通の既定で per-template の上書きが無いのに対し、上限は**そのテンプレについて作者が明示した値**なので、具体的な宣言を一般的な既定より優先する（ADR-0026①）。どちらも #553 の「生成の目安」で硬い制約ではないため、`durationSec > 0`（`§7`）は保たれる。警告は既存の `DURATION_CLAMPED` のまま（`aiHint` は作成エディタ非開放＝利用者に別の次の行動が無い・`§2-5`） |
+| 見た目パターンの層で、種別ごとの必須項目が欠けている（`slot` の `slotType` / `text`・`subtitle` の `textKey`） | `requiredFieldsForLayerType`（`domain/template/layerOps.ts`）の既定を補う（`slot`→`image_or_video`／`text`→`title`／`subtitle`→`subtitle`）。**#959**＝見た目パターン作成エディタが `slotType` を書いておらず、**保存はできるのに読み込みで却下され一覧から静かに消えていた**。⚠️ **無言でよい**＝必須欠けは schema 不適合で**これまで100%却下＝一度も描かれていない**ため、補正が当たるのは**いま読み込めていない文書だけ**で、既存の絵は変わらない（本節末の「`scene.warnings[]` に記録」は場面への取り込みの話で、見た目パターンの読込には場面が無い）。⚠️ **この前提は表と schema が「ちょうど一致」していることで保たれる**（`layerOps.test.ts` が両方向を検査。schema が必須にしていない項目を表へ足すと、補正が**読み込めている全テンプレ**に効いて絵が黙って変わる） |
 | `poseTag` 解決不可 / `poseAssetId` 不在 | 既定yuko（`isDefaultYuko` → 無ければ先頭 yuko）へ。yuko素材皆無かつ character 任意 → 非表示 |
 | テキストがテンプレ上限超過 | 警告＋「AIで短くする」提示（自動切詰めはしない） |
 

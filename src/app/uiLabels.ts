@@ -1,11 +1,27 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import { AI_ASSET_SEND_MAX } from "../domain/constants";
-import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
-import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
+import type { TimelineEditKind } from "../domain/timeline/editKind";
+import type { MotionPresetShape } from "../domain/timeline/motionPresets";
+import { AI_ASSET_SEND_MAX, EXPORT_SIZE, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX, type ExportSize } from "../domain/constants";
+import { ASSIST_KIND } from "../domain/ai/assist";
+import { ASSET_KIND } from "../domain/asset/assetFile";
+import type { AssetKind } from "../domain/asset/assetFile";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TALK_MOTION_KIND, TRACK_KIND } from "../domain/enums";
+import type { TalkMotionKind } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind, Orientation, VideoKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
+import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
+import type { Layer } from "../domain/template/types";
+import type { EditBlockedReason } from "../domain/timeline/edit";
+import { TIMELINE_EXPORT_BLOCK, volumePointsTooManyHasSplittable } from "../domain/timeline/export";
+import { AUDIO_SOURCE_KIND } from "../domain/timeline/audio";
+import { bgmById } from "../domain/bgm/bgmCatalog";
+import type { AudioSourceKind } from "../domain/timeline/audio";
+import type { TimelineExportBlockCode } from "../domain/timeline/export";
+import type { TimelineProject } from "../domain/timeline/types";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
+import { userFacingMessage } from "./userFacingError";
 /**
  * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
  * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
@@ -16,22 +32,47 @@ export function formatSceneNumbers(nums: number[]): string {
   return nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
 }
 
+/** 「枠への収め方」欄の見出し。正典 `06_UI_SPEC §9`（右パネル）＝「枠への収め方」。テンプレ編集・場面編集で共有（§6・#547 P2-10）。 */
+export const FIT_FIELD_LABEL = "枠への収め方";
+
 /**
  * 「枠への収め方」（Fit）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。
  * 語彙は `06_UI_SPEC §9`（シーン編集→右パネル・枠いっぱい/全体/伸縮）に合わせる。FitSelect（動画クリップ・画像スロット）と
  * LooksEditScreen（テンプレ編集）が**同じ語**を使うための単一の参照元（§6・#547 P2-10）。
  */
-/** 「枠への収め方」欄の見出し。正典 `06_UI_SPEC §9`（右パネル）＝「枠への収め方」。テンプレ編集・場面編集で共有（§6・#547 P2-10）。 */
-export const FIT_FIELD_LABEL = "枠への収め方";
-
 export const fitLabel: Record<Fit, string> = {
   cover: "枠いっぱいに表示（はみ出しは切り取り）",
   contain: "全体を表示（余白が入る）",
   stretch: "枠に合わせて伸縮",
 };
 
+/**
+ * 図形の形のユーザー向け名称（#684）。**全値必須**＝形が増えたら名前の決め漏れをコンパイル検知。
+ * 場面編集（自由配置）とタイムライン編集が**同じ形を同じ名で呼ぶ**ための単一の参照元（§6・ADR-0026②）。
+ */
+export const freeShapeLabel: Record<FreeShapeType, string> = {
+  rect: "四角",
+  rounded_rect: "角丸四角",
+  ellipse: "丸",
+  triangle: "三角",
+  star: "星",
+  arrow: "矢印",
+  speech_bubble: "吹き出し",
+};
+
 /** 重ね順（要素の前後関係）のユーザー向け見出し。正典は「重ね順」（`06_UI_SPEC §3`＝layer→要素・並び順）。#547 P2-11。 */
 export const Z_ORDER_LABEL = "重ね順";
+
+/**
+ * **同じ操作は同じ言い方**（#763-6）。右クリックのメニューで、キャンバスは「複製／削除」、
+ * 帯は「同じものを足す／消す」と割れていた（同じ部品への同じ操作なのに場所で別の語）。
+ *
+ * 一般的な動画編集用語をそのまま使う（ADR-0034 決定21＝**分かりやすさ最優先**）＝
+ * 「複製」「削除」に寄せる。アプリの他の場所（「この場面を複製」「この配置を削除」）とも揃う。
+ * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
+ */
+export const DUPLICATE_LABEL = "複製";
+export const DELETE_LABEL = "削除";
 
 /**
  * 自由配置の要素種別のユーザー向け名称（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
@@ -102,6 +143,13 @@ export function silentSubtitleMessage(reason: SubtitleSilentReason, sourceKind: 
 
 /** 一括作成ボタンの通常時の文言（既定）。公開前チェックだけは検査項目側の導線名（「声を作成」）を使う。 */
 export const BULK_VOICE_LABEL = "全場面の声を作成";
+/**
+ * タイムライン形式の「まとめて作る」（#1019 ⑥）。
+ *
+ * ⚠️ **「全場面」と言わない**＝タイムライン形式に**場面は無い**（`06 §12.1` 決定5＝
+ * 案内の中で名指しするものは、その画面に実在すること）。#991 ① と同じ型の間違いを作らない。
+ */
+export const BULK_VOICE_TIMELINE_LABEL = "まだ作っていない声をまとめて作る";
 /** 作成中のボタン文言。以前は画面ごとに「作成中…」「準備中…」が混在していた（#547 ④）。 */
 export const BULK_VOICE_BUSY_LABEL = "作成中…";
 /** 一括作成を止めるボタンの文言。 */
@@ -123,6 +171,18 @@ export function bulkVoiceProgressText(done: number, total: number, state: BulkVo
 }
 
 /**
+ * 声をまとめて作っている間、**どの画面にいても**出す一言（#1024 ⑤）。
+ *
+ * ⚠️ **書き出しの全画面バナーと同じ理由**（#547 P2-1・`15 §4`）＝離れた画面からは
+ * **止まったように見える**（進み具合も中止も、置いてある3画面でしか見えなかった）。
+ * ⚠️ **待つ以外の次の行動を言う**＝この状態は**書き出しを止める**ので、
+ * 「終わるのを待つ」か「中止する」かを選べることまで言う（§2-5）。
+ */
+export function bulkVoiceRunningNotice(done: number, total: number): string {
+  return `${bulkVoiceProgressText(done, total, "generating")}。書き出しは、声ができてから始められます。`;
+}
+
+/**
  * 一括作成が押せない理由（押せないのに理由が出ない、を作らない＝§2-5）。押せるときは undefined。
  *
  * 「作る対象が無い」は2種類あり、混同すると嘘になる：**セリフが1つも無い**（まだ何も書いていない）と
@@ -135,12 +195,20 @@ export function bulkVoiceDisabledReason(state: {
   needsVoice: boolean;
   /** 声の対象になるセリフが1つでもあるか（`narrationProgress().total > 0`）。 */
   hasNarrationText: boolean;
+  /**
+   * セリフを置く単位の呼び名（#1019 ⑥・PR #1044 レビュー 🔴）。
+   *
+   * ⚠️ **「場面」と決め打たない**＝タイムライン形式に**場面は無い**（`06 §12.1` 決定5）。
+   * ボタンの文言だけ形式ごとに分けても、**押せない理由の文言に分岐が漏れる**と
+   * #991 ① と同じ間違いがそのまま再発する（実際に漏れていた）。
+   */
+  unitLabel: string;
 }): string | undefined {
   if (state.isExporting) return "動画の書き出し中は声を作成できません。書き出しが終わってから、もう一度お試しください。";
   if (state.generating) return "いま声を作成しています。止めるときは「中止する」を押してください。";
   // 対象が無いのに押せると「押しても何も起きない」になる（ADR-0026④）。どうすれば押せるようになるかを添える。
-  if (!state.hasNarrationText) return "まだセリフがありません。場面にセリフを入れると、ここで声を作れます。";
-  if (!state.needsVoice) return "すべての場面の声が作成済みです。セリフを書き直すと、その場面の声を作り直せます。";
+  if (!state.hasNarrationText) return `まだセリフがありません。${state.unitLabel}にセリフを入れると、ここで声を作れます。`;
+  if (!state.needsVoice) return `すべての${state.unitLabel}の声が作成済みです。セリフを書き直すと、その${state.unitLabel}の声を作り直せます。`;
   return undefined;
 }
 
@@ -187,6 +255,19 @@ export function subtitleOverflowPrecheckDetail(scenesText: string, cause: "simul
   const head = `${scenesText}の字幕が画面からはみ出します。`;
   if (cause === "mixed") return `${head}場面によって理由が違うので、場面編集で確認して直してください。`;
   return `${head}場面編集で${SUBTITLE_OVERFLOW_FIX[cause]}`;
+}
+
+/**
+ * **次の場面の切り替えに覆われて、単独では映らない場面**の案内（#740）。
+ *
+ * ⚠️ **「動画に出ません」とは言わない**（実測＝重なっている間は見えているし、総尺にも効いている）。
+ * 言うのは「**単独では映らない**」＝一度も自分だけの時間を持たない、という起きていることそのもの。
+ * ⚠️ **触る先を取り違えない**＝その場面自身は切り替えを持っていない（持っているのは**次の場面**）ので、
+ * 「切り替えを短く」だけ言うと、飛んだ先の欄が既に「なし」で行き止まりになる（§2-5・#740 レビュー）。
+ */
+export function swallowedByNextPrecheckDetail(scenesText: string, nextSceneText: string): string {
+  return `${scenesText}は、次の場面（${nextSceneText}）の切り替えに覆われて単独では映りません。`
+    + `表示時間を長くするか、${nextSceneText}の切り替えを短く（または「なし」に）してください`;
 }
 
 /**
@@ -240,7 +321,7 @@ export function deleteLookConfirmMessage(
   if (impact.losingContent > 0) parts.push(`うち${impact.losingContent}個の場面は写真・文字などが動画に出なくなります。`);
   // 合う標準が無い場面は変わらず「見つからない」まま残る＝そのままでは書き出せない（§2-5）。
   if (impact.unresolved > 0) parts.push(`${impact.unresolved}個の場面は合う標準が無いため、見た目を選び直すまで書き出せません。`);
-  parts.push("他のプロジェクトで使っている場面は、開いたときに見た目を選び直してください。");
+  parts.push("他の動画で使っている場面は、開いたときに見た目を選び直してください。");
   return parts.join("");
 }
 
@@ -311,9 +392,1600 @@ export const GO_TO_DRAFT_LABEL = "たたき台へ";
  * 「手動で作成する」でなく**「手動で場面を作る」**なのは、押した先で実際にすることを言うため（§2-5）。
  */
 export const GENERATE_FAILED_TITLE = "動画案の作成に失敗しました";
+
+/**
+ * 上限を超えた動画案を**取り込まなかった**ときの見出し（#1222・PR #1223 レビュー 🟡）。
+ *
+ * ⚠️ **「作成に失敗」とは言わない**＝AI は最後まで作れている。**こちらが取り込みを断った**だけなので、
+ * 「失敗しました」と言うと**AI か通信のせい**に読めて、次の行動（入れた内容を減らす）に結びつかない
+ *（`15 §6`＝「できなかった」と「確かめられなかった」を分ける、と同じ趣旨）。
+ */
+export const GENERATE_TOO_LONG_TITLE = "動画案が長くなりすぎました";
 export const RETRY_GENERATE_LABEL = "もう一度試す";
 export const START_MANUAL_LABEL = "手動で場面を作る";
+
+/**
+ * 入れた内容を使って、たたき台を作りにいく（#985）。
+ *
+ * ⚠️ **「新しく作る」と言わない**＝いま開いている動画の入力を使うので、
+ * 新規作成と読み違えると「入れた内容が消える」と思わせる（実際には消えない）。
+ * ⚠️ **「続きから」と言わない**＝開き直すと段は先頭に戻る（`wizardStep` は保存しない＝画面の状態であって
+ * 動画の中身ではない・§5）。**入れた内容は残る**が、**段は続きではない**ので、そこは約束しない。
+ */
+export const RESUME_WIZARD_LABEL = "入れた内容から、たたき台を作る";
+
+/**
+ * 「見わたすタイムライン」への入口（#1026）。
+ *
+ * ⚠️ **同じ行き先に2つの言い方があった**＝たたき台は「タイムラインで見る」、
+ * 仕上がり確認は「タイムラインで見る・編集する形にする」。同じ画面へ行くのに
+ * **別のものに見える**（`06 §3`＝同じものは同じ言葉で呼ぶ）。
+ * ⚠️ **短いほうへ揃える**＝行った先に「タイムラインで編集する形にする」（焼き出し）が
+ * あるので、入口の名前に**その先の操作まで**入れると、押す前から2つのことを言うことになる。
+ */
+export const GO_TO_TIMELINE_VIEW_LABEL = "タイムラインで見る";
+
+/**
+ * **動画の一覧（ホーム）の呼び名**。左の帯・上の帯・戻る導線が**同じ文字**を使う。
+ *
+ * ⚠️ **同じ場所を2つの言葉で呼んでいた**（#1026・実機で確認 2026-09-10）＝左の帯は
+ * 「プロジェクト」、タイムライン画面の右上は「動画の一覧へ」。**「動画」へ改名した**が、
+ * 改名しただけだと**新しい名前が3か所に散る**（レビュー由来 🟡）＝次に割れても、
+ * 禁止語の門番は**語が違うだけでは赤くならない**。だから定数に寄せる（`06 §2` 規約11 と同じ流儀）。
+ */
+export const HOME_SCREEN_LABEL = "動画";
+
+/** 一覧へ戻る導線の文言（`HOME_SCREEN_LABEL` から作る＝呼び名が変われば一緒に変わる）。 */
+export const BACK_TO_HOME_LABEL = `${HOME_SCREEN_LABEL}の一覧へ戻る`;
+
+/**
+ * 白紙から作った動画へ、あとから会社情報を入れる入口（#1003）。
+ *
+ * ⚠️ **「見直す」ではない**＝まだ何も入れていないので、「入れた内容を見直す」と言うと
+ * **在りもしないものを指す**（`06 §12.1`「名指しするものはその画面に実在すること」）。
+ *
+ * ⚠️ **動画の種類を選ばない言い方にする**（PR #1028 レビュー 🟡）＝入れるものは種類で変わる
+ *（採用なら**会社情報**・一般なら**発表の内容**＝`videoKind`）。「会社情報」と決め打つと、
+ * 社内発表の動画で**入れないものを指す**ことになる。兄弟の「入れた内容を見直す」が
+ * 同じ問題を**種類を選ばない言い方**で解いているので、そちらへ揃える（分岐を増やさない）。
+ *
+ * ⚠️ **決定（2026-09-03）＝白紙にも入口を出す**（#1003 の案 (a)）。
+ * 理由＝出さないと、白紙で始めた人は**AIにたたき台を作ってもらう道が永久に無い**
+ *（会社情報が無いと渡すものが無い）＝作り直すしかない行き止まり。
+ * ⚠️ **#393「白紙はウィザードを通らない道」とは矛盾しない**＝あれは**始めるときに**
+ * 通らなくてよい、という話で、**あとから入れる道を塞ぐ**という意味ではない。
+ * 入口を置いても、通るかどうかは利用者が決める。
+ */
+export const ADD_WIZARD_INPUT_LABEL = "内容を入れる（AIに頼めるようになります）";
+
+/**
+ * 入れた内容（会社情報・発表テーマ）を見直しにいく（#985）。
+ *
+ * ⚠️ **ウィザードの案内と対にする**＝「会社情報は、あとからでも直せます」と言っているのに、
+ * **指す先がどこにも無かった**（`06 §12.1`＝案内の中で名指しするものは、その画面に実在すること）。
+ */
+export const EDIT_WIZARD_INPUT_LABEL = "入れた内容を見直す";
+
+/**
+ * 動画案を作り直すと、いまの手直しが消えることの確認（#985 レビュー 🔴）。
+ *
+ * ⚠️ **確認は「作る手前」に置く**＝もとはたたき台の「作り直す」にしか無く、
+ * **ウィザード経由では通らなかった**（入れた内容を見直して作り直すと、場面が黙って消える）。
+ * ⚠️ **どの道から来たかに依存させない**＝#985 で「入れた内容を見直す」を足して
+ * **その道が実際に通れるようになった**ので、確認の置き場所を実行の側へ寄せる。
+ */
+export const REGENERATE_OVERWRITE_CONFIRM =
+  "今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？";
+/** 動画案づくりの失敗で、文が設定を名指ししているときの行き先（UI/UX 監査 2026-10-02＝送り直しても直らない失敗）。 */
+export const OPEN_AI_SETTINGS_LABEL = "設定を開く";
+
 /** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
 export function generateFailedMessage(reason?: string | null): string {
   return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
 }
+
+/**
+ * ディスク容量のユーザー向け表記（焼き出し前の「増える容量」＝ADR-0032 決定13）。
+ * **目安として伝えるもの**なので桁を丸め、単位は身近な MB/GB を使う（KB 未満は「1MB 未満」に寄せる＝
+ * 「0.003MB」のような読みづらい数字を出さない）。
+ */
+export function formatDiskSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return "1MB 未満";
+  if (mb < 1024) return `約 ${Math.round(mb)}MB`;
+  return `約 ${(mb / 1024).toFixed(1)}GB`;
+}
+
+/**
+ * 焼き出しで持っていけないものの案内（`15 §6` の `BAKE_*`）。**全コードに文言が要る**＝
+ * 種類が増えたらコンパイルエラーで気づく（黙って無言の項目を作らない・§2-5）。
+ */
+export const bakeNoteMessage: Record<BakeNoteCode, string> = {
+  BAKE_DIALOGUE_SUBTITLE_SKIPPED: "セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください",
+  BAKE_VIDEO_START_TIMING_SKIPPED: "動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください",
+};
+
+/** 持っていけないもの1件の案内＋対象の場面（例:「場面2・5 …」）。 */
+export function bakeNoteText(note: BakeNote): string {
+  return `${formatSceneNumbers(note.sceneNumbers)}：${bakeNoteMessage[note.code]}`;
+}
+
+/**
+ * トラック（列）のユーザー向け名称（ADR-0032・#629）。未設定のときの自動名＝種別＋番号。
+ * 全値必須＝`TrackKind` が増えたらコンパイルエラーで気づく。`トラック` は技術語なので「列」と言う（§2-3）。
+ */
+const trackKindLabel: Record<TrackKind, string> = {
+  visual: "映像",
+  audio: "音",
+};
+
+/**
+ * 連番は**種別ごと**に数える（`11 §7.6`「未指定＝種別＋連番の自動名」）。
+ * 並び全体の通し番号にすると、映像3本＋音2本の動画で「音1」が無く「音4・音5」になる。
+ */
+export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?: string }[], trackId: string): string {
+  const track = tracks.find((t) => t.id === trackId);
+  if (!track) return "";
+  if (track.name) return track.name;
+  const same = tracks.filter((t) => t.kind === track.kind);
+  const i = same.findIndex((t) => t.id === trackId);
+  // ⚠️ **番号は、列を足しても動かない向きに数える**（#1249・実機で踏んだ）。
+  //   並びは**配列の後ろほど手前**（`11 §7.6`）で、画面は手前を上に出す＝表示は配列の逆さ。
+  //   映像は**足すほど手前（画面の上）へ積む**ので、`映像1` は映像の中の**いちばん下**＝配列の順で数えられる。
+  //   音は**足すほど下へ積む**ので、`音1` は音の中の**いちばん上**＝配列の順とは逆に数える。
+  //   ⚠️ **これは業界の型と同じ**（ADR-0034）＝映像は V1 が下・音は A1 が上。
+  //   逆に「画面の上から」で揃えると、**音を足したときに元の列の番号が付け替わる**
+  //  （実機で `音1` が `音2` に化けた＝自分の付けたはずの名前が動く）。
+  const order = track.kind === TRACK_KIND.audio ? same.length - i : i + 1;
+  return `${trackKindLabel[track.kind]}${order}`;
+}
+
+/**
+ * 動画を開けなかった／削除できなかったときの断り（#1026）。
+ *
+ * ⚠️ **`uiLabels` に置く**（PR #1056 レビュー 🟡）＝画面のローカル定数のままだと、表と実装の
+ * **等値の突き合わせ**（`errorStateTable` の `codeMessages`）に載らず、**弱い段**（実装のどこかに
+ * その文字列が在るか）でしか守られない。語をそろえたときに実際にここで取りこぼした。
+ * ⚠️ **原因は書かない**（§2-5）＝どちらも「もう一度」で直りうる想定外の失敗（読めない・版が新しいは
+ * `ProjectLoadError` が理由つきで出す＝そちらが優先される）。
+ * ⚠️ **「一覧から別の動画を選んでください」と書かない**（#793 レビュー）＝以前の固定文はそう書いていたが、
+ * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
+ * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
+ */
+export const PROJECT_OPEN_FAILED_MESSAGE = "この動画を開けませんでした。もう一度お試しください。";
+export const PROJECT_DELETE_FAILED_MESSAGE = "この動画を削除できませんでした。もう一度お試しください。";
+
+/**
+ * クリップのユーザー向け名称（ADR-0032・#629）。名前が付いていれば優先し、無ければ中身から短く作る。
+ * 全値必須＝`TimelineClipKind` が増えたらコンパイルエラーで気づく（無名の部品ができない）。
+ */
+// 空間の語彙は自由配置と**同じもの**（`TIMELINE_CLIP_KIND` は `FREE_ELEMENT_KIND` を広げた集合＝`11 §7.6`）。
+// 名前も `freeKindLabel` から広げる＝同じ物を画面によって別の名で呼ばない（§6・ADR-0026②）。
+const clipKindLabel: Record<TimelineClipKind, string> = {
+  ...freeKindLabel,
+  template: "見た目パターン",
+  audio: "音",
+  voice: "読み上げ",
+};
+
+/**
+ * 帯に出す名前。
+ *
+ * ⚠️ **素材の名前を出す**（#1250）＝以前は素材のクリップが**どれも「素材」**になり、
+ * 並びを見ても**どちらがどれか分からなかった**（素材の一覧では「ゆうこ（笑顔）」と名前を付けて
+ * 管理しているのに、置いた途端に消えていた）。文字のクリップは中身が出るので、
+ * **写真・動画・音だけが潰れて**いた。
+ * ⚠️ **クリップへ焼き込まない**（§2-7）＝素材の名前を変えたときに**帯だけ古い名前**になる。
+ * **描くときに引く**＝そのために `assets` を受ける。
+ *
+ * @param clip 帯の中身。`name` が付いていればそれが最優先（利用者が付けた名前）。
+ * @param assets その動画が持っている素材（省略すると素材の名前は出ない＝置く前の見本などで使う）。
+ */
+export function clipLabel(
+  clip: {
+    kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string };
+    assetId?: string | null; bundledBgmId?: string | null;
+  },
+  assets?: readonly { assetId: string; displayName: string }[],
+): string {
+  if (clip.name) return clip.name;
+  // 文字が入っているものは中身を見せたほうが見分けやすい（長いものは切る＝列の幅を壊さない）。
+  const body = clip.voice?.text ?? clip.text;
+  if (body) return body.slice(0, 12);
+  // 同梱BGM は素材を持たないので、曲の名前で見分ける。
+  const bgm = bgmById(clip.bundledBgmId);
+  if (bgm) return bgm.label;
+  const asset = clip.assetId ? assets?.find((a) => a.assetId === clip.assetId) : undefined;
+  if (asset?.displayName) return asset.displayName.slice(0, 20);
+  return clipKindLabel[clip.kind];
+}
+
+/**
+ * **同じ時刻に重なって出る字幕**があることの知らせ（#1014）。
+ *
+ * ⚠️ **位置は直さない**（`overlappingSubtitleClips` の JSDoc と同じ理由）＝あとから計算し直すと
+ * 利用者が**手で置いた場所を黙って動かす**（§2-5）。場面形式は帯の位置を保存せず描くたびに出しているが、
+ * こちらは y が**利用者の編集できるデータ**なので、**知らせる**のが筋。
+ * ⚠️ **次の行動は2つとも出す**＝上下にずらす／出る時間をずらす。どちらもこの画面でできる。
+ */
+export function subtitleOverlapMessage(count: number): string {
+  return `同じ時刻に重なって出る字幕が${count}組あります。そのままだと文字が重なって読めません。`
+    + `どちらかの字幕を選んで、上下にずらすか、出る時間をずらしてください。`;
+}
+
+/**
+ * **まとめて声を作ったとき、長さを合わせられなかったぶんの案内**（#1045）。
+ *
+ * ⚠️ **1件ずつのときの断り方をそのまま使えない**＝あちらは「選んだ部品」の欄に出すので
+ * **相手＝いま選んでいる部品**だが、まとめて作ると**選んでいない部品**が相手になる
+ *（欄を指すだけでは、どの部品の話なのか読めない＝§2-5・ADR-0034 決定10「操作した所で返す」）。
+ * ⚠️ **名前で示す**＝どれを直せばよいか分かるようにする（`importPartlyFailedMessage` と同じ考え）。
+ * ただし**書き方は同じではない**（PR #1049 レビュー ℹ️）＝あちらは**全件を並べる**が、こちらは
+ * **頭のいくつかと件数**にする。**読み上げは動画の数だけ増える**（取り込みは一度に選んだぶんで止まる）ので、
+ * 全件並べると案内が画面を埋める＝場面の番号（`formatSceneNumbers`）と同じ理由で打ち切る。
+ * ⚠️ **声は残っている**ことを言う＝「失敗」ではないので作り直させない。
+ * ⚠️ **次の行動はここに書かない**（PR #1049 レビュー 🟡）＝合わせられない理由は**重なり**とは限らず
+ *（**列が固定されている**こともある）、1つの締めを書くと**片方では効かない案内**になる（§2-5）。
+ * 理由ごとの次の行動は**その理由の文**（`editBlockedMessage`）が既に持っているので、呼び出し側が**添える**。
+ */
+export function bulkVoiceNotFittedMessage(names: readonly string[]): string {
+  const head = names.slice(0, 3).join("」「");
+  const rest = names.length > 3 ? `」ほか${names.length - 3}件` : "」";
+  return `「${head}${rest}は、声は作りましたが長さを合わせられませんでした。`;
+}
+
+/**
+ * 音量の変化を置いている間の案内（#512 段4）。点があるとその点が音量を決めるので、部品の「音量」欄
+ * （一定の音量）は使われない＝**設定したのに音が変わらない**を作らないため、欄を押せなくして理由を出す
+ * （ADR-0026①・§2-5）。
+ */
+export const VOLUME_POINTS_OVERRIDE_HINT =
+  "音量の変化を置いている間は、その点が音量を決めます。一定の音量に戻すには「音量の変化をすべて外す」を押してください";
+
+/**
+ * 自動保存に失敗したときの案内（`15 §6` の `TIMELINE_SAVE_FAILED`・#693）。タイムライン編集は**自動保存**
+ * （`06 §12.1`）で、共通トップバーの保存ボタンは出さない（ADR-0032＝押すと場面形式の文書を保存してしまう）
+ * ＝**失敗を伝える担い手はこの画面しかいない**。黙って落とすと「閉じても消えない」の前提が破れる
+ * （ADR-0026④）ので、次の行動（もう一度保存する）を添えて出す（§2-5）。
+ */
+export const TIMELINE_SAVE_FAILED_MESSAGE =
+  "変更を保存できませんでした。もう一度「保存し直す」を押してください。押しても直らないときは、直前の操作を取り消してからお試しください";
+
+/**
+ * 保存の状態の控えめな表示（#693）。**場面形式と同じ言い方**にする（`saveButtonLabel`／`SaveStatusBadge` が
+ * 「保存中…」「保存しました」を使っている＝同じ概念を別の言い方にしない・ADR-0026②）。
+ * 失敗は文言でなく `TIMELINE_SAVE_FAILED_MESSAGE`＋再試行の導線として出すのでここでは扱わない。
+ * `idle`（保存待ち）は出さない＝**画面を離れるときに書き切る**ので、数百ミリ秒だけ「未保存」を点滅させない。
+ */
+export function timelineSaveStatusLabel(saveStatus: "idle" | "saving" | "saved" | "error"): string {
+  return saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "";
+}
+
+/**
+ * 秒を「m:ss」表記へ。**場面形式の見わたす画面とタイムライン編集で同じ書き方にする**ための単一の参照元
+ * （§6・ADR-0026②＝同じ概念を同じ見せ方に）。短い動画でも "0:05" と読める。
+ */
+export function clockLabel(sec: number): string {
+  const whole = Math.round(sec);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** 帯（クリップ）のツールチップ＝名前と時間帯。両方の画面で同じ形にする。 */
+export function clipRangeTitle(label: string, startSec: number, endSec: number): string {
+  return `${label}（${clockLabel(startSec)}〜${clockLabel(endSec)}）`;
+}
+
+/**
+ * 素材が大きすぎるときの案内（#712＝両形式で共有）。**次の行動は画面ごとに違う**ので受け取る
+ * （場面形式には大きいファイル用のボタンがあり、タイムライン編集には無い＝実行できない案内にしない）。
+ * MB への換算もここ1か所（`Math.round` を画面ごとに書かない）。
+ */
+export function assetTooLargeMessage(nextAction: string): string {
+  const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+  return `このファイルは大きすぎます（上限${limitMb}MB）。${nextAction}`;
+}
+
+/**
+ * 種類の違うファイルを選んだときの案内（#347・§2-5）。
+ *
+ * ⚠️ **黙って種類を変えない**（ADR-0026④）＝写真の素材を動画で差し替えると、置いてある差し込み口が
+ * その種類を受け付けない場合があり（`assignableAssetsFor`）、**置いた場所から黙って消える**。
+ * かといって種類を変えずに中身だけ入れ替えると、**写真として動画を描く**ことになり何も映らない。
+ * どちらも「黙って別の結果」なので、**差し替えずに断り、代わりの手を示す**。
+ *
+ * ⚠️ **判定は「動画／音／絵」**（`changesAssetKind`）＝種類と直接くらべると、ロゴ・ゆうこ・QR・装飾が
+ * 素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。文言も「写真」でひとまとめにする＝
+ * 利用者に「ロゴ素材」「QR 素材」と言い分けても直し方は同じ。
+ */
+export function assetTypeMismatchMessage(kind: AssetKind, format: ProjectFormat): string {
+  const name = assetKindName[kind];
+  return `この素材は${name}です。${name}のファイルをお選びください。`
+    + `別の種類に変えたいときは、そのファイルを取り込んでから${assetPickAgainWhere(format)}。`;
+}
+
+/**
+ * 素材の種類の呼び名（#1050）。⚠️ **「音」も種類として数える**＝もとは動画／写真の2つしか無く、
+ * **絵の素材へ音を差し替えても通って**いた（`changesAssetKind` の JSDoc が「到達するようになったら
+ * 足すこと」と予告していた）。音の素材も選び直せるようになったので、その時が来た。
+ */
+const assetKindName: Record<AssetKind, string> = {
+  [ASSET_KIND.video]: '動画',
+  [ASSET_KIND.audio]: '音',
+  [ASSET_KIND.image]: '写真',
+};
+
+/**
+ * **取り込んだ後にどこで選び直すか**（#1019 ⑤）。形式で行き先が違う＝**タイムライン形式に「場面」は無い**
+ *（ADR-0032＝場面の区切りを持たない）ので、場面形式の言い方をそのまま出すと**存在しない行き先**へ案内する。
+ *
+ * ⚠️ **形式は必ず渡させる**（既定値を持たせない）＝新しい呼び出し口が黙って片方の言い方を持ち込まない
+ *（§2-5・ADR-0026②＝同じ状況で同じ案内。**片方だけ直す**を構造で止める）。
+ */
+function assetPickAgainWhere(format: ProjectFormat): string {
+  return format === PROJECT_FORMAT.timeline ? '部品を選んで入れ直してください' : '場面で選び直してください';
+}
+
+/**
+ * 差し替えた素材が短くなり、**切り出す範囲を収め直した**ときの案内（#347・§2-5・§6）。
+ *
+ * ⚠️ **黙って直さない**＝範囲は利用者が決めたものなので、勝手に変わったことを知らせる
+ *（`§2-5`＝直した結果と次に見るところを示す）。「失敗」ではないので原因は書かない。
+ */
+export function clipClampedMessage(count: number, format: ProjectFormat): string {
+  // ⚠️ **見に行く先も形式で違う**（`assetPickAgainWhere` と同じ理由）。
+  const where = format === PROJECT_FORMAT.timeline ? '「選んだ部品」の欄' : '場面編集';
+  return `差し替えた素材が短いため、${count}か所の使う範囲を新しい長さに合わせました。${where}でご確認ください。`;
+}
+
+/**
+ * まとめて取り込んで**一部が入らなかった**ときの案内（#858・§2-5・§6）。
+ *
+ * ⚠️ **1件だけのときはこれを使わない**＝その1件の理由をそのまま出す（単発で取り込んだときと
+ * 同じ文言になる＝ADR-0026②「件数で案内が変わらない」）。呼び出し側が2件以上のときだけ通す。
+ * ⚠️ **名前で示す**＝何を入れ直せばよいかが分かる。置き場所（絶対パス）までは出さない（読みにくい）。
+ * **両形式で同じ文言**（§6）。
+ */
+export function importPartlyFailedMessage(failedNames: readonly string[], firstReason: string | null): string {
+  return `${failedNames.length}件を取り込めませんでした（${failedNames.join("、")}）。${firstReason ?? ""}`;
+}
+
+/**
+ * **よく使う素材に置く**とき、まとめて置いて一部が失敗したときの案内（PR #905 レビュー）。
+ *
+ * ⚠️ **言い回しを増やさない**（§6）＝同じ状況（まとめて入れて一部だけ失敗）に対して
+ * `importPartlyFailedMessage` があるのに、画面の中で**3つ目の言い方**を作りかけていた。
+ * ⚠️ **語彙だけ変える**＝よく使う素材は「取り込む」ではなく**「置く」**（`06 §4`）なので、
+ * 形（件数＋名前＋最初の理由）は揃えたうえで動詞だけ合わせる。
+ */
+export function libraryPartlyFailedMessage(failedNames: readonly string[], firstReason: string | null): string {
+  return `${failedNames.length}件を置けませんでした（${failedNames.join("、")}）。${firstReason ?? ""}`;
+}
+
+/**
+ * 落としたものの中に**取り込めない形式**が混ざっていたときの案内（#1026 ②・§2-5）。
+ *
+ * ⚠️ **黙って捨てない**＝落とした本人は全部入ったと思うので、増えていないことに気づけない。
+ * ⚠️ **次の行動を言う**＝「どうすれば入るか」（形式を変える／別の導線）まで書く。
+ */
+export function droppedRejectMessage(names: readonly string[]): string {
+  return `${names.length}件は取り込めない形式でした（${names.join("、")}）。写真・動画のファイルを落としてください。音楽は書き出しの「BGM」から選べます。`;
+}
+
+/**
+ * 取り込んでいる最中に、もう一度まとめて取り込もうとしたときの案内（#858・§2-5）。
+ *
+ * ⚠️ **黙って落とさない**＝単発の取り込みは取り込み中を**黙って return** する（1件が入らないだけ）が、
+ * まとめて渡すと**N件がそっくり消える**。入口で断り、いつやり直せばよいかを言う。
+ * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
+ */
+export const IMPORT_BUSY_MESSAGE =
+  "いま素材を取り込んでいます。終わってからもう一度お試しください。";
+
+/**
+ * まとめて取り込みを中止したときの知らせ（#1024 ③）。
+ *
+ * ⚠️ **中止は「失敗」ではない**＝入ったものは**残っている**ので、
+ * 何件入ったかを言い、もう一度できることを添える（§2-5＝次の行動）。
+ * ⚠️ **「取り消した」と読ませない**＝途中まで入れた素材は消していない。
+ */
+export function importCancelledMessage(done: number): string {
+  return done > 0
+    ? `取り込みを中止しました。${done}件は入っています。残りは、もう一度「素材を追加」から入れてください`
+    : "取り込みを中止しました。まだ何も入っていません。もう一度「素材を追加」から入れてください";
+}
+
+/**
+ * 取り込み先の動画が無いときの断り（差分再監査 7巡目 ℹ️）。**判定（`hasOpenProject`）は共有したのに
+ * 文言は各画面の直書きだった**＝片方だけ直る形が残る（§6・ADR-0026②「同じ断りを2通りにしない」）。
+ *
+ * ⚠️ **ボタンに添える短い理由**（なぜ押せないか）。**次の行動**（先に動画を開くか、新しく作る）は、
+ * 空の一覧の案内文など**操作できる場所**に置く＝ホバーにしか無い、を作らない（§2-5）。
+ */
+export const IMPORT_NO_PROJECT_MESSAGE = "先に動画を開いてください";
+
+/**
+ * 場面形式の素材置き場に、**タイムライン形式を開いている人**が来たときの断り（#991）。
+ *
+ * ⚠️ **「先に動画を開いてください」は嘘になる**（開いているので）＝しかも**次の行動が違う**。
+ * そちらの素材は**その編集画面から**取り込む（この画面が扱うのは場面形式の素材）。
+ */
+export const IMPORT_TIMELINE_OPEN_MESSAGE =
+  "この画面は、場面から作る動画の素材置き場です。タイムラインの動画へ入れるなら、その編集画面から取り込んでください";
+
+/**
+ * いま使っていない種別・要素にフォントの指定が残っているときの知らせ（差分再監査 9巡目 ℹ️）。
+ *
+ * ⚠️ **両形式で同じ文言**（場面編集とタイムライン編集）＝2画面に直書きすると片方だけ直る形が残る（§6）。
+ * ⚠️ **出すのは「もう描かれないもの」だけ**＝描かれている文字を「使っていない」と言うと嘘になり、
+ * 案内どおり戻すと**動画に出ている字体が変わる**（§2-5）。
+ */
+export const DORMANT_FONT_HINT =
+  "いまの見た目パターンでは使っていない文字にも、フォントの指定が残っています。使わないなら「動画全体に合わせる」に戻せます。";
+
+/**
+ * 取り込みを待っている間に書き出しが始まっていたときの案内（#712）。**逆向き**の
+ * `EXPORT_BLOCKED_IMPORTING_MESSAGE` と対で、どちらが先でも「消えた理由」が分かるようにする。
+ */
+export const IMPORT_BLOCKED_EXPORTING_MESSAGE =
+  "いま動画を書き出しているので、取り込めませんでした。書き出しが終わってからもう一度お試しください。";
+
+/**
+ * 素材を取り込んでいる最中に書き出しを始めようとしたときの案内（#570 P1）。
+ * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
+ */
+export const EXPORT_BLOCKED_IMPORTING_MESSAGE = "素材の取り込み中です。取り込みが終わってから書き出してください。";
+
+/**
+ * 声を作っている最中に書き出しを始めようとしたときの案内（#718）。
+ * **両形式で同じ文言**（場面形式は `ExportScreen` の `startBlockedMessage` が出す・ADR-0026②・§6）。
+ */
+export const VOICE_BUSY_EXPORT_MESSAGE = "声を作成中です。作成が終わってから書き出してください。";
+
+/** 書き出し中に画面を離れようとしたときの案内（#719）。進み具合も中止もこの画面の中にしかない。 */
+export const LEAVE_BLOCKED_EXPORTING_MESSAGE = "いま動画を書き出しています。終わってから画面を移ってください。";
+
+/** 大きいファイルを取り込む道がある画面（はじめの入力・素材の画面）の次の行動。 */
+export const ASSET_TOO_LARGE_USE_PICKER = "大きいファイルは「写真・動画を選ぶ」から取り込んでください。";
+/** その道が無い画面（タイムライン編集）の次の行動。 */
+export const ASSET_TOO_LARGE_PICK_SMALLER = "もっと小さいファイルをお選びください。";
+
+/**
+ * よく使う素材を置けなかったときの既定（#1130 レビュー由来 🟡）。
+ *
+ * ⚠️ **同じ file に2本あった**＝まとめて置く側と1件ずつ置く側で**同じ文を書いて**おり、
+ * 片方だけ直る形だった（§6＝ユーザー向け文言は1か所）。
+ */
+export const LIBRARY_ADD_FAILED = "素材を置けませんでした。もう一度お試しください。";
+
+/**
+ * **この瞬間で絵を止める**（#356 ②＝フリーズフレーム）。
+ *
+ * ⚠️ **§2-3 を根拠にしていたのは誤り**（#1136 レビュー由来 🟡）＝ADR-0034 決定21 は
+ * 「§2-3 が禁じているのは **JSON・FFmpeg・templateId のような実装用語**であって、
+ * **動画編集の一般語（分割・ズーム・吸着・トリム）は対象外**」と整理している。
+ * 「フリーズ」を避ける理由は §2-3 ではなく、**この操作が他社の「フリーズ」と結果が違う**こと
+ *（あちらは止めたぶん尺が伸びる／こちらは**ここから先が置き換わる**＝ADR-0034 決定11 で
+ * 押しのけを採らないため）。同じ名前にすると、知っている人ほど結果を読み違える。
+ * ⚠️ **最終的な言い方は利用者判断**（決定21 は利用者判断の項）＝いまは説明を添えて凌いでいる。
+ * ⚠️ **ボタンと右クリックで同じ名前**＝同じことをする入口の名前を割らない（ADR-0026②）。
+ */
+export const FREEZE_FRAME_LABEL = "この瞬間で絵を止める";
+
+/**
+ * 素材画面の「この瞬間を写真にする」（#349）の呼び名。
+ *
+ * ⚠️ **同じファイルの中でも写さない**（#1168 レビュー ℹ️・§6）＝見出しとボタンの2か所に出る。
+ * ⚠️ **`*_LABEL` と名づける**＝`uiMessageScan` の差し戻し（`labelConstants`）はこの名前しか見ない。
+ */
+export const CAPTURE_FRAME_LABEL = "この瞬間を写真にする";
+
+/**
+ * 「この瞬間で絵を止める」の添え書き（#1155 ⑥）。
+ *
+ * ⚠️ **他社と結果が違うことを、押す前に言う**＝あちらは**尺が伸びる**が、こちらは伸びない
+ *（ADR-0034 決定11＝押しのけは採らない）。この差の埋め合わせ（伸ばし方）は**画面に出していなかった**
+ *（`06 §12` には書いてある）ので、押した後に「思ったより短い」となった人の次の一歩が読めなかった。
+ */
+export const FREEZE_FRAME_LENGTH_NOTE =
+  "全体の長さは変わりません。伸ばすときは、止めた絵の端を引っぱります";
+
+/**
+ * 見つからない素材の**直し方の呼び名**（#347・ADR-0024）。
+ *
+ * ⚠️ **取り込み直すのとは違う**＝これは**同じ素材の中身だけ**入れ替える（`assetId` は変わらない）ので、
+ * **置いた場所・切り出す範囲・動き・字幕の紐づけがそのまま残る**。取り込み直すと新しい素材になって全部失う。
+ * ⚠️ **寄せられるものは寄せ、寄せられないものは検査で留める**（#1169）＝
+ * **ボタンと、表に無い案内**（素材画面の3か所・`TimelineProjectScreen` のボタン2つと案内1つ・
+ * `adapters` の断り）は `RELINK_ASSET_LABEL` から呼ぶ。
+ * ⚠️ **寄せられないのは2件だけ**（PR #1180 レビュー 🟡＝最初は「表と等値だから断りは全部寄せられない」と
+ * 束ねて書いていたが、**事実と違った**）。表の守り方は3種類あり、**ソースの書き方まで見るもの**だけが
+ * 組み立てを拒む：
+ * ① `CAPTURE_FRAME_ASSET_MISSING_MESSAGE`＝`messageConstsOf` が `export const *_MESSAGE` の
+ *    **ソースを読んで**引用符リテラルだけで出来ているかを見る（`${…}` を混ぜると赤）。
+ * ② タイムラインの「音が出せない素材があります…」＝表にしか無い文なので、**ソースに丸ごと在るか**で守られる。
+ * ③ `editBlockedMessage`／`exportBlockedMessage` の断りと `audioUnreadableMessage`＝
+ *    **評価後の文字列どうし**の等値（あるいは等値の対象外）なので**組み立ててよい** → 寄せてある。
+ * ⚠️ **①②は `relinkLabel.test.ts` が留める**＝この定数を改名すると**赤くなり、直す先が名指しで出る**
+ *（写しが増えたときも、数で気づく＝ただし見ているのは `uiLabels`・`adapters`・素材画面・タイムラインの4つ）。
+ * ⚠️ **ボタンだけ直しても足りない**＝案内文が旧名で残ると、探す先が画面の中で食い違う。
+ * ⚠️ **寄せる理由**＝利用者は**画面の文字でボタンを探す**ので、片方だけ言い換えると行き先が消える。
+ * ⚠️ **寄せ先は `*_LABEL` と名づける**＝`uiMessageScan` の差し戻し（`labelConstants`）がその名前しか見ない。
+ */
+export const RELINK_ASSET_LABEL = "ファイルを選び直す";
+
+/**
+ * 場面形式の「この瞬間を写真にする」で、**元の動画のファイルが見つからない**ときの断り（#1155 ⑤）。
+ *
+ * ⚠️ **押す前に断る**＝以前は文書の中身しか見ていなかったので、**走らせてから Rust に断られて**いた
+ *（タイムライン形式の「絵を止める」は同じ門を持っている＝ADR-0026②）。
+ *
+ * ⚠️ **「取り込み直す」と言わない**（#1168 レビュー由来 🔴）＝最初そう書いたのは
+ * 「この画面には『ファイルを選び直す』が無い」と思い込んでいたからで、**事実と違った**
+ *（`MaterialsScreen` の同じ右の欄、すぐ上にある）。取り込み直すと**新しい素材番号**になり、
+ * **置いた場所・切り出す範囲・動き・字幕の紐づけを失う**＝#347／ADR-0024 が決めた
+ * **非破壊の道と逆**を案内していた。
+ * ⚠️ **呼び名は `RELINK_ASSET_LABEL` と同じ**＝この画面に出る3か所（上のバナー・右の欄のボタン・
+ * 切り出し欄の案内）と同じ言葉で呼ぶ。利用者は**画面の文字でボタンを探す**ので、片方だけ
+ * 言い換えると行き先が消える。
+ * ⚠️ **ここだけは組み立てずに素の文字列で持つ**＝`errorStateTable` は `*_MESSAGE` を**表と等値**で
+ * 守っており、組み立てると中身を取れず**理由つきで外す**（＝誰も見ない）側へ落ちる。
+ * 呼び名との一致は `captureFrame.test.ts` が `RELINK_ASSET_LABEL` で留める。
+ */
+export const CAPTURE_FRAME_ASSET_MISSING_MESSAGE =
+  "この動画のファイルが見つかりません。「ファイルを選び直す」から入れ直してから、もう一度お試しください";
+
+/**
+ * 時間の一点に置く**目印**（#356 ①）の言葉。
+ *
+ * ⚠️ **動画には出ない**ことを、名前と説明で伝える＝「印を置いたら動画に出る」と思わせない。
+ * ⚠️ **併記にした**（#1138 レビュー由来 ℹ️）＝当初は「目印」だけにして「§2-3 だから
+ * 『マーカー』と書かない」と説明していたが、**ADR-0034 決定21 の素直な読みは「マーカー」**
+ *（Premiere・Resolve・CapCut の日本語 UI はどれも「マーカー」＝分割・吸着・トリムと同じ一般語）。
+ * 「目印」だけにすると**新しい言い換えを1つ増やす**側で、決定21 が抑えたかった方向になる。
+ * ⚠️ **実害は行き止まりではなく発見性**＝困って調べたとき、世の中の解説は全部「マーカー」なので
+ * 繋がらない。併記なら**どちらの語からでも辿れる**。
+ * ⚠️ **「（動画には出ません）」は見出しから外した**＝ほかの節名（位置・大きさ／中身／切り抜き／動き／音）と
+ * 形が違う。説明の側（まだ無いときの案内）で言う。呼び方の最終判断は利用者。
+ */
+export const MARKER_SECTION_TITLE = "マーカー（目印）";
+// ⚠️ **置くボタンは「並び」の道具立ての行へ**（ADR-0048・#1256 b2）＝以前は目印の節の中にあり、
+// **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。短い名前にし、説明は `title` と
+// 近道キーの一覧に回す（行を増やさない＝#1104 で道具立てを1行に畳んだのと同じ理由）。
+export const MARKER_ADD_LABEL = "目印を置く";
+export const MARKER_ADD_TITLE =
+  "いまの再生位置に目印を置きます（M キーでも）。直したい所・音を入れたい所に置いておくと、あとで辿れます（動画には出ません）。";
+export const MARKER_JUMP_TITLE = "この目印の位置へ移ります";
+export const MARKER_TEXT_PLACEHOLDER = "メモ（例：ここ直す／ここに効果音）";
+export const MARKER_MOVE_LABEL = "ここへ動かす";
+export const MARKER_MOVE_TITLE = "この目印を、いまの再生位置へ動かします";
+
+/**
+ * AI の接続キーまわりの断り（#1131）。
+ *
+ * ⚠️ **「できなかった」と「確かめられなかった」を分ける**＝**保存は済んでいるのに
+ * 「保存できませんでした」と出す**のは、起きたことと食い違う（ADR-0026①）。
+ * 利用者はキーを打ち直すことになり、しかも実際は保存済み＝その作業は丸ごと無駄になる。
+ * ⚠️ **鍵そのものは言わない**（§2-6 の隣＝画面にも記録にも値は出さない）。
+ */
+export const apiKeyMessage = {
+  API_KEY_SAVE_FAILED: "キーを保存できませんでした。もう一度お試しください。",
+  API_KEY_DELETE_FAILED: "接続を削除できませんでした。もう一度お試しください。",
+  /**
+   * ⚠️ **双子は文言の形まで揃える**（#1134 レビュー由来 🟡）＝片方だけ「接続の」が抜けていると、
+   * 同じ場面の断りなのに**別のことを言っている**ように読める（`15 §6` の規則5は形にも効く）。
+   * 主語は画面の確認文（「接続キーを削除しますか？」）に合わせて「接続キー」で揃える。
+   */
+  API_KEY_SAVED_UNVERIFIED:
+    "接続キーは保存できましたが、接続の状態を確かめられませんでした。設定を開き直してご確認ください。",
+  API_KEY_DELETED_UNVERIFIED:
+    "接続キーは削除できましたが、接続の状態を確かめられませんでした。設定を開き直してご確認ください。",
+  /**
+   * 画面に入った時点で状態を確かめられなかったとき（#1134 レビュー由来 🟡）。
+   *
+   * ⚠️ **案内を空手形にしない**＝上の2文は「設定を開き直してご確認ください」と言うのに、
+   * 開き直した先で確認がまた失敗すると、**何も言わずに「未接続」**へ変わっていた
+   *（直前に「保存できました」と出したのと食い違う）。§2-5 の「次の行動」は、
+   * **やった結果が利用者に見える**ことまで含む。
+   */
+  API_KEY_STATE_UNKNOWN:
+    "接続の状態を確かめられませんでした。アプリを開き直してから、もう一度お試しください。",
+} as const;
+
+/**
+ * 素材を取り込めなかったときの案内（#712＝両形式で共有）。
+ *
+ * ⚠️ **注記が嘘だった**（#1123）＝「生の例外は見せない」と書いてあったのに、**文字列なら中身を見ずに
+ * そのまま通して**いた（`e.message` も同じ）。Rust には `map_err(|e| e.to_string())` が **56 か所**
+ * あるので、`os error 3` のような生の OS エラーが**この関数を素通り**して画面へ出る道が在った。
+ * ⚠️ **物差しを2つ持たない**＝判定は `userFacingMessage` に1つだけ置き、ここは**既定の文**を与える薄い包み。
+ */
+export function importErrorMessage(e: unknown): string {
+  return userFacingMessage(e, "asset-import") ?? "素材を取り込めませんでした。もう一度お選びください。";
+}
+
+/**
+ * 置けなかった理由の案内（`15 §6` の `TIMELINE_EDIT_*`・ADR-0032）。**全コードに文言が要る**＝
+ * 理由が増えたらコンパイルエラーで気づく（無言で操作が効かない状態を作らない）。
+ * どれも「なぜ置けないか」でなく**次にどうすれば置けるか**を言う（§2-5）。
+ */
+export const editBlockedMessage: Record<EditBlockedReason, string> = {
+  TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
+  TIMELINE_EDIT_PASTE_OVERLAP: "貼る場所に先に置いてある部品があります。再生位置を空いている所へ動かしてから貼ってください",
+  TIMELINE_EDIT_PASTE_SOURCE_GONE: "写した部品の素材か列が、もうありません。部品を選び直して、写し直してください",
+  TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
+  TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
+  TIMELINE_EDIT_LOCKED_SELECTION: "固定された列の部品が選ばれています。固定を外すか、選び直してください",
+  TIMELINE_EDIT_TRIM_NONE_AT_TIME:
+    "選んだ部品が、いま再生位置にかかっていません。再生位置を部品の上へ移すか、かかっている部品だけを選んでください",
+  TIMELINE_EDIT_MARKER_EXISTS:
+    "その時間には、もう別の目印があります。再生位置を1コマずらしてから、もう一度押してください",
+  TIMELINE_EDIT_GROUP_ACROSS_TRACKS: "この列の部品が、ほかの列の部品とグループになっています。グループを外してから複製してください",
+  TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
+  TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
+  TIMELINE_EDIT_NOT_AUDIO: "その部品は音を持っていません。音の設定は、音や読み上げの部品で変えてください",
+  TIMELINE_EDIT_NOT_PLAYABLE: "その部品には速さ・素材の使い始めがありません。音か動画の部品で変えてください",
+  TIMELINE_EDIT_NO_ORIGINAL_AUDIO: "この動画には音が入っていないので、元の音は鳴らせません。音を付けるなら、音の列に音を置いてください",
+  TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
+  TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
+  TIMELINE_EDIT_FREEZE_FAILED: "その瞬間の絵を切り出せませんでした。少し違う位置でもう一度お試しください",
+  TIMELINE_EDIT_FREEZE_ASSET_MISSING: `この動画のファイルが見つかりません。知らせの「${RELINK_ASSET_LABEL}」で入れ直してからお試しください`,
+  TIMELINE_EDIT_FREEZE_CHANGED: "絵を止めている間に、その部品が変わりました。もう一度お試しください",
+  TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
+  TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
+  // ⚠️ **「素材の画面で外す」とは案内しない**（#816-5・ADR-0034 決定5 に記録済み）＝素材の画面は
+  // 場面形式の画面で、この動画の切り出し（`asset.clip`）はここからは触れない＝**従っても解除されない
+  // 行き止まり**になる。この形式で実際にできるのは「切り出していない動画に入れ替える」ことだけ。
+  // ⚠️ **切り抜きは部品の箱ぜんぶを切る**ので、要素ごとに分けると**各要素が自分の箱で切られる**＝別の絵。
+  // ⚠️ **寄せも名指しする**（差分再監査 5巡目 🟡）＝断るのは切り抜きだけでなく**素材の寄せ**も
+  // 含む（`cropAlign`）ので、切り抜きしか言わないと**寄せだけ設定した人は案内どおり解除できない**。
+  TIMELINE_EDIT_EXPLODE_CROP:
+    "切り抜き・素材の寄せがしてある部品はバラせません。そのままバラすと切り取り方が変わります。切り抜きを外し、寄せを「中央」に戻してからバラすか、バラさずに使ってください",
+  TIMELINE_EDIT_EXPLODE_TALK_PULSE:
+    "喋っている間に「ふくらむ」部品はバラせません。そのままバラすと、ふくらむ中心が部品ごとに変わります。動き方を「はねる」か「ゆらゆら」にするか、「動かない」にしてからバラしてください",
+  TIMELINE_EDIT_EXPLODE_TRIM_END: "切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠に切り出していない動画を入れ直すか、バラさずに使ってください",
+  TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE:
+    "この枠だけ切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠の動画をいったん「なし」にして入れ直してからバラしてください",
+  // ⚠️ 「短くしてから」ではなく**分ける位置**を案内する＝素材の切り出しはこの形式から触れない
+  // 枠がある（`asset.clip`）ので、そこを直せと言うと行き止まりになる（#816-5 と同じ筋）。
+  TIMELINE_EDIT_SPLIT_PAST_SOURCE:
+    "そこは動画を使い切った後なので分けられません。動画が流れている間（映像が止まる前）の位置で分けてください",
+  // ⚠️ **「分ける」と原因は同じでも、次の行動が違う**（PR #1004 レビュー 🔴）＝
+  // あちらは「分ける位置を変える」、こちらは「そこまで詰めない」。同じ文を使い回すと、
+  // 案内が「分けられません」になって**していない操作**を指す（§2-5）。
+  TIMELINE_EDIT_TRIM_BEFORE_SOURCE: "素材の始まりより前には伸ばせません。前を長く見せたいときは、手前に別の部品を置いてください",
+  TIMELINE_EDIT_TRIM_PAST_SOURCE_END: "素材の終わりより先には伸ばせません。長く見せたいときは、速さを遅くするか「この瞬間で絵を止める」で続きを足してください",
+  TIMELINE_EDIT_TRIM_PAST_SOURCE:
+    "そこまで詰めると、動画を使い切った後から流れます。動画が流れている間（映像が止まる前）まででお試しください",
+
+  TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO:
+    "差し込み口ではない場所（背景など）に動画が入っています。そのままバラすと動き出して見た目が変わります。その動画を差し込み口へ入れるか、写真に差し替えてからバラしてください",
+  // ⚠️ **書き出しの断り（`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と言い方を揃える**（#831）＝
+  // 「差し替えてから」ではなく「列へ直接置くか、差し込み口へ入れる」＝この部品ではなく**動画の置き方**を
+  // 変える案内。立ち絵を触る欄がここに無いので、それ以外に実在する行動が無い。
+  TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
+  TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
+  TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
+  TIMELINE_EDIT_RANGE_NOT_SET: "先に「ここから（範囲）」と「ここまで（範囲）」で範囲を決めてください",
+  TIMELINE_EDIT_RANGE_EMPTY: "作業範囲の幅がありません。「ここまで（範囲）」を別の位置で置き直してください",
+  TIMELINE_EDIT_RANGE_NO_CLIPS: "作業範囲に部品がありません。範囲を取り直すか、「範囲を削除して詰める」で空白を詰めてください",
+  TIMELINE_EDIT_SPLIT_NONE_SELECTED: "分ける部品を選んでください",
+  TIMELINE_EDIT_SINGLE_CLIP_ONLY: "1つだけ選ぶと使えます",
+  TIMELINE_PLAY_EXPORTING: "いま動画を書き出しています。終わってから再生できます",
+  TIMELINE_EDIT_UNSPLITTABLE: "読み上げと、それに合わせている字幕は分けられません（文と音がずれるため）。字幕だけ分けたいときは「連動する読み上げ」で連動をやめてください",
+  TIMELINE_EDIT_SPLIT_OUTSIDE: "その位置では分けられません。再生位置を部品の中（両側が0.1秒以上残る所）へ動かしてください",
+  TIMELINE_EDIT_LINKED_SUBTITLE_TIME: "連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます",
+  TIMELINE_EDIT_VOLUME_POINTS_FULL: `音量の変化は1つの部品に${VOLUME_POINTS_MAX}か所までです。ほかの点を外してから置いてください`,
+  TIMELINE_EDIT_VOLUME_POINTS_KIND: "音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください",
+  TIMELINE_EDIT_CONTENT_FIELD: "この部品にはその項目がありません。直したい部品を選び直してください",
+};
+
+/**
+ * 音の入っていない動画を選んだときの知らせ（#512 段2・`15 §6`）。**元の音の欄は出さず、代わりにこれを出す**。
+ * ⚠️ **押せない欄を並べない／押しても何も起きない、も作らない**（§2-5）＝その場で次の行動を出す。
+ * 断りではなく知らせなので `exportBlockedMessage` には入れない。
+ */
+export const TIMELINE_VIDEO_NO_AUDIO =
+  "この動画には音が入っていません（音を付けるなら、音の列に音を置いてください）";
+
+/**
+ * 動画に音が入っているか**確かめられなかった**とき（#512 段2・`15 §6`）。
+ * ⚠️ 「入っていません」と断定しない＝取り込みのときに調べられなかっただけかもしれないので、
+ * 次の行動は「取り込み直す」（音の列に音を置く、ではない）。場面形式も同じ2文で分けている。
+ */
+export const TIMELINE_VIDEO_AUDIO_UNKNOWN =
+  "この動画に音が入っているか確かめられませんでした。もう一度取り込むと使えることがあります";
+
+/**
+ * まとまり全体を薄くする動きが掛かっている間、仕上がり確認では実映像を出さない（#512 段1・`11 §7.6.4`）。
+ * ⚠️ 層ごとに薄さを掛けると**重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になるため。
+ * 黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
+  "グループ全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
+/**
+ * この画面（WebView）が**復号できない形式**の動画は、仕上がり確認で実映像にできない（#816-1）。
+ * ⚠️ **黙って静止＋無音にしない**＝`.avi`/`.mkv` は取り込めるが復号できず、必ずこの状態になる
+ *（例外ではなく主要ケース）。復号できる形式なら書き出しには実映像＋元の音が入るので、言わないと
+ * **見えていたものと違う動画**が出る（ADR-0001・ADR-0026④）。音も鳴らせない（同じ復号器を通るため）。
+ * ⚠️ **「書き出しには入る」と言い切らない**（レビュー申し送り）＝この状態には**素材のファイルが
+ * 見つからない**ときも落ちてくる（`video` の失敗の合図は理由を区別しない）。そちらは書き出しも
+ * 失敗するので、約束すると嘘になる。**両方に当たる行動**（取り込み直す）だけを出す（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_UNPLAYABLE =
+  "この動画は、ここでは映像も音も出せません（形式が合わないか、ファイルが見つかりません）。MP4 で取り込み直すと、ここでも確かめられます";
+
+/**
+ * 回した部品を左右非対称に切り抜いているとき、仕上がり確認では実映像を出さない（#512 段1・`11 §7.6.4.1`）。
+ * ⚠️ 書き出しは切り抜きの矩形を**矩形自身の中心**で回すが、画面の実映像は**部品の中心**で回るため
+ * **別の窓**になる。直せるまでは出さない側へ倒し、黙って別の絵にしない（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
+  "回した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
+/**
+ * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
+ * **全コードに文言が要る**＝理由が増えたら気づく。
+ * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
+ * だけ（そこだけ静止画のまま）。静止画で出すのを成功にしない（ADR-0026④）。
+ * ⚠️ **`audioUnreadable` もここに無い**（#1064・PR #1066 レビュー 🟡）＝音源の種類（読み上げ／同梱の曲／
+ * 取り込んだ素材）で**できることが違う**ので、1つの締めを書くと**2種類では実行できない行動**を勧めることになる。
+ * ⚠️ **`volumePointsTooMany` はここに無い**（#831）＝挙げる部品に読み上げが混ざりうる集計型の理由で、
+ * 「分けてください」を添えてよいかが**部品ごとに違う**。`lockedTrackMessage` と同じ流儀＝呼び出し側が
+ * 状況を渡して締めを変える {@link volumePointsTooManyMessage} を直接呼ぶ。
+ */
+export const exportBlockedMessage: Record<
+  Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.volumePointsTooMany | typeof TIMELINE_EXPORT_BLOCK.audioUnreadable>,
+  string
+> = {
+  TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
+  TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
+    // ⚠️ 「読み込み直す」は書かない（#812）＝読み直す操作が画面に無く、自作のものを消した場合は
+    // 読み直しても戻らない（実行できない／効果の無い行動を名指ししない・§2-5）。
+    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して、置き直してください",
+  TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
+    "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
+  TIMELINE_EXPORT_ASSET_UNREADABLE:
+    "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
+  // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
+  // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
+  TIMELINE_EXPORT_USER_FONT_MISSING:
+    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、使っている文字で別の文字の形を選び直してください",
+  // ⚠️ **「見つからない」とは別**＝目録が読めないので待っても埋まらない（場面形式の `unknownFont` と同じ）。
+  TIMELINE_EXPORT_USER_FONT_UNREADABLE:
+    "この動画は取り込んだ文字の形（フォント）を使っていますが、いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。アプリを開き直してから、もう一度お試しください",
+  // ⚠️ **押す前に断る**（#1068）＝ファイルが無ければコマを焼く段で必ず落ちるので、
+  // 保存先を聞いて走り出してから途中で止めない（`06 §12.1`）。
+  // ⚠️ **構造を保つ直し方を名指しする**（#1101・#1019 ⑤）＝「取り込み直す」は新しい番号になり、
+  // 切り抜き・動き・連動する字幕まで作り直しになる。知らせの側に「ファイルを選び直す」を出したので、
+  // そちらを指す（§2-5＝実行できて、しかも失うものが少ない行動を出す）。
+  TIMELINE_EXPORT_VIDEO_FILE_MISSING:
+    `この動画で使っている動画のファイルが見つかりません。編集画面の知らせから「${RELINK_ASSET_LABEL}」で入れ直すと、置いた場所・切り出す範囲・動き・字幕の紐づけはそのまま残ります`,
+};
+
+/**
+ * 音が読み込めないときの案内（#1064）。**音源の種類で次の行動が違う**（PR #1066 レビュー 🟡）。
+ *
+ * ⚠️ **「ファイルを選び直す」は取り込んだ素材だけの導線**＝読み上げにも同梱の曲にも**その操作は無い**
+ *（読み上げは「声を作る」で作り直す／同梱の曲は一覧から選び直す）。1つの締めを書くと、
+ * 2種類では**実行できない行動**を勧めることになる（§2-5・`volumePointsTooManyMessage` と同じ流儀）。
+ */
+export function audioUnreadableMessage(kind: AudioSourceKind): string {
+  const head = "動画で使っている音を読み込めませんでした。そのままだとその部分は無音になります。";
+  const how = kind === AUDIO_SOURCE_KIND.voice
+    ? "その読み上げを選んで「声を作る」でもう一度作ってください"
+    : kind === AUDIO_SOURCE_KIND.bundled
+      ? "その部品を選んで「音」の「鳴らす音」で選び直してください"
+      : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
+  return `${head}${how}`;
+}
+
+/**
+ * 音量の点が多すぎる、の案内（#831）。
+ *
+ * ⚠️ #723 の時点では「部品を分けてください」を書けなかった（分割が未実装＝実在しない操作を案内すると
+ * 行き止まりになる・決定5）。**分割は land 済み**（`splitClip`＝「ここで分ける」／`Ctrl+K`）だが、
+ * **読み上げは分けられない**（`isUnsplittableClipKind`）。挙げた部品が読み上げだけのとき「分けてください」
+ * を添えると、従っても分けられない＝実行できない行動を名指しすることになる（§2-5・#812 と同型）。
+ * @param hasSplittable 挙げた部品のうち分けられる種類が1つでもあるか（{@link volumePointsTooManyHasSplittable}）。
+ */
+export function volumePointsTooManyMessage(hasSplittable: boolean): string {
+  return hasSplittable
+    ? `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外すか、部品を分けてください`
+    : `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外してください`;
+}
+
+/**
+ * 見た目パターンが見つからない部品の案内（`15 §6` `TIMELINE_TEMPLATE_NOT_FOUND`・ADR-0032・#834-2）。
+ *
+ * ⚠️ **画面で手書きしない**＝{@link lockedTrackMessage} と同じ理由（#819-2）。手書きは
+ * `uiLabels.test.ts` の禁止語の検査が見る**走査対象（Record と共有関数）の外**に落ちるので、
+ * 混ざっても誰も気づかない。実際この文言は**画面2か所と `15 §6` を手でそろえて**成立していた
+ *（#812 の直しがそうなっていた）。
+ * ⚠️ **`TIMELINE_EXPORT_TEMPLATE_UNRESOLVED`（{@link exportBlockedMessage}）とは別物**＝あちらは
+ * 書き出しを断るコードで、締めも意図して違う（「そのままでは動画に出ません」）。ここへ寄せない。
+ *
+ * ⚠️ **「読み込み直す」は名指ししない**（#812）＝見た目パターンを読み直す操作は画面のどこにも無く
+ * （起動時に一度だけ）、自作のものを消した場合は読み直しても戻らない＝**実行できない／効果の無い
+ * 行動**になる（§2-5）。消して置き直す側だけを出す。
+ *
+ * @param count 件数。**省略＝選んでいるその部品1つ**の話（詳しい欄＝相手が画面に出ている）。
+ *   渡すと**全体の警告**になり、何が起きるか（動画に出ない）を添える＝一覧では消す相手が
+ *   画面に出ているとは限らず、「直さないとどうなるか」が分からないと後回しの判断ができない。
+ */
+export function missingTemplateMessage(count?: number): string {
+  return count == null
+    ? "この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。"
+    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して、置き直してください。`;
+}
+
+/**
+ * 場面の見た目が**見つからない／合っていない**ときの断り（差分再監査 10巡目 🟡・`15 §6` `TEMPLATE_NOT_FOUND`）。
+ *
+ * ⚠️ **文言は1か所から**＝画面に直書きすると、同じ状態に**2通りの断り**が並ぶ（実際、節の外と中で
+ * 「選び直してください」と「合う見た目パターンがまだありません」が食い違っていた）。⚠️ **検査にも
+ * 載せる**（`uiLabels.test.ts` の `MAPS.sharedFunctions`）＝Record しか見ない検査は、関数で作る文を
+ * そのままでは見ない（登録して初めて §2-3 の禁止語走査に入る・#819-2 の先例）。
+ * ⚠️ **実行できない次の行動を出さない**＝候補が1つも無いときに「選び直してください」と言わない（§2-5）。
+ *
+ * @param unresolved 見つからない（`true`）か、向き・場面に合っていない（`false`）か。
+ * @param pickableCount いま選べる見た目パターンの数。
+ * @param avail 候補ゼロのときの次の行動を分ける材料。**「できる手」を実際の在庫から決める**。
+ *   - `otherKind` … **別の種類なら**この向きに見た目がある（＝種類を変えれば選べる）。
+ *   - `anyLoaded` … 見た目パターンが**1つでも読み込めている**（＝作る画面が使える）。
+ */
+export function sceneTemplateProblemMessage(
+  unresolved: boolean,
+  pickableCount: number,
+  avail: { otherKind: boolean; anyLoaded: boolean } = { otherKind: false, anyLoaded: true },
+): string {
+  const what = unresolved ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。";
+  // ⚠️ **どこを指すかは呼ぶ側が足す**（差分再監査 11巡目）＝ここで「下から」と書くと、節の外へ出した
+  // 文でも「下から」と言い、呼ぶ側の「（下の…にあります）」と**方向を二重に指す**。
+  if (pickableCount > 0) return what + "選び直してください。";
+  const none = "この向き・場面に合う見た目パターンがまだありません。";
+  // ⚠️ **次の行動は「いま実際にできる手」から選ぶ**（差分再監査 12巡目 🟡・§2-5）＝**3段**に分かれる。
+  //   ①別の種類にある → 種類を変える（同じ画面でできる）
+  //   ②読み込めてはいる → 「見た目パターン」の画面で作る（作成の入口が出る）
+  //   ③1つも読み込めていない → 開き直す／連絡する（種類も変えられず、作成の入口も出ない）
+  // ⚠️ ②と③を混ぜると、**読み込めているのに「読み込まれていません」と嘘をつく**（PR #921 レビュー 🔴）。
+  if (avail.otherKind) return what + none + "種類を変えると、別の見た目パターンを選べます。";
+  if (avail.anyLoaded) return what + none + "「見た目パターン」の画面で作れます。";
+  return what + none + "見た目パターンが読み込まれていません。アプリを開き直してください。改善しない場合は、お手数ですがご連絡ください。";
+}
+
+/**
+ * 見た目パターンを**もとに作る**（複製して自分の見た目にする）ボタンの文言（#1031）。
+ *
+ * ⚠️ **1か所に置く**＝見本の直下（主な操作）と「ほかの操作」の両方から使うので、
+ * 写すと**同じボタンが画面で別の名前**になる（§6）。
+ * ⚠️ **「複製」ではなく「もとに作る」**＝押した先で何が起きるか（新しい自分の見た目ができて編集画面へ行く）
+ * が読める言い方にする。
+ */
+export const DUPLICATE_LOOK_LABEL = "この見た目をもとに作る";
+/** 作っている最中の表示（押せない間の理由をボタン自身が言う）。 */
+export const DUPLICATE_BUSY_LABEL = "作成中…";
+
+/**
+ * 「置く」欄の案内（#1032）。
+ *
+ * ⚠️ **同じ文を4か所に書かない**＝以前は「再生位置（X秒）から置きます」を種別ごとに写しており、
+ * 片方だけ直る形になっていた（§6）。**どこへ入るかは帯で見せる**ので、文は種別ごとの続きだけ。
+ * ⚠️ **何を置くのかが一覧から読めないときは `lead` で言う**（PR #1096 レビュー）＝見た目パターンは
+ * 一覧で1つ選んでから押す形なので、「選んだものを置く」が落ちると何が置かれるのか分からない。
+ */
+export function placeAtPlayheadHint(playheadSec: number, tail: string, lead = ""): string {
+  return `${lead}再生位置（${playheadSec.toFixed(1)}秒）から置きます。${tail}`;
+}
+
+/**
+ * 選べない候補に添える理由（#1031）。
+ *
+ * ⚠️ **同じ状態を別の言い回しで出さない**（PR #1085 レビュー）＝見た目と素材で
+ * 「見つからない」の言い方が割れていた。候補の注記はここに1つずつ置く。
+ * ⚠️ **内部の綴りは出さない**（§2-3）。
+ */
+export const PICKER_NOTE = {
+  /** 見た目：この動画の向き・場面に合っていない。 */
+  lookMismatched: "今の動画に合いません",
+  /** 素材：この差し込み口には入れられない種類。 */
+  assetNotAssignable: "この差し込み口には入れられません",
+} as const;
+
+/** 見つからないものを候補に残すときの名前（#1031）。 */
+export const PICKER_MISSING_LABEL = {
+  look: "（今の見た目が見つかりません）",
+  asset: "（素材が見つかりません）",
+} as const;
+
+/**
+ * BGM を下げる区間を**つないだ**ときの知らせ（ADR-0032 追補4・α-6 出口監査 🟡）。
+ *
+ * ⚠️ **黙ってやらない**（§2-5）＝つなぐと「セリフとセリフの間でも BGM が下がったまま」になる。
+ * ⚠️ **両形式で同じ文言**＝場面形式（`ExportScreen`）とタイムライン形式で同じことを言う（ADR-0026②）。
+ * ⚠️ **次の行動は画面に実在する名前で書く**（`/canon-check` 🟡・§2-5）＝もとは「「BGM を下げる」を
+ * 弱く」と書いていたが、**その名前の操作はどこにも無い**（実物は「音の自動調整」の中の
+ * 「どのくらい控えめにするか」＝`AudioAutoField`・`06 §13`）。探しても見つからない案内は
+ * 「次の行動」になっていない。**共有したことで露出が2か所へ増えた**ので、ここで直す。
+ */
+export const DUCK_MERGED_MESSAGE =
+  "セリフが多いため、BGM を下げる区間をつないで保存しました。セリフとセリフの間でも BGM が下がったままになります。気になる場合は「音の自動調整」の「どのくらい控えめにするか」を弱くするか、動画を分けてお試しください。";
+
+/** 複製そのものに失敗したとき（読めた・書けた以外の理由）。読めない理由は `ProjectLoadError` を出す。 */
+export const DUPLICATE_FAILED_MESSAGE = "動画を複製できませんでした。もう一度お試しください。";
+
+/**
+ * 会社の見た目の**文字の形が入らなかった**ときの案内（#929・§2-5）。
+ *
+ * ⚠️ **黙って飛ばして「反映しました」と言わない**＝覚えている字体が手元に無いと入らないので、
+ * ロゴだけ入った状態を「全部入った」と見せると**失敗を成功に見せる**ことになる。
+ * ⚠️ **次の行動は2通りある**（取り込み直す／覚え直す）ので、両方を出す。
+ */
+export const BRAND_FONT_NOT_APPLIED_MESSAGE =
+  "覚えている文字の形は、いまこのパソコンにありません。設定の「文字の形」で取り込み直すか、「会社の見た目」で選び直してください。";
+
+/**
+ * 会社の見た目のロゴが入らなかったときの案内（ADR-0036・α-6 出口監査 🟡）。
+ * ⚠️ **明示適用と新規作成で同じことを言う**＝片方だけ黙る、を作らない（ADR-0026②・§6）。
+ */
+export const BRAND_LOGO_NOT_APPLIED_MESSAGE =
+  "ロゴを取り込めませんでした。「よく使う素材」に置いてあるか確かめてください。";
+
+/** 持ち込みフォントを外したので、会社の見た目の指定も外したときの知らせ（α-6 出口監査 🟡）。 */
+export const BRAND_FONT_CLEARED_MESSAGE =
+  "この文字の形を外したので、会社の見た目の指定も外しました。設定の「会社の見た目」から選び直せます。";
+
+/** 上の片づけに失敗したときの案内＝**黙って指したままにしない**（§2-5）。 */
+export const BRAND_FONT_CLEAR_FAILED_MESSAGE =
+  "この文字の形を外しましたが、会社の見た目の指定を外せませんでした。設定の「会社の見た目」から選び直してください。";
+
+/**
+ * 文字の形の「継承」を選ぶ項目の名前（#925）。
+ *
+ * ⚠️ **継承先の名前を言う**＝どこに合わせるかは**場所によって違う**（`resolveFontId`＝
+ * 場面の指定 → 動画全体 → 既定）。**場面が自分の指定を持っているとき**は、そこに合わせるのに
+ * 「動画全体に合わせる」と書くと**設定した意味と違うことを言う**（ADR-0026①）。
+ * ⚠️ **画面ごとに文言を書き分けない**（§6）＝どちらを出すかは呼ぶ側が決め、言葉はここに置く。
+ */
+export const FONT_INHERIT_PROJECT_LABEL = "動画全体に合わせる";
+/** 場面が自分の文字の形を持っているとき（そこに合わせる）。 */
+export const FONT_INHERIT_SCENE_LABEL = "この場面の文字の形に合わせる";
+
+/**
+ * 見た目が見つからず、そのフォントを**どの文字に使っているか調べられない**ときの知らせ（12巡目 🟡）。
+ *
+ * ⚠️ **双子（{@link DORMANT_FONT_HINT}）が `uiLabels` にあるのに片方だけ画面直書き**だった＝
+ * §6（文言は1か所）／検査（`uiLabels.test.ts` の走査）の外に落ちる。
+ */
+export const UNKNOWN_FONT_HINT =
+  "見た目が見つからないので、どの文字に使っているかは分かりません。フォントだけここで選べます。";
+
+/**
+ * {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。
+ *
+ * ⚠️ **音が読めない断りはここを通らない**（#1064）＝**音源の種類**（読み上げ／同梱の曲／取り込んだ素材）で
+ * 次の行動が変わるが、それは `doc`＋`clipIds` からは決まらない（読めなかった音源そのものを見る必要がある）。
+ * 呼ぶ側が {@link audioUnreadableMessage} を直接使う。
+ */
+export function resolveExportBlockedMessage(
+  code: Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.audioUnreadable>,
+  doc: TimelineProject,
+  clipIds: string[],
+): string {
+  if (code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany) return volumePointsTooManyMessage(volumePointsTooManyHasSplittable(doc, clipIds));
+  return exportBlockedMessage[code];
+}
+
+// ── 差し込み口（素材を入れる場所）の名前（§2-3：`layer.id` の生表示を防ぐ）。 ──
+// 場面編集（`SceneEditScreen`）とタイムライン編集（`TimelineProjectScreen`）が**同じ差し込み口を同じ名前で
+// 呼ぶ**ための単一の参照元（§6）。別々に持つと、同じテンプレなのに画面によって「素材2」の指す先が変わる。
+
+/** レイヤー id 別の表示名（複数スロットでも区別できるよう id をキーにする）。 */
+const SLOT_LABEL_BY_ID: Record<string, string> = {
+  background: "背景",
+  mainVisual: "メイン素材",
+  logo: "ロゴ",
+};
+
+/**
+ * 声を作れなかったが、**前に作った声はそのまま使える**ときに添える一言（#755-3）。
+ *
+ * ⚠️ **添えるのは本当に鳴るときだけ**＝場面形式は保存済みの音声（`narrationAudioById`）、
+ * タイムライン形式は `voicePath` が鳴らす材料なので、**その材料があるか**で判断する
+ *（印だけで判断すると「読み込めなかった声」にも「使えます」と言ってしまう）。
+ */
+export const KEPT_PREVIOUS_VOICE_SUFFIX = "前に作った声はそのまま使えます。";
+
+/**
+ * 固定した列でできないことの断り（#819-2）。**やろうとしたこと**で締めだけ変える。
+ *
+ * ⚠️ **画面で手書きしない**（§9-3・`canvasHoldMessage` と同じ流儀）＝以前は「動かす」（共有の
+ * `TIMELINE_EDIT_LOCKED`）と「変える」「削除する」（画面直書き）が混ざり、**同じ状況に2通りの文**が
+ * 出ていた（`Ctrl+K` は共有・ボタンは手書き）。手書きは禁止語の検査（`uiLabels.test.ts`）の外にも
+ * 落ちる＝出したまま誰も気づかない。
+ * ⚠️ **「動かす」は共有コードのまま**（`TIMELINE_EDIT_LOCKED`）＝あちらは domain が返す断りで、
+ * 画面の外（`editBlocked`）からも出る。ここは**画面が先回りして押せなくするときの説明**。
+ * ⚠️ **`"duplicate"` は持たない**（#831）＝複製ボタン・メニューはどちらも `editGuard` を通り、
+ * 固定は**選択の関門が先に締める**ので `"content"` が出る（`duplicateExtra` まで届かない）。
+ * 「複製するには」の文はどこからも呼ばれない定義だけが残っていた＝到達しない文言は持たない
+ * （§2-5・#812 と同型の後始末）。
+ */
+export type LockedTrackAction = "content" | "delete";
+
+export function lockedTrackMessage(action: LockedTrackAction): string {
+  const what = action === "content" ? "中身を変える" : "削除する";
+  return `この列は固定されています。${what}には固定を外してください`;
+}
+
+/**
+ * 「動画に出さない」列では**複製できない**（#819-2）。
+ *
+ * ⚠️ **共有の `TIMELINE_EDIT_HIDDEN_TRACK` は使えない**＝あちらの次の行動は「ほかの列へ置く」だが、
+ * **複製は必ず元の列に作る**ので、言われたとおりにしても増やせない（行き止まり・§2-5）。
+ * 別の文が要るのは正しいが、**画面で手書きしない**＝ここに置いて1か所から出す。
+ */
+export function hiddenTrackDuplicateMessage(): string {
+  return "動画に出さない列では増やせません。列の「⋮」から「動画に出す」を選んでください";
+}
+
+/**
+ * 再生位置が、選んでいる部品の**外**にあるときの断り（#996）。
+ *
+ * ⚠️ **1か所に置く**＝もとは「動き」「音量の変化」の2つの節に**同じ文が直に書かれて**いて、
+ * さらに「位置・大きさ」の節には**何も無かった**（＝同じ画面の中で流儀が3通り＝ADR-0026②）。
+ * 写して増やすと、次に言い回しを直したとき**片方だけ直る**。
+ *
+ * @param what その部品がその時間に何をしているか（「出ている」／「鳴っている」）。
+ *   ⚠️ **節ごとに変える**＝音の部品に「出ている」と言うと、画面に映ると誤解する。
+ * @param todo その時間へ動かして**何をするのか**（「置いて」／省略＝「触って」）。
+ */
+export function clipOutsidePlayheadMessage(
+  startSec: number,
+  endSec: number,
+  what: "出ている" | "鳴っている" = "出ている",
+  todo = "触って",
+): string {
+  return `再生位置がこの部品の外にあります。部品が${what}時間（${startSec.toFixed(1)}〜${endSec.toFixed(1)}秒）へ動かしてから${todo}ください。`;
+}
+
+/**
+ * キャンバスで**掴めない理由**（タイムライン編集）。`count` を渡すとまとめて動かしたときの言い方になる。
+ *
+ * ⚠️ **1か所にまとめる**（#788-1）＝以前は単体選択のときだけ理由別に出し分け、まとめて動かしたときは
+ * 常に「**固定を外してください**」だった＝**動きが原因のときは従っても直らない**案内になっていた。
+ * 言い方が2か所にあると、片方だけ直す（＝今回の割れそのもの）ので、単体もまとめても同じ文からつくる。
+ *
+ * ⚠️ **次の行動は「その場面で本当に押せるもの」だけを言う**（§2-5・#788 レビュー 🔴）。
+ * **単体**（`count` 無し）＝「位置・大きさ」の欄の中に出るので、**下の数値**も**「動き」**も目の前にある。
+ * **まとめて**（`count` あり）＝2つ以上選んでいるときにしか出ず、そのとき「選んだ部品」の欄は
+ * 「1つだけ選ぶと、位置や長さを変えられます」に替わっていて、**数値の欄も「動き」も画面に無い**。
+ * そこで数値や「動き」を案内すると、言われたとおりに探しても見つからない＝行き止まりになる。
+ * まとめてのときに**実在するのは矢印キーだけ**（そちらは列の固定しか見ないので、動き・まとまりでは効く）。
+ */
+export type CanvasHoldReason = "track" | "group";
+/**
+ * 動きを付けた部品を掴む・数値で動かすと**動き全体がずれる**（ADR-0054 段階1）＝業界の既定（その時刻だけ直す）に
+ * 慣れた人の取り違えを減らす一言。⚠️ 段階2（道筋と点）を入れたら「点を掴むとその時刻だけ直せます」に変える。
+ */
+export const ANIMATED_DRAG_NOTE = "動きを付けた部品は、動かすと動き全体がずれます（始まりも止まる位置も同じだけ）。その時刻の位置だけ直すときは「動き」で。";
+
+export function canvasHoldMessage(reason: CanvasHoldReason, count?: number): string {
+  const many = count != null;
+  const n = many ? `${count}個` : "";
+  // 単体＝いま触ろうとしている／まとめて＝もう動かした後、なので締めの言い方だけ変える。
+  const tail = many ? "動かしていません。" : "仕上がり確認の上では動かせません。";
+  // 動き・まとまりは**矢印キーでも変えられる**（そちらは列の固定しか見ない）＝行き止まりにしない。
+  // まとめてのときは数値の欄が画面に無いので、**1つだけ選べば数値でも変えられる**ことを添える。
+  const byNumbers = many ? "矢印キーで動かせます。1つだけ選ぶと数値でも変えられます。" : "下の数値（または矢印キー）で変えるか、";
+  switch (reason) {
+    // 固定は**外せば直る**＝行き先が固定の切り替えなので、数値の案内は添えない。
+    // ⚠️ 固定した列では**矢印も効かない**ので、まとめてのときも矢印を案内しない。
+    case "track":
+      return `固定された列の部品${n}は${tail}動かすには固定を外してください。`;
+    case "group":
+      return many
+        ? `グループの変形が効いている部品${n}は${tail}${byNumbers}`
+        : `グループの変形が効いている部品は${tail}下の数値（または矢印キー）で変えてください。`;
+  }
+}
+
+/** 差し込み口1つの表示名。未登録 id は種別から日本語化する。 */
+export function slotLabelFor(layer: Pick<Layer, "id" | "type">): string {
+  if (SLOT_LABEL_BY_ID[layer.id]) return SLOT_LABEL_BY_ID[layer.id];
+  if (layer.type === LAYER_TYPE.background) return "背景";
+  if (layer.type === LAYER_TYPE.logo) return "ロゴ";
+  return "素材";
+}
+
+/**
+ * 差し込み口の並びぶんの表示名。**同じ名前が複数あるときだけ連番を付ける**（「素材1」「素材2」）＝
+ * 1つしかないのに「素材1」と出さない。並び順は渡された層の順（描画の並びと同じ）。
+ */
+export function slotLabelsFor(layers: readonly Pick<Layer, "id" | "type">[]): string[] {
+  const total = new Map<string, number>();
+  for (const l of layers) total.set(slotLabelFor(l), (total.get(slotLabelFor(l)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return layers.map((l) => {
+    const base = slotLabelFor(l);
+    if ((total.get(base) ?? 0) <= 1) return base;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return `${base}${n}`;
+  });
+}
+
+/**
+ * α-6 で足した断り・知らせの文言（読み方辞書・持ち込みフォント・会社の見た目）。
+ *
+ * ⚠️ **`15 §6` の表と機械で突き合わせる**（α-6 出口監査 🟡18）＝これらは画面や
+ * `infrastructure` に直書きされていて `errorStateTable.test.ts` の走査の外にあり、
+ * **既に1件ズレていた**（句点の有無）。表と実装のどちらかだけ直すと落ちる形にする。
+ * ⚠️ **件数が入る文は関数**（下）＝表は `N` と書くので、`N` を入れて突き合わせる。
+ */
+export const alpha6Message = {
+  READING_DICT_WORD_CONFLICT: "音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません",
+  READING_DICT_IMPORT_DUPLICATE:
+    "読み込んだ一覧に、同じ言葉で読みが違うものがありました。そのままにするか、読み込んだ方に置き換えるかを選べます",
+  BRAND_KIT_SAVE_FAILED: "会社の見た目を保存できませんでした。しばらくしてから、もう一度お試しください",
+} as const;
+
+/**
+ * 開けなかった動画を、控えから戻せると知らせる（#263）。
+ *
+ * ⚠️ **どこまで戻るかを言う**＝日時が無いと「どれだけの作業が消えるか」が分からず、決められない。
+ * ⚠️ **開けなかったほうを消さないことも言う**＝戻すのをためらわせない。
+ */
+export function restoreOfferMessage(savedAt: string): string {
+  return (
+    `この動画は開けませんでしたが、${savedAt} に保存できていたところが残っています。` +
+    "そこから開き直せます。開けなかったほうも消さずに残ります。"
+  );
+}
+
+/**
+ * 控えの日時の見せ方。
+ *
+ * ⚠️ **文言と分けてある**＝差し込む値を外から渡せる形にしておくと、
+ * `15 §6` の表と**等値で突き合わせられる**（`errorStateTable.test.ts` は families としか比べない）。
+ * 日時を中で作ると、表に書けるのは実際に出る文と違うものになる。
+ */
+export function backupSavedAtLabel(savedAt: Date): string {
+  return savedAt.toLocaleString("ja-JP", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** 控えへ戻せなかったとき（§2-5＝次の行動）。 */
+export const RESTORE_FAILED_MESSAGE =
+  "前に保存できていたところから開けませんでした。一覧から別の動画を選んでください。";
+
+/**
+ * 焼き出している最中に画面を離れようとしたときの断り（#992 ②）。
+ *
+ * ⚠️ **黙って止めない**（§2-5）＝素材を丸ごとコピーするので分単位になりうる。
+ * その間に離れると**成否の受け皿ごと消える**（できたのか失敗したのか二度と分からない）ので止めるが、
+ * サイドバーは押せない見た目にできないため、**理由を出さないと「押しても何も起きない」**になる。
+ */
+export const BAKE_LEAVE_BLOCKED_MESSAGE =
+  "いま新しい動画を作っています。終わるまでこの画面のままお待ちください";
+
+/**
+ * 戻したことで、作り直しが要る読み上げがあるとき（#967 レビュー 🟡2）。
+ *
+ * ⚠️ **黙って消したように見せない**＝音のファイルは戻らないので、セリフが変わっていた読み上げは
+ * 「作成前」に戻してある。何も言わないと**声が消えた**ように見える。
+ * ⚠️ **なぜそうなるかまで言う**＝「音は戻らない」を知らないと、不具合に見える。
+ * ⚠️ **ボタンの名前を名指ししない**（α-7 出口監査 🔴）＝場面編集のボタンは状態で名前が変わり、
+ * **作成前に戻したあとは「声を作成」**になる（「声を作り直す」は作成済みのときだけ）。
+ * 掛け合いには行ごとのボタン自体が無い（「全部のセリフの声を作成」だけ）。
+ * **指した名前が見つからない**を作らないため、場所（声の欄）で言う。
+ *
+ * ⚠️ **形式で場所が違う**（#991）＝この知らせは**タイムライン形式でも出る**
+ *（`restorePointKeeper` は `clearStaleTimelineVoices` も通す＝#977）のに、
+ * 文が**場面形式にしか無いもの**（「その場面の」「声の欄」）を名指ししていた。
+ * タイムライン形式に**場面は無く**、作り直す場所は「読み上げ」の節の**「声を作る」**。
+ * `06 §12.1`「案内の中で名指しするものは、その画面に実在すること」（#723・決定5）に反する。
+ * ⚠️ α-7 出口監査 🔴 で直した「実在しないボタン名を指していた」と**同じ型**。
+ */
+export function voicesClearedMessage(count: number, format: "scene" | "timeline" = "scene"): string {
+  const where = format === "timeline" ? "「読み上げ」の欄" : "その場面の声の欄";
+  return (
+    `戻しました。セリフが変わっていた${count}件の読み上げは、音が前のままになるので作成前に戻しました。` +
+    `この動画はいったん閉じています。開き直して、${where}からもう一度作ってください`
+  );
+}
+
+/**
+ * **保存すると次に開けなくなる内容**だったとき（#974）。
+ *
+ * ⚠️ **書かずに断る**＝書いてしまうと**保存はできたのに次に開けない**（#959 と同じ形）。
+ * 書かなければ前に保存できていた内容がそのまま残るので、取り消して直せば続けられる。
+ * ⚠️ **「もう一度お試しください」ではない**＝同じ内容を書き直しても同じ結果になる。
+ */
+export const PROJECT_SAVE_WOULD_BREAK =
+  "この内容は保存していません（このまま保存すると、次に開けなくなるため）。取り消し（Ctrl+Z）で一つ前に戻すと保存できます";
+
+/** 復元ポイントの一覧を読めなかったとき（§2-5＝次の行動）。 */
+export const RESTORE_POINTS_UNREADABLE =
+  "戻れる時点の一覧を読めませんでした。しばらくしてから、もう一度お試しください";
+
+/** 戻れる時点がまだ無いとき（押せるのに何も無い、を説明する）。 */
+export const RESTORE_POINTS_EMPTY =
+  "まだ戻れる時点がありません。編集して保存していくと、少しずつ増えていきます";
+
+/**
+ * 動画を書き出せなかったとき（`15 §6` `EXPORT_FAILED`）。
+ *
+ * ⚠️ **繰り返す人に次が無かった**（#962）＝「もう一度お試しください」で終わっており、
+ * 何度やっても失敗する人は行き止まりだった。#396 で**うまくいかないときの記録**ができたので、
+ * そこへ案内する。⚠️ **記録は外へ送られない**ので、送るかどうかは利用者が決める。
+ * ⚠️ **場面形式とタイムライン形式で言い方が違う**（「保存」と「書き出し」）＝画面の言葉に合わせる。
+ */
+export const exportFailedMessage = {
+  EXPORT_FAILED_SCENE:
+    "動画の保存に失敗しました。もう一度お試しください。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください",
+  EXPORT_FAILED_TIMELINE:
+    "動画を書き出せませんでした。しばらくしてから、もう一度お試しください。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください",
+} as const;
+
+/**
+ * 見た目パターンの保存で断るときの文言（`15 §6`）。
+ *
+ * ⚠️ **表と機械で結ぶために family にする**（#960 レビュー）＝`errorStateTable.test.ts` は
+ * `codeMessages()` に載っている文言としか突き合わせないので、画面や store に直書きすると
+ * **表にだけ行があってコードとずれても緑**のまま通る（`alpha6Message` を作ったのと同じ穴）。
+ */
+export const templateSaveMessage = {
+  USER_TEMPLATE_SAVE_INVALID:
+    "この見た目パターンは、いまの内容では保存できません。直前に変えた項目を「取り消す」で元に戻してから、もう一度お試しください。",
+  /**
+   * 保存・削除が失敗したときの**既定**（#1129 レビュー由来 🟡）。
+   *
+   * ⚠️ **以前は `projectStore` に直書き**していた＝表の行（`USER_TEMPLATE_SAVE_FAILED` /
+   * `USER_TEMPLATE_DELETE_FAILED`）と**同じ文が2か所**にあり、片方だけ直る形だった（§6）。
+   * ⚠️ **Rust が理由を返せたときはそちらを出す**＝呼び側は `userFacingMessage(e, …) ?? ここ`。
+   */
+  USER_TEMPLATE_SAVE_FAILED: "見た目パターンを保存できませんでした。もう一度お試しください。",
+  USER_TEMPLATE_DELETE_FAILED: "見た目パターンを削除できませんでした。もう一度お試しください。",
+} as const;
+
+/**
+ * 使っている持ち込みフォントが**見つからない**（`USER_FONT_MISSING`）。
+ * ⚠️ **件数を差し込む**＝表は `N` と書くので、テストは `N` を渡して突き合わせる。
+ */
+export function userFontMissingMessage(count: string | number): string {
+  return (
+    `この動画で使っている文字の形（フォント）が${count}つ見つかりません。` +
+    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
+    `使っている場面で別の文字の形を選び直してください`
+  );
+}
+
+/**
+ * 使っている持ち込みフォントを**調べられなかった**（`USER_FONT_UNREADABLE`）。
+ * ⚠️ **「見つからない」とは別**＝目録そのものが読めないので、待っても埋まらない（§2-5）。
+ */
+export function userFontUnreadableMessage(count: string | number): string {
+  return (
+    `この動画は取り込んだ文字の形（フォント）を${count}つ使っていますが、` +
+    `いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。` +
+    `アプリを開き直してから、もう一度お試しください`
+  );
+}
+
+/**
+ * うまくいかないときの記録（#396）。**「ログ」とは言わない**（§2-3＝実装用語の置き換え・`06 §3`）。
+ *
+ * ⚠️ **外へ送らないことを先に言う**＝「記録が残る」とだけ書くと、勝手に送られると受け取られうる（§2-6）。
+ * ⚠️ **中身は見せない**＝入っているのは実装の言葉なので、導線は「場所を開く」までにする。
+ */
+export const TROUBLE_LOG_TITLE = "うまくいかないときの記録";
+/**
+ * ⚠️ **中身に何が入るかまで言う**（#957 レビュー）＝この記録には、入力した会社名や案件の内容から
+ * 作られた文章の一部が混じることがある（例：たたき台づくりの応答が形に合わなかったときの中身）。
+ * このパソコンから出ないので §2-6 には触れないが、**利用者はこのファイルを人に送る**ので、
+ * 送る前に中身の見当がつくようにしておく。**送るのは利用者の判断**なので、伏せずに知らせる側を採る。
+ */
+export const TROUBLE_LOG_DESC =
+  "動画の書き出しや声づくりがうまくいかないとき、原因を調べるための記録がこのパソコンに残ります。"
+  + "外へは何も送りません。入力した内容の一部が記録に含まれることがあるので、"
+  + "作った側に見てもらうときは、この場所のファイルをお送りください。";
+export const TROUBLE_LOG_OPEN = "記録の場所を開く";
+/** 開けなかったとき（§2-5＝次の行動を示す）。 */
+export const TROUBLE_LOG_OPEN_FAILED =
+  "記録の場所を開けませんでした。もう一度お試しください。";
+
+/**
+ * 画面の形（`Orientation`）の表示名（§2-3＝技術語を出さない）。
+ *
+ * ⚠️ **3か所に書き写していた**（PR #1243 レビュー 🟡）＝新しい動画を作る画面・たたき台・
+ * 見た目パターンの一覧で別々に持っていた。片方だけ言い換えると**同じものを2つの言葉で呼ぶ**
+ *（「プロジェクト」と「動画」で実際に起きた＝#1026）。
+ * ⚠️ **全値必須**（`Record<Orientation, …>`）＝向きを足したときに漏れが型で落ちる。
+ */
+export const ORIENTATION_LABEL: Record<Orientation, string> = {
+  "16:9": "横型（16:9）",
+  "9:16": "縦型（9:16）",
+};
+
+/** 動画の種類（`VideoKind`）の表示名（ADR-0011・`06 §3`）。全値必須。 */
+export const VIDEO_KIND_LABEL: Record<VideoKind, string> = {
+  recruit: "採用動画",
+  general: "一般動画・社内発表",
+};
+
+/**
+ * **取り消す／やり直すの中身の言い方**（#1268）＝種類は domain（`timelineEditKind`）が前後の文書から決める。
+ * ⚠️ **種類が増えたら、ここも増やす**（`Record` なので書き忘れは型で落ちる）。
+ */
+export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
+  place: "部品を置く",
+  duplicate: "部品を複製",
+  split: "部品を分ける",
+  remove: "部品を削除",
+  move: "部品を動かす",
+  resize: "長さを変える",
+  box: "位置・大きさを変える",
+  content: "中身を直す",
+  addTrack: "列を足す",
+  duplicateTrack: "列を複製",
+  removeTrack: "列を消す",
+  reorderTracks: "列の並びを変える",
+  track: "列の設定を変える",
+  marker: "目印を変える",
+  settings: "動画全体の設定を変える",
+  other: "編集",
+};
+
+/** 「置く」欄で、もう動画に置いてある素材の印（#1264）。 */
+export const ASSET_IN_USE_LABEL = "使用中";
+/** 上の印の意味（説明・読み上げ用）＝印だけだと「何に使っているか」が分からない（#1271 レビュー）。 */
+export const ASSET_IN_USE_DESCRIPTION = "この素材は動画に置いてあります";
+
+/** 仕上がり確認の別窓（ADR-0050）の題（窓の枠に出る）。 */
+export const previewWindowTitle = (projectName: string | null): string =>
+  projectName ? `仕上がり確認 — ${projectName}` : "仕上がり確認";
+
+/** 仕上がり確認の別窓で、まだ絵が無いときの案内（ADR-0050）。 */
+export const PREVIEW_WINDOW_WAITING_TEXT = {
+  /** 本体から写しが届く前。 */
+  connecting: "本体の窓から読み込んでいます…",
+  /** 本体に動画が開かれていない。 */
+  noVideo: "本体の窓で動画を開くと、ここに仕上がりが出ます。この窓は閉じてかまいません",
+} as const;
+
+/** 仕上がり確認の別窓を開けなかった（ADR-0050・`15 §6` `PREVIEW_WINDOW_OPEN_FAILED`）。 */
+export const PREVIEW_WINDOW_OPEN_FAILED_MESSAGE = "別の窓を開けませんでした。もう一度押すか、「大きく見る」で今の窓の中で大きくしてください";
+
+/** 仕上がり確認の別窓が本体の窓とつながらない（ADR-0050・`15 §6` `PREVIEW_WINDOW_NOT_CONNECTED`）。 */
+export const PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE = "本体の窓とつながりませんでした。この窓を閉じて、本体の「別の窓で見る」から開き直してください";
+
+/** Gemini を使う設定なのに接続キーが無い（ADR-0051 決定15・`15 §6` `AI_GEMINI_KEY_MISSING`）＝黙ってこのパソコンの中や見本へ落とさない。 */
+export const AI_GEMINI_KEY_MISSING_MESSAGE = "Gemini を使う設定になっていますが、接続キーが登録されていません。設定の「動画案を作るAI」でキーを登録するか、「このパソコンの中で作る」に戻してください。";
+
+/**
+ * 生成中に、このパソコンの中の AI が書いている場面の数を伝える文（ADR-0052 決定6・#1293）。
+ * ⚠️ **見込みの割合は出さない**＝何場面になるかは書き終わるまで分からない（嘘の % を出さない）。
+ */
+export function writingSceneMessage(n: number): string {
+  return `${n} 場面目を書いています。このままお待ちください。`;
+}
+
+// ── 素材の「AI解析」の欄（ADR-0052 決定4）───────────────────────────────────
+// ⚠️ **欄の名前は役割で言う**（ADR-0048 追補・利用者判断 2026-10-05）＝「説明」と「AI解析」が並び、どちらに書けばよいか迷った。
+//   データの形（description／aiDescription）は変えない＝名前だけ。送信前確認と使い方も同じ名前を引く。
+export const MATERIAL_NOTE_LABEL = "あなたのメモ（任意）";
+export const MATERIAL_NOTE_SHORT = "あなたのメモ";
+export const MATERIAL_AI_DESC_LABEL = "AIが読み取った内容（直せます）";
+export const MATERIAL_AI_DESC_SHORT = "AIが読み取った内容";
+// ⚠️ **行われない約束を出さない**（UI/UX 監査 2026-10-02・ADR-0026④）＝以前は AI が無いときや Gemini を選んでいるときも
+// 「取り込むと、このパソコンの中のAIが…書きます」と出ていた（読み取りは同梱の AI を選んでいるときだけ走る）。
+export const MATERIAL_AI_DESC_PLACEHOLDER_AUTO = "取り込むと、このパソコンの中のAIが写真や動画の内容を書きます";
+export const MATERIAL_AI_DESC_PLACEHOLDER_MANUAL = "写真や動画に写っているものを書くと、動画案を作るときの手がかりになります";
+
+// ── 編集の途中の AI 補助（ADR-0053）──────────────────────────────────────────
+// ⚠️ 技術用語を出さない（「AIに頼む」「候補」「使う」）。失敗は次の行動つき（§2-5・`15 §6`）。
+export const AI_ASSIST_HEADING = "AIに頼む：";
+export const AI_ASSIST_THINKING = "考えています…";
+export const AI_ASSIST_USE_LABEL = "使う";
+export const AI_ASSIST_CLOSE_LABEL = "候補を閉じる";
+/** 候補を作れなかった（形が違う・どれも上限を越えた・呼び出しの失敗）。 */
+export const AI_ASSIST_FAILED_MESSAGE = "うまく候補を作れませんでした。もう一度押すか、自分で書き直してください。";
+/**
+ * 同梱の AI の部品が無い・壊れている（UI/UX 監査 2026-10-02）＝「もう一度押す」では直らない。
+ * ⚠️ 以前は何の失敗でも `AI_ASSIST_FAILED_MESSAGE`（もう一度押す）だった＝押し続けても直らない。
+ */
+export const AI_ASSIST_UNAVAILABLE_MESSAGE = "このパソコンの中のAIが使えません。アプリを入れ直してください。それまでは自分で書き直せます。";
+/** 頼んでいる間に元の文が変わった（古い文から作った候補は出さない＝手直しを上書きしない）。 */
+export const AI_ASSIST_STALE_MESSAGE = "考えている間に文が変わったので、候補は出しませんでした。もう一度押すと、いまの文から作ります。";
+/** 元になる文が空でボタンを押せない理由。 */
+export const AI_ASSIST_NEED_SOURCE_HINT = "先に元になる文を入れると頼めます";
+/**
+ * 作業範囲を消す前の確認（UI/UX 監査 2026-10-02）＝どこからどこまでが・いくつ消えるかを見てから押す。
+ * ⚠️ 以前は**確認なしで全部の列を切って詰めていた**（同じ画面の「まとめて削除」は確認を出す＝規準が割れていた）。
+ */
+export function rangeDeleteConfirmMessage(from: string, to: string, count: number, closeGap: boolean): string {
+  const where = `作業範囲（${from}〜${to}）`;
+  if (closeGap) {
+    return count > 0
+      ? `${where}を削除して、後ろを詰めますか？${count}個の部品にかかります（すべての列が対象です）。`
+      : `${where}の空白を詰めますか？後ろの部品が前へ寄ります（すべての列が対象です）。`;
+  }
+  return `${where}を削除しますか？${count}個の部品にかかります（すべての列が対象です）。`;
+}
+/** 写す前の「貼る」の押せない理由。 */
+export const PASTE_NEEDS_COPY_HINT = "先に部品を「写す」と、再生位置に貼れます";
+/** 作業範囲を取っているときに見せる時刻。 */
+export function rangeLabel(from: string, to: string): string {
+  return `作業範囲：${from}〜${to}`;
+}
+/** 候補が出たことを知らせる（読み上げにも届くよう知らせの置き場に出す）。 */
+export function aiAssistCandidatesCount(n: number): string {
+  return `候補が${n}つ出ました`;
+}
+/** 考えている途中でやめる（返事は捨てる）。 */
+export const AI_ASSIST_CANCEL_LABEL = "やめる";
+/** 頼む必要が無い（もう表示時間に収まっている・文が短すぎる）。 */
+export const AI_ASSIST_NOT_NEEDED_MESSAGE = "いまの文のままで大丈夫です（もう収まっているか、これ以上短くできません）。";
+/** セリフ欄のボタン。 */
+export const AI_ASSIST_NARRATION_KINDS = [
+  { kind: ASSIST_KIND.shorten, label: "短く" },
+  { kind: ASSIST_KIND.polite, label: "丁寧に" },
+  { kind: ASSIST_KIND.soft, label: "やわらかく" },
+  { kind: ASSIST_KIND.fitDuration, label: "表示時間に収める" },
+] as const;
+/** 字幕欄のボタン。 */
+export const AI_ASSIST_SUBTITLE_KINDS = [{ kind: ASSIST_KIND.subtitle, label: "セリフから作る" }] as const;
+/** 公開前チェックの「セリフの長さ」「早口になる場面」から、その場面のセリフ欄へ寄るボタン（ADR-0053 決定2）。 */
+export const FIX_NARRATION_ACTION_LABEL = "セリフを直す";
+/** 公開前チェックの「字幕の長さ」のボタン（使い方の案内も同じものを引く＝書き写さない）。 */
+export const SHORTEN_SUBTITLE_ACTION_LABEL = "短くする";
+/** 見出し欄のボタン。 */
+export const AI_ASSIST_TITLE_KINDS = [{ kind: ASSIST_KIND.title, label: "候補を出す" }] as const;
+/** 掛け合いの各行のボタン（#1316）。行には表示時間が無いので「表示時間に収める」は出さない。 */
+export const AI_ASSIST_LINE_KINDS = [
+  { kind: ASSIST_KIND.shorten, label: "短く" },
+  { kind: ASSIST_KIND.polite, label: "丁寧に" },
+  { kind: ASSIST_KIND.soft, label: "やわらかく" },
+] as const;
+/** 動画の名前の横のボタン（#1316）。 */
+export const AI_ASSIST_VIDEO_TITLE_LABEL = "名前の候補";
+export const AI_ASSIST_VIDEO_TITLE_KINDS = [{ kind: ASSIST_KIND.videoTitle, label: "候補を出す" }] as const;
+
+/** 公開前チェックから場面編集へ来たときの戻る（UI/UX 監査 2026-10-02＝以前は常に「台本表へ戻る」）。 */
+export const BACK_TO_PRECHECK_LABEL = "公開前チェックへ戻る";
+/** 公開前チェックの項目にひっかかっている場面を順に直す帯（例：「セリフの長さ」2/8 場面目）。 */
+export function sceneEditTrailLabel(label: string, pos: number, total: number): string {
+  return pos > 0 ? `公開前チェックの「${label}」：${pos}/${total} 場面目` : `公開前チェックの「${label}」：${total} 場面`;
+}
+export const TRAIL_PREV_LABEL = "前の場面";
+export const TRAIL_NEXT_LABEL = "次の場面";
+
+/** 同梱の AI が写真・動画をまだ読んでいる（UI/UX 監査 2026-10-02＝裏で読んでいることが見えなかった）。 */
+export const DESCRIBING_LABEL = "読み取り中…";
+/** 動画案を作る前に、まだ読み終わっていない写真・動画があるとき。 */
+export function describingRemainMessage(n: number): string {
+  return `写真・動画の読み取りが、あと ${n} 件あります。読み終わってから作ると、どの場面にどれを使うかが合いやすくなります。`;
+}
+/** 「読み終わってから作る」を選んで待っているとき。 */
+export function describingWaitingMessage(n: number): string {
+  return `読み終わったら、そのまま進みます（あと ${n} 件）。`;
+}
+export const WAIT_DESCRIBE_LABEL = "読み終わってから作る";
+export const MAKE_WITHOUT_WAIT_LABEL = "待たずに作る";
+
+/** 動きの点の説明（ADR-0054 段階2）。秒は小数第2位まで。 */
+export function motionKeyTitle(timeSec: number, locked: boolean): string {
+  const at = `${Math.round(timeSec * 100) / 100}秒`;
+  return locked
+    ? `動きの点（${at}）。列が固定されているので動かせません。固定を外すと直せます。`
+    : `動きの点（${at}）。引くと、この時刻の位置だけ直ります。`;
+}
+/** 道筋と点を描いたときの一言（ADR-0054 決定4＝段階1の一言を置き換える）。 */
+export const MOTION_PATH_NOTE = "部品を動かすと動き全体がずれます。点を掴んで引くと、その時刻の位置だけ直せます。";
+
+/** 最後の1場面を消そうとしたときの理由（場面編集のカード・台本表の行で同じもの＝場面が0枚の動画は作れない）。 */
+export const LAST_SCENE_DELETE_HINT = "最後の1つは消せません";
+
+/** ウィザードの最後の段の声の選択の見出し（声の段は外した・ADR-0048 追補 2026-10-05）。 */
+export const WIZARD_VOICE_LABEL = "読み上げの声";
+
+/** たたき台の「進む」（流れの帯の右・ADR-0048 追補 2026-10-05）。ゆうこの案内も同じ文言を引く。 */
+export const DRAFT_NEXT_LABEL = "この内容で確認・編集する";
+
+/**
+ * タイムラインの動きのひな形（#1349）。登場は帯の始まり・退場は帯の終わり・強調は再生位置から当てる。
+ * ⚠️ 名前は場面形式の動きと同じ語（ふわっと・すべって・ぽんっと・くるっと）＝同じ動きを2つの言葉で呼ばない。
+ */
+export const MOTION_PRESET_OPTIONS: readonly { id: string; label: string; preset: MotionPresetShape }[] = [
+  { id: "in-fade", label: "登場：ふわっと", preset: { place: "in", kind: "fade" } },
+  { id: "in-slide-left", label: "登場：左からすべって", preset: { place: "in", kind: "slide", direction: "left" } },
+  { id: "in-slide-right", label: "登場：右からすべって", preset: { place: "in", kind: "slide", direction: "right" } },
+  { id: "in-slide-up", label: "登場：上からすべって", preset: { place: "in", kind: "slide", direction: "up" } },
+  { id: "in-slide-down", label: "登場：下からすべって", preset: { place: "in", kind: "slide", direction: "down" } },
+  { id: "in-pop", label: "登場：ぽんっと", preset: { place: "in", kind: "pop" } },
+  { id: "in-spin", label: "登場：くるっと", preset: { place: "in", kind: "spin" } },
+  { id: "out-fade", label: "退場：ふわっと", preset: { place: "out", kind: "fade" } },
+  { id: "out-slide-left", label: "退場：左へすべって", preset: { place: "out", kind: "slide", direction: "left" } },
+  { id: "out-slide-right", label: "退場：右へすべって", preset: { place: "out", kind: "slide", direction: "right" } },
+  { id: "out-slide-up", label: "退場：上へすべって", preset: { place: "out", kind: "slide", direction: "up" } },
+  { id: "out-slide-down", label: "退場：下へすべって", preset: { place: "out", kind: "slide", direction: "down" } },
+  { id: "out-pop", label: "退場：ぽんっと", preset: { place: "out", kind: "pop" } },
+  { id: "out-spin", label: "退場：くるっと", preset: { place: "out", kind: "spin" } },
+  { id: "emph-zoom", label: "強調：ズーム", preset: { place: "emphasis", kind: "zoom" } },
+  { id: "emph-shake", label: "強調：震える", preset: { place: "emphasis", kind: "shake" } },
+  { id: "emph-bounce", label: "強調：はねる", preset: { place: "emphasis", kind: "bounce" } },
+];
+export const MOTION_PRESET_HINT = "登場は帯の始まりから、退場は帯の終わりまで、強調は再生位置から当てます。当て直すと、その側（始まり／終わりから帯の半分まで）の動きを置き換えます（真ん中の動きは残します）。帯の長さを変えたら当て直してください。取り消しで戻せます。";
+/** 選んだ長さが帯に収まらないとき（登場・退場は帯の半分まで・#1349）。 */
+export function motionPresetShortenedMessage(sec: number): string {
+  return `この帯では ${Math.round(sec * 100) / 100} 秒になります（登場・退場は帯の半分まで）。`;
+}
+
+/** 字幕ファイルの読み込みの断り（ADR-0055・#1351）。表（`15 §6`）と等値で守る。 */
+export const subtitleFileMessage = {
+  SUBTITLE_FILE_UNREADABLE: "この字幕ファイルは読めませんでした。字幕ファイル（.srt／.vtt）を選び直してください",
+  SUBTITLE_FILE_EMPTY: "この字幕ファイルには、読める字幕がありませんでした。別の字幕ファイル（.srt／.vtt）を選んでください",
+  SUBTITLE_FILE_NOTHING_TO_EXPORT: "書き出せる字幕がありません。字幕を入れてから、もう一度押してください",
+  SUBTITLE_FILE_SAVE_FAILED: "字幕ファイルを保存できませんでした。別の保存先を選んで、もう一度押してください",
+} as const;
+/** 字幕ファイルを書き出したあとの知らせ。 */
+export function subtitleExportedMessage(count: number): string {
+  return `字幕を ${count} 個、字幕ファイルに書き出しました。`;
+}
+/**
+ * 字幕ファイルに入れられなかった場面の知らせ（場面形式・自由配置の字幕ボックスが対象をセリフにしているもの）。
+ * ⚠️ **黙って抜かない**（ADR-0026④）＝焼き出しの知らせ（`BAKE_DIALOGUE_SUBTITLE_SKIPPED`）と同じ場面を指す。
+ */
+export function subtitleFileSkippedScenesMessage(sceneNumbers: number[]): string {
+  return `${formatSceneNumbers(sceneNumbers)}の字幕は、セリフに合わせて切り替わる字幕ボックスなので字幕ファイルに入れていません。字幕ボックスの対象を読み上げにすると入ります。`;
+}
+/** 字幕ファイルを並べたあとの知らせ（読めなかった・上限を越えた分は数を言う＝黙って捨てない）。 */
+export function subtitleImportedMessage(placed: number, unreadable: number, beyondLimit: number): string {
+  const notes = [
+    ...(unreadable > 0 ? [`${unreadable} 個は読めなかったので並べていません`] : []),
+    ...(beyondLimit > 0 ? [`${beyondLimit} 個は動画の長さの上限を越えるので並べていません`] : []),
+  ];
+  return `字幕を ${placed} 個、新しい列に並べました。${notes.length > 0 ? `${notes.join("。")}。` : ""}取り消すと全部消えます。`;
+}
+/** 字幕ファイルの読み込み・書き出しのボタン。 */
+export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
+export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
+export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
+export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";
+
+/**
+ * タイムライン形式で、枠に入りきらず末尾が「…」になる文字の注意（#1366）。見出しは場面形式の公開前チェックと同じ。
+ * 例は先頭の1つだけ（長いと読めない）・数は全部。
+ */
+export const TRUNCATED_TEXT_LABEL = "切れている文字";
+export function timelineTruncatedTextDetail(texts: readonly string[]): string {
+  const first = texts[0] ?? "";
+  const sample = first.length > 16 ? `${first.slice(0, 16)}…` : first;
+  return `「${sample}」${texts.length > 1 ? `など ${texts.length} か所` : ""}の文字が枠に入りきらず、末尾が「…」になります。部品の枠を広げるか、文字を小さくしてください。`;
+}
+
+/** 喋っている間の動き（ADR-0056・#1367）。 */
+export const TALK_MOTION_SECTION_LABEL = "喋っている間の動き";
+export const TALK_MOTION_CHOICES: readonly { value: TalkMotionKind; label: string }[] = [
+  { value: TALK_MOTION_KIND.bounce, label: "はねる（セリフの頭で1回）" },
+  { value: TALK_MOTION_KIND.bob, label: "ゆらゆら（喋っている間、上下に）" },
+  { value: TALK_MOTION_KIND.pulse, label: "ふくらむ（喋っている間、少し大きく）" },
+];
+export const TALK_MOTION_HINT =
+  "選んだ列の声が鳴っている間だけ動きます。セリフを足したり長さを変えたりしても付いてきます。手で付けた動きの上に足されます（口は動きません）。";
+
+/**
+ * 動画サイズの名前（#1218・利用者判断 2026-10-07＝3択）。**両形式で同じ**（ADR-0026②）。
+ * ⚠️ 画面に出すのは名前と縦横の大きさだけ（ビットレート等の技術用語は出さない＝§2-3）。
+ */
+export const EXPORT_SIZE_LABEL: Record<ExportSize, string> = {
+  [EXPORT_SIZE.full]: "きれい",
+  [EXPORT_SIZE.standard]: "ふつう",
+  [EXPORT_SIZE.light]: "軽い",
+};
+/** 「ふつう」の補足（選択肢の中に添える）。 */
+export const EXPORT_SIZE_STANDARD_NOTE = "ファイル小さめ";
+/** 動画サイズの欄の説明（場面形式の書き出し画面）。 */
+export const EXPORT_SIZE_HINT =
+  "「ふつう」は大きさは「きれい」と同じで、ファイルを小さくします。写真や映像の細かい所がわずかに粗くなることがあります（字幕の読みやすさは変わりません）。";

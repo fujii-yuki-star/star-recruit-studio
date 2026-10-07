@@ -8,6 +8,10 @@ import type { ScreenId } from "./data/mockData";
  * 共有する単一の集合。別々に持つと「工程画面か」の線引きが2箇所でずれる（ADR-0026②）。
  */
 export const PROJECT_SCREENS: readonly ScreenId[] = [
+  // ⚠️ **タイムライン形式の編集も工程画面**（#987）＝入っていなかったので、
+  // タイムライン編集を開いている間**サイドバーの「今の動画」が出ず、戻る道が無かった**
+  //（場面形式も開いていると、**別の動画の名前を出したまま、押すと別の文書へ飛ぶ**）。
+  "timeline-project",
   "wizard",
   "confirm",
   "generating",
@@ -15,7 +19,6 @@ export const PROJECT_SCREENS: readonly ScreenId[] = [
   "scene-edit",
   "preview",
   "timeline",
-  "timeline-edit",
   "precheck",
   "export",
 ];
@@ -39,3 +42,59 @@ export const DEFAULT_PROJECT_RETURN: ScreenId = "draft";
 export function stickyProjectScreen(prev: ScreenId, current: ScreenId): ScreenId {
   return isProjectScreen(current) ? current : prev;
 }
+
+/**
+ * 公開前チェックから預けた「直す場面の並び」（`sceneEditTrail`）を、この遷移で持ち越すか（UI/UX 監査 2026-10-02）。
+ *
+ * ⚠️ **場面編集と仕上がり確認の往復だけ持ち越す**＝場面編集から「仕上がり確認へ」で確かめて「場面編集へ戻る」と、
+ * 並びが消えて戻るが「台本表へ戻る」に変わり、帯も消えていた（PR #1341 レビュー 🟡）。
+ * ⚠️ **それ以外へ出たら落とす**＝残すと、あとで台本表から素直に場面編集を開いたときに、押してもいない
+ * 「公開前チェックへ戻る」と帯が出る。
+ */
+export function keepsSceneEditTrail(next: ScreenId): boolean {
+  return next === "scene-edit" || next === "preview";
+}
+
+/**
+ * サイドバーの「今の動画」に出すもの（#987→#1006）。
+ *
+ * ⚠️ **2つの形式は同時に開いたままが正規の状態**＝一覧はタイムラインを開くとき
+ * 「別の文書なので」と確認を出さず、場面形式を閉じさせない。だから
+ * **「どちらを開いているか」では決まらない**＝**開いている方をすべて**出す。
+ *
+ * ⚠️ **1つに畳まない**（#1006＝実機の指摘「どちらも確認できるべき」）＝直近にいた方だけを
+ * 出していたので、**もう片方へはサイドバーから戻れず**、一覧を経由するしかなかった
+ *（一覧から開き直すと確認や読み込みが挟まる＝開いたままなのに遠い）。
+ *
+ * ⚠️ **どちらへ行くのか、押す前に分かるようにする**＝同じ「今の動画」が2つ並ぶと
+ * 見分けられないので、タイムライン形式には一覧と**同じ言葉**（「タイムライン」）を添える。
+ *
+ * ⚠️ **これを画面の中で書かない**＝場面形式からしか採っていなかったせいで、
+ * タイムライン編集中は「今の動画」が出ないか、**別の動画の名前を出したまま押すと別の文書へ飛んだ**。
+ */
+export function currentProjectEntries(input: {
+  /** 「今の動画」を押したときの戻り先（`stickyProjectScreen` が覚えているもの）。 */
+  returnTo: ScreenId;
+  /** 場面形式を開いているか。 */
+  sceneOpen: boolean;
+  sceneName: string;
+  /** タイムライン形式の動画名（開いていなければ `null`）。 */
+  timelineName: string | null;
+  /** いまの画面（工程画面にいる間は、開いていなくても出す＝従来の `showCurrentProject`）。 */
+  current: ScreenId;
+}): { kind: 'scene' | 'timeline'; name: string; target: ScreenId; sub: string }[] {
+  const out: { kind: 'scene' | 'timeline'; name: string; target: ScreenId; sub: string }[] = [];
+  // 場面形式＝工程画面にいる間は、まだ開いていなくても出す（従来どおり）。
+  // ⚠️ タイムライン編集の画面は**場面形式の工程画面ではない**ので、ここには数えない。
+  const sceneShow = input.sceneOpen || (isProjectScreen(input.current) && input.current !== 'timeline-project');
+  if (sceneShow) {
+    // ⚠️ **戻り先がタイムラインのままだと、場面形式の入口がタイムラインへ飛ぶ**。
+    const target = input.returnTo === 'timeline-project' ? DEFAULT_PROJECT_RETURN : input.returnTo;
+    out.push({ kind: 'scene', name: input.sceneName, target, sub: '今の動画' });
+  }
+  if (input.timelineName != null) {
+    out.push({ kind: 'timeline', name: input.timelineName, target: 'timeline-project', sub: '今の動画（タイムライン）' });
+  }
+  return out;
+}
+

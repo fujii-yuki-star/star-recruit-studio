@@ -9,14 +9,25 @@ export function FitSelect({
   value,
   onChange,
   inheritLabel,
+  disabled,
+  title,
 }: {
   value: Fit | undefined;
   onChange: (fit: Fit | undefined) => void;
   inheritLabel?: string;
+  /**
+   * 押せないとき（書き出し中・固定した列など・#720）。**受け口が無いと、渡された `disabled` は
+   * 黙って捨てられる**＝触れてしまい、あとから断られる（打った値が消えて理由だけ出る）。
+   */
+  disabled?: boolean;
+  /** 押せない理由（指したときに出す）。 */
+  title?: string;
 }) {
   return (
     <select
       className="select"
+      disabled={disabled}
+      title={title}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value === "" ? undefined : (e.target.value as Fit))}
     >

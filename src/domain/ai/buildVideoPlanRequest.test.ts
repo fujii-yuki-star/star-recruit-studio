@@ -1,14 +1,19 @@
+import { MAX_SCENES_PER_VIDEO } from '../constants';
 import { describe, expect, it } from 'vitest';
 import { AI_ASSET_SEND_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import {
+  FEW_SHOT_COMPANY_NAME,
+  VISUAL_WISH_RULE,
   VIDEO_PLAN_SYSTEM_PROMPT,
   VIDEO_PLAN_SYSTEM_PROMPT_GENERAL,
   buildVideoPlanMessages,
   buildVideoPlanUserMessage,
 } from './buildVideoPlanRequest';
+import { COMPANY_NAME_PLACEHOLDER, RECRUIT_URL_PLACEHOLDER } from './refineVideoPlan';
+import aiVideoPlanExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
 
 const templates: TemplateSummary[] = [
   {
@@ -57,6 +62,26 @@ function fullInput(): GenerateVideoPlanInput {
     yukoPoseTags: ['smile', 'guide', 'bow'],
   };
 }
+
+// ⚠️ **断る前に、先に伝えておく**（#1222）＝上限を超えた動画案は取り込まずに断るので、
+// **AI が知らないまま作ると、呼び出し1回ぶんが無駄になる**。プロンプトに書いておくのが第1段で、
+// 断りはその受け皿（第2段）。⚠️ **採用向けと一般向けの両方**＝片方だけだと、
+// その用途のときだけ無駄打ちが起きる（**同じ規則を用途で割らない**）。
+describe('場面の数の上限を、AI へ先に伝える（#1222）', () => {
+  it.each([
+    ['採用向け', VIDEO_PLAN_SYSTEM_PROMPT],
+    ['一般・社内発表向け', VIDEO_PLAN_SYSTEM_PROMPT_GENERAL],
+  ])('%s のプロンプトに上限が書いてある', (_name, prompt) => {
+    expect(prompt, '上限の数が書かれていない').toContain(String(MAX_SCENES_PER_VIDEO));
+    expect(prompt, '「場面の数の上限」として書かれていない').toContain(`場面は全部で ${MAX_SCENES_PER_VIDEO} 個まで`);
+    // ⚠️ **超えそうなときの逃げ道も書く**＝「80まで」だけだと、AI は**内容を削って**辻褄を合わせる。
+    expect(prompt, '超えそうなときにどうするかが無い').toContain('内容をまとめて場面の数を減らす');
+    // ⚠️ **「1場面を長くする」とは言わない**（PR #1223 レビュー 🟡）＝同じプロンプトの
+    //   「durationSec は 3〜15 秒」と矛盾し、従われても `transformPlan` が clamp して戻す
+    //  （`DURATION_CLAMPED`）＝**実行できない逃げ道**になる。
+    expect(prompt, '守れない逃げ道を書いている').not.toContain('1場面を長くして');
+  });
+});
 
 describe('buildVideoPlanMessages', () => {
   it('システムプロンプトは 12§5 の確定版を返す', () => {
@@ -347,5 +372,65 @@ describe('利用可能な素材の上限（12§6・#585）', () => {
     const sentCount = (user.match(/assetId=a\d+/g) ?? []).length;
     expect(sentCount).toBe(AI_ASSET_SEND_MAX); // プロンプトに載るのは上限まで
     expect(user).toContain(`assetId=a${AI_ASSET_SEND_MAX + 1}`); // 説明のある素材は残る
+  });
+});
+
+// 固有名詞はソフトが差し込む（ADR-0052 決定2・12 §8.7）＝同梱の AI にだけ「印で書く」と伝える。
+describe('差し込みの印（同梱の AI だけ・ADR-0052 段階1）', () => {
+  const on = { properNounPlaceholders: true };
+
+  it('印で書く指示を足し、例の会社名も印にする（例の名前を書き写させない）', () => {
+    const user = buildVideoPlanMessages(fullInput(), on).user;
+    expect(user).toContain(`会社名は文字で書き写さず、どこでも必ず ${COMPANY_NAME_PLACEHOLDER} と書く`);
+    expect(user).toContain(`texts.url に ${RECRUIT_URL_PLACEHOLDER} と書く`);
+    const example = user.slice(user.indexOf('"schemaVersion"'));
+    expect(example).not.toContain(FEW_SHOT_COMPANY_NAME);
+    expect(example).toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('会社情報の欄には本物の会社名を出したまま（AI が中身を考えられるように）', () => {
+    expect(buildVideoPlanMessages(fullInput(), on).user).toContain('会社名: 株式会社ゆうこ');
+  });
+
+  it('入力に値の無い印は指示しない', () => {
+    const input = fullInput();
+    input.companyInfo = { ...input.companyInfo!, recruitUrl: '' };
+    const user = buildVideoPlanMessages(input, on).user;
+    expect(user).not.toContain(RECRUIT_URL_PLACEHOLDER);
+    expect(user).toContain(COMPANY_NAME_PLACEHOLDER);
+    input.companyInfo = { ...input.companyInfo, companyName: ' ' };
+    const none = buildVideoPlanMessages(input, on).user;
+    expect(none).not.toContain(COMPANY_NAME_PLACEHOLDER);
+    expect(none).toContain(FEW_SHOT_COMPANY_NAME); // 印を使わないなら例もそのまま
+  });
+
+  it('一般の動画には足さない（会社情報を使わない）', () => {
+    const user = buildVideoPlanMessages({ ...generalInput(), companyInfo: fullInput().companyInfo }, on).user;
+    expect(user).not.toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('選ばなければ今と同じ（Gemini の経路は変えない）', () => {
+    expect(buildVideoPlanMessages(fullInput()).user).toBe(buildVideoPlanUserMessage(fullInput()));
+    expect(buildVideoPlanMessages(fullInput()).user).not.toContain(COMPANY_NAME_PLACEHOLDER);
+  });
+
+  it('例の fixture に置き換える会社名が本当に書いてある（fixture を直したら気づく）', () => {
+    expect(JSON.stringify(aiVideoPlanExample)).toContain(FEW_SHOT_COMPANY_NAME);
+  });
+});
+
+// 見せたいものを言葉で書かせる（ADR-0052 決定1・2・12 §8.8）＝同梱の AI だけ・素材があるときだけ。
+describe('見せたいものを notes に書かせる（同梱の AI だけ）', () => {
+  it('素材があれば指示を足す', () => {
+    expect(buildVideoPlanMessages(fullInput(), { askVisualWish: true }).user).toContain(VISUAL_WISH_RULE);
+  });
+  it('素材が無ければ足さない（当てる物が無い）', () => {
+    expect(buildVideoPlanMessages({ ...fullInput(), assets: [] }, { askVisualWish: true }).user).not.toContain(VISUAL_WISH_RULE);
+  });
+  it('選ばなければ足さない（Gemini の経路は変えない）', () => {
+    expect(buildVideoPlanMessages(fullInput()).user).not.toContain(VISUAL_WISH_RULE);
+  });
+  it('一般の動画にも足す（見せたいものは用途によらない）', () => {
+    expect(buildVideoPlanMessages({ ...generalInput(), assets: fullInput().assets }, { askVisualWish: true }).user).toContain(VISUAL_WISH_RULE);
   });
 });

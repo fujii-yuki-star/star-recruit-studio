@@ -6,21 +6,33 @@ import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import type { Scene, Transition } from './types';
 
+// MVP で実際に描画する種別。これ以外（wipe/zoom）は fade にフォールバックする。
+// **`as const` なのは意図的**（`readonly TransitionType[]` に広げない）＝この配列が
+// `DrawnTransitionType` の単一の参照元で、種別を1つ足した瞬間に下流の網羅 switch が落ちる。
+const DRAWN_TYPES = [TRANSITION_TYPE.none, TRANSITION_TYPE.fade, TRANSITION_TYPE.slide] as const;
+
+/**
+ * **実際に描画される**切り替えの種別（`resolveTransition` の結果の型）。`TransitionType` より狭い。
+ *
+ * これを分けているのは、設定できる種別（`TransitionType`＝wipe/zoom を含む）と、現に画面へ出る種別が
+ * 食い違っているため（wipe/zoom は fade に丸めている＝ADR-0032 決定19）。この型を消費する側を
+ * **網羅 switch（`never` チェック）**で書いておくと、`DRAWN_TYPES` に wipe が入った瞬間に union が
+ * 広がってビルドが落ちる＝黙って fade へ落とし続ける事故を人の注意ではなく型で防ぐ。
+ */
+export type DrawnTransitionType = (typeof DRAWN_TYPES)[number];
+
+function isDrawnType(type: TransitionType): type is DrawnTransitionType {
+  return (DRAWN_TYPES as readonly TransitionType[]).includes(type);
+}
+
 export interface ResolvedTransition {
   /** none/fade/slide（MVP）。wipe/zoom は fade に丸める。 */
-  type: TransitionType;
+  type: DrawnTransitionType;
   /** slide のときのみ意味を持つ（ADR-0009：MVP は in に適用）。 */
   direction: TransitionDirection;
   /** 希望の遷移時間（秒・0 以上）。境界での上限 clamp は transitionTimeline が場面尺を見て行う。 */
   durationSec: number;
 }
-
-// MVP で実際に描画する種別。これ以外（wipe/zoom）は fade にフォールバックする。
-const MVP_TYPES: readonly TransitionType[] = [
-  TRANSITION_TYPE.none,
-  TRANSITION_TYPE.fade,
-  TRANSITION_TYPE.slide,
-];
 
 /**
  * 場面の「入り」トランジション（transition.in）を MVP の実効値へ解決する。
@@ -28,7 +40,7 @@ const MVP_TYPES: readonly TransitionType[] = [
  */
 export function resolveTransition(transition: Transition | undefined): ResolvedTransition {
   const raw = transition?.in ?? TRANSITION_TYPE.none;
-  const type = MVP_TYPES.includes(raw) ? raw : TRANSITION_TYPE.fade;
+  const type = isDrawnType(raw) ? raw : TRANSITION_TYPE.fade;
   return {
     type,
     direction: transition?.direction ?? TRANSITION_DIRECTION.left,
@@ -46,10 +58,25 @@ export function deriveTransitionSelectValue(transition: Transition | undefined):
 }
 
 export interface BoundaryTransition {
-  type: TransitionType;
+  type: DrawnTransitionType;
   direction: TransitionDirection;
   /** clamp 済みの実効 D（秒）。書き出しと同じく両隣の場面尺で clamp する。0＝遷移なし（プレビュー不要）。 */
   durationSec: number;
+}
+
+/**
+ * 場面の並びから「場面 i への入場の希望 D」を組む（#727）。**全経路がこれを通す**。
+ *
+ * ⚠️ 以前は同じ式が6か所に手書きされていた。`transitionTimeline` は「各段が前より前だけで決まる」関数
+ * だったので写しても割れなかったが、**#727 で後ろの場面にも依存する**ようになったため、
+ * **入力を1つでも欠けた形で渡すと値が割れる**（実際にプレビューが割れた＝下の ⚠️）。
+ */
+export function transitionBoundaryDs(scenes: readonly { transition?: Transition }[]): number[] {
+  return scenes.map((s, i) => {
+    if (i === 0) return 0; // 先頭に入場の切り替えは無い
+    const r = resolveTransition(s.transition);
+    return r.type === TRANSITION_TYPE.none ? 0 : r.durationSec;
+  });
 }
 
 /**
@@ -68,17 +95,18 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
   if (targetIndex <= 0 || !scene || r.type === TRANSITION_TYPE.none || r.durationSec <= 0) {
     return { type: r.type, direction: r.direction, durationSec: 0 };
   }
-  // 書き出し（buildExportScenes）と同一の sceneDurations / boundaryDs を対象境界まで組む（none/先頭=0）。
-  const upto = scenes.slice(0, targetIndex + 1);
-  const sceneDurations = upto.map((s) => s.durationSec);
-  const boundaryDs = upto.map((s, k) => {
-    if (k === 0) return 0;
-    const rr = resolveTransition(s.transition);
-    return rr.type === TRANSITION_TYPE.none ? 0 : rr.durationSec;
-  });
-  const { steps } = transitionTimeline(sceneDurations, boundaryDs);
+  // 書き出し（buildExportScenes）と**同じ入力**で回す。
+  // ⚠️ **後ろを切り落としてはいけない**（#727）＝以前は対象境界までで回していたが、
+  // 切り替えの上限が「その場面に退場があるか」にも依るようになったので、切り落とすと
+  // **対象場面が必ず末尾になり退場が見えず、プレビューだけ上限が効かない**
+  // （`[5, 0.8(0.5), 5(0.5)]` で書き出し 0.383 秒・プレビュー 0.5 秒＝ADR-0001 が破れる）。
+  // `acc` は前より前だけで決まるので、全場面で回しても**対象より前の値は変わらない**。
+  const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), transitionBoundaryDs(scenes));
   return { type: r.type, direction: r.direction, durationSec: steps[targetIndex - 1]?.durationSec ?? 0 };
 }
+
+/** 浮動小数の丸めを吸収する許容差（比較のためだけの値＝尺の意味は持たない）。 */
+const FLOAT_EPS = 1e-9;
 
 /**
  * 「切り替えに飲み込まれて総尺に寄与しない場面」の番号（1始まり・公開前チェック用・#553/#554）。
@@ -92,14 +120,77 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
  * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため到達性が上がった。
  *
  * 判定は書き出し（buildExportScenes）と同じ `resolveTransition` 由来の want と場面尺の比較＝経路を共有する。
+ *
+ * ⚠️ **覆われる側は「自分の入場」だけではない**（#740）＝**次の場面の入場**にも潰される。
+ * 例＝尺 `[5, 4, 6]` の3番目に 5 秒のフェードを付けると、場面2（4秒）は**自分の切り替えを持たない**まま
+ * 丸ごと覆われるが、以前は「自分の入場 ≥ 自分の尺」しか見ておらず**何も知らせなかった**
+ *（`shortenedTransitionSceneNumbers` も、希望どおりの長さが取れているので黙る）。
+ * 片側だけの場面に上限を効かせない carve-out（#727）は ADR-0009 の意図どおり**そのまま**なので、
+ * **出力は変えず**、残る重なりを知らせるだけにする（§2-5・ADR-0026④）。
+ * ⚠️ 見るのは**適用後の `d` ではなく希望（want）**＝既存の判定と同じ材料で揃える。
+ * 自分の入場で覆われる場合、適用後は strict clamp で必ず1フレーム残るので `d ≥ 尺` は決して立たない
+ *（それでも実質見えない）。次の場面の入場で覆われる場合は、左の clamp が「それまでの結合結果」に効くので
+ * **1フレームも残らず丸ごと消える**（`[5,4,6]` の場面2）＝どちらも知らせる必要がある。
  */
 export function swallowedByTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const own = swallowedByOwnTransitionSceneNumbers(scenes);
+  const next = swallowedByNextTransitionSceneNumbers(scenes);
+  return [...own, ...next].sort((a, b) => a - b);
+}
+
+/**
+ * ①**自分の入場が自分の尺を覆う意図**（従来の判定・#553/#554）。
+ * 適用後は strict clamp で1フレーム残るが実質見えない＝「設定した切り替えが場面を覆い尽くす意図」で数える。
+ * **直す場所はその場面自身**（表示時間を長くする／自分の切り替えを短くする）。
+ */
+export function swallowedByOwnTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const ds = transitionBoundaryDs(scenes);
   const nums: number[] = [];
   scenes.forEach((s, i) => {
-    if (i === 0) return; // 先頭に入場の切り替えは無い（boundaryDs[0]=0）
-    const r = resolveTransition(s.transition);
-    if (r.type === TRANSITION_TYPE.none || r.durationSec <= 0) return;
-    if (r.durationSec >= s.durationSec) nums.push(i + 1); // 切り替えが場面尺以上＝丸ごと飲まれる
+    if (i === 0) return; // 先頭に入場の切り替えは無い
+    const want = ds[i] ?? 0;
+    if (want > 0 && want >= s.durationSec) nums.push(i + 1);
+  });
+  return nums;
+}
+
+/**
+ * ②**次の場面の入場に覆われて、単独で映る時間が残らない**場面（#740）。
+ *
+ * 左の clamp は「それまでの結合結果」に効くので、**自分より長い切り替え**が通ってしまう
+ * （`[5,4,6]` の場面2＝切り替え 5 秒が場面2の 4 秒を超える）。
+ * ⚠️ **「動画から消える」ではない**（レビュー指摘・実測）＝場面2は連結後 [5,9) に置かれ、切り替えの窓
+ * [4,9) に**丸ごと含まれる**ので**一度も単独では映らない**が、重なっている間は見えているし、総尺にも
+ * 約4秒ぶん効いている（10.0 秒／場面2を抜くと 6.033 秒）。**前の場面の単独区間まで削る**のも同じ理由。
+ * ⚠️ **直す場所は自分だけではない**＝切り替えを持っているのは**次の場面**なので、案内は
+ * 「表示時間を長くする」か「**次の場面**の切り替えを短くする」の2つになる（§2-5・`adapters` が出し分ける）。
+ * ⚠️ ①と分けるのは、**両側に切り替えがある場面は予算（#727）が救う**から＝そちらは残りが必ず 0 より
+ * 大きく、「短くしています」（`shortenedTransitionSceneNumbers`）の担当。希望の合計だけで数えると
+ * その場面まで「飲み込まれる」に化け、#727 の警告が消える。
+ *
+ * ⚠️ **残る穴**（意図して残す）＝**隣の境界だけ**を見るので、2つ以上前の場面まで覆う長い切り替え
+ * （`[5, 0.4, 0.4, 6(5秒)]` の場面2）は拾わない。
+ */
+export function swallowedByNextTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const ds = transitionBoundaryDs(scenes);
+  const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), ds);
+  const own = new Set(swallowedByOwnTransitionSceneNumbers(scenes));
+  const nums: number[] = [];
+  scenes.forEach((s, i) => {
+    if (own.has(i + 1)) return; // ①で言っている場面は繰り返さない
+    // **覆っているのが実際の切り替えのときだけ**（レビュー指摘）＝尺 0 秒の場面は切り替えが無くても
+    // 残りが 0 になるので、そのまま数えると**存在しない切り替えを短くしてください**と案内してしまう。
+    const byNext = steps[i]?.durationSec ?? 0;
+    if (byNext <= 0) return;
+    // ⚠️ **自分の入場も引く**（式としての正しさ）。ただし②が立つとき `steps[i-1]` は必ず 0＝両側に
+    // 切り替えがある場面は予算（#727）が救うので、ここには来ない。**書き違いを守るのはテスト**
+    // （「次の入場が尺の一部しか覆わないとき」＝二重に数えると誤検出になる）。
+    const remaining = s.durationSec - (steps[i - 1]?.durationSec ?? 0) - byNext;
+    // ⚠️ **1フレーム未満も「残っていない」**（レビュー指摘）＝①は ε だけ残る形まで拾うのに、ここを
+    // `<= 0` にすると半フレーム残る場面が無言になる（既定 0.5 秒の切り替えだけで到達する）。
+    // ⚠️ **許容差を入れる**＝両側予算の場面は `尺 − 2·((尺−ε)/2)` が浮動小数で ε をわずかに下回り、
+    // 素の `< ε` だと #727 の「短くしています」をまた食う（一度踏んだ罠）。
+    if (remaining < TRANSITION_MIN_TAIL_SEC - FLOAT_EPS) nums.push(i + 1);
   });
   return nums;
 }
@@ -123,17 +214,82 @@ export function transitionTimeline(
 ): { effectiveTotalSec: number; steps: TransitionStep[] } {
   const steps: TransitionStep[] = [];
   if (sceneDurations.length === 0) return { effectiveTotalSec: 0, steps };
+  const budget = sceneTransitionBudgets(sceneDurations, boundaryDs);
   let acc = sceneDurations[0];
   for (let i = 1; i < sceneDurations.length; i += 1) {
     const want = Math.max(0, boundaryDs[i] ?? 0);
     // 左（それまでの結合結果 acc）と右（場面 i）のどちらの尺も **strict `<`** で超えない（ADR-0009：`0 ≤ D < 隣接場面尺`）。
     // ε＝1フレーム（TRANSITION_MIN_TAIL_SEC）を引くことで、切り替えが場面を丸ごと飲み込まず（各場面が最低1フレーム残る）、
     // FFmpeg xfade へ `duration ≥ 入力尺`（未定義動作）を渡さない（#547 P3-4／ADR-0009 未解決#4）。
-    // 通常の切り替え（want が場面尺より十分小さい）は want がそのまま採られ、影響を受けるのは退化ケース（want ≥ 尺−ε）だけ。
+    // 通常の切り替え（want が場面尺より十分小さい）は want がそのまま採られ、影響を受けるのは退化ケースだけ。
     // 場面尺 ≤ ε（1フレーム以下の極短場面）は max(0,…) で d→0＝ハードカット（重ねようがない）。
-    const d = Math.max(0, Math.min(want, acc - TRANSITION_MIN_TAIL_SEC, sceneDurations[i] - TRANSITION_MIN_TAIL_SEC));
+    const d = Math.max(0, Math.min(
+      want,
+      acc - TRANSITION_MIN_TAIL_SEC,
+      sceneDurations[i] - TRANSITION_MIN_TAIL_SEC,
+      budget[i - 1],
+      budget[i],
+    ));
     steps.push({ offsetSec: acc - d, durationSec: d });
     acc = acc + sceneDurations[i] - d;
   }
   return { effectiveTotalSec: acc, steps };
+}
+
+/**
+ * 場面ごとに「**1つの切り替えが取ってよい上限**」（#727）。
+ *
+ * 両側に切り替えがある場面は、使える尺（`尺 − ε`）を**2つで分け合う**＝`(尺 − ε) / 2`。
+ * 片側だけ（先頭・末尾・相手が切り替え無し）なら丸ごと使える。
+ *
+ * ⚠️ **これが無いと入場と退場が時間で重なる**。片方ずつの上限しか見ていなかったので
+ * `d_in + d_out ≤ 尺` が保証されず、既定の 0.5 秒のままでも**尺 1.0 秒未満の場面すべて**で重なっていた
+ * （その場面は一度も完全には表示されない）。さらに焼き出しでは、重なったぶんを**その場面のクリップだけ**
+ * 切り詰めるので、**相手側の場面は元の長さのまま＝動きが左右でずれる**（#717 レビューの実測）。
+ * 切り替えは1つの窓を両隣で共有しているので、ここで縮めれば**相手側も同じ長さになり、ずれが根から消える**。
+ */
+function sceneTransitionBudgets(sceneDurations: number[], boundaryDs: number[]): number[] {
+  return sceneDurations.map((dur, i) => {
+    const hasIn = i > 0 && (boundaryDs[i] ?? 0) > 0;
+    const hasOut = i + 1 < sceneDurations.length && (boundaryDs[i + 1] ?? 0) > 0;
+    // ⚠️ **両側にあるときだけ**縛る。片側だけの場面に上限を足すと、既存の意図
+    //（左は「それまでの結合結果」なので、合成が長ければ1場面より長い切り替えも許す＝`[5,4,6]` の
+    // 3境界目に 5 秒。飲み込まれる場面は `swallowedByTransitionSceneNumbers` が知らせる）を壊す。
+    return hasIn && hasOut ? (dur - TRANSITION_MIN_TAIL_SEC) / 2 : Number.POSITIVE_INFINITY;
+  });
+}
+
+/**
+ * **希望した切り替えが場面の長さに入らず短くなった場面**の番号（1始まり・#727）。
+ *
+ * 黙って短くしない（§2-5・ADR-0026④）＝事前確認で知らせる。既存の `swallowedByTransitionSceneNumbers`
+ * は「切り替え ≥ 場面尺」しか見ないので、**両側の合計だけが尺を超える帯**（既定なら 0.5〜1.0 秒の場面）は
+ * そちらでは拾えない。
+ */
+export function shortenedTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const durations = scenes.map((s) => s.durationSec);
+  // ⚠️ **希望の値**を採る（`resolveBoundaryTransition` は**クランプ後**を返すので、それと比べると
+  // 何と比べても一致してしまい、この関数は常に空を返す）。
+  const boundaryDs = transitionBoundaryDs(scenes);
+  const budget = sceneTransitionBudgets(durations, boundaryDs);
+  const { steps } = transitionTimeline(durations, boundaryDs);
+  const out = new Set<number>();
+  // それまでの結合結果（`acc`）＝`transitionTimeline` と同じ進み方で数える（式を2通り持たない）。
+  let acc = durations[0] ?? 0;
+  steps.forEach((step, k) => {
+    const i = k + 1; // steps[k] は場面 i（0始まり）への入場
+    const accBefore = acc;
+    acc = acc + durations[i] - step.durationSec;
+    if (step.durationSec >= (boundaryDs[i] ?? 0) - 1e-9) return; // 希望どおり取れている
+    // ⚠️ **実際に上限を握った場面だけ**を挙げる（#727 レビュー）。両隣を機械的に出すと、
+    // **伸ばしても効かない場面**（先頭場面＝切り替えの欄すら無い／上限を握っていない側）を
+    // 「表示時間を長くしてください」の対象にしてしまい、言われたとおりにしても直らない（§2-5）。
+    if (budget[i - 1] <= step.durationSec + 1e-9) out.add(i); // 場面 i-1 の1始まり番号
+    if (budget[i] <= step.durationSec + 1e-9) out.add(i + 1); // 場面 i の1始まり番号
+    // ⚠️ **それまでの結合結果で頭打ちになった場合も挙げる**（#727 レビュー）＝上限は予算だけではない。
+    // 動画の頭が短いと入場がそこで切られる（`[0.4, 0.8, 5]` の1つ目の境界）。伸ばす先は
+    // **それまでの場面**なので、直前の場面を挙げる（そこを長くすれば結合結果も伸びる）。
+    if (accBefore - TRANSITION_MIN_TAIL_SEC <= step.durationSec + 1e-9) out.add(i);
+  });
+  return [...out].sort((a, b) => a - b);
 }

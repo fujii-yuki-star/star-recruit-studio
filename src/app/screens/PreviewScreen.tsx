@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { GO_TO_TIMELINE_VIEW_LABEL } from "../uiLabels";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead, Switch } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { NoScenesState } from "../components/NoScenesState";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
@@ -13,14 +18,15 @@ import { hasSceneNarrationOverride, resolveBgmVolume, resolveNarrationVolume } f
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
-import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { resolveSceneBgm } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { lineAdvanceWindowSec } from "./previewLineTiming";
-import { assembleProject } from "../../domain/project/persistence";
 import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
+import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { useSpaceFocusTracking, yieldsSpaceTo } from "../hooks/spaceFocus";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -44,17 +50,24 @@ const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
   draft: "たたき台へ戻る",
   "scene-edit": "場面編集へ戻る",
   export: "書き出しへ戻る",
+  // 流れの帯の段から来たとき（ADR-0048 追補 2026-10-05）。
+  precheck: "公開前チェックへ戻る",
 };
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
-  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, updateVoiceSettings, previewReturnTo } =
+  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, setPrecheckReturnTo, updateVoiceSettings, previewReturnTo } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   // 「戻る」先＝来た画面（#410 sub3）。既知の入口（たたき台/場面編集/書き出し）以外や未設定はたたき台へ。
   const previewBackTo: ScreenId = previewReturnTo && PREVIEW_BACK_LABEL[previewReturnTo] ? previewReturnTo : "draft";
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
+
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
   const [playing, setPlaying] = useState(false);
   // 選択済みBGMが再生できなかったとき通知する（自分のBGMのURL解決/再生失敗・§2-5）。
   const [bgmPlayWarning, setBgmPlayWarning] = useState(false);
@@ -118,42 +131,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
     activeJumpRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [safeIdx]);
-  // タイムラインのテロップ（ADR-0018 テロップ実描画）。現在場面のローカル区間へ切り出し、再生位置で表示を切り替える。
-  const timeline = useMemo(
-    () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
-    [meta, assets, parts, scenes],
-  );
-  const currentTelops = useMemo(
-    () => (current ? sceneLocalTelops(timeline, current.sceneId) : []),
-    [timeline, current],
-  );
-  // 再生中のテロップは区間境界のタイマーで切替（t=0 も 0ms タイマー経由＝effect 内の同期 setState を避ける）。
-  // 停止中は場面頭(t=0)の表示を描画時に導出する。区間は書き出しの enable='between' と同一（パリティ）。
-  // 並行テロップ（③(8)）＝時刻ごとに有効な全テロップ（段付き）を表示する。
-  const [playbackTelops, setPlaybackTelops] = useState<{ text: string; row: number }[]>([]);
-  // テロップ切替タイマーも「開始時点のスナップショット」で組む（#382）。currentTelops は scenes 参照変化で
-  // 別オブジェクトに作り直されるため、内容が同じでも参照差で再起動→タイマーが再生位置基準でずれていた。
-  // 最新値は ref で読み（render 中の代入は禁止＝同期は effect で）、deps は内容シグネチャ（telopSig）にする。
-  const currentTelopsRef = useRef(currentTelops);
-  const telopSig = useMemo(() => JSON.stringify(currentTelops), [currentTelops]);
-  useEffect(() => {
-    currentTelopsRef.current = currentTelops;
-  }, [currentTelops]);
-  useEffect(() => {
-    if (!playing) return;
-    const telops = currentTelopsRef.current;
-    const bounds = [...new Set([0, ...telops.flatMap((iv) => [iv.startSec, iv.endSec])])];
-    const timers = bounds
-      .filter((b) => b >= 0)
-      .map((b) => window.setTimeout(() => setPlaybackTelops(activeTelopsAt(telops, b)), b * 1000));
-    return () => {
-      timers.forEach((t) => window.clearTimeout(t));
-      setPlaybackTelops([]); // 場面送り/停止で前場面の表示を持ち越さない
-    };
-    // safeIdx（場面送り）と telopSig（テロップ内容の変化）でのみ再構成＝scenes の参照変化では再起動しない。
-  }, [playing, safeIdx, telopSig]);
-  const activeTelops = playing ? playbackTelops : activeTelopsAt(currentTelops, 0);
-
   // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay 由来・AI/場面正準は不変）。
   const sceneAnimations = useMemo(
     () => (current ? (meta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === current.sceneId) : []),
@@ -244,6 +221,47 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       startIdx = i;
       break;
     }
+
+  // 再生・停止の**入口を 1 つにする**（#1032）。ボタンとキーで別々に書くと、
+  // `Space` だけ**前回の警告が消えない**・**範囲の終端から動かない**という別の振る舞いになる（ADR-0026②）。
+  const canPlay = scenes.length > 0;
+  const startPlayback = (): void => {
+    setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
+    setNarrationPlayWarning(false); // ナレーション再生失敗の警告も同様にクリア（#452 P2）
+    if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
+    setPlaying(true);
+  };
+  const stopPlayback = (): void => setPlaying(false);
+
+  // いちばん新しい値を**控えで見る**（窓の購読を毎描画張り替えない）。
+  // ⚠️ ref の書き込みは**描画中ではなく effect の中**で行う（`useEscapeReceiver` と同じ形）。
+  const playRef = useRef({ playing, canPlay, start: startPlayback, stop: stopPlayback });
+  useEffect(() => {
+    playRef.current = { playing, canPlay, start: startPlayback, stop: stopPlayback };
+  });
+
+  // `Space` で再生⇄停止（#1032）。タイムライン編集には前からあるので、**同じキーの意味を画面で割らない**（ADR-0026②）。
+  useSpaceFocusTracking();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== " ") return;
+      // 文字を打っている途中・変換中は奪わない（打ちかけの文字ごと再生が始まる、を作らない）。
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // 修飾キー付きは OS/ブラウザのものを奪わない
+      // **押した要素が `Space` で反応するなら、そちらに譲る**（「停止」を押したら止まったうえに
+      // また再生が始まる、を作らない）。一律に奪うと画面じゅうのボタンがキーボードで押せなくなる。
+      // ⚠️ **マウスで押したボタンには譲らない**（UI/UX 監査 2026-10-02・PR4a レビュー＝タイムライン編集と同じ判定）。
+      if (yieldsSpaceTo(e.target)) return;
+      const p = playRef.current;
+      // **場面が無いときは奪わない**＝押して何も起きない、を作らない（ボタンと同じ条件）。
+      if (!p.playing && !p.canPlay) return;
+      e.preventDefault(); // 既定の「画面を下へ送る」を止める
+      if (p.playing) { p.stop(); return; } // 止めるのはいつでも通す
+      p.start();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // 再生時に流す BGM の解決＝現在場面の実効BGM（場面ごと ?? プロジェクト＝null=継承・ADR-0018 ③(7)）。
   // 同じソースが続く場面では再起動しない（連続する同じ曲は途切れない）＝下の effect の deps を bundledBgm/bgmAsset にする。
@@ -463,6 +481,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     return (
       <div className="main-scroll">
         <PageHead title="仕上がり確認" desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。" />
+        {/* ⚠️ **両方の枝に置く**（UI/UX レビュー①）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**。たたき台は両方に置いてある（#952）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
           <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
             <ArrowLeftIcon size={16} />
@@ -475,31 +496,44 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   }
 
   return (
-    <div className="main-scroll">
+    // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
+    // （実測 1452/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
+    <div className="main-scroll dense">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻る（来た画面）と進む（公開前チェック）を上へそろえた。
+          以前は戻るが上の左、進むが右の列の下にあった。 */}
+      <FlowBar
+        current="preview"
+        back={{ label: PREVIEW_BACK_LABEL[previewBackTo] ?? "", onClick: () => onNavigate(previewBackTo) }}
+        next={{ label: "公開前チェックへ進む", onClick: () => { setPrecheckReturnTo("preview"); onNavigate("precheck"); } }}
+        onJump={(to) => {
+          // 場面編集へ移るときは、いま見ている場面を開く（「場面を直す」と同じ）。
+          if (to === "scene-edit" && current) setEditingSceneId(current.sceneId);
+          flowJump("preview", to, onNavigate);
+        }}
+      />
       <PageHead
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
       <ExportLockBanner onNavigate={onNavigate} />
 
-      {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
-      <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
-          <ArrowLeftIcon size={16} />
-          {PREVIEW_BACK_LABEL[previewBackTo]}
-        </button>
-      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
+          {/* 拡大縮小（#142）＝プレビューのすぐ上（操作する所の隣） */}
+          <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
           <ScenePreview
+            zoom={previewZoom}
+            onFitPercent={setPreviewFitPct}
+            // ⚠️ **仕上がり確認には線を出さない**（#265）＝ここは「出来上がり」を見る場所で、
+            // 編集の補助線が入ると**動画にも入るのか**が分からなくなる。記憶が「出す」でも出さない。
+            showSafeArea={false}
             scene={current}
             template={template}
             activeLineIndex={activeLine}
             subtitleSegment={previewSubtitleState.segment}
             boundaryFrame={previewSubtitleState.boundaryFrame}
-            telops={activeTelops}
             timeSec={animTimeSec}
             animations={previewAnimations}
             videoPlayback={{ playing, muted, slots: videoPlaybackSlots }}
@@ -551,24 +585,22 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             </div>
           )}
 
+          {/* 押せるときは**キーの割り当てを添える**（タイムライン編集と同じ流儀＝キーだけの操作を作らない）。 */}
           <div className="preview-controls">
             <button
               className="btn btn-icon btn-secondary"
               aria-label="再生"
-              onClick={() => {
-                setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
-                setNarrationPlayWarning(false); // ナレーション再生失敗の警告も同様にクリア（#452 P2）
-                if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
-                setPlaying(true);
-              }}
-              disabled={playing || scenes.length === 0}
+              title={playing || !canPlay ? undefined : "再生します（Space）"}
+              onClick={startPlayback}
+              disabled={playing || !canPlay}
             >
               <PlayIcon size={20} />
             </button>
             <button
               className="btn btn-icon btn-secondary"
               aria-label="停止"
-              onClick={() => setPlaying(false)}
+              title={playing ? "再生を止めます（Space）" : undefined}
+              onClick={stopPlayback}
               disabled={!playing}
             >
               <StopIcon size={20} />
@@ -674,8 +706,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="col gap-sm mt-lg">
+            {/* 行き先は見わたす画面（そこから焼き出せる）。**呼び方は入口ごとに揃える**（#1026・`06 §2` 規約11）。 */}
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
-              タイムラインで見る
+              {GO_TO_TIMELINE_VIEW_LABEL}
             </button>
             <button
               className="btn btn-secondary btn-block"
@@ -686,10 +719,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               }}
             >
               場面を直す
-            </button>
-            <button className="btn btn-primary btn-block btn-lg" onClick={() => onNavigate("precheck")}>
-              公開前チェックへ進む
-              <ChevronRightIcon size={18} />
             </button>
           </div>
         </div>

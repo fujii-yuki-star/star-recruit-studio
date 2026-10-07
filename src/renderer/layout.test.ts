@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, scaleItemContent, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from '../domain/text/textWrap';
 import { sampleTemplates } from '../infrastructure/sampleData';
@@ -55,40 +55,6 @@ const scene: Scene = {
   transition: { in: 'fade', out: 'fade', durationSec: 0.5 },
   warnings: [],
 };
-
-describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画・並行テロップ③(8)）', () => {
-  const telopItems = (layout: { items: LayoutItem[] }): TextItem[] =>
-    layout.items.filter((i) => i.id.startsWith('overlay_telop')) as TextItem[];
-  it('opts.telops で段付きの帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'ここがポイント', row: 0 }] });
-    const t = telopItems(layout);
-    expect(t).toHaveLength(1);
-    expect(t[0].id).toBe('overlay_telop_0');
-    expect(t[0].text).toBe('ここがポイント');
-    expect(t[0].isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
-    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop_0'); // 最前面＝末尾
-    expect(t[0].y).toBe(Math.round(1080 * 0.06));
-    expect(t[0].fontSize).toBe(Math.round(1080 * 0.045));
-  });
-  it('並行テロップ：段ごとに y が帯高さ分だけ下へずれる（③(8)）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'A', row: 0 }, { text: 'B', row: 1 }] });
-    const t = telopItems(layout);
-    expect(t.map((i) => i.id)).toEqual(['overlay_telop_0', 'overlay_telop_1']);
-    expect(t[0].y).toBe(Math.round(1080 * 0.06));
-    expect(t[1].y).toBe(Math.round(1080 * (0.06 + 0.14))); // 段1 は帯高さ(0.14)分下
-  });
-  it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }], telopFontId: 'kaitou-yokoku-gothic' });
-    expect(telopItems(layout)[0].fontId).toBe('kaitou-yokoku-gothic');
-    // 未指定は null（描画側 fontFamily へフォールバック）。
-    const l2 = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }] });
-    expect(telopItems(l2)[0].fontId).toBeNull();
-  });
-  it('未指定/空では telop item を足さない（従来どおり）', () => {
-    expect(telopItems(layoutScene(scene, openingTemplate))).toHaveLength(0);
-    expect(telopItems(layoutScene(scene, openingTemplate, { telops: [] }))).toHaveLength(0);
-  });
-});
 
 describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413/#495 レビュー）', () => {
   const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
@@ -922,5 +888,140 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
         expect(subtitleOverflowsCanvas(s, t), `${t.templateId} / ${n}字`).toBe(false);
       }
     }
+  });
+});
+
+// 字幕層の `textKey` 未指定（#1055）。**場面編集と描く側で解き方をそろえる**。
+describe('layoutScene：字幕層の textKey は未指定でも `subtitle`（#1055）', () => {
+  const noKey: Template = {
+    ...openingTemplate,
+    templateId: 'tmpl_nokey',
+    layers: openingTemplate.layers.map((l) => (l.id === 'subtitle' ? { ...l, textKey: undefined } : l)),
+  } as Template;
+
+  // ⚠️ **打っても出ない、を作らない**＝`textKeyOfLayer` は未指定を `subtitle` と解くので、
+  //    場面編集には字幕の欄が出る。描く側だけ `layer.textKey` を直に見ていたため何も出なかった。
+  //    ⚠️ **いま実害は無い**（`textKey` は schema の必須で、欠けた文書は読込時に補われる）＝
+  //    ここで固定するのは**解き方が1か所であること**（コメントが実装より強いことを言わないため）。
+  it('textKey が無くても、場面の字幕を描く（欄はあるのに出ない、を作らない）', () => {
+    const items = layoutScene(scene, noKey).items.filter((i): i is TextItem => isSubtitleItem(i));
+    expect(items.map((i) => i.text), '字幕の欄に入れた文が描かれない').toEqual([scene.texts.subtitle]);
+  });
+
+  // ⚠️ **体裁とフォントも同じ鍵で解く**（PR #1057 レビュー 🔴）＝文言だけ直すと、
+  //    同じ関数の3行違いで**また解き方が割れる**（文字は出るのに体裁だけ効かない）。
+  it('textKey が無くても、場面別の体裁とフォントが効く', () => {
+    const s2 = {
+      ...scene,
+      textStyles: { subtitle: { color: '#ff0000' } },
+      textFontIds: { subtitle: 'gen_interface_jp_display' },
+    } as Scene;
+    const item = layoutScene(s2, noKey).items.filter((i): i is TextItem => isSubtitleItem(i))[0];
+    expect(item.color, '場面別の体裁が効いていない').toBe('#ff0000');
+    expect(item.fontId, '場面別のフォントが効いていない').toBe('gen_interface_jp_display');
+  });
+
+  // ⚠️ **文字層は今までどおり**＝`textKey` を持たない文字層は文言を持たない（既定を足さない）。
+  it('文字層は textKey が無ければ何も出さない', () => {
+    const t = {
+      ...openingTemplate,
+      layers: [{ id: 'free', type: 'text', x: 0, y: 0, w: 100, h: 40, fontSize: 20 }],
+    } as unknown as Template;
+    const texts = layoutScene(scene, t).items.filter((i): i is TextItem => i.kind === 'text');
+    expect(texts, '文字層に既定の文言を足してしまった').toEqual([]);
+  });
+});
+
+describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
+  // 箱だけ縮めて字を据え置くと、縮んだ幅で折り返して「…」で切れた（作例の題字「漫才「キーフ…」」）。
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  };
+  const textEl = {
+    id: 'free_001', kind: 'text', x: 100, y: 100, w: 200, h: 60, text: 'ああああ',
+    strokeWidth: 4, strokeColor: '#000000', shadow: { enabled: true, blur: 6, dx: 2, dy: 8 },
+    background: { enabled: true, color: '#000000', opacity: 0.5, radius: 10 },
+  };
+  const shapeEl = { id: 'free_002', kind: 'shape', x: 400, y: 100, w: 100, h: 100, radius: 20, strokeWidth: 6, strokeColor: '#000000' };
+  const freeScene = {
+    ...scene, sceneType: 'free', templateId: 'free_v1', freeLayout: [textEl, shapeEl],
+  } as unknown as Scene;
+  const byId = (items: LayoutItem[], id: string): LayoutItem => items.find((i) => i.id === id)!;
+
+  it('動きの大きさ：文字の大きさ・縁取り・影・帯の角丸も同じ倍率（折り返しが変わらない＝「…」で切れない）', () => {
+    const pop = { id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, scale: 0.3 }] };
+    const el = byId(layoutScene(freeScene, freeTemplate, { timeSec: 0, animations: [pop] }).items, 'free_001') as TextItem;
+    expect(el.fontSize).toBeCloseTo(40 * 0.3);
+    expect(el.strokeWidth).toBeCloseTo(4 * 0.3);
+    expect(el.shadow).toMatchObject({ blur: expect.closeTo(1.8), dx: expect.closeTo(0.6), dy: expect.closeTo(2.4) });
+    expect(el.background?.radius).toBeCloseTo(3);
+    // 縮める前と同じ1行に収まる（箱と字が同じ倍率）。
+    expect(wrapText(el.text, el.w, el.fontSize, el.maxLines)).toEqual(['ああああ']);
+  });
+
+  it('動きの大きさ：図形の角丸と枠線の太さも同じ倍率', () => {
+    const pop = { id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, scale: 0.5 }] };
+    const el = byId(layoutScene(freeScene, freeTemplate, { timeSec: 0, animations: [pop] }).items, 'free_002') as FillItem;
+    expect(el).toMatchObject({ w: 50, radius: 10, strokeWidth: 3 });
+  });
+
+  it('まとまりの静的な縮小も中身ごと（文字・図形）＝行数は縮める前と同じ', () => {
+    const plain = layoutScene(freeScene, freeTemplate).items;
+    const grouped = { ...freeScene, groups: [{ id: 'group_001', members: ['free_001', 'free_002'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }] } as unknown as Scene;
+    const items = layoutScene(grouped, freeTemplate).items;
+    const t = byId(items, 'free_001') as TextItem;
+    expect(t).toMatchObject({ w: 100, fontSize: 20, strokeWidth: 2, maxLines: (byId(plain, 'free_001') as TextItem).maxLines });
+    expect(t.background?.radius).toBe(5);
+    expect(byId(items, 'free_002')).toMatchObject({ w: 50, radius: 10, strokeWidth: 3 });
+  });
+
+  it('まとまりの無い場面は中身を変えない（従来どおり）', () => {
+    const t = byId(layoutScene(freeScene, freeTemplate).items, 'free_001') as TextItem;
+    expect(t).toMatchObject({ fontSize: 40, strokeWidth: 4 });
+    expect(t.background?.radius).toBe(10);
+  });
+
+  it('テンプレのまとまりの縮小：文字・字幕の大きさと帯の角丸も縮む（まとまりに入っていない層は不変）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['title', 'subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const items = layoutScene(scene, grouped).items;
+    expect((byId(items, 'title') as TextItem).fontSize).toBe(36);
+    const sub = byId(items, 'subtitle') as TextItem;
+    expect(sub.fontSize).toBe(19);
+    expect(sub.background?.radius).toBe(8);
+    expect((byId(layoutScene(scene, openingTemplate).items, 'title') as TextItem).fontSize).toBe(72);
+  });
+
+  it('テンプレのまとまりの縮小：図形・背景の角丸も縮む', () => {
+    const t: Template = {
+      ...openingTemplate,
+      layers: [...openingTemplate.layers, { id: 'deco', type: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, radius: 40 }],
+      groups: [{ id: 'group_001', members: ['deco'], transform: { x: 0, y: 0, rotation: 0, scale: 0.25 } }],
+    };
+    expect(byId(layoutScene(scene, t).items, 'deco')).toMatchObject({ w: 50, radius: 10 });
+  });
+
+  it('テンプレのまとまりの縮小：素材の無い背景層（塗り）の角丸も縮む', () => {
+    const t: Template = {
+      ...openingTemplate,
+      layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 400, h: 400, zIndex: 0, radius: 40 }],
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const bare = { ...scene, assetRefs: {} } as Scene;
+    expect(byId(layoutScene(bare, t).items, 'background')).toMatchObject({ kind: 'fill', w: 200, radius: 20 });
+  });
+});
+
+describe('scaleItemContent（#1371 レビュー：負の倍率）', () => {
+  it('行き過ぎるイージングで倍率が負になっても、中身は 0 で止める（負の字の大きさを出さない）', () => {
+    const t: LayoutItem = { id: 't', kind: 'text', x: 0, y: 0, w: 100, h: 50, zIndex: 1, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, strokeWidth: 4 };
+    scaleItemContent(t, -0.5);
+    expect(t).toMatchObject({ fontSize: 0, strokeWidth: 0 });
+    const f: LayoutItem = { id: 'f', kind: 'fill', x: 0, y: 0, w: 100, h: 50, zIndex: 1, color: '#000000', opacity: 1, radius: 10 };
+    scaleItemContent(f, -2);
+    expect((f as FillItem).radius).toBe(0);
   });
 });

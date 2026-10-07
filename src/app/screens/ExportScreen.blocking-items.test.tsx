@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, useExportLockStore } from "../store/exportLock";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import * as ffmpeg from "../../infrastructure/ffmpegExport";
 import * as dialog from "../../infrastructure/dialog";
@@ -33,7 +34,10 @@ const setup = (scenes: Scene[]) => {
   });
 };
 
-const saveBtn = (): HTMLButtonElement => screen.getByText("動画を保存").closest("button") as HTMLButtonElement;
+// ⚠️ **押した瞬間に文言が変わる**（#993 ①）＝保存先を選んでいる間も走行中に数えるので、
+// 「動画を書き出す」→「書き出し中…」。どちらでも同じボタンを掴めるようにする。
+const saveBtn = (): HTMLButtonElement =>
+  screen.getByRole("button", { name: /動画を書き出す|書き出し中…/ }) as HTMLButtonElement;
 
 describe("ExportScreen 書き出せない項目があるときは保存させない（#547 P2-5 後続）", () => {
   beforeEach(() => {
@@ -45,7 +49,44 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     useProjectStore.getState().setExportRun({ phase: "idle" });
   });
 
-  it("見た目が見つからない場面があると「動画を保存」を押せず、理由と次の行動を出す", () => {
+  // ⚠️ **見つからない素材でも押させない**（#1068・実機で確かめた）＝押させると、
+  // **写真は黙って灰色の枠**になり、**動画は途中で失敗する**（保存先を選ばせた後に落とす）。
+  // ⚠️ **タイムライン形式は既に押す前に断っている**ので、揃える（ADR-0026②）。
+  it("使っている素材が見つからないと「動画を書き出す」を押せない", () => {
+    setup([scene({ assetRefs: { mainVisual: "asset_001" } })]);
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: ["asset_001"],
+    });
+    // ⚠️ **開いたときの調べ直しは差し替える**＝アプリの外では「調べられない＝空」になるので、
+    // そのままだと**この検査が用意した状態を消してしまう**（調べ直すこと自体は下の検査で固定する）。
+    vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByText(/動画を書き出せない項目があります/).textContent).toContain("見つからない素材");
+  });
+
+  // ⚠️ **開いたときに調べ直す**（PR #1209 レビュー 🟡）＝誰かが調べた結果を借りているだけだと、
+  // 画面を離れずに外でファイルを消された回に**古い結果のまま通してしまう**（フォントは毎回調べ直している）。
+  it("開いたときに、素材が実在するか調べ直す", () => {
+    setup([scene()]);
+    const refresh = vi.spyOn(useProjectStore.getState(), "refreshMissingAssets").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(refresh, "開いても調べ直していない").toHaveBeenCalled();
+  });
+
+  // ⚠️ **調べていないときは止めない**＝嘘の「問題あり」を出さない（材料が無い＝項目を作らない）。
+  it("調べていない（材料が無い）ときは押せる", () => {
+    setup([scene({ assetRefs: { mainVisual: "asset_001" } })]);
+    useProjectStore.setState({
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+      missingAssetIds: [],
+    });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it("見た目が見つからない場面があると「動画を書き出す」を押せず、理由と次の行動を出す", () => {
     setup([scene({ templateId: "missing_tmpl" })]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(saveBtn().disabled).toBe(true);
@@ -54,20 +95,49 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(note.textContent).toContain("公開前チェック"); // 次の行動（左の「公開前チェックへ戻る」が導線）
   });
 
-  it("問題が無ければ「動画を保存」は押せる（理由も出さない）", () => {
+  /**
+   * ⚠️ **直行導線でもフォントの検査が効く**（#261・PR #886 レビュー 🔴）＝
+   * `exportBlockingItems` へ材料を渡していなかったので、**項目そのものが作られず**
+   * 別の字体に化けた動画がそのまま書き出せていた（§2-5・ADR-0026②）。
+   */
+  it("使っているフォントが見つからないと「動画を書き出す」を押せない（直行経路でも止まる）", async () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    // 「調べた結果、持っていない」＝空配列（`null` は「まだ調べていない」なので項目を出さない）。
+    useProjectStore.setState({ userFontIds: [] } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(saveBtn().disabled).toBe(true));
+    expect(screen.getByText(/動画を書き出せない項目があります/).textContent).toContain("文字の形");
+  });
+
+  it("フォントを持っていれば止めない（誤検出しない）", async () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    useProjectStore.setState({ userFontIds: ["user_font_001"] } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(saveBtn().disabled).toBe(false));
+  });
+
+  /** ⚠️ **調べていないうちは止めない**＝嘘の「問題あり」で書き出しを塞がない（#347 と同じ流儀）。 */
+  it("まだ調べていない（null）うちは止めない", () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    useProjectStore.setState({ userFontIds: null } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/文字の形/)).toBeNull();
+  });
+
+  it("問題が無ければ「動画を書き出す」は押せる（理由も出さない）", () => {
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(saveBtn().disabled).toBe(false);
     expect(screen.queryByText(/動画を書き出せない項目があります/)).toBeNull();
   });
 
-  it("この端末で書き出せない場合も「動画を保存」を押せない（直行経路でも公開前チェックと同じ判定）", async () => {
+  it("この端末で書き出せない場合も「動画を書き出す」を押せない（直行経路でも公開前チェックと同じ判定）", async () => {
     vi.spyOn(ffmpeg, "detectH264Capability").mockResolvedValue("unavailable");
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     await waitFor(() => expect(saveBtn().disabled).toBe(true)); // 能力検知は非同期
     // 押せないだけでなく**正しい理由**が出る（§2-5＝原因＋次の行動）。文言は正典 EXPORT_CAPABILITY_NOTICE。
-    expect(screen.getByText(/この端末では動画を書き出せません/)).toBeTruthy();
+    expect(screen.getByText(/このパソコンでは動画を書き出せません/)).toBeTruthy();
     expect(screen.queryByText(/動画を書き出せない項目があります/)).toBeNull(); // 端末要因が優先＝項目側は出さない
   });
 
@@ -95,6 +165,147 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     resolveBegin();
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/動画を書き出せない項目があります/)).toBeTruthy();
+    // ⚠️ **走行中の締めを返す**（#817-2）＝この早期 return は `try/finally` の**手前**で抜けるので、
+    // 返さないと `owner="scene"` が残り、**タイムライン形式の書き出しが永久に押せなくなる**
+    //（「ほかの動画を書き出しています」＝走っていないので終わりようがない案内・§2-5）。
+    expect(useExportLockStore.getState().owner).toBeNull();
+  });
+
+  // ⚠️ **名乗れなければ始めない**（レビュー ℹ️）＝走行中の判定と名乗りの間に保存先ダイアログの待ちが
+  // 挟まるので、その間に相手（タイムライン形式）が先に取りうる。見ないで進むと、共有の一時置き場を
+  // 片づける後始末が**相手のフレームを消す**。
+  it("名乗れなかったら書き出しを始めない（相手のフレームを消さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    // 保存先を選んでいる間に、相手が先に名乗る。
+    vi.spyOn(dialog, "showSaveVideoDialog").mockImplementation(async () => {
+      useExportLockStore.getState().acquire("timeline");
+      return "/out/movie.mp4";
+    });
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
+    expect(begin).not.toHaveBeenCalled(); // 始めていない
+    expect(useExportLockStore.getState().owner).toBe("timeline"); // 相手の締めを奪っていない
+    useExportLockStore.getState().release("timeline");
+  });
+
+  // ⚠️ **失敗で抜けるときも返す**＝`beginExport` は IPC なので失敗しうる。返さないと
+  // 走っていないのに「ほかの動画を書き出しています」で押せなくなる（終わりようがない案内）。
+  it("beginExport が失敗しても、走行中の締めは返す", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+    // 黙って終わらない＝理由も出す（失敗が投げっぱなしだと画面は押した直後のまま）。
+    expect(useProjectStore.getState().exportRun.phase).toBe("error");
+  });
+
+  // ⚠️ **自分の後片づけ待ちは押させない**（#843）＝終わりの合図（`done`/`cancelled`/`error`）は片づけより
+  // **先**に立つので、この窓ではボタンが戻っているのに `acquire` が失敗する＝**押しても断られるだけ**に
+  // なっていた（`06 §12.1`）。押す前に無効化して、走っている「ほかの動画」とは**別の理由**を出す。
+  it("後片づけが終わるまでは押せない（押しても断られるだけ、を作らない）", () => {
+    setup([scene()]);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn()).not.toBeDisabled();
+    // 直前の回が終わって（＝走行中ではない）片づけを待っている状態＝締めだけが自分に残っている。
+    act(() => { useExportLockStore.getState().acquire("scene"); });
+    expect(saveBtn()).toBeDisabled();
+    // ⚠️ **押せなくしたら理由も出す**＝押せないボタンは `onClick` が走らないので、
+    // 断り文を押した後の処理だけに置くと画面に一度も出ない（`06 §12.1` の「見せて」が抜ける）。
+    expect(screen.getByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeInTheDocument();
+    act(() => { useExportLockStore.getState().release("scene"); });
+    expect(saveBtn()).not.toBeDisabled(); // 片づけが終われば戻る
+  });
+
+  // ⚠️ **始めた直後に「後片づけ中」と誤表示しない**（#843 レビュー 🟡）＝この画面は名乗り（`acquire`）の
+  // **後**に `beginExport()` の往復を挟んでから走行中の表示になるので、その間は「締めは自分・走行中ではない」
+  // ＝後片づけ待ちの条件をそのまま満たしてしまう（タイムライン形式は名乗る**前**に走行中にするので起きない）。
+  // 正当に始めた直後に「前の書き出しの片づけをしています」と出るのは、#843 が消そうとした
+  // 「実態と違う案内」そのもの＝**新しく持ち込んだ退行**なので、その窓を開けたまま固定する。
+  it("書き出しを始めた直後に「後片づけ中」と誤表示しない", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // `beginExport` を**返さないまま**にして、名乗り〜走行中表示の窓を開けたままにする。
+    let resolveBegin: () => void = () => {};
+    vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
+    expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull(); // 誤表示しない
+    resolveBegin();
+  });
+
+  // ⚠️ **始めている最中は押せない**（差分再監査 ℹ️）＝この画面は名乗りの後に `beginExport` の往復を
+  // 挟むので、その窓は走行中の表示になっていない。押せるままだと、押し直しが**始まっている回の表示を潰す**
+  //（進捗と「中止」が消える＝中止の唯一の抜け道が消える）。押す前の無効化と押した瞬間の判定は同じ材料で見る。
+  it("始めている最中は押せない（走っている回の表示を潰さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    let resolveBegin: () => void = () => {};
+    vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
+    expect(saveBtn()).toBeDisabled();                                   // 押せない
+    expect(useProjectStore.getState().exportRun.phase).not.toBe("error"); // 走っている回が潰れていない
+    resolveBegin();
+  });
+
+  // ⚠️ **本物の後片づけの窓では、ちゃんと断る**（#843）＝上のテストは締めを直に取って窓を模したものなので、
+  // 「始めた直後は出さない」ための `starting` を**降ろし忘れても**気づけない（実測で素通りした）。
+  // 実際に書き出しを走らせ、片づけを返さないまま止めて、その窓で理由が出ることを見る。
+  it("本物の後片づけの窓では、理由を出して押せなくする", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // 失敗で `finally` まで確実に降りる（上の順序テストと同じ入口）。
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    // 片づけを**返さないまま**にして、締めが返る前の窓を開けたままにする。
+    let resolveClear: () => void = () => {};
+    vi.spyOn(ffmpeg, "clearExportFramesStage").mockReturnValue(new Promise<void>((r) => { resolveClear = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(screen.getByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeInTheDocument());
+    expect(saveBtn()).toBeDisabled();
+    resolveClear();
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+  });
+
+  // ⚠️ **相手が走っている間も押させない**（#843 レビュー 🟡）＝以前はこちらも**押した後**でしか見ておらず、
+  // 「押せるボタンを押すと断られるだけ」が残っていた。押す前の表示と押した瞬間の判定は同じ述語から採る。
+  it("ほかの形式が書き出している間も押せない（理由も出す）", () => {
+    setup([scene()]);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn()).not.toBeDisabled();
+    act(() => { useExportLockStore.getState().acquire("timeline"); });
+    expect(saveBtn()).toBeDisabled();
+    expect(screen.getByText(OTHER_EXPORT_RUNNING_MESSAGE)).toBeInTheDocument();
+    // 自分の後片づけ待ちとは**別の理由**（走っている相手が居るときはそちらが正確）。
+    expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull();
+    act(() => { useExportLockStore.getState().release("timeline"); });
+    expect(saveBtn()).not.toBeDisabled();
+  });
+
+  // ⚠️ **片づけてから締めを返す**（#834-3・タイムライン側と同じ順＝ADR-0026②）＝一時ファイルの
+  // 置き場は**アプリで1つ**（ADR-0032 決定22・`11 §7.6.5`）。先に返すと、次の書き出しが**この片づけの
+  // 最中に**フレームを書き始め、片づけが**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+  it("片づけ終わってから走行中の締めを返す（次の書き出しの絵を消さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // 後始末（`finally`）へ確実に降りる道を使う＝上の「失敗しても締めは返す」と同じ入口。
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    const order: string[] = [];
+    vi.spyOn(ffmpeg, "clearExportFramesStage").mockImplementation(async () => { order.push("clear"); });
+    const release = useExportLockStore.getState().release;
+    vi.spyOn(useExportLockStore.getState(), "release").mockImplementation((owner) => { order.push("release"); release(owner); });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+    expect(order[order.length - 1]).toBe("release");   // 最後が締め返し
+    expect(order[order.length - 2]).toBe("clear");     // その直前が片づけ＝順序が守られている
   });
 });
 
@@ -106,7 +317,7 @@ describe("ExportScreen 進捗の配線（#547 P2-1）", () => {
   it("共有関数の % と「場面 n / N」を実際に描く（バナーと同じ数字）", () => {
     setup([scene()]);
     useProjectStore.setState({
-      exportRun: { phase: "rendering", progress: { done: 2, total: 8 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+      exportRun: { phase: "rendering", progress: { done: 2, total: 8 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
     });
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("20%")).toBeTruthy();
@@ -124,7 +335,7 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
     setup([]); // 場面ゼロ
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("まだ場面がありません")).toBeTruthy();
-    expect(screen.queryByText("動画を保存")).toBeNull(); // 押せば必ず失敗するボタンを出さない
+    expect(screen.queryByRole("button", { name: "動画を書き出す" })).toBeNull(); // 押せば必ず失敗するボタンを出さない
     expect(screen.queryByLabelText("ファイル名")).toBeNull(); // 入力させてから断る、をしない
     // 設定フォームが無いのに「設定を確認して」と促さない＝次の行動が空状態と食い違わない（§2-5）。
     expect(screen.queryByText(/設定を確認して/)).toBeNull();
@@ -134,7 +345,7 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
   it("書き出し中は（場面ゼロでも）空状態にせず進捗を出し続ける＝中止できる道を残す", () => {
     setup([]);
     useProjectStore.setState({
-      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
     });
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("まだ場面がありません")).toBeNull(); // 空状態で覆わない
@@ -145,6 +356,6 @@ describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("まだ場面がありません")).toBeNull();
-    expect(screen.getByText("動画を保存")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "動画を書き出す" })).toBeTruthy();
   });
 });

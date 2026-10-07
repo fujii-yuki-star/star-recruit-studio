@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ContextMenu } from "./ContextMenu";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
@@ -8,11 +9,15 @@ import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
+import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 // インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
 import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
+import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from "../../domain/template/textStyle";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import { hexToRgb } from "../../domain/format/color";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
+import { useCanvasDrag } from "../hooks/useCanvasDrag";
+import { SNAP_GUIDE_COLOR } from "./overlayColors";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -66,12 +71,9 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
 // composeGroupGeometry と同じ anchor（メンバー回転後 AABB 基準）を使うため、回転メンバーを含むグループでも
 // 枠中心＝拡縮/回転 pivot が実描画と一致する（旧実装の素 bbox ずれ＝#312 既知制限を解消）。
 
-// 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
-const SNAP_GUIDE_COLOR = "#ff3d8b";
+// 吸着ガイド線の色は共有（#1108）＝同じ値を2か所に写さない。
 
 // 右クリックメニューの推定サイズ（画面端からはみ出さないようクランプするため）。
-const MENU_W = 160;
-const MENU_H = 220;
 
 // ダブルタップ（テキスト編集へ入る）と見なす2回の pointerdown の間隔（ms）と近接（画面px）。実機ではドラッグ開始の
 // preventDefault が互換 dblclick を潰すため、pointerdown 自体で二度押しを検出する（#525-4）。距離も見るのは
@@ -85,7 +87,20 @@ function bandStyle(el: FreeElement): { background: string; borderRadius?: number
   return { background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bg.opacity})`, borderRadius: bg.radius };
 }
 
+/**
+ * 影の色（CSS の `text-shadow` 用）。**濃さを色へ畳む**（#264・PR #879 再レビュー ℹ️）＝
+ * CSS の `text-shadow` に不透明度の引数が無いので、`rgba()` にして表す。
+ * 既定は描画側（`enabledShadow`）と同じ定数を見る＝2か所に既定を書かない。
+ */
+function shadowCss(shadow: { color?: string; opacity?: number }): string {
+  const rgb = hexToRgb(shadow.color ?? DEFAULT_SHADOW_COLOR);
+  const a = shadow.opacity ?? DEFAULT_SHADOW_OPACITY;
+  return rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})` : (shadow.color ?? DEFAULT_SHADOW_COLOR);
+}
+
 const DOUBLE_TAP_MS = 350;
+/** 空白（何も描かれていない所）を押したことを覚える印（要素 id と混ざらない・#818）。 */
+const EMPTY_TAP_ID = '';
 const DOUBLE_TAP_DIST = 12;
 
 interface OverlayProps {
@@ -108,15 +123,27 @@ interface OverlayProps {
   onRotate: (id: string, rotation: number) => void;
   /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
   gridSize?: number;
-  /** 右クリックメニューの操作（いずれも対象 id を渡す）。 */
-  onDuplicate: (id: string) => void;
-  onBringToFront: (id: string) => void;
-  onSendToBack: (id: string) => void;
-  onDelete: (id: string) => void;
-  /** テキストのインライン編集の確定（patch 相当）。 */
-  onChangeText: (id: string, text: string) => void;
+  /**
+   * 右クリックメニューの操作（いずれも対象 id を渡す）。
+   *
+   * ⚠️ **省いた項目はメニューに出さない**（#685 後半）。タイムライン形式は**重ね順を列の並びだけ**で
+   * 決めるので「前面／背面」を出すと嘘になる（ADR-0034 決定17）。**渡していないのに出す**と
+   * 押しても何も起きない項目が並ぶので、`undefined` は「その形式には無い操作」として扱う。
+   * すべて省くとメニュー自体を出さない（空のメニューを開かない）。
+   */
+  onDuplicate?: (id: string) => void;
+  onBringToFront?: (id: string) => void;
+  onSendToBack?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  /**
+   * メニューの項目ごとの**押せない理由**（#746-1）。渡さなければ押せる。
+   * ⚠️ 押せないときも**項目は出す**（消すと「同じ操作が場所によって在ったり無かったり」になる）。
+   */
+  menuGuards?: { duplicate?: { disabled?: boolean; disabledHint?: string }; delete?: { disabled?: boolean; disabledHint?: string } };
+  /** テキストのインライン編集の確定（patch 相当）。**省くとインライン編集に入らない**。 */
+  onChangeText?: (id: string, text: string) => void;
   /** 右クリック「編集」：その要素の kind 別エディタを開く（id とビューポート座標を渡す）。 */
-  onRequestEdit: (id: string, x: number, y: number) => void;
+  onRequestEdit?: (id: string, x: number, y: number) => void;
   /** ドラッグ移動/リサイズの開始/終了。連続編集を Undo の1ステップに合成するための境界（#211）。 */
   onInteractionStart?: () => void;
   onInteractionEnd?: () => void;
@@ -135,13 +162,30 @@ interface OverlayProps {
   textFontFamily?: string;
   /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
+  /**
+   * まとめて動かすときに**固定を除外した**ことを知らせる（#773・ADR-0034 未解決7 の決着 (a)）。
+   * 空間の移動は「除外して動かす」＝黙って一部だけ動かさないよう、**画面側が一言出す**
+   *（文言と出し方は画面が決める＝共有部品が2つの画面へ同じ文言を押し付けない）。
+   *
+   * **一緒に動かさなかったもの**を知らせる（黙って一部だけ動かさない・#773）。
+   * ⚠️ **数ではなく id を渡す**（#788-1）＝掴めない理由（固定した列／動きが効いている／グループの変形）は
+   * **呼び出し側だけが知っている**ので、ここで数にしてしまうと理由別の案内を出せない
+   *（「固定を外してください」は動き起因では従っても直らない）。
+   */
+  onSkippedLocked?: (ids: string[]) => void;
+  /**
+   * **何も描かれていない所を二度押しした**（#818・ドリルイン）。中に入れたら `true` を返す。
+   * ⚠️ この部品は「何が入っているか」を知らない（箱を持たない部品は渡ってこない）ので、
+   * **判断は呼び出し側**。`true` のときは選択解除も範囲選択も始めない（入った直後に解かない）。
+   */
+  onDrillInAt?: (point: { x: number; y: number }) => boolean;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
-  onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
+  onDuplicate, onBringToFront, onSendToBack, onDelete, menuGuards, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onEditingIdChange, textFontFamily,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily, onDrillInAt,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -153,7 +197,26 @@ export function FreeLayoutOverlay({
   // 互換 dblclick が来ないため、同一テキストを DOUBLE_TAP_MS 内かつ近接（DOUBLE_TAP_DIST 内）で二度押ししたら
   // 編集へ入る。座標も見るのはブラウザの dblclick 同様（間にドラッグを挟んだ二度押しを編集と誤認しない）。
   const lastTapRef = useRef<{ id: string; t: number; x: number; y: number } | null>(null);
-  useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
+  // 掴む作法（`Escape` の受け持ち・掴んでいる数・しきい値・掴んだ指）は**画面ぜんぶで1つ**（#769）。
+  // ⚠️ 3つのキャンバスで同じ機構を写さない（写すと「片方だけ直す」が必ず起きる）。
+  const canvasDrag = useCanvasDrag();
+  const minePointer = canvasDrag.mine;
+  const claimDrag = (e: { clientX: number; clientY: number; pointerId: number }): void => {
+    // 前の掴みが残っていたら先に閉じる（名乗りを外さずに上書きしない）。
+    if (canvasDrag.isActive()) cancelDrag();
+    canvasDrag.claim(e);
+  };
+  const releaseDrag = canvasDrag.release;
+  // ⚠️ **後始末は画面を離れるときだけ**（#752-8）。`onInteractionEnd` を依存に書くと、**渡された関数の
+  // 中身が変わるたび**に後始末が走る＝掴んでいる最中に走れば名乗りが落ち、`Escape` も取り消しの停止も
+  // 効かなくなる。いまの呼び出し3か所は安定した関数を渡しているので起きていないが、**それは呼ぶ側の
+  // 都合**（1か所がインラインに変わるだけで黙って壊れる）＝この効果が言いたいのは「画面を離れるとき」
+  // なので、依存でそう書く。鮮度は latest-ref で保つ（この file の `editingNotifyRef` と同じ形）。
+  // `releaseDrag` は ref しか触らないので、初回の実体を掴んだままで正しく動く。
+  const interactionEndRef = useRef(onInteractionEnd);
+  useEffect(() => { interactionEndRef.current = onInteractionEnd; });
+  // ⚠️ 名乗りの後始末は**共有フックが持つ**（#769）＝ここでは履歴のまとめを閉じるだけ。
+  useEffect(() => () => { if (dragRef.current) interactionEndRef.current?.(); }, []);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   // 複数同時リサイズ（#274）：選択中の非ロック・非表示要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
@@ -174,6 +237,35 @@ export function FreeLayoutOverlay({
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  /**
+   * 文字を直している間の**取り消しのまとめ**（#746 レビュー）。打鍵ごとに積むと、履歴の上限を
+   * 文字入力で食い潰し、それ以前の編集（**取り消しでしか戻らない操作**）が戻せなくなる。
+   *
+   * ⚠️ 開け閉めは**編集中かどうか**に結ぶ（`focus`/`blur` に結ばない）＝欄がフォーカス中に消えると
+   * `blur` は来ない（開けっぱなし＝以後の取り消しが積まれない）。効果の後始末なら、画面を離れても
+   * 相手が変わっても必ず閉じる。鮮度は latest-ref で保つ（この file の他の受け口と同じ形）。
+   */
+  const interactionStartRef = useRef(onInteractionStart);
+  const textGroupOpenRef = useRef(false);
+  useEffect(() => { interactionStartRef.current = onInteractionStart; });
+  useEffect(() => {
+    if (editingId == null) return;
+    return () => {
+      if (!textGroupOpenRef.current) return;
+      textGroupOpenRef.current = false;
+      interactionEndRef.current?.();
+    };
+  }, [editingId]);
+  /**
+   * まとめを開く（**最初の1打で**）。⚠️ 編集に入った時点では開けない＝二度押しは**選び直しでもある**ので、
+   * 呼び出し側が「選ぶ相手が変わったらまとめを畳む」を持っていると、開けた直後に畳まれる（実測）。
+   * 打ち始めてからなら選択はもう動かない。
+   */
+  const openTextGroup = (): void => {
+    if (textGroupOpenRef.current) return;
+    textGroupOpenRef.current = true;
+    interactionStartRef.current?.();
+  };
   // 編集中の要素を親へ通知＝親が ScenePreview の hideItemIds に渡し、SVG 側の同じ文字を伏せる（二重表示回避・#549）。
   useEffect(() => { onEditingIdChange?.(editingId); }, [editingId, onEditingIdChange]);
   // アンマウント時は必ず「編集していない」へ戻す（#549 レビュー ℹ️）。free_NNN は**場面内一意**なので、伏せたまま
@@ -210,14 +302,6 @@ export function FreeLayoutOverlay({
     return { x: (clientX - r.left) / scale, y: (clientY - r.top) / scale };
   };
 
-  // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menu]);
-
   // ルートで pointer capture することで、要素/ハンドルの押下後はドラッグがプレビュー外に出ても追従する。
   const beginDrag = (
     e: ReactPointerEvent, el: FreeElement, mode: "move" | "resize", corner?: ResizeCorner,
@@ -237,9 +321,18 @@ export function FreeLayoutOverlay({
     if (!alreadySelected) onSelect(el.id);
     // 一括移動の対象：選択済み要素のドラッグ＝全選択を動かす／未選択のドラッグ＝その要素だけ（リサイズも単独）。
     const moveTargets = mode === "move" && alreadySelected ? selectedIds : [el.id];
-    const starts = moveTargets
+    const found = moveTargets
       .map((id) => freeLayout.find((m) => m.id === id))
-      .filter((m): m is FreeElement => m != null)
+      .filter((m): m is FreeElement => m != null);
+    // **除外したもの**を知らせる（黙って一部だけ動かさない・#773）。掴んだ時点で1度だけ。
+    const skipped = found.filter((m) => m.locked).map((m) => m.id);
+    if (skipped.length > 0) onSkippedLocked?.(skipped);
+    const starts = found
+      // ⚠️ **固定したものは一緒に動かさない**（#746 レビュー 🔴）＝掴み始めるのは塞いであっても、
+      // **まとめて選んで別の1つを動かす**と混ざって動いていた（固定が意味を失う）。
+      // タイムライン形式では枠を「描かれている場所」に出しているので、混ざると**その場所が素の箱として
+      // 保存され、動きのぶんだけ絵が飛ぶ**（`Escape` の戻しも同じ値を書く）。
+      .filter((m) => !m.locked)
       .map((m) => ({ id: m.id, x: m.x, y: m.y }));
     // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
     // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。
@@ -249,6 +342,7 @@ export function FreeLayoutOverlay({
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.(); // 連続移動/リサイズを Undo の1ステップに合成する境界（開始・#211）
     setDrag({
       id: el.id, mode, corner,
@@ -271,8 +365,14 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
+    // ⚠️ **拡縮でも除外を知らせる**（#788-2）＝`groupEls` は固定したものを外して作るので、
+    // 知らせないと**一括移動は一言が出るのに拡縮は黙って取り残す**（同じ操作の同じ理由で挙動が割れる
+    // ＝ADR-0026②）。隠したものは元から見えていないので数えない（移動側と同じ扱い）。
+    const skipped = freeLayout.filter((el) => selectedIds.includes(el.id) && el.locked && !el.hidden).map((el) => el.id);
+    if (skipped.length > 0) onSkippedLocked?.(skipped);
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
     setDrag({
       id: "__group__", mode: "group-resize", corner,
@@ -292,6 +392,7 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
     setDrag({
       id: el.id, mode: "rotate",
@@ -313,6 +414,7 @@ export function FreeLayoutOverlay({
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.();
     setDrag({
       id: "__group__", mode: "group-move", groupId: group.id,
@@ -333,6 +435,7 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.();
     const p = toCanvas(e.clientX, e.clientY);
     const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
@@ -353,15 +456,28 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     onInteractionStart?.();
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
+      // ⚠️ **やめたときに戻す先**を控える（#777 レビュー）＝控えていないと `Escape` を押しても
+      // 回転が戻らない（戻す側だけ直しても、戻す値が無い）。拡縮・移動と同じ持ち方にする。
+      startTransform: { ...group.transform },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
       scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
     });
   };
 
   const handleMove = (e: ReactPointerEvent) => {
+    if (!drag && !marquee) return; // 掴んでいないときの素通り（この関数はただの移動でも呼ばれる）
+    if (!minePointer(e)) return; // **掴んだ指だけ見る**（別の指の動きで一緒に動かさない）
+    // ⚠️ **押していないのに動いている**＝どこかで `pointerup` を取り逃がした（画面の外で離した・
+    // 別の操作に取られた）。放っておくと影が指に付いたままになり、**次に無関係な所で離した瞬間**に
+    // そこへ置かれる。画面ぜんぶで共通の作法（`usePointerDrag`）と同じ救済を入れる（#752-8）。
+    if (e.buttons === 0) { cancelDrag(); return; }
+    // ⚠️ **少し動かすまで掴まない**（同・`DRAG_START_PX`）＝押しただけ・手の震えの1px で
+    // 位置を書き換えて取り消しを積まない。越えるまでは何もしない（選択は `pointerdown` で済んでいる）。
+    if (!canvasDrag.passedThreshold(e)) return;
     // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
     if (marquee) {
       e.preventDefault();
@@ -402,10 +518,13 @@ export function FreeLayoutOverlay({
       // 主の位置をグリッド吸着で確定し、さらに他要素の辺/中心へ吸着（要素スナップが近ければ優先）。
       const moved = moveFreeElement(drag.start, dx, dy, gridSize);
       const others = drag.otherEdges ?? [];
+      // ⚠️ **`Ctrl` を押している間は吸着を切る**（ADR-0034 決定12・Canva の型／#746-3）。
+      // 切れないと「あと少しだけずらす」ができない＝寄せたくない所でも寄ってしまう。
+      // しきい値を 0 にして**同じ関数を通す**＝切ったときだけ別の道を作らない（ガイド線も自然に消える）。
       const snap = snapToTargets(
         { x: moved.x, y: moved.y, w: drag.start.w, h: drag.start.h },
         others,
-        SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
+        e.ctrlKey || e.metaKey ? 0 : SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
       );
       // その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
       const ddx = snap.x - drag.start.x;
@@ -436,19 +555,87 @@ export function FreeLayoutOverlay({
     }
   };
 
-  const endDrag = (e: ReactPointerEvent) => {
+  /**
+   * 掴むのを**やめる**（`Escape`／`pointercancel`）＝**開始時の形へ戻す**（決定10・`usePointerDrag` の作法）。
+   * 戻す先はドラッグ開始時に控えた値そのもの（`start`／`starts`／`groupStarts`／`startTransform`）。
+   */
+  const cancelDrag = (): void => {
+    if (!canvasDrag.isActive()) return; // 同じやめるを二度走らせない（root と window の両方から来る）
+    const d = dragRef.current;
+    // ⚠️ **掴む前にやめたときは書き戻さない**（#752-8）＝しきい値を越えていない＝まだ1度も
+    // 動かしていないので、戻すと「何も変わらない更新」を1件流すだけになる（`releaseDrag` が
+    // 下でこの印を落とすので**先に読む**）。合成境界の終わり（`onInteractionEnd`）は越え方に
+    // 依らず必ず呼ぶ＝`begin*` が押した時点で開けているので、閉じないと以後の編集が全部つながる。
+    const started = canvasDrag.isStarted();
+    setMarquee(null);
+    if (d) {
+      if (!started) { setDrag(null); setGuides({ x: null, y: null }); onInteractionEnd?.(); releaseDrag(); return; }
+      if (d.mode === 'move') onMoveMany((d.starts ?? [{ id: d.id, x: d.start.x, y: d.start.y }]).map((s) => ({ ...s })));
+      else if (d.mode === 'group-move' || d.mode === 'group-scale' || d.mode === 'group-rotate') {
+        if (d.groupId && d.startTransform) onGroupTransform?.(d.groupId, d.startTransform);
+      } else if (d.mode === 'group-resize' && d.groupStarts) {
+        onResizeMany(d.groupStarts.map((m) => ({ id: m.id, x: m.x, y: m.y, w: m.w, h: m.h })));
+      } else if (d.mode === 'rotate') onRotate(d.id, d.rotation ?? 0);
+      else onChange(d.id, { x: d.start.x, y: d.start.y, w: d.start.w, h: d.start.h });
+      setDrag(null);
+      setGuides({ x: null, y: null });
+      onInteractionEnd?.();
+    }
+    releaseDrag();
+  };
+
+  // `Escape` と `pointercancel` でやめる（作法は画面ぜんぶで同じ・`usePointerDrag` の ⚠️ を参照）。
+  //
+  // ⚠️ **張るのは掴んでいる間に1度だけ**（#747 レビュー）。依存を書かないと `pointermove` のたびに
+  // 外して張り直す。かといって `drag` を依存に入れても**毎回変わる**ので同じこと。
+  // 「掴んでいるか」の真偽だけを依存にし、**中身は ref 越しに最新を読む**（この file の `dragRef` と同じ形）。
+  // ⚠️ ref を挟まず closure を固定すると、掴んでいる最中に親が渡し直した `onMoveMany` 等を**古いまま**
+  // 呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
+  const dragging = drag != null || marquee != null;
+  // ⚠️ 初期値に関数そのものを入れない＝`endDrag` はこの下で定義するので、参照すると読み込めない。
+  // 中身は下の効果で毎レンダー入れ替える（鮮度は落とさない）。
+  const cancelRef = useRef<() => void>(() => {});
+  const endRef = useRef<(e: { pointerId: number }) => void>(() => {});
+  const mineRef = useRef<(e: { pointerId: number }) => boolean>(() => true);
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); cancelRef.current(); } };
+    const onCancel = (ev: PointerEvent): void => { if (mineRef.current(ev)) cancelRef.current(); };
+    // ⚠️ **離しは window でも拾う**（#752 レビュー）＝指を捕まえる仕掛け（`setPointerCapture`）は
+    // 落ちることがあり、その回に枠の外で離すと `pointerup` がこの枠へ来ない。放っておくと名乗りが
+    // **次に掴むまで残り**、`Escape`・取り消し・倍率の変更が黙って効かなくなる。
+    // 枠の上で離した回は先に枠の受け口が閉じるので、こちらは何もしない（掴んでいる印で二度走らない）。
+    const onUp = (ev: PointerEvent): void => { if (mineRef.current(ev)) endRef.current(ev); };
+    window.addEventListener('keydown', onKey, true); // 外側の `Escape` より先に受ける
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [dragging]);
+
+  const endDrag = (e: { pointerId: number }) => {
+    if (!canvasDrag.isActive() || !minePointer(e)) return; // 掴んだ指の1回だけ（別の指でそこへ落とさない）
     // 範囲選択（マーキー）の終了：矩形を消す（選択は move 中に確定済み・#274）。
     if (marquee) {
       setMarquee(null);
       try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      releaseDrag(); // 名乗り（`Escape`・掴んでいる数）を必ず外す＝外し忘れると以後ずっと効かない
       return;
     }
-    if (!drag) return;
+    // ⚠️ ここも名乗りを外して抜ける＝**外さずに戻る出口を作らない**（#752 レビュー）。
+    if (!drag) { releaseDrag(); return; }
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
     setGuides({ x: null, y: null }); // ドラッグ終了でガイド線を消す
+    releaseDrag();
     onInteractionEnd?.(); // 連続移動/リサイズの合成境界（終了・#211）
   };
+
+  // 上の window 側の受け口が呼ぶ中身を毎レンダー入れ替える（`endDrag` を定義した後に置く）。
+  useEffect(() => { cancelRef.current = cancelDrag; endRef.current = endDrag; mineRef.current = minePointer; });
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
   // 要素押下のルーティング（#525-4 二度押し編集／#525-5 ドリルイン／通常ドラッグ）。要素 div と**グループ枠**
@@ -466,7 +653,10 @@ export function FreeLayoutOverlay({
     //  ・非グループのテキスト＝インライン編集（#525-4）
     //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
     const button0 = e.button === 0 && !e.shiftKey;
-    const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
+    // ⚠️ 文字の直接編集は **`onChangeText` を渡したときだけ**（渡さない形式では二度押しで編集に入らない）。
+    // ⚠️ **固定したものは編集欄に入れない**（#746 レビュー）＝入れても domain が打鍵ごとに断るので、
+    // **文字が入らない欄**と断り文の連発になる（「中身」の欄は最初から押せない＝場所で割れる）。
+    const dtEdit = button0 && onChangeText != null && !el.locked && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
     const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
     if (dtEdit || dtDrill) {
       const prev = lastTapRef.current;
@@ -536,26 +726,31 @@ export function FreeLayoutOverlay({
     setEditingId(null);
     // 複数選択中の要素を右クリックしたら選択は保つ（メニューは主の単独操作・一括削除はツールバー）。
     if (!selectedIds.includes(el.id)) onSelect(el.id);
-    const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_W));
-    const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_H));
+    // 画面の外へ出さないための寄せは `ContextMenu` に任せる（見込みサイズを2か所に持たない・§6）。
+    const x = e.clientX;
+    const y = e.clientY;
     setMenu({ id: el.id, x, y });
   };
 
   const menuEl = menu ? freeLayout.find((e) => e.id === menu.id) ?? null : null;
   // メニュー項目。「編集」は全 kind で kind 別エディタ（onRequestEdit）を開く＝素材選択/文字書式/図形書式。
   // テキストはダブルクリックでもインライン編集できる（別経路）。複製/前面/背面/削除は #172 のハンドラ。
-  const menuItems: { label: string; danger?: boolean; run: (id: string) => void }[] = menu && menuEl
+  // ⚠️ **渡された操作だけ**を並べる（省いた＝その形式には無い操作）。押しても何も起きない項目を作らない。
+  const menuItems: { label: string; danger?: boolean; disabled?: boolean; disabledHint?: string; run: (id: string) => void }[] = menu && menuEl
     ? [
-        { label: "編集", run: (id) => onRequestEdit(id, menu.x, menu.y) },
-        { label: "複製", run: onDuplicate },
-        { label: "前面", run: onBringToFront },
-        { label: "背面", run: onSendToBack },
-        { label: "削除", danger: true, run: onDelete },
+        ...(onRequestEdit ? [{ label: "編集", run: (id: string) => onRequestEdit(id, menu.x, menu.y) }] : []),
+        ...(onDuplicate ? [{ label: DUPLICATE_LABEL, run: onDuplicate, ...menuGuards?.duplicate }] : []),
+        ...(onBringToFront ? [{ label: "前面", run: onBringToFront }] : []),
+        ...(onSendToBack ? [{ label: "背面", run: onSendToBack }] : []),
+        ...(onDelete ? [{ label: DELETE_LABEL, danger: true, run: onDelete, ...menuGuards?.delete }] : []),
       ]
     : [];
 
   return (
     <div
+      // 触る層そのもの＝**名前を持たせる**（#818）。箱を持たない部品しか無い動画では中に要素が
+      // 1つも無く、それまでは「中の要素の親」としてしか掴めなかった（掴む手がかりが中身に依存していた）。
+      className="free-layout-overlay"
       ref={ref}
       style={{
         position: "absolute",
@@ -572,16 +767,37 @@ export function FreeLayoutOverlay({
       }}
       onPointerMove={handleMove}
       onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      // ⚠️ **`pointercancel` は「やめる」**＝元の形へ戻す（#752 レビュー）。確定（`endDrag`）へ繋ぐと、
+      // 「やめた」のに掴んだ所へ置かれる（この関数の doc と決定10 に反する）。
+      onPointerCancel={(e) => { if (minePointer(e)) cancelDrag(); }}
       // 何もない所を押したら選択解除＋編集/メニューを閉じ、範囲選択（マーキー）を開始（要素/ハンドルの onPointerDown は stopPropagation 済み）。
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
+        // ⚠️ **何も描かれていない所の二度押しを外へ渡す**（#818・ドリルイン）＝タイムライン形式の
+        // 見た目パターンは**箱を持たない**（枠そのもの）ので、その領域は「空白」として届く。
+        // 中に何があるかは**呼び出し側だけが知っている**（描いた結果を持っている）ので、判断を委ねる。
+        // 受け取り側が「入った」と答えたら、選択解除も範囲選択も**始めない**（入った直後に解かない）。
+        const nowTap = { id: EMPTY_TAP_ID, x: e.clientX, y: e.clientY, t: e.timeStamp };
+        const prevTap = lastTapRef.current;
+        const nearTap = prevTap != null && Math.hypot(e.clientX - prevTap.x, e.clientY - prevTap.y) < DOUBLE_TAP_DIST;
+        if (
+          onDrillInAt != null && e.button === 0 && !e.shiftKey &&
+          prevTap?.id === EMPTY_TAP_ID && e.timeStamp - prevTap.t < DOUBLE_TAP_MS && nearTap &&
+          onDrillInAt(toCanvas(e.clientX, e.clientY))
+        ) {
+          e.preventDefault();
+          lastTapRef.current = null;
+          setEditingId(null);
+          setMenu(null);
+          return;
+        }
         onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
-        lastTapRef.current = null; // 空白操作を挟んだら二度押し履歴を切る（#525-4 レビュー）
+        lastTapRef.current = nowTap; // 空白の二度押しを見分けるため、押した所を覚える（#818）
         if (e.button !== 0) return; // 左ボタンのみマーキー
         // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
         const p = toCanvas(e.clientX, e.clientY);
         try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        claimDrag(e); // 範囲選択も**同じ作法**（しきい値・取り逃がしの救済・`Escape` の受け持ち）
         setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       }}
       // 空白部分の右クリックはブラウザ既定メニューだけ抑止する。
@@ -622,7 +838,9 @@ export function FreeLayoutOverlay({
                 onSelect(el.id);
                 return;
               }
-              if (el.kind !== FREE_ELEMENT_KIND.text || elGroup != null) return;
+              // ⚠️ **押下の経路と同じ関門**（#746-2）＝`onChangeText` を渡さない形式では編集に入らない。
+              // ここが抜けていると、互換 `dblclick` が来る環境で**打てない編集欄**に入る。
+              if (onChangeText == null || el.locked || el.kind !== FREE_ELEMENT_KIND.text || elGroup != null) return;
               e.preventDefault();
               e.stopPropagation();
               setMenu(null);
@@ -648,7 +866,7 @@ export function FreeLayoutOverlay({
               <textarea
                 autoFocus
                 value={el.text ?? ""}
-                onChange={(e) => onChangeText(el.id, e.target.value)}
+                onChange={(e) => { openTextGroup(); onChangeText?.(el.id, e.target.value); }}
                 onPointerDown={(e) => e.stopPropagation()} // textarea 内の操作でドラッグを始めない
                 onDoubleClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.stopPropagation()} // 編集中はブラウザ標準の右クリックを使う
@@ -687,6 +905,16 @@ export function FreeLayoutOverlay({
                   // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
                   ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
                     ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
+                    : {}),
+                  // 字間・影（#264）も同じ TextItem 内＝伏せると消える。**編集中だけ字が詰まって影が消える**のを
+                  // 防ぐため近似再現する（PR #879 再レビュー ℹ️）。字間は em＝文字サイズに対する割合なので
+                  // 拡大率に依らない。影は px なので拡大率を掛ける（濃さは色へ畳む＝CSS の text-shadow に
+                  // 不透明度の引数が無いため）。
+                  ...(el.letterSpacing ? { letterSpacing: `${el.letterSpacing}em` } : {}),
+                  ...(el.shadow?.enabled && viewScale > 0
+                    ? {
+                        textShadow: `${(el.shadow.dx ?? 0) * viewScale}px ${(el.shadow.dy ?? 0) * viewScale}px ${(el.shadow.blur ?? 0) * viewScale}px ${shadowCss(el.shadow)}`,
+                      }
                     : {}),
                   overflow: "hidden", // はみ出しはSVG側の maxLines と揃えて見せない（実描画に寄せる）
                 }}
@@ -846,38 +1074,19 @@ export function FreeLayoutOverlay({
         </div>
       )}
 
+      {/* メニューの見た目・閉じ方は共有部品（`ContextMenu`）＝画面ごとに作り方が割れない（§6・ADR-0033）。 */}
       {menu && menuEl && (
-        <>
-          {/* 外側のクリック/右クリックで閉じる透明バックドロップ。 */}
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 50 }}
-            onPointerDown={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            style={{
-              position: "fixed", left: menu.x, top: menu.y, zIndex: 51,
-              background: "#fff", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 8,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
-            }}
-          >
-            {menuItems.map((it) => (
-              <button
-                key={it.label}
-                role="menuitem"
-                className="btn btn-ghost text-sm"
-                style={{
-                  display: "block", width: "100%", textAlign: "left",
-                  color: it.danger ? "var(--color-danger)" : undefined,
-                }}
-                onClick={() => { it.run(menu.id); setMenu(null); }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </>
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems.map((it) => ({
+            label: it.label, danger: it.danger,
+            // 押せない理由は**項目に添える**（消さずに理由を出す・#746-1）。
+            disabled: it.disabled, disabledHint: it.disabledHint,
+            onSelect: () => it.run(menu.id),
+          }))}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
   );

@@ -1,17 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { userFacingMessage } from "../userFacingError";
+import { apiKeyMessage } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { useAppearance } from "../hooks/useAppearance";
+import type { Appearance } from "../../infrastructure/appSettings";
+import { SECTION_SCOPE } from "../components/sectionOpen";
 import { PlayIcon, StopIcon } from "../components/icons";
+import { BrandKitSection } from "../components/BrandKitSection";
+import { TroubleLogSection } from "../components/TroubleLogSection";
+import { ReadingDictSection } from "../components/ReadingDictSection";
+import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
-import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
+import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, isTauri, localAiAvailable, saveApiKey } from "../../infrastructure/aiClient";
 import {
-  DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
-  setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
+  AI_ENGINE, DEFAULT_AI_MODEL, getAiEngine, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
+  setAiEngine, setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
+import type { AiEngine } from "../../infrastructure/appSettings";
 import { VOICE_CATALOG, DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import {
@@ -22,7 +33,29 @@ import {
   type H264FeatureStatus,
 } from "../../domain/export/h264Feature";
 
+/**
+ * 見た目の3択（ADR-0039）。
+ *
+ * ⚠️ **画面に出す語は「見た目・明るい・暗い」**（§2-3＝`テーマ` `ダークモード` `ライト/ダーク` は出さない）。
+ * ⚠️ **「パソコンの設定に合わせる」を先頭に置く**＝これが既定（`APPEARANCE_DEFAULT`）なので、
+ * いま何が効いているのかが並びの先頭で分かる。
+ */
+// ⚠️ **「OS」と書かない**（レビュー 🟡・§2-3）＝利用者は人事・非エンジニア。技術寄りの略語を画面に出さない。
+/** 動画案を作るAI の選び方（ADR-0051 決定15）。既定（このパソコンの中）を先頭に。 */
+const AI_ENGINE_CHOICES: [AiEngine, string][] = [
+  [AI_ENGINE.local, "このパソコンの中で作る"],
+  [AI_ENGINE.gemini, "Gemini を使う"],
+];
+
+export const APPEARANCE_CHOICES: [Appearance, string][] = [
+  ["system", "パソコンの設定に合わせる"],
+  ["light", "明るい"],
+  ["dark", "暗い"],
+];
+
 export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
+  // 見た目（ADR-0039・#1108）。⚠️ **動画の絵は変わらない**＝暗くなるのはアプリの枠だけ。
+  const [appearance, setAppearance] = useAppearance();
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
@@ -37,6 +70,20 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
   // 接続キーの削除も共通の確認へ（#410）。キーは復元できないため確認必須（即時削除だった）。
   const [confirmClearKey, setConfirmClearKey] = useState(false);
   const [aiModel, setAiModelState] = useState(() => getAiModel());
+  const [aiEngine, setAiEngineState] = useState<AiEngine>(() => getAiEngine());
+  /** このパソコンで作る部品が同梱されているか（`null`＝まだ分からない＝何も言わない）。 */
+  const [localAvailable, setLocalAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    // アプリの外（ブラウザでの開発）では問い合わせない＝「見つからない」と言わない。
+    if (!isTauri()) return;
+    let alive = true;
+    void localAiAvailable().then((ok) => { if (alive) setLocalAvailable(ok); });
+    return () => { alive = false; };
+  }, []);
+  function onChangeEngine(engine: AiEngine) {
+    setAiEngineState(engine);
+    setAiEngine(engine);
+  }
 
   function onChangeModel(value: string) {
     setAiModelState(value);
@@ -80,43 +127,105 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       });
       setTestState("idle");
     } catch (e) {
-      // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
+      // VOICEVOX 由来の失敗は Rust が行動明示の文で返す（関門を通る）。それ以外は定型文。
+      // ⚠️ **見分けるのは「型」ではなく「文の形」**（#1123）＝文字列か `Error` かではなく、
+      // **日本語を含み、句点を持つ文**かどうかで決まる。
       setTestError(
-        typeof e === "string" ? e : "声の確認に失敗しました。もう一度お試しください。",
+        userFacingMessage(e, "voice-test") ?? "声の確認に失敗しました。もう一度お試しください。",
       );
       setTestState("error");
     }
   }
 
-  // 起動時に接続キーの有無を確認（値は取得しない＝有無のみ）。
+  /** 接続キーを操作したか（済んだら、起動時の読み取りは採らない）。 */
+  const settled = useRef(false);
+
+  // 画面に入った時点で接続キーの有無を確認（値は取得しない＝有無のみ）。
+  //
+  // ⚠️ **確かめられなかったことを黙らない**（#1134 レビュー由来 🟡・§2-5）＝以前は
+  // `.catch(() => setAiConnected(false))` と**黙って「未接続」**にしていた。
+  // 保存直後の「接続キーは保存できましたが…設定を開き直してご確認ください」に従って開き直しても、
+  // 確認がまた失敗すれば**何も言わずに未接続**へ変わる＝直前の案内と食い違い、
+  // 利用者は確認できたのかどうかを**見分ける手段が無い**（案内が空手形になる）。
+  // ⚠️ **状態は「無い」側へ倒す**＝在ると偽って AI の機能を押させない（押しても進まない、を作らない）。
   useEffect(() => {
+    // ⚠️ **あとから来た起動時の結果で、操作の結果を上書きしない**（レビュー由来 ℹ️・
+    // `projectStore` の「丸ごと set で並行編集を巻き戻す」と同型）＝保存や削除が先に済んでいたら、
+    // 遅れて解決したこの読み取りは**採らない**。
+    // ⚠️ **外れたかどうか（`live`）だけでは足りない**＝画面に居るまま遅れて解決する筋がある。
+    // **操作が済んだか**（`settled`）で見る。`live` は外れたあとの set を避けるために別に持つ。
+    let live = true;
     void hasApiKey(GEMINI_PROVIDER)
-      .then(setAiConnected)
-      .catch(() => setAiConnected(false));
+      .then((has) => { if (live && !settled.current) setAiConnected(has); })
+      .catch((e: unknown) => {
+        if (!live || settled.current) return;
+        setAiConnected(false);
+        // ⚠️ **Rust が理由を返せるなら、それを出す**（#1131）＝`has_api_key` は
+        // アクセスできないときに `KEYRING_UNAVAILABLE` を返す（以前は `Ok(false)` に畳んでいた）。
+        setKeyError(userFacingMessage(e, "api-key-state") ?? apiKeyMessage.API_KEY_STATE_UNKNOWN);
+      });
+    return () => { live = false; };
   }, []);
 
+  // ⚠️ **「できなかった」と「確かめられなかった」を分ける**（#1131・ADR-0026①）＝以前は
+  // 保存と**状態の確認**を1つの `try` に入れていたので、**保存は成功したのに `hasApiKey` が
+  // 投げる**と「キーを保存できませんでした」と出た＝**起きたことと食い違う**。しかも
+  // `setKeyInput("")` が先にあったため、**入力欄だけ空**になって利用者は打ち直すことになり、
+  // その打ち直しは（実際には保存済みなので）**丸ごと無駄**だった。
   async function onSaveKey() {
+    // ⚠️ **ここから先は、起動時の読み取りより新しい**（レビュー由来 ℹ️）。
+    settled.current = true;
     setKeyBusy(true);
     setKeyError("");
     try {
       await saveApiKey(GEMINI_PROVIDER, keyInput.trim());
-      setKeyInput("");
+    } catch (e) {
+      // ⚠️ **先に押せる状態へ戻す**（レビュー由来 ℹ️）＝この下で投げると「保存中…」のまま
+      // 二度と押せなくなる（`finally` の外へ出た経路なので、拾ってくれるものが無い）。
+      setKeyBusy(false);
+      // ⚠️ **入力は消さない**＝打ち直させる以上、消してはいけない（§2-5）。
+      setKeyError(userFacingMessage(e, "api-key-save") ?? apiKeyMessage.API_KEY_SAVE_FAILED);
+      return;
+    }
+    // ここから先は**保存は済んでいる**＝失敗したようには見せない。
+    setKeyInput("");
+    try {
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(typeof e === "string" ? e : "キーを保存できませんでした。もう一度お試しください。");
+      // ⚠️ **中身は捨てない**（レビュー由来 🟡）＝画面に出す文は「保存はできた」を守るために
+      // こちらのものを使うが、**理由は記録へ流す**（`troubleLogBridge` が運ぶ）。
+      // 以前は `catch { … }` で `e` を丸ごと落としており、**調べる材料が減る向き**に倒れていた。
+      console.error("[api-key-save] 状態を確かめられませんでした:", e);
+      // ⚠️ **「在る」側へ倒す**＝保存できたのだから在る。黙って「未接続」に見せない。
+      setAiConnected(true);
+      setKeyError(apiKeyMessage.API_KEY_SAVED_UNVERIFIED);
     } finally {
       setKeyBusy(false);
     }
   }
 
+  // ⚠️ **双子の片方だけ直さない**（このリポジトリの不具合の多くはこの型）＝削除側も同じ形で、
+  // 削除は成功したのに `hasApiKey` が投げると「接続を削除できませんでした」と出ていた。
   async function onClearKey() {
+    // ⚠️ **ここから先は、起動時の読み取りより新しい**（レビュー由来 ℹ️）。
+    settled.current = true;
     setKeyBusy(true);
     setKeyError("");
     try {
       await deleteApiKey(GEMINI_PROVIDER);
+    } catch (e) {
+      setKeyBusy(false);
+      setConfirmClearKey(false);
+      setKeyError(userFacingMessage(e, "api-key-delete") ?? apiKeyMessage.API_KEY_DELETE_FAILED);
+      return;
+    }
+    try {
       setAiConnected(await hasApiKey(GEMINI_PROVIDER));
     } catch (e) {
-      setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
+      console.error("[api-key-delete] 状態を確かめられませんでした:", e);
+      // ⚠️ **「無い」側へ倒す**＝消せたのだから無い。
+      setAiConnected(false);
+      setKeyError(apiKeyMessage.API_KEY_DELETED_UNVERIFIED);
     } finally {
       setKeyBusy(false);
       setConfirmClearKey(false);
@@ -131,14 +240,49 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
-        {/* 動画案を作るAI（接続キーの保存・削除） */}
+        {/* 画面の見た目（ADR-0039・#1108）。⚠️ **動画の絵は変わらない**＝暗くなるのはアプリの枠だけ。 */}
+        <div className="card">
+          <h2 className="section-title">見た目</h2>
+          <p className="page-desc text-pretty">
+            アプリの明るさを選べます。暗くしても、作っている動画の色は変わりません。
+          </p>
+          <div className="segment" role="group" aria-label="見た目" style={{ display: "inline-flex" }}>
+            {APPEARANCE_CHOICES.map(([id, label]) => (
+              <button key={id} className={appearance === id ? "active" : ""} onClick={() => setAppearance(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 動画案を作るAI（ADR-0051 決定15＝既定はこのパソコンの中・Gemini は選んだときだけ＝接続キーの保存・削除）。 */}
         <div className="card">
           <h2 className="section-title">動画案を作るAI</h2>
           <p className="page-desc text-pretty">
-            動画案づくりに Google の Gemini を使えます。お持ちの接続キーを、この端末の安全な保管領域に保存します（キーは画面には表示しません）。
+            動画案は、このパソコンの中で作ります（入力した内容は外へ送りません）。Google の Gemini（外部のAI）を使うこともできます。
           </p>
+          {/* ⚠️ **編集の途中の手伝いはどちらを選んでも外へ送らない**（ADR-0053・UI/UX 監査 2026-10-02）＝書いていないと、
+              Gemini を選んだ人は「AIに頼む」も外へ送ると思う。 */}
+          <p className="field-hint">
+            場面編集の「AIに頼む」と写真の読み取りは、どちらを選んでもこのパソコンの中で動きます。
+          </p>
+          <div className="segment" role="group" aria-label="動画案を作るAI" style={{ display: "inline-flex" }}>
+            {AI_ENGINE_CHOICES.map(([id, label]) => (
+              <button key={id} className={aiEngine === id ? "active" : ""} aria-pressed={aiEngine === id} onClick={() => onChangeEngine(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <div className="toggle-row">
+          {aiEngine === AI_ENGINE.local ? (
+            <p className="field-hint mt" role="status">
+              {localAvailable === false
+                ? "このパソコンで動画案を作る部品が見つかりません。アプリを入れ直してください。"
+                : "初めて作るときは、準備に少し時間がかかります。"}
+            </p>
+          ) : (
+          <>
+          <div className="toggle-row mt">
             <div>
               <span className="field-label" style={{ margin: 0 }}>
                 接続の状態
@@ -146,7 +290,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               <p className="field-hint" style={{ marginTop: 2 }}>
                 {aiConnected
                   ? "接続済み。動画案づくりに使われます。"
-                  : "未接続のときは、お試し用の動画案で仕上がりを確認できます。"}
+                  : "未接続のときは動画案を作れません。キーを登録するか、「このパソコンの中で作る」を選んでください。"}
               </p>
             </div>
             <span className={`badge ${aiConnected ? "badge-teal" : "badge-gray"}`}>
@@ -195,7 +339,7 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
                 </button>
               </div>
               <p className="field-hint">
-                キーはこの端末の安全な保管領域に保存し、画面・ファイル・送信内容には残しません。
+                キーはこのパソコンのパスワードと同じ守られた場所に保存し、画面・ファイル・送信内容には残しません。
               </p>
             </div>
           )}
@@ -205,52 +349,68 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             </div>
           )}
 
-          <div className="field" style={{ marginTop: "var(--gap-md)" }}>
-            <label className="field-label" htmlFor="aiModel">
-              モデル
-            </label>
-            <input
-              id="aiModel"
-              className="input"
-              value={aiModel}
-              onChange={(e) => onChangeModel(e.target.value)}
-              placeholder={DEFAULT_AI_MODEL}
-            />
-            <p className="field-hint">
-              通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
-            </p>
-          </div>
-
-          <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
+          {/* ⚠️ **普段は触らないものは畳んでおく**（#1032）＝自分で「通常は変更不要です」と
+              書いている欄が**先頭で開きっぱなし**で、読み飛ばしを文章でお願いしていた。
+              ⚠️ **既定と違う値が入っているときは開いて出す**（PR #1072 レビュー ℹ️）＝
+              自分で変えた設定を畳んで出すと見失う（「この場面だけ声の大きさ」・場面の BGM と同じ流儀）。
+              ⚠️ **`key` は付けない**＝ここで値を `key` にすると**1文字打つごとに作り直されて焦点が外れる**。
+              開閉は描画の1回目だけで決める（入力中に畳んだり開いたりしない）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="ai-advanced" defaultOpen={aiModel !== DEFAULT_AI_MODEL}>
+            <div className="field">
+              {/* 「モデル」は技術語に近い（UI/UX 監査 2026-10-02）＝何を入れる欄かを言う。 */}
+              <label className="field-label" htmlFor="aiModel">
+                使うAIの名前
+              </label>
+              <input
+                id="aiModel"
+                className="input"
+                value={aiModel}
+                onChange={(e) => onChangeModel(e.target.value)}
+                placeholder={DEFAULT_AI_MODEL}
+              />
+              <p className="field-hint">
+                通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況が変わったときだけ、提供元が案内する名前に変えてください。
+              </p>
+            </div>
+            <p className="field-hint mt">※ いまつなげられるのは Gemini だけです。</p>
+          </CollapsibleSection>
 
           <hr className="divider" />
           <p className="field-hint">
-            動画案を作る前に、外部AIへ渡す情報の確認画面を必ず表示します。
+            動画案を作る前に、外部のAIへ渡す情報の確認画面を必ず表示します。
           </p>
+          </>
+          )}
         </div>
 
         {/* ナレーターの声 */}
         <div className="card">
           <h2 className="section-title">ナレーターの声</h2>
+          {/* ⚠️ 「常に」ではない（ADR-0025・#359 で出し方を選べる）。この画面（About）側の表示は
+              必須のまま・変わるのは**動画に焼く側**だけ、という線で書き分ける。 */}
           <p className="page-desc text-pretty">
-            選んだ声のクレジット（{creditForSpeaker(speaker)}）を、動画とプレビューに常に表示します。
+            ここで選んだ声は、これから作るものを含めてすべての動画に使われます。
+            選んだ声のクレジット（{creditForSpeaker(speaker)}）は「このアプリについて」に必ず表示されます。動画とプレビューへの出し方（最初と最後だけ・非表示など）は「動画を書き出す」で選べます。
           </p>
 
-          <div className="field">
-            <label className="field-label" htmlFor="voicevoxUrl">
-              音声ソフトの接続先
-            </label>
-            <input
-              id="voicevoxUrl"
-              className="input"
-              value={voicevoxUrl}
-              onChange={(e) => onChangeUrl(e.target.value)}
-              placeholder="http://localhost:50021"
-            />
-            <p className="field-hint">
-              通常は空のままで大丈夫です（標準の接続先を使います）。場所を変えている場合だけ入力してください。
-            </p>
-          </div>
+          {/* 既定と違う接続先を入れてあるなら開いて出す（上の注記と同じ理由）。 */}
+          <CollapsibleSection scope={SECTION_SCOPE.settings} title="上級者向け" storageKey="voice-advanced" defaultOpen={voicevoxUrl.trim() !== ""}>
+            <div className="field">
+              <label className="field-label" htmlFor="voicevoxUrl">
+                音声ソフトの接続先
+              </label>
+              <input
+                id="voicevoxUrl"
+                className="input"
+                value={voicevoxUrl}
+                onChange={(e) => onChangeUrl(e.target.value)}
+                placeholder="http://localhost:50021"
+              />
+              <p className="field-hint">
+                通常は空のままで大丈夫です（標準の接続先を使います）。場所を変えている場合だけ入力してください。
+              </p>
+            </div>
+          </CollapsibleSection>
 
           <div className="field">
             <label className="field-label" htmlFor="voiceStyle">
@@ -272,13 +432,28 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
                 </optgroup>
               ))}
             </select>
+            {/* ⚠️ 出し方は選べるようになった（ADR-0025・#359）＝ここで「常時」と言い切ると事実と違う。
+                出し方の選択は書き出し画面（`CreditDisplayField`）にあるので、そこへ案内する。 */}
             <p className="field-hint">
-              選んだキャラクターの名前を、動画に常時クレジット表示します。
+              選んだキャラクターの名前を、動画にクレジット表示します。出し方（最初と最後だけ・非表示など）は「動画を書き出す」で選べます。
             </p>
           </div>
 
+        </div>
+
+        {/* ⚠️ **範囲で分ける**（#1032）＝上のカードは**すべての動画に効く**設定（声・接続先）、
+            こちらは**いま開いている動画だけ**の設定。以前は同じカードに混ざっており、
+            違いは**末尾の一文だけ**で示していた（先に触ってから読むことになる）。
+            ⚠️ **声のまとまりは崩さない**（`06 §15` の並び）＝声 → この動画の読み上げ → 言葉の読み方、の順に置く。 */}
+        <div className="card">
+          <h2 className="section-title">この動画の読み上げ</h2>
+          <p className="page-desc text-pretty">
+            話す速さ・声の高さ・抑揚は、いま開いている動画の読み上げにだけ使われます（保存すると残ります）。上の「ナレーターの声」は、これから作るものを含めてすべての動画に効きます。
+          </p>
+
           {/* 話す速さ/高さ/抑揚は updateVoiceSettings＝書き出し中は固定（#570 P1）。生成パラメタなので今回のMP4は不変だが、
-              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので section 全体でなくここに置く。 */}
+              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので、
+              そちらは上のカードに残してある（このバナーもこのカードの中だけ）。 */}
           <ExportLockBanner onNavigate={onNavigate} />
           <div className="field">
             <label className="field-label" htmlFor="speed">
@@ -351,10 +526,6 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
             </div>
           </div>
 
-          <p className="field-hint">
-            話す速さ・高さ・抑揚はこのプロジェクトの読み上げの声に使われます（保存すると残ります）。
-          </p>
-
           <button
             className="btn btn-secondary btn-icon"
             onClick={() => void onTestVoice()}
@@ -377,12 +548,26 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           )}
         </div>
 
+        {/* ⚠️ **並びは `06 §15` の順**（α-6 出口監査 🟡26）＝声 → 言葉の読み方 → 文字の形 → 会社の見た目。
+            以前は会社の見た目が声の直後に入っており、**声↔読み方**と**文字の形↔会社の見た目**の
+            2組がどちらも分断されていた（コメント自身が「声のすぐ下」と書いているのに直下ではなかった）。 */}
+        {/* 言葉の読み方（ADR-0037・#350）。ナレーターの声のすぐ下＝声にまつわる設定をひとかたまりにする。 */}
+        <ReadingDictSection />
+        {/* 持ち込みフォント（ADR-0038・#261）。会社の見た目が既定に使うので、その手前に置く。 */}
+        <UserFontSection />
+        {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
+        <BrandKitSection onNavigate={onNavigate} />
+
+        {/* うまくいかないときの記録（#396）。⚠️ **いちばん下**＝ふだんは使わない導線なので、
+            日常の設定（声・読み方・文字の形・会社の見た目）の後ろに置く。 */}
+        <TroubleLogSection />
+
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (
           <div className="card">
-            <h2 className="section-title">動画保存の予備機能</h2>
+            <h2 className="section-title">動画の書き出しの予備機能</h2>
             <p className="page-desc text-pretty">
-              通常は Windows の標準機能で動画を保存します。以下は予備の保存方法が使えるかどうかの状態です。
+              通常は Windows の標準機能で動画を書き出します。以下は予備の書き出し方法が使えるかどうかの状態です。
             </p>
             <div className="row-between mt">
               <span className="text-muted">状態</span>

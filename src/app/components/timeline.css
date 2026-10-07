@@ -4,6 +4,28 @@
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
+  /* 左の固定ラベル幅。再生ヘッド（ADR-0023 (1)）の位置合わせもこれを見る＝単一の参照元（§2-7）。 */
+  /* ⚠️ **単一の参照元は TS 側**（`TIMELINE_LABEL_W_PX`）＝両方のタイムライン画面が流し込む。
+     ここは流し込みが無いときの保険（全体表示・錨点の計算も同じ値を引くので、ずれると黙って合わなくなる）。 */
+  --timeline-label-w: 124px;
+  /* 目盛りの行の高さ。⚠️ **印の帯（`.timeline-ruler-overlay`）と同じ値**＝写すと片方だけ動いて、
+     印が下の帯へはみ出して当たり判定を奪う（#1159）。 */
+  --timeline-ruler-h: 22px;
+  /* 列1本の高さと、帯の上下の余白（#1104）。
+     ⚠️ **単一の参照元は TS 側**（`TIMELINE_LANE_H_PX` / `TIMELINE_CLIP_INSET_PX`）＝両方の
+     タイムライン画面が流し込む。ここは流し込みが無いときの保険（幅と同じ扱い）。
+     ⚠️ **`.timeline` で宣言する**＝行（`.timeline-lane`）と帯（`.timeline-clip`）とその中の「⋮」の
+     **すべてから**見える必要がある（カスタムプロパティは子孫にしか継承しない）。 */
+  --timeline-lane-h: 28px;
+  --timeline-clip-inset: 2px;
+  /* 帯の枠線の太さ。⚠️ **下の `calc` と `.timeline-clip` の両方が引く**＝直書きすると、
+     太さを変えたときに文字の高さだけ取り残される（レビュー 🟡）。 */
+  --timeline-clip-border-w: 1px;
+  /* 帯の中の文字の高さ。⚠️ **3つ目の数字を増やさない**＝上の3つから導く。直書きすると、
+     行を詰めたときに**文字だけ元の高さのまま**になって行からはみ出す。 */
+  --timeline-clip-line-h: calc(
+    var(--timeline-lane-h) - var(--timeline-clip-inset) * 2 - var(--timeline-clip-border-w) * 2
+  );
 }
 
 .timeline-toolbar {
@@ -13,9 +35,142 @@
   flex-wrap: wrap;
 }
 
+/* **帯の操作の行**（ADR-0048・#1256 b5）＝見え方の道具（倍率・列の高さ・吸着）の行と**種類が違う**ので、
+   細い線で分ける（同じ行に混ぜると、どれが帯を変えるボタンか読み取れない）。 */
+.timeline-edit-tools {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--gap-xs);
+}
+
+/* **帯の長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる。 */
+.timeline-clip-badge {
+  float: right;
+  margin-left: var(--gap-xs);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  position: relative;
+}
+/* 選んだ帯は右端に「⋮」と取っ手が出る＝その下に潜らないよう空ける。 */
+.timeline-clip--selected .timeline-clip-badge {
+  margin-right: calc(var(--clip-menu-w) + var(--clip-handle-w));
+}
+
+/* **窓の外から運んでいるファイルの落とし先**（ADR-0049）＝時刻の線と、列の無い所の「新しい列」の行。 */
+.timeline-file-drop-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-primary);
+  pointer-events: none;
+  z-index: 4;
+}
+.timeline-file-drop-lane {
+  position: relative;
+  border: 1px dashed var(--color-primary);
+}
+.timeline-file-drop-newrow-text {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+/* 並びの外で運んでいるとき（離すと取り込むだけ）。画面の下に浮かせて出す。 */
+.file-drop-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  border: 1px solid var(--color-primary);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  pointer-events: none;
+}
+/* 離しても置けない所を通っているとき（#1272）＝枠の色を、置けない帯（`drop-target--blocked`）に揃える。 */
+.file-drop-hint--blocked {
+  border-color: var(--color-danger);
+}
+
+/* **音量の線**（#1266）＝帯の全面に重ねる（上端＝最大の音量・下端＝無音）。押す当たりは取らない。 */
+.timeline-clip-volume {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.timeline-clip-volume polyline {
+  fill: none;
+  stroke: var(--color-warn);
+  stroke-width: 1.5;
+  opacity: 0.9;
+}
+
+/* **囲んで選ぶ矩形**（#1265）＝画面の座標で重ねる。押す当たりは取らない（離すまで下の並びが受ける）。 */
+.timeline-marquee {
+  position: fixed;
+  z-index: 50;
+  border: 1px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  pointer-events: none;
+}
+
+/* 操作の区切り（#1104）＝1行に畳んだので、種類の違う操作がひと続きに見えないようにする。 */
+.timeline-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4em;
+  background: var(--color-border-strong);
+  margin: 0 var(--gap-xs);
+}
+
+/* 「並び」の欄の中身（#1104）＝道具立て（表示倍率・吸着・「列を足す」）を**留めたまま**、
+   帯だけを縦に流す。⚠️ **欄ごと流さない**＝実機で列を12本にすると、帯を見に下へ送った瞬間に
+   「列を足す」が画面の外へ出て**列を足せなくなった**（欄の器＝`.panel-frame-body--fill`）。 */
+.timeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  flex: 1 1 0;
+  /* ⚠️ **無いと縮まない**＝flex の中身は既定で「中身なりの高さ」より小さくならないので、
+     器を越えた分がそのまま外へ出る（＝下の帯が切り落とされて見えない）。 */
+  min-height: 0;
+}
+
+/* 添え書きと「列を足す」は**縮めない**（帯だけが伸び縮みする）。
+   ⚠️ **間は `gap` だけで取る**＝段落やボタン行が持つ既定の余白と足し算になると、
+   帯に回せる高さがそのぶん減る（実測で約32px＝列1本ぶん）。 */
+.timeline-panel > * {
+  flex: 0 0 auto;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.timeline-panel > .timeline {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 帯の枠が**縦に流れる場所**（列が増えたときに動くのはここ1か所）。 */
+.timeline-panel > .timeline > .timeline-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .timeline-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  /* ⚠️ **縦も `auto`**（#1104）＝列が増えたときに流れるのは**この枠**（欄ではない）。
+     見わたす側（読み取り専用）は高さが決まっていないので、この指定でも縦棒は出ない。 */
+  overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -33,24 +188,193 @@
   align-items: stretch;
 }
 
+/* 目盛りの行は**貼り付ける**（#1104 レビュー由来 ℹ️）。
+   ⚠️ **縦に流れる箱を帯の枠へ移した副作用**＝列が増えて下へ送ると、目盛りも一緒に流れて
+   視界から消え、「いま何秒の所を見ているか」が分からなくなる。
+   一般的な動画編集ソフトでは**ルーラーは残る**（ADR-0034＝業界の型に合わせる）。
+   ⚠️ **下地を敷く**＝敷かないと、下から来た帯が目盛りの文字に透ける。
+   ⚠️ **列の名前の欄（`z-index: 5`）より上**＝行ごと前に出す。 */
+.timeline-panel .timeline-inner > .timeline-row:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--color-surface);
+}
+
+/* 列の並べ替え（#767）。**掴んでいる行**は薄く、**落ちる先**はその行の上端に線を引く
+   ＝どこに入るか分からないまま落とさせない（ADR-0033 の欄の並べ替えと同じ流儀）。 */
+.timeline-row--dragging {
+  opacity: var(--drag-source-opacity);
+}
+.timeline-row--drop-above {
+  box-shadow: inset 0 var(--drop-line-w) 0 0 var(--drop-line-color);
+}
+.timeline-row--drop-below {
+  box-shadow: inset 0 calc(-1 * var(--drop-line-w)) 0 0 var(--drop-line-color);
+}
+
 .timeline-row-label {
   position: sticky;
   left: 0;
-  z-index: 2;
+  /* ⚠️ **どの帯よりも前面**（実機で発覚）。選んだ帯（3）・掴んでいる帯と「⋮」（4）より下だと、
+     横へ送ったときに帯が**名前の欄を突き抜けて**見える（欄は貼り付いたまま動かないので重なる）。
+     この file の重なりの段：1=帯・遷移／2=端の取っ手／3=選んだ帯・再生位置の線／
+     4=掴んでいる帯・「⋮」・吸着の線／**5=列の名前の欄**／
+     6=目盛りの行（貼り付く）・範囲選択の矩形。
+     **目盛りの行の中**はこの段とは別の重なり：3=目印の旗／4=再生ヘッドの掴み手
+     （どちらも行の中なので、外の段と比べる必要がない＝欄〔5〕より下でありさえすればよい）。
+     ⚠️ **段の説明を実態に合わせた**（#1148＝α 出口監査 🔴3）＝#1104 で 6 段目（貼り付く目盛りの行）を
+     足したときに、ここが 5 段のままだった。**説明が古いこと自体が、旗を 4 のまま置いた原因**。
+     ⚠️ **旗が 4 のままでよい理由**＝旗は**目盛りの行の中**に描くようになったので（#1148）、
+     行の段（6）に乗って前面に出る。行の中では欄（5）より下なので、横へ送っても欄を突き抜けない。 */
+  z-index: 5;
   flex: 0 0 auto;
-  width: 84px;
+  width: var(--timeline-label-w);
+  /* ⚠️ **横並びにする**（#1104・実機のスクショで判明 2026-09-10）＝縦積みだと
+     名前の**下**に「⋮」が来て、**この欄の高さが行の高さを決めてしまう**（実測 約57px）。
+     帯を 28px に詰めても「間がばがばに空いてんだもん」（利用者）はこれが原因。 */
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  /* ⚠️ **中身で押し広げない**＝はみ出すぶんは隠す（行の高さは帯が決める）。 */
+  overflow: hidden;
+  padding: 0 4px;
+  /* ⚠️ **行間を詰める**（#1104・利用者指摘 2026-09-10）＝`:root` の 1.6 を継ぐと
+     名前(12px)＋添え(10px)で 35px 要り、**列の高さがそれに引きずられていた**（40px の理由）。
+     普通の動画エディタの密度にするには、まずここを詰める。
+     ⚠️ **足し算なのは当時が縦積みだったから**（#1122）＝いまは横並びなので、拘束は
+     **欄に並ぶもののうちいちばん高い1つ**（`timelineMetrics.test.ts` が CSS から読んで見ている）。 */
+  line-height: 1.15;
   background: var(--color-surface-alt);
   border-right: 1px solid var(--color-border-strong);
   font-size: 12px;
   color: var(--color-text);
 }
+/* 名前は伸び縮みして、長いときは省略する。
+   ⚠️ **省略の指定だけでは名前は守れない**（#1104 レビュー由来 🟡・2026-09-10 実機で実測）＝
+   `min-width: 0` は**幅 0 まで潰れることを許す**ので、横並びにした結果
+   「出さない 固定中 ⋮」だけが残り、**どの列か分からなくなっていた**（名前の実測幅は 0px）。
+   守ったのは**欄の幅を実測どおりに広げたこと**（`TIMELINE_LABEL_W_PX` 84 → 124）で、
+   ここは「それでも長い名前」を三点で切るための指定。 */
+.timeline-row-label > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+ * **出す／固定の切り替え**（ADR-0048・ADR-0033 決定9 の改訂＝「静かな常設」）。
+ * - 普段は**見せない・押せない**（`opacity: 0` ＋ `pointer-events: none`）＝見えない当たり判定を作らない（ADR-0047 決定3）。
+ *   ⚠️ `visibility: hidden` にしない＝焦点が入らず、キーで辿れなくなる（`:focus-within` で出す道が消える）。
+ * - 見出しに乗せた／キーで入ったときは薄く出す。乗せているアイコンは濃く。
+ * - **変えた状態（出さない・固定）は常に濃く出す**＝今の状態がいつも読める。
+ * - 名前の上に**重ねる**（右端から）＝出たり消えたりで行がずれない。かぶる所は見出しの地の色でぼかす。
+ * - マウスの無い画面（触って使う）は、乗せる操作が無いので常に薄く出す（＝A案の姿）。
+ */
+.timeline-row-label {
+  --row-toggles-right: 18px; /* 「⋮」のぶん */
+}
+.timeline-row-toggles {
+  position: absolute;
+  right: var(--row-toggles-right);
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 12px;
+  background: linear-gradient(to right, transparent, var(--color-surface-alt) 12px);
+  pointer-events: none;
+}
+.timeline-row-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.timeline-row-label:hover .timeline-row-toggle,
+.timeline-row-label:focus-within .timeline-row-toggle {
+  opacity: 0.5;
+  pointer-events: auto;
+}
+.timeline-row-label .timeline-row-toggle:hover,
+.timeline-row-label .timeline-row-toggle:focus-visible {
+  opacity: 1;
+  color: var(--color-text);
+}
+.timeline-row-toggle--on,
+.timeline-row-label .timeline-row-toggle.timeline-row-toggle--on {
+  /* ⚠️ **見出しに乗せたときの規則（0,3,0）より強く・後ろに置く**（#1259 レビュー 🟡）＝以前は
+     `.timeline-row-toggle--on`（0,1,0）だけで、乗せると 1→0.5 に薄くなり「変えた状態は常に濃く」が破れていた。 */
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--color-warn);
+}
+/* 変えた状態が1つも無い列では、ぼかしの地も出さない（名前を削らない）。 */
+.timeline-row-label:not(:hover):not(:focus-within) .timeline-row-toggles:not(:has(.timeline-row-toggle--on)) {
+  background: none;
+}
+.timeline-row-toggle:disabled {
+  cursor: not-allowed;
+}
+@media (hover: none) {
+  /* ⚠️ **変えた状態は除く**＝同じ強さで後ろにあると、触る画面では ON まで薄くなる（#1259 レビュー 🟡）。 */
+  .timeline-row-toggle:not(.timeline-row-toggle--on) {
+    opacity: 0.5;
+    pointer-events: auto;
+  }
+}
+/* 出さない列は帯を薄く／固定した列は斜線（見出しを見なくても列の状態が分かる）。 */
+.timeline-lane--hidden .timeline-clip {
+  opacity: 0.4;
+}
+.timeline-lane--locked {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    var(--color-border) 6px 7px
+  );
+}
+/* ⚠️ **帯の上にも斜線**（実装後の評価で見つけた）＝帯は不透明なので、列の地にだけ引くと
+   **帯で埋まった固定の列は、固定していないように見えた**（Premiere も帯の上に斜線を出す）。 */
+.timeline-lane--locked .timeline-clip {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    var(--color-border-strong) 6px 7px
+  );
+}
+
 .timeline-row-label .sub {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--color-text-faint);
+}
+
+/* 列の操作（「⋮」）。⚠️ **共通のボタンの見た目を使わない**＝上下の余白で行が伸びる。 */
+.timeline-row-menu {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 14px;
+}
+.timeline-row-menu:hover {
+  color: var(--color-text);
 }
 
 .timeline-track {
@@ -60,7 +384,7 @@
 
 /* 時間ルーラー */
 .timeline-ruler {
-  height: 22px;
+  height: var(--timeline-ruler-h);
   border-bottom: 1px solid var(--color-border);
 }
 .timeline-tick {
@@ -78,7 +402,20 @@
 
 /* レーン */
 .timeline-lane {
-  height: 40px;
+  /* ⚠️ 帯（`.timeline-clip`）ではなく**共通の祖先**で宣言する（#701 レビュー）。
+     「⋮」は帯の**兄弟**なので、帯で宣言すると届かず（カスタムプロパティは子孫にしか継承しない）
+     `var()` が解決できずに `left`/`width` の宣言ごと無効になり、**帯の左端に出る**（実測で確認）。
+     同じファイルの `--timeline-label-w` が `.timeline` で宣言されているのと同じ流儀。 */
+  /* ⚠️ **単一の参照元は TS 側**（`CLIP_MENU_W_PX`／`CLIP_HANDLE_W_PX`／`CLIP_HANDLE_HIT_W_PX`）
+     ＝タイムライン編集が必ず流し込む。取っ手を出す最小の帯の幅と「⋮」の位置がそこから導かれるので、
+     ここだけ変えると下限や重なりが黙って合わなくなる。ここは**この file を単独で読んだときの既定**で、
+     値がずれないよう TS 側との一致をテストで固定している（#752 レビュー）。
+     ※取っ手と「⋮」を描くのはタイムライン編集の画面だけ（見わたす画面は描かない）。 */
+  --clip-menu-w: 14px;
+  --clip-handle-w: 7px;
+  /* 取っ手の**当たり判定**（見た目の2倍以上＝業界の型・#752-7）。見た目は `--clip-handle-w` のまま。 */
+  --clip-handle-hit-w: 14px;
+  height: var(--timeline-lane-h);
   border-bottom: 1px solid var(--color-border);
 }
 .timeline-lane:last-child {
@@ -88,15 +425,15 @@
 /* クリップ */
 .timeline-clip {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: var(--timeline-clip-inset);
+  bottom: var(--timeline-clip-inset);
   min-width: 2px;
   box-sizing: border-box;
-  border: 1px solid;
+  border: var(--timeline-clip-border-w) solid;
   border-radius: var(--radius-sm);
   padding: 0 6px;
   font-size: 11px;
-  line-height: 30px;
+  line-height: var(--timeline-clip-line-h);
   color: var(--color-text);
   overflow: hidden;
   white-space: nowrap;
@@ -109,6 +446,46 @@
 .timeline-clip--telop {
   background: var(--color-yellow);
   border-color: var(--color-yellow-strong);
+}
+/*
+ * 帯の操作を開く「⋮」（#701）。
+ *
+ * ⚠️ **選んだ帯の内側**に置く。帯の外（すぐ右）に置くと：
+ *   - 「複製」で作った帯は**必ず隣接する**（`duplicateClip` は前の終わりから置く）ので、
+ *     次の帯の左端を常に覆う＝別の帯が選ばれて**狙っていない帯が消える**
+ *   - 短い帯は丸ごと覆われて押せない
+ *   - いちばん最後の帯の「⋮」は**列の枠の外**に出る
+ *   - 見た目は空白なのに押すと帯が選ばれる＝「何もない所を押すと解除」（決定15）と逆になる
+ * 常時ではなく**選んだ帯だけ**に出すのも同じ理由（隣の当たり判定を常時は食わない）。
+ */
+.timeline-clip-menu {
+  position: absolute;
+  /* 常は薄く、指したときに濃く（下の :hover/:focus-visible が効くための基準）。 */
+  opacity: 0.6;
+  /* ⚠️ **帯と同じ余白を引く**（レビュー 🔴）＝「⋮」は帯の**兄弟**で包含ブロックも同じなので、
+     ここだけ直書きだと、余白を詰めたとき**箱より文字が高くなって帯とも上下がずれる**。 */
+  top: var(--timeline-clip-inset);
+  bottom: var(--timeline-clip-inset);
+  width: var(--clip-menu-w);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 11px;
+  line-height: var(--timeline-clip-line-h);
+  cursor: pointer;
+  /* 選んだ帯（`z-index: 3`）より上に置く＝選んだ帯の上に出すため。 */
+  z-index: 4;
+}
+.timeline-clip-menu:hover,
+.timeline-clip-menu:focus-visible {
+  opacity: 1;
+}
+.timeline-clip--shape {
+  /* 図形。⚠️ **既にある色から採る**（存在しない変数を書くと、フォールバックで別の種類と同じ色になり
+     「種類ごとに分ける」が達成されないのにテストは class 名しか見ないので緑のまま通る・#701 レビュー）。 */
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
 }
 .timeline-clip--audio {
   background: var(--color-accent-soft);
@@ -130,27 +507,73 @@
   z-index: 4;
 }
 /* トリミングハンドル（左右端）。選択中は掴みやすいよう縁を強調。 */
+/* ⚠️ **当たり判定は見た目より広い**（#752-7）＝見た目と同じ 7px だと、実機で指が乗る前に本体を掴む
+   （業界の型は「見た目の2倍以上」）。広げるのは**帯の内側だけ**（外へ広げると隣の帯を食う）。
+   見た目の帯は擬似要素で外側の端に出す＝**太く見せずに掴みやすくする**。 */
 .timeline-clip-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 7px;
+  width: var(--clip-handle-hit-w);
   cursor: ew-resize;
   z-index: 2;
 }
+.timeline-clip--selected .timeline-clip-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--clip-handle-w);
+  background: var(--color-primary);
+  opacity: 0.4;
+}
+.timeline-clip-handle--left::after { left: 0; }
+.timeline-clip-handle--right::after { right: 0; }
 .timeline-clip-handle--left {
   left: 0;
 }
 .timeline-clip-handle--right {
   right: 0;
 }
-.timeline-clip--selected .timeline-clip-handle {
-  background: var(--color-primary);
-  opacity: 0.4;
+
+/**
+ * 置けない所（#686）。⚠️ **共有の `drop-target--blocked`（theme.css）だけでは赤くならない**。
+ * どちらも1クラス＝同じ強さで、timeline.css の方が後に載るので `--selected` の青が後勝ちする。
+ * 掴んだ帯は**必ず選ばれている**（掴むと選ぶ）ので、赤は一度も出ていなかった
+ * ＝ゴーストの色で知らせる（決定10）が丸ごと効いていない（#742→#686 レビュー・実機で確認）。
+ * class 名しか見ないテストは緑のまま通るので、下に**重なり順を実際に解く**テストを置いた。
+ * 枠の色を上書きするだけでなく**背景でも示す**＝選択の枠と競らない層を1つ増やす。
+ */
+/**
+ * 端が限界で止まっている（ADR-0034 追補 2026-10-05）＝**その端だけ**危険色の太線（FCP・Resolve の「端が赤い」型）。
+ * 帯ぜんぶを赤くしない＝赤い帯は「離しても置けない」（決定10）で、こちらは**離せばそこで確定する**。
+ */
+.timeline-clip.timeline-clip--stopped-start {
+  box-shadow: inset 3px 0 0 var(--color-danger);
 }
+.timeline-clip.timeline-clip--stopped-end {
+  box-shadow: inset -3px 0 0 var(--color-danger);
+}
+/* ⚠️ **端の取っ手そのものも赤くする**（PR #1338 レビュー 🟡）＝掴んだ帯は必ず選ばれているので、選択の外枠（outline）と
+   取っ手の `::after`（主色・半透明）が上に重なり、内側の影だけでは赤が 2px ほどしか見えない。取っ手を塗り替えて最前面で示す。 */
+.timeline-clip--stopped-start .timeline-clip-handle--left::after,
+.timeline-clip--stopped-end .timeline-clip-handle--right::after {
+  background: var(--color-danger);
+  opacity: 1;
+}
+.timeline-clip.drop-target--blocked {
+  outline-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+/* ⚠️ 選んだ枠は**帯の内側**に描く（実機で発覚）。外側（`outline-offset: 1px`）だと枠が上下にはみ出し、
+   列の中で**隣の列へ食い込んで見える**（帯の高さ＝`--timeline-lane-h` から `--timeline-clip-inset` を
+   上下ぶん引いたもの／はみ出す量がその余白を超える）。左は列の名前の欄（`--timeline-label-w` の固定列）
+   へ食い込む。内側なら太さを変えずに収まる。
+   ⚠️ **実数で書かない**（レビュー ℹ️）＝#1104 ② で列の高さを変えた瞬間、この説明だけ古くなる。 */
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);
-  outline-offset: 1px;
+  outline-offset: -2px;
   box-shadow: var(--shadow-sm);
   z-index: 3;
 }
@@ -177,4 +600,266 @@
   padding: var(--gap-lg);
   text-align: center;
   color: var(--color-text-muted);
+}
+
+/* 再生ヘッド（ADR-0023 段階(1)・#329）。全レーンを縦に貫く線＋上端のつまみ。
+   位置は「ラベル幅 ＋ 時刻×表示倍率」＝ラベル幅は --timeline-label-w が単一の参照元（§2-7）。 */
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--color-danger);
+  z-index: 3; /* 帯（1）より前面＝どの列でも見える。列の名前の欄（5）には隠れる＝送ったとき欄を突き抜けない */
+  pointer-events: none; /* 線でクリックを奪わない（シークはルーラーが受ける） */
+}
+/**
+ * 作業範囲の網掛け（UI/UX 監査 2026-10-02 🔴）＝目盛りから列まで**どこからどこまでか**を見せる（Premiere/Resolve の型）。
+ * 範囲を取っても画面に何も出ず、「範囲を削除して詰める」を見ずに押すことになっていた。
+ * 位置は再生位置の線と同じ測り方（列の名前の欄ぶん右から）＝線と網掛けがずれない。
+ * 帯（1）の上・再生位置の線（3）の下＝線が網掛けに隠れない。片方の端だけのときは線だけ（--edge）。
+ */
+.timeline-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border-left: 2px solid var(--color-primary);
+  border-right: 2px solid var(--color-primary);
+  z-index: 2;
+  pointer-events: none;
+}
+.timeline-range--edge {
+  background: none;
+  border-right: none;
+}
+/**
+ * 吸着した先の線（#686 段階4・決定12）。**点線**にするのは再生位置の実線と**役割が違う**から
+ * （あちらは「いまの時刻」・こちらは「そこへ揃えた」）＝同じ見た目にすると2本の意味が混ざる。
+ * 掴んでいる間しか出ないので、頭のつまみ（`::before`）は持たない。
+ */
+.timeline-snapline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--color-accent);
+  z-index: 4; /* 掴んでいる帯（4）と同じ段＝運んでいる帯に隠れない */
+  pointer-events: none;
+}
+
+/**
+ * 目印（#356 ①）＝**時間軸の上に立つ印**。
+ *
+ * ⚠️ **一覧だけにしない**（#1138 レビュー由来 🔴）＝業界の型ではマーカーは**時間軸の上に見える**もので、
+ * 一覧はその補助。印が無いと「このカットの頭に置いた」が**帯との位置関係で確かめられない**。
+ * ⚠️ **再生位置の線と同じ測り方**（列の名前の欄ぶん右から）＝2つがずれない。
+ * ⚠️ **役割が違うので見た目を分ける**＝再生位置は実線（いまの時刻）・吸着は点線（そこへ揃えた）・
+ * 目印は**上端の旗**（そこに覚えがある）。線で覆うと帯が読めなくなるので、旗だけにする。
+ */
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  /* ⚠️ **旗は「印の帯」の中**（#1148）＝目盛りの行の中なので、行の段（6）に乗って前面に出る。
+     行の中では列の名前の欄（5）より下なので、横へ送っても欄を突き抜けない。
+     ⚠️ **外（`.timeline-inner` 直下）へ戻さない**＝そこに置くと、貼り付いた目盛りの行（6）の
+     **下に塗られて見えなくなり**、当たり判定も行が取って「押すとシーク」になる（α 出口監査 🔴3）。
+     ⚠️ **掴み手（4）より下**＝置いた直後に「いまの時刻」が印に隠れない（#1159 レビュー由来）。 */
+  z-index: 3;
+  pointer-events: auto;
+}
+.timeline-marker > button {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 2px 2px 6px 6px;
+  background: var(--color-accent);
+  cursor: pointer;
+}
+.timeline-marker > button:hover {
+  outline: 2px solid var(--color-text);
+}
+/** 選んでいる目印は太らせる（どれを直しているかが分かる）。 */
+.timeline-marker--current > button {
+  outline: 2px solid var(--color-text);
+}
+
+/**
+ * **印の帯**（#1148／#1159）＝目盛りの行の中・`role="slider"` の外に敷く。
+ *
+ * ⚠️ **敷いても目盛りは使えたまま**＝`pointer-events: none` なので、上からシークもスクラブも通る。
+ * 押せるのは中身（旗）だけ＝そちらで `auto` に戻す。
+ * ⚠️ **行の高さに揃える**＝目盛りより高いと、下の帯の上へはみ出して当たり判定を奪う。
+ */
+.timeline-ruler-overlay {
+  position: absolute;
+  top: 0;
+  left: var(--timeline-label-w);
+  right: 0;
+  height: var(--timeline-ruler-h);
+  pointer-events: none;
+}
+
+/**
+ * **再生ヘッドの掴み手**（#1159 レビュー由来 🔴）＝目盛りの中に描く三角。
+ *
+ * ⚠️ **もとは線（`.timeline-playhead`）の `::before`** だった＝#1104 で目盛り行を貼り付けてから、
+ * **行の下に塗られて画面から消えていた**（掴める合図が無いのに `cursor: ew-resize` だけ出ている）。
+ * ⚠️ **線は外のまま**＝全レーンを縦に貫くのが役目。**上端の三角だけ**をここへ出す。
+ * ⚠️ **旗（3）より上**＝置いた直後に「いまの時刻」が印に隠れない。
+ * ⚠️ **掴むのは目盛り**（この三角は合図）＝`pointer-events: none` で下のシークを塞がない。
+ */
+.timeline-playhead-grip {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  margin-left: -6px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid var(--color-danger);
+  z-index: 4;
+  pointer-events: none;
+}
+
+/*
+ * ルーラーは押した所へ跳べて、**掴んだまま動かせる**（#819-1・ADR-0034 決定1＝業界の型）。
+ * ⚠️ 合図は `pointer`（押せる）ではなく **`ew-resize`（左右に掴める）**＝再生ヘッドに掴み手の三角を
+ * 描いておきながら「押すだけ」の合図を出すと、掴めるのかどうかが画面から分からない。
+ */
+.timeline-ruler--seekable {
+  cursor: ew-resize;
+}
+
+/* 運んでいるものが**どこに・何秒ぶん**入るか（#684 レビュー）。実寸で出す＝落とす前に結果が分かる。 */
+.timeline-drop-preview {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 2px dashed var(--color-accent);
+  border-radius: 4px;
+  background: rgb(74 163 223 / 18%);
+  pointer-events: none;
+}
+
+.timeline-drop-preview--blocked {
+  border-color: var(--color-danger);
+  background: rgb(214 104 95 / 18%);
+}
+
+/*
+ * **押す前**の置き先（#1032）。運んでいるとき（上）より**薄く**する＝
+ * 「いま決まっている置き先」と「手を伸ばしているだけ」を見分けられるようにする。
+ */
+.timeline-drop-preview--hint {
+  border-style: dotted;
+  border-color: var(--color-primary);
+  background: rgb(74 163 223 / 9%);
+}
+
+/*
+ * **中へ入った所**（#818・ドリルイン）。場面編集のドリルインと**同じ色・同じ太さ**（`FreeLayoutOverlay`）
+ * ＝2つの画面で「いまここに入っている」の見え方を割らない（ADR-0026②）。
+ * ⚠️ **押せる相手ではない**（印だけ）＝下の操作の層を覆わない。
+ */
+.timeline-drilled-part {
+  position: absolute;
+  border: 2px solid var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.08);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* ── 動きの道筋と点（ADR-0054 段階2）＝編集用の描き足し（書き出しには出ない）────────────
+   ⚠️ **点だけが指を受ける**＝線と余白は下の部品へ素通し（本体を掴む操作を塞がない）。
+   ⚠️ **取っ手より手前**＝点が部品の中心や角に重なっても、点は掴める（取っ手の z は 40 まで）。 */
+.motion-path {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 45;
+}
+.motion-path svg {
+  display: block;
+}
+.motion-path-line {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.motion-path-key {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  background: var(--color-surface);
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+}
+.motion-path-key--current {
+  background: var(--color-primary);
+}
+.motion-path-key--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ── 帯に敷く絵（#332）＝音の波形／動画のコマ列 ─────────────────────────
+   ⚠️ **文字より下に敷く**＝名前が読めなくならない。`pointer-events: none` で
+   掴む・端をつまむ操作を邪魔しない（帯そのものが受け取る）。
+   ⚠️ **帯からはみ出さない**＝`.timeline-clip` が `overflow: hidden` なので任せる。 */
+.timeline-clip-strip,
+.timeline-clip-wave {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* コマ列は**1枚のPNGを帯の幅いっぱいに伸ばす**（コマごとに読み込まない＝#332 の実測）。 */
+.timeline-clip-strip {
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* 波形は 0..1 の座標系で描き、帯の幅が変わっても**描き直さずに伸びる**。 */
+.timeline-clip-wave > polyline {
+  fill: currentColor;
+  stroke: none;
+  opacity: 0.7;
+}
+
+/* 列の名前をその場で書き換える欄（利用者要望 2026-09-28）。
+   ⚠️ **行の高さを変えない**＝この行の高さは帯（`--timeline-lane-h`）が決めている。
+   共通の `.input` を使うと上下の余白で行が伸びるので、ここだけ持つ（`.timeline-row-menu` と同じ理由）。 */
+.timeline-row-name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒.コマが入る幅・数字の幅をそろえて桁が揺れない。 */
+.clock-field {
+  width: 7.5ch;
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }

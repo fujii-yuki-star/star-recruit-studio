@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { userFacingMessage } from "../userFacingError";
 import type { ScreenId } from "../data/mockData";
+import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
+import type { RestorePoint } from "../../domain/project/restorePoints";
+import { loadRestorePoints } from "../store/restorePointKeeper";
 import { useStartNewProject } from "../hooks/useStartNewProject";
-import { hasUnsavedChanges } from "../hooks/newProjectGuard";
+import { hasUnsavedChanges } from "../newProjectGuard";
+import { assetDisplayUrl } from "../../infrastructure/assetFs";
+import { PROJECT_THUMBNAIL_PATH } from "../../domain/project/thumbnail";
 import { ExportLockBanner } from "../components/ExportLockBanner";
+import { NoticeZone } from "../components/NoticeZone";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
-import {
+import { isTimelineProjectDoc } from "../../domain/projectFormat";
+import { useTimelineStore } from "../store/timelineStore";
+import { ProjectLoadError } from "../../domain/project/persistence";
+import { useNavigationGuard } from "../hooks/navigationGuard";
+import { CopyIcon,
   PlusIcon,
   LayoutIcon,
   SettingsIcon,
@@ -16,7 +30,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   TrashIcon,
-  PencilIcon,
+  HistoryIcon, PencilIcon,
 } from "../components/icons";
 
 interface HomeProps {
@@ -29,7 +43,9 @@ function formatDate(iso: string): string {
 
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
+  const restoreToRestorePoint = useProjectStore((s) => s.restoreToRestorePoint);
   const loadProject = useProjectStore((s) => s.loadProject);
+  const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
@@ -51,18 +67,94 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     };
   }, []);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
-  const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
-    useStartNewProject(onNavigate);
+  const {
+    confirming: confirmNew, start: startNew, startBlank, startTimeline,
+    creating: creatingTimeline, createFailed: timelineCreateFailed,
+    confirm: confirmStartNew, cancel: cancelNew,
+  } = useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
-  const [openError, setOpenError] = useState(false);
+  // タイムライン形式の新規作成で向きを選んでいる最中か（#664）。
+  const [choosingTimeline, setChoosingTimeline] = useState(false);
+  // ⚠️ **文言をそのまま持つ**（#793 レビュー）＝以前は真偽値で、`catch {}` が理由を捨てて
+  // **常に固定文**を出していた。そのため `parseProjectDoc` が返す「アプリを更新してから開き直して
+  // ください」も、**「素材が見つかりません」等も**利用者に届かず、代わりに出る固定文は
+  // 「一覧から**別のプロジェクトを選んでください**」＝**§2-5 が禁じる「実行しても直らない行動」**
+  // だった。タイムライン形式（`timelineStore`）は既に理由を運んでいる＝**非対称も解消する**。
+  const [openError, setOpenError] = useState<string | null>(null);
+  /**
+   * 開けなかった動画を「前に保存できていたところ」から戻せるとき（#263）。
+   *
+   * ⚠️ **壊れているときだけ**＝新しい版・別の形式は壊れていないので、戻しても直らず
+   * **古い内容へ黙って巻き戻す**ことになる（§2-5）。
+   * ⚠️ **控えがあるときだけ**＝押せるのに何も起きない導線を作らない。
+   */
+  const [recoverable, setRecoverable] = useState<{ projectId: string; savedAt: Date } | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  /** 「前の状態に戻す」を開いている動画と、その時点の一覧（#263 段階2）。 */
+  const [restoreFor, setRestoreFor] = useState<{ projectId: string; points: RestorePoint[] } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  /** 戻したことで作り直しが要る読み上げの数（0＝知らせるものが無い）。 */
+  const [voicesCleared, setVoicesCleared] = useState<{ projectId: string; count: number } | null>(null);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   // プロジェクトを開いている最中の id（#392）。連打・別プロジェクト並走で loadProject が後勝ちするのを防ぐ。
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
-  // 別プロジェクトを開く前の破棄確認（#547 P1-2）。未保存があるとき「開く先」をここに保持し、確認後に実行する。
-  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  // 別プロジェクトへ移る前の破棄確認（#547 P1-2）。未保存があるとき、確認後に実行する操作をここに保持する。
+  //
+  // ⚠️ **「開く」と「複製して開く」を1つの id で持たない**（PR #889 レビュー 🔴）＝以前は複製でも
+  // `pendingOpenId` を使い回しており、確認の「開く」を押すと **複製されずに元の動画が開いて**いた
+  //（押したボタンと違うことが起きる・§2-5）。何をするかまで持たせて、実行と文言を分ける。
+  const [pendingAction, setPendingAction] = useState<{ kind: "open" | "duplicate" | "restore"; projectId: string; pointName?: string } | null>(null);
+  // 一覧の小さな絵（#397）。⚠️ **無ければ出さないだけ**＝古い動画でも一覧は普通に出る（後方互換）。
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  // 複製（#395）：作っている最中の id（連打で二重に作らない）。
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const duplicateProject = useProjectStore((s) => s.duplicateProject);
+  const clearImportError = useProjectStore((s) => s.clearImportError);
+
+  /**
+   * 複製する（#395）。⚠️ **複製したら開く**ので、**開くのと同じ破棄ガード**を先に通す
+   *（未保存の変更があるまま別の動画へ移らない・#547 P1-2）。
+   */
+  async function onDuplicate(projectId: string): Promise<void> {
+    if (duplicatingId !== null || isExporting) return;
+    // ⚠️ **押す前に断っているが、ここでも見る**（入口が増えても失敗する複製を始めない）。
+    if (isTimelineProjectDoc({ format: projects.find((x) => x.projectId === projectId)?.format })) return;
+    if (openingId || awaitingAnswer) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
+    // ⚠️ **未保存があるなら確認を挟む**（複製したら開くので、いま編集しているものが閉じる＝
+    // 同じ結果になる操作は同じ聞き方・ADR-0026②）。⚠️ ただし**行き先は「複製」のまま持つ**
+    //（"開く" に寄せると押したボタンと違うことが起きる＝PR #889 レビュー 🔴）。
+    if (hasWork) {
+      setPendingAction({ kind: "duplicate", projectId });
+      return;
+    }
+    await doDuplicate(projectId);
+  }
+
+  /** 実際に複製する（確認を通ったあと・未保存が無いときの直行、どちらもここへ来る）。 */
+  async function doDuplicate(projectId: string): Promise<void> {
+    if (isExporting || openingId || duplicatingId !== null) return; // 確認中に状況が変わった場合の多重防御
+    setDuplicatingId(projectId);
+    setOpenError(null);
+    try {
+      const id = await duplicateProject(projectId);
+      // 成功したら開いた状態になっている（store が `loadProject` する）＝たたき台へ移る。
+      if (id) onNavigate("draft");
+      else {
+        // ⚠️ **保った理由を、押した場所に出す**（差分再監査 🟡・§2-5）＝store は
+        // `ProjectLoadError`（新しい版・壊れている＝**何度押しても直らない**）の文をそのまま
+        // `importError` へ入れるが、**この画面はそれを描かない**ので固定文だけが出ていた。
+        // 同じ行の「開く」は正しい理由を出す＝**入口で案内が割れる**（ADR-0026②）。
+        // ⚠️ **出したら消す**＝残すと、次に入った画面で**別の（正常な）動画についての警告**に見える。
+        setOpenError(useProjectStore.getState().importError ?? DUPLICATE_FAILED_MESSAGE);
+        clearImportError();
+      }
+    } finally {
+      setDuplicatingId(null);
+    }
+  }
 
   async function removeProject(projectId: string) {
     if (deleteBusy || isExporting) return; // 書き出し中は削除しない（no-op 後に一覧だけ消える不整合を防ぐ・#379）
@@ -136,11 +228,20 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   useEffect(() => {
     let alive = true;
     listProjects()
-      .then((list) => {
-        if (alive) {
-          setProjects(list);
-          setListError(false);
-        }
+      .then(async (list) => {
+        if (!alive) return;
+        setProjects(list);
+        setListError(false);
+        // 一覧の小さな絵（#397）。⚠️ **無い動画は飛ばすだけ**＝古い動画でも一覧は普通に出る。
+        // ⚠️ **一覧の表示は待たせない**（絵は後から入る）＝取得に失敗しても一覧は出たまま。
+        const found: Record<string, string> = {};
+        await Promise.all(
+          list.map(async (p) => {
+            const url = await assetDisplayUrl(p.projectId, PROJECT_THUMBNAIL_PATH).catch(() => null);
+            if (url) found[p.projectId] = url;
+          }),
+        );
+        if (alive) setThumbs(found);
       })
       .catch(() => {
         // 取得失敗は「保存物なし」と混同させず、原因＋次の行動（再試行）を出す（§2-5・ADR-0026④）。
@@ -156,20 +257,140 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   function requestOpenProject(projectId: string) {
     if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
     if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
-    if (pendingOpenId) return; // 既に別の「開く」確認中は上書きしない（確認中は他カードも無効化＝多重防御・レビュー対応）
-    if (hasWork) { setPendingOpenId(projectId); return; } // 未保存＝確認してから開く
+    // ⚠️ **複製中も開かない**（α-6 出口監査 🟡32）＝素材と声のコピーが走っている最中に別の動画を
+    // 開けると**後勝ち**になり、複製の着地が別の文書へ落ちる。カード側も押せなくしてある（対称）。
+    if (duplicatingId !== null) return;
+    if (awaitingAnswer) return; // 既に別の確認・知らせに答えていない（確認中は他カードも無効）（確認中は他カードも無効化＝多重防御・レビュー対応）
+    // タイムライン形式は**別の文書**を別の画面で開くだけ＝場面形式の編集内容は閉じないので確認は出さない
+    // （「保存していない素材や場面は失われます」は事実と違う・§2-5）。
+    const isTimeline = isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format });
+    if (hasWork && !isTimeline) { setPendingAction({ kind: "open", projectId }); return; } // 未保存＝確認してから開く
     void doOpenProject(projectId);
   }
   async function doOpenProject(projectId: string) {
-    if (isExporting || openingId) return; // 確認中に書き出し開始/並走した場合の多重防御（requestOpenProject と同条件）
-    setOpenError(false);
+    if (isExporting || openingId || duplicatingId !== null) return; // 確認中に状況が変わった場合の多重防御（requestOpenProject と同条件）
+    setOpenError(null);
+    // ⚠️ **前の動画の「戻す」を残さない**（#964 レビュー 🟡2）＝残すと、画面に出ている理由は
+    // いま開こうとした動画のものなのに、押すと**前の動画が戻って開く**（指しているものがずれる）。
+    setRecoverable(null);
     setOpeningId(projectId);
     try {
+      // 形式で開く先を分ける（ADR-0032・11 §1）＝開いてから「形式が違う」と断らない。
+      // タイムライン形式は別の文書なので別の store・別の画面（読み込めなかった理由は画面側が出す）。
+      if (isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format })) {
+        await openTimelineProject(projectId);
+        // ⚠️ **開けなかったときは、控えの導線まで面倒を見る**（#977）＝
+        // タイムライン形式は失敗を store の状態に飲むので、そのまま遷移すると
+        // **控えがあることを誰も言わない**（`save_project` の控えは両形式に効くのに）。
+        // 場面形式の catch と同じ扱いにそろえる。
+        const failed = useTimelineStore.getState();
+        if (failed.loadError && failed.loadFailure === "broken") {
+          setOpenError(failed.loadError);
+          setOpeningId(null);
+          const savedAt = await projectBackupTime(projectId).catch(() => null);
+          if (savedAt) setRecoverable({ projectId, savedAt });
+          return;
+        }
+        onNavigate("timeline-project");
+        return;
+      }
       await loadProject(projectId);
       onNavigate("draft"); // 成功で draft へ遷移＝HomeScreen アンマウント（openingId は解除不要）。
-    } catch {
-      setOpenError(true);
+    } catch (e) {
+      // 読み込み側が出した**理由**をそのまま見せる（次の行動がそこに書いてある）。
+      // それ以外（想定外）は従来の固定文へ倒す＝黙って何も出さない、を作らない。
+      setOpenError(e instanceof ProjectLoadError ? e.message : PROJECT_OPEN_FAILED_MESSAGE);
       setOpeningId(null); // 失敗時のみ解除して再度開けるように。
+      // 中身が壊れているときだけ、控えから戻す導線を出す（控えがあれば）。
+      if (e instanceof ProjectLoadError && e.failure === "broken") {
+        const savedAt = await projectBackupTime(projectId).catch(() => null);
+        if (savedAt) setRecoverable({ projectId, savedAt });
+      }
+    }
+  }
+
+  /**
+   * **答えを待っている**（別の操作を通さない）。
+   *
+   * ⚠️ **確認だけでなく、戻したあとの知らせも含める**（α-7 出口監査 🟡）＝
+   * 知らせを出したまま「新しい動画を作る」などを押せると、**この画面が消えて**
+   * 「作り直しが要る読み上げが N 件あります」を**一度も見ないまま**次へ進める。
+   * 既にある確認（`pendingAction`）と同じ扱いにする＝守り方を2通りに増やさない。
+   */
+  const awaitingAnswer = pendingAction !== null || voicesCleared !== null;
+  // ⚠️ **戻している間も、他の動画を触らせない**（α-7 再監査 🟡）＝戻す操作は走っている保存の
+  // 着地を待つので**数秒かかりうる**。その間に別の動画を押せると、開いた直後に
+  // `doRestorePoint` の続きが戻した動画を開き直し、**開いたばかりの動画が黙ってすり替わる**。
+  const listBusy = openingId !== null || duplicatingId !== null || restoring;
+
+  /**
+   * **サイドバーからも抜けさせない**（#971 レビュー 🟡）。
+   *
+   * ⚠️ **ボタンを押せなくするだけでは足りない**＝サイドバーは画面の外にあり、
+   * この画面のボタンとは関係なく押せる（#719 で同じ形を直した記録がある）。
+   * 答えを待っている間は、既にある関門（`useNavigationGuard`）で止める。
+   * ⚠️ **止めるだけにする**＝ここで確認を出し直すと、同じことを2か所で聞くことになる。
+   * 画面には既に知らせが出ているので、それに答えれば通れる。
+   */
+  useNavigationGuard(awaitingAnswer ? () => false : null);
+
+  /** 「前の状態に戻す」を開く（#263 段階2）。 */
+  async function openRestorePanel(projectId: string) {
+    setOpenError(null);
+    try {
+      setRestoreFor({ projectId, points: await loadRestorePoints(projectId) });
+    } catch {
+      // ⚠️ **一覧が取れないことを黙らせない**＝押したのに何も起きないように見せない（§2-5）。
+      setOpenError(RESTORE_POINTS_UNREADABLE);
+    }
+  }
+
+  /**
+   * 選んだ時点へ戻して、そのまま開き直す（#263 段階2）。
+   *
+   * ⚠️ **開いていた動画は `restoreToRestorePoint` が手放す**（α-7 再監査 🔴）＝
+   * 画面が持っている内容は戻す前のものなので、持ったままだと次の保存で
+   * **戻したはずのファイルを上書きする**（戻した意味が消える）。手放しは store 側でやる＝
+   * **どのボタンを押したかに依存させない**（「あとで開く」で編集へ帰る道ができたため）。
+   */
+  async function doRestorePoint(projectId: string, name: string) {
+    if (restoring || !name) return;
+    setRestoring(true);
+    setOpenError(null);
+    try {
+      const cleared = await restoreToRestorePoint(projectId, name);
+      setRestoreFor(null);
+      // ⚠️ **開き直す前に知らせる**（α-7 出口監査 🔴）＝開き直すと**この画面が消える**ので、
+      // 後に置いた知らせは**一度も描かれない**（読み上げが黙って「作成前」に戻る）。
+      // しかも開き直しに失敗した経路では、`doOpenProject` が入れた**理由を上書き**して
+      // 「戻しました」と出る＝**失敗が成功に見える**。
+      // ⚠️ **答えてもらってから開く**＝押すまで待つので、見落とされない。
+      if (cleared > 0) { setVoicesCleared({ projectId, count: cleared }); return; }
+      await doOpenProject(projectId);
+    } catch (e) {
+      setOpenError(userFacingMessage(e, "restore") ?? RESTORE_FAILED_MESSAGE);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  /** 控えへ戻してから、そのまま開き直す（#263）。 */
+  async function doRecover(projectId: string) {
+    if (recovering) return;
+    setRecovering(true);
+    setOpenError(null);
+    try {
+      await restoreProjectBackup(projectId);
+      setRecoverable(null);
+      await doOpenProject(projectId);
+    } catch (e) {
+      // ⚠️ **戻せなかったことを黙らせない**＝押したのに何も起きないように見せない（§2-5）。
+      // ⚠️ **理由を潰さない**＝断った側が「次の行動」を持っているので、それをそのまま見せる
+      //（例：開けなかったほうを取っておけなかった＝別のアプリで開いていないか確かめる）。
+      //  理由が取れないときだけ、こちらの決まり文句へ倒す。
+      setOpenError(userFacingMessage(e, "recover") ?? RESTORE_FAILED_MESSAGE);
+    } finally {
+      setRecovering(false);
     }
   }
 
@@ -177,67 +398,165 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
-          {openError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>プロジェクトを開けませんでした。一覧から別のプロジェクトを選んでください。</span>
-            </div>
-          )}
-
-          {deleteError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>プロジェクトを削除できませんでした。もう一度お試しください。</span>
-            </div>
-          )}
-
-          {renameError && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>名前を変更できませんでした。もう一度お試しください。</span>
-            </div>
-          )}
-
-          {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。ここは進捗も戻る導線も無い独自 notice だった＝
-              二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
-          <ExportLockBanner
-            onNavigate={onNavigate}
-            detail="書き出しが終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません。"
-          />
-
-          {confirmNew && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>
-                今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
-              </span>
-              {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
-              <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
-                  やめる
-                </button>
-                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
-                  新しく作る
-                </button>
+          <NoticeZone>
+            {openError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{openError}</span>
               </div>
-            </div>
-          )}
+            )}
 
-          {pendingOpenId && (
-            <div className="notice notice-warn mb" role="alert">
-              <span>
-                今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
-              </span>
-              {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
-              <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon" onClick={() => setPendingOpenId(null)}>
-                  やめる
-                </button>
-                <button
-                  className="btn btn-primary btn-icon"
-                  onClick={() => { const id = pendingOpenId; setPendingOpenId(null); void doOpenProject(id); }}
-                >
-                  開く
-                </button>
+            {/* ⚠️ **開く前に、声のことを知らせる**（α-7 出口監査 🔴）＝開くとこの画面が消えるので、
+                後から出しても描かれない。押してもらってから開く。 */}
+            {voicesCleared && (
+              <div className="notice notice-warn mb" role="alert">
+                {/* ⚠️ **形式で作り直す場所が違う**（#991）＝タイムライン形式に「場面」は無く、
+                    作り直すのは「読み上げ」の欄。名指しするものは**その画面に実在すること**（#723・決定5）。 */}
+                <span>
+                  {voicesClearedMessage(
+                    voicesCleared.count,
+                    isTimelineProjectDoc({ format: projects.find((p) => p.projectId === voicesCleared.projectId)?.format })
+                      ? "timeline"
+                      : "scene",
+                  )}
+                </span>
+                {/* ⚠️ **閉じる手段を用意する**（自分で挙げた懸念）＝答えるまで他を塞ぐので、
+                    「開く」しか無いと**開きたくない人が行き止まり**になる。見たことは押した時点で足りる。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost" onClick={() => setVoicesCleared(null)}>
+                    あとで開く
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => { const id = voicesCleared.projectId; setVoicesCleared(null); void doOpenProject(id); }}
+                  >
+                    動画を開く
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+
+            {/* 前の状態に戻す（#263 段階2）。⚠️ **時点を見せてから選んでもらう**＝
+                どこまで戻るか分からないまま押させない（§2-5）。 */}
+            {restoreFor && (
+              <div className="notice notice-warn mb" role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div className="row-between">
+                  <span>
+                    {restoreFor.points.length > 0
+                      ? "戻したい時点を選んでください。戻す前の状態も残るので、やっぱり戻したいときは戻せます。"
+                      : RESTORE_POINTS_EMPTY}
+                  </span>
+                  <button className="btn btn-ghost" onClick={() => setRestoreFor(null)} disabled={restoring}>
+                    やめる
+                  </button>
+                </div>
+                {restoreFor.points.length > 0 && (
+                  <ul style={{ margin: "var(--gap-sm) 0 0", padding: 0, listStyle: "none" }}>
+                    {restoreFor.points.map((pt) => (
+                      <li key={pt.name} className="row-between" style={{ marginBottom: 4 }}>
+                        <span className="text-sm">{backupSavedAtLabel(new Date(pt.savedAt))}</span>
+                        <button
+                          className="btn btn-secondary text-sm"
+                          disabled={restoring}
+                          onClick={() => {
+                            // ⚠️ **未保存があるときは先に確認する**＝戻すと、いま画面にある編集は失われる。
+                            if (hasWork) { setPendingAction({ kind: "restore", projectId: restoreFor.projectId, pointName: pt.name }); setRestoreFor(null); return; }
+                            void doRestorePoint(restoreFor.projectId, pt.name);
+                          }}
+                        >
+                          {restoring ? "戻しています…" : "ここへ戻す"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* ⚠️ **黙って戻さない**（§2-5）＝どこまで戻るかを見せてから、押してもらう。 */}
+            {recoverable && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{restoreOfferMessage(backupSavedAtLabel(recoverable.savedAt))}</span>
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost" onClick={() => setRecoverable(null)} disabled={recovering}>
+                    そのままにする
+                  </button>
+                  <button className="btn btn-primary" onClick={() => void doRecover(recoverable.projectId)} disabled={recovering}>
+                    {recovering ? "戻しています…" : "前に保存できていたところから開く"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {deleteError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>{PROJECT_DELETE_FAILED_MESSAGE}</span>
+              </div>
+            )}
+
+            {renameError && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>名前を変更できませんでした。もう一度お試しください。</span>
+              </div>
+            )}
+
+            {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。ここは進捗も戻る導線も無い独自 notice だった＝
+                二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
+            <ExportLockBanner
+              onNavigate={onNavigate}
+              detail="書き出しが終わるまで、新しい動画づくり・動画の切り替え・削除はできません。"
+            />
+
+            {confirmNew && (
+              <div className="notice notice-warn mb" role="alert">
+                <span>
+                  今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。
+                </span>
+                {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
+                    やめる
+                  </button>
+                  <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
+                    新しく作る
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingAction && (
+              <div className="notice notice-warn mb" role="alert">
+                {/* ⚠️ **押したボタンのことを聞く**（PR #889 レビュー 🔴）＝複製なのに「開きますか？」と
+                    聞いていると、利用者は違うことが起きても気づけない。 */}
+                <span>
+                  {pendingAction.kind === "restore"
+                    ? "今の編集内容を閉じて、選んだ時点に戻しますか？保存していない素材や場面は失われます。"
+                    : pendingAction.kind === "duplicate"
+                    ? "今の編集内容を閉じて、選んだ動画を複製して開きますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。"
+                    : "今の編集内容を閉じて別の動画を開きますか？保存していない素材や場面は失われます（保存した動画は下の一覧からいつでも開けます）。"}
+                </span>
+                {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
+                <div className="row gap-sm">
+                  <button className="btn btn-ghost btn-icon" onClick={() => setPendingAction(null)}>
+                    やめる
+                  </button>
+                  <button
+                    className="btn btn-primary btn-icon"
+                    onClick={() => {
+                      const a = pendingAction;
+                      setPendingAction(null);
+                      void (a.kind === "restore"
+                        ? doRestorePoint(a.projectId, a.pointName ?? "")
+                        : a.kind === "duplicate"
+                          ? doDuplicate(a.projectId)
+                          : doOpenProject(a.projectId));
+                    }}
+                  >
+                    {pendingAction.kind === "restore" ? "戻して開く" : pendingAction.kind === "duplicate" ? "複製して開く" : "開く"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </NoticeZone>
 
           {/* ヒーロー: 新しい動画を作る */}
           <div className="hero">
@@ -247,19 +566,70 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 伝えたいことを、動画でやさしく届けましょう
               </h1>
               <p className="page-desc text-pretty">
-                伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
+                伝えたい内容と写真・動画を入れると、AIが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
               <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
-                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : undefined}>
+                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : undefined}>
                   <PlusIcon size={20} />
                   新しい動画を作る
                 </button>
                 {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
-                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || awaitingAnswer} title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "AIを使わず、自分で場面を組み立てます"}>
                   白紙から作る
                 </button>
+                {/* タイムラインで作る（#635・ADR-0032 決定7/15）＝場面に区切らず、時間の流れの上に自分で
+                    素材を並べる別の作り方。場面形式とは別の動画になる（あとから行き来はしない）。 */}
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={() => setChoosingTimeline((v) => !v)}
+                  disabled={isExporting || awaitingAnswer || creatingTimeline}
+                  title={isExporting ? "書き出しが終わるまでお待ちください" : awaitingAnswer ? "確認に答えてから操作できます" : "場面に区切らず、時間の流れの上に自分で並べます"}
+                >
+                  {creatingTimeline ? "作っています…" : "タイムラインで作る"}
+                </button>
               </div>
+              {/* ⚠️ **選び方の説明を、見える形で置く**（#995 ①）＝これまで「白紙から作る」
+                  「タイムラインで作る」の説明は `title`（ホバー）にしか無く、**タッチ・キーボードでは読めなかった**。
+                  とくに「タイムラインで作る」は**別の形式で片道・AI が関与しない**（ADR-0032）という
+                  重い選択なのに、押すまで分からなかった（向きだけは押した後に聞く）。 */}
+              <dl className="text-sm text-muted mt" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", margin: 0 }}>
+                <dt style={{ fontWeight: 600 }}>新しい動画を作る</dt>
+                <dd style={{ margin: 0 }}>伝えたい内容と素材を入れると、AIがたたき台を作ります。</dd>
+                <dt style={{ fontWeight: 600 }}>白紙から作る</dt>
+                <dd style={{ margin: 0 }}>AIに頼まず、空の状態から自分で場面を組み立てます。</dd>
+                <dt style={{ fontWeight: 600 }}>タイムラインで作る</dt>
+                <dd style={{ margin: 0 }}>
+                  場面に区切らず、時間の流れの上に素材を並べます。
+                  <strong>場面から作る動画とは別のもの</strong>で、AIにたたき台を頼むことはできません。
+                </dd>
+              </dl>
+              {/* 向きは作るときにしか選べない（あとから変える導線が無い）ので、押した瞬間に作らず先に聞く（#664）。 */}
+              {choosingTimeline && !creatingTimeline && (
+                <div className="notice notice-info mt" role="group" aria-label="動画の向きを選ぶ">
+                  <p>どちらの向きで作りますか？（あとから変えられません）</p>
+                  <div className="row gap-sm">
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => { setChoosingTimeline(false); startTimeline(ORIENTATION.landscape); }}
+                    >
+                      横向き（パソコン・テレビ向き）
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => { setChoosingTimeline(false); startTimeline(ORIENTATION.portrait); }}
+                    >
+                      縦向き（スマホ向き）
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setChoosingTimeline(false)}>やめる</button>
+                  </div>
+                </div>
+              )}
+              {timelineCreateFailed && (
+                <p className="text-warn mt">
+                  新しいタイムラインの動画を作れませんでした。少し待ってからもう一度お試しください。
+                </p>
+              )}
             </div>
             <div
               className="thumb thumb-video"
@@ -270,20 +640,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           </div>
 
-          {/* クイック操作 */}
-          <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : undefined}>
-              <div
-                className="action-card-icon"
-                style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
-              >
-                <PlusIcon size={24} />
-              </div>
-              <span className="action-card-title">新しい動画を作る</span>
-              <span className="action-card-desc">
-                5つのステップで、動画のたたき台を作ります。
-              </span>
-            </button>
+          {/* クイック操作。⚠️ **「新しい動画を作る」はここに置かない**（UI/UX 監査 2026-10-02）＝すぐ上の大きなボタンと
+              同じ操作が2つ並んでいた（どちらを押せばよいか迷う）。 */}
+          <div className="card-grid cols-2 mb">
 
             <button className="action-card" onClick={() => onNavigate("looks")}>
               <div
@@ -312,20 +671,20 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </button>
           </div>
 
-          {/* 最近のプロジェクト（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
-          <h2 className="section-title mb">最近のプロジェクト</h2>
+          {/* 最近の動画（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
+          <h2 className="section-title mb">最近の動画</h2>
           <div className="col gap-sm">
             {listError ? (
               // 取得失敗（§2-5）：空（保存物なし）と区別し、原因＋次の行動（再試行）を出す＝無言で「保存物なし」にしない。
               <div className="notice notice-warn" role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
-                <span>保存したプロジェクトの一覧を読み込めませんでした。もう一度お試しください。</span>
+                <span>保存した動画の一覧を読み込めませんでした。もう一度お試しください。</span>
                 <button className="btn btn-secondary mt" onClick={refreshProjects} disabled={listRetrying}>
                   {listRetrying ? "読み込み中…" : "もう一度読み込む"}
                 </button>
               </div>
             ) : projects.length === 0 ? (
               <div className="text-sm text-muted">
-                保存したプロジェクトはまだありません。「新しい動画を作る」から始めましょう。
+                保存した動画はまだありません。「新しい動画を作る」から始めましょう。
               </div>
             ) : (
               projects.map((p) =>
@@ -336,17 +695,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
                       maxLength={PROJECT_NAME_MAX_LENGTH}
-                      placeholder="プロジェクト名"
-                      aria-label="プロジェクト名"
+                      placeholder="動画の名前"
+                      aria-label="動画の名前"
                       autoFocus
-                      onKeyDown={(e) => {
-                        // IME 変換確定の Enter では保存しない（日本語入力中の誤確定を防ぐ）。
-                        if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveRename(p.projectId);
-                        if (e.key === "Escape") {
-                          setRenamingId(null);
-                          setRenameError(false);
-                        }
-                      }}
+                      // ⚠️ **`Escape` 側も変換中は奪わない**（#989）＝`Enter` だけ守っていたので、
+                      // 変換中の `Escape`（＝変換をやめる）で**欄ごと閉じて打ちかけが消える**。
+                      // 規則は `renameFieldKeys` に1つだけ。
+                      onKeyDown={renameFieldKeys({
+                        commit: () => void saveRename(p.projectId),
+                        cancel: () => { setRenamingId(null); setRenameError(false); },
+                      })}
                     />
                     <button
                       className="btn btn-primary btn-icon"
@@ -370,7 +728,11 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   <DeleteConfirm
                     key={p.projectId}
                     busy={deleteBusy}
-                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。`}
+                    // ⚠️ **形式で語彙を割らない**（#991・ADR-0026②）＝同じ一覧に「タイムライン」の行が
+                    // 並ぶのに、削除の確認だけ場面形式の言葉（「場面」）で言っていた。
+                    message={`「${p.projectName || "無題の動画"}」を削除しますか？保存した${
+                      isTimelineProjectDoc({ format: p.format }) ? "部品" : "場面"
+                    }・素材・音声ごと消え、元に戻せません。`}
                     onCancel={() => {
                       setDeletingId(null);
                       setDeleteError(false);
@@ -382,23 +744,41 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => requestOpenProject(p.projectId)}
-                      disabled={isExporting || openingId !== null || pendingOpenId !== null || confirmNew}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || pendingOpenId !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
+                      disabled={isExporting || listBusy || awaitingAnswer || confirmNew}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : restoring ? "前の状態に戻しています…" : openingId !== null ? "動画を開いています…" : duplicatingId !== null ? "コピーしています…" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || listBusy || awaitingAnswer || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
+                      {/* 一覧の小さな絵（#397）＝先頭の場面。⚠️ **無ければこれまでどおりのアイコン**
+                          （後方互換＝古い動画・まだ保存していない動画でも一覧は普通に出る）。 */}
                       <div
                         className="thumb thumb-photo"
-                        style={{ width: 96, flexShrink: 0 }}
+                        style={{ width: 96, flexShrink: 0, overflow: "hidden" }}
                         aria-hidden="true"
                       >
-                        <FolderIcon size={24} />
+                        {thumbs[p.projectId] ? (
+                          <img
+                            src={thumbs[p.projectId]}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          <FolderIcon size={24} />
+                        )}
                       </div>
                       <div className="grow">
                         <div className="row gap-sm">
-                          <strong>{p.projectName || "無題のプロジェクト"}</strong>
+                          <strong>{p.projectName || "無題の動画"}</strong>
+                          {/* どちらの作り方の動画か一目で分かるように（開く先が違うため・ADR-0032）。 */}
+                          {isTimelineProjectDoc({ format: p.format }) && <span className="badge">タイムライン</span>}
                         </div>
                         <div className="text-sm text-muted">
-                          {openingId === p.projectId ? "開いています…" : `更新日 ${formatDate(p.updatedAt)}`}
+                          {/* ⚠️ **複製中も進み具合を出す**（α-6 出口監査 ℹ️）＝素材と声のコピーは時間がかかるのに
+                              「開いています…」だけがあり、複製は**押しても何も変わらないように見えた**。 */}
+                          {openingId === p.projectId
+                            ? "開いています…"
+                            : duplicatingId === p.projectId
+                              ? "コピーしています…"
+                              : `更新日 ${formatDate(p.updatedAt)}`}
                         </div>
                       </div>
                       <ChevronRightIcon size={20} className="text-faint" />
@@ -409,22 +789,78 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       // store 側も no-op で守るが、鉛筆を無効化して「押せるのに効かない」を避ける（ADR-0026④）。
                       disabled={isExporting}
                       onClick={() => startRename(p)}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」の名前を変更`}
+                      aria-label={`「${p.projectName || "無題の動画"}」の名前を変更`}
                       title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
+                    </button>
+                    {/* 前の状態に戻す（#263 段階2）。⚠️ **開くのと同じガード**＝
+                        戻したあとその動画を開くので、開けない状況では押せないようにする。 */}
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={isExporting || awaitingAnswer || listBusy}
+                      onClick={() => void openRestorePanel(p.projectId)}
+                      aria-label={`「${p.projectName || "無題の動画"}」を前の状態に戻す`}
+                      title={
+                        isExporting
+                          ? "書き出しが終わるまでお待ちください"
+                          : openingId !== null
+                            ? "動画を開いています…"
+                            : awaitingAnswer
+                              ? "確認に答えてから操作できます"
+                              : "前の状態に戻す"
+                      }
+                    >
+                      <HistoryIcon size={18} />
+                    </button>
+                    {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
+                        ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、
+                        **開くのと同じガード**を掛ける（未保存の破棄確認・書き出し中・確認中）。 */}
+                    {/* ⚠️ **タイムライン形式はまだ複製できない**（PR #889 レビュー 🟡）＝中で
+                        `parseProjectDoc` が必ず断るので**構造的に必ず失敗**する。押せたままだと
+                        「もう一度お試しください」＝**何度押しても直らない行動**を勧めることになる
+                        （§2-5・#793 で直したのと同じ型）。押す前に理由を出して押せなくする。 */}
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={
+                        isExporting || awaitingAnswer || confirmNew || duplicatingId !== null
+                        // ⚠️ **開いている最中も押せなくする**（α-6 出口監査 🟡32）＝`onDuplicate` が
+                        // 黙って return するので、押せると**何も起きない**（§2-5）。
+                        || openingId !== null
+                        || isTimelineProjectDoc({ format: p.format })
+                      }
+                      onClick={() => void onDuplicate(p.projectId)}
+                      aria-label={`「${p.projectName || "無題の動画"}」を複製`}
+                      title={
+                        isExporting
+                          ? "書き出しが終わるまでお待ちください"
+                          : openingId !== null
+                            ? "動画を開いています…"
+                            // ⚠️ **押せない枝の理由を落とさない**（α-6 出口監査 🟡）＝複製中も押せなく
+                            // なるのに理由の分岐が無く、**実行内容の説明が出続けて**いた（同じ行の「開く」は
+                            // 同じ状態で「コピーしています…」と言う＝同じ状態に断り方が2通り）。
+                            : duplicatingId !== null
+                              ? "コピーしています…"
+                              : awaitingAnswer || confirmNew
+                                ? "確認に答えてから操作できます"
+                                : isTimelineProjectDoc({ format: p.format })
+                                  ? "タイムラインで作った動画はまだ複製できません"
+                                  : "複製（素材と声ごとコピーします）"
+                      }
+                    >
+                      <CopyIcon size={18} />
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
                       // 確認バナー表示中は削除も止める（確認中の「開く先」を消せてしまい、「開く」が失敗するのを防ぐ＝
                       // カード/新規作成ボタンと同じ「確認中は他操作を止める」方針に揃える・レビュー対応）。
-                      disabled={isExporting || pendingOpenId !== null || confirmNew}
+                      disabled={isExporting || awaitingAnswer || confirmNew}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
-                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : "削除"}
+                      aria-label={`「${p.projectName || "無題の動画"}」を削除`}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : (awaitingAnswer || confirmNew) ? "確認に答えてから操作できます" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>
@@ -436,10 +872,11 @@ export function HomeScreen({ onNavigate }: HomeProps) {
         </div>
 
         <YukoPanel
+          pose="smile"
           messages={[
             "こんにちは、ゆうこです。今日も動画づくりをお手伝いします。",
             "まずは「新しい動画を作る」から始めてみましょう。伝えたい内容と写真があれば大丈夫です。",
-            "前に作ったプロジェクトは、下の一覧からいつでも開けますよ。",
+            "前に作った動画は、下の一覧からいつでも開けますよ。",
           ]}
         />
       </div>

@@ -52,6 +52,53 @@ describe("saveProject 多重起動ガード（#256 レビュー🔴・進行中�
     expect(st.meta.projectId).not.toBe(""); // 新規でも保存完了で projectId が確定（書き出し前保存の前提）
   });
 
+  it("**保存中に別の動画へ移ったら、その動画へ id を書き込まない**（別の動画を上書きしない・#762）", async () => {
+    // ⚠️ 保存中は「未保存あり」と見なさない＝ホームは**確認なしで別の動画を開ける**。括らないと、
+    // 完了の set が**新しい方の meta へ古い projectId を書き込み**、以後その動画の自動保存が
+    // **古い方の `project.json` を上書き**する（作業がディスクごと消える・取り消し不能）。
+    const p = useProjectStore.getState().saveProject();
+    await flush(); // 書き込みの手前まで進める
+    // 別の動画を開いた（＝文書が入れ替わった）状態にする。
+    useProjectStore.setState({
+      _docEpoch: useProjectStore.getState()._docEpoch + 1,
+      meta: { ...useProjectStore.getState().meta, projectId: "proj_other" },
+      saveStatus: "saved",
+    });
+    h.state.resolve?.();
+    await p;
+    const st = useProjectStore.getState();
+    expect(st.meta.projectId).toBe("proj_other"); // 開いている方の id を書き替えない
+    expect(st.saveStatus).toBe("saved"); // 別の文書の結果を、いまの画面の状態にしない
+  });
+
+  it("保存中に別の動画へ移ったら、失敗もその動画へ出さない（#762）", async () => {
+    // ⚠️ **失敗させるのは移った後**（すぐ reject すると、移る前に catch が走って
+    // 「移ったのに出さない」を見ていない＝空振りになる）。
+    let fail: ((e: Error) => void) | null = null;
+    h.saveProjectDocMock.mockImplementationOnce(() => new Promise<void>((_res, rej) => { fail = rej; }));
+    const p = useProjectStore.getState().saveProject();
+    await flush();
+    useProjectStore.setState({
+      _docEpoch: useProjectStore.getState()._docEpoch + 1,
+      meta: { ...useProjectStore.getState().meta, projectId: "proj_other" },
+      saveStatus: "saved",
+    });
+    (fail as unknown as (e: Error) => void)(new Error("disk"));
+    await p;
+    expect(useProjectStore.getState().saveStatus).toBe("saved"); // 「保存できませんでした」を誤って帰属させない
+  });
+
+  it("**新規どうしでも取り違えない**（id ではなく世代で照合する・#762）", async () => {
+    // ⚠️ 新規の動画は id を持たない（保存で初めて採番する）＝id で照合すると「どちらも空」で
+    // 同じものに見え、**採番した id が別の新規文書へ乗る**。
+    const p = useProjectStore.getState().saveProject();
+    await flush();
+    useProjectStore.getState().newProject(); // もう1つ新規を作った（id はやはり空）
+    h.state.resolve?.();
+    await p;
+    expect(useProjectStore.getState().meta.projectId).toBe(""); // 新しい方へ id を乗せない
+  });
+
   it("保存完了後の再保存は新しい保存を開始できる（in-flight がクリアされる）", async () => {
     const p1 = useProjectStore.getState().saveProject();
     await flush();

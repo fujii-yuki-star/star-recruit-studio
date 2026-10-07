@@ -3,7 +3,16 @@
    クリーンでフラット、やさしい業務アプリ */
 
 :root {
+  /* 掴んで並べ替えるときの見え方（#771(c)）＝**画面ぜんぶで同じ**。列・場面カード・台本表の行・欄で
+     太さと色がばらばらだと、同じ操作なのに別物に見える（線の置き方だけは器の事情で違ってよい）。 */
+  --drop-line-w: 3px;
+  --drop-line-color: var(--color-primary);
+  --drag-source-opacity: 0.5;
+
   /* カラートークン */
+  /* 素の部品（スクロールバー・`<input>` の内側など）にも見た目を伝える（ADR-0039）。 */
+  color-scheme: light;
+
   --color-bg: #f3f8fb;          /* 全体背景: ごく薄い水色 */
   --color-surface: #ffffff;     /* カード・面 */
   --color-surface-alt: #eef6fb; /* 薄い水色の面 */
@@ -12,26 +21,35 @@
   --color-primary: #1f9ea3;     /* 青緑 (メイン操作) */
   --color-primary-hover: #18888d;
   --color-primary-soft: #e3f4f4;
+  /* 主ボタン・選んだ段など「主操作色で塗った面に文字を載せる」ときの面と文字（UI/UX 監査 2026-10-02）。
+     ⚠️ --color-primary をそのまま塗ると白い文字が 3.2:1 しか取れない＝面だけ一段濃くする（選択枠などの線は --color-primary のまま）。 */
+  --color-primary-strong: #157579;
+  --color-primary-strong-hover: #12686b;
+  --color-on-primary: #ffffff;
   --color-primary-rgb: 31, 158, 163; /* #1f9ea3 のチャンネル値。半透明の選択面を合成する単一の参照元 (#547 P2-12)。
                                         選択ハイライトの塗りはこれで主操作色と同色相にする（選択枠 --color-primary と揃える）。 */
 
   --color-accent: #4aa3df;      /* 水色アクセント */
   --color-accent-soft: #e6f1fb;
+  --color-info: #2a6d9c;        /* お知らせ（.notice-info）の文字 */
 
   --color-yellow: #fbf3cf;      /* 淡い黄色 (ゆうこ/注目) */
   --color-yellow-strong: #f6e7a3;
-  --color-warn: #8a6d1a;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
+  --color-warn: #7a6014;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
 
   --color-text: #20323c;        /* 文字 (濃いめのスレート) */
-  --color-text-muted: #5d7480;  /* 補助文字 */
-  --color-text-faint: #8aa0ab;
+  --color-text-muted: #5a717d;  /* 補助文字＝淡い面（surface-alt）の上でも 4.5:1 以上（#5d7480 は 4.49:1・PR #1327 レビュー） */
+  --color-text-faint: #617885;  /* 案内文に使う＝置かれる背景のどれの上でも 4.0:1 以上（以前の #8aa0ab は 2.6:1・門番 themeContrastGuard） */
 
   --color-border: #dde8ef;
   --color-border-strong: #c5d8e2;
 
   --color-danger: #d6685f;
   --color-danger-soft: #fbeae8;
+  --color-danger-text: #b4473e; /* 小さい危険の文字（--color-danger は白地で 3.5:1） */
   --color-success: #3fa46a;
+  --color-success-text: #2a7449; /* 小さい成功の文字（--color-success は淡い緑の上で 2.8:1） */
+  --color-success-soft: #e6f5ec; /* 淡い緑の面。タイムラインの帯（図形）の色（#701） */
 
   /* 形状 */
   --radius-sm: 8px;
@@ -42,6 +60,13 @@
   --shadow-sm: 0 1px 2px rgba(32, 80, 100, 0.06);
   --shadow: 0 4px 14px rgba(32, 80, 100, 0.08);
   --shadow-lg: 0 10px 30px rgba(32, 80, 100, 0.12);
+  /* 素材のサムネイル（写真・動画・音） */
+  --thumb-photo-bg: linear-gradient(135deg, #e6f1fb, #d5e8f5);
+  --thumb-photo-fg: #2f6a93;
+  --thumb-video-bg: linear-gradient(135deg, #e3f4f4, #cfeae9);
+  --thumb-video-fg: #1d6e72;
+  --thumb-audio-bg: linear-gradient(135deg, #fbf3cf, #f4e7a8);
+  --thumb-audio-fg: #6e5612;
 
   /* 余白の単位 */
   --gap-xs: 6px;
@@ -57,6 +82,68 @@
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== 暗い見た目（ADR-0039・#1108） =====
+   ⚠️ **暗くするのはアプリの外枠だけ**＝`layoutScene`/`layoutToSvg` が描く**動画の絵は変えない**
+   （ADR-0001）。ここで上書きするのは器・帯・文字・枠の色だけで、キャンバスの中身には届かない。
+
+   ⚠️ **暗い版はここ1か所**＝`@media (prefers-color-scheme: dark)` にも同じ値を書くと
+   **暗い版のトークンを二重に持つ**ことになり、片方だけ直す事故が必ず起きる。
+   「OS に合わせる」は JS が解いて `data-theme` に落とす（`useAppearance.ts`）。
+
+   ⚠️ **純黒（#000）と純白（#fff）を本文に使わない**＝動機が「目がつらい」なので、
+   最大コントラストは目的に反する。面は暗いグレー、文字は少し落とした白にする。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #161b1e;          /* 全体背景: 暗いスレート（黒ではない） */
+  --color-surface: #1e2529;     /* カード・面 */
+  --color-surface-alt: #252d32; /* 一段持ち上げた面 */
+  --color-sidebar: #1a2125;
+
+  /* 主操作色は**暗い面で沈まない**よう明るめへ寄せる（色相は同じ青緑のまま）。 */
+  --color-primary: #3fbcc0;
+  --color-primary-hover: #56cdd1;
+  --color-primary-soft: #1d3335;
+  --color-primary-strong: #3fbcc0;
+  --color-primary-strong-hover: #56cdd1;
+  --color-on-primary: #0f1a1c;  /* 明るい青緑の面には暗い文字（白は 2.3:1） */
+  --color-primary-rgb: 63, 188, 192; /* 上の #3fbcc0 のチャンネル値（半透明の選択面を合成する参照元） */
+
+  --color-accent: #6fb8ea;
+  --color-accent-soft: #1c2a35;
+  --color-info: #8cc6ef;
+
+  /* 注意の帯は「淡い黄色の面＋濃い文字」を**反転**する＝暗い面に淡い文字は読めない。 */
+  --color-yellow: #3a3423;
+  --color-yellow-strong: #4d4429;
+  --color-warn: #e8c86a;
+
+  --color-text: #dbe4e8;        /* 純白にしない */
+  --color-text-muted: #9db0b9;
+  --color-text-faint: #8597a1;
+
+  --color-border: #2c353a;
+  --color-border-strong: #3d4a51;
+
+  --color-danger: #e8837a;
+  --color-danger-soft: #35211f;
+  --color-danger-text: #e8837a;
+  --color-success: #5fbe86;
+  --color-success-text: #5fbe86;
+  --color-success-soft: #1c2e24;
+
+  /* 影は暗い面では**濃くしないと見えない**（明るい版の薄い青みでは消える）。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
+  --thumb-photo-bg: linear-gradient(135deg, #1f2d38, #22343f);
+  --thumb-photo-fg: #8cc6ef;
+  --thumb-video-bg: linear-gradient(135deg, #1d3335, #20393a);
+  --thumb-video-fg: #7fd3d6;
+  --thumb-audio-bg: linear-gradient(135deg, #3a3423, #4d4429);
+  --thumb-audio-fg: #e8c86a;
 }
 
 * {
@@ -77,6 +164,11 @@ button {
 }
 
 /* ===== レイアウト ===== */
+/* 見出しを薄くする（#1104・実機の指摘「上の…幅取りすぎじゃない？」）＝
+   スクロールしない画面では、見出しの厚みがそのまま編集の場所を削る。 */
+.main-scroll--fixed .page-head { margin-bottom: var(--gap-sm); }
+.main-scroll--fixed .page-title { font-size: 20px; line-height: 1.3; margin-bottom: 0; }
+
 .app {
   display: flex;
   height: 100vh;
@@ -95,6 +187,19 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: var(--gap-xl);
+}
+
+/* **ページをスクロールさせない画面**（#1104・タイムライン編集）。
+   ⚠️ **編集の場所はスクロールの外に置く**（利用者指摘 2026-09-10「タイムライン編集画面に
+   スクロールをする必要が出てきてしまっています。これは絶対避けたいです」）＝
+   器を `76vh` で決め打つと上の見出しと足して画面をはみ出し、逆に画面の残りいっぱいにすると
+   下の知らせのぶんはみ出す。**器そのものをスクロールの外に出して flex で分ける**のが唯一の解。
+   ⚠️ **余白も詰める**＝`--gap-xl`(36px) は上下で 72px＝列2本ぶん。編集の場所を削るには大きすぎる。 */
+.main-scroll--fixed {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: var(--gap);
 }
 
 .content-with-yuko {
@@ -121,6 +226,45 @@ button {
   padding: var(--gap-lg) var(--gap);
 }
 
+/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
+   ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠した側には下の細い取っ手を必ず出す。
+   フォーカスの輪は共有の規則（`.btn:focus-visible` の並び）に足してあるので、ここでは書かない。 */
+.sidebar-collapse {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+.sidebar-collapse:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* 畳んでいる間に残す細い取っ手。**画面の端にいつも見えている**＝戻る道を探させない。 */
+.sidebar-reveal {
+  width: 20px;
+  flex-shrink: 0;
+  border: none;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-sidebar);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-reveal:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -132,14 +276,23 @@ button {
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   font-size: 18px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* ⚠️ 小さい枠なので、余白を切って顔が大きく出るようにする（#1228）。 */
+.sidebar-brand-img {
+  width: 132%;
+  height: 132%;
+  object-fit: contain;
+  object-position: center 18%;
 }
 
 .sidebar-brand-text {
@@ -239,6 +392,48 @@ button {
   margin-bottom: var(--gap-lg);
 }
 
+/* 共通ツールバー（取り消す・保存の状態・戻る）を載せた見出しの行（#774）。
+   ⚠️ **貼り付けて、スクロールしても消えないようにする**＝この行は `.main-scroll`（スクロールする側）の
+   中にあるので、欄を伸ばして下へスクロールすると**ツールバーごと視界から出る**。それでは
+   「欄の中・画面の下だと見失う」を直した意味がない（**見えていないボタンは無いのと同じ**＝`06 §2` 規約9）。
+   場面編集は `.topbar`（スクロールする側の**外**・`flex-shrink: 0`）なので、この印は要らない
+   ＝3画面とも「スクロールしても消えない」という同じ結果になる（ADR-0026②）。
+   下地を敷くのは、下の内容がツールバーに透けて重ならないようにするため。 */
+.editor-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-bg);
+  padding-bottom: var(--gap-sm);
+}
+
+/* 画面ぜんぶに効く知らせ・確認の置き場（#940・`NoticeZone`）。
+   ⚠️ **貼り付けて、スクロールしても消えないようにする**＝知らせは画面の先頭に出るのに、それを起こす操作は
+   **一覧の下の方**にある（動画を開く/複製する/消す・素材を消す/直す）。`.main-scroll`（スクロールする側）の
+   中に置いたままだと、下まで送って押したとき確認が視野の外に出る＝**見えていない知らせは無いのと同じ**
+   （`06 §2` 規約9）。`.editor-header` と同じ流儀。
+   ⚠️ **入れ物自身は余白を持たない**＝中身が無いときに空の帯を出さないため（高さ 0）。上下の間隔は
+   中の知らせが持つ `mb` に任せる。
+   下地を敷くのは、下の内容が知らせに透けて重ならないようにするため。
+   ⚠️ **`.editor-header` と同居させない**＝どちらも `top: 0`・同じ重なり順なので、同じ画面に両方あると
+   **後に描いた方が先の方を覆う**。同居させるなら、どちらを上にするかを先に決めて `top` をずらすこと
+   （`06 §2` 規約23）。いまは同居する画面が無い。 */
+.notice-zone {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-bg);
+}
+
+/* ⚠️ **下地を知らせの下端より先まで伸ばす**＝この入れ物は padding も枠も持たないので、最後の知らせの
+   `margin-bottom` は**外へ抜ける**（margin collapsing）。そのぶん下地が知らせの下端で切れ、貼り付いた
+   ときに一覧が知らせの縁へ**直に接して**見える（`.editor-header` は同じ理由で `padding-bottom` を持つ）。
+   ⚠️ **中身が無いときは付けない**＝素の `padding` にすると、知らせが1つも無い画面の先頭に
+   **8px の帯が出しっぱなし**になる。React は falsy の子を DOM に作らないので `:empty` が効く。 */
+.notice-zone:not(:empty) {
+  padding-bottom: var(--gap-sm);
+}
+
 .page-title {
   font-size: 24px;
   font-weight: 700;
@@ -314,17 +509,19 @@ button {
 .btn:focus-visible,
 .nav-item:focus-visible,
 .segment button:focus-visible,
-.switch:focus-visible {
+.switch:focus-visible,
+.sidebar-collapse:focus-visible,
+.sidebar-reveal:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
 .btn-primary {
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
 }
 .btn-primary:hover {
-  background: var(--color-primary-hover);
+  background: var(--color-primary-strong-hover);
 }
 
 .btn-secondary {
@@ -347,7 +544,7 @@ button {
 
 .btn-danger {
   background: var(--color-surface);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 .btn-danger:hover {
@@ -358,6 +555,16 @@ button {
   padding: 14px 26px;
   font-size: 16px;
   border-radius: var(--radius);
+}
+
+/* 小さいボタン（ADR-0047・#1245）。
+   ⚠️ **12か所で使われていたのに、この規則が無かった**＝「ここは小さいボタン」と読めるコードが
+   普通の 41px を出していた（ドリフトではなく、最初から効いていなかった）。
+   ⚠️ **見た目＝当たり判定**（ADR-0047 決定3）＝見た目だけ縮めて当たり判定を残すと、
+   見えない当たり判定が隣と重なる。 */
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
 }
 
 .btn-block {
@@ -372,6 +579,19 @@ button {
 /* ===== フォーム ===== */
 .field {
   margin-bottom: var(--gap);
+}
+/* チェックと文字を1行に並べる。⚠️ 使われているのに規則が無かった（#1246）。 */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  cursor: pointer;
+}
+/* 見出しと欄を1行に並べる（縦に積まない欄）。⚠️ 同上。 */
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
 }
 
 .field-label {
@@ -407,7 +627,7 @@ button {
 .select:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-soft);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.35);
 }
 
 .textarea {
@@ -476,10 +696,11 @@ input[type="range"] {
   overflow: hidden;
 }
 
-.yuko-avatar-face {
-  font-size: 13px;
-  color: var(--color-primary);
-  font-weight: 700;
+/* ⚠️ 立ち絵は正方形（1254x1254）なので、丸い枠に収める（切れないよう contain）＝#1228。 */
+.yuko-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .yuko-name {
@@ -516,11 +737,19 @@ input[type="range"] {
 
 .badge-blue {
   background: var(--color-accent-soft);
-  color: var(--color-accent);
+  color: var(--color-info);
 }
 .badge-teal {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-strong);
+}
+.badge-success {
+  background: var(--color-success-soft);
+  color: var(--color-success-text);
+}
+.badge-danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger-text);
 }
 .badge-yellow {
   background: var(--color-yellow);
@@ -551,7 +780,7 @@ button.badge {
 
 .notice-info {
   background: var(--color-accent-soft);
-  color: #2a6d9c;
+  color: var(--color-info);
 }
 .notice-warn {
   background: var(--color-yellow);
@@ -634,6 +863,19 @@ button.badge {
 .mb {
   margin-bottom: var(--gap);
 }
+/* ⚠️ 下の4つは**使われているのに規則が無かった**（#1246 の門番で判明）＝
+   書いた人は効かせたつもりで、実際には何も起きていなかった。 */
+.mb-sm {
+  margin-bottom: var(--gap-sm);
+}
+.gap-xs {
+  gap: var(--gap-xs);
+}
+.list-reset {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .grow {
   flex: 1;
 }
@@ -642,6 +884,24 @@ button.badge {
 }
 .text-faint {
   color: var(--color-text-faint);
+}
+/* 注意の色（`--color-warn` が単一の参照元＝#413）。⚠️ 使われているのに規則が無かった（#1246）。 */
+.text-warn {
+  color: var(--color-warn);
+}
+/* 断りの文（赤）。⚠️ **8か所で使われているのに規則が無かった**＝
+   エラーの文が本文と同じ色で出ていた（読み飛ばされる）。 */
+.form-error {
+  color: var(--color-danger-text);
+  font-size: 13px;
+}
+/* 読みやすい折り返し。⚠️ `text-pretty` は21か所・`text-balance` は2か所で使われていたのに
+   規則が無かった＝どちらも効いていなかった。見出しは行の長さを揃え、本文は末尾の孤立を避ける。 */
+.text-pretty {
+  text-wrap: pretty;
+}
+.text-balance {
+  text-wrap: balance;
 }
 .text-sm {
   font-size: 13px;
@@ -672,16 +932,16 @@ button.badge {
 }
 
 .thumb-photo {
-  background: linear-gradient(135deg, #e6f1fb, #d5e8f5);
-  color: #4a86b0;
+  background: var(--thumb-photo-bg);
+  color: var(--thumb-photo-fg);
 }
 .thumb-video {
-  background: linear-gradient(135deg, #e3f4f4, #cfeae9);
-  color: #2a8a8e;
+  background: var(--thumb-video-bg);
+  color: var(--thumb-video-fg);
 }
 .thumb-audio {
-  background: linear-gradient(135deg, #fbf3cf, #f4e7a8);
-  color: var(--color-warn);
+  background: var(--thumb-audio-bg);
+  color: var(--thumb-audio-fg);
   aspect-ratio: auto;
   padding: 14px;
 }
@@ -699,6 +959,101 @@ button.badge {
   gap: var(--gap-sm);
   position: relative;
   overflow: hidden;
+}
+
+/**
+ * 仕上がり確認と**キャンバスの操作レイヤ**を重ねる入れ物（#685 後半）。
+ * ⚠️ 操作レイヤは `position:absolute; inset:0` なので、**基準になる箱**が要る。
+ * 縦横比は中の `.preview-stage` が決めるので、ここは大きさを持たず**重ねるだけ**にする
+ * （ここで比を持つと、縦型に切り替えたときに枠と絵がずれる＝掴む位置が実際とずれる）。
+ */
+.preview-stage-wrap {
+  position: relative;
+}
+
+/* **仕上がり確認の別窓**（ADR-0050）＝窓いっぱいに仕上がり確認の欄の中身だけを出す。
+   本文は欄の本文（`.panel-frame-body--fill`）と同じ詰め方＝絵は残りの高さに収まり、「再生」の行は常に見える。 */
+.preview-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.preview-window-wait {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-bg);
+  color: var(--color-text-muted, var(--color-text));
+  text-align: center;
+}
+
+/**
+ * 仕上がり確認の**絵の置き場**（#1257・タイムライン編集）。欄の残りの高さを受け持ち、
+ * 絵（`.preview-stage-wrap`）を**縦横とも収まる**大きさにして真ん中へ置く。
+ * ⚠️ 絵の大きさを**幅だけ**で決めると、欄が横長のとき絵が欄の高さを越え、下の「再生」が押し出される。
+ * ⚠️ 絵の入れ物（wrap）に**実際の大きさを持たせる**＝操作レイヤ（`inset: 0`）の基準なので、
+ * 絵より大きい箱にすると掴む位置が実際とずれる。比は画面が `--stage-ratio`（幅÷高さ）で流し込む。
+ */
+/* 絵の置き場の入れ物。置き場の大きさは入れ物が決める（欄の残りの高さを受け持つ）。 */
+.preview-fit-shell {
+  flex: 1 1 0;
+  min-height: 96px;
+  display: flex;
+}
+/* 仕上がり確認の**見え方の道具**（倍率・端の目安・大きく見る・別の窓）。
+   ⚠️ **絵の上に重ねない**（実機指摘 2026-09-30＝絵と被って押し間違える）＝本体では欄の見出しの行
+   （`.panel-frame-head-tools`）、別窓では窓の上端の行（`.preview-window-bar`）に並べる。流れの中に置く。 */
+.preview-view-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  font-size: 12px;
+}
+/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。 */
+.preview-window-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  overflow: hidden;
+}
+.preview-fit {
+  flex: 1 1 0;
+  min-height: 96px;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-fit > .preview-stage-wrap {
+  width: min(100cqw, calc(100cqh * var(--stage-ratio, 1.7778)));
+  flex: 0 0 auto;
+}
+/* 拡大しているとき（#1261）＝箱が置き場より大きくなるので、置き場の中で流す（左上から）。
+   ⚠️ 幅は画面が実寸で決める（`min(100cqw, …)` の規則より強い `style`）。 */
+.preview-fit--zoomed {
+  overflow: auto;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+/* 絵の下（操作と設定）。中身の高さを取り、欄を越えた分はここだけで流す（絵は流さない）。 */
+.preview-below {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-sm);
 }
 
 .preview-stage-label {
@@ -810,9 +1165,9 @@ button.badge {
 }
 
 .step.active .step-circle {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-strong);
+  color: var(--color-on-primary);
 }
 .step.done .step-circle {
   background: var(--color-primary-soft);
@@ -992,6 +1347,15 @@ button.badge {
   background: var(--color-surface-alt);
 }
 
+/* 落とし先の挿入線（#771(c)）＝カードを囲むと「その前か後ろか」が読めないので、すき間そのものを見せる。
+   幅を持つ要素として並びに割り込ませる＝線の分だけカードが送られ、入る場所が実寸で分かる。 */
+.drop-line {
+  flex: 0 0 var(--drop-line-w);
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--drop-line-color);
+}
+
 /* 場面カード */
 .scene-card {
   border: 2px solid var(--color-border);
@@ -1020,21 +1384,6 @@ button.badge {
   gap: var(--gap-sm);
   overflow-x: auto;
   padding-bottom: 6px;
-}
-
-/* 編集レイアウト(場面編集) */
-.editor-grid {
-  display: grid;
-  /* 列は SceneEditScreen がインラインで指定（左折りたたみ 240/44px・中央 1fr・右リサイズ 260〜560px・#276）。 */
-  gap: var(--gap);
-  height: 100%;
-}
-.editor-col {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--gap);
-  overflow-y: auto;
 }
 
 /* 場面編集の右欄アコーディオン（#276）。節ごとに開閉してスクロール量を抑える。 */
@@ -1081,4 +1430,483 @@ button.badge {
   height: 40px;
   border-radius: 6px;
   flex-shrink: 0;
+}
+
+/* ── 欄の配置（ADR-0033）。左・中央・右・下の領域と、その中の入れ子の分割。 ── */
+.panel-layout {
+  display: grid;
+  gap: 0;
+  /* 空いた領域への落とし先（`.panel-dock-zone`）の基準＝器に対して置く。 */
+  position: relative;
+  /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
+     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
+  height: 76vh;
+  min-height: 420px;
+  margin-bottom: var(--space-lg, 16px);
+}
+/* スクロールしない器に入れるとき（場面編集）＝器いっぱいに広げる。画面の高さで決め打つと、小さい
+   ウィンドウで下の操作行（閉じた欄を戻す・配置を既定に戻す）が切れて**戻す道が消える**（決定6/8）。 */
+.panel-layout--fill {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.panel-layout-main {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.panel-layout-region {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/* **残りの幅を使う領域**（実機指摘 2026-09-30）＝既定は真ん中。真ん中を閉じたら右（無ければ左）が使う
+   ＝閉じた場所に何も無い帯を残さない（`flexRegionOf`）。 */
+.panel-layout-region--flex {
+  flex: 1 1 0;
+}
+.panel-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.panel-split--row { flex-direction: row; }
+.panel-split--column { flex-direction: column; }
+.panel-split-child {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 掴める境界。掴んでいる間に文字が選択されると、ドラッグが途中で切れる。 */
+.panel-divider {
+  flex: 0 0 auto;
+  background: var(--color-border, rgba(0, 0, 0, 0.12));
+  user-select: none;
+  touch-action: none;
+}
+.panel-divider:hover { background: var(--color-primary, #3b82f6); }
+/* 欄そのもの（見出し＋中身）。**中身は欄の中でスクロール**＝欄からはみ出さない（決定10）。 */
+.panel-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  margin: 2px;
+  overflow: hidden;
+}
+.panel-frame-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+}
+.panel-frame-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  /* 見出しの道具（`.panel-frame-head-tools`）と並ぶので、狭いときは名前の側も縮む（折り返さない）。 */
+  flex: 0 1 auto;
+  min-width: 3em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.panel-frame-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+/* 中身が自分でスクロールを持つ欄（#1104・`PanelSpec.fillBody`）。
+   ⚠️ **ここでは流さない**（`overflow: hidden`）＝中身にも流す場所があると**縦棒が二重**になり、
+   どちらが動くか押すまで分からない。流すのは中身の側（「並び」なら帯の枠だけ）。 */
+.panel-frame-body--fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* **欄の中では折り返す**（#687＝利用者要望）。`.row` は既定で折り返さないので、ボタンや入力が増えると
+   欄からはみ出して**横スクロール**を求めていた。デスクトップで横スクロールはしづらい＝縦に折り返す。
+   欄の外（画面下の操作行など）は元のまま＝ここは「欄の中身」の規則（ADR-0033 の配置とは別の層）。 */
+.panel-frame-body :is(.row, .row-between, .toggle-row) {
+  flex-wrap: wrap;
+}
+
+/* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
+.panel-frame { position: relative; }
+/* 見出しの右のボタン（広げる・⋮）。 */
+/* **素材を絵で並べる**（#1264）＝欄の幅に合わせて列の数が変わる。名前は1行で省略、印は右上。 */
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--gap-sm);
+}
+.picker-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  height: auto;
+  text-align: left;
+  min-width: 0;
+}
+.picker-tile-thumb {
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+.picker-tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.picker-tile-label {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-badge {
+  font-size: 10px;
+}
+.picker-tile .picker-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+/* 右クリックのメニューの近道のキー（#1268）＝右端に小さく・薄く。 */
+.context-menu-key {
+  float: right;
+  margin-left: 16px;
+  color: var(--color-text-faint); /* 透明度で薄めると背景次第で 3:1 を割る＝薄い文字の色を使う */
+  font-size: 11px;
+}
+/* 浮かぶ窓（右クリックのメニュー・自由配置の「〜を編集」）の面。暗い見た目でも面と文字が揃う（UI/UX 監査 2026-10-02）。 */
+.popover-surface {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-lg);
+}
+.panel-frame-head-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
+/* **見出しの行の道具**（実機指摘 2026-09-30）＝欄の中身の上に重ねない（重ねると絵と被って押し間違える）。
+   折り返さない＝見出しの高さが変わると中身の大きさが変わる（#1261 の繰り返しを作らない）。狭いときは道具の側が縮む。 */
+.panel-frame-head-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  font-size: 12px;
+  margin-right: 4px;
+}
+/* **一時的に広げた欄**（ADR-0048 決定5）＝配置の器いっぱいに重ねて出す。
+   ⚠️ **ほかの欄は外さずに隠す**（`visibility`）＝外すと中身の状態（鳴っている音・スクロール位置）が消える。
+   ⚠️ 器（`.panel-layout`）が基準＝間の箱は位置を持たないので、広げた欄は器に対して置かれる。 */
+/* 近道キーの一覧（ADR-0048・#1256 c6）＝メニューと同じ浮いた面。色は明暗どちらでも読めるよう色の言葉から取る。 */
+.shortcut-list {
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 12px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: 80vh;
+  overflow: auto;
+}
+.shortcut-list-table { border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.shortcut-list-table th { text-align: left; white-space: nowrap; padding: 3px 12px 3px 0; font-weight: normal; vertical-align: top; }
+.shortcut-list-table td { padding: 3px 0; }
+.panel-layout--maximized { position: relative; }
+.panel-layout--maximized .panel-frame:not(.panel-frame--maximized),
+.panel-layout--maximized .panel-divider { visibility: hidden; }
+.panel-frame--maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+.panel-frame--dragging { opacity: var(--drag-source-opacity); }
+.panel-frame-head {
+  cursor: grab;
+  /* 掴んでいる間に文字が選択される／タッチでスクロール判定に取られると、ドラッグが途中で切れる。 */
+  user-select: none;
+  touch-action: none;
+}
+.panel-frame-head:active { cursor: grabbing; }
+/* **入る半分を塗る**（実機指摘 2026-09-30＝線だけでは入る広さが読めない）。辺には線も残す＝どちら側かが一目で分かる。 */
+.panel-drop-line {
+  position: absolute;
+  background: color-mix(in srgb, var(--drop-line-color) 22%, transparent);
+  z-index: 2;
+  pointer-events: none;
+}
+.panel-drop-line--top { top: 0; left: 0; right: 0; height: 50%; border-top: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: 50%; border-bottom: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: 50%; border-left: var(--drop-line-w) solid var(--drop-line-color); }
+.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: 50%; border-right: var(--drop-line-w) solid var(--drop-line-color); }
+/* **空いた領域への落とし先**（実機指摘 2026-09-30）＝掴んでいる間だけ外周の端（と空いた真ん中）に出す。
+   押す当たりは取らない（落とし先の判定は画面の側が矩形で行う）。 */
+.panel-dock-zone {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed color-mix(in srgb, var(--drop-line-color) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--drop-line-color) 10%, transparent);
+  color: var(--drop-line-color);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.panel-dock-zone--active {
+  border-style: solid;
+  background: color-mix(in srgb, var(--drop-line-color) 32%, transparent);
+}
+
+/* 操作したその場の返事（置けなかった理由など）。**欄の下に置いたまま常に見える**ようにする
+   （ADR-0033＝上に積むと編集の場所が狭まる／下へ流すと画面外に落ちて気づけない）。 */
+/* **貼り付く知らせが動ける範囲**（囲い）。欄とその場の返事だけを入れる＝下の操作の行
+   （取り消す・列を足す・動画の一覧へ）は囲いの外なので、知らせが覆うことがない。
+   貼り付き（sticky）は**自分より後ろの兄弟のために場所を空けない**ので、囲いで区切るのが唯一の確実な防ぎ方。 */
+.timeline-flash-zone {
+  margin-bottom: var(--space-lg, 16px);
+}
+
+/* **編集の場所は残りの高さを全部使う**（#1104）。
+   ⚠️ **flex の連鎖に頼らない**（実機で3回外した）＝`flex` だけで高さを渡そうとすると、
+   途中の1つが `auto` のままでも**誰も気づけない**（実際、`.panel-layout--fill` の中で
+   後ろの `flex: 1 1 auto` が前の宣言を打ち消しており、直したつもりが無効だった）。
+   **中の器は `position: absolute; inset: 0` で貼る**＝高さが**確実に**この箱と同じになり、
+   行の割合（`fr`）が必ず解決する。中身が増えても器は伸びない（欄の中でスクロールする）。 */
+.main-scroll--fixed .timeline-flash-zone {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  margin-bottom: var(--gap-sm);
+}
+.main-scroll--fixed .timeline-flash-zone > .panel-layout {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+/* **知らせは自分の中でスクロールする**（#1104）＝ページをスクロールさせないので、
+   ここが伸びると編集の場所を押し出してしまう。⚠️ **消さずに残す**＝見出しの行の
+   「注意 N件」から寄れる先が要る（`06 §12.1`・#1032）。出るものが無ければ高さ 0。 */
+.main-scroll--fixed .timeline-notices {
+  flex: 0 0 auto;
+  max-height: 26vh;
+  overflow-y: auto;
+}
+
+.timeline-flash {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-bottom: 0;
+}
+
+/* つかんで運んでいるものの影（#684）。指の先に付いて回る。**当たり判定は持たない**＝落とし先を隠さない。 */
+.drag-ghost {
+  position: fixed;
+  transform: translate(12px, 12px);
+  pointer-events: none;
+  z-index: 1000;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 13px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+}
+
+/* 置けない所（理由の文言は離したときだけ出す＝ドラッグ中に明滅させない・ADR-0034 決定10）。 */
+.drag-ghost--blocked {
+  background: var(--color-danger);
+}
+
+/* 落とし先（いまここへ置ける／置けない）。 */
+.drop-target {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.drop-target--blocked {
+  outline: 2px solid var(--color-danger);
+  outline-offset: -2px;
+}
+
+/* 掴めるもの（#684 レビュー）。欄の見出し・帯と同じ見た目にする＝手を出す前に「掴める」と分かる。 */
+.grabbable { cursor: grab; }
+.grabbable:active { cursor: grabbing; }
+
+/* ── 安全領域（セーフエリア）の枠（#265）─────────────────────────
+   ⚠️ **編集を助けるためだけ**＝書き出しには焼かない（プレビューの箱に重ねるだけ）。
+   ⚠️ **操作を邪魔しない**＝`pointer-events: none`（掴む・置くは下のオーバーレイが受ける）。
+   ⚠️ **控えめに出す**＝主張しすぎると仕上がりが見えなくなる（点線・半透明）。 */
+.safe-area-guide {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgba(255, 255, 255, 0.75);
+  outline: 1px dashed rgba(0, 0, 0, 0.35); /* 明るい背景でも見える（白線だけだと消える） */
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 起動のときに頼まれた仕事の知らせ（ADR-0042・#1184）。
+   ⚠️ **いちばん上に出す**＝どの画面へ移っても見える（頼まれごとは画面をまたいで進む）。
+   ⚠️ **色は変数から取る**＝ダークモードでも読める（ADR-0039＝暗くするのは外枠だけ）。 */
+.startup-notice {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 60;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
+
+/* ===== 詰めた表示（ADR-0047・#1247） =====
+   編集画面の主役は「並び」で、周りの道具立てがその面積を削ってはいけない。
+   ⚠️ ~~触る所は変えない~~ → ADR-0048 で外した（UI/UX を優先＝理由を添えれば押す物・場所も変えてよい）。
+   ⚠️ **見た目＝当たり判定**（決定3・利用者判断）＝見た目だけ縮めると、見えない当たり判定が隣と重なる。
+   ⚠️ **寸法はここ（トークン）で決める**＝画面ごとに数字を書かない。クラス名だけで大きさを約束しない
+   （`btn-sm` が12か所で使われていたのに規則が無かった＝#1245）。
+   ⚠️ **列（`--timeline-lane-h`）はここで決めない**＝利用者が「列の高さ」で選ぶ（ADR-0048 決定3・既定 28px）。 */
+.dense {
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap: 10px;
+  --gap-lg: 12px;
+  --gap-xl: 20px;
+}
+.dense .card {
+  padding: var(--gap-lg);
+}
+.dense .btn {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.dense .btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.dense .btn-lg {
+  padding: 8px 18px;
+  font-size: 14px;
+}
+.dense .btn-icon {
+  padding: 5px;
+}
+.dense .section-title {
+  font-size: 14px;
+}
+.dense .topbar {
+  height: 44px;
+  padding: 0 var(--gap-lg);
+}
+.dense .page-head {
+  margin-bottom: var(--gap);
+}
+.dense .page-title {
+  font-size: 19px;
+}
+.dense .field {
+  margin-bottom: var(--gap-sm);
+}
+.dense .input,
+.dense .textarea,
+.dense .select,
+.dense select {
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+/* ── 流れの帯（ADR-0048 追補・2026-10-05）＝戻る（左）・段（中）・進む（右）を5画面で同じ形に。
+   ⚠️ 両脇は同じ幅を取り合う＝段の表示が画面の真ん中から動かない（戻る／進むの文言の長さで揺れない）。 */
+.flow-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
+}
+.flow-bar-side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.flow-bar-side--end {
+  justify-content: flex-end;
+}
+.flow-bar-steps ol {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-bar-steps li {
+  display: flex;
+  align-items: center;
+}
+.flow-step-sep {
+  color: var(--color-text-faint);
+  padding: 0 2px;
+}
+.flow-step {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 13px; /* .text-sm と同じ */
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.flow-step:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+.flow-step--current {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 600;
+  cursor: default;
+}
+.flow-bar-reason {
+  color: var(--color-danger-text);
+  text-align: right;
 }

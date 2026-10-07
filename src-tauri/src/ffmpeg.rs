@@ -3,11 +3,12 @@
 // コーデックは h264_mf（Media Foundation＝主経路）→ libopenh264（フォールバック）→ libx264（開発=GPL）を自動選択（ADR-0002/0013）。
 // → LGPL+mediafoundation ビルドを所定フォルダに置くだけで h264_mf 出力へ無改修で切り替わる（コマンド生成は不変）。
 // SVG→PNG は ADR-0004（WebView Canvas）で生成。FFmpegは PNG/動画/音声の合成のみ（ADR-0001）。
+use crate::proc::no_window_command;
 use base64::Engine as _;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
@@ -49,6 +50,16 @@ const DEFAULT_OUTPUT_HEIGHT: u32 = 1080;
 fn target_bitrate_bps(width: u32, height: u32, fps: u32) -> u64 {
     let raw = BITRATE_BPP * f64::from(width) * f64::from(height) * f64::from(fps);
     (raw as u64).clamp(BITRATE_MIN_BPS, BITRATE_MAX_BPS)
+}
+
+/// 目標ビットレートに利用者が選んだ上限を掛ける（#1218「ふつう」＝1080 のままファイルを小さく）。
+/// 上限は**下げる方向にだけ**効く（元が上限より低ければそのまま）。下限（`BITRATE_MIN_BPS`）は割らない。
+/// ⚠️ 効くのは目標ビットレートを渡すエンコーダ（`h264_mf`）だけ＝予備の方式では大きさが変わらない（`quality_args`）。
+fn capped_bitrate_bps(target: u64, max: Option<u64>) -> u64 {
+    match max {
+        Some(m) => target.min(m.max(BITRATE_MIN_BPS)),
+        None => target,
+    }
 }
 
 /// bps を FFmpeg の `-b:v` 引数値（kbps 表記）へ整形する。
@@ -140,8 +151,27 @@ pub struct H264Capability {
 /// 書き出し前に H.264 エンコード能力を検知する（#120・ADR-0013）。
 /// `ffmpeg -encoders` を読み、標準方式（h264_mf）/予備/不可 を判定。ffmpeg 不在は "toolMissing"。
 /// UI（公開前チェック）が「次の行動」を事前提示するために使う（書き出し本体は export_video 内で再判定）。
+/// ⚠️ **ここも `spawn_blocking`**（#1173 の射程）＝公開前チェックを開いた瞬間に FFmpeg を
+/// 起こすので、同期のままだと**その間だけ画面が固まる**。
 #[tauri::command]
-pub fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
+pub async fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
+    tauri::async_runtime::spawn_blocking(move || detect_h264_capability_impl(app))
+        .await
+        // ⚠️ **投げない**＝この口は元から `Result` を返さない（読めなければ「道具が無い」と答える）。
+        // 走らせ損ねたときも同じ答えにする＝呼ぶ側の分岐を増やさない。
+        // ⚠️ **痕跡は残す**（PR #1179 レビュー由来）＝双子（`probe_video`／小さな絵）は join の失敗を
+        // `export_failure` 経由で記録するのに、ここだけ握りつぶすと**起きたときに気づく手掛かりが無い**
+        //（この PR が埋めている「片方だけ直った」の別の形になる）。利用者向けの答えは変えない。
+        .unwrap_or_else(|e| {
+            crate::tlog!("h264_capability", "join: {e}");
+            H264Capability {
+                capability: "toolMissing".into(),
+                encoder: None,
+            }
+        })
+}
+
+fn detect_h264_capability_impl(app: tauri::AppHandle) -> H264Capability {
     let ffmpeg = resolve_ffmpeg(&app);
     match run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]) {
         Ok(encoders) => H264Capability {
@@ -340,9 +370,31 @@ pub struct JoinStep<'a> {
 /// 場面MP4群を xfade/concat のフィルタチェーンで1本に再エンコード結合する引数（純粋・ADR-0009 T2）。
 /// `steps.len()` は `files.len()-1`（各境界）。映像は xfade/concat、音声は acrossfade/concat を同じ境界規則で連ねる。
 /// 全境界 none のときは呼ばない（その場合は concat_args の無劣化コピーを使う）。files は2本以上を前提。
+/// ⚠️ 本番は音を尺で切る `xfade_chain_args_trimmed` を使う（#1362）。こちらは切らない形＝引数の並びの検査用。
+/// ⚠️ 検査用の印（cfg の test）は付けない＝「本番の範囲＝最初の検査用の印の手前」で切る検査（FFmpeg を起こす口）の範囲が縮む。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn xfade_chain_args(
     files: &[String],
     steps: &[JoinStep],
+    out: &str,
+    codec: VideoCodec,
+    fps: u32,
+    bitrate: &str,
+) -> Vec<String> {
+    xfade_chain_args_trimmed(files, steps, None, out, codec, fps, bitrate)
+}
+
+/// `xfade_chain_args` に、入力ごとの**尺**（秒）を渡して、音を尺ぴったりに切ってからつなぐ形（#1362）。
+///
+/// ⚠️ **音は尺ぴったりにする**（足りなければ無音で埋め、長ければ切る＝`apad,atrim`）＝場面ファイルの音（AAC）は詰め物ぶん映像より少し長い。音の `acrossfade`／`concat` は
+/// **左の実際の終わり**から次を重ねるので、切らないと境目ごとに約16ms ずつ声が絵より遅れていく
+/// （30場面で終わりに約0.45秒・実測）。映像の `xfade` は決めた位置（offset）で移るのでずれない。
+/// `audio_secs`＝`None` なら切らない（従来どおり）。
+#[allow(clippy::too_many_arguments)]
+pub fn xfade_chain_args_trimmed(
+    files: &[String],
+    steps: &[JoinStep],
+    audio_secs: Option<&[f64]>,
     out: &str,
     codec: VideoCodec,
     fps: u32,
@@ -361,7 +413,12 @@ pub fn xfade_chain_args(
     // settb/asettb は実時刻(PTS)を保ったまま tb ラベルだけ統一するので、どの遷移順序でも一致する。
     for k in 0..files.len() {
         filters.push(format!("[{k}:v]settb=AVTB[nv{k}]"));
-        filters.push(format!("[{k}:a]asettb=AVTB[na{k}]"));
+        match audio_secs.and_then(|secs| secs.get(k)) {
+            Some(sec) => filters.push(format!(
+                "[{k}:a]apad,atrim=0:{sec},asetpts=PTS-STARTPTS,asettb=AVTB[na{k}]"
+            )),
+            None => filters.push(format!("[{k}:a]asettb=AVTB[na{k}]")),
+        }
     }
     // 映像チェーン：[nv0] を起点に、各境界で xfade（重ね）or concat（ハードカット）。
     let mut v_prev = "nv0".to_string();
@@ -384,8 +441,8 @@ pub fn xfade_chain_args(
     }
     // 音声チェーン：xfade の境界は acrossfade（同じ D で重ねる）、none は concat。
     // acrossfade はオフセット引数を取らず「入力1の終端を検出して自動でクロスフェード開始」する。
-    // これが映像 xfade の offset=acc−D と整合するのは、各場面 MP4 を scene_clip_args が -t {dur} で
-    // 尺ぴったりに揃えているため（音声＝映像と同尺）。
+    // これが映像 xfade の offset=acc−D と整合するのは、**`audio_secs` で音を尺に切ったときだけ**（#1362）＝
+    // 場面 MP4 の音（AAC）は詰め物ぶん映像より少し長く、切らないと境目ごとに声が遅れていく。
     let mut a_prev = "na0".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
@@ -431,26 +488,76 @@ pub fn xfade_chain_args(
 pub struct BgmRunPlaced<'a> {
     pub file: &'a str,
     pub volume: f64,
+    /// 音量の変化（#512）＝`volume` フィルタの式（`t`＝この音の先頭からの秒）。**式は front の
+    /// `volumeExpr`（domain・純粋関数）が点列から組む**＝ここでは差し込むだけ（組み直すと規則が2か所になり、
+    /// 再生と書き出しでずれる余地が増える・ADR-0032 追補＝案A）。`None`＝従来どおり `volume` の一定値。
+    pub volume_expr: Option<&'a str>,
     pub delay_sec: f64,
     pub play_sec: f64,
     pub fade_in_sec: f64,
     pub fade_out_sec: f64,
+    /// 素材が置き場所より短いとき繰り返すか。**BGM は true**（曲を尺いっぱい鳴らす）。
+    /// **読み上げは false**（繰り返すと言葉が二重に鳴る＝タイムライン形式の音声クリップ・#631）。
+    pub loop_source: bool,
+    /// 素材のどこから使うか（秒・0=頭から）。タイムライン形式のトリム（#631）。
+    pub source_start_sec: f64,
+    /// 再生速度（>0・1.0=等速）。ピッチは維持（atempo）。タイムライン形式の速度変更（#631）。
+    pub speed: f64,
+}
+
+/// `atempo` は1段で 0.5〜2.0 しか受け付けないので、範囲外は**掛け算で分ける**（例 4.0＝`atempo=2,atempo=2`）。
+/// 値を範囲へ丸めない＝設定した速度どおりに鳴る（ADR-0026①）。等速のときは空（従来の引数と同じ並び）。
+fn atempo_chain(speed: f64) -> String {
+    // 壊れた値（NaN/∞/0以下）は等速扱い＝`atempo=NaN` のような引数を作らない。
+    if !speed.is_finite() || speed <= 0.0 || (speed - 1.0).abs() < 1e-6 {
+        return String::new();
+    }
+    let mut rest = speed;
+    let mut stages: Vec<f64> = Vec::new();
+    while rest > SPEED_MAX {
+        stages.push(SPEED_MAX);
+        rest /= SPEED_MAX;
+    }
+    while rest < SPEED_MIN {
+        stages.push(SPEED_MIN);
+        rest /= SPEED_MIN;
+    }
+    stages.push(rest);
+    stages
+        .iter()
+        .map(|v| format!("atempo={v},"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// 結合済み動画（ナレーション入り）へ、場面ごとBGMの各クリップをループ→切り出し→音量→フェード→adelay して amix する引数（純粋・ADR-0018 ③(7)）。
 /// クリップは planBgmMix が配置済み（曲が変わる境界は前後を重ねた delay/play＋フェードで amix ブレンド＝クロスフェード）。
-/// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。runs は1本以上（呼ぶ前に判定）。
+/// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。
+/// ⚠️ **runs は0本もありうる**（PR #896 レビュー ℹ️）＝**整えるだけ**（`normalize` のみ）のときは
+/// BGM が無いまま呼ばれる（`needs_audio_pass = has_bgm || normalize.is_some()`）。
+/// 0本なら `amix=inputs=1`（既存音声だけ）を通る＝「1本以上」を前提に手を入れない。
+/// 全体の音量を整える設定（#259・ADR-0032 追補4）。
+#[derive(Debug, Clone, Copy)]
+pub struct NormalizeSpec {
+    /// 目安の大きさ（LUFS・負の値）。
+    pub target_lufs: f64,
+}
+
 pub fn mix_bgm_runs_args(
     video: &str,
     runs: &[BgmRunPlaced],
     total_sec: f64,
+    // 全体の音量を整える（#259）。`None` ＝整えない（従来どおり＝出力不変）。
+    normalize: Option<NormalizeSpec>,
     out: &str,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
     for r in runs {
-        // 各BGMソースはループ（尺に満たない曲を繰り返す）。
-        args.push("-stream_loop".into());
-        args.push("-1".into());
+        // ループする音（BGM）は尺に満たない曲を繰り返す。読み上げは繰り返さない（言葉が二重に鳴る）。
+        if r.loop_source {
+            args.push("-stream_loop".into());
+            args.push("-1".into());
+        }
         args.push("-i".into());
         args.push(r.file.into());
     }
@@ -482,18 +589,46 @@ pub fn mix_bgm_runs_args(
         } else {
             String::new()
         };
+        // 切り出しは**素材の時間**で見る（速度を掛けたぶん長く読む）。`asetpts` で 0 起点へ戻したあと
+        // `atempo` で速度を掛けるので、フェードの位置（`play_sec` 基準）は速度が変わってもずれない。
+        let tempo = atempo_chain(r.speed);
+        // 音量の変化（#512）。式の `t` は**この音の先頭からの秒**＝`asetpts` で 0 起点に戻し `atempo` を
+        // 掛けたあとの時刻なので、フェード（`play_sec` 基準）と同じ物差しになる＝再生の `volumeAt(points, 局所秒)`
+        // と同じ点を指す。`eval=frame` を付けないと**最初の1回しか評価されず**一定音量に化ける。
+        // 式は `'…'` で囲む＝中の `,` `(` `)` をフィルタの区切りとして読ませない。
+        // 空文字は「式が無い」と同じ意味（曲線を持たない）なので一定値へ落とす＝`volume=''` のような引数を作らない。
+        let vol_filter = match r.volume_expr.map(str::trim).filter(|e| !e.is_empty()) {
+            Some(expr) => format!("volume='{expr}':eval=frame"),
+            None => format!("volume={}", r.volume),
+        };
         filters.push(format!(
-            "[{src}:a]atrim=0:{play},asetpts=N/SR/TB,volume={vol}{fi}{fo}{d}[{label}]",
-            play = r.play_sec,
-            vol = r.volume
+            "[{src}:a]atrim={start}:{end},asetpts=N/SR/TB,{tempo}{vol_filter}{fi}{fo}{d}[{label}]",
+            start = r.source_start_sec,
+            end = r.source_start_sec + r.play_sec * if r.speed > 0.0 { r.speed } else { 1.0 },
         ));
         labels.push(format!("[{label}]"));
     }
     let n = labels.len();
+    // ⚠️ **amix の `normalize=0` は「入力数で割らない」という意味**（#259 の「音量を整える」とは別物）。
+    // 割ると音源を足すたびに全体が小さくなるので従来どおり 0 のまま。整えるのは下の `loudnorm`。
+    let mixed = if normalize.is_some() {
+        "[mixed]"
+    } else {
+        "[a]"
+    };
     filters.push(format!(
-        "{}amix=inputs={n}:duration=first:normalize=0[a]",
+        "{}amix=inputs={n}:duration=first:normalize=0{mixed}",
         labels.join("")
     ));
+    // 全体の音量を整える（#259）。`loudnorm` で目安の大きさへ寄せ、`alimiter` で歪みを止める。
+    // ⚠️ **1回通しで測って整える**（2回通しは全体をもう一度読むので、書き出しが目に見えて遅くなる）。
+    // ⚠️ **`alimiter` を必ず後ろに置く**＝整えた結果が 0dBFS を超えると歪む（受け入れ条件「歪みが出ない」）。
+    if let Some(nz) = normalize {
+        filters.push(format!(
+            "[mixed]loudnorm=I={i}:TP=-1.5:LRA=11,alimiter=limit=0.95[a]",
+            i = nz.target_lufs
+        ));
+    }
     args.push("-filter_complex".into());
     args.push(filters.join(";"));
     args.extend([
@@ -511,61 +646,6 @@ pub fn mix_bgm_runs_args(
         "2".into(),
         "-t".into(),
         format!("{total_sec}"),
-        out.into(),
-    ]);
-    args
-}
-
-/// テロップ帯の overlay 入力（純粋引数用・ADR-0018）。png は一時PNGパス、区間はグローバル秒（front の compileTimeline と一致）。
-pub struct TelopOverlay<'a> {
-    pub png: &'a str,
-    pub start_sec: f64,
-    pub end_sec: f64,
-}
-
-/// 結合済み動画へテロップ帯PNG群を時刻指定で重ねる引数（純粋・ADR-0018 テロップ実描画）。
-/// 各PNGは透過・出力解像度と同サイズ（front が場面PNGと同じ SVG→PNG で焼く＝ADR-0004 パリティ）。
-/// 静止PNGは overlay の eof_action=repeat で唯一フレームが持続し、enable='between(t,S,E)' が表示区間を制御する
-/// （t は主入力＝結合済み動画のタイムスタンプ）。映像は再エンコード（コーデック/ビットレートは場面と同一）・音声は無変更コピー。
-/// BGM 合成の前に1回だけ実行する（再エンコード世代を最小に。xfade チェーンへの合流は将来最適化）。
-pub fn overlay_telops_args(
-    video: &str,
-    telops: &[TelopOverlay],
-    codec: VideoCodec,
-    bitrate: &str,
-    out: &str,
-) -> Vec<String> {
-    let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
-    for t in telops {
-        args.push("-i".into());
-        args.push(t.png.into());
-    }
-    let mut filters: Vec<String> = Vec::new();
-    let mut prev = "0:v".to_string();
-    for (i, t) in telops.iter().enumerate() {
-        let label = format!("v{}", i + 1);
-        filters.push(format!(
-            "[{prev}][{idx}:v]overlay=0:0:eof_action=repeat:enable='between(t,{s},{e})'[{label}]",
-            idx = i + 1,
-            s = t.start_sec,
-            e = t.end_sec
-        ));
-        prev = label;
-    }
-    args.push("-filter_complex".into());
-    args.push(filters.join(";"));
-    args.push("-map".into());
-    args.push(format!("[{prev}]"));
-    args.push("-map".into());
-    args.push("0:a".into());
-    args.push("-c:v".into());
-    args.push(codec.encoder().into());
-    args.extend(codec.quality_args(bitrate));
-    args.extend([
-        "-pix_fmt".into(),
-        "yuv420p".into(),
-        "-c:a".into(),
-        "copy".into(),
         out.into(),
     ]);
     args
@@ -1062,8 +1142,7 @@ pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
             if !p.is_empty() {
                 // 配布版で診断フラグにより外部 FFmpeg を使う場合は、pin 構成外（LGPL+h264_mf 保証外）を警告。
                 if !dev {
-                    eprintln!(
-                        "[ffmpeg] 診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
+                    crate::tlog!("ffmpeg","診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
                     );
                 }
                 return PathBuf::from(p);
@@ -1092,7 +1171,7 @@ pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
 
 /// ffmpeg を実行。成功時 stdout、失敗時 stderr を返す。
 pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
-    let out = Command::new(bin)
+    let out = no_window_command(bin)
         .args(args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1157,23 +1236,74 @@ pub fn cancel_export() {
 /// 走行中 Child を EXPORT_CHILD に登録し、キャンセル／アプリ終了から kill できるようにする。
 /// stdout/stderr は別スレッドで排出する（ffmpeg は stderr 出力が多く、未排出だとパイプ詰まりで停止し得る）。
 fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
+    run_export_inner(bin, args, None)
+}
+
+/**
+ * `run_export` の**進み具合つき**版（#1214）。
+ *
+ * ⚠️ **なぜ要るか**＝つなぐ段は**1回の FFmpeg 呼び出し**で全部の切り替えを処理するので、
+ * Rust 側に数えるループが無く、**進み具合を出せなかった**（実測で 6.5 分の沈黙）。
+ * 30分の動画では**後半12分バーが動かず**、利用者は「壊れた」と判断して中止する（#1214）。
+ *
+ * ⚠️ **それらしく動かすのではない**＝FFmpeg に `-progress` を渡して、
+ * **実際に書き終えた秒数**（`out_time_us`）を読む。
+ */
+fn run_export_progress(bin: &Path, args: &[String], on_us: &dyn Fn(u64)) -> Result<String, String> {
+    run_export_inner(bin, args, Some(on_us))
+}
+
+fn run_export_inner(
+    bin: &Path,
+    args: &[String],
+    on_us: Option<&dyn Fn(u64)>,
+) -> Result<String, String> {
     // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(EXPORT_CANCELLED_MARK.to_string());
     }
-    let mut child = Command::new(bin)
+    // ⚠️ **入力は明示して塞ぐ**（#1107）＝コンソール窓を出さなくしたので、受け継ぐ入力の口が無い。
+    // 既定（受け継ぐ）のままだと「無効な口を受け継いだ」状態になるので、意図を書いて空にする。
+    // `output()` を使う他の3か所は元から空なので、ここだけ揃えれば同じになる。
+    let mut child = no_window_command(bin)
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
     // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
+    // ⚠️ **数だけを渡す口**（#1214）＝読む側のスレッドへ Tauri の持ち物を持ち込まないため。
+    let (tx, rx) = std::sync::mpsc::channel::<u64>();
+    let tx = on_us.is_some().then_some(tx);
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
     let out_h = std::thread::spawn(move || {
         let mut s = String::new();
         if let Some(p) = out_pipe.as_mut() {
-            let _ = p.read_to_string(&mut s);
+            match tx {
+                // ⚠️ **1行ずつ読む**（#1214）＝`read_to_string` は**終わるまで返らない**ので、
+                // 途中の進み具合が取れない。ここだけ行読みに変える（既定の道は元のまま）。
+                //
+                // ⚠️ **このスレッドへ Tauri の持ち物を持ち込まない**（実機と CI で踏んだ）＝
+                // `AppHandle` を写して `Send` の箱へ入れると、**検査用の実行ファイルが起動しなくなる**
+                // （`STATUS_ENTRYPOINT_NOT_FOUND`＝WebView のDLLを要求するようになる）。
+                // **数だけを送り、送り先（画面へ知らせる所）は呼んだ側のスレッドで動かす。**
+                Some(tx) => {
+                    use std::io::BufRead;
+                    let reader = std::io::BufReader::new(p);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if let Some(us) = parse_out_time_us(&line) {
+                            let _ = tx.send(us);
+                        }
+                        s.push_str(&line);
+                        s.push(char::from(10)); // 改行
+                    }
+                }
+                None => {
+                    let _ = p.read_to_string(&mut s);
+                }
+            }
         }
         s
     });
@@ -1188,6 +1318,12 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
 
     // try_wait をポーリングして完了を待つ。キャンセルされたらスロットが空になり（or フラグで自 kill）抜ける。
     let status = loop {
+        // ⚠️ **知らせるのはこのスレッド**＝読む側のスレッドからは数しか来ない。
+        if let Some(cb) = on_us {
+            while let Ok(us) = rx.try_recv() {
+                cb(us);
+            }
+        }
         if EXPORT_CANCELLED.load(Ordering::SeqCst) {
             if let Some(mut child) = lock_export_child().take() {
                 let _ = child.kill();
@@ -1224,10 +1360,236 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// `run` の生バイト版（#332）。stdout を**文字列にせず**そのまま返す。
+///
+/// ⚠️ **PCM は文字列にできない**＝`run` は `from_utf8_lossy` を通すので、音の波形（s16le）を
+/// 通すと**不正なバイトが `U+FFFD` に化けて値が壊れる**。波形専用にここを分ける。
+fn run_bytes(bin: &Path, args: &[String]) -> Result<Vec<u8>, String> {
+    let out = no_window_command(bin)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+}
+
+/// 素材の**中身が変わったか**を安く見分ける印（#332）。大きさと更新時刻から作る。
+///
+/// ⚠️ **これが無いとキャッシュが化ける**＝保存名は `assets/<assetId>.<ext>` で、`asset_NNN` は
+/// **空き番号を埋める**採番（`createAssetId`）。さらに #347 の「ファイルを選び直す」は
+/// **同じ名前のまま中身を入れ替える**。どちらも「名前は同じで中身が別」を作るので、
+/// 名前だけでキャッシュを引くと**前の動画のコマ列**が出る。
+fn file_stamp(path: &Path) -> String {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return "0_0".to_string(),
+    };
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{}_{}", meta.len(), mtime)
+}
+
+/// 波形の山（#332）。0.0〜1.0 を `buckets` 個返す（音が無い・読めないときは空）。
+///
+/// ⚠️ **素材のバイトを JS に載せない**（ADR-0004・§2-1）＝ここで PCM を受けて**山だけ**を返す。
+/// 5分の曲でも Rust 側で数MBを流すだけで、JS へ渡るのは数百個の数値で済む。
+/// 4000Hz・モノラルまで落とす＝波形の見た目には十分で、読み取り量が桁で減る。
+/// ⚠️ **メインスレッドを塞がない**（#375 と同じ形）＝同期の `#[tauri::command]` は
+/// **UI/IPC のイベントループ上**で走るので、ここで ffmpeg のフル復号を回すと**ウィンドウが応答なし**に
+/// なる。書き出しは**1フレーム＝1 invoke** をフロントが回しているので、塞ぐと**中止も閉じるも効かない**。
+/// 呼び出し側の同時実行の絞り（`ANALYSIS_CONCURRENCY`）は、別スレッドへ逃がして初めて意味を持つ。
+#[tauri::command]
+pub async fn audio_peaks(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    buckets: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<Vec<f32>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        audio_peaks_impl(app, project_id, rel_path, buckets, from_sec, length_sec)
+    })
+    .await
+    .map_err(|e| format!("audio peaks task join: {e}"))?
+}
+
+fn audio_peaks_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    buckets: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<Vec<f32>, String> {
+    // 山の数は画面の都合で決まる。極端な値でメモリを食わないよう範囲に収める。
+    let buckets = buckets.clamp(1, 2000);
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.is_file() {
+        // 見つからないのは #347 が知らせる話＝ここは**空で返す**（波形が出ないだけ）。
+        return Ok(Vec::new());
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    // ⚠️ **置いた範囲だけを測る**＝素材まるごとを測って帯へ伸ばすと、末尾だけを置いた帯に
+    // 頭からの波形が出る。`-ss` は `-i` の前（速い＝そこまで復号しない）、長さは `-t` で切る。
+    let mut args: Vec<String> = vec!["-v".into(), "error".into()];
+    if from_sec > 0.0 && from_sec.is_finite() {
+        args.push("-ss".into());
+        args.push(format!("{from_sec}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if length_sec > 0.0 && length_sec.is_finite() {
+        args.push("-t".into());
+        args.push(format!("{length_sec}"));
+    }
+    args.extend([
+        "-f".to_string(),
+        "s16le".to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-ar".to_string(),
+        "4000".to_string(),
+        "-".to_string(),
+    ]);
+    // ⚠️ **失敗しても空で返す**＝波形は「あると見やすい」もので、無くても編集はできる。
+    // 音の入っていない動画・壊れたファイルで**画面を止めない**（§2-5＝求めることが無い）。
+    let pcm = match run_bytes(&ffmpeg, &args) {
+        Ok(b) => b,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let samples = pcm.len() / 2;
+    if samples == 0 {
+        return Ok(Vec::new());
+    }
+    let mut out = vec![0.0f32; buckets];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let from = samples * i / buckets;
+        let to = (samples * (i + 1) / buckets).max(from + 1).min(samples);
+        let mut peak: i32 = 0;
+        for s in from..to {
+            let v = i16::from_le_bytes([pcm[s * 2], pcm[s * 2 + 1]]) as i32;
+            peak = peak.max(v.abs());
+        }
+        *slot = (peak as f32 / 32768.0).min(1.0);
+    }
+    Ok(out)
+}
+
+/// 動画のコマ列（#332）。`frames` コマを**横に並べた PNG 1枚**を作り、相対パスを返す。
+///
+/// ⚠️ **1枚にまとめる**＝コマごとに別ファイルにすると、帯1本を描くのに N 回の読み込みが要る。
+/// 1枚なら `background-image` で置いて `background-size` で割るだけで済む。
+/// 置き場は `cache/`＝**素材ではない**（#348 の片づけ・#347 の欠損検知が実体と勘違いしない）。
+/// ⚠️ **メインスレッドを塞がない**（`audio_peaks` と同じ理由・#375）。
+#[tauri::command]
+pub async fn video_filmstrip(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    frames: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        video_filmstrip_impl(app, project_id, rel_path, frames, from_sec, length_sec)
+    })
+    .await
+    .map_err(|e| format!("filmstrip task join: {e}"))?
+}
+
+fn video_filmstrip_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    frames: usize,
+    from_sec: f64,
+    length_sec: f64,
+) -> Result<String, String> {
+    let frames = frames.clamp(1, 60);
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.is_file() {
+        return Ok(String::new());
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    // 尺が要る（何秒ごとに1コマ取るかを決めるため）。取れなければコマ列は作らない。
+    // ⚠️ **置いた範囲だけを測る**（波形と同じ理由）。範囲が渡っていれば尺を調べ直さない
+    //（probe の1プロセスぶん減る）。
+    let span = if length_sec > 0.0 && length_sec.is_finite() {
+        length_sec
+    } else {
+        ffmpeg_probe_stderr(&ffmpeg, &input)
+            .ok()
+            .and_then(|s| parse_video_meta(&s).duration_sec)
+            .unwrap_or(0.0)
+    };
+    if span <= 0.0 || !span.is_finite() {
+        return Ok(String::new());
+    }
+    let stem = Path::new(&rel_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "asset".to_string());
+    let rel_out = format!(
+        "cache/{}_{}_{}_{:.3}_{:.3}strip.png",
+        stem,
+        file_stamp(&input),
+        frames,
+        from_sec,
+        span
+    );
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    // 既にあるなら作り直さない（同じ中身・同じコマ数なら結果は同じ）。
+    // ⚠️ **「あるか」で見ない**（#1172）＝失敗した回の **0 バイトの残骸**を「あり」と読むと、
+    //   そのファイルが消えるまで**永久に空の帯**になる（作り直しにも行かない）。
+    //   見分けは切り出しと**同じ道具**（`produced_frame`＝中身があるか）を通す。
+    // ⚠️ **`clear_stale_frame` は要らない**（PR #1176 レビュー由来）＝この名前は中身
+    //   （`file_stamp`＝大きさ＋更新時刻）と作り方（コマ数・範囲）から決まるので、同じ名前は
+    //   同じ中身を指す。残骸があっても `-y` が上書きするだけで、**別の動画の帯が出る**化けは
+    //   起きない（切り出し・小さな絵は名前が素材番号から決まるので、あちらには要る）。
+    if produced_frame(&out) {
+        return Ok(rel_out);
+    }
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut args: Vec<String> = vec!["-y".into(), "-v".into(), "error".into()];
+    if from_sec > 0.0 && from_sec.is_finite() {
+        args.push("-ss".into());
+        args.push(format!("{from_sec}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    args.push("-t".into());
+    args.push(format!("{span}"));
+    args.push("-vf".into());
+    args.push(format!(
+        "fps={}/{},scale=-1:48,tile={}x1",
+        frames, span, frames
+    ));
+    args.extend(["-frames:v".to_string(), "1".to_string()]);
+    args.push(out.to_string_lossy().into_owned());
+    // ⚠️ **失敗しても空で返す**（波形と同じ）＝コマ列は無くても編集はできる。
+    // ⚠️ **出来たかまで見る**（#1172）＝`run` が成功しても**1枚も書かれない**ことがある
+    //   （尺の外を指した等）。見ずに返すと、次からは上の門が 0 バイトを「あり」と読む。
+    //   ⚠️ **帯の側は画面に文を出さない**ので、失敗は**空**で返して静かに諦める（切り出しと違う）。
+    match run(&ffmpeg, &args) {
+        Ok(_) if produced_frame(&out) => Ok(rel_out),
+        _ => Ok(String::new()),
+    }
+}
+
 /// `ffmpeg -i <file>` を実行し stderr を返す（出力未指定で終了コード1だが stderr にメタ情報が出る）。
 /// 音声有無・メタ取得（probe 系）の共通土台。成否に関わらず stderr を見る。
 fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
-    match Command::new(ffmpeg)
+    match no_window_command(ffmpeg)
         .arg("-hide_banner")
         .arg("-i")
         .arg(file)
@@ -1247,10 +1609,13 @@ fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
     Ok(ffmpeg_probe_stderr(ffmpeg, clip)?.contains("Audio:"))
 }
 
-/// 技術詳細を開発者向けに stderr へ記録し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
-/// `log` クレート未導入のため eprintln! で記録する（tauri dev のコンソールに出る）。
+/// 技術詳細を**このパソコンの記録へ**残し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
+///
+/// ⚠️ **`eprintln!` だけにしない**（#396）＝配布版はコンソールを持たないので、**stderr はどこにも残らない**。
+/// 「失敗しました」と言われても調べる材料が無かった。`tlog!` は stderr にも出しつつ
+/// `appData/logs` にも残す（外へは送らない＝§2-6）。
 fn export_failure(detail: impl std::fmt::Display, user_message: impl Into<String>) -> String {
-    eprintln!("[export] {detail}");
+    crate::trouble_log::record("export", &format!("{}", detail));
     user_message.into()
 }
 
@@ -1324,8 +1689,26 @@ fn parse_resolution(stderr: &str) -> (Option<u32>, Option<u32>) {
 /// 動画素材のメタ情報（長さ・音声有無・解像度）を `ffmpeg -i` で取得する。
 /// 注: Err はフロント（assetFs.probeVideo）で catch → null される best-effort 取得＝
 /// ここで返すユーザー向け文言は画面に出ない（取得できなくても素材は保持される）。技術詳細は eprintln に残る。
+/// ⚠️ **こちらも `spawn_blocking` に載せる**（#1173 の射程＝**双子の片方だけ直さない**）＝
+/// 小さな絵と**同じ取り込みの中で続けて呼ばれる**（`probeAndThumbVideo`）ので、片方だけ
+/// 載せてもメインスレッドは塞がったまま。ここも FFmpeg を起こす（`ffmpeg -i`）。
 #[tauri::command]
-pub fn probe_video(
+pub async fn probe_video(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<VideoMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || probe_video_impl(app, project_id, rel_path))
+        .await
+        .map_err(|e| {
+            export_failure(
+                format!("probe join: {e}"),
+                "動画の情報を読めませんでした。もう一度お試しください。",
+            )
+        })?
+}
+
+fn probe_video_impl(
     app: tauri::AppHandle,
     project_id: String,
     rel_path: String,
@@ -1360,8 +1743,29 @@ fn thumbnail_rel_path(rel_path: &str) -> String {
 /// 動画の代表フレーム（先頭フレーム）を PNG で書き出し、その相対パスを返す（確認画面/一覧サムネ用）。
 /// 注: Err はフロント（assetFs.extractVideoThumbnail）で catch → null される best-effort 取得＝
 /// ここで返すユーザー向け文言は画面に出ない（サムネが無くてもアイコン表示にフォールバックする）。
+/// ⚠️ **双子と同じく `spawn_blocking` に載せる**（#1173・#375）＝ここだけ同期のままで、
+/// FFmpeg が終わるまで**メインスレッドを塞いで**いた。小さな絵は**取り込みのついで**に作られる
+/// ので（`assetImport.ts`）、利用者からは「取り込みが少し長い」にしか見えず気づきにくかった。
+/// 手本は `extract_video_frame`（切り出し）・`video_filmstrip`（帯）。
 #[tauri::command]
-pub fn extract_video_thumbnail(
+pub async fn extract_video_thumbnail(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_thumbnail_impl(app, project_id, rel_path)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("thumbnail join: {e}"),
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
+        )
+    })?
+}
+
+fn extract_video_thumbnail_impl(
     app: tauri::AppHandle,
     project_id: String,
     rel_path: String,
@@ -1380,10 +1784,17 @@ pub fn extract_video_thumbnail(
         fs::create_dir_all(dir).map_err(|e| {
             export_failure(
                 format!("thumbnail dir: {e}"),
-                "動画のサムネイル作成に失敗しました。",
+                "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
             )
         })?;
     }
+    // ⚠️ **残骸を先に片づける**（#1140＝#1137 と同じ規則）＝`-y` は上書きだが、
+    // **FFmpeg は1枚も書かずに正常終了しうる**。小さな絵の名前は元の動画の名前から作る
+    //（`thumbnail_rel_path`＝`assets/asset_NNN.mp4` → `assets/asset_NNN_thumb.png`）ので、
+    // **素材番号が再発行された回**（予約はアプリの起動ごとに消える）には、ディスクに
+    // **前の動画の小さな絵**が残っている＝それを「作れた」と読むと**別の動画の絵が一覧に出る**
+    //（黙って別の結果にしない＝ADR-0026④）。
+    clear_stale_frame(&out)?;
     let ffmpeg = resolve_ffmpeg(&app);
     // 先頭フレームを 1枚、横640pxへ縮小して PNG 出力（プレビュー用ポスター）。
     let args: Vec<String> = vec![
@@ -1401,10 +1812,297 @@ pub fn extract_video_thumbnail(
     run(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("thumbnail extract: {e}"),
-            "動画のサムネイル作成に失敗しました。",
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
         )
     })?;
+    // ⚠️ **「あるか」ではなく「出来たか」で見る**（#1140）＝これまでは `rel_out` をそのまま返して
+    // いたので、1枚も書かれていなくても「作れた」ことになっていた。
+    // ⚠️ **断り方は変えない**＝呼ぶ側（`extractVideoThumbnail`）は例外を `null` に倒して
+    // **アイコン表示へ落とす**ので、`Err` がそのまま「絵は無し」になる（利用者には出ない）。
+    if !produced_frame(&out) {
+        // 出口でも片づける＝0 バイトの絵を利用者のフォルダへ置き去りにしない（切り出しと同じ）。
+        let _ = fs::remove_file(&out);
+        return Err(export_failure(
+            format!("thumbnail extract produced nothing: {}", input.display()),
+            "動画の小さな絵を作れませんでした。別のファイルでお試しください。",
+        ));
+    }
     Ok(rel_out)
+}
+
+/// 動画の**その瞬間**を静止画（PNG）として切り出し、素材フォルダへ保存して相対パスを返す（#349）。
+///
+/// ⚠️ **サムネ（`extract_video_thumbnail`）とは別物**＝あちらは一覧用に横 640px へ縮める
+/// 「見せるための絵」。こちらは**素材として使う絵**なので**原寸のまま**出す（縮めると、
+/// 切り出した写真だけ解像度が落ちて動画に入る＝黙って劣化させない）。
+/// ⚠️ **ファイル名は呼ぶ側が決める**（`asset_NNN` の採番はドメイン側の責務・§4）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn extract_video_frame(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+    // ⚠️ **省略できる**（#1158）＝素材画面の切り出しは格子を持たないので、今までどおり秒で選ぶ。
+    source_start_sec: Option<f64>,
+    speed: Option<f64>,
+    fps: Option<u32>,
+    local_frame: Option<u32>,
+) -> Result<String, String> {
+    let grid = FrameGrid::new(source_start_sec, speed, fps, local_frame);
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_frame_impl(app, project_id, rel_path, at_sec, out_file_name, grid)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("frame extract join: {e}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        )
+    })?
+}
+
+/// 前に切り出した絵の**残骸**を片づける（#1137）。
+///
+/// ⚠️ **`-y`（上書き）だけでは足りない**＝尺の外を指すと FFmpeg は**何も書かない**ので、
+/// 残骸があると「出来たか」の判定（`produced_frame`）が**前回の絵**を見て成功と誤判定する。
+///
+/// ⚠️ **使う側は2つ**（#1140）＝切り出し（`extract_video_frame_impl`）と
+/// 小さな絵（`extract_video_thumbnail`）。**同じ規則なので写して増やさない**。
+/// ⚠️ **断り方は使う側が決める**＝切り出しは利用者に文を出すが、小さな絵は呼ぶ側
+///（`extractVideoThumbnail`）が `null` に倒して**アイコン表示へ落とす**ので、この `Err` は画面に出ない。
+/// ⚠️ **ただし文そのものは切り出し向きの1つを共有している**（#1140 レビュー由来 ℹ️）＝
+/// 「前に切り出した**写真**を…」。いまは小さな絵の側で画面に出ないので実害は無いが、
+/// **画面に出す3人目**ができたらそこでずれる（そのときは文を引数で受ける形へ）。
+/// ⚠️ **片づけられなければ断る**＝黙って進むと、また同じ誤判定に戻る（§2-5＝次の行動を出す）。
+/// ⚠️ **前提＝`out` の名前がその回に1つだけであること**（#1139 レビュー由来 ℹ️）。
+/// 採番は呼ぶ側の単一責務（`assetImport.ts` の `reserveAssetId`）が担保していて、
+/// **固定の名前で呼ぶ経路を1本足した瞬間に**、片づけ→起こす→数える の間に他が割り込める。
+fn clear_stale_frame(out: &std::path::Path) -> Result<(), String> {
+    if !out.exists() {
+        return Ok(());
+    }
+    fs::remove_file(out).map_err(|e| {
+        export_failure(
+            format!("frame stale remove: {e}"),
+            "前に切り出した写真を片づけられませんでした。アプリを開き直してから、もう一度お試しください。",
+        )
+    })
+}
+
+/// **本当に切り出せたか**（#1137）。
+///
+/// ⚠️ **あるだけでは数えない**＝作りかけの 0 バイトを「出来た」と読むと、
+/// 中身の無い写真が素材として増える。
+fn produced_frame(out: &std::path::Path) -> bool {
+    fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+fn extract_video_frame_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+    at_sec: f64,
+    out_file_name: String,
+    grid: Option<FrameGrid>,
+) -> Result<String, String> {
+    if !is_safe_frame_file_name(&out_file_name) {
+        return Err(export_failure(
+            format!("frame extract bad name: {out_file_name}"),
+            "静止画の切り出しに失敗しました。もう一度お試しください。",
+        ));
+    }
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("frame src missing: {}", input.display()),
+            "動画が見つかりませんでした。素材の一覧から取り込み直してください。",
+        ));
+    }
+    let rel_out = format!("assets/{out_file_name}");
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            export_failure(
+                format!("frame dir: {e}"),
+                "静止画の保存先を用意できませんでした。もう一度お試しください。",
+            )
+        })?;
+    }
+    // ⚠️ **残骸を先に片づける**（#1137）＝`-y` は上書きだが、**尺の外を指すと FFmpeg は何も書かない**。
+    // 同じ名前のファイルが残っていると、下の `out.exists()` が**前回の絵**を見て**成功と誤判定**し、
+    // **まったく別のコマが「切り出した絵」として貼り付く**
+    //（設定した意味どおりに結果が出ない＝ADR-0026①／黙って別の結果にしない＝同④）。
+    // ⚠️ **踏む道は実在する**＝素材番号の予約は**アプリの起動ごとに消える**ので
+    //（`assetImport.ts` の `reservedByProject`）、番号が空いた状態で**起動し直す**と
+    // 同じ名前が再発行され、ディスクには前回の PNG が残っている。
+    clear_stale_frame(&out)?;
+    let ffmpeg = resolve_ffmpeg(&app);
+    let args = match &grid {
+        Some(g) => frame_grid_args(&input, &out, g),
+        None => frame_seconds_args(&input, &out, at_sec),
+    };
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("frame extract: {e}"),
+            "静止画を切り出せませんでした。時間を少し動かしてもう一度お試しください。",
+        )
+    })?;
+    // ⚠️ **出来ていないのに成功にしない**＝尺の外を指すと FFmpeg は 0 個の絵で正常終了する。
+    // ⚠️ **中身も見る**（#1137）＝作りかけの 0 バイトを「出来た」と数えない。
+    if !produced_frame(&out) {
+        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの写真を
+        // 利用者のフォルダへ置き去りにしない（この関数だけで閉じる＝書き出し側の流儀と揃える）。
+        let _ = fs::remove_file(&out);
+        return Err(export_failure(
+            format!("frame extract produced nothing at {at_sec}"),
+            "その時間には映像がありませんでした。時間を少し戻してもう一度お試しください。",
+        ));
+    }
+    Ok(rel_out)
+}
+
+/// 止め絵に取る**コマの居場所**を、書き出しと同じ言葉で持つ（#1158）。
+///
+/// ⚠️ **秒ではなく「何枚目か」で受ける**＝秒で受けると、ここが**自分の丸め方**でコマを選ぶ。
+/// 書き出し（`stage_clip_frames_impl`）は `-ss 並べ始める秒 -i … -vf setpts=PTS/速さ,fps=N` で
+/// 並べた **N 枚目**を焼くので、**同じ並べ方の同じ番号**を取れば、丸め方を合わせる必要が無くなる
+///（近似で書き写さない＝ADR-0001）。
+///
+/// ⚠️ **実測してから直した**＝素材 29.97fps・出力 24fps などで**ちょうど1コマ**ずれる
+///（64 通りのうち 18 通り）。「起きるかもしれない」ではなく、起きる。
+struct FrameGrid {
+    /// 素材の中で並べ始める秒（＝書き出しの `-ss`）。
+    source_start_sec: f64,
+    /// 速さ（`setpts=PTS/speed`）。
+    speed: f64,
+    /// 出力の fps（`fps=N`）。
+    fps: u32,
+    /// 並べたうちの**何枚目か**（0 始まり＝書き出しの `frame_%05d` の番号）。
+    local_frame: u32,
+}
+
+impl FrameGrid {
+    /// 4つ**そろって初めて**格子として使う（1つでも欠けたら秒で選ぶ道へ戻す）。
+    ///
+    /// ⚠️ **半端に受けない**＝欠けたぶんを既定値で埋めると、**書き出しと違う並べ方**を
+    /// 「合わせた」と名乗ることになる（黙って別の結果にしない＝ADR-0026④）。
+    fn new(
+        source_start_sec: Option<f64>,
+        speed: Option<f64>,
+        fps: Option<u32>,
+        local_frame: Option<u32>,
+    ) -> Option<Self> {
+        let (source_start_sec, speed, fps, local_frame) =
+            (source_start_sec?, speed?, fps?, local_frame?);
+        // ⚠️ **使えない値は格子として受けない**＝0 や負の速さ・0fps は割り算が壊れる。
+        if !source_start_sec.is_finite() || !speed.is_finite() || speed <= 0.0 || fps == 0 {
+            return None;
+        }
+        Some(Self {
+            source_start_sec: source_start_sec.max(0.0),
+            speed,
+            fps,
+            local_frame,
+        })
+    }
+}
+
+/// 書き出しと**同じ並べ方**で、`local_frame` 枚目を1枚だけ取る（#1158）。
+///
+/// ⚠️ **`setpts`/`fps` の綴りは書き出しと同じにする**＝違えば「同じ番号」が別のコマを指す。
+/// 違うのは**横幅を縮めない**ことだけ（止め絵は素材の大きさのまま持ちたい）。
+/// ⚠️ **`select` は `fps` の後ろ**＝並べ直したあとの番号でなければ、書き出しの番号と揃わない。
+fn frame_grid_args(input: &std::path::Path, out: &std::path::Path, g: &FrameGrid) -> Vec<String> {
+    let vf = format!(
+        "setpts=PTS/{},fps={},select='eq(n\\,{})'",
+        g.speed, g.fps, g.local_frame
+    );
+    vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{}", g.source_start_sec),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-vf".into(),
+        vf,
+        // ⚠️ **`-vsync 0` が要る**＝`select` で間引いたあと、既定の並べ直しが**空いた所を埋め直す**ので、
+        // 1枚目（＝間引く前の先頭）が出てしまう。
+        "-vsync".into(),
+        "0".into(),
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]
+}
+
+/// 秒で1枚取る（格子を渡せない呼び出し＝素材画面の切り出し）。今までどおりの並べ方。
+fn frame_seconds_args(input: &std::path::Path, out: &std::path::Path, at_sec: f64) -> Vec<String> {
+    let seek = frame_seek_args(at_sec);
+    let mut args: Vec<String> = vec!["-y".into()];
+    if let Some(coarse) = seek.coarse_sec {
+        args.push("-ss".into());
+        args.push(format!("{coarse}"));
+    }
+    args.push("-i".into());
+    args.push(input.to_string_lossy().into_owned());
+    if seek.fine_sec > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{}", seek.fine_sec));
+    }
+    args.extend([
+        "-frames:v".into(),
+        "1".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
+    args
+}
+
+/// 頭出しの引数（#349・PR #885 レビュー 🔴）。粗い頭出しと、そこからの端数に分ける。
+struct FrameSeek {
+    /// `-i` の**前**に置く秒（`None` ＝前置きしない＝先頭から読む）。
+    coarse_sec: Option<f64>,
+    /// `-i` の**後**に置く秒（0 ＝置かない）。
+    fine_sec: f64,
+}
+
+/// 切り出した絵のファイル名として受けてよいか（#349・PR #885 レビュー 🟡）。
+///
+/// ⚠️ **規則は写さず共有する**（α-6 出口監査 ℹ️）＝ここは `is_safe_single_file_name` の**3つ目の写し**で、
+/// **コロンの検査だけ落ちていた**（Windows の `C:evil.txt` はドライブ相対＝`is_absolute()` を通る）。
+/// いまは下流の `is_safe_rel_path` が弾くので実害は無かったが、**順序が変われば穴になる**。
+fn is_safe_frame_file_name(name: &str) -> bool {
+    crate::assets::is_safe_single_file_name(name)
+}
+
+/// 切り出しの頭出しを「粗い＋端数」に分ける（#349・PR #885 レビュー 🔴）。
+///
+/// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**＝前置きは
+/// **指定秒より前のキーフレーム**まで飛んでそこから1枚を返すので、キーフレームの間隔が広い動画
+///（スマホ撮影・画面収録）では**数秒ずれる**。しかもコマンドは正常終了しファイルもできるので、
+/// 「0枚で正常終了」の検査では捕まらない＝**見た画と違う絵を成功として返してしまう**。
+///
+/// ⚠️ **`-i` の後ろだけに置くと遅い**（先頭から全部デコードする）。長い動画で待たされる。
+///
+/// そこで**手前まで粗く飛び、残りを正確に進む**（二段シーク＝定石）。
+/// 手前に取る余白（`SEEK_BACKOFF_SEC`）は、よくあるキーフレーム間隔（2〜5秒）を跨げる長さにする。
+fn frame_seek_args(at_sec: f64) -> FrameSeek {
+    // ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    let t = at_sec.max(0.0);
+    const SEEK_BACKOFF_SEC: f64 = 10.0;
+    if t <= SEEK_BACKOFF_SEC {
+        // 近い時刻は前置きせず、そのまま正確に進む（10 秒ぶんのデコードは待たされない）。
+        return FrameSeek {
+            coarse_sec: None,
+            fine_sec: t,
+        };
+    }
+    let coarse = t - SEEK_BACKOFF_SEC;
+    FrameSeek {
+        coarse_sec: Some(coarse),
+        fine_sec: t - coarse,
+    }
 }
 
 struct SceneFile {
@@ -1532,13 +2230,182 @@ fn validate_xfade_name(name: &str) -> Option<String> {
 }
 
 /// 書き出しの進捗イベント（#376）：フロントの ExportScreen が受けて encoding 段のバーを実進捗（80→100%）で描く。
-/// phase＝"encode"（場面ごとエンコード・step/total 有効）/"join"（結合）/"telop"（字幕合成）/"bgm"（BGM合成）。
+/// phase＝"encode"（場面ごとエンコード・step/total 有効）/"join"（結合）/"bgm"（BGM合成）。
 /// 出力（ffmpeg 引数）には一切影響しない＝パリティ不変（ADR-0001）。
 #[derive(Clone, serde::Serialize)]
 struct ExportProgressEvent {
     phase: String,
     step: usize,
     total: usize,
+}
+
+/// `-progress` の1行から「いま何秒目を書き終えたか」を読む（#1214）。**純粋関数**。
+///
+/// ⚠️ **`out_time_us` だけを見る**＝同じ出力に `out_time`（時分秒の文字列）も来るが、
+/// そちらは丸めや書式の揺れがある。マイクロ秒の整数1本に絞る。
+fn parse_out_time_us(line: &str) -> Option<u64> {
+    line.strip_prefix("out_time_us=")?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+/// つなぎ終わったときの尺（秒）＝場面の尺の合計から、切り替えで**重なるぶん**を引く（#1214・ADR-0009）。
+///
+/// ⚠️ **負にしない**＝切り替えが場面より長い壊れた文書でも、進み具合の分母が負になると
+/// 画面が跳ねる（データの検証は別の所の仕事なので、ここでは丸める）。
+fn join_total_sec(job_secs: &[f64], steps: &[JoinStep]) -> f64 {
+    let total: f64 = job_secs.iter().sum();
+    let overlap: f64 = steps
+        .iter()
+        .map(|s| {
+            if s.xfade.is_some() {
+                s.duration_sec
+            } else {
+                0.0
+            }
+        })
+        .sum();
+    (total - overlap).max(0.0)
+}
+
+/// つなぐ入力ごとに、**音を切る長さ**（秒）を決める（#1362・PR #1363 レビュー 🟡）。**純粋関数**。
+///
+/// - 次の境目が**切り替え**＝決めた尺で切る（映像の `xfade` は決めた位置で移る＝音もそこに合わせる）。
+/// - 次の境目が**ハードカット**＝**コマにそろえた長さ**（`ceil(尺×fps)/fps`）で切る＝映像の `concat` は
+///   入力の実際の長さ（コマ単位で切り上がる）でつなぐので、音も同じだけ置かないと、ハードカットが続くたびに
+///   絵だけが最大1コマずつ遅れる。
+/// - 最後の入力は、後ろに何もつながないので決めた尺。
+fn join_audio_secs(secs: &[f64], steps: &[JoinStep], fps: u32) -> Vec<f64> {
+    let fps = fps.max(1) as f64;
+    secs.iter()
+        .enumerate()
+        .map(|(i, &sec)| match steps.get(i) {
+            Some(st) if st.xfade.is_none() => (sec * fps - 1e-9).ceil() / fps,
+            _ => sec,
+        })
+        .collect()
+}
+
+/// 切り替えでつなぐ段に、**一度に入れる場面の数の上限**（#1360）。
+///
+/// ⚠️ **場面の数だけメモリを使う**＝FFmpeg は入力を全部同時に開き、まだ使わない入力のコマも待ち行列に溜める。
+/// 実測で 80 本を1回でつなぐと ffmpeg 1本が **7.8GB**（1本あたり約100MB）・分けると **1.9GB**。これを超えるときは
+/// 数本ずつの塊に分けてつなぎ、塊どうしをもう一度つなぐ（`plan_join_chunks`）。
+/// ⚠️ **24＝ふつうの長さの動画は分けない**＝分けると塊どうしを**もう一度圧縮し直す**ぶん、つなぐ段が延びる
+/// （45分・80場面の実測で 449秒→770秒）。1本あたり約100MB なので 24 本で約2.4GB に収まる。
+const MAX_JOIN_INPUTS: usize = 24;
+
+/// つなぐ途中の作り置き用に、音を**非圧縮（PCM）**へ差し替える（#1360・PR #1361 レビュー 🟡）。**純粋関数**。
+/// `-c:a aac` を `pcm_s16le` にし、AAC 用の指定（`-b:a` など）は持たない前提（`xfade_chain_args` は付けていない）。
+fn intermediate_audio_args(mut args: Vec<String>) -> Vec<String> {
+    if let Some(i) = args.iter().position(|a| a == "-c:a") {
+        if let Some(v) = args.get_mut(i + 1) {
+            *v = "pcm_s16le".to_string();
+        }
+    }
+    args
+}
+
+/// 塊1つ（場面 `[first, end)`）。`start_sec`＝出来上がりの中でこの塊が始まる位置、`steps`＝塊の中の境目（位置は塊の先頭から）。
+struct JoinChunk<'a> {
+    first: usize,
+    end: usize,
+    start_sec: f64,
+    /// 塊をつないだときの長さ（秒）＝最後の場面の始まり＋その尺−塊の始まり（2段目で音を切る尺・#1362）。
+    len_sec: f64,
+    steps: Vec<JoinStep<'a>>,
+}
+
+/// 塊に分けてつなぐ計画（#1360）。**純粋関数**。
+///
+/// - `scene_secs`＝場面ごとの尺、`steps`＝場面 i→i+1 の境目（`steps.len() == scene_secs.len()-1`）。
+/// - 場面の数が `max_inputs` 以下なら `None`（いままでどおり1回でつなぐ）。
+/// - 塊の大きさは `ceil(√n)`＝1段目も2段目も入力がほぼ同じ数になる（80 場面なら 9 本ずつ・2段目 9 本）。
+/// - ⚠️ **境目の位置（`offset_sec`）は「つないだ結果の先頭から」**＝塊の中では、塊の1本目が出力のどこから始まるかを引く。
+///   2段目は先頭から積み上げるので元の値のまま。⚠️ 出来上がりの長さ・切り替えの位置は1回でつなぐときと同じ。
+fn plan_join_chunks<'a>(
+    scene_secs: &[f64],
+    steps: &[JoinStep<'a>],
+    max_inputs: usize,
+    min_gap_sec: f64,
+) -> Option<(Vec<JoinChunk<'a>>, Vec<JoinStep<'a>>)> {
+    let n = scene_secs.len();
+    if n <= max_inputs || steps.len() + 1 != n {
+        return None;
+    }
+    // 場面 g が出力のどこから始まるか。切り替えなら境目の位置、ハードカットなら前の場面の終わり。
+    let mut starts = vec![0.0f64; n];
+    for g in 1..n {
+        let st = &steps[g - 1];
+        starts[g] = if st.xfade.is_some() {
+            st.offset_sec
+        } else {
+            starts[g - 1] + scene_secs[g - 1]
+        };
+    }
+    let size = (n as f64).sqrt().ceil() as usize;
+    // ⚠️ **塊の切れ目 b は「b より後ろのどの場面も、b の入りの切り替えが終わってから始まる」所だけ**
+    // （PR #1361 レビュー 🔴×2・🟡）。
+    // - 前側（`transitionTimeline`）は切り替えの長さを「それまでつないだ全体」で抑えているので、入りがハードカットの
+    //   短い場面を丸ごと覆って、その前の場面まで重なる切り替えが正当に来る。そこで切ると塊の中の位置が 0 以下になる
+    //   （xfade に「1本目より長い重なり」を渡す＝未定義の動き）。
+    // - b の入りの切り替えの**最中**に次の切り替えが始まると、塊に分けたときに**重ねる順番**が変わる（絵も音も）。
+    // - ⚠️ **窓の中だけでなく b より後ろ全部**と比べる＝切れ目をずらして塊が延びても必ず満たす（窓だけだと、延びたぶんを
+    //   一度も比べない＝実際に反例があった）。後ろ側の最小値を先に作る。
+    // - 余裕は1コマ（`min_gap_sec`）＝1回でつなぐとき前側が守っている「最低1コマ残る」と同じ。
+    // 満たさなければ切れ目を後ろへずらす。⚠️ **最後の場面の頭はいつも切れる**（後ろが無い）ので塊は必ず2つ以上＝
+    // 全体が1つの塊になることは無い（PR #1361 再レビュー 🟡 は届かないと確かめた）。ずらし続けると前の塊が大きくなる＝記録に残す。
+    let mut later_min = vec![f64::INFINITY; n + 1];
+    for g in (1..n).rev() {
+        later_min[g] = later_min[g + 1].min(starts[g]);
+    }
+    let cut_ok = |b: usize| -> bool {
+        let entry = &steps[b - 1];
+        let entry_d = if entry.xfade.is_some() {
+            entry.duration_sec
+        } else {
+            0.0
+        };
+        later_min[b + 1] >= starts[b] + entry_d + min_gap_sec
+    };
+    let mut chunks = Vec::new();
+    let mut top = Vec::new();
+    let mut a = 0usize;
+    while a < n {
+        let mut b = (a + size).min(n);
+        while b < n && !cut_ok(b) {
+            b += 1;
+        }
+        let base = starts[a];
+        let inner = (a + 1..b)
+            .map(|g| {
+                let st = &steps[g - 1];
+                JoinStep {
+                    xfade: st.xfade,
+                    duration_sec: st.duration_sec,
+                    offset_sec: st.offset_sec - base,
+                }
+            })
+            .collect();
+        chunks.push(JoinChunk {
+            first: a,
+            end: b,
+            start_sec: base,
+            len_sec: starts[b - 1] + scene_secs[b - 1] - base,
+            steps: inner,
+        });
+        if a > 0 {
+            let st = &steps[a - 1];
+            top.push(JoinStep {
+                xfade: st.xfade,
+                duration_sec: st.duration_sec,
+                offset_sec: st.offset_sec,
+            });
+        }
+        a = b;
+    }
+    Some((chunks, top))
 }
 
 /// 進捗イベントを emit（送れなくても書き出しは続行＝best-effort・#376）。app が None（テスト等）は何もしない。
@@ -1746,8 +2613,9 @@ fn encode_jobs(
         // 場面1本を焼くたびに実進捗を通知＝encoding 段のバーが場面ごとに進む（#376）。
         emit_export_progress(progress, "encode", i + 1, jobs.len());
     }
-    eprintln!(
-        "[export] encode {} clips: {} ms",
+    crate::tlog!(
+        "export",
+        "encode {} clips: {} ms",
         jobs.len(),
         encode_start.elapsed().as_millis()
     );
@@ -1805,21 +2673,137 @@ fn encode_jobs(
                 });
             }
         }
-        // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップに変わっただけ。
-        let args = xfade_chain_args(
-            &scene_files,
+        // 出来上がりの尺＝場面の尺の合計から、切り替えで**重なるぶん**を引く（ADR-0009）。
+        let job_secs: Vec<f64> = jobs.iter().map(|j| j.duration_sec()).collect();
+        let total_sec = join_total_sec(&job_secs, &scene_steps);
+        let total = total_sec.round().max(1.0) as usize;
+        let scene_secs: Vec<f64> = ranges
+            .iter()
+            .map(|&(a, b)| job_secs[a..b].iter().sum())
+            .collect();
+        // ⚠️ **場面が多いときは塊に分けてつなぐ**（#1360）＝1回で全部を入れると場面の数だけメモリを使う
+        // （80 場面で ffmpeg 1本 7.8GB）。塊ごとにつないでから、塊どうしをつなぐ。
+        // 進み具合は**前半＝塊をつなぐ・後半＝塊どうしをつなぐ**で、同じ「つなぐ」の段の中で送る。
+        let chunked = plan_join_chunks(
+            &scene_secs,
             &scene_steps,
+            MAX_JOIN_INPUTS,
+            1.0 / fps.max(1) as f64,
+        );
+        let (join_files, join_steps, join_secs, done_before, span) = match &chunked {
+            None => (
+                scene_files.clone(),
+                scene_steps,
+                scene_secs.clone(),
+                0usize,
+                total,
+            ),
+            Some((chunks, top)) => {
+                let half = total;
+                let mut files_lv2: Vec<String> = Vec::with_capacity(chunks.len());
+                for (k, c) in chunks.iter().enumerate() {
+                    // 切れ目をずらし切れず塊が大きくなった（＝その塊はメモリを多く使う）ことを記録に残す（PR #1361 再レビュー ℹ️）。
+                    if c.end - c.first > MAX_JOIN_INPUTS {
+                        crate::tlog!(
+                            "export",
+                            "join chunk {} has {} scenes (over {})",
+                            k,
+                            c.end - c.first,
+                            MAX_JOIN_INPUTS
+                        );
+                    }
+                    if c.end - c.first == 1 {
+                        files_lv2.push(scene_files[c.first].clone());
+                        continue;
+                    }
+                    // ⚠️ **塊の音は圧縮しない**（PR #1361 レビュー 🟡）＝AAC で作り直すと末尾に詰め物（最大約23ms）が付き、
+                    // 2段目の音のつなぎ（acrossfade は左の**実際の**終わりから始まる）で塊の数だけずれが積み上がる。
+                    // 非圧縮（PCM）なら長さが合う。入れ物は PCM を持てる mkv。
+                    let chunk_out = tmp_dir.join(format!("join_chunk_{k:03}.mkv"));
+                    let mut cargs = intermediate_audio_args(xfade_chain_args_trimmed(
+                        &scene_files[c.first..c.end],
+                        &c.steps,
+                        Some(&join_audio_secs(&scene_secs[c.first..c.end], &c.steps, fps)),
+                        &chunk_out.to_string_lossy(),
+                        codec,
+                        fps,
+                        bitrate,
+                    ));
+                    cargs.push("-progress".to_string());
+                    cargs.push("pipe:1".to_string());
+                    cargs.push("-nostats".to_string());
+                    let base = c.start_sec;
+                    let last = std::cell::Cell::new(usize::MAX);
+                    let on_us = |us: u64| {
+                        let sec = (base + us as f64 / 1_000_000.0) as usize;
+                        if sec == last.get() {
+                            return;
+                        }
+                        last.set(sec);
+                        emit_export_progress(progress, "join", sec.min(half), half * 2);
+                    };
+                    run_export_progress(ffmpeg, &cargs, &on_us).map_err(|e| {
+                        export_failure(
+                            format!("xfade join chunk {k}: {e}"),
+                            "場面の切り替え合成に失敗しました。もう一度お試しください。",
+                        )
+                    })?;
+                    files_lv2.push(chunk_out.to_string_lossy().into_owned());
+                }
+                let top_steps: Vec<JoinStep> = top
+                    .iter()
+                    .map(|st| JoinStep {
+                        xfade: st.xfade,
+                        duration_sec: st.duration_sec,
+                        offset_sec: st.offset_sec,
+                    })
+                    .collect();
+                let lens: Vec<f64> = chunks.iter().map(|c| c.len_sec).collect();
+                (files_lv2, top_steps, lens, half, half)
+            }
+        };
+        // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップ（または塊）に変わっただけ。
+        let mut args = xfade_chain_args_trimmed(
+            &join_files,
+            &join_steps,
+            Some(&join_audio_secs(&join_secs, &join_steps, fps)),
             &output.to_string_lossy(),
             codec,
             fps,
             bitrate,
         );
-        run_export(ffmpeg, &args).map_err(|e| {
+        // ⚠️ **進み具合は、引数を組む純粋関数の外で足す**（#1214）＝中に入れると
+        // `xfade_chain_args` の検査（引数の並びを固定しているもの）が**進み具合の都合で動く**。
+        // ⚠️ **`-nostats`** ＝既定の進捗行（標準エラー）は使わないので止める。
+        args.push("-progress".to_string());
+        args.push("pipe:1".to_string());
+        args.push("-nostats".to_string());
+        // ⚠️ **秒が変わったときだけ送る**＝FFmpeg は細かく出すので、そのまま流すと画面が忙しくなる。
+        // ⚠️ **`progress` は借りたまま使う**（写してスレッドへ渡さない＝上の `run_export_inner` の注意）。
+        let last = std::cell::Cell::new(0usize);
+        let on_us = |us: u64| {
+            let sec = (us / 1_000_000) as usize;
+            if sec == last.get() {
+                return;
+            }
+            last.set(sec);
+            emit_export_progress(
+                progress,
+                "join",
+                done_before + sec.min(span),
+                done_before + span,
+            );
+        };
+        run_export_progress(ffmpeg, &args, &on_us).map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
                 "場面の切り替え合成に失敗しました。もう一度お試しください。",
             )
         })?;
+        // ⚠️ **終わったら必ず上限まで届かせる**（PR #1219 レビュー）＝見積りの尺と FFmpeg が最後に出す
+        // 秒は**丸めで一致しない**ので、放っておくと**途中の%のまま次の段へ飛ぶ**。
+        // 映像を作る段は場面ごとに最後まで送っているので、こちらも同じ形に揃える。
+        emit_export_progress(progress, "join", done_before + span, done_before + span);
     } else {
         // 遷移なし：従来どおり concat demuxer の無劣化コピー（高速）。
         let mut list = String::new();
@@ -1842,8 +2826,9 @@ fn encode_jobs(
         })?;
     }
     if files.len() >= 2 {
-        eprintln!(
-            "[export] join {} clips: {} ms",
+        crate::tlog!(
+            "export",
+            "join {} clips: {} ms",
             files.len(),
             join_start.elapsed().as_millis()
         );
@@ -1891,7 +2876,7 @@ fn parse_fit(s: &str) -> Fit {
 }
 
 /// プロジェクト相対パスを絶対パスへ解決（パストラバーサル・絶対パスを拒否＝assets.rs と同方針）。
-fn resolve_project_file(
+pub(crate) fn resolve_project_file(
     app: &tauri::AppHandle,
     project_id: &str,
     rel_path: &str,
@@ -1902,11 +2887,9 @@ fn resolve_project_file(
             "動画の書き出しに失敗しました。アプリを再起動してもう一度お試しください。",
         ));
     }
-    if rel_path.contains("..")
-        || rel_path.starts_with('/')
-        || rel_path.starts_with('\\')
-        || Path::new(rel_path).is_absolute()
-    {
+    // ⚠️ **規則は写さず共有する**（#893・§2-7）＝ここに同じ条件を書き直していたため、
+    // `assets.rs` 側にコロン（Windows のドライブ相対パス）の検査を足しても**こちらだけ古いまま**だった。
+    if !crate::assets::is_safe_rel_path(rel_path) {
         return Err(export_failure(
             format!("unsafe rel_path: {rel_path}"),
             "動画の書き出しに失敗しました。素材を確認してもう一度お試しください。",
@@ -2104,6 +3087,7 @@ pub fn cleanup_stale_export_dirs(app: &tauri::AppHandle) {
         .map(|b| b.join("exports").join(".frames_stage"));
     // 作業ディレクトリの親 `%TEMP%`（yuko_recruit_export_* が並ぶ）。
     let temp_parent = std::env::temp_dir();
+    let app_for_cache = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = stage_parent {
             remove_stale_export_dirs(&parent, "proc_", STALE_EXPORT_DIR_MAX_AGE);
@@ -2113,7 +3097,51 @@ pub fn cleanup_stale_export_dirs(app: &tauri::AppHandle) {
             "yuko_recruit_export_",
             STALE_EXPORT_DIR_MAX_AGE,
         );
+        // 帯に敷く絵の作り置きも一緒に（#332）＝誰も消さないと増え続ける。
+        remove_stale_analysis_cache(&app_for_cache);
     });
+}
+
+/// 帯に敷く絵の作り置き（`projects/*/cache/`）を古い順に片づける（#332）。
+///
+/// ⚠️ **誰も消さないと増え続ける**＝鍵に「素材の中身の印」と「コマ数」と「範囲」が入るので、
+/// 中身を差し替えるたび・別の倍率で開くたび・別の範囲で置くたびに1枚増える。
+/// 素材の片づけ（`delete_project_files` は `assets/` 限定＝破壊的なコマンドは範囲を狭く）にも
+/// 焼き出しのコピー（明示パス）にも乗らないので、**起動時にまとめて捨てる**。
+/// **作り直せる**ものなので、消して困ることは無い（次に必要になったら作る）。
+fn remove_stale_analysis_cache(app: &tauri::AppHandle) {
+    let projects = match app.path().app_data_dir().ok().map(|b| b.join("projects")) {
+        Some(p) => p,
+        None => return,
+    };
+    let now = SystemTime::now();
+    let entries = match fs::read_dir(&projects) {
+        Ok(e) => e,
+        Err(_) => return, // まだ動画を作っていない＝掃除不要
+    };
+    for project in entries.flatten() {
+        let cache = project.path().join("cache");
+        let files = match fs::read_dir(&cache) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if !path.is_file() {
+                continue;
+            }
+            // 使われていない期間で見る（書き出しの一時置き場と同じ基準・同じ長さ）。
+            if let Ok(modified) = file.metadata().and_then(|m| m.modified()) {
+                if now
+                    .duration_since(modified)
+                    .map(|d| d > STALE_EXPORT_DIR_MAX_AGE)
+                    .unwrap_or(false)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
 }
 
 /// クリップの区間フレームを出力fpsでステージング（#442・動画スロット本体アニメ）。
@@ -2460,10 +3488,20 @@ pub struct NarrationSegmentInput {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BgmRunInput {
+    /// 音源の中身（base64）。**`audio_path` を渡すときは空でよい**。
     audio_base64: String,
+    /// 音源のプロジェクト相対パス（#512 段2）。**動画の元の音**はここで渡す
+    /// ＝動画ファイルを base64 にすると数百MBの文字列を作ることになる（場面形式の動画スロットも
+    /// パスで渡している＝同じ流儀）。指定があれば base64 より優先し、一時ファイルも作らない。
+    #[serde(default)]
+    audio_path: Option<String>,
     /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
     file_ext: String,
     volume: f64,
+    /// 音量の変化（#512）＝`volume` フィルタの式。**未指定＝従来どおり `volume` の一定値**
+    /// （場面形式の呼び出しは渡さない＝出力は不変）。組むのは front の `volumeExpr`（ADR-0032 追補＝案A）。
+    #[serde(default)]
+    volume_expr: Option<String>,
     /// グローバル配置開始（秒）＝adelay。
     #[serde(default)]
     delay_sec: f64,
@@ -2473,17 +3511,24 @@ pub struct BgmRunInput {
     fade_in_sec: f64,
     #[serde(default)]
     fade_out_sec: f64,
+    /// 素材が短いとき繰り返すか。**既定 true＝従来の BGM の挙動**（場面形式の呼び出しは指定しない）。
+    /// タイムライン形式の読み上げは false を渡す（#631）。
+    #[serde(default = "default_true")]
+    loop_source: bool,
+    /// 素材のどこから使うか（秒）。**既定 0＝従来どおり頭から**。
+    #[serde(default)]
+    source_start_sec: f64,
+    /// 再生速度。**既定 1.0＝従来どおり等速**。
+    #[serde(default = "default_speed")]
+    speed: f64,
 }
 
-/// タイムラインのテロップ帯入力（ADR-0018）。透過PNG（base64/data URL）＋グローバル表示区間（compileTimeline の秒と一致）。
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TelopInput {
-    png_base64: String,
-    #[serde(default)]
-    start_sec: f64,
-    #[serde(default)]
-    end_sec: f64,
+fn default_speed() -> f64 {
+    DEFAULT_SPEED
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// エクスポート結果の要約。
@@ -2511,6 +3556,7 @@ impl Drop for ExportInFlightGuard {
 /// 同期コマンドのままだとメインスレッド（UI イベントループ）を塞ぎ、ウィンドウが「応答なし」になる（#375）。
 /// async コマンド＋spawn_blocking でブロッキング専用スレッドへ退避し、UI を生かす。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_video(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
@@ -2518,7 +3564,10 @@ pub async fn export_video(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
-    telops: Option<Vec<TelopInput>>,
+    // 全体の音量を整えるときの目安の大きさ（LUFS・#259）。未指定＝整えない（従来どおり＝出力不変）。
+    normalize_lufs: Option<f64>,
+    // 映像の目標ビットレートの上限（bps・#1218「ふつう」）。未指定＝上限なし（従来どおり＝出力不変）。
+    max_bitrate_bps: Option<u64>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         export_video_impl(
@@ -2528,7 +3577,8 @@ pub async fn export_video(
             bgm_runs,
             project_id,
             output_path,
-            telops,
+            normalize_lufs,
+            max_bitrate_bps,
         )
     })
     .await
@@ -2702,7 +3752,8 @@ fn export_video_impl(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
-    telops: Option<Vec<TelopInput>>,
+    normalize_lufs: Option<f64>,
+    max_bitrate_bps: Option<u64>,
 ) -> Result<ExportReport, String> {
     // すでに別の書き出しが走っていれば弾く（二重実行での作業ディレクトリ相互破壊を防ぐ・#379）。
     // 取得できたら以降の全経路で RAII ガードが解除を保証する。
@@ -2720,7 +3771,7 @@ fn export_video_impl(
     // 準備中に押された中止を取りこぼす（本体開始で flag が消える）ため、ここでは初期化しない。
 
     if scenes.is_empty() {
-        return Err("書き出す場面がありません。".into());
+        return Err("書き出す場面がありません。場面を1つ以上作ってからお試しください。".into());
     }
     let ffmpeg = resolve_ffmpeg(&app);
     let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).map_err(|_| {
@@ -2744,6 +3795,11 @@ fn export_video_impl(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
+    // ⚠️ **抜けるときに必ず消す**（成功・失敗・中止・途中の `?`・#1358）＝中間ファイル（場面ごとの動画・つないだ動画）は
+    // 書き出した動画と同じくらいの大きさ（45分で 7.2GB）。以前は**次に同じプロセス番号で書き出したとき**と、
+    // 起動時の掃除（24時間より古いもの・#420）でしか消えず、**丸1日、書き出しのたびに数GBずつ残って**いた。
+    // 書き出した動画そのものはここに置かない（保存先の隣に一時名で書く＝`StagedCleanup`）ので、消して困るものは無い。
+    let _tmp_cleanup = TmpDirCleanup { path: tmp.clone() };
 
     let mut jobs: Vec<SceneJob> = Vec::with_capacity(scenes.len());
     for (i, s) in scenes.iter().enumerate() {
@@ -2776,7 +3832,7 @@ fn export_video_impl(
             let pid = project_id.as_deref().ok_or_else(|| {
                 export_failure(
                     "video scene without project_id",
-                    "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                    "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
                 )
             })?;
             // 下層PNG：below_frames_dir（動画×アニメ・#435）があれば静止 below は書き出さない（per-frame を使う）。
@@ -2876,7 +3932,7 @@ fn export_video_impl(
                 return Err(export_failure(
                     format!("invalid slot size: {}x{}", v.slot_w, v.slot_h),
                     format!(
-                        "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                        "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                         i + 1
                     ),
                 ));
@@ -2926,7 +3982,7 @@ fn export_video_impl(
                     return Err(export_failure(
                         format!("invalid layer slot size: {}x{}", vl.slot_w, vl.slot_h),
                         format!(
-                            "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                            "場面{}の動画の大きさを決められませんでした。見た目パターンを選び直してください。",
                             i + 1
                         ),
                     ));
@@ -3038,7 +4094,7 @@ fn export_video_impl(
                 let pid = project_id.as_deref().ok_or_else(|| {
                     export_failure(
                         "clip audio without project_id",
-                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                        "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
                     )
                 })?;
                 let mut clips: Vec<(PathBuf, &ClipAudioInput)> =
@@ -3129,7 +4185,7 @@ fn export_video_impl(
             if p.components().any(|c| c.as_os_str() == "..") {
                 return Err(export_failure(
                     "output_path contains '..': path traversal rejected",
-                    "保存先が不正です。保存先を選び直してください。",
+                    "保存先が使えません。保存先を選び直してください。",
                 ));
             }
             if let Some(parent) = p.parent() {
@@ -3193,17 +4249,40 @@ fn export_video_impl(
             SceneJob::Frames(f) => read_png_size(f.first_frame.as_path()),
         })
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
-    let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
+    let bitrate = bitrate_arg(capped_bitrate_bps(
+        target_bitrate_bps(out_w, out_h, DEFAULT_FPS),
+        max_bitrate_bps,
+    ));
 
-    // パス構成：場面結合 →（テロップ overlay 合成・ADR-0018）→（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
-    let has_telops = telops.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
+    // パス構成：場面結合 →（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
+    // 旧・場面横断タイムラインのテロップ合成は #635 で退役（ADR-0032 決定11/12）＝この段そのものが無くなった。
     let has_bgm = bgm_runs.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
-    let joined_path = if has_telops {
-        tmp.join("joined.mp4")
-    } else if has_bgm {
+    let normalize = normalize_lufs.map(|target_lufs| NormalizeSpec { target_lufs });
+    // ⚠️ **BGM が無くても音を整えるなら音の段を通す**（#259・ADR-0026②）＝BGM の有無で
+    // 「音量を整える」が効いたり効かなかったりすると、同じ設定で別の結果になる。
+    // 整えるだけのときは `amix=inputs=1`（既存音声だけ）を通る＝映像は `-c:v copy` のまま。
+    let needs_audio_pass = has_bgm || normalize.is_some();
+    // ⚠️ **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）＝ffmpeg は出力を**開いた時点で切り詰める**ので、
+    // 既にある動画を選んで「上書きしますか→はい」と答えた直後に中止・失敗すると、
+    // **前の動画が失われ、開けないファイルだけが残る**（実測＝10,748 バイトの再生できる動画が
+    // 262,192 バイトの `moov atom not found` になった）。しかも成功時と同じ名前・拡張子なので、
+    // **開くまで気づけない**（§2-5「黙って別の結果にしない」）。
+    // → **隣に一時名で書き、成功したときだけ名前を付け替える**。
+    let staged = staged_output_path(&out);
+    // ⚠️ **前の回の書きかけを先に掃く**（レビュー由来 ℹ️ 2026-09-10）＝強制終了で `StagedCleanup` が
+    // 走らなかったぶんは**誰も消さない**まま保存先に残る。とくに **#1105 より前の形**
+    //（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので永久に残っていた。
+    // ⚠️ **同じ保存先の書きかけだけ**を消す（他のファイルは触らない）。
+    remove_stale_staged(&out);
+    let joined_path = if needs_audio_pass {
         tmp.join("video.mp4")
     } else {
-        out.clone()
+        staged.clone()
+    };
+    // ⚠️ **書きかけは、どの抜け方でも片づける**（中止・失敗・途中の `?`）＝
+    // 残すと、次に同じ場所へ書き出すときに**前回の書きかけ**が隣にいる（利用者から見ると謎のファイル）。
+    let _staged_cleanup = StagedCleanup {
+        path: staged.clone(),
     };
     let export_start = Instant::now();
     encode_jobs(
@@ -3218,56 +4297,12 @@ fn export_video_impl(
         Some(&app),
     )?;
 
-    // タイムラインのテロップ帯を結合後の動画へ overlay（区間はグローバル秒＝xfade 重なり込みの実効時間軸）。
-    let video_path = if has_telops {
-        emit_export_progress(Some(&app), "telop", 0, 0); // 字幕合成中（#376）
-        let telop_start = Instant::now();
-        let list = telops.unwrap_or_default();
-        let target = if has_bgm {
-            tmp.join("video.mp4")
-        } else {
-            out.clone()
-        };
-        let mut png_paths: Vec<String> = Vec::with_capacity(list.len());
-        for (i, t) in list.iter().enumerate() {
-            let p = tmp.join(format!("telop_{i:03}.png"));
-            decode_b64_to_file(&t.png_base64, &p, &format!("telop {}", i + 1))?;
-            png_paths.push(p.to_string_lossy().into_owned());
-        }
-        let overlays: Vec<TelopOverlay> = list
-            .iter()
-            .zip(png_paths.iter())
-            .map(|(t, p)| TelopOverlay {
-                png: p,
-                start_sec: t.start_sec,
-                end_sec: t.end_sec,
-            })
-            .collect();
-        let args = overlay_telops_args(
-            &joined_path.to_string_lossy(),
-            &overlays,
-            codec,
-            &bitrate,
-            &target.to_string_lossy(),
-        );
-        run_export(&ffmpeg, &args).map_err(|e| {
-            export_failure(
-                format!("telop overlay: {e}"),
-                "テロップの合成に失敗しました。もう一度お試しください。",
-            )
-        })?;
-        eprintln!(
-            "[export] telop overlay: {} ms",
-            telop_start.elapsed().as_millis()
-        );
-        target
-    } else {
-        joined_path
-    };
-
     // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
-    if has_bgm {
-        emit_export_progress(Some(&app), "bgm", 0, 0); // BGM合成中（#376）
+    // 音を整えるだけ（BGM 無し）のときもここを通る（#259）＝BGM のリストが空になるだけ。
+    if needs_audio_pass {
+        // ⚠️ **BGM が無いのに「BGMを合わせています」と出さない**（PR #896 レビュー ℹ️）＝
+        // 整えるだけのときは別の段として出す（事実と違う進捗を見せない・§2-5）。
+        emit_export_progress(Some(&app), if has_bgm { "bgm" } else { "loudness" }, 0, 0);
         let bgm_start = Instant::now();
         let list = bgm_runs.unwrap_or_default();
         // xfade で重なった分だけ実効総尺が縮む（ADR-0009）。-t にこの値を使う。境界は joins[1..] のみ。
@@ -3279,6 +4314,29 @@ fn export_video_impl(
         let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
         let mut files: Vec<String> = Vec::with_capacity(list.len());
         for (i, r) in list.iter().enumerate() {
+            // パス指定（#512 段2＝動画の元の音）は**そのまま入力にする**。中身を運ばないので、
+            // 大きな動画でも文字列にならない。存在しなければ理由つきで断る（黙って無音にしない）。
+            if let Some(rel) = r.audio_path.as_deref() {
+                // ⚠️ **プロジェクトが判らないなら、その理由で断る**（レビュー 🟡・§2-5）。
+                // 空文字で流すと `is_safe_project_id` に落ちて「アプリを再起動して」という
+                // **的外れな案内**になる（本当に必要なのは保存）。同ファイルの動画ありシーン・
+                // クリップ元音声の2か所と**同じ断り方**に揃える（同じ事情に別の文言を出さない）。
+                let pid = project_id.as_deref().ok_or_else(|| {
+                    export_failure(
+                        "video clip audio without project_id",
+                        "動画を使う書き出しは、先に保存が必要です。動画を保存してから、もう一度お試しください。",
+                    )
+                })?;
+                let src = resolve_project_file(&app, pid, rel)?;
+                if !src.exists() {
+                    return Err(export_failure(
+                        format!("bgm src missing: {}", src.display()),
+                        "動画が見つかりませんでした。もう一度取り込んでください。",
+                    ));
+                }
+                files.push(src.to_string_lossy().into_owned());
+                continue;
+            }
             let bg_bytes = base64::engine::general_purpose::STANDARD
                 .decode(strip_data_url(&r.audio_base64))
                 .map_err(|e| {
@@ -3303,43 +4361,226 @@ fn export_video_impl(
             .map(|(r, f)| BgmRunPlaced {
                 file: f.as_str(),
                 volume: r.volume,
+                volume_expr: r.volume_expr.as_deref(),
                 delay_sec: r.delay_sec,
                 play_sec: r.play_sec,
                 fade_in_sec: r.fade_in_sec,
                 fade_out_sec: r.fade_out_sec,
+                loop_source: r.loop_source,
+                source_start_sec: r.source_start_sec,
+                speed: r.speed,
             })
             .collect();
         let args = mix_bgm_runs_args(
-            &video_path.to_string_lossy(),
+            &joined_path.to_string_lossy(),
             &placed,
             total,
-            &out.to_string_lossy(),
+            normalize,
+            &staged.to_string_lossy(),
         );
         run_export(&ffmpeg, &args).map_err(|e| {
+            // ⚠️ **ffmpeg が言ったことを記録に残す**（#1105）＝画面には技術用語を出せないので（§2-3）、
+            // ここで捨てると**原因を追う手がかりが完全に消える**。実際、利用者から
+            // 「BGM を外しているのに『BGMの合成に失敗しました』が出る」と報告が来たとき、
+            // **こちらは何が起きたか一切分からなかった**。記録は外へ送られないので、
+            // 送るかどうかは利用者が決める（設定の「記録の場所を開く」）。
+            crate::tlog!("export", "bgm mix failed (has_bgm={has_bgm}): {e}");
+            crate::tlog!("export", "bgm mix args: {}", args.join(" "));
             export_failure(
                 format!("bgm mix: {e}"),
-                "BGMの合成に失敗しました。もう一度お試しください。",
+                // ⚠️ **状況で言い分ける**（#1105）＝BGM を1つも置いていない人に「BGMの合成に失敗」と
+                // 言うと、身に覚えのない語で断ることになる（§2-5）。この段は
+                // `needs_audio_pass = has_bgm || normalize.is_some()` なので、**音量をそろえるだけでも通る**。
+                if has_bgm {
+                    "BGMの合成に失敗しました。もう一度お試しください。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                } else {
+                    "音量の調整に失敗しました。書き出しの「音の自動調整」で「全体の音量をそろえる」を切ると、そのまま書き出せることがあります。何度も失敗するときは、設定の「記録の場所を開く」から記録をお送りください"
+                },
             )
         })?;
-        eprintln!("[export] bgm mix: {} ms", bgm_start.elapsed().as_millis());
+        crate::tlog!("export", "bgm mix: {} ms", bgm_start.elapsed().as_millis());
     }
     // 書き出し全体（エンコード＋結合＋字幕＋BGM）の所要時間。代表ケースで Before/After を測るための計測ログ（#376）。
-    eprintln!(
-        "[export] total (encode+join+telop+bgm): {} ms / {} scenes",
+    crate::tlog!(
+        "export",
+        "total (encode+join+bgm): {} ms / {} scenes",
         export_start.elapsed().as_millis(),
         scenes.len()
     );
 
+    // ⚠️ **ここで初めて利用者の場所へ置く**＝ここまで来たものだけが「開ける動画」。
+    // `rename` は同じ場所どうしなので取り違えが起きない（別ドライブへ跨がない）。
+    finish_staged_output(&staged, &out)?;
+    // ⚠️ **ここで初めて「開ける動画」になる**（#1118）＝画面の「動画を再生」はこの覚えだけを見る。
+    // 失敗した回は覚えない（書きかけを開かせない）。
+    // ⚠️ **返す文字列そのものを覚える**（レビュー由来 ℹ️）＝覚えるのが `PathBuf`、返すのが
+    // `to_string_lossy()` だと**別の道**で作った値どうしを突き合わせることになる。
+    // 画面は返した文字列を戻してくるので、**それを覚えておけば構造的に同値**になる
+    //（食い違うと「この場所は開けませんでした」になり、原因が追いにくい）。
+    let output_path = out.to_string_lossy().into_owned();
+    crate::opener::remember(std::path::Path::new(&output_path));
+
     Ok(ExportReport {
-        output_path: out.to_string_lossy().into_owned(),
+        output_path,
         codec: codec.encoder().to_string(),
         scene_count: scenes.len(),
     })
 }
 
+/// 書きかけを置く場所（利用者の選んだ場所の**隣**）。
+///
+/// ⚠️ **同じフォルダに置く**＝別の場所（一時フォルダ）だと、最後の付け替えが
+/// **ドライブをまたぐコピー**になり、大きな動画で時間がかかるうえ途中で失敗しうる。
+fn staged_output_path(out: &Path) -> PathBuf {
+    let name = out
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "video.mp4".to_string());
+    // ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明 2026-09-10）＝以前は `.<名前>.mp4.writing`
+    // にしていたが、**ffmpeg は出力の形式を拡張子で決める**ので `.writing` で終わると
+    // 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    // 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため。
+    // BGM とは無関係で、**音を混ぜる段を通る書き出しはすべて落ちていた**）。
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
+            (stem.to_string(), ext.to_string())
+        }
+        // 拡張子が無いときは、先頭のドットだけ付ける（ffmpeg 側は元から形式を決められない）。
+        _ => return out.with_file_name(format!(".{name}.writing")),
+    };
+    out.with_file_name(format!(".{stem}.writing.{ext}"))
+}
+
+/// **この保存先の書きかけ**（いまの形と、#1105 より前の形）を消す。
+///
+/// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+/// 残ると、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+/// ⚠️ **名前で当てる**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**のものまで消しうる。
+/// ⚠️ **消せなくても止めない**＝掃除は書き出しの本筋ではない。
+fn remove_stale_staged(out: &Path) {
+    let _ = fs::remove_file(staged_output_path(out));
+    if let Some(name) = out.file_name().map(|n| n.to_string_lossy().into_owned()) {
+        // #1105 より前の形（拡張子で終わらないので、ffmpeg が形式を決められず必ず失敗していた）。
+        let _ = fs::remove_file(out.with_file_name(format!(".{name}.writing")));
+    }
+}
+
+/// 書けた動画を利用者の選んだ場所へ置く（**成功したときだけ**呼ぶ）。
+fn finish_staged_output(staged: &Path, out: &Path) -> Result<(), String> {
+    // ⚠️ **先に消さない**（#984 レビュー 🔴）＝当初は「Windows は既にあるファイルへ rename できない」
+    // と思って `remove_file` してから rename していたが、**実測したら上書きできた**
+    //（Rust の `fs::rename` は Windows で `MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)` を使う）。
+    // 先に消すと、**消せたが rename に失敗した**ときに**前の動画も新しい動画も無い**状態になる＝
+    // このPRが防ごうとしていた「前の動画が失われる」を、別の形で自分で作っていた。
+    // rename ひとつなら、失敗しても**前の動画はそのまま残る**。
+    fs::rename(staged, out).map_err(|e| {
+        export_failure(
+            format!("rename staged output: {e}"),
+            "動画を保存先へ置けませんでした。空き容量を確かめて、もう一度お試しください。",
+        )
+    })
+}
+
+/// 書きかけの後始末（**どの抜け方でも**片づける）。
+///
+/// ⚠️ **`?` での早期離脱が多い**ので、片づけを手で書くと**必ずどこかで抜ける**。
+/// 置いた場所を持たせて、抜けた時点で消えるようにする。成功したときは
+/// `finish_staged_output` が先に名前を付け替えているので、ここでの削除は空振りする。
+struct StagedCleanup {
+    path: PathBuf,
+}
+
+impl Drop for StagedCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// 書き出しの作業フォルダを、抜けるときに丸ごと消す（#1358）。
+struct TmpDirCleanup {
+    path: PathBuf,
+}
+
+impl Drop for TmpDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 書き出しの作業フォルダは、抜けるときに中身ごと消える（#1358＝失敗でも成功でも残さない）。
+    #[test]
+    fn tmp_dir_cleanup_removes_folder_on_drop() {
+        let dir =
+            std::env::temp_dir().join(format!("stario_tmp_cleanup_test_{}", std::process::id()));
+        fs::create_dir_all(dir.join("sub")).expect("作れる");
+        fs::write(dir.join("sub").join("scene_000.mp4"), b"x").expect("書ける");
+        {
+            let _g = TmpDirCleanup { path: dir.clone() };
+        }
+        assert!(!dir.exists(), "抜けたのに作業フォルダが残った");
+    }
+
+    /// 切り出した絵のファイル名の検査（#349・PR #885 レビュー 🟡）。
+    ///
+    /// ⚠️ **「`assets/` の直下に1つ置く」という約束**を名前の形で守る（パスをまたがせない）。
+    #[test]
+    fn frame_file_name_rejects_path_pieces() {
+        assert!(is_safe_frame_file_name("asset_002.png"));
+        assert!(is_safe_frame_file_name("日本語の名前.png"));
+        assert!(!is_safe_frame_file_name(""));
+        assert!(!is_safe_frame_file_name("a/b.png"));
+        assert!(!is_safe_frame_file_name("a\\b.png"));
+        assert!(!is_safe_frame_file_name("../x.png"));
+        assert!(!is_safe_frame_file_name("a..b.png")); // 「..」を含むものは一律で断る（安全側）
+    }
+
+    /// 切り出しの頭出し（#349・PR #885 レビュー 🔴）。
+    ///
+    /// ⚠️ **`-ss` を `-i` の前だけに置くと、狙った瞬間の絵が出ない**（キーフレームまで飛ぶ）。
+    /// ⚠️ **後ろだけだと遅い**（先頭から全部デコードする）。二段に分ける。
+    #[test]
+    fn frame_seek_splits_into_coarse_and_fine() {
+        let s = frame_seek_args(60.0);
+        assert_eq!(s.coarse_sec, Some(50.0)); // 手前まで粗く飛ぶ
+        assert!((s.fine_sec - 10.0).abs() < 1e-9); // 残りは正確に進む
+    }
+
+    #[test]
+    fn frame_seek_near_start_does_not_prefix() {
+        // 近い時刻は前置きしない（10 秒ぶんのデコードは待たされない）。
+        let s = frame_seek_args(3.5);
+        assert_eq!(s.coarse_sec, None);
+        assert!((s.fine_sec - 3.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn frame_seek_at_zero_is_head() {
+        let s = frame_seek_args(0.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// ⚠️ **負の時刻は 0 に寄せる**（FFmpeg が引数として受け付けない）。
+    #[test]
+    fn frame_seek_clamps_negative() {
+        let s = frame_seek_args(-5.0);
+        assert_eq!(s.coarse_sec, None);
+        assert_eq!(s.fine_sec, 0.0);
+    }
+
+    /// 粗い頭出しと端数を足すと、必ず元の時刻になる（絵がずれない条件）。
+    #[test]
+    fn frame_seek_parts_sum_to_requested_time() {
+        for t in [0.0_f64, 1.0, 9.99, 10.0, 10.01, 123.456, 3600.0] {
+            let s = frame_seek_args(t);
+            let total = s.coarse_sec.unwrap_or(0.0) + s.fine_sec;
+            assert!((total - t).abs() < 1e-9, "t={t} total={total}");
+        }
+    }
 
     // フレームステージングのディレクトリ名はパストラバーサル防止で英数字と _ のみ許可（#書き出しRangeError）。
     #[test]
@@ -3394,43 +4635,6 @@ mod tests {
     }
 
     // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
-    #[test]
-    fn overlay_telops_args_builds_enable_chain() {
-        let telops = [
-            TelopOverlay {
-                png: "t0.png",
-                start_sec: 1.5,
-                end_sec: 3.0,
-            },
-            TelopOverlay {
-                png: "t1.png",
-                start_sec: 8.0,
-                end_sec: 11.0,
-            },
-        ];
-        let a = overlay_telops_args(
-            "in.mp4",
-            &telops,
-            VideoCodec::MediaFoundation,
-            "12000k",
-            "out.mp4",
-        );
-        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
-        assert_eq!(
-            a[fc + 1],
-            "[0:v][1:v]overlay=0:0:eof_action=repeat:enable='between(t,1.5,3)'[v1];[v1][2:v]overlay=0:0:eof_action=repeat:enable='between(t,8,11)'[v2]"
-        );
-        // 最終映像ラベルを map、音声は元動画から無変更コピー。MF は -b:v（品質）を伴う。yuv420p で互換維持。
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a"));
-        assert!(a.windows(2).any(|w| w[0] == "-c:a" && w[1] == "copy"));
-        assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "12000k"));
-        assert!(a
-            .windows(2)
-            .any(|w| w[0] == "-pix_fmt" && w[1] == "yuv420p"));
-        // 入力は 動画1本＋テロップPNG2枚。
-        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
-    }
 
     #[test]
     fn parse_video_meta_audio_resolution_duration() {
@@ -3623,6 +4827,73 @@ mod tests {
         assert!(!x.iter().any(|s| s == "-b:v"));
     }
 
+    /// つなぐ段の進み具合（#1214）＝FFmpeg の `-progress` の行から秒を読む。
+    #[test]
+    fn 進み具合の行から秒を読む() {
+        assert_eq!(parse_out_time_us("out_time_us=1500000"), Some(1_500_000));
+        // ⚠️ **前後の空白は落とす**＝改行込みで届く。
+        assert_eq!(parse_out_time_us("out_time_us=42 "), Some(42));
+        // ⚠️ **似た名前の行を拾わない**＝`out_time`（時分秒の文字列）も同じ出力に来る。
+        assert_eq!(parse_out_time_us("out_time=00:00:01.500000"), None);
+        assert_eq!(parse_out_time_us("frame=123"), None);
+        // ⚠️ **数でない値は無視**＝`N/A` が来ることがある（ここで落ちると書き出しごと止まる）。
+        assert_eq!(parse_out_time_us("out_time_us=N/A"), None);
+    }
+
+    /// つなぎ終わった尺＝場面の合計から、切り替えで重なるぶんを引く（#1214・ADR-0009）。
+    #[test]
+    fn つなぎ終わった尺は重なるぶんを引く() {
+        let steps = [
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+        ];
+        // 15×3 ＝ 45 から、切り替え2回ぶん（1.0）を引く。
+        assert!((join_total_sec(&[15.0, 15.0, 15.0], &steps) - 44.0).abs() < 1e-9);
+    }
+
+    /// ⚠️ **切り替えの無い境目は引かない**（ハードカットは重ならない）。
+    #[test]
+    fn 切り替えの無い境目は引かない() {
+        let steps = [
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 0.0,
+            },
+        ];
+        assert!((join_total_sec(&[10.0, 10.0, 10.0], &steps) - 29.5).abs() < 1e-9);
+    }
+
+    /// ⚠️ **負にしない**＝分母が負だと進み具合が跳ねる（壊れた文書でも画面を壊さない）。
+    #[test]
+    fn つなぎ終わった尺は負にならない() {
+        let steps = [JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 100.0,
+            offset_sec: 0.0,
+        }];
+        assert_eq!(join_total_sec(&[1.0, 1.0], &steps), 0.0);
+    }
+
+    /// ⚠️ **境目が無い（場面1つ）なら、そのままの尺**。
+    #[test]
+    fn 境目が無ければそのままの尺() {
+        assert!((join_total_sec(&[12.5], &[]) - 12.5).abs() < 1e-9);
+    }
+
     #[test]
     fn target_bitrate_is_pixel_based_and_orientation_agnostic() {
         let land = target_bitrate_bps(1920, 1080, 30);
@@ -3645,6 +4916,11 @@ mod tests {
         assert_eq!(target_bitrate_bps(3840, 2160, 60), 16_000_000); // 上限
         assert_eq!(target_bitrate_bps(1920, 1080, 0), BITRATE_MIN_BPS); // fps=0 → clamp下限
         assert_eq!(bitrate_arg(5_253_120), "5253k");
+        // #1218「ふつう」＝上限は下げる方向にだけ効き、下限は割らない。未指定は従来どおり。
+        assert_eq!(capped_bitrate_bps(11_819_520, Some(6_000_000)), 6_000_000);
+        assert_eq!(capped_bitrate_bps(5_253_120, Some(6_000_000)), 5_253_120);
+        assert_eq!(capped_bitrate_bps(11_819_520, None), 11_819_520);
+        assert_eq!(capped_bitrate_bps(11_819_520, Some(1_000)), BITRATE_MIN_BPS);
     }
 
     fn png_head(w: u32, h: u32) -> Vec<u8> {
@@ -4167,12 +5443,16 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "bgm.mp3",
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 10.0,
             fade_in_sec: 1.0,
             fade_out_sec: 2.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         assert!(a.windows(2).any(|w| w[0] == "-stream_loop" && w[1] == "-1"));
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         assert_eq!(
@@ -4182,6 +5462,163 @@ mod tests {
         assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy")); // 映像は再エンコードしない
     }
 
+    /// 読み上げ（タイムライン形式の音声クリップ・#631）は繰り返さない＝素材が短くても言葉が二重に鳴らない。
+    /// 既定（BGM）はループのままで、区別は入力の loop_source だけで決まる。
+    /// 音を整える（#259）＝**混ぜたあとに1回だけ通す**。順番が逆だと個々の音量・フェードを
+    /// 測ってしまい、`alimiter` が先だと整えた結果の 0dBFS 超えを止められない。
+    #[test]
+    fn mix_bgm_runs_args_normalize_appends_loudnorm_after_mix() {
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.5,
+            volume_expr: None,
+            delay_sec: 0.0,
+            play_sec: 10.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args(
+            "v.mp4",
+            &runs,
+            10.0,
+            Some(NormalizeSpec { target_lufs: -16.0 }),
+            "out.mp4",
+        );
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[1:a]atrim=0:10,asetpts=N/SR/TB,volume=0.5[bg0];[0:a][bg0]amix=inputs=2:duration=first:normalize=0[mixed];[mixed]loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[a]"
+        );
+    }
+
+    /// ⚠️ **BGM が無くても整える**（ADR-0026②＝BGM の有無で挙動を割らない）。
+    /// 既存の音声だけを `amix=inputs=1` で通し、そのあとに整える段を足す。
+    #[test]
+    fn mix_bgm_runs_args_normalize_without_bgm() {
+        let a = mix_bgm_runs_args(
+            "v.mp4",
+            &[],
+            10.0,
+            Some(NormalizeSpec { target_lufs: -20.0 }),
+            "out.mp4",
+        );
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[0:a]amix=inputs=1:duration=first:normalize=0[mixed];[mixed]loudnorm=I=-20:TP=-1.5:LRA=11,alimiter=limit=0.95[a]"
+        );
+        assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy")); // 映像は再エンコードしない
+    }
+
+    #[test]
+    fn mix_bgm_runs_args_no_loop_for_voice() {
+        let runs = [BgmRunPlaced {
+            file: "voice.wav",
+            volume: 1.0,
+            volume_expr: None,
+            delay_sec: 2.0,
+            play_sec: 3.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: false,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
+        assert!(!a.iter().any(|s| s == "-stream_loop")); // 繰り返さない
+        assert!(a.windows(2).any(|w| w[0] == "-i" && w[1] == "voice.wav")); // 入力自体は載る
+    }
+
+    #[test]
+    fn mix_bgm_runs_args_trims_and_speeds_source() {
+        // タイムライン形式のトリム＋速度（#631）：素材の 4.0 秒から、出力 3 秒ぶんを2倍速で。
+        // 素材側で読む長さは 3×2=6 秒＝atrim=4:10。フェードは出力側の秒数（atempo の後）で見る。
+        let runs = [BgmRunPlaced {
+            file: "clip.wav",
+            volume: 1.0,
+            volume_expr: None,
+            delay_sec: 0.0,
+            play_sec: 3.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 1.0,
+            loop_source: false,
+            source_start_sec: 4.0,
+            speed: 2.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        assert!(fc.contains("atrim=4:10"), "{fc}");
+        assert!(fc.contains("asetpts=N/SR/TB,atempo=2,volume=1"), "{fc}");
+        assert!(fc.contains("afade=t=out:st=2:d=1"), "{fc}"); // 出力 3 秒の末尾 1 秒
+    }
+
+    /// 音量の変化（#512 段3）：front が組んだ式をそのまま `volume` へ差し込む（毎フレーム評価）。
+    /// 一定値の `volume=` は出さない＝2つの音量が重ね掛けにならない。フェードは従来どおり式の上に掛かる。
+    #[test]
+    fn mix_bgm_runs_args_uses_volume_expression_when_given() {
+        let expr = "if(lt(t,0),0.2,if(lt(t,4),0.2+(1-0.2)*(t-0)/4,1))";
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            volume_expr: Some(expr),
+            delay_sec: 0.0,
+            play_sec: 8.0,
+            fade_in_sec: 1.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, None, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        // 式は `'…'` で囲む（中の `,` を区切りと読ませない）＋ eval=frame（付けないと一定音量に化ける）。
+        assert!(fc.contains(&format!("volume='{expr}':eval=frame")), "{fc}");
+        assert!(!fc.contains("volume=0.25"), "{fc}"); // 一定値は出さない
+        assert!(fc.contains("afade=t=in:st=0:d=1"), "{fc}"); // フェードは式の上に掛かる
+    }
+
+    /// 式が空（点が無いのと同じ意味）のときは一定値へ落とす＝`volume=''` のような壊れた引数を作らない。
+    #[test]
+    fn mix_bgm_runs_args_empty_expression_falls_back_to_constant_volume() {
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            volume_expr: Some("  "),
+            delay_sec: 0.0,
+            play_sec: 8.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, None, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        assert!(fc.contains("volume=0.25"), "{fc}");
+        assert!(!fc.contains("eval=frame"), "{fc}");
+    }
+
+    #[test]
+    fn atempo_chain_splits_out_of_range_speed_without_rounding() {
+        // 1段で受けられる範囲はそのまま。範囲外は掛け算で分ける＝速度を丸めない（ADR-0026①）。
+        assert_eq!(atempo_chain(1.0), "");
+        assert_eq!(atempo_chain(1.5), "atempo=1.5,");
+        assert_eq!(atempo_chain(4.0), "atempo=2,atempo=2,");
+        assert_eq!(atempo_chain(0.25), "atempo=0.5,atempo=0.5,");
+        // 分けたあとの積は元の速度に戻る（丸めていない）。
+        for speed in [0.1, 0.3, 3.0, 5.0, 8.0] {
+            let product: f64 = atempo_chain(speed)
+                .trim_end_matches(',')
+                .split(',')
+                .map(|s| s.trim_start_matches("atempo=").parse::<f64>().unwrap())
+                .product();
+            assert!((product - speed).abs() < 1e-9, "{speed} => {product}");
+        }
+    }
+
     #[test]
     fn mix_bgm_runs_args_crossfade_places_two_runs_with_adelay() {
         // 曲が変わる2区間：2本目は adelay で配置。入力は video+2曲、amix inputs=3。
@@ -4189,21 +5626,29 @@ mod tests {
             BgmRunPlaced {
                 file: "a.mp3",
                 volume: 0.25,
+                volume_expr: None,
                 delay_sec: 0.0,
                 play_sec: 8.5,
                 fade_in_sec: 1.5,
                 fade_out_sec: 1.0,
+                loop_source: true,
+                source_start_sec: 0.0,
+                speed: 1.0,
             },
             BgmRunPlaced {
                 file: "b.mp3",
                 volume: 0.3,
+                volume_expr: None,
                 delay_sec: 7.5,
                 play_sec: 6.5,
                 fade_in_sec: 1.0,
                 fade_out_sec: 2.0,
+                loop_source: true,
+                source_start_sec: 0.0,
+                speed: 1.0,
             },
         ];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, None, "out.mp4");
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3); // video + 2曲
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         let f = &a[fc + 1];
@@ -4219,12 +5664,16 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "bgm.mp3",
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 10.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
-        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, None, "out.mp4");
         assert!(!a.iter().any(|s| s.contains("afade")));
         assert!(!a.iter().any(|s| s.contains("adelay")));
         assert!(a
@@ -4471,12 +5920,22 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: &bgm_str,
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 2.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
-        let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, &out.to_string_lossy());
+        let args = mix_bgm_runs_args(
+            &video.to_string_lossy(),
+            &runs,
+            2.0,
+            None,
+            &out.to_string_lossy(),
+        );
         run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
@@ -6089,5 +7548,1096 @@ mod tests {
                 .len()
                 > 1000
         );
+    }
+}
+
+#[cfg(test)]
+mod source_range {
+    //! ソースを読む検査が**自分の文字列に当たらない**ようにするための切り出し（#1139・#1146）。
+    //!
+    //! ⚠️ **切らずに見ると恒真になる**＝`include_str!("ffmpeg.rs")` はファイル全体（＝検査自身）を
+    //! 含むので、`contains("〜")` は**検査の `assert!` 行に書いた文字列**に当たって絶対に落ちない。
+    //! 実際に2回踏んだ＝#1139（`extract_video_frame_impl` の繋ぎ）と #1146（BGM の断り）。
+    //!
+    //! ⚠️ **1か所に置く**＝検査ごとに書き写すと、片方だけ切り忘れてまた恒真に戻る。
+
+    /// `start` から `end` の**手前まで**を返す。どちらかが無ければ落ちる（＝黙って全体を見ない）。
+    pub fn 範囲(src: &str, start: &str, end: &str) -> String {
+        let at = src
+            .find(start)
+            .unwrap_or_else(|| panic!("{start} が見つからない"));
+        let rest = &src[at..];
+        let to = rest
+            .find(end)
+            .unwrap_or_else(|| panic!("{start} の次に来るはずの {end} が見つからない"));
+        rest[..to].to_string()
+    }
+
+    /// 説明（コメント）を落とす。
+    ///
+    /// ⚠️ **数を固定する網には要る**（#1171 レビュー由来 ℹ️）＝この repo の説明文は
+    /// **コードの綴りをそのまま引用する**（例＝「下の `out.exists()` が…」）ので、
+    /// 落とさずに数えると**コードは正しいまま説明文だけで赤くなる**。
+    /// ⚠️ **落とすのは説明だけ**＝並び（どちらが先か）は変わらないので、順序を見る検査にも安全。
+    /// ⚠️ **厳密には「説明だけ」ではない**（#1171 レビュー由来 ℹ️）＝**文字列リテラルの中の
+    /// `//`・`/*` も説明として落とす**（`"http://…"` を本体に書くと、その行の残りを食う）。
+    /// いま走査している2つの本体には**1件も無いことを確かめてある**（あれば `Ok(` の数が動いて赤くなる）。
+    /// ⚠️ **閉じない `/*` に当たると、以降を丸ごと捨てる**（縮む方向）。
+    /// ⚠️ **どちらも「必ず赤くなる」とは限らない**（#1171 レビュー由来 ℹ️＝ここを言い切っていた）＝
+    /// 巻き込んだ側に**目印か `Ok(`** があれば落ちるが、無ければ**黙って縮むだけ**＝網が弱くなる。
+    /// 本体に `"…//…"` を書いたら、ここを見直すこと。
+    pub fn コメントを落とす(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut 残り = src;
+        loop {
+            let 塊 = 残り.find("/*");
+            let 行 = 残り.find("//");
+            match (塊, 行) {
+                (None, None) => {
+                    out.push_str(残り);
+                    return out;
+                }
+                _ => {
+                    let (at, 終わり, 印) = match (塊, 行) {
+                        (Some(b), Some(l)) if b < l => (b, "*/", true),
+                        (Some(b), None) => (b, "*/", true),
+                        (_, Some(l)) => (
+                            l, "
+", false,
+                        ),
+                        (None, None) => unreachable!(),
+                    };
+                    out.push_str(&残り[..at]);
+                    out.push(' ');
+                    let 後 = &残り[at..];
+                    match 後.find(終わり) {
+                        Some(e) => {
+                            // 行コメントは改行そのものを残す（並びが潰れない）
+                            残り = if 印 {
+                                &後[e + 終わり.len()..]
+                            } else {
+                                &後[e..]
+                            };
+                        }
+                        None => return out,
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::範囲;
+
+        /// ⚠️ **説明の中の綴りは数えない**（#1171 レビュー由来 ℹ️）＝この repo の説明文は
+        /// コードの綴りをそのまま引用するので、落とさないと**コードは正しいまま赤**になる。
+        #[test]
+        fn 説明を落とす() {
+            use super::コメントを落とす;
+            assert!(!コメントを落とす(
+                "let a = 1; // ここに Ok( と書く
+let b = 2;"
+            )
+            .contains("Ok("));
+            assert!(!コメントを落とす("/* Ok( */ let a = 1;").contains("Ok("));
+            // ⚠️ **中身は残す**＝落としすぎると、検査が何も見なくなる
+            assert!(コメントを落とす(
+                "// 説明
+return Ok(1);"
+            )
+            .contains("return Ok("));
+            // ⚠️ **並びは変えない**＝順序を見る検査（どちらが先か）にも使う
+            let 落ちた = コメントを落とす(
+                "first(); // 説明
+second();",
+            );
+            assert!(落ちた.find("first()") < 落ちた.find("second()"));
+        }
+
+        #[test]
+        fn 始まりと終わりの間だけを返す() {
+            assert_eq!(範囲("aaSTARTxxENDbb", "START", "END"), "STARTxx");
+        }
+
+        /// ⚠️ **黙って全体を返さない**（#1146 の変異チェックで生き残った）＝
+        /// 見つからないときに `unwrap_or(len)` で倒すと、範囲が**ファイルの末尾まで**広がり、
+        /// 切り出した意味が消えて**また恒真に戻る**。落ちることそのものが守りなので、検査する。
+        #[test]
+        #[should_panic(expected = "見つからない")]
+        fn 始まりが無ければ落ちる() {
+            範囲("aaENDbb", "START", "END");
+        }
+
+        #[test]
+        #[should_panic(expected = "次に来るはずの")]
+        fn 終わりが無ければ落ちる() {
+            範囲("aaSTARTxx", "START", "END");
+        }
+    }
+}
+
+#[cfg(test)]
+mod bgm_mix_message_tests {
+    /// ⚠️ **BGM を置いていない人に「BGMの合成に失敗」と言わない**（#1105・利用者の実機報告）。
+    /// この段は `needs_audio_pass = has_bgm || normalize.is_some()` なので、
+    /// **音量をそろえるだけでも通る**＝身に覚えのない語で断ることになっていた。
+    ///
+    /// ⚠️ **文そのものは `export_video_impl` の中にある**（借用の都合で外へ出せない）ので、
+    /// ここでは**ソースを読んで**、2つの枝が在ることと、どちらも次の行動を言っていることを見る。
+    const SRC: &str = include_str!("ffmpeg.rs");
+
+    /// **音を合わせる段だけ**を切り出す（#1146）。
+    ///
+    /// ⚠️ **ファイル全体を見ていた**＝`SRC` には**この検査自身**が入るので、
+    /// `contains("BGMの合成に失敗しました。")` は**下の `assert!` 行に書いた文字列**に当たり、
+    /// **本番の枝もメッセージも記録も丸ごと消して緑のまま**だった（α 出口監査 🔴・反証で CONFIRMED）。
+    ///
+    /// ⚠️ **範囲の切り方に意味がある**＝始まりを `let bgm_start` にしたのは、その1行**手前**に
+    /// `emit_export_progress(..., if has_bgm { "bgm" } else { "loudness" }, ...)` があり、
+    /// そこにも `if has_bgm {` が出るため。範囲に入れると**検査を直さなくても本番の言い分け枝だけ
+    /// 消せば通る**という二重の穴が残る。
+    fn 音を合わせる段() -> String {
+        super::source_range::範囲(SRC, "let bgm_start = Instant::now();", "\"bgm mix: {} ms\"")
+    }
+
+    #[test]
+    fn bgm_mix_failure_has_two_branches() {
+        let body = 音を合わせる段();
+        assert!(body.contains("if has_bgm {"), "状況で言い分けていない");
+        assert!(
+            body.contains("BGMの合成に失敗しました。"),
+            "BGM がある側の文が無い"
+        );
+        assert!(
+            body.contains("音量の調整に失敗しました。"),
+            "音量をそろえるだけの側の文が無い"
+        );
+    }
+
+    /// ⚠️ **次の行動を言う**（`CLAUDE.md` §2-5）＝どちらの枝も「〜してください」で終わること。
+    #[test]
+    fn both_branches_tell_the_next_action() {
+        let body = 音を合わせる段();
+        for msg in ["BGMの合成に失敗しました。", "音量の調整に失敗しました。"]
+        {
+            let at = body.find(msg).expect("文が見つからない");
+            let line_end = body[at..].find('\n').map(|i| at + i).unwrap_or(body.len());
+            let line = &body[at..line_end];
+            assert!(line.contains("ください"), "次の行動を言っていない: {line}");
+        }
+    }
+
+    /// ⚠️ **手がかりを捨てない**（#1105）＝ffmpeg が言ったことを記録に残していること。
+    #[test]
+    fn ffmpeg_stderr_is_recorded() {
+        let body = 音を合わせる段();
+        assert!(
+            body.contains("bgm mix failed (has_bgm="),
+            "失敗の中身を記録していない"
+        );
+        assert!(body.contains("bgm mix args:"), "渡した引数を記録していない");
+    }
+
+    /// **切り出しが効いていること**そのものを留める（#1146）。
+    ///
+    /// ⚠️ **範囲が広がると、また恒真に戻る**＝この検査モジュールが範囲に入っていないことを見る。
+    /// 入っていれば「自分の `assert!` 行」に当たって、上の3つは何を消しても通るようになる。
+    #[test]
+    fn 切り出しに検査自身が入っていない() {
+        let body = 音を合わせる段();
+        assert!(
+            !body.contains("mod bgm_mix_message_tests"),
+            "範囲に検査自身が入っている＝上の検査は恒真になる"
+        );
+        assert!(
+            !body.contains("if has_bgm { \"bgm\" }"),
+            "進捗の言い分け（別用途の `if has_bgm {{`）が範囲に入っている"
+        );
+        // ⚠️ **短すぎ・長すぎの両方を見る**＝始まりだけ当たって終わりが遠いと、範囲は巨大になる。
+        // 行で数える（`len()` はバイト数なので、日本語のコメントが多いここでは意味が読めない）。
+        let lines = body.lines().count();
+        assert!(
+            (30..300).contains(&lines),
+            "切り出した範囲が想定の大きさでない: {lines} 行"
+        );
+    }
+}
+
+#[cfg(test)]
+mod staged_output_tests {
+    use super::*;
+
+    /// ⚠️ **拡張子を最後に残す**（#1105・実機の記録で判明）。
+    ///
+    /// ffmpeg は出力の形式を**拡張子で決める**ので、`.writing` で終わる名前にすると
+    /// 「Unable to choose an output format」で**書き出しが必ず失敗する**。
+    /// 実際、利用者には「BGMの合成に失敗しました」と出ていた（最後に書くのがその段だったため）。
+    #[test]
+    fn 書きかけの名前は拡張子で終わる() {
+        let out = std::path::Path::new("C:/dir/新しいタイムライン.mp4");
+        let staged = staged_output_path(out);
+        let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.ends_with(".mp4"), "拡張子が最後に無い: {name}");
+        // ⚠️ **「隠しファイルになる」とは書かない**（レビュー由来 ℹ️ 2026-09-10）＝
+        // 先頭のドットで隠れるのは Unix 系だけで、**Windows では普通に一覧へ並ぶ**。
+        // ここで見るのは「印が付いていること」と「元の名前とぶつからないこと」だけ。
+        // 一覧に残さないことは**掃除**（`StagedCleanup` と `remove_stale_staged`）が担う。
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
+        assert_ne!(staged, out);
+        // 同じフォルダに置く（別ドライブへ跨がない＝付け替えが速い・失敗しない）。
+        assert_eq!(staged.parent(), out.parent());
+    }
+
+    /// **前の回の書きかけを掃く**（レビュー由来 ℹ️ 2026-09-10）。
+    ///
+    /// ⚠️ **強制終了で残ったぶんは誰も消さない**＝`StagedCleanup` はその回の中でしか走らない。
+    /// とくに **#1105 より前の形**（`.<名前>.mp4.writing`）は、いまの掃除の対象名と違うので
+    /// 永久に残り、保存先に**再生できそうな動画が本物の隣に並ぶ**（先頭のドットは Windows では隠れない）。
+    /// ⚠️ **他のファイルは触らない**＝走査でまとめて消すと、別の書き出しが**いま書いている途中**の
+    /// ものまで消しうる。だから**この保存先の名前で当てる**。
+    #[test]
+    fn 前の回の書きかけを掃く() {
+        let dir = std::env::temp_dir().join(format!("stario-stale-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let out = dir.join("動画.mp4");
+        let now = staged_output_path(&out);
+        let legacy = dir.join(".動画.mp4.writing");
+        // 巻き添えにしてはいけないもの（本物・別の動画・別の動画の書きかけ）。
+        let real = dir.join("動画.mp4");
+        let other = dir.join("別の動画.mp4");
+        let other_staged = staged_output_path(&other);
+        for f in [&now, &legacy, &real, &other, &other_staged] {
+            fs::write(f, b"x").unwrap();
+        }
+
+        remove_stale_staged(&out);
+
+        assert!(!now.exists(), "いまの形の書きかけが残っている");
+        assert!(!legacy.exists(), "#1105 より前の形の書きかけが残っている");
+        assert!(other_staged.exists(), "別の動画の書きかけまで消している");
+        assert!(other.exists(), "関係のないファイルを消している");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 拡張子が無い保存先でも落ちない（そのときは ffmpeg 側も元から形式を決められない）。
+    #[test]
+    fn 拡張子が無いときも名前を作れる() {
+        let out = std::path::Path::new("C:/dir/video");
+        let name = staged_output_path(out)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with('.'), "印のドットが付いていない: {name}");
+    }
+
+    /// **利用者の選んだ場所へ直に書かない**（UI/UX レビュー 🔴）。
+    ///
+    /// ⚠️ **実測で確かめた壊れ方**＝ffmpeg は出力を**開いた時点で切り詰める**ので、
+    /// 既にある動画を選んで「上書きしますか→はい」と答えた直後に中止・失敗すると、
+    /// **前の動画が失われ、開けないファイルだけが残る**
+    ///（10,748 バイトの再生できる動画が 262,192 バイトの `moov atom not found` になった）。
+    #[test]
+    fn 書きかけは利用者の場所に触らない() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前に作った大事な動画".as_bytes()).unwrap();
+
+        let staged = staged_output_path(&out);
+        // ⚠️ **隣に置く**＝別ドライブへ跨ぐと、最後の付け替えがコピーになって遅く・失敗しうる。
+        assert_eq!(staged.parent(), out.parent(), "書きかけは同じ場所へ置く");
+        assert_ne!(staged, out, "利用者の選んだ場所そのものへ書かない");
+
+        // 書き出しが途中まで進んだ（＝書きかけができた）。
+        fs::write(&staged, "書きかけ".as_bytes()).unwrap();
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前に作った大事な動画".as_bytes(),
+            "書きかけができても、前の動画はそのまま"
+        );
+
+        // 中止・失敗＝見張りが落ちて片づく。
+        {
+            let _cleanup = StagedCleanup {
+                path: staged.clone(),
+            };
+        }
+        assert!(!staged.exists(), "書きかけを残さない");
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前に作った大事な動画".as_bytes(),
+            "中止しても前の動画は失われない"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **置き換えに失敗しても、前の動画は残る**（#984 レビュー 🔴）。
+    ///
+    /// ⚠️ 当初は「Windows は既にあるファイルへ rename できない」と思って**先に消して**いたが、
+    /// **実測したら上書きできた**。先に消すと、**消せたが rename に失敗した**ときに
+    /// **前の動画も新しい動画も無い**状態になる＝防ごうとしていたものを自分で作っていた。
+    #[test]
+    fn 置き換えに失敗しても前の動画は残る() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_ng_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前の動画".as_bytes()).unwrap();
+        // 書きかけが無い＝rename が必ず失敗する状況を作る。
+        let staged = staged_output_path(&out);
+        assert!(!staged.exists());
+
+        assert!(
+            finish_staged_output(&staged, &out).is_err(),
+            "失敗を握り潰さない"
+        );
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "前の動画".as_bytes(),
+            "置き換えに失敗しても、前の動画はそのまま"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 成功したときだけ置き換える() {
+        let dir = std::env::temp_dir().join(format!("stario_staged_ok_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("taisetsu.mp4");
+        fs::write(&out, "前の動画".as_bytes()).unwrap();
+        let staged = staged_output_path(&out);
+        fs::write(&staged, "新しい動画".as_bytes()).unwrap();
+
+        finish_staged_output(&staged, &out).unwrap();
+        assert_eq!(
+            fs::read(&out).unwrap(),
+            "新しい動画".as_bytes(),
+            "置き換わる"
+        );
+        assert!(!staged.exists(), "書きかけは残らない");
+
+        // 成功した後に見張りが落ちても、置いたものを消さない。
+        {
+            let _cleanup = StagedCleanup {
+                path: staged.clone(),
+            };
+        }
+        assert!(out.exists(), "成功した動画を後片づけで消さない");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **走査が膨れていない**ことを実数で留める（#1171 レビュー由来 ℹ️）。
+    ///
+    /// ⚠️ **終わりの目印は検査自身にも書いてある**＝説明文を言い換えると `範囲` の終わりが
+    /// **検査の中の文字列**に当たり、範囲がファイルの末尾近くまで膨れる。`範囲` の「見つからなければ
+    /// 落ちる」はその形を止められない（見つかってしまうので）。**大きさで気づく**。
+    fn 走査が膨れていない(body: &str, 上限: usize, 誰: &str) {
+        assert!(
+            body.len() < 上限,
+            "{誰}：走査が膨れている（{} バイト）＝終わりの目印が動いた可能性",
+            body.len()
+        );
+    }
+
+    /// **早抜けの成功返しが無い**ことを留める（#1140 レビュー由来 🟡）。
+    ///
+    /// ⚠️ **綴りで禁じると、逃げ道がいくらでもある**＝`out.is_file()` を禁じても
+    /// `fs::metadata(&out).is_ok()` や `Path::new(&out).exists()` で同じことが書ける。
+    /// ⚠️ **構造で留める**＝どちらの本体も**最後の1つ以外に成功を返さない**（`return Ok(` が 0 個・
+    /// `Ok(` は末尾の1個だけ）ので、そこを押さえると**綴りに依らず**「作らずに成功を返す」形を捕まえる。
+    /// ⚠️ **逃げ道は残す**＝出力の名前を**中身由来**にすれば（帯の `file_stamp` と同じ手）
+    /// 「あるなら作らない」は**正しい実装**になる。そのときはこの網ではなく、
+    /// **名前が中身から決まること**を留める検査へ置き換える（ここで断るのは、その判断を通すため）。
+    fn 早抜けの成功返しが無い(body: &str, 誰: &str) {
+        assert_eq!(
+            body.matches("return Ok(").count(),
+            0,
+            "{誰}：作らずに成功を返す道がある（前の絵をそのまま返す＝#1140）"
+        );
+        assert_eq!(
+            body.matches("Ok(").count(),
+            1,
+            "{誰}：成功を返す場所が増えた（最後の1つだけのはず）。`if let Ok(`／`match` の腕もここに数えます＝成功返しを増やしていないなら、網の方を直してください"
+        );
+    }
+
+    /// **残骸を成功と読まない**（#1137）。
+    ///
+    /// ⚠️ **`-y` だけでは足りない**＝尺の外を指すと FFmpeg は**何も書かない**ので、
+    /// 同じ名前のファイルが残っていると**前回の絵**を「切り出せた」と読んでしまう。
+    #[test]
+    fn 残骸は先に片づける() {
+        let p = std::env::temp_dir().join(format!("stario-stale-{}.png", std::process::id()));
+        fs::write(&p, b"old").unwrap();
+        assert!(clear_stale_frame(&p).is_ok(), "片づけに失敗した");
+        assert!(!p.exists(), "残骸が残っている＝前回の絵を成功と読む");
+    }
+
+    /// 残骸が無いときは、何もしないで通す（毎回の空振りで断らない）。
+    #[test]
+    fn 残骸が無ければ何もしない() {
+        let p = std::env::temp_dir().join(format!("stario-nostale-{}.png", std::process::id()));
+        let _ = fs::remove_file(&p);
+        assert!(clear_stale_frame(&p).is_ok());
+    }
+
+    /// **あるだけでは数えない**＝作りかけの 0 バイトを「出来た」と読まない（#1137）。
+    #[test]
+    fn 中身の無い絵は出来ていないと数える() {
+        let p = std::env::temp_dir().join(format!("stario-empty-{}.png", std::process::id()));
+        fs::write(&p, b"").unwrap();
+        assert!(!produced_frame(&p), "0 バイトを出来たと数えている");
+        fs::write(&p, b"x").unwrap();
+        assert!(produced_frame(&p), "中身があるのに出来ていないと数えている");
+        let _ = fs::remove_file(&p);
+    }
+
+    /// **残骸を成功と読まない**を、本体の中に留める（#1137・#1140）。
+    ///
+    /// ⚠️ **道具を足しただけでは直っていない**＝呼ばれていなければ、`clear_stale_frame` も
+    /// `produced_frame` も**単独の検査は緑のまま**通る。本体は ffmpeg を起動するので検査から
+    /// 叩けないため、**ソースを読んで**留める。
+    /// ⚠️ **網を1つにする**（#1171 レビュー由来 ℹ️）＝以前は2つの検査に書き写していたので、
+    /// 片方にしか無い網が**両方向に**できていた（`!out.exists()` は切り出しだけ／`ran < judge` は
+    /// 小さな絵だけ）。「片方だけ直す」を避けると書きながら、検査の側で同じことをしていた。
+    fn 残骸を成功と読まない(body: &str, 誰: &str) {
+        let clear = body.find("clear_stale_frame(&out)?").unwrap_or_else(|| {
+            panic!("{誰}：残骸を片づけていない（本番の綴りを変えたなら、この目印も直す）")
+        });
+        let spawn = body
+            .find("let ffmpeg = resolve_ffmpeg(")
+            .unwrap_or_else(|| {
+                panic!("{誰}：ffmpeg を起こす行が無い（本番の綴りを変えたなら、この目印も直す）")
+            });
+        assert!(clear < spawn, "{誰}：片づける前に ffmpeg を起こしている");
+        let ran = body.find("run(&ffmpeg, &args)").unwrap_or_else(|| {
+            panic!("{誰}：ffmpeg を走らせる行が無い（本番の綴りを変えたなら、この目印も直す）")
+        });
+        let judge = body.find("if !produced_frame(&out)").unwrap_or_else(|| {
+            panic!("{誰}：「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている")
+        });
+        assert!(ran < judge, "{誰}：走らせる前に出来たかを見ている");
+        // ⚠️ **出口でも片づける**（#1139 レビュー由来 ℹ️）＝断ったのに 0 バイトの絵を
+        // 利用者のフォルダへ置き去りにしない。**判定より後ろ**に無ければ意味がない。
+        let sweep = body
+            .find("let _ = fs::remove_file(&out);")
+            .unwrap_or_else(|| panic!("{誰}：断ったのに 0 バイトの絵を置き去りにしている"));
+        assert!(
+            judge < sweep,
+            "{誰}：片づけが判定より前にある（出口の後始末になっていない）"
+        );
+        // ⚠️ **判定を「あるか」へ戻す変異を名指しで捕まえる**＝下の構造の網と役目は重なるが、
+        // こちらは #1137 の形そのものを止める。
+        assert!(
+            !body.contains("!out.exists()"),
+            "{誰}：「あるか」で成功を判定している＝前回の絵を成功と読む"
+        );
+        早抜けの成功返しが無い(body, 誰);
+    }
+
+    /// 切り出し（`extract_video_frame_impl`）の本体を読む（#1137）。
+    #[test]
+    fn 切り出しの本体が残骸を成功と読まない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        // ⚠️ **終わりは本体の直後まで詰める**（#1171 レビュー由来 ℹ️）＝`fn frame_seek_args` までだと
+        // 隣の `struct FrameSeek`・`is_safe_frame_file_name` が範囲に入り、**数を固定する網**が
+        // 対象外の場所で赤くなる。
+        // ⚠️ **目印は本体の**次に来るもの**へ寄せる**（#1158）＝`/// 頭出しの引数` の手前に
+        // `FrameGrid` と2つの引数作りが入ったので、そのままだと範囲が 4,214 バイトまで膨れた
+        //（＝この網が実際に気づいた）。
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+            SRC,
+            "fn extract_video_frame_impl(",
+            "/// 止め絵に取る",
+        ));
+        // ⚠️ **本体は小さくなった**（#1158＝引数作りを2つの関数へ出した）ので、上限も詰める。
+        走査が膨れていない(&body, 2600, "切り出し");
+        残骸を成功と読まない(&body, "切り出し");
+    }
+
+    /// 小さな絵（`extract_video_thumbnail`）の本体を読む（#1140）。
+    ///
+    /// ⚠️ **#1137 で片方だけ直していた**＝規則は同じなのに、隣に並んだこちらは素通りのままだった
+    /// ＝**双子の片方だけ直す**型。
+    /// ⚠️ **小さな絵の名前は元の動画の名前から作る**（`thumbnail_rel_path`）ので、
+    /// 素材番号が再発行された回には**前の動画の小さな絵**がディスクに残っている。
+    #[test]
+    fn 小さな絵の本体が残骸を成功と読まない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+            SRC,
+            // ⚠️ **本体は `_impl` へ移った**（#1173＝双子と同じく `spawn_blocking` に載せた）。
+            // 包む側（`pub async fn`）には判定が無いので、目印を本体へ移す。
+            "fn extract_video_thumbnail_impl(",
+            // ⚠️ **次の関数の説明文まで見ない**（#1140 レビュー由来 ℹ️）＝`範囲` は end の手前までなので、
+            // `pub async fn` を終わりにすると**その上の doc コメント**が範囲に入り、そこに綴りを
+            // 書いただけで落ちる（検査対象ですらない所で赤くなる）。
+            "/// 動画の**その瞬間**を静止画",
+        ));
+        走査が膨れていない(&body, 3000, "小さな絵");
+        残骸を成功と読まない(&body, "小さな絵");
+    }
+
+    /// 帯（`video_filmstrip_impl`）の本体を読む（#1172）。
+    ///
+    /// ⚠️ **切り出し・小さな絵とは断り方が違う**＝帯は**画面に文を出さない**ので、失敗は
+    /// **空で返して静かに諦める**（`残骸を成功と読まない` の「断って片づける」形は当てはまらない）。
+    /// 揃えるのは**2つの判定**だけ＝**門**（作り直さないか）と**出来たか**の両方を、
+    /// 切り出しと同じ道具（`produced_frame`）へ通すこと。
+    /// ⚠️ **門が「あるか」だと、失敗した回の 0 バイトが永久に残る**＝そのファイルが消えるまで
+    /// **作り直しにも行かない**（帯が空のまま固まる）。
+    #[test]
+    fn 格子は四つそろって初めて受ける() {
+        // ⚠️ **半端に受けない**＝欠けたぶんを既定値で埋めると、書き出しと違う並べ方を
+        // 「合わせた」と名乗ることになる（#1158）。
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(30), Some(5)).is_some());
+        assert!(FrameGrid::new(None, Some(1.0), Some(30), Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), None, Some(30), Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), None, Some(5)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(30), None).is_none());
+    }
+
+    #[test]
+    fn 割り算が壊れる値は格子として受けない() {
+        assert!(FrameGrid::new(Some(1.0), Some(0.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(-1.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(f64::NAN), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(f64::INFINITY), Some(1.0), Some(30), Some(0)).is_none());
+        assert!(FrameGrid::new(Some(1.0), Some(1.0), Some(0), Some(0)).is_none());
+        // ⚠️ **負の頭出しは 0 へ寄せる**（受けないのではなく寄せる＝FFmpeg が負を受け付けない）。
+        let g = FrameGrid::new(Some(-3.0), Some(1.0), Some(30), Some(0)).expect("寄せて受ける");
+        assert_eq!(g.source_start_sec, 0.0);
+    }
+
+    #[test]
+    fn 止め絵の並べ方が書き出しと同じ綴りになる() {
+        // ⚠️ **綴りが同じでなければ「同じ番号」が別のコマを指す**（#1158）。
+        // 実測＝この綴りにすると 64 通りすべてで書き出しと同じコマになる（直す前は 18 通りずれた）。
+        let args = frame_grid_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            &FrameGrid::new(Some(1.5), Some(2.0), Some(24), Some(7)).expect("格子"),
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("-ss 1.5"), "頭出しは並べ始める秒: {joined}");
+        assert!(
+            joined.contains("setpts=PTS/2,fps=24,select='eq(n\\,7)'"),
+            "書き出しと同じ並べ方＋その番号: {joined}"
+        );
+        // ⚠️ **並べ直しを止めないと、間引いた穴を埋めて1枚目が出る**。
+        assert!(joined.contains("-vsync 0"), "並べ直しを止める: {joined}");
+        // ⚠️ **横幅は縮めない**＝止め絵は素材の大きさのまま持つ（書き出しとの違いはここだけ）。
+        assert!(!joined.contains("scale="), "止め絵は縮めない: {joined}");
+    }
+
+    #[test]
+    fn 格子が無いときは今までどおり秒で取る() {
+        let args = frame_seconds_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            3.5,
+        );
+        let joined = args.join(" ");
+        assert!(!joined.contains("select="), "秒の道は間引かない: {joined}");
+        assert!(joined.contains("-frames:v 1"), "1枚だけ: {joined}");
+    }
+
+    #[test]
+    fn 帯の本体が残骸を成功と読まない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+            SRC,
+            "fn video_filmstrip_impl(",
+            "/// `ffmpeg -i <file>` を実行し stderr を返す",
+        ));
+        assert!(
+            !body.contains("out.is_file()"),
+            "帯：門が「あるか」で見ている＝0 バイトの残骸を永久に「あり」と読む"
+        );
+        let ran = body.find("run(&ffmpeg, &args)").unwrap_or_else(|| {
+            panic!("帯：ffmpeg を走らせる行が無い（本番の綴りを変えたなら、この目印も直す）")
+        });
+        let judge = body
+            .find("Ok(_) if produced_frame(&out)")
+            .unwrap_or_else(|| {
+                panic!("帯：「出来たか」で見ていない＝1枚も書かれなくても作れたことにしている")
+            });
+        assert!(ran < judge, "帯：走らせる前に出来たかを見ている");
+        // ⚠️ **門にも通っていること**＝上の `Ok(_) if …` だけだと、門が「あるか」に戻っても
+        //   `out.is_file()` を別の綴り（`out.exists()`）にすれば素通りする。
+        assert_eq!(
+            body.matches("produced_frame(&out)").count(),
+            2,
+            "帯：門と出来たかの両方を同じ道具へ通していない"
+        );
+        assert!(
+            !body.contains("out.exists()"),
+            "帯：門が「あるか」で見ている＝0 バイトの残骸を永久に「あり」と読む"
+        );
+    }
+
+    /// **FFmpeg を起こす口は、全部 `spawn_blocking` に載っている**（#1173・#375）。
+    ///
+    /// ⚠️ **1本ずつ直しても、また外れる**＝小さな絵だけが外れていたのは「双子を見ていない」から。
+    /// 決めた規則（メインスレッドを塞がない）を**機械に持たせる**＝新しい口を足したときに、
+    /// 載せ忘れるとここが赤くなる。
+    /// ⚠️ **見分けは「FFmpeg を起こすか」**（`resolve_ffmpeg`）＝口の名前では決めない。
+    #[test]
+    fn ffmpeg_を起こす口は塞がない() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        // ⚠️ **検査自身を数えない**＝この検査の中にも `#[tauri::command]` と `resolve_ffmpeg(`
+        //   という**文字列**があるので、ファイル全体を割ると自分を違反として拾う（実際に拾った）。
+        let 本番 = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
+        let 本文 = super::source_range::コメントを落とす(本番);
+        let mut 見た = 0;
+        let mut 塞ぐ: Vec<String> = Vec::new();
+        for 断片 in 本文.split("#[tauri::command]").skip(1) {
+            // その口の本体＝次の `pub fn`／`pub async fn` の頭から、次の口まで。
+            let 頭 = 断片.lines().take(3).collect::<Vec<_>>().join(" ");
+            let 名 = 頭
+                .split("fn ")
+                .nth(1)
+                .and_then(|t| t.split('(').next())
+                .unwrap_or("?")
+                .trim()
+                .to_string();
+            if !断片.contains("resolve_ffmpeg(") {
+                continue; // FFmpeg を起こさない口（状態を読むだけ等）は対象外
+            }
+            見た += 1;
+            let 包んでいる = 頭.contains("pub async fn") && 断片.contains("spawn_blocking");
+            if !包んでいる {
+                塞ぐ.push(名);
+            }
+        }
+        // ⚠️ **見た数も留める**＝走査が壊れて 0 件になっても「違反なし」で緑になる
+        //（`guards-blind-not-red` の型）。
+        assert!(
+            見た >= 5,
+            "FFmpeg を起こす口を拾えていない（走査が壊れている）：{見た} 件"
+        );
+        assert!(
+            塞ぐ.is_empty(),
+            "メインスレッドを塞ぐ口が残っている（`spawn_blocking` に載せる）：{塞ぐ:?}"
+        );
+    }
+
+    #[test]
+    fn 無いものは出来ていないと数える() {
+        let p = std::env::temp_dir().join(format!("stario-none-{}.png", std::process::id()));
+        let _ = fs::remove_file(&p);
+        assert!(!produced_frame(&p));
+    }
+}
+
+#[cfg(test)]
+mod tmp_cleanup_wiring_tests {
+    /// ⚠️ **書き出しの関数が作業フォルダの片づけ役を持っている**こと（#1358・PR #1359 レビュー ℹ️）＝
+    /// 片づけ役（`TmpDirCleanup`）だけを見る検査は、関数から宣言を消しても緑のまま。
+    /// 作業フォルダを作った直後〜場面の準備の前に、片づけ役を持つ行があることを、本番の範囲だけ切り出して見る。
+    const SRC: &str = include_str!("ffmpeg.rs");
+
+    #[test]
+    fn export_video_impl_holds_tmp_cleanup() {
+        let body = super::source_range::範囲(
+            SRC,
+            "fn export_video_impl(",
+            "let mut jobs: Vec<SceneJob>",
+        );
+        assert!(
+            body.contains("let _tmp_cleanup = TmpDirCleanup { path: tmp.clone() };"),
+            "書き出しの関数が作業フォルダの片づけ役を持っていない"
+        );
+    }
+}
+
+#[cfg(test)]
+mod join_chunk_tests {
+    use super::{plan_join_chunks, JoinStep, MAX_JOIN_INPUTS};
+
+    /// つないだ結果の長さと、各入力が始まる位置（xfade＝`offset` から右が重なる・ハードカット＝後ろへ続く）。
+    fn simulate(lens: &[f64], steps: &[JoinStep]) -> (f64, Vec<f64>) {
+        let mut len = lens[0];
+        let mut starts = vec![0.0];
+        for (i, st) in steps.iter().enumerate() {
+            let s = if st.xfade.is_some() {
+                st.offset_sec
+            } else {
+                len
+            };
+            starts.push(s);
+            len = s + lens[i + 1];
+        }
+        (len, starts)
+    }
+
+    /// 場面の尺と境目（切り替えは 0.5 秒・`hard` の番号はハードカット）を、つなぐ側と同じ規則で作る。
+    fn scenes(n: usize, sec: f64, hard: &[usize]) -> (Vec<f64>, Vec<(bool, f64)>) {
+        let secs: Vec<f64> = (0..n).map(|i| sec + (i % 3) as f64 * 0.25).collect();
+        let mut acc = secs[0];
+        let mut out = Vec::new();
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            if hard.contains(&i) {
+                out.push((false, 0.0));
+                acc += s;
+            } else {
+                out.push((true, acc - 0.5));
+                acc += s - 0.5;
+            }
+        }
+        (secs, out)
+    }
+
+    fn to_steps(raw: &[(bool, f64)]) -> Vec<JoinStep<'static>> {
+        raw.iter()
+            .map(|&(x, o)| JoinStep {
+                xfade: if x { Some("fade") } else { None },
+                duration_sec: 0.5,
+                offset_sec: o,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn intermediate_uses_uncompressed_audio() {
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 1.0,
+        }];
+        let args = super::intermediate_audio_args(super::xfade_chain_args(
+            &files,
+            &steps,
+            "c.mkv",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        ));
+        let i = args
+            .iter()
+            .position(|a| a == "-c:a")
+            .expect("音の指定がある");
+        assert_eq!(args[i + 1], "pcm_s16le");
+        assert!(!args.iter().any(|a| a == "aac"), "AAC が残っている");
+    }
+
+    /// ⚠️ **入りがハードカットの短い場面を、次の切り替えが丸ごと覆う**ところでは切らない（PR #1361 レビュー 🔴）＝
+    /// 切ると塊の中の位置が 0 以下になる。どの塊の中でも、切り替えの位置が塊の頭より後ろにあること。
+    #[test]
+    fn never_cut_where_a_transition_reaches_before_the_chunk() {
+        // 30 場面（6 本ずつ）。場面 6 の入りはハードカットで尺 0.3 秒、場面 7 へ 1.0 秒の切り替え（場面 5 まで食い込む）。
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        secs[6] = 0.3;
+        let mut raw = Vec::new();
+        let mut acc = secs[0];
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            if i == 6 {
+                raw.push((false, 0.0, 0.0));
+                acc += s;
+            } else {
+                let d = if i == 7 { 1.0 } else { 0.5 };
+                raw.push((true, d, acc - d));
+                acc += s - d;
+            }
+        }
+        let steps: Vec<JoinStep> = raw
+            .iter()
+            .map(|&(x, d, o)| JoinStep {
+                xfade: if x { Some("fade") } else { None },
+                duration_sec: d,
+                offset_sec: o,
+            })
+            .collect();
+        let (want_len, want_starts) = simulate(&secs, &steps);
+        let (chunks, top) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        assert!(
+            chunks.iter().all(|c| c.first != 6),
+            "食い込まれる場面の頭で切った"
+        );
+        let mut lens = Vec::new();
+        for c in &chunks {
+            for st in &c.steps {
+                if st.xfade.is_some() {
+                    assert!(st.offset_sec > 0.0, "塊の中の切り替えの位置が 0 以下");
+                }
+            }
+            let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+            for (k, s) in starts.iter().enumerate() {
+                assert!((c.start_sec + s - want_starts[c.first + k]).abs() < 1e-9);
+            }
+            lens.push(len);
+        }
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+    }
+
+    /// 場面の尺と入り方（`Some(d)`＝切り替え・`None`＝ハードカット）から、前側と同じ規則（offset＝それまでの長さ−d）で境目を作る。
+    fn build(secs: &[f64], entries: &[Option<f64>]) -> Vec<JoinStep<'static>> {
+        let mut acc = secs[0];
+        let mut out = Vec::new();
+        for (i, s) in secs.iter().enumerate().skip(1) {
+            match entries[i] {
+                Some(d) => {
+                    out.push(JoinStep {
+                        xfade: Some("fade"),
+                        duration_sec: d,
+                        offset_sec: acc - d,
+                    });
+                    acc += s - d;
+                }
+                None => {
+                    out.push(JoinStep {
+                        xfade: None,
+                        duration_sec: 0.0,
+                        offset_sec: 0.0,
+                    });
+                    acc += s;
+                }
+            }
+        }
+        out
+    }
+
+    /// 塊の頭 b では、後ろのどの場面も b の入りの切り替えが終わってから始まること＋長さと位置が1回でつなぐときと同じこと。
+    fn assert_sound(secs: &[f64], steps: &[JoinStep]) -> Vec<usize> {
+        let (want_len, want_starts) = simulate(secs, steps);
+        let (chunks, top) =
+            plan_join_chunks(secs, steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        let mut lens = Vec::new();
+        for c in &chunks {
+            if c.first > 0 {
+                let e = &steps[c.first - 1];
+                let entry_d = if e.xfade.is_some() {
+                    e.duration_sec
+                } else {
+                    0.0
+                };
+                for g in c.first + 1..secs.len() {
+                    assert!(
+                        want_starts[g] >= want_starts[c.first] + entry_d + 1.0 / 30.0 - 1e-9,
+                        "塊の頭 {} の入りの切り替えに、場面 {} が食い込む",
+                        c.first,
+                        g
+                    );
+                }
+            }
+            for st in &c.steps {
+                if st.xfade.is_some() {
+                    assert!(st.offset_sec > 0.0, "塊の中の切り替えの位置が 0 以下");
+                }
+            }
+            let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+            for (k, s) in starts.iter().enumerate() {
+                assert!((c.start_sec + s - want_starts[c.first + k]).abs() < 1e-9);
+            }
+            lens.push(len);
+        }
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+        chunks.iter().map(|c| c.first).collect()
+    }
+
+    /// ⚠️ 切れ目をずらして塊が延びたぶんも比べる（PR #1361 再レビュー 🔴 の反例そのまま）。
+    #[test]
+    fn shifted_cut_checks_the_whole_tail() {
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        let mut entries: Vec<Option<f64>> = vec![Some(0.5); n];
+        for i in 6..=11 {
+            secs[i] = 0.3;
+            entries[i] = None;
+        }
+        entries[12] = Some(3.0);
+        secs[13] = 0.3;
+        entries[13] = None;
+        entries[14] = Some(11.0);
+        let steps = build(&secs, &entries);
+        let firsts = assert_sound(&secs, &steps);
+        assert!(!firsts.contains(&12) && !firsts.contains(&13) && !firsts.contains(&14));
+    }
+
+    /// ⚠️ 塊の頭の入りの切り替えの**最中**に次の切り替えが始まる所では切らない（重ねる順番が変わる・同 🟡）。
+    #[test]
+    fn never_cut_inside_the_entry_transition() {
+        let n = 30;
+        let mut secs = vec![10.0; n];
+        let mut entries: Vec<Option<f64>> = vec![Some(0.5); n];
+        secs[6] = 2.0;
+        entries[6] = Some(1.5);
+        secs[7] = 0.3;
+        entries[7] = None;
+        entries[8] = Some(2.0);
+        let steps = build(&secs, &entries);
+        let firsts = assert_sound(&secs, &steps);
+        assert!(
+            !firsts.contains(&6),
+            "入りの切り替えの最中に次が始まる場面の頭で切った"
+        );
+    }
+
+    /// 1場面だけの塊（31 場面＝6 本ずつで最後が1本）も、長さと位置が変わらない（PR #1361 レビュー ℹ️）。
+    #[test]
+    fn single_scene_chunk_keeps_positions() {
+        let (secs, raw) = scenes(31, 20.0, &[]);
+        let steps = to_steps(&raw);
+        let (want_len, _) = simulate(&secs, &steps);
+        let (chunks, top) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        assert_eq!(chunks.last().map(|c| c.end - c.first), Some(1));
+        let lens: Vec<f64> = chunks
+            .iter()
+            .map(|c| simulate(&secs[c.first..c.end], &c.steps).0)
+            .collect();
+        assert!((simulate(&lens, &top).0 - want_len).abs() < 1e-9);
+    }
+
+    /// ⚠️ 後ろの長い切り替えが頭近くまで食い込むと、切れ目は最後の場面の頭までずれる（塊は2つ・前の塊が大きい）。
+    /// それでも長さと位置は1回でつなぐときと同じ（同 🟡＝「全体が1つの塊」には届かない）。
+    #[test]
+    fn cut_shifts_to_the_last_scene_when_everything_overlaps() {
+        let n = 30;
+        let mut secs = vec![1.0; n];
+        let mut entries: Vec<Option<f64>> = vec![None; n];
+        secs[n - 1] = 40.0;
+        entries[n - 1] = Some(28.5); // 全体の頭近くまで食い込む
+        let steps = build(&secs, &entries);
+        assert_eq!(assert_sound(&secs, &steps), vec![0, n - 1]);
+    }
+
+    /// ⚠️ **音は入力ごとに尺で切ってからつなぐ**（#1362＝切らないと境目ごとに声が遅れていく）。
+    #[test]
+    fn trimmed_chain_cuts_each_audio_to_its_length() {
+        let files = vec![
+            "a.mp4".to_string(),
+            "b.mp4".to_string(),
+            "c.mp4".to_string(),
+        ];
+        let steps = vec![
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 3.5,
+            },
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        ];
+        let args = super::xfade_chain_args_trimmed(
+            &files,
+            &steps,
+            Some(&[4.0, 2.25, 3.0]),
+            "o.mp4",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        );
+        let fc = &args[args
+            .iter()
+            .position(|a| a == "-filter_complex")
+            .expect("ある")
+            + 1];
+        assert!(fc.contains("[0:a]apad,atrim=0:4,asetpts=PTS-STARTPTS,asettb=AVTB[na0]"));
+        assert!(fc.contains("[1:a]apad,atrim=0:2.25,asetpts=PTS-STARTPTS,asettb=AVTB[na1]"));
+        assert!(fc.contains("[2:a]apad,atrim=0:3,asetpts=PTS-STARTPTS,asettb=AVTB[na2]"));
+        // 映像は切らない（xfade は決めた位置で移る）
+        assert!(fc.contains("[0:v]settb=AVTB[nv0]"));
+        // 尺を渡さなければ従来どおり
+        let plain = super::xfade_chain_args(
+            &files,
+            &steps,
+            "o.mp4",
+            super::VideoCodec::X264,
+            30,
+            "12000k",
+        );
+        assert!(!plain.iter().any(|a| a.contains("atrim")));
+    }
+
+    /// 塊の長さ（2段目で音を切る尺）は、塊をつないだ長さと同じ（#1362）。
+    #[test]
+    fn chunk_len_matches_joined_length() {
+        let (secs, raw) = scenes(80, 33.75, &[9, 40]);
+        let steps = to_steps(&raw);
+        let (chunks, _) =
+            plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+        for c in &chunks {
+            let (len, _) = simulate(&secs[c.first..c.end], &c.steps);
+            assert!((c.len_sec - len).abs() < 1e-9, "塊 {} の長さ", c.first);
+        }
+    }
+
+    /// 音を切る長さ：次が切り替えなら決めた尺、ハードカットならコマにそろえた長さ、最後は決めた尺（PR #1363 レビュー 🟡）。
+    #[test]
+    fn audio_secs_follow_how_the_video_joins() {
+        let steps = vec![
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 3.0,
+            },
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        ];
+        let got = super::join_audio_secs(&[3.51, 2.01, 4.01], &steps, 30);
+        assert!((got[0] - 3.51).abs() < 1e-9, "切り替えの前は決めた尺");
+        assert!(
+            (got[1] - 61.0 / 30.0).abs() < 1e-9,
+            "ハードカットの前はコマにそろえた長さ"
+        );
+        assert!((got[2] - 4.01).abs() < 1e-9, "最後は決めた尺");
+        // ちょうどコマに乗る尺は増やさない
+        assert!((super::join_audio_secs(&[2.0, 1.0], &steps[1..], 30)[0] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn few_scenes_join_at_once() {
+        let (secs, raw) = scenes(MAX_JOIN_INPUTS, 10.0, &[]);
+        assert!(plan_join_chunks(&secs, &to_steps(&raw), MAX_JOIN_INPUTS, 1.0 / 30.0).is_none());
+    }
+
+    /// ⚠️ **塊に分けても、出来上がりの長さと、どの場面がどこから始まるかは1回でつなぐときと同じ**（#1360）。
+    #[test]
+    fn chunked_join_keeps_length_and_positions() {
+        for hard in [vec![], vec![9usize, 10, 40, 79]] {
+            let (secs, raw) = scenes(80, 33.75, &hard);
+            let steps = to_steps(&raw);
+            let (want_len, want_starts) = simulate(&secs, &steps);
+            let (chunks, top) =
+                plan_join_chunks(&secs, &steps, MAX_JOIN_INPUTS, 1.0 / 30.0).expect("分ける");
+            assert!(chunks.len() <= MAX_JOIN_INPUTS, "2段目の入力が多すぎる");
+            assert!(chunks.len() > 1, "ふつうの文書なのに分けなかった");
+            assert!(
+                chunks.iter().all(|c| c.end - c.first <= MAX_JOIN_INPUTS),
+                "1段目の入力が多すぎる"
+            );
+            let mut chunk_lens = Vec::new();
+            for c in &chunks {
+                let (len, starts) = simulate(&secs[c.first..c.end], &c.steps);
+                for (k, s) in starts.iter().enumerate() {
+                    let got = c.start_sec + s;
+                    assert!(
+                        (got - want_starts[c.first + k]).abs() < 1e-9,
+                        "場面 {} の始まりがずれた",
+                        c.first + k
+                    );
+                }
+                chunk_lens.push(len);
+            }
+            let (len, starts) = simulate(&chunk_lens, &top);
+            assert!((len - want_len).abs() < 1e-9, "出来上がりの長さが変わった");
+            for (c, s) in chunks.iter().zip(starts) {
+                assert!((s - c.start_sec).abs() < 1e-9, "塊の始まりがずれた");
+            }
+        }
     }
 }

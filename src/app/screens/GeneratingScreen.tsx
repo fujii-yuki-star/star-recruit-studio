@@ -1,8 +1,11 @@
+import { generateRecovery } from "../../domain/ai/generateRecovery";
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { VIDEO_KIND } from "../../domain/enums";
+import { onAiBusyWait, onLocalAiProgress } from "../../infrastructure/aiClient";
 import { LoadingView, ErrorView } from "../components/states";
-import { GENERATE_FAILED_TITLE, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
+import { GENERATE_FAILED_TITLE, GENERATE_TOO_LONG_TITLE, EDIT_WIZARD_INPUT_LABEL, generateFailedMessage, OPEN_AI_SETTINGS_LABEL, RETRY_GENERATE_LABEL, START_MANUAL_LABEL, writingSceneMessage } from "../uiLabels";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
@@ -12,6 +15,8 @@ interface GeneratingProps {
 // マウント時に Mock AI → 検証/変換 を実行し、結果はストアに入る。進捗はUX用のアニメーション。
 export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const status = useProjectStore((s) => s.status);
+  // 一般（発表）の動画に「会社情報」と出さない（UI/UX 監査 2026-10-02）。
+  const isGeneral = useProjectStore((s) => s.meta.videoKind === VIDEO_KIND.general);
   const aiError = useProjectStore((s) => s.aiError);
   const generate = useProjectStore((s) => s.generate);
   const cancelGeneration = useProjectStore((s) => s.cancelGeneration);
@@ -19,39 +24,102 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const reset = useProjectStore((s) => s.reset);
   const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const [progress, setProgress] = useState(8);
+  /**
+   * 混み合っていて待ち直している回数（0＝待っていない）。
+   *
+   * ⚠️ **待っていることを言う**（#1244・利用者の指摘 2026-09-25）＝混雑のときは裏で待ち直す
+   *（待つだけで合計 33 秒・1回の要求にも最大 60 秒かかりうる）ので、黙っていると**固まったように見える**（しかも以前は待ち直さずに落ちていた）。
+   */
+  const [busyWait, setBusyWait] = useState(0);
+  /**
+   * このパソコンの中で作っているとき、書き始めた場面の数（0＝まだ書き始めていない・ADR-0052 決定6・#1293）。
+   * ⚠️ **1分ほど何も変わらない画面にしない**＝実際に書いている場面の数を見せる（見込みの割合は出さない＝嘘をつかない）。
+   */
+  const [writingScene, setWritingScene] = useState(0);
 
   useEffect(() => {
     void generate();
   }, [generate]);
 
+  // ⚠️ **外す**＝画面を離れたあとに知らせが届いて、消えた画面へ書き込まない。
   useEffect(() => {
-    if (status === "error") return;
-    // ready になるまでは 90% で頭打ち＝生成完了前に 100% へ達して「100%なのに終わらない」表示になるのを防ぐ（#392）。
-    const tick = setInterval(() => {
-      setProgress((p) => Math.min(status === "ready" ? 100 : 90, p + 6));
-    }, 180);
+    let stop: (() => void) | null = null;
+    let alive = true;
+    void onAiBusyWait((e) => setBusyWait(e.attempt)).then((off) => {
+      if (alive) stop = off;
+      else off();
+    });
+    return () => {
+      alive = false;
+      if (stop) stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let alive = true;
+    void onLocalAiProgress((e) => setWritingScene(e.scenes)).then((off) => {
+      if (alive) stop = off;
+      else off();
+    });
+    return () => {
+      alive = false;
+      if (stop) stop();
+    };
+  }, []);
+
+  // ⚠️ **できるまでは「わからない」と見せる**（#993 ②）＝以前は 180ms ごとに +6 して
+  // **2.5秒で 90% まで行き、そこで止まって**いた。AI は最長60秒待つので、実際の相手だと
+  // **90% のまま数十秒動かない**＝「固まった」ようにしか見えない。
+  // ⚠️ **数字は出していないので嘘はついていなかった**が、止まったバーは固まって見える。
+  // 書き出しが「わからない区間」に使っている**流れるバー**へ寄せる（ADR-0026②）。
+  // できたら 100% まで詰めて終わりを見せる（そこは分かっている）。
+  useEffect(() => {
+    if (status !== "ready") return;
+    const tick = setInterval(() => setProgress((p) => Math.min(100, p + 6)), 180);
     return () => clearInterval(tick);
   }, [status]);
 
   if (status === "error") {
+    // ⚠️ **見分けは domain の目印から**（#1222）＝断りの文と同じ1か所から作るので、ずれない。
+    const recovery = generateRecovery(aiError);
+    const 上限で断った = recovery === "editInput";
+    const retry = {
+      label: RETRY_GENERATE_LABEL,
+      onClick: () => {
+        setProgress(8);
+        setWritingScene(0);
+        // 前の回で混み合いを待っていても、やり直しの最初からその文を出さない。
+        setBusyWait(0);
+        reset();
+        void generate();
+      },
+    };
+    const editInput = { label: EDIT_WIZARD_INPUT_LABEL, onClick: () => onNavigate("wizard") };
     return (
       <div className="main-scroll">
         {/* 見出し・説明・2択のラベルは空状態（NoScenesState）と共有する＝この画面を離れても言葉が変わらない（§6・#590）。 */}
         <ErrorView
-          title={GENERATE_FAILED_TITLE}
+          title={上限で断った ? GENERATE_TOO_LONG_TITLE : GENERATE_FAILED_TITLE}
           message={generateFailedMessage(aiError)}
           // 正典 `12_AI_PROMPT_AND_MAPPING §9.3③`「前回 ai/latest_result.json から復元」は **post-α・未実装として正典で追跡中**の
           // ため導線を出さない（GH issue でなく正典が追跡元＝復元しない導線で誤誘導しないため。現状 UI は ①再試行 / ②手動のみ）。
+          // ⚠️ **同じ入力での再送を出さない**（PR #1223 レビュー 🟡）＝上限で断ったときの
+          //   「もう一度試す」は `reset(); generate()`＝**同じ内容をそのまま送り直す**ので、**また超える**。
+          //   断りの文が「もう一度お試しください」を避けているのに、**ボタンがそれを打ち消して**いた（§2-5）。
+          // ⚠️ **行き先は入力**＝文が指示する次の行動（伝える内容を減らす）に、画面から到達できるようにする。
+          // ⚠️ **ボタンは文が名指しする行き先に従う**（UI/UX 監査 2026-10-02）＝部品が無い・壊れている・接続キーが無いのに
+          //   「もう一度試す」を主にすると、何度押しても同じ失敗になる。時間切れは「入力を短く」が先（再試行も残す）。
           actions={[
-            {
-              label: RETRY_GENERATE_LABEL,
-              primary: true,
-              onClick: () => {
-                setProgress(8);
-                reset();
-                void generate();
-              },
-            },
+            ...(recovery === "editInput"
+              ? [{ ...editInput, primary: true }]
+              : recovery === "settings"
+                ? // ⚠️ **再試行も控えめに残す**（PR3 レビュー 🟡）＝設定でキーを登録・Gemini へ切り替えてから戻ってきても
+                  //   失敗の文は消えないので、再試行が無いと**やり直す道がどの画面にも無い**（以前はどの失敗でも出ていた）。
+                  [{ label: OPEN_AI_SETTINGS_LABEL, primary: true, onClick: () => onNavigate("settings") }, retry]
+                : recovery === "shortenInput"
+                  ? [{ ...editInput, primary: true }, retry]
+                  : [{ ...retry, primary: true }]),
             // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
             { label: START_MANUAL_LABEL, onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}
@@ -65,13 +133,17 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   return (
     <div className="main-scroll">
       <LoadingView
-        title={ready ? "動画案ができました" : "ゆうこが動画案を作っています…"}
+        title={ready ? "動画案ができました" : "AIが動画案を作っています…"}
         message={
           ready
             ? "内容を確認して、自由に修正できます。"
-            : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
+            : busyWait > 0
+              ? "いま混み合っているので、少し待ってからもう一度お願いしています。このままお待ちください。"
+              : writingScene > 0
+                ? writingSceneMessage(writingScene)
+                : `${isGeneral ? "伝えたい内容" : "会社情報"}と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。`
         }
-        progress={progress}
+        progress={status === "ready" ? progress : "indeterminate"}
         onCancel={
           ready
             ? undefined

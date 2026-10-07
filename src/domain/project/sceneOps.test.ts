@@ -594,6 +594,88 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(t.background).toBeUndefined(); // prevTemplate の title 層は background 未指定
   });
 
+  /**
+   * ⚠️ **場面別の上書き（`scene.textStyles[key]`）は帯にも効く**（PR #879 再レビュー 🔴）。
+   * 以前は生の `layer.background` を写していたので、**場面で変えた帯だけテンプレ既定へ戻って**いた
+   *（隣の色・大きさは実効値を写していたのに帯だけ＝ADR-0026② の非対称）。
+   */
+  it('通常→FREE：背景帯も場面別の上書きを写す（テンプレ既定へ戻さない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('title', 'text', { textKey: 'title', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#111111', opacity: 0.2 } })],
+    };
+    const sc = {
+      ...richScene(),
+      texts: { title: 'タイトル' },
+      textStyles: { title: { background: { enabled: true, color: '#ff0000', opacity: 0.9, radius: 20 } } },
+    } as unknown as Scene;
+    const t = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'text')!;
+    expect(t.background).toEqual({ enabled: true, color: '#ff0000', opacity: 0.9, radius: 20 });
+  });
+
+  it('通常→FREE：字幕の背景帯も場面別の上書きを写す', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('subtitle', 'subtitle', { textKey: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#111111' } })],
+    };
+    const sc = {
+      ...richScene(),
+      texts: { subtitle: '字幕' },
+      textStyles: { subtitle: { background: { enabled: true, color: '#00ff00', opacity: 0.3 } } },
+    } as unknown as Scene;
+    const el = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'subtitle')!;
+    expect(el.background).toEqual({ enabled: true, color: '#00ff00', opacity: 0.3 });
+  });
+
+  /** ⚠️ **`FreeElement.background` は生の形**（`enabled` を持つ）＝解決後の帯を入れると往復で形が変わる。 */
+  it('通常→FREE：帯は「生の形」で写す（解決後の既定埋め済みの形にしない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('title', 'text', { textKey: 'title', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, color: '#112233' } })],
+    };
+    const sc = { ...richScene(), texts: { title: 'あ' } } as Scene;
+    const t = freeLayoutFromPlacedContent(sc, tmpl).elements.find((e) => e.kind === 'text')!;
+    // 既定（濃さ 0.55・角丸 16）を埋めない＝テンプレが持っていたものだけ。
+    expect(t.background).toEqual({ enabled: true, color: '#112233' });
+  });
+
+  it('通常→FREE：テンプレ既定素材（ADR-0021）も持ち込む（描画と同じ解決＝切替で絵が消えない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('mainVisual', 'slot', { x: 0, y: 0, w: 100, h: 100, assetId: 'tmpl_asset_001' })],
+    };
+    const sc = { ...richScene(), assetRefs: {} } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, tmpl);
+    expect(elements.find((e) => e.kind === 'slot')?.assetId).toBe('tmpl_asset_001');
+  });
+
+  it('通常→FREE：ロゴの収め方は contain（自由配置の既定 cover に任せると切り取られる）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('logo', 'logo', { x: 0, y: 0, w: 100, h: 100 })],
+    };
+    const sc = { ...richScene(), assetRefs: { logo: 'asset_logo' } } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, tmpl);
+    expect(elements.find((e) => e.kind === 'slot')?.fit).toBe('contain');
+  });
+
+  it('faithful：描かれるものをすべて写す（図形・空のスロット・素材の無い背景の塗り）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('background', 'background', { x: 0, y: 0, w: 1920, h: 1080, fillColor: '#123456' }),
+        layer('deco', 'shape', { x: 10, y: 10, w: 50, h: 50, fillColor: '#ff0000' }),
+        layer('mainVisual', 'slot', { x: 100, y: 100, w: 200, h: 200 }),
+      ],
+    };
+    const sc = { ...richScene(), assetRefs: {} } as Scene;
+    expect(freeLayoutFromPlacedContent(sc, tmpl).elements).toHaveLength(0); // 既定（切替）は持ち込まない
+    const faithful = freeLayoutFromPlacedContent(sc, tmpl, { faithful: true }).elements;
+    expect(faithful).toHaveLength(3);
+    expect(faithful.filter((e) => e.kind === 'shape')).toHaveLength(2); // 背景の塗り＋図形
+    expect(faithful.find((e) => e.kind === 'slot')?.assetId).toBeNull(); // 空の枠はそのまま
+  });
+
   it('freeLayoutFromPlacedContent 単体：{elements, slotClips} を返す（slotClips 移送マップ）', () => {
     const sc = { ...richScene(), slotClips: { mainVisual: { speed: 2 } } } as Scene;
     const { elements, slotClips } = freeLayoutFromPlacedContent(sc, prevTemplate());
@@ -601,6 +683,33 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(elements.filter((e) => e.kind === 'text')).toHaveLength(1);
     const mv = elements.find((e) => e.assetId === 'asset_v')!;
     expect(slotClips[mv.id]).toEqual({ speed: 2 });
+  });
+
+  // #831＝バラす（explode.ts）が「立ち絵の動画」と「差し込み口でない層の動画」を取り違えないために、
+  // characterElementIds を直接見る。統合テスト（explodeParity.test.ts）だけに任せず、この関数自身の
+  // 戻り値としても固定する（§7・ほかのフィールドと同じ流儀）。
+  it('freeLayoutFromPlacedContent 単体：立ち絵の要素は characterElementIds に入る（差し込み口とは別扱い・#831）', () => {
+    const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
+    const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    const pose = elements.find((e) => e.assetId === 'asset_yuko')!;
+    expect(characterElementIds.has(pose.id)).toBe(true);
+    expect(slotLayerByElementId[pose.id]).toBeUndefined(); // 差し込み口の層ではない＝対応表には入らない（#512 段3b）
+  });
+
+  it('freeLayoutFromPlacedContent 単体：ポーズ未設定なら要素も characterElementIds も増えない', () => {
+    const sc = { ...richScene(), character: { enabled: false, characterId: 'yuko' } } as Scene; // poseAssetId なし
+    const { elements, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    expect(elements.some((e) => e.assetId === 'asset_yuko')).toBe(false);
+    expect(characterElementIds.size).toBe(0);
+  });
+
+  it('freeLayoutFromPlacedContent 単体：characterElementIds と slotLayerByElementId は互いに排他', () => {
+    const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
+    const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    const slotIds = new Set(Object.keys(slotLayerByElementId));
+    for (const id of characterElementIds) expect(slotIds.has(id)).toBe(false);
+    const mv = elements.find((e) => e.assetId === 'asset_v')!; // 差し込み口（mainVisual）の要素は逆に入らない
+    expect(characterElementIds.has(mv.id)).toBe(false);
   });
 
   it('通常→FREE：グループ変形・非表示を実効配置で展開（生の座標でなく composeGroupGeometry・#524 P1）', () => {
@@ -624,6 +733,25 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const mv = elements.find((e) => e.assetId === 'asset_v')!;
     expect({ x: mv.x, y: mv.y, w: mv.w, h: mv.h }).toEqual({ x: expected.x, y: expected.y, w: expected.w, h: expected.h });
     expect(mv.x).not.toBe(100); // 生の座標のまま持ち込んでいない
+  });
+
+  it('通常→FREE：まとまりで縮めた文字は、縮めた大きさで写す（描画と同じ字の大きさ・#1371）', () => {
+    const grouped: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('title', 'text', { textKey: 'title', x: 200, y: 900, w: 1500, h: 120, fontSize: 64, strokeWidth: 4, background: { enabled: true, radius: 12 } }),
+        layer('deco', 'shape', { x: 0, y: 0, w: 200, h: 200, radius: 40 }),
+      ],
+      groups: [{ id: 'group_001', members: ['title', 'deco'], transform: { x: 0, y: 0, scale: 0.5, rotation: 0 } }],
+    };
+    const sc = { ...richScene(), textStyles: undefined } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, grouped, { faithful: true });
+    const title = elements.find((e) => e.kind === 'text')!;
+    // 描画（layoutScene）で見える大きさと同じ＝バラす前後で字の大きさが変わらない。
+    const drawn = layoutScene(sc, grouped).items.find((i) => i.id === 'title') as TextItem;
+    expect(title).toMatchObject({ fontSize: 32, strokeWidth: 2, background: { radius: 6 } });
+    expect(title.fontSize).toBe(drawn.fontSize);
+    expect(elements.find((e) => e.kind === 'shape')).toMatchObject({ w: 100, radius: 20 });
   });
 
   it('非破壊往復：通常→FREE で通常配置（assetRefs/slotFits）を休眠保持し、FREE→通常で復元（Option A・ADR-0030）', () => {

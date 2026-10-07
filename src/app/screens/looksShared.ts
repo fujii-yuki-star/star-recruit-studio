@@ -1,9 +1,13 @@
-// 見た目パターンの一覧（LooksScreen）と編集画面（LooksEditScreen）で共有する小物（§6＝文言/ロジックは1か所）。
+// 見た目パターンの一覧（LooksScreen）・編集画面（LooksEditScreen）・場面編集の見た目ピッカー
+// （SceneEditScreen・#1031）で共有する小物（§6＝文言/ロジックは1か所）。
 // コンポーネントを export しないファイルに分けることで Fast Refresh の警告も避ける。
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
+import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import type { Template } from "../../domain/template/types";
-import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType } from "../../domain/enums";
-import { DEFAULT_CHARACTER_ID, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, LAYER_TYPE, NARRATION_STATUS, type LayerType } from "../../domain/enums";
+import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
+import { textKeyOfLayer } from "../../domain/template/layerOps";
+import type { TextKey } from "../../domain/enums";
 
 // レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
 export const layerLabel: Record<LayerType, string> = {
@@ -24,14 +28,20 @@ export function buildSampleScene(template: Template, assets: Asset[]): Scene {
   // （layer.assetId・描画フォールバック）があれば表示、無ければプレースホルダ枠。ゆうこ（立ち絵）は持ち主の写真ではなく
   // 演者なので、character レイヤーがあれば既定ポーズで見せる。
   const assetRefs: AssetRefs = {};
-  const hasCharacter = template.layers.some((l) => l.type === "character");
+  const hasCharacter = template.layers.some((l) => l.type === LAYER_TYPE.character);
   const texts: Texts = {};
+  // ⚠️ **どの文字を指すかは1か所で解く**（#1058）＝字幕層の `textKey` 未指定は `subtitle`
+  //   （`textKeyOfLayer`）。直に見ると、見本の字幕だけ空になる（描く側とずれる）。
+  const sample: Record<TextKey, string> = {
+    title: "見出しの例",
+    subtitle: "字幕の例文がここに入ります",
+    main: "本文の例",
+    caption: "キャプションの例",
+    url: "example.com",
+  };
   for (const layer of template.layers) {
-    if (layer.textKey === "title") texts.title = "見出しの例";
-    else if (layer.textKey === "subtitle") texts.subtitle = "字幕の例文がここに入ります";
-    else if (layer.textKey === "main") texts.main = "本文の例";
-    else if (layer.textKey === "caption") texts.caption = "キャプションの例";
-    else if (layer.textKey === "url") texts.url = "example.com";
+    const key = textKeyOfLayer(layer);
+    if (key) texts[key] = sample[key];
   }
   // FREE テンプレは自由配置のサンプルを見せる（実演用・ADR-0008）。スロットは空＝持ち主の写真を勝手に出さない（ADR-0021 ①）。
   const freeLayout: FreeElement[] | undefined =
@@ -48,7 +58,7 @@ export function buildSampleScene(template: Template, assets: Asset[]): Scene {
     order: 1,
     sceneType: template.category,
     templateId: template.templateId,
-    durationSec: template.defaults?.durationSec ?? SCENE_DEFAULT_DURATION_SEC,
+    durationSec: defaultDurationForTemplate(template),
     assetRefs,
     character: {
       enabled: hasCharacter,

@@ -11,6 +11,30 @@ import type { Orientation, SceneCategory } from './enums';
 export const AI_SCENE_MIN_DURATION_SEC = 3;
 export const AI_SCENE_MAX_DURATION_SEC = 15;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
+// 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
+// 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は
+// 「早口すぎる」の判定で、こちらは**尺の見積もり**＝判定より遅めに見積もる＝計算した尺が早口の判定に掛からない。
+// ⚠️ どちらも**声の速さの倍率をかけて使う**（#1318）ので、同じ速さの声どうしで比〔7.5:9〕が保たれる）。
+// ⚠️ **速さ 1.0 のときの値**＝声の速さ設定（11.6）の倍率をかけて使う（`domain/voice/speechRate` の `narrationCharsPerSec`・#1318）。
+export const NARRATION_CHARS_PER_SEC = 7.5;
+// 語りの前後に置く間（秒）。場面の切り替わりで声が詰まって聞こえないように。
+export const NARRATION_SCENE_PADDING_SEC = 1;
+// 同梱の AI が写真に付ける説明とタグの上限（ADR-0052 決定4・12 §4b）。説明は動画案の指示文に素材ごとに載るので短く。
+export const ASSET_DESCRIPTION_MAX_LENGTH = 60;
+export const ASSET_AI_TAGS_MAX = 5;
+export const ASSET_AI_TAG_MAX_LENGTH = 12;
+// 編集の途中の AI 補助（ADR-0053・12 §10）。候補の数・見出しの上限・字幕の目安・「短く」の割合・これより短い上限は頼まない。
+// 候補は多すぎると選ぶのが手間（2B は数を増やすほど似た候補が増える）。字幕は語りの要約なので見た目の上限より短く。
+export const ASSIST_CANDIDATES = 3;
+export const ASSIST_TITLE_MAX_LENGTH = 20;
+export const ASSIST_SUBTITLE_TARGET_LENGTH = 30;
+export const ASSIST_SHORTEN_RATIO = 0.7;
+export const ASSIST_MIN_LENGTH = 8;
+// 動画の名前の候補の字数の上限（#1316）と、題名の材料にする内容の字数の上限（長い動画でも指示文を伸ばしすぎない）。
+export const ASSIST_VIDEO_TITLE_MAX_LENGTH = 24;
+export const ASSIST_VIDEO_SUMMARY_MAX_LENGTH = 400;
+// 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
+export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
 export const PROJECT_NAME_MAX_LENGTH = 80;
@@ -30,7 +54,10 @@ export const TRANSITION_DEFAULT_SEC = 0.5;
 export const PREVIEW_MIN_PLAY_SEC = 0.3;
 
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;
-export const VIDEO_HARD_MAX_SEC = 600;
+// 動画の長さの絶対天井（秒）。⚠️ **30分**（ADR-0045・2026-09-18 利用者判断）。
+// ⚠️ **ここだけ変えても足りない**＝`schemas/project.schema.json` の `maxDurationSec.maximum` と
+// `11 §4` の表が**同じ値**でなければならない（門番＝`src/test/canonConstantsGuard.test.ts`）。
+export const VIDEO_HARD_MAX_SEC = 1800;
 export const MAX_SCENES_PER_VIDEO = 80;
 export const DEFAULT_TARGET_DURATION_SEC = 60;
 
@@ -40,6 +67,74 @@ export const FPS = 30;
 // 出力はフレームに量子化されるため、これ未満の残りは0フレーム＝実質不可視になる（比率 ε だと短尺場面で守れない）。
 // D=場面尺（＝場面丸ごと消滅＋FFmpeg xfade の duration≥入力尺で未定義動作）を構造的に防ぐ（#547 P3-4／ADR-0009 未解決#4）。
 export const TRANSITION_MIN_TAIL_SEC = 1 / FPS;
+
+/**
+ * タイムラインの表示倍率の段（px/秒・#686）。**場面形式の見わたす画面と同じ型**（ADR-0034 決定13）
+ * ＝同じ概念を画面ごとに別の刻みにしない。ここを単一の参照元にして両画面が読む（§2-7）。
+ */
+//
+// ⚠️ **下へ 0.25px/秒まで伸ばした**（#1258）＝以前は 16 が最小で、**約94秒より長い動画は「全体を表示」
+// しても収まらなかった**（30分＝28,800px＝画面の約19枚ぶん）。決定13「開いた直後は全体表示」を
+// 長い動画でも守るため、**30分（上限・ADR-0045）が狭い窓（約450px）にも収まる**所まで段を足した。
+// 刻みはおおむね 1.5 倍（上の段と同じ比）＝全体表示で**窓の 2/3 以上**を使う。
+export const TIMELINE_ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 36, 54, 80, 120] as const;
+
+/**
+ * タイムラインの「列の名前」の欄の幅（px・#686）。**両方のタイムライン画面が同じ値を見る**
+ * （タイムライン編集と、場面形式の見わたす画面）。CSS へは画面が `--timeline-label-w` として流し込む。
+ *
+ * ⚠️ 全体表示の計算（`fitZoomIndex`）と錨点の位置合わせ（`zoomScrollLeft`）が**この値を引く**ので、
+ * CSS 側とずれると**見た目だけ黙って合わなくなる**（気づけない）。だから TS を単一の参照元にする。
+ *
+ * ⚠️ **84px から広げた**（#1104・レビュー由来 🟡／実測 2026-09-10）＝列の名前・添え書き（「出さない」
+ * 「固定中」）・「⋮」を**横一列**にしたので、84px では**名前が真っ先に潰れて幅 0 になっていた**
+ *（実機を測って確認＝「出さない 固定中 ⋮」だけが残り、どの列か分からない）。
+ * 実測の必要幅＝名前 37 ＋ 出さない 33 ＋ 固定中 30 ＋「⋮」9 ＋ 隙間 6 ＋ 余白 8 ＝ **123px**。
+ * ⚠️ **横は余っている**（帯の枠は約 1600px）ので、広げる側で解く。普通の動画編集ソフトの
+ * 列見出しも 120px 前後（ADR-0034＝業界の型に合わせる）。
+ */
+export const TIMELINE_LABEL_W_PX = 124;
+
+/**
+ * 列1本の高さ（px）。
+ *
+ * ⚠️ **正典（`11 §4`）に枠は無い**＝ここは「意味の決めごと」ではなく**画面の見た目の値**なので、
+ * `11 §4` へは写さない（`11_SCHEMA_REFERENCE.md` §4 前書きの「描画の既定値はコード側を単一の
+ * 参照元とし、ここへは写さない＝二重管理にしない」に従う）。`TIMELINE_LABEL_W_PX` と同じ扱い。
+ *
+ * ⚠️ **幅（`TIMELINE_LABEL_W_PX`）には正があるのに、高さは CSS だけに書いてあった**（#1104）＝
+ * 行の高さ（`.timeline-lane`）と帯の余白・行内の文字（`.timeline-clip`）が**別々の数字**として
+ * 書かれていたので、**片方だけ詰めると帯が行からはみ出す**。詰めるより先に1か所へ寄せる（§2-7）。
+ *
+ * ⚠️ **28px は実機の指摘から決めた**（#1104・2026-09-10）＝当初は 40px の下ごしらえだけを入れて
+ * 「実機で何本の列で溢れるかを見てから決める」としていたが、利用者から「明らかに帯一つ一つの間の
+ * 空間が今は広すぎます。普通の動画エディターツールでももっとぎちぎちだと思います」と来たので、
+ * **この1行で 40 → 28** にした（余白は 4 → 2）。行内の文字の高さは CSS がこの2つから導く。
+ */
+export const TIMELINE_LANE_H_PX = 28;
+
+/**
+ * **列の高さの選べる段**（ADR-0048 決定3・#1256 c1）＝利用者が「並び」の道具立ての行で選ぶ。
+ * 既定は `normal`＝`TIMELINE_LANE_H_PX`（#1104 で実機から決めた 28px）。
+ *
+ * ⚠️ **なぜ選べるようにしたか**＝列が少ない動画では帯を太くして読みやすく、多い動画では細くして
+ * 本数を稼ぐ（Kdenlive・Premiere・YMM4・AviUtl はどれも列の高さを変えられる）。
+ * ⚠️ **細いの下限は 20px**＝帯の中の文字（11px）と上下の余白・縁が収まる所まで。
+ */
+export const TIMELINE_LANE_HEIGHTS = { compact: 20, normal: TIMELINE_LANE_H_PX, tall: 44 } as const;
+export type TimelineLaneHeight = keyof typeof TIMELINE_LANE_HEIGHTS;
+/** 選べる段の並び（細い → 太い）。 */
+export const TIMELINE_LANE_HEIGHT_ORDER: readonly TimelineLaneHeight[] = ["compact", "normal", "tall"];
+/** 覚えが無いときの段。 */
+export const TIMELINE_LANE_HEIGHT_DEFAULT: TimelineLaneHeight = "normal";
+
+/**
+ * 帯（クリップ）の上下の余白（px）。行の高さから上下ぶん引いたものが帯の高さになる。
+ *
+ * ⚠️ **行の高さと対で意味を持つ**＝`TIMELINE_LANE_H_PX` だけ変えると、帯が行に対して
+ * 太すぎる／細すぎるになる。行内の文字の高さは CSS がこの2つから導く（数字を3つ目に増やさない）。
+ */
+export const TIMELINE_CLIP_INSET_PX = 2;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。
@@ -77,6 +172,35 @@ export function exportDimsForOrientation(
   return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) };
 }
 
+/**
+ * 書き出しの「動画サイズ」（#1218・利用者判断 2026-10-07＝3択・既定は「きれい」のまま）。
+ * 値は画面の選択欄の値そのもの（場面形式とタイムライン形式で同じ選択肢＝ADR-0026②）。
+ * ⚠️ **`project.schema` には入れない**（書き出しの好みは文書の中身ではない＝ADR-0033 の流儀）。
+ */
+export const EXPORT_SIZE = { full: 'fullhd', standard: 'standard', light: 'hd' } as const;
+export type ExportSize = (typeof EXPORT_SIZE)[keyof typeof EXPORT_SIZE];
+export const EXPORT_SIZES: readonly ExportSize[] = Object.values(EXPORT_SIZE);
+/**
+ * 「ふつう」の映像の上限（bps）＝**1080 のまま**ファイルを小さくする（#1218 の実測：30分で 2.4GB→約1.3GB・
+ * 焼いた字幕の読みやすさは変わらない＝文字は PNG で焼いてから重ねるので圧縮に強い）。
+ */
+export const EXPORT_STANDARD_MAX_BITRATE_BPS = 6_000_000;
+
+/** 選択欄の値が動画サイズか（知らない値を黙って別のサイズとして扱わない）。 */
+export function isExportSize(v: string): v is ExportSize {
+  return (EXPORT_SIZES as readonly string[]).includes(v);
+}
+
+/** そのサイズは解像度を下げるか（「軽い」＝短辺 `HD_SHORT`）。 */
+export function exportSizeIsLight(size: ExportSize): boolean {
+  return size === EXPORT_SIZE.light;
+}
+
+/** そのサイズの映像の上限（bps）。上限なし＝`undefined`（従来どおり）。 */
+export function exportSizeMaxBitrateBps(size: ExportSize): number | undefined {
+  return size === EXPORT_SIZE.standard ? EXPORT_STANDARD_MAX_BITRATE_BPS : undefined;
+}
+
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;
@@ -85,6 +209,15 @@ export const BGM_CROSSFADE_SEC = 1.0;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;
+/**
+ * 音量の変化（#512）で1つの部品に置ける点の上限。**FFmpeg の式の解析に上限があるため**の実装上の天井で、
+ * 好みで決めた数ではない（ADR-0032 追補）。同梱 ffmpeg での実測＝**点 95 個までは通り 96 個で解析に失敗する**
+ * （`[Eval] Missing ')' or too many args`＝式の組み立てごと落ちて「もう一度お試しください」しか出せなくなる）。
+ * **境目の正確な位置は式に書かれる数の桁数で少し動く**（入れ子の `if()` で組んだ式では 97 個で失敗し 98 個は
+ * 通る、という並びも観測した）ので、**十分な余裕を取って**ここで断る＝置く前・書き出す前に「次の行動」を
+ * 出す（§2-5・ADR-0026④）。単一の参照元（§2-7）。
+ */
+export const VOLUME_POINTS_MAX = 60;
 // 原音量（100%・等倍）。プレビュー再生で「これ以下は HTMLMediaElement.volume で厳密／超過は Web Audio GainNode で増幅」
 // を分ける境界であり、要素の .volume 物理上限でもある（単一の参照元＝§2-7・直書き禁止）。
 export const UNITY_VOLUME = 1.0;
@@ -126,7 +259,7 @@ export const GENERAL_TARGET_AUDIENCE_MAX_LEN = 100; // 対象視聴者
 export const GENERAL_LIST_ITEM_MAX_LEN = 100;    // agenda / keyPoints の1項目
 export const GENERAL_LIST_MAX_ITEMS = 20;        // agenda / keyPoints の要素数上限
 
-// 一般動画のトーン候補（toneSettings.tone へ保存する文言・一般ウィザードの選択肢）。ADR-0011 #12。
+// トーン候補（toneSettings.tone へ保存する文言・入力画面の選択肢）。ADR-0011 #12・2026-10-01 から採用でも選べる（ADR-0052 追補10）。
 export const TONE_PRESETS = ['親しみやすい', '丁寧・落ち着いた', 'フォーマル', '明るい・元気'] as const;
 // 既定トーン（未選択時・generate のフォールバック）。単一参照元（§2-7）＝二重定義を避ける。
 export const DEFAULT_TONE = TONE_PRESETS[0];
@@ -191,6 +324,26 @@ export const GROUP_MIN_SCALE = 0.01;
 export const TIMELINE_MIN_CLIP_SEC = 0.1;
 
 /**
+ * **数値の欄で入れられる最小の大きさ**（px・#685）。schema は「0 より大きい」しか言わないので、
+ * 0 を入れると**保存はできるが画面から消えて掴めなくなる**（戻す手段が無い＝行き止まり）。
+ * 単位は動画の座標（1920×1080 基準）。**両方の形式の数値欄が同じ値を見る**
+ * （場面編集の自由配置とタイムライン編集＝同じ概念を画面で別の下限にしない・ADR-0026②）。
+ *
+ * ⚠️ **ドラッグでの拡縮は `GEOM_MIN_SIZE`**（別の値）＝指で潰したときに消えないための余裕であって、
+ * 数値で意図して小さくする話とは用途が違う。混ぜない。
+ */
+export const MIN_BOX_SIZE_PX = 1;
+
+/**
+ * 角度を **0〜360 未満へ回り込ませる**（`-10` は `350`・`370` は `10`）。
+ * ⚠️ schema が `0 <= rotation < 360` しか受けないので、はみ出した値は**保存できない**
+ * （自動保存が黙って止まる）。同じ式が4か所に散っていたのを1つにした（#685 レビュー）。
+ */
+export function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+/**
  * 角度（回転）の数値入力の下限/上限（度）。**要素とグループの角度欄で共有する単一の参照元**（§2-7・#554）。
  * 根拠は正典＝schema の `rotation` は `minimum:0` / `exclusiveMaximum:360`（360=0 は重複ゆえ除外）で、
  * 回転ドラッグ（`rotationFromPointer`/`snapAngle`）も整数 0..359 へ正規化する＝**欄とドラッグの到達域が一致**する。
@@ -205,3 +358,47 @@ export const ROTATION_DEG_MAX = 359;
  * 実用上の天井にすぎない＝**広い方（100）に統一**してテンプレ側の不当な制限（21px 以上を作れない）を解く。
  */
 export const STROKE_WIDTH_MAX = 100;
+
+/** 見た目パターンが背景色を指定していないときの下地（`template.defaults.backgroundColor` の既定）。 */
+export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+
+/**
+ * 声を作る前の読み上げクリップの仮の長さ（秒）。**声を作ると実際の尺へ合わせ直す**ので、
+ * 見えていて掴める程度の長さがあればよい（ADR-0032 決定7・#633）。
+ */
+export const VOICE_PLACEHOLDER_SEC = 3;
+
+/** 音を置いたときの仮の長さ（秒）。素材より長い置き場所は繰り返して埋まるので、尺が分からなくても置ける。 */
+export const AUDIO_PLACEHOLDER_SEC = 10;
+
+/**
+ * 絵のもの（写真・文字・図形）を置いたときの仮の長さ（秒・#684）。**掴んで伸ばせる程度**にしておく
+ * （短すぎると帯が細くて掴めず、長すぎると置くたびに他とぶつかる）。見た目パターンだけは
+ * その見た目の既定を使う（`defaultDurationForTemplate`）＝置いたものの性格に合わせる。
+ */
+export const VISUAL_PLACEHOLDER_SEC = 5;
+
+/**
+ * 置いたときの箱の大きさ（画面に対する割合・#684）。**画面の真ん中に置く**＝置いた瞬間に見える。
+ * 種類ごとに変えるのは、そのまま使えることが多い形に寄せるため（写真は大きめ・文字は横長の帯・図形は小さめ）。
+ */
+export const PLACED_BOX_RATIO = {
+  // 写真は**画面いっぱい**（見た目パターンのクリップと同じ＝箱を持たない相当）。大きさを直す手段が
+  // まだ無いので、余白つきに固定してしまうと直せない（#684 レビュー）。収まり方は「枠への収め方」で調整する。
+  slot: { w: 1, h: 1 },
+  text: { w: 0.8, h: 0.14 },
+  shape: { w: 0.3, h: 0.3 },
+} as const;
+
+/**
+ * クリップの再生速度の範囲（#634）。schema は `exclusiveMinimum: 0` なので**0 以下は保存できない**。
+ * 上限は「実用として意味がある範囲」＝場面形式の動画クリップと同じ考え方（速すぎる音は聞き取れない）。
+ */
+export const CLIP_SPEED_MIN = 0.25;
+export const CLIP_SPEED_MAX = 4;
+
+/**
+ * 切り抜きで隠せる上限（#634）。**同じ軸の合計はこの値未満**＝丸ごと消える設定を作らない
+ * （schema も各辺 `exclusiveMaximum: 1`）。0.99 まで隠せば実用上は足りる。
+ */
+export const CROP_MAX = 0.99;

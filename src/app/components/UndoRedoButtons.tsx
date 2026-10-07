@@ -8,7 +8,15 @@ export function UndoRedoButtons({
   onUndo,
   onRedo,
   disabled = false,
+  undoLabel,
+  redoLabel,
 }: {
+  /**
+   * **何を取り消すか**（#1268＝Premiere の「取り消し：〜」の型）。説明（`title`）に出す。
+   * ⚠️ **ボタンの名前（読み上げ名）は変えない**＝「取り消す」のまま。中身は説明で足す。
+   */
+  undoLabel?: string;
+  redoLabel?: string;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -23,7 +31,7 @@ export function UndoRedoButtons({
         onClick={onUndo}
         disabled={!canUndo || disabled}
         aria-label="取り消す"
-        title="取り消す（Ctrl+Z）"
+        title={undoLabel ? `取り消す：${undoLabel}（Ctrl+Z）` : "取り消す（Ctrl+Z）"}
       >
         ↶ 取り消す
       </button>
@@ -32,7 +40,7 @@ export function UndoRedoButtons({
         onClick={onRedo}
         disabled={!canRedo || disabled}
         aria-label="やり直す"
-        title="やり直す（Ctrl+Y）"
+        title={redoLabel ? `やり直す：${redoLabel}（Ctrl+Y）` : "やり直す（Ctrl+Y）"}
       >
         ↷ やり直す
       </button>

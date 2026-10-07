@@ -2,6 +2,8 @@
 // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せ、ここでは奪わない。
 // App 一箇所で登録する（画面ごとの二重登録＝二重 Undo を防ぐ・#413）が、**有効にする画面は enabled で絞る**（下記）。
 import { useEffect } from "react";
+import { isPointerDragging } from "./usePointerDrag";
+import { shouldIgnoreShortcut } from "./keyboardShortcut";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
@@ -25,7 +27,7 @@ import type { ExportPhase } from "../store/projectStore";
  *   無い＝結果を確認できないため対象外（多くはテキスト入力＝下の入力欄ガードで元々効かない）。素材は履歴対象外（ADR-0020）。
  * ※ #413 の「たたき台の削除/移動も Ctrl+Z で戻せるように」という意図は `draft` を含めることで満たす。
  */
-export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draft", "scene-edit", "timeline-edit"]);
+export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draft", "scene-edit"]);
 
 /**
  * App のキーボード Undo/Redo 結線を1つの純粋述語に集約する（#570 P2 レビュー）。
@@ -35,16 +37,6 @@ export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draf
  */
 export function isUndoRedoEnabledFor(screen: ScreenId, exportPhase: ExportPhase): boolean {
   return UNDO_REDO_SCREENS.has(screen) && !isExportBusy(exportPhase);
-}
-
-/**
- * 文字入力中の要素か（input/textarea/contentEditable）。
- * ここでは「標準の文字 Undo を奪わない」判定に、履歴グループでは「連続入力だけを1履歴に合成する（ボタンは対象外）」
- * 判定に使う＝同じ規則を1か所に置く（§6）。
- */
-export function isTextEntryTarget(target: EventTarget | null): boolean {
-  const t = target as HTMLElement | null;
-  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 }
 
 /**
@@ -65,7 +57,11 @@ export function useUndoRedoShortcuts(enabled: boolean, handlers?: { undo: () => 
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
-      if (isTextEntryTarget(e.target)) return; // 入力中は標準の文字 Undo に任せる
+      if (shouldIgnoreShortcut(e)) return; // 入力中は標準の文字 Undo に任せる／変換中は奪わない
+      // 掴んでいる間は巻き戻さない（#686 レビュー）。掴んだ帯が足元で動くと、離したときに
+      // **掴んだときと違う結果**になる（起点だけ古い）。他のキーは `Escape` の名乗りで塞いであるのに
+      // 取り消しだけ効く、という非対称も消える。
+      if (isPointerDragging()) return;
       e.preventDefault();
       if (key === "y" || e.shiftKey) redo();
       else undo();

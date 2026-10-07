@@ -2,13 +2,15 @@
 // プロジェクトフォルダ <appData>/projects/<id>/{assets,voices}/ に保管し、相対パスを project.json に持つ（11 §7.2）。
 // 描画は data URL（ADR-0004：canvas汚染回避）なので、読み出しは data URL を返す（音声も同形式で復元）。
 use base64::Engine as _;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
 
-fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
-        return Err("不正なプロジェクトIDです。".to_string());
+        return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(base.join("projects").join(project_id))
@@ -22,6 +24,23 @@ fn strip_data_url(s: &str) -> &str {
         }
     }
     s
+}
+
+/// 「フォルダの直下に1つ置く名前」として受けてよいか（#260・PR #887 レビュー 🔴）。
+///
+/// ⚠️ **コロンも弾く**＝Windows の**ドライブ相対パス**（`C:evil.txt`）を `PathBuf::join` へ渡すと、
+/// **それまでの中身が丸ごと置き換わる**（prefix はあるが root が無い形の仕様）。
+/// つまり `assets/` の下に置いたつもりが**別のドライブのカレント**に書かれる。
+/// `/`・`\`・`..` だけを見ていると、この形だけがすり抜ける。
+///
+/// ⚠️ **呼ぶ側が正しい名前を作っている、を前提にしない**＝webview から直接 `invoke` されうる
+///（他のコマンドも同じ理由で自前で検査している）。
+pub fn is_safe_single_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
+        && !name.contains("..")
 }
 
 // ファイル名から区切り・予約文字を除く（空なら "asset"）。
@@ -115,7 +134,7 @@ pub fn import_asset_path(
 ) -> Result<String, String> {
     // 相対参照(..)は拒否（read_asset_data_url と同じ defense-in-depth。直接 invoke 対策）。
     if src_path.contains("..") {
-        return Err("不正なパスです。".to_string());
+        return Err(crate::messages::SRC_PATH_UNUSABLE.to_string());
     }
     let src = PathBuf::from(&src_path);
     // 元ファイルが実在する通常ファイルか確認（ダイアログ経由なら満たすが防御）。
@@ -137,7 +156,12 @@ pub fn import_asset(
 ) -> Result<String, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(strip_data_url(&data_base64))
-        .map_err(|e| format!("素材を読み取れませんでした: {e}"))?;
+        // 詳細は記録へ（画面には出さない＝§2-3／#1123）。
+        // 句点の無い文は受け側の関門で落ちるので、利用者は既定の文しか見られなかった。
+        .map_err(|e| {
+            crate::tlog!("assets", "base64 decode failed: {e}");
+            crate::messages::ASSET_UNREADABLE.to_string()
+        })?;
     write_asset(&app, &project_id, &file_name, &bytes)
 }
 
@@ -152,8 +176,10 @@ pub fn import_asset_bytes(
         return Err("素材を読み取れませんでした。もう一度お試しください。".to_string());
     };
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
-    let project_id = header("projectId").ok_or_else(|| "不正なリクエストです。".to_string())?;
-    let file_name = header("fileName").ok_or_else(|| "不正なリクエストです。".to_string())?;
+    let project_id =
+        header("projectId").ok_or_else(|| crate::messages::IMPORT_INFO_MISSING.to_string())?;
+    let file_name =
+        header("fileName").ok_or_else(|| crate::messages::IMPORT_INFO_MISSING.to_string())?;
     write_asset(&app, project_id, file_name, bytes)
 }
 
@@ -175,6 +201,54 @@ pub fn import_voice(
     Ok(format!("voices/{safe}"))
 }
 
+/// 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
+///
+/// 素材を消したときに**プロジェクトフォルダにファイルだけ残る**のを防ぐ。
+/// **止まらない**＝消せないものがあっても残りを続ける（素材はもう文書から外れており、
+/// 残ったファイルは次の取り込みで上書きされるだけの無害な余りなので、ここで失敗にしない）。
+///
+/// ⚠️ **消せるのは `assets/` の下だけ**（`delete_template_asset` が `tmpl_asset_` 接頭辞で守るのと同じ流儀）。
+/// `is_safe_rel_path` はプロジェクトの外を弾くが、**中なら何でも**消せてしまう＝`project.json` や
+/// `voices/*.wav` まで届く。**破壊的なコマンドは範囲を狭く取る**（呼び出し側の間違いを型では防げない）。
+/// `asset_dest` が書き込む先と同じ場所に揃えてある。
+#[tauri::command]
+pub fn delete_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<usize, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut removed = 0usize;
+    for rel in rel_paths {
+        if !is_safe_rel_path(&rel) || !rel.starts_with("assets/") {
+            continue;
+        }
+        let path = dir.join(&rel);
+        if path.is_file() && fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// 渡したプロジェクト相対パスのうち、**実体が見つからないもの**を返す（#347）。
+///
+/// 素材が移動・削除された／別PCへプロジェクトだけ持ち込んだ、を検知するために使う。
+/// **見つからないものだけ**を返す（全件の真偽表を返すと、素材が増えるほど無駄が増える）。
+/// 安全でない相対パスは「見つからない」として返す（読めないので実質同じ・黙って通さない）。
+#[tauri::command]
+pub fn missing_asset_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let dir = project_dir(&app, &project_id)?;
+    Ok(rel_paths
+        .into_iter()
+        .filter(|rel| !is_safe_rel_path(rel) || !dir.join(rel).is_file())
+        .collect())
+}
+
 /// プロジェクト相対パスのファイル（素材・音声）を読み、data URL を返す。
 #[tauri::command]
 pub fn read_asset_data_url(
@@ -182,20 +256,203 @@ pub fn read_asset_data_url(
     project_id: String,
     rel_path: String,
 ) -> Result<String, String> {
-    // パストラバーサル/絶対パス防止（filePath は project.json 由来だが、悪意ある共有プロジェクト対策）。
-    // PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の C:\ 含む）も拒否する。
-    if rel_path.contains("..")
-        || rel_path.starts_with('/')
-        || rel_path.starts_with('\\')
-        || Path::new(&rel_path).is_absolute()
-    {
-        return Err("不正なパスです。".to_string());
+    if !is_safe_rel_path(&rel_path) {
+        return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
     }
     let path = project_dir(&app, &project_id)?.join(&rel_path);
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let mime = mime_from_path(&rel_path);
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok(format!("data:{mime};base64,{b64}"))
+}
+
+/// プロジェクト相対パスがパス構成要素として安全か（パストラバーサル・絶対パス防止）。
+///
+/// filePath/voicePath は project.json 由来だが、悪意ある共有プロジェクト対策として読む側で毎回検証する。
+/// PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の `C:\` 含む）も拒否する。
+/// **プロジェクト相対パスを受け取る全コマンドがこの1関数を通る**（read_asset_data_url・焼き出しのコピー/容量・
+/// 書き出しの素材解決）＝どれか一方だけを直して安全条件が静かに乖離するのを防ぐ。
+///
+/// ⚠️ **コロンも弾く**（#893）＝Windows の**ドライブ相対パス**（`C:evil.txt`）は
+/// **prefix はあるが root が無い**ので `Path::is_absolute()` が **`false`** を返し、
+/// `..`・先頭の区切り・絶対パスの検査を**すべてすり抜ける**。しかし `PathBuf::join` へ渡すと
+/// **それまでの中身が丸ごと置き換わる**ので、プロジェクトの外へ書ける。
+/// `is_safe_single_file_name`（`/` も弾く）とは**別関数のまま**＝こちらは下位ディレクトリを許すので
+/// `/` を弾けない。共通なのは「コロン・`..`・空」の3つだけ。
+pub fn is_safe_rel_path(rel_path: &str) -> bool {
+    !rel_path.is_empty()
+        && !rel_path.contains("..")
+        && !rel_path.contains(':')
+        && !rel_path.starts_with('/')
+        && !rel_path.starts_with('\\')
+        && !Path::new(rel_path).is_absolute()
+}
+
+/// 指定したプロジェクト相対ファイルの合計バイト数（焼き出し前の容量提示＝ADR-0032 決定13）。
+/// 見つからないファイルは 0 として飛ばす（容量の目安なので、1つ欠けても提示を止めない）。
+#[tauri::command]
+pub fn project_files_size(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<u64, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut total: u64 = 0;
+    for rel in &rel_paths {
+        if !is_safe_rel_path(rel) {
+            return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
+        }
+        if let Ok(meta) = fs::metadata(dir.join(rel)) {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
+/// プロジェクト間のコピーの**中止要求**（#1021）。
+///
+/// ⚠️ **呼び出しごとに分ける**（PR #1054 レビュー 🔴）＝1つの真偽値にすると**プロセス全体で共有**され、
+/// 焼き出しの中止が**並行して走っている複製**を巻き込む（逆に、複製の開始が焼き出しの中止を握りつぶす）。
+/// 呼ぶ側が渡した `copy_id` で覚える＝**自分の回だけ**止まる。
+static CANCELLED_COPIES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn cancelled_copies() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
+    // 毒されても中身を取り出して続ける（中止できないより、続けられるほうがまし）。
+    CANCELLED_COPIES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 走行中のコピーを中止する（#1021）。ユーザーの「中止」から呼ぶ。副作用のみ（表示は呼び出し側）。
+#[tauri::command]
+pub fn cancel_project_copy(copy_id: String) {
+    cancelled_copies()
+        .get_or_insert_with(HashSet::new)
+        .insert(copy_id);
+}
+
+/// コピーの結果（#1021）。⚠️ **中止は失敗と分けて返す**＝`Err` の文字列で見分けると、
+/// **同じ文字列を呼ぶ側にも持つ**ことになり（§2-7 違反）、言い回しを変えたとたんに失敗として扱われる。
+#[derive(Clone, serde::Serialize)]
+pub struct CopyResult {
+    /// 実際に運んだ件数（元に無いファイルは飛ばすので、渡した数より少ないことがある）。
+    pub copied: usize,
+    /// 利用者が中止したか（運んだものは片づけ済み）。
+    pub cancelled: bool,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct CopyProgressEvent {
+    step: usize,
+    total: usize,
+}
+
+/// 焼き出し（ADR-0032）でプロジェクト間にファイルをコピーする。
+/// 相対パスの構造（assets/…・voices/…）はそのまま保ち、コピー先の親ディレクトリは作る。
+/// **元プロジェクトには一切書き込まない**（片道＝決定16）。
+///
+/// 素材を丸ごと運ぶので分単位になりうる（#1021）＝**進み具合を送り、中止を受ける**。
+/// ⚠️ **中止・失敗のどちらでも運んだものを片づける**＝途中まで運んだフォルダを残すと、素材だけがあって
+/// `project.json` が無い状態になり、一覧にも出ない**見えないゴミ**が残る。
+/// ⚠️ **片づけるのは「自分が運んだファイル」だけ**（フォルダを丸ごと消さない）＝
+/// 消してよいものだけを消す。空になった入れ物はその後で畳む。
+#[tauri::command]
+pub fn copy_project_files(
+    app: tauri::AppHandle,
+    src_project_id: String,
+    dest_project_id: String,
+    rel_paths: Vec<String>,
+    copy_id: String,
+) -> Result<CopyResult, String> {
+    if src_project_id == dest_project_id {
+        return Err(crate::messages::COPY_SAME_PLACE.to_string());
+    }
+    // 入口で自分の回の印を落とす＝前回の中止要求を持ち越さない（同じ id を再利用しても止まらない）。
+    if let Some(set) = cancelled_copies().as_mut() {
+        set.remove(&copy_id);
+    }
+    let src_dir = project_dir(&app, &src_project_id)?;
+    let dest_dir = project_dir(&app, &dest_project_id)?;
+    let total = rel_paths.len();
+    let mut copied: Vec<PathBuf> = Vec::new();
+    for (i, rel) in rel_paths.iter().enumerate() {
+        if !is_safe_rel_path(rel) {
+            cleanup_copied(&copied, &dest_dir);
+            return Err(crate::messages::REL_PATH_UNUSABLE.to_string());
+        }
+        if is_copy_cancelled(&copy_id) {
+            cleanup_copied(&copied, &dest_dir);
+            return Ok(CopyResult {
+                copied: 0,
+                cancelled: true,
+            });
+        }
+        let src = src_dir.join(rel);
+        // 元に無いファイルは飛ばす（未配置のサンプル素材など）。欠けたぶんは焼いた側で
+        // 「素材が見つかりません」として扱われる（15 §6）＝ここで丸ごと失敗させない。
+        if src.is_file() {
+            let dest = dest_dir.join(rel);
+            // ⚠️ **失敗したときも片づける**（PR #1054 レビュー 🟡）＝中止だけ片づけて失敗を残すと、
+            // 「見えないゴミを残さない」が**失敗系では守れない**（同じ状態が別の入口からできる）。
+            if let Some(parent) = dest.parent() {
+                if fs::create_dir_all(parent).is_err() {
+                    cleanup_copied(&copied, &dest_dir);
+                    return Err(ASSET_SAVE_ERR.to_string());
+                }
+            }
+            if fs::copy(&src, &dest).is_err() {
+                cleanup_copied(&copied, &dest_dir);
+                return Err(ASSET_SAVE_ERR.to_string());
+            }
+            copied.push(dest);
+        }
+        // 進み具合は best-effort（送れなくてもコピーは続ける＝書き出しと同じ流儀）。
+        let _ = app.emit("copy_progress", CopyProgressEvent { step: i + 1, total });
+    }
+    // 終わったら自分の印を片づける（覚えっぱなしにしない）。
+    if let Some(set) = cancelled_copies().as_mut() {
+        set.remove(&copy_id);
+    }
+    Ok(CopyResult {
+        copied: copied.len(),
+        cancelled: false,
+    })
+}
+
+/// この回のコピーが中止されたか。
+fn is_copy_cancelled(copy_id: &str) -> bool {
+    cancelled_copies()
+        .as_ref()
+        .is_some_and(|set| set.contains(copy_id))
+}
+
+/// 中止・失敗したときの後始末＝**自分が運んだファイル**を消し、空になった入れ物を畳む（#1021）。
+///
+/// ⚠️ **畳むのは「自分が作った入れ物」まで**＝コピー先の中の空になった入れ物と、コピー先そのもの
+/// （このコマンドは**新しいプロジェクト**へ運ぶ用途しか無いので、空になったなら誰も使っていない）。
+/// 中身が残っていれば `remove_dir` が失敗して残る＝**消してよいものだけが消える**。
+fn cleanup_copied(copied: &[PathBuf], dest_dir: &Path) {
+    for p in copied {
+        let _ = fs::remove_file(p);
+    }
+    // ⚠️ **途中の入れ物も畳む**（同レビュー ℹ️）＝直接の親だけだと、2階層以上のときに空の中間が残る。
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for p in copied {
+        let mut cur = p.parent();
+        while let Some(d) = cur {
+            if !d.starts_with(dest_dir) || d == dest_dir {
+                break;
+            }
+            dirs.push(d.to_path_buf());
+            cur = d.parent();
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    // 深い所から畳む（中が空になってから外側を見る）。
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs {
+        let _ = fs::remove_dir(&d);
+    }
+    let _ = fs::remove_dir(dest_dir);
 }
 
 /// テンプレ所有素材の保管ディレクトリ <appData>/user_templates/assets（全プロジェクト共通＝ADR-0021）。
@@ -236,7 +493,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
         let path = match entry {
             Ok(e) => e.path(),
             Err(e) => {
-                eprintln!("[template_assets] エントリ読み込みスキップ: {}", e);
+                crate::tlog!("template_assets", "エントリ読み込みスキップ: {}", e);
                 continue;
             }
         };
@@ -254,7 +511,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
                 let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
                 out.push((stem, format!("data:{mime};base64,{b64}")));
             }
-            Err(e) => eprintln!("[template_assets] 読み込みスキップ {:?}: {}", path, e),
+            Err(e) => crate::tlog!("template_assets", "読み込みスキップ {:?}: {}", path, e),
         }
     }
     Ok(out)
@@ -266,7 +523,7 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
 pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), String> {
     // defense-in-depth：テンプレ所有素材以外の id を弾く（呼び出しミスで他種ファイルを stem 一致で消さない）。
     if !asset_id.starts_with("tmpl_asset_") {
-        return Err("不正な素材IDです。".to_string());
+        return Err(crate::messages::ASSET_ID_UNUSABLE.to_string());
     }
     let dir = template_assets_dir(&app)?;
     if !dir.exists() {
@@ -285,6 +542,136 @@ pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 中止の印は**回ごと**に持つ（#1021・PR #1054 レビュー 🔴）＝1つの真偽値だと、
+    /// 焼き出しの中止が**並行して走っている複製**を巻き込む（逆も同じ）。
+    #[test]
+    fn cancel_is_per_copy() {
+        cancel_project_copy("bake_1".to_string());
+        assert!(is_copy_cancelled("bake_1"), "止めた回が止まっていない");
+        assert!(!is_copy_cancelled("dup_1"), "別の回まで巻き込んだ");
+        // 片づけ（テスト間で持ち越さない）。
+        if let Some(set) = cancelled_copies().as_mut() {
+            set.remove("bake_1");
+        }
+    }
+
+    /// 途中の入れ物も畳む（#1021・同レビュー ℹ️）＝直接の親だけだと、2階層以上で空の中間が残る。
+    #[test]
+    fn cleanup_folds_nested_dirs() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup3_{}", std::process::id()));
+        let dest = base.join("dest");
+        let deep = dest.join("assets").join("sub");
+        fs::create_dir_all(&deep).unwrap();
+        let a = deep.join("a.png");
+        fs::write(&a, b"x").unwrap();
+
+        cleanup_copied(std::slice::from_ref(&a), &dest);
+
+        assert!(!deep.exists(), "いちばん内側が残った");
+        assert!(!dest.join("assets").exists(), "途中の入れ物が残った");
+        assert!(!dest.exists(), "コピー先が残った");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 中止したときの後始末（#1021）。**自分が運んだファイルだけ**を消し、空になった入れ物を畳む。
+    /// ⚠️ **運んでいないものは消さない**＝コピー先に元からあるものを巻き込まない。
+    #[test]
+    fn cleanup_removes_only_copied_files() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup_{}", std::process::id()));
+        let dest = base.join("dest");
+        let assets = dest.join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let mine = assets.join("asset_001.png");
+        let theirs = assets.join("keep.png");
+        fs::write(&mine, b"x").unwrap();
+        fs::write(&theirs, b"y").unwrap();
+
+        cleanup_copied(std::slice::from_ref(&mine), &dest);
+
+        assert!(!mine.exists(), "運んだファイルが残った");
+        assert!(theirs.exists(), "運んでいないファイルまで消した");
+        assert!(assets.exists(), "中身が残っている入れ物を畳んだ");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 中止して**全部片づいたら**、空になった入れ物とコピー先そのものも畳む
+    /// （素材だけがあって project.json が無い＝一覧に出ない**見えないゴミ**を残さない）。
+    #[test]
+    fn cleanup_folds_empty_dirs() {
+        let base = std::env::temp_dir().join(format!("stario_cleanup2_{}", std::process::id()));
+        let dest = base.join("dest");
+        let assets = dest.join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let a = assets.join("a.png");
+        fs::write(&a, b"x").unwrap();
+
+        cleanup_copied(&[a], &dest);
+
+        assert!(!assets.exists(), "空になった入れ物が残った");
+        assert!(!dest.exists(), "空になったコピー先が残った");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// プロジェクト相対パスの安全判定（パストラバーサル・絶対パス・空文字）。
+    /// read_asset_data_url と焼き出しのコピー/容量が**同じこの関数**を通るので、ここが唯一の網。
+    #[test]
+    fn rel_path_safety() {
+        // 通す：assets/ と voices/ の通常の相対パス（サブディレクトリも可）。
+        assert!(is_safe_rel_path("assets/asset_001.png"));
+        assert!(is_safe_rel_path("voices/scene_001.wav"));
+        assert!(is_safe_rel_path("assets/sub/a.png"));
+        // 弾く：親への相対参照（区切りの向きを問わず・途中に現れる場合も）。
+        assert!(!is_safe_rel_path(".."));
+        assert!(!is_safe_rel_path("../secret.txt"));
+        assert!(!is_safe_rel_path("assets/../../secret.txt"));
+        assert!(!is_safe_rel_path("assets\\..\\secret.txt"));
+        // 弾く：ルート起点（join がベースを置き換える）。
+        assert!(!is_safe_rel_path("/etc/passwd"));
+        assert!(!is_safe_rel_path("\\Windows\\System32"));
+        // 弾く：**ドライブ相対パス**（#893）＝`C:evil.txt` は prefix はあるが root が無いので
+        // `Path::is_absolute()` が **false** を返し、上の検査を**すべてすり抜ける**。しかし
+        // `PathBuf::join` へ渡すと**中身が丸ごと置き換わり**、プロジェクトの外へ書ける。
+        assert!(!is_safe_rel_path("C:evil.txt"));
+        assert!(!is_safe_rel_path("c:a.png"));
+        assert!(!is_safe_rel_path("assets/C:evil.txt"));
+        // 弾く：Windows の絶対パス（ドライブレター・UNC）。
+        assert!(!is_safe_rel_path("C:\\Windows\\System32"));
+        assert!(!is_safe_rel_path("\\\\server\\share\\a.png"));
+        // 弾く：空（プロジェクトフォルダ自身を指す＝ファイルではない）。
+        assert!(!is_safe_rel_path(""));
+    }
+
+    /// 消せる範囲が `assets/` に閉じているか（#348・PR #875 レビュー）。
+    ///
+    /// ⚠️ **`is_safe_rel_path` だけでは足りない**＝あれは「プロジェクトの外」を弾くだけで、
+    /// **中なら何でも**通る（`project.json` も `voices/*.wav` も）。破壊的なコマンドは
+    /// `delete_template_asset` の接頭辞と同じ流儀で**範囲を狭く**取る。
+    ///
+    /// ⚠️ **Windows のドライブ相対（`C:foo`＝バックスラッシュ無し）は `is_absolute()` が false**。
+    /// 以前はここを `is_safe_rel_path` が通してしまい、**`starts_with("assets/")` の文字列比較だけが
+    /// 防いでいた**（この関数の外では守られていない＝#893 で書き出しの経路に穴が空いていた）。
+    /// **いまは `is_safe_rel_path` がコロンを弾く**ので、範囲の限定と入口の検査の**二重で**守る。
+    #[test]
+    fn delete_scope_is_assets_only() {
+        // この関数が実際に使う条件（`delete_project_files` の continue と同じ式）。
+        let deletable = |rel: &str| is_safe_rel_path(rel) && rel.starts_with("assets/");
+        // 通す：素材の実体と代表フレーム（`asset_dest` が書く先と同じ）。
+        assert!(deletable("assets/asset_001.png"));
+        assert!(deletable("assets/asset_001_thumb.png"));
+        // 弾く：プロジェクト配下でも素材ではないもの。
+        assert!(!deletable("project.json"));
+        assert!(!deletable("voices/scene_001.wav"));
+        assert!(!deletable("cache/asset_001_strip.png"));
+        // 弾く：ドライブ相対。⚠️ **入口の `is_safe_rel_path` が落とす**（#893 で塞いだ）。
+        // ここで `deletable` も見るのは、**範囲の限定だけでも守れている**ことを残すため
+        //（入口の検査が将来ゆるんでも、この関数だけは `assets/` の外へ出ない）。
+        assert!(!is_safe_rel_path("C:assets/evil.txt"));
+        assert!(!deletable("C:assets/evil.txt"));
+        // 弾く：親への相対参照（先に `is_safe_rel_path` が落とす）。
+        assert!(!deletable("assets/../project.json"));
+        assert!(!deletable("assets\\..\\project.json"));
+    }
 
     #[test]
     fn sanitize_and_strip() {
@@ -308,5 +695,62 @@ mod tests {
         assert_eq!(mime_from_path("assets/clip.avi"), "video/x-msvideo");
         assert_eq!(mime_from_path("assets/clip.mkv"), "video/x-matroska");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
+    }
+}
+
+#[cfg(test)]
+mod safe_name_tests {
+    use super::is_safe_single_file_name;
+
+    /// ⚠️ **Windows のドライブ相対パスを弾く**（PR #887 レビュー 🔴）＝`PathBuf::join` へ渡すと
+    /// **それまでの中身が丸ごと置き換わる**（別のドライブのカレントに書かれる）。
+    #[test]
+    fn rejects_drive_relative_path() {
+        assert!(!is_safe_single_file_name("C:evil.txt"));
+        assert!(!is_safe_single_file_name("c:a.png"));
+        assert!(!is_safe_single_file_name("asset:001.png")); // コロンは一律で断る（安全側）
+    }
+
+    #[test]
+    fn rejects_path_pieces() {
+        assert!(!is_safe_single_file_name(""));
+        assert!(!is_safe_single_file_name("a/b.png"));
+        assert!(!is_safe_single_file_name("a\\b.png"));
+        assert!(!is_safe_single_file_name("../x.png"));
+    }
+
+    #[test]
+    fn accepts_plain_names() {
+        assert!(is_safe_single_file_name("asset_001.png"));
+        assert!(is_safe_single_file_name("日本語の名前.mp4"));
+    }
+}
+
+/// **相対パスの検査を写し直させない門番**（#893）。
+///
+/// ⚠️ **型では守れない**＝`ffmpeg.rs` が `rel_path.starts_with('/')` を自前で書いても
+/// コンパイルは通る。実際にそうなっており、`assets.rs` にコロンの検査を足しても
+/// **書き出しの経路だけ古いまま**だった。規則を写した瞬間に落ちるようにしておく。
+#[cfg(test)]
+mod rel_path_single_source_guard {
+    /// `resolve_project_file` は `is_safe_rel_path` に委ねる（自前で条件を並べない）。
+    #[test]
+    fn 書き出しの経路は検査を写さない() {
+        let src = include_str!("ffmpeg.rs");
+        assert!(
+            src.contains("crate::assets::is_safe_rel_path(rel_path)"),
+            "resolve_project_file が共有の検査を通っていない（規則を写すと片方だけ古くなる）",
+        );
+        for copied in [
+            "rel_path.starts_with('/')",
+            "Path::new(rel_path).is_absolute()",
+            // ⚠️ **1つぶんの名前の検査も写さない**（α-6 出口監査 ℹ️）＝写しはコロンだけ落ちていた。
+            "!name.contains('/')",
+        ] {
+            assert!(
+                !src.contains(copied),
+                "相対パスの検査が写し直されている: {copied}（`is_safe_rel_path` へ委ねる）",
+            );
+        }
     }
 }

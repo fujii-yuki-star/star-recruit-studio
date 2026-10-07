@@ -16,7 +16,9 @@ const setup = (phase: "idle" | "rendering") => {
     assets: [asset("asset_001")],
     assetSrcById: { asset_001: "data:image/png;base64,x" },
     scenes: [],
-    exportRun: { phase, progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
+    // 「素材を追加」は**入れる先がある**ときだけ押せる（差分再監査 6巡目）＝動画を開いた状態にしておく。
+    status: "ready",
+    exportRun: { phase, progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
   });
 };
 
@@ -51,5 +53,37 @@ describe("MaterialsScreen 書き出し中は編集をロック（#547 P2-1・ADR
     expect(screen.getByLabelText("名前")).toBeTruthy();
     expect(screen.getByText("この素材を削除")).toBeTruthy();
     expect((screen.getByText("素材を追加").closest("label") as HTMLElement).getAttribute("aria-disabled")).toBe("false");
+  });
+});
+
+// ⚠️ **入れる先が無いときも押せない**（差分再監査 6巡目 🟡）＝棚からの取り込みだけ塞ぐと、
+// 同じ「取り込み」で断り方が2通りになる（ADR-0026②）。判定は共有の1つから採る。
+describe("MaterialsScreen 動画を開いていないとき", () => {
+  it("「素材を追加」は押せず、理由が出る", () => {
+    useProjectStore.setState({
+      templates: sampleTemplates, assets: [], assetSrcById: {}, scenes: [], status: "idle",
+      meta: { projectId: "", projectName: "" },
+      exportRun: { phase: "idle", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
+    } as never);
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+    const label = screen.getByText("素材を追加").closest("label") as HTMLElement;
+    expect(label.getAttribute("aria-disabled")).toBe("true");
+    expect(label.title).toContain("先に動画を開いてください");
+    // ⚠️ **押せないボタンを案内しない**（差分再監査 7巡目 🟡）＝理由はホバーにしか無いので、
+    // 空の一覧の案内は**次の行動**（先に動画を開く／新しく作る）を出す。
+    expect(screen.getByText(/先に動画を開くか、新しく作ってください/)).toBeInTheDocument();
+    expect(screen.queryByText(/「素材を追加」から、写真・動画・ゆうこの素材を登録できます/)).toBeNull();
+  });
+
+  it("白紙から作った直後（番号なし・場面なし）は押せる", () => {
+    useProjectStore.setState({
+      templates: sampleTemplates, assets: [], assetSrcById: {}, scenes: [], status: "ready",
+      meta: { projectId: "", projectName: "" },
+      exportRun: { phase: "idle", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false },
+    } as never);
+    render(<MaterialsScreen onNavigate={vi.fn()} />);
+    const label = screen.getByText("素材を追加").closest("label") as HTMLElement;
+    expect(label.getAttribute("aria-disabled")).toBe("false");
+    expect(screen.getByText(/「素材を追加」から、写真・動画・ゆうこの素材を登録できます/)).toBeInTheDocument();
   });
 });

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ColorPicker } from "./ColorPicker";
+import { isPointerDragging } from "../hooks/usePointerDrag";
 
 // 自前カラーピッカー（#525-6）。ポップオーバーは body ポータル＋role="dialog"、面/バーは data-testid、
 // パレットは aria-label で引ける。jsdom はレイアウトを持たないため面のドラッグは getBoundingClientRect をモックする。
@@ -29,20 +31,199 @@ describe("ColorPicker", () => {
     expect(screen.getByLabelText("色コード")).toHaveValue("#22c55e");
   });
 
-  it("色コード欄に入れると正規化して通知される（#abc→#aabbcc）", () => {
+  it("色コード欄は**確定**（Enter）で正規化して通知される（#abc→#aabbcc）", () => {
     const onChange = vi.fn();
     render(<ColorPicker value="#000000" onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
-    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#abc" } });
+    const code = screen.getByLabelText("色コード");
+    fireEvent.change(code, { target: { value: "#abc" } });
+    fireEvent.keyDown(code, { key: "Enter" });
     expect(onChange).toHaveBeenLastCalledWith("#aabbcc");
   });
 
-  it("無効な色コードでは通知しない", () => {
+  it("欄を出たときも確定する（Enter を押さずに他所を触っても打った色が入る）", () => {
     const onChange = vi.fn();
     render(<ColorPicker value="#000000" onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
-    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#zz" } });
+    const code = screen.getByLabelText("色コード");
+    fireEvent.change(code, { target: { value: "#1a2b3c" } });
+    fireEvent.blur(code);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith("#1a2b3c");
+  });
+
+  it("**打っている途中では通知しない**（1文字ずつ打っても取り消しは1件・#752-1）", () => {
+    // ⚠️ `normalizeHex` は3桁も受ける＝随時通知だと「1a2b3c」を打つ途中の `#1a2` で1件、
+    // 完成でもう1件積まれる（打ち方で戻す回数が変わる）。確定まで通知しないことを固定する。
+    const onChange = vi.fn();
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const code = screen.getByLabelText("色コード");
+    for (const v of ["#", "#1", "#1a", "#1a2", "#1a2b", "#1a2b3", "#1a2b3c"]) {
+      fireEvent.change(code, { target: { value: v } });
+    }
+    expect(onChange).not.toHaveBeenCalled(); // 途中の `#1a2`（＝#11aa22）で先に確定しない
+    fireEvent.keyDown(code, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith("#1a2b3c");
+  });
+
+  it("**外側を押して閉じても打った色は消えない**（欄が外れて `blur` が来ない・#752-1 レビュー）", () => {
+    // ⚠️ 随時反映だった頃は打った時点で入っていた。確定へ寄せた副作用として
+    // 「打ったのに黙って消える」を作らない（実機で `blur` が来ないことを確認済み）。
+    const onChange = vi.fn();
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    fireEvent.pointerDown(document.body); // 外側を押す＝閉じる（`blur` は来ない）
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith("#00ff00");
+  });
+
+  it("**外側を押して閉じるときは、その押下が選び直すより先に**確定する（#758 レビュー）", () => {
+    // ⚠️ 閉じた後（描き直しの後）に確定すると、**その同じ押下が選び直しでもあった**とき、
+    // 打った色が**新しく選ばれた相手**へ入る（色の受け口は「いま選ばれているもの」を見る）。
+    // 外側の受け手は bubble、この確定は capture＝必ず先に走ることを固定する。
+    const order: string[] = [];
+    const onChange = vi.fn(() => { order.push("確定"); });
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    const onOutside = (): void => { order.push("選び直し"); };
+    document.body.addEventListener("pointerdown", onOutside);
+    try {
+      fireEvent.pointerDown(document.body);
+    } finally {
+      document.body.removeEventListener("pointerdown", onOutside);
+    }
+    expect(order).toEqual(["確定", "選び直し"]);
+  });
+
+  it("`Escape` で閉じたときも打った色は入る（閉じ方で結果を変えない）", () => {
+    const onChange = vi.fn();
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onChange).toHaveBeenLastCalledWith("#00ff00");
+  });
+
+  it("**開いている最中に外から色が変わったら、面もコード欄も追う**（実機で発覚）", () => {
+    // ⚠️ 取り消し（`Ctrl+Z`）で親の色が戻っても、開きっぱなしの枠が古い色のままだと
+    // **いまの色を偽って見せる**（そのまま撫でると、戻したはずの色を起点に書き直す）。
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" })); // 選ぶ
+    expect(screen.getByLabelText("色コード")).toHaveValue("#22c55e");
+    rerender(<ColorPicker value="#22c55e" onChange={onChange} />); // 親が受け取って反映（自分が送った色）
+    expect(screen.getByLabelText("色コード")).toHaveValue("#22c55e"); // 同期し直さない
+    rerender(<ColorPicker value="#000000" onChange={onChange} />); // 外で取り消された
+    expect(screen.getByLabelText("色コード")).toHaveValue("#000000"); // 枠も戻る
+  });
+
+  it("自分が送った色では同期し直さない（撫でている指と競らない）", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    const shown = (screen.getByLabelText("色コード") as HTMLInputElement).value;
+    rerender(<ColorPicker value={shown} onChange={onChange} />); // 親が自分の色を返してきただけ
+    expect(screen.getByLabelText("色コード")).toHaveValue(shown); // 撫でた色のまま
+    fireEvent.pointerUp(window, { pointerId: 1 });
+  });
+
+  it("**自分で書き替えた色は閉じても送り直さない**（取り消しを無かったことにしない・#752 レビュー）", () => {
+    // ⚠️ コード欄の文字は面を撫でてもパレットを押しても書き替わる。閉じるときに無条件で送り直すと
+    // 「色を選ぶ → `Ctrl+Z` で戻す → 閉じる」で**戻したはずの色が復活**する（やり直しでも戻せない）。
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" })); // パレットで選ぶ
+    expect(onChange).toHaveBeenCalledTimes(1);
+    rerender(<ColorPicker value="#000000" onChange={onChange} />); // 外で取り消された＝親の色は元のまま
+    fireEvent.pointerDown(document.body); // 閉じる
+    expect(onChange).toHaveBeenCalledTimes(1); // 送り直さない
+  });
+
+  it("開いたまま画面から外れても、打ちかけの色は捨てない（#752 レビュー）", () => {
+    const onChange = vi.fn();
+    const { unmount } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    unmount(); // 選択が変わってパネルごと差し替わった等（この経路も `blur` は来ない）
+    expect(onChange).toHaveBeenLastCalledWith("#00ff00");
+  });
+
+  it("押せなくなって閉じたときは確定しない（受け取れない状況で書き込まない）", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    rerender(<ColorPicker value="#000000" onChange={onChange} disabled title="いま動画を書き出しています" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("**パレットは同じ色でも送る**（「いまの色で固定する」を潰さない・#752 レビュー）", () => {
+    // ⚠️ 呼び出し側の `value` は**未設定のときの解決値**（既定色）であることがある。パレットで
+    // その色を押したのに送らないと、いつまでも「未設定のまま」＝固有の色として持てない。
+    // 打ちかけを確定する色コード欄（下のテスト）とは、そろえずに**役目で分ける**。
+    const onChange = vi.fn();
+    render(<ColorPicker value="#22c55e" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" }));
+    expect(onChange).toHaveBeenCalledWith("#22c55e");
+  });
+
+  it("押せなくなって閉じたあと画面から外れても送らない（#758 レビュー）", () => {
+    // ⚠️ 「押せないから確定しない」で止めても、打ちかけの印が立ったままだと**そのあと外れた回に
+    // 後始末が送る**＝受け取れない状況で書き込まない、を経路によって破る。
+    const onChange = vi.fn();
+    const { rerender, unmount } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    rerender(<ColorPicker value="#000000" onChange={onChange} disabled title="いま動画を書き出しています" />);
+    unmount();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("押せなくなって捨てた打ちかけは、押せるように戻っても復活しない（#758 レビュー）", () => {
+    const onChange = vi.fn();
+    const { rerender, unmount } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    rerender(<ColorPicker value="#000000" onChange={onChange} disabled />); // 捨てる
+    rerender(<ColorPicker value="#000000" onChange={onChange} />); // 押せるように戻る（開き直しはしない）
+    unmount();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("同じ色を打ち直しても通知しない（空振りの取り消しを積まない）", () => {
+    const onChange = vi.fn();
+    render(<ColorPicker value="#aabbcc" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const code = screen.getByLabelText("色コード");
+    fireEvent.change(code, { target: { value: "#abc" } }); // 表記違いの同じ色
+    fireEvent.keyDown(code, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(code).toHaveValue("#aabbcc"); // 表記は現在色へそろえる
+  });
+
+  it("無効な色コードでは通知せず、欄を出たら現在色の表記へ戻す", () => {
+    const onChange = vi.fn();
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const code = screen.getByLabelText("色コード");
+    fireEvent.change(code, { target: { value: "#zz" } });
+    fireEvent.keyDown(code, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(code);
+    expect(code).toHaveValue("#000000");
   });
 
   it("鮮やかさ×明るさの面をドラッグすると新しい色で通知される", () => {
@@ -55,6 +236,33 @@ describe("ColorPicker", () => {
     // (50,0)＝鮮やかさ0.5・明るさ1・色相0 → #ff8080。
     fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
     expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+  });
+
+  it("**面を撫でている間は「掴んでいる」に数える**（取り消しが黙って上書きされない・#752-2）", () => {
+    // ⚠️ 数に入らないと、撫でている最中の `Ctrl+Z` が通り、**戻した文書の上に続きの動きが色を書く**。
+    // 帯・欄の見出しでは塞いだ穴が、色の面だけ開いたままになる（同じ画面で作法が2つ）。
+    render(<ColorPicker value="#ff0000" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    expect(isPointerDragging()).toBe(false);
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    expect(isPointerDragging()).toBe(true);
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("掴んだまま Escape で閉じても「掴んでいる」から必ず外れる（#752-2）", () => {
+    // 面の `pointerup` が来ない閉じ方（#720 と同じ道）。外れないと以後ずっと取り消しが効かなくなる。
+    render(<ColorPicker value="#ff0000" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(isPointerDragging()).toBe(false);
   });
 
   it("色相バーをドラッグすると色相だけ変わる", () => {
@@ -119,8 +327,191 @@ describe("ColorPicker", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("掴んだまま Escape → もう一度 Escape で閉じ、開き直したら**押していない移動**では色が変わらない（#720 レビュー）", () => {
+    const onChange = vi.fn();
+    const onDragStart = vi.fn();
+    const onDragEnd = vi.fn();
+    render(<ColorPicker value="#ff0000" onChange={onChange} onDragStart={onDragStart} onDragEnd={onDragEnd} />);
+    const svRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv1 = screen.getByTestId("cp-sv");
+    sv1.getBoundingClientRect = svRect;
+    fireEvent.pointerDown(sv1, { clientX: 50, clientY: 0, pointerId: 1 });
+    // 掴んだまま Escape＝**撫でるのをやめる**（#763-2）。1度目では枠は閉じない。
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(onDragEnd).toHaveBeenCalledTimes(1); // 取り消しの区切りは閉じている
+    fireEvent.keyDown(window, { key: "Escape" }); // 2度目で枠を閉じる
+
+    onChange.mockClear();
+    onDragStart.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv2 = screen.getByTestId("cp-sv");
+    sv2.getBoundingClientRect = svRect;
+    // 掴んでいない＝ただ指した状態。掴んだ印が残っていると、ここで色が変わり、
+    // しかも区切りの外なので移動1回ごとに取り消しが積まれる（＝#720 の症状の再発）。
+    fireEvent.pointerMove(sv2, { clientX: 10, clientY: 90, buttons: 0, pointerId: 2 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDragStart).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **色を実際に持つ入れ物**（#763-2）＝親が `value` を更新しないと「戻した」ことを見られない
+  // （撫でて色が変わる→やめて元へ戻る、の往復が起きない）。
+  function Controlled({ onChange }: { onChange?: (hex: string) => void }) {
+    const [v, setV] = useState("#ff0000");
+    return <ColorPicker value={v} onChange={(hex) => { setV(hex); onChange?.(hex); }} />;
+  }
+
+  const openSv = (): HTMLElement => {
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    return sv;
+  };
+
+  it("**押していない移動は「やめる」**（離したのを取り逃がしたら撫で始めの色へ戻す・#763-1）", () => {
+    // `pointerup`／`pointercancel` を両方取り逃がすと（面の外で離す・別窓へ移る 等）掴んだ印が
+    // 残り、ただの移動で色が書かれ続けるうえ、掴んでいる数も戻らず **`Ctrl+Z` が全画面で無言死**する。
+    // ⚠️ 戻す先まで確かめる＝**「やめる」の意味は画面ぜんぶで1つ**（`usePointerDrag`／
+    // `FreeLayoutOverlay`／`TemplateLayerOverlay` も `buttons===0` で元へ戻す）。
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 }); // #ff0000 → #ff8080
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+    expect(isPointerDragging()).toBe(true);
+
+    // 離したのを取り逃がした後の移動＝ボタンが1つも押されていない。
+    fireEvent.pointerMove(sv, { clientX: 10, clientY: 90, buttons: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false); // 掴んでいる数からも外れる
+
+    // その後の移動では何も書かない（掴んだ印が落ちている）。
+    onChange.mockClear();
+    fireEvent.pointerMove(sv, { clientX: 90, clientY: 10, buttons: 0, pointerId: 1 });
+    fireEvent.pointerMove(sv, { clientX: 20, clientY: 20, buttons: 1, pointerId: 1 });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("色相バーでも同じ（押していない移動は「やめる」・#763-1）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const hue = screen.getByTestId("cp-hue");
+    hue.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 360, height: 12, right: 360, bottom: 12, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(hue, { clientX: 120, clientY: 6, pointerId: 1 });
+    expect(onChange).toHaveBeenCalled(); // 色相が変わった
+    fireEvent.pointerMove(hue, { clientX: 240, clientY: 6, buttons: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**取り上げられたときも「やめる」**（`pointercancel`＝撫で始めの色へ戻す・#763-1）", () => {
+    // 離した（`pointerup`）＝自分で選んだ色で確定／取り上げられた（`pointercancel`）＝やめる。
+    // 同じ「閉じる」でも結末が違う（`usePointerDrag` の作法）。
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+    fireEvent.pointerCancel(window, { pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000");
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("離したときは選んだ色のまま（`pointerup` は「やめる」ではない）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080"); // 戻さない
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**撫でている最中の `Escape` は撫で始めの色へ戻す**（掴む作法と同じ・#763-2）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 }); // #ff0000 → #ff8080
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false);
+    // 面の印（コード欄）も戻る＝色だけ戻して印が撫でた場所に残ると、いまの色を偽って見せる。
+    expect(screen.getByRole("textbox")).toHaveValue("#ff0000");
+  });
+
+  it("**その `Escape` では枠を閉じない**（一度に2段はがさない・2度目で閉じる・#763-2）", () => {
+    render(<Controlled />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeInTheDocument(); // 掴みだけをやめる
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); // 2度目で閉じる
+  });
+
+  it("撫でていないときの `Escape` は今までどおり閉じる（作法を変えるのは掴んでいる間だけ）", () => {
+    render(<Controlled />);
+    openSv();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("読み上げラベルを渡せる", () => {
     render(<ColorPicker value="#000000" onChange={vi.fn()} ariaLabel="文字の色を選ぶ" />);
     expect(screen.getByRole("button", { name: "文字の色を選ぶ" })).toBeInTheDocument();
   });
 });
+
+// 画面より高いときの始末（#1023・PR #1025 レビュー 🟡）。
+describe("ColorPicker：画面より高いときは縮めて中でスクロールさせる", () => {
+  /** 面の実寸を決める（jsdom には配置が無いので、読まれる値を固定する）。 */
+  const stub = (el: HTMLElement, { scroll, offset }: { scroll: number; offset: number }): void => {
+    Object.defineProperty(el, "scrollHeight", { value: scroll, configurable: true });
+    Object.defineProperty(el, "offsetHeight", { value: offset, configurable: true });
+    Object.defineProperty(el, "offsetWidth", { value: 236, configurable: true });
+  };
+
+  it("画面より高ければ、上端に置いて中でスクロールさせる", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    stub(pop, { scroll: 1200, offset: 1200 });
+    fireEvent.scroll(window); // 測り直させる
+    expect(pop.style.maxHeight, "画面より高いのに縮めていない").toBe(`${800 - 8 * 2}px`);
+    expect(pop.style.overflowY).toBe("auto");
+  });
+
+  // ⚠️ **ここが「同じ理由の再発」**（レビュー 🟡）＝一度縮めた後、`offsetHeight` は
+  // **縮んだ後の高さ**を返すので、それで上下を決めると「入る」と読めてしまう。
+  // 縮める前（`scrollHeight`）を見ていれば、測り直しても答えは変わらない。
+  it("一度縮めた後に測り直しても、縮めたままになる（入ると読み違えない）", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    // 縮んだ後の姿＝`offsetHeight` は 784（= 800 - 8*2）、`scrollHeight` は本来の 1200。
+    stub(pop, { scroll: 1200, offset: 784 });
+    fireEvent.scroll(window);
+    expect(pop.style.maxHeight, "縮めた後の高さで判断して、縮めるのをやめている").toBe(`${800 - 8 * 2}px`);
+  });
+
+  it("収まる高さなら、縮めない", () => {
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const pop = screen.getByRole("dialog");
+    stub(pop, { scroll: 300, offset: 300 });
+    fireEvent.scroll(window);
+    expect(pop.style.maxHeight).toBe("");
+  });
+});
+

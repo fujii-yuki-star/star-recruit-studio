@@ -3,15 +3,63 @@
 // スロット自身はどちらにも描かない（FFmpeg が動画で埋める＝透明な穴）。
 import type { LayoutItem, Rect, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
-import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 
 export interface VideoSceneSplit {
   /** 動画より下のレイヤー（背景含む・不透明・全面）。 */
   belowSvg: string;
   /** 動画より上のレイヤー（透過）。 */
   aboveSvg: string;
-  /** 動画スロットの矩形（FFmpeg のスケール/配置に使う）。 */
+  /**
+   * 動画スロットの矩形（FFmpeg のスケール/配置に使う）。
+   *
+   * ⚠️ **配置の座標（キャンバス基準＝1920×1080 等）のまま**＝FFmpeg へ渡す前に
+   * **必ず `slotRectToOutput` で出力の大きさへ写す**こと。
+   */
   slot: Rect;
+}
+
+/** FFmpeg へ渡す動画の枠（出力の大きさの座標・整数）。 */
+export interface OutputSlotRect {
+  slotX: number;
+  slotY: number;
+  slotW: number;
+  slotH: number;
+}
+
+/**
+ * 配置の座標の矩形を、**出力の大きさの座標**へ写す（#1255 レビュー 🔴）。**純粋関数**。
+ *
+ * ⚠️ **なぜ1か所に置くか**＝下敷き・上敷きの PNG は出力の大きさで焼くので、
+ * 動画の枠だけ配置の座標のままだと**動画だけが違う大きさ・違う位置**に重なる（黙って別の絵＝ADR-0026④）。
+ * 実際に、場面形式は縮めていたのにタイムライン形式は縮めておらず、「軽い（720）」で
+ * **全画面の動画が 1920×1080 の枠のまま 1280×720 の絵に載っていた**。
+ * **2か所に書き写すと、また片方だけずれる**ので、両形式ともここを通す。
+ *
+ * ⚠️ **整数に丸める**＝FFmpeg 側（Rust）は `u32` で受ける。
+ */
+export function slotRectToOutput(
+  rect: Rect,
+  canvas: { width: number; height: number },
+  output: { width: number; height: number },
+): OutputSlotRect {
+  const rx = output.width / canvas.width;
+  const ry = output.height / canvas.height;
+  return {
+    slotX: Math.round(rect.x * rx),
+    slotY: Math.round(rect.y * ry),
+    slotW: Math.round(rect.w * rx),
+    slotH: Math.round(rect.h * ry),
+  };
+}
+
+/**
+ * その枠を FFmpeg にそのまま渡せるか（**負の座標や大きさ0は渡せない**）。
+ *
+ * ⚠️ **Rust は `u32` で受ける**＝画面の左や上へはみ出した配置（負の座標）は**受け取りに失敗して
+ * 書き出しごと止まる**。渡せない枠は、呼ぶ側で**焼く方へ倒す**こと（絵は正しく出る・遅くなるだけ）。
+ */
+export function isPassableSlot(r: OutputSlotRect): boolean {
+  return r.slotX >= 0 && r.slotY >= 0 && r.slotW > 0 && r.slotH > 0;
 }
 
 /**
@@ -24,11 +72,19 @@ export function splitVideoSceneSvg(
   assetSrc?: (assetId: string | null) => string | undefined,
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
-  credit: string = NARRATOR_CREDIT,
+  // ⚠️ **既定値を持たない**（PR #881 レビュー）＝ADR-0003「常時表示」時代の名残で `NARRATOR_CREDIT` を
+  // 既定にしていたが、ADR-0025 で**出す/出さないは呼ぶ側が決める**ようになった。既定があると、
+  // 呼ぶ側が「出さない」と判断して `undefined` を渡しても**ここで復活して焼き込まれる**
+  //（動画スロットのある場面は必ずこの経路＝「非表示」を選んでもクレジットが入っていた）。
+  // 未指定＝描かない（`layoutToSvg` の `credit?: string` と同じ契約）。
+  credit?: string,
 ): VideoSceneSplit | null {
-  // 動画スロット（image かつ role=slot）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
+  // 絵のアイテム（`image`）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
+  // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝立ち絵に入れた動画も**置き場所**で、書き出しは
+  // 役割を問わず実フレームで差し替える（`isItemOfPlacement`）。ここで `role==='slot'` に絞ると
+  // **立ち絵だけ穴が開かず**、プレビューは静止・書き出しは実映像＝ADR-0001 のパリティが割れる。
   const slot = layout.items.find(
-    (it) => it.id === slotId && it.kind === 'image' && it.role === 'slot',
+    (it) => it.id === slotId && it.kind === 'image',
   );
   if (!slot) return null;
   const slotZ = slot.zIndex;
@@ -75,12 +131,18 @@ export function splitVideoSceneSvgMulti(
   assetSrc?: (assetId: string | null) => string | undefined,
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
-  credit: string = NARRATOR_CREDIT,
+  // ⚠️ **既定値を持たない**（PR #881 レビュー）＝ADR-0003「常時表示」時代の名残で `NARRATOR_CREDIT` を
+  // 既定にしていたが、ADR-0025 で**出す/出さないは呼ぶ側が決める**ようになった。既定があると、
+  // 呼ぶ側が「出さない」と判断して `undefined` を渡しても**ここで復活して焼き込まれる**
+  //（動画スロットのある場面は必ずこの経路＝「非表示」を選んでもクレジットが入っていた）。
+  // 未指定＝描かない（`layoutToSvg` の `credit?: string` と同じ契約）。
+  credit?: string,
   // responsive: SVG ルートを 100% にしてコンテナへフィット（プレビューの実映像3層描画用・#432）。書き出しは既定 false（固定寸法でラスタライズ）。
   responsive: boolean = false,
 ): VideoSceneSplitMulti | null {
+  // ⚠️ **役割で絞らない**（α-6 出口監査 🔴・#809）＝上の `splitVideoSceneSvg` と同じ理由。
   const found = slotIds.map((id) =>
-    layout.items.find((it) => it.id === id && it.kind === 'image' && it.role === 'slot'),
+    layout.items.find((it) => it.id === id && it.kind === 'image'),
   );
   if (found.some((s) => !s)) return null; // 誤った id（fill/text 等）や未解決は分割不可
   const slots = (found as LayoutItem[]).slice().sort((a, b) => a.zIndex - b.zIndex);

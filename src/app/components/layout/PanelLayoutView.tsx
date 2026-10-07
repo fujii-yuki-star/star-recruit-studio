@@ -1,0 +1,562 @@
+// 欄の配置を描く共通部品（ADR-0033 段階2）。**並べ方の規則は domain**（`panelLayout`）にあり、
+// ここは「描く」と「掴む」だけを持つ（`§4`）。
+//
+// 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
+// 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
+import { Fragment, useEffect, useRef, useState } from "react";
+import { menuAnchorFrom, usePointerDrag } from "../../hooks/usePointerDrag";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { ContextMenu } from "../ContextMenu";
+import type { ContextMenuItem } from "../ContextMenu";
+import {
+  DROP_SIDE,
+  MIN_PANEL_RATIO,
+  PANEL_REGION,
+  PANEL_REGIONS,
+  SPLIT_DIR,
+  addPanelToRegion,
+  dropPanelBeside,
+  dockZoneBoxes,
+  dropSideAt,
+  flexRegionOf,
+  isSplit,
+  movePanelStep,
+  removePanel,
+  resizeRegion,
+  resizeSplit,
+} from "../../../domain/layout/panelLayout";
+import type { DropSide, PanelId, PanelLayout, PanelNode, PanelRegion, PanelSplit, RegionSizes } from "../../../domain/layout/panelLayout";
+
+/** 欄1つ＝見出しと中身（中身は使う側が作る）。 */
+export interface PanelSpec {
+  id: PanelId;
+  title: string;
+  content: ReactNode;
+  /**
+   * **中身が自分でスクロールを持つ欄**（#1104）。既定（`false`）は**欄ごと**縦に流す。
+   *
+   * ⚠️ **なぜ要るか**＝「並び」の欄は、道具立て（表示倍率・吸着・「列を足す」）と帯が縦に並ぶ。
+   * 欄ごと流すと、帯を見に下へ送った瞬間に**道具立ても一緒に画面の外へ出る**（実機で確認・
+   * 列を12本にすると「列を足す」に手が届かない）。中身の側に流す場所を持たせると、
+   * 道具立ては留まったまま帯だけが動く（一般的な動画編集ソフトの型＝ADR-0034）。
+   */
+  fillBody?: boolean;
+  /**
+   * **見出しの行に置く道具**（実機指摘 2026-09-30）＝欄の中身の上に重ねない（重ねると絵と被って押し間違える）。
+   * 見出しは高さが決まっているので、道具の幅が変わっても中身の大きさは変わらない（#1261 の繰り返しを作らない）。
+   * ⚠️ ここを掴んでも欄は動かさない（道具の操作を奪わない）。
+   */
+  headerTools?: ReactNode;
+}
+
+/** 領域のユーザー向け名（§2-3＝「欄」「配置」の言い方に合わせる）。 */
+const REGION_LABEL: Record<PanelRegion, string> = {
+  left: "左",
+  center: "真ん中",
+  right: "右",
+  bottom: "下",
+};
+
+/** 欄を広げる／戻すの言い方（ボタン・メニュー・読み上げで同じ言葉を使う）。 */
+const MAXIMIZE_LABEL = { maximize: "広げる", restore: "元に戻す" } as const;
+/** 指している欄を広げるキー（Premiere の型＝数字の1の左）。 */
+const MAXIMIZE_KEY = "`";
+
+/** その欄が配置のどこかにあるか（閉じた欄は広げない）。 */
+function inLayout(layout: PanelLayout, id: PanelId): boolean {
+  const walk = (n: PanelNode | null | undefined): boolean =>
+    n != null && (isSplit(n) ? n.children.some(walk) : n.panelId === id);
+  return PANEL_REGIONS.some((r) => walk(layout.nodes[r]));
+}
+
+/** 境界をつかむ帯の太さ（px）。細すぎると掴めない・太すぎると中身を食う。 */
+const DIVIDER_PX = 6;
+/**
+ * 空いた領域への落とし先の帯の太さ（px・実機指摘 2026-09-30）＝外周の端に出す。
+ * 細すぎると狙えない・太すぎると欄の辺へ落とす操作を食う。
+ */
+const DOCK_ZONE_PX = 36;
+
+/** 落とし先＝欄の辺か、空いた領域か。 */
+type DropTarget = { kind: "panel"; panelId: PanelId; side: DropSide } | { kind: "region"; region: PanelRegion };
+/** 器の中の矩形（器の左上から・px）。 */
+type Box = { left: number; top: number; width: number; height: number };
+
+/**
+ * 欄の中身を入れる箱のクラス名。**既定では縦にスクロールするのはここ**（ADR-0033）。
+ * ⚠️ `fillBody` の欄はここでは流さず、**中身が自分で流す場所を持つ**（#1104）＝
+ * 「見えている範囲」を測る側は、**この箱ではなく実際に流れている箱**を見ること。
+ */
+export const PANEL_BODY_CLASS = "panel-frame-body";
+
+export function PanelLayoutView({
+  layout,
+  panels,
+  onChange,
+  fill,
+  maximized: maximizedProp,
+  onMaximizedChange,
+}: {
+  layout: PanelLayout;
+  panels: readonly PanelSpec[];
+  onChange: (next: PanelLayout) => void;
+  /** 器の高さいっぱいに広げる（スクロールしない器に入れるとき）。既定は画面に対する高さ。 */
+  fill?: boolean;
+  /**
+   * **広げている欄を外から持つ**（#1262＝「大きく見る」が仕上がり確認を広げる）。未指定＝この部品が自分で持つ。
+   * ⚠️ 渡すときは `onMaximizedChange` も渡す（見出しのボタン・キー・メニューからの切り替えを受ける）。
+   */
+  maximized?: PanelId | null;
+  onMaximizedChange?: (next: PanelId | null) => void;
+}): React.ReactElement {
+  const byId = new Map(panels.map((p) => [p.id, p]));
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ panelId: PanelId; x: number; y: number } | null>(null);
+  // ドラッグの作法は共有（`usePointerDrag`）＝掴む場所ごとに書き分けない（ADR-0034 決定9）。
+  const beginDrag = usePointerDrag();
+  // 欄の箱（落とし先を当てるのに使う）。`elementFromPoint` ではなく**自分が描いた欄の箱**で当てる＝
+  // 上に何か重なっていても（メニュー・知らせ）落とし先を見失わない。
+  const frameRefs = useRef(new Map<PanelId, HTMLElement>());
+  // つかんでいる欄と、いま指している落とし先（線で示す）。
+  const [dragging, setDragging] = useState<PanelId | null>(null);
+  const [dropAt, setDropAt] = useState<DropTarget | null>(null);
+  /** 掴んでいる間の指の位置（掴んでいる欄の名前札を指の先に出す）。 */
+  const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
+  /** 掴んでいる間に出す、空いた領域の帯（掴み始めた時に測る＝描いている最中に箱を測らない）。 */
+  const [zones, setZones] = useState<{ region: PanelRegion; box: Box }[]>([]);
+  const zonesRef = useRef<{ region: PanelRegion; box: Box }[]>([]);
+  const putZones = (next: { region: PanelRegion; box: Box }[]): void => {
+    zonesRef.current = next;
+    setZones(next);
+  };
+  // 領域の箱（空いた真ん中の落とし先を、左右の境目に置くのに使う）。
+  const regionRefs = useRef(new Map<PanelRegion, HTMLElement>());
+  /**
+   * **一時的に広げている欄**（ADR-0048 決定5・#1256 b3）＝その欄だけを配置の器いっぱいに出す。
+   * ⚠️ **記憶しない**（配置＝ADR-0033 の記憶とは別の一時状態）＝開き直したら元の配置で始まる。
+   * ⚠️ **ほかの欄は外さずに隠す**（`visibility: hidden`）＝外すと中身の状態が消える
+   *（仕上がり確認で鳴っている音が止まる・並びのスクロール位置が戻る）。
+   */
+  const [maximizedOwn, setMaximizedOwn] = useState<PanelId | null>(null);
+  const maximized = maximizedProp !== undefined ? maximizedProp : maximizedOwn;
+  // ⚠️ **いまの値は ref でも持つ**＝キーの受け口は一度だけ張るので、閉じ込めた値が古くなる。
+  const setMaximized = (next: PanelId | null): void => {
+    if (onMaximizedChange) onMaximizedChange(next);
+    else setMaximizedOwn(next);
+  };
+  const maximizedRef = useRef(maximized);
+  const setMaximizedRef = useRef(setMaximized);
+  // 描くたびに最新へ（描いている最中に ref を書かない＝React の約束）。
+  useEffect(() => {
+    maximizedRef.current = maximized;
+    setMaximizedRef.current = setMaximized;
+  });
+  // 指している欄（`` ` `` キーで広げる相手＝Premiere と同じ型）。
+  const hoveredRef = useRef<PanelId | null>(null);
+  // 広げた欄が配置から消えたら（閉じた・既定に戻した）元に戻す＝見えない欄を広げたまま残さない。
+  const shownIds = new Set(panels.map((p) => p.id));
+  const activeMax = maximized != null && shownIds.has(maximized) && inLayout(layout, maximized) ? maximized : null;
+  const toggleMaximize = (id: PanelId): void => setMaximizedRef.current(maximizedRef.current === id ? null : id);
+
+  // `` ` ``（数字の1の左）で、指している欄を広げる／戻す（Premiere の型）。文字を打っている所では奪わない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== MAXIMIZE_KEY || e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const id = hoveredRef.current;
+      if (id == null) return;
+      e.preventDefault();
+      toggleMaximize(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /**
+   * **空いた領域への落とし先**（器の中の矩形・実機指摘 2026-09-30）。置き場所の規則は domain（`dockZoneBoxes`＝重ならない・はみ出さない）。
+   * ⚠️ 広げている間は出さない（隠れた欄の周りへ落とすと、何が起きたか見えない）。
+   * ⚠️ **掴み始めに1回だけ測る**（#1275 レビュー）＝見えている帯と当たる帯を同じ値にする（`zonesRef`）。
+   */
+  const measureDockZones = (): { region: PanelRegion; box: Box }[] => {
+    const root = rootRef.current?.getBoundingClientRect();
+    if (!root || activeMax != null) return [];
+    // 左右の境目＝左の領域の右端（真ん中の帯は、左右の両方に欄があるときだけそこに出る）。
+    const leftBox = regionRefs.current.get(PANEL_REGION.left)?.getBoundingClientRect();
+    const centerX = leftBox ? leftBox.right - root.left : null;
+    return dockZoneBoxes(layout, { width: root.width, height: root.height }, centerX, DOCK_ZONE_PX);
+  };
+
+  /** 指している位置から落とし先を探す（自分自身の上は落とし先にしない＝何も起きない操作を見せない）。 */
+  const findDrop = (panelId: PanelId, x: number, y: number): DropTarget | null => {
+    // 空いた領域の帯が先＝欄の端に重なって置かれるので、帯の上ではそちらを採る（帯は目に見えている）。
+    // ⚠️ 帯は掴み始めに測った値（`zonesRef`）＝見えている帯と当たる帯をずらさない。
+    const root = rootRef.current?.getBoundingClientRect();
+    if (root) {
+      const rx = x - root.left;
+      const ry = y - root.top;
+      const zone = zonesRef.current.find(({ box }) => rx >= box.left && rx <= box.left + box.width && ry >= box.top && ry <= box.top + box.height);
+      if (zone) return { kind: "region", region: zone.region };
+    }
+    for (const [id, el] of frameRefs.current) {
+      if (id === panelId) continue;
+      // ⚠️ **広げている間は、隠れた欄を落とし先にしない**（#1259 レビュー 🟡）＝隠した欄も箱は残るので、
+      //   見えない欄の上で離すと**何が起きたか分からないまま配置が変わった**（落とし線も見えない）。
+      if (activeMax != null && id !== activeMax) continue;
+      const box = el.getBoundingClientRect();
+      if (x < box.left || x > box.left + box.width || y < box.top || y > box.top + box.height) continue;
+      return { kind: "panel", panelId: id, side: dropSideAt(box, x, y) };
+    }
+    return null;
+  };
+
+  /**
+   * 見出しをつかんで動かす（決定12＝ドラッグ）。**少し動かすまでは始めない**＝見出しを押しただけで
+   * 掴んだ状態にしない。`Escape` でやめられる（掴んだまま戻れない、を作らない・§2-5）。
+   */
+  const beginPanelDrag = (e: ReactPointerEvent, panelId: PanelId): void => {
+    beginDrag(e, {
+      onStart: () => { setDragging(panelId); putZones(measureDockZones()); },
+      onMove: (ev) => {
+        setDragPoint({ x: ev.clientX, y: ev.clientY });
+        setDropAt(findDrop(panelId, ev.clientX, ev.clientY));
+      },
+      onEnd: (ev, started) => {
+        const target = started ? findDrop(panelId, ev.clientX, ev.clientY) : null;
+        setDragging(null);
+        setDropAt(null);
+        setDragPoint(null);
+        putZones([]);
+        if (!target) return;
+        onChange(target.kind === "panel"
+          ? dropPanelBeside(layout, panelId, target.panelId, target.side)
+          : addPanelToRegion(layout, panelId, target.region));
+      },
+      onCancel: () => { setDragging(null); setDropAt(null); setDragPoint(null); putZones([]); },
+    });
+  };
+
+  /** 並べ替え1つぶん。**動かせない向きは押せなくして理由を出す**（押しても何も起きない、を作らない・§2-5）。 */
+  const stepItem = (panelId: PanelId, side: (typeof DROP_SIDE)[keyof typeof DROP_SIDE], label: string): ContextMenuItem => {
+    const next = movePanelStep(layout, panelId, side);
+    return {
+      label,
+      disabled: next === layout,
+      disabledHint: `${label}動かせる欄がありません。同じ向きに並んでいる欄の中で入れ替えられます`,
+      onSelect: () => onChange(next),
+    };
+  };
+
+  const menuItems = (panelId: PanelId): ContextMenuItem[] => [
+    { label: activeMax === panelId ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize, onSelect: () => toggleMaximize(panelId) },
+    // 並べ替えはドラッグとメニューの両方（決定12）＝ドラッグが使えないときの逃げ道。
+    stepItem(panelId, DROP_SIDE.top, "上へ"),
+    stepItem(panelId, DROP_SIDE.bottom, "下へ"),
+    stepItem(panelId, DROP_SIDE.left, "左へ"),
+    stepItem(panelId, DROP_SIDE.right, "右へ"),
+    ...PANEL_REGIONS.map((region) => ({
+      label: `${REGION_LABEL[region]}へ移す`,
+      onSelect: () => onChange(addPanelToRegion(layout, panelId, region)),
+    })),
+    { label: "この欄を閉じる", danger: true, onSelect: () => onChange(removePanel(layout, panelId)) },
+  ];
+
+  /** 分かれ目の境界をドラッグ（決定2）。掴んだ2つの間だけを動かす＝隣の欄が芋づるで動かない。 */
+  const beginSplitDrag = (
+    e: ReactPointerEvent,
+    region: PanelRegion,
+    path: number[],
+    node: PanelSplit,
+    index: number,
+    box: DOMRect,
+  ): void => {
+    e.preventDefault();
+    const horizontal = node.dir === SPLIT_DIR.row;
+    const total = horizontal ? box.width : box.height;
+    if (total <= 0) return;
+    const start = horizontal ? e.clientX : e.clientY;
+    const a0 = node.sizes[index];
+    const b0 = node.sizes[index + 1];
+    const move = (ev: PointerEvent): void => {
+      const delta = ((horizontal ? ev.clientX : ev.clientY) - start) / total;
+      // 掴んだ2つの合計は変えない＝ほかの欄の大きさに触らない。
+      const a = Math.min(Math.max(MIN_PANEL_RATIO, a0 + delta), a0 + b0 - MIN_PANEL_RATIO);
+      const sizes = [...node.sizes];
+      sizes[index] = a;
+      sizes[index + 1] = a0 + b0 - a;
+      onChange(resizeSplit(layout, region, path, sizes));
+    };
+    const startLayout = layout;
+    // 境界は**押した瞬間から追従**させる（`startPx: 0`）＝掴んだのに動かない遊びを作らない。
+    beginDrag(e, { startPx: 0, onMove: move, onCancel: () => onChange(startLayout) });
+  };
+
+  /** 領域の外枠をドラッグ（左右の幅・下の高さ）。 */
+  const beginRegionDrag = (e: ReactPointerEvent, region: keyof RegionSizes): void => {
+    e.preventDefault();
+    const box = rootRef.current?.getBoundingClientRect();
+    if (!box || box.width <= 0 || box.height <= 0) return;
+    const move = (ev: PointerEvent): void => {
+      const ratio =
+        region === PANEL_REGION.left
+          ? (ev.clientX - box.left) / box.width
+          : region === PANEL_REGION.right
+            ? (box.right - ev.clientX) / box.width
+            : (box.bottom - ev.clientY) / box.height;
+      onChange(resizeRegion(layout, region, ratio));
+    };
+    const startLayout = layout;
+    // 境界は**押した瞬間から追従**させる（`startPx: 0`）＝掴んだのに動かない遊びを作らない。
+    beginDrag(e, { startPx: 0, onMove: move, onCancel: () => onChange(startLayout) });
+  };
+
+  const renderNode = (node: PanelNode, region: PanelRegion, path: number[]): ReactNode => {
+    if (!isSplit(node)) {
+      const spec = byId.get(node.panelId);
+      // 知らない欄は描かない（`normalizeLayout` が落とすので通常は来ない＝念のため）。
+      if (!spec) return null;
+      const drop = dropAt?.kind === "panel" && dropAt.panelId === spec.id ? dropAt.side : null;
+      return (
+        <section
+          className={`panel-frame${dragging === spec.id ? " panel-frame--dragging" : ""}${activeMax === spec.id ? " panel-frame--maximized" : ""}`}
+          key={spec.id}
+          data-panel-id={spec.id}
+          onPointerEnter={() => { hoveredRef.current = spec.id; }}
+          onPointerLeave={() => { if (hoveredRef.current === spec.id) hoveredRef.current = null; }}
+          ref={(el) => {
+            if (el) frameRefs.current.set(spec.id, el);
+            else frameRefs.current.delete(spec.id);
+          }}
+        >
+          {/* 落とし先を**入る面で示す**（決定12・実機指摘 2026-09-30＝線だけでは入る広さが読めない）。
+              欄の半分を塗る＝落とすとその半分に入る（Visual Studio・VS Code の型）。 */}
+          {drop && <div className={`panel-drop-line panel-drop-line--${drop}`} aria-hidden="true" />}
+          <header
+            className="panel-frame-head"
+            title="つかんで動かすと、ほかの欄の隣へ移せます"
+            onPointerDown={(e) => {
+              // 「⋮」・見出しの道具の上から始めない（その操作を奪わない）。
+              if ((e.target as HTMLElement).closest("button, input, select, label, .panel-frame-head-tools")) return;
+              beginPanelDrag(e, spec.id);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ panelId: spec.id, x: e.clientX, y: e.clientY });
+            }}
+            // 見出しを二度押しで広げる／戻す（見出しを掴んで動かす操作とは別＝動かさずに2回押したとき）。
+            onDoubleClick={(e) => {
+              if ((e.target as HTMLElement).closest("button, input, select, label, .panel-frame-head-tools")) return;
+              toggleMaximize(spec.id);
+            }}
+          >
+            <h3>{spec.title}</h3>
+            <span className="panel-frame-head-actions">
+            {spec.headerTools && <span className="panel-frame-head-tools">{spec.headerTools}</span>}
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-label={`${spec.title}の欄を${activeMax === spec.id ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize}`}
+              aria-pressed={activeMax === spec.id}
+              title={`${activeMax === spec.id ? MAXIMIZE_LABEL.restore : MAXIMIZE_LABEL.maximize}（見出しの二度押し・欄を指して ${MAXIMIZE_KEY} キーでも）`}
+              onClick={() => toggleMaximize(spec.id)}
+            >
+              {activeMax === spec.id ? "⤡" : "⤢"}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-label={`${spec.title}の欄の操作`}
+              title="この欄の操作（右クリックでも開けます）"
+              // ⚠️ **キーで押したときは押したボタンの下へ**（#989）＝キーの click は座標を持たないので、
+              // そのまま渡すとメニューが**画面の左上**に出る。規則は `menuAnchorFrom` に1つだけ。
+              onClick={(e) => setMenu({ panelId: spec.id, ...menuAnchorFrom(e) })}
+            >
+              ⋮
+            </button>
+            </span>
+          </header>
+          <div className={`${PANEL_BODY_CLASS}${spec.fillBody ? ` ${PANEL_BODY_CLASS}--fill` : ""}`}>{spec.content}</div>
+        </section>
+      );
+    }
+    const horizontal = node.dir === SPLIT_DIR.row;
+    return (
+      <div className={`panel-split ${horizontal ? "panel-split--row" : "panel-split--column"}`}>
+        {node.children.map((child, i) => (
+          <SplitChild
+            key={i}
+            ratio={node.sizes[i]}
+            horizontal={horizontal}
+            showDivider={i < node.children.length - 1}
+            onDividerDown={(e, box) => beginSplitDrag(e, region, path, node, i, box)}
+          >
+            {renderNode(child, region, [...path, i])}
+          </SplitChild>
+        ))}
+      </div>
+    );
+  };
+
+  const regionNode = (region: PanelRegion): ReactNode => {
+    const node = layout.nodes[region];
+    return node ? renderNode(node, region, []) : null;
+  };
+
+  const { bottom } = layout.regionSizes;
+  // **閉じた欄の場所を空けたままにしない**（実機指摘 2026-09-30）＝残りの幅を使う領域は、真ん中が空なら右（無ければ左）。
+  const flex = flexRegionOf(layout.nodes);
+  const hasMain = flex != null;
+  const hasBottom = layout.nodes.bottom != null;
+  /** 上の段に居る領域（左→真ん中→右の順）。 */
+  const mainRegions = ([PANEL_REGION.left, PANEL_REGION.center, PANEL_REGION.right] as const).filter((r) => layout.nodes[r] != null);
+
+  // 下の欄があるときの子は「本体・境界・下の欄」の**3つ**。境界ぶんの行を書かないと、境界が下の欄の行を取り、
+  // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
+  //
+  // ⚠️ **`1fr` ではなく `minmax(0, 1fr)`**（#1104・実機で発覚）＝`1fr` は `minmax(auto, 1fr)` と同じで、
+  // **中身の最小の高さより縮まない**。器がスクロールしない画面では、上の欄（仕上がり確認）が縮まずに
+  // 下の欄を押し潰し、**器からはみ出すので欄の中のスクロールも効かなくなる**
+  // （「並びブロック内のスクロールまで消えた」「かなり窮屈」＝利用者指摘 2026-09-10）。
+  // ⚠️ **割合は `%` ではなく `fr`**（#1104・実機で発覚）＝器の高さが flex で決まるとき、
+  // `%` は解決できずに**行が中身なりに伸びて器からはみ出す**（欄の中のスクロールも効かなくなる）。
+  // `fr` は残りの場所を配るので、器の高さの決まり方に依らない。
+  // ⚠️ **上の段が空なら下の欄が全体を使う**（実機指摘 2026-09-30＝閉じた場所を空けたままにしない）。
+  const rows = hasBottom && hasMain
+    ? `minmax(0, ${1 - bottom}fr) auto minmax(0, ${bottom}fr)`
+    : "minmax(0, 1fr)";
+
+  const draggingTitle = dragging ? byId.get(dragging)?.title : undefined;
+  return (
+    <div
+      className={`panel-layout${fill ? " panel-layout--fill" : ""}${activeMax ? " panel-layout--maximized" : ""}`}
+      ref={rootRef}
+      style={{ gridTemplateRows: rows }}
+    >
+      {hasMain && (
+        <div className="panel-layout-main">
+          {mainRegions.map((region, i) => {
+            const prev = mainRegions[i - 1];
+            // 境目は**割合を持つ側**を動かす（残りを使う側は割合を持たない）＝掴んだ位置どおりに動く。
+            // 前が左なら左（残りを使うのが左になるのは左だけのときで、そのとき境目は無い）、前が真ん中なら右。
+            const dividerFor: keyof RegionSizes | null = prev == null
+              ? null
+              : prev === PANEL_REGION.left ? PANEL_REGION.left : PANEL_REGION.right;
+            const fixedWidth = region !== flex && region !== PANEL_REGION.center
+              ? { width: `${layout.regionSizes[region as keyof RegionSizes] * 100}%` }
+              : undefined;
+            return (
+              <Fragment key={region}>
+                {dividerFor && (
+                  <Divider
+                    vertical
+                    onPointerDown={(e) => beginRegionDrag(e, dividerFor)}
+                    label={dividerFor === PANEL_REGION.left ? "左の欄の幅" : "右の欄の幅"}
+                  />
+                )}
+                <div
+                  ref={(el) => {
+                    if (el) regionRefs.current.set(region, el);
+                    else regionRefs.current.delete(region);
+                  }}
+                  className={`panel-layout-region${region === flex ? " panel-layout-region--flex" : ""}`}
+                  data-region={region}
+                  style={fixedWidth}
+                >
+                  {regionNode(region)}
+                </div>
+              </Fragment>
+            );
+          })}
+        </div>
+      )}
+      {hasBottom && (
+        <>
+          {hasMain && <Divider onPointerDown={(e) => beginRegionDrag(e, PANEL_REGION.bottom)} label="下の欄の高さ" />}
+          <div
+            className="panel-layout-region"
+            ref={(el) => {
+              if (el) regionRefs.current.set(PANEL_REGION.bottom, el);
+              else regionRefs.current.delete(PANEL_REGION.bottom);
+            }}
+            data-region={PANEL_REGION.bottom}
+          >{regionNode(PANEL_REGION.bottom)}</div>
+        </>
+      )}
+      {/* **空いた領域への落とし先**（実機指摘 2026-09-30）＝外周の端と空いた真ん中。掴んでいる間だけ出し、指している所は濃くする。 */}
+      {zones.map(({ region, box }) => (
+        <div
+          key={region}
+          className={`panel-dock-zone${dropAt?.kind === "region" && dropAt.region === region ? " panel-dock-zone--active" : ""}`}
+          data-dock-region={region}
+          aria-hidden="true"
+          style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+        >
+          <span>{REGION_LABEL[region]}</span>
+        </div>
+      ))}
+      {/* 掴んでいる欄の名前を指の先に出す＝何を運んでいるかが分かる（帯を運ぶときと同じ型）。 */}
+      {dragPoint && draggingTitle && (
+        <div className="drag-ghost" aria-hidden="true" style={{ left: dragPoint.x, top: dragPoint.y }}>
+          {draggingTitle}
+        </div>
+      )}
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.panelId)} onClose={() => setMenu(null)} />
+      )}
+    </div>
+  );
+}
+
+/** 分割の子1つ（割合ぶんの大きさと、次との境界）。境界の親の箱を測って渡す＝割合の計算を1か所に。 */
+function SplitChild({
+  ratio,
+  horizontal,
+  showDivider,
+  onDividerDown,
+  children,
+}: {
+  ratio: number;
+  horizontal: boolean;
+  showDivider: boolean;
+  onDividerDown: (e: ReactPointerEvent, box: DOMRect) => void;
+  children: ReactNode;
+}): React.ReactElement {
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      <div className="panel-split-child" ref={ref} style={{ flex: `${ratio} 1 0`, minWidth: 0, minHeight: 0 }}>
+        {children}
+      </div>
+      {showDivider && (
+        <Divider
+          vertical={horizontal}
+          label="欄の境目"
+          onPointerDown={(e) => {
+            const box = ref.current?.parentElement?.getBoundingClientRect();
+            if (box) onDividerDown(e, box);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** 掴める境界。**キーボードでは動かせない**ので、大きさを戻す道は「配置を既定に戻す」（§2-5・ADR-0033 未解決4）。 */
+function Divider({
+  vertical,
+  label,
+  onPointerDown,
+}: {
+  vertical?: boolean;
+  label: string;
+  onPointerDown: (e: ReactPointerEvent) => void;
+}): React.ReactElement {
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      aria-orientation={vertical ? "vertical" : "horizontal"}
+      className={`panel-divider ${vertical ? "panel-divider--vertical" : "panel-divider--horizontal"}`}
+      style={vertical ? { width: DIVIDER_PX, cursor: "col-resize" } : { height: DIVIDER_PX, cursor: "row-resize" }}
+      onPointerDown={onPointerDown}
+    />
+  );
+}

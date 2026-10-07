@@ -1,36 +1,54 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { exportFailedMessage, subtitleFileSkippedScenesMessage, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, DUCK_MERGED_MESSAGE } from "../uiLabels";
+import { refusalReason } from "../../domain/startup/refusalReason";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
+import { FlowBar } from "../components/FlowBar";
+import { flowJump } from "../flowSteps";
 import { NoScenesState } from "../components/NoScenesState";
-import { ArrowLeftIcon, FilmIcon } from "../components/icons";
+import { CreditDisplayField } from "../components/CreditDisplayField";
+import { FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { buildPrecheckItems, exportBlockedMessage, exportBlockingItems, exportNoteItems } from "../adapters";
+import { startupExportNotes } from "../../domain/startup/startupMessages";
 import { useExportCapability } from "../hooks/useExportCapability";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
-import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
-import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
+import { applyDuckingToMix, planBgmMix, resolveBgmExportRuns, resolveSpeechSpans } from "../../domain/project/bgmExport";
+import { wavDurationSec } from "../../domain/voice/wavDuration";
+import { resolveAudioAuto } from "../../domain/voice/audioAuto";
+import { AudioAutoField } from "../components/AudioAutoField";
+import { SubtitleFileExportButton } from "../components/SubtitleFileExportButton";
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND } from "../../domain/timeline/bake";
+import { subtitleCuesOf } from "../../domain/timeline/subtitleCues";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
+import { beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage, endExportDiskWatch, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice, EXPORT_RUN_PHASE, hasExportPercent } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
-import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
+import { BGM_CROSSFADE_SEC, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, isExportSize } from "../../domain/constants";
+import { ExportSizeOptions } from "../components/ExportSizeOptions";
+import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
-import { lineAudioKey } from "../../domain/project/narrationLines";
+import { narrationAudioKey, sceneLineVoiceUsable } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
-import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
+import { createExportSrcResolver } from "../store/assetExportSrc";
+import { ExportDoneActions } from "../components/ExportDoneActions";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
-import { ASSET_TYPE } from "../../domain/enums";
-import { isTemplateAsset } from "../../domain/template/templateAsset";
-import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
+import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, exportLockBlockedMessage, useExportLockStore } from "../store/exportLock";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
+import { userFacingMessage } from "../userFacingError";
+// 起動のときに頼まれた書き出し（ADR-0042 決定⑤・#1184）＝保存先を聞く所**だけ**を置き換える。
+import { useStartupJobStore } from "../store/startupJobStore";
+import { finishStartupJob } from "../../infrastructure/startupFs";
 
 // 画面タイトルは1か所（空状態と通常の両分岐で共有＝片方だけ直して drift しない・§6）。
 const EXPORT_TITLE = "動画を書き出す";
@@ -44,10 +62,16 @@ interface ExportProps {
 
 export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
+  // 公開前チェックへ「どこから来たか」を渡す（#1026＝戻る先が固定だった）。
+  const setPrecheckReturnTo = useProjectStore((s) => s.setPrecheckReturnTo);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
   const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   const assets = useProjectStore((s) => s.assets);
+  // ⚠️ **見つからない素材は押す前に断る材料**（#1068）＝画面が開いた時点の結果を見る
+  //（調べていないときは空＝項目そのものを出さない＝嘘の「問題なし」を出さない）。
+  const missingAssetIds = useProjectStore((s) => s.missingAssetIds);
+  const projectBgmAssetId = useProjectStore((s) => s.meta.bgmSettings?.assetId ?? null);
   const templates = useProjectStore((s) => s.templates);
   const overlayAnimations = useProjectStore((s) => s.meta.timelineOverlay?.animations);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
@@ -64,22 +88,46 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const fileName = exportForm.fileName ?? (projectName.trim() || "動画");
   const size = exportForm.size;
   const withSubtitle = exportForm.withSubtitle;
-  // 完了後の導線に失敗したとき、押した操作に応じた文言を出す（§2-5・#404）。""＝正常／"reveal"＝保存先を開く失敗／"open"＝再生失敗。
-  const [openError, setOpenError] = useState<"" | "reveal" | "open">("");
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
   // 出力解像度（向き＋画質）。書き出し時に PNG をこの解像度で焼く。向きは videoSettings.aspectRatio から導出（ADR-0012）。
   const fullDims = exportDimsForOrientation(aspectRatio, false);
   const hdDims = exportDimsForOrientation(aspectRatio, true);
-  const outputSize = size === "hd" ? hdDims : fullDims;
+  const outputSize = exportSizeIsLight(size) ? hdDims : fullDims;
 
   // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
+  // 持ち込みフォント（#261）＝**開くたびに調べ直す**（アプリの外で消されうる・公開前チェックと同じ流儀）。
+  const userFontIds = useProjectStore((s) => s.userFontIds);
+  // ⚠️ **「読めなかった」は「まだ調べていない」とは別**（🟡19 のレビュー）＝待っても埋まらないので、
+  // 黙って別の字体で書き出さないよう、公開前チェックが**そう言って**止める。
+  const userFontsUnreadable = useProjectStore((s) => s.userFontsUnreadable);
+  const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
+  useEffect(() => { void refreshUserFonts(); }, [refreshUserFonts]);
+  // ⚠️ **素材も同じように調べ直す**（PR #1209 レビュー 🟡）＝フォントだけ毎回調べ直していて、
+  // **素材は誰かが調べた結果を借りている**だけだった。画面を離れずに外でファイルを消された回や、
+  // 公開前チェック・素材の画面を通らずにここへ来た回は、**古い結果のまま止めずに通してしまう**。
+  const refreshMissingAssets = useProjectStore((s) => s.refreshMissingAssets);
+  useEffect(() => { void refreshMissingAssets(); }, [refreshMissingAssets]);
+  const projectFontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  const fontsForBlocking = useMemo(
+    // ⚠️ `userFontIds` が `null`（まだ調べていない）なら渡さない＝嘘の「問題なし」を出さない（#347 と同じ流儀）。
+    // ⚠️ **読めなかったときは一覧を渡さない**（差分再監査）＝古い一覧が残っていると
+    // 「調べられません」と「N つ見つかりません」が同時に出る（矛盾する2つの断り）。
+    () => ({ projectFontId, userFontsUnreadable, ...(userFontIds && !userFontsUnreadable ? { availableUserFontIds: userFontIds } : {}) }),
+    [projectFontId, userFontIds, userFontsUnreadable],
+  );
   // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
   // useMemo：書き出し中は進捗更新のたびに再描画されるので、毎回 全場面のレイアウト計算をやり直さない（#376 の待ち時間に効く）。
+  // ⚠️ **フォントの材料もここへ通す**（#261・PR #886 レビュー 🔴）＝通さないと、サイドバーから
+  // この画面へ直行したときに「見つからない文字の形」が**項目そのものとして作られず**、
+  // 別の字体に化けた動画がそのまま書き出せてしまう（§2-5・ADR-0026②）。
   const blockingItems = useMemo(
-    () => exportBlockingItems(scenes, assets, templates, overlayAnimations),
-    [scenes, assets, templates, overlayAnimations],
+    // ⚠️ **見つからない素材の材料もここへ通す**（#1068）＝通さないと、サイドバーから
+    // この画面へ直行したときに**項目そのものが作られず**、素材の抜けた動画が書き出せてしまう
+    //（フォントで同じ穴を踏んだ＝PR #886 レビュー 🔴）。
+    () => exportBlockingItems(scenes, assets, templates, overlayAnimations, fontsForBlocking, missingAssetIds, projectBgmAssetId),
+    [scenes, assets, templates, overlayAnimations, fontsForBlocking, missingAssetIds, projectBgmAssetId],
   );
   const blockedMessage = blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "export") : null;
   // この端末で書き出せない（h264 不可）ときも公開前チェックと同じく止める＝直行経路だけ押せてしまうのを防ぐ（ADR-0026②）。
@@ -87,7 +135,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const capabilityBlocked = capability != null && blocksExport(capability);
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
-  const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
+  const { phase, progress, encode, resultPath, message, bgmWarning, duckMerged, cancelling } = exportRun;
   // この画面に**入った時点で既に終わっていた**結果を見ているか（#547 P3-11）。実行状態は画面横断で保持する
   //（#379＝書き出し中に他画面へ移っても進捗が見える）ため、離れて戻ると前回の「保存しました（100%）」
   //「失敗しました」が**いま起きたこと**のように残り続ける。マウント時の phase を初期値にし、以後は
@@ -102,8 +150,91 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const setMessage = (message: string) => setExportRun({ message });
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
   const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
+  const setDuckMergedNotice = (duckMerged: boolean) => setExportRun({ duckMerged });
+
+  // 書き出しの持ち主（`exportLock`）。タイムライン形式と一時ファイルの置き場を取り合わないために使う。
+  const EXPORT_OWNER = "scene" as const;
 
   const busy = isExportBusy(phase);
+  /**
+   * **名乗ってから走行中の表示になるまでの間**（#843 レビュー 🟡）。
+   *
+   * ⚠️ これが無いと、**書き出しを正当に始めた直後に「後片づけ中」と誤表示**する＝この画面は
+   * 名乗り（`acquire`）の**後**に `beginExport()` の往復を挟んでから `rendering` にするので、
+   * その間は「締めは自分・走行中ではない」＝`isOwnCleanupPending` の条件をそのまま満たしてしまう
+   *（タイムライン形式は名乗る**前**に `preparing` を立てるので起きない＝非対称だった）。
+   * 走行中の語彙（`isExportBusy`）は画面横断で編集の可否も決めるので広げず、**この画面の中だけ**で持つ。
+   */
+  const [starting, setStarting] = useState(false);
+  /** 字幕ファイルを書き出した結果の知らせ（ADR-0055・`ok`＝書けた）。 */
+  const [subtitleExportNotice, setSubtitleExportNotice] = useState<{ message: string; ok: boolean } | null>(null);
+  /** 押した瞬間に**いまの値**で見るための控え（描画時のクロージャでは1回ぶん古い）。 */
+  const startingRef = useRef(false);
+  // ⚠️ **どの出口でも、ちょうど1回だけ返す**（PR #1197 レビュー 🔴／🟡）＝返さないと、頼んだ側（AI）は
+  // **終わらない仕事を待ち続ける**し、`--quit-when-done` の回はアプリが閉じない（§2-5 の行き止まり）。
+  // ⚠️ **画面の側に置く**＝`startExport` の**中**に置くと、`try` に入る前に例外が飛んだ回を拾えない
+  //（同レビュー 🟡）。始めた側（下の `useEffect`）からも返せるようにする。
+  // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
+  const startupJobRef = useRef<{ out: string; forwarded: boolean } | null>(null);
+  const jobSettledRef = useRef(false);
+  /** この回が始まった時点で画面に出ていた文（#1217 レビュー 🟡）。⚠️ **これと同じなら「この回の文ではない」**。 */
+  const messageAtStartRef = useRef<string>("");
+  const settleJob = (ok: boolean): void => {
+    const job = startupJobRef.current;
+    if (!job || jobSettledRef.current) return;
+    jobSettledRef.current = true;
+    // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側（外の AI）が受け取れるのは**数字だけ**。
+    // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
+    // ⚠️ **ただし「その回に出た文」に限る**（#1217 レビュー 🟡）＝前の回の文が残っていると、
+    // **直前の成功の文が、失敗の理由として出る**（いちばん誤解を招く形）。
+    // 文を出さずに抜ける枝が将来また増えても、ここで受け止める＝**枝を数え上げない**。
+    // ⚠️ **決めるのは domain の1つ**（#1217 レビュー 🟡）＝画面の中に式で書いていたら、
+    // 2つの守り（枝が文を出す／その回の文か見る）が**互いを隠して**どちらも検査できていなかった。
+    const reason = refusalReason(
+      useProjectStore.getState().exportRun.message,
+      messageAtStartRef.current,
+      exportFailedMessage.EXPORT_FAILED_SCENE,
+    );
+    // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
+    // 頼んだ側（外の AI）は絵を見るまで気づけない。**公開前チェックと同じ項目**（止めないもの）を1行ずつ渡す。
+    // ⚠️ **注意の計算で落ちても、返し損ねない**（PR #1369 レビュー 🟡）＝ここは「ちょうど1回だけ返す」出口なので、
+    // 例外で抜けると頼んだ側が永久に待つ。落ちたら注意なしで成功を返す。
+    let notes: string | null = null;
+    if (ok) {
+      try {
+        const st = useProjectStore.getState();
+        notes = startupExportNotes(
+          exportNoteItems(buildPrecheckItems(
+            st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations, st.missingAssetIds,
+            st.meta.bgmSettings?.assetId ?? null,
+            { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
+            st.meta.voiceSettings,
+          )),
+        );
+      } catch (e) {
+        console.error("[startup] 注意の計算に失敗（注意なしで返す）:", e);
+      }
+    }
+    void finishStartupJob(ok, job.forwarded, ok ? notes : reason)
+      .catch((err) => console.error("[startup] finish failed:", err));
+  };
+  const markStarting = (on: boolean): void => { startingRef.current = on; setStarting(on); };
+  // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
+  // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
+  // 押す前に無効化して出す理由と、押したときに断る理由は**同じ述語**から採る（`isOwnCleanupPending`）。
+  // ⚠️ **締めが理由で始められないときは押させない**（#843 レビュー 🟡）＝以前は「相手が走っている」も
+  // 「自分の後片づけ待ち」も**押した後**でしか見ておらず、**押せるボタンを押すと断られるだけ**だった。
+  // どちらも到達する（相手の書き出しが終わると走行中の判定が落ちるので、その直後にこの画面へ来ると
+  // 締めだけが残っている）。押す前の表示と押した瞬間の判定は**同じ述語**から採る（`06 §12.1`）。
+  const lockBlockedMessage = exportLockBlockedMessage(useExportLockStore((st) => st.owner), EXPORT_OWNER, busy || starting);
+  // **書き出しの入口を 1 つにする**（#1032）。失敗の知らせからもやり直せるようにしたので、
+  // 押せる条件を書き並べると**片方だけ塞がれていない**が起きる（`06 §12.1`＝押す前に見せて押せなくする）。
+  const exportDisabled = busy || starting || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked;
+  // 公開前チェックへの入口も 1 つ＝**戻り先の覚え方**（`setPrecheckReturnTo`）を書き忘れた入口を作らない（#1026）。
+  const openPrecheck = (): void => {
+    setPrecheckReturnTo("export");
+    onNavigate("precheck");
+  };
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
   // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
@@ -122,69 +253,141 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   async function startExport() {
+    // ⚠️ **頼まれごとは、いちばん先に取り出す**（PR レビュー 🔴）＝以前は準備に入った後で取り出しており、
+    // 手前の早期 return（走行中・使えない・場面ゼロ）で抜けると**保存先が残ったまま**になった。
+    // そうなると、**後で人が押した書き出しが、保存先を聞かれないまま外から渡された道へ書く**。
+    startupJobRef.current = useStartupJobStore.getState().takePendingExport();
+    jobSettledRef.current = false;
+    // ⚠️ **始まった時点の文を控える**（#1217 レビュー 🟡）＝これと同じ文なら「この回の文ではない」。
+    messageAtStartRef.current = useProjectStore.getState().exportRun.message;
+    const startupJob = startupJobRef.current;
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
-    if (busy) return;
+    // ⚠️ **いまの値で見る**（差分再監査 ℹ️）＝描画時のクロージャだと、`beginExport` の往復中
+    // （走行中の表示になる前）に押し直された回を素通りし、**始まっている回の表示を潰す**。
+    // ⚠️ **文を出してから返す**（#1217 レビュー 🟡）＝出さないと、頼んだ側には**前の回の文**が届く。
+    if (busy || startingRef.current) {
+      setMessage("いま別の書き出しが動いています。終わってから、もう一度お試しください。");
+      settleJob(false);
+      return;
+    }
     if (!canExport()) {
+      // ⚠️ **画面の文（下の `unsupported` の表示）と同じことを言う**＝出る場所で違う理由にしない。
+      setMessage("動画の書き出しは、デスクトップアプリでご利用いただけます。");
       setPhase("unsupported");
+      settleJob(false);
       return;
     }
     if (scenes.length === 0) {
       setMessage("書き出す場面がありません。先に「新しい動画を作る」で動画案を作成してください。");
       setPhase("error");
+      settleJob(false);
       return;
     }
+    // ⚠️ **押した瞬間に「始まった」と分かるようにする**（#993 ①⑥）＝ここから下には
+    // **同期で重い処理**（`startBlockedMessage` は**全場面のレイアウト計算**を回る・2回走る）が
+    // 並んでいて、その間 UI は固まる。それまで文言は「動画を書き出す」、右の欄は
+    // 「押すと進行状況が表示されます」＝**何も始まっていないように見える**（場面が多いほど長い）。
+    // ⚠️ **保存先を選んでいる間も走行中に数える**（`06 §12.1`＝二重に始めない）。
+    // タイムライン形式は先に `preparing` を立てている＝そちらへ揃える（ADR-0026②）。
+    setPhase(EXPORT_RUN_PHASE.preparing);
+    // ⚠️ **起動のときに書き出し先を頼まれていたら、保存先は聞かない**（ADR-0042 決定⑤・#1184）＝
+    // 置き換えるのは**ここ1か所だけ**。ほかは人が押したときと**同じ道**を通る
+    // （別の書き出し経路を作らない＝ADR-0007。公開前チェックの判定もそのまま効く）。
     // 先に保存先を選んでもらう（キャンセルしたら何もせず元の画面のまま）。
     let outputPath: string;
     try {
-      const picked = await showSaveVideoDialog(fileName.trim() || "export");
-      if (!picked) return; // キャンセル
+      const picked = startupJob?.out ?? (await showSaveVideoDialog(fileName.trim() || "export"));
+      // ⚠️ **やめたら走行中を降ろす**＝立てたまま返ると、押せないまま固まる。
+      if (!picked) { setPhase(EXPORT_RUN_PHASE.idle); settleJob(false); return; }
       outputPath = picked;
     } catch (e) {
       setMessage("保存先を選べませんでした。もう一度お試しください。");
       setPhase("error");
       console.error("[export] save dialog failed:", e);
+      settleJob(false);
       return;
     }
     setMessage("");
     setResultPath("");
     setBgmWarning("");
-    setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
+    setDuckMergedNotice(false);
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
     // 取り込み・生成中は書き出しを始めない（#570 P1・相互排他＝§2-5/ADR-0026④）。進行中の素材取り込みは同一パス上書きで
     // 「壊れたMP4」に、進行中の音声/動画案生成は開始時 snap の外で完了して「保存/画面は新・MP4 は旧（無音MP4が成功扱い）」に
     // なる（#547 P2-6）。取り込みは最初の await 前に isImporting を、生成は pending 行/フラグを立てるので、ここで見れば排他になる。
     const startBlockedMessage = (): string | null => {
       const st = useProjectStore.getState();
-      if (st.isImporting) return "素材の取り込み中です。取り込みが終わってから書き出してください。";
+      if (st.isImporting) return EXPORT_BLOCKED_IMPORTING_MESSAGE;
       if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
       if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
-      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
+      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return VOICE_BUSY_EXPORT_MESSAGE;
       // 残っていると書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと**同じ述語**で、
       // サイドバーからこの画面へ直行した経路も止める＝保存先を選ばせた後に落とさない（ADR-0026④）。
       if (capabilityBlocked && capability) return EXPORT_CAPABILITY_NOTICE[capability].detail;
-      const blocking = exportBlockingItems(st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations);
+      const blocking = exportBlockingItems(
+        st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations,
+        // ⚠️ 押した瞬間の再確認でも同じ材料を見る（`null`＝まだ調べていない＝項目を出さない）。
+        { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
+        // ⚠️ **押した瞬間の再確認でも、見つからない素材の材料を見る**（#1068）。
+        st.missingAssetIds,
+        st.meta.bgmSettings?.assetId ?? null,
+      );
       if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;
     };
     const blockedBefore = startBlockedMessage();
-    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
+    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); settleJob(false); return; }
+    // ⚠️ **自分の後片づけ待ちは押させない**（#843）＝書き出しの終わり（成功・中止・失敗）は片づけより
+    // **先**に立つので、この窓ではボタンが戻っているのに `acquire` が失敗する。走っている「ほかの動画」は
+    // 無いので、断り文も別のものにする（主語が実態と違う案内を出さない）。
+    // ⚠️ **`startBlockedMessage` の中には置かない**＝あの関数は `beginExport` の**後**の再確認にも使われ、
+    // そこでは自分が**正当に**締めを持っている（走行中の判定は phase を見るので窓と区別できない）。
+    // 名乗る前のここ1回だけで見る。
+    // ⚠️ **その時点の持ち主で見る**＝描いた後に相手が取ることがあるので、閉じ込めた値では遅い。
+    const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy || startingRef.current);
+    if (lockedNow) { setMessage(lockedNow); setPhase("error"); settleJob(false); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
-    await beginExport();
-    // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
-    // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
-    //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
-    const blockedAfter = startBlockedMessage();
-    if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
-    setProgress({ done: 0, total: scenes.length });
-    setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
-    setPhase("rendering");
+    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝取れないまま進むと、共有の一時置き場を片づける後始末が
+    // **相手のフレームを消す**（`11 §7.6.5`）。
+    // ⚠️ **いまは通常この分岐に入らない**（差分再監査 🟡）＝保存先を選ぶダイアログの待ちは**上の
+    // `lockedNow` より前**にあり、`lockedNow` と `acquire` の間に `await` は無い（以前は判定が
+    // ダイアログより前だったので本物のレースがあった＝#843 で判定を後ろへ移して閉じた）。
+    // **将来ここへ待ちを挟む形にしたときの備え**として残す（消すと、そのとき黙って穴が開く）。
+    // ⚠️ **名乗る前に立てる**＝名乗った瞬間に再描画が走るので、後で立てると「後片づけ中」が一瞬出る。
+    markStarting(true);
+    if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
+      markStarting(false);
+      // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
+      const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
+      setMessage(mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE);
+      setPhase("error");
+      settleJob(false);
+      return;
+    }
     // end-to-end 計測（#376 レビュー P2）：利用者の待ち時間全体は「レンダリング段（フレーム焼き/準備＝TS）＋
     // encoding 段（結合/字幕/BGM＝Rust）」。Rust の eprintln は後段のみなので、全体は開始〜完了を TS で測る。
     const startedAt = performance.now();
     // encoding 段（結合/字幕/BGM）の実進捗を Rust から受け取りバーを 80→100% で描く（#376）。Tauri 非検出時は no-op。
     let unlistenProgress: (() => void) | undefined;
+    // ⚠️ **名乗ったら、どの出口でも必ず返す**（#817-2）＝`try` は以前**名乗りより後**から始まっており、
+    // その間で抜けると `finally` の返却を通らなかった。すぐ下の「取り込みが始まっていないか」の再確認は
+    // **意図して作られた早期 return**（テストもある）＝必ず通る道で、抜けたあとは `owner="scene"` が残り
+    // **タイムライン形式の書き出しが「ほかの動画を書き出しています」で永久に押せなくなる**
+    //（走っていないので終わりようがない＝§2-5）。**名乗りの直後から囲む**ことで、出口を数え直さなくても
+    // 返る（`beginExport` の失敗も下の `catch` が理由つきで受ける）。
+    // ⚠️ タイムライン側（`timelineStore`）も名乗るのは `try` の**直前**＝間に行を足すと同じ穴が開く。
+    // 「名乗ったら囲む」を両方の入口で守ること（ADR-0026②）。
     try {
+      await beginExport();
+      // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
+      // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
+      //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
+      const blockedAfter = startBlockedMessage();
+      if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; } // 返しは下の finally（名乗った後はそこを必ず通る）
+      setProgress({ done: 0, total: scenes.length });
+      setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
+      setPhase("rendering");
       unlistenProgress = await listenExportProgress((e) => setExportRun({ encode: e }));
       // 開始時点の完全スナップショット（#381）：映像・テロップ・BGM をすべてこの1つの内容から供給し、書き出し中の編集（#377）で
       // 「映像は旧・テロップ/BGMは新」の不整合MP4になるのを防ぐ。saveProject の前＝従来 closure と同一瞬間に確定し、projectId のみ保存後の採番値を使う。
@@ -202,49 +405,48 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       await saveProject();
       // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
       const pid = useProjectStore.getState().meta.projectId;
-      // 表示用 assetSrcById（asset://）ではなく、書き出し時に各場面の画像をディスクから data URL 化する。
+      // 表示用 assetSrcById（asset://）ではなく、書き出し時に画像をディスクから data URL 化する。
       // buildExportScenes が場面ごとに解決→破棄するので、ここでは id→data URL のリゾルバを渡すだけ（#143・ADR-0004）。
-      const assetById = new Map(snapAssets.map((a) => [a.assetId, a] as const));
-      const resolveExportSrc = async (id: string): Promise<string | undefined> => {
-        // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
-        if (isTemplateAsset(id)) return snap.templateAssetSrcById[id];
-        const a = assetById.get(id);
-        if (!pid || !a) return undefined;
-        // 動画本体（大容量）は clipRelPath 経路で合成（ADR-0006）＝インライン不要。ただし動画スロット本体アニメの
-        // 窓フレーム（#442）はプレビュー同様スロットを代表フレーム（サムネ）で焼くため、thumbnailPath を data URL で返す
-        //（通常の下/上分割ではスロットは穴として除外されるため描かれない＝既存経路に影響なし）。
-        if (a.assetType === ASSET_TYPE.video) {
-          return a.thumbnailPath ? ((await readAssetDataUrl(pid, a.thumbnailPath)) ?? undefined) : undefined;
-        }
-        // 画像のみ本体を data URL 化。
-        if (!a.filePath) return undefined;
-        return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
-      };
+      // **解き方はタイムライン形式と共有**（`createExportSrcResolver`・#716）＝形式によって焼ける絵が割れない。
+      const resolveExportSrc = createExportSrcResolver({
+        projectId: pid,
+        assets: snapAssets,
+        templateAssetSrcById: snap.templateAssetSrcById,
+      });
       // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に
       // まとめず、JSON.stringify の文字列上限超過（RangeError）を避ける（#書き出しRangeError）。前回の残りを掃除。
       await clearExportFramesStage();
       const templateById = new Map(snapTemplates.map((t) => [t.templateId, t] as const));
-      // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント。
-      // Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
-      if (typeof document !== "undefined" && document.fonts) {
-        try {
-          await Promise.all(
-            FONT_CATALOG.flatMap((f) => [
-              document.fonts.load(`400 1em "${f.cssFamily}"`),
-              document.fonts.load(`700 1em "${f.cssFamily}"`),
-            ]),
-          );
-        } catch { /* 読込失敗時は描画側のフォールバックに任せる */ }
-      }
+      // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント）。
+      // タイムライン形式と**同じ関数**を通す＝形式によって焼ける字体が割れない（§6・ADR-0026②）。
+      await loadExportFonts();
+      // ⚠️ **空きを見張る**（#1211）＝止めないと、**何十分も待たされてから容量が尽き、
+      // 一時ファイルが数十GB残る**（#1205 の調査で実測）。
+      // ⚠️ **`totalFrames` は渡せない**＝場面形式は**焼く総コマ数を先に持っていない**
+      //（場面ごとに数える作りで、全体の合計がどこにも無い）。**底で止めるだけ**になる。
+      // 先に数えられるようにするのは #1211 の続き（そこまで行けば、数十コマで断れる）。
+      beginExportDiskWatch({ totalFrames: null, outPath: outputPath });
       const built = await buildExportScenes(
         snapScenes,
         templateById,
         resolveExportSrc,
-        (scene, lineId) => ({
-          // 掛け合いは行ごとの音声キー（lineAudioKey）、単一 narration は従来の sceneId（ADR-0015 PR-E）。
-          audioBase64: snapNarration[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
-          narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
-        }),
+        (scene, lineId) => {
+          // ⚠️ **作り直していない行の声は使わない**（#1165・ADR-0001）＝本文を直すと `status` は
+          // `none` へ戻るが、取り消しのために**旧 WAV は同じ鍵に残る**（#390）。見ないと
+          // **プレビューは「声が無い」扱い・書き出しだけ旧い声**という食い違いになり、
+          // **直したはずの文章が、直る前の声で**焼かれる（ADR-0026④）。
+          // 規則は `lineVoiceUsable` に1つ＝プレビュー（`lineDurationsFromAudio`）と同じものを見る。
+          // ⚠️ **掛け合いも単一 narration も同じ判定**（#1165・PR #1178 レビュー 🔴）＝
+          // 規則も、行のそろえ方も domain に1つ（`sceneLineVoiceUsable`）。
+          const usable = sceneLineVoiceUsable(scene, lineId);
+          return {
+            // 掛け合いは行ごとの音声キー、単一 narration は場面 id（ADR-0015 PR-E）。規則は domain に1つ。
+            // ⚠️ ここは**単独場面で `lineId` を渡さない**呼び出し規約だが、`narrationAudioKey` は
+            // 場面が明示の行を持つかで決めるので、どちらの渡し方でも同じ答えになる。
+            audioBase64: usable ? snapNarration[narrationAudioKey(scene, lineId ?? "")] : undefined,
+            narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
+          };
+        },
         (scene) => {
           const t = templateById.get(scene.templateId);
           return t
@@ -252,7 +454,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : [];
         },
         (done, total, frameFraction) => setProgress({ done, total, frameFraction }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), creditDisplay: snapMeta.videoSettings.creditDisplay, shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
@@ -264,21 +466,26 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           : undefined,
         (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
       );
-      // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
-      // テロップは場面横断のため動画全体フォントで焼く。
-      // テロップ/BGM も映像と同じ開始時点スナップショットから供給する（#381）。projectId は保存で採番された値を使う。
+      // 旧・場面横断タイムラインのテロップは**焼かない**（ADR-0032 決定11/12・#635）＝時間軸の編集は
+      // タイムライン形式へ移った。保存データは残すが、この形式の書き出しには出さない（開いたとき断る）。
       const proj = assembleProject({ ...snapMeta, projectId: pid }, snapAssets, snap.parts, snapScenes);
-      const telops = await buildTelopOverlays(proj, {
-        outputSize,
-        fontFamily: fontFamilyForId(snapFontId),
-        fontId: resolveFontId(null, snapFontId),
-      });
       // レンダリング段（フレーム焼き＋テロップ/BGM準備）の所要。encoding 段の内訳は Rust eprintln 側（#376 計測）。
       console.info(`[export] rendering (frames+prep): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("encoding");
       // 場面ごとBGM（ADR-0018 ③(7)）：区間を解決→配置＋クロスフェード計画→各区間のソースを data URL 化して Rust へ。
       // 表示用 src ではなく実体を data URL 化する（asset:// は FFmpeg へ渡せない）。同梱は public/bgm、自分のBGM はプロジェクトから。
-      const mixClips = planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC);
+      // ⚠️ **声が鳴っている区間だけ BGM を下げる**（#257・ADR-0032 追補4＝書き出し時の処理）。
+      // 声の長さは**作成済みの音声（WAV）から測る**＝表示の窓（次の行まで）で下げると、
+      // 声が終わったあとも下げっぱなしになる。まだ作っていない行は下げない（鳴らない声のために下げない）。
+      // ⚠️ **キーの規則は domain に1つ**（`narrationAudioKey`）＝掛け合いは行ごと・単独は場面 id。
+      // ここで分岐を書くと、単独読み上げだけ引けず**ダッキングが効かない**（PR #896 レビュー）。
+      const speech = resolveSpeechSpans(proj, (scene, lineId) => {
+        const a = snapNarration[narrationAudioKey(scene, lineId)];
+        return a ? wavDurationSec(a) : 0;
+      });
+      const ducked = applyDuckingToMix(planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC), speech, snapMeta.videoSettings.audioAuto);
+      if (ducked.merged) setDuckMergedNotice(true);
+      const mixClips = ducked.clips;
       const bgmRuns: BgmRunInput[] = [];
       let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
@@ -296,7 +503,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           }
         }
         if (audioBase64) {
-          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
+          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
           // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
           bgmLoadFailed = true;
@@ -309,32 +516,78 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         setPhase("cancelled");
         return;
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
+      // 全体の音量を整える（#259）。**整えないときは渡さない**＝従来どおりの音（出力不変）。
+      const auto = resolveAudioAuto(snapMeta.videoSettings.audioAuto);
+      const report = await exportVideo(
+        built,
+        fileName.trim() || "export",
+        bgmRuns,
+        pid || undefined,
+        outputPath,
+        auto.normalize ? auto.targetLufs : undefined,
+        exportSizeMaxBitrateBps(size),
+      );
       setResultPath(report.outputPath);
-      // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/telop/bgm＝Rust eprintln 内訳）。
+      // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/bgm＝Rust eprintln 内訳）。
       // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。
       console.info(`[export] end-to-end (render→save): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("done");
+      // ⚠️ **頼まれた仕事だったら、終わったことを返す**（ADR-0042 ④）＝
+      // 閉じるかどうかは Rust が決める（`--quit-when-done` を読んだのは向こう＝判断を2か所に置かない）。
+      settleJob(true);
     } catch (e) {
       // ユーザーが中止した場合は、エラーではなく「中止しました」で終える（走行中 ffmpeg は kill 済み・§2-5・#380）。
       // 準備ループが投げる ExportCancelledError も同様に中止扱い（cancelling が読めない稀な競合への保険）。
       if (useProjectStore.getState().exportRun.cancelling || e instanceof ExportCancelledError) {
         setPhase("cancelled");
       } else {
-        // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
-        // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
-        const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-        setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
+        // ⚠️ **「そのまま表示する」は嘘だった**（#1123）＝ここには
+        // `map_err(|e| e.to_string())`（56 か所）が返す**生の OS エラー**（`os error 3` など）も届く。
+        // 関門（`userFacingMessage`）で**画面に出せる文か**を見て、出せないものは記録へ流す。
+        const detail = userFacingMessage(e, "export-scene");
+        setMessage(detail ?? exportFailedMessage.EXPORT_FAILED_SCENE);
         setPhase("error");
         console.error("[export] failed:", e);
       }
+      // ⚠️ **中止も「できなかった」**＝人が止めた回を「できた」で返さない。
+      settleJob(false);
     } finally {
+      // ⚠️ **片づけに入る前に降ろす**＝ここから先は本当に「後片づけ中」なので、断りが出るのが正しい。
+      markStarting(false);
       unlistenProgress?.(); // 進捗購読を解除（#376）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
+      // ⚠️ **掃除してから締めを返す**（#834-3・タイムライン側と同じ順）＝一時ファイルの置き場は
+      // **アプリで1つ**（ADR-0032 決定22）。先に返すと、次の書き出しが**この掃除の最中に**フレームを
+      // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+      // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが前回の数を引き継ぐ。
+      endExportDiskWatch();
       await clearExportFramesStage().catch(() => {});
+      useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
+      // ⚠️ **取りこぼしをここで拾う**＝`try` の中の早期 return（`blockedAfter` 等）は
+      // 成功でも失敗でもないまま抜ける。**返さないのがいちばん悪い**ので「できなかった」で返す。
+      settleJob(false);
     }
   }
+
+  // ⚠️ **頼まれた書き出しは、人が押さなくても始める**（ADR-0042・#1184）＝
+  // ここが無いと「保存先は渡したのに、誰も押さないので終わらない」になる。
+  // ⚠️ **1回だけ**＝`startedForJobRef` で押さえる（`startExport` の中で保存先は取り出され消えるが、
+  // 画面の作り直しと競うので、**始めたこと自体**を覚える）。
+  const pendingExportOut = useStartupJobStore((st) => st.pendingExportOut);
+  const startedForJobRef = useRef(false);
+  useEffect(() => {
+    if (pendingExportOut == null || startedForJobRef.current) return;
+    startedForJobRef.current = true;
+    // ⚠️ **始めた側でも拾う**（同レビュー 🟡）＝`startExport` が**自分の `try` に入る前**に
+    // 例外で抜けた回は、中の `finally` を通らない。ここで返さないと永久に待たれる。
+    void startExport().catch((err) => {
+      console.error("[export] startExport threw:", err);
+      settleJob(false);
+    });
+    // ⚠️ **`startExport` を依存に入れない**＝毎描画で作り直される関数なので、入れると回り続ける。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExportOut]);
 
   // バーの % と1行の説明は共有の純粋関数（他画面の「書き出し中」バナーと同じ数字・説明を出す＝§2-7/ADR-0026②）。
   const percent = exportOverallPercent({ phase, progress, encode });
@@ -357,7 +610,18 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   }
 
   return (
-    <div className="main-scroll">
+    // ⚠️ **詰めた表示**（ADR-0047 の残り＝#1256 b8）＝ボタン 41px のままで、ページ全体のスクロールが要っていた
+    // （実測 1274/949px）。⚠️ **空の枝（上）には付けない**＝詰める本体が無い（ADR-0047 追補）。
+    <div className="main-scroll dense">
+      {/* 流れの帯（ADR-0048 追補 2026-10-05）＝戻るを上へそろえた（以前は設定の下の左）。最後の段なので進むは無い
+          （「動画を書き出す」はこの画面の操作そのもの＝流れの進むではない）。書き出している間は移らせない（以前の戻ると同じ）。 */}
+      <FlowBar
+        current="export"
+        back={{ label: "公開前チェックへ戻る", onClick: openPrecheck, disabled: busy, title: busy ? "書き出しが終わるまでお待ちください" : undefined }}
+        onJump={(to) => flowJump("export", to, onNavigate)}
+        jumpDisabled={busy}
+        jumpDisabledReason="書き出しが終わるまでお待ちください"
+      />
       <PageHead title={EXPORT_TITLE} desc={EXPORT_DESC} />
 
       <div
@@ -383,17 +647,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               disabled={busy}
               onChange={(e) => setExportForm({ fileName: e.target.value })}
             />
-            <p className="field-hint">「動画を保存」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
+            <p className="field-hint">「動画を書き出す」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
           </div>
 
           <div className="field">
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => setExportForm({ size: e.target.value })}>
-              <option value="fullhd">きれい（{fullDims.width}×{fullDims.height}）</option>
-              <option value="hd">軽い（{hdDims.width}×{hdDims.height}）</option>
+            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
+              <ExportSizeOptions full={fullDims} light={hdDims} />
             </select>
+            <p className="field-hint">{EXPORT_SIZE_HINT}</p>
           </div>
 
           <div className="toggle-row">
@@ -403,6 +667,37 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
           <p className="field-hint">書き出した動画に反映されます。仕上がり確認でも同じ設定で表示されます。</p>
+          {/* 字幕ファイル（ADR-0055 決定4）＝**焼き出しを通して**タイムライン形式と同じ取り出し方で出す（規則を2つ書かない）。
+              ⚠️ 上の「字幕を入れる」とは別＝動画に字幕を焼き込まなくても、字幕だけを別のファイルで渡せる。 */}
+          <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
+            <SubtitleFileExportButton
+              className="btn btn-secondary text-sm"
+              cuesOf={() => {
+                const st = useProjectStore.getState();
+                const templateById = new Map(st.templates.map((t) => [t.templateId, t]));
+                const { doc, notes } = st._bake({ kind: BAKE_RANGE_KIND.whole }, st.meta.projectName);
+                // ⚠️ **焼き出しが持っていけなかった字幕は黙って抜かない**（PR #1356 レビュー 🟡）＝自由配置の字幕ボックスが
+                //   セリフに追従する場面は、動画には出るのに字幕ファイルには入らない。その場面を知らせに添える。
+                const skipped = notes.find((n) => n.code === BAKE_NOTE_CODE.dialogueSubtitle);
+                return {
+                  cues: subtitleCuesOf(doc, (id) => templateById.get(id)),
+                  note: skipped ? subtitleFileSkippedScenesMessage(skipped.sceneNumbers) : undefined,
+                };
+              }}
+              defaultName={fileName}
+              disabledReason={null}
+              onMessage={(message, ok) => setSubtitleExportNotice({ message, ok })}
+            />
+          </div>
+          {subtitleExportNotice && (
+            <div className={`notice ${subtitleExportNotice.ok ? "notice-info" : "notice-warn"} row-between mt`} role={subtitleExportNotice.ok ? "status" : "alert"}>
+              <span>{subtitleExportNotice.message}</span>
+              <button className="btn btn-ghost text-sm" onClick={() => setSubtitleExportNotice(null)}>閉じる</button>
+            </div>
+          )}
+          <hr className="divider" />
+          {/* 声の表記の出し方（ADR-0025・#359）。⚠️ **About 画面の表記は必須で不変**（`13 §4`）。 */}
+          <CreditDisplayField disabled={busy} />
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>
@@ -421,6 +716,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <hr className="divider" />
+          {/* 音の自動処理（#257/#259・ADR-0032 追補4＝書き出し時の処理なのでここに置く）。
+              **プロジェクト単位**＝場面ごとには持たない。両形式（場面/タイムライン）に効く。 */}
+          <AudioAutoField disabled={busy} />
+
+          <hr className="divider" />
           {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。
               このスライダーは**動画全体の既定**（voiceSettings.volume・11 §6）。場面ごとに個別の声量を設定した場面は
               その設定が優先されて変わらない（設定できるのに一部に効かない誤認を避ける・仕上がり確認は「いまの場面」で
@@ -437,25 +737,27 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span>声を作成済みの場面には、その音声が入ります。</span>
           </div>
 
-          <div className="row-between mt-lg">
-            <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("precheck")} disabled={busy}>
-              <ArrowLeftIcon size={16} />
-              公開前チェックへ戻る
-            </button>
+          <div className="row mt-lg" style={{ justifyContent: "flex-end" }}>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
-                「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
+                「動画を書き出す」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || blockingItems.length > 0 || capabilityBlocked}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={exportDisabled}>
                 <FilmIcon size={20} />
-                {busy ? "書き出し中…" : "動画を保存"}
+                {busy ? "書き出し中…" : "動画を書き出す"}
               </button>
-              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。左の「公開前チェックへ戻る」が直す導線。
+              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。上の「公開前チェックへ戻る」が直す導線。
                   抑止は「**同じ文**が失敗表示に出ているとき」だけ＝二重に並べない。phase だけで抑止すると、無関係な失敗が
                   残っている間に blocker ができたとき「押せないのに理由が出ない」になる（レビュー指摘）。 */}
               {capabilityBlocked && capability ? (
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
               ) : blockedMessage && !(phase === "error" && message === blockedMessage) ? (
-                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{blockedMessage}</span>
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{blockedMessage}</span>
+              ) : lockBlockedMessage ? (
+                /* ⚠️ **押せなくしたら、理由も出す**（#843 レビュー 🟡）＝押せないボタンは `onClick` が走らないので、
+                   断り文を `startExport` の中だけに置くと**画面に一度も出ない**（`06 §12.1`＝押す前に見せて
+                   押せなくする、の「見せて」が抜ける）。タイムライン形式は `exportBlocked.message` を
+                   同じように出しているので、ここでも出して揃える（ADR-0026②）。 */
+                <span className="text-sm" style={{ color: "var(--color-danger-text)" }}>{lockBlockedMessage}</span>
               ) : null}
             </div>
           </div>
@@ -468,7 +770,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {phase === "idle" && (
             <div className="text-center text-muted" style={{ padding: "var(--gap-lg) 0" }}>
               <FilmIcon size={32} className="text-faint" />
-              <p className="mt text-sm">「動画を保存」を押すと、ここに進行状況が表示されます。</p>
+              <p className="mt text-sm">「動画を書き出す」を押すと、ここに進行状況が表示されます。</p>
             </div>
           )}
 
@@ -485,15 +787,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {(busy || (phase === "done" && !showsPastResult)) && (
             <>
               <div className="text-center mb">
-                <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
-                  {percent}%
-                </div>
+                {/* ⚠️ **言えない段に数を出さない**（#993 ①）＝`preparing` は進み具合を持っていない。
+                    0% と出すと「止まっている」に見える。 */}
+                {hasExportPercent(phase) && (
+                  <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
+                    {percent}%
+                  </div>
+                )}
                 <div className="text-muted">{exportHeadingLabel({ phase, progress, encode })}</div>
               </div>
               <div className="progress mb">
                 {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
                     「動いている」ことだけ伝える（#391）。レンダリング段/完了は常に幅で表す。 */}
-                {phase === "encoding" && !encode ? (
+                {(phase === "encoding" && !encode) || !hasExportPercent(phase) ? (
                   <div className="progress-fill progress-fill--indeterminate" />
                 ) : (
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
@@ -520,40 +826,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               前回の結果として見ているときも**保存したファイルへ辿れる**必要がある（#404 の導線を消さない）。 */}
           {phase === "done" && (
             <>
-              {resultPath && (
-                <>
-                  <div className="notice notice-info mt">
-                    <span>保存先：{resultPath}</span>
-                  </div>
-                  {/* 完了後の導線（06_UI_SPEC §12 完了時・#404）：長いパスを自力で辿らずワンクリックで開ける。 */}
-                  <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => { setOpenError(""); void revealSavedFile(resultPath).catch(() => setOpenError("reveal")); }}
-                    >
-                      保存した場所を開く
-                    </button>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => { setOpenError(""); void openSavedFile(resultPath).catch(() => setOpenError("open")); }}
-                    >
-                      動画を再生
-                    </button>
-                    <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("home")}>
-                      <ArrowLeftIcon size={16} />
-                      プロジェクト一覧へ戻る
-                    </button>
-                  </div>
-                  {openError && (
-                    <div className="notice notice-warn mt" role="alert">
-                      <span>
-                        {openError === "open"
-                          ? `動画を再生できませんでした。ファイルが移動・削除されていないか、再生できるアプリがあるかご確認ください（保存先：${resultPath}）。`
-                          : `保存した場所を開けませんでした。ファイルが移動・削除されていないかご確認ください（保存先：${resultPath}）。`}
-                      </span>
-                    </div>
-                  )}
-                </>
+              {/* ⚠️ **導線は共有部品から出す**（#991）＝タイムライン形式には**同じものが無かった**
+                  ので、片方だけ直る形を止めて1か所へ寄せた（`06 §13` 完了時・#404）。 */}
+              {/* ⚠️ **結果ごとに作り直す**（`key`）＝開けなかったときの断りを部品が自分で持つので、
+                  key を付けないと**前回の断りが次の結果に持ち越される**（もとは画面が明示的に消していた）。 */}
+              <ExportDoneActions key={resultPath} path={resultPath} onBack={() => onNavigate("home")} />
+              {duckMerged && (
+                <div className="notice notice-warn mt">
+                  {/* ⚠️ **黙ってやらない**（§2-5）＝下げる区間をつないだので、声と声の間でも BGM が下がったままになる。
+                      ⚠️ **文言は1か所から**（α-6 出口監査 🟡）＝タイムライン形式でも同じことを言う。 */}
+                  <span>{DUCK_MERGED_MESSAGE}</span>
+                </div>
               )}
               {bgmWarning && (
                 <div className="notice notice-warn mt">
@@ -570,15 +853,28 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {/* 失敗の中身（原因と次の行動）。前回の結果として見ているときは読み上げの割り込み（alert）にしない
               ＝画面に入るたび「たったいま失敗した」と再通知しない。いつのことかは上の1行が示す。 */}
           {phase === "error" && (
-            <div className="notice notice-warn" role={showsPastResult ? "status" : "alert"}>
+            <div className="notice notice-warn row-between" role={showsPastResult ? "status" : "alert"}>
               <span>{message}</span>
+              {/* ⚠️ **次の行動をその場に置く**（#1032・§2-5）＝直す入口（公開前チェック）も
+                  やり直す入口（動画を書き出す）も**遠く上にしか無かった**（進行バーや保存先の欄を挟んで
+                  画面外になりうる）。他画面向けの終了通知（`ExportResultNotice`）は行動を持っているのに、
+                  **失敗を直に見ているこの画面だけが読むだけ**だった。
+                  ⚠️ **押せる条件は上のボタンと同じ述語**（`exportDisabled`）＝書き並べると片方だけ塞がれない。 */}
+              <div className="row gap-sm">
+                <button className="btn btn-secondary text-sm" onClick={openPrecheck} disabled={busy}>
+                  公開前チェックを開く
+                </button>
+                <button className="btn btn-ghost text-sm" onClick={() => void startExport()} disabled={exportDisabled}>
+                  もう一度書き出す
+                </button>
+              </div>
             </div>
           )}
 
           {/* 中止は上の「前回の…」が同じ内容（中止した・やり直せる）を出すので、そのときは重ねない。 */}
           {phase === "cancelled" && !showsPastResult && (
             <div className="notice notice-info" role="status">
-              <span>書き出しを中止しました。もう一度「動画を保存」を押すと、やり直せます。</span>
+              <span>書き出しを中止しました。もう一度「動画を書き出す」を押すと、やり直せます。</span>
             </div>
           )}
 

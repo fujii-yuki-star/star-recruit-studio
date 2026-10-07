@@ -2,20 +2,21 @@
 // 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
-import { quantizeSec } from '../constants';
-import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
+import { DEFAULT_BACKGROUND_COLOR, quantizeSec, SHAPE_FILL_FALLBACK_COLOR } from '../constants';
+import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { FreeElementKind, SceneCategory } from '../enums';
 import type { Template } from '../template/types';
-import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
+import { composeGroupGeometry, groupScaleOf, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
 import { templateSlotIds } from '../template/layerOps';
-import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields, scaleTextStyle } from '../template/textStyle';
 import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource, freeSubtitleElementTexts, sceneDisplayedSubtitleTexts } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
+import { textKeyOfLayer } from '../template/layerOps';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
 export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
@@ -103,7 +104,7 @@ function textBoxH(h: number, fontSize: number, maxLines: number | undefined): nu
  * している**ので動かさない（`行数-1 = 0`）。掛け合いは行ごとに行数が変わり単一の y では一致させられないため、
  * **全行の最大行数**に寄せる＝どの行でもテンプレより下がらない（はみ出しを増やさない）側を採る。
  */
-function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined): number {
+function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined, letterSpacingEm = 0): number {
   const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
   // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`defaultSubtitleSource` と同じ規則）。
   // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
@@ -115,10 +116,10 @@ function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxL
           1,
           ...lines.map((l) => {
             const sub = resolveLineSubtitle(l, scene);
-            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap).length : 1;
+            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap, letterSpacingEm).length : 1;
           }),
         )
-      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap).length;
+      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap, letterSpacingEm).length;
   return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
 }
 
@@ -141,15 +142,34 @@ function showsSubtitle(scene: Scene, template: Template): boolean {
  * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
  * - 文字層（text）のテキスト（`texts`）→ text 要素。**枠高は行数を保つよう広げる**（`textBoxH`・#555 レビュー P1）。
  * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
- * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
+ * **`opts.faithful`**（既定 false）＝「表示中の**内容**」ではなく「**描かれるものすべて**」を写す。
+ * タイムライン形式の「バラす」（#632）は**前後で絵が変わらない**ことが条件なので、こちらを使う：
+ * 図形・装飾層も写す／**素材の入っていないスロット層も空のまま写す**（灰色の枠が消えない）／
+ * **素材の入っていない背景層は塗りとして写す**（層が持つ色が消えない）。ADR-0030 の切替（通常⇄自由配置）は
+ * 既定のまま＝意匠は持ち込まない。
+ * 字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
+ * 戻り値の `slotLayerByElementId` は「新 FREE 要素 id → 元の差し込み口の層 id」＝**per-use が無い枠も含む**
+ * 対応表（呼び出し側が素材既定を含む実効値を引くのに使う・#512 段3b）。
+ * 戻り値の `characterElementIds` は「立ち絵層（character）から持ち込んだ要素の id」の集合（#831）＝
+ * `slotLayerByElementId` には**入らない**（差し込み口の層ではないため）が、呼び出し側が「差し込み口
+ * ではない層の動画」と「立ち絵に入れた動画」を**取り違えない**ために要る（前者は差し込み口へ入れ
+ * 直せるが、後者にその逃げ道は無い＝実行できる行動が違う）。
  */
 export function freeLayoutFromPlacedContent(
   scene: Scene,
   template: Template,
-): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']> } {
+  opts: { faithful?: boolean } = {},
+): {
+  elements: FreeElement[];
+  slotClips: NonNullable<Scene['slotClips']>;
+  slotLayerByElementId: Record<string, string>;
+  characterElementIds: Set<string>;
+} {
   const elements: FreeElement[] = [];
   const slotClips: NonNullable<Scene['slotClips']> = {};
+  const slotLayerByElementId: Record<string, string> = {};
+  const characterElementIds = new Set<string>();
   const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
   // 通常描画（layoutScene）と同じくグループ transform を前合成し、非表示グループのメンバーは持ち込まない（ADR-0022・#524 P1）。
   // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
@@ -167,61 +187,107 @@ export function freeLayoutFromPlacedContent(
       ...(cg.rotation ? { rotation: cg.rotation } : {}),
       zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
     };
-    if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
-      const assetId = scene.assetRefs[layer.id];
-      if (!assetId) continue; // 空スロットは持ち込まない
+    // まとまりで縮めた分は中身も縮めて写す（#1371・描画＝`layoutScene` と同じ倍率）＝バラす前後で字の大きさが変わらない。
+    const contentScale = groupScaleOf(layer, cg);
+    if (layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.logo) {
+      const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材→テンプレ既定素材（描画と同じ解決）
+      if (!assetId) {
+        if (!opts.faithful) continue; // 空スロットは持ち込まない（ADR-0030 の切替）
+        // 描かれるものをそのまま写す：背景層は**塗り**、スロット層は**空の枠**（どちらも絵に出ている）。
+        // ロゴ層は素材が無ければ何も描かれないので写さない（描画＝`layoutScene` と同じ扱い）。
+        if (layer.type === LAYER_TYPE.background) {
+          elements.push({
+            id: nextId(),
+            kind: FREE_ELEMENT_KIND.shape,
+            ...geom,
+            shapeType: FREE_SHAPE_TYPE.rect,
+            fillColor: layer.fillColor ?? template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR,
+            opacity: layer.opacity ?? 1,
+            radius: (layer.radius ?? 0) * contentScale,
+          });
+        } else if (layer.type === LAYER_TYPE.slot) {
+          elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: null, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+        }
+        continue;
+      }
       const id = nextId();
-      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+      // 収め方の既定は**層の種別ごと**（描画＝`layoutScene` と同じ）。ロゴだけ contain＝写した瞬間に
+      // 切り取られた絵にならない（自由配置の既定は cover なので、既定に任せると変わってしまう）。
+      elements.push({
+        id,
+        kind: FREE_ELEMENT_KIND.slot,
+        ...geom,
+        assetId,
+        fit: scene.slotFits?.[layer.id] ?? layer.fit ?? (layer.type === LAYER_TYPE.logo ? FIT.contain : undefined),
+      });
       const clip = scene.slotClips?.[layer.id];
       if (clip) slotClips[id] = clip; // 動画クリップ調整を新 id へ移送（#524 P1）
-    } else if (layer.type === 'character') {
+      // ⚠️ **どの差し込み口から来たか**も返す（#512 段3b レビュー 🔴）＝per-use が無いときでも
+      // 素材既定（`asset.clip`）を含む**実効値**を引けるようにする（`slotClips` だけだと per-use が
+      // 無い枠は空になり、呼び出し側が「設定なし」と取り違える）。
+      slotLayerByElementId[id] = layer.id;
+    } else if (layer.type === LAYER_TYPE.character) {
       const poseId = scene.character?.poseAssetId;
       if (!poseId) continue; // ポーズ未設定は持ち込まない
       // 立ち絵は slot 要素（画像）で持ち込む＝FREE で見えて自由に動かせる。scene.character は休眠保持（往復で戻る）。
-      elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
-    } else if (layer.type === 'text' && layer.textKey) {
-      const text = scene.texts[layer.textKey];
+      const id = nextId();
+      characterElementIds.add(id); // 差し込み口の層ではない＝slotLayerByElementId には入れない（#831）
+      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
+    } else if (layer.type === LAYER_TYPE.text && textKeyOfLayer(layer)) {
+      const textKey = textKeyOfLayer(layer)!;
+      const text = scene.texts[textKey];
       if (!text) continue; // 空文字は持ち込まない
       // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
       // 変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る（隣の fontId は per-scene なのに体裁だけ戻る＝
       // ADR-0026②の非対称・ADR-0030「表示中の内容を持ち込む」に反する）。
-      const st = resolveTextStyle(layer, scene.textStyles?.[layer.textKey]);
+      // ⚠️ **体裁は `freeTextStyleFields` に丸ごと任せる**（PR #879 再レビュー 🔴）＝
+      // ここで項目を手で並べていたため、**新しい項目を足すたびに写し漏れ**が出た
+      //（`letterSpacing`/`shadow` が漏れ、直したあとも `background` の場面別上書きが漏れた）。
+      // 数え上げる場所を1つにすれば、`TextStyle` が増えてもここは無変更で済む。
+      const style = scaleTextStyle(freeTextStyleFields(layer, scene.textStyles?.[textKey]), contentScale);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
-        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
+        h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         text,
-        fontSize: st.fontSize,
-        color: st.color,
-        fontWeight: st.fontWeight,
-        fontId: scene.textFontIds?.[layer.textKey],
-        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
-        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
+        ...style,
+        fontId: scene.textFontIds?.[textKey],
       });
-    } else if (layer.type === 'subtitle') {
+    } else if (opts.faithful && (layer.type === LAYER_TYPE.shape || layer.type === LAYER_TYPE.decor)) {
+      // 図形・装飾＝描画（`layoutScene`）と同じ既定へ落とす（線は矩形として写す＝描画の扱いと同じ）。
+      elements.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.shape,
+        ...geom,
+        shapeType: layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect,
+        fillColor: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR,
+        opacity: layer.opacity ?? 1,
+        radius: (layer.radius ?? 0) * contentScale,
+        // 枠線（`strokeColor`/`strokeWidth`）は**通常テンプレの図形では描かれない**（`layoutScene`）。
+        // 写すと元の絵に無い線が出る＝バラす前後で見た目が変わる。持ち物ではなく**描かれるもの**を写す。
+      });
+    } else if (layer.type === LAYER_TYPE.subtitle) {
       if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
-      const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+      // 体裁は上の ⚠️ と同じ理由で `freeTextStyleFields` に任せる。
+      // **どの文字を指すか**は1か所で解く（#1058・`textKeyOfLayer` は字幕層の未指定を `subtitle` と解く）。
+      const subKey = textKeyOfLayer(layer);
+      const style = scaleTextStyle(freeTextStyleFields(layer, subKey ? scene.textStyles?.[subKey] : undefined), contentScale);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
-        y: subtitleTopY(scene, cg.y, cg.w, st.fontSize, layer.maxLines),
-        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
+        // 字間も渡す（#928）＝行数が変われば上端も変わる（描画と同じ行数で翻訳する）。
+        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines, style.letterSpacing ?? 0),
+        h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
-        fontSize: st.fontSize,
-        color: st.color,
-        fontWeight: st.fontWeight,
-        fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
-        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
+        ...style,
+        fontId: subKey ? scene.textFontIds?.[subKey] : undefined,
       });
     }
   }
-  return { elements, slotClips };
+  return { elements, slotClips, slotLayerByElementId, characterElementIds };
 }
 
 /**
@@ -285,11 +351,12 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
   // 層の数だけ積む：`layoutScene` は character 層ごとに立ち絵を描くので、2層あるテンプレでは2つ受け皿がある
   // （1つしか数えないと、立ち絵を2つ置いた往復で「出なくなる」と過剰に言う）。
   const poseAssetId = scene.character?.poseAssetId;
-  if (poseAssetId) for (const l of shownLayers) if (l.type === 'character') add(assetBag, poseAssetId);
+  if (poseAssetId) for (const l of shownLayers) if (l.type === LAYER_TYPE.character) add(assetBag, poseAssetId);
   const textBag = new Map<string, number>();
   for (const layer of shownLayers) {
-    if (layer.type !== 'text' || !layer.textKey) continue;
-    const text = scene.texts[layer.textKey];
+    const tk = textKeyOfLayer(layer);
+    if (layer.type !== LAYER_TYPE.text || !tk) continue;
+    const text = scene.texts[tk];
     // 空文字だけを除く＝`layoutScene` が描く条件（`text.length > 0`）と同じ。空白だけの文字も**描かれる**
     // （背景帯つきなら帯が出る）ので、trim で落とすと受け皿を数え落とす。
     if (text) add(textBag, text);

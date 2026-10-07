@@ -32,7 +32,7 @@ describe("HomeScreen プロジェクトを開く破棄ガード（#547 P1-2）",
     const loadProject = setup("idle", true);
     render(<HomeScreen onNavigate={vi.fn()} />);
     await clickCard();
-    expect(screen.getByText(/別のプロジェクトを開きますか/)).toBeTruthy(); // 確認バナー
+    expect(screen.getByText(/別の動画を開きますか/)).toBeTruthy(); // 確認バナー
     expect(loadProject).not.toHaveBeenCalled(); // まだ開いていない＝未保存分を失わない
   });
 
@@ -50,7 +50,7 @@ describe("HomeScreen プロジェクトを開く破棄ガード（#547 P1-2）",
     await clickCard();
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
     expect(loadProject).not.toHaveBeenCalled();
-    expect(screen.queryByText(/別のプロジェクトを開きますか/)).toBeNull();
+    expect(screen.queryByText(/別の動画を開きますか/)).toBeNull();
   });
 
   it("未保存が無ければ確認せず即開く（保存済み＝saved）", async () => {
@@ -58,7 +58,7 @@ describe("HomeScreen プロジェクトを開く破棄ガード（#547 P1-2）",
     render(<HomeScreen onNavigate={vi.fn()} />);
     await clickCard();
     expect(loadProject).toHaveBeenCalledWith("proj_001"); // 確認なしで即ロード
-    expect(screen.queryByText(/別のプロジェクトを開きますか/)).toBeNull();
+    expect(screen.queryByText(/別の動画を開きますか/)).toBeNull();
   });
 
   it("確認バナー表示中は他カードが無効化され、開く先がすり替わらない（pendingOpenId 上書き防止）", async () => {

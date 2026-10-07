@@ -23,14 +23,23 @@ const projectSchema = load(join(base, 'schemas/project.schema.json'));
 // 全部落ちて「無関係な失敗」を直す作業が毎回発生する（実際 #555 の 1.24 で発生）。
 const PROJECT_VERSION = projectSchema.properties.schemaVersion.const;
 const vProject = ajv.compile(projectSchema);
-const vTemplate = ajv.compile(load(join(base, 'schemas/template.schema.json')));
+const templateSchema = load(join(base, 'schemas/template.schema.json'));
+const vTemplate = ajv.compile(templateSchema);
 const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')));
+// タイムライン形式（ADR-0032・#627）。project の $defs を $ref で共有するので、vProject を先に compile して
+// $id を ajv に登録しておく必要がある（上の行順に依存＝入れ替えると $ref が解決できず落ちる）。
+const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
+// ⚠️ **宣言の側に書く**（PR #1238 レビュー 🟡）＝使う所で `/** @type {...} */ (cases)` と
+//   **言い切る**書き方（型アサーション）は、**検査されない**。実測＝2要素や4要素を混ぜても緑になり、
+//   `path` が `undefined` のまま実行時に落ちた。ここに書けば、同じ壊し方で `TS2322` が出る。
+/** @type {[string, import("ajv").ValidateFunction, string][]} */
 const cases = [
   ['project.sample.json', vProject, fx('project.sample.json')],
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
   ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
+  ['timeline-project.sample.json', vTimeline, fx('timeline-project.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];
@@ -57,12 +66,27 @@ const tplAccept = [
   ['template: strokeWidth=0（縁取りなし・境界）を許容', withLayer0({ strokeColor: '#ffffff', strokeWidth: 0 })],
   ['template: layer rotation を許容（#307）', withLayer0({ rotation: 30 })],
 ];
+// 文字の体裁（#264・schema 1.27）。⚠️ **`Layer`・`FreeElement`・`TextStyle` の3か所に同じ語彙**が
+// あるので、1つだけ直し忘れても気づけるよう**3つとも**検査する（α-6 出口監査 🔴3）。
+tplAccept.push(
+  ['template: 文字の影（shadow）を許容（1.27・#264）', withLayer0({ shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
+  ['template: 影は enabled だけでも許容（ほかは既定）', withLayer0({ shadow: { enabled: false } })],
+  ['template: 字間（letterSpacing）を許容（1.27・#264）', withLayer0({ letterSpacing: 0.1 })],
+  ['template: 字間は詰められる（負・境界 -0.5）', withLayer0({ letterSpacing: -0.5 })],
+  ['template: 字間の上限（2）を許容', withLayer0({ letterSpacing: 2 })],
+);
 const tplReject = [
   ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
   ['template: strokeWidth 負は拒否', withLayer0({ strokeWidth: -1 })],
   ['template: rotation 範囲外(400)は拒否', withLayer0({ rotation: 400 })],
   ['template: rotation 負(-1)は拒否', withLayer0({ rotation: -1 })],
   ['template: rotation 360（=0と重複）は除外（exclusiveMaximum）', withLayer0({ rotation: 360 })],
+  ['template: 影の色が非hexは拒否（1.27）', withLayer0({ shadow: { enabled: true, color: 'black' } })],
+  ['template: 影のぼかしが負は拒否（1.27）', withLayer0({ shadow: { enabled: true, blur: -1 } })],
+  ['template: 影の濃さ範囲外(1.5)は拒否（1.27）', withLayer0({ shadow: { enabled: true, opacity: 1.5 } })],
+  ['template: 影の未知フィールド(spread)は拒否（1.27）', withLayer0({ shadow: { enabled: true, spread: 4 } })],
+  ['template: 字間の範囲外(3)は拒否（1.27）', withLayer0({ letterSpacing: 3 })],
+  ['template: 字間の下限外(-1)は拒否（1.27）', withLayer0({ letterSpacing: -1 })],
 ];
 for (const [desc, data] of tplAccept) {
   if (vTemplate(data)) console.log(`PASS  must-accept  ${desc}`);
@@ -96,6 +120,56 @@ for (const p of project.parts) {
   }
 }
 if (project.bgmSettings?.assetId && !assetIds.has(project.bgmSettings.assetId)) fail(`bgm assetId ${project.bgmSettings.assetId} missing`);
+// 文字の体裁のうち**`$ref` 共有ではなく写しになっているもの**を突き合わせる。
+//
+// 帯（`background`）は**4か所**が写し（見た目パターンの層／場面の体裁上書き／自由配置の要素／
+// タイムラインの部品）で、影（`shadow`）は見た目パターンの層だけが写し（他は `$defs/TextShadow` を指す）。
+// 見た目パターンの層の値は**そのままコピーされる**（体裁欄の「引き継ぐ」・通常→FREE 移送＝ADR-0030・
+// 焼き出し・バラす）ので、片方だけ拡張するとコピーした文書が schema を外れ、**自動保存が黙って
+// 書かれない**。**ずれた瞬間に落とす**（後から気づく形にしない）。
+// ⚠️ **説明文は比べない**（形の話ではない）／**キーの順番でも比べない**（並べ替えただけで落ちる検査は
+// そのうち信用されず無視される）。
+const timelineSchema = load(join(base, 'schemas/timeline-project.schema.json'));
+const shapeOnly = (v) => Array.isArray(v) ? v.map(shapeOnly)
+  : (v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).filter((k) => k !== 'description').sort().map((k) => [k, shapeOnly(v[k])]))
+    : v);
+const copySets = {
+  background: {
+    'template Layer.background': templateSchema.$defs.Layer.properties.background,
+    'project TextStyle.background': projectSchema.$defs.TextStyle.properties.background,
+    'project FreeElement.background': projectSchema.$defs.FreeElement.properties.background,
+    'timeline TimelineClip.background': timelineSchema.$defs.TimelineClip.properties.background,
+  },
+  shadow: {
+    'template Layer.shadow': templateSchema.$defs.Layer.properties.shadow,
+    'project TextShadow': projectSchema.$defs.TextShadow,
+  },
+  // ⚠️ **写しはすべて群に入れる**（`/canon-check` 🟡）＝`letterSpacing` は写しなのに群に無く、
+  // timeline 側の値域を緩めても誰も落ちなかった（schema の説明は「形の一致検査で固定してある」と
+  // 書いていたので、**主張がコードより強い**状態だった）。
+  letterSpacing: {
+    'template Layer.letterSpacing': templateSchema.$defs.Layer.properties.letterSpacing,
+    'project TextStyle.letterSpacing': projectSchema.$defs.TextStyle.properties.letterSpacing,
+    'project FreeElement.letterSpacing': projectSchema.$defs.FreeElement.properties.letterSpacing,
+    'timeline TimelineClip.letterSpacing': timelineSchema.$defs.TimelineClip.properties.letterSpacing,
+  },
+};
+// ⚠️ **判定は群ごとに持つ**（PR #914 レビュー 🟡）＝1つの変数を使い回すと、先に落ちた群のせいで
+// **一致している群まで FAIL と表示**され、直す先を間違わせる（この検査が防ぐと謳っているもの）。
+let copyOk = true;
+for (const [what, shapes] of Object.entries(copySets)) {
+  const entries = Object.entries(shapes);
+  const baseJson = JSON.stringify(shapeOnly(entries[0][1]));
+  let groupOk = true;
+  for (const [name, shape] of entries) {
+    if (JSON.stringify(shapeOnly(shape)) !== baseJson) { groupOk = false; console.log(`  ${name} が他とずれています`); }
+  }
+  console.log(`${groupOk ? 'PASS' : 'FAIL'}  shape  ${what} の形が${entries.length}か所で一致`);
+  copyOk = copyOk && groupOk;
+}
+ok = ok && copyOk;
+
 console.log(sem ? 'PASS  semantic  project.sample cross-refs' : 'FAIL  semantic  project.sample cross-refs');
 ok = ok && sem;
 
@@ -115,6 +189,8 @@ const sceneBase = {
   narration: { text: 'x', status: 'none' }, warnings: [],
 };
 const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...extra }] });
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。**プロジェクト単位**＝`videoSettings` に置く。
+const withVideoSettings = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
   ['videoSettings: 縦型 9:16（width/height なし）', { ...withBrief({}), videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
@@ -122,6 +198,11 @@ const mustAccept = [
   // 場面ごとの上限/下限は持たない（#553）ので、0 より大きければ極端に短くても許容する。
   ['scene: durationSec 0.1（極短でも >0 なら許容・下限は持たない #553）', withScene({ durationSec: 0.1 })],
   ['scene: fontId=null（継承）を許容', withScene({ fontId: null })],
+  // 素材の「AI解析」の書き手（1.31・#1317）。
+  ['asset: aiDescriptionAuthor=ai／user を許容（1.31・#1317）', { ...withBrief({}), assets: [
+    { assetId: 'asset_001', assetType: 'image', displayName: 'a', filePath: 'assets/a.png', aiDescription: 'x', aiDescriptionAuthor: 'ai' },
+    { assetId: 'asset_002', assetType: 'image', displayName: 'b', filePath: 'assets/b.png', aiDescription: '', aiDescriptionAuthor: 'user' },
+  ] }],
   ['scene: fontId 既知（kaitou-yokoku-gothic）を許容', withScene({ fontId: 'kaitou-yokoku-gothic' })],
   ['scene: fontId 未指定（継承）を許容', withScene({})],
   ['freeLayout: 新図形(star)＋枠線(stroke)を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'star', fillColor: '#ff0000', opacity: 1, strokeColor: '#112233', strokeWidth: 3 }] })],
@@ -148,6 +229,8 @@ const mustAccept = [
   ['scene: bgmSettings（場面ごとBGM・曲の上書き）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true } })],
   ['scene: bgmSettings（無音＝enabled:false のみ）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: false } })],
   ['timelineOverlay: animations（キーフレーム）を許容（1.17・ADR-0019 ④）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, x: 100, y: 50, scale: 1.5, opacity: 1, rotation: 90, easing: 'ease-in-out' }] }] } }],
+  ['keyframe: 動き方に名前つきの追加を許容（1.25・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: 'ease-in' }, { timeSec: 1, x: 10, easing: 'ease-out' }] }] } }],
+  ['keyframe: 動き方に自由なカーブを許容（1.25・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [0.25, 1.6, 0.75, -0.6] } }] }] } }],
   ['scene: slotVideoStart（動画スロット再生開始・3モード）を許容（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim' }, sub: { mode: 'afterAnim' }, bg: { mode: 'delay', delaySec: 0.6 } } })],
   // 注：slotClips は startSec/endSec を各 minimum:0 でしか縛れない。**意味的な異常（反転レンジ endSec≤startSec・0尺）は
   // JSON Schema の cross-field では弾けない**（base Clip $def も同じ）＝schema が通る＝安全ではない。per-use の部分上書きが
@@ -155,6 +238,14 @@ const mustAccept = [
   ['scene: slotClips（クリップ per-use 上書き・範囲/速度/元音声）を許容（1.19・ADR-0028）', withScene({ slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 }, sub: { speed: 0.5 } } })],
 ];
 const mustReject = [
+  ['asset: aiDescriptionAuthor の値は ai／user だけ（1.31・#1317）', { ...withBrief({}), assets: [
+    { assetId: 'asset_001', assetType: 'image', displayName: 'a', filePath: 'assets/a.png', aiDescriptionAuthor: 'gemini' },
+  ] }],
+  // 形式の判別（ADR-0032・11 §1）。**場面形式は `format` を書かない**（不在＝場面形式）。`'scene'` は
+  // 読込時の解決値であって永続化しない値で、書くとここで落ちる。#627 レビューで挙がった
+  // 「後続で保存時に format:'scene' を明示すると壊れる」を、正典の記述ではなく CI で止めるための固定。
+  ['project: format:"scene" は拒否＝場面形式は format を書かない（判別は timeline か否か・ADR-0032）', { ...withBrief({}), format: 'scene' }],
+  ['project: format:"timeline" も拒否＝タイムライン形式は timeline-project.schema で検証する', { ...withBrief({}), format: 'timeline' }],
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
   ['general: agenda 21件', withBrief({ agenda: Array.from({ length: 21 }, () => 'x') })],
   ['general: agenda 1項目101字', withBrief({ agenda: ['あ'.repeat(101)] })],
@@ -176,6 +267,9 @@ const mustReject = [
   ['scene: bgmSettings 未知の bundledBgmId は拒否（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: true, bundledBgmId: 'nope' } })],
   ['timelineOverlay: durationSec 0 は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 0 }] } }],
   ['timelineOverlay: id 形式不正(clip_001)は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'clip_001', track: 'telop', startSec: 0, durationSec: 1 }] } }],
+  ['keyframe: 未知の動き方は拒否（#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: 'bounce' }] }] } }],
+  ['keyframe: カーブの x が範囲外は拒否（時間が戻る・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [1.5, 0, 0.5, 1] } }] }] } }],
+  ['keyframe: カーブの制御点が4つでないものは拒否（#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [0, 0, 1] } }] }] } }],
   ['timelineOverlay: animation id 形式不正(a_001)は拒否（1.17）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'a_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0 }] }] } }],
   ['timelineOverlay: keyframe opacity 範囲外(1.5)は拒否（1.17）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 1.5 }] }] } }],
   ['freeLayout: rotation 360（=0と重複）は除外（exclusiveMaximum）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 360 }] })],
@@ -216,8 +310,86 @@ const mustReject = [
   ['scene: slotVideoStart mode 欠落は拒否（required）', withScene({ slotVideoStart: { mainVisual: { delaySec: 1 } } })],
   ['scene: slotVideoStart mode=delay で delaySec 欠落は拒否（if/then＝「途中から」が「同時」に化けない）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay' } } })],
   ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
-  ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 1, startSec: 2 } } })],
+  ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim', startSec: 1 } } })],
+  ['audioAuto: 未知フィールド(sidechain)は拒否（additionalProperties:false・1.29）', withVideoSettings({ audioAuto: { sidechain: true } })],
+  ['audioAuto: duckDepth 範囲外(1.5)は拒否', withVideoSettings({ audioAuto: { duckDepth: 1.5 } })],
+  ['audioAuto: duckDepth 負は拒否', withVideoSettings({ audioAuto: { duckDepth: -0.1 } })],
+  ['audioAuto: duckAttackSec 範囲外(5)は拒否', withVideoSettings({ audioAuto: { duckAttackSec: 5 } })],
+  ['audioAuto: targetLufs 正の値は拒否（LUFS は負）', withVideoSettings({ audioAuto: { targetLufs: 3 } })],
+  ['audioAuto: targetLufs 小さすぎ(-40)は拒否', withVideoSettings({ audioAuto: { targetLufs: -40 } })],
+  ['audioAuto: duckBgm 非真偽は拒否', withVideoSettings({ audioAuto: { duckBgm: 'yes' } })],
+  ['videoSettings: audioAuto を場面に置くのは拒否（設定はプロジェクト単位＝ADR-0032 追補4）', withScene({ audioAuto: { duckBgm: true } })],
 ];
+// 持ち込みフォント（ADR-0038・#261・schema 1.26）。**enum ではなく形（pattern）で縛る**。
+const withFont = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
+mustAccept.push(
+  ['fontId: 同梱フォントを許容（従来どおり）', withFont({ fontId: 'gen-interface-jp' })],
+  ['fontId: 持ち込みフォント user_font_001 を許容（1.26）', withFont({ fontId: 'user_font_001' })],
+  ['fontId: 桁が増えても許容（user_font_1000）', withFont({ fontId: 'user_font_1000' })],
+  ['scene.fontId: 持ち込みフォントを許容', withScene({ fontId: 'user_font_002' })],
+  ['scene.fontId: null（継承）は従来どおり許容', withScene({ fontId: null })],
+  ['scene.textFontIds: 種別ごとに持ち込みフォントを許容', withScene({ textFontIds: { title: 'user_font_003', subtitle: 'gen-interface-jp' } })],
+  ['freeLayout の fontId も持ち込みフォントを許容', withScene({ freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_004' }] })],
+);
+mustReject.push(
+  ['fontId: 形の違う id は拒否（my-font）', withFont({ fontId: 'my-font' })],
+  ['fontId: 桁が足りない user_font_1 は拒否（3桁ゼロ詰め）', withFont({ fontId: 'user_font_1' })],
+  ['fontId: 前後に付いた文字は拒否（xuser_font_001）', withFont({ fontId: 'xuser_font_001' })],
+  ['fontId: パス区切りを含む id は拒否（user_font_001/../x）', withFont({ fontId: 'user_font_001/../x' })],
+  ['fontId: 空文字は拒否', withFont({ fontId: '' })],
+  ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
+);
+// 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。
+mustAccept.push(
+  ['audioAuto: 音の自動処理（ダッキング・ノーマライズ）を許容（1.29）', withVideoSettings({ audioAuto: { duckBgm: true, duckDepth: 0.6, duckAttackSec: 0.25, duckReleaseSec: 0.6, normalize: true, targetLufs: -16 } })],
+  ['audioAuto: 空オブジェクト（すべて既定）を許容', withVideoSettings({ audioAuto: {} })],
+  ['audioAuto: 未指定を許容（前の版のファイル）', withBrief({})],
+  ['audioAuto: 「しない」を明示できる（読み込んだ古い動画に書き込む値）', withVideoSettings({ audioAuto: { duckBgm: false, normalize: false } })],
+);
+
+// 文字の体裁（#264・schema 1.27）＝場面形式の側（`FreeElement` と `$defs/TextStyle`）。
+// ⚠️ **timeline 側にしか検査が無かった**（α-6 出口監査 🔴3）＝同じ語彙が3か所（Layer／FreeElement／
+// TextStyle）にあるので、1つだけ直し忘れても `validate:schemas` は緑のままだった。
+const freeText = (prop) => withScene({
+  freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', ...prop }],
+});
+const styleOf = (prop) => withScene({ textStyles: { title: prop } });
+mustAccept.push(
+  ['FREE text: 影（shadow）を許容（1.27・#264）', freeText({ shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
+  ['FREE text: 字間（letterSpacing）を許容（1.27）', freeText({ letterSpacing: 0.1 })],
+  ['FREE text: 字間は詰められる（境界 -0.5）', freeText({ letterSpacing: -0.5 })],
+  ['textStyles: 影・字間・背景帯を許容（1.27＝文字にも一般化）', styleOf({ shadow: { enabled: true }, letterSpacing: 0.2, background: { enabled: true, color: '#000000', opacity: 0.4, radius: 4 } })],
+  ['textStyles: 未指定＝従来どおり（空でも許容）', styleOf({})],
+);
+mustReject.push(
+  ['FREE text: 影の色が非hexは拒否（1.27）', freeText({ shadow: { enabled: true, color: 'black' } })],
+  ['FREE text: 影のぼかしが負は拒否（1.27）', freeText({ shadow: { enabled: true, blur: -1 } })],
+  ['FREE text: 影の未知フィールド(spread)は拒否（1.27）', freeText({ shadow: { enabled: true, spread: 4 } })],
+  ['FREE text: 字間の範囲外(3)は拒否（1.27）', freeText({ letterSpacing: 3 })],
+  ['textStyles: 影の濃さ範囲外(1.5)は拒否（1.27）', styleOf({ shadow: { enabled: true, opacity: 1.5 } })],
+  ['textStyles: 字間の下限外(-1)は拒否（1.27）', styleOf({ letterSpacing: -1 })],
+  ['textStyles: 未知フィールドは拒否（additionalProperties:false）', styleOf({ shadowColor: '#000000' })],
+);
+
+// クレジットの見せ方（ADR-0025・#359・schema 1.28）。⚠️ **検査が1件も無かった**（🔴4）＝
+// ADR-0025 の核である `hidden`（非表示にできる）が enum から落ちても気づけない状態だった。
+mustAccept.push(
+  ...['always', 'head', 'tail', 'both', 'hidden'].map((mode) => [
+    `creditDisplay: mode=${mode} を許容（1.28・ADR-0025）`,
+    withVideoSettings({ creditDisplay: { mode } }),
+  ]),
+  ['creditDisplay: 秒数の下限(1)を許容', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 1 } })],
+  ['creditDisplay: 秒数の上限(10)を許容', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 10 } })],
+  ['creditDisplay: 未指定を許容（前の版のファイル＝最初と最後・3秒へ解く）', withBrief({})],
+);
+mustReject.push(
+  ['creditDisplay: 知らない mode は拒否', withVideoSettings({ creditDisplay: { mode: 'sometimes' } })],
+  ['creditDisplay: 秒数 0 は拒否（minimum:1）', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 0 } })],
+  ['creditDisplay: 秒数 11 は拒否（maximum:10）', withVideoSettings({ creditDisplay: { mode: 'both', seconds: 11 } })],
+  ['creditDisplay: 未知フィールドは拒否（additionalProperties:false）', withVideoSettings({ creditDisplay: { mode: 'both', color: '#ffffff' } })],
+  ['videoSettings: creditDisplay を場面に置くのは拒否（設定はプロジェクト単位）', withScene({ creditDisplay: { mode: 'both' } })],
+);
+
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);
   else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vProject.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
@@ -226,6 +398,174 @@ for (const [desc, data] of mustReject) {
   if (!vProject(data)) console.log(`PASS  must-reject  ${desc}`);
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
 }
+
+// タイムライン形式（ADR-0032・#627）の代表データ。**schema で表せる範囲だけ**をここで縛る。
+// トラック未存在・種別違い・同一トラック内の時間重なり・グループ/アニメの参照切れは cross-field なので
+// schema では弾けず、domain の検証（validateTimelineDoc）が終端。下の semantic 節で sample を横断検査する。
+const tlBase = load(fx('timeline-project.sample.json'));
+const tlWith = (extra) => ({ ...tlBase, ...extra });
+const tlClips = (...clips) => tlWith({ clips });
+const tlAccept = [
+  ['timeline: クリップ0本（作りかけの空プロジェクト）を許容', tlWith({ clips: [], groups: [], animations: [] })],
+  ['timeline: sourceProjectId なし（完全新規）を許容', (() => { const { sourceProjectId, ...rest } = tlBase; return rest; })()],
+  ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
+  ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  // 文字の体裁（#264・ADR-0032 追補3＝両形式に効く共有の語彙）。
+  // ⚠️ **`$ref` と写しが混ざっている**（`/canon-check` 🟡で実態を調べ直した）＝タイムライン側は
+  // **`shadow`・`fontId` は `$ref`**（`project.schema.json` を指す）で、**`letterSpacing`・`background`・
+  // `strokeWidth` は同じ形の写し**。写しは書き足したとき**片方だけになりやすい**ので、
+  // 両方に効いていることをここで固定する（実際、最初は場面形式にしか足しておらず、この検査で気づいた）。
+  // 写しの**形そのもの**は下の `copySets` が突き合わせる（値域を緩めても気づける）。
+  ['timeline: 字間（letterSpacing）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: 0.1 })],
+  ['timeline: 影（shadow）を許容＝場面形式と同じ語彙（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 6, dx: 2, dy: 2 } })],
+  // 読み上げクリップ（1.1・#628）。声は素材ではなく「中身」（読み上げ文＋話者）を持つ。
+  ['timeline: 読み上げクリップ（voice）を許容（1.1）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 3, status: 'none' } })],
+  ['timeline: 読み上げは話者/速度なし（既定を継承）でも許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none' } })],
+  ['timeline: 読み上げの話者/話速/抑揚 null（継承）を許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: null, speed: null, intonation: null, status: 'generated' } })],
+  ['timeline: 動画の元の音（useOriginalAudio・originalAudioVolume）を許容（1.8・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: true, originalAudioVolume: 0.9 })],
+  ['timeline: 音量の変化（volumePoints）を許容（1.7・#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [{ timeSec: 0, volume: 0.2 }, { timeSec: 5, volume: 1 }] })],
+  ['timeline: 切り抜きの効かせ方（cropMode）を許容（1.5・#634）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', crop: { left: 0.1 }, cropMode: 'fill' })],
+  ['timeline: 素材の寄せ（cropAlign）を許容（1.4・#634）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', cropAlign: { x: 'left', y: 'bottom' } })],
+  ['timeline: 切り抜き（crop）を許容（1.3・#634）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', crop: { top: 0.1, bottom: 0.2 } })],
+  ['timeline: 字幕の連動先（voiceClipId）を許容（1.2・#633）', tlClips({ id: 'clip_001', kind: 'subtitle', trackId: 'track_003', startSec: 0, durationSec: 3, x: 0, y: 900, w: 1920, h: 120, voiceClipId: 'clip_007' })],
+  ['timeline: 連動先と自分の文の両方（言い換え）を許容（1.2・#633）', tlClips({ id: 'clip_001', kind: 'subtitle', trackId: 'track_003', startSec: 0, durationSec: 3, x: 0, y: 900, w: 1920, h: 120, voiceClipId: 'clip_007', text: '言い換えた字幕' })],
+  ['timeline: テンプレクリップの textFontIds/character/slotClips を許容（1.1）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'opening_yuko_right_v1', textFontIds: { title: 'kaitou-yokoku-gothic' }, character: { enabled: true, characterId: 'yuko', poseAssetId: 'yuko_smile_001' }, slotClips: { background: { startSec: 1, endSec: 5, speed: 1.5 } } })],
+];
+// ⚠️ **`$ref` で追従していることをテストで固定する**（ADR-0038 の約束・α-6 出口監査 🟡5）＝
+// `fontId` は `project.schema.json#/$defs/FontId` を `$ref` で共有しているので**追従は自動**だが、
+// 固定が無いと**写しが生まれた瞬間に無検知で割れる**（#264 では実際に片方だけになっていて、
+// この検査で気づいた）。
+tlAccept.push(
+  ['timeline: 持ち込みフォントを許容＝`$ref` で追従している（1.26・#261）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_001' })],
+  ['timeline: 同梱フォントも従来どおり許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'gen-interface-jp' })],
+  ['timeline: 動画全体の文字の形にも持ち込みを許容（videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, fontId: 'user_font_002' } })],
+  // ⚠️ **同じ `$ref` 共有の兄弟も固定する**（α-6 出口監査 🟡）＝`fontId` だけ固定して
+  // `creditDisplay`（1.28）・`audioAuto`（1.29）を空けておくと、写しが生まれた瞬間に無検知で割れる
+  //（この検査を足した理由がそのまま当てはまる＝片方の双子だけ検証）。
+  ['timeline: クレジットの見せ方を許容（1.28・videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'both', seconds: 3 } } })],
+  ['timeline: 音の自動処理を許容（1.29・同上）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckBgm: true, duckDepth: 0.6, normalize: true, targetLufs: -16 } } })],
+  // ⚠️ **目印（1.11・#356 ①）**＝版を上げたら受け入れ／拒否の両方を固定する
+  //（`docs/ai_work_guides/schema_change.md`。受け入れだけだと、pattern を消しても
+  //  `additionalProperties` を外しても赤くならない＝#1138 レビュー由来 🟡）。
+  ['timeline: 目印を許容（1.11・#356 ①）', tlWith({ markers: [{ id: 'marker_001', timeSec: 3.5, text: 'ここ直す' }] })],
+  ['timeline: メモの無い目印も許容（位置だけの印）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0 }] })],
+  ['timeline: 目印が1つも無い（未指定）も許容', tlWith({})],
+);
+
+const tlReject = [
+  // ⚠️ **写しの値域は下限も突く**（`/canon-check` 🟡）＝上限だけ見ていると、下限を緩めても気づけない。
+  ['timeline: 字間が下限より小さい(-1)のは拒否（写しの値域＝場面形式と同じ -0.5〜2・#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: -1 })],
+  // ⚠️ **`$ref` 共有の兄弟も拒否側で固定する**（α-6 出口監査 🟡）＝受け入れだけだと、
+  // 写しが生まれて**制約が緩んだ**ときに気づけない。
+  ['timeline: クレジットの未知の見せ方は拒否（1.28・$ref 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'sometimes' } } })],
+  ['timeline: クレジットの秒が範囲外(11)は拒否（1.28）', tlWith({ videoSettings: { ...tlBase.videoSettings, creditDisplay: { mode: 'head', seconds: 11 } } })],
+  ['timeline: 音の下げ幅が範囲外(1.5)は拒否（1.29）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckDepth: 1.5 } } })],
+  // ⚠️ **目印の拒否条件（1.11・#356 ①）**＝id の形・0 以上・未知の項目・メモの上限。
+  ['timeline: 目印の id が桁不足(marker_1)は拒否（§2.1・3桁以上）', tlWith({ markers: [{ id: 'marker_1', timeSec: 0 }] })],
+  // ⚠️ **必須も拒否側で留める**（#1155 ①）＝受け入れ側だけだと `required` を丸ごと消しても赤くならない。
+  ['timeline: 目印に時刻が無いのは拒否（required）', tlWith({ markers: [{ id: 'marker_001' }] })],
+  ['timeline: 目印に id が無いのは拒否（required）', tlWith({ markers: [{ timeSec: 0 }] })],
+  ['timeline: 目印の時刻が負(-1)は拒否（0 以上＝保存はできて次に開けない、を作らない）', tlWith({ markers: [{ id: 'marker_001', timeSec: -1 }] })],
+  ['timeline: 目印に未知の項目(color)は拒否（additionalProperties:false）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, color: 'red' }] })],
+  ['timeline: 目印のメモが上限超え(201字)は拒否（maxLength 200）', tlWith({ markers: [{ id: 'marker_001', timeSec: 0, text: 'あ'.repeat(201) }] })],
+  ['timeline: 音の自動処理の未知フィールドは拒否（1.29・additionalProperties:false）', tlWith({ videoSettings: { ...tlBase.videoSettings, audioAuto: { duckWhatever: true } } })],
+  ['timeline: 元の音の音量が範囲外(2.0)は拒否（値域は場面形式と共有＝$ref・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', originalAudioVolume: 2.0 })],
+  ['timeline: 元の音を鳴らすかが真偽でないのは拒否（#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: 'yes' })],
+  ['timeline: 音量の変化が空配列は拒否（#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [] })],
+  ['timeline: 音量の変化の音量が範囲外は拒否（#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [{ timeSec: 0, volume: 2 }] })],
+  ['timeline: 未知の切り抜きの効かせ方は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, cropMode: 'stretch' })],
+  ['timeline: 寄せの未知の値は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, cropAlign: { x: 'middle' } })],
+  ['timeline: 切り抜きが 1 以上（全部隠れる）は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, crop: { top: 1 } })],
+  ['timeline: format="scene" は拒否（場面形式は project.schema で検証する）', tlWith({ format: 'scene' })],
+  ['timeline: 形の違うフォント id は拒否＝制約も `$ref` 越しに効く（1.26）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_1' })],
+  ['timeline: format 欠落は拒否（形式の判別ができない）', (() => { const { format, ...rest } = tlBase; return rest; })()],
+  ['timeline: schemaVersion 未知(2.0)は拒否', tlWith({ schemaVersion: '2.0' })],
+  ['timeline: tracks 欠落は拒否（required）', (() => { const { tracks, ...rest } = tlBase; return rest; })()],
+  ['timeline: projectId が場面形式と同じ採番でないと拒否（tl_...）', tlWith({ projectId: 'tl_20260728_001' })],
+  ['timeline: track id 形式不正(track_1)は拒否', tlWith({ tracks: [{ id: 'track_1', kind: 'visual' }] })],
+  ['timeline: track kind 未知(telop)は拒否＝トラックは映像か音声（enum）', tlWith({ tracks: [{ id: 'track_001', kind: 'telop' }] })],
+  ['timeline: clip id 形式不正(ovclip_001)は拒否', tlClips({ id: 'ovclip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: clip kind 未知(character)は拒否', tlClips({ id: 'clip_001', kind: 'character', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: durationSec 0 は拒否（exclusiveMinimum・0尺クリップを作らない）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0 })],
+  ['timeline: durationSec 負は拒否', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: -1 })],
+  ['timeline: startSec 負は拒否（時間 0 より前は無い）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: -1, durationSec: 1 })],
+  ['timeline: trackId 欠落は拒否（どのトラックか決まらない）', tlClips({ id: 'clip_001', kind: 'text', startSec: 0, durationSec: 1 })],
+  ['timeline: sourceStartSec 負は拒否（素材の先頭より前は無い）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 1, sourceStartSec: -1 })],
+  ['timeline: speed 0 は拒否（exclusiveMinimum＝止まった素材にしない）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_004', startSec: 0, durationSec: 1, speed: 0 })],
+  ['timeline: bundledBgmId 未知は拒否（曲の一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_005', startSec: 0, durationSec: 1, bundledBgmId: 'nope' })],
+  ['timeline: fontId 未知は拒否（フォント一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'old-font' })],
+  ['timeline: 字間の範囲外（3em）は拒否＝制約も場面形式と同じ（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, letterSpacing: 3 })],
+  ['timeline: 影の未知フィールド(spread)は拒否＝同じ形（#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, spread: 4 } })],
+  ['timeline: 影の色が非hexは拒否（場面形式と同じ制約・#264）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, shadow: { enabled: true, color: 'black' } })],
+  ['timeline: rotation 360（=0と重複）は除外（exclusiveMaximum・場面形式と同じ）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, rotation: 360 })],
+  ['timeline: 未知の図形(hexagon)は拒否', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, shapeType: 'hexagon' })],
+  ['timeline: color 非hexは拒否', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, color: 'white' })],
+  ['timeline: 未知フィールド(sceneId)は拒否＝タイムラインに場面は無い（additionalProperties:false）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, sceneId: 'scene_001' })],
+  ['timeline: トップレベルに scenes は拒否＝場面形式のフィールドを混ぜない', tlWith({ scenes: [] })],
+  ['timeline: トップレベルに timelineOverlay は拒否＝旧2モデルは持ち込まない（ADR-0018 Superseded）', tlWith({ timelineOverlay: { clips: [] } })],
+  ['timeline: animation id 形式不正(a_001)は拒否', tlWith({ animations: [{ id: 'a_001', targetId: 'clip_003', keyframes: [{ timeSec: 0 }] }] })],
+  ['timeline: animation keyframe opacity 範囲外(1.5)は拒否', tlWith({ animations: [{ id: 'anim_001', targetId: 'clip_003', keyframes: [{ timeSec: 0, opacity: 1.5 }] }] })],
+  // 読み上げクリップ（1.1・#628）。「中身の無い声」を作らせない（if/then）。
+  ['timeline: kind=voice で voice 欠落は拒否（if/then＝空の声を作らせない）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3 })],
+  ['timeline: voice.text 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { status: 'none' } })],
+  ['timeline: voice.status 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ' } })],
+  ['timeline: voice.status 未知は拒否（enum は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'done' } })],
+  ['timeline: voice.speaker 非整数は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 1.5, status: 'none' } })],
+  ['timeline: voice に時間の語彙(startSec)は拒否＝時間はクリップが持つ（additionalProperties:false）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none', startSec: 1 } })],
+  ['timeline: voice に字幕の語彙(subtitleText)は拒否＝字幕は字幕クリップが持つ', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none', subtitleText: 'やあ' } })],
+  ['timeline: textFontIds 未知フォントは拒否（一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, textFontIds: { title: 'old-font' } })],
+  ['timeline: character に必須欠落(characterId)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, character: { enabled: true } })],
+  ['timeline: slotClips speed 範囲外(3.0)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, slotClips: { background: { speed: 3.0 } } })],
+];
+for (const [desc, data] of tlAccept) {
+  if (vTimeline(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vTimeline.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of tlReject) {
+  if (!vTimeline(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
+// タイムライン sample の相互参照（schema では表せない横断条件・domain の validateTimelineDoc と同じ規則）
+const tl = load(fx('timeline-project.sample.json'));
+const tlAssetIds = new Set(tl.assets.map((a) => a.assetId));
+const trackById = new Map(tl.tracks.map((t) => [t.id, t]));
+let tlSem = true;
+const tlFail = (m) => { tlSem = false; console.log(`   SEM  ${m}`); };
+const kindOfTrack = { slot: 'visual', text: 'visual', shape: 'visual', subtitle: 'visual', template: 'visual', audio: 'audio', voice: 'audio' };
+const tlYukoIds = new Set(tl.assets.filter((a) => a.assetType === 'yuko').map((a) => a.assetId));
+const byTrack = new Map();
+for (const c of tl.clips) {
+  const t = trackById.get(c.trackId);
+  if (!t) { tlFail(`${c.id}: trackId ${c.trackId} missing`); continue; }
+  if (t.kind !== kindOfTrack[c.kind]) tlFail(`${c.id}: kind ${c.kind} は ${t.kind} トラックに置けない`);
+  if (c.assetId != null && !tlAssetIds.has(c.assetId)) tlFail(`${c.id}: assetId ${c.assetId} missing`);
+  const sources = [c.assetId != null, c.bundledBgmId != null, c.kind === 'voice'].filter(Boolean).length;
+  if (sources > 1) tlFail(`${c.id}: 音の出どころが2つ以上（素材/同梱BGM/読み上げ）`);
+  if (c.character?.poseAssetId && !tlYukoIds.has(c.character.poseAssetId)) tlFail(`${c.id}: poseAssetId ${c.character.poseAssetId} not a yuko asset`);
+  if (c.voice != null && c.kind !== 'voice') tlFail(`${c.id}: voice は読み上げクリップにだけ置ける`);
+  if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []);
+  byTrack.get(c.trackId).push(c);
+}
+// 同一トラック内で時間は重ならない（重ね順がトラック順だけで一意に決まる＝ADR-0032）
+for (const [tid, list] of byTrack) {
+  const sorted = [...list].sort((a, b) => a.startSec - b.startSec);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = sorted[i - 1];
+    if (prev.startSec + prev.durationSec > sorted[i].startSec) tlFail(`${tid}: ${prev.id} と ${sorted[i].id} が時間で重なっている`);
+  }
+}
+const tlClipIds = new Set(tl.clips.map((c) => c.id));
+const tlGroupIds = new Set((tl.groups ?? []).map((g) => g.id));
+for (const g of tl.groups ?? []) {
+  for (const m of g.members) if (!tlClipIds.has(m) && !tlGroupIds.has(m)) tlFail(`group ${g.id}: member ${m} missing`);
+}
+for (const a of tl.animations ?? []) {
+  if (!tlClipIds.has(a.targetId) && !tlGroupIds.has(a.targetId)) tlFail(`animation ${a.id}: targetId ${a.targetId} missing`);
+}
+console.log(tlSem ? 'PASS  semantic  timeline-project.sample cross-refs' : 'FAIL  semantic  timeline-project.sample cross-refs');
+ok = ok && tlSem;
 
 // ai-video-plan の掛け合い（narrationLines・#180）を schema レベルで検証（任意追加・1.0 据え置き）。
 const aiBase = {

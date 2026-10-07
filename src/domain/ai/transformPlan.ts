@@ -1,7 +1,7 @@
 // AI出力(ai-video-plan) → 内部 Part[] / Scene[] への変換。正典は 12_AI_PROMPT_AND_MAPPING.md §8、
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
-import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
+import { ASSET_TYPE, LAYER_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
 import type { Orientation, SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
@@ -20,6 +20,8 @@ import type {
 import type { Template } from '../template/types';
 import { standardTemplateForScene } from '../template/templateSelection';
 import { speakerForCharacter } from '../voice/voiceCatalog';
+import { assignAssets } from './assignAssets';
+import type { AssignTarget } from './assignAssets';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
 import type { AiNarrationLine, AiVideoPlan } from './types';
@@ -31,6 +33,11 @@ export interface TransformContext {
   orientation: Orientation;
   /** 省略時は part_001 / scene_001 からの連番。 */
   idFactory?: IdFactory;
+  /**
+   * 空いている差し込み口へ素材をソフトが当てる（§8.8・ADR-0052 決定2・5）。**同梱の AI の経路だけ** true
+   * （Gemini の経路は当面そのまま＝ADR-0052 決定3）。
+   */
+  autoAssignAssets?: boolean;
 }
 
 export interface TransformResult {
@@ -96,7 +103,7 @@ function clampDuration(value: number, min: number, max: number): { value: number
 function resolveCharacter(
   template: Template | undefined, poseTag: string | null, yukoAssets: Asset[], warnings: Warning[],
 ): Character {
-  const charLayer = template?.layers.find((l) => l.type === 'character');
+  const charLayer = template?.layers.find((l) => l.type === LAYER_TYPE.character);
   if (!charLayer || !poseTag) {
     return { enabled: false, characterId: DEFAULT_CHARACTER_ID, poseAssetId: null };
   }
@@ -136,7 +143,7 @@ function checkLengths(
   // セリフ本体＝掛け合いなら各行、そうでなければ単一 narration（precheck の `sceneLines` と同じ対象）。
   const narrationTexts = hasLines ? aiLines.map((l) => l.text) : [narrationText];
   if (narrationTexts.some((t) => t.length > maxNarration)) {
-    warnings.push(warn('TEXT_OVERFLOW', 'セリフが長いため読みづらくなる可能性があります', 'narration', 'warning', false));
+    warnings.push(warn('TEXT_OVERFLOW', TRANSFORM_WARNING.NARRATION_TOO_LONG, 'narration', 'warning', false));
   }
   // 字幕は**両方**見る：掛け合いの行字幕（`narrationLines[].subtitle`）と、テンプレ字幕層に載る `texts.subtitle`。
   // どちらが実際に表示されるかは場面のテンプレ/FREE 字幕の対象で決まる（ADR-0029）が、ここは生成直後の**助言**なので
@@ -149,9 +156,24 @@ function checkLengths(
     ...(hasLines ? aiLines.map((l) => l.subtitle ?? l.text) : []),
   ];
   if (subtitleTexts.some((t) => t.length > maxSubtitle)) {
-    warnings.push(warn('TEXT_OVERFLOW', '字幕が長いため読みづらくなる可能性があります', 'texts.subtitle', 'warning', false));
+    warnings.push(warn('TEXT_OVERFLOW', TRANSFORM_WARNING.SUBTITLE_TOO_LONG, 'texts.subtitle', 'warning', false));
   }
 }
+
+/**
+ * たたき台の警告の文言（`15 §6`）。
+ *
+ * ⚠️ **名前つきにしてある**（#962）＝`errorStateTable.test.ts` は**コード側の定数**としか
+ * 突き合わせないので、ここに直書きすると**表とずれても緑**のまま通る。
+ * ⚠️ **次の行動は、たたき台の表にある操作の名前で言う**（`DraftScreen` の「セリフを直す」「素材を変更」）＝
+ * 「短くしてください」だけだと、どこで直すのかが分からない（§2-5）。
+ */
+export const TRANSFORM_WARNING = {
+  REQUIRED_SLOT_EMPTY: 'この場面に入れる写真・動画がまだ選ばれていません。表の「素材を変更」から選んでください',
+  ASSET_AUTO_ASSIGNED: '写真・動画を自動で選びました。場面に合っているか確かめ、違えば表の「素材を変更」から選び直してください',
+  NARRATION_TOO_LONG: 'セリフが長いので読みづらくなります。表の「セリフを直す」から短くしてください',
+  SUBTITLE_TOO_LONG: '字幕が長いので読みづらくなります。表の「セリフを直す」から短くしてください',
+} as const;
 
 /**
  * ai-video-plan を検証・補正しながら内部 Part/Scene へ変換する。
@@ -167,6 +189,8 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
   const parts: Part[] = [];
   const scenes: Scene[] = [];
   const allWarnings: Warning[] = [];
+  // 差し込み口の検査（V6）は、素材の割り当て（§8.8）の後に全場面まとめて行う＝割り当てで埋まった口を「空」と言わない。
+  const pending: { scene: Scene; template: Template | undefined; query: string[] }[] = [];
 
   for (const aiPart of plan.parts) {
     const partId = idFactory.nextPartId();
@@ -238,16 +262,6 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         }
       }
 
-      // 必須スロット未設定チェック（V6）
-      if (template) {
-        for (const layer of template.layers) {
-          const bearsAsset = layer.type === 'slot' || layer.type === 'background' || layer.type === 'logo';
-          if (bearsAsset && layer.required && !assetRefs[layer.id]) {
-            w.push(warn('REQUIRED_SLOT_EMPTY', 'この場面に必要な素材が未設定です', `assetRefs.${layer.id}`, 'warning', false));
-          }
-        }
-      }
-
       // ゆうこ（12 §8.3）
       const character = resolveCharacter(template, aiScene.yukoPoseTag ?? null, yukoAssets, w);
 
@@ -298,10 +312,39 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
 
       scenes.push(scene);
       part.sceneIds.push(sceneId);
-      allWarnings.push(...w);
+      pending.push({
+        scene,
+        template,
+        query: [aiScene.notes ?? '', aiScene.sceneTitle ?? '', ...Object.values(texts).map((v) => v ?? ''), narrationText, ...(aiScene.narrationLines ?? []).map((l) => l.text)],
+      });
     }
 
     parts.push(part);
+  }
+
+  // 素材の割り当て（§8.8・同梱の AI の経路だけ）。自信の低い割り当てには印を付ける（成功のふりをしない＝決定5）。
+  if (ctx.autoAssignAssets) {
+    const targets: AssignTarget[] = pending.map((p) => ({ template: p.template, assetRefs: p.scene.assetRefs, query: p.query }));
+    for (const a of assignAssets(targets, ctx.assets)) {
+      const { scene } = pending[a.sceneIndex];
+      scene.assetRefs[a.slotId] = a.assetId;
+      if (a.lowConfidence) {
+        scene.warnings.push(warn('ASSET_AUTO_ASSIGNED', TRANSFORM_WARNING.ASSET_AUTO_ASSIGNED, `assetRefs.${a.slotId}`, 'info', true));
+      }
+    }
+  }
+
+  // 必須スロット未設定チェック（V6）＝割り当ての後に見る。
+  for (const { scene, template } of pending) {
+    if (template) {
+      for (const layer of template.layers) {
+        const bearsAsset = layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.logo;
+        if (bearsAsset && layer.required && !scene.assetRefs[layer.id]) {
+          scene.warnings.push(warn('REQUIRED_SLOT_EMPTY', TRANSFORM_WARNING.REQUIRED_SLOT_EMPTY, `assetRefs.${layer.id}`, 'warning', false));
+        }
+      }
+    }
+    allWarnings.push(...scene.warnings);
   }
 
   // 全体チェック（V9 / V10）

@@ -1,0 +1,199 @@
+// 動画の複製（#395）。
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetProjectIdReservations } from "./assetImport";
+
+vi.mock('../../infrastructure/projectFs', async (orig) => ({
+  ...(await orig<typeof import('../../infrastructure/projectFs')>()),
+  loadProjectDoc: vi.fn(),
+  saveProjectDoc: vi.fn(async () => 'ok'),
+  listProjectSummaries: vi.fn(async () => []),
+}));
+vi.mock('../../infrastructure/bakeFs', async (orig) => ({
+  ...(await orig<typeof import('../../infrastructure/bakeFs')>()),
+  copyBakedFiles: vi.fn(async () => ({ copied: 0, cancelled: false })),
+}));
+
+import { useProjectStore } from './projectStore';
+import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from '../../infrastructure/projectFs';
+import { copyBakedFiles } from '../../infrastructure/bakeFs';
+import { ProjectLoadError } from '../../domain/project/persistence';
+import { DUPLICATE_FAILED_MESSAGE } from '../uiLabels';
+
+const doc = {
+  schemaVersion: '1.25',
+  projectId: 'proj_20260101_001',
+  projectName: '会社紹介',
+  purpose: 'company_intro',
+  videoKind: 'recruit',
+  companyInfo: { companyName: 'すたりお' },
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
+  videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+  voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+  assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+  parts: [],
+  scenes: [],
+};
+
+// 保存した本文を覚えておき、複製を開くときはそれを返す（実物と同じ流れ＝保存→読込）。
+const savedById = new Map<string, string>();
+
+beforeEach(() => {
+  // ⚠️ **番号の予約はモジュールに残る**（#992 ③＝アプリ起動中は覚えたままが正しい）＝
+  // テスト間で持ち越すと、2件目以降の番号がずれる。
+  resetProjectIdReservations();
+  savedById.clear();
+  vi.mocked(saveProjectDoc).mockImplementation(async (id, json) => {
+    savedById.set(id, json);
+    return 'ok';
+  });
+  vi.mocked(loadProjectDoc).mockImplementation(async (id) => savedById.get(id) ?? JSON.stringify(doc));
+  vi.mocked(listProjectSummaries).mockResolvedValue([]);
+  useProjectStore.getState().setExportRun({ phase: 'idle' });
+  useProjectStore.setState({ importError: null } as never);
+});
+afterEach(() => vi.clearAllMocks());
+
+describe('duplicateProject', () => {
+  it('新しい番号で保存し、名前に「のコピー」を付ける', async () => {
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id).toMatch(/^proj_\d{8}_\d{3}$/);
+    expect(id).not.toBe('proj_20260101_001');
+    const saved = JSON.parse(vi.mocked(saveProjectDoc).mock.calls[0][1]);
+    expect(saved.projectId).toBe(id);
+    expect(saved.projectName).toBe('会社紹介 のコピー');
+  });
+
+  it('素材・場面・設定をそのまま持っていく（作り替えない）', async () => {
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    const saved = JSON.parse(vi.mocked(saveProjectDoc).mock.calls[0][1]);
+    expect(saved.assets).toEqual(doc.assets); // `asset_NNN` は振り直さない
+    expect(saved.companyInfo).toEqual(doc.companyInfo);
+    // ⚠️ 読込の移行（`migrateProject`）が既定フォントを補うので、**入れたものが残る**ことを見る
+    //（丸ごと一致で比べると、移行が足したぶんで落ちて検査にならない）。
+    expect(saved.videoSettings).toMatchObject(doc.videoSettings);
+  });
+
+  it('素材と声のファイルを運ぶ', async () => {
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(copyBakedFiles).toHaveBeenCalledWith('proj_20260101_001', expect.any(String), ['assets/asset_001.png'], expect.any(String));
+  });
+
+  // ⚠️ **中止（＝運んだものは片づけ済み）なら保存しない**（PR #1054 レビュー 🔴）＝
+  //    保存すると**素材の消えた複製**が一覧に残る（開けるのに中身が欠けている）。
+  it('中止されたら文書を保存しない', async () => {
+    vi.mocked(copyBakedFiles).mockResolvedValue({ copied: 0, cancelled: true });
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id, '中止したのに番号を返した').toBeNull();
+    expect(saveProjectDoc, '中止したのに保存した').not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠️ **ファイルを運んでから文書を保存する**（焼き出しと同じ順）＝逆にすると、
+   * 素材の無い動画が一覧に残る。
+   */
+  it('ファイルを運んでから文書を保存する', async () => {
+    const order: string[] = [];
+    vi.mocked(copyBakedFiles).mockImplementation(async () => { order.push('copy'); return { copied: 0, cancelled: false }; });
+    vi.mocked(saveProjectDoc).mockImplementation(async (id, json) => {
+      order.push('save');
+      savedById.set(id, json);
+      return 'ok';
+    });
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(order).toEqual(['copy', 'save']);
+  });
+
+  /** ⚠️ **元は読むだけ**＝複製で元の動画を書き換えない。 */
+  it('元の動画へは書き込まない', async () => {
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    for (const [savedId] of vi.mocked(saveProjectDoc).mock.calls) {
+      expect(savedId).not.toBe('proj_20260101_001');
+    }
+  });
+
+  it('できたら開く（作っただけで見えない、を作らない）', async () => {
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(useProjectStore.getState().meta.projectId).toBe(id);
+  });
+
+  /**
+   * ⚠️ **日付は「その土地の日付」で採る**（α-6 出口監査で実際に落ちた）＝`createProjectId` は
+   * `formatYmd`（`getFullYear`/`getMonth`/`getDate`＝ローカル）で作るのに、ここは
+   * `toISOString()`（**UTC**）で作っていた。日本時間の 0〜9時は UTC がまだ前日なので、
+   * **その時間帯だけ必ず落ちる**テストになっていた。
+   */
+  it('番号は既にあるものとかぶらない', async () => {
+    const d = new Date();
+    const today = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    vi.mocked(listProjectSummaries).mockResolvedValue([{ projectId: `proj_${today}_001` }] as never);
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id).toBe(`proj_${today}_002`);
+  });
+
+  // ⚠️ **検査用の文は実物と同じ形で**（#1123）＝以前ここは「読めません」（句点なし）で、
+  // Rust が返す文の形と違っていた。実物どおり句点まで書く。
+  it('読めなければ理由を出し、null を返す', async () => {
+    const REASON = 'この動画のファイルを読めませんでした。別のアプリで開いていないかご確認ください。';
+    vi.mocked(loadProjectDoc).mockRejectedValue(REASON);
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).toBe(REASON);
+    expect(saveProjectDoc).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **生の OS エラーは画面へ出さない**（#1123・§2-3）。
+  it('画面に出せない断り（生のエラー）は、自前の文に置き換える', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(loadProjectDoc).mockRejectedValue('os error 3');
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).not.toContain('os error');
+    expect(useProjectStore.getState().importError).toContain('複製');
+  });
+
+  // ⚠️ **何度押しても直らない理由を「もう一度お試しください」に丸めない**（α-6 出口監査 🟡・§2-5）＝
+  // 新しい版で作られた・壊れている文書は再試行では直らない。同じ画面の「開く」は理由を保っているので、
+  // 複製だけ丸めると**同じ文書に対して入口で案内が割れる**（ADR-0026②）。
+  it('開けない理由（新しい版・壊れている）はそのまま出す', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(
+      new ProjectLoadError('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。'),
+    );
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError)
+      .toBe('この動画は新しいバージョンで作られています。アプリを更新してからお試しください。');
+    expect(useProjectStore.getState().importError).not.toBe(DUPLICATE_FAILED_MESSAGE);
+  });
+
+  // 分類できない失敗のときだけ定型文（再試行で直りうる）。
+  it('分類できない失敗は定型文にする', async () => {
+    vi.mocked(loadProjectDoc).mockRejectedValue(new Error('EBUSY'));
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(useProjectStore.getState().importError).toBe(DUPLICATE_FAILED_MESSAGE);
+  });
+
+  /** ⚠️ 書き出し中は別の動画へ切り替えない（進行中の書き出しが見ているものを保つ・#379）。 */
+  it('書き出し中は複製しない（理由も置く＝定型文へ落とさない）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    expect(await useProjectStore.getState().duplicateProject('proj_20260101_001')).toBeNull();
+    expect(saveProjectDoc).not.toHaveBeenCalled();
+    // 何度押しても同じなので、「もう一度お試しください」に落とさない。
+    expect(useProjectStore.getState().importError).toContain('書き出しが終わってから');
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+
+  // ⚠️ **前の操作の理由を複製の理由として見せない**＝画面はこの操作のあと `importError` を読む。
+  it('入口で前の理由を消す', async () => {
+    useProjectStore.setState({ importError: '前の操作の理由' } as never);
+    await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(useProjectStore.getState().importError).not.toBe('前の操作の理由');
+  });
+
+  // ⚠️ **成功したときも持ち越さない**（範囲7b レビュー）＝複製は成功したら**その動画を開く**ので、
+  // 残っていると**複製先の画面**に無関係な（前の動画の）警告が出る。しかもその警告は
+  // 「閉じる」を押すまで消えない＝身に覚えのない断りが居座る（§2-5）。
+  it('複製に成功したときも、前の理由を持ち越さない', async () => {
+    useProjectStore.setState({ importError: '別の画面で出た取り込みの失敗' } as never);
+    const id = await useProjectStore.getState().duplicateProject('proj_20260101_001');
+    expect(id).not.toBeNull();
+    expect(useProjectStore.getState().importError).toBeNull();
+  });
+});

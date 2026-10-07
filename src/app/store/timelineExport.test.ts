@@ -1,0 +1,873 @@
+// タイムライン形式の書き出し（ADR-0032 決定22・#631）。作る前に断る／描いて渡す／中止・片づけを固定する。
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// ラスタライズ（canvas）は環境依存＝ここでは差し替える（`buildTimelineFrames.test.ts` と同じ扱い）。
+// 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
+vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
+import { exportFailedMessage } from '../uiLabels';
+import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
+import { EXPORT_CLEANUP_PENDING_MESSAGE, useExportLockStore } from './exportLock';
+import { useStartupJobStore } from './startupJobStore';
+import * as fsMod from '../../infrastructure/projectFs';
+import * as assetFsMod from '../../infrastructure/assetFs';
+import * as dialogMod from '../../infrastructure/dialog';
+import * as ffmpegMod from '../../infrastructure/ffmpegExport';
+import * as framesMod from '../../renderer/export/buildTimelineFrames';
+import * as fontsMod from '../../renderer/export/loadExportFonts';
+import * as voiceFsMod from '../../infrastructure/voiceFs';
+import * as bgmMod from '../../infrastructure/bundledBgm';
+import { EXPORT_STANDARD_MAX_BITRATE_BPS } from '../../domain/constants';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
+import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
+import { volumeExpr } from '../../domain/timeline/audio';
+import type { TimelineClip, TimelineProject } from '../../domain/timeline/types';
+
+function doc(over: Partial<TimelineProject> = {}): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_20260729_001',
+    projectName: 'テスト動画',
+    createdAt: '2026-07-29T00:00:00.000Z',
+    updatedAt: '2026-07-29T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [],
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+    ],
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+    ],
+    ...over,
+  };
+}
+
+const deps = { templates: [], templateAssetSrcById: {} };
+
+async function open(d: TimelineProject): Promise<void> {
+  vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(d));
+  await useTimelineStore.getState().openTimelineProject(d.projectId);
+}
+
+beforeEach(() => {
+  // 走っている「声を作る」回は持ち越さない（#755＝文書を閉じても消えない印）。
+  useTimelineStore.setState({ _voiceRun: null, generatingVoiceClipId: null });
+  vi.restoreAllMocks();
+  // 走行中は閉じられない（本番の締め）ので、テスト間は先に走行状態を落としてから閉じる。
+  useTimelineStore.setState({ exportRun: { phase: 'idle', percent: 0, message: null, cancelling: false } });
+  useExportLockStore.setState({ owner: null });
+  useTimelineStore.getState().closeTimelineProject();
+  vi.spyOn(assetFsMod, 'assetDisplayUrl').mockResolvedValue('asset://a.png');
+  vi.spyOn(ffmpegMod, 'canExport').mockReturnValue(true);
+  vi.spyOn(ffmpegMod, 'beginExport').mockResolvedValue(undefined);
+  vi.spyOn(ffmpegMod, 'listenExportProgress').mockResolvedValue(() => undefined);
+  vi.spyOn(ffmpegMod, 'clearExportFramesStage').mockResolvedValue(undefined);
+  vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: '/out/movie.mp4' } as never);
+  vi.spyOn(framesMod, 'buildTimelineFrames').mockResolvedValue({ framesDir: 'timeline_frames', fps: 30, durationSec: 5 });
+  vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/out/movie.mp4');
+  vi.spyOn(fontsMod, 'loadExportFonts').mockResolvedValue(undefined);
+});
+
+// 起動のときに頼まれた書き出し（ADR-0042 決定⑤・#1184）。
+// ⚠️ **実機で見つかった穴**（2026-09-17）＝タイムライン形式には頼まれごとの道が無く、
+// `--export <タイムライン形式>` は**3秒で何もせず「成功」を返して**いた。
+describe('起動のときに頼まれた書き出し（#1184）', () => {
+  beforeEach(() => {
+    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, notice: null });
+  });
+
+  it('保存先を渡されていたら、保存先を聞かずにそこへ書く', async () => {
+    const ask = vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/人が選んだ.mp4');
+    vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: 'C:/頼まれた.mp4' } as never);
+    useStartupJobStore.getState().setPendingExport('C:/頼まれた.mp4', false);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(ask, '頼まれているのに保存先を聞いている').not.toHaveBeenCalled();
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[4]).toBe('C:/頼まれた.mp4');
+  });
+
+  // ⚠️ **1回きり**＝取り出したら消える。残すと、次に人が押した書き出しまで同じ所へ書く。
+  it('頼まれた保存先は、取り出したら消える', async () => {
+    useStartupJobStore.getState().setPendingExport('C:/頼まれた.mp4', false);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useStartupJobStore.getState().pendingExportOut, '次の書き出しまで同じ所へ書く').toBeNull();
+  });
+
+  // ⚠️ **頼まれていない回は、いつもどおり聞く**（置き換えが漏れ出さない）。
+  it('頼まれていなければ、いままでどおり保存先を聞く', async () => {
+    const ask = vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/人が選んだ.mp4');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(ask).toHaveBeenCalled();
+  });
+});
+
+// 区間に割って、そのまま流せる所は焼かない（#1203・ADR-0032 決定22 の再検討）。
+// ⚠️ **実測の出どころ**＝10分の動画に 75.7 分かかっていた（#1194）。同じ100カットを
+// FFmpeg に直接やらせると 80 秒＝**57倍**。
+describe('そのまま流せる区間は焼かない（#1203）', () => {
+  const vclip = (id: string, startSec: number, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec, durationSec: 2,
+       x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_mov_001', ...over }) as TimelineClip;
+  // ⚠️ **差し替えた「焼く側」は、渡された区間どおりの長さを返す**（#1203）＝
+  // 固定値を返す模型のままだと、**区間の割り方が壊れても検査が気づかない**
+  // （実際、最初はこの検査が模型の 5 秒を測って落ちた）。
+  beforeEach(() => {
+    vi.spyOn(framesMod, 'buildTimelineFrames').mockImplementation(async (_d, o) => {
+      const fps = 30;
+      const n = (o.window?.toFrame ?? 0) - (o.window?.fromFrame ?? 0);
+      return { framesDir: o.framesDirName ?? 'timeline_frames', fps, durationSec: n / fps };
+    });
+  });
+
+  const vdoc = (clips: TimelineClip[]): TimelineProject =>
+    doc({ clips, assets: [{ assetId: 'asset_mov_001', assetType: 'video', displayName: 'v.mp4', filePath: 'assets/v.mp4' }],
+          videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, creditDisplay: { mode: 'hidden' } } });
+
+  it('動画だけの並びは、1枚も焼かずに実動画を流す', async () => {
+    await open(vdoc([vclip('clip_001', 0), vclip('clip_002', 2)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { framesDir?: string; video?: { clipRelPath: string } }[];
+    expect(scenes).toHaveLength(2);
+    expect(scenes.every((x) => x.video != null), '実動画で流していない').toBe(true);
+    expect(scenes.some((x) => x.framesDir != null), '焼いた区間が混ざっている').toBe(false);
+    expect(scenes[0].video?.clipRelPath).toBe('assets/v.mp4');
+  });
+
+  // ⚠️ **上に重ねる層を必ず渡す**（実機で見つけた）＝渡さないと Rust が
+  // 「`video without above png`」で断り、**書き出しが丸ごと失敗する**。
+  // 型の上では任意（場面形式は別の渡し方も使う）なので、**送り出す所で留める**。
+  it('実動画で流す区間には、下と上の層を必ず渡す', async () => {
+    await open(vdoc([vclip('clip_001', 0)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { video?: { belowPngBase64?: string; abovePngBase64?: string } }[];
+    for (const sc of scenes) {
+      if (!sc.video) continue;
+      expect(sc.video.belowPngBase64, '下の層が無い').toBeTruthy();
+      expect(sc.video.abovePngBase64, '上の層が無い（Rust が断る）').toBeTruthy();
+    }
+  });
+
+  // ⚠️ **音を二重に鳴らさない**＝動画の元の音は全体の音の並びで渡っている。
+  it('元の音は流さない（二重に鳴らさない）', async () => {
+    await open(vdoc([vclip('clip_001', 0, { useOriginalAudio: true })]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { video?: { useOriginalAudio: boolean } }[];
+    expect(scenes[0].video?.useOriginalAudio).toBe(false);
+  });
+
+  // ⚠️ **細工の付いた部品は焼く**＝FFmpeg が重ねる所では SVG の細工が消える（ADR-0044）。
+  it('色の調整が付いていたら、その区間は焼く', async () => {
+    await open(vdoc([vclip('clip_001', 0, { colorAdjust: { brightness: 1.4 } })]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { framesDir?: string; video?: unknown }[];
+    expect(scenes[0].video, '細工が付いているのに実動画で流した').toBeUndefined();
+    expect(scenes[0].framesDir).toBeTruthy();
+  });
+
+  // ⚠️ **つないだ長さが元と同じ**＝ここがずれると、出来上がりが伸び縮みする。
+  it('区間をつないだ長さが、元の尺と同じ', async () => {
+    await open(vdoc([vclip('clip_001', 0), vclip('clip_002', 2, { colorAdjust: { brightness: 1.2 } }), vclip('clip_003', 4)]));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const scenes = vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[0] as { durationSec: number }[];
+    expect(scenes.reduce((a2, x) => a2 + x.durationSec, 0)).toBeCloseTo(6, 6);
+    expect(scenes.map((x) => x.durationSec)).toEqual([2, 2, 2]);
+  });
+});
+
+// 書き出す大きさ（#1255・利用者判断 2026-09-28）。
+// ⚠️ **画面で選べるだけでは足りない**＝選んだ値が**描く側まで届いているか**を見る。
+//   口（`outputSize`）は前から在り、タイムライン側だけ渡していなかった＝**常に 1920×1080** だった。
+describe('書き出す大きさが描く側まで届く（#1255）', () => {
+  /** `buildTimelineFrames` が受け取った `outputSize` を取り出す。 */
+  const receivedSize = (): unknown =>
+    (vi.mocked(framesMod.buildTimelineFrames).mock.calls[0]?.[1] as { outputSize?: unknown } | undefined)?.outputSize;
+
+  it('既定（きれい）では 1920×1080 を渡す', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('「軽い」を選ぶと 1280×720 を渡す', async () => {
+    await open(doc());
+    useTimelineStore.getState().setExportSize('hd');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1280, height: 720 });
+  });
+
+  // #1218「ふつう」＝**大きさは 1080 のまま**、映像の上限だけを書き出しへ渡す（上限は既定・軽いでは渡さない）。
+  it('「ふつう」は 1920×1080 のまま、映像の上限を渡す', async () => {
+    await open(doc());
+    useTimelineStore.getState().setExportSize('standard');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 1920, height: 1080 });
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBe(EXPORT_STANDARD_MAX_BITRATE_BPS);
+  });
+
+  it('「きれい」「軽い」は映像の上限を渡さない（従来どおり）', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBeUndefined();
+    vi.mocked(ffmpegMod.exportVideo).mockClear();
+    useTimelineStore.getState().setExportSize('hd');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo).mock.calls[0]?.[6]).toBeUndefined();
+  });
+
+  // ⚠️ **縦型でも向きに沿う**＝短辺を 720 に揃える（`exportDimsForOrientation`）。
+  it('縦型の「軽い」は 720×1280', async () => {
+    await open({ ...doc(), videoSettings: { ...doc().videoSettings, aspectRatio: '9:16' } });
+    useTimelineStore.getState().setExportSize('hd');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(receivedSize()).toEqual({ width: 720, height: 1280 });
+  });
+});
+
+describe('exportTimelineVideo', () => {
+  it('描いたフレームを書き出しへ渡し、保存できたと知らせる', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo)).toHaveBeenCalledWith(
+      [{ framesDir: 'timeline_frames', fps: 30, durationSec: 5 }],
+      'テスト動画',
+      [],
+      'proj_20260729_001',
+      '/out/movie.mp4',
+      // 全体の音量を整える（#259・ADR-0032 追補4）。新しい動画は既定で整える。
+      -16,
+      // 映像の上限（#1218）＝既定の「きれい」では渡さない。
+      undefined,
+    );
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.phase).toBe('done');
+    expect(run.message).toContain('保存しました');
+  });
+
+  /**
+   * ⚠️ **保存先は書き出しの戻り値から採る**（#1118 レビュー由来 ℹ️）＝Rust は拡張子を補う
+   * （`ffmpeg.rs` の `set_extension("mp4")`）ので、ダイアログで選ばれた文字列をそのまま持つと
+   * **覚えた場所と開く場所が食い違う**＝「動画を再生」が「この場所は開けませんでした」になる
+   * （覚える側は Rust が補ったあとの場所を覚えている＝`opener::remember`）。
+   * ⚠️ **だから2つを違う値にして見る**＝同じ値だと、どちらから採っても緑になる。
+   */
+  it('保存先は書き出しの戻り値から採る（ダイアログの文字列ではない）', async () => {
+    vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/out/movie');
+    vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: '/out/movie.mp4' } as never);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.outPath).toBe('/out/movie.mp4');
+  });
+
+  /**
+   * ⚠️ **整えないときは渡さない**（#259）＝前の版で作った動画は読込時に「しない」が書き込まれるので、
+   * 開いて書き出し直しても**前と同じ音**になる（§2-5＝黙って別の音の動画を出さない）。
+   */
+  it('「音量をそろえる」をしない設定なら、整える指定を渡さない', async () => {
+    const d = doc();
+    await open({ ...d, videoSettings: { ...d.videoSettings, audioAuto: { normalize: false } } });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const args = vi.mocked(ffmpegMod.exportVideo).mock.calls[0];
+    expect(args[5]).toBeUndefined();
+  });
+
+  // ⚠️ **断りは画面に出せる文だけ**（#1123・PR #1130 レビュー由来）＝`map_err(|e| e.to_string())` は
+  // `src-tauri` に 56 か所あり、`os error 3` のような生の OS エラーも文字列で届く。
+  it('整えた理由が返れば、その文を出す（丸めない）', async () => {
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue(
+      'この動画を書き出せませんでした。素材を選び直してから、もう一度お試しください。',
+    );
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.message).toContain('素材を選び直してから');
+  });
+
+  it('生の OS エラーは出さず、次の行動つきの定型文へ倒す（§2-3）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue('os error 3');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg).not.toContain('os error');
+    expect(msg).toContain('記録の場所を開く');
+  });
+
+  // ⚠️ **`Error` を型で外しているのではない**（PR #1130 レビュー由来 🟡）＝関門は `Error` の
+  // `message` も読むので、**日本語＋句点の `Error` は通る**（焼き出しの断りがこれ）。
+  // だから焼き出し側の文にも「次の行動」を持たせてある（`renderer/export/rasterize.ts`）。
+  it('中の失敗（`Error`）は出さない（`ffmpeg exited with code 1` 等）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(ffmpegMod, 'exportVideo').mockRejectedValue(new Error('ffmpeg exited with code 1'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg).not.toContain('ffmpeg');
+    expect(msg).toContain('記録の場所を開く');
+  });
+
+  it('何も置いていなければ、保存先を聞く前に断る（重い処理をさせない）', async () => {
+    await open(doc({ clips: [] }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog)).not.toHaveBeenCalled();
+    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message).toContain('まだ何も置かれていない');
+  });
+
+  // ⚠️ #512 段1＝直接置いた動画／段3＝差し込み口の動画は**映る**ようになったので、断るのは
+  // **まだ映らない使い方**だけ＝**立ち絵に入れた動画**。
+  // ⚠️ **立ち絵に入れた動画も書き出せるようになった**（#809）＝#512 の直接置き・差し込み口と
+  // 同じく置き場所として数える。断りは**外した**ので、ここで見るのは「止まらないこと」。
+  it('立ち絵に入れた動画は止めない（#809 で映るようになった）', async () => {
+    const clip: TimelineClip = {
+      id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+    } as TimelineClip;
+    await open(
+      doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4' }],
+        clips: [clip],
+      }),
+    );
+    // 見た目パターンは解決できる状態にする（未解決の断りが先に出ると、動画の話を見られない）。
+    const withTemplate = {
+      templates: [{
+        schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+        aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+        // ⚠️ **立ち絵の層を持たせる**＝層が無ければそもそも描かれないので、置き場所にもならない
+        // （#809 の変更点は「層があるとき映る」＝層が無い状態では何も確かめられない）。
+        layers: [
+          { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+          { id: 'chara', type: 'character', x: 100, y: 100, w: 400, h: 800 },
+        ],
+      }],
+      templateAssetSrcById: {},
+    } as unknown as typeof deps;
+    await useTimelineStore.getState().exportTimelineVideo(withTemplate);
+    expect(useTimelineStore.getState().exportRun.message ?? '').not.toContain('立ち絵として入れた動画');
+  });
+
+  // ⚠️ **差し込み口の元の音が、実際に書き出しへ渡るところまで見る**（#512 段3b レビュー 🔴）。
+  // domain 側（`timelineAudioRuns`）は見た目パターンを渡して緑になるが、**本番の呼び出しが
+  // 渡し続けている保証にはならない**（この配線が外れると、差し込み口の音だけが黙って消える）。
+  it('差し込み口の元の音を、書き出しへ渡す', async () => {
+    const clip: TimelineClip = {
+      id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 1, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
+      assetRefs: { main: 'asset_v' },
+      slotClips: { main: { useOriginalAudio: true } },
+    } as TimelineClip;
+    await open(
+      doc({
+        assets: [{
+          assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4',
+          thumbnailPath: 'assets/a_thumb.png', metadata: { hasAudio: true },
+        }],
+        clips: [clip],
+      }),
+    );
+    const withTemplate = {
+      templates: [{
+        schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+        aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+        layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+      }],
+      templateAssetSrcById: {},
+    } as unknown as typeof deps;
+    await useTimelineStore.getState().exportTimelineVideo(withTemplate);
+    const runs = vi.mocked(ffmpegMod.exportVideo).mock.calls[0][2];
+    expect(runs).toEqual([
+      expect.objectContaining({ audioPath: 'assets/a.mp4', delaySec: 1, playSec: 5, loopSource: false }),
+    ]);
+  });
+
+  // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。
+  // 実映像が壊れた速さ・解像度で焼かれるので、**実際に渡る値**を1件だけ固定する（#512 段1 レビュー 🟡）。
+  it('動画のコマの焼き出しに、正しい順で値を渡す', async () => {
+    vi.mocked(framesMod.buildTimelineFrames).mockRestore();
+    const stage = vi.spyOn(ffmpegMod, 'stageClipFrames').mockResolvedValue(30);
+    vi.spyOn(ffmpegMod, 'readExportFrame').mockResolvedValue('data:frame');
+    await open(
+      doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4', thumbnailPath: 'assets/a_thumb.png' }],
+        clips: [{
+          id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+          // ⚠️ **長さと速さを別の値にする**（同値だと入れ替えても通る＝テストが空振りする）。
+          startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50,
+          assetId: 'asset_v', sourceStartSec: 3, speed: 2,
+        } as TimelineClip],
+      }),
+    );
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(stage).toHaveBeenCalledWith(
+      'proj_20260729_001', // どの動画の
+      'assets/a.mp4', // **本体**（代表フレームではない）
+      3, // トリム
+      119 / 30, // 焼く長さ＝最後に要るコマまで（4秒＝120コマ→焼き出しは ceil(尺×fps)+1 枚なので 119/30・#1357）
+      2, // 速さ
+      30, // fps
+      1920, // 横幅（向きから）
+      'timeline_frames_v_clip_002', // 部品ごとの置き場
+    );
+  });
+
+  // ⚠️ **音が読めないまま書き出さない**（#1064）＝混ぜる側が黙って読み飛ばすので、
+  //    そのまま焼くと**その部分だけ無音になった動画**が「成功」として出る（絵は前から断っている）。
+  it('読めない音があれば、保存先を聞く前に断る', async () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.mp3' }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001' },
+      ],
+    } as Partial<TimelineProject>);
+    // ⚠️ **音だけ読めない**ようにする（絵まで読めなくすると、別の断り〔絵が読めない〕で止まる）。
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockImplementation(async (_p: string, rel: string) => (rel.endsWith('.mp3') ? null : 'data:image/png;base64,X'));
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '読めないのに保存先を聞いた').not.toHaveBeenCalled();
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '黙って無音の動画を出そうとした').toContain('無音');
+    // ⚠️ **種類で次の行動が違う**（PR #1066 レビュー 🟡）＝取り込んだ素材なので「ファイルを選び直す」。
+    expect(msg, '取り込んだ素材なのに別の手を案内した').toContain('ファイルを選び直す');
+  });
+
+  // ⚠️ **同梱の曲にも「ファイルを選び直す」は無い**（一覧から選び直す）＝取り込んだ素材と取り違えない。
+  it('同梱の曲が読めないときは、鳴らす音を選び直す手を出す', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, bundledBgmId: 'summer-morning' },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(bgmMod, 'readBundledBgmDataUrl').mockResolvedValue(undefined); // 同梱なのに読めない
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '同梱の曲なのに「ファイルを選び直す」を勧めた').toContain('鳴らす音');
+    expect(msg).not.toContain('ファイルを選び直す');
+  });
+
+  // ⚠️ **読み上げには「ファイルを選び直す」が無い**（PR #1066 レビュー 🟡）＝
+  //    作った声が読めないときは「声を作る」で作り直す（実行できない行動を勧めない）。
+  it('作った読み上げが読めないときは、作り直す手を出す', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
+          voice: { text: 'よみあげ', status: 'generated', voicePath: 'voices/clip_002.wav' } },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue(null); // 作ったが読めない
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg, '読み上げなのに「ファイルを選び直す」を勧めた').toContain('声を作る');
+    expect(msg).not.toContain('ファイルを選び直す');
+  });
+
+  // ⚠️ **まだ作っていない読み上げは止めない**＝音源そのものを持たない（元から鳴らない）ので、
+  //    直し方は「もう一度作る」＝画面の知らせが担う。
+  it('まだ作っていない読み上げがあっても書き出せる', async () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
+          voice: { text: 'まだ作っていない', status: 'none' } },
+      ],
+    } as Partial<TimelineProject>);
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '作っていない読み上げで止めた').toHaveBeenCalled();
+  });
+
+  it('保存先を選ばなければ何もしない（勝手に書き出さない）', async () => {
+    vi.mocked(dialogMod.showSaveVideoDialog).mockResolvedValue(null);
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.phase).toBe('idle');
+  });
+
+  // ⚠️ **Rust が整えた文言はそのまま出す**（#512 段1 レビュー 🟡）＝コマの焼き出しが本走行に入り、
+  // 「動画が見つかりませんでした。もう一度取り込んでください」等が届くようになった。丸めると
+  // **何度やっても成功しない案内**になる。Tauri は**文字列で** reject するので、そこで見分ける。
+  it('Rust が整えた案内はそのまま出す（丸めない）', async () => {
+    vi.mocked(ffmpegMod.exportVideo).mockRejectedValue('動画が見つかりませんでした。もう一度取り込んでください');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.message).toBe('動画が見つかりませんでした。もう一度取り込んでください');
+  });
+
+  it('失敗したら「次にどうするか」を知らせる（生のエラーを見せない）', async () => {
+    vi.mocked(ffmpegMod.exportVideo).mockRejectedValue(new Error('ffmpeg exited with code 1'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.phase).toBe('error');
+    expect(run.message).toBe(exportFailedMessage.EXPORT_FAILED_TIMELINE);
+  });
+
+  it('成功しても失敗しても一時ファイルを片づける（次の書き出しに古い絵を混ぜない）', async () => {
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.clearExportFramesStage).mock.calls.length).toBeGreaterThanOrEqual(2);
+    vi.mocked(ffmpegMod.clearExportFramesStage).mockClear();
+    vi.mocked(ffmpegMod.exportVideo).mockRejectedValue(new Error('x'));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.clearExportFramesStage)).toHaveBeenCalled();
+  });
+
+  // ⚠️ **掃除してから締めを返す**（#834-3）＝一時ファイルの置き場は**アプリで1つ**（ADR-0032 決定22・
+  // 場面形式とタイムライン形式が共有）。先に返すと、次の書き出しが**この掃除の最中に**フレームを
+  // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+  it('片づけ終わってから走行中の締めを返す（次の書き出しの絵を消さない）', async () => {
+    const order: string[] = [];
+    vi.mocked(ffmpegMod.clearExportFramesStage).mockImplementation(async () => { order.push('clear'); });
+    const release = useExportLockStore.getState().release;
+    vi.spyOn(useExportLockStore.getState(), 'release').mockImplementation((owner) => { order.push('release'); release(owner); });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(order[order.length - 1]).toBe('release'); // 最後が締め返し＝掃除はその前に終わっている
+    expect(order).toContain('clear');
+  });
+
+  // ⚠️ **締めがまだ返っていなければ始めない**＝直前の回の後片づけ（一時ファイルの掃除）が走っている間は、
+  // 走行中の表示が落ちているのに締めは自分に残っている。ここで止めないと**締めを持たないまま走る回**が
+  // でき、その最中に場面形式が締めを取って同時に走れてしまう（共有の一時置き場を互いに消す＝`11 §7.6.5`）。
+  // ⚠️ **止めているのは押す前の関門**（`exportStartBlock` の `cleanupPending`・#843）＝以前は
+  // `otherExportRunning` が**自分を数えない**ため素通りし、`acquire` の戻り値確認だけが受け止めていた。
+  // いまは関門が先に捕まえるので、このテストが通るのは関門の側（`acquire` 分岐は将来の備えとして残置）。
+  it('締めがまだ返っていなければ始めない（走行中のまま固まらせない）', async () => {
+    await open(doc());
+    // 持ち主が「自分（タイムライン形式）」＝前の回の後片づけがまだ走っている瞬間を作る。
+    useExportLockStore.getState().acquire('timeline');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled(); // 走らない
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.phase).toBe('error');
+    // ⚠️ **「ほかの動画」ではない**（#843）＝片づけているのは**自分の直前の回**なので、主語の合う別の文言。
+    expect(run.message).toBe(EXPORT_CLEANUP_PENDING_MESSAGE);
+    expect(useExportLockStore.getState().owner).toBe('timeline'); // 走っている回の締めを奪わない
+  });
+
+  // ⚠️ **掃除が失敗しても締めは返す**＝返し損ねると、以後どの動画も書き出せなくなる（行き止まり）。
+  it('片づけに失敗しても締めは返す（以後書き出せなくならない）', async () => {
+    vi.mocked(ffmpegMod.clearExportFramesStage).mockRejectedValue(new Error('cleanup failed'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps).catch(() => {});
+    expect(useExportLockStore.getState().owner).toBeNull();
+  });
+
+  it('中止したら書き出さず、中止として知らせる', async () => {
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async () => {
+      useTimelineStore.getState().cancelTimelineExport();
+      return { framesDir: 'timeline_frames', fps: 30, durationSec: 5 };
+    });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.phase).toBe('cancelled');
+  });
+
+  it('声を作っている最中は始めない（作った声が捨てられる・#718）', async () => {
+    await open(doc());
+    // ⚠️ 見るのは**走っている回**（#755）＝印は開き直しで消えるので、それだけだと締めが外れる。
+    useTimelineStore.setState({ generatingVoiceClipId: 'clip_009', _voiceRun: 1 });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message).toContain('声を作成中です');
+  });
+
+  it('書き出し中は二重に始めない（保存先を選んでいる間も含む）', async () => {
+    let release = (): void => undefined;
+    // **保存先ダイアログを開いたまま**にする＝「聞いている最中に押し直す」を実際に再現する
+    //（すぐ解決するモックだと、押し直しの時点で1本目がどこまで進んでいるかに結果が左右される）。
+    let answerDialog: (p: string) => void = () => {};
+    vi.mocked(dialogMod.showSaveVideoDialog).mockReturnValue(new Promise<string>((r) => { answerDialog = r; }));
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(
+      () => new Promise((resolve) => { release = () => resolve({ framesDir: 'd', fps: 30, durationSec: 5 }); }),
+    );
+    await open(doc());
+    const first = useTimelineStore.getState().exportTimelineVideo(deps);
+    await vi.waitFor(() => expect(vi.mocked(dialogMod.showSaveVideoDialog)).toHaveBeenCalledTimes(1));
+    // 保存先を聞いている最中に押し直す＝ここで走行中に数えていないと2本走る。
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog)).toHaveBeenCalledTimes(1);
+    answerDialog('/out/movie.mp4');
+    await vi.waitFor(() => expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalled());
+    release();
+    await first;
+    expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalledTimes(1);
+  });
+
+  it('書き出し中は別の動画を開かない（描いている途中の素材や音が入れ替わらない）', async () => {
+    let release = (): void => undefined;
+    let started = (): void => undefined;
+    const drawing = new Promise<void>((resolve) => { started = resolve; });
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(() => {
+      started();
+      return new Promise((resolve) => { release = () => resolve({ framesDir: 'd', fps: 30, durationSec: 5 }); });
+    });
+    await open(doc());
+    const first = useTimelineStore.getState().exportTimelineVideo(deps);
+    await drawing;
+    await open(doc({ projectId: 'proj_20260729_002', projectName: 'べつの動画' }));
+    expect(useTimelineStore.getState().doc?.projectName).toBe('テスト動画'); // 開き替わっていない
+    expect(useTimelineStore.getState().exportRun.message).toContain('別の動画を開いてください');
+    release();
+    await first;
+  });
+
+  it('書き出し中の編集は受け付けない（入らない編集を「保存しました」に混ぜない）', async () => {
+    useTimelineStore.setState({
+      doc: doc(),
+      exportRun: { phase: 'rendering', percent: 10, message: null, cancelling: false },
+      selectedClipIds: ['clip_001'],
+    });
+    useTimelineStore.getState().addTrack(TRACK_KIND.visual);
+    expect(useTimelineStore.getState().doc?.tracks).toHaveLength(2); // 増えていない
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_EXPORTING');
+  });
+
+  it('書き出し中の取り消しも受け付けない', async () => {
+    useTimelineStore.setState({
+      doc: doc(),
+      exportRun: { phase: 'encoding', percent: 90, message: null, cancelling: false },
+    });
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe('TIMELINE_EDIT_EXPORTING');
+  });
+
+  it('素材は**書き出しで描ける形**（data URL）へ解き直す（表示用のURLを渡さない）', async () => {
+    // ⚠️ 書き出しは SVG を Blob → <img> → canvas で焼くので、**表示用の `asset://` は取りに行かずに黙って落ちる**
+    //（canvas は汚れず `toDataURL` は成功する＝素材が抜けた動画が「成功」として出る・#716）。
+    let seen: string | undefined;
+    const read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async (_d, o) => {
+      seen = o.assetSrc('asset_001');
+      return { framesDir: 'd', fps: 30, durationSec: 5 };
+    });
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    // 表示用の URL が入っていても、そちらは渡さない。
+    useTimelineStore.setState({ assetSrcById: { asset_001: 'asset://表示用.png' } });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(seen).toBe('data:image/png;base64,AAAA');
+    expect(read).toHaveBeenCalledWith('proj_20260729_001', 'assets/asset_001.png');
+  });
+
+  it('素材のファイルを読めなかったら、描く前に断る（枠だけの動画を成功として出さない）', async () => {
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue(null); // 読めない
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled(); // 描き始めない
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+    expect(useTimelineStore.getState().exportRun.message).toContain('素材のファイルを読めませんでした');
+  });
+
+  // ⚠️ **実フレームで描く動画は「読めない素材」の門の対象外**（`timelineImageAssetIds` が意図的に外す）
+  //    ＝ファイルが無いことは誰も見ておらず、保存先を聞いて走り出してから途中で落ちていた（#1068）。
+  it('置いた動画のファイルが無かったら、描く前に断る（走り出してから落とさない）', async () => {
+    const missing = vi.spyOn(assetFsMod, 'missingAssetFiles').mockResolvedValue(['assets/asset_v.mp4']);
+    await open(doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/asset_v.mp4' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_v' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(missing).toHaveBeenCalledWith('proj_20260729_001', ['assets/asset_v.mp4']);
+    expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled(); // 描き始めない
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+    expect(useTimelineStore.getState().exportRun.message).toContain('動画のファイルが見つかりません');
+  });
+
+  // ⚠️ **調べられなかったときは断らない**＝`missingAssetFiles` は調べられない場（ブラウザ）で空を返す。
+  //    そこで断ると、動画を置いただけで書き出せなくなる（嘘の警告）。
+  it('ファイルの有無を調べられなかったときは、そのまま書き出す', async () => {
+    vi.spyOn(assetFsMod, 'missingAssetFiles').mockResolvedValue([]);
+    await open(doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/asset_v.mp4' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_v' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.phase).not.toBe('error');
+    expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalled();
+  });
+
+  it('使っていない素材は読まない（記憶に載せない）', async () => {
+    const read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    // 素材はあるが、どの部品も使っていない。
+    await open(doc({ assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }] }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('描くのに使う素材は始めた時点のものを使う（途中で入れ替えても混ざらない）', async () => {
+    let seen: string | undefined;
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async (_d, o) => {
+      // 走っている最中に文書を入れ替えても、渡すものは始めた時点のまま。
+      useTimelineStore.setState({ doc: null });
+      seen = o.assetSrc('asset_001');
+      return { framesDir: 'd', fps: 30, durationSec: 5 };
+    });
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(seen).toBe('data:image/png;base64,AAAA');
+  });
+
+  it('同梱フォントをそろえてから描く（プレビューと違う字で焼かない）', async () => {
+    const order: string[] = [];
+    vi.spyOn(fontsMod, 'loadExportFonts').mockImplementation(async () => { order.push('fonts'); });
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async () => {
+      order.push('draw');
+      return { framesDir: 'd', fps: 30, durationSec: 5 };
+    });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(order).toEqual(['fonts', 'draw']);
+  });
+
+  it('動画全体のフォントを受け皿として渡す（部品ごとの指定が無いときに継承する）', async () => {
+    await open(doc({ videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: 'kaitou-yokoku-gothic' } }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(framesMod.buildTimelineFrames).mock.calls[0][1].fontFamily).toContain('Kaitou Yokoku Gothic');
+  });
+
+  it('ほかの形式が書き出している間は始めない（一時ファイルの置き場を取り合わない）', async () => {
+    useExportLockStore.setState({ owner: 'scene' });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message).toContain('ほかの動画を書き出しています');
+  });
+
+  it('保存先を聞くのに失敗しても、走行中のまま固まらない', async () => {
+    vi.mocked(dialogMod.showSaveVideoDialog).mockRejectedValue(new Error('dialog failed'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+    expect(useExportLockStore.getState().owner).toBeNull(); // 締めも返す
+  });
+
+  it('走行中に出た知らせを閉じても、書き出し中の締めは外れない', async () => {
+    useTimelineStore.setState({
+      doc: doc(),
+      exportRun: { phase: 'rendering', percent: 10, message: 'いま動画を書き出しています。', cancelling: false },
+    });
+    useTimelineStore.getState().dismissTimelineExport();
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.message).toBeNull(); // 知らせだけ消える
+    expect(run.phase).toBe('rendering'); // 走行中のまま＝一覧へ戻る・二重起動が開かない
+  });
+
+  it('書き出し中は閉じない（締めごと初期化されない）', async () => {
+    await open(doc());
+    useTimelineStore.setState({ exportRun: { phase: 'rendering', percent: 1, message: null, cancelling: false } });
+    useTimelineStore.getState().closeTimelineProject();
+    expect(useTimelineStore.getState().doc).not.toBeNull();
+  });
+
+  it('再生したまま書き出しても、再生は止まる（鳴っている音と重ならない）', async () => {
+    await open(doc());
+    useTimelineStore.getState().play();
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+});
+
+describe('timelineBgmRunInputs', () => {
+  const audioClip: TimelineClip = {
+    id: 'clip_bgm', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002',
+    startSec: 2, durationSec: 4, bundledBgmId: 'found-new-hope',
+  };
+
+  it('再生に使っている音源をそのまま渡す（聞いた音と書き出した音が一致する）', () => {
+    const d = doc({ clips: [audioClip] });
+    const { runs } = timelineBgmRunInputs(d, { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs).toEqual([
+      {
+        audioBase64: 'data:audio/mp3;base64,AAA',
+        fileExt: 'mp3',
+        volume: 0.25,
+        delaySec: 2,
+        playSec: 4,
+        fadeInSec: 0,
+        fadeOutSec: 0,
+        loopSource: true,
+        sourceStartSec: 0,
+        speed: 1,
+      },
+    ]);
+  });
+
+  it('読み上げは繰り返さない（言葉が二重に鳴らない）', () => {
+    const voice: TimelineClip = {
+      id: 'clip_v', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3,
+      voice: { text: 'あ', status: 'generated', voicePath: 'voices/clip_v.wav' },
+    };
+    const { runs } = timelineBgmRunInputs(doc({ clips: [voice, audioClip] }), {
+      'voice:voices/clip_v.wav': 'data:audio/wav;base64,AAA',
+      'bgm:found-new-hope': 'data:audio/mp3;base64,BBB',
+    });
+    expect(runs.map((r) => r.loopSource)).toEqual([false, true]);
+  });
+
+  it('読めなかった音源は置かない（無い音を混ぜようとして書き出しごと失敗させない）', () => {
+    expect(timelineBgmRunInputs(doc({ clips: [audioClip] }), {}).runs).toEqual([]);
+  });
+
+  it('音量の変化はそのまま式で渡す（#512・混ぜる側で組み直さない）', () => {
+    const withPoints: TimelineClip = { ...audioClip, volumePoints: [{ timeSec: 0, volume: 0.1 }, { timeSec: 4, volume: 1 }] };
+    const { runs } = timelineBgmRunInputs(doc({ clips: [withPoints] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0].volumeExpr).toBe(volumeExpr(withPoints.volumePoints));
+  });
+
+  it('点が無ければ式は付けない（従来どおり一定値の音量で出る＝場面形式と同じ引数）', () => {
+    const { runs } = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0]).not.toHaveProperty('volumeExpr');
+  });
+
+  // 動画の元の音（#512 段2）＝**中身ではなくパスで渡す唯一の変換点**。
+  // ⚠️ 中身（`audioSrcByKey`）を要求してしまうと、動画を丸ごと文字列にしない限り鳴らなくなる。
+  const videoDoc = () =>
+    doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'media/v.mp4', metadata: { hasAudio: true } }],
+      clips: [{
+        id: 'clip_v', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 1, durationSec: 4, x: 0, y: 0, w: 1920, h: 1080,
+        assetId: 'asset_v', useOriginalAudio: true, originalAudioVolume: 0.8,
+      } as TimelineClip],
+    });
+
+  it('動画の元の音は、音源の中身が無くてもパスで渡す（飛ばさない）', () => {
+    const { runs } = timelineBgmRunInputs(videoDoc(), {}); // ⚠️ 空の音源表＝中身は1つも無い
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      audioPath: 'media/v.mp4',
+      audioBase64: '', // 中身は運ばない
+      fileExt: 'mp4',
+      delaySec: 1,
+      playSec: 4,
+      volume: 0.8,
+      loopSource: false,
+    });
+  });
+
+  it('音の部品にはパスを付けない（中身で渡す従来の経路のまま）', () => {
+    const { runs } = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0]).not.toHaveProperty('audioPath');
+  });
+});

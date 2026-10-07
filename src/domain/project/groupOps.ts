@@ -1,14 +1,16 @@
 // 要素のグループ化（ADR-0022）の編集 ops（FREE 要素 / テンプレ Layer 共用＝<T> で汎用化）。純粋関数（副作用なし）。
 // 呼び出し側（store/エディタ）が結果で groups と要素配列（FREE=scene.freeLayout / テンプレ=template.layers）を差し替える。
 // グループ操作は「グループ自身の transform を更新」する（メンバー座標は保持）。ungroup 時のみ transform をメンバーへ焼き込む。
-import { composeGroupGeometry } from '../group/compose';
+import { FREE_ELEMENT_KIND, LAYER_TYPE } from '../enums';
+import { composeGroupGeometry, groupScaleOf } from '../group/compose';
+import { DEFAULT_FONT_SIZE, scaleTextStyle } from '../template/textStyle';
+import type { LayerBackground, TextShadow } from '../template/types';
 import type { Group, GroupTransform } from '../group/types';
 import { createGroupId } from './persistence';
+import { normalizeDeg } from '../constants';
 
 /** identity 変形（新規グループの初期値）。 */
 export const IDENTITY_TRANSFORM: GroupTransform = { x: 0, y: 0, rotation: 0, scale: 1 };
-
-const normalizeDeg = (d: number): number => ((d % 360) + 360) % 360;
 
 /** 選択中の id をメンバーにした新しいグループ（identity transform）を末尾に追加し、新 group id を返す。 */
 export function createGroupFromSelection(
@@ -75,8 +77,10 @@ export function groupElementIds(groups: Group[], groupId: string): string[] {
  * （実際の要素削除は呼び出し側＝FREE は `removeFreeElements`／テンプレは `removeLayer` が行う＝要素の型に依存しない）。
  *
  * - **消す要素**＝`groupElementIds`（推移的＝ネストした子グループの中身も含む）。
- * - **消えるグループ**（`groupIds`）＝対象＋子孫＋「空になって落ちた親」。**グループ自体もアニメの対象になりうる**
- *   （ADR-0019 ④(3)）ため、呼び出し側が孤児アニメを掃除するのに要る。
+ * - **消えるグループ**＝対象＋子孫＋「空になって落ちた親」。⚠️ **消えた id は返さない**＝グループもアニメの
+ *   対象になりうる（ADR-0019 ④(3)）が、その掃除は**更新の前後を突き合わせる**側が持つ
+ *   （`vanishedAnimationTargets`・#779）。ここから受け取って呼び出し側で並べる形が、**経路ごとの列挙**を
+ *   生んで取りこぼしていた（解除・空になった親が漏れた）ので、返さないことで同じ形を作らせない。
  * - **残る groups**＝上記を除き、親の members からも参照を外す。さらに members が空になったグループを**安定するまで**
  *   落とす（子を失った親が空グループとして残る／消えた親を孫が参照する、を防ぐ）。
  *   `removeMembersFromGroups`（flat 前提・1パス）と違い、`groupElementIds` が対応しているネストをここでも扱う。
@@ -84,8 +88,8 @@ export function groupElementIds(groups: Group[], groupId: string): string[] {
 export function removeGroupWithMembers(
   groups: Group[],
   groupId: string,
-): { elementIds: string[]; groupIds: string[]; groups: Group[] } {
-  if (!groups.some((g) => g.id === groupId)) return { elementIds: [], groupIds: [], groups };
+): { elementIds: string[]; groups: Group[] } {
+  if (!groups.some((g) => g.id === groupId)) return { elementIds: [], groups };
   const elementIds = groupElementIds(groups, groupId);
   // 対象＋子孫グループの id（循環ガードつき）。
   const byId = new Map(groups.map((g) => [g.id, g] as const));
@@ -104,21 +108,51 @@ export function removeGroupWithMembers(
   for (;;) {
     const empty = next.filter((g) => g.members.length === 0).map((g) => g.id);
     if (empty.length === 0) break;
-    for (const id of empty) gone.add(id); // 落ちた親もアニメ掃除の対象へ
+    for (const id of empty) gone.add(id); // 落ちた親も「消えた」として次の周回で参照を外す
     const dropped = new Set(empty);
     next = next
       .filter((g) => !dropped.has(g.id))
       .map((g) => ({ ...g, members: g.members.filter((m) => !dropped.has(m)) }));
   }
-  return { elementIds, groupIds: [...gone], groups: next };
+  return { elementIds, groups: next };
+}
+
+/** 焼き込みで大きさを掛ける中身（FREE 要素とテンプレ Layer で同じ名前）。 */
+type BakeableContent = { fontSize?: number; strokeWidth?: number; radius?: number; shadow?: TextShadow; background?: LayerBackground };
+
+/**
+ * まとまりの倍率を要素の**中身**へ焼き込む（#1371）。描画（`layoutScene`）はまとまりの倍率で文字・角丸も縮めるので、
+ * 解除で箱だけ焼くと**解除した瞬間に字の大きさが変わる**。文字は `scaleTextStyle`（掛け方は1か所）、
+ * それ以外は角丸と枠線の太さ。文字の大きさが未指定なら既定を掛けた値を入れる（未指定のままだと既定へ戻る）。
+ */
+export function scaleBakedContent<T extends BakeableContent>(el: T, k: number, isText: boolean): T {
+  if (k === 1) return el;
+  if (isText) return scaleTextStyle({ ...el, fontSize: el.fontSize ?? DEFAULT_FONT_SIZE }, k);
+  return {
+    ...el,
+    ...(el.radius != null ? { radius: el.radius * k } : {}),
+    ...(el.strokeWidth != null ? { strokeWidth: el.strokeWidth * k } : {}),
+  };
+}
+
+/** 文字の FREE 要素か（解除の焼き込みで文字の大きさを掛ける対象・#1371）。 */
+export function isTextFreeElement(el: { kind: string }): boolean {
+  return el.kind === FREE_ELEMENT_KIND.text || el.kind === FREE_ELEMENT_KIND.subtitle;
+}
+
+/** 文字のテンプレ層か（同上）。 */
+export function isTextLayer(layer: { type: string }): boolean {
+  return layer.type === LAYER_TYPE.text || layer.type === LAYER_TYPE.subtitle;
 }
 
 /**
  * グループを解除し、transform をメンバー（FREE 要素 / テンプレ Layer）へ焼き込む（ADR-0022・flat 前提）。
  * T で汎用化＝FREE と テンプレで共用。返り値の要素キーは `elements`。
+ * `isText`＝文字の要素か（FREE は `kind`、テンプレは `type` で見分けるので呼び出し側が渡す）。
+ * ⚠️ 倍率は**中身にも焼き込む**（#1371・`scaleBakedContent`）＝解除の前後で見た目が変わらない。
  */
-export function ungroupGroup<T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number }>(
-  groups: Group[], elements: T[], groupId: string,
+export function ungroupGroup<T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number } & BakeableContent>(
+  groups: Group[], elements: T[], groupId: string, isText: (el: T) => boolean,
 ): { groups: Group[]; elements: T[] } {
   const group = groups.find((g) => g.id === groupId);
   if (!group) return { groups, elements };
@@ -131,7 +165,8 @@ export function ungroupGroup<T extends { id: string; x: number; y: number; w: nu
     // 合成後の回転（要素＋グループ回転の合算）。0（=回転なし）は undefined にして明示（el.rotation を残すと 360→0 正規化でズレる）。
     // ※ テンプレ Layer は rotation を持たず群回転も非対応ゆえ常に 0→undefined（JSON では省略される）。
     const rot = normalizeDeg(g.rotation ?? 0);
-    return { ...el, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
+    const scaled = scaleBakedContent(el, groupScaleOf(el, g), isText(el));
+    return { ...scaled, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
   });
   return { groups: groups.filter((g) => g.id !== groupId), elements: elementsBaked };
 }

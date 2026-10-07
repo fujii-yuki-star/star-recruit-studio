@@ -7,7 +7,7 @@ import { ExportLock, ExportLockBanner } from "./ExportLockBanner";
 
 // #570 P2：書き出し中はバナーを出すだけでなく、囲んだ編集 UI を inert で実際に操作不可にする（「押せるのに効かない」を無くす）。
 const setExport = (phase: ExportPhase, progress = { done: 0, total: 0 }) =>
-  useProjectStore.setState({ exportRun: { phase, progress, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false } });
+  useProjectStore.setState({ exportRun: { phase, progress, resultPath: "", message: "", bgmWarning: "", duckMerged: false, cancelling: false, resultUnseen: false } });
 
 describe("ExportLockBanner / ExportLock（#570 P2）", () => {
   afterEach(() => setExport("idle"));

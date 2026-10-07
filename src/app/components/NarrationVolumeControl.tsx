@@ -20,8 +20,10 @@ export function NarrationVolumeControl({
   const { dragGroup } = useHistoryGroup();
   return (
     <div className="field">
+      {/* ⚠️ **「ナレーション」は画面に出さない**（§2-3・`16 §1`・`06 §3` の置き換え表）＝
+          同じ画面の隣（仕上がり確認の音の欄）では「読み上げの声」と言っており、用語が割れていた。 */}
       <label className="field-label" htmlFor="narrationVolume">
-        ナレーション音量
+        読み上げの声の音量
       </label>
       <input
         id="narrationVolume"

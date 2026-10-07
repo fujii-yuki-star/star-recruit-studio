@@ -4,7 +4,7 @@ import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/en
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
-import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
+import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs, segmentLineIds } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
@@ -12,11 +12,13 @@ import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming
 import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
-import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
+import { NARRATOR_CREDIT, sceneCreditText } from '../../domain/voice/narratorCredit';
+import type { CreditDisplay } from '../../domain/voice/creditDisplay';
+import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
-import { splitVideoSceneSvgMulti } from './videoSceneSplit';
+import { slotRectToOutput, splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
 import { afterAnimNeverPlaysForSlots } from './videoSlotPlacement';
 
@@ -117,7 +119,6 @@ export type NarrationFor = (
   lineId?: string,
 ) => { audioBase64?: string; narrationVolume: number } | undefined;
 
-/** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
 /** 場面の動画スロットを**すべて**返すコールバック（空配列＝静止画シーン・#431 複数動画）。 */
 export type VideoSlotsFor = (scene: Scene) => VideoSlotInfo[];
 
@@ -160,8 +161,14 @@ export interface ExportOptions {
   outputSize?: { width: number; height: number };
   /** 場面ごとの描画フォントを返す（場面→動画全体で解決済み・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
   fontFamilyFor?: (scene: Scene) => string;
-  /** 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
+  /** クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
   credit?: string;
+  /**
+   * クレジットの見せ方（ADR-0025・#359）。未指定＝最初と最後・3秒。
+   * ⚠️ **場面形式は場面ごとにしか決められない**（`creditVisibleForScene`）＝静止の場面は1枚の絵。
+   * ずれる向きは「多め」に固定してある（規約で困るのは足りないときだけ＝`13 §4`）。
+   */
+  creditDisplay?: CreditDisplay;
   /**
    * 中止要求の確認（#380）。true を返すと、場面境界・フレームループ・クリップ抽出の各所で ExportCancelledError を投げ、
    * 長い準備処理でも押した中止が体感すぐ効くようにする（走行中の ffmpeg は別途 cancel_export が kill）。未指定＝中止判定なし。
@@ -222,8 +229,18 @@ export async function buildExportScenes(
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
     opts.withSubtitle === false ? (it) => !isSubtitleItem(it) : undefined;
-  // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
-  const credit = opts.credit ?? NARRATOR_CREDIT;
+  // クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
+  const baseCredit = opts.credit ?? NARRATOR_CREDIT;
+  // ⚠️ **見せ方（ADR-0025・#359）は場面ごとに決める**＝静止の場面は1枚の絵なので、途中で消すには
+  // その場面だけ毎フレーム描き直すことになる。区間に少しでも重なれば**その場面いっぱい出す**＝
+  // ずれる向きを「多め」に固定する（規約で困るのは足りないときだけ＝`13 §4`）。
+  //
+  // ⚠️ **判定はプレビューと同じ共有関数**（`sceneCreditVisibility`）＝時間軸の採り方（切り替えの
+  // 重なりを引いた実尺）も含めて1か所にある。見た目が解決できない場面は下で throw する＝ここで
+  // 数える場面と書き出される場面は一致する。
+  const creditVisible = sceneCreditVisibility(scenes, opts.creditDisplay);
+  // 文はプレビューと同じ共有関数（`sceneCreditText`）＝「最初と最後」は全員を縦に・「ずっと表示」は話している行（ADR-0025 追補）。
+  const creditFor = (index: number): string | undefined => (creditVisible[index] ? sceneCreditText(opts.creditDisplay, scenes, null, baseCredit) : undefined);
   const out: ExportSceneData[] = [];
   // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
   const bail = (): void => {
@@ -234,6 +251,8 @@ export async function buildExportScenes(
   for (let i = 0; i < scenes.length; i += 1) {
     bail(); // 場面境界（次の場面の重い描画に入る前）
     const scene = scenes[i];
+    // この場面にクレジットを焼くか（#359）。焼かない場面は `undefined`＝描かれない。
+    const credit = creditFor(i);
     const template = templateById.get(scene.templateId);
     if (template) {
       included.push(scene);
@@ -267,18 +286,14 @@ export async function buildExportScenes(
       const ch = template.canvas.height;
       const width = opts.outputSize?.width ?? cw;
       const height = opts.outputSize?.height ?? ch;
-      const rx = width / cw;
-      const ry = height / ch;
       if (videoSlots.length > 0 && splitM) {
         // 各動画レイヤーの矩形（出力解像度へスケール）＋クリップ設定を zIndex 順（下→上）に組む（#431）。
         const slotById = new Map(videoSlots.map((v) => [v.slotLayerId, v] as const));
         const layers = splitM.slots.map((s) => {
           const info = slotById.get(s.layerId)!; // slots は videoSlots の id から解決＝必ず存在
           return {
-            slotX: Math.round(s.rect.x * rx),
-            slotY: Math.round(s.rect.y * ry),
-            slotW: Math.round(s.rect.w * rx),
-            slotH: Math.round(s.rect.h * ry),
+            // ⚠️ **枠の写し方はタイムライン形式と同じ関数**（#1255 レビュー 🔴＝片方だけずれていた）。
+            ...slotRectToOutput(s.rect, { width: cw, height: ch }, { width, height }),
             clipRelPath: info.clipRelPath,
             fit: info.fit,
             clipStartSec: info.clipStartSec,
@@ -312,9 +327,9 @@ export async function buildExportScenes(
           let narrationVolume: number | undefined;
           for (let k = 0; k < specs.length; k += 1) {
             const spec = specs[k];
-            // クレジットは話者連動（静止画の掛け合いと同じ規則・#243 の併記は行ごと表示で置き換え）。
+            // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動・ADR-0025 追補）。
             const segLine = spec.lineId ? lines.find((l) => l.lineId === spec.lineId) : undefined;
-            const segCredit = segLine ? creditForLine(segLine, credit) : credit;
+            const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
                 ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
@@ -504,10 +519,7 @@ export async function buildExportScenes(
                 // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない・アニメ対象のみ効く）。settled はその続きから。
                 const playedW = Math.max(0, W - effectiveStartDelay(s.layerId));
                 return {
-                  slotX: Math.round(s.rect.x * rx),
-                  slotY: Math.round(s.rect.y * ry),
-                  slotW: Math.round(s.rect.w * rx),
-                  slotH: Math.round(s.rect.h * ry),
+                  ...slotRectToOutput(s.rect, { width: cw, height: ch }, { width, height }),
                   clipRelPath: info.clipRelPath,
                   fit: info.fit,
                   // 実フレーム時は窓で [clipStart,+(W−d)*speed) を再生済み＝settled はその続きから（連続再生・#444）。
@@ -615,9 +627,9 @@ export async function buildExportScenes(
         let segIndex = 0;
         for (const spec of specs) {
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
-          // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
+          // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動＝無ければ既定の声・ADR-0025 追補）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
-          const segCredit = segLine ? creditForLine(segLine, credit) : credit;
+          const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
           const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
           // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。
@@ -734,9 +746,7 @@ export async function buildExportScenes(
     return d;
   });
   const sceneResolved = sceneFirst.map((first) => resolveTransition(included[first].transition));
-  const sceneBoundaryDs = sceneResolved.map((r, k) =>
-    k === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec,
-  );
+  const sceneBoundaryDs = transitionBoundaryDs(sceneFirst.map((first) => included[first])); // 組み方は共有
   const { steps } = transitionTimeline(sceneDurations, sceneBoundaryDs);
   for (let k = 1; k < sceneFirst.length; k += 1) {
     if (sceneResolved[k].type === TRANSITION_TYPE.none) continue;

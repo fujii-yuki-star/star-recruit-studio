@@ -1,0 +1,100 @@
+// 時間の一点に置く**目印**（#356 ①）の一覧。
+//
+// ⚠️ **一覧は「補助」**（#1138 レビュー由来 🔴）＝業界の型では印は**時間軸の上に見える**もので、
+// 一覧はそこから辿るための道具。印そのものは「並び」のタイムラインに描く（`.timeline-marker`）。
+//
+// ⚠️ **動画には出ない**＝作業用のメモ（「ここ直す」「ここに効果音」「この間を伸ばす」）。
+// 門番＝`src/test/markersNotInVideoGuard.test.ts`（描く側・焼く側が読んでいないことを見る）。
+import { CollapsibleSection } from "./CollapsibleSection";
+import { SECTION_SCOPE } from "./sectionOpen";
+import { markerClock, markersInOrder, markerTimeEq, MARKER_TEXT_MAX } from "../../domain/timeline/markers";
+import {
+  DELETE_LABEL, MARKER_JUMP_TITLE,
+  MARKER_MOVE_LABEL, MARKER_MOVE_TITLE, MARKER_SECTION_TITLE, MARKER_TEXT_PLACEHOLDER,
+} from "../uiLabels";
+import type { TimelineProject } from "../../domain/timeline/types";
+
+/**
+ * 目印の一覧と、辿る・書く・動かす・消す。
+ *
+ * ⚠️ **置く入口はここに無い**（ADR-0048・#1256 b2）＝「並び」の道具立ての行のボタンと `M` キー。
+ * ⚠️ **目印が無いときは何も出さない**＝以前は空でも節が 124px を取り、帯の入る高さを削っていた。
+ *
+ * @param onJump その時刻へ再生位置を移す（**見える所まで連れて行く**のは呼ぶ側の責任＝`followPlayhead`）。
+ * @param onMove その目印を**再生位置へ動かす**（置けるのに直せない、を作らない＝ADR-0034 決定4）。
+ */
+export function TimelineMarkersSection({
+  doc, playheadSec, selectedMarkerId, busy, textGroup, onJump, onText, onMove, onRemove,
+}: {
+  doc: TimelineProject;
+  playheadSec: number;
+  /**
+   * **最後に置いた／動かした目印**（#1161 レビュー由来 🟡）。
+   *
+   * ⚠️ **再生位置の一致では足りない**＝再生中は時計が毎フレーム**生の秒**で上書きするので、
+   * 格子に落ちた目印の時刻とは実質一致しない。「どれが自分の置いた印か」を、
+   * 再生位置ではなく**選んだ相手**で示す。
+   */
+  selectedMarkerId?: string | null;
+  /** 押せないとき（書き出し中・取り込み中）＝理由つきで押せなくする。 */
+  busy?: { disabled?: boolean; title?: string };
+  /**
+   * 文字欄の履歴のまとめ（#1138 レビュー由来 🔴）。
+   *
+   * ⚠️ **この画面の文字欄はこれに一本化されている**＝手元 state ＋ `blur` で書き戻す形にすると、
+   * **欄が消えるとき `blur` が来ない**（欄を並べ替える・閉じる・画面を離れる）ので
+   * **打ちかけが黙って失われる**。`onChange` で書き、まとめは `textGroup` に任せる。
+   */
+  textGroup: {
+    onFocus: (e: { currentTarget: Element | null }) => void;
+    onBlur: () => void;
+    ref: (el: Element | null) => void;
+  };
+  onJump: (timeSec: number) => void;
+  onText: (markerId: string, text: string) => void;
+  onMove: (markerId: string) => void;
+  onRemove: (markerId: string) => void;
+}) {
+  const markers = markersInOrder(doc);
+  const fps = doc.videoSettings.fps;
+  if (markers.length === 0) return null;
+  return (
+    <CollapsibleSection scope={SECTION_SCOPE.timeline} title={MARKER_SECTION_TITLE} storageKey="markers">
+        {/* ⚠️ **自前で縦に流す**（#1138 レビュー由来 🔴）＝この欄は縦に流れないので、行が増えると
+            **帯の取り分を一方的に削り**、欄の高さを超えた行は**切れて到達できなくなる**（#1104 と同じ形）。 */}
+        <ul className="list-reset" style={{ maxHeight: "12rem", overflowY: "auto" }}>
+          {markers.map((m) => (
+            <li
+              key={m.id}
+              className="row gap-sm"
+              // ⚠️ **選んだ相手か、再生位置と同じ時刻か**（#1161 レビュー由来 🟡）＝
+              // 止めているときは再生位置で分かるが、**再生中は生の秒なので一致しない**。
+              style={{ alignItems: "center", ...(m.id === selectedMarkerId || markerTimeEq(m.timeSec, playheadSec) ? { outline: "1px solid var(--color-accent)" } : {}) }}
+            >
+              {/* ⚠️ **辿れること**が目印の本体＝押したらそこへ行く（置くだけにしない）。 */}
+              <button className="btn btn-ghost" onClick={() => onJump(m.timeSec)} title={MARKER_JUMP_TITLE}>
+                {/* ⚠️ **コマまで出す**＝秒で丸めると `3.1秒` と `3.4秒` が同じ表示になり、一覧で見分けがつかない。 */}
+                {markerClock(m.timeSec, fps)}
+              </button>
+              <input
+                className="input"
+                style={{ flex: "1 1 auto", minWidth: 0 }}
+                maxLength={MARKER_TEXT_MAX}
+                placeholder={MARKER_TEXT_PLACEHOLDER}
+                value={m.text ?? ""}
+                ref={textGroup.ref}
+                onFocus={textGroup.onFocus}
+                onBlur={textGroup.onBlur}
+                onChange={(e) => onText(m.id, e.target.value)}
+                {...(busy?.disabled ? { disabled: true } : {})}
+              />
+              <button className="btn btn-ghost" onClick={() => onMove(m.id)} title={MARKER_MOVE_TITLE} {...(busy ?? {})}>
+                {MARKER_MOVE_LABEL}
+              </button>
+              <button className="btn btn-danger" onClick={() => onRemove(m.id)} {...(busy ?? {})}>{DELETE_LABEL}</button>
+            </li>
+          ))}
+        </ul>
+    </CollapsibleSection>
+  );
+}

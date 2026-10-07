@@ -64,14 +64,34 @@ export const TEXT_ALIGN = {
   right: 'right',
 } as const satisfies Record<string, TextAlign>;
 
-/** キーフレームのイージング（④・ADR-0019）。 */
-export const EASINGS = ['linear', 'ease-in-out'] as const;
+/**
+ * キーフレームのイージング（④・ADR-0019）。
+ * ⚠️ `hold`（#1365）＝区間 [前KF, 当KF] は**前のキーの値のまま**で、当KF で一気に切り替わる（業界の「停止キーフレーム」）。
+ */
+export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'] as const;
 export type Easing = (typeof EASINGS)[number];
+
+/**
+ * **自由なカーブ**（#262）。CSS の `cubic-bezier(x1,y1,x2,y2)` と同じ形＝始点(0,0)・終点(1,1) を結ぶ
+ * 3次ベジェの制御点。`x` は 0〜1（時間が戻らない）・`y` は範囲外も許す（行き過ぎて戻る動きを作れる）。
+ */
+export interface BezierEasing {
+  bezier: [number, number, number, number];
+}
+
+/**
+ * イージングの指定＝**名前つき**か**自由なカーブ**（#262・判別できる形＝どちらの意味かが型で決まる）。
+ * 名前つきは `EASINGS`、自由なカーブは制御点4つ。未指定＝`linear`。
+ */
+export type EasingSpec = Easing | BezierEasing;
 
 /** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
 export const EASING = {
   linear: 'linear',
+  easeIn: 'ease-in',
+  easeOut: 'ease-out',
   easeInOut: 'ease-in-out',
+  hold: 'hold',
 } as const satisfies Record<string, Easing>;
 
 /** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */
@@ -107,6 +127,32 @@ export const ASSET_TYPES = [
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+/**
+ * 素材の種類の**受け入れ判定をテストで突き合わせる入力**（α-6 出口監査 🟡）。
+ *
+ * ⚠️ **同じ一覧が Rust 側（`is_known_asset_type`）にもある**＝境界で形を見るのに要る。
+ * Rust 側のコメントは「テストで同値性を固定する」と書いているのに**その固定が無かった**ので、
+ * `LIBRARY_ASSET_ID_SAMPLES` と同じ流儀でここに入力を置き、両側のテストが同じ答えになることを見る。
+ * ⚠️ **ずれると「選んだ種類を黙って捨てる」**（`update_library_asset` は知らない値を書かない）。
+ */
+export const ASSET_TYPE_SAMPLES: readonly string[] = [
+  ...ASSET_TYPES,
+  'Image', // 大文字
+  'audio', // 似ているが別の語
+  'movie',
+  '', // 空
+];
+
+/**
+ * 素材の種類として受けてよい値か（α-6 出口監査 ℹ️）。
+ *
+ * ⚠️ **型を狭める述語にしてある**＝呼ぶ側が `as AssetType` を書かずに済む（キャストは検査を素通り
+ * させるので、`unknown` から入る経路〔よく使う素材の目録〕で効く。`isKnownFontId` と同じ流儀）。
+ */
+export function isAssetType(v: unknown): v is AssetType {
+  return typeof v === 'string' && (ASSET_TYPES as readonly string[]).includes(v);
+}
+
 /** AssetType の値を参照するための定数（§2-7：ロジックでの文字列直書きを避ける）。 */
 export const ASSET_TYPE = {
   image: 'image',
@@ -133,6 +179,18 @@ export function isFreeSlotAssetType(type: AssetType): boolean {
   return (FREE_SLOT_ASSET_TYPES as readonly AssetType[]).includes(type);
 }
 
+/**
+ * **そのファイル自体が絵として出せる**種別か（#926）。小さな絵（サムネイル）を出す判定。
+ *
+ * ⚠️ **`isFreeSlotAssetType` とは別**＝あちらは「映像として置けるか」で**動画を含む**が、
+ * 動画は**ファイルをそのまま `<img>` にできない**（代表フレームが要る）。棚には代表フレームが
+ * 無いので、ここでは含めない＝**出せない絵を出そうとして壊れた画像枠を並べない**。
+ */
+export function isPreviewableImageType(type: AssetType): boolean {
+  return type === ASSET_TYPE.image || type === ASSET_TYPE.yuko
+    || type === ASSET_TYPE.logo || type === ASSET_TYPE.qr || type === ASSET_TYPE.decor;
+}
+
 // 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
 export const VIDEO_KINDS = ['recruit', 'general'] as const;
 export type VideoKind = (typeof VIDEO_KINDS)[number];
@@ -157,7 +215,60 @@ export type Purpose = (typeof PURPOSES)[number] | (typeof GENERAL_PURPOSES)[numb
 export const LAYER_TYPES = [
   'background', 'slot', 'text', 'subtitle', 'character', 'decor', 'shape', 'logo',
 ] as const;
+
+/** 層の種別の名前つき参照（`LAYER_TYPES` と同じ値・直書きを避けるための単一の参照元＝§2-7）。 */
+export const LAYER_TYPE = {
+  background: 'background',
+  slot: 'slot',
+  text: 'text',
+  subtitle: 'subtitle',
+  character: 'character',
+  decor: 'decor',
+  shape: 'shape',
+  logo: 'logo',
+} as const;
+
 export type LayerType = (typeof LAYER_TYPES)[number];
+
+/**
+ * 素材の**寄せ**（#634・`05 §8`「トリミング位置をユーザー調整可能にする」）。
+ * `fit:'cover'` で枠に収まらない側をどこで切るかを決める（既定＝中央）。`contain` では余白の寄せになる。
+ */
+export const CROP_ALIGN_XS = ['left', 'center', 'right'] as const;
+export const CROP_ALIGN_YS = ['top', 'middle', 'bottom'] as const;
+export type CropAlignX = (typeof CROP_ALIGN_XS)[number];
+export type CropAlignY = (typeof CROP_ALIGN_YS)[number];
+
+/**
+ * 切り抜きの効かせ方（#634）。`mask`＝**箱の辺を隠す**（既定・中身は動かない）／
+ * `fill`＝**残った素材を枠いっぱいに映し直す**（`kind='slot'` のみ・素材の実寸が要る）。
+ */
+export const CROP_MODES = ['mask', 'fill'] as const;
+export type CropMode = (typeof CROP_MODES)[number];
+export const CROP_MODE = {
+  mask: 'mask',
+  fill: 'fill',
+} as const satisfies Record<CropMode, CropMode>;
+
+/** 切り抜きの効かせ方の既定（箱の辺を隠す）。**判定・描画・画面がここだけを見る**。 */
+export const CROP_MODE_DEFAULT = CROP_MODE.mask;
+
+/** 値の名前つき参照（§6/§2-7：文字列直書きを避ける）。 */
+export const CROP_ALIGN_X = {
+  left: 'left',
+  center: 'center',
+  right: 'right',
+} as const satisfies Record<CropAlignX, CropAlignX>;
+
+export const CROP_ALIGN_Y = {
+  top: 'top',
+  middle: 'middle',
+  bottom: 'bottom',
+} as const satisfies Record<CropAlignY, CropAlignY>;
+
+/** 寄せの既定（中央）。**判定・描画・画面がここだけを見る**（既定が3か所に散らない）。 */
+export const CROP_ALIGN_DEFAULT_X = CROP_ALIGN_X.center;
+export const CROP_ALIGN_DEFAULT_Y = CROP_ALIGN_Y.middle;
 
 export const SLOT_TYPES = ['image_or_video', 'image', 'video'] as const;
 export type SlotType = (typeof SLOT_TYPES)[number];
@@ -230,6 +341,11 @@ export const TRANSITION_DIRECTION = {
   down: 'down',
 } as const satisfies Record<string, TransitionDirection>;
 
+/** 素材の「AI解析」（`asset.aiDescription`）を書いたのは誰か（#1317・ADR-0052 追補13）。 */
+export const AI_DESCRIPTION_AUTHORS = ['ai', 'user'] as const;
+export type AiDescriptionAuthor = (typeof AI_DESCRIPTION_AUTHORS)[number];
+export const AI_DESCRIPTION_AUTHOR = { ai: 'ai', user: 'user' } as const satisfies Record<string, AiDescriptionAuthor>;
+
 export const NARRATION_STATUSES = ['none', 'pending', 'generated', 'failed'] as const;
 export type NarrationStatus = (typeof NARRATION_STATUSES)[number];
 
@@ -247,6 +363,49 @@ export type RenderStatus = (typeof RENDER_STATUSES)[number];
 export const FORMALITIES = ['casual', 'standard', 'formal'] as const;
 export type Formality = (typeof FORMALITIES)[number];
 
+/**
+ * プロジェクトの文書形式（ADR-0032・11 §1）。project.json のトップレベル `format` で判別する。
+ * **ファイルに書かれるのは `'timeline'` だけ**で、場面形式は `format` を持たない（不在＝場面形式）。
+ * `'scene'` は `resolveProjectFormat` が返す**解決値**であって永続化しない
+ * （`project.schema` は `additionalProperties:false` ゆえ書くと検証を通らない・CI の must-reject で固定）。
+ */
+export const PROJECT_FORMATS = ['scene', 'timeline'] as const;
+export type ProjectFormat = (typeof PROJECT_FORMATS)[number];
+
+/** ProjectFormat の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const PROJECT_FORMAT = {
+  scene: 'scene',
+  timeline: 'timeline',
+} as const satisfies Record<string, ProjectFormat>;
+
+/** `format` が無い／`'timeline'` でない project.json は場面形式＝後方互換の既定（11 §1）。 */
+export const DEFAULT_PROJECT_FORMAT = PROJECT_FORMAT.scene;
+
+/** タイムラインのトラック種別（ADR-0032）。置けるクリップの種別を決める。 */
+export const TRACK_KINDS = ['visual', 'audio'] as const;
+export type TrackKind = (typeof TRACK_KINDS)[number];
+
+/** TrackKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const TRACK_KIND = {
+  visual: 'visual',
+  audio: 'audio',
+} as const satisfies Record<string, TrackKind>;
+
+/** タイムラインのクリップ種別（ADR-0032）。slot/text/shape/subtitle は FreeElementKind と同義、
+ *  template＝テンプレを素材として置く、audio＝音（素材/同梱BGM）、voice＝読み上げ（#628）。
+ *  audio と voice を分けるのは必須フィールドが別物だから＝voice は読み上げ文と話者を持ち、
+ *  音の素材（assetId/bundledBgmId）を持たない。 */
+export const TIMELINE_CLIP_KINDS = [...FREE_ELEMENT_KINDS, 'template', 'audio', 'voice'] as const;
+export type TimelineClipKind = (typeof TIMELINE_CLIP_KINDS)[number];
+
+/** TimelineClipKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const TIMELINE_CLIP_KIND = {
+  ...FREE_ELEMENT_KIND,
+  template: 'template',
+  audio: 'audio',
+  voice: 'voice',
+} as const satisfies Record<string, TimelineClipKind>;
+
 // schema の Warning.severity に対応
 export const WARNING_SEVERITIES = ['info', 'warning', 'error'] as const;
 export type WarningSeverity = (typeof WARNING_SEVERITIES)[number];
@@ -255,3 +414,25 @@ export type WarningSeverity = (typeof WARNING_SEVERITIES)[number];
 export function isSceneCategory(value: string): value is SceneCategory {
   return (SCENE_CATEGORIES as readonly string[]).includes(value);
 }
+
+/**
+ * 素材の**使い方**（#819-3）。値は1か所（§2-7）＝作る側（`videoPlacementsOfClip`）と
+ * 数える側（`clipImageAssetUses`）と画面が同じものを見る。
+ *
+ * ⚠️ **中立な置き場に置く**（PR #827 レビュー 🟡）＝`export.ts` に置くと、値を作っている
+ * `video.ts` から実行時に読めない（`export.ts` → `video.ts` の実行時 import があるので**循環**する）。
+ * 比較側だけ定数にして**作る側が直書きのまま**では、綴りが別々に生きる状態が消えない。
+ */
+export const ASSET_USE_KIND = { direct: 'direct', slot: 'slot', character: 'character' } as const;
+
+export type AssetUseKind = (typeof ASSET_USE_KIND)[keyof typeof ASSET_USE_KIND];
+
+/** 喋っている間の動き（ADR-0056・#1367）＝はねる／ゆらゆら／ふくらむ。 */
+export const TALK_MOTION_KINDS = ['bounce', 'bob', 'pulse'] as const;
+export type TalkMotionKind = (typeof TALK_MOTION_KINDS)[number];
+export const TALK_MOTION_KIND = {
+  bounce: 'bounce',
+  bob: 'bob',
+  pulse: 'pulse',
+} as const satisfies Record<string, TalkMotionKind>;
+

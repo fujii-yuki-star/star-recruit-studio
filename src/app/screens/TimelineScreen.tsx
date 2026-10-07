@@ -5,6 +5,7 @@ import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { TimelineView } from "../components/TimelineView";
+import { BakeToTimelinePanel } from "../components/BakeToTimelinePanel";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
 
@@ -17,6 +18,8 @@ interface TimelineScreenProps {
  * 編集はまだ無し（オーバーレイ編集は ③(3) 以降）。データは store の分解状態から assembleProject で組み立てて渡す。
  */
 export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
+  const hasRetiredTimelineEdits = useProjectStore((s) => s.hasRetiredTimelineEdits);
+  const dismissRetiredTimelineNotice = useProjectStore((s) => s.dismissRetiredTimelineNotice);
   const { scenes, parts, assets, meta, narrationAudioById } = useProjectStore();
   // 場面ベース project → 時間軸射影。掛け合いの行区間は実音声長で表示する（未指定だと最終行だけ全幅・#392）。
   const timeline = useMemo(
@@ -29,20 +32,36 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
 
   return (
     <div className="main-scroll">
+      {/* ⚠️ **見るだけであることを、読む前に見せる**（#1032）＝説明の一文だけだと、
+          帯を掴もうとして空振りしてから気づく。
+          ⚠️ **名前は正典のものをそのまま使う**（`06 §12`「見わたすタイムライン」）＝見出しは
+          「タイムライン」だけで、**編集画面（タイムライン編集）と見分けがつかなかった**。 */}
       <PageHead
-        title="タイムライン"
-        desc="動画全体の時間の流れを、場面・テロップ・音声・BGM のトラックで見渡せます。"
+        title="見わたすタイムライン"
+        desc="動画全体の時間の流れを、場面・テロップ・音声・BGM のトラックで見渡せます。ここでは見るだけで、時間の流れを直すときはタイムライン編集用の動画を作ります。"
+        actions={<span className="badge badge-gray">見るだけ</span>}
       />
+      {/* 旧・場面横断タイムラインの手編集（#635）。**消していない**ことと、次の行動を伝える（§2-5）。 */}
+      {hasRetiredTimelineEdits && (
+        <div className="notice notice-info" role="status">
+          <p>
+            この動画には、以前この画面で直した時間の流れ（テロップの位置など）が残っていますが、
+            <strong>動画には反映されなくなりました</strong>。内容は消していません。
+            時間の流れを細かく作るときは、下の「タイムラインで編集する形にする」から作り直してください。
+          </p>
+          <button className="btn btn-ghost btn-sm" onClick={dismissRetiredTimelineNotice}>
+            閉じる
+          </button>
+        </div>
+      )}
       <div className="card">
         <TimelineView timeline={timeline} />
       </div>
+      <BakeToTimelinePanel onNavigate={onNavigate} />
       <div className="row gap-sm mt-lg">
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("preview")}>
           <ArrowLeftIcon size={16} />
           仕上がり確認へ戻る
-        </button>
-        <button className="btn btn-primary" onClick={() => onNavigate("timeline-edit")}>
-          タイムラインを編集
         </button>
         <button className="btn btn-secondary" onClick={() => onNavigate("scene-edit")}>
           場面を直す

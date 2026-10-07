@@ -1,17 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
+import { useStartupJob } from "./app/hooks/useStartupJob";
+import { useStartupJobStore } from "./app/store/startupJobStore";
+import { SCREEN_TITLES } from "./app/screenTitles";
+import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
-import { isExportBusy, useProjectStore } from "./app/store/projectStore";
+import { hasOpenProject, isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
+import { ChevronRightIcon } from "./app/components/icons";
+import { SIDEBAR_EDITOR_SCREENS, useEditorSidebarCollapsed, useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
+import { useAppearance } from "./app/hooks/useAppearance";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
+import { BulkVoiceBanner } from "./app/components/BulkVoiceBanner";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
-import { DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
+import { currentProjectEntries, DEFAULT_PROJECT_RETURN, keepsSceneEditTrail, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -20,33 +28,16 @@ import { DraftScreen } from "./app/screens/DraftScreen";
 import { SceneEditScreen } from "./app/screens/SceneEditScreen";
 import { PreviewScreen } from "./app/screens/PreviewScreen";
 import { TimelineScreen } from "./app/screens/TimelineScreen";
-import { TimelineEditScreen } from "./app/screens/TimelineEditScreen";
+import { TimelineProjectScreen } from "./app/screens/TimelineProjectScreen";
+import { useTimelineStore } from "./app/store/timelineStore";
 import { PrecheckScreen } from "./app/screens/PrecheckScreen";
 import { ExportScreen } from "./app/screens/ExportScreen";
 import { LooksScreen } from "./app/screens/LooksScreen";
 import { LooksEditScreen } from "./app/screens/LooksEditScreen";
 import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
+import { HelpScreen } from "./app/screens/HelpScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
-
-const titles: Record<ScreenId, string> = {
-  home: "プロジェクト", // サイドバー先頭「プロジェクト」＝一覧（現ホーム統合・#399 B案）。名前と画面を一致させる。
-  wizard: "新しい動画を作る",
-  confirm: "動画案を作る前の確認",
-  generating: "動画案を作成中",
-  draft: "動画のたたき台を確認",
-  "scene-edit": "場面編集",
-  preview: "仕上がり確認",
-  timeline: "タイムライン",
-  "timeline-edit": "タイムラインを編集",
-  precheck: "公開前チェック",
-  export: "動画を書き出す",
-  looks: "見た目パターンを管理",
-  "looks-edit": "見た目パターンを編集",
-  materials: "素材を管理",
-  settings: "設定",
-  about: "このアプリについて",
-};
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
@@ -56,6 +47,25 @@ function App() {
   // 画面遷移は必ずこの navigate を通す（直接 setScreen を配らない）＝遷移のたびに戻り先を同時更新する。
   // effect で screen を後追いすると setState 連鎖になる（React の警告）ため、遷移時に1回で確定する（純粋関数で判定）。
   const navigate = useCallback((next: ScreenId) => {
+    // 離れる前に聞きたい画面があれば、ここで一度だけ聞く（#719）。断られたら**遷移しない**
+    // ＝確認を出すのは断った側の責任（黙って止めない・§2-5）。サイドバーもこの入口を通るので、
+    // 画面内のボタンだけに確認が付いていて素通しできる、という穴が構造的に塞がる。
+    if (!canNavigate(next)) {
+      // ⚠️ **断られたら、行き先で寄る指定も落とす**（PR #1074 レビュー）。
+      // 導線はどれも**指定を置いてから遷移を頑む**形なので、ここで断ると**指定だけが残る**。
+      // 残ると、あとでサイドバーから素直にその画面を開いたときに**勝手に寄る**（押してもいない指定で動く）。
+      // ⚠️ **入口はここひとつ**なので、どの画面が関門を持っても同じように守れる
+      //（導線ごとに書くと、関門が後から付いた画面でだけ漏れる）。
+      // ⚠️ 落とすのは**寄る先の指定だけ**＝「どの場面を編集中か」（`editingSceneId`）は
+      // 遷移とは別に意味を持つので触らない。
+      const st = useProjectStore.getState();
+      st.setEditingSceneFocus(null);
+      st.setEditingSceneAssist(null); // すぐ頼む AI 補助の印（ADR-0053 決定2）も同じ＝残すと押してもいないのに頼む
+      st.setSettingsFocus(null);
+      st.setSceneEditTrail(null); // 直す場面の並びも同じ＝残すと押してもいない「公開前チェックへ戻る」が出る
+      return;
+    }
+    if (!keepsSceneEditTrail(next)) useProjectStore.getState().setSceneEditTrail(null);
     setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
     setScreen(next);
   }, []);
@@ -67,14 +77,44 @@ function App() {
   const isExporting = isExportBusy(exportPhase);
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
+  const refreshUserFonts = useProjectStore((s) => s.refreshUserFonts);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
-  const hasProjectContent = useProjectStore((s) => s.status !== "idle" || s.scenes.length > 0);
-  const projectName = useProjectStore((s) => s.meta.projectName);
+  // 「今の動画」を出すかは**同じ問い**（動画を開いているか）＝共有の判定から採る（差分再監査 6巡目 🟡）。
+  // ⚠️ **2つの形式は同時に開いたままが正規の状態**（#987→#1006）＝`HomeScreen` は
+  //「タイムラインは別の文書なので確認を出さない」＝場面形式を閉じさせない。
+  // 場面形式からしか採っていなかったので、タイムライン編集中は**「今の動画」が出ない**か、
+  // **別の動画の名前を出したまま押すと別の文書へ飛んだ**（#987）。
+  // さらに直近にいる方だけを指す形にしても**もう片方へは戻れない**ままだった（#1006）ので、
+  // いまは**開いている形式のぶんだけ並べる**。
+  const sceneOpen = useProjectStore(hasOpenProject);
+  const sceneName = useProjectStore((s) => s.meta.projectName);
+  const timelineName = useTimelineStore((s) => s.doc?.projectName ?? null);
+  // ⚠️ **決め方は `navigation.ts` に1つ**＝画面の中で書くと、片方の形式を足したときに配り忘れる。
+  const currentProjects = currentProjectEntries({
+    returnTo: projectReturnTo,
+    sceneOpen,
+    sceneName,
+    timelineName,
+    current: screen,
+  });
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(navigate);
+  // 起動のときに頼まれた仕事（取り込み・書き出し）を進める（ADR-0042・#1184）。
+  useStartupJob(navigate);
+  const startupNotice = useStartupJobStore((st) => st.notice);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
+  // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
+  // OS の明暗が変わったら追いつく（「OS に合わせる」を選んだ人は開き直しを強いられない）。
+  useAppearance();
+  // 左の帯を畳んでいるか（#1103）。画面の好みなので覚える（`localStorage`・ADR-0033）。
+  const [outsideCollapsed, setOutsideCollapsed] = useSidebarCollapsed();
+  // 編集画面では**別に覚え、畳んだ状態で始める**（ADR-0048・#1256 b1）＝作業場を最大にする。
+  const [editorCollapsed, setEditorCollapsed] = useEditorSidebarCollapsed();
+  const inEditor = SIDEBAR_EDITOR_SCREENS.has(screen);
+  const sidebarCollapsed = inEditor ? editorCollapsed : outsideCollapsed;
+  const setSidebarCollapsed = inEditor ? setEditorCollapsed : setOutsideCollapsed;
   // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。
   // 有効にするのは「取り消す/やり直す」UI がある画面だけ（UNDO_REDO_SCREENS＝たたき台/場面編集/タイムライン編集）。
   // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、
@@ -85,11 +125,24 @@ function App() {
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
+  // ⚠️ **頼まれごとが分かるまで、自動では開かない**（PR #1197 レビュー 🔴・#1184）＝
+  // 起動の引数で別の動画を指されているのに自動で開くと、**どちらが勝つか**が IPC の往復の速さで決まり、
+  // 負けると **AI が指した動画ではなく直前の動画が書き出される**（エラーも出ず、成功として返る）。
+  // ⚠️ **待つのは「分かるまで」だけ**＝頼まれていないと分かれば、すぐ自動で開く（起動が遅くならない）。
+  const startupRequestKnown = useStartupJobStore((st) => st.requestKnown);
   useEffect(() => {
+    // ⚠️ **ここで待たない**（変異チェックで等価と分かった）＝最初は「分からない」ので
+    // 下の条件が偽になり、**自動では開かない**。待つ形にすると、見た目パターンと持ち込みフォントの
+    // 読み込みまで遅れる（それらは頼まれごとと関係が無い）。
     const last = getLastProjectId();
-    if (last) void loadProject(last).catch(() => {});
+    if (last && startupRequestKnown === "none") void loadProject(last).catch(() => {});
     void loadUserTemplates().catch(() => {});
-  }, [loadProject, loadUserTemplates]);
+    // ⚠️ **持ち込みフォントは起動時に1回そろえる**（α-6 出口監査 🟡11）＝`loadUserFonts` の入口が
+    // 設定・公開前チェック・書き出しにしか無かったため、**場面編集・仕上がり確認・タイムライン編集では
+    // プレビューだけ既定の字体**になっていた（書き出しは実物＝ADR-0001 のパリティが崩れる）。
+    // 画面ごとに数え上げると必ず漏れるので、**文書より上の起点で1回**通す。
+    void refreshUserFonts().catch(() => {});
+  }, [loadProject, loadUserTemplates, refreshUserFonts, startupRequestKnown]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
@@ -116,8 +169,8 @@ function App() {
         return <PreviewScreen onNavigate={navigate} />;
       case "timeline":
         return <TimelineScreen onNavigate={navigate} />;
-      case "timeline-edit":
-        return <TimelineEditScreen onNavigate={navigate} />;
+            case "timeline-project":
+        return <TimelineProjectScreen onNavigate={navigate} />;
       case "precheck":
         return <PrecheckScreen onNavigate={navigate} />;
       case "export":
@@ -130,6 +183,8 @@ function App() {
         return <MaterialsScreen onNavigate={navigate} />;
       case "settings":
         return <SettingsScreen onNavigate={navigate} />;
+      case "help":
+        return <HelpScreen />;
       case "about":
         return <AboutScreen />;
       default:
@@ -138,15 +193,52 @@ function App() {
   }
 
   // 場面編集・生成中・見た目パターン編集は独自ヘッダのため、共通トップバー（プロジェクト保存等）は表示しない
-  const hasOwnHeader = screen === "scene-edit" || screen === "generating" || screen === "looks-edit";
+  // 共通トップバーの「保存」とバッジは**場面形式の文書**を保存する（projectStore）。タイムライン形式は
+  // 別の文書なので出さない＝見ている文書と違うものが保存される／場面文書を開いていないときは空の
+  // プロジェクトが新しく作られる、を防ぐ（ADR-0026④）。画面は自前の見出し（PageHead）を持つ。
+  const hasOwnHeader =
+    screen === "scene-edit" || screen === "generating" || screen === "looks-edit" || screen === "timeline-project";
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={navigate} projectName={projectName} hasProjectContent={hasProjectContent} currentProjectTarget={projectReturnTo} />
+      {/* 起動のときに頼まれた仕事の知らせ（ADR-0042・#1184）＝うまくいった／断った、を**画面に出す**。
+          ⚠️ **記録だけにしない**＝頼んだのが AI でも、**画面を見るのは人**。黙って終わると、
+          「起動したのに何も起きない」になる（§2-5 の行き止まり）。
+          ⚠️ **自分で消せる**＝作業のじゃまになったら閉じられる（出しっぱなしにしない）。 */}
+      {startupNotice && (
+        <div className="startup-notice" role="status">
+          <span>{startupNotice}</span>
+          <button type="button" onClick={() => useStartupJobStore.getState().setNotice(null)} aria-label="この知らせを閉じる">
+            閉じる
+          </button>
+        </div>
+      )}
+      {/* 左の帯を畳む（#1103）。⚠️ **畳んだら完全に隠す**（利用者決定 2026-09-10）＝作業する場所を最大にする。
+          ⚠️ **戻す道は消さない**（ADR-0033 決定6/8）＝隠している間は細い取っ手をいつも出す。
+          `<button>` なので `Tab` で辿り着けて押せる（掴む操作しか無い戻り方を作らない）。 */}
+      {sidebarCollapsed ? (
+        <button
+          type="button"
+          className="sidebar-reveal"
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="メニューを出す"
+          aria-expanded={false}
+          title="メニューを出す"
+        >
+          <ChevronRightIcon size={18} />
+        </button>
+      ) : (
+        <Sidebar
+          current={screen}
+          onNavigate={navigate}
+          currentProjects={currentProjects}
+          onCollapse={() => setSidebarCollapsed(true)}
+        />
+      )}
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">
-            <div className="topbar-title">{titles[screen]}</div>
+            <div className="topbar-title">{SCREEN_TITLES[screen]}</div>
             <div className="topbar-actions">
               <SaveStatusBadge />
               {/* ウィザードはヘッダ保存を出さない（#401）。ヘッダ保存は applyForm を呼ばず入力を取りこぼす「保存トラップ」
@@ -178,7 +270,7 @@ function App() {
         {!hasOwnHeader && screen !== "home" && confirmNew && (
           <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
             <span>
-              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはプロジェクト一覧からいつでも開けます）。
+              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みの動画は一覧からいつでも開けます）。
             </span>
             {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
             <div className="row gap-sm">
@@ -195,6 +287,10 @@ function App() {
             （`hasOwnHeader` で囲まない）＝場面編集で待っている利用者にこそ必要。書き出し画面では出さない
             （そこに結果が出ており二重になる）＝開いた時点で既読にする（下の ExportScreen 側で解除）。 */}
         {screen !== "export" && <ExportResultNotice onNavigate={navigate} />}
+        {/* 声をまとめて作っている間の進み具合と中止を、**どの画面にいても**出す（#1024 ⑤）。
+            ⚠️ **独自ヘッダの画面でも出す**（`hasOwnHeader` で囲まない）＝場面編集・タイムライン編集で
+            待っている利用者にこそ要る。操作が画面に出ている間は部品側が数えて自分で引っ込む。 */}
+        <BulkVoiceBanner />
         {renderScreen()}
       </div>
     </div>

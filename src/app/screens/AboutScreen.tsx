@@ -8,6 +8,11 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../domain/bgm/bgmCatalog";
 
+/** 同梱のローカル AI のライセンス本文の置き場所（インストール先の中の相対パス・#1289）。 */
+export const LOCAL_AI_LICENSE_DIR = "local_llm/LICENSES";
+/** 同梱の FFmpeg の告知の置き場（#1241）。 */
+export const FFMPEG_LICENSE_DIR = "ffmpeg/LICENSES";
+
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
 const credits: { name: string; role: string; license: string; credit?: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
   {
@@ -18,8 +23,22 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   {
     name: "FFmpeg",
     role: "動画の書き出し",
-    license: "LGPL v3（ソースは下記の入手先をご参照ください）",
+    // 中に含む部品（OpenH264＝BSD-2-Clause）の告知と GPL v3 の本文は同梱フォルダに置く（#1241）。
+    license: `LGPL v3（ソースは下記の入手先をご参照ください。中に含む部品のライセンスも含め、全文はインストール先の ${FFMPEG_LICENSE_DIR} フォルダにあります）`,
     source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
+  },
+  // このパソコンの中で動く AI（ADR-0051・#1289）。全文と改変（変換・軽量化）の告知は同梱フォルダ `local_llm/LICENSES` に置く。
+  {
+    name: "llama.cpp",
+    role: "このパソコンの中で動く AI（動画案・写真の説明・編集の手伝い）",
+    license: `MIT（中に組み込まれている部品のライセンスも含め、全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
+    source: { label: "提供元", url: "https://github.com/ggml-org/llama.cpp" },
+  },
+  {
+    name: "Qwen3.5-2B（Qwen Team, Alibaba Cloud）",
+    role: "このパソコンの中で動くAIのモデル",
+    license: `Apache-2.0／公式のモデルを、このソフト用に変換して軽くしたもの（変えた点の告知と全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
+    source: { label: "提供元", url: "https://huggingface.co/Qwen/Qwen3.5-2B" },
   },
   {
     name: "Gen Interface JP / Gen Interface JP Display",
@@ -131,8 +150,10 @@ export function AboutScreen() {
             })}
           </div>
 
+          {/* ⚠️ 動画側の出し方は選べる（ADR-0025・#359）＝「表示されます」と言い切ると事実と違う。
+              この画面のクレジット一覧は必須のまま（ADR-0025）＝ここを条件つきにはしない。 */}
           <p className="field-hint mt">
-            作成・書き出しする動画には、利用規約に基づき使用した声（{usedCredits.join(" / ")}）のクレジットが表示されます（仕上がり確認にも表示されます）。
+            作成・書き出しする動画には、利用規約に基づき使用した声（{usedCredits.join(" / ")}）のクレジットを表示できます（仕上がり確認にも同じ出し方で表示されます）。出し方は「動画を書き出す」で選べます。動画に出さない場合は、この表記を動画の説明欄などに記載してください。
           </p>
         </div>
       </div>

@@ -41,14 +41,19 @@ describe('parseTemplatePack', () => {
     expect(ids).toContain('bad_ratio');
   });
 
-  it('slot レイヤーは slotType 必須（無いと不採用）', () => {
+  it('slot レイヤーの slotType は値が不正なら不採用（#959 で「欠落」は補正に変更）', () => {
+    // ⚠️ **このテストは以前「slotType 欠落＝不採用」を固定しており、不具合の側を守っていた**（#959）。
+    // 見た目パターン作成エディタは差し込み口を足すとき slotType を書いていなかったので、
+    // 利用者が作ったものは保存できるのに読み込みで却下され、一覧から静かに消えていた。
+    // 欠落は取り込み時に補正する（`15 §6`）ようにしたので、ここで固定するのは
+    // **補正では直せない不正値**＝schema の enum 違反にする（検証そのものは効いたまま）。
     const { templates, rejected } = parseTemplatePack({
       ...validLandscape,
-      templateId: 'slot_no_type',
-      layers: [{ id: 'm', type: 'slot', x: 0, y: 0, w: 100, h: 100 }], // slotType 欠落
+      templateId: 'slot_bad_type',
+      layers: [{ id: 'm', type: 'slot', slotType: 'audio', x: 0, y: 0, w: 100, h: 100 }],
     });
     expect(templates).toHaveLength(0);
-    expect(rejected.map((r) => r.templateId)).toContain('slot_no_type');
+    expect(rejected.map((r) => r.templateId)).toContain('slot_bad_type');
   });
 
   it('単体オブジェクトも配列も受け付ける', () => {
@@ -153,5 +158,59 @@ describe('縦型（9:16）同梱テンプレの網羅（B3）', () => {
     for (const t of portrait()) {
       expect(t.canvas).toEqual({ width: 1080, height: 1920 });
     }
+  });
+});
+
+describe('取り込み時の自動補正（#959）', () => {
+  const withSlot = (slot: Record<string, unknown>) => ({
+    ...validLandscape,
+    templateId: 'test_repair_v1',
+    layers: [validLandscape.layers[0], { id: 'layer_001', type: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 1, ...slot }],
+  });
+
+  it('slotType の無い差し込み口を補って取り込む＝一覧から静かに消えない', () => {
+    const { templates, rejected } = parseTemplatePack(withSlot({}));
+    expect(rejected).toEqual([]);
+    expect(templates[0].layers[1].slotType).toBe('image_or_video');
+  });
+
+  it('textKey の無い文字層も同じ規則で補う（種別ごとに片方だけ直さない）', () => {
+    const raw = {
+      ...validLandscape,
+      templateId: 'test_repair_v2',
+      layers: [
+        validLandscape.layers[0],
+        { id: 'layer_001', type: 'text', x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+        { id: 'layer_002', type: 'subtitle', x: 0, y: 0, w: 100, h: 100, zIndex: 2 },
+      ],
+    };
+    const { templates, rejected } = parseTemplatePack(raw);
+    expect(rejected).toEqual([]);
+    expect(templates[0].layers[1].textKey).toBe('title');
+    expect(templates[0].layers[2].textKey).toBe('subtitle');
+  });
+
+  it('入っている値は上書きしない＝利用者が選んだ「動画だけ」が写真も可に化けない', () => {
+    const { templates } = parseTemplatePack(withSlot({ slotType: 'video' }));
+    expect(templates[0].layers[1].slotType).toBe('video');
+  });
+
+  it('補正で不正データを通さない＝ほかが壊れていれば従来どおり却下する', () => {
+    const { templates, rejected } = parseTemplatePack(withSlot({ w: 0 }));
+    expect(templates).toEqual([]);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].templateId).toBe('test_repair_v1');
+  });
+
+  it('補う所が無ければ元のオブジェクトをそのまま通す（無用な作り直しをしない）', () => {
+    const raw = withSlot({ slotType: 'image' });
+    const { templates } = parseTemplatePack(raw);
+    expect(templates[0]).toBe(raw as unknown as (typeof templates)[number]);
+  });
+
+  it('層が配列でない・種別が文字列でない壊れ方でも落ちない（補正が例外を投げない）', () => {
+    expect(() => parseTemplatePack({ ...validLandscape, layers: 'こわれ' })).not.toThrow();
+    expect(() => parseTemplatePack({ ...validLandscape, layers: [null, 7, { type: 3 }] })).not.toThrow();
+    expect(() => parseTemplatePack(null)).not.toThrow();
   });
 });

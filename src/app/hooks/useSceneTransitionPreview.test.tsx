@@ -78,6 +78,19 @@ describe("useSceneTransitionPreview（切替効果プレビュー・#408 Part 2�
     expect(result.current.playing).toBe(false);
   });
 
+  it("【#1095 レビュー】再生中にもう一度 play しても頭出しから流し直す（前の続きにならない）", () => {
+    const { result } = renderHook(() => useSceneTransitionPreview(ab({ transition: fade }), 1));
+    act(() => result.current.play());
+    advance(400); // 0.5 秒の途中まで進める
+    expect(result.current.progress).toBeGreaterThan(0.5);
+    act(() => result.current.play()); // 別のタイルを選び直した相当（playing は true のまま）
+    expect(result.current.progress).toBe(0);
+    // 古い rAF ループが生きていると、この 1 フレームで**選び直す前の経過時間**（0.4秒相当）が書き戻る。
+    advance(500); // 新しい開始時刻から 0.1 秒
+    expect(result.current.progress).toBeCloseTo((Math.floor(0.1 * 30) / 30) / 0.5, 5);
+    expect(result.current.playing).toBe(true);
+  });
+
   it("別の場面へ切り替えると再生を止めて頭出しする", () => {
     const { result, rerender } = renderHook(
       ({ s }: { s: Scene }) => useSceneTransitionPreview([prev, s], 1),

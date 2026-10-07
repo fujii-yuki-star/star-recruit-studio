@@ -4,7 +4,7 @@
 // 次の編集で idle に戻れば再開する（失敗ループを避ける／手動保存でも復帰可）。App で1回だけ呼ぶ。
 import { useEffect } from "react";
 import { useProjectStore } from "../store/projectStore";
-import { hasWorkInProgress } from "./newProjectGuard";
+import { hasWorkInProgress } from "../newProjectGuard";
 
 /** 最後の操作から自動保存までの待ち（ms）。編集が続く間はリセットし、落ち着いてから1回走らせる。 */
 export const AUTOSAVE_DEBOUNCE_MS = 3000;

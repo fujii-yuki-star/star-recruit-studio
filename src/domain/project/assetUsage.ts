@@ -3,7 +3,7 @@
 // 実効表現だけを「使用中」と数える（ADR-0030）＝**その見た目が実際に描く分だけ**：自由配置要素は FREE テンプレのとき、
 // assetRefs は差し込み先の層があるキー、立ち絵は character 層があるとき。休眠側（通常場面に残った freeLayout／
 // 差し込み先を失った assetRefs）は描画されないので数えない＝切替後の誤カウント/誤表示を防ぐ。
-import { FREE_CATEGORY } from '../enums';
+import { FREE_CATEGORY, LAYER_TYPE } from '../enums';
 import { templateSlotIds } from '../template/layerOps';
 import type { Template } from '../template/types';
 import type { Scene } from './types';
@@ -26,7 +26,7 @@ import type { Scene } from './types';
  */
 export function sceneActiveAssetIds(scene: Scene, template: Template | undefined): string[] {
   const ids = sceneActivePlacedAssetIds(scene, template);
-  const hasCharacterLayer = template ? template.layers.some((l) => l.type === 'character') : true;
+  const hasCharacterLayer = template ? template.layers.some((l) => l.type === LAYER_TYPE.character) : true;
   if (scene.character?.poseAssetId && hasCharacterLayer) ids.push(scene.character.poseAssetId);
   return ids;
 }
@@ -56,6 +56,71 @@ export function sceneActivePlacedAssetIds(scene: Scene, template: Template | und
 /** 1場面がこの素材を実効的に使っているか（実効テンプレの表現だけ・ADR-0030）。 */
 export function sceneUsesAsset(scene: Scene, assetId: string, template: Template | undefined): boolean {
   return sceneActiveAssetIds(scene, template).includes(assetId);
+}
+
+/**
+ * その素材を**どこかが指しているか**（#348・削除の安全判定）。
+ *
+ * ⚠️ **`sceneActiveAssetIds`（描画されるもの）とは別の規則**。理由＝**目的が違う**。
+ * - 公開前チェックの「使っていない素材」は**動画に出るか**を言う警告＝多少ずれても「そのままでよい」で済む。
+ * - こちらは**消してよいか**＝間違えると**取り消せない**（`assets` は履歴の外＝ADR-0020/0028）。
+ *
+ * だから**ゲートを一切かけない**（休眠も数える）：
+ * - 差し込み先の層を失った `assetRefs` のキー（通常→通常の切替で休眠・ADR-0030 追補6）
+ * - 通常テンプレ場面に残った `freeLayout`（FREE へ戻すと**再び描かれる**＝`11 §5` の約束）
+ * - character 層の無いテンプレでの `poseAssetId`
+ * - 見た目パターンが**解決できない**場面（別PCへ持ち込み・テンプレ削除・起動直後）
+ * - **BGM**（`bgmSettings.assetId`＝プロジェクト既定と場面ごとの両方）
+ *
+ * ⚠️ **BGM を入れる理由**＝場面だけを見ると、自分で取り込んだ BGM が「どこからも指されていない」に
+ * 落ちる。焼き出し（`bake.ts`）が同じ経路を数えているのが先例。
+ */
+export function referencedAssetIds(
+  scenes: readonly Scene[],
+  projectBgmAssetId?: string | null,
+): Set<string> {
+  const ids = new Set<string>();
+  const add = (id: string | null | undefined): void => { if (id) ids.add(id); };
+  add(projectBgmAssetId);
+  for (const s of scenes) {
+    for (const v of Object.values(s.assetRefs ?? {})) add(v);
+    for (const el of s.freeLayout ?? []) add(el.assetId);
+    add(s.character?.poseAssetId);
+    add(s.bgmSettings?.assetId);
+  }
+  return ids;
+}
+
+/**
+ * **どこからも指されていない**素材（#348）。まとめて消す対象はこれ。
+ *
+ * ⚠️ **「動画に出ていない」ではない**＝見た目を戻せば出てくるもの（休眠）は**消させない**。
+ * 公開前チェックの「使っていない素材」より**少なく**出るのは意図どおりで、
+ * **消す判断は安全側へ倒す**（数え過ぎると使っている素材を消させる＝取り消せない）。
+ * ⚠️ **取り消しで戻る場面も数える**（α-6 出口監査 🔴）＝「いま指されていない」だけでは足りない。
+ */
+export function unusedAssetIds(
+  assets: readonly { assetId: string }[],
+  scenes: readonly Scene[],
+  projectBgmAssetId?: string | null,
+  /**
+   * **取り消し・やり直しで戻る場面**（α-6 出口監査 🔴）。⚠️ **いま生きている場面だけで数えない**＝
+   * 場面を消す・写真を外すのはどちらも取り消せるのに、その直後に「まとめて消す」を押すと
+   * **実体ファイルごと消える**（`assets` は履歴の外＝ADR-0020）。取り消すと場面は戻るが素材は
+   * 戻らず、死んだ参照と灰色の枠だけが残る（取り込み直しても番号が変わる）。
+   * 読み上げ音声の剪定（`_doSave`）が同じ理由で `past`/`future` を数えているのと同じ流儀。
+   * ⚠️ **履歴側は動画全体の BGM（`bgmSettings.assetId`）を見ていない**（PR #922 レビュー ℹ️）＝
+   * いまの唯一の呼び出し（素材画面）は **BGM を一覧・削除の候補から外している**（`isListedMaterial`）ので
+   * 実害は無い。**別の画面から呼ぶときは、履歴の `meta` も渡す形へ広げること**（そのままだと
+   * 「BGM を差し替えて元を消す→取り消す」で同じ穴になる）。
+   */
+  historyScenes: readonly (readonly Scene[])[] = [],
+): string[] {
+  const referenced = referencedAssetIds(scenes, projectBgmAssetId);
+  for (const snap of historyScenes) {
+    for (const id of referencedAssetIds(snap)) referenced.add(id);
+  }
+  return assets.filter((a) => !referenced.has(a.assetId)).map((a) => a.assetId);
 }
 
 /** この素材を実効的に使っている場面の配列（順序は scenes のまま）。件数や一覧（逆引き・#406）に使う。 */

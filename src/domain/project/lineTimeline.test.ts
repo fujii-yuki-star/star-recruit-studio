@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, hasSimultaneousLines, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt, segmentLineIds } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, firstFrameLayoutOptions, hasSimultaneousLines, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt, segmentLineIds } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -402,5 +402,74 @@ describe('hasSimultaneousLines（同時に流れるセリフがあるか・#563�
 
   it('単一ナレーション（lines 不在）は false', () => {
     expect(hasSimultaneousLines(sc())).toBe(false);
+  });
+});
+
+// 先頭フレームを描くための入力（#1152・α 出口監査 🟡）。
+//
+// ⚠️ **「同じ描画核を通す」だけでは足りない**＝場面カードの見本は `layoutScene` を**入力なし**で
+// 呼んでいたので、字幕は `scene.texts.subtitle` を描き、**動画に一度も出ない字幕**を出していた。
+// ここは**大きい方のプレビュー・書き出しと同じ入力**を作る1か所。
+describe('firstFrameLayoutOptions（見本も先頭フレームの入力で描く・#1152）', () => {
+  it('掛け合いで頭に間があるなら、字幕は消す（見本だけ出す、を作らない）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 6, status: NARRATION_STATUS.none },
+    ];
+    // ⚠️ **`texts.subtitle` を持たせる**＝入力を渡さない実装なら**これが出てしまう**。
+    const scene = sceneWith({ lines, texts: { subtitle: '場面ぜんたいの字幕' } });
+    expect(firstFrameLayoutOptions(scene).subtitleText, '間なのに字幕が出ている').toBeNull();
+  });
+
+  it('掛け合いで頭に間が無いなら、先頭行の字幕（場面ぜんたいの字幕ではない）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 0, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 5, status: NARRATION_STATUS.none },
+    ];
+    const scene = sceneWith({ lines, texts: { subtitle: '場面ぜんたいの字幕' } });
+    expect(firstFrameLayoutOptions(scene).subtitleText).toBe('a');
+  });
+
+  // ⚠️ **`undefined` は `null` と別物**＝「テンプレの既定に任せる」と「間＝消す」を潰すと、
+  // 単独 narration の場面で字幕が消える（または間で出る）。
+  it('掛け合いでない場面は undefined（テンプレの既定に任せる＝消さない）', () => {
+    expect(firstFrameLayoutOptions(sceneWith({ texts: { subtitle: 'あ' } })).subtitleText).toBeUndefined();
+  });
+
+  it('FREE 字幕の相手も先頭の正準セグメントから渡す', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 0, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 5, status: NARRATION_STATUS.none },
+    ];
+    const seg = firstFrameLayoutOptions(sceneWith({ lines })).subtitleSegment;
+    expect(seg, 'セグメントを渡していない').toBeDefined();
+    expect(seg).toEqual(sceneSegmentSpecs(sceneWith({ lines }))[0]);
+  });
+
+  // ⚠️ **行の長さを見ないと、まったく違う行が出る**（#1152 の変異チェックで判明）＝
+  // 自動逐次（`startSec` を書かない掛け合い）は**声の長さで各行の開始が決まる**ので、
+  // 長さを渡さないと全行が 0 秒開始になり、**先頭フレームに「最後の行」**が出る。
+  // 「少しずれる」ではなく**別の行**になるので、見本と中身が正面から食い違う。
+  it('行の長さを見る（自動逐次では、渡さないと最後の行が出てしまう）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'さいしょ', status: NARRATION_STATUS.generated },
+      { lineId: 'line_002', text: 'さいご', status: NARRATION_STATUS.generated },
+    ];
+    const scene = sceneWith({ lines });
+    expect(firstFrameLayoutOptions(scene, { line_001: 3.5, line_002: 2 }).subtitleText).toBe('さいしょ');
+    // ⚠️ **渡さないとこうなる**＝この差が出ることを、検査自身で示す（等価な変異にしない）。
+    expect(firstFrameLayoutOptions(scene, {}).subtitleText).toBe('さいご');
+  });
+
+  // ⚠️ **大きい方と同じ答えになること**＝ここが違うと「カードと中身が食い違う」が戻る。
+  it('大きい方のプレビューが使う `firstFrameBoundary` と同じ字幕を出す', () => {
+    for (const lines of [
+      [{ lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none }],
+      [{ lineId: 'line_001', text: 'a', startSec: 0, status: NARRATION_STATUS.none }],
+      [{ lineId: 'line_001', text: 'a', startSec: 0, subtitleEnabled: false, status: NARRATION_STATUS.none }],
+    ] as NarrationLine[][]) {
+      const scene = sceneWith({ lines });
+      expect(firstFrameLayoutOptions(scene).subtitleText).toBe(firstFrameBoundary(scene).subtitleText);
+    }
   });
 });

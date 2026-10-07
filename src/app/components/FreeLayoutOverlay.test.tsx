@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
+import { doubleTap, pointerDownAt } from "../../test/pointer";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { FreeLayoutOverlay } from "./FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
+import { isPointerDragging } from "../hooks/usePointerDrag";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 
 // FreeLayoutOverlay の「対話」をブラウザ非依存で自動検証するサンプル（ADR-0014）。
 // 各要素ボックスの中身（テキスト等）は重ねる ScenePreview 側が描くため overlay のボックスは
@@ -95,7 +98,7 @@ describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
     const { boxes, onSelect, onMoveMany } = renderOverlay({ selectedIds: ["free_001"] });
     fireEvent.pointerDown(boxes[1], { button: 0, shiftKey: true, clientX: 50, clientY: 50, pointerId: 1 });
     expect(onSelect).toHaveBeenCalledWith("free_002", true);
-    fireEvent.pointerMove(boxes[1], { clientX: 90, clientY: 90, pointerId: 1 });
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 90, clientY: 90, pointerId: 1 });
     expect(onMoveMany).not.toHaveBeenCalled(); // Shift＋クリックは選択操作のみ
   });
 
@@ -105,7 +108,7 @@ describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     // 主（free_001・末尾）を掴んで動かす。free_001 start=(100,100), free_002 start=(0,0)、差分(+30,+40)。
     fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(boxes[0], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([
       { id: "free_001", x: 130, y: 140 },
       { id: "free_002", x: 30, y: 40 },
@@ -158,10 +161,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
 
   it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
     const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
-    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。時刻は固定（#645）。
+    doubleTap(boxes[0], { clientX: 120, clientY: 120 });
     expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
   });
 
@@ -201,7 +202,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
     expect(onSelectGroup).not.toHaveBeenCalled(); // 無言のグループ再選択なし
     // そのままドラッグしてもグループ全体も個別メンバーも動かない（変形グループは詳細パネルで編集）。
-    fireEvent.pointerMove(boxes[0], { clientX: 220, clientY: 220, pointerId: 1 });
+    fireEvent.pointerMove(boxes[0], { buttons: 1, clientX: 220, clientY: 220, pointerId: 1 });
     expect(onGroupTransform).not.toHaveBeenCalled();
     expect(onMoveMany).not.toHaveBeenCalled();
   });
@@ -212,7 +213,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
     fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     expect(onSelectGroup).not.toHaveBeenCalled(); // 個別ドラッグ＝グループ再選択なし
-    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(boxes[0], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 130, y: 140 }]); // free_001(100,100) を +30,+40 個別移動
   });
 
@@ -227,7 +228,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     const frame = screen.getByTestId("group-frame");
     // 枠内かつ**メンバー**（free_001＝100,100,400,120）の上＝まとまり移動（従来どおり）。
     fireEvent.pointerDown(frame, { button: 0, clientX: 200, clientY: 150, pointerId: 1 });
-    fireEvent.pointerMove(frame, { clientX: 230, clientY: 190, pointerId: 1 });
+    fireEvent.pointerMove(frame, { buttons: 1, clientX: 230, clientY: 190, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
   });
 
@@ -259,10 +260,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
       mockRect(root);
       const frame = screen.getByTestId("group-frame");
       // (400,150)＝free_001 だけがある場所（free_003 の外）。1度目＝まとまり選択、2度目＝ドリルイン。
-      const at = { button: 0, clientX: 400, clientY: 150, pointerId: 1 };
-      fireEvent.pointerDown(frame, at);
-      fireEvent.pointerUp(frame, { pointerId: 1 });
-      fireEvent.pointerDown(frame, at);
+      // 時刻を固定して送る＝間の再描画が遅くても二度押しとして扱われる（#645）。
+      doubleTap(frame, { clientX: 400, clientY: 150 });
       expect(onSelect).toHaveBeenCalledWith("free_001"); // 枠に奪われずドリルインが発火
     });
   });
@@ -274,7 +273,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     const se = screen.getByTestId("group-scale-se");
     // free_001=(100,100,400,120) → 枠中心(300,160)。開始(500,160)=距離200、移動先(700,160)=距離400 ⇒ scale 2。
     fireEvent.pointerDown(se, { button: 0, clientX: 500, clientY: 160, pointerId: 1 });
-    fireEvent.pointerMove(se, { clientX: 700, clientY: 160, pointerId: 1 });
+    fireEvent.pointerMove(se, { buttons: 1, clientX: 700, clientY: 160, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
   });
 
@@ -285,7 +284,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     const knob = screen.getByTestId("group-rotate-handle");
     // 枠中心(300,160) の右(500,160)＝3時方向＝90°（上=0°時計回り）。
     fireEvent.pointerDown(knob, { button: 0, clientX: 300, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(knob, { clientX: 500, clientY: 160, pointerId: 1 });
+    fireEvent.pointerMove(knob, { buttons: 1, clientX: 500, clientY: 160, pointerId: 1 });
     const calls = onGroupTransform.mock.calls;
     const last = calls[calls.length - 1];
     expect(last[0]).toBe("group_001");
@@ -312,7 +311,7 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     const se = screen.getByTestId("group-scale-se");
     // 中心(130,30)から距離100→200 で scale 2。素 bbox 中心(150,50)を pivot にしていると 2 にならない。
     fireEvent.pointerDown(se, { button: 0, clientX: 230, clientY: 30, pointerId: 1 });
-    fireEvent.pointerMove(se, { clientX: 330, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(se, { buttons: 1, clientX: 330, clientY: 30, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
   });
 });
@@ -330,7 +329,7 @@ describe("FreeLayoutOverlay: 範囲選択（マーキー・#274）", () => {
     fireEvent.pointerDown(root, { button: 0, clientX: 50, clientY: 50, pointerId: 1 });
     expect(onSelect).toHaveBeenCalledWith(null); // 空白押下で一旦解除
     expect(screen.getByTestId("marquee")).toBeInTheDocument(); // 矩形が出る
-    fireEvent.pointerMove(root, { clientX: 350, clientY: 350, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 350, clientY: 350, pointerId: 1 });
     // free_001(100,100,400,120) と free_002(0,0,200,200) が矩形(50..350)に交差。
     expect(onSelectMany).toHaveBeenLastCalledWith(["free_001", "free_002"]);
     fireEvent.pointerUp(root, { pointerId: 1 });
@@ -359,7 +358,7 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     // bbox=(0,0,200,200)。se 角を +200,+200 → bbox 2倍(0,0,400,400)。各要素も相対位置を保って2倍。
     const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(root, { clientX: 200, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 200, clientY: 200, pointerId: 1 });
     expect(onResizeMany).toHaveBeenLastCalledWith([
       { id: "free_001", x: 0, y: 0, w: 200, h: 200 },
       { id: "free_002", x: 200, y: 200, w: 200, h: 200 },
@@ -376,7 +375,7 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     // 非ロックは free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(locked) は含まれない。
     const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 100, clientY: 100, pointerId: 1 });
     expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
   });
 
@@ -390,7 +389,7 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     // 以前は回転要素を除外していたが、枠を見た目（回転後）AABB で取るため両方を一括拡縮に含める（#300(a)）。
     const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 100, clientY: 100, pointerId: 1 });
     // 幾何の厳密値は freeLayoutOps のユニットで検証。ここでは回転要素(free_002)が含まれる配線を確認する。
     expect(onResizeMany).toHaveBeenLastCalledWith(
       expect.arrayContaining([
@@ -399,6 +398,35 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
       ]),
     );
     expect(onResizeMany.mock.lastCall?.[0]).toHaveLength(2);
+  });
+
+  // ⚠️ #788-2：一括移動は「一緒に動かさなかったもの」を知らせるのに、**一括拡縮だけ黙って取り残して**いた
+  // ＝同じ理由で同じ除外をするのに、操作によって知らせたり知らせなかったりする（ADR-0026②）。
+  it("一括拡縮でも、固定して外したものを知らせる（黙って取り残さない・#788-2）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2 },
+      { id: "free_003", kind: FREE_ELEMENT_KIND.shape, x: 200, y: 200, w: 100, h: 100, zIndex: 3, locked: true },
+    ];
+    const onSkippedLocked = vi.fn();
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002", "free_003"], onSkippedLocked });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(screen.getByTestId("group-handle-se"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSkippedLocked).toHaveBeenCalledWith(["free_003"]);
+  });
+
+  // ⚠️ **数ではなく id を渡す**（#788-1）＝掴めない理由は呼び出し側だけが知っているので、
+  // ここで数にしてしまうと理由別の案内が作れない。
+  it("一括移動は、一緒に動かさなかったものを**id で**知らせる（#788-1）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, locked: true },
+    ];
+    const onSkippedLocked = vi.fn();
+    const { root, boxes } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"], onSkippedLocked });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(onSkippedLocked).toHaveBeenCalledWith(["free_002"]);
   });
 });
 
@@ -414,7 +442,7 @@ describe("FreeLayoutOverlay: 回転ハンドル（#279）", () => {
     mockRect(root);
     fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     // center=(200,200)。ポインタを中心の真右(300,200)へ → 90°。
-    fireEvent.pointerMove(root, { clientX: 300, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 300, clientY: 200, pointerId: 1 });
     expect(onRotate).toHaveBeenLastCalledWith("free_001", 90);
   });
 
@@ -423,7 +451,7 @@ describe("FreeLayoutOverlay: 回転ハンドル（#279）", () => {
     const { root, onRotate } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
     mockRect(root);
     fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(root, { clientX: 200, clientY: 130, shiftKey: true, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 200, clientY: 130, shiftKey: true, pointerId: 1 });
     const last = onRotate.mock.calls[onRotate.mock.calls.length - 1];
     expect(last[0]).toBe("free_001");
     expect((last[1] as number) % 15).toBe(0); // 15°きざみ
@@ -462,7 +490,7 @@ describe("FreeLayoutOverlay: 吸着ガイド（#205 後半）", () => {
     expect(screen.queryByTestId("snap-guide-x")).not.toBeInTheDocument(); // ドラッグ前はガイドなし
     // free_002(left=0) を +96 動かすと left=96。free_001.left=100 に距離4（threshold 6 以内）→ x=100 に吸着。
     fireEvent.pointerDown(box002, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(box002, { clientX: 96, clientY: 5, pointerId: 1 });
+    fireEvent.pointerMove(box002, { buttons: 1, clientX: 96, clientY: 5, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_002", x: 100, y: 5 }]); // 左辺に吸着
     expect(screen.getByTestId("snap-guide-x")).toBeInTheDocument(); // 縦ガイド線が現れる
     // ドラッグ終了でガイドは消える。
@@ -480,7 +508,7 @@ describe("FreeLayoutOverlay: 吸着ガイド（#205 後半）", () => {
     const box002 = root.children[1] as HTMLElement;
     fireEvent.pointerDown(box002, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     // x=40 → left=40/right=120/centerX=80。free_001 の left100/right300/centerX200 のどれにも 6px 以内で当たらない。
-    fireEvent.pointerMove(box002, { clientX: 40, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(box002, { buttons: 1, clientX: 40, clientY: 40, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_002", x: 40, y: 40 }]);
     expect(screen.queryByTestId("snap-guide-x")).not.toBeInTheDocument(); // ガイドなし
     expect(screen.queryByTestId("snap-guide-y")).not.toBeInTheDocument();
@@ -592,10 +620,11 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
   // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
   it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
     const { boxes } = renderOverlay();
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 1度目と2度目は同じ時刻で送る（#645）＝間の再描画の速さで結論が変わらない。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     fireEvent.pointerUp(boxes[0], { pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
     expect(textarea).toHaveValue("見出し");
@@ -607,6 +636,24 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.pointerUp(boxes[1], { pointerId: 1 });
     fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("間が空いた二度押しは編集に入らない＝時間ガード（#525-4・時刻を明示して検証・#645）", () => {
+    const { boxes } = renderOverlay();
+    // 350ms（DOUBLE_TAP_MS）を超える間隔＝別々の押下として扱う。ヘルパーで時刻を明示するので
+    // 実時間に依存せず、しきい値そのものを検証できる。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1400, { clientX: 120, clientY: 120 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("しきい値内なら編集に入る（時間ガードの境界＝#645）", () => {
+    const { boxes } = renderOverlay();
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1300, { clientX: 120, clientY: 120 });
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {
@@ -714,8 +761,278 @@ describe("FreeLayoutOverlay: 非表示/ロック（#210）", () => {
     const box = root.children[0] as HTMLElement;
     fireEvent.pointerDown(box, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     expect(onSelect).toHaveBeenCalledWith("free_001"); // 選択はされる
-    fireEvent.pointerMove(box, { clientX: 50, clientY: 50, pointerId: 1 });
+    fireEvent.pointerMove(box, { buttons: 1, clientX: 50, clientY: 50, pointerId: 1 });
     expect(onMoveMany).not.toHaveBeenCalled(); // ロック中は移動しない
     expect(box.children).toHaveLength(0); // リサイズハンドルも出さない
+  });
+});
+
+// 掴む作法を画面ぜんぶで揃える（#685 レビュー 🔴）。帯（`usePointerDrag`）は `Escape` でやめられ、
+// 掴んでいる間は取り消しを止める。キャンバスだけ持っていなかったので、共有部品の側へ入れた。
+describe("掴む作法（`Escape` と取り消し・#685 レビュー）", () => {
+  const el = (over: Partial<FreeElement> = {}): FreeElement =>
+    ({ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, ...over }) as FreeElement;
+
+  function mount(over: Partial<Parameters<typeof FreeLayoutOverlay>[0]> = {}) {
+    const onMoveMany = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const r = render(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={onMoveMany}
+        onInteractionStart={vi.fn()} onInteractionEnd={onInteractionEnd}
+        {...over}
+      />,
+    );
+    const root = r.container.firstElementChild as HTMLElement;
+    Object.defineProperty(root, "clientWidth", { value: 960, configurable: true });
+    root.getBoundingClientRect = () => ({ left: 0, top: 0, right: 960, bottom: 540, width: 960, height: 540, x: 0, y: 0, toJSON: () => ({}) });
+    return { root, onMoveMany, onInteractionEnd, ...r };
+  }
+
+  it("掴んでいる間は**取り消しを止める**（足元で文書が動くと結果が変わる）", () => {
+    const { root, container } = mount();
+    expect(isPointerDragging()).toBe(false);
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 140, clientY: 100 });
+    expect(isPointerDragging()).toBe(true); // 帯と同じ合図に載る
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 140, clientY: 100 });
+    expect(isPointerDragging()).toBe(false); // 離したら外す（塞ぎっぱなしにしない）
+  });
+
+  it("**少し動かすまで動かさない**（押しただけ・手の震えでは位置を書かない・#752-8）", () => {
+    const { root, container, onMoveMany } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 102, clientY: 101 }); // 2.2px＝しきい値の内
+    expect(onMoveMany).not.toHaveBeenCalled();
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 110, clientY: 100 }); // 越えた
+    expect(onMoveMany).toHaveBeenCalled();
+  });
+
+  it("**押した時点から取り消しを止める**（履歴のまとめが開いている間に巻き戻させない・#752 レビュー）", () => {
+    // ⚠️ しきい値を越えてから数に入れると、**まとめが開いている間だけ** `Ctrl+Z` が通る穴になる
+    //（`begin*` は押した時点でまとめを開ける）＝戻した文書の上に、押した時点の控えを起点にした
+    // 位置が書き戻る。しかも「やり直す」でも戻せない（まとめの最初の1件が `future` を捨てる）。
+    const { root, container } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    expect(isPointerDragging()).toBe(true); // まだ動かしていなくても止める
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 102, clientY: 101 }); // しきい値の内
+    expect(isPointerDragging()).toBe(true);
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 102, clientY: 101 });
+    expect(isPointerDragging()).toBe(false); // 離せば外す（動かしていなくても）
+  });
+
+  it("しきい値の手前で `Escape` を押しても**書き戻さない**（何も変わらない更新を流さない・#752-8）", () => {
+    const { root, container, onMoveMany, onInteractionEnd } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 101, clientY: 100 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onMoveMany).not.toHaveBeenCalled();
+    expect(onInteractionEnd).toHaveBeenCalled(); // 合成境界は越え方に依らず必ず閉じる
+  });
+
+  it("**離すのを取り逃がしたら元へ戻して終わる**（影が指に付いたままにしない・#752-8）", () => {
+    // ⚠️ 画面の外で離した・別の操作に取られた＝`pointerup` が来ない。放っておくと**次に無関係な所で
+    // 離した瞬間**にそこへ置かれる。押していないのに動いている、を合図に元へ戻す。
+    const { root, container, onMoveMany } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(root, { buttons: 0, pointerId: 1, clientX: 400, clientY: 300 }); // 押していない
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 100, y: 100 }]); // 開始時の値へ
+    expect(isPointerDragging()).toBe(false);
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(root, { buttons: 0, pointerId: 1, clientX: 500, clientY: 300 });
+    expect(onMoveMany).not.toHaveBeenCalled(); // もう掴んでいない＝指に付いてこない
+  });
+
+  it("**掴んだ指だけ見る**（別の指を離してもそこへ落とさない・#752-8）", () => {
+    const { root, container, onMoveMany } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 2, clientX: 900, clientY: 700 }); // 別の指
+    expect(onMoveMany).not.toHaveBeenCalled(); // 一緒に動かさない
+    fireEvent.pointerUp(root, { pointerId: 2, clientX: 900, clientY: 700 }); // 別の指を離す
+    expect(isPointerDragging()).toBe(true); // まだ掴んでいる（そこへ落ちない）
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 300, clientY: 200 });
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**離すのを取り逃がした後にもう一度掴んでも、名乗りが二重に残らない**（#752-8）", () => {
+    // ⚠️ 掴み直しで名乗りを**外さずに上書き**すると、`Escape` と取り消しが以後ずっと効かなくなり、
+    // 履歴のまとめも開いたまま＝以後の編集が全部ひとつながりになる（取り消し1回で全部戻る）。
+    const { root, container, onInteractionEnd } = mount();
+    const el0 = () => container.querySelector("[style*='cursor: move']")!;
+    fireEvent.pointerDown(el0(), { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    // ここで離したのを取り逃がした（`pointerup` が届かない）まま、もう一度掴む。
+    fireEvent.pointerDown(el0(), { button: 0, pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 2, clientX: 320, clientY: 200 });
+    fireEvent.pointerUp(root, { pointerId: 2, clientX: 320, clientY: 200 });
+    expect(isPointerDragging()).toBe(false); // 1つぶん残らない
+    expect(hasEscapeOwner()).toBe(false);
+    // 開いたまとめも閉じている（開けた数と閉じた数が合う）。
+    expect(onInteractionEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it("**親が描き直しても名乗りは落ちない**（1回動かした時点で `Escape` が効かなくなる、を作らない・#752-8）", () => {
+    // ⚠️ 後始末の効果に `onInteractionEnd` を依存で書くと、**渡された関数の中身が変わるたび**に
+    // 後始末が走る＝掴んでいる最中に走れば名乗りが落ちる。いまの呼び出し2か所は安定した関数を
+    // 渡しているので起きていないが、**それは呼ぶ側の都合**（1か所がインラインに変わるだけで壊れる）。
+    const { root, container, rerender } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    expect(isPointerDragging()).toBe(true);
+    rerender(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={vi.fn()}
+        onInteractionStart={vi.fn()} onInteractionEnd={vi.fn()} // 毎回ちがう関数
+      />,
+    );
+    expect(isPointerDragging()).toBe(true); // 掴んだままでいる
+    expect(hasEscapeOwner()).toBe(true);
+  });
+
+  it("範囲選択も**同じ作法**（しきい値・離したら名乗りを外す・#752-8）", () => {
+    const onSelectMany = vi.fn();
+    const { root } = mount({ onSelectMany });
+    fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 12, clientY: 10 }); // しきい値の内
+    expect(onSelectMany).not.toHaveBeenCalled(); // 手の震えで選び直さない
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 400, clientY: 300 });
+    expect(onSelectMany).toHaveBeenCalled();
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 400, clientY: 300 });
+    expect(isPointerDragging()).toBe(false); // 外し忘れると以後ずっと取り消しが効かない
+    expect(hasEscapeOwner()).toBe(false);
+  });
+
+  it("範囲選択を `Escape` でやめても名乗りを外す（#752-8）", () => {
+    const { root } = mount();
+    fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 400, clientY: 300 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
+  });
+
+  it("**枠の外で離しても名乗りを外す**（指を捕まえ損ねた回に塞ぎっぱなしにしない・#752 レビュー）", () => {
+    // ⚠️ 離しを枠の受け口だけで拾っていると、`setPointerCapture` が落ちた回に枠の外で離したとき
+    // `pointerup` が届かず、名乗りが**次に掴むまで**残る＝`Escape`・取り消し・倍率が黙って効かない。
+    const { root, container } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 900, clientY: 900 }); // 枠の外で離した
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
+  });
+
+  it("**まとまりの回転を `Escape` でやめても戻す**（戻す値を控えていなかった・#777 レビュー）", () => {
+    // ⚠️ 戻す側（`cancelDrag`）は3つのまとまりを扱っていたのに、**回転だけ戻す値を控えていなかった**
+    // ＝押しても何も起きない。テンプレ編集で見つかった穴が、こちらにも同じ形であった。
+    const onGroupTransform = vi.fn();
+    const g = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } };
+    const { root, container } = mount({ groups: [g], activeGroupId: "group_001", onGroupTransform });
+    const knob = container.querySelector("[data-testid='group-rotate-handle']") as HTMLElement;
+    expect(knob).toBeTruthy();
+    fireEvent.pointerDown(knob, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    // ⚠️ 動きを受けるのは**枠**（`root`）＝window へ送っても届かず、しきい値を越えないまま終わる。
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onGroupTransform.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", g.transform);
+  });
+
+  it("`pointercancel` は**やめる**（掴んだ所に置かない・#752 レビュー）", () => {
+    // ⚠️ 確定へ繋ぐと「やめた」のに掴んだ所へ置かれる（決定10・この関数の doc に反する）。
+    const { root, container, onMoveMany, onInteractionEnd } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onMoveMany.mockClear();
+    fireEvent.pointerCancel(root, { pointerId: 1 });
+    expect(onMoveMany).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]); // 開始時の値へ
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1); // まとめは1回だけ閉じる（二重に閉じない）
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("`Escape` でやめたら**元の位置へ戻す**（掴んだ所に置かない）", () => {
+    const { root, container, onMoveMany, onInteractionEnd } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onMoveMany.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onMoveMany).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]); // 開始時の値へ
+    expect(onInteractionEnd).toHaveBeenCalled(); // 履歴グループも閉じる（開けっぱなしにしない）
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("やめる合図は**掴んでいる間に1度だけ**張る（動かすたびに張り直さない）", () => {
+    // ⚠️ 依存を書かない／`drag` を依存に入れる、のどちらでも `pointermove` のたびに張り直しになる。
+    const add = vi.spyOn(window, "addEventListener");
+    try {
+      const { root, container } = mount();
+      fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      const before = add.mock.calls.filter((c) => c[0] === "keydown").length;
+      for (let i = 0; i < 5; i++) fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 100 + i * 10, clientY: 100 });
+      expect(add.mock.calls.filter((c) => c[0] === "keydown").length).toBe(before); // 増えない
+      fireEvent.keyDown(window, { key: "Escape" }); // それでも効く（鮮度を落としていない）
+      expect(isPointerDragging()).toBe(false);
+    } finally {
+      add.mockRestore();
+    }
+  });
+
+  it("やめるときは**そのとき渡されている**受け口を呼ぶ（古いものを掴まない）", () => {
+    // ⚠️ 張り直しを減らすために closure を固定すると、掴んでいる最中に親が渡し直した受け口を
+    // **古いまま**呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
+    const first = vi.fn();
+    const later = vi.fn();
+    const { root, container, rerender } = mount({ onMoveMany: first });
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    rerender(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={later}
+        onInteractionStart={vi.fn()} onInteractionEnd={vi.fn()}
+      />,
+    );
+    first.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(later).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it("`Ctrl` を押している間は吸着しない（#746-3・決定12）", () => {
+    // ⚠️ 切れないと「あと少しだけずらす」ができない＝寄せたくない所でも寄ってしまう。
+    const onMoveMany = vi.fn();
+    // ⚠️ **ちょうど揃う位置に置かない**（寄せても寄せなくても同じ値になり、違いが見えない）。
+    // 動かした先の右辺は 340＝そこから 5 ずれた 345 に置く（しきい値 12 の中）。
+    const near = { ...el({ id: "free_002" }), x: 345, y: 100 } as FreeElement;
+    const { root, container } = mount({ freeLayout: [el(), near], onMoveMany });
+    const target = container.querySelector("[style*='cursor: move']") as HTMLElement;
+    fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    // 吸着が効く距離（画面 6px ＝ canvas 12px 以内）まで動かす。
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 120, clientY: 100, ctrlKey: true });
+    const lastX = (): number => onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
+    const withCtrl = lastX();
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 120, clientY: 100 });
+    const without = lastX();
+    expect(withCtrl).not.toBe(without); // 押している間は寄らない
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 120, clientY: 100 });
+  });
+
+  it("画面を離れても名乗りを外す（以後 `Escape` も取り消しも効かなくなるのを防ぐ）", () => {
+    const { root, container, unmount } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 140, clientY: 100 });
+    unmount();
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
   });
 });

@@ -1,19 +1,22 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
-import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
+import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage } from "../uiLabels";
+import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, ORIENTATION_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
-import { ExportLock } from "../components/ExportLockBanner";
+import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
+import { SceneThumb } from "../components/SceneThumb";
 import { PageHead } from "../components/ui";
+import { BrandKitLink } from "../components/BrandKitLink";
 import { EmptyState } from "../components/states";
 import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { layerLabel, buildSampleScene } from "./looksShared";
+import { matchesSearchWords } from "../../domain/search";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
 const categoryLabel: Record<SceneCategory, string> = {
@@ -29,11 +32,8 @@ const categoryLabel: Record<SceneCategory, string> = {
   free: "自由配置",
 };
 
-// 向き（Orientation）のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
-const orientationLabel: Record<Orientation, string> = {
-  "16:9": "横型（16:9）",
-  "9:16": "縦型（9:16）",
-};
+// 向き（Orientation）のユーザー向けラベル。文言は `uiLabels` に1つ（#1243 レビュー 🟡＝3か所に写していた）。
+const orientationLabel = ORIENTATION_LABEL;
 
 // FREE（自由配置）で「置けるもの」のラベル。FREE はテンプレ層でなく freeLayout に内容を持つため、
 // レイヤー種別ではなく配置できる要素（素材/文字/図形）を示す（ADR-0008・#5）。
@@ -75,11 +75,50 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   // ゼロから新規作成フォーム（ADR-0017「ゼロから作成」の導線＝複製に頼らず一から作る）。向き/カテゴリは編集画面で変えられないため作成時に決める。
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("新しい見た目");
-  const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
+  // ⚠️ **既定はこの動画の向き**（#1031）＝いつも横型で始まると、縦型で作っている人は
+  //   **注意文を読んで直す**ことになる（`aspectRatio` は上で取っているのに使っていなかった）。
+  // ⚠️ **開くときにも取り直す**（下の「ゼロから作る」）＝画面を出したまま動画の向きが変わっても、
+  //   次に開いたときは新しい向きで始まる。ここの初期値は**最初に描いたときのぶん**。
+  const [newOrientation, setNewOrientation] = useState<Orientation>(aspectRatio);
   const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
   // 読み込みの file input（label htmlFor でなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
   const packInputRef = useRef<HTMLInputElement>(null);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
+
+  /**
+   * 一覧の絞り込み（#1031）。
+   *
+   * ⚠️ **選んでいるものは絞り込みで消さない**＝右の見本・情報は `current` のままで、
+   * 一覧の見え方だけを変える（探している途中で**右の中身が入れ替わらない**）。
+   */
+  const [catFilter, setCatFilter] = useState<SceneCategory | "all">("all");
+  const [orientFilter, setOrientFilter] = useState<Orientation | "all">("all");
+  const [query, setQuery] = useState("");
+  const categoryFilters: [SceneCategory | "all", string][] = [
+    ["all", "すべて"],
+    ...SCENE_CATEGORIES.map((c): [SceneCategory | "all", string] => [c, categoryLabel[c]]),
+  ];
+  const orientationFilters: [Orientation | "all", string][] = [
+    ["all", "両方"],
+    ...ORIENTATIONS.map((o): [Orientation | "all", string] => [o, orientationLabel[o]]),
+  ];
+  /**
+   * 一覧の見本（PR #1086 レビュー）。
+   *
+   * ⚠️ **描くたびに作り直さない**＝毎回新しい場面を渡すと、**1枚選ぶだけで
+   * 全枚の絵を作り直す**（見た目は20枚以上並ぶ・探す欄の1文字ごとにも走る）。
+   */
+  const sampleById = useMemo(
+    () => new Map(templates.map((t) => [t.templateId, buildSampleScene(t, assets)])),
+    [templates, assets],
+  );
+  const filtering = catFilter !== "all" || orientFilter !== "all" || query !== "";
+  const visibleTemplates = templates.filter(
+    (t) =>
+      (catFilter === "all" || t.category === catFilter) &&
+      (orientFilter === "all" || t.aspectRatio === orientFilter) &&
+      matchesSearchWords([t.name], query),
+  );
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
   const [syncedId, setSyncedId] = useState<string | undefined>(undefined);
@@ -171,6 +210,9 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     return (
       <div className="main-scroll">
         <PageHead title="見た目パターンを管理" desc="動画の見た目のパターンを確認できます。" />
+        {/* ⚠️ **両方の枝に置く**（#984 レビュー ℹ️）＝早い `return` のある画面は、
+            片方に置くと**もう片方でだけ書き出し中の知らせが出ない**（#953 と同じ型）。 */}
+        <ExportLockBanner onNavigate={onNavigate} />
         <EmptyState
           title="見た目パターンがありません"
           message="標準の見た目パターンが読み込まれていません。アプリを再起動してください。改善しない場合は、お手数ですがご連絡ください。"
@@ -179,7 +221,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     );
   }
 
-  const sampleScene = buildSampleScene(current, assets);
+  // ⚠️ **右の見本も作り直さない**（PR #1086 レビュー）＝一覧と同じものが既にあるのに
+  // 別に作り直しており、**探す欄の1文字ごと**にも走っていた（同じ目的の直しを片方だけやらない）。
+  // ⚠️ **一覧に無い見た目はその場で作る**＝`templates` に無い `current` は起きないが、
+  // 黙って見本が消える形にはしない。
+  const sampleScene = sampleById.get(current.templateId) ?? buildSampleScene(current, assets);
   // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
   const usedScenes = scenesUsingTemplate(scenes, current.templateId);
   // 削除したときにこのプロジェクトで何が起きるか（#547・削除は取り消せないので先に示す）。
@@ -195,9 +241,14 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
       />
       <ExportLock onNavigate={onNavigate}>
       {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
-      <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
-        場面編集を開く
-      </button>
+      <div className="row gap-sm">
+        <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
+          場面編集を開く
+        </button>
+        {/* 会社の見た目（ADR-0036）への入口（#1032）。見た目を選んでいるときにこそ思い出すのに、
+            設定画面の奥だけにしか入口が無かった。 */}
+        <BrandKitLink onNavigate={onNavigate} />
+      </div>
 
       {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
       {creating ? (
@@ -213,14 +264,16 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             </div>
             <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>向き</label>
-                <select className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
+                {/* ⚠️ **見出しと欄を結ぶ**（#1031）＝結んでいないと、読み上げでは「何の欄か」が分からない
+                    （見た目には見出しが出ているので、目で見ている限り気づけない）。 */}
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="new-look-orientation">向き</label>
+                <select id="new-look-orientation" className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
                   {ORIENTATIONS.map((o) => (<option key={o} value={o}>{orientationLabel[o]}</option>))}
                 </select>
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>種類</label>
-                <select className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor="new-look-category">種類</label>
+                <select id="new-look-category" className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
                   {SCENE_CATEGORIES.map((c) => (<option key={c} value={c}>{categoryLabel[c]}</option>))}
                 </select>
               </div>
@@ -239,7 +292,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           </div>
         </div>
       ) : (
-        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} disabled={busyAction !== null} onClick={() => { clearTemplateError(); setCreating(true); }}>
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} disabled={busyAction !== null} onClick={() => { clearTemplateError(); setNewOrientation(aspectRatio); setCreating(true); }}>
           ＋ ゼロから新しい見た目を作る
         </button>
       )}
@@ -253,22 +306,72 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         }}
       >
         {/* 左: 見た目パターン一覧 */}
-        <div className="card-grid cols-2">
-          {templates.map((t) => (
-            <button
-              key={t.templateId}
-              className="action-card"
-              style={{
-                borderColor: current.templateId === t.templateId ? "var(--color-primary)" : undefined,
-                background: current.templateId === t.templateId ? "var(--color-primary-soft)" : undefined,
-              }}
-              disabled={busyAction !== null}
-              onClick={() => setSelectedId(t.templateId)}
-            >
-              <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}</span>
-            </button>
-          ))}
+        <div>
+          {/* ⚠️ **探し方は素材画面と揃える**（#1031）＝種類のタブ＋名前で探す＋「絞り込みをやめる」。
+              ⚠️ **件数で出し分けない**＝素材画面は常に出しているので、ここだけ途中から欄が現れると
+              同じ「探す」が画面で別挙動になる（ADR-0026②）。 */}
+          <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
+            <div className="segment" role="group" aria-label="場面の種類" style={{ display: "inline-flex" }}>
+              {categoryFilters.map(([id, label]) => (
+                <button key={id} className={catFilter === id ? "active" : ""} onClick={() => setCatFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* ⚠️ **向きも見せる**＝この画面は**向きを問わず全部**並べるので（作ったものが
+                見えなくならないように）、どれがこの動画で使えるのかが分かる印が要る。 */}
+            <div className="segment" role="group" aria-label="動画の向き" style={{ display: "inline-flex" }}>
+              {orientationFilters.map(([id, label]) => (
+                <button key={id} className={orientFilter === id ? "active" : ""} onClick={() => setOrientFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              className="input"
+              style={{ maxWidth: 200 }}
+              type="search"
+              aria-label="名前で探す"
+              placeholder="名前で探す"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {filtering && (
+              <button className="btn btn-ghost text-sm" onClick={() => { setCatFilter("all"); setOrientFilter("all"); setQuery(""); }}>
+                絞り込みをやめる
+              </button>
+            )}
+          </div>
+          {visibleTemplates.length === 0 ? (
+            <EmptyState
+              title="この絞り込みに合う見た目パターンはありません"
+              message="ほかの言葉で探すか、上の「絞り込みをやめる」で全部に戻せます。"
+            />
+          ) : (
+          <div className="card-grid cols-2">
+            {visibleTemplates.map((t) => (
+              <button
+                key={t.templateId}
+                className="action-card"
+                style={{
+                  borderColor: current.templateId === t.templateId ? "var(--color-primary)" : undefined,
+                  background: current.templateId === t.templateId ? "var(--color-primary-soft)" : undefined,
+                }}
+                disabled={busyAction !== null}
+                onClick={() => setSelectedId(t.templateId)}
+              >
+                {/* ⚠️ **見本を出す**（#1031）＝名前とカテゴリの文字だけだと、選んで右に
+                    出してみるまでどんな見た目か分からない。見本は右の大きなものと**同じ作り**
+                    （`buildSampleScene`）で、描画の核も共有する（ADR-0001）。 */}
+                <SceneThumb scene={sampleById.get(t.templateId)!} template={t} />
+                <span className="action-card-title">{t.name}</span>
+                <span className="action-card-desc">
+                  {categoryLabel[t.category]}・{orientationLabel[t.aspectRatio]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+          )}
         </div>
 
         {/* 右: 選択中の見た目のプレビュー＋情報 */}
@@ -281,6 +384,23 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               : `選択中の見た目「${current.name}」の見本です（写真・文字は例として表示しています）。`}
           </p>
 
+          {/* ⚠️ **主な操作は見本の直下**（#1031）＝以前は右欄の**4本目の区切り線の下**に
+              secondary で置いており、初回は探すことになっていた（実機確認済み）。
+              ⚠️ **出すのは1つだけ**＝自分の見た目なら「編集する」、標準なら「もとに作る」。
+              同じボタンを上と下の2か所に出さない（どちらを押せばいいのか分からなくなる）。 */}
+          <div className="col gap-sm mt">
+            {isUserCurrent ? (
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={onEdit}>この見た目を編集する</button>
+            ) : (
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={() => void onDuplicate()}>
+                {busyAction === "duplicate" ? DUPLICATE_BUSY_LABEL : DUPLICATE_LOOK_LABEL}
+              </button>
+            )}
+            <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`} style={{ alignSelf: "flex-start" }}>
+              {isUserCurrent ? "自分の見た目" : "標準（直接は編集できません）"}
+            </span>
+          </div>
+
           <hr className="divider" />
           <div className="col gap-sm">
             <div className="row-between">
@@ -290,6 +410,15 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             <div className="row-between">
               <span className="text-muted">カテゴリ</span>
               <span className="badge badge-teal">{categoryLabel[current.category]}</span>
+            </div>
+            {/* ⚠️ **向きも出す**（#1031）＝この画面は向きを問わず並べるので、
+                見ている見た目が**この動画で使えるのか**が分からなかった。 */}
+            <div className="row-between">
+              <span className="text-muted">向き</span>
+              <span className={`badge ${current.aspectRatio === aspectRatio ? "badge-teal" : "badge-gray"}`}>
+                {orientationLabel[current.aspectRatio]}
+                {current.aspectRatio === aspectRatio ? "" : "（この動画では使えません）"}
+              </span>
             </div>
           </div>
 
@@ -308,22 +437,19 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           <h3 className="field-label">使用場面</h3>
           <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" disabled={busyAction !== null} />
 
+          {/* ⚠️ **主な操作は上へ出した**（#1031）＝ここに残るのは「自分の見た目」だけの操作。
+              標準の見た目では**節ごと出さない**（中身が空の入れ物を残さない）。 */}
+          {isUserCurrent && (
+          <>
           <hr className="divider" />
-          {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}
-          <h3 className="field-label">この見た目を編集</h3>
-          <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
-            {isUserCurrent ? "自分の見た目" : "標準（編集するには複製します）"}
-          </span>
+          <h3 className="field-label">ほかの操作</h3>
           <div className="col gap-sm mt">
-            {isUserCurrent && (
-              <button className="btn btn-primary" disabled={busyAction !== null} onClick={onEdit}>この見た目を編集する</button>
-            )}
             <button className="btn btn-secondary" disabled={busyAction !== null} onClick={() => void onDuplicate()}>
-              {busyAction === "duplicate" ? "複製中…" : "この見た目を複製して編集する"}
+              {busyAction === "duplicate" ? DUPLICATE_BUSY_LABEL : DUPLICATE_LOOK_LABEL}
             </button>
 
             {/* 削除（マイテンプレのみ） */}
-            {isUserCurrent && (confirmDelete ? (
+            {(confirmDelete ? (
               <DeleteConfirm
                 busy={busyAction === "delete"}
                 message={deleteLookConfirmMessage(deleteImpactCounts(deleteImpact))}
@@ -333,7 +459,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             ) : (
               <button
                 className="btn btn-ghost text-sm"
-                style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
+                style={{ color: "var(--color-danger-text)", alignSelf: "flex-start" }}
                 disabled={busyAction !== null}
                 onClick={() => setConfirmDelete(true)}
               >
@@ -341,6 +467,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </button>
             ))}
           </div>
+          </>
+          )}
           {templateError && (
             <div className="notice notice-warn mt" role="alert">
               <span>{templateError}</span>

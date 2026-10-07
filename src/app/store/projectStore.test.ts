@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
+import { onProjectDeleted } from './projectDeletion';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
+import { parseTemplatePack } from '../../infrastructure/templateFs';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
+import { MAX_SCENES_PER_VIDEO } from '../../domain/constants';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -75,6 +78,34 @@ describe('projectStore addScene / removeScene', () => {
     const id = useProjectStore.getState().addScene();
     expect(id).toBe('scene_001'); // 最小の空き番号
     expect(useProjectStore.getState().scenes.map((s) => s.order)).toEqual([1, 2]);
+  });
+
+  // #779：場面ごと消える経路も掃除の対象。`scene_NNN` は歯抜けの最小番号を再利用し（上のテスト）、
+  // 新しい場面は**直前の見た目を引き継ぐ**（`addScene`）ので、残すと自由配置の要素 id まで揃い、
+  // **置いた覚えのない動きで新しい場面の図形が動く**（要素・まとまりの「憑依」の場面版）。
+  it('removeScene はその場面の動きも落とす（消した場面の動きが新しい場面へ憑依しない）', () => {
+    const st = useProjectStore.getState();
+    useProjectStore.setState({
+      meta: {
+        ...st.meta,
+        timelineOverlay: {
+          animations: [
+            { id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }] },
+            { id: 'anim_002', sceneId: 'scene_002', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }] },
+          ],
+        },
+      } as never,
+      past: [], future: [],
+    });
+    useProjectStore.getState().removeScene('scene_001');
+
+    const anims = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(anims.map((a) => a.id)).toEqual(['anim_002']); // 消した場面のぶんだけ落ちる（他場面は残る）
+
+    // 取り消しは1回で戻る（場面と動きを別々に戻させない＝同じ pushHistory の中）。
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes.map((x) => x.sceneId)).toEqual(['scene_001', 'scene_002']);
+    expect((useProjectStore.getState().meta.timelineOverlay?.animations ?? []).map((a) => a.id)).toEqual(['anim_001', 'anim_002']);
   });
 
   it('編集系アクションは saveStatus を "idle" に戻す（編集＝未保存）', () => {
@@ -179,7 +210,7 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     // 1行目は成功・2行目で失敗させる（mid-sequence エラー）。
     const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize')
       .mockResolvedValueOnce({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 })
-      .mockRejectedValueOnce('合成エラー');
+      .mockRejectedValueOnce('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
     await useProjectStore.getState().generateNarration('scene_001');
     const st = useProjectStore.getState();
     expect(st.scenes[0].lines?.[0].status).toBe('generated'); // 先行成功は保持（🔴2）
@@ -188,38 +219,119 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     expect(useProjectStore.getState().narrationError).toBeTruthy();
     spy.mockRestore();
   });
-});
 
-describe('projectStore overlay クリップ（ADR-0018・③(4)）', () => {
-  beforeEach(() => {
+  // ⚠️ #755-3：印は**文書に残る**が、失敗のたびに `failed` を書くと「作れませんでした」と出ながら
+  // 前に作った声は鳴り続ける（開き直しても消えない）。判断材料は**作り始める前の印**。
+  it('前が「作成済み」なら、作り直しに失敗しても据え置く（#755-3）', async () => {
     useProjectStore.setState({
-      meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined },
-      past: [], future: [], _historyGroupDepth: 0, saveStatus: 'saved',
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'generated', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' }, // 鳴らす材料がある
+      isGeneratingNarration: false,
     });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].narration.status).toBe('generated');
+    expect(st.narrationError).toContain('前に作った声はそのまま使えます');
+    // ⚠️ **中身そのものを見る**（PR #1130 レビュー由来 🟡）＝添えの有無だけを見ていると、
+    // 本体が**別の文へすり替わっても緑**になる（検査用の文が実物と同じ形でないと、実際にそうなる）。
+    expect(st.narrationError, '合成側が返した理由が画面まで届いていない').toContain('音声ソフトの接続先');
+    spy.mockRestore();
   });
-  it('addOverlayClip は telop クリップを追加し id を返す（既定 track/尺・未保存に戻る）', () => {
-    const id = useProjectStore.getState().addOverlayClip({ anchorSceneId: 'scene_001', text: 'やあ' });
-    const clips = useProjectStore.getState().meta.timelineOverlay?.clips ?? [];
-    expect(id).toBe('ovclip_001');
-    expect(clips).toHaveLength(1);
-    expect(clips[0]).toMatchObject({ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', text: 'やあ', startSec: 0, durationSec: 3 });
-    expect(useProjectStore.getState().saveStatus).toBe('idle');
+
+  // ⚠️ **生の断りは画面へ出さない**（#1123・§2-3）＝合成側は文字列で失敗を返すが、
+  // その中身が**文になっていない**ことがある（`map_err(|e| e.to_string())` は 56 か所）。
+  it('画面に出せない断り（生のエラー）は、自前の文に置き換える', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'idle' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('os error 3');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const msg = useProjectStore.getState().narrationError ?? '';
+    expect(msg).not.toContain('os error');
+    expect(msg).toContain('音声の作成に失敗しました');
+    spy.mockRestore();
   });
-  it('updateOverlayClip は該当クリップを部分更新する', () => {
-    const id = useProjectStore.getState().addOverlayClip({ text: 'a' });
-    useProjectStore.getState().updateOverlayClip(id, { startSec: 4, text: 'b' });
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0]).toMatchObject({ id, startSec: 4, text: 'b' });
+
+  // ⚠️ **声のファイルの有無で決めない**（レビューで3観点が独立に指摘）＝場面の単独ナレーションは
+  // セリフを変えても `voicePath` を落とさない。ファイルで決めると**古い文の声が「作成済み」に復帰**し、
+  // 「全場面の声ができました」に化けて、**新しい字幕に古い声が乗った動画が成功として出る**。
+  it('セリフを変えた後（作成済みではない）なら、古い声が残っていても「作れなかった」を残す（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        // セリフを書き換えた直後＝印は none だが、`voicePath` と古い音声は残っている。
+        narration: { text: 'あたらしい文', status: 'none', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' },
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('failed'); // 古い声を「作成済み」に戻さない
+    // ⚠️ **「そのまま使えます」も言わない**＝印は「作れなかった」なのに使ってよいと言うと、
+    // 古い文の声で書き出してしまう。添え書きの判断は印と揃える。
+    expect(useProjectStore.getState().narrationError).not.toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
   });
-  it('removeOverlayClip はクリップを削除する', () => {
-    const id = useProjectStore.getState().addOverlayClip({});
-    useProjectStore.getState().removeOverlayClip(id);
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toEqual([]);
+
+  // ⚠️ 印が「作成済み」でも、**音声を読み込めていなければ鳴らない**＝「そのまま使えます」は嘘になる。
+  it('前が「作成済み」でも、鳴らす音声が無ければ「そのまま使えます」と言わない（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'generated', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: {}, // 読み込めていない
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().narrationError).not.toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
   });
-  it('overlay 編集は Undo で戻る（meta スナップショット・ADR-0020）', () => {
-    const id = useProjectStore.getState().addOverlayClip({ text: 'x' });
-    useProjectStore.getState().updateOverlayClip(id, { text: 'y' });
-    useProjectStore.getState().undo();
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0].text).toBe('x');
+
+  // 掛け合いの行も同じ規則（片方だけ直すと同じ理由で挙動が割れる）。
+  it('掛け合いの行も、前が「作成済み」なら据え置く（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: '', status: 'none' },
+        lines: [{ lineId: 'line_001', text: 'いち', status: 'generated', voicePath: 'voices/scene_001__line_001.wav' }],
+        warnings: [],
+      }] as never,
+      narrationAudioById: { 'scene_001/line_001': 'data:audio/wav;base64,AAAA' },
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('音声ソフトが応答しませんでした。設定の「音声ソフトの接続先」を確かめてください。');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.[0].status).toBe('generated');
+    expect(st.narrationError).toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
   });
 });
 
@@ -255,13 +367,6 @@ describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', ()
     useProjectStore.getState().removeAnimation(id);
     useProjectStore.getState().undo();
     expect(useProjectStore.getState().meta.timelineOverlay?.animations).toHaveLength(1);
-  });
-  it('clips と animations は同じ timelineOverlay に共存できる', () => {
-    useProjectStore.getState().addOverlayClip({ text: 'telop' });
-    useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
-    const ov = useProjectStore.getState().meta.timelineOverlay;
-    expect(ov?.clips).toHaveLength(1);
-    expect(ov?.animations).toHaveLength(1);
   });
 });
 
@@ -304,6 +409,98 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',
     canvas: { width: 1920, height: 1080 },
     layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, ...(assetId ? { assetId } : {}) }],
+  });
+
+  // #959：保存の前に「読み込みと同じ経路」を通す＝**保存できたのに読み込めない**を構造で無くす。
+  describe('保存の門（#959）', () => {
+    const slotTmpl = (slot: Record<string, unknown>): Template => ({
+      ...userTmpl('user_tmpl_gate'),
+      layers: [
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'layer_001', type: 'slot', x: 0, y: 0, w: 100, h: 100, ...slot } as Template['layers'][number],
+      ],
+    });
+
+    it('slotType の無い差し込み口は補って保存する＝行き止まりにしない', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      expect(useProjectStore.getState().templateError).toBeNull();
+      // 保存されたファイルにも一覧にも、補正後が入る（片方だけ元のままにしない）。
+      expect(spy.mock.calls[0][0].layers[1].slotType).toBe('image_or_video');
+      const listed = useProjectStore.getState().templates.find((t) => t.templateId === 'user_tmpl_gate');
+      expect(listed?.layers[1].slotType).toBe('image_or_video');
+      spy.mockRestore();
+    });
+
+    // ⚠️ **理由を丸ごと捨てない**（#1129 レビュー由来 🟡・`15 §6.0` 決定3）＝以前は
+    // `catch { 既定文 }` だったので、Rust が書き分けた断り（`TEMPLATE_SAVE_FAILED` /
+    // `TEMPLATE_ID_MISSING`）が**一度も画面に出なかった**。
+    // ⚠️ **走査では拾えない形**＝生の `typeof e === "string"` が残らないので、
+    // `rawErrorDisplayGuard` は気づけない（走査の限界＝挙動で見るしかない）。
+    it('保存が断られた理由が言葉なら、その言葉を出す', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate')
+        .mockRejectedValue('この見た目パターンは保存できませんでした。名前を変えて、もう一度お試しください。');
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      expect(useProjectStore.getState().templateError).toMatch(/名前を変えて/);
+      spy.mockRestore();
+    });
+
+    it('保存の断りが生のエラーなら、自前の文へ倒す（§2-3）', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValue('os error 3');
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({}));
+      const msg = useProjectStore.getState().templateError ?? '';
+      expect(msg).not.toContain('os error');
+      expect(msg).toMatch(/見た目パターンを保存できませんでした/);
+      spy.mockRestore();
+    });
+
+    // ⚠️ **双子の片方だけ直さない**＝削除側も同じ形。
+    it('削除が断られた理由が言葉なら、その言葉を出す', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates, userTmpl('user_tmpl_gate')], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'deleteUserTemplate')
+        .mockRejectedValue('この見た目パターンは消せませんでした。見た目パターンの一覧から選び直してください。');
+      await useProjectStore.getState().deleteUserTemplate('user_tmpl_gate');
+      expect(useProjectStore.getState().templateError).toMatch(/一覧から選び直して/);
+      spy.mockRestore();
+    });
+
+    it('補正でも直せない内容は保存せず、次の行動を出す（成功に見せない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      await useProjectStore.getState().saveUserTemplate(slotTmpl({ slotType: 'audio' }));
+      expect(spy).not.toHaveBeenCalled(); // ファイルに書かない
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_gate')).toBe(false); // 一覧にも出さない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/); // 「もう一度」だけでは次の行動にならない
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 排他を握ったままにしない
+      spy.mockRestore();
+    });
+
+    // ⚠️ **複製・ゼロから作成も門を通ることを固定する**（#960 レビュー）＝いまは薄いラッパーで
+    // `saveUserTemplate` へ委譲しているが、直接 `userTemplateFs.saveUserTemplate` を呼ぶ形へ書き換えられると
+    // 門を迂回でき、#959 が別の入口から戻ってくる。
+    it('複製も門を通る（不正な内容は保存せず id を返さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates, slotTmpl({ slotType: 'audio' })], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().duplicateAsUserTemplate('user_tmpl_gate');
+      expect(spy).not.toHaveBeenCalled();
+      expect(id).toBe(''); // 呼び出し側が選ばない
+      expect(useProjectStore.getState().templateError).toMatch(/「取り消す」で元に戻して/);
+      spy.mockRestore();
+    });
+
+    it('ゼロから作成も門を通る（作れたものは検証を通っている）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const id = await useProjectStore.getState().createBlankUserTemplate('新規', 'opening', '16:9');
+      expect(id).not.toBe('');
+      // 門を通った＝保存された文書は読み込みの検証を通っている。
+      expect(parseTemplatePack(spy.mock.calls[0][0]).rejected).toEqual([]);
+      spy.mockRestore();
+    });
   });
 
   it('deleteUserTemplate はテンプレ削除時に所有素材の表示用src も掃除する（無関係な素材は残す）', async () => {
@@ -470,7 +667,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     useProjectStore.setState({
       meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
       scenes: [scene('scene_001', 1)],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
   });
 
@@ -518,6 +715,38 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     spy.mockRestore();
   });
 
+  it('旧タイムライン編集が残っているプロジェクトを開くと、断るための印が立つ（データは消さない・#635）', async () => {
+    const withOverlay = JSON.parse(JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], [])));
+    withOverlay.timelineOverlay = {
+      clips: [{ id: 'ovl_001', track: 'telop', startSec: 0, durationSec: 2, text: '旧テロップ' }],
+    };
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withOverlay));
+    await useProjectStore.getState().loadProject('proj_old');
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(true);
+    // **消さない**＝読み込んだ meta にそのまま残っている（次の保存で落ちない）。
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    // 読み終えたら閉じられる（出し続けない）。
+    useProjectStore.getState().dismissRetiredTimelineNotice();
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+    load.mockRestore();
+    // 読み込んだ meta を後続テストへ持ち越さない（この store は1つを共有している）。
+    useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined } });
+  });
+
+  it('新しい動画を作ると案内は消える（前の動画の案内を持ち越さない・#635）', () => {
+    useProjectStore.setState({ hasRetiredTimelineEdits: true });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+  });
+
+  it('旧タイムライン編集が無いプロジェクトでは印が立たない（無関係な案内を出さない）', async () => {
+    const plain = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(plain);
+    await useProjectStore.getState().loadProject('proj_new');
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+    load.mockRestore();
+  });
+
   it('書き出し中は「開いているプロジェクト」の改名を弾く／別プロジェクトの改名は許可（project.json の lost-update 防止・#570 レビュー）', async () => {
     useProjectStore.getState().setExportRun({ phase: 'rendering' });
     const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
@@ -546,6 +775,128 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(useProjectStore.getState().meta.projectId).toBe('');
     expect(useProjectStore.getState().scenes).toHaveLength(0);
     delSpy.mockRestore();
+  });
+
+  // #763-4：**発行済みの書き込みが着地するまで消さない**。手放す（`newProject`）だけでは
+  // 「これ以上書かない」にしかならず、**すでに走っている保存**は消した後に着地しうる＝
+  // `save_project` がフォルダごと作り直して**素材と声だけ消えた動画が一覧へ戻る**。
+  it('飛行中の保存が着地してから消す（消した後に書き戻されない・#763-4）', async () => {
+    let landSave = (): void => { /* 同上 */ };
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
+      () => new Promise<string>((resolve) => { landSave = (): void => { resolve('x/project.json'); }; }),
+    );
+    const order: string[] = [];
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
+
+    // ⚠️ **走らせた仕事は `finally` でも待つ**＝途中で落ちたとき、見張りを外した後も裏で走り続け、
+    // **次のテストの数え上げに紛れ込む**（`mockRestore` 済みなので本物が動く）。
+    let saving: Promise<void> | undefined;
+    let deleting: Promise<void> | undefined;
+    try {
+      // 保存を1件「飛ばしたまま」にする（着地はこちらで決める）。
+      // ⚠️ `_doSave` は書き込みの前に素材の収集などで何度か待つので、**実際に書き始めるまで**待つ。
+      saving = useProjectStore.getState().saveProject();
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+      deleting = useProjectStore.getState().deleteProject('proj_open');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(order).toEqual([]); // ⚠️ まだ消していない＝書き込みの着地を待っている
+
+      order.push('save-landed');
+      landSave();
+      await deleting;
+      await saving;
+
+      expect(order).toEqual(['save-landed', 'delete']); // 書き込みが着地してから消す
+    } finally {
+      landSave(); // 落ちても約束を残さない（次のテストを止めない）
+      await Promise.allSettled([saving, deleting]);
+      save.mockRestore(); del.mockRestore();
+    }
+  });
+
+  it('**受け手**の飛行中の書き込みが着地してから消す（別 store の保存に轢かれない・#763-4）', async () => {
+    // タイムライン形式の store も同じ動画を持ちうる（`discardDeletedProject` が受け手）。
+    // 受け手が「もう書かない」になっても、発行済みの書き込みは走っているので待つ必要がある。
+    let land = (): void => { /* 着地させる前は何もしない */ };
+    const off = onProjectDeleted(() => ({ pending: new Promise<void>((resolve) => { land = (): void => resolve(); }) }));
+    const order: string[] = [];
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
+    let deleting: Promise<void> | undefined;
+    try {
+      deleting = useProjectStore.getState().deleteProject('proj_other'); // 開いていない＝自分の保存は絡まない
+      await new Promise((r) => setTimeout(r, 0));
+      expect(order).toEqual([]); // ⚠️ 受け手の着地を待っている
+
+      order.push('listener-landed');
+      land();
+      await deleting;
+      expect(order).toEqual(['listener-landed', 'delete']);
+    } finally {
+      land();
+      await Promise.allSettled([deleting]); // 途中で落ちても裏で走らせたままにしない
+      off(); del.mockRestore();
+    }
+  });
+
+  // #763-4 レビュー🟡：手放しを削除の**前**へ動かした副作用。失敗すると一覧には動画が残るのに
+  // 編集画面だけ空＝利用者から見ると作業が消えたように見える。開き直して空の画面に置き去りにしない。
+  it('消せなかったら開き直す（一覧に残っているのに編集画面が空、を作らない・#763-4）', async () => {
+    // 開き直しの中身は読込側の担当なので、ここで見るのは**開き直しに行くこと**だけ。
+    const before = useProjectStore.getState();
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockRejectedValue(new Error('消せなかった'));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(
+      JSON.stringify(assembleProject(before.meta, [], before.parts, before.scenes)),
+    );
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      // 消せなかった＝開き直しに行く（空の画面に置き去りにしない）。失敗はそのまま投げ返す
+      // ＝一覧が理由を出す担い手なので、ここで握りつぶさない。
+      expect(load).toHaveBeenCalledWith('proj_open');
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
+  // #763-4 再レビュー🟡：待ちを意図的に長くしたので、その間に別の動画を開ける。捕まえた時点の id で
+  // 無条件に開き直すと、**いま開いている方を黙って上書き**する（未保存の編集が消える・§2-5）。
+  it('待っている間に別の動画を開かれていたら、開き直さない（開いている方を上書きしない）', async () => {
+    const other = assembleProject(
+      { ...useProjectStore.getState().meta, projectId: 'proj_other' },
+      [], useProjectStore.getState().parts, useProjectStore.getState().scenes,
+    );
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(other));
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      // 消している最中に別の動画を開く（手放した後の窓）。
+      await useProjectStore.getState().loadProject('proj_other');
+      throw new Error('消せなかった');
+    });
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      // 開いた方（proj_other）が残る＝消した方で上書きしない。
+      expect(useProjectStore.getState().meta.projectId).toBe('proj_other');
+      expect(load).not.toHaveBeenCalledWith('proj_open');
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
+  // 同上。**新しく作り始めていた**ときも上書きしない（新規は projectId が空のままなので、
+  // id だけでは「手放したまま」と見分けられない＝作業中の内容も見る）。
+  it('待っている間に新しく作り始めていたら、開き直さない', async () => {
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue('{}');
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      // 手放した後の空の新規に、場面を作り始めた状態（projectId は空のまま）。
+      useProjectStore.setState({ scenes: [{ sceneId: 'scene_001' } as never] });
+      throw new Error('消せなかった');
+    });
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      expect(load).not.toHaveBeenCalled(); // 作りかけを消した動画で上書きしない
+      expect(useProjectStore.getState().scenes).toHaveLength(1);
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
   });
 
   it('開いていない別プロジェクトの削除では編集状態を触らない（#383）', async () => {
@@ -593,7 +944,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
     useProjectStore.setState({
-      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
     await useProjectStore.getState().loadProject('proj_any');
     expect(loadSpy).toHaveBeenCalledWith('proj_any');
@@ -619,7 +970,7 @@ describe('projectStore 書き出し中は素材編集を弾く（#547 P2-1・ADR
       assets: [asset('asset_001')],
       assetSrcById: { asset_001: 'data:image/png;base64,x' },
       importError: null,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
   });
   // 書き出し中フェーズを次の describe へ漏らさない（startBlank 等は #379 で exportRun ガード＝leak すると後続が no-op で落ちる）。
@@ -709,7 +1060,7 @@ describe('projectStore 取り込み↔書き出しの相互排他（#570 P1）',
       assetSrcById: { asset_001: 'data:image/png;base64,x' },
       importError: null,
       isImporting: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
   });
   afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isImporting: false }); });
@@ -739,7 +1090,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
       scenes: [scene('scene_001', 1)],
       parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
       past: [], future: [],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
   });
   afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
@@ -781,9 +1132,6 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     ['updateAnimation', () => useProjectStore.getState().updateAnimation('anim_1', [])],
     ['removeAnimation', () => useProjectStore.getState().removeAnimation('anim_1')],
     ['removeAnimationsForElements', () => useProjectStore.getState().removeAnimationsForElements('scene_001', ['el_1'])],
-    ['addOverlayClip', () => { useProjectStore.getState().addOverlayClip({ track: 'telop' }); }],
-    ['updateOverlayClip', () => useProjectStore.getState().updateOverlayClip('clip_1', { startSec: 1 })],
-    ['removeOverlayClip', () => useProjectStore.getState().removeOverlayClip('clip_1')],
     ['applyProjectInfo', () => useProjectStore.getState().applyProjectInfo({ companyInfo: { name: 'x' } } as never)],
     ['changeOrientation', () => { useProjectStore.getState().changeOrientation('9:16'); }],
     ['setFontId', () => useProjectStore.getState().setFontId('gen-interface-jp' as never)],
@@ -808,6 +1156,70 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     expect(useProjectStore.getState().isGeneratingNarration).toBe(false); // 一括生成にも入らない
   });
 
+  // ⚠️ **AI の道だけ上限を素通りしていた**（#1222）＝手で足す道は #1213 で塞いだのに、
+  // `transformPlan` は81個以上でも**警告を積むだけ**で場面を減らさないので、
+  // **AI 経由なら80を超えた動画が作れて**いた（保存も読込もできて、外へ渡したときだけ弾かれる）。
+  describe('AI の動画案が場面の上限を超えたとき（#1222）', () => {
+    /**
+     * 場面を n 個持つ動画案（`ai-video-plan` の形＝場面はパートの中にある）。
+     *
+     * ⚠️ **見た目パターンは実在の ID を使う**＝架空の ID だと変換の側で先に落ちて、
+     * **上限の関門を一度も通らないのに「断れた」ように見える**（検査が嘘になる）。
+     */
+    const planWith = (n: number) => ({
+      schemaVersion: '1.0',
+      videoPlan: { title: 'テスト', purpose: 'new_graduate', targetAudience: '新卒', targetDurationSec: 60 },
+      parts: [
+        {
+          partTitle: '本編',
+          summary: 'まとめ',
+          targetDurationSec: n * 5,
+          scenes: Array.from({ length: n }, () => ({
+            sceneTitle: 'ごあいさつ',
+            sceneType: 'opening',
+            templateId: 'opening_yuko_right_v1',
+            durationSec: 5,
+            yukoPoseTag: 'smile',
+            texts: { title: 'ようこそ' },
+            narrationText: 'こんにちは。',
+          })),
+        },
+      ],
+    });
+    const 生成させる = (n: number) =>
+      vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockResolvedValue(planWith(n) as never);
+
+    beforeEach(() => useProjectStore.setState({ templates: [...sampleTemplates] }));
+    afterEach(() => vi.restoreAllMocks());
+
+    it('取り込まずに断る（いまの中身を置き換えない）', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO + 1);
+      const 元 = [scene('scene_001', 1)];
+      useProjectStore.setState({ scenes: 元, status: 'idle' });
+      await useProjectStore.getState().generate();
+      expect(useProjectStore.getState().status, '取り込んでしまっている').toBe('error');
+      expect(useProjectStore.getState().scenes, 'いまの中身を置き換えた').toEqual(元);
+    });
+
+    it('断りに、いくつだったかと次の行動を出す', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO + 13);
+      useProjectStore.setState({ scenes: [], status: 'idle' });
+      await useProjectStore.getState().generate();
+      const m = useProjectStore.getState().aiError ?? '';
+      expect(m, 'いくつだったかを言っていない').toContain(String(MAX_SCENES_PER_VIDEO + 13));
+      expect(m, '次の行動を言っていない').toContain('作り直');
+    });
+
+    // ⚠️ **境目**＝ちょうど上限は通す（誤検出で正常な動画案を捨てない）。
+    it('ちょうど上限なら取り込む', async () => {
+      生成させる(MAX_SCENES_PER_VIDEO);
+      useProjectStore.setState({ scenes: [], status: 'idle' });
+      await useProjectStore.getState().generate();
+      expect(useProjectStore.getState().status, '正常な動画案を断っている').toBe('ready');
+      expect(useProjectStore.getState().scenes).toHaveLength(MAX_SCENES_PER_VIDEO);
+    });
+  });
+
   it('generate（動画案生成）は書き出し中 no-op（生成を始めない）', async () => {
     useProjectStore.setState({ scenes: [], status: 'ready' });
     useProjectStore.getState().setExportRun({ phase: 'rendering' });
@@ -822,7 +1234,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     useProjectStore.setState({
       scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }],
       narrationAudioById: {}, isGeneratingNarration: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
     let resolveSynth: (v: unknown) => void = () => {};
     const synthP = new Promise((r) => { resolveSynth = r; });
@@ -842,7 +1254,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     useProjectStore.setState({
       scenes: [{ ...scene('scene_001', 1), narration: { text: '', status: 'none' }, lines: [{ lineId: 'line_001', text: 'こんにちは', status: 'none' }] }],
       narrationAudioById: {}, isGeneratingNarration: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false },
     });
     let resolveSynth: (v: unknown) => void = () => {};
     const synthP = new Promise((r) => { resolveSynth = r; });
@@ -971,6 +1383,16 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     expect(useProjectStore.getState().status).toBe('idle'); // 下書きなし＝未生成へ
   });
 
+  // ⚠️ **止めたら、外への送り直しも止める**（#1255 レビュー 🟡・§2-6）＝以前は画面の結果を捨てるだけで、
+  // 混み合っているとき Rust は待って自分で送り直していた＝**止めたあとも同じ中身が最大3回、外へ送られ続けた**。
+  it('キャンセルすると、外への送り直しも止める', () => {
+    const stop = vi.spyOn(aiClient, 'cancelAiGenerate').mockResolvedValue(undefined);
+    useProjectStore.setState({ scenes: [], status: 'generating' });
+    useProjectStore.getState().cancelGeneration();
+    expect(stop, 'キャンセルしたのに、送り直しを止めていない').toHaveBeenCalledTimes(1);
+    stop.mockRestore();
+  });
+
   it('生成中にキャンセルすると、裏で完走しても場面を置き換えない（#402）', async () => {
     const existing = [scene('scene_001', 1)];
     useProjectStore.setState({ scenes: existing, parts: [], status: 'idle', _generationSeq: 0 });
@@ -991,6 +1413,15 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     spy.mockRestore();
   });
 
+  // #1318：動画全体の声の速さを、尺の見積もりのために渡す（AI へは送らない＝入力の別の欄）。
+  it('generate は動画全体の声の速さを voiceSpeed として渡す', async () => {
+    useProjectStore.setState((st) => ({ scenes: [], parts: [], status: 'idle', _generationSeq: 0, meta: { ...st.meta, voiceSettings: { ...st.meta.voiceSettings, speed: 1.3 } } }));
+    const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan');
+    await useProjectStore.getState().generate();
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ voiceSpeed: 1.3 });
+    spy.mockRestore();
+  });
+
   it('キャンセル後に再度 generate すると正常に反映される（世代が現行なら破棄しない）', async () => {
     useProjectStore.setState({ scenes: [], parts: [], status: 'idle', _generationSeq: 0 });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan');
@@ -1003,7 +1434,7 @@ describe('projectStore 生成のキャンセル（#402）', () => {
   });
 
   it('キャンセルせず newProject しても、裏で完走した旧生成が新しい状態を上書きしない（#402 レビュー）', async () => {
-    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false } });
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', duckMerged: false, cancelling: false, resultUnseen: false } });
     let resolvePlan: (v: unknown) => void = () => {};
     const planPromise = new Promise((r) => { resolvePlan = r; });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);
@@ -1055,6 +1486,20 @@ describe('projectStore 履歴グループ（#389・連続編集を1履歴にま�
     // 3回でなく1回だけ（最初の pushHistory で記録・以降 no-op）＝1キーストローク毎に積まない。
     expect(useProjectStore.getState().past).toHaveLength(1);
     expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // グループは閉じている
+  });
+
+  // ⚠️ **まとめが開いたまま取り消しても、次の1手は積まれる**（#817 レビュー 🟡＝タイムライン形式と
+  // 同じ扱い・ADR-0026②）。畳まないと戻した後の編集が「まとめの続き」とみなされて**1件も積まれず**、
+  // 自動保存も `historyDepth > 0` の間は走らないので**保存も止まる**。
+  it('まとめが開いたまま取り消しても、その後の編集は積まれる', () => {
+    const st = useProjectStore.getState();
+    st.pushHistory(); // 戻せる1手を作る
+    st.beginHistoryGroup(); // スライダーを掴んだまま…
+    st.undo();              // …`Ctrl+Z` が通る（掴んだ数に入らない）
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // 畳まれている
+    const before = useProjectStore.getState().past.length;
+    st.pushHistory();
+    expect(useProjectStore.getState().past).toHaveLength(before + 1);
   });
 
   it('begin→（変更なし）→end では履歴を消費しない（未変更 focus/pointerdown で積まない・#389 レビュー）', () => {

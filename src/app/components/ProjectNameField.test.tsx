@@ -7,7 +7,7 @@ import { ProjectNameField } from "./ProjectNameField";
 describe("ProjectNameField（#252 編集中の改名）", () => {
   beforeEach(() => {
     useProjectStore.setState({
-      meta: { ...useProjectStore.getState().meta, projectName: "無題のプロジェクト" },
+      meta: { ...useProjectStore.getState().meta, projectName: "無題の動画" },
       past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
     });
   });
@@ -28,8 +28,8 @@ describe("ProjectNameField（#252 編集中の改名）", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.blur(input);
-    expect(useProjectStore.getState().meta.projectName).toBe("無題のプロジェクト");
-    expect(input.value).toBe("無題のプロジェクト"); // 表示も元へ戻る
+    expect(useProjectStore.getState().meta.projectName).toBe("無題の動画");
+    expect(input.value).toBe("無題の動画"); // 表示も元へ戻る
   });
 
   it("IME変換確定の Enter（composition中）では確定しない（部分確定バグの防止・レビュー対応）", () => {
@@ -38,7 +38,7 @@ describe("ProjectNameField（#252 編集中の改名）", () => {
     input.focus();
     fireEvent.change(input, { target: { value: "さいよう" } }); // 変換途中
     fireEvent.keyDown(input, { key: "Enter", isComposing: true }); // 変換確定の Enter＝確定しない
-    expect(useProjectStore.getState().meta.projectName).toBe("無題のプロジェクト");
+    expect(useProjectStore.getState().meta.projectName).toBe("無題の動画");
     // 変換が終わってからの通常 Enter で確定できる。
     fireEvent.keyDown(input, { key: "Enter" });
     expect(useProjectStore.getState().meta.projectName).toBe("さいよう");
@@ -52,6 +52,6 @@ describe("ProjectNameField（#252 編集中の改名）", () => {
     fireEvent.keyDown(input, { key: "Enter" }); // → blur() → commit
     expect(useProjectStore.getState().meta.projectName).toBe("会社紹介");
     useProjectStore.getState().undo();
-    expect(useProjectStore.getState().meta.projectName).toBe("無題のプロジェクト");
+    expect(useProjectStore.getState().meta.projectName).toBe("無題の動画");
   });
 });
