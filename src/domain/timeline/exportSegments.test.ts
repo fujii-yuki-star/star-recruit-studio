@@ -392,13 +392,14 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
       ({ id, kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec, durationSec, voice: { text: 'あ', status: 'none' } }) as TimelineClip;
     const talker = text('clip_001', 0, 4, { talkMotion: { trackId: 'track_002', kind: 'bob' } });
 
-    it('ゆらゆらは声が鳴っている区間だけ毎コマ・割り目は外側へ丸める', () => {
-      // 声は 1.01〜1.99 秒 → 割り目は 30 コマ目（1.0 秒・切り捨て）と 60 コマ目（2.0 秒・切り上げ）。
-      const d = doc([talker, voice('clip_002', 1.01, 0.98)], { tracks } as Partial<TimelineProject>);
+    it('ゆらゆらは声が鳴っている区間だけ毎コマ・割り目は動き始める最初のコマ（切り上げ）', () => {
+      // 声は 1.02〜2.013 秒 → 割り目は 31 コマ目（1.0333 秒＝最初に動くコマ）と 61 コマ目（2.0333 秒＝最初に止まるコマ）。
+      // ⚠️ 切り捨て・四捨五入だと 30／60 になる（種類は重なりで決めるので絵は正しいが、毎コマの区間が広がる）。
+      const d = doc([talker, voice('clip_002', 1.02, 0.993)], { tracks } as Partial<TimelineProject>);
       expect(planTimelineExportSegments(d)).toEqual([
-        { kind: 'still', startSec: 0, endSec: 1 },
-        { kind: 'frames', startSec: 1, endSec: 2 },
-        { kind: 'still', startSec: 2, endSec: 4 },
+        { kind: 'still', startSec: 0, endSec: 31 / 30 },
+        { kind: 'frames', startSec: 31 / 30, endSec: 61 / 30 },
+        { kind: 'still', startSec: 61 / 30, endSec: 4 },
       ]);
     });
 

@@ -145,13 +145,13 @@ export function planTimelineExportSegments(
     cuts.add(toFrame(c.startSec + c.durationSec));
   }
   // 喋っている間の動きを持つ部品は、動いている範囲の頭と終わりでも割る（追補3）。
-  // ⚠️ **外側へ丸める**（頭は切り捨て・終わりは切り上げ）＝内側へ丸めると、声の頭の1コマが「動かない区間」に
-  // 入って、はねる動きの出だしが消える。
-  const clampFrame = (f: number): number => Math.max(0, Math.min(plan.frameCount, f));
+  // ⚠️ **割り目の置き方は部品の出入りと同じ `toFrame`**（その時刻から動く最初のコマ＝切り上げ）＝描く側
+  // （`talkMotionAt` は `[頭, 終わり)` で動く）とぴったり合う。⚠️ 種類を決める所は「範囲と重なるか」で見るので、
+  // 割り目がずれても**毎コマの側へ倒れる**（遅くなるだけで絵は正しい）＝ずれは検査で区間の形を見て捕まえる。
   for (const ranges of talkRanges.values()) {
     for (const r of ranges) {
-      cuts.add(clampFrame(Math.floor(r.startSec * plan.fps)));
-      cuts.add(clampFrame(Math.ceil(r.endSec * plan.fps)));
+      cuts.add(toFrame(r.startSec));
+      cuts.add(toFrame(r.endSec));
     }
   }
   // ⚠️ **クレジットの出入りでも割る**（#352 の45分実測で分かった）＝割らないと、動画1本＋字幕1本の長い動画は
@@ -173,10 +173,12 @@ export function planTimelineExportSegments(
     // 区間の**真ん中**で見る＝端は半開区間の境目なので、出入りの判定がぶれる。
     const midSec = (startSec + endSec) / 2;
     const live = visual.filter((c) => liveAt(c, midSec));
-    // その区間で動くか＝キーフレーム（グループの動きを含む）か、**動いている範囲がこの区間に重なる**喋っている間の動き。
+    // その区間で動くか＝キーフレーム（グループの動きを含む）か、**動いている範囲がこの区間のコマに重なる**喋っている間の動き。
+    // ⚠️ **コマで比べる**（秒で比べると、範囲の頭が区間の最後のコマの少し後ろにあるだけで重なりと見てしまう）＝
+    // 範囲が動かすコマは `[toFrame(頭), toFrame(終わり))`（割り目と同じ数え方）。
     const hasAnimation = (clipId: string): boolean =>
       animated.has(clipId)
-      || (talkRanges.get(clipId) ?? []).some((r) => r.startSec < endSec && r.endSec > startSec);
+      || (talkRanges.get(clipId) ?? []).some((r) => toFrame(r.startSec) < to && toFrame(r.endSec) > from);
     const creditShows =
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, startSec) ||
       creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, (startSec + endSec) / 2) ||
