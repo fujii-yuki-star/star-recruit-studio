@@ -4,6 +4,7 @@ import { splitClip, splitClipIssue, splitKeyframes, splitVolumePoints, SPLIT_BLO
 import { VOLUME_POINTS_MAX } from '../constants';
 import { interpolateKeyframes, KEYFRAME_PROPS } from '../project/keyframes';
 import { volumeAt } from './audio';
+import { setVisualClipContent } from './edit';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
@@ -659,3 +660,33 @@ describe('「止める」の区間を分ける（#1365）', () => {
   });
 });
 
+
+// #1135 項目4：表情を途中で変える＝「分ける→後半だけ写真を差し替える」で、動きが残るか（AE の「素材の置き換え」と同じ）。
+// 残るので**専用の操作は足さない**（利用者判断 2026-10-07＝画面で確かめて、残れば足さない）。
+describe('分ける→後半だけ写真を差し替える（#1135 項目4）', () => {
+  it('後半の動き（キーフレーム）と喋っている間の動きは残り、素材だけが替わる', () => {
+    const d = doc({
+      assets: [
+        { assetId: 'asset_001', assetType: 'image', displayName: 'ふつう', filePath: 'assets/normal.png' },
+        { assetId: 'asset_002', assetType: 'image', displayName: '喜び', filePath: 'assets/happy.png' },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 10, x: 0, y: 0, w: 400, h: 600, assetId: 'asset_001', talkMotion: { trackId: 'track_002', kind: 'bounce' } } as TimelineClip,
+      ],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 10, x: 100 }] }],
+    });
+    const s = split(d, 'clip_001', 4);
+    if (!s.ok) throw new Error('分けられない');
+    const r = setVisualClipContent(s.doc, s.newClipId, { assetId: 'asset_002' });
+    if (!r.ok) throw new Error('差し替えられない');
+    const tail = r.doc.clips.find((c) => c.id === s.newClipId)!;
+    expect(tail.assetId).toBe('asset_002');
+    expect(tail.talkMotion).toEqual({ trackId: 'track_002', kind: 'bounce' });
+    const anim = r.doc.animations?.find((a) => a.targetId === s.newClipId);
+    expect(anim, '後半の動きが消えた').toBeDefined();
+    // 後半の頭は分けた時刻の位置（x=40）から続く＝差し替えても動きの途中から始まる。
+    expect(interpolateKeyframes(anim!.keyframes, 0).x).toBeCloseTo(40);
+    // 前半はそのまま元の素材。
+    expect(r.doc.clips.find((c) => c.id === 'clip_001')!.assetId).toBe('asset_001');
+  });
+});
