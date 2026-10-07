@@ -1950,3 +1950,14 @@ export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
 export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
 export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
 export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";
+
+/**
+ * タイムライン形式で、枠に入りきらず末尾が「…」になる文字の注意（#1366）。見出しは場面形式の公開前チェックと同じ。
+ * 例は先頭の1つだけ（長いと読めない）・数は全部。
+ */
+export const TRUNCATED_TEXT_LABEL = "切れている文字";
+export function timelineTruncatedTextDetail(texts: readonly string[]): string {
+  const first = texts[0] ?? "";
+  const sample = first.length > 16 ? `${first.slice(0, 16)}…` : first;
+  return `「${sample}」${texts.length > 1 ? `など ${texts.length} か所` : ""}の文字が枠に入りきらず、末尾が「…」になります。部品の枠を広げるか、文字を小さくしてください。`;
+}
