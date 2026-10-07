@@ -6,7 +6,7 @@ import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { elementAtPoint, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry, groupScaleOf, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
@@ -806,8 +806,6 @@ export function FreeLayoutOverlay({
       {freeLayout.map((el) => {
         if (el.hidden || isHiddenByGroup(el.id, groups)) return null; // 非表示（要素 or 所属グループ）は箱を出さない＝描画（layout.ts）と一致・操作枠だけ残さない（#525-9a）
         const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
-        // 文字の大きさ・縁取り・影は**まとまりの倍率も掛ける**（#1371・実描画＝`layoutScene` と同じ）＝編集中だけ字の大きさが変わらない。
-        const textScale = viewScale * groupScaleOf(el, cg);
         const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
         // ドリルイン（#525-5）：グループのメンバーをダブルクリックすると、そのメンバーだけを個別選択して直接編集できる。
         // canvas 直接編集（個別ドラッグ/ハンドル）が正しいのは、合成後（cg）が base（el）と**並進差のみ**のとき＝純並進で
@@ -900,13 +898,13 @@ export function FreeLayoutOverlay({
                   // フォールバック込み＝描画側と同じ関数）を使う。cssFamilyForId は bare 名でフォント未ロード時に
                   // textarea 既定（monospace）へ落ちて実描画と乖離する。
                   fontFamily: isKnownFontId(el.fontId) ? fontFamilyForId(el.fontId) : textFontFamily,
-                  fontSize: viewScale > 0 ? (el.fontSize ?? DEFAULT_FONT_SIZE) * textScale : undefined,
+                  fontSize: viewScale > 0 ? (el.fontSize ?? DEFAULT_FONT_SIZE) * viewScale : undefined,
                   fontWeight: el.fontWeight ?? FONT_WEIGHT.normal,
                   textAlign: el.textAlign ?? TEXT_ALIGN.left,
                   lineHeight: el.lineHeight ?? DEFAULT_LINE_HEIGHT,
                   // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
                   ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
-                    ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * textScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
+                    ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
                     : {}),
                   // 字間・影（#264）も同じ TextItem 内＝伏せると消える。**編集中だけ字が詰まって影が消える**のを
                   // 防ぐため近似再現する（PR #879 再レビュー ℹ️）。字間は em＝文字サイズに対する割合なので
@@ -915,7 +913,7 @@ export function FreeLayoutOverlay({
                   ...(el.letterSpacing ? { letterSpacing: `${el.letterSpacing}em` } : {}),
                   ...(el.shadow?.enabled && viewScale > 0
                     ? {
-                        textShadow: `${(el.shadow.dx ?? 0) * textScale}px ${(el.shadow.dy ?? 0) * textScale}px ${(el.shadow.blur ?? 0) * textScale}px ${shadowCss(el.shadow)}`,
+                        textShadow: `${(el.shadow.dx ?? 0) * viewScale}px ${(el.shadow.dy ?? 0) * viewScale}px ${(el.shadow.blur ?? 0) * viewScale}px ${shadowCss(el.shadow)}`,
                       }
                     : {}),
                   overflow: "hidden", // はみ出しはSVG側の maxLines と揃えて見せない（実描画に寄せる）

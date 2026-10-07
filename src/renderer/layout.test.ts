@@ -1003,4 +1003,14 @@ describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
     };
     expect(byId(layoutScene(scene, t).items, 'deco')).toMatchObject({ w: 50, radius: 10 });
   });
+
+  it('テンプレのまとまりの縮小：素材の無い背景層（塗り）の角丸も縮む', () => {
+    const t: Template = {
+      ...openingTemplate,
+      layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 400, h: 400, zIndex: 0, radius: 40 }],
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 0.5 } }],
+    };
+    const bare = { ...scene, assetRefs: {} } as Scene;
+    expect(byId(layoutScene(bare, t).items, 'background')).toMatchObject({ kind: 'fill', w: 200, radius: 20 });
+  });
 });
