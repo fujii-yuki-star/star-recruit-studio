@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import type { TimelineClip, TimelineProject } from '../../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
+import { planTimelineExportSegments } from '../../domain/timeline/exportSegments';
+import { layoutTimelineAt } from '../timelineLayout';
 
 vi.mock('./rasterize', () => ({
   svgToPngDataUrl: vi.fn(async (svg: string) => `png:${svg}`),
@@ -299,4 +301,36 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
     expect(seen).toEqual([[1, 2], [2, 2]]);
     expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(2);
   });
+});
+
+// ⚠️ **1コマで流す区間は、中のどのコマを描いても同じ絵**（#1376 の要）＝区間の割り目が描く側の
+//   「映るかどうか」とずれると、区間の頭の1コマで描いた絵が区間全体に広がる（作例で字幕が丸ごと消えた）。
+describe('1コマで流す区間の中は、どのコマも同じ絵（#1376）', () => {
+  const tracks = [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }];
+  const text = (id: string, startSec: number, durationSec: number, over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec, durationSec, x: 0, y: 0, w: 300, h: 80, text: id, ...over }) as TimelineClip;
+  const voice = (id: string, startSec: number, durationSec: number): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec, durationSec, voice: { text: 'あ', status: 'none' } }) as TimelineClip;
+  const cases: [string, TimelineProject][] = [
+    ['端数の時刻で出入りする文字', doc([text('a', 0, 5.635), text('b', 5.635, 1.01), text('c', 1.017, 3.333)])],
+    ['喋っている間の動き（はねる・ゆらゆら）', doc([
+      text('a', 0, 6, { talkMotion: { trackId: 'track_002', kind: 'bounce' } }),
+      text('b', 0, 6, { talkMotion: { trackId: 'track_002', kind: 'bob' }, y: 200 }),
+      voice('v1', 1.013, 1.5), voice('v2', 3.71, 0.07),
+    ], { tracks } as Partial<TimelineProject>)],
+  ];
+  for (const [name, d] of cases) {
+    it(name, () => {
+      const fps = 30;
+      for (const seg of planTimelineExportSegments(d)) {
+        if (seg.kind !== 'still') continue;
+        const from = Math.round(seg.startSec * fps);
+        const to = Math.round(seg.endSec * fps);
+        const head = JSON.stringify(layoutTimelineAt(d, from / fps, { templateOf: () => undefined }));
+        for (let f = from + 1; f < to; f += 1) {
+          expect(JSON.stringify(layoutTimelineAt(d, f / fps, { templateOf: () => undefined })), `${seg.startSec}〜${seg.endSec} の ${f} コマ目`).toBe(head);
+        }
+      }
+    });
+  }
 });

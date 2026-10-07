@@ -370,6 +370,16 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
     expect(planTimelineExportSegments(d)).toEqual([{ kind: 'frames', startSec: 0, endSec: 3 }]);
   });
 
+  // ⚠️ 割り目は「その時刻から映る最初のコマ」＝切り上げ。四捨五入だと 5.635 秒の字幕が 169 コマ目（5.633 秒＝まだ映らない）
+  //   で割られ、1コマで流す区間を字幕の無い絵で描いた（作例の漫才で実際に起きた）。
+  it('割り目は、その部品が初めて映るコマ（切り上げ）', () => {
+    const d = doc([text('clip_001', 0, 5.635), text('clip_002', 5.635, 2.365)]);
+    expect(planTimelineExportSegments(d)).toEqual([
+      { kind: 'still', startSec: 0, endSec: 170 / 30 },
+      { kind: 'still', startSec: 170 / 30, endSec: 8 },
+    ]);
+  });
+
   it('焼くコマ数は1コマの区間を1と数える', () => {
     const d = doc([text('clip_001', 0, 3), text('clip_002', 3, 3)]);
     expect(bakeFrameTotal(planTimelineExportSegments(d), 30)).toBe(2);

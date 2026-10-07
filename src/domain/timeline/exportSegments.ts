@@ -134,8 +134,12 @@ export function planTimelineExportSegments(
   const visual = doc.clips.filter((c) => isDrawnClip(doc, c));
   // 区間の境目＝部品の出入り（コマの格子に丸める）。
   const cuts = new Set<number>([0, plan.frameCount]);
+  // ⚠️ **割り目は「その時刻から映る最初のコマ」**（#1376）＝コマ f に映るのは `frameTimeAt(f)`（f/fps）が部品の
+  // 範囲に入るとき（`clipIsLiveAt`）なので、境目は**切り上げ**。四捨五入だと 5.635 秒に始まる字幕の割り目が
+  // 169 コマ目（5.633 秒＝まだ映らない）に来て、**1コマで流す区間を字幕の無い絵で描いて**しまった（作例の漫才で実際に起きた）。
+  // 毎コマ描く区間では1コマのずれで済んでいたので、表に出ていなかった。誤差（123/30*30 が 122.99…）は小さく見逃す。
   const toFrame = (sec: number): number =>
-    Math.max(0, Math.min(plan.frameCount, Math.round(sec * plan.fps)));
+    Math.max(0, Math.min(plan.frameCount, Math.ceil(sec * plan.fps - 1e-6)));
   for (const c of visual) {
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));
