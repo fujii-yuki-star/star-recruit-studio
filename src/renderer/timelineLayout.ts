@@ -8,6 +8,7 @@ import { DEFAULT_BACKGROUND_COLOR, DEFAULT_FIT, dimsForOrientation } from '../do
 import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
+import { talkMotionAt } from '../domain/timeline/talkMotion';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
@@ -277,7 +278,12 @@ export function timelineCanvasClipsAt(
       if (isHiddenByGroup(clip.id, groups)) continue;
       const box = resolveClipBox(clip, canvas);
       const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);
-      const ownTr: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
+      const keyed: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
+      // 喋っている間の動き（ADR-0056）＝キーフレームの結果の**上に足す**（縦のずれは足し・大きさは掛ける）。
+      const talk = clip.talkMotion ? talkMotionAt(doc, clip, timeSec) : null;
+      const ownTr: InterpolatedTransform = talk && (talk.dy !== 0 || talk.scale !== 1)
+        ? { ...keyed, y: (keyed.y ?? 0) + talk.dy, scale: (keyed.scale ?? 1) * talk.scale }
+        : keyed;
       const groupedBox = composed.get(clip.id) ?? box;
       out.push({ clip, box, groupedBox, finalBox: boxWithTransform(groupedBox, ownTr), ownTr });
     }

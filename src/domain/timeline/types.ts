@@ -3,7 +3,7 @@
 // タイムライン（時間の自由）。AI はこの形式を生成しない（AI の関与は場面形式まで）。
 import type { BlendMode, ColorAdjust } from '../template/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
-import type { CropAlignX, CropAlignY, CropMode, Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { CropAlignX, CropAlignY, CropMode, Fit, NarrationStatus, ProjectFormat, TalkMotionKind, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { Group } from '../group/types';
 import type {
@@ -77,6 +77,15 @@ export interface VolumePoint {
   volume: number;
 }
 
+/** 喋っている間の動き（ADR-0056）。 */
+export interface TalkMotion {
+  /** 音の列（`track_NNN`）。その列の声の部品が生きている間に動く。 */
+  trackId: string;
+  kind: TalkMotionKind;
+  /** 強さ（倍率・既定 1）。 */
+  strength?: number;
+}
+
 /** クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」（11 §7.6）。 */
 export interface TimelineClip extends ClipSpatial {
   /** `clip_NNN`（11 §2.1）。場面形式の `ovclip_NNN` とは別物。 */
@@ -146,6 +155,12 @@ export interface TimelineClip extends ClipSpatial {
    * 未指定＝連動しない。指した先が見つからないときは黙って消さず、検証（`11 §8` V29）が知らせる。
    */
   voiceClipId?: string;
+
+  /**
+   * 喋っている間の動き（ADR-0056・#1367）＝映像の部品が、`trackId`（音の列）の声の部品が生きている間に動く。
+   * キーフレームの上に足す（縦のずれは足し・大きさは掛ける）。未指定＝動かない。⚠️ 口パクではない（絵は1枚のまま）。
+   */
+  talkMotion?: TalkMotion;
 
   /** kind='voice' のとき必須（読み上げの中身・schema の if/then で強制）。 */
   voice?: TimelineVoice;
@@ -242,4 +257,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.15';
+export const TIMELINE_SCHEMA_VERSION = '1.16';

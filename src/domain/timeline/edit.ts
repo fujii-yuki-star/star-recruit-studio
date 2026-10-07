@@ -26,7 +26,9 @@ import { subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 // ⚠️ **すき間の広さは場面形式と共有する**（#1009）＝別に決めると、同じ「2人目を上へ」が形式で違う間隔になる。
 import { SUBTITLE_STACK_GAP_EM } from '../text/subtitleBands';
-import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
+import type { ClipAnimation, TalkMotion, TimelineClip, TimelineProject, Track } from './types';
+import { TALK_MOTION_STRENGTH_MAX } from './talkMotion';
+import { isVisualClip } from './clipKind';
 import type { Texts } from '../project/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import { defaultDurationForTemplate } from '../template/layerOps';
@@ -139,6 +141,11 @@ export const EDIT_BLOCKED = {
    * 別の絵になる。写せないものは**バラす前に断る**（バラすは取り消しでしか戻らない）。
    */
   explodeCrop: 'TIMELINE_EDIT_EXPLODE_CROP',
+  /**
+   * 「ふくらむ」で喋る部品はバラせない（ADR-0056・PR #1370 レビュー 🔴）＝要素ごとに分けると、それぞれが
+   * **自分の中心で**ふくらむ（元は部品の箱の中心）＝別の絵になる。はねる・ゆらゆら（縦にずらすだけ）は全要素へ写せば同じ絵。
+   */
+  explodeTalkPulse: 'TIMELINE_EDIT_EXPLODE_TALK_PULSE',
   /**
    * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
    * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
@@ -849,7 +856,15 @@ export function removeTrack(doc: TimelineProject, trackId: string): EditResult {
   if (track.locked) return blocked(EDIT_BLOCKED.locked);
   const ids = doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id);
   const withoutClips = removeClips(doc, ids);
-  return ok({ ...withoutClips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) });
+  // ⚠️ **その列の声で動いていた立ち絵の結びも外す**（ADR-0056）＝残すと、後から同じ番号で作った列で
+  // 勝手に動き出す（`track_NNN` の歯抜け再利用＝まとまりの動きの「憑依」と同じ経路）。
+  const clips = withoutClips.clips.map((c) => {
+    if (c.talkMotion?.trackId !== trackId) return c;
+    const next = { ...c };
+    delete next.talkMotion;
+    return next;
+  });
+  return ok({ ...withoutClips, clips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) });
 }
 
 /**
@@ -1061,6 +1076,11 @@ function freshClipCopy(doc: TimelineProject, clip: TimelineClip, id: string, sta
   // ⚠️ **落とす前に、いま出ている文を焼き付ける**（#787）＝自分の文を持たない連動字幕をそのまま落とすと
   // **文も連動先も無い＝何も出ない帯**になる（黙って中身が消えたのと同じ・§2-5／ADR-0026④）。
   // 焼き付けたあとは普通の字幕なので、書き換えも消すこともできる。
+  // ⚠️ **行き先の無い「喋っている間の動き」は持ち込まない**（PR #1370 レビュー 🟡）＝写したあとで声の列が消えて
+  // いると、後から同じ番号で作った列の声で勝手に動き出す（`removeTrack` が外しているのと同じ経路）。
+  if (next.talkMotion && !doc.tracks.some((t) => t.id === next.talkMotion!.trackId && t.kind === TRACK_KIND.audio)) {
+    delete next.talkMotion;
+  }
   if (next.voiceClipId) {
     const baked = subtitleTextOf(doc, clip);
     if (baked) next.text = baked;
@@ -1298,6 +1318,29 @@ export function setSubtitleVoiceLink(doc: TimelineProject, clipId: string, voice
   const moved = { ...clip, voiceClipId, startSec: voice.startSec, durationSec: voice.durationSec };
   const issue = placementIssue(doc, moved, moved.trackId, moved.startSec, moved.durationSec);
   return issue ? blocked(issue) : ok(withClip(doc, moved));
+}
+
+/**
+ * 喋っている間の動き（ADR-0056・#1367）を付ける／外す（`null`＝外す）。
+ *
+ * ⚠️ **映像の部品だけ**（動くのは絵）・**結ぶのは音の列だけ**（声の部品が置かれる列）＝ほかは断る（黙って別の列にしない）。
+ * ⚠️ 強さは 0 より大きく 5 まで（schema と同じ）＝外れた値は断る（丸めて保存しない）。
+ */
+export function setClipTalkMotion(doc: TimelineProject, clipId: string, talkMotion: TalkMotion | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || !isVisualClip(clip)) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (talkMotion === null) {
+    if (clip.talkMotion == null) return ok(doc);
+    const next = { ...clip };
+    delete next.talkMotion;
+    return ok(withClip(doc, next));
+  }
+  const track = doc.tracks.find((t) => t.id === talkMotion.trackId);
+  if (!track || track.kind !== TRACK_KIND.audio) return blocked(EDIT_BLOCKED.notFound);
+  const strength = talkMotion.strength;
+  if (strength != null && !(strength > 0 && strength <= TALK_MOTION_STRENGTH_MAX)) return blocked(EDIT_BLOCKED.notFound);
+  return ok(withClip(doc, { ...clip, talkMotion: { ...talkMotion } }));
 }
 
 /**

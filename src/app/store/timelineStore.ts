@@ -28,7 +28,7 @@ import { ASSET_TYPE, PROJECT_FORMAT } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import { frameTimeSec, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, effectiveFps, loopSpan, playbackStartSec, quantizeToFrameSec } from "../../domain/timeline/playback";
-import type { TimelineClip, TimelineProject } from "../../domain/timeline/types";
+import type { TalkMotion, TimelineClip, TimelineProject } from "../../domain/timeline/types";
 import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
@@ -39,7 +39,7 @@ import {
   setVisualClipContent,
   setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
-  setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip, trimClips, trimTargetsAt,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -650,6 +650,8 @@ export interface TimelineState {
   clearKeyframesOf: (targetId: string) => void;
   /** 選んでいる字幕自身の文を書き換える（空にすると連動先の読み上げ文に戻る・#633）。 */
   setSelectedSubtitleText: (text: string) => void;
+  /** 選んでいる映像の部品に「喋っている間の動き」を付ける／外す（`null`＝外す・ADR-0056）。 */
+  setSelectedClipTalkMotion: (talkMotion: TalkMotion | null) => void;
   /** 選んでいる字幕の連動先（読み上げ）を決める／やめる（#633）。 */
   setSelectedSubtitleVoiceLink: (voiceClipId: string | null) => void;
   /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
@@ -1694,6 +1696,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   },
 
   setSelectedSubtitleText: (text) => applyEdit(set, get, (d, id) => setSubtitleText(d, id, text)),
+  setSelectedClipTalkMotion: (talkMotion) => applyEdit(set, get, (d, id) => setClipTalkMotion(d, id, talkMotion)),
   setSelectedSubtitleVoiceLink: (voiceClipId) =>
     applyEdit(set, get, (d, id) => setSubtitleVoiceLink(d, id, voiceClipId)),
 

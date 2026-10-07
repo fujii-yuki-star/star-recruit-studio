@@ -5,7 +5,8 @@ import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "..
 import { ASSIST_KIND } from "../domain/ai/assist";
 import { ASSET_KIND } from "../domain/asset/assetFile";
 import type { AssetKind } from "../domain/asset/assetFile";
-import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TRACK_KIND } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, PROJECT_FORMAT, SUBTITLE_SOURCE_KIND, TALK_MOTION_KIND, TRACK_KIND } from "../domain/enums";
+import type { TalkMotionKind } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, FreeShapeType, ProjectFormat, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind, Orientation, VideoKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
@@ -1041,6 +1042,8 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   // 含む（`cropAlign`）ので、切り抜きしか言わないと**寄せだけ設定した人は案内どおり解除できない**。
   TIMELINE_EDIT_EXPLODE_CROP:
     "切り抜き・素材の寄せがしてある部品はバラせません。そのままバラすと切り取り方が変わります。切り抜きを外し、寄せを「中央」に戻してからバラすか、バラさずに使ってください",
+  TIMELINE_EDIT_EXPLODE_TALK_PULSE:
+    "喋っている間に「ふくらむ」部品はバラせません。そのままバラすと、ふくらむ中心が部品ごとに変わります。動き方を「はねる」か「ゆらゆら」にするか、「動かない」にしてからバラしてください",
   TIMELINE_EDIT_EXPLODE_TRIM_END: "切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠に切り出していない動画を入れ直すか、バラさずに使ってください",
   TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE:
     "この枠だけ切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠の動画をいったん「なし」にして入れ直してからバラしてください",
@@ -1961,3 +1964,14 @@ export function timelineTruncatedTextDetail(texts: readonly string[]): string {
   const sample = first.length > 16 ? `${first.slice(0, 16)}…` : first;
   return `「${sample}」${texts.length > 1 ? `など ${texts.length} か所` : ""}の文字が枠に入りきらず、末尾が「…」になります。部品の枠を広げるか、文字を小さくしてください。`;
 }
+
+/** 喋っている間の動き（ADR-0056・#1367）。 */
+export const TALK_MOTION_SECTION_LABEL = "喋っている間の動き";
+export const TALK_MOTION_CHOICES: readonly { value: TalkMotionKind; label: string }[] = [
+  { value: TALK_MOTION_KIND.bounce, label: "はねる（セリフの頭で1回）" },
+  { value: TALK_MOTION_KIND.bob, label: "ゆらゆら（喋っている間、上下に）" },
+  { value: TALK_MOTION_KIND.pulse, label: "ふくらむ（喋っている間、少し大きく）" },
+];
+export const TALK_MOTION_HINT =
+  "選んだ列の声が鳴っている間だけ動きます。セリフを足したり長さを変えたりしても付いてきます。手で付けた動きの上に足されます（口は動きません）。";
+
