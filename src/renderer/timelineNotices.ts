@@ -22,6 +22,8 @@ export function timelineTruncatedTexts(
   for (const clip of doc.clips) {
     if (!isVisualClip(clip)) continue;
     const at = clip.startSec + clip.durationSec / 2;
+    // その部品の絵だけを見る（読みやすさのため。外しても結果は同じ＝ほかの部品も自分の真ん中で見られ、
+    // 集合で重ねて数えないので＝変異チェックで等価と分かった）。
     const items = layoutTimelineAt(doc, at, { templateOf }).items.filter((it) => isItemOfClip(it.id, clip.id));
     for (const t of truncatedTexts(items)) out.add(t);
   }

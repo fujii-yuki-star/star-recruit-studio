@@ -588,6 +588,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     writingSceneMessage: "生成中に書いている場面の数を伝える進み具合の文（ADR-0052 決定6）＝失敗・状態ではない",
     subtitleImportedMessage: "字幕ファイルを並べたあとの知らせ（並べた数・読めなかった数・上限を越えた数）＝失敗ではない（ADR-0055）",
     subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
+    timelineTruncatedTextDetail: "起動の引数の書き出しで返す注意の中身（#1366）＝失敗ではない（書き出しは止めない）。場面形式の公開前チェック「切れている文字」と同じ見出し",
     subtitleFileSkippedScenesMessage: "字幕ファイルの結果に添える知らせ（入れられなかった場面）＝焼き出しの `BAKE_DIALOGUE_SUBTITLE_SKIPPED` と同じ場面を指す（ADR-0055 追補）",
     motionPresetShortenedMessage: "選んだ長さが帯に収まらないとき、押す前に実際の長さを伝える案内（#1349）＝失敗・状態ではない",
     describingRemainMessage: "写真・動画の読み取りの残りの数を伝える進み具合の文（UI/UX 監査 2026-10-02）＝失敗・状態ではない",

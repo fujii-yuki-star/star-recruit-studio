@@ -85,13 +85,18 @@ describe('断った理由が、頼んだ側に届く（#1212）', () => {
   });
 
   // ⚠️ **Rust 側が実際に外へ出しているか**＝受け取っても捨てていたら、届いていない。
-  it('Rust が、断ったときだけ標準エラーへ出している', () => {
+  // ⚠️ **できた回も出す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、注意を渡さないと
+  // 頼んだ側は気づけない。代わりに**成否は終了コードだけで読む**ことを契約（`18 §18.5`）に書く
+  // （以前は「成功の標準エラーに文が混ざると失敗と読まれる」ので断った回だけ出していた）。
+  it('Rust が、文を受け取ったら標準エラーへ出す（できた回も）・契約は成否を終了コードで読むと書いている', () => {
     const rs = srcOf('src-tauri/src/lib.rs');
     const body = rs.slice(rs.indexOf('fn finish_startup_job('), rs.indexOf('/// アプリを閉じる前の後片づけ'));
     expect(body, '文を受け取っていない').toContain('message: Option<String>');
     expect(body, '標準エラーへ出していない').toContain('eprintln!("{m}")');
-    // ⚠️ **できた回に出さない**＝成功の標準エラーに文が混ざると、頼んだ側が失敗と読む。
-    expect(body, '断った回だけ、という条件が無い').toContain('!ok');
+    expect(body, 'できた回に出さない条件が残っている').not.toContain('!ok && !m.is_empty()');
+    const contract = srcOf('docs/yuko_recruit_docs/18_EXTERNAL_AGENT_CONTRACT.md');
+    expect(contract, '契約に「できた回にも出る」が無い').toContain('できた回（`0`）にも、知らせ・注意が出ることがあります');
+    expect(contract, '契約に「書き出した動画は出来ている（終了コード0）」が無い').toContain('**書き出した動画は出来ています**（終了コード `0`）');
     // ⚠️ **閉じる前に出す**＝`std::process::exit` の後に置くと、一生出ない。
     expect(
       body.indexOf('eprintln!("{m}")') < body.indexOf('std::process::exit(code)'),
