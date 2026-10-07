@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.31" },
+    "schemaVersion": { "const": "1.32" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -194,7 +194,7 @@
         "easing": {
           "description": "区間 [前KF, 当KF] のイージング（#262）。名前つきか、自由なカーブ（CSS の cubic-bezier と同じ制御点4つ）。未指定＝linear。",
           "oneOf": [
-            { "enum": ["linear", "ease-in", "ease-out", "ease-in-out"] },
+            { "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "hold"] },
             {
               "type": "object",
               "additionalProperties": false,

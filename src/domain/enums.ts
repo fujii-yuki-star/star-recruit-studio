@@ -64,8 +64,11 @@ export const TEXT_ALIGN = {
   right: 'right',
 } as const satisfies Record<string, TextAlign>;
 
-/** キーフレームのイージング（④・ADR-0019）。 */
-export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out'] as const;
+/**
+ * キーフレームのイージング（④・ADR-0019）。
+ * ⚠️ `hold`（#1365）＝区間 [前KF, 当KF] は**前のキーの値のまま**で、当KF で一気に切り替わる（業界の「停止キーフレーム」）。
+ */
+export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'] as const;
 export type Easing = (typeof EASINGS)[number];
 
 /**
@@ -88,6 +91,7 @@ export const EASING = {
   easeIn: 'ease-in',
   easeOut: 'ease-out',
   easeInOut: 'ease-in-out',
+  hold: 'hold',
 } as const satisfies Record<string, Easing>;
 
 /** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */

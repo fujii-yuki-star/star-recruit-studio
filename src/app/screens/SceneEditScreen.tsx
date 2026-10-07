@@ -1604,11 +1604,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     // 自由なカーブ（#262）はタイムライン編集の機能。場面編集では**選び直させない**（黙って名前つきへ
     // 丸めると、作った動きが操作しただけで変わる＝ADR-0026④）。
     const curveEasing = desc && typeof desc.easing !== "string" ? desc.easing : null;
-    // 選択肢に出す値（カーブは名前つきでは表せないので表示だけ「なめらか」へ寄せる）。
-    const easingChoice = curveEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
+    // ⚠️ **選択肢に無い名前つき**（ゆっくり始まる／終わる／止める＝タイムライン形式の語彙・#1365）も同じ扱い
+    // （PR #1368 レビュー 🟡）＝表示が先頭の「なめらか」に見えるのに、実際の動きは別のまま、を作らない。
+    const SCENE_EASINGS: readonly string[] = [EASING.easeInOut, EASING.linear];
+    const unlistedEasing: EasingSpec | null =
+      curveEasing ?? (desc && typeof desc.easing === "string" && !SCENE_EASINGS.includes(desc.easing) ? desc.easing : null);
+    // 選択肢に出す値（表せないものは表示だけ「なめらか」へ寄せ、欄は押せなくする）。
+    const easingChoice = unlistedEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
     // **作り直すときに載せる値は元のまま**＝種類や秒を触っただけでカーブが名前つきへ化けない
     // （黙って別の動きにしない・ADR-0026④）。カーブの編集はタイムライン編集で行う。
-    const easing: EasingSpec = curveEasing ?? easingChoice;
+    const easing: EasingSpec = unlistedEasing ?? easingChoice;
     const direction = desc?.direction ?? "left";
     // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
@@ -1648,15 +1653,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <select
                   className="select"
                   value={easingChoice}
-                  disabled={!!curveEasing}
+                  disabled={!!unlistedEasing}
                   onChange={(e) => apply({ easing: e.target.value as Easing })}
                 >
                   <option value={EASING.easeInOut}>なめらか</option>
                   <option value={EASING.linear}>一定</option>
                 </select>
-                {curveEasing && (
+                {unlistedEasing && (
                   <p className="text-muted text-sm" style={{ margin: "2px 0 0" }}>
-                    自由なカーブが設定されています。ここで選び直すと動きが変わるため、タイムライン編集で調整してください。
+                    {curveEasing ? "自由なカーブ" : "ここでは選べない動き方"}が設定されています。ここで選び直すと動きが変わるため、タイムライン編集で調整してください。
                   </p>
                 )}
               </div>

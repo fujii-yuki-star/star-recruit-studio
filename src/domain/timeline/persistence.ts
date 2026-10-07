@@ -11,6 +11,9 @@ import { OLD_PROJECT_AUDIO_AUTO } from '../voice/audioAuto';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
 
+/** 音の自動処理（`videoSettings.audioAuto`）が入った版（#257/#259）。これより前の文書にだけ「しない」を書く。 */
+export const TIMELINE_AUDIO_AUTO_SINCE = '1.10';
+
 /**
  * この版のアプリで開けるか（11 §1）。**場面形式と同じ流儀**＝メジャーが同じなら開き、
  * 未対応メジャー（2.0 等）だけ断る。完全一致にすると、後方互換の追加（1.1→1.2 のような additive バンプ）
@@ -46,8 +49,12 @@ export function migrateTimelineProject(doc: Record<string, unknown>): Record<str
   // 既定で「する」だが、**前の版で作った動画には明示的に「しない」を書き込む**。書かないと、開いて
   // 書き出し直しただけで BGM の鳴り方と全体の音量が変わり、前に書き出した動画と別物になる。
   // ⚠️ **`videoSettings` は場面形式と `$ref` 共有**なので、片方だけ直すと形式で挙動が割れる（ADR-0026②）。
+  // ⚠️ **「前の版」は「音の自動処理が無かった版（1.10 より前）」**（PR #1368 レビュー 🔴）＝現行と違う版を
+  // 全部「前の版」とみなすと、**版を上げるたびに** 1.10 以降で作られ未指定（＝既定で「する」）の動画まで
+  // 「しない」に化ける（1.11〜1.14 に上げたときにも起きていた）。
   const vs = next.videoSettings;
-  if (isAudioSettingsRecord(vs) && vs.audioAuto === undefined) {
+  const fromVersion = typeof doc.schemaVersion === 'string' ? doc.schemaVersion : '';
+  if (isNewerSchemaVersion(TIMELINE_AUDIO_AUTO_SINCE, fromVersion) && isAudioSettingsRecord(vs) && vs.audioAuto === undefined) {
     next.videoSettings = { ...vs, audioAuto: OLD_PROJECT_AUDIO_AUTO };
   }
   return next;
