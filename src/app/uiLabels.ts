@@ -1988,4 +1988,4 @@ export const EXPORT_SIZE_LABEL: Record<ExportSize, string> = {
 export const EXPORT_SIZE_STANDARD_NOTE = "ファイル小さめ";
 /** 動画サイズの欄の説明（場面形式の書き出し画面）。 */
 export const EXPORT_SIZE_HINT =
-  "「ふつう」は細かさ（縦横の大きさ）はそのままで、ファイルを小さくします。実写の映像が多い動画ほど小さくなります（字幕の読みやすさは変わりません）。";
+  "「ふつう」は大きさは「きれい」と同じで、ファイルを小さくします。写真や映像の細かい所がわずかに粗くなることがあります（字幕の読みやすさは変わりません）。";

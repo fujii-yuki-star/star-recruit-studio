@@ -161,6 +161,7 @@ import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYP
 import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
 import { ExportSizeOptions } from "../components/ExportSizeOptions";
+import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import type { FontWeight, TextAlign } from "../../domain/enums";
@@ -6683,6 +6684,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                       value={exportSize}
                       onChange={(e) => { if (isExportSize(e.target.value)) setExportSize(e.target.value); }}
                       aria-label="書き出す大きさ"
+                      title={EXPORT_SIZE_HINT}
                     >
                       <ExportSizeOptions full={exportFullDims} light={exportHdDims} />
                     </select>

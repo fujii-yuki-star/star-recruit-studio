@@ -22,7 +22,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
-import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, MOTION_PATH_NOTE } from "../uiLabels";
+import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -9151,6 +9151,13 @@ describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
     const sel = screen.getByLabelText("書き出す大きさ") as HTMLSelectElement;
     const texts = [...sel.options].map((o) => o.text);
     expect(texts).toEqual(["きれい（1920×1080）", "ふつう（1920×1080・ファイル小さめ）", "軽い（1280×720）"]);
+  });
+
+  // #1218 レビュー：場面形式の書き出し画面と同じ説明を添える（同じ3択で片方だけ意味が書かれていない、を作らない）。
+  it("「ふつう」の説明を添える（場面形式と同じ文）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("書き出す大きさ").getAttribute("title")).toBe(EXPORT_SIZE_HINT);
   });
 
   it("既定は「きれい」（場面形式の既定と同じ）", () => {
