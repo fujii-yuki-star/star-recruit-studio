@@ -149,6 +149,8 @@ export function planTimelineExportSegments(
   const toFrame = (sec: number): number => {
     let f = Math.ceil(sec * plan.fps);
     while (f > 0 && frameTimeAt(f - 1, plan.fps) >= sec) f -= 1;
+    // ⚠️ 上げる側は**届く値が見つかっていない安全網**（fps 24/25/30/60 で数百万通り試して無し＝変異チェックで生き残る＝等価）。
+    //   下げる側は届く（8.3 秒×30＝249.00000000000003 → 切り上げ 250 だが 249 コマ目に映る）。
     while (frameTimeAt(f, plan.fps) < sec) f += 1;
     return Math.max(0, Math.min(plan.frameCount, f));
   };

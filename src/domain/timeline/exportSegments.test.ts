@@ -368,6 +368,12 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
     expect(planTimelineExportSegments(d)[1].startSec).toBe(100 / 30);
   });
 
+  // 逆向きの端数＝8.3×30 が 249.00000000000003 になり切り上げると 250。だが 249 コマ目（8.3 秒）にはもう映る。
+  it('掛け算の端数で切り上げが1コマ行き過ぎても、描く側と同じコマへ戻す', () => {
+    const d = doc([text('clip_001', 0, 8.3), text('clip_002', 8.3, 2)]);
+    expect(planTimelineExportSegments(d)[1].startSec).toBe(249 / 30);
+  });
+
   it('描画モードが付いた部品のある区間は、いまは毎コマ（狭く始める）', () => {
     const d = doc([text('clip_001', 0, 3, { blendMode: 'multiply' })]);
     expect(planTimelineExportSegments(d)).toEqual([{ kind: 'frames', startSec: 0, endSec: 3 }]);
