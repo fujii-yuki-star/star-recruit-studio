@@ -77,6 +77,8 @@ function emphasisKeyframes(kind: EmphasisKind, d: number): Keyframe[] {
  * 登場の形を逆にたどって退場の形にする（終わりで「ずれ」の側へ抜ける）。動き方は区間ごとに付け替える。
  * ⚠️ **左右対称の動き方だけを前提にしている**（PR #1353 レビュー ℹ️）＝時間を逆にすると「ゆっくり始まる」と
  *   「ゆっくり終わる」が入れ替わるが、ここでは入れ替えない。いまのひな形はどれも ease-in-out（対称）なので結果は正しい。
+ * ⚠️ **「止める」（`hold`・#1365）も対称ではない**＝逆にすると切り替わる時刻が区間の始まりから終わりへずれる。
+ *   ひな形に「止める」を使うときは、ここで扱いを決めてから。
  */
 function reverseKeyframes(kfs: readonly Keyframe[], d: number): Keyframe[] {
   const rev = [...kfs].reverse();

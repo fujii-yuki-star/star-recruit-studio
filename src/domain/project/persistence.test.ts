@@ -446,6 +446,16 @@ describe('parseProjectDoc', () => {
     expect(back.videoSettings.audioAuto).toEqual({ duckBgm: false, normalize: false });
   });
 
+  // ⚠️ PR #1368 レビュー 🔴＝「現行と違う版」で見ていたので、**版を上げるたびに** 1.29 以降の動画が OFF に化けていた。
+  it('音の自動処理：入った版(1.29)以降の前の版(1.29〜1.31)には書き込まない（版を上げても既定のまま）', () => {
+    for (const v of ['1.29', '1.30', '1.31']) {
+      const doc = { ...assembleProject(header(), [], [], []), schemaVersion: v } as Record<string, unknown>;
+      const back = parseProjectDoc(JSON.stringify(doc));
+      expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+      expect(back.videoSettings.audioAuto, v).toBeUndefined();
+    }
+  });
+
   it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
     const textStyles = {
       title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },

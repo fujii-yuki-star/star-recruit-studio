@@ -13,6 +13,9 @@ import { validateProject } from '../validation/generated/validators.js';
 import { isTimelineProjectDoc } from '../projectFormat';
 import { normalizeDialogueTiming } from './narrationLines';
 import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
+
+/** 音の自動処理（`videoSettings.audioAuto`）が入った版（#257/#259）。これより前の文書にだけ「しない」を書く。 */
+export const PROJECT_AUDIO_AUTO_SINCE = '1.29';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
@@ -430,7 +433,10 @@ function migrateProject(project: Project): Project {
   //（ADR-0026②）。
   // 触るのは `videoSettings` がオブジェクトのときだけ（壊れた値は検証へ＝#416 P1）。
   const vsAuto: unknown = next.videoSettings;
-  if (from !== PROJECT_SCHEMA_VERSION && isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
+  // ⚠️ **「前の版」は「音の自動処理が無かった版（1.29 より前）」**（PR #1368 レビュー 🔴）＝「現行と違う版」で
+  // 見ていたので、**版を上げるたびに**、1.29 以降で作られ未指定（＝既定で「する」）の動画まで「しない」に化けていた
+  // （1.30・1.31 に上げたときにも同じことが起きていた）。
+  if (typeof from === 'string' && isNewerSchemaVersion(PROJECT_AUDIO_AUTO_SINCE, from) && isRecord(vsAuto) && vsAuto.audioAuto === undefined) {
     next.videoSettings = { ...vsAuto, audioAuto: OLD_PROJECT_AUDIO_AUTO } as unknown as VideoSettings;
   }
   // 同時開始（ADR-0031）：先頭行の休眠フラグ・startWithPrevious×startSec の併存を読込時に正規化する

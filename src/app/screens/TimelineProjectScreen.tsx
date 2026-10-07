@@ -5556,7 +5556,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                         {/* 「両端ゆっくり」「止めて、ここで切り替え」はカーブでは正確に表せない＝変える前に断る（ADR-0026④・§2-5）。 */}
                         {(k.easing === EASING.easeInOut || k.easing === EASING.hold) && (
                           <p className="text-muted">
-                            「自由なカーブ」にすると、この動き方は正確には表せないため動きが少し変わります。
+                            {k.easing === EASING.hold
+                              ? "「自由なカーブ」にすると、なめらかに変わる動きになります（止めて切り替える動きは、カーブでは表せません）。"
+                              : "「自由なカーブ」にすると、この動き方は正確には表せないため動きが少し変わります。"}
                           </p>
                         )}
                         {k.easing != null && typeof k.easing !== 'string' && (

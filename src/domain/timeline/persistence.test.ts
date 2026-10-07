@@ -169,6 +169,19 @@ describe('migrateTimelineProject：音の自動処理（1.8→1.9）', () => {
     expect((r.videoSettings as Record<string, unknown>).audioAuto).toEqual({ duckBgm: true });
   });
 
+  it('入る前の最後の版(1.9)には書き込む（境界）', () => {
+    const r = migrateTimelineProject({ schemaVersion: '1.9', videoSettings: { aspectRatio: '16:9' } });
+    expect((r.videoSettings as Record<string, unknown>).audioAuto).toEqual({ duckBgm: false, normalize: false });
+  });
+
+  // ⚠️ PR #1368 レビュー 🔴＝「現行と違う版」で見ていたので、**版を上げるたびに** 1.10 以降の動画が OFF に化けていた。
+  it('入った版(1.10)以降の前の版には書き込まない（版を上げても既定のまま）', () => {
+    for (const v of ['1.10', '1.13', '1.14']) {
+      const r = migrateTimelineProject({ schemaVersion: v, videoSettings: { aspectRatio: '16:9' } });
+      expect((r.videoSettings as Record<string, unknown>).audioAuto, v).toBeUndefined();
+    }
+  });
+
   it('いまの版の文書は素通り（同一参照）', () => {
     const doc = { schemaVersion: TIMELINE_SCHEMA_VERSION, videoSettings: {} };
     expect(migrateTimelineProject(doc)).toBe(doc);
