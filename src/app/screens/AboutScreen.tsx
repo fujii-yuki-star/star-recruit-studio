@@ -10,6 +10,8 @@ import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../doma
 
 /** 同梱のローカル AI のライセンス本文の置き場所（インストール先の中の相対パス・#1289）。 */
 export const LOCAL_AI_LICENSE_DIR = "local_llm/LICENSES";
+/** 同梱の FFmpeg の告知の置き場（#1241）。 */
+export const FFMPEG_LICENSE_DIR = "ffmpeg/LICENSES";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
 const credits: { name: string; role: string; license: string; credit?: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
@@ -21,7 +23,8 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   {
     name: "FFmpeg",
     role: "動画の書き出し",
-    license: "LGPL v3（ソースは下記の入手先をご参照ください）",
+    // 中に含む部品（OpenH264＝BSD-2-Clause）の告知と GPL v3 の本文は同梱フォルダに置く（#1241）。
+    license: `LGPL v3（ソースは下記の入手先をご参照ください。中に含む部品のライセンスも含め、全文はインストール先の ${FFMPEG_LICENSE_DIR} フォルダにあります）`,
     source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
   },
   // このパソコンの中で動く AI（ADR-0051・#1289）。全文と改変（変換・軽量化）の告知は同梱フォルダ `local_llm/LICENSES` に置く。
