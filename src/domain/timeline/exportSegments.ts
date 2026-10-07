@@ -116,6 +116,8 @@ export function planTimelineExportSegments(
     if (!animated.has(g.id)) continue;
     for (const m of g.members ?? []) animated.add(m);
   }
+  // 喋っている間の動き（ADR-0056）を持つ部品も**動く部品**＝倒せない（毎コマ焼く）。
+  for (const c of doc.clips) if (c.talkMotion) animated.add(c.id);
   const hasAnimation = (clipId: string): boolean => animated.has(clipId);
 
   // **動画を映す部品**（直接置いた動画と、見た目パターンの中の差し込み口の両方）＝

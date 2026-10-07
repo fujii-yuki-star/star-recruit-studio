@@ -14,7 +14,9 @@ import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persist
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
-import type { Easing, EasingSpec } from "../../domain/enums";
+import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
+import { TALK_MOTION_KIND } from "../../domain/enums";
+import { TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
@@ -491,7 +493,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportHd, setExportHd, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
-    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
+    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
@@ -5424,6 +5426,67 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   明るさ・コントラスト・鮮やかさは <strong>1 がそのまま</strong>、色あいは <strong>0 がそのまま</strong>です。
                   重ね方は、下にあるものとどう混ざるかを決めます。
                 </p>
+              </CollapsibleSection>
+            )}
+            {/* **喋っている間の動き**（ADR-0056・#1367）＝どの音の列の声で動くか・動き方・強さ。
+                ⚠️ 口パクではない（絵は1枚のまま、位置・大きさだけ動く）。⚠️ 音の部品には出さない（動くのは絵）。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
+              <CollapsibleSection
+                key={`talk-${selected.id}`}
+                scope={SECTION_SCOPE.timeline}
+                storageKey="talk"
+                title={TALK_MOTION_SECTION_LABEL}
+                defaultOpen={selected.talkMotion != null}
+              >
+                <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <label className="field">
+                    <span className="field-label text-sm">どの声で動くか</span>
+                    <select
+                      className="select"
+                      value={selected.talkMotion?.trackId ?? ""}
+                      {...editGuard()}
+                      onChange={(e) =>
+                        setSelectedClipTalkMotion(
+                          e.target.value === ""
+                            ? null
+                            : { trackId: e.target.value, kind: selected.talkMotion?.kind ?? TALK_MOTION_KIND.bounce, ...(selected.talkMotion?.strength != null ? { strength: selected.talkMotion.strength } : {}) },
+                        )
+                      }
+                    >
+                      <option value="">動かない</option>
+                      {doc.tracks.filter((t) => t.kind === TRACK_KIND.audio).map((t) => (
+                        <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {selected.talkMotion && (
+                    <>
+                      <label className="field">
+                        <span className="field-label text-sm">動き方</span>
+                        <select
+                          className="select"
+                          value={selected.talkMotion.kind}
+                          {...editGuard()}
+                          onChange={(e) => setSelectedClipTalkMotion({ ...selected.talkMotion!, kind: e.target.value as TalkMotionKind })}
+                        >
+                          {TALK_MOTION_CHOICES.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <NumberField
+                        label="強さ（倍）"
+                        value={selected.talkMotion.strength ?? 1}
+                        min={0.1}
+                        max={5}
+                        step={0.1}
+                        {...editGuard()}
+                        onChange={(v) => setSelectedClipTalkMotion({ ...selected.talkMotion!, strength: v })}
+                      />
+                    </>
+                  )}
+                </div>
+                <p className="text-muted">{TALK_MOTION_HINT}</p>
               </CollapsibleSection>
             )}
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}

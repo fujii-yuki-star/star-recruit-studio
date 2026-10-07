@@ -426,3 +426,13 @@ export function isSceneCategory(value: string): value is SceneCategory {
 export const ASSET_USE_KIND = { direct: 'direct', slot: 'slot', character: 'character' } as const;
 
 export type AssetUseKind = (typeof ASSET_USE_KIND)[keyof typeof ASSET_USE_KIND];
+
+/** 喋っている間の動き（ADR-0056・#1367）＝はねる／ゆらゆら／ふくらむ。 */
+export const TALK_MOTION_KINDS = ['bounce', 'bob', 'pulse'] as const;
+export type TalkMotionKind = (typeof TALK_MOTION_KINDS)[number];
+export const TALK_MOTION_KIND = {
+  bounce: 'bounce',
+  bob: 'bob',
+  pulse: 'pulse',
+} as const satisfies Record<string, TalkMotionKind>;
+
