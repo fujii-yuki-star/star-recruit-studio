@@ -10,7 +10,8 @@ import { CreditDisplayField } from "../components/CreditDisplayField";
 import { FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { buildPrecheckItems, exportBlockedMessage, exportBlockingItems, exportNoteItems } from "../adapters";
+import { startupExportNotes } from "../../domain/startup/startupMessages";
 import { useExportCapability } from "../hooks/useExportCapability";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 import type { ExportPhase } from "../store/projectStore";
@@ -192,7 +193,20 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       messageAtStartRef.current,
       exportFailedMessage.EXPORT_FAILED_SCENE,
     );
-    void finishStartupJob(ok, job.forwarded, ok ? null : reason)
+    // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
+    // 頼んだ側（外の AI）は絵を見るまで気づけない。**公開前チェックと同じ項目**（止めないもの）を1行ずつ渡す。
+    const st = useProjectStore.getState();
+    const notes = ok
+      ? startupExportNotes(
+          exportNoteItems(buildPrecheckItems(
+            st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations, st.missingAssetIds,
+            st.meta.bgmSettings?.assetId ?? null,
+            { projectFontId: st.meta.videoSettings.fontId, userFontsUnreadable: st.userFontsUnreadable, ...(st.userFontIds && !st.userFontsUnreadable ? { availableUserFontIds: st.userFontIds } : {}) },
+            st.meta.voiceSettings,
+          )),
+        )
+      : null;
+    void finishStartupJob(ok, job.forwarded, ok ? notes : reason)
       .catch((err) => console.error("[startup] finish failed:", err));
   };
   const markStarting = (on: boolean): void => { startingRef.current = on; setStarting(on); };
