@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
 import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
-import { buildPrecheckItems, exportBlockingItems, sceneToDraftRow } from "./adapters";
+import { buildPrecheckItems, exportBlockingItems, exportNoteItems, sceneToDraftRow } from "./adapters";
 import { FIX_NARRATION_ACTION_LABEL, subtitleOverflowMessage } from "./uiLabels";
 import { ASSIST_KIND } from "../domain/ai/assist";
 
@@ -1127,5 +1127,17 @@ describe("公開前チェックの項目は、場面を指すなら並びも渡�
     const lines = src.split(/\r?\n/).filter((l) => /\bsceneId: /.test(l) && !/^\s*(\/\/|\*)/.test(l));
     expect(lines.length, "拾えた行の数が変わった（項目を足したら、並びを渡しているか見てから数を更新する）").toBe(14); // 見えていないのに緑、を防ぐ
     expect(lines.filter((l) => !/\bsceneIds: /.test(l))).toEqual([]);
+  });
+});
+
+describe("exportNoteItems（起動の引数の書き出しで返す注意・#1366）", () => {
+  it("問題なし（ok）と書き出しを止めるものを除き、それ以外（要対応・注意）を残す", () => {
+    const items = [
+      { id: "a", label: "A", detail: "a", severity: "ok" },
+      { id: "b", label: "B", detail: "b", severity: "warning" },
+      { id: "c", label: "C", detail: "c", severity: "action" },
+      { id: "d", label: "D", detail: "d", severity: "action", blocksExport: true },
+    ] as Parameters<typeof exportNoteItems>[0];
+    expect(exportNoteItems(items).map((i) => i.id)).toEqual(["b", "c"]);
   });
 });

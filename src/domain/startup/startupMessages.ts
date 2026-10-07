@@ -40,3 +40,16 @@ export function makeVoicesDoneMessage(left: number): string {
   if (left <= 0) return "読み上げの声を作りました。";
   return `読み上げの声を${left}件、作れませんでした。文を確かめてから、もう一度お試しください。`;
 }
+
+/**
+ * 起動の引数で書き出し終えたときの**注意**（#1366・§2-5）。成功は止めない＝終了コードは 0 のまま、
+ * 画面なら「注意」として見せている中身を、頼んだ側（外の AI）へ1行ずつ渡す。
+ *
+ * ⚠️ **見出しと中身は呼ぶ側が持つ文をそのまま使う**（§6＝同じ文を2か所に持たない）＝ここは「注意：見出し：中身」へ並べるだけ
+ *   （場面形式＝公開前チェックの項目そのもの／タイムライン形式＝`uiLabels` の「切れている文字」）。
+ * ⚠️ **無ければ `null`**（何も出さない＝毎回「注意0件」と出すと本物が埋もれる）。
+ */
+export function startupExportNotes(items: readonly { label: string; detail: string }[]): string | null {
+  if (items.length === 0) return null;
+  return items.map((i) => `注意：${i.label}：${i.detail}`).join('\n');
+}

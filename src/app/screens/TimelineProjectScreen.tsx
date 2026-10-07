@@ -16,7 +16,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -64,6 +64,8 @@ import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CL
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { startupExportSucceeded } from "../../domain/startup/startupJobOutcome";
+import { startupExportNotes } from "../../domain/startup/startupMessages";
+import { timelineTruncatedTexts } from "../../renderer/timelineNotices";
 import { useStartupJobStore } from "../store/startupJobStore";
 import { finishStartupJob } from "../../infrastructure/startupFs";
 import { creditTextAt, timelineVoiceCredits } from "../../domain/timeline/credit";
@@ -575,7 +577,20 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       const reason = refusalReason(
         useTimelineStore.getState().exportRun.message, before, exportFailedMessage.EXPORT_FAILED_TIMELINE,
       );
-      await finishStartupJob(ok, startupForwarded, ok ? null : reason);
+      // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
+      // 頼んだ側（外の AI）は絵を見るまで気づけない。判定は**場面形式の公開前チェックと同じ関数**（`truncatedTexts`）。
+      // ⚠️ タイムライン形式の画面には、まだこの注意が無い（起動の引数の書き出しだけ）。
+      // ⚠️ **注意の計算で落ちても、できた書き出しを失敗にしない**（PR #1369 レビュー 🟡）＝注意なしで成功を返す。
+      let truncated: string[] = [];
+      if (ok) {
+        try {
+          truncated = timelineTruncatedTexts(useTimelineStore.getState().doc!, templateOf);
+        } catch (e) {
+          console.error("[timeline-export] 注意の計算に失敗（注意なしで返す）:", e);
+        }
+      }
+      const notes = startupExportNotes(truncated.length > 0 ? [{ label: TRUNCATED_TEXT_LABEL, detail: timelineTruncatedTextDetail(truncated) }] : []);
+      await finishStartupJob(ok, startupForwarded, ok ? notes : reason);
     })().catch(async (e) => {
       // ⚠️ **始めた側でも拾う**＝ここで返さないと、頼んだ側（AI）は永久に待つ。
       console.error("[timeline-export] 頼まれた書き出しが落ちた:", e);

@@ -148,6 +148,15 @@ export function exportBlockedMessage(items: PrecheckItem[], from: "precheck" | "
 }
 
 
+/**
+ * 書き出しは止めないが**知らせたい**項目（#1366）＝公開前チェックの項目のうち、問題なし（`ok`）と
+ * 書き出しを止めるもの（`isExportBlocking`）を除いたもの。起動の引数で頼まれた書き出しが終わったとき、
+ * 頼んだ側（外の AI）へ渡す。⚠️ **判定は公開前チェックそのもの**（別に数え直さない）。
+ */
+export function exportNoteItems(items: readonly PrecheckItem[]): PrecheckItem[] {
+  return items.filter((i) => i.severity !== "ok" && !isExportBlocking(i));
+}
+
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
 export function buildPrecheckItems(
   scenes: Scene[],

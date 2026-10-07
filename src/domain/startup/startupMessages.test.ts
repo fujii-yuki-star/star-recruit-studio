@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { importDoneMessage, startupArgErrorMessage } from './startupMessages';
+import { importDoneMessage, startupArgErrorMessage, startupExportNotes } from './startupMessages';
 
 describe('起動のときの指定が読めなかったときの文（ADR-0042 ④）', () => {
   // ⚠️ **どれが悪いかを出す**＝直すのは頼んだ側（人か、その人の AI）。
@@ -44,3 +44,12 @@ describe('取り込めたときの知らせ', () => {
     expect(m).not.toMatch(/取り込めなかった/);
   });
 });
+
+describe('書き出し終えたときの注意（#1366）', () => {
+  it('1項目＝1行で「注意：見出し：中身」・無ければ null（毎回「0件」を出さない）', () => {
+    expect(startupExportNotes([])).toBeNull();
+    expect(startupExportNotes([{ label: '切れている文字', detail: 'A' }, { label: '早口', detail: 'B' }]))
+      .toBe('注意：切れている文字：A\n注意：早口：B');
+  });
+});
+
