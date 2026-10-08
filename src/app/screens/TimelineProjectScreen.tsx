@@ -882,7 +882,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const layoutPresets = useMemo(timelineLayoutPresets, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
   // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
-  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed } =
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed, saveFailed: layoutSaveFailed, dismissSaveFailed: dismissLayoutSaveFailed } =
     usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS, { persist: !inPreviewWindow });
 
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
@@ -6844,6 +6844,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
       <div className="timeline-flash-zone">
         <PanelLayoutView
+          saveFailed={layoutSaveFailed}
+          onDismissSaveFailed={dismissLayoutSaveFailed}
           layout={panelLayout}
           panels={shownPanels}
           onChange={changeLayout}
