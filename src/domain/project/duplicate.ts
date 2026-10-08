@@ -14,6 +14,20 @@ export const COPY_NAME_SUFFIX = ' のコピー';
 /** プロジェクト名の上限（`project.schema` の `projectName` maxLength と合わせる）。 */
 const PROJECT_NAME_MAX = 80;
 
+/** 縦横を入れ替えた版の名前の接尾辞（ADR-0057）。 */
+export const ORIENTED_NAME_SUFFIX = { landscape: '（横）', portrait: '（縦）' } as const;
+
+/**
+ * 縦横を入れ替えた版の名前（「◯◯（縦）」）。⚠️ 上限を超えたら元の名前を削る（接尾辞は残す）・
+ * 反対の接尾辞が付いていれば付け替える（横の版の縦の版が「◯◯（横）（縦）」にならない）。
+ */
+export function reorientedProjectName(name: string, portrait: boolean): string {
+  let base = name.trim() || '無題の動画';
+  for (const suf of Object.values(ORIENTED_NAME_SUFFIX)) if (base.endsWith(suf)) base = base.slice(0, -suf.length);
+  const suffix = portrait ? ORIENTED_NAME_SUFFIX.portrait : ORIENTED_NAME_SUFFIX.landscape;
+  return `${base.slice(0, Math.max(0, PROJECT_NAME_MAX - suffix.length))}${suffix}`;
+}
+
 /**
  * 複製した動画の名前を作る。
  *

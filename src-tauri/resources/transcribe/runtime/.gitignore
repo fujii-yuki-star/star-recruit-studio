@@ -1,0 +1,4 @@
+# 声を文字にする部品（ADR-0058）はコミットしない。scripts/transcribe/place-bundle.sh で置く。
+# この .gitignore だけ追跡してディレクトリを存在させる（tauri-build の resource path 検証を CI でも通す）。
+*
+!.gitignore

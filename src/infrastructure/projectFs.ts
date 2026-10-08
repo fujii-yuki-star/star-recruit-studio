@@ -12,6 +12,8 @@ export interface ProjectSummary {
    * 一覧が開く先を選ぶのに使う＝開いてから「形式が違う」と断らずに済む。判定は `resolveProjectFormat` を通す。
    */
   format?: string;
+  /** 画面の向き（`videoSettings.aspectRatio`）。一覧の「縦の版／横の版を作る」が行き先を名指しする（ADR-0057）。読めなければ未設定。 */
+  aspectRatio?: string;
 }
 
 const LS_PREFIX = 'project:';
@@ -69,12 +71,13 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
     const text = localStorage.getItem(key);
     if (text === null) continue;
     try {
-      const v = JSON.parse(text) as Partial<ProjectSummary>;
+      const v = JSON.parse(text) as Partial<ProjectSummary> & { videoSettings?: { aspectRatio?: unknown } };
       out.push({
         projectId: v.projectId ?? key.slice(LS_PREFIX.length),
         projectName: v.projectName ?? '',
         updatedAt: v.updatedAt ?? '',
         ...(typeof v.format === 'string' ? { format: v.format } : {}),
+        ...(typeof v.videoSettings?.aspectRatio === 'string' ? { aspectRatio: v.videoSettings.aspectRatio } : {}),
       });
     } catch {
       // 壊れたエントリは一覧から除外する

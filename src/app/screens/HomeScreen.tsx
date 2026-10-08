@@ -4,7 +4,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, REORIENT_COPY_NOTE, reorientCopyLabel, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
@@ -22,7 +22,7 @@ import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { useTimelineStore } from "../store/timelineStore";
 import { ProjectLoadError } from "../../domain/project/persistence";
 import { useNavigationGuard } from "../hooks/navigationGuard";
-import { CopyIcon,
+import { CopyIcon, RotateFrameIcon,
   PlusIcon,
   LayoutIcon,
   SettingsIcon,
@@ -41,11 +41,19 @@ function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
 
+/** 一覧の行の向きから、入れ替えた先の向き（読めなければ `null`）。 */
+function reorientTarget(aspectRatio: string | undefined): "portrait" | "landscape" | null {
+  if (aspectRatio === ORIENTATION.landscape) return "portrait";
+  if (aspectRatio === ORIENTATION.portrait) return "landscape";
+  return null;
+}
+
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const restoreToRestorePoint = useProjectStore((s) => s.restoreToRestorePoint);
   const loadProject = useProjectStore((s) => s.loadProject);
   const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
+  const duplicateTimelineProject = useTimelineStore((s) => s.duplicateTimelineProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
@@ -120,8 +128,11 @@ export function HomeScreen({ onNavigate }: HomeProps) {
    */
   async function onDuplicate(projectId: string): Promise<void> {
     if (duplicatingId !== null || isExporting) return;
-    // ⚠️ **押す前に断っているが、ここでも見る**（入口が増えても失敗する複製を始めない）。
-    if (isTimelineProjectDoc({ format: projects.find((x) => x.projectId === projectId)?.format })) return;
+    // タイムライン形式は別の入口（別の store・別の画面＝ADR-0057）。
+    if (isTimelineProjectDoc({ format: projects.find((x) => x.projectId === projectId)?.format })) {
+      await doTimelineDuplicate(projectId, false);
+      return;
+    }
     if (openingId || awaitingAnswer) return; // 「開く」の確認中・実行中は割り込まない（後勝ちを防ぐ）
     // ⚠️ **未保存があるなら確認を挟む**（複製したら開くので、いま編集しているものが閉じる＝
     // 同じ結果になる操作は同じ聞き方・ADR-0026②）。⚠️ ただし**行き先は「複製」のまま持つ**
@@ -131,6 +142,23 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       return;
     }
     await doDuplicate(projectId);
+  }
+
+  /**
+   * タイムライン形式の動画を複製する（`flip` で縦横を入れ替えた版＝ADR-0057・#1386）。できたら開く。
+   * ⚠️ 開くのと同じく、場面形式の未保存の確認は通さない（タイムライン形式の「開く」と同じ扱い）。
+   */
+  async function doTimelineDuplicate(projectId: string, flip: boolean): Promise<void> {
+    if (isExporting || openingId || duplicatingId !== null) return;
+    setDuplicatingId(projectId);
+    setOpenError(null);
+    try {
+      const r = await duplicateTimelineProject(projectId, flip);
+      if (r.projectId) onNavigate("timeline-project");
+      else if (r.message) setOpenError(r.message);
+    } finally {
+      setDuplicatingId(null);
+    }
   }
 
   /** 実際に複製する（確認を通ったあと・未保存が無いときの直行、どちらもここへ来る）。 */
@@ -393,6 +421,21 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       setRecovering(false);
     }
   }
+
+  /**
+   * 複製のボタン（複製・縦横を入れ替えた版）を押せない理由。`null`＝押せる。2つのボタンで共有する（同じ状態に断り方を2通り作らない）。
+   * ⚠️ **開いている最中も押せなくする**（α-6 出口監査 🟡32）＝`onDuplicate` が黙って return するので、押せると**何も起きない**（§2-5）。
+   * ⚠️ **押せない枝の理由を落とさない**（α-6 出口監査 🟡）＝複製中も押せなくなるのに理由の分岐が無く、実行内容の説明が出続けていた。
+   */
+  const copyBusyTitle: string | null = isExporting
+    ? "書き出しが終わるまでお待ちください"
+    : openingId !== null
+      ? "動画を開いています…"
+      : duplicatingId !== null
+        ? "コピーしています…"
+        : awaitingAnswer || confirmNew
+          ? "確認に答えてから操作できます"
+          : null;
 
   return (
     <div className="main-scroll">
@@ -816,40 +859,28 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
                         ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、
                         **開くのと同じガード**を掛ける（未保存の破棄確認・書き出し中・確認中）。 */}
-                    {/* ⚠️ **タイムライン形式はまだ複製できない**（PR #889 レビュー 🟡）＝中で
-                        `parseProjectDoc` が必ず断るので**構造的に必ず失敗**する。押せたままだと
-                        「もう一度お試しください」＝**何度押しても直らない行動**を勧めることになる
-                        （§2-5・#793 で直したのと同じ型）。押す前に理由を出して押せなくする。 */}
+                    {/* タイムライン形式は別の入口で複製する（ADR-0057）＝以前は場面形式の読み込みが必ず断るので押せなくしていた（PR #889）。 */}
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={
-                        isExporting || awaitingAnswer || confirmNew || duplicatingId !== null
-                        // ⚠️ **開いている最中も押せなくする**（α-6 出口監査 🟡32）＝`onDuplicate` が
-                        // 黙って return するので、押せると**何も起きない**（§2-5）。
-                        || openingId !== null
-                        || isTimelineProjectDoc({ format: p.format })
-                      }
+                      disabled={copyBusyTitle !== null}
                       onClick={() => void onDuplicate(p.projectId)}
                       aria-label={`「${p.projectName || "無題の動画"}」を複製`}
-                      title={
-                        isExporting
-                          ? "書き出しが終わるまでお待ちください"
-                          : openingId !== null
-                            ? "動画を開いています…"
-                            // ⚠️ **押せない枝の理由を落とさない**（α-6 出口監査 🟡）＝複製中も押せなく
-                            // なるのに理由の分岐が無く、**実行内容の説明が出続けて**いた（同じ行の「開く」は
-                            // 同じ状態で「コピーしています…」と言う＝同じ状態に断り方が2通り）。
-                            : duplicatingId !== null
-                              ? "コピーしています…"
-                              : awaitingAnswer || confirmNew
-                                ? "確認に答えてから操作できます"
-                                : isTimelineProjectDoc({ format: p.format })
-                                  ? "タイムラインで作った動画はまだ複製できません"
-                                  : "複製（素材と声ごとコピーします）"
-                      }
+                      title={copyBusyTitle ?? "複製（素材と声ごとコピーします）"}
                     >
                       <CopyIcon size={18} />
                     </button>
+                    {/* 縦横を入れ替えた版（ADR-0057）＝タイムライン形式だけ（場面形式は複製してから下書きの「向き」で変える）。 */}
+                    {isTimelineProjectDoc({ format: p.format }) && (
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        disabled={copyBusyTitle !== null}
+                        onClick={() => void doTimelineDuplicate(p.projectId, true)}
+                        aria-label={`「${p.projectName || "無題の動画"}」の${reorientCopyLabel(reorientTarget(p.aspectRatio))}`}
+                        title={copyBusyTitle ?? `${reorientCopyLabel(reorientTarget(p.aspectRatio))}${REORIENT_COPY_NOTE}`}
+                      >
+                        <RotateFrameIcon size={18} />
+                      </button>
+                    )}
                     <button
                       className="btn btn-ghost btn-icon"
                       // 確認バナー表示中は削除も止める（確認中の「開く先」を消せてしまい、「開く」が失敗するのを防ぐ＝

@@ -1,7 +1,7 @@
 {
   "name": "star-recruit-studio",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "package:release": "node scripts/package-release.mjs",
+    "prune:bundle": "node scripts/prune-bundle.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "mutate": "node scripts/mutate.mjs",

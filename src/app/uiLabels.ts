@@ -1989,3 +1989,96 @@ export const EXPORT_SIZE_STANDARD_NOTE = "ファイル小さめ";
 /** 動画サイズの欄の説明（場面形式の書き出し画面）。 */
 export const EXPORT_SIZE_HINT =
   "「ふつう」は大きさは「きれい」と同じで、ファイルを小さくします。写真や映像の細かい所がわずかに粗くなることがあります（字幕の読みやすさは変わりません）。";
+
+/**
+ * 無音・長い間を詰める（#1385）。⚠️ 「無音」は業界でそのまま使う言葉（CapCut・Premiere）＝言い換えない。
+ */
+export const SILENCE_FIND_LABEL = "無音を詰める…";
+export const SILENCE_FIND_TITLE = "選んだ動画・音の中から、長い無音（1秒以上）を探して、まとめて詰めます";
+/** 無音を詰めるの断り（`15 §6` の表で等値に守る）。 */
+export const silenceMessage = {
+  SILENCE_NO_SOUND: "選んだ部品には、探せる音がありません。音の入った動画か、音の部品を選んでから、もう一度お試しください。",
+  SILENCE_READ_FAILED: "音を読めませんでした。素材が見つかるか確かめてから、もう一度お試しください。",
+  SILENCE_CLIP_CHANGED: "探した後に動画が変わったので、やめました。もう一度「無音を詰める」を押してください。",
+} as const;
+export const SILENCE_FINDING = "無音を探しています…";
+export const SILENCE_NONE_FOUND = "1秒以上の無音は見つかりませんでした。";
+export const SILENCE_APPLY_LABEL = "選んだ所を詰める";
+/** 何か所・合計何秒を詰めるか（押す前に見せる）。 */
+export function silenceSummary(count: number, totalSec: number): string {
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を詰めます。詰めると、その時間は全部の列から消えます（BGM・ほかの列の録音や字幕も、その所で切れてつながります）。詰める前に、行の「聞く」でその所を確かめられます。`;
+}
+/** 詰めたあとの知らせ。 */
+export function silenceAppliedMessage(count: number, totalSec: number): string {
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を詰めました。元に戻すときは「取り消す」（Ctrl+Z）を押してください。`;
+}
+
+// ── 声を文字にする（ADR-0058・#1387） ──
+export const TRANSCRIBE_LABEL = "声を文字にする…";
+export const TRANSCRIBE_TITLE = "選んだ動画・音の声を、このパソコンの中で文字にします（外へは送りません）。字幕にしたり、文を選んで消したりできます";
+/** 声を文字にするの断り・知らせ（`15 §6` の表で等値に守る）。Rust が返す断り（部品が無い等）は `messages.rs` の `TRANSCRIBE_*`。 */
+export const transcribeMessage = {
+  TRANSCRIBE_NO_SOUND: "選んだ部品には、文字にできる音がありません。音の入った動画か、音の部品を選んでから、もう一度お試しください。",
+  TRANSCRIBE_CLIP_CHANGED: "文字にした後に動画が変わったので、やめました。もう一度「声を文字にする」を押してください。",
+  TRANSCRIBE_NOTHING_HEARD: "話し声が見つかりませんでした。声の入っている部品を選んでいるか、音量が小さすぎないか確かめてください。",
+  TRANSCRIBE_STOPPED: "声を文字にする途中で止まりました。もう一度「声を文字にする」を押してください。",
+  TRANSCRIBE_UNAVAILABLE: "声を文字にする部品が入っていません。アプリを入れ直してください。",
+} as const;
+/** 文字にしている間の表示。 */
+export function transcribingMessage(percent: number): string {
+  return `声を文字にしています…（${Math.round(percent)}%）。長い動画ほど時間がかかります`;
+}
+/** 結果の欄の説明（何ができるか・正解扱いしない）。 */
+export function transcriptSummary(count: number): string {
+  return `${count}行の文になりました。聞き違いがあるので、文は直してから使ってください。時刻を押すとその場所へ移ります`;
+}
+export const TRANSCRIPT_PLACE_LABEL = "字幕として並べる";
+export const TRANSCRIPT_CUT_LABEL = "選んだ行を消して詰める";
+/** 消して詰める前の確認（何か所・何秒・全部の列が詰まる）。 */
+export function transcriptCutSummary(lines: number, totalSec: number): string {
+  return `選んだ${lines}行（合計 ${totalSec.toFixed(1)} 秒）を消して詰めます。詰めると、その時間は全部の列から消えます（BGM・ほかの列の録音や字幕も、その所で切れてつながります）。`;
+}
+/** 字幕を並べたあとの知らせ。 */
+export function transcriptPlacedMessage(placed: number, beyondLimit: number): string {
+  const beyond = beyondLimit > 0 ? `動画の長さの上限を越える${beyondLimit}行は並べていません。` : "";
+  if (placed === 0) return `並べられる字幕がありませんでした。${beyond}`;
+  return `${placed}行の字幕を新しい列に並べました。${beyond}聞き違いがあれば、字幕を選んで直してください。`;
+}
+/** 消して詰めたあとの知らせ。 */
+export function transcriptCutMessage(count: number, totalSec: number, keptVoice: boolean): string {
+  const voice = keptVoice ? "読み上げが鳴っている所は消さずに残しました。" : "";
+  if (count === 0) return `消せる所がありませんでした。${voice}`;
+  // ⚠️ **次の一歩も言う**（#1387 段2のレビュー 🟡）＝消すと行の時刻がずれるので、残りを字幕にするには文字にし直す。
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を消して詰めました。${voice}残りを字幕にするときは、もう一度「声を文字にする」を押してください。元に戻すときは「取り消す」（Ctrl+Z）を押してください。`;
+}
+/** 前の回の片づけが終わるまで押せないときの説明。 */
+export const TRANSCRIBE_BUSY_HINT = "前の「声を文字にする」を止めています。少し待ってから押してください";
+/** 確認：すべての行を選んでいるとき（話している所をすべて消すことになる）。 */
+export const TRANSCRIPT_CUT_ALL_WARNING = "すべての行を選んでいます＝話している所をすべて消します。消したい行だけを選び直すときは「やめる」を押してください。";
+
+/**
+ * 縦横を入れ替えた版を作ったあとの知らせ（ADR-0057 決定6）。決めきれなかった所を具体的に言う（黙って別の結果にしない）。
+ * @param templateUnmatched 新しい向きに同じ種類の見た目パターンが無く、そのまま残した部品の数
+ * @param layersUnmatched 新しい見た目パターンに同じ名前の場所が無く、出なくなった写真・文字の数
+ * @param outside 画面の外へはみ出した部品の数
+ */
+export function reorientNotice(templateUnmatched: number, layersUnmatched: number, outside: number): string {
+  const parts: string[] = [];
+  if (templateUnmatched > 0) parts.push(`${templateUnmatched}個の見た目パターンは、この向きに合うものが無いため元のままです（選び直してください）`);
+  if (layersUnmatched > 0) parts.push(`${layersUnmatched}か所の写真・文字は、新しい見た目パターンに入れる場所が無いため出ていません`);
+  if (outside > 0) parts.push(`${outside}個の部品が画面の外へはみ出しています（選んで位置を直してください）`);
+  const head = "縦横を入れ替えた版を作りました。";
+  return parts.length === 0
+    ? `${head}部品は小さめに収めてあるので、大きさと位置を確かめてください。`
+    : `${head}${parts.join("。")}。部品の大きさと位置も確かめてください。`;
+}
+
+/**
+ * ホームの「縦の版／横の版を作る」の名前（ADR-0057）。⚠️ **行き先の向きを名指しする**（業界の型＝Canva の「サイズを変更」・
+ * Premiere の自動リフレームは作る先の比率を選ぶ）。向きが読めない行だけ「縦横を入れ替えた版」と言う。
+ */
+export function reorientCopyLabel(target: "portrait" | "landscape" | null): string {
+  return target === "portrait" ? "縦の版を作る" : target === "landscape" ? "横の版を作る" : "縦横を入れ替えた版を作る";
+}
+/** 同じボタンの説明（押せるとき）。 */
+export const REORIENT_COPY_NOTE = "（元はそのまま・素材と声ごとコピーします）";

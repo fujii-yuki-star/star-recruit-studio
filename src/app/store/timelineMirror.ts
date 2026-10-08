@@ -33,6 +33,19 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "addAsset",
   // 字幕ファイルのバイト列も窓をまたげない（ADR-0055）＝読み込むボタンは本体の窓の「置く」欄にだけある。
   "importSubtitleFile",
+  // 無音を詰める（#1385）＝探す欄は本体の窓にだけある（素材の音を測るのも本体＝FFmpeg を2つの窓で起こさない）。
+  "findSilencesFor",
+  "applySilenceCandidates",
+  "closeSilenceFind",
+  // 動画を複製する（ADR-0057）＝動画を作る・開く操作（上の「開く・作る」と同じ）。
+  "duplicateTimelineProject",
+  // 開いたときの知らせを閉じる（ADR-0057）＝知らせは本体の窓にだけ出る。
+  "dismissOpenNotice",
+  // 声を文字にする（ADR-0058）＝欄は本体の窓にだけある（`whisper-cli` を起こすのも本体＝2つの窓で CPU を取り合わない）。
+  "transcribeClip",
+  "closeTranscript",
+  "placeTranscriptSubtitles",
+  "cutTranscriptLines",
 ]);
 
 /**

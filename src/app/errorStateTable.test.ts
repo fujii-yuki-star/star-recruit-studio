@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, silenceMessage, transcribeMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
@@ -104,6 +104,10 @@ function codeMessages(): Record<string, string> {
     ...apiKeyMessage,
     // 字幕ファイルの読み込みの断り（ADR-0055・#1351）。
     ...subtitleFileMessage,
+    // 無音を詰めるの断り（#1385）。
+    ...silenceMessage,
+    // 声を文字にするの断り・知らせ（ADR-0058）。⚠️ 部品が無い等の断りは Rust（`messages.rs` の `TRANSCRIBE_*`）。
+    ...transcribeMessage,
     // ⚠️ **場面形式の切り出しの断りも等値で守る**（#1155 ⑤）＝タイムライン形式の双子
     // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
     // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
@@ -417,7 +421,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(29);
+    // ⚠️ **+6**（ADR-0058＝声を文字にする断り6つ：TRANSCRIBE_MISSING／BROKEN／READ_FAILED／FAILED／CANCELLED／BUSY）。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(35);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -432,13 +437,14 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）＝どれも1行。
     // ⚠️ **+1**（ADR-0052 決定6＝LOCAL_AI_TOO_LONG・1行）。
-    expect(all, "定数の数が変わった").toBe(29);
+    // ⚠️ **+6**（ADR-0058）＝どれも `cargo fmt` が2行に折り返した（1行の数は 14 のまま）。
+    expect(all, "定数の数が変わった").toBe(35);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
     expect(oneLine, "1行で書かれた定数の数が変わった").toBe(14);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(15);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(21);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -542,7 +548,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
     // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
     // ⚠️ **+2**（ADR-0034 追補 2026-10-05・#1331）＝TRIM_BEFORE_SOURCE／TRIM_PAST_SOURCE_END。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(284);
+    // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
+    // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(298);
   });
 
 
@@ -588,6 +596,14 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     writingSceneMessage: "生成中に書いている場面の数を伝える進み具合の文（ADR-0052 決定6）＝失敗・状態ではない",
     subtitleImportedMessage: "字幕ファイルを並べたあとの知らせ（並べた数・読めなかった数・上限を越えた数）＝失敗ではない（ADR-0055）",
     subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
+    silenceAppliedMessage: "無音を詰めたあとの知らせ（詰めた数と秒）＝失敗ではない（#1385）",
+    reorientNotice: "縦横を入れ替えた版を作ったあとの知らせ（残した見た目・出なくなった中身・はみ出しの数の組み合わせで文が変わる）＝失敗ではない（ADR-0057）",
+    transcriptPlacedMessage: "声を文字にした行を字幕にしたあとの知らせ（並べた数・上限を越えた数）＝失敗ではない（ADR-0058・字幕ファイルの読み込みと同じ扱い）",
+    transcriptCutMessage: "選んだ行を消して詰めたあとの知らせ（数と秒）＝失敗ではない（ADR-0058・`silenceAppliedMessage` と同じ扱い）",
+    transcriptCutSummary: "断り・知らせではなく、消して詰める前の確認の文（`silenceSummary` と同じ扱い）",
+    transcriptSummary: "結果の欄の説明（行の数）＝失敗・状態ではない（ADR-0058）",
+    transcribingMessage: "文字にしている間の進み具合の文＝失敗・状態ではない（ADR-0058）",
+    silenceSummary: "断り・知らせではなく、詰める前の確認の文（`rangeDeleteConfirmMessage` と同じ扱い）",
     timelineTruncatedTextDetail: "起動の引数の書き出しで返す注意の中身（#1366）＝失敗ではない（書き出しは止めない）。場面形式の公開前チェック「切れている文字」と同じ見出し",
     subtitleFileSkippedScenesMessage: "字幕ファイルの結果に添える知らせ（入れられなかった場面）＝焼き出しの `BAKE_DIALOGUE_SUBTITLE_SKIPPED` と同じ場面を指す（ADR-0055 追補）",
     motionPresetShortenedMessage: "選んだ長さが帯に収まらないとき、押す前に実際の長さを伝える案内（#1349）＝失敗・状態ではない",
@@ -810,7 +826,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
     // ⚠️ **+2**（#1331）＝上と同じ2行。
     // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（読む表から外れる＝取り消し線の行は数えない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(279);
+    // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
+    // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(293);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -837,6 +855,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
       // ⚠️ **+2**（#1331）＝素材の外へ伸ばせない断り2つ（同上）。
       // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（動きのある部品は掴めるようになった）。
-    ).toBe(130);
+      // ⚠️ **+3**（#1385）＝SILENCE_NO_SOUND／SILENCE_READ_FAILED／SILENCE_CLIP_CHANGED（`silenceMessage` 経由で等値）。
+      // ⚠️ **+5**（ADR-0058）＝TRANSCRIBE_NO_SOUND／CLIP_CHANGED／NOTHING_HEARD／STOPPED／UNAVAILABLE（`transcribeMessage` 経由で等値）。
+    ).toBe(138);
   });
 });

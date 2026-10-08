@@ -59,6 +59,20 @@ export function frameTimeAt(index: number, fps: number): number {
 }
 
 /**
+ * その秒から映る（鳴る）**最初のコマ**の番号＝`frameTimeAt(f) >= sec` を満たす最小の f。
+ * ⚠️ **描く側と同じ式**（`clipIsLiveAt` を `frameTimeAt` で引く）＝掛け算の端数（8.3×30＝249.00000000000003）や
+ *   足し算の端数（1.1+2.2）で1コマずれない。書き出しの区間の割り目（#1376）と無音の候補（#1385）が共有する。
+ */
+export function firstFrameAtOrAfter(sec: number, fps: number): number {
+  const r = fps > 0 ? fps : FPS;
+  let f = Math.ceil(sec * r);
+  while (f > 0 && frameTimeAt(f - 1, r) >= sec) f -= 1;
+  // ⚠️ 上げる側は届く値が見つかっていない安全網（fps 24/25/30/60 で数百万通り試して無し）。
+  while (frameTimeAt(f, r) < sec) f += 1;
+  return f;
+}
+
+/**
  * 書き出しで置く音1本ぶん（FFmpeg の「配置＋切り出し＋音量＋フェード＋ミックス」に対応）。
  * 場面形式の BGM 区間（`BgmRunInput`）と**同じ形**＝混ぜる側を作り直さない。
  *

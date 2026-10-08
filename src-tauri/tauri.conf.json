@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "stario",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "identifier": "jp.star-system.star-recruit-studio",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -49,7 +49,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg", "resources/local_llm": "local_llm" },
+    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg", "resources/local_llm": "local_llm", "resources/transcribe": "transcribe" },
     "windows": { "wix": { "template": "wix/main.wxs" } }
   }
 }

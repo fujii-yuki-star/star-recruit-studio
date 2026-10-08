@@ -7,7 +7,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } 
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
-import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
+import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveProjectId, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
@@ -101,6 +101,15 @@ import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/asse
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
+import { applySilenceCuts, silenceCandidates, silenceSourceOf, voiceSpansOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
+import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice, TIMELINE_SAVE_FAILED_MESSAGE, transcribeMessage, transcriptPlacedMessage, transcriptCutMessage } from "../uiLabels";
+import { transcriptCues, transcriptCuts, transcriptLinesOf, type TranscriptLine } from "../../domain/timeline/transcript";
+import { listenTranscribeProgress, transcribeAudio, transcribeCancel } from "../../infrastructure/transcribeFs";
+import { flippedOrientation, reorientTimelineDoc } from "../../domain/timeline/reorient";
+import { duplicatedProjectName, reorientedProjectName } from "../../domain/project/duplicate";
+import { copyBakedFiles } from "../../infrastructure/bakeFs";
+import { bakedFilePaths } from "../../domain/timeline/bake";
+import { ORIENTATION } from "../../domain/enums";
 import type { BlendMode } from "../../domain/template/types";
 import { userFacingMessage } from "../userFacingError";
 
@@ -366,6 +375,12 @@ export interface TimelineState {
    * ⚠️ **黙って捨てない**＝利用者が書いた覚えを勝手に消さないので、寄せて**数を知らせる**。
    */
   editNotice: string | null;
+  /**
+   * 開いたときの知らせ（ADR-0057＝縦横を入れ替えた版で決めきれなかった所）。⚠️ `editNotice` と違い**選ぶ・編集するでは消えない**
+   *（知らせを読んで部品を選び直すので、選んだ瞬間に消えると件数が分からなくなる）。閉じるか、別の動画を開くまで残す。
+   */
+  openNotice: string | null;
+  dismissOpenNotice: () => void;
   /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
   importError: string | null;
   /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
@@ -590,6 +605,40 @@ export interface TimelineState {
    */
   freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
   /**
+   * 無音・長い間を詰める（#1385）。`null`＝開いていない／`candidates` が `null` の間は探している最中。
+   * ⚠️ **文書に持たない**（この作業だけの都合＝作業範囲と同じ）。
+   */
+  silenceFind: { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null;
+  /** 選んだ部品（録画・録音）の中の無音を探す（測るのは Rust＝素材のバイトを JS に載せない）。 */
+  findSilencesFor: (clipId: string) => Promise<void>;
+  /** 選んだ候補をまとめて詰める（取り消し1回で戻る）。 */
+  applySilenceCandidates: (candidates: readonly SilenceCandidate[]) => void;
+  /** 無音を詰める欄を閉じる。 */
+  closeSilenceFind: () => void;
+  /**
+   * 声を文字にする（ADR-0058）。`null`＝開いていない／`lines` が `null` の間は文字にしている最中。
+   * ⚠️ **文書に持たない**（無音を詰めると同じ＝この作業だけの都合）。`doc`＝結果を出した時点の文書（変わっていたら使わない）。
+   */
+  transcript: { clipId: string; runId: number; lines: TranscriptLine[] | null; doc: TimelineProject } | null;
+  /**
+   * 文字にしている進み具合（0〜100）。⚠️ **`transcript` と分けて持つ**＝`transcript` は文書を抱えているので、進むたびに作り直すと
+   * 別窓への写しが文書ごと最大100回走る（#1387 段2のレビュー ℹ️）。
+   */
+  transcriptPercent: number;
+  /**
+   * 前の回がまだ終わっていない（止めた後も、Rust 側が片づけ終わるまで）。⚠️ **この間は押せない**＝すぐ押し直すと
+   *   Rust が「別の部品を文字にしています」と断る（#1387 段2のレビュー 🟡）。
+   */
+  transcribeBusy: boolean;
+  /** 選んだ部品（録画・録音）の声を文字にする（このパソコンの中で＝外へ送らない）。 */
+  transcribeClip: (clipId: string) => Promise<void>;
+  /** 文字にする欄を閉じる（文字にしている最中なら止める）。 */
+  closeTranscript: () => void;
+  /** 選んだ行を字幕として並べる（新しい列・取り消し1回＝字幕ファイルの読み込みと同じ道）。 */
+  placeTranscriptSubtitles: (lines: readonly TranscriptLine[]) => void;
+  /** 選んだ行の範囲を消して詰める（無音を詰めると同じ道・取り消し1回）。 */
+  cutTranscriptLines: (lines: readonly TranscriptLine[]) => void;
+  /**
    * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
    *
    * ⚠️ **同じ時刻には重ねない**＝既にあるときは増やさない（履歴にも積まない）。
@@ -793,6 +842,11 @@ export interface TimelineState {
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
   saveTimelineProject: () => Promise<void>;
+  /**
+   * タイムライン形式の動画を**複製**する（`flip` で縦横を入れ替えた版＝ADR-0057・#1386）。元は変えない。
+   * 素材・声も運び、できたら**開く**。返すのは新しい動画の番号（作れなければ `null` と理由）。
+   */
+  duplicateTimelineProject: (projectId: string, flip: boolean) => Promise<{ projectId: string | null; message: string | null }>;
   /** 再生を始める（終端にいるときは先頭から）。何も置いていない動画では始めない。 */
   play: () => void;
   /** 再生を止める（位置はそのまま＝続きから再生できる）。 */
@@ -1036,6 +1090,10 @@ function runAnalysis(job: () => Promise<void>): void {
 
 /** 音の長さを測っている最中の動画（同じ動画を2回測らない・#1348）。 */
 let audioMeasureRun: { projectId: string; promise: Promise<void> } | null = null;
+/** 走っている「声を文字にする」の回（閉じる・開くときに止める＝結果を捨てるだけだと CPU を使い続ける）。 */
+let transcribeRun: number | null = null;
+/** 回の番号（止めると進み具合の見分け）。 */
+let transcribeRunSeq = 0;
 
 /**
  * 長さの分からない音の素材を1つずつ測り、`audioDurations` に入れる（#1348）。文書は書き換えない
@@ -1071,6 +1129,11 @@ function emptyState() {
   // 音の長さの測りも手放す（#1348・PR #1352 レビュー 🟡）＝閉じて同じ動画を開き直したとき、閉じている間に打ち切られた
   //   前の測りを「測っている最中」と見て、新しく開いた分が測られないまま残っていた。
   audioMeasureRun = null;
+  // 文字にしている最中なら止める（ADR-0058＝閉じた動画の結果は使わない・CPU を使い続けない）。
+  if (transcribeRun != null) {
+    void transcribeCancel(transcribeRun);
+    transcribeRun = null;
+  }
   return {
     doc: null,
     loadError: null,
@@ -1078,9 +1141,13 @@ function emptyState() {
     isLoading: false,
     playheadSec: 0,
     editNotice: null as string | null,
+    openNotice: null as string | null,
     // 作業範囲（#1193）＝取っていない状態から始める。
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
+    silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null,
+    transcript: null as { clipId: string; runId: number; lines: TranscriptLine[] | null; doc: TimelineProject } | null,
+    transcriptPercent: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1127,6 +1194,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // **声の入っていない文書**を書く＝作った声が wav だけ残って消える。
   _voiceRun: null,
   _bulkVoiceRun: 0,
+  // ⚠️ **開き直しでも消さない**（上と同じ理由）＝閉じても Rust 側の片づけは続いている。消すと押し直せてしまい「別の部品を文字にしています」と断られる。
+  transcribeBusy: false,
 
   createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
@@ -1438,6 +1507,194 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editNotice: markersClampedMessage(r.clampedMarkerCount) });
     }
   },
+
+  findSilencesFor: async (clipId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    const src = silenceSourceOf(doc, clip);
+    // ⚠️ **探せない部品は理由を出す**（押しても何も起きない、を作らない＝§2-5）。
+    if (!src) {
+      set({ editNotice: silenceMessage.SILENCE_NO_SOUND });
+      return;
+    }
+    // ⚠️ **書き出し中は測らない**（波形と同じ理由＝FFmpeg を書き出しと取り合わせない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    set({ silenceFind: { clipId, candidates: null, doc }, editNotice: null });
+    const projectId = doc.projectId;
+    const generation = currentAnalysisGeneration();
+    const peaks: number[] = [];
+    // ⚠️ **長い素材は窓に分けて測る**＝1回に返る山の数に上限がある（Rust の `audio_peaks`）。
+    for (let from = 0; from < src.lengthSec - 1e-6; from += SILENCE_WINDOW_SEC) {
+      const len = Math.min(SILENCE_WINDOW_SEC, src.lengthSec - from);
+      const part = await audioPeaks(projectId, src.relPath, Math.max(1, Math.round(len / SILENCE_BUCKET_SEC)), src.fromSec + from, len);
+      // 待っている間に閉じた・別の動画へ移った・閉じて開き直した＝結果は捨てる。
+      if (get().silenceFind?.clipId !== clipId || get().doc?.projectId !== projectId || generation !== currentAnalysisGeneration()) return;
+      if (part.length === 0) {
+        set({ silenceFind: null, editNotice: silenceMessage.SILENCE_READ_FAILED });
+        return;
+      }
+      peaks.push(...part);
+    }
+    // ⚠️ **探している間に部品が変わったら、出した候補は使わない**（位置・切り出し・速さがずれる）。
+    const now = get().doc;
+    const nowClip = now?.clips.find((c) => c.id === clipId);
+    if (!now || nowClip !== clip) {
+      set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
+      return;
+    }
+    // ⚠️ **候補を出した時点の文書を持つ**＝詰めるときに同じ文書かを確かめる（取り消し・別の窓の編集で変わっていたら使わない）。
+    set({ silenceFind: { clipId, candidates: silenceCandidates(now, clip, peaks, SILENCE_BUCKET_SEC), doc: now } });
+  },
+  applySilenceCandidates: (candidates) => {
+    const doc = get().doc;
+    if (!doc || candidates.length === 0) return;
+    // ⚠️ **候補を出した後に文書が変わっていたら詰めない**（PR #1389 レビュー 🟡）＝取り消し（Ctrl+Z）や別の窓の編集で
+    //   部品の位置が変わっていると、**古い時刻のまま全部の列を切る**。探し直してもらう。
+    if (get().silenceFind?.doc !== doc) {
+      set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
+      return;
+    }
+    // ⚠️ **再生中は断る**（範囲を消して詰めると同じ＝走っている位置で確定させない・ADR-0032 決定21）。
+    if (get().isPlaying) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
+      return;
+    }
+    const r = applySilenceCuts(doc, candidates, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const total = candidates.reduce((a, c) => a + (c.endSec - c.startSec), 0);
+    // ⚠️ **1回の `commit`**＝まとめて詰めても取り消し1回（ADR-0034 決定20）。
+    commit(set, get, r.doc, { selectedClipIds: [], silenceFind: null });
+    if (get().doc === r.doc) {
+      // 寄せた目印も知らせる（「範囲を消して詰める」と同じ）。
+      const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
+      set({ editNotice: silenceAppliedMessage(r.applied, total) + markers });
+    }
+  },
+  closeSilenceFind: () => set({ silenceFind: null }),
+
+  transcribeClip: async (clipId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    // 測るのと同じ範囲（部品が使っている素材の範囲）＝無音を詰めると同じ選び方（ADR-0058 決定3）。
+    const src = silenceSourceOf(doc, clip);
+    if (!src) {
+      set({ editNotice: transcribeMessage.TRANSCRIBE_NO_SOUND });
+      return;
+    }
+    // ⚠️ **書き出し中は始めない**（FFmpeg と CPU を書き出しと取り合わせない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    if (get().transcript || get().transcribeBusy) return; // 1度に1つ（欄が出ている間・前の回の片づけ中は押せない）
+    transcribeRunSeq += 1;
+    const runId = transcribeRunSeq;
+    transcribeRun = runId;
+    set({ transcript: { clipId, runId, lines: null, doc }, transcriptPercent: 0, transcribeBusy: true, editNotice: null });
+    const unlisten = await listenTranscribeProgress((e) => {
+      const t = get().transcript;
+      if (t?.runId === e.runId && t.lines === null) set({ transcriptPercent: e.percent });
+    });
+    let segments: Awaited<ReturnType<typeof transcribeAudio>>;
+    try {
+      segments = await transcribeAudio(doc.projectId, src.relPath, src.fromSec, src.lengthSec, runId);
+    } catch (e) {
+      // 止めた・閉じた・別の動画へ移った回の断りは出さない（止めた側はもう結果を待っていない）。
+      if (get().transcript?.runId !== runId) return;
+      set({ transcript: null, editNotice: userFacingMessage(e, "transcribe") ?? transcribeMessage.TRANSCRIBE_STOPPED });
+      return;
+    } finally {
+      unlisten();
+      if (transcribeRun === runId) transcribeRun = null;
+      // 前の回が本当に終わった（Rust も片づけ終えた）＝ここで初めて次を押せる。
+      if (transcribeRunSeq === runId) set({ transcribeBusy: false });
+    }
+    if (get().transcript?.runId !== runId) return;
+    // ⚠️ **文字にしている間に部品が変わったら、結果は使わない**（時刻がずれる＝無音を詰めると同じ守り）。
+    const now = get().doc;
+    const nowClip = now?.clips.find((c) => c.id === clipId);
+    if (!now || nowClip !== clip) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    const lines = transcriptLinesOf(clip, segments);
+    if (lines.length === 0) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_NOTHING_HEARD });
+      return;
+    }
+    set({ transcript: { clipId, runId, lines, doc: now } });
+  },
+  closeTranscript: () => {
+    const t = get().transcript;
+    if (t && t.lines === null) void transcribeCancel(t.runId);
+    if (t && transcribeRun === t.runId) transcribeRun = null;
+    set({ transcript: null });
+  },
+  placeTranscriptSubtitles: (lines) => {
+    const doc = get().doc;
+    const t = get().transcript;
+    if (!doc || !t || lines.length === 0) return;
+    // ⚠️ **結果を出した後に文書が変わっていたら並べない**（取り消しで部品の位置が変わると時刻がずれる）。
+    if (t.doc !== doc) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    // 字幕ファイルの読み込みと同じ道（ADR-0055 の `importSubtitleCues`＝新しい列・重なりは下へ積む）。
+    const r = importSubtitleCues(doc, transcriptCues(lines));
+    if (r.placed === 0) {
+      set({ editNotice: transcriptPlacedMessage(0, r.beyondLimit) });
+      return;
+    }
+    // ⚠️ **1回の `commit`**＝何行並べても取り消し1回（ADR-0034 決定20）。
+    commit(set, get, r.doc, { transcript: null });
+    if (get().doc === r.doc) set({ editNotice: transcriptPlacedMessage(r.placed, r.beyondLimit) });
+  },
+  cutTranscriptLines: (lines) => {
+    const doc = get().doc;
+    const t = get().transcript;
+    if (!doc || !t || lines.length === 0) return;
+    if (t.doc !== doc) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    // 再生中は断る（範囲を消して詰めると同じ）。
+    if (get().isPlaying) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
+      return;
+    }
+    // ⚠️ **読み上げが鳴っている所は消さない**（切れない部品なので、かかると丸ごと消える＝#1387 段2のレビュー 🟡）。
+    const { cuts, keptVoice } = transcriptCuts(lines, doc.videoSettings.fps, voiceSpansOf(doc, t.clipId));
+    if (cuts.length === 0) {
+      set({ transcript: null, editNotice: transcriptCutMessage(0, 0, keptVoice) });
+      return;
+    }
+    const r = applySilenceCuts(doc, cuts, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const total = cuts.reduce((a, c) => a + (c.endSec - c.startSec), 0);
+    commit(set, get, r.doc, { selectedClipIds: [], transcript: null });
+    if (get().doc === r.doc) {
+      const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
+      set({ editNotice: transcriptCutMessage(r.applied, total, keptVoice) + markers });
+    }
+  },
+  dismissOpenNotice: () => set({ openNotice: null }),
 
   setSelectedColorAdjust: (patch) =>
     applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),
@@ -2481,6 +2738,54 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // 保存の入口。**進行中の保存があればそれを待って戻る**（場面形式 `projectStore.saveProject` と同じ形）。
   // 無いと、保存中の編集で張り直された自動保存タイマと「保存し直す」から**2本目が並走**し、
   // 古い文書を持つ側が後着してディスク上の編集が巻き戻る（書き込みは truncate＝上書き）。
+  duplicateTimelineProject: async (projectId, flip) => {
+    // 書き出し中は別の動画へ移らない（開く・作ると同じ）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return { projectId: null, message: EXPORT_BUSY_OPEN_MESSAGE };
+    // ⚠️ **開けない間は作らない**（取り込み中・読み込み中は `openTimelineProject` が黙って戻る）＝作ったのに
+    //   元の動画が出たまま「作りました」と知らせると、利用者は複製のつもりで元を書き換える（レビュー 🟡）。
+    if (get().isImporting) return { projectId: null, message: IMPORTING_OPEN_MESSAGE };
+    if (get().isLoading) return { projectId: null, message: null };
+    try {
+      // ⚠️ **開いている元なら先に保存**＝ディスクの文書と声を運ぶので、保存していない変更が抜け落ちる（焼き出しと同じ）。
+      if (get().doc?.projectId === projectId) {
+        await get().saveTimelineProject();
+        // ⚠️ **保存できなかったら作らない**（保存は失敗しても投げない）＝古い内容の複製を成功として開かない（ADR-0026④）。
+        if (get().saveStatus === "error") return { projectId: null, message: TIMELINE_SAVE_FAILED_MESSAGE };
+      }
+      const src = parseTimelineProjectDoc(await loadProjectDoc(projectId));
+      const existing = await listProjectSummaries();
+      // ⚠️ **番号を予約してから採る**（#992 ③）＝運んでいる間は一覧に居ないので、続けて押すと同じ番号になる。
+      const newId = reserveProjectId(existing.map((p) => p.projectId), (ids) => createProjectId(new Date(), ids));
+      const now = new Date().toISOString();
+      const target = flippedOrientation(src.videoSettings.aspectRatio);
+      const base: TimelineProject = {
+        ...src,
+        projectId: newId,
+        projectName: flip ? reorientedProjectName(src.projectName, target === ORIENTATION.portrait) : duplicatedProjectName(src.projectName),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const r = flip ? reorientTimelineDoc(base, target, useProjectStore.getState().templates) : null;
+      const dup = r ? r.doc : base;
+      // 保存と同じ検査（写し方で正典に合わない値を作ったら、作らずに止める＝開いた先で読めない動画を残さない）。
+      if (!validateTimelineProject(dup)) {
+        console.warn("[timeline] 複製の内容がスキーマに未適合:", validateTimelineProject.errors);
+        return { projectId: null, message: DUPLICATE_FAILED_MESSAGE };
+      }
+      // ⚠️ **ファイルを運んでから文書を保存する**（焼き出し・場面形式の複製と同じ順＝素材の無い動画を一覧に残さない）。
+      const copied = await copyBakedFiles(projectId, newId, bakedFilePaths(src), `dup_${newId}`);
+      if (copied.cancelled) return { projectId: null, message: null };
+      await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
+      await get().openTimelineProject(newId);
+      // 決めきれなかった所を知らせる（黙って別の結果にしない＝ADR-0057 決定6）。
+      if (r) set({ openNotice: reorientNotice(r.templateUnmatched, r.layersUnmatched, r.outside) });
+      return { projectId: newId, message: null };
+    } catch (e) {
+      // 理由が画面に出せる文なら保つ（ディスクが足りない等＝直らない「もう一度」に落とさない・場面形式の複製と同じ）。
+      return { projectId: null, message: e instanceof TimelineLoadError ? e.message : userFacingMessage(e, "duplicate") ?? DUPLICATE_FAILED_MESSAGE };
+    }
+  },
+
   saveTimelineProject: async () => {
     const running = currentSave;
     if (running) {
