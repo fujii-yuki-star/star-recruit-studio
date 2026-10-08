@@ -2045,9 +2045,16 @@ export function transcriptPlacedMessage(placed: number, beyondLimit: number): st
   return `${placed}行の字幕を新しい列に並べました。${beyond}聞き違いがあれば、字幕を選んで直してください。`;
 }
 /** 消して詰めたあとの知らせ。 */
-export function transcriptCutMessage(count: number, totalSec: number): string {
-  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を消して詰めました。元に戻すときは「取り消す」（Ctrl+Z）を押してください。`;
+export function transcriptCutMessage(count: number, totalSec: number, keptVoice: boolean): string {
+  const voice = keptVoice ? "読み上げが鳴っている所は消さずに残しました。" : "";
+  if (count === 0) return `消せる所がありませんでした。${voice}`;
+  // ⚠️ **次の一歩も言う**（#1387 段2のレビュー 🟡）＝消すと行の時刻がずれるので、残りを字幕にするには文字にし直す。
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を消して詰めました。${voice}残りを字幕にするときは、もう一度「声を文字にする」を押してください。元に戻すときは「取り消す」（Ctrl+Z）を押してください。`;
 }
+/** 前の回の片づけが終わるまで押せないときの説明。 */
+export const TRANSCRIBE_BUSY_HINT = "前の「声を文字にする」を止めています。少し待ってから押してください";
+/** 確認：すべての行を選んでいるとき（話している所をすべて消すことになる）。 */
+export const TRANSCRIPT_CUT_ALL_WARNING = "すべての行を選んでいます＝話している所をすべて消します。消したい行だけを選び直すときは「やめる」を押してください。";
 
 /**
  * 縦横を入れ替えた版を作ったあとの知らせ（ADR-0057 決定6）。決めきれなかった所を具体的に言う（黙って別の結果にしない）。

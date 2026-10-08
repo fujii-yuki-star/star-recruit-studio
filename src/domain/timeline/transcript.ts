@@ -4,7 +4,7 @@
 //   〔`silenceSourceOf`〕だけを渡されている）＝タイムラインの秒へは、置いた位置と速さで写す（無音を詰めると同じ写し方）。
 // ⚠️ **結果は正解扱いしない**（判断軸3）＝ここは時刻を写すだけ。文を直すのは利用者（画面の欄）。
 import type { SubtitleCue } from '../subtitle/subtitleFile';
-import { snapInside, type SilenceCandidate } from './silence';
+import { snapInside, subtract, type SilenceCandidate } from './silence';
 import type { TimelineClip } from './types';
 
 /** 文1行（タイムラインの秒）。 */
@@ -47,9 +47,15 @@ export function transcriptCues(lines: readonly TranscriptLine[]): SubtitleCue[] 
 /**
  * 選んだ行の範囲を、消して詰める区間にする（無音を詰めると同じ道＝`applySilenceCuts` へ渡す）。
  * - 重なる・つながる行は1つにまとめる（1コマ未満の隙間もつなぐ＝間に髪の毛ほどの音を残さない）。
+ * - **読み上げが鳴っている所（`keep`）は引く**＝読み上げは切れない部品なので、かかると丸ごと消える。
  * - **コマへ内側に丸める**（無音を詰めると同じ＝隣の読み上げの頭を巻き込まない）。丸めて長さが無くなった区間は落とす。
  */
-export function transcriptCuts(lines: readonly TranscriptLine[], fps: number): SilenceCandidate[] {
+export function transcriptCuts(
+  lines: readonly TranscriptLine[],
+  fps: number,
+  /** 消さずに残す区間（読み上げが鳴っている所＝`voiceSpansOf`）。 */
+  keep: readonly SilenceCandidate[] = [],
+): { cuts: SilenceCandidate[]; keptVoice: boolean } {
   const frame = 1 / fps;
   const sorted = [...lines].sort((a, b) => a.startSec - b.startSec);
   const merged: SilenceCandidate[] = [];
@@ -58,5 +64,9 @@ export function transcriptCuts(lines: readonly TranscriptLine[], fps: number): S
     if (last && l.startSec <= last.endSec + frame) last.endSec = Math.max(last.endSec, l.endSec);
     else merged.push({ startSec: l.startSec, endSec: l.endSec });
   }
-  return merged.map((r) => snapInside(r, fps)).filter((r) => r.endSec > r.startSec);
+  // ⚠️ **読み上げのかかる所は残す**（無音を詰めると同じ＝#1387 段2のレビュー 🟡）。残したかは知らせに使う。
+  const kept = subtract(merged, keep);
+  const sum = (rs: readonly SilenceCandidate[]): number => rs.reduce((a, r) => a + (r.endSec - r.startSec), 0);
+  const keptVoice = sum(kept) < sum(merged) - 1e-9;
+  return { cuts: kept.map((r) => snapInside(r, fps)).filter((r) => r.endSec > r.startSec), keptVoice };
 }

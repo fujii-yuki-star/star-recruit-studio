@@ -49,7 +49,7 @@ describe('transcriptCuts', () => {
       { startSec: 1, endSec: 2, text: 'a' },
       { startSec: 2.02, endSec: 3, text: 'b' }, // 隙間 0.02 秒＜1コマ
       { startSec: 5, endSec: 6, text: 'c' },
-    ], fps);
+    ], fps).cuts;
     expect(cuts).toEqual([{ startSec: 1, endSec: 3 }, { startSec: 5, endSec: 6 }]);
   });
 
@@ -57,11 +57,11 @@ describe('transcriptCuts', () => {
     expect(transcriptCuts([
       { startSec: 1, endSec: 5, text: '長い' },
       { startSec: 2, endSec: 3, text: '中' },
-    ], fps)).toEqual([{ startSec: 1, endSec: 5 }]);
+    ], fps).cuts).toEqual([{ startSec: 1, endSec: 5 }]);
   });
 
   it('コマへ内側に丸める（頭は切り上げ・終わりは切り下げ）', () => {
-    const [c] = transcriptCuts([{ startSec: 1.01, endSec: 1.99, text: 'a' }], fps);
+    const [c] = transcriptCuts([{ startSec: 1.01, endSec: 1.99, text: 'a' }], fps).cuts;
     expect(c.startSec).toBeCloseTo(31 / 30);
     expect(c.endSec).toBeCloseTo(59 / 30);
   });
@@ -71,6 +71,13 @@ describe('transcriptCuts', () => {
       { startSec: 5, endSec: 6, text: 'c' },
       { startSec: 1, endSec: 2, text: 'a' },
       { startSec: 7.001, endSec: 7.02, text: 'ほんの一瞬' },
-    ], fps)).toEqual([{ startSec: 1, endSec: 2 }, { startSec: 5, endSec: 6 }]);
+    ], fps).cuts).toEqual([{ startSec: 1, endSec: 2 }, { startSec: 5, endSec: 6 }]);
+  });
+
+  it('読み上げが鳴っている所は残し、残したことを返す', () => {
+    const r = transcriptCuts([{ startSec: 3, endSec: 6, text: 'a' }], fps, [{ startSec: 5, endSec: 8 }]);
+    expect(r.cuts).toEqual([{ startSec: 3, endSec: 5 }]);
+    expect(r.keptVoice).toBe(true);
+    expect(transcriptCuts([{ startSec: 3, endSec: 6, text: 'a' }], fps, [{ startSec: 7, endSec: 8 }]).keptVoice).toBe(false);
   });
 });

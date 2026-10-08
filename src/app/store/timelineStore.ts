@@ -101,7 +101,7 @@ import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/asse
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
-import { applySilenceCuts, silenceCandidates, silenceSourceOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
+import { applySilenceCuts, silenceCandidates, silenceSourceOf, voiceSpansOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
 import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice, TIMELINE_SAVE_FAILED_MESSAGE, transcribeMessage, transcriptPlacedMessage, transcriptCutMessage } from "../uiLabels";
 import { transcriptCues, transcriptCuts, transcriptLinesOf, type TranscriptLine } from "../../domain/timeline/transcript";
 import { listenTranscribeProgress, transcribeAudio, transcribeCancel } from "../../infrastructure/transcribeFs";
@@ -616,10 +616,20 @@ export interface TimelineState {
   /** 無音を詰める欄を閉じる。 */
   closeSilenceFind: () => void;
   /**
-   * 声を文字にする（ADR-0058）。`null`＝開いていない／`lines` が `null` の間は文字にしている最中（`percent`＝進み具合）。
+   * 声を文字にする（ADR-0058）。`null`＝開いていない／`lines` が `null` の間は文字にしている最中。
    * ⚠️ **文書に持たない**（無音を詰めると同じ＝この作業だけの都合）。`doc`＝結果を出した時点の文書（変わっていたら使わない）。
    */
-  transcript: { clipId: string; runId: number; lines: TranscriptLine[] | null; percent: number; doc: TimelineProject } | null;
+  transcript: { clipId: string; runId: number; lines: TranscriptLine[] | null; doc: TimelineProject } | null;
+  /**
+   * 文字にしている進み具合（0〜100）。⚠️ **`transcript` と分けて持つ**＝`transcript` は文書を抱えているので、進むたびに作り直すと
+   * 別窓への写しが文書ごと最大100回走る（#1387 段2のレビュー ℹ️）。
+   */
+  transcriptPercent: number;
+  /**
+   * 前の回がまだ終わっていない（止めた後も、Rust 側が片づけ終わるまで）。⚠️ **この間は押せない**＝すぐ押し直すと
+   *   Rust が「別の部品を文字にしています」と断る（#1387 段2のレビュー 🟡）。
+   */
+  transcribeBusy: boolean;
   /** 選んだ部品（録画・録音）の声を文字にする（このパソコンの中で＝外へ送らない）。 */
   transcribeClip: (clipId: string) => Promise<void>;
   /** 文字にする欄を閉じる（文字にしている最中なら止める）。 */
@@ -1136,7 +1146,8 @@ function emptyState() {
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
     silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null,
-    transcript: null as { clipId: string; runId: number; lines: TranscriptLine[] | null; percent: number; doc: TimelineProject } | null,
+    transcript: null as { clipId: string; runId: number; lines: TranscriptLine[] | null; doc: TimelineProject } | null,
+    transcriptPercent: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1183,6 +1194,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // **声の入っていない文書**を書く＝作った声が wav だけ残って消える。
   _voiceRun: null,
   _bulkVoiceRun: 0,
+  // ⚠️ **開き直しでも消さない**（上と同じ理由）＝閉じても Rust 側の片づけは続いている。消すと押し直せてしまい「別の部品を文字にしています」と断られる。
+  transcribeBusy: false,
 
   createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
@@ -1583,14 +1596,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
       return;
     }
-    if (get().transcript) return; // 1度に1つ（欄が出ている間は押せない）
+    if (get().transcript || get().transcribeBusy) return; // 1度に1つ（欄が出ている間・前の回の片づけ中は押せない）
     transcribeRunSeq += 1;
     const runId = transcribeRunSeq;
     transcribeRun = runId;
-    set({ transcript: { clipId, runId, lines: null, percent: 0, doc }, editNotice: null });
+    set({ transcript: { clipId, runId, lines: null, doc }, transcriptPercent: 0, transcribeBusy: true, editNotice: null });
     const unlisten = await listenTranscribeProgress((e) => {
       const t = get().transcript;
-      if (t?.runId === e.runId && t.lines === null) set({ transcript: { ...t, percent: e.percent } });
+      if (t?.runId === e.runId && t.lines === null) set({ transcriptPercent: e.percent });
     });
     let segments: Awaited<ReturnType<typeof transcribeAudio>>;
     try {
@@ -1603,6 +1616,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     } finally {
       unlisten();
       if (transcribeRun === runId) transcribeRun = null;
+      // 前の回が本当に終わった（Rust も片づけ終えた）＝ここで初めて次を押せる。
+      if (transcribeRunSeq === runId) set({ transcribeBusy: false });
     }
     if (get().transcript?.runId !== runId) return;
     // ⚠️ **文字にしている間に部品が変わったら、結果は使わない**（時刻がずれる＝無音を詰めると同じ守り）。
@@ -1617,7 +1632,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_NOTHING_HEARD });
       return;
     }
-    set({ transcript: { clipId, runId, lines, percent: 100, doc: now } });
+    set({ transcript: { clipId, runId, lines, doc: now } });
   },
   closeTranscript: () => {
     const t = get().transcript;
@@ -1661,8 +1676,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
       return;
     }
-    const cuts = transcriptCuts(lines, doc.videoSettings.fps);
-    if (cuts.length === 0) return;
+    // ⚠️ **読み上げが鳴っている所は消さない**（切れない部品なので、かかると丸ごと消える＝#1387 段2のレビュー 🟡）。
+    const { cuts, keptVoice } = transcriptCuts(lines, doc.videoSettings.fps, voiceSpansOf(doc, t.clipId));
+    if (cuts.length === 0) {
+      set({ transcript: null, editNotice: transcriptCutMessage(0, 0, keptVoice) });
+      return;
+    }
     const r = applySilenceCuts(doc, cuts, volumeAt, { templateOf: templateOfNow });
     if (!r.ok) {
       set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
@@ -1672,7 +1691,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, { selectedClipIds: [], transcript: null });
     if (get().doc === r.doc) {
       const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
-      set({ editNotice: transcriptCutMessage(r.applied, total) + markers });
+      set({ editNotice: transcriptCutMessage(r.applied, total, keptVoice) + markers });
     }
   },
   dismissOpenNotice: () => set({ openNotice: null }),

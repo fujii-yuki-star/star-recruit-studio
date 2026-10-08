@@ -42,6 +42,8 @@ beforeEach(async () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(trMod, 'listenTranscribeProgress').mockResolvedValue(() => {});
   vi.spyOn(trMod, 'transcribeCancel').mockResolvedValue();
+  // 前の検査で終わらないまま残した回の印を外す（閉じても消さない作り＝検査どうしで持ち越す）。
+  useTimelineStore.setState({ transcribeBusy: false });
   await st().openTimelineProject('proj_20261008_201');
 });
 afterEach(() => {
@@ -77,9 +79,9 @@ describe('transcribeClip', () => {
     await Promise.resolve(); await Promise.resolve();
     const runId = st().transcript!.runId;
     emit({ runId, percent: 40 });
-    expect(st().transcript?.percent).toBe(40);
+    expect(st().transcriptPercent).toBe(40);
     emit({ runId: runId + 99, percent: 90 }); // 別の回
-    expect(st().transcript?.percent).toBe(40);
+    expect(st().transcriptPercent).toBe(40);
     finish(segments);
     await p;
   });
@@ -108,6 +110,20 @@ describe('transcribeClip', () => {
     await p;
     expect(st().transcript).toBeNull();
     expect(st().editNotice).toBeNull();
+  });
+
+  it('止めた後も、前の回が本当に終わるまでは次を始めない（すぐ押し直すと断られるので）', async () => {
+    let fail: (e: unknown) => void = () => {};
+    const call = vi.spyOn(trMod, 'transcribeAudio').mockImplementation(() => new Promise((_r, j) => { fail = j; }));
+    const p = st().transcribeClip('clip_001');
+    await Promise.resolve(); await Promise.resolve();
+    st().closeTranscript();
+    expect(st().transcribeBusy).toBe(true);
+    await st().transcribeClip('clip_001');
+    expect(call).toHaveBeenCalledTimes(1);
+    fail(new Error('止めました'));
+    await p;
+    expect(st().transcribeBusy).toBe(false);
   });
 
   it('動画を閉じても、走っている回を止める', async () => {
@@ -162,6 +178,18 @@ describe('placeTranscriptSubtitles / cutTranscriptLines', () => {
     expect(Math.max(...st().doc!.clips.map((c) => c.startSec + c.durationSec))).toBeCloseTo(12);
   });
 
+  it('読み上げが鳴っている所は消さずに残し、そう知らせる', async () => {
+    st().closeTranscript();
+    const withVoice = { ...doc, tracks: [...doc.tracks, { id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [...doc.clips, { id: 'clip_003', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 6, durationSec: 2, voice: { text: 'はい', status: 'none' } }] };
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withVoice));
+    await st().openTimelineProject('proj_20261008_201');
+    await st().transcribeClip('clip_001');
+    st().cutTranscriptLines([st().transcript!.lines![1]]); // 5〜8 秒＝6〜8 秒は読み上げ
+    expect(st().doc!.clips.some((c) => c.id === 'clip_003')).toBe(true);
+    expect(st().editNotice).toContain('読み上げが鳴っている所は消さずに残しました');
+  });
+
   it('結果を出した後に文書が変わっていたら、並べも消しもしない', () => {
     const lines = st().transcript!.lines!;
     st().moveClipById('clip_002', { startSec: 1 });
@@ -179,7 +207,7 @@ describe('TranscriptPanel', () => {
   ];
   it('文字にしている間は進み具合と「やめる」', () => {
     const onClose = vi.fn();
-    render(<TranscriptPanel lines={null} percent={42} fps={30} onSeek={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={onClose} />);
+    render(<TranscriptPanel lines={null} percent={42} fps={30} onSeek={vi.fn()} onPreview={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={onClose} />);
     expect(screen.getByText(/42%/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'やめる' }));
     expect(onClose).toHaveBeenCalled();
@@ -188,7 +216,7 @@ describe('TranscriptPanel', () => {
   it('直した文と選んだ行だけを渡す・消すときはもう一度確かめる', () => {
     const onPlace = vi.fn();
     const onCut = vi.fn();
-    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPlace={onPlace} onCut={onCut} onClose={vi.fn()} />);
+    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPreview={vi.fn()} onPlace={onPlace} onCut={onCut} onClose={vi.fn()} />);
     const texts = screen.getAllByRole('textbox');
     fireEvent.change(texts[0], { target: { value: 'こんにちは！' } });
     fireEvent.click(screen.getAllByRole('checkbox')[1]); // 2行目を外す
@@ -201,9 +229,45 @@ describe('TranscriptPanel', () => {
     expect(onCut).toHaveBeenCalledWith([{ startSec: 2, endSec: 5, text: 'こんにちは！' }]);
   });
 
+  it('直した後に閉じるときは確かめる・文の欄の Escape は欄から手を離すだけ', () => {
+    const onClose = vi.fn();
+    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPreview={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={onClose} />);
+    const box = screen.getAllByRole('textbox')[0];
+    box.focus();
+    fireEvent.change(box, { target: { value: '直した' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(box);
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(/直した文は消えます/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('固定した列があれば消すほうを押す前に断る・全部選んだまま消すときは、すべて消すと言う・聞くでその行を鳴らす', () => {
+    const onPreview = vi.fn();
+    const { unmount } = render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPreview={onPreview} onPlace={vi.fn()} onCut={vi.fn()} onClose={vi.fn()} cutDisabledReason="固定" />);
+    const cut = screen.getByRole('button', { name: `${TRANSCRIPT_CUT_LABEL}（2行）` });
+    expect(cut).toHaveProperty('disabled', true);
+    expect(cut.getAttribute('title')).toBe('固定');
+    fireEvent.click(screen.getAllByRole('button', { name: '聞く' })[1]);
+    expect(onPreview).toHaveBeenCalledWith(lines[1]);
+    unmount();
+    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPreview={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: `${TRANSCRIPT_CUT_LABEL}（2行）` }));
+    expect(screen.getByText(/すべての行を選んでいます/)).toBeTruthy();
+  });
+
+  it('文が空の行は字幕の数に入れない', () => {
+    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={vi.fn()} onPreview={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.change(screen.getAllByRole('textbox')[1], { target: { value: '' } });
+    expect(screen.getByRole('button', { name: `${TRANSCRIPT_PLACE_LABEL}（1行）` })).toBeTruthy();
+  });
+
   it('何も選んでいなければ、どちらも押せない・時刻を押すとその場所へ', () => {
     const onSeek = vi.fn();
-    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={onSeek} onPlace={vi.fn()} onCut={vi.fn()} onClose={vi.fn()} />);
+    render(<TranscriptPanel lines={lines} percent={100} fps={30} onSeek={onSeek} onPreview={vi.fn()} onPlace={vi.fn()} onCut={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'すべて外す' }));
     expect(screen.getByRole('button', { name: `${TRANSCRIPT_PLACE_LABEL}（0行）` })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: `${TRANSCRIPT_CUT_LABEL}（0行）` })).toHaveProperty('disabled', true);

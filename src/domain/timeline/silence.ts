@@ -94,8 +94,18 @@ export function snapInside(r: SilenceCandidate, fps: number): SilenceCandidate {
   return { startSec: start, endSec: frameTimeAt(Math.max(0, f), fps) };
 }
 
+/**
+ * 読み上げが鳴っている区間（隠したものは除く）。⚠️ **消して詰める区間から引く**＝読み上げは切れない部品なので、
+ * 少しでも範囲にかかると `deleteRange` が字幕ごと丸ごと外す（選んでいない所の声まで消える）。
+ */
+export function voiceSpansOf(doc: TimelineProject, exceptClipId?: string): SilenceCandidate[] {
+  return doc.clips
+    .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !c.hidden && c.id !== exceptClipId)
+    .map((c) => ({ startSec: c.startSec, endSec: c.startSec + c.durationSec }));
+}
+
 /** 区間の並びから、別の区間の並びを引く（どちらも半開）。 */
-function subtract(a: SilenceCandidate[], b: readonly SilenceCandidate[]): SilenceCandidate[] {
+export function subtract(a: SilenceCandidate[], b: readonly SilenceCandidate[]): SilenceCandidate[] {
   let rest = a;
   for (const cut of b) {
     rest = rest.flatMap((r) => {
@@ -133,10 +143,7 @@ export function silenceCandidates(
       startSec: r.startSec + SILENCE_KEEP_SEC,
       endSec: r.endSec - SILENCE_KEEP_SEC,
     }));
-  const voices: SilenceCandidate[] = doc.clips
-    .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !c.hidden && c.id !== clip.id)
-    .map((c) => ({ startSec: c.startSec, endSec: c.startSec + c.durationSec }));
-  return subtract(raw.filter((r) => r.endSec > r.startSec), voices)
+  return subtract(raw.filter((r) => r.endSec > r.startSec), voiceSpansOf(doc, clip.id))
     .map((r) => snapInside(r, fps))
     .filter((r) => r.endSec - r.startSec >= SILENCE_MIN_SEC - 1e-9);
 }

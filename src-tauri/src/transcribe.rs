@@ -268,7 +268,8 @@ pub fn transcribe_cancel(run_id: u64) {
     }
 }
 
-/// 声を文字にする。`from_sec`／`length_sec`＝素材の秒の範囲（部品が使っている所）。返すのは素材の頭からの秒。
+/// 声を文字にする。`from_sec`／`length_sec`＝素材の秒の範囲（部品が使っている所）。⚠️ 返すのは**切り出した範囲の頭からの秒**
+/// （`-ss` を入力の前に置く＝素材の頭からではない）。タイムラインの秒へは画面側（`transcriptLinesOf`）が写す。
 /// ⚠️ **メインスレッドを塞がない**（`audio_peaks` と同じ理由）＝別スレッドで走らせる。
 #[tauri::command]
 pub async fn transcribe_audio(

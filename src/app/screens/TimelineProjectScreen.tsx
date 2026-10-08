@@ -167,7 +167,7 @@ import { transcribeAvailable } from "../../infrastructure/transcribeFs";
 import { silenceSourceOf } from "../../domain/timeline/silence";
 /** 無音の候補を聞くとき、前後に含める長さ（秒）。 */
 const SILENCE_PREVIEW_PAD_SEC = 0.5;
-import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage, TRANSCRIBE_LABEL, TRANSCRIBE_TITLE, transcribeMessage } from "../uiLabels";
+import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage, TRANSCRIBE_LABEL, TRANSCRIBE_TITLE, TRANSCRIBE_BUSY_HINT, transcribeMessage } from "../uiLabels";
 import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
@@ -499,7 +499,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const {
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
@@ -3667,6 +3667,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "声を文字にする動画か音の部品を選んでください" };
     if (transcribeReady === false) return { disabled: true, hint: transcribeMessage.TRANSCRIBE_UNAVAILABLE };
+    if (transcribeBusy) return { disabled: true, hint: TRANSCRIBE_BUSY_HINT };
     if (selected.assetId != null && missingAssetIds.includes(selected.assetId)) {
       return { disabled: true, hint: silenceMessage.SILENCE_READ_FAILED };
     }
@@ -7059,12 +7060,20 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
           <TranscriptPanel
             lines={transcript.lines}
-            percent={transcript.percent}
+            percent={transcriptPercent}
             fps={doc.videoSettings.fps}
             onSeek={(sec) => setPlayhead(sec)}
-            onPlace={(picked) => placeTranscriptSubtitles(picked)}
-            onCut={(picked) => { pause(); cutTranscriptLines(picked); }}
-            onClose={closeTranscript}
+            onPreview={(l) => {
+              // 無音を詰めるの「聞く」と同じ道（終わりで止める）＝その行だけを鳴らす。
+              setPlayhead(l.startSec);
+              setSilencePreviewUntil(l.endSec);
+              play();
+            }}
+            // ⚠️ **押す前に断る**＝消して詰めるのは全部の列（無音を詰めると同じ理由の文）。
+            cutDisabledReason={doc.tracks.some((t) => t.locked) ? editBlockedMessage[EDIT_BLOCKED.lockedSelection] : undefined}
+            onPlace={(picked) => { if (silencePreviewUntil != null) pause(); setSilencePreviewUntil(null); placeTranscriptSubtitles(picked); }}
+            onCut={(picked) => { pause(); setSilencePreviewUntil(null); cutTranscriptLines(picked); }}
+            onClose={() => { if (silencePreviewUntil != null) pause(); setSilencePreviewUntil(null); closeTranscript(); }}
           />
         </div>
       )}
