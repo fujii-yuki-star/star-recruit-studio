@@ -156,6 +156,7 @@ describe('placeTranscriptSubtitles / cutTranscriptLines', () => {
     st().cutTranscriptLines([lines[1]]); // 5〜8 秒の「えっと、」
     const end = Math.max(...st().doc!.clips.map((c) => c.startSec + c.durationSec));
     expect(end).toBeCloseTo(12 - 3);
+    expect(st().transcript).toBeNull(); // 欄を閉じる（消した後の古い時刻の行を残さない）
     expect(st().editNotice).toContain('1か所');
     st().undo();
     expect(Math.max(...st().doc!.clips.map((c) => c.startSec + c.durationSec))).toBeCloseTo(12);

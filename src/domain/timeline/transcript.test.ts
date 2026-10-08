@@ -53,6 +53,13 @@ describe('transcriptCuts', () => {
     expect(cuts).toEqual([{ startSec: 1, endSec: 3 }, { startSec: 5, endSec: 6 }]);
   });
 
+  it('長い行の中に収まる短い行があっても、長い方の終わりを保つ', () => {
+    expect(transcriptCuts([
+      { startSec: 1, endSec: 5, text: '長い' },
+      { startSec: 2, endSec: 3, text: '中' },
+    ], fps)).toEqual([{ startSec: 1, endSec: 5 }]);
+  });
+
   it('コマへ内側に丸める（頭は切り上げ・終わりは切り下げ）', () => {
     const [c] = transcriptCuts([{ startSec: 1.01, endSec: 1.99, text: 'a' }], fps);
     expect(c.startSec).toBeCloseTo(31 / 30);
