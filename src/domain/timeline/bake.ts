@@ -9,7 +9,8 @@
 //
 // 素材は**コピーする前提で `doc.assets` に載せる**（自己完結＝ADR-0024 (6)・決定13）。実ファイルのコピーと
 // 容量の事前提示は infrastructure/UI の仕事で、ここは「どれを持っていくか」だけを決める。
-import { dimsForOrientation } from '../constants';
+import { BGM_CROSSFADE_SEC, dimsForOrientation } from '../constants';
+import { bgmExportRunOf, planBgmMix } from '../project/bgmExport';
 import {
   FREE_CATEGORY,
   FREE_ELEMENT_KIND,
@@ -97,6 +98,12 @@ export interface BakeOptions {
   templateOf?: (templateId: string) => Template | undefined;
   /** 場面→行ごとの音声長（秒・lineId→秒）。掛け合いの自動逐次で区間尺を決める（書き出しと同じ入力）。 */
   lineDurationsFor?: (scene: Scene) => Record<string, number>;
+  /**
+   * 単独読み上げの**作成済み音声の長さ**（秒・`narrationDurationFromAudio`）。分かれば読み上げの部品をその長さにする（#1404）。
+   * ⚠️ 渡さない・分からないときは従来どおり場面いっぱい＝声が終わった後も「鳴っている」扱いになり、
+   *   BGM が下がりっぱなし（ダッキング）・喋っている間の動きが続く（ADR-0056）。
+   */
+  narrationDurationFor?: (scene: Scene) => number | undefined;
 }
 
 export interface BakeResult {
@@ -668,9 +675,12 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
 
     // 読み上げ：行ごとに1クリップ。同時に流れる行（ADR-0031）は窓が同じなので列が分かれる（決定8）。
     const voiceClipIdByLine = new Map<string, string>();
+    // 単独読み上げは窓が場面いっぱい＝**声の部品は実際の音声の長さに合わせる**（#1404・タイムラインで声を作ったときと同じ）。
+    const narrationSec = hasExplicitLines(scene) ? undefined : options.narrationDurationFor?.(scene);
     for (const w of windows) {
       const startSec = start + w.startSec;
-      const endSec = startSec + w.durationSec;
+      const voiceSec = narrationSec != null && narrationSec > 0 ? Math.min(w.durationSec, narrationSec) : w.durationSec;
+      const endSec = startSec + voiceSec;
       const column = audio.take(1, startSec, endSec);
       const voiceClipId = newClipId();
       voiceClipIdByLine.set(w.line.lineId, voiceClipId);
@@ -679,7 +689,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
         kind: TIMELINE_CLIP_KIND.voice,
         trackId: trackIdFor(tracks, column, TRACK_KIND.audio),
         startSec,
-        durationSec: w.durationSec,
+        durationSec: voiceSec,
         voice: voiceFromLine(w.line),
         ...(scene.audioMix?.narrationVolume != null ? { volume: scene.audioMix.narrationVolume } : {}),
       });
@@ -832,21 +842,27 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   }
 
   // BGM：鳴っている区間ごとに1クリップ（実効BGM＝場面 ?? プロジェクトの解決は場面形式と共有）。
-  for (const run of groupBgmRuns(scenes, starts, ends, project.bgmSettings)) {
-    const column = audio.take(1, run.startSec, run.endSec);
+  // ⚠️ **置き方とフェードは場面形式の書き出しと同じ計画（`planBgmMix`）を通す**（#1404）＝曲が変わる境界は
+  //   前後を重ねてクロスフェードし、途中の区間には場面の前後フェードではなく境界のフェードを使う。以前は区間をそのまま
+  //   置いていたので、**新しい曲がフェード無しで切り替わり**、書き出した音が場面形式と食い違っていた。
+  const bgmRuns = groupBgmRuns(scenes, starts, ends, project.bgmSettings);
+  const mix = planBgmMix(bgmRuns.map(bgmExportRunOf), BGM_CROSSFADE_SEC);
+  mix.forEach((m, k) => {
+    const run = bgmRuns[k];
+    const column = audio.take(1, m.delaySec, m.delaySec + m.playSec);
     clips.push({
       id: newClipId(),
       kind: TIMELINE_CLIP_KIND.audio,
       trackId: trackIdFor(tracks, column, TRACK_KIND.audio),
-      startSec: run.startSec,
-      durationSec: run.endSec - run.startSec,
+      startSec: m.delaySec,
+      durationSec: m.playSec,
       // 音の出どころは高々1つ（V25）。同梱BGMが選ばれていればそちらが優先（場面形式の解決と同じ）。
       ...(run.bgm.bundledBgmId != null ? { bundledBgmId: run.bgm.bundledBgmId } : { assetId: run.bgm.assetId }),
-      ...(run.bgm.volume != null ? { volume: run.bgm.volume } : {}),
-      ...(run.bgm.fadeInSec != null ? { fadeInSec: run.bgm.fadeInSec } : {}),
-      ...(run.bgm.fadeOutSec != null ? { fadeOutSec: run.bgm.fadeOutSec } : {}),
+      ...(run.bgm.volume != null ? { volume: m.volume } : {}),
+      ...(m.fadeInSec > 0 ? { fadeInSec: m.fadeInSec } : {}),
+      ...(m.fadeOutSec > 0 ? { fadeOutSec: m.fadeOutSec } : {}),
     });
-  }
+  });
 
   if (dialogueSubtitleScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: dialogueSubtitleScenes });
   if (videoStartTimingScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.videoStartTiming, sceneNumbers: videoStartTimingScenes });

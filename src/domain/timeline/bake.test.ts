@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { EASING, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND, TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import { presetKeyframes } from '../project/animationPresets';
 import { transitionTimeline } from '../project/sceneTransitions';
+import { planBgmMix, resolveBgmExportRuns } from '../project/bgmExport';
+import { narrationDurationFromAudio } from '../project/narrationLines';
+import { BGM_CROSSFADE_SEC } from '../constants';
 import { setKeyframe } from './keyframeEdit';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
@@ -1232,5 +1235,67 @@ describe('bakeTimelineProject: 焼いた字幕の細部（#633 レビュー）',
       opts({ templateOf: () => tall, lineDurationsFor: () => durations }),
     );
     expect(doc.clips.find((c) => c.kind === 'subtitle')?.h).toBeLessThan(600);
+  });
+});
+
+// 焼き出しの音を場面形式の書き出しとそろえる（#1404）。
+describe('bakeTimelineProject: 音を場面形式の書き出しとそろえる（#1404）', () => {
+  it('単独読み上げの声の部品は、作成済みの音声の長さにする（場面いっぱいにしない）', () => {
+    const p = project({ scenes: [scene('scene_001', { durationSec: 6, narration: { text: 'こんにちは', status: NARRATION_STATUS.generated, voicePath: 'voices/s1.wav' } })] });
+    const voiceOf = (o: Partial<BakeOptions>) => bakeTimelineProject(p, opts(o)).doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice);
+    expect(voiceOf({ narrationDurationFor: () => 2.3 }).map((c) => [c.startSec, c.durationSec])).toEqual([[0, 2.3]]);
+    // 分からないときは従来どおり場面いっぱい・場面より長い音声は場面で止める。
+    expect(voiceOf({}).map((c) => c.durationSec)).toEqual([6]);
+    expect(voiceOf({ narrationDurationFor: () => 9 }).map((c) => c.durationSec)).toEqual([6]);
+    expectSound(bakeTimelineProject(p, opts({ narrationDurationFor: () => 2.3 })).doc);
+  });
+
+  it('掛け合いの場面には効かない（行の窓は行ごとの長さで決まる）', () => {
+    const p = project({ scenes: [scene('scene_001', { durationSec: 6, subtitleEnabledDefault: false, lines: [
+      { lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none }, { lineId: 'line_002', text: 'に', status: NARRATION_STATUS.none },
+    ] })] });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => ({ line_001: 2, line_002: 3 }), narrationDurationFor: () => 0.5 }));
+    expect(doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice).map((c) => [c.startSec, c.durationSec])).toEqual([[0, 2], [2, 4]]);
+  });
+
+  it('BGM は場面形式の書き出しと同じ計画で置く＝曲が変わる境界はクロスフェードする', () => {
+    const p = project({
+      bgmSettings: { enabled: true, bundledBgmId: 'summer-morning', volume: 0.3, fadeInSec: 1, fadeOutSec: 1 },
+      parts: [{ partId: 'part_001', title: 'パート1', order: 1, sceneIds: ['scene_001', 'scene_002', 'scene_003'] }],
+      scenes: [
+        scene('scene_001', { durationSec: 6 }),
+        scene('scene_002', { order: 2, durationSec: 6, bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3 } }),
+        scene('scene_003', { order: 3, durationSec: 6 }),
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    const bgm = doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.audio).sort((a, b) => a.startSec - b.startSec)
+      .map((c) => ({ id: c.bundledBgmId, start: c.startSec, len: c.durationSec, fin: c.fadeInSec, fout: c.fadeOutSec }));
+    const expected = planBgmMix(resolveBgmExportRuns(p), BGM_CROSSFADE_SEC)
+      .map((m) => ({ id: m.bundledBgmId, start: m.delaySec, len: m.playSec, fin: m.fadeInSec || undefined, fout: m.fadeOutSec || undefined }));
+    expect(bgm).toEqual(expected);
+    // 中の曲は境界の半分だけ前から鳴り始め、フェードで入る（以前はフェード無しで切り替わった）。
+    expect(bgm[1]).toMatchObject({ id: 'found-new-hope', start: 6 - BGM_CROSSFADE_SEC / 2, fin: BGM_CROSSFADE_SEC });
+    expectSound(doc);
+  });
+});
+
+describe('narrationDurationFromAudio（#1404）', () => {
+  /** 指定の長さの無音 WAV（16bit・モノラル）の data URL。 */
+  const wav = (sec: number, rate = 8000): string => {
+    const n = Math.round(sec * rate);
+    const b = Buffer.alloc(44 + n * 2);
+    b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write('fmt ', 12);
+    b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24);
+    b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
+    return `data:audio/wav;base64,${b.toString('base64')}`;
+  };
+  it('単独読み上げで作成済みなら音声の長さ・行を持つ場面や未作成は undefined', () => {
+    const s = scene('scene_001', { narration: { text: 'あ', status: NARRATION_STATUS.generated, voicePath: 'v.wav' } });
+    expect(narrationDurationFromAudio(s, { scene_001: wav(2.5) })).toBeCloseTo(2.5);
+    expect(narrationDurationFromAudio(s, {})).toBeUndefined();
+    expect(narrationDurationFromAudio(s, { scene_001: wav(0) })).toBeUndefined(); // 長さ0の声は使わない（場面の尺のまま）
+    expect(narrationDurationFromAudio({ ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } }, { scene_001: wav(2.5) })).toBeUndefined();
+    expect(narrationDurationFromAudio({ ...s, lines: [{ lineId: 'line_001', text: 'い', status: NARRATION_STATUS.generated }] }, { scene_001: wav(2.5) })).toBeUndefined();
   });
 });

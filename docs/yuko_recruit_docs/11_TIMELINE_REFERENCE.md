@@ -91,9 +91,9 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 | **どの場面も**（見た目パターンの層） | **最背面に `kind:'template'` のクリップ**（`templateId` と差し込み口〔`assetRefs`/`texts`/`textStyles`/`slotFits`/`textFontIds`/`character`/`slotClips`/`fontId`〕を持ったまま＝決定5）。**FREE でも置く**＝FREE テンプレも `background` 層などを持ち動画に出るため（`layoutScene` は category を問わず層を描いてから自由配置を重ねる） |
 | 通常テンプレの場面 | 上記だけ＝**1場面1クリップ**。ただし**行ごとの字幕を焼いた場面は複数クリップ**になり、FREE と同じく**場面グループ**を作ってそこへ切り替えを付ける（§7.6.1.1） |
 | FREE の場面 | 上記の**上に要素ごとのクリップ**（`freeLayout` の重ね順で列へ）＋**1場面=1グループ**（見た目パターンのクリップもメンバー）。場面内の `groups` は入れ子で残す |
-| `scene.lines` / `scene.narration` | **`kind:'voice'` のクリップ**（行ごと）。同時開始（ADR-0031）は**列を分ける**だけ＝決定8。読み上げ文が空の行はクリップにしない |
+| `scene.lines` / `scene.narration` | **`kind:'voice'` のクリップ**（行ごと）。同時開始（ADR-0031）は**列を分ける**だけ＝決定8。読み上げ文が空の行はクリップにしない。⚠️ **長さは作った声の長さ**（場面の尺で頭打ち）＝単独の読み上げでも場面いっぱいに伸ばさない（`narrationDurationFromAudio`・#1404）。伸ばすと BGM の下げ（声が鳴っている間）が**無音のあいだも下がったまま**になり、場面形式と聞こえ方が変わる |
 | `scene.lines` の字幕（テンプレ字幕層が行ごとに差し替わるもの） | **`kind:'subtitle'` のクリップ**（行ごと・文言は焼き付け・`voiceClipId` で同じ行の読み上げへ連動＝§7.6.1.1／§7.6.2.3）。読み上げ文が空でも字幕が出ている行は焼く（声は作らない） |
-| BGM（`bgmSettings`・場面 ?? プロジェクト） | 鳴っている区間ごとに **`kind:'audio'` のクリップ**（`groupBgmRuns` を共有） |
+| BGM（`bgmSettings`・場面 ?? プロジェクト） | 鳴っている区間ごとに **`kind:'audio'` のクリップ**（`groupBgmRuns` を共有）。⚠️ **曲の切り替えは書き出しと同じ重ね方**＝`planBgmMix`（`BGM_CROSSFADE_SEC`）の出す開始・長さ・フェードをそのままクリップへ写す（#1404）。区間をそのまま並べると**次の曲がフェード無しで入る** |
 | `transition`（**実効の切り替え**＝`resolveTransition` の結果） | **キーフレーム**（決定19）。`fade`＝手前の場面の不透明度（入る側が手前なら 0→1／出ていく側が手前なら 1→0）、`slide`＝**両方が一緒に動く**（FFmpeg の `slideleft` 等と同じ）、`none`＝なし |
 | `timelineOverlay.animations`（FREE 場面のアニメ） | `ClipAnimation`（場面ローカル秒＝クリップローカル秒。要素クリップは場面の先頭から始まるため） |
 | `assets` | **焼く範囲で実際に使うものだけ**（`sceneActiveAssetIds`＝休眠の割当は数えない）＋鳴っている BGM の音源。実ファイルは**コピー**（決定13＝自己完結・ADR-0024 (6)） |

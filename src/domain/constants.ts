@@ -10,6 +10,13 @@ import type { Orientation, SceneCategory } from './enums';
 //   用途別に分離した（根拠は AI のペース配分の目安のみで、技術要件でも schema 制約でもなかった）。
 export const AI_SCENE_MIN_DURATION_SEC = 3;
 export const AI_SCENE_MAX_DURATION_SEC = 15;
+/**
+ * 同梱の AI が**止まらずに書き続けている**とみなす、書いた場面の長さの合計（尺に対する倍率・#1403）。
+ * 尺の 2 倍を越えたら途中で止めて作り直す（3072 トークンまで約4分待たせない）。
+ * ⚠️ **見張るのは整える前の生の長さ**（整える段が尺へ寄せるのはその後）＝実測（60 秒の尺・6回）で生の合計は
+ * 60〜85 秒（最大で尺の約1.42倍）。止まらなかった回は 418 秒（約7倍）。正しい案を止めないよう余裕を取って 2 倍。
+ */
+export const AI_PLAN_RUNAWAY_DURATION_FACTOR = 2;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
 // 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
 // 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は

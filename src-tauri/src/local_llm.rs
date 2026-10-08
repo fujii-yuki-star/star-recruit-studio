@@ -570,6 +570,8 @@ pub struct StreamAcc {
     pub done: bool,
     /// 途中で llama-server が返した失敗（`data: {"error": ...}`）。黙って捨てない。
     pub error: Option<String>,
+    /// 上限を越えて書き続けたので、こちらから切った（#1403）。
+    pub runaway_stopped: bool,
     pending: Vec<u8>,
 }
 
@@ -622,6 +624,36 @@ impl StreamAcc {
         self.content.matches("\"sceneType\"").count()
     }
 
+    /// ここまでに書いた場面の長さ（`"durationSec": 数`）の合計（秒）。書きかけで数がまだ読めないものは数えない。
+    pub fn planned_seconds(&self) -> f64 {
+        let key = "\"durationSec\"";
+        let mut total = 0.0;
+        let mut rest = self.content.as_str();
+        while let Some(i) = rest.find(key) {
+            rest = &rest[i + key.len()..];
+            let after = rest
+                .trim_start()
+                .strip_prefix(':')
+                .unwrap_or("")
+                .trim_start();
+            let num: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            // 数の後ろに区切り（`,` `}` 空白）が来ていなければ書きかけ＝まだ数えない。
+            let complete = after[num.len()..].starts_with([',', '}', ' ', '\n', '\r']);
+            if complete {
+                total += num.parse::<f64>().unwrap_or(0.0);
+            }
+        }
+        total
+    }
+
+    /// 止まらずに書き続けているか（#1403）＝場面の数か、書いた場面の長さの合計が、上限を越えた。
+    pub fn runaway(&self, limits: &GenerateLimits) -> bool {
+        self.scenes() as u32 > limits.max_scenes || self.planned_seconds() > limits.max_total_sec
+    }
+
     /// 出力が上限（`MAX_OUTPUT_TOKENS`）で止まったか。
     pub fn stopped_by_length(&self) -> bool {
         self.finish_reason.as_deref() == Some("length")
@@ -632,6 +664,15 @@ impl StreamAcc {
     pub fn finished(&self) -> bool {
         self.error.is_none() && (self.done || self.finish_reason.is_some())
     }
+}
+
+/// 動画案づくりの上限（#1403）。**画面が尺から決めて渡す**（尺の正は画面側の定数）。
+/// これを越えて書き続けたら途中で止めて作り直す＝3072 トークンまで（約4分）待たない。
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateLimits {
+    pub max_scenes: u32,
+    pub max_total_sec: f64,
 }
 
 /// 進み具合の知らせ（画面が「3 場面目を書いています」を出す）。
@@ -675,6 +716,7 @@ pub async fn local_ai_generate(
     system: String,
     user: String,
     schema: String,
+    limits: Option<GenerateLimits>,
 ) -> Result<String, String> {
     let gen = crate::ai::begin_generation();
     let schema: serde_json::Value = serde_json::from_str(&schema)
@@ -688,6 +730,49 @@ pub async fn local_ai_generate(
     let mut body = build_request_body(&system, &user, schema);
     // 少しずつ受け取る＝書き終えた場面の数を画面へ知らせる（ADR-0052 決定6）。
     body["stream"] = serde_json::json!(true);
+    // ⚠️ **止まらずに書き続けた回は、1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る（実測＝8回中1回）。
+    //   作り直しても止まらなければ断る（何度も待たせない）。
+    for attempt in 0..GENERATE_ATTEMPTS {
+        match generate_once(&app, &state, &base, &body, gen, limits).await? {
+            Attempt::Done(content) => return Ok(content),
+            Attempt::TooLong if attempt + 1 < GENERATE_ATTEMPTS => {
+                crate::tlog!("local_llm", "止まらずに書き続けたので作り直します");
+            }
+            Attempt::TooLong => break,
+        }
+    }
+    Err(LOCAL_AI_TOO_LONG.to_string())
+}
+
+/// 止まらずに書き続けた回を作り直す回数（最初の1回を含む）。
+const GENERATE_ATTEMPTS: u32 = 2;
+
+/// 1回ぶんの結果。
+enum Attempt {
+    Done(String),
+    /// 上限（トークン・場面の数・長さの合計）を越えて書き続けた。
+    TooLong,
+}
+
+/// 生の応答を残す（#1403）＝**このパソコンの記録の置き場だけ**（外へは送らない・毎回上書き）。
+/// 「できました」と出た案が空だった、のような食い違いを、あとから確かめられるようにする。
+fn keep_last_response(content: &str) {
+    if let Some(dir) = crate::trouble_log::dir() {
+        let _ = std::fs::write(dir.join(LAST_RESPONSE_FILE), content);
+    }
+}
+
+/// 生の応答を残すファイルの名前（記録の置き場の中）。
+pub const LAST_RESPONSE_FILE: &str = "ai_last_response.txt";
+
+async fn generate_once(
+    app: &AppHandle,
+    state: &State<'_, LocalLlmState>,
+    base: &str,
+    body: &serde_json::Value,
+    gen: u64,
+    limits: Option<GenerateLimits>,
+) -> Result<Attempt, String> {
     let started = Instant::now();
     // 送って、本文を読み終えるまでを1つにする＝本文の読み取りも「やめる」と時間切れの対象にする（#1286 レビュー 🟡）。
     let request = async {
@@ -712,6 +797,11 @@ pub async fn local_ai_generate(
                 let _ = app.emit("local-ai-progress", LocalAiProgress { scenes: n as u32 });
             }
             if acc.done {
+                break;
+            }
+            // 上限を越えて書き続けている＝ここで切る（接続を切ると相手も生成を止める）。
+            if limits.is_some_and(|l| acc.runaway(&l)) {
+                acc.runaway_stopped = true;
                 break;
             }
         }
@@ -757,6 +847,23 @@ pub async fn local_ai_generate(
             .map(|t| t.to_string())
             .unwrap_or_default()
     );
+    crate::tlog!(
+        "local_llm",
+        "中身：場面 {}・長さの合計 {:.1} 秒・{} 字",
+        acc.scenes(),
+        acc.planned_seconds(),
+        acc.content.chars().count()
+    );
+    keep_last_response(&acc.content);
+    if acc.runaway_stopped {
+        crate::tlog!(
+            "local_llm",
+            "上限を越えて書き続けたので途中で止めました（場面 {}・{:.1} 秒）",
+            acc.scenes(),
+            acc.planned_seconds()
+        );
+        return Ok(Attempt::TooLong);
+    }
     if !acc.finished() {
         crate::tlog!(
             "local_llm",
@@ -772,12 +879,12 @@ pub async fn local_ai_generate(
             "local_llm",
             "出力が上限（{MAX_OUTPUT_TOKENS} トークン）で止まりました"
         );
-        return Err(LOCAL_AI_TOO_LONG.to_string());
+        return Ok(Attempt::TooLong);
     }
     if acc.content.is_empty() {
         return Err(crate::messages::AI_REQUEST_FAILED.to_string());
     }
-    Ok(acc.content)
+    Ok(Attempt::Done(acc.content))
 }
 
 /// 先に起動しておく（ADR-0052 決定6「入力画面を開いたら裏で準備を始める」・#1293）。
@@ -1085,6 +1192,44 @@ mod tests {
         assert!(!acc.done);
         acc.push(b"data: [DONE]\n");
         assert!(acc.done);
+    }
+
+    /// 途中まで届いた中身だけを持つ受け皿。
+    fn acc_with(content: &str) -> StreamAcc {
+        StreamAcc {
+            content: content.to_string(),
+            ..StreamAcc::default()
+        }
+    }
+
+    #[test]
+    fn planned_seconds_counts_only_finished_numbers() {
+        let mut acc = acc_with(
+            r#"{"parts":[{"scenes":[{"sceneType":"opening","durationSec": 12,"x":1},{"sceneType":"message","durationSec":7.5}"#,
+        );
+        assert!((acc.planned_seconds() - 19.5).abs() < 1e-9);
+        // 書きかけの数（区切りがまだ来ていない）は数えない＝「1」と「15」を取り違えない。
+        acc.content
+            .push_str(r#",{"sceneType":"closing","durationSec":1"#);
+        assert!((acc.planned_seconds() - 19.5).abs() < 1e-9);
+        acc.content.push_str("5}");
+        assert!((acc.planned_seconds() - 34.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn runaway_by_scenes_or_total_seconds() {
+        let limits = GenerateLimits {
+            max_scenes: 3,
+            max_total_sec: 30.0,
+        };
+        let acc = acc_with(
+            r#"{"sceneType":"a","durationSec":10,"sceneType":"b","durationSec":10,"sceneType":"c","durationSec":10,"#,
+        );
+        assert!(!acc.runaway(&limits)); // ちょうど上限は越えていない
+        let more = acc_with(&format!("{}{}", acc.content, r#""sceneType":"d""#));
+        assert!(more.runaway(&limits)); // 場面の数が越えた
+        let long = acc_with(r#"{"sceneType":"a","durationSec":31,"#);
+        assert!(long.runaway(&limits)); // 長さの合計が越えた
     }
 
     #[test]
