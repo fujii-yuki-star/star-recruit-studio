@@ -41,6 +41,11 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "duplicateTimelineProject",
   // 開いたときの知らせを閉じる（ADR-0057）＝知らせは本体の窓にだけ出る。
   "dismissOpenNotice",
+  // 声を文字にする（ADR-0058）＝欄は本体の窓にだけある（`whisper-cli` を起こすのも本体＝2つの窓で CPU を取り合わない）。
+  "transcribeClip",
+  "closeTranscript",
+  "placeTranscriptSubtitles",
+  "cutTranscriptLines",
 ]);
 
 /**
