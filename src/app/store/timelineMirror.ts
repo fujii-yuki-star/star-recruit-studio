@@ -33,6 +33,10 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "addAsset",
   // 字幕ファイルのバイト列も窓をまたげない（ADR-0055）＝読み込むボタンは本体の窓の「置く」欄にだけある。
   "importSubtitleFile",
+  // 無音を詰める（#1385）＝探す欄は本体の窓にだけある（素材の音を測るのも本体＝FFmpeg を2つの窓で起こさない）。
+  "findSilencesFor",
+  "applySilenceCandidates",
+  "closeSilenceFind",
 ]);
 
 /**

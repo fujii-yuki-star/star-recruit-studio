@@ -101,6 +101,8 @@ import { deleteProjectFiles, extractVideoFrame } from "../../infrastructure/asse
 import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
+import { applySilenceCuts, silenceCandidates, silenceSourceOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
+import { silenceAppliedMessage, silenceMessage } from "../uiLabels";
 import type { BlendMode } from "../../domain/template/types";
 import { userFacingMessage } from "../userFacingError";
 
@@ -589,6 +591,17 @@ export interface TimelineState {
    * `outsideGroup` なのは「非同期の着地を利用者のまとめ（文字入力中など）に混ぜない」ため。
    */
   freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
+  /**
+   * 無音・長い間を詰める（#1385）。`null`＝開いていない／`candidates` が `null` の間は探している最中。
+   * ⚠️ **文書に持たない**（この作業だけの都合＝作業範囲と同じ）。
+   */
+  silenceFind: { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null;
+  /** 選んだ部品（録画・録音）の中の無音を探す（測るのは Rust＝素材のバイトを JS に載せない）。 */
+  findSilencesFor: (clipId: string) => Promise<void>;
+  /** 選んだ候補をまとめて詰める（取り消し1回で戻る）。 */
+  applySilenceCandidates: (candidates: readonly SilenceCandidate[]) => void;
+  /** 無音を詰める欄を閉じる。 */
+  closeSilenceFind: () => void;
   /**
    * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
    *
@@ -1081,6 +1094,7 @@ function emptyState() {
     // 作業範囲（#1193）＝取っていない状態から始める。
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
+    silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1438,6 +1452,78 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editNotice: markersClampedMessage(r.clampedMarkerCount) });
     }
   },
+
+  findSilencesFor: async (clipId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    const src = silenceSourceOf(doc, clip);
+    // ⚠️ **探せない部品は理由を出す**（押しても何も起きない、を作らない＝§2-5）。
+    if (!src) {
+      set({ editNotice: silenceMessage.SILENCE_NO_SOUND });
+      return;
+    }
+    // ⚠️ **書き出し中は測らない**（波形と同じ理由＝FFmpeg を書き出しと取り合わせない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    set({ silenceFind: { clipId, candidates: null, doc }, editNotice: null });
+    const projectId = doc.projectId;
+    const generation = currentAnalysisGeneration();
+    const peaks: number[] = [];
+    // ⚠️ **長い素材は窓に分けて測る**＝1回に返る山の数に上限がある（Rust の `audio_peaks`）。
+    for (let from = 0; from < src.lengthSec - 1e-6; from += SILENCE_WINDOW_SEC) {
+      const len = Math.min(SILENCE_WINDOW_SEC, src.lengthSec - from);
+      const part = await audioPeaks(projectId, src.relPath, Math.max(1, Math.round(len / SILENCE_BUCKET_SEC)), src.fromSec + from, len);
+      // 待っている間に閉じた・別の動画へ移った・閉じて開き直した＝結果は捨てる。
+      if (get().silenceFind?.clipId !== clipId || get().doc?.projectId !== projectId || generation !== currentAnalysisGeneration()) return;
+      if (part.length === 0) {
+        set({ silenceFind: null, editNotice: silenceMessage.SILENCE_READ_FAILED });
+        return;
+      }
+      peaks.push(...part);
+    }
+    // ⚠️ **探している間に部品が変わったら、出した候補は使わない**（位置・切り出し・速さがずれる）。
+    const now = get().doc;
+    const nowClip = now?.clips.find((c) => c.id === clipId);
+    if (!now || nowClip !== clip) {
+      set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
+      return;
+    }
+    // ⚠️ **候補を出した時点の文書を持つ**＝詰めるときに同じ文書かを確かめる（取り消し・別の窓の編集で変わっていたら使わない）。
+    set({ silenceFind: { clipId, candidates: silenceCandidates(now, clip, peaks, SILENCE_BUCKET_SEC), doc: now } });
+  },
+  applySilenceCandidates: (candidates) => {
+    const doc = get().doc;
+    if (!doc || candidates.length === 0) return;
+    // ⚠️ **候補を出した後に文書が変わっていたら詰めない**（PR #1389 レビュー 🟡）＝取り消し（Ctrl+Z）や別の窓の編集で
+    //   部品の位置が変わっていると、**古い時刻のまま全部の列を切る**。探し直してもらう。
+    if (get().silenceFind?.doc !== doc) {
+      set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
+      return;
+    }
+    // ⚠️ **再生中は断る**（範囲を消して詰めると同じ＝走っている位置で確定させない・ADR-0032 決定21）。
+    if (get().isPlaying) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
+      return;
+    }
+    const r = applySilenceCuts(doc, candidates, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const total = candidates.reduce((a, c) => a + (c.endSec - c.startSec), 0);
+    // ⚠️ **1回の `commit`**＝まとめて詰めても取り消し1回（ADR-0034 決定20）。
+    commit(set, get, r.doc, { selectedClipIds: [], silenceFind: null });
+    if (get().doc === r.doc) {
+      // 寄せた目印も知らせる（「範囲を消して詰める」と同じ）。
+      const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
+      set({ editNotice: silenceAppliedMessage(r.applied, total) + markers });
+    }
+  },
+  closeSilenceFind: () => set({ silenceFind: null }),
 
   setSelectedColorAdjust: (patch) =>
     applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),

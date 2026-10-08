@@ -22,7 +22,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
-import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE } from "../uiLabels";
+import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL, silenceMessage } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -9182,5 +9182,47 @@ describe("TimelineProjectScreen: 書き出す大きさ（#1255）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const texts = [...(screen.getByLabelText("書き出す大きさ") as HTMLSelectElement).options].map((o) => o.text);
     expect(texts).toEqual(["きれい（1080×1920）", "ふつう（1080×1920・ファイル小さめ）", "軽い（720×1280）"]);
+  });
+});
+
+// 無音を詰める（#1385）＝画面の関門と「聞く」。
+describe("無音を詰める", () => {
+  const rec = {
+    assets: [{ assetId: "asset_001", assetType: "bgm" as const, displayName: "録音", filePath: "assets/rec.wav" }],
+    clips: [{ id: "clip_009", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, assetId: "asset_001" }],
+  };
+  const button = () => screen.getByRole("button", { name: SILENCE_FIND_LABEL }) as HTMLButtonElement;
+
+  it("固定した列があれば押す前に断る（詰めるのは全部の列）", () => {
+    open({ ...rec, tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }] } as Partial<TimelineProject>);
+    useTimelineStore.setState({ selectedClipIds: ["clip_009"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(button().disabled).toBe(true);
+    expect(button().title).toBe(editBlockedMessage[EDIT_BLOCKED.lockedSelection]);
+  });
+
+  it("音の無い部品では押せない（理由つき）・音の部品なら押せる", () => {
+    const text = { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" };
+    open({ ...rec, clips: [...rec.clips, text] } as Partial<TimelineProject>);
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(button().disabled).toBe(true);
+    expect(button().title).toBe(silenceMessage.SILENCE_NO_SOUND);
+    unmount();
+    useTimelineStore.setState({ selectedClipIds: ["clip_009"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(button().disabled).toBe(false);
+  });
+
+  it("「聞く」は候補の少し前から鳴らし、終わりを過ぎたら止める", () => {
+    open(rec as Partial<TimelineProject>);
+    const cand = { startSec: 2, endSec: 4 };
+    useTimelineStore.setState({ selectedClipIds: ["clip_009"], silenceFind: { clipId: "clip_009", candidates: [cand], doc: useTimelineStore.getState().doc! } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "聞く" }));
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1.5);
+    act(() => { useTimelineStore.setState({ playheadSec: 4.6 }); });
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
   });
 });

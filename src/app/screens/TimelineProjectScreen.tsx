@@ -161,6 +161,11 @@ import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYP
 import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
 import { ExportSizeOptions } from "../components/ExportSizeOptions";
+import { SilenceFindPanel } from "../components/SilenceFindPanel";
+import { silenceSourceOf } from "../../domain/timeline/silence";
+/** 無音の候補を聞くとき、前後に含める長さ（秒）。 */
+const SILENCE_PREVIEW_PAD_SEC = 0.5;
+import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage } from "../uiLabels";
 import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
@@ -492,7 +497,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const {
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
@@ -887,8 +892,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // ⚠️ **確認を足したらここへ必ず並べる**（#721 の実機確認で漏れが出た）＝入れ忘れると、確認を出したまま
   // `Escape` で**背後の選択だけが解け**、そのまま「削除する」を押しても何も起きない（§2-5）。
   // `Space`・`Delete`・矢印もこの値で塞いでいるので、漏れると**答えを求めている最中に別の操作が通る**。
+  // 無音の候補を「聞く」ときの止める時刻（#1385）。候補の終わり＋少しで止める。
+  const [silencePreviewUntil, setSilencePreviewUntil] = useState<number | null>(null);
+  useEffect(() => {
+    if (silencePreviewUntil != null && playheadSec >= silencePreviewUntil) {
+      pause();
+      setSilencePreviewUntil(null);
+    }
+  }, [silencePreviewUntil, playheadSec, pause]);
   const overlayOpen =
-    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null;
+    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null
+    || silenceFind !== null;
   useEscapeOwner(overlayOpen);
   // 範囲が消えたら、範囲を消す確認も閉じる（見えないまま状態だけ残り、取り直したときに確認が出てくる、を作らない・PR4a レビュー）。
   useEffect(() => {
@@ -3618,6 +3632,24 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   };
   const freezeGuard = editGuard(freezeExtra());
   /**
+   * 無音を詰める（#1385）の押せる条件。⚠️ **探せない部品は押す前に断る**（押してから「音がありません」と言わない）。
+   * 判定は domain の `silenceSourceOf`（store が測る前に見るのと同じ1つ）。
+   */
+  const silenceExtra = (): { disabled?: boolean; hint?: string } => {
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
+    if (!doc || !selected) return { disabled: true, hint: "無音を探す動画か音の部品を選んでください" };
+    if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
+    if (selected.assetId != null && missingAssetIds.includes(selected.assetId)) {
+      return { disabled: true, hint: silenceMessage.SILENCE_READ_FAILED };
+    }
+    if (!silenceSourceOf(doc, selected)) return { disabled: true, hint: silenceMessage.SILENCE_NO_SOUND };
+    // ⚠️ **固定した列があれば押す前に断る**（PR #1389 レビュー 🟡）＝詰めるのは全部の列なので、探し終わって
+    //   「詰める」を押した最後に断られる、を作らない（「範囲を消して詰める」と同じ理由の文）。
+    if (doc.tracks.some((t) => t.locked)) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.lockedSelection] };
+    return {};
+  };
+  const silenceGuard = editGuard(silenceExtra());
+  /**
    * 目印の押せる条件（#356 ①・**ADR-0040**）。
    *
    * ⚠️ **再生中も断らない**（ADR-0040・利用者判断 2026-09-14）＝業界の型でマーカーの主用途は
@@ -3718,6 +3750,16 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           //（ADR-0026②）。`ContextMenuItem` に `hint` を足して、押せるときに出るようにした。
           hint: freezePreviewHint,
           onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
+        },
+        {
+          label: SILENCE_FIND_LABEL,
+          ...singleClipMenuGuard,
+          ...(() => {
+            const g = silenceExtra();
+            return g.disabled ? { disabled: true, disabledHint: g.hint } : {};
+          })(),
+          hint: SILENCE_FIND_TITLE,
+          onSelect: () => { if (selected) void findSilencesFor(selected.id); },
         },
         ...(menuClipTemplate
           ? [{
@@ -4489,6 +4531,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 title={freezeGuard.title ?? freezePreviewHint}
               >
                 {FREEZE_FRAME_LABEL}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { if (selected) void findSilencesFor(selected.id); }}
+                {...silenceGuard}
+                title={silenceGuard.title ?? SILENCE_FIND_TITLE}
+              >
+                {SILENCE_FIND_LABEL}
               </button>
               {/* ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
                   **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。 */}
@@ -6929,6 +6979,23 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             if (exporting) return;
             removeClipsByIds(ids, from);
           }}
+          />
+        </div>
+      )}
+
+      {silenceFind !== null && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <SilenceFindPanel
+            candidates={silenceFind.candidates}
+            fps={doc.videoSettings.fps}
+            onSeek={(sec) => setPlayhead(sec)}
+            onPreview={(c) => {
+              setPlayhead(Math.max(0, c.startSec - SILENCE_PREVIEW_PAD_SEC));
+              setSilencePreviewUntil(c.endSec + SILENCE_PREVIEW_PAD_SEC);
+              play();
+            }}
+            onApply={(picked) => { pause(); setSilencePreviewUntil(null); applySilenceCandidates(picked); }}
+            onClose={() => { if (silencePreviewUntil != null) pause(); setSilencePreviewUntil(null); closeSilenceFind(); }}
           />
         </div>
       )}

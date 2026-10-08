@@ -23,6 +23,8 @@ export function DeleteConfirm({
   className,
   showIcon = true,
   inline = false,
+  confirmDisabled = false,
+  confirmDisabledHint,
 }: {
   /** 何を消すか＋影響（例:「Xを削除しますか？元に戻せません。…」）。 */
   message: ReactNode;
@@ -50,6 +52,12 @@ export function DeleteConfirm({
    *（実際に4か所そうなっていた）。
    */
   inline?: boolean;
+  /**
+   * 確定を押せなくする（選んだ数が0のときなど＝押しても何も起きない、を作らない・§2-5・#1385）。
+   * ⚠️ 「やめる」は押せたまま。理由は `confirmDisabledHint`（ボタンの説明）に添える。
+   */
+  confirmDisabled?: boolean;
+  confirmDisabledHint?: string;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -108,7 +116,7 @@ export function DeleteConfirm({
         <button ref={cancelRef} className={`btn btn-ghost btn-icon${inline ? " text-sm" : ""}`} onClick={onCancel} disabled={busy}>
           やめる
         </button>
-        <button className={`btn btn-danger btn-icon${inline ? " text-sm" : ""}`} onClick={onConfirm} disabled={busy}>
+        <button className={`btn btn-danger btn-icon${inline ? " text-sm" : ""}`} onClick={onConfirm} disabled={busy || confirmDisabled} title={confirmDisabled ? confirmDisabledHint : undefined}>
           {showIcon && <TrashIcon size={16} />}
           {busy ? busyLabel : confirmLabel}
         </button>

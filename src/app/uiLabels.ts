@@ -1989,3 +1989,26 @@ export const EXPORT_SIZE_STANDARD_NOTE = "ファイル小さめ";
 /** 動画サイズの欄の説明（場面形式の書き出し画面）。 */
 export const EXPORT_SIZE_HINT =
   "「ふつう」は大きさは「きれい」と同じで、ファイルを小さくします。写真や映像の細かい所がわずかに粗くなることがあります（字幕の読みやすさは変わりません）。";
+
+/**
+ * 無音・長い間を詰める（#1385）。⚠️ 「無音」は業界でそのまま使う言葉（CapCut・Premiere）＝言い換えない。
+ */
+export const SILENCE_FIND_LABEL = "無音を詰める…";
+export const SILENCE_FIND_TITLE = "選んだ動画・音の中から、長い無音（1秒以上）を探して、まとめて詰めます";
+/** 無音を詰めるの断り（`15 §6` の表で等値に守る）。 */
+export const silenceMessage = {
+  SILENCE_NO_SOUND: "選んだ部品には、探せる音がありません。音の入った動画か、音の部品を選んでから、もう一度お試しください。",
+  SILENCE_READ_FAILED: "音を読めませんでした。素材が見つかるか確かめてから、もう一度お試しください。",
+  SILENCE_CLIP_CHANGED: "探した後に動画が変わったので、やめました。もう一度「無音を詰める」を押してください。",
+} as const;
+export const SILENCE_FINDING = "無音を探しています…";
+export const SILENCE_NONE_FOUND = "1秒以上の無音は見つかりませんでした。";
+export const SILENCE_APPLY_LABEL = "選んだ所を詰める";
+/** 何か所・合計何秒を詰めるか（押す前に見せる）。 */
+export function silenceSummary(count: number, totalSec: number): string {
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を詰めます。詰めると、その時間は全部の列から消えます（BGM・ほかの列の録音や字幕も、その所で切れてつながります）。詰める前に、行の「聞く」でその所を確かめられます。`;
+}
+/** 詰めたあとの知らせ。 */
+export function silenceAppliedMessage(count: number, totalSec: number): string {
+  return `${count}か所・合計 ${totalSec.toFixed(1)} 秒を詰めました。元に戻すときは「取り消す」（Ctrl+Z）を押してください。`;
+}
