@@ -52,3 +52,17 @@
 - 作る：`scripts/local-llm/build-model.sh <作業フォルダ>`（公式の重みを SHA-256 で照合・llama.cpp b11269 を版固定）。記録は [`local-llm-build.md`](../../docs/yuko_recruit_docs/local-llm-build.md)。
 - 置く：`scripts/local-llm/place-bundle.sh <作業フォルダ>`（モデルの SHA-256 が `src-tauri/src/local_llm.rs` の `MODEL_SHA256` と合わないと置かない）。
 - 無いとき：アプリは「部品が見つかりません。入れ直してください」と断る（`LOCAL_AI_MISSING`）＝黙って外部の AI や見本へ落とさない。
+
+---
+
+## 声を文字にする部品（ADR-0058・#1387）
+
+このパソコンの中で声を文字にするために、**whisper.cpp の `whisper-cli`** と **Whisper small（q5_1）**を同梱する。
+
+### 要点
+- 配置先：**`src-tauri/resources/transcribe/runtime/`**（`whisper-cli.exe`・`whisper.dll`・`ggml*.dll` の13ファイル・約 10.5MB）と **`src-tauri/resources/transcribe/models/`**（`ggml-small-q5_1.bin`・約 190MB）。大容量のため `.gitignore` 済み（ディレクトリのみ追跡）。
+- **ライセンスの告知**：`src-tauri/resources/transcribe/LICENSES/`（README＝由来・SHA-256／MIT 本文2つ）は**追跡する**（門番 `src/test/transcribeLicenseGuard.test.ts`）。
+- 置く：`scripts/transcribe/place-bundle.sh <作業フォルダ>`（公式の `whisper-bin-x64.zip` と `ggml-small-q5_1.bin` を照合してから置く＝モデルの SHA-256 は `src-tauri/src/transcribe.rs` の `MODEL_SHA256` を読む）。
+- 動き：1回ごとに `whisper-cli` を起こして終わらせる（常駐しない）。音は FFmpeg でその部品の使っている範囲だけを 16kHz・1チャンネルに切り出し、動画の `cache/` に一時的に置いて終わったら消す。
+- 確かめる（部品を置いた手元だけ）：`TRANSCRIBE_PROBE_WAV=<日本語の話し声.wav> cargo test --lib transcribe::tests::real_bundle -- --ignored --test-threads=1`。
+- 無いとき：「声を文字にする部品が見つかりませんでした」と断る（`TRANSCRIBE_MISSING`）＝黙って外部の AI や見本へ落とさない。

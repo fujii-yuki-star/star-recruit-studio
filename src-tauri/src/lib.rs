@@ -14,6 +14,7 @@ mod opener;
 mod proc;
 mod project_import;
 mod startup;
+mod transcribe;
 mod trouble_log;
 mod voicevox;
 mod voicevox_engine;
@@ -1019,6 +1020,8 @@ fn shutdown_side_processes(app: &tauri::AppHandle) {
     ffmpeg::cancel_running_export();
     // このパソコンの中で動画案を作る部品も止める（ADR-0051 決定13＝後始末は1か所）。
     app.state::<local_llm::LocalLlmState>().shutdown();
+    // 声を文字にしている途中なら止める（ADR-0058・PR #1392 レビュー 🟡＝whisper-cli／切り出しの ffmpeg を孤児にしない）。
+    transcribe::shutdown();
 }
 
 /// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。
@@ -1580,7 +1583,10 @@ pub fn run() {
             local_llm::local_ai_generate,
             local_llm::local_ai_describe_image,
             local_llm::local_ai_prepare,
-            local_llm::local_ai_assist
+            local_llm::local_ai_assist,
+            transcribe::transcribe_available,
+            transcribe::transcribe_audio,
+            transcribe::transcribe_cancel
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -1,4 +1,4 @@
-# 同梱バイナリ（VOICEVOX ENGINE #149／FFmpeg #119・大容量・配布ビルド時に配置）はコミットしない。
+# 同梱バイナリ（VOICEVOX ENGINE #149／FFmpeg #119／ローカル LLM ADR-0051／声を文字にする部品 ADR-0058・大容量・配布ビルド時に配置）はコミットしない。
 # README・本ファイル・各同梱ディレクトリ（中身は配下の .gitignore で除外）だけ追跡する。
 # ※ tauri.conf の bundle.resources がこれらのパスを参照するため、ディレクトリ自体は CI（バイナリ不在）でも
 #    存在する必要がある（tauri-build の build.rs が resource path の存在を検証＝不在だと cargo がエラー）。
@@ -8,3 +8,4 @@
 !voicevox_engine/
 !ffmpeg/
 !local_llm/
+!transcribe/

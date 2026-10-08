@@ -419,7 +419,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(29);
+    // ⚠️ **+6**（ADR-0058＝声を文字にする断り6つ：TRANSCRIBE_MISSING／BROKEN／READ_FAILED／FAILED／CANCELLED／BUSY）。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(35);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -434,13 +435,14 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     //   以前は1文が全部を受けており、**待っても直らない失敗にまで「時間をおいて」と言っていた**。
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）＝どれも1行。
     // ⚠️ **+1**（ADR-0052 決定6＝LOCAL_AI_TOO_LONG・1行）。
-    expect(all, "定数の数が変わった").toBe(29);
+    // ⚠️ **+6**（ADR-0058）＝どれも `cargo fmt` が2行に折り返した（1行の数は 14 のまま）。
+    expect(all, "定数の数が変わった").toBe(35);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
     expect(oneLine, "1行で書かれた定数の数が変わった").toBe(14);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(15);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(21);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -544,7 +546,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
     // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
     // ⚠️ **+2**（ADR-0034 追補 2026-10-05・#1331）＝TRIM_BEFORE_SOURCE／TRIM_PAST_SOURCE_END。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(287);
+    // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(293);
   });
 
 
@@ -815,7 +818,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
     // ⚠️ **+2**（#1331）＝上と同じ2行。
     // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（読む表から外れる＝取り消し線の行は数えない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(282);
+    // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(288);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

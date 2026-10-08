@@ -49,7 +49,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg", "resources/local_llm": "local_llm" },
+    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg", "resources/local_llm": "local_llm", "resources/transcribe": "transcribe" },
     "windows": { "wix": { "template": "wix/main.wxs" } }
   }
 }
