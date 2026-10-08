@@ -157,7 +157,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     l.nodes.right = { panelId: PANEL_ID.edit };
     return l;
   }, []);
-  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels, saveFailed: layoutSaveFailed, dismissSaveFailed: dismissLayoutSaveFailed } =
     usePanelLayout(PANEL_SCREEN.looks, defaultLayout, PANEL_IDS);
   // グループを中身ごと削除する確認（#551）。id で持つ＝選ぶグループが変わると確認が自動で解除される（#410 の流儀）。
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
@@ -1060,7 +1060,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
         onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
       >
-        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} saveFailed={layoutSaveFailed} onDismissSaveFailed={dismissLayoutSaveFailed} />
       </div>
     </div>
   );

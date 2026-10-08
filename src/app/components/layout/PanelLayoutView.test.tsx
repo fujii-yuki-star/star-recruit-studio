@@ -608,3 +608,15 @@ describe("PanelLayoutView: 欄を広げる", () => {
     });
   });
 });
+
+describe("配置を覚えられなかった知らせ（#1396）", () => {
+  it("立っているときだけ出し、「閉じる」で知らせる", () => {
+    const onDismiss = vi.fn();
+    const { rerender } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
+    expect(screen.queryByText(/画面の配置を覚えられませんでした/)).toBeNull();
+    rerender(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} saveFailed onDismissSaveFailed={onDismiss} />);
+    const note = screen.getByText(/画面の配置を覚えられませんでした/);
+    fireEvent.click(note.parentElement!.querySelector("button")!);
+    expect(onDismiss).toHaveBeenCalled();
+  });
+});

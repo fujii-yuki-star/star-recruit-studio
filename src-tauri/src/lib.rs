@@ -19,12 +19,6 @@ mod trouble_log;
 mod voicevox;
 mod voicevox_engine;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 /// プロジェクト一覧の要約（一覧表示用）。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1499,7 +1493,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             startup_request,
             finish_startup_job,
             read_import_folder,

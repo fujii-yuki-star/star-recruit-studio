@@ -178,13 +178,16 @@ export function getPanelLayout(screenId: PanelScreenId): PanelLayout | null {
   }
 }
 
-export function setPanelLayout(screenId: PanelScreenId, layout: PanelLayout): void {
+/** 保存できたら `true`。 */
+export function setPanelLayout(screenId: PanelScreenId, layout: PanelLayout): boolean {
   try {
     write(`${PANEL_LAYOUT_KEY}.${screenId}`, JSON.stringify(layout));
+    return true;
   } catch {
     // 保存できなくても**その場の操作は続ける**（境界のドラッグごとに走るので、投げると掴んだまま画面が固まる）。
-    // 次に開いたときに既定へ戻るだけ＝作りかけの動画は失わない。**いまは無言**で、見せ方は段階3 で決める
-    // （ADR-0033 未解決6）。
+    // 次に開いたときに既定へ戻るだけ＝作りかけの動画は失わない。⚠️ **黙って諦めない**（ADR-0033 未解決6 の決着・#1396）＝
+    //   呼ぶ側（`usePanelLayout`）が知らせを1度だけ出す。
+    return false;
   }
 }
 

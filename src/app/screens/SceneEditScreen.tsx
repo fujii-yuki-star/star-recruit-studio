@@ -323,7 +323,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     l.nodes.right = { panelId: PANEL_ID.edit };
     return l;
   }, []);
-  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels, saveFailed: layoutSaveFailed, dismissSaveFailed: dismissLayoutSaveFailed } =
     usePanelLayout(PANEL_SCREEN.scene, defaultLayout, PANEL_IDS);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -3435,7 +3435,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       })()}
       <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* 欄は器いっぱいに広げる。閉じた欄を戻す道は**見出しの行の「欄」メニュー**（#1032・決定6/8）。 */}
-        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill saveFailed={layoutSaveFailed} onDismissSaveFailed={dismissLayoutSaveFailed} />
       </div>
             {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
           ⚠️ 欄の最下部にある同じ操作は**残す**＝右クリックを知らない人の道を塞がない
