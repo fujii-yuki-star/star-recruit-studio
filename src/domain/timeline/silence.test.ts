@@ -11,6 +11,8 @@ import {
 const B = 0.05;
 /** その秒から映る最初のコマ（30fps）＝候補の割り目はコマに乗る。 */
 const up = (sec: number): number => Math.ceil(sec * 30 - 1e-9) / 30;
+/** その秒より前で最後のコマ（終わりは内側へ丸める＝読み上げの頭を巻き込まない）。 */
+const down = (sec: number): number => Math.floor(sec * 30 + 1e-9) / 30;
 /** 秒の区間ごとに大きさを決めた山を作る（`[秒, 大きさ]` の並び・最後まで）。 */
 function peaksOf(totalSec: number, loud: [number, number][]): number[] {
   const n = Math.round(totalSec / B);
@@ -55,23 +57,28 @@ describe('silenceCandidates', () => {
   it('両端を残し、短い間（1秒未満）は候補にしない・コマに乗せる', () => {
     // 0〜2 話す／2〜5 無音／5〜5.8 話す／5.8〜6.6 無音（短い）／6.6〜10 話す
     const p = peaksOf(10, [[0, 2], [5, 5.8], [6.6, 10]]);
-    expect(silenceCandidates(doc([rec()]), rec(), p, B)).toEqual([{ startSec: up(2 + SILENCE_KEEP_SEC), endSec: up(5 - SILENCE_KEEP_SEC) }]);
+    expect(silenceCandidates(doc([rec()]), rec(), p, B)).toEqual([{ startSec: up(2 + SILENCE_KEEP_SEC), endSec: down(5 - SILENCE_KEEP_SEC) }]);
   });
 
   it('置いた位置と速さを反映する（素材の秒 → タイムラインの秒）', () => {
     const clip = rec({ startSec: 3, durationSec: 5, speed: 2 }); // 素材 10 秒ぶんを 5 秒で
     const p = peaksOf(10, [[0, 2], [6, 10]]); // 素材 2〜6 秒が無音 → タイムライン 4〜6 秒
-    expect(silenceCandidates(doc([clip]), clip, p, B)).toEqual([{ startSec: up(4 + SILENCE_KEEP_SEC), endSec: up(6 - SILENCE_KEEP_SEC) }]);
+    expect(silenceCandidates(doc([clip]), clip, p, B)).toEqual([{ startSec: up(4 + SILENCE_KEEP_SEC), endSec: down(6 - SILENCE_KEEP_SEC) }]);
   });
 
   it('読み上げが鳴っている所は外す（隠した読み上げは数えない）', () => {
     const p = peaksOf(10, [[0, 1], [9, 10]]); // 1〜9 無音 → 1.25〜8.75
     const voice = { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 4, durationSec: 1, voice: { text: 'あ', status: 'none' } } as TimelineClip;
     expect(silenceCandidates(doc([rec(), voice]), rec(), p, B)).toEqual([
-      { startSec: up(1.25), endSec: 4 }, { startSec: 5, endSec: up(8.75) },
+      { startSec: up(1.25), endSec: 4 }, { startSec: 5, endSec: down(8.75) },
     ]);
+    // ⚠️ 読み上げの頭がコマの途中（4.01 秒）でも、消す範囲に読み上げを入れない（入れると読み上げと字幕が丸ごと消える）。
+    const odd = { ...voice, startSec: 4.01 } as TimelineClip;
+    const c2 = silenceCandidates(doc([rec(), odd]), rec(), p, B);
+    expect(c2[0].endSec).toBeLessThanOrEqual(4.01);
+    expect(c2[1].startSec).toBeGreaterThanOrEqual(5.01);
     const hidden = { ...voice, hidden: true } as TimelineClip;
-    expect(silenceCandidates(doc([rec(), hidden]), rec(), p, B)).toEqual([{ startSec: up(1.25), endSec: up(8.75) }]);
+    expect(silenceCandidates(doc([rec(), hidden]), rec(), p, B)).toEqual([{ startSec: up(1.25), endSec: down(8.75) }]);
   });
 });
 
@@ -109,6 +116,11 @@ describe('silenceSourceOf', () => {
   it('音の無い動画・分からない動画は探さない', () => {
     expect(silenceSourceOf(withVideo(false), vclip)).toBeNull();
     expect(silenceSourceOf(withVideo(undefined), vclip)).toBeNull();
+  });
+  it('素材の長さを越えて測らない（越えた所は音が無く、山1つが短くなって時刻が縮む）', () => {
+    const d = withVideo(true);
+    d.assets[0].metadata = { hasAudio: true, durationSec: 5 };
+    expect(silenceSourceOf(d, vclip)?.lengthSec).toBe(3); // 素材 5 秒・使い始め 2 秒 → 残り 3 秒（置いた長さ 6 秒より短い）
   });
   it('音の素材はそのまま・素材を持たない部品は探さない', () => {
     expect(silenceSourceOf(doc([rec()]), rec())?.relPath).toBe('assets/rec.wav');

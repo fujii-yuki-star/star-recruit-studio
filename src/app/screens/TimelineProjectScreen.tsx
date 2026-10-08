@@ -163,6 +163,8 @@ import { DEFAULT_FIT } from "../../domain/constants";
 import { ExportSizeOptions } from "../components/ExportSizeOptions";
 import { SilenceFindPanel } from "../components/SilenceFindPanel";
 import { silenceSourceOf } from "../../domain/timeline/silence";
+/** 無音の候補を聞くとき、前後に含める長さ（秒）。 */
+const SILENCE_PREVIEW_PAD_SEC = 0.5;
 import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage } from "../uiLabels";
 import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
@@ -890,8 +892,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // ⚠️ **確認を足したらここへ必ず並べる**（#721 の実機確認で漏れが出た）＝入れ忘れると、確認を出したまま
   // `Escape` で**背後の選択だけが解け**、そのまま「削除する」を押しても何も起きない（§2-5）。
   // `Space`・`Delete`・矢印もこの値で塞いでいるので、漏れると**答えを求めている最中に別の操作が通る**。
+  // 無音の候補を「聞く」ときの止める時刻（#1385）。候補の終わり＋少しで止める。
+  const [silencePreviewUntil, setSilencePreviewUntil] = useState<number | null>(null);
+  useEffect(() => {
+    if (silencePreviewUntil != null && playheadSec >= silencePreviewUntil) {
+      pause();
+      setSilencePreviewUntil(null);
+    }
+  }, [silencePreviewUntil, playheadSec, pause]);
   const overlayOpen =
-    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null;
+    exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null
+    || silenceFind !== null;
   useEscapeOwner(overlayOpen);
   // 範囲が消えたら、範囲を消す確認も閉じる（見えないまま状態だけ残り、取り直したときに確認が出てくる、を作らない・PR4a レビュー）。
   useEffect(() => {
@@ -3632,6 +3643,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       return { disabled: true, hint: silenceMessage.SILENCE_READ_FAILED };
     }
     if (!silenceSourceOf(doc, selected)) return { disabled: true, hint: silenceMessage.SILENCE_NO_SOUND };
+    // ⚠️ **固定した列があれば押す前に断る**（PR #1389 レビュー 🟡）＝詰めるのは全部の列なので、探し終わって
+    //   「詰める」を押した最後に断られる、を作らない（「範囲を消して詰める」と同じ理由の文）。
+    if (doc.tracks.some((t) => t.locked)) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.lockedSelection] };
     return {};
   };
   const silenceGuard = editGuard(silenceExtra());
@@ -6975,8 +6989,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             candidates={silenceFind.candidates}
             fps={doc.videoSettings.fps}
             onSeek={(sec) => setPlayhead(sec)}
-            onApply={(picked) => applySilenceCandidates(picked)}
-            onClose={closeSilenceFind}
+            onPreview={(c) => {
+              setPlayhead(Math.max(0, c.startSec - SILENCE_PREVIEW_PAD_SEC));
+              setSilencePreviewUntil(c.endSec + SILENCE_PREVIEW_PAD_SEC);
+              play();
+            }}
+            onApply={(picked) => { pause(); setSilencePreviewUntil(null); applySilenceCandidates(picked); }}
+            onClose={() => { if (silencePreviewUntil != null) pause(); setSilencePreviewUntil(null); closeSilenceFind(); }}
           />
         </div>
       )}

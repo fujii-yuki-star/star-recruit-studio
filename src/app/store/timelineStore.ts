@@ -595,7 +595,7 @@ export interface TimelineState {
    * 無音・長い間を詰める（#1385）。`null`＝開いていない／`candidates` が `null` の間は探している最中。
    * ⚠️ **文書に持たない**（この作業だけの都合＝作業範囲と同じ）。
    */
-  silenceFind: { clipId: string; candidates: SilenceCandidate[] | null } | null;
+  silenceFind: { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null;
   /** 選んだ部品（録画・録音）の中の無音を探す（測るのは Rust＝素材のバイトを JS に載せない）。 */
   findSilencesFor: (clipId: string) => Promise<void>;
   /** 選んだ候補をまとめて詰める（取り消し1回で戻る）。 */
@@ -1094,7 +1094,7 @@ function emptyState() {
     // 作業範囲（#1193）＝取っていない状態から始める。
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
-    silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null } | null,
+    silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1469,7 +1469,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
       return;
     }
-    set({ silenceFind: { clipId, candidates: null }, editNotice: null });
+    set({ silenceFind: { clipId, candidates: null, doc }, editNotice: null });
     const projectId = doc.projectId;
     const generation = currentAnalysisGeneration();
     const peaks: number[] = [];
@@ -1492,11 +1492,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
       return;
     }
-    set({ silenceFind: { clipId, candidates: silenceCandidates(now, clip, peaks, SILENCE_BUCKET_SEC) } });
+    // ⚠️ **候補を出した時点の文書を持つ**＝詰めるときに同じ文書かを確かめる（取り消し・別の窓の編集で変わっていたら使わない）。
+    set({ silenceFind: { clipId, candidates: silenceCandidates(now, clip, peaks, SILENCE_BUCKET_SEC), doc: now } });
   },
   applySilenceCandidates: (candidates) => {
     const doc = get().doc;
     if (!doc || candidates.length === 0) return;
+    // ⚠️ **候補を出した後に文書が変わっていたら詰めない**（PR #1389 レビュー 🟡）＝取り消し（Ctrl+Z）や別の窓の編集で
+    //   部品の位置が変わっていると、**古い時刻のまま全部の列を切る**。探し直してもらう。
+    if (get().silenceFind?.doc !== doc) {
+      set({ silenceFind: null, editNotice: silenceMessage.SILENCE_CLIP_CHANGED });
+      return;
+    }
     // ⚠️ **再生中は断る**（範囲を消して詰めると同じ＝走っている位置で確定させない・ADR-0032 決定21）。
     if (get().isPlaying) {
       set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
@@ -1510,7 +1517,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const total = candidates.reduce((a, c) => a + (c.endSec - c.startSec), 0);
     // ⚠️ **1回の `commit`**＝まとめて詰めても取り消し1回（ADR-0034 決定20）。
     commit(set, get, r.doc, { selectedClipIds: [], silenceFind: null });
-    if (get().doc === r.doc) set({ editNotice: silenceAppliedMessage(r.applied, total) });
+    if (get().doc === r.doc) {
+      // 寄せた目印も知らせる（「範囲を消して詰める」と同じ）。
+      const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
+      set({ editNotice: silenceAppliedMessage(r.applied, total) + markers });
+    }
   },
   closeSilenceFind: () => set({ silenceFind: null }),
 

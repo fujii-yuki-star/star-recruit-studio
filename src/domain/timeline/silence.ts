@@ -6,7 +6,7 @@
 // ⚠️ **勝手に消さない**＝ここは候補を出すだけ。当てるのは既存の「範囲を消して詰める」（`deleteRange`・#1193）と同じ道で、
 //   **まとめて当てても取り消し1回**（`applySilenceCuts`）。
 // ⚠️ **読み上げが鳴っている所は候補にしない**＝録音が無音でも、上に重ねた声を消すことになる。
-import { frameTimeAt } from './export';
+import { firstFrameAtOrAfter, frameTimeAt } from './export';
 import { deleteRange } from './deleteRange';
 import type { EditBlockedReason } from './edit';
 import type { Template } from '../template/types';
@@ -53,7 +53,13 @@ export function silenceSourceOf(
     : asset.assetType === ASSET_TYPE.bgm || asset.assetType === ASSET_TYPE.voice;
   if (!sounding) return null;
   const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-  return { relPath: asset.filePath, fromSec: Math.max(0, clip.sourceStartSec ?? 0), lengthSec: clip.durationSec * speed };
+  const fromSec = Math.max(0, clip.sourceStartSec ?? 0);
+  // ⚠️ **素材の長さを越えて測らない**（PR #1389 レビュー 🟡）＝越えた所は音が無く、Rust は読めた分を山の数で割るので
+  //   山1つが短くなり、候補の時刻が前へ縮む（話している所を切る）。長さが分かるときだけ抑える。
+  const sourceLeft = asset.metadata?.durationSec != null ? Math.max(0, asset.metadata.durationSec - fromSec) : Infinity;
+  const lengthSec = Math.min(clip.durationSec * speed, sourceLeft);
+  if (!(lengthSec > 0)) return null;
+  return { relPath: asset.filePath, fromSec, lengthSec };
 }
 
 /** 山の並び（素材の秒で `bucketSec` ごと）から、無音の区間（素材の頭からの秒）を出す。 */
@@ -74,12 +80,18 @@ export function silentRunsFromPeaks(peaks: readonly number[], bucketSec: number)
   return out;
 }
 
-/** そのタイムラインの秒から映る最初のコマの時刻（区間の割り目と同じ数え方＝描く側とずれない）。 */
-function snapUp(sec: number, fps: number): number {
-  let f = Math.ceil(sec * fps);
-  while (f > 0 && frameTimeAt(f - 1, fps) >= sec) f -= 1;
-  while (frameTimeAt(f, fps) < sec) f += 1;
-  return frameTimeAt(f, fps);
+/**
+ * 候補をコマに乗せる（書き出しの区間の割り目と同じ数え方＝`firstFrameAtOrAfter`）。
+ * ⚠️ **内側へ丸める**＝頭は「その秒から映る最初のコマ」、終わりは「その秒から映る最初のコマ」まで（そのコマは残る）。
+ *   終わりを外側へ丸めると、コマの途中から始まる読み上げ（例 4.01 秒）の頭まで消す範囲に入り、
+ *   **読み上げと字幕が丸ごと消える**（読み上げは切れない部品＝`deleteRange` が丸ごと外す・PR #1389 レビュー 🔴）。
+ */
+function snapInside(r: SilenceCandidate, fps: number): SilenceCandidate {
+  const start = frameTimeAt(firstFrameAtOrAfter(r.startSec, fps), fps);
+  // 終わり：`frameTimeAt(f) <= endSec` を満たす最大の f＝そのコマの時刻はまだ無音の中。
+  let f = firstFrameAtOrAfter(r.endSec, fps);
+  if (frameTimeAt(f, fps) > r.endSec) f -= 1;
+  return { startSec: start, endSec: frameTimeAt(Math.max(0, f), fps) };
 }
 
 /** 区間の並びから、別の区間の並びを引く（どちらも半開）。 */
@@ -125,7 +137,7 @@ export function silenceCandidates(
     .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !c.hidden && c.id !== clip.id)
     .map((c) => ({ startSec: c.startSec, endSec: c.startSec + c.durationSec }));
   return subtract(raw.filter((r) => r.endSec > r.startSec), voices)
-    .map((r) => ({ startSec: snapUp(r.startSec, fps), endSec: snapUp(r.endSec, fps) }))
+    .map((r) => snapInside(r, fps))
     .filter((r) => r.endSec - r.startSec >= SILENCE_MIN_SEC - 1e-9);
 }
 
@@ -139,13 +151,16 @@ export function applySilenceCuts(
   candidates: readonly SilenceCandidate[],
   volumeAt: Parameters<typeof deleteRange>[2],
   opts: { templateOf?: (templateId: string) => Template | undefined } = {},
-): { ok: true; doc: TimelineProject; applied: number } | { ok: false; reason: EditBlockedReason } {
+): { ok: true; doc: TimelineProject; applied: number; clampedMarkerCount: number } | { ok: false; reason: EditBlockedReason } {
   const sorted = [...candidates].sort((a, b) => b.startSec - a.startSec);
   let next = doc;
+  let clampedMarkerCount = 0;
   for (const c of sorted) {
     const r = deleteRange(next, { startSec: c.startSec, endSec: c.endSec, closeGap: true }, volumeAt, opts);
     if (!r.ok) return { ok: false, reason: r.reason };
     next = r.doc;
+    // ⚠️ **寄せた目印の数も持ち帰る**（「範囲を消して詰める」と同じく知らせる＝黙って変えない・PR #1389 レビュー 🟡）。
+    clampedMarkerCount += r.clampedMarkerCount;
   }
-  return { ok: true, doc: next, applied: sorted.length };
+  return { ok: true, doc: next, applied: sorted.length, clampedMarkerCount };
 }

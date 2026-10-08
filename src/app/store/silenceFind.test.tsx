@@ -62,6 +62,28 @@ describe('findSilencesFor / applySilenceCandidates', () => {
     expect(len(useTimelineStore.getState().doc)).toBeCloseTo(10);
   });
 
+  // ⚠️ 候補を出した後に取り消し（Ctrl+Z）などで文書が変わったら詰めない＝古い時刻のまま全部の列を切らない。
+  it('候補を出した後に文書が変わっていたら詰めない', async () => {
+    vi.spyOn(assetFsMod, 'audioPeaks').mockResolvedValue(peaks);
+    await useTimelineStore.getState().findSilencesFor('clip_001');
+    const found = useTimelineStore.getState().silenceFind!.candidates!;
+    useTimelineStore.getState().moveClipById('clip_002', { startSec: 1 });
+    const before = useTimelineStore.getState().doc;
+    useTimelineStore.getState().applySilenceCandidates(found);
+    expect(useTimelineStore.getState().doc).toBe(before);
+    expect(useTimelineStore.getState().editNotice).toBe(silenceMessage.SILENCE_CLIP_CHANGED);
+  });
+
+  it('寄せた目印も知らせる（範囲を消して詰めると同じ）', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify({ ...doc, markers: [{ id: 'marker_001', timeSec: 7 }] }));
+    await useTimelineStore.getState().openTimelineProject('proj_20261008_101');
+    vi.spyOn(assetFsMod, 'audioPeaks').mockResolvedValue(peaks);
+    await useTimelineStore.getState().findSilencesFor('clip_001');
+    const found = useTimelineStore.getState().silenceFind!.candidates!;
+    useTimelineStore.getState().applySilenceCandidates([found[1]]);
+    expect(useTimelineStore.getState().editNotice).toMatch(/目印/);
+  });
+
   it('音の無い部品は探さずに理由を出す', async () => {
     const peaksSpy = vi.spyOn(assetFsMod, 'audioPeaks').mockResolvedValue(peaks);
     await useTimelineStore.getState().findSilencesFor('clip_002');
@@ -102,7 +124,8 @@ describe('SilenceFindPanel', () => {
   it('既定は全部選ぶ・外した所は詰めない・行を押すとその時刻へ', () => {
     const onApply = vi.fn();
     const onSeek = vi.fn();
-    render(<SilenceFindPanel candidates={cands} fps={30} onSeek={onSeek} onApply={onApply} onClose={() => {}} />);
+    const onPreview = vi.fn();
+    render(<SilenceFindPanel candidates={cands} fps={30} onSeek={onSeek} onPreview={onPreview} onApply={onApply} onClose={() => {}} />);
     const boxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
     expect(boxes.every((b) => b.checked)).toBe(true);
     fireEvent.click(boxes[0]);
@@ -110,11 +133,24 @@ describe('SilenceFindPanel', () => {
     expect(onApply).toHaveBeenCalledWith([cands[1]]);
     fireEvent.click(screen.getAllByTitle('この時刻へ移動します')[1]);
     expect(onSeek).toHaveBeenCalledWith(6.25);
+    fireEvent.click(screen.getAllByRole('button', { name: '聞く' })[0]);
+    expect(onPreview).toHaveBeenCalledWith(cands[0]);
+  });
+
+  it('全部外すと「詰める」は押せない（押しても何も起きない、を作らない）', () => {
+    render(<SilenceFindPanel candidates={cands} fps={30} onSeek={() => {}} onPreview={() => {}} onApply={() => {}} onClose={() => {}} />);
+    for (const b of screen.getAllByRole('checkbox')) fireEvent.click(b);
+    expect((screen.getByRole('button', { name: /選んだ所を詰める（0か所）/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('探している最中のボタンは「やめる」', () => {
+    render(<SilenceFindPanel candidates={null} fps={30} onSeek={() => {}} onPreview={() => {}} onApply={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole('button', { name: 'やめる' })).toBeTruthy();
   });
 
   it('見つからなければその旨と閉じるだけ', () => {
     const onClose = vi.fn();
-    render(<SilenceFindPanel candidates={[]} fps={30} onSeek={() => {}} onApply={() => {}} onClose={onClose} />);
+    render(<SilenceFindPanel candidates={[]} fps={30} onSeek={() => {}} onPreview={() => {}} onApply={() => {}} onClose={onClose} />);
     expect(screen.getByText(SILENCE_NONE_FOUND)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
     expect(onClose).toHaveBeenCalled();

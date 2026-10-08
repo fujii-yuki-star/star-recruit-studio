@@ -18,7 +18,7 @@ import { TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
 import { groupElementIds } from '../project/groupOps';
-import { frameTimeAt, timelineFramePlan } from './export';
+import { firstFrameAtOrAfter, timelineFramePlan } from './export';
 import { talkMotionActiveRanges } from './talkMotion';
 import { isDrawnClip, videoPlacementsOf } from './video';
 import type { Template } from '../template/types';
@@ -146,14 +146,7 @@ export function planTimelineExportSegments(
   // ⚠️ **描く側と同じ式で決める**（PR #1377 レビュー 🔴）＝「`frameTimeAt(f) >= sec` を満たす最小の f」。
   // 掛け算・足し算の端数（1.1+2.2＝3.3000000000000003 → ×30＝99.00000000000001）を「見逃す幅」で丸めると、
   // 描く側（`clipIsLiveAt`）と1コマ食い違い、1コマで流す区間の絵がまるごと前の部品になる。
-  const toFrame = (sec: number): number => {
-    let f = Math.ceil(sec * plan.fps);
-    while (f > 0 && frameTimeAt(f - 1, plan.fps) >= sec) f -= 1;
-    // ⚠️ 上げる側は**届く値が見つかっていない安全網**（fps 24/25/30/60 で数百万通り試して無し＝変異チェックで生き残る＝等価）。
-    //   下げる側は届く（8.3 秒×30＝249.00000000000003 → 切り上げ 250 だが 249 コマ目に映る）。
-    while (frameTimeAt(f, plan.fps) < sec) f += 1;
-    return Math.max(0, Math.min(plan.frameCount, f));
-  };
+  const toFrame = (sec: number): number => Math.max(0, Math.min(plan.frameCount, firstFrameAtOrAfter(sec, plan.fps)));
   for (const c of visual) {
     cuts.add(toFrame(c.startSec));
     cuts.add(toFrame(c.startSec + c.durationSec));

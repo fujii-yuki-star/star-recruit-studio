@@ -17,6 +17,7 @@ export function SilenceFindPanel({
   candidates,
   fps,
   onSeek,
+  onPreview,
   onApply,
   onClose,
 }: {
@@ -24,6 +25,8 @@ export function SilenceFindPanel({
   candidates: SilenceCandidate[] | null;
   fps: number;
   onSeek: (sec: number) => void;
+  /** その候補の前後を少し含めて鳴らす（無音かどうかは耳で確かめる＝業界の型）。 */
+  onPreview: (c: SilenceCandidate) => void;
   onApply: (picked: SilenceCandidate[]) => void;
   onClose: () => void;
 }) {
@@ -37,15 +40,15 @@ export function SilenceFindPanel({
   const total = picked.reduce((a, c) => a + (c.endSec - c.startSec), 0);
 
   if (candidates === null || candidates.length === 0) {
-    return <SilenceStatusBox text={candidates === null ? SILENCE_FINDING : SILENCE_NONE_FOUND} onClose={onClose} />;
+    return <SilenceStatusBox text={candidates === null ? SILENCE_FINDING : SILENCE_NONE_FOUND} closeLabel={candidates === null ? "やめる" : "閉じる"} onClose={onClose} />;
   }
   return (
     <DeleteConfirm
       confirmLabel={`${SILENCE_APPLY_LABEL}（${picked.length}か所）`}
+      confirmDisabled={picked.length === 0}
+      confirmDisabledHint="詰める所を1つ以上選んでください"
       onCancel={onClose}
-      onConfirm={() => {
-        if (picked.length > 0) onApply(picked);
-      }}
+      onConfirm={() => onApply(picked)}
       message={
         <>
           <span style={{ display: "block", marginBottom: 6 }}>{silenceSummary(picked.length, total)}</span>
@@ -68,6 +71,9 @@ export function SilenceFindPanel({
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => onSeek(c.startSec)} title="この時刻へ移動します">
                   {markerClock(c.startSec, fps)}〜{markerClock(c.endSec, fps)}（{(c.endSec - c.startSec).toFixed(1)} 秒）
                 </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPreview(c)} title="前後を少し含めて鳴らします">
+                  聞く
+                </button>
               </span>
             ))}
           </span>
@@ -78,7 +84,7 @@ export function SilenceFindPanel({
 }
 
 /** 探している最中／見つからなかったときの箱（閉じるだけ）。 */
-function SilenceStatusBox({ text, onClose }: { text: string; onClose: () => void }) {
+function SilenceStatusBox({ text, closeLabel, onClose }: { text: string; closeLabel: string; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => closeRef.current?.focus(), []);
   useEscapeReceiver(true, () => {
@@ -90,7 +96,7 @@ function SilenceStatusBox({ text, onClose }: { text: string; onClose: () => void
       <span>{text}</span>
       <div className="row gap-sm">
         <button ref={closeRef} className="btn btn-ghost" onClick={onClose}>
-          閉じる
+          {closeLabel}
         </button>
       </div>
     </div>
