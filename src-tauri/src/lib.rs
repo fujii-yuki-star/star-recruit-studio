@@ -1020,6 +1020,8 @@ fn shutdown_side_processes(app: &tauri::AppHandle) {
     ffmpeg::cancel_running_export();
     // このパソコンの中で動画案を作る部品も止める（ADR-0051 決定13＝後始末は1か所）。
     app.state::<local_llm::LocalLlmState>().shutdown();
+    // 声を文字にしている途中なら止める（ADR-0058・PR #1392 レビュー 🟡＝whisper-cli／切り出しの ffmpeg を孤児にしない）。
+    transcribe::shutdown();
 }
 
 /// 起動のときに何を頼まれたかを、画面へ渡す（ADR-0042・#1184）。

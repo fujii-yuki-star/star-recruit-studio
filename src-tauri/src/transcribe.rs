@@ -17,8 +17,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -37,10 +37,77 @@ pub const PROGRESS_EVENT: &str = "transcribe_progress";
 
 /// いま走っているか（1度に1つ＝CPU を取り合わせない・止める相手を1つに決める）。
 static RUNNING: AtomicBool = AtomicBool::new(false);
-/// 止めてほしいと言われたか（走っている回だけが見る）。
-static CANCEL: AtomicBool = AtomicBool::new(false);
+/// いま走っている回の番号（画面が決めて渡す・0＝無し）。
+static CURRENT_RUN: AtomicU64 = AtomicU64::new(0);
+/// 止めてほしいと言われた回の番号（0＝無し）。⚠️ **回で見分ける**（PR #1392 レビュー）＝前の回へ向けた「止める」が
+/// 次の回を止めない・始まる前に押した「止める」も、その回が始まった時点で効く。
+static CANCEL_RUN: AtomicU64 = AtomicU64::new(0);
+/// 走っている子プロセス（FFmpeg の切り出し／`whisper-cli`）。⚠️ **止める・アプリを閉じるときに kill する置き場**
+/// （PR #1392 レビュー 🟡＝Windows では親が終わっても子は道連れにならない＝孤児になって CPU を使い続ける）。
+static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 /// モデルの照合（重い）を済ませたか。`Some(true)`＝合った・`Some(false)`＝合わなかった（起動中は覚える）。
 static SHA_CHECKED: Mutex<Option<bool>> = Mutex::new(None);
+
+/// 進み具合の知らせ（どの回のものかを添える＝止めた直後に始めた次の回の棒に混ざらない）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub run_id: u64,
+    pub percent: u8,
+}
+
+fn lock_child() -> std::sync::MutexGuard<'static, Option<Child>> {
+    CHILD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn cancelled(run_id: u64) -> bool {
+    CANCEL_RUN.load(Ordering::SeqCst) == run_id
+}
+
+/// 置き場の子プロセスを終わらせる（あれば）。
+fn kill_child() {
+    if let Some(mut c) = lock_child().take() {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
+/// アプリを閉じる前に、走っている回を止める（`lib.rs` の `shutdown_side_processes` から＝後片づけは1か所）。
+pub fn shutdown() {
+    CANCEL_RUN.store(CURRENT_RUN.load(Ordering::SeqCst), Ordering::SeqCst);
+    kill_child();
+}
+
+/// 子プロセスを置き場に入れて、終わるか止められるまで待つ。止められたら kill して `TRANSCRIBE_CANCELLED`。
+fn wait_child(child: Child, run_id: u64) -> Result<ExitStatus, String> {
+    *lock_child() = Some(child);
+    loop {
+        if cancelled(run_id) {
+            kill_child();
+            return Err(TRANSCRIBE_CANCELLED.to_string());
+        }
+        {
+            let mut g = lock_child();
+            let Some(c) = g.as_mut() else {
+                // 置き場が空＝止める・閉じる処理が先に kill した。
+                return Err(TRANSCRIBE_CANCELLED.to_string());
+            };
+            match c.try_wait() {
+                Ok(Some(st)) => {
+                    g.take();
+                    return Ok(st);
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    drop(g);
+                    kill_child();
+                    return Err(TRANSCRIBE_FAILED.to_string());
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 /// 区切り1つ（素材の頭からの秒）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -192,11 +259,12 @@ pub fn transcribe_available(app: AppHandle) -> bool {
     bundle_paths(&app).is_some_and(|(exe, model)| exe.is_file() && model.is_file())
 }
 
-/// 走っている回を止める（走っていなければ何もしない）。
+/// その回を止める。走っていればすぐ終わらせる／まだ始まっていなければ、始まった時点で止まる。
 #[tauri::command]
-pub fn transcribe_cancel() {
-    if RUNNING.load(Ordering::SeqCst) {
-        CANCEL.store(true, Ordering::SeqCst);
+pub fn transcribe_cancel(run_id: u64) {
+    CANCEL_RUN.store(run_id, Ordering::SeqCst);
+    if RUNNING.load(Ordering::SeqCst) && CURRENT_RUN.load(Ordering::SeqCst) == run_id {
+        kill_child();
     }
 }
 
@@ -209,16 +277,20 @@ pub async fn transcribe_audio(
     rel_path: String,
     from_sec: f64,
     length_sec: f64,
+    run_id: u64,
 ) -> Result<Vec<Segment>, String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err(TRANSCRIBE_BUSY.to_string());
     }
-    CANCEL.store(false, Ordering::SeqCst);
+    CURRENT_RUN.store(run_id, Ordering::SeqCst);
     let r = tauri::async_runtime::spawn_blocking(move || {
-        transcribe_impl(&app, &project_id, &rel_path, from_sec, length_sec)
+        transcribe_impl(&app, &project_id, &rel_path, from_sec, length_sec, run_id)
     })
     .await
     .unwrap_or_else(|_| Err(TRANSCRIBE_FAILED.to_string()));
+    // 子が残っていたら終わらせる（中で panic した等＝居残りを作らない）。
+    kill_child();
+    CURRENT_RUN.store(0, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
     r
 }
@@ -229,6 +301,7 @@ fn transcribe_impl(
     rel_path: &str,
     from_sec: f64,
     length_sec: f64,
+    run_id: u64,
 ) -> Result<Vec<Segment>, String> {
     let (exe, model) = bundle_paths(app).ok_or(TRANSCRIBE_MISSING)?;
     if !exe.is_file() {
@@ -240,11 +313,11 @@ fn transcribe_impl(
     if !input.is_file() {
         return Err(TRANSCRIBE_READ_FAILED.to_string());
     }
-    let cache = input
-        .ancestors()
-        .find(|p| p.parent().is_some_and(|q| q.ends_with("projects")))
-        .map(|p| p.join("cache"))
-        .ok_or(TRANSCRIBE_READ_FAILED)?;
+    // ⚠️ **動画のフォルダの規則を共有する**（PR #1392 レビュー 🟡）＝素材のパスから遡って探すと、素材の中に
+    //   `projects` という名のフォルダがあるとそこで止まる。起動時の掃除（`projects/*/cache`）と同じ場所に置く。
+    let cache = crate::assets::project_dir(app, project_id)
+        .map_err(|_| TRANSCRIBE_READ_FAILED.to_string())?
+        .join("cache");
     std::fs::create_dir_all(&cache).map_err(|_| TRANSCRIBE_FAILED.to_string())?;
     let stem = cache.join(format!("transcribe_{}", std::process::id()));
     let wav = stem.with_extension("wav");
@@ -252,8 +325,8 @@ fn transcribe_impl(
     // ⚠️ **必ず片づける**（成功・失敗・止めた、どの道でも）＝素材ではないファイルを動画のフォルダに残さない。
     let ffmpeg = crate::ffmpeg::resolve_ffmpeg(app);
     let progress_app = app.clone();
-    let on_progress = move |p: u8| {
-        let _ = progress_app.emit(PROGRESS_EVENT, p);
+    let on_progress = move |percent: u8| {
+        let _ = progress_app.emit(PROGRESS_EVENT, Progress { run_id, percent });
     };
     let r = run(
         &ffmpeg,
@@ -265,6 +338,7 @@ fn transcribe_impl(
         &wav,
         &stem,
         &json,
+        run_id,
         on_progress,
     );
     let _ = std::fs::remove_file(&wav);
@@ -284,19 +358,23 @@ fn run(
     wav: &Path,
     stem: &Path,
     json: &Path,
+    run_id: u64,
     on_progress: impl Fn(u8) + Send + 'static,
 ) -> Result<Vec<Segment>, String> {
-    let st = no_window_command(ffmpeg)
+    if cancelled(run_id) {
+        return Err(TRANSCRIBE_CANCELLED.to_string());
+    }
+    // ⚠️ **切り出しも置き場に入れて待つ**（PR #1392 レビュー 🟡）＝同期で待つと、長い動画の切り出しの間は止めても効かず、
+    //   閉じると ffmpeg.exe が孤児になる。
+    let ff = no_window_command(ffmpeg)
         .args(extract_args(input, from_sec, length_sec, wav))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .map_err(|_| TRANSCRIBE_READ_FAILED.to_string())?;
+    let st = wait_child(ff, run_id)?;
     if !st.success() || !wav.is_file() {
         return Err(TRANSCRIBE_READ_FAILED.to_string());
-    }
-    if CANCEL.load(Ordering::SeqCst) {
-        return Err(TRANSCRIBE_CANCELLED.to_string());
     }
     let logical = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -317,18 +395,7 @@ fn run(
             }
         });
     }
-    let status = loop {
-        if CANCEL.load(Ordering::SeqCst) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(TRANSCRIBE_CANCELLED.to_string());
-        }
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(_) => return Err(TRANSCRIBE_FAILED.to_string()),
-        }
-    };
+    let status = wait_child(child, run_id)?;
     if !status.success() {
         return Err(TRANSCRIBE_FAILED.to_string());
     }
@@ -430,6 +497,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 止めるのは**その回だけ**（前の回への「止める」で次の回を止めない）。
+    /// ⚠️ 置き場（`CHILD`）と番号は全体で1つ＝この2つの検査は同じ置き場を使うので、1本にまとめる（並列で走らせない）。
+    #[cfg(windows)]
+    #[test]
+    fn wait_child_stops_only_the_cancelled_run_and_empties_the_slot() {
+        let slow = || {
+            no_window_command("cmd")
+                .args(["/C", "ping -n 6 127.0.0.1 > NUL"])
+                .spawn()
+                .unwrap()
+        };
+        // 別の回（7）への「止める」は効かない＝最後まで待って終わる…のは遅いので、短い処理で確かめる。
+        CANCEL_RUN.store(7, Ordering::SeqCst);
+        let quick = no_window_command("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .unwrap();
+        assert!(wait_child(quick, 8).is_ok_and(|s| s.success()));
+        assert!(lock_child().is_none(), "終わった子を置き場に残さない");
+        // 自分の回への「止める」は、始まる前に押しても効き、子を kill して置き場を空にする。
+        CANCEL_RUN.store(9, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        assert_eq!(wait_child(slow(), 9), Err(TRANSCRIBE_CANCELLED.to_string()));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(lock_child().is_none(), "止めた子を置き場に残さない");
+        // 閉じる処理（`shutdown`）は、走っている回を止めて子を終わらせる。
+        CANCEL_RUN.store(0, Ordering::SeqCst);
+        CURRENT_RUN.store(10, Ordering::SeqCst);
+        let t = std::thread::spawn(move || wait_child(slow(), 10));
+        std::thread::sleep(Duration::from_millis(300));
+        shutdown();
+        assert_eq!(t.join().unwrap(), Err(TRANSCRIBE_CANCELLED.to_string()));
+        assert!(lock_child().is_none());
+        CURRENT_RUN.store(0, Ordering::SeqCst);
+        CANCEL_RUN.store(0, Ordering::SeqCst);
+    }
+
     /// 同梱の部品を置いた手元でだけ回す（CI には部品が無い）：
     /// `cargo test --lib transcribe::tests::real_bundle -- --ignored --nocapture`
     /// 環境変数 `TRANSCRIBE_PROBE_WAV`＝日本語の話し声（例：ADR-0058 の実測に使った clean.wav）。
@@ -459,6 +567,7 @@ mod tests {
             &stem.with_extension("wav"),
             &stem,
             &stem.with_extension("json"),
+            101,
             move |p| {
                 seen2.store(p, Ordering::SeqCst);
             },
@@ -488,10 +597,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("stario_transcribe_c_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let stem = dir.join("t");
-        CANCEL.store(false, Ordering::SeqCst);
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_millis(2500));
-            CANCEL.store(true, Ordering::SeqCst);
+            CANCEL_RUN.store(202, Ordering::SeqCst);
         });
         let started = std::time::Instant::now();
         let r = run(
@@ -504,9 +612,10 @@ mod tests {
             &stem.with_extension("wav"),
             &stem,
             &stem.with_extension("json"),
+            202,
             |_| {},
         );
-        CANCEL.store(false, Ordering::SeqCst);
+        CANCEL_RUN.store(0, Ordering::SeqCst);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(r, Err(TRANSCRIBE_CANCELLED.to_string()));
         // 64 秒の音を最後まで文字にすると約 18 秒＝止めたなら、その前に戻る。
