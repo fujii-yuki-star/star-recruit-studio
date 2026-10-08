@@ -185,6 +185,18 @@ export function CopyIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
+/** 縦横を入れ替える（横長の枠と縦長の枠・ADR-0057）。 */
+export function RotateFrameIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <rect x="2" y="7" width="12" height="8" rx="1.5" />
+      <rect x="15" y="4" width="7" height="14" rx="1.5" />
+      <path d="M6 4a6 6 0 0 1 7-1" />
+      <path d="M12 1.5 13 3l-1.5 1" />
+    </svg>
+  );
+}
+
 export function SaveIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>

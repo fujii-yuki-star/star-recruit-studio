@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import type { Scene } from "../../domain/project/types";
 import { HomeScreen } from "./HomeScreen";
@@ -82,20 +83,42 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
   });
 
   /**
-   * ⚠️ **タイムライン形式は複製できない**（PR #889 レビュー 🟡）＝中で `parseProjectDoc` が
-   * 必ず断るので**構造的に必ず失敗**する。押せたままだと「もう一度お試しください」＝
-   * **何度押しても直らない行動**を勧めることになる（§2-5・#793 で直したのと同じ型）。
+   * タイムライン形式の複製（ADR-0057・#1386）＝別の入口（タイムラインの store）へ行き、できたら開く。
+   * 「縦横を入れ替えた版」は同じ入口に `flip=true` を渡す。⚠️ 場面形式の複製は呼ばない（読めずに必ず失敗する）。
    */
-  it("タイムラインで作った動画は複製ボタンを押せなくし、理由を出す", async () => {
+  it("タイムラインで作った動画は、タイムラインの入口で複製して開く（縦横を入れ替えた版も）", async () => {
     const { duplicateProject } = setup(false, [
       { projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" },
     ]);
-    render(<HomeScreen onNavigate={vi.fn()} />);
+    const dupTl = vi.fn(() => Promise.resolve({ projectId: "proj_010", message: null }));
+    useTimelineStore.setState({ duplicateTimelineProject: dupTl } as never);
+    const onNavigate = vi.fn();
+    render(<HomeScreen onNavigate={onNavigate} />);
     await screen.findByText("焼いた動画");
-    const btn = screen.getByRole("button", { name: "「焼いた動画」を複製" });
-    expect(btn).toBeDisabled();
-    expect(btn.getAttribute("title")).toContain("まだ複製できません");
+    fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」を複製" }));
+    await waitFor(() => expect(dupTl).toHaveBeenCalledWith("proj_009", false));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("timeline-project"));
+    fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」の縦横を入れ替えた版を作る" }));
+    await waitFor(() => expect(dupTl).toHaveBeenCalledWith("proj_009", true));
     expect(duplicateProject).not.toHaveBeenCalled();
+  });
+
+  it("タイムラインの複製が断られたら、その理由を出して画面は移らない", async () => {
+    setup(false, [{ projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" }]);
+    useTimelineStore.setState({ duplicateTimelineProject: vi.fn(() => Promise.resolve({ projectId: null, message: "複製できませんでした" })) } as never);
+    const onNavigate = vi.fn();
+    render(<HomeScreen onNavigate={onNavigate} />);
+    await screen.findByText("焼いた動画");
+    fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」の縦横を入れ替えた版を作る" }));
+    expect(await screen.findByText("複製できませんでした")).toBeTruthy();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("場面形式の行には縦横を入れ替えるボタンを出さない（場面形式は下書きの「向き」で変える）", async () => {
+    setup(false);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await screen.findByText("テスト動画");
+    expect(screen.queryByRole("button", { name: /縦横を入れ替えた版/ })).toBeNull();
   });
 
   /**

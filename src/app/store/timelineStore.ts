@@ -7,7 +7,7 @@ import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } 
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
-import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveAssetId, type VideoEnrichment } from "./assetImport";
+import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveProjectId, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
@@ -102,7 +102,12 @@ import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
 import { applySilenceCuts, silenceCandidates, silenceSourceOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
-import { silenceAppliedMessage, silenceMessage } from "../uiLabels";
+import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice } from "../uiLabels";
+import { flippedOrientation, reorientTimelineDoc } from "../../domain/timeline/reorient";
+import { duplicatedProjectName, reorientedProjectName } from "../../domain/project/duplicate";
+import { copyBakedFiles } from "../../infrastructure/bakeFs";
+import { bakedFilePaths } from "../../domain/timeline/bake";
+import { ORIENTATION } from "../../domain/enums";
 import type { BlendMode } from "../../domain/template/types";
 import { userFacingMessage } from "../userFacingError";
 
@@ -806,6 +811,11 @@ export interface TimelineState {
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
   saveTimelineProject: () => Promise<void>;
+  /**
+   * タイムライン形式の動画を**複製**する（`flip` で縦横を入れ替えた版＝ADR-0057・#1386）。元は変えない。
+   * 素材・声も運び、できたら**開く**。返すのは新しい動画の番号（作れなければ `null` と理由）。
+   */
+  duplicateTimelineProject: (projectId: string, flip: boolean) => Promise<{ projectId: string | null; message: string | null }>;
   /** 再生を始める（終端にいるときは先頭から）。何も置いていない動画では始めない。 */
   play: () => void;
   /** 再生を止める（位置はそのまま＝続きから再生できる）。 */
@@ -2567,6 +2577,40 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // 保存の入口。**進行中の保存があればそれを待って戻る**（場面形式 `projectStore.saveProject` と同じ形）。
   // 無いと、保存中の編集で張り直された自動保存タイマと「保存し直す」から**2本目が並走**し、
   // 古い文書を持つ側が後着してディスク上の編集が巻き戻る（書き込みは truncate＝上書き）。
+  duplicateTimelineProject: async (projectId, flip) => {
+    // 書き出し中は別の動画へ移らない（開く・作ると同じ）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return { projectId: null, message: EXPORT_BUSY_OPEN_MESSAGE };
+    try {
+      // ⚠️ **開いている元なら先に保存**＝ディスクの文書と声を運ぶので、保存していない変更が抜け落ちる（焼き出しと同じ）。
+      if (get().doc?.projectId === projectId) await get().saveTimelineProject();
+      const src = parseTimelineProjectDoc(await loadProjectDoc(projectId));
+      const existing = await listProjectSummaries();
+      // ⚠️ **番号を予約してから採る**（#992 ③）＝運んでいる間は一覧に居ないので、続けて押すと同じ番号になる。
+      const newId = reserveProjectId(existing.map((p) => p.projectId), (ids) => createProjectId(new Date(), ids));
+      const now = new Date().toISOString();
+      const target = flippedOrientation(src.videoSettings.aspectRatio);
+      const base: TimelineProject = {
+        ...src,
+        projectId: newId,
+        projectName: flip ? reorientedProjectName(src.projectName, target === ORIENTATION.portrait) : duplicatedProjectName(src.projectName),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const r = flip ? reorientTimelineDoc(base, target, useProjectStore.getState().templates) : null;
+      const dup = r ? r.doc : base;
+      // ⚠️ **ファイルを運んでから文書を保存する**（焼き出し・場面形式の複製と同じ順＝素材の無い動画を一覧に残さない）。
+      const copied = await copyBakedFiles(projectId, newId, bakedFilePaths(src), `dup_${newId}`);
+      if (copied.cancelled) return { projectId: null, message: null };
+      await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
+      await get().openTimelineProject(newId);
+      // 決めきれなかった所を知らせる（黙って別の結果にしない＝ADR-0057 決定6）。
+      if (r) set({ editNotice: reorientNotice(r.templateUnmatched, r.layersUnmatched, r.outside) });
+      return { projectId: newId, message: null };
+    } catch (e) {
+      return { projectId: null, message: e instanceof TimelineLoadError ? e.message : DUPLICATE_FAILED_MESSAGE };
+    }
+  },
+
   saveTimelineProject: async () => {
     const running = currentSave;
     if (running) {
