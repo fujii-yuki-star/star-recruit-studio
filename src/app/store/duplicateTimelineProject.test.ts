@@ -143,3 +143,32 @@ describe('duplicateTimelineProject', () => {
     expect(saved(r.projectId!).projectName).toContain('直した名前');
   });
 });
+
+// 開いている動画の改名（#1396）＝ディスクだけ書き換えると、開いたままの文書の古い名前が次の自動保存で改名を消す。
+describe('renameOpenTimelineProject', () => {
+  it('開いている文書と取り消しの履歴の名前を変えて保存する（取り消しても名前は戻らない）', async () => {
+    await useTimelineStore.getState().openTimelineProject(SRC_ID);
+    useTimelineStore.getState().moveClipById('clip_001', { startSec: 1 }); // 履歴を1つ積む
+    expect(await useTimelineStore.getState().renameOpenTimelineProject('  新しい名前  ')).toBe(true);
+    expect(useTimelineStore.getState().doc!.projectName).toBe('新しい名前');
+    expect(saved(SRC_ID).projectName).toBe('新しい名前');
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0); // 編集は戻る
+    expect(useTimelineStore.getState().doc!.projectName).toBe('新しい名前'); // 名前は戻らない
+  });
+
+  it('書き出し中・空の名前は変えない', async () => {
+    await useTimelineStore.getState().openTimelineProject(SRC_ID);
+    expect(await useTimelineStore.getState().renameOpenTimelineProject('   ')).toBe(false);
+    useTimelineStore.setState({ exportRun: { ...useTimelineStore.getState().exportRun, phase: EXPORT_RUN_PHASE.rendering } } as never);
+    expect(await useTimelineStore.getState().renameOpenTimelineProject('x')).toBe(false);
+    useTimelineStore.setState({ exportRun: { ...useTimelineStore.getState().exportRun, phase: EXPORT_RUN_PHASE.idle } } as never);
+    expect(useTimelineStore.getState().doc!.projectName).toBe('会社紹介');
+  });
+
+  it('保存できなかったら失敗として返す（ホームは入力欄を残して理由を出す）', async () => {
+    await useTimelineStore.getState().openTimelineProject(SRC_ID);
+    vi.mocked(saveProjectDoc).mockRejectedValueOnce(new Error('disk full'));
+    expect(await useTimelineStore.getState().renameOpenTimelineProject('新しい名前')).toBe(false);
+  });
+});

@@ -46,6 +46,8 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "closeTranscript",
   "placeTranscriptSubtitles",
   "cutTranscriptLines",
+  // 開いている動画の名前を変える（#1396）＝ホームの操作で、保存を伴う（本体の窓だけ）。
+  "renameOpenTimelineProject",
 ]);
 
 /**
