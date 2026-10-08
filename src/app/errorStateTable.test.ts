@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, silenceMessage, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
@@ -104,6 +104,8 @@ function codeMessages(): Record<string, string> {
     ...apiKeyMessage,
     // 字幕ファイルの読み込みの断り（ADR-0055・#1351）。
     ...subtitleFileMessage,
+    // 無音を詰めるの断り（#1385）。
+    ...silenceMessage,
     // ⚠️ **場面形式の切り出しの断りも等値で守る**（#1155 ⑤）＝タイムライン形式の双子
     // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
     // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
@@ -542,7 +544,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+2**（UI/UX 監査 2026-10-02）＝手伝いの AI が使えない（AI_ASSIST_UNAVAILABLE）／考えている間に文が変わった（AI_ASSIST_STALE）。
     // ⚠️ **+5**（UI/UX 監査 2026-10-02・PR4a）＝作業範囲・分けるの断りをキーとボタンで同じコードに（RANGE_NOT_SET／RANGE_EMPTY／RANGE_NO_CLIPS／SPLIT_NONE_SELECTED／SINGLE_CLIP_ONLY）。
     // ⚠️ **+2**（ADR-0034 追補 2026-10-05・#1331）＝TRIM_BEFORE_SOURCE／TRIM_PAST_SOURCE_END。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(284);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(287);
   });
 
 
@@ -588,6 +590,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     writingSceneMessage: "生成中に書いている場面の数を伝える進み具合の文（ADR-0052 決定6）＝失敗・状態ではない",
     subtitleImportedMessage: "字幕ファイルを並べたあとの知らせ（並べた数・読めなかった数・上限を越えた数）＝失敗ではない（ADR-0055）",
     subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
+    silenceAppliedMessage: "無音を詰めたあとの知らせ（詰めた数と秒）＝失敗ではない（#1385）",
+    silenceSummary: "断り・知らせではなく、詰める前の確認の文（`rangeDeleteConfirmMessage` と同じ扱い）",
     timelineTruncatedTextDetail: "起動の引数の書き出しで返す注意の中身（#1366）＝失敗ではない（書き出しは止めない）。場面形式の公開前チェック「切れている文字」と同じ見出し",
     subtitleFileSkippedScenesMessage: "字幕ファイルの結果に添える知らせ（入れられなかった場面）＝焼き出しの `BAKE_DIALOGUE_SUBTITLE_SKIPPED` と同じ場面を指す（ADR-0055 追補）",
     motionPresetShortenedMessage: "選んだ長さが帯に収まらないとき、押す前に実際の長さを伝える案内（#1349）＝失敗・状態ではない",
@@ -810,7 +814,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（PR4a）＝上と同じ5行。
     // ⚠️ **+2**（#1331）＝上と同じ2行。
     // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（読む表から外れる＝取り消し線の行は数えない）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(279);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(282);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -837,6 +841,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+5**（PR4a）＝作業範囲・分けるの断り5つ（`editBlockedMessage` 経由で等値）。
       // ⚠️ **+2**（#1331）＝素材の外へ伸ばせない断り2つ（同上）。
       // ⚠️ **−2**（ADR-0054 段階1）＝TIMELINE_CANVAS_HOLD_ANIMATION(_MANY) を退役（動きのある部品は掴めるようになった）。
-    ).toBe(130);
+      // ⚠️ **+3**（#1385）＝SILENCE_NO_SOUND／SILENCE_READ_FAILED／SILENCE_CLIP_CHANGED（`silenceMessage` 経由で等値）。
+    ).toBe(133);
   });
 });

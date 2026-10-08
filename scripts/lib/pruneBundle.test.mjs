@@ -1,14 +1,14 @@
 // 配布物の容量を削る計画（#1384）。⚠️ **声の番号はアプリの声の一覧と同じ**であることを本物の一覧で確かめる。
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import { planCharacterInfo, planVvm, readZipEntry, speakersFromMetas, usedSpeakerIds } from "./pruneBundle.mjs";
 import { VOICE_CATALOG } from "../../src/domain/voice/voiceCatalog";
 
 describe("usedSpeakerIds", () => {
   it("アプリの声の一覧（本物）と同じ番号を読む", () => {
-    const src = readFileSync(join(__dirname, "..", "..", "src", "domain", "voice", "voiceCatalog.ts"), "utf8");
+    const src = readFileSync(fileURLToPath(new URL("../../src/domain/voice/voiceCatalog.ts", import.meta.url)), "utf8");
     const fromCatalog = [...new Set(VOICE_CATALOG.flatMap((c) => c.styles.map((s) => s.speaker)))].sort((a, b) => a - b);
     expect(usedSpeakerIds(src)).toEqual(fromCatalog);
   });
