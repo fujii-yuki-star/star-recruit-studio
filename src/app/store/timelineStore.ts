@@ -1,7 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, type ExportSize } from "../../domain/constants";
+import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, PROJECT_NAME_MAX_LENGTH, type ExportSize } from "../../domain/constants";
 import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
@@ -518,6 +518,13 @@ export interface TimelineState {
    * 作った id を返す（呼び出し側が画面を切り替える）。**未適合なら保存しない**＝開けない動画を一覧に作らない。
    */
   createTimelineProject: (projectName: string, aspectRatio?: Orientation) => Promise<string>;
+  /**
+   * 開いている動画の名前を変えて保存する（ホームの改名から・#1396）。成功したら `true`。
+   * ⚠️ **ディスクだけ書き換えない**＝開いたままの文書が古い名前を持ち続け、次の自動保存で改名が消える。
+   * ⚠️ **取り消しの履歴の名前もそろえる**＝履歴は文書まるごとの写しなので、そのままだと取り消すと名前まで戻る
+   *   （改名はホームの操作＝編集の取り消しの対象ではない）。
+   */
+  renameOpenTimelineProject: (name: string) => Promise<boolean>;
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
   /**
@@ -1197,6 +1204,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // ⚠️ **開き直しでも消さない**（上と同じ理由）＝閉じても Rust 側の片づけは続いている。消すと押し直せてしまい「別の部品を文字にしています」と断られる。
   transcribeBusy: false,
 
+  renameOpenTimelineProject: async (name) => {
+    const doc = get().doc;
+    if (!doc) return false;
+    // 書き出し中は文書を変えない（書き出しは文書を固定して描く＝ADR-0026④）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return false;
+    const projectName = name.trim().slice(0, PROJECT_NAME_MAX_LENGTH);
+    if (!projectName) return false;
+    const rn = (d: TimelineProject): TimelineProject => ({ ...d, projectName });
+    const h = get().history;
+    set({ doc: rn(doc), history: { ...h, past: h.past.map(rn), future: h.future.map(rn) } });
+    await get().saveTimelineProject();
+    return get().saveStatus !== "error";
+  },
   createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
     // 断る理由は store 側に置く（画面ごとに条件を書き分けない）。
