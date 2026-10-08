@@ -2023,12 +2023,19 @@ export function reorientNotice(templateUnmatched: number, layersUnmatched: numbe
   const parts: string[] = [];
   if (templateUnmatched > 0) parts.push(`${templateUnmatched}個の見た目パターンは、この向きに合うものが無いため元のままです（選び直してください）`);
   if (layersUnmatched > 0) parts.push(`${layersUnmatched}か所の写真・文字は、新しい見た目パターンに入れる場所が無いため出ていません`);
-  if (outside > 0) parts.push(`${outside}個の部品が画面の外へはみ出しています`);
+  if (outside > 0) parts.push(`${outside}個の部品が画面の外へはみ出しています（選んで位置を直してください）`);
   const head = "縦横を入れ替えた版を作りました。";
   return parts.length === 0
     ? `${head}部品は小さめに収めてあるので、大きさと位置を確かめてください。`
     : `${head}${parts.join("。")}。部品の大きさと位置も確かめてください。`;
 }
 
-/** ホームの「縦横を入れ替えた版を作る」の説明（ADR-0057）。 */
-export const REORIENT_COPY_TITLE = "縦横を入れ替えた版を作る（元はそのまま・素材と声ごとコピーします）";
+/**
+ * ホームの「縦の版／横の版を作る」の名前（ADR-0057）。⚠️ **行き先の向きを名指しする**（業界の型＝Canva の「サイズを変更」・
+ * Premiere の自動リフレームは作る先の比率を選ぶ）。向きが読めない行だけ「縦横を入れ替えた版」と言う。
+ */
+export function reorientCopyLabel(target: "portrait" | "landscape" | null): string {
+  return target === "portrait" ? "縦の版を作る" : target === "landscape" ? "横の版を作る" : "縦横を入れ替えた版を作る";
+}
+/** 同じボタンの説明（押せるとき）。 */
+export const REORIENT_COPY_NOTE = "（元はそのまま・素材と声ごとコピーします）";

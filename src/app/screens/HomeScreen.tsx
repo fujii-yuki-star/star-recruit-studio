@@ -4,7 +4,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, REORIENT_COPY_TITLE, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, REORIENT_COPY_NOTE, reorientCopyLabel, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
@@ -39,6 +39,13 @@ interface HomeProps {
 
 function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
+}
+
+/** 一覧の行の向きから、入れ替えた先の向き（読めなければ `null`）。 */
+function reorientTarget(aspectRatio: string | undefined): "portrait" | "landscape" | null {
+  if (aspectRatio === ORIENTATION.landscape) return "portrait";
+  if (aspectRatio === ORIENTATION.portrait) return "landscape";
+  return null;
 }
 
 export function HomeScreen({ onNavigate }: HomeProps) {
@@ -868,8 +875,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                         className="btn btn-ghost btn-icon"
                         disabled={copyBusyTitle !== null}
                         onClick={() => void doTimelineDuplicate(p.projectId, true)}
-                        aria-label={`「${p.projectName || "無題の動画"}」の縦横を入れ替えた版を作る`}
-                        title={copyBusyTitle ?? REORIENT_COPY_TITLE}
+                        aria-label={`「${p.projectName || "無題の動画"}」の${reorientCopyLabel(reorientTarget(p.aspectRatio))}`}
+                        title={copyBusyTitle ?? `${reorientCopyLabel(reorientTarget(p.aspectRatio))}${REORIENT_COPY_NOTE}`}
                       >
                         <RotateFrameIcon size={18} />
                       </button>

@@ -63,6 +63,17 @@ describe('reorientTimelineDoc', () => {
     expect(c.strokeWidth).toBeCloseTo(4 * S);
   });
 
+  it('縦→横でも新しい画面の中央へ（横の中心は 960）', () => {
+    // ⚠️ 横→縦だけだと、横の中央寄せは左上基準と同じ値になる（960·S＝540）＝見分けられない。
+    const d = doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: 440, y: 860, w: 200, h: 200, text: 'あ' })], {
+      videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    });
+    const c = reorientTimelineDoc(d, '16:9', []).doc.clips[0];
+    // 中心 (540, 960) は旧画面の中心 → 新画面の中心 (960, 540)。
+    expect(c.x! + c.w! / 2).toBeCloseTo(960);
+    expect(c.y! + c.h! / 2).toBeCloseTo(540);
+  });
+
   it('図形の角丸も同じ倍率（文字の大きさは付けない）', () => {
     const r = reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.shape, { x: 0, y: 0, w: 400, h: 400, radius: 40 })]), '9:16', []);
     expect(r.doc.clips[0].radius).toBeCloseTo(40 * S);
@@ -107,11 +118,34 @@ describe('reorientTimelineDoc', () => {
     expect(r.templateUnmatched).toBe(1);
   });
 
-  it('はみ出した部品を数える（縦→横で下の字幕が画面の外へ出る）', () => {
+  it('空の差し込み口は数えない・すでに新しい向きの見た目は替えない・見つからない見た目は数えない', () => {
+    const templates = [
+      tpl('photo_h', 'photo_intro', '16:9', [{ id: 'mainVisual', type: 'slot', x: 0, y: 0, w: 1, h: 1 }, { id: 'sub', type: 'slot', x: 0, y: 0, w: 1, h: 1 }]),
+      tpl('photo_v', 'photo_intro', '9:16', [{ id: 'mainVisual', type: 'slot', x: 0, y: 0, w: 1, h: 1 }]),
+      tpl('photo_v2', 'photo_intro', '9:16', [{ id: 'mainVisual', type: 'slot', x: 0, y: 0, w: 1, h: 1 }]),
+    ];
+    const r = reorientTimelineDoc(doc([
+      part('clip_001', TIMELINE_CLIP_KIND.template, { templateId: 'photo_h', assetRefs: { mainVisual: 'a', sub: null } as never }),
+      part('clip_002', TIMELINE_CLIP_KIND.template, { templateId: 'photo_v2' }),
+      part('clip_003', TIMELINE_CLIP_KIND.template, { templateId: 'gone' }),
+    ]), '9:16', templates);
+    expect(r.layersUnmatched).toBe(0);
+    expect(r.doc.clips[1].templateId).toBe('photo_v2');
+    expect(r.doc.clips[2].templateId).toBe('gone');
+    expect(r.templateUnmatched).toBe(0);
+  });
+
+  it('縦→横で下寄りの字幕は、高さを保ったまま画面の中へ収める', () => {
     const d = doc([part('clip_001', FREE_ELEMENT_KIND.subtitle, { x: 0, y: 1750, w: 1080, h: 150 })], {
       videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
     });
-    expect(reorientTimelineDoc(d, '16:9', []).outside).toBe(1);
+    const r = reorientTimelineDoc(d, '16:9', []);
+    expect(r.doc.clips[0]).toMatchObject({ y: 1080 - 150, h: 150 });
+    expect(r.outside).toBe(0);
+  });
+
+  it('はみ出した部品を数える（元から画面の外へ出ていた部品は、縮めても外に残る）', () => {
+    expect(reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: -400, y: 10, w: 300, h: 100, text: 'あ' })]), '9:16', []).outside).toBe(1);
     expect(reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: 10, y: 10, w: 100, h: 100, text: 'あ' })]), '9:16', []).outside).toBe(0);
   });
 

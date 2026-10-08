@@ -102,7 +102,7 @@ import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
 import { applySilenceCuts, silenceCandidates, silenceSourceOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
-import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice } from "../uiLabels";
+import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice, TIMELINE_SAVE_FAILED_MESSAGE } from "../uiLabels";
 import { flippedOrientation, reorientTimelineDoc } from "../../domain/timeline/reorient";
 import { duplicatedProjectName, reorientedProjectName } from "../../domain/project/duplicate";
 import { copyBakedFiles } from "../../infrastructure/bakeFs";
@@ -373,6 +373,12 @@ export interface TimelineState {
    * ⚠️ **黙って捨てない**＝利用者が書いた覚えを勝手に消さないので、寄せて**数を知らせる**。
    */
   editNotice: string | null;
+  /**
+   * 開いたときの知らせ（ADR-0057＝縦横を入れ替えた版で決めきれなかった所）。⚠️ `editNotice` と違い**選ぶ・編集するでは消えない**
+   *（知らせを読んで部品を選び直すので、選んだ瞬間に消えると件数が分からなくなる）。閉じるか、別の動画を開くまで残す。
+   */
+  openNotice: string | null;
+  dismissOpenNotice: () => void;
   /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
   importError: string | null;
   /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
@@ -1101,6 +1107,7 @@ function emptyState() {
     isLoading: false,
     playheadSec: 0,
     editNotice: null as string | null,
+    openNotice: null as string | null,
     // 作業範囲（#1193）＝取っていない状態から始める。
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
@@ -1534,6 +1541,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
   closeSilenceFind: () => set({ silenceFind: null }),
+  dismissOpenNotice: () => set({ openNotice: null }),
 
   setSelectedColorAdjust: (patch) =>
     applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),
@@ -2580,9 +2588,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   duplicateTimelineProject: async (projectId, flip) => {
     // 書き出し中は別の動画へ移らない（開く・作ると同じ）。
     if (isTimelineExportBusy(get().exportRun.phase)) return { projectId: null, message: EXPORT_BUSY_OPEN_MESSAGE };
+    // ⚠️ **開けない間は作らない**（取り込み中・読み込み中は `openTimelineProject` が黙って戻る）＝作ったのに
+    //   元の動画が出たまま「作りました」と知らせると、利用者は複製のつもりで元を書き換える（レビュー 🟡）。
+    if (get().isImporting) return { projectId: null, message: IMPORTING_OPEN_MESSAGE };
+    if (get().isLoading) return { projectId: null, message: null };
     try {
       // ⚠️ **開いている元なら先に保存**＝ディスクの文書と声を運ぶので、保存していない変更が抜け落ちる（焼き出しと同じ）。
-      if (get().doc?.projectId === projectId) await get().saveTimelineProject();
+      if (get().doc?.projectId === projectId) {
+        await get().saveTimelineProject();
+        // ⚠️ **保存できなかったら作らない**（保存は失敗しても投げない）＝古い内容の複製を成功として開かない（ADR-0026④）。
+        if (get().saveStatus === "error") return { projectId: null, message: TIMELINE_SAVE_FAILED_MESSAGE };
+      }
       const src = parseTimelineProjectDoc(await loadProjectDoc(projectId));
       const existing = await listProjectSummaries();
       // ⚠️ **番号を予約してから採る**（#992 ③）＝運んでいる間は一覧に居ないので、続けて押すと同じ番号になる。
@@ -2598,16 +2614,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       };
       const r = flip ? reorientTimelineDoc(base, target, useProjectStore.getState().templates) : null;
       const dup = r ? r.doc : base;
+      // 保存と同じ検査（写し方で正典に合わない値を作ったら、作らずに止める＝開いた先で読めない動画を残さない）。
+      if (!validateTimelineProject(dup)) {
+        console.warn("[timeline] 複製の内容がスキーマに未適合:", validateTimelineProject.errors);
+        return { projectId: null, message: DUPLICATE_FAILED_MESSAGE };
+      }
       // ⚠️ **ファイルを運んでから文書を保存する**（焼き出し・場面形式の複製と同じ順＝素材の無い動画を一覧に残さない）。
       const copied = await copyBakedFiles(projectId, newId, bakedFilePaths(src), `dup_${newId}`);
       if (copied.cancelled) return { projectId: null, message: null };
       await saveProjectDoc(newId, JSON.stringify(dup, null, 2));
       await get().openTimelineProject(newId);
       // 決めきれなかった所を知らせる（黙って別の結果にしない＝ADR-0057 決定6）。
-      if (r) set({ editNotice: reorientNotice(r.templateUnmatched, r.layersUnmatched, r.outside) });
+      if (r) set({ openNotice: reorientNotice(r.templateUnmatched, r.layersUnmatched, r.outside) });
       return { projectId: newId, message: null };
     } catch (e) {
-      return { projectId: null, message: e instanceof TimelineLoadError ? e.message : DUPLICATE_FAILED_MESSAGE };
+      // 理由が画面に出せる文なら保つ（ディスクが足りない等＝直らない「もう一度」に落とさない・場面形式の複製と同じ）。
+      return { projectId: null, message: e instanceof TimelineLoadError ? e.message : userFacingMessage(e, "duplicate") ?? DUPLICATE_FAILED_MESSAGE };
     }
   },
 

@@ -39,14 +39,18 @@ export function reorientTimelineDoc(doc: TimelineProject, target: Orientation, t
   const clips = doc.clips.map((clip): TimelineClip => {
     if (clip.kind === TIMELINE_CLIP_KIND.template) {
       const tpl = templates.find((t) => t.templateId === clip.templateId);
-      const alt = tpl ? templates.find((t) => t.category === tpl.category && t.aspectRatio === target) : undefined;
+      // 見た目自体が見つからない部品は数えない＝開いた画面が「見つからない見た目」として別に知らせる（理由が違う）。
+      if (!tpl) return clip;
+      // すでに新しい向きの見た目なら替えない（利用者が選んだものを同じ種類の別の見た目へ替えない＝`orientationOps` と同じ）。
+      const alt = tpl.aspectRatio === target ? tpl : templates.find((t) => t.category === tpl.category && t.aspectRatio === target);
       if (!alt) {
         templateUnmatched += 1;
         return clip;
       }
       const layerIds = new Set(alt.layers.map((l) => l.id));
       const textKeys = new Set(alt.layers.map((l) => textKeyOfLayer(l)).filter((k): k is NonNullable<typeof k> => k != null));
-      layersUnmatched += Object.keys(clip.assetRefs ?? {}).filter((k) => !layerIds.has(k)).length;
+      // 空の差し込み口（`null`）は数えない＝何も入っていないのに「出ていません」と言わない（文字の側と同じ）。
+      layersUnmatched += Object.entries(clip.assetRefs ?? {}).filter(([k, v]) => v != null && !layerIds.has(k)).length;
       layersUnmatched += Object.entries(clip.texts ?? {}).filter(([k, v]) => v && !textKeys.has(k as never)).length;
       mappingOf.set(clip.id, { fx: s, fy: s });
       return { ...clip, templateId: alt.templateId };
@@ -65,7 +69,9 @@ export function reorientTimelineDoc(doc: TimelineProject, target: Orientation, t
       const fx = to.width / from.width;
       const fy = to.height / from.height;
       mappingOf.set(clip.id, { fx, fy });
-      return { ...clip, x: b.x * fx, y: b.y * fy, w: b.w * fx, h: b.h };
+      // 高さは変えないので、縦→横で下寄りの字幕が下へはみ出す＝**画面の中へ収める**（判断軸3・はみ出さない側へ倒す）。
+      const y = Math.max(0, Math.min(b.y * fy, to.height - b.h));
+      return { ...clip, x: b.x * fx, y, w: b.w * fx, h: b.h };
     }
     mappingOf.set(clip.id, { fx: s, fy: s });
     const cx = (b.x + b.w / 2 - from.width / 2) * s + to.width / 2;

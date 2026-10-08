@@ -502,6 +502,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
+    editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
     setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
@@ -6843,6 +6844,18 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
             {/* 別の窓を開けなかった（ADR-0050）＝押しても何も起きない、を作らない（§2-5）。 */}
             {previewWindow.error && <p>{previewWindow.error}</p>}
+          </div>
+        )}
+        {/* 操作のあとの知らせ（無音を詰めた・範囲を消して目印を寄せた等＝#1385）。次の操作で消える。
+            ⚠️ 断り（上の警告色）とは分ける＝失敗ではない。 */}
+        {editNotice && (
+          <p className="notice notice-info timeline-flash" role="status">{editNotice}</p>
+        )}
+        {/* 開いたときの知らせ（ADR-0057）＝閉じるまで残す（読んで部品を選び直すので、選んでも消さない）。 */}
+        {openNotice && (
+          <div className="notice notice-info row-between" role="status">
+            <span>{openNotice}</span>
+            <button className="btn btn-ghost text-sm" onClick={dismissOpenNotice}>閉じる</button>
           </div>
         )}
       </div>

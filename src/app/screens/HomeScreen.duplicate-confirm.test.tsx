@@ -88,7 +88,7 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
    */
   it("タイムラインで作った動画は、タイムラインの入口で複製して開く（縦横を入れ替えた版も）", async () => {
     const { duplicateProject } = setup(false, [
-      { projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" },
+      { projectId: "proj_009", projectName: "焼いた動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline", aspectRatio: "16:9" },
     ]);
     const dupTl = vi.fn(() => Promise.resolve({ projectId: "proj_010", message: null }));
     useTimelineStore.setState({ duplicateTimelineProject: dupTl } as never);
@@ -98,7 +98,8 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
     fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」を複製" }));
     await waitFor(() => expect(dupTl).toHaveBeenCalledWith("proj_009", false));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("timeline-project"));
-    fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」の縦横を入れ替えた版を作る" }));
+    // 行き先の向きを名指しする（横の動画なら「縦の版」）。
+    fireEvent.click(screen.getByRole("button", { name: "「焼いた動画」の縦の版を作る" }));
     await waitFor(() => expect(dupTl).toHaveBeenCalledWith("proj_009", true));
     expect(duplicateProject).not.toHaveBeenCalled();
   });
@@ -114,11 +115,22 @@ describe("HomeScreen 複製の破棄ガード（#395・PR #889 レビュー 🔴
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("縦の動画なら「横の版」、向きが読めない行は「縦横を入れ替えた版」と言う", async () => {
+    setup(false, [
+      { projectId: "proj_011", projectName: "縦の動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline", aspectRatio: "9:16" },
+      { projectId: "proj_012", projectName: "古い動画", updatedAt: "2026-07-09T00:00:00Z", format: "timeline" },
+    ]);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await screen.findByText("縦の動画");
+    expect(screen.getByRole("button", { name: "「縦の動画」の横の版を作る" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "「古い動画」の縦横を入れ替えた版を作る" })).toBeTruthy();
+  });
+
   it("場面形式の行には縦横を入れ替えるボタンを出さない（場面形式は下書きの「向き」で変える）", async () => {
     setup(false);
     render(<HomeScreen onNavigate={vi.fn()} />);
     await screen.findByText("テスト動画");
-    expect(screen.queryByRole("button", { name: /縦横を入れ替えた版/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /版を作る/ })).toBeNull();
   });
 
   /**

@@ -35,6 +35,8 @@ struct ProjectSummary {
     /// 場面形式は format を書かない（不在＝場面形式）ので、そのまま None を返す＝
     /// 一覧が開く先を選べる（開いてから「形式が違う」と断らずに済む）。
     format: Option<String>,
+    /// 画面の向き（`videoSettings.aspectRatio`＝"16:9"／"9:16"）。一覧の「縦の版／横の版を作る」が行き先を名指しするのに使う（ADR-0057）。
+    aspect_ratio: Option<String>,
 }
 
 /// appData/projects ディレクトリのパスを返す（作成は呼び出し側）。
@@ -445,6 +447,11 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
             updated_at: get("updatedAt"),
             format: value
                 .get("format")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            aspect_ratio: value
+                .get("videoSettings")
+                .and_then(|v| v.get("aspectRatio"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
         });
