@@ -22,7 +22,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
-import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL } from "../uiLabels";
+import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL, silenceMessage } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -9201,11 +9201,17 @@ describe("無音を詰める", () => {
     expect(button().title).toBe(editBlockedMessage[EDIT_BLOCKED.lockedSelection]);
   });
 
-  it("音の無い部品では押せない（理由つき）", () => {
-    open(rec as Partial<TimelineProject>);
+  it("音の無い部品では押せない（理由つき）・音の部品なら押せる", () => {
+    const text = { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" };
+    open({ ...rec, clips: [...rec.clips, text] } as Partial<TimelineProject>);
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
-    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const { unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(button().disabled).toBe(true);
+    expect(button().title).toBe(silenceMessage.SILENCE_NO_SOUND);
+    unmount();
+    useTimelineStore.setState({ selectedClipIds: ["clip_009"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(button().disabled).toBe(false);
   });
 
   it("「聞く」は候補の少し前から鳴らし、終わりを過ぎたら止める", () => {
