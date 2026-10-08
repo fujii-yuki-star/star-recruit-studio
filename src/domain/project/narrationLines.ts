@@ -196,6 +196,21 @@ export function lineDurationsFromAudio(scene: Scene, audioById: Record<string, s
   return out;
 }
 
+/**
+ * **単独読み上げ**（明示の行を持たない場面）の作成済み音声の長さ（秒）。無い・使えない・行を持つ場面は `undefined`。
+ *
+ * ⚠️ `lineDurationsFromAudio` へ混ぜない（#1404）＝あちらは掛け合いの行の窓を決める（場面形式の画面＝凍結）。
+ *   単独読み上げの窓は場面いっぱいのまま（字幕も場面いっぱい）で、**声の部品の長さだけ**を実際の尺に合わせたい。
+ */
+export function narrationDurationFromAudio(scene: Scene, audioById: Record<string, string>): number | undefined {
+  if (scene.lines && scene.lines.length > 0) return undefined;
+  if (!lineVoiceUsable(scene.narration)) return undefined;
+  const audio = audioById[scene.sceneId];
+  if (!audio) return undefined;
+  const d = wavDurationSec(audio);
+  return d > 0 ? d : undefined;
+}
+
 /** 指定行の status を更新した Scene（明示 lines があれば該当行・無ければ単一 narration を更新）。 */
 export function withLineStatus(scene: Scene, lineId: string, status: NarrationStatus): Scene {
   if (scene.lines && scene.lines.length > 0) {

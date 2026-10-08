@@ -72,7 +72,7 @@ import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
 import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, cancelProjectCopy, copyBakedFiles, listenCopyProgress } from "../../infrastructure/bakeFs";
@@ -1771,6 +1771,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       nowIso: new Date().toISOString(),
       templateOf: (id) => templateById.get(id),
       lineDurationsFor: (sc) => lineDurationsFromAudio(sc, s.narrationAudioById),
+      narrationDurationFor: (sc) => narrationDurationFromAudio(sc, s.narrationAudioById),
     });
   },
   renameProject: async (projectId, newName) => {

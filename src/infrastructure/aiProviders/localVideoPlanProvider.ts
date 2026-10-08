@@ -15,7 +15,11 @@ import { templatesForAssets } from '../../domain/ai/videoPlanInput';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { currentAiCancelEpoch, localAiGenerate } from '../aiClient';
-import { AI_PLAN_UNREADABLE_MESSAGE } from './messages';
+import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from './messages';
+import { isHollowPlan, planRunawayLimits } from '../../domain/ai/planSanity';
+
+/** 中身が足りない案を作り直す回数（最初の1回を含む）。 */
+const HOLLOW_ATTEMPTS = 2;
 
 /** 出力の形を縛る schema（正典そのもの）。1回だけ文字列にする。 */
 const SCHEMA_TEXT = JSON.stringify(aiVideoPlanSchema);
@@ -53,21 +57,31 @@ export class LocalVideoPlanProvider implements AiProvider {
     const cancelEpoch = currentAiCancelEpoch();
     const isStale = () => run !== latestRun || currentAiCancelEpoch() !== cancelEpoch;
     const { system, user } = buildVideoPlanMessages(input, LOCAL_VIDEO_PLAN_OPTIONS);
-    let raw: string;
-    try {
-      raw = await localAiGenerate(system, user, SCHEMA_TEXT);
-    } catch (e) {
-      // 失敗の文は Rust が「次の行動」つきで返す（LOCAL_AI_*）。原因を追えるよう warn を残す（画面には出さない）。
-      console.warn('[ai] このパソコンの中での生成に失敗:', e instanceof Error ? e.message : e);
-      throw e;
+    // 止まらずに書き続けたら Rust が途中で止めて1度だけ作り直す（#1403）＝上限は尺から決める。
+    const limits = planRunawayLimits(input.targetDurationSec);
+    // ⚠️ **中身が足りない案は1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る。
+    for (let attempt = 0; attempt < HOLLOW_ATTEMPTS; attempt += 1) {
+      let raw: string;
+      try {
+        raw = await localAiGenerate(system, user, SCHEMA_TEXT, limits);
+      } catch (e) {
+        // 失敗の文は Rust が「次の行動」つきで返す（LOCAL_AI_*）。原因を追えるよう warn を残す（画面には出さない）。
+        console.warn('[ai] このパソコンの中での生成に失敗:', e instanceof Error ? e.message : e);
+        throw e;
+      }
+      const result = parseAndValidateVideoPlan(raw);
+      if (!result.valid) {
+        console.warn('[ai] AI_RESPONSE_INVALID（このパソコンの中）: 応答が構成スキーマに適合しませんでした。', {
+          errors: result.errors,
+          応答先頭: raw.length > 2000 ? `${raw.slice(0, 2000)}…(全${raw.length}字)` : raw,
+        });
+        throw new Error(AI_PLAN_UNREADABLE_MESSAGE);
+      }
+      if (!isHollowPlan(result.plan)) return this.refine(result.plan, input, isStale);
+      console.warn('[ai] 話す内容がほとんど無い動画案でした（このパソコンの中）。', { 回: attempt + 1 });
+      if (isStale()) break; // やめた・後から別の生成が始まった＝作り直さない
     }
-    const result = parseAndValidateVideoPlan(raw);
-    if (result.valid) return this.refine(result.plan, input, isStale);
-    console.warn('[ai] AI_RESPONSE_INVALID（このパソコンの中）: 応答が構成スキーマに適合しませんでした。', {
-      errors: result.errors,
-      応答先頭: raw.length > 2000 ? `${raw.slice(0, 2000)}…(全${raw.length}字)` : raw,
-    });
-    throw new Error(AI_PLAN_UNREADABLE_MESSAGE);
+    throw new Error(AI_PLAN_HOLLOW_MESSAGE);
   }
 
   private async refine(plan: AiVideoPlan, input: GenerateVideoPlanInput, isStale: () => boolean): Promise<AiVideoPlan> {

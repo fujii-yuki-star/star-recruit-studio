@@ -9,7 +9,7 @@ const { localAiGenerateMock, cancelEpoch } = vi.hoisted(() => ({ localAiGenerate
 vi.mock('../aiClient', () => ({ localAiGenerate: localAiGenerateMock, currentAiCancelEpoch: () => cancelEpoch.value }));
 
 import { LocalVideoPlanProvider } from './localVideoPlanProvider';
-import { AI_PLAN_UNREADABLE_MESSAGE } from './messages';
+import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from './messages';
 import { COMPANY_NAME_PLACEHOLDER } from '../../domain/ai/refineVideoPlan';
 import type { AiVideoPlan } from '../../domain/ai/types';
 
@@ -155,5 +155,35 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
   it('生成の失敗は、Rust が返した「次の行動」の文をそのまま伝える', async () => {
     localAiGenerateMock.mockRejectedValue(new Error('このパソコンで動画案を作る部品が見つかりませんでした。アプリを入れ直してください。'));
     await expect(new LocalVideoPlanProvider().generateVideoPlan(input())).rejects.toThrow('部品が見つかりませんでした');
+  });
+});
+
+// 止まらない・中身が空の案（#1403）。
+describe('LocalVideoPlanProvider：使える形でない案（#1403）', () => {
+  const hollow = (): unknown => {
+    const p = structuredClone(validPlanFixture) as AiVideoPlan;
+    for (const part of p.parts) for (const s of part.scenes) { s.narrationText = ''; delete s.narrationLines; }
+    return p;
+  };
+  it('尺から決めた上限を渡す（越えて書き続けたら Rust が途中で止める）', async () => {
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
+    await new LocalVideoPlanProvider().generateVideoPlan(input());
+    expect(localAiGenerateMock.mock.calls[0][3]).toEqual({ maxScenes: 20, maxTotalSec: 120 });
+  });
+  it('話す内容がほとんど無い案は1度だけ作り直し、直れば返す', async () => {
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(hollow())).mockResolvedValueOnce(JSON.stringify(validPlanFixture));
+    const plan = await new LocalVideoPlanProvider().generateVideoPlan(input());
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(2);
+    expect(plan.videoPlan.title).toBe(validPlanFixture.videoPlan.title);
+  });
+  it('作り直しても同じなら、できたことにせず断る', async () => {
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(hollow()));
+    await expect(new LocalVideoPlanProvider().generateVideoPlan(input())).rejects.toThrow(AI_PLAN_HOLLOW_MESSAGE);
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(2);
+  });
+  it('やめたら作り直さない', async () => {
+    localAiGenerateMock.mockImplementationOnce(async () => { cancelEpoch.value += 1; return JSON.stringify(hollow()); });
+    await expect(new LocalVideoPlanProvider().generateVideoPlan(input())).rejects.toThrow(AI_PLAN_HOLLOW_MESSAGE);
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(1);
   });
 });

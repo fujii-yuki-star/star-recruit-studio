@@ -77,8 +77,14 @@ export function willSendExternally(provider: string = GEMINI_PROVIDER): Promise<
  * このパソコンの中で動画案を作る（ADR-0051）。`schema` は正典の `ai-video-plan.schema.json`（出力の形を縛る）。
  * 応答は JSON の文字列＝検証は呼ぶ側（`parseAndValidateVideoPlan`）が行う（§2-2）。失敗は画面に出す文（Rust の `messages.rs`）。
  */
-export function localAiGenerate(system: string, user: string, schema: string): Promise<string> {
-  return invoke<string>('local_ai_generate', { system, user, schema });
+export function localAiGenerate(
+  system: string,
+  user: string,
+  schema: string,
+  /** 動画案づくりの上限（#1403）＝越えて書き続けたら Rust が途中で止めて作り直す。言い直し等では渡さない。 */
+  limits?: { maxScenes: number; maxTotalSec: number },
+): Promise<string> {
+  return invoke<string>('local_ai_generate', { system, user, schema, limits: limits ?? null });
 }
 
 /**

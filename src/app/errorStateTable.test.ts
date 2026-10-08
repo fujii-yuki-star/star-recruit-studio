@@ -14,7 +14,7 @@ import {
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_STALE_MESSAGE } from "./uiLabels";
-import { AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
+import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
 import { STARTUP_BUSY_MESSAGE, STARTUP_IMPORT_UNREADABLE_MESSAGE, STARTUP_ASSET_MISSING_MESSAGE, STARTUP_OPEN_FAILED_MESSAGE, STARTUP_VOICE_ENGINE_MESSAGE, STARTUP_VOICE_NOT_READY_MESSAGE } from "./hooks/useStartupJob";
@@ -125,6 +125,8 @@ function codeMessages(): Record<string, string> {
     AI_ASSIST_UNAVAILABLE: AI_ASSIST_UNAVAILABLE_MESSAGE,
     AI_ASSIST_STALE: AI_ASSIST_STALE_MESSAGE,
     AI_RESPONSE_UNREADABLE: AI_PLAN_UNREADABLE_MESSAGE,
+    // 中身が空の動画案（#1403）。
+    AI_PLAN_HOLLOW: AI_PLAN_HOLLOW_MESSAGE,
     PROJECT_RESTORE_FAILED: RESTORE_FAILED_MESSAGE,
     RESTORE_POINTS_UNREADABLE,
     RESTORE_POINTS_EMPTY,
@@ -553,7 +555,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
     // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(299);
+    // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(300);
   });
 
 
@@ -832,7 +835,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+6**（ADR-0058）＝TRANSCRIBE_* の6行。
     // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(294);
+    // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(295);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -862,6 +866,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+3**（#1385）＝SILENCE_NO_SOUND／SILENCE_READ_FAILED／SILENCE_CLIP_CHANGED（`silenceMessage` 経由で等値）。
       // ⚠️ **+5**（ADR-0058）＝TRANSCRIBE_NO_SOUND／CLIP_CHANGED／NOTHING_HEARD／STOPPED／UNAVAILABLE（`transcribeMessage` 経由で等値）。
       // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED（`codeMessages()` へ直に載せた）。
-    ).toBe(139);
+      // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
+    ).toBe(140);
   });
 });
