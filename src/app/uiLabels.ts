@@ -2014,6 +2014,10 @@ export function silenceAppliedMessage(count: number, totalSec: number): string {
 }
 
 // ── 声を文字にする（ADR-0058・#1387） ──
+/** 画面の配置を覚えられなかった（ADR-0033 未解決6・#1396）。 */
+export const PANEL_LAYOUT_SAVE_FAILED_MESSAGE =
+  "画面の配置を覚えられませんでした。いまはこのまま使えますが、次に開くと元の配置に戻ります。何度も出るときは、パソコンの空き容量を確かめてください。";
+
 export const TRANSCRIBE_LABEL = "声を文字にする…";
 export const TRANSCRIBE_TITLE = "選んだ動画・音の声を、このパソコンの中で文字にします（外へは送りません）。字幕にしたり、文を選んで消したりできます";
 /** 声を文字にするの断り・知らせ（`15 §6` の表で等値に守る）。Rust が返す断り（部品が無い等）は `messages.rs` の `TRANSCRIBE_*`。 */

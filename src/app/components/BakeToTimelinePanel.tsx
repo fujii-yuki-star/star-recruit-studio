@@ -7,6 +7,7 @@ import { BakeError } from "../../domain/timeline/bake";
 import { BAKE_RANGE_KIND, sceneIdsBetween } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange } from "../../domain/timeline/bake";
 import { bakeNoteText, formatDiskSize, BAKE_LEAVE_BLOCKED_MESSAGE } from "../uiLabels";
+import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 
 /** 焼き出す範囲の選び方（ADR-0032 決定17）。UI 内部の分類なので永続データの enum ではない。 */
 type RangeChoice = "whole" | "part" | "between";
@@ -184,7 +185,7 @@ export function BakeToTimelinePanel({ onNavigate }: { onNavigate?: (screen: Scre
 
       <label className="field">
         <span>新しい動画の名前</span>
-        <input value={name} onChange={(e) => { setName(e.target.value); resetPreview(); }} maxLength={80} />
+        <input value={name} onChange={(e) => { setName(e.target.value); resetPreview(); }} maxLength={PROJECT_NAME_MAX_LENGTH} />
       </label>
 
       {sceneCount === 0 && (

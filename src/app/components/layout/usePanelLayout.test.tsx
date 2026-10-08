@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 欄の配置の出し入れ（ADR-0033）＝覚えない指定（ADR-0050 決定10＝仕上がり確認の別窓が本体の配置を上書きしない）。
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { usePanelLayout } from "./usePanelLayout";
 import { PANEL_ID, PANEL_IDS, timelineDefaultLayout, timelineLayoutPresets } from "../../timelinePanels";
@@ -46,5 +46,38 @@ describe("usePanelLayout の覚えない指定（ADR-0050 決定10）", () => {
     act(() => result.current.change(timelineLayoutPresets()[0].layout));
     unmount();
     expect(Object.keys(localStorage)).toEqual([]);
+  });
+});
+
+// 配置を覚えられないとき（ADR-0033 未解決6 の決着・#1396）＝**黙って諦めない**。ただし境界のドラッグごとに出し直さない。
+describe("usePanelLayout の覚えられなかった知らせ（#1396）", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("書けなかったら知らせを立て、閉じたらこの画面ではもう立てない", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    const presets = timelineLayoutPresets();
+    const { result } = renderHook(() => usePanelLayout(PANEL_SCREEN.timeline, timelineDefaultLayout(), PANEL_IDS));
+    expect(result.current.saveFailed).toBe(false);
+    act(() => result.current.change(presets[0].layout));
+    await wait(400);
+    expect(result.current.saveFailed).toBe(true);
+    act(() => result.current.dismissSaveFailed());
+    expect(result.current.saveFailed).toBe(false);
+    act(() => result.current.change(presets[1].layout));
+    await wait(400);
+    expect(result.current.saveFailed).toBe(false);
+  });
+
+  it("書けたら立てない", async () => {
+    const { result } = renderHook(() => usePanelLayout(PANEL_SCREEN.timeline, timelineDefaultLayout(), PANEL_IDS));
+    act(() => result.current.change(timelineLayoutPresets()[0].layout));
+    await wait(400);
+    expect(result.current.saveFailed).toBe(false);
+  });
+
+  it("setPanelLayout は保存できたかを返す", () => {
+    expect(setPanelLayout(PANEL_SCREEN.timeline, timelineDefaultLayout())).toBe(true);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    expect(setPanelLayout(PANEL_SCREEN.timeline, timelineDefaultLayout())).toBe(false);
   });
 });

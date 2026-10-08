@@ -54,6 +54,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const loadProject = useProjectStore((s) => s.loadProject);
   const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
   const duplicateTimelineProject = useTimelineStore((s) => s.duplicateTimelineProject);
+  const renameOpenTimelineProject = useTimelineStore((s) => s.renameOpenTimelineProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
@@ -217,7 +218,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     setRenameBusy(true);
     setRenameError(false);
     try {
-      await renameProject(projectId, name);
+      // ⚠️ **開いているタイムライン形式の動画は、開いている文書から改名する**（#1396）＝ディスクだけ書き換えると、
+      //   開いたままの文書が古い名前を持ち続け、次の自動保存で改名が消える。
+      if (useTimelineStore.getState().doc?.projectId === projectId) {
+        if (!(await renameOpenTimelineProject(name))) throw new Error("rename failed");
+      } else {
+        await renameProject(projectId, name);
+      }
     } catch {
       setRenameError(true);
       return; // リネーム自体が失敗したときだけエラー表示（入力欄は残して再試行可能に）。

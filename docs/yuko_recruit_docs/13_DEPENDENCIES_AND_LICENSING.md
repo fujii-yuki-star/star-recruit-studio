@@ -72,8 +72,7 @@
   **H.264 は `h264_mf`（Media Foundation）が主経路**、**OpenH264 はフォールバック**（ADR-0013・実機検証済）。
   ソース提供は `FFmpeg_SOURCE.md`、ライセンス本文は `src-tauri/resources/ffmpeg/LICENSE.txt` を同梱。
 - ~~配布形態（インストーラ同梱 / 初回DL）~~
-  → ⚠️ **決定：インストーラ同梱**（初回DLはしない）。α は **MSI 単独配布**
-  （`tauri.conf.json` の `bundle.targets` は `msi` のみ＝NSIS は ~2GB の同梱物で作れなかった）。
+  → ⚠️ **決定：インストーラ同梱**（初回DLはしない）。α は **MSI＋書庫（`.cab`）を zip で配布**（`bundle.targets` は `msi` のみ・2GB を超えて CAB が MSI に入らないので書庫を外に分ける＝2026-09-30〜・ADR-0051 未決4／NSIS は ~2GB で不可）。
 
 ---
 
@@ -265,7 +264,7 @@
   **VOICEVOX ENGINE**＝v0.25.2 CPU（`src-tauri/resources/README.md`）／
   **AI モデル**＝`DEFAULT_AI_MODEL`（**名前の正は `src/infrastructure/appSettings.ts` に1つ**・設定の「上級者向け」で変更可）。⚠️ **ここに具体名を書かない**＝提供元の都合で使えなくなると、**資料だけが古い名前を指し続ける**（実際に `gemini-2.5-flash` が新規利用者に提供されなくなり、ここだけ古い名前が残っていた＝#1244・#1255 レビュー）。
 - ~~書き出し時 クレジット焼き込み＋設定の永続化（#153）~~ → **#153 実装済**（常時焼き込み・OFF 廃止のためトグル永続化は不要に）。
-- 配布物への **ライセンス本文同梱** → ⚠️ **主要なものは同梱済み。ただし2件足りない**（2026-09-24 に実物で確認）：
+- ~~配布物への **ライセンス本文同梱**~~ → ⚠️ **済み**（下の「足りないもの2件」は #1241・PR #1378 で同梱した＝`src-tauri/resources/ffmpeg/LICENSES/` に GPLv3 本文と OpenH264 の BSD-2-Clause・門番 `ffmpegLicenseGuard`。ローカル AI と声を文字にする部品の告知も `local_llm/LICENSES/`・`transcribe/LICENSES/`）。以下は当時（2026-09-24）の記録：
   `src-tauri/resources/ffmpeg/LICENSE.txt`（FFmpeg LGPL）／
   `src-tauri/resources/voicevox_engine/` の `licenses.json` と `resources/engine_manifest_assets/` にある利用規約（VOICEVOX）／
   `public/fonts/OFL-*.txt`（**OFL 本文2件が3書体をカバー**）／`public/bgm/CREDITS.txt`（BGM）。
@@ -283,7 +282,7 @@
 **事業・法務の判断/作業が必要（コードでは閉じない）**
 - **拘束力ある利用規約（EULA）**：エンドユーザーへ VOICEVOX キャラ規約・クレジット遵守を義務付ける仕組み（初回同意フロー等）。About 画面の明示は実装済（#122/#149）。
 - ~~FFmpeg の **配布パッケージング**（#119）~~ → ⚠️ **#119 で実装済**：`win64-lgpl-shared`（動的リンク）を
-  pin 同梱、ソース提供は `FFmpeg_SOURCE.md`。α は **MSI 単独配布**（`bundle.targets` は `msi` のみ）。
+  pin 同梱、ソース提供は `FFmpeg_SOURCE.md`。α は **MSI＋書庫（`.cab`）を zip で配布**（`bundle.targets` は `msi` のみ・2GB を超えて CAB が MSI に入らないので書庫を外に分ける＝2026-09-30〜・ADR-0051 未決4／NSIS は ~2GB で不可）。
 - VOICEVOX **同梱ビルドの最終法務**（CPU 版 0.25.2 で確定・配布時の最終確認のみ／`adr/0005`）。
 - ~~標準BGM の **入手元と権利台帳**~~ → **CC0 3曲を同梱済**（§8.1）。装飾アセットは当面なし。
 - ~~最終 **フォント選定**（OFL系・本文/見出し）~~ → ⚠️ **#161 で選定・同梱済み**（初期3種・全 SIL OFL 1.1）。

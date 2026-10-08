@@ -77,6 +77,7 @@ import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/tim
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, cancelProjectCopy, copyBakedFiles, listenCopyProgress } from "../../infrastructure/bakeFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
+import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { duplicateIdsIn } from "../../domain/timeline/validateTimelineDoc";
 
 /**
@@ -1789,8 +1790,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     doc.projectName = name;
     doc.updatedAt = updatedAt;
     // 保存前検証（#416）：改名は projectName の maxLength(80) を超え得る（#411）。当面は警告ログのみ。
-    const rv = validateProjectDoc(doc);
-    if (!rv.valid) console.warn("[project] 改名後の保存内容がスキーマに未適合（要修正・#416）:", rv.errors);
+    // ⚠️ **形式に合った検査を当てる**（#1396）＝タイムライン形式に場面形式の検査を当てると、改名のたびに偽の「未適合」が出る。
+    if (isTimelineProjectDoc(doc)) {
+      if (!validateTimelineProject(doc)) console.warn("[project] 改名後の保存内容がスキーマに未適合（タイムライン形式）:", validateTimelineProject.errors);
+    } else {
+      const rv = validateProjectDoc(doc);
+      if (!rv.valid) console.warn("[project] 改名後の保存内容がスキーマに未適合（要修正・#416）:", rv.errors);
+    }
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
     // 開いているプロジェクトを改名したなら、画面表示名・更新日時（meta）も同期する。
     if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));

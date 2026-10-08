@@ -3,6 +3,7 @@
 //
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
+import { PANEL_LAYOUT_SAVE_FAILED_MESSAGE } from "../../uiLabels";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { menuAnchorFrom, usePointerDrag } from "../../hooks/usePointerDrag";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
@@ -96,6 +97,8 @@ export function PanelLayoutView({
   fill,
   maximized: maximizedProp,
   onMaximizedChange,
+  saveFailed,
+  onDismissSaveFailed,
 }: {
   layout: PanelLayout;
   panels: readonly PanelSpec[];
@@ -108,6 +111,9 @@ export function PanelLayoutView({
    */
   maximized?: PanelId | null;
   onMaximizedChange?: (next: PanelId | null) => void;
+  /** 配置を覚えられなかったときの知らせ（`usePanelLayout` の `saveFailed`）。閉じると `onDismissSaveFailed`。 */
+  saveFailed?: boolean;
+  onDismissSaveFailed?: () => void;
 }): React.ReactElement {
   const byId = new Map(panels.map((p) => [p.id, p]));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -430,6 +436,14 @@ export function PanelLayoutView({
       ref={rootRef}
       style={{ gridTemplateRows: rows }}
     >
+      {/* 配置を覚えられなかった知らせ（ADR-0033 未解決6・#1396）。⚠️ **固定の位置に浮かせる**＝この器は格子なので、
+          流れの中に置くと行の割り当てがずれる（固定の要素は格子の行を取らない）。 */}
+      {saveFailed && (
+        <div className="notice notice-warn row-between" role="status" style={{ position: "fixed", right: 16, bottom: 16, zIndex: 50, maxWidth: 480 }}>
+          <span>{PANEL_LAYOUT_SAVE_FAILED_MESSAGE}</span>
+          <button className="btn btn-ghost text-sm" onClick={onDismissSaveFailed}>閉じる</button>
+        </div>
+      )}
       {hasMain && (
         <div className="panel-layout-main">
           {mainRegions.map((region, i) => {

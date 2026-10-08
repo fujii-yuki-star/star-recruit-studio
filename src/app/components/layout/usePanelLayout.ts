@@ -18,6 +18,12 @@ export interface PanelLayoutHandle {
   reset: () => void;
   /** いま閉じている欄（「〈欄〉を表示する」を出すのに使う）。 */
   closed: PanelId[];
+  /**
+   * 配置を覚えられなかった（`localStorage` が一杯など・ADR-0033 未解決6）。⚠️ **黙って諦めない**＝知らせを出す。
+   * 一度立ったら閉じるまで立てたまま（境界のドラッグごとに出し直さない）。
+   */
+  saveFailed: boolean;
+  dismissSaveFailed: () => void;
 }
 
 export function usePanelLayout(
@@ -42,9 +48,14 @@ export function usePanelLayout(
     layoutRef.current = layout;
   }, [layout]);
 
+  const [saveFailed, setSaveFailed] = useState(false);
+  // 一度閉じた知らせは、この画面にいる間は出し直さない（同じ理由で何度も失敗する＝毎回出すと邪魔になる）。
+  const dismissedRef = useRef(false);
   useEffect(() => {
     if (!persist || !changedRef.current) return;
-    const t = setTimeout(() => setPanelLayout(screenId, layout), LAYOUT_SAVE_DELAY_MS);
+    const t = setTimeout(() => {
+      if (!setPanelLayout(screenId, layout) && !dismissedRef.current) setSaveFailed(true);
+    }, LAYOUT_SAVE_DELAY_MS);
     return () => clearTimeout(t);
   }, [layout, screenId, persist]);
 
@@ -68,5 +79,10 @@ export function usePanelLayout(
       setLayout(normalizeLayout(defaultLayout, panelIds));
     },
     closed: closedPanelIds(layout, panelIds),
+    saveFailed,
+    dismissSaveFailed: () => {
+      dismissedRef.current = true;
+      setSaveFailed(false);
+    },
   };
 }
