@@ -591,6 +591,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     subtitleImportedMessage: "字幕ファイルを並べたあとの知らせ（並べた数・読めなかった数・上限を越えた数）＝失敗ではない（ADR-0055）",
     subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
     silenceAppliedMessage: "無音を詰めたあとの知らせ（詰めた数と秒）＝失敗ではない（#1385）",
+    reorientNotice: "縦横を入れ替えた版を作ったあとの知らせ（残した見た目・出なくなった中身・はみ出しの数の組み合わせで文が変わる）＝失敗ではない（ADR-0057）",
     silenceSummary: "断り・知らせではなく、詰める前の確認の文（`rangeDeleteConfirmMessage` と同じ扱い）",
     timelineTruncatedTextDetail: "起動の引数の書き出しで返す注意の中身（#1366）＝失敗ではない（書き出しは止めない）。場面形式の公開前チェック「切れている文字」と同じ見出し",
     subtitleFileSkippedScenesMessage: "字幕ファイルの結果に添える知らせ（入れられなかった場面）＝焼き出しの `BAKE_DIALOGUE_SUBTITLE_SKIPPED` と同じ場面を指す（ADR-0055 追補）",

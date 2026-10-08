@@ -37,6 +37,10 @@ export const PREVIEW_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "findSilencesFor",
   "applySilenceCandidates",
   "closeSilenceFind",
+  // 動画を複製する（ADR-0057）＝動画を作る・開く操作（上の「開く・作る」と同じ）。
+  "duplicateTimelineProject",
+  // 開いたときの知らせを閉じる（ADR-0057）＝知らせは本体の窓にだけ出る。
+  "dismissOpenNotice",
 ]);
 
 /**
