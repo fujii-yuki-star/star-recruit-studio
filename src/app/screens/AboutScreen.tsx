@@ -10,6 +10,8 @@ import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../doma
 
 /** 同梱のローカル AI のライセンス本文の置き場所（インストール先の中の相対パス・#1289）。 */
 export const LOCAL_AI_LICENSE_DIR = "local_llm/LICENSES";
+/** 同梱の「声を文字にする」部品のライセンス本文の置き場所（ADR-0058）。 */
+export const TRANSCRIBE_LICENSE_DIR = "transcribe/LICENSES";
 /** 同梱の FFmpeg の告知の置き場（#1241）。 */
 export const FFMPEG_LICENSE_DIR = "ffmpeg/LICENSES";
 
@@ -39,6 +41,18 @@ const credits: { name: string; role: string; license: string; credit?: string; s
     role: "このパソコンの中で動くAIのモデル",
     license: `Apache-2.0／公式のモデルを、このソフト用に変換して軽くしたもの（変えた点の告知と全文はインストール先の ${LOCAL_AI_LICENSE_DIR} フォルダにあります）`,
     source: { label: "提供元", url: "https://huggingface.co/Qwen/Qwen3.5-2B" },
+  },
+  {
+    name: "whisper.cpp",
+    role: "このパソコンの中で声を文字にする部品",
+    license: `MIT（全文はインストール先の ${TRANSCRIBE_LICENSE_DIR} フォルダにあります）`,
+    source: { label: "提供元", url: "https://github.com/ggml-org/whisper.cpp" },
+  },
+  {
+    name: "Whisper small（OpenAI）",
+    role: "声を文字にするモデル",
+    license: `MIT／whisper.cpp が公開している軽くした版をそのまま使用（全文はインストール先の ${TRANSCRIBE_LICENSE_DIR} フォルダにあります）`,
+    source: { label: "提供元", url: "https://github.com/openai/whisper" },
   },
   {
     name: "Gen Interface JP / Gen Interface JP Display",

@@ -14,6 +14,7 @@ mod opener;
 mod proc;
 mod project_import;
 mod startup;
+mod transcribe;
 mod trouble_log;
 mod voicevox;
 mod voicevox_engine;
@@ -1580,7 +1581,10 @@ pub fn run() {
             local_llm::local_ai_generate,
             local_llm::local_ai_describe_image,
             local_llm::local_ai_prepare,
-            local_llm::local_ai_assist
+            local_llm::local_ai_assist,
+            transcribe::transcribe_available,
+            transcribe::transcribe_audio,
+            transcribe::transcribe_cancel
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

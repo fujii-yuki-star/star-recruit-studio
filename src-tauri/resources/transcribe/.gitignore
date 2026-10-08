@@ -1,0 +1,7 @@
+*
+!.gitignore
+!runtime/
+!models/
+# ライセンス本文は配布物の一部として追跡する（ADR-0058）
+!LICENSES/
+!LICENSES/**
