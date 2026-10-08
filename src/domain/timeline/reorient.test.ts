@@ -146,6 +146,9 @@ describe('reorientTimelineDoc', () => {
 
   it('はみ出した部品を数える（元から画面の外へ出ていた部品は、縮めても外に残る）', () => {
     expect(reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: -400, y: 10, w: 300, h: 100, text: 'あ' })]), '9:16', []).outside).toBe(1);
+    // 下へはみ出していた部品（縦→横）＝中心 2000 → (2000−960)·S＋540 ≈ 1125・高さ 112.5 → 下端 1181 > 1080。
+    const portrait = { videoSettings: { aspectRatio: '9:16' as const, fps: 30, targetDurationSec: 60, maxDurationSec: 600 } };
+    expect(reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: 100, y: 1900, w: 200, h: 200, text: 'あ' })], portrait), '16:9', []).outside).toBe(1);
     expect(reorientTimelineDoc(doc([part('clip_001', FREE_ELEMENT_KIND.text, { x: 10, y: 10, w: 100, h: 100, text: 'あ' })]), '9:16', []).outside).toBe(0);
   });
 
