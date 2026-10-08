@@ -102,7 +102,9 @@ import { newFrameAsset } from "../../domain/asset/assetFile";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
 import { applySilenceCuts, silenceCandidates, silenceSourceOf, SILENCE_BUCKET_SEC, SILENCE_WINDOW_SEC, type SilenceCandidate } from "../../domain/timeline/silence";
-import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice, TIMELINE_SAVE_FAILED_MESSAGE } from "../uiLabels";
+import { silenceAppliedMessage, silenceMessage, DUPLICATE_FAILED_MESSAGE, reorientNotice, TIMELINE_SAVE_FAILED_MESSAGE, transcribeMessage, transcriptPlacedMessage, transcriptCutMessage } from "../uiLabels";
+import { transcriptCues, transcriptCuts, transcriptLinesOf, type TranscriptLine } from "../../domain/timeline/transcript";
+import { listenTranscribeProgress, transcribeAudio, transcribeCancel } from "../../infrastructure/transcribeFs";
 import { flippedOrientation, reorientTimelineDoc } from "../../domain/timeline/reorient";
 import { duplicatedProjectName, reorientedProjectName } from "../../domain/project/duplicate";
 import { copyBakedFiles } from "../../infrastructure/bakeFs";
@@ -614,6 +616,19 @@ export interface TimelineState {
   /** 無音を詰める欄を閉じる。 */
   closeSilenceFind: () => void;
   /**
+   * 声を文字にする（ADR-0058）。`null`＝開いていない／`lines` が `null` の間は文字にしている最中（`percent`＝進み具合）。
+   * ⚠️ **文書に持たない**（無音を詰めると同じ＝この作業だけの都合）。`doc`＝結果を出した時点の文書（変わっていたら使わない）。
+   */
+  transcript: { clipId: string; runId: number; lines: TranscriptLine[] | null; percent: number; doc: TimelineProject } | null;
+  /** 選んだ部品（録画・録音）の声を文字にする（このパソコンの中で＝外へ送らない）。 */
+  transcribeClip: (clipId: string) => Promise<void>;
+  /** 文字にする欄を閉じる（文字にしている最中なら止める）。 */
+  closeTranscript: () => void;
+  /** 選んだ行を字幕として並べる（新しい列・取り消し1回＝字幕ファイルの読み込みと同じ道）。 */
+  placeTranscriptSubtitles: (lines: readonly TranscriptLine[]) => void;
+  /** 選んだ行の範囲を消して詰める（無音を詰めると同じ道・取り消し1回）。 */
+  cutTranscriptLines: (lines: readonly TranscriptLine[]) => void;
+  /**
    * 再生位置に**目印**を置く（#356 ①）。⚠️ **動画には出ない**（作業用のメモ）。
    *
    * ⚠️ **同じ時刻には重ねない**＝既にあるときは増やさない（履歴にも積まない）。
@@ -1065,6 +1080,10 @@ function runAnalysis(job: () => Promise<void>): void {
 
 /** 音の長さを測っている最中の動画（同じ動画を2回測らない・#1348）。 */
 let audioMeasureRun: { projectId: string; promise: Promise<void> } | null = null;
+/** 走っている「声を文字にする」の回（閉じる・開くときに止める＝結果を捨てるだけだと CPU を使い続ける）。 */
+let transcribeRun: number | null = null;
+/** 回の番号（止めると進み具合の見分け）。 */
+let transcribeRunSeq = 0;
 
 /**
  * 長さの分からない音の素材を1つずつ測り、`audioDurations` に入れる（#1348）。文書は書き換えない
@@ -1100,6 +1119,11 @@ function emptyState() {
   // 音の長さの測りも手放す（#1348・PR #1352 レビュー 🟡）＝閉じて同じ動画を開き直したとき、閉じている間に打ち切られた
   //   前の測りを「測っている最中」と見て、新しく開いた分が測られないまま残っていた。
   audioMeasureRun = null;
+  // 文字にしている最中なら止める（ADR-0058＝閉じた動画の結果は使わない・CPU を使い続けない）。
+  if (transcribeRun != null) {
+    void transcribeCancel(transcribeRun);
+    transcribeRun = null;
+  }
   return {
     doc: null,
     loadError: null,
@@ -1112,6 +1136,7 @@ function emptyState() {
     rangeInSec: null as number | null,
     rangeOutSec: null as number | null,
     silenceFind: null as { clipId: string; candidates: SilenceCandidate[] | null; doc: TimelineProject } | null,
+    transcript: null as { clipId: string; runId: number; lines: TranscriptLine[] | null; percent: number; doc: TimelineProject } | null,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
@@ -1541,6 +1566,115 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
   closeSilenceFind: () => set({ silenceFind: null }),
+
+  transcribeClip: async (clipId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    // 測るのと同じ範囲（部品が使っている素材の範囲）＝無音を詰めると同じ選び方（ADR-0058 決定3）。
+    const src = silenceSourceOf(doc, clip);
+    if (!src) {
+      set({ editNotice: transcribeMessage.TRANSCRIBE_NO_SOUND });
+      return;
+    }
+    // ⚠️ **書き出し中は始めない**（FFmpeg と CPU を書き出しと取り合わせない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    if (get().transcript) return; // 1度に1つ（欄が出ている間は押せない）
+    transcribeRunSeq += 1;
+    const runId = transcribeRunSeq;
+    transcribeRun = runId;
+    set({ transcript: { clipId, runId, lines: null, percent: 0, doc }, editNotice: null });
+    const unlisten = await listenTranscribeProgress((e) => {
+      const t = get().transcript;
+      if (t?.runId === e.runId && t.lines === null) set({ transcript: { ...t, percent: e.percent } });
+    });
+    let segments: Awaited<ReturnType<typeof transcribeAudio>>;
+    try {
+      segments = await transcribeAudio(doc.projectId, src.relPath, src.fromSec, src.lengthSec, runId);
+    } catch (e) {
+      // 止めた・閉じた・別の動画へ移った回の断りは出さない（止めた側はもう結果を待っていない）。
+      if (get().transcript?.runId !== runId) return;
+      set({ transcript: null, editNotice: userFacingMessage(e, "transcribe") ?? transcribeMessage.TRANSCRIBE_STOPPED });
+      return;
+    } finally {
+      unlisten();
+      if (transcribeRun === runId) transcribeRun = null;
+    }
+    if (get().transcript?.runId !== runId) return;
+    // ⚠️ **文字にしている間に部品が変わったら、結果は使わない**（時刻がずれる＝無音を詰めると同じ守り）。
+    const now = get().doc;
+    const nowClip = now?.clips.find((c) => c.id === clipId);
+    if (!now || nowClip !== clip) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    const lines = transcriptLinesOf(clip, segments);
+    if (lines.length === 0) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_NOTHING_HEARD });
+      return;
+    }
+    set({ transcript: { clipId, runId, lines, percent: 100, doc: now } });
+  },
+  closeTranscript: () => {
+    const t = get().transcript;
+    if (t && t.lines === null) void transcribeCancel(t.runId);
+    if (t && transcribeRun === t.runId) transcribeRun = null;
+    set({ transcript: null });
+  },
+  placeTranscriptSubtitles: (lines) => {
+    const doc = get().doc;
+    const t = get().transcript;
+    if (!doc || !t || lines.length === 0) return;
+    // ⚠️ **結果を出した後に文書が変わっていたら並べない**（取り消しで部品の位置が変わると時刻がずれる）。
+    if (t.doc !== doc) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    // 字幕ファイルの読み込みと同じ道（ADR-0055 の `importSubtitleCues`＝新しい列・重なりは下へ積む）。
+    const r = importSubtitleCues(doc, transcriptCues(lines));
+    if (r.placed === 0) {
+      set({ editNotice: transcriptPlacedMessage(0, r.beyondLimit) });
+      return;
+    }
+    // ⚠️ **1回の `commit`**＝何行並べても取り消し1回（ADR-0034 決定20）。
+    commit(set, get, r.doc, { transcript: null });
+    if (get().doc === r.doc) set({ editNotice: transcriptPlacedMessage(r.placed, r.beyondLimit) });
+  },
+  cutTranscriptLines: (lines) => {
+    const doc = get().doc;
+    const t = get().transcript;
+    if (!doc || !t || lines.length === 0) return;
+    if (t.doc !== doc) {
+      set({ transcript: null, editNotice: transcribeMessage.TRANSCRIBE_CLIP_CHANGED });
+      return;
+    }
+    // 再生中は断る（範囲を消して詰めると同じ）。
+    if (get().isPlaying) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.playing, at: blockTargetFor(EDIT_BLOCKED.playing, PANEL_ID.arrange) } });
+      return;
+    }
+    const cuts = transcriptCuts(lines, doc.videoSettings.fps);
+    if (cuts.length === 0) return;
+    const r = applySilenceCuts(doc, cuts, volumeAt, { templateOf: templateOfNow });
+    if (!r.ok) {
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+      return;
+    }
+    const total = cuts.reduce((a, c) => a + (c.endSec - c.startSec), 0);
+    commit(set, get, r.doc, { selectedClipIds: [], transcript: null });
+    if (get().doc === r.doc) {
+      const markers = r.clampedMarkerCount > 0 ? ` ${markersClampedMessage(r.clampedMarkerCount)}` : "";
+      set({ editNotice: transcriptCutMessage(r.applied, total) + markers });
+    }
+  },
   dismissOpenNotice: () => set({ openNotice: null }),
 
   setSelectedColorAdjust: (patch) =>

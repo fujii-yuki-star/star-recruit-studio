@@ -86,7 +86,7 @@ export function silentRunsFromPeaks(peaks: readonly number[], bucketSec: number)
  *   終わりを外側へ丸めると、コマの途中から始まる読み上げ（例 4.01 秒）の頭まで消す範囲に入り、
  *   **読み上げと字幕が丸ごと消える**（読み上げは切れない部品＝`deleteRange` が丸ごと外す・PR #1389 レビュー 🔴）。
  */
-function snapInside(r: SilenceCandidate, fps: number): SilenceCandidate {
+export function snapInside(r: SilenceCandidate, fps: number): SilenceCandidate {
   const start = frameTimeAt(firstFrameAtOrAfter(r.startSec, fps), fps);
   // 終わり：`frameTimeAt(f) <= endSec` を満たす最大の f＝そのコマの時刻はまだ無音の中。
   let f = firstFrameAtOrAfter(r.endSec, fps);

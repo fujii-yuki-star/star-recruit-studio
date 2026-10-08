@@ -162,10 +162,12 @@ import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
 import { ExportSizeOptions } from "../components/ExportSizeOptions";
 import { SilenceFindPanel } from "../components/SilenceFindPanel";
+import { TranscriptPanel } from "../components/TranscriptPanel";
+import { transcribeAvailable } from "../../infrastructure/transcribeFs";
 import { silenceSourceOf } from "../../domain/timeline/silence";
 /** 無音の候補を聞くとき、前後に含める長さ（秒）。 */
 const SILENCE_PREVIEW_PAD_SEC = 0.5;
-import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage } from "../uiLabels";
+import { SILENCE_FIND_LABEL, SILENCE_FIND_TITLE, silenceMessage, TRANSCRIBE_LABEL, TRANSCRIBE_TITLE, transcribeMessage } from "../uiLabels";
 import { EXPORT_SIZE_HINT } from "../uiLabels";
 import { refusalReason } from "../../domain/startup/refusalReason";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
@@ -497,7 +499,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const {
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
@@ -895,6 +897,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // `Space`・`Delete`・矢印もこの値で塞いでいるので、漏れると**答えを求めている最中に別の操作が通る**。
   // 無音の候補を「聞く」ときの止める時刻（#1385）。候補の終わり＋少しで止める。
   const [silencePreviewUntil, setSilencePreviewUntil] = useState<number | null>(null);
+  // 声を文字にする部品が入っているか（ADR-0058）。`null`＝確かめている最中（押せる扱い＝押した後に Rust が断る）。
+  const [transcribeReady, setTranscribeReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void transcribeAvailable().then((ok) => { if (alive) setTranscribeReady(ok); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     if (silencePreviewUntil != null && playheadSec >= silencePreviewUntil) {
       pause();
@@ -903,7 +912,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   }, [silencePreviewUntil, playheadSec, pause]);
   const overlayOpen =
     exploding !== null || removingTrackId !== null || confirmLeave !== null || confirmRemove !== null || confirmRange !== null
-    || silenceFind !== null;
+    || silenceFind !== null || transcript !== null;
   useEscapeOwner(overlayOpen);
   // 範囲が消えたら、範囲を消す確認も閉じる（見えないまま状態だけ残り、取り直したときに確認が出てくる、を作らない・PR4a レビュー）。
   useEffect(() => {
@@ -3651,6 +3660,21 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   };
   const silenceGuard = editGuard(silenceExtra());
   /**
+   * 声を文字にする（ADR-0058）の押せる条件。部品が入っていないときは**押す前に**断る（§2-5）。
+   * ⚠️ 固定した列は見ない＝字幕を並べるのは新しい列（消して詰めるときは、その時に断る＝無音を詰めると同じ文）。
+   */
+  const transcribeExtra = (): { disabled?: boolean; hint?: string } => {
+    if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
+    if (!doc || !selected) return { disabled: true, hint: "声を文字にする動画か音の部品を選んでください" };
+    if (transcribeReady === false) return { disabled: true, hint: transcribeMessage.TRANSCRIBE_UNAVAILABLE };
+    if (selected.assetId != null && missingAssetIds.includes(selected.assetId)) {
+      return { disabled: true, hint: silenceMessage.SILENCE_READ_FAILED };
+    }
+    if (!silenceSourceOf(doc, selected)) return { disabled: true, hint: transcribeMessage.TRANSCRIBE_NO_SOUND };
+    return {};
+  };
+  const transcribeGuard = editGuard(transcribeExtra());
+  /**
    * 目印の押せる条件（#356 ①・**ADR-0040**）。
    *
    * ⚠️ **再生中も断らない**（ADR-0040・利用者判断 2026-09-14）＝業界の型でマーカーの主用途は
@@ -3761,6 +3785,16 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           })(),
           hint: SILENCE_FIND_TITLE,
           onSelect: () => { if (selected) void findSilencesFor(selected.id); },
+        },
+        {
+          label: TRANSCRIBE_LABEL,
+          ...singleClipMenuGuard,
+          ...(() => {
+            const g = transcribeExtra();
+            return g.disabled ? { disabled: true, disabledHint: g.hint } : {};
+          })(),
+          hint: TRANSCRIBE_TITLE,
+          onSelect: () => { if (selected) void transcribeClip(selected.id); },
         },
         ...(menuClipTemplate
           ? [{
@@ -4540,6 +4574,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 title={silenceGuard.title ?? SILENCE_FIND_TITLE}
               >
                 {SILENCE_FIND_LABEL}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { if (selected) void transcribeClip(selected.id); }}
+                {...transcribeGuard}
+                title={transcribeGuard.title ?? TRANSCRIBE_TITLE}
+              >
+                {TRANSCRIBE_LABEL}
               </button>
               {/* ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
                   **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。 */}
@@ -7009,6 +7051,20 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             }}
             onApply={(picked) => { pause(); setSilencePreviewUntil(null); applySilenceCandidates(picked); }}
             onClose={() => { if (silencePreviewUntil != null) pause(); setSilencePreviewUntil(null); closeSilenceFind(); }}
+          />
+        </div>
+      )}
+
+      {transcript !== null && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <TranscriptPanel
+            lines={transcript.lines}
+            percent={transcript.percent}
+            fps={doc.videoSettings.fps}
+            onSeek={(sec) => setPlayhead(sec)}
+            onPlace={(picked) => placeTranscriptSubtitles(picked)}
+            onCut={(picked) => { pause(); cutTranscriptLines(picked); }}
+            onClose={closeTranscript}
           />
         </div>
       )}
