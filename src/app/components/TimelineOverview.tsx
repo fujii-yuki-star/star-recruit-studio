@@ -21,8 +21,12 @@ export interface OverviewClip {
  * - **枠を掴んで運ぶ**＝並びも一緒に送る。
  * - **矢印キー**＝見えている幅の1割ずつ送る（`Home`／`End` で端へ）。
  * ⚠️ **描くだけ**＝部品は掴めない（並びの上で触る）。字や波形も描かない（細くて読めない）。
+ * ⚠️ **場所は常に取る**（`active` が偽なら中身を描かず押せない）＝出し入れで並びが縦にずれない（PR #1412 レビュー）。
+ * ⚠️ **`Escape` で送る前へ戻す**＝同じ画面のほかの運ぶ操作（欄の境界）と同じ流儀。
  */
 export function TimelineOverview({
+  active,
+  controlsId,
   totalSec,
   rows,
   clips,
@@ -31,7 +35,13 @@ export function TimelineOverview({
   range,
   onCenterAt,
   onScrollBySec,
+  getScrollPx,
+  setScrollPx,
 }: {
+  /** 偽＝全体が収まっている・まだ測れていない（場所だけ取り、中身は描かない）。 */
+  active: boolean;
+  /** 送る相手（並びの枠）の id＝`aria-controls`。 */
+  controlsId: string;
   totalSec: number;
   rows: number;
   clips: readonly OverviewClip[];
@@ -42,6 +52,10 @@ export function TimelineOverview({
   onCenterAt: (sec: number) => void;
   /** 見えている範囲を秒で送る（正＝右へ）。 */
   onScrollBySec: (deltaSec: number) => void;
+  /** いまの送り量（`Escape` で戻す先を控える）。 */
+  getScrollPx: () => number;
+  /** 送り量を戻す。 */
+  setScrollPx: (px: number) => void;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
   const beginDrag = usePointerDrag();
@@ -54,7 +68,7 @@ export function TimelineOverview({
   };
 
   /** 運ぶ（枠を掴んだとき・押してそのまま運んだとき）。動いた割合ぶん送る。 */
-  const follow = (e: ReactPointerEvent): void => {
+  const follow = (e: ReactPointerEvent, before: number): void => {
     let lastX = e.clientX;
     beginDrag(e, {
       startPx: 0,
@@ -63,6 +77,8 @@ export function TimelineOverview({
         if (w > 0) onScrollBySec(((ev.clientX - lastX) / w) * totalSec);
         lastX = ev.clientX;
       },
+      // `Escape`＝押す前の送り量へ戻す（押した瞬間に真ん中へ送った分も含めて）。
+      onCancel: () => setScrollPx(before),
     });
   };
 
@@ -78,11 +94,16 @@ export function TimelineOverview({
     e.stopPropagation();
   };
 
+  if (!active) return <div className="timeline-overview timeline-overview--idle" aria-hidden="true" />;
+
   return (
     <div
       ref={barRef}
       className="timeline-overview"
       role="scrollbar"
+      aria-controls={controlsId}
+      aria-valuetext={`${Math.round(view.startSec)}秒から${Math.round(view.endSec)}秒まで（全体 ${Math.round(totalSec)}秒）`}
+      title="押すとその時刻へ送ります。枠を運んでも送れます（← → で少しずつ・Home／End で端へ）"
       aria-orientation="horizontal"
       aria-label="全体図（押すとその時刻へ送ります）"
       aria-valuemin={0}
@@ -93,8 +114,9 @@ export function TimelineOverview({
       onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
+        const before = getScrollPx();
         onCenterAt(secAt(e.clientX));
-        follow(e);
+        follow(e, before);
       }}
     >
       {range && range.endSec > range.startSec && (
@@ -117,7 +139,7 @@ export function TimelineOverview({
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.stopPropagation(); // 枠を掴んだら真ん中へ跳ばさない（掴んだ所からそのまま運ぶ）
-          follow(e);
+          follow(e, getScrollPx());
         }}
       />
     </div>

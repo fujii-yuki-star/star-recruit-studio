@@ -293,6 +293,8 @@ const CLIP_BADGE_MIN_W_PX = 110;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
+/** 並びの枠の id（全体図の帯が `aria-controls` で指す）。 */
+const TIMELINE_SCROLL_ID = "timeline-arrange-scroll";
 
 /**
  * 帯の色（#701）。**部品の種類ごと**に分ける＝列の種類（映像／音）の2色だけだと、
@@ -2046,9 +2048,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const scrollRef = useRef<HTMLDivElement>(null);
   // 並びの枠の送り量と幅（全体図の枠に使う・#1319 c2）。送る・大きさが変わるたびに測り直す。
   const [scrollBox, setScrollBox] = useState({ left: 0, width: 0 });
-  const hasDoc = doc != null;
+  // ⚠️ **枠の要素が替わったら付け直す**（PR #1412 レビュー 🟡）＝欄を別の領域へ運ぶ・配置の型を変えると枠が作り直される。
+  //   最初の要素に縛ると、新しい枠を見張らずに送り量が古いまま止まる。要素は呼び戻しの ref で受ける。
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachScroll = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollEl(node);
+  }, []);
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = scrollEl;
     if (!el) return;
     const measure = (): void => setScrollBox((b) => (b.left === el.scrollLeft && b.width === el.clientWidth ? b : { left: el.scrollLeft, width: el.clientWidth }));
     measure();
@@ -2059,8 +2067,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       el.removeEventListener("scroll", measure);
       ro?.disconnect();
     };
-    // ⚠️ **並びが出たときに1回だけ付ける**＝毎回付け直すと、再生中（毎フレーム描き直す）に見張りを作り直し続ける。
-  }, [hasDoc]);
+  }, [scrollEl]);
   /**
    * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
    * 文書が変わったら決め直す＝別の動画を開いたときに前の倍率が残らない（覚えない・決定14）。
@@ -4079,6 +4086,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const overviewView = overviewViewport(scrollBox.left, scrollBox.width, LANE_LABEL_PX, pxPerSec, totalSec);
   // ⚠️ **幅を測れてから**出す＝測る前（幅 0）は「何も見えていない」と読めて、毎回出てしまう。
   const showOverview = scrollBox.width > LANE_LABEL_PX && overviewNeeded(overviewView, totalSec);
+  // 列 id → 文書の中で何番目か（全体図は再生中も毎フレーム描き直すので、部品ごとに探し直さない）。
+  const trackIndexById = useMemo(() => new Map((doc?.tracks ?? []).map((t, i) => [t.id, i] as const)), [doc?.tracks]);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
@@ -4746,14 +4755,18 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 </span>
               )}
             </div>
-            {showOverview && doc && (
+            {/* ⚠️ **場所は常に取っておく**（PR #1412 レビュー 🟡）＝収まっているとき消すと、拡大と「全体を表示」を
+                行き来するたびに並びが縦にずれる（Premiere・Resolve の帯は出しっぱなしで動かない）。収まっているときは中身を描かない。 */}
+            {doc && (
               <TimelineOverview
+                active={showOverview}
+                controlsId={TIMELINE_SCROLL_ID}
                 totalSec={totalSec}
                 rows={doc.tracks.length}
                 clips={doc.clips.map((c) => ({
                   id: c.id,
                   // ⚠️ **並びと同じ上下**＝並びは文書の最後の列をいちばん上に描く（`[...doc.tracks].reverse()`）。
-                  row: Math.max(0, doc.tracks.length - 1 - doc.tracks.findIndex((t) => t.id === c.trackId)),
+                  row: Math.max(0, doc.tracks.length - 1 - (trackIndexById.get(c.trackId) ?? 0)),
                   startSec: c.startSec,
                   endSec: clipEndSec(c),
                   tone: OVERVIEW_TONE[c.kind],
@@ -4769,9 +4782,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   const el = scrollRef.current;
                   if (el) el.scrollLeft += d * pxPerSec;
                 }}
+                getScrollPx={() => scrollRef.current?.scrollLeft ?? 0}
+                setScrollPx={(px) => {
+                  if (scrollRef.current) scrollRef.current.scrollLeft = px;
+                }}
               />
             )}
-            <div className="timeline-scroll" ref={scrollRef}>
+            <div className="timeline-scroll" id={TIMELINE_SCROLL_ID} ref={attachScroll}>
               <div className="timeline-inner">
                 <div className="timeline-row">
                   <div className="timeline-row-label" />

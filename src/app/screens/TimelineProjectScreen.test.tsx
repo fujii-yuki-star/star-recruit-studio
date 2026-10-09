@@ -9373,6 +9373,31 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     sizeScroller(container, LABEL + 20 * 36 + 10);
     expect(screen.queryByTestId("timeline-overview")).toBeNull();
+    // ⚠️ **場所は取っておく**（PR #1412 レビュー 🟡）＝出し入れで並びが縦にずれない。押せない・読み上げない。
+    const idle = container.querySelector(".timeline-overview--idle");
+    expect(idle).not.toBeNull();
+    expect(idle!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("Escape で、押す前の送り量へ戻す（押した瞬間に真ん中へ送った分も含めて）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 36);
+    const bar = screen.getByTestId("timeline-overview");
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 150, clientY: 5 });
+    expect(el.scrollLeft).not.toBe(36); // 押した瞬間に送る
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(el.scrollLeft).toBe(36);
+  });
+
+  it("送る相手（並びの枠）を指し、見えている範囲を読み上げる", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 180);
+    const bar = screen.getByTestId("timeline-overview");
+    expect(bar.getAttribute("aria-controls")).toBe(el.id);
+    expect(bar.getAttribute("aria-valuetext")).toBe("5秒から10秒まで（全体 20秒）");
   });
 
   it("はみ出していれば出し、見えている範囲を枠で示す（名前の欄の幅は除く）", () => {

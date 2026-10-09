@@ -929,3 +929,8 @@
   border-radius: 3px;
   cursor: grab;
 }
+/* 全体が収まっているとき（全体を表示）は場所だけ取る＝出し入れで並びが縦にずれない（PR #1412 レビュー）。 */
+.timeline-overview--idle {
+  visibility: hidden;
+  cursor: default;
+}
