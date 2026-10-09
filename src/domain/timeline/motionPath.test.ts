@@ -22,6 +22,17 @@ describe("motionPathOf", () => {
     expect(p.keys).toEqual([{ timeSec: 0, x: 120, y: 210 }, { timeSec: 2, x: 420, y: 160 }]);
   });
 
+  // ⚠️ **支点を外した部品は支点の通り道を描く**（ADR-0059）＝支点は回転・拡縮で動かないので、位置のずれだけで動く。
+  it("支点を外すと、支点（素の箱の向きで測る）にずれを足した所を通る", () => {
+    const b = { x: 0, y: 0, w: 100, h: 200 };
+    const kf = [{ timeSec: 0, x: 0 }, { timeSec: 1, x: 50 }];
+    const p = motionPathOf(b, kf, 1, { x: 0, y: 1 })!; // 左下
+    expect(p.keys.map((k) => [k.x, k.y])).toEqual([[0, 200], [50, 200]]);
+    // 素の箱が 90 度回っていれば、足元は中心の左（-100,0）。
+    const q = motionPathOf({ ...b, rotation: 90 }, kf, 1, { x: 0.5, y: 1 })!;
+    expect(Math.abs(q.keys[0].x - -50) < 1e-9 && Math.abs(q.keys[0].y - 100) < 1e-9).toBe(true);
+  });
+
   it("線は描画と同じ補間をなぞる（緩急がある区間も・キーの時刻を必ず通る）", () => {
     const kfs: Keyframe[] = [{ timeSec: 0, x: 0 }, { timeSec: 1.234, x: 100, easing: EASING.easeInOut }, { timeSec: 3, x: 0 }];
     const p = motionPathOf(box, kfs, 3)!;

@@ -1272,6 +1272,43 @@ export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: Ble
 }
 
 /**
+ * 部品の**反転**を直す（ADR-0059 決定2）。`axis`＝`x`（左右）／`y`（上下）。
+ * ⚠️ **戻したらキーごと落とす**＝`false` を残すと、絵は同じなのに文書だけ変わる（取り消しが空振りする）。
+ * 絵を持たない部品（音・読み上げ）には項目が無い＝`contentField`。
+ */
+export function setClipFlip(doc: TimelineProject, clipId: string, axis: 'x' | 'y', on: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isVisualClip(clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const key = axis === 'x' ? 'flipX' : 'flipY';
+  if ((clip[key] ?? false) === on) return ok(doc);
+  const copy = { ...clip };
+  if (on) copy[key] = true;
+  else delete copy[key];
+  return ok(withClip(doc, copy));
+}
+
+/**
+ * 部品の**動きの支点**を直す（ADR-0059 決定1）。`null`＝中心へ戻す（キーごと落とす）。値は 0〜1 へ収める。
+ * 絵を持たない部品には項目が無い＝`contentField`。
+ */
+export function setClipPivot(doc: TimelineProject, clipId: string, pivot: { x: number; y: number } | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isVisualClip(clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const clamp = (v: number): number => Math.min(1, Math.max(0, v));
+  const next = pivot == null || (clamp(pivot.x) === 0.5 && clamp(pivot.y) === 0.5) ? null : { x: clamp(pivot.x), y: clamp(pivot.y) };
+  const cur = clip.pivot ?? null;
+  if (next == null ? cur == null : cur != null && cur.x === next.x && cur.y === next.y) return ok(doc);
+  const copy = { ...clip };
+  if (next == null) delete copy.pivot;
+  else copy.pivot = next;
+  return ok(withClip(doc, copy));
+}
+
+/**
  * 見た目パターンを**素材として置く**（ADR-0032 決定6＝テンプレは「楽をするための素材」）。
  * 置き先は指定の列の指定の時刻。空いていなければ置かない（寄せない・上書きしない＝理由を返す）。
  *

@@ -5,6 +5,7 @@
 // 「いまの再生位置なら素材のどこか」を毎回もらい、止まっているときはそのコマで静止する。
 //
 // 元の音（#512 段2）は**鳴らす設定のときだけ**流す＝音量は `useMediaVolume`（場面形式と共有）が効かせる。
+import { warpedPlacement } from "../videoPlacement";
 import { useEffect, useRef } from "react";
 import { useMediaVolume } from "../hooks/useMediaVolume";
 import type { CSSProperties } from "react";
@@ -35,12 +36,17 @@ function insetOf(
 }
 
 export function TimelineSlotVideo({
-  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing, audioVolume, audioOnly, onUnplayable,
+  src, rect, rotation, warp, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing, audioVolume, audioOnly, onUnplayable,
 }: {
   src: string;
   /** 置き場所（**動画の座標**＝キャンバス基準）。割合への直しはここで行う（呼び出し側で作らない）。 */
   rect: { x: number; y: number; w: number; h: number };
   rotation?: number;
+  /**
+   * **ゆがみ**（ADR-0059）＝書き出しの SVG が `<g transform="matrix(…)">` で掛ける行列（反転）。
+   * 要素の中心をその行列で移し、要素の変形を「ゆがみ × 回転」にする＝同じ絵になる。
+   */
+  warp?: { matrix: readonly [number, number, number, number, number, number] };
   opacity?: number;
   fit: Fit;
   /** 寄せ（`cropAlign`）＝`cover` で切る側をどこに寄せるか。書き出しの `preserveAspectRatio` と対。 */
@@ -130,12 +136,14 @@ export function TimelineSlotVideo({
   }, []);
 
   // 音だけ流すときは**場所を取らない**（見えず・触れず・並びに影響しない）。絵は静止層が担当する。
+  // ゆがみ（ADR-0059）＝中心を行列で移し、要素の変形を「ゆがみ × 回転」にする（中心まわり＝CSS の既定の基準点）。
+  const placed = warpedPlacement(rect, rotation ?? 0, warp?.matrix);
   const style: CSSProperties = audioOnly
     ? { position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none" }
     : {
     position: "absolute",
-    left: `${(rect.x / canvas.width) * 100}%`,
-    top: `${(rect.y / canvas.height) * 100}%`,
+    left: `${(placed.x / canvas.width) * 100}%`,
+    top: `${(placed.y / canvas.height) * 100}%`,
     width: `${(rect.w / canvas.width) * 100}%`,
     height: `${(rect.h / canvas.height) * 100}%`,
     // 収め方・寄せは SVG の `preserveAspectRatio` と**同じ意味**に写す（`fitToObjectFit`＝共有）。
@@ -143,7 +151,7 @@ export function TimelineSlotVideo({
     ...(align?.x != null || align?.y != null
       ? { objectPosition: `${ALIGN_X_PCT[align.x ?? CROP_ALIGN_DEFAULT_X]} ${ALIGN_Y_PCT[align.y ?? CROP_ALIGN_DEFAULT_Y]}` }
       : {}),
-    ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
+    ...(placed.transform ? { transform: placed.transform } : {}),
     ...(opacity != null && opacity < 1 ? { opacity } : {}),
     // 切り抜きは書き出しが `<g clip-path>` で包むので、こちらも同じ所で切る。
     // ⚠️ **割合の基準は「この要素の箱」**（レビュー 🔴・2観点が同じ例で指摘）＝CSS の `inset()` は

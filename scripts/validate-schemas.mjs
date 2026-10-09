@@ -409,6 +409,7 @@ const tlAccept = [
   ['timeline: クリップ0本（作りかけの空プロジェクト）を許容', tlWith({ clips: [], groups: [], animations: [] })],
   ['timeline: sourceProjectId なし（完全新規）を許容', (() => { const { sourceProjectId, ...rest } = tlBase; return rest; })()],
   ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
+  ['timeline: 動きの支点と反転を許容（1.17・ADR-0059）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 0.5, y: 1 }, flipX: true, flipY: false })],
   ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   // 文字の体裁（#264・ADR-0032 追補3＝両形式に効く共有の語彙）。
@@ -517,6 +518,9 @@ const tlReject = [
   ['timeline: textFontIds 未知フォントは拒否（一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, textFontIds: { title: 'old-font' } })],
   ['timeline: character に必須欠落(characterId)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, character: { enabled: true } })],
   ['timeline: slotClips speed 範囲外(3.0)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, slotClips: { background: { speed: 3.0 } } })],
+  ['timeline: 動きの支点の範囲外(1.5)は拒否（1.17・ADR-0059＝箱に対する割合 0〜1）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 1.5, y: 0.5 } })],
+  ['timeline: 動きの支点の y 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 0.5 } })],
+  ['timeline: 反転が真偽でない(1)は拒否', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', flipX: 1 })],
 ];
 for (const [desc, data] of tlAccept) {
   if (vTimeline(data)) console.log(`PASS  must-accept  ${desc}`);

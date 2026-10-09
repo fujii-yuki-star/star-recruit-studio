@@ -147,6 +147,13 @@ describe('実動画をそのまま流す区間の組み立て', () => {
     expect(part, '回っているのに実動画で流した').toBeUndefined();
   });
 
+  // ⚠️ **反転した動画は組まない**（ADR-0059）＝FFmpeg の重ね合わせは矩形しか受けない。SVG がゆがみごと焼く。
+  it('反転してあるときは組まない（焼く方へ倒す＝SVG が鏡に映す）', async () => {
+    const d = doc([slot('clip_001', 0, { flipX: true })]);
+    const part = await buildVideoPart(d, { kind: 'video', startSec: 0, endSec: 2, clipId: 'clip_001' }, baseOpts);
+    expect(part, '反転しているのに実動画で流した').toBeUndefined();
+  });
+
   // ⚠️ **グループの拡大は倒せる**＝矩形へ畳み込まれるので、渡せる（回転と違う）。
   it('グループごと拡大してあるときは組める（矩形に畳み込まれる）', async () => {
     const d = doc([slot('clip_001', 0, { x: 400, y: 200, w: 800, h: 450 })], {

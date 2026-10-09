@@ -24,7 +24,7 @@ import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { rotatedBounds } from '../domain/preview/safeArea';
 import { drawnTextRect } from '../domain/text/subtitleBands';
-import { applyInterpolatedTransform, layoutScene, scaleItemContent } from './layout';
+import { applyInterpolatedTransform, layoutScene, scaleItemContent, type TransformableRect } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
 import { resolveClipBox } from '../domain/timeline/box';
@@ -63,9 +63,9 @@ export interface Box {
  * 箱へ補間済みの変換を重ねる。**規則そのものは `applyInterpolatedTransform`（場面形式と同じ1関数）に委ねる**
  * ＝「scale は中心維持 → x/y → rotation」を2か所に書かない（片方だけ直って絵が割れるのを防ぐ・§6）。
  */
-function boxWithTransform(box: Box, tr: InterpolatedTransform): Box {
+function boxWithTransform(box: Box, tr: InterpolatedTransform, pivot?: { x: number; y: number }): Box {
   const next: Box = { ...box, rotation: box.rotation ?? 0 };
-  applyInterpolatedTransform(next, tr); // 規則そのものは場面形式と同じ1関数（§6）
+  applyInterpolatedTransform(next, tr, pivot); // 規則そのものは場面形式と同じ1関数（§6）・支点は部品が持つ（ADR-0059）
   return next;
 }
 
@@ -203,7 +203,7 @@ export interface TimelineCanvasClip {
  *   そこは呼び出し側が掴ませない（`canvasHoldReason` の "group"）。
  */
 export function baseBoxPatchFromShown(
-  cc: Pick<TimelineCanvasClip, 'box' | 'ownTr'>,
+  cc: Pick<TimelineCanvasClip, 'box' | 'ownTr'> & { clip?: Pick<TimelineClip, 'pivot'> },
   shown: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
 ): { x?: number; y?: number; w?: number; h?: number; rotation?: number } {
   const tr = cc.ownTr;
@@ -215,10 +215,16 @@ export function baseBoxPatchFromShown(
   const h = shown.h != null ? shown.h / s : cc.box.h;
   if (shown.w != null) out.w = w;
   if (shown.h != null) out.h = h;
-  // 中心まわりの拡縮で左上は (w×s − w)/2 だけ左上へ動き、その後に平行移動が足される＝その逆。
-  if (shown.x != null) out.x = shown.x - (tr.x ?? 0) + (w * s - w) / 2;
-  if (shown.y != null) out.y = shown.y - (tr.y ?? 0) + (h * s - h) / 2;
   if (shown.rotation != null) out.rotation = shown.rotation - (tr.rotation ?? 0);
+  // 動きが左上をどれだけ動かすかは、素の箱の**位置によらない**（大きさ・向き・動き・支点だけで決まる）＝
+  // 原点に置いた箱へ同じ動きを当てて測り、その分を引く（中心まわりなら `(w×s − w)/2` 戻して平行移動を引くのと同じ）。
+  // ⚠️ **支点を外した部品**（ADR-0059）は、回転でも中心が動くので、式を書き写さずに同じ関数で測る。
+  if (shown.x != null || shown.y != null) {
+    const probe: TransformableRect = { x: 0, y: 0, w, h, rotation: out.rotation ?? cc.box.rotation ?? 0 };
+    applyInterpolatedTransform(probe, { ...tr, ...(tr.scale != null ? { scale: s } : {}), opacity: undefined }, cc.clip?.pivot);
+    if (shown.x != null) out.x = shown.x - probe.x;
+    if (shown.y != null) out.y = shown.y - probe.y;
+  }
   return out;
 }
 
@@ -288,7 +294,7 @@ export function timelineCanvasClipsAt(
         ? { ...keyed, y: (keyed.y ?? 0) + talk.dy, scale: (keyed.scale ?? 1) * talk.scale }
         : keyed;
       const groupedBox = composed.get(clip.id) ?? box;
-      out.push({ clip, box, groupedBox, finalBox: boxWithTransform(groupedBox, ownTr), ownTr });
+      out.push({ clip, box, groupedBox, finalBox: boxWithTransform(groupedBox, ownTr, clip.pivot), ownTr });
     }
   }
   return out;
@@ -467,6 +473,8 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // 残った素材を枠いっぱいに映す（#634）＝**素材の差し込み口だけ**（1つの素材に対する操作なので、
     // 複数の絵が入るテンプレのクリップには効かせない）。実寸が分からないときは `undefined`＝`mask` のまま。
     const fill = fillOf(clip, finalBox, opts.assetSizeOf);
+    // 反転（ADR-0059 決定2）＝**変形後の箱の中心**まわりに、箱の向き（回っていればその向き）で鏡に映す。
+    const warp = clipWarpOf(clip, finalBox);
 
     for (const item of clipItems) {
       applySimilarity(item, sim);
@@ -506,11 +514,35 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         // ⚠️ **持っていなければ付けない**＝従来の出力を1バイトも変えない。
         ...(clip.colorAdjust ? { colorAdjust: clip.colorAdjust } : {}),
         ...(clip.blendMode && clip.blendMode !== 'normal' ? { blendMode: clip.blendMode } : {}),
+        ...(warp ? { warp } : {}),
       });
     }
   }
 
   return { width: canvas.width, height: canvas.height, backgroundColor: DEFAULT_BACKGROUND_COLOR, items };
+}
+
+/**
+ * 部品の**ゆがみ**（ADR-0059 決定2・4）＝反転を、変形後の箱の中心まわり・箱の向きで鏡に映す行列。
+ * 反転しないなら `undefined`（従来の出力を変えない）。行列は `T(中心)·R(向き)·S(±1,±1)·R(−向き)·T(−中心)`。
+ */
+export function clipWarpOf(clip: Pick<TimelineClip, 'id' | 'flipX' | 'flipY'>, box: Box): LayoutItem['warp'] {
+  const fx = clip.flipX ? -1 : 1;
+  const fy = clip.flipY ? -1 : 1;
+  if (fx === 1 && fy === 1) return undefined;
+  const r = ((box.rotation ?? 0) * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  // A = R·S·R⁻¹（2×2）。
+  const a = c * c * fx + s * s * fy;
+  const b = c * s * fx - s * c * fy;
+  const d = s * s * fx + c * c * fy;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  // SVG の matrix(a b c d e f) は [a c e; b d f]。A は対称（b＝c）。
+  // ⚠️ `-0` を `0` へ（`0 === -0` なので値は同じ。並べて比べる・書き出すときに紛らわしくしない）。
+  const z = (v: number): number => (v === 0 ? 0 : v);
+  return { key: `flip_${clip.id}`, matrix: [z(a), z(b), z(b), z(d), z(cx - (a * cx + b * cy)), z(cy - (b * cx + d * cy))] };
 }
 
 /**

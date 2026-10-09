@@ -6,8 +6,9 @@
 //   ⚠️ ただし**喋っている間の動き**（ADR-0056）は線に入れない＝声が鳴っている間は、描かれた部品が線から縦にずれる
 //   （手で付けた動きの道筋を見せるための線なので、声で足される揺れは描かない）。
 //
-// 道筋は**部品の中心**で描く＝動きの拡縮・回転は**中心まわり**（`applyInterpolatedTransform`）なので、中心は
-// 素の箱の中心に**位置のずれ（x/y）を足しただけ**の所にある（拡縮・回転の動きがあっても線は曲がらない）。
+// 道筋は**動きの支点**で描く（既定は部品の中心）＝動きの拡縮・回転は**支点まわり**（`applyInterpolatedTransform`・ADR-0059）
+// なので、支点は素の箱の支点に**位置のずれ（x/y）を足しただけ**の所にある（拡縮・回転の動きがあっても線は曲がらない）。
+// ⚠️ 支点を外した部品で**中心**を描くと、回転で中心が弧を描くのに線はまっすぐ＝線と実際の動きが割れる。
 import { interpolateKeyframes } from '../project/keyframes';
 import type { Keyframe } from '../project/types';
 import type { ClipBox } from './box';
@@ -37,11 +38,20 @@ export interface MotionPath {
  * ⚠️ **点はクリップの長さの中にあるものだけ**＝縮めた帯の外に残ったキーフレームは描かれない時刻なので、掴ませない
  * （掴んで直すと、置ける範囲へ寄せられて**別の時刻に点が増える**＝`setKeyframe` は時刻を範囲へ収める）。
  */
-export function motionPathOf(box: ClipBox, keyframes: readonly Keyframe[], durationSec: number): MotionPath | null {
+export function motionPathOf(
+  box: ClipBox,
+  keyframes: readonly Keyframe[],
+  durationSec: number,
+  pivot?: { x: number; y: number },
+): MotionPath | null {
   const posKeys = keyframes.filter((k) => (k.x != null || k.y != null) && k.timeSec >= 0 && k.timeSec <= durationSec);
   if (posKeys.length === 0) return null;
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
+  // 支点（素の箱の向きで測る＝描画と同じ）。未指定＝中心。
+  const ox = ((pivot?.x ?? 0.5) - 0.5) * box.w;
+  const oy = ((pivot?.y ?? 0.5) - 0.5) * box.h;
+  const r = ((box.rotation ?? 0) * Math.PI) / 180;
+  const cx = box.x + box.w / 2 + ox * Math.cos(r) - oy * Math.sin(r);
+  const cy = box.y + box.h / 2 + ox * Math.sin(r) + oy * Math.cos(r);
   const centerAt = (t: number): { x: number; y: number } => {
     const tr = interpolateKeyframes(keyframes, t);
     return { x: cx + (tr.x ?? 0), y: cy + (tr.y ?? 0) };
