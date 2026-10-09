@@ -162,6 +162,17 @@ export interface TimelineClip extends ClipSpatial {
    */
   talkMotion?: TalkMotion;
 
+  /**
+   * **動きの支点**（ADR-0059 決定1・#1186）＝キーフレームの回転と拡縮をこの点まわりに効かせる。箱に対する割合（0〜1）。
+   * 未指定＝中心（0.5／0.5）。例：足元＝`{ x: 0.5, y: 1 }`。⚠️ **素の回転（`rotation`）は中心まわりのまま**。
+   */
+  pivot?: { x: number; y: number };
+
+  /** **左右反転**（ADR-0059 決定2）＝部品の変形後の箱の中心まわりに、中身ごと鏡に映す。未指定＝しない。 */
+  flipX?: boolean;
+  /** **上下反転**（ADR-0059 決定2）。 */
+  flipY?: boolean;
+
   /** kind='voice' のとき必須（読み上げの中身・schema の if/then で強制）。 */
   voice?: TimelineVoice;
 
@@ -257,4 +268,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.16';
+export const TIMELINE_SCHEMA_VERSION = '1.17';

@@ -37,7 +37,7 @@ import {
   visualPlacementFor,
   moveClip,
   setVisualClipContent,
-  setClipBlendMode, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
+  setClipBlendMode, setClipFlip, setClipPivot, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
   setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip, trimClips, trimTargetsAt,
@@ -589,6 +589,10 @@ export interface TimelineState {
   setSelectedColorAdjust: (patch: { brightness?: number; contrast?: number; saturation?: number; temperature?: number }) => void;
   /** 選んでいる部品の**描画モード**を直す（ADR-0044 ②）。 */
   setSelectedBlendMode: (mode: BlendMode) => void;
+  /** 選んでいる部品の**反転**（ADR-0059 決定2）。 */
+  setSelectedClipFlip: (axis: "x" | "y", on: boolean) => void;
+  /** 選んでいる部品の**動きの支点**（ADR-0059 決定1）。`null`＝中心へ戻す。 */
+  setSelectedClipPivot: (pivot: { x: number; y: number } | null) => void;
   /**
    * 作業範囲の**始まり／終わり**（#1193）。どちらも `null` ＝範囲を取っていない。
    *
@@ -1731,6 +1735,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedColorAdjust: (patch) =>
     applyEdit(set, get, (d, id) => setClipColorAdjust(d, id, patch)),
   setSelectedBlendMode: (mode) => applyEdit(set, get, (d, id) => setClipBlendMode(d, id, mode)),
+  setSelectedClipFlip: (axis, on) => applyEdit(set, get, (d, id) => setClipFlip(d, id, axis, on)),
+  setSelectedClipPivot: (pivot) => applyEdit(set, get, (d, id) => setClipPivot(d, id, pivot)),
 
   splitSelectedClip: (atSec, at = PANEL_ID.arrange) => {
     const { doc, selectedClipIds } = get();

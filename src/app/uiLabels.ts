@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
 import { AI_ASSET_SEND_MAX, EXPORT_SIZE, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX, type ExportSize } from "../domain/constants";
@@ -1126,6 +1127,14 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
   "回した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
+ * 反転した動画を切り抜いている間の静止の理由（ADR-0059）。
+ * ⚠️ 書き出しは**画面の向きのまま**切ってから中身を鏡に映すが、画面の実映像は要素ごと鏡に映るので切る位置も
+ * 映ってしまう＝別の窓になる。直せるまでは出さない側へ倒し、黙って別の絵にしない（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_FLIPPED_CROP =
+  "反転した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
+/**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
  * **全コードに文言が要る**＝理由が増えたら気づく。
  * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
@@ -2095,3 +2104,23 @@ export const REORIENT_COPY_NOTE = "（元はそのまま・素材と声ごとコ
  */
 export const TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE =
   "この映像を開けませんでした。アプリを入れ直すと見られるようになることがあります。";
+
+/**
+ * 動きの支点の選び先の名前（ADR-0059 決定1）。値は `CLIP_PIVOT_PRESETS`（domain）。
+ * ⚠️ **網羅で書く**（`satisfies`）＝選び先を足したら名前を忘れるとコンパイルで落ちる。
+ */
+export const CLIP_PIVOT_LABEL = {
+  center: "中心",
+  bottom: "下の真ん中（足元）",
+  top: "上の真ん中（頭）",
+  left: "左の真ん中",
+  right: "右の真ん中",
+  topLeft: "左上",
+  topRight: "右上",
+  bottomLeft: "左下",
+  bottomRight: "右下",
+} as const satisfies Record<ClipPivotPresetId, string>;
+/** どの選び先にも当たらない支点（外の AI などが書いた半端な値）。選び直すと選び先へ寄る。 */
+export const CLIP_PIVOT_CUSTOM_LABEL = "指定の位置";
+/** 動きの支点の説明（何に効くかを言う＝素の回転には効かない）。 */
+export const CLIP_PIVOT_HINT = "付けた動きの回転と大きさの変化を、この点を中心に効かせます（部品そのものの回転は中心のままです）。";

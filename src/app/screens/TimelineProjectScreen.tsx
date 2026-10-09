@@ -18,7 +18,7 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -45,6 +45,7 @@ import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor, emptySlotLayerIds } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
+import { CLIP_PIVOT_PRESETS, pivotPresetOf } from "../../domain/timeline/pivot";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { TimelineMarkersSection } from "../components/TimelineMarkersSection";
 import { markerClock, markersInOrder, markerTimeEq } from "../../domain/timeline/markers";
@@ -514,7 +515,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const {
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, copyClipsTo, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, copyClipsTo, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setSelectedClipFlip, setSelectedClipPivot, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
@@ -2773,6 +2774,37 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           <option value="plus-lighter">光を足す</option>
         </select>
       </label>
+      {/* 反転（ADR-0059 決定2・Premiere の「水平方向に反転」「垂直方向に反転」の型）。 */}
+      <div className="row gap-sm">
+        <label className="checkbox-row">
+          <input type="checkbox" checked={selected.flipX ?? false} {...editGuard()} onChange={(e) => setSelectedClipFlip("x", e.target.checked)} />
+          左右反転
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={selected.flipY ?? false} {...editGuard()} onChange={(e) => setSelectedClipFlip("y", e.target.checked)} />
+          上下反転
+        </label>
+      </div>
+      {/* 動きの支点（ADR-0059 決定1）＝キーフレームの回転・拡縮だけに効く（素の回転は中心のまま）。 */}
+      <label className="field">
+        <span className="field-label text-sm">動きの支点</span>
+        <select
+          className="input"
+          value={pivotPresetOf(selected.pivot) ?? ""}
+          {...editGuard()}
+          onChange={(e) => {
+            const p = CLIP_PIVOT_PRESETS.find((q) => q.id === e.target.value);
+            if (p) setSelectedClipPivot({ x: p.x, y: p.y });
+          }}
+        >
+          {pivotPresetOf(selected.pivot) == null && <option value="">{CLIP_PIVOT_CUSTOM_LABEL}</option>}
+          {CLIP_PIVOT_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>{CLIP_PIVOT_LABEL[p.id]}</option>
+          ))}
+        </select>
+      </label>
+      {/* 説明はラベルの外＝中に入れると欄の名前が説明文込みになる（読み上げで名前が長くなる）。 */}
+      <p className="field-hint">{CLIP_PIVOT_HINT}</p>
     </>
   );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
@@ -2851,7 +2883,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    */
   const selectedAnim = selected ? (doc?.animations ?? []).find((a) => a.targetId === selected.id) : undefined;
   const motionPath = selectedOnCanvas && selectedHoldReason == null && selectedAnim && selected
-    ? motionPathOf(selectedOnCanvas.box, selectedAnim.keyframes, selected.durationSec)
+    ? motionPathOf(selectedOnCanvas.box, selectedAnim.keyframes, selected.durationSec, selected.pivot)
     : null;
   /**
    * **中へ入れる層**（#818）＝いま描かれている見た目パターンの、**手の移り先がある**層だけ。
@@ -4035,7 +4067,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               ? "groupFade"
               : cropPivotDiffers(item, item.clipRect, item.rotation)
                 ? "rotatedCrop"
-                : null;
+                : item.warp != null && item.clipRect != null
+                  ? "flippedCrop"
+                  : null;
           return {
             clip, placement, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
@@ -4050,6 +4084,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
             clipRect: item.clipRect,
+            // 反転（ADR-0059）＝書き出しは SVG が中身ごと鏡に映す＝実映像にも同じ行列を掛ける。
+            warp: item.warp,
           };
         })
         .filter((v): v is NonNullable<typeof v> => v != null)
@@ -4201,6 +4237,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                           src={v.src}
                           rect={slot.rect}
                           rotation={slot.rotation}
+                          warp={v.warp}
                           opacity={v.opacity}
                           fit={v.fit}
                           align={v.align}
@@ -5334,6 +5371,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "rotatedCrop") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
             )}
+            {videoPlay.some((v) => v.clip.id === selected.id && v.held === "flippedCrop") && (
+              <p className="field-hint">{TIMELINE_VIDEO_STILL_FLIPPED_CROP}</p>
+            )}
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "unplayable") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_UNPLAYABLE}</p>
             )}
@@ -5658,8 +5698,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 key={`look-${selected.id}`}
                 scope={SECTION_SCOPE.timeline}
                 storageKey="look"
-                title="見え方（色・重ね方）"
-                defaultOpen={selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")}
+                title="見え方（色・重ね方・反転・動きの支点）"
+                defaultOpen={
+                  selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")
+                  || selected.flipX === true || selected.flipY === true || selected.pivot != null
+                }
               >
                 {lookFields}
                 <p className="text-muted">

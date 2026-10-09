@@ -9450,5 +9450,51 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     expect(el.scrollLeft).toBeCloseTo(0.5 * 36, 5); // 見えている 5 秒の1割
     fireEvent.keyDown(bar, { key: "End" });
     expect(el.scrollLeft).toBeGreaterThan(36 * 15);
+// 部品の反転と動きの支点（ADR-0059・#1186）＝「見え方」の欄から直す。付けた部品では欄を開いておく。
+describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
+  const withShape = (over: Record<string, unknown> = {}) => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, shapeType: "rect", ...over }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const openLook = () => {
+    if (!screen.queryByLabelText("左右反転")) fireEvent.click(screen.getByRole("button", { name: /見え方（色・重ね方・反転・動きの支点）/ }));
+  };
+
+  it("左右反転・上下反転を入れ外しできる", () => {
+    withShape();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openLook();
+    fireEvent.click(screen.getByLabelText("左右反転"));
+    expect(useTimelineStore.getState().doc!.clips[0].flipX).toBe(true);
+    fireEvent.click(screen.getByLabelText("上下反転"));
+    expect(useTimelineStore.getState().doc!.clips[0].flipY).toBe(true);
+    fireEvent.click(screen.getByLabelText("左右反転"));
+    expect(useTimelineStore.getState().doc!.clips[0].flipX).toBeUndefined();
+  });
+
+  it("動きの支点を選べる（足元・中心へ戻す）", () => {
+    withShape();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    openLook();
+    const select = screen.getByLabelText("動きの支点");
+    fireEvent.change(select, { target: { value: "bottom" } });
+    expect(useTimelineStore.getState().doc!.clips[0].pivot).toEqual({ x: 0.5, y: 1 });
+    fireEvent.change(select, { target: { value: "center" } });
+    expect(useTimelineStore.getState().doc!.clips[0].pivot).toBeUndefined();
+  });
+
+  it("反転・支点を付けた部品では、見え方の欄を開いておく（付けたことが見える）", () => {
+    withShape({ flipX: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("左右反転") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("外の AI などが書いた半端な支点は「指定の位置」と出す（黙って中心に見せない）", () => {
+    withShape({ pivot: { x: 0.3, y: 0.7 } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("動きの支点") as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("option", { name: "指定の位置" })).toBeTruthy();
   });
 });
