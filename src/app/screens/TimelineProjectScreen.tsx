@@ -2048,6 +2048,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const scrollRef = useRef<HTMLDivElement>(null);
   // 並びの枠の送り量と幅（全体図の枠に使う・#1319 c2）。送る・大きさが変わるたびに測り直す。
   const [scrollBox, setScrollBox] = useState({ left: 0, width: 0 });
+  // 列 id → 文書の中で何番目か（全体図は再生中も毎フレーム描き直すので、部品ごとに探し直さない）。⚠️ **途中で返す分岐より前**に置く（フックの数を回ごとに変えない）。
+  const trackIndexById = useMemo(() => new Map((doc?.tracks ?? []).map((t, i) => [t.id, i] as const)), [doc?.tracks]);
   // ⚠️ **枠の要素が替わったら付け直す**（PR #1412 レビュー 🟡）＝欄を別の領域へ運ぶ・配置の型を変えると枠が作り直される。
   //   最初の要素に縛ると、新しい枠を見張らずに送り量が古いまま止まる。要素は呼び戻しの ref で受ける。
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -4086,8 +4088,6 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const overviewView = overviewViewport(scrollBox.left, scrollBox.width, LANE_LABEL_PX, pxPerSec, totalSec);
   // ⚠️ **幅を測れてから**出す＝測る前（幅 0）は「何も見えていない」と読めて、毎回出てしまう。
   const showOverview = scrollBox.width > LANE_LABEL_PX && overviewNeeded(overviewView, totalSec);
-  // 列 id → 文書の中で何番目か（全体図は再生中も毎フレーム描き直すので、部品ごとに探し直さない）。
-  const trackIndexById = useMemo(() => new Map((doc?.tracks ?? []).map((t, i) => [t.id, i] as const)), [doc?.tracks]);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
