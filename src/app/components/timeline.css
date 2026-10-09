@@ -873,3 +873,59 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/* 全体図の帯（#1319 c2）＝全体を細く縮め、見えている範囲を枠で示す。部品の色は帯の縁の色（細くても見分けられる濃さ）。 */
+.timeline-overview {
+  position: relative;
+  height: 28px;
+  margin: 0 0 6px var(--timeline-label-w);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.timeline-overview:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+.timeline-overview-clip {
+  position: absolute;
+  min-width: 1px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--color-surface-alt);
+  pointer-events: none;
+}
+.timeline-overview-clip--video { background: var(--color-primary); }
+.timeline-overview-clip--telop { background: var(--color-yellow-strong); }
+.timeline-overview-clip--shape { background: var(--color-success); }
+.timeline-overview-clip--audio { background: var(--color-accent); }
+.timeline-overview-clip--bgm { background: var(--color-border-strong); }
+.timeline-overview-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--color-primary-soft);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.timeline-overview-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-danger);
+  pointer-events: none;
+}
+.timeline-overview-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
+  box-sizing: border-box;
+  border: 2px solid var(--color-text);
+  border-radius: 3px;
+  cursor: grab;
+}

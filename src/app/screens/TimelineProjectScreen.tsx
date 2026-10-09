@@ -105,6 +105,8 @@ import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
+import { TimelineOverview, type OverviewClip } from "../components/TimelineOverview";
+import { overviewNeeded, overviewViewport, scrollLeftCenteredAt } from "../timelineOverview";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
@@ -309,6 +311,17 @@ const CLIP_KIND_CLASS = {
   [TIMELINE_CLIP_KIND.audio]: "timeline-clip--bgm",
   [TIMELINE_CLIP_KIND.voice]: "timeline-clip--audio",
 } as const satisfies Record<TimelineClipKind, string>;
+
+/** 全体図の帯（#1319 c2）の色＝並びの帯と同じ種類分け（`CLIP_KIND_CLASS` と並べて持つ＝種類を足したら両方が型で落ちる）。 */
+const OVERVIEW_TONE = {
+  [TIMELINE_CLIP_KIND.template]: "video",
+  [TIMELINE_CLIP_KIND.slot]: "video",
+  [TIMELINE_CLIP_KIND.text]: "telop",
+  [TIMELINE_CLIP_KIND.subtitle]: "telop",
+  [TIMELINE_CLIP_KIND.shape]: "shape",
+  [TIMELINE_CLIP_KIND.audio]: "bgm",
+  [TIMELINE_CLIP_KIND.voice]: "audio",
+} as const satisfies Record<TimelineClipKind, OverviewClip["tone"]>;
 
 
 /**
@@ -2031,6 +2044,23 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     return true;
   };
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 並びの枠の送り量と幅（全体図の枠に使う・#1319 c2）。送る・大きさが変わるたびに測り直す。
+  const [scrollBox, setScrollBox] = useState({ left: 0, width: 0 });
+  const hasDoc = doc != null;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = (): void => setScrollBox((b) => (b.left === el.scrollLeft && b.width === el.clientWidth ? b : { left: el.scrollLeft, width: el.clientWidth }));
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro?.disconnect();
+    };
+    // ⚠️ **並びが出たときに1回だけ付ける**＝毎回付け直すと、再生中（毎フレーム描き直す）に見張りを作り直し続ける。
+  }, [hasDoc]);
   /**
    * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
    * 文書が変わったら決め直す＝別の動画を開いたときに前の倍率が残らない（覚えない・決定14）。
@@ -4045,6 +4075,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
+  // 全体図の帯（#1319 c2）＝いま見えている範囲。**全体が収まっていれば出さない**（送る先が無い）。
+  const overviewView = overviewViewport(scrollBox.left, scrollBox.width, LANE_LABEL_PX, pxPerSec, totalSec);
+  // ⚠️ **幅を測れてから**出す＝測る前（幅 0）は「何も見えていない」と読めて、毎回出てしまう。
+  const showOverview = scrollBox.width > LANE_LABEL_PX && overviewNeeded(overviewView, totalSec);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
@@ -4712,6 +4746,31 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 </span>
               )}
             </div>
+            {showOverview && doc && (
+              <TimelineOverview
+                totalSec={totalSec}
+                rows={doc.tracks.length}
+                clips={doc.clips.map((c) => ({
+                  id: c.id,
+                  // ⚠️ **並びと同じ上下**＝並びは文書の最後の列をいちばん上に描く（`[...doc.tracks].reverse()`）。
+                  row: Math.max(0, doc.tracks.length - 1 - doc.tracks.findIndex((t) => t.id === c.trackId)),
+                  startSec: c.startSec,
+                  endSec: clipEndSec(c),
+                  tone: OVERVIEW_TONE[c.kind],
+                }))}
+                view={overviewView}
+                playheadSec={playheadSec}
+                range={rangeInSec != null && rangeOutSec != null ? { startSec: Math.min(rangeInSec, rangeOutSec), endSec: Math.max(rangeInSec, rangeOutSec) } : null}
+                onCenterAt={(sec) => {
+                  const el = scrollRef.current;
+                  if (el) el.scrollLeft = scrollLeftCenteredAt(sec, el.clientWidth, LANE_LABEL_PX, pxPerSec, el.scrollWidth - el.clientWidth);
+                }}
+                onScrollBySec={(d) => {
+                  const el = scrollRef.current;
+                  if (el) el.scrollLeft += d * pxPerSec;
+                }}
+              />
+            )}
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
