@@ -3073,7 +3073,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 先頭側だけ 0 に張り付いて**間隔が消える**（別の列どうしなら成功として確定してしまう）。
      * 群のいちばん早い帯が 0 に着いたら、そこで**群ごと止まる**。
      */
-    const shiftFor = (sec: number): number => {
+    const shiftFor = (sec: number, copy = false): number => {
       const dt = sec - clip0.startSec;
       // ⚠️ 床に数えるのは**実際に動く帯だけ**（#754 レビュー 🔴）。連動している字幕は
       // **連動先の読み上げが群に居るときだけ**動く（居なければ時間は据え置き＝`moveClips`）。
@@ -3081,7 +3081,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       // （しかも断り文も出ないので「なぜ動かないか」が分からない）。
       const starts = (groupIds ?? [])
         .map((id) => doc0.clips.find((x) => x.id === id))
-        .filter((c): c is TimelineClip => c != null && c.voiceClipId == null)
+        // ⚠️ **写すときは連動している字幕も床に数える**（PR #1409 レビュー 🟡）＝写しは連動を外して時間ごと運ぶ
+        //   （`copyClipsTo`）ので、数えないと群でいちばん早い字幕の写しだけが 0 秒に丸められ、間隔が黙って潰れる。
+        .filter((c): c is TimelineClip => c != null && (copy || c.voiceClipId == null))
         .map((c) => c.startSec);
       return starts.length > 0 ? Math.max(dt, -Math.min(...starts)) : dt;
     };
@@ -3092,7 +3094,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       });
     /** 写しを置く先（#1248）。まとめて掴んだなら群ぜんぶ・1つなら掴んだ相手だけ。**列が変わるのは掴んだ相手だけ**（運ぶと同じ）。 */
     const copyUpdatesFor = (sec: number, trackId?: string) =>
-      groupIds ? updatesFor(shiftFor(sec), trackId) : [{ id: clipId, startSec: sec, ...(trackId ? { trackId } : {}) }];
+      groupIds ? updatesFor(shiftFor(sec, true), trackId) : [{ id: clipId, startSec: sec, ...(trackId ? { trackId } : {}) }];
     const issueOf = (sec: number, trackId?: string, copy = false): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
       if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
@@ -3125,6 +3127,31 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 「無ければ計算し直す」と書くと、**到達しない道**が残る（掴んだと見なす前に必ず1回見せるため）
      * ＝読み手に「本当に起きるのか」を追わせる（#749 レビュー）。
      */
+    /**
+     * **`Alt` の押し替えをその場で見せる**（PR #1409 レビュー 🟡・Premiere の型）＝指を止めたまま `Alt` を押し替えて離すと、
+     * 見た目は前のまま・結果だけ逆、になる（写すか運ぶかは離した瞬間の押し方で決まる）。運んでいる間だけ `Alt` の上げ下げを受け、
+     * 最後の指の位置で見せ直す。⚠️ `preventDefault` で窓のメニューへ焦点が移るのも止める（その後の `Space`／`Delete` を奪わせない）。
+     */
+    let lastPointer: PointerEvent | null = null;
+    let showLatest: ((ev: PointerEvent) => void) | null = null;
+    const onAltKey = (k: KeyboardEvent): void => {
+      if (k.key !== "Alt") return;
+      k.preventDefault();
+      if (!lastPointer || !showLatest) return;
+      showLatest(new MouseEvent("pointermove", {
+        clientX: lastPointer.clientX, clientY: lastPointer.clientY,
+        ctrlKey: k.ctrlKey, shiftKey: k.shiftKey, metaKey: k.metaKey, altKey: k.type === "keydown",
+      }) as PointerEvent);
+    };
+    const stopAltKeys = (): void => {
+      window.removeEventListener("keydown", onAltKey);
+      window.removeEventListener("keyup", onAltKey);
+    };
+    // ⚠️ 左ボタン以外は `beginDrag` が受けない＝ここで購読すると外す人がいない。
+    if (mode === "move" && e.button === 0) {
+      window.addEventListener("keydown", onAltKey);
+      window.addEventListener("keyup", onAltKey);
+    }
     let lastShownSec = origin;
     beginDrag(e, {
       // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する。
@@ -3141,7 +3168,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           // ⚠️ **群の丸めは運ぶときだけ**（PR #1338 レビュー 🟡）＝端を動かすときに確定するのは掴んだ帯だけ
           //   （`trimClipById`）。群の床を掛けると、選んでいる別の帯が 0 秒にあるだけで**黙って左へ伸びなくなる**。
           const grouped = mode === "move" && groupIds != null;
-          const shiftSec = grouped ? shiftFor(raw) : undefined;
+          const shiftSec = grouped ? shiftFor(raw, copyOf(e2)) : undefined;
           let sec = grouped ? clip0.startSec + (shiftSec ?? 0) : raw;
           // ⚠️ **端は限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝隣の帯・素材の限界・使い切りの手前で
           //   止まり、離すとそこで確定する（以前は赤くなって元の長さに戻っていた＝他社に無い型）。止まる位置は
@@ -3167,11 +3194,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           // 吸着の先とちょうど同じ所で止まったなら線も残す（同じ着地点で合図が指の距離によって変わる、を作らない）。
           setSnapGuideSec(stopped && (guideSec == null || Math.abs(guideSec - sec) > 1e-6) ? null : guideSec);
         };
+        lastPointer = ev;
+        showLatest = show;
         show(ev);
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
         autoScroll.track(scrollRef.current, ev, show);
       },
       onEnd: (ev, started) => {
+        stopAltKeys();
         autoScroll.stop();
         setSnapGuideSec(null);
         if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
@@ -3199,7 +3229,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) skipNextClick(); },
+      onCancel: (started) => { stopAltKeys(); autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) skipNextClick(); },
     });
   };
 

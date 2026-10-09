@@ -5255,6 +5255,47 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.overlap);
     });
 
+    // ⚠️ **押し替えをその場で見せる**（PR #1409 レビュー 🟡）＝指を止めたまま Alt を離すと、見た目は写すのに結果は運ぶ、を作らない。
+    it("指を止めたまま Alt を離すと、その場で運ぶ見た目に戻り、離せば運ぶ", () => {
+      two();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 10, { drop: false });
+      expect(band("あ").className).toContain("timeline-clip--copying");
+      fireEvent.keyUp(window, { key: "Alt", altKey: false });
+      expect(band("あ").className).not.toContain("timeline-clip--copying");
+      expect(container.querySelectorAll('[data-testid="clip-copy-source"]')).toHaveLength(0);
+      fireEvent.keyDown(window, { key: "Alt", altKey: true });
+      expect(band("あ").className).toContain("timeline-clip--copying"); // 押し直せば写す見た目に戻る
+      fireEvent.keyUp(window, { key: "Alt", altKey: false });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 10, clientY: 0, altKey: false });
+      expect(starts()).toEqual([["clip_001", 10], ["clip_002", 5]]);
+    });
+
+    // ⚠️ **写すときは連動している字幕も 0 秒の床に数える**（PR #1409 レビュー 🟡）＝写しは時間ごと運ぶので、
+    //   数えないと、いちばん早い字幕の写しだけが 0 秒に丸められて間隔が潰れる。
+    it("連動している字幕を含めて群ごと写すとき、0秒の壁で群ごと止まる（間隔を潰さない）", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_005", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+        clips: [
+          { id: "clip_sub", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 1, durationSec: 0.5, x: 0, y: 900, w: 1920, h: 120, voiceClipId: "clip_voice" },
+          { id: "clip_voice", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 1, durationSec: 0.5, voice: { text: "よろしく", status: "none" } },
+          // ⚠️ 短くしておく＝写しは同じ列へ置くので、元と重ならない長さにする（重なれば全か無かで何も置かれない）。
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_005", startSec: 3, durationSec: 0.5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        ],
+      });
+      useTimelineStore.setState({ selectedClipIds: ["clip_sub", "clip_001"] });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), -36 * 5); // 5秒ぶん左へ（群の先頭＝字幕は 1秒しかない）
+      const clips = useTimelineStore.getState().doc!.clips;
+      const copies = clips.filter((c) => !["clip_sub", "clip_voice", "clip_001"].includes(c.id));
+      expect(copies).toHaveLength(2);
+      const sub = copies.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+      const text = copies.find((c) => c.kind === TIMELINE_CLIP_KIND.text)!;
+      expect(sub.startSec).toBeCloseTo(0, 5);
+      expect(text.startSec).toBeCloseTo(2, 5); // 2秒の間隔が保たれる（3 - 1）
+      expect(sub.voiceClipId).toBeUndefined(); // 写しは連動を外す
+    });
+
     it("まとめて選んでいれば群ごと写す（元は全部残る・間隔はそのまま）", () => {
       two();
       useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });

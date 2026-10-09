@@ -43,6 +43,7 @@ export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
   { keys: "Ctrl+Z／Ctrl+Y", action: "取り消す／やり直す", codes: ["z", "y"] },
   { keys: "Ctrl＋ホイール", action: "並びの表示倍率を変える（マウスの位置を中心に）", codes: [] },
   { keys: "Ctrl を押しながら運ぶ", action: "吸着を一時的に切る", codes: [] },
+  { keys: "Alt を押しながら運ぶ", action: "元を残して、運んだ先へ写しを置く（離すときに押していれば写す）", codes: [] },
   { keys: "`", action: "指している欄を広げる／元に戻す", codes: ["`"] },
   { keys: "?", action: "この一覧を開く", codes: ["?"] },
 ];
