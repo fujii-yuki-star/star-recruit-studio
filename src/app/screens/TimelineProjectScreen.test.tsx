@@ -9401,6 +9401,21 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     expect(el.scrollLeft).toBe(15 * 36 - 90); // 見えている 180px の真ん中に 15 秒
   });
 
+  it("枠を掴んで運ぶと、動かした割合ぶん並びを送る（真ん中へ跳ばない）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ **途中まで送った所から掴む**＝0 秒付近で掴むと、真ん中へ跳んでも送り量が 0 のままで見分けられない（変異チェックで露見）。
+    const el = sizeScroller(container, LABEL + 180, 360); // 見えているのは 10〜15 秒（帯の 50〜75%）
+    const bar = screen.getByTestId("timeline-overview");
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const win = screen.getByTestId("timeline-overview-window");
+    fireEvent.pointerDown(win, { pointerId: 1, button: 0, clientX: 110, clientY: 5 }); // 枠の中（11 秒）
+    expect(el.scrollLeft).toBe(360); // 掴んだだけでは送らない（真ん中へ跳ばすと 11 秒が真ん中＝306）
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 130, clientY: 5 }); // 帯の 1割＝2秒ぶん
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 130, clientY: 5 });
+    expect(el.scrollLeft).toBeCloseTo(360 + 2 * 36, 5);
+  });
+
   it("矢印キーで見えている幅の1割ずつ送り、End で端へ", () => {
     long();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
