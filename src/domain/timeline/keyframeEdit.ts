@@ -104,6 +104,9 @@ export function isTargetLocked(doc: TimelineProject, targetId: string): boolean 
 export function clampProp(prop: KeyframeProp, v: number): number {
   if (prop === 'opacity') return Math.min(Math.max(0, v), 1);
   if (prop === 'scale') return Math.max(GROUP_MIN_SCALE, v);
+  // 横・縦だけの倍率（ADR-0059）は**負も意味がある**（反転）が、0 は不可（schema の `not: 0`＝潰れて消える）。
+  // 0 に近い値は符号を保ったまま下限へ寄せる（0 ちょうどは正の側＝反転しない）。
+  if (prop === 'scaleX' || prop === 'scaleY') return Math.abs(v) < GROUP_MIN_SCALE ? (v < 0 ? -GROUP_MIN_SCALE : GROUP_MIN_SCALE) : v;
   return v;
 }
 

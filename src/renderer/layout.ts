@@ -319,6 +319,31 @@ export function applyInterpolatedTransform(
   if (tr.opacity != null) item.opacity = tr.opacity;
 }
 
+/** SVG の `matrix(a b c d e f)` と同じ並びの行列（x' = a·x + c·y + e・y' = b·x + d·y + f）。 */
+export type Affine = readonly [number, number, number, number, number, number];
+
+/**
+ * 点 `q` を中心に、**向き `rotDeg` の座標**で横 `sx`・縦 `sy` 倍する行列（ADR-0059）＝`T(q)·R·S·R⁻¹·T(−q)`。
+ * 反転は ±1 倍、潰す・伸ばすは縦横別々の倍率。⚠️ `-0` は `0` へ（並べて比べる・書き出すときに紛らわしくしない）。
+ */
+export function scaleAround(q: { x: number; y: number }, rotDeg: number, sx: number, sy: number): Affine {
+  const r = (rotDeg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const a = c * c * sx + s * s * sy;
+  const b = c * s * (sx - sy);
+  const d = s * s * sx + c * c * sy;
+  const z = (v: number): number => (v === 0 ? 0 : v);
+  return [z(a), z(b), z(b), z(d), z(q.x - (a * q.x + b * q.y)), z(q.y - (b * q.x + d * q.y))];
+}
+
+/** 行列の合成＝`m2` を当ててから `m1` を当てる（`m1 ∘ m2`）。 */
+export function composeAffine(m1: Affine, m2: Affine): Affine {
+  const [a1, b1, c1, d1, e1, f1] = m1;
+  const [a2, b2, c2, d2, e2, f2] = m2;
+  return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1];
+}
+
 /** 画面の座標（下向きが正）で、ベクトルを `deg` 度回す（SVG の `rotate` と同じ向き＝時計回り）。 */
 function rotateVec(x: number, y: number, deg: number): [number, number] {
   if (deg === 0) return [x, y];
@@ -608,6 +633,12 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       applyInterpolatedTransform(item, tr);
       // 大きさの動きは**中身ごと**（#1371）＝箱だけ縮めると字が「…」で切れる。
       if (tr.scale != null) scaleItemContent(item, tr.scale);
+      // 横・縦だけの倍率（ADR-0059 段階2）＝要素の**中心**まわり・要素の向きで、ゆがみとして描く（共有の `$defs/Keyframe`）。
+      const sx = tr.scaleX ?? 1;
+      const sy = tr.scaleY ?? 1;
+      if (sx !== 1 || sy !== 1) {
+        item.warp = { key: `warp_${item.id}`, matrix: scaleAround({ x: item.x + item.w / 2, y: item.y + item.h / 2 }, item.rotation ?? 0, sx, sy) };
+      }
     }
   }
   // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。

@@ -24,7 +24,7 @@ import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { rotatedBounds } from '../domain/preview/safeArea';
 import { drawnTextRect } from '../domain/text/subtitleBands';
-import { applyInterpolatedTransform, layoutScene, scaleItemContent, type TransformableRect } from './layout';
+import { applyInterpolatedTransform, composeAffine, layoutScene, scaleAround, scaleItemContent, type Affine, type TransformableRect } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
 import { resolveClipBox } from '../domain/timeline/box';
@@ -474,7 +474,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // 複数の絵が入るテンプレのクリップには効かせない）。実寸が分からないときは `undefined`＝`mask` のまま。
     const fill = fillOf(clip, finalBox, opts.assetSizeOf);
     // 反転（ADR-0059 決定2）＝**変形後の箱の中心**まわりに、箱の向き（回っていればその向き）で鏡に映す。
-    const warp = clipWarpOf(clip, finalBox);
+    const warp = clipWarpOf(clip, finalBox, { sx: ownTr.scaleX, sy: ownTr.scaleY });
 
     for (const item of clipItems) {
       applySimilarity(item, sim);
@@ -523,26 +523,36 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
 }
 
 /**
- * 部品の**ゆがみ**（ADR-0059 決定2・4）＝反転を、変形後の箱の中心まわり・箱の向きで鏡に映す行列。
- * 反転しないなら `undefined`（従来の出力を変えない）。行列は `T(中心)·R(向き)·S(±1,±1)·R(−向き)·T(−中心)`。
+ * 部品の**ゆがみ**（ADR-0059 決定2〜4）＝相似変換で表せない残りを1つの行列にする。持たなければ `undefined`（従来の出力を変えない）。
+ * - **反転**（`flipX`／`flipY`）＝変形後の箱の**中心**まわり・箱の向きで ±1 倍。
+ * - **縦横別々の大きさ**（キーフレームの `scaleX`／`scaleY`）＝変形後の箱の**動きの支点**（`pivot`・未指定＝中心）まわり・箱の向き。
+ *   一様の部分（`scale`）は箱の大きさで描く（相似変換）ので、ここは残りだけ。
+ * 合成は「反転してから縦横を変える」（`squash ∘ flip`）。
  */
-export function clipWarpOf(clip: Pick<TimelineClip, 'id' | 'flipX' | 'flipY'>, box: Box): LayoutItem['warp'] {
+export function clipWarpOf(
+  clip: Pick<TimelineClip, 'id' | 'flipX' | 'flipY' | 'pivot'>,
+  box: Box,
+  squash?: { sx?: number; sy?: number },
+): LayoutItem['warp'] {
   const fx = clip.flipX ? -1 : 1;
   const fy = clip.flipY ? -1 : 1;
-  if (fx === 1 && fy === 1) return undefined;
-  const r = ((box.rotation ?? 0) * Math.PI) / 180;
-  const c = Math.cos(r);
-  const s = Math.sin(r);
-  // A = R·S·R⁻¹（2×2）。
-  const a = c * c * fx + s * s * fy;
-  const b = c * s * fx - s * c * fy;
-  const d = s * s * fx + c * c * fy;
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  // SVG の matrix(a b c d e f) は [a c e; b d f]。A は対称（b＝c）。
-  // ⚠️ `-0` を `0` へ（`0 === -0` なので値は同じ。並べて比べる・書き出すときに紛らわしくしない）。
-  const z = (v: number): number => (v === 0 ? 0 : v);
-  return { key: `flip_${clip.id}`, matrix: [z(a), z(b), z(b), z(d), z(cx - (a * cx + b * cy)), z(cy - (b * cx + d * cy))] };
+  const sx = squash?.sx ?? 1;
+  const sy = squash?.sy ?? 1;
+  if (fx === 1 && fy === 1 && sx === 1 && sy === 1) return undefined;
+  const rot = box.rotation ?? 0;
+  const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+  const flip = fx === 1 && fy === 1 ? undefined : scaleAround(center, rot, fx, fy);
+  let squashM: Affine | undefined;
+  if (sx !== 1 || sy !== 1) {
+    // 支点（素の箱の向きで測る＝`applyInterpolatedTransform` と同じ）。
+    const r = (rot * Math.PI) / 180;
+    const ox = ((clip.pivot?.x ?? 0.5) - 0.5) * box.w;
+    const oy = ((clip.pivot?.y ?? 0.5) - 0.5) * box.h;
+    const p = { x: center.x + ox * Math.cos(r) - oy * Math.sin(r), y: center.y + ox * Math.sin(r) + oy * Math.cos(r) };
+    squashM = scaleAround(p, rot, sx, sy);
+  }
+  const matrix = flip && squashM ? composeAffine(squashM, flip) : (squashM ?? flip)!;
+  return { key: `warp_${clip.id}`, matrix };
 }
 
 /**

@@ -111,11 +111,39 @@ const shape = (over: Partial<TimelineClip> = {}): TimelineClip =>
   ({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0, durationSec: 5, x: 100, y: 100, w: 200, h: 100, shapeType: 'rect', fillColor: '#ff0000', ...over }) as TimelineClip;
 const opts = { templateOf: () => undefined };
 
+describe('clipWarpOf の縦横別々の大きさ（ADR-0059 段階2）', () => {
+  const b = { x: 0, y: 0, w: 100, h: 50 };
+  it('動きの支点まわりに縦横を変える（足元を支点に縦に潰すと、足元は動かない）', () => {
+    const m = clipWarpOf({ id: 'clip_001', pivot: { x: 0.5, y: 1 } }, b, { sx: 1, sy: 0.5 })!.matrix;
+    // 足元 (50,50) は動かない＝y' = 0.5·y + f で 50 → 50（f = 25）。
+    expect(m).toEqual([1, 0, 0, 0.5, 0, 25]);
+  });
+  it('支点が無ければ中心まわり', () => {
+    expect(clipWarpOf({ id: 'clip_001' }, b, { sx: 2, sy: 1 })!.matrix).toEqual([2, 0, 0, 1, -50, 0]);
+  });
+  it('反転と合わせると「反転してから縦横を変える」（中心は動かない）', () => {
+    const m = clipWarpOf({ id: 'clip_001', flipX: true }, b, { sx: 0.5, sy: 1 })!.matrix;
+    // 中心 (50,25) は動かない・横は −0.5 倍。
+    expect([m[0], m[3]]).toEqual([-0.5, 1]);
+    expect(near(m[0] * 50 + m[2] * 25 + m[4], 50) && near(m[1] * 50 + m[3] * 25 + m[5], 25)).toBe(true);
+  });
+  it('縦横とも 1 で反転も無ければ持たない', () => {
+    expect(clipWarpOf({ id: 'clip_001' }, b, { sx: 1, sy: 1 })).toBeUndefined();
+  });
+});
+
 describe('layoutTimelineAt と SVG（描画の核は1つ・ADR-0001）', () => {
   it('反転した部品は、その部品の中身だけを <g transform="matrix(…)"> で包む', () => {
     const layout = layoutTimelineAt(doc([shape({ flipX: true })]), 1, opts);
-    expect(layout.items.every((i) => i.warp?.key === 'flip_clip_001')).toBe(true);
+    expect(layout.items.every((i) => i.warp?.key === 'warp_clip_001')).toBe(true);
     expect(layoutToSvg(layout)).toContain('<g transform="matrix(-1 0 0 1 400 0)">');
+  });
+
+  it('キーフレームの横だけの倍率は、その部品のゆがみになる', () => {
+    const anim = [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scaleX: 0.5 }] }];
+    const layout = layoutTimelineAt(doc([shape()], anim), 1, opts);
+    // 箱 (100,100,200,100) の中心 (200,150) まわりに横 0.5。
+    expect(layout.items[0].warp?.matrix).toEqual([0.5, 0, 0, 1, 100, 0]);
   });
 
   it('反転しない部品は包まない（既に作った動画の絵を変えない）', () => {

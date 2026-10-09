@@ -368,6 +368,9 @@ const KEYFRAME_FIELDS: { prop: KeyframeProp; label: string; neutral: number; ste
   { prop: 'x', label: '横のずれ（px）', neutral: 0, step: 10 },
   { prop: 'y', label: '縦のずれ（px）', neutral: 0, step: 10 },
   { prop: 'scale', label: '大きさ（倍）', neutral: 1, step: 0.1 },
+  // 潰す・伸ばす（ADR-0059 段階2）＝大きさに**掛ける**。負の数で、その向きに裏返る。
+  { prop: 'scaleX', label: '横の大きさ（倍・負で裏返す）', neutral: 1, step: 0.1 },
+  { prop: 'scaleY', label: '縦の大きさ（倍・負で裏返す）', neutral: 1, step: 0.1 },
   { prop: 'rotation', label: '傾き（度）', neutral: 0, step: 5 },
   { prop: 'opacity', label: '濃さ（0〜1）', neutral: 1, step: 0.1 },
 ];
