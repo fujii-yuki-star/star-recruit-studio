@@ -1,4 +1,6 @@
 // このパソコンの中で動画案を作る（ADR-0051 決定2）＝指示文・検証は Gemini と共有し、正典 schema で出力の形を縛る。
+import { planPartCap } from '../../domain/ai/planSanity';
+import { AI_PLAN_SCENES_PER_PART_MAX } from '../../domain/constants';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import validPlanFixture from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
@@ -35,7 +37,7 @@ beforeEach(() => {
 });
 
 describe('LocalVideoPlanProvider（ADR-0051）', () => {
-  it('Gemini と同じ指示文（に差し込みの印の指示を足したもの）を渡し、出力の形は正典の schema そのもので縛る', async () => {
+  it('Gemini と同じ指示文（に差し込みの印の指示を足したもの）を渡し、出力の形は正典の schema の写し（パートと場面の数の上限だけ足す）で縛る', async () => {
     localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
     await new LocalVideoPlanProvider().generateVideoPlan(input());
     const [system, user, schema] = localAiGenerateMock.mock.calls[0];
@@ -44,7 +46,20 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     expect(LOCAL_VIDEO_PLAN_OPTIONS).toEqual({ properNounPlaceholders: true, askVisualWish: true });
     expect(system).toBe(expected.system);
     expect(user).toBe(expected.user);
-    expect(JSON.parse(schema)).toEqual(aiVideoPlanSchema);
+    const sent = JSON.parse(schema);
+    // 上限（#1415）は尺から決める。上限を外せば正典と同じ＝ほかは何も変えていない（正典は弱めない・ADR-0051）。
+    expect(sent.properties.parts.maxItems).toBe(planPartCap(input().targetDurationSec));
+    expect(sent.properties.parts.items.properties.scenes.maxItems).toBe(AI_PLAN_SCENES_PER_PART_MAX);
+    delete sent.properties.parts.maxItems;
+    delete sent.properties.parts.items.properties.scenes.maxItems;
+    expect(sent).toEqual(aiVideoPlanSchema);
+  });
+
+  // ⚠️ **検証は元の schema**（ADR-0051）＝上限を越えた案（手で書いた・外の AI など）が来ても、正典に合えば通す。
+  it('書かせるときの上限を越えるパートの案でも、正典に合えば受け取る（検証は元の schema）', async () => {
+    const many = { ...validPlanFixture, parts: Array.from({ length: planPartCap(input().targetDurationSec) + 3 }, () => validPlanFixture.parts[0]) };
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(many));
+    await expect(new LocalVideoPlanProvider().generateVideoPlan(input())).resolves.toBeTruthy();
   });
 
   it('正典の検証に通った構成案だけを返す', async () => {

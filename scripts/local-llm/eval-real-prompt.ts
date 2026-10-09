@@ -7,7 +7,11 @@
 // `baseline`＝**段階1の前**（差し込みの印を使わない指示文・整えない・割り当てない）／`stage1`＝段階1まで（見せたいものを
 // 書かせない・割り当てない）／省略（`current`）＝今のアプリと同じ（見た目の絞り込み・段階2の割り当てまで）。前後を比べる基準に使う。
 // 結果は `docs/yuko_recruit_docs/local-llm-build.md` の「点数」に段階ごとに記録する（前後を比べる）。
+// ⚠️ **アプリと同じ依頼か**（#1415）＝0.5.2 以降のアプリ（Rust の `serde_json` に `preserve_order`）とは1文字も違わないことを
+//   確かめてある（縛りの形・指示文・入力の文）。環境変数 `SORT_SCHEMA=1` で、**0.5.1 までのアプリと同じく縛りの形の項目を
+//   アルファベット順に並べ替えて**送る（並べ替えの影響を測るため）。
 import { writeFileSync, mkdirSync } from 'node:fs';
+import http from 'node:http';
 import { join } from 'node:path';
 import aiVideoPlanSchema from '../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
 import { buildVideoPlanMessages } from '../../src/domain/ai/buildVideoPlanRequest';
@@ -15,6 +19,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import { stripCodeFence } from '../../src/domain/ai/validateVideoPlan';
 import { sanitizeAiVideoPlan } from '../../src/domain/ai/sanitizeVideoPlan';
 import { refineVideoPlan } from '../../src/domain/ai/refineVideoPlan';
+import { generationSchemaFor } from '../../src/domain/ai/planSanity';
 import type { ShortenText } from '../../src/domain/ai/refineVideoPlan';
 import { buildShortenMessages, parseShortenResponse } from '../../src/domain/ai/shortenTextRequest';
 import type { AiVideoPlan } from '../../src/domain/ai/types';
@@ -49,7 +54,30 @@ const toneArg = process.argv[5];
 if (outDir) mkdirSync(outDir, { recursive: true });
 
 /** アプリの `local_ai_generate` と同じ本文で1回頼む（Rust の `build_request_body` と同じ形）。 */
-async function chat(system: string, user: string, schema: unknown): Promise<{ content: string; timings?: Record<string, number> }> {
+function postJson(url: string, body: unknown): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const q = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } }, (r) => {
+      let d = '';
+      r.setEncoding('utf8');
+      r.on('data', (c: string) => (d += c));
+      r.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+    });
+    q.on('error', reject);
+    q.end(JSON.stringify(body));
+  });
+}
+
+/** 項目をアルファベット順に並べ替える（0.5.1 までのアプリ＝`serde_json` の既定と同じ）。 */
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]));
+  return v;
+}
+const SORT_SCHEMA = process.env.SORT_SCHEMA === '1';
+
+async function chat(system: string, user: string, schemaIn: unknown): Promise<{ content: string; timings?: Record<string, number> }> {
+  const schema = SORT_SCHEMA ? sortKeys(schemaIn) : schemaIn;
   const body = {
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
     response_format: { type: 'json_schema', json_schema: { name: 'ai_video_plan', schema } },
@@ -58,8 +86,8 @@ async function chat(system: string, user: string, schema: unknown): Promise<{ co
     // アプリ（Rust の `MAX_OUTPUT_TOKENS`）と同じ上限＝止まらない回で5分待って落ちない（ADR-0052 追補6）。
     max_tokens: 3072,
   };
-  const r = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const json = (await r.json()) as { choices?: { message?: { content?: string } }[]; timings?: Record<string, number> };
+  // ⚠️ `fetch` は応答の頭を 5 分で打ち切る＝止まらない回（最大 3072 トークン）で道具のほうが落ちる。素の http で待つ。
+  const json = (await postJson(`${base}/v1/chat/completions`, body)) as { choices?: { message?: { content?: string } }[]; timings?: Record<string, number> };
   return { content: json.choices?.[0]?.message?.content ?? '', timings: json.timings };
 }
 
@@ -120,7 +148,8 @@ for (const c of cases('16:9')) {
   if (toneArg) c.input = { ...c.input, tone: toneArg };
   const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline, askVisualWish: stage2 });
   const t0 = Date.now();
-  const res = await chat(system, user, aiVideoPlanSchema);
+  // アプリと同じく、書かせるときだけパートと場面の数に上限を付ける（#1415）。`NO_CAP=1` で上限なし（0.5.1 までと同じ）。
+  const res = await chat(system, user, process.env.NO_CAP === '1' ? aiVideoPlanSchema : generationSchemaFor(aiVideoPlanSchema, c.input.targetDurationSec));
   const genMs = Date.now() - t0;
   const result = parseAndValidateVideoPlan(res.content);
   const scoreCtx = {
