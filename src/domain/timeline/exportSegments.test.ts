@@ -65,6 +65,9 @@ describe('そのまま流せる動画か（1つ緩めるたびに1本足す）',
 
   it('⚠️ 回していたら倒せない', () => {
     expect(clipIsPassThroughVideo(videoClip({ rotation: 10 }), NO_ANIM)).toBe(false);
+    // 反転（ADR-0059）＝FFmpeg の重ね合わせは鏡に映せない。
+    expect(clipIsPassThroughVideo(videoClip({ flipX: true }), NO_ANIM)).toBe(false);
+    expect(clipIsPassThroughVideo(videoClip({ flipY: true }), NO_ANIM)).toBe(false);
   });
 
   it('⚠️ 薄くしていたら倒せない', () => {

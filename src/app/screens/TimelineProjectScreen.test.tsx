@@ -9450,6 +9450,9 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     expect(el.scrollLeft).toBeCloseTo(0.5 * 36, 5); // 見えている 5 秒の1割
     fireEvent.keyDown(bar, { key: "End" });
     expect(el.scrollLeft).toBeGreaterThan(36 * 15);
+  });
+});
+
 // 部品の反転と動きの支点（ADR-0059・#1186）＝「見え方」の欄から直す。付けた部品では欄を開いておく。
 describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
   const withShape = (over: Record<string, unknown> = {}) => {
