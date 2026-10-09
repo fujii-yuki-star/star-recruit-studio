@@ -443,13 +443,17 @@ pub fn xfade_chain_args_trimmed(
     // acrossfade はオフセット引数を取らず「入力1の終端を検出して自動でクロスフェード開始」する。
     // これが映像 xfade の offset=acc−D と整合するのは、**`audio_secs` で音を尺に切ったときだけ**（#1362）＝
     // 場面 MP4 の音（AAC）は詰め物ぶん映像より少し長く、切らないと境目ごとに声が遅れていく。
+    // ⚠️ **入ってくる側は上げない**（`c2=nofade`・#1406）＝場面の音には読み上げの声が入っているので、既定の曲線
+    //   （後ろを 0 から上げる）だと**場面の頭で話し始める声が D 秒かけて小さく始まる**（実測で出だし 0.3 秒が 5〜9dB 小さい）。
+    //   プレビューは声をそのまま鳴らし、タイムライン形式への焼き出しも声にフェードを付けない＝そちらへそろえる。
+    //   出ていく側（動画の音・言い残し）は今までどおり D 秒で消す（`c1=tri`＝既定と同じ曲線）。
     let mut a_prev = "na0".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
         let a_out = format!("a{cur}");
         match st.xfade {
             Some(_) => filters.push(format!(
-                "[{a_prev}][na{cur}]acrossfade=d={d}[{a_out}]",
+                "[{a_prev}][na{cur}]acrossfade=d={d}:c1=tri:c2=nofade[{a_out}]",
                 d = st.duration_sec,
             )),
             None => filters.push(format!("[{a_prev}][na{cur}]concat=n=2:v=0:a=1[{a_out}]")),
@@ -5194,7 +5198,8 @@ mod tests {
         assert!(graph.contains("[0:a]asettb=AVTB[na0]"));
         // 映像 xfade（offset=累積−D=7.5）と音声 acrossfade（同じ D）。入力は正規化済みラベル。
         assert!(graph.contains("[nv0][nv1]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
-        assert!(graph.contains("[na0][na1]acrossfade=d=0.5[a1]"));
+        // 入ってくる側は上げない（#1406）＝場面の頭の声を小さく始めない。
+        assert!(graph.contains("[na0][na1]acrossfade=d=0.5:c1=tri:c2=nofade[a1]"));
         // 最終ラベルを map。
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v1]"));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a1]"));
