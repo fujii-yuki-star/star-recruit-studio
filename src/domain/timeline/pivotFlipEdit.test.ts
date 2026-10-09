@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { EDIT_BLOCKED, setClipFlip, setClipPivot } from './edit';
 import { CLIP_PIVOT_PRESETS, pivotPresetOf } from './pivot';
+import { clampProp } from './keyframeEdit';
+import { GROUP_MIN_SCALE } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
@@ -67,5 +69,15 @@ describe('pivotPresetOf', () => {
     expect(pivotPresetOf(undefined)).toBe('center');
     for (const p of CLIP_PIVOT_PRESETS) expect(pivotPresetOf({ x: p.x, y: p.y })).toBe(p.id);
     expect(pivotPresetOf({ x: 0.3, y: 0.7 })).toBeNull();
+  });
+});
+
+describe('clampProp の横・縦だけの倍率（ADR-0059 段階2）', () => {
+  it('負はそのまま（反転）・0 に近い値は符号を保って下限へ・0 ちょうどは正の側', () => {
+    expect(clampProp('scaleX', -1)).toBe(-1);
+    expect(clampProp('scaleY', 2)).toBe(2);
+    expect(clampProp('scaleX', -GROUP_MIN_SCALE / 2)).toBe(-GROUP_MIN_SCALE);
+    expect(clampProp('scaleY', GROUP_MIN_SCALE / 2)).toBe(GROUP_MIN_SCALE);
+    expect(clampProp('scaleX', 0)).toBe(GROUP_MIN_SCALE);
   });
 });

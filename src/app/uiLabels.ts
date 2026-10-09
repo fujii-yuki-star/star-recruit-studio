@@ -1132,7 +1132,7 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
  * 映ってしまう＝別の窓になる。直せるまでは出さない側へ倒し、黙って別の絵にしない（§2-5）。
  */
 export const TIMELINE_VIDEO_STILL_FLIPPED_CROP =
-  "反転した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+  "反転したり縦横の大きさを変えたりした部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で

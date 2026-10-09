@@ -14,6 +14,10 @@ export interface InterpolatedTransform {
   scale?: number;
   opacity?: number;
   rotation?: number;
+  /** 横だけの倍率（ADR-0059 段階2・`scale` に掛ける・負＝反転）。 */
+  scaleX?: number;
+  /** 縦だけの倍率（同上）。 */
+  scaleY?: number;
 }
 
 /**
@@ -21,7 +25,7 @@ export interface InterpolatedTransform {
  * 「どのプロパティが区間をまたぐか」を数える側、置く側（`domain/timeline/keyframeEdit` が再エクスポート）が
  * 同じ並びを見る＝`$defs/Keyframe` に項目が増えたとき片方だけ直って**数え落とす**、を作らない。
  */
-export const KEYFRAME_PROPS = ['x', 'y', 'scale', 'opacity', 'rotation'] as const;
+export const KEYFRAME_PROPS = ['x', 'y', 'scale', 'opacity', 'rotation', 'scaleX', 'scaleY'] as const;
 const PROPS = KEYFRAME_PROPS;
 type AnimProp = (typeof PROPS)[number];
 

@@ -391,6 +391,12 @@ export interface Keyframe {
   opacity?: number;
   /** 回転角（度）。 */
   rotation?: number;
+  /**
+   * 横だけ・縦だけの倍率（ADR-0059 段階2・#1186）＝`scale` に**掛ける**（潰す・伸ばす）。負＝その向きに反転。0 は不可。
+   * タイムライン形式は部品の動きの支点まわり、場面形式は要素の中心まわり。
+   */
+  scaleX?: number;
+  scaleY?: number;
   /** 区間 [前KF, 当KF] のイージング（#262＝名前つき／自由なカーブ）。未指定＝`linear`。 */
   easing?: EasingSpec;
 }
