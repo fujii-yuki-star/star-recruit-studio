@@ -1,6 +1,7 @@
 // 同梱の AI の動画案が「使える形」か（#1403）。
 import { describe, expect, it } from 'vitest';
-import { isHollowPlan, planRunawayLimits } from './planSanity';
+import { generationSchemaFor, isHollowPlan, planPartCap, planRunawayLimits } from './planSanity';
+import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
 import type { AiVideoPlan } from './types';
 
 const plan = (narr: (string | null)[], lines?: string[]): AiVideoPlan => ({
@@ -37,5 +38,20 @@ describe('isHollowPlan', () => {
     // 1場面目は読み上げが空でも掛け合いの行がある＝話す文が無いのは3場面のうち1つだけ（行を数えなければ2つで越える）。
     expect(isHollowPlan(plan(['', '', 'う'], ['こんにちは']))).toBe(false);
     expect(isHollowPlan(plan(['  ', ''], ['  ']))).toBe(true);
+  });
+});
+
+describe('書かせるときの上限（#1415）', () => {
+  it('パートの数は 尺÷12 秒＋2（尺が 0 でも 2・場面の上限を越えない）', () => {
+    expect(planPartCap(60)).toBe(7);
+    expect(planPartCap(30)).toBe(5);
+    expect(planPartCap(0)).toBe(2);
+    expect(planPartCap(100000)).toBe(80);
+  });
+  it('正典の写しに上限を足すだけで、正典そのものは変えない', () => {
+    const before = JSON.stringify(aiVideoPlanSchema);
+    const g = generationSchemaFor(aiVideoPlanSchema, 60) as typeof aiVideoPlanSchema & { properties: { parts: { maxItems: number } } };
+    expect(g.properties.parts.maxItems).toBe(7);
+    expect(JSON.stringify(aiVideoPlanSchema)).toBe(before);
   });
 });

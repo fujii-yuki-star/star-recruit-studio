@@ -18,6 +18,15 @@ export const AI_SCENE_MAX_DURATION_SEC = 15;
  * 止まらなかった回は 400 秒を越えた（約7倍）。正しい案を止めないよう 3 倍。
  */
 export const AI_PLAN_RUNAWAY_DURATION_FACTOR = 3;
+/**
+ * 同梱の AI に**書かせるとき**のパートの数の上限＝`ceil(尺 ÷ この秒) + AI_PLAN_PART_SLACK`（#1415）。
+ * ⚠️ **正典の検証は弱めない**（ADR-0051）＝上限を付けるのは AI に渡す縛りの写しだけ。検証は元の schema で行う。
+ * 実測（60 秒・4 お題）で正しい案のパートは 3〜6。止まらない回は「1場面ずつのパートを増やし続ける」形だった。
+ */
+export const AI_PLAN_PART_SEC = 12;
+export const AI_PLAN_PART_SLACK = 2;
+/** 同じく、1つのパートに入れる場面の数の上限（正しい案は 1〜3）。 */
+export const AI_PLAN_SCENES_PER_PART_MAX = 4;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
 // 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
 // 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は

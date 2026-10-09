@@ -2,7 +2,7 @@
 //
 // ⚠️ **正典の検証（schema）とは別**＝schema に合っていても中身が空の案がありうる（実機で「セリフが空の3場面」が
 //   「動画案ができました」として出た）。ここは「利用者に渡してよいか」を見る。
-import { AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
+import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
 import type { AiVideoPlan } from './types';
 
 /** 書いている途中で止める上限（Rust の `GenerateLimits`）。尺から決める。 */
@@ -38,4 +38,23 @@ export function isHollowPlan(plan: AiVideoPlan): boolean {
   if (scenes.length === 0) return true;
   const silent = scenes.filter((s) => !hasWords(s)).length;
   return silent * 2 > scenes.length;
+}
+
+/** 書かせるときのパートの数の上限（#1415）。尺から決める（余裕の分で少なくとも 2）・動画の場面の上限を越えない。 */
+export function planPartCap(targetDurationSec: number): number {
+  return Math.min(MAX_SCENES_PER_VIDEO, Math.ceil(targetDurationSec / AI_PLAN_PART_SEC) + AI_PLAN_PART_SLACK);
+}
+
+/**
+ * 同梱の AI に**書かせるとき**の縛りの形（#1415）＝正典の schema の写しに、パートと場面の数の上限（`maxItems`）を足す。
+ * 上限に達すると AI は配列を閉じるしかない＝「1場面ずつのパートを増やし続けて止まらない」を形で止める。
+ * ⚠️ **正典は変えない**（ADR-0051）＝返ってきた案は元の schema で検証する。上限は今より**狭くするだけ**。
+ */
+export function generationSchemaFor<T>(schema: T, targetDurationSec: number): T {
+  const copy = structuredClone(schema) as unknown as {
+    properties: { parts: { maxItems?: number; items: { properties: { scenes: { maxItems?: number } } } } };
+  };
+  copy.properties.parts.maxItems = planPartCap(targetDurationSec);
+  copy.properties.parts.items.properties.scenes.maxItems = AI_PLAN_SCENES_PER_PART_MAX;
+  return copy as unknown as T;
 }
