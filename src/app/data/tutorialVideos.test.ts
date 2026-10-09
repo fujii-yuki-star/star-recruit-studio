@@ -7,12 +7,13 @@
 // 実物だけを見ると**0件どうしの比較**にしかならず、**比較の仕組みが一度も動かない**
 //（`.sort()` を外そうが重複の見方を変えようが緑のまま＝このリポジトリで繰り返している
 // 「見えていないのに緑」）。仕組みは `catalogMismatch` に出してあるので、直接叩ける。
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { catalogMismatch, TUTORIAL_VIDEOS, TUTORIAL_VIDEO_DIR, tutorialVideoSrc } from "./tutorialVideos";
+import { catalogMismatch, TUTORIAL_VIDEOS, TUTORIAL_VIDEO_DIR, tutorialVideoResourcePath } from "./tutorialVideos";
 
-const dir = join(process.cwd(), "public", TUTORIAL_VIDEO_DIR);
+// ⚠️ **同梱物の置き場所**（#1229）＝`public/` は先へ飛べないので使わない。
+const dir = join(process.cwd(), "src-tauri", "resources", TUTORIAL_VIDEO_DIR);
 /** ⚠️ `.gitkeep` は置き場所を git に残すための印で、映像ではない。 */
 const filesThere = (): string[] => readdirSync(dir).filter((f) => !f.startsWith("."));
 
@@ -85,7 +86,21 @@ describe("同梱するチュートリアル映像（#1229）", () => {
   });
 
   it("再生する道は置き場所の下を指す", () => {
-    const v = { id: "x", title: "題", desc: "説明", file: "a.mp4", durationLabel: "1分" };
-    expect(tutorialVideoSrc(v)).toBe(`/${TUTORIAL_VIDEO_DIR}/a.mp4`);
+    expect(tutorialVideoResourcePath({ file: "a.mp4" })).toBe(`${TUTORIAL_VIDEO_DIR}/a.mp4`);
+  });
+
+  // ⚠️ **配る束に入っていること・許可の範囲に入っていること**を設定ファイルで見る（#1229）＝
+  //   どちらかが欠けると、置いたのに**配られない**か、**配られたのに 403 で再生できない**。
+  it("置き場所は同梱物として配られ、素材の口で読める", () => {
+    const conf = JSON.parse(readFileSync(join(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8")) as {
+      bundle: { resources: Record<string, string> };
+      app: { security: { assetProtocol: { scope: string[] } } };
+    };
+    expect(conf.bundle.resources[`resources/${TUTORIAL_VIDEO_DIR}`]).toBe(TUTORIAL_VIDEO_DIR);
+    expect(conf.app.security.assetProtocol.scope).toContain(`$RESOURCE/${TUTORIAL_VIDEO_DIR}/*`);
+  });
+
+  it("埋め込み（`public/`）の側には置き場所を作らない（先へ飛べない口へ戻さない）", () => {
+    expect(existsSync(join(process.cwd(), "public", TUTORIAL_VIDEO_DIR))).toBe(false);
   });
 });

@@ -1,9 +1,11 @@
 // 同梱するチュートリアル映像の目録（#1229・ADR-0046 ①）。
 //
 // ⚠️ **外の動画サイトへ置かない**（`13`）＝このソフトは社内・オフラインで使われうるので、
-// 再生に通信を要求しない。映像は `public/tutorials/` に置いて一緒に配る。
+// 再生に通信を要求しない。映像は `src-tauri/resources/tutorials/` に置いて**同梱物**として一緒に配る。
+// ⚠️ **`public/` には置かない**（#1229 の実機確認・2026-10-09）＝`public/` の物は exe に埋め込まれ、その口は
+// **途中から読む要求に応じない**ので、**シークバーで先へ飛べない**。同梱物は素材と同じ口（`asset://`）で読む（`tutorialFs.ts`）。
 // ⚠️ **目録はここ1つ**（§2-7）＝画面は並べるだけにする。映像を足すときに触るのはこのファイルと
-// `public/tutorials/` の2つで、食い違いは門番（`tutorialVideos.test.ts`）が落とす。
+// `src-tauri/resources/tutorials/` の2つで、食い違いは門番（`tutorialVideos.test.ts`）が落とす。
 
 /** 同梱する映像1本ぶん。 */
 export interface TutorialVideo {
@@ -13,13 +15,13 @@ export interface TutorialVideo {
   title: string;
   /** 何が分かる映像か（一覧の添え字）。 */
   desc: string;
-  /** `public/tutorials/` の中のファイル名。 */
+  /** `src-tauri/resources/tutorials/` の中のファイル名。 */
   file: string;
   /** 長さの目安（例「2分30秒」）。⚠️ 実際に撮れた長さを書く（見込みを書かない）。 */
   durationLabel: string;
 }
 
-/** 映像を置く場所（`public/` の下）。⚠️ **画面とテストで同じものを見る**＝綴りを2か所に書かない。 */
+/** 映像を置く場所（同梱物の中の名前＝`tauri.conf.json` の `bundle.resources` の行き先）。⚠️ **画面とテストで同じものを見る**＝綴りを2か所に書かない。 */
 export const TUTORIAL_VIDEO_DIR = "tutorials";
 
 /**
@@ -31,9 +33,9 @@ export const TUTORIAL_VIDEO_DIR = "tutorials";
  */
 export const TUTORIAL_VIDEOS: readonly TutorialVideo[] = [];
 
-/** 映像の置き場所（`<video>` に渡す道）。 */
-export function tutorialVideoSrc(video: TutorialVideo): string {
-  return `/${TUTORIAL_VIDEO_DIR}/${video.file}`;
+/** 同梱物の中での道（`resolveResource` に渡す）。画面に渡す道は `tutorialFs.ts` が組む。 */
+export function tutorialVideoResourcePath(video: Pick<TutorialVideo, "file">): string {
+  return `${TUTORIAL_VIDEO_DIR}/${video.file}`;
 }
 
 /** 目録と置き場所の食い違い（`catalogMismatch` の答え）。**そろっていれば4つとも空**。 */

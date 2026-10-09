@@ -66,3 +66,9 @@
 - 動き：1回ごとに `whisper-cli` を起こして終わらせる（常駐しない）。音は FFmpeg でその部品の使っている範囲だけを 16kHz・1チャンネルに切り出し、動画の `cache/` に一時的に置いて終わったら消す。
 - 確かめる（部品を置いた手元だけ）：`TRANSCRIBE_PROBE_WAV=<日本語の話し声.wav> cargo test --lib transcribe::tests::real_bundle -- --ignored --test-threads=1`。
 - 無いとき：「声を文字にする部品が見つかりませんでした」と断る（`TRANSCRIBE_MISSING`）＝黙って外部の AI や見本へ落とさない。
+
+## チュートリアル映像（#1229・ADR-0046 ①）
+
+- 配置先：**`src-tauri/resources/tutorials/`**（直下にファイルを置く）。目録は `src/app/data/tutorialVideos.ts` に1つ。
+- ⚠️ **ここだけは中身ごと追跡する**（`.gitignore` の例外）＝目録と置いたファイルの突き合わせを CI でも見る。
+- ⚠️ **`public/` に置かない**＝埋め込みの口は途中から読めず、シークバーで先へ飛べない。ここに置いた物は素材と同じ口（`asset://`・`$RESOURCE/tutorials/*`）で読む。

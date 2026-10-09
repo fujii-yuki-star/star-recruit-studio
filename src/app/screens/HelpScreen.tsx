@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { PlayIcon } from "../components/icons";
 import { SCREEN_TITLES } from "../screenTitles";
 import { HELP_FLOW, HELP_PLACES, HELP_TIMELINE, HELP_TIPS, type HelpStep } from "../data/helpGuide";
-import { TUTORIAL_VIDEOS, tutorialVideoSrc, type TutorialVideo } from "../data/tutorialVideos";
+import { TUTORIAL_VIDEOS, tutorialVideoResourcePath, type TutorialVideo } from "../data/tutorialVideos";
+import { tutorialVideoUrl } from "../../infrastructure/tutorialFs";
+import { TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE } from "../uiLabels";
 
 /** 案内1件（見出しは画面の名前をそのまま引く＝書き写さない・#1229）。 */
 function GuideItem({ step, index }: { step: HelpStep; index?: number }) {
@@ -36,6 +38,20 @@ function GuideItem({ step, index }: { step: HelpStep; index?: number }) {
  */
 export function HelpScreen() {
   const [playing, setPlaying] = useState<TutorialVideo | null>(null);
+  // 再生する道（`undefined`＝決めている途中・`null`＝決められなかった）。
+  // ⚠️ **同梱物の口（`asset://`）で読む**（#1229）＝埋め込み（`public/`）だと先へ飛べない。
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!playing) return;
+    let alive = true;
+    setSrc(undefined);
+    void tutorialVideoUrl(tutorialVideoResourcePath(playing)).then((u) => {
+      if (alive) setSrc(u);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [playing]);
 
   return (
     <div className="main-scroll">
@@ -51,11 +67,14 @@ export function HelpScreen() {
             <p className="page-desc text-pretty">
               実際の操作を撮った映像です。このソフトの中で再生できます（インターネットにつながっていなくても見られます）。
             </p>
-            {playing && (
+            {playing && src === null && (
+              <div className="notice notice-warn mt" role="alert">{TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE}</div>
+            )}
+            {playing && src && (
               <video
                 className="mt"
                 style={{ width: "100%", borderRadius: 8, background: "#000" }}
-                src={tutorialVideoSrc(playing)}
+                src={src}
                 controls
                 autoPlay
                 aria-label={`${playing.title}（映像）`}
