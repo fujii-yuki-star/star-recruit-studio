@@ -559,7 +559,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
     // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(301);
+    // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(302);
   });
 
 
@@ -840,7 +841,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
     // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(296);
+    // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(297);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -872,6 +874,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED（`codeMessages()` へ直に載せた）。
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
       // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
-    ).toBe(141);
+      // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP（`editBlockedMessage` 経由で等値）。
+    ).toBe(142);
   });
 });
