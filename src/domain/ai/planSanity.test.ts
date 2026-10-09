@@ -13,9 +13,9 @@ const plan = (narr: (string | null)[], lines?: string[]): AiVideoPlan => ({
 } as AiVideoPlan);
 
 describe('planRunawayLimits', () => {
-  it('場面の数は尺÷最短の長さ・長さの合計は尺の2倍', () => {
-    expect(planRunawayLimits(60)).toEqual({ maxScenes: 20, maxTotalSec: 120 });
-    expect(planRunawayLimits(10)).toEqual({ maxScenes: 4, maxTotalSec: 20 });
+  it('場面の数は尺÷最短の長さ・長さの合計は尺の3倍', () => {
+    expect(planRunawayLimits(60)).toEqual({ maxScenes: 20, maxTotalSec: 180 });
+    expect(planRunawayLimits(10)).toEqual({ maxScenes: 4, maxTotalSec: 30 });
   });
   it('場面の数は動画の上限（80）を越えない・少なくとも1', () => {
     expect(planRunawayLimits(1800).maxScenes).toBe(80);

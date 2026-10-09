@@ -22,7 +22,11 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# ⚠️ **項目の順番を保つ**（`preserve_order`・#1403 の続き・2026-10-09）＝既定では読み込んだ JSON の項目を
+#   アルファベット順に並べ替える。同梱の AI へ渡す縛りの形（JSON Schema）が並び替わると、AI はその順に書く
+#   （場面の話す文 `narrationText` が後回しになり、書かないまま同じ場面を繰り返す）。実測＝アプリが送った依頼で
+#   正常 1/6 → 順番を保つと 6/6。
+serde_json = { version = "1", features = ["preserve_order"] }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 # APIキーは OS 資格情報ストアに保存（§13§7）。MVP は Windows 優先（CLAUDE.md §3）＝Windows 資格情報マネージャ。

@@ -168,7 +168,7 @@ describe('LocalVideoPlanProvider：使える形でない案（#1403）', () => {
   it('尺から決めた上限を渡す（越えて書き続けたら Rust が途中で止める）', async () => {
     localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
     await new LocalVideoPlanProvider().generateVideoPlan(input());
-    expect(localAiGenerateMock.mock.calls[0][3]).toEqual({ maxScenes: 20, maxTotalSec: 120 });
+    expect(localAiGenerateMock.mock.calls[0][3]).toEqual({ maxScenes: 20, maxTotalSec: 180 });
   });
   it('話す内容がほとんど無い案は1度だけ作り直し、直れば返す', async () => {
     localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(hollow())).mockResolvedValueOnce(JSON.stringify(validPlanFixture));

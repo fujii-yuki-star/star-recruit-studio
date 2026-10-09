@@ -730,6 +730,7 @@ pub async fn local_ai_generate(
     let mut body = build_request_body(&system, &user, schema);
     // 少しずつ受け取る＝書き終えた場面の数を画面へ知らせる（ADR-0052 決定6）。
     body["stream"] = serde_json::json!(true);
+    keep_last_request(&body);
     // ⚠️ **止まらずに書き続けた回は、1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る（実測＝8回中1回）。
     //   作り直しても止まらなければ断る（何度も待たせない）。
     for attempt in 0..GENERATE_ATTEMPTS {
@@ -756,14 +757,34 @@ enum Attempt {
 
 /// 生の応答を残す（#1403）＝**このパソコンの記録の置き場だけ**（外へは送らない・毎回上書き）。
 /// 「できました」と出た案が空だった、のような食い違いを、あとから確かめられるようにする。
+/// ⚠️ **1つ前の回も残す**（2026-10-09 の実機確認）＝作り直すと最初の回の応答が上書きされ、
+///   「空の案」と判定された1回目の中身を確かめられなかった（作り直しは最大2回＋空の案の作り直し）。
 fn keep_last_response(content: &str) {
     if let Some(dir) = crate::trouble_log::dir() {
-        let _ = std::fs::write(dir.join(LAST_RESPONSE_FILE), content);
+        let last = dir.join(LAST_RESPONSE_FILE);
+        if last.exists() {
+            let _ = std::fs::rename(&last, dir.join(PREV_RESPONSE_FILE));
+        }
+        let _ = std::fs::write(last, content);
     }
 }
 
 /// 生の応答を残すファイルの名前（記録の置き場の中）。
 pub const LAST_RESPONSE_FILE: &str = "ai_last_response.txt";
+/// 1つ前の回の応答。
+pub const PREV_RESPONSE_FILE: &str = "ai_prev_response.txt";
+/// 最後に送った依頼（指示文・入力・縛りの形）。⚠️ **同じ依頼をアプリの外で何度も試す**ために残す
+///（2026-10-09：アプリでは止まらなかったのに、似せた入力では再現しなかった＝送った中身が違うと疑えた）。
+pub const LAST_REQUEST_FILE: &str = "ai_last_request.json";
+
+/// 最後に送った依頼を残す（このパソコンの記録の置き場だけ・毎回上書き）。
+fn keep_last_request(body: &serde_json::Value) {
+    if let Some(dir) = crate::trouble_log::dir() {
+        if let Ok(text) = serde_json::to_string_pretty(body) {
+            let _ = std::fs::write(dir.join(LAST_REQUEST_FILE), text);
+        }
+    }
+}
 
 async fn generate_once(
     app: &AppHandle,
@@ -1200,6 +1221,22 @@ mod tests {
             content: content.to_string(),
             ..StreamAcc::default()
         }
+    }
+
+    /// ⚠️ **縛りの形の項目の順番を保つ**（`serde_json` の `preserve_order`）＝並び替わると AI はその順に書き、
+    /// 話す文を後回しにして同じ場面を繰り返した（2026-10-09 の実測＝正常 1/6 → 順番を保って 6/6）。
+    #[test]
+    fn request_keeps_schema_key_order() {
+        let schema: serde_json::Value = serde_json::from_str(
+            r#"{"properties":{"sceneTitle":{},"narrationText":{},"assetRefs":{}},"required":["sceneTitle"]}"#,
+        )
+        .unwrap();
+        let body = build_request_body("s", "u", schema);
+        let text = serde_json::to_string(&body).unwrap();
+        let at = |k: &str| text.find(k).unwrap();
+        assert!(at("sceneTitle") < at("narrationText"), "{text}");
+        assert!(at("narrationText") < at("assetRefs"), "{text}");
+        assert!(at("\"properties\"") < at("\"required\""), "{text}");
     }
 
     #[test]
