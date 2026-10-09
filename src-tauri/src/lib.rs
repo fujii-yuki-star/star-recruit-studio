@@ -938,6 +938,13 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("user_assets"))
 }
 
+/// 同梱したチュートリアル映像の置き場所（#1229）。⚠️ **同梱物**＝入れたときに置かれる（`bundle.resources`）。
+/// 素材と同じ口（`asset://`）で読む＝途中から読めるので、シークバーで先へ飛べる（埋め込みの口は飛べない）。
+fn tutorials_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().resource_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("tutorials"))
+}
+
 /// 画面側の技術詳細を1行残す（#396）。
 ///
 /// ⚠️ **画面側にも同じ穴がある**＝`console.warn`/`console.error` は配布版では**どこにも残らない**
@@ -1117,7 +1124,26 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
     // ⚠️ **見張りも両方に掛ける**（PR #1183 レビュー 🟡）＝`user_assets` も `asset://` に載る
     // （`user_templates`/`user_fonts` と違い data URL を通らない）ので、片方だけ見ると
     // **`projects` は通るのに `user_assets` だけ当たらない**を黙って通す＝偽陰性を減らす主旨に反する。
-    for (dir, recursive) in [(projects_dir(app), true), (user_assets_dir(app), false)] {
+    // ⚠️ **チュートリアル映像は直下だけ**（`$RESOURCE/tutorials/*`・#1229）。同梱物の置き場所は入れたときに在るので
+    //   作れなくても困らない（作れないのは書き込めないインストール先のときで、その記録が残るだけ）。
+    // 3つ目は**当たらなかったときに何が出なくなるか**（記録に書く＝映像の置き場を写真の問題として調べ始めない）。
+    for (dir, recursive, symptom) in [
+        (
+            projects_dir(app),
+            true,
+            "素材の置き場が許可に当たらない＝写真が出ません",
+        ),
+        (
+            user_assets_dir(app),
+            false,
+            "素材の棚が許可に当たらない＝棚の写真が出ません",
+        ),
+        (
+            tutorials_dir(app),
+            false,
+            "チュートリアル映像の置き場が許可に当たらない＝使い方の映像が再生できません",
+        ),
+    ] {
         let dir = match dir {
             Ok(d) => d,
             Err(e) => {
@@ -1157,7 +1183,8 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
                 .collect();
             crate::tlog!(
                 "asset_scope",
-                "素材の置き場が許可に当たらない＝写真が出ません。道={:?} 正規化後={} 許可の綴り={:?}",
+                "{}。道={:?} 正規化後={} 許可の綴り={:?}",
+                symptom,
                 dir,
                 canon,
                 patterns

@@ -21,7 +21,8 @@ describe('generateRecovery', () => {
     ['AI_GEMINI_KEY_MISSING', 'settings'],
     ['AI_MODEL_MISSING', 'settings'],
     ['LOCAL_AI_TIMEOUT', 'shortenInput'],
-    ['LOCAL_AI_TOO_LONG', 'shortenInput'],
+    // #1403＝入力を短くしても直らない（その欄が空でも起きる）。作り直すと多くは直る＝もう一度試すが主。
+    ['LOCAL_AI_TOO_LONG', 'retry'],
     ['LOCAL_AI_START_FAILED', 'retry'],
   ])('%s の文 → %s', (code, want) => {
     expect(generateRecovery(row(code))).toBe(want);
@@ -54,7 +55,9 @@ describe('generateRecovery', () => {
     LOCAL_AI_BROKEN: 'settings',
     LOCAL_AI_START_FAILED: 'retry',
     LOCAL_AI_TIMEOUT: 'shortenInput',
-    LOCAL_AI_TOO_LONG: 'shortenInput',
+    LOCAL_AI_TOO_LONG: 'retry',
+    // #1403＝中身が空の案（作り直すと多くは直る）。
+    AI_PLAN_HOLLOW: 'retry',
     AI_GEMINI_KEY_MISSING: 'settings',
     AI_PROVIDER_UNSUPPORTED: 'settings',
   };
@@ -63,7 +66,7 @@ describe('generateRecovery', () => {
     .filter((c): c is string => !!c && !c.startsWith('AI_ASSIST_'));
 
   it('表の動画案づくりの断りは、どれも行き先が決まっている', () => {
-    expect(generationCodes.length).toBe(18);
+    expect(generationCodes.length).toBe(19); // +1＝AI_PLAN_HOLLOW（#1403）
     expect([...generationCodes].sort()).toEqual(Object.keys(EXPECTED).sort());
   });
 

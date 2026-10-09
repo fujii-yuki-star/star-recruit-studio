@@ -56,19 +56,20 @@ describe("asset:// で配れる場所は、置き場所の深さと合ってい�
     // ⚠️ **広さ（再帰かどうか）まで合わせる**＝`allow_directory` の第2引数は `true` で `**`、
     // `false` で `*` を足すので、設定が `/*` の場所を `true` で足すと**設定より広く許す**ことになる。
     for (const entry of scope) {
-      const dir = entry.replace("$APPDATA/", "").replace(/\/\*+$/, "");   // projects / user_assets
+      const dir = entry.replace(/^\$(APPDATA|RESOURCE)\//, "").replace(/\/\*+$/, "");   // projects / user_assets / tutorials
       const recursive = entry.endsWith("/**");
       expect(body).toMatch(new RegExp(String.raw`${dir}_dir\(app\),\s*${recursive}`));
     }
   });
 
-  it("`asset://` を使うのはこの2か所だけ（増えたらここも見直す）", () => {
+  it("`asset://` を使うのはこの3か所だけ（増えたらここも見直す）", () => {
     // ⚠️ **配る先が増えたら深さの確認が要る**＝`convertFileSrc` を呼ぶ場所が増えるということは、
     // 新しい置き場が `asset://` に載るということ。持ち込みフォント（バイト列で渡す）や
     // 見た目パターンの既定素材（data URL＝ADR-0021）はここに載っていない。
-    const users = ["src/infrastructure/assetFs.ts", "src/infrastructure/assetLibraryFs.ts"]
+    // ⚠️ **+1**（#1229）＝同梱したチュートリアル映像（`tutorialFs.ts`・`$RESOURCE/tutorials/*`＝直下だけ）。
+    const users = ["src/infrastructure/assetFs.ts", "src/infrastructure/assetLibraryFs.ts", "src/infrastructure/tutorialFs.ts"]
       .filter((p) => readFileSync(p, "utf-8").includes("convertFileSrc("));
-    expect(users).toHaveLength(2);
-    expect(scope).toHaveLength(2);
+    expect(users).toHaveLength(3);
+    expect(scope).toHaveLength(3);
   });
 });

@@ -506,6 +506,16 @@
   opacity: 0.9;
   z-index: 4;
 }
+/* `Alt`＋運ぶ＝写しを置く（#1248）。運んでいる帯は写し・元の位置には元の帯を薄く残す（Premiere・Resolve の型）。 */
+.timeline-clip--copying {
+  cursor: copy;
+  outline: 2px dashed var(--color-border-strong);
+  outline-offset: -2px;
+}
+.timeline-clip--copy-source {
+  opacity: 0.55;
+  pointer-events: none;
+}
 /* トリミングハンドル（左右端）。選択中は掴みやすいよう縁を強調。 */
 /* ⚠️ **当たり判定は見た目より広い**（#752-7）＝見た目と同じ 7px だと、実機で指が乗る前に本体を掴む
    （業界の型は「見た目の2倍以上」）。広げるのは**帯の内側だけ**（外へ広げると隣の帯を食う）。
@@ -862,4 +872,65 @@
   padding: 2px 6px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* 全体図の帯（#1319 c2）＝全体を細く縮め、見えている範囲を枠で示す。部品の色は帯の縁の色（細くても見分けられる濃さ）。 */
+.timeline-overview {
+  position: relative;
+  height: 28px;
+  margin: 0 0 6px var(--timeline-label-w);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.timeline-overview:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+.timeline-overview-clip {
+  position: absolute;
+  min-width: 1px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--color-surface-alt);
+  pointer-events: none;
+}
+.timeline-overview-clip--video { background: var(--color-primary); }
+.timeline-overview-clip--telop { background: var(--color-yellow-strong); }
+.timeline-overview-clip--shape { background: var(--color-success); }
+.timeline-overview-clip--audio { background: var(--color-accent); }
+.timeline-overview-clip--bgm { background: var(--color-border-strong); }
+.timeline-overview-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--color-primary-soft);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.timeline-overview-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-danger);
+  pointer-events: none;
+}
+.timeline-overview-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
+  box-sizing: border-box;
+  border: 2px solid var(--color-text);
+  border-radius: 3px;
+  cursor: grab;
+}
+/* 全体が収まっているとき（全体を表示）は場所だけ取る＝出し入れで並びが縦にずれない（PR #1412 レビュー）。 */
+.timeline-overview--idle {
+  visibility: hidden;
+  cursor: default;
 }

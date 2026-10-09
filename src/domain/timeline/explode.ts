@@ -97,6 +97,8 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // `FreeElement` に無いので、断らないと**はみ出す側が変わって別の絵**になる。
   if (clip.crop != null || clip.cropAlign != null) return { ok: false, reason: EDIT_BLOCKED.explodeCrop };
   if (clip.talkMotion?.kind === TALK_MOTION_KIND.pulse) return { ok: false, reason: EDIT_BLOCKED.explodeTalkPulse };
+  // 反転・動きの支点・縦横別々の大きさの動き（ADR-0059）＝まとまりへ移すと黙って消える・化ける。
+  if (clip.flipX || clip.flipY || clip.pivot != null || hasSquash(doc, clip)) return { ok: false, reason: EDIT_BLOCKED.explodeWarp };
 
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {
@@ -137,6 +139,12 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
     return { ok: false, reason: EDIT_BLOCKED.explodeAnchor };
   }
   return { ok: true, doc: buildExploded(doc, clip, trackIndex, [background, ...sortedByZ(withSubtitleText)], useByElement) };
+}
+
+/** 縦横別々の大きさの動き（`scaleX`／`scaleY` が 1 以外）が付いているか（ADR-0059 段階2）。 */
+function hasSquash(doc: TimelineProject, clip: TimelineClip): boolean {
+  const anim = (doc.animations ?? []).find((a) => a.targetId === clip.id);
+  return !!anim?.keyframes.some((k) => (k.scaleX != null && k.scaleX !== 1) || (k.scaleY != null && k.scaleY !== 1));
 }
 
 /** 拡大・回転の動きが付いているか（平行移動と不透明度は支点に依らないので数えない）。 */

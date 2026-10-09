@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
 import { AI_ASSET_SEND_MAX, EXPORT_SIZE, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX, type ExportSize } from "../domain/constants";
@@ -1044,6 +1045,8 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
     "切り抜き・素材の寄せがしてある部品はバラせません。そのままバラすと切り取り方が変わります。切り抜きを外し、寄せを「中央」に戻してからバラすか、バラさずに使ってください",
   TIMELINE_EDIT_EXPLODE_TALK_PULSE:
     "喋っている間に「ふくらむ」部品はバラせません。そのままバラすと、ふくらむ中心が部品ごとに変わります。動き方を「はねる」か「ゆらゆら」にするか、「動かない」にしてからバラしてください",
+  TIMELINE_EDIT_EXPLODE_WARP:
+    "反転したり、動きの支点や縦横の大きさの動きを付けたりした部品はバラせません。そのままバラすと絵が変わります。反転を外し、動きの支点を「中心」に戻し、縦横の大きさの動きを外してからバラすか、バラさずに使ってください",
   TIMELINE_EDIT_EXPLODE_TRIM_END: "切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠に切り出していない動画を入れ直すか、バラさずに使ってください",
   TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE:
     "この枠だけ切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠の動画をいったん「なし」にして入れ直してからバラしてください",
@@ -1124,6 +1127,14 @@ export const TIMELINE_VIDEO_STILL_UNPLAYABLE =
  */
 export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
   "回した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
+/**
+ * 反転した動画を切り抜いている間の静止の理由（ADR-0059）。
+ * ⚠️ 書き出しは**画面の向きのまま**切ってから中身を鏡に映すが、画面の実映像は要素ごと鏡に映るので切る位置も
+ * 映ってしまう＝別の窓になる。直せるまでは出さない側へ倒し、黙って別の絵にしない（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_FLIPPED_CROP =
+  "反転したり縦横の大きさを変えたりした部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
@@ -1685,10 +1696,12 @@ export const TROUBLE_LOG_TITLE = "うまくいかないときの記録";
  * 作られた文章の一部が混じることがある（例：たたき台づくりの応答が形に合わなかったときの中身）。
  * このパソコンから出ないので §2-6 には触れないが、**利用者はこのファイルを人に送る**ので、
  * 送る前に中身の見当がつくようにしておく。**送るのは利用者の判断**なので、伏せずに知らせる側を採る。
+ * ⚠️ **このパソコンの中での動画案づくりは、最後に送った依頼をそのまま残す**（PR #1411）＝入力した会社の情報や
+ *   写真の説明が丸ごと入る。「一部」と書くと実態より小さく見えるので、何が入るかを名指しする。
  */
 export const TROUBLE_LOG_DESC =
   "動画の書き出しや声づくりがうまくいかないとき、原因を調べるための記録がこのパソコンに残ります。"
-  + "外へは何も送りません。入力した内容の一部が記録に含まれることがあるので、"
+  + "外へは何も送りません。入力した会社の情報や写真の説明などが記録に含まれることがあるので、"
   + "作った側に見てもらうときは、この場所のファイルをお送りください。";
 export const TROUBLE_LOG_OPEN = "記録の場所を開く";
 /** 開けなかったとき（§2-5＝次の行動を示す）。 */
@@ -2086,3 +2099,30 @@ export function reorientCopyLabel(target: "portrait" | "landscape" | null): stri
 }
 /** 同じボタンの説明（押せるとき）。 */
 export const REORIENT_COPY_NOTE = "（元はそのまま・素材と声ごとコピーします）";
+
+/**
+ * 同梱したチュートリアル映像の道を決められなかったときの知らせ（#1229）。
+ * ⚠️ 同梱物は入れたときに置かれる＝欠けていれば入れ直すのが次の一歩。
+ */
+export const TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE =
+  "この映像を開けませんでした。アプリを入れ直すと見られるようになることがあります。";
+
+/**
+ * 動きの支点の選び先の名前（ADR-0059 決定1）。値は `CLIP_PIVOT_PRESETS`（domain）。
+ * ⚠️ **網羅で書く**（`satisfies`）＝選び先を足したら名前を忘れるとコンパイルで落ちる。
+ */
+export const CLIP_PIVOT_LABEL = {
+  center: "中心",
+  bottom: "下の真ん中（足元）",
+  top: "上の真ん中（頭）",
+  left: "左の真ん中",
+  right: "右の真ん中",
+  topLeft: "左上",
+  topRight: "右上",
+  bottomLeft: "左下",
+  bottomRight: "右下",
+} as const satisfies Record<ClipPivotPresetId, string>;
+/** どの選び先にも当たらない支点（外の AI などが書いた半端な値）。選び直すと選び先へ寄る。 */
+export const CLIP_PIVOT_CUSTOM_LABEL = "指定の位置";
+/** 動きの支点の説明（何に効くかを言う＝素の回転には効かない）。 */
+export const CLIP_PIVOT_HINT = "付けた動きの回転と大きさの変化を、この点を中心に効かせます（部品そのものの回転は中心のままです）。";

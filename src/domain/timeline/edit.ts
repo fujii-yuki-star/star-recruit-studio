@@ -147,6 +147,13 @@ export const EDIT_BLOCKED = {
    */
   explodeTalkPulse: 'TIMELINE_EDIT_EXPLODE_TALK_PULSE',
   /**
+   * **反転・動きの支点・縦横別々の大きさの動き**を持つ部品はバラせない（ADR-0059・PR #1414 レビュー 🔴）。
+   * ⚠️ バラすと動きは**まとまり**へ移るが、まとまりの変形は相似変換で合成する（`effectiveGroupsAt`）ので、
+   * 縦横の倍率は黙って捨てられ、支点はまとまりの外接矩形の中心に化ける。反転もバラした部品へ写らない。
+   * 黙って別の絵にしないよう、外してからバラしてもらう（`explodeTalkPulse` と同じ流儀）。
+   */
+  explodeWarp: 'TIMELINE_EDIT_EXPLODE_WARP',
+  /**
    * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
    * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
    * **その先まで流れる**（どちらも決定23「前後で絵が変わらない」に反する）。黙って別の結果に
@@ -1122,6 +1129,38 @@ export function pasteClips(
 }
 
 /**
+ * **運んだ先へ写しを置く**（#1248・`Alt`＋運ぶ＝Premiere・Resolve・Clipchamp の型）。元の部品はそのまま残る。
+ *
+ * - `updates` は**写しを置く先**（元の部品の id と、置く時刻・列）。列を省けば元と同じ列。
+ * - 規則は**複製・貼り付けと同じ**（`freshClipCopy`＝読み上げの音声は引き継がない・連動は焼き付けて外す／
+ *   新しく作る側なので**固定・隠した列・種類の違う列は断る**／**重なる所には置かない**＝押しのけない・ADR-0034 決定11）。
+ * - ⚠️ **元の部品も重なりの相手に数える**＝元は残るので、少ししか運んでいない写しは元と重なって断られる。
+ * - **全か無か**（決定15）＝1つでも置けなければ何も置かない（理由を返す）。
+ */
+export function copyClipsTo(
+  doc: TimelineProject,
+  updates: readonly { id: string; startSec: number; trackId?: string }[],
+): { ok: true; doc: TimelineProject; copiedIds: string[] } | { ok: false; reason: EditBlockedReason } {
+  const no = (reason: EditBlockedReason) => ({ ok: false as const, reason });
+  if (updates.length === 0) return no(EDIT_BLOCKED.notFound);
+  let working = doc;
+  const copiedIds: string[] = [];
+  for (const u of [...updates].sort((a, b) => a.startSec - b.startSec)) {
+    const clip = doc.clips.find((c) => c.id === u.id);
+    if (!clip) return no(EDIT_BLOCKED.notFound);
+    const trackId = u.trackId ?? clip.trackId;
+    const trackIssue = trackPlacementIssue(working, trackId, trackKindForClip(clip.kind));
+    if (trackIssue) return no(trackIssue);
+    const startSec = Math.max(0, u.startSec);
+    if (!isFreeSpan(working.clips, trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.overlap);
+    const next = freshClipCopy(working, { ...clip, trackId }, createClipId(working.clips.map((c) => c.id)), startSec);
+    working = { ...working, clips: [...working.clips, next] };
+    copiedIds.push(next.id);
+  }
+  return { ok: true, doc: working, copiedIds };
+}
+
+/**
  * 見た目パターンのクリップの**差し込み口に素材を入れる／外す**（ADR-0032 決定5＝差し込み口は生きている）。
  *
  * 固定した列（`locked`）の部品は中身も変えない＝「動かせないのに中身は変えられる」という非対称を作らない
@@ -1237,6 +1276,43 @@ export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: Ble
       return copy;
     }),
   });
+}
+
+/**
+ * 部品の**反転**を直す（ADR-0059 決定2）。`axis`＝`x`（左右）／`y`（上下）。
+ * ⚠️ **戻したらキーごと落とす**＝`false` を残すと、絵は同じなのに文書だけ変わる（取り消しが空振りする）。
+ * 絵を持たない部品（音・読み上げ）には項目が無い＝`contentField`。
+ */
+export function setClipFlip(doc: TimelineProject, clipId: string, axis: 'x' | 'y', on: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isVisualClip(clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const key = axis === 'x' ? 'flipX' : 'flipY';
+  if ((clip[key] ?? false) === on) return ok(doc);
+  const copy = { ...clip };
+  if (on) copy[key] = true;
+  else delete copy[key];
+  return ok(withClip(doc, copy));
+}
+
+/**
+ * 部品の**動きの支点**を直す（ADR-0059 決定1）。`null`＝中心へ戻す（キーごと落とす）。値は 0〜1 へ収める。
+ * 絵を持たない部品には項目が無い＝`contentField`。
+ */
+export function setClipPivot(doc: TimelineProject, clipId: string, pivot: { x: number; y: number } | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isVisualClip(clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const clamp = (v: number): number => Math.min(1, Math.max(0, v));
+  const next = pivot == null || (clamp(pivot.x) === 0.5 && clamp(pivot.y) === 0.5) ? null : { x: clamp(pivot.x), y: clamp(pivot.y) };
+  const cur = clip.pivot ?? null;
+  if (next == null ? cur == null : cur != null && cur.x === next.x && cur.y === next.y) return ok(doc);
+  const copy = { ...clip };
+  if (next == null) delete copy.pivot;
+  else copy.pivot = next;
+  return ok(withClip(doc, copy));
 }
 
 /**

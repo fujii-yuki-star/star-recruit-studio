@@ -176,6 +176,6 @@ describe("操作の分類（門番）", () => {
   it("操作の数を実数で留める（足したら、送る／手元でも当てる／受けないを決めてから数を直す）", () => {
     // ⚠️ 既定は「送る」＝足した操作は分類を忘れても送られる。**寿命・外への出口・本体の時計**を足したときに
     //   受けない一覧へ入れ忘れると、別窓から保存・書き出しが走る。数が変わったらここで立ち止まる。
-    expect(storeActions().length).toBe(120); // renameOpenTimelineProject（#1396）＝受けない／ transcribeClip・closeTranscript・placeTranscriptSubtitles・cutTranscriptLines（ADR-0058）＝受けない／ duplicateTimelineProject・dismissOpenNotice（ADR-0057）＝受けない（動画を作って開く／知らせは本体の窓だけ）／ findSilencesFor／applySilenceCandidates／closeSilenceFind（#1385）＝受けない（探す欄は本体の窓だけ）／ setSelectedClipTalkMotion（ADR-0056）＝送る（ほかの部品の編集と同じ）／importSubtitleFile（ADR-0055）＝受けない（バイト列は窓をまたげない）／ abandonHistoryGroup（ADR-0054 段階2）＝送る（begin/endHistoryGroup と同じ）／_measureAudioDurations（#1348）＝受けない（`_` で始まる本体の段取り）／applySelectedMotionPreset（#1349）＝送る（ほかの動きの編集と同じ）
+    expect(storeActions().length).toBe(123); // setSelectedClipFlip・setSelectedClipPivot（ADR-0059）＝送る（ほかの部品の編集と同じ）／ copyClipsTo（#1248）＝送る（moveClipsBy と同じ＝別窓で運んでも本体で写す）／ renameOpenTimelineProject（#1396）＝受けない／ transcribeClip・closeTranscript・placeTranscriptSubtitles・cutTranscriptLines（ADR-0058）＝受けない／ duplicateTimelineProject・dismissOpenNotice（ADR-0057）＝受けない（動画を作って開く／知らせは本体の窓だけ）／ findSilencesFor／applySilenceCandidates／closeSilenceFind（#1385）＝受けない（探す欄は本体の窓だけ）／ setSelectedClipTalkMotion（ADR-0056）＝送る（ほかの部品の編集と同じ）／importSubtitleFile（ADR-0055）＝受けない（バイト列は窓をまたげない）／ abandonHistoryGroup（ADR-0054 段階2）＝送る（begin/endHistoryGroup と同じ）／_measureAudioDurations（#1348）＝受けない（`_` で始まる本体の段取り）／applySelectedMotionPreset（#1349）＝送る（ほかの動きの編集と同じ）
   });
 });

@@ -52,7 +52,7 @@ describe.each(screens)("%s", (_name, view) => {
     },
   );
 
-  it.each(["LOCAL_AI_TIMEOUT", "LOCAL_AI_TOO_LONG", "AI_REJECTED"])("%s：入力を直す道を主にし、もう一度試すも残す", (code) => {
+  it.each(["LOCAL_AI_TIMEOUT", "AI_REJECTED"])("%s：入力を直す道を主にし、もう一度試すも残す", (code) => {
     断られた状態(msg(code));
     const nav = vi.fn();
     render(view(nav));
@@ -61,6 +61,15 @@ describe.each(screens)("%s", (_name, view) => {
     fireEvent.click(screen.getByText(EDIT_WIZARD_INPUT_LABEL));
     expect(nav).toHaveBeenCalledWith("wizard");
     expect(screen.queryByText(OPEN_AI_SETTINGS_LABEL)).toBeNull();
+  });
+
+  // #1403＝長くなりすぎ・中身が空は、入力を直しても直らない（実機＝「その他」が空でも起きた）。作り直すと多くは直る。
+  it.each(["LOCAL_AI_TOO_LONG", "AI_PLAN_HOLLOW"])("%s：もう一度試すを主にし、手動で作る道も出す", (code) => {
+    断られた状態(msg(code));
+    render(view(vi.fn()));
+    expect(isPrimary(RETRY_GENERATE_LABEL)).toBe(true);
+    expect(screen.queryByText(EDIT_WIZARD_INPUT_LABEL)).toBeNull();
+    expect(screen.getByText(START_MANUAL_LABEL)).toBeInTheDocument();
   });
 
   it("起動できなかった（ほかのアプリを閉じて再試行）は、もう一度試すだけ", () => {

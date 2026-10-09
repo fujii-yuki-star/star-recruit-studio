@@ -231,6 +231,7 @@ const mustAccept = [
   ['timelineOverlay: animations（キーフレーム）を許容（1.17・ADR-0019 ④）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, x: 100, y: 50, scale: 1.5, opacity: 1, rotation: 90, easing: 'ease-in-out' }] }] } }],
   ['keyframe: 動き方に名前つきの追加を許容（1.25・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: 'ease-in' }, { timeSec: 1, x: 10, easing: 'ease-out' }] }] } }],
   ['keyframe: 動き方に自由なカーブを許容（1.25・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [0.25, 1.6, 0.75, -0.6] } }] }] } }],
+  ['keyframe: 横だけ・縦だけの倍率を許容（負＝反転・1.33・ADR-0059）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, scaleX: -1, scaleY: 0.5 }] }] } }],
   ['scene: slotVideoStart（動画スロット再生開始・3モード）を許容（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim' }, sub: { mode: 'afterAnim' }, bg: { mode: 'delay', delaySec: 0.6 } } })],
   // 注：slotClips は startSec/endSec を各 minimum:0 でしか縛れない。**意味的な異常（反転レンジ endSec≤startSec・0尺）は
   // JSON Schema の cross-field では弾けない**（base Clip $def も同じ）＝schema が通る＝安全ではない。per-use の部分上書きが
@@ -268,6 +269,7 @@ const mustReject = [
   ['timelineOverlay: durationSec 0 は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 0 }] } }],
   ['timelineOverlay: id 形式不正(clip_001)は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'clip_001', track: 'telop', startSec: 0, durationSec: 1 }] } }],
   ['keyframe: 未知の動き方は拒否（#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: 'bounce' }] }] } }],
+  ['keyframe: 横だけの倍率 0 は拒否（潰れて消える・ADR-0059）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, scaleX: 0 }] }] } }],
   ['keyframe: カーブの x が範囲外は拒否（時間が戻る・#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [1.5, 0, 0.5, 1] } }] }] } }],
   ['keyframe: カーブの制御点が4つでないものは拒否（#262）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 1, x: 10, easing: { bezier: [0, 0, 1] } }] }] } }],
   ['timelineOverlay: animation id 形式不正(a_001)は拒否（1.17）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'a_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0 }] }] } }],
@@ -409,6 +411,7 @@ const tlAccept = [
   ['timeline: クリップ0本（作りかけの空プロジェクト）を許容', tlWith({ clips: [], groups: [], animations: [] })],
   ['timeline: sourceProjectId なし（完全新規）を許容', (() => { const { sourceProjectId, ...rest } = tlBase; return rest; })()],
   ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
+  ['timeline: 動きの支点と反転を許容（1.17・ADR-0059）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 0.5, y: 1 }, flipX: true, flipY: false })],
   ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   // 文字の体裁（#264・ADR-0032 追補3＝両形式に効く共有の語彙）。
@@ -517,6 +520,9 @@ const tlReject = [
   ['timeline: textFontIds 未知フォントは拒否（一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, textFontIds: { title: 'old-font' } })],
   ['timeline: character に必須欠落(characterId)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, character: { enabled: true } })],
   ['timeline: slotClips speed 範囲外(3.0)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, slotClips: { background: { speed: 3.0 } } })],
+  ['timeline: 動きの支点の範囲外(1.5)は拒否（1.17・ADR-0059＝箱に対する割合 0〜1）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 1.5, y: 0.5 } })],
+  ['timeline: 動きの支点の y 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', pivot: { x: 0.5 } })],
+  ['timeline: 反転が真偽でない(1)は拒否', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', flipX: 1 })],
 ];
 for (const [desc, data] of tlAccept) {
   if (vTimeline(data)) console.log(`PASS  must-accept  ${desc}`);

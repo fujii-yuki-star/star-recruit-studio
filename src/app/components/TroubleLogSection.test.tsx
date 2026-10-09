@@ -80,6 +80,6 @@ describe("うまくいかないときの記録（#396）", () => {
   it("記録に入るものを説明する（送る前に見当がつく）", async () => {
     const { container } = render(<TroubleLogSection />);
     await screen.findByRole("button", { name: "記録の場所を開く" });
-    expect(container.textContent).toMatch(/入力した内容の一部が記録に含まれることがある/);
+    expect(container.textContent).toMatch(/入力した会社の情報や写真の説明などが記録に含まれることがある/);
   });
 });

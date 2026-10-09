@@ -249,6 +249,19 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     const el = layoutScene(moved, freeTemplate, { timeSec: 2, animations: [slide] }).items.find((i) => i.id === 'free_001') as FillItem;
     expect(el.x).toBe(500); // el.x(500) + オフセット0
   });
+  // 横だけ・縦だけの倍率（ADR-0059 段階2）＝共有の Keyframe。場面形式でも要素の中心まわりに「ゆがみ」で描く。
+  it('scaleX／scaleY は、要素の中心まわりのゆがみとして描く（箱は変えない）', () => {
+    const squash = { id: 'anim_009', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, scaleX: 2, scaleY: 0.5 }] };
+    const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [squash] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el).toMatchObject({ x: 10, y: 20, w: 100, h: 50 });
+    // 中心 (60,45) まわりに横 2・縦 0.5。
+    expect(el.warp?.matrix).toEqual([2, 0, 0, 0.5, 60 - 120, 45 - 22.5]);
+  });
+  it('scaleX／scaleY が 1 なら、ゆがみを持たない（従来の出力を変えない）', () => {
+    const none = { id: 'anim_010', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, scaleX: 1, scaleY: 1 }] };
+    const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [none] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el.warp).toBeUndefined();
+  });
   it('timeSec 未指定は静止（後方互換・基準値のまま）', () => {
     const el = layoutScene(freeScene, freeTemplate, { animations: [anim] }).items.find((i) => i.id === 'free_001') as FillItem;
     expect(el).toMatchObject({ x: 10, y: 20, w: 100, h: 50, opacity: 1 });

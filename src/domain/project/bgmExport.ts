@@ -3,7 +3,7 @@
 // 曲が変わる境界を短いクロスフェードで繋ぐ「置き場所＋フェード」の計画を出す。実際の FFmpeg フィルタ組み立ては Rust。
 import { resolveBgmVolume } from '../voice/audioMix';
 import { transitionBoundaryDs, transitionTimeline } from './sceneTransitions';
-import { groupBgmRuns } from './compileTimeline';
+import { groupBgmRuns, type BgmRun } from './compileTimeline';
 import { lineSegments } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import {
@@ -56,7 +56,15 @@ export function resolveBgmExportRuns(project: Project): BgmExportRun[] {
   const { steps } = transitionTimeline(durations, boundaryDs);
   const starts = scenes.map((_s, i) => (i === 0 ? 0 : steps[i - 1].offsetSec));
   const ends = starts.map((start, i) => start + durations[i]);
-  return groupBgmRuns(scenes, starts, ends, project.bgmSettings).map((r) => ({
+  return groupBgmRuns(scenes, starts, ends, project.bgmSettings).map(bgmExportRunOf);
+}
+
+/**
+ * BGM の1区間を書き出しの区間へ。⚠️ **タイムライン形式への焼き出し（`bake.ts`）も同じ関数を通す**（#1404）＝
+ * 片方だけ直すと、焼き出した音と場面形式の書き出しの音がずれる。
+ */
+export function bgmExportRunOf(r: BgmRun): BgmExportRun {
+  return {
     bundledBgmId: r.bgm.bundledBgmId ?? null,
     assetId: r.bgm.assetId ?? null,
     // プレビュー（PreviewScreen）と同じ resolveBgmVolume 経由で値域 [VOLUME_MIN, VOLUME_MAX] にクランプ（手編集等の範囲外対策）。
@@ -65,7 +73,7 @@ export function resolveBgmExportRuns(project: Project): BgmExportRun[] {
     fadeOutSec: Math.max(0, r.bgm.fadeOutSec ?? 0),
     startSec: r.startSec,
     endSec: r.endSec,
-  }));
+  };
 }
 
 /**

@@ -18,9 +18,9 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
@@ -45,6 +45,7 @@ import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor, emptySlotLayerIds } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, isDirectVideoClip, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import type { VideoPlacement } from "../../domain/timeline/video";
+import { CLIP_PIVOT_PRESETS, pivotPresetOf } from "../../domain/timeline/pivot";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { TimelineMarkersSection } from "../components/TimelineMarkersSection";
 import { markerClock, markersInOrder, markerTimeEq } from "../../domain/timeline/markers";
@@ -105,6 +106,8 @@ import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
+import { TimelineOverview, type OverviewClip } from "../components/TimelineOverview";
+import { overviewNeeded, overviewViewport, scrollLeftCenteredAt } from "../timelineOverview";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
@@ -291,6 +294,8 @@ const CLIP_BADGE_MIN_W_PX = 110;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
+/** 並びの枠の id（全体図の帯が `aria-controls` で指す）。 */
+const TIMELINE_SCROLL_ID = "timeline-arrange-scroll";
 
 /**
  * 帯の色（#701）。**部品の種類ごと**に分ける＝列の種類（映像／音）の2色だけだと、
@@ -309,6 +314,17 @@ const CLIP_KIND_CLASS = {
   [TIMELINE_CLIP_KIND.audio]: "timeline-clip--bgm",
   [TIMELINE_CLIP_KIND.voice]: "timeline-clip--audio",
 } as const satisfies Record<TimelineClipKind, string>;
+
+/** 全体図の帯（#1319 c2）の色＝並びの帯と同じ種類分け（`CLIP_KIND_CLASS` と並べて持つ＝種類を足したら両方が型で落ちる）。 */
+const OVERVIEW_TONE = {
+  [TIMELINE_CLIP_KIND.template]: "video",
+  [TIMELINE_CLIP_KIND.slot]: "video",
+  [TIMELINE_CLIP_KIND.text]: "telop",
+  [TIMELINE_CLIP_KIND.subtitle]: "telop",
+  [TIMELINE_CLIP_KIND.shape]: "shape",
+  [TIMELINE_CLIP_KIND.audio]: "bgm",
+  [TIMELINE_CLIP_KIND.voice]: "audio",
+} as const satisfies Record<TimelineClipKind, OverviewClip["tone"]>;
 
 
 /**
@@ -352,6 +368,9 @@ const KEYFRAME_FIELDS: { prop: KeyframeProp; label: string; neutral: number; ste
   { prop: 'x', label: '横のずれ（px）', neutral: 0, step: 10 },
   { prop: 'y', label: '縦のずれ（px）', neutral: 0, step: 10 },
   { prop: 'scale', label: '大きさ（倍）', neutral: 1, step: 0.1 },
+  // 潰す・伸ばす（ADR-0059 段階2）＝大きさに**掛ける**。負の数で、その向きに裏返る。
+  { prop: 'scaleX', label: '横の大きさ（倍・負で裏返す）', neutral: 1, step: 0.1 },
+  { prop: 'scaleY', label: '縦の大きさ（倍・負で裏返す）', neutral: 1, step: 0.1 },
   { prop: 'rotation', label: '傾き（度）', neutral: 0, step: 5 },
   { prop: 'opacity', label: '濃さ（0〜1）', neutral: 1, step: 0.1 },
 ];
@@ -499,7 +518,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const {
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, copyClipsTo, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setSelectedClipFlip, setSelectedClipPivot, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
@@ -2031,6 +2050,30 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     return true;
   };
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 並びの枠の送り量と幅（全体図の枠に使う・#1319 c2）。送る・大きさが変わるたびに測り直す。
+  const [scrollBox, setScrollBox] = useState({ left: 0, width: 0 });
+  // 列 id → 文書の中で何番目か（全体図は再生中も毎フレーム描き直すので、部品ごとに探し直さない）。⚠️ **途中で返す分岐より前**に置く（フックの数を回ごとに変えない）。
+  const trackIndexById = useMemo(() => new Map((doc?.tracks ?? []).map((t, i) => [t.id, i] as const)), [doc?.tracks]);
+  // ⚠️ **枠の要素が替わったら付け直す**（PR #1412 レビュー 🟡）＝欄を別の領域へ運ぶ・配置の型を変えると枠が作り直される。
+  //   最初の要素に縛ると、新しい枠を見張らずに送り量が古いまま止まる。要素は呼び戻しの ref で受ける。
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachScroll = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollEl(node);
+  }, []);
+  useEffect(() => {
+    const el = scrollEl;
+    if (!el) return;
+    const measure = (): void => setScrollBox((b) => (b.left === el.scrollLeft && b.width === el.clientWidth ? b : { left: el.scrollLeft, width: el.clientWidth }));
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro?.disconnect();
+    };
+  }, [scrollEl]);
   /**
    * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
    * 文書が変わったら決め直す＝別の動画を開いたときに前の倍率が残らない（覚えない・決定14）。
@@ -2393,6 +2436,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       issue: EditBlockedReason | null;
       /** 端が限界で止まっている（ADR-0034 追補 2026-10-05＝離すとそこで確定・端の色で示す）。 */
       stopped?: boolean;
+      /** `Alt` を押して運んでいる＝離すと**写しを置く**（元は残る・#1248）。 */
+      copy?: boolean;
     } | null
   >(null);
 
@@ -2732,6 +2777,37 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           <option value="plus-lighter">光を足す</option>
         </select>
       </label>
+      {/* 反転（ADR-0059 決定2・Premiere の「水平方向に反転」「垂直方向に反転」の型）。 */}
+      <div className="row gap-sm">
+        <label className="checkbox-row">
+          <input type="checkbox" checked={selected.flipX ?? false} {...editGuard()} onChange={(e) => setSelectedClipFlip("x", e.target.checked)} />
+          左右反転
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={selected.flipY ?? false} {...editGuard()} onChange={(e) => setSelectedClipFlip("y", e.target.checked)} />
+          上下反転
+        </label>
+      </div>
+      {/* 動きの支点（ADR-0059 決定1）＝キーフレームの回転・拡縮だけに効く（素の回転は中心のまま）。 */}
+      <label className="field">
+        <span className="field-label text-sm">動きの支点</span>
+        <select
+          className="input"
+          value={pivotPresetOf(selected.pivot) ?? ""}
+          {...editGuard()}
+          onChange={(e) => {
+            const p = CLIP_PIVOT_PRESETS.find((q) => q.id === e.target.value);
+            if (p) setSelectedClipPivot({ x: p.x, y: p.y });
+          }}
+        >
+          {pivotPresetOf(selected.pivot) == null && <option value="">{CLIP_PIVOT_CUSTOM_LABEL}</option>}
+          {CLIP_PIVOT_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>{CLIP_PIVOT_LABEL[p.id]}</option>
+          ))}
+        </select>
+      </label>
+      {/* 説明はラベルの外＝中に入れると欄の名前が説明文込みになる（読み上げで名前が長くなる）。 */}
+      <p className="field-hint">{CLIP_PIVOT_HINT}</p>
     </>
   );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
@@ -2810,7 +2886,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    */
   const selectedAnim = selected ? (doc?.animations ?? []).find((a) => a.targetId === selected.id) : undefined;
   const motionPath = selectedOnCanvas && selectedHoldReason == null && selectedAnim && selected
-    ? motionPathOf(selectedOnCanvas.box, selectedAnim.keyframes, selected.durationSec)
+    ? motionPathOf(selectedOnCanvas.box, selectedAnim.keyframes, selected.durationSec, selected.pivot)
     : null;
   /**
    * **中へ入れる層**（#818）＝いま描かれている見た目パターンの、**手の移り先がある**層だけ。
@@ -2927,6 +3003,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const dragShiftSec = (c: TimelineClip): number => {
     if (!clipDrag || clipDrag.mode !== "move" || !clipDrag.groupIds || clipDrag.shiftSec == null) return 0;
     if (clipDrag.clipId === c.id) return 0; // 掴んだ相手は `dragSpanOf` が直に持つ
+    // ⚠️ **写すときは群ぜんぶが同じだけずれる**（#1248）＝写しは連動を外して焼き付けるので、字幕も一緒に動く（`copyClipsTo`）。
+    if (clipDrag.copy) return clipDrag.groupIds.includes(c.id) ? clipDrag.shiftSec : 0;
     // ⚠️ 見るのは**掴んだ時点で固めた群**（`selectedClipIds` を見ると、ドラッグ中に選択が変わったとき
     // 動いて見える帯と動く帯がずれる＝右クリックで選択が潰れる道がある・`/canon-check`）。
     if (clipDrag.groupIds.includes(c.id)) return c.voiceClipId != null ? 0 : clipDrag.shiftSec;
@@ -3024,6 +3102,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 時間を動かさない相手は**横に追従させない**＝「動かしたのに変わらない」も作らず、列だけ運べる。
      */
     const timeFixed = mode === "move" && clip0.voiceClipId != null;
+    /**
+     * **`Alt` を押しているか**（#1248）＝運ぶ途中で押しても離してもよい（Premiere の型＝離した瞬間の押し方で決まる）。
+     * 写しは連動を外して焼き付ける（`copyClipsTo`）ので、**連動している字幕でも時間ごと運べる**。
+     */
+    const copyOf = (ev: { altKey: boolean }): boolean => mode === "move" && ev.altKey;
+    const fixedFor = (ev: { altKey: boolean }): boolean => timeFixed && !copyOf(ev);
     const clipLen = clipEndSec(clip0) - clip0.startSec;
     /**
      * 吸着（決定12）＝**他の帯の端・再生位置・0秒**へ寄せる。**`Ctrl` を押している間は切れる**。
@@ -3042,13 +3126,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const applySnap = (sec: number, ev: PointerEvent): { sec: number; guideSec: number | null } =>
       // 運ぶときは開始と終わりの両方（まとめてなら群の両端）・端を縮めるときは**動かしている端だけ**を見る。
       snapPlacement(sec, (t) => (mode === "move" ? [t + groupLead, t + groupTail] : [t]), {
-        exceptId: clipId,
-        exceptIds: mode === "move" ? groupIds ?? undefined : undefined,
-        off: snapOff(ev) || timeFixed,
+        // ⚠️ **写すときは元も寄せ先**（#1248）＝元は残るので、元のすぐ後ろへ並べたい手に応える。
+        exceptId: copyOf(ev) ? undefined : clipId,
+        exceptIds: mode === "move" && !copyOf(ev) ? groupIds ?? undefined : undefined,
+        off: snapOff(ev) || fixedFor(ev),
       });
     /** 指の下の時刻（0 秒で丸める前）。端が止まったかの見分けに使う（0 秒で止まったときも色を出す）。 */
     const atRaw = (ev: PointerEvent): number => {
-      if (timeFixed) return origin;
+      if (fixedFor(ev)) return origin;
       const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
       return origin + (ev.clientX - startX + scrolled) / pxPerSec;
     };
@@ -3062,7 +3147,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 先頭側だけ 0 に張り付いて**間隔が消える**（別の列どうしなら成功として確定してしまう）。
      * 群のいちばん早い帯が 0 に着いたら、そこで**群ごと止まる**。
      */
-    const shiftFor = (sec: number): number => {
+    const shiftFor = (sec: number, copy = false): number => {
       const dt = sec - clip0.startSec;
       // ⚠️ 床に数えるのは**実際に動く帯だけ**（#754 レビュー 🔴）。連動している字幕は
       // **連動先の読み上げが群に居るときだけ**動く（居なければ時間は据え置き＝`moveClips`）。
@@ -3070,7 +3155,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       // （しかも断り文も出ないので「なぜ動かないか」が分からない）。
       const starts = (groupIds ?? [])
         .map((id) => doc0.clips.find((x) => x.id === id))
-        .filter((c): c is TimelineClip => c != null && c.voiceClipId == null)
+        // ⚠️ **写すときは連動している字幕も床に数える**（PR #1409 レビュー 🟡）＝写しは連動を外して時間ごと運ぶ
+        //   （`copyClipsTo`）ので、数えないと群でいちばん早い字幕の写しだけが 0 秒に丸められ、間隔が黙って潰れる。
+        .filter((c): c is TimelineClip => c != null && (copy || c.voiceClipId == null))
         .map((c) => c.startSec);
       return starts.length > 0 ? Math.max(dt, -Math.min(...starts)) : dt;
     };
@@ -3079,9 +3166,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         const c = doc0.clips.find((x) => x.id === id);
         return { id, startSec: (c?.startSec ?? 0) + dt, ...(id === clipId && trackId ? { trackId } : {}) };
       });
-    const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
+    /** 写しを置く先（#1248）。まとめて掴んだなら群ぜんぶ・1つなら掴んだ相手だけ。**列が変わるのは掴んだ相手だけ**（運ぶと同じ）。 */
+    const copyUpdatesFor = (sec: number, trackId?: string) =>
+      groupIds ? updatesFor(shiftFor(sec, true), trackId) : [{ id: clipId, startSec: sec, ...(trackId ? { trackId } : {}) }];
+    const issueOf = (sec: number, trackId?: string, copy = false): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
       if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
+      // 写すときは確定と同じ `copyClipsTo` で見る＝見えている色と離した結果を割らない（#1248）。
+      if (copy) {
+        const r = copyClipsToDoc(now, copyUpdatesFor(sec, trackId));
+        return r.ok ? null : r.reason;
+      }
       // ⚠️ **まとめて動かすときは群ぜんぶで見る**（#686 段階4）。掴んだ相手だけを見ると、
       // **一緒に動く相手と重なる**判定になって赤くなるのに、離すと（正しく）置ける＝
       // 見えている色と結果が割れる（実機で踏んだ）。確定と同じ `moveClips` を通す。
@@ -3106,6 +3201,30 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 「無ければ計算し直す」と書くと、**到達しない道**が残る（掴んだと見なす前に必ず1回見せるため）
      * ＝読み手に「本当に起きるのか」を追わせる（#749 レビュー）。
      */
+    // **`Alt` の押し替えをその場で見せる**（PR #1409 レビュー 🟡・Premiere の型）＝指を止めたまま `Alt` を押し替えて離すと、
+    // 見た目は前のまま・結果だけ逆、になる（写すか運ぶかは離した瞬間の押し方で決まる）。運んでいる間だけ `Alt` の上げ下げを受け、
+    // 最後の指の位置で見せ直す。⚠️ `preventDefault` で窓のメニューへ焦点が移るのも止める（その後の `Space`／`Delete` を奪わせない）。
+    // ⚠️ **説明は `//` で書く**＝ここは宣言の並びの途中なので、`/** */` だと次の宣言の説明を奪う（門番）。
+    let lastPointer: PointerEvent | null = null;
+    let showLatest: ((ev: PointerEvent) => void) | null = null;
+    const onAltKey = (k: KeyboardEvent): void => {
+      if (k.key !== "Alt") return;
+      k.preventDefault();
+      if (!lastPointer || !showLatest) return;
+      showLatest(new MouseEvent("pointermove", {
+        clientX: lastPointer.clientX, clientY: lastPointer.clientY,
+        ctrlKey: k.ctrlKey, shiftKey: k.shiftKey, metaKey: k.metaKey, altKey: k.type === "keydown",
+      }) as PointerEvent);
+    };
+    const stopAltKeys = (): void => {
+      window.removeEventListener("keydown", onAltKey);
+      window.removeEventListener("keyup", onAltKey);
+    };
+    // ⚠️ 左ボタン以外は `beginDrag` が受けない＝ここで購読すると外す人がいない。
+    if (mode === "move" && e.button === 0) {
+      window.addEventListener("keydown", onAltKey);
+      window.addEventListener("keyup", onAltKey);
+    }
     let lastShownSec = origin;
     beginDrag(e, {
       // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する。
@@ -3122,7 +3241,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           // ⚠️ **群の丸めは運ぶときだけ**（PR #1338 レビュー 🟡）＝端を動かすときに確定するのは掴んだ帯だけ
           //   （`trimClipById`）。群の床を掛けると、選んでいる別の帯が 0 秒にあるだけで**黙って左へ伸びなくなる**。
           const grouped = mode === "move" && groupIds != null;
-          const shiftSec = grouped ? shiftFor(raw) : undefined;
+          const shiftSec = grouped ? shiftFor(raw, copyOf(e2)) : undefined;
           let sec = grouped ? clip0.startSec + (shiftSec ?? 0) : raw;
           // ⚠️ **端は限界で止める**（ADR-0034 追補 2026-10-05・利用者判断）＝隣の帯・素材の限界・使い切りの手前で
           //   止まり、離すとそこで確定する（以前は赤くなって元の長さに戻っていた＝他社に無い型）。止まる位置は
@@ -3142,16 +3261,20 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           }
           lastShownSec = sec;
           const trackId = trackAt(e2);
-          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId), stopped });
+          const copy = copyOf(e2);
+          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId, copy), stopped, copy });
           // 止まった所が吸着の先と違うときは線を出さない（寄せた先ではなく、止まった所にいる）。
           // 吸着の先とちょうど同じ所で止まったなら線も残す（同じ着地点で合図が指の距離によって変わる、を作らない）。
           setSnapGuideSec(stopped && (guideSec == null || Math.abs(guideSec - sec) > 1e-6) ? null : guideSec);
         };
+        lastPointer = ev;
+        showLatest = show;
         show(ev);
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
         autoScroll.track(scrollRef.current, ev, show);
       },
       onEnd: (ev, started) => {
+        stopAltKeys();
         autoScroll.stop();
         setSnapGuideSec(null);
         if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
@@ -3172,12 +3295,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
         if (mode === "move") {
           const trackId = trackAt(ev);
-          if (groupIds) moveClipsBy(updatesFor(shiftFor(sec), trackId));
+          // `Alt` を押したまま離した＝写しを置く（元は残る・#1248）。
+          if (copyOf(ev)) copyClipsTo(copyUpdatesFor(sec, trackId));
+          else if (groupIds) moveClipsBy(updatesFor(shiftFor(sec), trackId));
           else moveClipById(clipId, { startSec: sec, trackId });
         }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) skipNextClick(); },
+      onCancel: (started) => { stopAltKeys(); autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) skipNextClick(); },
     });
   };
 
@@ -3945,7 +4070,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               ? "groupFade"
               : cropPivotDiffers(item, item.clipRect, item.rotation)
                 ? "rotatedCrop"
-                : null;
+                : item.warp != null && item.clipRect != null
+                  ? "flippedCrop"
+                  : null;
           return {
             clip, placement, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
@@ -3960,6 +4087,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
             clipRect: item.clipRect,
+            // 反転（ADR-0059）＝書き出しは SVG が中身ごと鏡に映す＝実映像にも同じ行列を掛ける。
+            warp: item.warp,
           };
         })
         .filter((v): v is NonNullable<typeof v> => v != null)
@@ -3994,6 +4123,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
+  // 全体図の帯（#1319 c2）＝いま見えている範囲。**全体が収まっていれば出さない**（送る先が無い）。
+  const overviewView = overviewViewport(scrollBox.left, scrollBox.width, LANE_LABEL_PX, pxPerSec, totalSec);
+  // ⚠️ **幅を測れてから**出す＝測る前（幅 0）は「何も見えていない」と読めて、毎回出てしまう。
+  const showOverview = scrollBox.width > LANE_LABEL_PX && overviewNeeded(overviewView, totalSec);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
@@ -4107,6 +4240,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                           src={v.src}
                           rect={slot.rect}
                           rotation={slot.rotation}
+                          warp={v.warp}
                           opacity={v.opacity}
                           fit={v.fit}
                           align={v.align}
@@ -4661,7 +4795,40 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 </span>
               )}
             </div>
-            <div className="timeline-scroll" ref={scrollRef}>
+            {/* ⚠️ **場所は常に取っておく**（PR #1412 レビュー 🟡）＝収まっているとき消すと、拡大と「全体を表示」を
+                行き来するたびに並びが縦にずれる（Premiere・Resolve の帯は出しっぱなしで動かない）。収まっているときは中身を描かない。 */}
+            {doc && (
+              <TimelineOverview
+                active={showOverview}
+                controlsId={TIMELINE_SCROLL_ID}
+                totalSec={totalSec}
+                rows={doc.tracks.length}
+                clips={doc.clips.map((c) => ({
+                  id: c.id,
+                  // ⚠️ **並びと同じ上下**＝並びは文書の最後の列をいちばん上に描く（`[...doc.tracks].reverse()`）。
+                  row: Math.max(0, doc.tracks.length - 1 - (trackIndexById.get(c.trackId) ?? 0)),
+                  startSec: c.startSec,
+                  endSec: clipEndSec(c),
+                  tone: OVERVIEW_TONE[c.kind],
+                }))}
+                view={overviewView}
+                playheadSec={playheadSec}
+                range={rangeInSec != null && rangeOutSec != null ? { startSec: Math.min(rangeInSec, rangeOutSec), endSec: Math.max(rangeInSec, rangeOutSec) } : null}
+                onCenterAt={(sec) => {
+                  const el = scrollRef.current;
+                  if (el) el.scrollLeft = scrollLeftCenteredAt(sec, el.clientWidth, LANE_LABEL_PX, pxPerSec, el.scrollWidth - el.clientWidth);
+                }}
+                onScrollBySec={(d) => {
+                  const el = scrollRef.current;
+                  if (el) el.scrollLeft += d * pxPerSec;
+                }}
+                getScrollPx={() => scrollRef.current?.scrollLeft ?? 0}
+                setScrollPx={(px) => {
+                  if (scrollRef.current) scrollRef.current.scrollLeft = px;
+                }}
+              />
+            )}
+            <div className="timeline-scroll" id={TIMELINE_SCROLL_ID} ref={attachScroll}>
               <div className="timeline-inner">
                 <div className="timeline-row">
                   <div className="timeline-row-label" />
@@ -5017,6 +5184,21 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                           aria-hidden="true"
                         />
                       )}
+                      {/* **写すときは元を元の位置に薄く残す**（#1248）＝運んでいるのは写しで、元は動かないことを見せる。
+                          押せない（`pointer-events: none`）・読み上げにも出さない（`aria-hidden`）＝飾り。 */}
+                      {clipDrag?.copy && doc.clips
+                        .filter((c) => c.trackId === track.id && (c.id === clipDrag.clipId || clipDrag.groupIds?.includes(c.id)))
+                        .map((c) => (
+                          <div
+                            key={`copy-source-${c.id}`}
+                            className={`timeline-clip ${CLIP_KIND_CLASS[c.kind]} timeline-clip--copy-source`}
+                            style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * c.durationSec}px` }}
+                            aria-hidden="true"
+                            data-testid="clip-copy-source"
+                          >
+                            {clipLabel(c, doc.assets)}
+                          </div>
+                        ))}
                       {doc.clips
                         .filter((c) => laneOf(c) === track.id)
                         .map((c) => (
@@ -5032,6 +5214,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                               // 掴めないときは `cursor: grab` も出さない（掴めそうに見せない・#686 レビュー）。
                               grabbableClip(c) ? "timeline-clip--editable" : "",
                               clipDrag?.clipId === c.id ? "timeline-clip--dragging" : "",
+                              // 写しを運んでいる（#1248）＝群ごと写すなら群ぜんぶに付ける。
+                              clipDrag?.copy && (clipDrag.clipId === c.id || clipDrag.groupIds?.includes(c.id)) ? "timeline-clip--copying" : "",
                               clipDrag?.clipId === c.id && clipDrag.issue ? "drop-target--blocked" : "",
                               // 端が限界で止まっていることは**その端の色**で示す（FCP・Resolve の型・文言は出さない＝決定10）。
                               clipDrag?.clipId === c.id && clipDrag.stopped ? `timeline-clip--stopped-${clipDrag.mode === "trim-start" ? "start" : "end"}` : "",
@@ -5189,6 +5373,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             )}
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "rotatedCrop") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
+            )}
+            {videoPlay.some((v) => v.clip.id === selected.id && v.held === "flippedCrop") && (
+              <p className="field-hint">{TIMELINE_VIDEO_STILL_FLIPPED_CROP}</p>
             )}
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "unplayable") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_UNPLAYABLE}</p>
@@ -5514,8 +5701,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 key={`look-${selected.id}`}
                 scope={SECTION_SCOPE.timeline}
                 storageKey="look"
-                title="見え方（色・重ね方）"
-                defaultOpen={selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")}
+                title="見え方（色・重ね方・反転・動きの支点）"
+                defaultOpen={
+                  selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")
+                  || selected.flipX === true || selected.flipY === true || selected.pivot != null
+                }
               >
                 {lookFields}
                 <p className="text-muted">

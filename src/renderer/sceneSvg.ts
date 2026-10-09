@@ -273,8 +273,25 @@ function clippedRuns(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fon
     const rect = items[i].clipRect;
     let j = i;
     while (j + 1 < items.length && sameClipRect(items[j + 1].clipRect, rect)) j += 1;
-    const inner = items.slice(i, j + 1).map((it) => itemToSvg(it, opts, fontFamily)).join('\n');
+    const inner = warpedRuns(items.slice(i, j + 1), opts, fontFamily);
     out.push(rect ? wrapClipRect(inner, rect) : inner);
+    i = j;
+  }
+  return out.join('\n');
+}
+
+/**
+ * 連続したアイテムを**ゆがみごとに小分けして**包む（ADR-0059 決定4）。⚠️ **切り抜きの内側**＝切り抜きは画面の向きのまま。
+ * ゆがみを持たない区間は素通し＝従来の出力は1バイトも変わらない。
+ */
+function warpedRuns(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fontFamily: string): string {
+  const out: string[] = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const warp = items[i].warp;
+    let j = i;
+    while (j + 1 < items.length && items[j + 1].warp?.key === warp?.key) j += 1;
+    const inner = items.slice(i, j + 1).map((it) => itemToSvg(it, opts, fontFamily)).join('\n');
+    out.push(warp ? `<g transform="matrix(${warp.matrix.join(' ')})">\n${inner}\n</g>` : inner);
     i = j;
   }
   return out.join('\n');

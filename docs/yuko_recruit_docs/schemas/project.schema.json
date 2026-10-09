@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.32" },
+    "schemaVersion": { "const": "1.33" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -191,6 +191,8 @@
         "scale": { "type": "number", "exclusiveMinimum": 0 },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "rotation": { "type": "number" },
+        "scaleX": { "type": "number", "not": { "const": 0 }, "description": "横だけの倍率（ADR-0059 段階2）。scale に掛ける。負＝その向きに反転。0 は不可。" },
+        "scaleY": { "type": "number", "not": { "const": 0 }, "description": "縦だけの倍率（同上）。" },
         "easing": {
           "description": "区間 [前KF, 当KF] のイージング（#262）。名前つきか、自由なカーブ（CSS の cubic-bezier と同じ制御点4つ）。未指定＝linear。",
           "oneOf": [

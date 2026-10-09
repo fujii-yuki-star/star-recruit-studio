@@ -46,6 +46,13 @@ interface ItemBase extends Rect {
    */
   clipRect?: { id: string; x: number; y: number; w: number; h: number; rotation?: number };
   /**
+   * **ゆがみ**（ADR-0059 決定4）＝相似変換（一様の拡縮・回転・平行移動）で表せない残り（反転・縦横別々の大きさ）。
+   * SVG の `matrix(a b c d e f)` と同じ並び。同じ `key` を持つ**連続した**アイテムは1つの `<g transform>` で包む
+   *（`composite`・`clipRect` と同じ流儀）。⚠️ **切り抜きの内側**で包む＝切り抜きは画面の向きのまま（鏡に映さない）。
+   * 単位行列なら持たない＝従来の出力は1バイトも変わらない。場面形式は設定しない。
+   */
+  warp?: { key: string; matrix: readonly [number, number, number, number, number, number] };
+  /**
    * **色の調整**（ADR-0044 ①）。未指定＝調整なし（**従来の出力は不変**）。
    *
    * ⚠️ **プレビューと書き出しは同じ道を通る**ので、ここで効かせれば必ず一致する（**場面の中では**）。
@@ -263,20 +270,87 @@ export interface TransformableRect {
  * **場面形式（`layoutScene` の要素アニメ）とタイムライン形式（`layoutTimelineAt` のクリップの箱）が
  * この関数を呼ぶ**＝同じ「キーフレームの重ね方」を2か所に書かない（片方だけ直って絵が割れるのを防ぐ・§6）。
  * 引数を `LayoutItem` でなく矩形にしてあるのは、タイムライン側が**クリップの箱**に対して同じ規則を使うため。
+ *
+ * **動きの支点**（`pivot`・ADR-0059 決定1）＝拡縮と回転を、箱に対する割合で決めた点まわりに効かせる（未指定＝中心）。
+ * 支点は**素の箱の向き**（`rotation`）で測る＝回した部品の「足元」は回った先の足元。
+ * - 拡縮：支点が動かないように中心をずらす（中心のずれ＝素の向きに回した `(1−倍率)×支点の中心からの位置`）。
+ * - 回転：支点のまわりに回すと中心が動く＝その動きを `x`/`y` に足し、角度は今までどおり足す（描くのは中心まわり）。
+ * ⚠️ **支点が中心なら今までの式をそのまま通す**＝既に作った動画の絵を1ビットも変えない。
  */
-export function applyInterpolatedTransform(item: TransformableRect, tr: InterpolatedTransform): void {
+export function applyInterpolatedTransform(
+  item: TransformableRect,
+  tr: InterpolatedTransform,
+  pivot?: { x: number; y: number },
+): void {
+  const px = pivot?.x ?? 0.5;
+  const py = pivot?.y ?? 0.5;
+  const centered = px === 0.5 && py === 0.5;
   if (tr.scale != null) {
     const ow = item.w;
     const oh = item.h;
-    item.w *= tr.scale;
-    item.h *= tr.scale;
-    item.x -= (item.w - ow) / 2;
-    item.y -= (item.h - oh) / 2;
+    if (centered) {
+      item.w *= tr.scale;
+      item.h *= tr.scale;
+      item.x -= (item.w - ow) / 2;
+      item.y -= (item.h - oh) / 2;
+    } else {
+      const k = 1 - tr.scale;
+      const [dx, dy] = rotateVec((px - 0.5) * ow * k, (py - 0.5) * oh * k, item.rotation ?? 0);
+      const cx = item.x + ow / 2 + dx;
+      const cy = item.y + oh / 2 + dy;
+      item.w = ow * tr.scale;
+      item.h = oh * tr.scale;
+      item.x = cx - item.w / 2;
+      item.y = cy - item.h / 2;
+    }
   }
   if (tr.x != null) item.x += tr.x;
   if (tr.y != null) item.y += tr.y;
-  if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
+  if (tr.rotation != null) {
+    if (!centered && tr.rotation !== 0) {
+      // 支点（素の向きで測る）→ 中心へのベクトルを回した分だけ、中心が動く。
+      const [ox, oy] = rotateVec((px - 0.5) * item.w, (py - 0.5) * item.h, item.rotation ?? 0);
+      const [vx, vy] = rotateVec(-ox, -oy, tr.rotation);
+      item.x += ox + vx;
+      item.y += oy + vy;
+    }
+    item.rotation = (item.rotation ?? 0) + tr.rotation;
+  }
   if (tr.opacity != null) item.opacity = tr.opacity;
+}
+
+/** SVG の `matrix(a b c d e f)` と同じ並びの行列（x' = a·x + c·y + e・y' = b·x + d·y + f）。 */
+export type Affine = readonly [number, number, number, number, number, number];
+
+/**
+ * 点 `q` を中心に、**向き `rotDeg` の座標**で横 `sx`・縦 `sy` 倍する行列（ADR-0059）＝`T(q)·R·S·R⁻¹·T(−q)`。
+ * 反転は ±1 倍、潰す・伸ばすは縦横別々の倍率。⚠️ `-0` は `0` へ（並べて比べる・書き出すときに紛らわしくしない）。
+ */
+export function scaleAround(q: { x: number; y: number }, rotDeg: number, sx: number, sy: number): Affine {
+  const r = (rotDeg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const a = c * c * sx + s * s * sy;
+  const b = c * s * (sx - sy);
+  const d = s * s * sx + c * c * sy;
+  const z = (v: number): number => (v === 0 ? 0 : v);
+  return [z(a), z(b), z(b), z(d), z(q.x - (a * q.x + b * q.y)), z(q.y - (b * q.x + d * q.y))];
+}
+
+/** 行列の合成＝`m2` を当ててから `m1` を当てる（`m1 ∘ m2`）。 */
+export function composeAffine(m1: Affine, m2: Affine): Affine {
+  const [a1, b1, c1, d1, e1, f1] = m1;
+  const [a2, b2, c2, d2, e2, f2] = m2;
+  return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1];
+}
+
+/** 画面の座標（下向きが正）で、ベクトルを `deg` 度回す（SVG の `rotate` と同じ向き＝時計回り）。 */
+function rotateVec(x: number, y: number, deg: number): [number, number] {
+  if (deg === 0) return [x, y];
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return [x * c - y * s, x * s + y * c];
 }
 
 /**
@@ -559,6 +633,12 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       applyInterpolatedTransform(item, tr);
       // 大きさの動きは**中身ごと**（#1371）＝箱だけ縮めると字が「…」で切れる。
       if (tr.scale != null) scaleItemContent(item, tr.scale);
+      // 横・縦だけの倍率（ADR-0059 段階2）＝要素の**中心**まわり・要素の向きで、ゆがみとして描く（共有の `$defs/Keyframe`）。
+      const sx = tr.scaleX ?? 1;
+      const sy = tr.scaleY ?? 1;
+      if (sx !== 1 || sy !== 1) {
+        item.warp = { key: `warp_${item.id}`, matrix: scaleAround({ x: item.x + item.w / 2, y: item.y + item.h / 2 }, item.rotation ?? 0, sx, sy) };
+      }
     }
   }
   // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。

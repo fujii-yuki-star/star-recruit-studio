@@ -92,7 +92,9 @@ export async function buildVideoPart(
     || (item.opacity != null && item.opacity < 1)
     || item.clipRect != null
     || item.colorAdjust != null
-    || (item.blendMode != null && item.blendMode !== 'normal');
+    || (item.blendMode != null && item.blendMode !== 'normal')
+    // 反転（ADR-0059）＝FFmpeg の重ね合わせは矩形しか受けない＝焼く方へ倒す（SVG がゆがみごと描く）。
+    || item.warp != null;
   if (drawnExtras) return undefined;
   // ⚠️ **分け方は場面形式と同じ部品を使う**（`splitVideoSceneSvg`）＝手で書き直すと、
   // 「下は不透明・上は透過」「境目はその絵の重ね順」といった決まりが**2か所に分かれて**ずれる。
