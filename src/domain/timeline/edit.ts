@@ -1122,6 +1122,38 @@ export function pasteClips(
 }
 
 /**
+ * **運んだ先へ写しを置く**（#1248・`Alt`＋運ぶ＝Premiere・Resolve・Clipchamp の型）。元の部品はそのまま残る。
+ *
+ * - `updates` は**写しを置く先**（元の部品の id と、置く時刻・列）。列を省けば元と同じ列。
+ * - 規則は**複製・貼り付けと同じ**（`freshClipCopy`＝読み上げの音声は引き継がない・連動は焼き付けて外す／
+ *   新しく作る側なので**固定・隠した列・種類の違う列は断る**／**重なる所には置かない**＝押しのけない・ADR-0034 決定11）。
+ * - ⚠️ **元の部品も重なりの相手に数える**＝元は残るので、少ししか運んでいない写しは元と重なって断られる。
+ * - **全か無か**（決定15）＝1つでも置けなければ何も置かない（理由を返す）。
+ */
+export function copyClipsTo(
+  doc: TimelineProject,
+  updates: readonly { id: string; startSec: number; trackId?: string }[],
+): { ok: true; doc: TimelineProject; copiedIds: string[] } | { ok: false; reason: EditBlockedReason } {
+  const no = (reason: EditBlockedReason) => ({ ok: false as const, reason });
+  if (updates.length === 0) return no(EDIT_BLOCKED.notFound);
+  let working = doc;
+  const copiedIds: string[] = [];
+  for (const u of [...updates].sort((a, b) => a.startSec - b.startSec)) {
+    const clip = doc.clips.find((c) => c.id === u.id);
+    if (!clip) return no(EDIT_BLOCKED.notFound);
+    const trackId = u.trackId ?? clip.trackId;
+    const trackIssue = trackPlacementIssue(working, trackId, trackKindForClip(clip.kind));
+    if (trackIssue) return no(trackIssue);
+    const startSec = Math.max(0, u.startSec);
+    if (!isFreeSpan(working.clips, trackId, startSec, clip.durationSec)) return no(EDIT_BLOCKED.overlap);
+    const next = freshClipCopy(working, { ...clip, trackId }, createClipId(working.clips.map((c) => c.id)), startSec);
+    working = { ...working, clips: [...working.clips, next] };
+    copiedIds.push(next.id);
+  }
+  return { ok: true, doc: working, copiedIds };
+}
+
+/**
  * 見た目パターンのクリップの**差し込み口に素材を入れる／外す**（ADR-0032 決定5＝差し込み口は生きている）。
  *
  * 固定した列（`locked`）の部品は中身も変えない＝「動かせないのに中身は変えられる」という非対称を作らない

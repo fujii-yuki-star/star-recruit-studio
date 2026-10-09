@@ -5199,6 +5199,118 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(8, 5);
   });
 
+  // `Alt`＋運ぶ＝写しを置く（#1248・Premiere・Resolve・Clipchamp の型）。
+  describe("Alt を押して運ぶと写しを置く（#1248）", () => {
+    const altDrag = (el: HTMLElement, dx: number, opts: { drop?: boolean; altAtDrop?: boolean } = {}) => {
+      pointerDownAt(el, 1, { clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: dx, clientY: 0, altKey: true });
+      if (opts.drop !== false) fireEvent.pointerUp(window, { pointerId: 1, clientX: dx, clientY: 0, altKey: opts.altAtDrop ?? true });
+    };
+    const starts = () => useTimelineStore.getState().doc!.clips.map((c) => [c.id, c.startSec] as const);
+
+    it("元は残り、運んだ先に写しが増えて写しを選ぶ（取り消しは1回ぶん）", () => {
+      two();
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const before = useTimelineStore.getState().history.past.length;
+      altDrag(band("あ"), 36 * 10); // 10秒へ
+      const clips = useTimelineStore.getState().doc!.clips;
+      expect(clips).toHaveLength(3);
+      expect(clips.find((c) => c.id === "clip_001")!.startSec).toBe(0); // 元は動かない
+      const copy = clips.find((c) => c.id !== "clip_001" && c.id !== "clip_002")!;
+      expect(copy.startSec).toBeCloseTo(10, 5);
+      expect((copy as { text?: string }).text).toBe("あ");
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([copy.id]);
+      expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    });
+
+    it("運んでいる間は写しの印を付け、元の位置に元を薄く残す（Alt を押していなければ出さない）", () => {
+      two();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 10, { drop: false });
+      expect(band("あ").className).toContain("timeline-clip--copying");
+      const source = container.querySelectorAll('[data-testid="clip-copy-source"]');
+      expect(source).toHaveLength(1);
+      expect((source[0] as HTMLElement).style.left).toBe("0px");
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 10, clientY: 0, altKey: false });
+      expect(band("あ").className).not.toContain("timeline-clip--copying");
+      expect(container.querySelectorAll('[data-testid="clip-copy-source"]')).toHaveLength(0);
+    });
+
+    // ⚠️ **離した瞬間の押し方で決まる**（Premiere の型）＝途中で Alt を離せば、ふつうに運ぶ。
+    it("離す前に Alt を離せば、写さずに運ぶ", () => {
+      two();
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 10, { altAtDrop: false });
+      expect(starts()).toEqual([["clip_001", 10], ["clip_002", 5]]);
+    });
+
+    // ⚠️ **元も重なりの相手**＝元は残るので、少しだけ運ぶと元と重なる。色と結果を同じ関数で見る。
+    it("元と重なる所では赤く示し、離しても増やさずに理由を出す", () => {
+      two({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }] });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 1, { drop: false }); // 1秒＝元（0〜3秒）と重なる
+      expect(band("あ").className).toContain("drop-target--blocked");
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 36, clientY: 0, altKey: true });
+      expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+      expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.overlap);
+    });
+
+    // ⚠️ **押し替えをその場で見せる**（PR #1409 レビュー 🟡）＝指を止めたまま Alt を離すと、見た目は写すのに結果は運ぶ、を作らない。
+    it("指を止めたまま Alt を離すと、その場で運ぶ見た目に戻り、離せば運ぶ", () => {
+      two();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 10, { drop: false });
+      expect(band("あ").className).toContain("timeline-clip--copying");
+      fireEvent.keyUp(window, { key: "Alt", altKey: false });
+      expect(band("あ").className).not.toContain("timeline-clip--copying");
+      expect(container.querySelectorAll('[data-testid="clip-copy-source"]')).toHaveLength(0);
+      fireEvent.keyDown(window, { key: "Alt", altKey: true });
+      expect(band("あ").className).toContain("timeline-clip--copying"); // 押し直せば写す見た目に戻る
+      fireEvent.keyUp(window, { key: "Alt", altKey: false });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 10, clientY: 0, altKey: false });
+      expect(starts()).toEqual([["clip_001", 10], ["clip_002", 5]]);
+    });
+
+    // ⚠️ **写すときは連動している字幕も 0 秒の床に数える**（PR #1409 レビュー 🟡）＝写しは時間ごと運ぶので、
+    //   数えないと、いちばん早い字幕の写しだけが 0 秒に丸められて間隔が潰れる。
+    it("連動している字幕を含めて群ごと写すとき、0秒の壁で群ごと止まる（間隔を潰さない）", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_005", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+        clips: [
+          { id: "clip_sub", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 1, durationSec: 0.5, x: 0, y: 900, w: 1920, h: 120, voiceClipId: "clip_voice" },
+          { id: "clip_voice", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 1, durationSec: 0.5, voice: { text: "よろしく", status: "none" } },
+          // ⚠️ 短くしておく＝写しは同じ列へ置くので、元と重ならない長さにする（重なれば全か無かで何も置かれない）。
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_005", startSec: 3, durationSec: 0.5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        ],
+      });
+      useTimelineStore.setState({ selectedClipIds: ["clip_sub", "clip_001"] });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), -36 * 5); // 5秒ぶん左へ（群の先頭＝字幕は 1秒しかない）
+      const clips = useTimelineStore.getState().doc!.clips;
+      const copies = clips.filter((c) => !["clip_sub", "clip_voice", "clip_001"].includes(c.id));
+      expect(copies).toHaveLength(2);
+      const sub = copies.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+      const text = copies.find((c) => c.kind === TIMELINE_CLIP_KIND.text)!;
+      expect(sub.startSec).toBeCloseTo(0, 5);
+      expect(text.startSec).toBeCloseTo(2, 5); // 2秒の間隔が保たれる（3 - 1）
+      expect(sub.voiceClipId).toBeUndefined(); // 写しは連動を外す
+    });
+
+    it("まとめて選んでいれば群ごと写す（元は全部残る・間隔はそのまま）", () => {
+      two();
+      useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      altDrag(band("あ"), 36 * 10);
+      const clips = useTimelineStore.getState().doc!.clips;
+      expect(clips).toHaveLength(4);
+      expect(clips.filter((c) => c.id === "clip_001" || c.id === "clip_002").map((c) => c.startSec)).toEqual([0, 5]);
+      const copies = clips.filter((c) => c.id !== "clip_001" && c.id !== "clip_002").map((c) => c.startSec).sort((a, b) => a - b);
+      expect(copies[0]).toBeCloseTo(10, 5);
+      expect(copies[1]).toBeCloseTo(15, 5);
+      expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
+    });
+  });
+
   it("何度動かしても**取り消しは1回ぶん**（動かした回数だけ積まない・#752-12）", () => {
     // ⚠️ 影は毎回の動きで描き替わるが、文書を書き換えるのは離したときの1回だけ。
     // ここが崩れると、ひと運びで履歴上限を流し切って「戻したかった直前の誤操作」が追い出される。

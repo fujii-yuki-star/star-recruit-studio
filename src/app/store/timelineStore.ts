@@ -33,7 +33,7 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, copyClipsTo, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack,
   visualPlacementFor,
   moveClip,
   setVisualClipContent,
@@ -555,6 +555,11 @@ export interface TimelineState {
   moveClipById: (clipId: string, to: { trackId?: string; startSec?: number }) => void;
   /** **まとめて動かす**（#686 段階4・1つでも置けなければ全体を断る＝決定15）。 */
   moveClipsBy: (updates: readonly { id: string; startSec?: number; trackId?: string }[]) => void;
+  /**
+   * **運んだ先へ写しを置く**（#1248・`Alt`＋運ぶ）。元は残り、写しを選び直す（続けて触れるように）。
+   * id で受ける＝`moveClipsBy` と同じ流儀（掴んでいる間に選択が変わっても、掴んだ相手を写す）。
+   */
+  copyClipsTo: (updates: readonly { id: string; startSec: number; trackId?: string }[]) => void;
   trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
   /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
   setEditBlocked: (reason: EditBlockedReason, at: BlockTarget) => void;
@@ -1484,6 +1489,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || updates.length === 0) return;
     const r = moveClips(doc, updates);
     if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
+  },
+  copyClipsTo: (updates) => {
+    const doc = get().doc;
+    if (!doc || updates.length === 0) return;
+    const r = copyClipsTo(doc, updates);
+    if (r.ok) commit(set, get, r.doc, { selectedClipIds: r.copiedIds });
     else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
   },
   trimClipById: (clipId, edge, sec) =>
