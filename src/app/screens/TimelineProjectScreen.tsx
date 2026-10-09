@@ -3127,11 +3127,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 「無ければ計算し直す」と書くと、**到達しない道**が残る（掴んだと見なす前に必ず1回見せるため）
      * ＝読み手に「本当に起きるのか」を追わせる（#749 レビュー）。
      */
-    /**
-     * **`Alt` の押し替えをその場で見せる**（PR #1409 レビュー 🟡・Premiere の型）＝指を止めたまま `Alt` を押し替えて離すと、
-     * 見た目は前のまま・結果だけ逆、になる（写すか運ぶかは離した瞬間の押し方で決まる）。運んでいる間だけ `Alt` の上げ下げを受け、
-     * 最後の指の位置で見せ直す。⚠️ `preventDefault` で窓のメニューへ焦点が移るのも止める（その後の `Space`／`Delete` を奪わせない）。
-     */
+    // **`Alt` の押し替えをその場で見せる**（PR #1409 レビュー 🟡・Premiere の型）＝指を止めたまま `Alt` を押し替えて離すと、
+    // 見た目は前のまま・結果だけ逆、になる（写すか運ぶかは離した瞬間の押し方で決まる）。運んでいる間だけ `Alt` の上げ下げを受け、
+    // 最後の指の位置で見せ直す。⚠️ `preventDefault` で窓のメニューへ焦点が移るのも止める（その後の `Space`／`Delete` を奪わせない）。
+    // ⚠️ **説明は `//` で書く**＝ここは宣言の並びの途中なので、`/** */` だと次の宣言の説明を奪う（門番）。
     let lastPointer: PointerEvent | null = null;
     let showLatest: ((ev: PointerEvent) => void) | null = null;
     const onAltKey = (k: KeyboardEvent): void => {
