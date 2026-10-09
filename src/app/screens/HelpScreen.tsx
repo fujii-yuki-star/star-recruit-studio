@@ -38,20 +38,21 @@ function GuideItem({ step, index }: { step: HelpStep; index?: number }) {
  */
 export function HelpScreen() {
   const [playing, setPlaying] = useState<TutorialVideo | null>(null);
-  // 再生する道（`undefined`＝決めている途中・`null`＝決められなかった）。
+  // 再生する道（どの映像の道かを添えて持つ＝選び直した直後に前の映像の道を見せない）。
   // ⚠️ **同梱物の口（`asset://`）で読む**（#1229）＝埋め込み（`public/`）だと先へ飛べない。
-  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  const [resolved, setResolved] = useState<{ id: string; url: string | null } | null>(null);
   useEffect(() => {
     if (!playing) return;
     let alive = true;
-    setSrc(undefined);
-    void tutorialVideoUrl(tutorialVideoResourcePath(playing)).then((u) => {
-      if (alive) setSrc(u);
+    void tutorialVideoUrl(tutorialVideoResourcePath(playing)).then((url) => {
+      if (alive) setResolved({ id: playing.id, url });
     });
     return () => {
       alive = false;
     };
   }, [playing]);
+  /** `undefined`＝決めている途中・`null`＝決められなかった。 */
+  const src = playing && resolved?.id === playing.id ? resolved.url : undefined;
 
   return (
     <div className="main-scroll">

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, silenceMessage, transcribeMessage, PANEL_LAYOUT_SAVE_FAILED_MESSAGE, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
+  alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, silenceMessage, transcribeMessage, PANEL_LAYOUT_SAVE_FAILED_MESSAGE, TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
@@ -110,6 +110,8 @@ function codeMessages(): Record<string, string> {
     ...transcribeMessage,
     // 画面の配置を覚えられなかった（ADR-0033 未解決6・#1396）。
     PANEL_LAYOUT_SAVE_FAILED: PANEL_LAYOUT_SAVE_FAILED_MESSAGE,
+    // 同梱したチュートリアル映像を開けない（#1229）。
+    TUTORIAL_VIDEO_UNAVAILABLE: TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE,
     // ⚠️ **場面形式の切り出しの断りも等値で守る**（#1155 ⑤）＝タイムライン形式の双子
     // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
     // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
@@ -556,7 +558,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(300);
+    // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(301);
   });
 
 
@@ -836,7 +839,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+5**（ADR-0058 段2）＝画面側の TRANSCRIBE_* の5行（`transcribeMessage`）。
     // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED。
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(295);
+    // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(296);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -867,6 +871,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+5**（ADR-0058）＝TRANSCRIBE_NO_SOUND／CLIP_CHANGED／NOTHING_HEARD／STOPPED／UNAVAILABLE（`transcribeMessage` 経由で等値）。
       // ⚠️ **+1**（#1396）＝PANEL_LAYOUT_SAVE_FAILED（`codeMessages()` へ直に載せた）。
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
-    ).toBe(140);
+      // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
+    ).toBe(141);
   });
 });
