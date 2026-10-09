@@ -9338,3 +9338,117 @@ describe("無音を詰める", () => {
     expect(useTimelineStore.getState().isPlaying).toBe(false);
   });
 });
+
+// 全体図の帯（#1319 c2）＝全体を縮めて、見えている範囲を枠で示す。押すとその時刻へ送る。
+describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
+  const LABEL = TIMELINE_LABEL_W_PX;
+  // 0〜20 秒に部品（36px/秒＝720px）。
+  const long = () =>
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 15, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+  /** jsdom は幅を持たないので、並びの枠に幅と送り量を差し込み、測り直させる。 */
+  const sizeScroller = (container: HTMLElement, width: number, scrollLeft = 0): HTMLElement => {
+    const el = container.querySelector(".timeline-scroll") as HTMLElement;
+    let left = scrollLeft;
+    Object.defineProperty(el, "clientWidth", { configurable: true, get: () => width });
+    Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => LABEL + 20 * 36 });
+    Object.defineProperty(el, "scrollLeft", { configurable: true, get: () => left, set: (v: number) => { left = v; } });
+    act(() => { el.dispatchEvent(new Event("scroll")); });
+    return el;
+  };
+
+  // ⚠️ **幅を測る前は出さない**＝幅 0 は「何も見えていない」と読めて、どの動画でも出てしまう。
+  it("並びの幅を測る前（幅 0）は出さない", () => {
+    long();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByTestId("timeline-overview")).toBeNull();
+  });
+
+  it("全体が枠に収まっていれば出さない（送る先が無い）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    sizeScroller(container, LABEL + 20 * 36 + 10);
+    expect(screen.queryByTestId("timeline-overview")).toBeNull();
+    // ⚠️ **場所は取っておく**（PR #1412 レビュー 🟡）＝出し入れで並びが縦にずれない。押せない・読み上げない。
+    const idle = container.querySelector(".timeline-overview--idle");
+    expect(idle).not.toBeNull();
+    expect(idle!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("Escape で、押す前の送り量へ戻す（押した瞬間に真ん中へ送った分も含めて）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 36);
+    const bar = screen.getByTestId("timeline-overview");
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 150, clientY: 5 });
+    expect(el.scrollLeft).not.toBe(36); // 押した瞬間に送る
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(el.scrollLeft).toBe(36);
+  });
+
+  it("送る相手（並びの枠）を指し、見えている範囲を読み上げる", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 180);
+    const bar = screen.getByTestId("timeline-overview");
+    expect(bar.getAttribute("aria-controls")).toBe(el.id);
+    expect(bar.getAttribute("aria-valuetext")).toBe("5秒から10秒まで（全体 20秒）");
+  });
+
+  it("はみ出していれば出し、見えている範囲を枠で示す（名前の欄の幅は除く）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    sizeScroller(container, LABEL + 180, 180); // 見えているのは 5〜10 秒
+    const win = screen.getByTestId("timeline-overview-window");
+    expect(win.style.left).toBe("25%");
+    expect(win.style.width).toBe("25%");
+    // 部品は列の段に、種類の色で描く。
+    const marks = container.querySelectorAll<HTMLElement>(".timeline-overview-clip--telop");
+    expect(marks).toHaveLength(2);
+    // ⚠️ **並びと同じ上下**＝並びは文書の最後の列をいちばん上に描く。
+    const rows = useTimelineStore.getState().doc!.tracks.length;
+    expect(marks[0].style.top).toBe(`${(rows - 1) * (100 / rows)}%`);
+  });
+
+  it("押すとその時刻が真ん中に来るように送る", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 0);
+    const bar = screen.getByTestId("timeline-overview");
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 150, clientY: 5 }); // 15 秒
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 150, clientY: 5 });
+    expect(el.scrollLeft).toBe(15 * 36 - 90); // 見えている 180px の真ん中に 15 秒
+  });
+
+  it("枠を掴んで運ぶと、動かした割合ぶん並びを送る（真ん中へ跳ばない）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ **途中まで送った所から掴む**＝0 秒付近で掴むと、真ん中へ跳んでも送り量が 0 のままで見分けられない（変異チェックで露見）。
+    const el = sizeScroller(container, LABEL + 180, 360); // 見えているのは 10〜15 秒（帯の 50〜75%）
+    const bar = screen.getByTestId("timeline-overview");
+    bar.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const win = screen.getByTestId("timeline-overview-window");
+    fireEvent.pointerDown(win, { pointerId: 1, button: 0, clientX: 110, clientY: 5 }); // 枠の中（11 秒）
+    expect(el.scrollLeft).toBe(360); // 掴んだだけでは送らない（真ん中へ跳ばすと 11 秒が真ん中＝306）
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 130, clientY: 5 }); // 帯の 1割＝2秒ぶん
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 130, clientY: 5 });
+    expect(el.scrollLeft).toBeCloseTo(360 + 2 * 36, 5);
+  });
+
+  it("矢印キーで見えている幅の1割ずつ送り、End で端へ", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = sizeScroller(container, LABEL + 180, 0);
+    const bar = screen.getByTestId("timeline-overview");
+    fireEvent.keyDown(bar, { key: "ArrowRight" });
+    expect(el.scrollLeft).toBeCloseTo(0.5 * 36, 5); // 見えている 5 秒の1割
+    fireEvent.keyDown(bar, { key: "End" });
+    expect(el.scrollLeft).toBeGreaterThan(36 * 15);
+  });
+});
