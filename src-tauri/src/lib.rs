@@ -1126,10 +1126,23 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
     // **`projects` は通るのに `user_assets` だけ当たらない**を黙って通す＝偽陰性を減らす主旨に反する。
     // ⚠️ **チュートリアル映像は直下だけ**（`$RESOURCE/tutorials/*`・#1229）。同梱物の置き場所は入れたときに在るので
     //   作れなくても困らない（作れないのは書き込めないインストール先のときで、その記録が残るだけ）。
-    for (dir, recursive) in [
-        (projects_dir(app), true),
-        (user_assets_dir(app), false),
-        (tutorials_dir(app), false),
+    // 3つ目は**当たらなかったときに何が出なくなるか**（記録に書く＝映像の置き場を写真の問題として調べ始めない）。
+    for (dir, recursive, symptom) in [
+        (
+            projects_dir(app),
+            true,
+            "素材の置き場が許可に当たらない＝写真が出ません",
+        ),
+        (
+            user_assets_dir(app),
+            false,
+            "素材の棚が許可に当たらない＝棚の写真が出ません",
+        ),
+        (
+            tutorials_dir(app),
+            false,
+            "チュートリアル映像の置き場が許可に当たらない＝使い方の映像が再生できません",
+        ),
     ] {
         let dir = match dir {
             Ok(d) => d,
@@ -1170,7 +1183,8 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
                 .collect();
             crate::tlog!(
                 "asset_scope",
-                "素材の置き場が許可に当たらない＝写真が出ません。道={:?} 正規化後={} 許可の綴り={:?}",
+                "{}。道={:?} 正規化後={} 許可の綴り={:?}",
+                symptom,
                 dir,
                 canon,
                 patterns

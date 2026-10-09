@@ -64,6 +64,19 @@ describe("使い方：同梱した映像", () => {
     expect(container.querySelector("video")!.getAttribute("src")).toBe("asset://res/tutorials/t01.mp4");
   });
 
+  // ⚠️ **道は決まったのに読めない**（許可に当たらない 403・欠けている）ときも、黒い画面のまま止めない（PR #1408 レビュー ℹ️）。
+  it("映像を読めなければ、同じ知らせに切り替える", async () => {
+    videos.list = [
+      { id: "t01", title: "はじめての1本", desc: "入口から書き出しまで", file: "t01.mp4", durationLabel: "2分" },
+    ];
+    const { container } = render(<HelpScreen />);
+    fireEvent.click(screen.getByText("はじめての1本").closest("button")!);
+    await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
+    fireEvent.error(container.querySelector("video")!);
+    expect(await screen.findByText(TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE)).toBeTruthy();
+    expect(container.querySelector("video")).toBeNull();
+  });
+
   it("道を決められなければ、黙らずに次の一歩を知らせる（空の再生枠を出さない）", async () => {
     videos.list = [
       { id: "t01", title: "はじめての1本", desc: "入口から書き出しまで", file: "t01.mp4", durationLabel: "2分" },

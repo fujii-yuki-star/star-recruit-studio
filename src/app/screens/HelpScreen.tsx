@@ -51,8 +51,10 @@ export function HelpScreen() {
       alive = false;
     };
   }, [playing]);
-  /** `undefined`＝決めている途中・`null`＝決められなかった。 */
-  const src = playing && resolved?.id === playing.id ? resolved.url : undefined;
+  /** 道は決まったのに読めなかった映像（許可に当たらない・欠けている）。黒い画面のまま止めない（§2-5）。 */
+  const [failedId, setFailedId] = useState<string | null>(null);
+  /** `undefined`＝決めている途中・`null`＝決められなかった（または読めなかった）。 */
+  const src = playing && resolved?.id === playing.id ? (failedId === playing.id ? null : resolved.url) : undefined;
 
   return (
     <div className="main-scroll">
@@ -76,6 +78,7 @@ export function HelpScreen() {
                 className="mt"
                 style={{ width: "100%", borderRadius: 8, background: "#000" }}
                 src={src}
+                onError={() => setFailedId(playing.id)}
                 controls
                 autoPlay
                 aria-label={`${playing.title}（映像）`}
