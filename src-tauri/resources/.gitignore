@@ -9,3 +9,7 @@
 !ffmpeg/
 !local_llm/
 !transcribe/
+# チュートリアル映像（#1229）は**中身ごと追跡する**＝目録（`tutorialVideos.ts`）と置いたファイルの突き合わせを CI でも見るため
+# （`public/tutorials/` にあったときと同じ扱い）。`public/` は途中へ移動できないので、ここへ移した。
+!tutorials/
+!tutorials/**

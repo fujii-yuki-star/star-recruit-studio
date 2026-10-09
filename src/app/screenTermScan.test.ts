@@ -210,7 +210,8 @@ describe("画面に直書きした文字に、実装用語が混じっていな�
     //   `TranscriptPanel.tsx` 13→17（閉じる前の確認・聞く・その説明・空の行の説明）。
     // ⚠️ **+2**（#1396・実測）＝配置を覚えられなかった知らせ（`uiLabels.ts`）とその「閉じる」（`PanelLayoutView.tsx`）。
     // ⚠️ **+1**（#1403・実測）＝中身が空の動画案の断り（`aiProviders/messages.ts` の `AI_PLAN_HOLLOW_MESSAGE`）。
-    expect(n, "拾えた文言の数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(2670);
+    // ⚠️ **+1**（#1229・実測）＝チュートリアル映像を開けなかった知らせ（`uiLabels.ts` の `TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE`）。
+    expect(n, "拾えた文言の数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(2671);
   });
 
   it("走査が画面の外枠まで届いている（`src/App.tsx` を見ている）", () => {

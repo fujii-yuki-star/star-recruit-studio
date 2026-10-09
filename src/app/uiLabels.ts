@@ -2086,3 +2086,10 @@ export function reorientCopyLabel(target: "portrait" | "landscape" | null): stri
 }
 /** 同じボタンの説明（押せるとき）。 */
 export const REORIENT_COPY_NOTE = "（元はそのまま・素材と声ごとコピーします）";
+
+/**
+ * 同梱したチュートリアル映像の道を決められなかったときの知らせ（#1229）。
+ * ⚠️ 同梱物は入れたときに置かれる＝欠けていれば入れ直すのが次の一歩。
+ */
+export const TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE =
+  "この映像を開けませんでした。アプリを入れ直すと見られるようになることがあります。";
