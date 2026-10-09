@@ -506,6 +506,16 @@
   opacity: 0.9;
   z-index: 4;
 }
+/* `Alt`＋運ぶ＝写しを置く（#1248）。運んでいる帯は写し・元の位置には元の帯を薄く残す（Premiere・Resolve の型）。 */
+.timeline-clip--copying {
+  cursor: copy;
+  outline: 2px dashed var(--color-border-strong);
+  outline-offset: -2px;
+}
+.timeline-clip--copy-source {
+  opacity: 0.55;
+  pointer-events: none;
+}
 /* トリミングハンドル（左右端）。選択中は掴みやすいよう縁を強調。 */
 /* ⚠️ **当たり判定は見た目より広い**（#752-7）＝見た目と同じ 7px だと、実機で指が乗る前に本体を掴む
    （業界の型は「見た目の2倍以上」）。広げるのは**帯の内側だけ**（外へ広げると隣の帯を食う）。
