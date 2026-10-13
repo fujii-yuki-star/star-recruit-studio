@@ -613,6 +613,11 @@ const packReject = [
   ['pack: 権利が空は拒否', withPack({ licenses: [] })],
   ['pack: 版は x.y.z', withPack({ version: '1.0' })],
   ['pack: 知らない欄は拒否', withPack({ install: 'run.exe' })],
+  ['pack: packId の末尾の _ は拒否（境目が割れる）', withPack({ packId: 'ab_' })],
+  ['pack: パスの . の部分は拒否', withPack({ files: [{ path: 'a/./b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの空の部分は拒否', withPack({ files: [{ path: 'a//b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの末尾の / は拒否', withPack({ files: [{ path: 'a/', sha256: '0'.repeat(64) }] })],
+  ['pack: manifest.json を中身に数えない', withPack({ files: [{ path: 'manifest.json', sha256: '0'.repeat(64) }] })],
 ];
 for (const [desc, data] of packReject) {
   if (!vPack(data)) console.log(`PASS  must-reject  ${desc}`);

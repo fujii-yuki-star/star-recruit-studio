@@ -177,7 +177,7 @@ export function AboutScreen() {
                     <div className="text-faint text-sm">{m.publisher}（{m.version}）</div>
                     {m.licenses.map((l) => (
                       <div className="text-faint text-sm" key={l.target}>
-                        {PACK_CONTENT_LABEL[l.target] ?? l.target}：{l.license}
+                        {PACK_CONTENT_LABEL[l.target]}：{l.license}
                         {l.credit ? `（${l.credit}）` : ""}
                       </div>
                     ))}

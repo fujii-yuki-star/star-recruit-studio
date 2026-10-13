@@ -10,9 +10,12 @@ export async function inspectPack(path: string): Promise<string> {
   return invoke<string>('pack_inspect', { path });
 }
 
-/** 照合して入れる（同じ packId は置き換え）。 */
-export async function installPack(path: string, packId: string): Promise<void> {
-  await invoke('pack_install', { path, packId });
+/**
+ * 照合して入れる（同じ packId は置き換え）。`shownManifest` は**利用者に見せた manifest の文字そのもの**＝
+ * 見せてから入れるまでにファイルが差し替わっていたら Rust が断る（見せたものと違う中身を入れない）。
+ */
+export async function installPack(path: string, packId: string, shownManifest: string): Promise<void> {
+  await invoke('pack_install', { path, packId, shownManifest });
 }
 
 /** 入っているパックの manifest の文字。ブラウザでの開発中は空。 */

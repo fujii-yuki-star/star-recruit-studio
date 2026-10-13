@@ -29,6 +29,16 @@ const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 /// 作業用・置き換え前のフォルダの頭（一覧に出さない・起動時に片づける）。
 const STAGING_PREFIX: &str = ".staging-";
 const OLD_PREFIX: &str = ".old-";
+/// 外したパック（名前を変えてから消す・消し残しは起動時に片づける）。
+const TRASH_PREFIX: &str = ".trash-";
+
+/// `.old-<packId>-<時刻>` から packId を取り出す（形が違えば None）。
+fn old_dir_pack_id(name: &str) -> Option<String> {
+    let rest = name.strip_prefix(OLD_PREFIX)?;
+    let (id, tag) = rest.rsplit_once('-')?;
+    (is_safe_pack_id(id) && !tag.is_empty() && tag.chars().all(|c| c.is_ascii_digit()))
+        .then(|| id.to_string())
+}
 
 fn packs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app
@@ -47,6 +57,8 @@ pub(crate) fn is_safe_pack_id(id: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         && !id.contains("__")
+        // ⚠️ 末尾の `_` も断る（schema と同じ）＝`pack_ab___x` の境目が割れる（`ab` と取り違える）。
+        && !id.ends_with('_')
 }
 
 /// パックの中の相対パスが安全か（`/` 区切り・各部分は英数字と `- _ .`・`.` と `..` は使わない・先頭の `/` も無し）。
@@ -56,13 +68,26 @@ pub(crate) fn is_safe_rel_path(p: &str) -> bool {
         return false;
     }
     p.split('/').all(|part| {
+        // ⚠️ **Windows だけの重なりも断る**（schema より厳しい・PR レビュー ℹ️）＝末尾の `.`（`a.` は `a` と同じファイル）・
+        //   予約名（`con`・`nul`・`aux.json` など＝書き込みが装置へ流れる）。大文字小文字違いの重なりは `entry_names` が断る。
         !part.is_empty()
             && part != "."
             && part != ".."
+            && !part.ends_with('.')
+            && !is_windows_reserved(part)
             && part
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     })
+}
+
+/// Windows の予約名か（拡張子を付けても予約のまま＝`nul.json` も装置になる）。
+fn is_windows_reserved(part: &str) -> bool {
+    let stem = part.split('.').next().unwrap_or("").to_ascii_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ((stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -111,6 +136,8 @@ fn open_archive(path: &str) -> Result<zip::ZipArchive<fs::File>, String> {
 /// zip の中のファイル名の一覧（フォルダは除く）。危ない名前が1つでもあれば断る。
 fn entry_names(zip: &mut zip::ZipArchive<fs::File>) -> Result<Vec<String>, String> {
     let mut names = Vec::new();
+    // ⚠️ 大文字小文字だけ違う名前の重なりを断る（Windows では同じファイル＝照合した中身と書いた中身がずれる）。
+    let mut seen_lower = BTreeSet::new();
     let mut total: u64 = 0;
     for i in 0..zip.len() {
         let e = zip
@@ -123,7 +150,7 @@ fn entry_names(zip: &mut zip::ZipArchive<fs::File>) -> Result<Vec<String>, Strin
             .name()
             .map_err(|_| messages::PACK_UNREADABLE.to_string())?
             .to_string();
-        if !is_safe_rel_path(&name) {
+        if !is_safe_rel_path(&name) || !seen_lower.insert(name.to_ascii_lowercase()) {
             return Err(messages::PACK_TAMPERED.to_string());
         }
         total = total.saturating_add(e.size());
@@ -154,12 +181,26 @@ fn read_manifest(zip: &mut zip::ZipArchive<fs::File>) -> Result<String, String> 
     Ok(s)
 }
 
-/// 入れる前に中身を見る＝manifest の文字だけを返す（展開しない）。画面は形を確かめてから中身・発行者・権利を見せる。
-#[tauri::command]
-pub fn pack_inspect(path: String) -> Result<String, String> {
-    let mut zip = open_archive(&path)?;
+/// 重い処理（展開・照合・読み込み）を窓の外で走らせる（PR レビュー 🟡）＝同期のコマンドは窓の糸で走り、
+/// 大きなパックの展開と照合の間、窓が「応答なし」になる（このリポジトリの流儀＝`spawn_blocking`）。
+async fn run_blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?
+}
+
+fn inspect_blocking(path: &str) -> Result<String, String> {
+    let mut zip = open_archive(path)?;
     entry_names(&mut zip)?;
     read_manifest(&mut zip)
+}
+
+/// 入れる前に中身を見る＝manifest の文字だけを返す（展開しない）。画面は形を確かめてから中身・発行者・権利を見せる。
+#[tauri::command]
+pub async fn pack_inspect(path: String) -> Result<String, String> {
+    run_blocking(move || inspect_blocking(&path)).await
 }
 
 /// 中のファイル一覧が manifest の `files` とちょうど一致するか（多い・足りないのどちらも断る）。
@@ -223,16 +264,34 @@ fn now_tag() -> u128 {
         .unwrap_or(0)
 }
 
-/// 照合して入れる。`pack_id` は画面が manifest から読んだ値（取り違え防止に、zip の中の manifest と突き合わせる）。
+/// 照合して入れる。`shown_manifest` は**画面が見せた manifest の文字そのもの**＝見せてから入れるまでの間に
+/// ファイルが差し替わっていたら断る（PR レビュー 🟡＝見せた発行者・権利・版と違うものを入れない）。
 /// 同じ packId が入っていれば置き換える（古い版を断るのは画面＝版の比べ方は TS）。
 #[tauri::command]
-pub fn pack_install(app: tauri::AppHandle, path: String, pack_id: String) -> Result<(), String> {
-    if !is_safe_pack_id(&pack_id) {
+pub async fn pack_install(
+    app: tauri::AppHandle,
+    path: String,
+    pack_id: String,
+    shown_manifest: String,
+) -> Result<(), String> {
+    run_blocking(move || install_blocking(&app, &path, &pack_id, &shown_manifest)).await
+}
+
+fn install_blocking(
+    app: &tauri::AppHandle,
+    path: &str,
+    pack_id: &str,
+    shown_manifest: &str,
+) -> Result<(), String> {
+    if !is_safe_pack_id(pack_id) {
         return Err(messages::PACK_UNREADABLE.to_string());
     }
-    let mut zip = open_archive(&path)?;
+    let mut zip = open_archive(path)?;
     let entries = entry_names(&mut zip)?;
     let manifest = read_manifest(&mut zip)?;
+    if manifest != shown_manifest {
+        return Err(messages::PACK_TAMPERED.to_string());
+    }
     let (id_in_zip, files) = manifest_files(&manifest)?;
     if id_in_zip != pack_id {
         return Err(messages::PACK_TAMPERED.to_string());
@@ -240,7 +299,7 @@ pub fn pack_install(app: tauri::AppHandle, path: String, pack_id: String) -> Res
     if !same_file_set(&entries, &files) {
         return Err(messages::PACK_TAMPERED.to_string());
     }
-    let root = packs_dir(&app)?;
+    let root = packs_dir(app)?;
     fs::create_dir_all(&root).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
     let staging = root.join(format!("{STAGING_PREFIX}{pack_id}-{}", now_tag()));
     let mut budget = MAX_TOTAL_BYTES;
@@ -251,7 +310,7 @@ pub fn pack_install(app: tauri::AppHandle, path: String, pack_id: String) -> Res
         }
         fs::write(staging.join(MANIFEST), &manifest)
             .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
-        let target = root.join(&pack_id);
+        let target = root.join(pack_id);
         if target.exists() {
             let old = root.join(format!("{OLD_PREFIX}{pack_id}-{}", now_tag()));
             fs::rename(&target, &old).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
@@ -294,16 +353,22 @@ pub fn pack_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 }
 
 /// 外す（フォルダごと消す）。使っている動画を知らせるのは画面（外す前）。
+/// ⚠️ **先に名前を変えてから消す**（PR レビュー ℹ️）＝消す途中で止まると、半端なフォルダが「読めないパック」として残る。
+///   名前を変えた時点で一覧からは消え、消し残しは次の起動の片づけが消す。
 #[tauri::command]
 pub fn pack_uninstall(app: tauri::AppHandle, pack_id: String) -> Result<(), String> {
     if !is_safe_pack_id(&pack_id) {
         return Err(messages::PACK_REMOVE_FAILED.to_string());
     }
-    let dir = packs_dir(&app)?.join(&pack_id);
+    let root = packs_dir(&app)?;
+    let dir = root.join(&pack_id);
     if !dir.exists() {
         return Ok(());
     }
-    fs::remove_dir_all(&dir).map_err(|_| messages::PACK_REMOVE_FAILED.to_string())
+    let trash = root.join(format!("{TRASH_PREFIX}{pack_id}-{}", now_tag()));
+    fs::rename(&dir, &trash).map_err(|_| messages::PACK_REMOVE_FAILED.to_string())?;
+    let _ = fs::remove_dir_all(&trash);
+    Ok(())
 }
 
 fn pack_file(app: &tauri::AppHandle, pack_id: &str, rel: &str) -> Result<PathBuf, String> {
@@ -315,12 +380,16 @@ fn pack_file(app: &tauri::AppHandle, pack_id: &str, rel: &str) -> Result<PathBuf
 
 /// 中の文字のファイル（見た目パターンの JSON）を読む。
 #[tauri::command]
-pub fn pack_read_text(
+pub async fn pack_read_text(
     app: tauri::AppHandle,
     pack_id: String,
     rel: String,
 ) -> Result<String, String> {
-    let p = pack_file(&app, &pack_id, &rel)?;
+    run_blocking(move || read_text_blocking(&app, &pack_id, &rel)).await
+}
+
+fn read_text_blocking(app: &tauri::AppHandle, pack_id: &str, rel: &str) -> Result<String, String> {
+    let p = pack_file(app, pack_id, rel)?;
     let len = fs::metadata(&p)
         .map_err(|_| messages::PACK_UNREADABLE.to_string())?
         .len();
@@ -332,13 +401,21 @@ pub fn pack_read_text(
 
 /// 中の絵（既定素材）を data URL で読む（今の見た目パターンの既定素材と同じ渡し方）。
 #[tauri::command]
-pub fn pack_read_data_url(
+pub async fn pack_read_data_url(
     app: tauri::AppHandle,
     pack_id: String,
     rel: String,
 ) -> Result<String, String> {
+    run_blocking(move || read_data_url_blocking(&app, &pack_id, &rel)).await
+}
+
+fn read_data_url_blocking(
+    app: &tauri::AppHandle,
+    pack_id: &str,
+    rel: &str,
+) -> Result<String, String> {
     use base64::Engine;
-    let p = pack_file(&app, &pack_id, &rel)?;
+    let p = pack_file(app, pack_id, rel)?;
     let mime = match p
         .extension()
         .and_then(|e| e.to_str())
@@ -363,14 +440,26 @@ pub fn pack_read_data_url(
     ))
 }
 
-/// 起動時の片づけ＝途中で止まった作業用・置き換え前のフォルダを消す（入っているパックには触らない）。
+/// 起動時の片づけ＝途中で止まった作業用・外したフォルダを消す（入っているパックには触らない）。
+/// ⚠️ **置き換え前のフォルダ（`.old-`）は、置き換えが済んでいれば消し、済んでいなければ戻す**（PR レビュー ℹ️）＝
+///   置き換えの途中で両方の名前の変更が失敗すると元のパックは `.old-` にしか無い。黙って消すと**入っていたパックが無言で失われる**。
 pub fn cleanup_pack_staging(app: &tauri::AppHandle) {
     let Ok(root) = packs_dir(app) else { return };
     let Ok(rd) = fs::read_dir(&root) else { return };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if (name.starts_with(STAGING_PREFIX) || name.starts_with(OLD_PREFIX)) && e.path().is_dir() {
+        if !e.path().is_dir() {
+            continue;
+        }
+        if name.starts_with(STAGING_PREFIX) || name.starts_with(TRASH_PREFIX) {
             let _ = fs::remove_dir_all(e.path());
+        } else if let Some(id) = old_dir_pack_id(&name) {
+            let target = root.join(&id);
+            if target.exists() {
+                let _ = fs::remove_dir_all(e.path());
+            } else {
+                let _ = fs::rename(e.path(), &target);
+            }
         }
     }
 }
@@ -395,6 +484,13 @@ mod tests {
             "a/",
             "a b.json",
             "テンプレ.json",
+            "a.",
+            "t/logo.png.",
+            "nul",
+            "con.json",
+            "t/Aux.png",
+            "com1.txt",
+            "lpt9",
         ] {
             assert!(!is_safe_rel_path(bad), "{bad}");
         }
@@ -412,10 +508,30 @@ mod tests {
             "a__b",
             "a.b",
             "../x",
+            "ab_",
             &"a".repeat(41),
         ] {
             assert!(!is_safe_pack_id(bad), "{bad}");
         }
+        // 予約名でない似た名前は通す（過剰に断らない）。
+        assert!(is_safe_rel_path("t/console.json"));
+        assert!(is_safe_rel_path("t/com10.png"));
+        assert!(is_safe_rel_path(".hidden"));
+    }
+
+    #[test]
+    fn old_dir_name_round_trips_pack_id() {
+        assert_eq!(
+            old_dir_pack_id(".old-office_looks-1700000000000").as_deref(),
+            Some("office_looks")
+        );
+        assert_eq!(
+            old_dir_pack_id(".old-office-looks-12"),
+            None,
+            "packId に - は無い"
+        );
+        assert_eq!(old_dir_pack_id(".old-office_looks-"), None);
+        assert_eq!(old_dir_pack_id(".staging-office_looks-12"), None);
     }
 
     #[test]

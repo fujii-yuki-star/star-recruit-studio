@@ -119,3 +119,23 @@ describe('機能の鍵と外す前の数え上げ', () => {
     expect(countPackTemplateUses('office_looks', ['pack_office_looks__a', 'pack_office_looks__b', 'pack_other__a', 'opening_v1'])).toBe(2);
   });
 });
+
+describe('パックの外から入る道で、パックの名前を名乗らせない（PR レビュー 🟡）', () => {
+  it('templateId か層の既定素材がパックの名前なら templateClaimsPackIds が真', async () => {
+    const { templateClaimsPackIds } = await import('./extensionPack');
+    const t = (templateId: string, assetId?: string) =>
+      ({ templateId, layers: [{ id: 'l', type: 'logo', x: 0, y: 0, w: 1, h: 1, zIndex: 1, ...(assetId ? { assetId } : {}) }] }) as never;
+    expect(templateClaimsPackIds(t('pack_office__intro'))).toBe(true);
+    expect(templateClaimsPackIds(t('my_look', 'pack_office__logo'))).toBe(true);
+    expect(templateClaimsPackIds(t('my_look', 'tmpl_asset_001'))).toBe(false);
+    expect(templateClaimsPackIds(t('my_look'))).toBe(false);
+  });
+});
+
+describe('機能の名前', () => {
+  it('知っている名前だけが isKnownPackFeature', async () => {
+    const { isKnownPackFeature, KNOWN_PACK_FEATURES } = await import('./extensionPack');
+    for (const f of KNOWN_PACK_FEATURES) expect(isKnownPackFeature(f)).toBe(true);
+    expect(isKnownPackFeature('future-thing')).toBe(false);
+  });
+});

@@ -7,7 +7,7 @@ const fx = vi.hoisted(() => ({
   picked: "C:/パック/office.starpack" as string | null,
   inspect: "" as string,
   inspectError: null as string | null,
-  installs: [] as { path: string; packId: string }[],
+  installs: [] as { path: string; packId: string; shown: string }[],
   uninstalls: [] as string[],
   projects: [] as { projectId: string; doc: string }[],
   appVersion: "0.5.3",
@@ -21,7 +21,7 @@ vi.mock("../../infrastructure/packFs", () => ({
     if (fx.inspectError) throw new Error(fx.inspectError);
     return fx.inspect;
   }),
-  installPack: vi.fn(async (path: string, packId: string) => { fx.installs.push({ path, packId }); }),
+  installPack: vi.fn(async (path: string, packId: string, shown: string) => { fx.installs.push({ path, packId, shown }); }),
   uninstallPack: vi.fn(async (packId: string) => { fx.uninstalls.push(packId); }),
   listPackManifests: vi.fn(async () => []),
   readPackText: vi.fn(),
@@ -74,7 +74,8 @@ describe("ExtensionPackSection", () => {
     expect(confirm.textContent).toContain("見た目パターン：社内利用に限る（表記：総務部）");
     expect(fx.installs).toEqual([]); // 見せただけでは入れない
     fireEvent.click(screen.getByRole("button", { name: "入れる" }));
-    await waitFor(() => expect(fx.installs).toEqual([{ path: "C:/パック/office.starpack", packId: "office" }]));
+    // ⚠️ 見せた manifest の文字そのものを渡す（入れる時に Rust が zip の中と突き合わせる）。
+    await waitFor(() => expect(fx.installs).toEqual([{ path: "C:/パック/office.starpack", packId: "office", shown: fx.inspect }]));
     expect(await screen.findByText("「オフィスの見た目」を入れました。")).toBeTruthy();
   });
 
@@ -139,5 +140,14 @@ describe("ExtensionPackSection", () => {
     useProjectStore.setState({ packsSkipped: ["壊れたパック"] });
     render(<ExtensionPackSection />);
     expect(screen.getByRole("alert").textContent).toContain("壊れたパック");
+  });
+});
+
+describe("中身のあらまし", () => {
+  it("この版に無い機能は、識別子を出さずに決まった言葉にする（§2-3）", async () => {
+    const { packContentsSummary, PACK_UNKNOWN_FEATURE_LABEL } = await import("../uiLabels");
+    const s = packContentsSummary({ contents: { features: ["personalized-briefing", "future-thing", "other-thing"] } });
+    expect(s).toBe(`機能：あなた向け会社説明・${PACK_UNKNOWN_FEATURE_LABEL}`);
+    expect(s).not.toContain("future-thing");
   });
 });

@@ -8,6 +8,7 @@ import {
   readPackTemplate,
   type ExtensionPackManifest,
 } from '../../domain/pack/extensionPack';
+import { PACK_UNNAMED_LABEL } from '../uiLabels';
 import { listPackManifests, readPackDataUrl, readPackText } from '../../infrastructure/packFs';
 
 export interface InstalledPacks {
@@ -69,5 +70,5 @@ function packIdGuess(raw: string): string {
   } catch {
     // 拾えない
   }
-  return '（名前の読めない拡張パック）';
+  return PACK_UNNAMED_LABEL;
 }

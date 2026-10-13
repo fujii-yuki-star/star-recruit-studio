@@ -8,7 +8,7 @@ import { useProjectStore } from "../store/projectStore";
 import { countVideosUsingPack, inspectPackFile, installInspectedPack, removeInstalledPack } from "../store/packActions";
 import { showOpenExtensionPackDialog } from "../../infrastructure/dialog";
 import type { ExtensionPackManifest } from "../../domain/pack/extensionPack";
-import { PACK_CONTENT_LABEL, packContentsSummary, packRemoveConfirmMessage, packSkippedMessage } from "../uiLabels";
+import { PACK_CONTENT_LABEL, packContentsSummary, packInstalledMessage, packRemoveConfirmMessage, packRemovedMessage, packSkippedMessage } from "../uiLabels";
 import { DeleteConfirm } from "./DeleteConfirm";
 
 export function ExtensionPackSection() {
@@ -18,7 +18,7 @@ export function ExtensionPackSection() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   /** 中を見て、入れるかどうかを確かめている途中。 */
-  const [pending, setPending] = useState<{ path: string; manifest: ExtensionPackManifest } | null>(null);
+  const [pending, setPending] = useState<{ path: string; manifest: ExtensionPackManifest; raw: string } | null>(null);
   /** 外すかどうかを確かめている途中（使っている動画の数つき）。 */
   const [removing, setRemoving] = useState<{ manifest: ExtensionPackManifest; used: number } | null>(null);
 
@@ -30,7 +30,7 @@ export function ExtensionPackSection() {
       const path = await showOpenExtensionPackDialog();
       if (!path) return;
       const r = await inspectPackFile(path);
-      if (r.ok) setPending({ path, manifest: r.manifest });
+      if (r.ok) setPending({ path, manifest: r.manifest, raw: r.raw });
       else setError(r.message);
     } finally {
       setBusy(false);
@@ -41,8 +41,8 @@ export function ExtensionPackSection() {
     if (!pending) return;
     setBusy(true);
     try {
-      const r = await installInspectedPack(pending.path, pending.manifest);
-      if (r.ok) setNotice(`「${pending.manifest.name}」を入れました。`);
+      const r = await installInspectedPack(pending.path, pending.manifest, pending.raw);
+      if (r.ok) setNotice(packInstalledMessage(pending.manifest.name));
       else setError(r.message);
       setPending(null);
     } finally {
@@ -66,7 +66,7 @@ export function ExtensionPackSection() {
     setBusy(true);
     try {
       const r = await removeInstalledPack(removing.manifest.packId);
-      if (r.ok) setNotice(`「${removing.manifest.name}」を外しました。`);
+      if (r.ok) setNotice(packRemovedMessage(removing.manifest.name));
       else setError(r.message);
       setRemoving(null);
     } finally {
@@ -101,7 +101,7 @@ export function ExtensionPackSection() {
             <li>使ってよい範囲：</li>
             {pending.manifest.licenses.map((l) => (
               <li key={l.target} className="text-sm">
-                ・{PACK_CONTENT_LABEL[l.target] ?? l.target}：{l.license}
+                ・{PACK_CONTENT_LABEL[l.target]}：{l.license}
                 {l.credit ? `（表記：${l.credit}）` : ""}
               </li>
             ))}

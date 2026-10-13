@@ -606,6 +606,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
     rangeDeleteConfirmMessage: "断り・知らせではなく、消す前の確認の文（表の対象外＝まとめて削除の確認と同じ扱い）",
     packRemoveConfirmMessage: "断り・知らせではなく、拡張パックを外す前の確認の文（表の対象外＝範囲を消す確認と同じ扱い）",
+    packInstalledMessage: "うまくいった操作の報告（「『名前』を入れました。」）＝断り・知らせの表の対象外（文字の形を足した報告と同じ扱い）",
+    packRemovedMessage: "うまくいった操作の報告（「『名前』を外しました。」）＝断り・知らせの表の対象外",
     hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
     volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
     audioUnreadableMessage: "音源の種類（読み上げ／同梱の曲／取り込んだ素材）で次の行動が変わる",

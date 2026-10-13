@@ -52,6 +52,7 @@
 | user template | `user_tmpl_{NNN}` | `user_tmpl_001` | **ユーザー作成テンプレの `templateId`**。**グローバル一意**（全プロジェクト横断）・3桁（999超は桁上がり）。`^[a-z0-9_]+$` 適合（`template.schema` 不変）。同梱テンプレは記述的id（`corp_title` 等）で名前空間が別＝接頭辞 `user_tmpl_` で判定（ADR-0017） |
 | テンプレ所有素材 | `tmpl_asset_{NNN}` | `tmpl_asset_001` | **テンプレが持つ既定素材の id**（ADR-0021）。**グローバル一意**（`user_templates/assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^tmpl_asset_[0-9]+$` 適合。`layer.assetId` から参照。**最大連番+1・番号再利用可**（テンプレ削除と同時に消える＝`user_tmpl_` の no-reuse とは別方針） |
 | ライブラリ素材 | `lib_asset_{NNN}` | `lib_asset_001` | **ユーザー素材ライブラリの素材 id**（ADR-0035）。**グローバル一意**（`user_assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^lib_asset_[0-9]{3,}$` 適合。⚠️ **`project.json` には現れない**＝取り込みは**コピー**で、プロジェクト側では `asset_NNN` を採番し直す（ADR-0024 決定6 の自己完結を守る＝`project.schema` 不変）。テンプレ所有素材（`tmpl_asset_`）とは**棚が別**（持ち主も寿命も違う） |
+| 拡張パックの中身 | `pack_{packId}__{中の名前}` | `pack_office_looks__intro` | **拡張パックの見た目パターンと既定素材**（ADR-0060・§7.7）。読むときに頭を付ける（パックの中では短い名前で書く）。⚠️ **境目が一意**＝packId は `__` と末尾の `_` を含めない。⚠️ **同じ規則が3か所にある**＝schema の `packId` の pattern・`is_safe_pack_id`（Rust）・`isPackScopedId`／`packIdOfScopedId`（domain）。⚠️ **パックの外から入る道（見た目パターンのファイルの取り込み）はこの形を断る**（`templateClaimsPackIds`）。 |
 | 持ち込みフォント | `user_font_{NNN}` | `user_font_001` | **利用者が取り込んだフォントの id**（ADR-0038・#261）。**グローバル一意**（`appData/user_fonts/`・全プロジェクトで共有）・3桁以上。⚠️ **gap-fill しない**（`scene`/`part` と別方針＝既存の最大＋1）。⚠️ **同じ規則が3か所にある**＝`USER_FONT_ID_RE`（domain）・`$defs/FontId` の pattern（schema）・`is_user_font_id`（Rust・パストラバーサル防止も兼ねる）。**片方だけ変えると保存できるのに読めない**ので、`USER_FONT_ID_SAMPLES` を使って両側のテストで突き合わせる。⚠️ **`project.json` には現れない**（`videoSettings.fontId` 等が値として持つだけ＝実体はアプリの外） |
 
 - ID は不変。リネーム時も ID は変えず `displayName` を変える。
@@ -420,7 +421,8 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 - **manifest**：`packId`（英小文字で始まる・英小文字／数字／単独の `_`・40 字まで・`__` は使えない）・`name`・`version`（`x.y.z`）・`publisher`・`description`○・`minAppVersion`（`x.y.z`）・
   `contents`（`templates[].file`・`templateAssets[].{assetId,file}`・`features[]`＝少なくとも1種類）・`files[].{path,sha256}`（**manifest 以外の全ファイル**）・`licenses[].{target,license,credit○}`（**中身の種類ごとに必須**）。
-- **パス**：`/` 区切り・各部分は英数字と `- _ .`・`.`／`..`・先頭の `/` は不可（schema の `PackPath` と Rust の `is_safe_rel_path` が同じ規則）。
+- **パス**：`/` 区切り・各部分は英数字と `- _ .`・`.`／`..`・空の部分・先頭や末尾の `/`・`manifest.json` は不可（schema の `PackPath` と Rust の `is_safe_rel_path` が同じ規則）。⚠️ **Rust はさらに Windows だけの重なりを断る**＝末尾の `.`・予約名（`con`・`nul`・`aux.json` など）・大文字小文字だけ違う名前の重なり（schema の pattern では表しにくいので Rust 側だけの決まり）。
+- **見せてから入れる**：画面は `pack_inspect` で読んだ manifest の**文字そのもの**を `pack_install` へ渡し、Rust は zip の中の manifest と**一致しなければ断る**（見せた後にファイルが差し替わっても、見せたものと違う中身を入れない）。重い処理（展開・照合・読み込み）は窓の外（`spawn_blocking`）で走る。
 - **id の名前空間**：パックの見た目パターンと既定素材は **`pack_<packId>__<中の名前>`**（`readPackTemplate` が読むときに付ける＝パックの中では短い名前で書く）。`templateId` の schema（`^[a-z0-9_]+$`）に収まる形。同梱（記述的な id）・利用者（`user_tmpl_NNN`）とは頭で分かれる。
 - **入れる**（`pack_install`）：zip の中のファイルが `files` と**ちょうど一致**（多い・足りないは断る）・各ファイルの **SHA-256 が一致**・`packId` が画面で見せたものと同じ、を確かめながら作業用のフォルダへ展開し、全部通ってから `appData/packs/<packId>/` へ置く（途中で失敗したら何も残さない・同じ packId は置き換え）。版の比べ方（古い版は断る・`minAppVersion`）は TS（`packInstallProblem`）。
 - **読む**：起動時（`loadUserTemplates` の後）と入れた・外した後に `loadPacks`。読めないパックは飛ばして名前を知らせる（`PACK_SKIPPED`）。見た目パターンは `templates` に、既定素材の data URL は `templateAssetSrcById` に合流する（描画・書き出しは今の道のまま）。

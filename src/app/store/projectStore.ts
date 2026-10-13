@@ -117,7 +117,7 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
-import { isPackScopedId, replacePackTemplates, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
+import { isPackScopedId, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
 import { readInstalledPacks } from "./packLoad";
 import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
@@ -2244,6 +2244,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addTemplatePack: (incoming) => {
     // 書き出し中はパック取り込みも止める（同 id の使用中テンプレを上書きしうる＝save/delete と同じ固定・#570 レビュー・store 側の2層目）。
     if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
+    // ⚠️ 拡張パックの名前を名乗る・借りるものは入れない（取り込み口でも断っている＝2層目・ADR-0060）。
+    incoming = incoming.filter((t) => !templateClaimsPackIds(t));
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
       // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
@@ -2370,8 +2372,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const source = s.templates.find((t) => t.templateId === sourceTemplateId);
     if (!source) return "";
     const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // ⚠️ **拡張パックの既定素材は、利用者の見た目パターンの素材へコピーして付け替える**（ADR-0060・PR レビュー 🟡）＝
+    //   パックの素材 id のまま残すと、パックを外したときに複製した見た目パターンの絵が**黙って欠ける**（外す前の数え上げにもかからない）。
+    const layers: Template["layers"] = [];
+    for (const l of source.layers) {
+      if (l.assetId == null || !isPackScopedId(l.assetId)) {
+        layers.push(l);
+        continue;
+      }
+      const url = get().templateAssetSrcById[l.assetId];
+      if (!url) return "";
+      const blob = await (await fetch(url)).blob();
+      const ext = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+      const copiedId = await get().registerTemplateAsset(new File([blob], `${l.assetId}.${ext}`, { type: blob.type }));
+      if (!copiedId) return "";
+      layers.push({ ...l, assetId: copiedId });
+    }
     // 同梱/別ユーザーテンプレを複製し、新 id とコピー名で保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。
-    const copy: Template = { ...source, templateId: newId, name: `${source.name}のコピー` };
+    const copy: Template = { ...source, layers, templateId: newId, name: `${source.name}のコピー` };
     await get().saveUserTemplate(copy);
     // 保存に失敗していたら id を返さない（呼び出し側で選択しない）。
     return get().templates.some((t) => t.templateId === newId) ? newId : "";

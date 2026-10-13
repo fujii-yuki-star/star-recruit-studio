@@ -45,7 +45,7 @@ function rustMessage(e: unknown): string {
 /** 選んだファイルの中を見る（展開しない）。 */
 export async function inspectPackFile(
   path: string,
-): Promise<{ ok: true; manifest: ExtensionPackManifest } | { ok: false; message: string }> {
+): Promise<{ ok: true; manifest: ExtensionPackManifest; raw: string } | { ok: false; message: string }> {
   let raw: string;
   try {
     raw = await inspectPack(path);
@@ -53,7 +53,7 @@ export async function inspectPackFile(
     return { ok: false, message: rustMessage(e) };
   }
   const parsed = parsePackManifest(raw);
-  return parsed.ok ? { ok: true, manifest: parsed.manifest } : { ok: false, message: packProblemMessage(parsed.problem) };
+  return parsed.ok ? { ok: true, manifest: parsed.manifest, raw } : { ok: false, message: packProblemMessage(parsed.problem) };
 }
 
 /**
@@ -63,13 +63,15 @@ export async function inspectPackFile(
 export async function installInspectedPack(
   path: string,
   manifest: ExtensionPackManifest,
+  /** 見せた manifest の文字そのもの（Rust が zip の中と突き合わせる）。 */
+  raw: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const installed = useProjectStore.getState().packs.find((p) => p.packId === manifest.packId) ?? null;
   const appVersion = (await getAppVersion()) || manifest.minAppVersion;
   const problem = packInstallProblem(manifest, appVersion, installed?.version ?? null);
   if (problem) return { ok: false, message: packProblemMessage(problem) };
   try {
-    await installPack(path, manifest.packId);
+    await installPack(path, manifest.packId, raw);
   } catch (e) {
     return { ok: false, message: rustMessage(e) };
   }

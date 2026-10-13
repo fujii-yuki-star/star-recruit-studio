@@ -5,20 +5,51 @@
   "description": "拡張パックの manifest.json の規範スキーマ（ADR-0060）。パックはデータだけ（プログラムを入れない）。詳細は 11_SCHEMA_REFERENCE.md §7.7。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "packId", "name", "version", "publisher", "minAppVersion", "contents", "files", "licenses"],
+  "required": [
+    "schemaVersion",
+    "packId",
+    "name",
+    "version",
+    "publisher",
+    "minAppVersion",
+    "contents",
+    "files",
+    "licenses"
+  ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
+    "schemaVersion": {
+      "const": "1.0"
+    },
     "packId": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
       "maxLength": 40,
       "description": "パックの名前（英小文字・数字・単独の _）。中の id の頭に付く（`pack_<packId>__<localId>`）＝ `__` を含めない。"
     },
-    "name": { "type": "string", "minLength": 1, "maxLength": 60 },
-    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "パックの版（同じ packId の古い版は入れない）。" },
-    "publisher": { "type": "string", "minLength": 1, "maxLength": 60 },
-    "description": { "type": "string", "maxLength": 400 },
-    "minAppVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "このパックを使えるアプリの最小の版。" },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "パックの版（同じ packId の古い版は入れない）。"
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "minAppVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "このパックを使えるアプリの最小の版。"
+    },
     "contents": {
       "type": "object",
       "additionalProperties": false,
@@ -31,9 +62,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["file"],
+            "required": [
+              "file"
+            ],
             "properties": {
-              "file": { "$ref": "#/$defs/PackPath", "description": "template.schema.json に従う見た目パターンの JSON。templateId はパックの中の名前（取り込むときに頭へ `pack_<packId>__` が付く）。" }
+              "file": {
+                "$ref": "#/$defs/PackPath",
+                "description": "template.schema.json に従う見た目パターンの JSON。templateId はパックの中の名前（取り込むときに頭へ `pack_<packId>__` が付く）。"
+              }
             }
           }
         },
@@ -44,10 +80,19 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["assetId", "file"],
+            "required": [
+              "assetId",
+              "file"
+            ],
             "properties": {
-              "assetId": { "type": "string", "pattern": "^[a-z0-9_]+$", "maxLength": 40 },
-              "file": { "$ref": "#/$defs/PackPath" }
+              "assetId": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]+$",
+                "maxLength": 40
+              },
+              "file": {
+                "$ref": "#/$defs/PackPath"
+              }
             }
           }
         },
@@ -56,7 +101,11 @@
           "minItems": 1,
           "uniqueItems": true,
           "description": "有効にする組み込み機能の名前（アプリに組み込み済みのもの＝鍵は秘密ではない・ADR-0060 決定1）。",
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 40 }
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "maxLength": 40
+          }
         }
       }
     },
@@ -66,10 +115,18 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "sha256"],
+        "required": [
+          "path",
+          "sha256"
+        ],
         "properties": {
-          "path": { "$ref": "#/$defs/PackPath" },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "path": {
+            "$ref": "#/$defs/PackPath"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     },
@@ -80,11 +137,28 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["target", "license"],
+        "required": [
+          "target",
+          "license"
+        ],
         "properties": {
-          "target": { "enum": ["templates", "templateAssets", "features"] },
-          "license": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "credit": { "type": "string", "maxLength": 200, "description": "About（このアプリについて）に出す表記。" }
+          "target": {
+            "enum": [
+              "templates",
+              "templateAssets",
+              "features"
+            ]
+          },
+          "license": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "credit": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "About（このアプリについて）に出す表記。"
+          }
         }
       }
     }
@@ -92,8 +166,8 @@
   "$defs": {
     "PackPath": {
       "type": "string",
-      "description": "パックの中の相対パス（/ 区切り・英数字と - _ . だけ・.. や先頭の / を使わない）。",
-      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_-][A-Za-z0-9_./-]*$",
+      "description": "パックの中の相対パス（/ 区切り・各部分は英数字と - _ . だけ・. と .. の部分・空の部分・先頭や末尾の / を使わない・manifest.json は不可）。Rust の is_safe_rel_path と同じ規則。",
+      "pattern": "^(?!manifest\\.json$)(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$",
       "maxLength": 200
     }
   }

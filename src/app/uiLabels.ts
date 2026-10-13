@@ -1,5 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import type { ExtensionPackManifest } from "../domain/pack/extensionPack";
+import { isKnownPackFeature, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
@@ -2140,7 +2140,18 @@ export const PACK_MISSING_LICENSE_MESSAGE =
   "この拡張パックには、中身を使ってよい範囲（権利）が書かれていません。権利が分からない中身は入れられないので、配った人に確かめてください。";
 /** 入っているパックのうち読めなかったもの（起動時など）。 */
 export function packSkippedMessage(names: readonly string[]): string {
-  return `読めなかった拡張パックがあります（${names.join("、")}）。外してから、配った人から受け取り直して入れてください。`;
+  // ⚠️ **できる手順だけを書く**（PR レビュー 🟡）＝読めなかったパックは一覧に出ない（外すボタンが無い）。
+  //   同じパックを入れ直すと置き換わるので、次の行動は「受け取り直して入れ直す」。
+  return `読めなかった拡張パックがあります（${names.join("、")}）。配った人から受け取り直して、もう一度入れてください（入れ直すと置き換わります）。`;
+}
+/** 名前も読めなかった拡張パック（読めなかった知らせに出す名前）。 */
+export const PACK_UNNAMED_LABEL = "（名前の読めない拡張パック）";
+/** 入れた・外したときの知らせ。 */
+export function packInstalledMessage(name: string): string {
+  return `「${name}」を入れました。`;
+}
+export function packRemovedMessage(name: string): string {
+  return `「${name}」を外しました。`;
 }
 /** アプリの版が足りないとき（`PACK_PROBLEM.appTooOld`）。 */
 export function packAppTooOldMessage(minAppVersion: string): string {
@@ -2157,11 +2168,13 @@ export function packRemoveConfirmMessage(name: string, usedVideos: number): stri
     : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
 }
 /** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
-export const PACK_FEATURE_LABEL: Record<string, string> = {
+export const PACK_FEATURE_LABEL: Record<PackFeature, string> = {
   "personalized-briefing": "あなた向け会社説明",
 };
+/** この版のアプリに無い機能（新しいパックを古いアプリへ入れたとき）。識別子をそのまま画面に出さない（§2-3）。 */
+export const PACK_UNKNOWN_FEATURE_LABEL = "（この版では使えない機能）";
 /** 中身の種類（`licenses[].target`）を画面の言葉へ。 */
-export const PACK_CONTENT_LABEL: Record<string, string> = {
+export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templates: "見た目パターン",
   templateAssets: "見た目パターンの写真・ロゴ",
   features: "機能",
@@ -2171,6 +2184,9 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   const parts: string[] = [];
   if (m.contents.templates) parts.push(`${PACK_CONTENT_LABEL.templates} ${m.contents.templates.length}個`);
   if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
-  if (m.contents.features) parts.push(`${PACK_CONTENT_LABEL.features}：${m.contents.features.map((f) => PACK_FEATURE_LABEL[f] ?? f).join("・")}`);
+  if (m.contents.features) {
+    const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
+    parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);
+  }
   return parts.join("・");
 }

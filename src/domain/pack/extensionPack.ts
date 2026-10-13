@@ -173,6 +173,12 @@ export function replacePackTemplates(templates: readonly Template[], packTemplat
 
 /** アプリに組み込んである機能の名前（パックの鍵で出す・ADR-0060 決定1）。 */
 export const KNOWN_PACK_FEATURES = ['personalized-briefing'] as const;
+export type PackFeature = (typeof KNOWN_PACK_FEATURES)[number];
+
+/** 組み込み機能の名前か（知らない名前＝新しいパックを古いアプリへ入れたとき）。 */
+export function isKnownPackFeature(f: string): f is PackFeature {
+  return (KNOWN_PACK_FEATURES as readonly string[]).includes(f);
+}
 
 /**
  * その動画（project.json／タイムライン形式の文書の文字）が、このパックの見た目パターンを使っているか（外す前に数える・ADR-0060 決定3）。
@@ -181,5 +187,14 @@ export const KNOWN_PACK_FEATURES = ['personalized-briefing'] as const;
 export function projectUsesPack(rawJson: string, packId: string): boolean {
   // packId は英小文字・数字・_ だけ（schema・Rust の `is_safe_pack_id`）＝正規表現の特別な文字を含まない。
   return new RegExp(`"templateId"\\s*:\\s*"${packIdPrefix(packId)}`).test(rawJson);
+}
+
+/**
+ * その見た目パターンが、拡張パックの名前（`pack_<packId>__…`）を名乗る・借りるか（PR レビュー 🟡）。
+ * ⚠️ パックの外から入る道（見た目パターンのファイルの取り込み）で断る＝入っているパックの見た目パターンを上書きしたり、
+ *   パックの既定素材を黙って借りたりさせない（パックの中身はパックからだけ入る）。
+ */
+export function templateClaimsPackIds(t: Pick<Template, 'templateId' | 'layers'>): boolean {
+  return isPackScopedId(t.templateId) || t.layers.some((l) => l.assetId != null && isPackScopedId(l.assetId));
 }
 
