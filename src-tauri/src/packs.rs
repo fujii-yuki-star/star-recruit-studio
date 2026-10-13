@@ -143,8 +143,14 @@ fn read_manifest(zip: &mut zip::ZipArchive<fs::File>) -> Result<String, String> 
         return Err(messages::PACK_UNREADABLE.to_string());
     }
     let mut s = String::new();
-    e.read_to_string(&mut s)
+    // ⚠️ 書いてある大きさを信用せず、上限＋1 までしか読まない（超えたら断る）。
+    (&mut e)
+        .take(MAX_MANIFEST_BYTES + 1)
+        .read_to_string(&mut s)
         .map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    if s.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
     Ok(s)
 }
 
@@ -168,15 +174,20 @@ fn same_file_set(entries: &[String], listed: &[(String, String)]) -> bool {
 }
 
 /// 1つ展開しながら SHA-256 を取り、合わなければ断る。
+/// ⚠️ **書いた量も数える**＝zip に**書いてある大きさ**（`size()`）は信用しない（嘘の大きさで展開を膨らませる zip がある）。
+///   書いてある大きさを超えた・残りの上限（`budget`）を超えたら、その場で止めて断る。
 fn extract_checked(
     zip: &mut zip::ZipArchive<fs::File>,
     name: &str,
     sha: &str,
     dest: &Path,
+    budget: &mut u64,
 ) -> Result<(), String> {
     let mut e = zip
         .by_name(name)
         .map_err(|_| messages::PACK_TAMPERED.to_string())?;
+    let declared = e.size();
+    let mut written: u64 = 0;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
     }
@@ -190,10 +201,15 @@ fn extract_checked(
         if n == 0 {
             break;
         }
+        written += n as u64;
+        if written > declared || written > *budget {
+            return Err(messages::PACK_TOO_LARGE.to_string());
+        }
         h.update(&buf[..n]);
         out.write_all(&buf[..n])
             .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
     }
+    *budget -= written;
     if hex(&h.finalize()) != sha {
         return Err(messages::PACK_TAMPERED.to_string());
     }
@@ -227,10 +243,11 @@ pub fn pack_install(app: tauri::AppHandle, path: String, pack_id: String) -> Res
     let root = packs_dir(&app)?;
     fs::create_dir_all(&root).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
     let staging = root.join(format!("{STAGING_PREFIX}{pack_id}-{}", now_tag()));
+    let mut budget = MAX_TOTAL_BYTES;
     let result = (|| {
         fs::create_dir_all(&staging).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
         for (rel, sha) in &files {
-            extract_checked(&mut zip, rel, sha, &staging.join(rel))?;
+            extract_checked(&mut zip, rel, sha, &staging.join(rel), &mut budget)?;
         }
         fs::write(staging.join(MANIFEST), &manifest)
             .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
@@ -455,16 +472,55 @@ mod tests {
         }
         let good = hex(&Sha256::digest(b"hello"));
         let mut zip = zip::ZipArchive::new(fs::File::open(&zpath).unwrap()).unwrap();
-        assert!(extract_checked(&mut zip, "t/a.json", &good, &dir.join("out/t/a.json")).is_ok());
+        let (mut big, mut big2) = (u64::MAX, u64::MAX);
+        assert!(extract_checked(
+            &mut zip,
+            "t/a.json",
+            &good,
+            &dir.join("out/t/a.json"),
+            &mut big
+        )
+        .is_ok());
         assert_eq!(
             fs::read_to_string(dir.join("out/t/a.json")).unwrap(),
             "hello"
         );
         let bad = hex(&Sha256::digest(b"other"));
         assert_eq!(
-            extract_checked(&mut zip, "t/a.json", &bad, &dir.join("out2/a.json")).unwrap_err(),
+            extract_checked(
+                &mut zip,
+                "t/a.json",
+                &bad,
+                &dir.join("out2/a.json"),
+                &mut big2
+            )
+            .unwrap_err(),
             messages::PACK_TAMPERED
         );
+        // 残りの上限を超えたら、その場で止める（書いてある大きさを信用しない）。
+        let mut small: u64 = 3;
+        assert_eq!(
+            extract_checked(
+                &mut zip,
+                "t/a.json",
+                &good,
+                &dir.join("out3/a.json"),
+                &mut small
+            )
+            .unwrap_err(),
+            messages::PACK_TOO_LARGE
+        );
+        // 通ったら、書いた量を残りから引く。
+        let mut rest: u64 = 10;
+        extract_checked(
+            &mut zip,
+            "t/a.json",
+            &good,
+            &dir.join("out4/a.json"),
+            &mut rest,
+        )
+        .unwrap();
+        assert_eq!(rest, 5);
         let _ = fs::remove_dir_all(&dir);
     }
 }
