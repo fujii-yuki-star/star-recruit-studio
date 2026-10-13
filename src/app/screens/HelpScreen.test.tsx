@@ -75,6 +75,10 @@ describe("使い方：同梱した映像", () => {
     fireEvent.error(container.querySelector("video")!);
     expect(await screen.findByText(TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE)).toBeTruthy();
     expect(container.querySelector("video")).toBeNull();
+    // 選び直したら、もう一度読みに行く（一時的に読めなかっただけなら見られる・0.5.2 出口監査）。
+    fireEvent.click(screen.getByText("はじめての1本").closest("button")!);
+    await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
+    expect(screen.queryByText(TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE)).toBeNull();
   });
 
   it("道を決められなければ、黙らずに次の一歩を知らせる（空の再生枠を出さない）", async () => {

@@ -9,6 +9,7 @@ import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { talkMotionAt } from '../domain/timeline/talkMotion';
+import { pivotPointOf } from '../domain/timeline/pivot';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
@@ -349,18 +350,39 @@ export function templatePartAt(
     const clipId = item.id.slice(0, slash);
     const layerId = item.id.slice(slash + 1);
     if (!canDrillInto(clipId, layerId)) continue;
-    if (hitsItem(item, point)) return { clipId, layerId };
+    // ⚠️ **ゆがみ（反転・縦横の倍率）を戻してから当てる**（#1416）＝層は「ゆがめる前の位置」で持っているので、
+    //   そのまま当てると反転した部品では**映す前の位置**を押さないと入れない。
+    if (hitsItem(item, item.warp ? unwarpPoint(item.warp.matrix, point) : point)) return { clipId, layerId };
   }
   return null;
 }
 
-/** 入った層の**描かれている枠**（印を出す先）。`null`＝いま描かれていない。 */
+/**
+ * 入った層の**描かれている枠**（印を出す先）。`null`＝いま描かれていない。
+ * ゆがみ（反転・縦横の倍率・ADR-0059）が掛かっていれば `warp` に行列を添える（#1416）＝印も同じ行列で映す。
+ */
 export function templatePartRect(
   layout: SceneLayout,
   part: { clipId: string; layerId: string },
-): { x: number; y: number; w: number; h: number; rotation?: number } | null {
+): { x: number; y: number; w: number; h: number; rotation?: number; warp?: Affine } | null {
   const item = layout.items.find((it) => it.id === `${part.clipId}/${part.layerId}`);
-  return item ? { x: item.x, y: item.y, w: item.w, h: item.h, ...(item.rotation != null ? { rotation: item.rotation } : {}) } : null;
+  return item
+    ? {
+        x: item.x, y: item.y, w: item.w, h: item.h,
+        ...(item.rotation != null ? { rotation: item.rotation } : {}),
+        ...(item.warp ? { warp: item.warp.matrix } : {}),
+      }
+    : null;
+}
+
+/** ゆがみの行列の**逆**を点に当てる（描かれた位置 → ゆがめる前の位置）。潰れて逆が無いときは点をそのまま返す。 */
+function unwarpPoint(m: Affine, p: { x: number; y: number }): { x: number; y: number } {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  if (det === 0) return p;
+  const x = p.x - e;
+  const y = p.y - f;
+  return { x: (d * x - c * y) / det, y: (-b * x + a * y) / det };
 }
 
 /** その点がアイテムの中か（回っていれば回転を戻してから見る）。 */
@@ -544,12 +566,8 @@ export function clipWarpOf(
   const flip = fx === 1 && fy === 1 ? undefined : scaleAround(center, rot, fx, fy);
   let squashM: Affine | undefined;
   if (sx !== 1 || sy !== 1) {
-    // 支点（素の箱の向きで測る＝`applyInterpolatedTransform` と同じ）。
-    const r = (rot * Math.PI) / 180;
-    const ox = ((clip.pivot?.x ?? 0.5) - 0.5) * box.w;
-    const oy = ((clip.pivot?.y ?? 0.5) - 0.5) * box.h;
-    const p = { x: center.x + ox * Math.cos(r) - oy * Math.sin(r), y: center.y + ox * Math.sin(r) + oy * Math.cos(r) };
-    squashM = scaleAround(p, rot, sx, sy);
+    // 支点（素の箱の向きで測る＝`applyInterpolatedTransform` と同じ）。動きの道筋と同じ関数で出す。
+    squashM = scaleAround(pivotPointOf(center, clip.pivot, box.w, box.h, rot), rot, sx, sy);
   }
   const matrix = flip && squashM ? composeAffine(squashM, flip) : (squashM ?? flip)!;
   return { key: `warp_${clip.id}`, matrix };

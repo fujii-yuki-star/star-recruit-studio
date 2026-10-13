@@ -3,6 +3,12 @@
 import type { Asset } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 
+/**
+ * 区切りの見た目の使いどころ（AI へ渡す・#1424）。⚠️ 書かないと、指示文の「構成（章立て）」に引っ張られて
+ * **全部の場面を区切りの見た目**（最長 6 秒・文字だけ）で組み、尺に届かなかった（一般・素材なし・30 秒で 2/3）。
+ */
+const CHAPTER_USE_CASE = "章の始まりに題名だけを短く見せる区切り。中身の説明には使わず、使うのは各章の頭に1つまで";
+
 export const sampleTemplates: Template[] = [
   {
     schemaVersion: "1.0",
@@ -131,7 +137,7 @@ export const sampleTemplates: Template[] = [
     category: "chapter",
     aspectRatio: "16:9",
     canvas: { width: 1920, height: 1080 },
-    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40, useCase: CHAPTER_USE_CASE },
     defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#1a1a1a" },
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#1a1a1a" },
@@ -296,7 +302,7 @@ export const sampleTemplates: Template[] = [
     category: "chapter",
     aspectRatio: "9:16",
     canvas: { width: 1080, height: 1920 },
-    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40, useCase: CHAPTER_USE_CASE },
     defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#1a1a1a" },
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#1a1a1a" },
@@ -535,7 +541,7 @@ export const sampleTemplates: Template[] = [
   {
     schemaVersion: "1.0", templateId: "chapter_light_v1", name: "区切り・明るい", category: "chapter",
     aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
-    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40, useCase: CHAPTER_USE_CASE },
     defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#ffffff" },
@@ -546,7 +552,7 @@ export const sampleTemplates: Template[] = [
   {
     schemaVersion: "1.0", templateId: "chapter_light_portrait_v1", name: "区切り・縦（明るい）", category: "chapter",
     aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
-    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40, useCase: CHAPTER_USE_CASE },
     defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#ffffff" },

@@ -560,7 +560,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
     // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
     // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(302);
+    // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
+    // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(304);
   });
 
 
@@ -842,7 +844,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW。
     // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE。
     // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(297);
+    // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
+    // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(299);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -875,6 +879,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
       // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
       // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP（`editBlockedMessage` 経由で等値）。
-    ).toBe(142);
+    ).toBe(143);
   });
 });

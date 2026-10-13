@@ -9,7 +9,7 @@ import { layoutScene } from './layout';
 import type { TextItem } from './layout';
 import { wrapText } from '../domain/text/textWrap';
 import { layoutToSvg } from './sceneSvg';
-import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, overlappingSubtitleClips, templatePartAt } from './timelineLayout';
+import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from './timelineLayout';
 
 const NORMAL_TEMPLATE: Template = {
   schemaVersion: '1.0',
@@ -696,5 +696,29 @@ describe('layoutTimelineAt：大きさの変形は中身ごと（#1371）', () =
   it('変形が無ければ中身は変えない', () => {
     const title = layoutTimelineAt(doc({ clips: [templateClip('clip_001')] }), 0, opts).items.find((i) => i.id.endsWith('/title')) as TextItem;
     expect(title.fontSize).toBe(72);
+  });
+});
+
+// 反転した見た目パターンの中の層を指す（#1416・ADR-0059）＝描かれている位置（鏡に映した先）で当たる。
+describe('templatePartAt / templatePartRect とゆがみ（#1416）', () => {
+  const titleOnly = (clipId: string, layerId: string): boolean => clipId === 'clip_001' && layerId === 'title';
+  it('左右反転した部品の文字の層は、映した先を押すと当たり、映す前の位置では当たらない', () => {
+    // 見出しの層は (100,200,800,140)。画面いっぱいの部品を左右反転＝中心 960 の縦線で映し、x 1020〜1820 に描かれる。
+    const layout = layoutTimelineAt(doc({ clips: [templateClip('clip_001', { flipX: true })] }), 1, opts);
+    expect(templatePartAt(layout, { x: 1700, y: 260 }, titleOnly)).toEqual({ clipId: 'clip_001', layerId: 'title' });
+    expect(templatePartAt(layout, { x: 200, y: 260 }, titleOnly)).toBeNull();
+  });
+
+  it('反転していなければ今までどおり（映す前の位置で当たる）', () => {
+    const layout = layoutTimelineAt(doc({ clips: [templateClip('clip_001')] }), 1, opts);
+    expect(templatePartAt(layout, { x: 200, y: 260 }, titleOnly)).toEqual({ clipId: 'clip_001', layerId: 'title' });
+    expect(templatePartAt(layout, { x: 1700, y: 260 }, titleOnly)).toBeNull();
+  });
+
+  it('入った層の枠に、描画と同じゆがみの行列を添える（反転していなければ添えない）', () => {
+    const flipped = layoutTimelineAt(doc({ clips: [templateClip('clip_001', { flipX: true })] }), 1, opts);
+    expect(templatePartRect(flipped, { clipId: 'clip_001', layerId: 'title' })?.warp).toEqual([-1, 0, 0, 1, 1920, 0]);
+    const plain = layoutTimelineAt(doc({ clips: [templateClip('clip_001')] }), 1, opts);
+    expect(templatePartRect(plain, { clipId: 'clip_001', layerId: 'title' })).not.toHaveProperty('warp');
   });
 });

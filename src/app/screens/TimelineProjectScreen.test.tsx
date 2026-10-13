@@ -19,7 +19,7 @@ import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME_POINTS_MAX } from "../../domain/constants";
-import type { TimelineProject } from "../../domain/timeline/types";
+import type { TimelineClip, TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
 import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL, silenceMessage } from "../uiLabels";
@@ -5941,13 +5941,13 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
         { id: "right", type: "slot", x: 960, y: 0, w: 960, h: 1080 },
       ],
     };
-    const openTemplateClip = (): HTMLElement => {
+    const openTemplateClip = (over: Partial<TimelineClip> = {}): HTMLElement => {
       useProjectStore.setState({ templates: [drillTemplate], templateAssetSrcById: {} });
       open({
         assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
         clips: [{
           id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
-          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_001" },
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_001" }, ...over,
         }],
       });
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
@@ -5986,6 +5986,23 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       expect(mark.style.left).toBe("50%"); // 右の枠（960/1920）
       act(() => { useTimelineStore.getState().clearSelection(); }); // 空白を押して抜ける
       expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+    });
+
+    // ⚠️ **反転した部品では、描かれている所で入れる**（#1416）＝層は映す前の位置で持っているので、
+    // そのまま当てると「見えている所を押しても入れず、何も無い所で入る」になる。印も同じく映す。
+    it("左右反転した部品は、映した先を押すと入り、印も映した先に出る", () => {
+      const root = openTemplateClip({ flipX: true });
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      // 左の枠（0〜960）は反転で右（960〜1920）に描かれる。右を二度押し＝左の枠に入る。
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      const mark = document.querySelector(".timeline-drilled-part") as HTMLElement;
+      expect(mark).not.toBeNull();
+      expect(mark.style.left).toBe("0%"); // 持っている位置は左の枠
+      expect(mark.style.transform).toContain("matrix(-1, 0, 0, 1, 0, 0)"); // それを映して描く
+      expect(mark.style.transform).toContain("translate(100%, 0%)"); // 中心 480 → 1440（枠の幅 960 ぶん右）
     });
 
     // ⚠️ **文字の層にも入れる**（決定8＝「差し込み口の中身（素材・**文字**）はそのまま直せる」）。
@@ -9391,6 +9408,17 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     expect(el.scrollLeft).toBe(36);
   });
 
+  // ⚠️ **押しても焦点を取らない**（0.5.2 出口監査 ℹ️）＝取ると、押した後の ← → が帯を送り、再生位置が動かなくなる。
+  // 合成イベントは焦点を動かさないので、焦点の移動そのものではなく「既定の動き（焦点を移す）を止めたか」で見る。
+  it("帯を押しても焦点を取らない（キーは並びのまま・Tab では当てられる）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    sizeScroller(container, LABEL + 180, 36);
+    const bar = screen.getByTestId("timeline-overview");
+    expect(fireEvent.mouseDown(bar, { button: 0 })).toBe(false); // false＝既定の動きを止めた
+    expect(bar.tabIndex).toBe(0);
+  });
+
   it("送る相手（並びの枠）を指し、見えている範囲を読み上げる", () => {
     long();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
@@ -9453,7 +9481,7 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
   });
 });
 
-// 部品の反転と動きの支点（ADR-0059・#1186）＝「見え方」の欄から直す。付けた部品では欄を開いておく。
+// 部品の反転と動きの支点（ADR-0059・#1186）＝反転は「見え方」、支点は「動き」の欄から直す（0.5.2 出口監査で動きの欄へ）。付けた部品では欄を開いておく。
 describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
   const withShape = (over: Record<string, unknown> = {}) => {
     open({
@@ -9462,8 +9490,9 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
   const openLook = () => {
-    if (!screen.queryByLabelText("左右反転")) fireEvent.click(screen.getByRole("button", { name: /見え方（色・重ね方・反転・動きの支点）/ }));
+    if (!screen.queryByLabelText("左右反転")) fireEvent.click(screen.getByRole("button", { name: /見え方（色・重ね方・反転）/ }));
   };
+
 
   it("左右反転・上下反転を入れ外しできる", () => {
     withShape();
@@ -9480,7 +9509,6 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
   it("動きの支点を選べる（足元・中心へ戻す）", () => {
     withShape();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    openLook();
     const select = screen.getByLabelText("動きの支点");
     fireEvent.change(select, { target: { value: "bottom" } });
     expect(useTimelineStore.getState().doc!.clips[0].pivot).toEqual({ x: 0.5, y: 1 });
@@ -9492,6 +9520,18 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
     withShape({ flipX: true });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect((screen.getByLabelText("左右反転") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("支点を付けた部品では、動きの欄を開いておく（見え方の欄は開かない）", () => {
+    localStorage.clear(); // 欄の開閉は覚えている（前の検査で開いた欄が開いたままにならないように）
+    withShape({ pivot: { x: 0.5, y: 1 } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const pivot = screen.getByLabelText("動きの支点") as HTMLSelectElement;
+    expect(pivot.value).toBe("bottom");
+    // 欄は <details>（畳んでも中身は在る）＝開いているかは details で見る。支点は「動き」の欄にある。
+    expect(pivot.closest("details")!.open).toBe(true);
+    expect(pivot.closest("details")!.textContent).toContain("本来の見た目からのずれ");
+    expect(screen.getByLabelText("左右反転").closest("details")!.open).toBe(false);
   });
 
   it("外の AI などが書いた半端な支点は「指定の位置」と出す（黙って中心に見せない）", () => {
