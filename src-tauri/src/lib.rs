@@ -11,6 +11,7 @@ mod ffmpeg;
 mod local_llm;
 mod messages;
 mod opener;
+mod packs;
 mod proc;
 mod project_import;
 mod startup;
@@ -1517,9 +1518,16 @@ pub fn run() {
             voicevox_engine::start_bundled_engine(app.handle());
             // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
             ffmpeg::cleanup_stale_export_dirs(app.handle());
+            packs::cleanup_pack_staging(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            packs::pack_inspect,
+            packs::pack_install,
+            packs::pack_list,
+            packs::pack_uninstall,
+            packs::pack_read_text,
+            packs::pack_read_data_url,
             startup_request,
             finish_startup_job,
             read_import_folder,

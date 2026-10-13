@@ -209,7 +209,8 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+2**（ADR-0058 段2のレビュー）＝`TRANSCRIBE_BUSY_HINT`・`TRANSCRIPT_CUT_ALL_WARNING`。どちらも表の外（NOT_IN_TABLE）。
 // ⚠️ **+1**（#1396）＝`PANEL_LAYOUT_SAVE_FAILED_MESSAGE`（表へ行を足してある）。
 // ⚠️ **+1**（#1403）＝`AI_PLAN_HOLLOW_MESSAGE`（表へ行を足してある）。
-const FOUND_COUNT = 108;
+// ⚠️ **+3**（ADR-0060）＝PACK_INVALID／PACK_UNLISTED／PACK_MISSING_LICENSE（どれも表に行がある）。
+const FOUND_COUNT = 111;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

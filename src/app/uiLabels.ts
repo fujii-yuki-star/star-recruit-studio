@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import type { ExtensionPackManifest } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
@@ -2127,3 +2128,49 @@ export const CLIP_PIVOT_LABEL = {
 export const CLIP_PIVOT_CUSTOM_LABEL = "指定の位置";
 /** 動きの支点の説明（何に効くかを言う＝素の回転には効かない）。 */
 export const CLIP_PIVOT_HINT = "付けた動きの回転と大きさの変化を、この点を中心に効かせます（部品そのものの回転は中心のままです）。";
+
+// ── 拡張パック（ADR-0060） ─────────────────────────────────────────────
+
+/** 拡張パックの形が読めないとき（`PACK_PROBLEM.invalid`）。 */
+export const PACK_INVALID_MESSAGE = "この拡張パックは、すたりおで読める形になっていません。配った人に作り直してもらってください。";
+/** 中身のファイルが照合の一覧に無いとき（`PACK_PROBLEM.unlistedContent`）。 */
+export const PACK_UNLISTED_MESSAGE = "この拡張パックは、中身の一覧に抜けがあるため確かめられません。配った人に作り直してもらってください。";
+/** 中身の権利が書かれていないとき（`PACK_PROBLEM.missingLicense`）。 */
+export const PACK_MISSING_LICENSE_MESSAGE =
+  "この拡張パックには、中身を使ってよい範囲（権利）が書かれていません。権利が分からない中身は入れられないので、配った人に確かめてください。";
+/** 入っているパックのうち読めなかったもの（起動時など）。 */
+export function packSkippedMessage(names: readonly string[]): string {
+  return `読めなかった拡張パックがあります（${names.join("、")}）。外してから、配った人から受け取り直して入れてください。`;
+}
+/** アプリの版が足りないとき（`PACK_PROBLEM.appTooOld`）。 */
+export function packAppTooOldMessage(minAppVersion: string): string {
+  return `この拡張パックには、すたりお ${minAppVersion} 以降が必要です。新しい版のすたりおを入れてから、もう一度お試しください。`;
+}
+/** 入っている版より古いとき（`PACK_PROBLEM.olderThanInstalled`）。 */
+export function packOlderThanInstalledMessage(installedVersion: string): string {
+  return `入っている版（${installedVersion}）より古い版です。新しい版の拡張パックを使ってください。`;
+}
+/** 外す前の確かめ（使っている動画の数を添える）。 */
+export function packRemoveConfirmMessage(name: string, usedVideos: number): string {
+  return usedVideos > 0
+    ? `「${name}」を外しますか？この拡張パックの見た目パターンを ${usedVideos} 本の動画で使っています。外すと、その場面は「見た目パターンが見つかりません」と表示されます（もう一度入れると戻ります）。`
+    : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
+}
+/** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
+export const PACK_FEATURE_LABEL: Record<string, string> = {
+  "personalized-briefing": "あなた向け会社説明",
+};
+/** 中身の種類（`licenses[].target`）を画面の言葉へ。 */
+export const PACK_CONTENT_LABEL: Record<string, string> = {
+  templates: "見た目パターン",
+  templateAssets: "見た目パターンの写真・ロゴ",
+  features: "機能",
+};
+/** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
+export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">): string {
+  const parts: string[] = [];
+  if (m.contents.templates) parts.push(`${PACK_CONTENT_LABEL.templates} ${m.contents.templates.length}個`);
+  if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
+  if (m.contents.features) parts.push(`${PACK_CONTENT_LABEL.features}：${m.contents.features.map((f) => PACK_FEATURE_LABEL[f] ?? f).join("・")}`);
+  return parts.join("・");
+}

@@ -13,7 +13,8 @@ import {
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
-  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_STALE_MESSAGE } from "./uiLabels";
+  TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_STALE_MESSAGE,
+  PACK_INVALID_MESSAGE, PACK_UNLISTED_MESSAGE, PACK_MISSING_LICENSE_MESSAGE, packSkippedMessage, packAppTooOldMessage, packOlderThanInstalledMessage } from "./uiLabels";
 import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
 import { startupArgErrorMessage } from "../domain/startup/startupMessages";
@@ -112,6 +113,13 @@ function codeMessages(): Record<string, string> {
     PANEL_LAYOUT_SAVE_FAILED: PANEL_LAYOUT_SAVE_FAILED_MESSAGE,
     // 同梱したチュートリアル映像を開けない（#1229）。
     TUTORIAL_VIDEO_UNAVAILABLE: TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE,
+    // 拡張パック（ADR-0060）。⚠️ 照合・展開の断りは Rust（`messages.rs` の `PACK_*`）。
+    PACK_INVALID: PACK_INVALID_MESSAGE,
+    PACK_UNLISTED: PACK_UNLISTED_MESSAGE,
+    PACK_MISSING_LICENSE: PACK_MISSING_LICENSE_MESSAGE,
+    PACK_SKIPPED: packSkippedMessage(["〔名前〕"]),
+    PACK_APP_TOO_OLD: packAppTooOldMessage("〔版〕"),
+    PACK_OLDER_THAN_INSTALLED: packOlderThanInstalledMessage("〔版〕"),
     // ⚠️ **場面形式の切り出しの断りも等値で守る**（#1155 ⑤）＝タイムライン形式の双子
     // （`TIMELINE_EDIT_FREEZE_ASSET_MISSING`）は `editBlockedMessage` 経由で守られているのに、
     // こちらだけ定数で直書きだった＝**片方だけ守られている**を作らない。
@@ -428,7 +436,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
     // ⚠️ **+6**（ADR-0058＝声を文字にする断り6つ：TRANSCRIBE_MISSING／BROKEN／READ_FAILED／FAILED／CANCELLED／BUSY）。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(35);
+    // ⚠️ **+5**（ADR-0060＝拡張パックの断り5つ：PACK_UNREADABLE／TAMPERED／TOO_LARGE／INSTALL_FAILED／REMOVE_FAILED）。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(40);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -444,13 +453,14 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+4**（ADR-0051＝このパソコンの中で作るときの断り4つ：LOCAL_AI_MISSING／BROKEN／START_FAILED／TIMEOUT）＝どれも1行。
     // ⚠️ **+1**（ADR-0052 決定6＝LOCAL_AI_TOO_LONG・1行）。
     // ⚠️ **+6**（ADR-0058）＝どれも `cargo fmt` が2行に折り返した（1行の数は 14 のまま）。
-    expect(all, "定数の数が変わった").toBe(35);
+    // ⚠️ **+5**（ADR-0060）＝`cargo fmt` が4つを2行に折り返し、PACK_TAMPERED だけ1行（長すぎて折れない）。
+    expect(all, "定数の数が変わった").toBe(40);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
-    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(14);
+    expect(oneLine, "1行で書かれた定数の数が変わった").toBe(15);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(21);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(25);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -562,7 +572,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
     // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
     // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(304);
+    // ⚠️ **+11**（ADR-0060）＝拡張パックの PACK_* 11行（Rust 5・画面 6）。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(315);
   });
 
 
@@ -594,6 +605,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ── 状況で締めが変わる（1つの行に対して複数の文）＝等値では守れない ──
     lockedTrackMessage: "やろうとしたこと（中身を変える／削除する）で締めが変わる",
     rangeDeleteConfirmMessage: "断り・知らせではなく、消す前の確認の文（表の対象外＝まとめて削除の確認と同じ扱い）",
+    packRemoveConfirmMessage: "断り・知らせではなく、拡張パックを外す前の確認の文（表の対象外＝範囲を消す確認と同じ扱い）",
     hiddenTrackDuplicateMessage: "共有の断りが使えない場面だけの文（複製は必ず元の列に作る）",
     volumePointsTooManyMessage: "分けられる部品の有無で締めが変わる",
     audioUnreadableMessage: "音源の種類（読み上げ／同梱の曲／取り込んだ素材）で次の行動が変わる",
@@ -846,7 +858,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP。
     // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
     // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(299);
+    // ⚠️ **+11**（ADR-0060）＝拡張パックの PACK_* 11行（Rust 5・画面 6）。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(310);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -879,6 +892,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
       // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
       // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP（`editBlockedMessage` 経由で等値）。
-    ).toBe(143);
+    ).toBe(149); // +6（ADR-0060＝画面側の PACK_* 6つ）
   });
 });

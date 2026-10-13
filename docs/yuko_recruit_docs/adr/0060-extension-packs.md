@@ -59,7 +59,7 @@
 - 外へ取りに行かない（ネットの口を作らない）。
 
 ### 決定4：id の名前空間は「パックの名前＋中の名前」
-- 見た目パターン＝`pack.<packId>.<localId>`、フォント＝`pack_font_<packId>_<localId>`、BGM はパックの中のファイルを
+- 見た目パターンと既定素材＝`pack_<packId>__<localId>`（⚠️ **実装で直した**＝最初は `pack.<packId>.<localId>` と書いたが、`templateId` の schema は `^[a-z0-9_]+$` で `.` を使えない。packId に `__` を禁じて境目を一意にした）、フォント＝`pack_font_<packId>_<localId>`、BGM はパックの中のファイルを
   **素材ライブラリと同じ道で動画へコピー**（ADR-0035）＝schema の BGM enum を増やさない。
 - ⚠️ フォントは schema の `FontId` パターンに `pack_font_…` を足す（**project schema のマイナー版を上げる**・変換は要らない）。
 - 同梱・利用者・パックの id は**頭で分かれる**ので重ならない。同じ packId の別の版は同じ id のまま（置き換え）。

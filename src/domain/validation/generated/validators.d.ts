@@ -17,3 +17,5 @@ export const validateTemplate: StandaloneValidate;
 export const validateProject: StandaloneValidate;
 /** timeline-project.schema.json の事前コンパイル済み検証関数（タイムライン形式・ADR-0032・#627）。 */
 export const validateTimelineProject: StandaloneValidate;
+/** extension-pack.schema.json（拡張パックの manifest・ADR-0060）の事前コンパイル済み検証関数。 */
+export const validateExtensionPack: StandaloneValidate;

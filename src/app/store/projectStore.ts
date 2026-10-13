@@ -117,6 +117,8 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
+import { isPackScopedId, replacePackTemplates, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
+import { readInstalledPacks } from "./packLoad";
 import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
@@ -240,6 +242,10 @@ interface ProjectState {
   assetSrcById: Record<string, string>;
   /** テンプレ所有素材の表示用src（data URL）。tmpl_asset_NNN→src（ADR-0021・グローバル・プロジェクト非依存）。起動時に一括ロード。 */
   templateAssetSrcById: Record<string, string>;
+  /** 入っている拡張パック（ADR-0060）。見た目パターンは `templates`、既定素材は `templateAssetSrcById` へ合流している。 */
+  packs: ExtensionPackManifest[];
+  /** 読めなかった拡張パックの名前（設定の「拡張パック」で知らせる）。 */
+  packsSkipped: string[];
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
   /**
@@ -445,6 +451,8 @@ interface ProjectState {
   addTemplatePack: (templates: Template[]) => void;
   /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
   loadUserTemplates: () => Promise<void>;
+  /** 入っている拡張パックを読み直し、見た目パターンと既定素材へ合流させる（ADR-0060）。入れた・外した後にも呼ぶ。 */
+  loadPacks: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
   /** ユーザーテンプレを削除し一覧から外す（成功＝true）。開いているプロジェクトの参照場面は即時に標準へ置換し
@@ -956,6 +964,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assets: [], // 新規は空（見本素材は実画像が無く混乱の元のため・α）。利用者が素材管理/ウィザードで追加する。
   assetSrcById: {},
   templateAssetSrcById: {},
+  packs: [],
+  packsSkipped: [],
   narrationAudioById: {},
   _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
@@ -2243,6 +2253,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { templates: [...byId.values()] };
     });
   },
+  loadPacks: async () => {
+    const packs = await readInstalledPacks();
+    // ⚠️ **パック由来の分だけを差し替える**＝同梱・利用者の見た目パターンと素材には触らない。
+    set((s) => ({
+      templates: replacePackTemplates(s.templates, packs.templates),
+      templateAssetSrcById: {
+        ...Object.fromEntries(Object.entries(s.templateAssetSrcById).filter(([id]) => !isPackScopedId(id))),
+        ...packs.assetUrls,
+      },
+      packs: packs.manifests,
+      packsSkipped: packs.skipped,
+    }));
+  },
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
     // 同時にテンプレ所有素材の表示用 URL も一括ロード（プロジェクト非依存・起動時＝ADR-0021 PR C）。
@@ -2250,7 +2273,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       userTemplateFs.loadUserTemplates(),
       loadTemplateAssetUrls(),
     ]);
-    set((s) => ({ templates: replaceUserTemplates(s.templates, user.templates), templateAssetSrcById }));
+    // ⚠️ 拡張パックの既定素材は残す（ここで読むのは利用者の見た目パターンの素材だけ＝パックの分を消さない・ADR-0060）。
+    set((s) => ({
+      templates: replaceUserTemplates(s.templates, user.templates),
+      templateAssetSrcById: {
+        ...Object.fromEntries(Object.entries(s.templateAssetSrcById).filter(([id]) => isPackScopedId(id))),
+        ...templateAssetSrcById,
+      },
+    }));
     // 孤立したテンプレ素材ファイルを安全条件下で掃除（#299）。下書き破棄やテンプレ削除時の削除失敗で残ったファイルが対象。
     // user.complete が false（読込失敗・破損・検証却下）なら何もしない＝「空を全削除」の誤削除を防ぐ（ADR-0021 の注意）。
     const orphans = orphanTemplateAssetIds(get().templates, Object.keys(templateAssetSrcById), user.complete);
@@ -2262,6 +2292,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
       }));
     }
+    // 拡張パック（ADR-0060）も同じ時に読む＝起動時・別窓の両方で、パックの見た目パターンが一覧に出る。
+    await get().loadPacks();
   },
   saveUserTemplate: async (template) => {
     // 書き出し中は見た目パターンを保存しない（#570 P1 レビュー）。使用中テンプレを保存すると、書き出しは開始時の見た目を

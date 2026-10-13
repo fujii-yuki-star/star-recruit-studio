@@ -13,6 +13,7 @@
 | Template | `schemas/template.schema.json` | 見た目パターン定義 | 内部・取込 |
 | AiVideoPlan | `schemas/ai-video-plan.schema.json` | **AI出力**（内部Sceneとは別物） | 受信・一時 |
 | TimelineProject | `schemas/timeline-project.schema.json` | **タイムライン編集プロジェクト**の `project.json`（場面を持たない別形式・ADR-0032） | 内部・永続 |
+| ExtensionPack | `schemas/extension-pack.schema.json` | **拡張パック**の `manifest.json`（ADR-0060・§7.7） | 受信・取込 |
 
 > TimelineProject の版：初期 `"1.0"`（#627）→ **`"1.1"`**（読み上げクリップ＝`kind:'voice'` ＋ `voice`、テンプレクリップの `textFontIds`/`character`/`slotClips` を追加＝いずれも任意追加・後方互換のマイナー・#628 模型）→ **`"1.2"`**（字幕クリップの `voiceClipId`＝連動する読み上げ・#633）→ **`"1.3"`**（`crop`＝切り抜き・#634）→ **`"1.4"`**（`cropAlign`＝素材の寄せ・#634）→ **`"1.5"`**（`cropMode`＝切り抜いた素材を枠いっぱいに映し直す・#634）→ **`"1.6"`**（`$defs/Keyframe.easing` の値域拡大＝自由なカーブ・#262。共有 `$defs` の拡張なので project 1.25 と同時）→ **`"1.7"`**（`volumePoints`＝音量の変化・#512）→ **`"1.8"`**（`useOriginalAudio`/`originalAudioVolume`＝動画の元の音・#512 段2）→ **`"1.9"`**（`letterSpacing`＝字間・`shadow`＝文字の影・`background` を `TextStyle` にも＝#264。**`shadow` は `$ref` 共有・`letterSpacing` と `background` は同じ形の写し**なので project **1.27** と同時に足した（α-6 出口監査 🟡で是正＝1.26 は #261 の持ち込みフォント。写しかどうかを取り違えていたのを `/canon-check` 🟡 で実態に合わせた＝写しは `validate-schemas` の**形の一致検査**で固定してある））→ **`"1.10"`**（`videoSettings.audioAuto`＝音の自動処理・#257/#259。**共有 `$defs/VideoSettings` の拡張なので project 1.29 と同時**。読込時に前の版の文書へ「しない」を書き込むのも場面形式と同じ）→ **`"1.11"`**（`markers`＝**目印**・#356 ①。時間の一点に印とメモを置くだけで、**動画には出ない**〔描画にも書き出しにも現れない＝作業用〕。⚠️ **この形式だけの語彙**＝場面形式には足さない〔ADR-0032 の凍結＝時間軸の道具はこちらに持つ〕ので、`project` の版は動かない）→ **`"1.12"`**（色の調整 `colorAdjust`・描画モード `blendMode`＝ADR-0044）→ **`"1.13"`**（動画の長さの上限 600→1800 秒＝共有 `$defs/VideoSettings`・ADR-0045・project 1.30 と同時）→ **`"1.14"`**（素材の「AI解析」の書き手 `aiDescriptionAuthor`＝共有 `$defs/Asset`・#1317・project 1.31 と同時）→ **`"1.15"`**（キーフレームの「止める」`hold`＝共有 `$defs/Keyframe`・#1365・project 1.32 と同時）→ **`"1.16"`**（喋っている間の動き `talkMotion`＝この形式だけ・ADR-0056・#1367）→ **`"1.17"`**（部品の動きの支点 `pivot` と反転 `flipX`／`flipY`＝この形式だけ・ADR-0059）→ **`"1.18"`**（キーフレームの横だけ・縦だけの倍率 `scaleX`／`scaleY`＝共有 `$defs/Keyframe`・ADR-0059 段階2・project 1.33 と同時）。**現行は `"1.18"`**（`§7.6` と一致）。いずれも**任意追加または値域の拡大だけ**＝変換不要の後方互換マイナーで、`migrateTimelineProject` は版だけ上げる。
 
@@ -412,6 +413,19 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 | `11 §7.6.3` | 編集操作（キーフレーム `11 §7.6.3.1`／音の部品 `11 §7.6.3.2`） |
 | `11 §7.6.4` | 1フレームの描き方（切り抜き `11 §7.6.4.1`） |
 | `11 §7.6.5` | 書き出し |
+
+### 7.7 拡張パック（`manifest.json`・ADR-0060）
+
+**データだけ**のパック（見た目パターン・その既定素材・組み込み機能の鍵）。**プログラムは入れられない**。1 ファイル（`.starpack`＝zip）の一番上に `manifest.json` を置く。正典は `schemas/extension-pack.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`）。
+
+- **manifest**：`packId`（英小文字で始まる・英小文字／数字／単独の `_`・40 字まで・`__` は使えない）・`name`・`version`（`x.y.z`）・`publisher`・`description`○・`minAppVersion`（`x.y.z`）・
+  `contents`（`templates[].file`・`templateAssets[].{assetId,file}`・`features[]`＝少なくとも1種類）・`files[].{path,sha256}`（**manifest 以外の全ファイル**）・`licenses[].{target,license,credit○}`（**中身の種類ごとに必須**）。
+- **パス**：`/` 区切り・各部分は英数字と `- _ .`・`.`／`..`・先頭の `/` は不可（schema の `PackPath` と Rust の `is_safe_rel_path` が同じ規則）。
+- **id の名前空間**：パックの見た目パターンと既定素材は **`pack_<packId>__<中の名前>`**（`readPackTemplate` が読むときに付ける＝パックの中では短い名前で書く）。`templateId` の schema（`^[a-z0-9_]+$`）に収まる形。同梱（記述的な id）・利用者（`user_tmpl_NNN`）とは頭で分かれる。
+- **入れる**（`pack_install`）：zip の中のファイルが `files` と**ちょうど一致**（多い・足りないは断る）・各ファイルの **SHA-256 が一致**・`packId` が画面で見せたものと同じ、を確かめながら作業用のフォルダへ展開し、全部通ってから `appData/packs/<packId>/` へ置く（途中で失敗したら何も残さない・同じ packId は置き換え）。版の比べ方（古い版は断る・`minAppVersion`）は TS（`packInstallProblem`）。
+- **読む**：起動時（`loadUserTemplates` の後）と入れた・外した後に `loadPacks`。読めないパックは飛ばして名前を知らせる（`PACK_SKIPPED`）。見た目パターンは `templates` に、既定素材の data URL は `templateAssetSrcById` に合流する（描画・書き出しは今の道のまま）。
+- **動画からの参照**：見た目パターンは**動画へコピーしない**（利用者の見た目パターンと同じ＝ADR-0024 決定6 の例外）。外すと、その場面は `TEMPLATE_NOT_FOUND` の知らせ（黙って差し替えない）。
+- **作る道具**：`node scripts/make-starpack.mjs <フォルダ> <出力.starpack>`（`files` を全ファイルの SHA-256 で埋めてまとめる）。
 
 ## 8. 検証ルール（コード化可能な形）
 

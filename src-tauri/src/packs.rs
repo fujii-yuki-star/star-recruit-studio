@@ -1,0 +1,470 @@
+// 拡張パック（ADR-0060）＝`.starpack`（zip）を照合して `appData/packs/<packId>/` へ置く・一覧・外す・中のファイルを読む。
+//
+// ⚠️ **パックはデータだけ**＝ここは展開と照合だけで、中身を実行しない。manifest の形と中身の約束は TS
+//   （`src/domain/pack/extensionPack.ts`）が schema で確かめてから `pack_install` を呼ぶ。ここでは
+//   **照合できること**（中のファイルの一覧と SHA-256・パスが外へ出ないこと）を、TS を信用せずにもう一度見る。
+// ⚠️ **途中で失敗したら何も残さない**＝作業用のフォルダに全部展開・照合してから、最後に名前を変えて置く。
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+use tauri::Manager;
+
+use crate::messages;
+
+/// manifest のファイル名（パックの一番上）。
+const MANIFEST: &str = "manifest.json";
+/// 中のファイルの数の上限（壊れた・悪意のある zip で止まらないため）。
+const MAX_ENTRIES: usize = 5000;
+/// 中のファイルの合計の上限（展開後）。声のモデルが入る段階3を見込んで広めに取る。
+const MAX_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// manifest の大きさの上限。
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+/// 文字として読むファイル（見た目パターン）の上限。
+const MAX_TEXT_BYTES: u64 = 4 * 1024 * 1024;
+/// 絵として読むファイル（既定素材）の上限。
+const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+/// 作業用・置き換え前のフォルダの頭（一覧に出さない・起動時に片づける）。
+const STAGING_PREFIX: &str = ".staging-";
+const OLD_PREFIX: &str = ".old-";
+
+fn packs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+    Ok(base.join("packs"))
+}
+
+/// packId がフォルダ名として安全か（schema と同じ形＝英小文字・数字・_・40字まで）。
+pub(crate) fn is_safe_pack_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 40
+        && id.starts_with(|c: char| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && !id.contains("__")
+}
+
+/// パックの中の相対パスが安全か（`/` 区切り・各部分は英数字と `- _ .`・`.` と `..` は使わない・先頭の `/` も無し）。
+/// ⚠️ **zip の名前を信用しない**＝`..\\` や `C:` や絶対パスで外へ書かせない。schema の `PackPath` と同じ規則。
+pub(crate) fn is_safe_rel_path(p: &str) -> bool {
+    if p.is_empty() || p.len() > 200 || p.starts_with('/') || p.ends_with('/') {
+        return false;
+    }
+    p.split('/').all(|part| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// manifest の `files`（相対パス → SHA-256）と packId を読む。形の検証は TS 済み＝ここは使う欄だけ。
+fn manifest_files(manifest: &str) -> Result<(String, Vec<(String, String)>), String> {
+    let v: serde_json::Value =
+        serde_json::from_str(manifest).map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    let pack_id = v
+        .get("packId")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| messages::PACK_UNREADABLE.to_string())?;
+    let files = v
+        .get("files")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| messages::PACK_UNREADABLE.to_string())?;
+    let mut out = Vec::new();
+    for f in files {
+        let path = f
+            .get("path")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| messages::PACK_UNREADABLE.to_string())?;
+        let sha = f
+            .get("sha256")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| messages::PACK_UNREADABLE.to_string())?;
+        if !is_safe_rel_path(path) || path == MANIFEST || sha.len() != 64 {
+            return Err(messages::PACK_UNREADABLE.to_string());
+        }
+        out.push((path.to_string(), sha.to_ascii_lowercase()));
+    }
+    Ok((pack_id.to_string(), out))
+}
+
+fn open_archive(path: &str) -> Result<zip::ZipArchive<fs::File>, String> {
+    let f = fs::File::open(path).map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    let zip = zip::ZipArchive::new(f).map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    if zip.len() > MAX_ENTRIES {
+        return Err(messages::PACK_TOO_LARGE.to_string());
+    }
+    Ok(zip)
+}
+
+/// zip の中のファイル名の一覧（フォルダは除く）。危ない名前が1つでもあれば断る。
+fn entry_names(zip: &mut zip::ZipArchive<fs::File>) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let e = zip
+            .by_index(i)
+            .map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+        if e.is_dir() {
+            continue;
+        }
+        let name = e
+            .name()
+            .map_err(|_| messages::PACK_UNREADABLE.to_string())?
+            .to_string();
+        if !is_safe_rel_path(&name) {
+            return Err(messages::PACK_TAMPERED.to_string());
+        }
+        total = total.saturating_add(e.size());
+        if total > MAX_TOTAL_BYTES {
+            return Err(messages::PACK_TOO_LARGE.to_string());
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+fn read_manifest(zip: &mut zip::ZipArchive<fs::File>) -> Result<String, String> {
+    let mut e = zip
+        .by_name(MANIFEST)
+        .map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    if e.size() > MAX_MANIFEST_BYTES {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
+    let mut s = String::new();
+    e.read_to_string(&mut s)
+        .map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    Ok(s)
+}
+
+/// 入れる前に中身を見る＝manifest の文字だけを返す（展開しない）。画面は形を確かめてから中身・発行者・権利を見せる。
+#[tauri::command]
+pub fn pack_inspect(path: String) -> Result<String, String> {
+    let mut zip = open_archive(&path)?;
+    entry_names(&mut zip)?;
+    read_manifest(&mut zip)
+}
+
+/// 中のファイル一覧が manifest の `files` とちょうど一致するか（多い・足りないのどちらも断る）。
+fn same_file_set(entries: &[String], listed: &[(String, String)]) -> bool {
+    let a: BTreeSet<&str> = entries
+        .iter()
+        .map(String::as_str)
+        .filter(|n| *n != MANIFEST)
+        .collect();
+    let b: BTreeSet<&str> = listed.iter().map(|(p, _)| p.as_str()).collect();
+    a == b && b.len() == listed.len()
+}
+
+/// 1つ展開しながら SHA-256 を取り、合わなければ断る。
+fn extract_checked(
+    zip: &mut zip::ZipArchive<fs::File>,
+    name: &str,
+    sha: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    let mut e = zip
+        .by_name(name)
+        .map_err(|_| messages::PACK_TAMPERED.to_string())?;
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+    }
+    let mut out = fs::File::create(dest).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = e
+            .read(&mut buf)
+            .map_err(|_| messages::PACK_TAMPERED.to_string())?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+        out.write_all(&buf[..n])
+            .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+    }
+    if hex(&h.finalize()) != sha {
+        return Err(messages::PACK_TAMPERED.to_string());
+    }
+    Ok(())
+}
+
+fn now_tag() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// 照合して入れる。`pack_id` は画面が manifest から読んだ値（取り違え防止に、zip の中の manifest と突き合わせる）。
+/// 同じ packId が入っていれば置き換える（古い版を断るのは画面＝版の比べ方は TS）。
+#[tauri::command]
+pub fn pack_install(app: tauri::AppHandle, path: String, pack_id: String) -> Result<(), String> {
+    if !is_safe_pack_id(&pack_id) {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
+    let mut zip = open_archive(&path)?;
+    let entries = entry_names(&mut zip)?;
+    let manifest = read_manifest(&mut zip)?;
+    let (id_in_zip, files) = manifest_files(&manifest)?;
+    if id_in_zip != pack_id {
+        return Err(messages::PACK_TAMPERED.to_string());
+    }
+    if !same_file_set(&entries, &files) {
+        return Err(messages::PACK_TAMPERED.to_string());
+    }
+    let root = packs_dir(&app)?;
+    fs::create_dir_all(&root).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+    let staging = root.join(format!("{STAGING_PREFIX}{pack_id}-{}", now_tag()));
+    let result = (|| {
+        fs::create_dir_all(&staging).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+        for (rel, sha) in &files {
+            extract_checked(&mut zip, rel, sha, &staging.join(rel))?;
+        }
+        fs::write(staging.join(MANIFEST), &manifest)
+            .map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+        let target = root.join(&pack_id);
+        if target.exists() {
+            let old = root.join(format!("{OLD_PREFIX}{pack_id}-{}", now_tag()));
+            fs::rename(&target, &old).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+            if fs::rename(&staging, &target).is_err() {
+                // 置き換えに失敗したら、元を戻す（入っていたパックを失わない）。
+                let _ = fs::rename(&old, &target);
+                return Err(messages::PACK_INSTALL_FAILED.to_string());
+            }
+            let _ = fs::remove_dir_all(&old);
+        } else {
+            fs::rename(&staging, &target).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+/// 入っているパックの manifest（文字）を並べる。読めないフォルダ・作業用のフォルダは飛ばす。
+#[tauri::command]
+pub fn pack_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let root = packs_dir(&app)?;
+    let Ok(rd) = fs::read_dir(&root) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !is_safe_pack_id(&name) || !e.path().is_dir() {
+            continue;
+        }
+        if let Ok(s) = fs::read_to_string(e.path().join(MANIFEST)) {
+            out.push(s);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// 外す（フォルダごと消す）。使っている動画を知らせるのは画面（外す前）。
+#[tauri::command]
+pub fn pack_uninstall(app: tauri::AppHandle, pack_id: String) -> Result<(), String> {
+    if !is_safe_pack_id(&pack_id) {
+        return Err(messages::PACK_REMOVE_FAILED.to_string());
+    }
+    let dir = packs_dir(&app)?.join(&pack_id);
+    if !dir.exists() {
+        return Ok(());
+    }
+    fs::remove_dir_all(&dir).map_err(|_| messages::PACK_REMOVE_FAILED.to_string())
+}
+
+fn pack_file(app: &tauri::AppHandle, pack_id: &str, rel: &str) -> Result<PathBuf, String> {
+    if !is_safe_pack_id(pack_id) || !is_safe_rel_path(rel) {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
+    Ok(packs_dir(app)?.join(pack_id).join(rel))
+}
+
+/// 中の文字のファイル（見た目パターンの JSON）を読む。
+#[tauri::command]
+pub fn pack_read_text(
+    app: tauri::AppHandle,
+    pack_id: String,
+    rel: String,
+) -> Result<String, String> {
+    let p = pack_file(&app, &pack_id, &rel)?;
+    let len = fs::metadata(&p)
+        .map_err(|_| messages::PACK_UNREADABLE.to_string())?
+        .len();
+    if len > MAX_TEXT_BYTES {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
+    fs::read_to_string(&p).map_err(|_| messages::PACK_UNREADABLE.to_string())
+}
+
+/// 中の絵（既定素材）を data URL で読む（今の見た目パターンの既定素材と同じ渡し方）。
+#[tauri::command]
+pub fn pack_read_data_url(
+    app: tauri::AppHandle,
+    pack_id: String,
+    rel: String,
+) -> Result<String, String> {
+    use base64::Engine;
+    let p = pack_file(&app, &pack_id, &rel)?;
+    let mime = match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => return Err(messages::PACK_UNREADABLE.to_string()),
+    };
+    let len = fs::metadata(&p)
+        .map_err(|_| messages::PACK_UNREADABLE.to_string())?
+        .len();
+    if len > MAX_IMAGE_BYTES {
+        return Err(messages::PACK_UNREADABLE.to_string());
+    }
+    let bytes = fs::read(&p).map_err(|_| messages::PACK_UNREADABLE.to_string())?;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// 起動時の片づけ＝途中で止まった作業用・置き換え前のフォルダを消す（入っているパックには触らない）。
+pub fn cleanup_pack_staging(app: &tauri::AppHandle) {
+    let Ok(root) = packs_dir(app) else { return };
+    let Ok(rd) = fs::read_dir(&root) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if (name.starts_with(STAGING_PREFIX) || name.starts_with(OLD_PREFIX)) && e.path().is_dir() {
+            let _ = fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_rel_path_rejects_escapes() {
+        assert!(is_safe_rel_path("templates/intro.json"));
+        assert!(is_safe_rel_path("assets/logo-01.png"));
+        for bad in [
+            "",
+            "/abs.json",
+            "../x",
+            "a/../b",
+            "a/./b",
+            "a//b",
+            "a\\b",
+            "C:/x",
+            "a/",
+            "a b.json",
+            "テンプレ.json",
+        ] {
+            assert!(!is_safe_rel_path(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn safe_pack_id_matches_schema() {
+        assert!(is_safe_pack_id("office_looks"));
+        assert!(is_safe_pack_id("a1"));
+        for bad in [
+            "",
+            "1abc",
+            "Office",
+            "a-b",
+            "a__b",
+            "a.b",
+            "../x",
+            &"a".repeat(41),
+        ] {
+            assert!(!is_safe_pack_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn file_set_must_match_exactly() {
+        let listed = vec![
+            ("a.json".to_string(), "x".repeat(64)),
+            ("b.png".to_string(), "y".repeat(64)),
+        ];
+        let entries = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(same_file_set(
+            &entries(&["manifest.json", "a.json", "b.png"]),
+            &listed
+        ));
+        assert!(
+            !same_file_set(&entries(&["manifest.json", "a.json"]), &listed),
+            "足りない"
+        );
+        assert!(
+            !same_file_set(
+                &entries(&["manifest.json", "a.json", "b.png", "evil.dll"]),
+                &listed
+            ),
+            "多い"
+        );
+        let dup = vec![listed[0].clone(), listed[0].clone()];
+        assert!(!same_file_set(&entries(&["a.json"]), &dup), "一覧の重なり");
+    }
+
+    #[test]
+    fn manifest_files_rejects_unsafe_and_manifest_itself() {
+        let ok = r#"{"packId":"p","files":[{"path":"t/a.json","sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}"#;
+        let (id, f) = manifest_files(ok).unwrap();
+        assert_eq!(id, "p");
+        assert_eq!(f[0].1, "a".repeat(64), "小文字にそろえる");
+        let esc = r#"{"packId":"p","files":[{"path":"../a.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+        assert!(manifest_files(esc).is_err());
+        let mf = r#"{"packId":"p","files":[{"path":"manifest.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+        assert!(manifest_files(mf).is_err());
+    }
+
+    /// 本物の zip を作って、照合しながら展開する（合う・中身を書き換えた・名前で外へ出る）。
+    #[test]
+    fn extract_checked_detects_tampering() {
+        use zip::write::SimpleFileOptions;
+        let dir = std::env::temp_dir().join(format!("stario_pack_test_{}", now_tag()));
+        fs::create_dir_all(&dir).unwrap();
+        let zpath = dir.join("t.starpack");
+        {
+            let mut w = zip::ZipWriter::new(fs::File::create(&zpath).unwrap());
+            w.start_file("t/a.json", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(b"hello").unwrap();
+            w.finish().unwrap();
+        }
+        let good = hex(&Sha256::digest(b"hello"));
+        let mut zip = zip::ZipArchive::new(fs::File::open(&zpath).unwrap()).unwrap();
+        assert!(extract_checked(&mut zip, "t/a.json", &good, &dir.join("out/t/a.json")).is_ok());
+        assert_eq!(
+            fs::read_to_string(dir.join("out/t/a.json")).unwrap(),
+            "hello"
+        );
+        let bad = hex(&Sha256::digest(b"other"));
+        assert_eq!(
+            extract_checked(&mut zip, "t/a.json", &bad, &dir.join("out2/a.json")).unwrap_err(),
+            messages::PACK_TAMPERED
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
