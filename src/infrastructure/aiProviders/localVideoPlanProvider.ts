@@ -70,6 +70,8 @@ export class LocalVideoPlanProvider implements AiProvider {
       } catch (e) {
         // 失敗の文は Rust が「次の行動」つきで返す（LOCAL_AI_*）。原因を追えるよう warn を残す（画面には出さない）。
         console.warn('[ai] このパソコンの中での生成に失敗:', e instanceof Error ? e.message : e);
+        // 作り直しが失敗しても、控えた案があれば使う（PR #1422 レビュー 🟡）。やめたときはそのまま投げる。
+        if (cutShort && !isStale()) return this.refine(cutShort, input, isStale);
         throw e;
       }
       const result = parseAndValidateVideoPlan(raw);
@@ -78,6 +80,7 @@ export class LocalVideoPlanProvider implements AiProvider {
           errors: result.errors,
           応答先頭: raw.length > 2000 ? `${raw.slice(0, 2000)}…(全${raw.length}字)` : raw,
         });
+        if (cutShort && !isStale()) return this.refine(cutShort, input, isStale);
         throw new Error(AI_PLAN_UNREADABLE_MESSAGE);
       }
       if (!isHollowPlan(result.plan)) {

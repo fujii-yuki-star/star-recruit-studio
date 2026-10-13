@@ -249,6 +249,17 @@ describe('LocalVideoPlanProvider：上限で切られた案（#1421）', () => {
     await new LocalVideoPlanProvider().generateVideoPlan(withClosing());
     expect(localAiGenerateMock).toHaveBeenCalledTimes(1);
   });
+  it('作り直しが失敗・読めなくても、断らずに最初の案を使う', async () => {
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('1回目', cut()))).mockRejectedValueOnce(new Error('長くなりすぎました'));
+    expect((await new LocalVideoPlanProvider().generateVideoPlan(withClosing())).videoPlan.title).toBe('1回目');
+    localAiGenerateMock.mockReset();
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('1回目', cut()))).mockResolvedValueOnce('読めない');
+    expect((await new LocalVideoPlanProvider().generateVideoPlan(withClosing())).videoPlan.title).toBe('1回目');
+  });
+  it('作り直しの途中でやめたら、控えた案を使わずに投げる', async () => {
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('1回目', cut()))).mockImplementationOnce(async () => { cancelEpoch.value += 1; throw new Error('やめました'); });
+    await expect(new LocalVideoPlanProvider().generateVideoPlan(withClosing())).rejects.toThrow('やめました');
+  });
   it('締めの見た目が選べないなら作り直さない', async () => {
     localAiGenerateMock.mockResolvedValue(JSON.stringify(titled('切れた', cut())));
     await new LocalVideoPlanProvider().generateVideoPlan(input());

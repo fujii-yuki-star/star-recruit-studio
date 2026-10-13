@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { generationSchemaFor, isCutShortPlan, isHollowPlan, planMinScenesPerPart, planPartCap, planRunawayLimits } from './planSanity';
 import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
 import type { AiVideoPlan } from './types';
+import { AI_PLAN_SCENES_PER_PART_MAX } from '../constants';
 
 const plan = (narr: (string | null)[], lines?: string[]): AiVideoPlan => ({
   schemaVersion: '1.0',
@@ -62,8 +63,13 @@ describe('章立てのある案で、1パートの場面の下限（#1421）', (
     expect(planMinScenesPerPart(60, 3)).toBe(2);
     // 30 秒・3 章＝2 場面 → 1 章に 1 場面（下限は付かない）。
     expect(planMinScenesPerPart(30, 3)).toBe(1);
-    // 章が1つ・長い動画でも 1パートの場面の上限（4）を越えない。
-    expect(planMinScenesPerPart(600, 1)).toBe(4);
+    // 長い動画・章1つでも、パートの上限 × 下限が見張りを越えない（600 秒＝80 場面 ÷ 52 パート → 1）。
+    expect(planMinScenesPerPart(600, 1)).toBe(1);
+    // どの尺でも 1パートの場面の上限（4）より小さい。
+    for (const t of [10, 30, 60, 120, 180, 300, 600]) expect(planMinScenesPerPart(t, 1)).toBeLessThan(AI_PLAN_SCENES_PER_PART_MAX);
+    // 60 秒・章1つ＝4 場面が要るが、パートの上限（7）× 下限が書きすぎの見張り（20 場面）を越えないよう 2 に抑える。
+    expect(planMinScenesPerPart(60, 1)).toBe(2);
+    expect(planMinScenesPerPart(60, 1) * planPartCap(60)).toBeLessThanOrEqual(planRunawayLimits(60).maxScenes);
   });
   it('章立てが無ければ 1（採用・章を書かない一般）', () => {
     expect(planMinScenesPerPart(60, 0)).toBe(1);

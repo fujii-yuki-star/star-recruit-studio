@@ -73,7 +73,11 @@ export function generationSchemaFor<T>(schema: T, targetDurationSec: number, opt
 export function planMinScenesPerPart(targetDurationSec: number, agendaCount: number): number {
   if (agendaCount <= 0) return 1;
   const needed = Math.ceil(targetDurationSec / AI_SCENE_MAX_DURATION_SEC);
-  return Math.min(AI_PLAN_SCENES_PER_PART_MAX, Math.max(1, Math.ceil(needed / agendaCount)));
+  // ⚠️ **パートの上限まで書いても、書きすぎの見張り（場面の数）に届かない**ように抑える（PR レビュー ℹ️）＝
+  //   届くと上限で閉じる前に途中で止められ、作り直し・断りの道に入る。
+  //   ⚠️ この抑えは常に 1パートの場面の上限（4）より小さい（`ceil(尺÷3) < 4×(ceil(尺÷12)+2)`）＝上限を別に掛けない。
+  const fit = Math.floor(planRunawayLimits(targetDurationSec).maxScenes / planPartCap(targetDurationSec));
+  return Math.max(1, Math.min(fit, Math.ceil(needed / agendaCount)));
 }
 
 /**
