@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { useTimelineStore } from "../store/timelineStore";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { HomeScreen } from "./HomeScreen";
 
@@ -43,6 +44,26 @@ describe("HomeScreen 書き出し中は改名を無効化（#570 レビュー）
     render(<HomeScreen onNavigate={vi.fn()} />);
     const pencil = (await screen.findByLabelText("「テスト動画」の名前を変更")) as HTMLButtonElement;
     expect(pencil.disabled).toBe(true); // 書き出し中は改名を開始できない（lost-update 防止の UI 側）
+  });
+
+  // 0.5.2 出口監査：タイムライン形式の書き出し中も止める＝開いている文書の改名は store が断るので、
+  // 押せると「名前を変更できませんでした」だけが出て次の行動が無かった（§2-5）。
+  it("タイムライン形式の書き出し中も、鉛筆を無効化する", async () => {
+    const before = useTimelineStore.getState().exportRun;
+    useTimelineStore.setState({ exportRun: { ...before, phase: "rendering" } });
+    try {
+      useProjectStore.setState({
+        listProjects: vi.fn(() =>
+          Promise.resolve([{ projectId: "proj_001", projectName: "テスト動画", updatedAt: "2026-07-09T00:00:00Z" }] as unknown as ProjectHeader[]),
+        ),
+      });
+      render(<HomeScreen onNavigate={vi.fn()} />);
+      const pencil = (await screen.findByLabelText("「テスト動画」の名前を変更")) as HTMLButtonElement;
+      expect(pencil.disabled).toBe(true);
+      expect(pencil.title).toBe("書き出しが終わるまでお待ちください");
+    } finally {
+      useTimelineStore.setState({ exportRun: before });
+    }
   });
 });
 

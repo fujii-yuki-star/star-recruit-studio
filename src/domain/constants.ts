@@ -27,6 +27,11 @@ export const AI_PLAN_PART_SEC = 12;
 export const AI_PLAN_PART_SLACK = 2;
 /** 同じく、1つのパートに入れる場面の数の上限（正しい案は 1〜3）。 */
 export const AI_PLAN_SCENES_PER_PART_MAX = 4;
+/**
+ * 同梱の AI の動画案を**作り直す回数の上限**（#1403・#1421）＝話す文がほとんど無い案・上限で切れて締めの無い案は、
+ * この回数まで作り直す（同じ入力でも作り直すと多くは直る）。1回の生成は最低検証機で 2〜4 分かかるので増やさない。
+ */
+export const AI_PLAN_ATTEMPTS = 2;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
 // 同梱の AI の動画案で**場面の尺を語りから計算する**ときの見積もり（ADR-0052 段階1・#1291）。
 // 読み上げの速さ＝1秒あたりの字数。ずんだもんの既定の速さでおよそ 7〜8 字/秒（`precheckExtras.MAX_CHARS_PER_SEC`＝9 は

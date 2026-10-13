@@ -16,10 +16,8 @@ import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvi
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { currentAiCancelEpoch, localAiGenerate } from '../aiClient';
 import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from './messages';
+import { AI_PLAN_ATTEMPTS } from '../../domain/constants';
 import { generationSchemaFor, isCutShortPlan, isHollowPlan, planMinScenesPerPart, planRunawayLimits } from '../../domain/ai/planSanity';
-
-/** 中身が足りない案を作り直す回数（最初の1回を含む）。 */
-const HOLLOW_ATTEMPTS = 2;
 
 /** いちばん新しい動画案づくりの番号（この画面の中だけ）。古い回の言い直しが新しい回を追い越さないように見る。 */
 let latestRun = 0;
@@ -63,7 +61,7 @@ export class LocalVideoPlanProvider implements AiProvider {
     // ⚠️ **中身が足りない案は1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る。
     /** 上限で切られたが話す文はある案（#1421）＝作り直しが空振りしたら、断らずにこれを使う。 */
     let cutShort: AiVideoPlan | null = null;
-    for (let attempt = 0; attempt < HOLLOW_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < AI_PLAN_ATTEMPTS; attempt += 1) {
       let raw: string;
       try {
         raw = await localAiGenerate(system, user, schemaText, limits);

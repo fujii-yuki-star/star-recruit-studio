@@ -89,7 +89,8 @@ export function HelpScreen() {
                 <button
                   key={v.id}
                   className={`list-item${playing?.id === v.id ? " active" : ""}`}
-                  onClick={() => setPlaying(v)}
+                  // 選び直したら読み直す（一度読めなかった映像も、もう一度試す・0.5.2 出口監査）。
+                  onClick={() => { setFailedId(null); setPlaying(v); }}
                   aria-current={playing?.id === v.id ? "true" : undefined}
                 >
                   <PlayIcon size={18} className="nav-icon" />
