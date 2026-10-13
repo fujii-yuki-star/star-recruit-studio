@@ -74,7 +74,11 @@ export function contentFiles(m: ExtensionPackManifest): string[] {
   return [...(m.contents.templates ?? []).map((t) => t.file), ...(m.contents.templateAssets ?? []).map((a) => a.file)];
 }
 
-/** `x.y.z` を比べる（a が大きければ正）。形が違う版は 0 として扱う（schema で形は守られている）。 */
+/**
+ * `x.y.z` を比べる（a が大きければ正）。形が違う版は 0 として扱う（schema で形は守られている）。
+ * ⚠️ 変異チェックで「`Number` を外して文字のまま比べる」は生き残る＝**等価**（下の引き算が文字を数へ直す・`"10" - "9" === 1`）。
+ *   `Number` を残すのは読み手のため（数として比べていることを書いておく）。
+ */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map((n) => Number(n) || 0);
   const pb = b.split('.').map((n) => Number(n) || 0);

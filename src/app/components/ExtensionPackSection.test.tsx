@@ -123,6 +123,8 @@ describe("ExtensionPackSection", () => {
       { projectId: "proj_1", doc: JSON.stringify({ scenes: [{ templateId: "pack_office__a" }] }) },
       { projectId: "proj_2", doc: JSON.stringify({ clips: [{ templateId: "pack_office__b" }] }) },
       { projectId: "proj_3", doc: JSON.stringify({ scenes: [{ templateId: "opening_v1" }] }) },
+      // ほかのパックの見た目パターンだけを使う動画は数えない。
+      { projectId: "proj_4", doc: JSON.stringify({ scenes: [{ templateId: "pack_other__a" }] }) },
     ];
     render(<ExtensionPackSection />);
     fireEvent.click(screen.getByRole("button", { name: "外す" }));
