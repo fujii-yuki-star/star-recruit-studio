@@ -1,6 +1,6 @@
 // 同梱の AI の動画案が「使える形」か（#1403）。
 import { describe, expect, it } from 'vitest';
-import { generationSchemaFor, isHollowPlan, planMinScenesPerPart, planPartCap, planRunawayLimits } from './planSanity';
+import { generationSchemaFor, isCutShortPlan, isHollowPlan, planMinScenesPerPart, planPartCap, planRunawayLimits } from './planSanity';
 import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
 import type { AiVideoPlan } from './types';
 
@@ -78,5 +78,23 @@ describe('章立てのある案で、1パートの場面の下限（#1421）', (
     expect(scenesOf(generationSchemaFor(aiVideoPlanSchema, 60)).minItems).toBe(1);
     // 正典そのものは変えない。
     expect(scenesOf(aiVideoPlanSchema).minItems).toBe(1);
+  });
+});
+
+describe('上限で切られた案（#1421）', () => {
+  const mk = (types: string[][]) =>
+    ({ parts: types.map((t) => ({ partTitle: 'p', scenes: t.map((sceneType) => ({ sceneType, narrationText: 'あ' })) })) }) as unknown as Parameters<typeof isCutShortPlan>[0];
+  const cap = planPartCap(60);
+  it('パートが上限に達し、締めが無ければ切られた案', () => {
+    expect(isCutShortPlan(mk(Array.from({ length: cap }, () => ['opening'])), 60, true)).toBe(true);
+  });
+  it('締めがあれば、上限に達していても切られていない', () => {
+    expect(isCutShortPlan(mk([...Array.from({ length: cap - 1 }, () => ['opening']), ['closing']]), 60, true)).toBe(false);
+  });
+  it('上限より少なければ、締めが無くても切られていない（AI がそう書いた）', () => {
+    expect(isCutShortPlan(mk(Array.from({ length: cap - 1 }, () => ['opening'])), 60, true)).toBe(false);
+  });
+  it('締めの見た目を選べないなら見ない', () => {
+    expect(isCutShortPlan(mk(Array.from({ length: cap }, () => ['opening'])), 60, false)).toBe(false);
   });
 });

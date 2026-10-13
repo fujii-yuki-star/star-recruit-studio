@@ -10,13 +10,13 @@ import { parseAndValidateVideoPlan, validateAiVideoPlan } from '../../domain/ai/
 import { refineVideoPlan } from '../../domain/ai/refineVideoPlan';
 import type { ShortenText } from '../../domain/ai/refineVideoPlan';
 import { buildShortenMessages, parseShortenResponse } from '../../domain/ai/shortenTextRequest';
-import { VIDEO_KIND } from '../../domain/enums';
+import { CLOSING_CATEGORY, VIDEO_KIND } from '../../domain/enums';
 import { templatesForAssets } from '../../domain/ai/videoPlanInput';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { currentAiCancelEpoch, localAiGenerate } from '../aiClient';
 import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from './messages';
-import { generationSchemaFor, isHollowPlan, planMinScenesPerPart, planRunawayLimits } from '../../domain/ai/planSanity';
+import { generationSchemaFor, isCutShortPlan, isHollowPlan, planMinScenesPerPart, planRunawayLimits } from '../../domain/ai/planSanity';
 
 /** 中身が足りない案を作り直す回数（最初の1回を含む）。 */
 const HOLLOW_ATTEMPTS = 2;
@@ -61,6 +61,8 @@ export class LocalVideoPlanProvider implements AiProvider {
     const minScenesPerPart = planMinScenesPerPart(input.targetDurationSec, input.generalBrief?.agenda?.length ?? 0);
     const schemaText = JSON.stringify(generationSchemaFor(aiVideoPlanSchema, input.targetDurationSec, { minScenesPerPart }));
     // ⚠️ **中身が足りない案は1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る。
+    /** 上限で切られたが話す文はある案（#1421）＝作り直しが空振りしたら、断らずにこれを使う。 */
+    let cutShort: AiVideoPlan | null = null;
     for (let attempt = 0; attempt < HOLLOW_ATTEMPTS; attempt += 1) {
       let raw: string;
       try {
@@ -78,10 +80,19 @@ export class LocalVideoPlanProvider implements AiProvider {
         });
         throw new Error(AI_PLAN_UNREADABLE_MESSAGE);
       }
-      if (!isHollowPlan(result.plan)) return this.refine(result.plan, input, isStale);
+      if (!isHollowPlan(result.plan)) {
+        // ⚠️ **上限で切られた案は1度だけ作り直す**（#1421）＝締めが無い・同じ種類が続く。作り直しても同じなら、
+        //   話す文はあるので**そのまま使う**（断るより直せる案を渡す）＝控えて回を抜け、最後に控えた案を使う。
+        const closingAvailable = input.templates.some((t) => t.category === CLOSING_CATEGORY);
+        if (isStale() || !isCutShortPlan(result.plan, input.targetDurationSec, closingAvailable)) return this.refine(result.plan, input, isStale);
+        console.warn('[ai] パートの上限で切れ、締めの場面が無い動画案でした（このパソコンの中）。作り直します。', { 回: attempt + 1 });
+        cutShort = result.plan;
+        continue;
+      }
       console.warn('[ai] 話す内容がほとんど無い動画案でした（このパソコンの中）。', { 回: attempt + 1 });
       if (isStale()) break; // やめた・後から別の生成が始まった＝作り直さない
     }
+    if (cutShort) return this.refine(cutShort, input, isStale);
     throw new Error(AI_PLAN_HOLLOW_MESSAGE);
   }
 

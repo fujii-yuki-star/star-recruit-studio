@@ -3,6 +3,7 @@
 // ⚠️ **正典の検証（schema）とは別**＝schema に合っていても中身が空の案がありうる（実機で「セリフが空の3場面」が
 //   「動画案ができました」として出た）。ここは「利用者に渡してよいか」を見る。
 import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
+import { CLOSING_CATEGORY } from '../enums';
 import type { AiVideoPlan } from './types';
 
 /** 書いている途中で止める上限（Rust の `GenerateLimits`）。尺から決める。 */
@@ -73,4 +74,16 @@ export function planMinScenesPerPart(targetDurationSec: number, agendaCount: num
   if (agendaCount <= 0) return 1;
   const needed = Math.ceil(targetDurationSec / AI_SCENE_MAX_DURATION_SEC);
   return Math.min(AI_PLAN_SCENES_PER_PART_MAX, Math.max(1, Math.ceil(needed / agendaCount)));
+}
+
+/**
+ * **上限で切られた案**か（#1421）＝パートの数が書かせるときの上限（`planPartCap`）に達し、締めの場面が無い。
+ * 実測で、止まらずにパートを増やし続けた回が上限で閉じられ、「始まりが4つ続き、締めが無い」案になった。
+ * 形は正典に合っていて話す文もあるので `isHollowPlan` では拾えない。
+ * ⚠️ 締めの見た目を選べないとき（`closingAvailable` が偽）は見ない＝書けないものが無いのを責めない。
+ */
+export function isCutShortPlan(plan: AiVideoPlan, targetDurationSec: number, closingAvailable: boolean): boolean {
+  if (!closingAvailable) return false;
+  if (plan.parts.length < planPartCap(targetDurationSec)) return false;
+  return !plan.parts.some((p) => p.scenes.some((s) => s.sceneType === CLOSING_CATEGORY));
 }

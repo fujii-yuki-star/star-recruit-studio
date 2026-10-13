@@ -213,3 +213,45 @@ describe('LocalVideoPlanProvider：使える形でない案（#1403）', () => {
     expect(localAiGenerateMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// 上限で切られた案（#1421）＝パートが上限に達し、締めの場面が無い。
+describe('LocalVideoPlanProvider：上限で切られた案（#1421）', () => {
+  const withClosing = (): GenerateVideoPlanInput =>
+    ({ ...input(), templates: [...input().templates, { templateId: 'closing_v1', category: 'closing', hasYuko: true }] }) as GenerateVideoPlanInput;
+  /** パートを上限ちょうどまで並べ、締めの無い案（話す文はある）。 */
+  const cut = (): AiVideoPlan => {
+    const p = structuredClone(validPlanFixture) as AiVideoPlan;
+    return { ...p, parts: Array.from({ length: planPartCap(60) }, () => structuredClone(p.parts[1])) };
+  };
+  const titled = (title: string, base: AiVideoPlan): AiVideoPlan => ({ ...base, videoPlan: { ...base.videoPlan, title } });
+
+  it('1度だけ作り直し、直れば作り直した案を返す', async () => {
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('切れた', cut()))).mockResolvedValueOnce(JSON.stringify(validPlanFixture));
+    const plan = await new LocalVideoPlanProvider().generateVideoPlan(withClosing());
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(2);
+    expect(plan.videoPlan.title).toBe(validPlanFixture.videoPlan.title);
+  });
+  it('作り直しても切れたら、断らずに作り直した案を使う', async () => {
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('1回目', cut()))).mockResolvedValueOnce(JSON.stringify(titled('2回目', cut())));
+    const plan = await new LocalVideoPlanProvider().generateVideoPlan(withClosing());
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(2);
+    expect(plan.videoPlan.title).toBe('2回目');
+  });
+  it('作り直しが話す文の無い案なら、断らずに最初の案を使う', async () => {
+    const hollow = structuredClone(validPlanFixture) as AiVideoPlan;
+    for (const part of hollow.parts) for (const s of part.scenes) { s.narrationText = ''; delete s.narrationLines; }
+    localAiGenerateMock.mockResolvedValueOnce(JSON.stringify(titled('1回目', cut()))).mockResolvedValueOnce(JSON.stringify(hollow));
+    const plan = await new LocalVideoPlanProvider().generateVideoPlan(withClosing());
+    expect(plan.videoPlan.title).toBe('1回目');
+  });
+  it('やめたら作り直さない（切れた案のまま返す）', async () => {
+    localAiGenerateMock.mockImplementationOnce(async () => { cancelEpoch.value += 1; return JSON.stringify(titled('切れた', cut())); });
+    await new LocalVideoPlanProvider().generateVideoPlan(withClosing());
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(1);
+  });
+  it('締めの見た目が選べないなら作り直さない', async () => {
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(titled('切れた', cut())));
+    await new LocalVideoPlanProvider().generateVideoPlan(input());
+    expect(localAiGenerateMock).toHaveBeenCalledTimes(1);
+  });
+});
