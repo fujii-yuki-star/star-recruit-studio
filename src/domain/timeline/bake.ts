@@ -885,7 +885,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     if ((steps[i]?.durationSec ?? 0) <= 0) return [];
     const own = built.clips.filter((c) => c.startSec === starts[i] && c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio);
     const sounds = own.some((c) =>
-      videoPlacementsOfClip(built, c, { ...(options.templateOf ? { templateOf: options.templateOf } : {}) }).some((p) => placementOriginalAudio(built, p) != null),
+      videoPlacementsOfClip(built, c, { ...(options.templateOf ? { templateOf: options.templateOf } : {}) }).some((p) => (placementOriginalAudio(built, p)?.volume ?? 0) > 0),
     );
     return sounds ? [i + 1] : [];
   });

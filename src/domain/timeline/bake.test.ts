@@ -1352,6 +1352,13 @@ describe('出ていく場面の音の下げ方（#1410）', () => {
     expect(bakeTimelineProject(p, opts()).notes).toEqual([{ code: BAKE_NOTE_CODE.videoAudioTransition, sceneNumbers: [1] }]);
   });
 
+  it('元の音を 0 にしてある動画・最後の場面の動画では知らせない', () => {
+    const mk = (volume: number) => ({ assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'assets/v.mp4', metadata: { hasAudio: true }, clip: { useOriginalAudio: true, originalAudioVolume: volume } }) as unknown as Project['assets'][number];
+    expect(bakeTimelineProject(two({ assetRefs: { mainVisual: 'asset_001' } }, {}, { assets: [mk(0)] }), opts()).notes).toEqual([]);
+    // 出ていく切り替えを持たない最後の場面にだけ動画がある＝知らせない（場面を取り違えない）。
+    expect(bakeTimelineProject(two({}, { assetRefs: { mainVisual: 'asset_001' } }, { assets: [mk(1)] }), opts()).notes).toEqual([]);
+  });
+
   it('元の音を鳴らさない動画・切り替えの無い場面なら知らせない', () => {
     const silent = { assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'assets/v.mp4', metadata: { hasAudio: true } } as unknown as Project['assets'][number];
     expect(bakeTimelineProject(two({ assetRefs: { mainVisual: 'asset_001' } }, {}, { assets: [silent] }), opts()).notes).toEqual([]);
