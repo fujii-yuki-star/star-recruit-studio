@@ -43,5 +43,7 @@ describe("overlayWarpTransform（#1416）", () => {
     const before = corners(r);
     const expected = before.map(([x, y]) => [Math.round((0.5 * x + 30) * 1e6) / 1e6, y]);
     expect(corners({ ...r, warp })).toEqual(expected);
+    // CSS は右から当たる＝回転が最後（いちばん右）でないと、描画と逆の順になる（上の隅の検査は順を組み直すので、順はここで見る）。
+    expect(overlayWarpTransform({ ...r, warp })).toMatch(/^translate\(.*\) matrix\(.*\) rotate\(90deg\)$/);
   });
 });
