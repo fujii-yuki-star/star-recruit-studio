@@ -1313,6 +1313,8 @@ describe('出ていく場面の音の下げ方（#1410）', () => {
   it('outgoingFadePoints：重ならない・切り替えが無いなら点を持たない（従来どおり）', () => {
     expect(outgoingFadePoints(0, 5, 6, 0.5, 1)).toBeUndefined();
     expect(outgoingFadePoints(0, 6, 6, 0, 1)).toBeUndefined();
+    // 声が場面の終わりを越えても、切り替えが無ければ点を持たない（0 で割らない）。
+    expect(outgoingFadePoints(0, 7, 6, 0, 1)).toBeUndefined();
   });
 
   const fade = { in: TRANSITION_TYPE.fade, out: TRANSITION_TYPE.fade, durationSec: 0.5 };
