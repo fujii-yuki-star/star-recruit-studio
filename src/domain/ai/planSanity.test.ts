@@ -1,6 +1,6 @@
 // 同梱の AI の動画案が「使える形」か（#1403）。
 import { describe, expect, it } from 'vitest';
-import { generationSchemaFor, isHollowPlan, planPartCap, planRunawayLimits } from './planSanity';
+import { generationSchemaFor, isHollowPlan, planMinScenesPerPart, planPartCap, planRunawayLimits } from './planSanity';
 import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
 import type { AiVideoPlan } from './types';
 
@@ -53,5 +53,30 @@ describe('書かせるときの上限（#1415）', () => {
     const g = generationSchemaFor(aiVideoPlanSchema, 60) as typeof aiVideoPlanSchema & { properties: { parts: { maxItems: number } } };
     expect(g.properties.parts.maxItems).toBe(7);
     expect(JSON.stringify(aiVideoPlanSchema)).toBe(before);
+  });
+});
+
+describe('章立てのある案で、1パートの場面の下限（#1421）', () => {
+  it('尺を1場面の最長（15 秒）で割った数を、章の数で割り振る', () => {
+    // 60 秒・3 章＝4 場面が要る → 1 章に 2 場面。
+    expect(planMinScenesPerPart(60, 3)).toBe(2);
+    // 30 秒・3 章＝2 場面 → 1 章に 1 場面（下限は付かない）。
+    expect(planMinScenesPerPart(30, 3)).toBe(1);
+    // 章が1つ・長い動画でも 1パートの場面の上限（4）を越えない。
+    expect(planMinScenesPerPart(600, 1)).toBe(4);
+  });
+  it('章立てが無ければ 1（採用・章を書かない一般）', () => {
+    expect(planMinScenesPerPart(60, 0)).toBe(1);
+  });
+  it('縛りの形に下限を足す・正典の下限より狭くしない値は書かない', () => {
+    type S = { properties: { parts: { items: { properties: { scenes: { minItems?: number } } } } } };
+    const scenesOf = (x: unknown) => (x as S).properties.parts.items.properties.scenes;
+    expect(scenesOf(generationSchemaFor(aiVideoPlanSchema, 60, { minScenesPerPart: 2 })).minItems).toBe(2);
+    // 1 は正典（minItems 1）と同じ＝そのまま。0 を渡しても正典より広げない。
+    expect(scenesOf(generationSchemaFor(aiVideoPlanSchema, 60, { minScenesPerPart: 1 })).minItems).toBe(1);
+    expect(scenesOf(generationSchemaFor(aiVideoPlanSchema, 60, { minScenesPerPart: 0 })).minItems).toBe(1);
+    expect(scenesOf(generationSchemaFor(aiVideoPlanSchema, 60)).minItems).toBe(1);
+    // 正典そのものは変えない。
+    expect(scenesOf(aiVideoPlanSchema).minItems).toBe(1);
   });
 });

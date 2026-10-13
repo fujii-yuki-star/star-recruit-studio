@@ -1,5 +1,5 @@
 // このパソコンの中で動画案を作る（ADR-0051 決定2）＝指示文・検証は Gemini と共有し、正典 schema で出力の形を縛る。
-import { planPartCap } from '../../domain/ai/planSanity';
+import { planMinScenesPerPart, planPartCap } from '../../domain/ai/planSanity';
 import { AI_PLAN_SCENES_PER_PART_MAX } from '../../domain/constants';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
@@ -53,6 +53,17 @@ describe('LocalVideoPlanProvider（ADR-0051）', () => {
     delete sent.properties.parts.maxItems;
     delete sent.properties.parts.items.properties.scenes.maxItems;
     expect(sent).toEqual(aiVideoPlanSchema);
+  });
+
+  it('章立てがあれば、1パートの場面の下限も付ける（#1421）・無ければ正典の下限のまま', async () => {
+    localAiGenerateMock.mockResolvedValue(JSON.stringify(validPlanFixture));
+    const general = { ...input(), videoKind: 'general', generalBrief: { title: 't', agenda: ['a', 'b', 'c'] } } as GenerateVideoPlanInput;
+    await new LocalVideoPlanProvider().generateVideoPlan(general);
+    expect(JSON.parse(localAiGenerateMock.mock.calls[0][2]).properties.parts.items.properties.scenes.minItems).toBe(planMinScenesPerPart(60, 3));
+    expect(planMinScenesPerPart(60, 3)).toBe(2);
+    localAiGenerateMock.mockClear();
+    await new LocalVideoPlanProvider().generateVideoPlan(input());
+    expect(JSON.parse(localAiGenerateMock.mock.calls[0][2]).properties.parts.items.properties.scenes.minItems).toBe(1);
   });
 
   // ⚠️ **検証は元の schema**（ADR-0051）＝上限を越えた案（手で書いた・外の AI など）が来ても、正典に合えば通す。

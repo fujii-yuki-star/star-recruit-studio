@@ -2,7 +2,7 @@
 //
 // ⚠️ **正典の検証（schema）とは別**＝schema に合っていても中身が空の案がありうる（実機で「セリフが空の3場面」が
 //   「動画案ができました」として出た）。ここは「利用者に渡してよいか」を見る。
-import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
+import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
 import type { AiVideoPlan } from './types';
 
 /** 書いている途中で止める上限（Rust の `GenerateLimits`）。尺から決める。 */
@@ -50,11 +50,27 @@ export function planPartCap(targetDurationSec: number): number {
  * 上限に達すると AI は配列を閉じるしかない＝「1場面ずつのパートを増やし続けて止まらない」を形で止める。
  * ⚠️ **正典は変えない**（ADR-0051）＝返ってきた案は元の schema で検証する。上限は今より**狭くするだけ**。
  */
-export function generationSchemaFor<T>(schema: T, targetDurationSec: number): T {
+export function generationSchemaFor<T>(schema: T, targetDurationSec: number, options: { minScenesPerPart?: number } = {}): T {
   const copy = structuredClone(schema) as unknown as {
-    properties: { parts: { maxItems?: number; items: { properties: { scenes: { maxItems?: number } } } } };
+    properties: { parts: { maxItems?: number; items: { properties: { scenes: { minItems?: number; maxItems?: number } } } } };
   };
   copy.properties.parts.maxItems = planPartCap(targetDurationSec);
-  copy.properties.parts.items.properties.scenes.maxItems = AI_PLAN_SCENES_PER_PART_MAX;
+  const scenes = copy.properties.parts.items.properties.scenes;
+  scenes.maxItems = AI_PLAN_SCENES_PER_PART_MAX;
+  // 下限は**正典より広げない**（狭くするだけ）＝正典の minItems より小さい値は書かない。
+  const min = options.minScenesPerPart ?? 0;
+  if (min > (scenes.minItems ?? 0)) scenes.minItems = min;
   return copy as unknown as T;
+}
+
+/**
+ * 章立てのある案で、**1パートに書かせる場面の下限**（#1421）。
+ * 実測で一般のお題は「章の数＝パートの数で、1パート1場面」になり、どの場面も1場面の最長（15 秒）に張り付いても
+ * 尺に届かなかった（60 秒・3 章で −15 秒）。尺を最長で割った場面の数を、章の数で割り振る（上限は 1パートの場面の上限）。
+ * 章立てが無ければ下限は付けない（1）。
+ */
+export function planMinScenesPerPart(targetDurationSec: number, agendaCount: number): number {
+  if (agendaCount <= 0) return 1;
+  const needed = Math.ceil(targetDurationSec / AI_SCENE_MAX_DURATION_SEC);
+  return Math.min(AI_PLAN_SCENES_PER_PART_MAX, Math.max(1, Math.ceil(needed / agendaCount)));
 }

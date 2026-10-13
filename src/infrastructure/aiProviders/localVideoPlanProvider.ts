@@ -16,7 +16,7 @@ import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvi
 import type { AiVideoPlan } from '../../domain/ai/types';
 import { currentAiCancelEpoch, localAiGenerate } from '../aiClient';
 import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from './messages';
-import { generationSchemaFor, isHollowPlan, planRunawayLimits } from '../../domain/ai/planSanity';
+import { generationSchemaFor, isHollowPlan, planMinScenesPerPart, planRunawayLimits } from '../../domain/ai/planSanity';
 
 /** 中身が足りない案を作り直す回数（最初の1回を含む）。 */
 const HOLLOW_ATTEMPTS = 2;
@@ -57,7 +57,9 @@ export class LocalVideoPlanProvider implements AiProvider {
     // 止まらずに書き続けたら Rust が途中で止めて1度だけ作り直す（#1403）＝上限は尺から決める。
     const limits = planRunawayLimits(input.targetDurationSec);
     // ⚠️ **書かせるときだけ**パートと場面の数に上限を付ける（#1415）＝検証は元の schema（`parseAndValidateVideoPlan`）。
-    const schemaText = JSON.stringify(generationSchemaFor(aiVideoPlanSchema, input.targetDurationSec));
+    // 章立てがあれば、1パートの場面に下限も付ける（#1421＝章ごとに1場面で尺に届かない）。
+    const minScenesPerPart = planMinScenesPerPart(input.targetDurationSec, input.generalBrief?.agenda?.length ?? 0);
+    const schemaText = JSON.stringify(generationSchemaFor(aiVideoPlanSchema, input.targetDurationSec, { minScenesPerPart }));
     // ⚠️ **中身が足りない案は1度だけ作り直す**（#1403）＝同じ入力でも作り直すと多くは直る。
     for (let attempt = 0; attempt < HOLLOW_ATTEMPTS; attempt += 1) {
       let raw: string;
