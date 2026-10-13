@@ -2,7 +2,8 @@
 //
 // ⚠️ **正典の検証（schema）とは別**＝schema に合っていても中身が空の案がありうる（実機で「セリフが空の3場面」が
 //   「動画案ができました」として出た）。ここは「利用者に渡してよいか」を見る。
-import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
+import { AI_PLAN_PART_SEC, AI_PLAN_PART_SLACK, AI_PLAN_RUNAWAY_DURATION_FACTOR, AI_PLAN_SCENES_PER_PART_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC, MAX_SCENES_PER_VIDEO } from '../constants';
+import { CLOSING_CATEGORY } from '../enums';
 import type { AiVideoPlan } from './types';
 
 /** 書いている途中で止める上限（Rust の `GenerateLimits`）。尺から決める。 */
@@ -50,11 +51,43 @@ export function planPartCap(targetDurationSec: number): number {
  * 上限に達すると AI は配列を閉じるしかない＝「1場面ずつのパートを増やし続けて止まらない」を形で止める。
  * ⚠️ **正典は変えない**（ADR-0051）＝返ってきた案は元の schema で検証する。上限は今より**狭くするだけ**。
  */
-export function generationSchemaFor<T>(schema: T, targetDurationSec: number): T {
+export function generationSchemaFor<T>(schema: T, targetDurationSec: number, options: { minScenesPerPart?: number } = {}): T {
   const copy = structuredClone(schema) as unknown as {
-    properties: { parts: { maxItems?: number; items: { properties: { scenes: { maxItems?: number } } } } };
+    properties: { parts: { maxItems?: number; items: { properties: { scenes: { minItems?: number; maxItems?: number } } } } };
   };
   copy.properties.parts.maxItems = planPartCap(targetDurationSec);
-  copy.properties.parts.items.properties.scenes.maxItems = AI_PLAN_SCENES_PER_PART_MAX;
+  const scenes = copy.properties.parts.items.properties.scenes;
+  scenes.maxItems = AI_PLAN_SCENES_PER_PART_MAX;
+  // 下限は**正典より広げない**（狭くするだけ）＝正典の minItems より小さい値は書かない。
+  const min = options.minScenesPerPart ?? 0;
+  if (min > (scenes.minItems ?? 0)) scenes.minItems = min;
   return copy as unknown as T;
+}
+
+/**
+ * 章立てのある案で、**1パートに書かせる場面の下限**（#1421）。
+ * 実測で一般のお題は「章の数＝パートの数で、1パート1場面」になり、どの場面も1場面の最長（15 秒）に張り付いても
+ * 尺に届かなかった（60 秒・3 章で −15 秒）。尺を最長で割った場面の数を、章の数で割り振る（上限は 1パートの場面の上限）。
+ * 章立てが無ければ下限は付けない（1）。
+ */
+export function planMinScenesPerPart(targetDurationSec: number, agendaCount: number): number {
+  if (agendaCount <= 0) return 1;
+  const needed = Math.ceil(targetDurationSec / AI_SCENE_MAX_DURATION_SEC);
+  // ⚠️ **パートの上限まで書いても、書きすぎの見張り（場面の数）に届かない**ように抑える（PR レビュー ℹ️）＝
+  //   届くと上限で閉じる前に途中で止められ、作り直し・断りの道に入る。
+  //   ⚠️ この抑えは常に 1パートの場面の上限（4）より小さい（`ceil(尺÷3) < 4×(ceil(尺÷12)+2)`）＝上限を別に掛けない。
+  const fit = Math.floor(planRunawayLimits(targetDurationSec).maxScenes / planPartCap(targetDurationSec));
+  return Math.max(1, Math.min(fit, Math.ceil(needed / agendaCount)));
+}
+
+/**
+ * **上限で切られた案**か（#1421）＝パートの数が書かせるときの上限（`planPartCap`）に達し、締めの場面が無い。
+ * 実測で、止まらずにパートを増やし続けた回が上限で閉じられ、「始まりが4つ続き、締めが無い」案になった。
+ * 形は正典に合っていて話す文もあるので `isHollowPlan` では拾えない。
+ * ⚠️ 締めの見た目を選べないとき（`closingAvailable` が偽）は見ない＝書けないものが無いのを責めない。
+ */
+export function isCutShortPlan(plan: AiVideoPlan, targetDurationSec: number, closingAvailable: boolean): boolean {
+  if (!closingAvailable) return false;
+  if (plan.parts.length < planPartCap(targetDurationSec)) return false;
+  return !plan.parts.some((p) => p.scenes.some((s) => s.sceneType === CLOSING_CATEGORY));
 }

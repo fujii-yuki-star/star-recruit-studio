@@ -10,6 +10,9 @@ export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
 /** FREE テンプレのカテゴリ値（§6・ロジック比較用。自由配置 freeLayout を持つ場面）。 */
 export const FREE_CATEGORY = 'free' satisfies SceneCategory;
 
+/** 締めの場面のカテゴリ値（#1421・上限で切れた案を見分ける）。 */
+export const CLOSING_CATEGORY = 'closing' satisfies SceneCategory;
+
 /** FREE テンプレの自由配置要素の種別（ADR-0008／字幕＝ADR-0029）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
 export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape', 'subtitle'] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];

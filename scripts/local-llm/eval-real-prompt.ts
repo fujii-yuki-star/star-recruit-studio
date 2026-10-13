@@ -19,7 +19,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import { stripCodeFence } from '../../src/domain/ai/validateVideoPlan';
 import { sanitizeAiVideoPlan } from '../../src/domain/ai/sanitizeVideoPlan';
 import { refineVideoPlan } from '../../src/domain/ai/refineVideoPlan';
-import { generationSchemaFor } from '../../src/domain/ai/planSanity';
+import { generationSchemaFor, planMinScenesPerPart } from '../../src/domain/ai/planSanity';
 import type { ShortenText } from '../../src/domain/ai/refineVideoPlan';
 import { buildShortenMessages, parseShortenResponse } from '../../src/domain/ai/shortenTextRequest';
 import type { AiVideoPlan } from '../../src/domain/ai/types';
@@ -142,14 +142,15 @@ function cases(orientation: '16:9' | '9:16'): { name: string; input: GenerateVid
 }
 
 const summary: Record<string, unknown>[] = [];
-for (const c of cases('16:9')) {
+// `ONLY=一般` のように、名前にその文字を含むお題だけを回す（測り直しを短くする）。
+for (const c of cases('16:9').filter((x) => !process.env.ONLY || x.name.includes(process.env.ONLY))) {
   // 今のアプリと同じく、写真・動画が無ければ差し込み口のある見た目を見せない（12 §8.9）。
   if (stage2) c.input = { ...c.input, templates: templatesForAssets(c.input.templates, c.input.assets) };
   if (toneArg) c.input = { ...c.input, tone: toneArg };
   const { system, user } = buildVideoPlanMessages(c.input, { properNounPlaceholders: !baseline, askVisualWish: stage2 });
   const t0 = Date.now();
   // アプリと同じく、書かせるときだけパートと場面の数に上限を付ける（#1415）。`NO_CAP=1` で上限なし（0.5.1 までと同じ）。
-  const res = await chat(system, user, process.env.NO_CAP === '1' ? aiVideoPlanSchema : generationSchemaFor(aiVideoPlanSchema, c.input.targetDurationSec));
+  const res = await chat(system, user, process.env.NO_CAP === '1' ? aiVideoPlanSchema : generationSchemaFor(aiVideoPlanSchema, c.input.targetDurationSec, { minScenesPerPart: process.env.NO_MIN === '1' ? 1 : planMinScenesPerPart(c.input.targetDurationSec, c.input.generalBrief?.agenda?.length ?? 0) }));
   const genMs = Date.now() - t0;
   const result = parseAndValidateVideoPlan(res.content);
   const scoreCtx = {
