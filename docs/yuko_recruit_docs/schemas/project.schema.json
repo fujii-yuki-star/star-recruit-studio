@@ -191,7 +191,7 @@
         "scale": { "type": "number", "exclusiveMinimum": 0 },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "rotation": { "type": "number" },
-        "scaleX": { "type": "number", "not": { "const": 0 }, "description": "横だけの倍率（ADR-0059 段階2）。scale に掛ける。負＝その向きに反転。0 は不可。" },
+        "scaleX": { "type": "number", "not": { "const": 0 }, "description": "横だけの倍率（ADR-0059 段階2）。scale に掛ける。負＝その向きに反転。0 は不可。⚠️ 部品（クリップ・要素）の動きにだけ効く＝まとまり（グループ）の動きに書いても効かない（まとまりの変形は相似変換で合成する）。場面形式の画面からは書けない。" },
         "scaleY": { "type": "number", "not": { "const": 0 }, "description": "縦だけの倍率（同上）。" },
         "easing": {
           "description": "区間 [前KF, 当KF] のイージング（#262）。名前つきか、自由なカーブ（CSS の cubic-bezier と同じ制御点4つ）。未指定＝linear。",

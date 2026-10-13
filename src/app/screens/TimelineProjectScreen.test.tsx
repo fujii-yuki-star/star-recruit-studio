@@ -9408,6 +9408,17 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
     expect(el.scrollLeft).toBe(36);
   });
 
+  // ⚠️ **押しても焦点を取らない**（0.5.2 出口監査 ℹ️）＝取ると、押した後の ← → が帯を送り、再生位置が動かなくなる。
+  // 合成イベントは焦点を動かさないので、焦点の移動そのものではなく「既定の動き（焦点を移す）を止めたか」で見る。
+  it("帯を押しても焦点を取らない（キーは並びのまま・Tab では当てられる）", () => {
+    long();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    sizeScroller(container, LABEL + 180, 36);
+    const bar = screen.getByTestId("timeline-overview");
+    expect(fireEvent.mouseDown(bar, { button: 0 })).toBe(false); // false＝既定の動きを止めた
+    expect(bar.tabIndex).toBe(0);
+  });
+
   it("送る相手（並びの枠）を指し、見えている範囲を読み上げる", () => {
     long();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
