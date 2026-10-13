@@ -20,7 +20,7 @@ import type { TimelineClip, TimelineProject, VolumePoint } from './types';
  * 既定を 1.0 で決め打ちにすると、BGM 音量を明示していない文書（焼き出しは指定が無いと `volume` を
  * 書かない）が場面形式の **4倍**（0.25 → 1.0）で鳴る。値域のクランプも `clampVolume` を共有する。
  */
-export function clipBaseVolume(clip: TimelineClip, doc: TimelineProject): number {
+export function clipBaseVolume(clip: TimelineClip, doc: Pick<TimelineProject, 'voiceSettings'>): number {
   if (clip.kind === TIMELINE_CLIP_KIND.voice) {
     return clampVolume(clip.volume ?? doc.voiceSettings.volume ?? NARRATION_VOLUME);
   }
