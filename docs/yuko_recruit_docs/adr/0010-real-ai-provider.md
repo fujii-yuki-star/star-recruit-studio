@@ -35,6 +35,7 @@
 - `infrastructure/aiProviders/geminiProvider.ts`（MVP）／`openAiProvider.ts`（準備）。いずれも `AiProvider` 実装。
 - これらは `GenerateVideoPlanInput` から **12 のプロンプトを組み立て**（プロンプト生成は `domain` の純粋関数に切り出し＝§7 テスト対象）、**Tauri コマンド `ai_generate`**（`provider` ／ `model` ／ `system`・`user` の各テキストを渡す。**プロバイダ固有のリクエスト本文は Rust 側で組み立てる**＝フロントは各 API の形を知らない）を invoke して応答テキストを得る。
 - 既定／フォールバックは `MockAiProvider`（鍵未設定・オフライン・非Tauri 時）。**MVP は「鍵があれば実プロバイダ、無ければ Mock」**で全フロー継続。
+  - ⚠️ **この行は ADR-0051 で改められた**（2026-09-30）＝既定は**同梱のローカル AI**、Gemini は利用者が明示して選ぶ補助。アプリの中では **Mock に落とさない**（Mock はブラウザで開発しているときだけ＝ADR-0051 決定5）。
 
 ### Rust 側（`ai.rs` 新設・reqwest）
 - コマンド: `ai_generate(provider, model, system, user) -> String`（応答テキスト。**プロバイダ固有のボディは Rust が組み立てる**＝責務分離。実装 PR #90）／`save_api_key(provider, key)`／`has_api_key(provider) -> bool`／`delete_api_key(provider)`。model は URL パスへ埋め込むため英数字・ハイフン・ドットのみ許可（インジェクション防止）。
@@ -73,6 +74,7 @@
 ## 結果・影響
 
 - `MockAiProvider` は残し、**鍵未設定/オフライン/非Tauri のフォールバック**として全フロー継続（回帰なし・テストも Mock 前提を維持）。
+  - ⚠️ **この行は ADR-0051 で改められた**（2026-09-30）＝既定は**同梱のローカル AI**、Gemini は利用者が明示して選ぶ補助。アプリの中では **Mock に落とさない**（Mock はブラウザで開発しているときだけ＝ADR-0051 決定5）。
 - 鍵は **OSキーチェーンのみ**（平文ファイル無し）。フロントは鍵の値を保持しない。
 - 外部送信は**テキストのみ＋送信前確認**。元動画・元ファイルは送らない（§2-6 厳守）。
 - `domain` にプロンプト生成（純粋・テスト）。`infrastructure/aiProviders` に Provider 実装。`src-tauri` に `ai.rs`（reqwest＋keyring）。
