@@ -50,7 +50,8 @@ manifest.files = files.map((rel) => ({
   path: rel,
   sha256: createHash("sha256").update(readFileSync(join(dir, rel))).digest("hex"),
 }));
-const entries = [["manifest.json", Buffer.from(JSON.stringify(manifest, null, 2), "utf8")], ...files.map((rel) => [rel, readFileSync(join(dir, rel))])];
+/** @type {Array<[string, Buffer]>} */
+const entries = [["manifest.json", Buffer.from(JSON.stringify(manifest, null, 2), "utf8")], ...files.map((rel) => /** @type {[string, Buffer]} */ ([rel, readFileSync(join(dir, rel))]))];
 
 // ── zip（deflate・ZIP64 なし＝4GB 未満） ──
 const chunks = [];
