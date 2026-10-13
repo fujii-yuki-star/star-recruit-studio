@@ -2789,26 +2789,34 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           上下反転
         </label>
       </div>
-      {/* 動きの支点（ADR-0059 決定1）＝キーフレームの回転・拡縮だけに効く（素の回転は中心のまま）。 */}
-      <label className="field">
-        <span className="field-label text-sm">動きの支点</span>
-        <select
-          className="input"
-          value={pivotPresetOf(selected.pivot) ?? ""}
-          {...editGuard()}
-          onChange={(e) => {
-            const p = CLIP_PIVOT_PRESETS.find((q) => q.id === e.target.value);
-            if (p) setSelectedClipPivot({ x: p.x, y: p.y });
-          }}
-        >
-          {pivotPresetOf(selected.pivot) == null && <option value="">{CLIP_PIVOT_CUSTOM_LABEL}</option>}
-          {CLIP_PIVOT_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>{CLIP_PIVOT_LABEL[p.id]}</option>
-          ))}
-        </select>
-      </label>
-      {/* 説明はラベルの外＝中に入れると欄の名前が説明文込みになる（読み上げで名前が長くなる）。 */}
-      <p className="field-hint">{CLIP_PIVOT_HINT}</p>
+    </>
+  );
+  /**
+   * 動きの支点（ADR-0059 決定1）。⚠️ **「動き」の欄に置く**（0.5.2 出口監査）＝効くのはキーフレームの回転・拡縮だけなので、
+   *   色や重ね方と並べると、効く相手（動きの欄）と離れる。業界の型も動きの欄（Premiere の「モーション」・After Effects の「トランスフォーム」のアンカーポイント）。
+   */
+  const pivotField = selected && (
+    <>
+        {/* 動きの支点（ADR-0059 決定1）＝キーフレームの回転・拡縮だけに効く（素の回転は中心のまま）。 */}
+        <label className="field">
+          <span className="field-label text-sm">動きの支点</span>
+          <select
+            className="input"
+            value={pivotPresetOf(selected.pivot) ?? ""}
+            {...editGuard()}
+            onChange={(e) => {
+              const p = CLIP_PIVOT_PRESETS.find((q) => q.id === e.target.value);
+              if (p) setSelectedClipPivot({ x: p.x, y: p.y });
+            }}
+          >
+            {pivotPresetOf(selected.pivot) == null && <option value="">{CLIP_PIVOT_CUSTOM_LABEL}</option>}
+            {CLIP_PIVOT_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>{CLIP_PIVOT_LABEL[p.id]}</option>
+            ))}
+          </select>
+        </label>
+        {/* 説明はラベルの外＝中に入れると欄の名前が説明文込みになる（読み上げで名前が長くなる）。 */}
+        <p className="field-hint">{CLIP_PIVOT_HINT}</p>
     </>
   );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
@@ -5703,10 +5711,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 key={`look-${selected.id}`}
                 scope={SECTION_SCOPE.timeline}
                 storageKey="look"
-                title="見え方（色・重ね方・反転・動きの支点）"
+                title="見え方（色・重ね方・反転）"
                 defaultOpen={
                   selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")
-                  || selected.flipX === true || selected.flipY === true || selected.pivot != null
+                  || selected.flipX === true || selected.flipY === true
                 }
               >
                 {lookFields}
@@ -5779,7 +5787,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             )}
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
+              <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0 || selected.pivot != null}>
                 <p className="text-muted">
                   再生位置（{markerClock(playheadSec, clockFps)}）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
@@ -5832,6 +5840,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   )}
                   <p className="field-hint">{MOTION_PRESET_HINT}</p>
                 </div>
+                {pivotField}
                 {!keyframeAtPlayhead.live ? (
                   <p className="notice notice-warn" role="alert">
                     {clipOutsidePlayheadMessage(selected.startSec, clipEndSec(selected), "出ている", "置いて")}

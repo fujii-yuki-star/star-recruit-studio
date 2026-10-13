@@ -19,7 +19,7 @@ import { NoticeZone } from "../components/NoticeZone";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
-import { useTimelineStore } from "../store/timelineStore";
+import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { ProjectLoadError } from "../../domain/project/persistence";
 import { useNavigationGuard } from "../hooks/navigationGuard";
 import { CopyIcon, RotateFrameIcon,
@@ -55,6 +55,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
   const duplicateTimelineProject = useTimelineStore((s) => s.duplicateTimelineProject);
   const renameOpenTimelineProject = useTimelineStore((s) => s.renameOpenTimelineProject);
+  // ⚠️ **タイムライン形式の書き出し中も改名を止める**（0.5.2 出口監査）＝開いている文書の改名は書き出し中に断られ、
+  //   押せるのに「名前を変更できませんでした」だけが出ていた（次の行動が無い・§2-5）。場面形式の書き出しと同じく鉛筆を止める。
+  const timelineExporting = useTimelineStore((s) => isTimelineExportBusy(s.exportRun.phase));
   const deleteProject = useProjectStore((s) => s.deleteProject);
   // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
@@ -837,10 +840,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="btn btn-ghost btn-icon"
                       // 書き出し中は改名を止める（開いているプロジェクトの改名が project.json の保存と競合する・#570 レビュー）。
                       // store 側も no-op で守るが、鉛筆を無効化して「押せるのに効かない」を避ける（ADR-0026④）。
-                      disabled={isExporting}
+                      disabled={isExporting || timelineExporting}
                       onClick={() => startRename(p)}
                       aria-label={`「${p.projectName || "無題の動画"}」の名前を変更`}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
+                      title={isExporting || timelineExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
                     </button>
