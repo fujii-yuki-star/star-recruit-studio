@@ -36,6 +36,14 @@ describe('buildDescribeAssetMessages', () => {
   it('推測で固有名詞を書かないよう伝える', () => {
     expect(DESCRIBE_ASSET_SYSTEM_PROMPT).toContain('推測で会社名・人の名前・地名を書かない');
   });
+
+  // #1430＝フリー素材 19 枚の実測で、作業着を「白衣」と取り違え（採用動画で職種を誤って伝えうる）・表情を盛り・職種や場所まで言わなかった。
+  it('服装を見分け、表情を盛らず、職場の種類が分かれば書くよう伝える（#1430）', () => {
+    expect(DESCRIBE_ASSET_SYSTEM_PROMPT).toContain('作業着');
+    expect(DESCRIBE_ASSET_SYSTEM_PROMPT).toContain('白衣');
+    expect(DESCRIBE_ASSET_SYSTEM_PROMPT).toContain('笑っていなければ笑顔と書かない');
+    expect(DESCRIBE_ASSET_SYSTEM_PROMPT).toContain('職場の種類や場所');
+  });
 });
 
 describe('parseAssetDescription', () => {
