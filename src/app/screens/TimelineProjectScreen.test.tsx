@@ -9470,7 +9470,7 @@ describe("TimelineProjectScreen: 全体図の帯（#1319）", () => {
   });
 });
 
-// 部品の反転と動きの支点（ADR-0059・#1186）＝「見え方」の欄から直す。付けた部品では欄を開いておく。
+// 部品の反転と動きの支点（ADR-0059・#1186）＝反転は「見え方」、支点は「動き」の欄から直す（0.5.2 出口監査で動きの欄へ）。付けた部品では欄を開いておく。
 describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
   const withShape = (over: Record<string, unknown> = {}) => {
     open({
@@ -9479,8 +9479,9 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
   const openLook = () => {
-    if (!screen.queryByLabelText("左右反転")) fireEvent.click(screen.getByRole("button", { name: /見え方（色・重ね方・反転・動きの支点）/ }));
+    if (!screen.queryByLabelText("左右反転")) fireEvent.click(screen.getByRole("button", { name: /見え方（色・重ね方・反転）/ }));
   };
+
 
   it("左右反転・上下反転を入れ外しできる", () => {
     withShape();
@@ -9497,7 +9498,6 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
   it("動きの支点を選べる（足元・中心へ戻す）", () => {
     withShape();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    openLook();
     const select = screen.getByLabelText("動きの支点");
     fireEvent.change(select, { target: { value: "bottom" } });
     expect(useTimelineStore.getState().doc!.clips[0].pivot).toEqual({ x: 0.5, y: 1 });
@@ -9509,6 +9509,18 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
     withShape({ flipX: true });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect((screen.getByLabelText("左右反転") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("支点を付けた部品では、動きの欄を開いておく（見え方の欄は開かない）", () => {
+    localStorage.clear(); // 欄の開閉は覚えている（前の検査で開いた欄が開いたままにならないように）
+    withShape({ pivot: { x: 0.5, y: 1 } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const pivot = screen.getByLabelText("動きの支点") as HTMLSelectElement;
+    expect(pivot.value).toBe("bottom");
+    // 欄は <details>（畳んでも中身は在る）＝開いているかは details で見る。支点は「動き」の欄にある。
+    expect(pivot.closest("details")!.open).toBe(true);
+    expect(pivot.closest("details")!.textContent).toContain("本来の見た目からのずれ");
+    expect(screen.getByLabelText("左右反転").closest("details")!.open).toBe(false);
   });
 
   it("外の AI などが書いた半端な支点は「指定の位置」と出す（黙って中心に見せない）", () => {
