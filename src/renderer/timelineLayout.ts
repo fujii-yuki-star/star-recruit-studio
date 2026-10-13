@@ -349,18 +349,39 @@ export function templatePartAt(
     const clipId = item.id.slice(0, slash);
     const layerId = item.id.slice(slash + 1);
     if (!canDrillInto(clipId, layerId)) continue;
-    if (hitsItem(item, point)) return { clipId, layerId };
+    // ⚠️ **ゆがみ（反転・縦横の倍率）を戻してから当てる**（#1416）＝層は「ゆがめる前の位置」で持っているので、
+    //   そのまま当てると反転した部品では**映す前の位置**を押さないと入れない。
+    if (hitsItem(item, item.warp ? unwarpPoint(item.warp.matrix, point) : point)) return { clipId, layerId };
   }
   return null;
 }
 
-/** 入った層の**描かれている枠**（印を出す先）。`null`＝いま描かれていない。 */
+/**
+ * 入った層の**描かれている枠**（印を出す先）。`null`＝いま描かれていない。
+ * ゆがみ（反転・縦横の倍率・ADR-0059）が掛かっていれば `warp` に行列を添える（#1416）＝印も同じ行列で映す。
+ */
 export function templatePartRect(
   layout: SceneLayout,
   part: { clipId: string; layerId: string },
-): { x: number; y: number; w: number; h: number; rotation?: number } | null {
+): { x: number; y: number; w: number; h: number; rotation?: number; warp?: Affine } | null {
   const item = layout.items.find((it) => it.id === `${part.clipId}/${part.layerId}`);
-  return item ? { x: item.x, y: item.y, w: item.w, h: item.h, ...(item.rotation != null ? { rotation: item.rotation } : {}) } : null;
+  return item
+    ? {
+        x: item.x, y: item.y, w: item.w, h: item.h,
+        ...(item.rotation != null ? { rotation: item.rotation } : {}),
+        ...(item.warp ? { warp: item.warp.matrix } : {}),
+      }
+    : null;
+}
+
+/** ゆがみの行列の**逆**を点に当てる（描かれた位置 → ゆがめる前の位置）。潰れて逆が無いときは点をそのまま返す。 */
+function unwarpPoint(m: Affine, p: { x: number; y: number }): { x: number; y: number } {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  if (det === 0) return p;
+  const x = p.x - e;
+  const y = p.y - f;
+  return { x: (d * x - c * y) / det, y: (-b * x + a * y) / det };
 }
 
 /** その点がアイテムの中か（回っていれば回転を戻してから見る）。 */
