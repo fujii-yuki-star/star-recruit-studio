@@ -52,6 +52,7 @@ import { markerClock, markersInOrder, markerTimeEq } from "../../domain/timeline
 import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
+import { overlayWarpTransform } from "../canvasWarp";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
@@ -4306,7 +4307,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 top: `${(drilledRect.y / canvasDims.height) * 100}%`,
                 width: `${(drilledRect.w / canvasDims.width) * 100}%`,
                 height: `${(drilledRect.h / canvasDims.height) * 100}%`,
-                ...(drilledRect.rotation ? { transform: `rotate(${drilledRect.rotation}deg)` } : {}),
+                // 回転と、部品のゆがみ（反転・縦横の倍率）を描画と同じ順に映す（#1416）。
+                transform: overlayWarpTransform(drilledRect),
               }}
             />
           )}
