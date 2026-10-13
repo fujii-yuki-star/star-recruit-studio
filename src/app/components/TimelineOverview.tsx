@@ -112,6 +112,10 @@ export function TimelineOverview({
       tabIndex={0}
       data-testid="timeline-overview"
       onKeyDown={onKeyDown}
+      // ⚠️ **押しても焦点を取らない**（0.5.2 出口監査 ℹ️）＝取ると、押した後の ← → が再生位置ではなく帯を送り、
+      //   Home／End も先頭・最後へ飛ばなくなる（画面に何も出ない）。Premiere・Resolve の帯も押しただけでは焦点を持たない。
+      //   キーで送りたいときは Tab で焦点を当てる（`tabIndex=0` のまま）。
+      onMouseDown={(e) => e.preventDefault()}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         const before = getScrollPx();

@@ -1,6 +1,7 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
+import { CLIP_PIVOT_DEFAULT } from '../domain/timeline/pivot';
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
@@ -282,9 +283,9 @@ export function applyInterpolatedTransform(
   tr: InterpolatedTransform,
   pivot?: { x: number; y: number },
 ): void {
-  const px = pivot?.x ?? 0.5;
-  const py = pivot?.y ?? 0.5;
-  const centered = px === 0.5 && py === 0.5;
+  const px = pivot?.x ?? CLIP_PIVOT_DEFAULT.x;
+  const py = pivot?.y ?? CLIP_PIVOT_DEFAULT.y;
+  const centered = px === CLIP_PIVOT_DEFAULT.x && py === CLIP_PIVOT_DEFAULT.y;
   if (tr.scale != null) {
     const ow = item.w;
     const oh = item.h;

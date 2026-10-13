@@ -9,6 +9,7 @@
 // 道筋は**動きの支点**で描く（既定は部品の中心）＝動きの拡縮・回転は**支点まわり**（`applyInterpolatedTransform`・ADR-0059）
 // なので、支点は素の箱の支点に**位置のずれ（x/y）を足しただけ**の所にある（拡縮・回転の動きがあっても線は曲がらない）。
 // ⚠️ 支点を外した部品で**中心**を描くと、回転で中心が弧を描くのに線はまっすぐ＝線と実際の動きが割れる。
+import { pivotPointOf } from './pivot';
 import { interpolateKeyframes } from '../project/keyframes';
 import type { Keyframe } from '../project/types';
 import type { ClipBox } from './box';
@@ -47,11 +48,7 @@ export function motionPathOf(
   const posKeys = keyframes.filter((k) => (k.x != null || k.y != null) && k.timeSec >= 0 && k.timeSec <= durationSec);
   if (posKeys.length === 0) return null;
   // 支点（素の箱の向きで測る＝描画と同じ）。未指定＝中心。
-  const ox = ((pivot?.x ?? 0.5) - 0.5) * box.w;
-  const oy = ((pivot?.y ?? 0.5) - 0.5) * box.h;
-  const r = ((box.rotation ?? 0) * Math.PI) / 180;
-  const cx = box.x + box.w / 2 + ox * Math.cos(r) - oy * Math.sin(r);
-  const cy = box.y + box.h / 2 + ox * Math.sin(r) + oy * Math.cos(r);
+  const { x: cx, y: cy } = pivotPointOf({ x: box.x + box.w / 2, y: box.y + box.h / 2 }, pivot, box.w, box.h, box.rotation ?? 0);
   const centerAt = (t: number): { x: number; y: number } => {
     const tr = interpolateKeyframes(keyframes, t);
     return { x: cx + (tr.x ?? 0), y: cy + (tr.y ?? 0) };

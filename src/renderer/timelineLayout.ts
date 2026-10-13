@@ -9,6 +9,7 @@ import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { talkMotionAt } from '../domain/timeline/talkMotion';
+import { pivotPointOf } from '../domain/timeline/pivot';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
@@ -565,12 +566,8 @@ export function clipWarpOf(
   const flip = fx === 1 && fy === 1 ? undefined : scaleAround(center, rot, fx, fy);
   let squashM: Affine | undefined;
   if (sx !== 1 || sy !== 1) {
-    // 支点（素の箱の向きで測る＝`applyInterpolatedTransform` と同じ）。
-    const r = (rot * Math.PI) / 180;
-    const ox = ((clip.pivot?.x ?? 0.5) - 0.5) * box.w;
-    const oy = ((clip.pivot?.y ?? 0.5) - 0.5) * box.h;
-    const p = { x: center.x + ox * Math.cos(r) - oy * Math.sin(r), y: center.y + ox * Math.sin(r) + oy * Math.cos(r) };
-    squashM = scaleAround(p, rot, sx, sy);
+    // 支点（素の箱の向きで測る＝`applyInterpolatedTransform` と同じ）。動きの道筋と同じ関数で出す。
+    squashM = scaleAround(pivotPointOf(center, clip.pivot, box.w, box.h, rot), rot, sx, sy);
   }
   const matrix = flip && squashM ? composeAffine(squashM, flip) : (squashM ?? flip)!;
   return { key: `warp_${clip.id}`, matrix };

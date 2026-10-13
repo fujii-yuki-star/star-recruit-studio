@@ -6,6 +6,7 @@ import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
   TIMELINE_MIN_CLIP_SEC, VIDEO_HARD_MAX_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
+import { CLIP_PIVOT_DEFAULT } from './pivot';
 import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 // ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
@@ -1306,7 +1307,7 @@ export function setClipPivot(doc: TimelineProject, clipId: string, pivot: { x: n
   if (!isVisualClip(clip)) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const clamp = (v: number): number => Math.min(1, Math.max(0, v));
-  const next = pivot == null || (clamp(pivot.x) === 0.5 && clamp(pivot.y) === 0.5) ? null : { x: clamp(pivot.x), y: clamp(pivot.y) };
+  const next = pivot == null || (clamp(pivot.x) === CLIP_PIVOT_DEFAULT.x && clamp(pivot.y) === CLIP_PIVOT_DEFAULT.y) ? null : { x: clamp(pivot.x), y: clamp(pivot.y) };
   const cur = clip.pivot ?? null;
   if (next == null ? cur == null : cur != null && cur.x === next.x && cur.y === next.y) return ok(doc);
   const copy = { ...clip };
