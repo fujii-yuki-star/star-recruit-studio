@@ -11,6 +11,7 @@ import { PlayIcon, StopIcon } from "../components/icons";
 import { BrandKitSection } from "../components/BrandKitSection";
 import { TroubleLogSection } from "../components/TroubleLogSection";
 import { ReadingDictSection } from "../components/ReadingDictSection";
+import { ExtensionPackSection } from "../components/ExtensionPackSection";
 import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
@@ -555,6 +556,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
         <ReadingDictSection />
         {/* 持ち込みフォント（ADR-0038・#261）。会社の見た目が既定に使うので、その手前に置く。 */}
         <UserFontSection />
+        {/* 拡張パック（ADR-0060）＝見た目パターンや機能を後から足す。 */}
+        <ExtensionPackSection />
         {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
         <BrandKitSection onNavigate={onNavigate} />
 

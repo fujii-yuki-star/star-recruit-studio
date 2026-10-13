@@ -65,6 +65,12 @@ export async function showOpenLibraryAssetsDialog(): Promise<string[]> {
   return typeof picked === 'string' ? [picked] : [];
 }
 
+/** 拡張パック（`.starpack`）を1つ選ぶ（ADR-0060）。キャンセル時は null。 */
+export async function showOpenExtensionPackDialog(): Promise<string | null> {
+  const picked = await open({ multiple: false, directory: false, filters: [{ name: '拡張パック', extensions: ['starpack'] }] });
+  return typeof picked === 'string' ? picked : null;
+}
+
 /**
  * 字幕ファイルの保存先を選ぶ（ADR-0055 決定4）。キャンセル時は null。
  * 形式は選んだファイルの拡張子で決まる（種類の選び分けを先頭の .srt にしておく＝Windows の再生ソフトで広く読める）。

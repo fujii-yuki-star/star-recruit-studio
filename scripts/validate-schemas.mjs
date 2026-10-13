@@ -29,6 +29,8 @@ const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')))
 // タイムライン形式（ADR-0032・#627）。project の $defs を $ref で共有するので、vProject を先に compile して
 // $id を ajv に登録しておく必要がある（上の行順に依存＝入れ替えると $ref が解決できず落ちる）。
 const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
+// 拡張パックの manifest（ADR-0060）。
+const vPack = ajv.compile(load(join(base, 'schemas/extension-pack.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
 // ⚠️ **宣言の側に書く**（PR #1238 レビュー 🟡）＝使う所で `/** @type {...} */ (cases)` と
@@ -40,6 +42,7 @@ const cases = [
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
   ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
   ['timeline-project.sample.json', vTimeline, fx('timeline-project.sample.json')],
+  ['extension-pack.sample.json', vPack, fx('extension-pack.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];
@@ -593,6 +596,31 @@ for (const [desc, data] of aiAccept) {
 }
 for (const [desc, data] of aiReject) {
   if (!vPlan(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
+// 拡張パックの manifest（ADR-0060）＝**断る側も固定する**（受け入れだけだと、決まりを消しても赤くならない）。
+const packBase = load(fx('extension-pack.sample.json'));
+const withPack = (over) => ({ ...structuredClone(packBase), ...over });
+const packReject = [
+  ['pack: packId に __ は使えない（中の id の境目が割れる）', withPack({ packId: 'a__b' })],
+  ['pack: packId は英小文字で始める', withPack({ packId: 'Office' })],
+  ['pack: 中身が空は拒否', withPack({ contents: {} })],
+  ['pack: 知らない中身の種類（プログラム）は拒否', withPack({ contents: { scripts: [{ file: 'a.js' }] } })],
+  ['pack: パスに .. は拒否', withPack({ files: [{ path: '../x.json', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの先頭の / は拒否', withPack({ files: [{ path: '/x.json', sha256: '0'.repeat(64) }] })],
+  ['pack: SHA-256 は小文字16進64字', withPack({ files: [{ path: 'x.json', sha256: 'XYZ' }] })],
+  ['pack: 権利が空は拒否', withPack({ licenses: [] })],
+  ['pack: 版は x.y.z', withPack({ version: '1.0' })],
+  ['pack: 知らない欄は拒否', withPack({ install: 'run.exe' })],
+  ['pack: packId の末尾の _ は拒否（境目が割れる）', withPack({ packId: 'ab_' })],
+  ['pack: パスの . の部分は拒否', withPack({ files: [{ path: 'a/./b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの空の部分は拒否', withPack({ files: [{ path: 'a//b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの末尾の / は拒否', withPack({ files: [{ path: 'a/', sha256: '0'.repeat(64) }] })],
+  ['pack: manifest.json を中身に数えない', withPack({ files: [{ path: 'manifest.json', sha256: '0'.repeat(64) }] })],
+];
+for (const [desc, data] of packReject) {
+  if (!vPack(data)) console.log(`PASS  must-reject  ${desc}`);
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
 }
 

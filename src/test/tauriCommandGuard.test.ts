@@ -55,7 +55,8 @@ describe("画面側が呼ぶ Rust の口は、登録されている", () => {
     // ⚠️ **+1**（ADR-0053）＝`local_ai_assist`（編集の途中の手伝い）。
     // ⚠️ **+3**（ADR-0058）＝transcribe_available／transcribe_audio／transcribe_cancel。
     // ⚠️ **−1**（#1396）＝雛形の `greet` を外した（画面から呼ぶ所が無かった）。
-    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(87);
+    // ⚠️ **+6**（ADR-0060）＝pack_inspect／pack_install／pack_list／pack_uninstall／pack_read_text／pack_read_data_url。
+    expect(registeredNames().size, "Rust に登録された口の数が変わった（足したら数も直す）").toBe(93);
     expect(invokedNames().size, "画面側が呼ぶ口の数が変わった（足したら数も直す）").toBeGreaterThanOrEqual(70);
   });
 

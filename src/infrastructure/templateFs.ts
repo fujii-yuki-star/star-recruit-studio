@@ -4,6 +4,7 @@
 // 読込元: 同梱標準パック（既定）＋ ユーザーが選んだパックファイル。設定は validateVideoPlan と揃える。
 // 検証関数は scripts/compile-validators.mjs が template.schema.json から事前コンパイル（#156・実行時 eval なし）。
 // 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
+import { templateClaimsPackIds } from '../domain/pack/extensionPack';
 import { validateTemplate as validate } from '../domain/validation/generated/validators.js';
 import type { Template } from '../domain/template/types';
 import { requiredFieldsForLayerType } from '../domain/template/layerOps';
@@ -135,5 +136,10 @@ export async function parseTemplateFiles(files: File[]): Promise<ParsedTemplateP
     else raw.push(data);
   }
   const parsed = parseTemplatePack(raw);
-  return { templates: parsed.templates, rejected: [...rejected, ...parsed.rejected] };
+  // ⚠️ **拡張パックの名前を名乗る・借りる見た目パターンは断る**（ADR-0060・PR レビュー 🟡）＝パックの中身はパックからだけ入る。
+  const ok = parsed.templates.filter((t) => !templateClaimsPackIds(t));
+  const claimed = parsed.templates
+    .filter((t) => templateClaimsPackIds(t))
+    .map((t) => ({ templateId: t.templateId, errors: ['拡張パックの見た目パターンと同じ名前は取り込めません'] }));
+  return { templates: ok, rejected: [...rejected, ...parsed.rejected, ...claimed] };
 }

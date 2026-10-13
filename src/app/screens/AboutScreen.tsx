@@ -6,6 +6,7 @@ import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/exp
 import { usedVoiceCredits } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
+import { PACK_CONTENT_LABEL } from "../uiLabels";
 import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../domain/bgm/bgmCatalog";
 
 /** 同梱のローカル AI のライセンス本文の置き場所（インストール先の中の相対パス・#1289）。 */
@@ -86,6 +87,7 @@ export function AboutScreen() {
   // この動画で実際に使っている声を全て列挙（#251）。掛け合いの行ごと話者＋単一 narration の既定話者を重複なく。
   // プロジェクト未読込（場面なし）のときは選択話者のみになる（usedVoiceCredits の既定）。
   const scenes = useProjectStore((s) => s.scenes);
+  const packs = useProjectStore((s) => s.packs);
   const usedCredits = usedVoiceCredits(scenes, getVoicevoxSpeaker());
   // バージョンはアプリ本体（tauri.conf.json）を単一の参照元にする＝About のためだけの二重管理をなくす（#413）。
   const [version, setVersion] = useState("");
@@ -163,6 +165,27 @@ export function AboutScreen() {
               );
             })}
           </div>
+
+          {/* 入っている拡張パック（ADR-0060 決定6）＝パックが書いた中身ごとの権利と表記を、同梱物と同じ並びに出す。 */}
+          {packs.length > 0 && (
+            <div className="col gap-sm mt" data-testid="about-pack-credits">
+              <span className="text-sm text-muted">入っている拡張パック</span>
+              {packs.map((m) => (
+                <div className="list-item" key={m.packId} style={{ cursor: "default" }}>
+                  <div className="grow">
+                    <strong>{m.name}</strong>
+                    <div className="text-faint text-sm">{m.publisher}（{m.version}）</div>
+                    {m.licenses.map((l) => (
+                      <div className="text-faint text-sm" key={l.target}>
+                        {PACK_CONTENT_LABEL[l.target]}：{l.license}
+                        {l.credit ? `（${l.credit}）` : ""}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ⚠️ 動画側の出し方は選べる（ADR-0025・#359）＝「表示されます」と言い切ると事実と違う。
               この画面のクレジット一覧は必須のまま（ADR-0025）＝ここを条件つきにはしない。 */}
