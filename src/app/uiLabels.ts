@@ -504,6 +504,7 @@ export function formatDiskSize(bytes: number): string {
 export const bakeNoteMessage: Record<BakeNoteCode, string> = {
   BAKE_DIALOGUE_SUBTITLE_SKIPPED: "セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください",
   BAKE_VIDEO_START_TIMING_SKIPPED: "動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください",
+  BAKE_VIDEO_AUDIO_TRANSITION: "場面が切り替わる所で、動画の元の音は小さくならずに次の場面と重なります。気になるときは、作ったあとにその動画の元の音を小さくしてください",
 };
 
 /** 持っていけないもの1件の案内＋対象の場面（例:「場面2・5 …」）。 */

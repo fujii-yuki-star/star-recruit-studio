@@ -42,6 +42,8 @@ import type { Group } from '../group/types';
 import type { Template } from '../template/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
+import { clipBaseVolume } from './audio';
+import { placementOriginalAudio, videoPlacementsOfClip } from './video';
 import { normalizeDeg } from '../constants';
 import { textKeyOfLayer } from '../template/layerOps';
 
@@ -70,6 +72,11 @@ export const BAKE_NOTE_CODE = {
   dialogueSubtitle: 'BAKE_DIALOGUE_SUBTITLE_SKIPPED',
   /** 動画の差し込み口の「再生を始めるタイミング」（ADR-0027）。タイムライン形式に置き場が無い。 */
   videoStartTiming: 'BAKE_VIDEO_START_TIMING_SKIPPED',
+  /**
+   * 切り替えで**出ていく場面の動画の元の音**（#1410）。場面形式の書き出しは重なりの間に下げるが、タイムライン形式の
+   * 動画の元の音は一定の大きさしか持てない（フェード・音量の変化の語彙が無い）＝下がらずに重なる。
+   */
+  videoAudioTransition: 'BAKE_VIDEO_AUDIO_TRANSITION',
 } as const;
 
 export type BakeNoteCode = (typeof BAKE_NOTE_CODE)[keyof typeof BAKE_NOTE_CODE];
@@ -677,6 +684,9 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     const voiceClipIdByLine = new Map<string, string>();
     // 単独読み上げは窓が場面いっぱい＝**声の部品は実際の音声の長さに合わせる**（#1404・タイムラインで声を作ったときと同じ）。
     const narrationSec = hasExplicitLines(scene) ? undefined : options.narrationDurationFor?.(scene);
+    // 切り替えで**出ていく**重なり（#1410）＝場面形式の書き出しは、この間に出ていく場面の音を直線で下げる
+    //（`acrossfade` の `c1=tri`・ADR-0009 追補）。声の部品には同じ下がり方を音量の変化として写す。
+    const outgoingSec = steps[i]?.durationSec ?? 0;
     for (const w of windows) {
       const startSec = start + w.startSec;
       const voiceSec = narrationSec != null && narrationSec > 0 ? Math.min(w.durationSec, narrationSec) : w.durationSec;
@@ -684,7 +694,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
       const column = audio.take(1, startSec, endSec);
       const voiceClipId = newClipId();
       voiceClipIdByLine.set(w.line.lineId, voiceClipId);
-      clips.push({
+      const voiceClip: TimelineClip = {
         id: voiceClipId,
         kind: TIMELINE_CLIP_KIND.voice,
         trackId: trackIdFor(tracks, column, TRACK_KIND.audio),
@@ -692,7 +702,9 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
         durationSec: voiceSec,
         voice: voiceFromLine(w.line),
         ...(scene.audioMix?.narrationVolume != null ? { volume: scene.audioMix.narrationVolume } : {}),
-      });
+      };
+      const fade = outgoingFadePoints(startSec, voiceSec, end, outgoingSec, clipBaseVolume(voiceClip, { voiceSettings: project.voiceSettings }));
+      clips.push(fade ? { ...voiceClip, volumePoints: fade } : voiceClip);
     }
 
     // 行ごとの字幕クリップ＝**同じ行の読み上げへ連動**させる（決定24）＝時間も文言も追従する。
@@ -866,6 +878,18 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
 
   if (dialogueSubtitleScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: dialogueSubtitleScenes });
   if (videoStartTimingScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.videoStartTiming, sceneNumbers: videoStartTimingScenes });
+  // 出ていく場面で動画の元の音が鳴っていれば知らせる（#1410）＝重なりの間、下がらずに鳴る。
+  // ⚠️ **鳴るかは焼き上がりの文書で見る**（`placementOriginalAudio`＝描画・書き出しと同じ判定）。
+  const built = doc();
+  const audioTransitionScenes = scenes.flatMap((_s, i) => {
+    if ((steps[i]?.durationSec ?? 0) <= 0) return [];
+    const own = built.clips.filter((c) => c.startSec === starts[i] && c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio);
+    const sounds = own.some((c) =>
+      videoPlacementsOfClip(built, c, { ...(options.templateOf ? { templateOf: options.templateOf } : {}) }).some((p) => placementOriginalAudio(built, p) != null),
+    );
+    return sounds ? [i + 1] : [];
+  });
+  if (audioTransitionScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.videoAudioTransition, sceneNumbers: audioTransitionScenes });
 
   return { doc: doc(), notes, scenes };
 }
@@ -947,4 +971,28 @@ export function bakedAssets(
     if (bgm?.enabled && bgm.bundledBgmId == null && bgm.assetId) used.add(bgm.assetId);
   }
   return project.assets.filter((a) => used.has(a.assetId));
+}
+
+/**
+ * 切り替えで**出ていく**重なり（場面の終わり−`d`〜終わり）で、声を直線で 0 まで下げる音量の点（#1410）。
+ * 場面形式の書き出し（`acrossfade` の `c1=tri`）と同じ下がり方。重ならなければ `undefined`（点を持たない＝従来どおり）。
+ * 点は**クリップ先頭からの秒と音量**（`VolumePoint`）。重なりの前は `base` のまま（最初の点の値で伸びる）。
+ */
+export function outgoingFadePoints(
+  clipStartSec: number,
+  clipDurationSec: number,
+  sceneEndSec: number,
+  overlapSec: number,
+  base: number,
+): { timeSec: number; volume: number }[] | undefined {
+  if (overlapSec <= 0) return undefined;
+  const fadeStart = sceneEndSec - overlapSec;
+  const clipEnd = clipStartSec + clipDurationSec;
+  if (clipEnd <= fadeStart) return undefined;
+  const gain = (t: number): number => Math.min(1, Math.max(0, (sceneEndSec - t) / overlapSec));
+  const t0 = Math.max(clipStartSec, fadeStart);
+  return [
+    { timeSec: t0 - clipStartSec, volume: base * gain(t0) },
+    { timeSec: clipDurationSec, volume: base * gain(clipEnd) },
+  ];
 }

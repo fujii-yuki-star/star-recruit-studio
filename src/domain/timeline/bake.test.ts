@@ -5,13 +5,13 @@ import { presetKeyframes } from '../project/animationPresets';
 import { transitionTimeline } from '../project/sceneTransitions';
 import { planBgmMix, resolveBgmExportRuns } from '../project/bgmExport';
 import { narrationDurationFromAudio } from '../project/narrationLines';
-import { BGM_CROSSFADE_SEC } from '../constants';
+import { BGM_CROSSFADE_SEC, NARRATION_VOLUME } from '../constants';
 import { setKeyframe } from './keyframeEdit';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
 import { timelineExportBlockers } from './export';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, sceneIdsBetween, scenesForBakeRange } from './bake';
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, outgoingFadePoints, sceneIdsBetween, scenesForBakeRange } from './bake';
 import type { BakeOptions } from './bake';
 import { validateTimelineDoc } from './validateTimelineDoc';
 
@@ -1297,5 +1297,61 @@ describe('narrationDurationFromAudio（#1404）', () => {
     expect(narrationDurationFromAudio(s, { scene_001: wav(0) })).toBeUndefined(); // 長さ0の声は使わない（場面の尺のまま）
     expect(narrationDurationFromAudio({ ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } }, { scene_001: wav(2.5) })).toBeUndefined();
     expect(narrationDurationFromAudio({ ...s, lines: [{ lineId: 'line_001', text: 'い', status: NARRATION_STATUS.generated }] }, { scene_001: wav(2.5) })).toBeUndefined();
+  });
+});
+
+// 切り替えで出ていく場面の音（#1410）＝場面形式の書き出しは重なりの間に出ていく場面の音を直線で下げる（acrossfade の c1=tri）。
+describe('出ていく場面の音の下げ方（#1410）', () => {
+  it('outgoingFadePoints：重なりの始まりから場面の終わりへ直線で 0 まで下げる', () => {
+    // 場面の終わり 6・重なり 0.5・声は 0〜6 秒。
+    expect(outgoingFadePoints(0, 6, 6, 0.5, 1)).toEqual([{ timeSec: 5.5, volume: 1 }, { timeSec: 6, volume: 0 }]);
+    // 声が重なりの途中（5.75 秒）で終わる＝そこでは半分。
+    expect(outgoingFadePoints(0, 5.75, 6, 0.5, 0.8)).toEqual([{ timeSec: 5.5, volume: 0.8 }, { timeSec: 5.75, volume: 0.4 }]);
+    // 重なりの途中から始まる声＝始まりから下がった値。
+    expect(outgoingFadePoints(5.75, 0.25, 6, 0.5, 1)).toEqual([{ timeSec: 0, volume: 0.5 }, { timeSec: 0.25, volume: 0 }]);
+  });
+  it('outgoingFadePoints：重ならない・切り替えが無いなら点を持たない（従来どおり）', () => {
+    expect(outgoingFadePoints(0, 5, 6, 0.5, 1)).toBeUndefined();
+    expect(outgoingFadePoints(0, 6, 6, 0, 1)).toBeUndefined();
+  });
+
+  const fade = { in: TRANSITION_TYPE.fade, out: TRANSITION_TYPE.fade, durationSec: 0.5 };
+  const two = (over1: Partial<Scene> = {}, over2: Partial<Scene> = {}, extra: Partial<Project> = {}) =>
+    project({
+      parts: [{ partId: 'part_001', title: 'パート1', order: 1, sceneIds: ['scene_001', 'scene_002'] }],
+      scenes: [scene('scene_001', { transition: fade, ...over1 }), scene('scene_002', { order: 2, transition: fade, ...over2 })],
+      ...extra,
+    });
+
+  it('出ていく場面の声に、重なりの間だけ下げる音量の点を付ける（入ってくる側・最後の場面には付けない）', () => {
+    const p = two({ narration: { text: 'いち', status: NARRATION_STATUS.none } }, { narration: { text: 'に', status: NARRATION_STATUS.none } });
+    const voices = bakeTimelineProject(p, opts()).doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice);
+    expect(voices).toHaveLength(2);
+    expect(voices[0].volumePoints).toEqual([{ timeSec: 5.5, volume: NARRATION_VOLUME }, { timeSec: 6, volume: 0 }]);
+    expect(voices[1].volumePoints).toBeUndefined();
+  });
+
+  it('場面の声の大きさを指定していれば、その大きさから下げる', () => {
+    const p = two({ narration: { text: 'いち', status: NARRATION_STATUS.none }, audioMix: { narrationVolume: 0.6 } });
+    const voice = bakeTimelineProject(p, opts()).doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.voice)!;
+    expect(voice.volumePoints).toEqual([{ timeSec: 5.5, volume: 0.6 }, { timeSec: 6, volume: 0 }]);
+  });
+
+  it('切り替えが無ければ点を付けない', () => {
+    const none = { in: TRANSITION_TYPE.none, out: TRANSITION_TYPE.none, durationSec: 0 };
+    const p = two({ narration: { text: 'いち', status: NARRATION_STATUS.none }, transition: none }, { transition: none });
+    const voice = bakeTimelineProject(p, opts()).doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.voice)!;
+    expect(voice.volumePoints).toBeUndefined();
+  });
+
+  it('出ていく場面で動画の元の音が鳴るなら知らせる（タイムライン形式では下げられない）', () => {
+    const asset = { assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'assets/v.mp4', metadata: { hasAudio: true }, clip: { useOriginalAudio: true } } as unknown as Project['assets'][number];
+    const p = two({ assetRefs: { mainVisual: 'asset_001' } }, { assetRefs: { mainVisual: 'asset_001' } }, { assets: [asset] });
+    expect(bakeTimelineProject(p, opts()).notes).toEqual([{ code: BAKE_NOTE_CODE.videoAudioTransition, sceneNumbers: [1] }]);
+  });
+
+  it('元の音を鳴らさない動画・切り替えの無い場面なら知らせない', () => {
+    const silent = { assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'assets/v.mp4', metadata: { hasAudio: true } } as unknown as Project['assets'][number];
+    expect(bakeTimelineProject(two({ assetRefs: { mainVisual: 'asset_001' } }, {}, { assets: [silent] }), opts()).notes).toEqual([]);
   });
 });
