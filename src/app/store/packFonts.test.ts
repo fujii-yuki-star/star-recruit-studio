@@ -95,9 +95,9 @@ describe("パックの文字の形を一覧へ合流する", () => {
 
   it("持ち込みの一覧が読めないときも、パックの字は選ぶ一覧に出る（「調べたか」は変えない）", async () => {
     fx.userFonts = null;
+    await useProjectStore.getState().refreshUserFonts(); // 先に「読めない」が分かってから
     fx.manifests = [fontPack("office")];
-    await useProjectStore.getState().loadPacks();
-    await useProjectStore.getState().refreshUserFonts();
+    await useProjectStore.getState().loadPacks(); // パックを読む
     const s = useProjectStore.getState();
     expect(s.userFontsUnreadable).toBe(true);
     expect(s.userFonts.map((f) => f.id)).toEqual(["pack_office__mincho"]);

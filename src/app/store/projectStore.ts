@@ -3035,7 +3035,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（案内の「取り込み直す」も同じ目録を通るので必ず失敗＝行き止まり・§2-5）。
     // ⚠️ **起動直後の「まだ調べていない」（`userFontIds: null`）とも別**＝あちらは待てば埋まるので
     // 止めない。読めなかったことは別の印で持ち、公開前チェックがそう言って止める。
-    if (list == null) { set({ userFontsUnreadable: true, userFonts: mergeFontList(get().userFonts, get().packs) }); return; }
+    if (list == null) { set({ userFontsUnreadable: true }); return; }
     set({ userFontsUnreadable: false });
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
