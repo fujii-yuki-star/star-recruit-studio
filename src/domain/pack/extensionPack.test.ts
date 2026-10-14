@@ -246,26 +246,37 @@ describe('声（段階3）', () => {
     expect(parsePackManifest(JSON.stringify(withVoices([v({ file: 'v/aoi.onnx' })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
   });
 
-  it('パック同士で番号が重なれば、後のパックの声は足さず名前を返す', async () => {
-    const { packVoiceCharacters } = await import('./extensionPack');
+  it('採るかどうかは Rust の結果（accepted）に従い、足さなかった声のあるパックの名前を返す', async () => {
+    const { packVoiceCharacters, packVoiceRefKey } = await import('./extensionPack');
     const a = withVoices([v()], { packId: 'a', name: 'パックA' });
     const b = withVoices([v({ character: 'べつ' })], { packId: 'b', name: 'パックB' });
-    const c = withVoices([v({ character: 'みどり', styles: [{ speaker: 9100, label: 'ノーマル' }] })], { packId: 'c', name: 'パックC' });
-    expect(packVoiceCharacters([a, b, c])).toEqual({
-      characters: [
-        { character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] },
-        { character: 'みどり', styles: [{ speaker: 9100, label: 'ノーマル' }] },
-      ],
+    expect(packVoiceCharacters([a, b], new Set([packVoiceRefKey('a', 'aoi')]))).toEqual({
+      characters: [{ character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }],
       skipped: ['パックB'],
     });
+    // 音声ソフトが無い（ブラウザ開発）＝書かれた声を全部足す
+    expect(packVoiceCharacters([a, b], null).characters.map((c) => c.character)).toEqual(['あおい', 'べつ']);
   });
 
-  it('声のファイルの組の名前は、中身（SHA-256）が変われば変わり、声の無いパックでは空', async () => {
+  it('声のファイルの組の名前は、中身（SHA-256）が変われば変わり、採らなかった声と声の無いパックは含めない', async () => {
     const { packVoiceFilesKey } = await import('./extensionPack');
     const a = withVoices([v()], { packId: 'a' });
     const a2 = withVoices([v()], { packId: 'a', files: [{ path: 'v/aoi.vvm', sha256: 'b'.repeat(64) }] });
-    expect(packVoiceFilesKey([a])).not.toBe(packVoiceFilesKey([a2]));
-    expect(packVoiceFilesKey([a])).toBe(packVoiceFilesKey([a]));
-    expect(packVoiceFilesKey([manifest()])).toBe('');
+    expect(packVoiceFilesKey([a], null)).not.toBe(packVoiceFilesKey([a2], null));
+    expect(packVoiceFilesKey([a], null)).toBe(packVoiceFilesKey([a], null));
+    expect(packVoiceFilesKey([a], new Set())).toBe('');
+    expect(packVoiceFilesKey([manifest()], null)).toBe('');
   });
+
+  it('外す前の数え上げ：そのパックの声の番号を使っている動画を見つける（番号の頭が同じだけの別の番号は数えない）', async () => {
+    const { projectUsesPackVoice } = await import('./extensionPack');
+    const a = withVoices([v({ styles: [{ speaker: 9001, label: 'ノーマル' }, { speaker: 9003, label: 'あまあま' }] })]);
+    expect(projectUsesPackVoice('{"lines":[{"speaker": 9003}]}', a)).toBe(true);
+    expect(projectUsesPackVoice('{"voice":{"speaker":9001,"text":"x"}}', a)).toBe(true);
+    expect(projectUsesPackVoice('{"lines":[{"speaker":90011}]}', a)).toBe(false);
+    expect(projectUsesPackVoice('{"lines":[{"speaker":3}]}', a)).toBe(false);
+    expect(projectUsesPackVoice('{"lines":[{"speaker":9001}]}', manifest())).toBe(false);
+  });;
+
+
 });

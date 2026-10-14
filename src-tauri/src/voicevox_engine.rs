@@ -1,6 +1,7 @@
 // VOICEVOX ENGINE（ローカル HTTP サーバ）の同梱・自動起動・自動終了（ADR-0005・#149）。
 // 同梱した ENGINE（resource_dir/voicevox_engine/run[.exe]）を空きポートで起動し、アプリ終了時に終了する。
 // バイナリが同梱されていなければ何もしない＝従来どおり手動起動の ENGINE／設定の接続先へフォールバック（dev/CI も不変）。
+use crate::packs::DeclaredVoice;
 use crate::proc::no_window_command;
 use std::fs;
 use std::net::TcpListener;
@@ -24,7 +25,11 @@ impl EngineState {
 
     fn store(&self, child: Child, base_url: String) {
         if let Ok(mut g) = self.child.lock() {
-            *g = Some(child);
+            // ⚠️ **前のプロセスが残っていたら止めてから置く**＝上書きすると持ち手を失い、終了時にも止められない。
+            if let Some(mut old) = g.replace(child) {
+                let _ = old.kill();
+                let _ = old.wait();
+            }
         }
         if let Ok(mut g) = self.base_url.lock() {
             *g = Some(base_url);
@@ -68,14 +73,63 @@ fn link_or_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::copy(src, dst).map(|_| ())
 }
 
+/// 置き場の中身の「名前」（並べるファイルの名前・大きさ・更新時刻）。同じなら組み直さない。
+fn voicelib_signature(engine_dir: &Path, voices: &[DeclaredVoice]) -> String {
+    let stamp = |p: &Path| {
+        fs::metadata(p)
+            .map(|m| {
+                let t = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                format!("{}:{t}", m.len())
+            })
+            .unwrap_or_default()
+    };
+    let mut lines = Vec::new();
+    for dir in [engine_dir.to_path_buf(), engine_dir.join("model")] {
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_file() {
+                    lines.push(format!("{}={}", p.display(), stamp(&p)));
+                }
+            }
+        }
+    }
+    for v in voices {
+        lines.push(format!(
+            "pack_{}__{}={}",
+            v.pack_id,
+            v.voice_id,
+            stamp(&v.path)
+        ));
+    }
+    lines.sort();
+    lines.join("\n")
+}
+
+const VOICELIB_SIGNATURE: &str = ".contents";
+
 /// 同梱の声とパックの声を1つの置き場に並べる（ADR-0060 決定7 追補＝`--voicelib_dir` は1つしか読まない）。
-/// 置き場は `<out>/<ENGINE 直下の DLL>` と `<out>/model/*.vvm`。毎回作り直す（外したパックの声を残さない）。
+/// 置き場は `<out>/<ENGINE 直下の DLL>` と `<out>/model/*.vvm`。**中身が前と同じなら組み直さない**（起動を待たせない）。
 /// ⚠️ **パックの声はコピー**（ハードリンクにしない）＝音声ソフトが開いている間は同じ実体を消せず、パックを外せなくなる。
+/// ⚠️ 置き場のファイル名 `pack_<packId>__<voiceId>.vvm` は 11 §2 の名前空間（`packIdPrefix`）と同じ形＝packId に `__` が無いので重ならない。
 pub(crate) fn build_voicelib(
     engine_dir: &Path,
     out: &Path,
-    voices: &[(String, String, PathBuf)],
+    voices: &[DeclaredVoice],
 ) -> std::io::Result<()> {
+    let sig = voicelib_signature(engine_dir, voices);
+    if fs::read_to_string(out.join(VOICELIB_SIGNATURE))
+        .ok()
+        .as_deref()
+        == Some(sig.as_str())
+    {
+        return Ok(());
+    }
     if out.exists() {
         fs::remove_dir_all(out)?;
     }
@@ -97,22 +151,41 @@ pub(crate) fn build_voicelib(
             link_or_copy(&p, &model.join(e.file_name()))?;
         }
     }
-    for (pack_id, voice_id, src) in voices {
-        fs::copy(src, model.join(format!("pack_{pack_id}__{voice_id}.vvm")))?;
+    for v in voices {
+        fs::copy(
+            &v.path,
+            model.join(format!("pack_{}__{}.vvm", v.pack_id, v.voice_id)),
+        )?;
     }
+    // ⚠️ **名前は最後に書く**＝途中で失敗したら名前が無いので、次は必ず組み直す。
+    fs::write(out.join(VOICELIB_SIGNATURE), sig)?;
     Ok(())
 }
 
+/// 起こし直しを1本ずつ通す（重なると、先に起こしたプロセスの持ち手を失い、終了時にも止められない）。
+static RESTART_LOCK: Mutex<()> = Mutex::new(());
+
 /// 音声ソフトを起こし直す（拡張パックの声を入れた・外したあと＝段階3）。
 /// ⚠️ **止めてから置き場を組み直す**＝動いている間は置き場の声のファイルが開かれていて消せない。
+/// ⚠️ **パックの声を渡せなかった・起こせなかったら失敗として返す**（画面が `VOICE_ENGINE_RESTART_FAILED` を出す）。
+///   渡せなかったときも同梱の声だけでは起こしておく（声が全部使えなくなる状態を作らない）。
 #[tauri::command]
 pub async fn restart_voice_engine(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         app.state::<EngineState>().shutdown();
-        start_bundled_engine(&app);
+        match start_engine(&app) {
+            Ok(EngineStart::Started { packs_ok: true }) | Ok(EngineStart::NotBundled) => Ok(()),
+            _ => Err(crate::messages::VOICE_ENGINE_RESTART_FAILED.to_string()),
+        }
     })
     .await
-    .map_err(|_| crate::messages::VOICE_ENGINE_RESTART_FAILED.to_string())
+    .map_err(|_| crate::messages::VOICE_ENGINE_RESTART_FAILED.to_string())?
+}
+
+/// 同梱された ENGINE の置き場（resource_dir/voicevox_engine）。実行ファイルが無ければ None。
+pub(crate) fn bundled_engine_dir(app: &AppHandle) -> Option<PathBuf> {
+    bundled_engine_exe(app).and_then(|e| e.parent().map(Path::to_path_buf))
 }
 
 /// 同梱された ENGINE 実行ファイル（resource_dir/voicevox_engine/run[.exe]）。無ければ None。
@@ -122,18 +195,36 @@ fn bundled_engine_exe(app: &AppHandle) -> Option<PathBuf> {
     exe.exists().then_some(exe)
 }
 
-/// 同梱 ENGINE を空きポートで起動する。同梱が無ければ何もしない（手動起動／設定の接続先へフォールバック）。
+enum EngineStart {
+    /// 同梱が無い（開発時・未配置）。
+    NotBundled,
+    /// 起こした。`packs_ok`＝入っているパックの声を（あれば）渡せた。
+    Started { packs_ok: bool },
+}
+
+/// 同梱 ENGINE を空きポートで起動する（アプリの起動時）。同梱が無ければ何もしない（手動起動／設定の接続先へフォールバック）。
 /// 起動完了（モデル読込）には数秒かかるため、直後の音声作成が早すぎると失敗しうる（再試行で回復）。
+/// ⚠️ **パックの声があると置き場を組む**（初回や別ドライブでは大きなコピーになりうる）＝窓の起動を待たせないよう別の糸で起こす。
 pub fn start_bundled_engine(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = start_engine(&app) {
+            crate::tlog!("voicevox", "同梱エンジンの起動に失敗: {e}");
+        }
+    });
+}
+
+fn start_engine(app: &AppHandle) -> Result<EngineStart, String> {
     let Some(exe) = bundled_engine_exe(app) else {
-        return; // 同梱なし（開発時・未配置）＝既定/設定の接続先を使う。
+        return Ok(EngineStart::NotBundled); // 同梱なし（開発時・未配置）＝既定/設定の接続先を使う。
     };
     let Some(port) = pick_free_port() else {
         crate::tlog!(
             "voicevox",
             "空きポートの確保に失敗。同梱エンジンの起動を見送ります。"
         );
-        return;
+        return Err("port".into());
     };
     // Windows: GUI アプリ（windows_subsystem=windows）からコンソール向けの run.exe を起こすと、
     // 継承するコンソールが無いため新しい窓が開く。抑止は入口（`proc::no_window_command`）が持つ。
@@ -142,12 +233,19 @@ pub fn start_bundled_engine(app: &AppHandle) {
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string());
-    // 拡張パックの声（ADR-0060 段階3）＝あるときだけ、同梱の声と並べた置き場を組んで渡す。
-    // ⚠️ **組めなければ同梱の声だけで起こす**（声が全部使えなくなる状態を作らない）。
-    let voices = crate::packs::installed_pack_voices(app);
-    if !voices.is_empty() {
-        match (exe.parent(), voicelib_dir(app)) {
-            (Some(engine_dir), Some(out)) => match build_voicelib(engine_dir, &out, &voices) {
+    // 拡張パックの声（ADR-0060 段階3）＝採る声の判定は `packs::voice_plan` の1か所（画面も同じ結果を使う）。
+    // ⚠️ **組めなければ同梱の声だけで起こす**（声が全部使えなくなる状態を作らない）が、失敗としては返す。
+    let mut packs_ok = true;
+    let engine_dir = exe.parent().map(Path::to_path_buf);
+    let voices = crate::packs::voice_plan(app, engine_dir.as_deref()).0;
+    if let (Some(engine_dir), Some(out)) = (engine_dir.as_deref(), voicelib_dir(app)) {
+        if voices.is_empty() {
+            // 声のパックが無くなったら置き場も消す（コピーだと 500MB を超えて残る）。
+            if out.exists() {
+                let _ = fs::remove_dir_all(&out);
+            }
+        } else {
+            match build_voicelib(engine_dir, &out, &voices) {
                 Ok(()) => {
                     cmd.arg("--voicelib_dir").arg(&out);
                     crate::tlog!(
@@ -156,16 +254,17 @@ pub fn start_bundled_engine(app: &AppHandle) {
                         voices.len()
                     );
                 }
-                Err(e) => crate::tlog!(
-                    "voicevox",
-                    "拡張パックの声の置き場を組めませんでした（同梱の声だけで起動）: {e}"
-                ),
-            },
-            _ => crate::tlog!(
-                "voicevox",
-                "拡張パックの声の置き場が決まりません（同梱の声だけで起動）"
-            ),
+                Err(e) => {
+                    packs_ok = false;
+                    crate::tlog!(
+                        "voicevox",
+                        "拡張パックの声の置き場を組めませんでした（同梱の声だけで起動）: {e}"
+                    );
+                }
+            }
         }
+    } else if !voices.is_empty() {
+        packs_ok = false;
     }
     // DLL・モデル・辞書を解決できるよう、作業ディレクトリを ENGINE 直下にする。
     if let Some(dir) = exe.parent() {
@@ -176,12 +275,14 @@ pub fn start_bundled_engine(app: &AppHandle) {
             let base_url = format!("http://127.0.0.1:{port}");
             app.state::<EngineState>().store(child, base_url.clone());
             crate::tlog!("voicevox", "同梱エンジンを起動しました: {base_url}");
+            Ok(EngineStart::Started { packs_ok })
         }
         Err(e) => {
             crate::tlog!(
                 "voicevox",
                 "同梱エンジンの起動に失敗（設定の接続先／手動起動へフォールバック）: {e}"
             );
+            Err(e.to_string())
         }
     }
 }
@@ -209,12 +310,14 @@ mod tests {
         // 前回の残り（外したパックの声）は消える。
         fs::create_dir_all(out.join("model")).unwrap();
         fs::write(out.join("model/pack_old__gone.vvm"), b"old").unwrap();
-        build_voicelib(
-            &engine,
-            &out,
-            &[("office".to_string(), "aoi".to_string(), pack_vvm.clone())],
-        )
-        .unwrap();
+        let voices = [DeclaredVoice {
+            pack_id: "office".into(),
+            voice_id: "aoi".into(),
+            path: pack_vvm.clone(),
+            character: "あおい".into(),
+            speakers: vec![9001],
+        }];
+        build_voicelib(&engine, &out, &voices).unwrap();
         let mut names: Vec<String> = fs::read_dir(out.join("model"))
             .unwrap()
             .flatten()
@@ -229,6 +332,17 @@ mod tests {
             b"pack"
         );
         assert_eq!(fs::read(out.join("model/0.vvm")).unwrap(), b"bundled");
+        // 中身が同じなら組み直さない（目印に置いたファイルが残る）／パックの声が変われば組み直す（目印は消える）。
+        fs::write(out.join("model/marker"), b"m").unwrap();
+        build_voicelib(&engine, &out, &voices).unwrap();
+        assert!(out.join("model/marker").exists());
+        fs::write(&pack_vvm, b"pack-v2-longer").unwrap();
+        build_voicelib(&engine, &out, &voices).unwrap();
+        assert!(!out.join("model/marker").exists());
+        assert_eq!(
+            fs::read(out.join("model/pack_office__aoi.vvm")).unwrap(),
+            b"pack-v2-longer"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }

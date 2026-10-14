@@ -9,6 +9,7 @@ import { usedTextKeys } from "../domain/template/layerOps";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
+import { sceneGoneVoiceLineCount } from "../domain/voice/goneVoices";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { MAIN_ASSET_LAYER_KEYS } from "../domain/template/slotAssign";
@@ -23,7 +24,7 @@ import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/p
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
-import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
+import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage, VOICE_SPEAKER_GONE_MESSAGE } from "./uiLabels";
 import type { VoiceSettings, Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -433,6 +434,17 @@ export function buildPrecheckItems(
       id: "unknownFont",
       label: "文字の形を調べられません",
       detail: `${userFontUnreadableMessage(usedFontIds.length)}。`,
+      severity: "action",
+      blocksExport: true,
+    });
+  }
+  // いま入っていない声で作り済みの読み上げ（ADR-0060 段階3）＝そのまま出すと、鳴る声と名乗るキャラ（クレジット）が食い違う（ADR-0003）。
+  const goneVoices = sceneGoneVoiceLineCount(scenes);
+  if (goneVoices > 0) {
+    items.push({
+      id: "goneVoice",
+      label: "入っていない声",
+      detail: `${VOICE_SPEAKER_GONE_MESSAGE}。`,
       severity: "action",
       blocksExport: true,
     });

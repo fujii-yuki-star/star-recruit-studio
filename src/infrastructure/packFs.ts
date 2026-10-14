@@ -39,6 +39,16 @@ export async function readPackDataUrl(packId: string, rel: string): Promise<stri
   return invoke<string>('pack_read_data_url', { packId, rel });
 }
 
+/** 入っているパックの声の採否（段階3）＝判定は Rust の1か所（`packs::voice_plan`）。Tauri 以外では `null`（音声ソフトが無い）。 */
+export interface PackVoiceRef {
+  packId: string;
+  voiceId: string;
+}
+export async function packVoicePlan(): Promise<{ accepted: PackVoiceRef[]; rejected: PackVoiceRef[] } | null> {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
+  return invoke<{ accepted: PackVoiceRef[]; rejected: PackVoiceRef[] }>('pack_voice_plan');
+}
+
 /** 声を作るソフトを起こし直す（拡張パックの声を入れた・外したあと＝段階3）。Tauri 以外では何もしない。 */
 export async function restartVoiceEngine(): Promise<void> {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;

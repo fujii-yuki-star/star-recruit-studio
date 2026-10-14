@@ -4,7 +4,7 @@ import {
   PACK_PROBLEM,
   packInstallProblem,
   parsePackManifest,
-  projectUsesPack,
+  projectUsesPack, projectUsesPackVoice,
   type ExtensionPackManifest,
   type PackProblem,
 } from '../../domain/pack/extensionPack';
@@ -84,10 +84,13 @@ export async function installInspectedPack(
 
 /** このパックの見た目パターンを使っている動画の数（外す前に知らせる）。読めない動画は数えない。 */
 export async function countVideosUsingPack(packId: string): Promise<number> {
+  // 声（段階3）は番号で指すので、文字の頭では探せない＝manifest の番号で探す。
+  const manifest = useProjectStore.getState().packs.find((m) => m.packId === packId);
   let n = 0;
   for (const s of await listProjectSummaries()) {
     try {
-      if (projectUsesPack(await loadProjectDoc(s.projectId), packId)) n += 1;
+      const raw = await loadProjectDoc(s.projectId);
+      if (projectUsesPack(raw, packId) || (manifest != null && projectUsesPackVoice(raw, manifest))) n += 1;
     } catch {
       // 読めない動画は数えない（外す判断の知らせなので、数え漏れは「少なめ」に倒れるだけ）
     }

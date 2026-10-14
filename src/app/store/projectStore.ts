@@ -117,9 +117,9 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
-import { isPackScopedId, packFonts, packVoiceCharacters, packVoiceFilesKey, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
+import { isPackScopedId, packFonts, packVoiceCharacters, packVoiceFilesKey, packVoiceRefKey, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
 import { setExtraVoiceCharacters } from "../../domain/voice/voiceCatalog";
-import { restartVoiceEngine } from "../../infrastructure/packFs";
+import { packVoicePlan, restartVoiceEngine } from "../../infrastructure/packFs";
 import { mergeFontList, readInstalledPacks } from "./packLoad";
 import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
@@ -2277,11 +2277,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //   先に始めた方が後から終わると、**外したパックの中身を書き戻す**（字なら書き出しの門を通り、描画は既定へ倒れる）。
     const seq = ++packLoadSeq;
     const packs = await readInstalledPacks();
+    // 声（段階3）＝採るかどうかは Rust が声の中身を読んで決める（音声ソフトに読ませる声と同じ規則・`pack_voice_plan`）。
+    // ⚠️ 調べられなかったら声は足さない（読ませているか分からない声を一覧とクレジットに出さない）。
+    let accepted: Set<string> | null;
+    try {
+      const plan = await packVoicePlan();
+      accepted = plan ? new Set(plan.accepted.map((v) => packVoiceRefKey(v.packId, v.voiceId))) : null;
+    } catch {
+      accepted = new Set();
+    }
     if (seq !== packLoadSeq) return;
-    // 声（段階3）＝一覧（とクレジットの引き当て）へ先に足す＝下の `set` で画面が描き直すときに新しい声が見える。
-    const voices = packVoiceCharacters(packs.manifests);
+    // 一覧（とクレジットの引き当て）へ先に足す＝下の `set` で画面が描き直すときに新しい声が見える。
+    const voices = packVoiceCharacters(packs.manifests, accepted);
     setExtraVoiceCharacters(voices.characters);
-    const voiceKey = packVoiceFilesKey(packs.manifests);
+    const voiceKey = packVoiceFilesKey(packs.manifests, accepted);
     // ⚠️ **パック由来の分だけを差し替える**＝同梱・利用者の見た目パターンと素材には触らない。
     set((s) => ({
       templates: replacePackTemplates(s.templates, packs.templates),

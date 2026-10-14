@@ -1,12 +1,21 @@
 // 拡張パックの声（ADR-0060 段階3）＝読むと声の一覧へ足し、声のファイルの組が変わったときだけ声を作るソフトを起こし直す。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ manifests: [] as string[], restarts: 0, failRestart: false }));
+const fx = vi.hoisted(() => ({ manifests: [] as string[], restarts: 0, failRestart: false, rejected: [] as string[], planFails: false }));
 vi.mock("../../infrastructure/packFs", () => ({
   listPackManifests: vi.fn(async () => fx.manifests),
   readPackText: vi.fn(async () => { throw new Error("無い"); }),
   readPackDataUrl: vi.fn(async () => "data:x;base64,AA"),
   copyPackFileToProject: vi.fn(),
+  // 採否は Rust が決める（`pack_voice_plan`）＝ここでは書かれた声を全部採り、`fx.rejected` の packId だけ断る。
+  packVoicePlan: vi.fn(async () => {
+    if (fx.planFails) throw new Error("boom");
+    const all = fx.manifests.flatMap((m) => {
+      const j = JSON.parse(m);
+      return (j.contents.voices ?? []).map((v: { voiceId: string }) => ({ packId: j.packId as string, voiceId: v.voiceId }));
+    });
+    return { accepted: all.filter((v) => !fx.rejected.includes(v.packId)), rejected: all.filter((v) => fx.rejected.includes(v.packId)) };
+  }),
   restartVoiceEngine: vi.fn(async () => {
     fx.restarts++;
     if (fx.failRestart) throw new Error("boom");
@@ -28,6 +37,8 @@ beforeEach(() => {
   fx.manifests = [];
   fx.restarts = 0;
   fx.failRestart = false;
+  fx.rejected = [];
+  fx.planFails = false;
   resetPackVoiceKeyForTest();
   setExtraVoiceCharacters([]);
   useProjectStore.setState({ packs: [], packVoicesSkipped: [], voiceEngineRestartError: null } as never);
@@ -69,10 +80,19 @@ describe("拡張パックの声", () => {
     expect(useProjectStore.getState().voiceEngineRestartError).toBeNull();
   });
 
-  it("ほかのパックと番号が重なる声は足さず、パックの名前を知らせる", async () => {
-    fx.manifests = [voicePack("a", 9001), voicePack("b", 9001)];
+  it("Rust が採らなかった声は一覧にもクレジットにも足さず、パックの名前を知らせる", async () => {
+    fx.manifests = [voicePack("a", 9001), voicePack("b", 9002)];
+    fx.rejected = ["b"];
     await useProjectStore.getState().loadPacks();
     expect(useProjectStore.getState().packVoicesSkipped).toEqual(["声b"]);
     expect(characterForSpeaker(9001)).toBe("あおいa");
+    expect(characterForSpeaker(9002)).toBeNull();
+  });
+
+  it("採否を調べられなければ声は足さない（読ませているか分からない声を出さない）", async () => {
+    fx.planFails = true;
+    fx.manifests = [voicePack("a", 9001)];
+    await useProjectStore.getState().loadPacks();
+    expect(characterForSpeaker(9001)).toBeNull();
   });
 });

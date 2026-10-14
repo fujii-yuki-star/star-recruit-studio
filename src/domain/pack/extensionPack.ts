@@ -101,37 +101,58 @@ export function contentFiles(m: ExtensionPackManifest): string[] {
   ];
 }
 
+/** 声1つの名前（`<packId>/<voiceId>`）＝Rust の採否（`pack_voice_plan`）と突き合わせる鍵。 */
+export function packVoiceRefKey(packId: string, voiceId: string): string {
+  return `${packId}/${voiceId}`;
+}
+
 /**
  * 入っているパックの声を、声の一覧に足す形にする（段階3）。
- * ⚠️ **先に並んだパックと番号が重なるパックの声は足さない**（入れる時には同梱としか比べられない＝パック同士の重なりはここで止める）。
- *   足さなかったパックは `skipped` で返す（黙って消えたように見せない）。
+ * ⚠️ **採るかどうかは Rust が決める**（`accepted`＝`pack_voice_plan` の結果）＝声の中身（キャラ名と番号）を読めるのは Rust だけで、
+ *   画面と音声ソフトで別の規則を持つと、**一覧に出る声と実際に読ませる声が食い違う**（クレジットの取り違え＝ADR-0003）。
+ *   `accepted` が `null`（音声ソフトが無い＝ブラウザ開発）なら、書かれた声を全部足す。
+ * 足さなかった声のあるパックは `skipped` で名前を返す（黙って消えたように見せない）。
  */
-export function packVoiceCharacters(manifests: readonly ExtensionPackManifest[]): { characters: VoiceCharacter[]; skipped: string[] } {
-  const taken = new Set(VOICE_CATALOG.flatMap((c) => c.styles.map((s) => s.speaker)));
+export function packVoiceCharacters(
+  manifests: readonly ExtensionPackManifest[],
+  accepted: ReadonlySet<string> | null,
+): { characters: VoiceCharacter[]; skipped: string[] } {
   const characters: VoiceCharacter[] = [];
   const skipped: string[] = [];
   for (const m of manifests) {
-    const voices = m.contents.voices ?? [];
-    const speakers = voices.flatMap((v) => v.styles.map((s) => s.speaker));
-    if (speakers.some((s) => taken.has(s))) {
-      skipped.push(m.name);
-      continue;
+    let dropped = false;
+    for (const v of m.contents.voices ?? []) {
+      if (accepted && !accepted.has(packVoiceRefKey(m.packId, v.voiceId))) {
+        dropped = true;
+        continue;
+      }
+      characters.push({ character: v.character, styles: v.styles.map((s) => ({ ...s })) });
     }
-    for (const s of speakers) taken.add(s);
-    for (const v of voices) characters.push({ character: v.character, styles: v.styles.map((s) => ({ ...s })) });
+    if (dropped) skipped.push(m.name);
   }
   return { characters, skipped };
 }
 
 /**
- * 声のファイルの組の「名前」（段階3）＝変わったら声を作るソフトを起こし直す。
+ * 読ませる声のファイルの組の「名前」（段階3）＝変わったら声を作るソフトを起こし直す。
  * 中身の SHA-256 まで含める＝新しい版で同じファイル名でも中身が変われば起こし直す（文字の形と同じ考え）。
  */
-export function packVoiceFilesKey(manifests: readonly ExtensionPackManifest[]): string {
+export function packVoiceFilesKey(manifests: readonly ExtensionPackManifest[], accepted: ReadonlySet<string> | null): string {
   return manifests
-    .flatMap((m) => (m.contents.voices ?? []).map((v) => `${m.packId}/${v.voiceId}/${m.files.find((f) => f.path === v.file)?.sha256 ?? ''}`))
+    .flatMap((m) =>
+      (m.contents.voices ?? [])
+        .filter((v) => !accepted || accepted.has(packVoiceRefKey(m.packId, v.voiceId)))
+        .map((v) => `${packVoiceRefKey(m.packId, v.voiceId)}/${m.files.find((f) => f.path === v.file)?.sha256 ?? ''}`),
+    )
     .sort()
     .join('|');
+}
+
+/** その動画が、このパックの声（番号）を使っているか（外す前に数える＝段階3）。値が数なので文字の頭では探せない。 */
+export function projectUsesPackVoice(rawJson: string, manifest: ExtensionPackManifest): boolean {
+  const speakers = (manifest.contents.voices ?? []).flatMap((v) => v.styles.map((s) => s.speaker));
+  if (speakers.length === 0) return false;
+  return new RegExp(`"speaker"\\s*:\\s*(${speakers.join('|')})(?![0-9])`).test(rawJson);
 }
 
 /** パックの音楽1つぶん（素材の棚に並べる id＝`pack_<packId>__<bgmId>`・段階2b）。 */

@@ -24,8 +24,7 @@ import {
   setAiEngine, setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
 import type { AiEngine } from "../../infrastructure/appSettings";
-import { DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
-import { useVoiceCatalog } from "../hooks/useVoiceCatalog";
+import { VOICE_CATALOG, DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
@@ -56,8 +55,6 @@ export const APPEARANCE_CHOICES: [Appearance, string][] = [
 ];
 
 export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
-  // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
-  const voices = useVoiceCatalog();
   // 見た目（ADR-0039・#1108）。⚠️ **動画の絵は変わらない**＝暗くなるのはアプリの枠だけ。
   const [appearance, setAppearance] = useAppearance();
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
@@ -426,7 +423,9 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               value={speaker}
               onChange={(e) => onChangeSpeaker(Number(e.target.value))}
             >
-              {voices.map((c) => (
+              {/* ⚠️ **動画全体の既定の声は同梱の声だけ**（ADR-0060 段階3・PR レビュー 🔴）＝既定の声はこのパソコンの設定に残るので、
+                  パックを外したあと**どの動画の門にも渡らない**（書き出しの前に止められない）。パックの声は行・読み上げごとに選ぶ。 */}
+              {VOICE_CATALOG.map((c) => (
                 <optgroup key={c.character} label={c.character}>
                   {c.styles.map((s) => (
                     <option key={s.speaker} value={s.speaker}>

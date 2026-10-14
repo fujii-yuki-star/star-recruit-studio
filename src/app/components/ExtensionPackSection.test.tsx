@@ -172,3 +172,21 @@ describe("声の知らせ（段階3）", () => {
     useProjectStore.setState({ packVoicesSkipped: [], voiceEngineRestartError: null } as never);
   });
 });
+
+describe("声を作っている間・書き出しの間（段階3）", () => {
+  it("入れる・外すを押せず、理由を添える（声を作るソフトを起こし直すため）", async () => {
+    const { PACK_BUSY_MESSAGE } = await import("../uiLabels");
+    const { useTimelineStore } = await import("../store/timelineStore");
+    useProjectStore.setState({ isGeneratingNarration: true } as never);
+    const { unmount } = render(<ExtensionPackSection />);
+    const pick = screen.getByRole("button", { name: "拡張パックを入れる…" });
+    expect(pick).toBeDisabled();
+    expect(pick.getAttribute("title")).toBe(PACK_BUSY_MESSAGE);
+    unmount();
+    useProjectStore.setState({ isGeneratingNarration: false } as never);
+    useTimelineStore.setState({ _voiceRun: 1 } as never);
+    render(<ExtensionPackSection />);
+    expect(screen.getByRole("button", { name: "拡張パックを入れる…" })).toBeDisabled();
+    useTimelineStore.setState({ _voiceRun: null } as never);
+  });
+});

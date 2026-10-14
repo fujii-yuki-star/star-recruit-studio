@@ -430,7 +430,8 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - **動画からの参照**：見た目パターンは**動画へコピーしない**（利用者の見た目パターンと同じ＝ADR-0024 決定6 の例外）。外すと、その場面は `TEMPLATE_NOT_FOUND` の知らせ（黙って差し替えない）。
   **文字の形もコピーしない**（持ち込みフォントと同じ＝ADR-0038）。持ち込みと**同じ一覧**（`userFonts`／`userFontIds`）に並び、外すと `USER_FONT_MISSING` で書き出しを止める。読み込みは `pack_read_data_url`（ttf/otf/woff/woff2・64MB まで）→ `FontFace`。
   **音楽は動画へコピーする**（ADR-0060 決定5）＝素材の棚に `pack_<packId>__<bgmId>` の行として並び、取り込むと `pack_copy_to_project` で `assets/asset_NNN.<拡張子>` へ写す＝動画の中は普通の音の素材（パックの id は残らない・外しても鳴る）。棚の行と同じ口（`resolveLibrarySource`）を両方の形式が通る。
-  **声は声を作るソフトに読ませる**（段階3）＝Rust が `appData/voicelib` に同梱の声と並べて `--voicelib_dir` で起こす。キャラ名とスタイルは manifest から声の一覧（`setExtraVoiceCharacters`）へ足す＝選ぶ画面とクレジット（`characterForSpeaker`）が同じ一覧を見る。声のファイルの組が変わったときだけ起こし直す。
+  **声は声を作るソフトに読ませる**（段階3）＝採る声は Rust が声のファイルの中身（`metas.json`）を読んで1か所で決め（`pack_voice_plan`＝キャラ名と番号が中身と合う・同梱とも先のパックとも番号が重ならない）、`appData/voicelib` に同梱の声と並べて `--voicelib_dir` で起こす。画面は採った声だけを声の一覧（`setExtraVoiceCharacters`）へ足す＝選ぶ画面とクレジット（`characterForSpeaker`）が同じ一覧を見る。声のファイルの組が変わったときだけ起こし直す。
+  **外したとき**＝パックの声を指す行・読み上げは V19 どおり既定の声で作り直される。⚠️ **作り済みのまま書き出そうとすると止める**（`VOICE_SPEAKER_GONE`／`TIMELINE_EXPORT_VOICE_GONE`＝鳴る声とクレジットが食い違うため）。動画全体の既定の声にはパックの声を選べない。
 - **作る道具**：`node scripts/make-starpack.mjs <フォルダ> <出力.starpack>`（`files` を全ファイルの SHA-256 で埋めてまとめる）。
 
 ## 8. 検証ルール（コード化可能な形）

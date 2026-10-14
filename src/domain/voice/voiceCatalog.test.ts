@@ -73,3 +73,20 @@ describe('拡張パックの声（ADR-0060 段階3）', () => {
     }
   });
 });
+
+describe('いま入っていない声で作り済みの読み上げ（段階3）', () => {
+  it('作り済み・文あり・一覧に無い声だけを数える（継承・同梱の声・まだ作っていないものは数えない）', async () => {
+    const { sceneGoneVoiceLineCount, isGoneGeneratedVoice } = await import('./goneVoices');
+    const gen = 'generated';
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: 'こんにちは' })).toBe(true);
+    expect(isGoneGeneratedVoice({ speaker: 3, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: 'not_generated', text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: '  ' })).toBe(false);
+    expect(sceneGoneVoiceLineCount([
+      { lines: [{ speaker: 9001, status: gen, text: 'a' }, { speaker: 3, status: gen, text: 'b' }] },
+      { lines: null },
+      { lines: [{ speaker: 9002, status: gen, text: 'c' }] },
+    ])).toBe(2);
+  });
+});
