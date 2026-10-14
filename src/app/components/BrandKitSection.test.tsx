@@ -103,6 +103,24 @@ describe("BrandKitSection", () => {
     expect(screen.getByRole("option", { name: /会社の明朝/ })).toBeInTheDocument();
   });
 
+  /** 拡張パックの文字の形（ADR-0060 段階2）＝「手持ち」と言わない（実アプリで見つけた）。 */
+  it("拡張パックの文字の形は「拡張パック」と添えて出し、外したら拡張パックの字として「見つかりません」", () => {
+    useProjectStore.setState({
+      userFonts: [
+        { id: "user_font_001", fileName: "a.ttf", displayName: "会社の明朝" },
+        { id: "pack_office__mincho", fileName: "f/m.otf", displayName: "パックの明朝" },
+      ],
+      userFontIds: ["user_font_001", "pack_office__mincho"],
+    } as never);
+    const { unmount } = render(<BrandKitSection />);
+    expect(screen.getByRole("option", { name: "パックの明朝（拡張パック）" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "会社の明朝（手持ち）" })).toBeInTheDocument();
+    unmount();
+    useProjectStore.setState({ brandKit: { fontId: "pack_office__gone" }, userFonts: [], userFontIds: [] } as never);
+    render(<BrandKitSection />);
+    expect(screen.getByRole("option", { name: "拡張パックの文字の形（見つかりません）" })).toBeInTheDocument();
+  });
+
   /**
    * ⚠️ **覚えているのに一覧に無い字体の受け皿**（再監査で発覚＝この差分で到達可能になった）。
    * 「外す」はキットに触らないので、既定にしていた字体を外すと一致する選択肢が消え、

@@ -9,8 +9,8 @@ import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectS
 import { useTimelineStore } from "../store/timelineStore";
 import { ColorPicker } from "./ColorPicker";
 import { DeleteConfirm } from "./DeleteConfirm";
-import { BRAND_FONT_NOT_APPLIED_MESSAGE } from "../uiLabels";
-import { FONT_CATALOG, DEFAULT_FONT_ID, isFontAvailable } from "../../domain/font/fontCatalog";
+import { BRAND_FONT_NOT_APPLIED_MESSAGE, FONT_NOTE_PACK, FONT_NOTE_USER } from "../uiLabels";
+import { FONT_CATALOG, DEFAULT_FONT_ID, isFontAvailable, isPackFontId } from "../../domain/font/fontCatalog";
 import { listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import type { LibraryAsset } from "../../domain/asset/assetLibrary";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -205,10 +205,11 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
               覚えているのに画面は「覚えない（毎回選ぶ）」を見せる（そのまま新しい動画へは焼き込まれる）。
               ⚠️ `FontPicker` で潰した失敗と**同型**＝片方だけ直すと同じ穴が残る。 */}
           {missingBrandFont && (
-            <option value={brandKit.fontId}>取り込んだ文字の形（見つかりません）</option>
+            <option value={brandKit.fontId}>{isPackFontId(brandKit.fontId) ? FONT_NOTE_PACK : "取り込んだ"}の文字の形（見つかりません）</option>
           )}
           {userFonts.map((f) => (
-            <option key={f.id} value={f.id}>{f.displayName}（手持ち）</option>
+            // ⚠️ **添え書きは選ぶ部品（`FontPicker`）と同じ**＝拡張パックの字を「手持ち」と言わない（ADR-0060 段階2・実アプリで見つけた）。
+            <option key={f.id} value={f.id}>{f.displayName}（{isPackFontId(f.id) ? FONT_NOTE_PACK : FONT_NOTE_USER}）</option>
           ))}
         </select>
       </div>
