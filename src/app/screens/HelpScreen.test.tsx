@@ -48,7 +48,7 @@ describe("使い方：操作案内", () => {
 describe("使い方：同梱した映像", () => {
   it("映像がまだ無いときは、一覧ごと出さない（押しても何も起きない項目を作らない）", () => {
     render(<HelpScreen />);
-    expect(screen.queryByText("見て覚える")).toBeNull();
+    expect(screen.queryByText("使い方の動画")).toBeNull();
   });
 
   it("映像があれば一覧に並び、選ぶとこの画面の中で再生する", async () => {
@@ -56,7 +56,7 @@ describe("使い方：同梱した映像", () => {
       { id: "t01", title: "はじめての1本", desc: "入口から書き出しまで", file: "t01.mp4", durationLabel: "2分" },
     ];
     const { container } = render(<HelpScreen />);
-    expect(screen.getByText("見て覚える")).toBeTruthy();
+    expect(screen.getByText("使い方の動画")).toBeTruthy();
     expect(container.querySelector("video")).toBeNull(); // 選ぶ前は出さない
     fireEvent.click(screen.getByText("はじめての1本").closest("button")!);
     await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
