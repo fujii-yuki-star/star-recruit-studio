@@ -66,7 +66,8 @@ export function HelpScreen() {
       <div style={{ maxWidth: 820 }} className="col gap-lg">
         {TUTORIAL_VIDEOS.length > 0 && (
           <div className="card">
-            <h2 className="section-title">見て覚える</h2>
+            {/* 呼び名は「使い方の動画」（利用者判断 2026-10-14・ADR-0046 論点2）＝帯の「使い方」と言葉をそろえる。 */}
+            <h2 className="section-title">使い方の動画</h2>
             <p className="page-desc text-pretty">
               実際の操作を撮った映像です。このソフトの中で再生できます（インターネットにつながっていなくても見られます）。
             </p>
