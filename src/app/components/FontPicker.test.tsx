@@ -93,6 +93,20 @@ describe("FontPicker", () => {
     expect(screen.queryByText("手持ち")).not.toBeInTheDocument();
     expect(screen.queryByText("手書き風")).not.toBeInTheDocument();
   });
+
+  /** 拡張パックの文字の形（ADR-0060 段階2）＝同じ一覧に並び、添え書きで持ち込みと見分けられ、選べる。 */
+  it("拡張パックの文字の形は「拡張パック」と添えて出し、選べる", () => {
+    useProjectStore.setState({
+      userFonts: [userFonts[0], { id: "pack_office__mincho", fileName: "f/mincho.otf", displayName: "パックの明朝" }],
+    } as never);
+    const onChange = vi.fn();
+    render(<FontPicker value={null} onChange={onChange} allowInherit />);
+    fireEvent.click(screen.getByRole("button", { name: /動画全体に合わせる/ }));
+    expect(screen.getByText("手持ち")).toBeInTheDocument();
+    expect(screen.getByText("拡張パック")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("パックの明朝"));
+    expect(onChange).toHaveBeenCalledWith("pack_office__mincho");
+  });
 });
 // 継承の項目は**実際の継承先**を言う（#925・ADR-0026①）。
 //

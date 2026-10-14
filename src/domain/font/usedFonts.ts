@@ -1,10 +1,10 @@
 // 動画が使っているフォントの id を集める（ADR-0038・#261）。純粋関数（§7 テスト対象）。
 //
 // ⚠️ **「使っている」＝持ち込みフォントが見つからないときに断るための材料**。
-// 同梱フォントは必ずあるので、集めるのは**持ち込み（`user_font_NNN`）だけ**でよいが、
+// 同梱フォントは必ずあるので、集めるのは**持ち込み（`user_font_NNN`）と拡張パックの文字の形（`pack_<packId>__<fontId>`）だけ**でよいが、
 // **判定は呼ぶ側に任せる**（全部返す）＝ここが「同梱かどうか」を知っていると、
 // 同梱が増えたときに直す場所が2つになる。
-import { isUserFontId } from './fontCatalog';
+import { isExternalFontId } from './fontCatalog';
 import type { FreeElement, Scene } from '../project/types';
 
 /**
@@ -45,7 +45,7 @@ export function usedUserFontIds(
     ...(typeof projectFontId === 'string' ? [projectFontId] : []),
     ...scenes.flatMap(sceneFontIds),
   ];
-  return [...new Set(all.filter(isUserFontId))];
+  return [...new Set(all.filter(isExternalFontId))];
 }
 
 /**
@@ -87,5 +87,5 @@ export function usedTimelineUserFontIds(doc: {
     push(c.fontId);
     for (const v of Object.values(c.textFontIds ?? {})) push(v);
   }
-  return [...new Set(all.filter(isUserFontId))];
+  return [...new Set(all.filter(isExternalFontId))];
 }

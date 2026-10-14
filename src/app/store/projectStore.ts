@@ -56,7 +56,7 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
+import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, setPackFontSources, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
@@ -117,8 +117,8 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
-import { isPackScopedId, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
-import { readInstalledPacks } from "./packLoad";
+import { isPackScopedId, packFonts, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
+import { mergeFontList, readInstalledPacks } from "./packLoad";
 import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
@@ -913,6 +913,8 @@ function assertBakeable(doc: TimelineProject): void {
   }
 }
 
+/** 拡張パックの読み直しの世代（`loadPacks` が重なったとき、後から始めた1回だけを当てる）。 */
+let packLoadSeq = 0;
 
 /**
  * 取り込んだ写真を裏で1枚ずつ読んで説明を当てる（ADR-0052 決定4・12 §4b）。取り込みの `await` には入れない。
@@ -2256,7 +2258,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
   loadPacks: async () => {
+    // ⚠️ **重なったら後から始めた1回だけを当てる**（PR レビュー 🟡）＝入れた直後に外す・起動時の読み込みと重なる、で
+    //   先に始めた方が後から終わると、**外したパックの中身を書き戻す**（字なら書き出しの門を通り、描画は既定へ倒れる）。
+    const seq = ++packLoadSeq;
     const packs = await readInstalledPacks();
+    if (seq !== packLoadSeq) return;
     // ⚠️ **パック由来の分だけを差し替える**＝同梱・利用者の見た目パターンと素材には触らない。
     set((s) => ({
       templates: replacePackTemplates(s.templates, packs.templates),
@@ -2267,6 +2273,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       packs: packs.manifests,
       packsSkipped: packs.skipped,
     }));
+    // 文字の形（段階2）＝置き場を差し替え、選ぶ一覧へ合流してから読み込む。
+    // ⚠️ **持ち込みの一覧がまだ無い（`userFontIds: null`＝調べていない）ときは `userFontIds` に触らない**＝
+    //   ここで埋めると「調べた・持ち込みは0件」に見える（持ち込みを読んだとき＝`refreshUserFonts` に合流する）。
+    //   ⚠️ **選ぶ一覧（`userFonts`）には常に出す**＝持ち込みの一覧が読めないときでも、パックの字は選べる。
+    const fonts = packFonts(packs.manifests);
+    setPackFontSources(fonts);
+    set((s) => {
+      const userFonts = mergeFontList(s.userFonts, packs.manifests);
+      return s.userFontIds == null ? { userFonts } : { userFonts, userFontIds: userFonts.map((f) => f.id) };
+    });
+    await loadUserFonts(fonts.map((f) => f.id));
   },
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
@@ -3023,7 +3040,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
     await loadUserFonts(list.map((f) => f.id));
-    set({ userFontIds: list.map((f) => f.id), userFonts: list });
+    // 拡張パックの文字の形も同じ一覧へ（ADR-0060 段階2・`mergeFontList`）。
+    const userFonts = mergeFontList(list, get().packs);
+    set({ userFontIds: userFonts.map((f) => f.id), userFonts });
   },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();

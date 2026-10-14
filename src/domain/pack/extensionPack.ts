@@ -15,6 +15,7 @@ export interface ExtensionPackManifest {
   contents: {
     templates?: { file: string }[];
     templateAssets?: { assetId: string; file: string }[];
+    fonts?: { fontId: string; file: string; displayName: string }[];
     features?: string[];
   };
   files: { path: string; sha256: string }[];
@@ -22,7 +23,7 @@ export interface ExtensionPackManifest {
 }
 
 /** 中身の種類（`contents` のキー＝`licenses[].target`）。 */
-export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'features'] as const;
+export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'fonts', 'features'] as const;
 export type PackContentKind = (typeof PACK_CONTENT_KINDS)[number];
 
 /** パックを読めない・入れられない理由（文言は `uiLabels` の `packProblemMessage`・`15 §6`）。 */
@@ -62,6 +63,9 @@ export function parsePackManifest(raw: string): { ok: true; manifest: ExtensionP
   for (const path of contentFiles(m)) {
     if (!listed.has(path)) return { ok: false, problem: { kind: PACK_PROBLEM.unlistedContent, path } };
   }
+  // ⚠️ 文字の形の名前が重なると、動画から指したときにどちらか分からない（schema では項目の重なりを表せない）。
+  const fontIds = (m.contents.fonts ?? []).map((f) => f.fontId);
+  if (new Set(fontIds).size !== fontIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
   const licensed = new Set(m.licenses.map((l) => l.target));
   for (const kind of PACK_CONTENT_KINDS) {
     if (m.contents[kind] && !licensed.has(kind)) return { ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: kind } };
@@ -69,9 +73,36 @@ export function parsePackManifest(raw: string): { ok: true; manifest: ExtensionP
   return { ok: true, manifest: m };
 }
 
-/** 中身として読むファイル（見た目パターンと既定素材）。 */
+/** 中身として読むファイル（見た目パターン・既定素材・文字の形）。 */
 export function contentFiles(m: ExtensionPackManifest): string[] {
-  return [...(m.contents.templates ?? []).map((t) => t.file), ...(m.contents.templateAssets ?? []).map((a) => a.file)];
+  return [
+    ...(m.contents.templates ?? []).map((t) => t.file),
+    ...(m.contents.templateAssets ?? []).map((a) => a.file),
+    ...(m.contents.fonts ?? []).map((f) => f.file),
+  ];
+}
+
+/** パックの文字の形1つぶん（動画から指す id＝`pack_<packId>__<fontId>`・ADR-0060 決定4）。 */
+export interface PackFont {
+  id: string;
+  packId: string;
+  file: string;
+  /** 中身の SHA-256（`files` から）。⚠️ 新しい版でもファイル名は同じことが多い＝中身が変わったかはこれで見る。 */
+  sha256: string;
+  displayName: string;
+}
+
+/** 入っているパックの文字の形を、動画から指す id つきで並べる。 */
+export function packFonts(manifests: readonly ExtensionPackManifest[]): PackFont[] {
+  return manifests.flatMap((m) =>
+    (m.contents.fonts ?? []).map((f) => ({
+      id: `${packIdPrefix(m.packId)}${f.fontId}`,
+      packId: m.packId,
+      file: f.file,
+      sha256: m.files.find((x) => x.path === f.file)?.sha256 ?? '',
+      displayName: f.displayName,
+    })),
+  );
 }
 
 /**
@@ -181,12 +212,14 @@ export function isKnownPackFeature(f: string): f is PackFeature {
 }
 
 /**
- * その動画（project.json／タイムライン形式の文書の文字）が、このパックの見た目パターンを使っているか（外す前に数える・ADR-0060 決定3）。
- * ⚠️ 文字のまま探す＝動画を開かずに数えられる（形式を問わず `templateId` に頭が付いている）。
+ * その動画（project.json／タイムライン形式の文書の文字）が、このパックの中身（見た目パターン・文字の形）を使っているか（外す前に数える・ADR-0060 決定3）。
+ * ⚠️ 文字のまま探す＝動画を開かずに数えられる（形式を問わず、パックの中身を指す値には頭が付いている）。
+ * ⚠️ **項目の名前では絞らない**＝文字の形は `fontId` のほかテキスト種別ごとの上書き（`textFontIds` の `title` など）からも指すので、
+ *   名前を並べると足し忘れた所だけ数えない。**値が頭で始まる**かだけを見る。
  */
 export function projectUsesPack(rawJson: string, packId: string): boolean {
   // packId は英小文字・数字・_ だけ（schema・Rust の `is_safe_pack_id`）＝正規表現の特別な文字を含まない。
-  return new RegExp(`"templateId"\\s*:\\s*"${packIdPrefix(packId)}`).test(rawJson);
+  return new RegExp(`:\\s*"${packIdPrefix(packId)}`).test(rawJson);
 }
 
 /**

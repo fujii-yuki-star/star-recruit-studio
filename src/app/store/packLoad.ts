@@ -3,6 +3,7 @@
 //   飛ばしたパックは `skipped` で返す（設定の「拡張パック」で知らせる＝黙って消えたように見せない）。
 import type { Template } from '../../domain/template/types';
 import {
+  packFonts,
   packIdPrefix,
   parsePackManifest,
   readPackTemplate,
@@ -10,6 +11,21 @@ import {
 } from '../../domain/pack/extensionPack';
 import { PACK_UNNAMED_LABEL } from '../uiLabels';
 import { listPackManifests, readPackDataUrl, readPackText } from '../../infrastructure/packFs';
+import type { UserFont } from '../../infrastructure/userFontFs';
+import { isUserFontId } from '../../domain/font/fontCatalog';
+
+/**
+ * 文字の形を選ぶ一覧＝持ち込み（実体があるもの）＋入っているパックの文字の形（ADR-0060 段階2）。
+ * ⚠️ **一覧を1つにする**＝選ぶ部品・公開前チェック・書き出しの門は `userFonts`／`userFontIds` だけを見る。
+ *   パックの分を別に持つと、配り忘れた所だけ「見つからない」と言う（ADR-0038 で踏んだ「片方だけ漏れる」）。
+ * `current` はいまの一覧（パックの分が混ざっていてよい＝持ち込みの分だけ取り出す）。
+ */
+export function mergeFontList(current: readonly UserFont[], manifests: readonly ExtensionPackManifest[]): UserFont[] {
+  return [
+    ...current.filter((f) => isUserFontId(f.id)),
+    ...packFonts(manifests).map((f) => ({ id: f.id, fileName: f.file, displayName: f.displayName })),
+  ];
+}
 
 export interface InstalledPacks {
   manifests: ExtensionPackManifest[];

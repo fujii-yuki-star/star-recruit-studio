@@ -139,3 +139,47 @@ describe('機能の名前', () => {
     expect(isKnownPackFeature('future-thing')).toBe(false);
   });
 });
+
+describe('文字の形（段階2）', () => {
+  const withFonts = (fonts: { fontId: string; file: string; displayName: string }[], over: Partial<ExtensionPackManifest> = {}) =>
+    manifest({
+      contents: { fonts },
+      files: fonts.map((f) => ({ path: f.file, sha256: SHA })),
+      licenses: [{ target: 'fonts', license: 'SIL OFL 1.1', credit: '作った人' }],
+      ...over,
+    });
+
+  it('文字の形を持つパックを読み、動画から指す id を組む', async () => {
+    const { packFonts } = await import('./extensionPack');
+    const r = parsePackManifest(JSON.stringify(withFonts([{ fontId: 'mincho', file: 'fonts/mincho.otf', displayName: '明朝' }])));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(packFonts([r.manifest])).toEqual([{ id: 'pack_office_looks__mincho', packId: 'office_looks', file: 'fonts/mincho.otf', sha256: SHA, displayName: '明朝' }]);
+    // 組み立てた id は文字の形の id の形（schema と同じ規則）に通る＝頭と境目を2か所で書いていても割れていない。
+    const { isPackFontId } = await import('../font/fontCatalog');
+    expect(isPackFontId(packFonts([r.manifest])[0].id)).toBe(true);
+  });
+
+  it('同じ名前の文字の形が2つ・権利が無い・照合の一覧に無い・文字の形でない拡張子は断る', () => {
+    const dup = withFonts([
+      { fontId: 'mincho', file: 'fonts/a.otf', displayName: 'A' },
+      { fontId: 'mincho', file: 'fonts/b.otf', displayName: 'B' },
+    ]);
+    expect(parsePackManifest(JSON.stringify(dup))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+    const noLicense = withFonts([{ fontId: 'mincho', file: 'fonts/a.otf', displayName: 'A' }], { licenses: [{ target: 'templates', license: 'x' }] });
+    expect(parsePackManifest(JSON.stringify(noLicense))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: 'fonts' } });
+    const unlisted = withFonts([{ fontId: 'mincho', file: 'fonts/a.otf', displayName: 'A' }], { files: [] });
+    expect(parsePackManifest(JSON.stringify(unlisted))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.unlistedContent, path: 'fonts/a.otf' } });
+    const exe = withFonts([{ fontId: 'mincho', file: 'fonts/a.exe', displayName: 'A' }]);
+    expect(parsePackManifest(JSON.stringify(exe))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+  });
+
+  it('外す前の数え上げは、見た目パターンにも文字の形（種別ごとの上書きを含む）にも効き、よそのパックは数えない', async () => {
+    const { projectUsesPack } = await import('./extensionPack');
+    expect(projectUsesPack('{"scenes":[{"templateId":"pack_office__intro"}]}', 'office')).toBe(true);
+    expect(projectUsesPack('{"videoSettings":{"fontId":"pack_office__mincho"}}', 'office')).toBe(true);
+    expect(projectUsesPack('{"clips":[{"textFontIds":{"title": "pack_office__mincho"}}]}', 'office')).toBe(true);
+    expect(projectUsesPack('{"videoSettings":{"fontId":"pack_office_looks__mincho"}}', 'office')).toBe(false);
+    expect(projectUsesPack('{"videoSettings":{"fontId":"user_font_001"}}', 'office')).toBe(false);
+  });
+});

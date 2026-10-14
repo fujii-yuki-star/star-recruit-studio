@@ -4,7 +4,7 @@
 // いない webfont」を待たない）。画面に出ていない字体をそのまま焼くと、**プレビューと違う字**の動画が
 // 出てしまうので、描き始める前に全部そろえる（どの部品がどの字体を使うかは描いてみるまで分からない）。
 import { FONT_CATALOG } from '../../domain/font/fontCatalog';
-import { listUserFonts, loadUserFonts } from '../../infrastructure/userFontFs';
+import { listUserFonts, loadUserFonts, packFontIds } from '../../infrastructure/userFontFs';
 
 /**
  * 書き出しに使いうるフォントを全部読み込む（失敗しても描画側のフォールバックに任せて続ける）。
@@ -27,7 +27,8 @@ export async function loadExportFonts(): Promise<void> {
   }
   // 持ち込みフォントは `FontFace` として登録する（同梱と違い `@font-face` の宣言が無い）。
   try {
-    await loadUserFonts((await listUserFonts() ?? []).map((f) => f.id));
+    // ⚠️ **拡張パックの文字の形も同じ入口で読む**（ADR-0060 段階2）＝ここを通らない字体は焼けない。
+    await loadUserFonts([...(await listUserFonts() ?? []).map((f) => f.id), ...packFontIds()]);
   } catch {
     /* 同上 */
   }
