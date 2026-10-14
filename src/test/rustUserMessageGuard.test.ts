@@ -141,7 +141,8 @@ describe("Rust が画面へ返す文（#1111）", () => {
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
     // ⚠️ **+6**（ADR-0058）＝声を文字にする断り6つ（`messages.rs`）。
     // ⚠️ **+5**（ADR-0060）＝拡張パックの断り PACK_* 5つ。
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(128);
+    // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED）。
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(129);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {

@@ -53,7 +53,7 @@
     "contents": {
       "type": "object",
       "additionalProperties": false,
-      "description": "中身の種類ごとの一覧（段階1＝見た目パターンと組み込み機能の鍵・段階2＝文字の形）。少なくとも1つは中身を持つ。",
+      "description": "中身の種類ごとの一覧（段階1＝見た目パターンと組み込み機能の鍵・段階2＝文字の形と音楽）。少なくとも1つは中身を持つ。",
       "minProperties": 1,
       "properties": {
         "templates": {
@@ -135,6 +135,45 @@
             }
           }
         },
+        "bgm": {
+          "type": "array",
+          "minItems": 1,
+          "description": "音楽（BGM）。素材の棚に並び、使うときに動画へコピーする（パックを外しても鳴る・ADR-0060 決定5）。",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "bgmId",
+              "file",
+              "displayName"
+            ],
+            "properties": {
+              "bgmId": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$",
+                "maxLength": 40,
+                "description": "パックの中の名前（英小文字・数字・単独の _）。"
+              },
+              "file": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/PackPath"
+                  },
+                  {
+                    "pattern": "\\.(mp3|m4a|wav|aac|ogg|flac)$"
+                  }
+                ],
+                "description": "mp3 / m4a / wav / aac / ogg / flac（小文字の拡張子・取り込みで受ける音と同じ）。"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "素材の棚に出す名前。"
+              }
+            }
+          }
+        },
         "features": {
           "type": "array",
           "minItems": 1,
@@ -186,6 +225,7 @@
               "templates",
               "templateAssets",
               "fonts",
+              "bgm",
               "features"
             ]
           },

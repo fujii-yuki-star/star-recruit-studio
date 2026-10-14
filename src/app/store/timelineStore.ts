@@ -76,6 +76,7 @@ import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import type { LayerBackground, TextShadow } from "../../domain/template/types";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
+import { resolveLibrarySource } from "./librarySource";
 import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
 import type { ExportRunPhase } from "../../domain/export/exportProgress";
@@ -2292,20 +2293,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 別の動画を開けるので、控えないと**押した動画ではなく後から開いた動画へ入る**（場面形式は
     // `sameDocGuard` で同じ窓を塞いでいる＝形式で守りを割らない）。
     const started = get().doc?.projectId ?? null;
-    const list = await listLibraryAssets();
-    if (list == null) {
-      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return false;
-    }
-    const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return false; }
+    // 出どころ（棚／拡張パックの音楽）と断りは場面形式と同じ1か所（`resolveLibrarySource`・ADR-0026②）。
+    const resolved = await resolveLibrarySource(libraryAssetId, useProjectStore.getState().packs);
+    if (!resolved.ok) { set({ importError: resolved.error }); return false; }
+    const { lib, copy } = resolved.source;
     if (started == null || get().doc?.projectId !== started) return false;
     // ⚠️ **棚の名前・種類・タグを引き継ぐ**（ADR-0035 決定3・差分再監査 5巡目 🔴）＝ファイル名から
     // 作り直すと、棚のファイル名は `lib_asset_NNN.png` なので**機械の番号が素材名として画面に出る**うえ、
     // 種類（ロゴ）とタグも黙って落ちる（場面形式は `assetFromLibrary` で3つとも持ち込む＝ADR-0026②）。
     // 採番だけは**この形式の規則**（番号を使い回さない＝`reserveAssetId`）に従うので予約IDを渡す。
     const added = await runImport(set, get, lib.fileName, async (fileName) =>
-      await copyLibraryAssetToProject(libraryAssetId, get().doc!.projectId, fileName),
+      await copy(get().doc!.projectId, fileName),
       (reservedId) => assetFromLibrary(lib, [], reservedId));
     // ⚠️ **入ったかは「足した素材の番号が返ったか」で見る**（差分再監査 5巡目）＝件数の増減で見ると、
     // 待っている間の取り消し・別経路の着地を拾って**成功を騙る／知らせが出ない**。

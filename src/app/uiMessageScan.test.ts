@@ -210,7 +210,8 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+1**（#1396）＝`PANEL_LAYOUT_SAVE_FAILED_MESSAGE`（表へ行を足してある）。
 // ⚠️ **+1**（#1403）＝`AI_PLAN_HOLLOW_MESSAGE`（表へ行を足してある）。
 // ⚠️ **+3**（ADR-0060）＝PACK_INVALID／PACK_UNLISTED／PACK_MISSING_LICENSE（どれも表に行がある）。
-const FOUND_COUNT = 111;
+// ⚠️ **−2**（ADR-0060 段階2b）＝棚からの取り込みの断り2つを store の直書きから uiLabels の定数へ寄せた（表と等値で守る側＝`codeMessages` へ移した）。
+const FOUND_COUNT = 109;
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

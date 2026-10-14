@@ -179,6 +179,10 @@ pub const TRANSCRIBE_CANCELLED: &str =
 pub const TRANSCRIBE_BUSY: &str =
     "いま別の部品の声を文字にしています。終わってから、もう一度お試しください。";
 
+/// 拡張パックの音楽を動画へ取り込めなかったとき（段階2b・ADR-0060）。
+pub const PACK_COPY_FAILED: &str =
+    "拡張パックの音楽を取り込めませんでした。設定の「拡張パック」でそのパックが入っているか確かめてから、もう一度お試しください。";
+
 /// 拡張パックを読めないとき（zip でない・壊れている・manifest が無い）。ADR-0060。
 pub const PACK_UNREADABLE: &str =
     "拡張パックを読み取れませんでした。ファイルが壊れていないか確かめ、配った人からもう一度受け取ってください。";

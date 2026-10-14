@@ -462,6 +462,43 @@ fn read_data_url_blocking(
     ))
 }
 
+/// 動画へコピーしてよい音のファイルか（段階2b＝BGM）。⚠️ **domain の `AUDIO_FILE_EXTENSIONS` と同じ並び**（取り込みで受ける音・`extensionPack.test.ts` が照合）。
+/// 大文字の拡張子もここでは通すが、manifest の schema が小文字だけを受けるので、パックの中に大文字は入らない（先に schema で断る）。
+fn is_pack_audio(p: &Path) -> bool {
+    const AUDIO: [&str; 6] = ["mp3", "m4a", "wav", "aac", "ogg", "flac"];
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| AUDIO.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// パックの音楽を動画の素材としてコピーする（段階2b・ADR-0060 決定5＝BGM は動画へコピー＝パックを外しても鳴る）。
+/// ⚠️ **素材の棚からの取り込みと同じ置き場・同じ名前の決まり**（`assets/<file_name>`・名前は呼ぶ側が採番）。
+#[tauri::command]
+pub async fn pack_copy_to_project(
+    app: tauri::AppHandle,
+    pack_id: String,
+    rel: String,
+    project_id: String,
+    file_name: String,
+) -> Result<String, String> {
+    run_blocking(move || {
+        let src =
+            pack_file(&app, &pack_id, &rel).map_err(|_| messages::PACK_COPY_FAILED.to_string())?;
+        if !is_pack_audio(&src) || !src.is_file() {
+            return Err(messages::PACK_COPY_FAILED.to_string());
+        }
+        if !crate::assets::is_safe_single_file_name(&file_name) {
+            return Err(messages::PACK_COPY_FAILED.to_string());
+        }
+        let dir = crate::assets::project_dir(&app, &project_id)?.join("assets");
+        fs::create_dir_all(&dir).map_err(|_| messages::PACK_COPY_FAILED.to_string())?;
+        fs::copy(&src, dir.join(&file_name)).map_err(|_| messages::PACK_COPY_FAILED.to_string())?;
+        Ok(format!("assets/{file_name}"))
+    })
+    .await
+}
+
 /// 起動時の片づけ＝途中で止まった作業用・外したフォルダを消す（入っているパックには触らない）。
 /// ⚠️ **置き換え前のフォルダ（`.old-`）は、置き換えが済んでいれば消し、済んでいなければ戻す**（PR レビュー ℹ️）＝
 ///   置き換えの途中で両方の名前の変更が失敗すると元のパックは `.old-` にしか無い。黙って消すと**入っていたパックが無言で失われる**。
@@ -519,6 +556,18 @@ mod tests {
             messages::PACK_TOO_LARGE
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pack_audio_is_the_import_audio_list() {
+        for ok in [
+            "b/a.mp3", "b/a.M4A", "b/a.wav", "b/a.aac", "b/a.ogg", "b/a.flac",
+        ] {
+            assert!(is_pack_audio(Path::new(ok)), "{ok}");
+        }
+        for bad in ["t/intro.json", "f/a.otf", "a/logo.png", "run.exe", "noext"] {
+            assert!(!is_pack_audio(Path::new(bad)), "{bad}");
+        }
     }
 
     #[test]

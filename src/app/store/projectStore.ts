@@ -62,7 +62,7 @@ import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
-import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
+import { resolveLibrarySource } from "./librarySource";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, fillMissingAssetInfo, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
@@ -2711,16 +2711,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
     const stillOpen = sameDocGuard(get);
-    // ⚠️ **「読めなかった」と「1つも無い」を分ける**（差分再監査 2巡目・§2-5）＝`null` を潰して
-    // 「見つかりませんでした」に丸めると、**置いてあるのに置いていないかのような案内**になる
-    //（会社の見た目のロゴを足す経路では「「よく使う素材」に置いてあるか確かめてください」に化ける）。
-    const list = await listLibraryAssets();
-    if (list == null) {
-      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return done(null);
-    }
-    const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
+    // 出どころ（棚／拡張パックの音楽）と「読めなかった」「見つからない」の断りは `resolveLibrarySource` が1か所で持つ
+    //（会社の見た目のロゴを足す経路で「「よく使う素材」に置いてあるか確かめてください」に化けないよう、読めないと無いを分ける）。
+    const resolved = await resolveLibrarySource(libraryAssetId, get().packs);
+    if (!resolved.ok) { set({ importError: resolved.error }); return done(null); }
+    const { lib, copy } = resolved.source;
     const { asset, fileName } = assetFromLibrary(lib, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     if (!stillOpen()) return done(null);
     set({ importError: null });
@@ -2739,7 +2734,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (!stillOpen()) return null;
         set((st) => ({ meta: { ...st.meta, projectId } }));
       }
-      const relPath = await copyLibraryAssetToProject(libraryAssetId, projectId, fileName);
+      const relPath = await copy(projectId, fileName);
       // ⚠️ **できてから一覧へ足す**（切り出し #349 と同じ）＝コピーは失敗しうるので、
       // 先に足すと**中身の無い素材**が一瞬見えてから消える。
       if (!stillOpen()) return null;

@@ -14,6 +14,7 @@ import {
   DUCK_MERGED_MESSAGE, DUPLICATE_FAILED_MESSAGE, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE,
   IMPORT_BUSY_MESSAGE, IMPORT_NO_PROJECT_MESSAGE, IMPORT_TIMELINE_OPEN_MESSAGE, LEAVE_BLOCKED_EXPORTING_MESSAGE,
   TIMELINE_SAVE_FAILED_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, PROJECT_DELETE_FAILED_MESSAGE, CAPTURE_FRAME_ASSET_MISSING_MESSAGE, PREVIEW_WINDOW_OPEN_FAILED_MESSAGE, PREVIEW_WINDOW_NOT_CONNECTED_MESSAGE, AI_GEMINI_KEY_MISSING_MESSAGE, AI_ASSIST_FAILED_MESSAGE, AI_ASSIST_NOT_NEEDED_MESSAGE, AI_ASSIST_UNAVAILABLE_MESSAGE, AI_ASSIST_STALE_MESSAGE,
+  LIBRARY_ASSET_MISSING_MESSAGE, LIBRARY_LIST_UNREADABLE_MESSAGE,
   PACK_INVALID_MESSAGE, PACK_UNLISTED_MESSAGE, PACK_MISSING_LICENSE_MESSAGE, packSkippedMessage, packAppTooOldMessage, packOlderThanInstalledMessage } from "./uiLabels";
 import { AI_PLAN_HOLLOW_MESSAGE, AI_PLAN_UNREADABLE_MESSAGE } from "../infrastructure/aiProviders/messages";
 import { READING_DICT_SYNC_FAILED, READING_DICT_UNREADABLE_FOR_VOICE } from "../infrastructure/voiceProviders/readingDictSync";
@@ -114,6 +115,9 @@ function codeMessages(): Record<string, string> {
     // 同梱したチュートリアル映像を開けない（#1229）。
     TUTORIAL_VIDEO_UNAVAILABLE: TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE,
     // 拡張パック（ADR-0060）。⚠️ 照合・展開の断りは Rust（`messages.rs` の `PACK_*`）。
+    // ⚠️ 棚からの取り込みの断り（段階2b で `librarySource` の定数へ寄せた＝画面の直書きの走査から外れるので等値で守る）。
+    LIBRARY_LIST_UNREADABLE: LIBRARY_LIST_UNREADABLE_MESSAGE,
+    LIBRARY_ASSET_MISSING: LIBRARY_ASSET_MISSING_MESSAGE,
     PACK_INVALID: PACK_INVALID_MESSAGE,
     PACK_UNLISTED: PACK_UNLISTED_MESSAGE,
     PACK_MISSING_LICENSE: PACK_MISSING_LICENSE_MESSAGE,
@@ -437,7 +441,8 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG。
     // ⚠️ **+6**（ADR-0058＝声を文字にする断り6つ：TRANSCRIBE_MISSING／BROKEN／READ_FAILED／FAILED／CANCELLED／BUSY）。
     // ⚠️ **+5**（ADR-0060＝拡張パックの断り5つ：PACK_UNREADABLE／TAMPERED／TOO_LARGE／INSTALL_FAILED／REMOVE_FAILED）。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(40);
+    // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED）。
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(41);
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -454,13 +459,14 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+1**（ADR-0052 決定6＝LOCAL_AI_TOO_LONG・1行）。
     // ⚠️ **+6**（ADR-0058）＝どれも `cargo fmt` が2行に折り返した（1行の数は 14 のまま）。
     // ⚠️ **+5**（ADR-0060）＝`cargo fmt` が4つを2行に折り返し、PACK_TAMPERED だけ1行（長すぎて折れない）。
-    expect(all, "定数の数が変わった").toBe(40);
+    // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED は2行）。
+    expect(all, "定数の数が変わった").toBe(41);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
     expect(oneLine, "1行で書かれた定数の数が変わった").toBe(15);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(25);
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(26);
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -573,7 +579,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
     // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
     // ⚠️ **+11**（ADR-0060）＝拡張パックの PACK_* 11行（Rust 5・画面 6）。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(315);
+    // ⚠️ **+1**（ADR-0060 段階2b）＝PACK_COPY_FAILED。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(316);
   });
 
 
@@ -861,7 +868,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（#1410）＝BAKE_VIDEO_AUDIO_TRANSITION。
     // ⚠️ **+1**（0.5.2 出口監査）＝TIMELINE_VIDEO_STILL_FLIPPED_CROP（ADR-0059 で足したのに表に無かった）。
     // ⚠️ **+11**（ADR-0060）＝拡張パックの PACK_* 11行（Rust 5・画面 6）。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(310);
+    // ⚠️ **+1**（ADR-0060 段階2b）＝PACK_COPY_FAILED。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(311);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -894,6 +902,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
       // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
       // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP（`editBlockedMessage` 経由で等値）。
-    ).toBe(149); // +6（ADR-0060＝画面側の PACK_* 6つ）
+    ).toBe(151); // +6（ADR-0060＝画面側の PACK_* 6つ）／+2（段階2b＝棚の取り込みの断り LIBRARY_LIST_UNREADABLE／LIBRARY_ASSET_MISSING を等値へ）
   });
 });

@@ -628,10 +628,14 @@ const packReject = [
   ['pack: 文字の形の拡張子は小文字で書く（大文字は断る）', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.OTF', displayName: 'A' }] } })],
   ['pack: 文字の形の名前に __ は使えない（id の境目が割れる）', withPack({ contents: { fonts: [{ fontId: 'a__b', file: 'f/a.otf', displayName: 'A' }] } })],
   ['pack: 文字の形の表示名は必須', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.otf' }] } })],
+  ['pack: 音楽のファイルは取り込みで受ける音だけ（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.exe', displayName: 'A' }] } })],
+  ['pack: 音楽の名前に __ は使えない', withPack({ contents: { bgm: [{ bgmId: 'a__b', file: 'b/a.mp3', displayName: 'A' }] } })],
+  ['pack: 音楽の表示名は必須', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.mp3' }] } })],
 ];
 // 受け入れる側（文字の形を持つパック＝段階2）。
 const packAccept = [
   ['pack: 文字の形を持つパックを許容（段階2）', withPack({ contents: { fonts: [{ fontId: 'mincho_bold', file: 'f/a.woff2', displayName: '明朝' }] }, licenses: [{ target: 'fonts', license: 'SIL OFL 1.1' }] })],
+  ['pack: 音楽を持つパックを許容（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'morning', file: 'bgm/a.flac', displayName: '朝' }] }, licenses: [{ target: 'bgm', license: 'CC0' }] })],
 ];
 for (const [desc, data] of packAccept) {
   if (vPack(data)) console.log(`PASS  must-accept  ${desc}`);
