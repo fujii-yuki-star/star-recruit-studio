@@ -462,7 +462,8 @@ fn read_data_url_blocking(
     ))
 }
 
-/// 動画へコピーしてよい音のファイルか（段階2b＝BGM）。⚠️ **domain の `AUDIO_FILE_EXTENSIONS` と同じ並び**（取り込みで受ける音）。
+/// 動画へコピーしてよい音のファイルか（段階2b＝BGM）。⚠️ **domain の `AUDIO_FILE_EXTENSIONS` と同じ並び**（取り込みで受ける音・`extensionPack.test.ts` が照合）。
+/// 大文字の拡張子もここでは通すが、manifest の schema が小文字だけを受けるので、パックの中に大文字は入らない（先に schema で断る）。
 fn is_pack_audio(p: &Path) -> bool {
     const AUDIO: [&str; 6] = ["mp3", "m4a", "wav", "aac", "ogg", "flac"];
     p.extension()
