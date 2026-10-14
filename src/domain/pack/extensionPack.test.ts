@@ -183,3 +183,42 @@ describe('文字の形（段階2）', () => {
     expect(projectUsesPack('{"videoSettings":{"fontId":"user_font_001"}}', 'office')).toBe(false);
   });
 });
+
+describe('音楽（段階2b）', () => {
+  const withBgm = (bgm: { bgmId: string; file: string; displayName: string }[], over: Partial<ExtensionPackManifest> = {}) =>
+    manifest({
+      contents: { bgm },
+      files: bgm.map((b) => ({ path: b.file, sha256: SHA })),
+      licenses: [{ target: 'bgm', license: 'CC0' }],
+      ...over,
+    });
+
+  it('音楽を持つパックを読み、棚に並べる id を組む', async () => {
+    const { packBgms } = await import('./extensionPack');
+    const r = parsePackManifest(JSON.stringify(withBgm([{ bgmId: 'morning', file: 'bgm/morning.mp3', displayName: '朝' }])));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(packBgms([r.manifest])).toEqual([{ id: 'pack_office_looks__morning', packId: 'office_looks', file: 'bgm/morning.mp3', displayName: '朝' }]);
+  });
+
+  it('同じ名前の音楽が2つ・権利が無い・照合の一覧に無い・音でない拡張子は断る', () => {
+    const b = { bgmId: 'morning', file: 'bgm/a.mp3', displayName: 'A' };
+    expect(parsePackManifest(JSON.stringify(withBgm([b, { ...b, file: 'bgm/b.mp3' }])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+    expect(parsePackManifest(JSON.stringify(withBgm([b], { licenses: [{ target: 'templates', license: 'x' }] })))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: 'bgm' } });
+    expect(parsePackManifest(JSON.stringify(withBgm([b], { files: [] })))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.unlistedContent, path: 'bgm/a.mp3' } });
+    expect(parsePackManifest(JSON.stringify(withBgm([{ ...b, file: 'bgm/a.exe' }])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+  });
+
+  /** ⚠️ **同じ並びが Rust にもある**（`is_pack_audio`）＝片方だけ足すと「棚に並ぶのに取り込めない」。schema の pattern も同じ並び。 */
+  it('音の拡張子は domain・Rust・schema で同じ並び', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { AUDIO_FILE_EXTENSIONS } = await import('../asset/assetFile');
+    const rs = readFileSync('src-tauri/src/packs.rs', 'utf8');
+    const m = /const AUDIO: \[&str; \d+\] = \[([^\]]+)\]/.exec(rs);
+    expect(m, 'packs.rs の AUDIO が見つからない').not.toBeNull();
+    expect(m![1].split(',').map((s) => s.trim().replace(/"/g, ''))).toEqual([...AUDIO_FILE_EXTENSIONS]);
+    const schema = JSON.parse(readFileSync('docs/yuko_recruit_docs/schemas/extension-pack.schema.json', 'utf8'));
+    const pat: string = schema.properties.contents.properties.bgm.items.properties.file.allOf[1].pattern;
+    expect(pat).toBe(`${String.fromCharCode(92)}.(${AUDIO_FILE_EXTENSIONS.join('|')})$`);
+  });
+});

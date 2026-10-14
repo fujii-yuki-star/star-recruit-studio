@@ -417,10 +417,10 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 ### 7.7 拡張パック（`manifest.json`・ADR-0060）
 
-**データだけ**のパック（見た目パターン・その既定素材・文字の形・組み込み機能の鍵）。**プログラムは入れられない**。1 ファイル（`.starpack`＝zip）の一番上に `manifest.json` を置く。正典は `schemas/extension-pack.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`。段階2で `contents.fonts` を足したが、**main へ出る前なので `"1.0"` のまま**＝段階1だけの版は出回っていない。以後、中身の種類を足すときは版を上げ、そのパックの `minAppVersion` も対応する版以上にする）。
+**データだけ**のパック（見た目パターン・その既定素材・文字の形・音楽・組み込み機能の鍵）。**プログラムは入れられない**。1 ファイル（`.starpack`＝zip）の一番上に `manifest.json` を置く。正典は `schemas/extension-pack.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`。段階2で `contents.fonts`・`contents.bgm` を足したが、**main へ出る前なので `"1.0"` のまま**＝段階1だけの版は出回っていない。以後、中身の種類を足すときは版を上げ、そのパックの `minAppVersion` も対応する版以上にする）。
 
 - **manifest**：`packId`（英小文字で始まる・英小文字／数字／単独の `_`・40 字まで・`__` は使えない）・`name`・`version`（`x.y.z`）・`publisher`・`description`○・`minAppVersion`（`x.y.z`）・
-  `contents`（`templates[].file`・`templateAssets[].{assetId,file}`・`fonts[].{fontId,file,displayName}`〔段階2・ttf/otf/woff/woff2・`fontId` はパックの中で重ならない〕・`features[]`＝少なくとも1種類）・`files[].{path,sha256}`（**manifest 以外の全ファイル**）・`licenses[].{target,license,credit○}`（**中身の種類ごとに必須**）。
+  `contents`（`templates[].file`・`templateAssets[].{assetId,file}`・`fonts[].{fontId,file,displayName}`〔段階2・ttf/otf/woff/woff2・`fontId` はパックの中で重ならない〕・`bgm[].{bgmId,file,displayName}`〔段階2b・mp3/m4a/wav/aac/ogg/flac＝取り込みで受ける音と同じ・`bgmId` はパックの中で重ならない〕・`features[]`＝少なくとも1種類）・`files[].{path,sha256}`（**manifest 以外の全ファイル**）・`licenses[].{target,license,credit○}`（**中身の種類ごとに必須**）。
 - **パス**：`/` 区切り・各部分は英数字と `- _ .`・`.`／`..`・空の部分・先頭や末尾の `/`・`manifest.json` は不可（schema の `PackPath` と Rust の `is_safe_rel_path` が同じ規則）。⚠️ **Rust はさらに Windows だけの重なりを断る**＝末尾の `.`・予約名（`con`・`nul`・`aux.json` など）・大文字小文字だけ違う名前の重なり（schema の pattern では表しにくいので Rust 側だけの決まり）。
 - **見せてから入れる**：画面は `pack_inspect` で読んだ manifest の**文字そのもの**を `pack_install` へ渡し、Rust は zip の中の manifest と**一致しなければ断る**（見せた後にファイルが差し替わっても、見せたものと違う中身を入れない）。重い処理（展開・照合・読み込み）は窓の外（`spawn_blocking`）で走る。
 - **id の名前空間**：パックの見た目パターンと既定素材は **`pack_<packId>__<中の名前>`**（`readPackTemplate` が読むときに付ける＝パックの中では短い名前で書く）。`templateId` の schema（`^[a-z0-9_]+$`）に収まる形。同梱（記述的な id）・利用者（`user_tmpl_NNN`）とは頭で分かれる。
@@ -429,6 +429,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - **読む**：起動時（`loadUserTemplates` の後）と入れた・外した後に `loadPacks`。読めないパックは飛ばして名前を知らせる（`PACK_SKIPPED`）。見た目パターンは `templates` に、既定素材の data URL は `templateAssetSrcById` に合流する（描画・書き出しは今の道のまま）。
 - **動画からの参照**：見た目パターンは**動画へコピーしない**（利用者の見た目パターンと同じ＝ADR-0024 決定6 の例外）。外すと、その場面は `TEMPLATE_NOT_FOUND` の知らせ（黙って差し替えない）。
   **文字の形もコピーしない**（持ち込みフォントと同じ＝ADR-0038）。持ち込みと**同じ一覧**（`userFonts`／`userFontIds`）に並び、外すと `USER_FONT_MISSING` で書き出しを止める。読み込みは `pack_read_data_url`（ttf/otf/woff/woff2・64MB まで）→ `FontFace`。
+  **音楽は動画へコピーする**（ADR-0060 決定5）＝素材の棚に `pack_<packId>__<bgmId>` の行として並び、取り込むと `pack_copy_to_project` で `assets/asset_NNN.<拡張子>` へ写す＝動画の中は普通の音の素材（パックの id は残らない・外しても鳴る）。棚の行と同じ口（`resolveLibrarySource`）を両方の形式が通る。
 - **作る道具**：`node scripts/make-starpack.mjs <フォルダ> <出力.starpack>`（`files` を全ファイルの SHA-256 で埋めてまとめる）。
 
 ## 8. 検証ルール（コード化可能な形）

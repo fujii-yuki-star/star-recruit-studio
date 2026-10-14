@@ -2151,6 +2151,12 @@ export const PACK_UNNAMED_LABEL = "（名前の読めない拡張パック）";
 /** 文字の形を選ぶ一覧の添え書き（持ち込み／拡張パック・ADR-0060 段階2）。 */
 export const FONT_NOTE_USER = "手持ち";
 export const FONT_NOTE_PACK = "拡張パック";
+/** 素材の棚の一覧が読めない（`LIBRARY_LIST_UNREADABLE`）＝「1つも無い」と分ける。 */
+export const LIBRARY_LIST_UNREADABLE_MESSAGE = "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。";
+/** 棚の素材（または拡張パックの音楽）が見つからない（`LIBRARY_ASSET_MISSING`）。 */
+export const LIBRARY_ASSET_MISSING_MESSAGE = "この素材は見つかりませんでした。一覧を開き直してください。";
+/** 素材の棚に並べる拡張パックの音楽の見出し（ADR-0060 段階2b）。 */
+export const PACK_BGM_LIST_LABEL = "拡張パックの音楽";
 /** 入れた・外したときの知らせ。 */
 export function packInstalledMessage(name: string): string {
   return `「${name}」を入れました。`;
@@ -2183,6 +2189,7 @@ export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templates: "見た目パターン",
   templateAssets: "見た目パターンの写真・ロゴ",
   fonts: "文字の形",
+  bgm: "音楽",
   features: "機能",
 };
 /** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
@@ -2191,6 +2198,7 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   if (m.contents.templates) parts.push(`${PACK_CONTENT_LABEL.templates} ${m.contents.templates.length}個`);
   if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
   if (m.contents.fonts) parts.push(`${PACK_CONTENT_LABEL.fonts} ${m.contents.fonts.length}個`);
+  if (m.contents.bgm) parts.push(`${PACK_CONTENT_LABEL.bgm} ${m.contents.bgm.length}曲`);
   if (m.contents.features) {
     const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
     parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);

@@ -38,3 +38,8 @@ export async function readPackText(packId: string, rel: string): Promise<string>
 export async function readPackDataUrl(packId: string, rel: string): Promise<string> {
   return invoke<string>('pack_read_data_url', { packId, rel });
 }
+
+/** パックの音楽を動画の素材としてコピーする（段階2b）。返り値は動画の中の相対パス（`assets/<fileName>`）。 */
+export async function copyPackFileToProject(packId: string, rel: string, projectId: string, fileName: string): Promise<string> {
+  return invoke<string>('pack_copy_to_project', { packId, rel, projectId, fileName });
+}

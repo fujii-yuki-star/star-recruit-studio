@@ -16,6 +16,7 @@ export interface ExtensionPackManifest {
     templates?: { file: string }[];
     templateAssets?: { assetId: string; file: string }[];
     fonts?: { fontId: string; file: string; displayName: string }[];
+    bgm?: { bgmId: string; file: string; displayName: string }[];
     features?: string[];
   };
   files: { path: string; sha256: string }[];
@@ -23,7 +24,7 @@ export interface ExtensionPackManifest {
 }
 
 /** 中身の種類（`contents` のキー＝`licenses[].target`）。 */
-export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'fonts', 'features'] as const;
+export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'fonts', 'bgm', 'features'] as const;
 export type PackContentKind = (typeof PACK_CONTENT_KINDS)[number];
 
 /** パックを読めない・入れられない理由（文言は `uiLabels` の `packProblemMessage`・`15 §6`）。 */
@@ -66,6 +67,8 @@ export function parsePackManifest(raw: string): { ok: true; manifest: ExtensionP
   // ⚠️ 文字の形の名前が重なると、動画から指したときにどちらか分からない（schema では項目の重なりを表せない）。
   const fontIds = (m.contents.fonts ?? []).map((f) => f.fontId);
   if (new Set(fontIds).size !== fontIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
+  const bgmIds = (m.contents.bgm ?? []).map((b) => b.bgmId);
+  if (new Set(bgmIds).size !== bgmIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
   const licensed = new Set(m.licenses.map((l) => l.target));
   for (const kind of PACK_CONTENT_KINDS) {
     if (m.contents[kind] && !licensed.has(kind)) return { ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: kind } };
@@ -79,7 +82,31 @@ export function contentFiles(m: ExtensionPackManifest): string[] {
     ...(m.contents.templates ?? []).map((t) => t.file),
     ...(m.contents.templateAssets ?? []).map((a) => a.file),
     ...(m.contents.fonts ?? []).map((f) => f.file),
+    ...(m.contents.bgm ?? []).map((b) => b.file),
   ];
+}
+
+/** パックの音楽1つぶん（素材の棚に並べる id＝`pack_<packId>__<bgmId>`・段階2b）。 */
+export interface PackBgm {
+  id: string;
+  packId: string;
+  file: string;
+  displayName: string;
+}
+
+/**
+ * 入っているパックの音楽を、棚に並べる id つきで並べる。
+ * ⚠️ **id は棚の中だけの名前**＝使うときは動画へコピーして新しい素材の番号を採る（ADR-0060 決定5）。動画の中にこの id は残らない。
+ */
+export function packBgms(manifests: readonly ExtensionPackManifest[]): PackBgm[] {
+  return manifests.flatMap((m) =>
+    (m.contents.bgm ?? []).map((b) => ({
+      id: `${packIdPrefix(m.packId)}${b.bgmId}`,
+      packId: m.packId,
+      file: b.file,
+      displayName: b.displayName,
+    })),
+  );
 }
 
 /** パックの文字の形1つぶん（動画から指す id＝`pack_<packId>__<fontId>`・ADR-0060 決定4）。 */

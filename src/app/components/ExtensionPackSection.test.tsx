@@ -155,5 +155,6 @@ describe("中身のあらまし", () => {
     const font = { fontId: "a", file: "f/a.otf", displayName: "A" };
     expect(packContentsSummary({ contents: { templates: [{ file: "t.json" }], fonts: [font, { ...font, fontId: "b" }] } }))
       .toBe("見た目パターン 1個・文字の形 2個");
+    expect(packContentsSummary({ contents: { bgm: [{ bgmId: "a", file: "b/a.mp3", displayName: "A" }] } })).toBe("音楽 1曲");
   });
 });
