@@ -913,6 +913,8 @@ function assertBakeable(doc: TimelineProject): void {
   }
 }
 
+/** 拡張パックの読み直しの世代（`loadPacks` が重なったとき、後から始めた1回だけを当てる）。 */
+let packLoadSeq = 0;
 
 /**
  * 取り込んだ写真を裏で1枚ずつ読んで説明を当てる（ADR-0052 決定4・12 §4b）。取り込みの `await` には入れない。
@@ -2256,7 +2258,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
   loadPacks: async () => {
+    // ⚠️ **重なったら後から始めた1回だけを当てる**（PR レビュー 🟡）＝入れた直後に外す・起動時の読み込みと重なる、で
+    //   先に始めた方が後から終わると、**外したパックの中身を書き戻す**（字なら書き出しの門を通り、描画は既定へ倒れる）。
+    const seq = ++packLoadSeq;
     const packs = await readInstalledPacks();
+    if (seq !== packLoadSeq) return;
     // ⚠️ **パック由来の分だけを差し替える**＝同梱・利用者の見た目パターンと素材には触らない。
     set((s) => ({
       templates: replacePackTemplates(s.templates, packs.templates),
@@ -2267,17 +2273,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       packs: packs.manifests,
       packsSkipped: packs.skipped,
     }));
-    // 文字の形（段階2）＝置き場を差し替えてから読み込み、選ぶ一覧へ合流する。
-    // ⚠️ **持ち込みの一覧がまだ無い（`userFontIds: null`＝調べていない）ときは一覧に触らない**＝
-    //   ここで埋めると「調べた・持ち込みは0件」に見える。持ち込みを読んだとき（`refreshUserFonts`）に合流する。
+    // 文字の形（段階2）＝置き場を差し替え、選ぶ一覧へ合流してから読み込む。
+    // ⚠️ **持ち込みの一覧がまだ無い（`userFontIds: null`＝調べていない）ときは `userFontIds` に触らない**＝
+    //   ここで埋めると「調べた・持ち込みは0件」に見える（持ち込みを読んだとき＝`refreshUserFonts` に合流する）。
+    //   ⚠️ **選ぶ一覧（`userFonts`）には常に出す**＝持ち込みの一覧が読めないときでも、パックの字は選べる。
     const fonts = packFonts(packs.manifests);
     setPackFontSources(fonts);
-    await loadUserFonts(fonts.map((f) => f.id));
     set((s) => {
-      if (s.userFontIds == null) return {};
       const userFonts = mergeFontList(s.userFonts, packs.manifests);
-      return { userFonts, userFontIds: userFonts.map((f) => f.id) };
+      return s.userFontIds == null ? { userFonts } : { userFonts, userFontIds: userFonts.map((f) => f.id) };
     });
+    await loadUserFonts(fonts.map((f) => f.id));
   },
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
@@ -3029,7 +3035,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（案内の「取り込み直す」も同じ目録を通るので必ず失敗＝行き止まり・§2-5）。
     // ⚠️ **起動直後の「まだ調べていない」（`userFontIds: null`）とも別**＝あちらは待てば埋まるので
     // 止めない。読めなかったことは別の印で持ち、公開前チェックがそう言って止める。
-    if (list == null) { set({ userFontsUnreadable: true }); return; }
+    if (list == null) { set({ userFontsUnreadable: true, userFonts: mergeFontList(get().userFonts, get().packs) }); return; }
     set({ userFontsUnreadable: false });
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。

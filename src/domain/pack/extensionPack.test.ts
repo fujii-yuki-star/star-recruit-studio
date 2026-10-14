@@ -154,7 +154,10 @@ describe('文字の形（段階2）', () => {
     const r = parsePackManifest(JSON.stringify(withFonts([{ fontId: 'mincho', file: 'fonts/mincho.otf', displayName: '明朝' }])));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(packFonts([r.manifest])).toEqual([{ id: 'pack_office_looks__mincho', packId: 'office_looks', file: 'fonts/mincho.otf', displayName: '明朝' }]);
+    expect(packFonts([r.manifest])).toEqual([{ id: 'pack_office_looks__mincho', packId: 'office_looks', file: 'fonts/mincho.otf', sha256: SHA, displayName: '明朝' }]);
+    // 組み立てた id は文字の形の id の形（schema と同じ規則）に通る＝頭と境目を2か所で書いていても割れていない。
+    const { isPackFontId } = await import('../font/fontCatalog');
+    expect(isPackFontId(packFonts([r.manifest])[0].id)).toBe(true);
   });
 
   it('同じ名前の文字の形が2つ・権利が無い・照合の一覧に無い・文字の形でない拡張子は断る', () => {

@@ -87,17 +87,22 @@ export function resetRegisteredUserFonts(): void {
  * 拡張パックの文字の形の置き場（id → パックとその中のファイル・ADR-0060 段階2）。
  * ⚠️ **id から置き場を引けるようにここで持つ**＝描く側・書き出し側は id しか知らない（家族名＝id）。
  */
-const packFontSources = new Map<string, { packId: string; file: string }>();
+type PackFontSource = { packId: string; file: string; sha256: string };
+const packFontSources = new Map<string, PackFontSource>();
+
+/** 同じ置き場・同じ中身か（新しい版でファイル名が同じでも、中身が違えば別物）。 */
+function sameSource(a: PackFontSource | undefined, b: PackFontSource | undefined): boolean {
+  return a != null && b != null && a.packId === b.packId && a.file === b.file && a.sha256 === b.sha256;
+}
 
 /**
  * パックの文字の形の置き場を差し替える（パックを読み直すたびに呼ぶ）。
  * ⚠️ **外した・中身が変わったものは登録を外す**＝残すと、外したパックの字で描き続ける／入れ直した新しい字に変わらない。
  */
-export function setPackFontSources(fonts: readonly { id: string; packId: string; file: string }[]): void {
-  const next = new Map(fonts.map((f) => [f.id, { packId: f.packId, file: f.file }]));
+export function setPackFontSources(fonts: readonly { id: string; packId: string; file: string; sha256: string }[]): void {
+  const next = new Map(fonts.map((f) => [f.id, { packId: f.packId, file: f.file, sha256: f.sha256 }]));
   for (const [id, prev] of packFontSources) {
-    const now = next.get(id);
-    if (now && now.packId === prev.packId && now.file === prev.file) continue;
+    if (sameSource(prev, next.get(id))) continue;
     for (const face of facesById.get(id) ?? []) {
       if (typeof document !== 'undefined' && document.fonts) document.fonts.delete(face);
     }
@@ -140,6 +145,9 @@ export async function ensureUserFontLoaded(fontId: string): Promise<boolean> {
   if (!isTauri() || typeof document === 'undefined' || !document.fonts) return false;
   if (registered.has(fontId)) return true;
   try {
+    // ⚠️ **読んでいる間にパックが外された・入れ替わったら登録しない**（PR レビュー 🟡）＝読み終わってから足すと、
+    //   外したパックの字が登録されたまま残り、入れ直しても `registered` で読み直さない。
+    const src = packFontSources.get(fontId);
     const base64 = await readFontBase64(fontId);
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     const family = userFontCssFamily(fontId);
@@ -147,9 +155,10 @@ export async function ensureUserFontLoaded(fontId: string): Promise<boolean> {
     for (const weight of ['400', '700']) {
       const face = new FontFace(family, bytes, { weight });
       await face.load();
-      document.fonts.add(face);
       faces.push(face);
     }
+    if (isPackFontId(fontId) && !sameSource(src, packFontSources.get(fontId))) return false;
+    for (const face of faces) document.fonts.add(face);
     facesById.set(fontId, faces);
     registered.add(fontId);
     return true;

@@ -417,7 +417,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 ### 7.7 拡張パック（`manifest.json`・ADR-0060）
 
-**データだけ**のパック（見た目パターン・その既定素材・文字の形・組み込み機能の鍵）。**プログラムは入れられない**。1 ファイル（`.starpack`＝zip）の一番上に `manifest.json` を置く。正典は `schemas/extension-pack.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`）。
+**データだけ**のパック（見た目パターン・その既定素材・文字の形・組み込み機能の鍵）。**プログラムは入れられない**。1 ファイル（`.starpack`＝zip）の一番上に `manifest.json` を置く。正典は `schemas/extension-pack.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`。段階2で `contents.fonts` を足したが、**main へ出る前なので `"1.0"` のまま**＝段階1だけの版は出回っていない。以後、中身の種類を足すときは版を上げ、そのパックの `minAppVersion` も対応する版以上にする）。
 
 - **manifest**：`packId`（英小文字で始まる・英小文字／数字／単独の `_`・40 字まで・`__` は使えない）・`name`・`version`（`x.y.z`）・`publisher`・`description`○・`minAppVersion`（`x.y.z`）・
   `contents`（`templates[].file`・`templateAssets[].{assetId,file}`・`fonts[].{fontId,file,displayName}`〔段階2・ttf/otf/woff/woff2・`fontId` はパックの中で重ならない〕・`features[]`＝少なくとも1種類）・`files[].{path,sha256}`（**manifest 以外の全ファイル**）・`licenses[].{target,license,credit○}`（**中身の種類ごとに必須**）。

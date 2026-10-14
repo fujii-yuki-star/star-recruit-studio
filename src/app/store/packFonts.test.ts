@@ -1,9 +1,13 @@
 // 拡張パックの文字の形（ADR-0060 段階2）を、持ち込みと同じ一覧へ合流する。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ manifests: [] as string[], userFonts: [] as { id: string; fileName: string; displayName: string }[] | null, loaded: [] as string[] }));
+const fx = vi.hoisted(() => ({ gate: null as null | Promise<void>, manifests: [] as string[], userFonts: [] as { id: string; fileName: string; displayName: string }[] | null, loaded: [] as string[] }));
 vi.mock("../../infrastructure/packFs", () => ({
-  listPackManifests: vi.fn(async () => fx.manifests),
+  listPackManifests: vi.fn(async () => {
+    const m = fx.manifests;
+    if (fx.gate) await fx.gate;
+    return m;
+  }),
   readPackText: vi.fn(async () => { throw new Error("無い"); }),
   readPackDataUrl: vi.fn(async () => "data:font/otf;base64,AA"),
 }));
@@ -28,6 +32,7 @@ beforeEach(() => {
   fx.manifests = [];
   fx.userFonts = [{ id: "user_font_001", fileName: "a.ttf", displayName: "手書き" }];
   fx.loaded = [];
+  fx.gate = null;
   setPackFontSources([]);
   useProjectStore.setState({ userFontIds: null, userFonts: [], userFontsUnreadable: false, packs: [] });
 });
@@ -70,5 +75,32 @@ describe("パックの文字の形を一覧へ合流する", () => {
     fx.userFonts = [];
     await useProjectStore.getState().refreshUserFonts();
     expect(useProjectStore.getState().userFontIds).toEqual(["pack_office__mincho"]);
+  });
+
+  it("読み直しが重なったら、後から始めた1回だけを当てる（外したパックの字を書き戻さない）", async () => {
+    await useProjectStore.getState().refreshUserFonts();
+    let release!: () => void;
+    fx.gate = new Promise((r) => { release = r; });
+    fx.manifests = [fontPack("office")];
+    const first = useProjectStore.getState().loadPacks(); // 入っていた頃の一覧を読み始めたまま止まる
+    fx.gate = null;
+    fx.manifests = [];
+    await useProjectStore.getState().loadPacks(); // 外した後の読み直しが先に終わる
+    release();
+    await first;
+    expect(useProjectStore.getState().userFontIds).toEqual(["user_font_001"]);
+    expect(useProjectStore.getState().packs).toEqual([]);
+    expect(packFontIds()).toEqual([]);
+  });
+
+  it("持ち込みの一覧が読めないときも、パックの字は選ぶ一覧に出る（「調べたか」は変えない）", async () => {
+    fx.userFonts = null;
+    fx.manifests = [fontPack("office")];
+    await useProjectStore.getState().loadPacks();
+    await useProjectStore.getState().refreshUserFonts();
+    const s = useProjectStore.getState();
+    expect(s.userFontsUnreadable).toBe(true);
+    expect(s.userFonts.map((f) => f.id)).toEqual(["pack_office__mincho"]);
+    expect(s.userFontIds).toBeNull();
   });
 });

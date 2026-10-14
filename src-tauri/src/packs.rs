@@ -219,6 +219,19 @@ fn same_file_set(entries: &[String], listed: &[(String, String)]) -> bool {
 /// 1つ展開しながら SHA-256 を取り、合わなければ断る。
 /// ⚠️ **書いた量も数える**＝zip に**書いてある大きさ**（`size()`）は信用しない（嘘の大きさで展開を膨らませる zip がある）。
 ///   書いてある大きさを超えた・残りの上限（`budget`）を超えたら、その場で止めて断る。
+/// 1ファイルの大きさの上限＝**読むときの上限と同じ**（PR レビュー 🟡）。
+/// ⚠️ 入れるときに見ないと、入ったのに読めない中身ができる（字なら一覧に載って門を通り、描画は既定へ倒れる＝黙って別の字）。
+fn file_cap(p: &Path) -> u64 {
+    if p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("json"))
+        == Some(true)
+    {
+        return MAX_TEXT_BYTES;
+    }
+    data_url_kind(p).map(|(_, max)| max).unwrap_or(u64::MAX)
+}
+
 fn extract_checked(
     zip: &mut zip::ZipArchive<fs::File>,
     name: &str,
@@ -230,6 +243,7 @@ fn extract_checked(
         .by_name(name)
         .map_err(|_| messages::PACK_TAMPERED.to_string())?;
     let declared = e.size();
+    let cap = file_cap(Path::new(name));
     let mut written: u64 = 0;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|_| messages::PACK_INSTALL_FAILED.to_string())?;
@@ -245,7 +259,7 @@ fn extract_checked(
             break;
         }
         written += n as u64;
-        if written > declared || written > *budget {
+        if written > declared || written > *budget || written > cap {
             return Err(messages::PACK_TOO_LARGE.to_string());
         }
         h.update(&buf[..n]);
@@ -475,6 +489,45 @@ pub fn cleanup_pack_staging(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_stops_at_the_per_file_cap() {
+        use zip::write::SimpleFileOptions;
+        let dir = std::env::temp_dir().join(format!("stario_pack_cap_{}", now_tag()));
+        fs::create_dir_all(&dir).unwrap();
+        let zpath = dir.join("t.starpack");
+        let body = vec![b' '; (MAX_TEXT_BYTES + 1) as usize];
+        {
+            let mut w = zip::ZipWriter::new(fs::File::create(&zpath).unwrap());
+            w.start_file("t/big.json", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(&body).unwrap();
+            w.finish().unwrap();
+        }
+        let sha = hex(&Sha256::digest(&body));
+        let mut zip = zip::ZipArchive::new(fs::File::open(&zpath).unwrap()).unwrap();
+        let mut budget = u64::MAX;
+        assert_eq!(
+            extract_checked(
+                &mut zip,
+                "t/big.json",
+                &sha,
+                &dir.join("out/big.json"),
+                &mut budget
+            )
+            .unwrap_err(),
+            messages::PACK_TOO_LARGE
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_cap_matches_read_limits() {
+        assert_eq!(file_cap(Path::new("t/intro.json")), MAX_TEXT_BYTES);
+        assert_eq!(file_cap(Path::new("a/logo.png")), MAX_IMAGE_BYTES);
+        assert_eq!(file_cap(Path::new("f/mincho.otf")), MAX_FONT_BYTES);
+        assert_eq!(file_cap(Path::new("docs/readme.txt")), u64::MAX);
+    }
 
     #[test]
     fn data_url_kind_reads_images_and_fonts_only() {

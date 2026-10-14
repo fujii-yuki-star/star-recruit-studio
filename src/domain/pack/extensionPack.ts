@@ -87,6 +87,8 @@ export interface PackFont {
   id: string;
   packId: string;
   file: string;
+  /** 中身の SHA-256（`files` から）。⚠️ 新しい版でもファイル名は同じことが多い＝中身が変わったかはこれで見る。 */
+  sha256: string;
   displayName: string;
 }
 
@@ -97,6 +99,7 @@ export function packFonts(manifests: readonly ExtensionPackManifest[]): PackFont
       id: `${packIdPrefix(m.packId)}${f.fontId}`,
       packId: m.packId,
       file: f.file,
+      sha256: m.files.find((x) => x.path === f.file)?.sha256 ?? '',
       displayName: f.displayName,
     })),
   );
