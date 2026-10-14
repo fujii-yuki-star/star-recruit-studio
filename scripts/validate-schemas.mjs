@@ -631,10 +631,15 @@ const packReject = [
   ['pack: 音楽のファイルは取り込みで受ける音だけ（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.exe', displayName: 'A' }] } })],
   ['pack: 音楽の名前に __ は使えない', withPack({ contents: { bgm: [{ bgmId: 'a__b', file: 'b/a.mp3', displayName: 'A' }] } })],
   ['pack: 音楽の表示名は必須', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.mp3' }] } })],
+  ['pack: 声のファイルは .vvm だけ（段階3）', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.onnx', character: 'あ', styles: [{ speaker: 9001, label: 'ノーマル' }] }] } })],
+  ['pack: 声にはスタイルが1つは要る', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', character: 'あ', styles: [] }] } })],
+  ['pack: 声のキャラ名は必須（クレジットに出す）', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', styles: [{ speaker: 9001, label: 'ノーマル' }] }] } })],
+  ['pack: 声のスタイル番号は整数', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', character: 'あ', styles: [{ speaker: 1.5, label: 'ノーマル' }] }] } })],
 ];
 // 受け入れる側（文字の形を持つパック＝段階2）。
 const packAccept = [
   ['pack: 文字の形を持つパックを許容（段階2）', withPack({ contents: { fonts: [{ fontId: 'mincho_bold', file: 'f/a.woff2', displayName: '明朝' }] }, licenses: [{ target: 'fonts', license: 'SIL OFL 1.1' }] })],
+  ['pack: 声を持つパックを許容（段階3）', withPack({ contents: { voices: [{ voiceId: 'aoi', file: 'v/aoi.vvm', character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }] }, licenses: [{ target: 'voices', license: 'キャラの規約' }] })],
   ['pack: 音楽を持つパックを許容（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'morning', file: 'bgm/a.flac', displayName: '朝' }] }, licenses: [{ target: 'bgm', license: 'CC0' }] })],
 ];
 for (const [desc, data] of packAccept) {

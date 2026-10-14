@@ -156,5 +156,37 @@ describe("中身のあらまし", () => {
     expect(packContentsSummary({ contents: { templates: [{ file: "t.json" }], fonts: [font, { ...font, fontId: "b" }] } }))
       .toBe("見た目パターン 1個・文字の形 2個");
     expect(packContentsSummary({ contents: { bgm: [{ bgmId: "a", file: "b/a.mp3", displayName: "A" }] } })).toBe("音楽 1曲");
+    const voice = (character: string) => ({ voiceId: "a", file: "v/a.vvm", character, styles: [{ speaker: 9001, label: "ノーマル" }] });
+    expect(packContentsSummary({ contents: { voices: [voice("あおい"), voice("みどり")] } })).toBe("声：あおい・みどり");
+  });
+});
+
+describe("声の知らせ（段階3）", () => {
+  it("番号が重なって足せなかった声と、起こし直せなかったことを知らせる", async () => {
+    const { VOICE_ENGINE_RESTART_FAILED_MESSAGE } = await import("../uiLabels");
+    useProjectStore.setState({ packVoicesSkipped: ["声のパック"], voiceEngineRestartError: VOICE_ENGINE_RESTART_FAILED_MESSAGE } as never);
+    render(<ExtensionPackSection />);
+    const alerts = screen.getAllByRole("alert").map((a) => a.textContent);
+    expect(alerts.some((t) => t?.includes("声のパック") && t.includes("番号が重なって"))).toBe(true);
+    expect(alerts).toContain(VOICE_ENGINE_RESTART_FAILED_MESSAGE);
+    useProjectStore.setState({ packVoicesSkipped: [], voiceEngineRestartError: null } as never);
+  });
+});
+
+describe("声を作っている間・書き出しの間（段階3）", () => {
+  it("入れる・外すを押せず、理由を添える（声を作るソフトを起こし直すため）", async () => {
+    const { PACK_BUSY_MESSAGE } = await import("../uiLabels");
+    const { useTimelineStore } = await import("../store/timelineStore");
+    useProjectStore.setState({ isGeneratingNarration: true } as never);
+    const { unmount } = render(<ExtensionPackSection />);
+    const pick = screen.getByRole("button", { name: "拡張パックを入れる…" });
+    expect(pick).toBeDisabled();
+    expect(pick.getAttribute("title")).toBe(PACK_BUSY_MESSAGE);
+    unmount();
+    useProjectStore.setState({ isGeneratingNarration: false } as never);
+    useTimelineStore.setState({ _voiceRun: 1 } as never);
+    render(<ExtensionPackSection />);
+    expect(screen.getByRole("button", { name: "拡張パックを入れる…" })).toBeDisabled();
+    useTimelineStore.setState({ _voiceRun: null } as never);
   });
 });

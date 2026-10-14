@@ -368,6 +368,236 @@ pub fn pack_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// パックの中の声の名前（`voiceId`）として安全か（schema と同じ＝英小文字・数字・単独の `_`）。
+fn is_safe_voice_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 40
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && !id.starts_with('_')
+        && !id.ends_with('_')
+        && !id.contains("__")
+}
+
+/// manifest に書かれた声1つぶん（段階3）。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DeclaredVoice {
+    pub pack_id: String,
+    pub voice_id: String,
+    pub path: PathBuf,
+    pub character: String,
+    pub speakers: Vec<i64>,
+}
+
+/// manifest の文字から、声（`contents.voices[].{voiceId,file,character,styles[].speaker}`）を取り出す（段階3）。
+/// ⚠️ **形の悪い項目は黙って飛ばさず、その manifest の声を全部捨てる**＝半分だけ読むと、画面の声の一覧と音声ソフトが読む声が食い違う。
+fn manifest_voices(manifest: &str) -> Vec<(String, String, String, Vec<i64>)> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(manifest) else {
+        return Vec::new();
+    };
+    let Some(items) = v
+        .get("contents")
+        .and_then(|c| c.get("voices"))
+        .and_then(|x| x.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for it in items {
+        let (Some(id), Some(file), Some(character), Some(styles)) = (
+            it.get("voiceId").and_then(|x| x.as_str()),
+            it.get("file").and_then(|x| x.as_str()),
+            it.get("character").and_then(|x| x.as_str()),
+            it.get("styles").and_then(|x| x.as_array()),
+        ) else {
+            return Vec::new();
+        };
+        if !is_safe_voice_id(id)
+            || !is_safe_rel_path(file)
+            || !file.ends_with(".vvm")
+            || character.is_empty()
+        {
+            return Vec::new();
+        }
+        let speakers: Vec<i64> = styles
+            .iter()
+            .filter_map(|s| s.get("speaker").and_then(|x| x.as_i64()))
+            .collect();
+        if speakers.is_empty() || speakers.len() != styles.len() {
+            return Vec::new();
+        }
+        out.push((
+            id.to_string(),
+            file.to_string(),
+            character.to_string(),
+            speakers,
+        ));
+    }
+    out
+}
+
+/// 入っているパックの声（段階3）。packId の順。実体が無いものは入れない。
+fn installed_declared_voices(app: &tauri::AppHandle) -> Vec<DeclaredVoice> {
+    let Ok(root) = packs_dir(app) else {
+        return Vec::new();
+    };
+    let Ok(rd) = fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !is_safe_pack_id(&name) || !e.path().is_dir() {
+            continue;
+        }
+        let Ok(m) = fs::read_to_string(e.path().join(MANIFEST)) else {
+            continue;
+        };
+        for (voice_id, file, character, speakers) in manifest_voices(&m) {
+            let path = e.path().join(&file);
+            if path.is_file() {
+                out.push(DeclaredVoice {
+                    pack_id: name.clone(),
+                    voice_id,
+                    path,
+                    character,
+                    speakers,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.pack_id, &a.voice_id).cmp(&(&b.pack_id, &b.voice_id)));
+    out
+}
+
+/// 声のファイル（`.vvm`＝zip）の中の `metas.json` から、キャラ名とスタイル番号を読む。読めなければ None。
+pub(crate) fn vvm_styles(path: &Path) -> Option<Vec<(String, Vec<i64>)>> {
+    let f = fs::File::open(path).ok()?;
+    let mut zip = zip::ZipArchive::new(f).ok()?;
+    let mut e = zip.by_name("metas.json").ok()?;
+    if e.size() > MAX_MANIFEST_BYTES {
+        return None;
+    }
+    let mut text = String::new();
+    e.read_to_string(&mut text).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let mut out = Vec::new();
+    for c in v.as_array()? {
+        let name = c.get("name")?.as_str()?.to_string();
+        let ids = c
+            .get("styles")?
+            .as_array()?
+            .iter()
+            .map(|s| s.get("id").and_then(|x| x.as_i64()))
+            .collect::<Option<Vec<i64>>>()?;
+        out.push((name, ids));
+    }
+    Some(out)
+}
+
+/// どの声を音声ソフトに読ませるか（段階3）＝**判定はここ1か所**（画面はこの結果だけを声の一覧とクレジットに足す）。
+/// 採る条件：①声のファイルの中身が読める ②manifest のキャラ名が中身に在り、書かれた番号がそのキャラの番号に全部入っている
+/// ③中身の**全部の番号**が、同梱の声とも、先に採ったパックの声とも重ならない（packId の順に先勝ち）。
+/// ⚠️ ①②を見ないと、クレジットの名前（manifest）と実際に鳴る声（中身）が別物になりうる（ADR-0003）。
+/// ⚠️ ③を見ないと、音声ソフトに同じ番号が2つ並び、どちらで読むかが決まらない（実際に起動して確かめた＝落ちずに並ぶ）。
+pub(crate) fn plan_voices<F>(
+    bundled_ids: &BTreeSet<i64>,
+    declared: Vec<DeclaredVoice>,
+    read: F,
+) -> (Vec<DeclaredVoice>, Vec<DeclaredVoice>)
+where
+    F: Fn(&Path) -> Option<Vec<(String, Vec<i64>)>>,
+{
+    let mut taken = bundled_ids.clone();
+    let (mut accepted, mut rejected) = (Vec::new(), Vec::new());
+    for d in declared {
+        let ok = read(&d.path).is_some_and(|metas| {
+            let all: Vec<i64> = metas
+                .iter()
+                .flat_map(|(_, ids)| ids.iter().copied())
+                .collect();
+            let named = metas.iter().find(|(n, _)| *n == d.character);
+            let declared_ok =
+                named.is_some_and(|(_, ids)| d.speakers.iter().all(|s| ids.contains(s)));
+            let unique = all.iter().collect::<BTreeSet<_>>().len() == all.len();
+            if declared_ok && unique && all.iter().all(|id| !taken.contains(id)) {
+                taken.extend(all);
+                true
+            } else {
+                false
+            }
+        });
+        if ok {
+            accepted.push(d);
+        } else {
+            rejected.push(d);
+        }
+    }
+    (accepted, rejected)
+}
+
+/// 同梱の声の番号の全部（`<engine>/model/*.vvm` の中身から）。
+pub(crate) fn bundled_style_ids(engine_dir: &Path) -> BTreeSet<i64> {
+    let mut out = BTreeSet::new();
+    if let Ok(rd) = fs::read_dir(engine_dir.join("model")) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) == Some("vvm") {
+                for (_, ids) in vvm_styles(&p).unwrap_or_default() {
+                    out.extend(ids);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 入っているパックの声の採否（段階3）。`engine_dir` は同梱の音声ソフトの置き場（無ければ同梱の番号は空）。
+pub(crate) fn voice_plan(
+    app: &tauri::AppHandle,
+    engine_dir: Option<&Path>,
+) -> (Vec<DeclaredVoice>, Vec<DeclaredVoice>) {
+    let bundled = engine_dir.map(bundled_style_ids).unwrap_or_default();
+    plan_voices(&bundled, installed_declared_voices(app), vvm_styles)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceRef {
+    pack_id: String,
+    voice_id: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct VoicePlan {
+    accepted: Vec<VoiceRef>,
+    rejected: Vec<VoiceRef>,
+}
+
+fn voice_refs(v: Vec<DeclaredVoice>) -> Vec<VoiceRef> {
+    v.into_iter()
+        .map(|d| VoiceRef {
+            pack_id: d.pack_id,
+            voice_id: d.voice_id,
+        })
+        .collect()
+}
+
+/// 画面が声の一覧に足す声（＝音声ソフトに読ませる声）と、足さない声（段階3）。
+#[tauri::command]
+pub async fn pack_voice_plan(app: tauri::AppHandle) -> Result<VoicePlan, String> {
+    run_blocking(move || {
+        let engine_dir = crate::voicevox_engine::bundled_engine_dir(&app);
+        let (a, r) = voice_plan(&app, engine_dir.as_deref());
+        Ok(VoicePlan {
+            accepted: voice_refs(a),
+            rejected: voice_refs(r),
+        })
+    })
+    .await
+}
+
 /// 外す（フォルダごと消す）。使っている動画を知らせるのは画面（外す前）。
 /// ⚠️ **先に名前を変えてから消す**（PR レビュー ℹ️）＝消す途中で止まると、半端なフォルダが「読めないパック」として残る。
 ///   名前を変えた時点で一覧からは消え、消し残しは次の起動の片づけが消す。
@@ -555,6 +785,101 @@ mod tests {
             .unwrap_err(),
             messages::PACK_TOO_LARGE
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn manifest_voices_reads_all_or_nothing() {
+        let ok = r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm","character":"あおい","styles":[{"speaker":9001,"label":"a"}]}]}}"#;
+        assert_eq!(
+            manifest_voices(ok),
+            vec![(
+                "aoi".to_string(),
+                "v/aoi.vvm".to_string(),
+                "あおい".to_string(),
+                vec![9001]
+            )]
+        );
+        assert!(manifest_voices(r#"{"contents":{"templates":[]}}"#).is_empty());
+        let good = r#"{"voiceId":"aoi","file":"v/aoi.vvm","character":"あ","styles":[{"speaker":1,"label":"a"}]}"#;
+        // 1つでも形が悪ければ、その manifest の声は全部捨てる（画面と音声ソフトで食い違わせない）。
+        for bad in [
+            r#"{"voiceId":"x","file":"../x.vvm","character":"あ","styles":[{"speaker":2,"label":"a"}]}"#,
+            r#"{"voiceId":"a__b","file":"v/b.vvm","character":"あ","styles":[{"speaker":2,"label":"a"}]}"#,
+            r#"{"voiceId":"b","file":"v/b.exe","character":"あ","styles":[{"speaker":2,"label":"a"}]}"#,
+            r#"{"file":"v/b.vvm","character":"あ","styles":[{"speaker":2,"label":"a"}]}"#,
+            r#"{"voiceId":"b","file":"v/b.vvm","styles":[{"speaker":2,"label":"a"}]}"#,
+            r#"{"voiceId":"b","file":"v/b.vvm","character":"あ","styles":[{"speaker":1.5,"label":"a"}]}"#,
+        ] {
+            let m = format!(r#"{{"contents":{{"voices":[{good},{bad}]}}}}"#);
+            assert!(manifest_voices(&m).is_empty(), "{bad}");
+        }
+        assert!(manifest_voices("not json").is_empty());
+    }
+
+    fn dv(pack: &str, voice: &str, character: &str, speakers: &[i64]) -> DeclaredVoice {
+        DeclaredVoice {
+            pack_id: pack.into(),
+            voice_id: voice.into(),
+            path: PathBuf::from(format!("{pack}/{voice}.vvm")),
+            character: character.into(),
+            speakers: speakers.to_vec(),
+        }
+    }
+
+    #[test]
+    fn plan_voices_checks_contents_and_overlaps() {
+        let bundled: BTreeSet<i64> = [0, 1, 2, 3].into_iter().collect();
+        let read = |p: &Path| -> Option<Vec<(String, Vec<i64>)>> {
+            match p.to_string_lossy().as_ref() {
+                "a/aoi.vvm" => Some(vec![("あおい".into(), vec![9001, 9002])]),
+                "b/aoi.vvm" => Some(vec![("べつ".into(), vec![9002])]), // a と重なる
+                "c/mid.vvm" => Some(vec![("みどり".into(), vec![9100])]),
+                "d/zun.vvm" => Some(vec![("ずんだもん".into(), vec![3])]), // 同梱と重なる
+                "e/liar.vvm" => Some(vec![("ほんもの".into(), vec![9200])]), // 名前が違う
+                "f/part.vvm" => Some(vec![("ふ".into(), vec![9300])]),     // 書いた番号が中身に無い
+                "g/dup.vvm" => Some(vec![("じ".into(), vec![9400, 9400])]), // 中身の中で重なる
+                _ => None,                                                 // h＝読めない
+            }
+        };
+        let (acc, rej) = plan_voices(
+            &bundled,
+            vec![
+                dv("a", "aoi", "あおい", &[9001]),
+                dv("b", "aoi", "べつ", &[9002]),
+                dv("c", "mid", "みどり", &[9100]),
+                dv("d", "zun", "ずんだもん", &[3]),
+                dv("e", "liar", "うそ", &[9200]),
+                dv("f", "part", "ふ", &[9301]),
+                dv("g", "dup", "じ", &[9400]),
+                dv("h", "gone", "x", &[9500]),
+            ],
+            read,
+        );
+        let ids = |v: &[DeclaredVoice]| v.iter().map(|d| d.pack_id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&acc), vec!["a", "c"]);
+        assert_eq!(ids(&rej), vec!["b", "d", "e", "f", "g", "h"]);
+    }
+
+    #[test]
+    fn vvm_styles_reads_metas() {
+        use zip::write::SimpleFileOptions;
+        let dir = std::env::temp_dir().join(format!("stario_vvm_{}", now_tag()));
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("t.vvm");
+        {
+            let mut w = zip::ZipWriter::new(fs::File::create(&p).unwrap());
+            w.start_file("metas.json", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(r#"[{"name":"あおい","styles":[{"id":9001},{"id":9002}]}]"#.as_bytes())
+                .unwrap();
+            w.finish().unwrap();
+        }
+        assert_eq!(
+            vvm_styles(&p),
+            Some(vec![("あおい".to_string(), vec![9001, 9002])])
+        );
+        assert_eq!(vvm_styles(&dir.join("none.vvm")), None);
         let _ = fs::remove_dir_all(&dir);
     }
 

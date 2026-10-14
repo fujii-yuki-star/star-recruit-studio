@@ -1139,6 +1139,13 @@ export const TIMELINE_VIDEO_STILL_FLIPPED_CROP =
   "反転したり縦横の大きさを変えたりした部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
+ * いま入っていない声で作り済みの読み上げがある（ADR-0060 段階3・`VOICE_SPEAKER_GONE`／`TIMELINE_EXPORT_VOICE_GONE`）。
+ * ⚠️ 両形式で同じ文（ADR-0026②）。句点は付けない（場面形式は公開前チェックの流儀で付け足す）。
+ */
+export const VOICE_SPEAKER_GONE_MESSAGE =
+  "この動画には、いま入っていない声で作った読み上げがあります。このまま書き出すと声の名前（クレジット）が正しく出ません。設定の「拡張パック」からそのパックを入れ直すか、その読み上げの声を選び直して作り直してください";
+
+/**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
  * **全コードに文言が要る**＝理由が増えたら気づく。
  * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
@@ -1164,6 +1171,8 @@ export const exportBlockedMessage: Record<
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
   // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
   // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
+  // ⚠️ **場面形式と同じことを言う**（ADR-0026②・`VOICE_SPEAKER_GONE`）。
+  TIMELINE_EXPORT_VOICE_GONE: VOICE_SPEAKER_GONE_MESSAGE,
   TIMELINE_EXPORT_USER_FONT_MISSING:
     "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直す（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、使っている文字で別の文字の形を選び直してください",
   // ⚠️ **「見つからない」とは別**＝目録が読めないので待っても埋まらない（場面形式の `unknownFont` と同じ）。
@@ -2139,6 +2148,19 @@ export const PACK_UNLISTED_MESSAGE = "この拡張パックは、中身の一覧
 /** 中身の権利が書かれていないとき（`PACK_PROBLEM.missingLicense`）。 */
 export const PACK_MISSING_LICENSE_MESSAGE =
   "この拡張パックには、中身を使ってよい範囲（権利）が書かれていません。権利が分からない中身は入れられないので、配った人に確かめてください。";
+/** 声を入れた・外したあとに声を作るソフトを起こし直せなかった（段階3・Rust の `VOICE_ENGINE_RESTART_FAILED` と同じ文）。 */
+export const VOICE_ENGINE_RESTART_FAILED_MESSAGE =
+  "声を作るソフトを起こし直せませんでした。すたりおを開き直してください（入れた声が使えるようになります）。";
+/** 声を作っている間・書き出しの間は拡張パックを入れ替えられない（段階3・`PACK_BUSY`）。 */
+export const PACK_BUSY_MESSAGE =
+  "声を作っている間と書き出しの間は、拡張パックを入れたり外したりできません。終わってから、もう一度お試しください。";
+/** 声の番号が同梱の声と重なる（段階3・`PACK_VOICE_CONFLICT`）。 */
+export const PACK_VOICE_CONFLICT_MESSAGE =
+  "この拡張パックの声は、すでに入っている声と番号が重なっているので入れられません。配った人に確かめてください。";
+/** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
+export function packVoiceSkippedMessage(names: readonly string[]): string {
+  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わないか、ほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
+}
 /** 入っているパックのうち読めなかったもの（起動時など）。 */
 export function packSkippedMessage(names: readonly string[]): string {
   // ⚠️ **できる手順だけを書く**（PR レビュー 🟡）＝読めなかったパックは一覧に出ない（外すボタンが無い）。
@@ -2190,6 +2212,7 @@ export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templateAssets: "見た目パターンの写真・ロゴ",
   fonts: "文字の形",
   bgm: "音楽",
+  voices: "声",
   features: "機能",
 };
 /** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
@@ -2199,6 +2222,7 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
   if (m.contents.fonts) parts.push(`${PACK_CONTENT_LABEL.fonts} ${m.contents.fonts.length}個`);
   if (m.contents.bgm) parts.push(`${PACK_CONTENT_LABEL.bgm} ${m.contents.bgm.length}曲`);
+  if (m.contents.voices) parts.push(`${PACK_CONTENT_LABEL.voices}：${m.contents.voices.map((v) => v.character).join("・")}`);
   if (m.contents.features) {
     const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
     parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);

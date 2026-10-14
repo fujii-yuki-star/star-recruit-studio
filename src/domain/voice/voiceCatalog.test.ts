@@ -54,3 +54,39 @@ describe('characterForSpeaker', () => {
     expect(characterForSpeaker(undefined)).toBeNull();
   });
 });
+
+describe('拡張パックの声（ADR-0060 段階3）', () => {
+  it('足した声も一覧とキャラ名・クレジットの引き当てに出て、差し替えると消える', async () => {
+    const { setExtraVoiceCharacters, voiceCatalog } = await import('./voiceCatalog');
+    const { creditForSpeaker } = await import('./narratorCredit');
+    try {
+      setExtraVoiceCharacters([{ character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }]);
+      expect(voiceCatalog().at(-1)?.character).toBe('あおい');
+      expect(characterForSpeaker(9001)).toBe('あおい');
+      expect(speakerForCharacter('あおい')).toBe(9001);
+      expect(creditForSpeaker(9001)).toContain('あおい'); // クレジットを落とさない（ADR-0003）
+      setExtraVoiceCharacters([]);
+      expect(characterForSpeaker(9001)).toBeNull();
+      expect(voiceCatalog()).toBe(VOICE_CATALOG);
+    } finally {
+      setExtraVoiceCharacters([]);
+    }
+  });
+});
+
+describe('いま入っていない声で作り済みの読み上げ（段階3）', () => {
+  it('作り済み・文あり・一覧に無い声だけを数える（継承・同梱の声・まだ作っていないものは数えない）', async () => {
+    const { sceneGoneVoiceLineCount, isGoneGeneratedVoice } = await import('./goneVoices');
+    const gen = 'generated';
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: 'こんにちは' })).toBe(true);
+    expect(isGoneGeneratedVoice({ speaker: 3, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: 'not_generated', text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: '  ' })).toBe(false);
+    expect(sceneGoneVoiceLineCount([
+      { lines: [{ speaker: 9001, status: gen, text: 'a' }, { speaker: 3, status: gen, text: 'b' }] },
+      { lines: null },
+      { lines: [{ speaker: 9002, status: gen, text: 'c' }] },
+    ])).toBe(2);
+  });
+});

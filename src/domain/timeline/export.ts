@@ -7,6 +7,7 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
+import { isGoneGeneratedVoice } from '../voice/goneVoices';
 import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
@@ -315,6 +316,11 @@ export const TIMELINE_EXPORT_BLOCK = {
    */
   userFontMissing: 'TIMELINE_EXPORT_USER_FONT_MISSING',
   /**
+   * いま入っていない声で作り済みの読み上げがある（ADR-0060 段階3）＝拡張パックを外すと声の名前が引けず、クレジットが既定のキャラへ倒れる。
+   * 作り済みの音はパックの声のままなので、そのまま出すと**鳴る声と名乗るキャラが違う動画**になる（ADR-0003）。場面形式は公開前チェックの `goneVoice`。
+   */
+  voiceGone: 'TIMELINE_EXPORT_VOICE_GONE',
+  /**
    * 使っている**持ち込みフォント**が手元にあるか**調べられなかった**（差分再監査 2巡目）。
    *
    * ⚠️ **「見つからない」とは別**＝目録そのものが読めないので待っても埋まらない。
@@ -435,6 +441,12 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 通すと**黙って別の字体の動画**が成功として出る（ADR-0038）。**場面形式と同じ門**（ADR-0026②）。
   // ⚠️ **調べていないときは見ない**（`availableUserFontIds` 未指定＝判定材料が無い）。
   // 調べられなかったときは「見つからない」に倒さず、そう言って止める（場面形式と同じ3状態）。
+  const goneVoiceClips = doc.clips
+    .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && c.voice != null && isGoneGeneratedVoice(c.voice))
+    .map((c) => c.id);
+  if (goneVoiceClips.length > 0) {
+    blockers.push({ code: TIMELINE_EXPORT_BLOCK.voiceGone, clipIds: goneVoiceClips });
+  }
   if (opts.userFontsUnreadable && usedTimelineUserFontIds(doc).length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.userFontUnreadable, clipIds: [] });
   }

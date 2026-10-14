@@ -423,6 +423,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
               value={speaker}
               onChange={(e) => onChangeSpeaker(Number(e.target.value))}
             >
+              {/* ⚠️ **動画全体の既定の声は同梱の声だけ**（ADR-0060 段階3・PR レビュー 🔴）＝既定の声はこのパソコンの設定に残るので、
+                  パックを外したあと**どの動画の門にも渡らない**（書き出しの前に止められない）。パックの声は行・読み上げごとに選ぶ。 */}
               {VOICE_CATALOG.map((c) => (
                 <optgroup key={c.character} label={c.character}>
                   {c.styles.map((s) => (
