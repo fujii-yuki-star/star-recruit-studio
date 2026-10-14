@@ -63,10 +63,29 @@ export const VOICE_CATALOG: VoiceCharacter[] = [
   { character: '剣崎雌雄', styles: [{ speaker: 21, label: 'ノーマル' }] },
 ];
 
-/** speaker 番号 → キャラクター名（カタログ外/未指定は null）。 */
+/**
+ * 拡張パックの声（ADR-0060 段階3）。パックを読むたびに差し替える（`setExtraVoiceCharacters`）。
+ *
+ * ⚠️ **ここに置く理由**＝キャラ名の引き当て（`characterForSpeaker`）は**クレジット**（`VOICEVOX:<character>`）を作る道で、
+ *   描画・書き出し・字幕・読み上げのあちこちから**同期で**呼ばれる。一覧を引数で配る形にすると、配り忘れた所だけ
+ *   **パックの声のクレジットが落ちる**（規約違反＝ADR-0003）。文字の形が「家族名＝id」で目録を配らずに済ませたのと同じ動機。
+ */
+let extraCharacters: readonly VoiceCharacter[] = [];
+
+/** 拡張パックの声を差し替える（パックを読み直したとき）。 */
+export function setExtraVoiceCharacters(characters: readonly VoiceCharacter[]): void {
+  extraCharacters = characters;
+}
+
+/** 選べる声の一覧＝同梱（`VOICE_CATALOG`）＋拡張パックの声。 */
+export function voiceCatalog(): readonly VoiceCharacter[] {
+  return extraCharacters.length === 0 ? VOICE_CATALOG : [...VOICE_CATALOG, ...extraCharacters];
+}
+
+/** speaker 番号 → キャラクター名（カタログ外/未指定は null）。拡張パックの声も引く（クレジットを落とさない）。 */
 export function characterForSpeaker(speaker: number | null | undefined): string | null {
   if (speaker == null) return null;
-  for (const c of VOICE_CATALOG) {
+  for (const c of voiceCatalog()) {
     if (c.styles.some((s) => s.speaker === speaker)) return c.character;
   }
   return null;
@@ -75,6 +94,6 @@ export function characterForSpeaker(speaker: number | null | undefined): string 
 /** キャラクター名 → 既定（先頭スタイル）の speaker 番号（カタログ外/未指定は null）。AI の voiceCharacter 解決に使う（#180）。 */
 export function speakerForCharacter(character: string | null | undefined): number | null {
   if (character == null) return null;
-  const c = VOICE_CATALOG.find((v) => v.character === character);
+  const c = voiceCatalog().find((v) => v.character === character);
   return c ? c.styles[0].speaker : null;
 }

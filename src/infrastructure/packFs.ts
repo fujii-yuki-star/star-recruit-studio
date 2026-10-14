@@ -39,6 +39,12 @@ export async function readPackDataUrl(packId: string, rel: string): Promise<stri
   return invoke<string>('pack_read_data_url', { packId, rel });
 }
 
+/** 声を作るソフトを起こし直す（拡張パックの声を入れた・外したあと＝段階3）。Tauri 以外では何もしない。 */
+export async function restartVoiceEngine(): Promise<void> {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+  await invoke('restart_voice_engine');
+}
+
 /** パックの音楽を動画の素材としてコピーする（段階2b）。返り値は動画の中の相対パス（`assets/<fileName>`）。 */
 export async function copyPackFileToProject(packId: string, rel: string, projectId: string, fileName: string): Promise<string> {
   return invoke<string>('pack_copy_to_project', { packId, rel, projectId, fileName });

@@ -54,3 +54,22 @@ describe('characterForSpeaker', () => {
     expect(characterForSpeaker(undefined)).toBeNull();
   });
 });
+
+describe('拡張パックの声（ADR-0060 段階3）', () => {
+  it('足した声も一覧とキャラ名・クレジットの引き当てに出て、差し替えると消える', async () => {
+    const { setExtraVoiceCharacters, voiceCatalog } = await import('./voiceCatalog');
+    const { creditForSpeaker } = await import('./narratorCredit');
+    try {
+      setExtraVoiceCharacters([{ character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }]);
+      expect(voiceCatalog().at(-1)?.character).toBe('あおい');
+      expect(characterForSpeaker(9001)).toBe('あおい');
+      expect(speakerForCharacter('あおい')).toBe(9001);
+      expect(creditForSpeaker(9001)).toContain('あおい'); // クレジットを落とさない（ADR-0003）
+      setExtraVoiceCharacters([]);
+      expect(characterForSpeaker(9001)).toBeNull();
+      expect(voiceCatalog()).toBe(VOICE_CATALOG);
+    } finally {
+      setExtraVoiceCharacters([]);
+    }
+  });
+});

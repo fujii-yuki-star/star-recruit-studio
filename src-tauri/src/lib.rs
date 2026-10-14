@@ -1529,6 +1529,7 @@ pub fn run() {
             packs::pack_read_text,
             packs::pack_read_data_url,
             packs::pack_copy_to_project,
+            voicevox_engine::restart_voice_engine,
             startup_request,
             finish_startup_job,
             read_import_folder,

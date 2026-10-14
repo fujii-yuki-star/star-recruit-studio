@@ -17,6 +17,7 @@ import {
   PACK_UNLISTED_MESSAGE,
   packAppTooOldMessage,
   packOlderThanInstalledMessage,
+  PACK_VOICE_CONFLICT_MESSAGE,
 } from '../uiLabels';
 import { userFacingMessage } from '../userFacingError';
 import { useProjectStore } from './projectStore';
@@ -34,6 +35,8 @@ export function packProblemMessage(p: PackProblem): string {
       return packAppTooOldMessage(p.minAppVersion);
     case PACK_PROBLEM.olderThanInstalled:
       return packOlderThanInstalledMessage(p.installedVersion);
+    case PACK_PROBLEM.voiceConflict:
+      return PACK_VOICE_CONFLICT_MESSAGE;
   }
 }
 

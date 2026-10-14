@@ -222,3 +222,50 @@ describe('音楽（段階2b）', () => {
     expect(pat).toBe(`${String.fromCharCode(92)}.(${AUDIO_FILE_EXTENSIONS.join('|')})$`);
   });
 });
+
+describe('声（段階3）', () => {
+  type V = { voiceId: string; file: string; character: string; styles: { speaker: number; label: string }[] };
+  const v = (over: Partial<V> = {}): V => ({ voiceId: 'aoi', file: 'v/aoi.vvm', character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }], ...over });
+  const withVoices = (voices: V[], over: Partial<ExtensionPackManifest> = {}) =>
+    manifest({
+      contents: { voices },
+      files: voices.map((x) => ({ path: x.file, sha256: SHA })),
+      licenses: [{ target: 'voices', license: 'キャラごとの規約', credit: 'VOICEVOX:あおい' }],
+      ...over,
+    });
+
+  it('声を持つパックを読める', () => {
+    expect(parsePackManifest(JSON.stringify(withVoices([v()]))).ok).toBe(true);
+  });
+
+  it('同じ名前・同じ番号が2つ・同梱の声と番号が重なる・権利が無い・声のファイルでないは断る', () => {
+    expect(parsePackManifest(JSON.stringify(withVoices([v(), v({ file: 'v/b.vvm', styles: [{ speaker: 9002, label: 'x' }] })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+    expect(parsePackManifest(JSON.stringify(withVoices([v(), v({ voiceId: 'b', file: 'v/b.vvm' })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+    expect(parsePackManifest(JSON.stringify(withVoices([v({ styles: [{ speaker: 3, label: 'ずんだ' }] })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.voiceConflict } });
+    expect(parsePackManifest(JSON.stringify(withVoices([v()], { licenses: [{ target: 'templates', license: 'x' }] })))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: 'voices' } });
+    expect(parsePackManifest(JSON.stringify(withVoices([v({ file: 'v/aoi.onnx' })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
+  });
+
+  it('パック同士で番号が重なれば、後のパックの声は足さず名前を返す', async () => {
+    const { packVoiceCharacters } = await import('./extensionPack');
+    const a = withVoices([v()], { packId: 'a', name: 'パックA' });
+    const b = withVoices([v({ character: 'べつ' })], { packId: 'b', name: 'パックB' });
+    const c = withVoices([v({ character: 'みどり', styles: [{ speaker: 9100, label: 'ノーマル' }] })], { packId: 'c', name: 'パックC' });
+    expect(packVoiceCharacters([a, b, c])).toEqual({
+      characters: [
+        { character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] },
+        { character: 'みどり', styles: [{ speaker: 9100, label: 'ノーマル' }] },
+      ],
+      skipped: ['パックB'],
+    });
+  });
+
+  it('声のファイルの組の名前は、中身（SHA-256）が変われば変わり、声の無いパックでは空', async () => {
+    const { packVoiceFilesKey } = await import('./extensionPack');
+    const a = withVoices([v()], { packId: 'a' });
+    const a2 = withVoices([v()], { packId: 'a', files: [{ path: 'v/aoi.vvm', sha256: 'b'.repeat(64) }] });
+    expect(packVoiceFilesKey([a])).not.toBe(packVoiceFilesKey([a2]));
+    expect(packVoiceFilesKey([a])).toBe(packVoiceFilesKey([a]));
+    expect(packVoiceFilesKey([manifest()])).toBe('');
+  });
+});

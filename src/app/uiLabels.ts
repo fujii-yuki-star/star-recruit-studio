@@ -2139,6 +2139,16 @@ export const PACK_UNLISTED_MESSAGE = "この拡張パックは、中身の一覧
 /** 中身の権利が書かれていないとき（`PACK_PROBLEM.missingLicense`）。 */
 export const PACK_MISSING_LICENSE_MESSAGE =
   "この拡張パックには、中身を使ってよい範囲（権利）が書かれていません。権利が分からない中身は入れられないので、配った人に確かめてください。";
+/** 声を入れた・外したあとに声を作るソフトを起こし直せなかった（段階3・Rust の `VOICE_ENGINE_RESTART_FAILED` と同じ文）。 */
+export const VOICE_ENGINE_RESTART_FAILED_MESSAGE =
+  "声を作るソフトを起こし直せませんでした。すたりおを開き直してください（入れた声が使えるようになります）。";
+/** 声の番号が同梱の声と重なる（段階3・`PACK_VOICE_CONFLICT`）。 */
+export const PACK_VOICE_CONFLICT_MESSAGE =
+  "この拡張パックの声は、すでに入っている声と番号が重なっているので入れられません。配った人に確かめてください。";
+/** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
+export function packVoiceSkippedMessage(names: readonly string[]): string {
+  return `次の拡張パックの声は、ほかの拡張パックの声と番号が重なっているので使えません：${names.join("、")}。どちらかのパックを外してください。`;
+}
 /** 入っているパックのうち読めなかったもの（起動時など）。 */
 export function packSkippedMessage(names: readonly string[]): string {
   // ⚠️ **できる手順だけを書く**（PR レビュー 🟡）＝読めなかったパックは一覧に出ない（外すボタンが無い）。
@@ -2190,6 +2200,7 @@ export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templateAssets: "見た目パターンの写真・ロゴ",
   fonts: "文字の形",
   bgm: "音楽",
+  voices: "声",
   features: "機能",
 };
 /** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
@@ -2199,6 +2210,7 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
   if (m.contents.fonts) parts.push(`${PACK_CONTENT_LABEL.fonts} ${m.contents.fonts.length}個`);
   if (m.contents.bgm) parts.push(`${PACK_CONTENT_LABEL.bgm} ${m.contents.bgm.length}曲`);
+  if (m.contents.voices) parts.push(`${PACK_CONTENT_LABEL.voices}：${m.contents.voices.map((v) => v.character).join("・")}`);
   if (m.contents.features) {
     const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
     parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);

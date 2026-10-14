@@ -1,4 +1,4 @@
-// 拡張パック（ADR-0060）＝見た目パターン・文字の形・音楽・機能を後から足す。設定の欄。
+// 拡張パック（ADR-0060）＝見た目パターン・文字の形・音楽・声・機能を後から足す。設定の欄。
 //
 // ⚠️ **入れる前に見せる**（決定3）＝選んだファイルの中身・発行者・権利を見せてから「入れる」。
 // ⚠️ **外す前に知らせる**＝使っている動画の数を数えて確かめる（黙って見た目パターンを消さない）。
@@ -8,12 +8,15 @@ import { useProjectStore } from "../store/projectStore";
 import { countVideosUsingPack, inspectPackFile, installInspectedPack, removeInstalledPack } from "../store/packActions";
 import { showOpenExtensionPackDialog } from "../../infrastructure/dialog";
 import type { ExtensionPackManifest } from "../../domain/pack/extensionPack";
-import { PACK_CONTENT_LABEL, packContentsSummary, packInstalledMessage, packRemoveConfirmMessage, packRemovedMessage, packSkippedMessage } from "../uiLabels";
+import { PACK_CONTENT_LABEL, packContentsSummary, packInstalledMessage, packRemoveConfirmMessage, packRemovedMessage, packSkippedMessage, packVoiceSkippedMessage } from "../uiLabels";
 import { DeleteConfirm } from "./DeleteConfirm";
 
 export function ExtensionPackSection() {
   const packs = useProjectStore((s) => s.packs);
   const skipped = useProjectStore((s) => s.packsSkipped);
+  // 声（段階3）＝ほかのパックと番号が重なって足せなかった声と、声を作るソフトを起こし直せなかったこと。
+  const voicesSkipped = useProjectStore((s) => s.packVoicesSkipped);
+  const voiceRestartError = useProjectStore((s) => s.voiceEngineRestartError);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -78,7 +81,7 @@ export function ExtensionPackSection() {
     <div className="card" data-testid="extension-pack-section">
       <h2 className="section-title">拡張パック</h2>
       <p className="page-desc text-pretty">
-        配られた拡張パックを入れると、見た目パターン・文字の形・音楽・機能が増えます。入れる前に、中身と使ってよい範囲を確かめられます。
+        配られた拡張パックを入れると、見た目パターン・文字の形・音楽・声・機能が増えます。入れる前に、中身と使ってよい範囲を確かめられます。
       </p>
 
       <div className="row">
@@ -89,6 +92,8 @@ export function ExtensionPackSection() {
       {notice && <p className="field-hint mt">{notice}</p>}
       {error && <p className="form-error mt" role="alert">{error}</p>}
       {skipped.length > 0 && <p className="form-error mt" role="alert">{packSkippedMessage(skipped)}</p>}
+      {voicesSkipped.length > 0 && <p className="form-error mt" role="alert">{packVoiceSkippedMessage(voicesSkipped)}</p>}
+      {voiceRestartError && <p className="form-error mt" role="alert">{voiceRestartError}</p>}
 
       {pending && (
         <div className="card mt" data-testid="extension-pack-confirm">

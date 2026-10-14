@@ -2,6 +2,7 @@
 // ⚠️ **パックはデータだけ**＝ここで扱うのは manifest と中の JSON だけ。ファイルの展開と SHA-256 の照合は Rust（`packs.rs`）。
 import { validateExtensionPack, validateTemplate } from '../validation/generated/validators.js';
 import type { Template } from '../template/types';
+import { VOICE_CATALOG, type VoiceCharacter } from '../voice/voiceCatalog';
 
 /** manifest.json の形（`schemas/extension-pack.schema.json`）。 */
 export interface ExtensionPackManifest {
@@ -17,6 +18,7 @@ export interface ExtensionPackManifest {
     templateAssets?: { assetId: string; file: string }[];
     fonts?: { fontId: string; file: string; displayName: string }[];
     bgm?: { bgmId: string; file: string; displayName: string }[];
+    voices?: { voiceId: string; file: string; character: string; styles: { speaker: number; label: string }[] }[];
     features?: string[];
   };
   files: { path: string; sha256: string }[];
@@ -24,7 +26,7 @@ export interface ExtensionPackManifest {
 }
 
 /** 中身の種類（`contents` のキー＝`licenses[].target`）。 */
-export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'fonts', 'bgm', 'features'] as const;
+export const PACK_CONTENT_KINDS = ['templates', 'templateAssets', 'fonts', 'bgm', 'voices', 'features'] as const;
 export type PackContentKind = (typeof PACK_CONTENT_KINDS)[number];
 
 /** パックを読めない・入れられない理由（文言は `uiLabels` の `packProblemMessage`・`15 §6`）。 */
@@ -39,13 +41,16 @@ export const PACK_PROBLEM = {
   appTooOld: 'appTooOld',
   /** 入っている版より古い。 */
   olderThanInstalled: 'olderThanInstalled',
+  /** 声の番号（スタイル）が同梱の声と重なる（段階3）。 */
+  voiceConflict: 'voiceConflict',
 } as const;
 export type PackProblem =
   | { kind: typeof PACK_PROBLEM.invalid }
   | { kind: typeof PACK_PROBLEM.unlistedContent; path: string }
   | { kind: typeof PACK_PROBLEM.missingLicense; target: PackContentKind }
   | { kind: typeof PACK_PROBLEM.appTooOld; minAppVersion: string }
-  | { kind: typeof PACK_PROBLEM.olderThanInstalled; installedVersion: string };
+  | { kind: typeof PACK_PROBLEM.olderThanInstalled; installedVersion: string }
+  | { kind: typeof PACK_PROBLEM.voiceConflict };
 
 /**
  * manifest.json の文字列を読む。schema に合い、中身のファイルが全部 `files` に載り、中身の種類ごとに権利が書かれていれば manifest。
@@ -69,6 +74,15 @@ export function parsePackManifest(raw: string): { ok: true; manifest: ExtensionP
   if (new Set(fontIds).size !== fontIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
   const bgmIds = (m.contents.bgm ?? []).map((b) => b.bgmId);
   if (new Set(bgmIds).size !== bgmIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
+  const voices = m.contents.voices ?? [];
+  const voiceIds = voices.map((v) => v.voiceId);
+  if (new Set(voiceIds).size !== voiceIds.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
+  const speakers = voices.flatMap((v) => v.styles.map((s) => s.speaker));
+  if (new Set(speakers).size !== speakers.length) return { ok: false, problem: { kind: PACK_PROBLEM.invalid } };
+  // ⚠️ **同梱の声と番号が重なるものは入れない**＝声を作るソフトの一覧に同じ番号が2つ並び、どちらの声で読むかが決まらない
+  //   （実際に起動して確かめた＝落ちずに両方並ぶ）。クレジットの名前も取り違える。
+  const bundled = new Set(VOICE_CATALOG.flatMap((c) => c.styles.map((s) => s.speaker)));
+  if (speakers.some((s) => bundled.has(s))) return { ok: false, problem: { kind: PACK_PROBLEM.voiceConflict } };
   const licensed = new Set(m.licenses.map((l) => l.target));
   for (const kind of PACK_CONTENT_KINDS) {
     if (m.contents[kind] && !licensed.has(kind)) return { ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: kind } };
@@ -83,7 +97,41 @@ export function contentFiles(m: ExtensionPackManifest): string[] {
     ...(m.contents.templateAssets ?? []).map((a) => a.file),
     ...(m.contents.fonts ?? []).map((f) => f.file),
     ...(m.contents.bgm ?? []).map((b) => b.file),
+    ...(m.contents.voices ?? []).map((v) => v.file),
   ];
+}
+
+/**
+ * 入っているパックの声を、声の一覧に足す形にする（段階3）。
+ * ⚠️ **先に並んだパックと番号が重なるパックの声は足さない**（入れる時には同梱としか比べられない＝パック同士の重なりはここで止める）。
+ *   足さなかったパックは `skipped` で返す（黙って消えたように見せない）。
+ */
+export function packVoiceCharacters(manifests: readonly ExtensionPackManifest[]): { characters: VoiceCharacter[]; skipped: string[] } {
+  const taken = new Set(VOICE_CATALOG.flatMap((c) => c.styles.map((s) => s.speaker)));
+  const characters: VoiceCharacter[] = [];
+  const skipped: string[] = [];
+  for (const m of manifests) {
+    const voices = m.contents.voices ?? [];
+    const speakers = voices.flatMap((v) => v.styles.map((s) => s.speaker));
+    if (speakers.some((s) => taken.has(s))) {
+      skipped.push(m.name);
+      continue;
+    }
+    for (const s of speakers) taken.add(s);
+    for (const v of voices) characters.push({ character: v.character, styles: v.styles.map((s) => ({ ...s })) });
+  }
+  return { characters, skipped };
+}
+
+/**
+ * 声のファイルの組の「名前」（段階3）＝変わったら声を作るソフトを起こし直す。
+ * 中身の SHA-256 まで含める＝新しい版で同じファイル名でも中身が変われば起こし直す（文字の形と同じ考え）。
+ */
+export function packVoiceFilesKey(manifests: readonly ExtensionPackManifest[]): string {
+  return manifests
+    .flatMap((m) => (m.contents.voices ?? []).map((v) => `${m.packId}/${v.voiceId}/${m.files.find((f) => f.path === v.file)?.sha256 ?? ''}`))
+    .sort()
+    .join('|');
 }
 
 /** パックの音楽1つぶん（素材の棚に並べる id＝`pack_<packId>__<bgmId>`・段階2b）。 */

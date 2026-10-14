@@ -61,7 +61,7 @@ import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyfra
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
 import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
-import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { useVoiceCatalog } from "../hooks/useVoiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_HEIGHTS, TIMELINE_LANE_HEIGHT_DEFAULT, TIMELINE_LANE_HEIGHT_ORDER, TIMELINE_MIN_CLIP_SEC, type TimelineLaneHeight, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
@@ -513,6 +513,8 @@ const NOTHING_SELECTED_HINT = {
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
 export function TimelineProjectScreen({ onNavigate, presentation = "main" }: TimelineProjectScreenProps) {
+  // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
+  const voices = useVoiceCatalog();
   const inPreviewWindow = presentation === "previewWindow";
   // まとめて声を作る出どころ（タイムライン形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const timelineBulkVoice = useTimelineBulkVoice();
@@ -6147,7 +6149,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     onChange={(e) => setSelectedVoiceSpeaker(e.target.value === "" ? null : Number(e.target.value))}
                   >
                     <option value="">動画全体に合わせる</option>
-                    {VOICE_CATALOG.flatMap((c) =>
+                    {voices.flatMap((c) =>
                       c.styles.map((st) => (
                         <option key={st.speaker} value={st.speaker}>{`${c.character}（${st.label}）`}</option>
                       )),

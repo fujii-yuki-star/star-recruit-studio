@@ -42,7 +42,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { layoutScene, subtitleOverflowsCanvas } from "../../renderer/layout";
-import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { useVoiceCatalog } from "../hooks/useVoiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
@@ -227,6 +227,8 @@ function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
+  // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
+  const voices = useVoiceCatalog();
   // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const sceneBulkVoice = useSceneBulkVoice();
   const {
@@ -2276,7 +2278,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             onChange={(e) => patch((s) => updateLine(s, line.lineId, { speaker: e.target.value ? Number(e.target.value) : null }))}
                           >
                             <option value="">動画全体の声に合わせる</option>
-                            {VOICE_CATALOG.map((c) => (
+                            {voices.map((c) => (
                               <optgroup key={c.character} label={c.character}>
                                 {c.styles.map((st) => (
                                   <option key={st.speaker} value={st.speaker}>{c.character}（{st.label}）</option>

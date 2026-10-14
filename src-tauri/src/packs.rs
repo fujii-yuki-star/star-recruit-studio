@@ -368,6 +368,75 @@ pub fn pack_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// パックの中の声の名前（`voiceId`）として安全か（schema と同じ＝英小文字・数字・単独の `_`）。
+fn is_safe_voice_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 40
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && !id.starts_with('_')
+        && !id.ends_with('_')
+        && !id.contains("__")
+}
+
+/// manifest の文字から、声のファイル（`contents.voices[].{voiceId,file}`）を取り出す（段階3）。
+/// ⚠️ **形の悪い項目は黙って飛ばさず、その manifest の声を全部捨てる**＝半分だけ読むと、画面の声の一覧（TS が読む）と音声ソフトが読む声が食い違う。
+fn manifest_voices(manifest: &str) -> Vec<(String, String)> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(manifest) else {
+        return Vec::new();
+    };
+    let Some(items) = v
+        .get("contents")
+        .and_then(|c| c.get("voices"))
+        .and_then(|x| x.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for it in items {
+        let (Some(id), Some(file)) = (
+            it.get("voiceId").and_then(|x| x.as_str()),
+            it.get("file").and_then(|x| x.as_str()),
+        ) else {
+            return Vec::new();
+        };
+        if !is_safe_voice_id(id) || !is_safe_rel_path(file) || !file.ends_with(".vvm") {
+            return Vec::new();
+        }
+        out.push((id.to_string(), file.to_string()));
+    }
+    out
+}
+
+/// 入っているパックの声のファイル（段階3）。`(packId, voiceId, 実体のパス)`。実体が無いものは入れない。
+pub(crate) fn installed_pack_voices(app: &tauri::AppHandle) -> Vec<(String, String, PathBuf)> {
+    let Ok(root) = packs_dir(app) else {
+        return Vec::new();
+    };
+    let Ok(rd) = fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !is_safe_pack_id(&name) || !e.path().is_dir() {
+            continue;
+        }
+        let Ok(m) = fs::read_to_string(e.path().join(MANIFEST)) else {
+            continue;
+        };
+        for (vid, file) in manifest_voices(&m) {
+            let p = e.path().join(&file);
+            if p.is_file() {
+                out.push((name.clone(), vid, p));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// 外す（フォルダごと消す）。使っている動画を知らせるのは画面（外す前）。
 /// ⚠️ **先に名前を変えてから消す**（PR レビュー ℹ️）＝消す途中で止まると、半端なフォルダが「読めないパック」として残る。
 ///   名前を変えた時点で一覧からは消え、消し残しは次の起動の片づけが消す。
@@ -556,6 +625,29 @@ mod tests {
             messages::PACK_TOO_LARGE
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn manifest_voices_reads_all_or_nothing() {
+        let ok = r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm"},{"voiceId":"b_2","file":"v/b.vvm"}]}}"#;
+        assert_eq!(
+            manifest_voices(ok),
+            vec![
+                ("aoi".to_string(), "v/aoi.vvm".to_string()),
+                ("b_2".to_string(), "v/b.vvm".to_string())
+            ]
+        );
+        assert!(manifest_voices(r#"{"contents":{"templates":[]}}"#).is_empty());
+        // 1つでも形が悪ければ、その manifest の声は全部捨てる（画面と音声ソフトで食い違わせない）。
+        for bad in [
+            r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm"},{"voiceId":"x","file":"../x.vvm"}]}}"#,
+            r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm"},{"voiceId":"a__b","file":"v/b.vvm"}]}}"#,
+            r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm"},{"voiceId":"b","file":"v/b.exe"}]}}"#,
+            r#"{"contents":{"voices":[{"voiceId":"aoi","file":"v/aoi.vvm"},{"file":"v/b.vvm"}]}}"#,
+            "not json",
+        ] {
+            assert!(manifest_voices(bad).is_empty(), "{bad}");
+        }
     }
 
     #[test]
