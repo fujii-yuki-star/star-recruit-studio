@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "packId": "sample_office",
+  "name": "オフィスの見本パック",
+  "version": "1.0.0",
+  "publisher": "すたりお開発チーム",
+  "description": "チュートリアル用の見本。見た目パターン・文字の形・音楽が1つずつ入っています。",
+  "minAppVersion": "0.5.0",
+  "contents": {
+    "templates": [{ "file": "t/office_opening.json" }],
+    "fonts": [{ "fontId": "kaitou", "file": "f/kaitou.ttf", "displayName": "見本の演出ゴシック" }],
+    "bgm": [{ "bgmId": "cruise", "file": "b/cruise.mp3", "displayName": "見本のドライブ曲" }]
+  },
+  "files": [],
+  "licenses": [
+    { "target": "templates", "license": "社内利用（見本）", "credit": "すたりお開発チーム" },
+    { "target": "fonts", "license": "SIL Open Font License 1.1", "credit": "怪盗予告ゴシック" },
+    { "target": "bgm", "license": "CC0 1.0", "credit": "Open Music Academy" }
+  ]
+}

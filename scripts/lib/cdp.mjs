@@ -161,7 +161,10 @@ export const CHOOSE_OPTION = (label, option, nth = 1) => `(() => {
 export const FIND_BY_TEXT = (text) => `(() => {
   const want = ${JSON.stringify(text)};
   const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];
+  // ⚠️ **文字の無いボタン（絵だけ）は名前（aria-label）で探す**（#1228 の下見）＝動画の一覧の「縦の版を作る」などは
+  //   絵だけのボタンで、名前は aria-label にしか無い。完全一致だけ＝部分一致にすると、名前に言葉を含む別のボタンを押す。
   const hit = all.find((el) => (el.textContent || "").trim() === want)
+    || all.find((el) => el.getAttribute("aria-label") === want)
     || all.find((el) => (el.textContent || "").includes(want));
   if (!hit) return null;
   hit.scrollIntoView({ block: "center" });
