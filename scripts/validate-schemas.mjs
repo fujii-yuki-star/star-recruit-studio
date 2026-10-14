@@ -335,6 +335,8 @@ mustAccept.push(
   ['scene.fontId: null（継承）は従来どおり許容', withScene({ fontId: null })],
   ['scene.textFontIds: 種別ごとに持ち込みフォントを許容', withScene({ textFontIds: { title: 'user_font_003', subtitle: 'gen-interface-jp' } })],
   ['freeLayout の fontId も持ち込みフォントを許容', withScene({ freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_004' }] })],
+  ['fontId: 拡張パックの文字の形を許容（1.34・ADR-0060 段階2）', withFont({ fontId: 'pack_office_looks__mincho' })],
+  ['scene.textFontIds: 種別ごとに拡張パックの文字の形を許容', withScene({ textFontIds: { title: 'pack_office__mincho_bold' } })],
 );
 mustReject.push(
   ['fontId: 形の違う id は拒否（my-font）', withFont({ fontId: 'my-font' })],
@@ -343,6 +345,9 @@ mustReject.push(
   ['fontId: パス区切りを含む id は拒否（user_font_001/../x）', withFont({ fontId: 'user_font_001/../x' })],
   ['fontId: 空文字は拒否', withFont({ fontId: '' })],
   ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
+  ['fontId: 拡張パックの境目が無い id は拒否（pack_office_mincho）', withFont({ fontId: 'pack_office_mincho' })],
+  ['fontId: 拡張パックの中の名前が無い id は拒否（pack_office__）', withFont({ fontId: 'pack_office__' })],
+  ['fontId: 拡張パックの境目が3つの id は拒否（pack_office___mincho）', withFont({ fontId: 'pack_office___mincho' })],
 );
 // 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。
 mustAccept.push(
@@ -446,6 +451,7 @@ tlAccept.push(
   ['timeline: 持ち込みフォントを許容＝`$ref` で追従している（1.26・#261）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_001' })],
   ['timeline: 同梱フォントも従来どおり許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'gen-interface-jp' })],
   ['timeline: 動画全体の文字の形にも持ち込みを許容（videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, fontId: 'user_font_002' } })],
+  ['timeline: 拡張パックの文字の形を許容＝`$ref` で追従している（1.19・ADR-0060 段階2）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'pack_office__mincho' })],
   // ⚠️ **同じ `$ref` 共有の兄弟も固定する**（α-6 出口監査 🟡）＝`fontId` だけ固定して
   // `creditDisplay`（1.28）・`audioAuto`（1.29）を空けておくと、写しが生まれた瞬間に無検知で割れる
   //（この検査を足した理由がそのまま当てはまる＝片方の双子だけ検証）。
@@ -618,7 +624,19 @@ const packReject = [
   ['pack: パスの空の部分は拒否', withPack({ files: [{ path: 'a//b', sha256: '0'.repeat(64) }] })],
   ['pack: パスの末尾の / は拒否', withPack({ files: [{ path: 'a/', sha256: '0'.repeat(64) }] })],
   ['pack: manifest.json を中身に数えない', withPack({ files: [{ path: 'manifest.json', sha256: '0'.repeat(64) }] })],
+  ['pack: 文字の形のファイルは ttf / otf / woff / woff2 だけ', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.exe', displayName: 'A' }] } })],
+  ['pack: 文字の形の拡張子は小文字で書く（大文字は断る）', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.OTF', displayName: 'A' }] } })],
+  ['pack: 文字の形の名前に __ は使えない（id の境目が割れる）', withPack({ contents: { fonts: [{ fontId: 'a__b', file: 'f/a.otf', displayName: 'A' }] } })],
+  ['pack: 文字の形の表示名は必須', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.otf' }] } })],
 ];
+// 受け入れる側（文字の形を持つパック＝段階2）。
+const packAccept = [
+  ['pack: 文字の形を持つパックを許容（段階2）', withPack({ contents: { fonts: [{ fontId: 'mincho_bold', file: 'f/a.woff2', displayName: '明朝' }] }, licenses: [{ target: 'fonts', license: 'SIL OFL 1.1' }] })],
+];
+for (const [desc, data] of packAccept) {
+  if (vPack(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}（スキーマが拒否した）`); }
+}
 for (const [desc, data] of packReject) {
   if (!vPack(data)) console.log(`PASS  must-reject  ${desc}`);
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }

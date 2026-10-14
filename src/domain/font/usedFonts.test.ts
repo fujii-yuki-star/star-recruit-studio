@@ -1,6 +1,6 @@
 // 使っているフォントの収集（ADR-0038・#261）。
 import { describe, expect, it } from 'vitest';
-import { missingUserFontIds, sceneFontIds, usedUserFontIds } from './usedFonts';
+import { missingUserFontIds, sceneFontIds, usedTimelineUserFontIds, usedUserFontIds } from './usedFonts';
 import type { Scene } from '../project/types';
 
 const scene = (over: Partial<Scene> = {}): Scene =>
@@ -60,5 +60,18 @@ describe('missingUserFontIds', () => {
 
   it('全部そろっていれば空', () => {
     expect(missingUserFontIds(['user_font_001'], ['user_font_001', 'user_font_002'])).toEqual([]);
+  });
+});
+
+describe('拡張パックの文字の形も「使っている」に数える（ADR-0060 段階2）', () => {
+  it('タイムライン形式：動画全体・クリップ・種別ごとの上書きから集める', () => {
+    expect(usedTimelineUserFontIds({
+      videoSettings: { fontId: 'pack_office__mincho' },
+      clips: [{ fontId: 'gen-interface-jp', textFontIds: { title: 'pack_office__gothic' } }],
+    })).toEqual(['pack_office__mincho', 'pack_office__gothic']);
+  });
+  it('場面形式：動画全体の文字の形を集め、手元に無ければ見つからないと言う', () => {
+    expect(usedUserFontIds([], 'pack_office__mincho')).toEqual(['pack_office__mincho']);
+    expect(missingUserFontIds(['pack_office__mincho'], ['user_font_001'])).toEqual(['pack_office__mincho']);
   });
 });

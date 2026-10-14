@@ -53,7 +53,7 @@
     "contents": {
       "type": "object",
       "additionalProperties": false,
-      "description": "中身の種類ごとの一覧（段階1＝見た目パターンと組み込み機能の鍵）。少なくとも1つは中身を持つ。",
+      "description": "中身の種類ごとの一覧（段階1＝見た目パターンと組み込み機能の鍵・段階2＝文字の形）。少なくとも1つは中身を持つ。",
       "minProperties": 1,
       "properties": {
         "templates": {
@@ -92,6 +92,45 @@
               },
               "file": {
                 "$ref": "#/$defs/PackPath"
+              }
+            }
+          }
+        },
+        "fonts": {
+          "type": "array",
+          "minItems": 1,
+          "description": "文字の形（フォント）。動画では `pack_<packId>__<fontId>` で指す（ADR-0060 決定4）。プロジェクトにはコピーしない（ADR-0038 と同じ＝アプリを再配布経路にしない）。",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fontId",
+              "file",
+              "displayName"
+            ],
+            "properties": {
+              "fontId": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$",
+                "maxLength": 40,
+                "description": "パックの中の名前（英小文字・数字・単独の _）。"
+              },
+              "file": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/PackPath"
+                  },
+                  {
+                    "pattern": "\\.(ttf|otf|woff|woff2)$"
+                  }
+                ],
+                "description": "ttf / otf / woff / woff2（小文字の拡張子）。"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "文字の形を選ぶ一覧に出す名前。"
               }
             }
           }
@@ -146,6 +185,7 @@
             "enum": [
               "templates",
               "templateAssets",
+              "fonts",
               "features"
             ]
           },

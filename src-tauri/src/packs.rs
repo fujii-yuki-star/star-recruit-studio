@@ -26,6 +26,8 @@ const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_TEXT_BYTES: u64 = 4 * 1024 * 1024;
 /// 絵として読むファイル（既定素材）の上限。
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+/// 文字の形の上限（日本語の字体は 10〜20MB ほどあるので、絵より広く取る）。
+const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 /// 作業用・置き換え前のフォルダの頭（一覧に出さない・起動時に片づける）。
 const STAGING_PREFIX: &str = ".staging-";
 const OLD_PREFIX: &str = ".old-";
@@ -409,6 +411,22 @@ pub async fn pack_read_data_url(
     run_blocking(move || read_data_url_blocking(&app, &pack_id, &rel)).await
 }
 
+/// 絵か文字の形として読めるファイルの種類と大きさの上限（拡張子で決める・それ以外は読まない）。
+fn data_url_kind(p: &Path) -> Option<(&'static str, u64)> {
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => ("image/png", MAX_IMAGE_BYTES),
+        "jpg" | "jpeg" => ("image/jpeg", MAX_IMAGE_BYTES),
+        "webp" => ("image/webp", MAX_IMAGE_BYTES),
+        // 文字の形（段階2）＝画面が `FontFace` に渡す（持ち込みフォントと同じくバイト列で渡す・ADR-0038）。
+        "ttf" => ("font/ttf", MAX_FONT_BYTES),
+        "otf" => ("font/otf", MAX_FONT_BYTES),
+        "woff" => ("font/woff", MAX_FONT_BYTES),
+        "woff2" => ("font/woff2", MAX_FONT_BYTES),
+        _ => return None,
+    })
+}
+
 fn read_data_url_blocking(
     app: &tauri::AppHandle,
     pack_id: &str,
@@ -416,21 +434,11 @@ fn read_data_url_blocking(
 ) -> Result<String, String> {
     use base64::Engine;
     let p = pack_file(app, pack_id, rel)?;
-    let mime = match p
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        _ => return Err(messages::PACK_UNREADABLE.to_string()),
-    };
+    let (mime, max) = data_url_kind(&p).ok_or_else(|| messages::PACK_UNREADABLE.to_string())?;
     let len = fs::metadata(&p)
         .map_err(|_| messages::PACK_UNREADABLE.to_string())?
         .len();
-    if len > MAX_IMAGE_BYTES {
+    if len > max {
         return Err(messages::PACK_UNREADABLE.to_string());
     }
     let bytes = fs::read(&p).map_err(|_| messages::PACK_UNREADABLE.to_string())?;
@@ -467,6 +475,18 @@ pub fn cleanup_pack_staging(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_url_kind_reads_images_and_fonts_only() {
+        let k = |p: &str| data_url_kind(Path::new(p));
+        assert_eq!(k("a/logo.PNG"), Some(("image/png", MAX_IMAGE_BYTES)));
+        assert_eq!(k("f/mincho.otf"), Some(("font/otf", MAX_FONT_BYTES)));
+        assert_eq!(k("f/mincho.woff2"), Some(("font/woff2", MAX_FONT_BYTES)));
+        assert_eq!(k("f/mincho.ttf").map(|x| x.1), Some(MAX_FONT_BYTES));
+        for bad in ["t/intro.json", "run.exe", "noext", "a.svg"] {
+            assert_eq!(k(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn safe_rel_path_rejects_escapes() {

@@ -1165,7 +1165,7 @@ export const exportBlockedMessage: Record<
   // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
   // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
   TIMELINE_EXPORT_USER_FONT_MISSING:
-    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、使っている文字で別の文字の形を選び直してください",
+    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直す（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、使っている文字で別の文字の形を選び直してください",
   // ⚠️ **「見つからない」とは別**＝目録が読めないので待っても埋まらない（場面形式の `unknownFont` と同じ）。
   TIMELINE_EXPORT_USER_FONT_UNREADABLE:
     "この動画は取り込んだ文字の形（フォント）を使っていますが、いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。アプリを開き直してから、もう一度お試しください",
@@ -1669,7 +1669,8 @@ export const templateSaveMessage = {
 export function userFontMissingMessage(count: string | number): string {
   return (
     `この動画で使っている文字の形（フォント）が${count}つ見つかりません。` +
-    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
+    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直す` +
+    `（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、` +
     `使っている場面で別の文字の形を選び直してください`
   );
 }
@@ -2146,6 +2147,10 @@ export function packSkippedMessage(names: readonly string[]): string {
 }
 /** 名前も読めなかった拡張パック（読めなかった知らせに出す名前）。 */
 export const PACK_UNNAMED_LABEL = "（名前の読めない拡張パック）";
+
+/** 文字の形を選ぶ一覧の添え書き（持ち込み／拡張パック・ADR-0060 段階2）。 */
+export const FONT_NOTE_USER = "手持ち";
+export const FONT_NOTE_PACK = "拡張パック";
 /** 入れた・外したときの知らせ。 */
 export function packInstalledMessage(name: string): string {
   return `「${name}」を入れました。`;
@@ -2164,7 +2169,7 @@ export function packOlderThanInstalledMessage(installedVersion: string): string 
 /** 外す前の確かめ（使っている動画の数を添える）。 */
 export function packRemoveConfirmMessage(name: string, usedVideos: number): string {
   return usedVideos > 0
-    ? `「${name}」を外しますか？この拡張パックの見た目パターンを ${usedVideos} 本の動画で使っています。外すと、その場面は「見た目パターンが見つかりません」と表示されます（もう一度入れると戻ります）。`
+    ? `「${name}」を外しますか？この拡張パックの見た目パターンや文字の形を ${usedVideos} 本の動画で使っています。外すと、その部分は「見つかりません」と表示され、書き出す前に知らせます（もう一度入れると戻ります）。`
     : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
 }
 /** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
@@ -2177,6 +2182,7 @@ export const PACK_UNKNOWN_FEATURE_LABEL = "（この版では使えない機能�
 export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templates: "見た目パターン",
   templateAssets: "見た目パターンの写真・ロゴ",
+  fonts: "文字の形",
   features: "機能",
 };
 /** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
@@ -2184,6 +2190,7 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   const parts: string[] = [];
   if (m.contents.templates) parts.push(`${PACK_CONTENT_LABEL.templates} ${m.contents.templates.length}個`);
   if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
+  if (m.contents.fonts) parts.push(`${PACK_CONTENT_LABEL.fonts} ${m.contents.fonts.length}個`);
   if (m.contents.features) {
     const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
     parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);

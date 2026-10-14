@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.33" },
+    "schemaVersion": { "const": "1.34" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -51,9 +51,9 @@
   },
   "$defs": {
     "FontId": {
-      "description": "フォントの id（同梱＋持ち込み・ADR-0038・#261）。同梱は3つ、持ち込みは user_font_NNN（appData/user_fonts に置き、プロジェクトには入れない＝アプリを再配布経路にしない・13 §6）。⚠️ enum ではなく pattern＝持ち込みは利用者ごとに増えるので値を数え上げられない。",
+      "description": "フォントの id（同梱＋持ち込み・ADR-0038・#261）。同梱は3つ、持ち込みは user_font_NNN（appData/user_fonts に置き、プロジェクトには入れない＝アプリを再配布経路にしない・13 §6）。⚠️ enum ではなく pattern＝持ち込みは利用者ごとに増えるので値を数え上げられない。拡張パックの文字の形は pack_<packId>__<fontId>（ADR-0060 決定4・1.34〜。こちらもプロジェクトには入れない）。",
       "type": "string",
-      "pattern": "^(gen-interface-jp|gen-interface-jp-display|kaitou-yokoku-gothic|user_font_[0-9]{3,})$"
+      "pattern": "^(gen-interface-jp|gen-interface-jp-display|kaitou-yokoku-gothic|user_font_[0-9]{3,}|pack_[a-z][a-z0-9]*(_[a-z0-9]+)*__[a-z0-9]+(_[a-z0-9]+)*)$"
     },
     "FontIdOrNull": {
       "description": "フォントの id、または null（=継承）。",

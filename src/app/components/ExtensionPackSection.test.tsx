@@ -150,4 +150,10 @@ describe("中身のあらまし", () => {
     expect(s).toBe(`機能：あなた向け会社説明・${PACK_UNKNOWN_FEATURE_LABEL}`);
     expect(s).not.toContain("future-thing");
   });
+  it("文字の形の数も並べる（段階2）", async () => {
+    const { packContentsSummary } = await import("../uiLabels");
+    const font = { fontId: "a", file: "f/a.otf", displayName: "A" };
+    expect(packContentsSummary({ contents: { templates: [{ file: "t.json" }], fonts: [font, { ...font, fontId: "b" }] } }))
+      .toBe("見た目パターン 1個・文字の形 2個");
+  });
 });

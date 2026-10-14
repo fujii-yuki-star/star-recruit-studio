@@ -1,8 +1,8 @@
 import { useId, useState, type ReactNode } from "react";
 import { useEscapeReceiver } from "../hooks/escapeOwners";
-import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, type FontId } from "../../domain/font/fontCatalog";
+import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, isKnownFontId, isPackFontId, type FontId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
-import { FONT_INHERIT_PROJECT_LABEL } from "../uiLabels";
+import { FONT_INHERIT_PROJECT_LABEL, FONT_NOTE_PACK, FONT_NOTE_USER } from "../uiLabels";
 
 // 動画フォントの選択（プルダウン）。各選択肢を「そのフォントの字形」で表示して直感的に選べるようにする。
 // native <select> は option 個別の font 装飾ができないため、開閉する自前のドロップダウンにする。
@@ -71,7 +71,7 @@ export function FontPicker({
   // 同梱＋持ち込みを1つの一覧にする（`note` は持ち込みには無いので空）。
   const choices: { id: FontId; label: string; note?: string }[] = [
     ...FONT_CATALOG.map((f) => ({ id: f.id as FontId, label: f.label, note: f.note })),
-    ...userFonts.map((f) => ({ id: f.id as FontId, label: f.displayName, note: "手持ち" })),
+    ...userFonts.map((f) => ({ id: f.id as FontId, label: f.displayName, note: isPackFontId(f.id) ? FONT_NOTE_PACK : FONT_NOTE_USER })),
   ];
   // ⚠️ **持ち込みフォントも「既知」として扱う**（🔴1）＝`FONT_CATALOG` だけを見ていたため、
   // 既に持ち込みフォントが入っている文書で**実際と違う字体名を見せ**、一度触ると黙って上書きしていた。

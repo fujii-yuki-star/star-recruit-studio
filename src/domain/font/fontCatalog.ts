@@ -67,6 +67,39 @@ export function isUserFontId(fontId: unknown): fontId is FontId {
 }
 
 /**
+ * 拡張パックの文字の形の id の形（`pack_<packId>__<fontId>`・ADR-0060 決定4）。
+ * ⚠️ **schema の `$defs/FontId` の pattern と一致させる**（`PACK_FONT_ID_SAMPLES` で両側を突き合わせる）。
+ * packId の部分は `extension-pack.schema.json` の `packId`、後ろは `contents.fonts[].fontId` と同じ規則。
+ */
+export const PACK_FONT_ID_RE = /^pack_[a-z][a-z0-9]*(_[a-z0-9]+)*__[a-z0-9]+(_[a-z0-9]+)*$/;
+
+/** schema と domain の形の突き合わせに使う入力（`USER_FONT_ID_SAMPLES` と同じ流儀）。 */
+export const PACK_FONT_ID_SAMPLES: readonly string[] = [
+  'pack_office__mincho',
+  'pack_office_looks__mincho_bold',
+  'pack_office__', // 中の名前が無い
+  'pack___mincho', // packId が無い
+  'pack_office___mincho', // 境目が3つ
+  'pack_office_looks_mincho', // 境目が無い
+  'pack_1office__mincho', // packId が数字で始まる
+  'pack_office__Mincho', // 大文字
+  'xpack_office__mincho', // 前に付いている
+];
+
+/** 拡張パックの文字の形の id か（形だけ＝そのパックが入っているかは別の話）。 */
+export function isPackFontId(fontId: unknown): fontId is FontId {
+  return typeof fontId === 'string' && PACK_FONT_ID_RE.test(fontId);
+}
+
+/**
+ * 同梱でない文字の形（持ち込み＋拡張パック）の id か。**どちらも動画へはコピーせず、手元に在るかを別に確かめる**ので、
+ * 「見つからない」の扱い・CSS の家族名（id そのもの）・既知かの判定は同じ道を通す（ADR-0038・ADR-0060 決定5）。
+ */
+export function isExternalFontId(fontId: unknown): fontId is FontId {
+  return isUserFontId(fontId) || isPackFontId(fontId);
+}
+
+/**
  * 次の持ち込みフォント id を採る（`11 §2` の採番＝既存の最大＋1・3桁ゼロ詰め）。
  * ⚠️ **消した番号は使い回さない**＝`existingIds` には **これまでに使った番号**（外したものを含む＝
  * `usedUserFontIds()`）を渡すこと。**一覧は渡さない**（実体があるものだけなので最大番号を外すと
@@ -103,7 +136,7 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
   if (bundled) return bundled.cssFamily;
   // 持ち込みフォントは id がそのまま家族名（上の ⚠️）。**ファイルの有無はここでは見ない**＝
   // 見つからないときの断りは公開前チェックと書き出しが出す（描画は既定へ倒れる・ADR-0038）。
-  if (isUserFontId(fontId)) return userFontCssFamily(fontId);
+  if (isExternalFontId(fontId)) return userFontCssFamily(fontId);
   return FONT_CATALOG.find((f) => f.id === DEFAULT_FONT_ID)!.cssFamily;
 }
 
@@ -118,7 +151,7 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
  */
 export function isKnownFontId(fontId: unknown): fontId is FontId {
   return (
-    (typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId)) || isUserFontId(fontId)
+    (typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId)) || isExternalFontId(fontId)
   );
 }
 
@@ -138,7 +171,7 @@ export function isKnownFontId(fontId: unknown): fontId is FontId {
 export function isFontAvailable(fontId: unknown, userFontIds: readonly string[] | null): boolean {
   if (typeof fontId !== 'string') return false;
   if (FONT_CATALOG.some((f) => f.id === fontId)) return true;
-  if (!isUserFontId(fontId)) return false;
+  if (!isExternalFontId(fontId)) return false;
   return userFontIds == null || userFontIds.includes(fontId); // 調べていないなら「無い」と言わない
 }
 
