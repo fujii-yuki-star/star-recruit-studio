@@ -102,7 +102,7 @@ async function freePort() {
   return new Promise((ok) => {
     const s = net.createServer();
     s.listen(0, "127.0.0.1", () => {
-      const { port } = s.address();
+      const { port } = /** @type {import("node:net").AddressInfo} */ (s.address());
       s.close(() => ok(port));
     });
   });
