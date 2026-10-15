@@ -62,6 +62,11 @@ export function checkPlan(plan) {
     if (step.enter != null && step.fieldLabel == null) {
       throw new Error(`${i + 1} 段目の \`enter\` は打つ段（\`fieldLabel\`）にだけ書けます: ${JSON.stringify(step)}`);
     }
+    // 見出しが変わるまで待つ上限（ミリ秒・2026-10-15）＝AI のたたき台のように**かかる時間が毎回違う**段で、決め打ちの
+    //   `afterMs` だと足りなければ落ち、多ければ撮った映像に無駄な待ちが残る。⚠️ **待つ先（`expectHeading`）が要る**＝無いと何を待つのか決まらない。
+    if (step.untilHeadingMs != null && (step.expectHeading == null || !Number.isFinite(step.untilHeadingMs) || step.untilHeadingMs <= 0)) {
+      throw new Error(`${i + 1} 段目の \`untilHeadingMs\` は \`expectHeading\` と一緒に、正の数で書きます: ${JSON.stringify(step)}`);
+    }
     if (step.waitMs != null && !Number.isFinite(step.waitMs)) {
       throw new Error(`${i + 1} 段目の \`waitMs\` が数ではありません: ${JSON.stringify(step.waitMs)}`);
     }
