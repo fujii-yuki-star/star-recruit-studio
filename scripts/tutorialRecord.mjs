@@ -25,13 +25,14 @@
 //   ⚠️ **全段には課さない**＝同じ画面の中の選択（目的のカードを選ぶ等）は見出しが変わらないのが正しい。
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { CHOOSE_OPTION, FIND_BY_TEXT, FIND_FIELD, FIND_SELECT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
 import { checkPlan, needsMotionCheck, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
 import { toVideoPoint } from "./lib/cursor.mjs";
 import { gdigrabArea } from "./lib/capture.mjs";
+import { appTreeStopCommand } from "./lib/appTree.mjs";
 
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
@@ -795,6 +796,14 @@ async function main() {
           await new Promise((r) => setTimeout(r, 500));
         }
       }
+      // 見出しが変わるまで待つ（`untilHeadingMs` が上限・2026-10-15）＝かかる時間が毎回違う段（AI のたたき台）で、
+      //   変わったらすぐ次へ進む（撮った映像に無駄な待ちを残さない）。上限を過ぎたら下の見出しの確かめで落ちる。
+      if (step.untilHeadingMs != null) {
+        const until = Date.now() + step.untilHeadingMs;
+        while (Date.now() < until && (await evaluate(cdp, HEADING)) !== step.expectHeading) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
       await new Promise((r) => setTimeout(r, step.afterMs ?? 1200));
       const textAfter = await evaluate(cdp, TEXT_SIG);
       const headingAfter = await evaluate(cdp, HEADING);
@@ -941,9 +950,11 @@ async function main() {
       } catch { /* 消せなければそのまま（読み手に上の注意が出ている） */ }
     }
     // ⚠️ **`--attach` のときは閉じない**＝利用者が開いていたものを勝手に落とさない。
+    // ⚠️ **アプリの部品も一緒に止める**（2026-10-15・実際に踏んだ）＝アプリを強制終了すると、裏で動かす部品
+    //   （このパソコンの中の AI＝llama-server・声＝run.exe・文字起こし）の後始末が走らず、**丸1日動き続けた**
+    //   （利用者の別の実測のノイズになった）。アプリと同じフォルダの下から起動したものを全部止める（`appTreeStopCommand`）。
     if (!attach) {
-      spawnSync("powershell", ["-NoProfile", "-Command",
-        "Stop-Process -Name star-recruit-studio -Force -ErrorAction SilentlyContinue"], { stdio: "ignore", windowsHide: true });
+      spawnSync("powershell", ["-NoProfile", "-Command", appTreeStopCommand(resolve(dirname(APP)))], { stdio: "ignore", windowsHide: true });
     }
   }
 }
