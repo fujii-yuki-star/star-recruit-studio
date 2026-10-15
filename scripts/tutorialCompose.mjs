@@ -26,10 +26,11 @@ const CANVAS = { w: 1920, h: 1080 };
 const VIDEO_BOX = { x: 40, y: 60, w: 1536, h: 960 };
 const LINE_GAP = 0.25;
 /**
- * 声の音量（0〜1）。⚠️ **1 のままだと大きすぎる**（2026-10-15 利用者の指摘・実測で全体 -15.5 LUFS／最大 -0.8dB）＝
- * 0.65 で全体 -19 LUFS 前後（落ち着いて聞ける目安 -18〜-20）。
+ * 全体の音の大きさの目安（LUFS）。⚠️ **書き出しは全体をこの大きさへ整える**ので、声の部品の音量を下げても全体は戻る
+ * （2026-10-15・声を 0.65 にしても -15.4 LUFS のままだった＝既定の目安 -16 へ寄せ直されていた）。
+ * 既定の -16 は利用者の指摘で「大きすぎる」＝説明の動画として落ち着いて聞ける -19 にする。
  */
-const VOICE_VOLUME = 0.65;
+const TARGET_LUFS = -19;
 
 /** WAV の長さ（秒）＝data の大きさ ÷ 1秒あたりのバイト数。 */
 export function wavDurationSec(buf) {
@@ -243,7 +244,7 @@ async function main() {
     const vId = id();
     clips.push({
       id: vId, kind: "voice", trackId: l.who === "yuko" ? "track_005" : "track_006",
-      startSec: r3(plan.voiceAt[i]), durationSec: r3(lineSec[i]), name: `${cast.displayName} ${i + 1}`, volume: VOICE_VOLUME,
+      startSec: r3(plan.voiceAt[i]), durationSec: r3(lineSec[i]), name: `${cast.displayName} ${i + 1}`, volume: 1,
       voice: { text: l.reading ?? l.text, speaker: cast.speaker, voicePath: `voices/line_${String(i + 1).padStart(3, "0")}.wav`, status: "generated" },
     });
     clips.push({
@@ -259,7 +260,7 @@ async function main() {
   const doc = {
     schemaVersion: "1.19", format: "timeline", projectId: "proj_20260101_001", projectName: `使い方の動画：${title}`,
     createdAt: now, updatedAt: now,
-    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: Math.min(300, Math.ceil(total)), maxDurationSec: Math.min(1800, Math.max(60, Math.ceil(total) + 10)) },
+    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: Math.min(300, Math.ceil(total)), maxDurationSec: Math.min(1800, Math.max(60, Math.ceil(total) + 10)), audioAuto: { normalize: true, targetLufs: TARGET_LUFS } },
     voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
     assets, tracks, clips,
   };
