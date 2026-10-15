@@ -25,6 +25,11 @@ const CANVAS = { w: 1920, h: 1080 };
 /** 録画（1280×800）を置く箱。右に立ち絵の場所を空ける。 */
 const VIDEO_BOX = { x: 40, y: 60, w: 1536, h: 960 };
 const LINE_GAP = 0.25;
+/**
+ * 声の音量（0〜1）。⚠️ **1 のままだと大きすぎる**（2026-10-15 利用者の指摘・実測で全体 -15.5 LUFS／最大 -0.8dB）＝
+ * 0.65 で全体 -19 LUFS 前後（落ち着いて聞ける目安 -18〜-20）。
+ */
+const VOICE_VOLUME = 0.65;
 
 /** WAV の長さ（秒）＝data の大きさ ÷ 1秒あたりのバイト数。 */
 export function wavDurationSec(buf) {
@@ -238,7 +243,7 @@ async function main() {
     const vId = id();
     clips.push({
       id: vId, kind: "voice", trackId: l.who === "yuko" ? "track_005" : "track_006",
-      startSec: r3(plan.voiceAt[i]), durationSec: r3(lineSec[i]), name: `${cast.displayName} ${i + 1}`, volume: 1,
+      startSec: r3(plan.voiceAt[i]), durationSec: r3(lineSec[i]), name: `${cast.displayName} ${i + 1}`, volume: VOICE_VOLUME,
       voice: { text: l.reading ?? l.text, speaker: cast.speaker, voicePath: `voices/line_${String(i + 1).padStart(3, "0")}.wav`, status: "generated" },
     });
     clips.push({
