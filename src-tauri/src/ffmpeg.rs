@@ -868,10 +868,17 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     let mut vparts: Vec<String> = Vec::new();
     for (k, l) in layers.iter().enumerate() {
         let normal = (l.speed - 1.0).abs() < 1e-6;
+        // ⚠️ **最初のコマの時刻を 0 にそろえる**（2026-10-15・チュートリアル映像で見つけた）＝`-ss` で途中から読むと、
+        //   読み始めがコマの境目と合わないとき**最初のコマが 0 秒より後ろ**になる（15 コマ/秒の録画で最大 0.067 秒）。
+        //   重ねる側（overlay）はその間「動画がまだ無い」として**下敷きだけ**を出す＝区間の頭で1〜2コマ白く抜けて**チカチカ**する。
         let cv = if normal {
-            fit_filter(l.fit, l.w, l.h)
+            format!("setpts=PTS-STARTPTS,{}", fit_filter(l.fit, l.w, l.h))
         } else {
-            format!("setpts=PTS/{},{}", l.speed, fit_filter(l.fit, l.w, l.h))
+            format!(
+                "setpts=(PTS-STARTPTS)/{},{}",
+                l.speed,
+                fit_filter(l.fit, l.w, l.h)
+            )
         };
         vparts.push(format!("[{}:v]{cv}[clip{k}]", 1 + k));
     }
@@ -5992,7 +5999,9 @@ mod tests {
         assert!(fc.contains("[3:a]volume=1")); // ナレーション
         assert!(fc.contains("[1:a]volume=0.2")); // 元動画音声
         assert!(fc.contains("amix=inputs=2"));
-        assert!(!fc.contains("setpts")); // 等速(speed=1.0)なら setpts は不要
+        // 等速(speed=1.0)なら速さの setpts は不要（0 起点へそろえる setpts だけ＝2026-10-15）。
+        assert!(fc.contains("setpts=PTS-STARTPTS,"));
+        assert!(!fc.contains("setpts=PTS/") && !fc.contains("STARTPTS)/"));
         assert!(!fc.contains("atempo")); // 等速なら atempo は不要
         assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]"));
         assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[aout]"));
@@ -6074,7 +6083,7 @@ mod tests {
             .iter()
             .find(|s| s.contains("overlay"))
             .expect("filter_complex");
-        assert!(fc.contains("setpts=PTS/2")); // 映像を2倍速
+        assert!(fc.contains("setpts=(PTS-STARTPTS)/2")); // 映像を2倍速（最初のコマを 0 にそろえてから）
         assert!(fc.contains("atempo=2")); // 元音声を2倍速（ピッチ維持）
         let pos = args.iter().position(|s| s == "-ss").expect("-ss");
         assert_eq!(args[pos + 3], "10"); // clip_t = dur*speed
@@ -6383,6 +6392,8 @@ mod tests {
             .expect("filter_complex");
         // 2本のクリップをそれぞれスケール（先頭=input1→[clip0]、extra=input2→[clip1]）。
         assert!(fc.contains("[1:v]") && fc.contains("[clip0]"));
+        // 最初のコマの時刻を 0 にそろえる＝区間の頭で下敷きだけが出る（白く抜ける）のを防ぐ（2026-10-15）。
+        assert!(fc.contains("[1:v]setpts=PTS-STARTPTS,"));
         assert!(fc.contains("[2:v]") && fc.contains("[clip1]"));
         // overlay 連鎖（zIndex 下→上）: below→clip0@(80,140)→mid0(input3)→clip1@(200,100)→above(input4)。
         assert!(fc.contains("[0:v][clip0]overlay=80:140[bg1]"));
