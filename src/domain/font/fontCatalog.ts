@@ -33,6 +33,17 @@ export const FONT_CATALOG: readonly BundledFont[] = [
   { id: 'kaitou-yokoku-gothic', label: '怪盗予告ゴシック', cssFamily: 'Kaitou Yokoku Gothic', note: '演出・インパクト' },
 ];
 
+/**
+ * 同梱フォントの実体（`public/fonts/` のファイル名）を、太さごとに（ADR-0062＝書き出しで絵に埋め込むため）。
+ * ⚠️ **`src/styles/fonts.css` の `@font-face` と同じ**＝仕上がり確認が使う実体と同じものを埋め込む（門番が突き合わせる）。
+ * 1ファイルで全部の太さを賄う字体（怪盗予告ゴシック）は両方に同じファイル。
+ */
+export const BUNDLED_FONT_FILES: Readonly<Record<string, { regular: string; bold: string }>> = {
+  'Gen Interface JP': { regular: 'GenInterfaceJP-Regular.ttf', bold: 'GenInterfaceJP-Bold.ttf' },
+  'Gen Interface JP Display': { regular: 'GenInterfaceJPDisplay-Regular.ttf', bold: 'GenInterfaceJPDisplay-Bold.ttf' },
+  'Kaitou Yokoku Gothic': { regular: 'KaitouYokokuGothic.ttf', bold: 'KaitouYokokuGothic.ttf' },
+};
+
 /** 既定フォント（未指定・不明な fontId のフォールバック先）。 */
 export const DEFAULT_FONT_ID: BundledFontId = 'gen-interface-jp';
 
