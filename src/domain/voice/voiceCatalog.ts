@@ -17,6 +17,27 @@ export interface VoiceCharacter {
   styles: VoiceStyle[];
 }
 
+/**
+ * 会社の動画で使えるキャラ（クレジットを書けば商用可・申請不要）＝声はこの中からしか入れない（同梱も拡張パックも）。
+ *
+ * ⚠️ **「確かめが要る危ない橋は渡らない」**（利用者の判断 2026-10-16）＝2026-10-16 に VOICEVOX の全キャラの規約ページを読み、
+ *   会社の利用で申請・許可が要るキャラ（青山龍星・もち子さん・後鬼・No.7 など）と、確かめきれないキャラ（栗田まろん・琴詠ニア・WhiteCUL）を外した。
+ *   根拠の表は `13 §4`。**足すときは規約ページの本文を読み、表に書いてから**（公式サイトの要約だけでは足りない＝猫使・ナースロボ）。
+ * ⚠️ 名前は声のファイル（vvm）の中の名前と同じ綴り（拡張パックの照合は Rust がその名前で行う）。
+ */
+export const COMPANY_OK_VOICE_CHARACTERS: readonly string[] = [
+  // 同梱
+  'ずんだもん', '四国めたん', '九州そら', '春日部つむぎ', '雨晴はう', '波音リツ', '玄野武宏', '白上虎太郎', '冥鳴ひまり', '剣崎雌雄', 'ちび式じい',
+  // 拡張パックで足せる
+  '東北ずん子', '東北きりたん', '東北イタコ', '中国うさぎ', '中部つるぎ', 'あんこもん',
+  '雀松朱司', '麒ヶ島宗麟', '黒沢冴白', '櫻歌ミコ', '小夜/SAYO', '†聖騎士 紅桜†', '春歌ナナ', 'あいえるたん', '満別花丸', '離途',
+];
+
+/** 会社の動画で使えるキャラか（`COMPANY_OK_VOICE_CHARACTERS`）。 */
+export function isCompanyOkVoiceCharacter(character: string): boolean {
+  return COMPANY_OK_VOICE_CHARACTERS.includes(character);
+}
+
 /** 既定 speaker（ずんだもん・ノーマル）。未設定/不明時のフォールバック。 */
 export const DEFAULT_SPEAKER = 3;
 

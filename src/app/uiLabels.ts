@@ -2157,6 +2157,10 @@ export const PACK_BUSY_MESSAGE =
 /** 声の番号が同梱の声と重なる（段階3・`PACK_VOICE_CONFLICT`）。 */
 export const PACK_VOICE_CONFLICT_MESSAGE =
   "この拡張パックの声は、すでに入っている声と番号が重なっているので入れられません。配った人に確かめてください。";
+/** 会社の動画で使うには権利者の許可が要るキャラの声（`PACK_VOICE_NOT_ALLOWED`・13 §4）。 */
+export function packVoiceNotAllowedMessage(character: string): string {
+  return `この拡張パックの声「${character}」は、会社の動画で使うには権利者の許可が要るため、すたりおでは使えません。この声を含まない拡張パックを入れてください。`;
+}
 /** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
 export function packVoiceSkippedMessage(names: readonly string[]): string {
   return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わないか、ほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
