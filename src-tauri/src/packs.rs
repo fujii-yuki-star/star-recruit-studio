@@ -496,9 +496,45 @@ pub(crate) fn vvm_styles(path: &Path) -> Option<Vec<(String, Vec<i64>)>> {
     Some(out)
 }
 
+/// 会社の動画で使えるキャラ（クレジットで商用可・申請不要）＝声のファイルの中身は**全員**この中でなければ読ませない。
+/// ⚠️ **画面側の `COMPANY_OK_VOICE_CHARACTERS`（`src/domain/voice/voiceCatalog.ts`）と同じ一覧**＝門番（`src/test/voiceAllowlistParity.test.ts`）が突き合わせる。
+///   根拠は `13 §4`（2026-10-16 に全キャラの規約ページを確かめた・利用者の判断＝確かめが要る危ない橋は渡らない）。
+pub(crate) const COMPANY_OK_VOICE_CHARACTERS: &[&str] = &[
+    "ずんだもん",
+    "四国めたん",
+    "九州そら",
+    "春日部つむぎ",
+    "雨晴はう",
+    "波音リツ",
+    "玄野武宏",
+    "白上虎太郎",
+    "冥鳴ひまり",
+    "剣崎雌雄",
+    "ちび式じい",
+    "東北ずん子",
+    "東北きりたん",
+    "東北イタコ",
+    "中国うさぎ",
+    "中部つるぎ",
+    "あんこもん",
+    "雀松朱司",
+    "麒ヶ島宗麟",
+    "黒沢冴白",
+    "櫻歌ミコ",
+    "小夜/SAYO",
+    "†聖騎士 紅桜†",
+    "春歌ナナ",
+    "あいえるたん",
+    "満別花丸",
+    "離途",
+];
+
 /// どの声を音声ソフトに読ませるか（段階3）＝**判定はここ1か所**（画面はこの結果だけを声の一覧とクレジットに足す）。
 /// 採る条件：①声のファイルの中身が読める ②manifest のキャラ名が中身に在り、書かれた番号がそのキャラの番号に全部入っている
-/// ③中身の**全部の番号**が、同梱の声とも、先に採ったパックの声とも重ならない（packId の順に先勝ち）。
+/// ③中身の**全部の番号**が、同梱の声とも、先に採ったパックの声とも重ならない（packId の順に先勝ち）
+/// ④中身の**全部のキャラ**が会社の動画で使えるキャラ（`COMPANY_OK_VOICE_CHARACTERS`）。
+/// ⚠️ ④は manifest に書いていないキャラも見る＝1つの声のファイルに複数のキャラが入っていることがあり（例：春歌ナナと猫使アル/ビィ）、
+///   書いたキャラだけ見ると、書いていない（会社では許可が要る）キャラの声まで音声ソフトに読ませてしまう。
 /// ⚠️ ①②を見ないと、クレジットの名前（manifest）と実際に鳴る声（中身）が別物になりうる（ADR-0003）。
 /// ⚠️ ③を見ないと、音声ソフトに同じ番号が2つ並び、どちらで読むかが決まらない（実際に起動して確かめた＝落ちずに並ぶ）。
 pub(crate) fn plan_voices<F>(
@@ -521,7 +557,10 @@ where
             let declared_ok =
                 named.is_some_and(|(_, ids)| d.speakers.iter().all(|s| ids.contains(s)));
             let unique = all.iter().collect::<BTreeSet<_>>().len() == all.len();
-            if declared_ok && unique && all.iter().all(|id| !taken.contains(id)) {
+            let allowed = metas
+                .iter()
+                .all(|(n, _)| COMPANY_OK_VOICE_CHARACTERS.contains(&n.as_str()));
+            if declared_ok && unique && allowed && all.iter().all(|id| !taken.contains(id)) {
                 taken.extend(all);
                 true
             } else {
@@ -832,33 +871,42 @@ mod tests {
         let bundled: BTreeSet<i64> = [0, 1, 2, 3].into_iter().collect();
         let read = |p: &Path| -> Option<Vec<(String, Vec<i64>)>> {
             match p.to_string_lossy().as_ref() {
-                "a/aoi.vvm" => Some(vec![("あおい".into(), vec![9001, 9002])]),
-                "b/aoi.vvm" => Some(vec![("べつ".into(), vec![9002])]), // a と重なる
-                "c/mid.vvm" => Some(vec![("みどり".into(), vec![9100])]),
+                "a/aoi.vvm" => Some(vec![("雀松朱司".into(), vec![9001, 9002])]),
+                "b/aoi.vvm" => Some(vec![("麒ヶ島宗麟".into(), vec![9002])]), // a と重なる
+                "c/mid.vvm" => Some(vec![("黒沢冴白".into(), vec![9100])]),
                 "d/zun.vvm" => Some(vec![("ずんだもん".into(), vec![3])]), // 同梱と重なる
-                "e/liar.vvm" => Some(vec![("ほんもの".into(), vec![9200])]), // 名前が違う
-                "f/part.vvm" => Some(vec![("ふ".into(), vec![9300])]),     // 書いた番号が中身に無い
-                "g/dup.vvm" => Some(vec![("じ".into(), vec![9400, 9400])]), // 中身の中で重なる
-                _ => None,                                                 // h＝読めない
+                "e/liar.vvm" => Some(vec![("あいえるたん".into(), vec![9200])]), // 名前が違う
+                "f/part.vvm" => Some(vec![("離途".into(), vec![9300])]),   // 書いた番号が中身に無い
+                "g/dup.vvm" => Some(vec![("小夜/SAYO".into(), vec![9400, 9400])]), // 中身の中で重なる
+                // 書いたキャラは使えるが、同じファイルに会社では許可が要るキャラが入っている（2026-10-16・13 §4）
+                "i/mix.vvm" => Some(vec![
+                    ("春歌ナナ".into(), vec![9600]),
+                    ("猫使アル".into(), vec![9601]),
+                ]),
+                // 書いたキャラ自体が使えない（画面の門をすり抜けた manifest でも読ませない）
+                "j/ng.vvm" => Some(vec![("後鬼".into(), vec![9700])]),
+                _ => None, // h＝読めない
             }
         };
         let (acc, rej) = plan_voices(
             &bundled,
             vec![
-                dv("a", "aoi", "あおい", &[9001]),
-                dv("b", "aoi", "べつ", &[9002]),
-                dv("c", "mid", "みどり", &[9100]),
+                dv("a", "aoi", "雀松朱司", &[9001]),
+                dv("b", "aoi", "麒ヶ島宗麟", &[9002]),
+                dv("c", "mid", "黒沢冴白", &[9100]),
                 dv("d", "zun", "ずんだもん", &[3]),
-                dv("e", "liar", "うそ", &[9200]),
-                dv("f", "part", "ふ", &[9301]),
-                dv("g", "dup", "じ", &[9400]),
-                dv("h", "gone", "x", &[9500]),
+                dv("e", "liar", "満別花丸", &[9200]),
+                dv("f", "part", "離途", &[9301]),
+                dv("g", "dup", "小夜/SAYO", &[9400]),
+                dv("h", "gone", "東北ずん子", &[9500]),
+                dv("i", "mix", "春歌ナナ", &[9600]),
+                dv("j", "ng", "後鬼", &[9700]),
             ],
             read,
         );
         let ids = |v: &[DeclaredVoice]| v.iter().map(|d| d.pack_id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&acc), vec!["a", "c"]);
-        assert_eq!(ids(&rej), vec!["b", "d", "e", "f", "g", "h"]);
+        assert_eq!(ids(&rej), vec!["b", "d", "e", "f", "g", "h", "i", "j"]);
     }
 
     #[test]

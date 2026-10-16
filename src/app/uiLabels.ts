@@ -2163,7 +2163,7 @@ export function packVoiceNotAllowedMessage(character: string): string {
 }
 /** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
 export function packVoiceSkippedMessage(names: readonly string[]): string {
-  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わないか、ほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
+  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わない、すたりおでは使えないキャラの声が入っている、またはほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
 }
 /** 入っているパックのうち読めなかったもの（起動時など）。 */
 export function packSkippedMessage(names: readonly string[]): string {
