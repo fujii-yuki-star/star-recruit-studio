@@ -114,7 +114,51 @@
 | 剣崎雌雄 | ✅ | 必須（`VOICEVOX:剣崎雌雄`） | 不要 | 選べる | https://frontier.creatia.cc/fanclubs/413/posts/4507 |
 | **青山龍星** | ⚠️ **企業・個人事業主・企業と契約した個人は、収益の有無にかかわらず「ななはぴ」へ事前申請・許可** | 必須（クレジットを外す許可は無い） | **要** | **外した** | https://www.virvoxproject.com/voicevoxの利用規約 |
 | **もち子さん** | ⚠️ **企業の商用は事前に用途を伝えて許可**（無断の商用は 8 万円＋税を請求しうると明記） | 必須（`VOICEVOX もち子さん(cv明日葉よもぎ)`＝声優名まで） | **要** | **外した** | https://vtubermochio.wixsite.com/mochizora/利用規約 |
-| 中国うさぎ・ちび式じい・小夜/SAYO | （確かめていない） | — | — | 一覧に無い（未追加） | 各 policy.md |
+
+#### 同梱していないキャラ（拡張パックで足しうる・2026-10-16 に全員を確かめた）
+
+> ⚠️ **声は拡張パックで増やす**（ADR-0060 段階3）＝パックに入れる前の判断材料として、VOICEVOX 公式サイトのキャラ一覧（43 キャラ）を**全員**、各キャラの規約ページで確かめた。
+> ⚠️ **公式サイトの要約だけでは足りない**＝要約が「クレジットで商用可」でも、規約ページに**会社の利用は要連絡**とあるキャラがいた（猫使アル/ビィ・ナースロボ＿タイプＴ）。**必ず規約ページの本文を読む。**
+
+**会社で使える（クレジットで商用可・申請不要）**
+
+| キャラ | 注意 | 規約ページ |
+|---|---|---|
+| 東北ずん子・東北きりたん・東北イタコ・中国うさぎ・中部つるぎ・あんこもん | ずんだもんと同じ規約（上の表） | https://zunko.jp/con_ongen_kiyaku.html |
+| 雀松朱司・麒ヶ島宗麟・黒沢冴白 | 玄野武宏と同じ VirVox の規約（会社の条件は青山龍星だけ） | https://www.virvoxproject.com/voicevoxの利用規約 |
+| 櫻歌ミコ | 「個人・法人を問わず」と明記。クレジットは `VOICEVOX:櫻歌ミコ` か `(CV:赤乃みずき)` 付き | https://voicevox35miko.studio.site/rule |
+| 小夜/SAYO | 声は商用可（会社に問い合わせを求めるのはキャラの二次創作物） | https://316soramegu.wixsite.com/sayo-official/guideline |
+| †聖騎士 紅桜† | 「†」まで書くかは任意 | https://commons.nicovideo.jp/material/nc296132 |
+| 春歌ナナ | VOICEVOX 版は商用可（UTAU 版は法人に連絡が要る＝別物） | https://nanahira.jp/haruka_nana/guideline.html |
+| あいえるたん | — | https://www.infiniteloop.co.jp/special/iltan/terms/ |
+| 満別花丸 | 「個人様・法人様の商用、非商用利用問わず連絡不要」と明記 | https://100hanamaru.wixsite.com/manbetsu-hanamaru/rule |
+| ちび式じい | 出力した声を機械学習に使うときは連絡 | https://docs.google.com/presentation/d/1AcD8zXkfzKFf2ertHwWRwJuQXjNnijMxhz7AJzEkaI4 |
+| 離途 | 「法人が音声波形のみを利用する場合は、無料で商用利用可能」（キャラ自体の法人利用は許諾が要る）。クレジットは `VOICEVOX 離途` | https://litmus9.com/#/voicebank#rules |
+
+**確かめきれない（パックに入れる前に問い合わせる）**
+
+| キャラ | なぜ | 規約ページ |
+|---|---|---|
+| 栗田まろん | 声の規約は「商用・非商用ともに利用可能」だが、同じページの利用例の表で「法人とスポンサー契約を結んだ個人」などは「お問い合わせください」 | https://aivoice.jp/character/maron/ |
+| 琴詠ニア | 公式サイトの要約は商用可だが、規約ページ（ニコニ・コモンズ）に書かれた許可範囲は「動画配信サイトでの収益化（個人）」だけで、法人の記述が無い | https://commons.nicovideo.jp/works/nc315435 |
+| WhiteCUL | 規約ページが開けない（証明書がドメインと合わない＝ドメインが切れた可能性）。公式サイトの要約は「クレジットで商用可」 | https://www.whitecul.com/guideline |
+
+**会社で使うには申請・許可が要る（入れない）**
+
+| キャラ | 条件 | 規約ページ |
+|---|---|---|
+| 後鬼 | 企業の商用は事前に用途を確認（別キャラへの声当ても原則禁止） | https://ついなちゃん.com/voicevox_terms/ |
+| No.7 | 企業アカウントの利用は商用＝相談（クレジットを外すなら 25 万円＋税） | https://voiceseven.com/ |
+| ナースロボ＿タイプＴ | 企業による商用利用は「連絡必要」 | https://www.krnr.top/rules |
+| 猫使アル・猫使ビィ | 企業の商用は必ず事前に問い合わせ（社内だけの利用は不要） | https://nekotukarb.wixsite.com/nekonohako/利用規約 |
+| Voidoll | 「法人の利用者については原則許諾を行っておりません」。クレジットは `VOICEVOX:Voidoll(CV:丹下桜)` | https://blog.nicovideo.jp/niconews/224589.html |
+| ぞん子 | 商用は問い合わせ | https://zonko.zone-energy.jp/guideline |
+| ユーレイちゃん | 法人の利用は許可が要る | https://u-stella.co.jp/voicevox-ure-chan-tucumo-terms-of-use/ |
+| 夜語トバリ・暁記ミタマ | 法人利用・商用は問い合わせ | https://yogataritobari.studio.site/#rules |
+| 里石ユカ | 企業利用は事前相談。⚠️ **生成 AI を使って作った文章などを含む作品での使用を禁止**＝このソフトは同梱の AI でセリフを作るので、相談しても合わない可能性が高い | https://satoishiyuka.wixsite.com/satoishi/kiyaku |
+
+⚠️ **公式サイトの要約に「藍田ノエル」の項がある**が、キャラ一覧（ページ）には無い＝配布が終わったものと見て調べていない。
+⚠️ **拡張パックとのつながり**＝パックの声はパックを作る側が規約を確かめる（§8.2）。このソフトがパックで配るなら、**上の「会社で使える」の表のキャラだけ**にする。
 
 **どのキャラにも共通する禁止**（会社の動画で踏みうるもの）＝特定の政治・宗教・思想の勧誘や応援・非難／誹謗中傷／公序良俗に反するもの／
 キャラの著作情報を偽る（自作発言）。キャラによっては**情報商材**（ずんだもん等）・**医療の誤った情報**（雨晴はう・剣崎雌雄）・
