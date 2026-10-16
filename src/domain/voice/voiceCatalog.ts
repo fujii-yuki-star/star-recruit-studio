@@ -23,6 +23,10 @@ export const DEFAULT_SPEAKER = 3;
 /**
  * 選べる VOICEVOX 標準キャラのカタログ（規約確認済みの主要キャラ・段階的に追加可）。
  * speaker 番号は VOICEVOX 標準エンジンの値。
+ *
+ * ⚠️ **「クレジットを書けば商用可」だけで使えるキャラに限る**（ADR-0003 追補・2026-10-16）＝青山龍星・もち子さんは
+ *   規約（同梱の `character_info/<id>/policy.md`）に「**企業が携わる形で利用する場合は事前確認が必要**」とあり、
+ *   このソフトは会社が使う（採用動画）ので外した。追加するときは policy.md の**ただし書き**まで読む（`13 §4` の表）。
  */
 export const VOICE_CATALOG: VoiceCharacter[] = [
   {
@@ -57,9 +61,7 @@ export const VOICE_CATALOG: VoiceCharacter[] = [
     ],
   },
   { character: '白上虎太郎', styles: [{ speaker: 12, label: 'ふつう' }, { speaker: 32, label: 'わーい' }] },
-  { character: '青山龍星', styles: [{ speaker: 13, label: 'ノーマル' }] },
   { character: '冥鳴ひまり', styles: [{ speaker: 14, label: 'ノーマル' }] },
-  { character: 'もち子さん', styles: [{ speaker: 20, label: 'ノーマル' }] },
   { character: '剣崎雌雄', styles: [{ speaker: 21, label: 'ノーマル' }] },
 ];
 
