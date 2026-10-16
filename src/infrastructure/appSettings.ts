@@ -1,6 +1,7 @@
 // アプリ全体の設定（プロジェクト非依存）。VOICEVOX 接続先・ナレーター話者・欄の配置など。localStorage に保持。
 import { parsePanelLayout } from '../domain/layout/panelLayout';
 import type { PanelLayout, PanelScreenId } from '../domain/layout/panelLayout';
+import { VOICE_CATALOG } from '../domain/voice/voiceCatalog';
 // project.json には入れない（接続先は環境差があり、共有プロジェクトに含めるべきでないため）。
 // Tauri WebView でも localStorage は永続する（projectFs と同様）。
 const VOICEVOX_URL_KEY = 'app.voicevoxUrl';
@@ -128,7 +129,11 @@ export function getVoicevoxSpeaker(): number | null {
   const raw = read(VOICEVOX_SPEAKER_KEY);
   if (raw == null || raw === '') return null;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  // ⚠️ **いま選べない声は「未設定」として読む**（ADR-0003 追補・2026-10-16）＝一覧から外した声（青山龍星・もち子さん）を
+  //   既定の声に選んでいた人は、そのままだと**外した声で作り続け**、しかもクレジットは引けずに既定のキャラへ倒れる
+  //  （鳴る声と名乗るキャラが違う動画）。既定の声（ずんだもん）へ戻す。
+  if (!Number.isFinite(n) || !VOICE_CATALOG.some((c) => c.styles.some((s) => s.speaker === n))) return null;
+  return n;
 }
 export function setVoicevoxSpeaker(speaker: number): void {
   write(VOICEVOX_SPEAKER_KEY, String(speaker));
