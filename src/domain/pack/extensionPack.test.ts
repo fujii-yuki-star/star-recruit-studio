@@ -225,7 +225,7 @@ describe('音楽（段階2b）', () => {
 
 describe('声（段階3）', () => {
   type V = { voiceId: string; file: string; character: string; styles: { speaker: number; label: string }[] };
-  const v = (over: Partial<V> = {}): V => ({ voiceId: 'aoi', file: 'v/aoi.vvm', character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }], ...over });
+  const v = (over: Partial<V> = {}): V => ({ voiceId: 'aoi', file: 'v/aoi.vvm', character: '雀松朱司', styles: [{ speaker: 9001, label: 'ノーマル' }], ...over });
   const withVoices = (voices: V[], over: Partial<ExtensionPackManifest> = {}) =>
     manifest({
       contents: { voices },
@@ -246,16 +246,29 @@ describe('声（段階3）', () => {
     expect(parsePackManifest(JSON.stringify(withVoices([v({ file: 'v/aoi.onnx' })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.invalid } });
   });
 
+  // ⚠️ 会社の動画で使うには許可が要るキャラ・確かめきれないキャラの声は入れない（2026-10-16・13 §4）。
+  it('会社の動画で使えないキャラの声は、その名前を添えて断る', () => {
+    for (const character of ['後鬼', 'No.7', '猫使アル', 'Voidoll', '青山龍星', 'もち子さん', '栗田まろん', '琴詠ニア', 'WhiteCUL', '知らない声']) {
+      expect(parsePackManifest(JSON.stringify(withVoices([v({ character })])))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.voiceNotAllowed, character } });
+    }
+    // 1つでも使えない声があればパックごと断る（使える声だけ入れて、残りを黙って捨てない）
+    const mixed = [v(), v({ voiceId: 'b', file: 'v/b.vvm', character: '猫使ビィ', styles: [{ speaker: 9002, label: 'x' }] })];
+    expect(parsePackManifest(JSON.stringify(withVoices(mixed)))).toEqual({ ok: false, problem: { kind: PACK_PROBLEM.voiceNotAllowed, character: '猫使ビィ' } });
+    for (const character of ['†聖騎士 紅桜†', '東北ずん子', '小夜/SAYO', '離途']) {
+      expect(parsePackManifest(JSON.stringify(withVoices([v({ character })]))).ok).toBe(true);
+    }
+  });
+
   it('採るかどうかは Rust の結果（accepted）に従い、足さなかった声のあるパックの名前を返す', async () => {
     const { packVoiceCharacters, packVoiceRefKey } = await import('./extensionPack');
     const a = withVoices([v()], { packId: 'a', name: 'パックA' });
     const b = withVoices([v({ character: 'べつ' })], { packId: 'b', name: 'パックB' });
     expect(packVoiceCharacters([a, b], new Set([packVoiceRefKey('a', 'aoi')]))).toEqual({
-      characters: [{ character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }],
+      characters: [{ character: '雀松朱司', styles: [{ speaker: 9001, label: 'ノーマル' }] }],
       skipped: ['パックB'],
     });
     // 音声ソフトが無い（ブラウザ開発）＝書かれた声を全部足す
-    expect(packVoiceCharacters([a, b], null).characters.map((c) => c.character)).toEqual(['あおい', 'べつ']);
+    expect(packVoiceCharacters([a, b], null).characters.map((c) => c.character)).toEqual(['雀松朱司', 'べつ']);
   });
 
   it('声のファイルの組の名前は、中身（SHA-256）が変われば変わり、採らなかった声と声の無いパックは含めない', async () => {

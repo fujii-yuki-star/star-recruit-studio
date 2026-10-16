@@ -2,7 +2,7 @@
 // ⚠️ **パックはデータだけ**＝ここで扱うのは manifest と中の JSON だけ。ファイルの展開と SHA-256 の照合は Rust（`packs.rs`）。
 import { validateExtensionPack, validateTemplate } from '../validation/generated/validators.js';
 import type { Template } from '../template/types';
-import { VOICE_CATALOG, type VoiceCharacter } from '../voice/voiceCatalog';
+import { VOICE_CATALOG, isCompanyOkVoiceCharacter, type VoiceCharacter } from '../voice/voiceCatalog';
 
 /** manifest.json の形（`schemas/extension-pack.schema.json`）。 */
 export interface ExtensionPackManifest {
@@ -43,6 +43,8 @@ export const PACK_PROBLEM = {
   olderThanInstalled: 'olderThanInstalled',
   /** 声の番号（スタイル）が同梱の声と重なる（段階3）。 */
   voiceConflict: 'voiceConflict',
+  /** 会社の動画で使うには許可が要る（または確かめきれない）キャラの声（`COMPANY_OK_VOICE_CHARACTERS` に無い）。 */
+  voiceNotAllowed: 'voiceNotAllowed',
 } as const;
 export type PackProblem =
   | { kind: typeof PACK_PROBLEM.invalid }
@@ -50,7 +52,8 @@ export type PackProblem =
   | { kind: typeof PACK_PROBLEM.missingLicense; target: PackContentKind }
   | { kind: typeof PACK_PROBLEM.appTooOld; minAppVersion: string }
   | { kind: typeof PACK_PROBLEM.olderThanInstalled; installedVersion: string }
-  | { kind: typeof PACK_PROBLEM.voiceConflict };
+  | { kind: typeof PACK_PROBLEM.voiceConflict }
+  | { kind: typeof PACK_PROBLEM.voiceNotAllowed; character: string };
 
 /**
  * manifest.json の文字列を読む。schema に合い、中身のファイルが全部 `files` に載り、中身の種類ごとに権利が書かれていれば manifest。
@@ -83,6 +86,10 @@ export function parsePackManifest(raw: string): { ok: true; manifest: ExtensionP
   //   （実際に起動して確かめた＝落ちずに両方並ぶ）。クレジットの名前も取り違える。
   const bundled = new Set(VOICE_CATALOG.flatMap((c) => c.styles.map((s) => s.speaker)));
   if (speakers.some((s) => bundled.has(s))) return { ok: false, problem: { kind: PACK_PROBLEM.voiceConflict } };
+  // ⚠️ **会社の動画で使えないキャラの声は入れない**（2026-10-16 利用者の判断＝確かめが要る危ない橋は渡らない・`13 §4`）。
+  //   規約で「企業の利用は申請・許可」とあるキャラを入れると、利用者は知らずに規約違反の採用動画を作る。
+  const notAllowed = voices.find((v) => !isCompanyOkVoiceCharacter(v.character));
+  if (notAllowed) return { ok: false, problem: { kind: PACK_PROBLEM.voiceNotAllowed, character: notAllowed.character } };
   const licensed = new Set(m.licenses.map((l) => l.target));
   for (const kind of PACK_CONTENT_KINDS) {
     if (m.contents[kind] && !licensed.has(kind)) return { ok: false, problem: { kind: PACK_PROBLEM.missingLicense, target: kind } };

@@ -26,9 +26,11 @@ import { resetPackVoiceKeyForTest, useProjectStore } from "./projectStore";
 import { characterForSpeaker, setExtraVoiceCharacters } from "../../domain/voice/voiceCatalog";
 import { VOICE_ENGINE_RESTART_FAILED_MESSAGE } from "../uiLabels";
 
+/** パックごとのキャラ（会社の動画で使えるキャラの中から・13 §4）。 */
+const PACK_CHARACTER: Record<string, string> = { office: "雀松朱司", a: "麒ヶ島宗麟", b: "黒沢冴白" };
 const voicePack = (packId: string, speaker: number, sha = "a") => JSON.stringify({
   schemaVersion: "1.0", packId, name: `声${packId}`, version: "1.0.0", publisher: "社内", minAppVersion: "0.5.0",
-  contents: { voices: [{ voiceId: "aoi", file: "v/aoi.vvm", character: `あおい${packId}`, styles: [{ speaker, label: "ノーマル" }] }] },
+  contents: { voices: [{ voiceId: "aoi", file: "v/aoi.vvm", character: PACK_CHARACTER[packId] ?? "雀松朱司", styles: [{ speaker, label: "ノーマル" }] }] },
   files: [{ path: "v/aoi.vvm", sha256: sha.repeat(64) }],
   licenses: [{ target: "voices", license: "キャラの規約" }],
 });
@@ -49,7 +51,7 @@ describe("拡張パックの声", () => {
     fx.manifests = [voicePack("office", 9001)];
     await useProjectStore.getState().loadPacks();
     expect(fx.restarts).toBe(0);
-    expect(characterForSpeaker(9001)).toBe("あおいoffice");
+    expect(characterForSpeaker(9001)).toBe("雀松朱司");
   });
 
   it("声を入れた・外した・中身が変わったときだけ起こし直す（声と関係ない読み直しでは起こし直さない）", async () => {
@@ -85,7 +87,7 @@ describe("拡張パックの声", () => {
     fx.rejected = ["b"];
     await useProjectStore.getState().loadPacks();
     expect(useProjectStore.getState().packVoicesSkipped).toEqual(["声b"]);
-    expect(characterForSpeaker(9001)).toBe("あおいa");
+    expect(characterForSpeaker(9001)).toBe("麒ヶ島宗麟");
     expect(characterForSpeaker(9002)).toBeNull();
   });
 

@@ -2157,9 +2157,13 @@ export const PACK_BUSY_MESSAGE =
 /** 声の番号が同梱の声と重なる（段階3・`PACK_VOICE_CONFLICT`）。 */
 export const PACK_VOICE_CONFLICT_MESSAGE =
   "この拡張パックの声は、すでに入っている声と番号が重なっているので入れられません。配った人に確かめてください。";
+/** 会社の動画で使うには権利者の許可が要るキャラの声（`PACK_VOICE_NOT_ALLOWED`・13 §4）。 */
+export function packVoiceNotAllowedMessage(character: string): string {
+  return `この拡張パックの声「${character}」は、会社の動画で使うには権利者の許可が要るため、すたりおでは使えません。この声を含まない拡張パックを入れてください。`;
+}
 /** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
 export function packVoiceSkippedMessage(names: readonly string[]): string {
-  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わないか、ほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
+  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わない、すたりおでは使えないキャラの声が入っている、またはほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
 }
 /** 入っているパックのうち読めなかったもの（起動時など）。 */
 export function packSkippedMessage(names: readonly string[]): string {
@@ -2197,7 +2201,7 @@ export function packOlderThanInstalledMessage(installedVersion: string): string 
 /** 外す前の確かめ（使っている動画の数を添える）。 */
 export function packRemoveConfirmMessage(name: string, usedVideos: number): string {
   return usedVideos > 0
-    ? `「${name}」を外しますか？この拡張パックの見た目パターンや文字の形を ${usedVideos} 本の動画で使っています。外すと、その部分は「見つかりません」と表示され、書き出す前に知らせます（もう一度入れると戻ります）。`
+    ? `「${name}」を外しますか？この拡張パックの中身（見た目パターン・文字の形・声など）を ${usedVideos} 本の動画で使っています。外すと、その部分は使えなくなり、書き出す前に知らせます（もう一度入れると戻ります）。`
     : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
 }
 /** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */

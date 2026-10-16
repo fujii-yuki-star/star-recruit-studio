@@ -90,3 +90,17 @@ describe('いま入っていない声で作り済みの読み上げ（段階3）
     ])).toBe(2);
   });
 });
+
+describe('COMPANY_OK_VOICE_CHARACTERS（会社の動画で使えるキャラ・13 §4）', () => {
+  it('同梱の声はすべて会社の動画で使えるキャラ', async () => {
+    const { VOICE_CATALOG, isCompanyOkVoiceCharacter } = await import('./voiceCatalog');
+    for (const c of VOICE_CATALOG) expect(isCompanyOkVoiceCharacter(c.character)).toBe(true);
+  });
+  it('会社の利用で許可が要るキャラは入っていない', async () => {
+    const { isCompanyOkVoiceCharacter, COMPANY_OK_VOICE_CHARACTERS } = await import('./voiceCatalog');
+    for (const c of ['青山龍星', 'もち子さん', '後鬼', 'No.7', 'ナースロボ＿タイプＴ', '猫使アル', '猫使ビィ', 'Voidoll', 'ぞん子', 'ユーレイちゃん', '夜語トバリ', '暁記ミタマ', '里石ユカ', '栗田まろん', '琴詠ニア', 'WhiteCUL']) {
+      expect(isCompanyOkVoiceCharacter(c)).toBe(false);
+    }
+    expect(COMPANY_OK_VOICE_CHARACTERS).toHaveLength(27);
+  });
+});
