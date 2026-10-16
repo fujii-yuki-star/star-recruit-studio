@@ -67,7 +67,7 @@ describe("拡張パックの音楽の取り込み", () => {
   });
 
   it("タイムライン形式も同じ口で入る（形式で受けないことを作らない）", async () => {
-    expect(await useTimelineStore.getState().importFromLibrary("pack_office__morning")).toBe(true);
+    expect(await useTimelineStore.getState().importFromLibrary("pack_office__morning")).toBe("asset_001");
     const a = useTimelineStore.getState().doc!.assets[0];
     expect(a).toMatchObject({ assetType: ASSET_TYPE.bgm, displayName: "朝の曲" });
     expect(copyPackFileToProject).toHaveBeenCalledWith("office", "bgm/morning.mp3", "proj_20261014_002", expect.stringMatching(/^asset_\d{3}\.mp3$/));

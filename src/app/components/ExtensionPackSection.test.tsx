@@ -37,7 +37,7 @@ vi.mock("../../infrastructure/projectFs", async (orig) => ({
 import { ExtensionPackSection } from "./ExtensionPackSection";
 import { useProjectStore } from "../store/projectStore";
 import type { ExtensionPackManifest } from "../../domain/pack/extensionPack";
-import { PACK_INVALID_MESSAGE, PACK_MISSING_LICENSE_MESSAGE, packAppTooOldMessage, packRemoveConfirmMessage } from "../uiLabels";
+import { PACK_INVALID_MESSAGE, PACK_MISSING_LICENSE_MESSAGE, packAppTooOldMessage, packOlderThanInstalledMessage, packUpdateVersionLine, packRemoveConfirmMessage } from "../uiLabels";
 
 const SHA = "a".repeat(64);
 const manifest = (over: Partial<ExtensionPackManifest> = {}): ExtensionPackManifest => ({
@@ -108,14 +108,33 @@ describe("ExtensionPackSection", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(fx.inspectError);
   });
 
-  it("アプリが古いと、入れる段で断る（入れない）", async () => {
+  // ⚠️ 以前は中身を見せて「入れる」を押させてから断っていた（2026-10-16 実機）＝見せる前に断る。
+  it("アプリが古いと、中身を見せる前に断る（入れない）", async () => {
     fx.inspect = JSON.stringify(manifest({ minAppVersion: "0.9.0" }));
     render(<ExtensionPackSection />);
     fireEvent.click(screen.getByRole("button", { name: "拡張パックを入れる…" }));
-    await screen.findByTestId("extension-pack-confirm");
-    fireEvent.click(screen.getByRole("button", { name: "入れる" }));
     expect((await screen.findByRole("alert")).textContent).toBe(packAppTooOldMessage("0.9.0"));
+    expect(screen.queryByTestId("extension-pack-confirm")).toBeNull();
     expect(fx.installs).toEqual([]);
+  });
+
+  it("同じパックの新しい版なら「入れ替える」と見せ、入っている版 → 新しい版を出す", async () => {
+    useProjectStore.setState({ packs: [manifest({ version: "1.0.0" })] });
+    fx.inspect = JSON.stringify(manifest({ version: "1.1.0" }));
+    render(<ExtensionPackSection />);
+    fireEvent.click(screen.getByRole("button", { name: "拡張パックを入れる…" }));
+    const confirm = await screen.findByTestId("extension-pack-confirm");
+    expect(confirm.textContent).toContain(packUpdateVersionLine("1.0.0", "1.1.0"));
+    expect(screen.getByRole("button", { name: "入れ替える" })).toBeTruthy();
+  });
+
+  it("入っている版より古い版は、中身を見せる前に断る", async () => {
+    useProjectStore.setState({ packs: [manifest({ version: "1.0.0" })] });
+    fx.inspect = JSON.stringify(manifest({ version: "0.9.0" }));
+    render(<ExtensionPackSection />);
+    fireEvent.click(screen.getByRole("button", { name: "拡張パックを入れる…" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(packOlderThanInstalledMessage("1.0.0"));
+    expect(screen.queryByTestId("extension-pack-confirm")).toBeNull();
   });
 
   it("外す前に、そのパックの見た目パターンを使っている動画の数を知らせる", async () => {

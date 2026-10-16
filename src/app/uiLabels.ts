@@ -1,5 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import { isKnownPackFeature, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
+import { isKnownPackFeature, packIdOfScopedId, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
@@ -1164,7 +1164,7 @@ export const exportBlockedMessage: Record<
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     // ⚠️ 「読み込み直す」は書かない（#812）＝読み直す操作が画面に無く、自作のものを消した場合は
     // 読み直しても戻らない（実行できない／効果の無い行動を名指ししない・§2-5）。
-    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して、置き直してください",
+    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
   TIMELINE_EXPORT_ASSET_UNREADABLE:
@@ -1239,8 +1239,8 @@ export function volumePointsTooManyMessage(hasSplittable: boolean): string {
  */
 export function missingTemplateMessage(count?: number): string {
   return count == null
-    ? "この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。"
-    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して、置き直してください。`;
+    ? "この部品の見た目パターンが見つかりません。この部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください。"
+    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください。`;
 }
 
 /**
@@ -2181,8 +2181,28 @@ export const FONT_NOTE_PACK = "拡張パック";
 export const LIBRARY_LIST_UNREADABLE_MESSAGE = "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。";
 /** 棚の素材（または拡張パックの音楽）が見つからない（`LIBRARY_ASSET_MISSING`）。 */
 export const LIBRARY_ASSET_MISSING_MESSAGE = "この素材は見つかりませんでした。一覧を開き直してください。";
+/** 「音」の欄の、拡張パックの音楽の添え書き（押すと取り込んで置く）。 */
+export const PACK_AUDIO_NOTE = "拡張パック・押すと取り込んで置きます";
 /** 素材の棚に並べる拡張パックの音楽の見出し（ADR-0060 段階2b）。 */
 export const PACK_BGM_LIST_LABEL = "拡張パックの音楽";
+/**
+ * 見た目パターンの出どころの札（見た目の管理画面）。自分の見た目以外＝標準か拡張パック。
+ * ⚠️ 拡張パックの見た目を「標準」と出していた（2026-10-16 実機）＝外すと消えるので、どのパックのものかを出す。
+ */
+export function lookOriginLabel(templateId: string, packs: readonly { packId: string; name: string }[]): string {
+  const packId = packIdOfScopedId(templateId);
+  if (packId == null) return "標準（直接は編集できません）";
+  const name = packs.find((p) => p.packId === packId)?.name;
+  return name ? `拡張パック「${name}」（直接は編集できません）` : "拡張パック（直接は編集できません）";
+}
+/** 同じパックの別の版を入れるときの確かめの見出し（2026-10-16 実機＝更新だと分からなかった）。 */
+export function packUpdateConfirmTitle(name: string): string {
+  return `「${name}」を新しい版に入れ替えますか？`;
+}
+/** 版の行（入っている版 → 入れる版）。 */
+export function packUpdateVersionLine(installed: string, next: string): string {
+  return `${installed} → ${next}（入っている版を入れ替えます）`;
+}
 /** 入れた・外したときの知らせ。 */
 export function packInstalledMessage(name: string): string {
   return `「${name}」を入れました。`;

@@ -10,13 +10,14 @@ import { isOwnCleanupPending, useExportLockStore } from "../store/exportLock";
 import { canExport } from "../../infrastructure/ffmpegExport";
 import { useNavigationGuard } from "../hooks/navigationGuard";
 import { useProjectStore } from "../store/projectStore";
+import { packBgmLibraryAssets } from "../store/librarySource";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
-import { TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
+import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
@@ -528,7 +529,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
-    addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
+    addAudioClip, importFromLibrary, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
     setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
@@ -1563,6 +1564,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // 読み上げを置ける列（音の列）。
   // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
   const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
+  // 拡張パックの音楽（まだこの動画へ取り込んでいないもの）＝「音」の欄に同梱の曲と並べ、押すと取り込んでその場で置く。
+  // ⚠️ 以前は「よく使う素材」で取り込んでから「音」で置く二手だった（2026-10-16 実機）＝同梱の曲は「音」から一手で置ける。
+  const packs = useProjectStore((s) => s.packs);
+  const packAudioItems = packBgmLibraryAssets(packs).filter((b) => !audioAssets.some((a) => a.displayName === b.displayName));
   /**
    * 「鳴らす音」の欄が指す値と、それが**候補に無い**か（#734 レビュー）。
    *
@@ -3564,6 +3569,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       ? audioPlacementAt(doc, audioTrackId, playheadSec, placedDurationSec({ kind: TIMELINE_CLIP_KIND.audio, ...spec }))
       : null);
     addAudioClip({ ...spec, trackId: found?.trackId ?? audioTrackId, startSec: found?.startSec ?? playheadSec });
+  };
+
+  /** 拡張パックの音楽を、この動画へ取り込んでから置く（掴んで運ぶのは取り込んだあと＝取り込みに時間がかかるため）。 */
+  const placePackAudio = async (libraryId: string): Promise<void> => {
+    const assetId = await importFromLibrary(libraryId);
+    if (!assetId) return; // 断りは取り込み側が `importError` に出す
+    const asset = useTimelineStore.getState().doc?.assets.find((a) => a.assetId === assetId);
+    if (!asset) return;
+    placeAudio({ assetId, durationSec: audioAssetDurationSec(asset, audioDurations[assetId]) });
   };
 
   /** 読み上げを押して置くときの置き先（音と同じ規則＝種類で割らない）。 */
@@ -6731,6 +6745,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   items={[
                     ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
                     ...audioAssets.map((a) => ({ id: `asset:${a.assetId}`, label: a.displayName })),
+                    ...packAudioItems.map((b) => ({ id: `pack:${b.id}`, label: b.displayName, note: PACK_AUDIO_NOTE })),
                   ]}
                   disabled={isPlaying || exporting}
                   disabledHint={exporting ? exportingHint : playingHint}
@@ -6742,6 +6757,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                       placeAudio(src.spec, at));
                   }}
                   onPick={(id) => {
+                    if (id.startsWith("pack:")) {
+                      void placePackAudio(id.slice("pack:".length));
+                      return;
+                    }
                     const src = audioSourceOf(id);
                     if (!src) return;
                     placeAudio(src.spec);
