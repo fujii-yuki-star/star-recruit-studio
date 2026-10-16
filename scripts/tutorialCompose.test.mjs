@@ -1,6 +1,6 @@
 // チュートリアル映像の仕上げ（#1228）＝段ごとに切り、声が長い段は止めたコマで待つ並べ方。
 import { describe, expect, it } from "vitest";
-import { planTimeline, wavDurationSec } from "./tutorialCompose.mjs";
+import { fitBox, planTimeline, wavDurationSec } from "./tutorialCompose.mjs";
 
 describe("planTimeline", () => {
   it("前置き→段ごとの映像→後書きの順に並べ、声は段の頭から話し始める", () => {
@@ -40,5 +40,18 @@ describe("wavDurationSec", () => {
     buf.write("data", 36);
     buf.writeUInt32LE(48000, 40);
     expect(wavDurationSec(buf)).toBeCloseTo(2);
+  });
+});
+
+describe("fitBox", () => {
+  const box = { x: 0, y: 0, w: 1728, h: 908 };
+  it("横長の録画は幅いっぱい・高さを縮める（黒い帯を出さない）", () => {
+    expect(fitBox(box, 1888, 976)).toEqual({ x: 0, y: 0, w: 1728, h: 893 });
+  });
+  it("縦に長い録画は高さいっぱい・幅を縮める", () => {
+    expect(fitBox(box, 1280, 800)).toEqual({ x: 0, y: 0, w: 1453, h: 908 });
+  });
+  it("大きさが読めなければ箱のまま", () => {
+    expect(fitBox(box, 0, 0)).toBe(box);
   });
 });

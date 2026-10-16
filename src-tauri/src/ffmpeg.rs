@@ -665,18 +665,26 @@ pub enum Fit {
 
 /// 動画クリップをスロット(w×h)へ収める scale/crop/pad フィルタ（純粋）。
 fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
-    match fit {
+    // ⚠️ **大きさを変える前と後の両方で RGBA に固定する**（2026-10-16・使い方の動画で踏んだ）＝
+    //   録画は yuv420 で、縦横が**偶数でないと作れない**。箱が奇数（例 1728×893）だと scale が 894 へ丸め、
+    //   pad（893）より大きくなって**書き出しが止まる**。前だけ RGBA にしても、書き出し側（h264）が yuv420 を
+    //   求めるので、FFmpeg が scale の出力を yuv420 に決め直して**同じく止まる**（実 FFmpeg で確かめた）。
+    //   箱の大きさは利用者が自由に決める（タイムラインでつかんで動かせる）ので、奇数でも通るようにする。
+    let (scale, rest) = match fit {
         // 短辺合わせで埋めて余りを切る。
-        Fit::Cover => {
-            format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1")
-        }
+        Fit::Cover => (
+            format!("scale={w}:{h}:force_original_aspect_ratio=increase"),
+            format!("crop={w}:{h},setsar=1"),
+        ),
         // 全体を収め、余白を中央寄せで黒帯。
-        Fit::Contain => format!(
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+        Fit::Contain => (
+            format!("scale={w}:{h}:force_original_aspect_ratio=decrease"),
+            format!("pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1"),
         ),
         // アスペクト無視で引き伸ばし。
-        Fit::Stretch => format!("scale={w}:{h},setsar=1"),
-    }
+        Fit::Stretch => (format!("scale={w}:{h}"), "setsar=1".to_string()),
+    };
+    format!("format=rgba,{scale},format=rgba,{rest}")
 }
 
 /// 上PNG 1枚ぶんの合成指定（掛け合い×動画では行区間ごとに差し替える）。
@@ -6710,7 +6718,87 @@ mod tests {
 
     #[test]
     fn fit_filter_stretch_scales_only() {
-        assert_eq!(fit_filter(Fit::Stretch, 320, 180), "scale=320:180,setsar=1");
+        assert_eq!(
+            fit_filter(Fit::Stretch, 320, 180),
+            "format=rgba,scale=320:180,format=rgba,setsar=1"
+        );
+    }
+
+    // 奇数の箱でも作れるよう、大きさを変える前と後で RGBA に固定する（yuv420 は奇数の縦横を作れない＝書き出しが止まる・2026-10-16）。
+    #[test]
+    fn fit_filter_pins_rgba_around_scale_for_odd_sizes() {
+        for fit in [Fit::Cover, Fit::Contain, Fit::Stretch] {
+            let f = fit_filter(fit, 1728, 893);
+            assert!(f.starts_with("format=rgba,scale=1728:893"), "{f}");
+            assert!(f.contains(",format=rgba,"), "{f}");
+        }
+    }
+
+    // 奇数の箱の動画が、実 FFmpeg で h264 まで通るか（文字列の検査では FFmpeg の形式の決め直しが見えない）。FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn odd_slot_video_encodes_when_ffmpeg_available() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_odd_slot_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+        let clip = tmp.join("clip.mp4");
+        let s = |v: &str| v.to_string();
+        run(
+            &ffmpeg,
+            &[
+                s("-y"),
+                s("-f"),
+                s("lavfi"),
+                s("-i"),
+                s("testsrc=s=1888x976:r=15:d=1"),
+                s("-pix_fmt"),
+                s("yuv420p"),
+                s("-c:v"),
+                s(codec.encoder()),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("make clip");
+        for fit in [Fit::Cover, Fit::Contain, Fit::Stretch] {
+            let out = tmp.join("out.mp4");
+            let fc = format!(
+                "[1:v]setpts=PTS-STARTPTS,{}[c];[0:v][c]overlay=0:0:shortest=1[v]",
+                fit_filter(fit, 1727, 893)
+            );
+            run(
+                &ffmpeg,
+                &[
+                    s("-y"),
+                    s("-f"),
+                    s("lavfi"),
+                    s("-i"),
+                    s("color=c=white:s=1920x1080:r=30"),
+                    s("-ss"),
+                    s("0.37"),
+                    s("-i"),
+                    clip.to_string_lossy().into_owned(),
+                    s("-filter_complex"),
+                    fc,
+                    s("-map"),
+                    s("[v]"),
+                    s("-c:v"),
+                    s(codec.encoder()),
+                    s("-t"),
+                    s("0.3"),
+                    out.to_string_lossy().into_owned(),
+                ],
+            )
+            .unwrap_or_else(|e| panic!("odd slot ({fit:?}) failed: {e}"));
+            assert!(fs::metadata(&out).expect("out exists").len() > 0);
+        }
     }
 
     // 動画スロット合成のE2E（overlay＋amix のフィルタグラフが実FFmpegで通るか）。FFMPEG_PATH 未設定ならスキップ。

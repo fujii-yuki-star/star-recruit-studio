@@ -22,8 +22,17 @@ const FFMPEG = "src-tauri/resources/ffmpeg/bin/ffmpeg.exe";
 const ENGINE = "src-tauri/resources/voicevox_engine/run.exe";
 const YUKO = "public/yuko/yuko_smile_001.png";
 const CANVAS = { w: 1920, h: 1080 };
-/** 録画（1280×800）を置く箱。右に立ち絵の場所を空ける。 */
-const VIDEO_BOX = { x: 40, y: 60, w: 1536, h: 960 };
+/**
+ * 録画を置く箱（左上に寄せる）。下に字幕、右下に立ち絵の場所を空ける。
+ * ⚠️ **録画はできるだけ大きく撮って、ほぼそのまま置く**（2026-10-16 利用者の指摘＝大きいほうが見やすい）＝
+ *   サブモニターで最大化した窓（中身 1920×1009）を 0.9 倍で置く。以前の 1280×800 は 1.2 倍に引き伸ばしていて、文字がぼやけていた。
+ * ⚠️ **録画の上に何も重ねない**＝字幕と立ち絵は箱の外（04 のタイムラインのように、画面の下端に大事な物がある）。
+ */
+const VIDEO_BOX = { x: 0, y: 0, w: 1728, h: 908 };
+/** 立ち絵（箱の右下の空き・元の絵 340×540 の縦横比）。 */
+const YUKO_BOX = { x: 1736, y: 770, w: 180, h: 286 };
+/** 字幕（箱の下の帯・2 行まで）。 */
+const SUBTITLE_BOX = { x: 24, y: 918, w: 1690, h: 150 };
 const LINE_GAP = 0.25;
 /**
  * 全体の音の大きさの目安（LUFS）。⚠️ **書き出しは全体をこの大きさへ整える**ので、声の部品の音量を下げても全体は戻る
@@ -146,6 +155,24 @@ function stillFrame(video, sec, out) {
   if (r.status !== 0 || !existsSync(out)) throw new Error(`止めたコマを取り出せません（${sec}s）`);
 }
 
+/**
+ * 箱を映像の縦横比に合わせて縮める（左上はそのまま）。
+ * ⚠️ **箱と映像の形が違うと、余りが黒い帯になる**（2026-10-16・サブモニターで撮った 1888×976 を 1728×908 の箱へ入れて上下に帯が出た）。
+ */
+export function fitBox(box, videoW, videoH) {
+  if (!(videoW > 0 && videoH > 0)) return box;
+  const k = Math.min(box.w / videoW, box.h / videoH);
+  return { ...box, w: Math.round(videoW * k), h: Math.round(videoH * k) };
+}
+
+/** 映像の大きさ（画素）。 */
+function videoSize(video) {
+  const r = spawnSync(resolve(FFMPEG), ["-i", video], { encoding: "utf8", windowsHide: true });
+  const m = /Video:.*?(\d{2,5})x(\d{2,5})/.exec(r.stderr ?? "");
+  if (!m) throw new Error("映像の大きさを読めません");
+  return { w: Number(m[1]), h: Number(m[2]) };
+}
+
 function videoDurationSec(video) {
   const r = spawnSync(resolve(FFMPEG), ["-i", video], { encoding: "utf8", windowsHide: true });
   const m = /Duration: (\d+):(\d+):([\d.]+)/.exec(r.stderr ?? "");
@@ -169,6 +196,8 @@ async function main() {
   const trim = log.fps > 0 ? Math.ceil(log.usableFromSec * log.fps) / log.fps : log.usableFromSec;
   const stepTimes = log.steps.map((s) => Math.max(0, s.atSec - trim));
   const videoSec = videoDurationSec(video);
+  const size = videoSize(video);
+  const videoBox = fitBox(VIDEO_BOX, size.w, size.h);
   const sayIndex = new Map(log.steps.map((s, i) => [s.say, i]));
   const lineAt = dialogue.lines.map((l) => {
     if (l.at === "opening" || l.at === "ending") return l.at;
@@ -219,7 +248,7 @@ async function main() {
   clips.push({ id: id(), kind: "shape", trackId: "track_001", startSec: 0, durationSec: total, x: 0, y: 0, w: CANVAS.w, h: CANVAS.h, shapeType: "rect", fillColor: "#e9f2f1" });
   let still = 0;
   for (const it of plan.items) {
-    const box = { x: VIDEO_BOX.x, y: VIDEO_BOX.y, w: VIDEO_BOX.w, h: VIDEO_BOX.h, fit: "contain" };
+    const box = { ...videoBox, fit: "contain" };
     if (it.kind === "video") {
       clips.push({ id: id(), kind: "slot", trackId: "track_002", startSec: r3(it.startSec), durationSec: r3(it.durationSec), ...box, assetId: "asset_001", sourceStartSec: r3(it.sourceStartSec) });
     } else {
@@ -232,12 +261,12 @@ async function main() {
   }
   clips.push({
     id: id(), kind: "slot", trackId: "track_003", startSec: 0, durationSec: total,
-    x: 1560, y: 520, w: 340, h: 540, assetId: "asset_002", fit: "contain",
+    ...YUKO_BOX, assetId: "asset_002", fit: "contain",
     talkMotion: { trackId: "track_005", kind: "bounce", strength: 1 },
   });
   if (title) {
     const openEnd = plan.items[0]?.kind === "still" ? plan.items[0].durationSec : 3;
-    clips.push({ id: id(), kind: "text", trackId: "track_004", startSec: 0, durationSec: r3(Math.max(2, openEnd)), x: 140, y: 420, w: 1340, h: 200, text: title, fontSize: 88, color: "#ffffff", fontWeight: "bold", textAlign: "center", background: { enabled: true, color: "#1f6f78", opacity: 0.9, radius: 24 } });
+    clips.push({ id: id(), kind: "text", trackId: "track_004", startSec: 0, durationSec: r3(Math.max(2, openEnd)), x: VIDEO_BOX.x + (VIDEO_BOX.w - 1340) / 2, y: VIDEO_BOX.y + (VIDEO_BOX.h - 200) / 2, w: 1340, h: 200, text: title, fontSize: 88, color: "#ffffff", fontWeight: "bold", textAlign: "center", background: { enabled: true, color: "#1f6f78", opacity: 0.9, radius: 24 } });
   }
   dialogue.lines.forEach((l, i) => {
     const cast = dialogue.cast[l.who];
@@ -249,7 +278,7 @@ async function main() {
     });
     clips.push({
       id: id(), kind: "subtitle", trackId: "track_004", startSec: r3(plan.voiceAt[i]), durationSec: r3(lineSec[i]),
-      x: 80, y: 930, w: 1460, h: 120, fontSize: 44, color: "#ffffff",
+      ...SUBTITLE_BOX, fontSize: 44, color: "#ffffff",
       background: { enabled: true, color: "#000000", opacity: 0.6, radius: 14 },
       voiceClipId: vId, text: `${cast.displayName}「${l.text}」`,
     });
