@@ -56,8 +56,8 @@
     { "clickText": "先頭へ", "say": "先頭へ", "afterMs": 900 },
     { "clickText": "読み上げ", "say": "読み上げのタブ", "afterMs": 1200 },
     { "clickText": "読み上げを置く", "say": "読み上げを置く", "afterMs": 1800 },
-    { "fieldLabel": "読み上げる文", "type": "上級者のみなさん、ようこそ。", "say": "読み上げる文", "afterMs": 1400 },
-    { "selectLabel": "声", "option": "春日部つむぎ（ノーマル）", "say": "声を選ぶ", "afterMs": 1400 },
+    { "fieldLabel": "読み上げる文", "type": "応用編へ、ようこそ。", "say": "読み上げる文", "afterMs": 1400 },
+    { "selectLabel": "声", "option": "玄野武宏（ノーマル）", "say": "声を選ぶ", "afterMs": 1400 },
     { "clickText": "声を作る", "say": "声を作る", "afterMs": 9000 },
     { "clickText": "この読み上げの字幕を置く", "say": "連動する字幕を置く", "afterMs": 2400 },
 
