@@ -401,6 +401,7 @@ using System;using System.Runtime.InteropServices;
 public class Fg {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -411,7 +412,9 @@ public class Fg {
 $p = Get-Process star-recruit-studio -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $p) { exit 1 }
 $h = $p.MainWindowHandle
-[Fg]::ShowWindow($h, 9) | Out-Null   # SW_RESTORE
+# ⚠️ **戻すのは最小化されているときだけ**（2026-10-16・利用者が画面で見つけた）＝SW_RESTORE は**最大化も解く**ので、
+#    サブモニターで最大化して撮るつもりの窓が、前の小さな大きさへ縮んだまま撮られていた。
+if ([Fg]::IsIconic($h)) { [Fg]::ShowWindow($h, 9) | Out-Null }   # SW_RESTORE
 # ⚠️ Windows は「裏のプロセスからの前面化」を拒む。いま前面の窓の入力スレッドへ一時的に
 #    自分を繋ぐ（AttachThreadInput）と、同じ入力キューの持ち主として前面化が通る。
 $fg = [Fg]::GetForegroundWindow()
