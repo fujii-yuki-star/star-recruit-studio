@@ -530,13 +530,16 @@ pub(crate) const COMPANY_OK_VOICE_CHARACTERS: &[&str] = &[
 ];
 
 /// どの声を音声ソフトに読ませるか（段階3）＝**判定はここ1か所**（画面はこの結果だけを声の一覧とクレジットに足す）。
-/// 採る条件：①声のファイルの中身が読める ②manifest のキャラ名が中身に在り、書かれた番号がそのキャラの番号に全部入っている
-/// ③中身の**全部の番号**が、同梱の声とも、先に採ったパックの声とも重ならない（packId の順に先勝ち）
-/// ④中身の**全部のキャラ**が会社の動画で使えるキャラ（`COMPANY_OK_VOICE_CHARACTERS`）。
-/// ⚠️ ④は manifest に書いていないキャラも見る＝1つの声のファイルに複数のキャラが入っていることがあり（例：春歌ナナと猫使アル/ビィ）、
-///   書いたキャラだけ見ると、書いていない（会社では許可が要る）キャラの声まで音声ソフトに読ませてしまう。
-/// ⚠️ ①②を見ないと、クレジットの名前（manifest）と実際に鳴る声（中身）が別物になりうる（ADR-0003）。
+/// 声のファイルごとに見る（1つのファイルに複数のキャラが入っていることがある＝例：紅桜・雀松朱司・麒ヶ島宗麟）。
+/// ファイルを採る条件：①中身が読める ②中身の番号がファイルの中で重ならない ③中身の**全部の番号**が、同梱の声とも、
+/// 先に採ったファイルの番号とも重ならない（packId・voiceId の順に先勝ち）。
+/// 採ったファイルの中で、書かれた声を採る条件：④キャラ名が中身に在り、書かれた番号がそのキャラの番号に全部入っている
+/// ⑤会社の動画で使えるキャラ（`COMPANY_OK_VOICE_CHARACTERS`）。
+/// ⚠️ ④を見ないと、クレジットの名前（manifest）と実際に鳴る声（中身）が別物になりうる（ADR-0003）。
 /// ⚠️ ③を見ないと、音声ソフトに同じ番号が2つ並び、どちらで読むかが決まらない（実際に起動して確かめた＝落ちずに並ぶ）。
+/// ⚠️ **書かれていないキャラ・使えないキャラは、同じファイルに入っていても出さないだけ**（2026-10-16 利用者の判断）＝
+///   画面の一覧（と動画の声の解決）は採った声だけを知るので、選べず、声の番号が直に書かれていても既定の声へ倒れる（同梱の声と同じ形）。
+///   ファイルごと断ると、同じファイルの使えるキャラまで使えなくなる。
 pub(crate) fn plan_voices<F>(
     bundled_ids: &BTreeSet<i64>,
     declared: Vec<DeclaredVoice>,
@@ -547,30 +550,42 @@ where
 {
     let mut taken = bundled_ids.clone();
     let (mut accepted, mut rejected) = (Vec::new(), Vec::new());
+    // 同じファイルを指す声をまとめる（最初に出てきた順）。
+    let mut files: Vec<(PathBuf, Vec<DeclaredVoice>)> = Vec::new();
     for d in declared {
-        let ok = read(&d.path).is_some_and(|metas| {
+        match files.iter_mut().find(|(p, _)| *p == d.path) {
+            Some((_, group)) => group.push(d),
+            None => files.push((d.path.clone(), vec![d])),
+        }
+    }
+    for (path, group) in files {
+        let metas = read(&path).filter(|metas| {
             let all: Vec<i64> = metas
                 .iter()
                 .flat_map(|(_, ids)| ids.iter().copied())
                 .collect();
-            let named = metas.iter().find(|(n, _)| *n == d.character);
-            let declared_ok =
-                named.is_some_and(|(_, ids)| d.speakers.iter().all(|s| ids.contains(s)));
-            let unique = all.iter().collect::<BTreeSet<_>>().len() == all.len();
-            let allowed = metas
-                .iter()
-                .all(|(n, _)| COMPANY_OK_VOICE_CHARACTERS.contains(&n.as_str()));
-            if declared_ok && unique && allowed && all.iter().all(|id| !taken.contains(id)) {
-                taken.extend(all);
-                true
-            } else {
-                false
-            }
+            all.iter().collect::<BTreeSet<_>>().len() == all.len()
+                && all.iter().all(|id| !taken.contains(id))
         });
-        if ok {
-            accepted.push(d);
-        } else {
-            rejected.push(d);
+        let Some(metas) = metas else {
+            rejected.extend(group);
+            continue;
+        };
+        let mut any = false;
+        for d in group {
+            let named = metas.iter().find(|(n, _)| *n == d.character);
+            let ok = named.is_some_and(|(_, ids)| d.speakers.iter().all(|s| ids.contains(s)))
+                && COMPANY_OK_VOICE_CHARACTERS.contains(&d.character.as_str());
+            if ok {
+                any = true;
+                accepted.push(d);
+            } else {
+                rejected.push(d);
+            }
+        }
+        // 1つでも採ったら、ファイルの全部の番号を押さえる（音声ソフトはファイルごと読むので、出さない声の番号も並ぶ）。
+        if any {
+            taken.extend(metas.iter().flat_map(|(_, ids)| ids.iter().copied()));
         }
     }
     (accepted, rejected)
@@ -857,10 +872,21 @@ mod tests {
     }
 
     fn dv(pack: &str, voice: &str, character: &str, speakers: &[i64]) -> DeclaredVoice {
+        dvf(pack, voice, voice, character, speakers)
+    }
+
+    /// 声のファイルを名指しする版（1つのファイルを複数の声が指すとき）。
+    fn dvf(
+        pack: &str,
+        voice: &str,
+        file: &str,
+        character: &str,
+        speakers: &[i64],
+    ) -> DeclaredVoice {
         DeclaredVoice {
             pack_id: pack.into(),
             voice_id: voice.into(),
-            path: PathBuf::from(format!("{pack}/{voice}.vvm")),
+            path: PathBuf::from(format!("{pack}/{file}.vvm")),
             character: character.into(),
             speakers: speakers.to_vec(),
         }
@@ -879,10 +905,18 @@ mod tests {
                 "f/part.vvm" => Some(vec![("離途".into(), vec![9300])]),   // 書いた番号が中身に無い
                 "g/dup.vvm" => Some(vec![("小夜/SAYO".into(), vec![9400, 9400])]), // 中身の中で重なる
                 // 書いたキャラは使えるが、同じファイルに会社では許可が要るキャラが入っている（2026-10-16・13 §4）
+                //   ＝書いたキャラは採る（同じファイルの使えないキャラは出さないだけ）
                 "i/mix.vvm" => Some(vec![
                     ("春歌ナナ".into(), vec![9600]),
                     ("猫使アル".into(), vec![9601]),
                 ]),
+                // 1つのファイルに使えるキャラが2人＝両方採る（2つ目が「番号が重なる」で落ちない）
+                "k/two.vvm" => Some(vec![
+                    ("†聖騎士 紅桜†".into(), vec![9800]),
+                    ("雀松朱司".into(), vec![9801]),
+                ]),
+                // i のファイルの猫使アルを書いた別のパック＝番号は i が押さえ済み
+                "l/cat.vvm" => Some(vec![("猫使アル".into(), vec![9601])]),
                 // 書いたキャラ自体が使えない（画面の門をすり抜けた manifest でも読ませない）
                 "j/ng.vvm" => Some(vec![("後鬼".into(), vec![9700])]),
                 _ => None, // h＝読めない
@@ -900,13 +934,26 @@ mod tests {
                 dv("g", "dup", "小夜/SAYO", &[9400]),
                 dv("h", "gone", "東北ずん子", &[9500]),
                 dv("i", "mix", "春歌ナナ", &[9600]),
+                dvf("i", "mix2", "mix", "猫使アル", &[9601]),
                 dv("j", "ng", "後鬼", &[9700]),
+                dvf("k", "a", "two", "†聖騎士 紅桜†", &[9800]),
+                dvf("k", "b", "two", "雀松朱司", &[9801]),
+                dv("l", "cat", "猫使アル", &[9601]),
             ],
             read,
         );
-        let ids = |v: &[DeclaredVoice]| v.iter().map(|d| d.pack_id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&acc), vec!["a", "c"]);
-        assert_eq!(ids(&rej), vec!["b", "d", "e", "f", "g", "h", "i", "j"]);
+        let keys = |v: &[DeclaredVoice]| {
+            v.iter()
+                .map(|d| format!("{}/{}", d.pack_id, d.voice_id))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&acc), vec!["a/aoi", "c/mid", "i/mix", "k/a", "k/b"]);
+        assert_eq!(
+            keys(&rej),
+            vec![
+                "b/aoi", "d/zun", "e/liar", "f/part", "g/dup", "h/gone", "i/mix2", "j/ng", "l/cat"
+            ]
+        );
     }
 
     #[test]

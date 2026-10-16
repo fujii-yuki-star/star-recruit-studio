@@ -151,7 +151,14 @@ pub(crate) fn build_voicelib(
             link_or_copy(&p, &model.join(e.file_name()))?;
         }
     }
+    // ⚠️ **同じファイルは1回だけ置く**＝1つの声のファイルに複数のキャラが入っていて、パックがそれぞれを声として書くことがある
+    //   （例：紅桜と雀松朱司）。2回置くと音声ソフトに同じ番号が2つずつ並ぶ。
+    let mut placed: Vec<&Path> = Vec::new();
     for v in voices {
+        if placed.contains(&v.path.as_path()) {
+            continue;
+        }
+        placed.push(&v.path);
         fs::copy(
             &v.path,
             model.join(format!("pack_{}__{}.vvm", v.pack_id, v.voice_id)),
@@ -310,13 +317,23 @@ mod tests {
         // 前回の残り（外したパックの声）は消える。
         fs::create_dir_all(out.join("model")).unwrap();
         fs::write(out.join("model/pack_old__gone.vvm"), b"old").unwrap();
-        let voices = [DeclaredVoice {
-            pack_id: "office".into(),
-            voice_id: "aoi".into(),
-            path: pack_vvm.clone(),
-            character: "あおい".into(),
-            speakers: vec![9001],
-        }];
+        // 同じファイルを2つの声が指す（1つのファイルに2人のキャラ）＝置くのは1回だけ。
+        let voices = [
+            DeclaredVoice {
+                pack_id: "office".into(),
+                voice_id: "aoi".into(),
+                path: pack_vvm.clone(),
+                character: "雀松朱司".into(),
+                speakers: vec![9001],
+            },
+            DeclaredVoice {
+                pack_id: "office".into(),
+                voice_id: "beni".into(),
+                path: pack_vvm.clone(),
+                character: "†聖騎士 紅桜†".into(),
+                speakers: vec![9002],
+            },
+        ];
         build_voicelib(&engine, &out, &voices).unwrap();
         let mut names: Vec<String> = fs::read_dir(out.join("model"))
             .unwrap()
