@@ -8318,6 +8318,20 @@ describe("TimelineProjectScreen: 列に名前を付ける", () => {
     expect(screen.getByLabelText("映像1の名前")).toBeTruthy();
   });
 
+  // ⚠️ **⋮のボタンに手があるときも欄が閉じない**（通し点検 2026-10-16）＝メニューが閉じるときに⋮へ手を
+  //   奪い返し、名前の欄が手を失って確定・閉じていた（実マウスで⋮を押したときだけ出た）。
+  it("⋮のボタンから開いても、名前の欄に手が残る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "映像1の操作" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "名前を変える" }));
+    const field = screen.queryByLabelText("映像1の名前");
+    expect(field != null, "名前の欄が開いたまま").toBe(true);
+    expect(document.activeElement === field, "手は名前の欄にある").toBe(true);
+  });
+
   // ⚠️ **消す道を残す**＝空にすると自動の名前へ戻る。空文字のまま残すと**見出しが消える**。
   it("空にすると自動の名前へ戻る", () => {
     open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, name: "前の名前" }] });

@@ -6,7 +6,7 @@ use crate::proc::no_window_command;
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::Child;
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
@@ -236,6 +236,13 @@ fn start_engine(app: &AppHandle) -> Result<EngineStart, String> {
     // Windows: GUI アプリ（windows_subsystem=windows）からコンソール向けの run.exe を起こすと、
     // 継承するコンソールが無いため新しい窓が開く。抑止は入口（`proc::no_window_command`）が持つ。
     let mut cmd = no_window_command(&exe);
+    // ⚠️ **エンジンの出力は受け取らない**（通し点検 2026-10-16）＝受け継ぐと、起動の引数で頼まれた回に
+    //   **頼んだ側の標準出力へ辞書の作成の進み具合が数千字流れ込み**、標準エラーにもエンジンのログが混ざった
+    //   （`18 §18.5`＝標準出力は結果の受け渡しに使われうるので混ぜない・断りの文は1行）。
+    //   画面から起こした回はもともと行き先が無い（窓のアプリにコンソールは無い）＝失うものは無い。
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     cmd.arg("--host")
         .arg("127.0.0.1")
         .arg("--port")

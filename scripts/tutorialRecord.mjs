@@ -488,15 +488,18 @@ const RESET_TO_HOME = `(async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   // ⚠️ **戻り道は画面によって違う**（#1228・実測）＝「動画の一覧へ戻る」が無い画面があり
   //  （例＝「発表の内容を入力」）、そこでは**サイドバーの「動画」**が入口になる。両方を試す。
+  // ⚠️ **ホームかどうかは「ホームにしか無いもの」で見る**（2026-10-16 の通し点検で踏んだ）＝「新しい動画を作る」は
+  //   素材の画面などの上の帯にもあるので、それで見るとホームでないのにホームと思い込み、次の段が見つからない。
+  const isHome = () => !!find("白紙から作る") && !!find("タイムラインで作る");
   for (let i = 0; i < 8; i += 1) {
-    if (find("新しい動画を作る")) return "home";
+    if (isHome()) return "home";
     const back = find("動画の一覧へ戻る") || find("動画");
     if (back) { back.click(); await wait(500); }
     const drop = find("保存しないで移る");
     if (drop) { drop.click(); await wait(500); }
     await wait(400);
   }
-  return find("新しい動画を作る") ? "home" : "stuck";
+  return isHome() ? "home" : "stuck";
 })()`;
 
 /**
