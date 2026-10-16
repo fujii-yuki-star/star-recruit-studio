@@ -2,6 +2,7 @@
 import { parsePanelLayout } from '../domain/layout/panelLayout';
 import type { PanelLayout, PanelScreenId } from '../domain/layout/panelLayout';
 import { VOICE_CATALOG } from '../domain/voice/voiceCatalog';
+import { setInheritedVoiceRetiredProbe } from '../domain/voice/goneVoices';
 // project.json には入れない（接続先は環境差があり、共有プロジェクトに含めるべきでないため）。
 // Tauri WebView でも localStorage は永続する（projectFs と同様）。
 const VOICEVOX_URL_KEY = 'app.voicevoxUrl';
@@ -135,6 +136,16 @@ export function getVoicevoxSpeaker(): number | null {
   if (!Number.isFinite(n) || !VOICE_CATALOG.some((c) => c.styles.some((s) => s.speaker === n))) return null;
   return n;
 }
+/** 保存されている既定の声が、いま選べない声（一覧から外した声）か。未設定・数でない値は「外れていない」。 */
+export function isStoredVoicevoxSpeakerRetired(): boolean {
+  const raw = read(VOICEVOX_SPEAKER_KEY);
+  if (raw == null || raw === '') return false;
+  const n = Number(raw);
+  return Number.isFinite(n) && !VOICE_CATALOG.some((c) => c.styles.some((s) => s.speaker === n));
+}
+// 継承で作った読み上げを書き出しの前に止める門へ、答え方を差し込む（`goneVoices` の注記）。
+setInheritedVoiceRetiredProbe(isStoredVoicevoxSpeakerRetired);
+
 export function setVoicevoxSpeaker(speaker: number): void {
   write(VOICEVOX_SPEAKER_KEY, String(speaker));
 }

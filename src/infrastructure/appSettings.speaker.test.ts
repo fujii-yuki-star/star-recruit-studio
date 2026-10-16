@@ -2,7 +2,7 @@
 // 動画全体の既定の声（設定）。いま選べない声は「未設定」として読む（ADR-0003 追補・2026-10-16）。
 import { beforeEach, describe, expect, it } from "vitest";
 import { getVoicevoxSpeaker, setVoicevoxSpeaker } from "./appSettings";
-import { isGoneGeneratedVoice } from "../domain/voice/goneVoices";
+import { isGoneGeneratedVoice, sceneGoneVoiceLineCount } from "../domain/voice/goneVoices";
 
 beforeEach(() => localStorage.clear());
 
@@ -34,5 +34,36 @@ describe("一覧から外した声で作り済みの読み上げ", () => {
     expect(isGoneGeneratedVoice({ speaker: 13, status: "generated", text: "こんにちは" })).toBe(true);
     expect(isGoneGeneratedVoice({ speaker: 20, status: "generated", text: "こんにちは" })).toBe(true);
     expect(isGoneGeneratedVoice({ speaker: 21, status: "generated", text: "こんにちは" })).toBe(false);
+  });
+});
+
+// ⚠️ PR レビュー 🔴＝既定の声に外した声を選んでいた人の**継承の読み上げ**は、音は外した声のままなのに
+//   クレジットは既定（ずんだもん）へ倒れる＝書き出しの前に止める。
+describe("既定の声が外した声のまま残っているとき", () => {
+  const gen = "generated";
+  it("声を指定しない（継承の）作り済みも止める側に数える", () => {
+    setVoicevoxSpeaker(13);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: "こんにちは" })).toBe(true);
+    expect(isGoneGeneratedVoice({ status: gen, text: "こんにちは" })).toBe(true);
+    // 作っていない・本文が空は止めない（作るときは既定の声で作られる）
+    expect(isGoneGeneratedVoice({ speaker: null, status: "not_generated", text: "こんにちは" })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: " " })).toBe(false);
+  });
+
+  it("場面の1人の読み上げ（行が無い場面）も数え、行がある場面では休眠の読み上げを数えない", () => {
+    setVoicevoxSpeaker(20);
+    const narration = { status: gen, text: "こんにちは" };
+    expect(sceneGoneVoiceLineCount([{ narration }, { lines: [], narration }])).toBe(2);
+    expect(sceneGoneVoiceLineCount([{ lines: [{ speaker: 3, status: gen, text: "a" }], narration }])).toBe(0);
+  });
+
+  it("既定の声が一覧にある声なら、継承は止めない", () => {
+    setVoicevoxSpeaker(14);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: "こんにちは" })).toBe(false);
+    expect(sceneGoneVoiceLineCount([{ narration: { status: gen, text: "こんにちは" } }])).toBe(0);
+  });
+
+  it("未設定なら継承は止めない", () => {
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: "こんにちは" })).toBe(false);
   });
 });
