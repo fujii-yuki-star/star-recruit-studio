@@ -130,3 +130,35 @@ describe('FontEmbedder', () => {
     await expect(e.embed(svgOf(text("'Gen Interface JP'", 'あ')))).rejects.toThrow();
   });
 });
+
+describe('FontEmbedder（字体として受け付けられるか・PR レビュー 🟡）', () => {
+  it('作った字体が受け付けられなければ丸ごと埋め込む', async () => {
+    let calls = 0;
+    const e = new FontEmbedder(realBytes, async (b) => {
+      calls += 1;
+      return b.length > 5_000_000; // 作った字体（小さい）は断り、丸ごと（大きい）は受け付ける
+    });
+    const out = await e.embed(svgOf(text("'Gen Interface JP'", 'あ')));
+    expect(calls).toBe(2);
+    expect(out.length > 7_000_000).toBe(true); // 丸ごと（6MB → base64 で 8MB）
+  });
+
+  it('丸ごとも受け付けられなければ止める（黙って既定の字体で焼かない）', async () => {
+    const e = new FontEmbedder(realBytes, async () => false);
+    await expect(e.embed(svgOf(text("'Gen Interface JP'", 'あ')))).rejects.toThrow();
+  });
+
+  it('読めなかったときは覚えない（次は読み直す）', async () => {
+    let n = 0;
+    const load = vi.fn(async (s: FontSource) => {
+      n += 1;
+      if (n === 1) throw new Error('まだ無い');
+      return realBytes(s);
+    });
+    const e = new FontEmbedder(load);
+    await expect(e.embed(svgOf(text("'Gen Interface JP'", 'あ')))).rejects.toThrow();
+    const out = await e.embed(svgOf(text("'Gen Interface JP'", 'あ')));
+    expect(out.includes('@font-face')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+});

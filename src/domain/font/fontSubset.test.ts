@@ -1,7 +1,7 @@
 // 使う字の形だけを残した字体（ADR-0062）。同梱の本物の字体で確かめる（作り物の字体では表の入り組みを試せない）。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { cmapLookup, readTables, subsetFontKeepingTables } from './fontSubset';
+import { cmapLookup, followedByDefault, readTables, subsetFontKeepingTables, variationGlyphs } from './fontSubset';
 
 const font = (name: string): Uint8Array => new Uint8Array(readFileSync(`public/fonts/${name}`));
 const cps = (text: string): number[] => [...text].map((c) => c.codePointAt(0)!);
@@ -98,7 +98,7 @@ describe('subsetFontKeepingTables（怪盗予告ゴシック＝字の形の数�
       .filter(([l, g]) => l > 0 && g !== 0 && !encoded.has(g));
     expect(kept.length).toBeGreaterThan(0);
     // 置き換えを辿らないと、その字は残らない
-    const none = glyphLengths(subsetFontKeepingTables(src, cps(text), [])!).filter((l) => l > 0).length;
+    const none = glyphLengths(subsetFontKeepingTables(src, cps(text), () => false)!).filter((l) => l > 0).length;
     const withGsub = glyphLengths(subsetFontKeepingTables(src, cps(text))!).filter((l) => l > 0).length;
     expect(withGsub).toBeGreaterThan(none);
   });
@@ -133,5 +133,27 @@ describe('subsetFontKeepingTables（扱わない字体）', () => {
     otf.set([0x4f, 0x54, 0x54, 0x4f]); // 'OTTO'・表 0 個
     expect(subsetFontKeepingTables(otf, cps('あ'))).toBeNull();
     expect(subsetFontKeepingTables(new Uint8Array(3), cps('あ'))).toBeNull();
+  });
+});
+
+describe('異体字セレクタ（cmap 形式14・PR レビュー 🟡）', () => {
+  // 「侮」＋ U+FE00（標準の異体字）は別の字の形で出る。残さないと書き出しで空になる（仕上がり確認には出るのに）。
+  it('使う字とセレクタの組で選ばれる字の形を残す・セレクタを使わなければ残さない', () => {
+    const src = font('GenInterfaceJP-Regular.ttf');
+    const t = readTables(src)!;
+    const withVs = new Set(variationGlyphs(src, t, new Set([0x4fae, 0xfe00])));
+    expect(withVs.size).toBeGreaterThan(0);
+    const g = [...withVs][0]!;
+    expect(glyphLengths(src)[g]).toBeGreaterThan(0);
+    expect(glyphLengths(subsetFontKeepingTables(src, [0x4fae, 0xfe00])!)[g]).toBeGreaterThan(0);
+    expect(glyphLengths(subsetFontKeepingTables(src, [0x4fae])!)[g]).toBe(0);
+    expect(variationGlyphs(src, t, new Set([0x4fae]))).toEqual([]);
+  });
+});
+
+describe('followedByDefault（辿る置き換えの機能）', () => {
+  it('既定で効く機能（字の種類ごとのものも）は辿り、縦書き・字形の切り替え・字形セットは辿らない', () => {
+    for (const tag of ['ccmp', 'liga', 'calt', 'locl', 'frac', 'init', 'medi', 'fina', 'akhn', 'ltra']) expect(followedByDefault(tag), tag).toBe(true);
+    for (const tag of ['vert', 'vrt2', 'salt', 'aalt', 'ss01', 'ss20', 'cv05', 'smcp', 'jp78']) expect(followedByDefault(tag), tag).toBe(false);
   });
 });

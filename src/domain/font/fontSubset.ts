@@ -7,8 +7,22 @@
 //   ＋組み合わせ字の部品（glyf の composite）＋ 0 番（.notdef）。
 // ⚠️ **glyf を持たない字体（CFF の OTF）は扱わない**＝null を返す（呼ぶ側が丸ごと埋め込む）。
 
-/** 横書きで、ブラウザが既定で効かせる置き換えの機能（GSUB）。ここに無い機能（縦書きなど）の字の形は残さない。 */
-export const DEFAULT_GSUB_FEATURES: readonly string[] = ['ccmp', 'locl', 'liga', 'clig', 'calt', 'rlig', 'rclt', 'rvrn'];
+/**
+ * 既定では効かない置き換えの機能（GSUB）。**これ以外は全部辿る**（PR レビュー ℹ️）＝ブラウザが既定で効かせる機能は
+ * 字の種類（アラビア文字・インドの文字・分数など）でも増えるので、「効く方を数える」と漏れて**書き出しで字が消える**。
+ * 「効かない方を数える」なら、漏れても字体が少し大きくなるだけ。縦書き・字形の切り替え・別の字形の選び直しなどを外す。
+ */
+export const GSUB_FEATURES_OFF_BY_DEFAULT: ReadonlySet<string> = new Set([
+  'vert', 'vrt2', 'vrtr', 'vkna', 'vjmo', 'aalt', 'salt', 'swsh', 'cswh', 'ornm', 'nalt', 'dlig', 'hist', 'hlig',
+  'smcp', 'c2sc', 'pcap', 'c2pc', 'unic', 'titl', 'sups', 'subs', 'sinf', 'ordn', 'zero', 'afrc', 'case',
+  'lnum', 'onum', 'pnum', 'tnum', 'hwid', 'fwid', 'pwid', 'twid', 'qwid', 'halt', 'hkna', 'pkna', 'ruby', 'ital',
+  'jp78', 'jp83', 'jp90', 'jp04', 'trad', 'smpl', 'expt', 'hojo', 'nlck', 'ljmo', 'tjmo',
+]);
+
+/** その機能を辿るか（既定＝既定で効かないもの・字形セット〔ss01〜〕・字形の選び直し〔cv01〜〕以外）。 */
+export function followedByDefault(tag: string): boolean {
+  return !GSUB_FEATURES_OFF_BY_DEFAULT.has(tag) && !/^(ss\d\d|cv\d\d)$/.test(tag);
+}
 
 interface TableRec {
   tag: string;
@@ -43,6 +57,8 @@ export function cmapLookup(b: Uint8Array, tables: Map<string, TableRec>): (cp: n
   const n = v.getUint16(c + 2);
   let fmt12 = -1;
   let fmt4 = -1;
+  // 記号の字体（(3,0)＝Symbol）は字の番号を U+F000 台に置く（PR レビュー ℹ️＝読まないと記号の字体が全部空になる）。
+  let symbol4 = -1;
   for (let i = 0; i < n; i++) {
     const pid = v.getUint16(c + 4 + i * 8);
     const eid = v.getUint16(c + 6 + i * 8);
@@ -50,6 +66,7 @@ export function cmapLookup(b: Uint8Array, tables: Map<string, TableRec>): (cp: n
     const fmt = v.getUint16(sub);
     if (fmt === 12 && (pid === 0 || (pid === 3 && eid === 10)) && fmt12 < 0) fmt12 = sub;
     if (fmt === 4 && (pid === 0 || (pid === 3 && eid === 1)) && fmt4 < 0) fmt4 = sub;
+    if (fmt === 4 && pid === 3 && eid === 0 && symbol4 < 0) symbol4 = sub;
   }
   return (cp: number): number => {
     if (fmt12 >= 0) {
@@ -67,9 +84,17 @@ export function cmapLookup(b: Uint8Array, tables: Map<string, TableRec>): (cp: n
       }
       return 0;
     }
-    if (fmt4 >= 0 && cp <= 0xffff) {
-      const segX2 = v.getUint16(fmt4 + 6);
-      const ends = fmt4 + 14;
+    if (fmt4 >= 0) return lookup4(fmt4, cp);
+    // 記号の字体＝字の番号は U+F000 台（そのまま引けなければ U+F000 を足して引く）
+    if (symbol4 >= 0) return lookup4(symbol4, cp) || (cp <= 0xff ? lookup4(symbol4, 0xf000 + cp) : 0);
+    return 0;
+  };
+
+  function lookup4(sub4: number, cp: number): number {
+    if (cp > 0xffff) return 0;
+    {
+      const segX2 = v.getUint16(sub4 + 6);
+      const ends = sub4 + 14;
       const starts = ends + segX2 + 2;
       const deltas = starts + segX2;
       const ranges = deltas + segX2;
@@ -86,7 +111,41 @@ export function cmapLookup(b: Uint8Array, tables: Map<string, TableRec>): (cp: n
       }
     }
     return 0;
-  };
+  }
+}
+
+/**
+ * 異体字セレクタ（cmap 形式14）で選ばれる字の形（PR レビュー 🟡）。使う字と使うセレクタの組だけ。
+ * ⚠️ **読まないと、セレクタで選んだ字（人名の異体字など）が書き出しで空になる**＝仕上がり確認には出るのに動画に出ない。
+ * 既定の組（Default UVS）は元の字の形をそのまま使うので足さない（元の字は cmap で残る）。
+ */
+export function variationGlyphs(b: Uint8Array, tables: Map<string, TableRec>, codepoints: ReadonlySet<number>): number[] {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const cmap = tables.get('cmap');
+  if (!cmap) return [];
+  const c = cmap.offset;
+  const n = v.getUint16(c + 2);
+  const out: number[] = [];
+  const u24 = (at: number): number => (v.getUint8(at) << 16) | v.getUint16(at + 1);
+  for (let i = 0; i < n; i++) {
+    const sub = c + v.getUint32(c + 8 + i * 8);
+    if (v.getUint16(sub) !== 14) continue;
+    const records = v.getUint32(sub + 6);
+    for (let r = 0; r < records; r++) {
+      const rec = sub + 10 + r * 11;
+      if (!codepoints.has(u24(rec))) continue; // その異体字セレクタを使っていない
+      const nonDefault = v.getUint32(rec + 7);
+      if (nonDefault === 0) continue;
+      const at = sub + nonDefault;
+      const m = v.getUint32(at);
+      for (let k = 0; k < m; k++) {
+        const map = at + 4 + k * 5;
+        if (codepoints.has(u24(map))) out.push(v.getUint16(map + 3));
+      }
+    }
+    break;
+  }
+  return out;
 }
 
 /** 被覆表（Coverage）→ [字の番号, 並びの番号] の列。 */
@@ -110,7 +169,7 @@ function coverage(v: DataView, at: number): [number, number][] {
 }
 
 /** GSUB で、既定の機能から使われうる置き換え（と、その中から呼ばれる置き換え）を辿り、出てくる字を足す。 */
-function gsubClosure(v: DataView, gsub: TableRec, keep: Set<number>, features: readonly string[]): void {
+function gsubClosure(v: DataView, gsub: TableRec, keep: Set<number>, follow: (tag: string) => boolean): void {
   const base = gsub.offset;
   const featureList = base + v.getUint16(base + 6);
   const lookupList = base + v.getUint16(base + 8);
@@ -120,7 +179,7 @@ function gsubClosure(v: DataView, gsub: TableRec, keep: Set<number>, features: r
   for (let i = 0; i < featureCount; i++) {
     const r = featureList + 2 + i * 6;
     const tag = String.fromCharCode(v.getUint8(r), v.getUint8(r + 1), v.getUint8(r + 2), v.getUint8(r + 3));
-    if (!features.includes(tag)) continue;
+    if (!follow(tag)) continue;
     const f = featureList + v.getUint16(r + 4);
     const n = v.getUint16(f + 2);
     for (let k = 0; k < n; k++) queue.push(v.getUint16(f + 4 + k * 2));
@@ -287,7 +346,7 @@ function checksum(b: Uint8Array, off: number, len: number): number {
 export function subsetFontKeepingTables(
   src: Uint8Array,
   codepoints: Iterable<number>,
-  features: readonly string[] = DEFAULT_GSUB_FEATURES,
+  follow: (tag: string) => boolean = followedByDefault,
 ): Uint8Array | null {
   const tables = readTables(src);
   if (!tables) return null;
@@ -305,12 +364,14 @@ export function subsetFontKeepingTables(
 
   const keep = new Set<number>([0]);
   const lookup = cmapLookup(src, tables);
-  for (const cp of codepoints) {
+  const cpSet = new Set(codepoints);
+  for (const cp of cpSet) {
     const g = lookup(cp);
     if (g > 0 && g < numGlyphs) keep.add(g);
   }
   const gsub = tables.get('GSUB');
-  if (gsub) gsubClosure(v, gsub, keep, features);
+  for (const g of variationGlyphs(src, tables, cpSet)) if (g > 0 && g < numGlyphs) keep.add(g);
+  if (gsub) gsubClosure(v, gsub, keep, follow);
   for (const g of [...keep]) if (g >= numGlyphs) keep.delete(g);
   // 組み合わせ字の部品（部品がさらに組み合わせのこともある）
   const stack = [...keep];

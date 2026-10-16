@@ -75,6 +75,23 @@ function sourceKey(s: FontSource): string {
   return s.kind === 'bundled' ? `bundled:${s.file}` : `external:${s.fontId}`;
 }
 
+/** 字体として受け付けられるかを確かめる口（ブラウザの字体の検査＝`<img>` の中と同じものを通す）。 */
+export type FontVerifier = (bytes: Uint8Array) => Promise<boolean>;
+
+/**
+ * `FontFace` で読ませてみる（ブラウザが字体を受け付けるかの検査は `<img>` の中の `@font-face` と同じ）。
+ * `FontFace` が無い場（検査の環境）では確かめられないので受け付けたとみなす。
+ */
+export async function defaultFontVerifier(bytes: Uint8Array): Promise<boolean> {
+  if (typeof FontFace === 'undefined') return true;
+  try {
+    await new FontFace('stario-export-font-check', bytes).load();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 字体の実体を読む口（書き出しでは `defaultFontBytesLoader`・検査では差し替える）。 */
 export type FontBytesLoader = (source: FontSource) => Promise<Uint8Array>;
 
@@ -99,7 +116,10 @@ export class FontEmbedder {
   private readonly bytes = new Map<string, Promise<Uint8Array>>();
   private readonly embedded = new Map<string, Embedded>();
 
-  constructor(private readonly load: FontBytesLoader) {}
+  constructor(
+    private readonly load: FontBytesLoader,
+    private readonly verify: FontVerifier = defaultFontVerifier,
+  ) {}
 
   private async dataUrlFor(source: FontSource, codepoints: Set<number>): Promise<string> {
     const key = sourceKey(source);
@@ -110,11 +130,20 @@ export class FontEmbedder {
     if (!p) {
       p = this.load(source);
       this.bytes.set(key, p);
+      // ⚠️ **読めなかったら覚えない**（PR レビュー ℹ️）＝失敗を覚えると、次の書き出し・縮小絵まで同じ失敗を返し続ける。
+      p.catch(() => this.bytes.delete(key));
     }
     const full = await p;
     // glyf を持たない字体（CFF の OTF など）は丸ごと埋め込む＝遅いが正しい（ADR-0062 決定4）。
-    const subset = subsetFontKeepingTables(full, union) ?? full;
-    const dataUrl = `data:font/ttf;base64,${toBase64(subset)}`;
+    let chosen = subsetFontKeepingTables(full, union) ?? full;
+    // ⚠️ **字体として受け付けられるかを確かめる**（PR レビュー 🟡）＝作った字体が受け付けられないと、`<img>` の中の
+    //   `@font-face` は黙って効かず、既定の字体で焼いて成功を返す（この直しが防ぐはずの不具合そのもの）。
+    //   作った字体がだめなら丸ごと、それもだめなら止める（黙って既定の字体で焼かない）。
+    if (!(await this.verify(chosen))) {
+      if (chosen === full || !(await this.verify(full))) throw new Error(`font rejected: ${key}`);
+      chosen = full;
+    }
+    const dataUrl = `data:font/ttf;base64,${toBase64(chosen)}`;
     this.embedded.set(key, { codepoints: union, dataUrl });
     return dataUrl;
   }
