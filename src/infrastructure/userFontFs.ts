@@ -119,7 +119,7 @@ export function packFontIds(): string[] {
 }
 
 /** 文字の形の中身（base64）を読む。パックの文字の形はパックの中から、持ち込みは持ち込みの置き場から。 */
-async function readFontBase64(fontId: string): Promise<string> {
+export async function readFontBase64(fontId: string): Promise<string> {
   if (isPackFontId(fontId)) {
     const src = packFontSources.get(fontId);
     if (!src) throw new Error('pack font not installed');

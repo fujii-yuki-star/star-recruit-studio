@@ -47,6 +47,30 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
     expect(useStartupJobStore.getState().pendingExportOut).toBe("C:/頼まれた.mp4");
   });
 
+  // ⚠️ 起動直後は拡張パックを読み終える前にここへ来て、パックの文字の形を使う動画を
+  //   「文字の形が見つかりません」と断っていた（2026-10-16 実機）＝開く前にパックを読み終える。
+  it("開く前に、拡張パックを読み終える（パックの文字の形を「見つからない」と断らない）", async () => {
+    askFor("proj_20260917_001");
+    vi.spyOn(projectFs, "listProjectSummaries").mockResolvedValue([
+      { projectId: "proj_20260917_001", projectName: "長尺", updatedAt: "", format: "timeline" },
+    ]);
+    const order: string[] = [];
+    let done = false;
+    vi.spyOn(useProjectStore.getState(), "loadPacks").mockImplementation(async () => {
+      order.push("パックを読み始める");
+      await new Promise((r) => setTimeout(r, 20));
+      done = true;
+      order.push("パックを読み終える");
+    });
+    vi.spyOn(useTimelineStore.getState(), "openTimelineProject").mockImplementation(async () => {
+      order.push(done ? "開く（読み終えたあと）" : "開く（読み終える前）");
+    });
+    const navigate = vi.fn();
+    renderHook(() => useStartupJob(navigate));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("timeline-project"));
+    expect(order).toEqual(["パックを読み始める", "パックを読み終える", "開く（読み終えたあと）"]);
+  });
+
   it("場面形式なら、いままでどおり書き出しの画面へ行く", async () => {
     askFor("proj_20260624_003");
     vi.spyOn(projectFs, "listProjectSummaries").mockResolvedValue([
