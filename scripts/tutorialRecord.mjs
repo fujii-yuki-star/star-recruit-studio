@@ -27,6 +27,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CHOOSE_OPTION, FIND_BY_TEXT, FIND_FIELD, FIND_SELECT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { GLIDE_REMAINING_MS, GLIDE_SCROLL_INSTALL } from "./lib/glideScroll.mjs";
 import { checkPlan, needsMotionCheck, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
@@ -503,18 +504,26 @@ const RESET_TO_HOME = `(async () => {
 async function locateWithWait(cdp, step, isTyping) {
   const where = () => evaluate(cdp, step.selectLabel != null ? LOCATE_SELECT(step.selectLabel, step.nth ?? 1)
     : isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
+  // ⚠️ **スクロールはゆっくり滑らせる**（2026-10-16 利用者の指摘＝一瞬で飛ぶとスクロールしたことが分からない）。
+  //   画面を読み直したとき（別の画面へ移った等）にも効くよう、探すたびに入れ直す（入っていれば何もしない）。
+  await evaluate(cdp, GLIDE_SCROLL_INSTALL);
   const until = Date.now() + LOCATE_WAIT_MS;
+  let glidedMs = 0;
   for (;;) {
     const at = await where();
     if (at) {
+      // 滑っている途中の座標で押さない＝滑り終わるまで待ってから、落ち着いたかを見る。
+      const gliding = Number(await evaluate(cdp, GLIDE_REMAINING_MS));
+      if (gliding > 0) await new Promise((r) => setTimeout(r, gliding));
+      glidedMs += gliding;
       // ⚠️ **位置が落ち着くまで待つ**（#1228・タイムライン編集で踏んだ）＝探した直後にその座標へ
       //   押しているので、**畳んだ欄が開く途中**のように配置が動いていると**別の物を押す**。
       //   実際、素材のタグで絞る操作が効かないまま次へ進み、**違う素材を取り込んでいた**
       //  （押せてはいるので誰も落ちず、映像だけが間違っている＝いちばん質の悪い失敗）。
       await new Promise((r) => setTimeout(r, LOCATE_SETTLE_MS));
       const again = await where();
-      if (again && again.x === at.x && again.y === at.y) return again;
-      if (Date.now() > until) return again ?? at;
+      if (again && again.x === at.x && again.y === at.y) return { ...again, glidedMs };
+      if (Date.now() > until) return { ...(again ?? at), glidedMs };
       continue;
     }
     if (Date.now() > until) return null;
@@ -823,6 +832,8 @@ async function main() {
         quiet: step.quietChange ?? null,
         say: step.say ?? null,
         headingAfter,
+        // 押す前にスクロールで滑らせた長さ（ミリ秒・0＝動かしていない）。滑らせたことを記録から確かめるため。
+        glidedMs: at.glidedMs ?? 0,
       });
       console.log(`${tSec.toFixed(1)}s ${isTyping ? `「${step.fieldLabel}」へ「${step.type}」` : `「${at.label}」`}`
         + `(${at.x},${at.y}) → ${headingAfter}`);
