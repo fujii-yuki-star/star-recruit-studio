@@ -410,9 +410,11 @@ describe("missingTemplateMessage（見た目パターンが見つからない・
     expect(missingTemplateMessage(3)).toContain("動画に出ません");
   });
 
-  it("どちらも次の行動（消して置き直す）で終わる＝行き止まりにしない", () => {
+  it("どちらも次の行動（消して置き直す・パックを入れ直す）で終わる＝行き止まりにしない", () => {
     for (const t of [missingTemplateMessage(), missingTemplateMessage(2)]) {
-      expect(t).toContain("置き直してください");
+      expect(t).toContain("消して置き直す");
+      // 拡張パックの見た目パターンは、パックを入れ直すと戻る（2026-10-16 実機＝外したあと「置き直して」だけだった）
+      expect(t).toContain("そのパックを入れ直してください");
     }
   });
 
@@ -556,5 +558,15 @@ describe("画面の形・動画の種類の名前は1か所（#1243）", () => {
     const files = walk(join(process.cwd(), "src", "app"));
     expect(files.length).toBeGreaterThan(100);
     expect(files.some((f) => f.endsWith(`${sep}WizardScreen.tsx`))).toBe(true);
+  });
+});
+
+describe("lookOriginLabel（見た目パターンの出どころの札・2026-10-16）", () => {
+  it("拡張パックの見た目はパックの名前を出す（「標準」と出さない＝外すと消えるので）", async () => {
+    const { lookOriginLabel } = await import("./uiLabels");
+    const packs = [{ packId: "office", name: "オフィスの見本パック" }];
+    expect(lookOriginLabel("pack_office__opening", packs)).toBe("拡張パック「オフィスの見本パック」（直接は編集できません）");
+    expect(lookOriginLabel("pack_gone__opening", packs)).toBe("拡張パック（直接は編集できません）");
+    expect(lookOriginLabel("opening_yuko_right", packs)).toBe("標準（直接は編集できません）");
   });
 });

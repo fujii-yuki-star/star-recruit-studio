@@ -48,10 +48,21 @@ function rustMessage(e: unknown): string {
   return userFacingMessage(e, 'pack') ?? PACK_INVALID_MESSAGE;
 }
 
-/** 選んだファイルの中を見る（展開しない）。 */
+/** 版の問題（新しいアプリが要る・入っている版より古い）と、入っている版（更新なら）。 */
+async function versionCheck(manifest: ExtensionPackManifest): Promise<{ problem: PackProblem | null; installedVersion: string | null }> {
+  const installed = useProjectStore.getState().packs.find((p) => p.packId === manifest.packId) ?? null;
+  const appVersion = (await getAppVersion()) || manifest.minAppVersion;
+  return { problem: packInstallProblem(manifest, appVersion, installed?.version ?? null), installedVersion: installed?.version ?? null };
+}
+
+/**
+ * 選んだファイルの中を見る（展開しない）。
+ * ⚠️ **版の問題もここで断る**（2026-10-16 実機）＝以前は中身を見せて「入れる」を押させてから「新しいアプリが要る」と断っていた。
+ * 更新（同じパックが入っている）なら、入っている版を添える（見せる画面が「入れ替える」と言えるように）。
+ */
 export async function inspectPackFile(
   path: string,
-): Promise<{ ok: true; manifest: ExtensionPackManifest; raw: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; manifest: ExtensionPackManifest; raw: string; installedVersion: string | null } | { ok: false; message: string }> {
   let raw: string;
   try {
     raw = await inspectPack(path);
@@ -59,7 +70,10 @@ export async function inspectPackFile(
     return { ok: false, message: rustMessage(e) };
   }
   const parsed = parsePackManifest(raw);
-  return parsed.ok ? { ok: true, manifest: parsed.manifest, raw } : { ok: false, message: packProblemMessage(parsed.problem) };
+  if (!parsed.ok) return { ok: false, message: packProblemMessage(parsed.problem) };
+  const { problem, installedVersion } = await versionCheck(parsed.manifest);
+  if (problem) return { ok: false, message: packProblemMessage(problem) };
+  return { ok: true, manifest: parsed.manifest, raw, installedVersion };
 }
 
 /**
@@ -72,9 +86,8 @@ export async function installInspectedPack(
   /** 見せた manifest の文字そのもの（Rust が zip の中と突き合わせる）。 */
   raw: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const installed = useProjectStore.getState().packs.find((p) => p.packId === manifest.packId) ?? null;
-  const appVersion = (await getAppVersion()) || manifest.minAppVersion;
-  const problem = packInstallProblem(manifest, appVersion, installed?.version ?? null);
+  // 見せたあとに別のパックを入れた・外したこともあるので、入れる直前にもう一度見る。
+  const { problem } = await versionCheck(manifest);
   if (problem) return { ok: false, message: packProblemMessage(problem) };
   try {
     await installPack(path, manifest.packId, raw);

@@ -9,7 +9,7 @@ import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { countVideosUsingPack, inspectPackFile, installInspectedPack, removeInstalledPack } from "../store/packActions";
 import { showOpenExtensionPackDialog } from "../../infrastructure/dialog";
 import type { ExtensionPackManifest } from "../../domain/pack/extensionPack";
-import { PACK_CONTENT_LABEL, packContentsSummary, packInstalledMessage, packRemoveConfirmMessage, packRemovedMessage, packSkippedMessage, packVoiceSkippedMessage, PACK_BUSY_MESSAGE } from "../uiLabels";
+import { PACK_CONTENT_LABEL, packContentsSummary, packInstalledMessage, packRemoveConfirmMessage, packRemovedMessage, packSkippedMessage, packUpdateConfirmTitle, packUpdateVersionLine, packVoiceSkippedMessage, PACK_BUSY_MESSAGE } from "../uiLabels";
 import { DeleteConfirm } from "./DeleteConfirm";
 
 export function ExtensionPackSection() {
@@ -28,7 +28,7 @@ export function ExtensionPackSection() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   /** 中を見て、入れるかどうかを確かめている途中。 */
-  const [pending, setPending] = useState<{ path: string; manifest: ExtensionPackManifest; raw: string } | null>(null);
+  const [pending, setPending] = useState<{ path: string; manifest: ExtensionPackManifest; raw: string; installedVersion: string | null } | null>(null);
   /** 外すかどうかを確かめている途中（使っている動画の数つき）。 */
   const [removing, setRemoving] = useState<{ manifest: ExtensionPackManifest; used: number } | null>(null);
 
@@ -40,7 +40,7 @@ export function ExtensionPackSection() {
       const path = await showOpenExtensionPackDialog();
       if (!path) return;
       const r = await inspectPackFile(path);
-      if (r.ok) setPending({ path, manifest: r.manifest, raw: r.raw });
+      if (r.ok) setPending({ path, manifest: r.manifest, raw: r.raw, installedVersion: r.installedVersion });
       else setError(r.message);
     } finally {
       setBusy(false);
@@ -104,10 +104,19 @@ export function ExtensionPackSection() {
 
       {pending && (
         <div className="card mt" data-testid="extension-pack-confirm">
-          <h3 className="section-title">「{pending.manifest.name}」を入れますか？</h3>
+          <h3 className="section-title">
+            {pending.installedVersion != null
+              ? packUpdateConfirmTitle(pending.manifest.name)
+              : `「${pending.manifest.name}」を入れますか？`}
+          </h3>
           <ul className="list-reset">
             <li>作った人：{pending.manifest.publisher}</li>
-            <li>版：{pending.manifest.version}</li>
+            <li>
+              版：
+              {pending.installedVersion != null
+                ? packUpdateVersionLine(pending.installedVersion, pending.manifest.version)
+                : pending.manifest.version}
+            </li>
             {pending.manifest.description && <li>説明：{pending.manifest.description}</li>}
             <li>中身：{packContentsSummary(pending.manifest)}</li>
             <li>使ってよい範囲：</li>
@@ -120,7 +129,7 @@ export function ExtensionPackSection() {
           </ul>
           <div className="row mt">
             <button type="button" className="btn btn-primary" disabled={busy || otherBusy} title={busyTitle} onClick={() => void onInstall()}>
-              {busy ? "入れています…" : "入れる"}
+              {busy ? "入れています…" : pending.installedVersion != null ? "入れ替える" : "入れる"}
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => setPending(null)}>
               やめる

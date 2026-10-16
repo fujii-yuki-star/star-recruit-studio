@@ -4,7 +4,7 @@ import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, ORIENTATION_LABEL } from "../uiLabels";
+import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, lookOriginLabel, ORIENTATION_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -132,6 +132,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   }, [current?.templateId, clearTemplateError]);
 
   const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
+  const packs = useProjectStore((s) => s.packs);
 
   // この見た目を複製してマイテンプレにし、そのまま編集画面へ。連打は busyAction で防ぐ（採番の余分な前進を避ける）。
   async function onDuplicate() {
@@ -397,7 +398,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </button>
             )}
             <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`} style={{ alignSelf: "flex-start" }}>
-              {isUserCurrent ? "自分の見た目" : "標準（直接は編集できません）"}
+              {isUserCurrent ? "自分の見た目" : lookOriginLabel(current.templateId, packs)}
             </span>
           </div>
 

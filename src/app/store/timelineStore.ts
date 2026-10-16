@@ -414,8 +414,9 @@ export interface TimelineState {
    * **片方の形式で成立していない**（ADR-0026②）。場面形式の `importFromLibrary` と同じ流儀
    *（参照ではなくコピー＝プロジェクトは自己完結・ADR-0024 決定6）。
    * ⚠️ **成否を返す**（PR #913 レビュー 🔴）＝返さないと呼ぶ側が**失敗しても「取り込みました」**と出す。
+   * 返すのは**足した素材の番号**（できなければ null）＝「音」の欄から押した拡張パックの音楽を、取り込んだその場で置くため。
    */
-  importFromLibrary: (libraryAssetId: string) => Promise<boolean>;
+  importFromLibrary: (libraryAssetId: string) => Promise<string | null>;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
    *
@@ -2295,9 +2296,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const started = get().doc?.projectId ?? null;
     // 出どころ（棚／拡張パックの音楽）と断りは場面形式と同じ1か所（`resolveLibrarySource`・ADR-0026②）。
     const resolved = await resolveLibrarySource(libraryAssetId, useProjectStore.getState().packs);
-    if (!resolved.ok) { set({ importError: resolved.error }); return false; }
+    if (!resolved.ok) { set({ importError: resolved.error }); return null; }
     const { lib, copy } = resolved.source;
-    if (started == null || get().doc?.projectId !== started) return false;
+    if (started == null || get().doc?.projectId !== started) return null;
     // ⚠️ **棚の名前・種類・タグを引き継ぐ**（ADR-0035 決定3・差分再監査 5巡目 🔴）＝ファイル名から
     // 作り直すと、棚のファイル名は `lib_asset_NNN.png` なので**機械の番号が素材名として画面に出る**うえ、
     // 種類（ロゴ）とタグも黙って落ちる（場面形式は `assetFromLibrary` で3つとも持ち込む＝ADR-0026②）。
@@ -2307,7 +2308,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       (reservedId) => assetFromLibrary(lib, [], reservedId));
     // ⚠️ **入ったかは「足した素材の番号が返ったか」で見る**（差分再監査 5巡目）＝件数の増減で見ると、
     // 待っている間の取り消し・別経路の着地を拾って**成功を騙る／知らせが出ない**。
-    return added != null;
+    // 足した素材の番号を返す＝「音」の欄から押したパックの音楽を、取り込んだその場で置けるように。
+    return added;
   },
 
   ensureClipAnalysis: (clipId, barWidthPx) => {
