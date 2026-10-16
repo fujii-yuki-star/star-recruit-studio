@@ -2201,7 +2201,7 @@ export function packOlderThanInstalledMessage(installedVersion: string): string 
 /** 外す前の確かめ（使っている動画の数を添える）。 */
 export function packRemoveConfirmMessage(name: string, usedVideos: number): string {
   return usedVideos > 0
-    ? `「${name}」を外しますか？この拡張パックの見た目パターンや文字の形を ${usedVideos} 本の動画で使っています。外すと、その部分は「見つかりません」と表示され、書き出す前に知らせます（もう一度入れると戻ります）。`
+    ? `「${name}」を外しますか？この拡張パックの中身（見た目パターン・文字の形・声など）を ${usedVideos} 本の動画で使っています。外すと、その部分は使えなくなり、書き出す前に知らせます（もう一度入れると戻ります）。`
     : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
 }
 /** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
