@@ -12,8 +12,12 @@ export function charWidthEm(ch: string): number {
   return estimatedCharWidthEm(ch.codePointAt(0) ?? 0);
 }
 
-/** 空白（半角・全角・タブ）。 */
-const WHITESPACE = /\s/u;
+/**
+ * 折る所になる空白（半角の空白・タブ）。
+ * ⚠️ **全角空白と NBSP は入れない**（PR #1468 レビュー）＝どちらも SVG の既定の空白処理で消えないので、
+ * 行末に残すと中央・右揃えで見える文字が寄る。NBSP はそもそも「ここで折らない」という意味の文字。
+ */
+const WHITESPACE = /[ \t]/;
 
 /**
  * 欧文の単語を作る文字か（英数字・ラテン補助・ギリシャ・キリル・記号を含む＝U+2000 より前で空白でないもの）。
@@ -79,7 +83,11 @@ export function wrapText(
           const cur = [...line];
           let head = cur.length;
           while (head > 0 && isWordChar(cur[head - 1])) head -= 1;
-          if (head > 0 && head < cur.length) {
+          // ⚠️ **送った先でも入らないなら送らない**（PR #1468 レビュー 🟡）＝単語の前が細い（行頭の空白・「“」
+          // など）と、送った単語＋はみ出した1文字が新しい行でも枠を超えたまま確定する。そのときは
+          // 従来どおり文字で折る（箱からはみ出さない側）。
+          const carryW = cur.slice(head).reduce((sum, ch, k) => sum + widthOf(ch) + (k > 0 ? spacingPx : 0), 0);
+          if (head > 0 && head < cur.length && carryW + w <= maxWidth) {
             carry = cur.slice(head);
             line = cur.slice(0, head).join('');
           }

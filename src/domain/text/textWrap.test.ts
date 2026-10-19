@@ -1,6 +1,7 @@
 // テキストの折返し（純粋関数・#209／#928）。
 import { describe, expect, it } from 'vitest';
 import { wrapText } from './textWrap';
+import { charWidthEmIn } from './fontMetrics';
 
 
 // 字間（#264）も数える（#928）。
@@ -94,5 +95,29 @@ describe('欧文は単語の切れ目で折る', () => {
   it('折り返しの位置にちょうど空白が来ても、上限で残りがあれば … にする', () => {
     // 「ABCD EF」：ABCD=220、空白で 275 > 250 → 空白を前の行へ残して折る。残り「EF」がある。
     expect(wrapText('ABCD EF', 250, 100, 1, 0, undefined)).toEqual(['ABCD…']);
+  });
+});
+
+describe('欧文の折り方の境目（PR #1468 レビュー）', () => {
+  /**
+   * ⚠️ **送った先でも入らないなら送らない**＝単語の前が細い（行頭の空白など）と、送った単語＋はみ出した
+   * 1文字が新しい行でも枠を超えたまま確定していた。実際の字体では空白は W よりずっと細い。
+   */
+  it('単語の前が細くて送っても入らないときは、文字で折る（箱からはみ出さない）', () => {
+    const font = { fontId: 'gen-interface-jp', bold: false };
+    const width = (t: string): number => [...t].reduce((s, ch) => s + charWidthEmIn(ch, font) * 100, 0);
+    expect(width(' ')).toBeLessThan(width('W')); // 前提：空白は W より細い
+    const max = width(' WWWW') + 1; // 「 WWWW」は入り、もう1つ W を足すと入らない
+    const lines = wrapText(' WWWWW', max, 100, 9, 0, font);
+    expect(lines).toEqual([' WWWW', 'W']);
+    for (const l of lines) expect(width(l)).toBeLessThanOrEqual(max);
+  });
+
+  it('NBSP（折らない空白）では折らない＝前後の語を1つとして送る', () => {
+    expect(wrapText('X AB\u00A0CD', 300, 100, 9, 0, undefined)).toEqual(['X ', 'AB\u00A0CD']);
+  });
+
+  it('全角空白は行末に残さない（中央・右揃えで文字が寄るため）＝日本語と同じく文字で折る', () => {
+    expect(wrapText('ああ\u3000い', 250, 100, 9, 0, undefined)).toEqual(['ああ', '\u3000い']);
   });
 });
