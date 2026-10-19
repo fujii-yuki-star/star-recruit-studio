@@ -58,6 +58,17 @@ const textClip = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
 const templateClip = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
   clip({ id, kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_normal', texts: { title: 'みだし' }, ...over });
 
+describe('layoutTimelineAt：文字の字体（ADR-0063）', () => {
+  it('動画全体の字体が文字に効き、クリップの字体が優先する（描画と折返しが同じ字体）', () => {
+    const d = doc({
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: 'kaitou-yokoku-gothic' },
+      clips: [textClip('clip_001'), textClip('clip_002', { fontId: 'gen-interface-jp-display', trackId: 'track_002' })],
+    });
+    const texts = layoutTimelineAt(d, 0, opts).items.filter((i): i is TextItem => i.kind === 'text');
+    expect(texts.map((t) => t.textFont.fontId).sort()).toEqual(['gen-interface-jp-display', 'kaitou-yokoku-gothic']);
+  });
+});
+
 describe('clipIsLiveAt（生きている区間は半開＝V24 と同じ）', () => {
   const c = clip({ id: 'clip_001', startSec: 2, durationSec: 3 });
   it.each([

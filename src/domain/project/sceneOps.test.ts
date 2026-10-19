@@ -483,6 +483,17 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(bandTop(after, expectLines)).toBeCloseTo(topBefore, 5); // 帯の位置が一致（P2）
   });
 
+  it('通常→FREE：字幕の上端は動画全体の字体の行数で翻訳する（ADR-0063）', () => {
+    // 字幕層 1720px・48px。32字は Gen Interface（既定）なら1行、怪盗予告ゴシックなら2行。
+    const text = '採用社員'.repeat(8);
+    const base = { ...richScene(), texts: { subtitle: text } } as Scene;
+    const tpl = prevTemplate();
+    const subY = (projectFontId: string | undefined): number =>
+      (switchSceneTemplate(base, 'free_v1', 'free', tpl, projectFontId).freeLayout ?? []).find((e) => e.kind === 'subtitle')!.y;
+    expect(subY(undefined)).toBe(980); // 1行＝動かさない
+    expect(subY('kaitou-yokoku-gothic')).toBeCloseTo(980 - 48 * DEFAULT_LINE_HEIGHT); // 2行＝1行ぶん上へ
+  });
+
   it('通常→FREE：1行字幕は元から一致しているので動かさない', () => {
     const base = { ...richScene(), texts: { subtitle: '短い字幕' } } as Scene;
     const tpl = prevTemplate();

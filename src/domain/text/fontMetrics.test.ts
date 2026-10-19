@@ -64,6 +64,9 @@ describe('charWidthEmIn：字体の実測を引く', () => {
     expect(readerOf('GenInterfaceJP-Regular.ttf').advanceOf(0x2007)).not.toBeNull();
     expect(charWidthEmIn(figureSpace, KAITOU)).toBe(1);
     expect(charWidthEmIn(figureSpace, GEN)).not.toBe(1);
+    // 漢字（CJK 統合漢字の表）でも同じ＝「丆」は Gen Interface に無い（簡体字など）。既定の幅（0.95em）で数えない。
+    expect(readerOf('GenInterfaceJP-Regular.ttf').advanceOf('丆'.codePointAt(0)!)).toBeNull();
+    expect(charWidthEmIn('丆', GEN)).toBe(1);
   });
 
   it('表の外の字（絵文字など）は今までの見積もり', () => {
@@ -104,6 +107,10 @@ describe('textFontFor：描画と同じ解き方（要素 → 場面 → 動画�
 });
 
 describe('wrapText：字体の字幅で折り返す', () => {
+  it('行の先頭の字も字体の幅で数える', () => {
+    // 太字の「A」は 0.747em。100px で3字＝224px は 220px に入らない（先頭を見積もり 0.55em で数えると 204px で入ってしまう）。
+    expect(wrapText('AAA', 220, 100, 3, 0, GEN_BOLD)).toEqual(['AA', 'A']);
+  });
   it('同じ文でも字体で行数が変わる（英字の多い文は見積もりより早く折り返す）', () => {
     const text = 'STARIO SYSTEM'; // 13字
     // 見積もり：0.55×13×100 = 715 → 800px に1行で入る。実測（太字）は 800px を超える。
