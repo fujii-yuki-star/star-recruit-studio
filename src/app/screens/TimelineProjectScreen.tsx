@@ -223,6 +223,8 @@ interface TimelineProjectScreenProps {
 
 /** 編集してから自動保存するまでの待ち（ms）。連続操作のたびに書かないための間。 */
 const AUTOSAVE_DELAY_MS = 800;
+/** 「…で切れる文字」を数え直すまで待つ時間（編集が落ち着いてから＝掴んで運ぶ間に毎回は回さない）。 */
+const TRUNCATED_TEXT_CHECK_DELAY_MS = 600;
 
 /** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
 const NUDGE_SEC = 0.5;
@@ -614,7 +616,6 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       );
       // ⚠️ **できたときも、知らせたいことは渡す**（#1366）＝文字が「…」で切れていても終了コードは 0 なので、
       // 頼んだ側（外の AI）は絵を見るまで気づけない。判定は**場面形式の公開前チェックと同じ関数**（`truncatedTexts`）。
-      // ⚠️ タイムライン形式の画面には、まだこの注意が無い（起動の引数の書き出しだけ）。
       // ⚠️ **注意の計算で落ちても、できた書き出しを失敗にしない**（PR #1369 レビュー 🟡）＝注意なしで成功を返す。
       let truncated: string[] = [];
       if (ok) {
@@ -1534,6 +1535,27 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     () => (doc ? overlappingSubtitleClips(doc, { templateOf }).length : 0),
     [doc, templateOf],
   );
+  /**
+   * **枠に入りきらず「…」で切れる文字**（α 残件の洗い直し 2026-10-19）。
+   *
+   * ⚠️ **起動の引数の書き出しだけが知らせていた**（#1366）＝画面から書き出す人は、切れた動画を黙って受け取った
+   *   （場面形式は公開前チェックで出す＝ADR-0026②）。判定は同じ関数（`timelineTruncatedTexts`＝描画と同じ折返し）。
+   * ⚠️ **編集が落ち着いてから数える**＝部品ごとに何か所かの時刻で配置を作り直すので重い。掴んで運ぶ間に毎回は回さない。
+   */
+  const [truncatedTexts, setTruncatedTexts] = useState<string[]>([]);
+  useEffect(() => {
+    if (!doc) { setTruncatedTexts([]); return; }
+    const timer = setTimeout(() => {
+      try {
+        setTruncatedTexts(timelineTruncatedTexts(doc, templateOf));
+      } catch (e) {
+        // 注意の計算で落ちても、編集は止めない（知らせを出さないだけ）。
+        console.error("[timeline] 切れている文字の計算に失敗:", e);
+        setTruncatedTexts([]);
+      }
+    }, TRUNCATED_TEXT_CHECK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [doc, templateOf]);
   // 連動先の候補（この動画にある読み上げの部品）。
   const voiceClips = useMemo(() => (doc ? doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice) : []), [doc]);
   // 素材が入っていない差し込み口は、灰色の「（未設定）」の枠がそのまま動画に焼き込まれる（`sceneSvg`）。
@@ -2007,6 +2029,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     emptySlot: emptySlotCount,
     danglingLink: danglingLinkCount,
     subtitleOverlap: subtitleOverlapCount,
+    truncatedText: truncatedTexts.length,
     missingImage: missingImageCount,
     /** 音が出せない**素材**（選び直せる）。下の `missingAudio`（部品）とは**排他**。 */
     missingAudioAsset: missingAudioAssets.length,
@@ -7148,6 +7171,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       )}
       {notices.subtitleOverlap > 0 && (
         <p className="notice notice-warn" role="alert">{subtitleOverlapMessage(subtitleOverlapCount)}</p>
+      )}
+      {notices.truncatedText > 0 && (
+        <p className="notice notice-warn" role="alert">{timelineTruncatedTextDetail(truncatedTexts)}</p>
       )}
       {/* ⚠️ **選び直す道をその場に出す**（#1019 ⑤）＝前は「取り込み直すか置き直してください」だけで、
           どちらも**新しい番号になる**＝**切り抜き・動き・連動する字幕まで作り直し**だった。
