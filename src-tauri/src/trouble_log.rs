@@ -58,11 +58,16 @@ pub fn dir() -> Option<PathBuf> {
     LOG_DIR.get().cloned()
 }
 
-/// 技術詳細を1行残す。**stderr にも出す**（dev のコンソールは従来どおり）。
+/// 技術詳細を1行残す。**開発版では stderr にも出す**（dev のコンソールは従来どおり）。
 ///
 /// ⚠️ **時刻を付ける**＝いつの失敗か分からないと、複数回試した中のどれかが特定できない。
 /// ⚠️ **改行は潰す**＝FFmpeg の stderr は複数行で来るので、1件が1行になるようにする（読み返しやすさ）。
+/// ⚠️ **配布版では stderr に出さない**（通し点検 2026-10-16）＝配布版の stderr が読まれるのは
+///   起動の引数で頼まれたときだけで、そこは**断り・知らせの文の受け渡し口**（`18 §18.5`）。
+///   `[voicevox] 同梱エンジンを起動しました` `[export] encode …` が混ざり、「断りの文が1行」の約束が崩れていた。
+///   記録はファイルに残るので、調べる材料は減らない。
 pub fn record(tag: &str, detail: &str) {
+    #[cfg(debug_assertions)]
     eprintln!("[{tag}] {detail}");
     let Some(dir) = LOG_DIR.get() else { return };
     record_to(dir, tag, detail, MAX_BYTES);
