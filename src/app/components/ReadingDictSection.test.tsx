@@ -24,7 +24,8 @@ vi.mock("../../infrastructure/dialog", () => ({
 
 import { ReadingDictSection } from "./ReadingDictSection";
 import { importReadingDictFrom, loadReadingDict, saveReadingDict } from "../../infrastructure/readingDictFs";
-import { markReadingDictChanged } from "../../infrastructure/voiceProviders/readingDictSync";
+import { markReadingDictChanged, syncAndCollectConflicts } from "../../infrastructure/voiceProviders/readingDictSync";
+import { alpha6Message } from "../uiLabels";
 import { showOpenReadingDictDialog } from "../../infrastructure/dialog";
 
 const entry = { surface: "宇都宮", yomi: "ウツノミヤ", accentType: 4 };
@@ -35,6 +36,33 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("ReadingDictSection", () => {
+  /** ⚠️ ADR-0037 追補＝同じ読みでも弱い登録は効かないことがある。知らせて、選んだら登録し直す（決定3）。 */
+  it("同じ読みが弱く登録されているときは、違う読みとは別の文で知らせる", async () => {
+    const kado = { surface: "角田", yomi: "カドタ", accentType: 1 };
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [kado], links: {} }, dropped: 0 });
+    vi.mocked(syncAndCollectConflicts).mockResolvedValueOnce({
+      conflicts: [{ entry: kado, engine: { uuid: "x", ...kado, priority: 5 }, weak: true }],
+      error: null,
+    });
+    render(<ReadingDictSection />);
+    expect(await screen.findByText(new RegExp(alpha6Message.READING_DICT_WORD_WEAK.slice(0, 20)))).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(alpha6Message.READING_DICT_WORD_CONFLICT.slice(0, 20)))).toBeNull();
+    expect(screen.getByText(/角田：音声ソフト側にも同じ読み「カ↓ドタ」（弱い登録）/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "こちらの読みにする" })).toBeInTheDocument();
+  });
+
+  it("違う読みの登録は従来どおりの文で知らせる（弱い登録の文は出さない）", async () => {
+    const kado = { surface: "角田", yomi: "カドタ", accentType: 1 };
+    vi.mocked(loadReadingDict).mockResolvedValue({ file: { version: 1, entries: [kado], links: {} }, dropped: 0 });
+    vi.mocked(syncAndCollectConflicts).mockResolvedValueOnce({
+      conflicts: [{ entry: kado, engine: { uuid: "x", surface: "角田", yomi: "ツノダ", accentType: 1 } }],
+      error: null,
+    });
+    render(<ReadingDictSection />);
+    expect(await screen.findByText(new RegExp(alpha6Message.READING_DICT_WORD_CONFLICT.slice(0, 20)))).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(alpha6Message.READING_DICT_WORD_WEAK.slice(0, 20)))).toBeNull();
+  });
+
   it("登録が無いときは次の行動を出す（空欄のまま置き去りにしない）", async () => {
     render(<ReadingDictSection />);
     expect(await screen.findByText(/まだ登録がありません/)).toBeInTheDocument();

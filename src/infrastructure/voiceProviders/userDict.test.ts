@@ -8,7 +8,7 @@ describe('parseEngineDict：GET /user_dict の本文', () => {
     const text = JSON.stringify({
       'u-1': { surface: '宇都宮', pronunciation: 'ウツノミヤ', accent_type: 4, priority: 5 },
     });
-    expect(parseEngineDict(text)).toEqual([{ uuid: 'u-1', surface: '宇都宮', yomi: 'ウツノミヤ', accentType: 4 }]);
+    expect(parseEngineDict(text)).toEqual([{ uuid: 'u-1', surface: '宇都宮', yomi: 'ウツノミヤ', accentType: 4, priority: 5 }]);
   });
 
   /**
@@ -28,6 +28,11 @@ describe('parseEngineDict：GET /user_dict の本文', () => {
   it('下がる場所が無い・数でないときは 0（平板）', () => {
     const text = JSON.stringify({ a: { surface: 'あ', pronunciation: 'ア' }, b: { surface: 'い', pronunciation: 'イ', accent_type: '2' } });
     expect(parseEngineDict(text).map((w) => w.accentType)).toEqual([0, 0]);
+  });
+
+  it('優先度が無い・整数でないときは持たない（送り直しの判定で「違う」になる）', () => {
+    const text = JSON.stringify({ a: { surface: 'あ', pronunciation: 'ア' }, b: { surface: 'い', pronunciation: 'イ', priority: '9' } });
+    expect(parseEngineDict(text).map((w) => w.priority)).toEqual([undefined, undefined]);
   });
 
   it('object でない本文は空', () => {

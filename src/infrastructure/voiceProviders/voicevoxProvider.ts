@@ -9,6 +9,7 @@ import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { DEFAULT_SPEAKER } from '../../domain/voice/voiceCatalog';
 import { MockVoiceProvider } from './mockVoiceProvider';
 import { ensureReadingDictSynced } from './readingDictSync';
+import { accentPreviewKana } from '../../domain/voice/readingDict';
 
 // 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。既定話者は voiceCatalog の単一参照元（§2-7）。
 // 選べる話者一覧（UI向け）も domain/voice/voiceCatalog.ts に置く（infra→domain は §4 で許可・app も domain を参照）。
@@ -67,7 +68,8 @@ export async function synthesizeWithAccent(
   if (!isTauri()) return new MockVoiceProvider().synthesize({ text: yomi, ...v }).then((r) => r.audioDataUrl);
   return invoke<string>('voicevox_synthesize_with_accent', {
     yomi,
-    accentType,
+    // 下がる場所は「かな」の書き方で渡す（登録した後と同じ音になる形・ADR-0037 追補）。
+    kana: accentPreviewKana(yomi, accentType),
     speaker: effectiveSpeaker(v, getVoicevoxSpeaker()),
     // 話し方は**3つで1組**（Rust 側は `VoiceStyle` で受け、スケールへの換算を声の作成と共有する）。
     style: { speed: v.speed, pitch: v.pitch, intonation: v.intonation },
