@@ -14,7 +14,7 @@
 // **その区間に生きている絵の部品が「動画1つだけ」**のときしか倒さない。
 // 広げるときは**パリティの検査を足してから**（各条件が1つずつ検査を持つ形にしてある）。
 
-import { TIMELINE_CLIP_KIND } from '../enums';
+import { isMixingBlend, TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
 import { groupElementIds } from '../project/groupOps';
@@ -55,7 +55,7 @@ export function clipIsPassThroughVideo(
   if (clip.cropAlign != null) return false;
   // ⚠️ **色の調整・描画モードは SVG で描く**（ADR-0044）＝FFmpeg が重ねる所では効かない。
   if (clip.colorAdjust != null) return false;
-  if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
+  if (isMixingBlend(clip.blendMode)) return false;
   return true;
 }
 
@@ -76,7 +76,7 @@ export function clipIsStaticOverlay(
   if (isVideoClip(clip.id)) return false;
   if (hasAnimation(clip.id)) return false;
   if ((clip.fadeInSec ?? 0) !== 0 || (clip.fadeOutSec ?? 0) !== 0) return false;
-  if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
+  if (isMixingBlend(clip.blendMode)) return false;
   return true;
 }
 

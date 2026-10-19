@@ -11,7 +11,7 @@ import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { talkMotionAt } from '../domain/timeline/talkMotion';
 import { pivotPointOf } from '../domain/timeline/pivot';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
-import { CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import { isMixingBlend, CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
@@ -535,7 +535,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         //（層ごとに違う調整が掛かると、同じ絵のつもりが崩れる）。
         // ⚠️ **持っていなければ付けない**＝従来の出力を1バイトも変えない。
         ...(clip.colorAdjust ? { colorAdjust: clip.colorAdjust } : {}),
-        ...(clip.blendMode && clip.blendMode !== 'normal' ? { blendMode: clip.blendMode } : {}),
+        ...(isMixingBlend(clip.blendMode) ? { blendMode: clip.blendMode } : {}),
         ...(warp ? { warp } : {}),
       });
     }

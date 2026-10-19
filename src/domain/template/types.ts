@@ -1,5 +1,5 @@
 // 見た目パターン（テンプレート）の型。正典は docs/yuko_recruit_docs/schemas/template.schema.json と 04_TEMPLATE_SPEC.md。
-import type { Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { BlendModeValue, Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
 import type { Group } from '../group/types';
 
 /**
@@ -48,7 +48,7 @@ export interface ColorAdjust {
  * ⚠️ **持てるのはタイムライン形式のクリップだけ**（ADR-0044 追補1）＝場面形式は凍結（ADR-0032）なので
  * `FreeElement` には足していない。足すと**プレビューにだけ出て書き出しに出ない**（層に割って FFmpeg が重ねるため）。
  */
-export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'plus-lighter';
+export type BlendMode = BlendModeValue;
 
 export interface LayerBackground {
   enabled?: boolean;

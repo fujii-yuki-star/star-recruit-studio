@@ -439,3 +439,21 @@ export const TALK_MOTION_KIND = {
   pulse: 'pulse',
 } as const satisfies Record<string, TalkMotionKind>;
 
+/**
+ * 描画モード（ADR-0044 ②）。値は1か所（§2-7）＝描く側・書き出しの割り方・画面が同じものを見る
+ * （0.5.2 出口監査で「別の機会に」とした `'normal'` の直書き6か所を寄せた）。
+ */
+export const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'plus-lighter'] as const;
+export type BlendModeValue = (typeof BLEND_MODES)[number];
+export const BLEND_MODE = {
+  normal: 'normal',
+  multiply: 'multiply',
+  screen: 'screen',
+  overlay: 'overlay',
+  plusLighter: 'plus-lighter',
+} as const satisfies Record<string, BlendModeValue>;
+
+/** 下と混ぜる描画モードか（未指定・`normal` は混ぜない＝従来の出力）。 */
+export function isMixingBlend(mode: BlendModeValue | null | undefined): mode is Exclude<BlendModeValue, 'normal'> {
+  return mode != null && mode !== BLEND_MODE.normal;
+}

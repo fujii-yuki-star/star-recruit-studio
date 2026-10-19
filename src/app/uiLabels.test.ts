@@ -8,6 +8,7 @@ import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, importErrorMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
+import { BANNED_IN_SCREENS } from "../test/uiTerms";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
 import type { TimelineClip, TimelineProject } from "../domain/timeline/types";
@@ -302,7 +303,11 @@ describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）",
 describe("利用者に出す文言に技術用語を混ぜない（§2-3）", () => {
   // CLAUDE.md §2-3 の禁止語。置換語は `06_UI_SPEC.md §3`。
   // ⚠️ 「動画編集の一般語」（分割・ズーム・吸着・トリム）は対象外＝ADR-0034 決定21 で整理済み。
+  // ⚠️ **共有の一覧（`src/test/uiTerms.ts`）を土台にする**（α 残件の洗い直し 2026-10-19）＝以前はこの一覧が
+  //   独立しており、**片方に足してももう片方は素通り**した（`15 §6.0` 項3 の「3つ目」）。共有の一覧に足せば
+  //   ここにも効く。下に並べるのは、組み立てる文言だけで見る語（`JSON`・`null` など）。
   const BANNED = [
+  ...BANNED_IN_SCREENS,
   // ⚠️ **画面では「動画」と呼ぶ**（#1026・利用者判断 2026-09-10）＝この一覧は
   // `src/test/uiTerms.ts`（画面の直書き・Rust の文）とは**別射程**で、`uiLabels.ts` の
   // 組み立てる文言を見る。**片方に足しても、もう片方は素通り**するので両方に足す
@@ -316,6 +321,11 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
     // **2か所（音量のラベル・見わたす列の添え字）が機械検査をすり抜けて画面に出ていた**。
     "ナレーション",
   ];
+
+  // ⚠️ **共有の一覧を土台にしていること自体を見る**＝外すと、共有の一覧に足した語がここで素通りする。
+  it("共有の禁止語（画面の直書き・Rust の文と同じ一覧）を全部含む", () => {
+    for (const w of BANNED_IN_SCREENS) expect(BANNED, w).toContain(w);
+  });
 
   const MAPS: Record<string, Record<string, string>> = {
     editBlockedMessage,
