@@ -75,6 +75,9 @@ describe("タイムライン：切れている文字の知らせ", () => {
   it("切れる文字があれば、編集が落ち着いたあとに注意を出す", () => {
     open({ doc: longText("とても長い見出しの文字がここに入ります") });
     expect(screen.queryByText(/末尾が「…」になります/)).toBeNull();
+    // 編集が落ち着くまでは数えない（重いので、掴んで運ぶ間に毎回は回さない）。
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(screen.queryByText(/末尾が「…」になります/), "落ち着く前に数えた").toBeNull();
     act(() => { vi.advanceTimersByTime(1000); });
     expect(screen.getByText(/末尾が「…」になります/)).toBeInTheDocument();
     vi.useRealTimers();
