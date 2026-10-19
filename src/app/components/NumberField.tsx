@@ -5,6 +5,16 @@
 // これで「空→0 に化ける」「打っている途中で桁がクランプされる」を解消し、#411 の入力防御（範囲外を保存しない）とも整合。
 import { useState, type CSSProperties } from "react";
 
+/**
+ * 数値欄に見せる文字（小数は3桁まで・末尾の 0 は出さない）。
+ *
+ * ⚠️ **生の小数を出さない**（通し点検 2026-10-16）＝コマに乗せた時刻（1/30 秒刻み）をそのまま出すと
+ *   「開始（秒）」が `32.06666666666667` になっていた。値そのものは変えない（見せ方だけ）。
+ */
+function numberFieldText(value: number): string {
+  return String(Number(value.toFixed(3)));
+}
+
 export function NumberField({
   label,
   value,
@@ -49,10 +59,15 @@ export function NumberField({
   const isEmpty = value == null;
   // draft=null は非編集中（value を表示）。編集中は自由入力文字列を保持する。
   const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? (isEmpty ? "" : String(value));
+  // 焦点が入ったときに見せた文字（そのまま離れたら何も変えない＝丸めた表示で値を書き換えない）。
+  const [focusText, setFocusText] = useState<string | null>(null);
+  const shown = draft ?? (isEmpty ? "" : numberFieldText(value));
 
   const commit = (): void => {
     if (draft == null) return;
+    // ⚠️ **触らずに離れたら変えない**＝表示は丸めてあるので、そのまま確定すると値が丸めた値に書き換わる
+    //   （コマに乗せた時刻がコマの格子から外れる）。
+    if (draft === focusText) { setDraft(null); return; }
     const t = draft.trim();
     if (t === "") {
       // 空で確定：クリア可能な欄はクリア、そうでなければ何もしない（＝元値へ戻る）。
@@ -82,7 +97,7 @@ export function NumberField({
       disabled={disabled}
       style={inputStyle}
       value={shown}
-      onFocus={() => setDraft(isEmpty ? "" : String(value))}
+      onFocus={() => { const t = isEmpty ? "" : numberFieldText(value); setDraft(t); setFocusText(t); }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {

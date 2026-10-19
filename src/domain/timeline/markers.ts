@@ -38,6 +38,10 @@ export const MARKER_TEXT_MAX = 200;
  * `3.1秒` と `3.4秒` の目印が**どちらも「0:03」**になり、一覧で**見分けがつかない**
  *（重なりを防いでいるのはコマ単位の一致だけなので、この状態は普通に作れる）。
  * 業界の一覧もコマまで出す（`00:00:03:12`）。
+ *
+ * ⚠️ **コマの区切りは `:`**（通し点検 2026-10-16・利用者判断）＝以前は `0:41.09`（41秒9コマ）と `.` で区切っていて
+ *   **41.09 秒と読めた**。見た目どおり `0:45.50`（45.5 秒のつもり）を打つと、コマが fps 以上で**黙って戻った**。
+ *   業界（Premiere・Resolve）と同じく `:` で区切り、`.` は**秒の小数**だけに使う（`parseClock`）。
  */
 export function markerClock(timeSec: number, fps: number): string {
   // ⚠️ **コマの数で数えてから分ける**（UI/UX 監査 2026-10-02）＝秒の端数を丸めると 0.999 秒が「0:00.30」（30fps で
@@ -47,26 +51,34 @@ export function markerClock(timeSec: number, fps: number): string {
   const mm = Math.floor(frames / perMin);
   const ss = Math.floor((frames % perMin) / fps);
   const ff = frames % fps;
-  return `${mm}:${String(ss).padStart(2, '0')}.${String(ff).padStart(2, '0')}`;
+  return `${mm}:${String(ss).padStart(2, '0')}:${String(ff).padStart(2, '0')}`;
 }
 
 /**
  * 打ち込まれた時刻を秒へ（UI/UX 監査 2026-10-02＝再生位置を数値で打てるようにする）。
- * - `分:秒.コマ`（表示と同じ書き方・`markerClock` の逆）／`分:秒:コマ`（Premiere・Resolve の書き方＝コマの区切りを
- *   `:` にして小数点と取り違えない・PR #1340 レビュー）／`分:秒`
- * - `:` が無ければ**秒**（`12.5`＝12.5 秒）＝表示と違う書き方でも、ふつうに打てば通る
+ * - `分:秒:コマ`（表示と同じ書き方・`markerClock` の逆＝Premiere・Resolve の書き方）／`時:分:秒:コマ`（業界の時刻を
+ *   そのまま貼れる）／`分:秒`
+ * - **`.` は秒の小数**（`0:45.5`＝45.5 秒）＝見た目どおりに読む（通し点検 2026-10-16＝以前は `分:秒.コマ` と読み、
+ *   `0:45.50` が「50コマ＝読めない」で黙って戻った）
+ * - `:` が無ければ**秒**（`12.5`＝12.5 秒）
  * 読めなければ `null`（呼び出し側は打つ前の値へ戻す＝黙って別の時刻へ飛ばない）。コマが fps 以上なら読めない扱い。
  */
 export function parseClock(text: string, fps: number): number | null {
   const t = text.trim().replace(/：/g, ':').replace(/．/g, '.').replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
   if (t === '') return null;
-  const m = /^(\d+):(\d{1,2})(?:[.:](\d{1,2}))?$/.exec(t);
+  const h = /^(\d+):(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(t);
+  if (h) {
+    const [hh, mm, ss, ff] = [Number(h[1]), Number(h[2]), Number(h[3]), Number(h[4])];
+    if (mm >= 60 || ss >= 60 || ff >= fps) return null;
+    return hh * 3600 + mm * 60 + ss + ff / fps;
+  }
+  const m = /^(\d+):(\d{1,2})(?::(\d{1,2})|(\.\d+))?$/.exec(t);
   if (m) {
     const mm = Number(m[1]);
     const ss = Number(m[2]);
     const ff = m[3] != null ? Number(m[3]) : 0;
     if (ss >= 60 || ff >= fps) return null;
-    return mm * 60 + ss + ff / fps;
+    return mm * 60 + ss + (m[4] != null ? Number(m[4]) : 0) + ff / fps;
   }
   if (/^\d+(?:\.\d+)?$/.test(t)) return Number(t);
   return null;

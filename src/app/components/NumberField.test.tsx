@@ -81,3 +81,37 @@ describe("NumberField（数値入力の共通挙動・#459 item4）", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+// ⚠️ **生の小数を出さない**（通し点検 2026-10-16）＝コマに乗せた時刻が `32.06666666666667` と出ていた。
+describe("NumberField（見せ方だけ丸める）", () => {
+  it("小数は3桁までで見せる（末尾の 0 は出さない）", () => {
+    render(<NumberField label="開始" value={32 + 2 / 30} onChange={vi.fn()} />);
+    expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("32.067");
+  });
+
+  it("整数・短い小数はそのまま", () => {
+    render(<NumberField label="長さ" value={2.5} onChange={vi.fn()} />);
+    expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("2.5");
+  });
+
+  it("触らずに離れたら値を変えない（丸めた表示で書き換えない）", () => {
+    const onChange = vi.fn();
+    render(<NumberField label="開始" value={32 + 2 / 30} onChange={onChange} />);
+    const input = screen.getByRole("spinbutton");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("打ち直したら確定する", () => {
+    const onChange = vi.fn();
+    render(<NumberField label="開始" value={32 + 2 / 30} onChange={onChange} />);
+    const input = screen.getByRole("spinbutton");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "33" } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(33);
+  });
+});

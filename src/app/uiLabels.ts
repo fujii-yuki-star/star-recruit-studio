@@ -1757,6 +1757,7 @@ export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
   removeTrack: "列を消す",
   reorderTracks: "列の並びを変える",
   track: "列の設定を変える",
+  motion: "動きを変える",
   marker: "目印を変える",
   settings: "動画全体の設定を変える",
   other: "編集",

@@ -369,6 +369,8 @@ fn run(
     //   閉じると ffmpeg.exe が孤児になる。
     let ff = no_window_command(ffmpeg)
         .args(extract_args(input, from_sec, length_sec, wav))
+        // 入力も渡さない（ffmpeg は既定で標準入力を読む＝起こした側の口を掴まない・ffmpeg.rs と同じ）。
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -382,6 +384,7 @@ fn run(
         .unwrap_or(4);
     let mut child = no_window_command(exe)
         .args(cli_args(model, wav, stem, thread_count(logical)))
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()

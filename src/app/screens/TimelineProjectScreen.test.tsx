@@ -125,9 +125,9 @@ describe("TimelineProjectScreen", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2.5" } });
     expect(useTimelineStore.getState().playheadSec).toBe(2.5);
-    // 時刻はコマまで（分:秒.コマ・UI/UX 監査 2026-10-02）＝2.5 秒＠30fps は 2秒15コマ。
-    expect((screen.getByLabelText("再生位置の時刻") as HTMLInputElement).value).toBe("0:02.15");
-    expect(screen.getByText("/ 全体 0:05.00")).toBeInTheDocument();
+    // 時刻はコマまで（分:秒:コマ・UI/UX 監査 2026-10-02）＝2.5 秒＠30fps は 2秒15コマ。
+    expect((screen.getByLabelText("再生位置の時刻") as HTMLInputElement).value).toBe("0:02:15");
+    expect(screen.getByText("/ 全体 0:05:00")).toBeInTheDocument();
   });
 
   it("Home／End は画面のどこでも先頭へ／最後へ（スライダーに焦点があるときはそちらに譲る）", () => {
@@ -164,13 +164,13 @@ describe("TimelineProjectScreen", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const field = screen.getByLabelText("再生位置の時刻") as HTMLInputElement;
-    fireEvent.change(field, { target: { value: "0:03.15" } });
+    fireEvent.change(field, { target: { value: "0:03:15" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3.5, 9);
     fireEvent.change(field, { target: { value: "なに" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().playheadSec, "読めない値で動いた").toBeCloseTo(3.5, 9);
-    expect(field.value, "読めない値が残っている").toBe("0:03.15");
+    expect(field.value, "読めない値が残っている").toBe("0:03:15");
     fireEvent.change(field, { target: { value: "99" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useTimelineStore.getState().playheadSec, "範囲の外へ出た").toBeLessThanOrEqual(5);
@@ -1374,7 +1374,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     withClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     typeAndPlace("濃さ（0〜1）", "0.5");
-    expect(screen.getByText("0:03.00：濃さ（0〜1） 0.5")).toBeInTheDocument();
+    expect(screen.getByText("0:03:00：濃さ（0〜1） 0.5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "外す" }));
     expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
   });
@@ -1607,7 +1607,7 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 表示は動画の時刻（部品の開始 1 秒 ＋ 点の 2 秒）＝画面の目盛りと同じ物差し。
-    expect(screen.getByText("0:03.00：音量 0.4")).toBeInTheDocument();
+    expect(screen.getByText("0:03:00：音量 0.4")).toBeInTheDocument();
     fireEvent.click(screen.getByText("外す"));
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toBeUndefined();
   });
@@ -5423,10 +5423,10 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_003"] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const subLeft = () => (([...container.querySelectorAll(".timeline-clip")]
-      .find((el) => el.textContent?.includes("字幕")) as HTMLElement | undefined)?.style.left);
+    // ⚠️ **帯は id で探す**＝連動した字幕の帯にも読み上げと同じ文（「あ」）が出る（通し点検 2026-10-16）。
+    const subLeft = () => (container.querySelector('.timeline-clip[data-clip-id="clip_002"]') as HTMLElement | null)?.style.left;
     const before = subLeft();
-    drag(band("あ"), 36 * 5, { drop: false }); // 読み上げを掴んで5秒ぶん右へ
+    drag(container.querySelector('.timeline-clip[data-clip-id="clip_001"]') as HTMLElement, 36 * 5, { drop: false }); // 読み上げを掴んで5秒ぶん右へ
     // ⚠️ 据え置いて見せると、離した瞬間に字幕だけ飛ぶ（確定は `withBoundSubtitles` が動かす）。
     expect(subLeft()).not.toBe(before);
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 5, clientY: 0 });

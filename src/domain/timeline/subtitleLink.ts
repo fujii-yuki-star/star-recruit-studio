@@ -32,6 +32,18 @@ export function subtitleTextOf(doc: TimelineProject, clip: TimelineClip): string
 }
 
 /**
+ * 帯や見出しに名前を出すための写し＝**連動した字幕は、実際に出る文を `text` に入れて返す**（通し点検 2026-10-16）。
+ *
+ * ⚠️ 自分の文を持たない連動字幕は、帯に「字幕」とだけ出ていた（どの文の字幕か分からない）。
+ * 文書は変えない（名前を作るときだけ使う）。字幕でない・自分の文がある・連動先が無いときはそのまま返す。
+ */
+export function clipWithShownText(doc: TimelineProject, clip: TimelineClip): TimelineClip {
+  if (clip.kind !== TIMELINE_CLIP_KIND.subtitle || clip.text) return clip;
+  const shown = subtitleTextOf(doc, clip);
+  return shown ? { ...clip, text: shown } : clip;
+}
+
+/**
  * 連動先を指しているのに見つからない字幕クリップ（黙って消さないための材料）。
  *
  * ⚠️ **「何も描かれない字幕」まで広げてはいけない**（#787 で一度広げて取り下げた）＝**指している**という
