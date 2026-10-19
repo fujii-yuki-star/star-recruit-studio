@@ -7,6 +7,7 @@ import { resolveNarrationVoice } from '../voice/voiceProvider';
 import type { VoiceSettings } from '../project/types';
 import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from '../enums';
 import type { TimelineClip, TimelineVoice } from './types';
+import { audioSourceKeyOfClip } from './audio';
 
 /** 読み上げクリップの声の設定を、動画全体の既定で埋めて返す。 */
 export function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettings) {
@@ -30,6 +31,25 @@ export function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettin
 export function voiceClipNeedsVoice(clip: TimelineClip): boolean {
   if (clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return false;
   return clip.voice.text.trim().length > 0 && clip.voice.status !== NARRATION_STATUS.generated;
+}
+
+/**
+ * **作成済みの印なのに音が読めない**読み上げか（通し点検 2026-10-16）。純粋。
+ *
+ * ⚠️ **印だけ見ると作り直されない**＝声のファイルが消えた動画では、まとめて作るがこれを飛ばして「作りました」と言い、
+ *   書き出しは「声を作ってください」と断る＝**行き止まり**（§2-5）。「読めるか」は呼ぶ側が渡す
+ *   （`audioSrcByKey` に入っているか＝書き出しの「読めない音」の判定と同じ材料・キーは `audioSourceKeyOfClip`）。
+ */
+export function voiceClipNeedsRemake(clip: TimelineClip, audioReadable: (key: string) => boolean): boolean {
+  if (clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return false;
+  if (clip.voice.text.trim().length === 0 || clip.voice.status !== NARRATION_STATUS.generated) return false;
+  const key = audioSourceKeyOfClip(clip);
+  return key == null || !audioReadable(key);
+}
+
+/** まとめて作る対象の読み上げ（まだ作っていない＋作成済みなのに音が読めない）。並びは文書の順。 */
+export function voiceClipsToMake(clips: readonly TimelineClip[], audioReadable: (key: string) => boolean): TimelineClip[] {
+  return clips.filter((c) => voiceClipNeedsVoice(c) || voiceClipNeedsRemake(c, audioReadable));
 }
 
 /**

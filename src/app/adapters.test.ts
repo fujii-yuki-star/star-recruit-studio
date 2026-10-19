@@ -176,6 +176,20 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
     expect(voice?.sceneId).toBe("b"); // 2つ目が最初の該当
   });
 
+  // ⚠️ **作成済みの印なのに音が読めない場面も「声がまだ」に数える**（通し点検 2026-10-16）＝声のファイルが消えると
+  //   「作成済み」と出たまま無音で書き出せた。読めるかを渡さないとき（ブラウザ・検査）は印だけ（嘘の要対応を出さない）。
+  it("読めるかを渡すと、作成済みなのに音が読めない場面を要対応にする（渡さなければ印だけ）", () => {
+    const a = scn("a", { narration: { text: "セリフ", status: "generated", voicePath: "voices/a.wav" } });
+    const b = scn("b", { narration: { text: "セリフ", status: "generated", voicePath: "voices/b.wav" } });
+    const readable = (key: string) => key === "a";
+    const args = [undefined, undefined, undefined, undefined, undefined] as const;
+    const withAudio = buildPrecheckItems([a, b], assets, [freeTemplate], ...args, readable).find((i) => i.id === "voice");
+    expect(withAudio?.severity).toBe("action");
+    expect(withAudio?.sceneId).toBe("b");
+    const without = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(without?.severity).toBe("ok");
+  });
+
   it("字幕が長い項目は最初の該当場面 id を持つ（action で飛べる項目）", () => {
     // FREE 場面で texts.subtitle を実表示するには字幕要素（読み上げ対象）が要る（ADR-0029・sceneDisplayedSubtitleTexts）。
     const subEl = [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, subtitleSource: { kind: "narration" } }] as unknown as Scene["freeLayout"];

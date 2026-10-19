@@ -34,16 +34,16 @@
 | ℹ️（2026-10-19） | 動きを当てた・置いた取り消しの名前が「編集」 → 「動きを変える」 | `src/domain/timeline/editKind.ts:114` |
 | ℹ️（2026-10-19） | 連動した字幕の帯が「字幕」とだけ出る → 実際に出る文を帯・選んだ部品の見出しに出す（5か所） | `src/domain/timeline/subtitleLink.ts:40` |
 | ℹ️（2026-10-19・レビュー） | 「断り・知らせの文は `[` で始まらない」（18 §18.5）を検査で留めた・声を文字にするときの子プロセスも入力を渡さない | `src/app/hooks/useStartupJob.stderr-prefix.test.ts`・`src-tauri/src/transcribe.rs:373`・`src-tauri/src/transcribe.rs:387` |
+| 🟡（2026-10-19・利用者判断） | **`--make-voices` が、声のファイルの欠けた読み上げを作り直さない**（印だけ見て「作りました」と返し、書き出しが断る＝外の AI の行き止まり）→ 両形式の「全部の声を作る」が、作成済みでも音が読めないものを作り直す（判定は書き出し・プレビューと同じ材料）。起動の引数の「残り」と場面形式の書き出し前の確かめも同じ判定で数える。あわせて**場面形式は声のファイルが無いと黙って無音で書き出せた**ので、公開前チェックの「読み上げの声」も同じ判定にした（アプリの中だけ） | `src/domain/timeline/voice.ts:51`・`src/domain/project/narrationLines.ts:74`・`src/app/store/timelineStore.ts:2598`・`src/app/store/projectStore.ts:3380`・`src/app/hooks/useStartupJob.ts:282`・`src/app/hooks/useStartupJob.ts:391`・`src/app/adapters.ts:245`・`src/app/screens/PrecheckScreen.tsx:112` |
+| 🟡（2026-10-19・利用者判断） | **`--import` で採り直した番号がどこにも出ない** → 標準出力へ1行で返す（画面には出さない）・18 に追記 | `src/app/hooks/useStartupJob.ts:242`・`src-tauri/src/lib.rs:1006`・`docs/yuko_recruit_docs/18_EXTERNAL_AGENT_CONTRACT.md` |
+| 🟡（2026-10-19・利用者判断） | **読み込んだ見た目パターンが起動の間だけ**（閉じると消え、使った場面の見た目が見つからなくなる・「標準」と出て削除もできない・同じ番号の標準を置き換えていた）→ 番号を採り直して「自分の見た目」として保存する | `src/app/store/projectStore.ts:2264`・`src/app/screens/LooksScreen.tsx`・`docs/yuko_recruit_docs/06_UI_SPEC.md` |
 | 道具 | 撮影の道具の「ホームに戻す」が、上の帯の「新しい動画を作る」でホームと思い込んでいた | `scripts/tutorialRecord.mjs:493` |
 
 ## 判断が要るもの（直していない）
 
 | 重さ | 内容 | 場所 |
 |---|---|---|
-| 🟡 | **`--make-voices` が、ファイルの欠けた声を作り直さない**。「作成済み」の印のままファイルが無い声は対象にも「残り」にも入らず、コード 0「読み上げの声を作りました。」で返る。続く `--export` は「その読み上げを選んで「声を作る」で…」で断る＝**外の AI には行き止まり**（画面の「全部の声を作る」も同じ対象選び）。別件として切り出した | `src/app/hooks/useStartupJob.ts`（`runMakeVoices`） |
-| 🟡 | **`--import` で採り直した番号がどこにも出ない**＝続く `--make-voices <番号>` に渡す番号を、外の AI は置き場を覗いて推すしかない（18 にも書いていない）。同じ名前の動画が一覧に並ぶので、画面からも見分けにくい | `src/app/hooks/useStartupJob.ts`（取り込みの知らせ） |
 | 🟡 | **タイムライン形式で置いた「（ゆうこ）」の見た目パターンに、ゆうこ（立ち絵）を出す欄が無い**＝ゆうこが写らない。`clip.character` は schema にあるが、入るのは場面形式からの作り直しだけ | `src/domain/timeline/bake.ts:677` |
-| 🟡 | **読み込んだ見た目パターンは、その起動の間だけ**（`projectStore.ts:2269` の注記「永続化は将来フェーズ」）なのに、画面は「標準（直接は編集できません）」と出て削除の道も無い。開き直すと消え、使った場面は「見た目が見つかりません」になる | `src/app/store/projectStore.ts:2269`・`src/app/uiLabels.ts`（`lookOriginLabel`） |
 | ℹ️ | 見た目パターンの一覧に、前の点検・撮影の残り（「…のコピー」「新しい見た目」×3・「yuuko」）がある | 利用者の手元のデータ |
 
 ## 領域ごとの確かめ

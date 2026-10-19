@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
 import type { Scene } from "../../domain/project/types";
+import { isTauri } from "../../infrastructure/assetFs";
 import { isExportBusy, useProjectStore, type StandardLookApplyResult } from "../store/projectStore";
 import { buildPrecheckItems, exportBlockedMessage, isExportBlocking } from "../adapters";
 import { useExportCapability } from "../hooks/useExportCapability";
@@ -47,6 +48,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const precheckReturnTo = useProjectStore((s) => s.precheckReturnTo);
   const precheckBackTo: ScreenId =
     precheckReturnTo && PRECHECK_BACK_LABEL[precheckReturnTo] ? precheckReturnTo : "preview";
+  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes, missingAssetIds, refreshMissingAssets, userFontIds, userFontsUnreadable, refreshUserFonts } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
@@ -105,6 +107,9 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     { projectFontId: meta.videoSettings.fontId, userFontsUnreadable, ...(userFontIds && !userFontsUnreadable ? { availableUserFontIds: userFontIds } : {}) },
     // 早口の判定と「セリフを直す」を声の速さに合わせる（#1318・場面編集の AI 補助と同じ解決）。
     meta.voiceSettings,
+    // ⚠️ **作成済みなのに声の音が読めない場面も「声がまだ」に数える**（通し点検 2026-10-16）＝「声を作成」で作り直せる。
+    //   アプリの中だけで渡す（音を読めない場＝ブラウザ・検査で嘘の「要対応」を出さない＝`missingAssetIds` と同じ流儀）。
+    isTauri() ? (key: string) => narrationAudioById[key] != null : undefined,
   );
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;

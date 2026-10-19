@@ -981,6 +981,9 @@ fn finish_startup_job(
     forwarded: bool,
     // 断りの文（`ok = false`）／できたときの知らせ・注意（`ok = true`・#1366）。⚠️ **画面に出すのと同じ文**を受け取る。
     message: Option<String>,
+    // 頼んだ側へ渡す**結果**（いまは取り込んだ動画の番号だけ）。⚠️ **標準出力へ1行**＝`18 §18.5`
+    // （標準出力は結果の受け渡し用）。画面には出さない（番号は利用者の見る言葉ではない＝§2-3）。
+    result: Option<String>,
 ) {
     // ⚠️ **断った理由を、頼んだ側へ届ける**（#1212）＝これが無いと、外の AI が受け取れるのは
     // **数字だけ**になる。断る理由は4つあり（声がまだ・素材が見つからない・声の用意ができない・
@@ -994,6 +997,15 @@ fn finish_startup_job(
     if let Some(m) = message.as_deref() {
         if !m.is_empty() {
             eprintln!("{m}");
+        }
+    }
+    // ⚠️ **取り込んだ番号を返す**（通し点検 2026-10-16）＝アプリが番号を採り直すのに、どこにも出していなかった＝
+    //   外の AI は続く `--make-voices <番号>` に渡す番号を、置き場を覗いて推すしかなかった。
+    if let Some(r) = result.as_deref() {
+        if !r.is_empty() {
+            println!("{r}");
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
         }
     }
     if forwarded || !state.startup.quit_when_done {

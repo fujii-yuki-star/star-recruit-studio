@@ -11,7 +11,7 @@ import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
 import { sceneGoneVoiceLineCount } from "../domain/voice/goneVoices";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
-import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { sceneLines, sceneNeedsVoice, sceneNeedsVoiceOrRemake } from "../domain/project/narrationLines";
 import { MAIN_ASSET_LAYER_KEYS } from "../domain/template/slotAssign";
 import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
@@ -182,6 +182,12 @@ export function buildPrecheckItems(
    * （場面編集の AI 補助と同じ解決＝`resolveNarrationVoice`）。未指定＝速さ 1.0。
    */
   voiceSettings?: VoiceSettings,
+  /**
+   * 読み上げの音が読めるか（`narrationAudioById` のキーで）。**渡すと、作成済みの印なのに音が読めない場面も
+   * 「声がまだ」に数える**（通し点検 2026-10-16＝声のファイルが消えると「作成済み」と出たまま無音で書き出せた）。
+   * ⚠️ **省略＝調べていない**（`missingAssetIds` と同じ流儀）＝音を読めない場（ブラウザ・検査）で嘘の「要対応」を出さない。
+   */
+  narrationAudioReadable?: (key: string) => boolean,
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const speedOf = (s: Scene): number | undefined => (voiceSettings ? resolveNarrationVoice(s.narration, voiceSettings).speed : undefined);
@@ -236,7 +242,7 @@ export function buildPrecheckItems(
       : { sceneId: hit.firstId, sceneIds: hit.ids, focus: "text" };
   };
 
-  const voice = offending(sceneNeedsVoice);
+  const voice = offending((s) => (narrationAudioReadable ? sceneNeedsVoiceOrRemake(s, narrationAudioReadable) : sceneNeedsVoice(s)));
   items.push(
     voice.nums.length > 0
       ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId, sceneIds: voice.ids }

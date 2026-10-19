@@ -55,7 +55,7 @@ import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../doma
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { sameSynthInput } from "../../domain/voice/voiceProvider";
 // ⚠️ **声の設定の解決は domain に1つ**（#977）＝戻すときの突き合わせでも同じ解決が要る。
-import { resolveTimelineVoice, voiceClipNeedsVoice } from "../../domain/timeline/voice";
+import { resolveTimelineVoice, voiceClipsToMake } from "../../domain/timeline/voice";
 import { resolveAudioAuto } from "../../domain/voice/audioAuto";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
@@ -2591,7 +2591,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
       // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
       const notice: VoiceNoticeSink = { kind: "collect", notFitted: [] };
-      for (const id of doc.clips.filter(voiceClipNeedsVoice).map((c) => c.id)) {
+      // ⚠️ **作成済みなのに音が読めない読み上げも作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、
+      //   印だけ見て飛ばすと「作りました」と言い、書き出しは「声を作ってください」と断る＝行き止まり。
+      //   「読めるか」は書き出しの「読めない音」と同じ材料（`audioSrcByKey`）で見る＝先にそろえる。
+      await get().ensureAudioSrcs();
+      for (const id of voiceClipsToMake(doc.clips, (key) => get().audioSrcByKey[key] != null).map((c) => c.id)) {
         // ⚠️ **中止されたら次の1件へ進まない**＝作った声はそのまま残す（取り消しではない）。
         if (get()._bulkVoiceRun !== runSeq) break;
         // ⚠️ **文書が入れ替わったら止める**＝別の動画の読み上げを作りにいかない。

@@ -548,6 +548,36 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
 
   // #570 P1 レビュー：書き出し中は見た目パターン（＝場面が使う templateId）とその既定素材を固定する。使用中テンプレを
   // 保存/削除すると MP4(開始時 snap の見た目) と 保存/仕上がり確認(新) が食い違う（15§4・ADR-0026④＝α-4 パリティ）。
+  // ⚠️ **読み込んだ見た目パターンは、自分の見た目として保存する**（通し点検 2026-10-16・利用者判断 2026-10-19）＝
+  //   以前はその起動の間だけ持ち、閉じると消えて使った場面の見た目が見つからなくなった。番号のまま入れると、
+  //   同じ番号の標準の見た目を**黙って置き換えていた**。
+  describe('見た目パターンの読み込み＝自分の見た目として保存', () => {
+    it('番号を採り直して保存し、標準の見た目は置き換えない', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null, isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      const builtin = sampleTemplates[0]!;
+      const ids = await useProjectStore.getState().addTemplatePack([{ ...userTmpl(builtin.templateId), name: '読み込んだ見た目' }]);
+      expect(ids).toHaveLength(1);
+      expect(ids[0] !== builtin.templateId, '同じ番号のまま入れた').toBe(true);
+      expect(spy, '保存していない（閉じると消える）').toHaveBeenCalledTimes(1);
+      const st = useProjectStore.getState().templates;
+      expect(st.find((t) => t.templateId === builtin.templateId) === builtin, '標準の見た目を置き換えた').toBe(true);
+      expect(st.find((t) => t.templateId === ids[0])?.name).toBe('読み込んだ見た目');
+    });
+
+    it('保存に失敗したものは返さない（一覧にも出さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null, isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValue('os error 3');
+      const before = useProjectStore.getState().templates.length;
+      const ids = await useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_x')]);
+      expect(ids).toEqual([]);
+      expect(useProjectStore.getState().templates).toHaveLength(before);
+      expect(useProjectStore.getState().templateError).not.toBeNull();
+    });
+  });
+
   describe('書き出し中は見た目パターンを固定（#570 P1 レビュー）', () => {
     const BUSY = /書き出しが終わるまで/;
     afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isTemplateMutating: false }); });

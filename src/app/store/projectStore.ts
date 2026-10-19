@@ -72,7 +72,7 @@ import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, narrationAudioKey, sceneNeedsVoiceOrRemake, sceneVoiceKeysToRemake, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
 import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, cancelProjectCopy, copyBakedFiles, listenCopyProgress } from "../../infrastructure/bakeFs";
@@ -453,8 +453,11 @@ interface ProjectState {
    *（整理のための機能で片づかない、を作らない）。消せなくても失敗にしない（無害な余り）。
    */
   removeAssets: (assetIds: readonly string[]) => void;
-  /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
-  addTemplatePack: (templates: Template[]) => void;
+  /**
+   * 見た目パターンのファイルを読み込み、**自分の見た目として保存する**（保存できたものの新しい番号を返す）。
+   * ⚠️ 以前はその起動の間だけ持ち、閉じると消えていた（通し点検 2026-10-16）。
+   */
+  addTemplatePack: (templates: Template[]) => Promise<string[]>;
   /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
   loadUserTemplates: () => Promise<void>;
   /** 入っている拡張パックを読み直し、見た目パターンと既定素材へ合流させる（ADR-0060）。入れた・外した後にも呼ぶ。 */
@@ -672,7 +675,7 @@ interface ProjectState {
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
-  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean }) => Promise<void>;
+  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean; remakeKeys?: ReadonlySet<string> }) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
   /**
@@ -2258,19 +2261,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（消せなくても次の取り込みで上書きされるだけの無害な余り＝ADR-0021 の孤立掃除と同じ流儀）。
     if (meta.projectId) void deleteProjectFiles(meta.projectId, files);
   },
-  addTemplatePack: (incoming) => {
-    // 書き出し中はパック取り込みも止める（同 id の使用中テンプレを上書きしうる＝save/delete と同じ固定・#570 レビュー・store 側の2層目）。
-    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
+  addTemplatePack: async (incoming) => {
+    // 書き出し中は取り込みも止める（save/delete と同じ固定・#570 レビュー・store 側の2層目）。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return []; }
     // ⚠️ 拡張パックの名前を名乗る・借りるものは入れない（取り込み口でも断っている＝2層目・ADR-0060）。
     incoming = incoming.filter((t) => !templateClaimsPackIds(t));
-    set((s) => {
-      // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
-      // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
-      // 取り込んだパックはセッション内で保持し newProject でもリセットしない（永続化/リセットは将来フェーズ＝B2 スコープ外）。
-      const byId = new Map(s.templates.map((t) => [t.templateId, t] as const));
-      for (const t of incoming) byId.set(t.templateId, t);
-      return { templates: [...byId.values()] };
-    });
+    // ⚠️ **自分の見た目として保存する**（通し点検 2026-10-16・利用者判断 2026-10-19）＝以前はその起動の間だけ持ち、
+    //   画面は「標準（直接は編集できません）」と出て削除の道も無く、**閉じると消えて使った場面の見た目が見つからなくなった**。
+    // ⚠️ **番号は採り直す**＝ファイルの番号のまま入れると、同じ番号の標準の見た目を**黙って置き換えていた**。
+    //   保存は複製・ゼロから作成と同じ `saveUserTemplate`（読み込みと同じ検証を通し、一覧へ反映）。
+    const saved: string[] = [];
+    for (const t of incoming) {
+      const newId = userTemplateFs.allocateUserTemplateId(get().templates.map((x) => x.templateId));
+      await get().saveUserTemplate({ ...t, templateId: newId });
+      if (get().templates.some((x) => x.templateId === newId)) saved.push(newId);
+    }
+    return saved;
   },
   loadPacks: async () => {
     // ⚠️ **重なったら後から始めた1回だけを当てる**（PR レビュー 🟡）＝入れた直後に外す・起動時の読み込みと重なる、で
@@ -3188,7 +3194,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (scene.lines && scene.lines.length > 0) {
       // fromBulk（全場面生成）では生成済み行を再合成しない（単一 narration と対称）。個別呼び出しは作り直し。
       const targets = scene.lines.filter(
-        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated),
+        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated
+          // 作成済みでも音が読めない行は作り直す（通し点検 2026-10-16・`sceneVoiceKeysToRemake`）。
+          || (opts.remakeKeys?.has(narrationAudioKey(scene, l.lineId)) ?? false)),
       );
       if (targets.length === 0) return;
       if (scene.lines.some((l) => l.status === NARRATION_STATUS.pending)) return; // 多重起動防止
@@ -3365,10 +3373,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
       // 掛け合い・単一 narration 共通の実効判定（sceneNeedsVoice）を precheck と共有＝同概念同挙動（#403）。
-      const ids = get().scenes.filter(sceneNeedsVoice).map((s) => s.sceneId);
+      // ⚠️ **作成済みなのに音が読めない行も作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、印だけ見て
+      //   飛ばすと「作りました」と言うのに無音のまま残る＝行き止まり。「読めるか」はプレビュー・書き出しと同じ材料で見る。
+      const readable = (key: string): boolean => get().narrationAudioById[key] != null;
+      const ids = get().scenes.filter((s) => sceneNeedsVoiceOrRemake(s, readable)).map((s) => s.sceneId);
+      const remakeKeys = new Set(get().scenes.flatMap((s) => sceneVoiceKeysToRemake(s, readable)));
       // 同時実行数を絞る（#547 P2-6）。全件を一度に投げると「まだ始まっていない仕事」が残らず**中止が効かない**
       // ＝ボタンはあるのに止まらない（ADR-0026④）。絞れば残りは待機列に残り、進捗も少しずつ進む。
-      await runWithConcurrency(ids, NARRATION_BULK_CONCURRENCY, (id) => get().generateNarration(id, { fromBulk: true }), {
+      await runWithConcurrency(ids, NARRATION_BULK_CONCURRENCY, (id) => get().generateNarration(id, { fromBulk: true, remakeKeys }), {
         shouldStop: () => get()._narrationRunSeq !== runSeq,
       });
     } finally {

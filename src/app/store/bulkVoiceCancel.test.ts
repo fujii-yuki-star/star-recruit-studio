@@ -282,3 +282,33 @@ describe("誰も作っていない「準備中」を残さない（#547 P2-6）"
     expect(useProjectStore.getState().isGeneratingNarration).toBe(true);
   });
 });
+
+// ⚠️ **作成済みの印なのに音が読めない行も作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、印だけ見て
+//   飛ばすと「作りました」と言うのに無音のまま残る（書き出しも黙って無音で焼いていた）。
+describe("声の一括作成：作成済みでも音が読めないものは作り直す", () => {
+  const generatedScene = (id: string, order: number): Scene => ({
+    ...scene(id, order), narration: { text: `セリフ${order}`, status: "generated", voicePath: `voices/${id}.wav` },
+  } as Scene);
+  const dialogueScene = (id: string, order: number): Scene => ({
+    ...scene(id, order),
+    lines: [
+      { lineId: "line_001", speaker: "voicevox_zundamon", text: "一行目", status: "generated", voicePath: `voices/${id}_line_001.wav` },
+      { lineId: "line_002", speaker: "voicevox_zundamon", text: "二行目", status: "generated", voicePath: `voices/${id}_line_002.wav` },
+    ],
+  } as unknown as Scene);
+
+  it("音の無い作成済みの場面・行だけ作り直す（読める行は作らない）", async () => {
+    useProjectStore.setState({
+      scenes: [generatedScene("scene_001", 1), generatedScene("scene_002", 2), dialogueScene("scene_003", 3)],
+      // scene_002 と scene_003 の1行目は音が読める。scene_001 と scene_003 の2行目は読めない。
+      narrationAudioById: { scene_002: "wav", "scene_003/line_001": "wav" },
+    });
+    const synth = gatedSynth();
+    const run = useProjectStore.getState().generateAllNarrations();
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started, "読めない2つ（scene_001・scene_003 の2行目）だけ作る").toBe(2);
+    const audio = useProjectStore.getState().narrationAudioById;
+    expect(audio.scene_001 != null && audio["scene_003/line_002"] != null, "作り直した音が入っていない").toBe(true);
+  });
+});
