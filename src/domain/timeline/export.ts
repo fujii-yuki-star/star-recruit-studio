@@ -427,9 +427,8 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  // ⚠️ **直接置いた動画（#512 段1・段2）と差し込み口の動画（段3）は映る**＝断るのは**まだ映らない
-  // 使い方**だけ＝**立ち絵に入れた動画**（`character.poseAssetId`）。置いたのに静止画で出る、を
-  // 成功として出さない（ADR-0026④）。
+  // ⚠️ **直接置いた動画（#512 段1・段2）と差し込み口の動画（段3）は映る**。以前は**立ち絵に入れた動画**
+  // （`character.poseAssetId`）だけがまだ映らず、ここで断っていた（置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
   // ⚠️ **描かれないものは数えない**＝隠した部品は静止画で出ることも無いので、断る理由が無い
   // （隠したのに書き出せない、を作らない）。
   // ⚠️ **立ち絵に入れた動画も映って音が鳴るようになった**（#809）＝断る理由が無くなったので、

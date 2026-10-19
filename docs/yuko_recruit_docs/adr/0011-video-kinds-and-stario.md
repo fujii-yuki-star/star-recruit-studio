@@ -81,6 +81,8 @@
 
 ## 未解決の論点
 
+> ⚠️ **1・3・11 は schema に反映済み**（2026-10-19 注記）＝`companyInfo` は条件つき（`videoKind=general` の `if`）・`additionalNotes` はトップレベル・版は上がっている（`project.schema.json`）。
+
 1. **🔴 `companyInfo` の必須性**: 現行 `schemas/project.schema.json` は `companyInfo` を required、`11 §7.1` も必須（●）。`videoKind=general` では会社採用情報は不要なため、**条件付き必須**にする（`videoKind=recruit` のときのみ必須＝schema の `if/then/else`、または `companyInfo` を任意化して `11 §7.1` の表を更新）。正典更新②で確定（放置すると「general なのに companyName 必須」の矛盾）。
 2. **`purpose` enum の設計（出力・内部の両方）**: ①AI出力 `videoPlan.purpose` と ②内部 `project.purpose`（現状 採用7種・**必須**）の双方で、採用 enum と一般 enum を**統合するか `videoKind` で別管理するか**を確定。`project.purpose` は必須フィールドゆえ設計の核心（一般時に `general_*` を入れるなら enum 拡張、別管理なら `purpose` を `videoKind=recruit` 限定にする等）。`11 §3.1` / `12 §3/§8` ＋ 両 schema で確定。
 3. **`additionalNotes` の帰属先**: 現状 `companyInfo` 配下（`11 §7.1.2`）。両用途共通にするため **project トップレベルへ移すか、`generalBrief` 配下に持つか**を確定（recruit の既存データへの影響＝マイグレーションも考慮）。

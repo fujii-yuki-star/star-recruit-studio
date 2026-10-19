@@ -7,7 +7,7 @@ import {
   TIMELINE_MIN_CLIP_SEC, VIDEO_HARD_MAX_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
 import { CLIP_PIVOT_DEFAULT } from './pivot';
-import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { ASSET_TYPE, FIT, isMixingBlend, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 // ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
 import { advancedSlotStarts, advancedSourceStart, sourceLimitIssue, usesUpSource } from './sourceTime';
@@ -1272,7 +1272,7 @@ export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: Ble
     clips: doc.clips.map((c) => {
       if (c.id !== clipId) return c;
       const copy = { ...c };
-      if (mode === 'normal') delete copy.blendMode;
+      if (!isMixingBlend(mode)) delete copy.blendMode;
       else copy.blendMode = mode;
       return copy;
     }),

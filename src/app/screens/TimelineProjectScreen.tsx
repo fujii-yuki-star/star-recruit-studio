@@ -14,7 +14,7 @@ import { packBgmLibraryAssets } from "../store/librarySource";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
+import { BLEND_MODE, isMixingBlend, CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
@@ -2798,14 +2798,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         <span className="field-label text-sm">重ね方</span>
         <select
           className="input"
-          value={selected.blendMode ?? "normal"}
+          value={selected.blendMode ?? BLEND_MODE.normal}
           onChange={(e) => setSelectedBlendMode(e.target.value as BlendMode)}
         >
-          <option value="normal">ふつう</option>
-          <option value="multiply">重ねて暗く</option>
-          <option value="screen">重ねて明るく</option>
-          <option value="overlay">コントラストを強める</option>
-          <option value="plus-lighter">光を足す</option>
+          <option value={BLEND_MODE.normal}>ふつう</option>
+          <option value={BLEND_MODE.multiply}>重ねて暗く</option>
+          <option value={BLEND_MODE.screen}>重ねて明るく</option>
+          <option value={BLEND_MODE.overlay}>コントラストを強める</option>
+          <option value={BLEND_MODE.plusLighter}>光を足す</option>
         </select>
       </label>
       {/* 反転（ADR-0059 決定2・Premiere の「水平方向に反転」「垂直方向に反転」の型）。 */}
@@ -5752,7 +5752,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 storageKey="look"
                 title="見え方（色・重ね方・反転）"
                 defaultOpen={
-                  selected.colorAdjust != null || (selected.blendMode != null && selected.blendMode !== "normal")
+                  selected.colorAdjust != null || isMixingBlend(selected.blendMode)
                   || selected.flipX === true || selected.flipY === true
                 }
               >

@@ -50,6 +50,8 @@ pub fn init(app: &tauri::AppHandle) {
     // ⚠️ **画面から開ける先として覚える**（#1118）＝`open_path` は画面から任意の場所を
     // 渡せない形にしたので、アプリが作った場所は**作った側が覚える**。
     crate::opener::remember(&dir);
+    // 古い版が残した、同梱の AI とのやり取り（会社の情報を含む）を配布版では消す（`local_llm::forget_ai_exchange`）。
+    crate::local_llm::forget_ai_exchange(&dir);
     let _ = LOG_DIR.set(dir);
 }
 

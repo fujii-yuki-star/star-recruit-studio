@@ -31,7 +31,8 @@ describe('scripts/** に lint が当たっている（#1235）', () => {
   it('道具の .mjs に `no-undef` が error で当たっている', async () => {
     const config = await eslint.calculateConfigForFile('scripts/lib/frames.mjs');
     expect(severityOf(config, 'no-undef'), '規則が当たっていない＝#1235 の状態に戻っている').toBe('error');
-  });
+    // ⚠️ **最初の1回は設定の読み込みを待つ**＝全件を回すと負荷で 30 秒を越え、時間切れで赤くなっていた（2026-10-19）。
+  }, 120_000);
 
   it('道具の .mjs に `no-unused-vars` が error で当たっている', async () => {
     const config = await eslint.calculateConfigForFile('scripts/tutorialRecord.mjs');

@@ -3,7 +3,7 @@ import { colorFilterDefs, colorFilterId, needsColorFilter } from './colorFilter'
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
-import { CROP_ALIGN_X, CROP_ALIGN_Y, FIT, TEXT_ALIGN, type CropAlignX, type CropAlignY, type Fit } from '../domain/enums';
+import { isMixingBlend, CROP_ALIGN_X, CROP_ALIGN_Y, FIT, TEXT_ALIGN, type CropAlignX, type CropAlignY, type Fit } from '../domain/enums';
 import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
@@ -205,7 +205,7 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
   const adjusted = needsColorFilter(item.colorAdjust);
   // **描画モード**（ADR-0044 ②）＝`mix-blend-mode` を包む `<g>` に載せる。
   // ⚠️ **ここ（合成の単位より内側）に載せるのが肝**＝畳んだ後に混ぜると**フェード中だけ混ざり方が変わる**。
-  const blend = item.blendMode != null && item.blendMode !== 'normal' ? item.blendMode : undefined;
+  const blend = isMixingBlend(item.blendMode) ? item.blendMode : undefined;
   if (!rotated && elemOpacity == null && !adjusted && blend == null) return inner;
   const cx = item.x + item.w / 2;
   const cy = item.y + item.h / 2;
