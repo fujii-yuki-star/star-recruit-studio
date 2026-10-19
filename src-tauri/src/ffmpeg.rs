@@ -341,6 +341,11 @@ pub fn frames_scene_args(
 }
 
 /// concat demuxer でシーンMP4を無劣化結合する引数（純粋）。list_file と同じ階層の相対名を参照する。
+///
+/// ⚠️ **`-copyts` を付ける**（2026-10-19 実機で見つけた）＝付けないと、音（AAC）の頭の詰め物
+/// （先頭の 1024 サンプル＝負の時刻）を避けるために**映像だけが約 23ms 後ろへずれて**書き出される
+/// （映像の頭 0.022982 秒・音 0 秒）。`-copyts` なら時刻をそのまま運ぶので、映像も音も 0 から始まり、
+/// 尺も映像と音でそろう（実 FFmpeg で確かめた＝場面の境目の絵と音がそろう）。
 pub fn concat_args(list_file: &str, out: &str) -> Vec<String> {
     vec![
         "-y".into(),
@@ -352,6 +357,7 @@ pub fn concat_args(list_file: &str, out: &str) -> Vec<String> {
         list_file.into(),
         "-c".into(),
         "copy".into(),
+        "-copyts".into(),
         out.into(),
     ]
 }
@@ -5152,6 +5158,8 @@ mod tests {
         let a = concat_args("list.txt", "out.mp4");
         assert!(a.iter().any(|s| s == "concat"));
         assert!(a.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
+        // 時刻をそのまま運ぶ＝映像だけが音の頭の詰め物ぶん後ろへずれない（2026-10-19）。
+        assert!(a.iter().any(|s| s == "-copyts"));
     }
 
     #[test]
