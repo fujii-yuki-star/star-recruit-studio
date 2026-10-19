@@ -1550,6 +1550,8 @@ export function slotLabelsFor(layers: readonly Pick<Layer, "id" | "type">[]): st
  */
 export const alpha6Message = {
   READING_DICT_WORD_CONFLICT: "音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません",
+  READING_DICT_WORD_WEAK:
+    "音声ソフトに同じ読み方が登録されていますが、弱い登録のため読み方が変わらないことがあります。「こちらの読みにする」で登録し直せます",
   READING_DICT_IMPORT_DUPLICATE:
     "読み込んだ一覧に、同じ言葉で読みが違うものがありました。そのままにするか、読み込んだ方に置き換えるかを選べます",
   BRAND_KIT_SAVE_FAILED: "会社の見た目を保存できませんでした。しばらくしてから、もう一度お試しください",

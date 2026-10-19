@@ -44,17 +44,35 @@ describe('planDictSync：エンジンへ映す計画', () => {
    * 前の版が優先度を送らずに登録した語は、読みがそろっていても送り直す（開き直すだけで効くようになる）。
    */
   it('自分の語（控えが当たった）の優先度が違えば、読みが同じでも送り直す', () => {
-    // 優先度が 5／読めない（無い）のどちらでも（`w` の既定は送る値なので、無い形は直に作る）。
-    for (const word of [w('u1', '角田', 'カドタ', 1, 5), { uuid: 'u1', surface: '角田', yomi: 'カドタ', accentType: 1 }]) {
-      const plan = planDictSync([e('角田', 'カドタ', 1)], [word], { 角田: 'u1' });
-      expect(plan.ops).toEqual([{ kind: 'update', uuid: 'u1', entry: e('角田', 'カドタ', 1) }]);
+    const plan = planDictSync([e('角田', 'カドタ', 1)], [w('u1', '角田', 'カドタ', 1, 5)], { 角田: 'u1' });
+    expect(plan.ops).toEqual([{ kind: 'update', uuid: 'u1', entry: e('角田', 'カドタ', 1) }]);
+  });
+
+  /** ⚠️ 優先度を返さない版のエンジンで毎回送り直さない（書き込めないエンジンでは毎回止まる・決定7）。 */
+  it('自分の語でも、優先度が読めないときは優先度を理由に送り直さない', () => {
+    const plan = planDictSync([e('角田', 'カドタ', 1)], [{ uuid: 'u1', surface: '角田', yomi: 'カドタ', accentType: 1 }], { 角田: 'u1' });
+    expect(plan.ops).toEqual([]);
+  });
+
+  it('他人の語（控えが当たらない）の優先度には触らないが、弱い登録なら知らせる（決定3・PR #1467 レビュー）', () => {
+    const plan = planDictSync([e('角田', 'カドタ', 1)], [w('他人', '角田', 'カドタ', 1, 5)], {});
+    expect(plan.ops).toEqual([]); // 黙って強くしない
+    expect(plan.links).toEqual({}); // 消してよい語の名簿にも載せない
+    expect(plan.conflicts).toEqual([{ entry: e('角田', 'カドタ', 1), engine: w('他人', '角田', 'カドタ', 1, 5), weak: true }]);
+  });
+
+  it('他人の語でも、強い登録・優先度が読めないなら知らせない（そのまま使う）', () => {
+    for (const word of [w('他人', '角田', 'カドタ', 1), { uuid: '他人', surface: '角田', yomi: 'カドタ', accentType: 1 }]) {
+      const plan = planDictSync([e('角田', 'カドタ', 1)], [word], {});
+      expect(plan.conflicts).toEqual([]);
+      expect(plan.adopted).toEqual(['角田']);
     }
   });
 
-  it('他人の語（控えが当たらない）の優先度には触らない（決定3）', () => {
-    const plan = planDictSync([e('角田', 'カドタ', 1)], [w('他人', '角田', 'カドタ', 1, 5)], {});
+  it('自分の語で読みも優先度もそろっていれば送らない（控えを保つ）', () => {
+    const plan = planDictSync([e('角田', 'カドタ', 1)], [w('u1', '角田', 'カドタ', 1, READING_DICT_PRIORITY)], { 角田: 'u1' });
     expect(plan.ops).toEqual([]);
-    expect(plan.adopted).toEqual(['角田']);
+    expect(plan.links).toEqual({ 角田: 'u1' });
   });
 
   it('控えが当たって読みが違えば直す', () => {
@@ -225,6 +243,16 @@ describe('音の粒と下がる場所（決定6＝用語を画面に出さない
     expect(accentPreviewKana('ホシノハラ', 5)).toBe("ホシノハラ'ガ");
     expect(accentPreviewKana('キョウト', 1)).toBe("キョ'ウトガ"); // 小さいカナは割らない
     expect(accentPreviewKana('アイ', 9)).toBe("アイガ'"); // 粒の数を超える指定は下がらない扱い
+  });
+
+  /** ⚠️ エンジンのかなの書き方は「ー」を受け付けない（実測＝400）＝直前の粒の母音へ（粒の数は同じ）。 */
+  it('聞き比べのかな：伸ばす音は直前の母音に置き換える（下がる場所はずれない）', () => {
+    expect(accentPreviewKana('コーポレーション', 1)).toBe("コ'オポレエションガ");
+    expect(accentPreviewKana('ディズニー', 0)).toBe("ディズニイガ'");
+    expect(accentPreviewKana('ウィークリー', 2)).toBe("ウィイ'クリイガ");
+    expect(accentPreviewKana('シェアー', 3)).toBe("シェアア'ガ");
+    expect(accentPreviewKana('ンー', 1)).toBe("ン'ーガ"); // 母音の無い粒のあとはそのまま
+    expect(accentPreviewKana('ヴヵ', 1)).toBe("ヴ'カガ"); // 小さい「ヵ」も受け付けないので「カ」へ
   });
 
   it('粒の数を超える指定は印を出さない（壊れたデータで文字を落とさない）', () => {
