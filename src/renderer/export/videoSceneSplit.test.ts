@@ -16,8 +16,8 @@ function layout(): SceneLayout {
     items: [
       { kind: 'fill', id: 'bg', x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, color: '#123456', opacity: 1, radius: 0 },
       { kind: 'image', id: 'slot', x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: 'asset_v', fit: 'cover', role: 'slot', label: 'メイン' },
-      { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false },
-      { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false },
+      { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false } },
+      { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: true } },
       // 立ち絵の絵（`role:'character'`）＝#809 で**ここも動画の置き場所になった**。
       { kind: 'image', id: 'yuko', x: 1200, y: 200, w: 400, h: 800, zIndex: 20, assetId: 'asset_pose', fit: 'contain', role: 'character', label: 'ゆうこ' },
     ],
@@ -113,9 +113,9 @@ function multiLayout(): SceneLayout {
     items: [
       { kind: 'fill', id: 'bg', x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, color: '#123456', opacity: 1, radius: 0 },
       { kind: 'image', id: 'slotA', x: 0, y: 0, w: 900, h: 500, zIndex: 10, assetId: 'asset_a', fit: 'cover', role: 'slot', label: 'メインA' },
-      { kind: 'text', id: 'midText', x: 100, y: 200, w: 400, h: 60, zIndex: 20, text: '中間テキスト', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false },
+      { kind: 'text', id: 'midText', x: 100, y: 200, w: 400, h: 60, zIndex: 20, text: '中間テキスト', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false } },
       { kind: 'image', id: 'slotB', x: 960, y: 100, w: 900, h: 500, zIndex: 30, assetId: 'asset_b', fit: 'contain', role: 'slot', label: 'メインB' },
-      { kind: 'text', id: 'title', x: 160, y: 700, w: 1000, h: 120, zIndex: 40, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false },
+      { kind: 'text', id: 'title', x: 160, y: 700, w: 1000, h: 120, zIndex: 40, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: true } },
     ],
   } as unknown as SceneLayout;
 }

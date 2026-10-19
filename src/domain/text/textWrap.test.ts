@@ -10,7 +10,7 @@ import { wrapText } from './textWrap';
 // **画面外へ出る字幕に警告が出ない**（`subtitleOverflowsCanvas` が見逃す）。
 describe('字間を数える（#928）', () => {
   // 全角は 1.0em＝100px（fontSize 100）。幅 350px なら字間 0 で3文字入る。
-  const wrap = (spacing: number) => wrapText('あいうえお', 350, 100, 9, spacing);
+  const wrap = (spacing: number) => wrapText('あいうえお', 350, 100, 9, spacing, undefined);
 
   it('字間が 0 なら今までどおり（既に作った動画の折返しを変えない）', () => {
     expect(wrap(0)).toEqual(['あいう', 'えお']);
@@ -24,21 +24,21 @@ describe('字間を数える（#928）', () => {
   it('末尾の字間は数えない（数えると1文字ぶん狭く見える）', () => {
     // 送り 0.25em=25px。3文字ぶんの送りを数えると 100*3+25*3=375>350 で2文字になるが、
     // 実際に要るのは**あいだの2つ**だけ＝100*3+25*2=350 でちょうど収まる。
-    expect(wrapText('あいうえ', 350, 100, 9, 0.25)).toEqual(['あいう', 'え']);
+    expect(wrapText('あいうえ', 350, 100, 9, 0.25, undefined)).toEqual(['あいう', 'え']);
   });
 
   it('行頭へ送り直した文字には送りを足さない', () => {
     // 2行目の先頭「え」は1文字目なので、行頭に送りぶんの空きができない。
-    expect(wrapText('あいうえお', 250, 100, 9, 0.5)).toEqual(['あい', 'うえ', 'お']);
+    expect(wrapText('あいうえお', 250, 100, 9, 0.5, undefined)).toEqual(['あい', 'うえ', 'お']);
   });
 
   // ⚠️ **1文字目は必ず置く**（送りを足しても折り返さない）＝置かないと空行が出るか、
   // 同じ文字を延々と送り続けることになる。既存の `line.length > 0` の門がこれを担っている。
   it('箱より広い1文字でも、その行に置く（空行を作らない）', () => {
-    expect(wrapText('あい', 100, 100, 9, 0.5)).toEqual(['あ', 'い']);
+    expect(wrapText('あい', 100, 100, 9, 0.5, undefined)).toEqual(['あ', 'い']);
   });
 
   it('明示改行のあとも1文字目から数え直す', () => {
-    expect(wrapText('あい\nうえ', 350, 100, 9, 0.5)).toEqual(['あい', 'うえ']);
+    expect(wrapText('あい\nうえ', 350, 100, 9, 0.5, undefined)).toEqual(['あい', 'うえ']);
   });
 });

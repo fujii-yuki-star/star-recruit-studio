@@ -308,7 +308,7 @@ export function buildPrecheckItems(
   const laidOut = scenes
     .map((s) => ({ scene: s, template: templateOf(s) }))
     .filter((x): x is { scene: Scene; template: Template } => x.template != null)
-    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template).flatMap((l) => l.items) }));
+    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template, fonts?.projectFontId).flatMap((l) => l.items) }));
 
   // ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
   // 「そう書いたのか」「切れたのか」が分からない。
@@ -492,7 +492,7 @@ export function buildPrecheckItems(
   // 書き出しは止めない＝「直せば良くなる」警告側（P2-5 のハードブロッカーとは分離）。
   const isSubtitleOverflow = (s: Scene): boolean => {
     const t = templateOf(s);
-    return t != null && subtitleOverflowsCanvas(s, t);
+    return t != null && subtitleOverflowsCanvas(s, t, fonts?.projectFontId);
   };
   const subtitleOverflow = offending(isSubtitleOverflow);
   if (subtitleOverflow.nums.length > 0) {

@@ -439,7 +439,8 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const tpl = prevTemplate();
     const titleLayer = tpl.layers.find((l) => l.id === 'title')!;
     // 通常テンプレでの表示行数（layoutScene と同じ wrapText・同じ maxLines 既定）。
-    const normalLines = wrapText(long, titleLayer.w, fontSize, titleLayer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES).length;
+    const titleFont = (layoutScene(styled, tpl).items.find((i) => i.id === 'title') as TextItem).textFont; // 描画と同じ字体
+    const normalLines = wrapText(long, titleLayer.w, fontSize, titleLayer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, 0, titleFont).length;
     expect(normalLines).toBe(2); // 前提：この文字数・幅で2行になっている
 
     const r = switchSceneTemplate(styled, 'free_v1', 'free', tpl);
@@ -447,7 +448,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     // FREE 側の行数モデル（枠高から導出）で、同じ行数が出ること。
     const freeMaxLines = linesForBoxHeight(el.h, el.fontSize ?? fontSize);
     expect(freeMaxLines).toBeGreaterThanOrEqual(normalLines);
-    expect(wrapText(el.text ?? '', el.w, el.fontSize ?? fontSize, freeMaxLines).length).toBe(normalLines);
+    expect(wrapText(el.text ?? '', el.w, el.fontSize ?? fontSize, freeMaxLines, 0, titleFont).length).toBe(normalLines);
     expect((el.text ?? '').length).toBe(long.length); // 文言そのものは持ち込まれている
   });
 
@@ -470,7 +471,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const tpl = prevTemplate();
     // 変換前：通常テンプレでの字幕帯の上端。
     const before = layoutScene(base, tpl).items.find((i) => i.id === 'subtitle') as TextItem;
-    expect(wrapText(before.text, before.w, before.fontSize, before.maxLines).length).toBe(expectLines); // 前提：2行
+    expect(wrapText(before.text, before.w, before.fontSize, before.maxLines, 0, before.textFont).length).toBe(expectLines); // 前提：2行
     const topBefore = bandTop(before, expectLines);
 
     // 変換後：FREE テンプレでの同じ字幕の上端。
@@ -478,8 +479,19 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const r = switchSceneTemplate(base, 'free_v1', 'free', tpl);
     const after = layoutScene(r, freeTpl).items.find((i) => i.kind === 'text' && i.isSubtitle) as TextItem;
     expect(after).toBeTruthy();
-    expect(wrapText(after.text, after.w, after.fontSize, after.maxLines).length).toBe(expectLines); // 行は減っていない（P1）
+    expect(wrapText(after.text, after.w, after.fontSize, after.maxLines, 0, after.textFont).length).toBe(expectLines); // 行は減っていない（P1）
     expect(bandTop(after, expectLines)).toBeCloseTo(topBefore, 5); // 帯の位置が一致（P2）
+  });
+
+  it('通常→FREE：字幕の上端は動画全体の字体の行数で翻訳する（ADR-0063）', () => {
+    // 字幕層 1720px・48px。32字は Gen Interface（既定）なら1行、怪盗予告ゴシックなら2行。
+    const text = '採用社員'.repeat(8);
+    const base = { ...richScene(), texts: { subtitle: text } } as Scene;
+    const tpl = prevTemplate();
+    const subY = (projectFontId: string | undefined): number =>
+      (switchSceneTemplate(base, 'free_v1', 'free', tpl, projectFontId).freeLayout ?? []).find((e) => e.kind === 'subtitle')!.y;
+    expect(subY(undefined)).toBe(980); // 1行＝動かさない
+    expect(subY('kaitou-yokoku-gothic')).toBeCloseTo(980 - 48 * DEFAULT_LINE_HEIGHT); // 2行＝1行ぶん上へ
   });
 
   it('通常→FREE：1行字幕は元から一致しているので動かさない', () => {

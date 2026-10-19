@@ -10,7 +10,7 @@ import { MAX_SUBTITLE_LEN_DEFAULT } from '../domain/constants';
 
 // 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
 const bandRect = (item: TextItem): { top: number; bottom: number } => {
-  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines, item.letterSpacing ?? 0, item.textFont).length;
   const lh = item.fontSize * DEFAULT_LINE_HEIGHT;
   const top = item.y - (item.anchorBottom ? (n - 1) * lh : 0);
   return { top, bottom: top + lh * n + item.fontSize * SUBTITLE_BAND_PAD_EM };
@@ -149,12 +149,12 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
     }));
 
   it('2〜3人（通常の長さ）は画面内＝はみ出さない（false）', () => {
-    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate)).toBe(false);
-    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate, undefined)).toBe(false);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate, undefined)).toBe(false);
   });
 
   it('8人×長文はスタックが画面上端を超える＝はみ出す（true）＝警告対象', () => {
-    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate, undefined)).toBe(true);
   });
 
   it('逐次（同時開始なし）は帯を積まないので、通常の長さでは収まる（false）', () => {
@@ -163,7 +163,7 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
       { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
       { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
     ]);
-    expect(subtitleOverflowsCanvas(seq, openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(seq, openingTemplate, undefined)).toBe(false);
   });
 
   it('グループ transform で字幕層が上へ移動していれば、その実位置で判定する（実描画と一致・#533 レビュー）', () => {
@@ -173,8 +173,8 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: -820, rotation: 0, scale: 1 } }],
     };
     const long2 = dialogueScene(groupLines(2, 'あ'.repeat(50)));
-    expect(subtitleOverflowsCanvas(long2, grouped)).toBe(true);
-    expect(subtitleOverflowsCanvas(long2, openingTemplate)).toBe(false); // グループ無し＝生 y で収まる
+    expect(subtitleOverflowsCanvas(long2, grouped, undefined)).toBe(true);
+    expect(subtitleOverflowsCanvas(long2, openingTemplate, undefined)).toBe(false); // グループ無し＝生 y で収まる
   });
 
   it('字幕層がグループで非表示なら描画されない＝はみ出し判定の対象外（false）', () => {
@@ -183,7 +183,7 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
     };
     const many = dialogueScene(groupLines(8, 'あ'.repeat(50))); // 通常なら true だが非表示なので false
-    expect(subtitleOverflowsCanvas(many, hidden)).toBe(false);
+    expect(subtitleOverflowsCanvas(many, hidden, undefined)).toBe(false);
   });
 
   it('2個目の字幕層のはみ出しも検出する（最初の層だけ見ない・#533 レビュー）', () => {
@@ -196,8 +196,8 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
     };
     // 1個目（y=920）は収まるが、2個目（y=30・上寄り）は2人同時で上へ積むと画面上端を超える。
     const twoPeople = dialogueScene(groupLines(2, 'こんにちは'));
-    expect(subtitleOverflowsCanvas(twoPeople, twoSub)).toBe(true);
-    expect(subtitleOverflowsCanvas(twoPeople, openingTemplate)).toBe(false); // 1層だけなら収まる
+    expect(subtitleOverflowsCanvas(twoPeople, twoSub, undefined)).toBe(true);
+    expect(subtitleOverflowsCanvas(twoPeople, openingTemplate, undefined)).toBe(false); // 1層だけなら収まる
   });
 
   it('下方向への移動で下端がはみ出すのも検出する（上端だけ見ない）', () => {
@@ -206,7 +206,7 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 100, rotation: 0, scale: 1 } }],
     };
     // subtitle が y=920→1020 へ下がると primary 帯の下端（≒1092）が 1080 を超える。
-    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), movedDown)).toBe(true);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), movedDown, undefined)).toBe(true);
   });
 
   it('90度回転で上下左右にはみ出すのも検出する（回転を判定に反映）', () => {
@@ -215,7 +215,7 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } }],
     };
     // 幅1440の帯を90度回すと縦≒1440になり、字幕位置を中心に上下へ大きくはみ出す。
-    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), rotated)).toBe(true);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), rotated, undefined)).toBe(true);
   });
 });
 
@@ -861,11 +861,11 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
       texts: { subtitle: 'あ'.repeat(40) },
       textStyles: { subtitle: { fontSize: 300 } },
     } as Partial<Scene>);
-    expect(subtitleOverflowsCanvas(huge, openingTemplate)).toBe(true);
+    expect(subtitleOverflowsCanvas(huge, openingTemplate, undefined)).toBe(true);
   });
 
   it('単独ナレーションでも通常の体裁なら収まる（false）＝既定では警告しない', () => {
-    expect(subtitleOverflowsCanvas(soloScene({ texts: { subtitle: 'あ'.repeat(40) } }), openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(soloScene({ texts: { subtitle: 'あ'.repeat(40) } }), openingTemplate, undefined)).toBe(false);
   });
 
   it('場面の字幕がオフなら、拡大していても検査対象にならない（描かれないものを警告しない）', () => {
@@ -874,7 +874,7 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
       textStyles: { subtitle: { fontSize: 300 } },
       subtitleEnabledDefault: false,
     } as Partial<Scene>);
-    expect(subtitleOverflowsCanvas(off, openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(off, openingTemplate, undefined)).toBe(false);
   });
 
   it('逐次の行でも拡大しすぎればはみ出す（true）＝同時字幕だけの特権にしない（ADR-0026②）', () => {
@@ -886,7 +886,7 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
         { lineId: 'line_002', text: 'あ'.repeat(40), status: 'none' }, // 逐次
       ],
     } as unknown as Scene;
-    expect(subtitleOverflowsCanvas(seqHuge, openingTemplate)).toBe(true);
+    expect(subtitleOverflowsCanvas(seqHuge, openingTemplate, undefined)).toBe(true);
   });
 
   // ノイズガード（#563 の「既存プロジェクトで警告が増えないか要確認」への実測回答）。
@@ -898,7 +898,7 @@ describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
     for (const t of withSubtitle) {
       for (const n of [20, 40, MAX_SUBTITLE_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT * 2]) {
         const s = { ...scene, templateId: t.templateId, texts: { subtitle: 'あ'.repeat(n) } } as Scene;
-        expect(subtitleOverflowsCanvas(s, t), `${t.templateId} / ${n}字`).toBe(false);
+        expect(subtitleOverflowsCanvas(s, t, undefined), `${t.templateId} / ${n}字`).toBe(false);
       }
     }
   });
@@ -970,7 +970,7 @@ describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
     expect(el.shadow).toMatchObject({ blur: expect.closeTo(1.8), dx: expect.closeTo(0.6), dy: expect.closeTo(2.4) });
     expect(el.background?.radius).toBeCloseTo(3);
     // 縮める前と同じ1行に収まる（箱と字が同じ倍率）。
-    expect(wrapText(el.text, el.w, el.fontSize, el.maxLines)).toEqual(['ああああ']);
+    expect(wrapText(el.text, el.w, el.fontSize, el.maxLines, 0, el.textFont)).toEqual(['ああああ']);
   });
 
   it('動きの大きさ：図形の角丸と枠線の太さも同じ倍率', () => {
@@ -1030,11 +1030,78 @@ describe('layoutScene：大きさの変形は中身ごと（#1371）', () => {
 
 describe('scaleItemContent（#1371 レビュー：負の倍率）', () => {
   it('行き過ぎるイージングで倍率が負になっても、中身は 0 で止める（負の字の大きさを出さない）', () => {
-    const t: LayoutItem = { id: 't', kind: 'text', x: 0, y: 0, w: 100, h: 50, zIndex: 1, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, strokeWidth: 4 };
+    const t: LayoutItem = { id: 't', kind: 'text', x: 0, y: 0, w: 100, h: 50, zIndex: 1, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, strokeWidth: 4, textFont: { fontId: 'gen-interface-jp', bold: false } };
     scaleItemContent(t, -0.5);
     expect(t).toMatchObject({ fontSize: 0, strokeWidth: 0 });
     const f: LayoutItem = { id: 'f', kind: 'fill', x: 0, y: 0, w: 100, h: 50, zIndex: 1, color: '#000000', opacity: 1, radius: 10 };
     scaleItemContent(f, -2);
     expect((f as FillItem).radius).toBe(0);
+  });
+});
+
+describe('layoutScene：文字の字体を1回だけ解き、描画と折返しが同じものを見る（ADR-0063）', () => {
+  const textOf = (items: LayoutItem[], id: string): TextItem => items.find((i) => i.id === id) as TextItem;
+  const KAITOU = 'kaitou-yokoku-gothic';
+  const DISPLAY = 'gen-interface-jp-display';
+
+  it('動画全体の字体（projectFontId）が、場面・要素に指定の無い文字に効く', () => {
+    const items = layoutScene(scene, openingTemplate, { projectFontId: KAITOU }).items;
+    expect(textOf(items, 'title').textFont).toEqual({ fontId: KAITOU, bold: true }); // 見出しの層は太字
+    expect(textOf(items, 'subtitle').textFont).toEqual({ fontId: KAITOU, bold: false });
+  });
+
+  it('場面の字体 → 文字ごとの字体の順で上書きする', () => {
+    const items = layoutScene({ ...scene, fontId: DISPLAY, textFontIds: { title: KAITOU } }, openingTemplate, { projectFontId: 'gen-interface-jp' }).items;
+    expect(textOf(items, 'title').textFont.fontId).toBe(KAITOU);
+    expect(textOf(items, 'subtitle').textFont.fontId).toBe(DISPLAY);
+  });
+
+  it('自由配置の文字・字幕も同じ解き方', () => {
+    const freeTemplate = { ...openingTemplate, templateId: 'free_v1', category: 'free', layers: [] } as unknown as Template;
+    const freeScene = {
+      ...scene, sceneType: 'free', templateId: 'free_v1',
+      freeLayout: [
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 100, zIndex: 5, text: 'あ', fontId: KAITOU, fontWeight: 'bold' },
+        { id: 'free_002', kind: 'subtitle', x: 0, y: 200, w: 400, h: 100, zIndex: 6, subtitleSource: { kind: 'narration' } },
+      ],
+    } as unknown as Scene;
+    const items = layoutScene(freeScene, freeTemplate, { projectFontId: DISPLAY }).items;
+    expect(textOf(items, 'free_001').textFont).toEqual({ fontId: KAITOU, bold: true });
+    expect(textOf(items, 'free_002').textFont.fontId).toBe(DISPLAY);
+  });
+
+  it('描く字体（font-family）は textFont から＝場面の字体が絵に出る', () => {
+    const svg = layoutToSvg(layoutScene(scene, openingTemplate, { projectFontId: KAITOU }));
+    expect(svg).toContain(`font-family="'Kaitou Yokoku Gothic', sans-serif"`);
+  });
+
+  it('折返しも同じ字体の字幅＝広い字体では同じ文が早く折り返す（描画の行数が変わる）', () => {
+    // 見出しの層は幅 1100・72px。14字は見積もり（1em）なら 1008px で1行、怪盗予告ゴシック（漢字 1.2〜1.3em）では2行。
+    const text = '採用社員採用社員採用社員採用';
+    const lines = (projectFontId: string): number => {
+      const layout = layoutScene({ ...scene, texts: { ...scene.texts, title: text } }, openingTemplate, { projectFontId });
+      const title = textOf(layout.items, 'title');
+      return (layoutToSvg({ ...layout, items: [title] }).match(/<text /g) ?? []).length;
+    };
+    expect(lines('gen-interface-jp')).toBe(1);
+    expect(lines(KAITOU)).toBe(2);
+  });
+
+  it('同時字幕の帯の段も同じ字体の行数で積む（重ならない）', () => {
+    // 2人が同時に話す＝帯が2つ。広い字体で2行に折れても、上の帯が下の帯に重ならない。
+    const long = '採用社員'.repeat(9); // 字幕層 1440px・38px：見積もりは1行、怪盗予告ゴシックは2行
+    const dialogue = {
+      ...scene,
+      lines: [
+        { lineId: 'line_001', speakerId: 'yuko', text: long, startSec: 0 },
+        { lineId: 'line_002', speakerId: 'yuko', text: long, startSec: 0 },
+      ],
+    } as unknown as Scene;
+    const seg = { lineId: 'line_001', parallelLineIds: ['line_002'], startSec: 0, durationSec: 8, isFirst: true };
+    const subs = layoutScene(dialogue, openingTemplate, { subtitleText: long, subtitleSegment: seg, projectFontId: KAITOU })
+      .items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+    expect(subs).toHaveLength(2);
+    expect(wrapText(long, 1440, 38, 2, 0, subs[0]!.textFont)).toHaveLength(2); // 前提：この字体では2行
+    expect(noOverlap(subs)).toBe(true);
   });
 });

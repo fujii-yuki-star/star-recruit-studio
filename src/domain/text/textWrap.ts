@@ -1,10 +1,15 @@
 // テキストの折返し（純粋関数）。layout（同時字幕の帯の段位置計算・ADR-0031）と sceneSvg（描画）が共有し、
-// 「行数」と「描画」を一致させる＝重ならない自動配置とパリティ（ADR-0001）。文字幅はフォント実測の代替（05 §10）。
+// 「行数」と「描画」を一致させる＝重ならない自動配置とパリティ（ADR-0001）。
+// 文字幅は**描く字体の実測表**から引く（ADR-0063・`fontMetrics.ts`）＝どの字体かは呼ぶ側が渡す（`TextFont`）。
+import { charWidthEmIn, estimatedCharWidthEm, type TextFont } from './fontMetrics';
 
-// 文字幅の概算（フォント実測の代替・05 §10 / ADR-0001 未解決）。半角(ASCII)は約0.55em、
-// それ以外（日本語など全角）はほぼ1em。全角を 0.58em 一律とみなすと縦型の狭幅で折返し不足＝見切れるため区別する。
+/**
+ * 字体を問わない文字幅の見積もり（ADR-0063 より前の値）。半角(ASCII)は約0.55em、それ以外はほぼ1em。
+ * ⚠️ **折返しには使わない**（字体ごとの実測は `wrapText` に `TextFont` を渡す）＝字体を選べない所
+ *（権利表示のピル＝既定の字体に固定）だけが使う。
+ */
 export function charWidthEm(ch: string): number {
-  return ch.charCodeAt(0) <= 0xff ? 0.55 : 1.0;
+  return estimatedCharWidthEm(ch.codePointAt(0) ?? 0);
 }
 
 // 幅(px)に収まるよう行へ分割する（全角/半角を区別）。字間（#264）も数える（#928）。
@@ -18,7 +23,12 @@ export function wrapText(
   maxWidth: number,
   fontSize: number,
   maxLines: number,
-  letterSpacingEm = 0,
+  letterSpacingEm: number,
+  /**
+   * 描く字体（ADR-0063）。⚠️ **必ず渡す**（省略できない引数にしてある）＝渡し忘れると描く字体と違う幅で折り返し、
+   * 行数・帯の段・はみ出しの判定が絵と食い違う。`undefined` は「字体を問わない見積もり」（検査用）。
+   */
+  font: TextFont | undefined,
 ): string[] {
   if (maxWidth < fontSize || maxLines < 1) return [text];
   // 字間（#264・#928）＝**文字と文字のあいだ**に入る送り。`em` で持つので px へ直す。
@@ -41,7 +51,7 @@ export function wrapText(
     let lineW = 0;
     let lineChars = 0; // 送りは「2文字目以降」に足すので、行の文字数で数える（`line.length` は絵文字で狂う）
     for (let i = 0; i < chars.length; i += 1) {
-      const w = charWidthEm(chars[i]) * fontSize + (lineChars > 0 ? spacingPx : 0);
+      const w = charWidthEmIn(chars[i], font) * fontSize + (lineChars > 0 ? spacingPx : 0);
       if (lineW + w > maxWidth && line.length > 0) {
         lines.push(line);
         line = '';
@@ -58,7 +68,7 @@ export function wrapText(
       // 折り返した直後はその文字が**新しい行の1文字目**になるので、`w` に入っている送りは要らない。
       // ⚠️ PR #937 のレビューで「この三項は冗長」と読まれ、こちらもそう答えたが**どちらも誤り**
       // （単純化したらテストが落ちた）。`w` の中の三項は**折り返す前の `lineChars`** を見ている、が要点。
-      lineW += lineChars === 0 ? charWidthEm(chars[i]) * fontSize : w;
+      lineW += lineChars === 0 ? charWidthEmIn(chars[i], font) * fontSize : w;
       lineChars += 1;
     }
     if (line.length > 0) {

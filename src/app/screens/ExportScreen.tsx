@@ -40,7 +40,6 @@ import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { createExportSrcResolver } from "../store/assetExportSrc";
 import { ExportDoneActions } from "../components/ExportDoneActions";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
-import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, exportLockBlockedMessage, useExportLockStore } from "../store/exportLock";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
@@ -454,7 +453,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : [];
         },
         (done, total, frameFraction) => setProgress({ done, total, frameFraction }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), creditDisplay: snapMeta.videoSettings.creditDisplay, shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
+        { withSubtitle, outputSize, projectFontId: snapFontId, credit: creditForSpeaker(snapVoicevoxSpeaker), creditDisplay: snapMeta.videoSettings.creditDisplay, shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。

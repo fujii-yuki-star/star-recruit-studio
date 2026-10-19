@@ -19,7 +19,7 @@ export async function renderProjectThumbnail(
   projectFontId: string | null | undefined,
 ): Promise<string | null> {
   try {
-    const layout = layoutScene(scene, template);
+    const layout = layoutScene(scene, template, { projectFontId });
     const svg = layoutToSvg(layout, {
       assetSrc,
       fontFamily: fontFamilyForId(resolveFontId(scene.fontId, projectFontId)),

@@ -463,7 +463,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
       clip.kind === TIMELINE_CLIP_KIND.template
         ? sceneFromClip(clip, template, subtitleOpts)
         : { ...sceneFromClip(clip, template, subtitleOpts), freeLayout: [freeElementFromClip(clip, canvas)] };
-    const sub = layoutScene(scene, template);
+    const sub = layoutScene(scene, template, { projectFontId: doc.videoSettings.fontId });
 
     // クリップは**中身の座標系**として扱う＝クリップに掛かる変形（グループ → 自身のキーフレーム）は、
     // まず「クリップの箱」に効かせ、その **箱の動き（相似変換）を中身へそのまま持ち込む**。
@@ -501,8 +501,9 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     for (const item of clipItems) {
       applySimilarity(item, sim);
       // 文字のフォント：クリップ全体の指定（`fontId`）は、種別ごとの指定が無いときの受け皿。
-      // 場面形式は「フレーム単位の fontFamily」で効かせるが、1フレームに複数クリップが混ざる本形式では
-      // それができないので、アイテムへ落とす（テンプレのクリップだけ黙って既定へ戻るのを防ぐ・ADR-0026②）。
+      // ⚠️ **描く字体は `item.textFont`**（ADR-0063）＝クリップの字体は `sceneFromClip` の `scene.fontId` を通して
+      // `layoutScene` が解いた時点で入っている。ここで `fontId` へ落とすのは、アイテムの持ち物を揃えておくためだけ
+      // （描画・折返しはこの値を読まない）。
       if (item.kind === 'text' && item.fontId == null && clip.fontId != null) item.fontId = clip.fontId;
       // 素材の寄せ（#634）＝クリップの指定を絵のアイテムへ落とす。**枠の中の差し込み口すべてに効く**
       // （テンプレのクリップも同じ寄せになる）＝クリップ単位の設定なので、そこは意図どおり。

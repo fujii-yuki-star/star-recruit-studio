@@ -62,7 +62,7 @@ export function TransitionPreview({
     // 見本の場面（動画の場面ではない）は index が無い＝従来どおり出す（ScenePreview と同じ規則）。
     const index = projectScenes.findIndex((s) => s.sceneId === sc.sceneId);
     const credit = index < 0 || creditVisible[index] ? creditText : undefined;
-    return layoutToSvg(layoutScene(sc, tpl, layoutOpts), {
+    return layoutToSvg(layoutScene(sc, tpl, { ...layoutOpts, projectFontId: fontId }), {
       assetSrc,
       responsive: true,
       ...(credit != null ? { credit } : {}),

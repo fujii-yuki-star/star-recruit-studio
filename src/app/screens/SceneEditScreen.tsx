@@ -643,7 +643,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // ⚠️ **掴んでいる素材ごとに決める**（PR #1042 レビュー 🔴）＝入れられる口だけを出す。
   //   入らない口の枠を出すと「落とせそうに見えて何も起きない」。判定は押す道と同じ関数。
   const dropTargets: SlotDropTarget[] =
-    template && dragging ? slotDropTargets(layoutScene(selected, template), slotLayers, selected.assetRefs, dragging.asset) : [];
+    template && dragging ? slotDropTargets(layoutScene(selected, template, { projectFontId: fontId }), slotLayers, selected.assetRefs, dragging.asset) : [];
   /**
    * いま指の下にある差し込み口（`elementFromPoint`）。
    * ⚠️ **枠の座標を自分で計算し直さない**＝拡大率（`previewZoom`）や縦型で
@@ -732,7 +732,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 見た目切替の共通処理（「見た目パターン」ピッカーと「種類」セレクタで共用・#528）。
   const applyTemplateSwitch = (newTemplateId: string) => {
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId), fontId));
     // 確認待ちを解除する：確認中に別の見た目（何も隠れないもの）を選ぶと即適用されるので、残しておくと
     // **適用済みとは別の切替先**を指す確認が出たままになる（押すと二重に切り替わる・§2-5）。
     setPendingTemplateId(null);
@@ -1777,7 +1777,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 文言は原因で変える＝「次の行動」が違う（同時なら行を減らす／1帯なら小さく・短く）＝§2-5。
   // はみ出しの案内は**文字（字幕）の欄の下**に出す（下記）＝掛け合いの有無に関わらず見え、直す場所がその場にある。
   // ここ（セリフ列の検証）に混ぜると掛け合いブロックの中でしか描画されず、単独/逐次では出ない（#563）。
-  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template);
+  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template, fontId);
   const lineWarningMessages = isDialogue
     ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
     : [];

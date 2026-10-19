@@ -67,6 +67,15 @@ describe('truncatedTexts（切れている文字・#346）', () => {
   });
 });
 
+describe('truncatedTexts：描く字体の字幅で数える（ADR-0063）', () => {
+  it('同じ文・同じ枠でも、広い字体では切れている（描画と同じ字体を渡す）', () => {
+    // 1行・420px・100px：見積もり（1em）なら4字が入り、怪盗予告ゴシック（漢字 1.2〜1.3em）では入らない。
+    const item = { kind: 'text', text: '採用社員', w: 420, fontSize: 100, maxLines: 1 };
+    expect(truncatedTexts([item])).toEqual([]);
+    expect(truncatedTexts([{ ...item, textFont: { fontId: 'kaitou-yokoku-gothic', bold: false } }])).toEqual(['採用社員']);
+  });
+});
+
 describe('blurryAssets（ぼやける素材・#346）', () => {
   const asset = (id: string, w?: number, h?: number): Asset =>
     ({ assetId: id, assetType: 'image', displayName: id, filePath: `${id}.png`,

@@ -2,16 +2,17 @@ import { CREDIT_LINE_SEPARATOR } from '../domain/voice/creditDisplay';
 import { colorFilterDefs, colorFilterId, needsColorFilter } from './colorFilter';
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
-// 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
+// 折返しの字幅は描く字体の実測表（ADR-0063）＝字体は `TextItem.textFont`（描画の font-family と同じ1つ）。
 import { isMixingBlend, CROP_ALIGN_X, CROP_ALIGN_Y, FIT, TEXT_ALIGN, type CropAlignX, type CropAlignY, type Fit } from '../domain/enums';
-import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
+import { fontFamilyForId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
 import { charWidthEm, wrapText } from '../domain/text/textWrap';
 import { DEFAULT_SHADOW_COLOR, DEFAULT_SHADOW_OPACITY } from '../domain/template/textStyle';
 
-// 折返し（charWidthEm/wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。
+// 折返し（wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。字幅は `TextItem.textFont` の字体の実測（ADR-0063）。
+// `charWidthEm`（字体を問わない見積もり）は権利表示のピル（既定の字体に固定）だけが使う。
 // 既存の import 元（'./sceneSvg'）を保つため再エクスポートする。
 export { charWidthEm, wrapText } from '../domain/text/textWrap';
 
@@ -41,13 +42,13 @@ function dedupeDefs(svg: string): string {
     .join('\n');
 }
 
-function textToSvg(item: TextItem, fontFamily: string): string {
+function textToSvg(item: TextItem): string {
   const parts: string[] = [];
-  // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
-  const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
+  // 字体は `layoutScene` が解いたもの（要素→場面→動画全体→既定・#178）＝**折返しの字幅と同じ1つ**から引く（ADR-0063）。
+  const family = fontFamilyForId(item.textFont.fontId);
   // ⚠️ **折返しにも字間を渡す**（#928）＝渡さないと、字間を広げた文字が**実際より狭く**見積もられ、
   // 描くときだけ横に伸びて**箱からはみ出す**（絵は割れないが、はみ出し判定が見逃す）。
-  const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines, item.letterSpacing ?? 0);
+  const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines, item.letterSpacing ?? 0, item.textFont);
   const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
   // 下端基準（テンプレ字幕・ADR-0031）：行が増えたぶんを上へずらし、最終行は1行時の位置に留める＝画面下端に
   // 置いた字幕帯が2行で画面外へはみ出さない。anchorBottom でないもの（見出し・FREE text）は 0＝従来どおり上端起点。
@@ -139,7 +140,11 @@ export interface LayoutToSvgOptions {
   /** 設定時、最前面に常時クレジット（ADR-0003）を焼き込む。書き出し・プレビュー共通。
    *  動画ありシーンは上レイヤーのみに付けて二重化を防ぐ（videoSceneSplit）。 */
   credit?: string;
-  /** 描画に使う font-family（同梱フォント選択）。未指定は既定フォント。fontCatalog.fontFamilyForId の戻り値を渡す。 */
+  /**
+   * 素材が無い枠の仮の文字に使う font-family。未指定は既定フォント。
+   * ⚠️ **文字アイテムの字体はこれではない**＝`layoutScene` が解いた `TextItem.textFont`（ADR-0063）＝
+   * 場面の字体を効かせたいなら `layoutScene` に `projectFontId` を渡す。
+   */
   fontFamily?: string;
 }
 
@@ -185,7 +190,7 @@ function renderItemInner(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily:
         fontFamily,
       );
     case 'text':
-      return textToSvg(item, fontFamily);
+      return textToSvg(item);
   }
 }
 
