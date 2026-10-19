@@ -5,7 +5,7 @@
 // ⚠️ **反映できなかったら黙って作らない**（決定7・§2-5）＝失敗を返し、呼ぶ側が次の行動を出して止める。
 import { invoke } from '@tauri-apps/api/core';
 import { getVoicevoxUrl } from '../appSettings';
-import { planDictSync, type EngineLinks, type EngineWord, type ReadingEntry } from '../../domain/voice/readingDict';
+import { READING_DICT_PRIORITY, planDictSync, type EngineLinks, type EngineWord, type ReadingEntry } from '../../domain/voice/readingDict';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -26,12 +26,14 @@ export function parseEngineDict(text: string): EngineWord[] {
     const surface = w.surface;
     const yomi = w.pronunciation;
     const accent = w.accent_type;
+    const priority = w.priority;
     if (typeof surface !== 'string' || typeof yomi !== 'string') continue;
     out.push({
       uuid,
       surface,
       yomi,
       accentType: typeof accent === 'number' && Number.isInteger(accent) && accent >= 0 ? accent : 0,
+      ...(typeof priority === 'number' && Number.isInteger(priority) ? { priority } : {}),
     });
   }
   return out;
@@ -75,6 +77,7 @@ export async function syncReadingDict(
         surface: op.entry.surface,
         pronunciation: op.entry.yomi,
         accentType: op.entry.accentType,
+        priority: READING_DICT_PRIORITY,
         baseUrl,
       });
       // ⚠️ **`false` は失敗ではなく「作り直しの合図」**（決定3b＝未知の uuid は `422`）。
@@ -94,6 +97,7 @@ async function addWord(entry: ReadingEntry, baseUrl: string | null): Promise<str
     surface: entry.surface,
     pronunciation: entry.yomi,
     accentType: entry.accentType,
+    priority: READING_DICT_PRIORITY,
     baseUrl,
   });
 }
@@ -112,6 +116,7 @@ export async function overwriteEngineWord(entry: ReadingEntry, uuid: string): Pr
     surface: entry.surface,
     pronunciation: entry.yomi,
     accentType: entry.accentType,
+    priority: READING_DICT_PRIORITY,
     baseUrl,
   });
   // `false` ＝その語がもう無い（決定3b＝作り直しの合図）。

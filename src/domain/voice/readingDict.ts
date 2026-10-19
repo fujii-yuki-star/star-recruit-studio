@@ -44,7 +44,19 @@ export interface EngineWord {
   surface: string;
   yomi: string;
   accentType: AccentType;
+  /** エンジンでの優先度（0〜10）。読めなかったら未指定。 */
+  priority?: number;
 }
+
+/**
+ * 登録する語の優先度（0〜10・VOICEVOX の `priority`）。**いちばん高くする**（ADR-0037 追補 2026-10-19）。
+ *
+ * ⚠️ **既にエンジンの辞書にある言葉は、既定（5）では登録が効かない**（実測）＝「角田→カドタ」
+ * 「東海林→トウカイリン」は 8〜9、「日本→ヒノモト」「山崎→ヤマサキ」は 10 でやっと効いた。
+ * 直したいのはまさにそういう人名・地名なので、送らない（既定 5）と**登録したのに読みが変わらない**
+ *（§2-5＝設定した意味どおりにならない）。辞書に無い言葉はどの値でも効く。
+ */
+export const READING_DICT_PRIORITY = 10;
 
 /** エンジンへ**送る**操作（1語ぶん）。送らないもの（控えの取り直し）はここに出さない。 */
 export type DictOp =
@@ -122,7 +134,12 @@ export function planDictSync(
     const known = links[surface];
     const byRef = known ? byUuid.get(known) : undefined;
     if (byRef) {
-      if (!sameReading(byRef, entry)) plan.ops.push({ kind: 'update', uuid: byRef.uuid, entry });
+      // ⚠️ **優先度も見る**（ADR-0037 追補）＝前の版は優先度を送らずに登録していた（既定 5＝効かない語がある）。
+      // 読みがそろっていても優先度が違えば送り直す＝開き直すだけで前の登録も効くようになる。
+      // 自分の語（控えが当たった語）だけ＝他人の語の優先度には触らない（決定3）。
+      if (!sameReading(byRef, entry) || byRef.priority !== READING_DICT_PRIORITY) {
+        plan.ops.push({ kind: 'update', uuid: byRef.uuid, entry });
+      }
       else plan.links[surface] = byRef.uuid; // そろっている＝控えを保つ
       continue;
     }
@@ -224,6 +241,26 @@ export function splitMorae(yomi: string): string[] {
 export function accentCandidates(yomi: string): AccentType[] {
   const n = splitMorae(yomi).length;
   return Array.from({ length: n + 1 }, (_, i) => i);
+}
+
+/** 聞き比べで言葉のうしろに付ける助詞（「下がらない」と「最後で下がる」は、言葉だけだと同じ音になる）。 */
+const PREVIEW_PARTICLE = 'ガ';
+
+/**
+ * 聞き比べの音を作る読み（エンジンの「かな」の書き方＝下がる所のうしろに `'`）。
+ *
+ * ⚠️ **登録した後と同じ音になる形で作る**（ADR-0037 追補 2026-10-19・実測で一致を確認）。前の版は
+ * 読みで作った音の「下がる場所」の数だけを差し替えていたが、エンジンは**音の高さを作り直さない**ので、
+ * **どの候補を押しても同じ音**だった。さらに読みが2つのかたまりに分かれると（`ホシノ｜ハラ`）先頭だけが
+ * 対象になっていた。かなの書き方なら1つのかたまりで、指定した所で下がる。
+ * ⚠️ **うしろに「ガ」を付ける**＝「下がらない（0）」と「最後で下がる」は言葉だけだと同じ音で、
+ * 助詞が続くと違う（`ホシノハラガ'`／`ホシノハラ'ガ`＝登録後の文と同じ）。
+ */
+export function accentPreviewKana(yomi: string, accentType: AccentType): string {
+  const morae = [...splitMorae(yomi), PREVIEW_PARTICLE];
+  const n = morae.length - 1; // 言葉の粒の数（助詞を除く）
+  const at = accentType <= 0 || accentType > n ? morae.length : accentType; // 0＝助詞まで下がらない
+  return `${morae.slice(0, at).join('')}'${morae.slice(at).join('')}`;
 }
 
 /** 読みに「下がる場所」の印を入れた見せ方（`ウ↓ツノミヤ`）。0＝印なし（下がらない）。 */
