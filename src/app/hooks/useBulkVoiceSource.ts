@@ -8,8 +8,9 @@
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
-import { sceneNeedsVoice } from "../../domain/project/narrationLines";
-import { timelineVoiceProgress, voiceClipNeedsVoice } from "../../domain/timeline/voice";
+import { sceneNeedsVoice, sceneNeedsVoiceOrRemake } from "../../domain/project/narrationLines";
+import { timelineVoiceProgress, voiceClipNeedsVoice, voiceClipsToMake } from "../../domain/timeline/voice";
+import { isTauri } from "../../infrastructure/assetFs";
 
 /** どちらの形式のまとめて作るか（バナーが形式ごとに数えるための鍵）。 */
 export type BulkVoiceFormat = "scene" | "timeline";
@@ -45,6 +46,8 @@ export interface BulkVoiceSource {
 /** 場面形式（たたき台・場面編集・公開前チェック）。 */
 export function useSceneBulkVoice(): BulkVoiceSource {
   const scenes = useProjectStore((s) => s.scenes);
+  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
+  const readable = isTauri() ? (key: string): boolean => narrationAudioById[key] != null : undefined;
   const generating = useProjectStore((s) => s.isGeneratingNarration);
   const cancelled = useProjectStore((s) => s.narrationCancelled);
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
@@ -53,11 +56,14 @@ export function useSceneBulkVoice(): BulkVoiceSource {
   return {
     format: "scene",
     unitLabel: "場面",
-    progress: narrationProgress(scenes),
+    progress: narrationProgress(scenes, readable),
     generating,
     cancelled,
     // 対象の判定は store と共有＝「押せるのに何も起きない」を作らない（ADR-0026④）。
-    needsWork: scenes.some(sceneNeedsVoice),
+    // ⚠️ **作成済みなのに音が読めない場面も対象**（通し点検 2026-10-16・PR レビュー 🟡）＝store だけ直して
+    //   ここが印だけのままだと、公開前チェックが「声を作成」を勧めるのにボタンが押せなかった。
+    //   ⚠️ **アプリの中だけ**（公開前チェックと同じ）＝音を読めない場（ブラウザ・検査）で全部を作り直す対象にしない。
+    needsWork: scenes.some((s) => (readable ? sceneNeedsVoiceOrRemake(s, readable) : sceneNeedsVoice(s))),
     isExporting,
     generateAll,
     cancel,
@@ -68,6 +74,8 @@ export function useSceneBulkVoice(): BulkVoiceSource {
 /** タイムライン形式（タイムライン編集）。 */
 export function useTimelineBulkVoice(): BulkVoiceSource {
   const clips = useTimelineStore((s) => s.doc?.clips);
+  const audioSrcByKey = useTimelineStore((s) => s.audioSrcByKey);
+  const readable = isTauri() ? (key: string): boolean => audioSrcByKey[key] != null : undefined;
   const generating = useTimelineStore((s) => s.isGeneratingVoices);
   const cancelled = useTimelineStore((s) => s.voicesCancelled);
   const isExporting = useTimelineStore((s) => isTimelineExportBusy(s.exportRun.phase));
@@ -78,10 +86,11 @@ export function useTimelineBulkVoice(): BulkVoiceSource {
     format: "timeline",
     // ⚠️ タイムライン形式に「場面」は無い＝セリフは**読み上げの部品**に入る。
     unitLabel: "読み上げ",
-    progress: timelineVoiceProgress(list),
+    progress: timelineVoiceProgress(list, readable),
     generating,
     cancelled,
-    needsWork: list.some(voiceClipNeedsVoice),
+    // 上と同じ理由で、作成済みなのに音が読めない読み上げも対象（store の `voiceClipsToMake` と同じ判定）。
+    needsWork: readable ? voiceClipsToMake(list, readable).length > 0 : list.some(voiceClipNeedsVoice),
     isExporting,
     generateAll,
     cancel,

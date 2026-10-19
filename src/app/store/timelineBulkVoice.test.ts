@@ -86,7 +86,48 @@ beforeEach(() => {
     generatingVoiceClipId: null,
     voiceError: null,
     exportRun: { phase: "idle", percent: 0, message: null, cancelling: false },
+    audioSrcByKey: {},
+    _audioTried: new Set<string>(),
   } as never);
+});
+
+// ⚠️ **作成済みの印なのに音が読めない読み上げも作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で
+//   飛ばすと「作りました」と言い、書き出しは「声を作ってください」と断る＝外の AI には行き止まりだった。
+describe("まとめて声を作る：作成済みでも音が読めないものは作り直す", () => {
+  const generated = (id: string, startSec: number): TimelineClip =>
+    ({ ...voiceClip(id, "作成済み", "generated"), startSec,
+      voice: { text: "作成済み", status: "generated", voicePath: `voices/${id}.wav` } }) as unknown as TimelineClip;
+
+  it("音が読めない作成済みは作り直し、読める作成済みは作らない", async () => {
+    useTimelineStore.setState({
+      doc: doc([generated("clip_001", 0), generated("clip_002", 3)]),
+      audioSrcByKey: { "voice:voices/clip_002.wav": "wav" },
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 4; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started, "読めない1件だけ作る").toBe(1);
+    expect(useTimelineStore.getState().audioSrcByKey["voice:voices/clip_001.wav"], "作り直した音が入っていない").toBe("wav");
+  });
+
+  // ⚠️ **先に音をそろえてから見る**＝開いた直後は画面がまだ音を読んでいない（`audioSrcByKey` が空）。そろえずに見ると、
+  //   ファイルがある作成済みまで「読めない」と見なして、作った声を全部作り直してしまう。
+  it("開いた直後でも、ファイルのある作成済みは作り直さない（先に音を読みにいく）", async () => {
+    const { readVoiceDataUrl } = await import("../../infrastructure/voiceFs");
+    vi.mocked(readVoiceDataUrl).mockImplementation(async (_p: string, path: string) => (path === "voices/clip_002.wav" ? "wav" : null));
+    useTimelineStore.setState({
+      doc: doc([generated("clip_001", 0), generated("clip_002", 3)]),
+      audioSrcByKey: {},
+      _audioTried: new Set<string>(),
+    } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 4; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started, "ファイルのある作成済みまで作り直した").toBe(1);
+    vi.mocked(readVoiceDataUrl).mockImplementation(async () => null);
+  });
 });
 
 describe("まとめて声を作る（#1019 ⑥）", () => {
@@ -120,6 +161,8 @@ describe("まとめて声を作る（#1019 ⑥）", () => {
         { ...voiceClip("clip_003", "あと", "generated"), startSec: 6, durationSec: 3,
           voice: { text: "あと", status: "generated", voicePath: "voices/clip_003.wav" } } as unknown as TimelineClip,
       ]),
+      // 作成済みの音は読めている（読めないと「作り直す」対象になる＝通し点検 2026-10-16）。
+      audioSrcByKey: { "voice:voices/clip_003.wav": "wav" },
     } as never);
     const synth = gatedSynth();
     const run = useTimelineStore.getState().generateAllVoices();
@@ -147,6 +190,8 @@ describe("まとめて声を作る（#1019 ⑥）", () => {
         { ...voiceClip("clip_003", "あと", "generated"), startSec: 6, durationSec: 3,
           voice: { text: "あと", status: "generated", voicePath: "voices/clip_003.wav" } } as unknown as TimelineClip,
       ]),
+      // 作成済みの音は読めている（読めないと「作り直す」対象になる＝通し点検 2026-10-16）。
+      audioSrcByKey: { "voice:voices/clip_003.wav": "wav" },
     } as never);
     const synth = gatedSynth();
     const run = useTimelineStore.getState().generateAllVoices();

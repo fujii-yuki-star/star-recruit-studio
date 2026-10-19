@@ -7,6 +7,7 @@ import { resolveNarrationVoice } from '../voice/voiceProvider';
 import type { VoiceSettings } from '../project/types';
 import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from '../enums';
 import type { TimelineClip, TimelineVoice } from './types';
+import { audioSourceKeyOfClip } from './audio';
 
 /** 読み上げクリップの声の設定を、動画全体の既定で埋めて返す。 */
 export function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettings) {
@@ -33,18 +34,38 @@ export function voiceClipNeedsVoice(clip: TimelineClip): boolean {
 }
 
 /**
+ * **作成済みの印なのに音が読めない**読み上げか（通し点検 2026-10-16）。純粋。
+ *
+ * ⚠️ **印だけ見ると作り直されない**＝声のファイルが消えた動画では、まとめて作るがこれを飛ばして「作りました」と言い、
+ *   書き出しは「声を作ってください」と断る＝**行き止まり**（§2-5）。「読めるか」は呼ぶ側が渡す
+ *   （`audioSrcByKey` に入っているか＝書き出しの「読めない音」の判定と同じ材料・キーは `audioSourceKeyOfClip`）。
+ */
+export function voiceClipNeedsRemake(clip: TimelineClip, audioReadable: (key: string) => boolean): boolean {
+  if (clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return false;
+  if (clip.voice.text.trim().length === 0 || clip.voice.status !== NARRATION_STATUS.generated) return false;
+  const key = audioSourceKeyOfClip(clip);
+  return key == null || !audioReadable(key);
+}
+
+/** まとめて作る対象の読み上げ（まだ作っていない＋作成済みなのに音が読めない）。並びは文書の順。 */
+export function voiceClipsToMake(clips: readonly TimelineClip[], audioReadable: (key: string) => boolean): TimelineClip[] {
+  return clips.filter((c) => voiceClipNeedsVoice(c) || voiceClipNeedsRemake(c, audioReadable));
+}
+
+/**
  * まとめて作る進み具合（作成済み / 文のある読み上げの数）。
  *
  * ⚠️ **分母は「文のある読み上げ」**＝空の文を数えると、いつまでも終わらない分母になる。
  */
-export function timelineVoiceProgress(clips: readonly TimelineClip[]): { done: number; total: number } {
+export function timelineVoiceProgress(clips: readonly TimelineClip[], audioReadable?: (key: string) => boolean): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const c of clips) {
     if (c.kind !== TIMELINE_CLIP_KIND.voice || !c.voice) continue;
     if (c.voice.text.trim().length === 0) continue;
     total += 1;
-    if (c.voice.status === NARRATION_STATUS.generated) done += 1;
+    // 読めるかを渡したときは、作成済みでも音が読めないものは数えない（場面形式の `narrationProgress` と同じ）。
+    if (c.voice.status === NARRATION_STATUS.generated && !(audioReadable && voiceClipNeedsRemake(c, audioReadable))) done += 1;
   }
   return { done, total };
 }

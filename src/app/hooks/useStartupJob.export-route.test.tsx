@@ -168,7 +168,9 @@ describe("頼まれた書き出しの行き先は、動画の形式で決まる�
       });
       const gen = vi.spyOn(useTimelineStore.getState(), 'generateAllVoices').mockImplementation(async () => {
         useTimelineStore.setState({ doc: { clips: [{ id: 'clip_001', kind: 'voice', trackId: 'track_002',
-          startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'generated', voicePath: 'v.wav' } }] } as never });
+          startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'generated', voicePath: 'v.wav' } }] } as never,
+          // 作った声の音も入る（実物と同じ＝`_generateVoiceFor` が入れる）。無いと「作成済みなのに音が読めない」で残りに数える。
+          audioSrcByKey: { 'voice:v.wav': 'wav' } } as never);
       });
       // ⚠️ **書き切ってから終わる**（実機で踏んだ）＝自動保存は画面の都合で少し待つ形なので、
       // すぐ閉じる回では一度も走らず、**音は出来たのに文書は「まだ」のまま**になった。
