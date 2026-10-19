@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_FONT_FILES, DEFAULT_FONT_ID, FONT_CATALOG } from '../font/fontCatalog';
 import { readFontAdvances } from '../font/fontAdvance';
-import { buildFontMetrics } from './fontMetricsBuild';
+import { buildFontMetrics, CJK_END, CJK_START, DENSE_RANGES } from './fontMetricsBuild';
 import { BUNDLED_FONT_METRICS } from './generated/bundledFontMetrics';
 import { charWidthEmIn, estimatedCharWidthEm, textFontFor, type TextFont } from './fontMetrics';
 import { wrapText } from './textWrap';
@@ -17,6 +17,7 @@ const allFiles = [...new Set(Object.values(BUNDLED_FONT_FILES).flatMap((f) => [f
 const GEN: TextFont = { fontId: 'gen-interface-jp', bold: false };
 const GEN_BOLD: TextFont = { fontId: 'gen-interface-jp', bold: true };
 const KAITOU: TextFont = { fontId: 'kaitou-yokoku-gothic', bold: false };
+const DISPLAY_ID = 'gen-interface-jp-display';
 
 describe('字幅表（作られたファイル）', () => {
   it('同梱の字体ファイルすべてぶんの表がある（足りない・余計がない）', () => {
@@ -46,6 +47,24 @@ describe('charWidthEmIn：字体の実測を引く', () => {
       });
     }
   }
+
+  // 表の作り方と引き方の対（区間の端・CJK の違う幅の一覧の終わりまで）を、字体ファイルの全部の字で突き合わせる。
+  it.each(allFiles)('%s：表の範囲の全部の字が、字体ファイルの送り幅と同じ', (file) => {
+    const r = readerOf(file);
+    const fontId = FONT_CATALOG.find((f) => [BUNDLED_FONT_FILES[f.cssFamily]!.regular].includes(file))?.id
+      ?? FONT_CATALOG.find((f) => BUNDLED_FONT_FILES[f.cssFamily]!.bold === file)!.id;
+    const bold = !FONT_CATALOG.some((f) => BUNDLED_FONT_FILES[f.cssFamily]!.regular === file);
+    const ranges: [number, number][] = [...DENSE_RANGES.map(([a, b]) => [a, b] as [number, number]), [CJK_START, CJK_END]];
+    const wrong: string[] = [];
+    for (const [a, b] of ranges) {
+      for (let cp = a; cp <= b; cp += 1) {
+        const adv = r.advanceOf(cp);
+        const expected = adv == null || adv === 0 ? estimatedCharWidthEm(cp) : adv / r.unitsPerEm;
+        if (Math.abs(charWidthEmIn(String.fromCodePoint(cp), { fontId, bold }) - expected) > 1e-12) wrong.push(cp.toString(16));
+      }
+    }
+    expect(wrong.slice(0, 10)).toEqual([]);
+  });
 
   it('実際の字幅は見積もりと違う（＝この ADR が直したもの）', () => {
     expect(charWidthEmIn('A', GEN_BOLD)).toBeGreaterThan(0.7); // 見積もりは 0.55
@@ -99,6 +118,10 @@ describe('textFontFor：描画と同じ解き方（要素 → 場面 → 動画�
   });
   it('知らない id は次へ落ちる（描画と同じ）', () => {
     expect(textFontFor('nope', 'nope', 'kaitou-yokoku-gothic', 'normal').fontId).toBe('kaitou-yokoku-gothic');
+  });
+  it('持ち込み・拡張パックの id は形で既知＝そのまま残る（以前の描画と同じ答え）', () => {
+    expect(textFontFor('user_font_001', DISPLAY_ID, undefined, 'normal').fontId).toBe('user_font_001');
+    expect(textFontFor(undefined, 'pack_office__mincho', DISPLAY_ID, 'normal').fontId).toBe('pack_office__mincho');
   });
   it('太さは文字の太さから', () => {
     expect(textFontFor(undefined, undefined, undefined, 'bold').bold).toBe(true);

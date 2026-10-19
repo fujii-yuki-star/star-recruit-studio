@@ -5,7 +5,7 @@
 //   字体からは幅が分からない。
 // ⚠️ **持ち込み・拡張パックの字体は汎用の表**＝字ごとに「今までの見積もり」と「Gen Interface JP 太字の実測」の大きい方
 //   （今より狭く見ない＝今出ている注意を黙って消さない）。
-import { BUNDLED_FONT_FILES, cssFamilyForId, isExternalFontId, resolveFontId, type FontId } from '../font/fontCatalog';
+import { BUNDLED_FONT_FILES, DEFAULT_FONT_ID, cssFamilyForId, isExternalFontId, resolveFontId, type FontId } from '../font/fontCatalog';
 import { FONT_WEIGHT } from '../enums';
 import { CJK_END, CJK_START, type BundledFontMetrics } from './fontMetricsBuild';
 import { BUNDLED_FONT_METRICS } from './generated/bundledFontMetrics';
@@ -35,8 +35,8 @@ export function estimatedCharWidthEm(codePoint: number): number {
   return codePoint <= 0xff ? 0.55 : 1.0;
 }
 
-/** 汎用の表の土台（持ち込み・拡張パックの字体）。 */
-const GENERIC_BASE_FILE = BUNDLED_FONT_FILES['Gen Interface JP']!.bold;
+/** 汎用の表の土台（持ち込み・拡張パックの字体）＝既定の字体（Gen Interface JP）の太字。 */
+const GENERIC_BASE_FILE = BUNDLED_FONT_FILES[cssFamilyForId(DEFAULT_FONT_ID)]?.bold ?? '';
 
 interface ParsedMetrics {
   upm: number;
