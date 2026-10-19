@@ -7,7 +7,7 @@
 | 資料 | 範囲 | なぜ |
 |---|---|---|
 | [`adr/0001`](../yuko_recruit_docs/adr/0001-rendering-parity.md) | 全文（6,568字） | **プレビュー＝書き出し**の作り方（A2ハイブリッド／per-frame） |
-| [`05_RENDERING_SPEC.md`](../yuko_recruit_docs/05_RENDERING_SPEC.md) | **全文でよい（5,033字）** | 描画順・収め方・字幕・音量・トランジション |
+| [`05_RENDERING_SPEC.md`](../yuko_recruit_docs/05_RENDERING_SPEC.md) | **全文でよい（5,887字）** | 描画順・収め方・字幕・音量・トランジション |
 | [`11_SCHEMA_REFERENCE.md`](../yuko_recruit_docs/11_SCHEMA_REFERENCE.md) | **§5 バインディング契約**（2,878字）・**§6 声・音量の解決順序**（754字） | `assetRefs[layer.id] ?? layer.assetId` などの解決順 |
 
 ## 必要なら読む
