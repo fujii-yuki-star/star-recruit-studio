@@ -60,3 +60,30 @@ describe("知らせが画面に出る", () => {
     expect(screen.queryByText(text)).toBeNull();
   });
 });
+
+// ⚠️ **枠に入りきらず「…」で切れる文字を画面で知らせる**（α 残件の洗い直し 2026-10-19）＝以前は起動の引数の書き出しだけが
+//   知らせ、画面から書き出す人は切れた動画を黙って受け取っていた（場面形式は公開前チェックで出す＝ADR-0026②）。
+describe("タイムライン：切れている文字の知らせ", () => {
+  beforeEach(() => vi.useFakeTimers());
+
+  const longText = (text: string) => ({
+    ...doc(),
+    clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5,
+      x: 0, y: 0, w: 100, h: 50, fontSize: 40, maxLines: 1, text }],
+  });
+
+  it("切れる文字があれば、編集が落ち着いたあとに注意を出す", () => {
+    open({ doc: longText("とても長い見出しの文字がここに入ります") });
+    expect(screen.queryByText(/末尾が「…」になります/)).toBeNull();
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.getByText(/末尾が「…」になります/)).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("収まっていれば出さない", () => {
+    open({ doc: longText("短い") });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.queryByText(/末尾が「…」になります/)).toBeNull();
+    vi.useRealTimers();
+  });
+});
