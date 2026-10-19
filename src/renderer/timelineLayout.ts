@@ -463,7 +463,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
       clip.kind === TIMELINE_CLIP_KIND.template
         ? sceneFromClip(clip, template, subtitleOpts)
         : { ...sceneFromClip(clip, template, subtitleOpts), freeLayout: [freeElementFromClip(clip, canvas)] };
-    const sub = layoutScene(scene, template);
+    const sub = layoutScene(scene, template, { projectFontId: doc.videoSettings.fontId });
 
     // クリップは**中身の座標系**として扱う＝クリップに掛かる変形（グループ → 自身のキーフレーム）は、
     // まず「クリップの箱」に効かせ、その **箱の動き（相似変換）を中身へそのまま持ち込む**。

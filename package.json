@@ -33,7 +33,8 @@
     "review": "npm run check:frontend && npm run build && npm run check:rust && npm run check:rust:fmt && npm run check:rust:clippy && npm run check:rust:test",
     "hooks:install": "git config --local core.hooksPath .githooks",
     "tutorial:record": "node scripts/tutorialRecord.mjs",
-    "tutorial:cursor": "node scripts/tutorialCursor.mjs"
+    "tutorial:cursor": "node scripts/tutorialCursor.mjs",
+    "gen:font-metrics": "tsx scripts/gen-font-metrics.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

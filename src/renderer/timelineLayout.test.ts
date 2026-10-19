@@ -681,7 +681,7 @@ describe('layoutTimelineAt：大きさの変形は中身ごと（#1371）', () =
     const t = layoutTimelineAt(d, 0, opts).items.find((i) => i.kind === 'text') as TextItem;
     expect(t.w).toBeCloseTo(120);
     expect(t.fontSize).toBeCloseTo(30);
-    expect(wrapText(t.text, t.w, t.fontSize, t.maxLines)).toEqual(['ああああ']);
+    expect(wrapText(t.text, t.w, t.fontSize, t.maxLines, 0, t.textFont)).toEqual(['ああああ']);
   });
 
   it('まとまりの静的な拡大でも中身ごと（テンプレの部品の文字）', () => {

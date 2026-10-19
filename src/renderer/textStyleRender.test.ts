@@ -11,7 +11,7 @@ const layout = (over: Record<string, unknown> = {}): SceneLayout => ({
   items: [{
     id: 'free_001', kind: 'text', x: 100, y: 100, w: 800, h: 200,
     text: 'あいう', fontSize: 40, fontWeight: 'normal', color: '#ffffff',
-    maxLines: 2, isSubtitle: false, ...over,
+    maxLines: 2, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false }, ...over,
   }],
 } as unknown as SceneLayout);
 
@@ -91,8 +91,8 @@ describe('影（#264）', () => {
     const two = {
       width: 1920, height: 1080, backgroundColor: '#fff',
       items: [
-        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, shadow: { enabled: true, dx: 1 } },
-        { id: 'free_002', kind: 'text', x: 0, y: 60, w: 100, h: 50, text: 'い', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, shadow: { enabled: true, dx: 9 } },
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false }, shadow: { enabled: true, dx: 1 } },
+        { id: 'free_002', kind: 'text', x: 0, y: 60, w: 100, h: 50, text: 'い', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false }, shadow: { enabled: true, dx: 9 } },
       ],
     } as unknown as SceneLayout;
     const svg = layoutToSvg(two);
@@ -110,8 +110,8 @@ describe('影（#264）', () => {
     const two = {
       width: 1920, height: 1080, backgroundColor: '#fff',
       items: [
-        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, shadow: same },
-        { id: 'free_002', kind: 'text', x: 0, y: 60, w: 100, h: 50, text: 'い', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, shadow: same },
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false }, shadow: same },
+        { id: 'free_002', kind: 'text', x: 0, y: 60, w: 100, h: 50, text: 'い', fontSize: 40, fontWeight: 'normal', color: '#fff', maxLines: 1, isSubtitle: false, textFont: { fontId: 'gen-interface-jp', bold: false }, shadow: same },
       ],
     } as unknown as SceneLayout;
     const svg = layoutToSvg(two);

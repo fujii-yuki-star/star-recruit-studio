@@ -53,7 +53,7 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // ⚠️ **引くのは per-use ではなく実効値**（レビュー 🔴）＝`slotClips` だけを見ると、素材既定
   //（`asset.clip`）に頼っている枠が「設定なし」になり、バラした瞬間に音が消える。描画・再生と
   // **同じ解決**（`videoPlacementsOfClip`）から採る＝展開後に継承経路が無くなっても値は残る。
-  const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
+  const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(scene, template, { faithful: true, projectFontId: doc.videoSettings.fontId });
   const placementByLayer = new Map(
     videoPlacementsOfClip(doc, clip, { templateOf: () => template }).map((pl) => [pl.layerId, pl]),
   );

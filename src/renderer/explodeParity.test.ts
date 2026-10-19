@@ -769,10 +769,10 @@ describe('焼いた掛け合い字幕の位置が場面形式と一致する', (
     expect(sub).toBeDefined();
     if (sub?.kind !== 'text') return;
     // 折り返しが2行以上あること（この検査が意味を持つ前提）。
-    expect(wrapText(long, 1720, 52, sub.maxLines).length).toBeGreaterThan(1);
+    expect(wrapText(long, 1720, 52, sub.maxLines, 0, sub.textFont).length).toBeGreaterThan(1);
     // 場面形式の帯の**上端**＝タイムラインの y（上端起点）。
     const lineHeightPx = 52 * DEFAULT_LINE_HEIGHT;
-    const n = wrapText(long, 1720, 52, sub.maxLines).length;
+    const n = wrapText(long, 1720, 52, sub.maxLines, 0, sub.textFont).length;
     expect(sub.y).toBeCloseTo(sceneYs[0] - (n - 1) * lineHeightPx);
   });
   it('回転した字幕層：焼いても同じ位置に出る（回転の軸が動くぶんを打ち消す）', () => {
