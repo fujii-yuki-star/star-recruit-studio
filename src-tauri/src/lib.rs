@@ -1001,7 +1001,9 @@ fn finish_startup_job(
     }
     // ⚠️ **取り込んだ番号を返す**（通し点検 2026-10-16）＝アプリが番号を採り直すのに、どこにも出していなかった＝
     //   外の AI は続く `--make-voices <番号>` に渡す番号を、置き場を覗いて推すしかなかった。
-    if let Some(r) = result.as_deref() {
+    // ⚠️ **渡された仕事（`forwarded`）では出さない**（ADR-0042 追補3）＝最初に起動したプロセスの標準出力へ行き、
+    //   頼んだ側の2つ目のプロセスには届かない（終了コードが当てにならないのと同じ理由・決定③-2）。
+    if let Some(r) = result.as_deref().filter(|_| !forwarded) {
         if !r.is_empty() {
             println!("{r}");
             use std::io::Write;

@@ -2,17 +2,19 @@
 // 純粋関数＝§7 テスト対象。UI の「声 X/Y」表示に使う。
 // 単一 narration の場面は sceneLines が1行に解決＝従来（場面=1行）と同値（後方互換）。
 import { NARRATION_STATUS } from '../enums';
-import { sceneLines, withLineStatus } from '../project/narrationLines';
+import { narrationAudioKey, sceneLines, withLineStatus } from '../project/narrationLines';
 import type { Scene } from '../project/types';
 
-export function narrationProgress(scenes: Scene[]): { done: number; total: number } {
+export function narrationProgress(scenes: Scene[], audioReadable?: (key: string) => boolean): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const scene of scenes) {
     for (const line of sceneLines(scene)) {
       if (line.text.trim().length === 0) continue;
       total += 1;
-      if (line.status === NARRATION_STATUS.generated) done += 1;
+      // ⚠️ 読めるかを渡したときは、作成済みでも音が読めない行は「できた」に数えない（通し点検 2026-10-16＝
+      //   まとめて作るの対象と同じ見方。数えると「全部できた」と出るのに作るボタンが押せる、になる）。
+      if (line.status === NARRATION_STATUS.generated && (!audioReadable || audioReadable(narrationAudioKey(scene, line.lineId)))) done += 1;
     }
   }
   return { done, total };

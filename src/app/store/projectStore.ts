@@ -50,7 +50,7 @@ import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/te
 import { keepRestorePoints, restoreToPoint } from "./restorePointKeeper";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
-import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { orphanTemplateAssetIds, templateAssetIdsOwnedOnlyBy, withoutTemplateAssetRefs } from "../../domain/template/templateAsset";
 import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -2264,18 +2264,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addTemplatePack: async (incoming) => {
     // 書き出し中は取り込みも止める（save/delete と同じ固定・#570 レビュー・store 側の2層目）。
     if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return []; }
+    // ⚠️ **ほかの見た目の変更中は断る**（PR レビュー 🟡）＝`saveUserTemplate` はこのとき黙って戻るので、理由を先に立てる。
+    if (get().isTemplateMutating) { set({ templateError: templateSaveMessage.USER_TEMPLATE_BUSY }); return []; }
     // ⚠️ 拡張パックの名前を名乗る・借りるものは入れない（取り込み口でも断っている＝2層目・ADR-0060）。
-    incoming = incoming.filter((t) => !templateClaimsPackIds(t));
+    // ⚠️ **テンプレ素材への参照は外す**（PR レビュー 🟡）＝番号はこのパソコンの中だけで一意＝別の見た目の素材を指しうる。
+    incoming = incoming.filter((t) => !templateClaimsPackIds(t)).map(withoutTemplateAssetRefs);
     // ⚠️ **自分の見た目として保存する**（通し点検 2026-10-16・利用者判断 2026-10-19）＝以前はその起動の間だけ持ち、
     //   画面は「標準（直接は編集できません）」と出て削除の道も無く、**閉じると消えて使った場面の見た目が見つからなくなった**。
     // ⚠️ **番号は採り直す**＝ファイルの番号のまま入れると、同じ番号の標準の見た目を**黙って置き換えていた**。
     //   保存は複製・ゼロから作成と同じ `saveUserTemplate`（読み込みと同じ検証を通し、一覧へ反映）。
     const saved: string[] = [];
+    // ⚠️ **最初の断りを残す**（PR レビュー 🟡）＝後の保存が成功すると `saveUserTemplate` が断りを消すので、
+    //   一部だけ失敗したときに**理由が画面から消えていた**。
+    let firstError: string | null = null;
     for (const t of incoming) {
       const newId = userTemplateFs.allocateUserTemplateId(get().templates.map((x) => x.templateId));
       await get().saveUserTemplate({ ...t, templateId: newId });
       if (get().templates.some((x) => x.templateId === newId)) saved.push(newId);
+      else firstError ??= get().templateError;
     }
+    if (firstError) set({ templateError: firstError });
     return saved;
   },
   loadPacks: async () => {
@@ -2396,7 +2404,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
     if (!isUserTemplate(templateId)) return false;
     // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
-    const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
+    // ⚠️ **ほかの見た目がまだ使う素材は消さない**（PR レビュー 🟡）＝複製は素材を共有する（持ち主の絵が黙って欠ける）。
+    const owned = templateAssetIdsOwnedOnlyBy(get().templates, templateId);
     if (get().isTemplateMutating) return false; // 進行中の見た目変更を1本に保つ（isImporting と対称・#570 レビュー）。
     set({ isTemplateMutating: true }); // 最初の await 前に排他（#570 レビュー）。書き出し開始がこれを見て止まる＝削除はファイル/場面置換まで完走できる。
     try {

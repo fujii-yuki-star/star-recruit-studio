@@ -57,14 +57,15 @@ export function voiceClipsToMake(clips: readonly TimelineClip[], audioReadable: 
  *
  * ⚠️ **分母は「文のある読み上げ」**＝空の文を数えると、いつまでも終わらない分母になる。
  */
-export function timelineVoiceProgress(clips: readonly TimelineClip[]): { done: number; total: number } {
+export function timelineVoiceProgress(clips: readonly TimelineClip[], audioReadable?: (key: string) => boolean): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const c of clips) {
     if (c.kind !== TIMELINE_CLIP_KIND.voice || !c.voice) continue;
     if (c.voice.text.trim().length === 0) continue;
     total += 1;
-    if (c.voice.status === NARRATION_STATUS.generated) done += 1;
+    // 読めるかを渡したときは、作成済みでも音が読めないものは数えない（場面形式の `narrationProgress` と同じ）。
+    if (c.voice.status === NARRATION_STATUS.generated && !(audioReadable && voiceClipNeedsRemake(c, audioReadable))) done += 1;
   }
   return { done, total };
 }

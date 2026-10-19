@@ -4,6 +4,7 @@ import { onProjectDeleted } from './projectDeletion';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
+import * as templateAssetFsMod from '../../infrastructure/templateAssetFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
@@ -13,6 +14,7 @@ import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider'
 import { MAX_SCENES_PER_VIDEO } from '../../domain/constants';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
+import { templateSaveMessage } from '../uiLabels';
 
 function scene(id: string, order: number, partId = 'part_001'): Scene {
   return {
@@ -458,6 +460,22 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
       spy.mockRestore();
     });
 
+    // ⚠️ **ほかの見た目がまだ使う素材は消さない**（PR レビュー 🟡）＝複製・読み込みで素材を共有しうる。
+    it('削除しても、ほかの見た目が使う素材ファイルは消さない', async () => {
+      useProjectStore.setState({
+        templates: [...sampleTemplates, userTmpl('user_tmpl_a', 'tmpl_asset_001'), userTmpl('user_tmpl_b', 'tmpl_asset_001')],
+        templateError: null, isTemplateMutating: false,
+      });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const del = vi.spyOn(userTemplateFsMod, 'deleteUserTemplate').mockResolvedValue(undefined);
+      const delAsset = vi.spyOn(templateAssetFsMod, 'deleteTemplateAsset').mockResolvedValue(undefined);
+      delAsset.mockClear();
+      await useProjectStore.getState().deleteUserTemplate('user_tmpl_a');
+      expect(delAsset, '共有している素材を消した').not.toHaveBeenCalled();
+      del.mockRestore();
+      delAsset.mockRestore();
+    });
+
     // ⚠️ **双子の片方だけ直さない**＝削除側も同じ形。
     it('削除が断られた理由が言葉なら、その言葉を出す', async () => {
       useProjectStore.setState({ templates: [...sampleTemplates, userTmpl('user_tmpl_gate')], templateError: null });
@@ -564,6 +582,37 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
       const st = useProjectStore.getState().templates;
       expect(st.find((t) => t.templateId === builtin.templateId) === builtin, '標準の見た目を置き換えた').toBe(true);
       expect(st.find((t) => t.templateId === ids[0])?.name).toBe('読み込んだ見た目');
+    });
+
+    it('ほかの見た目の変更中は断り、理由を出す（黙って何もしない、をしない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null, isTemplateMutating: true });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      spy.mockClear();
+      const ids = await useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_x')]);
+      expect(ids).toEqual([]);
+      expect(spy).not.toHaveBeenCalled();
+      expect(useProjectStore.getState().templateError).toBe(templateSaveMessage.USER_TEMPLATE_BUSY);
+      useProjectStore.setState({ isTemplateMutating: false });
+    });
+
+    it('テンプレ素材への参照は外して保存する（このパソコンの別の見た目の素材を指さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null, isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockResolvedValue(undefined);
+      spy.mockClear();
+      await useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_x', 'tmpl_asset_001')]);
+      const savedTemplate = spy.mock.calls[0]![0] as Template;
+      expect(savedTemplate.layers[0]!.assetId).toBeUndefined();
+    });
+
+    it('一部だけ保存に失敗したら、最初の理由を残す（後の成功で消さない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null, isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValueOnce('os error 3').mockResolvedValue(undefined);
+      const ids = await useProjectStore.getState().addTemplatePack([userTmpl('a'), userTmpl('b')]);
+      expect(ids).toHaveLength(1);
+      expect(useProjectStore.getState().templateError).not.toBeNull();
     });
 
     it('保存に失敗したものは返さない（一覧にも出さない）', async () => {

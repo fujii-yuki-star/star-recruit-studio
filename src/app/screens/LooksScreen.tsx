@@ -202,7 +202,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     setLoadOk(!!first);
     setLoadMsg(
       first
-        ? `${saved.length}件の見た目パターンを読み込み、自分の見た目として残しました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}`
+        ? `${saved.length}件の見た目パターンを読み込み、自分の見た目として残しました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}${loaded.length > saved.length ? `（${loaded.length - saved.length}件は残せませんでした。上の案内を確かめてください）` : ""}`
         : loaded.length > 0
           ? "見た目パターンを残せませんでした。上の案内を確かめてから、もう一度読み込んでください。"
           : "読み込める見た目パターンがありませんでした。ファイルの内容をご確認ください。",
