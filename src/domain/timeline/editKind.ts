@@ -19,6 +19,7 @@ export const TIMELINE_EDIT_KIND = {
   removeTrack: 'removeTrack',
   reorderTracks: 'reorderTracks',
   track: 'track',
+  motion: 'motion',
   marker: 'marker',
   settings: 'settings',
   other: 'other',
@@ -42,7 +43,7 @@ function sameContent(a: TimelineClip, b: TimelineClip): boolean {
  * 1. **列の増減・並び**＝列を消すと中の部品も消えるので、部品の増減より先に見ないと「部品を削除」と言ってしまう
  *    （#1270 レビュー）。ただし**部品を置くために手前へ列を足した**（#1252）は「部品を置く」と言う。
  * 2. **部品の増減**＝分ける（元が縮み、続きに1つ増える）・複製（中身が同じものが増える）・置く・削除。
- * 3. 部品の時間 → 箱 → 中身 → 列の設定 → 目印 → 動画全体の設定。
+ * 3. 部品の時間 → 箱 → 中身 → 動き（キーフレーム） → 列の設定 → 目印 → 動画全体の設定。
  */
 export function timelineEditKind(before: TimelineProject, after: TimelineProject): TimelineEditKind {
   const beforeClips = new Map(before.clips.map((c) => [c.id, c]));
@@ -108,6 +109,9 @@ export function timelineEditKind(before: TimelineProject, after: TimelineProject
   if (resized) return TIMELINE_EDIT_KIND.resize;
   if (boxed) return TIMELINE_EDIT_KIND.box;
   if (content) return TIMELINE_EDIT_KIND.content;
+  // ⚠️ **動きは部品ではなく文書の `animations` に入る**（通し点検 2026-10-16）＝見ないと、動きを当てた・置いた
+  //   取り消しが「編集」とだけ出ていた（何を戻すか分からない）。
+  if (before.animations !== after.animations && JSON.stringify(before.animations ?? []) !== JSON.stringify(after.animations ?? [])) return TIMELINE_EDIT_KIND.motion;
 
   if (before.tracks !== after.tracks && JSON.stringify(before.tracks) !== JSON.stringify(after.tracks)) return TIMELINE_EDIT_KIND.track;
   if (before.markers !== after.markers && JSON.stringify(before.markers ?? []) !== JSON.stringify(after.markers ?? [])) return TIMELINE_EDIT_KIND.marker;

@@ -866,7 +866,7 @@
   background: var(--color-surface);
 }
 
-/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒.コマが入る幅・数字の幅をそろえて桁が揺れない。 */
+/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒:コマが入る幅・数字の幅をそろえて桁が揺れない。 */
 .clock-field {
   width: 7.5ch;
   padding: 2px 6px;

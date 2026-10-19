@@ -93,8 +93,7 @@ import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity"
 import { Switch } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
 import { textKeyOfLayer } from "../../domain/template/layerOps";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { NoScenesState } from "../components/NoScenesState";
 import {
   SearchIcon,
   PhotoIcon,
@@ -602,13 +601,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   });
 
   if (!selected) {
+    // ⚠️ **場面が0の表示は共有の部品に任せる**（#590・ADR-0026②＝同じ状況なら同じ挙動）＝作成中・失敗・入力の続き・
+    //   取り消しで0になったときの「やり直す」（通し点検 2026-10-16）までそこが見分ける。この画面は場面を作れるので
+    //   「場面を追加」を渡し、たたき台とは別の画面なので「たたき台へ」も添える。
     return (
       <div className="main-scroll">
-        <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : "編集する場面がありません"}
-          message="「新しい動画を作る」から動画案を作成してください。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => setSelectedId(addScene())} withGoToDraft />
       </div>
     );
   }

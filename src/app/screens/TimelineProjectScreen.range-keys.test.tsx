@@ -73,7 +73,7 @@ describe("作業範囲を並びの上に描く（以前はどこにも描かれ�
     const px = Number(/\+ (\d+(?:\.\d+)?)px\)$/.exec(fwd.left)![1]);
     // 2〜4秒＝始まり（2秒）の位置と幅（2秒ぶん）が同じ px になる＝始まりを遅いほう（4秒）にすると倍になる。
     expect(px).toBeCloseTo(parseFloat(fwd.width));
-    expect(fwd.label).toBe("作業範囲：0:02.00〜0:04.00");
+    expect(fwd.label).toBe("作業範囲：0:02:00〜0:04:00");
   });
 
   it("片方だけのときは端の線だけ（幅の無い網掛けを広げない）", () => {

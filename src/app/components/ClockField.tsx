@@ -1,5 +1,5 @@
 // 時刻を見せて、そのまま打ち込める欄（UI/UX 監査 2026-10-02＝再生位置を数値で打つ手段が無かった）。
-// 見せ方は `markerClock`（分:秒.コマ）＝目印・一覧と同じ書き方。打つときは同じ書き方でも、秒だけでもよい（`parseClock`）。
+// 見せ方は `markerClock`（分:秒:コマ）＝目印・一覧と同じ書き方。打つときは同じ書き方でも、秒だけでもよい（`parseClock`）。
 // ⚠️ **読めなければ打つ前の値へ戻す**＝黙って別の時刻へ飛ばない。範囲の外は端へ寄せる（数値欄と同じ作法）。
 import { useState } from "react";
 import { markerClock, parseClock } from "../../domain/timeline/markers";

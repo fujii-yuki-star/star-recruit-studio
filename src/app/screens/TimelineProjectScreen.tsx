@@ -57,7 +57,7 @@ import { overlayWarpTransform } from "../canvasWarp";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
-import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
+import { clipWithShownText, danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
 import { groupElementIds } from "../../domain/project/groupOps";
@@ -1220,7 +1220,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
   const frameStepSec = 1 / (doc ? effectiveFps(doc) : FPS);
-  /** 時刻を「分:秒.コマ」で見せる・打つときのコマ数（整数＝コマ番号が割り切れるように・書き出しの格子と同じ丸め）。 */
+  /** 時刻を「分:秒:コマ」で見せる・打つときのコマ数（整数＝コマ番号が割り切れるように・書き出しの格子と同じ丸め）。 */
   const clockFps = doc ? Math.round(effectiveFps(doc)) : FPS;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
@@ -4501,7 +4501,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               fps={clockFps}
               max={totalSec}
               ariaLabel="再生位置の時刻"
-              title="時刻を打つと、その位置へ移ります（例：1:05.15＝1分5秒15コマ／1:05:15 も同じ／65.5＝65.5秒）"
+              title="時刻を打つと、その位置へ移ります（例：1:05:15＝1分5秒15コマ／1:05.5＝1分5.5秒／65.5＝65.5秒）"
               onCommit={(sec) => { if (useTimelineStore.getState().isPlaying) pause(); setPlayhead(sec); followPlayhead(); }}
             />
             <span>/ 全体 {markerClock(totalSec, clockFps)}</span>
@@ -5222,7 +5222,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                             aria-hidden="true"
                             data-testid="clip-copy-source"
                           >
-                            {clipLabel(c, doc.assets)}
+                            {clipLabel(clipWithShownText(doc, c), doc.assets)}
                           </div>
                         ))}
                       {doc.clips
@@ -5251,7 +5251,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                             onPointerDown={(e) => beginClipDrag(e, c.id, "move")}
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
-                            title={clipRangeTitle(clipLabel(c, doc.assets), c.startSec, clipEndSec(c))}
+                            title={clipRangeTitle(clipLabel(clipWithShownText(doc, c), doc.assets), c.startSec, clipEndSec(c))}
                             onClick={(e) => { if (consumeSkipClick(e)) return; selectClip(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
@@ -5282,7 +5282,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                                 {c.speed != null && c.speed !== 1 ? `×${c.speed} ` : ""}{c.durationSec.toFixed(1)}秒
                               </span>
                             )}
-                            {clipLabel(c, doc.assets)}
+                            {clipLabel(clipWithShownText(doc, c), doc.assets)}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (
                               <>
@@ -5320,7 +5320,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                                 wideEnoughForHandles(c) ? " - var(--clip-handle-hit-w)" : ""
                               })`,
                             }}
-                            aria-label={`${clipLabel(c, doc.assets)}の操作`}
+                            aria-label={`${clipLabel(clipWithShownText(doc, c), doc.assets)}の操作`}
                             title="この部品の操作（右クリックでも開けます）"
                             onClick={(e) => {
                               // ⚠️ **右クリックと同じ入口を通す**（#1015 レビュー 補足）＝
@@ -5374,7 +5374,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         {selected ? (
           <>
             <p className="text-muted">
-              {clipLabel(selected, doc.assets)}（{markerClock(selected.startSec, clockFps)}から{selected.durationSec.toFixed(1)}秒間）
+              {clipLabel(clipWithShownText(doc, selected), doc.assets)}（{markerClock(selected.startSec, clockFps)}から{selected.durationSec.toFixed(1)}秒間）
             </p>
             {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。

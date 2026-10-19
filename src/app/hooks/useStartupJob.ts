@@ -77,6 +77,14 @@ export const STARTUP_IMPORT_UNREADABLE_MESSAGE =
   "そのフォルダの中身を読めませんでした。動画のフォルダごと指定してください。";
 
 /**
+ * 取り込む元の動画の中身が壊れていたときの断り（通し点検 2026-10-16）。
+ *
+ * ⚠️ **上と分ける**＝フォルダの指定は正しいのに「フォルダごと指定して」と言うと、**従っても直らない**（§2-5）。
+ */
+export const STARTUP_IMPORT_BROKEN_MESSAGE =
+  "そのフォルダの動画の中身が壊れていて読めませんでした。中身を作り直してから、もう一度お試しください。";
+
+/**
  * いま「他人の作業中」か（ADR-0042 決定③）。
  *
  * ⚠️ **開いているかどうかで見る**＝このアプリに「直したけど保存していない」を表す印が無い
@@ -187,7 +195,7 @@ async function runImport(
     try {
       doc = JSON.parse(text);
     } catch {
-      setNotice(STARTUP_IMPORT_UNREADABLE_MESSAGE);
+      setNotice(STARTUP_IMPORT_BROKEN_MESSAGE);
       await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }

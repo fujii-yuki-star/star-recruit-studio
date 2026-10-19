@@ -19,11 +19,11 @@ describe("ClockField", () => {
     const f = screen.getByLabelText("時刻") as HTMLInputElement;
     fireEvent.focus(f);
     rerender(<ClockField value={2} fps={30} max={10} onCommit={vi.fn()} ariaLabel="時刻" />);
-    expect(f.value, "焦点がある間に表示が動いた").toBe("0:01.00");
+    expect(f.value, "焦点がある間に表示が動いた").toBe("0:01:00");
   });
 
-  it("書き方どおりに見せる（分:秒.コマ）", () => {
+  it("書き方どおりに見せる（分:秒:コマ）", () => {
     render(<ClockField value={65.5} fps={30} max={100} onCommit={vi.fn()} ariaLabel="時刻" />);
-    expect((screen.getByLabelText("時刻") as HTMLInputElement).value).toBe("1:05.15");
+    expect((screen.getByLabelText("時刻") as HTMLInputElement).value).toBe("1:05:15");
   });
 });

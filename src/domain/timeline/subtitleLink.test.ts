@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { boundVoiceClip, danglingSubtitleLinks, subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
+import { boundVoiceClip, clipWithShownText, danglingSubtitleLinks, subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
 import {
   addLinkedSubtitleClip, addVoiceClip, duplicateClip, EDIT_BLOCKED, moveClip,
   setSubtitleText, setSubtitleVoiceLink, setVoiceSpeaker, setVoiceText, trimClip,
@@ -57,6 +57,17 @@ function doc(over: Partial<TimelineProject> = {}): TimelineProject {
 }
 
 describe('連動の解決', () => {
+  // 帯に「字幕」とだけ出ていた（通し点検 2026-10-16）＝名前を作るときは実際に出る文を入れる。
+  it('帯の名前用の写し：連動字幕は出る文を持ち、元の文書は変えない', () => {
+    const d = doc({ clips: [voice('clip_001'), subtitle('clip_002', { voiceClipId: 'clip_001' })] });
+    expect(clipWithShownText(d, d.clips[1]).text).toBe('こんにちは');
+    expect(d.clips[1].text).toBeUndefined();
+    const own = doc({ clips: [voice('clip_001'), subtitle('clip_002', { voiceClipId: 'clip_001', text: '言い換え' })] });
+    expect(clipWithShownText(own, own.clips[1]) === own.clips[1]).toBe(true);
+    const v = d.clips[0];
+    expect(clipWithShownText(d, v) === v).toBe(true);
+  });
+
   it('連動先の読み上げ文を字幕として出す', () => {
     const d = doc({ clips: [voice('clip_001'), subtitle('clip_002', { voiceClipId: 'clip_001' })] });
     expect(subtitleTextOf(d, d.clips[1])).toBe('こんにちは');
