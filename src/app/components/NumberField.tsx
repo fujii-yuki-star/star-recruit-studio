@@ -59,15 +59,14 @@ export function NumberField({
   const isEmpty = value == null;
   // draft=null は非編集中（value を表示）。編集中は自由入力文字列を保持する。
   const [draft, setDraft] = useState<string | null>(null);
-  // 焦点が入ったときに見せた文字（そのまま離れたら何も変えない＝丸めた表示で値を書き換えない）。
-  const [focusText, setFocusText] = useState<string | null>(null);
   const shown = draft ?? (isEmpty ? "" : numberFieldText(value));
 
   const commit = (): void => {
     if (draft == null) return;
-    // ⚠️ **触らずに離れたら変えない**＝表示は丸めてあるので、そのまま確定すると値が丸めた値に書き換わる
-    //   （コマに乗せた時刻がコマの格子から外れる）。
-    if (draft === focusText) { setDraft(null); return; }
+    // ⚠️ **いまの値の表示と同じ文字なら変えない**＝表示は丸めてあるので、そのまま確定すると値が丸めた値に
+    //   書き換わる（コマに乗せた時刻がコマの格子から外れる）。⚠️ 比べる相手は**確定する時点の**表示
+    //   （焦点が入ったときの文字と比べると、Enter で確定したあと元の値へ打ち直したのを黙って捨てる・PR レビュー 🟡）。
+    if (!isEmpty && draft.trim() === numberFieldText(value)) { setDraft(null); return; }
     const t = draft.trim();
     if (t === "") {
       // 空で確定：クリア可能な欄はクリア、そうでなければ何もしない（＝元値へ戻る）。
@@ -97,7 +96,7 @@ export function NumberField({
       disabled={disabled}
       style={inputStyle}
       value={shown}
-      onFocus={() => { const t = isEmpty ? "" : numberFieldText(value); setDraft(t); setFocusText(t); }}
+      onFocus={() => setDraft(isEmpty ? "" : numberFieldText(value))}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {

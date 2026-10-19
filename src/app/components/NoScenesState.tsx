@@ -3,7 +3,7 @@ import { useProjectStore } from "../store/projectStore";
 import { EmptyState } from "./states";
 import { StartNewVideoButton } from "./StartNewVideoButton";
 import { ChevronRightIcon, PlusIcon } from "./icons";
-import { GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL, OPEN_AI_SETTINGS_LABEL } from "../uiLabels";
+import { REDO_LABEL, GO_TO_DRAFT_LABEL, noScenesMessage, noScenesTitle, RESUME_WIZARD_LABEL, RETRY_GENERATE_LABEL, EDIT_WIZARD_INPUT_LABEL, START_MANUAL_LABEL, ADD_WIZARD_INPUT_LABEL, OPEN_AI_SETTINGS_LABEL } from "../uiLabels";
 import { hasWizardBrief } from "../newProjectGuard";
 import { generateRecovery } from "../../domain/ai/generateRecovery";
 
@@ -20,13 +20,15 @@ import { generateRecovery } from "../../domain/ai/generateRecovery";
  * 状態の見分けと次の行動をここ1か所に集約する（ADR-0026②：同じ状況なら同じ挙動）。
  *
  * @param purpose その画面で何ができるようになるか（例「仕上がりを確認できます」）。文言に差し込む。
- * @param onAddScene **その画面自身が場面を作れる**とき渡す（たたき台のみ）。渡すと「場面を追加」を出し、
+ * @param onAddScene **その画面自身が場面を作れる**とき渡す（たたき台・場面編集）。渡すと「場面を追加」を出し、
  *                   渡さない画面は「たたき台へ」＝場面を作れる画面へ送る（自分の画面へ送り返さない）。
+ * @param withGoToDraft 場面を作れる画面でも「たたき台へ」を添える（場面編集＝たたき台とは別の画面）。
  */
-export function NoScenesState({ purpose, onNavigate, onAddScene }: {
+export function NoScenesState({ purpose, onNavigate, onAddScene, withGoToDraft = false }: {
   purpose: string;
   onNavigate: (screen: ScreenId) => void;
   onAddScene?: () => void;
+  withGoToDraft?: boolean;
 }) {
   const status = useProjectStore((s) => s.status);
   const aiError = useProjectStore((s) => s.aiError);
@@ -38,6 +40,10 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
   // ⚠️ **入力があるときだけ出す**＝何も入れていない動画に「続き」と言っても行き先が空。
   const meta = useProjectStore((s) => s.meta);
   const canResumeWizard = hasWizardBrief(meta);
+  // ⚠️ **取り消しで場面が0になったら「やり直す」を出す**（通し点検 2026-10-16）＝場面形式で取り消しを重ねると
+  //   場面が無くなり、`Ctrl+Y` でしか戻れなかった（マウスでは行き止まり＝§2-5）。やり直せるときだけ出す。
+  const canRedo = useProjectStore((s) => s.future.length > 0);
+  const redo = useProjectStore((s) => s.redo);
 
   const toDraft = (
     <button className="btn btn-primary btn-icon" onClick={() => onNavigate("draft")}>
@@ -98,6 +104,13 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
           <PlusIcon size={18} />
           場面を追加
         </button>
+        {canRedo && <button className="btn btn-secondary" onClick={redo}>{REDO_LABEL}</button>}
+        {withGoToDraft && (
+          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
+            {GO_TO_DRAFT_LABEL}
+            <ChevronRightIcon size={18} />
+          </button>
+        )}
       </div>
     ) : (
       toDraft

@@ -93,8 +93,7 @@ import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity"
 import { Switch } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
 import { textKeyOfLayer } from "../../domain/template/layerOps";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { NoScenesState } from "../components/NoScenesState";
 import {
   SearchIcon,
   PhotoIcon,
@@ -259,8 +258,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
-  // 開いている動画（場面が0のときに「動画が無い」と「場面が無い」を見分ける）。
-  const openProjectId = useProjectStore((s) => s.meta.projectId);
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -604,33 +601,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   });
 
   if (!selected) {
-    // ⚠️ **開いている動画の場面が0になったときは、戻る道を出す**（通し点検 2026-10-16）＝取り消しを重ねて場面が
-    //   無くなると「新しい動画を作る」しか出ず、**やり直す・場面を足す・台本表へ戻る**がマウスでは無かった
-    //   （`Ctrl+Y` でしか戻れない＝§2-5 の行き止まり）。
-    if (status !== "generating" && openProjectId !== "") {
-      return (
-        <div className="main-scroll">
-          <EmptyState
-            title="この動画には場面がありません"
-            message="場面を足すか、取り消した場面を「やり直す」で戻してください。"
-            action={
-              <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
-                <button className="btn btn-primary" disabled={isExporting} onClick={() => setSelectedId(addScene())}>場面を追加</button>
-                {canRedo && <button className="btn btn-secondary" disabled={isExporting} onClick={redo}>↷ やり直す</button>}
-                <button className="btn btn-ghost" onClick={() => onNavigate("draft")}>台本表へ戻る</button>
-              </div>
-            }
-          />
-        </div>
-      );
-    }
+    // ⚠️ **場面が0の表示は共有の部品に任せる**（#590・ADR-0026②＝同じ状況なら同じ挙動）＝作成中・失敗・入力の続き・
+    //   取り消しで0になったときの「やり直す」（通し点検 2026-10-16）までそこが見分ける。この画面は場面を作れるので
+    //   「場面を追加」を渡し、たたき台とは別の画面なので「たたき台へ」も添える。
     return (
       <div className="main-scroll">
-        <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : "編集する場面がありません"}
-          message="「新しい動画を作る」から動画案を作成してください。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => setSelectedId(addScene())} withGoToDraft />
       </div>
     );
   }

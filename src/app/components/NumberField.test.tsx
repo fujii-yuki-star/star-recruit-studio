@@ -105,6 +105,21 @@ describe("NumberField（見せ方だけ丸める）", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  // ⚠️ 焦点が入ったときの文字と比べていたので、Enter で確定したあと元の値へ打ち直すと黙って捨てていた（PR レビュー 🟡）。
+  it("Enter で確定したあと、焦点を入れたまま元の値へ打ち直しても確定する", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<NumberField label="幅" value={5} onChange={onChange} />);
+    const input = screen.getByRole("spinbutton");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "6" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(6);
+    rerender(<NumberField label="幅" value={6} onChange={onChange} />);
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenLastCalledWith(5);
+  });
+
   it("打ち直したら確定する", () => {
     const onChange = vi.fn();
     render(<NumberField label="開始" value={32 + 2 / 30} onChange={onChange} />);

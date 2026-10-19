@@ -387,6 +387,8 @@ export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, pu
 
 /** 空状態から「場面を作る画面」へ行く導線のラベル（4画面で同じ言葉＝同じ行き先）。 */
 export const GO_TO_DRAFT_LABEL = "たたき台へ";
+/** 場面が0のときの「やり直す」（取り消しで場面が無くなったときの戻り道・通し点検 2026-10-16）。上の道具の行と同じ言い方。 */
+export const REDO_LABEL = "↷ やり直す";
 
 /**
  * 動画案の作成に失敗したときの見出し・説明・復帰の2択（#393 P1）。**生成中の画面と空状態（4画面）で共有**する（#590）。

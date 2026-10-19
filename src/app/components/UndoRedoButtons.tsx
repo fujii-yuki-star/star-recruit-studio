@@ -2,6 +2,8 @@
 // 同じ操作は全画面で同じ見た目・位置・語彙にする（`06_UI_SPEC.md §操作の統一規約`＝共有コンポーネント＋単一参照元）。
 // 置く画面：たたき台・場面編集・タイムライン編集（store 履歴＝ADR-0020）／テンプレ作成（画面ローカル下書きの履歴）。
 // **戻す対象は画面ごとに違う**が、見た目・ラベル・キー案内はここ1か所に集約してドリフトを防ぐ（ADR-0026②）。
+import { REDO_LABEL } from "../uiLabels";
+
 export function UndoRedoButtons({
   canUndo,
   canRedo,
@@ -42,7 +44,7 @@ export function UndoRedoButtons({
         aria-label="やり直す"
         title={redoLabel ? `やり直す：${redoLabel}（Ctrl+Y）` : "やり直す（Ctrl+Y）"}
       >
-        ↷ やり直す
+        {REDO_LABEL}
       </button>
     </>
   );
