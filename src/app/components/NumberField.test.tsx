@@ -89,12 +89,22 @@ describe("NumberField（見せ方だけ丸める）", () => {
     expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("32.067");
   });
 
+  // ⚠️ 丸めた文字（32.067）から上下キー・矢印のボタンで刻むと、ブラウザは刻みの格子へ寄せるだけで1コマ進まなかった（実機）。
+  it("焦点が入ったら正確な値を見せる（刻むときの起点を丸めない）", () => {
+    render(<NumberField label="開始" value={32 + 2 / 30} step={1 / 30} onChange={vi.fn()} />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.focus(input);
+    expect(input.value).toBe(String(32 + 2 / 30));
+    fireEvent.blur(input);
+    expect(input.value).toBe("32.067");
+  });
+
   it("整数・短い小数はそのまま", () => {
     render(<NumberField label="長さ" value={2.5} onChange={vi.fn()} />);
     expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("2.5");
   });
 
-  it("触らずに離れたら値を変えない（丸めた表示で書き換えない）", () => {
+  it("触らずに離れたら値を変えない（焦点の間は正確な値＝丸めた値で書き換えない）", () => {
     const onChange = vi.fn();
     render(<NumberField label="開始" value={32 + 2 / 30} onChange={onChange} />);
     const input = screen.getByRole("spinbutton");

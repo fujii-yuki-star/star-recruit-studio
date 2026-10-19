@@ -10,6 +10,7 @@ import { useState, type CSSProperties } from "react";
  *
  * ⚠️ **生の小数を出さない**（通し点検 2026-10-16）＝コマに乗せた時刻（1/30 秒刻み）をそのまま出すと
  *   「開始（秒）」が `32.06666666666667` になっていた。値そのものは変えない（見せ方だけ）。
+ * ⚠️ **丸めるのは見ているときだけ**＝焦点が入ったら正確な値に戻す（丸めた文字から刻むと1コマ進まない）。
  */
 function numberFieldText(value: number): string {
   return String(Number(value.toFixed(3)));
@@ -63,10 +64,6 @@ export function NumberField({
 
   const commit = (): void => {
     if (draft == null) return;
-    // ⚠️ **いまの値の表示と同じ文字なら変えない**＝表示は丸めてあるので、そのまま確定すると値が丸めた値に
-    //   書き換わる（コマに乗せた時刻がコマの格子から外れる）。⚠️ 比べる相手は**確定する時点の**表示
-    //   （焦点が入ったときの文字と比べると、Enter で確定したあと元の値へ打ち直したのを黙って捨てる・PR レビュー 🟡）。
-    if (!isEmpty && draft.trim() === numberFieldText(value)) { setDraft(null); return; }
     const t = draft.trim();
     if (t === "") {
       // 空で確定：クリア可能な欄はクリア、そうでなければ何もしない（＝元値へ戻る）。
@@ -96,7 +93,9 @@ export function NumberField({
       disabled={disabled}
       style={inputStyle}
       value={shown}
-      onFocus={() => setDraft(isEmpty ? "" : numberFieldText(value))}
+      // ⚠️ **打っている間は正確な値を見せる**（実機で確かめた）＝丸めた文字（`1.033`）から上下キー・矢印のボタンで
+      //   刻むと、ブラウザは刻みの格子（1コマ＝1/30 秒）へ寄せるだけで**1コマ進まなかった**。丸めるのは見ているときだけ。
+      onFocus={() => setDraft(isEmpty ? "" : String(value))}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
