@@ -760,6 +760,9 @@ enum Attempt {
 /// ⚠️ **1つ前の回も残す**（2026-10-09 の実機確認）＝作り直すと最初の回の応答が上書きされ、
 ///   「空の案」と判定された1回目の中身を確かめられなかった（作り直しは最大2回＋空の案の作り直し）。
 fn keep_last_response(content: &str) {
+    if !KEEP_AI_EXCHANGE {
+        return;
+    }
     if let Some(dir) = crate::trouble_log::dir() {
         let last = dir.join(LAST_RESPONSE_FILE);
         if last.exists() {
@@ -777,8 +780,28 @@ pub const PREV_RESPONSE_FILE: &str = "ai_prev_response.txt";
 ///（2026-10-09：アプリでは止まらなかったのに、似せた入力では再現しなかった＝送った中身が違うと疑えた）。
 pub const LAST_REQUEST_FILE: &str = "ai_last_request.json";
 
-/// 最後に送った依頼を残す（このパソコンの記録の置き場だけ・毎回上書き）。
+/// 同梱の AI とのやり取り（依頼・応答）を記録の置き場へ残すか。**開発版だけ**。
+///
+/// ⚠️ **配布版では残さない**（α 残件の洗い直し・利用者判断 2026-10-19）＝依頼には**入力した会社の情報がそのまま**入る。
+///   アプリはこれを一度も読み返さない（作る側が同じ依頼を送り直して調べるためだけ＝`scripts/local-llm/replay-request.mjs`）
+///   ので、残さなくても AI の出来は変わらない。古い版が残したものは起動時に消す（`forget_ai_exchange`）。
+const KEEP_AI_EXCHANGE: bool = cfg!(debug_assertions);
+
+/// 古い版が残した、同梱の AI とのやり取りの記録を消す（配布版の起動時）。
+pub fn forget_ai_exchange(dir: &std::path::Path) {
+    if KEEP_AI_EXCHANGE {
+        return;
+    }
+    for name in [LAST_REQUEST_FILE, LAST_RESPONSE_FILE, PREV_RESPONSE_FILE] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+}
+
+/// 最後に送った依頼を残す（このパソコンの記録の置き場だけ・毎回上書き・開発版だけ）。
 fn keep_last_request(body: &serde_json::Value) {
+    if !KEEP_AI_EXCHANGE {
+        return;
+    }
     if let Some(dir) = crate::trouble_log::dir() {
         if let Ok(text) = serde_json::to_string_pretty(body) {
             let _ = std::fs::write(dir.join(LAST_REQUEST_FILE), text);
