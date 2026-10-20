@@ -19,6 +19,7 @@ import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import { useCanvasDrag } from "../hooks/useCanvasDrag";
 import { SNAP_GUIDE_COLOR } from "./overlayColors";
 import { editScaleStyle } from "../canvasWarp";
+import { CANVAS_HANDLE_SIZE } from "./canvasHandle";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -940,8 +941,8 @@ export function FreeLayoutOverlay({
                         position: "absolute",
                         left: hd.left,
                         top: hd.top,
-                        width: 12,
-                        height: 12,
+                        width: CANVAS_HANDLE_SIZE,
+                        height: CANVAS_HANDLE_SIZE,
                         transform: "translate(-50%, -50%)",
                         background: "#fff",
                         border: "2px solid var(--color-primary)",
@@ -959,7 +960,7 @@ export function FreeLayoutOverlay({
                       onPointerDown={(e) => beginRotate(e, el)}
                       title="ドラッグで回転（Shift で15°ずつ）"
                       style={{
-                        position: "absolute", left: "50%", top: -22, width: 12, height: 12,
+                        position: "absolute", left: "50%", top: -22, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE,
                         transform: "translate(-50%, -50%)", background: "#fff",
                         border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab",
                       }}
@@ -1027,7 +1028,7 @@ export function FreeLayoutOverlay({
                   data-testid={`group-scale-${hd.corner}`}
                   onPointerDown={(e) => beginGroupScale(e, activeGroup, activeGroupFrame)}
                   style={{
-                    position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,
+                    position: "absolute", left: hd.left, top: hd.top, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE,
                     transform: "translate(-50%, -50%)", background: "#fff",
                     border: "2px solid var(--color-primary)", borderRadius: 2,
                     cursor: resizeCursor(hd.corner, activeGroupFrame.rotation),
@@ -1041,7 +1042,7 @@ export function FreeLayoutOverlay({
                 onPointerDown={(e) => beginGroupRotate(e, activeGroup, activeGroupFrame)}
                 title="ドラッグでグループを回転（Shift で15°ずつ）"
                 style={{
-                  position: "absolute", left: "50%", top: -22, width: 12, height: 12,
+                  position: "absolute", left: "50%", top: -22, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE,
                   transform: "translate(-50%, -50%)", background: "#fff",
                   border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab",
                 }}
@@ -1073,7 +1074,7 @@ export function FreeLayoutOverlay({
               data-testid={`group-handle-${hd.corner}`}
               onPointerDown={(e) => beginGroupResize(e, hd.corner)}
               style={{
-                position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,
+                position: "absolute", left: hd.left, top: hd.top, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE,
                 transform: "translate(-50%, -50%)", background: "#fff",
                 border: "2px solid var(--color-primary)", borderRadius: 2, cursor: hd.cursor,
                 pointerEvents: "auto",
