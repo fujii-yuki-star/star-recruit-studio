@@ -18,7 +18,7 @@ import { BLEND_MODE, isMixingBlend, CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENT
 import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { VOICES_FROM_SUBTITLES_HINT, voicesFromSubtitlesLabel, clipKeyTitle } from "../uiLabels";
-import { clipKeyframeTimes } from "../../domain/timeline/keyframeMarks";
+import { clipKeyframeTimes, keyframeSeekSec } from "../../domain/timeline/keyframeMarks";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, unusedAssetsCleanupConfirm, unusedAssetsCleanupLabel, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
@@ -5530,7 +5530,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                               clipKeyframeTimes(doc, c.id).map((t) => (
                                 <span
                                   key={`key-${t}`}
-                                  className={`timeline-clip-key${Math.abs(playheadSec - (c.startSec + t)) < 1e-6 ? " timeline-clip-key--current" : ""}`}
+                                  className={`timeline-clip-key${markerTimeEq(playheadSec, keyframeSeekSec(c, t, clockFps)) ? " timeline-clip-key--current" : ""}`}
                                   data-testid="clip-key"
                                   data-time={c.startSec + t}
                                   style={{ left: `${(t / c.durationSec) * 100}%` }}
@@ -5540,7 +5540,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (useTimelineStore.getState().isPlaying) pause();
-                                    setPlayhead(c.startSec + t);
+                                    setPlayhead(keyframeSeekSec(c, t, clockFps));
                                     followPlayhead();
                                   }}
                                 />

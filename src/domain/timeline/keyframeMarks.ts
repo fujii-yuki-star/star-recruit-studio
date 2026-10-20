@@ -17,3 +17,14 @@ export function clipKeyframeTimes(doc: TimelineProject, clipId: string): number[
   const times = anim.keyframes.map((k) => k.timeSec).filter((t) => t >= 0 && t <= clip.durationSec);
   return [...new Set(times)].sort((a, b) => a - b);
 }
+
+/**
+ * 印を押したときに移る時刻（動画の先頭からの秒）。
+ * ⚠️ **帯の末尾ちょうどのキーは1コマ手前へ**（PR レビュー ℹ️）＝部品が映るのは末尾を含まない半開区間なので、末尾へ移ると
+ *   **その部品が映っていない時刻**になる（Premiere の終わりの点も最後のコマを指す）。
+ */
+export function keyframeSeekSec(clip: { startSec: number; durationSec: number }, timeSec: number, fps: number): number {
+  const frame = fps > 0 ? 1 / fps : 0;
+  const t = timeSec >= clip.durationSec ? Math.max(0, clip.durationSec - frame) : timeSec;
+  return clip.startSec + t;
+}

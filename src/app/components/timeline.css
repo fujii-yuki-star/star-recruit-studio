@@ -861,7 +861,8 @@
 }
 
 /* ── キーフレームの印（#1186 ②）＝選んだ帯の下端にひし形。押すとその時刻へ。
-   ⚠️ 見た目＝当たり判定（ADR-0047 決定3）。帯の掴みより手前（取っ手より奥）。 */
+   ⚠️ 見た目＝当たり判定（ADR-0047 決定3）。帯の掴みより手前・**端の取っ手より奥**（`.timeline-clip-handle` の z-index 2 より下＝
+   帯の先頭・末尾のキーの印が取っ手に重なっても、端を縮める操作が勝つ＝Premiere・CapCut の型・PR レビュー 🟡）。 */
 .timeline-clip-key {
   position: absolute;
   bottom: 3px;
@@ -873,7 +874,7 @@
   border: 1.5px solid var(--color-primary);
   background: var(--color-surface);
   cursor: pointer;
-  z-index: 3;
+  z-index: 1;
 }
 .timeline-clip-key--current {
   background: var(--color-primary);

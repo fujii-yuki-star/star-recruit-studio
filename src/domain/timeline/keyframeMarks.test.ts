@@ -1,7 +1,7 @@
 // 選んだ部品の帯に出すキーフレームの印（#1186 ②）。
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { clipKeyframeTimes } from './keyframeMarks';
+import { clipKeyframeTimes, keyframeSeekSec } from './keyframeMarks';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -22,6 +22,15 @@ function doc(animations: TimelineProject['animations']): TimelineProject {
     animations,
   } as TimelineProject;
 }
+
+describe('keyframeSeekSec', () => {
+  it('その時刻へ・帯の末尾ちょうどは1コマ手前（部品が映っている時刻へ）', () => {
+    const clip = { startSec: 2, durationSec: 3 };
+    expect(keyframeSeekSec(clip, 1.5, 30)).toBe(3.5);
+    expect(keyframeSeekSec(clip, 0, 30)).toBe(2);
+    expect(keyframeSeekSec(clip, 3, 30)).toBeCloseTo(2 + 3 - 1 / 30, 9);
+  });
+});
 
 describe('clipKeyframeTimes', () => {
   it('自身のキーの時刻を昇順に・帯の長さの外は出さない・同じ時刻のキーは1つ（外の AI が書いた文書でも）', () => {
