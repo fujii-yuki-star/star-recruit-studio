@@ -2764,6 +2764,20 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     });
   };
 
+  // **使っていない素材を片づける**（#1480）＝件数つきで出し、確かめてから外す（ファイルはごみ箱）。
+  it("使っていない素材を片づける（件数・確かめてから・取り消しでは戻らないと言う）", async () => {
+    const trash = vi.spyOn(await import("../../infrastructure/assetFs"), "trashProjectFiles").mockResolvedValue(1);
+    withAsset({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, assetId: "asset_003" }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "使っていない素材を片づける（2件）" }));
+    expect(screen.getByText(/「会社の外観」「曲」を一覧から外し、ファイルをごみ箱へ移します/)).toBeInTheDocument();
+    expect(screen.getByText(/「取り消す」では戻りません/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "片づける" }));
+    expect(useTimelineStore.getState().doc!.assets.map((a) => a.assetId)).toEqual(["asset_003"]);
+    expect(trash).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /使っていない素材を片づける/ }), "無くなったのに出ている").toBeNull();
+  });
+
   it("文字を置ける（置いたら選ばれていて、すぐ直せる）", () => {
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

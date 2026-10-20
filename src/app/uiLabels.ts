@@ -74,6 +74,16 @@ export const Z_ORDER_LABEL = "重ね順";
  * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
  */
 export const DUPLICATE_LABEL = "複製";
+/** タイムライン形式の「使っていない素材を片づける」（#1480）。件数つき。 */
+export function unusedAssetsCleanupLabel(count: number): string {
+  return `使っていない素材を片づける（${count}件）`;
+}
+/** 片づける前の確認（#1480）＝何がどこへ行くか・戻し方を言う（ADR-0064 と同じ＝ごみ箱）。 */
+export function unusedAssetsCleanupConfirm(names: readonly string[]): string {
+  const head = names.slice(0, 5).join("」「");
+  const rest = names.length > 5 ? `」ほか${names.length - 5}件` : "」";
+  return `どの部品にも使っていない素材「${head}${rest}を一覧から外し、ファイルをごみ箱へ移します。この操作は「取り消す」では戻りません。必要になったらごみ箱から戻して取り込み直してください。`;
+}
 /** 部品の音のノイズを減らす切り替え（ADR-0068）。 */
 export const DENOISE_LABEL = "ノイズを減らす";
 /** ノイズを減らした音を作っている間（ADR-0068）。 */
