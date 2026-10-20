@@ -648,6 +648,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     subtitleExportedMessage: "字幕ファイルを書き出したあとの知らせ（書いた数）＝失敗ではない（ADR-0055 決定4）",
     silenceAppliedMessage: "無音を詰めたあとの知らせ（詰めた数と秒）＝失敗ではない（#1385）",
     reorientNotice: "縦横を入れ替えた版を作ったあとの知らせ（残した見た目・出なくなった中身・はみ出しの数の組み合わせで文が変わる）＝失敗ではない（ADR-0057）",
+    voicesFromSubtitlesMessage: "字幕から読み上げを作ったあとの知らせ（置いた数・作らなかった数・声を後で作るか）＝作れる字幕が無いときも文書を変えずに選び方を言うだけ（#1485・字幕ファイルの読み込みの知らせと同じ扱い）",
     transcriptPlacedMessage: "声を文字にした行を字幕にしたあとの知らせ（並べた数・上限を越えた数）＝失敗ではない（ADR-0058・字幕ファイルの読み込みと同じ扱い）",
     transcriptCutMessage: "選んだ行を消して詰めたあとの知らせ（数と秒）＝失敗ではない（ADR-0058・`silenceAppliedMessage` と同じ扱い）",
     transcriptCutSummary: "断り・知らせではなく、消して詰める前の確認の文（`silenceSummary` と同じ扱い）",

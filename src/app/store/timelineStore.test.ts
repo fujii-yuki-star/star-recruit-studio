@@ -1522,6 +1522,14 @@ describe('importSubtitleFile', () => {
     expect(useTimelineStore.getState().doc!.clips.some((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)).toBe(false);
   });
 
+  // ⚠️ **置いた字幕を選んだ状態にする**（#1485）＝そのまま「選んだ字幕から読み上げを作る」が全部に効く。
+  it('並べた字幕を選んだ状態にする', () => {
+    setDoc();
+    useTimelineStore.getState().importSubtitleFile(enc('1\n00:00:01,000 --> 00:00:02,000\nあ\n\n2\n00:00:03,000 --> 00:00:04,000\nい\n'));
+    const subs = useTimelineStore.getState().doc!.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle).map((c) => c.id);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(subs);
+  });
+
   it('読めない・何も無いは断り、文書を変えない', () => {
     setDoc();
     const before = useTimelineStore.getState().doc;

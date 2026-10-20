@@ -1611,7 +1611,7 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
 export function importSubtitleCues(
   doc: TimelineProject,
   cues: readonly { startSec: number; endSec: number; text: string }[],
-): { doc: TimelineProject; placed: number; beyondLimit: number } {
+): { doc: TimelineProject; placed: number; beyondLimit: number; placedIds: string[] } {
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
   const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
@@ -1620,6 +1620,7 @@ export function importSubtitleCues(
   const newTracks: string[] = [];
   let placed = 0;
   let beyondLimit = 0;
+  const placedIds: string[] = [];
   for (const cue of cues) {
     const startSec = Math.max(0, cue.startSec);
     const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, cue.endSec - startSec);
@@ -1641,9 +1642,113 @@ export function importSubtitleCues(
       text: cue.text,
     };
     cur = { ...cur, clips: [...cur.clips, clip] };
+    placedIds.push(clip.id);
     placed += 1;
   }
-  return { doc: placed > 0 ? cur : doc, placed, beyondLimit };
+  return { doc: placed > 0 ? cur : doc, placed, beyondLimit, placedIds };
+}
+
+/**
+ * **字幕から読み上げを作る**（ADR-0055 追補 2026-10-20・#1485）＝1回の編集（取り消し1回で全部戻る）。
+ *
+ * - 対象＝渡した部品のうち、**連動していない字幕**で、自分の文があり、列が固定されていないもの。対象外の字幕は数えて返す
+ *   （呼ぶ側が言う＝黙って飛ばさない）。字幕でない部品は数えない（選んだ中に混ざっていてよい）。
+ * - 字幕と**同じ時刻・同じ長さ**の読み上げを、**新しい音の列**へ置く（`importSubtitleCues` と同じ＝既存の部品と重ねない・
+ *   重なる分だけ列を足す）。声は動画全体の声（話者は空＝継承）。読み上げる文は字幕の文から改行を除いたもの。
+ * - 字幕は作った読み上げへ**連動させる**（声を作ると長さが声に合う）。字幕の文が読み上げの文と同じなら外して追従させ、
+ *   改行を含むなら**自分の文として残す**（見た目の改行を黙って消さない）。
+ */
+export function voicesFromSubtitles(
+  doc: TimelineProject,
+  subtitleIds: readonly string[],
+): { doc: TimelineProject; voiceIds: string[]; skipped: number } {
+  const ids = new Set(subtitleIds);
+  const locked = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
+  const targets = doc.clips
+    .filter((c) => ids.has(c.id) && c.kind === TIMELINE_CLIP_KIND.subtitle)
+    .sort((a, b) => a.startSec - b.startSec);
+  let cur = doc;
+  const newTracks: string[] = [];
+  const voiceIds: string[] = [];
+  let skipped = 0;
+  for (const sub of targets) {
+    const own = sub.text ?? '';
+    // 英数字どうしの改行は空白1つにする（`Hello\nworld` を `Helloworld` と読ませない・PR レビュー ℹ️）。日本語は詰める。
+    const text = own.replace(/([A-Za-z0-9])\s*\r?\n\s*(?=[A-Za-z0-9])/g, '$1 ').replace(/\s*\r?\n\s*/g, '').trim();
+    if (sub.voiceClipId != null || text.length === 0 || locked.has(sub.trackId)) {
+      skipped += 1;
+      continue;
+    }
+    let trackId = newTracks.find((id) => isFreeSpan(cur.clips, id, sub.startSec, sub.durationSec));
+    if (!trackId) {
+      trackId = createTrackId(cur.tracks.map((t) => t.id));
+      newTracks.push(trackId);
+      cur = { ...cur, tracks: [...cur.tracks, { id: trackId, kind: TRACK_KIND.audio }] };
+    }
+    const id = createClipId(cur.clips.map((c) => c.id));
+    const voice: TimelineClip = {
+      id,
+      kind: TIMELINE_CLIP_KIND.voice,
+      trackId,
+      startSec: sub.startSec,
+      durationSec: sub.durationSec,
+      voice: { text, status: NARRATION_STATUS.none },
+    };
+    const linked: TimelineClip = { ...sub, voiceClipId: id };
+    if (own === text) delete linked.text;
+    cur = { ...cur, clips: [...cur.clips.map((c) => (c.id === sub.id ? linked : c)), voice] };
+    voiceIds.push(id);
+  }
+  return { doc: voiceIds.length > 0 ? cur : doc, voiceIds, skipped };
+}
+
+/**
+ * 読み上げの長さを実際の声の長さへ合わせる。**伸ばした先が隣とぶつかるなら、空いた列へ移してから合わせる**
+ * （ADR-0055 追補 2026-10-20 決定5・#1485）＝字幕から作った読み上げは、字幕の区切りが詰まって並ぶので、声が少しでも長いと
+ * 次の字幕・次の読み上げにぶつかって合わせられない。「重なる分だけ列を足す」（読み込みと同じ規則）を、長さが分かった時点で当てる。
+ *
+ * - まず今の場所で合わせる（`trimClip`＝連動した字幕も一緒に動く）。通ればそのまま。
+ * - ぶつかるときだけ、読み上げは**読み上げだけが並ぶ音の列**（列の音量を変えていないもの＝BGM の列の音量が声に掛からない）、
+ *   連動した字幕は**字幕だけが並ぶ映像の列**の中から、その区間が空いた列へ移す。無ければ列を足す。固定・隠した列には移さない。
+ * - 列が固定されているなど、移しても合わせられない理由はそのまま返す（黙って別の結果にしない）。
+ * - ⚠️ **移す元が隠した列なら移さない**（PR レビュー 🟡）＝見える列へ移すと、出さないつもりの字幕・声が出る。
+ * - ⚠️ **立ち絵の「喋っている間の動き」が結んだ音の列からも、その列へも移さない**（ADR-0056・PR レビュー 🟡）＝
+ *   移すと、結んだ立ち絵がこの声で動かなくなる／別の立ち絵がこの声で動き出す。
+ */
+export function fitVoiceLength(doc: TimelineProject, voiceClipId: string, durationSec: number): EditResult {
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice) return blocked(EDIT_BLOCKED.notFound);
+  const endSec = voice.startSec + durationSec;
+  const first = trimClip(doc, voiceClipId, 'end', endSec);
+  if (first.ok || voice.kind !== TIMELINE_CLIP_KIND.voice) return first;
+  const subs = subtitlesBoundTo(doc, voiceClipId);
+  const trackOf = (id: string): Track | undefined => doc.tracks.find((t) => t.id === id);
+  if ([voice, ...subs].some((c) => trackOf(c.trackId)?.locked || trackOf(c.trackId)?.hidden)) return first;
+  const talkBound = new Set(doc.clips.map((c) => c.talkMotion?.trackId).filter((id): id is string => id != null));
+  if (talkBound.has(voice.trackId)) return first;
+  const span = { startSec: voice.startSec, durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, durationSec) };
+  let cur = doc;
+  const roomFor = (clip: TimelineClip, kind: TrackKind, sameKind: TimelineClipKind): string => {
+    const usable = (t: Track): boolean =>
+      t.kind === kind && !t.locked && !t.hidden && (t.volume == null || t.volume === 1) && !talkBound.has(t.id)
+      && cur.clips.every((c) => c.trackId !== t.id || c.kind === sameKind)
+      && isFreeSpan(cur.clips, t.id, span.startSec, span.durationSec, clip.id);
+    const here = cur.tracks.find((t) => t.id === clip.trackId);
+    if (here && isFreeSpan(cur.clips, here.id, span.startSec, span.durationSec, clip.id)) return here.id;
+    const found = cur.tracks.find(usable);
+    if (found) return found.id;
+    const id = createTrackId(cur.tracks.map((t) => t.id));
+    cur = { ...cur, tracks: [...cur.tracks, { id, kind }] };
+    return id;
+  };
+  const voiceTrack = roomFor(voice, TRACK_KIND.audio, TIMELINE_CLIP_KIND.voice);
+  cur = withClip(cur, { ...voice, trackId: voiceTrack });
+  for (const sub of subs) {
+    const subTrack = roomFor(sub, TRACK_KIND.visual, TIMELINE_CLIP_KIND.subtitle);
+    cur = withClip(cur, { ...sub, trackId: subTrack });
+  }
+  const second = trimClip(cur, voiceClipId, 'end', endSec);
+  return second.ok ? second : first;
 }
 
 /** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */
