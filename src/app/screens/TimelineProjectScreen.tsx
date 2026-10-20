@@ -299,6 +299,15 @@ const CLIP_BADGE_MIN_W_PX = 110;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
+
+/**
+ * 並びの枠の上に**貼り付いている行**（目盛り）の高さ（#1477）。縦に送る帯はこの下から測る。
+ * ⚠️ 数を写さずに測る＝高さは CSS（`--timeline-ruler-h`）が決める。見つからなければ 0。
+ */
+function stickyHeadHeightOf(scroller: HTMLElement): number {
+  const head = scroller.querySelector<HTMLElement>(".timeline-inner > .timeline-row:first-child");
+  return head?.getBoundingClientRect().height ?? 0;
+}
 /** 並びの枠の id（全体図の帯が `aria-controls` で指す）。 */
 const TIMELINE_SCROLL_ID = "timeline-arrange-scroll";
 
@@ -2580,7 +2589,21 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   };
   // 掴んだまま端まで来たら送る（#714-1）＝**置く側と帯側で同じ部品**（送り方を2つ作らない）。
   // 左の送る帯は**列の名前の欄の内側**から測る（欄の下に隠れると、どこへ入るか見ながら送れない）。
-  const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
+  const autoScrollX = useEdgeAutoScroll(LANE_LABEL_PX);
+  // ⚠️ **縦にも送る**（#1477・業界の型）＝列が多くて枠の外にある列へ運べなかった（帯を運ぶ・置く・囲んで選ぶ）。
+  //   上の送る帯は**貼り付いた目盛りの行の下**から測る（行の下に隠れると、どの列へ入るか見ながら送れない＝横の名前の欄と同じ理由）。
+  const autoScrollY = useEdgeAutoScroll(stickyHeadHeightOf, "y");
+  /** 掴んで運ぶ間の端送り（横と縦を一緒に）。速さ・行き止まりの規則は同じ部品。 */
+  const autoScroll = {
+    track: (el: HTMLElement | null, ev: PointerEvent, replay: (ev: PointerEvent) => void): void => {
+      autoScrollX.track(el, ev, replay);
+      autoScrollY.track(el, ev, replay);
+    },
+    stop: (): void => {
+      autoScrollX.stop();
+      autoScrollY.stop();
+    },
+  };
   // 列の並べ替えは**縦**に送る（置く・運ぶは横）。速さ・行き止まりの規則は同じ部品から。
   const trackAutoScroll = useEdgeAutoScroll(0, "y");
   const stageRef = useRef<HTMLDivElement>(null);

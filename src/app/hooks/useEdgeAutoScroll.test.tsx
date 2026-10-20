@@ -167,4 +167,18 @@ describe("縦にも送れる（並べ替えの端送り・#714 項目5）", () =
     act(() => { result.current.track(tallBox(), { clientX: 900, clientY: 599 } as PointerEvent, vi.fn()); });
     expect(raf.pending).toBe(0);
   });
+
+  // ⚠️ **始点の見えない幅を枠から測る**（#1477）＝上に貼り付いた目盛りの行の下から送る帯を数える。
+  //   数を写すと、目盛りの高さ（CSS）を変えたときに片方だけずれる。
+  it("始点の見えない幅は、枠を見て測った値を使う（上に貼り付いた行の下から）", () => {
+    const measure = vi.fn(() => 100);
+    const { result } = renderHook(() => useEdgeAutoScroll(measure, "y"));
+    const el = tallBox();
+    el.scrollTop = 500;
+    // 100px の行の下＝上の送る帯（100〜148）に入っている。0 から数えると帯の外（真ん中）。
+    act(() => { result.current.track(el, { clientX: 200, clientY: 120 } as PointerEvent, vi.fn()); });
+    raf.tick(100);
+    expect(measure).toHaveBeenCalledWith(el);
+    expect(el.scrollTop).toBeLessThan(500);
+  });
 });
