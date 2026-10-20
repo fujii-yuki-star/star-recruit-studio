@@ -1744,9 +1744,13 @@ fn video_filmstrip_impl(
     args.push("-t".into());
     args.push(format!("{span}"));
     args.push("-vf".into());
+    // 色の前処理（ADR-0069）＝書き出し・プレビューと同じ規則で解く（印の無い動画の色が帯だけずれない）。
     args.push(format!(
-        "fps={}/{},scale=-1:48,tile={}x1",
-        frames, span, frames
+        "{}fps={}/{},scale=-1:48,tile={}x1",
+        clip_color_in(&ffmpeg, &input),
+        frames,
+        span,
+        frames
     ));
     args.extend(["-frames:v".to_string(), "1".to_string()]);
     args.push(out.to_string_lossy().into_owned());
@@ -1987,7 +1991,8 @@ fn extract_video_thumbnail_impl(
         "-frames:v".into(),
         "1".into(),
         "-vf".into(),
-        "scale=640:-2".into(),
+        // 色の前処理（ADR-0069）＝書き出し・プレビューと同じ規則で解く。
+        format!("{}scale=640:-2", clip_color_in(&ffmpeg, &input)),
         out.to_string_lossy().into_owned(),
     ];
     run(&ffmpeg, &args).map_err(|e| {
@@ -2120,9 +2125,11 @@ fn extract_video_frame_impl(
     // 同じ名前が再発行され、ディスクには前回の PNG が残っている。
     clear_stale_frame(&out)?;
     let ffmpeg = resolve_ffmpeg(&app);
+    // 色の前処理（ADR-0069）＝切り出した絵は写真の素材になる＝ずれた色を素材に焼き込まない。
+    let color_in = clip_color_in(&ffmpeg, &input);
     let args = match &grid {
-        Some(g) => frame_grid_args(&input, &out, g),
-        None => frame_seconds_args(&input, &out, at_sec),
+        Some(g) => frame_grid_args(&input, &out, g, &color_in),
+        None => frame_seconds_args(&input, &out, at_sec, &color_in),
     };
     run(&ffmpeg, &args).map_err(|e| {
         export_failure(
@@ -2195,9 +2202,14 @@ impl FrameGrid {
 /// ⚠️ **`setpts`/`fps` の綴りは書き出しと同じにする**＝違えば「同じ番号」が別のコマを指す。
 /// 違うのは**横幅を縮めない**ことだけ（止め絵は素材の大きさのまま持ちたい）。
 /// ⚠️ **`select` は `fps` の後ろ**＝並べ直したあとの番号でなければ、書き出しの番号と揃わない。
-fn frame_grid_args(input: &std::path::Path, out: &std::path::Path, g: &FrameGrid) -> Vec<String> {
+fn frame_grid_args(
+    input: &std::path::Path,
+    out: &std::path::Path,
+    g: &FrameGrid,
+    color_in: &str,
+) -> Vec<String> {
     let vf = format!(
-        "setpts=PTS/{},fps={},select='eq(n\\,{})'",
+        "{color_in}setpts=PTS/{},fps={},select='eq(n\\,{})'",
         g.speed, g.fps, g.local_frame
     );
     vec![
@@ -2219,7 +2231,12 @@ fn frame_grid_args(input: &std::path::Path, out: &std::path::Path, g: &FrameGrid
 }
 
 /// 秒で1枚取る（格子を渡せない呼び出し＝素材画面の切り出し）。今までどおりの並べ方。
-fn frame_seconds_args(input: &std::path::Path, out: &std::path::Path, at_sec: f64) -> Vec<String> {
+fn frame_seconds_args(
+    input: &std::path::Path,
+    out: &std::path::Path,
+    at_sec: f64,
+    color_in: &str,
+) -> Vec<String> {
     let seek = frame_seek_args(at_sec);
     let mut args: Vec<String> = vec!["-y".into()];
     if let Some(coarse) = seek.coarse_sec {
@@ -2231,6 +2248,12 @@ fn frame_seconds_args(input: &std::path::Path, out: &std::path::Path, at_sec: f6
     if seek.fine_sec > 0.0 {
         args.push("-ss".into());
         args.push(format!("{}", seek.fine_sec));
+    }
+    // 色の前処理（ADR-0069）。不要なら付けない（今までどおりの並び）。
+    let color = color_in.trim_end_matches(',');
+    if !color.is_empty() {
+        args.push("-vf".into());
+        args.push(color.to_string());
     }
     args.extend([
         "-frames:v".into(),
@@ -3535,7 +3558,11 @@ fn stage_clip_frames_impl(
     let start = clip_start_sec.max(0.0);
     let ffmpeg = resolve_ffmpeg(&app);
     // 出力 f＝clip-time start+(f/fps)*speed：setpts=PTS/speed で速度反映→fps で等間隔サンプル→横幅制限。
-    let vf = format!("setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2");
+    // 色の前処理（ADR-0069）＝この道で取り出したコマは書き出しの絵になる（プレビューと同じ規則で解く）。
+    let vf = format!(
+        "{}setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2",
+        clip_color_in(&ffmpeg, &input)
+    );
     let args: Vec<String> = vec![
         "-y".into(),
         "-ss".into(),
@@ -8800,6 +8827,7 @@ mod staged_output_tests {
             std::path::Path::new("in.mp4"),
             std::path::Path::new("out.png"),
             &FrameGrid::new(Some(1.5), Some(2.0), Some(24), Some(7)).expect("格子"),
+            "",
         );
         let joined = args.join(" ");
         assert!(joined.contains("-ss 1.5"), "頭出しは並べ始める秒: {joined}");
@@ -8813,12 +8841,50 @@ mod staged_output_tests {
         assert!(!joined.contains("scale="), "止め絵は縮めない: {joined}");
     }
 
+    /// 切り出しの絵にも色の前処理（ADR-0069）＝写真の素材になる絵に、ずれた色を焼き込まない。
+    #[test]
+    fn 切り出しの絵も色の前処理を通す() {
+        let pre = color_in_filter(SourceColor::Bt709Assumed { full: false });
+        let grid = frame_grid_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            &FrameGrid::new(Some(1.5), Some(2.0), Some(24), Some(7)).expect("格子"),
+            &pre,
+        )
+        .join(" ");
+        assert!(
+            grid.contains(&format!("-vf {pre}setpts=PTS/2,fps=24")),
+            "前処理は並べ方の前: {grid}"
+        );
+        let secs = frame_seconds_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            3.5,
+            &pre,
+        );
+        let at = secs.iter().position(|s| s == "-vf").expect("-vf がある");
+        assert_eq!(
+            secs[at + 1],
+            pre.trim_end_matches(','),
+            "末尾のカンマは付けない"
+        );
+        // 前処理が要らなければ、今までどおり -vf を付けない。
+        let plain = frame_seconds_args(
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.png"),
+            3.5,
+            "",
+        );
+        assert!(!plain.iter().any(|s| s == "-vf"));
+    }
+
     #[test]
     fn 格子が無いときは今までどおり秒で取る() {
         let args = frame_seconds_args(
             std::path::Path::new("in.mp4"),
             std::path::Path::new("out.png"),
             3.5,
+            "",
         );
         let joined = args.join(" ");
         assert!(!joined.contains("select="), "秒の道は間引かない: {joined}");
