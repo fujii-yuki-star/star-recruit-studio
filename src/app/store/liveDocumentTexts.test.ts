@@ -53,6 +53,18 @@ describe("cleanupBusy", () => {
     expect(cleanupBusy("proj_a")).toBe(true);
   });
 
+  it("1場面・1行だけの声づくり中（準備中）も片づけない", () => {
+    useProjectStore.setState({ meta: { ...initialProject.meta, projectId: "proj_a" }, scenes: [{ narration: { status: "pending" } }] as never });
+    expect(cleanupBusy("proj_a")).toBe(true);
+    useProjectStore.setState({ scenes: [{ narration: { status: "none" }, lines: [{ status: "pending" }] }] as never });
+    expect(cleanupBusy("proj_a")).toBe(true);
+  });
+
+  it("タイムラインで読み上げの声を作っている間も片づけない", () => {
+    useTimelineStore.setState({ doc: { projectId: "proj_t" } as never, generatingVoiceClipId: "clip_001" });
+    expect(cleanupBusy("proj_t")).toBe(true);
+  });
+
   it("何も走っていなければ片づけてよい", () => {
     useProjectStore.setState({ meta: { ...initialProject.meta, projectId: "proj_a" } });
     expect(cleanupBusy("proj_a")).toBe(false);

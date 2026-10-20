@@ -27,7 +27,7 @@ export function UnusedFilesPanel({ projectId, onClose }: { projectId: string; on
         setChecked(new Set(list.map((f) => f.path))); // 既定は全部選ぶ（Logic Pro と同じ）
       })
       .catch((e: unknown) => {
-        if (alive) setError(userFacingMessage(e, "unused-files") ?? unusedFilesLabel.busy);
+        if (alive) setError(userFacingMessage(e, "unused-files") ?? unusedFilesLabel.checkFailed);
       });
     return () => { alive = false; };
   }, [projectId, busyAtOpen]);
@@ -46,7 +46,15 @@ export function UnusedFilesPanel({ projectId, onClose }: { projectId: string; on
       setDone(unusedFilesTrashedMessage(n));
       setFiles(null);
     } catch (e) {
-      setError(userFacingMessage(e, "unused-files-trash") ?? unusedFilesLabel.busy);
+      setError(userFacingMessage(e, "unused-files-trash") ?? unusedFilesLabel.trashFailed);
+      // ⚠️ **途中まで移せた場合がある**（PR #1472 レビュー ℹ️）＝一覧を調べ直して、残っているものだけを見せる。
+      try {
+        const list = await listUnusedProjectFiles(projectId, liveDocumentTexts(projectId));
+        setFiles(list);
+        setChecked((cur) => new Set(list.map((f) => f.path).filter((p) => cur.has(p))));
+      } catch {
+        // 調べ直せなければ、前の一覧のまま（押せば Rust が調べ直す）。
+      }
     } finally {
       setTrashing(false);
     }

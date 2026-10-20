@@ -247,11 +247,27 @@ pub struct UnusedFile {
     pub size: u64,
 }
 
-/// 文書（JSON）の中の全部の文字列を集める（純粋）。区切りは `/` にそろえる。
+/// 道の書き方の揺れをそろえる（純粋）＝区切り `\` → `/`・先頭の `./`・重なった `/`・大文字小文字。
+///
+/// ⚠️ **完全一致で比べない**（PR #1472 レビュー 🟡）＝Windows は `./assets/a.png`・`assets//a.png`・
+/// `Assets/A.PNG` も同じファイルとして開く。持ち込みの AI（ADR-0041/0042）がそう書くと、表示も書き出しも
+/// 正常なのに「使っていない」と取り違え、**使っているファイルを既定で選んでしまう**。
+fn normalize_rel(s: &str) -> String {
+    let mut t = s.replace('\\', "/");
+    while let Some(rest) = t.strip_prefix("./") {
+        t = rest.to_string();
+    }
+    while t.contains("//") {
+        t = t.replace("//", "/");
+    }
+    t.to_lowercase()
+}
+
+/// 文書（JSON）の中の全部の文字列を集める（純粋）。書き方の揺れはそろえる（`normalize_rel`）。
 fn collect_strings(v: &serde_json::Value, out: &mut HashSet<String>) {
     match v {
         serde_json::Value::String(s) => {
-            out.insert(s.replace('\\', "/"));
+            out.insert(normalize_rel(s));
         }
         serde_json::Value::Array(a) => a.iter().for_each(|x| collect_strings(x, out)),
         serde_json::Value::Object(o) => o.values().for_each(|x| collect_strings(x, out)),
@@ -271,7 +287,7 @@ fn referenced_in(texts: &[String]) -> Option<HashSet<String>> {
 
 /// 候補のうち、どこにも書かれていないもの（純粋・名前の順）。
 fn unused_among(mut candidates: Vec<UnusedFile>, referenced: &HashSet<String>) -> Vec<UnusedFile> {
-    candidates.retain(|f| !referenced.contains(&f.path));
+    candidates.retain(|f| !referenced.contains(&normalize_rel(&f.path)));
     candidates.sort_by(|a, b| a.path.cmp(&b.path));
     candidates
 }
@@ -312,9 +328,17 @@ fn documents_of(dir: &Path, live_texts: Vec<String>) -> Result<Vec<String>, Stri
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(unreadable()),
     }
+    // 開けなかった版（`project.broken.json`）も手がかりとして残してあるので、読めれば数える（読めないのは元から壊れた版）。
+    if let Ok(t) = fs::read_to_string(dir.join("project.broken.json")) {
+        if serde_json::from_str::<serde_json::Value>(&t).is_ok() {
+            texts.push(t);
+        }
+    }
     match fs::read_dir(dir.join("restore")) {
         Ok(rd) => {
-            for e in rd.flatten() {
+            // ⚠️ **一覧の読み失敗も断る**（PR #1472 レビュー ℹ️）＝飛ばすと、その時点が使うファイルを数えない。
+            for e in rd {
+                let e = e.map_err(|_| unreadable())?;
                 if e.path().extension().is_some_and(|x| x == "json") {
                     texts.push(fs::read_to_string(e.path()).map_err(|_| unreadable())?);
                 }
@@ -401,8 +425,8 @@ pub fn trash_project_files(
 fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{
-        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE,
-        SHFILEOPSTRUCTW,
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
+        FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW,
     };
     if paths.is_empty() {
         return Ok(());
@@ -410,7 +434,9 @@ fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     // 対象は「NUL で区切り、最後に NUL を2つ」の並び（シェルの決まり）。
     let mut from: Vec<u16> = Vec::new();
     for p in paths {
-        from.extend(p.as_os_str().encode_wide());
+        // シェルの区切りは `\\`（`join` が混ぜた `/` をそろえる・PR #1472 レビュー ℹ️）。
+        let win = p.to_string_lossy().replace('/', "\\");
+        from.extend(std::ffi::OsStr::new(&win).encode_wide());
         from.push(0);
     }
     from.push(0);
@@ -419,7 +445,15 @@ fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
         wFunc: FO_DELETE,
         pFrom: from.as_ptr(),
         pTo: std::ptr::null(),
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16,
+        // ⚠️ **`FOF_WANTNUKEWARNING` を必ず付ける**（PR #1472 レビュー 🟡）＝無いと、ごみ箱に入らない
+        // ファイル（上限より大きい・ごみ箱を使わない設定・ごみ箱の無いドライブ）を**黙って完全に消して**
+        // 成功を返す（画面は「ごみ箱から戻せます」と言ってしまう）。付ければそのときだけ Windows が確認を出し、
+        // 断られれば `fAnyOperationsAborted` で失敗に落ちる＝決定5「移せなかったら消さない」。
+        fFlags: (FOF_ALLOWUNDO
+            | FOF_NOCONFIRMATION
+            | FOF_SILENT
+            | FOF_NOERRORUI
+            | FOF_WANTNUKEWARNING) as u16,
         fAnyOperationsAborted: 0,
         hNameMappings: std::ptr::null_mut(),
         lpszProgressTitle: std::ptr::null(),
@@ -943,6 +977,54 @@ mod unused_file_tests {
         assert!(r.contains("assets/a.png"));
         assert!(r.contains("voices/v.wav"), "区切りを / にそろえる");
         assert!(r.contains("assets/b.mp4"));
+    }
+
+    /// ⚠️ **書き方の揺れで「使っていない」にしない**（PR #1472 レビュー 🟡）。
+    #[test]
+    fn referenced_matches_spelling_variants() {
+        let d = tmp("spell");
+        put(
+            &d,
+            "project.json",
+            r#"{"a":"./assets/a.png","b":"assets//b.png","c":"Assets/C.PNG","d":"voices\\D.wav"}"#,
+        );
+        for f in [
+            "assets/a.png",
+            "assets/b.png",
+            "assets/c.png",
+            "voices/d.wav",
+            "assets/orphan.png",
+        ] {
+            put(&d, f, "x");
+        }
+        let got: Vec<String> = unused_files_in(&d, vec![])
+            .unwrap()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(got, vec!["assets/orphan.png".to_string()]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 実際のファイル名に大文字がある（フォルダから取り込んだ名前など）ときも、そのまま書かれていれば使っている。
+    #[test]
+    fn uppercase_file_names_on_disk_are_matched() {
+        let d = tmp("upper");
+        put(&d, "project.json", r#"{"a":"assets/Photo.PNG"}"#);
+        put(&d, "assets/Photo.PNG", "x");
+        assert!(unused_files_in(&d, vec![]).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 開けなかった版（`project.broken.json`）が読めるなら、そこが使うファイルも残す。
+    #[test]
+    fn readable_broken_copy_is_counted() {
+        let d = tmp("brokencopy");
+        put(&d, "project.json", "{}");
+        put(&d, "project.broken.json", r#"{"x":"assets/kept.png"}"#);
+        put(&d, "assets/kept.png", "x");
+        assert!(unused_files_in(&d, vec![]).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&d);
     }
 
     /// ⚠️ **1つでも読めなければ失敗**（調べられないなら1つも消さない）。

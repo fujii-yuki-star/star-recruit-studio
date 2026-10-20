@@ -31,7 +31,7 @@ describe("UnusedFilesPanel", () => {
     expect(await screen.findByText(/写真：asset_004\.png/)).toBeInTheDocument();
     expect(screen.getByText(/音：old\.wav/)).toBeInTheDocument();
     expect(screen.getAllByRole("checkbox").every((c) => (c as HTMLInputElement).checked)).toBe(true);
-    expect(screen.getByText(/ごみ箱から戻せます/)).toBeInTheDocument(); // 戻せることを必ず言う
+    expect(screen.getByText(/同じ名前で入り、そこから戻せます/)).toBeInTheDocument(); // 戻せること・手がかり（名前）を必ず言う
     // ⚠️ 画面の内容（保存前・履歴）も渡す＝まだ保存していないファイルを「使っていない」としない。
     expect(listUnusedProjectFiles).toHaveBeenCalledWith("proj_1", ["{\"live\":true}"]);
   });
@@ -82,5 +82,33 @@ describe("UnusedFilesPanel", () => {
     render(<UnusedFilesPanel projectId="proj_1" onClose={() => {}} />);
     expect(await screen.findByText(/調べられませんでした/)).toBeInTheDocument();
     expect(trashUnusedProjectFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("UnusedFilesPanel：断りが届かなかったとき", () => {
+  it("調べられなかった・移せなかったで別の文を出す（「終わってから」と取り違えない）", async () => {
+    vi.mocked(listUnusedProjectFiles).mockRejectedValueOnce(new Error("internal"));
+    const { unmount } = render(<UnusedFilesPanel projectId="proj_1" onClose={() => {}} />);
+    expect(await screen.findByText(unusedFilesLabel.checkFailed)).toBeInTheDocument();
+    unmount();
+    vi.mocked(listUnusedProjectFiles).mockResolvedValueOnce(files);
+    vi.mocked(trashUnusedProjectFiles).mockRejectedValueOnce(new Error("internal"));
+    render(<UnusedFilesPanel projectId="proj_1" onClose={() => {}} />);
+    await screen.findByText(/写真：asset_004\.png/);
+    fireEvent.click(screen.getByRole("button", { name: unusedFilesLabel.trash }));
+    expect(await screen.findByText(unusedFilesLabel.trashFailed)).toBeInTheDocument();
+  });
+});
+
+describe("UnusedFilesPanel：途中まで移せたとき", () => {
+  it("移せなかったら一覧を調べ直し、残っているものだけを見せる", async () => {
+    vi.mocked(listUnusedProjectFiles).mockResolvedValueOnce(files).mockResolvedValueOnce([files[1]!]);
+    vi.mocked(trashUnusedProjectFiles).mockRejectedValueOnce(new Error("internal"));
+    render(<UnusedFilesPanel projectId="proj_1" onClose={() => {}} />);
+    await screen.findByText(/写真：asset_004\.png/);
+    fireEvent.click(screen.getByRole("button", { name: unusedFilesLabel.trash }));
+    expect(await screen.findByText(unusedFilesLabel.trashFailed)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/写真：asset_004\.png/)).toBeNull());
+    expect(screen.getByText(/音：old\.wav/)).toBeInTheDocument();
   });
 });
