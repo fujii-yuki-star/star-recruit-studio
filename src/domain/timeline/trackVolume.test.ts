@@ -128,3 +128,15 @@ describe('ソロ（ADR-0067 決定2＝編集中の聞き方だけ）', () => {
     expect([...activeSoloTrackIds(d, ['track_999', 'track_002'])!]).toEqual(['track_002']);
   });
 });
+
+// ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝上限の掛け方を再生と書き出しで割らない。
+describe('部品の音量 × 列の音量が上限を超えるとき', () => {
+  it('再生も書き出しも 1.5 で止まる（点のある部品・無い部品とも）', () => {
+    const pts = [{ timeSec: 0, volume: 1.2 }, { timeSec: 4, volume: 1.2 }];
+    const d = withTrackVolume(doc({ clips: [bgm('clip_001', { volume: 1.2 }), bgm('clip_002', { trackId: 'track_002', startSec: 5, volumePoints: pts })] }), 'track_002', 1.5);
+    expect(audioCuesAt(d, 1).find((q) => q.clipId === 'clip_001')!.volume).toBe(VOLUME_MAX);
+    const { runs } = timelineAudioRuns(d);
+    expect(runs.find((r) => r.clipId === 'clip_001')!.volume).toBe(VOLUME_MAX);
+    expect(runs.find((r) => r.clipId === 'clip_002')!.volumeExpr).not.toContain('1.8');
+  });
+});

@@ -82,3 +82,25 @@ describe('trackVolumeFromPercentText（列の頭の欄の読み方）', () => {
     expect(trackVolumeFromPercentText('abc')).toBeNull();
   });
 });
+
+// ⚠️ **列の番号は使い回す**＝消した列のソロを残すと、後で足した列が勝手にソロになる（PR レビュー 🟡）。
+describe('消した列のソロ', () => {
+  it('列を消すとソロも外れ、同じ番号で足した列はソロにならない', async () => {
+    await open({ ...doc(), tracks: [...doc().tracks, { id: 'track_003', kind: TRACK_KIND.audio }] });
+    useTimelineStore.getState().toggleTrackSolo('track_003');
+    useTimelineStore.getState().removeTrack('track_003');
+    expect(useTimelineStore.getState().soloTrackIds).toEqual([]);
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    expect(useTimelineStore.getState().doc!.tracks.some((t) => t.id === 'track_003')).toBe(true);
+    expect(useTimelineStore.getState().soloTrackIds).toEqual([]);
+  });
+
+  it('取り消しで列が消えたときも外れる', async () => {
+    await open(doc());
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    const added = useTimelineStore.getState().doc!.tracks.find((t) => !doc().tracks.some((o) => o.id === t.id))!.id;
+    useTimelineStore.getState().toggleTrackSolo(added);
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().soloTrackIds).toEqual([]);
+  });
+});

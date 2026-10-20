@@ -3289,8 +3289,20 @@ function commit(
     isPlaying: false,
     // 尺が縮んだら位置を収める（消した部品より後ろに取り残さない）。
     playheadSec: clampTimelinePlayheadSec(next, get().playheadSec),
+    soloTrackIds: liveSoloTrackIds(next, get().soloTrackIds),
     ...extra,
   });
+}
+
+/**
+ * **文書に無い列のソロを外す**（ADR-0067・PR レビュー 🟡）＝列の番号は空いた所から使い回すので、消した列の id を残すと
+ * **あとで足した列が勝手にソロになる**（ほかの列と動画の元の音が鳴らなくなる）。文書を差し替える入口（編集・取り消し）で通す。
+ * 何も変わらなければ同じ配列を返す（購読している画面を描き直させない）。
+ */
+function liveSoloTrackIds(doc: TimelineProject, solo: string[]): string[] {
+  if (solo.length === 0) return solo;
+  const live = solo.filter((id) => doc.tracks.some((t) => t.id === id));
+  return live.length === solo.length ? solo : live;
 }
 
 /** 書き出し中は取り消し・やり直しも止める（`commit` と同じ理由＝焼く文書は始めた時点のもの）。 */
@@ -3309,6 +3321,7 @@ function restore(set: SetState, get: GetState, doc: TimelineProject, history: Hi
   set({
     doc,
     history,
+    soloTrackIds: liveSoloTrackIds(doc, get().soloTrackIds),
     // ⚠️ **開いているまとめを畳む**（#817-1）＝畳まないと、戻した**後**の編集が「まとめの続き」と
     // みなされて**履歴に積まれず**（最初の1回しか記録しない）、`future` も捨てられない。
     // 実測＝矢印で動かす→600ms 以内に `Ctrl+Z`→もう一度動かす、で**その移動が取り消せず**、

@@ -201,7 +201,8 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
       // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
       offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
       // ⚠️ **列の音量は鳴らす値にだけ掛ける**（ADR-0067）＝部品の音量の線（`clipGainAt`）は部品の設定のまま。
-      volume: clipGainAt(clip, doc, localSec) * (trackGain.get(clip.trackId) ?? 1),
+      // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝書き出し（`timelineAudioRuns`）と同じ順＝上限を掛ける道で割らない。
+      volume: clampVolume(clipGainAt(clip, doc, localSec) * (trackGain.get(clip.trackId) ?? 1)),
       speed,
     });
   }
