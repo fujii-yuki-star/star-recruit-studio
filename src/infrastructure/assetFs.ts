@@ -154,6 +154,43 @@ export async function deleteProjectFiles(projectId: string, relPaths: string[]):
 }
 
 /**
+ * 素材を消したときのファイルを**ごみ箱へ移す**（ADR-0064 決定4＝Final Cut Pro と同じ）。移せた数を返す。
+ *
+ * ⚠️ **移せなくても失敗にしない**＝素材はもう文書から外れており、残ったファイルは
+ * 「使っていないファイルを片づける」で後から片づけられる。⚠️ **すぐ消すへ切り替えない**（決定5）。
+ */
+export async function trashProjectFiles(projectId: string, relPaths: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  try {
+    return await invoke<number>('trash_project_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] trashProjectFiles 失敗:', e);
+    return 0;
+  }
+}
+
+/** 使っていないファイル1つ（動画のフォルダからの相対パスと大きさ）。 */
+export interface UnusedFile {
+  path: string;
+  size: number;
+}
+
+/**
+ * 使っていないファイルの一覧（ADR-0064）。`liveTexts`＝開いている動画なら、画面が持っている内容
+ *（保存前の変更・取り消し／やり直しの履歴）。**調べられなければ断る**（投げる）＝1つも消さない。
+ */
+export async function listUnusedProjectFiles(projectId: string, liveTexts: string[]): Promise<UnusedFile[]> {
+  if (!isTauri()) return [];
+  return invoke<UnusedFile[]>('list_unused_project_files', { projectId, liveTexts });
+}
+
+/** 選んだファイルのうち、**押した時点でも使っていないもの**をごみ箱へ移す（ADR-0064）。移せた数を返す。 */
+export async function trashUnusedProjectFiles(projectId: string, relPaths: string[], liveTexts: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  return invoke<number>('trash_unused_project_files', { projectId, relPaths, liveTexts });
+}
+
+/**
  * 渡した素材のうち、**実体が見つからないもの**の相対パスを返す（#347）。
  *
  * ⚠️ **見つからないものだけ**を返す（全件の真偽表だと素材が増えるほど無駄が増える）。

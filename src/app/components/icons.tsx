@@ -175,6 +175,15 @@ export function TrashIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
+/** 使っていないファイルを片づける（ADR-0064）＝ほうき。 */
+export function BroomIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M19 3l-7.5 7.5M9 10l5 5M4 21c3 0 6-1 8-3l2-3-5-5-3 2c-2 2-3 5-2 9zM7 15l-2 2M10 17l-2 3" />
+    </svg>
+  );
+}
+
 /** 複製（#395）＝2枚重ねた紙。 */
 export function CopyIcon({ size = 20, className, style }: IconProps) {
   return (
