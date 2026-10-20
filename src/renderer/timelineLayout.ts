@@ -239,14 +239,15 @@ export function baseBoxPatchFromShown(
 }
 
 /**
- * 部品が**描かれている向き**（#1475）＝反転（`flipX`／`flipY`）と、負の縦横の倍率（向きを裏返す）を合わせたもの。
- * 文字をその場で直している間も、この向きのまま映す（`FreeLayoutOverlay` の `textMirrorOf`）。
- * ⚠️ 2つが両方効くと元の向きに戻る（裏の裏）＝足し算ではなく食い違い（XOR）で見る。
+ * 部品の**ゆがみの倍率**（#1475）＝反転（`flipX`／`flipY`＝−1 倍）と縦横の倍率（キーフレームの `scaleX`／`scaleY`）を掛けたもの。
+ * 文字をその場で直している間も、この倍率で映す（`FreeLayoutOverlay` の `textEditScaleOf`）＝描画は
+ * 「倍率を当てる前の箱で折り返してから伸ばす・裏返す」ので、直す欄も同じ順にしないと**改行の位置が変わる**（PR レビュー 🟡）。
+ * ⚠️ 反転と負の倍率が両方効くと元の向きに戻る（裏の裏）＝掛け算なので符号で自然にそうなる。
  */
-export function drawnMirrorOf(cc: { clip: Pick<TimelineClip, 'flipX' | 'flipY'>; ownTr: InterpolatedTransform }): { x: boolean; y: boolean } {
+export function drawnWarpScaleOf(cc: { clip: Pick<TimelineClip, 'flipX' | 'flipY'>; ownTr: InterpolatedTransform }): { x: number; y: number } {
   return {
-    x: (cc.clip.flipX === true) !== ((cc.ownTr.scaleX ?? 1) < 0),
-    y: (cc.clip.flipY === true) !== ((cc.ownTr.scaleY ?? 1) < 0),
+    x: (cc.clip.flipX === true ? -1 : 1) * safeScale(cc.ownTr.scaleX),
+    y: (cc.clip.flipY === true ? -1 : 1) * safeScale(cc.ownTr.scaleY),
   };
 }
 
@@ -264,8 +265,9 @@ function safeScale(v: number | undefined): number {
  * ⚠️ 負の倍率（向きを裏返す）も長方形は同じ＝大きさは絶対値、中心の動きは符号つきの `S` で出す。
  */
 export function squashedBox(box: Box, squash: { sx?: number; sy?: number }, pivot?: { x: number; y: number }): Box {
-  const sx = squash.sx ?? 1;
-  const sy = squash.sy ?? 1;
+  // ⚠️ **戻す側（`unsquashedBox`）と同じ割り切り**（PR レビュー ℹ️）＝0 に近い瞬間に行きと帰りで扱いが割れると、掴んだ量がずれて書かれる。
+  const sx = safeScale(squash.sx);
+  const sy = safeScale(squash.sy);
   if (sx === 1 && sy === 1) return box;
   const d = pivotOffset(pivot, box.w, box.h);
   const off = rotateVec({ x: (1 - sx) * d.x, y: (1 - sy) * d.y }, box.rotation ?? 0);

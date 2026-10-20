@@ -54,7 +54,7 @@ import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { overlayWarpTransform } from "../canvasWarp";
-import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnMirrorOf } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnWarpScaleOf } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { clipWithShownText, danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -4419,10 +4419,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               onChangeText={(id: string, text: string) => setClipTextFor(id, text)}
               onEditingIdChange={setEditingCanvasId}
               textFontFamily={fontFamilyForId(doc.videoSettings.fontId)}
-              // ⚠️ **直している間も描かれた向きのまま**（#1475）＝反転と、負の縦横の倍率（向きを裏返す）を合わせた向き。
-              textMirrorOf={(id: string) => {
+              // ⚠️ **直している間も描かれた形のまま**（#1475）＝反転と縦横の倍率を、描画と同じ順で当てる。
+              textEditScaleOf={(id: string) => {
                 const cc = canvasClips.find((x) => x.clip.id === id);
-                return cc ? drawnMirrorOf(cc) : undefined;
+                return cc ? drawnWarpScaleOf(cc) : undefined;
               }}
               // ⚠️ **見た目パターンの中へ入る**（#818・ADR-0034 決定8＝二度押しで中へ）。
               // 見た目パターンのクリップは**箱を持たない**（枠そのもの）ので、その領域は「空白」として

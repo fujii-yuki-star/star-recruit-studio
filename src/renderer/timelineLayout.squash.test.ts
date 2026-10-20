@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
-import { baseBoxPatchFromShown, clipWarpOf, drawnMirrorOf, squashedBox, timelineCanvasClipsAt, unsquashedBox } from './timelineLayout';
+import { baseBoxPatchFromShown, clipWarpOf, drawnWarpScaleOf, squashedBox, timelineCanvasClipsAt, unsquashedBox } from './timelineLayout';
 import type { Box } from './timelineLayout';
 
 /** 回した長方形の4隅（キャンバスの座標）。 */
@@ -110,11 +110,19 @@ describe('timelineCanvasClipsAt の枠（shownBox）', () => {
   });
 });
 
-describe('drawnMirrorOf（直している間の向き）', () => {
-  it('反転だけ・負の倍率だけ・両方（裏の裏で元へ戻る）', () => {
-    expect(drawnMirrorOf({ clip: { flipX: true }, ownTr: {} })).toEqual({ x: true, y: false });
-    expect(drawnMirrorOf({ clip: {}, ownTr: { scaleY: -1 } })).toEqual({ x: false, y: true });
-    expect(drawnMirrorOf({ clip: { flipX: true }, ownTr: { scaleX: -2 } })).toEqual({ x: false, y: false });
-    expect(drawnMirrorOf({ clip: {}, ownTr: { scaleX: 2 } })).toEqual({ x: false, y: false });
+describe('drawnWarpScaleOf（直している間のゆがみの倍率）', () => {
+  it('反転だけ・負の倍率だけ・両方（裏の裏で元へ戻る）・伸ばしただけ', () => {
+    expect(drawnWarpScaleOf({ clip: { flipX: true }, ownTr: {} })).toEqual({ x: -1, y: 1 });
+    expect(drawnWarpScaleOf({ clip: {}, ownTr: { scaleY: -1 } })).toEqual({ x: 1, y: -1 });
+    expect(drawnWarpScaleOf({ clip: { flipX: true }, ownTr: { scaleX: -2 } })).toEqual({ x: 2, y: 1 });
+    expect(drawnWarpScaleOf({ clip: { flipY: true }, ownTr: { scaleX: 0.5 } })).toEqual({ x: 0.5, y: -1 });
+  });
+});
+
+describe('0 に近い倍率（行きと帰りで同じ割り切り）', () => {
+  it('倍率 0 の瞬間は倍率 1 として枠を出し、戻しても同じ箱', () => {
+    const box = { x: 10, y: 20, w: 100, h: 50 };
+    expect(squashedBox(box, { sx: 0 }, { x: 0, y: 0 })).toEqual(box);
+    expect(unsquashedBox(box, { sx: 0 }, { x: 0, y: 0 })).toEqual(box);
   });
 });

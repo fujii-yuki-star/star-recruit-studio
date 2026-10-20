@@ -18,7 +18,7 @@ import { hexToRgb } from "../../domain/format/color";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import { useCanvasDrag } from "../hooks/useCanvasDrag";
 import { SNAP_GUIDE_COLOR } from "./overlayColors";
-import { mirrorTransform } from "../canvasWarp";
+import { editScaleStyle } from "../canvasWarp";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -181,18 +181,18 @@ interface OverlayProps {
    */
   onDrillInAt?: (point: { x: number; y: number }) => boolean;
   /**
-   * 文字を**その場で直している間の向き**（#1475・ADR-0059）＝描画が鏡に映している向き（`x`＝左右・`y`＝上下）。
-   * 未指定・`undefined`＝映さない（場面形式には反転が無い）。⚠️ 直している間だけ反転していない姿で出すと、
-   * 確定した途端に裏返る＝見えている形と打っている形が割れる（業界の型＝その場で直すときも描かれた向きのまま）。
+   * 文字を**その場で直している間のゆがみの倍率**（#1475・ADR-0059）＝描画が当てている反転（−1）と縦横の倍率。
+   * 未指定・`undefined`＝当てない（場面形式には反転も縦横の倍率も無い）。⚠️ 直している間だけ反転していない・伸びていない姿で
+   * 出すと、確定した途端に裏返る・改行が変わる＝見えている形と打っている形が割れる（業界の型＝その場で直すときも描かれた形のまま）。
    */
-  textMirrorOf?: (id: string) => { x: boolean; y: boolean } | undefined;
+  textEditScaleOf?: (id: string) => { x: number; y: number } | undefined;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, menuGuards, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily, onDrillInAt, textMirrorOf,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily, onDrillInAt, textEditScaleOf,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -909,8 +909,8 @@ export function FreeLayoutOverlay({
                   fontWeight: el.fontWeight ?? FONT_WEIGHT.normal,
                   textAlign: el.textAlign ?? TEXT_ALIGN.left,
                   lineHeight: el.lineHeight ?? DEFAULT_LINE_HEIGHT,
-                  // 反転（#1475）＝描画と同じ向きに映す（中心まわり＝箱の中で裏返るだけ）。
-                  transform: mirrorTransform(textMirrorOf?.(el.id)),
+                  // 反転・縦横の倍率（#1475）＝倍率を当てる前の大きさで中央に置き、描画と同じだけ伸ばす・裏返す。
+                  ...(editScaleStyle(textEditScaleOf?.(el.id)) ? { position: "absolute" as const, ...editScaleStyle(textEditScaleOf?.(el.id)) } : {}),
                   // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
                   ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
                     ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }

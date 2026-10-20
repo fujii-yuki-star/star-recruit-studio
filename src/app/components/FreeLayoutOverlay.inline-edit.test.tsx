@@ -53,15 +53,26 @@ describe("FreeLayoutOverlay インライン編集の見た目＝実描画に合�
     expect(ta.style.fontSize).toBe("24px"); // el.fontSize(48) × viewScale(960/1920)
   });
 
-  // ⚠️ **直している間も描かれた向きのまま**（#1475）＝以前は反転した文字が直している間だけ裏返らずに出た。
+  // ⚠️ **直している間も描かれた形のまま**（#1475）＝以前は反転した文字が直している間だけ裏返らずに出た。
   it("反転した文字は、直している間も同じ向きに映す", () => {
-    renderOverlay({ textMirrorOf: (id) => (id === "free_001" ? { x: true, y: false } : undefined) });
+    renderOverlay({ textEditScaleOf: (id: string) => (id === "free_001" ? { x: -1, y: 1 } : undefined) });
     expect(enterEdit().style.transform).toBe("scale(-1, 1)");
   });
 
-  it("反転していなければ何も当てない（今までと同じ）", () => {
-    renderOverlay({ textMirrorOf: () => undefined });
-    expect(enterEdit().style.transform).toBe("");
+  // ⚠️ **伸ばす前の大きさで折り返す**（PR レビュー 🟡）＝描画は折り返してから伸ばす。
+  it("横に伸ばした文字は、伸ばす前の幅で直して同じだけ伸ばす", () => {
+    renderOverlay({ textEditScaleOf: () => ({ x: 2, y: 1 }) });
+    const ta = enterEdit();
+    expect(ta.style.width).toBe("50%");
+    expect(ta.style.left).toBe("25%");
+    expect(ta.style.transform).toBe("scale(2, 1)");
+  });
+
+  it("倍率が無ければ何も当てない（今までと同じ）", () => {
+    renderOverlay({ textEditScaleOf: () => undefined });
+    const ta = enterEdit();
+    expect(ta.style.transform).toBe("");
+    expect(ta.style.width).toBe("100%");
   });
 
   it("色・揃え・太さ・行間を要素からミラーし、背景は透明（下のSVGは親が伏せる）", () => {

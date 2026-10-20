@@ -22,8 +22,15 @@ export function overlayWarpTransform(r: { x: number; y: number; w: number; h: nu
   return [`translate(${pct(dx, r.w)}%, ${pct(dy, r.h)}%)`, `matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`, rotate].filter(Boolean).join(" ");
 }
 
-/** 文字を直している間の向き（`FreeLayoutOverlay` の `textMirrorOf`・#1475）を CSS へ。映さないときは `undefined`（今までと同じ）。 */
-export function mirrorTransform(m: { x: boolean; y: boolean } | undefined): string | undefined {
-  if (!m || (!m.x && !m.y)) return undefined;
-  return `scale(${m.x ? -1 : 1}, ${m.y ? -1 : 1})`;
+/**
+ * 文字を直している間の欄の置き方（`FreeLayoutOverlay` の `textEditScaleOf`・#1475）。
+ *
+ * 枠は**倍率まで当てた長方形**（`shownBox`）なので、直す欄は**倍率を当てる前の大きさ**（枠の `1/|倍率|`）で中央に置き、
+ * `scale(倍率)` で枠いっぱいへ伸ばす・裏返す＝描画と同じ「折り返してから伸ばす」。倍率が無ければ `undefined`（今までと同じ）。
+ */
+export function editScaleStyle(s: { x: number; y: number } | undefined): { width: string; height: string; left: string; top: string; transform: string } | undefined {
+  if (!s || (s.x === 1 && s.y === 1)) return undefined;
+  const w = 100 / Math.abs(s.x);
+  const h = 100 / Math.abs(s.y);
+  return { width: `${w}%`, height: `${h}%`, left: `${(100 - w) / 2}%`, top: `${(100 - h) / 2}%`, transform: `scale(${s.x}, ${s.y})` };
 }
