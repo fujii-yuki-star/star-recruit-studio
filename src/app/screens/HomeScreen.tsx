@@ -273,7 +273,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
         if (!alive) return;
         setProjects(list);
         setListError(false);
-        // 一覧の小さな絵（#397）。⚠️ **無い動画は飛ばすだけ**＝古い動画でも一覧は普通に出る。
+        // 一覧の小さな絵（#397）。⚠️ **無い動画は印に戻す**＝道はファイルがあるかを見ずに作るので、読めなかったら
+        //   `<img>` の onError で外す（下）＝古い動画でも一覧は普通に出る。
         // ⚠️ **一覧の表示は待たせない**（絵は後から入る）＝取得に失敗しても一覧は出たまま。
         const found: Record<string, string> = {};
         await Promise.all(
@@ -819,6 +820,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                             src={thumbs[p.projectId]}
                             alt=""
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            // ⚠️ **読めなければ印に戻す**＝絵の道は「ファイルがあるか」を見ずに作るので、絵の無い動画
+                            //   （タイムライン形式・まだ保存していない動画）では**折れた絵**が出ていた（2026-10-20 実機）。
+                            onError={() =>
+                              setThumbs((t) => {
+                                if (!(p.projectId in t)) return t;
+                                const next = { ...t };
+                                delete next[p.projectId];
+                                return next;
+                              })
+                            }
                           />
                         ) : (
                           <FolderIcon size={24} />
