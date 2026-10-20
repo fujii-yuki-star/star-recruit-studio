@@ -19,7 +19,7 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, unusedAssetsCleanupConfirm, unusedAssetsCleanupLabel, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, withAddedTrack, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -53,6 +53,7 @@ import { markerClock, markersInOrder, markerTimeEq } from "../../domain/timeline
 import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
+import { unusedTimelineAssetIds } from "../../domain/timeline/unusedAssets";
 import { overlayWarpTransform } from "../canvasWarp";
 import { trackVolumeFromPercentText } from "../trackVolumeInput";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnWarpScaleOf } from "../../renderer/timelineLayout";
@@ -554,7 +555,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, importFromLibrary, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
-    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume, setSelectedClipHoldFrame, setSelectedClipDenoise, denoiseFailedKeys,
+    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume, setSelectedClipHoldFrame, setSelectedClipDenoise, denoiseFailedKeys, removeUnusedTimelineAssets,
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
@@ -1297,6 +1298,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
   /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
   const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
+  /** 片づける確認を出している素材（#1480）＝押した瞬間の顔ぶれ。 */
+  const [confirmUnusedAssets, setConfirmUnusedAssets] = useState<string[] | null>(null);
   /** 列の音量をその場で直している列（ADR-0067）。名前と同じく列の頭で直す（別の画面を開かない）。 */
   const [volumeTrackId, setVolumeTrackId] = useState<string | null>(null);
   /**
@@ -1967,6 +1970,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     );
     return doc.assets.filter((a) => unresolved.has(a.assetId));
   }, [doc, audioSrcByKey, missingAssetIds]);
+  // 使っていない素材（#1480）＝取り消し・やり直しで戻る文書も数える（domain の1か所）。
+  // ⚠️ **文書が変わったときだけ数える**＝文書と履歴ぶんを文字にして探すので、再生中の毎コマで回すと重い。
+  const unusedAssetIdsNow = useMemo(
+    () => (doc ? unusedTimelineAssetIds(doc, [...history.past, ...history.future]) : []),
+    [doc, history],
+  );
   // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
   const missingAudioCount = useMemo(() => {
     if (!doc) return 0;
@@ -6910,6 +6919,29 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   />
                 )}
               </>
+            )}
+            {/* **使っていない素材を片づける**（#1480・Resolve の Remove Unused Clips）＝どの部品にも（取り消しで戻る文書にも）
+                使っていない素材だけ。一覧から外し、ファイルはごみ箱へ（ADR-0064 と同じ確認の形）。無ければ出さない。 */}
+            {unusedAssetIdsNow.length > 0 && (
+              confirmUnusedAssets ? (
+                <DeleteConfirm
+                  className="mt"
+                  message={unusedAssetsCleanupConfirm(doc.assets.filter((a) => confirmUnusedAssets.includes(a.assetId)).map((a) => a.displayName))}
+                  confirmLabel="片づける"
+                  onCancel={() => setConfirmUnusedAssets(null)}
+                  onConfirm={() => { removeUnusedTimelineAssets(confirmUnusedAssets); setConfirmUnusedAssets(null); }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm mt"
+                  {...busyGuard({ disabled: isImporting, hint: IMPORT_BUSY_MESSAGE })}
+                  // 押した瞬間の顔ぶれを控える＝確認の間に置いた素材を消さない（実行の側も、いまも使っていないかを見直す）。
+                  onClick={() => setConfirmUnusedAssets(unusedAssetIdsNow)}
+                >
+                  {unusedAssetsCleanupLabel(unusedAssetIdsNow.length)}
+                </button>
+              )
             )}
             {/* ⚠️ **棚からも取り込める**（差分再監査 4巡目 🟡）＝「どの動画からでも取り込める」という
                 棚の目的（ADR-0035）が、入口の無いこの形式では成立していなかった（ADR-0026②）。 */}

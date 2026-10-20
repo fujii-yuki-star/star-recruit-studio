@@ -2,7 +2,7 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, PROJECT_NAME_MAX_LENGTH, type ExportSize } from "../../domain/constants";
-import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio, trashProjectFiles } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
@@ -96,6 +96,7 @@ import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherEx
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { freezeFrameAt, FREEZE_BLOCKED_REASON } from "../../domain/timeline/freeze";
+import { unusedTimelineAssetIds, withoutAssets } from "../../domain/timeline/unusedAssets";
 import { markersClampedMessage, addMarker, moveMarker, moveMarkerBlocked, removeMarker, setMarkerText } from "../../domain/timeline/markers";
 import { volumeAt } from "../../domain/timeline/audio";
 import { deleteRange } from "../../domain/timeline/deleteRange";
@@ -871,6 +872,13 @@ export interface TimelineState {
   denoiseFailedKeys: string[];
   /** 選んでいる部品の**ノイズを減らす**を切り替える（ADR-0068）。 */
   setSelectedClipDenoise: (on: boolean) => void;
+  /**
+   * **使っていない素材を片づける**（#1480）＝一覧から外し、ファイルはごみ箱へ（ADR-0064 と同じ＝戻せる）。
+   * ⚠️ 渡された番号のうち、**いまも使っていないものだけ**を外す（確認の間に置かれた素材を消さない）。
+   * ⚠️ **取り消しの履歴には載せない**（ファイルはごみ箱＝取り消しで一覧だけ戻ると「見つかりません」になる）＝
+   *   履歴の文書からも外す。確認の文で「ごみ箱から戻せます」と言う。
+   */
+  removeUnusedTimelineAssets: (assetIds: readonly string[]) => void;
   undo: () => void;
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
@@ -2036,6 +2044,31 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipHoldFrame: (hold) => applyEdit(set, get, (d, id) => setClipHoldFrame(d, id, hold)),
+  removeUnusedTimelineAssets: (assetIds) => {
+    const { doc, history } = get();
+    if (!doc) return;
+    if (blockedByExport(set, get)) return;
+    // ⚠️ **取り込み中は外さない**＝素材の番号は空いた所を埋めるので、外した番号を取り込み中のものが拾いうる（場面形式と同じ）。
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return; }
+    const stillUnused = new Set(unusedTimelineAssetIds(doc, [...history.past, ...history.future]));
+    const gone = new Set(assetIds.filter((id) => stillUnused.has(id)));
+    if (gone.size === 0) return;
+    // ⚠️ **外す前にファイルの場所を控える**（代表フレームも一緒に＝本体だけ消すと小さな絵が残る）。
+    const files = doc.assets
+      .filter((a) => gone.has(a.assetId))
+      .flatMap((a) => [a.filePath, a.thumbnailPath].filter((p): p is string => typeof p === "string"));
+    const drop = <T,>(m: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(m).filter(([id]) => !gone.has(id)));
+    set({
+      doc: withoutAssets(doc, gone),
+      history: { past: history.past.map((d) => withoutAssets(d, gone)), future: history.future.map((d) => withoutAssets(d, gone)) },
+      assetSrcById: drop(get().assetSrcById),
+      videoSrcById: drop(get().videoSrcById),
+      missingAssetIds: get().missingAssetIds.filter((id) => !gone.has(id)),
+      saveStatus: "idle",
+    });
+    // ⚠️ **ごみ箱へ移す**（ADR-0064 決定4）＝待たない（一覧からはもう外れており、移せなくても後から片づけられる）。
+    void trashProjectFiles(doc.projectId, files);
+  },
   setSelectedClipDenoise: (on) => {
     // ⚠️ **入れ直したら作り直しを試す**（PR レビュー ℹ️）＝前に作れなかった印が残ると、外して入れ直しても試さず知らせも消えない。
     const clip = get().doc?.clips.find((c) => c.id === get().selectedClipIds[0]);
