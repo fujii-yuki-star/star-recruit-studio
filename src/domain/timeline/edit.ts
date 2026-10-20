@@ -189,28 +189,12 @@ export const EDIT_BLOCKED = {
    */
   freezeNotVideo: 'TIMELINE_EDIT_FREEZE_NOT_VIDEO',
   /**
-   * 絵を止めようとしたが、**その瞬間を切り出せなかった**（#356 ②）。
-   *
-   * ⚠️ **押した所へ返すために要る**（#1136 レビュー由来 🟡）＝切り出しの失敗は取り込みの断り
-   * （`importError`）に入るが、その表示は「置く」の欄の中だけ＝「選んだ部品」から押した人には
-   * **何も見えない**まま終わる。詳しい理由はあちらに出し、押した欄にはこれを出す。
-   */
-  freezeFailed: 'TIMELINE_EDIT_FREEZE_FAILED',
-  /**
    * 絵を止めようとしたが、**その動画のファイルが見つからない**（#356 ②）。
    *
    * ⚠️ **押す前に断る**（#1136 レビュー由来 🟡・#1068/#1101 と同じ流儀）＝文書の中身しか見ない
    * 関門は通ってしまい、**FFmpeg を起こしてから失敗する**。直し方は知らせの「ファイルを選び直す」。
    */
   freezeAssetMissing: 'TIMELINE_EDIT_FREEZE_ASSET_MISSING',
-  /**
-   * 絵を止めている間に、**その帯が変わった**（#356 ②・#1136 レビュー由来）。
-   *
-   * ⚠️ **黙って貼らない**＝切り出すのは待つ前の帯、分けるのは待った後の帯なので、
-   * 待っている間に動かす・詰める・速さを変える・素材を選び直すと、**切れ目と止めた絵が
-   * 別の瞬間**になる（素材ごと替わっていれば**別の動画のコマ**）。ADR-0026④。
-   */
-  freezeChanged: 'TIMELINE_EDIT_FREEZE_CHANGED',
   /**
    * 左端をそこまで詰めると、**素材を使い切った先**から流れることになる（PR #1004 レビュー 🔴）。
    *
@@ -2171,6 +2155,33 @@ export function setClipVolume(doc: TimelineProject, clipId: string, volume: numb
   const patched = { ...clip };
   if (next == null) delete patched.volume;
   else patched.volume = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 動画のクリップを、**最初のコマで止めた**クリップに替える（音の項目は落とす・ADR-0065）。 */
+export function asHeld(clip: TimelineClip): TimelineClip {
+  const {
+    useOriginalAudio: _useOriginalAudio,
+    originalAudioVolume: _originalAudioVolume,
+    volumePoints: _volumePoints,
+    ...rest
+  } = clip;
+  return { ...rest, holdFrame: true };
+}
+
+/**
+ * 止めた絵（ADR-0065）を**止めるのをやめる／止める**。やめると、使い始めから同じ速さで流れる。
+ * ⚠️ **直接置いた動画だけ**＝止める側（`freezeFrameIssue`）と同じ相手。
+ */
+export function setClipHoldFrame(doc: TimelineProject, clipId: string, hold: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isDirectVideoClip(doc, clip)) return blocked(EDIT_BLOCKED.freezeNotVideo);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.holdFrame === true) === hold) return ok(doc);
+  if (hold) return ok(withClip(doc, asHeld(clip)));
+  const patched = { ...clip };
+  delete patched.holdFrame;
   return ok(withClip(doc, patched));
 }
 

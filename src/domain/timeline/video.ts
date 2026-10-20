@@ -84,8 +84,13 @@ export function videoPlacementsOfClip(
   if (direct != null) {
     return [{
       clip, use: ASSET_USE_KIND.direct, layerId: null, assetId: direct,
-      sourceStartSec: clip.sourceStartSec ?? 0, durationSec: clip.durationSec, speed: effectiveSpeed(clip),
-      useOriginalAudio: clip.useOriginalAudio === true,
+      sourceStartSec: clip.sourceStartSec ?? 0,
+      // ⚠️ **止めた絵は使える長さ 0**（ADR-0065）＝既存の「使える長さで最後のコマに凍る」がそのまま効く
+      //   （書き出しは1コマだけ焼いて全部それを読む・プレビューは `videoHoldsLastFrameAt` で流すのをやめる）。
+      durationSec: clip.holdFrame === true ? 0 : clip.durationSec,
+      speed: effectiveSpeed(clip),
+      // 止めた絵は音を鳴らさない（`asHeld` が落とすが、手で書いた文書でも鳴らさない）。
+      useOriginalAudio: clip.useOriginalAudio === true && clip.holdFrame !== true,
       originalAudioVolume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
     }];
   }
@@ -236,6 +241,8 @@ export function placementOriginalAudio(
  * ⚠️ **隠しているかは見ない**＝隠した部品でも設定は変えられる（鳴るかどうかだけが `placementOriginalAudio`）。
  */
 export function canUseOriginalAudio(doc: TimelineProject, clip: TimelineClip): boolean {
+  // 止めた絵（ADR-0065）は音を鳴らさない＝欄も出さない。
+  if (clip.holdFrame === true) return false;
   return videoAudioState(doc, clip) === 'available';
 }
 

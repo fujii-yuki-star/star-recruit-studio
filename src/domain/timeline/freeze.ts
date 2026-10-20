@@ -1,8 +1,10 @@
 // 再生位置で**絵を止める**（#356 ②・フリーズフレーム）。
 //
-// ⚠️ **新しい概念を足さない**＝止めた絵は「切り出した写真を置いたクリップ」で、
-// **分ける（#333）＋この瞬間を写真にする（#349）**を1手にまとめただけ。
-// データの形は増やさないので、あとから触るのも普通の写真クリップと同じ（ADR-0032「テンプレは素材」）。
+// ⚠️ **ファイルを作らない**（ADR-0065・2026-10-20）＝止めた絵は「分けた後ろ半分の動画を、最初のコマで止める」
+// 部品の設定（`holdFrame`）。業界の型（Premiere Pro のフレーム保持）。以前は写真を切り出して置いていたので、
+// 取り消すと写真のファイルが残り（ADR-0064 の発端）、切り出しの待ちと「待っている間に変わった」の断りが要った。
+// ⚠️ **描き方は既存の「最後のコマで凍る」を共有する**（`videoPlacementsOfClip` が使える長さを 0 にする）＝
+// プレビュー＝書き出し（ADR-0001）。
 //
 // ⚠️ **時間は増やさない**（ADR-0034 決定11）＝押しのけ（ripple）は**採らないと決めてある**
 //（`11 §8` V24「同一列で時間の重なり禁止」と喧嘩するため）。だから「止めたぶん後ろへずらす」
@@ -11,13 +13,13 @@
 //
 // ⚠️ **相手は「直接置いた動画」だけ**＝見た目パターンの差し込み口に入れた動画は、止めると
 // **枠ごと写真に化ける**（文字も立ち絵も消える）＝押した結果と食い違う。断って理由を出す。
-import { isDirectVideoClip, videoPlacementsOfClip, videoSourceFrameAt, videoSourceSecAt } from './video';
+import { isDirectVideoClip, videoPlacementsOfClip, videoSourceSecAt } from './video';
 import { ASSET_USE_KIND } from '../enums';
 import { effectiveFps } from './playback';
 import { frameTimeSec } from './persistence';
 import { splitClip, splitClipIssue, SPLIT_BLOCKED_REASON } from './split';
 import type { SplitBlockedReason } from './split';
-import { EDIT_BLOCKED } from './edit';
+import { asHeld, EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
@@ -26,40 +28,9 @@ import type { Template } from '../template/types';
 export const FREEZE_BLOCKED = {
   /** 直接置いた動画ではない（写真・文字・見た目パターン・音など）。 */
   notVideo: 'notVideo',
-  /**
-   * 切り出している間に**その帯が変わった**（#1136 レビュー由来 🟡）。
-   * そのまま貼ると**切れ目と止めた絵が別の瞬間**になる（素材ごと替わっていれば別の動画のコマ）。
-   */
-  changed: 'changed',
 } as const;
 
 export type FreezeBlockedReason = SplitBlockedReason | (typeof FREEZE_BLOCKED)[keyof typeof FREEZE_BLOCKED];
-
-/**
- * **切り出す前の帯の姿**（待っている間に変わっていないかを見るための控え）。
- *
- * ⚠️ **切り出すのは待つ前の帯、分けるのは待った後の帯**（#1136 レビュー由来 🟡）＝
- * 取り込み中でも編集は止まらない（押せなくなるのはボタンだけ）ので、待っている間に
- * **動かす／左端を詰める／速さを変える／素材を選び直す**と、**切れ目と止めた絵が別の瞬間**になる。
- * 素材を別の動画に差し替えられた場合は、**別の動画のコマ**が貼り付く。
- * `freezeFrameIssue` は固定・帯の外・短すぎ・使い切りしか見ないので、ここは素通りする。
- */
-export interface FreezeSnapshot {
-  assetId: string | null | undefined;
-  startSec: number;
-  sourceStartSec: number | undefined;
-  speed: number | undefined;
-}
-
-export function freezeSnapshotOf(clip: TimelineClip): FreezeSnapshot {
-  return { assetId: clip.assetId, startSec: clip.startSec, sourceStartSec: clip.sourceStartSec, speed: clip.speed };
-}
-
-/** 切り出す前と同じ姿か（違えば、止めた絵は別の瞬間になる）。 */
-export function sameFreezeSnapshot(a: FreezeSnapshot, b: FreezeSnapshot): boolean {
-  return a.assetId === b.assetId && a.startSec === b.startSec
-    && a.sourceStartSec === b.sourceStartSec && a.speed === b.speed;
-}
 
 /** 止める相手の探し方（画面と実行で同じものを通す）。 */
 export function freezeTargetOf(doc: TimelineProject, clipId: string): TimelineClip | undefined {
@@ -81,13 +52,13 @@ export function freezeFrameIssue(
   const clip = freezeTargetOf(doc, clipId);
   // ⚠️ **種類の判定を先に**＝「見つからない」は分ける側も返すので、そちらへ委ねる。
   if (clip && !isDirectVideoClip(doc, clip)) return FREEZE_BLOCKED.notVideo;
-  // ⚠️ **分けられることが前提**＝止める形は「分けて、後半を写真に替える」なので、
+  // ⚠️ **分けられることが前提**＝止める形は「分けて、後半を止める」なので、
   // 分ける側が断る理由（固定・外・短すぎ・使い切った先）はそのまま止める側の理由になる。
   return splitClipIssue(doc, clipId, atSec, opts);
 }
 
 /**
- * 止めた絵にする**素材の時刻**（＝切り出す位置）。`null` ＝その時刻に映っていない。
+ * 止めた絵が映す**素材の時刻**（＝押した時に見えていたコマ）。`null` ＝その時刻に映っていない。
  *
  * ⚠️ **プレビュー＝書き出しの正準をそのまま呼ぶ**（ADR-0001・#1147）＝
  * `videoSourceSecAt` は**コマ番号から**素材の秒を導く。以前はここだけ
@@ -120,51 +91,34 @@ export function freezeSourceSec(
 }
 
 /**
- * 止める瞬間のコマを、**書き出しが使う言葉**（並べ始める秒・速さ・fps・何枚目か）で返す（#1158）。
+ * 再生位置で分けて、**後半をそのコマで止める**（ADR-0065）。
  *
- * ⚠️ **相手の選び方は `freezeSourceSec` と同じ**＝直接置いた動画だけ（見た目パターンの帯は掴まない）。
- * ⚠️ **秒を渡さない**＝切り出す側が自分の丸め方でコマを選ぶと、素材と出力の格子が合わないときに
- * **1コマ先**の絵になる（実測 18/64・全部ちょうど1コマ）。`videoSourceFrameAt` の ⚠️ に理由がある。
- */
-export function freezeSourceFrame(
-  doc: TimelineProject,
-  clip: TimelineClip,
-  atSec: number,
-): { sourceStartSec: number; speed: number; fps: number; localFrame: number } | null {
-  const place = videoPlacementsOfClip(doc, clip).find((p) => p.use === ASSET_USE_KIND.direct);
-  if (!place) return null;
-  return videoSourceFrameAt(place, frameTimeSec(doc, atSec), effectiveFps(doc));
-}
-
-/**
- * 再生位置で分けて、**後半を止めた絵に替える**。
- *
- * @param stillAssetId 切り出した写真の素材 id（呼ぶ側が先に作る＝ここは純粋関数のまま）。
- *
- * ⚠️ **音は連れていかない**＝止めた絵は写真なので、元の音・音量の変化・速さ・頭出しは**落とす**
- *（持たせても効かない項目が残るだけ＝置いた覚えのない値を作らない＝#1019 ⑦と同じ理由）。
- * ⚠️ **動き（キーフレーム）は分ける側が再基準化したものをそのまま使う**＝止めても動かし続けられる
- *（寄る・回す演出は絵が止まってからが本番）。
+ * ⚠️ **ファイルを作らない**＝後半の部品に `holdFrame` を立てるだけ（純粋・同期）。止まるのは後半の
+ * **使い始めのコマ**＝押した時に見えていたコマ（`freezeSourceSec` で出して入れ直す）。
+ * ⚠️ **音は連れていかない**＝止めた絵は音を鳴らさないので、元の音・音量の変化は**落とす**
+ *（持たせても効かない項目が残るだけ＝#1019 ⑦と同じ理由）。使い始めと速さは**残す**
+ *（止めるのをやめたとき、そこから同じ速さで流れる）。
+ * ⚠️ **動き（キーフレーム）は分ける側が再基準化したものをそのまま使う**＝止めても動かし続けられる。
  */
 export function freezeFrameAt(
   doc: TimelineProject,
   clipId: string,
   atSec: number,
-  stillAssetId: string,
   volumeAt: (points: readonly { timeSec: number; volume: number }[] | undefined, localSec: number) => number | undefined,
-  opts: { templateOf?: (templateId: string) => Template | undefined; was?: FreezeSnapshot } = {},
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
 ): { ok: true; doc: TimelineProject; newClipId: string } | { ok: false; reason: FreezeBlockedReason } {
   const issue = freezeFrameIssue(doc, clipId, atSec, opts);
   if (issue) return { ok: false, reason: issue };
-  // ⚠️ **切り出す前と同じ姿か**（レビュー由来 🟡）＝違えば、止めた絵は別の瞬間（別の動画）になる。
-  const now = doc.clips.find((c) => c.id === clipId);
-  if (opts.was && now && !sameFreezeSnapshot(opts.was, freezeSnapshotOf(now))) {
-    return { ok: false, reason: FREEZE_BLOCKED.changed };
-  }
   const split = splitClip(doc, clipId, atSec, volumeAt, opts);
   // ⚠️ **ここへは来ない想定**＝上で同じ関門を通している。それでも握りつぶさない（理由を返す）。
   if (!split.ok) return { ok: false, reason: split.reason };
-  const clips = split.doc.clips.map((c) => (c.id === split.newClipId ? asStill(c, stillAssetId) : c));
+  // ⚠️ **見えていたコマで止める**＝分ける側は使い始めを**生の秒**で進めるので、置いた位置が格子に
+  //   乗っていないと**隣のコマ**になる（#1147 と同じ理由）。押した時に映っていたコマの秒を正準で出して入れる。
+  const sourceSec = freezeSourceSec(doc, doc.clips.find((c) => c.id === clipId) as TimelineClip, atSec);
+  if (sourceSec == null) return { ok: false, reason: FREEZE_BLOCKED.notVideo };
+  const clips = split.doc.clips.map((c) =>
+    c.id === split.newClipId ? { ...asHeld(c), sourceStartSec: sourceSec } : c,
+  );
   return { ok: true, doc: { ...split.doc, clips }, newClipId: split.newClipId };
 }
 
@@ -180,19 +134,6 @@ export function freezeStopsOriginalAudio(clip: TimelineClip): boolean {
   return clip.useOriginalAudio === true;
 }
 
-/** 動画のクリップを、止めた絵（写真）のクリップに替える。 */
-function asStill(clip: TimelineClip, stillAssetId: string): TimelineClip {
-  const {
-    sourceStartSec: _sourceStartSec,
-    speed: _speed,
-    useOriginalAudio: _useOriginalAudio,
-    originalAudioVolume: _originalAudioVolume,
-    volumePoints: _volumePoints,
-    ...rest
-  } = clip;
-  return { ...rest, assetId: stillAssetId };
-}
-
 /**
  * 断る理由 → 画面の語彙（`splitClip` の `SPLIT_BLOCKED_REASON` と同じ流儀）。
  *
@@ -201,5 +142,4 @@ function asStill(clip: TimelineClip, stillAssetId: string): TimelineClip {
 export const FREEZE_BLOCKED_REASON: Record<FreezeBlockedReason, EditBlockedReason> = {
   ...SPLIT_BLOCKED_REASON,
   [FREEZE_BLOCKED.notVideo]: EDIT_BLOCKED.freezeNotVideo,
-  [FREEZE_BLOCKED.changed]: EDIT_BLOCKED.freezeChanged,
 };

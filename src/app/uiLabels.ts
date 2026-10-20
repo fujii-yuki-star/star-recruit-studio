@@ -589,7 +589,7 @@ const clipKindLabel: Record<TimelineClipKind, string> = {
 export function clipLabel(
   clip: {
     kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string };
-    assetId?: string | null; bundledBgmId?: string | null;
+    assetId?: string | null; bundledBgmId?: string | null; holdFrame?: boolean;
   },
   assets?: readonly { assetId: string; displayName: string }[],
 ): string {
@@ -601,8 +601,11 @@ export function clipLabel(
   const bgm = bgmById(clip.bundledBgmId);
   if (bgm) return bgm.label;
   const asset = clip.assetId ? assets?.find((a) => a.assetId === clip.assetId) : undefined;
-  if (asset?.displayName) return asset.displayName.slice(0, 20);
-  return clipKindLabel[clip.kind];
+  // ⚠️ **止めた絵（ADR-0065）は並びで見分けられるように**＝同じ動画の名前が前後に2つ並ぶので、
+  //   どちらが止まっているかが帯から読めない（以前は写真の名前になっていた）。
+  const held = clip.holdFrame === true ? "（止めた絵）" : "";
+  if (asset?.displayName) return asset.displayName.slice(0, 20) + held;
+  return clipKindLabel[clip.kind] + held;
 }
 
 /**
@@ -1034,9 +1037,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_NO_ORIGINAL_AUDIO: "この動画には音が入っていないので、元の音は鳴らせません。音を付けるなら、音の列に音を置いてください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
-  TIMELINE_EDIT_FREEZE_FAILED: "その瞬間の絵を切り出せませんでした。少し違う位置でもう一度お試しください",
   TIMELINE_EDIT_FREEZE_ASSET_MISSING: `この動画のファイルが見つかりません。知らせの「${RELINK_ASSET_LABEL}」で入れ直してからお試しください`,
-  TIMELINE_EDIT_FREEZE_CHANGED: "絵を止めている間に、その部品が変わりました。もう一度お試しください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
   // ⚠️ **「素材の画面で外す」とは案内しない**（#816-5・ADR-0034 決定5 に記録済み）＝素材の画面は

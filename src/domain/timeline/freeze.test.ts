@@ -1,9 +1,10 @@
 // 再生位置で**絵を止める**（#356 ②・フリーズフレーム）。
 import { describe, expect, it } from 'vitest';
-import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceFrame, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
+import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
 import { SPLIT_BLOCKED } from './split';
+import { EDIT_BLOCKED, setClipHoldFrame } from './edit';
 import { volumeAt } from './audio';
-import { videoPlacementsOfClip, videoSourceSecAt } from './video';
+import { canUseOriginalAudio, videoPlacementsOfClip, videoSourceSecAt } from './video';
 import { effectiveFps } from './playback';
 import { frameTimeSec } from './persistence';
 import { ASSET_TYPE, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
@@ -16,7 +17,7 @@ const movie: Asset = {
   assetId: 'asset_001', assetType: ASSET_TYPE.video, displayName: '素材', filePath: 'assets/asset_001.mp4',
 };
 const still: Asset = {
-  assetId: 'asset_002', assetType: ASSET_TYPE.image, displayName: '止めた絵', filePath: 'assets/asset_002.png',
+  assetId: 'asset_002', assetType: ASSET_TYPE.image, displayName: '写真', filePath: 'assets/asset_002.png',
 };
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
@@ -44,7 +45,7 @@ const video = (over: Partial<TimelineClip> = {}): TimelineClip =>
   }) as TimelineClip;
 
 const freeze = (d: TimelineProject, at: number, id = 'clip_001') =>
-  freezeFrameAt(d, id, at, 'asset_002', volumeAt);
+  freezeFrameAt(d, id, at, volumeAt);
 
 describe('freezeFrameIssue（そこで止められるか）', () => {
   it('直接置いた動画の中なら止められる', () => {
@@ -96,53 +97,7 @@ describe('freezeFrameIssue（そこで止められるか）', () => {
   });
 });
 
-// 切り出しへ渡す「コマの居場所」（#1158）。
-// ⚠️ **秒ではなくこの4つで頼む**＝秒だと切り出す側が自分の丸め方でコマを選び、素材と出力の格子が
-// 合わないとき**見えていたコマの1つ先**になる（FFmpeg で実測＝64 通り中 18 通り）。
-describe('freezeSourceFrame（どのコマを切り出すか）', () => {
-  const withClip = (c: TimelineClip): TimelineProject => doc({ clips: [c] });
-
-  it('秒で出した答えと、同じコマを指す', () => {
-    // ⚠️ **2つの出口が割れないこと**＝同じ瞬間を、秒でもコマ番号でも同じ所に置く。
-    const c = video({ startSec: 2, sourceStartSec: 5 });
-    const d = withClip(c);
-    const g = freezeSourceFrame(d, c, 6);
-    expect(g).not.toBeNull();
-    expect(freezeSourceSec(d, c, 6)).toBeCloseTo(
-      g!.sourceStartSec + (g!.localFrame / g!.fps) * g!.speed,
-    );
-  });
-
-  it('頭出しと速さを、書き出しと同じ言葉で連れていく', () => {
-    // ⚠️ **書き出しはこの3つで並べる**（`-ss sourceStartSec` ＋ `setpts=PTS/speed,fps=N`）。
-    const c = video({ startSec: 0, sourceStartSec: 1.5, speed: 2 });
-    const g = freezeSourceFrame(withClip(c), c, 1);
-    expect(g?.sourceStartSec).toBe(1.5);
-    expect(g?.speed).toBe(2);
-    expect(g?.fps).toBe(effectiveFps(withClip(c)));
-  });
-
-  // ⚠️ **見えていたコマを切り出す**（#1136・ADR-0001）＝キャンバスが映しているのは
-  // **格子へ落とした時刻**（`frameTimeSec`＝**切り捨て**）なので、生の再生位置のまま
-  // コマ番号（`Math.round`）へ直すと**1コマ先**を指す。
-  // ⚠️ **端数は半コマより大きく取る**＝切り捨てと四捨五入が割れるのはそこだけで、
-  // 半コマ未満の端数で試すと**落としていなくても緑**になる（変異チェックで生き残った）。
-  it('見えていたコマを指す（再生位置を格子へ落としてから数える）', () => {
-    const c = video({ startSec: 0, sourceStartSec: 0 });
-    // 2.02 秒 × 30fps ＝ 60.6 コマ。落とすと 60、落とさないと 61。
-    expect(freezeSourceFrame(withClip(c), c, 2.02)?.localFrame).toBe(60);
-  });
-
-  it('相手は直接置いた動画だけ（秒の側と同じ選び方）', () => {
-    // ⚠️ **選び方を写さない**＝秒の側が `null` を返す場面では、こちらも出さない。
-    const c = video({ startSec: 5, durationSec: 2 });
-    const d = withClip(c);
-    expect(freezeSourceSec(d, c, 1)).toBeNull();
-    expect(freezeSourceFrame(d, c, 1)).toBeNull();
-  });
-});
-
-describe('freezeSourceSec（どの瞬間を切り出すか）', () => {
+describe('freezeSourceSec（どの瞬間で止めるか）', () => {
   /** その帯だけを置いた文書（`freezeSourceSec` は文書ごと受け取る＝正準を通すため）。 */
   const withClip = (c: TimelineClip): TimelineProject => doc({ clips: [c] });
 
@@ -273,17 +228,26 @@ describe('freezeStopsOriginalAudio（止めると元の音が止まるか）', (
   });
 });
 
-describe('freezeFrameAt（止めた絵に替える）', () => {
-  it('後半が「止めた絵」になる（前半は動画のまま）', () => {
+describe('freezeFrameAt（そのコマで止める・ADR-0065）', () => {
+  it('後半が「そのコマで止める」になる（前半は流れるまま）', () => {
     const r = freeze(doc({ clips: [video()] }), 4);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const [head, tail] = r.doc.clips;
-    expect(head!.assetId, '前半まで写真に替えている').toBe('asset_001');
+    expect(head!.holdFrame, '前半まで止めている').toBeUndefined();
     expect(head!.durationSec).toBe(4);
-    expect(tail!.assetId, '後半が止めた絵になっていない').toBe('asset_002');
+    expect(tail!.holdFrame, '後半が止まっていない').toBe(true);
     expect(tail!.startSec).toBe(4);
     expect(tail!.durationSec).toBe(6);
+  });
+
+  // ⚠️ **ファイルを作らない**＝素材は増えない・同じ動画を指したまま（ADR-0064 の発端を断つ）。
+  it('素材を増やさない（同じ動画のまま）', () => {
+    const d = doc({ clips: [video()] });
+    const r = freeze(d, 4);
+    if (!r.ok) return;
+    expect(r.doc.assets).toBe(d.assets);
+    expect(r.doc.clips[1]!.assetId).toBe('asset_001');
   });
 
   // ⚠️ **時間は増やさない**（ADR-0034 決定11＝押しのけは採らない）。
@@ -295,17 +259,58 @@ describe('freezeFrameAt（止めた絵に替える）', () => {
     expect(end(r.doc.clips)).toBe(end(d.clips));
   });
 
-  // ⚠️ **効かない項目を残さない**＝写真に速さ・頭出し・元の音は無い（置いた覚えのない値を作らない）。
-  it('止めた絵は、動画だけの項目を持たない', () => {
-    const clip = video({ sourceStartSec: 3, speed: 2, useOriginalAudio: true, originalAudioVolume: 0.8 });
+  // ⚠️ **音は連れていかない**＝止めた絵は鳴らさない（効かない項目を残さない）。
+  // 使い始めと速さは**残す**＝止めるのをやめたとき、そこから同じ速さで流れる。
+  it('止めた絵は音の項目を持たず、使い始めと速さは持つ', () => {
+    const clip = video({
+      sourceStartSec: 3, speed: 2, useOriginalAudio: true, originalAudioVolume: 0.8,
+      volumePoints: [{ timeSec: 0, volume: 1 }, { timeSec: 10, volume: 0.5 }],
+    });
     const r = freeze(doc({ clips: [clip] }), 4);
     if (!r.ok) return;
     const tail = r.doc.clips[1]!;
-    expect(tail.sourceStartSec).toBeUndefined();
-    expect(tail.speed).toBeUndefined();
     expect(tail.useOriginalAudio).toBeUndefined();
     expect(tail.originalAudioVolume).toBeUndefined();
     expect(tail.volumePoints).toBeUndefined();
+    expect(tail.speed).toBe(2);
+    expect(tail.sourceStartSec).toBe(11); // 3 + 4×2
+  });
+
+  // ⚠️ **見えていたコマで止める**（#1147 と同じ理由）＝分ける側は使い始めを生の秒で進めるので、
+  // 置いた位置が格子に乗っていないと隣のコマになる。押した時に映っていた秒と同じであること。
+  it('止まるのは、押した時に映っていたコマ（置いた位置が格子に乗っていなくても）', () => {
+    for (const over of [{ startSec: 2.017, sourceStartSec: 5 }, { startSec: 0.49, speed: 2 }, {}]) {
+      const c = video(over);
+      const d = doc({ clips: [c] });
+      const r = freeze(d, 6);
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const tail = r.doc.clips[1]!;
+      const seen = freezeSourceSec(d, c, 6);
+      // 止めた後に映る秒（どの時刻でも同じ）＝押した時に映っていた秒。
+      const place = videoPlacementsOfClip(r.doc, tail)[0]!;
+      for (const t of [6, 7.5, tail.startSec + tail.durationSec - 0.01]) {
+        expect(videoSourceSecAt(place, frameTimeSec(r.doc, t), effectiveFps(r.doc)), `${JSON.stringify(over)} @${t}`).toBe(seen);
+      }
+    }
+  });
+
+  // ⚠️ 上の突き合わせは正準どうしの比較なので、**手で解いた値でも1件留める**：
+  // 2.017 秒に置いた動画を 6 秒で止める＝`round(6×30) − round(2.017×30) = 119` コマ目 → `5 + 119/30`。
+  // 分ける側の生の秒なら `5 + 3.983 = 8.983`（隣のコマ）。
+  it('手で解いた値と合う（分ける側の生の秒ではない）', () => {
+    const r = freeze(doc({ clips: [video({ startSec: 2.017, sourceStartSec: 5 })] }), 6);
+    if (!r.ok) return;
+    expect(r.doc.clips[1]!.sourceStartSec).toBeCloseTo(5 + 119 / 30, 9);
+  });
+
+  // ⚠️ **描き方は「使える長さ 0」**＝既存の「最後のコマで凍る」を共有（プレビュー＝書き出し）。
+  it('止めた部品は、使える長さ 0・音なしとして描かれる', () => {
+    const r = freeze(doc({ clips: [video()] }), 4);
+    if (!r.ok) return;
+    const place = videoPlacementsOfClip(r.doc, r.doc.clips[1]!)[0]!;
+    expect(place.durationSec).toBe(0);
+    expect(place.useOriginalAudio).toBe(false);
   });
 
   it('箱（位置・大きさ）はそのまま引き継ぐ', () => {
@@ -339,7 +344,62 @@ describe('freezeFrameAt（止めた絵に替える）', () => {
 
   it('できた文書は正典（schema）に通る', () => {
     const r = freeze(doc({ clips: [video()] }), 4);
+    expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(validateTimelineProject(r.doc), JSON.stringify(validateTimelineProject.errors)).toBe(true);
+  });
+});
+
+describe('setClipHoldFrame（止めるのをやめる・止める）', () => {
+  it('やめると流れる動画に戻る（使い始めと速さはそのまま）', () => {
+    const r = freeze(doc({ clips: [video({ speed: 2 })] }), 4);
+    if (!r.ok) return;
+    const tail = r.doc.clips[1]!;
+    const u = setClipHoldFrame(r.doc, tail.id, false);
+    expect(u.ok).toBe(true);
+    if (!u.ok) return;
+    const back = u.doc.clips[1]!;
+    expect(back.holdFrame).toBeUndefined();
+    expect(back.sourceStartSec).toBe(tail.sourceStartSec);
+    expect(back.speed).toBe(2);
+    expect(videoPlacementsOfClip(u.doc, back)[0]!.durationSec, '流れる長さに戻っていない').toBe(back.durationSec);
+  });
+
+  it('止めると音の項目を落とす（止める側と同じ形）', () => {
+    const r = setClipHoldFrame(doc({ clips: [video({ useOriginalAudio: true, originalAudioVolume: 0.5 })] }), 'clip_001', true);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const c = r.doc.clips[0]!;
+    expect(c.holdFrame).toBe(true);
+    expect(c.useOriginalAudio).toBeUndefined();
+    expect(c.originalAudioVolume).toBeUndefined();
+  });
+
+  it('同じ状態なら文書をそのまま返す（履歴を積まない）', () => {
+    const d = doc({ clips: [video()] });
+    const r = setClipHoldFrame(d, 'clip_001', false);
+    expect(r.ok && r.doc).toBe(d);
+  });
+
+  it('動画でない部品・固定した列・見つからないものは断る', () => {
+    expect(setClipHoldFrame(doc({ clips: [video({ assetId: 'asset_002' })] }), 'clip_001', true))
+      .toEqual({ ok: false, reason: EDIT_BLOCKED.freezeNotVideo });
+    const locked = doc({
+      clips: [video()],
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }, { id: 'track_002', kind: TRACK_KIND.audio }],
+    });
+    expect(setClipHoldFrame(locked, 'clip_001', true)).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    expect(setClipHoldFrame(doc({ clips: [video()] }), 'clip_999', true)).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+  });
+
+  // ⚠️ **手で書いた文書でも鳴らさない**＝`useOriginalAudio` が残っていても、止めている間は音なし。
+  it('止めた部品は、元の音の設定が残っていても鳴らない・欄も出さない', () => {
+    const c = video({ holdFrame: true, useOriginalAudio: true });
+    // 音の入った動画（止めていなければ鳴る・欄も出る）。
+    const d = doc({ clips: [c], assets: [{ ...movie, metadata: { hasAudio: true } }, still] });
+    expect(canUseOriginalAudio(d, { ...c, holdFrame: undefined }), '前提：止めていなければ欄が出る').toBe(true);
+    expect(videoPlacementsOfClip(d, { ...c, holdFrame: undefined })[0]!.useOriginalAudio, '前提：止めていなければ鳴る').toBe(true);
+    expect(videoPlacementsOfClip(d, c)[0]!.useOriginalAudio).toBe(false);
+    expect(canUseOriginalAudio(d, c)).toBe(false);
   });
 });
