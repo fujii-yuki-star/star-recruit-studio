@@ -60,10 +60,38 @@ describe('タイムライン形式の一覧の絵', () => {
     expect(thumb).toHaveBeenCalledTimes(2);
   });
 
+  // ⚠️ **描いている間に消しても、消した後に書かない**（PR レビュー 🔴＝`preview.png` だけのフォルダが復活する）。
+  it('描いている最中に消すと、消す側はその回を待ち、絵は書かない', async () => {
+    let release: (v: string) => void = () => {};
+    read.mockImplementation(() => new Promise((r) => { release = r; }));
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20261021_001');
+    await flush(); // 素材を読んでいる最中で止まっている
+    const handoff = useTimelineStore.getState().discardDeletedProject('proj_20261021_001');
+    let landed = false;
+    void handoff.pending?.then(() => { landed = true; });
+    await flush();
+    expect(landed).toBe(false); // 描いている回の着地を待つ
+    release('data:image/png;base64,PHOTO');
+    await flush();
+    expect(landed).toBe(true);
+    expect(thumb).not.toHaveBeenCalled();
+  });
+
+  it('消せなかったら印を外し、また絵を作れる', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    const handoff = useTimelineStore.getState().discardDeletedProject('proj_20261021_001'); // 開いていない動画
+    await handoff.restore?.();
+    await useTimelineStore.getState().openTimelineProject('proj_20261021_001');
+    await flush();
+    expect(thumb).toHaveBeenCalledTimes(1);
+  });
+
   // ⚠️ **どの動画の印かまで見る**＝複製した直後は中身が同じ＝印だけで比べると、複製した側の絵が一度も作られない（場面形式の PR #889 と同じ）。
   it('中身が同じ別の動画（複製した直後）でも、その動画の絵を作る', async () => {
-    const a = doc();
-    const b = { ...doc(), projectId: 'proj_20261021_002' };
+    // ⚠️ 前の検査が焼いた印（モジュールの中に残る）と当たらない番号にする。
+    const a = { ...doc(), projectId: 'proj_20261021_003' };
+    const b = { ...doc(), projectId: 'proj_20261021_004' };
     const load = vi.spyOn(fsMod, 'loadProjectDoc');
     load.mockResolvedValueOnce(JSON.stringify(a));
     await useTimelineStore.getState().openTimelineProject(a.projectId);
@@ -71,6 +99,6 @@ describe('タイムライン形式の一覧の絵', () => {
     load.mockResolvedValueOnce(JSON.stringify(b));
     await useTimelineStore.getState().openTimelineProject(b.projectId);
     await flush();
-    expect(thumb.mock.calls.map((c: unknown[]) => c[0])).toEqual(['proj_20261021_001', 'proj_20261021_002']);
+    expect(thumb.mock.calls.map((c: unknown[]) => c[0])).toEqual(['proj_20261021_003', 'proj_20261021_004']);
   });
 });

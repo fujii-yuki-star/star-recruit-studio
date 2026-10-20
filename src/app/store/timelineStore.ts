@@ -1387,6 +1387,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 音の素材の長さ（#1348）＝古い動画は取り込み時に測っていないので、ここで測る（待たない・文書は書き換えない）。
       void get()._measureAudioDurations();
       // 一覧の小さな絵＝前の版で作った動画には絵が無い（保存を待たずに、開いたときにも作る・待たない）。
+      // ⚠️ 開けた＝在る動画＝消した印は外す（消した番号が新しい動画に使い回されても、絵を止めたままにしない）。
+      deletedThumbIds.delete(doc.projectId);
       void refreshTimelineThumbnail(doc);
       // ⚠️ **実在も調べる**（#1019 ⑤）＝表示用の URL は組むだけなので、これが無いと
       //   ファイルが動いた・消えた素材を**一度も知らせられない**（選び直す入口も出ない）。
@@ -1419,8 +1421,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // ⚠️ **`currentSave` を見てはいけない**＝`releaseSaveGuard()` がそれを捨てるので、手放した後に
     // 読むと必ず空になる（待ちが丸ごと空振りする）。**いま開いていない動画の書き込み**（別の動画へ
     // 移った後も走っている）も待てるよう、手放しで消えない `inFlightWrites`（`writesFor`）を見る。
-    const pending = writesFor(projectId);
-    if (get().doc?.projectId !== projectId) return { pending }; // 開いてはいないが、書き込みは待たせる
+    // ⚠️ **一覧の絵を描いている最中の回も待たせる**（PR レビュー 🔴）＝`trackWrite` が数えるのは書き始めてから。
+    //   描いている間に消すと、描き終わった回が `preview.png` を書いて**フォルダだけ復活**する（場面形式の #927 と同じ穴）。
+    const pending = withThumbnailHold(projectId, writesFor(projectId));
+    const unmark = (): void => { deletedThumbIds.delete(projectId); };
+    if (get().doc?.projectId !== projectId) return { pending, restore: unmark }; // 開いてはいないが、書き込みは待たせる
     releaseSaveGuard();
     set({ ...emptyState(), exportRun: get().exportRun });
     // 文書はもう手放しているので、この保存は最後の `set` を `stillOpen` で見送る（#693）。
@@ -1432,7 +1437,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **待っている間に別の動画を開かれていたら戻さない**（#763-4 レビュー）＝消す側の待ちは
       // このPRで意図的に長くしたので、その間に別の動画を開ける。無条件に開き直すと、
       // **いま開いている方を黙って上書きする**（§2-5）。手放したまま（空）のときだけ戻す。
-      restore: () => (get().doc == null ? get().openTimelineProject(projectId) : undefined),
+      restore: () => {
+        unmark();
+        return get().doc == null ? get().openTimelineProject(projectId) : undefined;
+      },
     };
   },
 
@@ -3579,6 +3587,20 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
 
 /** 最後に焼いた一覧の絵の印（同じ動画・同じ中身なら焼き直さない＝打つたびに焼かない）。 */
 let lastTimelineThumb: { projectId: string; key: string } | null = null;
+/** 消した動画（一覧の絵を書かない）。消せなかったときは外す（`discardDeletedProject` の `restore`）。 */
+const deletedThumbIds = new Set<string>();
+
+/**
+ * 消す動画の一覧の絵を止め、描いている回の着地も待たせる（PR レビュー 🔴）。
+ * 順番待ちの文書がその動画なら捨てる＝消した後に描き始めない。
+ */
+function withThumbnailHold(projectId: string, writes: Promise<void> | undefined): Promise<void> | undefined {
+  deletedThumbIds.add(projectId);
+  if (timelineThumbNext?.projectId === projectId) timelineThumbNext = null;
+  const run = timelineThumbRun;
+  if (!run) return writes;
+  return Promise.all([writes, run]).then(() => undefined);
+}
 /** 焼いている最中の回（重ねて焼かない＝最後に頼まれた文書だけ、走り終わってから焼く）。 */
 let timelineThumbRun: Promise<void> | null = null;
 let timelineThumbNext: TimelineProject | null = null;
@@ -3590,29 +3612,34 @@ let timelineThumbNext: TimelineProject | null = null;
  *   フォルダが復活する（場面形式の #927 と同じ穴）。
  */
 async function refreshTimelineThumbnail(doc: TimelineProject): Promise<void> {
+  if (deletedThumbIds.has(doc.projectId)) return;
   timelineThumbNext = doc;
   if (timelineThumbRun) return;
   timelineThumbRun = (async () => {
     while (timelineThumbNext) {
       const d = timelineThumbNext;
       timelineThumbNext = null;
-      const key = timelineThumbnailKey(d, templateOfNow);
-      if (key == null) continue; // 絵の部品が無い＝作らない（一覧は印のまま）
-      if (lastTimelineThumb?.projectId === d.projectId && lastTimelineThumb.key === key) continue;
-      const templateAssetSrcById = useProjectStore.getState().templateAssetSrcById;
-      const dataUrl = await renderTimelineThumbnail(d, {
-        templateOf: templateOfNow,
-        templateAssetSrc: (id) => templateAssetSrcById[id],
-        loadAssetSrc: async (id) => {
-          const rel = thumbnailSourcePath(d, id);
-          return rel ? ((await readAssetDataUrl(d.projectId, rel)) ?? undefined) : undefined;
-        },
-        fontFamily: fontFamilyForId(d.videoSettings.fontId),
-      });
-      if (!dataUrl) continue; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
-      const write = saveProjectThumbnail(d.projectId, dataUrl);
-      trackWrite(d.projectId, write);
+      // ⚠️ **1回ぶんまるごと「失敗しても黙って続ける」**（PR レビュー 🟡）＝印を作る段で投げると、順番待ちの文書を
+      //   捨てて「捕まえていない失敗」になる（焼く段だけ守っていた）。
       try {
+        const key = timelineThumbnailKey(d, templateOfNow);
+        if (key == null) continue; // 絵の部品が無い＝作らない（一覧は印のまま）
+        if (lastTimelineThumb?.projectId === d.projectId && lastTimelineThumb.key === key) continue;
+        const templateAssetSrcById = useProjectStore.getState().templateAssetSrcById;
+        const dataUrl = await renderTimelineThumbnail(d, {
+          templateOf: templateOfNow,
+          templateAssetSrc: (id) => templateAssetSrcById[id],
+          loadAssetSrc: async (id) => {
+            const rel = thumbnailSourcePath(d, id);
+            return rel ? ((await readAssetDataUrl(d.projectId, rel)) ?? undefined) : undefined;
+          },
+          fontFamily: fontFamilyForId(d.videoSettings.fontId),
+        });
+        if (!dataUrl) continue; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
+        // ⚠️ **書く直前にも見る**＝描いている間に消された動画へは書かない（フォルダだけ復活させない）。
+        if (deletedThumbIds.has(d.projectId)) continue;
+        const write = saveProjectThumbnail(d.projectId, dataUrl);
+        trackWrite(d.projectId, write);
         await write;
         lastTimelineThumb = { projectId: d.projectId, key };
       } catch {
@@ -3621,6 +3648,13 @@ async function refreshTimelineThumbnail(doc: TimelineProject): Promise<void> {
     }
   })().finally(() => {
     timelineThumbRun = null;
+    // ⚠️ **抜けた後に頼まれたぶんを取りこぼさない**（PR レビュー 🟡）＝ループを抜けてから空にするまでの間に
+    //   届いた文書は、走っている回に預けられたまま置き去りになる。
+    const left = timelineThumbNext;
+    if (left) {
+      timelineThumbNext = null;
+      void refreshTimelineThumbnail(left);
+    }
   });
   return timelineThumbRun;
 }
