@@ -595,7 +595,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（2026-10-16・13 §4）＝PACK_VOICE_NOT_ALLOWED（会社の動画で使えないキャラの声のパックを断る）。
     // ⚠️ **−2**（ADR-0065）＝TIMELINE_EDIT_FREEZE_FAILED／TIMELINE_EDIT_FREEZE_CHANGED（止めた絵がファイルを作らなくなり、切り出しの失敗と待ちが無くなった）。
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(327);
+    // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(328);
   });
 
 
@@ -889,7 +890,8 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（2026-10-16・13 §4）＝PACK_VOICE_NOT_ALLOWED（会社の動画で使えないキャラの声のパックを断る）。
     // ⚠️ **−2**（ADR-0065）＝TIMELINE_EDIT_FREEZE_FAILED／TIMELINE_EDIT_FREEZE_CHANGED。
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(322);
+    // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(323);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

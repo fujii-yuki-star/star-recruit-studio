@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, cssFamilyForId, isKnownFontId, resolveFontId,
   createUserFontId, isUserFontId, USER_FONT_ID_RE, USER_FONT_ID_SAMPLES,
-  PACK_FONT_ID_RE, PACK_FONT_ID_SAMPLES, isExternalFontId, isFontAvailable,
+  PACK_FONT_ID_RE, PACK_FONT_ID_SAMPLES, isExternalFontId, isFontAvailable, effectiveTextFontId, boldLooksSameIn,
 } from './fontCatalog';
 
 describe('fontCatalog（同梱フォント選択）', () => {
@@ -160,5 +160,21 @@ describe('fontCatalog（同梱フォント選択）', () => {
       expect(resolveFontId(null, 'user_font_002')).toBe('user_font_002');
       expect(resolveFontId(null, null)).toBe(DEFAULT_FONT_ID);
     });
+  });
+});
+
+// 太さの欄の知らせ（#1483・ADR-0038）＝描くときと同じ順で字体を解き、持ち込み・パックの字体なら「太字が効かない」。
+describe('effectiveTextFontId / boldLooksSameIn', () => {
+  it('要素 → 場面 → 動画全体 → 既定の順（分からない値は飛ばす）', () => {
+    expect(effectiveTextFontId('user_font_001', 'gen-interface-jp-display', DEFAULT_FONT_ID)).toBe('user_font_001');
+    expect(effectiveTextFontId(undefined, 'gen-interface-jp-display', 'user_font_002')).toBe('gen-interface-jp-display');
+    expect(effectiveTextFontId('not-a-font', undefined, 'user_font_002')).toBe('user_font_002');
+    expect(effectiveTextFontId(undefined, undefined, undefined)).toBe(DEFAULT_FONT_ID);
+  });
+  it('持ち込み・拡張パックの字体では太字が効かない／同梱の字体では効く', () => {
+    expect(boldLooksSameIn('user_font_001')).toBe(true);
+    expect(boldLooksSameIn('pack_office__mincho')).toBe(true);
+    expect(boldLooksSameIn(DEFAULT_FONT_ID)).toBe(false);
+    expect(boldLooksSameIn(undefined)).toBe(false);
   });
 });

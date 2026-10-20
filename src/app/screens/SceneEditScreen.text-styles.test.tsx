@@ -719,3 +719,22 @@ describe("SceneEditScreen 見た目が見つからない場面", () => {
     expect(screen.getByText("文字")).toBeInTheDocument();
   });
 });
+
+// 太さの欄の知らせ（#1483・ADR-0038）＝描く字体が持ち込みなら「太字が効かない」と出す（描くときと同じ順＝その種別 → 場面 → 動画全体）。
+describe("SceneEditScreen 太字が効かない字体の知らせ（#1483）", () => {
+  it("その種別の字体が持ち込みなら知らせる・同梱なら出さない", () => {
+    setup({ textFontIds: { title: "user_font_001" } } as Partial<Scene>);
+    const details = openStyles();
+    expect(within(details).getByRole("note").textContent).toContain("太字が無い");
+  });
+  it("場面の字体が持ち込みでも知らせる（その種別に指定が無いとき）", () => {
+    setup({ fontId: "user_font_001" } as Partial<Scene>);
+    const details = openStyles();
+    expect(within(details).queryByRole("note")).not.toBeNull();
+  });
+  it("同梱の字体では出さない", () => {
+    setup();
+    const details = openStyles();
+    expect(within(details).queryByRole("note")).toBeNull();
+  });
+});

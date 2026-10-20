@@ -54,6 +54,8 @@ import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { unusedTimelineAssetIds } from "../../domain/timeline/unusedAssets";
+import { BoldUnavailableNote } from "../components/BoldUnavailableNote";
+import { effectiveTextFontId } from "../../domain/font/fontCatalog";
 import { overlayWarpTransform } from "../canvasWarp";
 import { trackVolumeFromPercentText } from "../trackVolumeInput";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnWarpScaleOf } from "../../renderer/timelineLayout";
@@ -1719,6 +1721,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             <option value={FONT_WEIGHT.normal}>ふつう</option>
             <option value={FONT_WEIGHT.bold}>太字</option>
           </select>
+          <BoldUnavailableNote fontId={effectiveTextFontId(sel.fontId, null, doc?.videoSettings.fontId)} />
         </label>
         <label className="field">
           <span>揃え</span>

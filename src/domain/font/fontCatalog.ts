@@ -111,6 +111,26 @@ export function isExternalFontId(fontId: unknown): fontId is FontId {
 }
 
 /**
+ * **描く字体**（要素 → 場面 → 動画全体 → 既定の順で、最初に分かるもの・ADR-0063 の `textFontFor` と同じ順）。
+ * 太さの欄の知らせ（#1483）が、描画と同じ字体を見るために使う。
+ */
+export function effectiveTextFontId(
+  elementFontId: string | null | undefined,
+  sceneFontId: string | null | undefined,
+  projectFontId: string | null | undefined,
+): FontId {
+  return resolveFontId(isKnownFontId(elementFontId) ? elementFontId : sceneFontId, projectFontId);
+}
+
+/**
+ * その字体で**太字を選んでも見た目が変わらない**か（#1483・ADR-0038）。持ち込み・拡張パックの字体は1つのファイルを
+ * 普通と太字の両方に登録する（合成の太字に任せると、プレビューと書き出しで太さが変わりうる＝パリティを優先）。
+ */
+export function boldLooksSameIn(fontId: string | null | undefined): boolean {
+  return isExternalFontId(fontId);
+}
+
+/**
  * 次の持ち込みフォント id を採る（`11 §2` の採番＝既存の最大＋1・3桁ゼロ詰め）。
  * ⚠️ **消した番号は使い回さない**＝`existingIds` には **これまでに使った番号**（外したものを含む＝
  * `usedUserFontIds()`）を渡すこと。**一覧は渡さない**（実体があるものだけなので最大番号を外すと
