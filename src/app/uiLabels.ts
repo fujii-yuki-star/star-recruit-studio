@@ -74,6 +74,8 @@ export const Z_ORDER_LABEL = "重ね順";
  * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
  */
 export const DUPLICATE_LABEL = "複製";
+/** 太字が効かない字体のとき（#1483・ADR-0038）＝次の行動は「同梱の字体へ戻す」。 */
+export const BOLD_UNAVAILABLE_NOTE = "この文字の形には太字が無いため、太字を選んでも見た目は変わりません。太くしたいときは、同梱の文字の形を選んでください";
 /** タイムライン形式の「使っていない素材を片づける」（#1480）。件数つき。 */
 export function unusedAssetsCleanupLabel(count: number): string {
   return `使っていない素材を片づける（${count}件）`;

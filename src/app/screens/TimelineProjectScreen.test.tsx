@@ -7623,6 +7623,30 @@ describe("TimelineProjectScreen: キャンバスで掴む × 履歴（#813）", 
 // 字幕クリップの「見た目」（差分再監査 5巡目 🔴＋レビュー）。
 //
 // ⚠️ **効くのに選べない、の裏返し**＝描画も書き込みも通っているのに入口が影と帯しか無く、
+// 太さの欄の知らせ（#1483・ADR-0038）＝描く字体が持ち込み・拡張パックなら「太字が効かない」と出す。
+describe("太字が効かない字体の知らせ（#1483）", () => {
+  const withText = (fontId?: string, projectFontId?: string): void => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 40, text: "あ", ...(fontId ? { fontId } : {}) }] });
+    if (projectFontId) useTimelineStore.setState((st) => ({ doc: st.doc ? { ...st.doc, videoSettings: { ...st.doc.videoSettings, fontId: projectFontId } } : st.doc }));
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  it("部品の字体が持ち込みなら知らせる", () => {
+    withText("user_font_001");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("note").textContent).toContain("太字が無い");
+  });
+  it("動画全体の字体が持ち込みなら知らせる（部品に指定が無いとき）", () => {
+    withText(undefined, "user_font_002");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("note").some((n) => (n.textContent ?? "").includes("太字が無い"))).toBe(true);
+  });
+  it("同梱の字体では出さない", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("note").some((n) => (n.textContent ?? "").includes("太字が無い"))).toBe(false);
+  });
+});
+
 // 大きさ・色・太さ・揃え・フォント・縁取りが直せなかった（場面形式の自由配置の字幕は直せる）。
 describe("字幕クリップの見た目", () => {
   const openSubtitle = (): void => {

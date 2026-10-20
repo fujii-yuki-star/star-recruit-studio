@@ -105,3 +105,19 @@ describe("自由配置の文字：体裁は畳んで出す（#1032）", () => {
     expect(screen.getByText("太さ")).toBeInTheDocument();
   });
 });
+
+// 太さの欄の知らせ（#1483・ADR-0038）＝自由配置の文字も、描く字体（要素 → 場面 → 動画全体）が持ち込みなら知らせる。
+describe("自由配置の文字：太字が効かない字体の知らせ（#1483）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0 });
+  });
+  it("要素の字体が持ち込みなら知らせる", () => {
+    setup(sceneWith({ fontId: "user_font_001" }));
+    expect(screen.queryAllByRole("note").some((n) => (n.textContent ?? "").includes("太字が無い"))).toBe(true);
+  });
+  it("同梱の字体では出さない", () => {
+    setup(sceneWith({}));
+    expect(screen.queryAllByRole("note").some((n) => (n.textContent ?? "").includes("太字が無い"))).toBe(false);
+  });
+});

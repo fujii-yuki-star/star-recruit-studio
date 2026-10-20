@@ -35,6 +35,8 @@ import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue, transitionFromSelectValue } from "../../domain/project/sceneTransitions";
+import { BoldUnavailableNote } from "../components/BoldUnavailableNote";
+import { effectiveTextFontId } from "../../domain/font/fontCatalog";
 import { freeContentHiddenBySwitch, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
@@ -1170,6 +1172,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <option value={FONT_WEIGHT.normal}>標準</option>
               <option value={FONT_WEIGHT.bold}>太字</option>
             </select>
+            <BoldUnavailableNote fontId={effectiveTextFontId(selected.textFontIds?.[key], selected.fontId, fontId)} />
           </div>
         </div>
         <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
@@ -1417,6 +1420,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <option value={FONT_WEIGHT.normal}>標準</option>
                 <option value={FONT_WEIGHT.bold}>太字</option>
               </select>
+              <BoldUnavailableNote fontId={effectiveTextFontId(el.fontId, selected.fontId, fontId)} />
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -1548,6 +1552,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <option value={FONT_WEIGHT.normal}>標準</option>
                 <option value={FONT_WEIGHT.bold}>太字</option>
               </select>
+              <BoldUnavailableNote fontId={effectiveTextFontId(el.fontId, selected.fontId, fontId)} />
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
