@@ -17,7 +17,8 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { BLEND_MODE, isMixingBlend, CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
-import { VOICES_FROM_SUBTITLES_HINT, voicesFromSubtitlesLabel } from "../uiLabels";
+import { VOICES_FROM_SUBTITLES_HINT, voicesFromSubtitlesLabel, clipKeyTitle } from "../uiLabels";
+import { clipKeyframeTimes, keyframeSeekSec } from "../../domain/timeline/keyframeMarks";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, unusedAssetsCleanupConfirm, unusedAssetsCleanupLabel, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
@@ -5522,6 +5523,28 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                               </span>
                             )}
                             {clipLabel(clipWithShownText(doc, c), doc.assets)}
+                            {/* **キーフレームの印**（#1186 ②＝実機で、どこに動きを置いたかが帯から分からなかった）＝選んだ帯にだけ、
+                                その部品自身のキーの時刻にひし形を出す。**押すとその時刻へ移る**（CapCut・Premiere の型・まず読むだけ）。
+                                ⚠️ 帯は `<button>` なので印は `span`（入れ子にしない）。押しても帯を掴まない・選び直さない（伝えない）。 */}
+                            {selectedClipIds.length === 1 && selectedClipIds[0] === c.id &&
+                              clipKeyframeTimes(doc, c.id).map((t) => (
+                                <span
+                                  key={`key-${t}`}
+                                  className={`timeline-clip-key${markerTimeEq(playheadSec, keyframeSeekSec(c, t, clockFps)) ? " timeline-clip-key--current" : ""}`}
+                                  data-testid="clip-key"
+                                  data-time={c.startSec + t}
+                                  style={{ left: `${(t / c.durationSec) * 100}%` }}
+                                  title={clipKeyTitle(markerClock(c.startSec + t, clockFps))}
+                                  aria-hidden="true"
+                                  onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (useTimelineStore.getState().isPlaying) pause();
+                                    setPlayhead(keyframeSeekSec(c, t, clockFps));
+                                    followPlayhead();
+                                  }}
+                                />
+                              ))}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (
                               <>
