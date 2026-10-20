@@ -5618,6 +5618,11 @@ mod tests {
             source_color_of("  Stream #0:0: Audio: aac (LC), 44100 Hz, mono"),
             SourceColor::Other
         );
+        // 範囲は画素の形の名前（yuvj）だけでなく、括弧の中の pc でも見る（印の無い HD の全範囲）。
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p(pc, progressive)", "1920x1080")),
+            SourceColor::Bt709Assumed { full: true }
+        );
     }
 
     #[test]
