@@ -454,6 +454,23 @@ describe('exportTimelineVideo', () => {
     expect(msg).not.toContain('ファイルを選び直す');
   });
 
+  // ⚠️ **書き出す直前にもう一度そろえる**（PR レビュー 🟡）＝一度読めた後に作り置きが消えた・素材を差し替えた、を見落とさない。
+  it('前に読めていても、書き出す直前に作り置きを作れなければ断る', async () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '録音', filePath: 'assets/asset_001.wav' }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', denoise: true },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(assetFsMod, 'ensureDenoisedAudio').mockResolvedValue(null);
+    await open(d);
+    useTimelineStore.setState({ audioSrcByKey: { 'denoise:asset_001': 'asset://cache/denoise/asset_001.wav.flac' } });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '作り置きが無いのに保存先を聞いた').not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message ?? '').toContain('ノイズを減らす');
+  });
+
   // ⚠️ **同梱の曲にも「ファイルを選び直す」は無い**（一覧から選び直す）＝取り込んだ素材と取り違えない。
   it('同梱の曲が読めないときは、鳴らす音を選び直す手を出す', async () => {
     const d = doc({

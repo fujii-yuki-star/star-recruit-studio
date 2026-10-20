@@ -42,7 +42,8 @@ describe('ノイズを減らした作り置き（ADR-0068）', () => {
     await open(doc(true));
     await useTimelineStore.getState().ensureAudioSrcs();
     expect(ensure).toHaveBeenCalledWith('proj_20261020_001', 'assets/asset_001.wav');
-    expect(useTimelineStore.getState().audioSrcByKey['denoise:asset_001']).toBe('asset://cache/denoise/asset_001.wav.flac');
+    // 読み直すたびに別の URL（`?t=`）＝作り直した音を古いまま鳴らさない。
+    expect(useTimelineStore.getState().audioSrcByKey['denoise:asset_001']).toMatch(/^asset:\/\/cache\/denoise\/asset_001\.wav\.flac\?t=\d+$/);
     expect(useTimelineStore.getState().audioSrcByKey['asset:asset_001']).toBeUndefined();
     expect(useTimelineStore.getState().denoiseFailedKeys).toEqual([]);
   });
@@ -61,5 +62,24 @@ describe('ノイズを減らした作り置き（ADR-0068）', () => {
     await useTimelineStore.getState().ensureAudioSrcs();
     expect(ensure).not.toHaveBeenCalled();
     expect(useTimelineStore.getState().audioSrcByKey['asset:asset_001']).toBeTruthy();
+  });
+
+  // ⚠️ **入れ直したら作り直しを試す**（PR レビュー ℹ️）＝前に作れなかった印が残ると、外して入れ直しても試さず知らせも消えない。
+  it('作れなかった後に外して入れ直すと、もう一度試す', async () => {
+    let canMake = false; // 初めは作れない → 直ったあとは作れる
+    const ensure = vi.spyOn(assetFsMod, 'ensureDenoisedAudio').mockImplementation(async () => (canMake ? 'cache/denoise/asset_001.wav.flac' : null));
+    await open(doc(true));
+    await useTimelineStore.getState().ensureAudioSrcs();
+    // 開いたときの読み込みが先に走っていることがある＝終わるのを待つ。
+    await vi.waitFor(() => expect(useTimelineStore.getState().denoiseFailedKeys).toEqual(['denoise:asset_001']));
+    canMake = true;
+    const callsBefore = ensure.mock.calls.length;
+    useTimelineStore.setState({ selectedClipIds: ['clip_001'] });
+    useTimelineStore.getState().setSelectedClipDenoise(false);
+    useTimelineStore.getState().setSelectedClipDenoise(true);
+    expect(useTimelineStore.getState().denoiseFailedKeys).toEqual([]);
+    await useTimelineStore.getState().ensureAudioSrcs();
+    expect(ensure.mock.calls.length, 'もう一度試していない').toBeGreaterThan(callsBefore);
+    expect(useTimelineStore.getState().audioSrcByKey['denoise:asset_001']).toContain('cache/denoise/asset_001.wav.flac');
   });
 });

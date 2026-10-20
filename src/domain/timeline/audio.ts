@@ -9,7 +9,7 @@ import { clampVolume } from '../voice/audioMix';
 import { clipTimeAtSceneTime } from '../project/videoStartTiming';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject, Track, VolumePoint } from './types';
-import { isDirectVideoClip, placementOriginalAudio, videoPlacementsOfClip } from './video';
+import { isDirectVideoClip, isDrawnClip, placementOriginalAudio, videoPlacementsOfClip } from './video';
 
 /**
  * クリップの**フェードを掛ける前**の実効音量（`11 §6` の null=継承と同じ流儀）。
@@ -233,9 +233,10 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
   }
   // **ノイズを減らした動画の元の音**（ADR-0068）＝`<video>` は黙らせ、作り置きを同じ時刻・速さで鳴らす。
   // ⚠️ 鳴るかどうか・音量・頭出しは書き出しと同じ `placementOriginalAudio`／使える長さを通す（勝手に鳴らし続けない）。
-  const shownVisual = new Set(doc.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.hidden).map((t) => t.id));
+  // ⚠️ **描かれるかは書き出しと同じ述語**（`isDrawnClip`＝隠した部品・隠した列・隠したまとまり）＝自前で判定すると、
+  //   まとまりごと隠した動画だけプレビューで鳴り書き出しで鳴らない（PR レビュー 🔴）。
   for (const clip of doc.clips) {
-    if (clip.kind === TIMELINE_CLIP_KIND.audio || clip.hidden || !shownVisual.has(clip.trackId)) continue;
+    if (clip.kind === TIMELINE_CLIP_KIND.audio || !isDrawnClip(doc, clip)) continue;
     if (!denoisesClip(doc, clip)) continue;
     const place = videoPlacementsOfClip(doc, clip)[0];
     const org = place ? placementOriginalAudio(doc, place) : null;

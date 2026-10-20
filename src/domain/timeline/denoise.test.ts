@@ -87,6 +87,15 @@ describe('鳴らす音の出どころ（プレビュー）', () => {
     expect(audioCuesAt(doc([movie({ denoise: true, useOriginalAudio: false })]), 2)).toEqual([]); // 元の音を流さない動画
     expect(audioCuesAt(doc([movie()]), 2)).toEqual([]); // 減らさない動画は `<video>` が鳴らす
   });
+
+  // ⚠️ **描かれるかは書き出しと同じ述語**（PR レビュー 🔴）＝まとまりごと隠した動画は書き出しで鳴らないので、プレビューでも鳴らさない。
+  it('まとまりごと隠した動画・隠した部品・隠した列は鳴らさない', () => {
+    const grouped = { ...doc([movie({ denoise: true })]), groups: [{ id: 'group_001', members: ['clip_002'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }] } as TimelineProject;
+    expect(audioCuesAt(grouped, 2)).toEqual([]);
+    expect(audioCuesAt(doc([movie({ denoise: true, hidden: true })]), 2)).toEqual([]);
+    const hiddenTrack = { ...doc([movie({ denoise: true })]), tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }, { id: 'track_002', kind: TRACK_KIND.audio }] };
+    expect(audioCuesAt(hiddenTrack, 2)).toEqual([]);
+  });
 });
 
 describe('書き出し（作り置きをパスで渡す）', () => {

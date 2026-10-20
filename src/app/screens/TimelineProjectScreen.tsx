@@ -1955,8 +1955,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const gone = new Set(missingAssetIds);
     const unresolved = new Set(
       doc.clips
+        // ⚠️ **ノイズを減らす部品は除く**（ADR-0068・PR レビュー 🟡）＝元の素材は読まない（作り置きを読む）ので「選び直す」と出すのは誤り。
+        //   ファイルが本当に無いときは `gone` が拾い、作り置きを作れないときは部品の欄が「外して元の音で」と出す。
         .filter((c) => c.kind === TIMELINE_CLIP_KIND.audio && c.assetId)
         .filter((c) => {
+          if (doc && denoisesClip(doc, c)) return gone.has(c.assetId ?? "");
           const key = audioSourceKeyOfClip(c);
           return gone.has(c.assetId ?? "") || !key || !audioSrcByKey[key];
         })

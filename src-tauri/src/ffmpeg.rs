@@ -2258,15 +2258,22 @@ fn denoised_rel_path(rel_path: &str) -> String {
     format!("cache/denoise/{name}.flac")
 }
 
-/// 作り置きが**元より新しい**か（ADR-0068）。素材を差し替えたら作り直す＝古い音を黙って鳴らさない。
-fn denoised_is_fresh(
-    out_modified: Option<std::time::SystemTime>,
-    src_modified: Option<std::time::SystemTime>,
-) -> bool {
-    match (out_modified, src_modified) {
-        (Some(out), Some(src)) => out >= src,
-        _ => false,
-    }
+/// 元の素材の**しるし**（大きさと更新時刻・ADR-0068）。作り置きの横に控え、**同じときだけ**使い回す。
+/// ⚠️ **「作り置きの方が新しい」では足りない**（PR レビュー 🔴）＝素材を選び直すとファイルは写される（`fs::copy`）が、
+/// Windows では**元の更新時刻を引き継ぐ**ので、古い日付のファイルで差し替えると「作り置きの方が新しい」と読めて前の音が残る。
+fn source_stamp(meta: &fs::Metadata) -> String {
+    let nanos = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{}:{nanos}", meta.len())
+}
+
+/// 作り置きを使い回してよいか（ADR-0068）＝控えたしるしが、いまの素材のしるしと**同じ**とき。
+fn denoised_is_fresh(saved_stamp: Option<&str>, src_stamp: Option<&str>) -> bool {
+    matches!((saved_stamp, src_stamp), (Some(a), Some(b)) if a.trim() == b)
 }
 
 /// 失敗したときの文（ADR-0068）＝**外せば元の音で鳴る**ことを次の行動として出す。
@@ -2302,8 +2309,10 @@ fn ensure_denoised_audio_impl(
     }
     let rel_out = denoised_rel_path(&rel_path);
     let out = resolve_project_file(&app, &project_id, &rel_out)?;
-    let modified = |p: &std::path::Path| fs::metadata(p).and_then(|m| m.modified()).ok();
-    if produced_frame(&out) && denoised_is_fresh(modified(&out), modified(&input)) {
+    let stamp_path = out.with_extension("flac.src");
+    let src_stamp = fs::metadata(&input).ok().map(|m| source_stamp(&m));
+    let saved = fs::read_to_string(&stamp_path).ok();
+    if produced_frame(&out) && denoised_is_fresh(saved.as_deref(), src_stamp.as_deref()) {
         return Ok(rel_out);
     }
     if let Some(dir) = out.parent() {
@@ -2340,6 +2349,10 @@ fn ensure_denoised_audio_impl(
         let _ = fs::remove_file(&tmp);
         export_failure(format!("denoise rename: {e}"), DENOISE_FAILED_MESSAGE)
     })?;
+    // しるしを控える（書けなくても作り置きは使える＝次に開いたとき作り直すだけ）。
+    if let Some(stamp) = src_stamp {
+        let _ = fs::write(&stamp_path, stamp);
+    }
     Ok(rel_out)
 }
 
@@ -5302,17 +5315,14 @@ mod tests {
     }
 
     #[test]
-    fn denoised_is_fresh_only_when_newer_than_source() {
-        use std::time::{Duration, SystemTime};
-        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
-        assert!(denoised_is_fresh(Some(t), Some(t)));
-        assert!(denoised_is_fresh(Some(t + Duration::from_secs(1)), Some(t)));
-        assert!(!denoised_is_fresh(
-            Some(t),
-            Some(t + Duration::from_secs(1))
-        )); // 素材を差し替えた＝作り直す
-        assert!(!denoised_is_fresh(None, Some(t)));
-        assert!(!denoised_is_fresh(Some(t), None));
+    fn denoised_is_fresh_only_when_source_stamp_matches() {
+        assert!(denoised_is_fresh(Some("100:5"), Some("100:5")));
+        assert!(denoised_is_fresh(Some("100:5\n"), Some("100:5"))); // 控えの改行は気にしない
+                                                                    // 素材を差し替えた＝大きさか時刻が違う＝作り直す（古い日付で差し替えても見落とさない）。
+        assert!(!denoised_is_fresh(Some("100:5"), Some("120:5")));
+        assert!(!denoised_is_fresh(Some("100:5"), Some("100:4")));
+        assert!(!denoised_is_fresh(None, Some("100:5")));
+        assert!(!denoised_is_fresh(Some("100:5"), None));
     }
 
     #[test]

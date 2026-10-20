@@ -14,7 +14,7 @@ import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
-import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf } from "../../domain/timeline/audio";
+import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf, denoiseSourceKey } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { keepRestorePoints } from "./restorePointKeeper";
@@ -2036,7 +2036,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipHoldFrame: (hold) => applyEdit(set, get, (d, id) => setClipHoldFrame(d, id, hold)),
-  setSelectedClipDenoise: (on) => applyEdit(set, get, (d, id) => setClipDenoise(d, id, on)),
+  setSelectedClipDenoise: (on) => {
+    // ⚠️ **入れ直したら作り直しを試す**（PR レビュー ℹ️）＝前に作れなかった印が残ると、外して入れ直しても試さず知らせも消えない。
+    const clip = get().doc?.clips.find((c) => c.id === get().selectedClipIds[0]);
+    if (on && clip?.assetId) {
+      const key = denoiseSourceKey(clip.assetId);
+      get()._audioTried.delete(key);
+      set({ denoiseFailedKeys: get().denoiseFailedKeys.filter((k) => k !== key) });
+    }
+    applyEdit(set, get, (d, id) => setClipDenoise(d, id, on));
+  },
   setSelectedClipOriginalAudioVolume: (volume) =>
     applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
   // ⚠️ **見た目パターンを渡す**（`/canon-check` 🔴・`splitClip` と同じ理由）＝どの枠が動画を受けるか、
@@ -2206,7 +2215,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (nowDoc && nowDoc.projectId === doc.projectId) {
         // ⚠️ **この素材のぶんだけ**読み直すのは**速さのため**（ぜんぶ読み直しても結果は同じ）＝
         //   音の部品が多い動画で、選び直すたびに全部を読み直さない。
-        const uses = audioSourcesOf(nowDoc).filter((src) => src.assetId === assetId);
+        // ⚠️ **ノイズを減らした作り置きも作り直す**（ADR-0068・PR レビュー 🔴）＝鍵は素材の番号なので、ここで読み直さないと前の音が鳴り続ける。
+        const uses = audioSourcesOf(nowDoc).filter((src) => (src.assetId ?? src.denoiseAssetId) === assetId);
         const loaded = await Promise.all(uses.map((src) => loadAudioSrc(nowDoc, src)));
         const after2 = get().doc;
         if (after2 && after2.projectId === doc.projectId && loaded.some(Boolean)) {
@@ -2911,6 +2921,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       //   ⚠️ **保存先を聞く前**にやる（絵の判定と同じ順＝聞いてから断らない）。
       // ⚠️ **種類で次の行動が違う**（PR #1066 レビュー 🟡）＝読み上げ／同梱の曲／取り込んだ素材で
       //   できることが違うので、**読めなかった最初のもの**の種類で言い分ける。
+      // ⚠️ **ノイズを減らした作り置きは書き出す直前にもう一度そろえる**（ADR-0068・PR レビュー 🟡）＝一度読めた後に素材を差し替えた・
+      //   作り置きを消した、を見落とさない（中は「元と同じか」を確かめるだけなので軽い）。作れなければ読めない音として断る。
+      const staleDenoise: string[] = [];
+      for (const src of audioSourcesOf(doc)) {
+        if (!src.denoiseAssetId) continue;
+        const path = assetPathOf(doc, src.denoiseAssetId);
+        if (!path || !(await ensureDenoisedAudio(doc.projectId, path))) staleDenoise.push(audioSourceKey(src));
+      }
+      if (staleDenoise.length > 0) {
+        const left = { ...get().audioSrcByKey };
+        for (const k of staleDenoise) delete left[k];
+        set({ audioSrcByKey: left, denoiseFailedKeys: [...new Set([...get().denoiseFailedKeys, ...staleDenoise])] });
+      }
       const unreadableAudio = audioSourcesOf(doc).find((src) => !get().audioSrcByKey[audioSourceKey(src)]);
       if (unreadableAudio) {
         set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: audioUnreadableMessage(audioSourceKindOf(unreadableAudio)) } });
@@ -3171,7 +3194,8 @@ async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[st
     const path = assetPathOf(doc, src.denoiseAssetId);
     const rel = path ? await ensureDenoisedAudio(doc.projectId, path) : null;
     const display = rel ? await assetDisplayUrl(doc.projectId, rel) : null;
-    return display ? [audioSourceKey(src), display] : null;
+    // ⚠️ **読み直しのたびに別の URL**＝同じ場所に作り直したとき、前の音を鳴らさない（動画の `?t=` と同じ理由）。
+    return display ? [audioSourceKey(src), `${display}?t=${Date.now()}`] : null;
   }
   const url = src.voicePath
     ? await readVoiceDataUrl(doc.projectId, src.voicePath)
