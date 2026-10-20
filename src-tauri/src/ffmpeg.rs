@@ -710,25 +710,66 @@ pub enum SourceColor {
     Bt709Tagged,
     /// 印が無く、高さ 720 以上＝BT.709 とみなす（プレビューと同じ）。`full`＝範囲が pc（yuvj 等）。
     Bt709Assumed { full: bool },
-    /// BT.601 系（印 smpte170m／bt470bg、または印が無く高さ 720 未満）＝原色ごと BT.709 へ直す。
-    /// `bt470bg`＝原色・式が PAL 系（印が bt470bg のときだけ）。
-    Bt601 { bt470bg: bool, full: bool },
-    /// それ以外の印（BT.2020・HDR 等）＝今までどおり（FFmpeg の既定）。
+    /// BT.601 系（式の印 smpte170m／bt470bg、または印が無く高さ 720 未満）＝原色ごと BT.709 へ直す。
+    /// `bt470bg`＝式が PAL 系（印が bt470bg のときだけ）。`primaries`＝原色（印があれば印どおり・無ければ式に合わせる）。
+    Bt601 {
+        bt470bg: bool,
+        primaries: Primaries,
+        full: bool,
+    },
+    /// それ以外（BT.2020・HDR の印／RGB の動画／印の無い透過つきの動画）＝今までどおり（FFmpeg の既定）。
     Other,
 }
 
-/// 映像の行の、画素の形（yuv… / nv… / p01…）の直後の括弧の中身（無ければ None）。
-fn pix_fmt_paren(line: &str) -> Option<&str> {
-    let mut from = 0;
-    while let Some(rel) = line[from..].find('(') {
-        let open = from + rel;
-        let start = line[..open].rfind([' ', ',']).map(|i| i + 1).unwrap_or(0);
-        let fmt = &line[start..open];
-        if fmt.starts_with("yuv") || fmt.starts_with("nv") || fmt.starts_with("p01") {
-            let close = line[open..].find(')')? + open;
-            return Some(&line[open + 1..close]);
+/// BT.601 系の動画の原色（`zscale` の `primariesin` の名前）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Primaries {
+    Smpte170m,
+    Bt470bg,
+    Bt709,
+}
+
+impl Primaries {
+    /// `zscale` の `primariesin` に渡す名前。⚠️ `470bg` は受けない（`bt470bg` と綴る＝同梱の FFmpeg で実測・式の側は `470bg` も受ける）。
+    fn zscale_name(self) -> &'static str {
+        match self {
+            Primaries::Smpte170m => "smpte170m",
+            Primaries::Bt470bg => "bt470bg",
+            Primaries::Bt709 => "bt709",
         }
-        from = open + 1;
+    }
+}
+
+/// 映像の行の画素の形の名前と、その直後の括弧の中身（括弧が無ければ空）。
+/// ⚠️ 行には符号の説明の括弧（"h264 (High) (avc1 / …)"）もある＝画素の形の名前の直後の括弧だけを見る。
+fn pix_fmt_of(line: &str) -> Option<(&str, &str)> {
+    const HEADS: [&str; 12] = [
+        "yuv", "nv", "p01", "rgb", "bgr", "gbr", "gray", "argb", "abgr", "ya", "pal", "x2",
+    ];
+    let after = &line[line.find("Video:")? + "Video:".len()..];
+    let base = line.len() - after.len();
+    let mut i = 0;
+    while i < after.len() {
+        let rest = &after[i..];
+        let at_word = i == 0 || matches!(after.as_bytes()[i - 1], b' ' | b',');
+        if at_word && HEADS.iter().any(|h| rest.starts_with(h)) {
+            let name_len = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            let name = &rest[..name_len];
+            let inner = if rest[name_len..].starts_with('(') {
+                let open = base + i + name_len;
+                let close = line[open..]
+                    .find(')')
+                    .map(|c| open + c)
+                    .unwrap_or(line.len());
+                &line[open + 1..close]
+            } else {
+                ""
+            };
+            return Some((name, inner));
+        }
+        i += rest.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
     }
     None
 }
@@ -739,43 +780,59 @@ pub fn source_color_of(stderr: &str) -> SourceColor {
     let Some(line) = stderr.lines().find(|l| l.contains("Video:")) else {
         return SourceColor::Other;
     };
+    let Some((fmt, inner)) = pix_fmt_of(line) else {
+        return SourceColor::Other;
+    };
+    // ⚠️ **YUV の動画だけ**＝RGB の動画に式の推定は要らない（原色だけ動いて色がずれる）。
+    let yuv = fmt.starts_with("yuv") || fmt.starts_with("nv") || fmt.starts_with("p01");
+    if !yuv {
+        return SourceColor::Other;
+    }
     let height = parse_resolution(stderr).1.unwrap_or(0);
-    // 画素の形の直後の括弧の中（例 "tv, bt709, progressive"）。括弧が無ければ印も範囲も無い。
-    // ⚠️ 行には符号の説明の括弧（"h264 (High) (avc1 / …)"）もあるので、画素の形の名前の直後の括弧だけを見る。
-    let inner = pix_fmt_paren(line).unwrap_or("");
-    let fmt_full = line.contains("yuvj");
-    let tokens: Vec<String> = inner
+    let tokens: Vec<&str> = inner
         .split(',')
-        .map(|t| t.trim().to_string())
+        .map(|t| t.trim())
         .filter(|t| !t.is_empty())
         .collect();
-    let full = fmt_full || tokens.iter().any(|t| t == "pc");
-    // 色の印＝"bt709" か "space/primaries/trc" の形。範囲・走査の語は除く。
-    let space = tokens
-        .iter()
-        .find(|t| {
-            let head = t.split('/').next().unwrap_or("");
-            !matches!(
-                head,
-                "tv" | "pc" | "progressive" | "top first" | "bottom first" | "unknown"
-            ) && head.chars().any(|c| c.is_ascii_alphabetic())
-                && head.chars().any(|c| c.is_ascii_digit())
-        })
-        .map(|t| t.split('/').next().unwrap_or("").to_string());
-    match space.as_deref() {
+    let full = fmt.starts_with("yuvj") || tokens.contains(&"pc");
+    // 色の印＝"bt709" か "式/原色/曲線" の形。範囲・走査の語は除く。
+    let tag = tokens.iter().find(|t| {
+        let head = t.split('/').next().unwrap_or("");
+        !matches!(
+            head,
+            "tv" | "pc" | "progressive" | "top first" | "bottom first" | "unknown"
+        ) && head.chars().any(|c| c.is_ascii_alphabetic())
+            && head.chars().any(|c| c.is_ascii_digit())
+    });
+    let mut parts = tag.map(|t| t.split('/')).into_iter().flatten();
+    let space = parts.next();
+    // 原色の印（2つ目）。1つだけの形（"bt709"）は3つとも同じ＝式と同じ名前。
+    let prim_tag = parts.next().or(space);
+    let primaries_or = |fallback: Primaries| match prim_tag {
+        Some("bt709") => Primaries::Bt709,
+        Some("bt470bg") => Primaries::Bt470bg,
+        Some("smpte170m") => Primaries::Smpte170m,
+        _ => fallback,
+    };
+    match space {
         Some("bt709") => SourceColor::Bt709Tagged,
         Some("smpte170m") => SourceColor::Bt601 {
             bt470bg: false,
+            primaries: primaries_or(Primaries::Smpte170m),
             full,
         },
         Some("bt470bg") => SourceColor::Bt601 {
             bt470bg: true,
+            primaries: primaries_or(Primaries::Bt470bg),
             full,
         },
         Some(_) => SourceColor::Other,
+        // ⚠️ **印の無い透過つきの動画は推定しない**（ProRes 4444 等）＝透過を保つ（今までどおり）。
+        None if fmt.starts_with("yuva") => SourceColor::Other,
         None if height >= 720 => SourceColor::Bt709Assumed { full },
         None if height > 0 => SourceColor::Bt601 {
             bt470bg: false,
+            primaries: Primaries::Smpte170m,
             full,
         },
         None => SourceColor::Other,
@@ -784,6 +841,7 @@ pub fn source_color_of(stderr: &str) -> SourceColor {
 
 /// 元の動画を RGB にする前に噛ませる色の前処理（純粋・末尾にカンマ付き／不要なら空）。
 /// ⚠️ BT.601 系は **`zscale` で原色ごと**直す（`colorspace` フィルタは実測でプレビューと最大 33 ずれ、`zscale` は最大 11）。
+/// ⚠️ `zscale` の後ろで画素の形を決めない＝4:4:4・10bit・透過をそのまま次（RGB にする所）へ渡す。
 pub fn color_in_filter(c: SourceColor) -> String {
     match c {
         SourceColor::Bt709Tagged | SourceColor::Other => String::new(),
@@ -791,13 +849,12 @@ pub fn color_in_filter(c: SourceColor) -> String {
             "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range={},",
             if full { "pc" } else { "tv" }
         ),
-        SourceColor::Bt601 { bt470bg, full } => {
-            let p = if bt470bg { "470bg" } else { "170m" };
-            format!(
-                "zscale=matrixin={p}:primariesin={p}:transferin=601:rangein={}:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,",
-                if full { "full" } else { "limited" }
-            )
-        }
+        SourceColor::Bt601 { bt470bg, primaries, full } => format!(
+            "zscale=matrixin={}:primariesin={}:transferin=601:rangein={}:matrix=709:primaries=709:transfer=709:range=limited,",
+            if bt470bg { "470bg" } else { "170m" },
+            primaries.zscale_name(),
+            if full { "full" } else { "limited" }
+        ),
     }
 }
 
@@ -5551,6 +5608,11 @@ mod tests {
 
     #[test]
     fn source_color_follows_tag_or_guesses_by_height() {
+        let p601 = |bt470bg: bool, primaries: Primaries, full: bool| SourceColor::Bt601 {
+            bt470bg,
+            primaries,
+            full,
+        };
         // 印どおり（符号の説明の括弧 "(High) (avc1 …)" に引っかからない）。
         assert_eq!(
             source_color_of(&probe_line("yuv420p(tv, bt709, progressive)", "1920x1080")),
@@ -5568,20 +5630,30 @@ mod tests {
                 "yuv420p(tv, smpte170m/smpte170m/bt709, progressive)",
                 "1920x1080"
             )),
-            SourceColor::Bt601 {
-                bt470bg: false,
-                full: false
-            }
+            p601(false, Primaries::Smpte170m, false)
         );
         assert_eq!(
             source_color_of(&probe_line(
                 "yuvj420p(pc, bt470bg/bt470bg/smpte170m, progressive)",
                 "1280x720"
             )),
-            SourceColor::Bt601 {
-                bt470bg: true,
-                full: true
-            }
+            p601(true, Primaries::Bt470bg, true)
+        );
+        // 原色は印（2つ目）どおり＝式が BT.601 でも原色が BT.709 なら原色は動かさない。
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuv420p(tv, smpte170m/bt709/bt709, progressive)",
+                "1920x1080"
+            )),
+            p601(false, Primaries::Bt709, false)
+        );
+        // 原色の印が無ければ式に合わせる。
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuvj422p(pc, bt470bg/unknown/unknown)",
+                "640x480"
+            )),
+            p601(true, Primaries::Bt470bg, true)
         );
         // 印が無い＝高さで決める（720 以上は BT.709・未満は BT.601＝プレビューと同じ）。境目は 720 ちょうど。
         assert_eq!(
@@ -5590,21 +5662,41 @@ mod tests {
         );
         assert_eq!(
             source_color_of(&probe_line("yuv420p(progressive)", "1280x719")),
-            SourceColor::Bt601 {
-                bt470bg: false,
-                full: false
-            }
+            p601(false, Primaries::Smpte170m, false)
         );
         assert_eq!(
             source_color_of(&probe_line("yuv420p", "640x360")),
-            SourceColor::Bt601 {
-                bt470bg: false,
-                full: false
-            }
+            p601(false, Primaries::Smpte170m, false)
         );
         assert_eq!(
             source_color_of(&probe_line("yuvj420p(pc, progressive)", "1920x1080")),
             SourceColor::Bt709Assumed { full: true }
+        );
+        // 範囲は画素の形の名前（yuvj）だけでなく、括弧の中の pc でも見る（印の無い HD の全範囲）。
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p(pc, progressive)", "1920x1080")),
+            SourceColor::Bt709Assumed { full: true }
+        );
+        // ⚠️ RGB の動画・印の無い透過つきの動画は推定しない（原色だけ動く／透過が消える＝PR レビュー 🟡）。
+        assert_eq!(
+            source_color_of(&probe_line("rgb24(progressive)", "640x360")),
+            SourceColor::Other
+        );
+        assert_eq!(
+            source_color_of(&probe_line("bgra", "640x360")),
+            SourceColor::Other
+        );
+        assert_eq!(
+            source_color_of(&probe_line("yuva444p12le(tv, progressive)", "640x360")),
+            SourceColor::Other
+        );
+        // 印のある透過つきは印どおり直す（zscale は透過を保つ）。
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuva444p12le(tv, smpte170m/smpte170m/bt709, progressive)",
+                "640x360"
+            )),
+            p601(false, Primaries::Smpte170m, false)
         );
         // それ以外の印（BT.2020 等）は触らない。映像が無ければ触らない。
         assert_eq!(
@@ -5618,11 +5710,6 @@ mod tests {
             source_color_of("  Stream #0:0: Audio: aac (LC), 44100 Hz, mono"),
             SourceColor::Other
         );
-        // 範囲は画素の形の名前（yuvj）だけでなく、括弧の中の pc でも見る（印の無い HD の全範囲）。
-        assert_eq!(
-            source_color_of(&probe_line("yuv420p(pc, progressive)", "1920x1080")),
-            SourceColor::Bt709Assumed { full: true }
-        );
     }
 
     #[test]
@@ -5634,19 +5721,84 @@ mod tests {
             "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,"
         );
         assert!(color_in_filter(SourceColor::Bt709Assumed { full: true }).contains("range=pc"));
-        // BT.601 系は zscale で原色ごと BT.709 へ（colorspace フィルタはプレビューと合わなかった）。
+        // BT.601 系は zscale で原色ごと BT.709 へ（colorspace フィルタはプレビューと合わなかった）。後ろで画素の形は決めない。
         assert_eq!(
-            color_in_filter(SourceColor::Bt601 { bt470bg: false, full: false }),
-            "zscale=matrixin=170m:primariesin=170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,"
+            color_in_filter(SourceColor::Bt601 { bt470bg: false, primaries: Primaries::Smpte170m, full: false }),
+            "zscale=matrixin=170m:primariesin=smpte170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,"
         );
+        // ⚠️ 原色は `bt470bg` と綴る（`470bg` は zscale が受けず、書き出しが必ず失敗した＝PR レビュー 🔴）。
         let pal = color_in_filter(SourceColor::Bt601 {
             bt470bg: true,
+            primaries: Primaries::Bt470bg,
             full: true,
         });
         assert!(
-            pal.contains("matrixin=470bg:primariesin=470bg") && pal.contains("rangein=full"),
+            pal.contains("matrixin=470bg:primariesin=bt470bg:") && pal.contains("rangein=full"),
             "{pal}"
         );
+        assert!(color_in_filter(SourceColor::Bt601 {
+            bt470bg: false,
+            primaries: Primaries::Bt709,
+            full: false
+        })
+        .contains("primariesin=bt709:"));
+    }
+
+    /// 前処理の全種類を、同梱の FFmpeg に実際に通す（綴りの誤りは引数の文字列の検査では見つからない＝PR レビュー 🔴）。
+    /// FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn color_in_filter_runs_on_real_ffmpeg() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let mut kinds = vec![
+            SourceColor::Bt709Assumed { full: false },
+            SourceColor::Bt709Assumed { full: true },
+        ];
+        for bt470bg in [false, true] {
+            for primaries in [Primaries::Smpte170m, Primaries::Bt470bg, Primaries::Bt709] {
+                for full in [false, true] {
+                    kinds.push(SourceColor::Bt601 {
+                        bt470bg,
+                        primaries,
+                        full,
+                    });
+                }
+            }
+        }
+        for src in [
+            "testsrc2=s=320x240:d=0.1,format=yuv420p",
+            "testsrc2=s=320x240:d=0.1,format=yuva444p",
+        ] {
+            for k in &kinds {
+                let vf = format!("{}format=rgba,{PNG_SRGB_TAG}", color_in_filter(*k));
+                let args: Vec<String> = [
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    src,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    &vf,
+                    "-f",
+                    "null",
+                    "-",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+                let r = run(&ffmpeg, &args);
+                assert!(r.is_ok(), "{k:?} / {src}: {r:?}");
+            }
+        }
     }
 
     /// エンコードする所は、どれも出力の色の印（VUI まで）を付ける。
@@ -5710,7 +5862,7 @@ mod tests {
         let v = video_scene_args(&VideoSceneArgs {
             below_png: "below.png",
             clip: "clip.mp4",
-            color_in: "zscale=matrixin=170m:primariesin=170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,",
+            color_in: "zscale=matrixin=170m:primariesin=smpte170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,",
             extra_videos: &[VideoLayerArg {
                 clip: "clip2.mp4",
                 color_in: "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,",
@@ -5756,7 +5908,7 @@ mod tests {
             "{fc}"
         );
         assert!(
-            fc.contains(",format=yuv420p,format=rgba,scale=1920:1080"),
+            fc.contains("range=limited,format=rgba,scale=1920:1080"),
             "{fc}"
         );
         assert!(
