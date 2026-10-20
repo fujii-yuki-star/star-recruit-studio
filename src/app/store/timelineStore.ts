@@ -40,8 +40,7 @@ import {
   setClipBlendMode, setClipFlip, setClipPivot, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
   setClipUseOriginalAudio, setClipHoldFrame, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setTrackVolume, setVoiceSpeaker,
-  setVoiceText, trimClip, trimClips, trimTargetsAt,
-} from "../../domain/timeline/edit";
+  setVoiceText, trimClip, trimClips, trimTargetsAt, withAddedTrack } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import { placeDroppedAssets } from "../../domain/timeline/fileDropPlacement";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
@@ -838,6 +837,12 @@ export interface TimelineState {
    */
   updateVideoSettings: (patch: Partial<TimelineProject["videoSettings"]>) => void;
   addTrack: (kind: TrackKind) => void;
+  /**
+   * **新しい列を足して、そこへ置く**（#1478・業界の型＝列の外へ落とすと列ができる）。`place` に新しい列の id を渡す。
+   * ⚠️ **取り消し1回で両方戻る**（列と置いた部品を1つのまとめにする）。⚠️ **置けなかったら列も足さない**
+   *（新しい列に何も載っていなければ、まとめごと無かったことにする＝空の列だけ増える、を作らない）。
+   */
+  withNewTrack: (kind: TrackKind, place: (trackId: string) => void) => void;
   removeTrack: (trackId: string) => void;
   /**
    * 列に名前を付ける（利用者要望 2026-09-28）＝「映像1／音1」の自動名だけだと、
@@ -2589,6 +2594,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addTrack: (kind) => {
     const doc = get().doc;
     if (doc) commit(set, get, addTrack(doc, kind));
+  },
+  withNewTrack: (kind, place) => {
+    const doc = get().doc;
+    if (!doc) return;
+    if (blockedByExport(set, get)) return;
+    const s = get();
+    s.beginHistoryGroup();
+    // ⚠️ 押す前の判定（画面）と同じ `withAddedTrack` で足す＝同じ id の列へ置く。
+    const added = withAddedTrack(doc, kind);
+    commit(set, get, added.doc);
+    place(added.trackId);
+    const used = get().doc?.clips.some((c) => c.trackId === added.trackId) ?? false;
+    // ⚠️ 置けなかった＝**断る理由は `place` が立てたまま**、列だけ戻す（まとめの1件も外す）。
+    if (used) get().endHistoryGroup();
+    else get().abandonHistoryGroup();
   },
   renameTrack: (trackId, name) => {
     const doc = get().doc;
