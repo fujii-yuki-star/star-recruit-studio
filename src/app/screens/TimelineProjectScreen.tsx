@@ -54,7 +54,7 @@ import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { overlayWarpTransform } from "../canvasWarp";
-import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnWarpScaleOf } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
 import { clipWithShownText, danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -2956,8 +2956,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       // インライン編集の見た目だけ実描画と割れる（`freeElementFromClip` は描画の入口と同じもの）。
       ...freeElementFromClip(cc.clip, canvasDims),
       // ⚠️ **枠は「いま描かれている場所」に出す**（#746-4）＝動きが効いている間、素の箱に出すと
-      // **掴もうとした所に部品が無い**。
-      ...cc.finalBox,
+      // **掴もうとした所に部品が無い**。⚠️ **縦横の倍率まで当てた長方形**（#1475）＝伸ばした部品の枠が
+      // 伸ばす前の大きさに出ていた。返ってきた値は `toBaseBox`（`baseBoxPatchFromShown`）が倍率から戻す。
+      ...cc.shownBox,
       // ⚠️ **重ね順は描く順**（#746-5）＝配列の順で当てるので、後ろほど手前。列の並びと同じにしないと、
       // 重なった所で**奥の部品が掴まれる**（右クリックの「削除」も奥に当たる）。
       zIndex: i,
@@ -4418,6 +4419,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               onChangeText={(id: string, text: string) => setClipTextFor(id, text)}
               onEditingIdChange={setEditingCanvasId}
               textFontFamily={fontFamilyForId(doc.videoSettings.fontId)}
+              // ⚠️ **直している間も描かれた形のまま**（#1475）＝反転と縦横の倍率を、描画と同じ順で当てる。
+              textEditScaleOf={(id: string) => {
+                const cc = canvasClips.find((x) => x.clip.id === id);
+                return cc ? drawnWarpScaleOf(cc) : undefined;
+              }}
               // ⚠️ **見た目パターンの中へ入る**（#818・ADR-0034 決定8＝二度押しで中へ）。
               // 見た目パターンのクリップは**箱を持たない**（枠そのもの）ので、その領域は「空白」として
               // 届く＝ここで受けて、押した所にある**中の部分**（差し込み口・文字の層）を当てる。

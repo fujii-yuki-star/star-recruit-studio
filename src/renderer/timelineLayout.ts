@@ -9,7 +9,7 @@ import { fillPlacement } from '../domain/timeline/cropFill';
 import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { talkMotionAt } from '../domain/timeline/talkMotion';
-import { pivotPointOf } from '../domain/timeline/pivot';
+import { CLIP_PIVOT_DEFAULT, pivotPointOf } from '../domain/timeline/pivot';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { isMixingBlend, CROP_MODE, FIT, FREE_CATEGORY, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind } from '../domain/enums';
@@ -187,8 +187,14 @@ export interface TimelineCanvasClip {
   box: Box;
   /** グループの変形まで当てた箱（自身の動きはまだ）。 */
   groupedBox: Box;
-  /** グループの変形 → 自身の動き まで当てた箱＝**いま描かれている場所**。 */
+  /** グループの変形 → 自身の動き まで当てた箱＝**いま描かれている場所**（縦横の倍率はまだ）。 */
   finalBox: Box;
+  /**
+   * キャンバスに出す**枠**＝`finalBox` に縦横の倍率（キーフレームの `scaleX`／`scaleY`・ADR-0059 段階2）まで当てた、
+   * **見えている長方形**（#1475）。倍率が無ければ `finalBox` と同じもの。
+   * ⚠️ 反転は枠の形を変えない（中心まわりの鏡＝同じ長方形）ので、ここには入らない。
+   */
+  shownBox: Box;
   /** その部品自身の動き（不透明度は箱に乗らないので、描画側がそのまま使う）。 */
   ownTr: InterpolatedTransform;
 }
@@ -204,10 +210,13 @@ export interface TimelineCanvasClip {
  *   そこは呼び出し側が掴ませない（`canvasHoldReason` の "group"）。
  */
 export function baseBoxPatchFromShown(
-  cc: Pick<TimelineCanvasClip, 'box' | 'ownTr'> & { clip?: Pick<TimelineClip, 'pivot'> },
-  shown: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
+  cc: Pick<TimelineCanvasClip, 'box' | 'ownTr'> & { finalBox?: Box; clip?: Pick<TimelineClip, 'pivot'> },
+  shownOnCanvas: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
 ): { x?: number; y?: number; w?: number; h?: number; rotation?: number } {
   const tr = cc.ownTr;
+  // ⚠️ **縦横の倍率を先に外す**（#1475）＝枠は倍率まで当てた長方形（`shownBox`）なので、返ってくるのもその長方形。
+  //   素の箱へ戻す前に、倍率を当てる前の箱（`finalBox` の側）へ戻す。
+  const shown = unsquashShownPatch(cc, shownOnCanvas);
   // ⚠️ 倍率が 0 以下になる瞬間（行き過ぎるイージングの途中）は割れないので 1 として扱う＝その瞬間に掴むと
   //   素の箱へ書く値が少しずれる（描画は素の箱から描くので一致は崩れない＝操作の精度だけの割り切り・PR #1339 レビュー ℹ️）。
   const s = tr.scale != null && tr.scale > 0 ? tr.scale : 1;
@@ -226,6 +235,93 @@ export function baseBoxPatchFromShown(
     if (shown.x != null) out.x = shown.x - probe.x;
     if (shown.y != null) out.y = shown.y - probe.y;
   }
+  return out;
+}
+
+/**
+ * 部品の**ゆがみの倍率**（#1475）＝反転（`flipX`／`flipY`＝−1 倍）と縦横の倍率（キーフレームの `scaleX`／`scaleY`）を掛けたもの。
+ * 文字をその場で直している間も、この倍率で映す（`FreeLayoutOverlay` の `textEditScaleOf`）＝描画は
+ * 「倍率を当てる前の箱で折り返してから伸ばす・裏返す」ので、直す欄も同じ順にしないと**改行の位置が変わる**（PR レビュー 🟡）。
+ * ⚠️ 反転と負の倍率が両方効くと元の向きに戻る（裏の裏）＝掛け算なので符号で自然にそうなる。
+ */
+export function drawnWarpScaleOf(cc: { clip: Pick<TimelineClip, 'flipX' | 'flipY'>; ownTr: InterpolatedTransform }): { x: number; y: number } {
+  return {
+    x: (cc.clip.flipX === true ? -1 : 1) * safeScale(cc.ownTr.scaleX),
+    y: (cc.clip.flipY === true ? -1 : 1) * safeScale(cc.ownTr.scaleY),
+  };
+}
+
+/** 倍率が 0 に近すぎると割れない＝1 として扱う（`baseBoxPatchFromShown` の一様の倍率と同じ割り切り）。 */
+function safeScale(v: number | undefined): number {
+  return v != null && Math.abs(v) > 1e-6 ? v : 1;
+}
+
+/**
+ * 縦横の倍率（`scaleX`／`scaleY`）を当てた**見えている長方形**（#1475・ADR-0059 段階2）。
+ *
+ * 描画は「箱の向きで、動きの支点（`pivot`）まわりに縦横を伸ばす」（`clipWarpOf`）。向きの揃った伸び縮みは
+ * 長方形を長方形へ写すので、**同じ向きの長方形**として出せる＝大きさは `|倍率|` 倍、中心は支点から伸びた分だけ動く：
+ * 中心 `c' = c + R((I − S)d)`（`d` は箱の向きでの支点の中心からのずれ・`R` は箱の回転・`S` は倍率）。
+ * ⚠️ 負の倍率（向きを裏返す）も長方形は同じ＝大きさは絶対値、中心の動きは符号つきの `S` で出す。
+ */
+export function squashedBox(box: Box, squash: { sx?: number; sy?: number }, pivot?: { x: number; y: number }): Box {
+  // ⚠️ **戻す側（`unsquashedBox`）と同じ割り切り**（PR レビュー ℹ️）＝0 に近い瞬間に行きと帰りで扱いが割れると、掴んだ量がずれて書かれる。
+  const sx = safeScale(squash.sx);
+  const sy = safeScale(squash.sy);
+  if (sx === 1 && sy === 1) return box;
+  const d = pivotOffset(pivot, box.w, box.h);
+  const off = rotateVec({ x: (1 - sx) * d.x, y: (1 - sy) * d.y }, box.rotation ?? 0);
+  const w = box.w * Math.abs(sx);
+  const h = box.h * Math.abs(sy);
+  return { ...box, x: box.x + box.w / 2 + off.x - w / 2, y: box.y + box.h / 2 + off.y - h / 2, w, h };
+}
+
+/** `squashedBox` の逆（見えている長方形 → 倍率を当てる前の箱）。式は同じ `c = c' − R((I − S)d)`（`d` は戻した大きさで測る）。 */
+export function unsquashedBox(shown: Box, squash: { sx?: number; sy?: number }, pivot?: { x: number; y: number }): Box {
+  const sx = safeScale(squash.sx);
+  const sy = safeScale(squash.sy);
+  if (sx === 1 && sy === 1) return shown;
+  const w = shown.w / Math.abs(sx);
+  const h = shown.h / Math.abs(sy);
+  const d = pivotOffset(pivot, w, h);
+  const off = rotateVec({ x: (1 - sx) * d.x, y: (1 - sy) * d.y }, shown.rotation ?? 0);
+  return { ...shown, x: shown.x + shown.w / 2 - off.x - w / 2, y: shown.y + shown.h / 2 - off.y - h / 2, w, h };
+}
+
+/** 箱の向きで測った、支点の中心からのずれ（`pivotPointOf` と同じ割合の読み方）。 */
+function pivotOffset(pivot: { x: number; y: number } | undefined, w: number, h: number): { x: number; y: number } {
+  return { x: ((pivot?.x ?? CLIP_PIVOT_DEFAULT.x) - 0.5) * w, y: ((pivot?.y ?? CLIP_PIVOT_DEFAULT.y) - 0.5) * h };
+}
+
+function rotateVec(v: { x: number; y: number }, deg: number): { x: number; y: number } {
+  if (!deg) return v;
+  const r = (deg * Math.PI) / 180;
+  return { x: v.x * Math.cos(r) - v.y * Math.sin(r), y: v.x * Math.sin(r) + v.y * Math.cos(r) };
+}
+
+/**
+ * キャンバスで返ってきた変更（見えている長方形の上での値）を、倍率を当てる前の箱の値へ直す。
+ * ⚠️ **欠けた項目はいまの枠で埋めてから戻す**＝動かすだけ（x・y）でも、伸ばした向きと支点によって左上の戻り方が変わる。
+ * 返すのは**渡された項目だけ**（移動で大きさを書かない＝数値欄の値を動かさない）。
+ */
+function unsquashShownPatch(
+  cc: Pick<TimelineCanvasClip, 'ownTr'> & { finalBox?: Box; clip?: Pick<TimelineClip, 'pivot'> },
+  shown: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
+): { x?: number; y?: number; w?: number; h?: number; rotation?: number } {
+  const squash = { sx: cc.ownTr.scaleX, sy: cc.ownTr.scaleY };
+  if ((squash.sx ?? 1) === 1 && (squash.sy ?? 1) === 1) return shown;
+  if (!cc.finalBox) return shown;
+  const pivot = cc.clip?.pivot;
+  const merged = { ...squashedBox(cc.finalBox, squash, pivot), ...shown };
+  const back = unsquashedBox(merged, squash, pivot);
+  const out: { x?: number; y?: number; w?: number; h?: number; rotation?: number } = {};
+  if (shown.x != null || shown.y != null) {
+    out.x = back.x;
+    out.y = back.y;
+  }
+  if (shown.w != null) out.w = back.w;
+  if (shown.h != null) out.h = back.h;
+  if (shown.rotation != null) out.rotation = shown.rotation;
   return out;
 }
 
@@ -295,7 +391,9 @@ export function timelineCanvasClipsAt(
         ? { ...keyed, y: (keyed.y ?? 0) + talk.dy, scale: (keyed.scale ?? 1) * talk.scale }
         : keyed;
       const groupedBox = composed.get(clip.id) ?? box;
-      out.push({ clip, box, groupedBox, finalBox: boxWithTransform(groupedBox, ownTr, clip.pivot), ownTr });
+      const finalBox = boxWithTransform(groupedBox, ownTr, clip.pivot);
+      const shownBox = squashedBox(finalBox, { sx: ownTr.scaleX, sy: ownTr.scaleY }, clip.pivot);
+      out.push({ clip, box, groupedBox, finalBox, shownBox, ownTr });
     }
   }
   return out;

@@ -1,6 +1,6 @@
 // キャンバスの印を部品のゆがみに合わせる（#1416）。
 import { describe, expect, it } from "vitest";
-import { overlayWarpTransform } from "./canvasWarp";
+import { editScaleStyle, overlayWarpTransform } from "./canvasWarp";
 
 /** CSS の `translate(%) matrix() rotate()` を、印の4隅に当てた結果（キャンバスの座標）。検査の側で式を組み直す。 */
 function corners(r: { x: number; y: number; w: number; h: number; rotation?: number; warp?: readonly number[] }): number[][] {
@@ -45,5 +45,22 @@ describe("overlayWarpTransform（#1416）", () => {
     expect(corners({ ...r, warp })).toEqual(expected);
     // CSS は右から当たる＝回転が最後（いちばん右）でないと、描画と逆の順になる（上の隅の検査は順を組み直すので、順はここで見る）。
     expect(overlayWarpTransform({ ...r, warp })).toMatch(/^translate\(.*\) matrix\(.*\) rotate\(90deg\)$/);
+  });
+});
+
+describe("editScaleStyle（#1475）", () => {
+  it("倍率が無ければ何も付けない（今までと同じ）", () => {
+    expect(editScaleStyle(undefined)).toBeUndefined();
+    expect(editScaleStyle({ x: 1, y: 1 })).toBeUndefined();
+  });
+  it("反転だけ＝同じ大きさで裏返す", () => {
+    expect(editScaleStyle({ x: -1, y: 1 })).toEqual({ width: "100%", height: "100%", left: "0%", top: "0%", transform: "scale(-1, 1)" });
+  });
+  // ⚠️ **伸ばす前の大きさで折り返す**（PR レビュー 🟡）＝枠（伸ばした後）いっぱいの欄で打つと、改行の位置が描画と変わる。
+  it("横 2 倍＝欄は枠の半分の幅で中央に置き、2 倍に伸ばす", () => {
+    expect(editScaleStyle({ x: 2, y: 1 })).toEqual({ width: "50%", height: "100%", left: "25%", top: "0%", transform: "scale(2, 1)" });
+  });
+  it("縦 0.5 倍で上下反転＝欄は枠の 2 倍の高さ", () => {
+    expect(editScaleStyle({ x: 1, y: -0.5 })).toEqual({ width: "100%", height: "200%", left: "0%", top: "-50%", transform: "scale(1, -0.5)" });
   });
 });
