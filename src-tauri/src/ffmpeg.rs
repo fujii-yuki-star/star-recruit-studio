@@ -8921,6 +8921,36 @@ mod staged_output_tests {
         }
     }
 
+    /// 書き出しの動画の場面は、先頭の動画も重ねる動画も、元の動画を調べて色の前処理を決める（ADR-0069 決定4）。
+    /// ⚠️ ジョブを組む所は FFmpeg が無いと通らない＝本文を読んで留める（片方だけ空の前処理に戻ると、その層だけ色がずれる）。
+    #[test]
+    fn 書き出しのジョブは動画ごとに色を調べる() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        let prod = &SRC[..SRC.find("#[cfg(test)]").expect("検査の印")];
+        assert_eq!(
+            prod.matches("color_in: clip_color_in(&ffmpeg, &clip),")
+                .count(),
+            1,
+            "先頭の動画"
+        );
+        assert_eq!(
+            prod.matches("color_in: clip_color_in(&ffmpeg, &lclip),")
+                .count(),
+            1,
+            "重ねる動画"
+        );
+        assert_eq!(
+            prod.matches("color_in: &v.color_in,").count(),
+            1,
+            "先頭の動画を引数へ渡す"
+        );
+        assert_eq!(
+            prod.matches("color_in: &e.color_in,").count(),
+            1,
+            "重ねる動画を引数へ渡す"
+        );
+    }
+
     #[test]
     fn 格子が無いときは今までどおり秒で取る() {
         let args = frame_seconds_args(
