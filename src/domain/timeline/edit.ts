@@ -799,8 +799,15 @@ export function containBox(source: { w: number; h: number }, canvas: { width: nu
  * 重ね順は配列の並びだけで決まる（`11 §7.6`）ので、入れる場所がそのまま前後関係になる。
  */
 export function addTrack(doc: TimelineProject, kind: TrackKind): TimelineProject {
+  return withAddedTrack(doc, kind).doc;
+}
+
+/**
+ * 列を足した文書と、**足した列の id**（#1478）。新しい列へ落とすとき、置けるかの判定（押す前）と確定が**同じ文書**を見るために使う。
+ */
+export function withAddedTrack(doc: TimelineProject, kind: TrackKind): { doc: TimelineProject; trackId: string } {
   const track: Track = { id: createTrackId(doc.tracks.map((t) => t.id)), kind };
-  return { ...doc, tracks: insertTrack(doc.tracks, track) };
+  return { doc: { ...doc, tracks: insertTrack(doc.tracks, track) }, trackId: track.id };
 }
 
 /**

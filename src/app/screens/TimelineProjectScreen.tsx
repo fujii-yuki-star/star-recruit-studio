@@ -19,9 +19,9 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, TRACK_NAME_MAX, withAddedTrack, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
@@ -38,7 +38,7 @@ import { hasEscapeOwner, useEscapeOwner, useEscapeReceiver } from "../hooks/esca
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
-import type { CropMode, TimelineClipKind } from "../../domain/enums";
+import type { CropMode, TimelineClipKind, TrackKind } from "../../domain/enums";
 import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
@@ -301,6 +301,18 @@ const CLIP_BADGE_MIN_W_PX = 110;
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
 
 /**
+ * 落とし先が**列の無い所（いちばん下の列より下）**＝新しい列を作って置く、を表す印（#1478）。
+ * 窓の外からのファイル（ADR-0049）と同じ場所・同じ規則＝帯を運ぶ・欄から置くでも同じにする（ADR-0026②）。
+ * ⚠️ 本物の列の id と取り違えない形（`track_NNN` にならない）。確定するときに `withNewTrack` が本物の id に替える。
+ */
+const NEW_TRACK_TARGET = "__new_track__";
+
+/** 置く・運ぶ部品が載る列の種類（音・読み上げは音の列・ほかは映像の列）。 */
+function trackKindForClipKind(kind: TimelineClipKind): TrackKind {
+  return kind === TIMELINE_CLIP_KIND.audio || kind === TIMELINE_CLIP_KIND.voice ? TRACK_KIND.audio : TRACK_KIND.visual;
+}
+
+/**
  * 並びの枠の上に**貼り付いている行**（目盛り）の高さ（#1477）。縦に送る帯はこの下から測る。
  * ⚠️ 数を写さずに測る＝高さは CSS（`--timeline-ruler-h`）が決める。見つからなければ 0。
  */
@@ -535,7 +547,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, copyClipsTo, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setSelectedClipFlip, setSelectedClipPivot, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
-    addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, setTrackVolume, soloTrackIds, toggleTrackSolo, undo, redo, saveTimelineProject, saveStatus,
+    addTrack, withNewTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, setTrackVolume, soloTrackIds, toggleTrackSolo, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
@@ -3235,8 +3247,13 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     /** 写しを置く先（#1248）。まとめて掴んだなら群ぜんぶ・1つなら掴んだ相手だけ。**列が変わるのは掴んだ相手だけ**（運ぶと同じ）。 */
     const copyUpdatesFor = (sec: number, trackId?: string) =>
       groupIds ? updatesFor(shiftFor(sec, true), trackId) : [{ id: clipId, startSec: sec, ...(trackId ? { trackId } : {}) }];
-    const issueOf = (sec: number, trackId?: string, copy = false): EditBlockedReason | null => {
-      const now = useTimelineStore.getState().doc ?? doc0;
+    const issueOf = (sec: number, trackIdIn?: string, copy = false): EditBlockedReason | null => {
+      const current = useTimelineStore.getState().doc ?? doc0;
+      // ⚠️ **新しい列へ運ぶときも、確定と同じ関数で見る**（#1478）＝列を足した文書を作って、その id で判定する
+      //   （「空の列なら必ず置ける」と決め打ちにしない＝固定・尺などの理由は同じ所が出す）。
+      const fresh = trackIdIn === NEW_TRACK_TARGET ? withAddedTrack(current, trackKindForClipKind(clip0.kind)) : null;
+      const now = fresh?.doc ?? current;
+      const trackId = fresh ? fresh.trackId : trackIdIn;
       if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec, { templateOf });
       // 写すときは確定と同じ `copyClipsTo` で見る＝見えている色と離した結果を割らない（#1248）。
       if (copy) {
@@ -3257,8 +3274,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
      * 列の外（欄の余白・仕上がり確認の上）へ出たら `undefined`＝**掴んだ列のまま**
      * （`moveClip` も `laneOf` も「指定が無ければ元の列」を見るので、勝手に別の列へ飛ばさない）。
      */
-    const trackAt = (ev: PointerEvent): string | undefined =>
-      mode === "move" ? laneAt(ev.clientX, ev.clientY)?.trackId : undefined;
+    const trackAt = (ev: PointerEvent): string | undefined => {
+      if (mode !== "move") return undefined;
+      const lane = laneAt(ev.clientX, ev.clientY);
+      if (lane) return lane.trackId;
+      // **列の無い所（いちばん下の列より下）＝新しい列**（#1478・窓の外からのファイルと同じ規則）。
+      // ⚠️ まとめて運ぶときは使わない＝列が変わるのは掴んだ相手だけなので、群が2つの列に割れる。
+      return !groupIds && newTrackDropAt(ev.clientX, ev.clientY) ? NEW_TRACK_TARGET : undefined;
+    };
     /**
      * **最後に見せた時刻**（#686 段階4 レビュー）。確定はこれを使う＝見えていたものと違う所へ落とさない。
      * ⚠️ state（`clipDrag`）は**掴んだ時点の render の値**しか見えない（この関数の closure）ので使えない。
@@ -3361,6 +3384,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
         if (mode === "move") {
           const trackId = trackAt(ev);
+          // **新しい列へ**（#1478）＝列を足してから同じ操作で置く（取り消し1回・置けなければ列も足さない）。
+          if (trackId === NEW_TRACK_TARGET) {
+            const copy = copyOf(ev);
+            withNewTrack(trackKindForClipKind(clip0.kind), (id) => {
+              if (copy) copyClipsTo(copyUpdatesFor(sec, id));
+              else moveClipById(clipId, { startSec: sec, trackId: id });
+            });
+            return;
+          }
           // `Alt` を押したまま離した＝写しを置く（元は残る・#1248）。
           if (copyOf(ev)) copyClipsTo(copyUpdatesFor(sec, trackId));
           else if (groupIds) moveClipsBy(updatesFor(shiftFor(sec), trackId));
@@ -3397,12 +3429,22 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const lane = laneAt(x, y);
     if (lane) return lane;
     // 列の無い所（いちばん下の列より下・並びの箱の中）＝新しい列。時刻は列の横の位置から。
+    const fresh = newTrackDropAt(x, y);
+    if (fresh) return { trackId: null, startSec: fresh.startSec };
+    return FILE_DROP_IMPORT_ONLY;
+  };
+
+  /**
+   * **列の無い所（いちばん下の列より下・並びの箱の中）**に落とそうとしているか（ADR-0049・#1478）。時刻は列の横の位置から。
+   * ⚠️ **窓の外からのファイル・帯を運ぶ・欄から置くの3つがこの1つを通す**＝同じ場所で結果が割れない（ADR-0026②）。
+   */
+  const newTrackDropAt = (x: number, y: number): { startSec: number } | null => {
     const box = scrollRef.current ? visibleRectOf(scrollRef.current) : null;
     const lanes = [...laneRefs.current.values()].map((el) => el.getBoundingClientRect());
     if (box && pointInRect(box, x, y) && lanes.length > 0 && y > Math.max(...lanes.map((r) => r.bottom))) {
-      return { trackId: null, startSec: laneTimeAt(lanes[0], pxPerSec, Math.max(x, lanes[0].left)) };
+      return { startSec: laneTimeAt(lanes[0], pxPerSec, Math.max(x, lanes[0].left)) };
     }
-    return FILE_DROP_IMPORT_ONLY;
+    return null;
   };
 
   const laneAt = (x: number, y: number): { trackId: string; startSec: number } | null => {
@@ -3466,6 +3508,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       );
       const { trackId } = lane;
       return { at: { trackId, startSec }, guideSec, issue: clipPlacementIssue(doc, spec, trackId, startSec) };
+    }
+    // **列の無い所＝新しい列**（#1478）＝帯を運ぶ・窓の外からのファイルと同じ規則。判定は列を足した文書で、置くのと同じ関数。
+    const fresh = newTrackDropAt(x, y);
+    if (fresh) {
+      const durationSec = placedDurationSec(spec);
+      const { sec: startSec, guideSec } = snapPlacement(fresh.startSec, (t) => [t, t + durationSec], { off: noSnap });
+      const added = withAddedTrack(doc, trackKindForClipKind(spec.kind));
+      return { at: { trackId: NEW_TRACK_TARGET, startSec }, guideSec, issue: clipPlacementIssue(added.doc, spec, added.trackId, startSec) };
     }
     // ⚠️ **仕上がり確認へ落とせるのは絵の部品だけ**（#714）＝見た目パターン・音・読み上げは
     // 「動画の中の場所」を持たない。落とせない所として扱う（勝手に別の場所へ置かない・決定10）。
@@ -3569,6 +3619,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         // ⚠️ **仕上がり確認へ落としたときも「置く列」へ入れる**（#771(b) レビュー🔴）＝あちらは
         // **動画の中の場所**だけを指しており、列は指していない。欄に出ている列を使わないと
         // 「表示と結果を割らない」（`11 §7.6.3`）が破れる（ボタンは同じ列へ入るのに、運ぶと別の列へ入る）。
+        // **新しい列へ**（#1478）＝列を足してから、同じ置き方で置く（取り消し1回・置けなければ列も足さない）。
+        const at = drop.at;
+        if (at?.trackId === NEW_TRACK_TARGET) {
+          withNewTrack(trackKindForClipKind(spec.kind), (id) => place({ ...at, trackId: id }));
+          return;
+        }
         place(drop.at, drop.center);
       },
       // 中止しても**点線を消す**（#771(a) レビュー）＝ゴーストは消えるのに線だけ残ると、
@@ -5458,10 +5514,32 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     <div className="timeline-row-label" />
                     <div className="timeline-track timeline-lane timeline-file-drop-lane drop-target" style={{ width: laneWidthPx }}>
                       <span className="timeline-file-drop-line" style={{ left: `${pxPerSec * fileHover.startSec}px` }} />
-                      <span className="text-sm text-muted timeline-file-drop-newrow-text">離すと新しい列を作って、ここに置きます</span>
+                      <span className="text-sm text-muted timeline-file-drop-newrow-text">{NEW_TRACK_DROP_TEXT}</span>
                     </div>
                   </div>
                 )}
+                {/* **帯を運ぶ・欄から置くときも同じ**（#1478）＝列の無い所へ落とすと新しい列を作って置く。入る場所を実寸で見せる。 */}
+                {(() => {
+                  const preview = clipDrag?.trackId === NEW_TRACK_TARGET && clipDrag.mode === "move"
+                    ? { startSec: clipDrag.sec, durationSec: doc.clips.find((c) => c.id === clipDrag.clipId)?.durationSec ?? 0, blocked: clipDrag.issue != null }
+                    : drag?.drop?.at?.trackId === NEW_TRACK_TARGET
+                      ? { startSec: drag.drop.at.startSec, durationSec: placedDurationSec(drag.spec), blocked: drag.drop.issue != null }
+                      : null;
+                  if (!preview) return null;
+                  return (
+                    <div className="timeline-row" data-testid="drag-newrow">
+                      <div className="timeline-row-label" />
+                      <div className={`timeline-track timeline-lane timeline-file-drop-lane ${preview.blocked ? "drop-target--blocked" : "drop-target"}`} style={{ width: laneWidthPx }}>
+                        <div
+                          className={`timeline-drop-preview${preview.blocked ? " timeline-drop-preview--blocked" : ""}`}
+                          style={{ left: `${pxPerSec * preview.startSec}px`, width: `${pxPerSec * preview.durationSec}px` }}
+                          aria-hidden="true"
+                        />
+                        <span className="text-sm text-muted timeline-file-drop-newrow-text">{NEW_TRACK_DROP_TEXT}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

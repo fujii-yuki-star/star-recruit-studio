@@ -3225,6 +3225,43 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(container.querySelector(".timeline-drop-preview")).toBeNull(); // 離したら消える
   });
 
+  // ⚠️ **列の無い所＝新しい列**（#1478）＝窓の外からのファイル（ADR-0049）と同じ場所・同じ規則（ADR-0026②）。
+  it("いちばん下の列より下へ落とすと、新しい列を作って置く（行き先を先に見せる・取り消し1回）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
+    stubRect(container.querySelector(".timeline-scroll")!, { left: 76, top: 380, width: 1000, height: 300 });
+    const before = useTimelineStore.getState().doc!;
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(380, 600); // 列の下・5秒
+    expect(screen.getByTestId("drag-newrow").textContent).toContain("新しい列");
+    dropAt(380, 600);
+    const now = useTimelineStore.getState().doc!;
+    expect(now.tracks).toHaveLength(2);
+    const added = now.tracks.find((t) => t.id !== "track_001")!;
+    expect(now.clips.find((c) => c.trackId === added.id)?.startSec).toBe(5);
+    act(() => { useTimelineStore.getState().undo(); });
+    expect(useTimelineStore.getState().doc!.tracks).toEqual(before.tracks);
+    expect(useTimelineStore.getState().doc!.clips).toEqual(before.clips);
+  });
+
+  it("帯を掴んでいちばん下の列より下へ運ぶと、新しい列へ移る", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
+    stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
+    stubRect(container.querySelector(".timeline-scroll")!, { left: 76, top: 380, width: 1000, height: 300 });
+    const clip = container.querySelector(".timeline-clip[data-clip-id]") as HTMLElement;
+    const clipId = clip.dataset.clipId!;
+    fireEvent.pointerDown(clip, { button: 0, pointerId: 1, clientX: 220, clientY: 420 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 240, clientY: 600 });
+    expect(screen.getByTestId("drag-newrow")).toBeInTheDocument();
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 240, clientY: 600 });
+    const now = useTimelineStore.getState().doc!;
+    expect(now.tracks).toHaveLength(2);
+    expect(now.clips.find((c) => c.id === clipId)!.trackId).not.toBe("track_001");
+  });
+
   it("置いた所へ再生位置が動く（置いたのに何も見えない、を作らない）", () => {
     withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
