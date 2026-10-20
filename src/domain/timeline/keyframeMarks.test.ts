@@ -24,9 +24,9 @@ function doc(animations: TimelineProject['animations']): TimelineProject {
 }
 
 describe('clipKeyframeTimes', () => {
-  it('自身のキーの時刻を昇順に・帯の長さの外は出さない・重なりは1つ', () => {
+  it('自身のキーの時刻を昇順に・帯の長さの外は出さない・同じ時刻のキーは1つ（外の AI が書いた文書でも）', () => {
     const d = doc([
-      { id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 2.5, x: 10 }, { timeSec: 0, x: 0 }, { timeSec: 3, opacity: 1 }, { timeSec: 4, x: 5 }] },
+      { id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 2.5, x: 10 }, { timeSec: 0, x: 0 }, { timeSec: 3, opacity: 1 }, { timeSec: 4, x: 5 }, { timeSec: 2.5, y: 3 }] },
     ]);
     expect(clipKeyframeTimes(d, 'clip_001')).toEqual([0, 2.5, 3]);
   });

@@ -9760,7 +9760,8 @@ describe("帯のキーフレームの印（#1186）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const k = [...document.querySelectorAll('[data-testid="clip-key"]')][1] as HTMLElement;
     fireEvent.pointerDown(k, { button: 0 });
-    fireEvent.click(k);
+    // Shift を押したままでも選び直さない＝印を押したことは帯へ伝わらない（伝わると Shift で選択が外れる）。
+    fireEvent.click(k, { shiftKey: true });
     expect(useTimelineStore.getState().playheadSec).toBe(5);
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
     expect(document.querySelectorAll(".timeline-clip-key--current")).toHaveLength(1);
