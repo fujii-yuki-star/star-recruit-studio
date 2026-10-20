@@ -16,7 +16,7 @@ import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf, denoiseSourceKey } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
-import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
+import { listProjectSummaries, loadProjectDoc, saveProjectDoc, saveProjectThumbnail } from "../../infrastructure/projectFs";
 import { keepRestorePoints } from "./restorePointKeeper";
 import { createProjectId } from "../../domain/project/persistence";
 import { useProjectStore } from "./projectStore";
@@ -70,6 +70,8 @@ import { timelineFramePlan } from "../../domain/timeline/export";
 // ⚠️ **焼く総コマ数は domain の1つを通す**（#1211）＝組み立てる側の分母と同じ数を見る。
 import { bakeFrameTotal, planTimelineExportSegments } from "../../domain/timeline/exportSegments";
 import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
+import { renderTimelineThumbnail, timelineThumbnailKey } from "../../renderer/export/timelineThumbnail";
+import { thumbnailSourcePath } from "../../domain/timeline/thumbnail";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import type { LayerBackground, TextShadow } from "../../domain/template/types";
@@ -1384,6 +1386,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, audioDurations: {}, isLoading: false });
       // 音の素材の長さ（#1348）＝古い動画は取り込み時に測っていないので、ここで測る（待たない・文書は書き換えない）。
       void get()._measureAudioDurations();
+      // 一覧の小さな絵＝前の版で作った動画には絵が無い（保存を待たずに、開いたときにも作る・待たない）。
+      void refreshTimelineThumbnail(doc);
       // ⚠️ **実在も調べる**（#1019 ⑤）＝表示用の URL は組むだけなので、これが無いと
       //   ファイルが動いた・消えた素材を**一度も知らせられない**（選び直す入口も出ない）。
       void get().refreshMissingAssets();
@@ -3566,9 +3570,59 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
     if (!stillOpen()) return;
     // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
     set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
+    // 一覧に出す小さな絵（2026-10-20 実機＝タイムライン形式だけ絵が無かった）＝**投げっぱなし**（保存の完了を待たせない）。
+    void refreshTimelineThumbnail(next);
   } catch {
     if (stillOpen()) set({ saveStatus: "error" });
   }
+}
+
+/** 最後に焼いた一覧の絵の印（同じ動画・同じ中身なら焼き直さない＝打つたびに焼かない）。 */
+let lastTimelineThumb: { projectId: string; key: string } | null = null;
+/** 焼いている最中の回（重ねて焼かない＝最後に頼まれた文書だけ、走り終わってから焼く）。 */
+let timelineThumbRun: Promise<void> | null = null;
+let timelineThumbNext: TimelineProject | null = null;
+
+/**
+ * タイムライン形式の動画の一覧の絵を焼き直す（場面形式の `_refreshProjectThumbnail` と同じ役目）。
+ * ⚠️ **失敗しても黙って続ける**＝絵が無くても一覧は開ける（印に戻る）。
+ * ⚠️ **書き込みは「着地を待つ」に数える**（`trackWrite`）＝消している最中に書くと、`preview.png` だけの
+ *   フォルダが復活する（場面形式の #927 と同じ穴）。
+ */
+async function refreshTimelineThumbnail(doc: TimelineProject): Promise<void> {
+  timelineThumbNext = doc;
+  if (timelineThumbRun) return;
+  timelineThumbRun = (async () => {
+    while (timelineThumbNext) {
+      const d = timelineThumbNext;
+      timelineThumbNext = null;
+      const key = timelineThumbnailKey(d, templateOfNow);
+      if (key == null) continue; // 絵の部品が無い＝作らない（一覧は印のまま）
+      if (lastTimelineThumb?.projectId === d.projectId && lastTimelineThumb.key === key) continue;
+      const templateAssetSrcById = useProjectStore.getState().templateAssetSrcById;
+      const dataUrl = await renderTimelineThumbnail(d, {
+        templateOf: templateOfNow,
+        templateAssetSrc: (id) => templateAssetSrcById[id],
+        loadAssetSrc: async (id) => {
+          const rel = thumbnailSourcePath(d, id);
+          return rel ? ((await readAssetDataUrl(d.projectId, rel)) ?? undefined) : undefined;
+        },
+        fontFamily: fontFamilyForId(d.videoSettings.fontId),
+      });
+      if (!dataUrl) continue; // 描けなかった＝印は覚えない（次の保存でもう一度試す）
+      const write = saveProjectThumbnail(d.projectId, dataUrl);
+      trackWrite(d.projectId, write);
+      try {
+        await write;
+        lastTimelineThumb = { projectId: d.projectId, key };
+      } catch {
+        /* 絵が無くても一覧は開ける＝黙って続ける */
+      }
+    }
+  })().finally(() => {
+    timelineThumbRun = null;
+  });
+  return timelineThumbRun;
 }
 
 

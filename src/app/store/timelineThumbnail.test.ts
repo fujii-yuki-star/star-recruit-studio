@@ -1,0 +1,62 @@
+// タイムライン形式の動画の一覧の絵（2026-10-20 実機＝タイムライン形式だけ絵が無かった）＝保存・開いたときに焼き、中身が同じなら焼き直さない。
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('./restorePointKeeper', () => ({ keepRestorePoints: vi.fn(async () => {}), restoreToPoint: vi.fn(async () => 0), loadRestorePoints: vi.fn(async () => []) }));
+vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,THUMB') }));
+
+import { useTimelineStore } from './timelineStore';
+import * as fsMod from '../../infrastructure/projectFs';
+import * as assetFsMod from '../../infrastructure/assetFs';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
+import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
+import type { TimelineClip, TimelineProject } from '../../domain/timeline/types';
+
+function doc(): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_20261021_001',
+    projectName: '絵の確認',
+    createdAt: '2026-10-21T00:00:00.000Z',
+    updatedAt: '2026-10-21T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }],
+    clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 400, h: 300, assetId: 'asset_001' } as TimelineClip],
+  };
+}
+
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 20; i += 1) await new Promise((r) => setTimeout(r, 0));
+};
+
+let thumb: ReturnType<typeof vi.spyOn>;
+let read: ReturnType<typeof vi.spyOn>;
+beforeEach(async () => {
+  vi.restoreAllMocks();
+  useTimelineStore.getState().closeTimelineProject();
+  vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue(undefined as never);
+  thumb = vi.spyOn(fsMod, 'saveProjectThumbnail').mockResolvedValue(undefined);
+  read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,PHOTO');
+});
+
+describe('タイムライン形式の一覧の絵', () => {
+  it('開いたときに焼き、中身が同じなら保存しても焼き直さない・動かしたら焼き直す', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20261021_001');
+    await flush();
+    expect(thumb).toHaveBeenCalledTimes(1);
+    expect(thumb.mock.calls[0]![0]).toBe('proj_20261021_001');
+    expect(read).toHaveBeenCalledWith('proj_20261021_001', 'assets/asset_001.png');
+
+    await useTimelineStore.getState().saveTimelineProject();
+    await flush();
+    expect(thumb).toHaveBeenCalledTimes(1); // 変わっていない＝焼かない
+
+    useTimelineStore.getState().moveClipById('clip_001', { startSec: 1 });
+    await useTimelineStore.getState().saveTimelineProject();
+    await flush();
+    expect(thumb).toHaveBeenCalledTimes(2);
+  });
+});
