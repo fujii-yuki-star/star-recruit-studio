@@ -78,10 +78,9 @@ describe('タイムライン形式の一覧の絵', () => {
     expect(thumb).not.toHaveBeenCalled();
   });
 
-  it('消せなかったら印を外し、また絵を作れる', async () => {
+  it('消せなかった動画（消した番号を使い回した新しい動画も）は、開けばまた絵を作れる', async () => {
     vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
-    const handoff = useTimelineStore.getState().discardDeletedProject('proj_20261021_001'); // 開いていない動画
-    await handoff.restore?.();
+    useTimelineStore.getState().discardDeletedProject('proj_20261021_001'); // 開いていない動画
     await useTimelineStore.getState().openTimelineProject('proj_20261021_001');
     await flush();
     expect(thumb).toHaveBeenCalledTimes(1);

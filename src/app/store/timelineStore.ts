@@ -1423,9 +1423,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 移った後も走っている）も待てるよう、手放しで消えない `inFlightWrites`（`writesFor`）を見る。
     // ⚠️ **一覧の絵を描いている最中の回も待たせる**（PR レビュー 🔴）＝`trackWrite` が数えるのは書き始めてから。
     //   描いている間に消すと、描き終わった回が `preview.png` を書いて**フォルダだけ復活**する（場面形式の #927 と同じ穴）。
+    // ⚠️ 消した印は**開いたときに外す**（`openTimelineProject`）＝一覧の絵を作るのは「開いたとき」と「開いている動画の保存」
+    //   だけなので、消せなかった動画も開き直せば絵がまた作られる（ここで外す口は持たない＝二重にしない）。
     const pending = withThumbnailHold(projectId, writesFor(projectId));
-    const unmark = (): void => { deletedThumbIds.delete(projectId); };
-    if (get().doc?.projectId !== projectId) return { pending, restore: unmark }; // 開いてはいないが、書き込みは待たせる
+    if (get().doc?.projectId !== projectId) return { pending }; // 開いてはいないが、書き込みは待たせる
     releaseSaveGuard();
     set({ ...emptyState(), exportRun: get().exportRun });
     // 文書はもう手放しているので、この保存は最後の `set` を `stillOpen` で見送る（#693）。
@@ -1437,10 +1438,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **待っている間に別の動画を開かれていたら戻さない**（#763-4 レビュー）＝消す側の待ちは
       // このPRで意図的に長くしたので、その間に別の動画を開ける。無条件に開き直すと、
       // **いま開いている方を黙って上書きする**（§2-5）。手放したまま（空）のときだけ戻す。
-      restore: () => {
-        unmark();
-        return get().doc == null ? get().openTimelineProject(projectId) : undefined;
-      },
+      restore: () => (get().doc == null ? get().openTimelineProject(projectId) : undefined),
     };
   },
 
@@ -3587,7 +3585,7 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
 
 /** 最後に焼いた一覧の絵の印（同じ動画・同じ中身なら焼き直さない＝打つたびに焼かない）。 */
 let lastTimelineThumb: { projectId: string; key: string } | null = null;
-/** 消した動画（一覧の絵を書かない）。消せなかったときは外す（`discardDeletedProject` の `restore`）。 */
+/** 消した動画（一覧の絵を書かない）。開いたときに外す（消せなかった動画・消した番号を使い回した新しい動画）。 */
 const deletedThumbIds = new Set<string>();
 
 /**
