@@ -46,6 +46,8 @@ export function silenceSourceOf(
   clip: TimelineClip,
 ): { relPath: string; fromSec: number; lengthSec: number } | null {
   if (!clip.assetId) return null;
+  // ⚠️ **止めた絵（ADR-0065）は音を鳴らさない**＝鳴っていない音で候補を出さない。
+  if (clip.holdFrame === true) return null;
   const asset = doc.assets.find((a) => a.assetId === clip.assetId);
   if (!asset?.filePath) return null;
   const sounding = asset.assetType === ASSET_TYPE.video

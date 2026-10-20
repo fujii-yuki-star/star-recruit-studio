@@ -7,7 +7,7 @@
 // ⚠️ **他社の型でもトリムは頭出しを進める**（Premiere / CapCut＝research §2「端にカーソルを合わせるとトリム」）＝
 // 進めないと、左端を詰めても**頭は切れず中身が右へずれ、代わりに末尾が落ちる**。
 import { TIMELINE_CLIP_KIND } from '../enums';
-import { effectiveSpeed, videoPlacementsOfClip } from './video';
+import { effectiveSpeed, isDirectVideoClip, videoPlacementsOfClip } from './video';
 import { resolveSlotClip } from '../asset/clip';
 import type { Template } from '../template/types';
 import type { SlotClipOverride } from '../project/types';
@@ -28,6 +28,9 @@ export const USES_SOURCE_TIME = new Set<string>([TIMELINE_CLIP_KIND.audio, TIMEL
  */
 export function advancedSourceStart(clip: TimelineClip, headSec: number): { sourceStartSec?: number } {
   if (!USES_SOURCE_TIME.has(clip.kind)) return {};
+  // ⚠️ **止めた絵（ADR-0065）は進めない**＝映るのは使い始めの1コマなので、分ける・詰めるで進めると
+  //   **切っただけで別の瞬間の絵になる**（ADR-0026①）。
+  if (isHeldClip(clip)) return {};
   return { sourceStartSec: clampSourceStart((clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1)) };
 }
 
@@ -87,6 +90,8 @@ export function usesUpSource(
   headSec: number,
   templateOf: ((templateId: string) => Template | undefined) | undefined,
 ): boolean {
+  // ⚠️ **止めた絵（ADR-0065）は使い切らない**＝頭出しを進めない（`advancedSourceStart`）ので、どこで分けても同じ1コマ。
+  if (isHeldClip(clip) && isDirectVideoClip(doc, clip)) return false;
   return videoPlacementsOfClip(doc, clip, { templateOf }).some((p) => {
     const advanced = p.sourceStartSec + headSec * p.speed;
     const asset = doc.assets.find((a) => a.assetId === p.assetId);
@@ -134,6 +139,9 @@ export function sourceLimitIssue(
   span: { startSec: number; durationSec: number },
   templateOf: ((templateId: string) => Template | undefined) | undefined,
 ): 'before' | 'after' | null {
+  // ⚠️ **止めた絵（ADR-0065）は素材の時間を進めない**＝どちらへ伸ばしても映るのは同じ1コマ。
+  //   断ると、素材の終わり近くで止めた絵が**伸ばせない**（押しのけを採らないので、伸ばすのが唯一の道＝ADR-0034 決定11）。
+  if (isHeldClip(clip) && isDirectVideoClip(doc, clip)) return null;
   type P = { sourceStartSec: number; speed: number; assetId: string | null; endSec?: number; inTemplate?: boolean; loops?: boolean };
   const places: P[] = videoPlacementsOfClip(doc, clip, { templateOf }).map((p) => ({
     sourceStartSec: p.sourceStartSec,
@@ -159,4 +167,9 @@ export function sourceLimitIssue(
     return p.sourceStartSec + span.durationSec * p.speed > limit + EPS;
   });
   return past ? 'after' : null;
+}
+
+/** 止めた絵（ADR-0065）か＝素材の時間を進めない部品。 */
+function isHeldClip(clip: TimelineClip): boolean {
+  return clip.kind === TIMELINE_CLIP_KIND.slot && clip.holdFrame === true;
 }

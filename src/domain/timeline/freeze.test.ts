@@ -2,7 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import { FREEZE_BLOCKED, freezeFrameAt, freezeFrameIssue, freezeSourceSec, freezeStopsOriginalAudio } from './freeze';
 import { SPLIT_BLOCKED } from './split';
-import { EDIT_BLOCKED, setClipHoldFrame } from './edit';
+import { EDIT_BLOCKED, setClipHoldFrame, trimClip } from './edit';
+import { splitClip } from './split';
+import { clipIsPassThroughVideo } from './exportSegments';
+import { silenceSourceOf } from './silence';
 import { volumeAt } from './audio';
 import { canUseOriginalAudio, videoPlacementsOfClip, videoSourceSecAt } from './video';
 import { effectiveFps } from './playback';
@@ -401,5 +404,65 @@ describe('setClipHoldFrame（止めるのをやめる・止める）', () => {
     expect(videoPlacementsOfClip(d, { ...c, holdFrame: undefined })[0]!.useOriginalAudio, '前提：止めていなければ鳴る').toBe(true);
     expect(videoPlacementsOfClip(d, c)[0]!.useOriginalAudio).toBe(false);
     expect(canUseOriginalAudio(d, c)).toBe(false);
+  });
+});
+
+// ⚠️ **止めた絵は素材の時間を進めない**（PR レビュー由来 🔴）＝分ける・詰める・伸ばすで映るコマを変えず、
+// 素材の終わりを理由に断らない（押しのけを採らないので、伸ばすのが止めた絵を長くする唯一の道＝ADR-0034 決定11）。
+describe('止めた絵の編集（素材の時間を進めない）', () => {
+  // 10 秒の動画を 9 秒で止める＝後半は使い始め 9 秒・長さ 1 秒。
+  const movie10: Asset = { ...movie, metadata: { durationSec: 10, hasAudio: true } };
+  const held = (): { d: TimelineProject; id: string } => {
+    const r = freeze(doc({ assets: [movie10, still], clips: [video({ useOriginalAudio: undefined })] }), 9);
+    if (!r.ok) throw new Error(r.reason);
+    return { d: r.doc, id: r.newClipId };
+  };
+
+  it('素材の終わり近くで止めても、右端を伸ばせる', () => {
+    const { d, id } = held();
+    const moved = { ...d, clips: d.clips.filter((c) => c.id === id) }; // 後ろに隣を置かない
+    const r = trimClip(moved, id, 'end', 15);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+  });
+
+  it('止めていない動画は、素材の終わりより先へは伸ばせない（比べる相手）', () => {
+    const d = doc({ assets: [movie10, still], clips: [video({ sourceStartSec: 9, durationSec: 1, useOriginalAudio: undefined })] });
+    expect(trimClip(d, 'clip_001', 'end', 5).ok).toBe(false);
+  });
+
+  it('止めた絵を分けても、どちらも同じコマのまま（素材の終わり近くでも断らない）', () => {
+    const { d, id } = held();
+    // 伸ばしてから、素材の終わり（10 秒）を越えた所で分ける＝進めて数えると「使い切った」で断られる。
+    const long = trimClip({ ...d, clips: d.clips.filter((c) => c.id === id) }, id, 'end', 15);
+    if (!long.ok) throw new Error(long.reason);
+    const r = splitClip(long.doc, id, 13, volumeAt);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (!r.ok) return;
+    const src = r.doc.clips.map((c) => c.sourceStartSec);
+    expect(src[0]).toBe(src[1]);
+  });
+
+  it('止めた絵の左端を詰めても、映るコマは変わらない', () => {
+    const { d, id } = held();
+    const before = d.clips.find((c) => c.id === id)!.sourceStartSec;
+    const r = trimClip({ ...d, clips: d.clips.filter((c) => c.id === id) }, id, 'start', 9.5);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.clips[0]!.sourceStartSec).toBe(before);
+  });
+
+  // ⚠️ **書き出しで流さない**（PR レビュー由来 🔴）＝「そのまま流せる動画」に数えると FFmpeg が動画を流す。
+  it('書き出しで「そのまま流す動画」に数えない（止めていなければ数える）', () => {
+    const { d, id } = held();
+    const tail = d.clips.find((c) => c.id === id)!;
+    expect(clipIsPassThroughVideo({ ...tail, holdFrame: undefined }, () => false), '前提').toBe(true);
+    expect(clipIsPassThroughVideo(tail, () => false)).toBe(false);
+  });
+
+  it('無音探し・文字起こしの相手にしない（鳴っていない音）', () => {
+    const { d, id } = held();
+    const tail = d.clips.find((c) => c.id === id)!;
+    expect(silenceSourceOf(d, { ...tail, holdFrame: undefined }), '前提').not.toBeNull();
+    expect(silenceSourceOf(d, tail)).toBeNull();
   });
 });

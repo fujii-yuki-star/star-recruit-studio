@@ -612,14 +612,11 @@ export interface TimelineState {
    */
   deleteRangeInTimeline: (closeGap: boolean, at?: BlockTarget) => void;
   /**
-   * 再生位置で**絵を止める**（#356 ②）＝分けて、後半を切り出した写真に替える。
+   * 再生位置で**絵を止める**（#356 ②）＝分けて、後半をそのコマで止める（ADR-0065＝ファイルを作らない・待たない）。
    *
-   * ⚠️ **取り消しは1回**（#1136 レビュー由来 🟡）＝素材の追加と帯の差し替えを**1つの履歴に載せる**
-   *（ADR-0034 決定20＝1操作＝1つの取り消し）。別々に積むと、戻す途中に**使っていない写真だけ
-   * 素材に残る**＝利用者が一度も作っていない状態ができる。
-   * `outsideGroup` なのは「非同期の着地を利用者のまとめ（文字入力中など）に混ぜない」ため。
+   * ⚠️ **取り消しは1回**（ADR-0034 決定20＝1操作＝1つの取り消し）。
    */
-  freezeSelectedClip: (atSec: number, at?: BlockTarget) => Promise<void>;
+  freezeSelectedClip: (atSec: number, at?: BlockTarget) => void;
   /**
    * 無音・長い間を詰める（#1385）。`null`＝開いていない／`candidates` が `null` の間は探している最中。
    * ⚠️ **文書に持たない**（この作業だけの都合＝作業範囲と同じ）。
@@ -1753,7 +1750,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 空振りする（嘘の理由）。`explodeClip` と同じ形。
     commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
   },
-  freezeSelectedClip: async (atSec, at = PANEL_ID.arrange) => {
+  freezeSelectedClip: (atSec, at = PANEL_ID.arrange) => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length !== 1) return;
     const clipId = selectedClipIds[0]!;
@@ -1776,7 +1773,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return;
     }
     // ⚠️ **止めた絵を選び直す**＝「分ける」と同じ規則（伸ばすときの1手目が止めた絵を選んでいること）。
-    commit(set, get, r.doc, { selectedClipIds: [r.newClipId] }, { outsideGroup: true });
+    commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
   },
   addMarkerAtPlayhead: () => {
     const doc = get().doc;

@@ -3944,7 +3944,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           // **死んだ受け渡し**になり、「元の音が止まる」の知らせが**この入口だけ届いていなかった**
           //（ADR-0026②）。`ContextMenuItem` に `hint` を足して、押せるときに出るようにした。
           hint: freezePreviewHint,
-          onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
+          onSelect: () => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
         },
         {
           label: SILENCE_FIND_LABEL,
@@ -4741,7 +4741,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   「思ったより短い」となった人の次の一歩が画面から読めない。 */}
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
+                onClick={() => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
                 {...freezeGuard}
                 title={freezeGuard.title ?? freezePreviewHint}
               >
@@ -6093,7 +6093,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="videoPlayback" title="この動画の使い方" defaultOpen={true}>
                 {selected.holdFrame === true ? (
                   <>
-                    <p className="text-muted">この部品は絵を止めています（押した瞬間の絵を、部品の長さいっぱい映します。音は鳴りません）。</p>
+                    <p className="text-muted">この部品は絵を止めています（止めたコマの絵を、部品の長さいっぱい映します。音は鳴りません）。</p>
                     <button type="button" className="btn btn-sm" onClick={() => setSelectedClipHoldFrame(false)}>
                       止めるのをやめる
                     </button>

@@ -184,8 +184,8 @@ export const EDIT_BLOCKED = {
   splitPastSource: 'TIMELINE_EDIT_SPLIT_PAST_SOURCE',
   /**
    * **止める相手が動画でない**（#356 ②）。写真はもう止まっているし、文字・図形・音には
-   * 止める絵が無い。見た目パターンのクリップも対象外＝止めると**枠ごと写真に化ける**
-   *（文字も立ち絵も消える）＝押した結果と食い違う（ADR-0026①）。
+   * 止める絵が無い。見た目パターンのクリップも対象外＝**枠の中の動画だけを止める道が無い**
+   * ＝押した結果と食い違う（ADR-0026①・ADR-0065）。
    */
   freezeNotVideo: 'TIMELINE_EDIT_FREEZE_NOT_VIDEO',
   /**
