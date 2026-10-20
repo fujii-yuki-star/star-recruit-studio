@@ -143,7 +143,7 @@ describe("Rust が画面へ返す文（#1111）", () => {
     // ⚠️ **+5**（ADR-0060）＝拡張パックの断り PACK_* 5つ。
     // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED）。
     // ⚠️ **+1**（ADR-0060 段階3＝VOICE_ENGINE_RESTART_FAILED）。
-    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(130);
+    expect(new Set(all).size, "拾えた文の数が変わった（増減したら数も直す）").toBe(132);
   });
 
   it("どの文も、次の行動を示している（§2-5）", () => {

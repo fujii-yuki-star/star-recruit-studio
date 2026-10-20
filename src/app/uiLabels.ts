@@ -2264,3 +2264,33 @@ export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">):
   }
   return parts.join("・");
 }
+
+/**
+ * 使っていないファイルを片づける（ADR-0064）。⚠️ **ごみ箱へ移す・戻せる**ことを必ず言う（黙って消したように見せない）。
+ * 業界の型（Logic Pro の「Clean Up」）＝消す前に一覧を見せ、チェックを外せば残せる。
+ */
+export const unusedFilesLabel = {
+  action: "使っていないファイルを片づける",
+  intro:
+    "この動画のフォルダにある、どこからも使われていないファイルです（取り消した取り込み・止めた絵など）。選んだものをごみ箱へ移します。ごみ箱から戻せます",
+  checking: "調べています…",
+  empty: "使っていないファイルはありません",
+  busy: "取り込み・書き出し・声づくりが終わってから、もう一度お試しください",
+  trash: "選んだファイルをごみ箱へ移す",
+  trashing: "ごみ箱へ移しています…",
+  close: "閉じる",
+} as const;
+
+/** 片づけた後の知らせ（数は移せた数＝押した時点で使われるようになったものは移さない）。 */
+export function unusedFilesTrashedMessage(n: number): string {
+  return n > 0 ? `${n}個のファイルをごみ箱へ移しました。ごみ箱から戻せます` : "移せるファイルはありませんでした（使われるようになったものは残しました）";
+}
+
+/** 片づけの一覧に出す、ファイルの種類（拡張子から）。 */
+export function unusedFileKindLabel(path: string): string {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  if (["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) return "写真";
+  if (["mp4", "mov", "webm", "mkv", "avi", "m4v"].includes(ext)) return "動画";
+  if (["wav", "mp3", "m4a", "aac", "ogg", "flac"].includes(ext)) return "音";
+  return "ファイル";
+}

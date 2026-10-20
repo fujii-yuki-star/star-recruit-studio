@@ -57,7 +57,7 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, setPackFontSources, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, trashProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
@@ -2258,8 +2258,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     }));
     // ⚠️ **ファイルの片づけは待たない**＝一覧からはもう消えており、片づけの成否で画面を止める理由が無い
-    //（消せなくても次の取り込みで上書きされるだけの無害な余り＝ADR-0021 の孤立掃除と同じ流儀）。
-    if (meta.projectId) void deleteProjectFiles(meta.projectId, files);
+    //（移せなくても「使っていないファイルを片づける」で後から片づけられる）。
+    // ⚠️ **ごみ箱へ移す**（ADR-0064 決定4＝Final Cut Pro と同じ）＝以前はすぐ消していた（戻せなかった）。
+    if (meta.projectId) void trashProjectFiles(meta.projectId, files);
   },
   addTemplatePack: async (incoming) => {
     // 書き出し中は取り込みも止める（save/delete と同じ固定・#570 レビュー・store 側の2層目）。

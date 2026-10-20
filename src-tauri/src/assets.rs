@@ -231,6 +231,222 @@ pub fn delete_project_files(
     Ok(removed)
 }
 
+// ── 使っていないファイルの片づけ（ADR-0064）─────────────────────────────
+//
+// ⚠️ **黙って消さない・消すときはごみ箱へ**（業界の型＝Final Cut Pro・Logic Pro）。
+// ⚠️ **「使っている」は文書の中の全部の文字列で見る**＝欄の名前で拾うと、新しい欄を足したときに
+// 見落として**使っているファイルを消す側**に倒れる。
+
+/// 片づけの対象にするフォルダ（動画のフォルダの中）。`project.json`・控え・`restore/` には触れない。
+const CLEANUP_DIRS: [&str; 2] = ["assets", "voices"];
+
+/// 使っていないファイル1つ（動画のフォルダからの相対パスと大きさ）。
+#[derive(serde::Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct UnusedFile {
+    pub path: String,
+    pub size: u64,
+}
+
+/// 文書（JSON）の中の全部の文字列を集める（純粋）。区切りは `/` にそろえる。
+fn collect_strings(v: &serde_json::Value, out: &mut HashSet<String>) {
+    match v {
+        serde_json::Value::String(s) => {
+            out.insert(s.replace('\\', "/"));
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| collect_strings(x, out)),
+        serde_json::Value::Object(o) => o.values().for_each(|x| collect_strings(x, out)),
+        _ => {}
+    }
+}
+
+/// 文書の文字列から「使っているもの」を集める（純粋）。**1つでも読めなければ失敗**（調べられないなら消さない）。
+fn referenced_in(texts: &[String]) -> Option<HashSet<String>> {
+    let mut out = HashSet::new();
+    for t in texts {
+        let v: serde_json::Value = serde_json::from_str(t).ok()?;
+        collect_strings(&v, &mut out);
+    }
+    Some(out)
+}
+
+/// 候補のうち、どこにも書かれていないもの（純粋・名前の順）。
+fn unused_among(mut candidates: Vec<UnusedFile>, referenced: &HashSet<String>) -> Vec<UnusedFile> {
+    candidates.retain(|f| !referenced.contains(&f.path));
+    candidates.sort_by(|a, b| a.path.cmp(&b.path));
+    candidates
+}
+
+/// 片づけの対象フォルダの中のファイル（下の階層も）。
+fn cleanup_candidates(dir: &Path) -> Vec<UnusedFile> {
+    fn walk(base: &Path, rel: &str, out: &mut Vec<UnusedFile>) {
+        let Ok(rd) = fs::read_dir(base.join(rel)) else {
+            return; // 無い＝候補なし
+        };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let child = format!("{rel}/{name}");
+            match e.file_type() {
+                Ok(t) if t.is_dir() => walk(base, &child, out),
+                Ok(t) if t.is_file() => out.push(UnusedFile {
+                    path: child,
+                    size: e.metadata().map(|m| m.len()).unwrap_or(0),
+                }),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for d in CLEANUP_DIRS {
+        walk(dir, d, &mut out);
+    }
+    out
+}
+
+/// 「使っている」を調べる文書を全部読む＝いまの内容・1つ前の控え・前の状態（全部）・画面が持っている内容。
+fn documents_of(dir: &Path, live_texts: Vec<String>) -> Result<Vec<String>, String> {
+    let unreadable = || crate::messages::UNUSED_FILES_UNREADABLE.to_string();
+    let mut texts = live_texts;
+    texts.push(fs::read_to_string(dir.join("project.json")).map_err(|_| unreadable())?);
+    match fs::read_to_string(dir.join("project.prev.json")) {
+        Ok(t) => texts.push(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(unreadable()),
+    }
+    match fs::read_dir(dir.join("restore")) {
+        Ok(rd) => {
+            for e in rd.flatten() {
+                if e.path().extension().is_some_and(|x| x == "json") {
+                    texts.push(fs::read_to_string(e.path()).map_err(|_| unreadable())?);
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(unreadable()),
+    }
+    Ok(texts)
+}
+
+fn unused_files_in(dir: &Path, live_texts: Vec<String>) -> Result<Vec<UnusedFile>, String> {
+    let referenced = referenced_in(&documents_of(dir, live_texts)?)
+        .ok_or_else(|| crate::messages::UNUSED_FILES_UNREADABLE.to_string())?;
+    Ok(unused_among(cleanup_candidates(dir), &referenced))
+}
+
+/// 使っていないファイルの一覧（ADR-0064 決定1・2）。`live_texts`＝開いている動画なら、画面が持っている内容
+/// （保存前の変更・取り消し／やり直しの履歴）を JSON の文字列で渡す。
+#[tauri::command]
+pub fn list_unused_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    live_texts: Vec<String>,
+) -> Result<Vec<UnusedFile>, String> {
+    unused_files_in(&project_dir(&app, &project_id)?, live_texts)
+}
+
+/// 選んだファイルのうち、**いまも使っていないもの**だけをごみ箱へ移す（ADR-0064 決定1・5）。
+///
+/// ⚠️ **押した時点で調べ直す**＝一覧を見ている間に、取り込み・保存で使われるようになったファイルを消さない。
+#[tauri::command]
+pub fn trash_unused_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+    live_texts: Vec<String>,
+) -> Result<usize, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let unused: HashSet<String> = unused_files_in(&dir, live_texts)?
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    let targets = still_unused_targets(&dir, &rel_paths, &unused);
+    move_to_trash(&targets)?;
+    Ok(targets.len())
+}
+
+/// 選んだもののうち、安全な相対パスで、いまも使っていないもの（純粋）。
+fn still_unused_targets(
+    dir: &Path,
+    rel_paths: &[String],
+    unused: &HashSet<String>,
+) -> Vec<PathBuf> {
+    rel_paths
+        .iter()
+        .filter(|r| is_safe_rel_path(r) && unused.contains(*r))
+        .map(|r| dir.join(r))
+        .collect()
+}
+
+/// 素材を消したときのファイルを、ごみ箱へ移す（ADR-0064 決定4＝Final Cut Pro と同じ）。`assets/` の中だけ。
+#[tauri::command]
+pub fn trash_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<usize, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let targets: Vec<PathBuf> = rel_paths
+        .iter()
+        .filter(|r| is_safe_rel_path(r) && r.starts_with("assets/"))
+        .map(|r| dir.join(r))
+        .filter(|p| p.is_file())
+        .collect();
+    move_to_trash(&targets)?;
+    Ok(targets.len())
+}
+
+/// ファイルをごみ箱へ移す（Windows のシェルの「削除」＝元に戻せる）。
+///
+/// ⚠️ **移せなかったら消さない**（ADR-0064 決定5）＝すぐ消すへ切り替えると、戻せない削除を黙ってすることになる。
+#[cfg(windows)]
+fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE,
+        SHFILEOPSTRUCTW,
+    };
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // 対象は「NUL で区切り、最後に NUL を2つ」の並び（シェルの決まり）。
+    let mut from: Vec<u16> = Vec::new();
+    for p in paths {
+        from.extend(p.as_os_str().encode_wide());
+        from.push(0);
+    }
+    from.push(0);
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd: std::ptr::null_mut(),
+        wFunc: FO_DELETE,
+        pFrom: from.as_ptr(),
+        pTo: std::ptr::null(),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16,
+        fAnyOperationsAborted: 0,
+        hNameMappings: std::ptr::null_mut(),
+        lpszProgressTitle: std::ptr::null(),
+    };
+    // SAFETY: `from` は二重 NUL 終端で、呼び出しの間は生きている。他のポインタは null。
+    let rc = unsafe { SHFileOperationW(&mut op) };
+    if rc != 0 || op.fAnyOperationsAborted != 0 {
+        crate::tlog!(
+            "trash",
+            "ごみ箱へ移せませんでした: rc={rc} aborted={}",
+            op.fAnyOperationsAborted
+        );
+        return Err(crate::messages::TRASH_FAILED.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
+    // Windows 以外はまだ対象外（CLAUDE.md §3）＝消さずに断る（決定5）。
+    if paths.is_empty() {
+        Ok(())
+    } else {
+        Err(crate::messages::TRASH_FAILED.to_string())
+    }
+}
+
 /// 渡したプロジェクト相対パスのうち、**実体が見つからないもの**を返す（#347）。
 ///
 /// 素材が移動・削除された／別PCへプロジェクトだけ持ち込んだ、を検知するために使う。
@@ -695,6 +911,189 @@ mod tests {
         assert_eq!(mime_from_path("assets/clip.avi"), "video/x-msvideo");
         assert_eq!(mime_from_path("assets/clip.mkv"), "video/x-matroska");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
+    }
+}
+
+#[cfg(test)]
+mod unused_file_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("stario_unused_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn put(base: &Path, rel: &str, body: &str) {
+        let p = base.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    /// ⚠️ **欄の名前で拾わない**＝どの欄に書かれていても「使っている」（新しい欄で見落とさない）。
+    #[test]
+    fn referenced_collects_every_string_in_any_field() {
+        let docs = vec![
+            r#"{"assets":[{"filePath":"assets/a.png"}],"x":{"deep":["voices\\v.wav"]}}"#
+                .to_string(),
+            r#"{"somethingNew":"assets/b.mp4"}"#.to_string(),
+        ];
+        let r = referenced_in(&docs).unwrap();
+        assert!(r.contains("assets/a.png"));
+        assert!(r.contains("voices/v.wav"), "区切りを / にそろえる");
+        assert!(r.contains("assets/b.mp4"));
+    }
+
+    /// ⚠️ **1つでも読めなければ失敗**（調べられないなら1つも消さない）。
+    #[test]
+    fn referenced_fails_if_any_document_is_broken() {
+        let docs = vec![
+            r#"{"a":"assets/a.png"}"#.to_string(),
+            "{壊れている".to_string(),
+        ];
+        assert!(referenced_in(&docs).is_none());
+    }
+
+    #[test]
+    fn unused_keeps_only_unreferenced_sorted() {
+        let refs: HashSet<String> = ["assets/a.png".to_string()].into_iter().collect();
+        let cands = vec![
+            UnusedFile {
+                path: "voices/z.wav".into(),
+                size: 3,
+            },
+            UnusedFile {
+                path: "assets/a.png".into(),
+                size: 1,
+            },
+            UnusedFile {
+                path: "assets/b.png".into(),
+                size: 2,
+            },
+        ];
+        assert_eq!(
+            unused_among(cands, &refs),
+            vec![
+                UnusedFile {
+                    path: "assets/b.png".into(),
+                    size: 2
+                },
+                UnusedFile {
+                    path: "voices/z.wav".into(),
+                    size: 3
+                },
+            ]
+        );
+    }
+
+    /// 対象は `assets/` と `voices/` の中だけ（下の階層も）。`project.json`・`restore/` は候補にしない。
+    #[test]
+    fn candidates_are_only_in_assets_and_voices() {
+        let d = tmp("cand");
+        put(&d, "project.json", "{}");
+        put(&d, "restore/p-1.json", "{}");
+        put(&d, "assets/a.png", "xx");
+        put(&d, "assets/sub/b.png", "y");
+        put(&d, "voices/v.wav", "zzz");
+        let mut got: Vec<(String, u64)> = cleanup_candidates(&d)
+            .into_iter()
+            .map(|f| (f.path, f.size))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("assets/a.png".into(), 2),
+                ("assets/sub/b.png".into(), 1),
+                ("voices/v.wav".into(), 3)
+            ]
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// ⚠️ **戻し先を壊さない**＝控え（`project.prev.json`）・前の状態（`restore/`）・画面の内容が使っているものは残す。
+    #[test]
+    fn files_used_by_backup_restore_points_or_live_doc_are_kept() {
+        let d = tmp("keep");
+        put(
+            &d,
+            "project.json",
+            r#"{"assets":[{"filePath":"assets/now.png"}]}"#,
+        );
+        put(
+            &d,
+            "project.prev.json",
+            r#"{"assets":[{"filePath":"assets/prev.png"}]}"#,
+        );
+        put(
+            &d,
+            "restore/p-100.json",
+            r#"{"assets":[{"filePath":"assets/old.png"}]}"#,
+        );
+        for f in ["now", "prev", "old", "live", "orphan"] {
+            put(&d, &format!("assets/{f}.png"), "x");
+        }
+        let live = vec![r#"{"past":[{"assets":[{"filePath":"assets/live.png"}]}]}"#.to_string()];
+        let got: Vec<String> = unused_files_in(&d, live)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(got, vec!["assets/orphan.png".to_string()]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn broken_restore_point_refuses_listing() {
+        let d = tmp("broken");
+        put(&d, "project.json", "{}");
+        put(&d, "restore/p-1.json", "{壊れ");
+        put(&d, "assets/a.png", "x");
+        assert_eq!(
+            unused_files_in(&d, vec![]).unwrap_err(),
+            crate::messages::UNUSED_FILES_UNREADABLE
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn missing_project_json_refuses_listing() {
+        let d = tmp("nojson");
+        put(&d, "assets/a.png", "x");
+        assert!(unused_files_in(&d, vec![]).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 押した時点で使っていない・安全な相対パスだけを移す。
+    #[test]
+    fn targets_are_safe_and_still_unused() {
+        let d = PathBuf::from("C:/x");
+        let unused: HashSet<String> = ["assets/a.png".to_string(), "../evil".to_string()]
+            .into_iter()
+            .collect();
+        let got = still_unused_targets(
+            &d,
+            &[
+                "assets/a.png".to_string(),
+                "assets/used.png".to_string(),
+                "../evil".to_string(),
+            ],
+            &unused,
+        );
+        assert_eq!(got, vec![d.join("assets/a.png")]);
+    }
+
+    /// 実際にごみ箱へ移す（手元で1回確かめる用＝ごみ箱に試しのファイルが入るので普段は回さない）。
+    #[test]
+    #[ignore]
+    #[cfg(windows)]
+    fn move_to_trash_removes_file() {
+        let d = tmp("trash");
+        put(&d, "assets/a.png", "x");
+        move_to_trash(&[d.join("assets/a.png")]).unwrap();
+        assert!(!d.join("assets/a.png").exists());
+        let _ = fs::remove_dir_all(&d);
     }
 }
 
