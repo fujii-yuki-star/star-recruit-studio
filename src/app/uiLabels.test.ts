@@ -239,6 +239,15 @@ describe('trackLabel / clipLabel（タイムラインの列と部品の名前・
     expect(clipLabel({ kind: 'shape' })).toBe('図形');
   });
 
+  // ⚠️ **止めた絵（ADR-0065）は帯で見分けられる**＝同じ動画の名前が前後に並ぶので。
+  it('止めた絵は名前に「止めた絵」と添える（利用者が付けた名前は触らない）', () => {
+    const assets = [{ assetId: 'asset_001', displayName: '工場' }];
+    expect(clipLabel({ kind: 'slot', assetId: 'asset_001', holdFrame: true }, assets)).toBe('工場（止めた絵）');
+    expect(clipLabel({ kind: 'slot', assetId: 'asset_001' }, assets)).toBe('工場');
+    expect(clipLabel({ kind: 'slot', holdFrame: true })).toBe(`${freeKindLabel.slot}（止めた絵）`);
+    expect(clipLabel({ kind: 'slot', name: '決め', holdFrame: true })).toBe('決め');
+  });
+
   it('自由配置と同じ物は同じ名前で呼ぶ（画面で語が割れない）', () => {
     expect(clipLabel({ kind: 'slot' })).toBe(freeKindLabel.slot);
   });

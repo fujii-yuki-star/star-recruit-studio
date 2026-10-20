@@ -42,6 +42,9 @@ export function clipIsPassThroughVideo(
   if (!clip.assetId) return false;
   // ⚠️ **動きがあると倒せない**＝重ねるのは FFmpeg なので、位置も大きさも区間の間ずっと同じでなければならない。
   if (hasAnimation(clip.id)) return false;
+  // ⚠️ **止めた絵（ADR-0065）は流せない**＝そのまま流すと**動画が動く**（プレビューは止まっている）。
+  //   焼く側へ倒す＝1コマだけ焼いて全部それを読む（`videoPlacementsOfClip` の使える長さ 0）。
+  if (clip.holdFrame === true) return false;
   if (clip.rotation != null && clip.rotation !== 0) return false;
   // ⚠️ **反転も倒せない**（ADR-0059・PR #1413 レビュー 🟡）＝`overlay` は鏡に映せない。組む側（`drawnExtras`）だけで弾くと、
   //   割る側はそのまま流す区間と数えてしまい、焼くコマ数（進み具合・空き容量の見張り）を少なく見積もる。

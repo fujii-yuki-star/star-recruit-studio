@@ -84,8 +84,13 @@ export function videoPlacementsOfClip(
   if (direct != null) {
     return [{
       clip, use: ASSET_USE_KIND.direct, layerId: null, assetId: direct,
-      sourceStartSec: clip.sourceStartSec ?? 0, durationSec: clip.durationSec, speed: effectiveSpeed(clip),
-      useOriginalAudio: clip.useOriginalAudio === true,
+      sourceStartSec: clip.sourceStartSec ?? 0,
+      // ⚠️ **止めた絵は使える長さ 0**（ADR-0065）＝既存の「使える長さで最後のコマに凍る」がそのまま効く
+      //   （書き出しは1コマだけ焼いて全部それを読む・プレビューは `videoHoldsLastFrameAt` で流すのをやめる）。
+      durationSec: clip.holdFrame === true ? 0 : clip.durationSec,
+      speed: effectiveSpeed(clip),
+      // 止めた絵は音を鳴らさない（`asHeld` が落とすが、手で書いた文書でも鳴らさない）。
+      useOriginalAudio: clip.useOriginalAudio === true && clip.holdFrame !== true,
       originalAudioVolume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
     }];
   }
@@ -236,6 +241,8 @@ export function placementOriginalAudio(
  * ⚠️ **隠しているかは見ない**＝隠した部品でも設定は変えられる（鳴るかどうかだけが `placementOriginalAudio`）。
  */
 export function canUseOriginalAudio(doc: TimelineProject, clip: TimelineClip): boolean {
+  // 止めた絵（ADR-0065）は音を鳴らさない＝欄も出さない。
+  if (clip.holdFrame === true) return false;
   return videoAudioState(doc, clip) === 'available';
 }
 
@@ -452,8 +459,8 @@ export function videoSourceSecAt(p: VideoPlacement, timeSec: number, fps: number
  * ⚠️ **秒ではなくこの4つを渡す**（#1158）＝秒を渡すと、受け取った側が**自分の丸め方**でコマを選ぶ。
  * 実測すると、素材 29.97fps／出力 24fps などで**1コマずれる**（64 通り中 18 通り・全部ちょうど1コマ）。
  * 書き出しは `-ss 並べ始める秒 -i … -vf setpts=PTS/速さ,fps=N` で並べた **N 枚目**を焼くので、
- * 止め絵の切り出しも**同じ並べ方の N 枚目**を取れば、丸め方を合わせる必要がそもそも無くなる
- *（近似で書き写さない＝ADR-0001）。
+ * プレビューの秒（`videoSourceSecAt`）も**同じ並べ方の N 枚目**から出す（近似で書き写さない＝ADR-0001）。
+ *（以前は止め絵の切り出しにもこの4つを渡していた＝#1158。ADR-0065 でファイルを作らなくなって使い手は1つ。）
  */
 export function videoSourceFrameAt(
   p: VideoPlacement,

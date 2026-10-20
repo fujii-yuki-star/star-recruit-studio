@@ -19,7 +19,7 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -532,7 +532,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, importFromLibrary, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
-    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
+    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume, setSelectedClipHoldFrame,
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
@@ -3794,19 +3794,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   /**
    * **この瞬間で絵を止める**（#356 ②）＝押せる条件は「分ける」と同じ入口を通す。
    *
-   * ⚠️ **切り出し（重い処理）を始めてから断らない**（§2-5）＝store 側も同じ関門
-   * （`freezeFrameIssue`）を先頭で通すので、押す前と押した後で条件が割れない。
+   * ⚠️ **押す前と押した後で条件を割らない**（§2-5）＝store 側も同じ関門（`freezeFrameIssue`）を先頭で通す。
+   * ⚠️ **取り込み中でも押せる**（ADR-0065）＝ファイルを作らないので待つものが無い。
    */
   const freezeExtra = (): { disabled?: boolean; hint?: string } => {
     if (selectedClipIds.length > 1) return { disabled: true, hint: SINGLE_CLIP_ONLY_HINT };
     if (!doc || !selected) return { disabled: true, hint: "絵を止める部品を選んでください" };
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
-    // ⚠️ **切り出し中は押す前に断る**（#1136 レビュー由来 🟡）＝黙って何も起きないと、
-    // 利用者は**必ずもう一度押す**（すぐ隣の素材の取り込みは押す前に断っている＝同じ画面で流儀を割らない）。
-    if (isImporting) return { disabled: true, hint: IMPORT_BUSY_MESSAGE };
-    // ⚠️ **ファイルが見つからない動画では押せない**（同レビュー 🟡・#1068/#1101 と同じ流儀）＝
-    // 文書の中身しか見ない関門は通ってしまい、**FFmpeg を起こしてから失敗する**＝
-    // この機能自身が掲げた「重い処理を始めてから断らない」に反する。
+    // ⚠️ **ファイルが見つからない動画では押せない**（#1136 レビュー由来 🟡・#1068/#1101 と同じ流儀）＝
+    // 文書の中身しか見ない関門は通ってしまい、**止めたコマを見せられない部品**ができる。
     if (selected.assetId != null && missingAssetIds.includes(selected.assetId)) {
       return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.freezeAssetMissing] };
     }
@@ -3948,7 +3944,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           // **死んだ受け渡し**になり、「元の音が止まる」の知らせが**この入口だけ届いていなかった**
           //（ADR-0026②）。`ContextMenuItem` に `hint` を足して、押せるときに出るようにした。
           hint: freezePreviewHint,
-          onSelect: () => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
+          onSelect: () => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
         },
         {
           label: SILENCE_FIND_LABEL,
@@ -4745,7 +4741,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   「思ったより短い」となった人の次の一歩が画面から読めない。 */}
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { void freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
+                onClick={() => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
                 {...freezeGuard}
                 title={freezeGuard.title ?? freezePreviewHint}
               >
@@ -6091,12 +6087,25 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 分ける・バラすは**書いて**いたので、**置いた覚えのない頭出し・速さが付いた部品**ができ、
                 見ることも直すことも既定へ戻すこともできなかった（§2-5・ADR-0026④）。
                 ⚠️ **欄そのものは音と同じものを出す**（`playbackFields`）＝写すと片方だけ直る。 */}
+            {/* ⚠️ **止めた絵（ADR-0065）は速さ・使い始めを出さない**＝止めている間は効かない（出しておいて
+                効かない、を作らない）。代わりに「止めるのをやめる」を出す＝やめると使い始めから同じ速さで流れる。 */}
             {doc && isDirectVideoClip(doc, selected) && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="videoPlayback" title="この動画の使い方" defaultOpen={true}>
-                {playbackFields}
-                <p className="text-muted">
-                  速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
-                </p>
+                {selected.holdFrame === true ? (
+                  <>
+                    <p className="text-muted">この部品は絵を止めています（止めたコマの絵を、部品の長さいっぱい映します。音は鳴りません）。</p>
+                    <button type="button" className="btn btn-sm" onClick={() => setSelectedClipHoldFrame(false)}>
+                      止めるのをやめる
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {playbackFields}
+                    <p className="text-muted">
+                      速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
+                    </p>
+                  </>
+                )}
               </CollapsibleSection>
             )}
 

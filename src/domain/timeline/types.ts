@@ -190,6 +190,12 @@ export interface TimelineClip extends ClipSpatial {
   fadeOutSec?: number;
 
   /**
+   * **このコマで止める**（ADR-0065・「この瞬間で絵を止める」）。動画を直接置いた部品で、使い始め（`sourceStartSec`）の
+   * **1コマ**を部品の長さいっぱい映す。未指定＝流す。音は鳴らさない。描き方は `video.ts` の1か所（使える長さ 0）。
+   */
+  holdFrame?: boolean;
+
+  /**
    * 動画の素材を置いたクリップで、その動画に入っている**元の音を鳴らすか**（#512 段2）。
    * 未指定＝鳴らさない。**素材に音が入っているときだけ**効く（場面形式と同じ規準＝ADR-0026②）。
    * 解決は `domain/timeline/video.ts` の1か所（再生・書き出し・画面が共有）。
@@ -268,4 +274,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.19';
+export const TIMELINE_SCHEMA_VERSION = '1.20';
