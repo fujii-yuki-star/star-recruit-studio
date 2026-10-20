@@ -338,6 +338,27 @@
 .timeline-row-toggle:disabled {
   cursor: not-allowed;
 }
+/* 列の音量（ADR-0067）＝数で出すので幅は字に合わせる。ソロ＝業界の型の「S」（字で示す）。 */
+.timeline-row-toggle.timeline-row-volume {
+  width: auto;
+  padding: 0 3px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-row-toggle.timeline-row-solo {
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-row-solo.timeline-row-toggle--on {
+  color: var(--color-primary);
+}
+.timeline-row-volume-input {
+  width: 48px;
+  height: 18px;
+  padding: 0 2px;
+  font-size: 11px;
+  pointer-events: auto;
+}
 @media (hover: none) {
   /* ⚠️ **変えた状態は除く**＝同じ強さで後ろにあると、触る画面では ON まで薄くなる（#1259 レビュー 🟡）。 */
   .timeline-row-toggle:not(.timeline-row-toggle--on) {

@@ -39,7 +39,7 @@ import {
   setVisualClipContent,
   setClipBlendMode, setClipFlip, setClipPivot, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
-  setClipUseOriginalAudio, setClipHoldFrame, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setVoiceSpeaker,
+  setClipUseOriginalAudio, setClipHoldFrame, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setTrackVolume, setVoiceSpeaker,
   setVoiceText, trimClip, trimClips, trimTargetsAt,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -853,6 +853,15 @@ export interface TimelineState {
   /** 列を**指した位置へ**動かす（#767・掴んで並べ替える）。`toIndex` は動かす前の並びでの落とし先。 */
   moveTrackTo: (trackId: string, toIndex: number) => void;
   setTrackFlag: (trackId: string, flag: "hidden" | "locked", value: boolean) => void;
+  /** **列の音量**（ADR-0067）。`null`＝標準（100%）へ戻す。音の列だけ。 */
+  setTrackVolume: (trackId: string, volume: number | null) => void;
+  /**
+   * **ソロにしている音の列**（ADR-0067 決定2）＝編集中の聞き方だけ（文書に持たない・取り消しに載せない・書き出しに効かない）。
+   * 1つでもあれば、ソロでない音の列と動画の元の音を鳴らさない。
+   */
+  soloTrackIds: string[];
+  /** 音の列のソロを付け外しする（複数の列をソロにできる）。 */
+  toggleTrackSolo: (trackId: string) => void;
   undo: () => void;
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
@@ -1164,6 +1173,8 @@ function emptyState() {
     transcript: null as { clipId: string; runId: number; lines: TranscriptLine[] | null; doc: TimelineProject } | null,
     transcriptPercent: 0,
     selectedClipIds: [] as string[],
+    // ソロ（ADR-0067）＝開き直したら外れる（編集中の聞き方だけ）。
+    soloTrackIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
     missingAssetIds: [] as string[],
@@ -2623,6 +2634,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (doc) commit(set, get, setTrackFlag(doc, trackId, flag, value));
   },
+  setTrackVolume: (trackId, volume) => {
+    const doc = get().doc;
+    if (doc) commit(set, get, setTrackVolume(doc, trackId, volume));
+  },
+  // ⚠️ **文書を変えない**（ADR-0067 決定2）＝`commit` を通さない（取り消しに積まない・保存しない・書き出し中も変えられる）。
+  // 音の列でなければ何もしない（映像の列にソロは無い）。
+  toggleTrackSolo: (trackId) =>
+    set((s) => {
+      const track = s.doc?.tracks.find((t) => t.id === trackId);
+      if (!track || track.kind !== TRACK_KIND.audio) return {};
+      return {
+        soloTrackIds: s.soloTrackIds.includes(trackId)
+          ? s.soloTrackIds.filter((id) => id !== trackId)
+          : [...s.soloTrackIds, trackId],
+      };
+    }),
 
   undo: () => {
     const { doc, history } = get();

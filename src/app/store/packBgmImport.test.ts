@@ -45,7 +45,7 @@ beforeEach(() => {
   useProjectStore.getState().setExportRun({ phase: "idle" });
   useTimelineStore.setState({
     doc: {
-      format: "timeline", schemaVersion: "1.20", projectId: "proj_20261014_002", projectName: "t",
+      format: "timeline", schemaVersion: "1.21", projectId: "proj_20261014_002", projectName: "t",
       createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
       videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
       assets: [], tracks: [], clips: [],

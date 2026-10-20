@@ -2,7 +2,7 @@
 // 「その瞬間に何がどの音量・速度で鳴るか」は domain の純粋関数（`audioCuesAt`）が決める＝時刻から一意に
 // 決まるので、途中から再生してもシークしても同じ結果になる（絵の `playbackTick` と同じ考え方）。
 import { useEffect, useRef } from "react";
-import { audioCuesAt, audioLoops, audioSourceKeyOfClip } from "../../domain/timeline/audio";
+import { audioCuesAt, audioLoops, audioSourceKeyOfClip, soloFilteredCues } from "../../domain/timeline/audio";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
 import { keepsPlayingWhileHidden } from "./playbackPulse";
@@ -24,6 +24,7 @@ export function useTimelineAudio(enabled = true): void {
   const playheadSec = useTimelineStore((s) => s.playheadSec);
   const doc = useTimelineStore((s) => s.doc);
   const audioSrcByKey = useTimelineStore((s) => s.audioSrcByKey);
+  const soloTrackIds = useTimelineStore((s) => s.soloTrackIds);
   // 鳴らしている音（クリップ id → 要素）。React の描画とは独立に持つ（再描画で作り直さない）。
   const playingRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   // 鳴らせなかったクリップ（端末/ブラウザの制限）。再試行しない。
@@ -62,7 +63,8 @@ export function useTimelineAudio(enabled = true): void {
       stopAll();
       return;
     }
-    const cues = audioCuesAt(doc, playheadSec);
+    // ⚠️ **ソロは再生の中だけ**（ADR-0067）＝書き出しの並べ方（`audioCuesAt` を共有）には入れない。
+    const cues = soloFilteredCues(doc, audioCuesAt(doc, playheadSec), soloTrackIds);
     const live = new Set(cues.map((c) => c.clipId));
     // 鳴り終わった（区間を出た）ものを止める。
     for (const [clipId, el] of playing) {
@@ -108,7 +110,7 @@ export function useTimelineAudio(enabled = true): void {
         vol.setVolume(cue.volume);
       }
     }
-  }, [enabled, isPlaying, playheadSec, doc, audioSrcByKey]);
+  }, [enabled, isPlaying, playheadSec, doc, audioSrcByKey, soloTrackIds]);
 
   // 画面が隠れたら止める＝時計（rAF）が止まって位置が進まない間、音だけ実時間で進み続けるのを防ぐ。
   useEffect(() => {

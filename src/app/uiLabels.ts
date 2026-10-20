@@ -74,6 +74,8 @@ export const Z_ORDER_LABEL = "重ね順";
  * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
  */
 export const DUPLICATE_LABEL = "複製";
+/** 列の「⋮」から列の音量を直す（ADR-0067）。 */
+export const TRACK_VOLUME_MENU_LABEL = "この列の音量";
 export const DELETE_LABEL = "削除";
 
 /**

@@ -2569,7 +2569,11 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     expect(within(inSelected).getByLabelText("載っている列")).toBeDisabled();
     fireEvent.click(screen.getByLabelText("音1の操作"));
     const items = screen.getAllByRole("menuitem");
-    expect(items.every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
+    // ⚠️ **ソロだけは押せる**（ADR-0067 決定2）＝文書を変えない聞き方（書き出しに効かない）。塞ぐと「書き出しを待つ間に声だけ聞く」ができない。
+    const isSolo = (el: HTMLElement): boolean => /ソロ/.test(el.textContent ?? "");
+    expect(items.filter((el) => !isSolo(el)).every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
+    expect(items.filter(isSolo)).toHaveLength(1);
+    expect(items.filter(isSolo)[0]!.hasAttribute("disabled")).toBe(false);
   });
 
   it("書き出し中は取り消す／やり直すも押せない（場面形式と同じ）", () => {

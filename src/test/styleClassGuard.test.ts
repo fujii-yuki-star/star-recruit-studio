@@ -90,7 +90,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1248）＝写すときに元の位置へ残す元の帯（`timeline-clip--copy-source`）。運んでいる帯の `--copying` は条件で付ける断片なので数えない。
     // ⚠️ **+5**（#1319）＝全体図の帯（`timeline-overview`・`-clip`・`-range`・`-playhead`・`-window`）。色の `--◯◯` は式で組むので数えない。
     // ⚠️ **+1**（PR #1412 レビュー）＝収まっているときの場所取り（`timeline-overview--idle`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(221);
+    // ⚠️ **+4**（ADR-0067）＝列の音量（`timeline-row-volume`・その場で直す欄 `timeline-row-volume-input`）とソロ（`timeline-row-solo`）、
+    //   列の音量の札は常に濃く出すので `timeline-row-toggle--on` を文字のまま書いた（以前は条件の式の中だけ）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(225);
   });
 });
 

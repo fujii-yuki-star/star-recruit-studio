@@ -287,7 +287,7 @@ async function main() {
 
   const now = new Date().toISOString();
   const doc = {
-    schemaVersion: "1.20", format: "timeline", projectId: "proj_20260101_001", projectName: `使い方の動画：${title}`,
+    schemaVersion: "1.21", format: "timeline", projectId: "proj_20260101_001", projectName: `使い方の動画：${title}`,
     createdAt: now, updatedAt: now,
     videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: Math.min(300, Math.ceil(total)), maxDurationSec: Math.min(1800, Math.max(60, Math.ceil(total) + 10)), audioAuto: { normalize: true, targetLufs: TARGET_LUFS } },
     voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
