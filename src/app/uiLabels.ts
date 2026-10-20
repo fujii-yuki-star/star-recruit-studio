@@ -2015,6 +2015,10 @@ export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
 export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
 export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
 export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";
+/** 帯のキーフレームの印の説明（#1186 ②）。押すとその時刻へ移る。 */
+export function clipKeyTitle(clock: string): string {
+  return `${clock} に動きを置いています（押すとこの時刻へ移ります）`;
+}
 /** 字幕から読み上げを作る（ADR-0055 追補 2026-10-20・#1485）。複数の字幕を選んでいれば数を言う。 */
 export function voicesFromSubtitlesLabel(subtitleCount: number): string {
   return subtitleCount > 1 ? `選んだ字幕${subtitleCount}個から読み上げを作る` : "この字幕から読み上げを作る";

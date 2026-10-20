@@ -860,6 +860,25 @@
   opacity: 0.6;
 }
 
+/* ── キーフレームの印（#1186 ②）＝選んだ帯の下端にひし形。押すとその時刻へ。
+   ⚠️ 見た目＝当たり判定（ADR-0047 決定3）。帯の掴みより手前（取っ手より奥）。 */
+.timeline-clip-key {
+  position: absolute;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-surface);
+  cursor: pointer;
+  z-index: 3;
+}
+.timeline-clip-key--current {
+  background: var(--color-primary);
+}
+
 /* ── 帯に敷く絵（#332）＝音の波形／動画のコマ列 ─────────────────────────
    ⚠️ **文字より下に敷く**＝名前が読めなくならない。`pointer-events: none` で
    掴む・端をつまむ操作を邪魔しない（帯そのものが受け取る）。

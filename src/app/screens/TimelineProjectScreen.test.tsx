@@ -9725,3 +9725,44 @@ describe("字幕から読み上げを作る（#1485）", () => {
     expect(screen.queryByRole("button", { name: /読み上げを作る/ })).toBeNull();
   });
 });
+
+// 帯のキーフレームの印（#1186 ②）＝選んだ帯にだけ、自身のキーの時刻に出す・押すとその時刻へ移る（選び直さない）。
+describe("帯のキーフレームの印（#1186）", () => {
+  const withKeys = (): void => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 2, durationSec: 4, x: 0, y: 0, w: 100, h: 40, text: "動く" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 7, durationSec: 2, x: 0, y: 0, w: 100, h: 40, text: "隣" },
+      ],
+    });
+    useTimelineStore.setState((st) => ({
+      doc: st.doc ? { ...st.doc, animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 3, x: 100 }] }] } : st.doc,
+    }));
+  };
+  it("選んだ帯にだけ、キーの時刻に印を出す", () => {
+    withKeys();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const keys = [...document.querySelectorAll('[data-testid="clip-key"]')];
+    expect(keys.map((k) => k.getAttribute("data-time"))).toEqual(["2", "5"]);
+    expect(keys.every((k) => k.closest('.timeline-clip[data-clip-id="clip_001"]'))).toBe(true);
+    expect((keys[1] as HTMLElement).style.left).toBe("75%");
+  });
+  it("選んでいなければ出さない", () => {
+    withKeys();
+    useTimelineStore.setState({ selectedClipIds: ["clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(document.querySelectorAll('[data-testid="clip-key"]')).toHaveLength(0);
+  });
+  it("押すとその時刻へ移り、選び直さない（その時刻の印が強く出る）", () => {
+    withKeys();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 0 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const k = [...document.querySelectorAll('[data-testid="clip-key"]')][1] as HTMLElement;
+    fireEvent.pointerDown(k, { button: 0 });
+    fireEvent.click(k);
+    expect(useTimelineStore.getState().playheadSec).toBe(5);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    expect(document.querySelectorAll(".timeline-clip-key--current")).toHaveLength(1);
+  });
+});
