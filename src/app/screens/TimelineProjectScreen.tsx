@@ -496,7 +496,7 @@ export const SNAP_DEFAULT = true;
  * ⚠️ **入れているときは「何に寄るか」を出す**＝寄せ先が画面から消えると、
  * 効いているのに何が起きているか分からない。
  */
-export const SNAP_ON_HINT = "帯の端・再生位置・0秒へ寄せます（Ctrl を押しながらで一時解除）";
+export const SNAP_ON_HINT = "帯の端・再生位置・0秒へ寄せる（Ctrl で一時解除）";
 /** 切っているときの添え書き＝入れると何が起きるか。 */
 export const SNAP_OFF_HINT = "掴んだ場所へそのまま置けます";
 // ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
@@ -4824,12 +4824,22 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <span className="timeline-toolbar-sep" aria-hidden="true" />
               {/* ⚠️ **見出しの文字を押しても切り替わる**（UI/UX 監査 2026-10-02）＝以前は見出しが別の span で、押しても何も起きず、
                   折り返すとスイッチと離れて「文字の無いスイッチ」に見えた。見出しを label にして結ぶ。 */}
-              <label htmlFor="timeline-snap-switch" className="field-label text-sm" style={{ margin: 0, cursor: "pointer" }}>吸着</label>
+              {/* ⚠️ **説明は画面に短く出し、札にも付ける**（#1481）＝札（ホバー）だけにすると、タッチ・キーボードでは読めない
+                  （`06 §2` 規約20・#1104 で一度札へ移して差し戻した）。窓が狭いと道具の行が折り返して帯の入る高さを削っていたので、**文を短くした**。 */}
+              <label
+                htmlFor="timeline-snap-switch"
+                className="field-label text-sm"
+                style={{ margin: 0, cursor: "pointer" }}
+                title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
+              >
+                吸着
+              </label>
               <Switch
                 id="timeline-snap-switch"
                 on={snapEnabled}
                 onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
                 label="吸着"
+                title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
               />
               <span className="text-sm text-muted">{snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}</span>
               {/* ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、
