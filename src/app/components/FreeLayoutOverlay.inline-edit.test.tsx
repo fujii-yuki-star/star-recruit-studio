@@ -53,6 +53,17 @@ describe("FreeLayoutOverlay インライン編集の見た目＝実描画に合�
     expect(ta.style.fontSize).toBe("24px"); // el.fontSize(48) × viewScale(960/1920)
   });
 
+  // ⚠️ **直している間も描かれた向きのまま**（#1475）＝以前は反転した文字が直している間だけ裏返らずに出た。
+  it("反転した文字は、直している間も同じ向きに映す", () => {
+    renderOverlay({ textMirrorOf: (id) => (id === "free_001" ? { x: true, y: false } : undefined) });
+    expect(enterEdit().style.transform).toBe("scale(-1, 1)");
+  });
+
+  it("反転していなければ何も当てない（今までと同じ）", () => {
+    renderOverlay({ textMirrorOf: () => undefined });
+    expect(enterEdit().style.transform).toBe("");
+  });
+
   it("色・揃え・太さ・行間を要素からミラーし、背景は透明（下のSVGは親が伏せる）", () => {
     renderOverlay();
     const ta = enterEdit();

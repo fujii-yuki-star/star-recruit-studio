@@ -21,3 +21,9 @@ export function overlayWarpTransform(r: { x: number; y: number; w: number; h: nu
   const pct = (v: number, size: number): number => (size > 0 ? (v / size) * 100 : 0);
   return [`translate(${pct(dx, r.w)}%, ${pct(dy, r.h)}%)`, `matrix(${a}, ${b}, ${c}, ${d}, 0, 0)`, rotate].filter(Boolean).join(" ");
 }
+
+/** 文字を直している間の向き（`FreeLayoutOverlay` の `textMirrorOf`・#1475）を CSS へ。映さないときは `undefined`（今までと同じ）。 */
+export function mirrorTransform(m: { x: boolean; y: boolean } | undefined): string | undefined {
+  if (!m || (!m.x && !m.y)) return undefined;
+  return `scale(${m.x ? -1 : 1}, ${m.y ? -1 : 1})`;
+}

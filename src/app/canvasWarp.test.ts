@@ -1,6 +1,6 @@
 // キャンバスの印を部品のゆがみに合わせる（#1416）。
 import { describe, expect, it } from "vitest";
-import { overlayWarpTransform } from "./canvasWarp";
+import { mirrorTransform, overlayWarpTransform } from "./canvasWarp";
 
 /** CSS の `translate(%) matrix() rotate()` を、印の4隅に当てた結果（キャンバスの座標）。検査の側で式を組み直す。 */
 function corners(r: { x: number; y: number; w: number; h: number; rotation?: number; warp?: readonly number[] }): number[][] {
@@ -45,5 +45,17 @@ describe("overlayWarpTransform（#1416）", () => {
     expect(corners({ ...r, warp })).toEqual(expected);
     // CSS は右から当たる＝回転が最後（いちばん右）でないと、描画と逆の順になる（上の隅の検査は順を組み直すので、順はここで見る）。
     expect(overlayWarpTransform({ ...r, warp })).toMatch(/^translate\(.*\) matrix\(.*\) rotate\(90deg\)$/);
+  });
+});
+
+describe("mirrorTransform（#1475）", () => {
+  it("映さないときは何も付けない（今までと同じ）", () => {
+    expect(mirrorTransform(undefined)).toBeUndefined();
+    expect(mirrorTransform({ x: false, y: false })).toBeUndefined();
+  });
+  it("左右・上下それぞれに裏返す", () => {
+    expect(mirrorTransform({ x: true, y: false })).toBe("scale(-1, 1)");
+    expect(mirrorTransform({ x: false, y: true })).toBe("scale(1, -1)");
+    expect(mirrorTransform({ x: true, y: true })).toBe("scale(-1, -1)");
   });
 });
