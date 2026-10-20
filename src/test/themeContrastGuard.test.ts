@@ -90,7 +90,7 @@ describe("見た目の色の組み合わせは読める濃さ（UI/UX 監査 202
 
   it("トークンを読めている（規則の途中で切れて空振りしない）", () => {
     // ⚠️ 規則の切り出しは「改行＋}」で終わる＝入れ子を足すと途中で切れて数が減る。変わったら赤にする（実数で留める＝増やしたときは数を直し、走査が欠けていないか見る）。
-    expect(light.size).toBe(48);
+    expect(light.size).toBe(49);
     expect(tokensOf(':root[data-theme="dark"]').size).toBe(37);
   });
 

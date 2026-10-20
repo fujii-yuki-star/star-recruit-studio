@@ -10,6 +10,7 @@ import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFram
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 import { SNAP_GUIDE_COLOR } from "./overlayColors";
+import { CANVAS_HANDLE_SIZE } from "./canvasHandle";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着＋複数選択するオーバーレイ（ADR-0017・#306）。
 // ①の FREE オーバーレイの純粋 ops（{x,y,w,h} を受ける move/resize/snap、id 集合を返す freeElementsInRect）を Layer 編集へ流用する。
@@ -492,7 +493,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                 <div
                   key={hd.corner}
                   onPointerDown={(e) => beginDrag(e, l, "resize", hd.corner)}
-                  style={{ position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: rotated ? resizeCursor(hd.corner, l.rotation ?? 0) : hd.cursor }}
+                  style={{ position: "absolute", left: hd.left, top: hd.top, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: rotated ? resizeCursor(hd.corner, l.rotation ?? 0) : hd.cursor }}
                 />
               ))}
             {/* 回転ハンドル（#279 同様）：単一の主に出す。回転中も操作できるよう rotated 条件は付けない。 */}
@@ -503,7 +504,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                   data-testid="tmpl-rotate-handle"
                   onPointerDown={(e) => beginRotate(e, l)}
                   title="ドラッグで回転（Shift で15°ずつ）"
-                  style={{ position: "absolute", left: "50%", top: -22, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab" }}
+                  style={{ position: "absolute", left: "50%", top: -22, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab" }}
                 />
               </>
             )}
@@ -539,7 +540,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                   key={hd.corner}
                   data-testid={`tmpl-group-scale-${hd.corner}`}
                   onPointerDown={(e) => beginGroupScale(e, activeGroup, activeGroupFrame)}
-                  style={{ position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: resizeCursor(hd.corner, activeGroupFrame.rotation) }}
+                  style={{ position: "absolute", left: hd.left, top: hd.top, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: resizeCursor(hd.corner, activeGroupFrame.rotation) }}
                 />
               ))}
               {/* 上＝回転（transform.rotation）。 */}
@@ -548,7 +549,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                 data-testid="tmpl-group-rotate-handle"
                 onPointerDown={(e) => beginGroupRotate(e, activeGroup, activeGroupFrame)}
                 title="ドラッグでグループを回転（Shift で15°ずつ）"
-                style={{ position: "absolute", left: "50%", top: -22, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab" }}
+                style={{ position: "absolute", left: "50%", top: -22, width: CANVAS_HANDLE_SIZE, height: CANVAS_HANDLE_SIZE, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab" }}
               />
             </>
           )}

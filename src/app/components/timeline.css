@@ -840,9 +840,10 @@
 }
 .motion-path-key {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  margin: -6px 0 0 -6px;
+  /* 大きさは取っ手と同じ（寸法の正＝`--canvas-handle-size`・#1482）。中心を点に合わせる。 */
+  width: var(--canvas-handle-size);
+  height: var(--canvas-handle-size);
+  margin: calc(var(--canvas-handle-size) / -2) 0 0 calc(var(--canvas-handle-size) / -2);
   box-sizing: border-box;
   border-radius: 50%;
   border: 2px solid var(--color-primary);
