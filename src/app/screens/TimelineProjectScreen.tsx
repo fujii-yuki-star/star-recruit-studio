@@ -17,6 +17,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { BLEND_MODE, isMixingBlend, CROP_MODE, CROP_MODE_DEFAULT, EASING, ORIENTATION, TIMELINE_CLIP_KIND, TRACK_KIND, PROJECT_FORMAT } from "../../domain/enums";
 import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
+import { VOICES_FROM_SUBTITLES_HINT, voicesFromSubtitlesLabel } from "../uiLabels";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, unusedAssetsCleanupConfirm, unusedAssetsCleanupLabel, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
@@ -553,7 +554,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     addTrack, withNewTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, setTrackVolume, soloTrackIds, toggleTrackSolo, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
-    addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
+    addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, makeVoicesFromSelectedSubtitles, voiceError, generatingVoiceClipId,
     editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, importFromLibrary, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
@@ -2971,6 +2972,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       ) : null}
     </>
   ) : null;
+  /** 選んでいる字幕の数（「選んだ字幕N個から読み上げを作る」・#1485）。 */
+  const selectedSubtitleCount = doc
+    ? doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle && selectedClipIds.includes(c.id)).length
+    : 0;
   /**
    * 選んだ部品に**自身の動き**があるか（掴むと動き全体がずれることを一言添える・ADR-0054 決定4）。
    * ⚠️ **その時刻のずれでは見ない**（PR #1339 レビュー ℹ️）＝ずれがちょうど 0 の時刻でも、掴めば動き全体がずれる。
@@ -4052,6 +4057,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
           onSelect: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
         },
+        // **字幕から読み上げを作る**（#1485・CapCut の右クリック「読み上げ」と同じ入口）＝まとめて選んだときは
+        //   「選んだ部品」の欄が出ないので、ここが入口になる（欄のボタンと同じ store の操作・同じ言い方）。
+        ...(selectedSubtitleCount > 0
+          ? [{
+              label: voicesFromSubtitlesLabel(selectedSubtitleCount),
+              ...(busyGuard({ disabled: isPlaying, hint: playingHint }).disabled
+                ? { disabled: true, disabledHint: busyGuard({ disabled: isPlaying, hint: playingHint }).title }
+                : {}),
+              onSelect: () => makeVoicesFromSelectedSubtitles(),
+            }]
+          : []),
         {
           label: FREEZE_FRAME_LABEL,
           ...singleClipMenuGuard,
@@ -6583,6 +6599,18 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             )}
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleLink" title="連動する読み上げ" defaultOpen={true}>
+                {/* **字幕から読み上げを作る**（ADR-0055 追補 2026-10-20・#1485）＝選んだ字幕ぜんぶに効く（読み込んだ直後は置いた字幕が選ばれている）。
+                    ⚠️ 選んだのがこの1つで、もう連動しているときは出さない（作る相手が無い）。 */}
+                {(!selected.voiceClipId || selectedSubtitleCount > 1) && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    {...busyGuard({ disabled: isPlaying, hint: isPlaying ? playingHint : VOICES_FROM_SUBTITLES_HINT })}
+                    onClick={() => makeVoicesFromSelectedSubtitles()}
+                  >
+                    {voicesFromSubtitlesLabel(selectedSubtitleCount)}
+                  </button>
+                )}
                 {voiceClips.length === 0 ? (
                   <p className="text-muted">連動できる読み上げの部品がまだありません。「読み上げを置く」で置くと、ここで選べます。</p>
                 ) : (

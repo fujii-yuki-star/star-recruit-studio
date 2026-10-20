@@ -9,7 +9,7 @@ import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, ty
 import { createAssetId } from "../../domain/project/persistence";
 import { fillMissingAssetInfo, probeAndThumbVideo, probeAudioDuration, reserveProjectId, reserveAssetId, type VideoEnrichment } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage } from "../uiLabels";
+import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage, voicesFromSubtitlesMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -33,7 +33,7 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, copyClipsTo, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, copyClipsTo, duplicateClip, duplicateTrack, importSubtitleCues, pasteClips, renameTrack, voicesFromSubtitles, fitVoiceLength,
   visualPlacementFor,
   moveClip,
   setVisualClipContent,
@@ -121,7 +121,15 @@ import { userFacingMessage } from "../userFacingError";
  */
 export type VoiceNoticeSink =
   | { kind: "selected" }
-  | { kind: "collect"; notFitted: { label: string; reason: EditBlockedReason }[] };
+  | {
+      kind: "collect";
+      notFitted: { label: string; reason: EditBlockedReason }[];
+      /**
+       * 長さが隣とぶつかるとき、空いた列へ移してから合わせるか（`fitVoiceLength`・#1485）＝**字幕から作った読み上げ**だけ。
+       * ⚠️ 手で置いた読み上げは移さない（置いた列を黙って変えない）＝今までどおり「合わせられなかった」を知らせる。
+       */
+      makeRoom: boolean;
+    };
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -816,7 +824,12 @@ export interface TimelineState {
    * **選んだ読み上げ1件ずつ**しか無かった＝同じ動画を作るのに、形式で手間が違う（ADR-0026②）。
    * ⚠️ **中止できる**（世代番号）＝書き出しと取り込みと同じ流儀。
    */
-  generateAllVoices: () => Promise<void>;
+  generateAllVoices: (only?: { ids: readonly string[]; makeRoom: boolean }) => Promise<void>;
+  /**
+   * **選んだ字幕から読み上げを作る**（ADR-0055 追補 2026-10-20・#1485）＝置く・連動させるは1回の編集、続けて**置いた読み上げだけ**の声を作る
+   * （まとめて作る道を絞って通す＝1件ずつの約束・やめる・合わせられなかった部品のまとめを共有）。
+   */
+  makeVoicesFromSelectedSubtitles: () => void;
   /** まとめて作るのをやめる（`generateAllVoices` を次の1件へ進む前に降ろす）。 */
   cancelVoiceGeneration: () => void;
   /** まとめて作っている最中か。 */
@@ -1725,7 +1738,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return;
     }
     // ⚠️ **1回の `commit`**＝何行並べても取り消し1回（ADR-0034 決定20）。
-    commit(set, get, r.doc, { transcript: null });
+    // 置いた字幕を選ぶ＝字幕ファイルの読み込みと同じ（置き方で選ばれ方を割らない・ADR-0055 追補 2026-10-20 決定1）。
+    commit(set, get, r.doc, { transcript: null, selectedClipIds: r.placedIds });
     if (get().doc === r.doc) set({ editNotice: transcriptPlacedMessage(r.placed, r.beyondLimit) });
   },
   cutTranscriptLines: (lines) => {
@@ -1924,7 +1938,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (cues.length === 0) { set({ importError: subtitleFileMessage.SUBTITLE_FILE_EMPTY }); return; }
     const r = importSubtitleCues(doc, cues);
     if (r.placed === 0) { set({ importError: subtitleImportedMessage(0, unreadable, r.beyondLimit) }); return; }
-    commit(set, get, r.doc, { importError: subtitleImportedMessage(r.placed, unreadable, r.beyondLimit) });
+    // ⚠️ **置いた字幕を選んだ状態にする**（ADR-0055 追補 2026-10-20 決定1）＝そのまま「選んだ字幕から読み上げを作る」が全部に効く。
+    commit(set, get, r.doc, { importError: subtitleImportedMessage(r.placed, unreadable, r.beyondLimit), selectedClipIds: r.placedIds });
   },
   applySelectedMotionPreset: (preset) =>
     applyEdit(set, get, (d, id) => applyMotionPreset(d, id, preset, { atSec: keyframeTimeAt(d, id, get().playheadSec) ?? 0 })),
@@ -2485,8 +2500,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
             : c,
         ),
       };
+      // 字幕から作った読み上げは、ぶつかるなら空いた列へ移してから合わせる（#1485・`VoiceNoticeSink` の `makeRoom`）。
       const sized =
-        result.durationSec > 0 ? trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec) : null;
+        result.durationSec <= 0 ? null
+          : notice.kind === "collect" && notice.makeRoom ? fitVoiceLength(withVoice, clipId, result.durationSec)
+            : trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec);
       // 長さを合わせられない（置けない）ときは、**声はそのまま置いて**理由を出す＝作った声を捨てない。
       // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
       // ⚠️ **断りの出し先は呼び出し側が決める**（#1045）＝1件ずつなら相手は「選んだ部品」だが、
@@ -2550,7 +2568,28 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
-  generateAllVoices: async () => {
+  makeVoicesFromSelectedSubtitles: () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc) return;
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
+      return;
+    }
+    const r = voicesFromSubtitles(doc, selectedClipIds);
+    if (r.voiceIds.length === 0) {
+      set({ editNotice: voicesFromSubtitlesMessage(0, r.skipped, false) });
+      return;
+    }
+    // ⚠️ **まとめて作っている最中なら、置くだけ**＝走っている回は始めたときの一覧で回るので、置いた分は入らない
+    //   （黙って作られないままにしない＝言う）。
+    const busy = get().isGeneratingVoices;
+    commit(set, get, r.doc, {});
+    if (get().doc !== r.doc) return;
+    set({ editNotice: voicesFromSubtitlesMessage(r.voiceIds.length, r.skipped, busy) });
+    if (!busy) void get().generateAllVoices({ ids: r.voiceIds, makeRoom: true });
+  },
+
+  generateAllVoices: async (only) => {
     if (get().isGeneratingVoices) return; // 連打・再入で二重に回さない
     // 書き出し中は始めない（1件ずつのときと同じ理由＝作れても文書へ入れられない）。
     if (isTimelineExportBusy(get().exportRun.phase)) {
@@ -2569,12 +2608,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
       // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
       // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
-      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [] };
+      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [], makeRoom: only?.makeRoom ?? false };
       // ⚠️ **作成済みなのに音が読めない読み上げも作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、
       //   印だけ見て飛ばすと「作りました」と言い、書き出しは「声を作ってください」と断る＝行き止まり。
       //   「読めるか」は書き出しの「読めない音」と同じ材料（`audioSrcByKey`）で見る＝先にそろえる。
       await get().ensureAudioSrcs();
-      for (const id of voiceClipsToMake(doc.clips, (key) => get().audioSrcByKey[key] != null).map((c) => c.id)) {
+      // 絞って渡されたら（字幕から作った読み上げ・#1485）その中だけ。
+      const onlyIds = only ? new Set(only.ids) : null;
+      const targets = voiceClipsToMake(doc.clips, (key) => get().audioSrcByKey[key] != null)
+        .map((c) => c.id)
+        .filter((id) => !onlyIds || onlyIds.has(id));
+      for (const id of targets) {
         // ⚠️ **中止されたら次の1件へ進まない**＝作った声はそのまま残す（取り消しではない）。
         if (get()._bulkVoiceRun !== runSeq) break;
         // ⚠️ **文書が入れ替わったら止める**＝別の動画の読み上げを作りにいかない。

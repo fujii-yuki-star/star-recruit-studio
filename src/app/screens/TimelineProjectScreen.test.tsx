@@ -9680,3 +9680,48 @@ describe("TimelineProjectScreen: 反転と動きの支点（#1186）", () => {
     expect(screen.getByRole("option", { name: "指定の位置" })).toBeTruthy();
   });
 });
+
+// 字幕から読み上げを作る（ADR-0055 追補 2026-10-20・#1485）＝選んだ字幕ぜんぶに効く・連動済みの1つだけなら出さない。
+describe("字幕から読み上げを作る（#1485）", () => {
+  const subtitle = (id: string, startSec: number, over: Record<string, unknown> = {}) =>
+    ({ id, kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec, durationSec: 2, x: 0, y: 0, w: 100, h: 40, text: "字幕", ...over });
+  it("1つ選べば「この字幕から」・押すとストアの操作を呼ぶ", () => {
+    open({ clips: [subtitle("clip_001", 0)] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const make = vi.fn();
+    useTimelineStore.setState({ makeVoicesFromSelectedSubtitles: make } as never);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "この字幕から読み上げを作る" }));
+    expect(make).toHaveBeenCalledTimes(1);
+  });
+  // まとめて選んだときは「選んだ部品」の欄が出ない＝右クリックのメニューが入口（数を言う）。
+  it("まとめて選べば右クリックのメニューから・数を言う", () => {
+    open({ clips: [subtitle("clip_001", 0), subtitle("clip_002", 2)] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    const make = vi.fn();
+    useTimelineStore.setState({ makeVoicesFromSelectedSubtitles: make } as never);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(document.querySelector('.timeline-clip[data-clip-id="clip_002"]')!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "選んだ字幕2個から読み上げを作る" }));
+    expect(make).toHaveBeenCalledTimes(1);
+  });
+  it("字幕を選んでいなければメニューに出さない", () => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 40, text: "文字" }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(document.querySelector('.timeline-clip[data-clip-id="clip_001"]')!);
+    expect(screen.queryByRole("menuitem", { name: /読み上げを作る/ })).toBeNull();
+  });
+  it("連動済みの字幕を1つだけ選んでいるなら出さない", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_009", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "あ", status: "none" } },
+        subtitle("clip_001", 0, { voiceClipId: "clip_009" }),
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /読み上げを作る/ })).toBeNull();
+  });
+});

@@ -2015,6 +2015,25 @@ export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
 export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
 export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
 export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";
+/** 字幕から読み上げを作る（ADR-0055 追補 2026-10-20・#1485）。複数の字幕を選んでいれば数を言う。 */
+export function voicesFromSubtitlesLabel(subtitleCount: number): string {
+  return subtitleCount > 1 ? `選んだ字幕${subtitleCount}個から読み上げを作る` : "この字幕から読み上げを作る";
+}
+export const VOICES_FROM_SUBTITLES_HINT = "字幕と同じ時刻に読み上げを置いて、声を作ります。声ができると、字幕の長さが声に合います";
+/**
+ * 字幕から読み上げを作ったあとの知らせ（#1485）。置かなかった字幕は数を言い（黙って飛ばさない）、
+ * まとめて作っている最中なら声は後で作る、と言う（走っている回には入らない）。
+ */
+export function voicesFromSubtitlesMessage(made: number, skipped: number, busy: boolean): string {
+  if (made === 0) {
+    return "読み上げを作れる字幕がありませんでした。読み上げにつながっていない、文のある字幕を選んでください（固定した列の字幕は、固定を外してください）。";
+  }
+  const skippedNote = skipped > 0 ? `読み上げにつながっている・文が無い・固定した列の字幕${skipped}個には作っていません。` : "";
+  const next = busy
+    ? `いまはほかの声をまとめて作っているので、終わったら「${BULK_VOICE_TIMELINE_LABEL}」を押してください。`
+    : "声を作っています。できると、字幕の長さが声に合います。";
+  return `読み上げを${made}個、新しい列に置きました。${skippedNote}${next}取り消すと置いた読み上げが消えます。`;
+}
 
 /**
  * タイムライン形式で、枠に入りきらず末尾が「…」になる文字の注意（#1366）。見出しは場面形式の公開前チェックと同じ。
