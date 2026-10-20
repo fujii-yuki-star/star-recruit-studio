@@ -23,6 +23,12 @@ const TILES: readonly (readonly [TransitionTileValue, string])[] = [
   [`slide:${TRANSITION_DIRECTION.right}`, "スライド（右へ）"],
   [`slide:${TRANSITION_DIRECTION.up}`, "スライド（上へ）"],
   [`slide:${TRANSITION_DIRECTION.down}`, "スライド（下へ）"],
+  // ワイプ・ズーム（ADR-0066）。向きの言葉はスライドと同じ（「左へ」＝次の場面が右から入る）。
+  [`wipe:${TRANSITION_DIRECTION.left}`, "ワイプ（左へ）"],
+  [`wipe:${TRANSITION_DIRECTION.right}`, "ワイプ（右へ）"],
+  [`wipe:${TRANSITION_DIRECTION.up}`, "ワイプ（上へ）"],
+  [`wipe:${TRANSITION_DIRECTION.down}`, "ワイプ（下へ）"],
+  [TRANSITION_TYPE.zoom, "ズーム"],
 ];
 
 /** 矢印の向き（スライドが**動いていく先**）。 */
@@ -33,9 +39,39 @@ const ARROW: Record<TransitionDirection, string> = {
   [TRANSITION_DIRECTION.down]: "M22 8 L22 24 M16 18 L22 24 L28 18",
 };
 
+/** ワイプの絵で、この場面が見えている側（矢印の向きと逆の端から入る）。 */
+const WIPE_SHOWN: Record<TransitionDirection, { x: number; y: number; w: number; h: number }> = {
+  [TRANSITION_DIRECTION.left]: { x: 25, y: 4, w: 12, h: 24 },
+  [TRANSITION_DIRECTION.right]: { x: 13, y: 4, w: 12, h: 24 },
+  [TRANSITION_DIRECTION.up]: { x: 13, y: 16, w: 24, h: 12 },
+  [TRANSITION_DIRECTION.down]: { x: 13, y: 4, w: 24, h: 12 },
+};
+
 /** 1つ分の絵（前の場面＝薄い枠／この場面＝濃い枠）。 */
 function TileArt({ value }: { value: TransitionTileValue }): React.ReactElement {
-  const dir = value.startsWith("slide:") ? (value.slice(6) as TransitionDirection) : null;
+  const [kind, rawDir] = value.split(":");
+  const dir = rawDir ? (rawDir as TransitionDirection) : null;
+  // ⚠️ **ワイプは1枚の上で境目が動く**＝スライドのように2枚をずらして描くと、押し出しと見分けられない。
+  if (kind === TRANSITION_TYPE.wipe && dir) {
+    const shown = WIPE_SHOWN[dir];
+    return (
+      <svg viewBox="0 0 44 32" width="100%" height="34" aria-hidden focusable="false">
+        <rect x="13" y="4" width="24" height="24" rx="3" fill="var(--color-surface-alt)" stroke="var(--color-border)" />
+        <rect {...shown} fill="var(--color-primary-soft)" stroke="var(--color-primary)" />
+        <path d={ARROW[dir]} transform="translate(3 0)" fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  // ⚠️ **ズームは前の場面へ寄る**＝前の場面の中に小さい枠と、外へ広がる角の線。
+  if (kind === TRANSITION_TYPE.zoom) {
+    return (
+      <svg viewBox="0 0 44 32" width="100%" height="34" aria-hidden focusable="false">
+        <rect x="10" y="4" width="24" height="24" rx="3" fill="var(--color-surface-alt)" stroke="var(--color-border)" />
+        <rect x="17" y="11" width="10" height="10" rx="2" fill="var(--color-primary-soft)" stroke="var(--color-primary)" />
+        <path d="M17 11 L12 6 M27 11 L32 6 M17 21 L12 26 M27 21 L32 26" fill="none" stroke="var(--color-primary)" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 44 32" width="100%" height="34" aria-hidden focusable="false">
       {/* 前の場面（薄い） */}

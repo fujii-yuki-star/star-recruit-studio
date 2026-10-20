@@ -78,6 +78,11 @@ export const BAKE_NOTE_CODE = {
    * 動画の元の音は一定の大きさしか持てない（フェード・音量の変化の語彙が無い）＝下がらずに重なる。
    */
   videoAudioTransition: 'BAKE_VIDEO_AUDIO_TRANSITION',
+  /**
+   * 場面の切り替えの**ワイプ・ズーム**（ADR-0066 決定5）。タイムライン形式ではフェードとして焼く
+   * （付け先のまとまりに切り抜きが無く、ズームの中心もまとまりの箱になる＝同じ絵をキーフレームで表せない）。
+   */
+  transitionAsFade: 'BAKE_TRANSITION_AS_FADE',
 } as const;
 
 export type BakeNoteCode = (typeof BAKE_NOTE_CODE)[keyof typeof BAKE_NOTE_CODE];
@@ -286,8 +291,10 @@ function sortedKeyframes(keyframes: readonly Keyframe[]): Keyframe[] {
  *   入る側だけ動かすと絵が変わる。x/y キーフレームは**本来位置からの相対**（`interpolateKeyframes` の適用規則）。
  * - `none`＝キーフレーム無し（ハードカット）。
  *
- * `default` の `never` チェックは**意図的な仕掛け**：`DrawnTransitionType`（＝`sceneTransitions` の丸め表）に
- * wipe が加わった瞬間ここがコンパイルエラーになり、黙って fade として焼き続けることができなくなる（決定19）。
+ * - `wipe`／`zoom`＝**フェードとして焼く**（ADR-0066 決定5＝同じ絵をキーフレームで表せない）。知らせは呼び出し側。
+ *
+ * `default` の `never` チェックは**意図的な仕掛け**：`DrawnTransitionType` に種別が加わった瞬間ここがコンパイルエラーになり、
+ * 黙って別の形で焼き続けることができなくなる（決定19・ADR-0066 で実際に鳴った）。
  *
  * @param outgoingStartSec 出ていく側のクリップ先頭から見た、重なりが始まる秒。
  */
@@ -303,6 +310,10 @@ function transitionKeyframes(
   switch (type) {
     case TRANSITION_TYPE.none:
       return { incoming: [], outgoing: [] };
+    // ⚠️ **ワイプ・ズームはフェードとして焼く**（ADR-0066 決定5）＝付け先の多くはまとまりで、切り抜きも
+    //   ズームの中心も同じ絵をキーフレームで表せない。黙ってではなく、呼び出し側が `BAKE_TRANSITION_AS_FADE` で知らせる。
+    case TRANSITION_TYPE.wipe:
+    case TRANSITION_TYPE.zoom:
     case TRANSITION_TYPE.fade:
       return incomingIsAbove
         ? {
@@ -638,6 +649,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   const sceneTargetId: string[] = [];
   const sceneBlock: ColumnBlock[] = [];
   const dialogueSubtitleScenes: number[] = [];
+  const transitionAsFadeScenes: number[] = [];
   const videoStartTimingScenes: number[] = [];
 
   scenes.forEach((scene, i) => {
@@ -838,6 +850,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     const incomingTarget = sceneTargetId[i];
     const outgoingTarget = sceneTargetId[i - 1];
     if (incomingTarget == null || outgoingTarget == null) continue; // 描くものが無い場面には切り替えを付けようがない
+    if (resolved[i].type === TRANSITION_TYPE.wipe || resolved[i].type === TRANSITION_TYPE.zoom) transitionAsFadeScenes.push(i + 1);
     const kf = transitionKeyframes(
       resolved[i].type,
       resolved[i].direction,
@@ -883,6 +896,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
 
   if (dialogueSubtitleScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: dialogueSubtitleScenes });
   if (videoStartTimingScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.videoStartTiming, sceneNumbers: videoStartTimingScenes });
+  if (transitionAsFadeScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.transitionAsFade, sceneNumbers: transitionAsFadeScenes });
   // 出ていく場面で動画の元の音が鳴っていれば知らせる（#1410）＝重なりの間、下がらずに鳴る。
   // ⚠️ **鳴るかは焼き上がりの文書で見る**（`placementOriginalAudio`＝描画・書き出しと同じ判定）。
   const built = doc();

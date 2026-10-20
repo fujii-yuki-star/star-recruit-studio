@@ -373,12 +373,21 @@ describe('bakeTimelineProject: 切り替えはキーフレームで表す（ADR-
     expect(doc.animations ?? []).toEqual([]);
   });
 
-  it('設定が wipe でも、実効の切り替え（fade へ丸められた結果）を焼く', () => {
-    const { doc } = bakeTimelineProject(twoScenes({ in: TRANSITION_TYPE.wipe, durationSec: 1 }), opts());
+  // ⚠️ **ワイプ・ズームはフェードとして焼き、知らせる**（ADR-0066 決定5＝同じ絵をキーフレームで表せない）。
+  it.each([TRANSITION_TYPE.wipe, TRANSITION_TYPE.zoom])('%s はフェードとして焼き、持っていけないものとして知らせる', (type) => {
+    const { doc, notes } = bakeTimelineProject(twoScenes({ in: type, durationSec: 1 }), opts());
     expect(doc.animations![0].keyframes).toEqual([
       { timeSec: 0, opacity: 0 },
       { timeSec: 1, opacity: 1 },
     ]);
+    expect(notes).toContainEqual({ code: BAKE_NOTE_CODE.transitionAsFade, sceneNumbers: [2] });
+  });
+
+  it('フェード・スライドは知らせない（そのまま焼ける）', () => {
+    for (const tr of [{ in: TRANSITION_TYPE.fade }, { in: TRANSITION_TYPE.slide }]) {
+      const { notes } = bakeTimelineProject(twoScenes({ ...tr, durationSec: 1 }), opts());
+      expect(notes.map((n) => n.code)).not.toContain(BAKE_NOTE_CODE.transitionAsFade);
+    }
   });
 });
 

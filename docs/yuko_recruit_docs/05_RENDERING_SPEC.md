@@ -330,16 +330,15 @@ MVPでは口パクアニメーションは対象外。
 
 ## 15. トランジション
 
-MVP対応：
+対応（ADR-0009・ADR-0066）：
 
 - none
 - fade
+- slide（左右上下）
+- wipe（左右上下）＝FFmpeg `xfade` の `wipe*`。プレビューは同じ式（境目が一定の速さ）で `clip-path`
+- zoom＝FFmpeg `xfade` の `zoomin`。プレビューは同じ式（前の場面へ寄ってから溶ける・smoothstep）
 
-将来対応：
-
-- slide
-- wipe
-- zoom
+タイムライン形式へ焼くとき、wipe・zoom はフェードとして焼き、知らせる（`BAKE_TRANSITION_AS_FADE`）。
 
 ---
 

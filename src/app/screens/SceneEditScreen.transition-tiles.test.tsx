@@ -44,11 +44,12 @@ describe("画面の切り替えを絵で選ぶ（#1032）", () => {
     useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0 });
   });
 
-  it("効果は6つ、それぞれ絵つきで並ぶ", () => {
+  it("効果は11、それぞれ絵つきで並ぶ", () => {
     setup();
     const buttons = tiles().getAllByRole("button");
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
       "なし", "フェード", "スライド（左へ）", "スライド（右へ）", "スライド（上へ）", "スライド（下へ）",
+      "ワイプ（左へ）", "ワイプ（右へ）", "ワイプ（上へ）", "ワイプ（下へ）", "ズーム",
     ]);
     for (const b of buttons) {
       expect(b.querySelector("svg"), `「${b.getAttribute("aria-label")}」に絵が無い`).toBeTruthy();
@@ -71,6 +72,28 @@ describe("画面の切り替えを絵で選ぶ（#1032）", () => {
     setup();
     pick(name);
     expect(current()).toMatchObject({ in: TRANSITION_TYPE.slide, out: TRANSITION_TYPE.slide, direction });
+  });
+
+  // ワイプ・ズーム（ADR-0066）。⚠️ 4つとも見る（上と同じ理由）。
+  it.each([
+    ["ワイプ（左へ）", "left"],
+    ["ワイプ（右へ）", "right"],
+    ["ワイプ（上へ）", "up"],
+    ["ワイプ（下へ）", "down"],
+  ])("ワイプは向きも入る（%s）", (name, direction) => {
+    setup();
+    pick(name);
+    expect(current()).toMatchObject({ in: TRANSITION_TYPE.wipe, out: TRANSITION_TYPE.wipe, direction });
+    expect(tiles().getByRole("button", { name }).getAttribute("aria-current"), "選んだ印が付かない＝読み戻せていない").toBe("true");
+  });
+
+  it("ズームは向きを持たない（前の向きを残さない）", () => {
+    setup();
+    pick("ワイプ（上へ）");
+    pick("ズーム");
+    expect(current()).toMatchObject({ in: TRANSITION_TYPE.zoom, out: TRANSITION_TYPE.zoom });
+    expect(current()?.direction).toBeUndefined();
+    expect(tiles().getByRole("button", { name: "ズーム" }).getAttribute("aria-current")).toBe("true");
   });
 
   it("いま選んでいる効果に印が付く", () => {

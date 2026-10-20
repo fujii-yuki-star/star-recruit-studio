@@ -129,7 +129,7 @@
 | `fit` | `cover` / `contain` / `stretch` |
 | `textKey` | `title` / `main` / `subtitle` / `caption` / `url`（定数 `DEFAULT_TEXT_KEY_TEXT`／`DEFAULT_TEXT_KEY_SUBTITLE`＝`domain/template/layerOps.ts`・**`text`/`subtitle` 層では必須**〔`allOf`〕・欠落は読込時に `text`→`title` / `subtitle`→`subtitle` へ補正＝`§9`・#959） |
 | `layer.shapeType`（テンプレ shape レイヤー＝`layer.type=shape`） | `rect` / `ellipse` / `line`（定数 `LAYER_SHAPE_TYPE`・未指定=`rect`） |
-| `transition`（MVP） | `none` / `fade` / `slide`（方向 `direction`: `left`/`right`/`up`/`down`）／（将来）`wipe` / `zoom`（ADR-0009） |
+| `transition` | `none` / `fade` / `slide`・`wipe`（方向 `direction`: `left`/`right`/`up`/`down`・未指定は `left`）／`zoom`（向きなし）（ADR-0009・ADR-0066＝wipe/zoom も描く。タイムライン形式へ焼くとフェード＋`BAKE_TRANSITION_AS_FADE`） |
 | `videoStartMode`（動画スロット再生開始・ADR-0027） | `withAnim` / `afterAnim` / `delay`（定数 `VIDEO_START_MODE`・未指定=`withAnim`。`delay` のみ `delaySec`≥0 が必須） |
 | `creditMode`（クレジットの見せ方・ADR-0025） | `always` / `head` / `tail` / `both` / `hidden`（定数 `CREDIT_MODE`＝`domain/voice/creditDisplay.ts`・**未指定=`both`**＝最初と最後・`seconds` 未指定=3〔1〜10〕。`always`/`hidden` は `seconds` を見ない） |
 
