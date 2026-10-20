@@ -2582,7 +2582,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     // ⚠️ **まとめて作っている最中なら、置くだけ**＝走っている回は始めたときの一覧で回るので、置いた分は入らない
     //   （黙って作られないままにしない＝言う）。
-    const busy = get().isGeneratingVoices;
+    // ⚠️ **1件ずつ作っている最中も同じ**（PR レビュー 🟡）＝1件ぶんの枠（`_voiceRun`）が埋まっていると、まとめて作る回の
+    //   1件ずつが何も残さず素通りする＝置いた読み上げは未作成のまま「作っています」と言ってしまう。
+    const busy = get().isGeneratingVoices || get()._voiceRun != null;
     commit(set, get, r.doc, {});
     if (get().doc !== r.doc) return;
     set({ editNotice: voicesFromSubtitlesMessage(r.voiceIds.length, r.skipped, busy) });

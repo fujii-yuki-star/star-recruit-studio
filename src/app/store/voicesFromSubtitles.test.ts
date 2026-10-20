@@ -127,6 +127,18 @@ describe("makeVoicesFromSelectedSubtitles", () => {
     expect(useTimelineStore.getState().editNotice).toBe(voicesFromSubtitlesMessage(1, 0, true));
   });
 
+  // ⚠️ 1件ずつの枠が埋まっていると、まとめて作る回の1件ずつが素通りする＝置くだけにして、後で作るよう言う（PR レビュー 🟡）。
+  it("1件ずつ声を作っている最中も置くだけで、後で作るよう言う", async () => {
+    const synth = vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockResolvedValue({ audioDataUrl: "wav", durationSec: 1 });
+    setDoc(doc([sub("clip_001", 0, 2, "一つ目")]), ["clip_001"]);
+    useTimelineStore.setState({ _voiceRun: 99 } as never);
+    useTimelineStore.getState().makeVoicesFromSelectedSubtitles();
+    await flush();
+    expect(clipsOf(TIMELINE_CLIP_KIND.voice)).toHaveLength(1);
+    expect(synth).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().editNotice).toBe(voicesFromSubtitlesMessage(1, 0, true));
+  });
+
   it("作れる字幕が無ければ文書を変えず、選び方を言う", () => {
     const d = doc([sub("clip_001", 0, 2, "")]);
     setDoc(d, ["clip_001"]);
