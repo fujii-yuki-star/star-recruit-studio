@@ -1673,7 +1673,8 @@ export function voicesFromSubtitles(
   let skipped = 0;
   for (const sub of targets) {
     const own = sub.text ?? '';
-    const text = own.replace(/\s*\r?\n\s*/g, '').trim();
+    // 英数字どうしの改行は空白1つにする（`Hello\nworld` を `Helloworld` と読ませない・PR レビュー ℹ️）。日本語は詰める。
+    const text = own.replace(/([A-Za-z0-9])\s*\r?\n\s*(?=[A-Za-z0-9])/g, '$1 ').replace(/\s*\r?\n\s*/g, '').trim();
     if (sub.voiceClipId != null || text.length === 0 || locked.has(sub.trackId)) {
       skipped += 1;
       continue;
@@ -1710,6 +1711,9 @@ export function voicesFromSubtitles(
  * - ぶつかるときだけ、読み上げは**読み上げだけが並ぶ音の列**（列の音量を変えていないもの＝BGM の列の音量が声に掛からない）、
  *   連動した字幕は**字幕だけが並ぶ映像の列**の中から、その区間が空いた列へ移す。無ければ列を足す。固定・隠した列には移さない。
  * - 列が固定されているなど、移しても合わせられない理由はそのまま返す（黙って別の結果にしない）。
+ * - ⚠️ **移す元が隠した列なら移さない**（PR レビュー 🟡）＝見える列へ移すと、出さないつもりの字幕・声が出る。
+ * - ⚠️ **立ち絵の「喋っている間の動き」が結んだ音の列からも、その列へも移さない**（ADR-0056・PR レビュー 🟡）＝
+ *   移すと、結んだ立ち絵がこの声で動かなくなる／別の立ち絵がこの声で動き出す。
  */
 export function fitVoiceLength(doc: TimelineProject, voiceClipId: string, durationSec: number): EditResult {
   const voice = doc.clips.find((c) => c.id === voiceClipId);
@@ -1719,12 +1723,14 @@ export function fitVoiceLength(doc: TimelineProject, voiceClipId: string, durati
   if (first.ok || voice.kind !== TIMELINE_CLIP_KIND.voice) return first;
   const subs = subtitlesBoundTo(doc, voiceClipId);
   const trackOf = (id: string): Track | undefined => doc.tracks.find((t) => t.id === id);
-  if ([voice, ...subs].some((c) => trackOf(c.trackId)?.locked)) return first;
+  if ([voice, ...subs].some((c) => trackOf(c.trackId)?.locked || trackOf(c.trackId)?.hidden)) return first;
+  const talkBound = new Set(doc.clips.map((c) => c.talkMotion?.trackId).filter((id): id is string => id != null));
+  if (talkBound.has(voice.trackId)) return first;
   const span = { startSec: voice.startSec, durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, durationSec) };
   let cur = doc;
   const roomFor = (clip: TimelineClip, kind: TrackKind, sameKind: TimelineClipKind): string => {
     const usable = (t: Track): boolean =>
-      t.kind === kind && !t.locked && !t.hidden && (t.volume == null || t.volume === 1)
+      t.kind === kind && !t.locked && !t.hidden && (t.volume == null || t.volume === 1) && !talkBound.has(t.id)
       && cur.clips.every((c) => c.trackId !== t.id || c.kind === sameKind)
       && isFreeSpan(cur.clips, t.id, span.startSec, span.durationSec, clip.id);
     const here = cur.tracks.find((t) => t.id === clip.trackId);

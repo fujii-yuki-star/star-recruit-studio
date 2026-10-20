@@ -67,6 +67,12 @@ describe("voicesFromSubtitles", () => {
     expect(byId(r.doc, "clip_001").voiceClipId).toBe(r.voiceIds[0]);
   });
 
+  it("英数字どうしの改行は空白1つにする（日本語は詰める）", () => {
+    const d = doc([sub("clip_001", 0, 2, "Hello\nworld"), sub("clip_002", 3, 2, "ABC\nあいう")]);
+    const r = voicesFromSubtitles(d, ["clip_001", "clip_002"]);
+    expect(r.voiceIds.map((id) => byId(r.doc, id).voice?.text)).toEqual(["Hello world", "ABCあいう"]);
+  });
+
   it("連動済み・文が無い・固定した列の字幕は作らず数える／字幕でない部品は数えない", () => {
     const d = doc(
       [
@@ -144,6 +150,41 @@ describe("fitVoiceLength", () => {
     if (!r.ok) return;
     expect(byId(r.doc, "clip_002").trackId).toBe("track_006");
     expect(r.doc.tracks).toHaveLength(4);
+  });
+
+  // ⚠️ 隠した列から見える列へ移すと、出さないつもりの字幕・声が出る（PR レビュー 🟡）。
+  it("移す元が隠した列なら移さない", () => {
+    const d = doc(
+      [
+        sub("clip_001", 0, 2, undefined, { voiceClipId: "clip_002" }), voice("clip_002", 0, 2),
+        sub("clip_003", 2, 2, "次"),
+      ],
+      [{ id: "track_002", kind: TRACK_KIND.visual, hidden: true }, audio("track_003")],
+    );
+    const r = fitVoiceLength(d, "clip_002", 3);
+    expect(r.ok).toBe(false);
+  });
+
+  // ⚠️ 立ち絵の「喋っている間の動き」（ADR-0056）が結んだ列へ移すと別の立ち絵が動き出す／結んだ列から外すと動かなくなる。
+  it("立ち絵が結んだ音の列へは移さない（読み上げだけの列でも）", () => {
+    const actor = { id: "clip_020", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 10, ...box,
+      talkMotion: { trackId: "track_006", kind: "bounce" } } as unknown as TimelineClip;
+    const d = doc(
+      [voice("clip_002", 0, 2), voice("clip_004", 2, 2), voice("clip_006", 10, 1, "track_006"), actor],
+      [{ id: "track_001", kind: TRACK_KIND.visual }, audio("track_003"), audio("track_006")],
+    );
+    const r = fitVoiceLength(d, "clip_002", 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(byId(r.doc, "clip_002").trackId).not.toBe("track_006");
+    expect(byId(r.doc, "clip_002").trackId).not.toBe("track_003");
+  });
+  it("立ち絵が結んだ音の列からは移さない", () => {
+    const actor = { id: "clip_020", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 10, ...box,
+      talkMotion: { trackId: "track_003", kind: "bounce" } } as unknown as TimelineClip;
+    const d = doc([voice("clip_002", 0, 2), voice("clip_004", 2, 2), actor],
+      [{ id: "track_001", kind: TRACK_KIND.visual }, audio("track_003")]);
+    expect(fitVoiceLength(d, "clip_002", 3).ok).toBe(false);
   });
 
   it("列が固定されていれば移さず、合わせられない理由をそのまま返す", () => {

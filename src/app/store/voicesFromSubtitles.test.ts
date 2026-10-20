@@ -139,6 +139,28 @@ describe("makeVoicesFromSelectedSubtitles", () => {
     expect(useTimelineStore.getState().editNotice).toBe(voicesFromSubtitlesMessage(1, 0, true));
   });
 
+  // ⚠️ 作っている間に利用者が別の列へ動かした読み上げは、ぶつかっても移さない（置いた列を黙って変えない・PR レビュー ℹ️）。
+  it("作っている間に動かした読み上げは移さず、合わせられなかったと言う", async () => {
+    let resolve: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const hand = { id: "clip_050", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_009", startSec: 2, durationSec: 2,
+      voice: { text: "手で置いた", status: NARRATION_STATUS.generated, voicePath: "voices/x.wav" } } as TimelineClip;
+    const d = { ...doc([sub("clip_001", 0, 2, "一つ目"), hand]),
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_009", kind: TRACK_KIND.audio }] } as TimelineProject;
+    setDoc(d, ["clip_001"]);
+    useTimelineStore.getState().makeVoicesFromSelectedSubtitles();
+    await flush();
+    const made = clipsOf(TIMELINE_CLIP_KIND.voice).find((c) => c.id !== "clip_050")!;
+    useTimelineStore.getState().moveClipById(made.id, { trackId: "track_009" });
+    expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === made.id)?.trackId).toBe("track_009");
+    resolve({ audioDataUrl: "wav", durationSec: 2.5 });
+    await flush();
+    const after = useTimelineStore.getState().doc!.clips.find((c) => c.id === made.id)!;
+    expect(after.trackId).toBe("track_009");
+    expect(after.durationSec).toBe(2);
+    expect(useTimelineStore.getState().voiceError).not.toBeNull();
+  });
+
   it("作れる字幕が無ければ文書を変えず、選び方を言う", () => {
     const d = doc([sub("clip_001", 0, 2, "")]);
     setDoc(d, ["clip_001"]);

@@ -2503,7 +2503,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 字幕から作った読み上げは、ぶつかるなら空いた列へ移してから合わせる（#1485・`VoiceNoticeSink` の `makeRoom`）。
       const sized =
         result.durationSec <= 0 ? null
-          : notice.kind === "collect" && notice.makeRoom ? fitVoiceLength(withVoice, clipId, result.durationSec)
+          // ⚠️ 作っている間に利用者が別の列へ動かしたなら移さない（置いた列を黙って変えない・PR レビュー ℹ️）。
+          : notice.kind === "collect" && notice.makeRoom && current.trackId === clip.trackId
+            ? fitVoiceLength(withVoice, clipId, result.durationSec)
             : trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec);
       // 長さを合わせられない（置けない）ときは、**声はそのまま置いて**理由を出す＝作った声を捨てない。
       // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
@@ -2588,8 +2590,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, {});
     if (get().doc !== r.doc) return;
     set({ editNotice: voicesFromSubtitlesMessage(r.voiceIds.length, r.skipped, busy) });
-    // ⚠️ `generateAllVoices` も走っている最中は自分から降りる（冒頭の門）＝ここで外しても結果は同じ（変異チェックで等価）。
-    //   知らせの出し分けに `busy` が要るので、同じ条件で呼ぶ・呼ばないも書いておく。
+    // ⚠️ 呼ばない門は `busy` と同じ条件＝まとめて作っている最中だけなら `generateAllVoices` も冒頭で降りるが、
+    //   1件ずつ作っている最中（`_voiceRun`）は降りない＝ここで止めないと各件が素通りする（検査あり）。
     if (!busy) void get().generateAllVoices({ ids: r.voiceIds, makeRoom: true });
   },
 
