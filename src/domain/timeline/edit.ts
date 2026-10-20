@@ -16,7 +16,7 @@ import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '.
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import type { SlotClipOverride } from '../project/types';
-import { isAudioClip } from './audio';
+import { canDenoise, isAudioClip } from './audio';
 import { clampVolume } from '../voice/audioMix';
 import { canUseOriginalAudio, isDirectVideoClip, videoPlacementsOfClip } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
@@ -2194,6 +2194,22 @@ export function asHeld(clip: TimelineClip): TimelineClip {
     ...rest
   } = clip;
   return { ...rest, holdFrame: true };
+}
+
+/**
+ * **ノイズを減らす**の切り替え（ADR-0068）。効かない部品（同梱の曲・読み上げ・見た目パターン・止めた絵）には置かない＝
+ * 効かない欄を持たせない（`canDenoise` と同じ相手）。外すとキーを消す。
+ */
+export function setClipDenoise(doc: TimelineProject, clipId: string, on: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canDenoise(doc, clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.denoise === true) === on) return ok(doc);
+  if (on) return ok(withClip(doc, { ...clip, denoise: true }));
+  const patched = { ...clip };
+  delete patched.denoise;
+  return ok(withClip(doc, patched));
 }
 
 /**

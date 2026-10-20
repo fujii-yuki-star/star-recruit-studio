@@ -201,6 +201,12 @@ export interface TimelineClip extends ClipSpatial {
   holdFrame?: boolean;
 
   /**
+   * **ノイズを減らす**（ADR-0068）。持ち込みの音の部品と、直接置いた動画の元の音に効く。未指定＝しない。
+   * プレビューも書き出しも同じ作り置き（`cache/denoise/…flac`・`denoisedCachePath`）を鳴らす。
+   */
+  denoise?: boolean;
+
+  /**
    * 動画の素材を置いたクリップで、その動画に入っている**元の音を鳴らすか**（#512 段2）。
    * 未指定＝鳴らさない。**素材に音が入っているときだけ**効く（場面形式と同じ規準＝ADR-0026②）。
    * 解決は `domain/timeline/video.ts` の1か所（再生・書き出し・画面が共有）。
@@ -279,4 +285,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.21';
+export const TIMELINE_SCHEMA_VERSION = '1.22';

@@ -54,6 +54,20 @@ export async function importAssetByPath(
   return invoke<string>('import_asset_path', { projectId, fileName, srcPath });
 }
 
+/**
+ * 素材の音の**ノイズを減らした作り置き**をそろえ、そのプロジェクト相対のパスを返す（ADR-0068）。作れなければ `null`
+ *（理由は画面が「ノイズを減らす」を外せば鳴る、と案内する）。
+ */
+export async function ensureDenoisedAudio(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>('ensure_denoised_audio', { projectId, relPath });
+  } catch (e) {
+    console.warn('[denoise] ensure_denoised_audio 失敗:', e);
+    return null;
+  }
+}
+
 /** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */
 export async function readAssetDataUrl(projectId: string, relPath: string): Promise<string | null> {
   if (!isTauri()) return null;

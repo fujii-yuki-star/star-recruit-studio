@@ -13,6 +13,7 @@ vi.mock("../../infrastructure/assetFs", async (orig) => ({
   readAssetDataUrl: vi.fn(async () => "data:audio/mp3;base64,NEW"),
   extractVideoThumbnail: vi.fn(async () => "assets/asset_001.png"),
   missingAssetFiles: vi.fn(async () => []),
+  ensureDenoisedAudio: vi.fn(async () => "cache/denoise/asset_002.mp3.flac"),
 }));
 vi.mock("../../infrastructure/projectFs", () => ({
   saveProjectDoc: vi.fn(async () => {}),
@@ -24,7 +25,7 @@ vi.mock("../../infrastructure/projectFs", () => ({
   loadProjectDoc: vi.fn(async () => ""),
 }));
 
-import { importAssetByPath, missingAssetFiles, probeVideo } from "../../infrastructure/assetFs";
+import { ensureDenoisedAudio, importAssetByPath, missingAssetFiles, probeVideo } from "../../infrastructure/assetFs";
 import { useTimelineStore } from "./timelineStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
@@ -168,6 +169,20 @@ describe("素材のファイルを選び直す（#1019 ⑤）", () => {
     } as never);
     await useTimelineStore.getState().relinkAssetByPath("asset_002", "D:/new/曲.mp3");
     expect(useTimelineStore.getState().audioSrcByKey["asset:asset_002"], "前の音のまま").toBe("data:audio/mp3;base64,NEW");
+  });
+
+  // ⚠️ **ノイズを減らした作り置きも作り直す**（ADR-0068・PR レビュー 🔴）＝鍵は素材の番号なので、読み直さないと前の音のまま。
+  it("ノイズを減らす音の素材を差し替えたら、作り置きをそろえ直して読み直す", async () => {
+    useTimelineStore.setState({
+      doc: {
+        ...doc([{ assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "assets/asset_002.mp3" } as Asset], []),
+        clips: [{ id: "clip_a", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_002", denoise: true } as TimelineClip],
+      },
+      audioSrcByKey: { "denoise:asset_002": "asset://old" },
+    } as never);
+    await useTimelineStore.getState().relinkAssetByPath("asset_002", "D:/new/曲.mp3");
+    expect(vi.mocked(ensureDenoisedAudio), "作り置きをそろえ直していない").toHaveBeenCalled();
+    expect(useTimelineStore.getState().audioSrcByKey["denoise:asset_002"], "前の音のまま").not.toBe("asset://old");
   });
 
   // ⚠️ **音と絵は差し替えない**（#1050）＝もとは「音は動画でないもの」に含まれていて、

@@ -22,7 +22,7 @@ const scene = (speaker: number, status = 'generated') => ({
 
 const doc = (speaker: number, status = 'generated'): TimelineProject =>
   ({
-    schemaVersion: '1.21', format: 'timeline', projectId: 'proj_20261014_0001', projectName: 't', createdAt: '', updatedAt: '',
+    schemaVersion: '1.22', format: 'timeline', projectId: 'proj_20261014_0001', projectName: 't', createdAt: '', updatedAt: '',
     videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 180 },
     voiceSettings: {}, assets: [],
     tracks: [{ id: 'track_001', kind: 'audio', name: '音1' }],
