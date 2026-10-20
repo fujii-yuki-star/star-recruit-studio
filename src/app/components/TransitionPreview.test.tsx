@@ -47,6 +47,27 @@ describe('layerStyles（#408 Part 2 の切替効果プレビュー補間）', ()
     expect(layerStyles(b('slide', 'down'), 0).b.transform).toBe('translateY(-100%)');
   });
 
+  // ワイプ（ADR-0066）＝B を見えている範囲で切る（境目は一定の速さ・xfade wipe* の実測と同じ）。
+  it('wipe-left：B は右から見えてくる（左側を隠す）', () => {
+    expect(layerStyles(b('wipe', 'left'), 0.25).b.clipPath).toBe('inset(0% 0% 0% 75%)');
+    expect(layerStyles(b('wipe', 'left'), 1).b.clipPath).toBe('inset(0% 0% 0% 0%)');
+    expect(layerStyles(b('wipe', 'left'), 0.25).a.transform).toBeUndefined(); // 動かない
+  });
+
+  it('wipe-down：B は上から見えてくる（下側を隠す）', () => {
+    expect(layerStyles(b('wipe', 'down'), 0.25).b.clipPath).toBe('inset(0% 0% 75% 0%)');
+  });
+
+  // ズーム（ADR-0066）＝A を上に重ね、寄りながら薄れる（xfade zoomin と画素一致の式）。
+  it('zoom：前半は A が寄るだけ、後半は寄り切って B へ溶ける', () => {
+    const early = layerStyles(b('zoom'), 0.25);
+    expect(early.a).toMatchObject({ transform: 'scale(2)', opacity: 1, zIndex: 1 });
+    const late = layerStyles(b('zoom'), 0.75);
+    expect(late.a.opacity).toBeCloseTo(0.5, 9);
+    expect(late.a.transform).toBe('scale(4096)'); // 寄り切り＝大きな倍率で代える（無限は CSS に渡せない）
+    expect(layerStyles(b('zoom'), 1).a.opacity).toBe(0);
+  });
+
   it('両レイヤとも fit 箱を充填する絶対配置（inset:0）', () => {
     const s = layerStyles(b('fade'), 0.5);
     expect(s.a.position).toBe('absolute');

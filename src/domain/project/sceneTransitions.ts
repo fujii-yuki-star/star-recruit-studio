@@ -6,16 +6,22 @@ import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import type { Scene, Transition } from './types';
 
-// MVP で実際に描画する種別。これ以外（wipe/zoom）は fade にフォールバックする。
+// 実際に描画する種別（ADR-0066 で wipe/zoom も描くようになった＝いまは全種別）。
 // **`as const` なのは意図的**（`readonly TransitionType[]` に広げない）＝この配列が
 // `DrawnTransitionType` の単一の参照元で、種別を1つ足した瞬間に下流の網羅 switch が落ちる。
-const DRAWN_TYPES = [TRANSITION_TYPE.none, TRANSITION_TYPE.fade, TRANSITION_TYPE.slide] as const;
+const DRAWN_TYPES = [
+  TRANSITION_TYPE.none,
+  TRANSITION_TYPE.fade,
+  TRANSITION_TYPE.slide,
+  TRANSITION_TYPE.wipe,
+  TRANSITION_TYPE.zoom,
+] as const;
 
 /**
  * **実際に描画される**切り替えの種別（`resolveTransition` の結果の型）。`TransitionType` より狭い。
  *
- * これを分けているのは、設定できる種別（`TransitionType`＝wipe/zoom を含む）と、現に画面へ出る種別が
- * 食い違っているため（wipe/zoom は fade に丸めている＝ADR-0032 決定19）。この型を消費する側を
+ * これを分けていたのは、設定できる種別と現に画面へ出る種別が食い違っていたため（wipe/zoom を fade に丸めていた）。
+ * ADR-0066 で全種別を描くようになったが、**型は残す**＝種別が増えたときに描く側の網羅 switch を落とす仕掛け。この型を消費する側を
  * **網羅 switch（`never` チェック）**で書いておくと、`DRAWN_TYPES` に wipe が入った瞬間に union が
  * 広がってビルドが落ちる＝黙って fade へ落とし続ける事故を人の注意ではなく型で防ぐ。
  */
@@ -26,17 +32,16 @@ function isDrawnType(type: TransitionType): type is DrawnTransitionType {
 }
 
 export interface ResolvedTransition {
-  /** none/fade/slide（MVP）。wipe/zoom は fade に丸める。 */
   type: DrawnTransitionType;
-  /** slide のときのみ意味を持つ（ADR-0009：MVP は in に適用）。 */
+  /** slide・wipe のときだけ意味を持つ（ADR-0009・ADR-0066）。 */
   direction: TransitionDirection;
   /** 希望の遷移時間（秒・0 以上）。境界での上限 clamp は transitionTimeline が場面尺を見て行う。 */
   durationSec: number;
 }
 
 /**
- * 場面の「入り」トランジション（transition.in）を MVP の実効値へ解決する。
- * wipe/zoom は未対応のため fade に、direction 未指定は left に、durationSec は 0 以上に丸める。
+ * 場面の「入り」トランジション（transition.in）を実効値へ解決する。
+ * direction 未指定は left に、durationSec は 0 以上に丸める（未知の種別は fade）。
  */
 export function resolveTransition(transition: Transition | undefined): ResolvedTransition {
   const raw = transition?.in ?? TRANSITION_TYPE.none;
@@ -49,12 +54,75 @@ export function resolveTransition(transition: Transition | undefined): ResolvedT
 }
 
 /**
- * SceneEdit の「画面の切り替え」select 値（`none`/`fade`/`slide:<direction>`）を transition から導く。
- * resolveTransition と同じ実効値に寄せる＝wipe/zoom は fade として表示し、書き出しの実効値と UI を一致させる。
+ * SceneEdit の「画面の切り替え」の値（`none`/`fade`/`zoom`/`slide:<direction>`/`wipe:<direction>`）を transition から導く。
+ * resolveTransition と同じ実効値に寄せる＝書き出しの実効値と UI を一致させる。
  */
 export function deriveTransitionSelectValue(transition: Transition | undefined): string {
   const r = resolveTransition(transition);
-  return r.type === TRANSITION_TYPE.slide ? `slide:${r.direction}` : r.type;
+  return hasDirection(r.type) ? `${r.type}:${r.direction}` : r.type;
+}
+
+/** 向きを持つ種別か（スライドとワイプ＝ADR-0066）。 */
+export function hasDirection(type: TransitionType): boolean {
+  return type === TRANSITION_TYPE.slide || type === TRANSITION_TYPE.wipe;
+}
+
+/**
+ * 選び方の値（`deriveTransitionSelectValue` の綴り）を transition の差分へ戻す（向きを持たない種別は向きを外す）。
+ * ⚠️ **綴りの読み書きを1か所に**＝画面が `slide:` だけを特別扱いしていたので、ワイプを足すと読めなかった。
+ */
+export function transitionFromSelectValue(value: string): { in: TransitionType; out: TransitionType; direction?: TransitionDirection } {
+  const [head, dir] = value.split(':') as [TransitionType, TransitionDirection | undefined];
+  if (hasDirection(head) && dir != null) return { in: head, out: head, direction: dir };
+  return { in: head, out: head };
+}
+
+/**
+ * **ワイプで次の場面が見えている範囲**（ADR-0066 決定1）＝次の場面を隠す各辺の割合（0〜1）。`q` は切り替えの進み（0→1）。
+ *
+ * ⚠️ **式は FFmpeg の `xfade=wipe*` の実測どおり**（2026-10-20）＝境目は一定の速さで動く。
+ * 左＝次の場面が右から（`x > W·(1−q)`）／右＝左から（`x < W·q`）／上＝下から（`y > H·(1−q)`）／下＝上から（`y < H·q`）。
+ */
+export function wipeHiddenEdges(
+  direction: TransitionDirection,
+  q: number,
+): { top: number; right: number; bottom: number; left: number } {
+  const p = Math.min(1, Math.max(0, q));
+  const none = { top: 0, right: 0, bottom: 0, left: 0 };
+  switch (direction) {
+    case TRANSITION_DIRECTION.left:
+      return { ...none, left: 1 - p };
+    case TRANSITION_DIRECTION.right:
+      return { ...none, right: 1 - p };
+    case TRANSITION_DIRECTION.up:
+      return { ...none, top: 1 - p };
+    case TRANSITION_DIRECTION.down:
+      return { ...none, bottom: 1 - p };
+    default: {
+      const _exhaustive: never = direction;
+      return _exhaustive;
+    }
+  }
+}
+
+/** `xfade` と同じ smoothstep（`t²(3−2t)`・t は 0〜1 に収めた `(x−e0)/(e1−e0)`）。 */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * **ズームの途中の見え方**（ADR-0066 決定2）。`q` は切り替えの進み（0→1）。
+ * - `zoom`＝前の場面を中心まわりに映す倍率（1 以上。寄り切ったときは `Infinity`＝中心の1画素の色）
+ * - `outgoingWeight`＝前の場面の重み（`a·拡大した前 + (1−a)·次`）
+ *
+ * ⚠️ **式は FFmpeg の `xfade=zoomin` と画素で一致**（実測で誤差 0・2026-10-20）＝進み P＝1−q に対し
+ * `zf = smoothstep(0.5, 1, P)`（倍率は 1/zf）・`a = smoothstep(0, 0.5, P)`。前半で寄り切り、後半で次へ溶ける。
+ */
+export function zoomInState(q: number): { zoom: number; outgoingWeight: number } {
+  const P = 1 - Math.min(1, Math.max(0, q));
+  const zf = smoothstep(0.5, 1, P);
+  return { zoom: zf > 0 ? 1 / zf : Number.POSITIVE_INFINITY, outgoingWeight: smoothstep(0, 0.5, P) };
 }
 
 export interface BoundaryTransition {
@@ -86,7 +154,7 @@ export function transitionBoundaryDs(scenes: readonly { transition?: Transition 
  * clamp は書き出し（buildExportScenes）と同一：対象境界までの全場面尺 sceneDurations と境界希望 boundaryDs
  * （none/先頭=0）から transitionTimeline を回し steps[targetIndex-1] を採る。左 clamp を累積結合尺 acc で行うため、
  * **直前場面が実効 D より短い（prev<D）場面でもプレビュー=書き出しが一致**する（2場面近似 min(D,prev,cur) だと
- * prev で過小になっていた＝#408 レビュー P1）。type/direction は resolveTransition と同一（wipe/zoom→fade）
+ * prev で過小になっていた＝#408 レビュー P1）。type/direction は resolveTransition と同一
  * ＝プレビュー=書き出し（ADR-0001/0026）。
  */
 export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number): BoundaryTransition {

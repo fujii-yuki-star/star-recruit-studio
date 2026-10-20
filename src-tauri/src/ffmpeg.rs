@@ -2249,7 +2249,19 @@ fn scene_ranges(joins: &[JoinInfo]) -> Vec<(usize, usize)> {
 }
 
 /// FFmpeg xfade が受け付ける transition 名の許可リスト（MVP）。これ以外/"none" はハードカット扱い。
-const XFADE_NAMES: [&str; 5] = ["fade", "slideleft", "slideright", "slideup", "slidedown"];
+// ワイプ・ズーム（ADR-0066）＝`xfade` の既成の名前。見え方は実測して `transitionLayerStyles`（プレビュー）と揃えてある。
+const XFADE_NAMES: [&str; 10] = [
+    "fade",
+    "slideleft",
+    "slideright",
+    "slideup",
+    "slidedown",
+    "wipeleft",
+    "wiperight",
+    "wipeup",
+    "wipedown",
+    "zoomin",
+];
 fn validate_xfade_name(name: &str) -> Option<String> {
     XFADE_NAMES.contains(&name).then(|| name.to_string())
 }
@@ -5192,7 +5204,13 @@ mod tests {
         );
         assert_eq!(validate_xfade_name("none"), None);
         assert_eq!(validate_xfade_name(""), None);
-        assert_eq!(validate_xfade_name("wipe"), None); // MVP 外
+        // 向きの無い名前は FFmpeg に無い。
+        assert_eq!(validate_xfade_name("wipe"), None);
+        // ワイプ・ズーム（ADR-0066）。
+        assert_eq!(validate_xfade_name("wipeleft").as_deref(), Some("wipeleft"));
+        assert_eq!(validate_xfade_name("wipedown").as_deref(), Some("wipedown"));
+        assert_eq!(validate_xfade_name("zoomin").as_deref(), Some("zoomin"));
+        assert_eq!(validate_xfade_name("zoomout"), None);
     }
 
     #[test]

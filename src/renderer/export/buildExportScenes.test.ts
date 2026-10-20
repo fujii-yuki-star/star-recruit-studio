@@ -1205,13 +1205,21 @@ describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', 
     expect(out[1].transition).toBeUndefined();
   });
 
-  it('wipe/zoom は fade として書き出す（resolveTransition と一致）', async () => {
+  // ADR-0066＝ワイプ・ズームは FFmpeg の既成名で書き出す（以前は fade へ丸めていた）。⚠️ 4つの向きとも見る。
+  it.each([
+    [{ in: 'wipe' }, 'wipeleft'],
+    [{ in: 'wipe', direction: 'right' }, 'wiperight'],
+    [{ in: 'wipe', direction: 'up' }, 'wipeup'],
+    [{ in: 'wipe', direction: 'down' }, 'wipedown'],
+    [{ in: 'zoom', direction: 'up' }, 'zoomin'],
+    [{ in: 'slide', direction: 'down' }, 'slidedown'],
+  ])('%o は %s で書き出す', async (tr, name) => {
     const scenes = [
       { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
-      { sceneId: 's2', templateId: 'tpl', durationSec: 6, transition: { in: 'wipe', durationSec: 0.5 } },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 6, transition: { ...tr, durationSec: 0.5 } },
     ] as unknown as Scene[];
     const out = await buildExportScenes(scenes, templateById, noAsset);
-    expect(out[1].transition?.name).toBe('fade');
+    expect(out[1].transition?.name).toBe(name);
   });
 
   it('掛け合いの短い「間」＋入場遷移：遷移尺は間で縮めず場面尺で clamp（#430・per-scene＝切り替え尺優先）', async () => {

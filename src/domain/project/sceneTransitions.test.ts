@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, shortenedTransitionSceneNumbers, transitionTimeline, swallowedByTransitionSceneNumbers } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, shortenedTransitionSceneNumbers, transitionFromSelectValue, transitionTimeline, swallowedByTransitionSceneNumbers, wipeHiddenEdges, zoomInState } from './sceneTransitions';
 import { FPS } from '../constants';
 import type { Scene, Transition } from './types';
 
@@ -27,9 +27,10 @@ describe('resolveTransition', () => {
     expect(resolveTransition({ in: 'slide' }).direction).toBe('left');
   });
 
-  it('wipe/zoom は MVP 未対応のため fade にフォールバック', () => {
-    expect(resolveTransition({ in: 'wipe' }).type).toBe('fade');
-    expect(resolveTransition({ in: 'zoom' }).type).toBe('fade');
+  // ADR-0066＝ワイプ・ズームも描く（以前は fade へ丸めていた＝設定した意味どおりに出なかった）。
+  it('wipe/zoom はそのまま（ワイプは向きも持つ）', () => {
+    expect(resolveTransition({ in: 'wipe', direction: 'down' })).toMatchObject({ type: 'wipe', direction: 'down' });
+    expect(resolveTransition({ in: 'zoom' }).type).toBe('zoom');
   });
 
   it('durationSec は 0 以上に丸める', () => {
@@ -47,9 +48,20 @@ describe('deriveTransitionSelectValue（UI select 値・resolveTransition と一
     expect(deriveTransitionSelectValue({ in: 'slide' })).toBe('slide:left'); // 既定方向
   });
 
-  it('wipe/zoom は fade として表示（書き出し実効値と一致＝UI と乖離させない）', () => {
-    expect(deriveTransitionSelectValue({ in: 'wipe' })).toBe('fade');
-    expect(deriveTransitionSelectValue({ in: 'zoom' })).toBe('fade');
+  it('wipe は向きつき・zoom は向きなし（ADR-0066）', () => {
+    expect(deriveTransitionSelectValue({ in: 'wipe', direction: 'up' })).toBe('wipe:up');
+    expect(deriveTransitionSelectValue({ in: 'wipe' })).toBe('wipe:left'); // 既定方向
+    expect(deriveTransitionSelectValue({ in: 'zoom', direction: 'up' })).toBe('zoom');
+  });
+
+  // ⚠️ **読み書きが往復する**＝綴りを読む側と書く側が割れると、選んだ印が付かない（画面の検査でも見ている）。
+  it.each(['none', 'fade', 'zoom', 'slide:left', 'slide:down', 'wipe:right', 'wipe:up'])('往復する（%s）', (v) => {
+    expect(deriveTransitionSelectValue(transitionFromSelectValue(v))).toBe(v);
+  });
+
+  it('向きを持たない種別は向きを外す', () => {
+    expect(transitionFromSelectValue('zoom')).toEqual({ in: 'zoom', out: 'zoom' });
+    expect(transitionFromSelectValue('fade')).toEqual({ in: 'fade', out: 'fade' });
   });
 });
 
@@ -140,8 +152,9 @@ describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界�
     expect(d).toBeCloseTo(3 - EPS, 6);
   });
 
-  it('wipe/zoom は fade に丸める（resolveTransition と一致）', () => {
-    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'zoom', durationSec: 0.5 })], 1).type).toBe('fade');
+  it('wipe/zoom もそのまま（resolveTransition と一致）', () => {
+    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'zoom', durationSec: 0.5 })], 1).type).toBe('zoom');
+    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'wipe', direction: 'right', durationSec: 0.5 })], 1)).toMatchObject({ type: 'wipe', direction: 'right' });
   });
 
   // #408 Part 2 レビュー P1：プレビューの実効 D は、書き出し（buildExportScenes）と同じ全場面 transitionTimeline を
@@ -366,5 +379,48 @@ describe('切り替えは場面の長さに収まる（#727）', () => {
 
   it('切り替えが無ければ何も言わない', () => {
     expect(shortenedTransitionSceneNumbers([sc(0.3), sc(0.3), sc(0.3)])).toEqual([]);
+  });
+});
+
+// ⚠️ **期待値は FFmpeg の実測**（ADR-0066・2026-10-20・320×180・1秒の切り替え）＝式を写した検査ではなく、
+// 書き出しが実際に出した絵の境目から取った値。q=0.5 の列：wipeleft は 161〜319 が次の場面（W·(1−q)=160 より右）。
+describe('wipeHiddenEdges（ワイプで次の場面を隠す辺）', () => {
+  it('左＝次の場面は右から入る（左側を隠す）', () => {
+    expect(wipeHiddenEdges('left', 0.25)).toEqual({ top: 0, right: 0, bottom: 0, left: 0.75 });
+  });
+  it('右＝左から入る', () => {
+    expect(wipeHiddenEdges('right', 0.25)).toEqual({ top: 0, right: 0.75, bottom: 0, left: 0 });
+  });
+  it('上＝下から入る', () => {
+    expect(wipeHiddenEdges('up', 0.25)).toEqual({ top: 0.75, right: 0, bottom: 0, left: 0 });
+  });
+  it('下＝上から入る', () => {
+    expect(wipeHiddenEdges('down', 0.25)).toEqual({ top: 0, right: 0, bottom: 0.75, left: 0 });
+  });
+  it('進みは 0〜1 に収める（はみ出した値で裏返らない）', () => {
+    expect(wipeHiddenEdges('left', -1).left).toBe(1);
+    expect(wipeHiddenEdges('left', 2).left).toBe(0);
+  });
+});
+
+// ⚠️ 実測で `xfade=zoomin` の画素とこの式の画素が一致（誤差 0）。値は手で解いたもの：
+// q=0.25 → P=0.75 → t=(0.75−0.5)/0.5=0.5 → zf=0.25·(3−1)=0.5（2倍）・a=smoothstep(0,0.5,0.75)=1。
+// q=0.75 → P=0.25 → zf=0（寄り切り）・t=0.5 → a=0.5。
+describe('zoomInState（ズームの途中）', () => {
+  it('前半は寄るだけ（混ぜない）', () => {
+    expect(zoomInState(0.25)).toEqual({ zoom: 2, outgoingWeight: 1 });
+  });
+  it('後半は寄り切って次へ溶ける', () => {
+    const z = zoomInState(0.75);
+    expect(z.zoom).toBe(Number.POSITIVE_INFINITY);
+    expect(z.outgoingWeight).toBeCloseTo(0.5, 9);
+  });
+  it('始まりは前の場面そのまま・終わりは次の場面だけ', () => {
+    expect(zoomInState(0)).toEqual({ zoom: 1, outgoingWeight: 1 });
+    expect(zoomInState(1).outgoingWeight).toBe(0);
+  });
+  it('曲がり方は smoothstep（直線ではない）', () => {
+    // q=0.1 → P=0.9 → t=0.8 → zf=0.64·1.4=0.896
+    expect(zoomInState(0.1).zoom).toBeCloseTo(1 / 0.896, 9);
   });
 });

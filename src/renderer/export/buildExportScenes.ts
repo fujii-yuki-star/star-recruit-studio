@@ -1,6 +1,6 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
+import { TRANSITION_TYPE, type Fit } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -24,15 +24,26 @@ import type { VideoSlotInfo } from './findVideoSlot';
 import { afterAnimNeverPlaysForSlots } from './videoSlotPlacement';
 
 /** ResolvedTransition を FFmpeg xfade の transition 名へ（none はハードカット＝"none"）。 */
-function xfadeName(r: ResolvedTransition): string {
-  if (r.type === TRANSITION_TYPE.fade) return 'fade';
-  if (r.type === TRANSITION_TYPE.slide) {
-    if (r.direction === TRANSITION_DIRECTION.right) return 'slideright';
-    if (r.direction === TRANSITION_DIRECTION.up) return 'slideup';
-    if (r.direction === TRANSITION_DIRECTION.down) return 'slidedown';
-    return 'slideleft';
+export function xfadeName(r: ResolvedTransition): string {
+  switch (r.type) {
+    case TRANSITION_TYPE.none:
+      return 'none';
+    case TRANSITION_TYPE.fade:
+      return 'fade';
+    // ⚠️ **向きの綴りは FFmpeg の既成名**（`slideleft` 等）＝ワイプも同じ向きの言葉（ADR-0066 決定1＝実測で
+    //   「左へ」は次の場面が右から入る＝スライドと同じ向き）。
+    case TRANSITION_TYPE.slide:
+    case TRANSITION_TYPE.wipe:
+      return `${r.type}${r.direction}`;
+    // ズーム＝`zoomin`（ADR-0066 決定2＝前の場面へ寄ってから次へ溶ける）。
+    case TRANSITION_TYPE.zoom:
+      return 'zoomin';
+    default: {
+      // 種別が増えたらここで落ちる（黙って 'none'＝ハードカットにしない）。
+      const _exhaustive: never = r.type;
+      return _exhaustive;
+    }
   }
-  return 'none';
 }
 
 /** 動画ありシーンの書き出し入力（infrastructure の ExportVideoInput と構造一致）。 */

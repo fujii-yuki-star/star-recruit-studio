@@ -11,7 +11,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
 import { editableTextKeys, usedTextKeys, withTextFontId } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
@@ -34,7 +34,7 @@ import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
-import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
+import { deriveTransitionSelectValue, transitionFromSelectValue } from "../../domain/project/sceneTransitions";
 import { freeContentHiddenBySwitch, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
@@ -1757,16 +1757,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
   // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
   const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
-  // select 値の導出は domain に集約（wipe/zoom→fade を resolveTransition と一致させる・観点4対応）。
+  // 値の読み書きは domain に集約（`deriveTransitionSelectValue`／`transitionFromSelectValue`＝綴りを1か所に）。
   const transitionValue = deriveTransitionSelectValue(selected.transition);
   const onTransitionChange = (val: string) =>
     patch((s) => {
-      if (val.startsWith("slide:")) {
-        const direction = val.slice("slide:".length) as TransitionDirection;
-        return { ...s, transition: { ...s.transition, in: TRANSITION_TYPE.slide, out: TRANSITION_TYPE.slide, direction } };
-      }
-      const type = val as TransitionType; // none | fade
-      return { ...s, transition: { ...s.transition, in: type, out: type, direction: undefined } };
+      const next = transitionFromSelectValue(val);
+      // 向きを持たない種別は向きを外す（以前と同じ＝残すと次に向きのある種別を選んだとき古い向きが出る）。
+      return { ...s, transition: { ...s.transition, in: next.in, out: next.out, direction: next.direction } };
     });
   // 掛け合い（複数のセリフ）モードか。明示 lines があるとき＝ON（ADR-0015・#180）。
   const isDialogue = (selected.lines?.length ?? 0) > 0;
