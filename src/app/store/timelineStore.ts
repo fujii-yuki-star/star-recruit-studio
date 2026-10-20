@@ -2586,6 +2586,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, {});
     if (get().doc !== r.doc) return;
     set({ editNotice: voicesFromSubtitlesMessage(r.voiceIds.length, r.skipped, busy) });
+    // ⚠️ `generateAllVoices` も走っている最中は自分から降りる（冒頭の門）＝ここで外しても結果は同じ（変異チェックで等価）。
+    //   知らせの出し分けに `busy` が要るので、同じ条件で呼ぶ・呼ばないも書いておく。
     if (!busy) void get().generateAllVoices({ ids: r.voiceIds, makeRoom: true });
   },
 
