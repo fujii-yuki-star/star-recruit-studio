@@ -1037,6 +1037,26 @@ export function setTrackFlag(doc: TimelineProject, trackId: string, flag: 'hidde
 }
 
 /**
+ * **列の音量**（ADR-0067）。`null`＝標準（100%）へ戻す（キーを消す）。値域は部品の音量と同じ（`clampVolume`）。
+ * ⚠️ **音の列だけ**（映像の列には効かない＝持たせない）。⚠️ 何も変わらなければ同じ文書を返す（取り消しを空振りさせない）。
+ */
+export function setTrackVolume(doc: TimelineProject, trackId: string, volume: number | null): TimelineProject {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track || track.kind !== TRACK_KIND.audio) return doc;
+  const next = volume == null || !Number.isFinite(volume) ? undefined : clampVolume(volume);
+  const normalized = next === 1 ? undefined : next;
+  if (track.volume === normalized) return doc;
+  return {
+    ...doc,
+    tracks: doc.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const { volume: _old, ...rest } = t;
+      return normalized == null ? rest : { ...rest, volume: normalized };
+    }),
+  };
+}
+
+/**
  * クリップを複製して、**同じ列の空いている直後**へ置く（空いていなければ置けない＝理由を返す）。
  * 「置く」の最短経路（まず複製して動かす）として用意する。
  */

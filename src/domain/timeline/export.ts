@@ -8,7 +8,8 @@
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { isGoneGeneratedVoice } from '../voice/goneVoices';
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
+import { clampVolume } from '../voice/audioMix';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
 import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND, LAYER_TYPE } from '../enums';
@@ -211,13 +212,18 @@ export function timelineAudioRuns(
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!sourceKey || !cue) continue;
-    const volume = clipBaseVolume(clip, doc);
+    // **列の音量**（ADR-0067）＝再生（`audioCuesAt`）と同じ倍率を、一定の音量と音量の変化の点の両方に掛ける。
+    const gain = trackGainOf(doc.tracks.find((t) => t.id === clip.trackId));
+    // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝点の側は `volumeExpr` が点ごとに収める・再生も同じ上限。
+    //   収めないと「部品 120% × 列 150%」で再生 150%・書き出し 180% に割れていた。
+    const volume = clampVolume(clipBaseVolume(clip, doc) * gain);
     // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
     // ⚠️ **倍率の有無で分岐しない**＝`volumeExpr` は中で `normalizedVolumePoints` を通す（べき等）ので、
     // 倍率が空のときの `points` は「正規化した保存の点」＝生の点を渡したときと**同じ式**になる。
     // 分けて書くと「なぜ違うのか」を毎回確かめることになる（式は1本にしておく）。
-    const expr = volumeExpr(clipVolumePointsForExport(doc, clip, auto, duckSpans).points);
+    const pts = clipVolumePointsForExport(doc, clip, auto, duckSpans).points;
+    const expr = volumeExpr(gain === 1 ? pts : pts.map((p) => ({ ...p, volume: p.volume * gain })));
     runs.push({
       clipId: clip.id,
       sourceKey,

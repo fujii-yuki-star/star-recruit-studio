@@ -8,7 +8,7 @@ import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { clampVolume } from '../voice/audioMix';
 import { clipTimeAtSceneTime } from '../project/videoStartTiming';
 import { clipEndSec } from './validateTimelineDoc';
-import type { TimelineClip, TimelineProject, VolumePoint } from './types';
+import type { TimelineClip, TimelineProject, Track, VolumePoint } from './types';
 
 /**
  * クリップの**フェードを掛ける前**の実効音量（`11 §6` の null=継承と同じ流儀）。
@@ -25,6 +25,37 @@ export function clipBaseVolume(clip: TimelineClip, doc: Pick<TimelineProject, 'v
     return clampVolume(clip.volume ?? doc.voiceSettings.volume ?? NARRATION_VOLUME);
   }
   return clampVolume(clip.volume ?? BGM_VOLUME);
+}
+
+/**
+ * **列の音量**（ADR-0067）＝音の列の部品の実効音量に掛ける倍率。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）が
+ * 同じこの関数を通る。⚠️ **音の列だけ**＝映像の列（動画の元の音）には効かせない。
+ */
+export function trackGainOf(track: Pick<Track, 'kind' | 'volume'> | undefined): number {
+  if (!track || track.kind !== TRACK_KIND.audio || track.volume == null) return 1;
+  return clampVolume(track.volume);
+}
+
+/**
+ * **いま効いているソロ**（ADR-0067 決定2）＝ソロにした列のうち、**いまもある音の列**だけ。1つも無ければ `null`（ソロ無し＝全部鳴る）。
+ * ⚠️ **消した列の id を残したまま見ない**＝ソロにした列を消すと、残った id のせいで**全部が鳴らなくなる**。
+ * 鳴らす側（再生の音・動画の元の音）が同じこの関数を通す。
+ */
+export function activeSoloTrackIds(doc: Pick<TimelineProject, 'tracks'>, soloTrackIds: readonly string[]): ReadonlySet<string> | null {
+  if (soloTrackIds.length === 0) return null;
+  const live = new Set(doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && soloTrackIds.includes(t.id)).map((t) => t.id));
+  return live.size > 0 ? live : null;
+}
+
+/**
+ * ソロを当てた後に鳴らす音（ADR-0067 決定2）＝ソロが効いていれば、ソロの列の音だけ残す。効いていなければそのまま。
+ * ⚠️ **再生の中だけ**＝書き出し（`timelineAudioRuns`）は通さない（ソロは文書に持たない・書き出しに効かない）。
+ */
+export function soloFilteredCues(doc: TimelineProject, cues: readonly AudioCue[], soloTrackIds: readonly string[]): AudioCue[] {
+  const solo = activeSoloTrackIds(doc, soloTrackIds);
+  if (!solo) return [...cues];
+  const trackOf = new Map(doc.clips.map((c) => [c.id, c.trackId]));
+  return cues.filter((q) => solo.has(trackOf.get(q.clipId) ?? ''));
 }
 
 /** その瞬間に鳴らすべき音1つ分。`offsetSec` は**音源の先頭からの秒**（途中から鳴らすときの頭出し）。 */
@@ -158,6 +189,7 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
   const audible = new Set(
     doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.hidden).map((t) => t.id),
   );
+  const trackGain = new Map(doc.tracks.map((t) => [t.id, trackGainOf(t)]));
   const cues: AudioCue[] = [];
   for (const clip of doc.clips) {
     if (!isAudioClip(clip) || clip.hidden || !audible.has(clip.trackId)) continue;
@@ -168,7 +200,9 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
       clipId: clip.id,
       // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
       offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
-      volume: clipGainAt(clip, doc, localSec),
+      // ⚠️ **列の音量は鳴らす値にだけ掛ける**（ADR-0067）＝部品の音量の線（`clipGainAt`）は部品の設定のまま。
+      // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝書き出し（`timelineAudioRuns`）と同じ順＝上限を掛ける道で割らない。
+      volume: clampVolume(clipGainAt(clip, doc, localSec) * (trackGain.get(clip.trackId) ?? 1)),
       speed,
     });
   }

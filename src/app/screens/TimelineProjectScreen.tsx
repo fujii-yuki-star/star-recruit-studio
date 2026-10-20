@@ -19,7 +19,7 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -28,7 +28,7 @@ import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
 import { detectAssetType } from "../../domain/asset/assetFile";
 import type { AssetType } from "../../domain/enums";
 import { dimsForOrientation, exportDimsForOrientation, isExportSize, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
-import { audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { activeSoloTrackIds, audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
@@ -54,6 +54,7 @@ import { showOpenAudioDialog, showOpenAssetsDialog } from "../../infrastructure/
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { useTimelineBulkVoice } from "../hooks/useBulkVoiceSource";
 import { overlayWarpTransform } from "../canvasWarp";
+import { trackVolumeFromPercentText } from "../trackVolumeInput";
 import { clipIsLiveAt, layoutTimelineAt, overlappingSubtitleClips, templatePartAt, templatePartRect, drawnWarpScaleOf } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { exportFailedMessage, missingTemplateMessage, resolveExportBlockedMessage, PICKER_NOTE, PICKER_MISSING_LABEL, BACK_TO_HOME_LABEL, RELINK_ASSET_LABEL } from "../uiLabels";
@@ -525,7 +526,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     clipClipboard, copySelectedClips, pasteClipsAtPlayhead,
     doc, loadError, isLoading, playheadSec, rangeInSec, rangeOutSec, selectedMarkerId, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun, missingAssetIds,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, trimSelectedClipsAt, moveClipById, moveClipsBy, copyClipsTo, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, freezeSelectedClip, silenceFind, findSilencesFor, applySilenceCandidates, closeSilenceFind, transcript, transcriptPercent, transcribeBusy, transcribeClip, closeTranscript, placeTranscriptSubtitles, cutTranscriptLines, setSelectedColorAdjust, setSelectedBlendMode, setSelectedClipFlip, setSelectedClipPivot, setRangeEdge, clearRange, deleteRangeInTimeline, addMarkerAtPlayhead, setMarkerTextFor, moveMarkerToPlayhead, removeMarkerById, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
-    addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
+    addTrack, duplicateTrack, renameTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, setTrackVolume, soloTrackIds, toggleTrackSolo, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, loopPlayback, setLoopPlayback, exportTimelineVideo, exportSize, setExportSize, cancelTimelineExport, dismissTimelineExport, updateVideoSettings,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText, setSelectedClipTalkMotion,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
@@ -1275,6 +1276,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const [laneHeight, setLaneHeight] = useState(loadLaneHeight);
   /** いま名前を書き換えている列（`null`＝書き換えていない）。 */
   const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null);
+  /** 列の音量をその場で直している列（ADR-0067）。名前と同じく列の頭で直す（別の画面を開かない）。 */
+  const [volumeTrackId, setVolumeTrackId] = useState<string | null>(null);
   /**
    * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
    *
@@ -4019,6 +4022,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           ...trackMenuGuard,
           onSelect: () => setTrackFlag(menuTrack.id, "hidden", !menuTrack.hidden),
         },
+        // **列の音量とソロ**（ADR-0067）＝音の列だけ（映像の列にはミキサーが無い）。
+        // ⚠️ ソロは文書を変えないので書き出し中も押せる（`trackMenuGuard` を当てない）。
+        ...(menuTrack.kind === TRACK_KIND.audio
+          ? [
+              { label: TRACK_VOLUME_MENU_LABEL, ...trackMenuGuard, onSelect: () => setVolumeTrackId(menuTrack.id) },
+              {
+                label: soloTrackIds.includes(menuTrack.id) ? "ソロを外す" : "ソロにする",
+                onSelect: () => toggleTrackSolo(menuTrack.id),
+              },
+            ]
+          : []),
         {
           // ⚠️ **主語も説明も落とす**（#1106・利用者決定 2026-09-10）＝このメニューは
           // 「手前へ」「奥へ」「動画に出す」のように**主語なしが多数派**だったので、そちらへそろえる。
@@ -4123,7 +4137,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             fit: item.fit, align: item.align,
             // 元の音（#512 段2・段3b）。鳴るかどうか・音量は domain の1か所が決める（書き出しと同じ値）。
             // 直接置きも差し込み口も**同じ関数**を通る＝置き場所で挙動を割らない。
-            audioVolume: doc ? (placementOriginalAudio(doc, placement)?.volume ?? undefined) : undefined,
+            // ⚠️ **ソロが効いている間は鳴らさない**（ADR-0067 決定2）＝ソロは音の列だけ。動画の元の音は映像の列にあるので、
+            //   声の列だけ聞いて確かめたいときに混ざらないようにする（書き出しには効かない）。
+            audioVolume: doc && !activeSoloTrackIds(doc, soloTrackIds) ? (placementOriginalAudio(doc, placement)?.volume ?? undefined) : undefined,
             // ⚠️ **使える長さを過ぎたら止める**（レビュー 🟡）＝素材の秒は頭打ちで一定になるが、
             // それだけでは `video` 要素が自分で先へ流れ続ける（絵も音も「ここまで」を越える）。
             // 書き出しは最後のコマで凍るので、ここでも止めて凍らせる（ADR-0001）。
@@ -5159,6 +5175,58 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                           ⚠️ **見えないときは押せない**（`pointer-events`）＝見えない当たり判定を作らない（ADR-0047 決定3）。
                           ⚠️ **動きはメニューと同じ入口**（`setTrackFlag`）＝取り消せる・書き出し中は押せない。 */}
                       <span className="timeline-row-toggles">
+                        {/* **列の音量**（ADR-0067）＝100% でないときは常に出す（いまの状態が分かる）。押すとその場で直す。 */}
+                        {track.kind === TRACK_KIND.audio && (volumeTrackId === track.id ? (
+                          <input
+                            className="timeline-row-volume-input"
+                            type="number"
+                            autoFocus
+                            min={Math.round(VOLUME_MIN * 100)}
+                            max={Math.round(VOLUME_MAX * 100)}
+                            step={5}
+                            defaultValue={Math.round((track.volume ?? 1) * 100)}
+                            aria-label={`${trackLabel(doc.tracks, track.id)}の音量（%）`}
+                            title="この列の音量（%）。空にすると 100% に戻ります"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={(e) => { setTrackVolume(track.id, trackVolumeFromPercentText(e.currentTarget.value)); setVolumeTrackId(null); }}
+                            onKeyDown={(e) => {
+                              // 名前の欄と同じ＝画面のキーへ流さない・`Enter` で決め・`Escape` でやめる。
+                              e.stopPropagation();
+                              const value = e.currentTarget.value;
+                              renameFieldKeys({
+                                commit: () => { setTrackVolume(track.id, trackVolumeFromPercentText(value)); setVolumeTrackId(null); },
+                                cancel: () => setVolumeTrackId(null),
+                              })(e);
+                            }}
+                          />
+                        ) : track.volume != null ? (
+                          <button
+                            type="button"
+                            className="timeline-row-toggle timeline-row-toggle--on timeline-row-volume"
+                            aria-label={`${trackLabel(doc.tracks, track.id)}の音量（${Math.round(track.volume * 100)}%）を直す`}
+                            title={exporting ? exportingHint : `この列の音量：${Math.round(track.volume * 100)}%（押すと直す）`}
+                            disabled={exporting}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => setVolumeTrackId(track.id)}
+                          >
+                            {Math.round(track.volume * 100)}%
+                          </button>
+                        ) : null)}
+                        {/* **ソロ**（ADR-0067）＝編集中の聞き方だけ（保存しない・書き出しに効かない）。業界の型の「S」。 */}
+                        {track.kind === TRACK_KIND.audio && (
+                          <button
+                            type="button"
+                            className={`timeline-row-toggle timeline-row-solo${soloTrackIds.includes(track.id) ? " timeline-row-toggle--on" : ""}`}
+                            aria-pressed={soloTrackIds.includes(track.id)}
+                            aria-label={soloTrackIds.includes(track.id) ? `${trackLabel(doc.tracks, track.id)}のソロを外す` : `${trackLabel(doc.tracks, track.id)}だけを聞く（ソロ）`}
+                            title={soloTrackIds.includes(track.id) ? "ソロ：この列だけ聞いています（押すと外す・動画には影響しません）" : "ソロ：この列だけ聞く（動画には影響しません）"}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => toggleTrackSolo(track.id)}
+                          >
+                            S
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={`timeline-row-toggle${track.hidden ? " timeline-row-toggle--on" : ""}`}

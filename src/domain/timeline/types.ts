@@ -31,6 +31,11 @@ export interface Track {
   hidden?: boolean;
   /** true でクリップの移動・トリムを禁止。 */
   locked?: boolean;
+  /**
+   * **列の音量**（ADR-0067）＝音の列の部品の実効音量に掛ける倍率（未指定＝1＝100%・値域は部品の音量と同じ）。
+   * 再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）が同じ `trackGainOf` を通す。映像の列には効かない。
+   */
+  volume?: number;
 }
 
 /**
@@ -274,4 +279,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.20';
+export const TIMELINE_SCHEMA_VERSION = '1.21';
