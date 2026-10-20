@@ -59,4 +59,18 @@ describe('タイムライン形式の一覧の絵', () => {
     await flush();
     expect(thumb).toHaveBeenCalledTimes(2);
   });
+
+  // ⚠️ **どの動画の印かまで見る**＝複製した直後は中身が同じ＝印だけで比べると、複製した側の絵が一度も作られない（場面形式の PR #889 と同じ）。
+  it('中身が同じ別の動画（複製した直後）でも、その動画の絵を作る', async () => {
+    const a = doc();
+    const b = { ...doc(), projectId: 'proj_20261021_002' };
+    const load = vi.spyOn(fsMod, 'loadProjectDoc');
+    load.mockResolvedValueOnce(JSON.stringify(a));
+    await useTimelineStore.getState().openTimelineProject(a.projectId);
+    await flush();
+    load.mockResolvedValueOnce(JSON.stringify(b));
+    await useTimelineStore.getState().openTimelineProject(b.projectId);
+    await flush();
+    expect(thumb.mock.calls.map((c) => c[0])).toEqual(['proj_20261021_001', 'proj_20261021_002']);
+  });
 });
