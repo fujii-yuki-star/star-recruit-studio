@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZOOM_LEVELS } from "../../domain/timeline/zoom";
 import { pointerDownAt } from "../../test/pointer";
-import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
+import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, SNAP_OFF_HINT, SNAP_ON_HINT, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { NOTICE_ZONE_CLASS } from "../components/NoticeZone";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
@@ -158,6 +158,22 @@ describe("TimelineProjectScreen", () => {
     const before = sw.getAttribute("aria-checked");
     fireEvent.click(container.querySelector('label[for="timeline-snap-switch"]') as HTMLElement);
     expect(sw.getAttribute("aria-checked")).not.toBe(before);
+  });
+
+  // ⚠️ **吸着の説明は画面に短く出し、札にも付ける**（#1481）＝札だけにすると読めない人がいる（`06 §2` 規約20）。
+  it("吸着の説明は画面に出し、見出しとスイッチの札にも同じ文を付ける（切り替えると変わる）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const sw = screen.getByRole("switch", { name: "吸着" });
+    const label = container.querySelector('label[for="timeline-snap-switch"]') as HTMLElement;
+    const toolbar = sw.closest(".timeline-toolbar") as HTMLElement;
+    const on = sw.getAttribute("aria-checked") === "true";
+    const hint = (now: boolean) => (now ? SNAP_ON_HINT : SNAP_OFF_HINT);
+    expect(sw.getAttribute("title")).toBe(hint(on));
+    expect(label.getAttribute("title")).toBe(hint(on));
+    expect(toolbar.textContent).toContain(hint(on));
+    fireEvent.click(sw);
+    expect(sw.getAttribute("title")).toBe(hint(!on));
   });
 
   it("再生位置の時刻を打つと、その位置へ移る（読めなければ動かない・範囲の外は端へ）", () => {
