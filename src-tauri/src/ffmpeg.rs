@@ -200,9 +200,13 @@ fn append_scene_av_tail(
     // 映像に噛ませる simple フィルタ（None=映像は 0:v 直結＝従来）。frames 経路が tpad(最終フレーム保持)を渡す（#376）。
     video_filter: Option<&str>,
 ) {
-    // 映像出力ラベルと（必要なら）映像フィルタ節。video_filter があれば [0:v]{vf}[v] を filter_complex に足し [v] を map。
-    let vmap = if video_filter.is_some() { "[v]" } else { "0:v" };
-    let vfg = video_filter.map(|vf| format!("[0:v]{vf}[v]"));
+    // 映像は**いつも**フィルタを通す＝最後に出力の色（ADR-0069）へ明示で変換する（静止1枚・コマ列とも）。
+    let vmap = "[v]";
+    let vf = match video_filter {
+        Some(f) => format!("{f},{COLOR_OUT_FILTER}"),
+        None => COLOR_OUT_FILTER.to_string(),
+    };
+    let vfg = Some(format!("[0:v]{vf}[v]"));
     match audio {
         Some(a) => {
             // ナレーション音量を適用し、尺に満たない分は無音で埋める（apad）。映像フィルタがあれば同じ filter_complex に連結。
@@ -247,6 +251,8 @@ fn append_scene_av_tail(
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
     args.extend(codec.quality_args(bitrate));
+    // 出力の色の印（ADR-0069）。⚠️ ビットレートの後ろ＝エンコーダの直後にビットレートを置く並びは変えない。
+    args.extend(color_out_args());
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -466,11 +472,13 @@ pub fn xfade_chain_args_trimmed(
         }
         a_prev = a_out;
     }
+    // 出力の色（ADR-0069）＝つないだ後で明示で変換する（場面ファイルは印つき＝印どおりに解いてから）。
+    filters.push(format!("[{v_prev}]{COLOR_OUT_FILTER}[vout]"));
     args.push("-filter_complex".into());
     args.push(filters.join(";"));
     args.extend([
         "-map".into(),
-        format!("[{v_prev}]"),
+        "[vout]".into(),
         "-map".into(),
         format!("[{a_prev}]"),
         "-r".into(),
@@ -482,6 +490,8 @@ pub fn xfade_chain_args_trimmed(
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
     args.extend(codec.quality_args(bitrate));
+    // 出力の色の印（ADR-0069）。⚠️ ビットレートの後ろ＝エンコーダの直後にビットレートを置く並びは変えない。
+    args.extend(color_out_args());
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -669,6 +679,128 @@ pub enum Fit {
     Stretch,
 }
 
+/// 書き出しの出力の色（ADR-0069）＝**BT.709・限定範囲**へ明示で変換する（暗黙の変換に任せない）。
+/// ⚠️ 映像の最後に必ず通す＝写真の区間と動画の区間で色の式が混ざらない（実測で 1本の中に BT.601 と BT.709 が混ざっていた）。
+pub const COLOR_OUT_FILTER: &str = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p";
+
+/// 出力の色の印（ADR-0069 決定2）。出力の項目に加え、**H.264 の中の印（VUI）も書く**
+/// （Windows のエンコーダ〔Media Foundation〕は出力の項目を指定しても VUI を書かない＝実測）。
+pub fn color_out_args() -> Vec<String> {
+    [
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-color_range",
+        "tv",
+        "-bsf:v",
+        "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// 元の動画の色（ADR-0069 決定3）。調べた文字列（`ffmpeg -i` の標準エラー）から決める。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceColor {
+    /// BT.709 の印がある＝印どおり（前処理なし）。
+    Bt709Tagged,
+    /// 印が無く、高さ 720 以上＝BT.709 とみなす（プレビューと同じ）。`full`＝範囲が pc（yuvj 等）。
+    Bt709Assumed { full: bool },
+    /// BT.601 系（印 smpte170m／bt470bg、または印が無く高さ 720 未満）＝原色ごと BT.709 へ直す。
+    /// `bt470bg`＝原色・式が PAL 系（印が bt470bg のときだけ）。
+    Bt601 { bt470bg: bool, full: bool },
+    /// それ以外の印（BT.2020・HDR 等）＝今までどおり（FFmpeg の既定）。
+    Other,
+}
+
+/// 映像の行の、画素の形（yuv… / nv… / p01…）の直後の括弧の中身（無ければ None）。
+fn pix_fmt_paren(line: &str) -> Option<&str> {
+    let mut from = 0;
+    while let Some(rel) = line[from..].find('(') {
+        let open = from + rel;
+        let start = line[..open].rfind([' ', ',']).map(|i| i + 1).unwrap_or(0);
+        let fmt = &line[start..open];
+        if fmt.starts_with("yuv") || fmt.starts_with("nv") || fmt.starts_with("p01") {
+            let close = line[open..].find(')')? + open;
+            return Some(&line[open + 1..close]);
+        }
+        from = open + 1;
+    }
+    None
+}
+
+/// `ffmpeg -i` の標準エラーの映像の行から色を決める（純粋）。
+/// 形の例：`yuv420p(tv, bt709, progressive)`／`yuv420p(tv, smpte170m/smpte170m/bt709)`／`yuv420p(progressive)`／`yuvj420p(pc)`。
+pub fn source_color_of(stderr: &str) -> SourceColor {
+    let Some(line) = stderr.lines().find(|l| l.contains("Video:")) else {
+        return SourceColor::Other;
+    };
+    let height = parse_resolution(stderr).1.unwrap_or(0);
+    // 画素の形の直後の括弧の中（例 "tv, bt709, progressive"）。括弧が無ければ印も範囲も無い。
+    // ⚠️ 行には符号の説明の括弧（"h264 (High) (avc1 / …)"）もあるので、画素の形の名前の直後の括弧だけを見る。
+    let inner = pix_fmt_paren(line).unwrap_or("");
+    let fmt_full = line.contains("yuvj");
+    let tokens: Vec<String> = inner
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let full = fmt_full || tokens.iter().any(|t| t == "pc");
+    // 色の印＝"bt709" か "space/primaries/trc" の形。範囲・走査の語は除く。
+    let space = tokens
+        .iter()
+        .find(|t| {
+            let head = t.split('/').next().unwrap_or("");
+            !matches!(
+                head,
+                "tv" | "pc" | "progressive" | "top first" | "bottom first" | "unknown"
+            ) && head.chars().any(|c| c.is_ascii_alphabetic())
+                && head.chars().any(|c| c.is_ascii_digit())
+        })
+        .map(|t| t.split('/').next().unwrap_or("").to_string());
+    match space.as_deref() {
+        Some("bt709") => SourceColor::Bt709Tagged,
+        Some("smpte170m") => SourceColor::Bt601 {
+            bt470bg: false,
+            full,
+        },
+        Some("bt470bg") => SourceColor::Bt601 {
+            bt470bg: true,
+            full,
+        },
+        Some(_) => SourceColor::Other,
+        None if height >= 720 => SourceColor::Bt709Assumed { full },
+        None if height > 0 => SourceColor::Bt601 {
+            bt470bg: false,
+            full,
+        },
+        None => SourceColor::Other,
+    }
+}
+
+/// 元の動画を RGB にする前に噛ませる色の前処理（純粋・末尾にカンマ付き／不要なら空）。
+/// ⚠️ BT.601 系は **`zscale` で原色ごと**直す（`colorspace` フィルタは実測でプレビューと最大 33 ずれ、`zscale` は最大 11）。
+pub fn color_in_filter(c: SourceColor) -> String {
+    match c {
+        SourceColor::Bt709Tagged | SourceColor::Other => String::new(),
+        SourceColor::Bt709Assumed { full } => format!(
+            "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range={},",
+            if full { "pc" } else { "tv" }
+        ),
+        SourceColor::Bt601 { bt470bg, full } => {
+            let p = if bt470bg { "470bg" } else { "170m" };
+            format!(
+                "zscale=matrixin={p}:primariesin={p}:transferin=601:rangein={}:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,",
+                if full { "full" } else { "limited" }
+            )
+        }
+    }
+}
+
 /// 動画クリップをスロット(w×h)へ収める scale/crop/pad フィルタ（純粋）。
 fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
     // ⚠️ **大きさを変える前と後の両方で RGBA に固定する**（2026-10-16・使い方の動画で踏んだ）＝
@@ -714,6 +846,8 @@ pub struct NarrationArg<'a> {
 /// 2本目以降を extra_videos で zIndex 昇順（先頭動画の上）に重ねる。各レイヤーは自分の slot/fit/クリップ設定を持つ。
 pub struct VideoLayerArg<'a> {
     pub clip: &'a str,
+    /// 色の前処理（`color_in_filter`・ADR-0069）。空＝前処理なし。
+    pub color_in: &'a str,
     pub slot_x: u32,
     pub slot_y: u32,
     pub slot_w: u32,
@@ -779,6 +913,8 @@ pub struct VideoSceneArgs<'a> {
     pub below_png: &'a str,
     /// 先頭（最下）動画クリップ。
     pub clip: &'a str,
+    /// 先頭動画の色の前処理（`color_in_filter`・ADR-0069）。空＝前処理なし。
+    pub color_in: &'a str,
     /// 2本目以降の動画レイヤー（zIndex 昇順・先頭動画の上に重ねる・#431）。空＝1動画（従来）。
     pub extra_videos: &'a [VideoLayerArg<'a>],
     /// 連続する動画レイヤーの間に挟む静止層（透過PNG・枚数＝動画本数−1・#431）。空＝1動画（従来・中間層なし）。
@@ -829,6 +965,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     // 先頭動画（従来フィールド）＋追加動画（extra_videos）を1列に束ね、zIndex 昇順（下→上）に扱う（#431）。
     struct VLayer {
         clip: String,
+        color_in: String,
         x: u32,
         y: u32,
         w: u32,
@@ -843,6 +980,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     let mut layers: Vec<VLayer> = Vec::with_capacity(1 + a.extra_videos.len());
     layers.push(VLayer {
         clip: a.clip.to_string(),
+        color_in: a.color_in.to_string(),
         x: a.slot_x,
         y: a.slot_y,
         w: a.slot_w,
@@ -857,6 +995,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     for e in a.extra_videos {
         layers.push(VLayer {
             clip: e.clip.to_string(),
+            color_in: e.color_in.to_string(),
             x: e.slot_x,
             y: e.slot_y,
             w: e.slot_w,
@@ -885,12 +1024,18 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         // ⚠️ **最初のコマの時刻を 0 にそろえる**（2026-10-15・チュートリアル映像で見つけた）＝`-ss` で途中から読むと、
         //   読み始めがコマの境目と合わないとき**最初のコマが 0 秒より後ろ**になる（15 コマ/秒の録画で最大 0.067 秒）。
         //   重ねる側（overlay）はその間「動画がまだ無い」として**下敷きだけ**を出す＝区間の頭で1〜2コマ白く抜けて**チカチカ**する。
+        // 色の前処理（ADR-0069）は RGB にする前＝`fit_filter` の頭の `format=rgba` より前に置く。
         let cv = if normal {
-            format!("setpts=PTS-STARTPTS,{}", fit_filter(l.fit, l.w, l.h))
+            format!(
+                "setpts=PTS-STARTPTS,{}{}",
+                l.color_in,
+                fit_filter(l.fit, l.w, l.h)
+            )
         } else {
             format!(
-                "setpts=(PTS-STARTPTS)/{},{}",
+                "setpts=(PTS-STARTPTS)/{},{}{}",
                 l.speed,
+                l.color_in,
                 fit_filter(l.fit, l.w, l.h)
             )
         };
@@ -932,7 +1077,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     let mut prev = below_label;
     for (i, (in_l, x, y, win, eof_rep)) in ops.iter().enumerate() {
         let out = if i + 1 == ops.len() {
-            "vout".to_string()
+            "vcomp".to_string()
         } else {
             format!("bg{}", i + 1)
         };
@@ -944,6 +1089,8 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         vparts.push(format!("[{prev}][{in_l}]overlay={x}:{y}{en}[{out}]"));
         prev = out;
     }
+    // 出力の色（ADR-0069）＝重ねた後で1回だけ BT.709 へ明示で変換する。
+    vparts.push(format!("[{prev}]{COLOR_OUT_FILTER}[vout]"));
     let video_filter = vparts.join(";");
     // 音声: narrations（0本以上・delay 配置）＋ 各動画レイヤーの元音声(use_orig)。すべて無ければ無音(anullsrc)。
     let nv = a.narration_volume;
@@ -1132,6 +1279,8 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与。
     args.extend(a.codec.quality_args(a.bitrate));
+    // 出力の色の印（ADR-0069）。⚠️ ビットレートの後ろ＝エンコーダの直後にビットレートを置く並びは変えない。
+    args.extend(color_out_args());
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -1632,6 +1781,13 @@ fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
 /// クリップに音声トラックがあるか（`ffmpeg -i` の stderr に "Audio:" が出るか）。
 fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
     Ok(ffmpeg_probe_stderr(ffmpeg, clip)?.contains("Audio:"))
+}
+
+/// 元の動画の色の前処理（ADR-0069）。調べられなければ前処理なし（今までどおり）＝書き出しは止めない。
+fn clip_color_in(ffmpeg: &Path, clip: &Path) -> String {
+    ffmpeg_probe_stderr(ffmpeg, clip)
+        .map(|s| color_in_filter(source_color_of(&s)))
+        .unwrap_or_default()
 }
 
 /// 技術詳細を**このパソコンの記録へ**残し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
@@ -2157,6 +2313,8 @@ struct VideoJob {
     below: PathBuf,
     aboves: Vec<TimedAbove>,
     clip: PathBuf,
+    /// 色の前処理（`color_in_filter`・ADR-0069）。
+    color_in: String,
     narrations: Vec<TimedNarration>,
     slot: (u32, u32, u32, u32),
     fit: Fit,
@@ -2182,6 +2340,8 @@ struct VideoJob {
 /// 追加動画レイヤー1本の解決済みジョブ（#431）。clip は絶対パス、slot/クリップ設定を持つ。
 struct VideoLayerJob {
     clip: PathBuf,
+    /// 色の前処理（`color_in_filter`・ADR-0069）。
+    color_in: String,
     slot: (u32, u32, u32, u32),
     fit: Fit,
     clip_start_sec: f64,
@@ -2654,6 +2814,7 @@ fn encode_jobs(
                     .zip(extra_clip_s.iter())
                     .map(|(e, clip)| VideoLayerArg {
                         clip,
+                        color_in: &e.color_in,
                         slot_x: e.slot.0,
                         slot_y: e.slot.1,
                         slot_w: e.slot.2,
@@ -2704,6 +2865,7 @@ fn encode_jobs(
                 video_scene_args(&VideoSceneArgs {
                     below_png: &below,
                     clip: &clip_path,
+                    color_in: &v.color_in,
                     extra_videos: &extra_videos,
                     mid_pngs: &mid_pngs,
                     aboves: &aboves,
@@ -4142,6 +4304,7 @@ fn export_video_impl(
                     ));
                 }
                 extra_videos.push(VideoLayerJob {
+                    color_in: clip_color_in(&ffmpeg, &lclip),
                     clip: lclip,
                     slot: (vl.slot_x, vl.slot_y, vl.slot_w, vl.slot_h),
                     fit: parse_fit(&vl.fit),
@@ -4195,6 +4358,7 @@ fn export_video_impl(
             jobs.push(SceneJob::Video(Box::new(VideoJob {
                 below,
                 aboves,
+                color_in: clip_color_in(&ffmpeg, &clip),
                 clip,
                 narrations,
                 extra_videos,
@@ -4902,6 +5066,7 @@ mod tests {
         assert_eq!(a[i + 2], "12000k");
         // video_scene_args も MF で -c:v h264_mf の直後に -b:v <bitrate>。
         let v = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -5185,9 +5350,9 @@ mod tests {
         assert!(o.iter().any(|s| s.contains("anullsrc")));
         assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a"));
         // 無音経路でも映像は tpad で最終フレームを尺まで保持し [v] を map（#376）。
-        assert!(o
-            .iter()
-            .any(|s| s.contains("[0:v]tpad=stop_mode=clone:stop_duration=4[v]")));
+        assert!(o.iter().any(|s| s.contains(&format!(
+            "[0:v]tpad=stop_mode=clone:stop_duration=4,{COLOR_OUT_FILTER}[v]"
+        ))));
         assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "[v]"));
     }
 
@@ -5345,6 +5510,230 @@ mod tests {
         assert_eq!(validate_xfade_name("zoomout"), None);
     }
 
+    // ── 書き出しの色（ADR-0069）──────────────────────────────────────────────
+    // 実物の `ffmpeg -i` の標準エラーの映像の行の形（同梱の FFmpeg 8 で取った）。
+    fn probe_line(fmt: &str, size: &str) -> String {
+        format!("  Duration: 00:00:03.00, start: 0.000000, bitrate: 81 kb/s\n  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), {fmt}, {size}, 79 kb/s, 30 fps, 30 tbr, 15360 tbn")
+    }
+
+    #[test]
+    fn source_color_follows_tag_or_guesses_by_height() {
+        // 印どおり（符号の説明の括弧 "(High) (avc1 …)" に引っかからない）。
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p(tv, bt709, progressive)", "1920x1080")),
+            SourceColor::Bt709Tagged
+        );
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuv420p(tv, bt709/bt709/bt709, progressive)",
+                "640x360"
+            )),
+            SourceColor::Bt709Tagged
+        );
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuv420p(tv, smpte170m/smpte170m/bt709, progressive)",
+                "1920x1080"
+            )),
+            SourceColor::Bt601 {
+                bt470bg: false,
+                full: false
+            }
+        );
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuvj420p(pc, bt470bg/bt470bg/smpte170m, progressive)",
+                "1280x720"
+            )),
+            SourceColor::Bt601 {
+                bt470bg: true,
+                full: true
+            }
+        );
+        // 印が無い＝高さで決める（720 以上は BT.709・未満は BT.601＝プレビューと同じ）。境目は 720 ちょうど。
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p(progressive)", "1280x720")),
+            SourceColor::Bt709Assumed { full: false }
+        );
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p(progressive)", "1280x719")),
+            SourceColor::Bt601 {
+                bt470bg: false,
+                full: false
+            }
+        );
+        assert_eq!(
+            source_color_of(&probe_line("yuv420p", "640x360")),
+            SourceColor::Bt601 {
+                bt470bg: false,
+                full: false
+            }
+        );
+        assert_eq!(
+            source_color_of(&probe_line("yuvj420p(pc, progressive)", "1920x1080")),
+            SourceColor::Bt709Assumed { full: true }
+        );
+        // それ以外の印（BT.2020 等）は触らない。映像が無ければ触らない。
+        assert_eq!(
+            source_color_of(&probe_line(
+                "yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67)",
+                "3840x2160"
+            )),
+            SourceColor::Other
+        );
+        assert_eq!(
+            source_color_of("  Stream #0:0: Audio: aac (LC), 44100 Hz, mono"),
+            SourceColor::Other
+        );
+    }
+
+    #[test]
+    fn color_in_filter_converts_601_with_primaries_and_tags_untagged_hd() {
+        assert_eq!(color_in_filter(SourceColor::Bt709Tagged), "");
+        assert_eq!(color_in_filter(SourceColor::Other), "");
+        assert_eq!(
+            color_in_filter(SourceColor::Bt709Assumed { full: false }),
+            "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,"
+        );
+        assert!(color_in_filter(SourceColor::Bt709Assumed { full: true }).contains("range=pc"));
+        // BT.601 系は zscale で原色ごと BT.709 へ（colorspace フィルタはプレビューと合わなかった）。
+        assert_eq!(
+            color_in_filter(SourceColor::Bt601 { bt470bg: false, full: false }),
+            "zscale=matrixin=170m:primariesin=170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,"
+        );
+        let pal = color_in_filter(SourceColor::Bt601 {
+            bt470bg: true,
+            full: true,
+        });
+        assert!(
+            pal.contains("matrixin=470bg:primariesin=470bg") && pal.contains("rangein=full"),
+            "{pal}"
+        );
+    }
+
+    /// エンコードする所は、どれも出力の色の印（VUI まで）を付ける。
+    fn has_color_out(a: &[String]) {
+        let out = color_out_args();
+        assert!(
+            a.windows(out.len()).any(|w| w == out.as_slice()),
+            "色の印が無い: {a:?}"
+        );
+        assert!(out
+            .iter()
+            .any(|s| s.starts_with("h264_metadata=") && s.contains("matrix_coefficients=1")));
+    }
+
+    #[test]
+    fn every_encode_site_converts_to_bt709_and_tags_it() {
+        // 静止1枚（フィルタを持たなかった経路）も、明示の変換を通す。
+        let still = scene_clip_args(
+            "f.png",
+            None,
+            1.0,
+            "o.mp4",
+            3.0,
+            30,
+            VideoCodec::MediaFoundation,
+            "12000k",
+        );
+        assert!(
+            still
+                .iter()
+                .any(|s| s == &format!("[0:v]{COLOR_OUT_FILTER}[v]")),
+            "{still:?}"
+        );
+        assert!(still.windows(2).any(|w| w[0] == "-map" && w[1] == "[v]"));
+        has_color_out(&still);
+        let frames = frames_scene_args(
+            "f/frame_%05d.png",
+            Some("n.wav"),
+            1.0,
+            "o.mp4",
+            3.0,
+            30,
+            VideoCodec::OpenH264,
+            "12000k",
+        );
+        has_color_out(&frames);
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 2.5,
+        }];
+        has_color_out(&xfade_chain_args(
+            &files,
+            &steps,
+            "o.mp4",
+            VideoCodec::MediaFoundation,
+            30,
+            "12000k",
+        ));
+        let v = video_scene_args(&VideoSceneArgs {
+            below_png: "below.png",
+            clip: "clip.mp4",
+            color_in: "zscale=matrixin=170m:primariesin=170m:transferin=601:rangein=limited:matrix=709:primaries=709:transfer=709:range=limited,format=yuv420p,",
+            extra_videos: &[VideoLayerArg {
+                clip: "clip2.mp4",
+                color_in: "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv,",
+                slot_x: 0,
+                slot_y: 0,
+                slot_w: 640,
+                slot_h: 360,
+                fit: Fit::Cover,
+                clip_start_sec: 0.0,
+                clip_end_sec: None,
+                use_original_audio: false,
+                original_volume: 1.0,
+                speed: 1.0,
+            }],
+            mid_pngs: &["mid.png"],
+            aboves: &[AbovePngArg { png: "above.png", window: None }],
+            below_frames: None,
+            mid_frames: &[],
+            above_frames: None,
+            narrations: &[],
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 1920,
+            slot_h: 1080,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 3.0,
+            narration_volume: 1.0,
+            original_volume: 1.0,
+            use_original_audio: false,
+            speed: 1.0,
+            fps: 30,
+            codec: VideoCodec::MediaFoundation,
+            bitrate: "12000k",
+            out: "o.mp4",
+        });
+        has_color_out(&v);
+        let fc = &v[v.iter().position(|s| s == "-filter_complex").unwrap() + 1];
+        // 色の前処理は RGB にする前（fit_filter の頭の format=rgba より前）＝層ごとに自分の前処理。
+        assert!(
+            fc.contains("[1:v]setpts=PTS-STARTPTS,zscale=matrixin=170m"),
+            "{fc}"
+        );
+        assert!(
+            fc.contains(",format=yuv420p,format=rgba,scale=1920:1080"),
+            "{fc}"
+        );
+        assert!(
+            fc.contains("[2:v]setpts=PTS-STARTPTS,setparams=colorspace=bt709"),
+            "{fc}"
+        );
+        // 重ねた後で1回だけ BT.709 へ。
+        assert!(
+            fc.ends_with(&format!("[vcomp]{COLOR_OUT_FILTER}[vout]"))
+                || fc.contains(&format!("[vcomp]{COLOR_OUT_FILTER}[vout];")),
+            "{fc}"
+        );
+        assert_eq!(fc.matches(COLOR_OUT_FILTER).count(), 1, "{fc}");
+    }
+
     #[test]
     fn xfade_chain_args_two_scenes_fade() {
         let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
@@ -5373,8 +5762,10 @@ mod tests {
         assert!(graph.contains("[nv0][nv1]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
         // 入ってくる側は上げない（#1406）＝場面の頭の声を小さく始めない。
         assert!(graph.contains("[na0][na1]acrossfade=d=0.5:c1=tri:c2=nofade[a1]"));
-        // 最終ラベルを map。
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v1]"));
+        // 最終ラベルを map（映像は色の変換を通した vout・ADR-0069）。
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]"));
+        // 出力の色（ADR-0069）＝つないだ後で明示で変換する。
+        assert!(graph.contains(&format!("[v1]{COLOR_OUT_FILTER}[vout]")));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a1]"));
         // 再エンコード（copy ではない）。
         assert!(a
@@ -5454,8 +5845,9 @@ mod tests {
         assert!(graph.contains("[nv0][nv1]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
         assert!(graph.contains("[v1][nv2]concat=n=2:v=1:a=0[v2]"));
         assert!(graph.contains("[a1][na2]concat=n=2:v=0:a=1[a2]"));
-        // 最終ラベルは v2/a2。
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
+        // 最終ラベルは v2/a2（映像は色の変換を通して vout へ・ADR-0069）。
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]"));
+        assert!(graph.contains(&format!("[v2]{COLOR_OUT_FILTER}[vout]")));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a2]"));
     }
 
@@ -6122,6 +6514,7 @@ mod tests {
     fn video_scene_args_overlays_clip_and_mixes_audio() {
         let narr = "n.wav".to_string();
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "below.png",
             clip: "clip.mp4",
             extra_videos: &[],
@@ -6161,7 +6554,7 @@ mod tests {
             .expect("filter_complex");
         assert!(fc.contains("force_original_aspect_ratio=increase")); // cover
         assert!(fc.contains("overlay=80:140")); // スロット配置
-        assert!(fc.contains("[bg1][2:v]overlay=0:0[vout]")); // 上PNGを前面へ
+        assert!(fc.contains("[bg1][2:v]overlay=0:0[vcomp]")); // 上PNGを前面へ
         assert!(fc.contains("[3:a]volume=1")); // ナレーション
         assert!(fc.contains("[1:a]volume=0.2")); // 元動画音声
         assert!(fc.contains("amix=inputs=2"));
@@ -6178,6 +6571,7 @@ mod tests {
     fn video_scene_args_clip_end_trims_to_segment() {
         // clip_start=1, clip_end=3, dur=5 → クリップは min(3-1,5)=2 秒に切り出す。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6216,6 +6610,7 @@ mod tests {
     fn video_scene_args_speed_applies_setpts_and_atempo() {
         // speed=2: 映像は setpts=PTS/2、元音声は atempo=2。クリップ読取尺は dur*speed=10。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6259,6 +6654,7 @@ mod tests {
     fn video_scene_args_clip_end_with_speed_caps_source_seconds() {
         // clip_end が主要制限: start=0,end=3,dur=5,speed=2 → clip_t = min(3, dur*speed=10) = 3。
         let a1 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6293,6 +6689,7 @@ mod tests {
 
         // dur*speed が主要制限: end=12,dur=5,speed=2 → clip_t = min(12, 10) = 10。
         let a2 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6329,6 +6726,7 @@ mod tests {
     #[test]
     fn video_scene_args_uses_silence_without_audio() {
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6371,6 +6769,7 @@ mod tests {
     fn video_scene_args_dialogue_above_windows_and_delayed_narrations() {
         // 掛け合い×動画：上PNGを行区間 [0,4)/[4,8) で切替え、行ナレーションを 0秒/4秒 に配置する。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6426,7 +6825,7 @@ mod tests {
             fc.contains("[bg1][2:v]overlay=0:0:eof_action=repeat:enable='gte(t,0)*lt(t,4)'[bg2]")
         );
         assert!(
-            fc.contains("[bg2][3:v]overlay=0:0:eof_action=repeat:enable='gte(t,4)*lt(t,8)'[vout]")
+            fc.contains("[bg2][3:v]overlay=0:0:eof_action=repeat:enable='gte(t,4)*lt(t,8)'[vcomp]")
         );
         // 行ナレーション：各行を窓（4秒）で atrim 切り詰め＝前の行が次の行に重ならない（#385）。
         // 2本目は adelay=4000ms で配置し、amix で1トラックへ。
@@ -6443,6 +6842,7 @@ mod tests {
     fn video_scene_args_dialogue_with_original_audio_mixes_all() {
         // 掛け合い×動画×元音声：行ナレーション2本＋元音声を amix=inputs=3 で混ぜる。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6505,6 +6905,7 @@ mod tests {
     fn video_scene_args_two_videos_overlays_in_zindex_order() {
         // #431：2動画（先頭＋extra 1本）＋中間静止層1枚。overlay は下→clip0@slot0→mid0→clip1@slot1→above。
         let extra = [VideoLayerArg {
+            color_in: "",
             clip: "clip2.mp4",
             slot_x: 200,
             slot_y: 100,
@@ -6519,6 +6920,7 @@ mod tests {
         }];
         let mid = ["mid0.png"];
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "below.png",
             clip: "clip1.mp4",
             extra_videos: &extra,
@@ -6565,8 +6967,8 @@ mod tests {
         assert!(fc.contains("[0:v][clip0]overlay=80:140[bg1]"));
         assert!(fc.contains("[bg1][3:v]overlay=0:0[bg2]")); // mid0＝入力 1+n=3
         assert!(fc.contains("[bg2][clip1]overlay=200:100[bg3]"));
-        assert!(fc.contains("[bg3][4:v]overlay=0:0[vout]")); // above＝入力 1+n+mid=4
-                                                             // 入力本数: below/clip0/clip1/mid0/above/narration = 6本。
+        assert!(fc.contains("[bg3][4:v]overlay=0:0[vcomp]")); // above＝入力 1+n+mid=4
+                                                              // 入力本数: below/clip0/clip1/mid0/above/narration = 6本。
         assert_eq!(args.iter().filter(|s| *s == "-i").count(), 6);
     }
 
@@ -6574,6 +6976,7 @@ mod tests {
     fn video_scene_args_two_videos_mix_both_original_audios() {
         // #431：2動画とも元音声ありは両方 amix（narrations 無し・orig0=先頭input1, orig1=extra input2）。
         let extra = [VideoLayerArg {
+            color_in: "",
             clip: "c2.mp4",
             slot_x: 0,
             slot_y: 0,
@@ -6588,6 +6991,7 @@ mod tests {
         }];
         let mid = ["m.png"];
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c1.mp4",
             extra_videos: &extra,
@@ -6630,6 +7034,7 @@ mod tests {
     fn video_scene_args_above_frames_uses_image2_sequence() {
         // #435：動画×アニメ（非掛け合い）は最上層を image2 シーケンスで overlay（eof_action=repeat で最終フレーム保持）。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "below.png",
             clip: "clip.mp4",
             extra_videos: &[],
@@ -6669,7 +7074,7 @@ mod tests {
             .expect("filter_complex");
         // below(0)→clip0(1)→above image2(2)。最上 overlay は eof_action=repeat（enable 無し＝前景アニメを尺まで保持）。
         assert!(fc.contains("[0:v][clip0]overlay=80:140[bg1]"));
-        assert!(fc.contains("[bg1][2:v]overlay=0:0:eof_action=repeat[vout]"));
+        assert!(fc.contains("[bg1][2:v]overlay=0:0:eof_action=repeat[vcomp]"));
         // image2 入力（-framerate 30 -i abv/frame_%05d.png）。静止 -loop は below のみ（above はループしない）。
         assert!(args
             .windows(2)
@@ -6710,6 +7115,7 @@ mod tests {
     fn video_scene_args_all_static_layers_per_frame_for_animation() {
         // #435 P1：動画×アニメは下/中/上の静止層すべてを image2 で焼く（below=tpad base, mid/above=eof_repeat overlay）。
         let extra = [VideoLayerArg {
+            color_in: "",
             clip: "c2.mp4",
             slot_x: 0,
             slot_y: 0,
@@ -6727,6 +7133,7 @@ mod tests {
             fps: 30,
         }];
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "below.png", // below_frames=Some のとき使わない
             clip: "clip1.mp4",
             extra_videos: &extra,
@@ -6769,7 +7176,7 @@ mod tests {
         // mid（input 3）は eof_action=repeat。extra 動画（clip1）@(0,0)。above（input 4）も eof_action=repeat で最前面。
         assert!(fc.contains("[bg1][3:v]overlay=0:0:eof_action=repeat[bg2]"));
         assert!(fc.contains("[bg2][clip1]overlay=0:0[bg3]"));
-        assert!(fc.contains("[bg3][4:v]overlay=0:0:eof_action=repeat[vout]"));
+        assert!(fc.contains("[bg3][4:v]overlay=0:0:eof_action=repeat[vcomp]"));
         // 静止 -loop は無し（below/mid/above すべて image2）。
         assert_eq!(args.iter().filter(|s| *s == "-loop").count(), 0);
         assert!(args.iter().any(|s| s == "bel/frame_%05d.png"));
@@ -6814,6 +7221,7 @@ mod tests {
     fn video_scene_args_single_narration_keeps_legacy_filter() {
         // 単一ナレーション（delay 0）は従来と同一のフィルタ文字列（後方互換＝既存場面の出力不変）。
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: "b.png",
             clip: "c.mp4",
             extra_videos: &[],
@@ -6852,7 +7260,7 @@ mod tests {
             .find(|s| s.contains("overlay"))
             .expect("filter_complex");
         // 映像・音声とも従来文字列（enable/adelay/amix/atrim を含まない＝window None は切り詰めない）。
-        assert!(fc.contains("[bg1][2:v]overlay=0:0[vout]"));
+        assert!(fc.contains("[bg1][2:v]overlay=0:0[vcomp]"));
         assert!(fc.contains("[3:a]volume=1,apad[aout]"));
         assert!(!fc.contains("enable="));
         assert!(!fc.contains("adelay"));
@@ -7057,6 +7465,7 @@ mod tests {
         let out = tmp.join("scene.mp4");
         let out_s = out.to_string_lossy().into_owned();
         let args = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[],
@@ -7097,6 +7506,7 @@ mod tests {
         let out2 = tmp.join("scene_silent.mp4");
         let out2_s = out2.to_string_lossy().into_owned();
         let args2 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[],
@@ -7133,6 +7543,7 @@ mod tests {
         let out3 = tmp.join("scene_dialogue.mp4");
         let out3_s = out3.to_string_lossy().into_owned();
         let args3 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[],
@@ -7209,9 +7620,11 @@ mod tests {
         let out4 = tmp.join("scene_multi.mp4");
         let out4_s = out4.to_string_lossy().into_owned();
         let args4 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[VideoLayerArg {
+                color_in: "",
                 clip: &clip_s,
                 slot_x: 320,
                 slot_y: 30,
@@ -7282,6 +7695,7 @@ mod tests {
         let out5 = tmp.join("scene_anim.mp4");
         let out5_s = out5.to_string_lossy().into_owned();
         let args5 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[],
@@ -7341,6 +7755,7 @@ mod tests {
         let out6 = tmp.join("scene_anim_below.mp4");
         let out6_s = out6.to_string_lossy().into_owned();
         let args6 = video_scene_args(&VideoSceneArgs {
+            color_in: "",
             below_png: &below_s,
             clip: &clip_s,
             extra_videos: &[],
@@ -7472,6 +7887,7 @@ mod tests {
 
         let out = tmp.join("final.mp4");
         let jobs = vec![SceneJob::Video(Box::new(VideoJob {
+            color_in: String::new(),
             below,
             aboves: vec![TimedAbove {
                 png: above,
@@ -7618,6 +8034,7 @@ mod tests {
                 fps: 30,
             }),
             SceneJob::Video(Box::new(VideoJob {
+                color_in: String::new(),
                 below,
                 aboves: vec![TimedAbove {
                     png: above,
