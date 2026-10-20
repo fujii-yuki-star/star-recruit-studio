@@ -71,6 +71,6 @@ describe('タイムライン形式の一覧の絵', () => {
     load.mockResolvedValueOnce(JSON.stringify(b));
     await useTimelineStore.getState().openTimelineProject(b.projectId);
     await flush();
-    expect(thumb.mock.calls.map((c) => c[0])).toEqual(['proj_20261021_001', 'proj_20261021_002']);
+    expect(thumb.mock.calls.map((c: unknown[]) => c[0])).toEqual(['proj_20261021_001', 'proj_20261021_002']);
   });
 });
