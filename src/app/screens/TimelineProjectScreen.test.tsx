@@ -5048,6 +5048,36 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
         vi.unstubAllGlobals();
       }
     });
+
+    // ⚠️ **縦にも送る**（#1477・業界の型）＝列が多いと、枠の下に隠れた列へ帯を運べなかった（横だけ送っていた）。
+    it("帯を掴んで枠の下端まで運ぶと縦に送り、離すと止まる", () => {
+      const frames: Array<(t: number) => void> = [];
+      vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { frames.push(cb); return frames.length; });
+      vi.stubGlobal("cancelAnimationFrame", () => { frames.length = 0; });
+      try {
+        withClip(5);
+        const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+        const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+        Object.defineProperty(scroll, "clientWidth", { value: 600, configurable: true });
+        Object.defineProperty(scroll, "clientHeight", { value: 300, configurable: true });
+        Object.defineProperty(scroll, "scrollHeight", { value: 2000, configurable: true });
+        let st = 0;
+        Object.defineProperty(scroll, "scrollTop", { get: () => st, set: (v: number) => { st = v; }, configurable: true });
+        scroll.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 300, width: 600, height: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+        const clip = screen.getByRole("button", { name: "あ" });
+        fireEvent.pointerDown(clip, { button: 0, pointerId: 1, clientX: 300, clientY: 60 });
+        fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 300, clientY: 295 }); // 下端の送る帯へ
+        act(() => { frames.splice(0).forEach((cb) => cb(1000)); });
+        act(() => { frames.splice(0).forEach((cb) => cb(2000)); });
+        expect(st).toBeGreaterThan(0); // 縦に送られた
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 300, clientY: 295 });
+        const after = st;
+        act(() => { frames.splice(0).forEach((cb) => cb(3000)); });
+        expect(st).toBe(after); // 離したら止まる
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
   });
 
   // ⚠️ **再生に合わせて見える範囲を送る**（#819-1）＝送らないと、ヘッドが枠の外へ出た時点で
