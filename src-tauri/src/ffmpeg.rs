@@ -1852,9 +1852,17 @@ fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
 
 /// 元の動画の色の前処理（ADR-0069）。調べられなければ前処理なし（今までどおり）＝書き出しは止めない。
 fn clip_color_in(ffmpeg: &Path, clip: &Path) -> String {
-    ffmpeg_probe_stderr(ffmpeg, clip)
-        .map(|s| color_in_filter(source_color_of(&s)))
-        .unwrap_or_default()
+    match ffmpeg_probe_stderr(ffmpeg, clip) {
+        Ok(s) => color_in_filter(source_color_of(&s)),
+        Err(e) => {
+            // 後から「色が合わない」と言われたときに追えるよう、調べられなかった事実は残す（書き出しは止めない）。
+            crate::tlog!(
+                "ffmpeg",
+                "色を調べられませんでした（前処理なしで続けます）: {e}"
+            );
+            String::new()
+        }
+    }
 }
 
 /// 技術詳細を**このパソコンの記録へ**残し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
