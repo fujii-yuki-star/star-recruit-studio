@@ -27,7 +27,7 @@
 ### データ（`scene.transition` 拡張）
 
 - 既存: `transition: { in?: TransitionType, out?: TransitionType, durationSec?: number }`（`TransitionType` = none/fade/slide/wipe/zoom）。
-- 追加: **`direction?: 'left' | 'right' | 'up' | 'down'`**（`type='slide'` のときのみ有効）。`TransitionType` enum は**維持**（wipe/zoom は MVP 対象外＝指定されても fade にフォールバック）。schema/enum へ後方互換追加（マイナー）。
+- 追加: **`direction?: 'left' | 'right' | 'up' | 'down'`**（`type='slide'` のときのみ有効）。`TransitionType` enum は**維持**（⚠️ **追補 2026-10-20＝ADR-0066 で wipe/zoom も描く**。以下は当時の記述：wipe/zoom は MVP 対象外＝指定されても fade にフォールバック）。schema/enum へ後方互換追加（マイナー）。
 - 境界 A→B の演出 = **B.transition.in（＋ direction）**。
   - **先頭場面の扱い**: 先頭場面は「切り替え元が無い」ため、SceneEdit では遷移設定を**出さない**（先頭であることが分かるよう「最初の場面です」等のヒントのみ）。データ上 `transition.in` が入っていても先頭は書き出しで無視（黒からのフェードイン等は将来）。
   - **`direction` は MVP では単一フィールド＝`in` に適用**。`transition.out` は当面 `in` とミラー（SceneEdit が in/out 同値で設定）で末尾 exit 演出用に予約（未解決#1）。将来 out を独立演出にする場合は、in 方向と out 方向が異なり得る（例「左から入って右へ出る」）ため `inDirection`/`outDirection` への分離を検討する。
