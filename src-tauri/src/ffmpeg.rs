@@ -801,6 +801,12 @@ pub fn color_in_filter(c: SourceColor) -> String {
     }
 }
 
+/// 動画から取り出す**絵（PNG）の明るさの曲線の印を sRGB にする**（ADR-0069 決定5）。フィルタの最後に付ける。
+/// ⚠️ FFmpeg 8 は取り出した PNG に元の動画の印（`cICP`＝BT.709 の曲線）を書き込み、アプリの中の描画（WebView）が
+///   それを sRGB へ**変換し直す**＝灰色が暗くなる（実測 128→121・32→18）。プレビューの動画は曲線を変換せずに映すので、
+///   取り出した絵だけ暗くなる＝止めた絵・切り出した絵・コマにして描く書き出しが動画とずれる。sRGB の印なら変換されない。
+pub const PNG_SRGB_TAG: &str = "setparams=color_trc=iec61966-2-1";
+
 /// 動画クリップをスロット(w×h)へ収める scale/crop/pad フィルタ（純粋）。
 fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
     // ⚠️ **大きさを変える前と後の両方で RGBA に固定する**（2026-10-16・使い方の動画で踏んだ）＝
@@ -1746,7 +1752,7 @@ fn video_filmstrip_impl(
     args.push("-vf".into());
     // 色の前処理（ADR-0069）＝書き出し・プレビューと同じ規則で解く（印の無い動画の色が帯だけずれない）。
     args.push(format!(
-        "{}fps={}/{},scale=-1:48,tile={}x1",
+        "{}fps={}/{},scale=-1:48,tile={}x1,{PNG_SRGB_TAG}",
         clip_color_in(&ffmpeg, &input),
         frames,
         span,
@@ -1992,7 +1998,10 @@ fn extract_video_thumbnail_impl(
         "1".into(),
         "-vf".into(),
         // 色の前処理（ADR-0069）＝書き出し・プレビューと同じ規則で解く。
-        format!("{}scale=640:-2", clip_color_in(&ffmpeg, &input)),
+        format!(
+            "{}scale=640:-2,{PNG_SRGB_TAG}",
+            clip_color_in(&ffmpeg, &input)
+        ),
         out.to_string_lossy().into_owned(),
     ];
     run(&ffmpeg, &args).map_err(|e| {
@@ -2209,7 +2218,7 @@ fn frame_grid_args(
     color_in: &str,
 ) -> Vec<String> {
     let vf = format!(
-        "{color_in}setpts=PTS/{},fps={},select='eq(n\\,{})'",
+        "{color_in}setpts=PTS/{},fps={},select='eq(n\\,{})',{PNG_SRGB_TAG}",
         g.speed, g.fps, g.local_frame
     );
     vec![
@@ -2249,12 +2258,9 @@ fn frame_seconds_args(
         args.push("-ss".into());
         args.push(format!("{}", seek.fine_sec));
     }
-    // 色の前処理（ADR-0069）。不要なら付けない（今までどおりの並び）。
-    let color = color_in.trim_end_matches(',');
-    if !color.is_empty() {
-        args.push("-vf".into());
-        args.push(color.to_string());
-    }
+    // 色の前処理と、絵の印を sRGB にする（ADR-0069）。
+    args.push("-vf".into());
+    args.push(format!("{color_in}{PNG_SRGB_TAG}"));
     args.extend([
         "-frames:v".into(),
         "1".into(),
@@ -3560,7 +3566,7 @@ fn stage_clip_frames_impl(
     // 出力 f＝clip-time start+(f/fps)*speed：setpts=PTS/speed で速度反映→fps で等間隔サンプル→横幅制限。
     // 色の前処理（ADR-0069）＝この道で取り出したコマは書き出しの絵になる（プレビューと同じ規則で解く）。
     let vf = format!(
-        "{}setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2",
+        "{}setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2,{PNG_SRGB_TAG}",
         clip_color_in(&ffmpeg, &input)
     );
     let args: Vec<String> = vec![
@@ -8863,19 +8869,56 @@ mod staged_output_tests {
             &pre,
         );
         let at = secs.iter().position(|s| s == "-vf").expect("-vf がある");
-        assert_eq!(
-            secs[at + 1],
-            pre.trim_end_matches(','),
-            "末尾のカンマは付けない"
-        );
-        // 前処理が要らなければ、今までどおり -vf を付けない。
+        assert_eq!(secs[at + 1], format!("{pre}{PNG_SRGB_TAG}"));
+        // 前処理が要らなくても、絵の印は sRGB にする（印のある動画の切り出しが暗くならない）。
         let plain = frame_seconds_args(
             std::path::Path::new("in.mp4"),
             std::path::Path::new("out.png"),
             3.5,
             "",
         );
-        assert!(!plain.iter().any(|s| s == "-vf"));
+        let at = plain.iter().position(|s| s == "-vf").expect("-vf がある");
+        assert_eq!(plain[at + 1], PNG_SRGB_TAG);
+        assert!(
+            grid.contains(&format!(",{PNG_SRGB_TAG} -vsync 0")),
+            "格子の切り出しも最後に sRGB の印: {grid}"
+        );
+    }
+
+    /// 動画を絵（PNG）にする本体は、どれも色の前処理を通し、絵の印を sRGB にする（ADR-0069）。
+    /// ⚠️ 本体（`_impl`）は引数を関数の中で組むので、本文を読んで留める（1か所だけ外れると、その絵だけ色がずれる）。
+    #[test]
+    fn 動画を絵にする本体はどれも色をそろえる() {
+        const SRC: &str = include_str!("ffmpeg.rs");
+        for (start, end, name) in [
+            (
+                "fn video_filmstrip_impl(",
+                "/// `ffmpeg -i <file>` を実行し stderr を返す",
+                "帯",
+            ),
+            (
+                "fn extract_video_thumbnail_impl(",
+                "/// 動画の**その瞬間**を静止画",
+                "小さな絵",
+            ),
+            (
+                "fn stage_clip_frames_impl(",
+                "/// ステージ済みフレーム（stage_clip_frames",
+                "書き出しのコマ",
+            ),
+        ] {
+            let body = super::source_range::コメントを落とす(&super::source_range::範囲(
+                SRC, start, end,
+            ));
+            assert!(
+                body.contains("clip_color_in(&ffmpeg, &input)"),
+                "{name}：色の前処理が無い"
+            );
+            assert!(
+                body.contains("{PNG_SRGB_TAG}"),
+                "{name}：絵の印を sRGB にしていない"
+            );
+        }
     }
 
     #[test]
