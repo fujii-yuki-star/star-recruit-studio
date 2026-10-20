@@ -19,7 +19,7 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
+import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, TRACK_NAME_MAX, withAddedTrack, audioPlacementAt, copyClipsTo as copyClipsToDoc, visualPlacementFor, clipCountOnTrack, trimTargetsAt, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, trimStopSec, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
@@ -28,7 +28,7 @@ import { fileDropHoverIssue } from "../../domain/timeline/fileDropPlacement";
 import { detectAssetType } from "../../domain/asset/assetFile";
 import type { AssetType } from "../../domain/enums";
 import { dimsForOrientation, exportDimsForOrientation, isExportSize, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
-import { activeSoloTrackIds, audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { activeSoloTrackIds, canDenoise, denoiseSourceKey, denoisesClip, audioAssetDurationSec, audioSourceKeyOfClip, clipVolumeEnvelope, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
@@ -554,7 +554,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     editNotice, openNotice, dismissOpenNotice,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf, applySelectedMotionPreset,
     addAudioClip, importFromLibrary, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
-    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume, setSelectedClipHoldFrame,
+    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume, setSelectedClipHoldFrame, setSelectedClipDenoise, denoiseFailedKeys,
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
@@ -2934,6 +2934,29 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     return cc ? (baseBoxPatchFromShown(cc, shown) as T) : shown;
   };
   /**
+   * **ノイズを減らす**の切り替え（ADR-0068）＝音の部品の「音量」と動画の「この動画の音」の両方に同じものを出す（写すと片方だけ直る）。
+   * 作っている間・作れなかったときは、その場で理由と次の行動を出す（黙って無音にしない）。
+   */
+  const denoiseKey = selected?.denoise === true && selected.assetId ? denoiseSourceKey(selected.assetId) : null;
+  const denoiseField = selected ? (
+    <>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={selected.denoise === true}
+          {...editGuard()}
+          onChange={(e) => setSelectedClipDenoise(e.target.checked)}
+        />
+        <span>{DENOISE_LABEL}</span>
+      </label>
+      {denoiseKey && denoiseFailedKeys.includes(denoiseKey) ? (
+        <p className="text-warn" role="status">{DENOISE_FAILED_TEXT}</p>
+      ) : denoiseKey && !audioSrcByKey[denoiseKey] ? (
+        <p className="text-muted" role="status">{DENOISE_PREPARING_TEXT}</p>
+      ) : null}
+    </>
+  ) : null;
+  /**
    * 選んだ部品に**自身の動き**があるか（掴むと動き全体がずれることを一言添える・ADR-0054 決定4）。
    * ⚠️ **その時刻のずれでは見ない**（PR #1339 レビュー ℹ️）＝ずれがちょうど 0 の時刻でも、掴めば動き全体がずれる。
    */
@@ -4218,7 +4241,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             // 直接置きも差し込み口も**同じ関数**を通る＝置き場所で挙動を割らない。
             // ⚠️ **ソロが効いている間は鳴らさない**（ADR-0067 決定2）＝ソロは音の列だけ。動画の元の音は映像の列にあるので、
             //   声の列だけ聞いて確かめたいときに混ざらないようにする（書き出しには効かない）。
-            audioVolume: doc && !activeSoloTrackIds(doc, soloTrackIds) ? (placementOriginalAudio(doc, placement)?.volume ?? undefined) : undefined,
+            // ⚠️ **ノイズを減らす動画は黙らせる**（ADR-0068）＝作り置きを音の側（`audioCuesAt`）が同じ時刻で鳴らす（二重に鳴らさない）。
+            audioVolume: doc && !activeSoloTrackIds(doc, soloTrackIds) && !(placement.layerId == null && denoisesClip(doc, clip))
+              ? (placementOriginalAudio(doc, placement)?.volume ?? undefined)
+              : undefined,
             // ⚠️ **使える長さを過ぎたら止める**（レビュー 🟡）＝素材の秒は頭打ちで一定になるが、
             // それだけでは `video` 要素が自分で先へ流れ続ける（絵も音も「ここまで」を越える）。
             // 書き出しは最後のコマで凍るので、ここでも止めて凍らせる（ADR-0001）。
@@ -6312,6 +6338,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   onChange={(v) => setSelectedClipOriginalAudioVolume(v)}
                   onClear={() => setSelectedClipOriginalAudioVolume(null)}
                 />
+                {doc && canDenoise(doc, selected) && denoiseField}
               </CollapsibleSection>
             )}
             {isAudioClip(selected) && (
@@ -6328,6 +6355,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   onClear={() => setSelectedClipVolume(null)}
                 />
                 {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
+                {doc && canDenoise(doc, selected) && denoiseField}
                 <div className="row gap-sm">
                   <NumberField
                     label="だんだん大きく（秒）"

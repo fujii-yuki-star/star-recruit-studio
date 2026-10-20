@@ -74,6 +74,12 @@ export const Z_ORDER_LABEL = "重ね順";
  * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
  */
 export const DUPLICATE_LABEL = "複製";
+/** 部品の音のノイズを減らす切り替え（ADR-0068）。 */
+export const DENOISE_LABEL = "ノイズを減らす";
+/** ノイズを減らした音を作っている間（ADR-0068）。 */
+export const DENOISE_PREPARING_TEXT = "ノイズを減らした音を用意しています。用意できるまでは音が鳴りません";
+/** ノイズを減らした音を作れなかった（ADR-0068）＝外せば元の音で鳴る。 */
+export const DENOISE_FAILED_TEXT = `ノイズを減らした音を作れませんでした。「${DENOISE_LABEL}」を外して、元の音で鳴らしてください`;
 /** 列の無い所（いちばん下の列より下）へ落とすときの予告（ADR-0049・#1478＝ファイル・帯・欄から置く、で同じ文）。 */
 export const NEW_TRACK_DROP_TEXT = "離すと新しい列を作って、ここに置きます";
 /** 列の「⋮」から列の音量を直す（ADR-0067）。 */
@@ -1208,7 +1214,9 @@ export function audioUnreadableMessage(kind: AudioSourceKind): string {
     ? "その読み上げを選んで「声を作る」でもう一度作ってください"
     : kind === AUDIO_SOURCE_KIND.bundled
       ? "その部品を選んで「音」の「鳴らす音」で選び直してください"
-      : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
+      : kind === AUDIO_SOURCE_KIND.denoise
+        ? `その部品の「${DENOISE_LABEL}」を外すと元の音で書き出せます`
+        : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
   return `${head}${how}`;
 }
 

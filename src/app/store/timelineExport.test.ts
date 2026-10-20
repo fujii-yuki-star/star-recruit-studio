@@ -435,6 +435,25 @@ describe('exportTimelineVideo', () => {
     expect(msg, '取り込んだ素材なのに別の手を案内した').toContain('ファイルを選び直す');
   });
 
+  // ⚠️ **ノイズを減らした音を作れなかったら、外せば元の音で書き出せる**（ADR-0068）＝素材を入れ直す話ではない。
+  it('ノイズを減らした音を作れないときは、保存先を聞く前に断り、外す手を出す', async () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '録音', filePath: 'assets/asset_001.wav' }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', denoise: true },
+      ],
+    } as Partial<TimelineProject>);
+    vi.spyOn(assetFsMod, 'ensureDenoisedAudio').mockResolvedValue(null); // 作れなかった
+    await open(d);
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog), '作れないのに保存先を聞いた').not.toHaveBeenCalled();
+    const msg = useTimelineStore.getState().exportRun.message ?? '';
+    expect(msg).toContain('無音');
+    expect(msg).toContain('ノイズを減らす');
+    expect(msg).not.toContain('ファイルを選び直す');
+  });
+
   // ⚠️ **同梱の曲にも「ファイルを選び直す」は無い**（一覧から選び直す）＝取り込んだ素材と取り違えない。
   it('同梱の曲が読めないときは、鳴らす音を選び直す手を出す', async () => {
     const d = doc({

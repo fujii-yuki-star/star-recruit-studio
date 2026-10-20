@@ -2248,6 +2248,101 @@ fn scene_ranges(joins: &[JoinInfo]) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// ノイズを減らした音の**作り置きの場所**（ADR-0068）。⚠️ **domain の `denoisedCachePath` と同じ規則**＝
+/// 書き出しは domain が決めたパスを渡してくるので、ここと割れると「作ったのに見つからない」になる（検査で両方を留める）。
+fn denoised_rel_path(rel_path: &str) -> String {
+    let name = std::path::Path::new(rel_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    format!("cache/denoise/{name}.flac")
+}
+
+/// 作り置きが**元より新しい**か（ADR-0068）。素材を差し替えたら作り直す＝古い音を黙って鳴らさない。
+fn denoised_is_fresh(
+    out_modified: Option<std::time::SystemTime>,
+    src_modified: Option<std::time::SystemTime>,
+) -> bool {
+    match (out_modified, src_modified) {
+        (Some(out), Some(src)) => out >= src,
+        _ => false,
+    }
+}
+
+/// 失敗したときの文（ADR-0068）＝**外せば元の音で鳴る**ことを次の行動として出す。
+const DENOISE_FAILED_MESSAGE: &str =
+    "ノイズを減らした音を作れませんでした。「ノイズを減らす」を外して、元の音で鳴らしてください。";
+
+/// 素材の音の**ノイズを減らした作り置き**をそろえ、そのプロジェクト相対のパスを返す（ADR-0068）。
+/// プレビューも書き出しもこのファイルを鳴らす＝聞いた音と書き出した音が一致する（ADR-0001）。
+#[tauri::command]
+pub async fn ensure_denoised_audio(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_denoised_audio_impl(app, project_id, rel_path)
+    })
+    .await
+    .map_err(|e| export_failure(format!("denoise join: {e}"), DENOISE_FAILED_MESSAGE))?
+}
+
+fn ensure_denoised_audio_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("denoise src missing: {}", input.display()),
+            "音の素材が見つかりませんでした。素材を入れ直してください。",
+        ));
+    }
+    let rel_out = denoised_rel_path(&rel_path);
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    let modified = |p: &std::path::Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    if produced_frame(&out) && denoised_is_fresh(modified(&out), modified(&input)) {
+        return Ok(rel_out);
+    }
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir)
+            .map_err(|e| export_failure(format!("denoise dir: {e}"), DENOISE_FAILED_MESSAGE))?;
+    }
+    // ⚠️ **途中の書きかけを本物の名前で残さない**＝別の名前へ書いてから入れ替える（落ちた後に半端な音を鳴らさない）。
+    let tmp = out.with_extension("part.flac");
+    let _ = fs::remove_file(&tmp);
+    let ffmpeg = resolve_ffmpeg(&app);
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-vn".into(),
+        "-af".into(),
+        "afftdn=nf=-25".into(),
+        "-c:a".into(),
+        "flac".into(),
+        tmp.to_string_lossy().into_owned(),
+    ];
+    run(&ffmpeg, &args).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        export_failure(format!("denoise: {e}"), DENOISE_FAILED_MESSAGE)
+    })?;
+    if !produced_frame(&tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(export_failure(
+            format!("denoise produced nothing: {}", input.display()),
+            DENOISE_FAILED_MESSAGE,
+        ));
+    }
+    fs::rename(&tmp, &out).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        export_failure(format!("denoise rename: {e}"), DENOISE_FAILED_MESSAGE)
+    })?;
+    Ok(rel_out)
+}
+
 /// FFmpeg xfade が受け付ける transition 名の許可リスト（MVP）。これ以外/"none" はハードカット扱い。
 // ワイプ・ズーム（ADR-0066）＝`xfade` の既成の名前。見え方は実測して `transitionLayerStyles`（プレビュー）と揃えてある。
 const XFADE_NAMES: [&str; 10] = [
@@ -5191,6 +5286,33 @@ mod tests {
         // 空・単一。
         assert_eq!(scene_ranges(&[]), Vec::<(usize, usize)>::new());
         assert_eq!(scene_ranges(&[j(true)]), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn denoised_rel_path_follows_domain_rule() {
+        // ⚠️ domain の `denoisedCachePath` と同じ規則（ADR-0068）＝割れると書き出しが作り置きを見つけられない。
+        assert_eq!(
+            denoised_rel_path("assets/asset_003.mp4"),
+            "cache/denoise/asset_003.mp4.flac"
+        );
+        assert_eq!(
+            denoised_rel_path("assets/voice.wav"),
+            "cache/denoise/voice.wav.flac"
+        );
+    }
+
+    #[test]
+    fn denoised_is_fresh_only_when_newer_than_source() {
+        use std::time::{Duration, SystemTime};
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        assert!(denoised_is_fresh(Some(t), Some(t)));
+        assert!(denoised_is_fresh(Some(t + Duration::from_secs(1)), Some(t)));
+        assert!(!denoised_is_fresh(
+            Some(t),
+            Some(t + Duration::from_secs(1))
+        )); // 素材を差し替えた＝作り直す
+        assert!(!denoised_is_fresh(None, Some(t)));
+        assert!(!denoised_is_fresh(Some(t), None));
     }
 
     #[test]

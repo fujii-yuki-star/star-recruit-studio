@@ -2,7 +2,7 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, PROJECT_NAME_MAX_LENGTH, type ExportSize } from "../../domain/constants";
-import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
@@ -39,7 +39,7 @@ import {
   setVisualClipContent,
   setClipBlendMode, setClipFlip, setClipPivot, setClipColorAdjust, moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
-  setClipUseOriginalAudio, setClipHoldFrame, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setTrackVolume, setVoiceSpeaker,
+  setClipUseOriginalAudio, setClipHoldFrame, setClipDenoise, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setClipTalkMotion, setTrackFlag, setTrackVolume, setVoiceSpeaker,
   setVoiceText, trimClip, trimClips, trimTargetsAt, withAddedTrack } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import { placeDroppedAssets } from "../../domain/timeline/fileDropPlacement";
@@ -867,6 +867,10 @@ export interface TimelineState {
   soloTrackIds: string[];
   /** 音の列のソロを付け外しする（複数の列をソロにできる）。 */
   toggleTrackSolo: (trackId: string) => void;
+  /** ノイズを減らした音を**作れなかった**鍵（ADR-0068・`denoise:<素材 id>`）。画面が理由と次の行動を出す。 */
+  denoiseFailedKeys: string[];
+  /** 選んでいる部品の**ノイズを減らす**を切り替える（ADR-0068）。 */
+  setSelectedClipDenoise: (on: boolean) => void;
   undo: () => void;
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
@@ -1180,6 +1184,8 @@ function emptyState() {
     selectedClipIds: [] as string[],
     // ソロ（ADR-0067）＝開き直したら外れる（編集中の聞き方だけ）。
     soloTrackIds: [] as string[],
+    // ノイズを減らした音を作れなかった鍵（ADR-0068）。
+    denoiseFailedKeys: [] as string[],
     assetSrcById: {} as Record<string, string>,
     analysisByPath: {} as Record<string, AssetAnalysis | null>,
     missingAssetIds: [] as string[],
@@ -2030,6 +2036,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipHoldFrame: (hold) => applyEdit(set, get, (d, id) => setClipHoldFrame(d, id, hold)),
+  setSelectedClipDenoise: (on) => applyEdit(set, get, (d, id) => setClipDenoise(d, id, on)),
   setSelectedClipOriginalAudioVolume: (volume) =>
     applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
   // ⚠️ **見た目パターンを渡す**（`/canon-check` 🔴・`splitClip` と同じ理由）＝どの枠が動画を受けるか、
@@ -2111,6 +2118,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const now = get().doc;
     if (!now || now.projectId !== doc.projectId) return;
     const add = loaded.filter((e): e is [string, string] => e != null);
+    // ノイズを減らした音を**作れなかった**ものを覚える（ADR-0068）＝画面が「外すと元の音で鳴る」と出す（黙って無音にしない）。
+    const failedDenoise = missing.filter((src, i) => src.denoiseAssetId != null && loaded[i] == null).map((src) => audioSourceKey(src));
+    if (failedDenoise.length > 0) set({ denoiseFailedKeys: [...new Set([...get().denoiseFailedKeys, ...failedDenoise])] });
     if (add.length === 0) return;
     set({ audioSrcByKey: { ...get().audioSrcByKey, ...Object.fromEntries(add) } });
   },
@@ -3155,6 +3165,14 @@ function withoutAnalysisOf<T>(byKey: Record<string, T>, relPaths: readonly strin
  * 読めないものは `null`＝その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
  */
 async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[string, string] | null> {
+  // **ノイズを減らした作り置き**（ADR-0068）＝先に作り置きをそろえ、そのファイルを鳴らす（書き出しはパスで同じファイルを読む）。
+  // ⚠️ 中身は文字列にしない（動画の音は長い）＝表示用の URL で鳴らす。
+  if (src.denoiseAssetId) {
+    const path = assetPathOf(doc, src.denoiseAssetId);
+    const rel = path ? await ensureDenoisedAudio(doc.projectId, path) : null;
+    const display = rel ? await assetDisplayUrl(doc.projectId, rel) : null;
+    return display ? [audioSourceKey(src), display] : null;
+  }
   const url = src.voicePath
     ? await readVoiceDataUrl(doc.projectId, src.voicePath)
     : src.bundledBgmId

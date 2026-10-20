@@ -8,7 +8,7 @@
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { isGoneGeneratedVoice } from '../voice/goneVoices';
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, denoisedCachePath, denoiseSourceKey, denoisesClip, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
 import { clampVolume } from '../voice/audioMix';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
@@ -224,10 +224,13 @@ export function timelineAudioRuns(
     // 分けて書くと「なぜ違うのか」を毎回確かめることになる（式は1本にしておく）。
     const pts = clipVolumePointsForExport(doc, clip, auto, duckSpans).points;
     const expr = volumeExpr(gain === 1 ? pts : pts.map((p) => ({ ...p, volume: p.volume * gain })));
+    // **ノイズを減らす部品**（ADR-0068）＝作り置きを**パスで**渡す（プレビューと同じファイル・中身を文字列にしない）。
+    const denoisedPath = denoisesClip(doc, clip) && clip.assetId ? denoisedPathOf(doc, clip.assetId) : undefined;
     runs.push({
       clipId: clip.id,
-      sourceKey,
-      fileExt: audioFileExtOf(clip, doc),
+      ...(denoisedPath && clip.assetId
+        ? { sourceKey: denoiseSourceKey(clip.assetId), assetPath: denoisedPath, fileExt: DENOISED_EXT }
+        : { sourceKey, fileExt: audioFileExtOf(clip, doc) }),
       delaySec: clip.startSec,
       playSec: clipEndSec(clip) - clip.startSec,
       sourceStartSec: clip.sourceStartSec ?? 0,
@@ -249,13 +252,15 @@ export function timelineAudioRuns(
     const path = doc.assets.find((a) => a.assetId === org.assetId)?.filePath;
     if (!path) continue; // 保存先が判らない＝渡すものが無い（ファイルの欠けは Rust 側が理由つきで断る）
     const clip = placement.clip;
+    // **ノイズを減らした元の音**（ADR-0068）＝直接置きだけ（差し込み口は対象外）。プレビューと同じ作り置きを鳴らす。
+    const denoised = placement.layerId == null && denoisesClip(doc, clip);
     runs.push({
       // ⚠️ **置き場所ごとに別の音**（段3b）＝1つの部品に差し込み口ぶんの動画がありうるので、
       // 部品 id だけだと同じ id の run が並び、鳴らす側で見分けられない。
       clipId: placement.layerId == null ? clip.id : `${clip.id}/${placement.layerId}`,
-      sourceKey: audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
-      assetPath: path,
-      fileExt: extOf(path),
+      sourceKey: denoised ? denoiseSourceKey(org.assetId) : audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
+      assetPath: denoised ? denoisedCachePath(path) : path,
+      fileExt: denoised ? DENOISED_EXT : extOf(path),
       delaySec: clip.startSec,
       // ⚠️ **使える長さで頭打ち**＝「ここまで」で切った動画の音が、その先まで鳴り続けない
       //（絵は最後のコマで凍るので、音だけ流れると食い違う）。
@@ -269,6 +274,15 @@ export function timelineAudioRuns(
     });
   }
   return { runs, duckMerged: fitted.merged };
+}
+
+/** ノイズを減らした作り置きの拡張子（ADR-0068・`denoisedCachePath` と同じ）。 */
+const DENOISED_EXT = 'flac';
+
+/** 素材のノイズを減らした作り置きのパス（素材が見つからなければ `undefined`）。 */
+function denoisedPathOf(doc: TimelineProject, assetId: string): string | undefined {
+  const path = doc.assets.find((a) => a.assetId === assetId)?.filePath;
+  return path ? denoisedCachePath(path) : undefined;
 }
 
 /**

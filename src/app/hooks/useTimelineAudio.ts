@@ -2,7 +2,7 @@
 // 「その瞬間に何がどの音量・速度で鳴るか」は domain の純粋関数（`audioCuesAt`）が決める＝時刻から一意に
 // 決まるので、途中から再生してもシークしても同じ結果になる（絵の `playbackTick` と同じ考え方）。
 import { useEffect, useRef } from "react";
-import { audioCuesAt, audioLoops, audioSourceKeyOfClip, soloFilteredCues } from "../../domain/timeline/audio";
+import { audioCuesAt, audioLoops, playedAudioKeyOfClip, soloFilteredCues } from "../../domain/timeline/audio";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
 import { keepsPlayingWhileHidden } from "./playbackPulse";
@@ -78,7 +78,8 @@ export function useTimelineAudio(enabled = true): void {
     for (const cue of cues) {
       if (failedRef.current.has(cue.clipId)) continue;
       const clip = doc.clips.find((c) => c.id === cue.clipId);
-      const key = clip ? audioSourceKeyOfClip(clip) : null;
+      // ⚠️ **鳴らす音の鍵**（ADR-0068）＝ノイズを減らす部品は作り置き（動画の元の音もここで鳴る）。
+      const key = clip ? playedAudioKeyOfClip(doc, clip) : null;
       const src = key ? audioSrcByKey[key] : undefined;
       if (!clip || !src) continue; // 音源がまだ無い（読み上げ未作成・読み込み失敗）＝鳴らすものが無い
       let el = playing.get(cue.clipId);
