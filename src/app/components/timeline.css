@@ -901,9 +901,13 @@
   background: var(--color-surface);
 }
 
-/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒:コマが入る幅・数字の幅をそろえて桁が揺れない。 */
+/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒:コマが入る幅・数字の幅をそろえて桁が揺れない。
+   ⚠️ **幅は中身だけで決める**（`content-box`）＝詰め物込みの幅にすると、詰めた表示（`.dense .input` の左右 8px）が
+   詰め物を広げて中身が約6字ぶんになり、「0:00:00」の最後の字が切れていた（2026-10-20 実機）。
+   ⚠️ **8字**＝分が2桁（「10:00:00」）でも入る。 */
 .clock-field {
-  width: 7.5ch;
+  box-sizing: content-box;
+  width: 8ch;
   padding: 2px 6px;
   font-variant-numeric: tabular-nums;
   text-align: right;
