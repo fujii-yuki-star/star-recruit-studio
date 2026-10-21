@@ -93,9 +93,10 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+4**（ADR-0067）＝列の音量（`timeline-row-volume`・その場で直す欄 `timeline-row-volume-input`）とソロ（`timeline-row-solo`）、
     //   列の音量の札は常に濃く出すので `timeline-row-toggle--on` を文字のまま書いた（以前は条件の式の中だけ）。
     // ⚠️ **+1**（#1186 ②）＝帯のキーフレームの印（`timeline-clip-key`）。いまの時刻の `--current` は式で付ける断片なので数えない。
+    // ⚠️ **+1**（α 最終点検 2026-10-21）＝どの欄にも属さない返事の置き場（`timeline-flash-stack`）＝右下に重ねて、欄の見出しを覆わない。
     // ⚠️ **+5**（α 最終点検 2026-10-21・狭い窓の崩れ）＝流れの帯の並べる器（`flow-bar-grid`）・表を持つ画面の印（`content-with-yuko--table`）・
     //   見た目パターンの2列（`looks-layout`）・仕上がり確認の「…」（`preview-tools-more`）・倍率の数字（`preview-zoom-label`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(231);
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(232);
   });
 });
 

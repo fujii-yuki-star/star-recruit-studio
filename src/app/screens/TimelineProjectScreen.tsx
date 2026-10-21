@@ -7481,8 +7481,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         {/* **操作したその場の返事**は**操作した欄の中**に出す（ADR-0034 決定10・#869）。
             ここに残るのは**どの欄にも属さない返事**＝画面全体に効く断り（書き出し中・再生中・
             対象が見つからない）と、**行き先の欄を閉じている**とき（出しても見えない＝§2-5）。
-            置き方は欄のすぐ下＝下へ流すと、恒常の警告が出ているときに画面外へ落ちて
-            **同じ操作を繰り返す**（§2-5・ADR-0026④）。上に積まない（編集の場所を狭めない）。 */}
+            置き方は**編集の場所の右下に重ねる**（α 最終点検 2026-10-21・実機）＝
+            ⚠️ 以前は流れに置いていたので、欄を `absolute` で貼った囲いの**一番上**に出て、欄の見出し（タブ）を覆って押せなくしていた。
+            ⚠️ **下に場所を取って並べない**＝出る・消えるたびに欄の高さが変わり、押した帯が指の下でずれる。
+            下へ流すと画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。上に積むと編集の場所が狭まる。 */}
+        <div className="timeline-flash-stack">
         {(voiceError || flashBlockedMessage || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice || previewWindow.error) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
@@ -7506,6 +7509,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             <button className="btn btn-ghost text-sm" onClick={dismissOpenNotice}>閉じる</button>
           </div>
         )}
+        </div>
       </div>
 
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。
