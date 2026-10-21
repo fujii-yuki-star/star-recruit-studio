@@ -220,6 +220,32 @@ button {
     grid-template-columns: 1fr 260px;
   }
 }
+/* **狭い窓ではゆうこを下へ回す**（α 最終点検 2026-10-21・実機）＝最小の窓（1024 幅）では本文の最小幅と
+   ゆうこの幅の和が中身の幅を越え、**ページが横に流れていた**（ホーム・たたき台）。 */
+@media (max-width: 1120px) {
+  .content-with-yuko {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* 見た目パターンの管理＝一覧と見本の2列。狭い窓では見本を下へ回す（ゆうこの欄と同じ境目）。 */
+.looks-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--gap-lg);
+  align-items: start;
+}
+@media (max-width: 1120px) {
+  .looks-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* **表を持つ画面**（たたき台の台本表）はもっと早く下へ回す＝既定の窓（1280）でも表が 670px 前後に押し込まれ、
+   見た目パターンの名前・場面名が**1字ずつ縦に折れていた**（実機）。 */
+@media (max-width: 1440px) {
+  .content-with-yuko--table {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 
 /* ===== サイドバー ===== */
 .sidebar {
@@ -371,8 +397,10 @@ button {
 }
 
 /* ===== トップバー ===== */
+/* ⚠️ **高さは下限で持つ**（α 最終点検 2026-10-21・実機）＝場面編集の見出しの行は道具が多く、最小の窓では
+   2行に折り返す。高さを決め打っていたので、折り返した道具が**上下にはみ出して**流れの帯と欄に重なっていた。 */
 .topbar {
-  height: 60px;
+  min-height: 60px;
   flex-shrink: 0;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
@@ -1022,8 +1050,10 @@ button.badge {
   white-space: nowrap;
   font-size: 12px;
 }
-/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。 */
+/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。
+   ⚠️ **同じ道具を同じ畳み方で**（レビュー 🟡）＝ここも幅を測られる器にする。そうしないと狭い2画面目で道具が切れたまま押せない。 */
 .preview-window-bar {
+  container-type: inline-size;
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
@@ -1265,14 +1295,18 @@ button.badge {
 }
 
 /* セグメント切替 */
+/* ⚠️ **選択肢が多いときは行を折り返す**（α 最終点検 2026-10-21・実機）＝見た目パターンの「場面の種類」（11個）が
+   既定の窓（1280）でも幅に押し込まれ、**1つずつの名前が1字ずつ縦に折れていた**。名前は折らず（`nowrap`）、並びのほうを折り返す。 */
 .segment {
   display: inline-flex;
+  flex-wrap: wrap;
   background: var(--color-surface-alt);
   border-radius: var(--radius-sm);
   padding: 3px;
   gap: 3px;
 }
 .segment button {
+  white-space: nowrap;
   border: none;
   background: transparent;
   padding: 7px 14px;
@@ -1611,6 +1645,38 @@ button.badge {
 .panel-frame-head-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
 /* **見出しの行の道具**（実機指摘 2026-09-30）＝欄の中身の上に重ねない（重ねると絵と被って押し間違える）。
    折り返さない＝見出しの高さが変わると中身の大きさが変わる（#1261 の繰り返しを作らない）。狭いときは道具の側が縮む。 */
+/* 見出しの行は**自分の幅で道具を畳む**（`@container`）＝欄の幅は配置で変わるので、窓の幅（`@media`）では決められない。 */
+.panel-frame-head {
+  container-type: inline-size;
+}
+/* 仕上がり確認の「…」＝並べきれない道具の受け皿（α 最終点検 2026-10-21・実機）。広いときは出さない。
+   ⚠️ 境目は実測＝道具を全部並べると約 500px（倍率 223・端の目安 109・大きく見る 68・別の窓 83＋すき間）、
+   見出しの名前（約 80px）と「⤢⋮」（52px）と余白を足して **680px**。狭い側は倍率の「全体表示」（78px）まで畳む。 */
+.preview-view-tools .preview-tools-more {
+  display: none;
+}
+@container (max-width: 680px) {
+  .preview-view-tools [data-preview-tool="safe"],
+  .preview-view-tools [data-preview-tool="big"],
+  .preview-view-tools [data-preview-tool="window"] {
+    display: none;
+  }
+  .preview-view-tools .preview-tools-more {
+    display: inline-flex;
+  }
+}
+@container (max-width: 440px) {
+  .preview-view-tools [data-preview-tool="fit"] {
+    display: none;
+  }
+}
+/* 最小の窓（1024 幅）の既定の配置＝見出しの行は約 250px。倍率の数字（「全体（9%）」約 77px）も外し、
+   縮める・広げる・「…」だけを残す（数字は読むだけの表示＝押す物を切らすより良い）。 */
+@container (max-width: 300px) {
+  .preview-view-tools .preview-zoom-label {
+    display: none;
+  }
+}
 .panel-frame-head-tools {
   display: flex;
   align-items: center;
@@ -1862,8 +1928,8 @@ button.badge {
   font-size: 14px;
 }
 .dense .topbar {
-  height: 44px;
-  padding: 0 var(--gap-lg);
+  min-height: 44px;
+  padding: 4px var(--gap-lg);
 }
 .dense .page-head {
   margin-bottom: var(--gap);
@@ -1885,11 +1951,29 @@ button.badge {
 /* ── 流れの帯（ADR-0048 追補・2026-10-05）＝戻る（左）・段（中）・進む（右）を5画面で同じ形に。
    ⚠️ 両脇は同じ幅を取り合う＝段の表示が画面の真ん中から動かない（戻る／進むの文言の長さで揺れない）。 */
 .flow-bar {
+  container-type: inline-size;
+  margin-bottom: var(--gap-sm);
+}
+.flow-bar-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: "back steps next";
   align-items: center;
   gap: var(--gap-sm);
-  margin-bottom: var(--gap-sm);
+}
+.flow-bar-grid > .flow-bar-side { grid-area: back; }
+.flow-bar-grid > .flow-bar-steps { grid-area: steps; }
+.flow-bar-grid > .flow-bar-side--end { grid-area: next; }
+/* **狭いときは段を2行目へ下ろす**（α 最終点検 2026-10-21・実機）＝最小の窓（1024 幅）では、両脇が
+   `minmax(0, 1fr)` で 0 まで縮み、**進む／戻るのボタンが段の上に重なって**「4 公開前チェック」等を隠していた（5画面すべて）。
+   境目＝段（実測 482px）＋両脇の最も長いボタン（「この内容で確認・編集する」実測 210px）×2 ＋すき間（12px）＝914px。
+   ⚠️ 大きくしすぎない＝既定の窓（1280）でたたき台・公開前チェックの帯は 929px＝1行に収まるのに2行へ下りる（実機）。 */
+@container (max-width: 916px) {
+  .flow-bar-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "back next" "steps steps";
+  }
+  .flow-bar-grid > .flow-bar-steps { justify-self: center; }
 }
 .flow-bar-side {
   display: flex;

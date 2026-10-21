@@ -40,6 +40,9 @@ interface DraftProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
+/** 台本表の最小の幅。これより狭いときは表の中で横に流す（列が1字ずつ縦に折れない幅＝実機で見た値）。 */
+const DRAFT_TABLE_MIN_WIDTH_PX = 760;
+
 export function DraftScreen({ onNavigate }: DraftProps) {
   // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const sceneBulkVoice = useSceneBulkVoice();
@@ -165,7 +168,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
       />
       <ExportLockBanner onNavigate={onNavigate} />
       {notice}
-      <div className="content-with-yuko" inert={isExporting}>
+      {/* 表を持つので、ゆうこは早めに下へ回す（`content-with-yuko--table`・α 最終点検 2026-10-21）。 */}
+      <div className="content-with-yuko content-with-yuko--table" inert={isExporting}>
         <div>
           <PageHead
             title="動画のたたき台を確認"
@@ -231,8 +235,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             ))}
 
           {/* 台本表 */}
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <table className="table">
+          {/* ⚠️ **最小幅を持たせ、狭いときは表の中で横に流す**（α 最終点検 2026-10-21・実機）＝最小の窓では列が押し込まれて
+              名前が1字ずつ縦に折れ、右端の「セリフ」「⋮」が欄の外で切れていた（押せない）。ページは流さず、表だけを流す。 */}
+          <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+            <table className="table" style={{ minWidth: DRAFT_TABLE_MIN_WIDTH_PX }}>
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>順番</th>

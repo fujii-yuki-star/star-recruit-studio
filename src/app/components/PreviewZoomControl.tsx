@@ -6,6 +6,7 @@
 //
 // ⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝倍率は**画面を離れたら戻す**。
 // 動画ごとに覚えると、別の動画を開いたときに前の倍率で始まって「なぜか拡大されている」になる。
+import { PREVIEW_TOOL } from "./previewTools";
 import { canStepZoom, stepZoom, zoomPercentOf, type PreviewZoom } from "../../domain/preview/previewZoom";
 
 export function PreviewZoomControl({
@@ -41,7 +42,7 @@ export function PreviewZoomControl({
       </button>
       {/* ⚠️ **いま何%で見えているかを出す**＝フィットは 100% とは限らない（領域で変わる）ので、
           「フィット」とだけ出すと**どれくらいで見ているか**が分からない。 */}
-      <span className="text-sm text-muted" style={{ minWidth: "5em", textAlign: "center" }}>
+      <span className="text-sm text-muted preview-zoom-label" style={{ minWidth: "5em", textAlign: "center" }}>
         {zoom === "fit" ? `全体（${percent}%）` : `${percent}%`}
       </span>
       <button
@@ -54,6 +55,8 @@ export function PreviewZoomControl({
         ＋
       </button>
       <button
+        // 欄が狭いと「…」へ畳む（タイムライン編集の仕上がり確認・`previewTools.ts`）。ほかの画面では印だけで効かない。
+        data-preview-tool={PREVIEW_TOOL.fit}
         className="btn btn-ghost text-sm"
         // ⚠️ **戻す先は「全体」**＝倍率の数字ではなく**領域に合わせる**状態へ戻す
         //（100% に戻すと、狭い領域では画面からはみ出したままになる）。
