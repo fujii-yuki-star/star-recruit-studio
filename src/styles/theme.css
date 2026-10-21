@@ -1732,6 +1732,30 @@ button.badge {
   z-index: 3;
   margin-bottom: 0;
 }
+/* **どの欄にも属さない返事**の置き場（α 最終点検 2026-10-21・実機）＝編集の場所の**右下に重ねる**。
+   ⚠️ 流れに置くと、欄を `absolute` で貼った囲いの**一番上**に出て、欄の見出し（タブ）を覆っていた。
+   ⚠️ **下に場所を取らない**＝出る・消えるたびに欄の高さが変わると、押した帯が指の下でずれる。
+   ⚠️ **高さに上限**＝返事が重なっても欄を覆い尽くさない（あふれは中で流す）。空のときは場所を取らない。 */
+.main-scroll--fixed .timeline-flash-stack {
+  position: absolute;
+  right: var(--gap-sm);
+  bottom: var(--gap-sm);
+  z-index: 4;
+  width: min(560px, 60%);
+  max-height: 40%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.main-scroll--fixed .timeline-flash-stack:empty {
+  display: none;
+}
+.main-scroll--fixed .timeline-flash-stack > .notice {
+  position: static;
+  margin: 0;
+  box-shadow: var(--shadow-lg);
+}
 
 /* つかんで運んでいるものの影（#684）。指の先に付いて回る。**当たり判定は持たない**＝落とし先を隠さない。 */
 .drag-ghost {
