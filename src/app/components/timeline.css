@@ -59,7 +59,7 @@
 }
 
 /* 畳む境目＝**「並び」の欄の幅**（窓の幅ではない＝欄の幅は配置で変わる）。実測（1280×800 の既定の配置で欄 974px）から：
-   いつも出す物 約 440px ＋ 列を足す・吸着の一文 約 470px ＋ ここから始める／終わる・目印 約 265px ＋ 絵を止める〜範囲・列の高さ 約 700px。
+   いつも出す物 約 470px ＋ ここから始める／終わる・吸着の一文 約 435px ＋ 列を足す・目印 約 290px ＋ 絵を止める〜範囲・列の高さ 約 700px。
    測る器は `.timeline-panel`（`container-type` はそちらの規則に置く）。 */
 .timeline-toolbar [data-fold="idle"] {
   display: none;
@@ -73,7 +73,7 @@
     display: none;
   }
 }
-@container (max-width: 1179px) {
+@container (max-width: 1199px) {
   .timeline-toolbar [data-fold="mid"] {
     display: none;
   }

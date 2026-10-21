@@ -14,6 +14,8 @@
     { "clickText": "ゆうこ（笑顔）", "say": "土台を置く", "afterMs": 2000 },
     { "fieldLabel": "長さ（秒）", "type": "10", "enter": true, "say": "土台を10秒に", "afterMs": 1800 },
 
+    { "clickText": "並びのほかの操作", "say": "ほかの操作を開く", "afterMs": 700 },
+
     { "clickText": "映像の列を足す", "say": "列を足す", "afterMs": 1500 },
     { "clickText": "ゆうこ（案内）", "say": "上の列に重ねる", "afterMs": 2000 },
     { "fieldLabel": "長さ（秒）", "type": "10", "enter": true, "say": "小窓も10秒に", "afterMs": 1500 },

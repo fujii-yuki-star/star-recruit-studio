@@ -4474,7 +4474,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       label: `ここから始める${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
       guard: trimAtPlayheadGuard,
       title: "選んだ部品の始まりを、再生位置までそろえます",
-      fold: ARRANGE_FOLD.mid,
+      fold: ARRANGE_FOLD.narrow,
       sepBefore: true,
       onClick: () => trimSelectedClipsAt("start", playheadSec),
     },
@@ -4483,7 +4483,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       label: `ここで終わる${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
       guard: trimAtPlayheadGuard,
       title: "選んだ部品の終わりを、再生位置までそろえます",
-      fold: ARRANGE_FOLD.mid,
+      fold: ARRANGE_FOLD.narrow,
       onClick: () => trimSelectedClipsAt("end", playheadSec),
     },
     // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、言わないと
@@ -4563,8 +4563,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     { key: "marker", label: MARKER_ADD_LABEL, guard: markerGuard, title: MARKER_ADD_TITLE, shortcut: SHORTCUT_KEYS.marker, fold: ARRANGE_FOLD.mid, onClick: addMarkerAtPlayhead },
     // ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、帯の入る高さを削っていた。
     // ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、欄だけを見ていて列を足せない、に戻る。
-    { key: "addVisual", label: "映像の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.narrow, sepBefore: true, onClick: () => addTrack(TRACK_KIND.visual) },
-    { key: "addAudio", label: "音の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.narrow, onClick: () => addTrack(TRACK_KIND.audio) },
+    // ⚠️ **既定の窓では「…」へ**（利用者判断 2026-10-21）＝業界の型どおり、再生位置で詰める操作（ここから始める／ここで終わる）を前に出す。
+    //   列は素材を落とせばできる。「…」も欄の中なので #767 は満たす。
+    { key: "addVisual", label: "映像の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.mid, sepBefore: true, onClick: () => addTrack(TRACK_KIND.visual) },
+    { key: "addAudio", label: "音の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.mid, onClick: () => addTrack(TRACK_KIND.audio) },
   ];
   // 列の高さ（`select`）は「…」ではほかの2つを項目にする（いまの値は押しても何も起きない）。
   const laneHeightMenuItems: ContextMenuItem[] = TIMELINE_LANE_HEIGHT_ORDER.filter((h) => h !== laneHeight).map((h) => ({
