@@ -397,8 +397,10 @@ button {
 }
 
 /* ===== トップバー ===== */
+/* ⚠️ **高さは下限で持つ**（α 最終点検 2026-10-21・実機）＝場面編集の見出しの行は道具が多く、最小の窓では
+   2行に折り返す。高さを決め打っていたので、折り返した道具が**上下にはみ出して**流れの帯と欄に重なっていた。 */
 .topbar {
-  height: 60px;
+  min-height: 60px;
   flex-shrink: 0;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
@@ -1924,8 +1926,8 @@ button.badge {
   font-size: 14px;
 }
 .dense .topbar {
-  height: 44px;
-  padding: 0 var(--gap-lg);
+  min-height: 44px;
+  padding: 4px var(--gap-lg);
 }
 .dense .page-head {
   margin-bottom: var(--gap);

@@ -7,6 +7,7 @@
 // - ゆうこの欄・見た目パターンの見本：最小の窓で、2列の和が中身の幅を越えてページが横に流れていた。
 // - たたき台の台本表：既定の窓（1280）でも列が押し込まれ、名前が1字ずつ縦に折れていた／最小の窓では右端の操作が切れていた。
 // - 選択肢の並び（`segment`）：見た目パターンの「場面の種類」（11個）が1字ずつ縦に折れていた。
+// - 見出しの行（`topbar`）：場面編集の道具が最小の窓で2行に折り返し、高さの決め打ちを越えて上下にはみ出していた。
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -82,5 +83,16 @@ describe("選択肢の並びは名前を折らず、並びを折り返す", () =
   it("segment", () => {
     expect(rule(".segment")).toMatch(/flex-wrap:\s*wrap/);
     expect(rule(".segment button")).toMatch(/white-space:\s*nowrap/);
+  });
+});
+
+describe("見出しの行は折り返した道具のぶん伸びる", () => {
+  it("topbar は高さを決め打たない（下限で持つ）", () => {
+    for (const sel of [".topbar", ".dense .topbar"]) {
+      const r = rule(sel);
+      expect(r, `${sel} が無い`).not.toBe("");
+      expect(r, `${sel} が高さを決め打っている`).not.toMatch(/(^|[^-])height:/m);
+      expect(r).toMatch(/min-height:/);
+    }
   });
 });
