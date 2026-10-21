@@ -28,6 +28,15 @@ function isWordChar(ch: string | undefined): boolean {
   return (ch.codePointAt(0) ?? 0) < 0x2000 && !WHITESPACE.test(ch);
 }
 
+/**
+ * **行頭に来てはいけない字**（行頭禁則・JIS X 4051 の型＝句読点・閉じ括弧・音引き・小書きのかな・繰り返し記号など）。
+ * 2026-10-21 のコント作例で「もはや別人／。」と句点だけが次の行の頭へ落ちた（ワープロ・DTP では起きない）。
+ * ⚠️ 半角の記号（`.` `!` `)` など）は欧文の単語の扱い（`isWordChar`）で既に前の語と一緒に送られる＝ここには全角だけ。
+ */
+const NO_LINE_START = new Set([...'、。，．・：；？！ー―‐…‥〜～」』）］｝〕〉》】〙〗ゝゞヽヾ々〻ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ']);
+/** **行末に残してはいけない字**（行末禁則＝開き括弧）。 */
+const NO_LINE_END = new Set([...'「『（［｛〔〈《【〘〖']);
+
 // 幅(px)に収まるよう行へ分割する（全角/半角を区別）。字間（#264）も数える（#928）。
 //
 // ⚠️ **字間を数えないと、はみ出し判定が実際より狭く見る**＝字間を広げた文字は横に長くなるのに、
@@ -90,6 +99,25 @@ export function wrapText(
           if (head > 0 && head < cur.length && carryW + w <= maxWidth) {
             carry = cur.slice(head);
             line = cur.slice(0, head).join('');
+          }
+        }
+        // ⚠️ **行頭禁則・行末禁則**（追い出し＝ワープロ・DTP の既定の型）：行頭に来てはいけない字が次の行の頭に来るなら、
+        //   前の行の末尾の字を一緒に送る（送る字も禁則の字ならさらに戻る＝「お」」。」の並び）。行末に開き括弧が残るなら次の行へ送る。
+        //   ⚠️ 送った先でも入らないなら送らない（箱からはみ出さない側＝単語を送るときと同じ判断）。
+        if (!isSpace && carry.length === 0) {
+          const cur = [...line];
+          let head = cur.length;
+          if (NO_LINE_START.has(chars[i])) {
+            head -= 1;
+            while (head > 0 && NO_LINE_START.has(cur[head])) head -= 1;
+          }
+          while (head > 0 && NO_LINE_END.has(cur[head - 1])) head -= 1;
+          if (head > 0 && head < cur.length) {
+            const carryW = cur.slice(head).reduce((sum, ch, k) => sum + widthOf(ch) + (k > 0 ? spacingPx : 0), 0);
+            if (carryW + w <= maxWidth) {
+              carry = cur.slice(head);
+              line = cur.slice(0, head).join('');
+            }
           }
         }
         lines.push(line);
