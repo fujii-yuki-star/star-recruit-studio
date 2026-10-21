@@ -5051,7 +5051,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   </span>
                 )}
                 <button
-                  className="btn btn-ghost btn-sm timeline-toolbar-more"
+                  className="btn btn-ghost btn-sm"
                   aria-label="並びのほかの操作"
                   title="ここに並びきらない操作"
                   aria-haspopup="menu"

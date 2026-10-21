@@ -56,10 +56,8 @@
 }
 
 /* 畳む境目＝**「並び」の欄の幅**（窓の幅ではない＝欄の幅は配置で変わる）。実測（1280×800 の既定の配置で欄 974px）から：
-   いつも出す物 約 440px ＋ 列を足す・吸着の一文 約 470px ＋ ここから始める／終わる・目印 約 265px ＋ 絵を止める〜範囲・列の高さ 約 700px。 */
-.timeline-panel {
-  container-type: inline-size;
-}
+   いつも出す物 約 440px ＋ 列を足す・吸着の一文 約 470px ＋ ここから始める／終わる・目印 約 265px ＋ 絵を止める〜範囲・列の高さ 約 700px。
+   測る器は `.timeline-panel`（`container-type` はそちらの規則に置く）。 */
 .timeline-toolbar [data-fold="idle"] {
   display: none;
 }
@@ -174,6 +172,8 @@
    帯だけを縦に流す。⚠️ **欄ごと流さない**＝実機で列を12本にすると、帯を見に下へ送った瞬間に
    「列を足す」が画面の外へ出て**列を足せなくなった**（欄の器＝`.panel-frame-body--fill`）。 */
 .timeline-panel {
+  /* 道具の行を欄の幅で畳むための器（ADR-0048 追補 2026-10-21）。 */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
