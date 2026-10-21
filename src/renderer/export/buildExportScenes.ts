@@ -1,6 +1,6 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
+import { TRANSITION_TYPE, type Fit } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -12,6 +12,7 @@ import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming
 import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
+import { fontFamilyForId, resolveFontId } from '../../domain/font/fontCatalog';
 import { NARRATOR_CREDIT, sceneCreditText } from '../../domain/voice/narratorCredit';
 import type { CreditDisplay } from '../../domain/voice/creditDisplay';
 import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
@@ -23,15 +24,26 @@ import type { VideoSlotInfo } from './findVideoSlot';
 import { afterAnimNeverPlaysForSlots } from './videoSlotPlacement';
 
 /** ResolvedTransition を FFmpeg xfade の transition 名へ（none はハードカット＝"none"）。 */
-function xfadeName(r: ResolvedTransition): string {
-  if (r.type === TRANSITION_TYPE.fade) return 'fade';
-  if (r.type === TRANSITION_TYPE.slide) {
-    if (r.direction === TRANSITION_DIRECTION.right) return 'slideright';
-    if (r.direction === TRANSITION_DIRECTION.up) return 'slideup';
-    if (r.direction === TRANSITION_DIRECTION.down) return 'slidedown';
-    return 'slideleft';
+export function xfadeName(r: ResolvedTransition): string {
+  switch (r.type) {
+    case TRANSITION_TYPE.none:
+      return 'none';
+    case TRANSITION_TYPE.fade:
+      return 'fade';
+    // ⚠️ **向きの綴りは FFmpeg の既成名**（`slideleft` 等）＝ワイプも同じ向きの言葉（ADR-0066 決定1＝実測で
+    //   「左へ」は次の場面が右から入る＝スライドと同じ向き）。
+    case TRANSITION_TYPE.slide:
+    case TRANSITION_TYPE.wipe:
+      return `${r.type}${r.direction}`;
+    // ズーム＝`zoomin`（ADR-0066 決定2＝前の場面へ寄ってから次へ溶ける）。
+    case TRANSITION_TYPE.zoom:
+      return 'zoomin';
+    default: {
+      // 種別が増えたらここで落ちる（黙って 'none'＝ハードカットにしない）。
+      const _exhaustive: never = r.type;
+      return _exhaustive;
+    }
   }
-  return 'none';
 }
 
 /** 動画ありシーンの書き出し入力（infrastructure の ExportVideoInput と構造一致）。 */
@@ -159,8 +171,11 @@ export interface ExportOptions {
    * width/height は1組で受ける（片方だけ指定で縦横比が崩れるのを型で防ぐ）。
    */
   outputSize?: { width: number; height: number };
-  /** 場面ごとの描画フォントを返す（場面→動画全体で解決済み・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
-  fontFamilyFor?: (scene: Scene) => string;
+  /**
+   * 動画全体の字体（`videoSettings.fontId`）。場面→動画全体→既定の順で解く（`layoutScene` が文字ごとに解く＝
+   * 描画の字体と折返しの字幅が同じ1つ・ADR-0063）。未指定は既定の字体。
+   */
+  projectFontId?: string | null;
   /** クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
   credit?: string;
   /**
@@ -229,6 +244,7 @@ export async function buildExportScenes(
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
     opts.withSubtitle === false ? (it) => !isSubtitleItem(it) : undefined;
+  const projectFontId = opts.projectFontId;
   // クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
   const baseCredit = opts.credit ?? NARRATOR_CREDIT;
   // ⚠️ **見せ方（ADR-0025・#359）は場面ごとに決める**＝静止の場面は1枚の絵なので、途中で消すには
@@ -256,7 +272,7 @@ export async function buildExportScenes(
     const template = templateById.get(scene.templateId);
     if (template) {
       included.push(scene);
-      const layout = layoutScene(scene, template);
+      const layout = layoutScene(scene, template, { projectFontId });
       // この場面で使う画像だけをディスクから data URL 化（場面ごとに解決→描画後に破棄＝全画像の一括ロードによる
       // 瞬間メモリ spike を避ける・#143）。動画スロットは clipRelPath 経路（ADR-0006）なので対象外。
       // トレードオフ：同一画像が複数場面に出ると場面ごとに読み直す（I/O は増えうる）。data URL を常駐させない
@@ -275,7 +291,7 @@ export async function buildExportScenes(
       );
       const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
       const videoSlots = videoSlotsFor?.(scene) ?? [];
-      const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
+      const sceneFontFamily = fontFamilyForId(resolveFontId(scene.fontId, projectFontId)); // 素材が無い枠の仮の文字（文字アイテムは `textFont`）
       const slotIds = videoSlots.map((v) => v.slotLayerId);
       const splitM =
         videoSlots.length > 0
@@ -332,7 +348,7 @@ export async function buildExportScenes(
             const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
-                ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
+                ? layoutScene(scene, template, { projectFontId, subtitleText: spec.subtitleText, subtitleSegment: spec })
                 : layout;
             const segSplit = splitVideoSceneSvgMulti(
               segLayout,
@@ -451,7 +467,7 @@ export async function buildExportScenes(
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
               if (f % 4 === 0 || f === frameCount - 1) onProgress?.(i, scenes.length, (f + 1) / frameCount);
-              const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              const frameLayout = layoutScene(scene, template, { projectFontId, timeSec: f / fps, animations: sceneAnims });
               // アニメ区間のスロット画像＝この時刻の実フレーム（無ければ assetSrc＝サムネ）。プレビューと同じ layoutToSvg で描く。
               let frameAssetSrc = assetSrc;
               if (clipFrameByAsset.size > 0) {
@@ -509,7 +525,7 @@ export async function buildExportScenes(
             });
             // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
             if (hasSettled) {
-              const settledLayout = layoutScene(scene, template, { timeSec: animEnd, animations: sceneAnims });
+              const settledLayout = layoutScene(scene, template, { projectFontId, timeSec: animEnd, animations: sceneAnims });
               // #434 の精神：settled（アニメ収束）レイアウトの分割に失敗したら基準 splitM で黙って代替せず停止する
               // （代替すると動画位置/字幕が settled でなく基準のまま焼かれる＝壊れた成功。通常来ない防御）。
               const sSplit = splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
@@ -567,7 +583,7 @@ export async function buildExportScenes(
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
               if (f % 4 === 0 || f === frameCount - 1) onProgress?.(i, scenes.length, (f + 1) / frameCount);
               // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。下/中/上層に切り出して焼く。
-              const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              const frameLayout = layoutScene(scene, template, { projectFontId, timeSec: f / fps, animations: sceneAnims });
               const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
               // #434 の精神：毎フレームの派生 layout の分割に失敗したら、基準 splitM で黙って代替せず停止する
               // （代替するとそのフレームだけ動きが飛ぶ＝壊れた成功。基準で成功済みのため通常来ない防御）。
@@ -672,6 +688,7 @@ export async function buildExportScenes(
                 onProgress?.(i, scenes.length, (segIndex + (f + 1) / frameCount) / specs.length);
               // 場面内の絶対時刻でアニメを補間（プレビューと同一 layoutScene(t)＝パリティ）。行字幕も同フレームに焼き込む。
               const frameLayout = layoutScene(scene, template, {
+                projectFontId,
                 timeSec: spec.startSec + f / fps,
                 animations: sceneAnims,
                 subtitleSegment: spec, // FREE 字幕（ADR-0029）＝掛け合いの現在セグメントで対象解決（プレビュー=書き出し）
@@ -698,7 +715,7 @@ export async function buildExportScenes(
             // 静止区間（従来）：字幕上書きがあれば行字幕で焼き直し、無ければ共有 layout を再利用。
             const segLayout =
               segSubtitle !== undefined
-                ? layoutScene(scene, template, { subtitleText: segSubtitle, subtitleSegment: spec })
+                ? layoutScene(scene, template, { projectFontId, subtitleText: segSubtitle, subtitleSegment: spec })
                 : layout;
             const pngBase64 = await svgToPngDataUrl(
               layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),

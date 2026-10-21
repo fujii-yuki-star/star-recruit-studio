@@ -9,8 +9,9 @@ import { usedTextKeys } from "../domain/template/layerOps";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { missingUserFontIds, usedUserFontIds } from "../domain/font/usedFonts";
+import { sceneGoneVoiceLineCount } from "../domain/voice/goneVoices";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
-import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { sceneLines, sceneNeedsVoice, sceneNeedsVoiceOrRemake } from "../domain/project/narrationLines";
 import { MAIN_ASSET_LAYER_KEYS } from "../domain/template/slotAssign";
 import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
@@ -23,7 +24,7 @@ import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/p
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
-import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage } from "./uiLabels";
+import { RELINK_ASSET_LABEL, formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail, userFontMissingMessage, userFontUnreadableMessage, VOICE_SPEAKER_GONE_MESSAGE } from "./uiLabels";
 import type { VoiceSettings, Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -181,6 +182,12 @@ export function buildPrecheckItems(
    * （場面編集の AI 補助と同じ解決＝`resolveNarrationVoice`）。未指定＝速さ 1.0。
    */
   voiceSettings?: VoiceSettings,
+  /**
+   * 読み上げの音が読めるか（`narrationAudioById` のキーで）。**渡すと、作成済みの印なのに音が読めない場面も
+   * 「声がまだ」に数える**（通し点検 2026-10-16＝声のファイルが消えると「作成済み」と出たまま無音で書き出せた）。
+   * ⚠️ **省略＝調べていない**（`missingAssetIds` と同じ流儀）＝音を読めない場（ブラウザ・検査）で嘘の「要対応」を出さない。
+   */
+  narrationAudioReadable?: (key: string) => boolean,
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const speedOf = (s: Scene): number | undefined => (voiceSettings ? resolveNarrationVoice(s.narration, voiceSettings).speed : undefined);
@@ -235,7 +242,7 @@ export function buildPrecheckItems(
       : { sceneId: hit.firstId, sceneIds: hit.ids, focus: "text" };
   };
 
-  const voice = offending(sceneNeedsVoice);
+  const voice = offending((s) => (narrationAudioReadable ? sceneNeedsVoiceOrRemake(s, narrationAudioReadable) : sceneNeedsVoice(s)));
   items.push(
     voice.nums.length > 0
       ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId, sceneIds: voice.ids }
@@ -301,7 +308,7 @@ export function buildPrecheckItems(
   const laidOut = scenes
     .map((s) => ({ scene: s, template: templateOf(s) }))
     .filter((x): x is { scene: Scene; template: Template } => x.template != null)
-    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template).flatMap((l) => l.items) }));
+    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template, fonts?.projectFontId).flatMap((l) => l.items) }));
 
   // ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
   // 「そう書いたのか」「切れたのか」が分からない。
@@ -437,6 +444,17 @@ export function buildPrecheckItems(
       blocksExport: true,
     });
   }
+  // いま入っていない声で作り済みの読み上げ（ADR-0060 段階3）＝そのまま出すと、鳴る声と名乗るキャラ（クレジット）が食い違う（ADR-0003）。
+  const goneVoices = sceneGoneVoiceLineCount(scenes);
+  if (goneVoices > 0) {
+    items.push({
+      id: "goneVoice",
+      label: "入っていない声",
+      detail: `${VOICE_SPEAKER_GONE_MESSAGE}。`,
+      severity: "action",
+      blocksExport: true,
+    });
+  }
   if (missingFonts.length > 0) {
     items.push({
       id: "missingFont",
@@ -474,7 +492,7 @@ export function buildPrecheckItems(
   // 書き出しは止めない＝「直せば良くなる」警告側（P2-5 のハードブロッカーとは分離）。
   const isSubtitleOverflow = (s: Scene): boolean => {
     const t = templateOf(s);
-    return t != null && subtitleOverflowsCanvas(s, t);
+    return t != null && subtitleOverflowsCanvas(s, t, fonts?.projectFontId);
   };
   const subtitleOverflow = offending(isSubtitleOverflow);
   if (subtitleOverflow.nums.length > 0) {

@@ -4,7 +4,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, REORIENT_COPY_NOTE, reorientCopyLabel, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, voicesClearedMessage } from "../uiLabels";
+import { backupSavedAtLabel, DUPLICATE_FAILED_MESSAGE, REORIENT_COPY_NOTE, reorientCopyLabel, PROJECT_DELETE_FAILED_MESSAGE, PROJECT_OPEN_FAILED_MESSAGE, RESTORE_FAILED_MESSAGE, RESTORE_POINTS_EMPTY, RESTORE_POINTS_UNREADABLE, restoreOfferMessage, unusedFilesLabel, voicesClearedMessage } from "../uiLabels";
 import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { projectBackupTime, restoreProjectBackup } from "../../infrastructure/projectFs";
@@ -18,6 +18,7 @@ import { ExportLockBanner } from "../components/ExportLockBanner";
 import { NoticeZone } from "../components/NoticeZone";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { UnusedFilesPanel } from "../components/UnusedFilesPanel";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { ProjectLoadError } from "../../domain/project/persistence";
@@ -30,7 +31,7 @@ import { CopyIcon, RotateFrameIcon,
   ChevronRightIcon,
   FolderIcon,
   TrashIcon,
-  HistoryIcon, PencilIcon,
+  BroomIcon, HistoryIcon, PencilIcon,
 } from "../components/icons";
 
 interface HomeProps {
@@ -104,6 +105,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const [recovering, setRecovering] = useState(false);
   /** 「前の状態に戻す」を開いている動画と、その時点の一覧（#263 段階2）。 */
   const [restoreFor, setRestoreFor] = useState<{ projectId: string; points: RestorePoint[] } | null>(null);
+  /** 「使っていないファイルを片づける」を開いている動画（ADR-0064）。 */
+  const [cleanupFor, setCleanupFor] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   /** 戻したことで作り直しが要る読み上げの数（0＝知らせるものが無い）。 */
   const [voicesCleared, setVoicesCleared] = useState<{ projectId: string; count: number } | null>(null);
@@ -270,7 +273,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
         if (!alive) return;
         setProjects(list);
         setListError(false);
-        // 一覧の小さな絵（#397）。⚠️ **無い動画は飛ばすだけ**＝古い動画でも一覧は普通に出る。
+        // 一覧の小さな絵（#397）。⚠️ **無い動画は印に戻す**＝道はファイルがあるかを見ずに作るので、読めなかったら
+        //   `<img>` の onError で外す（下）＝古い動画でも一覧は普通に出る。
         // ⚠️ **一覧の表示は待たせない**（絵は後から入る）＝取得に失敗しても一覧は出たまま。
         const found: Record<string, string> = {};
         await Promise.all(
@@ -487,6 +491,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 </div>
               </div>
             )}
+
+            {/* 使っていないファイルを片づける（ADR-0064）＝見せてから選んでもらい、ごみ箱へ移す。 */}
+            {cleanupFor && <UnusedFilesPanel key={cleanupFor} projectId={cleanupFor} onClose={() => setCleanupFor(null)} />}
 
             {/* 前の状態に戻す（#263 段階2）。⚠️ **時点を見せてから選んでもらう**＝
                 どこまで戻るか分からないまま押させない（§2-5）。 */}
@@ -813,6 +820,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                             src={thumbs[p.projectId]}
                             alt=""
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            // ⚠️ **読めなければ印に戻す**＝絵の道は「ファイルがあるか」を見ずに作るので、絵の無い動画
+                            //   （タイムライン形式・まだ保存していない動画）では**折れた絵**が出ていた（2026-10-20 実機）。
+                            onError={() =>
+                              setThumbs((t) => {
+                                if (!(p.projectId in t)) return t;
+                                const next = { ...t };
+                                delete next[p.projectId];
+                                return next;
+                              })
+                            }
                           />
                         ) : (
                           <FolderIcon size={24} />
@@ -865,6 +882,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       }
                     >
                       <HistoryIcon size={18} />
+                    </button>
+                    {/* 使っていないファイルを片づける（ADR-0064）。⚠️ **書き出し中は押させない**（書きかけのファイルがある）。 */}
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={isExporting || timelineExporting || awaitingAnswer || listBusy}
+                      onClick={() => setCleanupFor(p.projectId)}
+                      aria-label={`「${p.projectName || "無題の動画"}」の${unusedFilesLabel.action}`}
+                      title={isExporting || timelineExporting ? "書き出しが終わるまでお待ちください" : unusedFilesLabel.action}
+                    >
+                      <BroomIcon size={18} />
                     </button>
                     {/* 複製（#395）＝同じ会社・シリーズの動画を作り直すときの土台。
                         ⚠️ **複製すると開く**（作っただけで見えないと、できたかどうか分からない）ので、

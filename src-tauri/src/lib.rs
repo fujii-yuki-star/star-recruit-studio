@@ -11,6 +11,7 @@ mod ffmpeg;
 mod local_llm;
 mod messages;
 mod opener;
+mod packs;
 mod proc;
 mod project_import;
 mod startup;
@@ -980,6 +981,9 @@ fn finish_startup_job(
     forwarded: bool,
     // 断りの文（`ok = false`）／できたときの知らせ・注意（`ok = true`・#1366）。⚠️ **画面に出すのと同じ文**を受け取る。
     message: Option<String>,
+    // 頼んだ側へ渡す**結果**（いまは取り込んだ動画の番号だけ）。⚠️ **標準出力へ1行**＝`18 §18.5`
+    // （標準出力は結果の受け渡し用）。画面には出さない（番号は利用者の見る言葉ではない＝§2-3）。
+    result: Option<String>,
 ) {
     // ⚠️ **断った理由を、頼んだ側へ届ける**（#1212）＝これが無いと、外の AI が受け取れるのは
     // **数字だけ**になる。断る理由は4つあり（声がまだ・素材が見つからない・声の用意ができない・
@@ -993,6 +997,17 @@ fn finish_startup_job(
     if let Some(m) = message.as_deref() {
         if !m.is_empty() {
             eprintln!("{m}");
+        }
+    }
+    // ⚠️ **取り込んだ番号を返す**（通し点検 2026-10-16）＝アプリが番号を採り直すのに、どこにも出していなかった＝
+    //   外の AI は続く `--make-voices <番号>` に渡す番号を、置き場を覗いて推すしかなかった。
+    // ⚠️ **渡された仕事（`forwarded`）では出さない**（ADR-0042 追補3）＝最初に起動したプロセスの標準出力へ行き、
+    //   頼んだ側の2つ目のプロセスには届かない（終了コードが当てにならないのと同じ理由・決定③-2）。
+    if let Some(r) = result.as_deref().filter(|_| !forwarded) {
+        if !r.is_empty() {
+            println!("{r}");
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
         }
     }
     if forwarded || !state.startup.quit_when_done {
@@ -1517,9 +1532,19 @@ pub fn run() {
             voicevox_engine::start_bundled_engine(app.handle());
             // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
             ffmpeg::cleanup_stale_export_dirs(app.handle());
+            packs::cleanup_pack_staging(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            packs::pack_inspect,
+            packs::pack_install,
+            packs::pack_list,
+            packs::pack_uninstall,
+            packs::pack_read_text,
+            packs::pack_read_data_url,
+            packs::pack_copy_to_project,
+            voicevox_engine::restart_voice_engine,
+            packs::pack_voice_plan,
             startup_request,
             finish_startup_job,
             read_import_folder,
@@ -1575,6 +1600,7 @@ pub fn run() {
             ffmpeg::read_export_frame,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
+            ffmpeg::ensure_denoised_audio,
             ffmpeg::extract_video_frame,
             ffmpeg::detect_h264_capability,
             assets::import_asset,
@@ -1584,6 +1610,9 @@ pub fn run() {
             assets::read_asset_data_url,
             assets::missing_asset_files,
             assets::delete_project_files,
+            assets::list_unused_project_files,
+            assets::trash_unused_project_files,
+            assets::trash_project_files,
             ffmpeg::audio_peaks,
             ffmpeg::video_filmstrip,
             assets::project_files_size,

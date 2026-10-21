@@ -31,6 +31,11 @@ export interface Track {
   hidden?: boolean;
   /** true でクリップの移動・トリムを禁止。 */
   locked?: boolean;
+  /**
+   * **列の音量**（ADR-0067）＝音の列の部品の実効音量に掛ける倍率（未指定＝1＝100%・値域は部品の音量と同じ）。
+   * 再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）が同じ `trackGainOf` を通す。映像の列には効かない。
+   */
+  volume?: number;
 }
 
 /**
@@ -190,6 +195,18 @@ export interface TimelineClip extends ClipSpatial {
   fadeOutSec?: number;
 
   /**
+   * **このコマで止める**（ADR-0065・「この瞬間で絵を止める」）。動画を直接置いた部品で、使い始め（`sourceStartSec`）の
+   * **1コマ**を部品の長さいっぱい映す。未指定＝流す。音は鳴らさない。描き方は `video.ts` の1か所（使える長さ 0）。
+   */
+  holdFrame?: boolean;
+
+  /**
+   * **ノイズを減らす**（ADR-0068）。持ち込みの音の部品と、直接置いた動画の元の音に効く。未指定＝しない。
+   * プレビューも書き出しも同じ作り置き（`cache/denoise/…flac`・`denoisedCachePath`）を鳴らす。
+   */
+  denoise?: boolean;
+
+  /**
    * 動画の素材を置いたクリップで、その動画に入っている**元の音を鳴らすか**（#512 段2）。
    * 未指定＝鳴らさない。**素材に音が入っているときだけ**効く（場面形式と同じ規準＝ADR-0026②）。
    * 解決は `domain/timeline/video.ts` の1か所（再生・書き出し・画面が共有）。
@@ -268,4 +285,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.18';
+export const TIMELINE_SCHEMA_VERSION = '1.22';

@@ -82,3 +82,30 @@ describe('頼まれた書き出しを断るか', () => {
     expect(startupExportNotReady({ ungeneratedVoices: 0, missingUsedAssets: 0 })).toBeNull();
   });
 });
+
+// ⚠️ **読めるかを渡すと、作成済みなのに音が読めないものも残りに数える**（通し点検 2026-10-16）＝印だけだと、
+//   声のファイルが消えた動画で `--make-voices` が「作りました」（0）と返し、書き出しが断る（外の AI の行き止まり）。
+describe('作成済みなのに音が読めない声も数える（読めるかを渡したとき）', () => {
+  const gen = (id: string, voicePath?: string): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2,
+      voice: { text: 'あ', status: NARRATION_STATUS.generated, ...(voicePath ? { voicePath } : {}) } }) as TimelineClip;
+
+  it('タイムライン形式：読めない作成済みと、置き場所の無い作成済みを数える', () => {
+    const clips = [gen('clip_001', 'voices/clip_001.wav'), gen('clip_002', 'voices/clip_002.wav'), gen('clip_003')];
+    const readable = (key: string) => key === 'voice:voices/clip_002.wav';
+    expect(timelineUngeneratedVoices(clips, readable)).toBe(2);
+    expect(timelineUngeneratedVoices(clips), '渡さないときは印だけ').toBe(0);
+  });
+
+  it('場面形式：単独のセリフは場面 id、掛け合いは行ごとのキーで見る', () => {
+    const single = scene({ narration: { text: 'あいさつ', status: NARRATION_STATUS.generated, voicePath: 'voices/scene_001.wav' } });
+    const dialogue = scene({
+      sceneId: 'scene_002',
+      lines: [{ lineId: 'line_001', speaker: 'voicevox_zundamon', text: 'やあ', status: NARRATION_STATUS.generated }],
+    } as unknown as Partial<Scene>);
+    expect(sceneUngeneratedVoices([single, dialogue], (k) => k === 'scene_001')).toBe(1);
+    expect(sceneUngeneratedVoices([single, dialogue], (k) => k === 'scene_002/line_001')).toBe(1);
+    expect(sceneUngeneratedVoices([single, dialogue], () => true)).toBe(0);
+    expect(sceneUngeneratedVoices([single, dialogue]), '渡さないときは印だけ').toBe(0);
+  });
+});

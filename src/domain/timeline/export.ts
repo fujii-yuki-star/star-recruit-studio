@@ -7,7 +7,9 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
+import { isGoneGeneratedVoice } from '../voice/goneVoices';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, denoisedCachePath, denoiseSourceKey, denoisesClip, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
+import { clampVolume } from '../voice/audioMix';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
 import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND, LAYER_TYPE } from '../enums';
@@ -210,17 +212,25 @@ export function timelineAudioRuns(
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!sourceKey || !cue) continue;
-    const volume = clipBaseVolume(clip, doc);
+    // **列の音量**（ADR-0067）＝再生（`audioCuesAt`）と同じ倍率を、一定の音量と音量の変化の点の両方に掛ける。
+    const gain = trackGainOf(doc.tracks.find((t) => t.id === clip.trackId));
+    // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝点の側は `volumeExpr` が点ごとに収める・再生も同じ上限。
+    //   収めないと「部品 120% × 列 150%」で再生 150%・書き出し 180% に割れていた。
+    const volume = clampVolume(clipBaseVolume(clip, doc) * gain);
     // ⚠️ **門と同じ関数を通る**（`/canon-check` 🟡）＝数える側と組む側で規則が割れない。
     // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
     // ⚠️ **倍率の有無で分岐しない**＝`volumeExpr` は中で `normalizedVolumePoints` を通す（べき等）ので、
     // 倍率が空のときの `points` は「正規化した保存の点」＝生の点を渡したときと**同じ式**になる。
     // 分けて書くと「なぜ違うのか」を毎回確かめることになる（式は1本にしておく）。
-    const expr = volumeExpr(clipVolumePointsForExport(doc, clip, auto, duckSpans).points);
+    const pts = clipVolumePointsForExport(doc, clip, auto, duckSpans).points;
+    const expr = volumeExpr(gain === 1 ? pts : pts.map((p) => ({ ...p, volume: p.volume * gain })));
+    // **ノイズを減らす部品**（ADR-0068）＝作り置きを**パスで**渡す（プレビューと同じファイル・中身を文字列にしない）。
+    const denoisedPath = denoisesClip(doc, clip) && clip.assetId ? denoisedPathOf(doc, clip.assetId) : undefined;
     runs.push({
       clipId: clip.id,
-      sourceKey,
-      fileExt: audioFileExtOf(clip, doc),
+      ...(denoisedPath && clip.assetId
+        ? { sourceKey: denoiseSourceKey(clip.assetId), assetPath: denoisedPath, fileExt: DENOISED_EXT }
+        : { sourceKey, fileExt: audioFileExtOf(clip, doc) }),
       delaySec: clip.startSec,
       playSec: clipEndSec(clip) - clip.startSec,
       sourceStartSec: clip.sourceStartSec ?? 0,
@@ -242,13 +252,15 @@ export function timelineAudioRuns(
     const path = doc.assets.find((a) => a.assetId === org.assetId)?.filePath;
     if (!path) continue; // 保存先が判らない＝渡すものが無い（ファイルの欠けは Rust 側が理由つきで断る）
     const clip = placement.clip;
+    // **ノイズを減らした元の音**（ADR-0068）＝直接置きだけ（差し込み口は対象外）。プレビューと同じ作り置きを鳴らす。
+    const denoised = placement.layerId == null && denoisesClip(doc, clip);
     runs.push({
       // ⚠️ **置き場所ごとに別の音**（段3b）＝1つの部品に差し込み口ぶんの動画がありうるので、
       // 部品 id だけだと同じ id の run が並び、鳴らす側で見分けられない。
       clipId: placement.layerId == null ? clip.id : `${clip.id}/${placement.layerId}`,
-      sourceKey: audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
-      assetPath: path,
-      fileExt: extOf(path),
+      sourceKey: denoised ? denoiseSourceKey(org.assetId) : audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
+      assetPath: denoised ? denoisedCachePath(path) : path,
+      fileExt: denoised ? DENOISED_EXT : extOf(path),
       delaySec: clip.startSec,
       // ⚠️ **使える長さで頭打ち**＝「ここまで」で切った動画の音が、その先まで鳴り続けない
       //（絵は最後のコマで凍るので、音だけ流れると食い違う）。
@@ -262,6 +274,15 @@ export function timelineAudioRuns(
     });
   }
   return { runs, duckMerged: fitted.merged };
+}
+
+/** ノイズを減らした作り置きの拡張子（ADR-0068・`denoisedCachePath` と同じ）。 */
+const DENOISED_EXT = 'flac';
+
+/** 素材のノイズを減らした作り置きのパス（素材が見つからなければ `undefined`）。 */
+function denoisedPathOf(doc: TimelineProject, assetId: string): string | undefined {
+  const path = doc.assets.find((a) => a.assetId === assetId)?.filePath;
+  return path ? denoisedCachePath(path) : undefined;
 }
 
 /**
@@ -314,6 +335,11 @@ export const TIMELINE_EXPORT_BLOCK = {
    * ⚠️ **場面形式には同じ門がある**（公開前チェックの `missingFont`）＝形式で挙動を割らない（ADR-0026②）。
    */
   userFontMissing: 'TIMELINE_EXPORT_USER_FONT_MISSING',
+  /**
+   * いま入っていない声で作り済みの読み上げがある（ADR-0060 段階3）＝拡張パックを外すと声の名前が引けず、クレジットが既定のキャラへ倒れる。
+   * 作り済みの音はパックの声のままなので、そのまま出すと**鳴る声と名乗るキャラが違う動画**になる（ADR-0003）。場面形式は公開前チェックの `goneVoice`。
+   */
+  voiceGone: 'TIMELINE_EXPORT_VOICE_GONE',
   /**
    * 使っている**持ち込みフォント**が手元にあるか**調べられなかった**（差分再監査 2巡目）。
    *
@@ -421,9 +447,8 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  // ⚠️ **直接置いた動画（#512 段1・段2）と差し込み口の動画（段3）は映る**＝断るのは**まだ映らない
-  // 使い方**だけ＝**立ち絵に入れた動画**（`character.poseAssetId`）。置いたのに静止画で出る、を
-  // 成功として出さない（ADR-0026④）。
+  // ⚠️ **直接置いた動画（#512 段1・段2）と差し込み口の動画（段3）は映る**。以前は**立ち絵に入れた動画**
+  // （`character.poseAssetId`）だけがまだ映らず、ここで断っていた（置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
   // ⚠️ **描かれないものは数えない**＝隠した部品は静止画で出ることも無いので、断る理由が無い
   // （隠したのに書き出せない、を作らない）。
   // ⚠️ **立ち絵に入れた動画も映って音が鳴るようになった**（#809）＝断る理由が無くなったので、
@@ -435,6 +460,12 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 通すと**黙って別の字体の動画**が成功として出る（ADR-0038）。**場面形式と同じ門**（ADR-0026②）。
   // ⚠️ **調べていないときは見ない**（`availableUserFontIds` 未指定＝判定材料が無い）。
   // 調べられなかったときは「見つからない」に倒さず、そう言って止める（場面形式と同じ3状態）。
+  const goneVoiceClips = doc.clips
+    .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && c.voice != null && isGoneGeneratedVoice(c.voice))
+    .map((c) => c.id);
+  if (goneVoiceClips.length > 0) {
+    blockers.push({ code: TIMELINE_EXPORT_BLOCK.voiceGone, clipIds: goneVoiceClips });
+  }
   if (opts.userFontsUnreadable && usedTimelineUserFontIds(doc).length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.userFontUnreadable, clipIds: [] });
   }

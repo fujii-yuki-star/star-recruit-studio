@@ -3,6 +3,8 @@
 // ScenePreview が B を表示する（最終フレーム＝B と一致してカクつかない）。
 // - fade＝B を上に重ねて opacity 0→1（下に A・クロスフェード）。
 // - slide＝押し出し：A が direction へ抜け、B が反対端から入る（FFmpeg xfade slide と同じ見え方）。
+// - wipe＝B を上に重ね、境目が direction へ一定の速さで動いて B が見えてくる（xfade wipe* と同じ式・ADR-0066）。
+// - zoom＝A を上に重ね、中心へ寄りながら薄れて B が見えてくる（xfade zoomin と同じ式・ADR-0066）。
 // 使う値（type/direction/clamp後 D）は resolveBoundaryTransition＝書き出しと同一＝プレビュー=書き出しパリティ（ADR-0001/0026）。
 // SVG は responsive:true で 100% 充填＝親（fit 箱）にそのまま重なる（ScenePreview と同じ layoutScene→layoutToSvg）。
 import type { Scene } from "../../domain/project/types";
@@ -62,7 +64,7 @@ export function TransitionPreview({
     // 見本の場面（動画の場面ではない）は index が無い＝従来どおり出す（ScenePreview と同じ規則）。
     const index = projectScenes.findIndex((s) => s.sceneId === sc.sceneId);
     const credit = index < 0 || creditVisible[index] ? creditText : undefined;
-    return layoutToSvg(layoutScene(sc, tpl, layoutOpts), {
+    return layoutToSvg(layoutScene(sc, tpl, { ...layoutOpts, projectFontId: fontId }), {
       assetSrc,
       responsive: true,
       ...(credit != null ? { credit } : {}),

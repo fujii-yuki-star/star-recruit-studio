@@ -23,7 +23,8 @@ export type ScrollAxis = DragAxis;
  * 直交する側は**切った後の見えている矩形**で見る（落とし先の判定と同じ規則＝2つの当たり判定を割らない）。
  * 送る向きのはみ出しは今までどおり許す（端へ寄せながら運ぶのは普通の操作）。
  */
-function speedFor(el: HTMLElement, ev: PointerEvent, insetStartPx: number, axis: ScrollAxis): number {
+function speedFor(el: HTMLElement, ev: PointerEvent, insetStart: Inset, axis: ScrollAxis): number {
+  const insetStartPx = typeof insetStart === "function" ? insetStart(el) : insetStart;
   const box = visibleRectOf(el);
   if (!box) return 0;
   const across = axis === "x" ? ev.clientY : ev.clientX;
@@ -38,6 +39,12 @@ function speedFor(el: HTMLElement, ev: PointerEvent, insetStartPx: number, axis:
   });
 }
 
+/**
+ * 始点側の「中身が見えない幅」。数か、**その枠を見て測る関数**（#1477＝縦に送るとき、上に貼り付いた目盛りの行の高さ）。
+ * ⚠️ 関数にするのは**値を写さない**ため＝目盛りの高さは CSS が決めるので、ここに数を書くと片方だけ変わる。
+ */
+type Inset = number | ((el: HTMLElement) => number);
+
 type Session = {
   el: HTMLElement;
   ev: PointerEvent;
@@ -50,7 +57,7 @@ type Session = {
  * 掴んでいる間の**端送り**。`track` を `onMove` から呼び、`stop` を離す・やめる・画面を離れるで呼ぶ。
  * 端の帯に入っていない間は時計を回さない（掴んでいるだけで毎フレーム走らせない）。
  */
-export function useEdgeAutoScroll(insetStartPx = 0, axis: ScrollAxis = "x"): {
+export function useEdgeAutoScroll(insetStartPx: Inset = 0, axis: ScrollAxis = "x"): {
   track: (el: HTMLElement | null, ev: PointerEvent, replay: (ev: PointerEvent) => void) => void;
   stop: () => void;
 } {

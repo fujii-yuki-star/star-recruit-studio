@@ -17,12 +17,37 @@ export interface VoiceCharacter {
   styles: VoiceStyle[];
 }
 
+/**
+ * 会社の動画で使えるキャラ（クレジットを書けば商用可・申請不要）＝声はこの中からしか入れない（同梱も拡張パックも）。
+ *
+ * ⚠️ **「確かめが要る危ない橋は渡らない」**（利用者の判断 2026-10-16）＝2026-10-16 に VOICEVOX の全キャラの規約ページを読み、
+ *   会社の利用で申請・許可が要るキャラ（青山龍星・もち子さん・後鬼・No.7 など）と、確かめきれないキャラ（栗田まろん・琴詠ニア・WhiteCUL）を外した。
+ *   根拠の表は `13 §4`。**足すときは規約ページの本文を読み、表に書いてから**（公式サイトの要約だけでは足りない＝猫使・ナースロボ）。
+ * ⚠️ 名前は声のファイル（vvm）の中の名前と同じ綴り（拡張パックの照合は Rust がその名前で行う）。
+ */
+export const COMPANY_OK_VOICE_CHARACTERS: readonly string[] = [
+  // 同梱
+  'ずんだもん', '四国めたん', '九州そら', '春日部つむぎ', '雨晴はう', '波音リツ', '玄野武宏', '白上虎太郎', '冥鳴ひまり', '剣崎雌雄', 'ちび式じい',
+  // 拡張パックで足せる
+  '東北ずん子', '東北きりたん', '東北イタコ', '中国うさぎ', '中部つるぎ', 'あんこもん',
+  '雀松朱司', '麒ヶ島宗麟', '黒沢冴白', '櫻歌ミコ', '小夜/SAYO', '†聖騎士 紅桜†', '春歌ナナ', 'あいえるたん', '満別花丸', '離途',
+];
+
+/** 会社の動画で使えるキャラか（`COMPANY_OK_VOICE_CHARACTERS`）。 */
+export function isCompanyOkVoiceCharacter(character: string): boolean {
+  return COMPANY_OK_VOICE_CHARACTERS.includes(character);
+}
+
 /** 既定 speaker（ずんだもん・ノーマル）。未設定/不明時のフォールバック。 */
 export const DEFAULT_SPEAKER = 3;
 
 /**
  * 選べる VOICEVOX 標準キャラのカタログ（規約確認済みの主要キャラ・段階的に追加可）。
  * speaker 番号は VOICEVOX 標準エンジンの値。
+ *
+ * ⚠️ **「クレジットを書けば商用可」だけで使えるキャラに限る**（ADR-0003 追補・2026-10-16）＝青山龍星・もち子さんは
+ *   規約（同梱の `character_info/<id>/policy.md`）に「**企業が携わる形で利用する場合は事前確認が必要**」とあり、
+ *   このソフトは会社が使う（採用動画）ので外した。追加するときは policy.md の**ただし書き**まで読む（`13 §4` の表）。
  */
 export const VOICE_CATALOG: VoiceCharacter[] = [
   {
@@ -57,16 +82,33 @@ export const VOICE_CATALOG: VoiceCharacter[] = [
     ],
   },
   { character: '白上虎太郎', styles: [{ speaker: 12, label: 'ふつう' }, { speaker: 32, label: 'わーい' }] },
-  { character: '青山龍星', styles: [{ speaker: 13, label: 'ノーマル' }] },
   { character: '冥鳴ひまり', styles: [{ speaker: 14, label: 'ノーマル' }] },
-  { character: 'もち子さん', styles: [{ speaker: 20, label: 'ノーマル' }] },
   { character: '剣崎雌雄', styles: [{ speaker: 21, label: 'ノーマル' }] },
 ];
 
-/** speaker 番号 → キャラクター名（カタログ外/未指定は null）。 */
+/**
+ * 拡張パックの声（ADR-0060 段階3）。パックを読むたびに差し替える（`setExtraVoiceCharacters`）。
+ *
+ * ⚠️ **ここに置く理由**＝キャラ名の引き当て（`characterForSpeaker`）は**クレジット**（`VOICEVOX:<character>`）を作る道で、
+ *   描画・書き出し・字幕・読み上げのあちこちから**同期で**呼ばれる。一覧を引数で配る形にすると、配り忘れた所だけ
+ *   **パックの声のクレジットが落ちる**（規約違反＝ADR-0003）。文字の形が「家族名＝id」で目録を配らずに済ませたのと同じ動機。
+ */
+let extraCharacters: readonly VoiceCharacter[] = [];
+
+/** 拡張パックの声を差し替える（パックを読み直したとき）。 */
+export function setExtraVoiceCharacters(characters: readonly VoiceCharacter[]): void {
+  extraCharacters = characters;
+}
+
+/** 選べる声の一覧＝同梱（`VOICE_CATALOG`）＋拡張パックの声。 */
+export function voiceCatalog(): readonly VoiceCharacter[] {
+  return extraCharacters.length === 0 ? VOICE_CATALOG : [...VOICE_CATALOG, ...extraCharacters];
+}
+
+/** speaker 番号 → キャラクター名（カタログ外/未指定は null）。拡張パックの声も引く（クレジットを落とさない）。 */
 export function characterForSpeaker(speaker: number | null | undefined): string | null {
   if (speaker == null) return null;
-  for (const c of VOICE_CATALOG) {
+  for (const c of voiceCatalog()) {
     if (c.styles.some((s) => s.speaker === speaker)) return c.character;
   }
   return null;
@@ -75,6 +117,6 @@ export function characterForSpeaker(speaker: number | null | undefined): string 
 /** キャラクター名 → 既定（先頭スタイル）の speaker 番号（カタログ外/未指定は null）。AI の voiceCharacter 解決に使う（#180）。 */
 export function speakerForCharacter(character: string | null | undefined): number | null {
   if (character == null) return null;
-  const c = VOICE_CATALOG.find((v) => v.character === character);
+  const c = voiceCatalog().find((v) => v.character === character);
   return c ? c.styles[0].speaker : null;
 }

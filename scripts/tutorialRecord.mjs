@@ -25,13 +25,15 @@
 //   ⚠️ **全段には課さない**＝同じ画面の中の選択（目的のカードを選ぶ等）は見出しが変わらないのが正しい。
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { CHOOSE_OPTION, FIND_BY_TEXT, FIND_FIELD, FIND_SELECT, connect, evaluate, waitForTarget } from "./lib/cdp.mjs";
+import { GLIDE_REMAINING_MS, GLIDE_SCROLL_INSTALL } from "./lib/glideScroll.mjs";
 import { checkPlan, needsMotionCheck, parseOutDir } from "./lib/plan.mjs";
 import { FFMPEG, changedBounds, distinctFrames, framesFromResult, sampleFrames } from "./lib/frames.mjs";
 import { scaleVerdict, viewFromBounds } from "./lib/burnCheck.mjs";
 import { toVideoPoint } from "./lib/cursor.mjs";
 import { gdigrabArea } from "./lib/capture.mjs";
+import { appTreeStopCommand } from "./lib/appTree.mjs";
 
 
 const APP = "src-tauri/target/release/star-recruit-studio.exe";
@@ -399,6 +401,7 @@ using System;using System.Runtime.InteropServices;
 public class Fg {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -409,7 +412,9 @@ public class Fg {
 $p = Get-Process star-recruit-studio -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $p) { exit 1 }
 $h = $p.MainWindowHandle
-[Fg]::ShowWindow($h, 9) | Out-Null   # SW_RESTORE
+# ⚠️ **戻すのは最小化されているときだけ**（2026-10-16・利用者が画面で見つけた）＝SW_RESTORE は**最大化も解く**ので、
+#    サブモニターで最大化して撮るつもりの窓が、前の小さな大きさへ縮んだまま撮られていた。
+if ([Fg]::IsIconic($h)) { [Fg]::ShowWindow($h, 9) | Out-Null }   # SW_RESTORE
 # ⚠️ Windows は「裏のプロセスからの前面化」を拒む。いま前面の窓の入力スレッドへ一時的に
 #    自分を繋ぐ（AttachThreadInput）と、同じ入力キューの持ち主として前面化が通る。
 $fg = [Fg]::GetForegroundWindow()
@@ -483,15 +488,18 @@ const RESET_TO_HOME = `(async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   // ⚠️ **戻り道は画面によって違う**（#1228・実測）＝「動画の一覧へ戻る」が無い画面があり
   //  （例＝「発表の内容を入力」）、そこでは**サイドバーの「動画」**が入口になる。両方を試す。
+  // ⚠️ **ホームかどうかは「ホームにしか無いもの」で見る**（2026-10-16 の通し点検で踏んだ）＝「新しい動画を作る」は
+  //   素材の画面などの上の帯にもあるので、それで見るとホームでないのにホームと思い込み、次の段が見つからない。
+  const isHome = () => !!find("白紙から作る") && !!find("タイムラインで作る");
   for (let i = 0; i < 8; i += 1) {
-    if (find("新しい動画を作る")) return "home";
+    if (isHome()) return "home";
     const back = find("動画の一覧へ戻る") || find("動画");
     if (back) { back.click(); await wait(500); }
     const drop = find("保存しないで移る");
     if (drop) { drop.click(); await wait(500); }
     await wait(400);
   }
-  return find("新しい動画を作る") ? "home" : "stuck";
+  return isHome() ? "home" : "stuck";
 })()`;
 
 /**
@@ -502,18 +510,26 @@ const RESET_TO_HOME = `(async () => {
 async function locateWithWait(cdp, step, isTyping) {
   const where = () => evaluate(cdp, step.selectLabel != null ? LOCATE_SELECT(step.selectLabel, step.nth ?? 1)
     : isTyping ? LOCATE_FIELD(step.fieldLabel) : LOCATE(step.clickText));
+  // ⚠️ **スクロールはゆっくり滑らせる**（2026-10-16 利用者の指摘＝一瞬で飛ぶとスクロールしたことが分からない）。
+  //   画面を読み直したとき（別の画面へ移った等）にも効くよう、探すたびに入れ直す（入っていれば何もしない）。
+  await evaluate(cdp, GLIDE_SCROLL_INSTALL);
   const until = Date.now() + LOCATE_WAIT_MS;
+  let glidedMs = 0;
   for (;;) {
     const at = await where();
     if (at) {
+      // 滑っている途中の座標で押さない＝滑り終わるまで待ってから、落ち着いたかを見る。
+      const gliding = Number(await evaluate(cdp, GLIDE_REMAINING_MS));
+      if (gliding > 0) await new Promise((r) => setTimeout(r, gliding));
+      glidedMs += gliding;
       // ⚠️ **位置が落ち着くまで待つ**（#1228・タイムライン編集で踏んだ）＝探した直後にその座標へ
       //   押しているので、**畳んだ欄が開く途中**のように配置が動いていると**別の物を押す**。
       //   実際、素材のタグで絞る操作が効かないまま次へ進み、**違う素材を取り込んでいた**
       //  （押せてはいるので誰も落ちず、映像だけが間違っている＝いちばん質の悪い失敗）。
       await new Promise((r) => setTimeout(r, LOCATE_SETTLE_MS));
       const again = await where();
-      if (again && again.x === at.x && again.y === at.y) return again;
-      if (Date.now() > until) return again ?? at;
+      if (again && again.x === at.x && again.y === at.y) return { ...again, glidedMs };
+      if (Date.now() > until) return { ...(again ?? at), glidedMs };
       continue;
     }
     if (Date.now() > until) return null;
@@ -795,6 +811,14 @@ async function main() {
           await new Promise((r) => setTimeout(r, 500));
         }
       }
+      // 見出しが変わるまで待つ（`untilHeadingMs` が上限・2026-10-15）＝かかる時間が毎回違う段（AI のたたき台）で、
+      //   変わったらすぐ次へ進む（撮った映像に無駄な待ちを残さない）。上限を過ぎたら下の見出しの確かめで落ちる。
+      if (step.untilHeadingMs != null) {
+        const until = Date.now() + step.untilHeadingMs;
+        while (Date.now() < until && (await evaluate(cdp, HEADING)) !== step.expectHeading) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
       await new Promise((r) => setTimeout(r, step.afterMs ?? 1200));
       const textAfter = await evaluate(cdp, TEXT_SIG);
       const headingAfter = await evaluate(cdp, HEADING);
@@ -814,6 +838,8 @@ async function main() {
         quiet: step.quietChange ?? null,
         say: step.say ?? null,
         headingAfter,
+        // 押す前にスクロールで滑らせた長さ（ミリ秒・0＝動かしていない）。滑らせたことを記録から確かめるため。
+        glidedMs: at.glidedMs ?? 0,
       });
       console.log(`${tSec.toFixed(1)}s ${isTyping ? `「${step.fieldLabel}」へ「${step.type}」` : `「${at.label}」`}`
         + `(${at.x},${at.y}) → ${headingAfter}`);
@@ -941,9 +967,11 @@ async function main() {
       } catch { /* 消せなければそのまま（読み手に上の注意が出ている） */ }
     }
     // ⚠️ **`--attach` のときは閉じない**＝利用者が開いていたものを勝手に落とさない。
+    // ⚠️ **アプリの部品も一緒に止める**（2026-10-15・実際に踏んだ）＝アプリを強制終了すると、裏で動かす部品
+    //   （このパソコンの中の AI＝llama-server・声＝run.exe・文字起こし）の後始末が走らず、**丸1日動き続けた**
+    //   （利用者の別の実測のノイズになった）。アプリと同じフォルダの下から起動したものを全部止める（`appTreeStopCommand`）。
     if (!attach) {
-      spawnSync("powershell", ["-NoProfile", "-Command",
-        "Stop-Process -Name star-recruit-studio -Force -ErrorAction SilentlyContinue"], { stdio: "ignore", windowsHide: true });
+      spawnSync("powershell", ["-NoProfile", "-Command", appTreeStopCommand(resolve(dirname(APP)))], { stdio: "ignore", windowsHide: true });
     }
   }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "star-recruit-studio"
-version = "0.5.3"
+version = "0.6.0"
 description = "ゆうこ採用ムービーメーカー (working name: star-recruit-studio)"
 authors = ["Star System"]
 edition = "2021"
@@ -38,9 +38,10 @@ tauri-plugin-single-instance = "2.4.4"
 tokio = { version = "1", features = ["time", "sync", "macros"] }
 # 同梱のローカル LLM のモデルを照合する（ADR-0051 決定14）。
 sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 # ディスクの空きを調べる（#1211）。⚠️ **新しい依存を増やしていない**＝すでに依存の木にある
 # `windows-sys` を、必要な機能だけ直に指しているだけ（`GetDiskFreeSpaceExW`）。
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Shell"] }
 

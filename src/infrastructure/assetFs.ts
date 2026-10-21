@@ -54,6 +54,20 @@ export async function importAssetByPath(
   return invoke<string>('import_asset_path', { projectId, fileName, srcPath });
 }
 
+/**
+ * 素材の音の**ノイズを減らした作り置き**をそろえ、そのプロジェクト相対のパスを返す（ADR-0068）。作れなければ `null`
+ *（理由は画面が「ノイズを減らす」を外せば鳴る、と案内する）。
+ */
+export async function ensureDenoisedAudio(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>('ensure_denoised_audio', { projectId, relPath });
+  } catch (e) {
+    console.warn('[denoise] ensure_denoised_audio 失敗:', e);
+    return null;
+  }
+}
+
 /** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */
 export async function readAssetDataUrl(projectId: string, relPath: string): Promise<string | null> {
   if (!isTauri()) return null;
@@ -151,6 +165,43 @@ export async function deleteProjectFiles(projectId: string, relPaths: string[]):
     console.warn('[asset] deleteProjectFiles 失敗:', e);
     return 0;
   }
+}
+
+/**
+ * 素材を消したときのファイルを**ごみ箱へ移す**（ADR-0064 決定4＝Final Cut Pro と同じ）。移せた数を返す。
+ *
+ * ⚠️ **移せなくても失敗にしない**＝素材はもう文書から外れており、残ったファイルは
+ * 「使っていないファイルを片づける」で後から片づけられる。⚠️ **すぐ消すへ切り替えない**（決定5）。
+ */
+export async function trashProjectFiles(projectId: string, relPaths: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  try {
+    return await invoke<number>('trash_project_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] trashProjectFiles 失敗:', e);
+    return 0;
+  }
+}
+
+/** 使っていないファイル1つ（動画のフォルダからの相対パスと大きさ）。 */
+export interface UnusedFile {
+  path: string;
+  size: number;
+}
+
+/**
+ * 使っていないファイルの一覧（ADR-0064）。`liveTexts`＝開いている動画なら、画面が持っている内容
+ *（保存前の変更・取り消し／やり直しの履歴）。**調べられなければ断る**（投げる）＝1つも消さない。
+ */
+export async function listUnusedProjectFiles(projectId: string, liveTexts: string[]): Promise<UnusedFile[]> {
+  if (!isTauri()) return [];
+  return invoke<UnusedFile[]>('list_unused_project_files', { projectId, liveTexts });
+}
+
+/** 選んだファイルのうち、**押した時点でも使っていないもの**をごみ箱へ移す（ADR-0064）。移せた数を返す。 */
+export async function trashUnusedProjectFiles(projectId: string, relPaths: string[], liveTexts: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  return invoke<number>('trash_unused_project_files', { projectId, relPaths, liveTexts });
 }
 
 /**

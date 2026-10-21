@@ -273,7 +273,7 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   // 場面のレイアウト（アニメ再生中は timeSec で補間済み＝書き出しと同一 layoutScene(t)・ADR-0001）。
-  const fullLayout = layoutScene(scene, template, layoutOpts);
+  const fullLayout = layoutScene(scene, template, { ...layoutOpts, projectFontId: fontId });
   // hideItemIds＝インライン編集中の要素をSVGから伏せる（#549）。編集中は textarea が同じ体裁で同じ位置に文字を出すため、
   // 伏せないと二重表示になる（入力は即 store へ反映＝SVG も毎打鍵更新されるため）。**プレビュー限定の編集用アフォーダンス**で、
   // 正準 layoutScene の結果を後段で間引くだけ＝書き出しは hideItemIds を渡さないのでパリティに影響しない（ADR-0001）。

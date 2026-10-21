@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "packId": "sample_office_looks",
+  "name": "オフィスの見た目（見本）",
+  "version": "1.0.0",
+  "publisher": "すたりお開発チーム",
+  "description": "拡張パックの形の見本（ADR-0060）。見た目パターン1つと既定のロゴ1つ、機能の鍵1つ。",
+  "minAppVersion": "0.5.3",
+  "contents": {
+    "templates": [{ "file": "templates/intro.json" }],
+    "templateAssets": [{ "assetId": "logo", "file": "assets/logo.png" }],
+    "features": ["personalized-briefing"]
+  },
+  "files": [
+    { "path": "assets/logo.png", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
+    { "path": "templates/intro.json", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" }
+  ],
+  "licenses": [
+    { "target": "templates", "license": "社内利用に限る", "credit": "すたりお開発チーム" },
+    { "target": "templateAssets", "license": "社内利用に限る" },
+    { "target": "features", "license": "社内利用に限る" }
+  ]
+}

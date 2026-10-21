@@ -33,6 +33,17 @@ export const FONT_CATALOG: readonly BundledFont[] = [
   { id: 'kaitou-yokoku-gothic', label: '怪盗予告ゴシック', cssFamily: 'Kaitou Yokoku Gothic', note: '演出・インパクト' },
 ];
 
+/**
+ * 同梱フォントの実体（`public/fonts/` のファイル名）を、太さごとに（ADR-0062＝書き出しで絵に埋め込むため）。
+ * ⚠️ **`src/styles/fonts.css` の `@font-face` と同じ**＝仕上がり確認が使う実体と同じものを埋め込む（門番が突き合わせる）。
+ * 1ファイルで全部の太さを賄う字体（怪盗予告ゴシック）は両方に同じファイル。
+ */
+export const BUNDLED_FONT_FILES: Readonly<Record<string, { regular: string; bold: string }>> = {
+  'Gen Interface JP': { regular: 'GenInterfaceJP-Regular.ttf', bold: 'GenInterfaceJP-Bold.ttf' },
+  'Gen Interface JP Display': { regular: 'GenInterfaceJPDisplay-Regular.ttf', bold: 'GenInterfaceJPDisplay-Bold.ttf' },
+  'Kaitou Yokoku Gothic': { regular: 'KaitouYokokuGothic.ttf', bold: 'KaitouYokokuGothic.ttf' },
+};
+
 /** 既定フォント（未指定・不明な fontId のフォールバック先）。 */
 export const DEFAULT_FONT_ID: BundledFontId = 'gen-interface-jp';
 
@@ -64,6 +75,59 @@ export const USER_FONT_ID_SAMPLES: readonly string[] = [
 /** 持ち込みフォントの id か（形だけを見る＝ファイルがあるかは別の話）。 */
 export function isUserFontId(fontId: unknown): fontId is FontId {
   return typeof fontId === 'string' && USER_FONT_ID_RE.test(fontId);
+}
+
+/**
+ * 拡張パックの文字の形の id の形（`pack_<packId>__<fontId>`・ADR-0060 決定4）。
+ * ⚠️ **schema の `$defs/FontId` の pattern と一致させる**（`PACK_FONT_ID_SAMPLES` で両側を突き合わせる）。
+ * packId の部分は `extension-pack.schema.json` の `packId`、後ろは `contents.fonts[].fontId` と同じ規則。
+ */
+export const PACK_FONT_ID_RE = /^pack_[a-z][a-z0-9]*(_[a-z0-9]+)*__[a-z0-9]+(_[a-z0-9]+)*$/;
+
+/** schema と domain の形の突き合わせに使う入力（`USER_FONT_ID_SAMPLES` と同じ流儀）。 */
+export const PACK_FONT_ID_SAMPLES: readonly string[] = [
+  'pack_office__mincho',
+  'pack_office_looks__mincho_bold',
+  'pack_office__', // 中の名前が無い
+  'pack___mincho', // packId が無い
+  'pack_office___mincho', // 境目が3つ
+  'pack_office_looks_mincho', // 境目が無い
+  'pack_1office__mincho', // packId が数字で始まる
+  'pack_office__Mincho', // 大文字
+  'xpack_office__mincho', // 前に付いている
+];
+
+/** 拡張パックの文字の形の id か（形だけ＝そのパックが入っているかは別の話）。 */
+export function isPackFontId(fontId: unknown): fontId is FontId {
+  return typeof fontId === 'string' && PACK_FONT_ID_RE.test(fontId);
+}
+
+/**
+ * 同梱でない文字の形（持ち込み＋拡張パック）の id か。**どちらも動画へはコピーせず、手元に在るかを別に確かめる**ので、
+ * 「見つからない」の扱い・CSS の家族名（id そのもの）・既知かの判定は同じ道を通す（ADR-0038・ADR-0060 決定5）。
+ */
+export function isExternalFontId(fontId: unknown): fontId is FontId {
+  return isUserFontId(fontId) || isPackFontId(fontId);
+}
+
+/**
+ * **描く字体**（要素 → 場面 → 動画全体 → 既定の順で、最初に分かるもの・ADR-0063 の `textFontFor` と同じ順）。
+ * 太さの欄の知らせ（#1483）が、描画と同じ字体を見るために使う。
+ */
+export function effectiveTextFontId(
+  elementFontId: string | null | undefined,
+  sceneFontId: string | null | undefined,
+  projectFontId: string | null | undefined,
+): FontId {
+  return resolveFontId(isKnownFontId(elementFontId) ? elementFontId : sceneFontId, projectFontId);
+}
+
+/**
+ * その字体で**太字を選んでも見た目が変わらない**か（#1483・ADR-0038）。持ち込み・拡張パックの字体は1つのファイルを
+ * 普通と太字の両方に登録する（合成の太字に任せると、プレビューと書き出しで太さが変わりうる＝パリティを優先）。
+ */
+export function boldLooksSameIn(fontId: string | null | undefined): boolean {
+  return isExternalFontId(fontId);
 }
 
 /**
@@ -103,7 +167,7 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
   if (bundled) return bundled.cssFamily;
   // 持ち込みフォントは id がそのまま家族名（上の ⚠️）。**ファイルの有無はここでは見ない**＝
   // 見つからないときの断りは公開前チェックと書き出しが出す（描画は既定へ倒れる・ADR-0038）。
-  if (isUserFontId(fontId)) return userFontCssFamily(fontId);
+  if (isExternalFontId(fontId)) return userFontCssFamily(fontId);
   return FONT_CATALOG.find((f) => f.id === DEFAULT_FONT_ID)!.cssFamily;
 }
 
@@ -118,7 +182,7 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
  */
 export function isKnownFontId(fontId: unknown): fontId is FontId {
   return (
-    (typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId)) || isUserFontId(fontId)
+    (typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId)) || isExternalFontId(fontId)
   );
 }
 
@@ -138,7 +202,7 @@ export function isKnownFontId(fontId: unknown): fontId is FontId {
 export function isFontAvailable(fontId: unknown, userFontIds: readonly string[] | null): boolean {
   if (typeof fontId !== 'string') return false;
   if (FONT_CATALOG.some((f) => f.id === fontId)) return true;
-  if (!isUserFontId(fontId)) return false;
+  if (!isExternalFontId(fontId)) return false;
   return userFontIds == null || userFontIds.includes(fontId); // 調べていないなら「無い」と言わない
 }
 

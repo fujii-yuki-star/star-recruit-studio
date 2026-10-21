@@ -90,7 +90,14 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（#1248）＝写すときに元の位置へ残す元の帯（`timeline-clip--copy-source`）。運んでいる帯の `--copying` は条件で付ける断片なので数えない。
     // ⚠️ **+5**（#1319）＝全体図の帯（`timeline-overview`・`-clip`・`-range`・`-playhead`・`-window`）。色の `--◯◯` は式で組むので数えない。
     // ⚠️ **+1**（PR #1412 レビュー）＝収まっているときの場所取り（`timeline-overview--idle`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(221);
+    // ⚠️ **+4**（ADR-0067）＝列の音量（`timeline-row-volume`・その場で直す欄 `timeline-row-volume-input`）とソロ（`timeline-row-solo`）、
+    //   列の音量の札は常に濃く出すので `timeline-row-toggle--on` を文字のまま書いた（以前は条件の式の中だけ）。
+    // ⚠️ **+1**（#1186 ②）＝帯のキーフレームの印（`timeline-clip-key`）。いまの時刻の `--current` は式で付ける断片なので数えない。
+    // ⚠️ **+1**（α 最終点検 2026-10-21）＝どの欄にも属さない返事の置き場（`timeline-flash-stack`）＝右下に重ねて、欄の見出しを覆わない。
+    // ⚠️ **+5**（α 最終点検 2026-10-21・狭い窓の崩れ）＝流れの帯の並べる器（`flow-bar-grid`）・表を持つ画面の印（`content-with-yuko--table`）・
+    //   見た目パターンの2列（`looks-layout`）・仕上がり確認の「…」（`preview-tools-more`）・倍率の数字（`preview-zoom-label`）。
+    // ⚠️ **+1**（ADR-0048 追補 2026-10-21）＝並びの道具の見え方のまとまり（`timeline-view-tools`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(233);
   });
 });
 
@@ -120,6 +127,10 @@ describe("拾い方そのもの（走る所と同じ道を直接叩く）", () =
   it("CSS の規則を拾う。⚠️ 中身の値は規則と数えない", () => {
     expect(cssClassesIn(".btn { color: red }")).toEqual(["btn"]);
     expect(cssClassesIn('.a { content: ".not-a-rule" }')).toEqual(["a"]);
+    // ⚠️ **`@media`／`@container` の中だけにある規則も拾う**（α 最終点検 2026-10-21）＝外側の `{` から最初の `}` までを
+    //   消していたので、狭い窓でだけ効く規則が「実体が無い」と誤って断られた。
+    expect(cssClassesIn("@media (max-width: 9px) { .only-narrow { color: red } }")).toEqual(["only-narrow"]);
+    expect(cssClassesIn('@container (max-width: 9px) { .a { content: ".not-a-rule" } }')).toEqual(["a"]);
   });
 
   it("目印として使っているクラスを拾う", () => {

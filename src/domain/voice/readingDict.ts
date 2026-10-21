@@ -44,7 +44,19 @@ export interface EngineWord {
   surface: string;
   yomi: string;
   accentType: AccentType;
+  /** エンジンでの優先度（0〜10）。読めなかったら未指定。 */
+  priority?: number;
 }
+
+/**
+ * 登録する語の優先度（0〜10・VOICEVOX の `priority`）。**いちばん高くする**（ADR-0037 追補 2026-10-19）。
+ *
+ * ⚠️ **既にエンジンの辞書にある言葉は、既定（5）では登録が効かない**（実測）＝「角田→カドタ」
+ * 「東海林→トウカイリン」は 8〜9、「日本→ヒノモト」「山崎→ヤマサキ」は 10 でやっと効いた。
+ * 直したいのはまさにそういう人名・地名なので、送らない（既定 5）と**登録したのに読みが変わらない**
+ *（§2-5＝設定した意味どおりにならない）。辞書に無い言葉はどの値でも効く。
+ */
+export const READING_DICT_PRIORITY = 10;
 
 /** エンジンへ**送る**操作（1語ぶん）。送らないもの（控えの取り直し）はここに出さない。 */
 export type DictOp =
@@ -72,6 +84,11 @@ function sameReading(
 export interface EngineConflict {
   entry: ReadingEntry;
   engine: EngineWord;
+  /**
+   * 読みは同じだが、**弱い登録**（優先度が `READING_DICT_PRIORITY` より低い）で効かないことがある（ADR-0037 追補）。
+   * 他人の語なので黙って強くしない（決定3）＝知らせて、「こちらの読みにする」で登録し直せるようにする。
+   */
+  weak?: true;
 }
 
 /** エンジンへ映すための計画（`planDictSync` の答え）。 */
@@ -122,7 +139,14 @@ export function planDictSync(
     const known = links[surface];
     const byRef = known ? byUuid.get(known) : undefined;
     if (byRef) {
-      if (!sameReading(byRef, entry)) plan.ops.push({ kind: 'update', uuid: byRef.uuid, entry });
+      // ⚠️ **優先度も見る**（ADR-0037 追補）＝前の版は優先度を送らずに登録していた（既定 5＝効かない語がある）。
+      // 読みがそろっていても優先度が違えば送り直す＝開き直すだけで前の登録も効くようになる。
+      // 自分の語（控えが当たった語）だけ＝他人の語の優先度には触らない（決定3）。
+      // ⚠️ **優先度が読めない（返さない版のエンジン）ときは比べない**（PR #1467 レビュー ℹ️）＝比べると毎回
+      // 送り直しになり、書き込めないエンジンでは毎回止まる（決定7）。
+      if (!sameReading(byRef, entry) || (byRef.priority !== undefined && byRef.priority !== READING_DICT_PRIORITY)) {
+        plan.ops.push({ kind: 'update', uuid: byRef.uuid, entry });
+      }
       else plan.links[surface] = byRef.uuid; // そろっている＝控えを保つ
       continue;
     }
@@ -143,6 +167,13 @@ export function planDictSync(
     // 失うのは「エンジンを入れ直した直後の自動の付け替え」だけ＝**控えた uuid に一度でも
     // 実際に当たったときだけ**自分の語と見る、という安全側の縮小にする。
     if (sameReading(found, entry)) {
+      // ⚠️ **同じ読みでも弱い登録なら知らせる**（PR #1467 レビュー 🟡）＝既にエンジンの辞書にある言葉は、
+      // 優先度が低いと登録が効かない（事実14）。「アプリでは登録済みなのに読みが変わらない」を黙って残さない。
+      // 優先度が読めない（返さない版）なら比べない＝言えないことは言わない。
+      if (found.priority !== undefined && found.priority < READING_DICT_PRIORITY) {
+        plan.conflicts.push({ entry, engine: found, weak: true });
+        continue;
+      }
       plan.adopted.push(surface); // 同じ読みで既にある＝送らない・控えにも入れない
       continue;
     }
@@ -224,6 +255,55 @@ export function splitMorae(yomi: string): string[] {
 export function accentCandidates(yomi: string): AccentType[] {
   const n = splitMorae(yomi).length;
   return Array.from({ length: n + 1 }, (_, i) => i);
+}
+
+/** 段（ア・イ・ウ・エ・オ）ごとのカナ。伸ばす音を母音へ置き換えるのに使う。 */
+const VOWEL_ROWS: readonly (readonly [string, string])[] = [
+  ['ア', 'アカサタナハマヤラワガザダバパァャヮヵ'],
+  ['イ', 'イキシチニヒミリギジヂビピィヰ'],
+  ['ウ', 'ウクスツヌフムユルグズヅブプゥュヴ'],
+  ['エ', 'エケセテネヘメレゲゼデベペェヱヶ'],
+  ['オ', 'オコソトノホモヨロヲゴゾドボポォョ'],
+];
+
+/**
+ * エンジンの「かな」の書き方が受け付ける粒へ直す（粒の数は変えない＝下がる場所はずれない）。
+ *
+ * ⚠️ **伸ばす音「ー」は受け付けられない**（2026-10-19 実測＝`コーポレーション`・`ディズニー` は 400）＝
+ * 直前の粒の母音へ置き換える（エンジン自身も登録後は `ショウジ` を `ショオジ` と読む＝同じ音）。
+ * 「ン」「ッ」のあとはそのまま（母音が無い）。小さい「ヵ」「ヶ」も受け付けないので「カ」「ケ」へ。
+ */
+function kanaMorae(morae: readonly string[]): string[] {
+  const vowelOf = (mora: string | undefined): string | undefined => {
+    const last = mora?.[mora.length - 1];
+    return last == null ? undefined : VOWEL_ROWS.find(([, row]) => row.includes(last))?.[0];
+  };
+  const out: string[] = [];
+  for (const m of morae) {
+    if (m === 'ー') out.push(vowelOf(out[out.length - 1]) ?? m);
+    else out.push(m.replace('ヵ', 'カ').replace('ヶ', 'ケ'));
+  }
+  return out;
+}
+
+/** 聞き比べで言葉のうしろに付ける助詞（「下がらない」と「最後で下がる」は、言葉だけだと同じ音になる）。 */
+const PREVIEW_PARTICLE = 'ガ';
+
+/**
+ * 聞き比べの音を作る読み（エンジンの「かな」の書き方＝下がる所のうしろに `'`）。
+ *
+ * ⚠️ **登録した後と同じ音になる形で作る**（ADR-0037 追補 2026-10-19・実測で一致を確認）。前の版は
+ * 読みで作った音の「下がる場所」の数だけを差し替えていたが、エンジンは**音の高さを作り直さない**ので、
+ * **どの候補を押しても同じ音**だった。さらに読みが2つのかたまりに分かれると（`ホシノ｜ハラ`）先頭だけが
+ * 対象になっていた。かなの書き方なら1つのかたまりで、指定した所で下がる。
+ * ⚠️ **うしろに「ガ」を付ける**＝「下がらない（0）」と「最後で下がる」は言葉だけだと同じ音で、
+ * 助詞が続くと違う（`ホシノハラガ'`／`ホシノハラ'ガ`＝登録後の文と同じ）。
+ */
+export function accentPreviewKana(yomi: string, accentType: AccentType): string {
+  const morae = [...kanaMorae(splitMorae(yomi)), PREVIEW_PARTICLE];
+  const n = morae.length - 1; // 言葉の粒の数（助詞を除く）
+  const at = accentType <= 0 || accentType > n ? morae.length : accentType; // 0＝助詞まで下がらない
+  return `${morae.slice(0, at).join('')}'${morae.slice(at).join('')}`;
 }
 
 /** 読みに「下がる場所」の印を入れた見せ方（`ウ↓ツノミヤ`）。0＝印なし（下がらない）。 */

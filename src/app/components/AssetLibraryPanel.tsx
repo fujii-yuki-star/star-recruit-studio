@@ -4,7 +4,7 @@
 // 既に取り込んだ動画は影響を受けない（プロジェクトは自己完結・ADR-0024 決定6）。
 // ⚠️ **技術用語を出さない**（§2-3）＝「ライブラリ」は定着しているので使うが、
 // 「アセット」「マニフェスト」「グローバル」は出さない。見出しは「よく使う素材」。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { hasOpenProject, isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { AssetThumb } from "./AssetThumb";
@@ -27,11 +27,12 @@ import {
   type LibraryAsset,
 } from "../../domain/asset/assetLibrary";
 import { detectAssetType, fileNameOf, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
-import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage, LIBRARY_ADD_FAILED } from "../uiLabels";
+import { IMPORT_NO_PROJECT_MESSAGE, libraryPartlyFailedMessage, LIBRARY_ADD_FAILED, PACK_BGM_LIST_LABEL } from "../uiLabels";
 import { ASSET_TYPE, PROJECT_FORMAT, isFreeSlotAssetType, isPreviewableImageType } from "../../domain/enums";
 import type { AssetType } from "../../domain/enums";
 import type { ScreenId } from "../data/mockData";
 import { userFacingMessage } from "../userFacingError";
+import { packBgmLibraryAssets } from "../store/librarySource";
 
 /** 種類の絞り込み（画面に出す名前）。 */
 const TYPE_CHOICES: { label: string; value: AssetType | null }[] = [
@@ -106,6 +107,9 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
   const sceneExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const isExporting = target === PROJECT_FORMAT.timeline ? timelineExporting : sceneExporting;
   const brandKit = useProjectStore((s) => s.brandKit);
+  // 拡張パックの音楽（ADR-0060 段階2b）＝棚と同じ「この動画で使う」で動画へコピーする。棚の行ではないので直す・外すは無い（外すのはパックごと）。
+  const packs = useProjectStore((s) => s.packs);
+  const packBgm = useMemo(() => packBgmLibraryAssets(packs), [packs]);
   const updateBrandKit = useProjectStore((s) => s.updateBrandKit);
 
   // ⚠️ **「読めなかった」を「1つも無い」に見せない**（差分再監査・§2-5）＝空を出すと、
@@ -508,6 +512,23 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
           </ul>
         )}
       </div>
+
+      {packBgm.length > 0 && (
+        <div className="mt" data-testid="pack-bgm-list">
+          <span className="field-label">{PACK_BGM_LIST_LABEL}</span>
+          <ul className="list-reset">
+            {packBgm.map((a) => (
+              <li key={a.id} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
+                <AssetThumb type={a.assetType} box={40} />
+                <span style={{ flex: 1 }}>{a.displayName}</span>
+                <button type="button" className="btn btn-secondary" disabled={importBlocked} title={importBlockedReason} onClick={() => void onImport(a)}>
+                  この動画で使う
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {editing && (
         <div className="mt">

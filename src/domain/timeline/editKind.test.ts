@@ -32,6 +32,8 @@ describe('timelineEditKind（#1268）', () => {
     ['列が増えた', doc(), doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }] }), TIMELINE_EDIT_KIND.addTrack],
     ['列が減った', doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }] }), doc(), TIMELINE_EDIT_KIND.removeTrack],
     ['列の設定が変わった', doc(), doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] }), TIMELINE_EDIT_KIND.track],
+    // 動きは文書の `animations` に入る＝見ないと「編集」とだけ出ていた（通し点検 2026-10-16）。
+    ['動きが変わった', doc(), doc({ animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, opacity: 0 }] }] } as never), TIMELINE_EDIT_KIND.motion],
     ['目印が変わった', doc(), doc({ markers: [{ id: 'marker_001', timeSec: 1 }] }), TIMELINE_EDIT_KIND.marker],
     ['動画全体の設定が変わった', doc(), doc({ videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 30, maxDurationSec: 600 } }), TIMELINE_EDIT_KIND.settings],
     ['元が消えて増えた（バラす等）', doc(), doc({ clips: [{ ...clip, id: 'clip_002' }] as TimelineProject['clips'] }), TIMELINE_EDIT_KIND.other],

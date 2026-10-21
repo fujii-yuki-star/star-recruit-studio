@@ -8,7 +8,8 @@ import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { clampVolume } from '../voice/audioMix';
 import { clipTimeAtSceneTime } from '../project/videoStartTiming';
 import { clipEndSec } from './validateTimelineDoc';
-import type { TimelineClip, TimelineProject, VolumePoint } from './types';
+import type { TimelineClip, TimelineProject, Track, VolumePoint } from './types';
+import { isDirectVideoClip, isDrawnClip, placementOriginalAudio, videoPlacementsOfClip } from './video';
 
 /**
  * クリップの**フェードを掛ける前**の実効音量（`11 §6` の null=継承と同じ流儀）。
@@ -25,6 +26,37 @@ export function clipBaseVolume(clip: TimelineClip, doc: Pick<TimelineProject, 'v
     return clampVolume(clip.volume ?? doc.voiceSettings.volume ?? NARRATION_VOLUME);
   }
   return clampVolume(clip.volume ?? BGM_VOLUME);
+}
+
+/**
+ * **列の音量**（ADR-0067）＝音の列の部品の実効音量に掛ける倍率。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）が
+ * 同じこの関数を通る。⚠️ **音の列だけ**＝映像の列（動画の元の音）には効かせない。
+ */
+export function trackGainOf(track: Pick<Track, 'kind' | 'volume'> | undefined): number {
+  if (!track || track.kind !== TRACK_KIND.audio || track.volume == null) return 1;
+  return clampVolume(track.volume);
+}
+
+/**
+ * **いま効いているソロ**（ADR-0067 決定2）＝ソロにした列のうち、**いまもある音の列**だけ。1つも無ければ `null`（ソロ無し＝全部鳴る）。
+ * ⚠️ **消した列の id を残したまま見ない**＝ソロにした列を消すと、残った id のせいで**全部が鳴らなくなる**。
+ * 鳴らす側（再生の音・動画の元の音）が同じこの関数を通す。
+ */
+export function activeSoloTrackIds(doc: Pick<TimelineProject, 'tracks'>, soloTrackIds: readonly string[]): ReadonlySet<string> | null {
+  if (soloTrackIds.length === 0) return null;
+  const live = new Set(doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && soloTrackIds.includes(t.id)).map((t) => t.id));
+  return live.size > 0 ? live : null;
+}
+
+/**
+ * ソロを当てた後に鳴らす音（ADR-0067 決定2）＝ソロが効いていれば、ソロの列の音だけ残す。効いていなければそのまま。
+ * ⚠️ **再生の中だけ**＝書き出し（`timelineAudioRuns`）は通さない（ソロは文書に持たない・書き出しに効かない）。
+ */
+export function soloFilteredCues(doc: TimelineProject, cues: readonly AudioCue[], soloTrackIds: readonly string[]): AudioCue[] {
+  const solo = activeSoloTrackIds(doc, soloTrackIds);
+  if (!solo) return [...cues];
+  const trackOf = new Map(doc.clips.map((c) => [c.id, c.trackId]));
+  return cues.filter((q) => solo.has(trackOf.get(q.clipId) ?? ''));
 }
 
 /** その瞬間に鳴らすべき音1つ分。`offsetSec` は**音源の先頭からの秒**（途中から鳴らすときの頭出し）。 */
@@ -144,6 +176,30 @@ function fadedVolume(clip: TimelineClip, doc: TimelineProject, localSec: number)
 }
 
 /**
+ * ノイズを減らした音の**作り置きの場所**（ADR-0068）＝素材のパスから決まる。⚠️ **Rust の `denoised_rel_path` と同じ規則**
+ *（書き出しはこのパスを渡す・プレビューは Rust が作って返したパスを読む＝割れると作ったのに見つからない）。
+ */
+export function denoisedCachePath(assetFilePath: string): string {
+  const name = assetFilePath.split(/[\\/]/).pop() ?? '';
+  return `cache/denoise/${name}.flac`;
+}
+
+/**
+ * その部品の音を**ノイズを減らして鳴らすか**（ADR-0068）。効くのは**持ち込みの音の部品**と**直接置いた動画の元の音**だけ
+ *（同梱の曲・読み上げ・差し込み口・止めた絵は対象外）。再生・書き出し・画面（欄を出すか）が同じ述語を通る。
+ */
+export function denoisesClip(doc: TimelineProject, clip: TimelineClip): boolean {
+  if (clip.denoise !== true) return false;
+  return canDenoise(doc, clip);
+}
+
+/** ノイズを減らす欄を出せる部品か（ADR-0068）＝`denoisesClip` の、設定を見ない側。 */
+export function canDenoise(doc: TimelineProject, clip: TimelineClip): boolean {
+  if (clip.kind === TIMELINE_CLIP_KIND.audio) return clip.assetId != null && clip.bundledBgmId == null;
+  return isDirectVideoClip(doc, clip) && clip.holdFrame !== true;
+}
+
+/**
  * 時刻 `timeSec` に鳴っている音の一覧（ADR-0032・#630）。純粋関数。
  *
  * - 区間は **`[startSec, startSec+durationSec)`**（絵の `clipIsLiveAt` と同じ半開＝V24 と揃える）。
@@ -158,6 +214,7 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
   const audible = new Set(
     doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.hidden).map((t) => t.id),
   );
+  const trackGain = new Map(doc.tracks.map((t) => [t.id, trackGainOf(t)]));
   const cues: AudioCue[] = [];
   for (const clip of doc.clips) {
     if (!isAudioClip(clip) || clip.hidden || !audible.has(clip.trackId)) continue;
@@ -168,8 +225,29 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
       clipId: clip.id,
       // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
       offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
-      volume: clipGainAt(clip, doc, localSec),
+      // ⚠️ **列の音量は鳴らす値にだけ掛ける**（ADR-0067）＝部品の音量の線（`clipGainAt`）は部品の設定のまま。
+      // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝書き出し（`timelineAudioRuns`）と同じ順＝上限を掛ける道で割らない。
+      volume: clampVolume(clipGainAt(clip, doc, localSec) * (trackGain.get(clip.trackId) ?? 1)),
       speed,
+    });
+  }
+  // **ノイズを減らした動画の元の音**（ADR-0068）＝`<video>` は黙らせ、作り置きを同じ時刻・速さで鳴らす。
+  // ⚠️ 鳴るかどうか・音量・頭出しは書き出しと同じ `placementOriginalAudio`／使える長さを通す（勝手に鳴らし続けない）。
+  // ⚠️ **描かれるかは書き出しと同じ述語**（`isDrawnClip`＝隠した部品・隠した列・隠したまとまり）＝自前で判定すると、
+  //   まとまりごと隠した動画だけプレビューで鳴り書き出しで鳴らない（PR レビュー 🔴）。
+  for (const clip of doc.clips) {
+    if (clip.kind === TIMELINE_CLIP_KIND.audio || !isDrawnClip(doc, clip)) continue;
+    if (!denoisesClip(doc, clip)) continue;
+    const place = videoPlacementsOfClip(doc, clip)[0];
+    const org = place ? placementOriginalAudio(doc, place) : null;
+    if (!place || !org) continue;
+    const localSec = timeSec - clip.startSec;
+    if (localSec < 0 || timeSec >= clipEndSec(clip) || localSec >= place.durationSec) continue;
+    cues.push({
+      clipId: clip.id,
+      offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: org.sourceStartSec, speed: org.speed })),
+      volume: org.volume,
+      speed: org.speed,
     });
   }
   return cues;
@@ -184,6 +262,8 @@ export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
  */
 export interface AudioSource {
   clipId: string;
+  /** ノイズを減らした作り置き（ADR-0068）＝この素材の `denoisedCachePath`。ほかの出どころより先に見る。 */
+  denoiseAssetId?: string;
   voicePath?: string;
   bundledBgmId?: string;
   assetId?: string;
@@ -192,6 +272,11 @@ export interface AudioSource {
 export function audioSourcesOf(doc: TimelineProject): AudioSource[] {
   const out: AudioSource[] = [];
   for (const clip of doc.clips) {
+    // ノイズを減らす部品（ADR-0068）＝作り置きを読む（元の素材は読まない＝鳴らさないので）。
+    if (denoisesClip(doc, clip) && clip.assetId) {
+      out.push({ clipId: clip.id, denoiseAssetId: clip.assetId });
+      continue;
+    }
     // **種別で分ける**（優先順で吸収しない）＝「音の出どころは高々1つ」（§8 V25）の語彙と一致させる。
     // 重ねて指定されたデータは V25 が警告するので、ここで黙って一方を選ばない。
     if (clip.kind === TIMELINE_CLIP_KIND.voice) {
@@ -208,11 +293,13 @@ export function audioSourcesOf(doc: TimelineProject): AudioSource[] {
  * 音源の種類（#1064）。**できる次の行動が種類で違う**ので、断りの文言が見分けるのに使う
  *（読み上げ＝作り直す／同梱の曲＝一覧から選び直す／取り込んだ素材＝ファイルを選び直す）。
  */
-export const AUDIO_SOURCE_KIND = { voice: 'voice', bundled: 'bundled', asset: 'asset' } as const;
+export const AUDIO_SOURCE_KIND = { voice: 'voice', bundled: 'bundled', asset: 'asset', denoise: 'denoise' } as const;
 export type AudioSourceKind = (typeof AUDIO_SOURCE_KIND)[keyof typeof AUDIO_SOURCE_KIND];
 
 /** その音源はどの種類か（鍵の作り方と**同じ順**で見る＝見分けを2か所に持たない）。 */
 export function audioSourceKindOf(src: AudioSource): AudioSourceKind {
+  // ⚠️ **ノイズを減らした作り置きは別の種類**（ADR-0068）＝直し方が違う（素材を入れ直すのではなく、外せば元の音で鳴る）。
+  if (src.denoiseAssetId) return AUDIO_SOURCE_KIND.denoise;
   if (src.voicePath) return AUDIO_SOURCE_KIND.voice;
   if (src.bundledBgmId) return AUDIO_SOURCE_KIND.bundled;
   return AUDIO_SOURCE_KIND.asset;
@@ -223,9 +310,24 @@ export function audioSourceKindOf(src: AudioSource): AudioSourceKind {
  * **セッション中に増えたクリップ**（複製など）でも読み直さずに鳴らせる＝黙って無音にならない。
  */
 export function audioSourceKey(src: AudioSource): string {
+  if (src.denoiseAssetId) return denoiseSourceKey(src.denoiseAssetId);
   if (src.voicePath) return `voice:${src.voicePath}`;
   if (src.bundledBgmId) return `bgm:${src.bundledBgmId}`;
   return `asset:${src.assetId ?? ''}`;
+}
+
+/** ノイズを減らした作り置きの鍵（ADR-0068）＝元の素材の鍵（`asset:`）と分ける（同じ素材を両方の部品で使える）。 */
+export function denoiseSourceKey(assetId: string): string {
+  return `denoise:${assetId}`;
+}
+
+/**
+ * 部品が鳴らす音の鍵（ノイズを減らす部品＝作り置き・ADR-0068）。動画の元の音もこれで引く＝**再生する側はこれを通す**。
+ * ⚠️ 書き出しの「音の部品か」の判定（`audioSourceKeyOfClip`）とは分ける＝動画まで音の部品として並べない。
+ */
+export function playedAudioKeyOfClip(doc: TimelineProject, clip: TimelineClip): string | null {
+  if (denoisesClip(doc, clip) && clip.assetId) return denoiseSourceKey(clip.assetId);
+  return audioSourceKeyOfClip(clip);
 }
 
 /** クリップから音源キーを引く（鳴らす側が `audioSrcByKey` を引くのに使う）。 */

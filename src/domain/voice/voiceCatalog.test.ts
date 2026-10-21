@@ -54,3 +54,53 @@ describe('characterForSpeaker', () => {
     expect(characterForSpeaker(undefined)).toBeNull();
   });
 });
+
+describe('拡張パックの声（ADR-0060 段階3）', () => {
+  it('足した声も一覧とキャラ名・クレジットの引き当てに出て、差し替えると消える', async () => {
+    const { setExtraVoiceCharacters, voiceCatalog } = await import('./voiceCatalog');
+    const { creditForSpeaker } = await import('./narratorCredit');
+    try {
+      setExtraVoiceCharacters([{ character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }]);
+      expect(voiceCatalog().at(-1)?.character).toBe('あおい');
+      expect(characterForSpeaker(9001)).toBe('あおい');
+      expect(speakerForCharacter('あおい')).toBe(9001);
+      expect(creditForSpeaker(9001)).toContain('あおい'); // クレジットを落とさない（ADR-0003）
+      setExtraVoiceCharacters([]);
+      expect(characterForSpeaker(9001)).toBeNull();
+      expect(voiceCatalog()).toBe(VOICE_CATALOG);
+    } finally {
+      setExtraVoiceCharacters([]);
+    }
+  });
+});
+
+describe('いま入っていない声で作り済みの読み上げ（段階3）', () => {
+  it('作り済み・文あり・一覧に無い声だけを数える（継承・同梱の声・まだ作っていないものは数えない）', async () => {
+    const { sceneGoneVoiceLineCount, isGoneGeneratedVoice } = await import('./goneVoices');
+    const gen = 'generated';
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: 'こんにちは' })).toBe(true);
+    expect(isGoneGeneratedVoice({ speaker: 3, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: null, status: gen, text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: 'not_generated', text: 'こんにちは' })).toBe(false);
+    expect(isGoneGeneratedVoice({ speaker: 9001, status: gen, text: '  ' })).toBe(false);
+    expect(sceneGoneVoiceLineCount([
+      { lines: [{ speaker: 9001, status: gen, text: 'a' }, { speaker: 3, status: gen, text: 'b' }] },
+      { lines: null },
+      { lines: [{ speaker: 9002, status: gen, text: 'c' }] },
+    ])).toBe(2);
+  });
+});
+
+describe('COMPANY_OK_VOICE_CHARACTERS（会社の動画で使えるキャラ・13 §4）', () => {
+  it('同梱の声はすべて会社の動画で使えるキャラ', async () => {
+    const { VOICE_CATALOG, isCompanyOkVoiceCharacter } = await import('./voiceCatalog');
+    for (const c of VOICE_CATALOG) expect(isCompanyOkVoiceCharacter(c.character)).toBe(true);
+  });
+  it('会社の利用で許可が要るキャラは入っていない', async () => {
+    const { isCompanyOkVoiceCharacter, COMPANY_OK_VOICE_CHARACTERS } = await import('./voiceCatalog');
+    for (const c of ['青山龍星', 'もち子さん', '後鬼', 'No.7', 'ナースロボ＿タイプＴ', '猫使アル', '猫使ビィ', 'Voidoll', 'ぞん子', 'ユーレイちゃん', '夜語トバリ', '暁記ミタマ', '里石ユカ', '栗田まろん', '琴詠ニア', 'WhiteCUL']) {
+      expect(isCompanyOkVoiceCharacter(c)).toBe(false);
+    }
+    expect(COMPANY_OK_VOICE_CHARACTERS).toHaveLength(27);
+  });
+});

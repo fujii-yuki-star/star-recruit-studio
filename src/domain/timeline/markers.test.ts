@@ -158,11 +158,11 @@ describe('markerClock（時刻の表示）', () => {
   // ⚠️ **秒で丸めない**＝同じ秒の目印が一覧で見分けられなくなる。
   it('コマまで出す（同じ秒でも見分けられる）', () => {
     expect(markerClock(3.1, 30)).not.toBe(markerClock(3.4, 30));
-    expect(markerClock(65, 30)).toMatch(/^1:05\./);
+    expect(markerClock(65, 30)).toBe('1:05:00');
   });
 
   it('負の時刻でも落ちない（0 として出す）', () => {
-    expect(markerClock(-1, 30)).toBe('0:00.00');
+    expect(markerClock(-1, 30)).toBe('0:00:00');
   });
 });
 
@@ -270,15 +270,15 @@ describe('moveMarkerBlocked（押す前に断るための判定）', () => {
 });
 
 describe('markerClock はコマで数える（UI/UX 監査 2026-10-02）', () => {
-  it('秒の端数を丸めて存在しないコマにしない（0.999 秒＠30fps は 0:01.00）', () => {
-    expect(markerClock(0.999, 30)).toBe('0:01.00');
-    expect(markerClock(59.99, 30)).toBe('1:00.00');
-    expect(markerClock(1 + 29 / 30, 30)).toBe('0:01.29');
+  it('秒の端数を丸めて存在しないコマにしない（0.999 秒＠30fps は 0:01:00）', () => {
+    expect(markerClock(0.999, 30)).toBe('0:01:00');
+    expect(markerClock(59.99, 30)).toBe('1:00:00');
+    expect(markerClock(1 + 29 / 30, 30)).toBe('0:01:29');
   });
 });
 
 describe('parseClock（再生位置を打つ）', () => {
-  it('表示と同じ書き方（分:秒.コマ）を読む＝markerClock の逆', () => {
+  it('表示と同じ書き方（分:秒:コマ）を読む＝markerClock の逆', () => {
     for (const sec of [0, 1 + 15 / 30, 65 + 3 / 30, 600]) {
       expect(parseClock(markerClock(sec, 30), 30)).toBeCloseTo(sec, 9);
     }
@@ -287,14 +287,27 @@ describe('parseClock（再生位置を打つ）', () => {
   it('分:秒・秒だけ・全角も読む', () => {
     expect(parseClock('1:05', 30)).toBe(65);
     expect(parseClock('12.5', 30)).toBe(12.5);
-    expect(parseClock('１：０５．１５', 30)).toBeCloseTo(65.5, 9);
+    expect(parseClock('１：０５：１５', 30)).toBeCloseTo(65.5, 9);
+    expect(parseClock('１：０５．５', 30)).toBeCloseTo(65.5, 9);
   });
 
   it('読めないもの・ありえないコマや秒は null（黙って別の時刻へ飛ばない）', () => {
-    for (const t of ['', 'abc', '1:60', '0:01.30', '0:01:30', '-1', '1:2:3:4']) expect(parseClock(t, 30), t).toBeNull();
+    for (const t of ['', 'abc', '1:60', '0:01:30', '-1', '1:2:3:4:5', '0:60:00:00', '0:00:00:30', '1:05.', '1.2.3']) expect(parseClock(t, 30), t).toBeNull();
   });
 
   it('Premiere・Resolve の書き方（分:秒:コマ）も読む＝小数点と取り違えない', () => {
     expect(parseClock('1:05:15', 30)).toBeCloseTo(65.5, 9);
+  });
+
+  // ⚠️ **`.` は秒の小数**（通し点検 2026-10-16）＝以前は `0:45.50` を「50コマ」と読み、fps 以上で黙って戻っていた。
+  it('`.` は秒の小数として読む（見た目どおり・コマにしない）', () => {
+    expect(parseClock('0:45.50', 30)).toBeCloseTo(45.5, 9);
+    expect(parseClock('0:45.5', 30)).toBeCloseTo(45.5, 9);
+    expect(parseClock('1:05.25', 30)).toBeCloseTo(65.25, 9);
+  });
+
+  it('業界の時刻（時:分:秒:コマ）をそのまま貼っても読む', () => {
+    expect(parseClock('00:00:41:09', 30)).toBeCloseTo(41 + 9 / 30, 9);
+    expect(parseClock('1:02:03:04', 30)).toBeCloseTo(3723 + 4 / 30, 9);
   });
 });

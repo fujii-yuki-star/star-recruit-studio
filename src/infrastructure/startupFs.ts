@@ -45,6 +45,8 @@ export async function finishStartupJob(
   ok: boolean,
   forwarded: boolean,
   message?: string | null,
+  /** 頼んだ側へ渡す結果（標準出力へ1行・いまは取り込んだ動画の番号だけ＝`18 §18.5`）。 */
+  result?: string | null,
 ): Promise<void> {
-  await invoke('finish_startup_job', { ok, forwarded, message: message ?? null });
+  await invoke('finish_startup_job', { ok, forwarded, message: message ?? null, result: result ?? null });
 }

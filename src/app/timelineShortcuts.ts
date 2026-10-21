@@ -24,6 +24,11 @@ export const SHORTCUT_KEYS = {
   copy: "Ctrl+C",
   paste: "Ctrl+V",
   duplicate: "Ctrl+D",
+  // 「並び」の道具の「…」にも見える形で出す（ADR-0048 追補 2026-10-21＝右クリックのメニューと同じ出し方）。
+  rangeIn: "I",
+  rangeOut: "O",
+  rangeCloseGap: "Shift+Delete",
+  marker: "M",
 } as const;
 
 export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
@@ -33,9 +38,9 @@ export const TIMELINE_SHORTCUTS: readonly Shortcut[] = [
   { keys: "Home／End", action: "先頭へ／最後へ", codes: ["home", "end"] },
   { keys: SHORTCUT_KEYS.split, action: "選んだ部品を再生位置で分ける", codes: ["k"] },
   { keys: SHORTCUT_KEYS.remove, action: "選んだ部品を削除", codes: ["delete"] },
-  { keys: "I／O", action: "作業範囲の始まり／終わりを再生位置に置く", codes: ["i", "o"] },
-  { keys: "Shift+Delete（Shift+Backspace）", action: "作業範囲を削除して、空いた所を詰める（押すと確認が出ます）", codes: ["backspace"] },
-  { keys: "M", action: "再生位置に目印を置く（動画には出ません）", codes: ["m"] },
+  { keys: `${SHORTCUT_KEYS.rangeIn}／${SHORTCUT_KEYS.rangeOut}`, action: "作業範囲の始まり／終わりを再生位置に置く", codes: ["i", "o"] },
+  { keys: `${SHORTCUT_KEYS.rangeCloseGap}（Shift+Backspace）`, action: "作業範囲を削除して、空いた所を詰める（押すと確認が出ます）", codes: ["backspace"] },
+  { keys: SHORTCUT_KEYS.marker, action: "再生位置に目印を置く（動画には出ません）", codes: ["m"] },
   { keys: "Ctrl+A", action: "すべての部品を選ぶ", codes: ["a"] },
   { keys: `${SHORTCUT_KEYS.copy}／${SHORTCUT_KEYS.paste}`, action: "選んだ部品を写す／再生位置へ貼る（列と間隔はそのまま・重なる所には貼らない）", codes: ["c", "v"] },
   { keys: SHORTCUT_KEYS.duplicate, action: "選んだ部品を複製して、すぐ後ろに置く（空いていなければ理由を出す）", codes: ["d"] },

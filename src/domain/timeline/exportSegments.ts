@@ -14,7 +14,7 @@
 // **その区間に生きている絵の部品が「動画1つだけ」**のときしか倒さない。
 // 広げるときは**パリティの検査を足してから**（各条件が1つずつ検査を持つ形にしてある）。
 
-import { TIMELINE_CLIP_KIND } from '../enums';
+import { isMixingBlend, TIMELINE_CLIP_KIND } from '../enums';
 import { CREDIT_MODE, creditVisibleAt, resolveCreditDisplay } from '../voice/creditDisplay';
 import type { CreditDisplay } from '../voice/creditDisplay';
 import { groupElementIds } from '../project/groupOps';
@@ -42,6 +42,9 @@ export function clipIsPassThroughVideo(
   if (!clip.assetId) return false;
   // ⚠️ **動きがあると倒せない**＝重ねるのは FFmpeg なので、位置も大きさも区間の間ずっと同じでなければならない。
   if (hasAnimation(clip.id)) return false;
+  // ⚠️ **止めた絵（ADR-0065）は流せない**＝そのまま流すと**動画が動く**（プレビューは止まっている）。
+  //   焼く側へ倒す＝1コマだけ焼いて全部それを読む（`videoPlacementsOfClip` の使える長さ 0）。
+  if (clip.holdFrame === true) return false;
   if (clip.rotation != null && clip.rotation !== 0) return false;
   // ⚠️ **反転も倒せない**（ADR-0059・PR #1413 レビュー 🟡）＝`overlay` は鏡に映せない。組む側（`drawnExtras`）だけで弾くと、
   //   割る側はそのまま流す区間と数えてしまい、焼くコマ数（進み具合・空き容量の見張り）を少なく見積もる。
@@ -55,7 +58,7 @@ export function clipIsPassThroughVideo(
   if (clip.cropAlign != null) return false;
   // ⚠️ **色の調整・描画モードは SVG で描く**（ADR-0044）＝FFmpeg が重ねる所では効かない。
   if (clip.colorAdjust != null) return false;
-  if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
+  if (isMixingBlend(clip.blendMode)) return false;
   return true;
 }
 
@@ -76,7 +79,7 @@ export function clipIsStaticOverlay(
   if (isVideoClip(clip.id)) return false;
   if (hasAnimation(clip.id)) return false;
   if ((clip.fadeInSec ?? 0) !== 0 || (clip.fadeOutSec ?? 0) !== 0) return false;
-  if (clip.blendMode != null && clip.blendMode !== 'normal') return false;
+  if (isMixingBlend(clip.blendMode)) return false;
   return true;
 }
 

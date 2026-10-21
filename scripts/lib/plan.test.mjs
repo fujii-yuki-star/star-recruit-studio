@@ -187,3 +187,14 @@ describe("撮った後の「絵が動いたか」の検査に掛ける段", () =
     expect(needsMotionCheck({ ...base, quiet: true })).toBe(true);
   });
 });
+
+describe("見出しが変わるまで待つ（untilHeadingMs・2026-10-15）", () => {
+  it("待つ先（expectHeading）と一緒なら通る", () => {
+    expect(() => checkPlan({ steps: [{ clickText: "作る", expectHeading: "できました", untilHeadingMs: 180000 }] })).not.toThrow();
+  });
+  it("待つ先が無い・数でない・0 以下は断る", () => {
+    expect(() => checkPlan({ steps: [{ clickText: "作る", untilHeadingMs: 1000 }] })).toThrow(/untilHeadingMs/);
+    expect(() => checkPlan({ steps: [{ clickText: "作る", expectHeading: "x", untilHeadingMs: "長め" }] })).toThrow(/untilHeadingMs/);
+    expect(() => checkPlan({ steps: [{ clickText: "作る", expectHeading: "x", untilHeadingMs: 0 }] })).toThrow(/untilHeadingMs/);
+  });
+});

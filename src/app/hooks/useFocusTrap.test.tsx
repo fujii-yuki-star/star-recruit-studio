@@ -82,6 +82,65 @@ describe("焦点の出し入れ（#986）", () => {
   });
 });
 
+describe("閉じるとき、わざと移した手は奪わない（通し点検 2026-10-16）", () => {
+  // 列のメニューの「名前を変える」＝選ぶと名前の欄が自分で手を取る。ここで⋮へ奪い返すと、
+  // 欄は手を失った瞬間に確定して閉じ、**メニューから名前を変えられなかった**。
+  function MenuThenField() {
+    const [open, setOpen] = useState(false);
+    const [renaming, setRenaming] = useState(false);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>ひらく</button>
+        {renaming && <input aria-label="名前" autoFocus onBlur={() => setRenaming(false)} />}
+        {open && <MenuBox onPick={() => { setOpen(false); setRenaming(true); }} />}
+      </>
+    );
+  }
+  function MenuBox({ onPick }: { onPick: () => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+    useFocusTrap(true, ref);
+    return <div ref={ref}><button onClick={onPick}>名前を変える</button></div>;
+  }
+
+  it("項目が別の欄へ手を移したら、その欄に手が残る（欄は閉じない）", () => {
+    render(<MenuThenField />);
+    const opener = screen.getByText("ひらく");
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByText("名前を変える"));
+    const field = screen.queryByLabelText("名前");
+    expect(field != null, "名前の欄が開いたまま").toBe(true);
+    expect(document.activeElement === field, "手は名前の欄にある").toBe(true);
+  });
+
+  it("中の要素が消えて body へ落ちたときは、開く前の所へ戻す", () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const { rerender } = render(<Box open />);
+    expect(document.activeElement === screen.getByText("中1"), "開くと中へ").toBe(true);
+    rerender(<Box open={false} />);
+    expect(document.activeElement === outside, "body へ落とさない").toBe(true);
+    outside.remove();
+  });
+
+  it("閉じ込めをやめても中身が残るときは、中に残った手を開く前の所へ戻す", () => {
+    function Stay({ active }: { active: boolean }) {
+      const ref = useRef<HTMLDivElement>(null);
+      useFocusTrap(active, ref);
+      return <div ref={ref}><button>残る中身</button></div>;
+    }
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const { rerender } = render(<Stay active />);
+    expect(document.activeElement === screen.getByText("残る中身"), "開くと中へ").toBe(true);
+    rerender(<Stay active={false} />);
+    expect(document.activeElement === outside, "中に残った手は戻す").toBe(true);
+    outside.remove();
+  });
+});
+
 // ⚠️ **部品に配線されているか**（#986）＝フックが正しくても、部品が呼んでいなければ効かない。
 describe("3つの部品に配線されている（#986）", () => {
   it("削除の確認：閉じると、開く前の所へ手が戻る", async () => {

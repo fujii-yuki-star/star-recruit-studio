@@ -223,6 +223,7 @@ pub async fn voicevox_user_dict_add(
     surface: String,
     pronunciation: String,
     accent_type: u32,
+    priority: u32,
     base_url: Option<String>,
     engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
 ) -> Result<String, String> {
@@ -233,6 +234,8 @@ pub async fn voicevox_user_dict_add(
             ("surface", surface.as_str()),
             ("pronunciation", pronunciation.as_str()),
             ("accent_type", accent_type.to_string().as_str()),
+            // 優先度は画面側が決める（`READING_DICT_PRIORITY`＝ここに数を書かない・ADR-0037 追補）。
+            ("priority", priority.to_string().as_str()),
         ])
         .send()
         .await
@@ -259,6 +262,7 @@ pub async fn voicevox_user_dict_update(
     surface: String,
     pronunciation: String,
     accent_type: u32,
+    priority: u32,
     base_url: Option<String>,
     engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
 ) -> Result<bool, String> {
@@ -269,6 +273,7 @@ pub async fn voicevox_user_dict_update(
             ("surface", surface.as_str()),
             ("pronunciation", pronunciation.as_str()),
             ("accent_type", accent_type.to_string().as_str()),
+            ("priority", priority.to_string().as_str()),
         ])
         .send()
         .await
@@ -317,14 +322,16 @@ fn is_missing_word(status: reqwest::StatusCode) -> bool {
 ///
 /// ⚠️ **辞書には触らない**＝登録する前に確かめるための機能なので、`user_dict` へ入れて消す、はしない
 /// （辞書は OS 上の固定パスで他の VOICEVOX と共有される＝途中で落ちるとゴミが残る・決定3）。
-/// 代わりに `audio_query` の結果の**下がる位置だけ差し替えて** `synthesis` へ渡す。
 ///
-/// ⚠️ **読みが複数のかたまりに割れたときは先頭だけ直す**＝辞書は1語に1つの下がり方を持つので、
-/// 登録後の聞こえ方に十分近い。割れること自体が稀（1語ぶんの読みを渡すため）。
+/// ⚠️ **下がり方は「かな」の書き方で受ける**（`kana`＝`ホ'シノハラガ`・作るのは画面側の `accentPreviewKana`）。
+/// 前の版は `audio_query` の結果の「下がる位置」の数だけを差し替えていたが、エンジンは**音の高さを
+/// 作り直さない**ので**どの候補も同じ音**だった（2026-10-19 実測・ADR-0037 追補）。かなから
+/// `accent_phrases` を作れば高さも作られ、**登録した後の音と同じ**になる（実測で一致）。
+/// 話す速さなどの既定は読みの `audio_query` から採り、かたまりだけを差し替える。
 #[tauri::command]
 pub async fn voicevox_synthesize_with_accent(
     yomi: String,
-    accent_type: u32,
+    kana: String,
     speaker: u32,
     style: VoiceStyle,
     base_url: Option<String>,
@@ -351,23 +358,27 @@ pub async fn voicevox_synthesize_with_accent(
         .await
         .map_err(|_| "音声データの解析に失敗しました。もう一度お試しください。".to_string())?;
 
-    // 下がる位置を差し替える（先頭のかたまりだけ・粒の数を超えない範囲へ収める）。
-    if let Some(phrase) = query
-        .get_mut("accent_phrases")
-        .and_then(|v| v.as_array_mut())
-        .and_then(|a| a.first_mut())
-    {
-        let mora_count = phrase
-            .get("moras")
-            .and_then(|m| m.as_array())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        // ⚠️ **値はそのまま渡す**（推測で寄せない・§9-2）。`AccentPhrase.accent` と `user_dict` の
-        // `accent_type` が「下がらない（平板）」を同じ値で表すかは**実機で未検証**（ADR-0037 未解決）。
-        // 片方へ寄せると聞いた音と登録後の音が食い違うので、実機で突き合わせてから直す。
-        let clamped = (accent_type as usize).min(mora_count);
-        phrase["accent"] = serde_json::json!(clamped);
+    let phrases_res = client
+        .post(format!("{base}/accent_phrases"))
+        .query(&[
+            ("text", kana.as_str()),
+            ("speaker", speaker_str.as_str()),
+            ("is_kana", "true"),
+        ])
+        .send()
+        .await
+        .map_err(|e| send_error(&e, ENGINE_TIMEOUT_MESSAGE, ENGINE_UNREACHABLE_MESSAGE))?;
+    if !phrases_res.status().is_success() {
+        return Err(
+            "読み方を確かめられませんでした。読み（カタカナ）を確かめてもう一度お試しください。"
+                .to_string(),
+        );
     }
+    let phrases: serde_json::Value = phrases_res
+        .json()
+        .await
+        .map_err(|_| "音声データの解析に失敗しました。もう一度お試しください。".to_string())?;
+    query["accent_phrases"] = phrases;
     style.apply(&mut query);
 
     let synth_res = client

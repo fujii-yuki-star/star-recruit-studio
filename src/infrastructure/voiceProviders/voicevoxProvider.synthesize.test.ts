@@ -73,7 +73,9 @@ describe('synthesizeWithAccent（Rust へ渡す形）', () => {
     expect(args.style).toEqual({ speed: 1.2, pitch: 0.3, intonation: 0.8 });
     expect(args).not.toHaveProperty('speed');
     expect(args.yomi).toBe('スタリオ');
-    expect(args.accentType).toBe(1);
+    // 下がり方は「かな」の書き方で渡す（登録後と同じ音・ADR-0037 追補）。数だけ渡す形に戻さない。
+    expect(args.kana).toBe("ス'タリオガ");
+    expect(args).not.toHaveProperty('accentType');
     delete (globalThis as { window?: unknown }).window;
   });
 });

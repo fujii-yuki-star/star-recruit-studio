@@ -4,7 +4,7 @@ import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, ORIENTATION_LABEL } from "../uiLabels";
+import { deleteLookConfirmMessage, DUPLICATE_LOOK_LABEL, DUPLICATE_BUSY_LABEL, lookOriginLabel, ORIENTATION_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock, ExportLockBanner } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -132,6 +132,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   }, [current?.templateId, clearTemplateError]);
 
   const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
+  const packs = useProjectStore((s) => s.packs);
 
   // この見た目を複製してマイテンプレにし、そのまま編集画面へ。連打は busyAction で防ぐ（採番の余分な前進を避ける）。
   async function onDuplicate() {
@@ -193,16 +194,18 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     e.target.value = "";
     if (files.length === 0) return;
     const { templates: loaded, rejected } = await parseTemplateFiles(files);
-    const first = loaded[0];
-    if (first) {
-      addTemplatePack(loaded);
-      setSelectedId(first.templateId);
-    }
+    // ⚠️ **自分の見た目として保存する**（通し点検 2026-10-16・利用者判断 2026-10-19）＝以前はその起動の間だけで、閉じると消えた。
+    //   保存に失敗したものは数えない（理由は保存の断り＝`templateError` が出す）。
+    const saved = loaded.length > 0 ? await addTemplatePack(loaded) : [];
+    const first = saved[0];
+    if (first) setSelectedId(first);
     setLoadOk(!!first);
     setLoadMsg(
       first
-        ? `${loaded.length}件の見た目パターンを読み込みました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}`
-        : "読み込める見た目パターンがありませんでした。ファイルの内容をご確認ください。",
+        ? `${saved.length}件の見た目パターンを読み込み、自分の見た目として残しました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}${loaded.length > saved.length ? `（${loaded.length - saved.length}件は残せませんでした。上の案内を確かめてください）` : ""}`
+        : loaded.length > 0
+          ? "見た目パターンを残せませんでした。上の案内を確かめてから、もう一度読み込んでください。"
+          : "読み込める見た目パターンがありませんでした。ファイルの内容をご確認ください。",
     );
   }
 
@@ -297,14 +300,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         </button>
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 360px",
-          gap: "var(--gap-lg)",
-          alignItems: "start",
-        }}
-      >
+      {/* 一覧と見本の2列。⚠️ **狭い窓では見本を下へ回す**（`looks-layout`・α 最終点検 2026-10-21＝最小の窓で見本が右へはみ出し、ページが横に流れていた）。 */}
+      <div className="looks-layout">
         {/* 左: 見た目パターン一覧 */}
         <div>
           {/* ⚠️ **探し方は素材画面と揃える**（#1031）＝種類のタブ＋名前で探す＋「絞り込みをやめる」。
@@ -397,7 +394,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </button>
             )}
             <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`} style={{ alignSelf: "flex-start" }}>
-              {isUserCurrent ? "自分の見た目" : "標準（直接は編集できません）"}
+              {isUserCurrent ? "自分の見た目" : lookOriginLabel(current.templateId, packs)}
             </span>
           </div>
 

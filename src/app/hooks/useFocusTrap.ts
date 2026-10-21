@@ -28,7 +28,7 @@ const focusablesIn = (root: HTMLElement): HTMLElement[] =>
  *
  * - 開いたとき＝`initial`（無ければ中の最初のもの）へ手を移す
  * - `Tab` / `Shift+Tab`＝**外へ出さず**、端で反対側へ回す
- * - 閉じたとき＝**開く前に手があった所へ戻す**
+ * - 閉じたとき＝**開く前に手があった所へ戻す**（手が中に残っているか `body` へ落ちたときだけ。別の所へ移っていれば奪わない）
  *
  * ⚠️ **`Escape` は扱わない**＝それは名簿（`escapeOwners`）の仕事。ここは焦点だけ。
  */
@@ -75,7 +75,13 @@ export function useFocusTrap(
       window.removeEventListener("keydown", onKey, true);
       // ⚠️ **元へ戻す**＝押した瞬間に消えるボタンから手が落ちる（#354 の症状の裏側）。
       // ⚠️ **まだ画面にあるときだけ**＝消えた要素へ戻そうとしても何も起きない。
-      if (returnTo && returnTo.isConnected) returnTo.focus();
+      // ⚠️ **手が行き場を失ったときだけ戻す**（通し点検 2026-10-16）＝選んだ項目が**わざと別の所へ手を移した**
+      //   （列のメニューの「名前を変える」＝名前の欄が自分で手を取る）のに、ここで⋮のボタンへ奪い返すと、
+      //   欄は手を失った瞬間に確定して閉じる＝**メニューから名前を変えられなかった**。
+      //   戻すのは、手が中に残っている／`body` へ落ちたときだけ（中の要素が消えると `body` になる）。
+      const now = document.activeElement;
+      const lost = now == null || now === document.body || (box?.contains(now) ?? false);
+      if (lost && returnTo && returnTo.isConnected) returnTo.focus();
     };
   }, [active, ref, initial]);
 }

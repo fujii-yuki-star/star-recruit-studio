@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import { isKnownPackFeature, packIdOfScopedId, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
 import type { MotionPresetShape } from "../domain/timeline/motionPresets";
@@ -73,6 +74,28 @@ export const Z_ORDER_LABEL = "重ね順";
  * ⚠️ §2-3 が禁じるのは**実装用語**であって、動画編集の一般語ではない。
  */
 export const DUPLICATE_LABEL = "複製";
+/** 太字が効かない字体のとき（#1483・ADR-0038）＝次の行動は「同梱の字体へ戻す」。 */
+export const BOLD_UNAVAILABLE_NOTE = "この文字の形には太字が無いため、太字を選んでも見た目は変わりません。太くしたいときは、同梱の文字の形を選んでください";
+/** タイムライン形式の「使っていない素材を片づける」（#1480）。件数つき。 */
+export function unusedAssetsCleanupLabel(count: number): string {
+  return `使っていない素材を片づける（${count}件）`;
+}
+/** 片づける前の確認（#1480）＝何がどこへ行くか・戻し方を言う（ADR-0064 と同じ＝ごみ箱）。 */
+export function unusedAssetsCleanupConfirm(names: readonly string[]): string {
+  const head = names.slice(0, 5).join("」「");
+  const rest = names.length > 5 ? `」ほか${names.length - 5}件` : "」";
+  return `どの部品にも使っていない素材「${head}${rest}を一覧から外し、ファイルをごみ箱へ移します。この操作は「取り消す」では戻りません。必要になったらごみ箱から戻して取り込み直してください。`;
+}
+/** 部品の音のノイズを減らす切り替え（ADR-0068）。 */
+export const DENOISE_LABEL = "ノイズを減らす";
+/** ノイズを減らした音を作っている間（ADR-0068）。 */
+export const DENOISE_PREPARING_TEXT = "ノイズを減らした音を用意しています。用意できるまでは音が鳴りません";
+/** ノイズを減らした音を作れなかった（ADR-0068）＝外せば元の音で鳴る。 */
+export const DENOISE_FAILED_TEXT = `ノイズを減らした音を作れませんでした。「${DENOISE_LABEL}」を外して、元の音で鳴らしてください`;
+/** 列の無い所（いちばん下の列より下）へ落とすときの予告（ADR-0049・#1478＝ファイル・帯・欄から置く、で同じ文）。 */
+export const NEW_TRACK_DROP_TEXT = "離すと新しい列を作って、ここに置きます";
+/** 列の「⋮」から列の音量を直す（ADR-0067）。 */
+export const TRACK_VOLUME_MENU_LABEL = "この列の音量";
 export const DELETE_LABEL = "削除";
 
 /**
@@ -386,6 +409,8 @@ export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, pu
 
 /** 空状態から「場面を作る画面」へ行く導線のラベル（4画面で同じ言葉＝同じ行き先）。 */
 export const GO_TO_DRAFT_LABEL = "たたき台へ";
+/** 場面が0のときの「やり直す」（取り消しで場面が無くなったときの戻り道・通し点検 2026-10-16）。上の道具の行と同じ言い方。 */
+export const REDO_LABEL = "↷ やり直す";
 
 /**
  * 動画案の作成に失敗したときの見出し・説明・復帰の2択（#393 P1）。**生成中の画面と空状態（4画面）で共有**する（#590）。
@@ -505,6 +530,7 @@ export const bakeNoteMessage: Record<BakeNoteCode, string> = {
   BAKE_DIALOGUE_SUBTITLE_SKIPPED: "セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください",
   BAKE_VIDEO_START_TIMING_SKIPPED: "動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください",
   BAKE_VIDEO_AUDIO_TRANSITION: "場面が切り替わる所で、動画の元の音は小さくならずに次の場面と重なります。気になるときは、作ったあとにその動画の元の音を小さくしてください",
+  BAKE_TRANSITION_AS_FADE: "ワイプ・ズームの切り替えは、フェードとして持っていきます。ワイプ・ズームのまま出したいときは、いまの動画から書き出してください",
 };
 
 /** 持っていけないもの1件の案内＋対象の場面（例:「場面2・5 …」）。 */
@@ -586,7 +612,7 @@ const clipKindLabel: Record<TimelineClipKind, string> = {
 export function clipLabel(
   clip: {
     kind: TimelineClipKind; name?: string; text?: string; voice?: { text: string };
-    assetId?: string | null; bundledBgmId?: string | null;
+    assetId?: string | null; bundledBgmId?: string | null; holdFrame?: boolean;
   },
   assets?: readonly { assetId: string; displayName: string }[],
 ): string {
@@ -598,8 +624,11 @@ export function clipLabel(
   const bgm = bgmById(clip.bundledBgmId);
   if (bgm) return bgm.label;
   const asset = clip.assetId ? assets?.find((a) => a.assetId === clip.assetId) : undefined;
-  if (asset?.displayName) return asset.displayName.slice(0, 20);
-  return clipKindLabel[clip.kind];
+  // ⚠️ **止めた絵（ADR-0065）は並びで見分けられるように**＝同じ動画の名前が前後に2つ並ぶので、
+  //   どちらが止まっているかが帯から読めない（以前は写真の名前になっていた）。
+  const held = clip.holdFrame === true ? "（止めた絵）" : "";
+  if (asset?.displayName) return asset.displayName.slice(0, 20) + held;
+  return clipKindLabel[clip.kind] + held;
 }
 
 /**
@@ -1031,9 +1060,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_NO_ORIGINAL_AUDIO: "この動画には音が入っていないので、元の音は鳴らせません。音を付けるなら、音の列に音を置いてください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_FREEZE_NOT_VIDEO: "絵を止められるのは、置いた動画だけです。動画の部品を選んでからお試しください",
-  TIMELINE_EDIT_FREEZE_FAILED: "その瞬間の絵を切り出せませんでした。少し違う位置でもう一度お試しください",
   TIMELINE_EDIT_FREEZE_ASSET_MISSING: `この動画のファイルが見つかりません。知らせの「${RELINK_ASSET_LABEL}」で入れ直してからお試しください`,
-  TIMELINE_EDIT_FREEZE_CHANGED: "絵を止めている間に、その部品が変わりました。もう一度お試しください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
   // ⚠️ **「素材の画面で外す」とは案内しない**（#816-5・ADR-0034 決定5 に記録済み）＝素材の画面は
@@ -1138,6 +1165,13 @@ export const TIMELINE_VIDEO_STILL_FLIPPED_CROP =
   "反転したり縦横の大きさを変えたりした部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
 /**
+ * いま入っていない声で作り済みの読み上げがある（ADR-0060 段階3・`VOICE_SPEAKER_GONE`／`TIMELINE_EXPORT_VOICE_GONE`）。
+ * ⚠️ 両形式で同じ文（ADR-0026②）。句点は付けない（場面形式は公開前チェックの流儀で付け足す）。
+ */
+export const VOICE_SPEAKER_GONE_MESSAGE =
+  "この動画には、いま選べない声で作った読み上げがあります。このまま書き出すと声の名前（クレジット）が正しく出ません。その読み上げの声を選び直して作り直してください（外した拡張パックの声なら、設定の「拡張パック」から入れ直しても直ります）";
+
+/**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
  * **全コードに文言が要る**＝理由が増えたら気づく。
  * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
@@ -1156,15 +1190,17 @@ export const exportBlockedMessage: Record<
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     // ⚠️ 「読み込み直す」は書かない（#812）＝読み直す操作が画面に無く、自作のものを消した場合は
     // 読み直しても戻らない（実行できない／効果の無い行動を名指ししない・§2-5）。
-    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して、置き直してください",
+    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
   TIMELINE_EXPORT_ASSET_UNREADABLE:
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
   // ⚠️ **場面形式と同じことを言う**（ADR-0026②）＝`USER_FONT_MISSING` と同じ「別の字になる」を伝え、
   // 次の行動（取り込み直す／別の文字の形を選ぶ）まで出す。
+  // ⚠️ **場面形式と同じことを言う**（ADR-0026②・`VOICE_SPEAKER_GONE`）。
+  TIMELINE_EXPORT_VOICE_GONE: VOICE_SPEAKER_GONE_MESSAGE,
   TIMELINE_EXPORT_USER_FONT_MISSING:
-    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、使っている文字で別の文字の形を選び直してください",
+    "この動画で使っている文字の形（フォント）が見つかりません。このまま書き出すと別の字になります。設定の「文字の形」から取り込み直す（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、使っている文字で別の文字の形を選び直してください",
   // ⚠️ **「見つからない」とは別**＝目録が読めないので待っても埋まらない（場面形式の `unknownFont` と同じ）。
   TIMELINE_EXPORT_USER_FONT_UNREADABLE:
     "この動画は取り込んだ文字の形（フォント）を使っていますが、いま手元にあるかを調べられませんでした。このまま書き出すと別の字になることがあります。アプリを開き直してから、もう一度お試しください",
@@ -1190,7 +1226,9 @@ export function audioUnreadableMessage(kind: AudioSourceKind): string {
     ? "その読み上げを選んで「声を作る」でもう一度作ってください"
     : kind === AUDIO_SOURCE_KIND.bundled
       ? "その部品を選んで「音」の「鳴らす音」で選び直してください"
-      : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
+      : kind === AUDIO_SOURCE_KIND.denoise
+        ? `その部品の「${DENOISE_LABEL}」を外すと元の音で書き出せます`
+        : `その素材の「${RELINK_ASSET_LABEL}」から入れ直すか、その部品を消してください`;
   return `${head}${how}`;
 }
 
@@ -1229,8 +1267,8 @@ export function volumePointsTooManyMessage(hasSplittable: boolean): string {
  */
 export function missingTemplateMessage(count?: number): string {
   return count == null
-    ? "この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。"
-    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して、置き直してください。`;
+    ? "この部品の見た目パターンが見つかりません。この部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください。"
+    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して置き直すか、拡張パックの見た目パターンなら、設定の「拡張パック」からそのパックを入れ直してください。`;
 }
 
 /**
@@ -1336,7 +1374,7 @@ export const DUPLICATE_FAILED_MESSAGE = "動画を複製できませんでした
  * ⚠️ **次の行動は2通りある**（取り込み直す／覚え直す）ので、両方を出す。
  */
 export const BRAND_FONT_NOT_APPLIED_MESSAGE =
-  "覚えている文字の形は、いまこのパソコンにありません。設定の「文字の形」で取り込み直すか、「会社の見た目」で選び直してください。";
+  "覚えている文字の形は、いまこのパソコンにありません。設定の「文字の形」で取り込み直す（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、「会社の見た目」で選び直してください。";
 
 /**
  * 会社の見た目のロゴが入らなかったときの案内（ADR-0036・α-6 出口監査 🟡）。
@@ -1538,6 +1576,8 @@ export function slotLabelsFor(layers: readonly Pick<Layer, "id" | "type">[]): st
  */
 export const alpha6Message = {
   READING_DICT_WORD_CONFLICT: "音声ソフトに、同じ言葉で違う読み方が登録されています。この読み方は上書きしていません",
+  READING_DICT_WORD_WEAK:
+    "音声ソフトに同じ読み方が登録されていますが、弱い登録のため読み方が変わらないことがあります。「こちらの読みにする」で登録し直せます",
   READING_DICT_IMPORT_DUPLICATE:
     "読み込んだ一覧に、同じ言葉で読みが違うものがありました。そのままにするか、読み込んだ方に置き換えるかを選べます",
   BRAND_KIT_SAVE_FAILED: "会社の見た目を保存できませんでした。しばらくしてから、もう一度お試しください",
@@ -1659,6 +1699,11 @@ export const templateSaveMessage = {
    */
   USER_TEMPLATE_SAVE_FAILED: "見た目パターンを保存できませんでした。もう一度お試しください。",
   USER_TEMPLATE_DELETE_FAILED: "見た目パターンを削除できませんでした。もう一度お試しください。",
+  /**
+   * ほかの見た目の変更（素材の登録・保存・削除）の最中に読み込んだとき（PR レビュー 🟡）。
+   * ⚠️ 黙って何もしないと、画面は「上の案内を確かめて」と言うのに上に案内が無かった（§2-5）。
+   */
+  USER_TEMPLATE_BUSY: "ほかの見た目パターンの変更が終わってから、もう一度読み込んでください。",
 } as const;
 
 /**
@@ -1668,7 +1713,8 @@ export const templateSaveMessage = {
 export function userFontMissingMessage(count: string | number): string {
   return (
     `この動画で使っている文字の形（フォント）が${count}つ見つかりません。` +
-    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直すか、` +
+    `このまま書き出すと別の字になります。設定の「文字の形」から取り込み直す` +
+    `（拡張パックの文字の形なら、設定の「拡張パック」からそのパックを入れ直す）か、` +
     `使っている場面で別の文字の形を選び直してください`
   );
 }
@@ -1697,8 +1743,9 @@ export const TROUBLE_LOG_TITLE = "うまくいかないときの記録";
  * 作られた文章の一部が混じることがある（例：たたき台づくりの応答が形に合わなかったときの中身）。
  * このパソコンから出ないので §2-6 には触れないが、**利用者はこのファイルを人に送る**ので、
  * 送る前に中身の見当がつくようにしておく。**送るのは利用者の判断**なので、伏せずに知らせる側を採る。
- * ⚠️ **このパソコンの中での動画案づくりは、最後に送った依頼をそのまま残す**（PR #1411）＝入力した会社の情報や
- *   写真の説明が丸ごと入る。「一部」と書くと実態より小さく見えるので、何が入るかを名指しする。
+ * ⚠️ **動画案づくりの依頼・応答をそのまま残すのは開発版だけ**（PR #1411 → 2026-10-19 から `KEEP_AI_EXCHANGE`＝
+ *   配布版では残さない）。配布版でも、写真の説明の応答の一部などは記録に入りうる（`assetDescribeQueue.ts` の警告）ので、
+ *   「会社の情報や写真の説明など」と名指しする文は変えない。
  */
 export const TROUBLE_LOG_DESC =
   "動画の書き出しや声づくりがうまくいかないとき、原因を調べるための記録がこのパソコンに残ります。"
@@ -1746,6 +1793,7 @@ export const TIMELINE_EDIT_KIND_LABEL: Record<TimelineEditKind, string> = {
   removeTrack: "列を消す",
   reorderTracks: "列の並びを変える",
   track: "列の設定を変える",
+  motion: "動きを変える",
   marker: "目印を変える",
   settings: "動画全体の設定を変える",
   other: "編集",
@@ -1967,6 +2015,30 @@ export const SUBTITLE_FILE_IMPORT_LABEL = "字幕ファイルを読み込む";
 export const SUBTITLE_FILE_IMPORT_HINT = "字幕ファイル（.srt／.vtt）の字幕を、新しい列に時刻どおり並べます";
 export const SUBTITLE_FILE_EXPORT_LABEL = "字幕ファイルを書き出す";
 export const SUBTITLE_FILE_EXPORT_HINT = "動画に出る字幕を、時刻つきの字幕ファイル（.srt／.vtt）に保存します（動画の投稿先や、ほかの編集ソフトで使えます）";
+/** 帯のキーフレームの印の説明（#1186 ②）。押すとその時刻へ移る。 */
+export function clipKeyTitle(clock: string): string {
+  return `${clock} に動きを置いています（押すとこの時刻へ移ります）`;
+}
+/** 字幕から読み上げを作る（ADR-0055 追補 2026-10-20・#1485）。複数の字幕を選んでいれば数を言う。 */
+export function voicesFromSubtitlesLabel(subtitleCount: number): string {
+  return subtitleCount > 1 ? `選んだ字幕${subtitleCount}個から読み上げを作る` : "この字幕から読み上げを作る";
+}
+export const VOICES_FROM_SUBTITLES_HINT = "字幕と同じ時刻に読み上げを置いて、声を作ります。声ができると、字幕の長さが声に合います";
+/**
+ * 字幕から読み上げを作ったあとの知らせ（#1485）。置かなかった字幕は数を言い（黙って飛ばさない）、
+ * まとめて作っている最中なら声は後で作る、と言う（走っている回には入らない）。
+ */
+export function voicesFromSubtitlesMessage(made: number, skipped: number, busy: boolean): string {
+  if (made === 0) {
+    return "読み上げを作れる字幕がありませんでした。読み上げに連動していない、文のある字幕を選んでください（固定した列の字幕は、固定を外してください）。";
+  }
+  const skippedNote = skipped > 0 ? `読み上げに連動している・文が無い・固定した列の字幕${skipped}個には作っていません。` : "";
+  const next = busy
+    ? `いまはほかの声を作っているので、終わったら「${BULK_VOICE_TIMELINE_LABEL}」を押してください。`
+    : "声を作っています。できると、字幕の長さが声に合います。";
+  // ⚠️ 「取り消すと全部消えます」とは言わない（PR レビュー 🟡）＝声ができるたびに取り消しが1つずつ積まれるので、声ができた後は1回では戻らない。
+  return `読み上げを${made}個、新しい列に置きました。${skippedNote}${next}`;
+}
 
 /**
  * タイムライン形式で、枠に入りきらず末尾が「…」になる文字の注意（#1366）。見出しは場面形式の公開前チェックと同じ。
@@ -2127,3 +2199,152 @@ export const CLIP_PIVOT_LABEL = {
 export const CLIP_PIVOT_CUSTOM_LABEL = "指定の位置";
 /** 動きの支点の説明（何に効くかを言う＝素の回転には効かない）。 */
 export const CLIP_PIVOT_HINT = "付けた動きの回転と大きさの変化を、この点を中心に効かせます（部品そのものの回転は中心のままです）。";
+
+// ── 拡張パック（ADR-0060） ─────────────────────────────────────────────
+
+/** 拡張パックの形が読めないとき（`PACK_PROBLEM.invalid`）。 */
+export const PACK_INVALID_MESSAGE = "この拡張パックは、すたりおで読める形になっていません。配った人に作り直してもらってください。";
+/** 中身のファイルが照合の一覧に無いとき（`PACK_PROBLEM.unlistedContent`）。 */
+export const PACK_UNLISTED_MESSAGE = "この拡張パックは、中身の一覧に抜けがあるため確かめられません。配った人に作り直してもらってください。";
+/** 中身の権利が書かれていないとき（`PACK_PROBLEM.missingLicense`）。 */
+export const PACK_MISSING_LICENSE_MESSAGE =
+  "この拡張パックには、中身を使ってよい範囲（権利）が書かれていません。権利が分からない中身は入れられないので、配った人に確かめてください。";
+/** 声を入れた・外したあとに声を作るソフトを起こし直せなかった（段階3・Rust の `VOICE_ENGINE_RESTART_FAILED` と同じ文）。 */
+export const VOICE_ENGINE_RESTART_FAILED_MESSAGE =
+  "声を作るソフトを起こし直せませんでした。すたりおを開き直してください（入れた声が使えるようになります）。";
+/** 声を作っている間・書き出しの間は拡張パックを入れ替えられない（段階3・`PACK_BUSY`）。 */
+export const PACK_BUSY_MESSAGE =
+  "声を作っている間と書き出しの間は、拡張パックを入れたり外したりできません。終わってから、もう一度お試しください。";
+/** 声の番号が同梱の声と重なる（段階3・`PACK_VOICE_CONFLICT`）。 */
+export const PACK_VOICE_CONFLICT_MESSAGE =
+  "この拡張パックの声は、すでに入っている声と番号が重なっているので入れられません。配った人に確かめてください。";
+/** 会社の動画で使うには権利者の許可が要るキャラの声（`PACK_VOICE_NOT_ALLOWED`・13 §4）。 */
+export function packVoiceNotAllowedMessage(character: string): string {
+  return `この拡張パックの声「${character}」は、会社の動画で使うには権利者の許可が要るため、すたりおでは使えません。この声を含まない拡張パックを入れてください。`;
+}
+/** 入っているパックのうち、ほかのパックと声の番号が重なって声を足せなかったもの（段階3・`PACK_VOICE_SKIPPED`）。 */
+export function packVoiceSkippedMessage(names: readonly string[]): string {
+  return `次の拡張パックの声は使えません（声の中身と書かれた名前・番号が合わない、すたりおでは使えないキャラの声が入っている、またはほかの声と番号が重なっています）：${names.join("、")}。配った人に確かめるか、重なっているパックを外してください。`;
+}
+/** 入っているパックのうち読めなかったもの（起動時など）。 */
+export function packSkippedMessage(names: readonly string[]): string {
+  // ⚠️ **できる手順だけを書く**（PR レビュー 🟡）＝読めなかったパックは一覧に出ない（外すボタンが無い）。
+  //   同じパックを入れ直すと置き換わるので、次の行動は「受け取り直して入れ直す」。
+  return `読めなかった拡張パックがあります（${names.join("、")}）。配った人から受け取り直して、もう一度入れてください（入れ直すと置き換わります）。`;
+}
+/** 名前も読めなかった拡張パック（読めなかった知らせに出す名前）。 */
+export const PACK_UNNAMED_LABEL = "（名前の読めない拡張パック）";
+
+/** 文字の形を選ぶ一覧の添え書き（持ち込み／拡張パック・ADR-0060 段階2）。 */
+export const FONT_NOTE_USER = "手持ち";
+export const FONT_NOTE_PACK = "拡張パック";
+/** 素材の棚の一覧が読めない（`LIBRARY_LIST_UNREADABLE`）＝「1つも無い」と分ける。 */
+export const LIBRARY_LIST_UNREADABLE_MESSAGE = "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。";
+/** 棚の素材（または拡張パックの音楽）が見つからない（`LIBRARY_ASSET_MISSING`）。 */
+export const LIBRARY_ASSET_MISSING_MESSAGE = "この素材は見つかりませんでした。一覧を開き直してください。";
+/** 「音」の欄の、拡張パックの音楽の添え書き（押すと取り込んで置く）。 */
+export const PACK_AUDIO_NOTE = "拡張パック・押すと取り込んで置きます";
+/** 素材の棚に並べる拡張パックの音楽の見出し（ADR-0060 段階2b）。 */
+export const PACK_BGM_LIST_LABEL = "拡張パックの音楽";
+/**
+ * 見た目パターンの出どころの札（見た目の管理画面）。自分の見た目以外＝標準か拡張パック。
+ * ⚠️ 拡張パックの見た目を「標準」と出していた（2026-10-16 実機）＝外すと消えるので、どのパックのものかを出す。
+ */
+export function lookOriginLabel(templateId: string, packs: readonly { packId: string; name: string }[]): string {
+  const packId = packIdOfScopedId(templateId);
+  if (packId == null) return "標準（直接は編集できません）";
+  const name = packs.find((p) => p.packId === packId)?.name;
+  return name ? `拡張パック「${name}」（直接は編集できません）` : "拡張パック（直接は編集できません）";
+}
+/** 同じパックの別の版を入れるときの確かめの見出し（2026-10-16 実機＝更新だと分からなかった）。 */
+export function packUpdateConfirmTitle(name: string): string {
+  return `「${name}」を新しい版に入れ替えますか？`;
+}
+/** 版の行（入っている版 → 入れる版）。 */
+export function packUpdateVersionLine(installed: string, next: string): string {
+  return `${installed} → ${next}（入っている版を入れ替えます）`;
+}
+/** 入れた・外したときの知らせ。 */
+export function packInstalledMessage(name: string): string {
+  return `「${name}」を入れました。`;
+}
+export function packRemovedMessage(name: string): string {
+  return `「${name}」を外しました。`;
+}
+/** アプリの版が足りないとき（`PACK_PROBLEM.appTooOld`）。 */
+export function packAppTooOldMessage(minAppVersion: string): string {
+  return `この拡張パックには、すたりお ${minAppVersion} 以降が必要です。新しい版のすたりおを入れてから、もう一度お試しください。`;
+}
+/** 入っている版より古いとき（`PACK_PROBLEM.olderThanInstalled`）。 */
+export function packOlderThanInstalledMessage(installedVersion: string): string {
+  return `入っている版（${installedVersion}）より古い版です。新しい版の拡張パックを使ってください。`;
+}
+/** 外す前の確かめ（使っている動画の数を添える）。 */
+export function packRemoveConfirmMessage(name: string, usedVideos: number): string {
+  return usedVideos > 0
+    ? `「${name}」を外しますか？この拡張パックの中身（見た目パターン・文字の形・声など）を ${usedVideos} 本の動画で使っています。外すと、その部分は使えなくなり、書き出す前に知らせます（もう一度入れると戻ります）。`
+    : `「${name}」を外しますか？この拡張パックを使っている動画はありません。`;
+}
+/** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
+export const PACK_FEATURE_LABEL: Record<PackFeature, string> = {
+  "personalized-briefing": "あなた向け会社説明",
+};
+/** この版のアプリに無い機能（新しいパックを古いアプリへ入れたとき）。識別子をそのまま画面に出さない（§2-3）。 */
+export const PACK_UNKNOWN_FEATURE_LABEL = "（この版では使えない機能）";
+/** 中身の種類（`licenses[].target`）を画面の言葉へ。 */
+export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
+  templates: "見た目パターン",
+  templateAssets: "見た目パターンの写真・ロゴ",
+  fonts: "文字の形",
+  bgm: "音楽",
+  voices: "声",
+  features: "機能",
+};
+/** 中身のあらまし（「見た目パターン 3個・機能：あなた向け会社説明」）。 */
+export function packContentsSummary(m: Pick<ExtensionPackManifest, "contents">): string {
+  const parts: string[] = [];
+  if (m.contents.templates) parts.push(`${PACK_CONTENT_LABEL.templates} ${m.contents.templates.length}個`);
+  if (m.contents.templateAssets) parts.push(`${PACK_CONTENT_LABEL.templateAssets} ${m.contents.templateAssets.length}個`);
+  if (m.contents.fonts) parts.push(`${PACK_CONTENT_LABEL.fonts} ${m.contents.fonts.length}個`);
+  if (m.contents.bgm) parts.push(`${PACK_CONTENT_LABEL.bgm} ${m.contents.bgm.length}曲`);
+  if (m.contents.voices) parts.push(`${PACK_CONTENT_LABEL.voices}：${m.contents.voices.map((v) => v.character).join("・")}`);
+  if (m.contents.features) {
+    const names = [...new Set(m.contents.features.map((f) => (isKnownPackFeature(f) ? PACK_FEATURE_LABEL[f] : PACK_UNKNOWN_FEATURE_LABEL)))];
+    parts.push(`${PACK_CONTENT_LABEL.features}：${names.join("・")}`);
+  }
+  return parts.join("・");
+}
+
+/**
+ * 使っていないファイルを片づける（ADR-0064）。⚠️ **ごみ箱へ移す・戻せる**ことを必ず言う（黙って消したように見せない）。
+ * 業界の型（Logic Pro の「Clean Up」）＝消す前に一覧を見せ、チェックを外せば残せる。
+ */
+export const unusedFilesLabel = {
+  action: "使っていないファイルを片づける",
+  intro:
+    "この動画のフォルダにある、どこからも使われていないファイルです（取り消した取り込み・止めた絵など）。選んだものをごみ箱へ移します（ごみ箱には同じ名前で入り、そこから戻せます）",
+  checking: "調べています…",
+  empty: "使っていないファイルはありません",
+  busy: "取り込み・書き出し・声づくりが終わってから、もう一度お試しください",
+  /** 調べられなかった（Rust の断りが届かなかったとき）。 */
+  checkFailed: "使っていないファイルを調べられませんでした。もう一度お試しください",
+  /** ごみ箱へ移せなかった（同上）。 */
+  trashFailed: "ファイルをごみ箱へ移せませんでした。もう一度お試しください",
+  trash: "選んだファイルをごみ箱へ移す",
+  trashing: "ごみ箱へ移しています…",
+  close: "閉じる",
+} as const;
+
+/** 片づけた後の知らせ（数は移せた数＝押した時点で使われるようになったものは移さない）。 */
+export function unusedFilesTrashedMessage(n: number): string {
+  return n > 0 ? `${n}個のファイルをごみ箱へ移しました。ごみ箱から戻せます` : "移せるファイルはありませんでした（使われるようになったものは残しました）";
+}
+
+/** 片づけの一覧に出す、ファイルの種類（拡張子から）。 */
+export function unusedFileKindLabel(path: string): string {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  if (["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) return "写真";
+  if (["mp4", "mov", "webm", "mkv", "avi", "m4v"].includes(ext)) return "動画";
+  if (["wav", "mp3", "m4a", "aac", "ogg", "flac"].includes(ext)) return "音";
+  return "ファイル";
+}

@@ -33,9 +33,19 @@ const ZOOM_LEVELS = TIMELINE_ZOOM_LEVELS;
 // こちらは「見たい瞬間を探す」操作の粒度（0.1秒だと十数秒の動画でも端まで百回以上かかる）。
 const SEEK_KEY_STEP_SEC = 1;
 
-/** 遷移種別を画面用の言い換えへ（§2-3。FFmpeg 名や enum 値は出さない）。 */
+/**
+ * 遷移種別を画面用の言い換えへ（§2-3。FFmpeg 名や enum 値は出さない）。
+ * ⚠️ **全種別に名前を持つ**（ADR-0066）＝以前は「フェードでなければスライド」で、ワイプ・ズームまでスライドと出ていた。
+ */
+const TRANSITION_LABEL: Record<TransitionType, string> = {
+  [TRANSITION_TYPE.none]: "なし",
+  [TRANSITION_TYPE.fade]: "フェード",
+  [TRANSITION_TYPE.slide]: "スライド",
+  [TRANSITION_TYPE.wipe]: "ワイプ",
+  [TRANSITION_TYPE.zoom]: "ズーム",
+};
 function transitionLabel(type: TransitionType): string {
-  return type === TRANSITION_TYPE.fade ? "フェード" : "スライド";
+  return TRANSITION_LABEL[type];
 }
 
 

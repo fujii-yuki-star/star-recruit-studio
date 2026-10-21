@@ -49,6 +49,7 @@ export const SceneThumb = memo(function SceneThumb({ scene, template }: { scene:
     // 載せると `null` と同じ扱いになり、単独 narration の場面で字幕が消える（`ScenePreview` と同じ流儀）。
     ...(first.subtitleText !== undefined ? { subtitleText: first.subtitleText } : {}),
     ...(first.subtitleSegment ? { subtitleSegment: first.subtitleSegment } : {}),
+    projectFontId: fontId,
   }), {
     assetSrc,
     responsive: true,

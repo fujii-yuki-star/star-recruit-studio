@@ -29,6 +29,8 @@ const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')))
 // タイムライン形式（ADR-0032・#627）。project の $defs を $ref で共有するので、vProject を先に compile して
 // $id を ajv に登録しておく必要がある（上の行順に依存＝入れ替えると $ref が解決できず落ちる）。
 const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
+// 拡張パックの manifest（ADR-0060）。
+const vPack = ajv.compile(load(join(base, 'schemas/extension-pack.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
 // ⚠️ **宣言の側に書く**（PR #1238 レビュー 🟡）＝使う所で `/** @type {...} */ (cases)` と
@@ -40,6 +42,7 @@ const cases = [
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
   ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
   ['timeline-project.sample.json', vTimeline, fx('timeline-project.sample.json')],
+  ['extension-pack.sample.json', vPack, fx('extension-pack.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];
@@ -332,6 +335,8 @@ mustAccept.push(
   ['scene.fontId: null（継承）は従来どおり許容', withScene({ fontId: null })],
   ['scene.textFontIds: 種別ごとに持ち込みフォントを許容', withScene({ textFontIds: { title: 'user_font_003', subtitle: 'gen-interface-jp' } })],
   ['freeLayout の fontId も持ち込みフォントを許容', withScene({ freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_004' }] })],
+  ['fontId: 拡張パックの文字の形を許容（1.34・ADR-0060 段階2）', withFont({ fontId: 'pack_office_looks__mincho' })],
+  ['scene.textFontIds: 種別ごとに拡張パックの文字の形を許容', withScene({ textFontIds: { title: 'pack_office__mincho_bold' } })],
 );
 mustReject.push(
   ['fontId: 形の違う id は拒否（my-font）', withFont({ fontId: 'my-font' })],
@@ -340,6 +345,9 @@ mustReject.push(
   ['fontId: パス区切りを含む id は拒否（user_font_001/../x）', withFont({ fontId: 'user_font_001/../x' })],
   ['fontId: 空文字は拒否', withFont({ fontId: '' })],
   ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
+  ['fontId: 拡張パックの境目が無い id は拒否（pack_office_mincho）', withFont({ fontId: 'pack_office_mincho' })],
+  ['fontId: 拡張パックの中の名前が無い id は拒否（pack_office__）', withFont({ fontId: 'pack_office__' })],
+  ['fontId: 拡張パックの境目が3つの id は拒否（pack_office___mincho）', withFont({ fontId: 'pack_office___mincho' })],
 );
 // 音の自動処理（#257/#259・ADR-0032 追補4・schema 1.29）。
 mustAccept.push(
@@ -443,6 +451,7 @@ tlAccept.push(
   ['timeline: 持ち込みフォントを許容＝`$ref` で追従している（1.26・#261）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'user_font_001' })],
   ['timeline: 同梱フォントも従来どおり許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'gen-interface-jp' })],
   ['timeline: 動画全体の文字の形にも持ち込みを許容（videoSettings は `$ref` 共有）', tlWith({ videoSettings: { ...tlBase.videoSettings, fontId: 'user_font_002' } })],
+  ['timeline: 拡張パックの文字の形を許容＝`$ref` で追従している（1.19・ADR-0060 段階2）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'pack_office__mincho' })],
   // ⚠️ **同じ `$ref` 共有の兄弟も固定する**（α-6 出口監査 🟡）＝`fontId` だけ固定して
   // `creditDisplay`（1.28）・`audioAuto`（1.29）を空けておくと、写しが生まれた瞬間に無検知で割れる
   //（この検査を足した理由がそのまま当てはまる＝片方の双子だけ検証）。
@@ -593,6 +602,52 @@ for (const [desc, data] of aiAccept) {
 }
 for (const [desc, data] of aiReject) {
   if (!vPlan(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
+// 拡張パックの manifest（ADR-0060）＝**断る側も固定する**（受け入れだけだと、決まりを消しても赤くならない）。
+const packBase = load(fx('extension-pack.sample.json'));
+const withPack = (over) => ({ ...structuredClone(packBase), ...over });
+const packReject = [
+  ['pack: packId に __ は使えない（中の id の境目が割れる）', withPack({ packId: 'a__b' })],
+  ['pack: packId は英小文字で始める', withPack({ packId: 'Office' })],
+  ['pack: 中身が空は拒否', withPack({ contents: {} })],
+  ['pack: 知らない中身の種類（プログラム）は拒否', withPack({ contents: { scripts: [{ file: 'a.js' }] } })],
+  ['pack: パスに .. は拒否', withPack({ files: [{ path: '../x.json', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの先頭の / は拒否', withPack({ files: [{ path: '/x.json', sha256: '0'.repeat(64) }] })],
+  ['pack: SHA-256 は小文字16進64字', withPack({ files: [{ path: 'x.json', sha256: 'XYZ' }] })],
+  ['pack: 権利が空は拒否', withPack({ licenses: [] })],
+  ['pack: 版は x.y.z', withPack({ version: '1.0' })],
+  ['pack: 知らない欄は拒否', withPack({ install: 'run.exe' })],
+  ['pack: packId の末尾の _ は拒否（境目が割れる）', withPack({ packId: 'ab_' })],
+  ['pack: パスの . の部分は拒否', withPack({ files: [{ path: 'a/./b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの空の部分は拒否', withPack({ files: [{ path: 'a//b', sha256: '0'.repeat(64) }] })],
+  ['pack: パスの末尾の / は拒否', withPack({ files: [{ path: 'a/', sha256: '0'.repeat(64) }] })],
+  ['pack: manifest.json を中身に数えない', withPack({ files: [{ path: 'manifest.json', sha256: '0'.repeat(64) }] })],
+  ['pack: 文字の形のファイルは ttf / otf / woff / woff2 だけ', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.exe', displayName: 'A' }] } })],
+  ['pack: 文字の形の拡張子は小文字で書く（大文字は断る）', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.OTF', displayName: 'A' }] } })],
+  ['pack: 文字の形の名前に __ は使えない（id の境目が割れる）', withPack({ contents: { fonts: [{ fontId: 'a__b', file: 'f/a.otf', displayName: 'A' }] } })],
+  ['pack: 文字の形の表示名は必須', withPack({ contents: { fonts: [{ fontId: 'a', file: 'f/a.otf' }] } })],
+  ['pack: 音楽のファイルは取り込みで受ける音だけ（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.exe', displayName: 'A' }] } })],
+  ['pack: 音楽の名前に __ は使えない', withPack({ contents: { bgm: [{ bgmId: 'a__b', file: 'b/a.mp3', displayName: 'A' }] } })],
+  ['pack: 音楽の表示名は必須', withPack({ contents: { bgm: [{ bgmId: 'a', file: 'b/a.mp3' }] } })],
+  ['pack: 声のファイルは .vvm だけ（段階3）', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.onnx', character: 'あ', styles: [{ speaker: 9001, label: 'ノーマル' }] }] } })],
+  ['pack: 声にはスタイルが1つは要る', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', character: 'あ', styles: [] }] } })],
+  ['pack: 声のキャラ名は必須（クレジットに出す）', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', styles: [{ speaker: 9001, label: 'ノーマル' }] }] } })],
+  ['pack: 声のスタイル番号は整数', withPack({ contents: { voices: [{ voiceId: 'a', file: 'v/a.vvm', character: 'あ', styles: [{ speaker: 1.5, label: 'ノーマル' }] }] } })],
+];
+// 受け入れる側（文字の形を持つパック＝段階2）。
+const packAccept = [
+  ['pack: 文字の形を持つパックを許容（段階2）', withPack({ contents: { fonts: [{ fontId: 'mincho_bold', file: 'f/a.woff2', displayName: '明朝' }] }, licenses: [{ target: 'fonts', license: 'SIL OFL 1.1' }] })],
+  ['pack: 声を持つパックを許容（段階3）', withPack({ contents: { voices: [{ voiceId: 'aoi', file: 'v/aoi.vvm', character: 'あおい', styles: [{ speaker: 9001, label: 'ノーマル' }] }] }, licenses: [{ target: 'voices', license: 'キャラの規約' }] })],
+  ['pack: 音楽を持つパックを許容（段階2b）', withPack({ contents: { bgm: [{ bgmId: 'morning', file: 'bgm/a.flac', displayName: '朝' }] }, licenses: [{ target: 'bgm', license: 'CC0' }] })],
+];
+for (const [desc, data] of packAccept) {
+  if (vPack(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}（スキーマが拒否した）`); }
+}
+for (const [desc, data] of packReject) {
+  if (!vPack(data)) console.log(`PASS  must-reject  ${desc}`);
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
 }
 

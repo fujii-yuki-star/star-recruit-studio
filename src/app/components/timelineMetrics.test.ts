@@ -242,6 +242,20 @@ describe("「並び」は道具立てを留めて帯だけ流す（#1104）", ()
     expect(/min-height:\s*0\s*;/.test(inner ?? "")).toBe(true);
   });
 
+  /**
+   * ⚠️ **目印が増えても帯が潰れない**（2026-10-19 実機＝1280×800・目印 50 個で並びが 19px になり、
+   * 道具と全体図が目印の一覧の下に重なった）＝帯の側に下限・目印の節は縮んで中で流す。
+   */
+  it("帯の側に下限があり、目印の節は縮んで中で流す", () => {
+    const tl = ruleBody(css, ".timeline-panel > .timeline");
+    expect(tl).not.toBeNull();
+    expect(/min-height:\s*12rem\s*;/.test(tl ?? "")).toBe(true);
+    const markers = ruleBody(css, ".timeline-panel > .accordion");
+    expect(markers).not.toBeNull();
+    expect(/flex:\s*0 1 auto\s*;/.test(markers ?? "")).toBe(true);
+    expect(/overflow-y:\s*auto\s*;/.test(markers ?? "")).toBe(true);
+  });
+
   it("添え書きと「列を足す」は縮まない（帯だけが伸び縮みする）", () => {
     const kids = ruleBody(css, ".timeline-panel > *");
     expect(kids).not.toBeNull();

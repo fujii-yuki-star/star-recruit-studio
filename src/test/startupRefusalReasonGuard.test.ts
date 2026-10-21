@@ -81,7 +81,7 @@ describe('断った理由が、頼んだ側に届く（#1212）', () => {
   it('運ぶ口（`message`）が、Rust へ渡るところまで開いている', () => {
     const fs = srcOf('src/infrastructure/startupFs.ts');
     expect(fs, '運ぶ口が引数に無い').toContain('message?: string | null');
-    expect(fs, 'Rust へ渡していない').toContain("invoke('finish_startup_job', { ok, forwarded, message: message ?? null })");
+    expect(fs, 'Rust へ渡していない').toContain("invoke('finish_startup_job', { ok, forwarded, message: message ?? null, result: result ?? null })");
   });
 
   // ⚠️ **Rust 側が実際に外へ出しているか**＝受け取っても捨てていたら、届いていない。

@@ -7,7 +7,7 @@ import {
   TIMELINE_MIN_CLIP_SEC, VIDEO_HARD_MAX_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
 import { CLIP_PIVOT_DEFAULT } from './pivot';
-import { ASSET_TYPE, FIT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { ASSET_TYPE, FIT, isMixingBlend, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 // ⚠️ **頭出しの規則は1か所**（#988）＝「分ける」と同じものを使う（写すと片方だけ直る）。
 import { advancedSlotStarts, advancedSourceStart, sourceLimitIssue, usesUpSource } from './sourceTime';
@@ -16,7 +16,7 @@ import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '.
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import type { SlotClipOverride } from '../project/types';
-import { isAudioClip } from './audio';
+import { canDenoise, isAudioClip } from './audio';
 import { clampVolume } from '../voice/audioMix';
 import { canUseOriginalAudio, isDirectVideoClip, videoPlacementsOfClip } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
@@ -184,18 +184,10 @@ export const EDIT_BLOCKED = {
   splitPastSource: 'TIMELINE_EDIT_SPLIT_PAST_SOURCE',
   /**
    * **止める相手が動画でない**（#356 ②）。写真はもう止まっているし、文字・図形・音には
-   * 止める絵が無い。見た目パターンのクリップも対象外＝止めると**枠ごと写真に化ける**
-   *（文字も立ち絵も消える）＝押した結果と食い違う（ADR-0026①）。
+   * 止める絵が無い。見た目パターンのクリップも対象外＝**枠の中の動画だけを止める道が無い**
+   * ＝押した結果と食い違う（ADR-0026①・ADR-0065）。
    */
   freezeNotVideo: 'TIMELINE_EDIT_FREEZE_NOT_VIDEO',
-  /**
-   * 絵を止めようとしたが、**その瞬間を切り出せなかった**（#356 ②）。
-   *
-   * ⚠️ **押した所へ返すために要る**（#1136 レビュー由来 🟡）＝切り出しの失敗は取り込みの断り
-   * （`importError`）に入るが、その表示は「置く」の欄の中だけ＝「選んだ部品」から押した人には
-   * **何も見えない**まま終わる。詳しい理由はあちらに出し、押した欄にはこれを出す。
-   */
-  freezeFailed: 'TIMELINE_EDIT_FREEZE_FAILED',
   /**
    * 絵を止めようとしたが、**その動画のファイルが見つからない**（#356 ②）。
    *
@@ -203,14 +195,6 @@ export const EDIT_BLOCKED = {
    * 関門は通ってしまい、**FFmpeg を起こしてから失敗する**。直し方は知らせの「ファイルを選び直す」。
    */
   freezeAssetMissing: 'TIMELINE_EDIT_FREEZE_ASSET_MISSING',
-  /**
-   * 絵を止めている間に、**その帯が変わった**（#356 ②・#1136 レビュー由来）。
-   *
-   * ⚠️ **黙って貼らない**＝切り出すのは待つ前の帯、分けるのは待った後の帯なので、
-   * 待っている間に動かす・詰める・速さを変える・素材を選び直すと、**切れ目と止めた絵が
-   * 別の瞬間**になる（素材ごと替わっていれば**別の動画のコマ**）。ADR-0026④。
-   */
-  freezeChanged: 'TIMELINE_EDIT_FREEZE_CHANGED',
   /**
    * 左端をそこまで詰めると、**素材を使い切った先**から流れることになる（PR #1004 レビュー 🔴）。
    *
@@ -815,8 +799,15 @@ export function containBox(source: { w: number; h: number }, canvas: { width: nu
  * 重ね順は配列の並びだけで決まる（`11 §7.6`）ので、入れる場所がそのまま前後関係になる。
  */
 export function addTrack(doc: TimelineProject, kind: TrackKind): TimelineProject {
+  return withAddedTrack(doc, kind).doc;
+}
+
+/**
+ * 列を足した文書と、**足した列の id**（#1478）。新しい列へ落とすとき、置けるかの判定（押す前）と確定が**同じ文書**を見るために使う。
+ */
+export function withAddedTrack(doc: TimelineProject, kind: TrackKind): { doc: TimelineProject; trackId: string } {
   const track: Track = { id: createTrackId(doc.tracks.map((t) => t.id)), kind };
-  return { ...doc, tracks: insertTrack(doc.tracks, track) };
+  return { doc: { ...doc, tracks: insertTrack(doc.tracks, track) }, trackId: track.id };
 }
 
 /**
@@ -1053,6 +1044,26 @@ export function setTrackFlag(doc: TimelineProject, trackId: string, flag: 'hidde
 }
 
 /**
+ * **列の音量**（ADR-0067）。`null`＝標準（100%）へ戻す（キーを消す）。値域は部品の音量と同じ（`clampVolume`）。
+ * ⚠️ **音の列だけ**（映像の列には効かない＝持たせない）。⚠️ 何も変わらなければ同じ文書を返す（取り消しを空振りさせない）。
+ */
+export function setTrackVolume(doc: TimelineProject, trackId: string, volume: number | null): TimelineProject {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track || track.kind !== TRACK_KIND.audio) return doc;
+  const next = volume == null || !Number.isFinite(volume) ? undefined : clampVolume(volume);
+  const normalized = next === 1 ? undefined : next;
+  if (track.volume === normalized) return doc;
+  return {
+    ...doc,
+    tracks: doc.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const { volume: _old, ...rest } = t;
+      return normalized == null ? rest : { ...rest, volume: normalized };
+    }),
+  };
+}
+
+/**
  * クリップを複製して、**同じ列の空いている直後**へ置く（空いていなければ置けない＝理由を返す）。
  * 「置く」の最短経路（まず複製して動かす）として用意する。
  */
@@ -1272,7 +1283,7 @@ export function setClipBlendMode(doc: TimelineProject, clipId: string, mode: Ble
     clips: doc.clips.map((c) => {
       if (c.id !== clipId) return c;
       const copy = { ...c };
-      if (mode === 'normal') delete copy.blendMode;
+      if (!isMixingBlend(mode)) delete copy.blendMode;
       else copy.blendMode = mode;
       return copy;
     }),
@@ -1600,7 +1611,7 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
 export function importSubtitleCues(
   doc: TimelineProject,
   cues: readonly { startSec: number; endSec: number; text: string }[],
-): { doc: TimelineProject; placed: number; beyondLimit: number } {
+): { doc: TimelineProject; placed: number; beyondLimit: number; placedIds: string[] } {
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
   const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
@@ -1609,6 +1620,7 @@ export function importSubtitleCues(
   const newTracks: string[] = [];
   let placed = 0;
   let beyondLimit = 0;
+  const placedIds: string[] = [];
   for (const cue of cues) {
     const startSec = Math.max(0, cue.startSec);
     const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, cue.endSec - startSec);
@@ -1630,9 +1642,113 @@ export function importSubtitleCues(
       text: cue.text,
     };
     cur = { ...cur, clips: [...cur.clips, clip] };
+    placedIds.push(clip.id);
     placed += 1;
   }
-  return { doc: placed > 0 ? cur : doc, placed, beyondLimit };
+  return { doc: placed > 0 ? cur : doc, placed, beyondLimit, placedIds };
+}
+
+/**
+ * **字幕から読み上げを作る**（ADR-0055 追補 2026-10-20・#1485）＝1回の編集（取り消し1回で全部戻る）。
+ *
+ * - 対象＝渡した部品のうち、**連動していない字幕**で、自分の文があり、列が固定されていないもの。対象外の字幕は数えて返す
+ *   （呼ぶ側が言う＝黙って飛ばさない）。字幕でない部品は数えない（選んだ中に混ざっていてよい）。
+ * - 字幕と**同じ時刻・同じ長さ**の読み上げを、**新しい音の列**へ置く（`importSubtitleCues` と同じ＝既存の部品と重ねない・
+ *   重なる分だけ列を足す）。声は動画全体の声（話者は空＝継承）。読み上げる文は字幕の文から改行を除いたもの。
+ * - 字幕は作った読み上げへ**連動させる**（声を作ると長さが声に合う）。字幕の文が読み上げの文と同じなら外して追従させ、
+ *   改行を含むなら**自分の文として残す**（見た目の改行を黙って消さない）。
+ */
+export function voicesFromSubtitles(
+  doc: TimelineProject,
+  subtitleIds: readonly string[],
+): { doc: TimelineProject; voiceIds: string[]; skipped: number } {
+  const ids = new Set(subtitleIds);
+  const locked = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
+  const targets = doc.clips
+    .filter((c) => ids.has(c.id) && c.kind === TIMELINE_CLIP_KIND.subtitle)
+    .sort((a, b) => a.startSec - b.startSec);
+  let cur = doc;
+  const newTracks: string[] = [];
+  const voiceIds: string[] = [];
+  let skipped = 0;
+  for (const sub of targets) {
+    const own = sub.text ?? '';
+    // 英数字どうしの改行は空白1つにする（`Hello\nworld` を `Helloworld` と読ませない・PR レビュー ℹ️）。日本語は詰める。
+    const text = own.replace(/([A-Za-z0-9])\s*\r?\n\s*(?=[A-Za-z0-9])/g, '$1 ').replace(/\s*\r?\n\s*/g, '').trim();
+    if (sub.voiceClipId != null || text.length === 0 || locked.has(sub.trackId)) {
+      skipped += 1;
+      continue;
+    }
+    let trackId = newTracks.find((id) => isFreeSpan(cur.clips, id, sub.startSec, sub.durationSec));
+    if (!trackId) {
+      trackId = createTrackId(cur.tracks.map((t) => t.id));
+      newTracks.push(trackId);
+      cur = { ...cur, tracks: [...cur.tracks, { id: trackId, kind: TRACK_KIND.audio }] };
+    }
+    const id = createClipId(cur.clips.map((c) => c.id));
+    const voice: TimelineClip = {
+      id,
+      kind: TIMELINE_CLIP_KIND.voice,
+      trackId,
+      startSec: sub.startSec,
+      durationSec: sub.durationSec,
+      voice: { text, status: NARRATION_STATUS.none },
+    };
+    const linked: TimelineClip = { ...sub, voiceClipId: id };
+    if (own === text) delete linked.text;
+    cur = { ...cur, clips: [...cur.clips.map((c) => (c.id === sub.id ? linked : c)), voice] };
+    voiceIds.push(id);
+  }
+  return { doc: voiceIds.length > 0 ? cur : doc, voiceIds, skipped };
+}
+
+/**
+ * 読み上げの長さを実際の声の長さへ合わせる。**伸ばした先が隣とぶつかるなら、空いた列へ移してから合わせる**
+ * （ADR-0055 追補 2026-10-20 決定5・#1485）＝字幕から作った読み上げは、字幕の区切りが詰まって並ぶので、声が少しでも長いと
+ * 次の字幕・次の読み上げにぶつかって合わせられない。「重なる分だけ列を足す」（読み込みと同じ規則）を、長さが分かった時点で当てる。
+ *
+ * - まず今の場所で合わせる（`trimClip`＝連動した字幕も一緒に動く）。通ればそのまま。
+ * - ぶつかるときだけ、読み上げは**読み上げだけが並ぶ音の列**（列の音量を変えていないもの＝BGM の列の音量が声に掛からない）、
+ *   連動した字幕は**字幕だけが並ぶ映像の列**の中から、その区間が空いた列へ移す。無ければ列を足す。固定・隠した列には移さない。
+ * - 列が固定されているなど、移しても合わせられない理由はそのまま返す（黙って別の結果にしない）。
+ * - ⚠️ **移す元が隠した列なら移さない**（PR レビュー 🟡）＝見える列へ移すと、出さないつもりの字幕・声が出る。
+ * - ⚠️ **立ち絵の「喋っている間の動き」が結んだ音の列からも、その列へも移さない**（ADR-0056・PR レビュー 🟡）＝
+ *   移すと、結んだ立ち絵がこの声で動かなくなる／別の立ち絵がこの声で動き出す。
+ */
+export function fitVoiceLength(doc: TimelineProject, voiceClipId: string, durationSec: number): EditResult {
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice) return blocked(EDIT_BLOCKED.notFound);
+  const endSec = voice.startSec + durationSec;
+  const first = trimClip(doc, voiceClipId, 'end', endSec);
+  if (first.ok || voice.kind !== TIMELINE_CLIP_KIND.voice) return first;
+  const subs = subtitlesBoundTo(doc, voiceClipId);
+  const trackOf = (id: string): Track | undefined => doc.tracks.find((t) => t.id === id);
+  if ([voice, ...subs].some((c) => trackOf(c.trackId)?.locked || trackOf(c.trackId)?.hidden)) return first;
+  const talkBound = new Set(doc.clips.map((c) => c.talkMotion?.trackId).filter((id): id is string => id != null));
+  if (talkBound.has(voice.trackId)) return first;
+  const span = { startSec: voice.startSec, durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, durationSec) };
+  let cur = doc;
+  const roomFor = (clip: TimelineClip, kind: TrackKind, sameKind: TimelineClipKind): string => {
+    const usable = (t: Track): boolean =>
+      t.kind === kind && !t.locked && !t.hidden && (t.volume == null || t.volume === 1) && !talkBound.has(t.id)
+      && cur.clips.every((c) => c.trackId !== t.id || c.kind === sameKind)
+      && isFreeSpan(cur.clips, t.id, span.startSec, span.durationSec, clip.id);
+    const here = cur.tracks.find((t) => t.id === clip.trackId);
+    if (here && isFreeSpan(cur.clips, here.id, span.startSec, span.durationSec, clip.id)) return here.id;
+    const found = cur.tracks.find(usable);
+    if (found) return found.id;
+    const id = createTrackId(cur.tracks.map((t) => t.id));
+    cur = { ...cur, tracks: [...cur.tracks, { id, kind }] };
+    return id;
+  };
+  const voiceTrack = roomFor(voice, TRACK_KIND.audio, TIMELINE_CLIP_KIND.voice);
+  cur = withClip(cur, { ...voice, trackId: voiceTrack });
+  for (const sub of subs) {
+    const subTrack = roomFor(sub, TRACK_KIND.visual, TIMELINE_CLIP_KIND.subtitle);
+    cur = withClip(cur, { ...sub, trackId: subTrack });
+  }
+  const second = trimClip(cur, voiceClipId, 'end', endSec);
+  return second.ok ? second : first;
 }
 
 /** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */
@@ -2171,6 +2287,49 @@ export function setClipVolume(doc: TimelineProject, clipId: string, volume: numb
   const patched = { ...clip };
   if (next == null) delete patched.volume;
   else patched.volume = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 動画のクリップを、**最初のコマで止めた**クリップに替える（音の項目は落とす・ADR-0065）。 */
+export function asHeld(clip: TimelineClip): TimelineClip {
+  const {
+    useOriginalAudio: _useOriginalAudio,
+    originalAudioVolume: _originalAudioVolume,
+    volumePoints: _volumePoints,
+    ...rest
+  } = clip;
+  return { ...rest, holdFrame: true };
+}
+
+/**
+ * **ノイズを減らす**の切り替え（ADR-0068）。効かない部品（同梱の曲・読み上げ・見た目パターン・止めた絵）には置かない＝
+ * 効かない欄を持たせない（`canDenoise` と同じ相手）。外すとキーを消す。
+ */
+export function setClipDenoise(doc: TimelineProject, clipId: string, on: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canDenoise(doc, clip)) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.denoise === true) === on) return ok(doc);
+  if (on) return ok(withClip(doc, { ...clip, denoise: true }));
+  const patched = { ...clip };
+  delete patched.denoise;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 止めた絵（ADR-0065）を**止めるのをやめる／止める**。やめると、使い始めから同じ速さで流れる。
+ * ⚠️ **直接置いた動画だけ**＝止める側（`freezeFrameIssue`）と同じ相手。
+ */
+export function setClipHoldFrame(doc: TimelineProject, clipId: string, hold: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!isDirectVideoClip(doc, clip)) return blocked(EDIT_BLOCKED.freezeNotVideo);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.holdFrame === true) === hold) return ok(doc);
+  if (hold) return ok(withClip(doc, asHeld(clip)));
+  const patched = { ...clip };
+  delete patched.holdFrame;
   return ok(withClip(doc, patched));
 }
 

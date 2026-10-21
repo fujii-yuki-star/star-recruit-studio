@@ -28,6 +28,10 @@
   );
 }
 
+/* **「並び」の道具は1行**（ADR-0048 追補 2026-10-21・α 最終点検）＝以前は2本×2段＝118px を取り、
+   帯の見える高さが既定の窓で約 127px（3列ぶん）しか無かった。左＝帯の操作・右＝見え方の道具。
+   ⚠️ **入りきらなければ畳む**（`data-fold`・下の `@container`）。それでも入らないとき（作業範囲を取っている等）だけ
+   まとまりごと折り返す＝**切って押せなくはしない**（「…」が切れると畳んだ物に届かない）。 */
 .timeline-toolbar {
   display: flex;
   align-items: center;
@@ -35,11 +39,49 @@
   flex-wrap: wrap;
 }
 
-/* **帯の操作の行**（ADR-0048・#1256 b5）＝見え方の道具（倍率・列の高さ・吸着）の行と**種類が違う**ので、
-   細い線で分ける（同じ行に混ぜると、どれが帯を変えるボタンか読み取れない）。 */
+/* **帯の操作**（ADR-0048・#1256 b5）と**見え方の道具**は種類が違う＝細い線で分ける
+   （同じ並びに混ぜると、どれが帯を変えるボタンか読み取れない）。 */
+.timeline-edit-tools,
+.timeline-view-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
 .timeline-edit-tools {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--gap-xs);
+  /* 見え方の道具と「…」は右へ寄せる。 */
+  margin-right: auto;
+}
+.timeline-view-tools {
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--gap-sm);
+}
+
+/* 畳む境目＝**「並び」の欄の幅**（窓の幅ではない＝欄の幅は配置で変わる）。実測（1280×800 の既定の配置で欄 974px）から：
+   いつも出す物 約 470px ＋ ここから始める／終わる・吸着の一文 約 435px ＋ 列を足す・目印 約 290px ＋ 絵を止める〜範囲・列の高さ 約 700px。
+   測る器は `.timeline-panel`（`container-type` はそちらの規則に置く）。 */
+.timeline-toolbar [data-fold="idle"] {
+  display: none;
+}
+/* 作業範囲を取っている間は、範囲の操作が並ぶぶん優先度の低い物をもう1段畳む＝行を折り返して帯を縦にずらさない（レビュー 🟡）。 */
+.timeline-toolbar[data-range-active] [data-fold="narrow"] {
+  display: none;
+}
+@container (max-width: 1879px) {
+  .timeline-toolbar [data-fold="wide"] {
+    display: none;
+  }
+}
+@container (max-width: 1199px) {
+  .timeline-toolbar [data-fold="mid"] {
+    display: none;
+  }
+}
+@container (max-width: 919px) {
+  .timeline-toolbar [data-fold="narrow"] {
+    display: none;
+  }
 }
 
 /* **帯の長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる。 */
@@ -137,6 +179,8 @@
    帯だけを縦に流す。⚠️ **欄ごと流さない**＝実機で列を12本にすると、帯を見に下へ送った瞬間に
    「列を足す」が画面の外へ出て**列を足せなくなった**（欄の器＝`.panel-frame-body--fill`）。 */
 .timeline-panel {
+  /* 道具の行を欄の幅で畳むための器（ADR-0048 追補 2026-10-21）。 */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
@@ -155,9 +199,19 @@
   margin-bottom: 0;
 }
 
+/* ⚠️ **帯の側に下限を持たせる**（2026-10-19 実機）＝目印が増えると、目印の節（縮まない＝`flex: 0 0 auto`）が
+   本文を取り切り、**並び（帯・道具・全体図）が 19px まで潰れて**道具が目印の一覧の下に重なった
+   （1280×800 で目印 50 個）。帯の側に下限を置き、**縮むのは目印の節**にする（下の規則）。 */
 .timeline-panel > .timeline {
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 12rem;
+}
+
+/* 目印の節は**縮む側**（中で縦に流す）＝帯の取り分を食い切らない。見出しが見える高さは残す。 */
+.timeline-panel > .accordion {
+  flex: 0 1 auto;
+  min-height: 2.5rem;
+  overflow-y: auto;
 }
 
 /* 帯の枠が**縦に流れる場所**（列が増えたときに動くのはここ1か所）。 */
@@ -180,6 +234,12 @@
   position: relative;
   width: max-content;
   min-width: 100%;
+}
+/* **いちばん下の列の下に、列1本ぶんの空き**（#1478・ADR-0049）＝ここへ落とすと新しい列を作って置く。
+   ⚠️ 空きが無いと、列が多くて枠が埋まったとき**新しい列へ落とす場所が無くなる**（送っても下端が最後の列）。
+   高さは列と同じ（`--timeline-lane-h`＝利用者が変えられる）。編集する並びだけ（見わたす側は読み取り専用）。 */
+.timeline-panel .timeline-inner {
+  padding-bottom: var(--timeline-lane-h);
 }
 
 /* 各行（ルーラー＋レーン）：左に固定ラベル、右に時間軸トラック。 */
@@ -327,6 +387,24 @@
 }
 .timeline-row-toggle:disabled {
   cursor: not-allowed;
+}
+/* 列の音量（ADR-0067）＝数で出すので幅は字に合わせる。ソロ＝業界の型の「S」（字で示す）。 */
+.timeline-row-toggle.timeline-row-volume {
+  width: auto;
+  padding: 0 3px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-row-toggle.timeline-row-solo {
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-row-volume-input {
+  width: 48px;
+  height: 18px;
+  padding: 0 2px;
+  font-size: 11px;
+  pointer-events: auto;
 }
 @media (hover: none) {
   /* ⚠️ **変えた状態は除く**＝同じ強さで後ろにあると、触る画面では ON まで薄くなる（#1259 レビュー 🟡）。 */
@@ -806,9 +884,10 @@
 }
 .motion-path-key {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  margin: -6px 0 0 -6px;
+  /* 大きさは取っ手と同じ（寸法の正＝`--canvas-handle-size`・#1482）。中心を点に合わせる。 */
+  width: var(--canvas-handle-size);
+  height: var(--canvas-handle-size);
+  margin: calc(var(--canvas-handle-size) / -2) 0 0 calc(var(--canvas-handle-size) / -2);
   box-sizing: border-box;
   border-radius: 50%;
   border: 2px solid var(--color-primary);
@@ -823,6 +902,26 @@
 .motion-path-key--disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* ── キーフレームの印（#1186 ②）＝選んだ帯の下端にひし形。押すとその時刻へ。
+   ⚠️ 見た目＝当たり判定（ADR-0047 決定3）。帯の掴みより手前・**端の取っ手より奥**（`.timeline-clip-handle` の z-index 2 より下＝
+   帯の先頭・末尾のキーの印が取っ手に重なっても、端を縮める操作が勝つ＝Premiere・CapCut の型・PR レビュー 🟡）。 */
+.timeline-clip-key {
+  position: absolute;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-surface);
+  cursor: pointer;
+  z-index: 1;
+}
+.timeline-clip-key--current {
+  background: var(--color-primary);
 }
 
 /* ── 帯に敷く絵（#332）＝音の波形／動画のコマ列 ─────────────────────────
@@ -866,9 +965,13 @@
   background: var(--color-surface);
 }
 
-/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒.コマが入る幅・数字の幅をそろえて桁が揺れない。 */
+/* 時刻を見せて打ち込める欄（UI/UX 監査 2026-10-02・ClockField）。分:秒:コマが入る幅・数字の幅をそろえて桁が揺れない。
+   ⚠️ **幅は中身だけで決める**（`content-box`）＝詰め物込みの幅にすると、詰めた表示（`.dense .input` の左右 8px）が
+   詰め物を広げて中身が約6字ぶんになり、「0:00:00」の最後の字が切れていた（2026-10-20 実機）。
+   ⚠️ **8字**＝分が2桁（「10:00:00」）でも入る。 */
 .clock-field {
-  width: 7.5ch;
+  box-sizing: content-box;
+  width: 8ch;
   padding: 2px 6px;
   font-variant-numeric: tabular-nums;
   text-align: right;

@@ -120,6 +120,11 @@ export interface TextItem extends ItemBase {
   anchorBottom?: boolean;
   /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
   fontId?: string | null;
+  /**
+   * 描く字体（ADR-0063）＝`layoutScene` が `textFontFor` で**一度だけ**解いたもの。描画の font-family と
+   * 折返しの字幅（行数・帯の段・はみ出し・切り詰め）が**この1つ**から出る＝食い違えない。
+   */
+  textFont: TextFont;
   /** 行間（倍率・未指定=1.3）・揃え（未指定=left）・縁取り（FREE text の体裁・#209）。 */
   lineHeight?: number;
   textAlign?: TextAlign;
@@ -160,6 +165,7 @@ export { bandBackground } from '../domain/template/textStyle';
 // 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
 export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
 import { drawnTextRect, stackedSubtitleBands } from '../domain/text/subtitleBands';
+import { textFontFor, type TextFont } from '../domain/text/fontMetrics';
 import { rotatedBounds } from '../domain/preview/safeArea';
 // 字幕帯の積み方（同時字幕・ADR-0031）は **domain が正典**＝描画・はみ出し判定・焼き出し（#633）で共有する。
 // ここからは再輸出だけ（既存の import 経路を保つ・`DEFAULT_LINE_HEIGHT` と同じ流儀）。
@@ -186,10 +192,10 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
  *
  * `subtitleOverflowsCanvas` が持っていた数え上げをここへ出し、**同じものを見る検査で共有**する。
  */
-export function sceneDrawnLayouts(scene: Scene, template: Template): SceneLayout[] {
+export function sceneDrawnLayouts(scene: Scene, template: Template, projectFontId: string | null | undefined): SceneLayout[] {
   // 単独ナレーション（lines 無し）＝静的字幕（`texts.subtitle`）をそのまま描く経路。
   // opts を渡さない＝layoutScene 内の `subtitleEnabledDefault === false` で消える扱いもそのまま効く（#413）。
-  if (!scene.lines || scene.lines.length === 0) return [layoutScene(scene, template)];
+  if (!scene.lines || scene.lines.length === 0) return [layoutScene(scene, template, { projectFontId })];
   const lines = sceneLines(scene);
   return groupIndices(lines).map((g) => {
     const primary = lines[g[0]];
@@ -201,7 +207,7 @@ export function sceneDrawnLayouts(scene: Scene, template: Template): SceneLayout
       durationSec: scene.durationSec,
       isFirst: true,
     };
-    return layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
+    return layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg, projectFontId });
   });
 }
 
@@ -210,7 +216,7 @@ export function sceneDrawnLayouts(scene: Scene, template: Template): SceneLayout
  * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
  * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
  */
-export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
+export function subtitleOverflowsCanvas(scene: Scene, template: Template, projectFontId: string | null | undefined): boolean {
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
   const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === LAYER_TYPE.subtitle).map((l) => l.id));
@@ -227,7 +233,7 @@ export function subtitleOverflowsCanvas(scene: Scene, template: Template): boole
   // 同時グループ（2行以上）は帯を積む。**逐次/単独行（1行）も対象**＝1帯でも拡大・回転・長文で見切れるため（#563）。
   // 以前は `g.length < 2` で読み飛ばしており、#555（文字の体裁の場面別上書き）で字幕を大きくできるようになって
   // 到達性が上がった＝「黙って画面外に切れる」が単独/逐次だけ検出できない非対称になっていた（ADR-0026④）。
-  return sceneDrawnLayouts(scene, template).some(overflows);
+  return sceneDrawnLayouts(scene, template, projectFontId).some(overflows);
 }
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
@@ -249,6 +255,11 @@ export interface LayoutOptions {
   timeSec?: number;
   /** この場面の要素アニメーション（timelineOverlay.animations のうち sceneId 一致分）。timeSec と併せて渡す。 */
   animations?: ElementAnimation[];
+  /**
+   * 動画全体の字体（`videoSettings.fontId`・ADR-0063）。場面・要素に指定が無い文字の字体の受け皿＝
+   * **描画の font-family と同じ値を渡す**（渡さないと既定の字体で折り返す）。
+   */
+  projectFontId?: string | null;
 }
 
 
@@ -473,6 +484,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // fontSize は下の stackedSubtitleBands（同時字幕の段組み）にも渡るため、**上書き後の値**を使う
         // ＝上書きで文字が大きくなっても帯が重ならない（#533 P1 の実折返し行数計算と同じ値）。
         const fontSize = style.fontSize;
+        // 字体は1回だけ解く（ADR-0063）＝帯の段（下の `stackedSubtitleBands`）と描画が同じ字幅で折り返す。
+        const fontId = textKey ? scene.textFontIds?.[textKey] : undefined;
+        const textFont = textFontFor(fontId, scene.fontId, opts?.projectFontId, style.fontWeight);
         // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
         const pushBand = (bandText: string, y: number, idSuffix: string): void => {
           items.push({
@@ -489,7 +503,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             isSubtitle: isSub,
             // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
             anchorBottom: isSub,
-            fontId: textKey ? scene.textFontIds?.[textKey] : undefined,
+            fontId,
+            textFont,
             // 縁取り（#275）。太さ>0 で色未指定なら既定色（resolveTextStyle が担保）。
             strokeColor: style.strokeColor,
             strokeWidth: style.strokeWidth,
@@ -516,7 +531,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         if (isSub) {
           // ⚠️ **字間も渡す**（#928）＝渡さないと折返し行数が実際より少なく出て、**帯が重なる**
           // （段を詰める計算が実折返し行数を前提にしているため）。
-          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, style.letterSpacing ?? 0);
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, style.letterSpacing ?? 0, textFont);
           bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
         } else if (bands.length > 0) {
           pushBand(bands[0].text, base.y, bands[0].idSuffix);
@@ -587,7 +602,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           const color = st.color;
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: st.fontWeight, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: st.strokeColor, strokeWidth: st.strokeWidth, background: st.background, letterSpacing: st.letterSpacing, shadow: st.shadow });
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: st.fontWeight, color, maxLines, isSubtitle: false, fontId: el.fontId, textFont: textFontFor(el.fontId, scene.fontId, opts?.projectFontId, st.fontWeight), lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: st.strokeColor, strokeWidth: st.strokeWidth, background: st.background, letterSpacing: st.letterSpacing, shadow: st.shadow });
           break;
         }
         case 'shape': {
@@ -608,7 +623,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           const color = subSt.color;
-          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: subSt.fontWeight, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: subSt.strokeColor, strokeWidth: subSt.strokeWidth, background: subSt.background, letterSpacing: subSt.letterSpacing, shadow: subSt.shadow });
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: subSt.fontWeight, color, maxLines, isSubtitle: true, fontId: el.fontId, textFont: textFontFor(el.fontId, scene.fontId, opts?.projectFontId, subSt.fontWeight), lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: subSt.strokeColor, strokeWidth: subSt.strokeWidth, background: subSt.background, letterSpacing: subSt.letterSpacing, shadow: subSt.shadow });
           break;
         }
       }

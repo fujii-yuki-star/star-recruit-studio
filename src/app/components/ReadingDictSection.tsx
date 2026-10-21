@@ -360,16 +360,26 @@ export function ReadingDictSection() {
       {conflicts.length > 0 && (
         <div className="mt">
           {/* ⚠️ 決定3b＝利用者が VOICEVOX 本体で入れた読みを、アプリが黙って書き換えない。
-              知らせて選ばせる（`15 §6` READING_DICT_WORD_CONFLICT）。 */}
-          <p className="field-hint">
-            {alpha6Message.READING_DICT_WORD_CONFLICT}。
-          </p>
+              知らせて選ばせる（`15 §6` READING_DICT_WORD_CONFLICT）。
+              ⚠️ 同じ読みでも**弱い登録**は効かないことがある（ADR-0037 追補・`15 §6` READING_DICT_WORD_WEAK）。 */}
+          {conflicts.some((c) => !c.weak) && (
+            <p className="field-hint">
+              {alpha6Message.READING_DICT_WORD_CONFLICT}。
+            </p>
+          )}
+          {conflicts.some((c) => c.weak) && (
+            <p className="field-hint">
+              {alpha6Message.READING_DICT_WORD_WEAK}。
+            </p>
+          )}
           <ul className="list-reset">
             {conflicts.map((c) => (
               <li key={c.entry.surface} style={{ display: "flex", alignItems: "center", gap: "var(--gap-sm)" }}>
                 <span style={{ flex: 1 }}>
-                  {c.entry.surface}：音声ソフト側「{accentMark(c.engine.yomi, c.engine.accentType)}」／
-                  ここでの登録「{accentMark(c.entry.yomi, c.entry.accentType)}」
+                  {c.weak
+                    ? <>{c.entry.surface}：音声ソフト側にも同じ読み「{accentMark(c.engine.yomi, c.engine.accentType)}」（弱い登録）</>
+                    : <>{c.entry.surface}：音声ソフト側「{accentMark(c.engine.yomi, c.engine.accentType)}」／
+                      ここでの登録「{accentMark(c.entry.yomi, c.entry.accentType)}」</>}
                 </span>
                 <button type="button" className="btn" onClick={() => void onOverwrite(c)}>
                   こちらの読みにする

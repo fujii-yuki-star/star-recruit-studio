@@ -8,6 +8,7 @@ import { EDIT_BLOCKED } from "../domain/timeline/edit";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage, sceneTemplateProblemMessage, DORMANT_FONT_HINT, UNKNOWN_FONT_HINT, importErrorMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
+import { BANNED_IN_SCREENS } from "../test/uiTerms";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
 import type { TimelineClip, TimelineProject } from "../domain/timeline/types";
@@ -238,6 +239,15 @@ describe('trackLabel / clipLabel（タイムラインの列と部品の名前・
     expect(clipLabel({ kind: 'shape' })).toBe('図形');
   });
 
+  // ⚠️ **止めた絵（ADR-0065）は帯で見分けられる**＝同じ動画の名前が前後に並ぶので。
+  it('止めた絵は名前に「止めた絵」と添える（利用者が付けた名前は触らない）', () => {
+    const assets = [{ assetId: 'asset_001', displayName: '工場' }];
+    expect(clipLabel({ kind: 'slot', assetId: 'asset_001', holdFrame: true }, assets)).toBe('工場（止めた絵）');
+    expect(clipLabel({ kind: 'slot', assetId: 'asset_001' }, assets)).toBe('工場');
+    expect(clipLabel({ kind: 'slot', holdFrame: true })).toBe(`${freeKindLabel.slot}（止めた絵）`);
+    expect(clipLabel({ kind: 'slot', name: '決め', holdFrame: true })).toBe('決め');
+  });
+
   it('自由配置と同じ物は同じ名前で呼ぶ（画面で語が割れない）', () => {
     expect(clipLabel({ kind: 'slot' })).toBe(freeKindLabel.slot);
   });
@@ -302,11 +312,12 @@ describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）",
 describe("利用者に出す文言に技術用語を混ぜない（§2-3）", () => {
   // CLAUDE.md §2-3 の禁止語。置換語は `06_UI_SPEC.md §3`。
   // ⚠️ 「動画編集の一般語」（分割・ズーム・吸着・トリム）は対象外＝ADR-0034 決定21 で整理済み。
+  // ⚠️ **共有の一覧（`src/test/uiTerms.ts`）を土台にする**（α 残件の洗い直し 2026-10-19）＝以前はこの一覧が
+  //   独立しており、**片方に足してももう片方は素通り**した（`15 §6.0` 項3 の「3つ目」）。共有の一覧に足せば
+  //   ここにも効く。下に並べるのは、組み立てる文言だけで見る語（`JSON`・`null` など）。
   const BANNED = [
-  // ⚠️ **画面では「動画」と呼ぶ**（#1026・利用者判断 2026-09-10）＝この一覧は
-  // `src/test/uiTerms.ts`（画面の直書き・Rust の文）とは**別射程**で、`uiLabels.ts` の
-  // 組み立てる文言を見る。**片方に足しても、もう片方は素通り**するので両方に足す
-  //（`15 §6.0` 項3 が「3つ目がある」と書いているのはこのこと）。
+  ...BANNED_IN_SCREENS,
+  // ⚠️ **画面では「動画」と呼ぶ**（#1026・利用者判断 2026-09-10）。
   'プロジェクト',
     "キーフレーム", "JSON", "FFmpeg", "LLM", "Provider", "templateId", "assetId", "clipId",
     "レンダリング", "バリデーション", "スキーマ", "プロパティ", "オブジェクト", "パース",
@@ -316,6 +327,11 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
     // **2か所（音量のラベル・見わたす列の添え字）が機械検査をすり抜けて画面に出ていた**。
     "ナレーション",
   ];
+
+  // ⚠️ **共有の一覧を土台にしていること自体を見る**＝外すと、共有の一覧に足した語がここで素通りする。
+  it("共有の禁止語（画面の直書き・Rust の文と同じ一覧）を全部含む", () => {
+    for (const w of BANNED_IN_SCREENS) expect(BANNED, w).toContain(w);
+  });
 
   const MAPS: Record<string, Record<string, string>> = {
     editBlockedMessage,
@@ -410,9 +426,11 @@ describe("missingTemplateMessage（見た目パターンが見つからない・
     expect(missingTemplateMessage(3)).toContain("動画に出ません");
   });
 
-  it("どちらも次の行動（消して置き直す）で終わる＝行き止まりにしない", () => {
+  it("どちらも次の行動（消して置き直す・パックを入れ直す）で終わる＝行き止まりにしない", () => {
     for (const t of [missingTemplateMessage(), missingTemplateMessage(2)]) {
-      expect(t).toContain("置き直してください");
+      expect(t).toContain("消して置き直す");
+      // 拡張パックの見た目パターンは、パックを入れ直すと戻る（2026-10-16 実機＝外したあと「置き直して」だけだった）
+      expect(t).toContain("そのパックを入れ直してください");
     }
   });
 
@@ -556,5 +574,15 @@ describe("画面の形・動画の種類の名前は1か所（#1243）", () => {
     const files = walk(join(process.cwd(), "src", "app"));
     expect(files.length).toBeGreaterThan(100);
     expect(files.some((f) => f.endsWith(`${sep}WizardScreen.tsx`))).toBe(true);
+  });
+});
+
+describe("lookOriginLabel（見た目パターンの出どころの札・2026-10-16）", () => {
+  it("拡張パックの見た目はパックの名前を出す（「標準」と出さない＝外すと消えるので）", async () => {
+    const { lookOriginLabel } = await import("./uiLabels");
+    const packs = [{ packId: "office", name: "オフィスの見本パック" }];
+    expect(lookOriginLabel("pack_office__opening", packs)).toBe("拡張パック「オフィスの見本パック」（直接は編集できません）");
+    expect(lookOriginLabel("pack_gone__opening", packs)).toBe("拡張パック（直接は編集できません）");
+    expect(lookOriginLabel("opening_yuko_right", packs)).toBe("標準（直接は編集できません）");
   });
 });

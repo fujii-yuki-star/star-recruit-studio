@@ -13,8 +13,8 @@
 //（止めると、頼んだ側は**直しようのない断り**を受け取る）。
 
 import type { Scene } from '../project/types';
-import { sceneNeedsVoice } from '../project/narrationLines';
-import { voiceClipNeedsVoice } from '../timeline/voice';
+import { sceneNeedsVoice, sceneNeedsVoiceOrRemake } from '../project/narrationLines';
+import { voiceClipNeedsVoice, voiceClipsToMake } from '../timeline/voice';
 import type { TimelineClip } from '../timeline/types';
 
 /** 頼まれた仕事を断る理由（いまは1つだけ＝声が作られていない）。 */
@@ -39,10 +39,12 @@ export type StartupNotReady = (typeof STARTUP_NOT_READY)[keyof typeof STARTUP_NO
  *
  * ⚠️ **文が空のものは数えない**＝元から鳴らないので、直しようがない。
  */
-export function timelineUngeneratedVoices(clips: readonly TimelineClip[]): number {
+export function timelineUngeneratedVoices(clips: readonly TimelineClip[], audioReadable?: (key: string) => boolean): number {
   // ⚠️ **判定は画面と同じものを呼ぶ**（PR #1208 レビュー ℹ️）＝同じ条件を書き写すと、
   // どちらか一方だけ変えたときに**公開前チェックと起動の口がずれる**（このPRが警戒している当のもの）。
-  return clips.filter(voiceClipNeedsVoice).length;
+  // ⚠️ **「読めるか」を渡すと、作成済みなのに音が読めないものも数える**（通し点検 2026-10-16）＝まとめて作るの対象と同じ
+  //   （`voiceClipsToMake`）。渡さないときは印だけ（音をまだそろえていない所で呼ぶと、全部を読めない扱いにするため）。
+  return audioReadable ? voiceClipsToMake(clips, audioReadable).length : clips.filter(voiceClipNeedsVoice).length;
 }
 
 /**
@@ -51,9 +53,9 @@ export function timelineUngeneratedVoices(clips: readonly TimelineClip[]): numbe
  * ⚠️ **掛け合いも単一のセリフも同じ見方で数える**（`sceneLines`）＝
  * 画面の公開前チェックと**同じ判定**を通す（形式や作りで数が食い違わない＝ADR-0026②）。
  */
-export function sceneUngeneratedVoices(scenes: readonly Scene[]): number {
-  // ⚠️ **判定は画面と同じものを呼ぶ**（上と同じ理由）。
-  return scenes.filter(sceneNeedsVoice).length;
+export function sceneUngeneratedVoices(scenes: readonly Scene[], audioReadable?: (key: string) => boolean): number {
+  // ⚠️ **判定は画面と同じものを呼ぶ**（上と同じ理由）。読めるかを渡したときは上と同じ（`sceneNeedsVoiceOrRemake`）。
+  return scenes.filter((s) => (audioReadable ? sceneNeedsVoiceOrRemake(s, audioReadable) : sceneNeedsVoice(s))).length;
 }
 
 /**

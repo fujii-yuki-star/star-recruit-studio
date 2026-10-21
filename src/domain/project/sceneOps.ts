@@ -10,6 +10,7 @@ import { composeGroupGeometry, groupScaleOf, isHiddenByGroup } from '../group/co
 import { effectiveLayerZ } from '../template/layerOrder';
 import { templateSlotIds } from '../template/layerOps';
 import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields, scaleTextStyle } from '../template/textStyle';
+import { textFontFor, type TextFont } from '../text/fontMetrics';
 import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
@@ -52,6 +53,8 @@ export function switchSceneTemplate(
   newTemplateId: string,
   newCategory?: SceneCategory,
   prevTemplate?: Template,
+  /** 動画全体の字体（ADR-0063）＝持ち込む字幕の上端を描画と同じ字体の行数で決める。 */
+  projectFontId?: string | null,
 ): Scene {
   // 通常→FREE：表示中の配置内容（スロット素材＋文字＋字幕＋立ち絵）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
   const seeded =
@@ -59,7 +62,7 @@ export function switchSceneTemplate(
     prevTemplate &&
     prevTemplate.category !== FREE_CATEGORY &&
     (scene.freeLayout?.length ?? 0) === 0
-      ? freeLayoutFromPlacedContent(scene, prevTemplate)
+      ? freeLayoutFromPlacedContent(scene, prevTemplate, { projectFontId })
       : undefined;
   return {
     ...scene,
@@ -104,7 +107,7 @@ function textBoxH(h: number, fontSize: number, maxLines: number | undefined): nu
  * している**ので動かさない（`行数-1 = 0`）。掛け合いは行ごとに行数が変わり単一の y では一致させられないため、
  * **全行の最大行数**に寄せる＝どの行でもテンプレより下がらない（はみ出しを増やさない）側を採る。
  */
-function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined, letterSpacingEm = 0): number {
+function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined, letterSpacingEm: number, font: TextFont): number {
   const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
   // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`defaultSubtitleSource` と同じ規則）。
   // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
@@ -116,10 +119,10 @@ function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxL
           1,
           ...lines.map((l) => {
             const sub = resolveLineSubtitle(l, scene);
-            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap, letterSpacingEm).length : 1;
+            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap, letterSpacingEm, font).length : 1;
           }),
         )
-      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap, letterSpacingEm).length;
+      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap, letterSpacingEm, font).length;
   return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
 }
 
@@ -159,7 +162,8 @@ function showsSubtitle(scene: Scene, template: Template): boolean {
 export function freeLayoutFromPlacedContent(
   scene: Scene,
   template: Template,
-  opts: { faithful?: boolean } = {},
+  /** `projectFontId`＝動画全体の字体（ADR-0063）＝字幕の行数を描画と同じ字体で数える。 */
+  opts: { faithful?: boolean; projectFontId?: string | null } = {},
 ): {
   elements: FreeElement[];
   slotClips: NonNullable<Scene['slotClips']>;
@@ -279,7 +283,8 @@ export function freeLayoutFromPlacedContent(
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
         // 字間も渡す（#928）＝行数が変われば上端も変わる（描画と同じ行数で翻訳する）。
-        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines, style.letterSpacing ?? 0),
+        y: subtitleTopY(scene, cg.y, cg.w, style.fontSize, layer.maxLines, style.letterSpacing ?? 0,
+          textFontFor(subKey ? scene.textFontIds?.[subKey] : undefined, scene.fontId, opts.projectFontId, style.fontWeight)),
         h: textBoxH(geom.h, style.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
         ...style,

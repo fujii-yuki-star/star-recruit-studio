@@ -33,6 +33,14 @@ describe("画面の言葉で要素を探す式", () => {
     expect(e.indexOf("=== want")).toBeLessThan(e.indexOf("includes(want)"));
   });
 
+  // ⚠️ **絵だけのボタンは名前（aria-label）の完全一致で**＝文字の完全一致の次・部分一致の前（#1228 の下見）。
+  it("文字の無いボタンを名前の完全一致で探す（部分一致の前）", () => {
+    const e = FIND_BY_TEXT("縦の版を作る");
+    expect(e, "名前で探していない").toContain('getAttribute("aria-label") === want');
+    expect(e.indexOf("=== want")).toBeLessThan(e.indexOf('getAttribute("aria-label")'));
+    expect(e.indexOf('getAttribute("aria-label")')).toBeLessThan(e.indexOf("includes(want)"));
+  });
+
   // ⚠️ **画面の真ん中へ寄せる**＝スクロールの外にあると、押せても録画に写らない。
   it("見つけたら画面の中へ寄せる", () => {
     expect(FIND_BY_TEXT("保存")).toContain("scrollIntoView");

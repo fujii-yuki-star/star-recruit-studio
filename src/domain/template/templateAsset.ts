@@ -42,6 +42,38 @@ export function templateAssetIdsOf(layers: readonly Layer[]): string[] {
 }
 
 /**
+ * 削除してよい（**そのテンプレだけが参照する**）テンプレ素材 id（PR レビュー 🟡・通し点検 2026-10-16）。
+ *
+ * ⚠️ **ほかのテンプレがまだ使う素材は消さない**＝複製（`duplicateAsUserTemplate`）は素材を共有し、読み込んだ見た目も
+ *   同じ番号を指しうる。持ち主の分まで消すと、残った見た目の絵が**黙って欠ける**。
+ */
+export function templateAssetIdsOwnedOnlyBy(templates: readonly Template[], templateId: string): string[] {
+  const target = templates.find((t) => t.templateId === templateId);
+  if (!target) return [];
+  const usedElsewhere = new Set(templates.filter((t) => t.templateId !== templateId).flatMap((t) => templateAssetIdsOf(t.layers)));
+  return templateAssetIdsOf(target.layers).filter((id) => !usedElsewhere.has(id));
+}
+
+/**
+ * ファイルから読み込んだ見た目パターンの、**テンプレ素材への参照を外す**（通し点検 2026-10-16・PR レビュー 🟡）。純粋。
+ *
+ * ⚠️ テンプレ素材の番号は**このパソコンの中だけで一意**＝ファイルには絵が入っていないので、別のパソコンの番号は
+ *   こちらの**別の見た目の素材**を指しうる（別の絵で描かれても気づけない・消すと持ち主の絵が欠ける）。
+ *   外した層は既定の絵なしで描く（差し込み口・文字は残る）。外すものが無ければ同じ参照を返す。
+ */
+export function withoutTemplateAssetRefs(template: Template): Template {
+  if (!template.layers.some((l) => l.assetId && isTemplateAsset(l.assetId))) return template;
+  return {
+    ...template,
+    layers: template.layers.map((l) => {
+      if (!l.assetId || !isTemplateAsset(l.assetId)) return l;
+      const { assetId: _drop, ...rest } = l;
+      return rest as Layer;
+    }),
+  };
+}
+
+/**
  * 掃除してよい孤立テンプレ素材 id（#299）＝ disk に実在するが、どのテンプレも参照しないファイル。
  * 破棄した下書き（ファイルは即保存）やテンプレ削除時の削除失敗で生じる（影響は disk 容量のみ）。
  *

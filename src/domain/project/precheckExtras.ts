@@ -2,6 +2,7 @@
 //
 // ⚠️ **判定は描画と同じ関数を通す**（`layoutScene` が作ったアイテムを見る／折返しは `wrapText`）＝
 // 別に数え直すと「チェックは通ったのに動画では切れている」が起きる。
+import type { TextFont } from '../text/fontMetrics';
 import { wrapText } from '../text/textWrap';
 import type { Asset, Scene } from './types';
 
@@ -44,6 +45,8 @@ export function truncatedTexts(
     isSubtitle?: boolean;
     /** 字間（em・#264）。折返しが変わるので渡す（#928）＝渡さないと「切れている」を見逃す。 */
     letterSpacing?: number;
+    /** 描く字体（ADR-0063）＝描画と同じ幅で折り返す。 */
+    textFont?: TextFont;
   }[],
 ): string[] {
   const out: string[] = [];
@@ -51,7 +54,7 @@ export function truncatedTexts(
     if (it.kind !== 'text') continue;
     const { text, w, fontSize, maxLines } = it;
     if (!text || !w || !fontSize || !maxLines) continue;
-    if (isTruncated(text, wrapText(text, w, fontSize, maxLines, it.letterSpacing ?? 0))) out.push(text);
+    if (isTruncated(text, wrapText(text, w, fontSize, maxLines, it.letterSpacing ?? 0, it.textFont))) out.push(text);
   }
   return out;
 }

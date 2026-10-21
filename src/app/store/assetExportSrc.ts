@@ -8,6 +8,7 @@
 //
 // この非対称を形式ごとに書くと、片方だけ直す事故が起きる（実際にタイムライン形式で起きた＝#716）。
 // **解き方はここだけ**にして、場面形式・タイムライン形式の両方が通す。
+import { isPackScopedId } from '../../domain/pack/extensionPack';
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { isTemplateAsset } from "../../domain/template/templateAsset";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -19,7 +20,7 @@ export type ExportSrcResolver = (assetId: string) => Promise<string | undefined>
 /**
  * 書き出し用のリゾルバを作る。
  *
- * - **テンプレ既定素材**（`tmpl_asset_*`）は既に data URL なのでそのまま返す（ADR-0021）。
+ * - **テンプレ既定素材**（`tmpl_asset_*`・拡張パックの `pack_<packId>__*`）は既に data URL なのでそのまま返す（ADR-0021・ADR-0060）。
  * - **動画**は本体（大容量）を載せず**代表フレーム**を返す（ADR-0006・#442 の窓フレームもこれを使う）。
  * - **写真**は本体をディスクから data URL 化する（ADR-0004）。
  */
@@ -30,7 +31,8 @@ export function createExportSrcResolver(input: {
 }): ExportSrcResolver {
   const byId = new Map(input.assets.map((a) => [a.assetId, a] as const));
   return async (assetId) => {
-    if (isTemplateAsset(assetId)) return input.templateAssetSrcById[assetId];
+    // ⚠️ 拡張パックの既定素材（`pack_<packId>__…`・ADR-0060）も見た目パターンの持ち物＝同じ表から引く。
+    if (isTemplateAsset(assetId) || isPackScopedId(assetId)) return input.templateAssetSrcById[assetId];
     const a = byId.get(assetId);
     const pid = input.projectId;
     if (!pid || !a) return undefined;

@@ -36,6 +36,7 @@ import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
 import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, freeTextStyleFields, scaleTextStyle } from '../template/textStyle';
 import { stackedSubtitleBands } from '../text/subtitleBands';
+import { textFontFor } from '../text/fontMetrics';
 import { wrapText } from '../text/textWrap';
 import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene, Texts } from '../project/types';
 import type { Group } from '../group/types';
@@ -77,6 +78,11 @@ export const BAKE_NOTE_CODE = {
    * 動画の元の音は一定の大きさしか持てない（フェード・音量の変化の語彙が無い）＝下がらずに重なる。
    */
   videoAudioTransition: 'BAKE_VIDEO_AUDIO_TRANSITION',
+  /**
+   * 場面の切り替えの**ワイプ・ズーム**（ADR-0066 決定5）。タイムライン形式ではフェードとして焼く
+   * （付け先のまとまりに切り抜きが無く、ズームの中心もまとまりの箱になる＝同じ絵をキーフレームで表せない）。
+   */
+  transitionAsFade: 'BAKE_TRANSITION_AS_FADE',
 } as const;
 
 export type BakeNoteCode = (typeof BAKE_NOTE_CODE)[keyof typeof BAKE_NOTE_CODE];
@@ -285,8 +291,10 @@ function sortedKeyframes(keyframes: readonly Keyframe[]): Keyframe[] {
  *   入る側だけ動かすと絵が変わる。x/y キーフレームは**本来位置からの相対**（`interpolateKeyframes` の適用規則）。
  * - `none`＝キーフレーム無し（ハードカット）。
  *
- * `default` の `never` チェックは**意図的な仕掛け**：`DrawnTransitionType`（＝`sceneTransitions` の丸め表）に
- * wipe が加わった瞬間ここがコンパイルエラーになり、黙って fade として焼き続けることができなくなる（決定19）。
+ * - `wipe`／`zoom`＝**フェードとして焼く**（ADR-0066 決定5＝同じ絵をキーフレームで表せない）。知らせは呼び出し側。
+ *
+ * `default` の `never` チェックは**意図的な仕掛け**：`DrawnTransitionType` に種別が加わった瞬間ここがコンパイルエラーになり、
+ * 黙って別の形で焼き続けることができなくなる（決定19・ADR-0066 で実際に鳴った）。
  *
  * @param outgoingStartSec 出ていく側のクリップ先頭から見た、重なりが始まる秒。
  */
@@ -302,6 +310,10 @@ function transitionKeyframes(
   switch (type) {
     case TRANSITION_TYPE.none:
       return { incoming: [], outgoing: [] };
+    // ⚠️ **ワイプ・ズームはフェードとして焼く**（ADR-0066 決定5）＝付け先の多くはまとまりで、切り抜きも
+    //   ズームの中心も同じ絵をキーフレームで表せない。黙ってではなく、呼び出し側が `BAKE_TRANSITION_AS_FADE` で知らせる。
+    case TRANSITION_TYPE.wipe:
+    case TRANSITION_TYPE.zoom:
     case TRANSITION_TYPE.fade:
       return incomingIsAbove
         ? {
@@ -452,6 +464,8 @@ export function bakeLineSubtitles(
   scene: Scene,
   template: Template | undefined,
   windows: ReadonlyArray<{ line: NarrationLine; startSec: number; durationSec: number }>,
+  /** 動画全体の字体（ADR-0063）＝描画と同じ字体で行数を数える。 */
+  projectFontId: string | null | undefined,
 ): BakedLineSubtitle[] {
   if (!hasExplicitLines(scene) || !template) return [];
   const groups = template.groups ?? [];
@@ -465,6 +479,8 @@ export function bakeLineSubtitles(
     // まとまりで縮めた分は中身も縮める（#1371・描画＝`layoutScene` と同じ倍率）＝段積みも縮めた字で折り返す。
     const style = scaleTextStyle(freeTextStyleFields(layer, layerTextKey ? scene.textStyles?.[layerTextKey] : undefined), groupScaleOf(layer, cg));
     const maxLines = layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
+    // 字体は描画（`layoutScene`）と同じ解き方で1回だけ（ADR-0063）。
+    const textFont = textFontFor(layerTextKey ? scene.textFontIds?.[layerTextKey] : undefined, scene.fontId, projectFontId, style.fontWeight);
     // 同時に流れる行は1つの窓を共有する＝窓ごとにまとめて段積みする（描画と同じ積み方）。
     const byWindow = new Map<string, typeof windows[number][]>();
     for (const w of windows) {
@@ -478,9 +494,9 @@ export function bakeLineSubtitles(
         .filter((x) => x.sub.enabled && x.sub.text.length > 0);
       if (shown.length === 0) continue;
       // 字間も渡す（#928）＝描画（`layoutScene`）と同じ行数で積む。
-      const bands = stackedSubtitleBands(shown.map((x) => x.sub.text), cg.y, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0);
+      const bands = stackedSubtitleBands(shown.map((x) => x.sub.text), cg.y, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0, textFont);
       shown.forEach((x, k) => {
-        const lines = wrapText(x.sub.text, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0).length;
+        const lines = wrapText(x.sub.text, cg.w, style.fontSize, maxLines, style.letterSpacing ?? 0, textFont).length;
         const boxH = boxHeightForLines(lines, style.fontSize);
         // 旧箱の中心（アンカー y ＋ 層の高さ）と新箱の中心（帯の上端＋この行数の高さ）の差。
         const shift = rotationShift(cg.rotation ?? 0, (bands[k].y + cg.h / 2) - (bands[k].top + boxH / 2));
@@ -633,6 +649,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   const sceneTargetId: string[] = [];
   const sceneBlock: ColumnBlock[] = [];
   const dialogueSubtitleScenes: number[] = [];
+  const transitionAsFadeScenes: number[] = [];
   const videoStartTimingScenes: number[] = [];
 
   scenes.forEach((scene, i) => {
@@ -649,7 +666,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     const windows = allWindows.filter(hasVoiceText);
     // 掛け合いの字幕は**行ごとの字幕クリップ**へ焼く（#633）。**自由配置の場面でも焼く**＝テンプレの層は
     // category を問わず描かれる（`layoutScene`）ので、外すと FREE テンプレの字幕層が黙って消える。
-    const lineSubtitles = bakeLineSubtitles(scene, template, allWindows);
+    const lineSubtitles = bakeLineSubtitles(scene, template, allWindows, project.videoSettings.fontId);
     // この場面で、見た目パターンのクリップ以外に作ったクリップ（切り替えの付け先＝場面グループに入れる）。
     // 採った id を**場面グループのメンバー用に控えるだけ**（クリップ自体はその場で `clips` へ積む）。
     // ⚠️ 採番は積んである分から次を決めるので、**採ってから積むまでを空けない**（#811）。
@@ -833,6 +850,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     const incomingTarget = sceneTargetId[i];
     const outgoingTarget = sceneTargetId[i - 1];
     if (incomingTarget == null || outgoingTarget == null) continue; // 描くものが無い場面には切り替えを付けようがない
+    if (resolved[i].type === TRANSITION_TYPE.wipe || resolved[i].type === TRANSITION_TYPE.zoom) transitionAsFadeScenes.push(i + 1);
     const kf = transitionKeyframes(
       resolved[i].type,
       resolved[i].direction,
@@ -878,6 +896,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
 
   if (dialogueSubtitleScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: dialogueSubtitleScenes });
   if (videoStartTimingScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.videoStartTiming, sceneNumbers: videoStartTimingScenes });
+  if (transitionAsFadeScenes.length > 0) notes.push({ code: BAKE_NOTE_CODE.transitionAsFade, sceneNumbers: transitionAsFadeScenes });
   // 出ていく場面で動画の元の音が鳴っていれば知らせる（#1410）＝重なりの間、下がらずに鳴る。
   // ⚠️ **鳴るかは焼き上がりの文書で見る**（`placementOriginalAudio`＝描画・書き出しと同じ判定）。
   const built = doc();

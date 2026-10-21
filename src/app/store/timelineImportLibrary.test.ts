@@ -47,7 +47,7 @@ afterEach(() => vi.clearAllMocks());
 describe('タイムラインの棚からの取り込み', () => {
   it('棚の名前・種類・タグを引き継ぐ（機械の番号を素材名にしない）', async () => {
     const ok = await useTimelineStore.getState().importFromLibrary('lib_asset_003');
-    expect(ok).toBe(true);
+    expect(ok).toBe('asset_001'); // 足した素材の番号を返す（「音」の欄からその場で置くため）
     const added = useTimelineStore.getState().doc!.assets[0];
     expect(added.displayName).toBe('会社ロゴ');
     expect(added.assetType).toBe(ASSET_TYPE.logo);
@@ -64,7 +64,7 @@ describe('タイムラインの棚からの取り込み', () => {
         { assetId: 'asset_002', assetType: ASSET_TYPE.image, displayName: 'b', filePath: 'assets/asset_002.png' },
       ] } as never,
     } as never);
-    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(true);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe('asset_003');
     const list = useTimelineStore.getState().doc!.assets;
     const added = list[list.length - 1];
     expect(added.assetId).toBe('asset_003');
@@ -77,32 +77,32 @@ describe('タイムラインの棚からの取り込み', () => {
       return [{ id: 'lib_asset_003', fileName: 'lib_asset_003.png', displayName: '会社ロゴ', assetType: ASSET_TYPE.logo, tags: [] }];
     });
     const ok = await useTimelineStore.getState().importFromLibrary('lib_asset_003');
-    expect(ok).toBe(false);
+    expect(ok).toBeNull();
     expect(useTimelineStore.getState().doc!.assets).toEqual([]);
     expect(copyLibraryAssetToProject).not.toHaveBeenCalled();
   });
 
   it('動画を開いていなければ取り込まない（画面が塞ぐ前の守り）', async () => {
     useTimelineStore.setState({ doc: null } as never);
-    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(false);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBeNull();
     expect(copyLibraryAssetToProject).not.toHaveBeenCalled();
   });
 
   it('一覧を読めなかったら、次の行動を出して取り込まない', async () => {
     vi.mocked(listLibraryAssets).mockResolvedValue(null);
-    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(false);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBeNull();
     expect(useTimelineStore.getState().importError).toContain('開き直して');
     expect(useTimelineStore.getState().doc!.assets).toEqual([]);
   });
 
   it('棚に無い素材は、探す先を示して断る', async () => {
-    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_999')).toBe(false);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_999')).toBeNull();
     expect(useTimelineStore.getState().importError).toContain('一覧を開き直して');
   });
 
   it('コピーに失敗したら「取り込めた」と言わない', async () => {
     vi.mocked(copyLibraryAssetToProject).mockRejectedValue(new Error('boom'));
-    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBe(false);
+    expect(await useTimelineStore.getState().importFromLibrary('lib_asset_003')).toBeNull();
     expect(useTimelineStore.getState().doc!.assets).toEqual([]);
   });
 });

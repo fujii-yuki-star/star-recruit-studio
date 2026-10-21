@@ -64,6 +64,25 @@ export function sceneNeedsVoice(scene: Scene): boolean {
   return sceneLines(scene).some((l) => l.text.trim().length > 0 && l.status !== NARRATION_STATUS.generated);
 }
 
+/**
+ * **作成済みの印なのに音が読めない**行の音声キー（`narrationAudioById` のキー）。純粋。
+ *
+ * ⚠️ **印だけ見ると作り直されない**（通し点検 2026-10-16）＝声のファイルが消えた動画では、まとめて作るが
+ *   この行を飛ばして「作りました」と言い、書き出しは「声を作ってください」と断る＝**行き止まり**（§2-5）。
+ *   「読めるか」は呼ぶ側が渡す（`narrationAudioById` に入っているか＝プレビュー・書き出しが使うのと同じ材料）。
+ */
+export function sceneVoiceKeysToRemake(scene: Scene, audioReadable: (key: string) => boolean): string[] {
+  return sceneLines(scene)
+    .filter((l) => l.text.trim().length > 0 && l.status === NARRATION_STATUS.generated)
+    .map((l) => narrationAudioKey(scene, l.lineId))
+    .filter((key) => !audioReadable(key));
+}
+
+/** まとめて作る対象か＝まだ作っていない行がある、または作成済みなのに音が読めない行がある。 */
+export function sceneNeedsVoiceOrRemake(scene: Scene, audioReadable: (key: string) => boolean): boolean {
+  return sceneNeedsVoice(scene) || sceneVoiceKeysToRemake(scene, audioReadable).length > 0;
+}
+
 function warn(code: string, message: string, field: string, severity: Warning['severity']): Warning {
   return { code, message, field, severity, autoFixed: false };
 }

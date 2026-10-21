@@ -88,7 +88,7 @@ describe("動画の絵は見た目で変わらない（ADR-0001）", () => {
       backgroundColor: "#ffffff",
       items: [
         { kind: "image", id: "slot", x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: "asset_001", fit: "cover", role: "slot", label: "メイン画像" },
-        { kind: "text", id: "t1", x: 1200, y: 200, w: 600, h: 200, zIndex: 20, text: "見出しの文字", color: "#20323c", fontSize: 64, align: "left", role: "text" },
+        { kind: "text", id: "t1", x: 1200, y: 200, w: 600, h: 200, zIndex: 20, text: "見出しの文字", color: "#20323c", fontSize: 64, align: "left", role: "text", textFont: { fontId: "gen-interface-jp", bold: false } },
         { kind: "shape", id: "s1", x: 0, y: 980, w: 1920, h: 100, zIndex: 5, shape: "rect", fillColor: "#1f9ea3" },
       ],
     } as unknown as SceneLayout;

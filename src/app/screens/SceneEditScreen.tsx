@@ -11,7 +11,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer, LayerBackground, TextShadow } from "../../domain/template/types";
 import { editableTextKeys, usedTextKeys, withTextFontId } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
@@ -34,7 +34,9 @@ import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
-import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
+import { deriveTransitionSelectValue, transitionFromSelectValue } from "../../domain/project/sceneTransitions";
+import { BoldUnavailableNote } from "../components/BoldUnavailableNote";
+import { effectiveTextFontId } from "../../domain/font/fontCatalog";
 import { freeContentHiddenBySwitch, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
@@ -42,7 +44,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { layoutScene, subtitleOverflowsCanvas } from "../../renderer/layout";
-import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { useVoiceCatalog } from "../hooks/useVoiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
@@ -93,8 +95,7 @@ import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity"
 import { Switch } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
 import { textKeyOfLayer } from "../../domain/template/layerOps";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { NoScenesState } from "../components/NoScenesState";
 import {
   SearchIcon,
   PhotoIcon,
@@ -227,6 +228,8 @@ function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
+  // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
+  const voices = useVoiceCatalog();
   // まとめて声を作る出どころ（場面形式）。⚠️ **形式ごとに1つの物で受け取る**（#1019 ⑥）。
   const sceneBulkVoice = useSceneBulkVoice();
   const {
@@ -600,13 +603,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   });
 
   if (!selected) {
+    // ⚠️ **場面が0の表示は共有の部品に任せる**（#590・ADR-0026②＝同じ状況なら同じ挙動）＝作成中・失敗・入力の続き・
+    //   取り消しで0になったときの「やり直す」（通し点検 2026-10-16）までそこが見分ける。この画面は場面を作れるので
+    //   「場面を追加」を渡し、たたき台とは別の画面なので「たたき台へ」も添える。
     return (
       <div className="main-scroll">
-        <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : "編集する場面がありません"}
-          message="「新しい動画を作る」から動画案を作成してください。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => setSelectedId(addScene())} withGoToDraft />
       </div>
     );
   }
@@ -643,7 +645,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // ⚠️ **掴んでいる素材ごとに決める**（PR #1042 レビュー 🔴）＝入れられる口だけを出す。
   //   入らない口の枠を出すと「落とせそうに見えて何も起きない」。判定は押す道と同じ関数。
   const dropTargets: SlotDropTarget[] =
-    template && dragging ? slotDropTargets(layoutScene(selected, template), slotLayers, selected.assetRefs, dragging.asset) : [];
+    template && dragging ? slotDropTargets(layoutScene(selected, template, { projectFontId: fontId }), slotLayers, selected.assetRefs, dragging.asset) : [];
   /**
    * いま指の下にある差し込み口（`elementFromPoint`）。
    * ⚠️ **枠の座標を自分で計算し直さない**＝拡大率（`previewZoom`）や縦型で
@@ -732,7 +734,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 見た目切替の共通処理（「見た目パターン」ピッカーと「種類」セレクタで共用・#528）。
   const applyTemplateSwitch = (newTemplateId: string) => {
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId), fontId));
     // 確認待ちを解除する：確認中に別の見た目（何も隠れないもの）を選ぶと即適用されるので、残しておくと
     // **適用済みとは別の切替先**を指す確認が出たままになる（押すと二重に切り替わる・§2-5）。
     setPendingTemplateId(null);
@@ -1170,6 +1172,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <option value={FONT_WEIGHT.normal}>標準</option>
               <option value={FONT_WEIGHT.bold}>太字</option>
             </select>
+            <BoldUnavailableNote fontId={effectiveTextFontId(selected.textFontIds?.[key], selected.fontId, fontId)} />
           </div>
         </div>
         <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
@@ -1417,6 +1420,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <option value={FONT_WEIGHT.normal}>標準</option>
                 <option value={FONT_WEIGHT.bold}>太字</option>
               </select>
+              <BoldUnavailableNote fontId={effectiveTextFontId(el.fontId, selected.fontId, fontId)} />
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -1548,6 +1552,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <option value={FONT_WEIGHT.normal}>標準</option>
                 <option value={FONT_WEIGHT.bold}>太字</option>
               </select>
+              <BoldUnavailableNote fontId={effectiveTextFontId(el.fontId, selected.fontId, fontId)} />
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -1757,16 +1762,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
   // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
   const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
-  // select 値の導出は domain に集約（wipe/zoom→fade を resolveTransition と一致させる・観点4対応）。
+  // 値の読み書きは domain に集約（`deriveTransitionSelectValue`／`transitionFromSelectValue`＝綴りを1か所に）。
   const transitionValue = deriveTransitionSelectValue(selected.transition);
   const onTransitionChange = (val: string) =>
     patch((s) => {
-      if (val.startsWith("slide:")) {
-        const direction = val.slice("slide:".length) as TransitionDirection;
-        return { ...s, transition: { ...s.transition, in: TRANSITION_TYPE.slide, out: TRANSITION_TYPE.slide, direction } };
-      }
-      const type = val as TransitionType; // none | fade
-      return { ...s, transition: { ...s.transition, in: type, out: type, direction: undefined } };
+      const next = transitionFromSelectValue(val);
+      // 向きを持たない種別は向きを外す（以前と同じ＝残すと次に向きのある種別を選んだとき古い向きが出る）。
+      return { ...s, transition: { ...s.transition, in: next.in, out: next.out, direction: next.direction } };
     });
   // 掛け合い（複数のセリフ）モードか。明示 lines があるとき＝ON（ADR-0015・#180）。
   const isDialogue = (selected.lines?.length ?? 0) > 0;
@@ -1777,7 +1779,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 文言は原因で変える＝「次の行動」が違う（同時なら行を減らす／1帯なら小さく・短く）＝§2-5。
   // はみ出しの案内は**文字（字幕）の欄の下**に出す（下記）＝掛け合いの有無に関わらず見え、直す場所がその場にある。
   // ここ（セリフ列の検証）に混ぜると掛け合いブロックの中でしか描画されず、単独/逐次では出ない（#563）。
-  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template);
+  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template, fontId);
   const lineWarningMessages = isDialogue
     ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
     : [];
@@ -2276,7 +2278,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             onChange={(e) => patch((s) => updateLine(s, line.lineId, { speaker: e.target.value ? Number(e.target.value) : null }))}
                           >
                             <option value="">動画全体の声に合わせる</option>
-                            {VOICE_CATALOG.map((c) => (
+                            {voices.map((c) => (
                               <optgroup key={c.character} label={c.character}>
                                 {c.styles.map((st) => (
                                   <option key={st.speaker} value={st.speaker}>{c.character}（{st.label}）</option>

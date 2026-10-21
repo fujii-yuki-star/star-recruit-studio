@@ -77,6 +77,14 @@ export const STARTUP_IMPORT_UNREADABLE_MESSAGE =
   "そのフォルダの中身を読めませんでした。動画のフォルダごと指定してください。";
 
 /**
+ * 取り込む元の動画の中身が壊れていたときの断り（通し点検 2026-10-16）。
+ *
+ * ⚠️ **上と分ける**＝フォルダの指定は正しいのに「フォルダごと指定して」と言うと、**従っても直らない**（§2-5）。
+ */
+export const STARTUP_IMPORT_BROKEN_MESSAGE =
+  "そのフォルダの動画の中身が壊れていて読めませんでした。中身を作り直してから、もう一度お試しください。";
+
+/**
  * いま「他人の作業中」か（ADR-0042 決定③）。
  *
  * ⚠️ **開いているかどうかで見る**＝このアプリに「直したけど保存していない」を表す印が無い
@@ -187,7 +195,7 @@ async function runImport(
     try {
       doc = JSON.parse(text);
     } catch {
-      setNotice(STARTUP_IMPORT_UNREADABLE_MESSAGE);
+      setNotice(STARTUP_IMPORT_BROKEN_MESSAGE);
       await finishStartupJob(false, req.forwarded, noticeNow());
       return;
     }
@@ -230,7 +238,8 @@ async function runImport(
     }
     // ⚠️ **開けてから言う**＝「取り込みました」を先に出すと、開けなかった回に嘘が残る。
     setNotice(importDoneMessage(copied, skipped));
-    await finishStartupJob(true, req.forwarded, noticeNow());
+    // ⚠️ **採り直した番号を頼んだ側へ返す**（通し点検 2026-10-16）＝標準出力へ1行（`18 §18.5`）。画面には出さない。
+    await finishStartupJob(true, req.forwarded, noticeNow(), projectId);
   } catch (e) {
     setNotice(loadErrorMessage(e, "startup-import", STARTUP_IMPORT_UNREADABLE_MESSAGE));
     await finishStartupJob(false, req.forwarded, noticeNow());
@@ -267,7 +276,10 @@ async function runMakeVoices(
       // 仕事が終わってすぐ閉じる回では**一度も走らない**。音のファイルは出来ているのに、
       // 文書は「まだ作っていない」のままになり、**次の書き出しが断られる**。
       await useTimelineStore.getState().saveTimelineProject();
-      const left = timelineUngeneratedVoices(useTimelineStore.getState().doc?.clips ?? []);
+      // ⚠️ **作成済みなのに音が読めないものも残りに数える**（通し点検 2026-10-16）＝印だけ数えると、声のファイルが
+      //   消えた動画で「作りました」（0）と返し、続く書き出しが断る＝外の AI には行き止まり。
+      const tl = useTimelineStore.getState();
+      const left = timelineUngeneratedVoices(tl.doc?.clips ?? [], (key) => tl.audioSrcByKey[key] != null);
       setNotice(makeVoicesDoneMessage(left));
       await finishStartupJob(left === 0, req.forwarded, noticeNow());
       return;
@@ -282,7 +294,8 @@ async function runMakeVoices(
     await useProjectStore.getState().generateAllNarrations();
     // ⚠️ **書き切ってから終わる**（上と同じ）。
     await useProjectStore.getState().saveProject();
-    const left = sceneUngeneratedVoices(useProjectStore.getState().scenes);
+    const ps = useProjectStore.getState();
+    const left = sceneUngeneratedVoices(ps.scenes, (key) => ps.narrationAudioById[key] != null); // 上と同じ理由
     setNotice(makeVoicesDoneMessage(left));
     await finishStartupJob(left === 0, req.forwarded, noticeNow());
   } catch (e) {
@@ -333,6 +346,10 @@ async function runExport(
   setNotice: (m: string | null) => void,
 ): Promise<void> {
   try {
+    // ⚠️ **拡張パックを読み終えてから**（2026-10-16 実機）＝起動直後はパックの読み込みより先にここへ来て、
+    //   パックの文字の形を使う動画を「文字の形が見つかりません」と断っていた（画面から書き出すと通る）。
+    //   ここで読み直して待つ（起動時の読み込みと重なっても、後から始めた1回が当たる＝`loadPacks` の世代）。
+    await useProjectStore.getState().loadPacks();
     // ⚠️ **どちらの形式かで開く先が変わる**（実機で発覚・2026-09-17）＝
     // 場面形式の道しか無かったので、**タイムライン形式の動画は3秒で何もせず終わって「成功」を返していた**。
     // ⚠️ **ここが塞がっていると ADR-0041 の枠②が成立しない**＝外の AI にタイムラインを書かせると決めたのに、
@@ -369,7 +386,9 @@ async function runExport(
     //（画面は「テンプレの差し込み口に入っているか」＝`sceneActiveAssetIds` で数える）。
     await useProjectStore.getState().refreshMissingAssets();
     const sceneNotReady = startupExportNotReady({
-      ungeneratedVoices: sceneUngeneratedVoices(useProjectStore.getState().scenes),
+      // ⚠️ **作成済みなのに音が読めない声も断る**（通し点検 2026-10-16）＝場面形式の書き出しは声の音が無いと**無音のまま**
+      //   焼くので、ここで止めて `--make-voices`（作り直す）へ向ける。音は開いたときに読んである（`narrationAudioById`）。
+      ungeneratedVoices: sceneUngeneratedVoices(useProjectStore.getState().scenes, (key) => useProjectStore.getState().narrationAudioById[key] != null),
       missingUsedAssets: 0,
     });
     if (sceneNotReady) {

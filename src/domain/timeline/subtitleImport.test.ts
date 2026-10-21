@@ -54,7 +54,7 @@ describe("importSubtitleCues", () => {
   it("置けるものが無ければ文書を変えない", () => {
     const d = doc();
     const r = importSubtitleCues(d, [{ startSec: VIDEO_HARD_MAX_SEC, endSec: VIDEO_HARD_MAX_SEC + 2, text: "x" }]);
-    expect(r).toEqual({ doc: d, placed: 0, beyondLimit: 1 });
+    expect(r).toEqual({ doc: d, placed: 0, beyondLimit: 1, placedIds: [] });
   });
 
   it("並べた文書は保存して開き直せる（schema に通る）", () => {

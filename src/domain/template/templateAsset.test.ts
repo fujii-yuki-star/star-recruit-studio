@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer, Template } from './types';
 import {
-  createTemplateAssetId, isTemplateAsset, orphanTemplateAssetIds, templateAssetIdsOf, templateAssetSeq, TEMPLATE_ASSET_PREFIX,
+  createTemplateAssetId, isTemplateAsset, orphanTemplateAssetIds, templateAssetIdsOf, templateAssetIdsOwnedOnlyBy, templateAssetSeq, TEMPLATE_ASSET_PREFIX,
+  withoutTemplateAssetRefs,
 } from './templateAsset';
 
 describe('isTemplateAsset', () => {
@@ -96,3 +97,29 @@ describe('orphanTemplateAssetIds', () => {
     expect(orphanTemplateAssetIds(templates, ['tmpl_asset_001', 'tmpl_asset_002'], true)).toEqual([]);
   });
 });
+
+// 読み込んだ見た目・複製した見た目とテンプレ素材（通し点検 2026-10-16・PR レビュー 🟡）。
+describe('テンプレ素材の持ち主', () => {
+  const tpl = (templateId: string, ...assetIds: string[]): Template => ({
+    schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: assetIds.map((a, i) => ({ id: `l${i}`, type: 'background', x: 0, y: 0, w: 10, h: 10, assetId: a }) as Layer),
+  }) as Template;
+
+  it('削除してよいのは、そのテンプレだけが使う素材（ほかが使う素材は残す）', () => {
+    const ts = [tpl('user_tmpl_001', 'tmpl_asset_001', 'tmpl_asset_002'), tpl('user_tmpl_002', 'tmpl_asset_002')];
+    expect(templateAssetIdsOwnedOnlyBy(ts, 'user_tmpl_001')).toEqual(['tmpl_asset_001']);
+    expect(templateAssetIdsOwnedOnlyBy(ts, 'user_tmpl_002')).toEqual([]);
+    expect(templateAssetIdsOwnedOnlyBy(ts, 'user_tmpl_999')).toEqual([]);
+  });
+
+  it('読み込んだ見た目のテンプレ素材への参照を外す（ほかの参照・素材の無い層はそのまま）', () => {
+    const t = tpl('x', 'tmpl_asset_007', 'asset_003');
+    const out = withoutTemplateAssetRefs(t);
+    expect(out.layers[0]!.assetId).toBeUndefined();
+    expect(out.layers[1]!.assetId).toBe('asset_003');
+    const plain = tpl('y', 'asset_003');
+    expect(withoutTemplateAssetRefs(plain) === plain).toBe(true);
+  });
+});
+

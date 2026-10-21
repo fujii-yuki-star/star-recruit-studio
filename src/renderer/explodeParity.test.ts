@@ -11,6 +11,7 @@ import { explodeTemplateClip } from '../domain/timeline/explode';
 import { setClipAssetRef } from '../domain/timeline/edit';
 import { bakeTimelineProject } from '../domain/timeline/bake';
 import { DEFAULT_LINE_HEIGHT, layoutScene } from './layout';
+import { boxHeightForLines } from '../domain/template/textStyle';
 import { wrapText } from '../domain/text/textWrap';
 import type { Scene } from '../domain/project/types';
 import { layoutTimelineAt } from './timelineLayout';
@@ -769,11 +770,45 @@ describe('焼いた掛け合い字幕の位置が場面形式と一致する', (
     expect(sub).toBeDefined();
     if (sub?.kind !== 'text') return;
     // 折り返しが2行以上あること（この検査が意味を持つ前提）。
-    expect(wrapText(long, 1720, 52, sub.maxLines).length).toBeGreaterThan(1);
+    expect(wrapText(long, 1720, 52, sub.maxLines, 0, sub.textFont).length).toBeGreaterThan(1);
     // 場面形式の帯の**上端**＝タイムラインの y（上端起点）。
     const lineHeightPx = 52 * DEFAULT_LINE_HEIGHT;
-    const n = wrapText(long, 1720, 52, sub.maxLines).length;
+    const n = wrapText(long, 1720, 52, sub.maxLines, 0, sub.textFont).length;
     expect(sub.y).toBeCloseTo(sceneYs[0] - (n - 1) * lineHeightPx);
+  });
+  it('字体で行数が変わる字幕：焼くときも動画全体の字体で行数を数える（ADR-0063）', () => {
+    // 32字・52px・幅1720：見積もり（1em）と Gen Interface では1行、怪盗予告ゴシック（漢字 1.2〜1.3em）では2行。
+    const text = '採用社員'.repeat(8);
+    const KAITOU = { fontId: 'kaitou-yokoku-gothic', bold: false };
+    expect(wrapText(text, 1720, 52, 2, 0, undefined)).toHaveLength(1); // 前提
+    expect(wrapText(text, 1720, 52, 2, 0, KAITOU)).toHaveLength(2); // 前提
+    const sceneYs = sceneFrameSubtitleY(text);
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260730_001', projectName: 'x',
+        createdAt: '2026-07-30T00:00:00.000Z', updatedAt: '2026-07-30T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: 'kaitou-yokoku-gothic' },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [{
+          sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+          durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+          texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+          lines: [{ lineId: 'line_001', text, status: 'none' }],
+        }],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260730_002', projectName: 'y',
+        nowIso: '2026-07-30T00:00:00.000Z', templateOf: () => tmpl, lineDurationsFor: () => ({ line_001: 4 }),
+      },
+    ).doc;
+    const sub = layoutTimelineAt(baked, 1, { templateOf: () => tmpl }).items.find((it) => it.kind === 'text' && it.isSubtitle);
+    if (sub?.kind !== 'text') throw new Error('字幕が無い');
+    expect(sub.textFont.fontId).toBe('kaitou-yokoku-gothic'); // 焼いた後も同じ字体で描く
+    // 2行ぶん上へ（下端基準→上端起点の翻訳を、怪盗予告ゴシックの行数で行っている）。
+    expect(sub.y).toBeCloseTo(sceneYs[0] - 52 * DEFAULT_LINE_HEIGHT);
+    expect(sub.h).toBeCloseTo(boxHeightForLines(2, 52)); // 枠も2行ぶん（受け側は枠高から行数を導く）
   });
   it('回転した字幕層：焼いても同じ位置に出る（回転の軸が動くぶんを打ち消す）', () => {
     const rotated: Template = {

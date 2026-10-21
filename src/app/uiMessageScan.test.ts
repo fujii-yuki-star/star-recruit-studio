@@ -209,7 +209,10 @@ const NOT_IN_TABLE: Record<string, string> = {
 // ⚠️ **+2**（ADR-0058 段2のレビュー）＝`TRANSCRIBE_BUSY_HINT`・`TRANSCRIPT_CUT_ALL_WARNING`。どちらも表の外（NOT_IN_TABLE）。
 // ⚠️ **+1**（#1396）＝`PANEL_LAYOUT_SAVE_FAILED_MESSAGE`（表へ行を足してある）。
 // ⚠️ **+1**（#1403）＝`AI_PLAN_HOLLOW_MESSAGE`（表へ行を足してある）。
-const FOUND_COUNT = 108;
+// ⚠️ **+3**（ADR-0060）＝PACK_INVALID／PACK_UNLISTED／PACK_MISSING_LICENSE（どれも表に行がある）。
+// ⚠️ **−2**（ADR-0060 段階2b）＝棚からの取り込みの断り2つを store の直書きから uiLabels の定数へ寄せた（表と等値で守る側＝`codeMessages` へ移した）。
+// ⚠️ **+2**（ADR-0060 段階3・実測）＝声の番号の重なりの知らせ（`packVoiceSkippedMessage`）と、起こし直しの失敗（`VOICE_ENGINE_RESTART_FAILED_MESSAGE`）。／**+2**＝押せない理由（`PACK_BUSY_MESSAGE`）と入っていない声の門（`VOICE_SPEAKER_GONE_MESSAGE`）。
+const FOUND_COUNT = 115; // +1（BOLD_UNAVAILABLE_NOTE＝太字が効かない字体の知らせ・表に載せた・#1483）／+1（STARTUP_IMPORT_BROKEN＝壊れた中身の取り込みの断り・表に載せた・通し点検 2026-10-16）
 
 describe("画面に直書きした断りも、表に載っている（#978）", () => {
   const found = directGuidanceConstants();

@@ -50,19 +50,19 @@ import { loadBundledTemplates, parseTemplatePack } from "../../infrastructure/te
 import { keepRestorePoints, restoreToPoint } from "./restorePointKeeper";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
-import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { orphanTemplateAssetIds, templateAssetIdsOwnedOnlyBy, withoutTemplateAssetRefs } from "../../domain/template/templateAsset";
 import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts, setPackFontSources, usedUserFontIds, type UserFont } from "../../infrastructure/userFontFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoFrame, fileToDataUrl, missingAssetFiles, trashProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
 import type { BrandKit } from "../../domain/brand/brandKit";
 import { emptyBrandKit, isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
 import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
-import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
+import { resolveLibrarySource } from "./librarySource";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, fileExtension, isListedMaterial, newAssetFrom, newFrameAsset } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { adoptPendingAssetIds, fillMissingAssetInfo, reserveProjectId, probeAndThumbVideo, probeImageSize, reserveAssetId } from "./assetImport";
@@ -72,7 +72,7 @@ import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, narrationAudioKey, sceneNeedsVoiceOrRemake, sceneVoiceKeysToRemake, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
 import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, cancelProjectCopy, copyBakedFiles, listenCopyProgress } from "../../infrastructure/bakeFs";
@@ -92,7 +92,7 @@ import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
 import { isOtherExportRunning } from "./exportLock";
 import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
-import { PROJECT_SAVE_WOULD_BREAK, KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE } from "../uiLabels";
+import { PROJECT_SAVE_WOULD_BREAK, KEPT_PREVIOUS_VOICE_SUFFIX, alpha6Message, templateSaveMessage, BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE, DUPLICATE_FAILED_MESSAGE, VOICE_ENGINE_RESTART_FAILED_MESSAGE } from "../uiLabels";
 
 /**
  * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
@@ -117,6 +117,10 @@ import { VoicevoxProvider, synthesizeWithAccent } from "../../infrastructure/voi
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 // 保存の状態は `app/saveStatus` が持つ（#924＝判定側との循環を作らない）。既存の取り込み元を保つため再輸出する。
 import type { SaveStatus } from "../saveStatus";
+import { isPackScopedId, packFonts, packVoiceCharacters, packVoiceFilesKey, packVoiceRefKey, replacePackTemplates, templateClaimsPackIds, type ExtensionPackManifest } from "../../domain/pack/extensionPack";
+import { setExtraVoiceCharacters } from "../../domain/voice/voiceCatalog";
+import { packVoicePlan, restartVoiceEngine } from "../../infrastructure/packFs";
+import { mergeFontList, readInstalledPacks } from "./packLoad";
 import { userFacingMessage } from "../userFacingError";
 export type { SaveStatus };
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
@@ -240,6 +244,14 @@ interface ProjectState {
   assetSrcById: Record<string, string>;
   /** テンプレ所有素材の表示用src（data URL）。tmpl_asset_NNN→src（ADR-0021・グローバル・プロジェクト非依存）。起動時に一括ロード。 */
   templateAssetSrcById: Record<string, string>;
+  /** 入っている拡張パック（ADR-0060）。見た目パターンは `templates`、既定素材は `templateAssetSrcById` へ合流している。 */
+  packs: ExtensionPackManifest[];
+  /** 読めなかった拡張パックの名前（設定の「拡張パック」で知らせる）。 */
+  packsSkipped: string[];
+  /** ほかのパックと声の番号が重なって、声を足せなかった拡張パックの名前（段階3）。 */
+  packVoicesSkipped: string[];
+  /** 声を入れた・外したあとに声を作るソフトを起こし直せなかったときの知らせ（段階3）。 */
+  voiceEngineRestartError: string | null;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
   /**
@@ -441,10 +453,15 @@ interface ProjectState {
    *（整理のための機能で片づかない、を作らない）。消せなくても失敗にしない（無害な余り）。
    */
   removeAssets: (assetIds: readonly string[]) => void;
-  /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
-  addTemplatePack: (templates: Template[]) => void;
+  /**
+   * 見た目パターンのファイルを読み込み、**自分の見た目として保存する**（保存できたものの新しい番号を返す）。
+   * ⚠️ 以前はその起動の間だけ持ち、閉じると消えていた（通し点検 2026-10-16）。
+   */
+  addTemplatePack: (templates: Template[]) => Promise<string[]>;
   /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
   loadUserTemplates: () => Promise<void>;
+  /** 入っている拡張パックを読み直し、見た目パターンと既定素材へ合流させる（ADR-0060）。入れた・外した後にも呼ぶ。 */
+  loadPacks: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
   /** ユーザーテンプレを削除し一覧から外す（成功＝true）。開いているプロジェクトの参照場面は即時に標準へ置換し
@@ -658,7 +675,7 @@ interface ProjectState {
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
-  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean }) => Promise<void>;
+  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean; remakeKeys?: ReadonlySet<string> }) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
   /**
@@ -905,6 +922,15 @@ function assertBakeable(doc: TimelineProject): void {
   }
 }
 
+/** 拡張パックの読み直しの世代（`loadPacks` が重なったとき、後から始めた1回だけを当てる）。 */
+let packLoadSeq = 0;
+/** 前に読んだときの声のファイルの組（`null`＝まだ読んでいない＝起動直後は起こし直さない）。 */
+let lastPackVoiceKey: string | null = null;
+
+/** 検査用＝「まだ読んでいない」へ戻す（モジュールの状態は検査の間で残るため）。 */
+export function resetPackVoiceKeyForTest(): void {
+  lastPackVoiceKey = null;
+}
 
 /**
  * 取り込んだ写真を裏で1枚ずつ読んで説明を当てる（ADR-0052 決定4・12 §4b）。取り込みの `await` には入れない。
@@ -956,6 +982,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assets: [], // 新規は空（見本素材は実画像が無く混乱の元のため・α）。利用者が素材管理/ウィザードで追加する。
   assetSrcById: {},
   templateAssetSrcById: {},
+  packs: [],
+  packsSkipped: [],
+  packVoicesSkipped: [],
+  voiceEngineRestartError: null,
   narrationAudioById: {},
   _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
@@ -2228,20 +2258,87 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     }));
     // ⚠️ **ファイルの片づけは待たない**＝一覧からはもう消えており、片づけの成否で画面を止める理由が無い
-    //（消せなくても次の取り込みで上書きされるだけの無害な余り＝ADR-0021 の孤立掃除と同じ流儀）。
-    if (meta.projectId) void deleteProjectFiles(meta.projectId, files);
+    //（移せなくても「使っていないファイルを片づける」で後から片づけられる）。
+    // ⚠️ **ごみ箱へ移す**（ADR-0064 決定4＝Final Cut Pro と同じ）＝以前はすぐ消していた（戻せなかった）。
+    if (meta.projectId) void trashProjectFiles(meta.projectId, files);
   },
-  addTemplatePack: (incoming) => {
-    // 書き出し中はパック取り込みも止める（同 id の使用中テンプレを上書きしうる＝save/delete と同じ固定・#570 レビュー・store 側の2層目）。
-    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
+  addTemplatePack: async (incoming) => {
+    // 書き出し中は取り込みも止める（save/delete と同じ固定・#570 レビュー・store 側の2層目）。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return []; }
+    // ⚠️ **ほかの見た目の変更中は断る**（PR レビュー 🟡）＝`saveUserTemplate` はこのとき黙って戻るので、理由を先に立てる。
+    if (get().isTemplateMutating) { set({ templateError: templateSaveMessage.USER_TEMPLATE_BUSY }); return []; }
+    // ⚠️ 拡張パックの名前を名乗る・借りるものは入れない（取り込み口でも断っている＝2層目・ADR-0060）。
+    // ⚠️ **テンプレ素材への参照は外す**（PR レビュー 🟡）＝番号はこのパソコンの中だけで一意＝別の見た目の素材を指しうる。
+    incoming = incoming.filter((t) => !templateClaimsPackIds(t)).map(withoutTemplateAssetRefs);
+    // ⚠️ **自分の見た目として保存する**（通し点検 2026-10-16・利用者判断 2026-10-19）＝以前はその起動の間だけ持ち、
+    //   画面は「標準（直接は編集できません）」と出て削除の道も無く、**閉じると消えて使った場面の見た目が見つからなくなった**。
+    // ⚠️ **番号は採り直す**＝ファイルの番号のまま入れると、同じ番号の標準の見た目を**黙って置き換えていた**。
+    //   保存は複製・ゼロから作成と同じ `saveUserTemplate`（読み込みと同じ検証を通し、一覧へ反映）。
+    const saved: string[] = [];
+    // ⚠️ **最初の断りを残す**（PR レビュー 🟡）＝後の保存が成功すると `saveUserTemplate` が断りを消すので、
+    //   一部だけ失敗したときに**理由が画面から消えていた**。
+    let firstError: string | null = null;
+    for (const t of incoming) {
+      const newId = userTemplateFs.allocateUserTemplateId(get().templates.map((x) => x.templateId));
+      await get().saveUserTemplate({ ...t, templateId: newId });
+      if (get().templates.some((x) => x.templateId === newId)) saved.push(newId);
+      else firstError ??= get().templateError;
+    }
+    if (firstError) set({ templateError: firstError });
+    return saved;
+  },
+  loadPacks: async () => {
+    // ⚠️ **重なったら後から始めた1回だけを当てる**（PR レビュー 🟡）＝入れた直後に外す・起動時の読み込みと重なる、で
+    //   先に始めた方が後から終わると、**外したパックの中身を書き戻す**（字なら書き出しの門を通り、描画は既定へ倒れる）。
+    const seq = ++packLoadSeq;
+    const packs = await readInstalledPacks();
+    // 声（段階3）＝採るかどうかは Rust が声の中身を読んで決める（音声ソフトに読ませる声と同じ規則・`pack_voice_plan`）。
+    // ⚠️ 調べられなかったら声は足さない（読ませているか分からない声を一覧とクレジットに出さない）。
+    let accepted: Set<string> | null;
+    try {
+      const plan = await packVoicePlan();
+      accepted = plan ? new Set(plan.accepted.map((v) => packVoiceRefKey(v.packId, v.voiceId))) : null;
+    } catch {
+      accepted = new Set();
+    }
+    if (seq !== packLoadSeq) return;
+    // 一覧（とクレジットの引き当て）へ先に足す＝下の `set` で画面が描き直すときに新しい声が見える。
+    const voices = packVoiceCharacters(packs.manifests, accepted);
+    setExtraVoiceCharacters(voices.characters);
+    const voiceKey = packVoiceFilesKey(packs.manifests, accepted);
+    // ⚠️ **パック由来の分だけを差し替える**＝同梱・利用者の見た目パターンと素材には触らない。
+    set((s) => ({
+      templates: replacePackTemplates(s.templates, packs.templates),
+      templateAssetSrcById: {
+        ...Object.fromEntries(Object.entries(s.templateAssetSrcById).filter(([id]) => !isPackScopedId(id))),
+        ...packs.assetUrls,
+      },
+      packs: packs.manifests,
+      packsSkipped: packs.skipped,
+      packVoicesSkipped: voices.skipped,
+    }));
+    // ⚠️ **声のファイルの組が変わったときだけ起こし直す**＝起動時の1回目は Rust が最初から並べて起こしているので起こし直さない。
+    //   起こし直している間（数秒）は声を作れない＝入れる・外すは設定の欄で利用者が押したときだけ起きる。
+    if (lastPackVoiceKey !== null && voiceKey !== lastPackVoiceKey) {
+      set({ voiceEngineRestartError: null });
+      try {
+        await restartVoiceEngine();
+      } catch (e) {
+        set({ voiceEngineRestartError: userFacingMessage(e, "voice-engine") ?? VOICE_ENGINE_RESTART_FAILED_MESSAGE });
+      }
+    }
+    lastPackVoiceKey = voiceKey;
+    // 文字の形（段階2）＝置き場を差し替え、選ぶ一覧へ合流してから読み込む。
+    // ⚠️ **持ち込みの一覧がまだ無い（`userFontIds: null`＝調べていない）ときは `userFontIds` に触らない**＝
+    //   ここで埋めると「調べた・持ち込みは0件」に見える（持ち込みを読んだとき＝`refreshUserFonts` に合流する）。
+    //   ⚠️ **選ぶ一覧（`userFonts`）には常に出す**＝持ち込みの一覧が読めないときでも、パックの字は選べる。
+    const fonts = packFonts(packs.manifests);
+    setPackFontSources(fonts);
     set((s) => {
-      // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
-      // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
-      // 取り込んだパックはセッション内で保持し newProject でもリセットしない（永続化/リセットは将来フェーズ＝B2 スコープ外）。
-      const byId = new Map(s.templates.map((t) => [t.templateId, t] as const));
-      for (const t of incoming) byId.set(t.templateId, t);
-      return { templates: [...byId.values()] };
+      const userFonts = mergeFontList(s.userFonts, packs.manifests);
+      return s.userFontIds == null ? { userFonts } : { userFonts, userFontIds: userFonts.map((f) => f.id) };
     });
+    await loadUserFonts(fonts.map((f) => f.id));
   },
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
@@ -2250,7 +2347,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       userTemplateFs.loadUserTemplates(),
       loadTemplateAssetUrls(),
     ]);
-    set((s) => ({ templates: replaceUserTemplates(s.templates, user.templates), templateAssetSrcById }));
+    // ⚠️ 拡張パックの既定素材は残す（ここで読むのは利用者の見た目パターンの素材だけ＝パックの分を消さない・ADR-0060）。
+    set((s) => ({
+      templates: replaceUserTemplates(s.templates, user.templates),
+      templateAssetSrcById: {
+        ...Object.fromEntries(Object.entries(s.templateAssetSrcById).filter(([id]) => isPackScopedId(id))),
+        ...templateAssetSrcById,
+      },
+    }));
     // 孤立したテンプレ素材ファイルを安全条件下で掃除（#299）。下書き破棄やテンプレ削除時の削除失敗で残ったファイルが対象。
     // user.complete が false（読込失敗・破損・検証却下）なら何もしない＝「空を全削除」の誤削除を防ぐ（ADR-0021 の注意）。
     const orphans = orphanTemplateAssetIds(get().templates, Object.keys(templateAssetSrcById), user.complete);
@@ -2262,6 +2366,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
       }));
     }
+    // 拡張パック（ADR-0060）も同じ時に読む＝起動時・別窓の両方で、パックの見た目パターンが一覧に出る。
+    await get().loadPacks();
   },
   saveUserTemplate: async (template) => {
     // 書き出し中は見た目パターンを保存しない（#570 P1 レビュー）。使用中テンプレを保存すると、書き出しは開始時の見た目を
@@ -2299,7 +2405,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
     if (!isUserTemplate(templateId)) return false;
     // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
-    const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
+    // ⚠️ **ほかの見た目がまだ使う素材は消さない**（PR レビュー 🟡）＝複製は素材を共有する（持ち主の絵が黙って欠ける）。
+    const owned = templateAssetIdsOwnedOnlyBy(get().templates, templateId);
     if (get().isTemplateMutating) return false; // 進行中の見た目変更を1本に保つ（isImporting と対称・#570 レビュー）。
     set({ isTemplateMutating: true }); // 最初の await 前に排他（#570 レビュー）。書き出し開始がこれを見て止まる＝削除はファイル/場面置換まで完走できる。
     try {
@@ -2338,8 +2445,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const source = s.templates.find((t) => t.templateId === sourceTemplateId);
     if (!source) return "";
     const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // ⚠️ **拡張パックの既定素材は、利用者の見た目パターンの素材へコピーして付け替える**（ADR-0060・PR レビュー 🟡）＝
+    //   パックの素材 id のまま残すと、パックを外したときに複製した見た目パターンの絵が**黙って欠ける**（外す前の数え上げにもかからない）。
+    const layers: Template["layers"] = [];
+    for (const l of source.layers) {
+      if (l.assetId == null || !isPackScopedId(l.assetId)) {
+        layers.push(l);
+        continue;
+      }
+      const url = get().templateAssetSrcById[l.assetId];
+      if (!url) return "";
+      const blob = await (await fetch(url)).blob();
+      const ext = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+      const copiedId = await get().registerTemplateAsset(new File([blob], `${l.assetId}.${ext}`, { type: blob.type }));
+      if (!copiedId) return "";
+      layers.push({ ...l, assetId: copiedId });
+    }
     // 同梱/別ユーザーテンプレを複製し、新 id とコピー名で保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。
-    const copy: Template = { ...source, templateId: newId, name: `${source.name}のコピー` };
+    const copy: Template = { ...source, layers, templateId: newId, name: `${source.name}のコピー` };
     await get().saveUserTemplate(copy);
     // 保存に失敗していたら id を返さない（呼び出し側で選択しない）。
     return get().templates.some((t) => t.templateId === newId) ? newId : "";
@@ -2644,16 +2767,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 別の動画を開けるので、ここより後で作ると**開いた動画へ会社のロゴが黙って生える**
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
     const stillOpen = sameDocGuard(get);
-    // ⚠️ **「読めなかった」と「1つも無い」を分ける**（差分再監査 2巡目・§2-5）＝`null` を潰して
-    // 「見つかりませんでした」に丸めると、**置いてあるのに置いていないかのような案内**になる
-    //（会社の見た目のロゴを足す経路では「「よく使う素材」に置いてあるか確かめてください」に化ける）。
-    const list = await listLibraryAssets();
-    if (list == null) {
-      set({ importError: "よく使う素材の一覧を読めませんでした。アプリを開き直してから、もう一度お試しください。" });
-      return done(null);
-    }
-    const lib = list.find((a) => a.id === libraryAssetId);
-    if (!lib) { set({ importError: "この素材は見つかりませんでした。一覧を開き直してください。" }); return done(null); }
+    // 出どころ（棚／拡張パックの音楽）と「読めなかった」「見つからない」の断りは `resolveLibrarySource` が1か所で持つ
+    //（会社の見た目のロゴを足す経路で「「よく使う素材」に置いてあるか確かめてください」に化けないよう、読めないと無いを分ける）。
+    const resolved = await resolveLibrarySource(libraryAssetId, get().packs);
+    if (!resolved.ok) { set({ importError: resolved.error }); return done(null); }
+    const { lib, copy } = resolved.source;
     const { asset, fileName } = assetFromLibrary(lib, [], reserveAssetId(get().meta.projectId, get().assets.map((a) => a.assetId), createAssetId));
     if (!stillOpen()) return done(null);
     set({ importError: null });
@@ -2672,7 +2790,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (!stillOpen()) return null;
         set((st) => ({ meta: { ...st.meta, projectId } }));
       }
-      const relPath = await copyLibraryAssetToProject(libraryAssetId, projectId, fileName);
+      const relPath = await copy(projectId, fileName);
       // ⚠️ **できてから一覧へ足す**（切り出し #349 と同じ）＝コピーは失敗しうるので、
       // 先に足すと**中身の無い素材**が一瞬見えてから消える。
       if (!stillOpen()) return null;
@@ -2973,7 +3091,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **見つかったものは読み込んでおく**＝一覧に出したフォントで実際に描けるようにする
     // （読めなかったものは描画が既定へ倒れ、書き出しは公開前チェックが止める＝ADR-0038）。
     await loadUserFonts(list.map((f) => f.id));
-    set({ userFontIds: list.map((f) => f.id), userFonts: list });
+    // 拡張パックの文字の形も同じ一覧へ（ADR-0060 段階2・`mergeFontList`）。
+    const userFonts = mergeFontList(list, get().packs);
+    set({ userFontIds: userFonts.map((f) => f.id), userFonts });
   },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();
@@ -3084,7 +3204,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (scene.lines && scene.lines.length > 0) {
       // fromBulk（全場面生成）では生成済み行を再合成しない（単一 narration と対称）。個別呼び出しは作り直し。
       const targets = scene.lines.filter(
-        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated),
+        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated
+          // 作成済みでも音が読めない行は作り直す（通し点検 2026-10-16・`sceneVoiceKeysToRemake`）。
+          || (opts.remakeKeys?.has(narrationAudioKey(scene, l.lineId)) ?? false)),
       );
       if (targets.length === 0) return;
       if (scene.lines.some((l) => l.status === NARRATION_STATUS.pending)) return; // 多重起動防止
@@ -3261,10 +3383,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
       // 掛け合い・単一 narration 共通の実効判定（sceneNeedsVoice）を precheck と共有＝同概念同挙動（#403）。
-      const ids = get().scenes.filter(sceneNeedsVoice).map((s) => s.sceneId);
+      // ⚠️ **作成済みなのに音が読めない行も作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、印だけ見て
+      //   飛ばすと「作りました」と言うのに無音のまま残る＝行き止まり。「読めるか」はプレビュー・書き出しと同じ材料で見る。
+      const readable = (key: string): boolean => get().narrationAudioById[key] != null;
+      const ids = get().scenes.filter((s) => sceneNeedsVoiceOrRemake(s, readable)).map((s) => s.sceneId);
+      const remakeKeys = new Set(get().scenes.flatMap((s) => sceneVoiceKeysToRemake(s, readable)));
       // 同時実行数を絞る（#547 P2-6）。全件を一度に投げると「まだ始まっていない仕事」が残らず**中止が効かない**
       // ＝ボタンはあるのに止まらない（ADR-0026④）。絞れば残りは待機列に残り、進捗も少しずつ進む。
-      await runWithConcurrency(ids, NARRATION_BULK_CONCURRENCY, (id) => get().generateNarration(id, { fromBulk: true }), {
+      await runWithConcurrency(ids, NARRATION_BULK_CONCURRENCY, (id) => get().generateNarration(id, { fromBulk: true, remakeKeys }), {
         shouldStop: () => get()._narrationRunSeq !== runSeq,
       });
     } finally {

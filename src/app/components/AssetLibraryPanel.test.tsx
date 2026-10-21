@@ -647,3 +647,31 @@ describe("小さな絵（#926）", () => {
     expect(screen.queryByRole("presentation")).toBeNull();
   });
 });
+
+// 拡張パックの音楽（ADR-0060 段階2b）＝棚の下に並び、「この動画で使う」で同じ取り込みの口を通る。直す・外すは無い。
+describe("拡張パックの音楽", () => {
+  it("入っているパックの音楽を並べ、押すとパックの id で取り込む", async () => {
+    useProjectStore.setState({
+      packs: [{
+        schemaVersion: "1.0", packId: "office", name: "音楽", version: "1.0.0", publisher: "社内", minAppVersion: "0.5.0",
+        contents: { bgm: [{ bgmId: "morning", file: "bgm/morning.mp3", displayName: "朝の曲" }] },
+        files: [{ path: "bgm/morning.mp3", sha256: "a".repeat(64) }],
+        licenses: [{ target: "bgm", license: "CC0" }],
+      }],
+    } as never);
+    render(<AssetLibraryPanel />);
+    const list = await screen.findByTestId("pack-bgm-list");
+    expect(within(list).getByText("拡張パックの音楽")).toBeInTheDocument();
+    expect(within(list).getByText("朝の曲")).toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: "外す" })).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "この動画で使う" }));
+    await waitFor(() => expect(importFromLibrary).toHaveBeenCalledWith("pack_office__morning"));
+  });
+
+  it("パックが無ければ欄を出さない", async () => {
+    useProjectStore.setState({ packs: [] } as never);
+    render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    expect(screen.queryByTestId("pack-bgm-list")).toBeNull();
+  });
+});

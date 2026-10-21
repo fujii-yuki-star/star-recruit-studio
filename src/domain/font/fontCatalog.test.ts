@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, cssFamilyForId, isKnownFontId, resolveFontId,
   createUserFontId, isUserFontId, USER_FONT_ID_RE, USER_FONT_ID_SAMPLES,
+  PACK_FONT_ID_RE, PACK_FONT_ID_SAMPLES, isExternalFontId, isFontAvailable, effectiveTextFontId, boldLooksSameIn,
 } from './fontCatalog';
 
 describe('fontCatalog（同梱フォント選択）', () => {
@@ -39,6 +40,36 @@ describe('fontCatalog（同梱フォント選択）', () => {
     for (const id of USER_FONT_ID_SAMPLES.filter((x) => !FONT_CATALOG.some((f) => f.id === x))) {
       expect(USER_FONT_ID_RE.test(id)).toBe(re.test(id));
     }
+  });
+
+  /**
+   * 拡張パックの文字の形（ADR-0060 段階2）。⚠️ **3つの schema の規則が組み合わさる**＝project の `FontId`・
+   * extension-pack の `packId` と `contents.fonts[].fontId`。パックが schema どおりなら、組み立てた id は必ず project の形に通る。
+   */
+  it('パックの文字の形の id は schema と domain で同じ（PACK_FONT_ID_RE）・パックの規則から組んだ id は必ず通る', () => {
+    const read = (f: string) => JSON.parse(readFileSync(join(process.cwd(), 'docs/yuko_recruit_docs/schemas', f), 'utf8'));
+    const re = new RegExp(read('project.schema.json').$defs.FontId.pattern);
+    for (const id of PACK_FONT_ID_SAMPLES) expect(PACK_FONT_ID_RE.test(id)).toBe(re.test(id));
+    expect(PACK_FONT_ID_SAMPLES.filter((id) => re.test(id))).toEqual(['pack_office__mincho', 'pack_office_looks__mincho_bold']);
+    const pack = read('extension-pack.schema.json');
+    const packIdRe = new RegExp(pack.properties.packId.pattern);
+    const fontIdRe = new RegExp(pack.properties.contents.properties.fonts.items.properties.fontId.pattern);
+    for (const [p, f] of [['a', 'b'], ['office_looks', 'mincho_bold_2'], ['x1', '9']]) {
+      expect(packIdRe.test(p) && fontIdRe.test(f)).toBe(true);
+      expect(re.test(`pack_${p}__${f}`)).toBe(true);
+    }
+  });
+
+  it('同梱でない文字の形（持ち込み・パック）は家族名が id・形で既知・手元の一覧で在るかを見る', () => {
+    expect(isExternalFontId('pack_office__mincho')).toBe(true);
+    expect(isExternalFontId('user_font_001')).toBe(true);
+    expect(isExternalFontId('gen-interface-jp')).toBe(false);
+    expect(cssFamilyForId('pack_office__mincho')).toBe('pack_office__mincho');
+    expect(isKnownFontId('pack_office__mincho')).toBe(true);
+    expect(isFontAvailable('pack_office__mincho', ['pack_office__mincho'])).toBe(true);
+    expect(isFontAvailable('pack_office__mincho', ['user_font_001'])).toBe(false);
+    expect(isFontAvailable('pack_office__mincho', null)).toBe(true); // 調べていないなら「無い」と言わない
+    expect(resolveFontId('pack_office__mincho', null)).toBe('pack_office__mincho');
   });
 
   it('fontFamilyForId：既知IDは cssFamily＋sans-serif、未知/未指定は既定へ', () => {
@@ -129,5 +160,21 @@ describe('fontCatalog（同梱フォント選択）', () => {
       expect(resolveFontId(null, 'user_font_002')).toBe('user_font_002');
       expect(resolveFontId(null, null)).toBe(DEFAULT_FONT_ID);
     });
+  });
+});
+
+// 太さの欄の知らせ（#1483・ADR-0038）＝描くときと同じ順で字体を解き、持ち込み・パックの字体なら「太字が効かない」。
+describe('effectiveTextFontId / boldLooksSameIn', () => {
+  it('要素 → 場面 → 動画全体 → 既定の順（分からない値は飛ばす）', () => {
+    expect(effectiveTextFontId('user_font_001', 'gen-interface-jp-display', DEFAULT_FONT_ID)).toBe('user_font_001');
+    expect(effectiveTextFontId(undefined, 'gen-interface-jp-display', 'user_font_002')).toBe('gen-interface-jp-display');
+    expect(effectiveTextFontId('not-a-font', undefined, 'user_font_002')).toBe('user_font_002');
+    expect(effectiveTextFontId(undefined, undefined, undefined)).toBe(DEFAULT_FONT_ID);
+  });
+  it('持ち込み・拡張パックの字体では太字が効かない／同梱の字体では効く', () => {
+    expect(boldLooksSameIn('user_font_001')).toBe(true);
+    expect(boldLooksSameIn('pack_office__mincho')).toBe(true);
+    expect(boldLooksSameIn(DEFAULT_FONT_ID)).toBe(false);
+    expect(boldLooksSameIn(undefined)).toBe(false);
   });
 });
