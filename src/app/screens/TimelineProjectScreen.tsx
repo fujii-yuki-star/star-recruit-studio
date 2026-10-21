@@ -4379,8 +4379,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       <button
         className="btn btn-ghost btn-sm preview-tools-more"
         aria-label="仕上がり確認のほかの操作"
-        title="ここに並びきらない操作（端の目安・大きく見る・別の窓で見る）"
+        // 中身は欄の幅と窓で変わる（狭いと「全体表示」も入る・別窓では「別の窓で見る」が無い）＝名前を並べない。
+        title="ここに並びきらない操作"
         aria-haspopup="menu"
+        aria-expanded={previewToolsMenu != null}
         onClick={(e) => {
           const tools = e.currentTarget.closest(".preview-view-tools");
           const hidden = PREVIEW_TOOL_ORDER.filter((key) => {

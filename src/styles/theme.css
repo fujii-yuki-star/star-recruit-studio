@@ -1050,8 +1050,10 @@ button.badge {
   white-space: nowrap;
   font-size: 12px;
 }
-/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。 */
+/* 別窓の上端の行（本体の欄の見出しの行と同じ役）。
+   ⚠️ **同じ道具を同じ畳み方で**（レビュー 🟡）＝ここも幅を測られる器にする。そうしないと狭い2画面目で道具が切れたまま押せない。 */
 .preview-window-bar {
+  container-type: inline-size;
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
