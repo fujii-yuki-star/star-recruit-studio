@@ -504,6 +504,34 @@ export const SNAP_DEFAULT = true;
 export const SNAP_ON_HINT = "帯の端・再生位置・0秒へ寄せる（Ctrl で一時解除）";
 /** 切っているときの添え書き＝入れると何が起きるか。 */
 export const SNAP_OFF_HINT = "掴んだ場所へそのまま置けます";
+/**
+ * 吸着が入っているときに**画面に出す短い一文**（ADR-0048 追補 2026-10-21）＝道具を1行に収めるため、札（`SNAP_ON_HINT`）より短く。
+ * ⚠️ **何に寄るか（再生位置）と `Ctrl` の道は残す**（`06 §12.1`・規約20）。
+ */
+export const SNAP_ON_SHORT = "端・再生位置へ寄せる（Ctrl で一時解除）";
+/**
+ * 「並び」の道具を畳む順（ADR-0048 追補 2026-10-21）＝欄の幅が狭いほど、値の小さい物まで「…」へ畳む（境目は `timeline.css`）。
+ * `idle` は**いまは使えない物**（作業範囲を取っていないときの「範囲を削除」など）＝並べず「…」にだけ出す。
+ */
+const ARRANGE_FOLD = { wide: "wide", mid: "mid", narrow: "narrow", idle: "idle" } as const;
+type ArrangeFold = (typeof ARRANGE_FOLD)[keyof typeof ARRANGE_FOLD];
+/** 列の高さ（`select`）の印＝「…」では「列の高さを〜にする」の項目になる。 */
+const ARRANGE_LANE_HEIGHT_KEY = "laneHeight";
+/** 「並び」の道具の1つ＝ボタンと「…」の項目を、この1つから作る。 */
+interface ArrangeTool {
+  key: string;
+  label: string;
+  /** 押せる条件と、押せないときの理由（`title`）。 */
+  guard?: { disabled?: boolean; title?: string };
+  /** 押せるときの説明（押したら何が起きるか）。 */
+  title?: string;
+  fold?: ArrangeFold;
+  /** 前に区切りの線を置く（種類の変わり目）。区切りも同じ優先度で畳む。 */
+  sepBefore?: boolean;
+  /** 近道のキー＝「…」の項目の右端に出す（右クリックのメニューと同じ出し方・`SHORTCUT_KEYS` から）。 */
+  shortcut?: string;
+  onClick: () => void;
+}
 // ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
 // 以前はここで `localStorage` を直に触っており、**壊れた値を既定（ON）ではなく OFF に倒して**いた
 // ＝既定が ON の好みで、壊れた値のときだけ黙って OFF になる（**既定が効かない**）。
@@ -929,6 +957,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   // 仕上がり確認の見出しの「…」（α 最終点検 2026-10-21）＝欄が狭くて見出しの行に並べきれない道具の受け皿。
   // **開いた時点で隠れている道具**だけを並べる（`hidden`）＝並んで見えている物を二重に出さない。
   const [previewToolsMenu, setPreviewToolsMenu] = useState<{ x: number; y: number; hidden: PreviewToolKey[] } | null>(null);
+  // 「並び」の道具の「…」（ADR-0048 追補 2026-10-21）＝開いた時点で隠れている道具の名前（`data-arrange-tool`）。
+  const [arrangeMenu, setArrangeMenu] = useState<{ x: number; y: number; hidden: string[] } | null>(null);
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
@@ -4398,6 +4428,187 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       </button>
     </span>
   );
+  // 「並び」の道具（ADR-0048 追補 2026-10-21）＝**1行に置き、狭いと優先度の低い物から「…」へ畳む**。
+  // ⚠️ **ボタンと「…」の項目は、この1つの定義から作る**＝押せる条件・断り文・近道キーの案内を2か所に書かない（ADR-0026②）。
+  // どれを畳むかは CSS（欄の幅を測る `@container`・`data-fold`）が決め、「…」は**開いた時点で隠れている物**だけを並べる。
+  const rangeActive = rangeInSec != null || rangeOutSec != null;
+  const arrangeEditTools: ArrangeTool[] = [
+    {
+      key: "split",
+      label: "ここで分ける",
+      guard: splitGuard,
+      title: `選んだ部品を再生位置で分けます（${SHORTCUT_KEYS.split}）`,
+      shortcut: SHORTCUT_KEYS.split,
+      onClick: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
+    },
+    {
+      key: "duplicate",
+      label: DUPLICATE_LABEL,
+      // 押せるときの説明に近道キーを添える（分けるの「（Ctrl+K）」と同じ流儀・#1350 レビュー）。
+      guard: editGuard(
+        selectedClipIds.length > 1
+          ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
+          : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
+      ),
+      title: `選んだ部品を複製して、すぐ後ろに置きます（${SHORTCUT_KEYS.duplicate}）`,
+      shortcut: SHORTCUT_KEYS.duplicate,
+      onClick: duplicateSelectedClip,
+    },
+    {
+      key: "remove",
+      // まとめて選んでいるときは数を言う＝右クリックのメニューと同じ言い方（ADR-0026②）。
+      label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
+      guard: removeGuard ?? undefined,
+      title: selectedClipIds.length === 0
+        ? NOTHING_SELECTED_HINT.remove
+        : selectedClipIds.length > 1
+          ? `選んだ${selectedClipIds.length}個をまとめて削除します（Delete）`
+          : "選んだ部品を削除します（Delete）",
+      shortcut: SHORTCUT_KEYS.remove,
+      onClick: () => requestRemoveSelected(PANEL_ID.arrange),
+    },
+    // ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
+    // **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。
+    {
+      key: "trimStart",
+      label: `ここから始める${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
+      guard: trimAtPlayheadGuard,
+      title: "選んだ部品の始まりを、再生位置までそろえます",
+      fold: ARRANGE_FOLD.narrow,
+      sepBefore: true,
+      onClick: () => trimSelectedClipsAt("start", playheadSec),
+    },
+    {
+      key: "trimEnd",
+      label: `ここで終わる${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
+      guard: trimAtPlayheadGuard,
+      title: "選んだ部品の終わりを、再生位置までそろえます",
+      fold: ARRANGE_FOLD.narrow,
+      onClick: () => trimSelectedClipsAt("end", playheadSec),
+    },
+    // ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、言わないと
+    // 「思ったより短い」となった人の次の一歩が画面から読めない。
+    {
+      key: "freeze",
+      label: FREEZE_FRAME_LABEL,
+      guard: freezeGuard,
+      title: freezePreviewHint,
+      fold: ARRANGE_FOLD.wide,
+      onClick: () => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); },
+    },
+    {
+      key: "silence",
+      label: SILENCE_FIND_LABEL,
+      guard: silenceGuard,
+      title: SILENCE_FIND_TITLE,
+      fold: ARRANGE_FOLD.wide,
+      onClick: () => { if (selected) void findSilencesFor(selected.id); },
+    },
+    {
+      key: "transcribe",
+      label: TRANSCRIBE_LABEL,
+      guard: transcribeGuard,
+      title: TRANSCRIBE_TITLE,
+      fold: ARRANGE_FOLD.wide,
+      onClick: () => { if (selected) void transcribeClip(selected.id); },
+    },
+    // **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
+    // ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
+    // ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
+    // ⚠️ **キーだけにしない**（同 決定19）＝ボタン（または「…」）からも同じ入口を通る。
+    {
+      key: "rangeIn",
+      label: "ここから（範囲）",
+      title: `ここを作業範囲の始まりにします（${SHORTCUT_KEYS.rangeIn}）`,
+      shortcut: SHORTCUT_KEYS.rangeIn,
+      fold: ARRANGE_FOLD.wide,
+      sepBefore: true,
+      onClick: () => setRangeEdge("in", playheadSec),
+    },
+    {
+      key: "rangeOut",
+      label: "ここまで（範囲）",
+      title: `ここを作業範囲の終わりにします（${SHORTCUT_KEYS.rangeOut}）`,
+      shortcut: SHORTCUT_KEYS.rangeOut,
+      fold: ARRANGE_FOLD.wide,
+      onClick: () => setRangeEdge("out", playheadSec),
+    },
+    // ⚠️ **範囲を取っているときは畳まない**（いまの状態に関わる物）＝取っていないときは「…」にだけ出る（押せない理由つき）。
+    {
+      key: "rangeCloseGap",
+      label: "範囲を削除して詰める",
+      guard: rangeCloseGuard,
+      title: `作業範囲を削除して、空いた所を詰めます（${SHORTCUT_KEYS.rangeCloseGap}）`,
+      shortcut: SHORTCUT_KEYS.rangeCloseGap,
+      fold: rangeActive ? undefined : ARRANGE_FOLD.idle,
+      onClick: () => setConfirmRange({ closeGap: true }),
+    },
+    {
+      key: "rangeDelete",
+      label: "範囲を削除",
+      guard: rangeDeleteGuard,
+      title: "作業範囲を削除します（詰めません）",
+      fold: rangeActive ? undefined : ARRANGE_FOLD.idle,
+      onClick: () => setConfirmRange({ closeGap: false }),
+    },
+    // ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
+    // 消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。
+    ...(rangeActive
+      ? [{ key: "rangeClear", label: "範囲をやめる", title: "作業範囲をやめます", onClick: clearRange } satisfies ArrangeTool]
+      : []),
+  ];
+  const arrangeViewTools: ArrangeTool[] = [
+    // ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
+    // **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。`M` キーでも置ける（業界の型）。
+    { key: "marker", label: MARKER_ADD_LABEL, guard: markerGuard, title: MARKER_ADD_TITLE, shortcut: SHORTCUT_KEYS.marker, fold: ARRANGE_FOLD.mid, onClick: addMarkerAtPlayhead },
+    // ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、帯の入る高さを削っていた。
+    // ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、欄だけを見ていて列を足せない、に戻る。
+    // ⚠️ **既定の窓では「…」へ**（利用者判断 2026-10-21）＝業界の型どおり、再生位置で詰める操作（ここから始める／ここで終わる）を前に出す。
+    //   列は素材を落とせばできる。「…」も欄の中なので #767 は満たす。
+    { key: "addVisual", label: "映像の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.mid, sepBefore: true, onClick: () => addTrack(TRACK_KIND.visual) },
+    { key: "addAudio", label: "音の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.mid, onClick: () => addTrack(TRACK_KIND.audio) },
+  ];
+  // 列の高さ（`select`）は「…」ではほかの2つを項目にする（いまの値は押しても何も起きない）。
+  const laneHeightMenuItems: ContextMenuItem[] = TIMELINE_LANE_HEIGHT_ORDER.filter((h) => h !== laneHeight).map((h) => ({
+    label: `列の高さを「${LANE_HEIGHT_LABEL[h]}」にする`,
+    onSelect: () => { setLaneHeight(h); saveLaneHeight(h); },
+  }));
+  const arrangeMenuItems: ContextMenuItem[] = arrangeMenu == null ? [] : [
+    ...[...arrangeEditTools, ...arrangeViewTools]
+      .filter((t) => arrangeMenu.hidden.includes(t.key))
+      .map((t): ContextMenuItem => ({
+        label: t.label,
+        disabled: t.guard?.disabled ?? false,
+        disabledHint: t.guard?.title ?? undefined,
+        hint: t.title,
+        shortcut: t.shortcut,
+        onSelect: t.onClick,
+      })),
+    ...(arrangeMenu.hidden.includes(ARRANGE_LANE_HEIGHT_KEY) ? laneHeightMenuItems : []),
+  ];
+  const renderArrangeTool = (t: ArrangeTool) => (
+    <Fragment key={t.key}>
+      {t.sepBefore && <span className="timeline-toolbar-sep" aria-hidden="true" data-fold={t.fold} />}
+      <button
+        className="btn btn-ghost btn-sm"
+        data-arrange-tool={t.key}
+        data-fold={t.fold}
+        onClick={t.onClick}
+        disabled={t.guard?.disabled ?? false}
+        title={t.guard?.title ?? t.title}
+      >
+        {t.label}
+      </button>
+    </Fragment>
+  );
+  const openArrangeMenu = (e: ReactMouseEvent<HTMLButtonElement>): void => {
+    const bar = e.currentTarget.closest(".timeline-toolbar");
+    const hidden = [...(bar?.querySelectorAll<HTMLElement>("[data-arrange-tool]") ?? [])]
+      .filter((el) => el.getClientRects().length === 0)
+      .map((el) => el.dataset.arrangeTool ?? "");
+    const r = e.currentTarget.getBoundingClientRect();
+    setArrangeMenu({ x: r.left, y: r.bottom, hidden });
+  };
   const previewToolsMenuItems: ContextMenuItem[] = (previewToolsMenu?.hidden ?? []).map((key): ContextMenuItem => {
     switch (key) {
       case PREVIEW_TOOL.fit:
@@ -4834,229 +5045,125 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               ["--clip-menu-w" as string]: `${CLIP_MENU_W_PX}px`,
             }}
           >
-            {/* 表示倍率（#686・決定13）＝**全体を表示**から始め、段で広げ縮めできる。
-                `Ctrl`+ホイールでも同じ段を動かし、**錨点はマウスの位置**（見ていた所が流れない）。 */}
-            <div className="timeline-toolbar">
-              <span className="text-sm text-muted">表示倍率</span>
-              <button
-                className="btn btn-ghost btn-icon"
-                aria-label="表示を縮める"
-                title="表示を縮める（Ctrl＋ホイールでも）"
-                disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
-                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1))}
-              >
-                −
-              </button>
-              <button
-                className="btn btn-ghost btn-icon"
-                aria-label="表示を広げる"
-                title="表示を広げる（Ctrl＋ホイールでも）"
-                disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
-                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1))}
-              >
-                ＋
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => changeZoom(fitZoomIndex(totalSec, (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX))}
-              >
-                全体を表示
-              </button>
-              {/* ⚠️ **操作は1行に畳む**（#1104・実機の指摘 2026-09-10）＝以前は「表示倍率」「吸着」
-                  「`Ctrl` の説明」で**3行**を使っており、欄の中身（帯）が入る前に高さを食い潰していた
-                  （「こんなに広々取れても並びがこんなつぶれてたら快適もくそもない」）。
-                  ⚠️ **文章でお願いしない**（#1032）＝切替は残す（押せば切れる）。
-                  ⚠️ **`Ctrl` の案内をホバーだけにしない**（レビュー由来 🟡・`06 §2` 規約20）＝
-                  一度そうしたが、`title` は**タッチでもキーボードでも読めない**うえ、
-                  `06 §12.1` が「並びの欄の上に一文で置く」と明記していた。
-                  **同じ行に、短い一文として置く**（行は増やさない・寄せ先も画面に残す）。 */}
-              {/* **列の高さ**（ADR-0048 決定3・#1256 c1）＝列が少なければ太く、多ければ細く。 */}
-              <span className="timeline-toolbar-sep" aria-hidden="true" />
-              <label className="row gap-sm" style={{ alignItems: "center", flexWrap: "nowrap" }}>
-                <span className="field-label text-sm" style={{ margin: 0 }}>列の高さ</span>
-                <select
-                  className="select"
-                  style={{ width: "auto" }}
-                  aria-label="列の高さ"
-                  value={laneHeight}
-                  onChange={(e) => {
-                    const next = e.target.value as TimelineLaneHeight;
-                    setLaneHeight(next);
-                    saveLaneHeight(next);
-                  }}
+            {/* **道具は1行**（ADR-0048 追補 2026-10-21・α 最終点検）＝以前は2本×2段＝118px を取り、帯の見える高さが
+                既定の窓で約 127px（3列ぶん）しか無かった。左＝帯の操作・右＝見え方の道具。狭いと優先度の低い物から「…」へ畳む
+                （`data-fold`・欄の幅で決める）。⚠️ 以前の行を3行から1行に詰めた理由（#1104「こんなに広々取れても並びがこんなつぶれてたら
+                快適もくそもない」）と同じ＝帯の入る高さを道具に食わせない。 */}
+            {/* ⚠️ **作業範囲を取っている間は、優先度の低い物（列を足す・吸着の一文）をもう1段畳む**（レビュー 🟡）＝
+                範囲の操作が並ぶぶん行が折り返すと、I／O を押すたびに帯が縦にずれる（全体図の場所を常に取るのと同じ考え＝PR #1412）。 */}
+            <div className="timeline-toolbar" data-range-active={rangeActive ? "" : undefined}>
+              {/* **帯の操作**（ADR-0048・#1256 b5）＝業界の型（CapCut・Premiere）どおりタイムラインのすぐ上。
+                  ⚠️ **押せる条件・断り文は以前と同じ入口**（`splitGuard` 等）。何も選んでいないときは**押せなくして理由を出す**。 */}
+              <div className="timeline-edit-tools" role="toolbar" aria-label="帯の操作">
+                {arrangeEditTools.map(renderArrangeTool)}
+                {/* どこからどこまでかを**数字でも**見せる（並びの上の網掛けと同じ値・UI/UX 監査 2026-10-02）。 */}
+                {rangeInSec != null && rangeOutSec != null && (
+                  <span className="text-sm text-muted" data-testid="timeline-range-label">
+                    {rangeLabel(
+                      markerClock(Math.min(rangeInSec, rangeOutSec), doc.videoSettings.fps),
+                      markerClock(Math.max(rangeInSec, rangeOutSec), doc.videoSettings.fps),
+                    )}
+                  </span>
+                )}
+              </div>
+              <div className="timeline-view-tools">
+                {arrangeViewTools.map(renderArrangeTool)}
+                {/* **出さない列・固定した列があることを数で言う**（ADR-0048）＝列が多くて見出しが画面の外に
+                    あっても気づける。押すと最初のその列へ送る。 */}
+                {flaggedTracks.count > 0 && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    title="その列まで移ります"
+                    onClick={() => {
+                      const el = document.querySelector(`[data-track-id="${flaggedTracks.firstId}"]`);
+                      el?.scrollIntoView({ block: "nearest" });
+                    }}
+                  >
+                    <span className="badge badge-yellow">{flaggedTracks.label}</span>
+                  </button>
+                )}
+                <span className="timeline-toolbar-sep" aria-hidden="true" />
+                {/* ⚠️ **見出しの文字を押しても切り替わる**（UI/UX 監査 2026-10-02）＝見出しを label にして結ぶ。 */}
+                <label
+                  htmlFor="timeline-snap-switch"
+                  className="field-label text-sm"
+                  style={{ margin: 0, cursor: "pointer" }}
+                  title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
                 >
-                  {TIMELINE_LANE_HEIGHT_ORDER.map((h) => (
-                    <option key={h} value={h}>{LANE_HEIGHT_LABEL[h]}</option>
-                  ))}
-                </select>
-              </label>
-              <span className="timeline-toolbar-sep" aria-hidden="true" />
-              {/* ⚠️ **見出しの文字を押しても切り替わる**（UI/UX 監査 2026-10-02）＝以前は見出しが別の span で、押しても何も起きず、
-                  折り返すとスイッチと離れて「文字の無いスイッチ」に見えた。見出しを label にして結ぶ。 */}
-              {/* ⚠️ **説明は画面に短く出し、札にも付ける**（#1481）＝札（ホバー）だけにすると、タッチ・キーボードでは読めない
-                  （`06 §2` 規約20・#1104 で一度札へ移して差し戻した）。窓が狭いと道具の行が折り返して帯の入る高さを削っていたので、**文を短くした**。 */}
-              <label
-                htmlFor="timeline-snap-switch"
-                className="field-label text-sm"
-                style={{ margin: 0, cursor: "pointer" }}
-                title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
-              >
-                吸着
-              </label>
-              <Switch
-                id="timeline-snap-switch"
-                on={snapEnabled}
-                onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
-                label="吸着"
-                title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
-              />
-              <span className="text-sm text-muted">{snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}</span>
-              {/* ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、
-                  その2つのボタンのぶんだけ**帯の入る高さを削っていた**。道具立ては1行に畳む
-                  （#1104 で「表示倍率」「吸着」を1行にしたのと同じ理由）。
-                  ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、
-                  欄だけを見ていて列を足せない、に戻る。 */}
-              <span className="timeline-toolbar-sep" aria-hidden="true" />
-              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
-              {/* ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
-                  **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。
-                  節は目印があるときだけ出す（一覧を辿る・メモを書く道具）。`M` キーでも置ける（業界の型）。 */}
-              {/* **出さない列・固定した列があることを数で言う**（ADR-0048）＝列が多くて見出しが画面の外に
-                  あっても気づける。押すと最初のその列へ送る。 */}
-              {flaggedTracks.count > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  title="その列まで移ります"
-                  onClick={() => {
-                    const el = document.querySelector(`[data-track-id="${flaggedTracks.firstId}"]`);
-                    el?.scrollIntoView({ block: "nearest" });
-                  }}
-                >
-                  <span className="badge badge-yellow">{flaggedTracks.label}</span>
-                </button>
-              )}
-              <span className="timeline-toolbar-sep" aria-hidden="true" />
-              <button className="btn btn-ghost btn-sm" onClick={addMarkerAtPlayhead} title={markerGuard.title ?? MARKER_ADD_TITLE} {...(markerGuard.disabled ? { disabled: true } : {})}>
-                {MARKER_ADD_LABEL}
-              </button>
-            </div>
-            {/* **帯の操作の行**（ADR-0048・#1256 b5）＝分ける・絵を止める・再生位置でそろえる・複製・削除・作業範囲。
-                ⚠️ **業界の型**＝CapCut・Premiere などは、帯を編集する道具を**タイムラインのすぐ上**に置く
-                （以前は「選んだ部品」欄の上段に13個並べており、欄の中身 976px のうち見えるのは約39%だった）。
-                ⚠️ **押せる条件・断り文は以前と同じ入口**（`splitGuard` 等）＝置き場所だけを変えた。
-                何も選んでいないときは**押せなくして理由を出す**（押しても何も起きない、を作らない）。 */}
-            <div className="timeline-toolbar timeline-edit-tools" role="toolbar" aria-label="帯の操作">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.arrange)}
-                {...splitGuard}
-                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
-              >
-                ここで分ける
-              </button>
-              {/* ⚠️ **尺が伸びないことも押す前に言う**（#1155 ⑥）＝他社は伸びるので、言わないと
-                  「思ったより短い」となった人の次の一歩が画面から読めない。 */}
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => { freezeSelectedClip(playheadSec, PANEL_ID.arrange); }}
-                {...freezeGuard}
-                title={freezeGuard.title ?? freezePreviewHint}
-              >
-                {FREEZE_FRAME_LABEL}
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => { if (selected) void findSilencesFor(selected.id); }}
-                {...silenceGuard}
-                title={silenceGuard.title ?? SILENCE_FIND_TITLE}
-              >
-                {SILENCE_FIND_LABEL}
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => { if (selected) void transcribeClip(selected.id); }}
-                {...transcribeGuard}
-                title={transcribeGuard.title ?? TRANSCRIBE_TITLE}
-              >
-                {TRANSCRIBE_LABEL}
-              </button>
-              {/* ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
-                  **再生位置をまたいでいる数**（数え方は domain と共有＝`trimTargetsAt`）。 */}
-              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("start", playheadSec)} {...trimAtPlayheadGuard}>
-                ここから始める{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => trimSelectedClipsAt("end", playheadSec)} {...trimAtPlayheadGuard}>
-                ここで終わる{selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={duplicateSelectedClip}
-                // 押せるときの説明に近道キーを添える（分けるの「（Ctrl+K）」と同じ流儀・#1350 レビュー）。
-                {...((g) => ({ ...g, title: g.title ?? `選んだ部品を複製して、すぐ後ろに置きます（${SHORTCUT_KEYS.duplicate}）` }))(editGuard(
-                  selectedClipIds.length > 1
-                    ? { disabled: true, hint: SINGLE_CLIP_ONLY_HINT }
-                    : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
-                ))}
-              >
-                {DUPLICATE_LABEL}
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => requestRemoveSelected(PANEL_ID.arrange)}
-                {...(removeGuard ?? {})}
-                title={removeGuard?.title ?? (selectedClipIds.length === 0
-                  ? NOTHING_SELECTED_HINT.remove
-                  : selectedClipIds.length > 1
-                    ? `選んだ${selectedClipIds.length}個をまとめて削除します（Delete）`
-                    : "選んだ部品を削除します（Delete）")}
-              >
-                {/* まとめて選んでいるときは数を言う＝右クリックのメニューと同じ言い方（ADR-0026②）。 */}
-                {selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL}
-              </button>
-              {/* **作業範囲**（#1193）＝イン点／アウト点で挟み、まとめて消す。
-                  ⚠️ **業界の型に合わせる**（ADR-0034 決定1）＝`I`／`O` で置き、`Shift+Delete` で詰めて消す。
-                  ⚠️ **押しのけモードではない**（同 決定11 は不変）＝押したときだけ動く。
-                  ⚠️ **キーだけにしない**（同 決定19）＝ボタンからも同じ入口を通る。 */}
-              <span className="timeline-toolbar-sep" aria-hidden="true" />
-              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("in", playheadSec)} title="ここを作業範囲の始まりにします（I）">
-                ここから（範囲）
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => setRangeEdge("out", playheadSec)} title="ここを作業範囲の終わりにします（O）">
-                ここまで（範囲）
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setConfirmRange({ closeGap: true })}
-                {...rangeCloseGuard}
-                title={rangeCloseGuard.title ?? "作業範囲を削除して、空いた所を詰めます（Shift+Delete）"}
-              >
-                範囲を削除して詰める
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setConfirmRange({ closeGap: false })}
-                {...rangeDeleteGuard}
-                title={rangeDeleteGuard.title ?? "作業範囲を削除します（詰めません）"}
-              >
-                範囲を削除
-              </button>
-              {/* ⚠️ **やめる道を消さない**（ADR-0033 決定6/8 と同じ考え方）＝範囲を取ったあと、
-                  消す以外に戻る道が無いと「取ったら最後」になる。取っているときだけ出す。 */}
-              {(rangeInSec != null || rangeOutSec != null) && (
-                <button className="btn btn-ghost btn-sm" onClick={clearRange} title="作業範囲をやめます">
-                  範囲をやめる
-                </button>
-              )}
-              {/* どこからどこまでかを**数字でも**見せる（並びの上の網掛けと同じ値・UI/UX 監査 2026-10-02）。 */}
-              {rangeInSec != null && rangeOutSec != null && (
-                <span className="text-sm text-muted" data-testid="timeline-range-label">
-                  {rangeLabel(
-                    markerClock(Math.min(rangeInSec, rangeOutSec), doc.videoSettings.fps),
-                    markerClock(Math.max(rangeInSec, rangeOutSec), doc.videoSettings.fps),
-                  )}
+                  吸着
+                </label>
+                <Switch
+                  id="timeline-snap-switch"
+                  on={snapEnabled}
+                  onChange={(on) => { setSnapEnabled(on); saveSnapEnabled(on); }}
+                  label="吸着"
+                  title={snapEnabled ? SNAP_ON_HINT : SNAP_OFF_HINT}
+                />
+                {/* ⚠️ **説明は画面に短く出し、札にも付ける**（#1481・`06 §2` 規約20＝ホバーだけにしない）。
+                    いちばん狭いときだけ畳む（札と近道キーの一覧には残る）。 */}
+                <span className="text-sm text-muted" data-fold={ARRANGE_FOLD.narrow}>{snapEnabled ? SNAP_ON_SHORT : SNAP_OFF_HINT}</span>
+                <span className="timeline-toolbar-sep" aria-hidden="true" data-fold={ARRANGE_FOLD.wide} />
+                {/* **列の高さ**（ADR-0048 決定3・#1256 c1）＝列が少なければ太く、多ければ細く。 */}
+                <label className="row gap-sm" style={{ alignItems: "center", flexWrap: "nowrap" }} data-arrange-tool={ARRANGE_LANE_HEIGHT_KEY} data-fold={ARRANGE_FOLD.wide}>
+                  <span className="field-label text-sm" style={{ margin: 0 }}>列の高さ</span>
+                  <select
+                    className="select"
+                    style={{ width: "auto" }}
+                    aria-label="列の高さ"
+                    value={laneHeight}
+                    onChange={(e) => {
+                      const next = e.target.value as TimelineLaneHeight;
+                      setLaneHeight(next);
+                      saveLaneHeight(next);
+                    }}
+                  >
+                    {TIMELINE_LANE_HEIGHT_ORDER.map((h) => (
+                      <option key={h} value={h}>{LANE_HEIGHT_LABEL[h]}</option>
+                    ))}
+                  </select>
+                </label>
+                <span className="timeline-toolbar-sep" aria-hidden="true" />
+                {/* 表示倍率（#686・決定13）＝**全体を表示**から始め、段で広げ縮めできる。
+                    `Ctrl`+ホイールでも同じ段を動かし、**錨点はマウスの位置**（見ていた所が流れない）。
+                    見出しの文字は外し、まとまりに名前を付ける（ADR-0048 追補 2026-10-21）。 */}
+                <span className="row gap-xs" role="group" aria-label="表示倍率" style={{ alignItems: "center", flexWrap: "nowrap" }}>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    aria-label="表示を縮める"
+                    title="表示を縮める（Ctrl＋ホイールでも）"
+                    disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
+                    onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1))}
+                  >
+                    −
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    aria-label="表示を広げる"
+                    title="表示を広げる（Ctrl＋ホイールでも）"
+                    disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
+                    onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1))}
+                  >
+                    ＋
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => changeZoom(fitZoomIndex(totalSec, (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX))}
+                  >
+                    全体を表示
+                  </button>
                 </span>
-              )}
+              </div>
+              {/* 「…」は行の端（2つのまとまりの外）＝帯の操作と見え方の道具の両方を受け持つので、どちらかの中に入れない（レビュー ℹ️）。 */}
+              <button
+                className="btn btn-ghost btn-sm"
+                aria-label="並びのほかの操作"
+                title="ここに並びきらない操作"
+                aria-haspopup="menu"
+                aria-expanded={arrangeMenu != null}
+                onClick={openArrangeMenu}
+              >
+                …
+              </button>
             </div>
             {/* ⚠️ **場所は常に取っておく**（PR #1412 レビュー 🟡）＝収まっているとき消すと、拡大と「全体を表示」を
                 行き来するたびに並びが縦にずれる（Premiere・Resolve の帯は出しっぱなしで動かない）。収まっているときは中身を描かない。 */}
@@ -7616,6 +7723,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       )}
       {previewToolsMenu && (
         <ContextMenu x={previewToolsMenu.x} y={previewToolsMenu.y} items={previewToolsMenuItems} onClose={() => setPreviewToolsMenu(null)} />
+      )}
+      {arrangeMenu && (
+        <ContextMenu x={arrangeMenu.x} y={arrangeMenu.y} items={arrangeMenuItems} onClose={() => setArrangeMenu(null)} />
       )}
       </div>
       {/* ⚠️ **答えを求める確認は、流れていかない所へ出す**（#990・`06 §2` 規約23／#940）＝

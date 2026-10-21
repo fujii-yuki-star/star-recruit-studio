@@ -96,7 +96,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（α 最終点検 2026-10-21）＝どの欄にも属さない返事の置き場（`timeline-flash-stack`）＝右下に重ねて、欄の見出しを覆わない。
     // ⚠️ **+5**（α 最終点検 2026-10-21・狭い窓の崩れ）＝流れの帯の並べる器（`flow-bar-grid`）・表を持つ画面の印（`content-with-yuko--table`）・
     //   見た目パターンの2列（`looks-layout`）・仕上がり確認の「…」（`preview-tools-more`）・倍率の数字（`preview-zoom-label`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(232);
+    // ⚠️ **+1**（ADR-0048 追補 2026-10-21）＝並びの道具の見え方のまとまり（`timeline-view-tools`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(233);
   });
 });
 

@@ -27,4 +27,13 @@ describe("FIND_BY_TEXT（実際の部品で）", () => {
     expect(run("縦の版を作るときの").id).toBe("long");
     expect(run("見つからない言葉")).toBeNull();
   });
+  // ⚠️ **畳んだ道具より、描かれている「…」の項目を当てる**（ADR-0048 追補 2026-10-21）＝畳んだボタンは
+  //   `display: none` で DOM に残り、文字の完全一致で先に当たって押せない所を押しにいった。
+  it("描かれている物を先に当てる（同じ名前の隠れたボタンより、見えている項目）", () => {
+    document.body.innerHTML = `
+      <button id="folded">目印を置く</button>
+      <div role="menu"><button id="item" role="menuitem">目印を置く</button></div>`;
+    document.getElementById("item").getClientRects = () => /** @type {DOMRectList} */ (/** @type {unknown} */ ({ length: 1 }));
+    expect(run("目印を置く").id).toBe("item");
+  });
 });
