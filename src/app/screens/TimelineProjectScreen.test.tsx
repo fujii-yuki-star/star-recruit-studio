@@ -4669,26 +4669,33 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(container.querySelector(".main-scroll--fixed.dense"), "詰めた表示の印が外れている").not.toBeNull();
   });
 
-  it("その場の返事は**欄を覆わない**（欄を貼る器の外・下に場所を取る＝α 最終点検の実機）", () => {
+  it("その場の返事は**欄の見出しを覆わず、欄の高さも変えない**（右下に重ねる＝α 最終点検の実機）", () => {
     // ⚠️ **実機で踏んだ**（2026-10-21）＝欄を囲いへ `absolute` で貼っていたので、流れに残る返事が
-    // 囲いの一番上に出て、**欄の見出し（タブ）を覆って押せなくしていた**。
+    // 囲いの**一番上**に出て、欄の見出し（タブ）を覆って押せなくしていた。
+    // ⚠️ **下に場所を取って並べる直し方は採らない**（レビュー）＝出る・消えるたびに欄の高さが変わり、押した帯が指の下でずれる。
     open();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const body = container.querySelector(".timeline-flash-zone > .timeline-flash-body");
-    expect(body, "欄を貼る器が無い").not.toBeNull();
-    expect(body!.querySelector(".panel-layout")).not.toBeNull();
-    // 器に入るのは欄だけ（返事が入ると、また欄の上に重なる）。
-    expect(body!.querySelector(".timeline-flash")).toBeNull();
-    // CSS＝`absolute` で貼るのは**器の中の欄**だけ。返事は流れに戻して下に場所を取る。
+    const stack = container.querySelector(".timeline-flash-zone > .timeline-flash-stack");
+    expect(stack, "返事の置き場が無い").not.toBeNull();
+    // 欄は置き場の外（置き場の中に欄が入ると、重ねる側と重なられる側が逆になる）。
+    expect(stack!.querySelector(".panel-layout")).toBeNull();
     const css = readFileSync(resolve(__dirname, "../../styles/theme.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     const block = (sel: string): string => {
       const at = css.indexOf(`${sel} {`);
       return at < 0 ? "" : css.slice(at, css.indexOf("}", at));
     };
-    expect(block(".main-scroll--fixed .timeline-flash-body > .panel-layout")).toMatch(/position:\s*absolute/);
-    expect(block(".main-scroll--fixed .timeline-flash-zone > .panel-layout"), "囲いへ直に貼る形に戻っている").toBe("");
-    expect(block(".main-scroll--fixed .timeline-flash-zone > .notice")).toMatch(/position:\s*static/);
-    expect(block(".main-scroll--fixed .timeline-flash-zone")).toMatch(/flex-direction:\s*column/);
+    const stackRule = block(".main-scroll--fixed .timeline-flash-stack");
+    // 重ねる（流れに置かない＝欄の高さを変えない）・**下端**に寄せる（上端だと見出しを覆う）。
+    expect(stackRule).toMatch(/position:\s*absolute/);
+    expect(stackRule).toMatch(/bottom:/);
+    expect(stackRule).not.toMatch(/top:/);
+    // 返事が重なっても欄を覆い尽くさない。
+    expect(stackRule).toMatch(/max-height:/);
+    expect(stackRule).toMatch(/overflow-y:\s*auto/);
+    // 空のときは場所を取らない（見えない箱が帯の上の押せる所を奪わない）。
+    expect(block(".main-scroll--fixed .timeline-flash-stack:empty")).toMatch(/display:\s*none/);
+    // 囲いが重ねの基準。
+    expect(block(".main-scroll--fixed .timeline-flash-zone")).toMatch(/position:\s*relative/);
   });
 
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
