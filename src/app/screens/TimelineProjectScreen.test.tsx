@@ -4669,6 +4669,28 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(container.querySelector(".main-scroll--fixed.dense"), "詰めた表示の印が外れている").not.toBeNull();
   });
 
+  it("その場の返事は**欄を覆わない**（欄を貼る器の外・下に場所を取る＝α 最終点検の実機）", () => {
+    // ⚠️ **実機で踏んだ**（2026-10-21）＝欄を囲いへ `absolute` で貼っていたので、流れに残る返事が
+    // 囲いの一番上に出て、**欄の見出し（タブ）を覆って押せなくしていた**。
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const body = container.querySelector(".timeline-flash-zone > .timeline-flash-body");
+    expect(body, "欄を貼る器が無い").not.toBeNull();
+    expect(body!.querySelector(".panel-layout")).not.toBeNull();
+    // 器に入るのは欄だけ（返事が入ると、また欄の上に重なる）。
+    expect(body!.querySelector(".timeline-flash")).toBeNull();
+    // CSS＝`absolute` で貼るのは**器の中の欄**だけ。返事は流れに戻して下に場所を取る。
+    const css = readFileSync(resolve(__dirname, "../../styles/theme.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const block = (sel: string): string => {
+      const at = css.indexOf(`${sel} {`);
+      return at < 0 ? "" : css.slice(at, css.indexOf("}", at));
+    };
+    expect(block(".main-scroll--fixed .timeline-flash-body > .panel-layout")).toMatch(/position:\s*absolute/);
+    expect(block(".main-scroll--fixed .timeline-flash-zone > .panel-layout"), "囲いへ直に貼る形に戻っている").toBe("");
+    expect(block(".main-scroll--fixed .timeline-flash-zone > .notice")).toMatch(/position:\s*static/);
+    expect(block(".main-scroll--fixed .timeline-flash-zone")).toMatch(/flex-direction:\s*column/);
+  });
+
   it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
     // ⚠️ 流し込みは必ず行われるので既定は普通は使われないが、**書き写しである以上ずれ得る**。
     // ずれると、この file を単独で読んだときの見え方と計算が食い違う（`--timeline-label-w` と同じ流儀）。

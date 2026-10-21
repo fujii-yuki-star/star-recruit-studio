@@ -1706,10 +1706,25 @@ button.badge {
 .main-scroll--fixed .timeline-flash-zone {
   flex: 1 1 0;
   min-height: 0;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   margin-bottom: var(--gap-sm);
 }
-.main-scroll--fixed .timeline-flash-zone > .panel-layout {
+/* ⚠️ **欄を貼る器と、その場の返事を分ける**（α 最終点検 2026-10-21・実機）＝以前は囲いそのものに欄を
+   `absolute` で貼っていたので、流れに残るのは返事だけ＝**返事が囲いの一番上に出て、欄の見出し（タブ）を
+   覆って押せなくしていた**（`sticky; bottom: 0` は下へ押しやる力を持たない）。返事は器の**下に場所を取って**並べる
+   ＝出ている間だけ編集の場所が少し縮む（覆うより良い・§2-5＝押せない状態を作らない）。 */
+.main-scroll--fixed .timeline-flash-body {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+}
+.main-scroll--fixed .timeline-flash-zone > .notice {
+  flex: 0 0 auto;
+  position: static;
+  margin: var(--gap-sm) 0 0;
+}
+.main-scroll--fixed .timeline-flash-body > .panel-layout {
   position: absolute;
   inset: 0;
   height: auto;

@@ -7399,6 +7399,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           `76vh` の決め打ちだと上の見出しと足して画面をはみ出し、画面の残りいっぱいにすると
           下の知らせのぶんはみ出した。**器をスクロールの外に出す**のが唯一の解。 */}
       <div className="timeline-flash-zone">
+        {/* 欄を貼る器（返事とは分ける＝返事が欄を覆わない）。 */}
+        <div className="timeline-flash-body">
         <PanelLayoutView
           saveFailed={layoutSaveFailed}
           onDismissSaveFailed={dismissLayoutSaveFailed}
@@ -7414,6 +7416,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             if (bigView && next !== PANEL_ID.preview) { setBigView(false); void setAppFullscreen(false); }
           }}
         />
+        </div>
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
