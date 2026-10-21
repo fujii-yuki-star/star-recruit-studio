@@ -112,6 +112,7 @@ import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
+import { PREVIEW_TOOL, PREVIEW_TOOL_ORDER, type PreviewToolKey } from "../components/previewTools";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
 import { TimelineOverview, type OverviewClip } from "../components/TimelineOverview";
@@ -925,6 +926,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
   // 帯の右クリックメニュー（#701）。列の行と**同じ作法**（右クリック＋「⋮」の逃げ道）。
   const [clipMenu, setClipMenu] = useState<{ clipId: string; x: number; y: number } | null>(null);
+  // 仕上がり確認の見出しの「…」（α 最終点検 2026-10-21）＝欄が狭くて見出しの行に並べきれない道具の受け皿。
+  // **開いた時点で隠れている道具**だけを並べる（`hidden`）＝並んで見えている物を二重に出さない。
+  const [previewToolsMenu, setPreviewToolsMenu] = useState<{ x: number; y: number; hidden: PreviewToolKey[] } | null>(null);
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
@@ -1054,7 +1058,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     return () => { cancelled = true; un?.(); };
   }, [bigView]);
   // **端の目安**（#1261）＝場面編集と同じ好み（どちらの画面で切り替えても同じ）。
-  const [safeAreaOn] = useSafeAreaPref();
+  const [safeAreaOn, setSafeAreaOn] = useSafeAreaPref();
   /** 並びで囲んで選んでいる矩形（#1265・画面の座標）。`null`＝囲んでいない。 */
   const [marquee, setMarquee] = useState<{ left: number; top: number; right: number; bottom: number } | null>(null);
   /** 近道キーの一覧を出している位置（ADR-0048・#1256 c6）。`null`＝閉じている。 */
@@ -4346,8 +4350,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     <span className="preview-view-tools" data-testid="preview-view-tools">
       {/* ⚠️ **名前に「仕上がりの」を付ける**＝並びにも「表示を広げる」があり、読み上げで区別できない。 */}
       <PreviewZoomControl subject="仕上がりの" zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
-      <SafeAreaToggle />
+      {/* ⚠️ **欄が狭いときは「…」へ畳む**（α 最終点検 2026-10-21・実機）＝既定の窓（1280）の既定の配置で、
+          見出しの行が足りず「端の目安を出す」「大きく見る」「別の窓で見る」が**切れて押せなかった**。
+          どれを畳むかは CSS（欄の幅）が決め、「…」は開いた時点で隠れている物だけを並べる（`data-preview-tool`）。 */}
+      <span data-preview-tool={PREVIEW_TOOL.safe}><SafeAreaToggle /></span>
       <button
+        data-preview-tool={PREVIEW_TOOL.big}
         className="btn btn-ghost btn-sm"
         aria-pressed={bigView}
         title={bigView ? "元の大きさに戻します（Esc でも）" : "仕上がり確認を画面いっぱいに広げます（Esc で戻ります）。そのまま直接動かせます"}
@@ -4359,6 +4367,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           別窓では出さない（別窓の閉じ方は窓の上端の行の左端＝切れない所に置く）。 */}
       {!inPreviewWindow && (
         <button
+          data-preview-tool={PREVIEW_TOOL.window}
           className="btn btn-ghost btn-sm"
           aria-pressed={previewWindow.open}
           title={previewWindow.open ? "別の窓を閉じます" : "仕上がり確認を別の窓に出します。2画面目で大きく見ながら、そのまま直接動かせます"}
@@ -4367,8 +4376,46 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           別の窓で見る
         </button>
       )}
+      <button
+        className="btn btn-ghost btn-sm preview-tools-more"
+        aria-label="仕上がり確認のほかの操作"
+        title="ここに並びきらない操作（端の目安・大きく見る・別の窓で見る）"
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const tools = e.currentTarget.closest(".preview-view-tools");
+          const hidden = PREVIEW_TOOL_ORDER.filter((key) => {
+            const el = tools?.querySelector(`[data-preview-tool="${key}"]`);
+            // 描かれていない（別窓では「別の窓で見る」が無い）物は出さない＝押しても何も起きない項目を作らない。
+            return el != null && el.getClientRects().length === 0;
+          });
+          const r = e.currentTarget.getBoundingClientRect();
+          setPreviewToolsMenu({ x: r.left, y: r.bottom, hidden });
+        }}
+      >
+        …
+      </button>
     </span>
   );
+  const previewToolsMenuItems: ContextMenuItem[] = (previewToolsMenu?.hidden ?? []).map((key): ContextMenuItem => {
+    switch (key) {
+      case PREVIEW_TOOL.fit:
+        return {
+          label: "全体表示",
+          disabled: previewZoom === "fit",
+          disabledHint: "いま全体が見えています",
+          onSelect: () => setPreviewZoom("fit"),
+        };
+      case PREVIEW_TOOL.safe:
+        return { label: safeAreaOn ? "端の目安を消す" : "端の目安を出す", onSelect: () => setSafeAreaOn(!safeAreaOn) };
+      case PREVIEW_TOOL.big:
+        return { label: bigView ? "元に戻す" : "大きく見る", onSelect: () => (bigView ? exitBigView() : enterBigView()) };
+      case PREVIEW_TOOL.window:
+        return {
+          label: previewWindow.open ? "別の窓を閉じる" : "別の窓で見る",
+          onSelect: () => (previewWindow.open ? previewWindow.close() : previewWindow.show()),
+        };
+    }
+  });
   const panels: PanelSpec[] = [
     // ⚠️ **絵は欄に収め、操作の行は常に見せる**（#1257）＝以前は絵を**幅だけ**で決めていたので、
     // 既定の配置（下段 0.65）では絵が欄の高さを越え、**「再生」が欄の外へ押し出されていた**
@@ -7560,6 +7607,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       )}
       {clipMenu && menuClip && (
         <ContextMenu x={clipMenu.x} y={clipMenu.y} items={clipMenuItems} onClose={() => setClipMenu(null)} />
+      )}
+      {previewToolsMenu && (
+        <ContextMenu x={previewToolsMenu.x} y={previewToolsMenu.y} items={previewToolsMenuItems} onClose={() => setPreviewToolsMenu(null)} />
       )}
       </div>
       {/* ⚠️ **答えを求める確認は、流れていかない所へ出す**（#990・`06 §2` 規約23／#940）＝

@@ -42,7 +42,10 @@ export function classNamesIn(text: string): string[] {
 /** CSS の中で**規則が書かれている**クラス名（`.foo { … }` の `foo`）。 */
 export function cssClassesIn(text: string): string[] {
   // ⚠️ **中身を消してから探す**＝`content: ".x"` のような値を規則と数えない。
-  const withoutValues = text.replace(/\{[^}]*\}/g, " ");
+  // ⚠️ **いちばん内側の波かっこだけ消す**（α 最終点検 2026-10-21）＝`{[^}]*}` だと `@media (…) { .x { … } }` の
+  //   外側の `{` から最初の `}` までを消し、**`@media`／`@container` の中だけにある規則を見落としていた**
+  //   （狭い窓でだけ効く `content-with-yuko--table` が「実体が無い」と誤って断られた）。
+  const withoutValues = text.replace(/\{[^{}]*\}/g, " ");
   return [...withoutValues.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1]);
 }
 

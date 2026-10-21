@@ -38,6 +38,8 @@ export interface FlowBarProps {
 export function FlowBar({ current, back, next, onJump, jumpDisabled = false, jumpDisabledReason, stepBlocked, sticky = true }: FlowBarProps) {
   return (
     <div className={`flow-bar${sticky ? ` ${EDITOR_HEADER_CLASS}` : ""}`} data-testid="flow-bar">
+      {/* 並べる器（外側は幅を測られる側＝狭いときに段を2行目へ下ろす・α 最終点検 2026-10-21）。 */}
+      <div className="flow-bar-grid">
       <div className="flow-bar-side">
         {back && (
           <button className="btn btn-ghost btn-icon" onClick={back.onClick} disabled={back.disabled} title={back.title}>
@@ -81,6 +83,7 @@ export function FlowBar({ current, back, next, onJump, jumpDisabled = false, jum
             ) : null}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

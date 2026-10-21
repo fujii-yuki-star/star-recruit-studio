@@ -300,14 +300,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         </button>
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 360px",
-          gap: "var(--gap-lg)",
-          alignItems: "start",
-        }}
-      >
+      {/* 一覧と見本の2列。⚠️ **狭い窓では見本を下へ回す**（`looks-layout`・α 最終点検 2026-10-21＝最小の窓で見本が右へはみ出し、ページが横に流れていた）。 */}
+      <div className="looks-layout">
         {/* 左: 見た目パターン一覧 */}
         <div>
           {/* ⚠️ **探し方は素材画面と揃える**（#1031）＝種類のタブ＋名前で探す＋「絞り込みをやめる」。

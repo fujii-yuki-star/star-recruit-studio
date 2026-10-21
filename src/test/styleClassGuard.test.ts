@@ -93,7 +93,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+4**（ADR-0067）＝列の音量（`timeline-row-volume`・その場で直す欄 `timeline-row-volume-input`）とソロ（`timeline-row-solo`）、
     //   列の音量の札は常に濃く出すので `timeline-row-toggle--on` を文字のまま書いた（以前は条件の式の中だけ）。
     // ⚠️ **+1**（#1186 ②）＝帯のキーフレームの印（`timeline-clip-key`）。いまの時刻の `--current` は式で付ける断片なので数えない。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(226);
+    // ⚠️ **+5**（α 最終点検 2026-10-21・狭い窓の崩れ）＝流れの帯の並べる器（`flow-bar-grid`）・表を持つ画面の印（`content-with-yuko--table`）・
+    //   見た目パターンの2列（`looks-layout`）・仕上がり確認の「…」（`preview-tools-more`）・倍率の数字（`preview-zoom-label`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(231);
   });
 });
 
@@ -123,6 +125,10 @@ describe("拾い方そのもの（走る所と同じ道を直接叩く）", () =
   it("CSS の規則を拾う。⚠️ 中身の値は規則と数えない", () => {
     expect(cssClassesIn(".btn { color: red }")).toEqual(["btn"]);
     expect(cssClassesIn('.a { content: ".not-a-rule" }')).toEqual(["a"]);
+    // ⚠️ **`@media`／`@container` の中だけにある規則も拾う**（α 最終点検 2026-10-21）＝外側の `{` から最初の `}` までを
+    //   消していたので、狭い窓でだけ効く規則が「実体が無い」と誤って断られた。
+    expect(cssClassesIn("@media (max-width: 9px) { .only-narrow { color: red } }")).toEqual(["only-narrow"]);
+    expect(cssClassesIn('@container (max-width: 9px) { .a { content: ".not-a-rule" } }')).toEqual(["a"]);
   });
 
   it("目印として使っているクラスを拾う", () => {

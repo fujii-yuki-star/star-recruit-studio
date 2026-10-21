@@ -9193,6 +9193,64 @@ describe("TimelineProjectScreen: 仕上がり確認の表示倍率と端の目�
     fireEvent.click(within(screen.getByTestId("preview-view-tools")).getByRole("checkbox")); // 次の検査へ持ち越さない
   });
 
+  // ⚠️ **欄が狭いと見出しの道具が切れて押せなかった**（α 最終点検 2026-10-21・実機 1280×800 の既定の配置）。
+  // どれを畳むかは CSS（`@container`）が決め、「…」は**開いた時点で隠れている物**だけを並べる。
+  // jsdom は描かないので `getClientRects` は空＝全部「隠れている」扱いになる。見えている物を外すのは下の検査で別に見る。
+  it("「…」は隠れている道具を並べ、選ぶと同じことが起きる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const more = () => within(screen.getByTestId("preview-view-tools")).getByRole("button", { name: "仕上がり確認のほかの操作" });
+    fireEvent.click(more());
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual(["全体表示", "端の目安を出す", "大きく見る", "別の窓で見る"]);
+    // 全体が見えているときの「全体表示」は押せない（理由つき）。
+    expect(within(menu).getByRole("menuitem", { name: "全体表示" })).toBeDisabled();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "端の目安を出す" }));
+    expect(screen.getByTestId("timeline-safe-area"), "選んでも端の目安が出ない").toBeTruthy();
+    // 開き直すと、いまの状態に合わせた名前になる。
+    fireEvent.click(more());
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "端の目安を消す" }));
+    expect(screen.queryByTestId("timeline-safe-area")).toBeNull();
+  });
+
+  it("「…」は**見えている道具を二重に出さない**", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const tools = screen.getByTestId("preview-view-tools");
+    // 「全体表示」と「端の目安」は見えている（＝描かれている）ことにする。
+    for (const key of ["fit", "safe"]) {
+      const el = tools.querySelector(`[data-preview-tool="${key}"]`) as HTMLElement;
+      el.getClientRects = () => ({ length: 1 }) as unknown as DOMRectList;
+    }
+    fireEvent.click(within(tools).getByRole("button", { name: "仕上がり確認のほかの操作" }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual(["大きく見る", "別の窓で見る"]);
+  });
+
+  it("畳む境目は**欄の見出しの幅**で決める（CSS の約束）", () => {
+    const css = readFileSync(resolve(__dirname, "../../styles/theme.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    // 同じ選択子の規則が複数あるときは全部を合わせて見る（見出しの行は並べ方と畳み方で規則が分かれている）。
+    const rule = (sel: string) => css.split(`\n${sel} {`).slice(1).map((r) => r.slice(0, r.indexOf("}"))).join("\n");
+    // 窓の幅（`@media`）では決められない＝欄の幅は配置で変わる。
+    expect(rule(".panel-frame-head")).toMatch(/container-type:\s*inline-size/);
+    // 広いときは「…」を出さない。
+    expect(rule(".preview-view-tools .preview-tools-more")).toMatch(/display:\s*none/);
+    const block = (q: string): string => {
+      const i = css.indexOf(`@container (${q})`);
+      if (i < 0) return "";
+      let depth = 0;
+      for (let j = css.indexOf("{", i); j < css.length; j++) {
+        if (css[j] === "{") depth++;
+        else if (css[j] === "}" && --depth === 0) return css.slice(i, j);
+      }
+      return "";
+    };
+    const mid = block("max-width: 680px");
+    for (const key of ["safe", "big", "window"]) expect(mid, `${key} を畳んでいない`).toContain(`[data-preview-tool="${key}"]`);
+    expect(mid).toMatch(/\.preview-tools-more\s*\{\s*display:\s*inline-flex/);
+    expect(block("max-width: 440px")).toContain('[data-preview-tool="fit"]');
+    expect(block("max-width: 300px")).toContain(".preview-zoom-label");
+  });
+
   // ⚠️ **箱の実寸を変える**＝操作の層は実寸から縮尺を導くので、掴む位置が合う（`transform` にしない）。
   it("広げると絵の箱の実寸が大きくなり、置き場の中で流れる", () => {
     withResizeObserver(800, 300); // 置き場 800×300 → 欄に合わせた絵は 533×300（16:9）
