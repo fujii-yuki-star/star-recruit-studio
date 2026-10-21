@@ -28,18 +28,55 @@
   );
 }
 
+/* **「並び」の道具は1行**（ADR-0048 追補 2026-10-21・α 最終点検）＝以前は2本×2段＝118px を取り、
+   帯の見える高さが既定の窓で約 127px（3列ぶん）しか無かった。左＝帯の操作・右＝見え方の道具。
+   ⚠️ **入りきらなければ畳む**（`data-fold`・下の `@container`）。それでも入らないとき（作業範囲を取っている等）だけ
+   まとまりごと折り返す＝**切って押せなくはしない**（「…」が切れると畳んだ物に届かない）。 */
 .timeline-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--gap-sm);
   flex-wrap: wrap;
 }
 
-/* **帯の操作の行**（ADR-0048・#1256 b5）＝見え方の道具（倍率・列の高さ・吸着）の行と**種類が違う**ので、
-   細い線で分ける（同じ行に混ぜると、どれが帯を変えるボタンか読み取れない）。 */
-.timeline-edit-tools {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--gap-xs);
+/* **帯の操作**（ADR-0048・#1256 b5）と**見え方の道具**は種類が違う＝細い線で分ける
+   （同じ並びに混ぜると、どれが帯を変えるボタンか読み取れない）。 */
+.timeline-edit-tools,
+.timeline-view-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.timeline-view-tools {
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--gap-sm);
+}
+
+/* 畳む境目＝**「並び」の欄の幅**（窓の幅ではない＝欄の幅は配置で変わる）。実測（1280×800 の既定の配置で欄 974px）から：
+   いつも出す物 約 440px ＋ 列を足す・吸着の一文 約 470px ＋ ここから始める／終わる・目印 約 265px ＋ 絵を止める〜範囲・列の高さ 約 700px。 */
+.timeline-panel {
+  container-type: inline-size;
+}
+.timeline-toolbar [data-fold="idle"] {
+  display: none;
+}
+@container (max-width: 1879px) {
+  .timeline-toolbar [data-fold="wide"] {
+    display: none;
+  }
+}
+@container (max-width: 1179px) {
+  .timeline-toolbar [data-fold="mid"] {
+    display: none;
+  }
+}
+@container (max-width: 919px) {
+  .timeline-toolbar [data-fold="narrow"] {
+    display: none;
+  }
 }
 
 /* **帯の長さと速さの印**（ADR-0048・#1256 b6）＝右に寄せ、名前のほうを省略させる。 */
