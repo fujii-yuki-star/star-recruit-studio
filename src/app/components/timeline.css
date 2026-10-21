@@ -35,7 +35,6 @@
 .timeline-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--gap-sm);
   flex-wrap: wrap;
 }
@@ -50,6 +49,10 @@
   flex-wrap: nowrap;
   white-space: nowrap;
 }
+.timeline-edit-tools {
+  /* 見え方の道具と「…」は右へ寄せる。 */
+  margin-right: auto;
+}
 .timeline-view-tools {
   border-left: 1px solid var(--color-border);
   padding-left: var(--gap-sm);
@@ -59,6 +62,10 @@
    いつも出す物 約 440px ＋ 列を足す・吸着の一文 約 470px ＋ ここから始める／終わる・目印 約 265px ＋ 絵を止める〜範囲・列の高さ 約 700px。
    測る器は `.timeline-panel`（`container-type` はそちらの規則に置く）。 */
 .timeline-toolbar [data-fold="idle"] {
+  display: none;
+}
+/* 作業範囲を取っている間は、範囲の操作が並ぶぶん優先度の低い物をもう1段畳む＝行を折り返して帯を縦にずらさない（レビュー 🟡）。 */
+.timeline-toolbar[data-range-active] [data-fold="narrow"] {
   display: none;
 }
 @container (max-width: 1879px) {

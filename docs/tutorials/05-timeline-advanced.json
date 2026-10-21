@@ -44,12 +44,15 @@
     { "clickText": "停止", "say": "止める", "afterMs": 1400 },
 
     { "clickText": "ここで分ける", "say": "ここで分ける", "afterMs": 1800 },
+    { "clickText": "並びのほかの操作", "say": "ほかの操作を開く", "afterMs": 700 },
     { "clickText": "ここから（範囲）", "say": "範囲の始まり", "afterMs": 1200 },
     { "clickText": "再生", "say": "少し進める", "afterMs": 1500 },
     { "clickText": "停止", "say": "止める", "afterMs": 1000 },
+    { "clickText": "並びのほかの操作", "say": "ほかの操作を開く", "afterMs": 700 },
     { "clickText": "ここまで（範囲）", "say": "範囲の終わり", "quietChange": "範囲の終わりを決めると目盛りの帯が少し伸びるだけで、縮めたコマ比べでは見えない（次の段の削除で効いたことが分かる）", "afterMs": 1400 },
     { "clickText": "範囲を削除して詰める", "say": "範囲を消して詰める", "afterMs": 1400 },
     { "clickText": "削除する", "say": "確かめて消す", "afterMs": 2200 },
+    { "clickText": "並びのほかの操作", "say": "ほかの操作を開く", "afterMs": 700 },
     { "clickText": "目印を置く", "say": "目印を置く", "afterMs": 1400 },
     { "fieldLabel": "メモ", "type": "ここで決めゼリフ", "say": "目印にメモ", "afterMs": 1600 },
 

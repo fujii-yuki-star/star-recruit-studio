@@ -160,12 +160,16 @@ export const CHOOSE_OPTION = (label, option, nth = 1) => `(() => {
 
 export const FIND_BY_TEXT = (text) => `(() => {
   const want = ${JSON.stringify(text)};
+  // ⚠️ **描かれている物を先に探す**（ADR-0048 追補 2026-10-21）＝狭いと「…」へ畳んだ道具は \`display: none\` で DOM に残り、
+  //   同じ名前の「…」の項目より先に見つかって、押せない所を押しにいく。描かれている物に無ければ全部から（形を持たない場でも探せる）。
   const all = [...document.querySelectorAll("button, a, [role=button], [role=menuitem], summary, label")];
+  const shown = all.filter((el) => el.getClientRects().length > 0);
+  const pick = (pool) => pool.find((el) => (el.textContent || "").trim() === want)
+    || pool.find((el) => el.getAttribute("aria-label") === want)
+    || pool.find((el) => (el.textContent || "").includes(want));
   // ⚠️ **文字の無いボタン（絵だけ）は名前（aria-label）で探す**（#1228 の下見）＝動画の一覧の「縦の版を作る」などは
   //   絵だけのボタンで、名前は aria-label にしか無い。完全一致だけ＝部分一致にすると、名前に言葉を含む別のボタンを押す。
-  const hit = all.find((el) => (el.textContent || "").trim() === want)
-    || all.find((el) => el.getAttribute("aria-label") === want)
-    || all.find((el) => (el.textContent || "").includes(want));
+  const hit = pick(shown) || pick(all);
   if (!hit) return null;
   hit.scrollIntoView({ block: "center" });
   return hit;

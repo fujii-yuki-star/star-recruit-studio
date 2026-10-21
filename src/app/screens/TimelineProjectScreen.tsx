@@ -528,6 +528,8 @@ interface ArrangeTool {
   fold?: ArrangeFold;
   /** 前に区切りの線を置く（種類の変わり目）。区切りも同じ優先度で畳む。 */
   sepBefore?: boolean;
+  /** 近道のキー＝「…」の項目の右端に出す（右クリックのメニューと同じ出し方・`SHORTCUT_KEYS` から）。 */
+  shortcut?: string;
   onClick: () => void;
 }
 // ⚠️ **読み書きは `infrastructure/appSettings` に寄せた**（#1112・`CLAUDE.md §4`＝外部I/O の隔離）。
@@ -4435,7 +4437,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       key: "split",
       label: "ここで分ける",
       guard: splitGuard,
-      title: "選んだ部品を再生位置で分けます（Ctrl+K）",
+      title: `選んだ部品を再生位置で分けます（${SHORTCUT_KEYS.split}）`,
+      shortcut: SHORTCUT_KEYS.split,
       onClick: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
     },
     {
@@ -4448,6 +4451,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           : selected ? duplicateExtra() : { disabled: true, hint: NOTHING_SELECTED_HINT.duplicate },
       ),
       title: `選んだ部品を複製して、すぐ後ろに置きます（${SHORTCUT_KEYS.duplicate}）`,
+      shortcut: SHORTCUT_KEYS.duplicate,
       onClick: duplicateSelectedClip,
     },
     {
@@ -4460,6 +4464,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         : selectedClipIds.length > 1
           ? `選んだ${selectedClipIds.length}個をまとめて削除します（Delete）`
           : "選んだ部品を削除します（Delete）",
+      shortcut: SHORTCUT_KEYS.remove,
       onClick: () => requestRemoveSelected(PANEL_ID.arrange),
     },
     // ⚠️ **まとめて選んでいるときは、変わる数を押す前に出す**（#1005）＝選んだ数ではなく
@@ -4468,6 +4473,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       key: "trimStart",
       label: `ここから始める${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
       guard: trimAtPlayheadGuard,
+      title: "選んだ部品の始まりを、再生位置までそろえます",
       fold: ARRANGE_FOLD.mid,
       sepBefore: true,
       onClick: () => trimSelectedClipsAt("start", playheadSec),
@@ -4476,6 +4482,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       key: "trimEnd",
       label: `ここで終わる${selectedClipIds.length > 1 ? `（${trimTargetCount}個）` : ""}`,
       guard: trimAtPlayheadGuard,
+      title: "選んだ部品の終わりを、再生位置までそろえます",
       fold: ARRANGE_FOLD.mid,
       onClick: () => trimSelectedClipsAt("end", playheadSec),
     },
@@ -4512,7 +4519,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     {
       key: "rangeIn",
       label: "ここから（範囲）",
-      title: "ここを作業範囲の始まりにします（I）",
+      title: `ここを作業範囲の始まりにします（${SHORTCUT_KEYS.rangeIn}）`,
+      shortcut: SHORTCUT_KEYS.rangeIn,
       fold: ARRANGE_FOLD.wide,
       sepBefore: true,
       onClick: () => setRangeEdge("in", playheadSec),
@@ -4520,7 +4528,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     {
       key: "rangeOut",
       label: "ここまで（範囲）",
-      title: "ここを作業範囲の終わりにします（O）",
+      title: `ここを作業範囲の終わりにします（${SHORTCUT_KEYS.rangeOut}）`,
+      shortcut: SHORTCUT_KEYS.rangeOut,
       fold: ARRANGE_FOLD.wide,
       onClick: () => setRangeEdge("out", playheadSec),
     },
@@ -4529,7 +4538,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       key: "rangeCloseGap",
       label: "範囲を削除して詰める",
       guard: rangeCloseGuard,
-      title: "作業範囲を削除して、空いた所を詰めます（Shift+Delete）",
+      title: `作業範囲を削除して、空いた所を詰めます（${SHORTCUT_KEYS.rangeCloseGap}）`,
+      shortcut: SHORTCUT_KEYS.rangeCloseGap,
       fold: rangeActive ? undefined : ARRANGE_FOLD.idle,
       onClick: () => setConfirmRange({ closeGap: true }),
     },
@@ -4550,7 +4560,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const arrangeViewTools: ArrangeTool[] = [
     // ⚠️ **目印を置くのも、この行へ**（ADR-0048・#1256 b2）＝以前は帯の**下**の節の中にあり、
     // **目印が1つも無くても節が 124px を取っていた**（並びの欄の本文の約27%）。`M` キーでも置ける（業界の型）。
-    { key: "marker", label: MARKER_ADD_LABEL, guard: markerGuard, title: MARKER_ADD_TITLE, fold: ARRANGE_FOLD.mid, onClick: addMarkerAtPlayhead },
+    { key: "marker", label: MARKER_ADD_LABEL, guard: markerGuard, title: MARKER_ADD_TITLE, shortcut: SHORTCUT_KEYS.marker, fold: ARRANGE_FOLD.mid, onClick: addMarkerAtPlayhead },
     // ⚠️ **列を足すのも、この行へ**（利用者要望 2026-09-28）＝以前は帯の**下**にあり、帯の入る高さを削っていた。
     // ⚠️ **「並び」の欄の中には残す**（#767・利用者要望）＝欄の外へ出すと、欄だけを見ていて列を足せない、に戻る。
     { key: "addVisual", label: "映像の列を足す", guard: busyGuard(), fold: ARRANGE_FOLD.narrow, sepBefore: true, onClick: () => addTrack(TRACK_KIND.visual) },
@@ -4569,6 +4579,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         disabled: t.guard?.disabled ?? false,
         disabledHint: t.guard?.title ?? undefined,
         hint: t.title,
+        shortcut: t.shortcut,
         onSelect: t.onClick,
       })),
     ...(arrangeMenu.hidden.includes(ARRANGE_LANE_HEIGHT_KEY) ? laneHeightMenuItems : []),
@@ -5036,7 +5047,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 既定の窓で約 127px（3列ぶん）しか無かった。左＝帯の操作・右＝見え方の道具。狭いと優先度の低い物から「…」へ畳む
                 （`data-fold`・欄の幅で決める）。⚠️ 以前の行を3行から1行に詰めた理由（#1104「こんなに広々取れても並びがこんなつぶれてたら
                 快適もくそもない」）と同じ＝帯の入る高さを道具に食わせない。 */}
-            <div className="timeline-toolbar">
+            {/* ⚠️ **作業範囲を取っている間は、優先度の低い物（列を足す・吸着の一文）をもう1段畳む**（レビュー 🟡）＝
+                範囲の操作が並ぶぶん行が折り返すと、I／O を押すたびに帯が縦にずれる（全体図の場所を常に取るのと同じ考え＝PR #1412）。 */}
+            <div className="timeline-toolbar" data-range-active={rangeActive ? "" : undefined}>
               {/* **帯の操作**（ADR-0048・#1256 b5）＝業界の型（CapCut・Premiere）どおりタイムラインのすぐ上。
                   ⚠️ **押せる条件・断り文は以前と同じ入口**（`splitGuard` 等）。何も選んでいないときは**押せなくして理由を出す**。 */}
               <div className="timeline-edit-tools" role="toolbar" aria-label="帯の操作">
@@ -5050,16 +5063,6 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     )}
                   </span>
                 )}
-                <button
-                  className="btn btn-ghost btn-sm"
-                  aria-label="並びのほかの操作"
-                  title="ここに並びきらない操作"
-                  aria-haspopup="menu"
-                  aria-expanded={arrangeMenu != null}
-                  onClick={openArrangeMenu}
-                >
-                  …
-                </button>
               </div>
               <div className="timeline-view-tools">
                 {arrangeViewTools.map(renderArrangeTool)}
@@ -5148,6 +5151,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   </button>
                 </span>
               </div>
+              {/* 「…」は行の端（2つのまとまりの外）＝帯の操作と見え方の道具の両方を受け持つので、どちらかの中に入れない（レビュー ℹ️）。 */}
+              <button
+                className="btn btn-ghost btn-sm"
+                aria-label="並びのほかの操作"
+                title="ここに並びきらない操作"
+                aria-haspopup="menu"
+                aria-expanded={arrangeMenu != null}
+                onClick={openArrangeMenu}
+              >
+                …
+              </button>
             </div>
             {/* ⚠️ **場所は常に取っておく**（PR #1412 レビュー 🟡）＝収まっているとき消すと、拡大と「全体を表示」を
                 行き来するたびに並びが縦にずれる（Premiere・Resolve の帯は出しっぱなしで動かない）。収まっているときは中身を描かない。 */}

@@ -9462,7 +9462,13 @@ describe("TimelineProjectScreen: 並びの道具は1行・畳んだ物は「…�
     { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "あ" },
   ] as TimelineProject["clips"];
   const more = () => screen.getByRole("button", { name: "並びのほかの操作" });
-  const menuLabels = () => within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.textContent?.trim());
+  // 項目の名前（右端の近道キー＝`context-menu-key` は除く）。
+  const menuLabels = () => within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => {
+    const copy = b.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll(".context-menu-key").forEach((k) => k.remove());
+    return copy.textContent?.trim();
+  });
+  const menuKeys = () => within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.getAttribute("aria-keyshortcuts")).filter(Boolean);
 
   it("道具の行は1本＝帯の操作と見え方の道具が同じ行", () => {
     open({ clips });
@@ -9484,6 +9490,8 @@ describe("TimelineProjectScreen: 並びの道具は1行・畳んだ物は「…�
       "ここから（範囲）", "ここまで（範囲）", "範囲を削除して詰める", "範囲を削除",
       MARKER_ADD_LABEL, "映像の列を足す", "音の列を足す", "列の高さを「細い」にする", "列の高さを「太い」にする",
     ]);
+    // 近道のキーも項目に出す（右クリックのメニューと同じ出し方）。
+    expect(menuKeys()).toEqual(["Control+K", "Control+D", "Delete", "I", "O", "Shift+Delete", "M"]);
     const split = within(screen.getByRole("menu")).getByRole("menuitem", { name: "ここで分ける" });
     expect(split).toBeDisabled();
     expect(split.getAttribute("title"), "押せない理由が無い").toBeTruthy();
@@ -9531,6 +9539,12 @@ describe("TimelineProjectScreen: 並びの道具は1行・畳んだ物は「…�
     expect(fold("rangeCloseGap"), "取っているのに畳んでいる").toBeNull();
     expect(fold("rangeDelete")).toBeNull();
     expect(container.querySelector('[data-arrange-tool="rangeClear"]')).not.toBeNull();
+    // 範囲の操作が並ぶぶん、優先度の低い物をもう1段畳む印（行を折り返して帯を縦にずらさない）。
+    expect(container.querySelector(".timeline-toolbar")!.hasAttribute("data-range-active")).toBe(true);
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    expect(css).toMatch(/\.timeline-toolbar\[data-range-active\] \[data-fold="narrow"\] \{\s*display:\s*none/);
+    act(() => useTimelineStore.getState().clearRange());
+    expect(container.querySelector(".timeline-toolbar")!.hasAttribute("data-range-active")).toBe(false);
   });
 
   it("畳む境目は**欄の幅**で決め、畳む物は優先度の低い順（CSS の約束）", () => {
