@@ -97,7 +97,8 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+5**（α 最終点検 2026-10-21・狭い窓の崩れ）＝流れの帯の並べる器（`flow-bar-grid`）・表を持つ画面の印（`content-with-yuko--table`）・
     //   見た目パターンの2列（`looks-layout`）・仕上がり確認の「…」（`preview-tools-more`）・倍率の数字（`preview-zoom-label`）。
     // ⚠️ **+1**（ADR-0048 追補 2026-10-21）＝並びの道具の見え方のまとまり（`timeline-view-tools`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(233);
+    // ⚠️ **+2**（使い勝手の点検 2026-10-22）＝押すと開く「？」（`help-tip`・`help-tip-body`）。
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(235);
   });
 });
 
