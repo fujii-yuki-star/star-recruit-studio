@@ -3395,6 +3395,65 @@ fn stage_export_frame_impl(
     decode_b64_to_file(&data_base64, &path, "staged frame")
 }
 
+/// **前のコマと同じ絵のコマ**を、前のコマのファイルから作る（書き出しの高速化・2026-10-22）。
+///
+/// ⚠️ 絵を作り直さない＝**同じ SVG から作った PNG はバイトまで同じ**なので、描く・PNG にする・base64 で運ぶ、を省く。
+/// 講座の動画（3分36秒・6491コマ）では 90.5% のコマが前のコマと同じだった（字幕と立ち絵が止まっている間）。
+/// 速いハードリンクを先に試し、作れない（別のドライブ・ファイルシステムが対応しない）ときは複写する。
+#[tauri::command]
+pub async fn copy_export_frame(
+    app: tauri::AppHandle,
+    dir_name: String,
+    from_index: u32,
+    to_index: u32,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_export_frame_impl(app, dir_name, from_index, to_index)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("copy frame task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+fn copy_export_frame_impl(
+    app: tauri::AppHandle,
+    dir_name: String,
+    from_index: u32,
+    to_index: u32,
+) -> Result<(), String> {
+    if !is_safe_stage_name(&dir_name) {
+        return Err(export_failure(
+            format!("invalid stage dir: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    let dir = export_frames_stage_dir(&app)?.join(&dir_name);
+    copy_frame_file(
+        &dir.join(format!("frame_{from_index:05}.png")),
+        &dir.join(format!("frame_{to_index:05}.png")),
+    )
+}
+
+/// `from` と同じ中身の `to` を作る（ハードリンク→だめなら複写）。`to` が既にあれば置き換える。
+fn copy_frame_file(from: &Path, to: &Path) -> Result<(), String> {
+    if to.exists() {
+        let _ = fs::remove_file(to);
+    }
+    if fs::hard_link(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to).map(|_| ()).map_err(|e| {
+        export_failure(
+            format!("copy staged frame: {e}"),
+            "動画の保存中に問題が発生しました。空き容量を確かめてから、もう一度お試しください。",
+        )
+    })
+}
+
 /// フレームのステージングを空にする（書き出しの前後で呼ぶ＝古いフレームを残さない）。非存在は成功扱い。
 /// 数百PNGのディレクトリ削除（ブロッキングI/O）をメインスレッドで走らせないよう専用スレッドへ退避（#375）。
 #[tauri::command]
@@ -4918,6 +4977,27 @@ impl Drop for TmpDirCleanup {
 
 #[cfg(test)]
 mod tests {
+    /// 前のコマから写したコマは**中身がバイトまで同じ**＝同じ絵（書き出しの高速化 2026-10-22）。
+    /// すでに同じ名前があれば置き換える（書き出しを途中からやり直したときに古いコマを残さない）。
+    #[test]
+    fn copy_frame_file_makes_identical_frame_and_replaces_existing() {
+        let dir =
+            std::env::temp_dir().join(format!("stario_copy_frame_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let from = dir.join("frame_00000.png");
+        let to = dir.join("frame_00001.png");
+        fs::write(&from, b"PNGBYTES-1").unwrap();
+        fs::write(&to, b"OLD").unwrap();
+        copy_frame_file(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"PNGBYTES-1");
+        // 元が無ければ失敗で返す（黙って空のコマを作らない）。
+        assert!(
+            copy_frame_file(&dir.join("frame_09999.png"), &dir.join("frame_00002.png")).is_err()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     /// 書き出しの作業フォルダは、抜けるときに中身ごと消える（#1358＝失敗でも成功でも残さない）。

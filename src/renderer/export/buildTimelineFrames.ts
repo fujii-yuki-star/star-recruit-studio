@@ -39,6 +39,12 @@ export interface BuildTimelineFramesOptions {
   fontFamily?: string;
   /** 1フレームをディスクへ逃がす（数千フレームの base64 を配列に溜めない）。 */
   stageFrame?: (dirName: string, frameIndex: number, dataBase64: string) => Promise<void>;
+  /**
+   * **前のコマと同じ絵**のコマを、置き場の前のコマから作る（書き出しの高速化・2026-10-22）。
+   * 未指定なら、同じ PNG をもう一度 `stageFrame` に渡す（描き直しと PNG 化だけ省く）。
+   * `dataBase64` は前のコマの PNG（空きの見張りに大きさを数えるため）。
+   */
+  copyFrame?: (dirName: string, fromIndex: number, toIndex: number, dataBase64: string) => Promise<void>;
   /** 進捗（描いた枚数 / 総数）。 */
   onProgress?: (done: number, total: number) => void;
   /** 中止要求。フレームごとに見る＝長い動画でも押した中止がすぐ効く。 */
@@ -159,6 +165,29 @@ export async function buildTimelineFrames(
     }
   }
 
+  // **前のコマと同じ絵なら描き直さない**（書き出しの高速化・2026-10-22）＝描く材料（SVG）が前のコマと文字まで同じなら、
+  // 同じ PNG になる（同じ関数・同じ大きさ）。講座の動画（6491コマ）では 90.5% のコマが前と同じだった
+  // （字幕と立ち絵が止まっている間）。⚠️ 比べるのは**描く材料そのもの**＝動画のコマ・クレジット・動きは SVG に入るので、
+  // 1つでも違えば描き直す（見た目が変わるのに前の絵を使い回すことは無い）。
+  let prevSvg: string | null = null;
+  let prevDataUrl: string | null = null;
+  let prevStagedIndex = -1;
+  // **置き場へ運ぶのと、次のコマを描くのを重ねる**＝前は運び終わるのを待ってから次を描いていた（待ちが約4割）。
+  // 運ぶのは1つずつ順に＝前のコマのファイルを写すときは、そのファイルが書き終わっている。
+  let inflight: Promise<void> | null = null;
+  const flush = async (): Promise<void> => {
+    if (!inflight) return;
+    const p = inflight;
+    inflight = null;
+    await p;
+  };
+  const startStaging = (p: Promise<void>): void => {
+    // 中止で抜けたときに「誰も待たない失敗」にしない（失敗は次の flush で投げる）。
+    p.catch(() => {});
+    inflight = p;
+  };
+
+  try {
   for (let f = fromFrame; f < toFrame; f += 1) {
     bail();
     const timeSec = frameTimeAt(f, plan.fps);
@@ -188,17 +217,37 @@ export async function buildTimelineFrames(
       ...(creditText != null ? { credit: creditText } : {}),
       ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
     });
-    const dataUrl = await svgToPngDataUrl(
-      svg,
-      opts.outputSize?.width ?? layout.width,
-      opts.outputSize?.height ?? layout.height,
-    );
     // ⚠️ **置き場の中では 0 から並べる**＝`image2` は連番で読むので、
     // 区間の頭が 5400 番だからといって 5400 から置くと、1枚も見つからない。
-    if (framesDir && opts.stageFrame) await opts.stageFrame(framesDir, f - fromFrame, dataUrl);
-    else framesBase64.push(dataUrl);
+    const stagedIndex = f - fromFrame;
+    if (svg === prevSvg && prevDataUrl != null) {
+      if (framesDir && opts.stageFrame) {
+        await flush(); // 写す元（前のコマ）が書き終わってから
+        startStaging(opts.copyFrame
+          ? opts.copyFrame(framesDir, prevStagedIndex, stagedIndex, prevDataUrl)
+          : opts.stageFrame(framesDir, stagedIndex, prevDataUrl));
+      } else framesBase64.push(prevDataUrl);
+    } else {
+      const dataUrl = await svgToPngDataUrl(
+        svg,
+        opts.outputSize?.width ?? layout.width,
+        opts.outputSize?.height ?? layout.height,
+      );
+      if (framesDir && opts.stageFrame) {
+        await flush();
+        startStaging(opts.stageFrame(framesDir, stagedIndex, dataUrl));
+      } else framesBase64.push(dataUrl);
+      prevSvg = svg;
+      prevDataUrl = dataUrl;
+    }
+    prevStagedIndex = stagedIndex;
     // 4枚おき＋最後＝進捗が動きつつ通知で埋もれない（場面形式のフレームループと同じ間引き）。
     if (f % 4 === 0 || f === toFrame - 1) opts.onProgress?.(f - fromFrame + 1, windowCount);
+  }
+  await flush();
+  } finally {
+    // 途中で投げた（中止・失敗）ときも、運んでいる途中のものを置き去りにしない（結果は捨てる）。
+    if (inflight) await (inflight as Promise<void>).catch(() => {});
   }
   return {
     ...(framesDir ? { framesDir } : { framesBase64 }),

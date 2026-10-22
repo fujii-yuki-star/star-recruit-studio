@@ -19,7 +19,10 @@ export { charWidthEm, wrapText } from '../domain/text/textWrap';
 // 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
 const DEFAULT_FONT_FAMILY = fontFamilyForId(undefined);
 
-function escapeXml(s: string): string {
+export function escapeXml(s: string): string {
+  // ⚠️ **置き換える字が無ければそのまま返す**（書き出しの高速化 2026-10-22）＝写真の data URL（数MB の base64）は
+  //   置き換える字を1つも含まないのに、毎コマ5回なめ直していた（書き出しの描く時間の約1割）。結果は同じ文字列。
+  if (!XML_SPECIAL.test(s)) return s;
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -28,8 +31,14 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** `escapeXml` が置き換える字（どれか1つでもあれば置き換える）。 */
+const XML_SPECIAL = /[&<>"']/;
+
 /** 同じ `<defs>` の行を1つに畳む（#264・影の filter は中身から id を作るので重複しうる）。 */
-function dedupeDefs(svg: string): string {
+export function dedupeDefs(svg: string): string {
+  // ⚠️ **重なりが無ければそのまま返す**（書き出しの高速化 2026-10-22）＝写真の data URL を含む数MB の文字列を、
+  //   毎コマ行に割ってつなぎ直していた。行を1つも落とさないなら、割ってつないでも同じ文字列になる。
+  if (!hasDuplicateDefsLine(svg)) return svg;
   const seen = new Set<string>();
   return svg
     .split('\n')
@@ -40,6 +49,24 @@ function dedupeDefs(svg: string): string {
       return true;
     })
     .join('\n');
+}
+
+/** `<defs>` で始まる行に、まったく同じ行が2つ以上あるか（`dedupeDefs` が何か落とすか）。 */
+function hasDuplicateDefsLine(svg: string): boolean {
+  const seen = new Set<string>();
+  // 行の頭の `<defs>` だけを拾う（先頭の行と、改行の直後）。
+  let at = svg.startsWith('<defs>') ? 0 : svg.indexOf('\n<defs>');
+  if (at > 0) at += 1;
+  while (at >= 0) {
+    const end = svg.indexOf('\n', at);
+    const line = end < 0 ? svg.slice(at) : svg.slice(at, end);
+    if (seen.has(line)) return true;
+    seen.add(line);
+    if (end < 0) break;
+    const next = svg.indexOf('\n<defs>', end);
+    at = next < 0 ? -1 : next + 1;
+  }
+  return false;
 }
 
 function textToSvg(item: TextItem): string {
