@@ -20,7 +20,8 @@ import type { Easing, EasingSpec, TalkMotionKind } from "../../domain/enums";
 import { TALK_MOTION_KIND } from "../../domain/enums";
 import { VOICES_FROM_SUBTITLES_HINT, voicesFromSubtitlesLabel, clipKeyTitle } from "../uiLabels";
 import { clipKeyframeTimes, keyframeSeekSec } from "../../domain/timeline/keyframeMarks";
-import { PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
+import { KEYFRAME_HELP, PLAYBACK_SPEED_HELP, PACK_AUDIO_NOTE, TALK_MOTION_CHOICES, TALK_MOTION_DETAIL, TALK_MOTION_HINT, TALK_MOTION_SECTION_LABEL } from "../uiLabels";
+import { HelpTip } from "../components/HelpTip";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { BULK_VOICE_TIMELINE_LABEL, TRUNCATED_TEXT_LABEL, timelineTruncatedTextDetail, DELETE_LABEL, IMPORT_BUSY_MESSAGE, unusedAssetsCleanupConfirm, unusedAssetsCleanupLabel, DENOISE_FAILED_TEXT, DENOISE_LABEL, DENOISE_PREPARING_TEXT, DUPLICATE_LABEL, NEW_TRACK_DROP_TEXT, TRACK_VOLUME_MENU_LABEL, FREEZE_FRAME_LABEL, FREEZE_FRAME_LENGTH_NOTE, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_FLIPPED_CROP, CLIP_PIVOT_LABEL, CLIP_PIVOT_CUSTOM_LABEL, CLIP_PIVOT_HINT, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel, MARKER_ADD_LABEL, MARKER_ADD_TITLE, PASTE_NEEDS_COPY_HINT, rangeDeleteConfirmMessage, rangeLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
@@ -2979,7 +2980,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
           </select>
         </label>
         {/* 説明はラベルの外＝中に入れると欄の名前が説明文込みになる（読み上げで名前が長くなる）。 */}
-        <p className="field-hint">{CLIP_PIVOT_HINT}</p>
+        <p className="field-hint">支点とは <HelpTip label="動きの支点の説明" text={CLIP_PIVOT_HINT} /></p>
     </>
   );
   // **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
@@ -6020,12 +6021,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 食い違う2つの案内が並ぶ。未解決のときは下の案内だけに委ねる。 */}
             {selected.kind === TIMELINE_CLIP_KIND.template && selectedTemplate && (
               <p className="text-sm text-muted">
-                この部品は見た目パターンの枠そのものです。中の位置や大きさを変えるには「中身をバラす」を使ってください。
+                位置や大きさは「中身をバラす」で変えます。
                 {/* ⚠️ **二度押しできること自体の発見手段**（#832）＝入った後に出る印だけでは、二度押しが
                     できることそのものは見つからない（06_UI_SPEC.md の①）。ここに書いて先に知らせる。
                     ⚠️ **入れる中身が無いときは書かない**＝下の「入れ替えられる中身はありません」と同じ
                     条件（`slotLayers`/`textKeys`）＝実行できない行動を名指ししない（§2-5）。 */}
-                {(slotLayers.length > 0 || textKeys.length > 0) && " 中の写真や文字は、その場所を二度押しでも直せます。"}
+                {(slotLayers.length > 0 || textKeys.length > 0) && " 中の写真・文字は二度押しでも直せます。"}
               </p>
             )}
 
@@ -6290,15 +6291,16 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     </>
                   )}
                 </div>
-                <p className="text-muted">{TALK_MOTION_HINT}</p>
+                <p className="text-muted">{TALK_MOTION_HINT} <HelpTip label="喋っている間の動きの説明" text={TALK_MOTION_DETAIL} /></p>
               </CollapsibleSection>
             )}
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
               <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0 || selected.pivot != null}>
+                {/* ⚠️ **1行に縮め、残りは「？」へ**（使い勝手の点検 2026-10-22）＝節を開くと入力欄より前に約290字が3段並んでいた。 */}
                 <p className="text-muted">
-                  再生位置（{markerClock(playheadSec, clockFps)}）に「<strong>本来の見た目からのずれ</strong>」を置きます。
-                  2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
+                  再生位置（{markerClock(playheadSec, clockFps)}）に動きを置きます。2か所に置くと、その間がなめらかに変わります。{" "}
+                  <HelpTip label="動きの説明" text={KEYFRAME_HELP} />
                 </p>
                 {/* ひな形を**先頭**に（PR #1353 レビュー ℹ️＝初心者がいちばん楽に使える道を欄の奥に置かない・CapCut の型）。 */}
                 {/* 動きのひな形（#1349・#1335 提案D）＝キーフレームの列へ展開して重ねる。当てたあとは下の一覧・キャンバスの点で直せる。 */}
@@ -6346,7 +6348,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                       {motionPresetShortenedMessage(motionPresetEffectiveSec({ ...motionPresetChoice.preset, durationSec: motionPresetSec } as MotionPreset, selected.durationSec))}
                     </p>
                   )}
-                  <p className="field-hint">{MOTION_PRESET_HINT}</p>
+                  <p className="field-hint">ひな形の当たり方 <HelpTip label="ひな形の当たり方" text={MOTION_PRESET_HINT} /></p>
                 </div>
                 {pivotField}
                 {!keyframeAtPlayhead.live ? (
@@ -6548,10 +6550,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                   </select>
                 </label>
                 {playbackFields}
-                <p className="text-muted">
-                  速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
-                  素材が置き場所より短いときは繰り返して埋まります。
-                </p>
+                {/* 説明は「？」へ（使い勝手の点検 2026-10-22＝最初から開いている節に段落が常に出ていた・文は1か所＝`PLAYBACK_SPEED_HELP`）。 */}
+                <p className="field-hint">速さと長さ <HelpTip label="速さと長さの説明" text={`${PLAYBACK_SPEED_HELP}素材が置き場所より短いときは繰り返して埋まります。`} /></p>
               </CollapsibleSection>
             )}
 
@@ -6574,9 +6574,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 ) : (
                   <>
                     {playbackFields}
-                    <p className="text-muted">
-                      速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
-                    </p>
+                    <p className="field-hint">速さと長さ <HelpTip label="速さと長さの説明" text={PLAYBACK_SPEED_HELP} /></p>
                   </>
                 )}
               </CollapsibleSection>
@@ -7051,7 +7049,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         ) : (
           <p className="text-muted">
             {selectedClipIds.length > 1
-              ? "1つだけ選ぶと、中身や位置を変えられます（始まりや終わりをそろえる「ここから始める」「ここで終わる」と、まとめての削除は、並びの上の行にあります）。"
+              ? "1つだけ選ぶと、中身や位置を変えられます（そろえる・消すは並びの上の行）。"
               : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
           </p>
         )}
@@ -7157,8 +7155,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                     </select>
                   </label>
                   <span className="text-muted text-sm">
-                    {placeAtPlayheadHint(playheadSec, "塞がっていれば次の空き時刻へ。")}
-                    つかんで運べば落とした所へ。
+                    {/* 続きは「？」へ（使い勝手の点検 2026-10-22＝置き先はゴーストが絵で見せているので、文は二重になっていた）。 */}
+                    {placeAtPlayheadHint(playheadSec, "")}{" "}
+                    <HelpTip label="置き方の説明" text="塞がっていれば次の空き時刻へ置きます。つかんで運べば、落とした所へ置けます。" />
                   </span>
                 </div>
                 {visualAssets.length === 0 ? (
@@ -7231,7 +7230,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
             ) : (
               <>
                 <p className="text-muted">
-                  {placeAtPlayheadHint(playheadSec, "置いたあとも中身は差し替えられます。", "選んだ見た目パターンを、")}
+                  {placeAtPlayheadHint(playheadSec, "", "選んだ見た目パターンを、")}{" "}
+                  <HelpTip label="置き方の説明" text="置いたあとも中身は差し替えられます。" />
                 </p>
                 <label className="field">
                   <span>置く列</span>
@@ -7272,7 +7272,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "置いたあとに速さ・音量を変えられます。")}</p>
+                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "")} <HelpTip label="置き方の説明" text="置いたあとに速さ・音量を変えられます。" /></p>
                 {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
                     列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
                 <label className="field">
@@ -7322,7 +7322,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
               <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
             ) : (
               <>
-                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "置いたあとに文を書いて声を作ります。")}</p>
+                <p className="text-muted">{placeAtPlayheadHint(playheadSec, "")} <HelpTip label="置き方の説明" text="置いたあとに文を書いて声を作ります。" /></p>
                 {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
                     列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
                 <label className="field">
