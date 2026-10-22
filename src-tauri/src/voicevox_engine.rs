@@ -286,6 +286,8 @@ fn start_engine(app: &AppHandle) -> Result<EngineStart, String> {
     }
     match cmd.spawn() {
         Ok(child) => {
+            // 異常終了でも残さない（`proc::bind_to_app_lifetime`）。
+            crate::proc::bind_to_app_lifetime(&child);
             let base_url = format!("http://127.0.0.1:{port}");
             app.state::<EngineState>().store(child, base_url.clone());
             crate::tlog!("voicevox", "同梱エンジンを起動しました: {base_url}");

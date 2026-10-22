@@ -1509,6 +1509,8 @@ fn run_export_inner(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
+    // 書き出しの途中でアプリが落ちても、エンコードを走らせ続けない（`proc::bind_to_app_lifetime`）。
+    crate::proc::bind_to_app_lifetime(&child);
     // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
     // ⚠️ **数だけを渡す口**（#1214）＝読む側のスレッドへ Tauri の持ち物を持ち込まないため。
     let (tx, rx) = std::sync::mpsc::channel::<u64>();

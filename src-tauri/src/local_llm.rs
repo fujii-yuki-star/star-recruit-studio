@@ -456,6 +456,8 @@ async fn ensure_started(
         crate::tlog!("local_llm", "起動できません: {e}");
         LOCAL_AI_START_FAILED.to_string()
     })?;
+    // 異常終了でも残さない（数 GB の部品＝`proc::bind_to_app_lifetime`）。
+    crate::proc::bind_to_app_lifetime(&child);
     if let Ok(mut g) = state.inner.lock() {
         g.child = Some(child);
         g.base_url = None;
