@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
+import type { ReactNode } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, menuAnchorFrom, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
@@ -571,6 +572,17 @@ const NOTHING_SELECTED_HINT = {
  * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
  * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
+/**
+ * **前と同じ `deps` なら描き直さない**入れ物（負荷試験 2026-10-22）＝再生中の並びの帯に使う。
+ * ⚠️ `deps` に入れていない値を `render` の中で使うと、再生中は古いまま描かれる＝再生中に変わりうる値は必ず入れる。
+ */
+const FrozenWhilePlaying = memo(
+  function FrozenWhilePlaying({ render }: { deps: readonly unknown[]; render: () => ReactNode }) {
+    return <>{render()}</>;
+  },
+  (a, b) => a.deps.length === b.deps.length && a.deps.every((d, i) => Object.is(d, b.deps[i])),
+);
+
 export function TimelineProjectScreen({ onNavigate, presentation = "main" }: TimelineProjectScreenProps) {
   // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
   const voices = useVoiceCatalog();
@@ -2174,6 +2186,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   const scrollRef = useRef<HTMLDivElement>(null);
   // 並びの枠の送り量と幅（全体図の枠に使う・#1319 c2）。送る・大きさが変わるたびに測り直す。
   const [scrollBox, setScrollBox] = useState({ left: 0, width: 0 });
+  /**
+   * 送りの位置と枠の幅の最後の実測（送る・大きさが変わるたびに上の `measure` が入れる）。
+   * ⚠️ **再生中の追いかけは DOM を読まない**（負荷試験 2026-10-22）＝`scrollLeft` を読むと、その場で帯（部品の数だけ要素がある）の
+   * 配置の計算をさせる＝部品 2216 の動画では1コマに約 20ms かかっていた。送った後は `scroll` の合図でここが更新される。
+   */
+  const scrollMetricsRef = useRef<{ left: number; width: number } | null>(null);
   // 列 id → 文書の中で何番目か（全体図は再生中も毎フレーム描き直すので、部品ごとに探し直さない）。⚠️ **途中で返す分岐より前**に置く（フックの数を回ごとに変えない）。
   const trackIndexById = useMemo(() => new Map((doc?.tracks ?? []).map((t, i) => [t.id, i] as const)), [doc?.tracks]);
   // ⚠️ **枠の要素が替わったら付け直す**（PR #1412 レビュー 🟡）＝欄を別の領域へ運ぶ・配置の型を変えると枠が作り直される。
@@ -2186,7 +2204,10 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   useEffect(() => {
     const el = scrollEl;
     if (!el) return;
-    const measure = (): void => setScrollBox((b) => (b.left === el.scrollLeft && b.width === el.clientWidth ? b : { left: el.scrollLeft, width: el.clientWidth }));
+    const measure = (): void => {
+      scrollMetricsRef.current = { left: el.scrollLeft, width: el.clientWidth };
+      setScrollBox((b) => (b.left === el.scrollLeft && b.width === el.clientWidth ? b : { left: el.scrollLeft, width: el.clientWidth }));
+    };
     measure();
     el.addEventListener("scroll", measure, { passive: true });
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -2216,13 +2237,14 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * ⚠️ **位置は store から読む**＝キー操作は `setPlayhead` の直後にここを呼ぶので、描画時の
    * `playheadSec` では1回ぶん古い（動かす**前**の位置を見て「見えている」と判断してしまう）。
    */
-  const followPlayhead = useCallback((): void => {
+  const followPlayhead = useCallback((fromLastMeasure = false): void => {
     const el = scrollRef.current;
     if (!el) return;
     const px = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
+    const known = fromLastMeasure ? scrollMetricsRef.current : null;
     const next = playbackScrollLeft({
-      scrollLeft: el.scrollLeft,
-      viewPx: el.clientWidth,
+      scrollLeft: known?.left ?? el.scrollLeft,
+      viewPx: known?.width ?? el.clientWidth,
       contentPx: Math.max(totalSec * px, MIN_LANE_WIDTH_PX),
       headPx: useTimelineStore.getState().playheadSec * px,
       insetStartPx: LANE_LABEL_PX,
@@ -2231,7 +2253,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   }, [zoomIndex, totalSec]);
   // ⚠️ 早い段階（画面を返す前）に置く＝フックの数を毎回そろえる。
   useEffect(() => {
-    if (isPlaying) followPlayhead();
+    if (isPlaying) followPlayhead(true);
   }, [isPlaying, playheadSec, followPlayhead]);
 
   /**
@@ -5425,7 +5447,15 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                 {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。
                     行にも解除を付けるのは、列の幅より画面が広いとき**右側にできる余白**を押しても解けるようにするため
                     ＝「何もない所を押すと解ける」の当たり判定を見た目どおりにする（#701 レビュー）。 */}
-                {[...doc.tracks].reverse().map((track, displayIndex) => (
+                {/* ⚠️ **再生中は列と帯を描き直さない**（負荷試験 2026-10-22）＝再生中は1コマごとに画面全体を描き直すので、
+                    部品 2216 の動画では帯の要素（約6000）を毎コマ比べ直し、再生が 10〜20fps に落ちていた。
+                    再生中に変わりうるもの（文書・選択・運んでいる物・ソロ…）が変わったときだけ描き直す。
+                    止まっている間は今までどおり毎回描く（`deps` に毎回新しい物を入れる）。 */}
+                <FrozenWhilePlaying
+                  deps={isPlaying
+                    ? [doc, selectedClipIds, selectedMarkerId, soloTrackIds, clipDrag, drag, fileHover, placeHint, renamingTrackId, trackDrag, volumeTrackId, pxPerSec, laneWidthPx, exporting, analysisByPath, assetSrcById, videoSrcById, missingAssetIds, textGroup]
+                    : [{}]}
+                  render={() => [...doc.tracks].reverse().map((track, displayIndex) => (
                   <div
                     className={`timeline-row${trackDrag?.trackId === track.id ? " timeline-row--dragging" : ""}${
                       trackDrag?.gap === displayIndex ? " timeline-row--drop-above" : ""
@@ -5769,7 +5799,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                         ))}
                     </div>
                   </div>
-                ))}
+                ))} />
                 {/* **列の無い所へ落とそうとしている**（ADR-0049）＝新しい列を作って置くことを、離す前に見せる。 */}
                 {fileHover && fileHover !== FILE_DROP_IMPORT_ONLY && fileHover.trackId == null && (
                   <div className="timeline-row" data-testid="file-drop-newrow">
