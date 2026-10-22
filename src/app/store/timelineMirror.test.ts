@@ -70,6 +70,15 @@ describe("写し（本体→別窓）", () => {
     expect(isMirroredKey("history", {})).toBe(false);
     expect(isMirroredKey("_audioTried", new Set())).toBe(false);
   });
+
+  // ⚠️ **鳴らす音の中身は写さない**（負荷試験 2026-10-22・ADR-0050 決定2＝別窓は音を鳴らさない）＝
+  // 写すと声を1本作るたびに辞書まるごと（数十MBになりうる）を別窓へ送り、別窓にも同じ物がもう1部できる。
+  it("鳴らす音の中身（audioSrcByKey）は送らず、届いても当てない", () => {
+    expect(isMirroredKey("audioSrcByKey", { voice_1: "data:audio/wav;base64,AAAA" })).toBe(false);
+    const p = mirrorPatch(null, { doc: 1, audioSrcByKey: { k: "data:" } })!;
+    expect(Object.keys(p.values)).toEqual(["doc"]);
+    expect(mirrorUpdate({}, { values: { audioSrcByKey: { k: "data:" }, doc: 2 }, cleared: ["audioSrcByKey"] })).toEqual({ doc: 2 });
+  });
 });
 
 describe("命令（別窓→本体）", () => {

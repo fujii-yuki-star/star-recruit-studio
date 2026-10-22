@@ -247,24 +247,21 @@ describe('audioCueOfClipAt（1部品ぶん）', () => {
     expect(audioCueOfClipAt(d, d.clips[2], 1)?.clipId).toBe('clip_003');
   });
 
-  it('部品が4倍になっても、鳴るかの判定にかかる手間は4倍程度（2乗の16倍にならない）', () => {
-    const make = (n: number) => doc({
-      clips: Array.from({ length: n }, (_, i) => voiceClip(`clip_${String(i + 1).padStart(4, '0')}`, { startSec: i, durationSec: 1 })),
-    });
-    const time = (d: TimelineProject): number => {
-      const runs: number[] = [];
-      for (let k = 0; k < 3; k += 1) {
-        const t0 = performance.now();
-        for (const c of d.clips) isAudibleRunClip(d, c);
-        timelineExportBlockers(d);
-        runs.push(performance.now() - t0);
-      }
-      return runs.sort((a, b) => a - b)[1];
+  // ⚠️ **時間では測らない**＝ほかの検査と並んで走ると時間がぶれて、たまに落ちた（実際に落ちた）。
+  //   部品の項目を**読んだ回数**を数える＝機械の混み具合によらず同じ数になる。
+  it('部品が4倍になっても、鳴るかの判定で部品を読む回数は4倍程度（2乗の16倍にならない）', () => {
+    const reads = (n: number): number => {
+      let count = 0;
+      const clips = Array.from({ length: n }, (_, i) =>
+        new Proxy(voiceClip(`clip_${String(i + 1).padStart(4, '0')}`, { startSec: i, durationSec: 1 }), {
+          get(t, k, r) { count += 1; return Reflect.get(t, k, r); },
+        }));
+      const d = doc({ clips });
+      for (const c of d.clips) isAudibleRunClip(d, c);
+      timelineExportBlockers(d);
+      return count;
     };
-    const small = make(500);
-    const big = make(2000);
-    time(small); // 温める
-    const ratio = time(big) / Math.max(time(small), 0.5);
-    expect(ratio, `部品 2000 の手間が 500 の ${ratio.toFixed(1)} 倍`).toBeLessThan(9);
+    const ratio = reads(800) / reads(200);
+    expect(ratio, `部品 800 は 200 の ${ratio.toFixed(1)} 倍読んだ`).toBeLessThan(6);
   });
 });
