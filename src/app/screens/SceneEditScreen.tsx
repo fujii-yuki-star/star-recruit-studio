@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { renameFieldKeys } from "../hooks/keyboardShortcut";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import { HelpTip } from "../components/HelpTip";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_SCREEN, SPLIT_DIR, emptyLayout } from "../../domain/layout/panelLayout";
@@ -2068,8 +2069,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </div>
                   </>
                 )}
+              {/* ⚠️ 「右側を直すと」とは言わない（使い勝手の点検 2026-10-22）＝欄の並びは利用者が変えられる（ADR-0033）ので、方向が嘘になりうる。 */}
               <p className="text-sm text-muted mt">
-                選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。右側を直すとここに反映されます。
+                選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。
               </p>
       </>
     ) },
@@ -2353,7 +2355,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               onChange={(v) => patch((s) => updateLine(s, line.lineId, { startSec: v }))}
                               onClear={() => patch((s) => updateLine(s, line.lineId, { startSec: undefined }))}
                             />
-                            <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
+                            {/* 後ろの説明はセリフの数だけ並ぶ＝短くする（説明は欄の札にある・使い勝手の点検 2026-10-22）。 */}
+                            <span className="text-sm text-muted">秒（空欄＝自動）</span>
                           </div>
                         )}
                         <div className="row-between">
@@ -2394,7 +2397,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   {narrationError && (
                     <div className="notice notice-warn" role="alert"><span>{narrationError}</span></div>
                   )}
-                  <p className="field-hint">セリフごとに声（キャラクター）を変えて掛け合いにできます。字幕は経過に合わせて切り替わります。</p>
+                  <p className="field-hint">セリフごとに声を変えられます。 <HelpTip label="掛け合いの説明" text="セリフごとに声（キャラクター）を変えて掛け合いにできます。字幕は経過に合わせて切り替わります。" /></p>
                 </div>
               ) : (<>
               <label className="field-label" htmlFor="line">セリフ</label>
@@ -2486,7 +2489,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   ここで2つに分ける
                 </button>
               </div>
-              <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
               {/* ⚠️ **印に紐づけない**（#755-3 レビュー）＝失敗しても前の声が残っていれば印は「作成済み」の
                   ままにするので、`failed` を条件にすると**押しても何も起きなかったように見える**（無言の失敗）。
                   掛け合い（上）とタイムライン編集も無条件で出す＝同じ操作の返事を場所で変えない（ADR-0026②）。 */}
@@ -3312,9 +3314,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   />
                 )}
               </div>
-              <p className="field-hint">
-                動画の収め方・使う範囲・元の音声は、「使用素材」で動画を選ぶと設定できます。声の大きさは「この場面だけ声の大きさ」で場面ごとに変えられます。
-              </p>
             </div>
 
             {/* 場面編集から離れずに複製できる（台本表への往復・選択リセットを避ける・#405）。複製直後のコピーを選択する。 */}

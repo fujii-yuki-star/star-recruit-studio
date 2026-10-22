@@ -800,7 +800,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onInteractionEnd={endGroup}
             />
           </ScenePreview>
-          <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小・回転できます（写真・文字は例として表示）。</p>
+          {/* 掴んで動かす・拡縮・回すは型どおりの操作＝文で説明しない（使い勝手の点検 2026-10-22）。例として出していることだけ言う。 */}
+          <p className="text-sm text-muted mt">写真・文字は例として表示しています。</p>
           {/* グループ一覧（#525-9）：全グループを選択・再表示（隠したものを戻す）・改名できる。隠したグループを選び直せる導線。 */}
           <GroupList
             groups={tplGroups}

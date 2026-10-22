@@ -60,6 +60,13 @@ describe("声の表記の出し方（#359）", () => {
     expect(screen.getByText(/短くはなりません/)).toBeInTheDocument();
   });
 
+  // ⚠️ **タイムライン形式には出さない**（使い勝手の点検 2026-10-22）＝あちらは毎コマ判定する（`creditTextAt`）ので事実と違う。
+  //   タイムライン形式は話者の一覧（`credits`）を渡してくる。
+  it("タイムライン形式（話者の一覧を渡す）では、長く出ることがあるとは言わない", () => {
+    render(<CreditDisplayField credits={["VOICEVOX:ずんだもん"]} value={{ mode: CREDIT_MODE.both }} onChange={vi.fn()} />);
+    expect(screen.queryByText(/指定より長く出ることがあります/)).toBeNull();
+  });
+
   /**
    * ⚠️ **出さないときは「代わりにどうするか」を必ず出す**（`13 §4`＝規約は守る必要がある）。
    * 案内だけでなく**貼り付けられる文**まで出す（それが無いと守れない）。

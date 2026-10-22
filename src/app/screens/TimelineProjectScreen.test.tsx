@@ -22,7 +22,7 @@ import { TIMELINE_CLIP_INSET_PX, TIMELINE_LABEL_W_PX, TIMELINE_LANE_H_PX, VOLUME
 import type { TimelineClip, TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
-import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, EXPORT_SIZE_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL, silenceMessage, FREEZE_FRAME_LABEL, MARKER_ADD_LABEL, TRANSCRIBE_LABEL } from "../uiLabels";
+import { ANIMATED_DRAG_NOTE, BACK_TO_HOME_LABEL, CLIP_PIVOT_HINT, EXPORT_SIZE_HINT, KEYFRAME_HELP, MOTION_PRESET_HINT, MOTION_PATH_NOTE, SILENCE_FIND_LABEL, silenceMessage, FREEZE_FRAME_LABEL, MARKER_ADD_LABEL, TRANSCRIBE_LABEL } from "../uiLabels";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -1379,6 +1379,19 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
     expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_EXPORTING");
     expect((screen.getByLabelText("横のずれ（px）") as HTMLInputElement).value).toBe("200");
+  });
+
+  // ⚠️ **詳しい説明は「？」の中だけ**（使い勝手の点検 2026-10-22）＝節を開くと入力欄より前に約290字が3段並んでいた。
+  // 文言ごとに書き並べず、**画面まるごとで**「？」の外に出ていないかを見る（CLAUDE.md §7＝直し漏れた1か所を見つけられる形）。
+  it("動きの節の詳しい説明は、「？」の中にだけある（常に出る段落にしない）", () => {
+    withClip({ tracks: [{ id: "track_001", kind: "visual" }, { id: "track_002", kind: "audio" }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const text of [KEYFRAME_HELP, MOTION_PRESET_HINT, CLIP_PIVOT_HINT]) {
+      const outside = [...container.querySelectorAll("p, span, div")].filter((el) =>
+        el.children.length === 0 && (el.textContent ?? "").includes(text.slice(0, 12)) && !el.closest(".help-tip-body"));
+      expect(outside.map((el) => el.className), `「${text.slice(0, 12)}…」が「？」の外に出ている`).toEqual([]);
+      expect(container.querySelector(`.help-tip > summary[title="${text}"]`), "札にも同じ文が無い").not.toBeNull();
+    }
   });
 
   it("説明文に記号がそのまま出ない（Markdown は効かない）", () => {
@@ -6639,7 +6652,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     openTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByLabelText("横位置")).toBeNull();
-    expect(screen.getByText(/中の位置や大きさを変えるには「中身をバラす」を使ってください/)).toBeInTheDocument();
+    expect(screen.getByText(/位置や大きさは「中身をバラす」で変えます/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "中身をバラす" })).toBeInTheDocument(); // 名指し先が実在する
   });
 
@@ -6650,7 +6663,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useProjectStore.setState({ templates: [drillable] });
     openTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/中の写真や文字は、その場所を二度押しでも直せます/)).toBeInTheDocument();
+    expect(screen.getByText(/中の写真・文字は二度押しでも直せます/)).toBeInTheDocument();
   });
 
   // ⚠️ **実行できない行動を名指ししない**（§2-5）＝入れる差し込み口・文字が1つも無い見た目パターンで
@@ -6665,7 +6678,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useProjectStore.setState({ templates: [noDrillable] });
     openTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/中の位置や大きさを変えるには「中身をバラす」を使ってください/)).toBeInTheDocument(); // 前提＝一文自体は出る
+    expect(screen.getByText(/位置や大きさは「中身をバラす」で変えます/)).toBeInTheDocument(); // 前提＝一文自体は出る
     expect(screen.queryByText(/二度押しでも直せます/)).toBeNull();
   });
 

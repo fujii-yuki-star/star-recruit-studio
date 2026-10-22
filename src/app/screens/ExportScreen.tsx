@@ -7,6 +7,7 @@ import { FlowBar } from "../components/FlowBar";
 import { flowJump } from "../flowSteps";
 import { NoScenesState } from "../components/NoScenesState";
 import { CreditDisplayField } from "../components/CreditDisplayField";
+import { HelpTip } from "../components/HelpTip";
 import { FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -653,10 +654,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
+            {/* 違いは選択肢の名前が言う（「ふつう（…・ファイル小さめ）」）。詳しくは「？」と札へ（使い勝手の点検 2026-10-22＝タイムライン形式と同じ扱い）。 */}
+            <select id="size" className="select" value={size} disabled={busy} title={EXPORT_SIZE_HINT} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
               <ExportSizeOptions full={fullDims} light={hdDims} />
             </select>
-            <p className="field-hint">{EXPORT_SIZE_HINT}</p>
+            <p className="field-hint">大きさの違い <HelpTip label="大きさの違い" text={EXPORT_SIZE_HINT} /></p>
           </div>
 
           <div className="toggle-row">

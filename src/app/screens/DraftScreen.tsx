@@ -173,11 +173,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
         <div>
           <PageHead
             title="動画のたたき台を確認"
-            desc={
-              draftFromAi
-                ? "AIが作った構成です。台本表を見ながら、自由に修正してください。"
-                : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"
-            }
+            // AI が作ったときは下の知らせ（#467）が同じことを言う＝見出しの説明は出さない（使い勝手の点検 2026-10-22）。
+            desc={draftFromAi ? undefined : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"}
           />
 
           {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（App で登録・この画面は有効・#547 P1-1）。 */}
@@ -426,11 +423,9 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
         <YukoPanel
           pose="cheer"
-          messages={[
-            `動画のたたき台ができました！全部で${rows.length}つの場面で構成しています。`,
-            "セリフや素材は、表の右の操作ボタンから直せます。",
-            `気になるところがなければ、上の「${DRAFT_NEXT_LABEL}」に進みましょう。`,
-          ]}
+          // ⚠️ **1つにまとめる**（使い勝手の点検 2026-10-22）＝見出しの説明・AI の知らせ・ここで同じことを3回言っていた。
+          // 「できました」とも言わない＝白紙から作った動画でも出る。
+          messages={[`全部で${rows.length}つの場面です。気になるところがなければ、上の「${DRAFT_NEXT_LABEL}」へ進みましょう。`]}
         />
       </div>
       {rowMenu && rowMenu.scenes === scenes && (() => {
