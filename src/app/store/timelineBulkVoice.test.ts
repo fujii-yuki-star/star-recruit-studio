@@ -325,3 +325,41 @@ describe("voiceClipNeedsVoice / timelineVoiceProgress（#1019 ⑥）", () => {
     expect(timelineVoiceProgress(clips)).toEqual({ done: 1, total: 2 });
   });
 });
+
+// ⚠️ **まとめて作った声は、取り消しの履歴を1つだけ使う**（負荷・耐久の点検 2026-10-22）＝1本ごとに積むと、
+//   上限（50）を声だけで使い切り、その前の自分の編集が取り消せなくなる。
+describe("まとめて声を作る：取り消しの履歴", () => {
+  const statuses = () => useTimelineStore.getState().doc!.clips.map((c) => c.voice?.status);
+
+  it("何本作っても履歴は1つ増えるだけ・1回の取り消しで作る前に戻る", async () => {
+    useTimelineStore.setState({ history: { past: [], future: [] } } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started).toBe(3);
+    expect(statuses()).toEqual(["generated", "generated", "generated"]);
+    expect(useTimelineStore.getState().history.past, "1本ごとに積んでいる").toHaveLength(1);
+    useTimelineStore.getState().undo();
+    expect(statuses(), "取り消しで作る前に戻らない").toEqual(["none", "none", "none"]);
+  });
+
+  it("作っている間に別の記録が入ったら、その後の声は新しく1つ積む（その記録の取り消しで声まで消さない）", async () => {
+    useTimelineStore.setState({ history: { past: [], future: [] } } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    await flush(); synth.resolveAll(); await flush(); await flush();
+    // 1本目ができた後に、利用者の編集が1つ記録された（ここでは履歴に1つ積んだ形で表す）。
+    const h = useTimelineStore.getState().history;
+    expect(h.past).toHaveLength(1);
+    useTimelineStore.setState({ history: { past: [...h.past, useTimelineStore.getState().doc!], future: [] } } as never);
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started).toBe(3);
+    const past = useTimelineStore.getState().history.past;
+    expect(past, "間の記録に合流した").toHaveLength(3);
+    // 最後の取り消し＝2本目以降だけが消え、1本目は残る。
+    useTimelineStore.getState().undo();
+    expect(statuses()).toEqual(["generated", "none", "none"]);
+  });
+});

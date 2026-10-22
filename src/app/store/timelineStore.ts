@@ -131,7 +131,20 @@ export type VoiceNoticeSink =
        * ⚠️ 手で置いた読み上げは移さない（置いた列を黙って変えない）＝今までどおり「合わせられなかった」を知らせる。
        */
       makeRoom: boolean;
+      /**
+       * **まとめて作った声は、取り消しの履歴を1つだけ使う**（負荷・耐久の点検 2026-10-22）＝1本ごとに積むと、
+       * 上限（`HISTORY_LIMIT`＝50）を声だけで使い切り、その前の自分の編集が取り消せなくなる。
+       * 最初の1本で積んだ後の `history.past`（同じ配列）を覚えておき、次の1本のときに**同じ配列のまま**なら
+       * （＝間に他の記録が無い）積まずに合流する。⚠️ 間に利用者の編集・取り消しが入ったら、新しく1つ積む
+       * （合流すると、その編集の取り消しで後から作った声まで消える）。
+       */
+      history: BulkHistoryJoin;
     };
+
+/** まとめて作る間の「最後に自分が積んだ履歴」（`commit` の `joinBulk`）。 */
+export interface BulkHistoryJoin {
+  past: readonly TimelineProject[] | null;
+}
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -2544,7 +2557,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
         ...(editBlocked ? { editBlocked } : {}),
-      }, { outsideGroup: true });
+      }, { outsideGroup: true, ...(notice.kind === "collect" ? { joinBulk: notice.history } : {}) });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
       // ⚠️ **自分から保存する**（#751）。自動保存は**画面**が持っているので、作っている最中に
@@ -2624,7 +2637,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
       // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
       // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
-      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [], makeRoom: only?.makeRoom ?? false };
+      const notice: VoiceNoticeSink = {
+        kind: "collect",
+        notFitted: [],
+        makeRoom: only?.makeRoom ?? false,
+        history: { past: null },
+      };
       // ⚠️ **作成済みなのに音が読めない読み上げも作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、
       //   印だけ見て飛ばすと「作りました」と言い、書き出しは「声を作ってください」と断る＝行き止まり。
       //   「読めるか」は書き出しの「読めない音」と同じ材料（`audioSrcByKey`）で見る＝先にそろえる。
@@ -3413,13 +3431,15 @@ async function runImport(
  * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
+ * @param opts.joinBulk **まとめて作った声を1つの記録へ合流させる**（`BulkHistoryJoin`）＝前に自分が積んだ直後から
+ *   履歴が動いていなければ積まない。動いていたら（利用者の編集・取り消し）新しく積む。
  */
 function commit(
   set: SetState,
   get: GetState,
   next: TimelineProject,
   extra: Partial<TimelineState> = {},
-  opts: { outsideGroup?: boolean } = {},
+  opts: { outsideGroup?: boolean; joinBulk?: BulkHistoryJoin } = {},
 ): void {
   // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
   if (isTimelineExportBusy(get().exportRun.phase)) {
@@ -3434,10 +3454,13 @@ function commit(
   // グループ中は**最初の実変更だけ**積む（1文字ごとに積むと、上限 50 を文字入力だけで食い潰し、
   // それ以前の編集＝「バラす」などが取り消せなくなる・#708）。
   const inGroup = get()._historyGroupDepth > 0 && !opts.outsideGroup;
-  const record = !inGroup || get()._historyGroupPending;
+  const joined = opts.joinBulk != null && opts.joinBulk.past != null && opts.joinBulk.past === get().history.past;
+  const record = !joined && (!inGroup || get()._historyGroupPending);
+  const history = record ? recordSnapshot(get().history, current) : get().history;
+  if (opts.joinBulk) opts.joinBulk.past = history.past;
   set({
     doc: next,
-    history: record ? recordSnapshot(get().history, current) : get().history,
+    history,
     // まとめに参加した分だけ「記録済み」にする（参加していない完了で他人のまとめを消費しない）。
     ...(inGroup ? { _historyGroupPending: false } : {}),
     editBlocked: null,
