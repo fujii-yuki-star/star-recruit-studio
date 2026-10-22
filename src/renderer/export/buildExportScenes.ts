@@ -191,7 +191,6 @@ export interface ExportOptions {
   shouldCancel?: () => boolean;
 }
 
-/** 書き出しの中止（#380）で投げる番兵。呼び出し側は中止として扱い、エラー表示しない。 */
 /**
  * **前のコマと同じ絵は描き直さない**（書き出しの高速化 2026-10-22）＝描く材料（SVG）が文字まで同じなら、同じ PNG になる
  * （同じ関数・同じ大きさ）。毎コマ描く区間の中で、動きの止まっている間・動画の同じコマの間に効く。
@@ -210,6 +209,7 @@ function lastPngReuser(): (svg: string, width: number, height: number) => Promis
   };
 }
 
+/** 書き出しの中止（#380）で投げる番兵。呼び出し側は中止として扱い、エラー表示しない。 */
 export class ExportCancelledError extends Error {
   constructor() {
     super('export cancelled by user');
