@@ -386,6 +386,14 @@ describe('buildTimelineFrames', () => {
         copyFrame: async () => undefined,
       })).rejects.toThrow('disk full');
     });
+
+    it('最後のコマを置くのに失敗しても、失敗で止まる（運び終わりを待ってから返す）', async () => {
+      await expect(buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.1 })] }), {
+        ...baseOpts,
+        stageFrame: async () => undefined,
+        copyFrame: async (_d, _from, to) => { if (to === 2) throw new Error('disk full at last'); },
+      })).rejects.toThrow('disk full at last');
+    });
   });
 
   it('中止したらそこで止める（長い動画でも押した中止が効く）', async () => {
