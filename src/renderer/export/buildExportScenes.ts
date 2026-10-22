@@ -192,6 +192,24 @@ export interface ExportOptions {
 }
 
 /** 書き出しの中止（#380）で投げる番兵。呼び出し側は中止として扱い、エラー表示しない。 */
+/**
+ * **前のコマと同じ絵は描き直さない**（書き出しの高速化 2026-10-22）＝描く材料（SVG）が文字まで同じなら、同じ PNG になる
+ * （同じ関数・同じ大きさ）。毎コマ描く区間の中で、動きの止まっている間・動画の同じコマの間に効く。
+ * ⚠️ 1つの並び（層）ごとに作る＝前のコマは並びごとに違う。コマを置くのは今までどおり全部（数を減らすと動画が縮む）。
+ */
+function lastPngReuser(): (svg: string, width: number, height: number) => Promise<string> {
+  let lastKey: string | null = null;
+  let lastPng: string | null = null;
+  return async (svg, width, height) => {
+    const key = `${width}x${height}:${svg}`;
+    if (key === lastKey && lastPng != null) return lastPng;
+    const png = await svgToPngDataUrl(svg, width, height);
+    lastKey = key;
+    lastPng = png;
+    return png;
+  };
+}
+
 export class ExportCancelledError extends Error {
   constructor() {
     super('export cancelled by user');
@@ -463,6 +481,7 @@ export async function buildExportScenes(
                 clipFrameByAsset.set(assetId, { dir, count, delayFrames });
               }
             }
+            const framePng = lastPngReuser(); // 前のコマと同じ絵は描き直さない（`lastPngReuser`）
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
@@ -483,11 +502,7 @@ export async function buildExportScenes(
               await stageAnimationFrame(
                 winDir,
                 f,
-                await svgToPngDataUrl(
-                  layoutToSvg(frameLayout, { assetSrc: frameAssetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
-                  width,
-                  height,
-                ),
+                await framePng(layoutToSvg(frameLayout, { assetSrc: frameAssetSrc, itemFilter, credit, fontFamily: sceneFontFamily }), width, height),
               );
             }
             // 窓の元音声（#442・既定=動画は先頭から再生）：実フレーム時のみ、**元音声ONの全スロット**の [clipStart,+W*speed)
@@ -578,6 +593,10 @@ export async function buildExportScenes(
             const belowDir = `scene_vbelow_${i}`;
             const aboveDir = `scene_vabove_${i}`;
             const midDirs = splitM.midSvgs.map((_, m) => `scene_vmid_${i}_${m}`);
+            // 層ごとに「前のコマと同じ絵は描き直さない」（`lastPngReuser`）＝層ごとに前のコマが違う。
+            const belowPng = lastPngReuser();
+            const midPngs = midDirs.map(() => lastPngReuser());
+            const abovePng = lastPngReuser();
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
@@ -589,11 +608,11 @@ export async function buildExportScenes(
               // （代替するとそのフレームだけ動きが飛ぶ＝壊れた成功。基準で成功済みのため通常来ない防御）。
               if (!fSplit) throw videoUnplaceableError(i + 1);
               const s = fSplit;
-              await stageAnimationFrame(belowDir, f, await svgToPngDataUrl(s.belowSvg, width, height));
+              await stageAnimationFrame(belowDir, f, await belowPng(s.belowSvg, width, height));
               for (let m = 0; m < midDirs.length; m += 1) {
-                await stageAnimationFrame(midDirs[m], f, await svgToPngDataUrl(s.midSvgs[m], width, height));
+                await stageAnimationFrame(midDirs[m], f, await midPngs[m](s.midSvgs[m], width, height));
               }
-              await stageAnimationFrame(aboveDir, f, await svgToPngDataUrl(s.aboveSvg, width, height));
+              await stageAnimationFrame(aboveDir, f, await abovePng(s.aboveSvg, width, height));
             }
             out.push({
               durationSec: scene.durationSec,
@@ -679,6 +698,7 @@ export async function buildExportScenes(
             // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
             const framesDir = stageAnimationFrame ? `scene_frames_${i}_${segIndex}` : undefined;
             const framesBase64: string[] = [];
+            const segPng = lastPngReuser(); // 前のコマと同じ絵は描き直さない（`lastPngReuser`）
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
@@ -694,7 +714,7 @@ export async function buildExportScenes(
                 subtitleSegment: spec, // FREE 字幕（ADR-0029）＝掛け合いの現在セグメントで対象解決（プレビュー=書き出し）
                 ...(segSubtitle !== undefined ? { subtitleText: segSubtitle } : {}),
               });
-              const dataUrl = await svgToPngDataUrl(
+              const dataUrl = await segPng(
                 layoutToSvg(frameLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
                 width,
                 height,
