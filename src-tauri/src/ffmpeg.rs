@@ -4799,7 +4799,8 @@ fn export_video_impl(
                 if !src.exists() {
                     return Err(export_failure(
                         format!("bgm src missing: {}", src.display()),
-                        "動画が見つかりませんでした。もう一度取り込んでください。",
+                        // 動画の元の音だけでなく、取り込んだ音もパスで来る（負荷・耐久の点検 2026-10-22）。
+                        "音や動画のファイルが見つかりませんでした。もう一度取り込んでください。",
                     ));
                 }
                 files.push(src.to_string_lossy().into_owned());

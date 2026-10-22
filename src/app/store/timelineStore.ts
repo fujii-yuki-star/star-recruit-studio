@@ -2,7 +2,7 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, PROJECT_NAME_MAX_LENGTH, type ExportSize } from "../../domain/constants";
-import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio, trashProjectFiles } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, audioPlayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio, trashProjectFiles } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
@@ -3315,7 +3315,9 @@ async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[st
     : src.bundledBgmId
       ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
       : src.assetId
-        ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
+        // ⚠️ **取り込んだ音は中身を読まない**（負荷・耐久の点検 2026-10-22）＝数百 MB の WAV で落ちうる。
+        //   鳴らすのは asset:// の URL・書き出しはファイルのパス（`timelineAudioRuns` の `assetPath`）。
+        ? await audioPlayUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
         : null;
   return url ? [audioSourceKey(src), url] : null;
 }

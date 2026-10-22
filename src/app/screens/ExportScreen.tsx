@@ -37,7 +37,8 @@ import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { narrationAudioKey, sceneLineVoiceUsable } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
-import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { missingAssetFiles } from "../../infrastructure/assetFs";
+import { sceneBgmSource } from "./sceneBgmSource";
 import { createExportSrcResolver } from "../store/assetExportSrc";
 import { ExportDoneActions } from "../components/ExportDoneActions";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -490,20 +491,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
         if (useProjectStore.getState().exportRun.cancelling) throw new ExportCancelledError(); // BGM準備中の中止も即反映（#380）
-        let audioBase64: string | undefined;
-        let fileExt = "mp3";
-        if (clip.bundledBgmId) {
-          audioBase64 = await readBundledBgmDataUrl(clip.bundledBgmId);
-          fileExt = bgmById(clip.bundledBgmId)?.fileName.split(".").pop()?.toLowerCase() || "mp3";
-        } else if (clip.assetId && pid) {
-          const a = snapAssets.find((x) => x.assetId === clip.assetId);
-          if (a) {
-            audioBase64 = (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
-            fileExt = (a.filePath.split(".").pop() || "mp3").toLowerCase();
-          }
-        }
-        if (audioBase64) {
-          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
+        // 音の出どころ（同梱は中身・自分の BGM はパス＝数百 MB の WAV を文字列にしない）は `sceneBgmSource` の1か所。
+        const source = await sceneBgmSource(clip, snapAssets, pid, { readBundledBgmDataUrl, missingAssetFiles });
+        if (source) {
+          bgmRuns.push({ ...source, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
           // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
           bgmLoadFailed = true;
