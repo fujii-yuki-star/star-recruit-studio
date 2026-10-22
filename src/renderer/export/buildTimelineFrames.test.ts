@@ -77,7 +77,7 @@ describe('区間だけ描く（#1203）', () => {
   it('指した区間の枚数だけ描く', async () => {
     const d = doc({ clips: [textClip('clip_001', { durationSec: 4 })] });
     const r = await buildTimelineFrames(d, { ...baseOpts, window: { fromFrame: 30, toFrame: 60 } });
-    expect(vi.mocked(svgToPngDataUrl).mock.calls).toHaveLength(30);
+    expect(r.framesBase64).toHaveLength(30);
     expect(r.durationSec).toBeCloseTo(1, 6);
   });
 
@@ -234,7 +234,8 @@ describe('buildTimelineFrames', () => {
     expect(r.fps).toBe(FPS);
     expect(r.durationSec).toBeCloseTo(1);
     expect(r.framesBase64).toHaveLength(30);
-    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(30);
+    // 動かない1秒＝描くのは1回だけ（前のコマと同じ絵は描き直さない・書き出しの高速化 2026-10-22）。
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(1);
   });
 
   /**
@@ -245,11 +246,10 @@ describe('buildTimelineFrames', () => {
    */
   it('「最初と最後」なら、真ん中のコマにはクレジットを描かない（#359）', async () => {
     const d = doc({ clips: [textClip('clip_001', { durationSec: 10 })] });
-    await buildTimelineFrames(
+    const svgs = (await buildTimelineFrames(
       { ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'both', seconds: 1 } } },
       baseOpts,
-    );
-    const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
+    )).framesBase64!;
     expect(svgs[0]).toContain('VOICEVOX');                       // 先頭
     expect(svgs[Math.floor(svgs.length / 2)]).not.toContain('VOICEVOX'); // 真ん中
     expect(svgs[svgs.length - 1]).toContain('VOICEVOX');          // 末尾
@@ -315,8 +315,8 @@ describe('buildTimelineFrames', () => {
       clips: [textClip('clip_001', { durationSec: 1 }), voiceClip('clip_002', 2, { startSec: 0.5, durationSec: 0.5 })],
     });
     d.videoSettings = { ...d.videoSettings, creditDisplay: { mode: 'always' } };
-    await buildTimelineFrames(d, baseOpts);
-    const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
+    // コマごとの絵（同じ絵のコマは前のコマを使い回す＝描く回数ではなく、出来たコマで見る）。
+    const svgs = (await buildTimelineFrames(d, baseOpts)).framesBase64!;
     expect(svgs[0]).toContain('VOICEVOX:ずんだもん'); // 誰もしゃべっていない＝既定の声
     expect(svgs[20]).toContain('VOICEVOX:四国めたん'); // speaker=2＝四国めたん（既定のずんだもんと別のキャラ）
   });
@@ -327,12 +327,65 @@ describe('buildTimelineFrames', () => {
     const d = doc({
       clips: [textClip('clip_001', { durationSec: 1 }), voiceClip('clip_002', 2, { startSec: 0.5, durationSec: 0.5 })],
     });
-    await buildTimelineFrames(d, baseOpts);
-    const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
+    const svgs = (await buildTimelineFrames(d, baseOpts)).framesBase64!;
     for (const svg of [svgs[0], svgs[20]]) {
       expect(svg).toContain('>VOICEVOX:四国めたん</text>');
     }
     expect(svgs[0]).not.toContain('VOICEVOX:ずんだもん'); // 鳴る声が四国めたんだけ＝既定の声は名乗らない
+  });
+
+  // **前のコマと同じ絵は描き直さない**（書き出しの高速化 2026-10-22）。⚠️ 絵が変わるのに使い回すと、動画が化ける。
+  describe('前のコマと同じ絵は使い回す', () => {
+    it('描く材料が同じコマは描かず、置き場では前のコマから写す（番号は順に・全部のコマが置かれる）', async () => {
+      const staged: string[] = [];
+      await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.2 })] }), {
+        ...baseOpts,
+        stageFrame: async (_d, i, png) => { staged.push(`put ${i} ${png.length}`); },
+        copyFrame: async (_d, from, to) => { staged.push(`copy ${from}->${to}`); },
+      });
+      expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(1);
+      expect(staged[0]).toMatch(/^put 0 /);
+      expect(staged.slice(1)).toEqual(['copy 0->1', 'copy 1->2', 'copy 2->3', 'copy 3->4', 'copy 4->5']);
+    });
+
+    it('絵が変わるコマ（文字が出る・消える）は必ず描き直す＝出来たコマはその時刻の絵', async () => {
+      const d = doc({ clips: [textClip('clip_001', { durationSec: 0.1, text: 'あ' }), textClip('clip_002', { startSec: 0.1, durationSec: 0.1, text: 'い' })] });
+      const r = await buildTimelineFrames(d, baseOpts);
+      const frames = r.framesBase64!;
+      expect(frames).toHaveLength(6);
+      expect(frames.slice(0, 3).every((f) => f.includes('>あ<'))).toBe(true);
+      expect(frames.slice(3).every((f) => f.includes('>い<') && !f.includes('>あ<'))).toBe(true);
+      expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(2);
+    });
+
+    it('写す口が無ければ、同じ PNG をもう一度置く', async () => {
+      const staged: number[] = [];
+      await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.1 })] }), {
+        ...baseOpts,
+        stageFrame: async (_d, i) => { staged.push(i); },
+      });
+      expect(staged).toEqual([0, 1, 2]);
+      expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(1);
+    });
+
+    it('写す前に、写す元（前のコマ）を置き終えている', async () => {
+      const done = new Set<number>();
+      const order: string[] = [];
+      await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.1 })] }), {
+        ...baseOpts,
+        stageFrame: async (_d, i) => { await new Promise((r) => setTimeout(r, 5)); done.add(i); },
+        copyFrame: async (_d, from, to) => { order.push(done.has(from) ? 'ok' : `missing ${from}`); done.add(to); },
+      });
+      expect(order).toEqual(['ok', 'ok']);
+    });
+
+    it('置くのに失敗したら、書き出しは失敗で止まる（重ねて運んでも失敗を落とさない）', async () => {
+      await expect(buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.1 })] }), {
+        ...baseOpts,
+        stageFrame: async () => { throw new Error('disk full'); },
+        copyFrame: async () => undefined,
+      })).rejects.toThrow('disk full');
+    });
   });
 
   it('中止したらそこで止める（長い動画でも押した中止が効く）', async () => {

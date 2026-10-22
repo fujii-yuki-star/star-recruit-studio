@@ -209,6 +209,16 @@ export async function stageExportFrame(dirName: string, frameIndex: number, data
 }
 
 /**
+ * **前のコマと同じ絵のコマ**を、前のコマのファイルから作る（書き出しの高速化・2026-10-22）。
+ * 描く・PNG にする・base64 で運ぶ、を省く（同じ SVG から作った PNG は同じ＝絵は変わらない）。
+ * ⚠️ 空きの見張りは**複写したのと同じ大きさ**で数える＝ハードリンクで済んでも多めに見積もる側（止めどきが今より遅れない）。
+ */
+export async function copyExportFrame(dirName: string, fromIndex: number, toIndex: number, dataBase64: string): Promise<void> {
+  await invoke('copy_export_frame', { dirName, fromIndex, toIndex });
+  await accountStagedFrame(dataBase64);
+}
+
+/**
  * 空きが足りなくなったので止めた（#1211）。⚠️ **文はそのまま利用者に出す**（§2-5 を通した文）。
  */
 export class ExportDiskShortError extends Error {
