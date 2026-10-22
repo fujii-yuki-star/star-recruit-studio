@@ -104,6 +104,23 @@ export async function assetDisplayUrl(projectId: string, relPath: string): Promi
 }
 
 /**
+ * 取り込んだ音を**鳴らすための URL**（負荷・耐久の点検 2026-10-22）。
+ *
+ * ⚠️ **中身を文字列にしない**＝前は data URL で読んでいた（`readAssetDataUrl`）ので、数百 MB の WAV を選ぶと
+ *   Rust・受け渡し・画面のそれぞれに丸ごと（base64 で 1.33 倍）載り、アプリが落ちうる。asset:// なら WebView が
+ *   ディスクから必要なぶんだけ読む（動画と同じ）。
+ * ⚠️ **ファイルが無ければ null**＝「読めるか」を見ている所（書き出しの「読めない音」など）が、前と同じく
+ *   見つからない音を見分けられるように、URL を組む前に在るかを確かめる。
+ * ⚠️ **毎回別の URL**（`?t=`）＝同じ名前のファイルを選び直したとき、前の音を鳴らさない（動画と同じ理由）。
+ */
+export async function audioPlayUrl(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri() || !relPath) return null;
+  if ((await missingAssetFiles(projectId, [relPath])).length > 0) return null;
+  const display = await assetDisplayUrl(projectId, relPath);
+  return display ? `${display}?t=${Date.now()}` : null;
+}
+
+/**
  * 音の波形の山（#332）。0.0〜1.0 を `buckets` 個返す（音が無い・読めないときは空）。
  *
  * ⚠️ **素材のバイトを JS に載せない**（ADR-0004・§2-1）＝Rust が PCM を受けて**山だけ**を返す。

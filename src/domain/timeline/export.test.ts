@@ -251,6 +251,23 @@ describe('timelineAudioRuns', () => {
     expect(timelineAudioRuns(d).runs.map((r) => r.loop)).toEqual([false, true]);
   });
 
+  // ⚠️ **取り込んだ音はパスで渡す**（負荷・耐久の点検 2026-10-22）＝中身（base64）にすると数百 MB の WAV で落ちうる。
+  //   読み上げ・同梱 BGM は今までどおり中身（`audioSrcByKey`）で渡す＝パスを持たせない。
+  it('取り込んだ音だけパスで渡す（読み上げ・同梱 BGM は持たない）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.wav' }],
+      clips: [
+        voiceClip('clip_001'),
+        clip('clip_002', { bundledBgmId: 'found-new-hope' }),
+        clip('clip_003', { assetId: 'asset_001' }),
+      ],
+    } as never);
+    const byId = new Map(timelineAudioRuns(d).runs.map((r) => [r.clipId, r]));
+    expect(byId.get('clip_001')!.assetPath).toBeUndefined();
+    expect(byId.get('clip_002')!.assetPath).toBeUndefined();
+    expect(byId.get('clip_003')).toMatchObject({ sourceKey: 'asset:asset_001', assetPath: 'assets/asset_001.wav', fileExt: 'wav' });
+  });
+
   it('音量は再生と同じ解決（BGM の既定は 0.25）', () => {
     const d = doc({ clips: [clip('clip_001', { bundledBgmId: 'found-new-hope' })] });
     expect(timelineAudioRuns(d).runs[0].volume).toBeCloseTo(0.25);

@@ -2,6 +2,8 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef } from "react";
 import { Switch } from "./ui";
 import { useProjectStore } from "../store/projectStore";
+import { ASSET_TOO_LARGE_PICK_SMALLER, assetTooLargeMessage } from "../uiLabels";
+import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -52,6 +54,12 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    // ⚠️ **大きすぎるファイルは読む前に断る**（負荷・耐久の点検 2026-10-22）＝ここは中身を丸ごと文字列にして運ぶので、
+    //   数百 MB の WAV を選ぶとアプリが落ちうる（取り込みのほかの経路と同じ上限）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      useProjectStore.setState({ bgmError: assetTooLargeMessage(ASSET_TOO_LARGE_PICK_SMALLER) });
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") void setBgm({ name: file.name, dataUrl: reader.result });
