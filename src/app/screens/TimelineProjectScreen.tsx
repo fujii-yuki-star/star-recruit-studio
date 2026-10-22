@@ -566,13 +566,6 @@ const NOTHING_SELECTED_HINT = {
 } as const;
 
 /**
- * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
- *
- * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
- * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
- * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
- */
-/**
  * **前と同じ `deps` なら描き直さない**入れ物（負荷試験 2026-10-22）＝再生中の並びの帯に使う。
  * ⚠️ `deps` に入れていない値を `render` の中で使うと、再生中は古いまま描かれる＝再生中に変わりうる値は必ず入れる。
  */
@@ -583,6 +576,13 @@ const FrozenWhilePlaying = memo(
   (a, b) => a.deps.length === b.deps.length && a.deps.every((d, i) => Object.is(d, b.deps[i])),
 );
 
+/**
+ * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
+ *
+ * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
+ * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
+ * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
+ */
 export function TimelineProjectScreen({ onNavigate, presentation = "main" }: TimelineProjectScreenProps) {
   // 声を選ぶ一覧（同梱＋拡張パックの声・ADR-0060 段階3）。
   const voices = useVoiceCatalog();
@@ -2241,7 +2241,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
     const el = scrollRef.current;
     if (!el) return;
     const px = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
-    const known = fromLastMeasure ? scrollMetricsRef.current : null;
+    // 実測がまだ無い・幅が 0（大きさの合図がまだ来ていない）なら DOM を読む。
+    const last = fromLastMeasure ? scrollMetricsRef.current : null;
+    const known = last && last.width > 0 ? last : null;
     const next = playbackScrollLeft({
       scrollLeft: known?.left ?? el.scrollLeft,
       viewPx: known?.width ?? el.clientWidth,
@@ -2249,7 +2251,11 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
       headPx: useTimelineStore.getState().playheadSec * px,
       insetStartPx: LANE_LABEL_PX,
     });
-    if (next != null) el.scrollLeft = next;
+    if (next != null) {
+      el.scrollLeft = next;
+      // 送った値をすぐ覚える（`scroll` の合図は後から来る＝次のコマで古い値を見て同じ送りを繰り返さない）。
+      if (known) scrollMetricsRef.current = { left: el.scrollLeft, width: known.width };
+    }
   }, [zoomIndex, totalSec]);
   // ⚠️ 早い段階（画面を返す前）に置く＝フックの数を毎回そろえる。
   useEffect(() => {
