@@ -1596,10 +1596,9 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    * **同じ時刻に重なって出る字幕**（#1014）。⚠️ **位置は直さない**＝手で置いた場所を黙って動かさない
    *（§2-5）。実際に**描かれる矩形**で見る（箱ではない）＝`renderer` の1か所と共有。
    */
-  const subtitleOverlapCount = useMemo(
-    () => (doc ? overlappingSubtitleClips(doc, { templateOf }).length : 0),
-    [doc, templateOf],
-  );
+  // ⚠️ **編集が落ち着いてから数える**（負荷試験 2026-10-22）＝字幕の出だしの時刻ごとに画面全体の配置を作り直すので、
+  //   字幕 344・部品 2216 の動画では**1回の編集に約0.5秒**かかっていた。数は下の「切れる文字」と同じ間合いで出す。
+  const [subtitleOverlapCount, setSubtitleOverlapCount] = useState(0);
   /**
    * **枠に入りきらず「…」で切れる文字**（α 残件の洗い直し 2026-10-19）。
    *
@@ -1609,7 +1608,7 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
    */
   const [truncatedTexts, setTruncatedTexts] = useState<string[]>([]);
   useEffect(() => {
-    if (!doc) { setTruncatedTexts([]); return; }
+    if (!doc) { setTruncatedTexts([]); setSubtitleOverlapCount(0); return; }
     const timer = setTimeout(() => {
       try {
         setTruncatedTexts(timelineTruncatedTexts(doc, templateOf));
@@ -1617,6 +1616,12 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
         // 注意の計算で落ちても、編集は止めない（知らせを出さないだけ）。
         console.error("[timeline] 切れている文字の計算に失敗:", e);
         setTruncatedTexts([]);
+      }
+      try {
+        setSubtitleOverlapCount(overlappingSubtitleClips(doc, { templateOf }).length);
+      } catch (e) {
+        console.error("[timeline] 重なる字幕の計算に失敗:", e);
+        setSubtitleOverlapCount(0);
       }
     }, TRUNCATED_TEXT_CHECK_DELAY_MS);
     return () => clearTimeout(timer);
