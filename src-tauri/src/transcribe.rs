@@ -375,6 +375,7 @@ fn run(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| TRANSCRIBE_READ_FAILED.to_string())?;
+    crate::proc::bind_to_app_lifetime(&ff);
     let st = wait_child(ff, run_id)?;
     if !st.success() || !wav.is_file() {
         return Err(TRANSCRIBE_READ_FAILED.to_string());
@@ -389,6 +390,7 @@ fn run(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| TRANSCRIBE_FAILED.to_string())?;
+    crate::proc::bind_to_app_lifetime(&child);
     // 進み具合は別のスレッドで読む（読まないと出力の管が詰まって止まる）。
     if let Some(err) = child.stderr.take() {
         std::thread::spawn(move || {
