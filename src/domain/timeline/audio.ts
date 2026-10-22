@@ -211,46 +211,78 @@ export function canDenoise(doc: TimelineProject, clip: TimelineClip): boolean {
  * - 並びは `doc.clips` の順（決定的＝同じ時刻なら毎回同じ結果）。
  */
 export function audioCuesAt(doc: TimelineProject, timeSec: number): AudioCue[] {
-  const audible = new Set(
-    doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.hidden).map((t) => t.id),
-  );
-  const trackGain = new Map(doc.tracks.map((t) => [t.id, trackGainOf(t)]));
+  const ctx = audioTrackContextOf(doc);
   const cues: AudioCue[] = [];
   for (const clip of doc.clips) {
-    if (!isAudioClip(clip) || clip.hidden || !audible.has(clip.trackId)) continue;
-    if (timeSec < clip.startSec || timeSec >= clipEndSec(clip)) continue;
-    const localSec = timeSec - clip.startSec;
-    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
-    cues.push({
-      clipId: clip.id,
-      // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
-      offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
-      // ⚠️ **列の音量は鳴らす値にだけ掛ける**（ADR-0067）＝部品の音量の線（`clipGainAt`）は部品の設定のまま。
-      // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝書き出し（`timelineAudioRuns`）と同じ順＝上限を掛ける道で割らない。
-      volume: clampVolume(clipGainAt(clip, doc, localSec) * (trackGain.get(clip.trackId) ?? 1)),
-      speed,
-    });
+    const cue = audioCueOfClipAt(doc, clip, timeSec, ctx);
+    if (cue) cues.push(cue);
+  }
+  return cues;
+}
+
+/** 列から決まる材料（鳴る列・列の音量）＝部品ごとに作り直さない（列の配列ごとに作り置く）。 */
+interface AudioTrackContext {
+  audible: ReadonlySet<string>;
+  trackGain: ReadonlyMap<string, number>;
+}
+const trackContextOf = new WeakMap<readonly Track[], AudioTrackContext>();
+function audioTrackContextOf(doc: TimelineProject): AudioTrackContext {
+  const hit = trackContextOf.get(doc.tracks);
+  // ⚠️ 列の配列をその場で書き換えられても古い材料を使わない（数で見分ける・検査は配列を書き換えることがある）。
+  if (hit && hit.trackGain.size === doc.tracks.length) return hit;
+  const ctx = {
+    audible: new Set(doc.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.hidden).map((t) => t.id)),
+    trackGain: new Map(doc.tracks.map((t) => [t.id, trackGainOf(t)])),
+  };
+  trackContextOf.set(doc.tracks, ctx);
+  return ctx;
+}
+
+/**
+ * **その部品が** 時刻 `timeSec` に鳴らす音（鳴らなければ `null`）＝`audioCuesAt` の1部品ぶん。
+ *
+ * ⚠️ **部品の数の2乗にしない**（負荷試験 2026-10-22）＝書き出しの音の並べ方・書き出し前の門は「この部品は鳴るか」を
+ * 部品ごとに `audioCuesAt(...).some(...)` で聞いていた＝部品ごとに全部の部品を見ていたので、部品 2216 の動画では
+ * **1回の編集に約1.5秒**かかった（門は編集のたびに見直される）。規則は1つ＝`audioCuesAt` もこれを並べるだけ。
+ * 同じ部品が両方の道に当たるときは、`audioCuesAt` の並びと同じく**部品の音の側**を返す。
+ */
+export function audioCueOfClipAt(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  timeSec: number,
+  ctx: AudioTrackContext = audioTrackContextOf(doc),
+): AudioCue | null {
+  if (isAudioClip(clip) && !clip.hidden && ctx.audible.has(clip.trackId)) {
+    if (timeSec >= clip.startSec && timeSec < clipEndSec(clip)) {
+      const localSec = timeSec - clip.startSec;
+      const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+      return {
+        clipId: clip.id,
+        // 場面形式の動画スロットと同じ式（開始遅延は無いので 0）。速度を掛けないと絵から線形にずれる。
+        offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: clip.sourceStartSec ?? 0, speed })),
+        // ⚠️ **列の音量は鳴らす値にだけ掛ける**（ADR-0067）＝部品の音量の線（`clipGainAt`）は部品の設定のまま。
+        // ⚠️ **掛けたあとで値域へ収める**（PR レビュー 🟡）＝書き出し（`timelineAudioRuns`）と同じ順＝上限を掛ける道で割らない。
+        volume: clampVolume(clipGainAt(clip, doc, localSec) * (ctx.trackGain.get(clip.trackId) ?? 1)),
+        speed,
+      };
+    }
   }
   // **ノイズを減らした動画の元の音**（ADR-0068）＝`<video>` は黙らせ、作り置きを同じ時刻・速さで鳴らす。
   // ⚠️ 鳴るかどうか・音量・頭出しは書き出しと同じ `placementOriginalAudio`／使える長さを通す（勝手に鳴らし続けない）。
   // ⚠️ **描かれるかは書き出しと同じ述語**（`isDrawnClip`＝隠した部品・隠した列・隠したまとまり）＝自前で判定すると、
   //   まとまりごと隠した動画だけプレビューで鳴り書き出しで鳴らない（PR レビュー 🔴）。
-  for (const clip of doc.clips) {
-    if (clip.kind === TIMELINE_CLIP_KIND.audio || !isDrawnClip(doc, clip)) continue;
-    if (!denoisesClip(doc, clip)) continue;
-    const place = videoPlacementsOfClip(doc, clip)[0];
-    const org = place ? placementOriginalAudio(doc, place) : null;
-    if (!place || !org) continue;
-    const localSec = timeSec - clip.startSec;
-    if (localSec < 0 || timeSec >= clipEndSec(clip) || localSec >= place.durationSec) continue;
-    cues.push({
-      clipId: clip.id,
-      offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: org.sourceStartSec, speed: org.speed })),
-      volume: org.volume,
-      speed: org.speed,
-    });
-  }
-  return cues;
+  if (clip.kind === TIMELINE_CLIP_KIND.audio || !denoisesClip(doc, clip) || !isDrawnClip(doc, clip)) return null;
+  const place = videoPlacementsOfClip(doc, clip)[0];
+  const org = place ? placementOriginalAudio(doc, place) : null;
+  if (!place || !org) return null;
+  const localSec = timeSec - clip.startSec;
+  if (localSec < 0 || timeSec >= clipEndSec(clip) || localSec >= place.durationSec) return null;
+  return {
+    clipId: clip.id,
+    offsetSec: Math.max(0, clipTimeAtSceneTime(localSec, { startDelaySec: 0, clipStartSec: org.sourceStartSec, speed: org.speed })),
+    volume: org.volume,
+    speed: org.speed,
+  };
 }
 
 /**

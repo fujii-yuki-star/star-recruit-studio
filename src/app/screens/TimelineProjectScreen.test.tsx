@@ -9454,6 +9454,43 @@ describe("TimelineProjectScreen: 塞がっているときの置き方（#1252）
   });
 });
 
+// 再生中は列と帯を描き直さない（負荷試験 2026-10-22）。⚠️ **再生中に変わりうるものは描き直す**＝
+// 入れ物の `deps` から抜けると、再生中に選んだ・動かした結果が止めるまで帯に出ない（古いまま描かれる）。
+describe("TimelineProjectScreen: 再生中の帯", () => {
+  const clips = [
+    { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+    { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "い" },
+  ] as TimelineProject["clips"];
+  const band = (id: string) => document.querySelector(`[data-clip-id="${id}"]`) as HTMLElement;
+
+  it("再生中に選び直すと、帯の選んだ印がすぐ移る", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.setState({ isPlaying: true, selectedClipIds: ["clip_001"] }));
+    expect(band("clip_001").className).toContain("timeline-clip--selected");
+    act(() => useTimelineStore.setState({ selectedClipIds: ["clip_002"] }));
+    expect(band("clip_001").className).not.toContain("timeline-clip--selected");
+    expect(band("clip_002").className).toContain("timeline-clip--selected");
+    act(() => useTimelineStore.setState({ isPlaying: false }));
+  });
+
+  it("再生中に文書が変わると、帯の位置がすぐ変わる（再生位置だけが変わるときは描き直さない）", () => {
+    open({ clips });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => useTimelineStore.setState({ isPlaying: true }));
+    const before = band("clip_002").style.left;
+    act(() => useTimelineStore.getState().setPlayhead(3));
+    expect(band("clip_002").style.left).toBe(before);
+    // 文書を差し替える（再生中は編集を断る操作もあるので、合図ではなく文書そのものを変える）。
+    act(() => {
+      const d = useTimelineStore.getState().doc!;
+      useTimelineStore.setState({ doc: { ...d, clips: d.clips.map((c) => (c.id === "clip_002" ? { ...c, startSec: 8 } : c)) } });
+    });
+    expect(band("clip_002").style.left, "再生中に動かした帯が古い位置のまま").not.toBe(before);
+    act(() => useTimelineStore.setState({ isPlaying: false }));
+  });
+});
+
 // 「並び」の道具は1行・狭いと「…」へ畳む（ADR-0048 追補 2026-10-21・α 最終点検）。
 // ⚠️ **以前は2本×2段＝118px**を取り、帯の見える高さが既定の窓で約 127px（3列ぶん）しか無かった。
 // jsdom は CSS を当てないので `getClientRects` は空＝全部「隠れている」扱い。見えている物を外すのは別の検査で見る。

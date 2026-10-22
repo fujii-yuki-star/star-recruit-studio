@@ -7,11 +7,24 @@
 //  （場面形式の `unusedAssetIds` と同じ規則・α-6 出口監査 🔴）。
 import type { TimelineProject } from './types';
 
+/**
+ * 文書ごとの答えの作り置き（同じ素材の一覧で聞かれたときだけ使う）。
+ * ⚠️ **取り消しの履歴の文書は変わらない**（ADR-0020＝編集のたびに新しい文書を積む）＝作り置けば、編集のたびに
+ * 文書まるごとの文字列を履歴の数（最大50）だけ作り直さずに済む（負荷試験 2026-10-22＝部品 2216 の動画で1回の編集に約50ms）。
+ * ⚠️ 文字列そのものは持たない（文書1つで数百KB×50）＝見つかった番号だけ持つ。
+ */
+const mentionsCache = new WeakMap<TimelineProject, { key: string; used: Set<string> }>();
+
 /** 素材の一覧の外で、その番号が文字として出てくるか（`"asset_001"` を引用符ごと探す＝`asset_0011` に当たらない）。 */
 function mentions(doc: TimelineProject, ids: readonly string[]): Set<string> {
+  const key = ids.join("\n");
+  const hit = mentionsCache.get(doc);
+  if (hit && hit.key === key) return hit.used;
   const { assets: _assets, ...rest } = doc;
   const text = JSON.stringify(rest);
-  return new Set(ids.filter((id) => text.includes(JSON.stringify(id))));
+  const used = new Set(ids.filter((id) => text.includes(JSON.stringify(id))));
+  mentionsCache.set(doc, { key, used });
+  return used;
 }
 
 /**
