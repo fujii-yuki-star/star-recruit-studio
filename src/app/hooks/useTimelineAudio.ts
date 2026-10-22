@@ -6,6 +6,7 @@ import { audioCuesAt, audioLoops, playedAudioKeyOfClip, soloFilteredCues } from 
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
 import { keepsPlayingWhileHidden } from "./playbackPulse";
+import { releaseAudio } from "./releaseAudio";
 
 /** 頭出しをやり直す閾値（秒）。これ未満のズレは直さない＝毎フレーム `currentTime` を触って音が途切れるのを防ぐ。 */
 const RESYNC_THRESHOLD_SEC = 0.25;
@@ -53,7 +54,7 @@ export function useTimelineAudio(enabled = true): void {
     const playing = playingRef.current;
     const vols = volumeRef.current;
     const stopAll = (): void => {
-      for (const el of playing.values()) el.pause();
+      for (const el of playing.values()) releaseAudio(el);
       for (const v of vols.values()) v.dispose();
       playing.clear();
       vols.clear();
@@ -69,7 +70,7 @@ export function useTimelineAudio(enabled = true): void {
     // 鳴り終わった（区間を出た）ものを止める。
     for (const [clipId, el] of playing) {
       if (!live.has(clipId)) {
-        el.pause();
+        releaseAudio(el);
         vols.get(clipId)?.dispose();
         vols.delete(clipId);
         playing.delete(clipId);
@@ -92,10 +93,12 @@ export function useTimelineAudio(enabled = true): void {
         void el.play().catch(() => {
           // 端末/ブラウザの制限で鳴らせないことがある。絵は進めたいのでここでは落とさず、
           // **同じクリップを二度と試さない**（毎フレーム作り直さない）。
-          started.pause();
+          // ⚠️ **この要素がまだ現役のときだけ**＝止めた・作り直した後の「再生を打ち切られた」で
+          //   鳴らせない印を付けない（付けると、止めて再生し直したときにその部品だけ二度と鳴らない）。
+          if (playing.get(cue.clipId) !== started) return;
+          releaseAudio(started);
           failedRef.current.add(cue.clipId);
-          // 追跡から外すのは**この要素がまだ現役のとき**だけ（シークで作り直した新しい方を外さない）。
-          if (playing.get(cue.clipId) === started) playing.delete(cue.clipId);
+          playing.delete(cue.clipId);
         });
       } else if (Math.abs(el.currentTime - cue.offsetSec) > RESYNC_THRESHOLD_SEC) {
         el.currentTime = cue.offsetSec; // シーク・コマ落ちで離れたときだけ合わせ直す
@@ -133,7 +136,7 @@ export function useTimelineAudio(enabled = true): void {
     const vols = volumeRef.current;
     const ctx = ctxRef;
     return () => {
-      for (const el of playing.values()) el.pause();
+      for (const el of playing.values()) releaseAudio(el);
       for (const v of vols.values()) v.dispose();
       playing.clear();
       vols.clear();

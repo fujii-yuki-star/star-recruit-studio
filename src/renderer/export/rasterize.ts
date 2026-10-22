@@ -18,7 +18,25 @@ let embedder = new FontEmbedder(defaultFontBytesLoader);
 
 /** 書き出しの始めに呼ぶ（`loadExportFonts`）。覚えた字体を捨てる。 */
 export function resetExportFontEmbedder(): void {
+  if (releaseTimer != null) clearTimeout(releaseTimer);
+  releaseTimer = null;
   embedder = new FontEmbedder(defaultFontBytesLoader);
+}
+
+/**
+ * **しばらく焼かなければ、覚えた字体を捨てる**（負荷・耐久の点検 2026-10-22）＝覚えているのは字体のファイル丸ごと
+ * （日本語の字体は数 MB〜20MB 余り）と、使う字だけの字体。前は次の書き出しまで持ちっぱなしだった（書き出しの後も、
+ * 見本の絵を1枚作っただけでも）。⚠️ 捨てても絵は変わらない＝次に焼くときに読み直して作り直すだけ
+ * （同じ字体のファイルから同じ字の形を取る）。書き出しの間はコマが続けて来るので、途中で捨てることはまず無い。
+ */
+export const FONT_CACHE_IDLE_MS = 60_000;
+let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleFontRelease(): void {
+  if (releaseTimer != null) clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(() => {
+    releaseTimer = null;
+    embedder = new FontEmbedder(defaultFontBytesLoader);
+  }, FONT_CACHE_IDLE_MS);
 }
 
 /** SVG文字列を canvas で PNG(data URL) に焼く。フォント確定を待ってから描画する。 */
@@ -41,8 +59,10 @@ export async function svgToPngDataUrl(svg: string, width: number, height: number
   try {
     withFonts = await embedder.embed(svg);
   } catch {
+    scheduleFontRelease();
     throw new Error('動画の文字の形を読み込めませんでした。アプリを開き直してから、もう一度書き出してください。');
   }
+  scheduleFontRelease();
   const blob = new Blob([withFonts], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   try {

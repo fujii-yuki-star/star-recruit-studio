@@ -29,6 +29,7 @@ import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
 import { useSpaceFocusTracking, yieldsSpaceTo } from "../hooks/spaceFocus";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
+import { releaseAudio } from "../hooks/releaseAudio";
 import {
   PlayIcon,
   StopIcon,
@@ -403,7 +404,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       return () => {
         cancelled = true;
         lineTimers.forEach((t) => window.clearTimeout(t));
-        lineAudios.forEach((a) => a.pause());
+        lineAudios.forEach((a) => releaseAudio(a)); // 止めた音は使い回さない＝音源を手放す
         lineControls.forEach((c) => c.dispose()); // 共有 ctx に古い source/gain を残さない（#465 P2）
         narrationAudioRef.current = null;
         narrationCtlRef.current = null;
@@ -430,7 +431,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     }
     return () => {
       window.clearTimeout(endTimer);
-      audio?.pause();
+      if (audio) releaseAudio(audio);
       narrationCtlRef.current?.dispose(); // 共有 ctx に古い source/gain を残さない（#465 P2）
       narrationAudioRef.current = null;
       narrationCtlRef.current = null;
@@ -467,7 +468,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     })();
     return () => {
       cancelled = true;
-      bgmAudioRef.current?.pause();
+      if (bgmAudioRef.current) releaseAudio(bgmAudioRef.current);
       bgmCtlRef.current?.dispose(); // 共有 ctx に古い source/gain を残さない（#465 P2）
       bgmAudioRef.current = null;
       bgmCtlRef.current = null;
