@@ -12,12 +12,14 @@
 // **壊れた参照は黙って消さない**（§2-5）＝連動先が見つからない字幕は、自分の文へ落ちて描かれ続け、
 // 検証（`11 §8` V29）が「連動先が見つからない」と知らせる。
 import { TIMELINE_CLIP_KIND } from '../enums';
+import { findClipById } from './clipIndex';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 字幕クリップが指している読み上げクリップ（指していない・見つからない＝`undefined`）。 */
 export function boundVoiceClip(doc: TimelineProject, clip: TimelineClip): TimelineClip | undefined {
   if (clip.kind !== TIMELINE_CLIP_KIND.subtitle || !clip.voiceClipId) return undefined;
-  const found = doc.clips.find((c) => c.id === clip.voiceClipId);
+  // ⚠️ 索引で引く（字幕ごとに全部の部品を探すと、部品の数の2乗になる＝負荷試験 2026-10-22）。
+  const found = findClipById(doc.clips, clip.voiceClipId);
   return found?.kind === TIMELINE_CLIP_KIND.voice ? found : undefined;
 }
 

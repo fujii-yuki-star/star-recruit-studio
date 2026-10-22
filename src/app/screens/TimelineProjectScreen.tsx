@@ -1623,6 +1623,17 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
   }, [doc, templateOf]);
   // 連動先の候補（この動画にある読み上げの部品）。
   const voiceClips = useMemo(() => (doc ? doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice) : []), [doc]);
+  // 列ごとの部品（文書の並び順のまま）。⚠️ **描くたびに列ごとに全部の部品を探さない**（負荷試験 2026-10-22）＝
+  // 再生中は1コマごとに画面を描き直すので、列 16・部品 2216 の動画では1コマに約3.5万回比べていた。文書が変わったときだけ作る。
+  const clipsByTrack = useMemo(() => {
+    const byTrack = new Map<string, TimelineClip[]>();
+    for (const c of doc?.clips ?? []) {
+      const list = byTrack.get(c.trackId);
+      if (list) list.push(c);
+      else byTrack.set(c.trackId, [c]);
+    }
+    return byTrack;
+  }, [doc?.clips]);
   // 素材が入っていない差し込み口は、灰色の「（未設定）」の枠がそのまま動画に焼き込まれる（`sceneSvg`）。
   // 黙ってそのまま出さずに知らせる（§2-5・場面形式の公開前チェックと同じ扱い＝ADR-0026②）。
   const emptySlotCount = useMemo(() => {
@@ -5621,8 +5632,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                             {clipLabel(clipWithShownText(doc, c), doc.assets)}
                           </div>
                         ))}
-                      {doc.clips
-                        .filter((c) => laneOf(c) === track.id)
+                      {/* 掴んで運んでいる間だけは、運んでいる帯が別の列に見える（`laneOf`）＝全部から選び直す。 */}
+                      {(clipDrag ? doc.clips.filter((c) => laneOf(c) === track.id) : (clipsByTrack.get(track.id) ?? []))
                         .map((c) => (
                           <button
                             key={c.id}
@@ -5719,8 +5730,8 @@ export function TimelineProjectScreen({ onNavigate, presentation = "main" }: Tim
                       {/* 帯の操作を開く「⋮」（#701）＝列の行と同じ逃げ道。
                           ⚠️ **帯の中には入れない**＝`button` の入れ子は不正で、しかも帯の読み上げ名に
                           「⋮」が混ざって「その帯を名前で掴む」ができなくなる。帯と同じ場所に**並べて**置く。 */}
-                      {doc.clips
-                        .filter((c) => laneOf(c) === track.id && selectedClipIds.includes(c.id))
+                      {(clipDrag ? doc.clips.filter((c) => laneOf(c) === track.id) : (clipsByTrack.get(track.id) ?? []))
+                        .filter((c) => selectedClipIds.includes(c.id))
                         .map((c) => (
                           <button
                             key={`${c.id}-menu`}
