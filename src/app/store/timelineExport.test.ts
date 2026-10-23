@@ -232,7 +232,7 @@ describe('exportTimelineVideo', () => {
     await open(doc());
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(ffmpegMod.exportVideo)).toHaveBeenCalledWith(
-      [{ framesDir: 'timeline_frames', fps: 30, durationSec: 5 }],
+      [{ framesDir: 'timeline_frames', fps: 30, durationSec: 5, expectedFrames: 150 }],
       'テスト動画',
       [],
       'proj_20260729_001',

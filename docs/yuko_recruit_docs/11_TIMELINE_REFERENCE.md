@@ -1168,7 +1168,12 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
   PNG にするのは別スレッド（`pngEncoder`＝1つ・増やしても速くならなかった）で、**バイトのまま**運ぶ（`stage_export_frame_png`）／
   運ぶのは `STAGING_IN_FLIGHT` 枚まで重ねる／SVG の中の大きな data URL は前のコマの Blob の部品を使い回す（`svgBlob`）。
   ⚠️ **画素のまま（RGBA）は運ばない**＝1コマ 8MB で受け渡しだけで約 200ms かかった。⚠️ `canvas.toBlob` も使わない
-  ＝画面が空くまで PNG 化を後回しにするので遅くなった。見た目パターンと
+  ＝画面が空くまで PNG 化を後回しにするので遅くなった。
+  ⚠️ **コマは隠した別の窓でも描く**（ADR-0070）＝長い区間（`PARALLEL_MIN_FRAMES` 以上）は、コマの範囲を小分け（`PARALLEL_CHUNK_FRAMES`）
+  にして本体と窓で取り合い、**同じ置き場へ区間の頭から数えた番号で**置く（`stageIndexBase`）＝FFmpeg への渡し方は1窓と同じ。
+  窓の数は `extraRenderWindows`（コアと空きメモリ・最大2つ足す）。窓は確かめの1コマ（`probeHash`）が本体と同じときだけ使い、
+  落ちた・黙った窓の範囲は本体が描き直す。動画の部品のコマは本体が先に1回だけ焼き出す（`stageTimelineVideos`）。
+  FFmpeg の前に置き場のコマがそろっているかを Rust が確かめる（`expectedFrames`）。見た目パターンと
   **素材の実寸**（`assetSizes`）は画面から受け取る＝見えているものがそのまま出る（ADR-0001）。
   ⚠️ **素材の絵だけは画面のものを渡さない**（表示用の URL は書き出しでは読めない＝下記）。
   出来上がりは場面形式の**アニメ場面と同じ形**（`framesDir`＋`fps`＋`durationSec`）なので、**FFmpeg 側は

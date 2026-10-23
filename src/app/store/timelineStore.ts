@@ -73,6 +73,12 @@ import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
 import { renderTimelineThumbnail, timelineThumbnailKey } from "../../renderer/export/timelineThumbnail";
 import { thumbnailSourcePath } from "../../domain/timeline/thumbnail";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { PARALLEL_MIN_FRAMES } from "../../renderer/export/parallelFrames";
+import { extraRenderWindows } from "../../domain/export/renderWindowPlan";
+import { availableMemoryBytes, canOpenRenderWindows, closeRenderWindow, onRenderReport, openRenderWindow, reasonForLog, sendToRenderWindow } from "../../infrastructure/renderWindowLink";
+import { packFontSourceList } from "../../infrastructure/userFontFs";
+import { openRenderHelpers, type RenderHelperPool, type RenderSegment } from "../renderWindow/renderHelpers";
+import { probeFrameOf, probeHash, sessionDrawOptions, sessionTemplateAssets, type RenderSessionPayload } from "../renderWindow/renderSession";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import type { LayerBackground, TextShadow } from "../../domain/template/types";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
@@ -89,7 +95,7 @@ import {
   accountStagedVideo,
   beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
   endExportDiskWatch, exportVideo, listenExportProgress,
-  copyExportFrames, readExportFrame, stageClipFrames, stageExportFrame, stageExportFramePng,
+  accountStagedFramesFromHelper, copyExportFrames, readExportFrame, stageClipFrames, stageExportFrame, stageExportFramePng,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
@@ -2989,6 +2995,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return; // 走行中のまま固まらせない（立てた `preparing` を戻す）
     }
     let unlisten: (() => void) | undefined;
+    /** 書き出しのコマを描く隠した窓（ADR-0070）。**どの出口でも閉じる**（finally）。 */
+    let helperPool: RenderHelperPool | null = null;
     try {
       // 見た目パターンの解決は**代表フレームの要否**（どの枠が実フレームで描かれるか＝#512 段3）にも
       // 要るので、絵を描く手前ではなく**ここで**用意する（同じ表を2度作らない）。
@@ -3085,22 +3093,30 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **空きを見張る**（#1211）＝焼くコマ数は**割り方が既に知っている**ので渡せる。
       // 渡すと「このままでは足りない」を**数十コマで**判じられる（いまは12分以上待たされてから尽きる）。
       // ⚠️ **倒せた区間は1コマも焼かない**ので、そのぶんは数に入れない（決定22-2 追補1）。
-      beginExportDiskWatch({
-        totalFrames: bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps),
-        outPath: outputPath,
-      });
-      const parts = await buildTimelineParts(doc, {
-        templateOf,
-        assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+      const bakeTotal = bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps);
+      beginExportDiskWatch({ totalFrames: bakeTotal, outPath: outputPath });
+      // 描く材料（ADR-0070＝隠した別の窓も**同じ組み立て**を通す＝`sessionDrawOptions`）。
+      const drawSession = {
+        templates: deps.templates,
         // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
-        assetSizeOf: (id) => assetSizes[id],
-        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
-        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        assetSizes,
         // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
         // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
         //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
         outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, exportSizeIsLight(get().exportSize)),
+        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
+        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
+      };
+      const drawOptions = sessionDrawOptions(drawSession, (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined));
+      // **隠した別の窓でも描く**（ADR-0070）＝長い動画で、コアと空きメモリに余裕があるときだけ。使えなければ本体だけ（いままでどおり）。
+      helperPool = bakeTotal >= PARALLEL_MIN_FRAMES && canOpenRenderWindows()
+        ? await openHelpersForExport(doc, drawSession, drawOptions, deps, exportSrcById)
+        : null;
+      console.info(`[export] render windows: ${helperPool?.size() ?? 0}`);
+      const parts = await buildTimelineParts(doc, {
+        ...drawOptions,
+        ...(helperPool && helperPool.size() > 0 ? { parallelDrawersFor: (seg: RenderSegment) => helperPool!.drawersFor(seg) } : {}),
         stageFrame: stageExportFrame,
         // ⚠️ **PNG は別スレッドで作り、バイトのまま運ぶ**（書き出しの高速化・2026-10-23）＝base64 の口より優先される。
         stageFramePng: stageExportFramePng,
@@ -3136,7 +3152,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 区間を書き出しの入力へ写す（#1203）。⚠️ **音は渡さない**（`useOriginalAudio: false`）＝
       // 動画の元の音は**下の `bgmRuns`** で渡っているので、ここでも鳴らすと**二重に鳴る**。
       const scenes = parts.map((p) => {
-        if (!p.video) return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir };
+        if (!p.video) {
+          return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir, ...(p.expectedFrames != null ? { expectedFrames: p.expectedFrames } : {}) };
+        }
         const asset = doc.assets.find((x) => x.assetId === p.video!.assetId);
         return {
           fps: p.fps,
@@ -3200,6 +3218,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
     } finally {
       unlisten?.();
+      // ⚠️ **隠した窓はどの出口でも閉じる**（ADR-0070）＝残すと、見えない窓がメモリを持ったまま居続ける。
+      await helperPool?.close().catch(() => {});
       // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが**前回の焼いた数**を
       // 引き継いで、見積もりが狂う（少なく見積もって、足りないのに通す）。
       endExportDiskWatch();
@@ -3322,6 +3342,50 @@ async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[st
         ? await audioPlayUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
         : null;
   return url ? [audioSourceKey(src), url] : null;
+}
+
+/**
+ * 書き出しのコマを描く隠した窓を開く（ADR-0070）。足す数はコアと空きメモリで決める（`extraRenderWindows`）。
+ * 本体で確かめの1コマを描き、窓の絵と印が同じ窓だけを使う。1つも使えなければ `null`（本体だけで描く）。
+ */
+async function openHelpersForExport(
+  doc: TimelineProject,
+  drawSession: Pick<RenderSessionPayload, 'templates' | 'assetSizes' | 'outputSize' | 'fontFamily' | 'fallbackCredit'>,
+  drawOptions: ReturnType<typeof sessionDrawOptions>,
+  deps: TimelineDrawDeps,
+  exportSrcById: Record<string, string>,
+): Promise<RenderHelperPool | null> {
+  try {
+    const logicalCores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined;
+    const availableBytes = await availableMemoryBytes();
+    const extra = extraRenderWindows({ logicalCores, availableBytes });
+    // 足さなかった理由を後から追えるように残す（普段の実況＝info）。
+    console.info(`[export] render windows plan: extra=${extra} cores=${logicalCores ?? "?"} availMB=${availableBytes == null ? "?" : Math.round(availableBytes / 1048576)}`);
+    if (extra <= 0) return null;
+    const sub = sessionTemplateAssets(doc, drawSession.templates, deps.templateAssetSrcById);
+    const probeFrame = probeFrameOf(doc);
+    const session: RenderSessionPayload = {
+      sessionId: `${doc.projectId}-${Date.now()}`,
+      doc,
+      ...drawSession,
+      ...sub,
+      knownSrcIds: [...new Set([...Object.keys(exportSrcById), ...Object.keys(deps.templateAssetSrcById)])],
+      packFonts: packFontSourceList(),
+      probeFrame,
+    };
+    const mainProbe = await probeHash(doc, drawOptions, probeFrame);
+    const pool = await openRenderHelpers(extra, session, mainProbe, {
+      link: { open: openRenderWindow, close: closeRenderWindow, send: sendToRenderWindow, onReport: onRenderReport },
+      accountFrames: accountStagedFramesFromHelper,
+    });
+    if (pool.size() > 0) return pool;
+    await pool.close();
+    return null;
+  } catch (e) {
+    // 窓を使えない＝本体だけで描く（書き出しは止めない）。
+    console.info(`[export] render windows unavailable: ${reasonForLog(e)}`);
+    return null;
+  }
 }
 
 type SetState = (partial: Partial<TimelineState>) => void;

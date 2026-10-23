@@ -73,6 +73,11 @@ export interface ExportSceneInput {
   framesBase64?: string[];
   /** ステージング済みフレームの相対ディレクトリ名（stageExportFrame で書き出し済み）。framesBase64 より優先＝巨大IPC回避。 */
   framesDir?: string;
+  /**
+   * `framesDir` に置いたはずのコマの数（ADR-0070）。渡すと Rust が 0 番からこの数まで全部そろっているかを確かめる
+   * （窓で分けて描くと、落ちた窓のぶんが抜けうる＝抜けたまま流すと途中から止まった動画が「成功」として出る）。
+   */
+  expectedFrames?: number;
   /** framesBase64 のフレームレート（既定 30）。 */
   fps?: number;
   durationSec: number;
@@ -234,6 +239,16 @@ export async function stageExportFramePng(dirName: string, frameIndex: number, p
     headers: { 'x-stage-dir': dirName, 'x-frame-index': String(frameIndex) },
   });
   await accountStagedFrame(png.byteLength);
+}
+
+/**
+ * **ほかの窓が置いたコマ**を見張りへ数える（ADR-0070）。別の窓には見張りが無い（JS の状態を共有しない）ので、
+ * 置いた枚数と大きさを本体へ知らせ、本体がここで数える＝空きが足りなくなる前に止める判定を、1窓のときと同じにする。
+ */
+export async function accountStagedFramesFromHelper(frames: number, bytes: number): Promise<void> {
+  if (frames <= 0) return;
+  const each = Math.ceil(bytes / frames);
+  for (let k = 0; k < frames; k += 1) await accountStagedFrame(each);
 }
 
 /**

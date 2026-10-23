@@ -15,6 +15,7 @@ mod packs;
 mod proc;
 mod project_import;
 mod startup;
+mod sysmem;
 mod transcribe;
 mod trouble_log;
 mod voicevox;
@@ -1552,6 +1553,7 @@ pub fn run() {
             save_project,
             project_backup_time,
             export_free_space,
+            sysmem::available_memory_bytes,
             restore_project_backup,
             list_restore_points,
             take_restore_point,
