@@ -3378,21 +3378,74 @@ fn stage_export_frame_impl(
     frame_index: u32,
     data_base64: String,
 ) -> Result<(), String> {
-    if !is_safe_stage_name(&dir_name) {
+    let path = staged_frame_path(&app, &dir_name, frame_index)?;
+    decode_b64_to_file(&data_base64, &path, "staged frame")
+}
+
+/// 置き場の1コマのパス（置き場の名前を確かめ、フォルダを作る）。base64 で受ける口と生のバイトで受ける口で共有する。
+fn staged_frame_path(
+    app: &tauri::AppHandle,
+    dir_name: &str,
+    frame_index: u32,
+) -> Result<PathBuf, String> {
+    if !is_safe_stage_name(dir_name) {
         return Err(export_failure(
             format!("invalid stage dir: {dir_name}"),
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         ));
     }
-    let dir = export_frames_stage_dir(&app)?.join(&dir_name);
+    let dir = export_frames_stage_dir(app)?.join(dir_name);
     fs::create_dir_all(&dir).map_err(|e| {
         export_failure(
             format!("create stage dir: {e}"),
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
-    let path = dir.join(format!("frame_{frame_index:05}.png"));
-    decode_b64_to_file(&data_base64, &path, "staged frame")
+    Ok(dir.join(format!("frame_{frame_index:05}.png")))
+}
+
+/// 1コマの PNG を**生のバイトで**受けて置き場へ書く（書き出しの高速化・2026-10-23）。
+///
+/// ⚠️ base64 の口（`stage_export_frame`）は、画面で文字にする・JSON に包む・ここで戻す、の3回なめていた。
+/// PNG にするのは画面の別スレッド（`pngEncodeWorker`）＝中身は同じ PNG の画素なので、出来上がる動画は変わらない。
+/// ⚠️ **画素のまま（RGBA）は運ばない**＝1コマ 8MB になり、受け渡しだけで 1コマ約 200ms かかった（実測・PNG は約 1MB で約 25ms）。
+/// 置き場の名前とコマの番号はヘッダ（`x-stage-dir`／`x-frame-index`）で受ける（`import_asset_bytes` と同じ流儀）。
+#[tauri::command]
+pub async fn stage_export_frame_png(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let unreadable = || {
+        export_failure(
+            "staged frame png: bad request",
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    };
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(unreadable());
+    };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
+    let dir_name = header("x-stage-dir").ok_or_else(unreadable)?.to_string();
+    let frame_index: u32 = header("x-frame-index")
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(unreadable)?;
+    let bytes = bytes.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = staged_frame_path(&app, &dir_name, frame_index)?;
+        fs::write(&path, &bytes).map_err(|e| {
+            export_failure(
+                format!("write staged frame: {e}"),
+                "動画の保存中に問題が発生しました。空き容量を確かめてから、もう一度お試しください。",
+            )
+        })
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("stage frame task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
 }
 
 /// **前のコマと同じ絵のコマ**を、前のコマのファイルから作る（書き出しの高速化・2026-10-22）。
@@ -3400,15 +3453,17 @@ fn stage_export_frame_impl(
 /// ⚠️ 絵を作り直さない＝**同じ SVG から作った PNG はバイトまで同じ**なので、描く・PNG にする・base64 で運ぶ、を省く。
 /// 講座の動画（3分36秒・6491コマ）では 90.5% のコマが前のコマと同じだった（字幕と立ち絵が止まっている間）。
 /// 速いハードリンクを先に試し、作れない（別のドライブ・ファイルシステムが対応しない）ときは複写する。
+/// 同じ絵が続くぶんは `to_index` から `count` 枚をまとめて1回で写す（2026-10-23）。
 #[tauri::command]
-pub async fn copy_export_frame(
+pub async fn copy_export_frames(
     app: tauri::AppHandle,
     dir_name: String,
     from_index: u32,
     to_index: u32,
+    count: u32,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        copy_export_frame_impl(app, dir_name, from_index, to_index)
+        copy_export_frames_impl(app, dir_name, from_index, to_index, count)
     })
     .await
     .map_err(|e| {
@@ -3419,11 +3474,14 @@ pub async fn copy_export_frame(
     })?
 }
 
-fn copy_export_frame_impl(
+/// ⚠️ **同じ絵が続くぶんはまとめて1回で頼む**（`to_index` から `count` 枚・2026-10-23）＝1枚ずつ頼むと、
+/// 講座の動画（9割が前のコマと同じ）では画面の主スレッドの半分が受け渡しの待ちだった。
+fn copy_export_frames_impl(
     app: tauri::AppHandle,
     dir_name: String,
     from_index: u32,
     to_index: u32,
+    count: u32,
 ) -> Result<(), String> {
     if !is_safe_stage_name(&dir_name) {
         return Err(export_failure(
@@ -3432,10 +3490,17 @@ fn copy_export_frame_impl(
         ));
     }
     let dir = export_frames_stage_dir(&app)?.join(&dir_name);
-    copy_frame_file(
-        &dir.join(format!("frame_{from_index:05}.png")),
-        &dir.join(format!("frame_{to_index:05}.png")),
-    )
+    copy_frame_run(&dir, from_index, to_index, count)
+}
+
+/// `dir` の中で、`from_index` のコマを `to_index` から `count` 枚ぶん写す。
+fn copy_frame_run(dir: &Path, from_index: u32, to_index: u32, count: u32) -> Result<(), String> {
+    let from = dir.join(format!("frame_{from_index:05}.png"));
+    for k in 0..count {
+        let to = to_index.saturating_add(k);
+        copy_frame_file(&from, &dir.join(format!("frame_{to:05}.png")))?;
+    }
+    Ok(())
 }
 
 /// `from` と同じ中身の `to` を作る（ハードリンク→だめなら複写）。`to` が既にあれば置き換える。
@@ -4978,6 +5043,23 @@ impl Drop for TmpDirCleanup {
 
 #[cfg(test)]
 mod tests {
+    /// 同じ絵が続くぶんは、まとめて写せる（書き出しの高速化 2026-10-23）。
+    #[test]
+    fn copy_frame_run_makes_count_identical_frames() {
+        let dir = std::env::temp_dir().join(format!("stario_copy_run_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("frame_00004.png"), b"PNG-4").unwrap();
+        copy_frame_run(&dir, 4, 5, 3).unwrap();
+        for i in 5..8 {
+            assert_eq!(
+                fs::read(dir.join(format!("frame_{i:05}.png"))).unwrap(),
+                b"PNG-4"
+            );
+        }
+        assert!(!dir.join("frame_00008.png").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// 前のコマから写したコマは**中身がバイトまで同じ**＝同じ絵（書き出しの高速化 2026-10-22）。
     /// すでに同じ名前があれば置き換える（書き出しを途中からやり直したときに古いコマを残さない）。
     #[test]

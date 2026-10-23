@@ -89,7 +89,7 @@ import {
   accountStagedVideo,
   beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
   endExportDiskWatch, exportVideo, listenExportProgress,
-  copyExportFrame, readExportFrame, stageClipFrames, stageExportFrame,
+  copyExportFrames, readExportFrame, stageClipFrames, stageExportFrame, stageExportFramePng,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
@@ -3102,8 +3102,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, exportSizeIsLight(get().exportSize)),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
         stageFrame: stageExportFrame,
+        // ⚠️ **PNG は別スレッドで作り、バイトのまま運ぶ**（書き出しの高速化・2026-10-23）＝base64 の口より優先される。
+        stageFramePng: stageExportFramePng,
         // 前のコマと同じ絵のコマは、置き場の前のコマから作る（書き出しの高速化・2026-10-22）。
-        copyFrame: copyExportFrame,
+        copyFrames: copyExportFrames,
         // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
         // ⚠️ 素材は**プロジェクトからの相対パス**で渡す（`stage_clip_frames` がそう解決する）。
         // 動画の id が解けない・プロジェクト id が無いときは渡さない＝静止のまま（画面が先に断る）。

@@ -205,7 +205,7 @@ export async function cancelExport(): Promise<void> {
  */
 export async function stageExportFrame(dirName: string, frameIndex: number, dataBase64: string): Promise<void> {
   await invoke('stage_export_frame', { dirName, frameIndex, dataBase64 });
-  await accountStagedFrame(dataBase64);
+  await accountStagedFrame(base64Bytes(dataBase64));
 }
 
 /**
@@ -213,9 +213,27 @@ export async function stageExportFrame(dirName: string, frameIndex: number, data
  * 描く・PNG にする・base64 で運ぶ、を省く（同じ SVG から作った PNG は同じ＝絵は変わらない）。
  * ⚠️ 空きの見張りは**複写したのと同じ大きさ**で数える＝ハードリンクで済んでも多めに見積もる側（止めどきが今より遅れない）。
  */
-export async function copyExportFrame(dirName: string, fromIndex: number, toIndex: number, dataBase64: string): Promise<void> {
-  await invoke('copy_export_frame', { dirName, fromIndex, toIndex });
-  await accountStagedFrame(dataBase64);
+export async function copyExportFrames(
+  dirName: string,
+  fromIndex: number,
+  toIndex: number,
+  count: number,
+  pngBytes: number,
+): Promise<void> {
+  await invoke('copy_export_frames', { dirName, fromIndex, toIndex, count });
+  // 見張りは1枚ずつ数える（区切りの回に空きを見るのは今までどおり）。
+  for (let k = 0; k < count; k += 1) await accountStagedFrame(pngBytes);
+}
+
+/**
+ * 1コマの PNG を**バイトのまま**置き場へ書く（書き出しの高速化・2026-10-23）＝base64 の文字にしない
+ * （画面で文字にする・運ぶときに包む・受け側で戻す、を省く）。置き場の名前と番号はヘッダで渡す（`import_asset_bytes` と同じ）。
+ */
+export async function stageExportFramePng(dirName: string, frameIndex: number, png: Uint8Array): Promise<void> {
+  await invoke('stage_export_frame_png', png, {
+    headers: { 'x-stage-dir': dirName, 'x-frame-index': String(frameIndex) },
+  });
+  await accountStagedFrame(png.byteLength);
 }
 
 /**
@@ -322,11 +340,11 @@ function base64Bytes(dataBase64: string): number {
  * ⚠️ **空きを調べられなかったら止めない**＝調べられないこと自体を理由に**書き出しを断らない**
  *（Windows 以外・権限など。断ると「直しようのない断り」になる＝§2-5）。
  */
-async function accountStagedFrame(dataBase64: string): Promise<void> {
+async function accountStagedFrame(pngBytes: number): Promise<void> {
   const w = diskWatch;
   if (!w) return;
   w.bakedFrames += 1;
-  w.bakedBytes += base64Bytes(dataBase64);
+  w.bakedBytes += pngBytes;
   if (!shouldCheckDisk(w.bakedFrames)) return;
   let free: { stageFreeBytes: number; outFreeBytes: number | null; sameDrive: boolean };
   try {
