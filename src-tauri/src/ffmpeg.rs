@@ -3503,6 +3503,32 @@ fn copy_frame_run(dir: &Path, from_index: u32, to_index: u32, count: u32) -> Res
     Ok(())
 }
 
+/// 置き場の連番（`frame_NNNNN.png`）で、**最初に抜けている番号**を返す（そろっていれば `None`）。
+/// `expected` があれば 0..expected が全部あるか、無ければ「いちばん大きい番号まで隙間が無いか」を見る。
+fn first_missing_staged_frame(dir: &Path, expected: Option<u32>) -> Option<u32> {
+    let mut present: Vec<u32> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let name = e.file_name();
+                    let name = name.to_str()?;
+                    name.strip_prefix("frame_")?
+                        .strip_suffix(".png")?
+                        .parse::<u32>()
+                        .ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    present.sort_unstable();
+    present.dedup();
+    let need = match expected {
+        Some(n) => n,
+        None => present.last().map_or(0, |m| m + 1),
+    };
+    (0..need).find(|i| present.binary_search(i).is_err())
+}
+
 /// `from` と同じ中身の `to` を作る（ハードリンク→だめなら複写）。`to` が既にあれば置き換える。
 fn copy_frame_file(from: &Path, to: &Path) -> Result<(), String> {
     if to.exists() {
@@ -3850,6 +3876,11 @@ pub struct SceneInput {
     /// 指定時は frames_base64 より優先＝巨大な base64 を IPC に載せずに済む（#書き出しRangeError）。
     #[serde(default)]
     frames_dir: Option<String>,
+    /// `frames_dir` に置いたはずのコマの数（ADR-0070）。渡されたら、0 番からこの数まで**全部そろっているか**を確かめる。
+    /// ⚠️ 渡さなくても、**番号の抜け**は確かめる（`image2` は抜けた番号で黙って止まり、`tpad` が最後のコマで埋める＝
+    /// 途中から止まった動画が「成功」として出る）。
+    #[serde(default)]
+    expected_frames: Option<u32>,
     /// frames_base64 のフレームレート（未指定なら描画fpsを使う）。
     #[serde(default)]
     fps: Option<u32>,
@@ -4621,6 +4652,13 @@ fn export_video_impl(
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
                 ));
             }
+            // ⚠️ **コマの抜けを確かめる**（ADR-0070）＝複数の窓で描くと、落ちた窓のぶんが抜けうる。
+            if let Some(missing) = first_missing_staged_frame(&frames_dir, s.expected_frames) {
+                return Err(export_failure(
+                    format!("staged frame {missing} missing: {}", frames_dir.display()),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                ));
+            }
             // 窓 Frames（#442）：クリップ元音声（複数動画スロット対応）があればナレーションと全本 amix
             // （音量は WAV へ焼き込む＝job の narration_volume は 1.0）。無ければ従来どおりナレーションのみ。
             let (audio, narr_vol) = if !s.clip_audios.is_empty() {
@@ -5043,6 +5081,24 @@ impl Drop for TmpDirCleanup {
 
 #[cfg(test)]
 mod tests {
+    /// 置き場のコマの抜け（ADR-0070）＝途中の抜け・数が足りない、のどちらも見つける。
+    #[test]
+    fn first_missing_staged_frame_finds_gaps_and_short_tails() {
+        let dir = std::env::temp_dir().join(format!("stario_missing_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for i in [0u32, 1, 2, 4] {
+            fs::write(dir.join(format!("frame_{i:05}.png")), b"x").unwrap();
+        }
+        fs::write(dir.join("other.txt"), b"x").unwrap();
+        assert_eq!(first_missing_staged_frame(&dir, None), Some(3));
+        fs::write(dir.join("frame_00003.png"), b"x").unwrap();
+        assert_eq!(first_missing_staged_frame(&dir, None), None);
+        assert_eq!(first_missing_staged_frame(&dir, Some(5)), None);
+        assert_eq!(first_missing_staged_frame(&dir, Some(7)), Some(5));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// 同じ絵が続くぶんは、まとめて写せる（書き出しの高速化 2026-10-23）。
     #[test]
     fn copy_frame_run_makes_count_identical_frames() {

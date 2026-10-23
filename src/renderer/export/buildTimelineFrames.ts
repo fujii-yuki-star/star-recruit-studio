@@ -89,6 +89,16 @@ export interface BuildTimelineFramesOptions {
   window?: { fromFrame: number; toFrame: number };
   /** コマの置き場の名前（#1203＝区間ごとに分ける）。未指定＝`timeline_frames`。 */
   framesDirName?: string;
+  /**
+   * 置き場の中の番号を、どのコマから数えるか（ADR-0070＝区間を窓で分けて描く）。未指定＝描く範囲の頭（`window.fromFrame`）。
+   * ⚠️ 区間の一部だけを描くときは**区間の頭**を渡す＝同じ置き場に、区間の頭から数えた番号で置く（FFmpeg は1本の連番で読む）。
+   */
+  stageIndexBase?: number;
+  /**
+   * 動画の部品のコマを**焼き出し済み**で渡す（ADR-0070）。渡すと、ここでは焼き出さない（`stageVideo` を呼ばない）。
+   * ⚠️ 区間を窓で分けて描くとき、窓どうしが同じ置き場へ焼き出して取り合わないよう、本体が先に1回だけ焼く。
+   */
+  stagedVideos?: readonly StagedVideoRef[];
   /** 焼き出したコマを1枚読む（data URL）。`stageVideo` と対で渡す。 */
   readVideoFrame?: (dirName: string, frameIndex: number) => Promise<string>;
 }
@@ -108,6 +118,74 @@ export interface TimelineFramesResult {
   framesBase64?: string[];
   fps: number;
   durationSec: number;
+}
+
+/** 焼き出し済みの動画のコマ（窓へ渡せる形＝部品は id で指す）。 */
+export interface StagedVideoRef {
+  clipId: string;
+  layerId: string | null;
+  dirName: string;
+  count: number;
+  offset: number;
+}
+
+/**
+ * 描く範囲に映る動画の部品を、コマへ焼き出す（#512 段1・#1203）。`buildTimelineFrames` の中から切り出した（ADR-0070）。
+ * 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
+ */
+export async function stageTimelineVideos(
+  doc: TimelineProject,
+  fromFrame: number,
+  toFrame: number,
+  opts: Pick<BuildTimelineFramesOptions, 'templateOf' | 'stageVideo' | 'shouldCancel'>,
+): Promise<StagedVideoRef[]> {
+  const plan = timelineFramePlan(doc);
+  const out: StagedVideoRef[] = [];
+  if (!opts.stageVideo) return out;
+  for (const placement of videoPlacementsOf(doc, opts.templateOf)) {
+    if (opts.shouldCancel?.()) throw new ExportCancelledError();
+    // ⚠️ **描く範囲に重なるコマだけを焼き出す**（#1203・#352 の45分実測）＝出てこない部品は焼かない、に加えて、
+    // 出てくる部品も**範囲の外のコマは焼かない**（頭の3秒のために45分ぶんを取り出していた）。
+    const win = videoStageWindow(placement, fromFrame, toFrame, plan.fps);
+    if (!win) continue;
+    const baseDir = videoFramesDirOf(placement.clip.id, placement.layerId);
+    const stage = (w: { sourceStartSec: number; durationSec: number; speed: number }, dirName: string): Promise<number> =>
+      opts.stageVideo!({
+        clipId: placement.clip.id,
+        assetId: placement.assetId,
+        dirName,
+        sourceStartSec: w.sourceStartSec,
+        durationSec: w.durationSec,
+        speed: w.speed,
+        fps: plan.fps,
+      });
+    // ⚠️ **始まりの違う焼き出しは別のフォルダへ**（PR #1357 レビュー 🔴）＝置き場は書き出しの頭で1回しか空にならず、
+    //   焼き出しは「あるだけ数える」ので、同じフォルダだと前の範囲のコマが残って数えられる（尻の窓に先頭の絵が出る）。
+    let dirName = win.offset > 0 ? `${baseDir}_f${win.offset}` : baseDir;
+    let offset = win.offset;
+    let count: number;
+    try {
+      count = await stage(win, dirName);
+    } catch (e) {
+      // ⚠️ **範囲が素材の終わりより後ろ**（素材が置いた長さより短く、最後のコマで止まっている所）は1枚も取れず、
+      //   焼き出しは失敗で返す（Rust＝0枚は失敗・PR #1357 レビュー 🔴）。範囲の頭が0なら丸ごとと同じ＝そのまま失敗。
+      // ⚠️ **受けるのは焼き出しの口（Rust）の失敗だけ**（PR #1357 再レビュー 🔴）＝口の失敗は文字で返る。
+      //   こちら側の例外（`Error`＝空き不足の見張り・中止など）は受けない＝空き不足の直後に丸ごと焼き直すと、
+      //   #352 で空き容量を使い切ったのと同じ動きになる。中止のあとに焼き直すと、止めたのに走り続ける。
+      if (opts.shouldCancel?.()) throw new ExportCancelledError();
+      if (offset === 0 || e instanceof Error) throw e;
+      count = 0;
+    }
+    if (count === 0 && offset > 0) {
+      // そのときだけ丸ごと焼き直す（止まったコマ＝素材の最後のコマが要る。素材の長さはここでは分からない）。
+      // 本当に読めない素材なら、ここでも失敗して投げる（握りつぶさない）。
+      dirName = baseDir;
+      offset = 0;
+      count = await stage(videoStagePlan(placement), dirName);
+    }
+    out.push({ clipId: placement.clip.id, layerId: placement.layerId, dirName, count, offset });
+  }
+  return out;
 }
 
 /**
@@ -134,51 +212,14 @@ export async function buildTimelineFrames(
   const windowCount = Math.max(0, toFrame - fromFrame);
 
   // **動画は先にコマへ焼き出す**（#512 段1）＝1フレームずつ切り出すと同じ素材を何度も開くことになる。
-  // 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
+  // 焼き出し済みを渡されたら（ADR-0070＝窓で分けて描く）それを使う＝ここでは焼き出さない。
   const staged: { placement: VideoPlacement; dirName: string; count: number; offset: number }[] = [];
-  if (opts.stageVideo && opts.readVideoFrame) {
-    for (const placement of videoPlacementsOf(doc, opts.templateOf)) {
-      bail();
-      // ⚠️ **描く範囲に重なるコマだけを焼き出す**（#1203・#352 の45分実測）＝出てこない部品は焼かない、に加えて、
-      // 出てくる部品も**範囲の外のコマは焼かない**（頭の3秒のために45分ぶんを取り出していた）。
-      const win = videoStageWindow(placement, fromFrame, toFrame, plan.fps);
-      if (!win) continue;
-      const baseDir = videoFramesDirOf(placement.clip.id, placement.layerId);
-      const stage = (w: { sourceStartSec: number; durationSec: number; speed: number }, dirName: string): Promise<number> =>
-        opts.stageVideo!({
-          clipId: placement.clip.id,
-          assetId: placement.assetId,
-          dirName,
-          sourceStartSec: w.sourceStartSec,
-          durationSec: w.durationSec,
-          speed: w.speed,
-          fps: plan.fps,
-        });
-      // ⚠️ **始まりの違う焼き出しは別のフォルダへ**（PR #1357 レビュー 🔴）＝置き場は書き出しの頭で1回しか空にならず、
-      //   焼き出しは「あるだけ数える」ので、同じフォルダだと前の範囲のコマが残って数えられる（尻の窓に先頭の絵が出る）。
-      let dirName = win.offset > 0 ? `${baseDir}_f${win.offset}` : baseDir;
-      let offset = win.offset;
-      let count: number;
-      try {
-        count = await stage(win, dirName);
-      } catch (e) {
-        // ⚠️ **範囲が素材の終わりより後ろ**（素材が置いた長さより短く、最後のコマで止まっている所）は1枚も取れず、
-        //   焼き出しは失敗で返す（Rust＝0枚は失敗・PR #1357 レビュー 🔴）。範囲の頭が0なら丸ごとと同じ＝そのまま失敗。
-        // ⚠️ **受けるのは焼き出しの口（Rust）の失敗だけ**（PR #1357 再レビュー 🔴）＝口の失敗は文字で返る。
-        //   こちら側の例外（`Error`＝空き不足の見張り・中止など）は受けない＝空き不足の直後に丸ごと焼き直すと、
-        //   #352 で空き容量を使い切ったのと同じ動きになる。中止のあとに焼き直すと、止めたのに走り続ける。
-        bail();
-        if (offset === 0 || e instanceof Error) throw e;
-        count = 0;
-      }
-      if (count === 0 && offset > 0) {
-        // そのときだけ丸ごと焼き直す（止まったコマ＝素材の最後のコマが要る。素材の長さはここでは分からない）。
-        // 本当に読めない素材なら、ここでも失敗して投げる（握りつぶさない）。
-        dirName = baseDir;
-        offset = 0;
-        count = await stage(videoStagePlan(placement), dirName);
-      }
-      staged.push({ placement, dirName, count, offset });
+  if (opts.readVideoFrame) {
+    const refs = opts.stagedVideos ?? (opts.stageVideo ? await stageTimelineVideos(doc, fromFrame, toFrame, opts) : []);
+    const placements = videoPlacementsOf(doc, opts.templateOf);
+    for (const r of refs) {
+      const placement = placements.find((p) => p.clip.id === r.clipId && p.layerId === r.layerId);
+      if (placement) staged.push({ placement, dirName: r.dirName, count: r.count, offset: r.offset });
     }
   }
 
@@ -272,7 +313,7 @@ export async function buildTimelineFrames(
     });
     // ⚠️ **置き場の中では 0 から並べる**＝`image2` は連番で読むので、
     // 区間の頭が 5400 番だからといって 5400 から置くと、1枚も見つからない。
-    const stagedIndex = f - fromFrame;
+    const stagedIndex = f - (opts.stageIndexBase ?? fromFrame);
     const width = opts.outputSize?.width ?? layout.width;
     const height = opts.outputSize?.height ?? layout.height;
     if (svg === prevSvg && prevPng != null) {
