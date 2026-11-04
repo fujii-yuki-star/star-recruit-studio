@@ -141,125 +141,155 @@ export async function buildVideoPart(
  */
 export type ParallelDrawersFor = (seg: { framesDirName: string; stageIndexBase: number; stagedVideos: StagedVideoRef[] }) => FrameDrawer[];
 
+/** 区間の割り方を先に決めた結果（ADR-0072）。`parts` を書き出しへ先に渡し、`draw` でコマを描いて置く。 */
+export interface PlannedTimelineParts {
+  /** 書き出しへ渡す区間（コマの区間は置き場の名前と、置くはずのコマの数が**描く前から**決まっている）。 */
+  parts: TimelineExportPart[];
+  /** コマを描いて置く（区間の順に）。割り方を決めただけでは1コマも描いていない。 */
+  draw: () => Promise<void>;
+}
+
 /**
- * 書き出しの区間を順に組み立てる（#1203）。
+ * 書き出しの区間を**先に全部決め**、コマは後から描く（ADR-0072＝描きながら圧縮する）。
  *
- * ⚠️ **組めなかった区間は焼く方へ倒す**＝「倒せるはずだったのに組めなかった」を**黙って通さない**。
+ * ⚠️ **区間の中身（置き場・コマの数・長さ）は描く前に決まる**＝書き出しを先に頼み、描けたコマから順に圧縮させるため。
+ * 描いた結果から数え直さない（数は割り方から出る＝`buildTimelineFrames` が返す数と同じ式）。
+ * ⚠️ **組めなかった区間は焼く方へ倒す**（#1203）＝「倒せるはずだったのに組めなかった」を**黙って通さない**。
  */
-export async function buildTimelineParts(
+export async function planTimelineParts(
   doc: TimelineProject,
   opts: BuildTimelineFramesOptions & { parallelDrawersFor?: ParallelDrawersFor },
-): Promise<TimelineExportPart[]> {
+): Promise<PlannedTimelineParts> {
   const plan = timelineFramePlan(doc);
   // ⚠️ **見た目パターンの解決を渡す**＝中に動画の差し込み口がある部品を
   // 「動かない上乗せ」と取り違えないため（渡さないと、動く絵を静止画に写してしまう）。
   const segments = planTimelineExportSegments(doc, opts.templateOf);
   const parts: TimelineExportPart[] = [];
+  const drawSteps: (() => Promise<void>)[] = [];
   // ⚠️ **進み具合は「全部で何枚焼くか」で数える**＝区間ごとに 0 から数え直すと、
   // バーが**区間の数だけ行ったり来たり**する（倒せた区間は1枚も焼かないので、なおさら飛ぶ）。
   // ⚠️ **数え方は domain の1つを通す**（#1211）＝空きの見張りと同じ数を見る。
   const bakeTotal = bakeFrameTotal(segments, plan.fps);
   let baked = 0;
+  // 置き場を使うか（使わない＝コマを文字のまま返す古い口・検査用）。
+  const staged = Boolean(opts.stageFrame || opts.stageFramePng);
 
   // ⚠️ **1枚も焼かない回でも進み具合を出す**（同レビュー ℹ️）＝出さないと**0% のまま止まって見える**。
   const reportSegment = (done: number): void => { if (bakeTotal === 0) opts.onProgress?.(done, segments.length); };
   for (let i = 0; i < segments.length; i += 1) {
     // ⚠️ **区間ごとに中止を見る**（PR #1207 レビュー 🟡）＝倒した区間は1枚も焼かないので、
     // `buildTimelineFrames` の中の見張り（コマごと）に**一度も入らない**ことがある。
-    // そのとき中止を押しても、**残り全部の下敷き・上敷きを焼き終わるまで**効かない。
     if (opts.shouldCancel?.()) throw new ExportCancelledError();
     const seg = segments[i];
     if (seg.kind === 'video') {
       const part = await buildVideoPart(doc, seg, opts);
       // ⚠️ **いまは通常この分岐で落ちない**＝割る側（`planTimelineExportSegments`）と組む側が
       // **同じ条件**を見ているので、割る側が「倒せる」と言った区間は必ず組めます。
-      // **どちらかを緩めたときの受け皿として残します**（消すと、そのとき黙って穴が開く＝
-      // 組めなかった区間が**空のまま**出力へ流れる）。`timelineStore` の締めの取り合いにも同じ形の備えがあります。
+      // **どちらかを緩めたときの受け皿として残します**（消すと、そのとき黙って穴が開く）。
       if (part) {
         parts.push(part);
         reportSegment(i + 1);
         continue;
       }
     }
-    const bakedBefore = baked;
+    const framesDirName = framesDirForSegment(i);
     if (seg.kind === 'still') {
       // ⚠️ **何も時間で変わらない区間は1コマだけ描く**（ADR-0032 決定22-2 追補3・#1376）＝描くのは毎コマの区間と
       // **同じ関数**（1コマぶん）。区間の長さは Rust が最後のコマを引き伸ばして満たす（`tpad=stop_mode=clone`）。
       const fromFrame = Math.round(seg.startSec * plan.fps);
-      const one = await buildTimelineFrames(doc, {
-        ...opts,
-        onProgress: undefined,
-        framesDirName: framesDirForSegment(i),
-        window: { fromFrame, toFrame: fromFrame + 1 },
-      });
-      baked = bakedBefore + 1;
-      opts.onProgress?.(baked, bakeTotal);
       parts.push({
-        fps: one.fps,
+        fps: plan.fps,
         durationSec: seg.endSec - seg.startSec,
-        ...(one.framesDir ? { framesDir: one.framesDir, expectedFrames: 1 } : {}),
+        ...(staged ? { framesDir: framesDirName, expectedFrames: 1 } : {}),
+      });
+      drawSteps.push(async () => {
+        const bakedBefore = baked;
+        await buildTimelineFrames(doc, {
+          ...opts,
+          onProgress: undefined,
+          framesDirName,
+          window: { fromFrame, toFrame: fromFrame + 1 },
+        });
+        baked = bakedBefore + 1;
+        opts.onProgress?.(baked, bakeTotal);
       });
       continue;
     }
     const fromFrame = Math.round(seg.startSec * plan.fps);
     // ⚠️ **動画の長さで頭打ち**（`buildTimelineFrames` と同じ）＝区間の終わりが最後のコマを越えても、置くのはそこまで。
     const toFrame = Math.min(plan.frameCount, Math.round(seg.endSec * plan.fps));
-    const framesDirName = framesDirForSegment(i);
-    // **隠した別の窓でも描く**（ADR-0070）＝区間の中のコマの範囲を小分けにして、本体と窓で取り合う。
-    // ⚠️ 置き場は区間ごとに1つのまま・番号は区間の頭から＝FFmpeg への渡し方は1窓のときと同じ（動画のバイトが変わらない）。
-    // ⚠️ 動画の部品のコマは本体が先に1回だけ焼き出す＝窓どうしが同じ置き場を取り合わない。
-    const helpers = opts.parallelDrawersFor && toFrame - fromFrame >= PARALLEL_MIN_FRAMES && (opts.stageFrame || opts.stageFramePng)
-      ? opts.parallelDrawersFor
-      : undefined;
-    if (helpers) {
-      const stagedVideos = opts.readVideoFrame ? await stageTimelineVideos(doc, fromFrame, toFrame, opts) : [];
-      const seg = { framesDirName, stageIndexBase: fromFrame, stagedVideos };
-      const drawers = helpers(seg);
-      if (drawers.length > 0) {
-        const main: FrameDrawer = {
-          draw: async (range, onDone) => {
-            await buildTimelineFrames(doc, {
-              ...opts,
-              onProgress: (done) => onDone(done),
-              framesDirName,
-              window: range,
-              stageIndexBase: fromFrame,
-              stagedVideos,
-            });
-          },
-        };
-        await drawRangesInParallel(frameChunks(fromFrame, toFrame), [main, ...drawers], {
-          onProgress: (done) => {
-            baked = bakedBefore + done;
-            opts.onProgress?.(baked, bakeTotal);
-          },
-          ...(opts.shouldCancel ? { shouldCancel: opts.shouldCancel } : {}),
-        });
-        baked = bakedBefore + (toFrame - fromFrame);
-        parts.push({
-          fps: plan.fps,
-          durationSec: (toFrame - fromFrame) / plan.fps,
-          framesDir: framesDirName,
-          expectedFrames: toFrame - fromFrame,
-        });
-        continue;
-      }
-    }
-    const frames = await buildTimelineFrames(doc, {
-      ...opts,
-      onProgress: (done) => {
-        baked = bakedBefore + done;
-        opts.onProgress?.(baked, bakeTotal);
-      },
-      framesDirName,
-      window: { fromFrame, toFrame },
-    });
-    baked = bakedBefore + Math.round(frames.durationSec * frames.fps);
+    const count = Math.max(0, toFrame - fromFrame);
     parts.push({
-      fps: frames.fps,
-      durationSec: frames.durationSec,
-      ...(frames.framesDir ? { framesDir: frames.framesDir, expectedFrames: Math.round(frames.durationSec * frames.fps) } : {}),
+      fps: plan.fps,
+      // `buildTimelineFrames` が返す長さと同じ式（コマの数 ÷ fps）。
+      durationSec: count / plan.fps,
+      ...(staged ? { framesDir: framesDirName, expectedFrames: count } : {}),
+    });
+    drawSteps.push(async () => {
+      const bakedBefore = baked;
+      // **隠した別の窓でも描く**（ADR-0070）＝区間の中のコマの範囲を小分けにして、本体と窓で取り合う。
+      // ⚠️ 置き場は区間ごとに1つのまま・番号は区間の頭から＝FFmpeg への渡し方は1窓のときと同じ（動画のバイトが変わらない）。
+      // ⚠️ 動画の部品のコマは本体が先に1回だけ焼き出す＝窓どうしが同じ置き場を取り合わない。
+      const helpers = opts.parallelDrawersFor && count >= PARALLEL_MIN_FRAMES && staged ? opts.parallelDrawersFor : undefined;
+      if (helpers) {
+        const stagedVideos = opts.readVideoFrame ? await stageTimelineVideos(doc, fromFrame, toFrame, opts) : [];
+        const drawers = helpers({ framesDirName, stageIndexBase: fromFrame, stagedVideos });
+        if (drawers.length > 0) {
+          const main: FrameDrawer = {
+            draw: async (range, onDone) => {
+              await buildTimelineFrames(doc, {
+                ...opts,
+                onProgress: (done) => onDone(done),
+                framesDirName,
+                window: range,
+                stageIndexBase: fromFrame,
+                stagedVideos,
+              });
+            },
+          };
+          await drawRangesInParallel(frameChunks(fromFrame, toFrame), [main, ...drawers], {
+            onProgress: (done) => {
+              baked = bakedBefore + done;
+              opts.onProgress?.(baked, bakeTotal);
+            },
+            ...(opts.shouldCancel ? { shouldCancel: opts.shouldCancel } : {}),
+          });
+          baked = bakedBefore + count;
+          return;
+        }
+      }
+      await buildTimelineFrames(doc, {
+        ...opts,
+        onProgress: (done) => {
+          baked = bakedBefore + done;
+          opts.onProgress?.(baked, bakeTotal);
+        },
+        framesDirName,
+        window: { fromFrame, toFrame },
+      });
+      baked = bakedBefore + count;
     });
   }
-  return parts;
+  return {
+    parts,
+    draw: async () => {
+      for (const step of drawSteps) {
+        if (opts.shouldCancel?.()) throw new ExportCancelledError();
+        await step();
+      }
+    },
+  };
+}
+
+/**
+ * 書き出しの区間を順に組み立てる（#1203）＝割り方を決めて（`planTimelineParts`）、そのまま描く。
+ * 描き終えてから書き出しを頼む形（描きながら圧縮しない呼び手・検査）のための口。
+ */
+export async function buildTimelineParts(
+  doc: TimelineProject,
+  opts: BuildTimelineFramesOptions & { parallelDrawersFor?: ParallelDrawersFor },
+): Promise<TimelineExportPart[]> {
+  const planned = await planTimelineParts(doc, opts);
+  await planned.draw();
+  return planned.parts;
 }

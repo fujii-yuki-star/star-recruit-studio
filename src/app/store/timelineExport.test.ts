@@ -13,6 +13,7 @@ import * as assetFsMod from '../../infrastructure/assetFs';
 import * as dialogMod from '../../infrastructure/dialog';
 import * as ffmpegMod from '../../infrastructure/ffmpegExport';
 import * as framesMod from '../../renderer/export/buildTimelineFrames';
+import { ExportCancelledError } from '../../renderer/export/buildExportScenes';
 import * as fontsMod from '../../renderer/export/loadExportFonts';
 import * as voiceFsMod from '../../infrastructure/voiceFs';
 import * as bgmMod from '../../infrastructure/bundledBgm';
@@ -64,6 +65,8 @@ beforeEach(() => {
   vi.spyOn(ffmpegMod, 'beginExport').mockResolvedValue(undefined);
   vi.spyOn(ffmpegMod, 'listenExportProgress').mockResolvedValue(() => undefined);
   vi.spyOn(ffmpegMod, 'clearExportFramesStage').mockResolvedValue(undefined);
+  vi.spyOn(ffmpegMod, 'finishExportFrames').mockResolvedValue(undefined);
+  vi.spyOn(ffmpegMod, 'cancelExport').mockResolvedValue(undefined);
   vi.spyOn(ffmpegMod, 'exportVideo').mockResolvedValue({ outputPath: '/out/movie.mp4' } as never);
   vi.spyOn(framesMod, 'buildTimelineFrames').mockResolvedValue({ framesDir: 'timeline_frames', fps: 30, durationSec: 5 });
   vi.spyOn(dialogMod, 'showSaveVideoDialog').mockResolvedValue('/out/movie.mp4');
@@ -232,7 +235,8 @@ describe('exportTimelineVideo', () => {
     await open(doc());
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(ffmpegMod.exportVideo)).toHaveBeenCalledWith(
-      [{ framesDir: 'timeline_frames', fps: 30, durationSec: 5, expectedFrames: 150 }],
+      // ⚠️ コマはこれから置かれる（ADR-0072＝描きながら圧縮する）。
+      [{ framesDir: 'timeline_frames', fps: 30, durationSec: 5, expectedFrames: 150, framesLive: true }],
       'テスト動画',
       [],
       'proj_20260729_001',
@@ -598,15 +602,74 @@ describe('exportTimelineVideo', () => {
     expect(useExportLockStore.getState().owner).toBeNull();
   });
 
-  it('中止したら書き出さず、中止として知らせる', async () => {
+  // ⚠️ 書き出しは描く前に頼んでいる（ADR-0072）＝中止は**圧縮も止める**（FFmpeg を取り残さない）・描き終えた知らせは出さない。
+  it('描いている途中で中止したら、圧縮も止めて中止として知らせる', async () => {
     vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async () => {
       useTimelineStore.getState().cancelTimelineExport();
+      throw new ExportCancelledError();
+    });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.cancelExport)).toHaveBeenCalled();
+    expect(vi.mocked(ffmpegMod.finishExportFrames)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.phase).toBe('cancelled');
+  });
+
+  // ADR-0072：書き出しを**先に頼み**、描いて、描き終えたと知らせてから結果を待つ。
+  it('書き出しを頼んでから描き、描き終えたと知らせる（描きながら圧縮する）', async () => {
+    const order: string[] = [];
+    vi.mocked(ffmpegMod.exportVideo).mockImplementation(async () => {
+      order.push('export');
+      return { outputPath: '/out/movie.mp4' } as never;
+    });
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async () => {
+      order.push('draw');
+      return { framesDir: 'timeline_frames', fps: 30, durationSec: 5 };
+    });
+    vi.mocked(ffmpegMod.finishExportFrames).mockImplementation(async () => { order.push('finish'); });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(order).toEqual(['export', 'draw', 'finish']);
+    expect(useTimelineStore.getState().exportRun.phase).toBe('done');
+  });
+
+  // 決定6：圧縮が先に失敗したら、描くのをやめて**圧縮の断り**を出す（描く側の「中止」に化けさせない）。
+  it('描いている間に圧縮が失敗したら、描くのをやめてその断りを出す', async () => {
+    let rejectExport: (e: unknown) => void = () => {};
+    vi.mocked(ffmpegMod.exportVideo).mockReturnValue(new Promise((_, rej) => { rejectExport = rej; }) as never);
+    let drawCalls = 0;
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async (_d, o) => {
+      drawCalls += 1;
+      rejectExport('動画が見つかりませんでした。もう一度取り込んでください');
+      await new Promise((r) => setTimeout(r, 0));
+      if (o.shouldCancel?.()) throw new ExportCancelledError();
       return { framesDir: 'timeline_frames', fps: 30, durationSec: 5 };
     });
     await open(doc());
     await useTimelineStore.getState().exportTimelineVideo(deps);
-    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.phase).toBe('cancelled');
+    expect(drawCalls).toBe(1);
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.phase).toBe('error');
+    expect(run.message).toBe('動画が見つかりませんでした。もう一度取り込んでください');
+    expect(vi.mocked(ffmpegMod.finishExportFrames)).not.toHaveBeenCalled();
+  });
+
+  // 決定7：描いている間は、圧縮の知らせでバーの段を飛ばさない。
+  it('描いている間は、圧縮の知らせで段が変わらない', async () => {
+    let onEncode: (ev: { phase: string; step: number; total: number }) => void = () => {};
+    vi.mocked(ffmpegMod.listenExportProgress).mockImplementation(async (h) => {
+      onEncode = h as typeof onEncode;
+      return () => undefined;
+    });
+    let phaseWhileDrawing = '';
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async () => {
+      onEncode({ phase: 'encode', step: 1, total: 2 });
+      phaseWhileDrawing = useTimelineStore.getState().exportRun.phase;
+      return { framesDir: 'timeline_frames', fps: 30, durationSec: 5 };
+    });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(phaseWhileDrawing).toBe('rendering');
   });
 
   it('声を作っている最中は始めない（作った声が捨てられる・#718）', async () => {

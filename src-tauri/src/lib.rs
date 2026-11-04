@@ -1600,6 +1600,7 @@ pub fn run() {
             ffmpeg::copy_export_frames,
             ffmpeg::stage_export_frame_png,
             ffmpeg::clear_export_frames_stage,
+            ffmpeg::finish_export_frames,
             ffmpeg::stage_clip_frames,
             ffmpeg::read_export_frame,
             ffmpeg::probe_video,

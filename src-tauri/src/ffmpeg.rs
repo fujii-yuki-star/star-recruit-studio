@@ -320,8 +320,7 @@ pub fn frames_scene_args(
     codec: VideoCodec,
     bitrate: &str,
 ) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "-y".into(),
+    let input = vec![
         "-framerate".into(),
         format!("{fps}"),
         "-start_number".into(),
@@ -329,6 +328,66 @@ pub fn frames_scene_args(
         "-i".into(),
         frames_pattern.into(),
     ];
+    frames_scene_args_with_input(
+        input,
+        audio,
+        narration_volume,
+        out,
+        duration_sec,
+        fps,
+        codec,
+        bitrate,
+    )
+}
+
+/// `frames_scene_args` の**標準入力から読む**版（ADR-0072＝描きながら圧縮する）。
+/// コマ（PNG）を番号順に標準入力へ流す（`image2pipe`）。⚠️ **入力の指定だけが違う**＝その後ろ（尺・音・コーデック・
+/// ビットレート）は同じ関数で作る（実 FFmpeg で連番ファイル入力と md5 一致を確かめた・2026-11-04）。
+#[allow(clippy::too_many_arguments)]
+pub fn frames_scene_pipe_args(
+    audio: Option<&str>,
+    narration_volume: f64,
+    out: &str,
+    duration_sec: f64,
+    fps: u32,
+    codec: VideoCodec,
+    bitrate: &str,
+) -> Vec<String> {
+    let input = vec![
+        "-f".into(),
+        "image2pipe".into(),
+        "-framerate".into(),
+        format!("{fps}"),
+        "-c:v".into(),
+        "png".into(),
+        "-i".into(),
+        "-".into(),
+    ];
+    frames_scene_args_with_input(
+        input,
+        audio,
+        narration_volume,
+        out,
+        duration_sec,
+        fps,
+        codec,
+        bitrate,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn frames_scene_args_with_input(
+    input: Vec<String>,
+    audio: Option<&str>,
+    narration_volume: f64,
+    out: &str,
+    duration_sec: f64,
+    fps: u32,
+    codec: VideoCodec,
+    bitrate: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-y".into()];
+    args.extend(input);
     // フレーム列はアニメの「変化する区間」だけ（#376）。最終フレームを尺まで複製保持して尺を満たす
     // （stop_duration を尺いっぱいに取り、末尾 -t {duration} でぴったり切る＝アンダーフロー無し）。
     let vf = format!("tpad=stop_mode=clone:stop_duration={duration_sec}");
@@ -1460,6 +1519,7 @@ fn reset_export_cancel() {
 #[tauri::command]
 pub fn begin_export() {
     reset_export_cancel();
+    reset_staged_frames();
 }
 
 /// ユーザー操作の「中止」から呼ぶコマンド（#380）。走行中の書き出し ffmpeg を終了する。
@@ -1473,7 +1533,15 @@ pub fn cancel_export() {
 /// 走行中 Child を EXPORT_CHILD に登録し、キャンセル／アプリ終了から kill できるようにする。
 /// stdout/stderr は別スレッドで排出する（ffmpeg は stderr 出力が多く、未排出だとパイプ詰まりで停止し得る）。
 fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
-    run_export_inner(bin, args, None)
+    run_export_inner(bin, args, None, None)
+}
+
+/// FFmpeg の標準入力へ流す仕事（ADR-0072）。`stop` が立ったら待つのをやめて返す。
+type Feeder = Box<dyn FnOnce(std::process::ChildStdin, &AtomicBool) -> Result<(), String> + Send>;
+
+/// `run_export` の**標準入力へ流す**版（ADR-0072＝描きながら圧縮する）。`feed` が None なら `run_export` と同じ。
+fn run_export_fed(bin: &Path, args: &[String], feed: Option<Feeder>) -> Result<String, String> {
+    run_export_inner(bin, args, None, feed)
 }
 
 /**
@@ -1487,13 +1555,14 @@ fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
  * **実際に書き終えた秒数**（`out_time_us`）を読む。
  */
 fn run_export_progress(bin: &Path, args: &[String], on_us: &dyn Fn(u64)) -> Result<String, String> {
-    run_export_inner(bin, args, Some(on_us))
+    run_export_inner(bin, args, Some(on_us), None)
 }
 
 fn run_export_inner(
     bin: &Path,
     args: &[String],
     on_us: Option<&dyn Fn(u64)>,
+    feed: Option<Feeder>,
 ) -> Result<String, String> {
     // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
     if EXPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -1502,9 +1571,14 @@ fn run_export_inner(
     // ⚠️ **入力は明示して塞ぐ**（#1107）＝コンソール窓を出さなくしたので、受け継ぐ入力の口が無い。
     // 既定（受け継ぐ）のままだと「無効な口を受け継いだ」状態になるので、意図を書いて空にする。
     // `output()` を使う他の3か所は元から空なので、ここだけ揃えれば同じになる。
+    // ⚠️ 流す仕事があるときだけ入力を開く（ADR-0072）。
     let mut child = no_window_command(bin)
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if feed.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1553,6 +1627,17 @@ fn run_export_inner(
         }
         s
     });
+    // 流し手（ADR-0072）＝別のスレッドでコマを流す。⚠️ 終わるとき `stop` を立てる＝FFmpeg が先に終わっても
+    // 流し手が置かれないコマを待ち続けない（スレッドを残さない）。
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let mut feed_h = match (feed, child.stdin.take()) {
+        (Some(f), Some(stdin)) => {
+            let stop = stop.clone();
+            Some(std::thread::spawn(move || f(stdin, &stop)))
+        }
+        _ => None,
+    };
+    let mut feed_err: Option<String> = None;
     *lock_export_child() = Some(child);
 
     // try_wait をポーリングして完了を待つ。キャンセルされたらスロットが空になり（or フラグで自 kill）抜ける。
@@ -1569,6 +1654,20 @@ fn run_export_inner(
                 let _ = child.wait();
             }
             break None;
+        }
+        // 流し手が**先に**失敗した（コマの抜け・読めない）＝FFmpeg を止めてその断りを返す（ADR-0072 決定5）。
+        // ⚠️ 「書けない」（FFmpeg が先に終わった）は FFmpeg の終わり方で見る＝ここでは止めない。
+        if feed_h.as_ref().is_some_and(|h| h.is_finished()) {
+            if let Some(Err(e)) = feed_h.take().and_then(|h| h.join().ok()) {
+                if is_feeder_failure(&e) {
+                    feed_err = Some(e);
+                    if let Some(mut child) = lock_export_child().take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    break None;
+                }
+            }
         }
         let mut slot = lock_export_child();
         match slot.as_mut() {
@@ -1590,8 +1689,16 @@ fn run_export_inner(
         }
     };
 
+    // 流し手を終わらせてから戻る（置かれないコマを待ち続けさせない）。
+    stop.store(true, Ordering::SeqCst);
+    if let Some(h) = feed_h.take() {
+        let _ = h.join();
+    }
     let stdout = out_h.join().unwrap_or_default();
     let stderr = err_h.join().unwrap_or_default();
+    if let Some(e) = feed_err {
+        return Err(e);
+    }
     match status {
         Some(st) if st.success() => Ok(stdout),
         Some(_) => Err(stderr),
@@ -2452,6 +2559,8 @@ struct FramesJob {
     frames_dir: PathBuf,
     /// ビットレート算出の解像度取得用（先頭フレーム）。
     first_frame: PathBuf,
+    /// 描きながら圧縮する（ADR-0072）＝`(置き場の名前, 流すコマの数)`。None は置き終えた連番を読む。
+    live: Option<(String, u32)>,
     audio: Option<PathBuf>,
     narration_volume: f64,
     duration_sec: f64,
@@ -2989,21 +3098,47 @@ fn encode_jobs(
             }
             SceneJob::Frames(f) => {
                 let audio = f.audio.as_ref().map(|p| p.to_string_lossy().into_owned());
-                // image2 入力パターン（frame_00000.png ...）。decode 時に同名で書き出し済み。
-                let pattern = f.frames_dir.join("frame_%05d.png");
-                frames_scene_args(
-                    &pattern.to_string_lossy(),
-                    audio.as_deref(),
-                    f.narration_volume,
-                    &clip.to_string_lossy(),
-                    f.duration_sec,
-                    f.fps,
-                    codec,
-                    bitrate,
-                )
+                if f.live.is_some() {
+                    // 描きながら圧縮する（ADR-0072）＝コマは標準入力から番号順に流す。
+                    frames_scene_pipe_args(
+                        audio.as_deref(),
+                        f.narration_volume,
+                        &clip.to_string_lossy(),
+                        f.duration_sec,
+                        f.fps,
+                        codec,
+                        bitrate,
+                    )
+                } else {
+                    // image2 入力パターン（frame_00000.png ...）。decode 時に同名で書き出し済み。
+                    let pattern = f.frames_dir.join("frame_%05d.png");
+                    frames_scene_args(
+                        &pattern.to_string_lossy(),
+                        audio.as_deref(),
+                        f.narration_volume,
+                        &clip.to_string_lossy(),
+                        f.duration_sec,
+                        f.fps,
+                        codec,
+                        bitrate,
+                    )
+                }
             }
         };
-        run_export(ffmpeg, &args).map_err(|e| {
+        let feed: Option<Feeder> = match job {
+            SceneJob::Frames(FramesJob {
+                live: Some((name, count)),
+                frames_dir,
+                ..
+            }) => {
+                let (name, count, dir) = (name.clone(), *count, frames_dir.clone());
+                Some(Box::new(move |stdin, stop: &AtomicBool| {
+                    feed_staged_frames(stdin, &dir, &name, count, stop)
+                }))
+            }
+            _ => None,
+        };
+        run_export_fed(ffmpeg, &args, feed).map_err(|e| {
             export_failure(
                 format!("scene {} encode: {e}", i + 1),
                 format!(
@@ -3344,6 +3479,123 @@ fn export_frames_stage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join(format!("proc_{}", std::process::id())))
 }
 
+/// 置き場へ**置き終えた**コマの番号（ADR-0072＝描きながら圧縮する）。置き場の名前ごとに覚える。
+///
+/// ⚠️ **書き終えてから印を付ける**＝FFmpeg へ流す側は印の付いたコマしか読まない（書きかけを読まない）。
+/// ⚠️ **書き出しの始め（`begin_export`）と置き場の掃除で空にする**＝前の書き出しの印を引き継がない。
+#[derive(Default)]
+struct StagedFrames {
+    ready: std::collections::HashMap<String, std::collections::HashSet<u32>>,
+    /// 画面が「描き終えた」と知らせたか（`finish_export_frames`）。その後に足りないコマは待たずに断る。
+    finished: bool,
+}
+
+fn staged_frames() -> &'static (Mutex<StagedFrames>, std::sync::Condvar) {
+    static REG: std::sync::OnceLock<(Mutex<StagedFrames>, std::sync::Condvar)> =
+        std::sync::OnceLock::new();
+    REG.get_or_init(|| {
+        (
+            Mutex::new(StagedFrames::default()),
+            std::sync::Condvar::new(),
+        )
+    })
+}
+
+fn lock_staged() -> std::sync::MutexGuard<'static, StagedFrames> {
+    staged_frames().0.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 置いたコマの印を全部消す（書き出しの始め・置き場の掃除）。
+fn reset_staged_frames() {
+    *lock_staged() = StagedFrames::default();
+    staged_frames().1.notify_all();
+}
+
+/// そのコマはもう置いてあるか。
+fn is_staged(dir_name: &str, index: u32) -> bool {
+    lock_staged()
+        .ready
+        .get(dir_name)
+        .is_some_and(|s| s.contains(&index))
+}
+
+/// そのコマを置き終えた印を付ける（待っている流し手を起こす）。
+fn mark_staged(dir_name: &str, index: u32) {
+    lock_staged()
+        .ready
+        .entry(dir_name.to_string())
+        .or_default()
+        .insert(index);
+    staged_frames().1.notify_all();
+}
+
+/// 描き終えた知らせ（ADR-0072 決定5）＝この後に足りないコマがあれば、流し手は待たずに断る。
+#[tauri::command]
+pub fn finish_export_frames() {
+    lock_staged().finished = true;
+    staged_frames().1.notify_all();
+}
+
+/// そのコマが置かれるまで待つ（ADR-0072 決定3）。
+/// 中止・`stop`（圧縮側が先に終わった）なら中止の印で、描き終えたのに無ければ「抜け」として断る。
+fn wait_staged(dir_name: &str, index: u32, stop: &AtomicBool) -> Result<(), String> {
+    let (lock, cv) = staged_frames();
+    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        if EXPORT_CANCELLED.load(Ordering::SeqCst) || stop.load(Ordering::SeqCst) {
+            return Err(EXPORT_CANCELLED_MARK.to_string());
+        }
+        if g.ready.get(dir_name).is_some_and(|s| s.contains(&index)) {
+            return Ok(());
+        }
+        if g.finished {
+            return Err(export_failure(
+                format!("staged frame {index} missing (live): {dir_name}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            ));
+        }
+        g = cv
+            .wait_timeout(g, Duration::from_millis(200))
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+}
+
+/// 流し手の失敗のうち、**流し手の側の理由**で止めるものか（コマの抜け・読めない）。
+/// 中止の印と「書けない」（FFmpeg が先に終わった＝断りは FFmpeg の側）は除く。
+fn is_feeder_failure(e: &str) -> bool {
+    e != EXPORT_CANCELLED_MARK && !e.starts_with(FEED_WRITE_FAILED)
+}
+
+/// 「FFmpeg の入力へ書けなかった」の印（流し手の失敗の見分けに使う）。
+const FEED_WRITE_FAILED: &str = "feed frame ";
+
+/// 置き場のコマを**番号順に、置かれるのを待って** FFmpeg の標準入力へ流す（ADR-0072 決定3）。
+/// ⚠️ 流し終えたら入力を閉じる（落とす）＝FFmpeg が終わりを知る。
+fn feed_staged_frames(
+    mut stdin: std::process::ChildStdin,
+    dir: &Path,
+    dir_name: &str,
+    count: u32,
+    stop: &AtomicBool,
+) -> Result<(), String> {
+    use std::io::Write;
+    for i in 0..count {
+        wait_staged(dir_name, i, stop)?;
+        let bytes = fs::read(dir.join(format!("frame_{i:05}.png"))).map_err(|e| {
+            export_failure(
+                format!("read staged frame {i}: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?;
+        // 書けない＝FFmpeg が先に終わった（断りは FFmpeg の側から返る）。
+        stdin
+            .write_all(&bytes)
+            .map_err(|e| format!("{FEED_WRITE_FAILED}{i}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// ステージ用ディレクトリ名の検証（英数字と _ のみ＝パストラバーサル防止。フロントは `scene_frames_<n>` を渡す）。
 fn is_safe_stage_name(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -3378,8 +3630,14 @@ fn stage_export_frame_impl(
     frame_index: u32,
     data_base64: String,
 ) -> Result<(), String> {
+    // ⚠️ **置き終えたコマは書き直さない**（ADR-0072 決定4）＝同じ絵は同じバイト。流している最中のファイルを書き換えない。
+    if is_staged(&dir_name, frame_index) {
+        return Ok(());
+    }
     let path = staged_frame_path(&app, &dir_name, frame_index)?;
-    decode_b64_to_file(&data_base64, &path, "staged frame")
+    decode_b64_to_file(&data_base64, &path, "staged frame")?;
+    mark_staged(&dir_name, frame_index);
+    Ok(())
 }
 
 /// 置き場の1コマのパス（置き場の名前を確かめ、フォルダを作る）。base64 で受ける口と生のバイトで受ける口で共有する。
@@ -3431,13 +3689,19 @@ pub async fn stage_export_frame_png(
         .ok_or_else(unreadable)?;
     let bytes = bytes.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // ⚠️ **置き終えたコマは書き直さない**（ADR-0072 決定4）。
+        if is_staged(&dir_name, frame_index) {
+            return Ok(());
+        }
         let path = staged_frame_path(&app, &dir_name, frame_index)?;
         fs::write(&path, &bytes).map_err(|e| {
             export_failure(
                 format!("write staged frame: {e}"),
                 "動画の保存中に問題が発生しました。空き容量を確かめてから、もう一度お試しください。",
             )
-        })
+        })?;
+        mark_staged(&dir_name, frame_index);
+        Ok(())
     })
     .await
     .map_err(|e| {
@@ -3490,15 +3754,26 @@ fn copy_export_frames_impl(
         ));
     }
     let dir = export_frames_stage_dir(&app)?.join(&dir_name);
-    copy_frame_run(&dir, from_index, to_index, count)
+    copy_frame_run(&dir, &dir_name, from_index, to_index, count)
 }
 
 /// `dir` の中で、`from_index` のコマを `to_index` から `count` 枚ぶん写す。
-fn copy_frame_run(dir: &Path, from_index: u32, to_index: u32, count: u32) -> Result<(), String> {
+/// ⚠️ 置き終えたコマは飛ばし、写したコマには印を付ける（ADR-0072 決定2・4）。
+fn copy_frame_run(
+    dir: &Path,
+    dir_name: &str,
+    from_index: u32,
+    to_index: u32,
+    count: u32,
+) -> Result<(), String> {
     let from = dir.join(format!("frame_{from_index:05}.png"));
     for k in 0..count {
         let to = to_index.saturating_add(k);
+        if is_staged(dir_name, to) {
+            continue;
+        }
         copy_frame_file(&from, &dir.join(format!("frame_{to:05}.png")))?;
+        mark_staged(dir_name, to);
     }
     Ok(())
 }
@@ -3560,6 +3835,7 @@ pub async fn clear_export_frames_stage(app: tauri::AppHandle) -> Result<(), Stri
 }
 
 fn clear_export_frames_stage_impl(app: tauri::AppHandle) -> Result<(), String> {
+    reset_staged_frames();
     let dir = export_frames_stage_dir(&app)?;
     match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
@@ -3881,6 +4157,10 @@ pub struct SceneInput {
     /// 途中から止まった動画が「成功」として出る）。
     #[serde(default)]
     expected_frames: Option<u32>,
+    /// 描きながら圧縮する（ADR-0072）＝`frames_dir` のコマは**これから置かれる**。番号順に置かれるのを待って流す
+    /// （`expected_frames` が要る）。false（既定）は今までどおり＝置き終えた連番を読む。
+    #[serde(default)]
+    frames_live: bool,
     /// frames_base64 のフレームレート（未指定なら描画fpsを使う）。
     #[serde(default)]
     fps: Option<u32>,
@@ -4646,14 +4926,31 @@ fn export_video_impl(
             }
             let frames_dir = export_frames_stage_dir(&app)?.join(dir_name);
             let first_frame = frames_dir.join("frame_00000.png");
-            if !first_frame.exists() {
+            // 描きながら圧縮する区間（ADR-0072）＝コマはこれから置かれる。そろっているかは流しながら確かめる（決定5）。
+            let live = if s.frames_live {
+                let n = s.expected_frames.filter(|n| *n > 0).ok_or_else(|| {
+                    export_failure(
+                        format!("live frames without expected_frames: {dir_name}"),
+                        "動画の保存中に問題が発生しました。もう一度お試しください。",
+                    )
+                })?;
+                Some((dir_name.clone(), n))
+            } else {
+                None
+            };
+            if live.is_none() && !first_frame.exists() {
                 return Err(export_failure(
                     format!("staged frames missing: {}", frames_dir.display()),
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
                 ));
             }
             // ⚠️ **コマの抜けを確かめる**（ADR-0070）＝複数の窓で描くと、落ちた窓のぶんが抜けうる。
-            if let Some(missing) = first_missing_staged_frame(&frames_dir, s.expected_frames) {
+            // 描きながらの区間は、流す側が番号ごとに確かめる（ADR-0072 決定5）。
+            if let Some(missing) = live
+                .is_none()
+                .then(|| first_missing_staged_frame(&frames_dir, s.expected_frames))
+                .flatten()
+            {
                 return Err(export_failure(
                     format!("staged frame {missing} missing: {}", frames_dir.display()),
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
@@ -4692,6 +4989,7 @@ fn export_video_impl(
             jobs.push(SceneJob::Frames(FramesJob {
                 frames_dir,
                 first_frame,
+                live,
                 audio,
                 narration_volume: narr_vol,
                 duration_sec: s.duration_sec,
@@ -4722,6 +5020,7 @@ fn export_video_impl(
             jobs.push(SceneJob::Frames(FramesJob {
                 frames_dir,
                 first_frame,
+                live: None,
                 audio: narration,
                 narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
                 duration_sec: s.duration_sec,
@@ -4810,6 +5109,14 @@ fn export_video_impl(
 
     // 出力解像度（先頭場面のPNG＝実出力サイズ）から H.264 目標ビットレートを1回算出（#121・向き非依存）。
     // 場面エンコード・xfade 結合・テロップ overlay（再エンコード）で同じ値を共有する。
+    // 描きながらの区間が先頭なら、先頭のコマが置かれるのを待ってから大きさを読む（ADR-0072）。
+    if let Some(SceneJob::Frames(FramesJob {
+        live: Some((name, _)),
+        ..
+    })) = jobs.first()
+    {
+        wait_staged(name, 0, &AtomicBool::new(false))?;
+    }
     let (out_w, out_h) = jobs
         .first()
         .and_then(|j| match j {
@@ -5099,13 +5406,230 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// 置いたコマの印は1つの持ち物（全体）なので、それを触る検査は1本ずつ通す（ADR-0072）。
+    static STAGED_TEST_LOCK: Mutex<()> = Mutex::new(());
+    fn staged_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let g = STAGED_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_staged_frames();
+        g
+    }
+
+    /// 置かれたコマは待たずに通し、置かれるまでは待ち、描き終えた後に無ければ断る（ADR-0072 決定3・5）。
+    #[test]
+    fn wait_staged_waits_then_passes_and_refuses_missing_after_finish() {
+        let _g = staged_test_guard();
+        let stop = AtomicBool::new(false);
+        mark_staged("live_wait_test", 0);
+        assert!(wait_staged("live_wait_test", 0, &stop).is_ok());
+        // 別のスレッドが後から置く＝待っていた側が起きて通る。
+        let t = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            mark_staged("live_wait_test", 1);
+        });
+        assert!(wait_staged("live_wait_test", 1, &stop).is_ok());
+        t.join().unwrap();
+        // 描き終えたのに無い＝待ち続けず、抜けとして断る（中止の印ではない）。
+        finish_export_frames();
+        let e = wait_staged("live_wait_test", 2, &stop).unwrap_err();
+        assert_ne!(e, EXPORT_CANCELLED_MARK);
+        assert!(is_feeder_failure(&e));
+        reset_staged_frames();
+    }
+
+    /// 圧縮が先に終わった（`stop`）ら、置かれないコマを待ち続けない（ADR-0072）。
+    #[test]
+    fn wait_staged_stops_when_told() {
+        let _g = staged_test_guard();
+        let stop = AtomicBool::new(true);
+        assert_eq!(
+            wait_staged("live_stop_test", 0, &stop).unwrap_err(),
+            EXPORT_CANCELLED_MARK
+        );
+        assert!(!is_feeder_failure(EXPORT_CANCELLED_MARK));
+        assert!(!is_feeder_failure(&format!(
+            "{FEED_WRITE_FAILED}3: broken pipe"
+        )));
+    }
+
+    /// 置き終えたコマは写し直さない（流している最中のファイルを書き換えない＝ADR-0072 決定4）。写したコマには印が付く。
+    #[test]
+    fn copy_frame_run_skips_staged_and_marks_copied() {
+        let _g = staged_test_guard();
+        let dir =
+            std::env::temp_dir().join(format!("stario_live_copy_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("frame_00000.png"), b"NEW").unwrap();
+        fs::write(dir.join("frame_00001.png"), b"OLD").unwrap();
+        mark_staged("live_copy_test", 1);
+        copy_frame_run(&dir, "live_copy_test", 0, 1, 2).unwrap();
+        assert_eq!(fs::read(dir.join("frame_00001.png")).unwrap(), b"OLD");
+        assert_eq!(fs::read(dir.join("frame_00002.png")).unwrap(), b"NEW");
+        assert!(is_staged("live_copy_test", 2));
+        reset_staged_frames();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 標準入力から読む版は、入力の指定だけが違い、後ろは連番ファイル版と同じ（ADR-0072）。
+    #[test]
+    fn frames_scene_pipe_args_differs_only_in_input() {
+        let file = frames_scene_args(
+            "P/frame_%05d.png",
+            Some("a.wav"),
+            0.8,
+            "o.mp4",
+            12.0,
+            30,
+            VideoCodec::MediaFoundation,
+            "6M",
+        );
+        let pipe = frames_scene_pipe_args(
+            Some("a.wav"),
+            0.8,
+            "o.mp4",
+            12.0,
+            30,
+            VideoCodec::MediaFoundation,
+            "6M",
+        );
+        let file_in = [
+            "-y",
+            "-framerate",
+            "30",
+            "-start_number",
+            "0",
+            "-i",
+            "P/frame_%05d.png",
+        ];
+        let pipe_in = [
+            "-y",
+            "-f",
+            "image2pipe",
+            "-framerate",
+            "30",
+            "-c:v",
+            "png",
+            "-i",
+            "-",
+        ];
+        assert_eq!(&file[..file_in.len()], &file_in.map(String::from)[..]);
+        assert_eq!(&pipe[..pipe_in.len()], &pipe_in.map(String::from)[..]);
+        assert_eq!(file[file_in.len()..], pipe[pipe_in.len()..]);
+    }
+
+    /// 実 FFmpeg（FFMPEG_PATH）で、**番号を飛ばして後から置かれる**コマを流して作った動画が、
+    /// 置き終えた連番を読んで作った動画と**バイトまで同じ**（ADR-0072 の合格の基準）。未設定ならスキップ。
+    #[test]
+    fn live_feed_matches_file_sequence_with_real_ffmpeg() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let _g = staged_test_guard();
+        reset_export_cancel();
+        let tmp =
+            std::env::temp_dir().join(format!("stario_live_feed_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let live = tmp.join("live");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&live).unwrap();
+        run(
+            &ffmpeg,
+            &[
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x180:rate=30",
+                "-frames:v",
+                "60",
+                "-start_number",
+                "0",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .chain([src.join("frame_%05d.png").to_string_lossy().into_owned()])
+            .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let file_out = tmp.join("file.mp4");
+        let file_args = frames_scene_args(
+            &src.join("frame_%05d.png").to_string_lossy(),
+            None,
+            1.0,
+            &file_out.to_string_lossy(),
+            2.5,
+            30,
+            VideoCodec::MediaFoundation,
+            "1M",
+        );
+        run_export(&ffmpeg, &file_args).unwrap();
+        // 後ろ半分を先に、前半を後から置く（隠した窓が先の範囲を描き終えた形）。
+        let placer = {
+            let (src, live) = (src.clone(), live.clone());
+            std::thread::spawn(move || {
+                for i in (30..60).chain(0..30) {
+                    let name = format!("frame_{i:05}.png");
+                    fs::copy(src.join(&name), live.join(&name)).unwrap();
+                    mark_staged("live_feed_test", i);
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                finish_export_frames();
+            })
+        };
+        let live_out = tmp.join("live.mp4");
+        let pipe_args = frames_scene_pipe_args(
+            None,
+            1.0,
+            &live_out.to_string_lossy(),
+            2.5,
+            30,
+            VideoCodec::MediaFoundation,
+            "1M",
+        );
+        let dir = live.clone();
+        let feed: Feeder = Box::new(move |stdin, stop: &AtomicBool| {
+            feed_staged_frames(stdin, &dir, "live_feed_test", 60, stop)
+        });
+        run_export_fed(&ffmpeg, &pipe_args, Some(feed)).unwrap();
+        placer.join().unwrap();
+        assert_eq!(fs::read(&file_out).unwrap(), fs::read(&live_out).unwrap());
+
+        // 描き終えたのにコマが足りない＝待ち続けずに断る（黙って短い動画を出さない）。
+        reset_staged_frames();
+        mark_staged("live_feed_short", 0);
+        finish_export_frames();
+        let dir = src.clone();
+        let feed: Feeder = Box::new(move |stdin, stop: &AtomicBool| {
+            feed_staged_frames(stdin, &dir, "live_feed_short", 60, stop)
+        });
+        let short_out = tmp.join("short.mp4");
+        let args = frames_scene_pipe_args(
+            None,
+            1.0,
+            &short_out.to_string_lossy(),
+            2.5,
+            30,
+            VideoCodec::MediaFoundation,
+            "1M",
+        );
+        let e = run_export_fed(&ffmpeg, &args, Some(feed)).unwrap_err();
+        assert!(is_feeder_failure(&e), "{e}");
+        reset_staged_frames();
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
     /// 同じ絵が続くぶんは、まとめて写せる（書き出しの高速化 2026-10-23）。
     #[test]
     fn copy_frame_run_makes_count_identical_frames() {
         let dir = std::env::temp_dir().join(format!("stario_copy_run_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("frame_00004.png"), b"PNG-4").unwrap();
-        copy_frame_run(&dir, 4, 5, 3).unwrap();
+        copy_frame_run(&dir, "copy_run_test", 4, 5, 3).unwrap();
         for i in 5..8 {
             assert_eq!(
                 fs::read(dir.join(format!("frame_{i:05}.png"))).unwrap(),
@@ -8447,6 +8971,7 @@ mod tests {
             SceneJob::Frames(FramesJob {
                 frames_dir: frames_dir.clone(),
                 first_frame,
+                live: None,
                 audio: None,
                 narration_volume: 1.0,
                 duration_sec: 0.5,

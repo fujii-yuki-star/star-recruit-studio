@@ -68,7 +68,7 @@ import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timel
 import { timelineFramePlan } from "../../domain/timeline/export";
 // ⚠️ **焼く総コマ数は domain の1つを通す**（#1211）＝組み立てる側の分母と同じ数を見る。
 import { bakeFrameTotal, planTimelineExportSegments } from "../../domain/timeline/exportSegments";
-import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
+import { planTimelineParts } from "../../renderer/export/buildTimelineParts";
 import { renderTimelineThumbnail, timelineThumbnailKey } from "../../renderer/export/timelineThumbnail";
 import { thumbnailSourcePath } from "../../domain/timeline/thumbnail";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
@@ -93,7 +93,7 @@ import { useStartupJobStore } from "./startupJobStore";
 import {
   accountStagedVideo,
   beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
-  endExportDiskWatch, exportVideo, listenExportProgress,
+  endExportDiskWatch, exportVideo, finishExportFrames, listenExportProgress,
   accountStagedFramesFromHelper, copyExportFrames, readExportFrame, stageClipFrames, stageExportFrame, stageExportFramePng,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
@@ -3079,7 +3079,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
       set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
       await beginExport();
+      // 描いている間は、圧縮の知らせでバーの段を飛ばさない（ADR-0072 決定7）＝描き終えた後の残りだけ圧縮の知らせで進める。
+      let drawingFrames = true;
       unlisten = await listenExportProgress((ev) => {
+        if (drawingFrames) return;
         set({
           exportRun: {
             ...get().exportRun,
@@ -3115,7 +3118,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         ? await openHelpersForExport(doc, drawSession, drawOptions, deps, exportSrcById)
         : null;
       console.info(`[export] render windows: ${helperPool?.size() ?? 0}`);
-      const parts = await buildTimelineParts(doc, {
+      // **描きながら圧縮する**（ADR-0072）＝区間の割り方を先に全部決め、書き出しを先に頼んでから描く。
+      // 圧縮が先に失敗したら描くのをやめる（決定6）＝そのための印。
+      let encodeFailure: { error: unknown } | null = null;
+      const planned = await planTimelineParts(doc, {
         ...drawOptions,
         ...(helperPool && helperPool.size() > 0 ? { parallelDrawersFor: (seg: RenderSegment) => helperPool!.drawersFor(seg) } : {}),
         stageFrame: stageExportFrame,
@@ -3146,15 +3152,23 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
               percent: exportOverallPercent({ phase: P.rendering, progress: { done, total } }),
             },
           }),
-        shouldCancel: () => get().exportRun.cancelling,
+        shouldCancel: () => get().exportRun.cancelling || encodeFailure != null,
       });
       if (get().exportRun.cancelling) throw new ExportCancelledError();
-      set({ exportRun: { ...get().exportRun, phase: P.encoding } });
+      const parts = planned.parts;
       // 区間を書き出しの入力へ写す（#1203）。⚠️ **音は渡さない**（`useOriginalAudio: false`）＝
       // 動画の元の音は**下の `bgmRuns`** で渡っているので、ここでも鳴らすと**二重に鳴る**。
       const scenes = parts.map((p) => {
         if (!p.video) {
-          return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir, ...(p.expectedFrames != null ? { expectedFrames: p.expectedFrames } : {}) };
+          // ⚠️ コマはこれから置かれる（ADR-0072）＝Rust は番号順に置かれるのを待って流す。数が無い区間は今までどおり。
+          const live = p.framesDir != null && (p.expectedFrames ?? 0) > 0;
+          return {
+            fps: p.fps,
+            durationSec: p.durationSec,
+            framesDir: p.framesDir,
+            ...(p.expectedFrames != null ? { expectedFrames: p.expectedFrames } : {}),
+            ...(live ? { framesLive: true } : {}),
+          };
         }
         const asset = doc.assets.find((x) => x.assetId === p.video!.assetId);
         return {
@@ -3182,7 +3196,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **保存先は Rust の戻り値から採る**（レビュー由来 ℹ️・#1118）＝ダイアログで選ばれた
       // 文字列をそのまま使うと、Rust が拡張子を補った（`ffmpeg.rs` の `set_extension("mp4")`）ときに
       // **覚えた場所と開く場所が食い違う**＝「この場所は開けませんでした」になる（保存先の表示もずれる）。
-      const report = await exportVideo(
+      const exporting = exportVideo(
         scenes,
         doc.projectName || "movie",
         bgmRuns,
@@ -3191,6 +3205,25 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         auto.normalize ? auto.targetLufs : undefined,
         exportSizeMaxBitrateBps(get().exportSize),
       );
+      // 圧縮が先に失敗したら、描くのを止める（決定6）。⚠️ ここで受けておく＝描いている間に失敗しても「受け手の無い失敗」にしない。
+      exporting.catch((error: unknown) => {
+        encodeFailure = { error };
+      });
+      try {
+        await planned.draw();
+      } catch (e) {
+        // 描けなかった・中止した＝圧縮も止める（FFmpeg を取り残さない）。圧縮が先に失敗していたらそちらの断りを出す。
+        await cancelExport().catch(() => {});
+        await exporting.catch(() => {});
+        const failed = encodeFailure as { error: unknown } | null;
+        if (failed && !get().exportRun.cancelling) throw failed.error;
+        throw e;
+      }
+      // 描き終えた知らせ＝この後に足りないコマがあれば Rust は待たずに断る（決定5）。
+      await finishExportFrames();
+      drawingFrames = false;
+      set({ exportRun: { ...get().exportRun, phase: P.encoding } });
+      const report = await exporting;
       // ⚠️ **保存先も持ち帰る**（#991）＝場面形式は保存先と「開く」導線を出すのに、
       // こちらは文だけだった（`06 §12.1` に導線を落とす理由は無い＝ADR-0026②）。
       set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false, duckMerged, outPath: report.outputPath } });

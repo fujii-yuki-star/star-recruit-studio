@@ -13,7 +13,7 @@ vi.mock('./rasterize', () => ({
   svgToPngDataUrl: vi.fn(async (svg: string) => `png:${svg}`),
 }));
 
-const { buildTimelineParts, buildVideoPart, framesDirForSegment } = await import('./buildTimelineParts');
+const { buildTimelineParts, buildVideoPart, framesDirForSegment, planTimelineParts } = await import('./buildTimelineParts');
 const { svgToPngDataUrl } = await import('./rasterize');
 const { buildTimelineFrames } = await import('./buildTimelineFrames');
 const { PARALLEL_MIN_FRAMES } = await import('./parallelFrames');
@@ -405,5 +405,38 @@ describe('区間を窓で分けて描く（ADR-0070）', () => {
     const parts = await buildTimelineParts(short, { ...baseOpts, stageFrame: async () => {}, parallelDrawersFor: asked });
     expect(parts[0]).toMatchObject({ expectedFrames: 150 }); // 毎コマ描く区間になっている（確かめの前提）
     expect(asked).not.toHaveBeenCalled();
+  });
+});
+
+// ADR-0072：区間の割り方を**描く前に**全部決める（書き出しを先に頼み、描けたコマから圧縮させるため）。
+describe('割り方を先に決めてから描く（ADR-0072）', () => {
+  it('割り方を決めた時点では1コマも描かず、決めた区間は描き終えた後と同じ', async () => {
+    const d = doc([slot('clip_001', 0), slot('clip_002', 2, { rotation: 15 }), slot('clip_003', 4)]);
+    const staged: number[] = [];
+    const opts = { ...baseOpts, stageFrame: async (_dir: string, index: number) => { staged.push(index); } };
+    const planned = await planTimelineParts(d, opts);
+    expect(staged, '割り方を決めただけで描いた').toHaveLength(0);
+    const before = JSON.parse(JSON.stringify(planned.parts));
+    await planned.draw();
+    expect(staged.length).toBeGreaterThan(0);
+    expect(planned.parts).toEqual(before);
+    expect(planned.parts).toEqual(await buildTimelineParts(d, { ...baseOpts, stageFrame: async () => {} }));
+    // 焼く区間は、置き場と置くはずのコマの数が描く前から決まっている（Rust が番号順に待つため）。
+    const baked = planned.parts.find((p) => p.video == null);
+    expect(baked?.framesDir).toBe(framesDirForSegment(1));
+    expect(baked?.expectedFrames).toBe(60);
+  });
+
+  it('描く途中で中止されたら、残りの区間は描かない', async () => {
+    const d = doc([slot('clip_001', 0, { rotation: 15 }), slot('clip_002', 2, { rotation: 15 })]);
+    let cancel = false;
+    const dirs = new Set<string>();
+    const planned = await planTimelineParts(d, {
+      ...baseOpts,
+      stageFrame: async (dir: string) => { dirs.add(dir); cancel = true; },
+      shouldCancel: () => cancel,
+    });
+    await expect(planned.draw()).rejects.toThrow();
+    expect([...dirs]).toEqual([framesDirForSegment(0)]);
   });
 });

@@ -78,6 +78,11 @@ export interface ExportSceneInput {
    * （窓で分けて描くと、落ちた窓のぶんが抜けうる＝抜けたまま流すと途中から止まった動画が「成功」として出る）。
    */
   expectedFrames?: number;
+  /**
+   * 描きながら圧縮する（ADR-0072）＝`framesDir` のコマは**これから置かれる**。Rust は番号順に置かれるのを待って流す
+   *（`expectedFrames` が要る）。描き終えたら `finishExportFrames` を呼ぶ。
+   */
+  framesLive?: boolean;
   /** framesBase64 のフレームレート（既定 30）。 */
   fps?: number;
   durationSec: number;
@@ -385,6 +390,14 @@ async function accountStagedFrame(pngBytes: number): Promise<void> {
   // 見積もれないときは**底で止める**だけ。
   const floor = diskFloorShortfall(free.stageFreeBytes);
   if (diskIsShort(floor)) throw new ExportDiskShortError(diskFloorMessage(free.stageFreeBytes));
+}
+
+/**
+ * コマを描き終えた知らせ（ADR-0072）＝この後に足りないコマがあれば、Rust は待ち続けずに書き出しを断る
+ *（黙って短い動画を出さない）。描きながら圧縮する書き出しで、描き終えたら必ず呼ぶ。
+ */
+export async function finishExportFrames(): Promise<void> {
+  await invoke('finish_export_frames');
 }
 
 /** フレームのステージングを空にする（書き出しの前後で呼ぶ）。非存在は成功扱い（Rust 側）。 */
