@@ -74,7 +74,7 @@ import { thumbnailSourcePath } from "../../domain/timeline/thumbnail";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { PARALLEL_MIN_FRAMES } from "../../renderer/export/parallelFrames";
 import { extraRenderWindows } from "../../domain/export/renderWindowPlan";
-import { availableMemoryBytes, canOpenRenderWindows, closeRenderWindow, onRenderReport, openRenderWindow, reasonForLog, sendToRenderWindow } from "../../infrastructure/renderWindowLink";
+import { memoryStatus, canOpenRenderWindows, closeRenderWindow, onRenderReport, openRenderWindow, reasonForLog, sendToRenderWindow } from "../../infrastructure/renderWindowLink";
 import { packFontSourceList } from "../../infrastructure/userFontFs";
 import { openRenderHelpers, type RenderHelperPool, type RenderSegment } from "../renderWindow/renderHelpers";
 import { probeFrameOf, probeHash, sessionDrawOptions, sessionTemplateAssets, type RenderSessionPayload } from "../renderWindow/renderSession";
@@ -3360,10 +3360,11 @@ async function openHelpersForExport(
 ): Promise<RenderHelperPool | null> {
   try {
     const logicalCores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined;
-    const availableBytes = await availableMemoryBytes();
-    const extra = extraRenderWindows({ logicalCores, availableBytes });
+    const memory = await memoryStatus();
+    const extra = extraRenderWindows({ logicalCores, memory });
     // 足さなかった理由を後から追えるように残す（普段の実況＝info）。
-    console.info(`[export] render windows plan: extra=${extra} cores=${logicalCores ?? "?"} availMB=${availableBytes == null ? "?" : Math.round(availableBytes / 1048576)}`);
+    const mb = (n: number | undefined) => (n == null ? "?" : Math.round(n / 1048576));
+    console.info(`[export] render windows plan: extra=${extra} cores=${logicalCores ?? "?"} totalMB=${mb(memory?.totalPhys)} availMB=${mb(memory?.availPhys)} commitMB=${mb(memory?.availCommit)}`);
     if (extra <= 0) return null;
     const sub = sessionTemplateAssets(doc, drawSession.templates, deps.templateAssetSrcById);
     const probeFrame = probeFrameOf(doc);
