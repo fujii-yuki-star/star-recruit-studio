@@ -4,6 +4,7 @@
 //   中身の意味（どの範囲を・どの文書で）は app 層（`app/renderWindow`）が決める。
 // ⚠️ **アプリの中だけ**＝ブラウザ（開発時）には窓が無いので、本体1つで描く（`canOpenRenderWindows` が false）。
 import { isTauri } from './assetFs';
+import type { MemoryStatus } from '../domain/export/renderWindowPlan';
 
 /** 描く窓の名前の頭（権限 `capabilities/render.json` の `windows` と同じ）。 */
 export const RENDER_WINDOW_LABEL_PREFIX = 'render-';
@@ -33,12 +34,12 @@ export function canOpenRenderWindows(): boolean {
   return isTauri();
 }
 
-/** いま空いている物理メモリ（バイト）。調べられなければ `null`（＝窓を足さない）。 */
-export async function availableMemoryBytes(): Promise<number | null> {
+/** メモリの様子（積んでいる・いまの空き・確保できる余地）。調べられなければ `null`（＝窓を足さない）。 */
+export async function memoryStatus(): Promise<MemoryStatus | null> {
   if (!isTauri()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return (await invoke<number | null>('available_memory_bytes')) ?? null;
+    return (await invoke<MemoryStatus | null>('memory_status')) ?? null;
   } catch {
     return null;
   }

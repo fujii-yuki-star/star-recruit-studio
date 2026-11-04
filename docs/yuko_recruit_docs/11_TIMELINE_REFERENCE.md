@@ -1171,7 +1171,7 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
   ＝画面が空くまで PNG 化を後回しにするので遅くなった。
   ⚠️ **コマは隠した別の窓でも描く**（ADR-0070）＝長い区間（`PARALLEL_MIN_FRAMES` 以上）は、コマの範囲を小分け（`PARALLEL_CHUNK_FRAMES`）
   にして本体と窓で取り合い、**同じ置き場へ区間の頭から数えた番号で**置く（`stageIndexBase`）＝FFmpeg への渡し方は1窓と同じ。
-  窓の数は `extraRenderWindows`（コアと空きメモリ・最大2つ足す）。窓は確かめの1コマ（`probeHash`）が本体と同じときだけ使い、
+  窓の数は `extraRenderWindows`（コアと**積んでいるメモリ**・確保できる余地で尽きないか・最大2つ足す＝ADR-0070 追補 2026-11-04）。窓は確かめの1コマ（`probeHash`）が本体と同じときだけ使い、
   落ちた・黙った窓の範囲は本体が描き直す。動画の部品のコマは本体が先に1回だけ焼き出す（`stageTimelineVideos`）。
   FFmpeg の前に置き場のコマがそろっているかを Rust が確かめる（`expectedFrames`）。見た目パターンと
   **素材の実寸**（`assetSizes`）は画面から受け取る＝見えているものがそのまま出る（ADR-0001）。
