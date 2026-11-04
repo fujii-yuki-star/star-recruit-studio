@@ -615,6 +615,16 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.phase).toBe('cancelled');
   });
 
+  // ⚠️ 中止のボタンを押していなくても、描くのに失敗したら圧縮を止める（FFmpeg が来ないコマを待ち続けない）。
+  it('描くのに失敗したら、圧縮も止める', async () => {
+    vi.mocked(framesMod.buildTimelineFrames).mockRejectedValue(new Error('draw failed'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.cancelExport)).toHaveBeenCalled();
+    expect(vi.mocked(ffmpegMod.finishExportFrames)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+  });
+
   // ADR-0072：書き出しを**先に頼み**、描いて、描き終えたと知らせてから結果を待つ。
   it('書き出しを頼んでから描き、描き終えたと知らせる（描きながら圧縮する）', async () => {
     const order: string[] = [];
