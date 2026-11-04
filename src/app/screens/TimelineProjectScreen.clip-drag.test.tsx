@@ -3,7 +3,7 @@
 // ⚠️ **1つのファイルで約10分かかっていたので分けた**（負荷・耐久の点検 2026-10-22）＝ほかと一緒に走ると時間切れで
 //   たまに落ちていた。共有の下ごしらえ（文書・開き方・テスト間の後片づけ）は `src/test/timelineScreenKit.tsx` に1つ。
 import { describe, expect, it, vi } from "vitest";
-import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, createEvent, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
@@ -805,9 +805,15 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
         ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
       return container.querySelector(".free-layout-overlay") as HTMLElement;
     };
+    // ⚠️ **押した時刻は決めて渡す**（2026-11-04）＝`fireEvent` の `timeStamp` は**黙って無視され**、本物の時刻が入っていた
+    //   （二度押しの判定は `e.timeStamp` の差）。全体を回して重いと2回の押下の間が 350ms を越え、二度押しにならずに
+    //   落ちていた。「離れた2回」を見る検査も、本当は時刻ではなく別の理由で通っていた。
     const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
-      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
-      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      for (const make of [createEvent.pointerDown, createEvent.pointerUp]) {
+        const ev = make(root, { button: 0, pointerId: 1, clientX: x, clientY: y });
+        Object.defineProperty(ev, "timeStamp", { value: t });
+        fireEvent(root, ev);
+      }
     };
 
     it("二度押しで中へ入り、その差し込み口の欄に手が移る", () => {
@@ -819,6 +825,19 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       tapAt(root, 1400, 500, 1100); // 二度押し
       expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // その部品が選ばれる
       expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+    });
+
+    // ⚠️ **離れた2回は二度押しにならない**（2026-11-04）＝押した時刻が本当に効いていることも、ここで見る
+    //   （時刻を決めずに本物の時刻のままだと、2回は数ミリ秒差で二度押しになってしまう）。
+    it("2回の押下が離れていれば、中へは入らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 3000); // 2秒後
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBeNull();
     });
 
     // ⚠️ **入った所に印が出る**（レビュー 🔴）＝印が無いと、入ったかどうかも、どの層に入ったかも読めない。
@@ -1212,9 +1231,15 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     // 範囲選択（マーキー）を始めた状態のまま止まる（`pointerDown` だけだと「掴んでいる最中」を抜けない）。
     // 実機のクリックには必ず離しが来る＝離しが来ないと**掴んでいる最中の Escape の受け持ち**
     // （`FreeLayoutOverlay` 側・#752）が居座り、この節が試したい「欄の Escape」より先に消費してしまう。
+    // ⚠️ **押した時刻は決めて渡す**（2026-11-04）＝`fireEvent` の `timeStamp` は**黙って無視され**、本物の時刻が入っていた
+    //   （二度押しの判定は `e.timeStamp` の差）。全体を回して重いと2回の押下の間が 350ms を越え、二度押しにならずに
+    //   落ちていた。「離れた2回」を見る検査も、本当は時刻ではなく別の理由で通っていた。
     const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
-      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
-      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      for (const make of [createEvent.pointerDown, createEvent.pointerUp]) {
+        const ev = make(root, { button: 0, pointerId: 1, clientX: x, clientY: y });
+        Object.defineProperty(ev, "timeStamp", { value: t });
+        fireEvent(root, ev);
+      }
     };
 
     it("文字の欄：1回目の Escape は欄を抜けるだけ・2回目で選択が解ける", () => {
@@ -1270,9 +1295,15 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
       return root;
     };
+    // ⚠️ **押した時刻は決めて渡す**（2026-11-04）＝`fireEvent` の `timeStamp` は**黙って無視され**、本物の時刻が入っていた
+    //   （二度押しの判定は `e.timeStamp` の差）。全体を回して重いと2回の押下の間が 350ms を越え、二度押しにならずに
+    //   落ちていた。「離れた2回」を見る検査も、本当は時刻ではなく別の理由で通っていた。
     const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
-      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
-      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      for (const make of [createEvent.pointerDown, createEvent.pointerUp]) {
+        const ev = make(root, { button: 0, pointerId: 1, clientX: x, clientY: y });
+        Object.defineProperty(ev, "timeStamp", { value: t });
+        fireEvent(root, ev);
+      }
     };
 
     // ⚠️ **理由は store の `editBlocked` では持てない**（#832 レビューで発覚）＝`onDrillInAt` が

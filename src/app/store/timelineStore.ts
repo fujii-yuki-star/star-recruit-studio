@@ -12,7 +12,6 @@ import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage, voicesFromSubtitlesMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
-import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf, denoiseSourceKey } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
@@ -2500,6 +2499,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     try {
       const result = await voiceProvider.synthesize(input);
       const voicePath = await importVoiceFile(doc.projectId, clipId, result.audioDataUrl);
+      const playUrl = voicePath ? await audioPlayUrl(doc.projectId, voicePath) : null;
       // 作っている間に文書が入れ替わった／この部品が消えた／設定を変えた＝結果は捨てる。
       const now = get().doc;
       const current = now?.clips.find((c) => c.id === clipId);
@@ -2561,7 +2561,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         }
       }
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
-        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
+        // ⚠️ **置いたファイルを鳴らす**（中身は持たない）。アプリの外（ブラウザ）では置き場が無いので作った中身で鳴らす。
+        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: playUrl ?? result.audioDataUrl },
         ...(editBlocked ? { editBlocked } : {}),
       }, { outsideGroup: true, ...(notice.kind === "collect" ? { joinBulk: notice.history } : {}) });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
@@ -3333,7 +3334,9 @@ async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[st
     return display ? [audioSourceKey(src), `${display}?t=${Date.now()}`] : null;
   }
   const url = src.voicePath
-    ? await readVoiceDataUrl(doc.projectId, src.voicePath)
+    // ⚠️ **読み上げも中身を読まない**（書き出しの仕上げ 2026-11-04）＝1本は小さいが、長い動画では数十 MB になり、
+    //   消した部品の声も取り消しのために持ち続ける。鳴らすのは asset:// の URL・書き出しはファイルのパス（取り込んだ音と同じ）。
+    ? await audioPlayUrl(doc.projectId, src.voicePath)
     : src.bundledBgmId
       ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
       : src.assetId
