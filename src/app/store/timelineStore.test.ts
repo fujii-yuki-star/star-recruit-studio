@@ -6,7 +6,6 @@ import { useProjectStore } from './projectStore';
 import { resetAssetIdReservations } from './assetImport';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
-import * as voiceFsMod from '../../infrastructure/voiceFs';
 import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { EDIT_BLOCKED } from '../../domain/timeline/edit';
@@ -571,15 +570,17 @@ describe('音源の用意（#630 後半）', () => {
       ],
     });
     vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withAudio));
-    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue('data:audio/wav;base64,Vk9JQ0U=');
+    // ⚠️ **読み上げは中身を読まずファイルを鳴らす**（書き出しの仕上げ 2026-11-04）＝同梱 BGM だけ中身。
+    const playUrl = vi.spyOn(assetFsMod, 'audioPlayUrl').mockImplementation(async (_p, rel) => `asset://${rel}?t=1`);
     vi.spyOn(bgmMod, 'readBundledBgmDataUrl').mockResolvedValue('data:audio/mp3;base64,QkdN');
 
     await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
     // キーは**音源の中身**（クリップ id ではない）＝複製で増えたクリップも読み直さずに鳴る。
     expect(useTimelineStore.getState().audioSrcByKey).toEqual({
-      'voice:voices/clip_101.wav': 'data:audio/wav;base64,Vk9JQ0U=',
+      'voice:voices/clip_101.wav': 'asset://voices/clip_101.wav?t=1',
       'bgm:found-new-hope': 'data:audio/mp3;base64,QkdN',
     });
+    expect(playUrl).toHaveBeenCalledWith('proj_20260728_001', 'voices/clip_101.wav');
   });
 
   it('読めない音源はその部品だけ鳴らない（動画全体を開けなくしない）', async () => {
@@ -588,7 +589,7 @@ describe('音源の用意（#630 後半）', () => {
       clips: [{ id: 'clip_101', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'generated', voicePath: 'voices/missing.wav' } }],
     });
     vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withAudio));
-    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue(null);
+    vi.spyOn(assetFsMod, 'audioPlayUrl').mockResolvedValue(null);
 
     await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
     const s = useTimelineStore.getState();

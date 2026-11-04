@@ -227,9 +227,13 @@ export function timelineAudioRuns(
     const expr = volumeExpr(gain === 1 ? pts : pts.map((p) => ({ ...p, volume: p.volume * gain })));
     // **ノイズを減らす部品**（ADR-0068）＝作り置きを**パスで**渡す（プレビューと同じファイル・中身を文字列にしない）。
     const denoisedPath = denoisesClip(doc, clip) && clip.assetId ? denoisedPathOf(doc, clip.assetId) : undefined;
-    // **取り込んだ音もパスで**渡す（負荷・耐久の点検 2026-10-22）＝中身（base64）にすると数百 MB の WAV で落ちうる。
-    // 鳴らす側も中身を読まない（asset:// で鳴らす）。⚠️ 鍵が `asset:` のもの＝読み上げ・同梱 BGM は今までどおり中身で渡す。
-    const importedPath = sourceKey.startsWith(ASSET_SOURCE_KEY_PREFIX) ? assetFilePathOf(doc, clip.assetId) : undefined;
+    // **取り込んだ音・読み上げはパスで**渡す（負荷・耐久の点検 2026-10-22／読み上げは 2026-11-04）＝中身（base64）にしない。
+    // 鳴らす側も中身を読まない（asset:// で鳴らす）。⚠️ **同梱 BGM だけは今までどおり中身**＝プロジェクトの外（アプリの中）にある。
+    const importedPath = sourceKey.startsWith(ASSET_SOURCE_KEY_PREFIX)
+      ? assetFilePathOf(doc, clip.assetId)
+      : clip.kind === TIMELINE_CLIP_KIND.voice
+        ? clip.voice?.voicePath ?? undefined
+        : undefined;
     runs.push({
       clipId: clip.id,
       ...(denoisedPath && clip.assetId

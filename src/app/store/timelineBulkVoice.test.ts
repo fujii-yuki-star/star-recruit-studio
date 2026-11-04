@@ -10,6 +10,12 @@ vi.mock("../../infrastructure/voiceFs", () => ({
   importVoiceFile: vi.fn(async (_projectId: string, stem: string) => `voices/${stem}.wav`),
   readVoiceDataUrl: vi.fn(async () => null),
 }));
+// ⚠️ **読み上げは置いたファイルを鳴らす**（書き出しの仕上げ 2026-11-04）＝読めるかは `audioPlayUrl`（在るかを確かめる）で決まる。
+//   既定は「読めない」（null）＝作った声は作った中身で鳴らす（アプリの外と同じ受け皿）。
+vi.mock("../../infrastructure/assetFs", async (orig) => ({
+  ...(await orig<typeof import("../../infrastructure/assetFs")>()),
+  audioPlayUrl: vi.fn(async () => null),
+}));
 vi.mock("../../infrastructure/projectFs", () => ({
   saveProjectDoc: vi.fn(async () => {}),
   listProjectSummaries: vi.fn(async () => []),
@@ -114,8 +120,8 @@ describe("まとめて声を作る：作成済みでも音が読めないもの�
   // ⚠️ **先に音をそろえてから見る**＝開いた直後は画面がまだ音を読んでいない（`audioSrcByKey` が空）。そろえずに見ると、
   //   ファイルがある作成済みまで「読めない」と見なして、作った声を全部作り直してしまう。
   it("開いた直後でも、ファイルのある作成済みは作り直さない（先に音を読みにいく）", async () => {
-    const { readVoiceDataUrl } = await import("../../infrastructure/voiceFs");
-    vi.mocked(readVoiceDataUrl).mockImplementation(async (_p: string, path: string) => (path === "voices/clip_002.wav" ? "wav" : null));
+    const { audioPlayUrl } = await import("../../infrastructure/assetFs");
+    vi.mocked(audioPlayUrl).mockImplementation(async (_p: string, path: string) => (path === "voices/clip_002.wav" ? "asset://voices/clip_002.wav" : null));
     useTimelineStore.setState({
       doc: doc([generated("clip_001", 0), generated("clip_002", 3)]),
       audioSrcByKey: {},
@@ -126,7 +132,7 @@ describe("まとめて声を作る：作成済みでも音が読めないもの�
     for (let i = 0; i < 4; i += 1) { await flush(); synth.resolveAll(); }
     await run;
     expect(synth.started, "ファイルのある作成済みまで作り直した").toBe(1);
-    vi.mocked(readVoiceDataUrl).mockImplementation(async () => null);
+    vi.mocked(audioPlayUrl).mockImplementation(async () => null);
   });
 });
 
@@ -361,5 +367,19 @@ describe("まとめて声を作る：取り消しの履歴", () => {
     // 最後の取り消し＝2本目以降だけが消え、1本目は残る。
     useTimelineStore.getState().undo();
     expect(statuses()).toEqual(["generated", "none", "none"]);
+  });
+});
+
+// ⚠️ **作った声は、置いたファイルを鳴らす**（書き出しの仕上げ 2026-11-04）＝作った中身（data URL）を持ち続けない。
+describe("作った声の鳴らし方", () => {
+  it("置いたファイルが読めれば、そのファイルの URL で鳴らす（中身は持たない）", async () => {
+    const { audioPlayUrl } = await import("../../infrastructure/assetFs");
+    vi.mocked(audioPlayUrl).mockImplementation(async (_p: string, path: string) => `asset://${path}?t=1`);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(useTimelineStore.getState().audioSrcByKey["voice:voices/clip_001.wav"]).toBe("asset://voices/clip_001.wav?t=1");
+    vi.mocked(audioPlayUrl).mockImplementation(async () => null);
   });
 });

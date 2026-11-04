@@ -233,6 +233,7 @@ describe('timelineAudioRuns', () => {
       {
         clipId: 'clip_001',
         sourceKey: 'voice:voices/clip_001.wav',
+        assetPath: 'voices/clip_001.wav',
         fileExt: 'wav',
         delaySec: 2,
         playSec: 3,
@@ -251,9 +252,9 @@ describe('timelineAudioRuns', () => {
     expect(timelineAudioRuns(d).runs.map((r) => r.loop)).toEqual([false, true]);
   });
 
-  // ⚠️ **取り込んだ音はパスで渡す**（負荷・耐久の点検 2026-10-22）＝中身（base64）にすると数百 MB の WAV で落ちうる。
-  //   読み上げ・同梱 BGM は今までどおり中身（`audioSrcByKey`）で渡す＝パスを持たせない。
-  it('取り込んだ音だけパスで渡す（読み上げ・同梱 BGM は持たない）', () => {
+  // ⚠️ **取り込んだ音・読み上げはパスで渡す**（負荷・耐久の点検 2026-10-22／読み上げは 2026-11-04）＝中身（base64）にしない。
+  //   同梱 BGM だけは今までどおり中身（`audioSrcByKey`）で渡す＝プロジェクトの外にあるのでパスを持たせない。
+  it('取り込んだ音・読み上げはパスで渡す（同梱 BGM は持たない）', () => {
     const d = doc({
       assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.wav' }],
       clips: [
@@ -263,7 +264,7 @@ describe('timelineAudioRuns', () => {
       ],
     } as never);
     const byId = new Map(timelineAudioRuns(d).runs.map((r) => [r.clipId, r]));
-    expect(byId.get('clip_001')!.assetPath).toBeUndefined();
+    expect(byId.get('clip_001')).toMatchObject({ sourceKey: 'voice:voices/clip_001.wav', assetPath: 'voices/clip_001.wav', fileExt: 'wav' });
     expect(byId.get('clip_002')!.assetPath).toBeUndefined();
     expect(byId.get('clip_003')).toMatchObject({ sourceKey: 'asset:asset_001', assetPath: 'assets/asset_001.wav', fileExt: 'wav' });
   });
