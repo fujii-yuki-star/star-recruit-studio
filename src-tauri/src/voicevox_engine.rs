@@ -1,5 +1,6 @@
-// VOICEVOX ENGINE（ローカル HTTP サーバ）の同梱・自動起動・自動終了（ADR-0005・#149）。
+// VOICEVOX ENGINE（ローカル HTTP サーバ）の同梱・起動・終了（ADR-0005・#149・ADR-0071）。
 // 同梱した ENGINE（resource_dir/voicevox_engine/run[.exe]）を空きポートで起動し、アプリ終了時に終了する。
+// ⚠️ **使うときに起動し、しばらく使わなければ止める**（ADR-0071）＝アプリの起動時には起こさない（約 0.5GB を握り続けない）。
 // バイナリが同梱されていなければ何もしない＝従来どおり手動起動の ENGINE／設定の接続先へフォールバック（dev/CI も不変）。
 use crate::packs::DeclaredVoice;
 use crate::proc::no_window_command;
@@ -7,20 +8,91 @@ use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
+
+/// 最後に使ってからこれだけたったら止める（同梱の AI と同じ＝ADR-0071 決定2）。
+const IDLE_STOP: Duration = Duration::from_secs(10 * 60);
+/// 止める見張りの間隔。
+const IDLE_POLL: Duration = Duration::from_secs(60);
+
+/// 使い方の数え上げ（ADR-0071 決定2）。⚠️ **止める判断と同じ錠で数える**＝数え始めた直後に止めない。
+#[derive(Default)]
+struct Usage {
+    last_used: Option<Instant>,
+    in_flight: u32,
+}
 
 /// 起動した同梱 ENGINE の状態（プロセスハンドルと接続先 base_url）。Tauri の管理状態として保持する。
 #[derive(Default)]
 pub struct EngineState {
     child: Mutex<Option<Child>>,
     base_url: Mutex<Option<String>>,
+    usage: Mutex<Usage>,
+    /// 起動の糸が走っている間 true（待つ側が「起動に失敗した」と「まだ起動中」を見分ける）。
+    starting: AtomicBool,
 }
 
 impl EngineState {
     /// 起動済みの同梱 ENGINE の base_url（`http://127.0.0.1:PORT`）。未起動なら None。
+    /// ⚠️ **プロセスが終わっていたら None**（ADR-0071 決定4）＝落ちたエンジンの番号へ頼み続けない（次に使うとき起こし直す）。
     pub fn base_url(&self) -> Option<String> {
+        if let Ok(mut g) = self.child.lock() {
+            let exited = g
+                .as_mut()
+                .is_some_and(|c| !matches!(c.try_wait(), Ok(None)));
+            if exited {
+                *g = None;
+                if let Ok(mut b) = self.base_url.lock() {
+                    *b = None;
+                }
+                crate::tlog!(
+                    "voicevox",
+                    "同梱エンジンが終わっていました（次に使うとき起動します）"
+                );
+                return None;
+            }
+        }
         self.base_url.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// 起動の糸が走っているか。
+    pub fn is_starting(&self) -> bool {
+        self.starting.load(Ordering::SeqCst)
+    }
+
+    /// 頼みごとを始める（終わったら落とす＝`EngineUse` が数を戻し、最後に使った時刻を進める）。
+    /// ⚠️ 走っている間は数で止めない（時刻は終わったときに付ければ足りる＝変異チェックで等価と分かった）。
+    pub fn begin_use(&self) -> EngineUse<'_> {
+        if let Ok(mut u) = self.usage.lock() {
+            u.in_flight += 1;
+        }
+        EngineUse(self)
+    }
+
+    /// 使った印だけ付ける（裏で起こしたときも 10 分で止まるように＝印が無いと永久に止まらない）。
+    fn touch(&self) {
+        if let Ok(mut u) = self.usage.lock() {
+            u.last_used = Some(Instant::now());
+        }
+    }
+
+    /// しばらく使っていなければ止める（止めたら true）。⚠️ 判断と停止を**使い方の錠の中**で行う。
+    fn stop_if_idle(&self, now: Instant) -> bool {
+        let Ok(u) = self.usage.lock() else {
+            return false;
+        };
+        if !crate::local_llm::should_stop_idle(u.last_used, u.in_flight, now, IDLE_STOP) {
+            return false;
+        }
+        let running = self.child.lock().map(|g| g.is_some()).unwrap_or(false);
+        if !running {
+            return false;
+        }
+        self.shutdown();
+        true
     }
 
     fn store(&self, child: Child, base_url: String) {
@@ -36,7 +108,7 @@ impl EngineState {
         }
     }
 
-    /// 起動済みプロセスを終了する（アプリ終了時に呼ぶ＝ゾンビ化防止）。
+    /// 起動済みプロセスを終了する（アプリ終了時・しばらく使わなかったとき・起こし直し）。
     pub fn shutdown(&self) {
         if let Ok(mut g) = self.child.lock() {
             if let Some(mut child) = g.take() {
@@ -47,6 +119,17 @@ impl EngineState {
         }
         if let Ok(mut g) = self.base_url.lock() {
             *g = None;
+        }
+    }
+}
+
+/// 走っている頼みごと1つ（落とすと数を戻し、最後に使った時刻を進める＝失敗した道でも漏らさない）。
+pub struct EngineUse<'a>(&'a EngineState);
+impl Drop for EngineUse<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut u) = self.0.usage.lock() {
+            u.in_flight = u.in_flight.saturating_sub(1);
+            u.last_used = Some(Instant::now());
         }
     }
 }
@@ -181,6 +264,9 @@ pub async fn restart_voice_engine(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         app.state::<EngineState>().shutdown();
+        // 起こしたものも 10 分で止まるように印を付ける（ADR-0071）。
+        app.state::<EngineState>().touch();
+        ensure_idle_watcher(&app);
         match start_engine(&app) {
             Ok(EngineStart::Started { packs_ok: true }) | Ok(EngineStart::NotBundled) => Ok(()),
             _ => Err(crate::messages::VOICE_ENGINE_RESTART_FAILED.to_string()),
@@ -209,15 +295,58 @@ enum EngineStart {
     Started { packs_ok: bool },
 }
 
-/// 同梱 ENGINE を空きポートで起動する（アプリの起動時）。同梱が無ければ何もしない（手動起動／設定の接続先へフォールバック）。
-/// 起動完了（モデル読込）には数秒かかるため、直後の音声作成が早すぎると失敗しうる（再試行で回復）。
-/// ⚠️ **パックの声があると置き場を組む**（初回や別ドライブでは大きなコピーになりうる）＝窓の起動を待たせないよう別の糸で起こす。
-pub fn start_bundled_engine(app: &AppHandle) {
+/// 同梱 ENGINE が動いていなければ、**裏で**起動を始める（待たない・ADR-0071 決定1）。
+/// 同梱が無い・もう動いている・起動中なら何もしない。止める見張りもここで1度だけ立てる。
+/// ⚠️ **パックの声があると置き場を組む**（初回や別ドライブでは大きなコピーになりうる）＝呼んだ側を待たせないよう別の糸で起こす。
+pub fn kick_bundled_engine(app: &AppHandle) {
+    let state = app.state::<EngineState>();
+    state.touch();
+    ensure_idle_watcher(app);
+    if bundled_engine_exe(app).is_none() || state.base_url().is_some() {
+        return;
+    }
+    if state.starting.swap(true, Ordering::SeqCst) {
+        return; // もう起動中
+    }
     let app = app.clone();
     std::thread::spawn(move || {
+        {
+            let _guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // 錠を待つ間にほかが起こしていたら起こさない（二重に起こすと前のを止めることになる）。
+            if app.state::<EngineState>().base_url().is_none() {
+                if let Err(e) = start_engine(&app) {
+                    crate::tlog!("voicevox", "同梱エンジンの起動に失敗: {e}");
+                }
+            }
+        }
+        app.state::<EngineState>()
+            .starting
+            .store(false, Ordering::SeqCst);
+    });
+}
+
+/// 同梱されているか（されていなければ、待つ側は設定の接続先／既定へ回る）。
+pub fn is_bundled(app: &AppHandle) -> bool {
+    bundled_engine_exe(app).is_some()
+}
+
+/// しばらく使わなければ止める見張り（1つだけ・ADR-0071 決定2）。
+fn ensure_idle_watcher(app: &AppHandle) {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    if STARTED.set(()).is_err() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(IDLE_POLL);
+        let state = app.state::<EngineState>();
+        // ⚠️ 起こし直し（パックの声）と重ねない。
         let _guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = start_engine(&app) {
-            crate::tlog!("voicevox", "同梱エンジンの起動に失敗: {e}");
+        if state.stop_if_idle(Instant::now()) {
+            crate::tlog!(
+                "voicevox",
+                "しばらく使われなかったので同梱エンジンを止めました"
+            );
         }
     });
 }
@@ -306,6 +435,59 @@ fn start_engine(app: &AppHandle) -> Result<EngineStart, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// しばらく動き続ける子（エンジンの代わり）。
+    fn long_child() -> Child {
+        let (program, args): (&str, &[&str]) = if cfg!(windows) {
+            ("ping", &["-n", "30", "127.0.0.1"])
+        } else {
+            ("sleep", &["30"])
+        };
+        no_window_command(program)
+            .args(args)
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn")
+    }
+
+    #[test]
+    fn idle_stop_waits_for_running_requests_and_then_stops() {
+        let st = EngineState::default();
+        st.store(long_child(), "http://127.0.0.1:1".into());
+        let later = Instant::now() + IDLE_STOP + Duration::from_secs(1);
+        // 頼みが走っている間は、10 分たっていても止めない（ADR-0071 決定2）。
+        let using = st.begin_use();
+        assert!(!st.stop_if_idle(later));
+        assert!(st.base_url().is_some());
+        drop(using);
+        // 使い終えた直後はまだ止めない（使い終えた時刻から数える）。
+        assert!(!st.stop_if_idle(Instant::now()));
+        // 10 分たてば止める。止めたら接続先も消え、止めたものをもう一度止めようとはしない。
+        assert!(st.stop_if_idle(Instant::now() + IDLE_STOP + Duration::from_secs(1)));
+        assert!(st.base_url().is_none());
+        assert!(!st.stop_if_idle(Instant::now() + IDLE_STOP * 3));
+    }
+
+    #[test]
+    fn idle_stop_needs_a_use_mark() {
+        // 印が無い（一度も使っていない）のに止める、はしない。印を付ければ 10 分で止まる＝裏で起こしただけでも残らない。
+        let st = EngineState::default();
+        st.store(long_child(), "http://127.0.0.1:1".into());
+        assert!(!st.stop_if_idle(Instant::now() + IDLE_STOP * 2));
+        st.touch();
+        assert!(st.stop_if_idle(Instant::now() + IDLE_STOP + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn exited_engine_is_not_running() {
+        // 落ちたエンジンの番号へ頼み続けない（ADR-0071 決定4）。
+        let st = EngineState::default();
+        let mut c = long_child();
+        c.kill().unwrap();
+        c.wait().unwrap();
+        st.store(c, "http://127.0.0.1:1".into());
+        assert!(st.base_url().is_none());
+    }
 
     #[test]
     fn build_voicelib_lays_out_dlls_bundled_and_pack_voices() {

@@ -12,6 +12,7 @@ import { Sidebar } from "./app/components/Sidebar";
 import { ChevronRightIcon } from "./app/components/icons";
 import { SIDEBAR_EDITOR_SCREENS, useEditorSidebarCollapsed, useSidebarCollapsed } from "./app/hooks/useSidebarCollapsed";
 import { useAppearance } from "./app/hooks/useAppearance";
+import { useVoiceEngineWarmup } from "./app/hooks/useVoiceEngineWarmup";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { ExportResultNotice } from "./app/components/ExportResultNotice";
 import { BulkVoiceBanner } from "./app/components/BulkVoiceBanner";
@@ -108,6 +109,8 @@ function App() {
   // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
   // OS の明暗が変わったら追いつく（「OS に合わせる」を選んだ人は開き直しを強いられない）。
   useAppearance();
+  // 声を使う画面に入ったら、声のエンジンを裏で起こしておく（ADR-0071）＝起動時には起こさない（約 0.5GB）。
+  useVoiceEngineWarmup(screen);
   // 左の帯を畳んでいるか（#1103）。画面の好みなので覚える（`localStorage`・ADR-0033）。
   const [outsideCollapsed, setOutsideCollapsed] = useSidebarCollapsed();
   // 編集画面では**別に覚え、畳んだ状態で始める**（ADR-0048・#1256 b1）＝作業場を最大にする。
