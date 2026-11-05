@@ -46,6 +46,19 @@ export function resolveNarrationVoice(narration: Narration, voice: VoiceSettings
 }
 
 /**
+ * 単独の語りの合成入力（ADR-0073）。声・話し方は `resolveNarrationVoice`、話者は `narration.speaker`
+ *（掛け合いの行と同じ＝アプリの設定より優先・カタログに無い番号は null＝既定へ）。
+ * ⚠️ **入口は1つ**＝作るときと「同じ入力か」を見るときの両方がここを通る（片方だけ話者を見ると、作った声を毎回捨てる）。
+ */
+export function resolveNarrationInput(narration: Narration, voice: VoiceSettings): SynthesizeInput {
+  return {
+    text: narration.text,
+    ...resolveNarrationVoice(narration, voice),
+    speaker: narration.speaker != null && characterForSpeaker(narration.speaker) != null ? narration.speaker : null,
+  };
+}
+
+/**
  * 掛け合いの1行の合成入力を解決する（ADR-0015 PR-C2）。base＝resolveNarrationVoice（場面/既定声）。
  * - speed/pitch/intonation は 行→base（場面/既定）を継承（#242 で intonation も行ごとに調整可）。
  * - speaker は行に明示があればそれ（app 設定より優先）、無ければ null＝voiceId 経路（app 設定→既定）で解決。

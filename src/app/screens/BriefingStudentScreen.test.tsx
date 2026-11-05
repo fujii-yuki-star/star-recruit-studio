@@ -98,10 +98,23 @@ describe("学生の画面", () => {
     fireEvent.click(screen.getByRole("button", { name: "この内容で作る" }));
     await waitFor(() => expect(run.prepared).toHaveLength(1));
     expect((run.prepared[0] as { picks: BriefingCandidate[] }).picks.map((c) => c.key)).toEqual(["c1"]);
+    expect((run.prepared[0] as { speaker: number | null }).speaker).toBeNull(); // 選ばなければいつもの声
     // 仕上げは書き出しの画面へ「アプリの中の仕事」として保存先を渡す
     await waitFor(() => expect(useStartupJobStore.getState().pendingExportOut).toBe("C:/data/temporary-sessions/proj_20261105_901/briefing.mp4"));
     expect(useStartupJobStore.getState().internal).toBe(true);
     expect(screen.getByTestId("hidden-export")).toBeTruthy();
+  });
+
+  it("話す声を選ぶと、その声を作るときに渡す", async () => {
+    render(<BriefingStudentScreen catalog={catalog()} />);
+    fireEvent.click(screen.getByRole("button", { name: "研修" }));
+    fireEvent.click(screen.getByRole("radio", { name: "四国めたん" }));
+    expect(screen.getByRole("radio", { name: "四国めたん" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "いつもの声" }).getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "説明動画を組む" }));
+    fireEvent.click(await screen.findByRole("button", { name: "この内容で作る" }));
+    await waitFor(() => expect(run.prepared).toHaveLength(1));
+    expect((run.prepared[0] as { speaker: number | null }).speaker).toBe(2);
   });
 
   it("仕上がったらその場で再生し、終わると一時の動画を消して最初へ戻る", async () => {

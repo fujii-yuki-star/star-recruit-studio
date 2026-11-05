@@ -222,6 +222,27 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     spy.mockRestore();
   });
 
+  // ADR-0073：単独の語りの話者（`narration.speaker`）を作る声へ渡す（アプリの設定より優先＝掛け合いの行と同じ）。
+  it('単独の語りは、場面の話者で声を作る（ADR-0073）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'none', speaker: 2 },
+        warnings: [],
+      }] as never,
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockResolvedValue({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 });
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ text: 'ひとこと', speaker: 2 });
+    // 作った入力といまの入力が同じと見なせる＝作った声を捨てない
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('generated');
+    spy.mockRestore();
+  });
+
   // ⚠️ #755-3：印は**文書に残る**が、失敗のたびに `failed` を書くと「作れませんでした」と出ながら
   // 前に作った声は鳴り続ける（開き直しても消えない）。判断材料は**作り始める前の印**。
   it('前が「作成済み」なら、作り直しに失敗しても据え置く（#755-3）', async () => {

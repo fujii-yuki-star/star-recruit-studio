@@ -70,7 +70,7 @@ import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMess
 import { aiSceneLimitMessage, canAddScenes, sceneLimitMessage } from "../../domain/project/sceneLimit";
 import { runBulkImport } from "./bulkImport";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
-import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
+import { resolveLineVoice, resolveNarrationInput, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, narrationAudioKey, sceneNeedsVoiceOrRemake, sceneVoiceKeysToRemake, withLineStatus, withLineVoicePath, narrationDurationFromAudio } from "../../domain/project/narrationLines";
 import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
@@ -3312,8 +3312,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }));
     setStatus(NARRATION_STATUS.pending);
     set({ narrationError: null, narrationCancelled: false }); // 新しく声を作り始めた＝直前の「中止しました」の表示は消す（#547 P2-6）
-    const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
-    const input = { text: scene.narration.text, ...v };
+    const input = resolveNarrationInput(scene.narration, get().meta.voiceSettings);
     const key = sceneId;
     const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
     const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
@@ -3327,7 +3326,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (!sc || (sc.lines && sc.lines.length > 0)) return {};
         // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
         // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
-        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        const curInput = resolveNarrationInput(sc.narration, st.meta.voiceSettings);
         if (!sameSynthInput(input, curInput)) {
           return {
             scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
@@ -3359,7 +3358,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const sc = st.scenes.find((x) => x.sceneId === sceneId);
         if (!sc || (sc.lines && sc.lines.length > 0)) return {};
         // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
-        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        const curInput = resolveNarrationInput(sc.narration, st.meta.voiceSettings);
         if (!sameSynthInput(input, curInput)) {
           return {
             scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),

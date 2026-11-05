@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.34" },
+    "schemaVersion": { "const": "1.35" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -555,6 +555,7 @@
       "properties": {
         "text": { "type": "string" },
         "voiceId": { "type": ["string", "null"], "pattern": "^[a-z0-9_]+$" },
+        "speaker": { "type": ["integer", "null"], "description": "単独の語りの話者（VOICEVOX の話者番号＝掛け合いの行の speaker と同じ・1.35・ADR-0073）。null/未指定＝アプリの設定の声を継承。" },
         "speed": { "type": ["number", "null"] },
         "pitch": { "type": ["number", "null"] },
         "intonation": { "type": ["number", "null"] },

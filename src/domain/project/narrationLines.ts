@@ -9,12 +9,14 @@ import type { Narration, NarrationLine, Scene, Warning } from './types';
 /**
  * 単一 narration を1行（line_001）に写す（後方互換・lines 不在時の実効行）。
  * 旧 narration.voiceId（文字列）は speaker（数値）へ逆変換しない（ADR-0015）＝speaker 未指定＝既定声を継承。
+ * ⚠️ **`narration.speaker`（ADR-0073）は写す**＝これで単独の語りも掛け合いの行と同じ道（作る声・クレジット・行の字幕の話者・焼き出し）に乗る。
  * speed/pitch/intonation は写す（#242 で NarrationLine に intonation を追加・null=場面/動画の既定を継承）。
  */
 export function lineFromNarration(narration: Narration): NarrationLine {
   return {
     lineId: 'line_001',
     text: narration.text,
+    ...(narration.speaker != null ? { speaker: narration.speaker } : {}),
     speed: narration.speed ?? null,
     pitch: narration.pitch ?? null,
     intonation: narration.intonation ?? null,
