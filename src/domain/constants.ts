@@ -69,6 +69,8 @@ export const BRIEFING_AI_SPEECH_MAX_LENGTH = 60;
 export const BRIEFING_SESSION_ID_FLOOR = 900;
 // 最後の場面（「すたりおで作りました」）の長さ（秒・ADR-0061 判断3）。
 export const BRIEFING_CLOSING_DURATION_SEC = 6;
+// 学生が選べる声の数（「元の声のまま」は数えない・ADR-0073）。多すぎると選ぶのが手間。
+export const BRIEFING_VOICE_CHOICE_MAX = 6;
 // 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
 export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる

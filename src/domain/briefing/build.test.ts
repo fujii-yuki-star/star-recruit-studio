@@ -68,7 +68,7 @@ function input(over: Partial<BriefingBuildInput> = {}): BriefingBuildInput {
       { project: A, sceneId: 'scene_002' },
       { project: A, sceneId: 'scene_001' },
     ],
-    voiceId: 'voicevox_zundamon',
+    speaker: 2,
     closingText: 'すたりおで作りました。',
     templates: sampleTemplates,
     ...over,
@@ -99,7 +99,7 @@ describe('一時の動画を組み立てる', () => {
     const r = buildBriefingProject(input())!;
     const [s1, s2, s3] = r.project.scenes;
     expect(r.voiceSceneIds).toEqual([s1.sceneId, s3.sceneId]);
-    for (const s of [s1, s3]) expect(s.narration).toMatchObject({ voiceId: 'voicevox_zundamon', voicePath: null, status: 'pending' });
+    for (const s of [s1, s3]) expect(s.narration).toMatchObject({ speaker: 2, voicePath: null, status: 'pending' });
     expect(s2.lines?.[0].voicePath).toBe(`voices/${s2.sceneId}_line_001.wav`);
     const to = r.files.map((f) => f.toRelPath);
     expect(to).toContain(`voices/${s2.sceneId}_line_001.wav`);
@@ -115,10 +115,11 @@ describe('一時の動画を組み立てる', () => {
   });
 
   it('声を選ばなければ、元の声とファイルのまま', () => {
-    const r = buildBriefingProject(input({ voiceId: null }))!;
+    const r = buildBriefingProject(input({ speaker: null }))!;
     expect(r.voiceSceneIds).toEqual([]);
     const s1 = r.project.scenes[0];
     expect(s1.narration).toMatchObject({ voiceId: 'voicevox_metan', status: 'generated', voicePath: `voices/${s1.sceneId}.wav` });
+    expect(s1.narration.speaker).toBeUndefined();
     expect(r.files.map((f) => f.toRelPath)).toContain(`voices/${s1.sceneId}.wav`);
   });
 

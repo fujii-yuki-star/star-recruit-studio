@@ -490,6 +490,21 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     ]);
   });
 
+  it('単独の語りの場面は、その場面の話者で名乗る（ADR-0073）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8, narration: { text: 'こんにちは', status: 'generated', speaker: 2 } }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      // 「ずっと表示」＝話している声を名乗る（「最初と最後」は全員を並べるので、語りの話者は一覧の側で確かめる＝narrationSpeaker.test）。
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'always' } },
+    );
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
+  });
+
   it('opts.credit を渡すと splitVideoSceneSvgMulti の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
     vi.mocked(splitVideoSceneSvgMulti).mockClear();
     await buildExportScenes(

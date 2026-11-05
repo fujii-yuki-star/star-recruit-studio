@@ -62,14 +62,16 @@ export class BriefingPrepareError extends Error {}
  * 組んだ並びから一時の動画を作り、ファイルを写して保存する。作った動画の番号を返す（開くのは呼ぶ側）。
  *
  * ⚠️ **失敗したら作りかけを消す**（一時の置き場所の中だけ）。
- * ⚠️ **声は元の動画のまま**（`voiceId: null`）＝単独のナレーションの声はアプリ全体の設定で決まり、
- *   動画ごとに変える道がまだ無い（学生が選ぶ声は利用者の判断待ち・ADR-0061 段階5）。
+ * ⚠️ **声**＝`speaker` を選んだときだけ、単独のナレーションの場面をその声で作り直す（`narration.speaker`・ADR-0073）。
+ *   null＝元の動画の声のまま。掛け合いの場面はいつも元の声（ADR-0061 判断2）。
  */
 export async function prepareBriefingVideo(input: {
   catalog: BriefingCatalog;
   docs: readonly Project[];
   picks: readonly BriefingCandidate[];
   templates: readonly Template[];
+  /** 学生が選んだ声（VOICEVOX の話者番号）・null＝元の声のまま。 */
+  speaker: number | null;
   now: Date;
 }): Promise<string> {
   const byId = new Map(input.docs.map((d) => [d.projectId, d]));
@@ -93,7 +95,7 @@ export async function prepareBriefingVideo(input: {
       nowIso: input.now.toISOString(),
       projectName: "あなた向けの会社説明",
       picks,
-      voiceId: null,
+      speaker: input.speaker,
       closingText: input.catalog.closing.text,
       makeLogoAsset: lib
         ? (ids) => {

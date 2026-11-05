@@ -16,6 +16,7 @@ import {
   BRIEFING_NORMAL_MIN_SEC,
   BRIEFING_SHORT_MAX_SEC,
   BRIEFING_SHORT_MIN_SEC,
+  BRIEFING_VOICE_CHOICE_MAX,
 } from '../constants';
 import { sceneSpokenText } from '../ai/assist';
 import { BRIEFING_PRIORITIES, type BriefingCatalog, type BriefingPriority } from './catalog';
@@ -308,4 +309,15 @@ export async function composeBriefing(
   const checked = checkBriefingComposition(raw, offer, length);
   if (!checked.ok) return byRules(checked.problem);
   return { picks: checked.picks, totalSec: sumSec(checked.picks), by: 'ai', aiProblem: null };
+}
+
+/**
+ * 学生が選べる声（ADR-0061 決定3・ADR-0073）＝会社の動画で使えるキャラの「ノーマル」の声を `BRIEFING_VOICE_CHOICE_MAX` まで。
+ * ⚠️ 並びは声のカタログの順（カタログが会社で使えるキャラだけを持つ）。「元の声のまま」は画面が先頭に足す。
+ */
+export function briefingVoiceChoices(catalog: readonly { character: string; styles: readonly { speaker: number }[] }[], isAllowed: (character: string) => boolean): { speaker: number; character: string }[] {
+  return catalog
+    .filter((c) => isAllowed(c.character) && c.styles.length > 0)
+    .slice(0, BRIEFING_VOICE_CHOICE_MAX)
+    .map((c) => ({ speaker: c.styles[0].speaker, character: c.character }));
 }

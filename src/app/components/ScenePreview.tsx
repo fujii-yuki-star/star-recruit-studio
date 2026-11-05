@@ -18,7 +18,7 @@ import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
-import { creditForSpeaker, sceneCreditText } from "../../domain/voice/narratorCredit";
+import { creditForSpeaker, sceneCreditText, soloCreditLine } from "../../domain/voice/narratorCredit";
 import { CREDIT_MODE } from "../../domain/voice/creditDisplay";
 import { sceneCreditVisibility } from "../../domain/project/sceneCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
@@ -256,8 +256,8 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   // ⚠️ 見本の場面（見た目パターンの画面・index が無い）は動画の設定に従わせない＝従来どおり話している行か既定の声1行。
   const isProjectScene = projectScenes.some((s) => s.sceneId === scene.sceneId);
   const creditText = isProjectScene
-    ? sceneCreditText(creditDisplay, projectScenes, creditLine, baseCredit)
-    : sceneCreditText({ mode: CREDIT_MODE.always }, projectScenes, creditLine, baseCredit);
+    ? sceneCreditText(creditDisplay, projectScenes, creditLine ?? soloCreditLine(scene), baseCredit)
+    : sceneCreditText({ mode: CREDIT_MODE.always }, projectScenes, creditLine ?? soloCreditLine(scene), baseCredit);
   // 出す/出さないは**書き出しと同じ共有関数**（`sceneCreditVisibility`・ADR-0001）。
   // 見た目パターンの画面が描く**見本の場面**はプロジェクトの場面ではない（index が無い）＝
   // そこは従来どおり出す（「出来上がり」ではなく見た目の見本なので、動画の設定に従わせる意味がない）。

@@ -80,7 +80,7 @@ const NOW = new Date(2026, 10, 5, 10, 0, 0);
 const firstId = `proj_20261105_${BRIEFING_SESSION_ID_FLOOR + 1}`;
 
 function input(over: Partial<Parameters<typeof prepareBriefingVideo>[0]> = {}): Parameters<typeof prepareBriefingVideo>[0] {
-  return { catalog: defaultBriefingCatalog(), docs: [SRC], picks: [PICK], templates: sampleTemplates, now: NOW, ...over };
+  return { catalog: defaultBriefingCatalog(), docs: [SRC], picks: [PICK], templates: sampleTemplates, speaker: null, now: NOW, ...over };
 }
 
 beforeEach(() => {
@@ -101,6 +101,13 @@ describe("一時の動画を作る", () => {
     expect(doc.projectId).toBe(id);
     expect(doc.scenes).toHaveLength(2);
     expect(fs.deleted).toEqual([]);
+  });
+
+  it("声を選ぶと、単独の語りをその声で作り直す（元の声は写さない）", async () => {
+    await prepareBriefingVideo(input({ speaker: 2 }));
+    const doc = JSON.parse(fs.saved[0].json) as Project;
+    expect(doc.scenes[0].narration).toMatchObject({ speaker: 2, status: "pending", voicePath: null });
+    expect((fs.copied[0].files as { toRelPath: string }[]).map((f) => f.toRelPath)).not.toContain("voices/scene_001.wav");
   });
 
   it("会社の見た目のロゴを写して締めの場面に置く（登録で「置かない」なら写さない）", async () => {

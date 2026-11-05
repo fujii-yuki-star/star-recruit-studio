@@ -10,7 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { BRIEFING_LENGTH, BRIEFING_LENGTHS, type BriefingCandidate, type BriefingLength } from "../../domain/briefing/compose";
+import { BRIEFING_LENGTH, BRIEFING_LENGTHS, briefingVoiceChoices, type BriefingCandidate, type BriefingLength } from "../../domain/briefing/compose";
+import { isCompanyOkVoiceCharacter, VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import type { BriefingCatalog } from "../../domain/briefing/catalog";
 import { BRIEFING_CLOSING_DURATION_SEC, EXPORT_SIZE } from "../../domain/constants";
 import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
@@ -57,6 +58,9 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
   const [step, setStep] = useState<Step>("choose");
   const [chosen, setChosen] = useState<string[]>([]);
   const [length, setLength] = useState<BriefingLength>(BRIEFING_LENGTH.normal);
+  // 話す声（null＝元の動画の声のまま・ADR-0073＝単独の語りだけその声で作り直す）。
+  const [speaker, setSpeaker] = useState<number | null>(null);
+  const voiceChoices = useMemo(() => briefingVoiceChoices(VOICE_CATALOG, isCompanyOkVoiceCharacter), []);
   const [docs, setDocs] = useState<Project[] | null>(null);
   const [picks, setPicks] = useState<BriefingCandidate[]>([]);
   const [off, setOff] = useState<Set<string>>(new Set());
@@ -115,7 +119,7 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
   async function make(): Promise<void> {
     setStep("making");
     try {
-      const id = await prepareBriefingVideo({ catalog, docs: docs ?? [], picks: kept, templates, now: new Date() });
+      const id = await prepareBriefingVideo({ catalog, docs: docs ?? [], picks: kept, templates, speaker, now: new Date() });
       setSessionId(id);
       sessionRef.current = id;
       await withLastProjectKept(() => useProjectStore.getState().loadProject(id));
@@ -163,6 +167,7 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
     setPicks([]);
     setOff(new Set());
     setChosen([]);
+    setSpeaker(null);
     setErrorText("");
     setStep("choose");
     // 開いていた一時の動画を閉じる（消した動画を編集画面に残さない）。⚠️ 書き出しの結果も一緒に落ちる（`newProject` が戻す）＝
@@ -240,6 +245,19 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
                 {BRIEFING_LENGTHS.map((l) => (
                   <button key={l} type="button" role="radio" aria-checked={length === l} className="briefing-student-card" onClick={() => setLength(l)}>
                     {BRIEFING_LENGTH_LABEL[l]}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section className="col gap-sm">
+              <h2 className="briefing-student-q">話す声</h2>
+              <div className="briefing-student-cards" role="radiogroup" aria-label="話す声">
+                <button type="button" role="radio" aria-checked={speaker == null} className="briefing-student-card" onClick={() => setSpeaker(null)}>
+                  いつもの声
+                </button>
+                {voiceChoices.map((v) => (
+                  <button key={v.speaker} type="button" role="radio" aria-checked={speaker === v.speaker} className="briefing-student-card" onClick={() => setSpeaker(v.speaker)}>
+                    {v.character}
                   </button>
                 ))}
               </div>

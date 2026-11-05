@@ -26,8 +26,8 @@ export interface BriefingBuildInput {
   projectName: string;
   /** 組んだ並び（原本の動画と場面の番号）。 */
   picks: readonly { project: Project; sceneId: string }[];
-  /** 単独のナレーションの場面を作り直す声（null＝元の声のまま）。 */
-  voiceId: string | null;
+  /** 単独のナレーションの場面を作り直す声（VOICEVOX の話者番号・null＝元の声のまま）。⚠️ `narration.speaker` に書く（ADR-0073）。 */
+  speaker: number | null;
   /** 最後の場面の文。 */
   closingText: string;
   /**
@@ -82,9 +82,9 @@ export function buildBriefingProject(input: BriefingBuildInput): BriefingBuildRe
   // 声＝単独のナレーションの場面だけ選んだ声で作り直す（元の声のファイルはコピーしない）。
   const voiceSceneIds: string[] = [];
   const scenes = imported.scenes.map((s) => {
-    if (input.voiceId == null || !isSoloNarration(s)) return s;
+    if (input.speaker == null || !isSoloNarration(s)) return s;
     voiceSceneIds.push(s.sceneId);
-    return { ...s, narration: { ...s.narration, voiceId: input.voiceId, voicePath: null, status: NARRATION_STATUS.pending } };
+    return { ...s, narration: { ...s.narration, speaker: input.speaker, voicePath: null, status: NARRATION_STATUS.pending } };
   });
   const dropped = new Set(
     imported.scenes.filter((s) => voiceSceneIds.includes(s.sceneId)).map((s) => s.narration.voicePath).filter((p): p is string => !!p),

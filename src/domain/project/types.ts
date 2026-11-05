@@ -173,6 +173,8 @@ export interface Narration {
   text: string;
   /** null = project.voiceSettings を継承（11 §6）。 */
   voiceId?: string | null;
+  /** 単独の語りの話者（VOICEVOX の話者番号＝掛け合いの行の `speaker` と同じ・ADR-0073・schema 1.35）。null/未指定＝アプリの設定の声を継承。 */
+  speaker?: number | null;
   speed?: number | null;
   pitch?: number | null;
   intonation?: number | null;

@@ -9,7 +9,7 @@
 // ⚠️ **戻す時点では、どちらの文も手元にある**（戻す内容といまの内容）ので、
 // **文が変わっている読み上げだけ**「作成前」に戻せば足りる（全部作り直させない）。
 import { NARRATION_STATUS } from '../enums';
-import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from '../voice/voiceProvider';
+import { resolveLineVoice, resolveNarrationInput, resolveNarrationVoice, sameSynthInput } from '../voice/voiceProvider';
 import type { SynthesizeInput } from '../voice/voiceProvider';
 import type { Project, Scene, VoiceSettings } from './types';
 
@@ -39,7 +39,7 @@ function voiceInputsOf(
   const base = scene.narration ? resolveNarrationVoice(scene.narration, voice as VoiceSettings) : null;
   return {
     narration:
-      scene.narration && base ? { text: scene.narration.text, ...base, speaker: null } : null,
+      scene.narration ? resolveNarrationInput(scene.narration, voice as VoiceSettings) : null,
     lines: new Map(
       (scene.lines ?? []).map((l) => [
         l.lineId,
