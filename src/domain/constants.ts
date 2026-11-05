@@ -65,6 +65,8 @@ export const BRIEFING_LONG_MIN_SEC = 150;
 export const BRIEFING_LONG_MAX_SEC = 240;
 export const BRIEFING_AI_CANDIDATE_MAX = 40;
 export const BRIEFING_AI_SPEECH_MAX_LENGTH = 60;
+// 一時の動画の番号の帯（ADR-0061 決定5・11 §7.9）＝その日のこの数より上から採る（通常の動画の番号と重ならない）。
+export const BRIEFING_SESSION_ID_FLOOR = 9000;
 // 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
 export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる

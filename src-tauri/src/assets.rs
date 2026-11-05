@@ -13,7 +13,8 @@ pub fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, 
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(base.join("projects").join(project_id))
+    // ⚠️ 一時の動画（ADR-0061 決定5）もここで見る＝通常の動画が先（`temp_sessions::resolve_project_dir`）。
+    Ok(crate::temp_sessions::resolve_project_dir(&base, project_id))
 }
 
 // data URL なら base64 本体だけを取り出す（小ユーティリティ。ffmpeg.rs と同等）。

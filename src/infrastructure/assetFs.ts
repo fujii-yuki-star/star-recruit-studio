@@ -3,6 +3,7 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import type { AssetMetadata } from '../domain/project/types';
+import { projectStorageDirName } from './projectLocation';
 
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -94,7 +95,7 @@ function cachedAppDataDir(): Promise<string> {
 export async function assetDisplayUrl(projectId: string, relPath: string): Promise<string | null> {
   if (!isTauri()) return null;
   try {
-    const abs = await join(await cachedAppDataDir(), 'projects', projectId, relPath);
+    const abs = await join(await cachedAppDataDir(), projectStorageDirName(projectId), projectId, relPath);
     return convertFileSrc(abs);
   } catch (e) {
     // 他の読み出し関数と同様、原因を残す（画像が出ない時の追跡用・§デバッグ）。
