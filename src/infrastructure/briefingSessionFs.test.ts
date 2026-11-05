@@ -14,6 +14,7 @@ vi.mock('@tauri-apps/api/path', () => ({
 import { invoke } from '@tauri-apps/api/core';
 import { createBriefingSession, deleteBriefingSession } from './briefingSessionFs';
 import { assetDisplayUrl } from './assetFs';
+import { getLastProjectId, setLastProjectId } from './projectFs';
 
 const ID = 'proj_20261105_901';
 
@@ -41,5 +42,15 @@ describe('一時の動画の置き場所', () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error('taken'));
     await expect(createBriefingSession('proj_20261105_902')).rejects.toThrow();
     expect(await assetDisplayUrl('proj_20261105_902', 'a.png')).toContain('/projects/');
+  });
+
+  it('一時の動画は「次に開く動画」として覚えない（24 時間で消える）・通常の動画は覚える', async () => {
+    setLastProjectId('proj_20261105_001');
+    await createBriefingSession('proj_20261105_903');
+    setLastProjectId('proj_20261105_903');
+    expect(getLastProjectId()).toBe('proj_20261105_001');
+    await deleteBriefingSession('proj_20261105_903');
+    setLastProjectId('proj_20261105_002');
+    expect(getLastProjectId()).toBe('proj_20261105_002');
   });
 });

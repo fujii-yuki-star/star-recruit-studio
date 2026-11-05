@@ -2,6 +2,7 @@
 // Tauri 非検出時（ブラウザでの開発・プレビュー）は localStorage にフォールバックし、開発フローを止めない。
 import type { RestorePoint } from '../domain/project/restorePoints';
 import { invoke } from '@tauri-apps/api/core';
+import { PROJECTS_DIR_NAME, projectStorageDirName } from './projectLocation';
 
 export interface ProjectSummary {
   projectId: string;
@@ -29,6 +30,9 @@ export function getLastProjectId(): string | null {
 }
 
 export function setLastProjectId(projectId: string): void {
+  // ⚠️ **一時の動画は覚えない**（ADR-0061 決定5）＝24 時間で消えるので、次の起動で開けない動画を指したままになる
+  //   （実機で発覚＝学生の画面で作った動画を保存・書き出す道が、ここを通って書き換えていた）。
+  if (projectStorageDirName(projectId) !== PROJECTS_DIR_NAME) return;
   if (typeof localStorage !== 'undefined') localStorage.setItem(LAST_PROJECT_KEY, projectId);
 }
 
