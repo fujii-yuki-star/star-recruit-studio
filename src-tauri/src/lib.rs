@@ -16,6 +16,7 @@ mod proc;
 mod project_import;
 mod startup;
 mod sysmem;
+mod temp_sessions;
 mod transcribe;
 mod trouble_log;
 mod voicevox;
@@ -70,7 +71,7 @@ fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, S
     if !is_safe_project_id(project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let dir = projects_dir(&app)?.join(project_id);
+    let dir = crate::assets::project_dir(&app, project_id)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("project.json");
     back_up_previous(&path);
@@ -105,7 +106,7 @@ fn back_up_previous(path: &std::path::Path) {
 
 /// 復元ポイントの置き場（`projects/<id>/restore/`）。
 fn restore_dir(app: &tauri::AppHandle, project_id: &str) -> Result<std::path::PathBuf, String> {
-    Ok(projects_dir(app)?.join(project_id).join("restore"))
+    Ok(crate::assets::project_dir(app, project_id)?.join("restore"))
 }
 
 /// 復元ポイントの一覧（ファイル名と、作った時刻＝1970年からのミリ秒）。
@@ -155,7 +156,7 @@ fn take_restore_point(app: tauri::AppHandle, project_id: String, at_ms: u64) -> 
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let src = projects_dir(&app)?.join(&project_id).join("project.json");
+    let src = crate::assets::project_dir(&app, &project_id)?.join("project.json");
     let Ok(text) = fs::read_to_string(&src) else {
         return Ok(()); // まだ保存されていない＝控えるものが無い
     };
@@ -245,7 +246,7 @@ fn restore_project_text(
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let target = projects_dir(&app)?.join(&project_id).join("project.json");
+    let target = crate::assets::project_dir(&app, &project_id)?.join("project.json");
     if let Ok(cur) = fs::read_to_string(&target) {
         if serde_json::from_str::<serde_json::Value>(&cur).is_ok() {
             let dir = restore_dir(&app, &project_id)?;
@@ -317,7 +318,7 @@ fn project_backup_time(app: tauri::AppHandle, project_id: String) -> Result<Opti
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let path = backup_path(&projects_dir(&app)?.join(&project_id).join("project.json"));
+    let path = backup_path(&crate::assets::project_dir(&app, &project_id)?.join("project.json"));
     let Ok(meta) = fs::metadata(&path) else {
         return Ok(None);
     };
@@ -340,7 +341,7 @@ fn restore_project_backup(app: tauri::AppHandle, project_id: String) -> Result<(
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    restore_backup_files(&projects_dir(&app)?.join(&project_id).join("project.json"))
+    restore_backup_files(&crate::assets::project_dir(&app, &project_id)?.join("project.json"))
 }
 
 /// 戻す手順（ファイルの操作だけ）。
@@ -377,7 +378,7 @@ fn load_project(app: tauri::AppHandle, project_id: String) -> Result<String, Str
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let path = projects_dir(&app)?.join(&project_id).join("project.json");
+    let path = crate::assets::project_dir(&app, &project_id)?.join("project.json");
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
@@ -463,7 +464,7 @@ fn delete_project(app: tauri::AppHandle, project_id: String) -> Result<(), Strin
     if !is_safe_project_id(&project_id) {
         return Err(crate::messages::PROJECT_UNUSABLE.to_string());
     }
-    let dir = projects_dir(&app)?.join(&project_id);
+    let dir = crate::assets::project_dir(&app, &project_id)?;
     // 冪等：消そうとした瞬間に既に無くても成功扱い（exists→remove の TOCTOU を避け、エラー種別で振り分ける）。
     match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
@@ -942,6 +943,11 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// 同梱したチュートリアル映像の置き場所（#1229）。⚠️ **同梱物**＝入れたときに置かれる（`bundle.resources`）。
 /// 素材と同じ口（`asset://`）で読む＝途中から読めるので、シークバーで先へ飛べる（埋め込みの口は飛べない）。
+/// 一時の説明動画の置き場（ADR-0061 決定5）＝`asset://` の許可に載せる（`projects/**` と同じ深さ）。
+fn temporary_sessions_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    temp_sessions::sessions_dir(app)
+}
+
 fn tutorials_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().resource_dir().map_err(|e| e.to_string())?;
     Ok(base.join("tutorials"))
@@ -1148,6 +1154,11 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
             projects_dir(app),
             true,
             "素材の置き場が許可に当たらない＝写真が出ません",
+        ),
+        (
+            temporary_sessions_dir(app),
+            true,
+            "一時の説明動画の置き場が許可に当たらない＝説明動画の写真が出ません",
         ),
         (
             user_assets_dir(app),
@@ -1567,6 +1578,7 @@ pub fn run() {
             //   起動時に起こすと、声を作らない間も書き出しの間も約 0.5GB を握り続ける。
             // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
             ffmpeg::cleanup_stale_export_dirs(app.handle());
+            temp_sessions::cleanup_on_startup(app.handle());
             packs::cleanup_pack_staging(app.handle());
             Ok(())
         })
@@ -1629,6 +1641,11 @@ pub fn run() {
             save_brand_kit,
             briefing_catalog_load,
             briefing_catalog_save,
+            temp_sessions::briefing_session_create,
+            temp_sessions::briefing_session_list,
+            temp_sessions::briefing_session_delete,
+            temp_sessions::briefing_sessions_cleanup,
+            temp_sessions::briefing_session_copy_files,
             ffmpeg::export_video,
             ffmpeg::begin_export,
             ffmpeg::cancel_export,

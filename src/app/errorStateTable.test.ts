@@ -464,7 +464,7 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+5**（ADR-0060＝拡張パックの断り5つ：PACK_UNREADABLE／TAMPERED／TOO_LARGE／INSTALL_FAILED／REMOVE_FAILED）。
     // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED）。
     // ⚠️ **+1**（ADR-0060 段階3＝VOICE_ENGINE_RESTART_FAILED）。
-    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(44);
+    expect(Object.keys(messagesModule()).length, "`messages.rs` の定数の数が変わった").toBe(46); // +2（ADR-0061 段階4＝BRIEFING_SESSION_ID_TAKEN／COPY_FAILED）
   });
 
   it("1行の形と2行の形の数（書いた主張を数えて出す）", () => {
@@ -483,13 +483,13 @@ describe("`messages.rs` を丸ごと拾う（#1129）", () => {
     // ⚠️ **+5**（ADR-0060）＝`cargo fmt` が4つを2行に折り返し、PACK_TAMPERED だけ1行（長すぎて折れない）。
     // ⚠️ **+1**（ADR-0060 段階2b＝PACK_COPY_FAILED は2行）。／**+1**（段階3＝VOICE_ENGINE_RESTART_FAILED も2行）。
     // ⚠️ **+2**（ADR-0064＝UNUSED_FILES_UNREADABLE／TRASH_FAILED・どちらも2行）。
-    expect(all, "定数の数が変わった").toBe(44);
+    expect(all, "定数の数が変わった").toBe(46);
     // ⚠️ **+4**（#1244）＝足したのは6つだが、**`cargo fmt` が2つを2行に折り返した**（文の長さで決まる）。
     //   ⚠️ **6 と書いて落ちた**＝「足した数」と「1行で書かれた数」は同じではない。数え直して直した。
     // ⚠️ **+1**（ADR-0052 決定6）＝LOCAL_AI_TOO_LONG は1行のまま（`cargo fmt` は文字列を折らない）。
     expect(oneLine, "1行で書かれた定数の数が変わった").toBe(15);
     // ⚠️ **+2**（#1244）＝足した6つのうち、`cargo fmt` が2つを2行に折り返した（上の +4 の裏側）。
-    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(29); // +2（ADR-0064＝UNUSED_FILES_UNREADABLE／TRASH_FAILED はどちらも2行）
+    expect(all - oneLine, "`rustfmt` が改行した定数の数が変わった＝拾い方が効いている範囲").toBe(31); // +2（ADR-0061 段階4＝BRIEFING_SESSION_* はどちらも2行）／+2（ADR-0064＝UNUSED_FILES_UNREADABLE／TRASH_FAILED はどちらも2行）
   });
 
   it("**2行に割れた形**も拾う（`rustfmt` は長い定数を改行する）", () => {
@@ -609,7 +609,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
     // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
     // ⚠️ **+8**（ADR-0061 段階2）＝あなた向け会社説明の登録の画面の BRIEFING_* 8行。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(336);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(338);
   });
 
 
@@ -906,7 +906,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
     // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
     // ⚠️ **+8**（ADR-0061 段階2）＝BRIEFING_* 8行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(331);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(333);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",

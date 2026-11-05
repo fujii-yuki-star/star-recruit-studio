@@ -181,6 +181,7 @@
 | `BRIEFING_LONG_MAX_SEC` | `240` | 同上の「しっかり」の上限（秒） |
 | `BRIEFING_AI_CANDIDATE_MAX` | `40` | 同上で同梱の AI に見せる場面の数の上限（必ず入れる場面＋ルールの順で上から）＝指示文を伸ばしすぎない |
 | `BRIEFING_AI_SPEECH_MAX_LENGTH` | `60` | 同上で場面ごとに見せるセリフの字数の上限 |
+| `BRIEFING_SESSION_ID_FLOOR` | `900` | 同上の**一時の動画の番号の帯**＝その日のこの数より上（901〜999）で空いている一番小さい番号を採る（`11 §7.9`）。通常の動画を作る所は通常の一覧の番号しか見ないので、帯を分けて重ならないようにする |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
 | `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |
@@ -453,6 +454,18 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - `exitCode`＝4 桁の数字か `null`（まだ決めていない＝学生の画面は始められない）。
 - **指す先が無いとき**（動画・場面を消した）は、登録の画面で知らせる（`briefingCatalogProblems`＝黙って飛ばさない）。
 - 組み方（絞る・同梱の AI・確かめる・ルールだけ）は `12 §11`。
+
+### 7.9 あなた向け会社説明の一時の動画（`temporary-sessions/`・β・ADR-0061 決定5）
+
+組んだ説明動画は**場面形式の新しい動画**として作る。中身は通常の動画と同じ形（`project.json`・`assets/`・`voices/`）＝場面編集・仕上がり確認・書き出しの道をそのまま通る。
+**置き場所は `appData/temporary-sessions/<projectId>/`**＝通常の動画の一覧（`projects/`）には出さない。
+
+- **番号**＝`proj_YYYYMMDD_NNN`（`11.2` と同じ形＝ちょうど3桁）を、**その日の 901〜999（`BRIEFING_SESSION_ID_FLOOR` より上）で空いている一番小さい番号**から、両方の置き場所の番号を見て採る（`createBriefingSessionId`・空きが無ければ作らない）。⚠️ 帯を分けるのは、通常の動画を作る所が通常の一覧の番号しか見ないため（同じ帯だと、後から作った通常の動画と重なりうる）。⚠️ 最大＋1 ではなく空きを採る（3桁しか無いので、24 時間で消えた番号を使い直す）。
+- **動画のフォルダの決め方**（Rust の `project_dir`・`resolve_project_file`）＝`projects/<id>` が在ればそちら → 無くて `temporary-sessions/<id>` が在ればそちら → どちらも無ければ `projects/<id>`。⚠️ **通常の動画が先**＝一時の動画のために通常の動画の置き場所が別の所へ向くことは無い。画面が自分で道を組む所（`asset://`）は、作った番号を覚えて置き場所を選ぶ（`projectLocation.ts`）。
+- **作る**（`briefing_session_create`）＝どちらかの置き場所に同じ番号が在れば断る。作った時刻を `session.json`（`{createdAtMs}`）に書く。
+- **ファイル**（`briefing_session_copy_files`）＝原本から**名前を変えて**コピーする（場面の取り込みで番号を付け替えるため・`importScenes` の `files`）。⚠️ コピー先は一時の動画だけ・原本には書かない・途中で失敗したらコピーした分を消す・同じ新しい名前へ2回は書かない。元に無いファイルは `missing` で返す（黙って飛ばさない）。
+- **消す**＝作ってから **24 時間**（`session.json` の時刻・読めなければフォルダの時刻・どちらも無ければ消さない）。アプリの起動時（`cleanup_stale_export_dirs` と並べる）と、この機能を開いた時・1 時間ごと（`briefing_sessions_cleanup`）。「この回のデータを消す」は `briefing_session_delete`。⚠️ **消すのは `temporary-sessions/` の直下の、番号の形のフォルダだけ**（原本・素材の棚・見た目パターン・登録には触らない）。書き出した物も同じフォルダに置く＝一緒に消える。
+- `asset://` の許可＝`$APPDATA/temporary-sessions/**`（`projects/**` と同じ深さ・起動時に作って許可する）。
 
 ## 8. 検証ルール（コード化可能な形）
 
