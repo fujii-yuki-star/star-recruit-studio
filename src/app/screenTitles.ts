@@ -28,4 +28,5 @@ export const SCREEN_TITLES: Record<ScreenId, string> = {
   settings: "設定",
   help: "使い方",
   about: "このアプリについて",
+  briefing: "あなた向け会社説明",
 };

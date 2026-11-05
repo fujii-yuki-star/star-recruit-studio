@@ -22,6 +22,8 @@ const projectSchema = loadSchema('docs/yuko_recruit_docs/schemas/project.schema.
 // から standalone 化する（$id で解決＝共有部分をコピーしない・CLAUDE.md §2-7）。
 const timelineProjectSchema = loadSchema('docs/yuko_recruit_docs/schemas/timeline-project.schema.json');
 const extensionPackSchema = loadSchema('docs/yuko_recruit_docs/schemas/extension-pack.schema.json');
+// あなた向け会社説明の登録（β・ADR-0061）。
+const briefingCatalogSchema = loadSchema('docs/yuko_recruit_docs/schemas/briefing-catalog.schema.json');
 
 // validateVideoPlan/templateFs と同設定（draft 2020-12・strict:false・allErrors）。
 // code.source/esm で ESM の standalone 検証関数を出力する。project の date-time format は strict:false で無視される
@@ -32,6 +34,7 @@ ajv.addSchema(templateSchema);
 ajv.addSchema(projectSchema);
 ajv.addSchema(timelineProjectSchema);
 ajv.addSchema(extensionPackSchema);
+ajv.addSchema(briefingCatalogSchema);
 
 const rawCode = standaloneCode(ajv, {
   validateAiVideoPlan: aiVideoPlanSchema.$id,
@@ -39,6 +42,7 @@ const rawCode = standaloneCode(ajv, {
   validateProject: projectSchema.$id,
   validateTimelineProject: timelineProjectSchema.$id,
   validateExtensionPack: extensionPackSchema.$id,
+  validateBriefingCatalog: briefingCatalogSchema.$id,
 });
 
 // ajv standalone は esm:true でも runtime helper を CJS の `require(...)` で出すことがある（例: ucs2length）。

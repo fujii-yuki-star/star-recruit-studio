@@ -39,6 +39,8 @@ import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { HelpScreen } from "./app/screens/HelpScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
+import { BriefingAdminScreen } from "./app/screens/BriefingAdminScreen";
+import { isPackFeatureEnabled, PACK_FEATURE } from "./domain/pack/extensionPack";
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
@@ -104,6 +106,9 @@ function App() {
   // 起動のときに頼まれた仕事（取り込み・書き出し）を進める（ADR-0042・#1184）。
   useStartupJob(navigate);
   const startupNotice = useStartupJobStore((st) => st.notice);
+  // あなた向け会社説明（β・ADR-0061 決定1）＝拡張パックの鍵があるときだけ左の帯に出す。
+  const packs = useProjectStore((st) => st.packs);
+  const briefingEnabled = isPackFeatureEnabled(packs, PACK_FEATURE.personalizedBriefing);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
   // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
@@ -190,6 +195,8 @@ function App() {
         return <HelpScreen />;
       case "about":
         return <AboutScreen />;
+      case "briefing":
+        return <BriefingAdminScreen enabled={briefingEnabled} />;
       default:
         return <HomeScreen onNavigate={navigate} />;
     }
@@ -236,6 +243,7 @@ function App() {
           onNavigate={navigate}
           currentProjects={currentProjects}
           onCollapse={() => setSidebarCollapsed(true)}
+          briefingEnabled={briefingEnabled}
         />
       )}
       <div className="main">

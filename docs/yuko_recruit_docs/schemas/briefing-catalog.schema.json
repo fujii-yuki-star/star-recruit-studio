@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuko-recruit/schemas/briefing-catalog.schema.json",
+  "title": "BriefingCatalog",
+  "description": "あなた向け会社説明（β・ADR-0061）の登録＝どの動画のどの場面を、どの興味に使うか。置き場所は appData/extensions/personalized-briefing/catalog.json。project.json には入れない（β を外しても α の動画はそのまま開ける）。詳細は 11_SCHEMA_REFERENCE.md §7.8。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "interests", "sources", "closing", "exitCode"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "interests": {
+      "type": "array",
+      "maxItems": 30,
+      "description": "興味の項目（並べた順に学生へ見せる）。会社が決める＝コードに決め打ちしない。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["interestId", "label"],
+        "properties": {
+          "interestId": {
+            "type": "string",
+            "pattern": "^interest_[0-9]{3,}$",
+            "description": "interest_NNN（登録の中で一意）。"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30,
+            "description": "学生に見せる名前。"
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "使う動画（場面形式）。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["projectId", "enabled", "scenes"],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "pattern": "^proj_[0-9]{8}_[0-9]{3,}$",
+            "description": "場面形式の動画の projectId。指すだけ（原本は書き換えない）。"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "false＝組むときに使わない（登録は残す）。"
+          },
+          "scenes": {
+            "type": "array",
+            "maxItems": 300,
+            "description": "場面ごとの使い方。載っていない場面は使わない。",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sceneId", "interestIds", "priority", "required", "excluded"],
+              "properties": {
+                "sceneId": {
+                  "type": "string",
+                  "pattern": "^scene_[0-9]{3,}$"
+                },
+                "interestIds": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^interest_[0-9]{3,}$"
+                  },
+                  "description": "この場面を使う興味の項目。"
+                },
+                "priority": {
+                  "enum": ["high", "normal", "low"],
+                  "description": "長さに収めるとき、どれを先に採るか。"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "true＝どの興味を選んでも必ず入れる。"
+                },
+                "excluded": {
+                  "type": "boolean",
+                  "description": "true＝使わない（興味が付いていても入れない）。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "closing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "useBrandLogo"],
+      "description": "最後に必ず入れる「自社開発のすたりおで作った」場面（学生は外せない・ADR-0061 判断3）。",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "useBrandLogo": {
+          "type": "boolean",
+          "description": "true＝ブランドキットのロゴを置く。"
+        }
+      }
+    },
+    "exitCode": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}$",
+      "description": "学生の画面から抜ける 4 桁の番号。null＝まだ決めていない（決めるまで学生の画面は始められない）。"
+    }
+  }
+}

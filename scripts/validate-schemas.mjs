@@ -31,6 +31,8 @@ const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')))
 const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
 // 拡張パックの manifest（ADR-0060）。
 const vPack = ajv.compile(load(join(base, 'schemas/extension-pack.schema.json')));
+// あなた向け会社説明の登録（β・ADR-0061）。
+const vBriefing = ajv.compile(load(join(base, 'schemas/briefing-catalog.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
 // ⚠️ **宣言の側に書く**（PR #1238 レビュー 🟡）＝使う所で `/** @type {...} */ (cases)` と
@@ -43,6 +45,7 @@ const cases = [
   ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
   ['timeline-project.sample.json', vTimeline, fx('timeline-project.sample.json')],
   ['extension-pack.sample.json', vPack, fx('extension-pack.sample.json')],
+  ['briefing-catalog.sample.json', vBriefing, fx('briefing-catalog.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];

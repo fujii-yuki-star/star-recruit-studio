@@ -350,6 +350,13 @@ button {
   flex: 1;
 }
 
+/* 左の帯の区切り（拡張パックで足す機能を、ほかの項目と分けて見せる・#1336 §3-1）。 */
+.sidebar-sep {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 4px var(--gap-sm);
+}
+
 .nav-item {
   display: flex;
   align-items: center;
