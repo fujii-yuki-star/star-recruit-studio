@@ -279,7 +279,7 @@ mod tests {
         d
     }
 
-    const ID: &str = "proj_20261105_9001";
+    const ID: &str = "proj_20261105_901";
 
     #[test]
     fn 通常の動画が先_無ければ一時の動画_どちらも無ければ通常() {
@@ -306,11 +306,11 @@ mod tests {
         let base = tmp();
         create_in(&base, ID, 1).unwrap();
         assert!(create_in(&base, ID, 1).is_err());
-        fs::create_dir_all(base.join("projects").join("proj_20261105_9002")).unwrap();
-        assert!(create_in(&base, "proj_20261105_9002", 1).is_err());
+        fs::create_dir_all(base.join("projects").join("proj_20261105_902")).unwrap();
+        assert!(create_in(&base, "proj_20261105_902", 1).is_err());
         assert!(!base
             .join(SESSIONS_DIR_NAME)
-            .join("proj_20261105_9002")
+            .join("proj_20261105_902")
             .exists());
         assert!(create_in(&base, "../x", 1).is_err());
         assert_eq!(list_in(&base), vec![ID.to_string()]);
@@ -337,24 +337,24 @@ mod tests {
         let base = tmp();
         let day = SESSION_MAX_AGE.as_millis() as u64;
         let now = 10 * day;
-        create_in(&base, "proj_20261105_9001", now - day - 1).unwrap(); // 過ぎた
-        create_in(&base, "proj_20261105_9002", now - day).unwrap(); // ちょうど＝残す
-        create_in(&base, "proj_20261105_9003", now - 1).unwrap(); // 新しい
+        create_in(&base, "proj_20261105_901", now - day - 1).unwrap(); // 過ぎた
+        create_in(&base, "proj_20261105_902", now - day).unwrap(); // ちょうど＝残す
+        create_in(&base, "proj_20261105_903", now - 1).unwrap(); // 新しい
 
         // 番号の形でない入れ物は、札が古くても触らない
         let other = base.join(SESSIONS_DIR_NAME).join("not-a-session");
         fs::create_dir_all(&other).unwrap();
         fs::write(other.join(MARKER_FILE), r#"{"createdAtMs":0}"#).unwrap();
-        let file = base.join(SESSIONS_DIR_NAME).join("proj_20261105_9009");
+        let file = base.join(SESSIONS_DIR_NAME).join("proj_20261105_909");
         fs::write(&file, "x").unwrap();
-        let normal = base.join("projects").join("proj_20261105_9001");
+        let normal = base.join("projects").join("proj_20261105_901");
         fs::create_dir_all(&normal).unwrap();
         assert_eq!(cleanup_in(&base, now, SESSION_MAX_AGE), 1);
         assert_eq!(
             list_in(&base),
             vec![
-                "proj_20261105_9002".to_string(),
-                "proj_20261105_9003".to_string()
+                "proj_20261105_902".to_string(),
+                "proj_20261105_903".to_string()
             ]
         );
         assert!(other.exists());

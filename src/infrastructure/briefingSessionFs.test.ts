@@ -15,7 +15,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { createBriefingSession, deleteBriefingSession } from './briefingSessionFs';
 import { assetDisplayUrl } from './assetFs';
 
-const ID = 'proj_20261105_9001';
+const ID = 'proj_20261105_901';
 
 beforeEach(() => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
@@ -39,7 +39,7 @@ describe('一時の動画の置き場所', () => {
 
   it('作るのを断られたら、一時の動画として覚えない', async () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error('taken'));
-    await expect(createBriefingSession('proj_20261105_9002')).rejects.toThrow();
-    expect(await assetDisplayUrl('proj_20261105_9002', 'a.png')).toContain('/projects/');
+    await expect(createBriefingSession('proj_20261105_902')).rejects.toThrow();
+    expect(await assetDisplayUrl('proj_20261105_902', 'a.png')).toContain('/projects/');
   });
 });
