@@ -54,7 +54,8 @@ export interface BriefingCatalog {
 export const DEFAULT_BRIEFING_INTERESTS: readonly string[] = ['仕事内容', '研修', '若手社員', '技術', '福利厚生', '社風'];
 
 /** 最後の場面の既定の文。⚠️ 会社名は入れない（コードに決め打ちしない＝管理者が書き換える）。 */
-export const DEFAULT_BRIEFING_CLOSING_TEXT = 'この動画は、当社が開発した動画づくり支援ソフト「すたりお」で作りました。';
+// 改行は締めの場面で読みやすい切れ目に置く（自動の折り返しだと「作／りました」で切れる＝見本で確かめた）。
+export const DEFAULT_BRIEFING_CLOSING_TEXT = 'この動画は、当社が開発した\n動画づくり支援ソフト「すたりお」で作りました。';
 
 /** interest_NNN を発行する（既存と重ならない最小の番号）。 */
 export function createInterestId(existingIds: readonly string[]): string {
