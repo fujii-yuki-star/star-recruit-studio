@@ -41,6 +41,8 @@ import { HelpScreen } from "./app/screens/HelpScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
 import { BriefingAdminScreen } from "./app/screens/BriefingAdminScreen";
 import { isPackFeatureEnabled, PACK_FEATURE } from "./domain/pack/extensionPack";
+import { BriefingStudentScreen } from "./app/screens/BriefingStudentScreen";
+import { useBriefingStudentStore } from "./app/store/briefingStudentStore";
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
@@ -206,8 +208,12 @@ function App() {
   // 共通トップバーの「保存」とバッジは**場面形式の文書**を保存する（projectStore）。タイムライン形式は
   // 別の文書なので出さない＝見ている文書と違うものが保存される／場面文書を開いていないときは空の
   // プロジェクトが新しく作られる、を防ぐ（ADR-0026④）。画面は自前の見出し（PageHead）を持つ。
+  // 学生の画面（ADR-0061 決定3）＝入っている間は**それだけ**を出す（左の帯・ほかの画面・知らせを出さない）。
+  const studentCatalog = useBriefingStudentStore((st) => st.catalog);
   const hasOwnHeader =
     screen === "scene-edit" || screen === "generating" || screen === "looks-edit" || screen === "timeline-project";
+
+  if (studentCatalog) return <BriefingStudentScreen catalog={studentCatalog} />;
 
   return (
     <div className="app">
