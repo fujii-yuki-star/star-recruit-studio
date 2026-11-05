@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   BRIEFING_CATALOG_SAVE_FAILED_MESSAGE, BRIEFING_CATALOG_UNREADABLE_MESSAGE, BRIEFING_EXIT_CODE_INVALID_MESSAGE, BRIEFING_FEATURE_DISABLED_MESSAGE,
   BRIEFING_PROJECT_MISSING_MESSAGE, BRIEFING_PROJECT_NOT_SCENE_MESSAGE, BRIEFING_PROJECT_UNREADABLE_MESSAGE, briefingScenesMissingMessage,
+  BRIEFING_START_NEEDS_CODE_MESSAGE, BRIEFING_NO_SCENES_MESSAGE, BRIEFING_SESSION_FULL_MESSAGE, BRIEFING_SESSION_PREPARE_FAILED_MESSAGE, BRIEFING_EXPORT_FAILED_MESSAGE, BRIEFING_EXIT_CODE_WRONG_MESSAGE,
   alpha6Message, templateSaveMessage, apiKeyMessage, subtitleFileMessage, silenceMessage, transcribeMessage, PANEL_LAYOUT_SAVE_FAILED_MESSAGE, TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE, bakeNoteMessage, editBlockedMessage, exportBlockedMessage,
   userFontMissingMessage, userFontUnreadableMessage, bulkVoiceNotFittedMessage, canvasHoldMessage, clipOutsidePlayheadMessage, subtitleOverlapMessage, BAKE_LEAVE_BLOCKED_MESSAGE,
   BRAND_FONT_CLEARED_MESSAGE, BRAND_FONT_CLEAR_FAILED_MESSAGE, BRAND_FONT_NOT_APPLIED_MESSAGE, BRAND_LOGO_NOT_APPLIED_MESSAGE,
@@ -126,6 +127,12 @@ function codeMessages(): Record<string, string> {
     // ⚠️ 差し込み口は ` N ` の目印（`aiSceneLimitMessage` と同じ流儀＝等値で守る）。
     BRIEFING_SCENES_MISSING: briefingScenesMissingMessage(" N " as unknown as number),
     BRIEFING_EXIT_CODE_INVALID: BRIEFING_EXIT_CODE_INVALID_MESSAGE,
+    BRIEFING_START_NEEDS_CODE: BRIEFING_START_NEEDS_CODE_MESSAGE,
+    BRIEFING_NO_SCENES: BRIEFING_NO_SCENES_MESSAGE,
+    BRIEFING_SESSION_FULL: BRIEFING_SESSION_FULL_MESSAGE,
+    BRIEFING_SESSION_PREPARE_FAILED: BRIEFING_SESSION_PREPARE_FAILED_MESSAGE,
+    BRIEFING_EXPORT_FAILED: BRIEFING_EXPORT_FAILED_MESSAGE,
+    BRIEFING_EXIT_CODE_WRONG: BRIEFING_EXIT_CODE_WRONG_MESSAGE,
     // 拡張パック（ADR-0060）。⚠️ 照合・展開の断りは Rust（`messages.rs` の `PACK_*`）。
     // ⚠️ 棚からの取り込みの断り（段階2b で `librarySource` の定数へ寄せた＝画面の直書きの走査から外れるので等値で守る）。
     LIBRARY_LIST_UNREADABLE: LIBRARY_LIST_UNREADABLE_MESSAGE,
@@ -609,7 +616,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
     // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
     // ⚠️ **+8**（ADR-0061 段階2）＝あなた向け会社説明の登録の画面の BRIEFING_* 8行。
-    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(338);
+    expect(tableLines().length, "表の行数が変わった（増減したら数も直す）").toBe(344);
   });
 
 
@@ -906,7 +913,7 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     // ⚠️ **+1**（ADR-0066）＝BAKE_TRANSITION_AS_FADE。
     // ⚠️ **+1**（#1483）＝BOLD_UNAVAILABLE_NOTE。
     // ⚠️ **+8**（ADR-0061 段階2）＝BRIEFING_* 8行。
-    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(333);
+    expect(readErrorTable().size, "表の行数が変わった（増減とも、対応を確かめてから数を更新する）").toBe(339);
     expect(
       Object.keys(codeMessages()).length,
       "完全一致で守れている件数が変わった（退役なら数を下げ、追加なら families へ載っているか確かめる）",
@@ -939,6 +946,6 @@ describe("15 §6 の表と実装の一致（#855）", () => {
       // ⚠️ **+1**（#1403）＝AI_PLAN_HOLLOW（同上）。
       // ⚠️ **+1**（#1229）＝TUTORIAL_VIDEO_UNAVAILABLE（同上）。
       // ⚠️ **+1**（ADR-0059・PR #1414 レビュー）＝TIMELINE_EDIT_EXPLODE_WARP（`editBlockedMessage` 経由で等値）。
-    ).toBe(168); // +8（ADR-0061 段階2＝BRIEFING_* 8行を等値で）／+1（ADR-0066＝BAKE_TRANSITION_AS_FADE）／−2（ADR-0065＝TIMELINE_EDIT_FREEZE_FAILED／TIMELINE_EDIT_FREEZE_CHANGED を退役）／+1（READING_DICT_WORD_WEAK・2026-10-19）／+1（USER_TEMPLATE_BUSY・2026-10-19）／+1（STARTUP_IMPORT_BROKEN・通し点検 2026-10-16）／+1（PACK_VOICE_NOT_ALLOWED・2026-10-16）／+6（段階3＝PACK_VOICE_CONFLICT／PACK_VOICE_SKIPPED／VOICE_ENGINE_RESTART_FAILED／PACK_BUSY／VOICE_SPEAKER_GONE／TIMELINE_EXPORT_VOICE_GONE）／+6（ADR-0060＝画面側の PACK_* 6つ）／+2（段階2b＝棚の取り込みの断り LIBRARY_LIST_UNREADABLE／LIBRARY_ASSET_MISSING を等値へ）
+    ).toBe(174); // +6（ADR-0061 段階5＝学生の画面の BRIEFING_* 6行を等値で）／+8（ADR-0061 段階2＝BRIEFING_* 8行を等値で）／+1（ADR-0066＝BAKE_TRANSITION_AS_FADE）／−2（ADR-0065＝TIMELINE_EDIT_FREEZE_FAILED／TIMELINE_EDIT_FREEZE_CHANGED を退役）／+1（READING_DICT_WORD_WEAK・2026-10-19）／+1（USER_TEMPLATE_BUSY・2026-10-19）／+1（STARTUP_IMPORT_BROKEN・通し点検 2026-10-16）／+1（PACK_VOICE_NOT_ALLOWED・2026-10-16）／+6（段階3＝PACK_VOICE_CONFLICT／PACK_VOICE_SKIPPED／VOICE_ENGINE_RESTART_FAILED／PACK_BUSY／VOICE_SPEAKER_GONE／TIMELINE_EXPORT_VOICE_GONE）／+6（ADR-0060＝画面側の PACK_* 6つ）／+2（段階2b＝棚の取り込みの断り LIBRARY_LIST_UNREADABLE／LIBRARY_ASSET_MISSING を等値へ）
   });
 });

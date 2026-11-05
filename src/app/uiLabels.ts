@@ -1,5 +1,6 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import type { BriefingPriority } from "../domain/briefing/catalog";
+import type { BriefingLength } from "../domain/briefing/compose";
 import { isKnownPackFeature, packIdOfScopedId, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
@@ -2329,6 +2330,30 @@ export const BRIEFING_PRIORITY_LABEL: Record<BriefingPriority, string> = {
   high: "高い",
   normal: "ふつう",
   low: "低い",
+};
+/** 学生の画面を始める前に、抜ける番号が決まっていない（管理者の画面）。 */
+export const BRIEFING_START_NEEDS_CODE_MESSAGE =
+  "学生の画面を始める前に、下の「学生の画面から抜ける番号」を決めてください。";
+
+// ── あなた向け会社説明（β・ADR-0061 決定3）の学生の画面 ──────────────────────
+// ⚠️ **学生に向けた言葉**＝「場面」「書き出し」「見た目パターン」を出さない。困ったら「担当の人」へ。
+/** 選んだことに合う説明が無い。 */
+export const BRIEFING_NO_SCENES_MESSAGE = "選んだことに合う説明が見つかりませんでした。ほかの項目も選んでみてください。";
+/** その日の一時の動画が多すぎる（番号が尽きた）。 */
+export const BRIEFING_SESSION_FULL_MESSAGE = "今日はこれ以上作れません。担当の人に声をかけてください。";
+/** 一時の動画を作れなかった。 */
+export const BRIEFING_SESSION_PREPARE_FAILED_MESSAGE =
+  "説明動画を作れませんでした。もう一度お試しください。うまくいかないときは、担当の人に声をかけてください。";
+/** 動画を仕上げられなかった。 */
+export const BRIEFING_EXPORT_FAILED_MESSAGE =
+  "説明動画を仕上げられませんでした。もう一度お試しください。うまくいかないときは、担当の人に声をかけてください。";
+/** 抜ける番号が違う。 */
+export const BRIEFING_EXIT_CODE_WRONG_MESSAGE = "番号が違います。もう一度入れてください。";
+/** 学生が選ぶ長さの言葉（`BRIEFING_LENGTHS` の順）。 */
+export const BRIEFING_LENGTH_LABEL: Record<BriefingLength, string> = {
+  short: "短め（1 分ほど）",
+  normal: "ふつう（2 分ほど）",
+  long: "しっかり（3 分ほど）",
 };
 /** 中身の種類（`licenses[].target`）を画面の言葉へ。 */
 export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {

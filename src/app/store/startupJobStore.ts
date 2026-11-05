@@ -25,10 +25,15 @@ export type StartupJobState = {
   pendingExportOut: string | null;
   /** その仕事が**後から渡されたもの**か（真なら終わっても閉じない＝仕事の持ち主が違う）。 */
   forwarded: boolean;
+  /**
+   * アプリの中の仕事か（あなた向け会社説明の書き出し＝ADR-0061 決定5）。真なら終わっても**起動の仕事として返さない**
+   *（`finish_startup_job` を呼ばない＝`--quit-when-done` で起こされていても閉じない・頼んだ側への出力もしない）。
+   */
+  internal: boolean;
   /** 画面に出す知らせ（うまくいった／断った）。 */
   notice: string | null;
-  setPendingExport: (out: string, forwarded: boolean) => void;
-  takePendingExport: () => { out: string; forwarded: boolean } | null;
+  setPendingExport: (out: string, forwarded: boolean, internal?: boolean) => void;
+  takePendingExport: () => { out: string; forwarded: boolean; internal: boolean } | null;
   setNotice: (notice: string | null) => void;
 };
 
@@ -37,15 +42,16 @@ export const useStartupJobStore = create<StartupJobState>((set, get) => ({
   setRequestKnown: (v) => set({ requestKnown: v }),
   pendingExportOut: null,
   forwarded: false,
+  internal: false,
   notice: null,
-  setPendingExport: (out, forwarded) => set({ pendingExportOut: out, forwarded }),
+  setPendingExport: (out, forwarded, internal = false) => set({ pendingExportOut: out, forwarded, internal }),
   // ⚠️ **取り出したら消す**＝「1回きり」を呼ぶ側の作法に頼らない（忘れると次の書き出しが化ける）。
   takePendingExport: () => {
     const out = get().pendingExportOut;
     if (out == null) return null;
-    const forwarded = get().forwarded;
-    set({ pendingExportOut: null });
-    return { out, forwarded };
+    const { forwarded, internal } = get();
+    set({ pendingExportOut: null, internal: false });
+    return { out, forwarded, internal };
   },
   setNotice: (notice) => set({ notice }),
 }));

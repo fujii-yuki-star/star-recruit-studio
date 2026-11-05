@@ -176,7 +176,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // ⚠️ **画面の側に置く**＝`startExport` の**中**に置くと、`try` に入る前に例外が飛んだ回を拾えない
   //（同レビュー 🟡）。始めた側（下の `useEffect`）からも返せるようにする。
   // ⚠️ **「名乗ったら囲む」（#817-2）と同じ型**＝出口を数え直さずに済む形にする。
-  const startupJobRef = useRef<{ out: string; forwarded: boolean } | null>(null);
+  const startupJobRef = useRef<{ out: string; forwarded: boolean; internal: boolean } | null>(null);
   const jobSettledRef = useRef(false);
   /** この回が始まった時点で画面に出ていた文（#1217 レビュー 🟡）。⚠️ **これと同じなら「この回の文ではない」**。 */
   const messageAtStartRef = useRef<string>("");
@@ -184,6 +184,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const job = startupJobRef.current;
     if (!job || jobSettledRef.current) return;
     jobSettledRef.current = true;
+    // ⚠️ **アプリの中の仕事は起動の仕事として返さない**（ADR-0061 決定5）＝返すと `--quit-when-done` で起こされた
+    //   アプリが閉じる・頼んだ側への出力に混ざる。結果は `exportRun`（store）で見る。
+    if (job.internal) return;
     // ⚠️ **断った理由も渡す**（#1212）＝渡さないと、頼んだ側（外の AI）が受け取れるのは**数字だけ**。
     // ⚠️ **画面に出ている文をそのまま渡す**（§6＝同じ文を2か所に持たない）。
     // ⚠️ **ただし「その回に出た文」に限る**（#1217 レビュー 🟡）＝前の回の文が残っていると、

@@ -13,10 +13,11 @@ import { parseProjectDoc } from "../../domain/project/persistence";
 import { listProjectSummaries, loadProjectDoc, type ProjectSummary } from "../../infrastructure/projectFs";
 import { loadBriefingCatalog, saveBriefingCatalog } from "../../infrastructure/briefingFs";
 import {
-  BRIEFING_CATALOG_SAVE_FAILED_MESSAGE, BRIEFING_CATALOG_UNREADABLE_MESSAGE, BRIEFING_EXIT_CODE_INVALID_MESSAGE,
+  BRIEFING_CATALOG_SAVE_FAILED_MESSAGE, BRIEFING_CATALOG_UNREADABLE_MESSAGE, BRIEFING_EXIT_CODE_INVALID_MESSAGE, BRIEFING_START_NEEDS_CODE_MESSAGE,
   BRIEFING_FEATURE_DISABLED_MESSAGE, BRIEFING_PRIORITY_LABEL, BRIEFING_PROJECT_MISSING_MESSAGE, BRIEFING_PROJECT_NOT_SCENE_MESSAGE,
   BRIEFING_PROJECT_UNREADABLE_MESSAGE, briefingScenesMissingMessage,
 } from "../uiLabels";
+import { useBriefingStudentStore } from "../store/briefingStudentStore";
 
 /** 登録の画面に並べる場面1つ（動画を開かずに読んだもの）。 */
 interface SceneRow {
@@ -133,6 +134,18 @@ export function BriefingAdminScreen({ enabled }: { enabled: boolean }) {
       {head}
       <div style={{ maxWidth: 860 }} className="col gap-lg">
         {saveError && <div className="notice notice-warn" role="alert">{saveError}</div>}
+
+        {/* 学生の画面を始める（全画面の専用モード・ADR-0061 決定3）。⚠️ 抜ける番号が決まるまで始められない。 */}
+        <div className="card row gap-sm">
+          <div className="grow col gap-xs">
+            <h2 className="section-title">学生の画面</h2>
+            <p className="page-desc text-pretty">学生が知りたいことを選ぶと、その場で説明動画を組んで見せます。抜けるときは下の番号を入れます（番号を忘れたら、アプリを閉じれば通常の画面に戻ります）。</p>
+            {catalog.exitCode == null && <div className="notice notice-info" role="status">{BRIEFING_START_NEEDS_CODE_MESSAGE}</div>}
+          </div>
+          <button type="button" className="btn btn-primary" disabled={catalog.exitCode == null} onClick={() => useBriefingStudentStore.getState().enter(catalog)}>
+            学生の画面を始める
+          </button>
+        </div>
 
         {/* 興味の項目（会社が決める・学生にはこの順で見せる）。 */}
         <div className="card">
